@@ -13,6 +13,7 @@ import {
 	REVIEW_FOCUS_NOTE,
 	SLIDES_TO_VIDEO_NOTE,
 	TOOL_CATALOG_SEGMENT,
+	LOCAL_SERVER_CURL_SHORT,
 	TOOL_PATTERNS_SEGMENT,
 	buildToolCatalogSegment,
 } from "./system-prompt.js";
@@ -122,5 +123,12 @@ describe("TOOL_PATTERNS_SEGMENT local server guidance (#3941)", () => {
 		expect(TOOL_PATTERNS_SEGMENT).toContain("under .tmp/");
 		expect(TOOL_PATTERNS_SEGMENT).toContain("Do not pass -L");
 		expect(TOOL_PATTERNS_SEGMENT).toContain("second loopback request");
+	});
+
+	it("the compact short form is under 300 chars, has no em dash, and keeps the core rules", () => {
+		expect(LOCAL_SERVER_CURL_SHORT.length).toBeLessThanOrEqual(300);
+		expect(LOCAL_SERVER_CURL_SHORT).not.toContain("\u2014");
+		for (const rule of ["one plain curl per call", "under .tmp/", "never /tmp", "Location header"])
+			expect(LOCAL_SERVER_CURL_SHORT).toContain(rule);
 	});
 });

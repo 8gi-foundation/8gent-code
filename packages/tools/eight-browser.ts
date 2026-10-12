@@ -426,8 +426,7 @@ export function browserWithheldNote(env: Env = process.env): string | null {
 		"Browser tools (browser_open, browser_state, browser_task, browser_screenshot) are not offered in this session: " +
 		"no isolated browser profile is configured. To get them, start the session with EIGHT_BROWSER_PROFILE=<name> " +
 		"(a running 8gent Browser profile). Even then they never open loopback or private addresses and never type " +
-		"into password fields.\n" +
-		LOCAL_SERVER_CURL_NOTE
+		"into password fields. For a local web app, follow the local-server curl rules in your instructions."
 	);
 }
 

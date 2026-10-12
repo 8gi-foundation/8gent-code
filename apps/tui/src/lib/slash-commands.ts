@@ -465,8 +465,7 @@ function getBuiltInSlashCommands(): BuiltInSlashCommandDef[] {
 
 /**
  * The commands about the work itself, few enough that a bare `/` shows every
- * one without scrolling (the menu draws 14 rows; two are kept free for /copy
- * and /hotkeys). The `/` menu and the Ctrl+P palette show
+ * one without scrolling (the menu draws 14 rows). The `/` menu and the Ctrl+P palette show
  * these first (the `/` menu shows only these until a letter is typed); every
  * other command still runs when typed by name and appears once its prefix
  * matches (#3918, Pi gap D9).
@@ -483,6 +482,8 @@ export const CORE_SLASH_COMMANDS: ReadonlySet<SlashCommand> = new Set<SlashComma
 	"export",
 	"skills",
 	"settings",
+	"copy",
+	"hotkeys",
 	"quit",
 ]);
 
@@ -508,7 +509,7 @@ export function formatSlashHelp(all: boolean): string {
 	const lines = rows.map((c) => `  ${c.usage ?? `/${c.name}`} - ${c.description}`);
 	const hidden = BUILT_IN_SLASH_COMMANDS.length - rows.length;
 	const tail = all
-		? "  /<skill> ... - Any loaded skill name or alias expands to its prompt"
+		? "  /<skill> ... - Any loaded skill name or alias expands to its prompt\n  /<template> ... - A Markdown file in ~/.8gent/prompts, sent with $1, $@ filled in"
 		: `  /help all - Show ${hidden} more commands`;
 	return `${all ? "All commands" : "Core commands"}:\n${lines.join("\n")}\n${tail}`;
 }

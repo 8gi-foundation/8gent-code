@@ -665,13 +665,10 @@ describe("browserWithheldNote (a withheld browser says why and how to get it, #3
 		expect(note).toMatch(/loopback|private/);
 		expect(note).not.toContain("\u2014");
 	});
-	test("carries the local-server curl rules, the only copy a local text-tool session sees (#3941 follow-up)", () => {
+	test("points at the curl rules instead of repeating them: the compact local prompt carries them now (#4034)", () => {
 		const note = browserWithheldNote({}) ?? "";
-		expect(note).toContain(LOCAL_SERVER_CURL_NOTE);
-		expect(note).toContain("under .tmp/");
-		expect(note).toContain("never /tmp");
-		expect(note).toContain("Do not pass -L");
-		expect(note).toMatch(/no pipes, ; or &&/);
+		expect(note).not.toContain(LOCAL_SERVER_CURL_NOTE);
+		expect(note).toContain("local-server curl rules");
 	});
 	test("the example curl in the note passes System One's loopback lane as written", () => {
 		const example = /\((curl [^)]+)\)/.exec(LOCAL_SERVER_CURL_NOTE)?.[1];

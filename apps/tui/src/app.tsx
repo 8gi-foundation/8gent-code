@@ -76,7 +76,7 @@ import {
 	ADHD_MODE_ENABLED_MSG,
 	ADHD_MODE_SUGGESTION,
 } from "./components/bionic-text.js";
-import { CommandInput } from "./components/command-input.js";
+import { CommandInput, slashMenuCompact } from "./components/command-input.js";
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
 import pkgInfo from "../../../package.json" with { type: "json" };
@@ -173,6 +173,7 @@ import {
 	logToolEnd,
 	logToolStart,
 } from "./lib/session-logger.js";
+import { expandPromptSlashCommand } from "./lib/prompt-slash.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
 import { detectBuildIntent } from "./lib/build-intent.js";
 import { copyReply } from "./lib/copy-answer.js";
@@ -255,6 +256,12 @@ import {
 	startSystemOneWarmup,
 	systemOneJudgeWarm,
 } from "../../../packages/permissions/system-one-gate.js";
+import { bunFlagsFor, safeBunFlags } from "../../../packages/core/bun-flags.js";
+import {
+	onRunCommandUnsandboxed,
+	runCommandSandboxStatus,
+	sandboxFooterReason,
+} from "../../../packages/permissions/run-command-sandbox.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
 import { NoProviderNotice } from "./components/NoProviderCard.js";
@@ -441,7 +448,8 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 	let answers: any[] = [];
 	try {
 		answers = JSON.parse(
-			execFileSync(process.execPath, ["-e", PROBE, ...urls], {
+			// Runs in the user's cwd on every start: never its bunfig.toml or .env (#4013).
+			execFileSync(process.execPath, [...bunFlagsFor(process.execPath), "-e", PROBE, ...urls], {
 				timeout: 3000,
 				stdio: ["ignore", "pipe", "ignore"],
 			}).toString(),
@@ -1668,6 +1676,8 @@ export function App({
 
 	// TV Mode state — task cards + narrator
 	const viewport = useViewport();
+	// The / menu is open: in a short terminal the focal strip steps aside for it.
+	const [slashMenuOpen, setSlashMenuOpen] = useState(false);
 	// Real rows of the chat box after layout (#3019). The viewport guess
 	// overestimated it and messages overprinted.
 	const chatBoxRef = useRef<DOMElement>(null);
@@ -2420,6 +2430,14 @@ export function App({
 			() => setJudgeState("failed"),
 		);
 	}, [activePermMode]);
+	// run_command without its OS boundary (#4013): the reason lives in the
+	// footer, where the one stderr warning cannot be lost under Ink.
+	const [sandboxOff, setSandboxOff] = useState<string | undefined>(undefined);
+	useEffect(() => {
+		const status = runCommandSandboxStatus();
+		if (!status.applied) setSandboxOff(sandboxFooterReason(status.reason));
+		return onRunCommandUnsandboxed((s) => setSandboxOff(sandboxFooterReason(s.reason)));
+	}, []);
 	// A failed warm-up does not stick: the next gate call retries the load.
 	// When a turn ends, a judge that has since answered clears "failed".
 	useEffect(() => {
@@ -4235,7 +4253,7 @@ export function App({
 						break;
 					}
 					try {
-						const result = Bun.spawnSync(["bun", "run", debugScript, ...debugCmd.split(" ")], {
+						const result = Bun.spawnSync(["bun", ...safeBunFlags(), "run", debugScript, ...debugCmd.split(" ")], {
 							cwd: process.cwd(),
 							env: { ...process.env, NO_COLOR: "1" }, // strip ANSI for clean display
 							timeout: 10000,
@@ -5810,7 +5828,9 @@ export function App({
 			}
 
 			const cmdStartTime = Date.now();
-			const expanded = await expandSkillSlashCommand(message);
+			// A skill first, then a prompt template (#3918 G4); a line neither
+			// knows passes through unchanged.
+			const expanded = expandPromptSlashCommand(await expandSkillSlashCommand(message));
 			// Shell output from `!cmd` lines goes in front, once (#3918 D5).
 			const shellContext = shellContextRef.current.get(tabId);
 			shellContextRef.current.delete(tabId);
@@ -6753,33 +6773,35 @@ export function App({
 							))}
 
 					<Box flexGrow={1} flexDirection="column" minWidth={0}>
-						<LiveFocalStripWithGoal
-							goalClient={goalClient}
-							adhdMode={adhdMode}
-							mode={
-								agentMode === "Planning"
-									? "Planning"
-									: agentMode === "Implementing"
-										? "Implementing"
-										: agentMode === "Testing"
-											? "Testing"
-											: agentMode === "Debugging"
-												? "Debugging"
-												: "Researching"
-							}
-							activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
-							route={shownModel.ran || "-"}
-							routeAsked={shownModel.asked}
-							tokens={tokenStr}
-							contextPct={contextPct}
-							approvalPending={isApprovalPending}
-							autonomous={infiniteModeActive}
-							isProcessing={isProcessing}
-							lastTurnEndedAt={lastTurnEndedAt}
-							lastTurnSuccess={lastTurnSuccess}
-							animate={showAnimations}
-							width={chatWidth}
-						/>
+						{!(slashMenuOpen && slashMenuCompact(viewport.height)) && (
+							<LiveFocalStripWithGoal
+								goalClient={goalClient}
+								adhdMode={adhdMode}
+								mode={
+									agentMode === "Planning"
+										? "Planning"
+										: agentMode === "Implementing"
+											? "Implementing"
+											: agentMode === "Testing"
+												? "Testing"
+												: agentMode === "Debugging"
+													? "Debugging"
+													: "Researching"
+								}
+								activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
+								route={shownModel.ran || "-"}
+								routeAsked={shownModel.asked}
+								tokens={tokenStr}
+								contextPct={contextPct}
+								approvalPending={isApprovalPending}
+								autonomous={infiniteModeActive}
+								isProcessing={isProcessing}
+								lastTurnEndedAt={lastTurnEndedAt}
+								lastTurnSuccess={lastTurnSuccess}
+								animate={showAnimations}
+								width={chatWidth}
+							/>
+						)}
 
 						<NoProviderNotice
 							checked={providerHealth.checked}
@@ -6839,6 +6861,7 @@ export function App({
 						>
 							<CommandInput
 								cwd={projectCwd}
+								onSlashMenuChange={setSlashMenuOpen}
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}
 								placeholder={
@@ -6916,6 +6939,7 @@ export function App({
 					adhd={adhdMode}
 					tokensPerSecond={tokensPerSecond}
 					judge={judgeState}
+					sandboxOff={sandboxOff}
 					djKeys={djKeys}
 					onDjKeysDone={endDjKeys}
 				/>

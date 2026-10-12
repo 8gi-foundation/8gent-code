@@ -294,6 +294,14 @@ export const SCRATCH_DIR_NOTE =
 export const REVIEW_FOCUS_NOTE =
 	"**Reviews: cite only lines that must change, plus any security-relevant edit, however small; omit pure context.**";
 
+/**
+ * Short form of LOCAL_SERVER_CURL_NOTE (tools/eight-browser.ts, the full prompt's copy) for the
+ * compact local prompt, which local models get instead of TOOL_PATTERNS_SEGMENT (#4034). Kept
+ * short for the headless prompt budget (headless-prompt.test.ts, 60% rule).
+ */
+export const LOCAL_SERVER_CURL_SHORT =
+	"Local web servers (127.0.0.1/localhost): run_command with one plain curl per call, no pipes, ; or &&. Keep cookie/header/output files under .tmp/ in the project, never /tmp, then read_file them. On a 302 read the Location header and make a second curl.";
+
 export const SLIDES_TO_VIDEO_NOTE =
 	"**Slides to video: one segment per slide file; check segment count equals slide count before joining; never loop over a text file that may lack a trailing newline.**";
 

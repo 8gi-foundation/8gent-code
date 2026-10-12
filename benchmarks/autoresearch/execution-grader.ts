@@ -9,6 +9,7 @@
  * Grading: 0.7 * execution + 0.3 * keyword
  */
 
+import { safeBunFlags } from "../../packages/core/bun-flags";
 import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import type {
@@ -197,7 +198,7 @@ export async function gradeExecution(
 		mkdirSync(tmpDir, { recursive: true });
 		writeFileSync(fixturePath, code, "utf-8");
 
-		const proc = Bun.spawn(["bun", "test", testFile], {
+		const proc = Bun.spawn(["bun", ...safeBunFlags(), "test", testFile], {
 			env: childEnv({ FIXTURE_PATH: fixturePath, WORK_DIR: tmpDir }),
 			cwd: BENCHMARKS_ROOT,
 			stdout: "pipe",
@@ -280,7 +281,7 @@ export async function gradeMultiFileExecution(
 			writeFileSync(filePath, file.content, "utf-8");
 		}
 
-		const proc = Bun.spawn(["bun", "test", testFile], {
+		const proc = Bun.spawn(["bun", ...safeBunFlags(), "test", testFile], {
 			env: childEnv({ WORK_DIR: tmpDir }),
 			cwd: tmpDir,
 			stdout: "pipe",
