@@ -50,6 +50,19 @@ export const GROUND_PRESETS: Record<string, Preset> = {
 		coords: "absolute",
 	},
 	"qwen3-vl": { model: "qwen3-vl:8b", endpoint: OLLAMA, transport: "ollama", coords: "norm1000" },
+	"qwen3.5": { model: "qwen3.5:9b", endpoint: OLLAMA, transport: "ollama", coords: "norm1000" },
+	"muse-glimmer": {
+		model: "muse-glimmer:30b-mlx",
+		endpoint: OLLAMA,
+		transport: "ollama",
+		coords: "norm1000",
+	},
+	gemma4: {
+		model: "gemma-4-26b-a4b-it",
+		endpoint: LMSTUDIO,
+		transport: "openai",
+		coords: "norm1000",
+	},
 };
 
 export const DEFAULT_GROUND_BACKEND = "qwen2.5vl";
