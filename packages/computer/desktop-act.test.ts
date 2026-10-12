@@ -393,6 +393,10 @@ describe("preflight", () => {
 		expect(resolveHostApp({ TERM_PROGRAM: "Apple_Terminal" }, () => null)).toBe("Terminal");
 		expect(resolveHostApp({ TERM_PROGRAM: "8gent" }, () => null)).toBe("8gent.app");
 		expect(resolveHostApp({}, () => null)).toBe("the app running 8gent");
+		// herdr/tmux rewrite TERM_PROGRAM; the Launch Services bundle id still names the app.
+		expect(
+			resolveHostApp({ TERM_PROGRAM: "herdr", __CFBundleIdentifier: "com.apple.Terminal" }, () => null),
+		).toBe("Terminal");
 	});
 
 	test("a pass is cached, a failure is re-probed", () => {

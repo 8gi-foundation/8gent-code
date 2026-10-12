@@ -35,6 +35,22 @@ const HOST_NAMES: Record<string, string> = {
 	"8gent.app": "8gent.app",
 };
 
+/**
+ * __CFBundleIdentifier is set by Launch Services for every process started
+ * from an app, and survives tmux and multiplexers (herdr) that rewrite
+ * TERM_PROGRAM. It names the app macOS keys the privacy grant on.
+ */
+const BUNDLE_IDS: Record<string, string> = {
+	"com.apple.Terminal": "Terminal",
+	"com.googlecode.iterm2": "iTerm",
+	"com.mitchellh.ghostty": "Ghostty",
+	"dev.warp.Warp-Stable": "Warp",
+	"com.microsoft.VSCode": "Visual Studio Code",
+	"net.kovidgoyal.kitty": "kitty",
+	"org.alacritty": "Alacritty",
+	"com.github.wez.wezterm": "WezTerm",
+};
+
 /** Walk up the process tree for the first `.app` bundle; null when ps is unavailable. */
 export function hostAppFromProcessTree(startPid = process.ppid, maxDepth = 8): string | null {
 	let pid = startPid;
@@ -61,7 +77,8 @@ export function hostAppFromProcessTree(startPid = process.ppid, maxDepth = 8): s
 
 /**
  * The app a person must find in System Settings. A bundle on the process
- * tree wins (it is what macOS keys the grant on); else TERM_PROGRAM.
+ * tree wins (it is what macOS keys the grant on); then the Launch Services
+ * bundle id; else TERM_PROGRAM.
  */
 export function resolveHostApp(
 	env: Record<string, string | undefined> = process.env,
@@ -71,6 +88,8 @@ export function resolveHostApp(
 	// tmux and harnesses are not the app macOS grants to; look past them.
 	const bundle = fromTree();
 	if (bundle) return HOST_NAMES[bundle] ?? bundle;
+	const id = env.__CFBundleIdentifier;
+	if (id && BUNDLE_IDS[id]) return BUNDLE_IDS[id];
 	if (raw && HOST_NAMES[raw]) return HOST_NAMES[raw];
 	return raw ? `the app running 8gent (TERM_PROGRAM=${raw})` : "the app running 8gent";
 }
