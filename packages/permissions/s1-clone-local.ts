@@ -44,7 +44,6 @@
 
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { userInfo } from "node:os";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -56,7 +55,10 @@ import {
 	protectedRel,
 	stripDot,
 } from "./s1-mv-in-project";
+import { accountHome, _setPasswdHomeForTests } from "./s1-account-home";
 import { inside } from "./s1-rm-nothing";
+
+export { _setPasswdHomeForTests };
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
 /** Dependency, install and build output directories: never a clone destination at any depth (lower-cased). */
@@ -150,28 +152,6 @@ function bareRepo(dir: string): boolean {
 		isDir(path.join(dir, "refs")) &&
 		!lstatOrNull(path.join(dir, ".git"))
 	);
-}
-
-type HomeLookup = string | null | (() => string | undefined);
-let passwdHomeOverride: HomeLookup | undefined;
-/** Tests only: stand in for the account's home lookup. Inert unless NODE_ENV is "test". */
-export function _setPasswdHomeForTests(h: HomeLookup | undefined): void {
-	if (process.env.NODE_ENV !== "test") return;
-	passwdHomeOverride = h;
-}
-
-/** The account's home directory, or undefined when it cannot be determined. */
-function accountHome(): string | undefined {
-	try {
-		if (passwdHomeOverride !== undefined) {
-			const v =
-				typeof passwdHomeOverride === "function" ? passwdHomeOverride() : passwdHomeOverride;
-			return v ?? undefined;
-		}
-		return userInfo().homedir;
-	} catch {
-		return undefined;
-	}
 }
 
 /** Lower-cased candidates for `h`: as written, and with its nearest existing ancestor resolved. */
