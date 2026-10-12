@@ -9,7 +9,7 @@
  * - Slash command support (/kanban, /predict, /avenues)
  */
 
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
@@ -90,6 +90,8 @@ interface CommandInputProps {
 	approvalPending?: boolean;
 	/** Project folder the `@` file list comes from. Defaults to process.cwd(). */
 	cwd?: string;
+	/** Told when the / menu opens or closes (a short terminal makes room for it). */
+	onSlashMenuChange?: (open: boolean) => void;
 }
 
 /** The status line while an approval card waits on the person (#3118). */
@@ -157,6 +159,7 @@ export function CommandInput({
 	allowEmptySubmit = false,
 	approvalPending = false,
 	cwd = process.cwd(),
+	onSlashMenuChange,
 // Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
 // react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: CommandInputProps) {
@@ -233,7 +236,6 @@ export function CommandInput({
 		() => (mention && projectFiles ? rankFiles(projectFiles.files, mention.query, MENTION_ROWS) : []),
 		[mention, projectFiles],
 	);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: a new query starts at the best match
 	useEffect(() => setMentionIndex(0), [mention?.query]);
 	const mentionOpen = mention !== null && mentionMatches.length > 0;
 
@@ -255,6 +257,21 @@ export function CommandInput({
 		setShowSlashHelp(t.startsWith("/") && !t.slice(1).includes(" "));
 	}, [value]);
 
+	// The menu's rows, how many fit this terminal, and the picked one.
+	// Up/Down scroll through every row; Tab puts the picked command in.
+	const { stdout } = useStdout();
+	const terminalRows = stdout?.rows ?? 24;
+	const slashVisible = slashMenuVisibleRows(terminalRows);
+	const slashFilter = value.trimStart().slice(1);
+	const slashRows = useMemo(
+		() => (showSlashHelp ? slashMenuRows(slashFilter, slashRegistryEntries) : []),
+		[showSlashHelp, slashFilter, slashRegistryEntries],
+	);
+	const [slashIndex, setSlashIndex] = useState(0);
+	useEffect(() => setSlashIndex(0), [slashFilter]);
+	const slashOpen = !isProcessing && showSlashHelp && slashRows.length > 0;
+	useEffect(() => onSlashMenuChange?.(slashOpen), [slashOpen, onSlashMenuChange]);
+
 	// Handle keyboard input
 	useInput(
 		(input, key) => {
@@ -271,6 +288,23 @@ export function CommandInput({
 				}
 				if (key.downArrow) {
 					setMentionIndex((i) => Math.min(mentionMatches.length - 1, i + 1));
+					return;
+				}
+			}
+
+			// An open / menu takes Up, Down and Tab.
+			if (slashOpen) {
+				if (key.upArrow) {
+					setSlashIndex((i) => Math.max(0, i - 1));
+					return;
+				}
+				if (key.downArrow) {
+					setSlashIndex((i) => Math.min(slashRows.length - 1, i + 1));
+					return;
+				}
+				if (key.tab && !key.shift) {
+					const row = slashRows[Math.min(slashIndex, slashRows.length - 1)];
+					if (row) setValue(`/${row.name} `);
 					return;
 				}
 			}
@@ -488,7 +522,12 @@ export function CommandInput({
 
 			{/* Slash command help */}
 			{!isProcessing && showSlashHelp && (
-				<SlashCommandHelp filter={value.trimStart().slice(1)} entries={slashRegistryEntries} />
+				<SlashCommandHelp
+					rows={slashRows}
+					selected={slashIndex}
+					visible={slashVisible}
+					compact={slashMenuCompact(terminalRows)}
+				/>
 			)}
 		</Box>
 	);
@@ -662,37 +701,82 @@ export function slashMenuRows(filter: string, entries: SlashRegistryEntry[]): Sl
 }
 
 export const SLASH_MENU_ROWS = 14;
+/** Below this many terminal rows the menu drops its frame and the focal strip steps aside. */
+export const SLASH_MENU_COMPACT_BELOW = 30;
+/**
+ * Terminal rows the TUI keeps around the menu, measured in the real App
+ * (slash-menu-height.test.tsx). Framed: header, tabs, frame, focal strip,
+ * input, footer, and the menu's margin, border, title and position line.
+ * Compact: the same without the focal strip, margin, border and title. The
+ * App's frame is itself two rows shorter than the terminal.
+ */
+export const SLASH_MENU_CHROME = { framed: 18, compact: 11 } as const;
+
+export function slashMenuCompact(terminalRows: number): boolean {
+	return terminalRows < SLASH_MENU_COMPACT_BELOW;
+}
+
+/** Menu rows that fit a terminal `terminalRows` tall: min(14, rows - chrome), at least 1. */
+export function slashMenuVisibleRows(terminalRows: number): number {
+	const chrome = slashMenuCompact(terminalRows) ? SLASH_MENU_CHROME.compact : SLASH_MENU_CHROME.framed;
+	return Math.max(1, Math.min(SLASH_MENU_ROWS, terminalRows - chrome));
+}
+
+/** The window of `total` rows, `visible` tall, that keeps `selected` in view. */
+export function slashMenuWindow(total: number, selected: number, visible: number): { start: number; end: number } {
+	if (total <= visible) return { start: 0, end: total };
+	const start = Math.max(0, Math.min(selected - Math.floor(visible / 2), total - visible));
+	return { start, end: start + visible };
+}
 
 // Slash command help dropdown (built-ins + loaded skills)
-function SlashCommandHelp({
-	filter,
-	entries,
+export function SlashCommandHelp({
+	rows,
+	selected,
+	visible,
+	compact = false,
 }: {
-	filter: string;
-	entries: SlashRegistryEntry[];
+	rows: SlashRegistryEntry[];
+	selected: number;
+	visible: number;
+	compact?: boolean;
 }) {
-	const combined = slashMenuRows(filter, entries).map((entry) => ({
+	if (rows.length === 0) return null;
+	const { start, end } = slashMenuWindow(rows.length, selected, visible);
+	const combined = rows.slice(start, end).map((entry, i) => ({
 		key: `${entry.kind}:${entry.token}`,
 		label: entry.name,
 		description: entry.description,
+		picked: start + i === selected,
 	}));
 
-	if (combined.length === 0) return null;
-
 	return (
-		<Box flexDirection="column" borderStyle="round" borderColor={t.frame} paddingX={1} marginTop={1}>
-			<Text color={t.heading} bold>
-				COMMANDS
-			</Text>
-			{combined.slice(0, SLASH_MENU_ROWS).map((row) => (
-				<Box key={row.key}>
-					<Text color={t.textPrimary}>/{row.label}</Text>
+		<Box
+			flexDirection="column"
+			borderStyle={compact ? undefined : "round"}
+			borderColor={t.frame}
+			paddingX={1}
+			marginTop={compact ? 0 : 1}
+			flexShrink={0}
+		>
+			{!compact && (
+				<Text color={t.heading} bold>
+					COMMANDS
+				</Text>
+			)}
+			{combined.map((row) => (
+				// One line per row, cut at the edge: a wrapped row would push the
+				// menu past the rows the terminal has.
+				<Text key={row.key} wrap="truncate-end">
+					<Text color={row.picked ? t.heading : t.textPrimary}>
+						{row.picked ? "> " : "  "}/{row.label}
+					</Text>
 					<Text color={t.textTertiary}> {row.description}</Text>
-				</Box>
+				</Text>
 			))}
-			{combined.length > SLASH_MENU_ROWS && (
+			{rows.length > end - start && (
 				<Text color={t.textTertiary}>
-					{`+${combined.length - SLASH_MENU_ROWS} more, keep typing to narrow. /help all lists everything.`}
+					{`${start + 1}-${end} of ${rows.length}, Up/Down to scroll, Tab to pick`}
 				</Text>
 			)}
 		</Box>

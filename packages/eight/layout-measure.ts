@@ -52,7 +52,7 @@ function isModuleLoadError(err: unknown): boolean {
 	);
 }
 
-export async function measureLayout(file: string): Promise<LayoutMeasure | null> {
+export async function measureLayout(file: string | Buffer): Promise<LayoutMeasure | null> {
 	try {
 		const sharp = (await import("sharp")).default;
 		const { data, info } = await sharp(file, { limitInputPixels: MAX_PIXELS })
@@ -134,7 +134,7 @@ export async function measureLayout(file: string): Promise<LayoutMeasure | null>
 }
 
 /** One block of text for a read_image result, or "" when there is nothing to say. */
-export async function layoutMeasureLine(file: string): Promise<string> {
+export async function layoutMeasureLine(file: string | Buffer): Promise<string> {
 	const m = await measureLayout(file);
 	if (!m) return "";
 	const rows = m.bands.map((b) => {

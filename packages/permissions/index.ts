@@ -1362,6 +1362,9 @@ export {
 	sessionScratchDir,
 } from "./seatbelt.js";
 export type { SeatbeltSpec } from "./seatbelt.js";
+// run_command OS boundary (#4009): status and the unsandboxed hook are for the TUI status line.
+export { onRunCommandUnsandboxed, runCommandSandboxStatus } from "./run-command-sandbox.js";
+export type { RunCommandSandbox } from "./run-command-sandbox.js";
 export { detectBestIsolation, runSandboxed } from "./sandbox.js";
 export type { IsolationLevel, SandboxOptions, SandboxResult } from "./sandbox-types.js";
 export type {
