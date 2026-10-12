@@ -30,8 +30,9 @@ import { deckVideoAfterWrite } from "../deck/auto";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
-import { applyAt, editRefusal, gateWriteTool, locateEdit, logEditRefusal } from "../permissions/write-content-gate";
+import { applyAt, editRefusal, gateWriteTool, logEditRefusal, resolveEdit } from "../permissions/write-content-gate";
 import {
 	type PermissionModeHolder,
 	currentPermissionMode,
@@ -472,19 +473,24 @@ const editFile = tool({
 		const absolutePath = target.path;
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 		const content = fs.readFileSync(absolutePath, "utf-8");
-		const located = locateEdit(content, oldText, startLine);
-		const refusal = editRefusal(located, filePath);
+		const resolved = resolveEdit(content, oldText, newText, startLine, filePath);
+		const refusal = editRefusal(resolved, filePath);
 		if (refusal) {
-			logEditRefusal(located, filePath, oldText.length);
+			logEditRefusal(resolved, filePath, oldText.length);
 			return refusal;
 		}
 		const edited =
-			located.kind === "ok" ? applyAt(content, located.idx, oldText.length, newText) : null;
+			resolved.kind === "ok"
+				? applyAt(content, resolved.idx, resolved.oldLength, resolved.newText)
+				: null;
 		if (edited === null)
 			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
 		const recordEdit = watchWrite(absolutePath, getToolContext().createdFiles);
 		fs.writeFileSync(absolutePath, edited);
 		recordEdit();
+		if (resolved.kind === "ok" && resolved.matchedLine !== undefined) {
+			return `File edited (matched ignoring whitespace at line ${resolved.matchedLine}): ${absolutePath}`;
+		}
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
 	},
 });
@@ -1404,6 +1410,9 @@ async function runShellCommand(command: string): Promise<string> {
 		finalCommand = `${command} -y`;
 	}
 
+	const sandboxRefusal = runCommandSandboxRefusal();
+	if (sandboxRefusal) return sandboxRefusal;
+
 	return new Promise((settle) => {
 		// Redirect targets this command creates are this agent's own files (#3177).
 		const recordRedirects = watchRedirects(finalCommand, ctx.workingDirectory, ctx.createdFiles);
@@ -1411,7 +1420,8 @@ async function runShellCommand(command: string): Promise<string> {
 			recordRedirects();
 			settle(value);
 		};
-		const proc = spawnShell(finalCommand, {
+		// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
+		const proc = spawnShell(wrapRunCommand(finalCommand), {
 			cwd: ctx.workingDirectory,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,

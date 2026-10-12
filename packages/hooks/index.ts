@@ -239,6 +239,12 @@ function runYamlHookCommand(
 				});
 			});
 
+			// A hook may exit without reading stdin (`echo '{"block": true}'`), so the
+			// write can fail with EPIPE. Unhandled, that error is uncaught and takes
+			// the process down; the hook's own exit and stdout still decide the result.
+			proc.stdin.on("error", (err: NodeJS.ErrnoException) => {
+				if (err.code !== "EPIPE") stderr += String(err);
+			});
 			// Send payload as JSON to stdin
 			proc.stdin.write(JSON.stringify(payload));
 			proc.stdin.end();

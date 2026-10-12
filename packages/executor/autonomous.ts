@@ -17,6 +17,7 @@
  *   8. Report result via Telegram
  */
 
+import { safeBunFlags } from "../core/bun-flags";
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -71,7 +72,7 @@ function validateGeneratedFiles(
 		const fullPath = join(workDir, file.path);
 		if (existsSync(fullPath)) {
 			try {
-				execSync(`bun build "${fullPath}" --no-bundle --outdir /tmp/.8gent-validate 2>&1`, {
+				execSync(`bun ${safeBunFlags().map((f) => JSON.stringify(f)).join(" ")} build "${fullPath}" --no-bundle --outdir /tmp/.8gent-validate 2>&1`, {
 					cwd: workDir,
 					encoding: "utf-8",
 					timeout: 15000,
