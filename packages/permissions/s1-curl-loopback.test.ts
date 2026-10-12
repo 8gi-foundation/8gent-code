@@ -337,7 +337,11 @@ describe("-L is refused for everyone, with the way forward (#3967, 8SO)", () => 
 		}
 	});
 	test("-L to a non-loopback URL is no opinion (no refusal text)", () => {
-		for (const c of ["curl -sL http://example.com/", `curl -sL ${URL} http://example.com/`, "curl -sL http://169.254.169.254/"]) {
+		for (const c of [
+			"curl -sL http://example.com/",
+			`curl -sL ${URL} http://example.com/`,
+			"curl -sL http://169.254.169.254/",
+		]) {
 			const r = curlToLoopback(c, ws);
 			expect(r.ok, c).toBe(false);
 			expect((r as { refuse?: string }).refuse, c).toBeUndefined();
@@ -524,7 +528,9 @@ describe("systemOneGate end to end (default mode) with a judge that says dangero
 
 describe("backslash inside double quotes (pilot 12 Oct, -w with \\n)", () => {
 	test("a backslash before a letter or digit is literal and allowed", () => {
-		expect(ok('curl -s -o .tmp/r.html -w "HTTP_STATUS:%{http_code}\\n" http://127.0.0.1:55376/')).toBe(true);
+		expect(
+			ok('curl -s -o .tmp/r.html -w "HTTP_STATUS:%{http_code}\\n" http://127.0.0.1:55376/'),
+		).toBe(true);
 		expect(ok('curl -s -w "a\\tb\\r\\n" http://127.0.0.1:55376/')).toBe(true);
 	});
 	test("any other backslash is refused, including one that would escape the closing quote", () => {
