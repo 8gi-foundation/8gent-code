@@ -21,7 +21,7 @@ const MAX_ECHO_ROWS = 20;
 export const HASHLINE_READ_DESC =
 	"[FILE] Pass path; returns the file one row per line as `N#hash<tab>text`, where N#hash is that line's anchor for edit_file. The anchor and tab are not file text. Use offset and limit to read part of a file; the numbers stay the file's real line numbers.";
 export const HASHLINE_EDIT_DESC =
-	"[FILE] Replaces the lines at anchor (N#hash from read_file; a block lists each, comma-separated) in file path with newText in place. Or pass oldText instead of anchor. A stale anchor (the line changed since read_file) is refused and nothing is written. Empty newText deletes the lines.";
+	"[FILE] Replaces oldText or the line(s) at anchor (N#hash from read_file) in file path with newText in place; a line is that whole line. For a block, list every line's anchor in order, comma-separated. A stale anchor (the line changed since read_file) is refused and nothing is written. Empty newText deletes the lines.";
 export const ANCHOR_PARAM_DESC =
 	"Anchor of the line to replace, e.g. 12#k7q3; for a block, every line's anchor in order, comma-separated (12#k7q3,13#ab2c)";
 export const ANCHORED_NEWTEXT_DESC =

@@ -15,6 +15,86 @@ import { ToolExecutor, numberLines } from "./tools";
 
 afterAll(cleanupTempDirs);
 
+/* Pinned from origin/main 29f546db (git show origin/main:packages/eight/tools.ts, :packages/ai/tools.ts). */
+const MAIN_EIGHT_READ = {
+	name: "read_file",
+	description:
+		"[FILE] Returns the text of a file at the given path, one line per row, each row starting with its line number and a tab (like `cat -n`). The number and tab are not part of the file: cite them as line numbers, but never copy them into edit_file oldText or newText. Use offset and limit to read part of a file; the numbers stay the file's real line numbers. For large files (>500 lines), prefer get_outline first to find the specific function, then get_symbol for just that code. For config files (package.json, tsconfig.json, etc.) this is the right choice directly.",
+	parameters: {
+		type: "object",
+		properties: {
+			path: { type: "string", description: "Path to the file to read" },
+			offset: {
+				type: "number",
+				description: "Line number to start reading from (1-based). Optional.",
+			},
+			limit: { type: "number", description: "How many lines to read from offset. Optional." },
+		},
+		required: ["path"],
+	},
+};
+const MAIN_EIGHT_EDIT = {
+	name: "edit_file",
+	description:
+		"[FILE] Replaces oldText (exact existing line or block) in file path with newText in place; to update a line, oldText is that whole line. Returns confirmation. Use this for surgical edits to existing files - prefer over write_file when changing a specific function or block. The oldText must match exactly (whitespace-sensitive). If the match fails, read_file first to get the exact current content, then retry.",
+	parameters: {
+		type: "object",
+		properties: {
+			path: { type: "string", description: "Path to the file" },
+			oldText: {
+				type: "string",
+				description:
+					"The exact existing text being changed, a whole line or block; after the edit the file contains newText and not oldText",
+			},
+			newText: { type: "string", description: "Replacement for oldText, in place" },
+			startLine: {
+				type: "number",
+				description:
+					"Optional 1-based line. If oldText appears more than once, the copy at or after this line is edited. Without it, a duplicate oldText is refused.",
+			},
+		},
+		required: ["path", "oldText", "newText"],
+	},
+};
+const SCHEMA = "http://json-schema.org/draft-07/schema#";
+const MAIN_AI_READ = {
+	description:
+		"[FILE] Returns the text of a file at the given path, one line per row, each row starting with its line number and a tab (like `cat -n`).",
+	schema: {
+		$schema: SCHEMA,
+		type: "object",
+		properties: { path: { type: "string", description: "Path to the file to read" } },
+		required: ["path"],
+		additionalProperties: false,
+	},
+};
+const MAIN_AI_EDIT = {
+	description:
+		"[FILE] Replaces oldText (exact existing line or block) in file path with newText in place; to update a line, oldText is that whole line.",
+	schema: {
+		$schema: SCHEMA,
+		type: "object",
+		properties: {
+			path: { type: "string", description: "Path to the file" },
+			oldText: {
+				type: "string",
+				description:
+					"The exact existing text being changed, a whole line or block; after the edit the file contains newText and not oldText",
+			},
+			newText: { type: "string", description: "Replacement for oldText, in place" },
+			startLine: {
+				description:
+					"1-based line; when oldText appears more than once, edit the copy at or after this line",
+				type: "integer",
+				minimum: -9007199254740991,
+				maximum: 9007199254740991,
+			},
+		},
+		required: ["path", "oldText", "newText"],
+		additionalProperties: false,
+	},
+};
+
 const SRC = "const a = 1;\nconst b  =  `x   y`;   // aligned\nconst c = 3;\n";
 const LINES = SRC.split("\n").slice(0, 3);
 const prior = process.env.EIGHT_EDIT_FORMAT;
@@ -66,6 +146,24 @@ describe("flag off (EIGHT_EDIT_FORMAT unset): unchanged", () => {
 		const edit = def("edit_file").function.parameters;
 		expect(edit.required).toEqual(["path", "oldText", "newText"]);
 		expect(edit.properties.anchor).toBeUndefined();
+	});
+
+	test("read_file and edit_file definitions equal origin/main's literals (29f546db)", () => {
+		expect(def("read_file").function).toEqual(MAIN_EIGHT_READ);
+		expect(def("edit_file").function).toEqual(MAIN_EIGHT_EDIT);
+	});
+
+	test("the native read_file and edit_file equal origin/main's literals (29f546db)", async () => {
+		const { asSchema } = await import("ai");
+		const { agentTools } = await import("../ai/tools");
+		for (const [name, want] of [
+			["read_file", MAIN_AI_READ],
+			["edit_file", MAIN_AI_EDIT],
+		] as const) {
+			const t = agentTools[name] as { description?: string; inputSchema: never };
+			expect(t.description).toBe(want.description);
+			expect(await asSchema(t.inputSchema).jsonSchema).toEqual(want.schema);
+		}
 	});
 
 	test("the native catalog keeps its legacy read_file and edit_file", async () => {
@@ -148,7 +246,7 @@ console.log(JSON.stringify({ desc: (agentTools as any).edit_file.description, re
 			env: { ...process.env, EIGHT_EDIT_FORMAT: "hashline" },
 		});
 		const out = JSON.parse(res.stdout.toString().trim().split("\n").pop() as string);
-		expect(out.desc).toStartWith("[FILE] Replaces the lines at anchor");
+		expect(out.desc).toStartWith("[FILE] Replaces oldText or the line(s) at anchor");
 		expect(out.read.split("\n")[0]).toBe(`     1#${lineHash(LINES[0])}\t${LINES[0]}`);
 		expect(out.edit).toContain("Replaced lines 3-3 (1) with 1 line(s).");
 		expect(out.byText).toStartWith("File edited:");
