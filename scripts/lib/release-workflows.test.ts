@@ -61,12 +61,14 @@ describe("all release workflows", () => {
 	// that let release-proxy.yml carry 8 movable refs unchecked while four sibling
 	// release workflows were verified. #4149 pinned the last of them, so the
 	// property now holds everywhere and the list can stop being hand-maintained.
-	for (const f of readdirSync(WF).filter((n) => n.endsWith(".yml"))) {
+	// Job-level `uses:` (a reusable workflow) is checked too: a remote one on a
+	// movable tag is the same hole as a step. Local `./` refs live in this repo.
+	for (const f of readdirSync(WF).filter((n) => /\.ya?ml$/.test(n))) {
 		const wf = load(f);
 		test(`${f}: every action is pinned to a commit SHA`, () => {
-			for (const job of Object.values(wf.jobs)) {
-				for (const s of job.steps ?? []) {
-					if (s.uses && !s.uses.startsWith("./")) expect(s.uses).toMatch(/@[0-9a-f]{40}$/);
+			for (const job of Object.values(wf.jobs) as (Job & { uses?: string })[]) {
+				for (const ref of [job.uses, ...(job.steps ?? []).map((s) => s.uses)]) {
+					if (ref && !ref.startsWith("./")) expect(ref).toMatch(/@[0-9a-f]{40}$/);
 				}
 			}
 		});
