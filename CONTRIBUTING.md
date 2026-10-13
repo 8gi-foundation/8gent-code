@@ -178,9 +178,9 @@ The Infinite Gentleman's voice is in `packages/personality/`:
 - TypeScript strict mode
 - Biome for linting/formatting. CI runs, and you can run locally:
   - `bun run lint` (lint rules, whole repo)
-  - `bun run biome:check` (lint, format and import order; CI gates the files your change touches)
+  - `bun run check:biome` (lint, format and import order; CI gates the files your change touches)
   - `bun run format:check` (formatting only; same changed-files gate in CI)
-  - `bun run biome:check:fix` applies the safe fixes and formatting
+  - `bun run check:biome:fix` applies the safe fixes and formatting
 - `bun run typecheck` and `bun run typecheck:tui` must both pass
 - Meaningful variable names
 - Document public APIs
