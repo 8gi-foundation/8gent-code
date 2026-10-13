@@ -423,31 +423,22 @@ if(getComputedStyle(e).visibility!=="visible")continue;out.push({s:sel(e).slice(
 var j=document.createElement("script");j.type="application/json";j.id="${boxesId(token)}";j.textContent=JSON.stringify(out).replace(/</g,"\\\\u003c");(document.body||document.documentElement).appendChild(j)});`;
 
 /**
- * A page-controlled selector made safe to show the model: no control, line-break, bidi or
- * zero-width characters (a class name must not open a new line of instructions in the tool
- * result), whitespace collapsed, cut to MAX_SELECTOR_CHARS.
+ * A page-controlled selector made safe to show the model. Allowlist, not denylist: only
+ * printable ASCII and Unicode letters and digits survive; every other code point (controls,
+ * line breaks, bidi, zero-width, tag characters U+E0000.., variation selectors, combining
+ * marks, private use, lone surrogates) becomes a space, so a class name can neither open a
+ * new line nor smuggle invisible text. Whitespace collapsed, cut to MAX_SELECTOR_CHARS code
+ * points (never mid surrogate pair).
  */
 export function cleanSelector(s: string): string {
-	let flat = "";
-	for (const ch of s) flat += hiddenOrBreaking(ch.codePointAt(0) ?? 0) ? " " : ch;
-	flat = flat.replace(/\s+/g, " ").trim();
-	return flat.length > MAX_SELECTOR_CHARS ? `${flat.slice(0, MAX_SELECTOR_CHARS)}...` : flat;
-}
-
-/** C0/C1 controls, line and paragraph separators, bidi controls and zero-width or format characters. */
-function hiddenOrBreaking(c: number): boolean {
-	return (
-		c <= 0x1f ||
-		(c >= 0x7f && c <= 0x9f) ||
-		c === 0xad ||
-		c === 0x61c ||
-		c === 0x180e ||
-		(c >= 0x200b && c <= 0x200f) ||
-		(c >= 0x2028 && c <= 0x202e) ||
-		(c >= 0x2060 && c <= 0x206f) ||
-		c === 0xfeff ||
-		(c >= 0xfff9 && c <= 0xfffb)
-	);
+	const flat = s
+		.replace(/[^\x20-\x7e\p{L}\p{N}]/gu, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+	const points = Array.from(flat);
+	return points.length > MAX_SELECTOR_CHARS
+		? `${points.slice(0, MAX_SELECTOR_CHARS).join("")}...`
+		: flat;
 }
 
 /** The element boxes out of a --dump-dom print, or null when the print holds none. */
