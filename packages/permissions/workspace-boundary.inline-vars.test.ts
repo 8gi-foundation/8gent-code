@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import evidence from "./__tests__/fixtures/4173-inline-var-commands.json";
+import overnight from "./__tests__/fixtures/artale-overnight-magick.json";
 import { type BoundaryHost, checkCommandBoundary } from "./src/workspace-boundary";
 
 type Row = [command: string, allowed: boolean];
@@ -246,6 +247,98 @@ describe("second review: every other way the shell can bind or rewrite a name", 
 			expect(allowed(command)).toBe(ok);
 		});
 	}
+});
+
+describe("third review: an empty or unrun loop, and a cd that lands on -", () => {
+	// After `for f in; do`, a real shell leaves $f as it was: here unset, so `$f/etc` is `/etc`.
+	const refused: [label: string, command: string][] = [
+		["empty for list, then a read", "for f in; do :; done; cat $f/etc/passwd"],
+		["empty for list, then a copy out", "for f in; do :; done; cp secret $f/tmp/exfil"],
+		["empty for list with a space", "for f in ; do :; done; cat $f/etc/passwd"],
+		["empty select list", "select f in; do :; done; cat $f/etc/passwd"],
+		["empty list after a full one", "for f in a; do :; done; for f in; do :; done; cat $f/x"],
+		[
+			"empty list, a read, then a full one",
+			"for f in; do :; done; cat $f/etc/passwd; for f in a; do :; done",
+		],
+		["empty for list, then a cd", "for f in; do :; done; cd $f/etc; cat passwd"],
+		["a variable that is -", "D=-; cd $D; cat passwd"],
+		["a loop value that is -", "for d in -; do cd $d; done; cat passwd"],
+		["a variable that is -, after an option", "D=-; cd -P $D; cat passwd"],
+		["cd -P -", "cd -P -; cat passwd"],
+		["cd -L -", "cd -L -; cat passwd"],
+		["cd -- -", "cd -- -; cat passwd"],
+		["cd -P with no operand goes to HOME", "cd -P; cat .ssh/id_rsa"],
+		["cd -P to an absolute path", "cd -P /etc; cat passwd"],
+		["cd -- to an absolute path", "cd -- /etc; cat passwd"],
+		["a variable that is -, with OLDPWD set", "OLDPWD=/etc; cd src; D=-; cd $D; cat passwd"],
+		// A loop binds its name only once it has run, in this shell.
+		["a read before the loop", "cat $f/etc/passwd; for f in a; do :; done"],
+		["a cd before the loop", "cd $f/etc; for f in a; do :; done; cat passwd"],
+		["a loop that may not run", "false && for f in a; do :; done; cat $f/etc/passwd"],
+		["a loop after ||", "true || for f in a; do :; done; cat $f/etc/passwd"],
+		["a loop inside an if", "if false; then for f in a; do :; done; fi; cat $f/etc/passwd"],
+		["a loop inside an empty loop", "for g in; do for f in a; do :; done; done; cat $f/etc/passwd"],
+		["a loop inside a while", "while false; do for f in a; do :; done; done; cat $f/etc/passwd"],
+		["a piped loop runs in a subshell", "for f in a; do :; done | cat; cat $f/etc/passwd"],
+		["a background loop runs in a subshell", "for f in a; do :; done & cat $f/etc/passwd"],
+		["a redirect on done expands first", "for f in a; do :; done > $f/etc/x"],
+		["a select value can be empty", "select f in a; do cat $f/etc/passwd; break; done"],
+		// 8SO review: a loop in `then` never ran for the `else` or `elif` branch.
+		[
+			"a loop in then, read in else",
+			"if false; then for f in a; do :; done; else cat $f/etc/passwd; fi",
+		],
+		[
+			"a loop in then, read in elif",
+			"if false; then for f in a; do :; done; elif true; then cat $f/etc/passwd; fi",
+		],
+		// 8SO review: under nullglob a glob list can be empty, so the loop may not run.
+		[
+			"a glob loop under nullglob",
+			"shopt -s nullglob; for f in *.none; do :; done; cat $f/etc/passwd",
+		],
+		["a glob loop, read after it", "for f in *.png; do :; done; cat $f/etc/passwd"],
+		["a bracket glob loop, read after it", "for f in [ab]; do :; done; cat $f/etc/passwd"],
+	];
+	for (const [label, command] of refused) {
+		test(`refuses ${label}: ${JSON.stringify(command)}`, () => {
+			expect(allowed(command)).toBe(false);
+		});
+	}
+
+	const kept: Row[] = [
+		["for f in a; do :; done; cat $f/x", true],
+		['for f in *.png; do magick "$f" "out/$f"; done', true],
+		["cd src; D=-; cd $D; cat a.txt", true],
+		["cd src; for d in -; do cd $d; done; cat a.txt", true],
+		["cd src; cd -P -; cat a.txt", true],
+		["cd -P src; cat ../a.txt", true],
+		["cd -L -- src; cat a.txt", true],
+		["cd src; D=-; cd $D; cat ../x", false],
+		["for a in o; do for b in ut; do :; done; cp x.png $a$b/x.png; done", true],
+		["for f in a; do :; done; for f in b; do :; done; cat $f/x", true],
+		["for f in a; do cat $f/x; done | cat", true],
+		["for f in a\ndo\n:\ndone\ncat $f/x", true],
+		["if true; then for f in a; do :; done; cat $f/x; fi", true],
+		["if false; then :; else for f in a; do :; done; cat $f/x; fi", true],
+		["for f in *.png; do :; done; for f in a; do cat $f/x; done", true],
+	];
+	for (const [command, ok] of kept) {
+		test(`${ok ? "allows" : "denies"} ${JSON.stringify(command)}`, () => {
+			expect(allowed(command)).toBe(ok);
+		});
+	}
+
+	test("the eight artale-overnight commands that assign D are still allowed", () => {
+		const ws = "/Users/dev/work";
+		const host = { platform: "darwin" as const, env: { HOME: "/Users/dev", PATH: "/usr/bin" } };
+		const calls = overnight.calls.filter((c) => c.command.startsWith("D={WS}/"));
+		expect(calls.map((c) => c.step)).toEqual([22, 23, 24, 25, 26, 27, 28, 29]);
+		for (const c of calls) {
+			expect(allowed(c.command.replaceAll("{WS}", ws), host, ws)).toBe(true);
+		}
+	});
 });
 
 describe("symlinks on a real filesystem", () => {
