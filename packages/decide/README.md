@@ -87,6 +87,31 @@ what makes same input give same output: Ollama's float output drifts in the
   - Default timeout 60s per question (covers a cold model load).
 - **mock** (`backends/mock.ts`) - deterministic word-overlap heuristic. Tests
   only, or `createDecider({ backend: "mock" })`. Never auto-selected.
+- **jev** (`backends/jev.ts`) - HOSTED, EXPLICIT ONLY, for synthetic evals.
+  TypeSafe AI's decision model `typesafe-ai/jev` through the Vercel AI
+  Gateway, `POST https://ai-gateway.vercel.sh/v1/evaluate` with
+  `zeroDataRetention: true`. Only `createDecider({ backend: "jev" })` builds
+  it, with `AI_GATEWAY_API_KEY` set (the key is read from that env var only,
+  never a file). No environment variable selects it, and `auto` never
+  becomes Jev: there is no `EIGHT_DECIDE_BACKEND` switch. It is the bare
+  backend with no fallback. `jevForbidden` makes it throw under env
+  `SIGI_RUN` or `PILOT_RUN`, or while `~/.8gent/rishi-pilot/pilot.lock`
+  exists. The System One gate (`packages/permissions/system-one-gate.ts`)
+  and locate routing (`packages/ast-index/locate-system-one.ts`) refuse any
+  decider whose backend is named `jev`: the gate falls to the rules (default
+  mode) or blocks (strict), locate falls to hybrid. A gateway error is
+  reported as its HTTP status plus the fixed `error.type` code only, never
+  the body's free text (it can carry the state). `FallbackBackend`
+  (a primary with a local fallback, optional log) remains for callers that
+  wrap a hosted backend themselves; its `name` and `model` report the
+  backend that actually answered. Field map: noul
+  -> `type: "boolean"`, choice options -> `criteria {option: option}` (keys
+  made unique when options repeat), score levels -> `criteria [...]`;
+  probabilities come back keyed by option (choice) or level index (score)
+  and are renormalised here. Hard rules: the state of every question leaves
+  the machine on this path, so it never takes part in a SIGI scored run or
+  anything labelled local, and no secrets or user data go in `state`. No
+  training on its output (TypeSafe MCA s2.3(b)).
 
 `probe.ts` `detectBackend()` tries llamacpp (only when a GGUF resolves AND
 `node-llama-cpp` imports; the package is not imported when no GGUF resolves),

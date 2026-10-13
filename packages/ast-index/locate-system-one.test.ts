@@ -221,3 +221,26 @@ describe("createProseRouter", () => {
 		expect(r.reason).toBe("model");
 	});
 });
+
+describe("the hosted jev judge never routes a locate query (#3652)", () => {
+	test("a decider whose backend is named jev is refused: hybrid, reason error, never asked", async () => {
+		const { decider, asked } = fakeDecider([0.01, 0.01, 0.01, 0.01, 0.96], {
+			backend: "jev",
+			model: "typesafe-ai/jev",
+		});
+		const route = createProseRouter({ decider, threshold: 0.5 });
+		const r = await route("where do we validate the token");
+		expect(r.mode).toBe("hybrid");
+		expect(r.reason).toBe("error");
+		expect(r.error).toContain("jev");
+		expect(asked).toHaveLength(0);
+	});
+
+	test("the same answer from a backend with another name is kept", async () => {
+		const { decider, asked } = fakeDecider([0.01, 0.01, 0.96, 0.01, 0.01]);
+		const route = createProseRouter({ decider, threshold: 0.5 });
+		const r = await route("where do we validate the token");
+		expect(r.mode).toBe("path");
+		expect(asked).toHaveLength(1);
+	});
+});
