@@ -833,6 +833,26 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// A plain ffmpeg call that builds one new media file from the
+		// workspace's own files (L6 media). Default mode only.
+		try {
+			const { ffmpegInProject } = await import("./s1-ffmpeg-in-project");
+			const f = mode === "default" ? ffmpegInProject(command, cwd) : { ok: false as const };
+			if (f.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: f.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 		// A plain `mv` whose every endpoint is inside the workspace and that
 		// overwrites nothing (#3809). Needs the caller's working directory.
 		try {
