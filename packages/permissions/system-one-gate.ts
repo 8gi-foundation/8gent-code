@@ -749,6 +749,30 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// A `magick`/`convert` render from built-in generators (xc:, gradient:, caption:, ...)
+		// to an image inside the workspace: no file read, no coder that fetches, no config from
+		// the workspace (#4177); see s1-magick.ts. Default mode only.
+		try {
+			const { magickRenderInProject } = await import("./s1-magick");
+			const im =
+				mode === "default"
+					? magickRenderInProject(command, cwd, env, opts.project)
+					: { ok: false as const };
+			if (im.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: im.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 		// A plain curl whose every URL is a loopback http(s) server and whose
 		// every file stays inside the workspace (#3941). Default mode only.
 		try {
