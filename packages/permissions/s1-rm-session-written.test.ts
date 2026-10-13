@@ -16,10 +16,15 @@
  * the TUI with the person approving every card (as the pilot does), so the
  * permission layer's card for a dangerous rm is approved and only System One
  * decides.
+ *
+ * Residual (documented in s1-created-files.ts): a NEW file another process
+ * creates inside a directory the command named, while the command runs, is
+ * recorded as this session's. Section (5) pins the boundary: a new file
+ * outside every directory the command named is never recorded.
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
@@ -27,7 +32,7 @@ import { agentTools, setToolContext } from "../ai/tools";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
 import { ToolExecutor } from "../eight/tools";
-import { CreatedFiles, watchBorn } from "./s1-created-files";
+import { CreatedFiles, bornScopes, watchBorn } from "./s1-created-files";
 import { rmOfNothingOrOwn } from "./s1-rm-nothing";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
@@ -280,24 +285,176 @@ describe.skipIf(!HAS_BIRTH || !POSIX)("(4) another session or another project", 
 	});
 });
 
-describe.skipIf(!HAS_BIRTH)("watchBorn: the walk before the command must be complete", () => {
-	test("a small tree: a file born during the command is recorded", () => {
+/** Another process writes `rel` under ws after `ms`; resolves once it has. */
+function otherProcessWrites(rel: string, ms: number): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const child = spawn("sh", ["-c", `sleep ${ms / 1000}; printf other > ${rel}`], { cwd: ws });
+		child.on("error", reject);
+		child.on("exit", () => resolve());
+	});
+}
+
+describe.skipIf(!HAS_BIRTH || !POSIX)(
+	"(5) new files outside the directories the command named go to the judge",
+	() => {
+		test("a session's `sleep` while another process creates notes.md in the project root", async () => {
+			const ex = new ToolExecutor(ws, "born-a");
+			const session = executorAgent(ex);
+			await Promise.all([session.run("sleep 1"), otherProcessWrites("notes.md", 300)]);
+			expect(existsSync(join(ws, "notes.md"))).toBe(true);
+			expect(ex.createdFiles.createdBySession(join(ws, "notes.md"))).toBe(false);
+			expectJudgedAndBlocked(await session.run("rm -f notes.md"), "notes.md");
+		});
+
+		test("session A's `sleep` while session B writes video/b-report.md: A's rm goes to the judge", async () => {
+			const a = new ToolExecutor(ws, "born-a");
+			const b = executorAgent(new ToolExecutor(ws, "born-b"));
+			const later = new Promise((r) => setTimeout(r, 300)).then(() =>
+				b.write("video/b-report.md", "b\n"),
+			);
+			await Promise.all([executorAgent(a).run("sleep 1"), later]);
+			expect(existsSync(join(ws, "video", "b-report.md"))).toBe(true);
+			expect(a.createdFiles.createdBySession(join(ws, "video", "b-report.md"))).toBe(false);
+			expectJudgedAndBlocked(
+				await executorAgent(a).run("rm -f video/b-report.md"),
+				"video/b-report.md",
+			);
+		});
+	},
+);
+
+describe.skipIf(!HAS_BIRTH || !POSIX)(
+	"(6) a credential name the command wrote is recorded, yet judged",
+	() => {
+		for (const name of ["id_rsa", "credentials"]) {
+			test(`video/${name}, written by a child of a command that names video/`, async () => {
+				const ex = new ToolExecutor(ws, "born-a");
+				const session = executorAgent(ex);
+				await session.write(
+					"video/mk.sh",
+					`#!/usr/bin/env bash\ncd "$(dirname "$0")"\nprintf k > ${name}\n`,
+				);
+				await session.run("bash video/mk.sh");
+				// Recorded: only the write refusal in rmOfNothingOrOwn stands between it and the lane.
+				expect(ex.createdFiles.createdBySession(join(ws, "video", name))).toBe(true);
+				expectJudgedAndBlocked(await session.run(`rm -f video/${name}`), `video/${name}`);
+			});
+		}
+	},
+);
+
+describe("bornScopes: only the directories a command names", () => {
+	const scopes = (command: string) => {
 		const root = realpathSync(ws);
-		const record = new CreatedFiles();
-		const done = watchBorn(root, record);
-		writeFileSync(join(root, "video", "new.png"), "x");
-		done();
-		expect(record.createdBySession(join(root, "video", "new.png"))).toBe(true);
+		return bornScopes(command, root).map((d) => d.slice(root.length + 1));
+	};
+
+	test("a script path scopes to its directory; a directory to itself", () => {
+		mkdirSync(join(ws, "video", "out"));
+		writeFileSync(join(ws, "video", "build_slides.sh"), "");
+		expect(scopes("bash video/build_slides.sh")).toEqual(["video"]);
+		expect(scopes("ls video/out")).toEqual(["video/out"]);
+		expect(scopes("convert x.png video/out/new.png")).toEqual(["video/out"]);
 	});
 
-	test("a tree past the entry limit records nothing", () => {
-		const root = realpathSync(ws);
-		mkdirSync(join(root, "many"));
-		for (let i = 0; i < 3001; i++) writeFileSync(join(root, "many", `f${i}`), "");
-		const record = new CreatedFiles();
-		const done = watchBorn(root, record);
-		writeFileSync(join(root, "video", "new.png"), "x");
-		done();
-		expect(record.size).toBe(0);
+	test("commands naming no directory below the root walk nothing", () => {
+		writeFileSync(join(ws, "Makefile"), "");
+		for (const c of ["make", "sleep 30", "ls", "ls .", "cat Makefile", "touch new.txt"])
+			expect(scopes(c)).toEqual([]);
+	});
+
+	test("quoted, `..`, `$`, `~`, glob, absolute, flag and dot words are never scopes", () => {
+		mkdirSync(join(ws, ".hidden"));
+		mkdirSync(join(ws, "node_modules"));
+		for (const c of [
+			'bash "video/build_slides.sh"',
+			"ls ../video",
+			"ls video/../video",
+			"ls $HOME/video",
+			"ls ~/video",
+			"ls video/*",
+			`ls ${join(realpathSync(ws), "video")}`,
+			"ls --dir=video",
+			"ls .hidden",
+			"ls .git",
+			"ls node_modules",
+		])
+			expect(scopes(c)).toEqual([]);
+	});
+
+	test("a symlink resolving outside the project is not a scope", () => {
+		execFileSync("ln", ["-s", outside, join(ws, "away")]);
+		expect(scopes("ls away/x")).toEqual([]);
+	});
+
+	test("nested scopes collapse, and at most four are kept", () => {
+		for (const d of ["a", "b", "c", "d", "e"]) mkdirSync(join(ws, d));
+		mkdirSync(join(ws, "a", "inner"));
+		expect(scopes("ls a/inner a")).toEqual(["a"]);
+		expect(scopes("ls a b c d e")).toEqual(["a", "b", "c", "d"]);
 	});
 });
+
+describe.skipIf(!HAS_BIRTH)(
+	"watchBorn: each scope's walk before the command must be complete",
+	() => {
+		test("a small scope: a file born in it during the command is recorded", () => {
+			const root = realpathSync(ws);
+			const record = new CreatedFiles();
+			const done = watchBorn("bash video/build_slides.sh", root, record);
+			writeFileSync(join(root, "video", "new.png"), "x");
+			done();
+			expect(record.createdBySession(join(root, "video", "new.png"))).toBe(true);
+		});
+
+		test("a file born outside the named scope is not recorded", () => {
+			const root = realpathSync(ws);
+			mkdirSync(join(root, "other"));
+			const record = new CreatedFiles();
+			const done = watchBorn("bash video/build_slides.sh", root, record);
+			writeFileSync(join(root, "other", "new.png"), "x");
+			writeFileSync(join(root, "new.png"), "x");
+			done();
+			expect(record.size).toBe(0);
+		});
+
+		test("a scope past the entry limit records nothing", () => {
+			const root = realpathSync(ws);
+			mkdirSync(join(root, "video", "many"));
+			for (let i = 0; i < 3001; i++) writeFileSync(join(root, "video", "many", `f${i}`), "");
+			const record = new CreatedFiles();
+			const done = watchBorn("bash video/build_slides.sh", root, record);
+			writeFileSync(join(root, "video", "new.png"), "x");
+			done();
+			expect(record.size).toBe(0);
+		});
+
+		test("files the incomplete walk before never listed are not recorded when the walk after completes", async () => {
+			const root = realpathSync(ws);
+			// Start at a second boundary so every file below is born inside the command's window,
+			// leaving only the walk-before-was-complete check to turn them away.
+			while (Date.now() % 1000 > 50) await new Promise((r) => setTimeout(r, 5));
+			for (const d of ["a", "b"]) {
+				mkdirSync(join(root, "video", d));
+				for (let i = 0; i < 1600; i++) writeFileSync(join(root, "video", d, `f${i}`), "");
+			}
+			const record = new CreatedFiles();
+			const done = watchBorn("bash video/build_slides.sh", root, record);
+			for (const d of ["a", "b"])
+				for (let i = 0; i < 400; i++) rmSync(join(root, "video", d, `f${i}`));
+			done();
+			expect(record.size).toBe(0);
+		});
+
+		test("a large sibling outside the scope no longer blocks recording", () => {
+			const root = realpathSync(ws);
+			mkdirSync(join(root, "many"));
+			for (let i = 0; i < 3001; i++) writeFileSync(join(root, "many", `f${i}`), "");
+			const record = new CreatedFiles();
+			const done = watchBorn("bash video/build_slides.sh", root, record);
+			writeFileSync(join(root, "video", "new.png"), "x");
+			done();
+			expect(record.createdBySession(join(root, "video", "new.png"))).toBe(true);
+		});
+	},
+);

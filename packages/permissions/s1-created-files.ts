@@ -54,10 +54,17 @@
  *   - the command passed the same gates as redirect pinning (no rule fired,
  *     no change of directory) and the working directory is neither the
  *     filesystem root nor the home directory;
- *   - a bounded walk of the working directory just before the command (after
- *     redirect pinning) completed within its limits and did not list the
- *     path: it did not exist then (an editor's save-by-rename of an existing
- *     file keeps its path, so it is never recorded);
+ *   - the command names the path's directory (bornScopes): for each plain
+ *     relative path word in the command text (quotes masked; no `..`, `$`,
+ *     `~`, glob, absolute path or dot segment) the word if it is a directory,
+ *     else its parent; the working directory itself is never a scope and at
+ *     most MAX_BORN_SCOPES are walked. `bash video/build_slides.sh` scopes to
+ *     video/; `make`, `sleep 30` and `ls` walk nothing and record nothing;
+ *   - a bounded walk of that scope just before the command (after redirect
+ *     pinning) completed within its limits and did not list the path: it did
+ *     not exist then (an editor's save-by-rename of an existing file keeps its
+ *     path, so it is never recorded). A scope whose walk was incomplete
+ *     records nothing;
  *   - the same bounded walk after the command finds it as a regular file
  *     (lstat; never a symlink, FIFO or directory), outside any dot directory
  *     and outside node_modules / vendor;
@@ -66,10 +73,23 @@
  *     skew): a hard link or rename of an older file keeps its old birth time
  *     and is not recorded.
  * At most MAX_BORN paths are recorded per command.
- * Known window (accepted, the same class as the TOCTOU window in
- * s1-rm-single.ts): another process that creates a NEW file in the working
- * directory while the command runs has it recorded as this session's. It
- * cannot make an existing file this session's.
+ *
+ * Birth time is not authentic and nothing here relies on it being so. On APFS
+ * an unprivileged process can set it to now (`SetFile -d`,
+ * setattrlist(ATTR_CMN_CRTIME)), so a script could `mv ../precious.txt
+ * moved.txt` and then stamp it. What decides "did not exist before" is the
+ * pre-command listing; what decides "still that file" at rm time is the
+ * identity fields (device, inode, ctime ns, birth ns, size). The birth window
+ * only turns away the plain hard-link and rename cases. Such a script gains no
+ * new capability: it could `rm` the file itself.
+ *
+ * Residual window (accepted, the same class as the TOCTOU window in
+ * s1-rm-single.ts): another process that creates a NEW file inside a
+ * directory this command named, while the command runs, has it recorded as
+ * this session's. A new file anywhere else (the project root, a directory the
+ * command did not name) is never recorded, so another session's or an
+ * editor's new file there still goes to the judge. It cannot make an existing
+ * file this session's.
  */
 
 import {
@@ -329,12 +349,61 @@ function bornBetween(abs: string, sinceMs: number, untilMs: number): boolean {
 	}
 }
 
+/** At most this many directories a command names are walked for it. */
+const MAX_BORN_SCOPES = 4;
+
+/**
+ * The directories `command` names, as realpaths strictly inside `root`: for
+ * each plain relative path word (quotes masked first; no `..`, `$`, `~`, glob,
+ * absolute path, flag, or dot / node_modules / vendor segment), the word
+ * itself when it is a directory, else its parent directory. The root itself is
+ * never a scope, so a command naming no path (`make`, `sleep 30`, `ls`) gets
+ * none. A scope inside another scope is dropped; at most MAX_BORN_SCOPES are
+ * kept, in the order the command names them.
+ */
+export function bornScopes(command: string, root: string): string[] {
+	const masked = maskQuotes(command);
+	const found: string[] = [];
+	for (const m of masked.matchAll(/[^\s;|&<>()]+/g)) {
+		const word = m[0];
+		const at = m.index ?? 0;
+		// Masking changed it: part of it was quoted.
+		if (command.slice(at, at + word.length) !== word) continue;
+		if (!PLAIN_PATH.test(word) || word.startsWith("/") || word.startsWith("-")) continue;
+		const segs = word.split("/").filter((s) => s !== "" && s !== ".");
+		if (segs.length === 0 || segs.includes("..")) continue;
+		if (segs.some((s) => s.startsWith(".") || BORN_SKIP_DIRS.has(s))) continue;
+		const abs = path.resolve(root, ...segs);
+		let isDir = false;
+		try {
+			isDir = lstatSync(abs).isDirectory();
+		} catch {
+			// Absent (a file the command will write): its parent is the scope.
+		}
+		let dir: string;
+		try {
+			dir = realpathSync(isDir ? abs : path.dirname(abs));
+		} catch {
+			continue;
+		}
+		if (dir === root || !inside(dir, root)) continue;
+		const rel = path.relative(root, dir).split(path.sep);
+		if (rel.some((s) => s.startsWith(".") || BORN_SKIP_DIRS.has(s))) continue;
+		if (!found.includes(dir)) found.push(dir);
+	}
+	const within = (a: string, b: string) => a !== b && a.startsWith(`${b}${path.sep}`);
+	return found.filter((d) => !found.some((o) => within(d, o))).slice(0, MAX_BORN_SCOPES);
+}
+
 /**
  * Bracket one command for the files its child processes create (#4159); see
  * the module header for the invariant. `root` is the realpath of the working
- * directory. The finisher records each new regular file the walk finds.
+ * directory. Only the directories the command names are walked (bornScopes),
+ * each with its own limits; a scope whose walk before the command was
+ * incomplete records nothing. The finisher records each new regular file the
+ * walks find.
  */
-export function watchBorn(root: string, record: CreatedFiles): () => void {
+export function watchBorn(command: string, root: string, record: CreatedFiles): () => void {
 	if (root === path.parse(root).root) return () => {};
 	try {
 		if (root === realpathSync(homedir())) return () => {};
@@ -342,18 +411,24 @@ export function watchBorn(root: string, record: CreatedFiles): () => void {
 		return () => {};
 	}
 	const since = Math.floor(Date.now() / 1000) * 1000;
-	const before = walkTree(root);
-	if (!before.complete) return () => {};
+	const scopes: Array<{ dir: string; before: Map<string, Dirent> }> = [];
+	for (const dir of bornScopes(command, root)) {
+		const before = walkTree(dir);
+		if (before.complete) scopes.push({ dir, before: before.paths });
+	}
+	if (scopes.length === 0) return () => {};
 	return () => {
 		try {
 			const until = Date.now() + BORN_SKEW_MS;
 			let recorded = 0;
-			for (const [abs, item] of walkTree(root).paths) {
-				if (recorded >= MAX_BORN) break;
-				if (before.paths.has(abs) || !item.isFile()) continue;
-				if (!bornBetween(abs, since, until)) continue;
-				record.record(abs);
-				recorded++;
+			for (const { dir, before } of scopes) {
+				for (const [abs, item] of walkTree(dir).paths) {
+					if (recorded >= MAX_BORN) return;
+					if (before.has(abs) || !item.isFile()) continue;
+					if (!bornBetween(abs, since, until)) continue;
+					record.record(abs);
+					recorded++;
+				}
 			}
 		} catch {
 			// Recording is best effort; it never affects the command.
@@ -391,7 +466,7 @@ export function watchRedirects(
 		}
 		// After pinning, so a pinned target is "already there" to this walk and only
 		// the pin decides whether it is recorded.
-		watches.push(watchBorn(root, record));
+		watches.push(watchBorn(command, root, record));
 	} catch {
 		// Fall through with what was pinned, so every descriptor is closed.
 	}
