@@ -291,6 +291,44 @@ describe("which 8gent would run (8SO, #4084)", () => {
 	});
 });
 
+describe("after a cd prefix, the project around the folder is workspace too (8SO, #4169)", () => {
+	const SUB_CMD = "8gent deck render deck.json out.mp4";
+
+	test("a PATH entry elsewhere in the project goes to the judge, empty or holding an 8gent", () => {
+		const sub = join(ws, "sub");
+		const projectBin = join(ws, "bin");
+		const PATH = `${projectBin}:${installedBin}:${SYSTEM_PATH}`;
+		// Seen from the folder alone, <project>/bin is outside it, so only the project check refuses.
+		expect(deckRenderInProject(SUB_CMD, sub, { PATH }).ok).toBe(DECK_LANE);
+		expect(deckRenderInProject(SUB_CMD, sub, { PATH }, ws).ok).toBe(false);
+		// The planted binary the folder-only check would have run.
+		put("bin/8gent", "#!/bin/sh\necho pwned\n", ws, true);
+		expect(deckRenderInProject(SUB_CMD, sub, { PATH }, ws).ok).toBe(false);
+		// The installed 8gent alone still passes from the folder.
+		rmSync(join(ws, "bin"), { recursive: true, force: true });
+		expect(
+			deckRenderInProject(SUB_CMD, sub, { PATH: `${installedBin}:${SYSTEM_PATH}` }, ws).ok,
+		).toBe(DECK_LANE);
+	});
+
+	test("a source checkout at the project root goes to the judge from a folder inside it", () => {
+		put("bin/8gent.ts", "// source\n");
+		const sub = join(ws, "sub");
+		expect(
+			deckRenderInProject(SUB_CMD, sub, { PATH: `${installedBin}:${SYSTEM_PATH}` }, ws).ok,
+		).toBe(false);
+	});
+
+	test("systemOneGate passes the project through: cd sub && the recipe with <project>/bin on PATH reaches the judge", async () => {
+		const sub = join(ws, "sub");
+		const p = { ...process.env, PATH: `${join(ws, "bin")}:${installedBin}:${SYSTEM_PATH}` };
+		const g = await systemOneGate(SUB_CMD, p, sub, undefined, "sub", { project: ws });
+		expect(g.guard?.backend).not.toBe("allowlist");
+		const ok = await systemOneGate(SUB_CMD, process.env, sub, undefined, "sub", { project: ws });
+		if (DECK_LANE) expect(ok.guard?.backend).toBe("allowlist");
+	});
+});
+
 describe("systemOneGate end to end (default mode) with a judge that says dangerous", () => {
 	test("the recipe runs without asking the judge", async () => {
 		for (const cmd of ALLOWED) {

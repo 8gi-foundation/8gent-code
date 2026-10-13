@@ -540,8 +540,8 @@ export async function systemOneGate(
 	where?: string,
 	/**
 	 * canRunInstead: the caller runs `runInstead` when one is handed back (#4102). project: the
-	 * project root when `cwd` is a folder a cd prefix chose inside it, so the tg-notify lane's PATH
-	 * check covers the whole project, not only that folder (8SO, #4102).
+	 * project root when `cwd` is a folder a cd prefix chose inside it, so the tg-notify and
+	 * deck-render lanes' PATH checks cover the whole project, not only that folder (8SO, #4102, #4169).
 	 */
 	opts: { canRunInstead?: boolean; project?: string } = {},
 ): Promise<SystemOneGateResult> {
@@ -731,7 +731,9 @@ export async function systemOneGate(
 		try {
 			const { deckRenderInProject } = await import("./s1-deck-render");
 			const deck =
-				mode === "default" ? deckRenderInProject(command, cwd, env) : { ok: false as const };
+				mode === "default"
+					? deckRenderInProject(command, cwd, env, opts.project)
+					: { ok: false as const };
 			if (deck.ok) {
 				return {
 					run: true,
