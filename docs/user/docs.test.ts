@@ -84,7 +84,16 @@ describe("docs/user", () => {
 	test("run flags documented exist in run.ts", () => {
 		const run = readFileSync(join(repo, "packages/eight/run.ts"), "utf8");
 		const headless = read("headless.md");
-		for (const f of ["--yes", "--output-format", "--provider", "--model", "--cwd", "--max-turns", "--image", "--no-workspace-boundary"]) {
+		for (const f of [
+			"--yes",
+			"--output-format",
+			"--provider",
+			"--model",
+			"--cwd",
+			"--max-turns",
+			"--image",
+			"--no-workspace-boundary",
+		]) {
 			expect(headless).toContain(f);
 			expect(run).toContain(f);
 		}
@@ -92,7 +101,13 @@ describe("docs/user", () => {
 
 	test("rpc methods documented exist in rpc-server.ts", () => {
 		const rpc = readFileSync(join(repo, "packages/eight/rpc-server.ts"), "utf8");
-		for (const m of ["session.create", "session.message", "session.abort", "session.destroy", "tools.list"]) {
+		for (const m of [
+			"session.create",
+			"session.message",
+			"session.abort",
+			"session.destroy",
+			"tools.list",
+		]) {
 			expect(read("headless.md")).toContain(m);
 			expect(rpc).toContain(`"${m}"`);
 		}
