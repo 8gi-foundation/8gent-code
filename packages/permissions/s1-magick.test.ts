@@ -596,6 +596,29 @@ describe("the binary and the configuration are not the workspace's", () => {
 		expect(ok(CMD)).toBe(LANE);
 	});
 
+	test("a MAGICK_* or FONTCONFIG_* override written into the command goes to the judge (#4173)", async () => {
+		// The env tests above read the host environment. The same override can be written
+		// into the command text, and the in-line assignments #4173 reads must not let it in.
+		const lines = [
+			`FONTCONFIG_SYSROOT=${ws} ${CMD}`,
+			`FONTCONFIG_FILE=${join(ws, "fonts.conf")} ${CMD}`,
+			`MAGICK_CONFIGURE_PATH=${ws} ${CMD}`,
+			`env FONTCONFIG_SYSROOT=${ws} ${CMD}`,
+			`export FONTCONFIG_SYSROOT=${ws}; ${CMD}`,
+			`FONTCONFIG_SYSROOT=${ws}; export FONTCONFIG_SYSROOT; ${CMD}`,
+			`D=${ws}; FONTCONFIG_SYSROOT=$D ${CMD}`,
+			`D=${ws}; export FONTCONFIG_SYSROOT=$D; ${CMD}`,
+		];
+		for (const line of lines) {
+			expect(ok(line), line).toBe(false);
+			// The verdict then belongs to the judge (or, with no calibrated judge, the rules);
+			// what this lane owns is never fast-passing it.
+			const r = await systemOneGate(line, env, ws);
+			expect(r.guard?.backend, line).not.toBe("allowlist");
+		}
+		expect(ok(CMD)).toBe(LANE);
+	});
+
 	test("no working directory, or a relative one", () => {
 		expect(magickRenderInProject(CMD, undefined, env).ok).toBe(false);
 		expect(magickRenderInProject(CMD, "rel", env).ok).toBe(false);
