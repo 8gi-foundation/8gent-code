@@ -7,8 +7,16 @@ import { ffmpegInProject } from "./s1-ffmpeg-in-project";
 
 afterAll(cleanupTempDirs);
 
-const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(16)]);
-const WAV = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WAVEfmt "), Buffer.alloc(16)]);
+const PNG = Buffer.concat([
+	Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+	Buffer.alloc(16),
+]);
+const WAV = Buffer.concat([
+	Buffer.from("RIFF"),
+	Buffer.alloc(4),
+	Buffer.from("WAVEfmt "),
+	Buffer.alloc(16),
+]);
 const MP4 = Buffer.concat([Buffer.alloc(4), Buffer.from("ftypisom"), Buffer.alloc(16)]);
 
 let w: string;
@@ -30,8 +38,16 @@ const ok = (c: string) => ffmpegInProject(c, w).ok;
 
 describe("ffmpegInProject passes", () => {
 	test("slide plus narration into a segment", () => {
-		expect(ok("ffmpeg -y -loop 1 -i video/slide1.png -i video/n1.wav -t 4.8 -c:v libx264 -pix_fmt yuv420p -r 25 -c:a aac -shortest video/out1.mp4")).toBe(true);
-		expect(ok("ffmpeg -loop 1 -i slide1.png -i n1.wav -shortest -vf scale=1280:720,format=yuv420p out.mp4")).toBe(true);
+		expect(
+			ok(
+				"ffmpeg -y -loop 1 -i video/slide1.png -i video/n1.wav -t 4.8 -c:v libx264 -pix_fmt yuv420p -r 25 -c:a aac -shortest video/out1.mp4",
+			),
+		).toBe(true);
+		expect(
+			ok(
+				"ffmpeg -loop 1 -i slide1.png -i n1.wav -shortest -vf scale=1280:720,format=yuv420p out.mp4",
+			),
+		).toBe(true);
 	});
 	test("concat of a vetted list, -safe 0 included", () => {
 		expect(ok("ffmpeg -y -f concat -safe 0 -i video/list.txt -c copy video/brief.mp4")).toBe(true);

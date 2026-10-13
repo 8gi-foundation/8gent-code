@@ -55,7 +55,17 @@ const VCODEC = new Set(["libx264", "libx265", "mpeg4", "libvpx-vp9", "copy"]);
 const ACODEC = new Set(["aac", "libmp3lame", "pcm_s16le", "libopus", "copy"]);
 const PRESET = new Set(["ultrafast", "superfast", "veryfast", "faster", "fast", "medium"]);
 const FILTERS = new Set(["scale", "format", "fps", "setsar", "setpts", "pad"]);
-const BARE = new Set(["y", "n", "shortest", "an", "vn", "hide_banner", "nostdin", "stats", "nostats"]);
+const BARE = new Set([
+	"y",
+	"n",
+	"shortest",
+	"an",
+	"vn",
+	"hide_banner",
+	"nostdin",
+	"stats",
+	"nostats",
+]);
 
 interface Ctx {
 	root: string;
@@ -129,7 +139,10 @@ function concatList(p: string, cx: Ctx): boolean {
 		const st = lstatSync(abs);
 		if (st.size > MAX_LIST_BYTES) return false;
 		const dir = path.dirname(path.relative(cx.root, abs));
-		const lines = readFileSync(abs, "utf8").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+		const lines = readFileSync(abs, "utf8")
+			.split("\n")
+			.map((l) => l.trim())
+			.filter((l) => l && !l.startsWith("#"));
 		if (lines.length === 0 || lines.length > MAX_LIST_LINES) return false;
 		for (const line of lines) {
 			if (/^duration\s+\d+(\.\d+)?$/.test(line)) continue;
@@ -281,9 +294,17 @@ export function ffmpegInProject(command: string, cwd: string | undefined): Ffmpe
 		if (segs.length !== 1 || subs.length) return NO;
 		if (/[<>|&;()]/.test(maskQuotes(text))) return NO;
 		const words = shellWords(text);
-		if (!words || words.length < 4 || words.length > MAX_WORDS || words.some((w) => w.length > MAX_WORD_LEN)) return NO;
+		if (
+			!words ||
+			words.length < 4 ||
+			words.length > MAX_WORDS ||
+			words.some((w) => w.length > MAX_WORD_LEN)
+		)
+			return NO;
 		const cx: Ctx = { root: canon(cwd) };
-		return ffmpegOk(words.slice(1), cx) ? { ok: true, reason: "ffmpeg building a new media file from workspace files" } : NO;
+		return ffmpegOk(words.slice(1), cx)
+			? { ok: true, reason: "ffmpeg building a new media file from workspace files" }
+			: NO;
 	} catch {
 		return NO;
 	}
