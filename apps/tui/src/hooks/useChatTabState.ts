@@ -25,9 +25,9 @@ import type {
 	AgentToolEndEvent,
 	AgentToolStartEvent,
 } from "../../../../packages/eight/index.js";
+import { extensionsWanted } from "../../../../packages/extensions/index.js";
 import type { Message } from "../app.js";
 import { type AgentRuntime, providerToRuntime } from "../lib/model-selection.js";
-import { extensionsWanted } from "../../../../packages/extensions/index.js";
 
 // ============================================
 // Types

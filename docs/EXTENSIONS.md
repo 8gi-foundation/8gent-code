@@ -52,8 +52,8 @@ An extension cannot register a tool named `bash`, `read`, `write`, `edit`,
 8gent ext enable pi-<name>      # for each one you want on
 ```
 
-This reads `~/.pi/agent/extensions` (or `$PI_CODING_AGENT_DIR/extensions`
-when you set that for Pi). To import from somewhere else:
+This reads the extensions folder Pi keeps under `~/.pi` (or
+`$PI_CODING_AGENT_DIR/extensions` when you set that for Pi). To import from somewhere else:
 
 ```sh
 8gent ext import-pi ~/code/my-pi-extensions
@@ -66,7 +66,7 @@ when you set that for Pi). To import from somewhere else:
 8gent ext enable pi-<name>      # for each one you want on
 ```
 
-This reads `C:\Users\<you>\.pi\agent\extensions` (or
+This reads the extensions folder Pi keeps under `C:\Users\<you>\.pi` (or
 `$env:PI_CODING_AGENT_DIR\extensions`). To import from somewhere else:
 
 ```powershell

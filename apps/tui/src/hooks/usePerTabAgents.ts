@@ -32,11 +32,11 @@ import { useCallback, useRef, useState } from "react";
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { Agent } from "../../../../packages/eight/index.js";
 import type { AgentEventCallbacks } from "../../../../packages/eight/index.js";
+import { extensionsWanted } from "../../../../packages/extensions/index.js";
 import { ROLE_REGISTRY } from "../../../../packages/orchestration/role-registry.js";
 import { loadSettings as loadAppSettings } from "../../../../packages/settings/index.js";
 import type { Settings } from "../../../../packages/settings/index.js";
 import { providerToRuntime } from "../lib/model-selection.js";
-import { extensionsWanted } from "../../../../packages/extensions/index.js";
 
 // ============================================
 // Types

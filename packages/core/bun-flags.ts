@@ -42,7 +42,10 @@ export function safeBunFlags(platform: NodeJS.Platform = process.platform): stri
 }
 
 /** safeBunFlags() when `execPath` is the Bun runtime; [] for a compiled 8gent binary (built with autoload off). */
-export function bunFlagsFor(execPath: string, platform: NodeJS.Platform = process.platform): string[] {
+export function bunFlagsFor(
+	execPath: string,
+	platform: NodeJS.Platform = process.platform,
+): string[] {
 	const base = execPath.split(/[\\/]/).pop() ?? "";
 	return /^bun(\.exe)?$/i.test(base) ? safeBunFlags(platform) : [];
 }

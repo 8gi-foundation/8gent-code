@@ -631,6 +631,7 @@ async function main() {
 			const result = await runExtCommand(restArgs);
 			console.log(result.output);
 			process.exit(result.code);
+			break;
 		}
 
 		default:

@@ -504,7 +504,8 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "extensions",
 		aliases: ["ext"],
-		description: "Import Pi extensions, Claude Code commands or MCP servers (records sha256, reports each)",
+		description:
+			"Import Pi extensions, Claude Code commands or MCP servers (records sha256, reports each)",
 		usage: "/extensions import-pi [path] | import <pi|claude-code|mcp> | approve-mcp <name>",
 	},
 ];

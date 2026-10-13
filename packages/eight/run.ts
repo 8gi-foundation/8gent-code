@@ -22,13 +22,13 @@
  */
 import { resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
+import { extensionsWanted } from "../extensions/index";
 import type { TurnStop } from "./agent";
 import { isLocalTurnFailureReply } from "./local-turn-error";
 import type { RunEvent, RunStopInfo } from "./run-events";
 import { type RunSessionStore, defaultRunSessionStore } from "./run-session";
 import { scrub } from "./secret-scanner";
 import type { AgentEventCallbacks } from "./types";
-import { extensionsWanted } from "../extensions/index";
 
 export type { RunEvent } from "./run-events";
 

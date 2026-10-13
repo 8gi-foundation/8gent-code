@@ -382,6 +382,7 @@ import type {
 // Load .env file if present
 import * as fs from "node:fs";
 import * as pathMod from "node:path";
+import { extensionsWanted } from "../../../packages/extensions/index.js";
 import {
 	type CliTabPin,
 	type ModelSpec,
@@ -401,7 +402,6 @@ import {
 } from "./lib/model-selection.js";
 import { routeOnScreen } from "./lib/model-truth.js";
 import { PACKAGE_ROOT, packageBinScript } from "./lib/package-scripts.js";
-import { extensionsWanted } from "../../../packages/extensions/index.js";
 
 function loadEnvFile() {
 	// Check multiple locations: cwd first, then the 8gent repo root
@@ -574,13 +574,13 @@ function computeCliOverrides(
 
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
-import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
 import {
 	describeMissingVoiceSetup,
 	describeTranscriberBackend,
 	formatMicLabel,
 	resolveInputDevice,
 } from "../../../packages/voice/input-device.js";
+import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
 import {
 	FALLBACK_SYSTEM_VOICE,
 	listInstalledSystemVoices,
