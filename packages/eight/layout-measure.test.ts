@@ -10,8 +10,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import sharp from "sharp";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
-import { ToolExecutor } from "./tools";
 import { layoutMeasureLine, measureLayout } from "./layout-measure";
+import { ToolExecutor } from "./tools";
 
 afterAll(cleanupTempDirs);
 
@@ -27,7 +27,9 @@ async function mockup(boxes: Box[]): Promise<string> {
 			for (let x = b.x; x < b.x + b.w; x++) px.set([0, 0, 0], (y * W + x) * 3);
 	const file = path.join(tempDir("layout-measure-"), "mock.png");
 	fs.mkdirSync(path.dirname(file), { recursive: true });
-	await sharp(px, { raw: { width: W, height: H, channels: 3 } }).png().toFile(file);
+	await sharp(px, { raw: { width: W, height: H, channels: 3 } })
+		.png()
+		.toFile(file);
 	return file;
 }
 

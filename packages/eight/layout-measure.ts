@@ -49,7 +49,9 @@ function isModuleLoadError(err: unknown): boolean {
 	return (
 		code === "ERR_MODULE_NOT_FOUND" ||
 		code === "MODULE_NOT_FOUND" ||
-		/Cannot find (?:module|package)|Could not load the "?sharp"? module|sharp.*(?:runtime|native)/i.test(msg)
+		/Cannot find (?:module|package)|Could not load the "?sharp"? module|sharp.*(?:runtime|native)/i.test(
+			msg,
+		)
 	);
 }
 
@@ -173,7 +175,12 @@ export function pageHeightLines(m: LayoutMeasure): string[] {
 	const end = last.y + last.h;
 	const blank = m.height - end;
 	const base = `  total page height: ${m.height}px. The mock-up canvas includes blank space below the content; reproduce the full canvas height (html { min-height: ${m.height}px }) so every element keeps its place on the page.`;
-	return blank >= 40 ? [`  the last content ends at y=${end}; the remaining ${blank}px below it is blank canvas.`, base] : [base];
+	return blank >= 40
+		? [
+				`  the last content ends at y=${end}; the remaining ${blank}px below it is blank canvas.`,
+				base,
+			]
+		: [base];
 }
 
 /** One block of text for a read_image result, or "" when there is nothing to say. */
