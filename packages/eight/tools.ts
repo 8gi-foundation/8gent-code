@@ -201,6 +201,17 @@ import {
 import { loadSettings } from "../settings/store";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
+import {
+	ANCHORED_NEWTEXT_DESC,
+	ANCHOR_PARAM_DESC,
+	HASHLINE_EDIT_DESC,
+	HASHLINE_READ_DESC,
+	OPTIONAL_OLDTEXT_DESC,
+	anchoredEditMessage,
+	applyAnchoredEdit,
+	hashLines,
+	hashlineEnabled,
+} from "../tools/edit-anchor";
 import { createEightBrowser, isolatedBrowser } from "../tools/eight-browser";
 import { describeImage, readImage, resizeImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
@@ -650,6 +661,44 @@ function positiveInt(value: unknown): number | undefined {
 	return Number.isFinite(n) && n >= 1 ? n : undefined;
 }
 
+type FnDef = { type: string; function: { name: string; description: string; parameters: any } };
+
+/**
+ * With EIGHT_EDIT_FORMAT=hashline (#3472), read_file and edit_file advertise
+ * anchors; edit_file keeps oldText as an optional alternative. Flag off: the
+ * definitions are returned untouched.
+ */
+function withHashline(defs: object[]): object[] {
+	if (!hashlineEnabled()) return defs;
+	return defs.map((d) => {
+		const def = d as FnDef;
+		const name = def.function?.name;
+		if (name === "read_file") {
+			return { ...def, function: { ...def.function, description: HASHLINE_READ_DESC } };
+		}
+		if (name !== "edit_file") return d;
+		const { path, oldText, newText, startLine } = def.function.parameters.properties;
+		return {
+			...def,
+			function: {
+				...def.function,
+				description: HASHLINE_EDIT_DESC,
+				parameters: {
+					type: "object",
+					properties: {
+						path,
+						anchor: { type: "string", description: ANCHOR_PARAM_DESC },
+						newText: { ...newText, description: ANCHORED_NEWTEXT_DESC },
+						oldText: { ...oldText, description: OPTIONAL_OLDTEXT_DESC },
+						startLine,
+					},
+					required: ["path", "newText"],
+				},
+			},
+		};
+	});
+}
+
 /** Text-tool definitions for lean MCP access (#3474); only sent with EIGHT_MCP_LEAN=1. */
 export const MCP_LEAN_TOOL_DEFS = [
 	{
@@ -1012,7 +1061,7 @@ export class ToolExecutor {
 	 * Get tool definitions for the LLM
 	 */
 	getToolDefinitions(): object[] {
-		return [
+		return withHashline([
 			// Code exploration
 			{
 				type: "function",
@@ -2048,7 +2097,7 @@ export class ToolExecutor {
 			...(postMessageAvailable() ? [POST_MESSAGE_TOOL_DEF] : []),
 			// Windows only, off by default (settings.shell.powershellTool).
 			...(powershellToolShell() ? [POWERSHELL_TOOL_DEF] : []),
-		];
+		]);
 	}
 
 	private rateLimiter = new RateLimiter();
@@ -2372,6 +2421,10 @@ export class ToolExecutor {
 			}
 			case "edit_file": {
 				const safe = safePath(args.path as string, this.workingDirectory, "write");
+				// Anchored edit (#3472): only with the flag on and an anchor sent.
+				if (hashlineEnabled() && args.anchor !== undefined && args.anchor !== "") {
+					return this.editFileAnchored(safe, args.anchor, String(args.newText ?? ""));
+				}
 				return this.editFile(
 					safe,
 					args.oldText as string,
@@ -2999,6 +3052,8 @@ export class ToolExecutor {
 		if (content === "") return "";
 
 		const isCodeFile = /\.(ts|tsx|js|jsx)$/.test(absolutePath);
+		// Anchors per row with EIGHT_EDIT_FORMAT=hashline (#3472), else `cat -n`.
+		const numberRows = hashlineEnabled() ? hashLines : numberLines;
 		const offset = positiveInt(offsetArg);
 		const limit = positiveInt(limitArg);
 
@@ -3010,7 +3065,7 @@ export class ToolExecutor {
 			}
 			const count = limit ?? (isCodeFile ? 200 : lines.length);
 			const end = Math.min(lines.length, start - 1 + count);
-			const body = numberLines(lines.slice(start - 1, end), start);
+			const body = numberRows(lines.slice(start - 1, end), start);
 			return end < lines.length
 				? `${body}\n\n[Lines ${start}-${end} of ${lines.length}. Use offset=${end + 1} to read more.]`
 				: body;
@@ -3056,14 +3111,14 @@ export class ToolExecutor {
 				}
 			}
 
-			return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberLines(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`;
+			return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberRows(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`;
 		}
 
 		if (DIFF_FILE.test(absolutePath)) {
 			const diff = numberDiffLines(lines);
 			if (diff !== null) return diff;
 		}
-		return numberLines(lines, 1);
+		return numberRows(lines, 1);
 	}
 
 	private async writeFile(filePath: string, content: string): Promise<string> {
@@ -3133,6 +3188,25 @@ export class ToolExecutor {
 
 		// Say "opened" only when it was.
 		return `${opened ? "File written and opened" : "File written"}: ${absolutePath}${designHint}`;
+	}
+
+	/** edit_file by read_file anchors (#3472); the hash is checked against the file now. */
+	private editFileAnchored(filePath: string, anchor: unknown, newText: string): string {
+		const absolutePath = path.isAbsolute(filePath)
+			? filePath
+			: path.join(this.workingDirectory, filePath);
+		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
+		const edit = applyAnchoredEdit(
+			fs.readFileSync(absolutePath, "utf-8"),
+			anchor,
+			newText,
+			filePath,
+		);
+		if (!edit.ok) return edit.error;
+		const recordEdit = watchWrite(absolutePath, this.createdFiles);
+		fs.writeFileSync(absolutePath, edit.content);
+		recordEdit();
+		return anchoredEditMessage(absolutePath, edit);
 	}
 
 	private async editFile(

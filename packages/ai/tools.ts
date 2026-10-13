@@ -65,6 +65,17 @@ import {
 	logEditRefusal,
 	resolveEdit,
 } from "../permissions/write-content-gate";
+import {
+	ANCHORED_NEWTEXT_DESC,
+	ANCHOR_PARAM_DESC,
+	HASHLINE_EDIT_DESC,
+	HASHLINE_READ_DESC,
+	OPTIONAL_OLDTEXT_DESC,
+	anchoredEditMessage,
+	applyAnchoredEdit,
+	hashLines,
+	hashlineEnabled,
+} from "../tools/edit-anchor";
 import { DeckSpecSchema } from "../tools/video-deck";
 import { withImagesWritten } from "./image-shape";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
@@ -437,8 +448,9 @@ const updatePlanTool = tool({
 // ============================================
 
 const readFile = tool({
-	description:
-		"[FILE] Returns the text of a file at the given path, one line per row, each row starting with its line number and a tab (like `cat -n`).",
+	description: hashlineEnabled()
+		? HASHLINE_READ_DESC
+		: "[FILE] Returns the text of a file at the given path, one line per row, each row starting with its line number and a tab (like `cat -n`).",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the file to read"),
 	}),
@@ -449,6 +461,8 @@ const readFile = tool({
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
+		// Anchors per row with EIGHT_EDIT_FORMAT=hashline (#3472); flag off is unchanged.
+		if (hashlineEnabled()) return hashlineRead(content);
 		const lines = content.split("\n");
 		if (lines.length > 200) {
 			return `// File has ${lines.length} lines. Showing first 200:\n\n${lines.slice(0, 200).join("\n")}\n\n// ... truncated. Use get_outline + get_symbol for specific sections.`;
@@ -456,6 +470,15 @@ const readFile = tool({
 		return content;
 	},
 });
+
+/** read_file rows as `N#hash<tab>text`, the first 200 lines (#3472). */
+function hashlineRead(content: string): string {
+	if (content === "") return "";
+	const lines = content.split("\n");
+	if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+	if (lines.length <= 200) return hashLines(lines, 1);
+	return `// File has ${lines.length} lines. Showing first 200:\n\n${hashLines(lines.slice(0, 200), 1)}\n\n// ... truncated. Use get_outline + get_symbol for specific sections.`;
+}
 
 const writeFile = tool({
 	description:
@@ -540,6 +563,42 @@ const editFile = tool({
 			return `File edited (matched ignoring whitespace at line ${resolved.matchedLine}): ${absolutePath}`;
 		}
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
+	},
+});
+
+/** edit_file with EIGHT_EDIT_FORMAT=hashline (#3472): anchor, or oldText as before. */
+const editFileAnchored = tool({
+	description: HASHLINE_EDIT_DESC,
+	inputSchema: z.object({
+		path: z.string().describe("Path to the file"),
+		anchor: z.string().optional().describe(ANCHOR_PARAM_DESC),
+		newText: z.string().describe(ANCHORED_NEWTEXT_DESC),
+		oldText: z.string().optional().describe(OPTIONAL_OLDTEXT_DESC),
+		startLine: z.number().int().optional(),
+	}),
+	execute: async (args, options) => {
+		if (args.anchor === undefined || args.anchor === "") {
+			const byText = editFile.execute as (input: unknown, opts: unknown) => Promise<string>;
+			return byText({ ...args, oldText: args.oldText ?? "" }, options);
+		}
+		const { path: filePath, anchor, newText } = args;
+		const blocked = gateWrite("edit_file", { path: filePath, anchor, newText });
+		if (blocked) return blocked;
+		const target = confinedWritePath(filePath);
+		if ("refused" in target) return target.refused;
+		const absolutePath = target.path;
+		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
+		const edit = applyAnchoredEdit(
+			fs.readFileSync(absolutePath, "utf-8"),
+			anchor,
+			newText,
+			filePath,
+		);
+		if (!edit.ok) return edit.error;
+		const recordEdit = watchWrite(absolutePath, getToolContext().createdFiles);
+		fs.writeFileSync(absolutePath, edit.content);
+		recordEdit();
+		return anchoredEditMessage(absolutePath, edit);
 	},
 });
 
@@ -3360,7 +3419,7 @@ export const agentTools = bindToolContext({
 	// File operations
 	read_file: readFile,
 	write_file: writeFile,
-	edit_file: editFile,
+	edit_file: hashlineEnabled() ? editFileAnchored : editFile,
 	list_files: listFiles,
 
 	// Git
