@@ -483,7 +483,7 @@ export class Agent {
 					: true;
 
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
-		this.toolRegistry = new ToolRegistry(config.allTools ?? false);
+		this.toolRegistry = new ToolRegistry(config.allTools ?? false, config.role);
 		// SPEC-05 #108: feed the ACTIVE provider's detected context window into
 		// compaction instead of the hardcoded 32k. A large-context cloud model
 		// (e.g. anthropic 200k) compacts far later; a small local model compacts
@@ -1986,6 +1986,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.toolRegistry.loadCategory("orchestration");
 			}
 		}
+		// Native providers cannot pick up discover_tools mid-turn (#3881).
+		if (!isLocalProvider) this.toolRegistry.preloadForNative(this.config.role);
 		// Load computer category when cua:setup has been run, regardless of provider.
 		const { existsSync } = await import("node:fs");
 		const { homedir } = await import("node:os");
