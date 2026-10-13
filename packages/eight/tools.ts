@@ -756,22 +756,32 @@ export const EXTENSION_POLICY_ACTION = "extension_call" as const;
  * renderer's own DeckSpecSchema so the fields a model is shown are the fields it is checked
  * against. The native tool list carries no function description in a headless run, so this
  * schema is where a model learns slides[{title, text, bullets, narration, ...}], size and voice.
- * String lengths and the closed-object flags are left out to keep every request lean (the
- * headless prompt budget); the renderer still enforces them and says which one failed.
+ * Only names, types, enums and nesting go out: lengths, counts, ranges, defaults and the
+ * closed-object flags are left out to keep every request inside the headless prompt budget
+ * (headless-prompt.test.ts, 60% rule). The renderer still enforces them and says which failed.
  */
+const LEAN_DROP = new Set([
+	"$schema",
+	"additionalProperties",
+	"default",
+	"maxItems",
+	"maxLength",
+	"maximum",
+	"minItems",
+	"minimum",
+]);
 export const DECK_SPEC_PARAMETER: Record<string, unknown> = (() => {
 	const lean = (node: unknown): unknown => {
 		if (Array.isArray(node)) return node.map(lean);
 		if (node === null || typeof node !== "object") return node;
 		const out: Record<string, unknown> = {};
 		for (const [k, v] of Object.entries(node)) {
-			if (k === "$schema" || k === "maxLength" || k === "additionalProperties") continue;
+			if (LEAN_DROP.has(k)) continue;
 			out[k] = lean(v);
 		}
 		return out;
 	};
-	const shape = lean(z.toJSONSchema(DeckSpecSchema, { io: "input" })) as Record<string, unknown>;
-	return { ...shape, description: "Deck spec, 1-40 slides" };
+	return lean(z.toJSONSchema(DeckSpecSchema, { io: "input" })) as Record<string, unknown>;
 })();
 
 export class ToolExecutor {
