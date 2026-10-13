@@ -6,10 +6,11 @@
  */
 
 import { EventEmitter } from "node:events";
-import { existsSync, statSync, unlinkSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Subprocess, spawn } from "bun";
+import { type InputDevice, resolveInputDevice } from "./input-device.js";
 
 export interface RecorderOptions {
 	/** Sample rate in Hz (default: 16000 for Whisper) */
@@ -24,11 +25,22 @@ export interface RecorderOptions {
 	outputPath?: string;
 }
 
+/** Injection points for tests; production uses the defaults. */
+export interface RecorderDeps {
+	resolveDevice?: () => Promise<InputDevice>;
+	checkSox?: () => Promise<{ installed: boolean; installHint: string }>;
+	spawnRec?: (args: string[]) => Subprocess;
+	/** Wait this long after SIGTERM before escalating to SIGKILL (default 1500) */
+	killGraceMs?: number;
+}
+
 export interface RecorderEvents {
 	start: [];
 	stop: [{ path: string; durationMs: number }];
 	"audio-level": [{ level: number }];
 	error: [{ message: string }];
+	/** Emitted at the start of every recording with the current default input */
+	device: [InputDevice];
 }
 
 /**
@@ -73,6 +85,43 @@ export async function checkSoxInstalled(): Promise<{
 }
 
 /**
+ * RMS level (0-1) of the last ~100 ms of 16-bit PCM in a growing WAV file.
+ * sox flushes in blocks, so this is real but updates in steps. Returns null
+ * when the file has no audio data yet or the format is not 16-bit.
+ */
+export function readTailLevel(path: string, bitDepth = 16, windowBytes = 3200): number | null {
+	if (bitDepth !== 16) return null;
+	try {
+		const size = statSync(path).size;
+		if (size <= 44 + 2) return null;
+		const len = Math.min(windowBytes, size - 44) & ~1;
+		const buf = Buffer.alloc(len);
+		const fd = openSync(path, "r");
+		try {
+			readSync(fd, buf, 0, len, size - len);
+		} finally {
+			closeSync(fd);
+		}
+		return pcm16Level(buf);
+	} catch {
+		return null;
+	}
+}
+
+/** RMS of little-endian 16-bit samples, scaled so ordinary speech reads mid-bar. */
+export function pcm16Level(buf: Uint8Array): number {
+	const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+	const n = Math.floor(buf.byteLength / 2);
+	if (n === 0) return 0;
+	let sum = 0;
+	for (let i = 0; i < n; i++) {
+		const v = view.getInt16(i * 2, true) / 32768;
+		sum += v * v;
+	}
+	return Math.min(1, Math.sqrt(sum / n) * 4);
+}
+
+/**
  * Microphone recorder using sox `rec` command.
  *
  * Usage:
@@ -93,9 +142,12 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 	private levelInterval: ReturnType<typeof setInterval> | null = null;
 	private isRecording = false;
 	private options: Required<RecorderOptions>;
+	private device: InputDevice | null = null;
+	private deps: RecorderDeps;
 
-	constructor(opts: RecorderOptions = {}) {
+	constructor(opts: RecorderOptions = {}, deps: RecorderDeps = {}) {
 		super();
+		this.deps = deps;
 		this.options = {
 			sampleRate: opts.sampleRate ?? 16000,
 			channels: opts.channels ?? 1,
@@ -115,13 +167,17 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 			throw new Error("Already recording");
 		}
 
-		const soxCheck = await checkSoxInstalled();
+		const soxCheck = await (this.deps.checkSox ?? checkSoxInstalled)();
 		if (!soxCheck.installed) {
 			this.emit("error", {
 				message: `sox/rec not found. ${soxCheck.installHint}`,
 			});
 			throw new Error(`sox not installed. ${soxCheck.installHint}`);
 		}
+
+		// The device name is display-only and is resolved in parallel below, so
+		// the lookup can never delay the start of recording.
+		this.device = null;
 
 		// Generate a fresh temp path for this recording
 		this.outputPath = this.options.outputPath.includes("8gent-voice-")
@@ -144,36 +200,30 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 		];
 
 		try {
-			this.process = spawn(["rec", ...args], {
-				stdout: "ignore",
-				stderr: "ignore",
-			});
+			this.process = this.deps.spawnRec
+				? this.deps.spawnRec(args)
+				: spawn(["rec", ...args], { stdout: "ignore", stderr: "ignore" });
 
 			this.isRecording = true;
 			this.startTime = Date.now();
 			this.emit("start");
 
-			// Simulate audio levels (sox rec doesn't output levels in quiet mode)
-			// In a real implementation, we'd use sox's --show-progress or stat effect
+			// Resolve on EVERY start, never cached, so a headset or AirPods switch
+			// applies on the next press. sox records from the OS default input.
+			const startedAt = this.startTime;
+			(this.deps.resolveDevice ?? resolveInputDevice)()
+				.then((d) => {
+					if (this.startTime !== startedAt) return; // a newer recording owns the slot
+					this.device = d;
+					this.emit("device", d);
+				})
+				.catch(() => {});
+
+			// Real levels: RMS of the newest PCM samples sox has written to the file.
 			this.levelInterval = setInterval(() => {
-				if (this.isRecording) {
-					// Generate a pseudo-level based on file size growth
-					// This gives a rough indication that audio is being captured
-					try {
-						if (existsSync(this.outputPath)) {
-							const stat = statSync(this.outputPath);
-							const bytesPerSecond =
-								this.options.sampleRate * this.options.channels * (this.options.bitDepth / 8);
-							const expectedBytes = ((Date.now() - this.startTime) / 1000) * bytesPerSecond;
-							const ratio = expectedBytes > 0 ? Math.min(stat.size / expectedBytes, 1) : 0;
-							// Add some randomness to simulate real audio levels
-							const level = Math.max(0, Math.min(1, ratio * 0.5 + Math.random() * 0.3));
-							this.emit("audio-level", { level });
-						}
-					} catch {
-						// File might not exist yet, ignore
-					}
-				}
+				if (!this.isRecording) return;
+				const level = readTailLevel(this.outputPath, this.options.bitDepth);
+				if (level !== null) this.emit("audio-level", { level });
 			}, 100);
 
 			// Safety: max recording duration
@@ -213,21 +263,33 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 
 		const durationMs = Date.now() - this.startTime;
 
-		// Kill the rec process (sends SIGTERM which makes it finalize the WAV header)
+		// SIGTERM lets sox finalize the WAV header; escalate to SIGKILL if it
+		// has not exited after a short grace period.
+		const proc = this.process;
+		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
-			this.process.kill("SIGTERM");
-			// Wait for process to exit cleanly
-			await Promise.race([
-				this.process.exited,
-				new Promise((resolve) => setTimeout(resolve, 2000)),
+			proc.kill("SIGTERM");
+			const exited = await Promise.race([
+				proc.exited.then(() => true),
+				new Promise<boolean>((resolve) => {
+					timer = setTimeout(() => resolve(false), this.deps.killGraceMs ?? 1500);
+				}),
 			]);
+			if (!exited) {
+				try {
+					proc.kill("SIGKILL");
+				} catch {
+					// Already dead
+				}
+			}
 		} catch {
-			// Force kill if SIGTERM didn't work
 			try {
-				this.process.kill("SIGKILL");
+				proc.kill("SIGKILL");
 			} catch {
 				// Already dead
 			}
+		} finally {
+			if (timer) clearTimeout(timer);
 		}
 
 		this.isRecording = false;
@@ -236,6 +298,13 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 		const result = { path: this.outputPath, durationMs };
 		this.emit("stop", result);
 		return result;
+	}
+
+	/**
+	 * The input device for the current recording, or null until the lookup lands.
+	 */
+	getDevice(): InputDevice | null {
+		return this.device;
 	}
 
 	/**
