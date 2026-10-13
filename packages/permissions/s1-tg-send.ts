@@ -54,9 +54,13 @@
  * What leaves the box: text@ reads only a workspace file and sends it only to the loopback base in
  * bot.env. Accepted residuals, on purpose (8SO, #4102): a local port that forwards off the machine
  * (an ssh -L or a proxy listening on 127.0.0.1) carries the message and the token wherever it goes;
- * the text file and bot.env can still change between this check and the spawn (TOCTOU, as for the
- * sibling lanes), and either change can only reach that same loopback base. Only the sendMessage
- * method.
+ * the text file can still change between this check and the spawn (TOCTOU, as for the sibling
+ * lanes), and that change can only reach the same loopback base. bot.env can change in that window
+ * too, and a changed bot.env is sourced as shell, so it is NOT bounded the same way: it is accepted
+ * only because it lives outside the workspace, where write_file and edit_file cannot reach
+ * (safePath), and any run_command that writes it passes its own gate first. The token is never in
+ * the command the model wrote or the session log, but sh expands it into curl's own argv, so it is
+ * visible in this user's process list for the length of the request. Only the sendMessage method.
  *
  * Synchronous, never throws.
  */
@@ -103,6 +107,9 @@ const BASE = "\u0001B";
 const TOK = "\u0001T";
 const PWD = "\u0001P";
 const URL_WORD = `${BASE}/bot${TOK}/sendMessage`;
+
+/** `rel` with `/` separators: the reason names the path as the model wrote it, on every host. */
+const slash = (rel: string): string => rel.split(path.sep).join("/");
 
 /** The workspace-relative path of `p`, resolved, or null when it leaves the workspace. */
 function relInside(p: string, root: string): { abs: string; rel: string; lexical: string } | null {
@@ -326,7 +333,7 @@ export function tgSendFromEnv(
 		return {
 			ok: true,
 			body,
-			reason: `tg-notify sendMessage from ${script.rel} to the loopback Bot API in bot.env (${vars.get("TELEGRAM_API_BASE")}), token read from the env file${c.rel ? `, text from ${c.rel}` : ""}`,
+			reason: `tg-notify sendMessage from ${slash(script.rel)} to the loopback Bot API in bot.env (${vars.get("TELEGRAM_API_BASE")}), token read from the env file${c.rel ? `, text from ${slash(c.rel)}` : ""}`,
 		};
 	} catch {
 		return NO;

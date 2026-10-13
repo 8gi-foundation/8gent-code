@@ -445,9 +445,11 @@ function stub() {
 	});
 	return { calls, server };
 }
+/** POSIX hosts only: the executors run `/bin/sh -c`, which a Windows runner does not have. */
+const POSIX = process.platform !== "win32";
 /** Run `text` the way both executors do: `/bin/sh -c`, in the workspace, with the checked env. */
-async function shC(text: string, e: Env = env) {
-	const run = Bun.spawn(["/bin/sh", "-c", text], {
+async function shC(text: string, e: Env = env, shell = "/bin/sh") {
+	const run = Bun.spawn([shell, "-c", text], {
 		cwd: ws,
 		env: e,
 		stdout: "pipe",
@@ -460,44 +462,50 @@ async function shC(text: string, e: Env = env) {
 const OPT = { canRunInstead: true };
 
 describe("the allowed script does what the lane says (real sh, real loopback server)", () => {
-	test("exactly one sendMessage to the stated chat, token only in the path, text from the file", async () => {
-		const { calls, server } = stub();
-		try {
-			botEnv(`http://127.0.0.1:${server.port}`);
-			const r = lane(PILOT_CMD);
-			expect(r.ok).toBe(true);
-			const res = await shC((r as { body: string }).body);
-			expect(res.code).toBe(0);
-			expect(calls).toEqual([{ path: `/bot${TOKEN}/sendMessage`, chat: CHAT, text: MSG }]);
-			expect(res.out + res.err).not.toContain(TOKEN);
-		} finally {
-			server.stop(true);
-		}
-	});
+	test.skipIf(!POSIX)(
+		"exactly one sendMessage to the stated chat, token only in the path, text from the file",
+		async () => {
+			const { calls, server } = stub();
+			try {
+				botEnv(`http://127.0.0.1:${server.port}`);
+				const r = lane(PILOT_CMD);
+				expect(r.ok).toBe(true);
+				const res = await shC((r as { body: string }).body);
+				expect(res.code).toBe(0);
+				expect(calls).toEqual([{ path: `/bot${TOKEN}/sendMessage`, chat: CHAT, text: MSG }]);
+				expect(res.out + res.err).not.toContain(TOKEN);
+			} finally {
+				server.stop(true);
+			}
+		},
+	);
 });
 
 describe("8SO hold on #4102", () => {
-	test("(a) the gate hands back the checked bytes; a script swapped after the check never runs", async () => {
-		const { calls, server } = stub();
-		try {
-			botEnv(`http://127.0.0.1:${server.port}`);
-			const g = await systemOneGate(PILOT_CMD, env, ws, undefined, OPT);
-			expect(g.run).toBe(true);
-			expect(g.runInstead).toBe(PILOT_SCRIPT);
-			// A write_file racing the run_command (same SDK step) replaces the script.
-			const pwned = join(ws, "pwned");
-			writeFileSync(join(ws, ".tmp/send.sh"), `touch ${pwned}\n`);
-			const res = await shC(g.runInstead as string);
-			expect(res.code).toBe(0);
-			expect(existsSync(pwned)).toBe(false);
-			expect(calls.length).toBe(1);
-			// Running the path, as before this fix, would have run the swapped file.
-			await shC("sh .tmp/send.sh");
-			expect(existsSync(pwned)).toBe(true);
-		} finally {
-			server.stop(true);
-		}
-	});
+	test.skipIf(!POSIX)(
+		"(a) the gate hands back the checked bytes; a script swapped after the check never runs",
+		async () => {
+			const { calls, server } = stub();
+			try {
+				botEnv(`http://127.0.0.1:${server.port}`);
+				const g = await systemOneGate(PILOT_CMD, env, ws, undefined, OPT);
+				expect(g.run).toBe(true);
+				expect(g.runInstead).toBe(PILOT_SCRIPT);
+				// A write_file racing the run_command (same SDK step) replaces the script.
+				const pwned = join(ws, "pwned");
+				writeFileSync(join(ws, ".tmp/send.sh"), `touch ${pwned}\n`);
+				const res = await shC(g.runInstead as string);
+				expect(res.code).toBe(0);
+				expect(existsSync(pwned)).toBe(false);
+				expect(calls.length).toBe(1);
+				// Running the path, as before this fix, would have run the swapped file.
+				await shC("sh .tmp/send.sh");
+				expect(existsSync(pwned)).toBe(true);
+			} finally {
+				server.stop(true);
+			}
+		},
+	);
 	test("(a) a caller that cannot run the checked bytes never gets the lane's allow", async () => {
 		const r = await systemOneGate(PILOT_CMD, env, ws);
 		expect(r.guard?.backend).not.toBe("allowlist");
@@ -516,20 +524,23 @@ describe("8SO hold on #4102", () => {
 		expect(r.ok).toBe(false);
 		expect((r as { refuse?: string }).refuse).toBeUndefined();
 	});
-	test("(b) a bot.env line led by NBSP or BOM runs as a command in sh (no assignment), and the lane refuses it", async () => {
-		const pwned = join(ws, "pwned");
-		for (const lead of ["\u00a0", "\ufeff"]) {
-			put(
-				".config/tg-notify/bot.env",
-				`TELEGRAM_API_BASE=http://127.0.0.1:1\nTELEGRAM_BOT_TOKEN=${TOKEN}\n${lead}touch ${pwned}\n`,
-				home,
-			);
-			expect(ok(PILOT_CMD), JSON.stringify(lead)).toBe(false);
-		}
-		// The bytes are live: sh does not see an assignment there, it tries to run the line as a command.
-		const res = await shC(". ~/.config/tg-notify/bot.env");
-		expect(res.err).toMatch(/not found|command/i);
-	});
+	test.skipIf(!POSIX)(
+		"(b) a bot.env line led by NBSP or BOM runs as a command in sh (no assignment), and the lane refuses it",
+		async () => {
+			const pwned = join(ws, "pwned");
+			for (const lead of ["\u00a0", "\ufeff"]) {
+				put(
+					".config/tg-notify/bot.env",
+					`TELEGRAM_API_BASE=http://127.0.0.1:1\nTELEGRAM_BOT_TOKEN=${TOKEN}\n${lead}touch ${pwned}\n`,
+					home,
+				);
+				expect(ok(PILOT_CMD), JSON.stringify(lead)).toBe(false);
+			}
+			// The bytes are live: sh does not see an assignment there, it tries to run the line as a command.
+			const res = await shC(". ~/.config/tg-notify/bot.env");
+			expect(res.err).toMatch(/not found|command/i);
+		},
+	);
 	test("(b) other bytes outside printable ASCII, tab and newline in bot.env (CR, NUL, UTF-8)", () => {
 		for (const bad of ["\r", "\u0000", "\u00e9", "\u000b"]) {
 			put(
@@ -554,27 +565,32 @@ describe("8SO hold on #4102", () => {
 		);
 		expect(ok(PILOT_CMD)).toBe(true);
 	});
-	test("(c) SHELLOPTS=xtrace with PS4 runs code and prints the token; the lane refuses it and its siblings", async () => {
-		const traced = { ...env, SHELLOPTS: "xtrace", PS4: "$(echo PS4RAN)+ " };
-		expect(ok(PILOT_CMD, traced)).toBe(false);
-		for (const extra of [
-			{ SHELLOPTS: "xtrace" },
-			{ BASHOPTS: "extglob" },
-			{ PS4: "+ " },
-			{ IFS: "/" },
-		])
-			expect(ok(PILOT_CMD, { ...env, ...extra }), JSON.stringify(extra)).toBe(false);
-		// What it would have done: bash as sh imports SHELLOPTS, runs PS4, and traces the URL.
-		const { server } = stub();
-		try {
-			botEnv(`http://127.0.0.1:${server.port}`);
-			const res = await shC(PILOT_SCRIPT, traced);
-			expect(res.err).toContain("PS4RAN+ ");
-			expect(res.err).toContain(TOKEN);
-		} finally {
-			server.stop(true);
-		}
-	});
+	test.skipIf(!POSIX)(
+		"(c) SHELLOPTS=xtrace with PS4 runs code and prints the token; the lane refuses it and its siblings",
+		async () => {
+			const traced = { ...env, SHELLOPTS: "xtrace", PS4: "$(echo PS4RAN)+ " };
+			expect(ok(PILOT_CMD, traced)).toBe(false);
+			for (const extra of [
+				{ SHELLOPTS: "xtrace" },
+				{ BASHOPTS: "extglob" },
+				{ PS4: "+ " },
+				{ IFS: "/" },
+			])
+				expect(ok(PILOT_CMD, { ...env, ...extra }), JSON.stringify(extra)).toBe(false);
+			// What it would have done: bash as sh (macOS /bin/sh) imports SHELLOPTS, runs PS4, and traces
+			// the URL. Run bash by name: on Linux /bin/sh is dash, which ignores both, so /bin/sh there
+			// cannot show the attack the lane exists for. The lane refuses on every host either way.
+			const { server } = stub();
+			try {
+				botEnv(`http://127.0.0.1:${server.port}`);
+				const res = await shC(PILOT_SCRIPT, traced, "bash");
+				expect(res.err).toContain("PS4RAN+ ");
+				expect(res.err).toContain(TOKEN);
+			} finally {
+				server.stop(true);
+			}
+		},
+	);
 	test("(d) PATH with '.', an empty entry, a relative entry or a workspace directory is refused", () => {
 		const base = process.env.PATH ?? "/usr/bin:/bin";
 		for (const p of [
