@@ -3187,12 +3187,15 @@ export class ToolExecutor {
 		// the card. One command, at most one card.
 		// Guarded mode (#3170) turns System One on for this call whatever the
 		// env says; the env flag stays on in every mode.
+		// canRunInstead: this executor runs systemOne.runInstead when set (the checked bytes, #4102),
+		// only with process.env: a caller-passed env is not the env the gate checked (8SO).
 		const systemOne = await systemOneGate(
 			command,
 			systemOneEnvFor(mode),
 			dir,
 			this.createdFiles,
 			where,
+			{ canRunInstead: env === undefined, project: this.workingDirectory },
 		);
 		if (!systemOne.run) return systemOne.message as string;
 
@@ -3231,6 +3234,8 @@ export class ToolExecutor {
 		if (command.includes("npm init") && !command.includes("-y")) {
 			finalCommand = `${command} -y`;
 		}
+		// System One checked these bytes, not the file the command names: run them (8SO, #4102).
+		if (systemOne.runInstead !== undefined) finalCommand = systemOne.runInstead;
 
 		const timeoutMs = Math.min(timeoutSec || 120, 300) * 1000;
 

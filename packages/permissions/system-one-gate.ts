@@ -240,6 +240,12 @@ export interface SystemOneGateResult {
 	thresholds?: SystemOneThresholds;
 	/** Set when the verdict was escalate: true approved, false declined, null no human. */
 	humanApproved?: boolean | null;
+	/**
+	 * Set only for a caller that passed `canRunInstead`: the exact text to run with `/bin/sh -c` in
+	 * place of `command`, because what was checked is these bytes, not the file the command names
+	 * (s1-tg-send.ts, 8SO on #4102). A caller given this must run it, never `command`.
+	 */
+	runInstead?: string;
 }
 
 /** Ask a human. true approve, false decline, null when no human can be asked. */
@@ -532,6 +538,12 @@ export async function systemOneGate(
 	created?: CreatedFiles,
 	/** The project folder after a leading `cd <folder> &&` (#3199): the escalation card names it. */
 	where?: string,
+	/**
+	 * canRunInstead: the caller runs `runInstead` when one is handed back (#4102). project: the
+	 * project root when `cwd` is a folder a cd prefix chose inside it, so the tg-notify lane's PATH
+	 * check covers the whole project, not only that folder (8SO, #4102).
+	 */
+	opts: { canRunInstead?: boolean; project?: string } = {},
 ): Promise<SystemOneGateResult> {
 	const mode = systemOneMode(env);
 	if (mode === "off") return { run: true };
@@ -541,6 +553,41 @@ export async function systemOneGate(
 	// The rm/mv/run/curl shortcuts below read POSIX quoting. Where the shell parses the
 	// line another way (PowerShell, cmd ^ or %, any line break) they have no opinion.
 	if (allow.enabled && posixRulesApply(command, activeShellKind())) {
+		// The tg-notify send recipe as a two-line script to a loopback Bot API (#4101), and a
+		// deterministic refusal, in every mode, for a bot token written into a curl command or
+		// that script. First, so no later lane (a loopback GET) can admit a token in argv.
+		try {
+			const { redactBotToken, tgSendFromEnv } = await import("./s1-tg-send");
+			const tg = tgSendFromEnv(command, cwd, env, opts.project);
+			if (!tg.ok && tg.refuse) {
+				const guard: BashGuardResult = {
+					verdict: "block",
+					pYes: Number.NaN,
+					backend: "allowlist",
+					model: "allowlist",
+					reason: tg.refuse,
+				};
+				const shown = redactBotToken(command, env);
+				return { run: false, guard, message: blockMessage(guard, "unknown", tg.refuse, shown) };
+			}
+			// Allowed only for a caller that will run the checked body (runInstead); for any other
+			// caller the lane has no opinion and the judge decides.
+			if (tg.ok && mode === "default" && opts.canRunInstead === true) {
+				return {
+					run: true,
+					runInstead: tg.body,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: tg.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through.
+		}
 		try {
 			const { readOnlyAllowlist } = await import("../decide/allowlist");
 			const a = readOnlyAllowlist(command, { bunTest: allow.bunTest });

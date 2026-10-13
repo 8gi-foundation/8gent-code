@@ -1460,6 +1460,7 @@ const backgroundOutput = tool({
 async function commandRefusal(
 	command: string,
 	cwd: string = getToolContext().workingDirectory,
+	out?: { runInstead?: string },
 ): Promise<string | null> {
 	// The text path's pre-spawn backstops (#3993): protected files such as
 	// ~/.8gent/settings.json and the browser control tokens, for shell and argv alike.
@@ -1485,14 +1486,17 @@ async function commandRefusal(
 	const { systemOneGate } = await import("../permissions/system-one-gate");
 	// Guarded mode (#3170) turns System One on for this call whatever the env
 	// says; the env flag stays on in every mode.
+	// canRunInstead only when the caller passed `out` and will run out.runInstead (#4102).
 	const systemOne = await systemOneGate(
 		command,
 		systemOneEnvFor(mode),
 		cwd,
 		ctx.createdFiles,
 		where,
+		{ canRunInstead: out !== undefined, project: ctx.workingDirectory },
 	);
 	if (!systemOne.run) return systemOne.message as string;
+	if (out && systemOne.runInstead !== undefined) out.runInstead = systemOne.runInstead;
 
 	if (
 		permissionCheck === "ask" &&
@@ -1525,7 +1529,8 @@ async function runShellCommand(
 	const ctx = getToolContext();
 	const hookManager = getHookManager();
 
-	const refusal = await commandRefusal(command, cwd);
+	const checked: { runInstead?: string } = {};
+	const refusal = await commandRefusal(command, cwd, checked);
 	if (refusal !== null) return refusal;
 
 	const startTime = Date.now();
@@ -1541,6 +1546,8 @@ async function runShellCommand(
 	if (command.includes("npm init") && !command.includes("-y")) {
 		finalCommand = `${command} -y`;
 	}
+	// System One checked these bytes, not the file the command names: run them (8SO, #4102).
+	if (checked.runInstead !== undefined) finalCommand = checked.runInstead;
 
 	const sandboxRefusal = runCommandSandboxRefusal();
 	if (sandboxRefusal) return sandboxRefusal;

@@ -114,16 +114,27 @@ function realOrAncestor(p: string): string {
 }
 
 /**
- * True only when `8gent` on an all-absolute PATH is an executable regular file
- * outside the workspace and nothing it runs resolves inside the workspace.
+ * True when every PATH entry is absolute and resolves outside the workspace (8SO review of #4084):
+ * no `.`, no empty entry, nothing a command could find inside the workspace. Shared with
+ * s1-tg-send.ts (#4101), whose sh and curl are found on the same PATH.
  */
-function installedOutside(root: string, pathEnv: string): boolean {
+export function pathOutsideWorkspace(root: string, pathEnv: string): boolean {
 	const entries = pathEnv.split(path.delimiter);
 	if (entries.length === 0) return false;
 	for (const dir of entries) {
 		if (!dir || !path.isAbsolute(dir)) return false;
 		if (inside(realOrAncestor(dir), root)) return false;
 	}
+	return true;
+}
+
+/**
+ * True only when `8gent` on an all-absolute PATH is an executable regular file
+ * outside the workspace and nothing it runs resolves inside the workspace.
+ */
+function installedOutside(root: string, pathEnv: string): boolean {
+	if (!pathOutsideWorkspace(root, pathEnv)) return false;
+	const entries = pathEnv.split(path.delimiter);
 	let bin: string | null = null;
 	for (const dir of entries) {
 		const cand = path.join(dir, "8gent");
