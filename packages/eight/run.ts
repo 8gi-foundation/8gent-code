@@ -22,10 +22,11 @@
  */
 import { resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
+import type { TurnStop } from "./agent";
 import { isLocalTurnFailureReply } from "./local-turn-error";
-import { scrub } from "./secret-scanner";
-import type { RunEvent } from "./run-events";
+import type { RunEvent, RunStopInfo } from "./run-events";
 import { type RunSessionStore, defaultRunSessionStore } from "./run-session";
+import { scrub } from "./secret-scanner";
 import type { AgentEventCallbacks } from "./types";
 
 export type { RunEvent } from "./run-events";
@@ -253,7 +254,56 @@ export function parseRunArgs(argv: string[]): RunOptions {
  * (not a subcommand): `-p`/`--print` (anywhere on the line) and `--mode json|text` run one prompt,
  * `--mode rpc` (like `--rpc`) is the JSON-RPC server (F1).
  */
-const SUBCOMMANDS = new Set(["init","outline","symbol","search","benchmark","demo","tui","run","pipeline","pet","infinite","chat","agent","session","export","preferences","memory","airdrop","drop","onboard","auth","cron","blueprint","daemon","rpc","mcp-server","review","doctor","update","upgrade","permissions","perms","keys","env","install","publish","start","open","stop","kill","restart","build","log","logs","login","logout","whoami","status"]);
+const SUBCOMMANDS = new Set([
+	"init",
+	"outline",
+	"symbol",
+	"search",
+	"benchmark",
+	"demo",
+	"tui",
+	"run",
+	"pipeline",
+	"pet",
+	"infinite",
+	"chat",
+	"agent",
+	"session",
+	"export",
+	"preferences",
+	"memory",
+	"airdrop",
+	"drop",
+	"onboard",
+	"auth",
+	"cron",
+	"blueprint",
+	"daemon",
+	"rpc",
+	"mcp-server",
+	"review",
+	"doctor",
+	"update",
+	"upgrade",
+	"permissions",
+	"perms",
+	"keys",
+	"env",
+	"install",
+	"publish",
+	"start",
+	"open",
+	"stop",
+	"kill",
+	"restart",
+	"build",
+	"log",
+	"logs",
+	"login",
+	"logout",
+	"whoami",
+	"status",
+]);
 
 export function headlessRoute(args: string[]): "run" | "rpc" | null {
 	if (args.length === 0) return null;
@@ -305,7 +355,9 @@ export async function unknownToolNames(tools: string[]): Promise<string[]> {
 		for (const k of Object.keys(agentTools)) known.add(k);
 		const { ToolExecutor } = await import("./tools");
 		const os = await import("node:os");
-		for (const d of new ToolExecutor(os.tmpdir()).getToolDefinitions() as Array<{ function?: { name?: unknown } }>)
+		for (const d of new ToolExecutor(os.tmpdir()).getToolDefinitions() as Array<{
+			function?: { name?: unknown };
+		}>)
 			if (typeof d.function?.name === "string") known.add(d.function.name);
 	} catch {
 		return [];
@@ -450,6 +502,13 @@ function emit(obj: RunEvent): void {
 	}
 }
 
+/** The `stop` field of a result event: which guard stopped the run, and its limit. */
+export function stopInfo(stop: TurnStop): RunStopInfo {
+	return stop.kind === "watchdog"
+		? { kind: "watchdog", reason: stop.reason, limit_ms: stop.limitMs }
+		: { kind: "circuit_breaker", reason: stop.reason };
+}
+
 /**
  * Pick a sensible default model for the active provider when the caller did
  * not specify one. Unknown providers fall through to `auto:free` — the
@@ -511,11 +570,13 @@ export async function runRunCommand(
 	if (opts.print || !opts.prompt) {
 		try {
 			const piped = await (deps.stdin ?? (() => readPipedStdin(Boolean(opts.prompt))))();
-			if (Buffer.byteLength(piped) > MAX_STDIN_BYTES) throw new StdinTooLargeError(Buffer.byteLength(piped));
+			if (Buffer.byteLength(piped) > MAX_STDIN_BYTES)
+				throw new StdinTooLargeError(Buffer.byteLength(piped));
 			opts.prompt = combinePromptAndStdin(opts.prompt, piped);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			if (opts.outputFormat === "stream-json") emit({ type: "error", subtype: "usage", message: msg });
+			if (opts.outputFormat === "stream-json")
+				emit({ type: "error", subtype: "usage", message: msg });
 			else process.stderr.write(`${msg}\n`);
 			return 1;
 		}
@@ -550,7 +611,8 @@ export async function runRunCommand(
 		const unknown = await unknownToolNames(opts.tools);
 		if (unknown.length) {
 			const msg = `Warning: --tools names no such tool: ${unknown.join(", ")}.`;
-			if (opts.outputFormat === "stream-json") emit({ type: "error", subtype: "usage", message: msg });
+			if (opts.outputFormat === "stream-json")
+				emit({ type: "error", subtype: "usage", message: msg });
 			else process.stderr.write(`${msg}\n`);
 		}
 		const { getModeManager } = await import("./modes");
@@ -715,6 +777,9 @@ export async function runRunCommand(
 	if (workspaceRoot) process.env.EIGHT_WORKSPACE_ROOT = workspaceRoot;
 
 	let exitCode = 0;
+	// Read in the catch below: a native turn the watchdog aborts throws, and the
+	// result must still name the watchdog, not the bare abort error (#4172).
+	let stopOf: () => TurnStop | null = () => null;
 	try {
 		// --image: the file is read before the agent exists, so a bad path is a
 		// usage error and never a model turn (#3641).
@@ -756,6 +821,8 @@ export async function runRunCommand(
 			headless: true,
 		});
 
+		stopOf = () => agent.getTurnStop();
+
 		if (resumeFrom) {
 			// restoreFromCheckpoint logs to stdout; keep stdout for the answer.
 			const log = console.log;
@@ -778,6 +845,8 @@ export async function runRunCommand(
 		const baseline = await baselineCheck({ cwd: workDir, run, consent: opts.yes });
 		const before = projectFingerprint(workDir);
 		const answer = await agent.chat(opts.prompt, image?.base64, image?.mimeType);
+		// A turn the breaker or the watchdog cut off is not finished (#4172).
+		const firstStop = agent.getTurnStop();
 		const check = await finishWithProjectCheck({
 			baseline,
 			changed: projectFingerprint(workDir) !== before,
@@ -815,7 +884,27 @@ export async function runRunCommand(
 		if (check.status === "fail") exitCode = 1;
 		if (notice) process.stderr.write(`${notice}\n`);
 
-		if (isEmptyReplyNote(finalText) || isLocalTurnFailureReply(finalText)) {
+		const stop = firstStop ?? agent.getTurnStop();
+		if (stop) {
+			// #4172: the circuit breaker or the session watchdog stopped the run, so the
+			// task is not done. A script must see a failure and why, never "ok" and exit 0.
+			exitCode = 1;
+			if (isStreamJson) {
+				emit({
+					type: "result",
+					subtype: "error",
+					session_id: sessionId,
+					ended_at: new Date().toISOString(),
+					error: stop.reason,
+					stop: stopInfo(stop),
+					final_text: finalText,
+					project_check: projectCheck,
+				});
+			} else {
+				process.stdout.write(`${finalText}\n`);
+				process.stderr.write(`[run] stopped: ${stop.reason}\n`);
+			}
+		} else if (isEmptyReplyNote(finalText) || isLocalTurnFailureReply(finalText)) {
 			// #3524: a blank model reply, or an unreachable or timed-out local model,
 			// is not a finished turn, so a script must not read it as success.
 			exitCode = 1;
@@ -848,7 +937,8 @@ export async function runRunCommand(
 		await agent.cleanup();
 	} catch (err) {
 		exitCode = 1;
-		const msg = err instanceof Error ? err.message : String(err);
+		const stop = stopOf();
+		const msg = stop ? stop.reason : err instanceof Error ? err.message : String(err);
 		if (isStreamJson) {
 			emit({ type: "error", subtype: "agent", message: msg });
 			emit({
@@ -857,6 +947,7 @@ export async function runRunCommand(
 				session_id: sessionId,
 				ended_at: new Date().toISOString(),
 				error: msg,
+				...(stop ? { stop: stopInfo(stop) } : {}),
 			});
 		} else {
 			process.stderr.write(`Error: ${msg}\n`);
