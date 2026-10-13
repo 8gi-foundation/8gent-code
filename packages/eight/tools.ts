@@ -10,6 +10,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtractVideoMode, extractVideo, formatExtractVideoResult } from "@8gent/eyes/marlin";
 import { z } from "zod";
+import {
+	type FormattingStop,
+	checkDraftConstraints,
+	describeFailures,
+	namedSources,
+} from "../ai/draft-constraints";
 import { withImagesWritten } from "../ai/image-shape";
 import {
 	POST_MESSAGE_TOOL_DEF,
@@ -836,6 +842,12 @@ export class ToolExecutor {
 	private permission: PermissionModeHolder | undefined;
 	/** Keys the post_message session limit (#3595); a real session id when one was given. */
 	private postSession: string;
+	/** The turn's task text; post_message checks its countable rules before sending (#4191). */
+	private presendTask = "";
+	/** Redrafts asked for this turn; one is allowed, a second failure stops the turn. */
+	private presendRedrafts = 0;
+	/** Set on the second failed draft; the turn loop takes it and stops the turn with it. */
+	private presendStop: FormattingStop | null = null;
 	/**
 	 * Can the model driving this executor see images (#3641)? Asked when
 	 * read_image runs, never before, so a turn that reads no image costs no
@@ -935,10 +947,65 @@ export class ToolExecutor {
 	}
 
 	/** A new turn starts: files may be opened once again (#3107). */
-	beginTurn(): void {
+	beginTurn(task = ""): void {
+		this.presendTask = task;
+		this.presendRedrafts = 0;
+		this.presendStop = null;
 		this.openedThisTurn.clear();
 		this.layoutNotesSent.clear();
 		this.retiredFacts.reset();
+	}
+
+	/**
+	 * Check an outward draft against the turn task's countable rules (#4191). null: send it.
+	 * First failure: nothing is sent and the model gets the draft and the broken rule for ONE
+	 * redraft. Second failure: nothing is sent and the turn stops with formatting_rule_violation.
+	 */
+	private presendCheck(draft: string): string | null {
+		if (!this.presendTask || draft.trim() === "") return null;
+		const sources: Record<string, string> = {};
+		let root: string;
+		try {
+			root = fs.realpathSync(path.resolve(this.workingDirectory));
+		} catch {
+			root = "";
+		}
+		for (const rel of root ? namedSources(this.presendTask) : []) {
+			try {
+				// A symlink, or a real path outside the working directory, is never read.
+				const abs = path.resolve(root, rel);
+				if (fs.lstatSync(abs).isSymbolicLink()) continue;
+				const real = fs.realpathSync(abs);
+				if (!real.startsWith(root + path.sep)) continue;
+				if (fs.statSync(real).size <= 256 * 1024) sources[rel] = fs.readFileSync(real, "utf8");
+			} catch {
+				// a source that cannot be read is unchecked, never a failure
+			}
+		}
+		const v = checkDraftConstraints(this.presendTask, draft, sources);
+		if (v.ok) return null;
+		const broken = describeFailures(v);
+		if (this.presendRedrafts === 0) {
+			this.presendRedrafts++;
+			console.log(`[pre-send] draft breaks a task rule, one redraft asked: ${broken}`);
+			return `[BLOCKED] post_message pre-send check: the draft breaks a rule in the task, so nothing was sent. Broken: ${broken}. Your draft was:\n${draft}\nRewrite it once so every rule holds, then call post_message again. A second draft that breaks a rule stops the turn.`;
+		}
+		const constraint = v.failed[0].constraint.phrase;
+		this.presendStop = {
+			kind: "formatting_rule_violation",
+			reason: `post_message draft broke a task rule after one redraft: ${broken}`,
+			constraint,
+			draft,
+		};
+		console.log(`[pre-send] redraft broke a task rule again, turn stopped: ${broken}`);
+		return `[BLOCKED] post_message pre-send check: the redraft still breaks a rule in the task (${broken}). Nothing was sent. The turn is stopped. Do not retry.`;
+	}
+
+	/** The formatting_rule_violation stop from the second failed draft, once (#4191). */
+	takePresendStop(): FormattingStop | null {
+		const s = this.presendStop;
+		this.presendStop = null;
+		return s;
 	}
 
 	/**
@@ -2360,7 +2427,10 @@ export class ToolExecutor {
 				return this.runSpawn("gh", ["pr", "view", String(args.number || "")]);
 			case "gh_issue_list":
 				return this.runCommand("gh issue list");
-			case "post_message":
+			case "post_message": {
+				// Pre-send check (#4191): the task's countable rules, counted in the draft with code.
+				const presend = this.presendCheck(typeof args.text === "string" ? args.text : "");
+				if (presend) return presend;
 				// Policy gate, then the person, inside postMessage; never a shell string.
 				return postMessage(
 					{
@@ -2370,6 +2440,7 @@ export class ToolExecutor {
 					},
 					postMessageDeps(this.agentId, this.postSession),
 				);
+			}
 			case "gh_issue_create":
 				return this.runSpawn("gh", [
 					"issue",

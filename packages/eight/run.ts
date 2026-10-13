@@ -504,9 +504,11 @@ function emit(obj: RunEvent): void {
 
 /** The `stop` field of a result event: which guard stopped the run, and its limit. */
 export function stopInfo(stop: TurnStop): RunStopInfo {
-	return stop.kind === "watchdog"
-		? { kind: "watchdog", reason: stop.reason, limit_ms: stop.limitMs }
-		: { kind: "circuit_breaker", reason: stop.reason };
+	if (stop.kind === "watchdog")
+		return { kind: "watchdog", reason: stop.reason, limit_ms: stop.limitMs };
+	if (stop.kind === "formatting_rule_violation")
+		return { kind: stop.kind, reason: stop.reason, constraint: stop.constraint, draft: stop.draft };
+	return { kind: "circuit_breaker", reason: stop.reason };
 }
 
 /**

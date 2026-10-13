@@ -73,7 +73,8 @@ export interface ProjectCheckInfo {
 /** Which harness guard stopped the run (#4172). Only on a result with subtype "error". */
 export type RunStopInfo =
 	| { kind: "circuit_breaker"; reason: string }
-	| { kind: "watchdog"; reason: string; limit_ms: number };
+	| { kind: "watchdog"; reason: string; limit_ms: number }
+	| { kind: "formatting_rule_violation"; reason: string; constraint: string; draft: string };
 
 export interface ResultEvent {
 	type: "result";
@@ -173,7 +174,10 @@ export function validateRunEvent(e: unknown): string[] {
 					(isObj(e.stop) &&
 						isStr(e.stop.reason) &&
 						(e.stop.kind === "circuit_breaker" ||
-							(e.stop.kind === "watchdog" && isNum(e.stop.limit_ms))) &&
+							(e.stop.kind === "watchdog" && isNum(e.stop.limit_ms)) ||
+							(e.stop.kind === "formatting_rule_violation" &&
+								isStr(e.stop.constraint) &&
+								isStr(e.stop.draft))) &&
 						e.subtype === "error"),
 				"stop",
 			);
