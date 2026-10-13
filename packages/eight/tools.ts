@@ -50,13 +50,6 @@ import {
 } from "../ast-index/locate";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
 import {
-	ENV_PASS_HINT,
-	GH_ENV_NAMES,
-	GIT_ENV_NAMES,
-	buildChildEnv,
-	withheldAny,
-} from "./harness/child-env";
-import {
 	addToSafeList as computerAddToSafeList,
 	click as computerClick,
 	clipboardGet as computerClipboardGet,
@@ -240,6 +233,13 @@ import { ArtifactStore } from "./artifact-store";
 import { formatCommandOutput } from "./command-output";
 import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatEditNotFound } from "./edit-hint";
+import {
+	ENV_PASS_HINT,
+	GH_ENV_NAMES,
+	GIT_ENV_NAMES,
+	buildChildEnv,
+	withheldAny,
+} from "./harness/child-env";
 import { layoutMeasureLine } from "./layout-measure";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { RetiredFacts } from "./retired-facts";

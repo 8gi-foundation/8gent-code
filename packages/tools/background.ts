@@ -7,8 +7,8 @@
 import type { ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import { killProcessTree, spawnShell } from "../core/shell";
-import { wrapRunCommand } from "../permissions/run-command-sandbox";
 import { buildChildEnv } from "../eight/harness/child-env";
+import { wrapRunCommand } from "../permissions/run-command-sandbox";
 
 // ============================================
 // Types

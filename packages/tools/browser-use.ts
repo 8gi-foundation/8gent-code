@@ -33,7 +33,7 @@ function run(args: string[], timeout = DEFAULT_TIMEOUT): string {
 				timeout,
 				encoding: "utf-8",
 				stdio: ["pipe", "pipe", "pipe"],
-				env: buildChildEnv(),
+				env: buildChildEnv() as NodeJS.ProcessEnv,
 			},
 		);
 		return result.trim();

@@ -20,9 +20,9 @@ import { getBackgroundTaskManager } from "../tools/background";
 import {
 	BASE_NAMES,
 	ENV_PASS_HINT,
-	SECRETISH,
 	GH_ENV_NAMES,
 	GIT_ENV_NAMES,
+	SECRETISH,
 	buildChildEnv,
 	envPassList,
 	withheldAny,
