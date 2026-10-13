@@ -182,6 +182,8 @@ function commitExists(root: string, rev: string): boolean {
  */
 export function restoreInProject(command: string, cwd: string | undefined): RestoreInProject {
 	try {
+		// The grammar is POSIX (git show > file, sh quoting); on win32 the lane has no opinion.
+		if (process.platform === "win32") return NO;
 		if (!cwd || !path.isAbsolute(cwd)) return NO;
 		let text = command.trim();
 		if (promptControlText(text) !== null) return NO;

@@ -60,6 +60,9 @@ let ws: string;
 let outside: string;
 let sha: string;
 let judge: AlwaysDangerous;
+/** The lane's grammar is POSIX; on win32 it has no opinion and everything goes to the judge. */
+const LANE = process.platform !== "win32";
+
 const saved: Record<string, string | undefined> = {};
 const KEYS = [SYSTEM_ONE_FLAG, SYSTEM_ONE_ALLOWLIST_FLAG, "EIGHT_HEADLESS", "EIGHT_WORKSPACE_ROOT"];
 
@@ -130,7 +133,7 @@ describe("restoreInProject allows", () => {
 		`git restore --source=${sha} config/rates.json`,
 		`git restore --source=HEAD~1 -- config/rates.json config/other.json`,
 	];
-	test("every shape, including the exact pilot command", () => {
+	test.skipIf(!LANE)("every shape, including the exact pilot command", () => {
 		for (const cmd of allowed()) expect([cmd, restoreInProject(cmd, ws).ok]).toEqual([cmd, true]);
 	});
 });
@@ -209,7 +212,7 @@ describe("restoreInProject falls through on", () => {
 		expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(false);
 	});
 
-	test("a show whose blob is not in the rev (redirect would truncate)", () => {
+	test.skipIf(!LANE)("a show whose blob is not in the rev (redirect would truncate)", () => {
 		writeFileSync(join(ws, "config", "late.json"), "{}");
 		git(ws, "add", "config/late.json");
 		git(ws, "commit", "-qm", "late");
@@ -272,12 +275,15 @@ describe("restoreInProject falls through on", () => {
 			else process.env.HOME = savedHome;
 			rmSync(home, { recursive: true, force: true });
 		});
-		test("the pilot command is allowed when the target has no filter attribute", () => {
-			expect(git(ws, "config", "--global", "--get", "filter.lfs.clean")).toContain("cat");
-			const cmd = `git show ${sha}:config/rates.json > config/rates.json`;
-			expect(restoreInProject(cmd, ws).ok).toBe(true);
-			expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(true);
-		});
+		test.skipIf(!LANE)(
+			"the pilot command is allowed when the target has no filter attribute",
+			() => {
+				expect(git(ws, "config", "--global", "--get", "filter.lfs.clean")).toContain("cat");
+				const cmd = `git show ${sha}:config/rates.json > config/rates.json`;
+				expect(restoreInProject(cmd, ws).ok).toBe(true);
+				expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(true);
+			},
+		);
 		test("it is refused when .gitattributes assigns filter=lfs to the target", () => {
 			writeFileSync(join(ws, ".gitattributes"), "config/rates.json filter=lfs\n");
 			git(ws, "add", ".gitattributes");
@@ -295,7 +301,7 @@ describe("restoreInProject falls through on", () => {
 		writeFileSync(join(ws, ".git", "hooks", "post-merge"), "#!/bin/sh\n");
 		expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(false);
 	});
-	test("sample hooks do not count", () => {
+	test.skipIf(!LANE)("sample hooks do not count", () => {
 		writeFileSync(join(ws, ".git", "hooks", "post-merge.sample"), "#!/bin/sh\n");
 		expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(true);
 	});
@@ -315,7 +321,7 @@ describe("restoreInProject falls through on", () => {
 });
 
 describe("systemOneGate end to end with a judge that says dangerous", () => {
-	test("the pilot restore runs without asking the judge", async () => {
+	test.skipIf(!LANE)("the pilot restore runs without asking the judge", async () => {
 		const r = await systemOneGate(
 			`git show ${sha}:config/rates.json > config/rates.json`,
 			process.env,
