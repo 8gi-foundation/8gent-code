@@ -1454,7 +1454,8 @@ export function extractAutoMemories(
  * line has no gutter is taken to be raw file text and returned unchanged.
  */
 function stripReadFileGutter(result: string): string {
-	const gutter = /^ *\d+\t/;
+	// `cat -n` rows, or `N#hash` rows with EIGHT_EDIT_FORMAT=hashline (#3472).
+	const gutter = /^ *\d+(?:#[a-z2-7]{4})?\t/;
 	const rows = result.split("\n");
 	if (!gutter.test(rows[0] ?? "")) return result;
 	return rows
