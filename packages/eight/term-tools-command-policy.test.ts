@@ -141,7 +141,11 @@ describe("with no terminal attached", () => {
 	});
 
 	test("pending input clears once submitted, so a later line is judged alone", async () => {
-		await executeTermTool("term_send", { sessionId: "s1", text: "git push origin ", appendEnter: false });
+		await executeTermTool("term_send", {
+			sessionId: "s1",
+			text: "git push origin ",
+			appendEnter: false,
+		});
 		// Submitted with Enter (a feature branch is allowed): pending is cleared.
 		expect(await send("feature")).toContain('"ok":true');
 		// Nothing is pending now: "main" alone is ordinary input.
@@ -161,8 +165,14 @@ describe("with no terminal attached", () => {
 	});
 
 	test("a denied send leaves the pending line as it was", async () => {
-		await executeTermTool("term_send", { sessionId: "s1", text: "git push origin ", appendEnter: false });
-		expect(await executeTermTool("term_send", { sessionId: "s1", text: "$(x)", appendEnter: false })).toContain("[PERMISSION DENIED]");
+		await executeTermTool("term_send", {
+			sessionId: "s1",
+			text: "git push origin ",
+			appendEnter: false,
+		});
+		expect(
+			await executeTermTool("term_send", { sessionId: "s1", text: "$(x)", appendEnter: false }),
+		).toContain("[PERMISSION DENIED]");
 		expect(await send("main")).toContain("[PERMISSION DENIED]");
 	});
 
