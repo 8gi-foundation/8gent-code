@@ -131,7 +131,10 @@ function runChild(mode: "arm" | "mid" | "idle" | "native429"): Record<string, un
 		.toString()
 		.split("\n")
 		.find((l) => l.startsWith("@@LATCH@@"));
-	if (!line) throw new Error(`child printed no result (exit ${r.exitCode}): ${r.stderr.toString().slice(-1200)}`);
+	if (!line)
+		throw new Error(
+			`child printed no result (exit ${r.exitCode}): ${r.stderr.toString().slice(-1200)}`,
+		);
 	return JSON.parse(line.slice("@@LATCH@@".length));
 }
 
