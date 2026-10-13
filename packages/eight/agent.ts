@@ -20,6 +20,7 @@ import { modelSupportsVision, prefixMeterSink } from "../ai/text-tool-endpoint";
 import {
 	emptyReplyNote,
 	emptyReplyStall,
+	isEmptyReplyNote,
 	splitToolImageAttachment,
 	stripDoneMarker,
 } from "../ai/text-tool-loop";
@@ -392,6 +393,12 @@ export class Agent {
 	/** Id of the turn running now, or null between turns. */
 	private activeTurn: number | null = null;
 	private turnCounter = 0;
+	// A stop pressed in this turn (#3521). chat() awaits several pre-turn steps
+	// before a controller is armed, and the native loop re-arms after a 429
+	// backoff; without this latch an ESC in either window was dropped and the
+	// model call went ahead. Set by abort(), honoured by armController(),
+	// cleared at chat() entry.
+	private stopRequested = false;
 	private orchestratorBus: OrchestratorBus;
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
@@ -1079,8 +1086,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// `this.abortController` is null and this.abort() - fired by the circuit
 		// breaker below, the session watchdog, and user ESC - would be a no-op.
 		// Assigning it here makes all three actually stop the turn.
-		this.abortController = new AbortController();
-		const signal = this.abortController.signal;
+		const signal = this.armController().signal;
 
 		// Build the real tool set: intersect the executor's own tool definitions
 		// (everything it can actually run) with the local CORE_TOOLS subset via a
@@ -1563,6 +1569,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// instead of throwing a raw fetch error up through the surface. A slow
 			// model is a timeout, not "not reachable" - they have different fixes.
 			this.abortController = null;
+			// A user stop (not the circuit breaker, which reports its own reason)
+			// reads as what it is, not as a model failure.
+			if (this.stopRequested && breakerStop === null) {
+				this.messageHistory.push({ role: "assistant", content: "Stopped." });
+				recordFailedRun("stopped by user");
+				return "Stopped.";
+			}
 			const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
 			const failure = describeLocalTurnFailure(err, { endpoint, timeoutMs: attemptTimeoutMs });
 			this.messageHistory.push({ role: "assistant", content: failure.message });
@@ -1570,6 +1583,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			return failure.message;
 		}
 		this.abortController = null;
+		// An ended turn with nothing said is an empty reply (or the harness's note for one, #3524).
+		if (
+			this.stopRequested &&
+			breakerStop === null &&
+			(agentResult.content.trim() === "" || isEmptyReplyNote(agentResult.content))
+		) {
+			this.messageHistory.push({ role: "assistant", content: "Stopped." });
+			recordFailedRun("stopped by user");
+			return "Stopped.";
+		}
 
 		// ── Law 1 (issue #2747): no fabricated completion ────────────────────
 		// The final reply is gated on the turn's tool ledger. A completion claim
@@ -1797,6 +1820,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		await this.extensionsReady;
 		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
+		// A stop latched while idle belongs to no turn; it must not cancel this
+		// one (#3521). Known gap, not fixed here: an ESC between the TUI's submit
+		// and this line is also cleared, because nothing marks a turn as pending
+		// before chat() is entered.
+		this.stopRequested = false;
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
 		this.turnTask = userMessage;
@@ -2765,7 +2793,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				}));
 
 			// Create abort controller for ESC interruption (shared across attempts)
-			this.abortController = new AbortController();
+			this.armController();
 
 			// Deterministic self-healing: walk the failover chain on ANY error
 			// (Bad Request, 5xx, network, schema, timeout). Within the same
@@ -2816,6 +2844,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					// TurnTimeoutError. Without this flag the catch below would treat
 					// that AbortError as a user ESC and kill the whole turn.
 					let attemptTimedOut = false;
+					// A stop during the previous attempt or its 429 backoff nulled the
+					// controller. Re-arm (honouring the latch) so this attempt is never
+					// sent with no signal, and stop before the call if it was pressed.
+					if (!this.abortController) this.armController();
+					if (this.abortController?.signal.aborted) {
+						throw Object.assign(new Error("Stopped by user"), { name: "AbortError" });
+					}
 					try {
 						// ── Hedge wrap (ISI keystone). When the hedge flag is OFF (default),
 						// this fires exactly ONE candidate (the current chain entry) and is
@@ -2911,8 +2946,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						// The shared controller is now aborted (timeout tore it down).
 						// Refresh it so the next chain attempt gets a live signal instead
 						// of an already-aborted one that would fail instantly.
+						// Our own timeout aborts the controller directly, never through
+						// abort(), so it does not latch a stop; a user stop that landed
+						// in this window did, and armController() honours it.
 						if (attemptTimedOut) {
-							this.abortController = new AbortController();
+							this.armController();
 						}
 
 						const msg = String(err?.message ?? err);
@@ -2987,7 +3025,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					);
 					agentConfig.maxOutputTokens = 8192;
 					const retryAgent = createEightAgent(agentConfig);
-					this.abortController = new AbortController();
+					this.armController();
 					const messages2 = this.messageHistory
 						.filter((m) => m.role !== "system")
 						.map((m) => ({
@@ -3415,9 +3453,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (!this.abortController) {
 			if (stop?.kind === "watchdog")
 				console.log(`\n[8gent] ${stop.reason} No model call in flight.`);
+			// The person's ESC between steps (pre-turn awaits, a timeout refresh, a retry):
+			// latch it so the next armController() in this turn aborts at once instead of
+			// the stop being lost (#3521). A harness stop with no call in flight stays unkept.
+			if (stop === undefined) {
+				this.stopRequested = true;
+				console.log("[8gent] Stop requested; the turn will stop before its next model call");
+			}
 			return;
 		}
 		if (stop && this.turnStop === null) this.turnStop = stop;
+		// Latch it too (#3521): a later step in the same turn (a 429 backoff retry, a
+		// failover attempt) arms a fresh controller through armController(), which must
+		// see the stop or the retry runs unstoppable. The latch holds until the next turn.
+		this.stopRequested = true;
 		this.abortController.abort();
 		this.abortController = null;
 		console.log(
@@ -3434,6 +3483,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	/** Why the harness stopped the last turn, or null when it ended on its own or by ESC. */
 	getTurnStop(): TurnStop | null {
 		return this.turnStop;
+	}
+
+	/**
+	 * The one place a turn's abort controller is created (#3521). If a stop was
+	 * latched earlier in this turn, the new controller is aborted before
+	 * it is returned, so the model call it guards never starts. The latch holds
+	 * until the next chat() entry, so every later arm in the same turn stops too.
+	 */
+	private armController(): AbortController {
+		const controller = new AbortController();
+		this.abortController = controller;
+		if (this.stopRequested) controller.abort();
+		return controller;
 	}
 
 	private async collectToolEvidence(event: {
