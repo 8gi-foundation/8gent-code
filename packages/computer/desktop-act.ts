@@ -490,7 +490,7 @@ export const DESKTOP_ACT_TOOL_DEF = {
 	function: {
 		name: "desktop_act",
 		description:
-			"[DESKTOP] Find `target` on screen with the local grounder and click, type or press there; asks the person first and verifies on a fresh screenshot.",
+			"[DESKTOP] Finds target on screen and does action there (click, type text, press keys); asks the person first, then verifies.",
 		parameters: {
 			type: "object",
 			properties: {

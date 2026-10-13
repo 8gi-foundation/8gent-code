@@ -279,7 +279,7 @@ function confinedWritePath(p: string): { path: string } | { refused: string } {
 
 const getOutline = tool({
 	description:
-		"Get the outline (functions, classes, etc.) of a source file. Use this FIRST before reading full files to understand structure.",
+		"[CODE] Pass filePath; returns every symbol (functions, classes, types, exports) in that file with line numbers and signatures. Use this FIRST before reading full files to understand structure.",
 	inputSchema: z.object({
 		filePath: z.string().describe("Path to the file to analyze"),
 	}),
@@ -313,7 +313,8 @@ const getOutline = tool({
 });
 
 const getSymbol = tool({
-	description: "Get the full source code of a specific symbol (function, class, etc.)",
+	description:
+		"[CODE] Pass symbolId as 'path/to/file.ts::name'; returns the full source of that one symbol (function, class, variable, type).",
 	inputSchema: z.object({
 		symbolId: z.string().describe("Symbol ID in format 'path/to/file.ts::symbolName'"),
 	}),
@@ -342,7 +343,8 @@ const getSymbol = tool({
 });
 
 const searchSymbols = tool({
-	description: "Search for symbols (functions, classes, etc.) across the codebase",
+	description:
+		"[CODE] Pass query (a name or a few words); returns matching symbol names, locations and kinds across the whole indexed codebase.",
 	inputSchema: z.object({
 		query: z.string().describe("Search query"),
 		kinds: z
@@ -393,7 +395,7 @@ const searchSymbols = tool({
 
 const locate = tool({
 	description:
-		'Answer "where is X?" in one call: at most 5 "file:line kind text" rows. Give a symbol name, a path or file name, a quoted string or error message, or a short description.',
+		'[CODE] Pass query (a symbol, path, quoted text or error) to answer "where is X?" in one call: at most 5 "file:line kind text" rows. Give a symbol name, a path or file name, a quoted string or error message, or a short description.',
 	inputSchema: z.object({
 		query: z
 			.string()
@@ -435,7 +437,8 @@ const updatePlanTool = tool({
 // ============================================
 
 const readFile = tool({
-	description: "Read the contents of a file",
+	description:
+		"[FILE] Returns the text of a file at the given path, one line per row, each row starting with its line number and a tab (like `cat -n`).",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the file to read"),
 	}),
@@ -455,7 +458,8 @@ const readFile = tool({
 });
 
 const writeFile = tool({
-	description: "Write content to a file (creates or overwrites)",
+	description:
+		"[FILE] Writes content to the file at path (relative), creating it or overwriting the whole file; for small changes use edit_file.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the file"),
 		content: z.string().describe("Content to write"),
@@ -489,7 +493,7 @@ const writeFile = tool({
 
 const editFile = tool({
 	description:
-		"[FILE] Replaces oldText (the exact existing line or block) with newText in place; to update a line, oldText is that whole line.",
+		"[FILE] Replaces oldText (exact existing line or block) in file path with newText in place; to update a line, oldText is that whole line.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the file"),
 		oldText: z
@@ -609,7 +613,8 @@ const gitAdd = tool({
 });
 
 const gitCommit = tool({
-	description: "Create a git commit",
+	description:
+		"[GIT] Commits the staged changes with message and returns the commit hash; run git_add first.",
 	inputSchema: z.object({
 		message: z.string().describe("Commit message"),
 	}),
@@ -661,7 +666,7 @@ const ghPrList = tool({
 });
 
 const ghPrCreate = tool({
-	description: "Create a pull request",
+	description: "Creates a pull request from the current branch with title and an optional body.",
 	inputSchema: z.object({
 		title: z.string().describe("PR title"),
 		body: z.string().optional().describe("PR description"),
@@ -692,7 +697,8 @@ const ghIssueList = tool({
 });
 
 const ghIssueCreate = tool({
-	description: "Create a GitHub issue and assign it to the current user",
+	description:
+		"Creates a GitHub issue with title and an optional body, assigned to the current user.",
 	inputSchema: z.object({
 		title: z.string().describe("Issue title"),
 		body: z.string().optional().describe("Issue description in markdown"),
@@ -753,7 +759,7 @@ const runCommand = tool({
 // ============================================
 
 const lspGotoDefinition = tool({
-	description: "Go to the definition of a symbol at a specific location",
+	description: "Goes to the definition of the symbol at filePath, line, character (both 0-based).",
 	inputSchema: z.object({
 		filePath: z.string().describe("Path to the file"),
 		line: z.number().describe("Line number (0-based)"),
@@ -766,7 +772,7 @@ const lspGotoDefinition = tool({
 });
 
 const lspFindReferences = tool({
-	description: "Find all references to a symbol",
+	description: "Finds all references to the symbol at filePath, line, character (both 0-based).",
 	inputSchema: z.object({
 		filePath: z.string().describe("Path to the file"),
 		line: z.number().describe("Line number (0-based)"),
@@ -779,7 +785,8 @@ const lspFindReferences = tool({
 });
 
 const lspHover = tool({
-	description: "Get hover information about a symbol",
+	description:
+		"Returns hover information for the symbol at filePath, line, character (both 0-based).",
 	inputSchema: z.object({
 		filePath: z.string().describe("Path to the file"),
 		line: z.number().describe("Line number (0-based)"),
@@ -792,7 +799,7 @@ const lspHover = tool({
 });
 
 const lspDocumentSymbols = tool({
-	description: "Get all symbols in a document via LSP",
+	description: "Returns all symbols in the file at filePath via LSP.",
 	inputSchema: z.object({
 		filePath: z.string().describe("Path to the file"),
 	}),
@@ -803,7 +810,7 @@ const lspDocumentSymbols = tool({
 });
 
 const lspDiagnostics = tool({
-	description: "Get errors and warnings for a file via LSP",
+	description: "Returns errors and warnings for the file at filePath via LSP.",
 	inputSchema: z.object({
 		filePath: z.string().describe("Path to the file"),
 	}),
@@ -818,7 +825,7 @@ const lspDiagnostics = tool({
 // ============================================
 
 const readImage = tool({
-	description: "Read image metadata and base64 data",
+	description: "[FILE] Reads the image file at path (png, jpg, gif, webp).",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the image file"),
 	}),
@@ -849,7 +856,8 @@ const readImage = tool({
 });
 
 const describeImage = tool({
-	description: "Describe an image using vision model",
+	description:
+		"[FILE] Describes the image file at path in words using a local vision model; pass prompt to ask something specific.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the image file"),
 		prompt: z.string().optional().describe("Custom prompt for description"),
@@ -1071,7 +1079,8 @@ const speakTool = tool({
 // ============================================
 
 const readPdf = tool({
-	description: "Read entire PDF content",
+	description:
+		"[FILE] Reads the PDF file at path and returns its extracted text, page count and metadata (title, author, dates).",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the PDF file"),
 	}),
@@ -1087,7 +1096,7 @@ const readPdf = tool({
 });
 
 const readPdfPage = tool({
-	description: "Read a specific page of a PDF",
+	description: "[FILE] Reads page pageNum (1-based) of the PDF file at path and returns its text.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the PDF file"),
 		pageNum: z.number().describe("Page number to read"),
@@ -1107,7 +1116,7 @@ const readPdfPage = tool({
 // ============================================
 
 const readNotebook = tool({
-	description: "Read a Jupyter notebook file",
+	description: "Reads the Jupyter notebook file at path.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the notebook file"),
 	}),
@@ -1147,7 +1156,7 @@ const readNotebook = tool({
 });
 
 const notebookEditCell = tool({
-	description: "Edit a notebook cell by index",
+	description: "Replaces the source of cell cellIndex in the notebook at path with newSource.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the notebook file"),
 		cellIndex: z.number().describe("Cell index to edit"),
@@ -1168,7 +1177,8 @@ const notebookEditCell = tool({
 });
 
 const notebookInsertCell = tool({
-	description: "Insert a new cell into a notebook",
+	description:
+		"Inserts a new cell of cellType with source after cell afterIndex in the notebook at path.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the notebook file"),
 		afterIndex: z.number().describe("Insert after this cell index"),
@@ -1190,7 +1200,7 @@ const notebookInsertCell = tool({
 });
 
 const notebookDeleteCell = tool({
-	description: "Delete a notebook cell",
+	description: "Deletes cell cellIndex from the notebook at path.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the notebook file"),
 		cellIndex: z.number().describe("Cell index to delete"),
@@ -1212,7 +1222,8 @@ const notebookDeleteCell = tool({
 // ============================================
 
 const webSearchTool = tool({
-	description: "Search the web",
+	description:
+		"[WEB] Pass query; returns a list of search results (titles, URLs, snippets) from DuckDuckGo.",
 	inputSchema: z.object({
 		query: z.string().describe("Search query"),
 		maxResults: z.number().optional().describe("Max results (default: 5)"),
@@ -1229,7 +1240,7 @@ const webSearchTool = tool({
 });
 
 const webFetchTool = tool({
-	description: "Fetch content from a URL",
+	description: "[WEB] Pass url; returns the readable text of that web page (HTML stripped).",
 	inputSchema: z.object({
 		url: z.string().describe("URL to fetch"),
 	}),
@@ -1250,7 +1261,7 @@ const webFetchTool = tool({
 
 const travelResolveLocation = tool({
 	description:
-		"Resolve a city or airport name to IATA airport/city codes through LetsFG. Search-only: does not unlock, book, collect payment, or store passenger profiles.",
+		"Resolves query (a city, airport name or IATA code) to IATA airport/city codes through LetsFG. Search-only: does not unlock, book, collect payment, or store passenger profiles.",
 	inputSchema: z.object({
 		query: z
 			.string()
@@ -1271,7 +1282,7 @@ const travelResolveLocation = tool({
 
 const travelSearchFlights = tool({
 	description:
-		"Search live flight offers through LetsFG using IATA codes. Phase 1 is search-only: no unlock, booking, payment, or passenger profile storage.",
+		"Searches live flight offers through LetsFG from origin to destination (IATA codes) departing on dateFrom (YYYY-MM-DD). Phase 1 is search-only: no unlock, booking, payment, or passenger profile storage.",
 	inputSchema: z.object({
 		origin: z
 			.string()
@@ -1363,7 +1374,8 @@ const mcpListTools = tool({
 });
 
 const mcpCallTool = tool({
-	description: "Call a specific MCP tool",
+	description:
+		"[MCP] Calls one MCP tool: pass server, tool (its exact name) and args (per its input schema).",
 	inputSchema: z.object({
 		server: z.string().describe("MCP server name"),
 		tool: z.string().describe("Tool name"),
@@ -1395,7 +1407,7 @@ const mcpCallTool = tool({
 // ============================================
 
 const backgroundStart = tool({
-	description: "Start a background task and return task ID",
+	description: "Starts command as a background task and returns its task ID.",
 	inputSchema: z.object({
 		command: z.string().describe("Command to run in background"),
 		timeout: z.number().optional().describe("Timeout in milliseconds"),
@@ -1416,7 +1428,7 @@ const backgroundStart = tool({
 });
 
 const backgroundStatus = tool({
-	description: "Check status of a running background task",
+	description: "Returns the status of the running background task taskId.",
 	inputSchema: z.object({
 		taskId: z.string().describe("Task ID to check"),
 	}),
@@ -1434,7 +1446,7 @@ const backgroundStatus = tool({
 });
 
 const backgroundOutput = tool({
-	description: "Get output from a background task",
+	description: "Returns output from the background task taskId.",
 	inputSchema: z.object({
 		taskId: z.string().describe("Task ID"),
 		tail: z.number().optional().describe("Number of lines from end"),
@@ -1871,7 +1883,7 @@ import { getPersona, listPersonas, matchPersona } from "../orchestration/persona
 
 const suggest_spawn = tool({
 	description:
-		"Suggest spawning a specialist sub-agent for a specific task. The user will be asked to approve unless auto-spawn is enabled.",
+		"Suggests spawning the specialist persona on task, with reason saying why it is needed. The user will be asked to approve unless auto-spawn is enabled.",
 	inputSchema: z.object({
 		persona: z.string().describe("Persona ID: winston, larry, curly, mo, or doc"),
 		task: z.string().describe("The specific task for this agent"),
@@ -1919,7 +1931,7 @@ const check_agents = tool({
 
 const message_agent = tool({
 	description:
-		"Send a message to a specific sub-agent. Used for coordination between orchestrator and specialists.",
+		"Sends message to the specialist agentId. Used for coordination between orchestrator and specialists.",
 	inputSchema: z.object({
 		agentId: z.string().describe("The agent ID to message"),
 		message: z.string().describe("The message content"),
@@ -1960,7 +1972,7 @@ const message_agent = tool({
 
 const merge_agent_work = tool({
 	description:
-		"Review and merge a sub-agent's worktree changes into the main branch. Only the orchestrator should call this.",
+		"Reviews and merges the worktree changes of agentId into the main branch. Only the orchestrator should call this.",
 	inputSchema: z.object({
 		agentId: z.string().describe("The agent ID whose work to merge"),
 		commitMessage: z.string().optional().describe("Custom merge commit message"),
@@ -2013,7 +2025,7 @@ const merge_agent_work = tool({
 
 const writeNotesTool = tool({
 	description:
-		"Write or append a note to the Notes tab. The note will appear immediately in the Notes panel.",
+		"Writes or appends a note with title and content to the Notes tab. The note will appear immediately in the Notes panel.",
 	inputSchema: z.object({
 		title: z.string().describe("Note title (first line)"),
 		content: z.string().describe("Note content in plain text or markdown"),
@@ -2077,7 +2089,7 @@ const writeNotesTool = tool({
  */
 const writeTerminalTool = tool({
 	description:
-		"Send a shell command to an open terminal tab. The command runs in a real PTY shell, so interactive programs, `gh auth login --web`, and TTY-requiring commands all work. Call list_terminals first if you don't know the tabId.",
+		"Sends input (a shell command or text) to the open terminal tab tabId; a newline is appended. The command runs in a real PTY shell, so interactive programs, `gh auth login --web`, and TTY-requiring commands all work. Call list_terminals first if you don't know the tabId.",
 	inputSchema: z.object({
 		tabId: z
 			.string()
@@ -2112,7 +2124,7 @@ const writeTerminalTool = tool({
 
 const selfInspect = tool({
 	description:
-		"[SELF] Inspect your own runtime parameters: model, provider, temperature, topK, topP, maxOutputTokens, maxSteps, penalty values, tool count, loaded categories, system prompt length, message history size, step count, live tokens-per-second throughput, and any appended context. Use this when you need to understand your own configuration, answer questions about how fast you're generating, or diagnose why something isn't working.",
+		"[SELF] Inspect your own runtime parameters; takes no arguments. Returns model, provider, temperature, topK, topP, maxOutputTokens, maxSteps, penalty values, tool count, loaded categories, system prompt length, message history size, step count, live tokens-per-second throughput, and any appended context. Use this when you need to understand your own configuration, answer questions about how fast you're generating, or diagnose why something isn't working.",
 	inputSchema: z.object({}),
 	execute: async () => {
 		const p = getRuntimeParams();
@@ -2163,7 +2175,7 @@ const TUNABLE_KEYS = [
 
 const selfTune = tool({
 	description:
-		"[SELF] Adjust your own runtime parameters. Tunable: temperature (0-2), topP (0-1), topK (1-100), maxOutputTokens (256-16384), maxSteps (1-100), frequencyPenalty (-2 to 2), presencePenalty (-2 to 2). Changes take effect on the next step or retry. Use when: output is truncated (bump maxOutputTokens), responses are too deterministic (raise temperature), or you're stuck in loops (adjust penalties).",
+		"[SELF] Sets your runtime parameter to value, with a reason that is logged. Tunable: temperature (0-2), topP (0-1), topK (1-100), maxOutputTokens (256-16384), maxSteps (1-100), frequencyPenalty (-2 to 2), presencePenalty (-2 to 2). Changes take effect on the next step or retry. Use when: output is truncated (bump maxOutputTokens), responses are too deterministic (raise temperature), or you're stuck in loops (adjust penalties).",
 	inputSchema: z.object({
 		parameter: z
 			.string()
@@ -2205,7 +2217,7 @@ const selfTune = tool({
 
 const selfAppendContext = tool({
 	description:
-		"[SELF] Append additional context or instructions to your own system prompt for this session. Use to record learned patterns, task-specific constraints, or intermediate findings that should influence all subsequent steps. Appends are additive (never delete existing instructions). Max 500 chars per append, max 10 appends per session.",
+		"[SELF] Appends context (max 500 chars) to your own system prompt for this session, with a reason. Use to record learned patterns, task-specific constraints, or intermediate findings that should influence all subsequent steps. Appends are additive (never delete existing instructions). Max 500 chars per append, max 10 appends per session.",
 	inputSchema: z.object({
 		context: z.string().describe("Text to append to your system prompt (max 500 chars)"),
 		reason: z.string().describe("Why this context is important for future steps"),
@@ -2234,7 +2246,7 @@ const selfAppendContext = tool({
 
 const rememberTool = tool({
 	description:
-		"[MEMORY] Save a fact to memory. Layers: 'session' (temporary, current session only), 'project' (persisted in .8gent/ for this repo), 'global' (persisted in ~/.8gent/ across projects). Keep facts concise and searchable. Pair with recall to retrieve later.",
+		"[MEMORY] Persists a fact to the specified memory layer and returns confirmation. Layers: 'session' (temporary, current session only), 'project' (persisted in .8gent/ for this repo), 'global' (persisted in ~/.8gent/ across projects). Keep facts concise and searchable. Pair with recall to retrieve later.",
 	inputSchema: z.object({
 		fact: z.string().describe("The fact to remember"),
 		layer: z.enum(["session", "project", "global"]).describe("Memory layer"),
@@ -2253,7 +2265,7 @@ const rememberTool = tool({
 
 const recallTool = tool({
 	description:
-		"[MEMORY] Search memory for relevant facts. Uses full-text search across all layers. Returns matching memories ranked by relevance.",
+		"[MEMORY] Pass query (keywords); returns matching facts from all memory layers (session, project, global) ranked by relevance. Uses full-text search across all layers. Returns matching memories ranked by relevance.",
 	inputSchema: z.object({
 		query: z.string().describe("Search query"),
 		limit: z.number().optional().describe("Max results (default: 5)"),
@@ -2425,7 +2437,7 @@ const queryDesignSystem = tool({
 
 const deckTheme = tool({
 	description:
-		"[DESIGN] Import-ready Marp deck themes, one per design system. USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
+		"[DESIGN] Import-ready Marp deck themes, one per design system: action is list, apply (to deck) or mix (palette plus type). USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
 	inputSchema: z.object({
 		action: z.enum(["list", "apply", "mix"]).describe("list | apply | mix"),
 		deck: z.string().optional().describe("Path to the deck .md (apply, mix)"),
@@ -2516,7 +2528,7 @@ const desktopType = tool({
 
 const desktopPress = tool({
 	description:
-		"Press a key combination. Examples: 'enter', 'cmd+s', 'ctrl+shift+p', 'tab', 'escape'. Dangerous combos (cmd+q, alt+f4) are flagged but still executed.",
+		"[DESKTOP] Presses the key combination in keys, such as 'enter', 'cmd+s' or 'ctrl+shift+p'. Examples: 'enter', 'cmd+s', 'ctrl+shift+p', 'tab', 'escape'. Dangerous combos (cmd+q, alt+f4) are flagged but still executed.",
 	inputSchema: z.object({
 		keys: z.string().describe("Key combo, e.g. 'cmd+s'"),
 		count: z.number().int().min(1).max(5).optional(),
@@ -2544,7 +2556,8 @@ const desktopScroll = tool({
 });
 
 const desktopDrag = tool({
-	description: "Drag from one point to another. Useful for resizing windows, moving files.",
+	description:
+		"[DESKTOP] Drags from screen point fromX, fromY to screen point toX, toY. Useful for resizing windows, moving files.",
 	inputSchema: z.object({
 		fromX: z.number(),
 		fromY: z.number(),
@@ -2560,7 +2573,8 @@ const desktopDrag = tool({
 });
 
 const desktopHover = tool({
-	description: "Move the cursor to a point without clicking. Triggers hover states/tooltips.",
+	description:
+		"[DESKTOP] Moves the cursor to screen point x, y without clicking. Triggers hover states/tooltips.",
 	inputSchema: z.object({
 		x: z.number(),
 		y: z.number(),
@@ -2581,7 +2595,8 @@ const desktopWindows = tool({
 });
 
 const desktopClipboard = tool({
-	description: "Get or set the system clipboard. action='get' reads, 'set' writes.",
+	description:
+		"[DESKTOP] Gets or sets the system clipboard: action 'get' reads it, action 'set' writes text. action='get' reads, 'set' writes.",
 	inputSchema: z.object({
 		action: z.enum(["get", "set"]),
 		text: z.string().optional().describe("Required when action='set'"),
@@ -2604,7 +2619,7 @@ const desktopClipboard = tool({
 
 const proposeSkillCreation = tool({
 	description:
-		"Author and persist a new SKILL.md to packages/skills/<name>/. Use this when you have noticed a recurring or reusable workflow pattern across this session that would help future sessions (or future users). The new skill ships to every 8gent-code user. Do not propose a skill that duplicates an existing one. Hard cap: 3 auto-skills per session. Returns ok=false with a reason if blocked (name-collision, session-cap-reached, etc.) so you can adjust and try again.",
+		"Writes a new skill to packages/skills/<name>/SKILL.md from name, description (one line) and body (the markdown). Use this when you have noticed a recurring or reusable workflow pattern across this session that would help future sessions (or future users). The new skill ships to every 8gent-code user. Do not propose a skill that duplicates an existing one. Hard cap: 3 auto-skills per session. Returns ok=false with a reason if blocked (name-collision, session-cap-reached, etc.) so you can adjust and try again.",
 	inputSchema: z.object({
 		name: z
 			.string()
@@ -2854,7 +2869,7 @@ const eyesSee = tool({
 
 const eyesFind = tool({
 	description:
-		"Find a UI element on screen by label, role, or natural-language description. Returns one or more locators with bbox + center point you can pass to desktop_click. Captures a fresh frame if none provided.",
+		"Finds a UI element on screen; kind picks how (label, role, id, describe or coords) and returns locators to pass to desktop_click. Returns one or more locators with bbox + center point you can pass to desktop_click. Captures a fresh frame if none provided.",
 	inputSchema: z.object({
 		kind: z.enum(["label", "role", "id", "describe", "coords"]).describe("Locator kind."),
 		text: z
@@ -2955,7 +2970,7 @@ const eyesDescribe = tool({
 
 const eyesWaitFor = tool({
 	description:
-		"Wait until a screen condition becomes true. Polls eyes_see internally. Times out cleanly with elapsed time so the agent can decide whether to retry, give up, or proceed. Use to wait for dialogs, page loads, or text to appear.",
+		"Waits until the screen condition predicate (element_visible, element_gone or text_present) becomes true. Polls eyes_see internally. Times out cleanly with elapsed time so the agent can decide whether to retry, give up, or proceed. Use to wait for dialogs, page loads, or text to appear.",
 	inputSchema: z.object({
 		predicate: z
 			.enum(["element_visible", "element_gone", "text_present"])
@@ -3069,7 +3084,7 @@ async function getHandeyes(): Promise<
 
 const handeyesLocateAndClick = tool({
 	description:
-		"Locate a UI element by query, then click it. Compound action over eyes+hands. Retries the locate up to locate_retries times before declaring no_match. Set verify_changed=true to wait for an observe-detected screen change after the click. Auto-engages struggle mode when the locate fires the find-zero-hits-twice trigger; the result includes escalated_to with the struggle handle id.",
+		"Locates a UI element (kind picks how, as in eyes_find), then clicks it. Compound action over eyes+hands. Retries the locate up to locate_retries times before declaring no_match. Set verify_changed=true to wait for an observe-detected screen change after the click. Auto-engages struggle mode when the locate fires the find-zero-hits-twice trigger; the result includes escalated_to with the struggle handle id.",
 	inputSchema: z.object({
 		kind: z.enum(["label", "role", "id", "describe", "coords"]),
 		text: z.string().optional(),
@@ -3137,7 +3152,7 @@ const handeyesLocateAndClick = tool({
 
 const handeyesClickAndVerify = tool({
 	description:
-		"Click a known point, then poll a predicate to verify the click had the intended effect. Retries up to max_retries on failure. Use this for 'did anything actually happen?' loops where hands.click returning ok is not enough.",
+		"Clicks point x, y, then polls predicate to verify the click had the intended effect. Retries up to max_retries on failure. Use this for 'did anything actually happen?' loops where hands.click returning ok is not enough.",
 	inputSchema: z.object({
 		x: z.number(),
 		y: z.number(),
@@ -3206,7 +3221,7 @@ const handeyesClickAndVerify = tool({
 
 const handeyesTypeAndConfirm = tool({
 	description:
-		"Type into the focused field, then optionally re-locate the field and confirm its value reflects what was typed. Catches IME / focus-stolen / wrong-field-focused failure modes that look identical to success at the hands layer.",
+		"Types text into the focused field, then optionally re-locates the field and confirms its value. Catches IME / focus-stolen / wrong-field-focused failure modes that look identical to success at the hands layer.",
 	inputSchema: z.object({
 		text: z.string(),
 		expected_field_kind: z.enum(["label", "role", "id"]).optional(),

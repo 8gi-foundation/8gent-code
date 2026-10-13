@@ -651,7 +651,7 @@ function positiveInt(value: unknown): number | undefined {
 }
 
 /** Text-tool definitions for lean MCP access (#3474); only sent with EIGHT_MCP_LEAN=1. */
-const MCP_LEAN_TOOL_DEFS = [
+export const MCP_LEAN_TOOL_DEFS = [
 	{
 		type: "function",
 		function: {
@@ -676,7 +676,7 @@ const MCP_LEAN_TOOL_DEFS = [
 		function: {
 			name: "mcp_call_tool",
 			description:
-				"[MCP] Call one MCP tool. Pass fields (dotted paths such as 'data.total') to keep only those parts of a JSON answer. Answers over 4000 characters are saved to a file and you get its path plus a short preview.",
+				"[MCP] Calls one MCP tool: pass server, tool (its exact name) and args (per its input schema). Pass fields (dotted paths such as 'data.total') to keep only those parts of a JSON answer. Answers over 4000 characters are saved to a file and you get its path plus a short preview.",
 			parameters: {
 				type: "object",
 				properties: {
@@ -740,12 +740,12 @@ function powershellToolShell(): ResolvedShell | undefined {
 	return resolvePowerShell();
 }
 
-const POWERSHELL_TOOL_DEF = {
+export const POWERSHELL_TOOL_DEF = {
 	type: "function",
 	function: {
 		name: "powershell",
 		description:
-			"[SHELL] Windows only. Runs a PowerShell command (-NoProfile -NonInteractive) and returns stdout/stderr. Use for Windows-native work (Get-ChildItem, registry, services); use run_command for git, bun, npm and POSIX tools. Same permission checks as run_command.",
+			"[SHELL] Windows only: pass command, a PowerShell command line. Runs a PowerShell command (-NoProfile -NonInteractive) and returns stdout/stderr. Use for Windows-native work (Get-ChildItem, registry, services); use run_command for git, bun, npm and POSIX tools. Same permission checks as run_command.",
 		parameters: {
 			type: "object",
 			properties: { command: { type: "string", description: "PowerShell command to run" } },
@@ -1019,7 +1019,7 @@ export class ToolExecutor {
 				function: {
 					name: "get_outline",
 					description:
-						"[CODE] Returns a list of all symbols (functions, classes, types, exports) in a file with their line numbers and signatures. Use this FIRST before read_file to understand file structure - much cheaper than reading the whole file. Typically followed by get_symbol to extract just the function you need. If the file is not indexed, falls back to AST parsing.",
+						"[CODE] Pass filePath; returns every symbol (functions, classes, types, exports) in that file with line numbers and signatures. Use this FIRST before read_file to understand file structure - much cheaper than reading the whole file. Typically followed by get_symbol to extract just the function you need. If the file is not indexed, falls back to AST parsing.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1037,7 +1037,7 @@ export class ToolExecutor {
 				function: {
 					name: "get_symbol",
 					description:
-						"[CODE] Returns the full source code of a single symbol (function, class, variable, type) by ID. Use this after get_outline to extract exactly the code you need without reading the entire file. Typically used after get_outline or search_symbols. If the symbol is not found, check the ID format: 'path/to/file.ts::symbolName'.",
+						"[CODE] Pass symbolId as 'path/to/file.ts::name'; returns the full source of that one symbol (function, class, variable, type). Use this after get_outline to extract exactly the code you need without reading the entire file. Typically used after get_outline or search_symbols. If the symbol is not found, check the ID format: 'path/to/file.ts::symbolName'.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1055,7 +1055,7 @@ export class ToolExecutor {
 				function: {
 					name: "search_symbols",
 					description:
-						"[CODE] Returns matching symbol names, locations, and kinds across the entire indexed codebase. Use this when you know what you are looking for but not where it lives. Prefer this over reading multiple files to find a function. If no results, try broader query terms or check that the project is indexed with get_project_outline.",
+						"[CODE] Pass query (a name or a few words); returns matching symbol names, locations and kinds across the whole indexed codebase. Use this when you know what you are looking for but not where it lives. Prefer this over reading multiple files to find a function. If no results, try broader query terms or check that the project is indexed with get_project_outline.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1075,7 +1075,7 @@ export class ToolExecutor {
 				function: {
 					name: "locate",
 					description:
-						'[CODE] Answers "where is X?" in one call with at most 5 "file:line kind text" rows. Give it a symbol name (createDecider, Foo::bar), a path or file name (decide/rules.ts), a quoted string or error message, or a short description. It picks symbol, path or text search itself. Use this FIRST to find where something lives, then get_symbol or read_file on the row you need.',
+						'[CODE] Pass query (a symbol, path, quoted text or error) to answer "where is X?" in one call: at most 5 "file:line kind text" rows. Give it a symbol name (createDecider, Foo::bar), a path or file name (decide/rules.ts), a quoted string or error message, or a short description. It picks symbol, path or text search itself. Use this FIRST to find where something lives, then get_symbol or read_file on the row you need.',
 					parameters: {
 						type: "object",
 						properties: {
@@ -1155,7 +1155,7 @@ export class ToolExecutor {
 				function: {
 					name: "write_file",
 					description:
-						"[FILE] Creates a new file or completely overwrites an existing file with the given content. Use when creating new files or rewriting an entire file. Prefer edit_file for surgical changes to existing files. ALWAYS use relative paths (e.g. 'server.ts', 'src/index.ts'). NEVER use absolute paths. If the parent directory does not exist, this will fail - use run_command to mkdir first.",
+						"[FILE] Writes content to the file at path (relative), creating it or overwriting the whole file; for small changes use edit_file. Use when creating new files or rewriting an entire file. Prefer edit_file for surgical changes to existing files. ALWAYS use relative paths (e.g. 'server.ts', 'src/index.ts'). NEVER use absolute paths. If the parent directory does not exist, this will fail - use run_command to mkdir first.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1175,7 +1175,7 @@ export class ToolExecutor {
 				function: {
 					name: "edit_file",
 					description:
-						"[FILE] Replaces oldText (the exact existing line or block) with newText in place; to update a line, oldText is that whole line. Returns confirmation. Use this for surgical edits to existing files - prefer over write_file when changing a specific function or block. The oldText must match exactly (whitespace-sensitive). If the match fails, read_file first to get the exact current content, then retry.",
+						"[FILE] Replaces oldText (exact existing line or block) in file path with newText in place; to update a line, oldText is that whole line. Returns confirmation. Use this for surgical edits to existing files - prefer over write_file when changing a specific function or block. The oldText must match exactly (whitespace-sensitive). If the match fails, read_file first to get the exact current content, then retry.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1286,7 +1286,7 @@ export class ToolExecutor {
 				function: {
 					name: "git_commit",
 					description:
-						"[GIT] Creates a git commit with the staged changes and returns the commit hash. Use after git_add. If nothing is staged, this will fail - run git_status first to verify staged files. Follow the project's commit message conventions (check git_log for examples).",
+						"[GIT] Commits the staged changes with message and returns the commit hash; run git_add first. Use after git_add. If nothing is staged, this will fail - run git_status first to verify staged files. Follow the project's commit message conventions (check git_log for examples).",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1384,7 +1384,7 @@ export class ToolExecutor {
 				function: {
 					name: "web_search",
 					description:
-						"[WEB] Returns a list of search results (titles, URLs, snippets) from DuckDuckGo. Use when you need to find documentation, look up error messages, or research a topic. Follow up with web_fetch on a specific result URL to get full page content. If results are poor, try rephrasing with more specific technical terms.",
+						"[WEB] Pass query; returns a list of search results (titles, URLs, snippets) from DuckDuckGo. Use when you need to find documentation, look up error messages, or research a topic. Follow up with web_fetch on a specific result URL to get full page content. If results are poor, try rephrasing with more specific technical terms.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1403,7 +1403,7 @@ export class ToolExecutor {
 				function: {
 					name: "web_fetch",
 					description:
-						"[WEB] Returns the text content of a web page at the given URL (HTML stripped to readable text). Use after web_search to read a specific page, or directly when you have a known URL (docs, GitHub, npm). Results are cached to disk. If the page is too large, only the first portion is returned.",
+						"[WEB] Pass url; returns the readable text of that web page (HTML stripped). Use after web_search to read a specific page, or directly when you have a known URL (docs, GitHub, npm). Results are cached to disk. If the page is too large, only the first portion is returned.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1436,7 +1436,7 @@ export class ToolExecutor {
 				function: {
 					name: "compare_layout",
 					description:
-						"[FILE] Renders an HTML page with the local browser at the size of a reference image (a design mock-up) and compares it band by band, returning each block's offset in pixels and a similarity number. Use it after writing a page from a mock-up, fix the largest offsets, and run it again until the bands are within 2px. Local and offline; the page cannot reach the network.",
+						"[FILE] Compares page html with the mock-up image reference, band by band; returns each block's pixel offset and a similarity number. Use it after writing a page from a mock-up, fix the largest offsets, and run it again until the bands are within 2px. Local and offline; the page cannot reach the network.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1470,7 +1470,8 @@ export class ToolExecutor {
 				type: "function",
 				function: {
 					name: "screen_locate",
-					description: "[FILE] Point to click for a thing in a screenshot, named in words.",
+					description:
+						"[FILE] Returns the point to click for target (a thing named in words) in the screenshot at image.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1487,7 +1488,7 @@ export class ToolExecutor {
 				function: {
 					name: "read_image",
 					description:
-						"[FILE] Reads an image file (png, jpg, gif, webp). If you can see images, the picture is attached to the next message for you to look at; otherwise you get its size and format, and describe_image can tell you what is in it. Use for screenshots, UI mockups, charts and diagrams the task refers to.",
+						"[FILE] Reads the image file at path (png, jpg, gif, webp). If you can see images, the picture is attached to the next message for you to look at; otherwise you get its size and format, and describe_image can tell you what is in it. Use for screenshots, UI mockups, charts and diagrams the task refers to.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1502,7 +1503,7 @@ export class ToolExecutor {
 				function: {
 					name: "describe_image",
 					description:
-						"[FILE] Describes an image file in words using a local vision model. Use when you cannot see images yourself, or need a second reading of a screenshot, chart or diagram. Pass a prompt to ask something specific about the image.",
+						"[FILE] Describes the image file at path in words using a local vision model; pass prompt to ask something specific. Use when you cannot see images yourself, or need a second reading of a screenshot, chart or diagram. Pass a prompt to ask something specific about the image.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1521,7 +1522,7 @@ export class ToolExecutor {
 				function: {
 					name: "read_pdf",
 					description:
-						"[FILE] Reads a PDF file and returns extracted text content, page count, and metadata (title, author, dates). Use for analyzing PDF documents, contracts, reports, or papers. For large PDFs, use read_pdf_page to read specific pages. Follow up with search_pdf to find specific content within a PDF.",
+						"[FILE] Reads the PDF file at path and returns its extracted text, page count and metadata (title, author, dates). Use for analyzing PDF documents, contracts, reports, or papers. For large PDFs, use read_pdf_page to read specific pages. Follow up with search_pdf to find specific content within a PDF.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1536,7 +1537,7 @@ export class ToolExecutor {
 				function: {
 					name: "read_pdf_page",
 					description:
-						"[FILE] Reads a specific page from a PDF file and returns its text content. Use when you only need content from certain pages of a large PDF, or when the full PDF text was truncated. Page numbers start at 1.",
+						"[FILE] Reads page pageNum (1-based) of the PDF file at path and returns its text. Use when you only need content from certain pages of a large PDF, or when the full PDF text was truncated. Page numbers start at 1.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1555,7 +1556,7 @@ export class ToolExecutor {
 				function: {
 					name: "search_pdf",
 					description:
-						"[FILE] Searches for text within a PDF file and returns matching positions with surrounding context. Use when you need to find specific content, keywords, or phrases in a PDF without reading the entire document.",
+						"[FILE] Searches the PDF file at path for query and returns matching positions with surrounding context. Use when you need to find specific content, keywords, or phrases in a PDF without reading the entire document.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1579,7 +1580,7 @@ export class ToolExecutor {
 				function: {
 					name: "extract_video",
 					description:
-						"[VIDEO] Extracts structured information from a video file: a scene summary, timestamped visual events, and a speech transcript. Use to understand screen recordings, demos, meetings, or clips, or to ingest a video into the knowledge graph. Runs fully local on-device. Requires the video-understanding capability to be installed (8gent vision install).",
+						"[VIDEO] Extracts from the video file at path a scene summary, timestamped visual events and a speech transcript. Use to understand screen recordings, demos, meetings, or clips, or to ingest a video into the knowledge graph. Runs fully local on-device. Requires the video-understanding capability to be installed (8gent vision install).",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1619,7 +1620,7 @@ export class ToolExecutor {
 				function: {
 					name: "vercel_get_deployments",
 					description:
-						"[DEPLOY] Returns recent deployments for a Vercel project including state, URL, and commit message. Use after vercel_list_projects to check deployment status.",
+						"[DEPLOY] Returns recent deployments for the Vercel project projectId, including state, URL and commit message. Use after vercel_list_projects to check deployment status.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1638,7 +1639,7 @@ export class ToolExecutor {
 				function: {
 					name: "vercel_deploy",
 					description:
-						"[DEPLOY] Triggers a redeployment of the latest deployment for a Vercel project. Returns the new deployment ID and URL.",
+						"[DEPLOY] Triggers a redeployment of the latest deployment for the Vercel project projectId. Returns the new deployment ID and URL.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1653,7 +1654,7 @@ export class ToolExecutor {
 				function: {
 					name: "vercel_set_env",
 					description:
-						"[DEPLOY] Creates or updates an environment variable on a Vercel project. Value is stored encrypted. Targets production, preview, and development by default.",
+						"[DEPLOY] Sets environment variable key to value on the Vercel project projectId, creating or updating it. Value is stored encrypted. Targets production, preview, and development by default.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1678,7 +1679,7 @@ export class ToolExecutor {
 				function: {
 					name: "vercel_get_env",
 					description:
-						"[DEPLOY] Returns all environment variables for a Vercel project (keys and targets only, values are encrypted).",
+						"[DEPLOY] Returns all environment variables for the Vercel project projectId (keys and targets only, values are encrypted).",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1693,7 +1694,7 @@ export class ToolExecutor {
 				function: {
 					name: "vercel_list_domains",
 					description:
-						"[DEPLOY] Returns all custom domains configured for a Vercel project with verification status.",
+						"[DEPLOY] Returns all custom domains for the Vercel project projectId with verification status.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1708,7 +1709,7 @@ export class ToolExecutor {
 				function: {
 					name: "vercel_get_deployment_logs",
 					description:
-						"[DEPLOY] Returns build/runtime logs for a specific deployment. Use the deployment ID from vercel_get_deployments.",
+						"[DEPLOY] Returns build/runtime logs for the deployment deploymentId (the uid from vercel_get_deployments). Use the deployment ID from vercel_get_deployments.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1727,7 +1728,7 @@ export class ToolExecutor {
 				function: {
 					name: "film_craft",
 					description:
-						"[VIDEO] Makes slide videos look designed, not like a default slideshow. action=list shows the film presets (palette, type, title card, lower third, grade, camera move, transition, pacing, music bed). action=plan takes slides [{title, kicker?, sub?, lower?, seconds}] and writes out_dir/film.sh: magick draws each slide (no drawtext needed), ffmpeg adds the camera move, text blur-in, transitions and grade, and muxes narration and/or bed; run it with bash. Picture length equals the sum of slide seconds. action=bed writes an original music bed wav (seconds, hits = cut times). action=mix returns the grade of grade_from with the titles of preset.",
+						"[VIDEO] Makes slide videos look designed, not like a default slideshow: action is list, plan, bed or mix. action=list shows the film presets (palette, type, title card, lower third, grade, camera move, transition, pacing, music bed). action=plan takes slides [{title, kicker?, sub?, lower?, seconds}] and writes out_dir/film.sh: magick draws each slide (no drawtext needed), ffmpeg adds the camera move, text blur-in, transitions and grade, and muxes narration and/or bed; run it with bash. Picture length equals the sum of slide seconds. action=bed writes an original music bed wav (seconds, hits = cut times). action=mix returns the grade of grade_from with the titles of preset.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1779,7 +1780,7 @@ export class ToolExecutor {
 				function: {
 					name: "deck_theme",
 					description:
-						"[DESIGN] Import-ready Marp deck themes, one per design system. USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
+						"[DESIGN] Import-ready Marp deck themes, one per design system: action is list, apply (to deck) or mix (palette plus type). USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1903,7 +1904,7 @@ export class ToolExecutor {
 				function: {
 					name: "recall",
 					description:
-						"[MEMORY] Returns matching facts from all memory layers (session, project, global) ranked by relevance. Use this when you need context about the user, project conventions, past decisions, or previously learned information. Search with broad keywords first, then narrow down. If no results, try synonyms or related terms. Useful at the start of a task to check for prior context.",
+						"[MEMORY] Pass query (keywords); returns matching facts from all memory layers (session, project, global) ranked by relevance. Use this when you need context about the user, project conventions, past decisions, or previously learned information. Search with broad keywords first, then narrow down. If no results, try synonyms or related terms. Useful at the start of a task to check for prior context.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1928,7 +1929,7 @@ export class ToolExecutor {
 				function: {
 					name: "run_computer_task",
 					description:
-						"[DESKTOP] Run an autonomous multi-step computer-use task. The agent perceives the screen (accessibility tree first, screenshot as fallback) and uses mouse/keyboard tools to complete the goal. Use for tasks that span multiple apps or require navigating a GUI. The vision model is configured via ~/.8gent/config.json vision.computerUseModel.",
+						"[DESKTOP] Runs an autonomous multi-step computer-use task until goal (plain words) is done on the desktop. The agent perceives the screen (accessibility tree first, screenshot as fallback) and uses mouse/keyboard tools to complete the goal. Use for tasks that span multiple apps or require navigating a GUI. The vision model is configured via ~/.8gent/config.json vision.computerUseModel.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1951,7 +1952,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_open",
 					description:
-						"Open a URL in a new 8gent Browser tab and return its tab id, title, numbered elements and page text.",
+						"Opens url in a new 8gent Browser tab and returns its tab id, title, numbered elements and page text.",
 					parameters: {
 						type: "object",
 						properties: {

@@ -346,3 +346,76 @@ describe("render_video_deck catalog line carries its spec shape (#4172)", () => 
 		expect(Object.keys(slide?.properties ?? {})).toEqual(expect.arrayContaining(SLIDE_FIELDS));
 	});
 });
+
+describe("every tool's first sentence carries its input shape within 140 characters (retro 13 Oct)", () => {
+	/** The description cap the text-tool catalog applies (DESC_CAP in packages/ai/text-tools.ts). */
+	const CAP = 140;
+	type Spec = { name: string; description: string; parameters: Record<string, unknown> };
+
+	/** The description exactly as the text-tool catalog line shows it to the model. */
+	async function shownDescription(spec: Spec): Promise<string> {
+		const { buildToolSystemPrompt } = await import("../../ai/text-tools.js");
+		const line = buildToolSystemPrompt([spec])
+			.split("\n")
+			.find((l) => l.startsWith(`${spec.name}(`)) as string;
+		const at = line.indexOf(") - ");
+		return at === -1 ? "" : line.slice(at + 4);
+	}
+
+	/** Each failing tool with the reasons, so the assertion message names them all. */
+	async function audit(specs: Spec[]): Promise<string[]> {
+		const failures: string[] = [];
+		for (const spec of specs) {
+			const reasons: string[] = [];
+			const flat = spec.description.replace(/\s+/g, " ").trim();
+			const first = flat.split(/(?<=\.)\s/)[0] ?? flat;
+			if (first.length > CAP) reasons.push(`first sentence is ${first.length} chars`);
+			const shown = await shownDescription(spec);
+			if (shown.endsWith("…")) reasons.push("cut mid-word by the catalog renderer");
+			const head = shown.slice(0, CAP);
+			const required = Array.isArray(spec.parameters.required)
+				? (spec.parameters.required as string[])
+				: [];
+			const missing = required.filter((p) => !new RegExp(`\\b${p}\\b`).test(head));
+			if (missing.length > 0) reasons.push(`missing required ${missing.join(", ")}`);
+			if (reasons.length > 0) failures.push(`${spec.name}: ${reasons.join("; ")} | "${first}"`);
+		}
+		return failures;
+	}
+
+	it("packages/eight/tools.ts: every tool definition passes, conditional ones included", async () => {
+		const { MCP_LEAN_TOOL_DEFS, POWERSHELL_TOOL_DEF, ToolExecutor } = await import("../tools.js");
+		const { POST_MESSAGE_TOOL_DEF } = await import("../../ai/post-message.js");
+		const { toolDefsToSpecs } = await import("../../ai/text-tool-endpoint.js");
+		type Defs = Parameters<typeof toolDefsToSpecs>[0];
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "catalog-all-")));
+		try {
+			const base = new ToolExecutor(dir).getToolDefinitions() as Defs;
+			// Tools advertised only on some hosts (lean MCP, Windows, a tg-group helper) are audited too.
+			const have = new Set(base.map((d) => d.function?.name));
+			const extra = [...MCP_LEAN_TOOL_DEFS, POWERSHELL_TOOL_DEF, POST_MESSAGE_TOOL_DEF].filter(
+				(d) => !have.has(d.function.name),
+			) as Defs;
+			const specs = toolDefsToSpecs([...base, ...extra]) as Spec[];
+			expect(specs.length).toBeGreaterThan(40);
+			const failures = await audit(specs);
+			expect(failures, `\n${failures.join("\n")}\n`).toEqual([]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("packages/ai/tools.ts: every AI SDK tool passes", async () => {
+		const { asSchema } = await import("ai");
+		const { agentTools } = await import("../../ai/tools.js");
+		const specs: Spec[] = [];
+		for (const [name, def] of Object.entries(agentTools)) {
+			const t = def as { description?: string; inputSchema: Parameters<typeof asSchema>[0] };
+			const parameters = (await asSchema(t.inputSchema).jsonSchema) as Record<string, unknown>;
+			specs.push({ name, description: t.description ?? "", parameters });
+		}
+		expect(specs.length).toBeGreaterThan(40);
+		const failures = await audit(specs);
+		expect(failures, `\n${failures.join("\n")}\n`).toEqual([]);
+	});
+});
