@@ -429,6 +429,46 @@ describe("escape probes go to the judge", () => {
 			expect(ok(cmd), cmd).toBe(false);
 	});
 
+	test("a quoted glob, tilde or option-like output is no opinion: ImageMagick globs it itself", () => {
+		// The shell leaves '*.png' alone, but convert's ExpandFilenames expands it: every match but
+		// the last is read as an input and the last is written, through a symlink if it is one.
+		symlinkSync(join(outside, "list.txt"), join(ws, "link.png"));
+		for (const tool of ["magick", "convert"])
+			for (const out of [
+				"'*.png'",
+				'"*.png"',
+				"'?.png'",
+				"'[ab].png'",
+				"'x{a,b}.png'",
+				"'sub/*.png'",
+				"'~/x.png'",
+				"'-x.png'",
+				"'+x.png'",
+			]) {
+				const cmd = `${tool} -size 9x9 xc:red ${out}`;
+				expect(ok(cmd), cmd).toBe(false);
+				expect(ok(`${tool} xc:red -write ${out} out.png`), `-write ${out}`).toBe(false);
+			}
+		// A quoted space is still a plain path.
+		expect(ok("magick xc:red 'my frame.png'")).toBe(LANE);
+	});
+
+	test("-font naming an entry of the working directory is no opinion: ImageMagick opens it", () => {
+		expect(ok("magick -font Didot label:hi out.png")).toBe(LANE);
+		put("Didot", "not a font");
+		expect(ok("magick -font Didot label:hi out.png")).toBe(false);
+		expect(ok("magick -font 'Didot' caption:hi out.png")).toBe(false);
+		// -family is looked up by name only, never opened as a file.
+		expect(ok("magick -family Didot label:hi out.png")).toBe(LANE);
+		// A folder or a dangling link of that name counts too.
+		symlinkSync(join(ws, "nowhere"), join(ws, "Futura"));
+		expect(ok("magick -font Futura label:hi out.png")).toBe(false);
+		// After a cd prefix the lookup is from the folder ImageMagick runs in.
+		put("sub/Avenir", "not a font");
+		expect(ok("magick -font Avenir label:hi out.png", join(ws, "sub"), env, ws)).toBe(false);
+		expect(ok("magick -font Avenir label:hi out.png")).toBe(LANE);
+	});
+
 	test("a non-ASCII or control character is no opinion", () => {
 		expect(ok("magick caption:'caf\u00e9' out.png")).toBe(false);
 		expect(ok("magick caption:'a\tb' out.png")).toBe(false);
@@ -511,6 +551,25 @@ describe("the binary and the configuration are not the workspace's", () => {
 		symlinkSync(ws, join(outside, "xdg", "ImageMagick"));
 		expect(ok(CMD, ws, { ...env, XDG_CONFIG_HOME: join(outside, "xdg") })).toBe(false);
 		expect(ok(CMD, ws, { ...env, XDG_CONFIG_HOME: "rel" })).toBe(false);
+	});
+
+	test("fontconfig's per-user configuration or font folders resolving into the workspace", () => {
+		const home = join(outside, "home");
+		for (const rel of [
+			".fonts",
+			".fonts.conf",
+			join(".config", "fontconfig"),
+			join(".local", "share", "fonts"),
+		]) {
+			mkdirSync(join(home, rel, ".."), { recursive: true });
+			symlinkSync(ws, join(home, rel));
+			expect(ok(CMD), rel).toBe(false);
+			rmSync(join(home, rel));
+		}
+		expect(ok(CMD)).toBe(LANE);
+		expect(ok(CMD, ws, { ...env, XDG_CONFIG_HOME: ws })).toBe(false);
+		expect(ok(CMD, ws, { ...env, XDG_DATA_HOME: ws })).toBe(false);
+		expect(ok(CMD, ws, { ...env, XDG_DATA_HOME: join(outside, "data") })).toBe(LANE);
 	});
 
 	test("an ImageMagick configuration file in the working directory", () => {

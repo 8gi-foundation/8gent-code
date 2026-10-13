@@ -20,7 +20,8 @@
  *     `!`;
  *   - the first word is exactly `magick` or `convert`; no env prefix;
  *   - every option is in OPTIONS below with each argument passing its validator (colors, numbers,
- *     geometry, plain names, a font NAME with no `/`, a `-draw` of one shape primitive with numeric
+ *     geometry, plain names, a font NAME with no `/` that is not also an entry of the working
+ *     directory (ImageMagick opens such a name as a font file), a `-draw` of one shape primitive with numeric
  *     points only, so no `image` primitive, no `text`, no `url(...)`); anything else (`-script`,
  *     `-read`, `-define`, `-set`, `-limit`, `-policy`, `-debug`, `-log`, `-monitor`,
  *     `-authenticate`, `-tile`, `-texture`, `-profile`, `-fx`, `-format`, `-print`, `-path`,
@@ -34,7 +35,7 @@
  *     `text:`, `txt:`, `inline:`, `pango:`, `fd:`, `vid:`, `x:`, `screenshot:`, `clipboard:`,
  *     `print:`, `show:`, `win:`, `ps:`, `eps:`, `pdf:` (Ghostscript), `info:`, `mpr:`;
  *   - the output (the last word) and every `-write`/`+write` target is a path with no coder prefix
- *     (no `:`), no `%`, ending .png, .jpg, .jpeg, .webp or .gif, that resolves inside the working
+ *     (no `:`), no `%`, no glob character or `~` (ImageMagick globs a quoted `'*.png'` itself), ending .png, .jpg, .jpeg, .webp or .gif, that resolves inside the working
  *     directory through the workspace boundary resolver (checkPath: realpath of the nearest
  *     existing ancestor, so an existing symlinked folder is followed), has no dot segment in the
  *     project other than `.tmp`, no symlink among its existing ancestors below the working
@@ -49,7 +50,8 @@
  *     (pathOutsideWorkspace, shared with the deck-render and tg-notify lanes): the `magick` that
  *     runs cannot be one the workspace planted;
  *   - no MAGICK_* variable and no FONTCONFIG_FILE/FONTCONFIG_PATH; $HOME/.config/ImageMagick,
- *     $HOME/.magick and $XDG_CONFIG_HOME/ImageMagick (when set) resolve outside the roots; and
+ *     $HOME/.magick, $XDG_CONFIG_HOME/ImageMagick and the per-user fontconfig configuration and
+ *     font folders (when set) resolve outside the roots; and
  *     neither root holds an ImageMagick configuration file of its own name (CONFIG_NAMES), which
  *     some builds read from the current directory. So ImageMagick's policy.xml, delegates.xml
  *     (a command per format) and type.xml cannot come from the workspace.
@@ -244,6 +246,15 @@ function gradientValue(v: string): boolean {
 /** Image files this lane lets a render write. */
 const OUTPUT_EXT = /\.(?:png|jpe?g|webp|gif)$/i;
 
+/**
+ * Characters an output path may hold. No glob character (`*` `?` `[` `]` `{` `}`) and no `~`:
+ * the shell leaves a quoted glob alone, but ImageMagick's own ExpandFilenames expands it, and
+ * `convert ... '*.png'` turns every match but the last into an input (a workspace file read) and
+ * writes the last, through a symlink if it is one (#4180 review). The first character is not
+ * `-` or `+`, so the output can never be read as an option.
+ */
+const OUTPUT_CHARS = /^[A-Za-z0-9_./ ,=][A-Za-z0-9_./ ,+=-]*$/;
+
 /** ImageMagick configuration file names; some builds read them from the current directory. */
 const CONFIG_NAMES = [
 	"policy.xml",
@@ -284,7 +295,7 @@ function noSymlinkBelow(abs: string, root: string): boolean {
  */
 function outputOk(raw: string | undefined, root: string, project: string): boolean {
 	if (!raw || raw.includes(":") || raw.includes("%")) return false;
-	if (!OUTPUT_EXT.test(raw)) return false;
+	if (!OUTPUT_CHARS.test(raw) || !OUTPUT_EXT.test(raw)) return false;
 	// Containment through the shared resolver: it follows every existing symlink on the way.
 	if (!checkPath(raw, root).allowed) return false;
 	const abs = path.resolve(root, raw);
@@ -344,6 +355,10 @@ export function magickRenderInProject(
 					const v = args[++i];
 					if (v === undefined || !check(v)) return NO;
 				}
+				// ImageMagick loads `-font NAME` as a file when NAME exists relative to the
+				// current directory (annotate.c: IsPathAccessible before the type lookup), so a
+				// font name that is also a workspace entry is a file read (#4180 review).
+				if (w === "-font" && lstatOrNull(path.join(root, args[i]))) return NO;
 				continue;
 			}
 			// An image the command reads: a built-in generator, never a file.
@@ -359,10 +374,23 @@ export function magickRenderInProject(
 		const pathEnv = env.PATH ?? process.env.PATH ?? "";
 		if (roots.some((r) => !pathOutsideWorkspace(r, pathEnv))) return NO;
 		if (Object.keys(env).some((k) => CONFIG_ENV.test(k) && env[k] !== undefined)) return NO;
-		const { HOME: home, XDG_CONFIG_HOME: xdg } = env;
-		if (home && !outsideRoots(path.join(home, ".config", "ImageMagick"), roots)) return NO;
-		if (home && !outsideRoots(path.join(home, ".magick"), roots)) return NO;
-		if (xdg && !outsideRoots(path.join(xdg, "ImageMagick"), roots)) return NO;
+		const { HOME: home, XDG_CONFIG_HOME: xdg, XDG_DATA_HOME: xdgData } = env;
+		const userConfig = [
+			...(home
+				? [
+						path.join(home, ".config", "ImageMagick"),
+						path.join(home, ".magick"),
+						// fontconfig: per-user configuration and font folders (FreeType parses them).
+						path.join(home, ".config", "fontconfig"),
+						path.join(home, ".fonts.conf"),
+						path.join(home, ".fonts"),
+						path.join(home, ".local", "share", "fonts"),
+					]
+				: []),
+			...(xdg ? [path.join(xdg, "ImageMagick"), path.join(xdg, "fontconfig")] : []),
+			...(xdgData ? [path.join(xdgData, "fonts")] : []),
+		];
+		if (userConfig.some((d) => !outsideRoots(d, roots))) return NO;
 		for (const r of roots)
 			for (const n of CONFIG_NAMES) if (lstatOrNull(path.join(r, n))) return NO;
 
