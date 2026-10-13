@@ -36,7 +36,7 @@ import {
 	describeResult,
 	detectChannel,
 	latestBinaryRelease,
-	latestFromNpm,
+	latestForNpmChannel,
 	runSelfUpdate,
 } from "./self-update";
 import { type ExecFn, runSourceUpdate } from "./source-update";
@@ -164,7 +164,7 @@ export async function checkUpdate(o: {
 	try {
 		let available: string;
 		if (ch === "npm") {
-			available = await latestFromNpm(o.fetchImpl);
+			available = (await latestForNpmChannel(o.fetchImpl, o.releasesUrl)).version;
 		} else {
 			const names = binaryAssetNames(o.platform, o.arch);
 			if (names.length === 0)

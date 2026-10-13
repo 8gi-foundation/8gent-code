@@ -23,7 +23,9 @@ import {
 	detectChannel,
 	hopAllowed,
 	latestBinaryRelease,
+	latestForNpmChannel,
 	npmInstallCommand,
+	npmTarballName,
 	probeVersionWithTimeout,
 	runSelfUpdate,
 	sumFor,
@@ -211,6 +213,146 @@ describe("npm channel", () => {
 			log: () => {},
 		});
 		expect(r.status).toBe("failed");
+	});
+});
+
+describe("npm channel from the GitHub release (#3658)", () => {
+	let dir: string;
+	beforeEach(() => {
+		dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "self-update-npm-"));
+	});
+	afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+	const DL = "https://github.com/8gi-foundation/8gent-code/releases/download";
+	const tgz = npmTarballName("0.20.0");
+	const tgzBytes = new TextEncoder().encode("NPM-TARBALL-0.20.0");
+	const tgzSum = createHash("sha256").update(tgzBytes).digest("hex");
+	const rel = (tag: string, names: string[]) => ({
+		tag_name: tag,
+		draft: false,
+		prerelease: false,
+		assets: names.map((name) => ({ name, browser_download_url: `${DL}/${tag}/${name}` })),
+	});
+	// The real state on 13 Oct 2026: npm latest 0.17.0, v0.19.0 public with no
+	// assets, and (once the release PR merges) v0.20.0 with the tarball.
+	const routes = (npm: Routes, sums = `${tgzSum}  ${tgz}\n`): Routes => ({
+		...npm,
+		[RELEASES]: {
+			body: [
+				rel("v0.20.0", [tgz, "SHA256SUMS"]),
+				rel("v0.19.0", []),
+				rel("v2.1.0", []),
+				rel("desktop-v0.1.0", ["8gent-linux-x64"]),
+			],
+		},
+		[`${DL}/v0.20.0/${tgz}`]: { body: tgzBytes },
+		[`${DL}/v0.20.0/SHA256SUMS`]: { body: sums },
+	});
+	const update = (
+		fetchImpl: FetchLike,
+		runs: { args: string[]; staged: string }[],
+		extra: Partial<Parameters<typeof runSelfUpdate>[0]> = {},
+	) =>
+		runSelfUpdate({
+			currentVersion: "0.18.0",
+			channel: "npm",
+			execPath: "x",
+			platform: "linux",
+			releasesUrl: RELEASES,
+			fetchImpl,
+			tmpDir: dir,
+			signingKey: "",
+			run: async (_cmd, args) => {
+				const file = args[2];
+				runs.push({ args, staged: file.startsWith("/") ? readFileSync(file, "utf8") : "" });
+				return 0;
+			},
+			log: () => {},
+			...extra,
+		});
+
+	test("tarball name is npm pack's, as release.yml attaches it", () => {
+		expect(npmTarballName("0.18.0")).toBe("8gi-foundation-8gent-code-0.18.0.tgz");
+	});
+
+	test("the regression: npm stuck at 0.17.0 no longer hides a newer release", async () => {
+		const runs: { args: string[]; staged: string }[] = [];
+		const r = await update(fakeFetch(routes(npmLatest("0.17.0"))), runs);
+		expect(r).toEqual({ status: "updated", from: "0.18.0", to: "0.20.0", channel: "npm" });
+		expect(runs).toHaveLength(1);
+		expect(runs[0].args[0]).toBe("install");
+		expect(runs[0].args[1]).toBe("-g");
+		expect(runs[0].args[2].endsWith(`/${tgz}`)).toBe(true);
+		expect(runs[0].args[3]).toBe("--force");
+		// npm installed exactly the verified bytes, and nothing is left behind.
+		expect(runs[0].staged).toBe("NPM-TARBALL-0.20.0");
+		expect(readdirSync(dir)).toEqual([]);
+	});
+
+	test("npm wins when it is as new as the release: installed by name, nothing downloaded", async () => {
+		const runs: { args: string[]; staged: string }[] = [];
+		const f = fakeFetch(routes(npmLatest("0.20.0")));
+		const r = await update(f, runs);
+		expect(r.status).toBe("updated");
+		expect(runs[0].args).toEqual(["install", "-g", "@8gi-foundation/8gent-code@0.20.0", "--force"]);
+		expect(f.calls.some((u) => u.endsWith(".tgz"))).toBe(false);
+	});
+
+	test("a checksum mismatch refuses the tarball and npm never runs", async () => {
+		const runs: { args: string[]; staged: string }[] = [];
+		const r = await update(
+			fakeFetch(routes(npmLatest("0.17.0"), `${"0".repeat(64)}  ${tgz}\n`)),
+			runs,
+		);
+		expect(r.status).toBe("failed");
+		expect(describeResult(r)).toContain("checksum mismatch");
+		expect(runs).toEqual([]);
+		expect(readdirSync(dir)).toEqual([]);
+	});
+
+	test("SHA256SUMS that does not list the tarball is refused", async () => {
+		const runs: { args: string[]; staged: string }[] = [];
+		const r = await update(fakeFetch(routes(npmLatest("0.17.0"), "abc  other\n")), runs);
+		expect(r.status).toBe("failed");
+		expect(runs).toEqual([]);
+	});
+
+	test("registry down: the release still serves the npm channel", async () => {
+		const target = await latestForNpmChannel(fakeFetch(routes({})), RELEASES);
+		expect(target.version).toBe("0.20.0");
+		expect(target.release?.asset).toBe(tgz);
+	});
+
+	test("GitHub down: npm alone decides, as before", async () => {
+		const target = await latestForNpmChannel(fakeFetch(npmLatest("0.17.0")), RELEASES);
+		expect(target).toEqual({ version: "0.17.0", release: null });
+	});
+
+	test("both down is a failure, not a crash", async () => {
+		await expect(latestForNpmChannel(fakeFetch({}), RELEASES)).rejects.toThrow(
+			"npm registry answered 404",
+		);
+	});
+
+	test("a release without the tarball is ignored, so a lower npm is still refused", async () => {
+		const f = fakeFetch({
+			...npmLatest("0.17.0"),
+			[RELEASES]: { body: [rel("v0.19.0", [])] },
+		});
+		const r = await update(f, []);
+		expect(r).toEqual({
+			status: "refused-downgrade",
+			from: "0.18.0",
+			to: "0.17.0",
+			channel: "npm",
+		});
+	});
+
+	test("Windows quotes the staged tarball path for the npm.cmd shell", () => {
+		expect(npmInstallCommand("0.20.0", "win32", "C:\\Users\\A B\\x.tgz").args[2]).toBe(
+			'"C:\\Users\\A B\\x.tgz"',
+		);
+		expect(npmInstallCommand("0.20.0", "linux", "/tmp/x.tgz").args[2]).toBe("/tmp/x.tgz");
 	});
 });
 

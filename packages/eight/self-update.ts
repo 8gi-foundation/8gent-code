@@ -17,7 +17,8 @@
  */
 import { spawn } from "node:child_process";
 import { createHash, createPublicKey, verify as cryptoVerify, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const NPM_PACKAGE = "@8gi-foundation/8gent-code";
@@ -223,10 +224,11 @@ interface GhRelease {
 /**
  * Newest published vX.Y.Z GitHub release that carries this platform's binary
  * and SHA256SUMS. Releases without assets, drafts and prereleases are skipped.
+ * `asset` may depend on the version (the npm tarball is named after it).
  */
 export async function latestBinaryRelease(
 	fetchImpl: FetchLike,
-	asset: string,
+	assetFor: string | ((version: string) => string),
 	releasesUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100`,
 ): Promise<ReleaseBinary | null> {
 	const res = await fetchChecked(fetchImpl, releasesUrl, "list", {
@@ -239,6 +241,7 @@ export async function latestBinaryRelease(
 		if (r.draft || r.prerelease || !r.tag_name) continue;
 		const v = /^v(\d+\.\d+\.\d+)$/.exec(r.tag_name)?.[1];
 		if (!v) continue;
+		const asset = typeof assetFor === "string" ? assetFor : assetFor(v);
 		const urls: Record<string, string> = {};
 		for (const a of r.assets ?? []) {
 			if (a.name && a.browser_download_url) urls[a.name] = a.browser_download_url;
@@ -247,6 +250,39 @@ export async function latestBinaryRelease(
 		if (!best || compareVersions(v, best.version) > 0) best = { version: v, urls, asset };
 	}
 	return best;
+}
+
+/** The npm tarball release.yml attaches to every GitHub release (`npm pack` naming). */
+export function npmTarballName(version: string): string {
+	return `${NPM_PACKAGE.slice(1).replace("/", "-")}-${version}.tgz`;
+}
+
+/** What the npm channel installs: from npm, or the same tarball from the GitHub release. */
+export type NpmTarget = { version: string; release: ReleaseBinary | null };
+
+/**
+ * The npm channel's newest version. npm's `latest` dist-tag, unless the newest
+ * GitHub release carries a newer npm tarball: then that tarball (#3658). npm
+ * latest sat at 0.17.0 from May to October while releases moved on, because
+ * the publish needs a credential CI did not have; npm users must not depend on
+ * it. Either source may be down; only both failing is an error.
+ */
+export async function latestForNpmChannel(
+	fetchImpl: FetchLike,
+	releasesUrl?: string,
+): Promise<NpmTarget> {
+	const [npm, rel] = await Promise.allSettled([
+		latestFromNpm(fetchImpl),
+		latestBinaryRelease(fetchImpl, npmTarballName, releasesUrl),
+	]);
+	const fromRelease = rel.status === "fulfilled" ? rel.value : null;
+	if (npm.status === "rejected" && !fromRelease) throw npm.reason;
+	if (
+		npm.status === "fulfilled" &&
+		(!fromRelease || compareVersions(fromRelease.version, npm.value) <= 0)
+	)
+		return { version: npm.value, release: null };
+	return { version: (fromRelease as ReleaseBinary).version, release: fromRelease };
 }
 
 // ── Signature (minisign) ─────────────────────────────────────────────
@@ -304,6 +340,8 @@ export interface SelfUpdateOptions {
 	releasesUrl?: string;
 	/** Release signing key; defaults to RELEASE_SIGNING_KEY. Tests only. */
 	signingKey?: string;
+	/** Where the npm channel stages a release tarball; defaults to os.tmpdir(). Tests only. */
+	tmpDir?: string;
 }
 
 export type SelfUpdateResult =
@@ -313,17 +351,22 @@ export type SelfUpdateResult =
 	| { status: "source"; message: string }
 	| { status: "failed"; message: string; channel: InstallChannel };
 
-/** The npm command for an exact version. Windows needs npm.cmd through a shell. */
+/**
+ * The npm command for an exact version, or for a verified release tarball on
+ * disk. Windows needs npm.cmd through a shell, so a file path is quoted there.
+ */
 export function npmInstallCommand(
 	version: string,
 	platform: string,
+	tarball?: string,
 ): { cmd: string; args: string[]; shell: boolean } {
 	const win = platform === "win32";
+	const spec = tarball ? (win ? `"${tarball}"` : tarball) : `${NPM_PACKAGE}@${version}`;
 	return {
 		cmd: win ? "npm.cmd" : "npm",
 		// Exact version, never a tag: what was checked is what gets installed.
 		// --force replaces stale `8` / `8gent` / `8gent-code` bin links (EEXIST).
-		args: ["install", "-g", `${NPM_PACKAGE}@${version}`, "--force"],
+		args: ["install", "-g", spec, "--force"],
 		shell: win,
 	};
 }
@@ -418,6 +461,62 @@ function swapInto(staged: string, target: string, platform: string): void {
 	}
 }
 
+/** The release's SHA256SUMS, signature-checked when a release key is configured. */
+async function verifiedSums(
+	o: Required<Pick<SelfUpdateOptions, "fetchImpl">> & SelfUpdateOptions,
+	rel: ReleaseBinary,
+): Promise<{ ok: true; sums: string } | { ok: false; problem: string }> {
+	const sumsBytes = await download(o.fetchImpl, rel.urls.SHA256SUMS);
+	const key = (o.signingKey ?? RELEASE_SIGNING_KEY).trim();
+	if (key) {
+		const sigUrl = rel.urls["SHA256SUMS.minisig"];
+		if (!sigUrl)
+			return {
+				ok: false,
+				problem: `v${rel.version} has no SHA256SUMS.minisig; refusing unsigned checksums`,
+			};
+		const sig = new TextDecoder().decode(await download(o.fetchImpl, sigUrl));
+		if (!verifyMinisign(sumsBytes, sig, key))
+			return {
+				ok: false,
+				problem: `SHA256SUMS for v${rel.version} does not carry a valid release signature; nothing changed`,
+			};
+	}
+	return { ok: true, sums: new TextDecoder().decode(sumsBytes) };
+}
+
+/**
+ * The npm channel from a GitHub release: download the npm tarball, check it
+ * against SHA256SUMS (signed when a release key is configured), then
+ * `npm install -g <file>`. Same bytes release.yml would have published to npm.
+ */
+async function updateNpmFromRelease(
+	o: Required<Pick<SelfUpdateOptions, "fetchImpl" | "log">> & SelfUpdateOptions,
+	rel: ReleaseBinary,
+	platform: string,
+): Promise<string | null> {
+	const name = rel.asset;
+	const checked = await verifiedSums(o, rel);
+	if (!checked.ok) return checked.problem;
+	const expected = sumFor(checked.sums, name);
+	if (!expected)
+		return `SHA256SUMS for v${rel.version} does not list ${name}; refusing an unverified package`;
+	const bytes = await download(o.fetchImpl, rel.urls[name]);
+	const actual = sha256Hex(bytes);
+	if (actual !== expected)
+		return `checksum mismatch for ${name} (expected ${expected}, got ${actual}); nothing changed`;
+	const dir = mkdtempSync(join(o.tmpDir ?? tmpdir(), "8gent-update-"));
+	try {
+		const file = join(dir, name);
+		writeFileSync(file, bytes, { flag: "wx" });
+		const c = npmInstallCommand(rel.version, platform, file);
+		const code = await (o.run ?? defaultRun)(c.cmd, c.args, { shell: c.shell });
+		return code === 0 ? null : `npm exited ${code}. Try: npm install -g ${rel.urls[name]} --force`;
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 /**
  * Download, verify and swap the running binary. Order: signed SHA256SUMS
  * (when a release key is configured), the binary's SHA256, then the new
@@ -430,16 +529,9 @@ async function updateBinary(
 	names: string[],
 ): Promise<string | null> {
 	const platform = o.platform ?? process.platform;
-	const sumsBytes = await download(o.fetchImpl, rel.urls.SHA256SUMS);
-	const key = (o.signingKey ?? RELEASE_SIGNING_KEY).trim();
-	if (key) {
-		const sigUrl = rel.urls["SHA256SUMS.minisig"];
-		if (!sigUrl) return `v${rel.version} has no SHA256SUMS.minisig; refusing unsigned checksums`;
-		const sig = new TextDecoder().decode(await download(o.fetchImpl, sigUrl));
-		if (!verifyMinisign(sumsBytes, sig, key))
-			return `SHA256SUMS for v${rel.version} does not carry a valid release signature; nothing changed`;
-	}
-	const sums = new TextDecoder().decode(sumsBytes);
+	const checked = await verifiedSums(o, rel);
+	if (!checked.ok) return checked.problem;
+	const sums = checked.sums;
 	const target = o.execPath;
 	let lastProblem = `no ${names.join(" or ")} on v${rel.version}`;
 	for (const name of names) {
@@ -495,11 +587,17 @@ export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdate
 
 	try {
 		if (ch === "npm") {
-			const latest = await latestFromNpm(o.fetchImpl);
-			const d = decideUpdate(o.currentVersion, latest);
+			const target = await latestForNpmChannel(o.fetchImpl, o.releasesUrl);
+			const d = decideUpdate(o.currentVersion, target.version);
 			if (d.action === "current") return { status: "current", version: d.version, channel: ch };
 			if (d.action === "refuse-downgrade")
 				return { status: "refused-downgrade", from: d.from, to: d.to, channel: ch };
+			if (target.release) {
+				o.log(`Updating ${NPM_PACKAGE} v${d.from} -> v${d.to} from the GitHub release...`);
+				const err = await updateNpmFromRelease(o, target.release, platform);
+				if (err) return { status: "failed", channel: ch, message: err };
+				return { status: "updated", from: d.from, to: d.to, channel: ch };
+			}
 			const c = npmInstallCommand(d.to, platform);
 			o.log(`Updating ${NPM_PACKAGE} v${d.from} -> v${d.to} with npm...`);
 			const code = await (o.run ?? defaultRun)(c.cmd, c.args, { shell: c.shell });

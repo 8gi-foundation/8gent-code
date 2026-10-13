@@ -122,6 +122,27 @@ describe("8gent update", () => {
 		expect(b.lines.join("\n")).toContain("newest npm version is v0.17.0, lower than this v0.18.0");
 	});
 
+	test("--check on the npm channel sees a release npm does not have yet (#3658)", async () => {
+		const tgz = "8gi-foundation-8gent-code-0.20.0.tgz";
+		const f = fakeFetch({
+			...npmLatest("0.17.0"),
+			[RELEASES]: {
+				body: [
+					{
+						tag_name: "v0.20.0",
+						draft: false,
+						prerelease: false,
+						assets: [tgz, "SHA256SUMS"].map((name) => ({ name, browser_download_url: `${DL}/v0.20.0/${name}` })),
+					},
+				],
+			},
+		});
+		const { deps, lines, ran } = binaryDeps(f, { modulePath: "/usr/lib/node_modules/@8gi-foundation/8gent-code/dist/cli.js", embedded: false });
+		expect(await runUpdateCommand(["--check"], deps)).toBe(0);
+		expect(lines.join("\n")).toContain("v0.20.0 is available (this is v0.18.0, npm channel)");
+		expect(ran).toEqual([]);
+	});
+
 	test("--check on a source checkout compares with origin through git; the network is never touched", async () => {
 		const f = fakeFetch({});
 		const dir = mkdtempSync(join(tmpdir(), "src-co-"));
