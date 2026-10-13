@@ -5,9 +5,10 @@
  * Routes messages to the AgentPool, broadcasts agent events to clients.
  */
 
-import { telegramBridgeHealth } from "./bridge-health";
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
+import { SessionManager, defaultSessionsDir } from "../eight/session-manager";
+import { handleHarnessRoute } from "../harness/http";
 import {
 	SPEAK_URL_RE,
 	TableStore,
@@ -15,13 +16,10 @@ import {
 	handleTableSpeakHttp,
 	installTablePolicies,
 } from "../table/index";
-import { handleHarnessRoute } from "../harness/http";
 import { type AgentPool, KNOWN_CHANNELS } from "./agent-pool";
-import {
-	CLASSROOM_CHANNEL,
-	classroomCreateRefusal,
-	installClassroomPolicies,
-} from "./classroom";
+import { telegramBridgeHealth } from "./bridge-health";
+import { channelApprovals, isBridgeSecret, parseTurn } from "./channel-approvals";
+import { CLASSROOM_CHANNEL, classroomCreateRefusal, installClassroomPolicies } from "./classroom";
 import { type CronJob, addJob, getJobs, removeJob } from "./cron";
 import type {
 	DispatchHub,
@@ -31,9 +29,17 @@ import type {
 	SurfaceRegistry,
 	TokenVerifier,
 } from "./dispatch";
-import { channelApprovals, isBridgeSecret, parseTurn } from "./channel-approvals";
 import { type EventName, bus } from "./events";
 import { type GoalManager, type GoalRpcOutbound, handleGoalRpc } from "./goal-rpc";
+import { handleStageHttp } from "./huddle-stage";
+import {
+	handleLiveHttp,
+	installLiveAnatomy,
+	liveClose,
+	liveMessage,
+	liveOpen,
+} from "./live-anatomy";
+import { assertSafeBind, guardRequest, resolveBindHost } from "./origin-guard";
 import {
 	type ComputerWS,
 	handleComputerClose,
@@ -53,23 +59,13 @@ import {
 	handleStoreMessage,
 	handleStoreOpen,
 } from "./routes/store/index";
-import { handleStageHttp } from "./huddle-stage";
 import {
-	handleLiveHttp,
-	installLiveAnatomy,
-	liveClose,
-	liveMessage,
-	liveOpen,
-} from "./live-anatomy";
-import { assertSafeBind, guardRequest, resolveBindHost } from "./origin-guard";
-import { SessionManager, defaultSessionsDir } from "../eight/session-manager";
-import {
+	ResumeSecrets,
+	SHAREABLE_CHANNELS,
 	type SharedPool,
 	type SharedSessionInbound,
 	type SharedSessionOutbound,
 	type SharedStore,
-	ResumeSecrets,
-	SHAREABLE_CHANNELS,
 	handleResume,
 	handleSharedSession,
 	isSharedSessionType,
@@ -424,7 +420,10 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			}
 			// An unknown channel string is refused, never defaulted into a wider scope.
 			if (msg.channel && !(KNOWN_CHANNELS as readonly string[]).includes(msg.channel)) {
-				send(ws, { type: "error", message: `unknown channel: ${String(msg.channel).slice(0, 40)}` });
+				send(ws, {
+					type: "error",
+					message: `unknown channel: ${String(msg.channel).slice(0, 40)}`,
+				});
 				break;
 			}
 			const sessionId = generateSessionId();

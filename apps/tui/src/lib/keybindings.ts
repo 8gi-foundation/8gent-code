@@ -28,7 +28,11 @@ export const KEYBINDINGS: readonly KeyBinding[] = [
 	{ keys: "Ctrl+P", action: "Command palette", group: "core" },
 	{ keys: "Ctrl+C", action: "Save the session and quit", group: "core" },
 	{ keys: "@", action: "Pick a project file; Tab inserts its path", group: "prompt" },
-	{ keys: "!cmd", action: "Run a shell command; output goes with your next message", group: "prompt" },
+	{
+		keys: "!cmd",
+		action: "Run a shell command; output goes with your next message",
+		group: "prompt",
+	},
 	{ keys: "!!cmd", action: "Run a shell command; output stays here", group: "prompt" },
 	{ keys: "Ctrl+T", action: "New chat tab", group: "tabs" },
 	{ keys: "Ctrl+W", action: "Close the current tab", group: "tabs" },

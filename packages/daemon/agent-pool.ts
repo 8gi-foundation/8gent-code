@@ -516,7 +516,9 @@ export class AgentPool {
 		try {
 			write();
 		} catch (err) {
-			console.error(`[agent-pool] in-flight tool journal write failed for ${sessionId}: ${String(err)}`);
+			console.error(
+				`[agent-pool] in-flight tool journal write failed for ${sessionId}: ${String(err)}`,
+			);
 		}
 	}
 
@@ -737,8 +739,7 @@ export async function loadPoolConfig(): Promise<Partial<PoolConfig>> {
 		// The OpenRouter env key only for an openrouter runtime (#3261).
 		// fileConfig.apiKey names no provider, so it is treated as the
 		// OpenRouter key it has always been used as, and only for openrouter.
-		apiKey:
-			sessionApiKey(runtime) || (runtime === "openrouter" ? fileConfig?.apiKey : undefined),
+		apiKey: sessionApiKey(runtime) || (runtime === "openrouter" ? fileConfig?.apiKey : undefined),
 		maxTurns: fileConfig?.maxTurns,
 	};
 }
