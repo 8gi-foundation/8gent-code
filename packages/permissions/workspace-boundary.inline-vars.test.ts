@@ -99,6 +99,15 @@ describe("an assignment cannot smuggle a path outside", () => {
 		["backticks", "D=`echo /etc`; cat $D/passwd"],
 		["command substitution, used where main read nothing", "D=$(echo /etc); cat $D"],
 		["backticks inside double quotes", 'D="`pwd`"; cat "$D/../secret.txt"'],
+		// Process substitution: the value is a /dev/fd path the shell makes up at run time
+		["input process substitution", "D=<(echo /etc); cat $D/passwd"],
+		["output process substitution", "D=>(cat); cp secret.txt $D"],
+		// An operator on a bound name, with an expansion or an outside path inside it
+		["default holding a command substitution", "D=/home/dev/proj/x; cat ${D:-$(echo /etc)}/passwd"],
+		["default holding a host variable", "D=/home/dev/proj/x; cat ${D:-$HOME}/.ssh/id_rsa"],
+		["default holding backticks", 'D=/home/dev/proj/x; cat "${D:-`pwd`}/a"'],
+		["indirection through a bound name", "D=/home/dev/proj/x; E=D; cat ${!E}/a"],
+		["a bound name beside a host one", "D=/home/dev/proj/x; cat $D/a $OUT/b"],
 		["a host variable set nowhere, embedded", "D=src$SUFFIX; cat $D/main.ts"],
 		["cd into a variable the line also reads", "D=src; read D; cd $D; cat passwd"],
 		["a colon in the value is a path, not a search list", "D=/etc:/home/dev/proj; ls $D"],
