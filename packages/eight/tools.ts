@@ -1175,16 +1175,20 @@ export class ToolExecutor {
 				function: {
 					name: "edit_file",
 					description:
-						"[FILE] Returns confirmation after replacing an exact text match in a file with new text. Use this for surgical edits to existing files - prefer over write_file when changing a specific function or block. The oldText must match exactly (whitespace-sensitive). If the match fails, read_file first to get the exact current content, then retry.",
+						"[FILE] Replaces oldText (the exact existing line or block) with newText in place; to update a line, oldText is that whole line. Returns confirmation. Use this for surgical edits to existing files - prefer over write_file when changing a specific function or block. The oldText must match exactly (whitespace-sensitive). If the match fails, read_file first to get the exact current content, then retry.",
 					parameters: {
 						type: "object",
 						properties: {
 							path: { type: "string", description: "Path to the file" },
 							oldText: {
 								type: "string",
-								description: "Text to find and replace",
+								description:
+									"The exact existing text being changed, a whole line or block; after the edit the file contains newText and not oldText",
 							},
-							newText: { type: "string", description: "Replacement text" },
+							newText: {
+								type: "string",
+								description: "Replacement for oldText, in place",
+							},
 							startLine: {
 								type: "number",
 								description:
