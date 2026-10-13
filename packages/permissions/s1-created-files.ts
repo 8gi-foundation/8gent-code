@@ -44,9 +44,45 @@
  * command starts, so a test such as `[ -e target ]` inside the command sees
  * it; and a redirect the shell never opens (a branch not taken, or a command
  * that fails before it) leaves that empty file behind.
+ *
+ * Files a command's child processes create (#4159). The pilot's
+ * `bash video/build_slides.sh` ran ImageMagick, which wrote
+ * video/body_1-0.png and video/body_1-1.png; no redirect named them, so the
+ * later `rm -f video/body_1-0.png video/body_1-1.png` went to the judge and
+ * was blocked. `watchBorn` records them. Invariant: a path is recorded only
+ * if ALL hold:
+ *   - the command passed the same gates as redirect pinning (no rule fired,
+ *     no change of directory) and the working directory is neither the
+ *     filesystem root nor the home directory;
+ *   - a bounded walk of the working directory just before the command (after
+ *     redirect pinning) completed within its limits and did not list the
+ *     path: it did not exist then (an editor's save-by-rename of an existing
+ *     file keeps its path, so it is never recorded);
+ *   - the same bounded walk after the command finds it as a regular file
+ *     (lstat; never a symlink, FIFO or directory), outside any dot directory
+ *     and outside node_modules / vendor;
+ *   - its birth time is known (non-zero, finite) and falls between the start
+ *     of the command (floored to the second) and the end of it (plus 1 s of
+ *     skew): a hard link or rename of an older file keeps its old birth time
+ *     and is not recorded.
+ * At most MAX_BORN paths are recorded per command.
+ * Known window (accepted, the same class as the TOCTOU window in
+ * s1-rm-single.ts): another process that creates a NEW file in the working
+ * directory while the command runs has it recorded as this session's. It
+ * cannot make an existing file this session's.
  */
 
-import { constants, closeSync, fstatSync, lstatSync, openSync, realpathSync } from "node:fs";
+import {
+	constants,
+	type Dirent,
+	closeSync,
+	fstatSync,
+	lstatSync,
+	openSync,
+	readdirSync,
+	realpathSync,
+} from "node:fs";
+import { homedir } from "node:os";
 import * as path from "node:path";
 import { decideRules, maskQuotes } from "../decide/rules";
 import { inside } from "./s1-rm-nothing";
@@ -239,13 +275,100 @@ function pinTarget(abs: string, root: string, record: CreatedFiles): () => void 
 	};
 }
 
+const BORN_SKIP_DIRS = new Set(["node_modules", "vendor"]);
+const BORN_MAX_DEPTH = 4;
+const BORN_MAX_ENTRIES = 3000;
+/** At most this many files a command's children created are recorded per command. */
+const MAX_BORN = 200;
+const BORN_SKEW_MS = 1000;
+
+/**
+ * Every path under `root` the bounded walk reaches (dot entries, node_modules
+ * and vendor skipped; symlinks listed but never followed), and whether the
+ * walk read every directory it reached without hitting the entry limit.
+ * Each entry carries its Dirent.
+ */
+function walkTree(root: string): { paths: Map<string, Dirent>; complete: boolean } {
+	const paths = new Map<string, Dirent>();
+	let complete = true;
+	const walk = (dir: string, depth: number) => {
+		let items: Dirent[];
+		try {
+			items = readdirSync(dir, { withFileTypes: true });
+		} catch {
+			complete = false;
+			return;
+		}
+		for (const item of items) {
+			if (item.name.startsWith(".")) continue;
+			if (paths.size >= BORN_MAX_ENTRIES) {
+				complete = false;
+				return;
+			}
+			const full = path.join(dir, item.name);
+			paths.set(full, item);
+			// The depth limit is the same before and after, so it hides the same paths both times.
+			if (item.isDirectory() && !BORN_SKIP_DIRS.has(item.name) && depth < BORN_MAX_DEPTH)
+				walk(full, depth + 1);
+		}
+	};
+	walk(root, 0);
+	return { paths, complete };
+}
+
+/** True when `abs` is a regular file (lstat) born at or after `sinceMs` and no later than `untilMs`. */
+function bornBetween(abs: string, sinceMs: number, untilMs: number): boolean {
+	try {
+		const st = lstatSync(abs);
+		if (!st.isFile()) return false;
+		const born = Number(st.birthtimeMs);
+		if (!Number.isFinite(born) || born <= 0) return false;
+		return born >= sinceMs && born <= untilMs;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Bracket one command for the files its child processes create (#4159); see
+ * the module header for the invariant. `root` is the realpath of the working
+ * directory. The finisher records each new regular file the walk finds.
+ */
+export function watchBorn(root: string, record: CreatedFiles): () => void {
+	if (root === path.parse(root).root) return () => {};
+	try {
+		if (root === realpathSync(homedir())) return () => {};
+	} catch {
+		return () => {};
+	}
+	const since = Math.floor(Date.now() / 1000) * 1000;
+	const before = walkTree(root);
+	if (!before.complete) return () => {};
+	return () => {
+		try {
+			const until = Date.now() + BORN_SKEW_MS;
+			let recorded = 0;
+			for (const [abs, item] of walkTree(root).paths) {
+				if (recorded >= MAX_BORN) break;
+				if (before.paths.has(abs) || !item.isFile()) continue;
+				if (!bornBetween(abs, since, until)) continue;
+				record.record(abs);
+				recorded++;
+			}
+		} catch {
+			// Recording is best effort; it never affects the command.
+		}
+	};
+}
+
 /**
  * Bracket one shell command: call before it runs, and call the result after
  * it exits. Invariant: a target ends up recorded only if it is still the
  * inode `pinTarget` created for it (see `pinTarget` for each case). The
  * first MAX_PINNED distinct plain targets are pinned. A command any rule
  * escalates or blocks, a command that changes directory, or a working
- * directory that does not resolve pins nothing.
+ * directory that does not resolve pins nothing. The same command is also
+ * bracketed by `watchBorn` (#4159) for the files its children create.
  */
 export function watchRedirects(
 	command: string,
@@ -266,6 +389,9 @@ export function watchRedirects(
 			seen.add(abs);
 			watches.push(pinTarget(abs, root, record));
 		}
+		// After pinning, so a pinned target is "already there" to this walk and only
+		// the pin decides whether it is recorded.
+		watches.push(watchBorn(root, record));
 	} catch {
 		// Fall through with what was pinned, so every descriptor is closed.
 	}
