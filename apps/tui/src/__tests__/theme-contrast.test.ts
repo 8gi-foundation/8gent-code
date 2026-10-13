@@ -31,6 +31,7 @@ describe("text contrast, both themes (4.5:1 or better)", () => {
 				["rail row label (textTertiary)", p.textTertiary, p.bg],
 				["reply prose", p.prose, p.bg],
 				["user text (textSecondary)", p.textSecondary, p.bg],
+				["muted (CHECK state word, #3290)", p.muted, p.bg],
 				["user label (steel)", p.steel, p.bg],
 				["code chip text on its tint", p.textPrimary, p.border],
 				["danger red (risk HIGH, N deny, MIC on, fail) #3171", p.red, p.bg],
