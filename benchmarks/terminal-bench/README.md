@@ -16,7 +16,7 @@ Apache-2.0, 89 tasks, run by the Harbor harness.
 ## How it plugs in
 
 Harbor loads a custom class by import path (`module:Class`, passed by the run script). The class extends
-`BaseInstalledAgent`: `install()` runs once per task container, `run()` executes the
+Harbor installed-runner base class: `install()` runs once per task container, `run()` executes the
 command and Harbor then runs the task's own test script for the score.
 
 - Model string must be `ollama/<model>` or `lmstudio/<model>`. Any other provider is refused
