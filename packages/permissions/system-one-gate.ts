@@ -309,7 +309,8 @@ async function thresholdsFor(
 ): Promise<{ opts: BashGuardOptions; label: SystemOneThresholds }> {
 	const backend = await decider.backend();
 	// The hosted judge sends the command off the machine: never a safety judge here (#3652).
-	if (backend.name === "jev") throw new Error("the hosted jev judge is not allowed for the System One gate");
+	if (backend.name === "jev")
+		throw new Error("the hosted jev judge is not allowed for the System One gate");
 	const key = JSON.stringify([backend.name, backend.model]);
 	const hit = thresholdCache.get(key);
 	if (hit) return hit;

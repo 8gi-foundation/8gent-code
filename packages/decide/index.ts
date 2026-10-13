@@ -10,10 +10,22 @@
 
 import { JevBackend, jevForbidden, resolveJevKey } from "./backends/jev";
 import { LayaBackend } from "./backends/laya";
-import { LlamaCppBackend, type LlamaCppLoader, defaultLlamaCppLoader, llamaCppUnavailable, resolveGguf } from "./backends/llamacpp";
+import {
+	LlamaCppBackend,
+	type LlamaCppLoader,
+	defaultLlamaCppLoader,
+	llamaCppUnavailable,
+	resolveGguf,
+} from "./backends/llamacpp";
 import { MockBackend } from "./backends/mock";
 import { OllamaBackend, resolveOllamaHost } from "./backends/ollama";
-import { SHARED_JUDGE_NUM_CTX, detectBackend, listOllamaModels, pickModel, type ProbeResult } from "./probe";
+import {
+	type ProbeResult,
+	SHARED_JUDGE_NUM_CTX,
+	detectBackend,
+	listOllamaModels,
+	pickModel,
+} from "./probe";
 import {
 	type ChoiceAnswer,
 	type DecideBackend,
@@ -132,14 +144,23 @@ async function buildBackend(opts: DeciderOptions, avoidShared = false): Promise<
 	if (sel === "jev") {
 		const forbidden = jevForbidden(env);
 		if (forbidden) throw new DecideUnavailableError(`jev refused: ${forbidden}`);
-		return local(new JevBackend({ apiKey: resolveJevKey(env) ?? "", timeoutMs: opts.timeoutMs, fetch: opts.fetch }));
+		return local(
+			new JevBackend({
+				apiKey: resolveJevKey(env) ?? "",
+				timeoutMs: opts.timeoutMs,
+				fetch: opts.fetch,
+			}),
+		);
 	}
 	if (sel === "laya") return local(new LayaBackend(common));
 	const model = opts.model ?? env.EIGHT_DECIDE_MODEL;
 	if (sel === "llamacpp") {
 		const loader = opts.llamacppLoader ?? defaultLlamaCppLoader;
 		const gguf = resolveGguf(env, model);
-		if (!gguf.path) throw new DecideUnavailableError(`llamacpp: ${gguf.note ?? "no EIGHT_DECIDE_GGUF, OLLAMA_MODELS or HOME to find a GGUF"}`);
+		if (!gguf.path)
+			throw new DecideUnavailableError(
+				`llamacpp: ${gguf.note ?? "no EIGHT_DECIDE_GGUF, OLLAMA_MODELS or HOME to find a GGUF"}`,
+			);
 		const missing = await llamaCppUnavailable(loader);
 		if (missing) throw new DecideUnavailableError(missing);
 		return local(new LlamaCppBackend({ model: gguf.model, modelPath: gguf.path, loader }));
@@ -147,11 +168,16 @@ async function buildBackend(opts: DeciderOptions, avoidShared = false): Promise<
 	if (sel === "ollama") {
 		if (model) return local(new OllamaBackend({ ...common, model }));
 		const host = resolveOllamaHost(env);
-		const installed = await listOllamaModels(opts.fetch ?? ((i, n) => fetch(i, n)), host, 1_000).catch((err: Error) => {
+		const installed = await listOllamaModels(
+			opts.fetch ?? ((i, n) => fetch(i, n)),
+			host,
+			1_000,
+		).catch((err: Error) => {
 			throw new DecideUnavailableError(`ollama unreachable at ${host}: ${err.message}`);
 		});
 		const picked = pickModel(installed);
-		if (!picked) throw new DecideUnavailableError(`ollama at ${host} has no usable models installed`);
+		if (!picked)
+			throw new DecideUnavailableError(`ollama at ${host} has no usable models installed`);
 		return local(new OllamaBackend({ ...common, model: picked, host }));
 	}
 	const probe: ProbeResult = await detectBackend({
@@ -161,12 +187,24 @@ async function buildBackend(opts: DeciderOptions, avoidShared = false): Promise<
 		avoidShared,
 	});
 	if (probe.backend === "llamacpp" && probe.model && probe.path) {
-		return local(new LlamaCppBackend({ model: probe.model, modelPath: probe.path, loader: opts.llamacppLoader ?? undefined }));
+		return local(
+			new LlamaCppBackend({
+				model: probe.model,
+				modelPath: probe.path,
+				loader: opts.llamacppLoader ?? undefined,
+			}),
+		);
 	}
-	if (probe.backend === "laya") return local(new LayaBackend({ ...common, url: probe.url ?? undefined }));
+	if (probe.backend === "laya")
+		return local(new LayaBackend({ ...common, url: probe.url ?? undefined }));
 	if (probe.backend === "ollama" && probe.model) {
 		// Every Ollama judge pins its context (OllamaBackend default, #3212), shared or not.
-		const backend = new OllamaBackend({ ...common, model: probe.model, host: probe.url ?? undefined, numCtx: SHARED_JUDGE_NUM_CTX });
+		const backend = new OllamaBackend({
+			...common,
+			model: probe.model,
+			host: probe.url ?? undefined,
+			numCtx: SHARED_JUDGE_NUM_CTX,
+		});
 		return { backend, shared: probe.shared === true };
 	}
 	throw new DecideUnavailableError(`no decide backend available: ${probe.notes.join("; ")}`);
@@ -221,7 +259,9 @@ export function createDecider(opts: DeciderOptions = {}): Decider {
 			},
 			(err: unknown) => {
 				backOff();
-				throw new DecideUnavailableError(`shared judge lost (${why(cause)}) and nothing to fail over to: ${why(err)}`);
+				throw new DecideUnavailableError(
+					`shared judge lost (${why(cause)}) and nothing to fail over to: ${why(err)}`,
+				);
 			},
 		);
 		failover = p;
@@ -258,13 +298,21 @@ export function createDecider(opts: DeciderOptions = {}): Decider {
 	};
 	const one = async <T>(request: SystemOneRequest): Promise<T & Meta> => {
 		const res = await ask(request);
-		return { ...(res.answers[0] as T), backend: res.backend, model: res.model, latencyMs: res.latencyMs };
+		return {
+			...(res.answers[0] as T),
+			backend: res.backend,
+			model: res.model,
+			latencyMs: res.latencyMs,
+		};
 	};
 	return {
 		backend,
 		ask,
-		noul: (state, prompt) => one<NoulAnswer>({ state, questions: [{ id: "q", kind: "noul", prompt }] }),
-		choice: (state, prompt, options) => one<ChoiceAnswer>({ state, questions: [{ id: "q", kind: "choice", prompt, options }] }),
-		score: (state, prompt, levels) => one<ScoreAnswer>({ state, questions: [{ id: "q", kind: "score", prompt, levels }] }),
+		noul: (state, prompt) =>
+			one<NoulAnswer>({ state, questions: [{ id: "q", kind: "noul", prompt }] }),
+		choice: (state, prompt, options) =>
+			one<ChoiceAnswer>({ state, questions: [{ id: "q", kind: "choice", prompt, options }] }),
+		score: (state, prompt, levels) =>
+			one<ScoreAnswer>({ state, questions: [{ id: "q", kind: "score", prompt, levels }] }),
 	};
 }

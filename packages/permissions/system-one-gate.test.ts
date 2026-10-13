@@ -1127,7 +1127,10 @@ describe("Guarded with no checker installed asks the person (#3193)", () => {
 
 describe("the hosted jev judge is never the System One gate's judge (#3652)", () => {
 	class JevNamedBackend extends StubBackend {
-		override readonly name = "jev";
+		constructor() {
+			super();
+			(this as { name: string }).name = "jev";
+		}
 	}
 
 	test("a decider whose backend is named jev is refused in strict mode: it is never asked, the command does not run", async () => {
