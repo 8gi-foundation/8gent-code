@@ -20,6 +20,7 @@ import { modelSupportsVision, prefixMeterSink } from "../ai/text-tool-endpoint";
 import {
 	emptyReplyNote,
 	emptyReplyStall,
+	isEmptyReplyNote,
 	splitToolImageAttachment,
 	stripDoneMarker,
 } from "../ai/text-tool-loop";
@@ -1505,7 +1506,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			return failure.message;
 		}
 		this.abortController = null;
-		if (this.stopRequested && breakerStop === null && agentResult.content.trim() === "") {
+		// An ended turn with nothing said is an empty reply (or the harness's note for one, #3524).
+		if (
+			this.stopRequested &&
+			breakerStop === null &&
+			(agentResult.content.trim() === "" || isEmptyReplyNote(agentResult.content))
+		) {
 			this.messageHistory.push({ role: "assistant", content: "Stopped." });
 			recordFailedRun("stopped by user");
 			return "Stopped.";
