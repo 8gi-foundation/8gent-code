@@ -82,6 +82,7 @@
  * `run` functions do; this module itself stays glue-only.
  */
 
+import { REFUSED_TWICE_LINE } from "../permissions/cd-prefix";
 import { browserWithheldNote } from "../tools/eight-browser";
 import {
 	checkClaims,
@@ -211,7 +212,7 @@ export function isChainRefusal(result: string): boolean {
  * already says to split the command; this adds the count, which the model cannot see.
  */
 export function chainRefusalNote(count: number): string {
-	return `\n\nNote: ${count} chained commands refused this turn. Send each piece as its own run_command call, in order; a chained one is refused every time.`;
+	return `\n\nNote: ${count} chained commands refused this turn. Send each piece as its own run_command call, in order; a chained one is refused every time, except one leading \`cd <folder> &&\` into a project folder.`;
 }
 
 /**
@@ -640,6 +641,8 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 	let prevRoundAllRefused = false;
 	// run_command calls refused for command chaining this turn (chainRefusalNote).
 	let chainRefusals = 0;
+	// Chaining refusals this turn per exact command text (REFUSED_TWICE_LINE, #3199).
+	const chainRefusedTexts = new Map<string, number>();
 	// Gate block reasons from the previous round, and since the last round
 	// that ran a tool successfully (deduped, in order).
 	let prevRoundBlockReasons: string[] = [];
@@ -978,6 +981,13 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 			// ignored three times in one turn (#4072).
 			if (tc.name === "run_command" && isChainRefusal(result) && ++chainRefusals > 1)
 				note += chainRefusalNote(chainRefusals);
+			// The same command text refused twice: one plain line on what does work (#3199).
+			if (tc.name === "run_command" && isChainRefusal(result)) {
+				const text = String(tc.arguments?.command ?? "");
+				const seen = (chainRefusedTexts.get(text) ?? 0) + 1;
+				chainRefusedTexts.set(text, seen);
+				if (seen >= 2) note += `\n${REFUSED_TWICE_LINE}`;
+			}
 			resultParts.push(`Tool ${tc.name} returned:\n${result}${note}`);
 		}
 

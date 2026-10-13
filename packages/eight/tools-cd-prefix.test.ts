@@ -1,0 +1,207 @@
+/**
+ * #3199 through the real run_command paths: a leading `cd <folder> &&` runs the rest in
+ * that folder, and the rest meets every gate it would meet alone, judged in that folder.
+ *
+ * System One runs with no judge and no person to ask, as on a machine without the model:
+ * its deterministic rules and lanes speak, and an escalate is a block. Same on every machine.
+ */
+
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
+import { agentTools, setToolContext } from "../ai/tools";
+import { CreatedFiles } from "../permissions/s1-created-files";
+import { _resetSystemOne, _setSystemOneOverridesForTests } from "../permissions/system-one-gate";
+import { ToolExecutor } from "./tools";
+
+afterAll(() => {
+	_resetSystemOne();
+	cleanupTempDirs();
+});
+
+type PM = {
+	checkPermission: (command: string) => "allowed" | "denied" | "ask";
+	requestPermission: (action: string, details: string, command?: string) => Promise<boolean>;
+};
+
+const ENV_KEYS = ["EIGHT_SYSTEM_ONE", "EIGHT_COMMIT_GATE"];
+const savedEnv: Record<string, string | undefined> = {};
+
+let root = "";
+let sub = "";
+let executor: ToolExecutor;
+let pm: PM;
+let origCheck: PM["checkPermission"];
+let origRequest: PM["requestPermission"];
+let asked: string[];
+
+beforeEach(() => {
+	for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
+	Reflect.deleteProperty(process.env, "EIGHT_SYSTEM_ONE");
+	root = realpathSync(tempDir("cd-prefix-exec-"));
+	sub = join(root, "video");
+	mkdirSync(join(sub, "old"), { recursive: true });
+	writeFileSync(join(sub, "old", "keep.txt"), "keep");
+	writeFileSync(join(sub, "slides.md"), "# slides");
+	writeFileSync(join(root, "x.txt"), "root file");
+	_setSystemOneOverridesForTests({
+		createDecider: () => {
+			throw new Error("no judge in this test");
+		},
+		askHuman: async () => null,
+		calibrationDir: tempDir("cd-prefix-nocal-"),
+	});
+	executor = new ToolExecutor(root, "cd-prefix");
+	pm = (executor as unknown as { permissionManager: PM }).permissionManager;
+	origCheck = pm.checkPermission;
+	origRequest = pm.requestPermission;
+	asked = [];
+	pm.checkPermission = () => "allowed";
+	pm.requestPermission = async (_a, _d, command) => {
+		asked.push(command ?? "");
+		return true;
+	};
+});
+
+afterEach(() => {
+	pm.checkPermission = origCheck;
+	pm.requestPermission = origRequest;
+	for (const k of ENV_KEYS) {
+		if (savedEnv[k] === undefined) Reflect.deleteProperty(process.env, k);
+		else process.env[k] = savedEnv[k];
+	}
+});
+
+const run = (command: string) => executor.execute("run_command", { command }) as Promise<string>;
+
+describe("ToolExecutor run_command with a leading cd", () => {
+	test("`cd video && ls` runs ls inside video", async () => {
+		const out = await run("cd video && ls");
+		expect(out).toContain("slides.md");
+		expect(out).not.toContain("x.txt");
+	});
+
+	test("the rest reaches System One exactly as it would alone, and is blocked the same way", async () => {
+		const alone = await run("rm -rf video/old");
+		expect(alone).toStartWith("[SYSTEM ONE BLOCKED]");
+		const out = await run("cd video && rm -rf old");
+		expect(out).toStartWith("[SYSTEM ONE BLOCKED]");
+		expect(out).toEndWith("Command: rm -rf old");
+		// The same rule, the same verdict: only the command text differs.
+		expect(out.split(" Command: ")[0]).toBe(alone.split(" Command: ")[0]);
+		expect(existsSync(join(sub, "old", "keep.txt"))).toBe(true);
+	});
+
+	test("System One's rm lanes judge paths in the folder: x.txt is absent in video, so nothing is deleted", async () => {
+		// Alone at the root, x.txt exists and is not this session's: blocked.
+		expect(await run("rm -f x.txt")).toStartWith("[SYSTEM ONE BLOCKED]");
+		// In video there is no x.txt: the rm-of-nothing lane passes it.
+		const out = await run("cd video && rm -f x.txt");
+		expect(out).not.toContain("BLOCKED");
+		expect(readFileSync(join(root, "x.txt"), "utf-8")).toBe("root file");
+	});
+
+	test("a redirect target is recorded in the folder, so its own rm passes", async () => {
+		process.env.EIGHT_SYSTEM_ONE = "0";
+		expect(await run("cd video && cat slides.md > copy.md")).not.toContain("BLOCKED");
+		Reflect.deleteProperty(process.env, "EIGHT_SYSTEM_ONE");
+		expect(executor.createdFiles.createdBySession(join(sub, "copy.md"))).toBe(true);
+		expect(await run("cd video && rm -f copy.md")).not.toContain("BLOCKED");
+		expect(existsSync(join(sub, "copy.md"))).toBe(false);
+	});
+
+	test("a file a child process makes in a named subfolder is recorded (watchBorn gets the folder)", async () => {
+		process.env.EIGHT_SYSTEM_ONE = "0";
+		expect(await run("cd video && cp slides.md old/copy2.md")).not.toContain("BLOCKED");
+		Reflect.deleteProperty(process.env, "EIGHT_SYSTEM_ONE");
+		expect(executor.createdFiles.createdBySession(join(sub, "old", "copy2.md"))).toBe(true);
+		expect(await run("cd video && rm -f old/copy2.md")).not.toContain("BLOCKED");
+		expect(existsSync(join(sub, "old", "copy2.md"))).toBe(false);
+	});
+
+	test("`cd a && b; c`: the rest is refused for chaining and nothing runs", async () => {
+		const out = await run("cd video && touch a.txt; touch b.txt");
+		expect(out).toStartWith("[BLOCKED] Semicolon command chaining is not allowed");
+		expect(existsSync(join(sub, "a.txt"))).toBe(false);
+		expect(existsSync(join(sub, "b.txt"))).toBe(false);
+	});
+
+	test("a refused prefix runs nothing and asks no one", async () => {
+		pm.checkPermission = () => "ask";
+		for (const command of [
+			"cd .. && touch z.txt",
+			"cd /tmp && touch z.txt",
+			"cd $HOME && touch z.txt",
+		]) {
+			const out = await run(command);
+			expect(out, command).toStartWith("[BLOCKED] Command chaining is not allowed.");
+		}
+		expect(asked).toEqual([]);
+		expect(existsSync(join(root, "z.txt"))).toBe(false);
+	});
+
+	test("the approval card is raised for the rest, as it would be alone", async () => {
+		pm.checkPermission = () => "ask";
+		await run("cd video && ls");
+		expect(asked).toEqual(["ls"]);
+	});
+
+	test("a commit behind a cd still meets the test-suite gate", async () => {
+		let checked = 0;
+		(executor as unknown as { commitGate: { check: () => Promise<unknown> } }).commitGate = {
+			check: async () => {
+				checked++;
+				return { commit: false, message: "GATE REFUSED" };
+			},
+		};
+		expect(await run("cd video && git commit -m wip")).toBe("GATE REFUSED");
+		expect(checked).toBe(1);
+	});
+});
+
+describe("native run_command with a leading cd", () => {
+	const execute = (command: string) =>
+		(
+			agentTools.run_command as unknown as { execute: (i: unknown, o: unknown) => Promise<string> }
+		).execute({ command }, {});
+
+	beforeEach(() => {
+		setToolContext({ workingDirectory: root, createdFiles: new CreatedFiles() });
+	});
+
+	test("`cd video && ls` runs ls inside video", async () => {
+		const out = await execute("cd video && ls");
+		expect(out).toContain("slides.md");
+		expect(out).not.toContain("x.txt");
+	});
+
+	test("the rest reaches System One and is blocked as it would be alone", async () => {
+		const alone = await execute("rm -rf video/old");
+		const out = await execute("cd video && rm -rf old");
+		expect(out).toStartWith("[SYSTEM ONE BLOCKED]");
+		expect(out.split(" Command: ")[0]).toBe(alone.split(" Command: ")[0]);
+		expect(existsSync(join(sub, "old", "keep.txt"))).toBe(true);
+	});
+
+	test("refused prefixes and chained rests run nothing", async () => {
+		expect(await execute("cd .. && touch z.txt")).toStartWith(
+			"[BLOCKED] Command chaining is not allowed.",
+		);
+		expect(await execute("cd video && touch a.txt; touch b.txt")).toStartWith(
+			"[BLOCKED] Semicolon command chaining is not allowed",
+		);
+		expect(existsSync(join(sub, "a.txt"))).toBe(false);
+	});
+});
+
+describe("the loop breaker counts a cd-prefixed command that runs (#3409)", () => {
+	test("refusedBeforeRun: an accepted shape is a call, a refused one is not", async () => {
+		const { refusedBeforeRun } = await import("./agent");
+		expect(refusedBeforeRun("run_command", { command: "cd video && bash build.sh" })).toBe(false);
+		expect(refusedBeforeRun("run_command", { command: "cd video && ls; ls" })).toBe(true);
+		expect(refusedBeforeRun("run_command", { command: "cd .. && ls" })).toBe(true);
+		expect(refusedBeforeRun("run_command", { command: "cd /tmp && ls" })).toBe(true);
+		expect(refusedBeforeRun("powershell", { command: "cd video && ls" })).toBe(true);
+	});
+});

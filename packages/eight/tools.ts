@@ -139,6 +139,7 @@ import {
 	getPermissionManager,
 	isCommandDangerous,
 } from "../permissions";
+import { cdPrefix, commandAfterCdPrefix } from "../permissions/cd-prefix";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import {
 	editScopeViolation,
@@ -2350,7 +2351,9 @@ export class ToolExecutor {
 				const run = () => this.runCommand(command, args.timeout as number | undefined);
 				// A command the sanitizer refuses never commits, so it never runs the suite.
 				const target = parseGitCommit(command);
-				return target && sanitizeShellCommand(command).safe ? this.gatedCommit(run, target) : run();
+				// Judged on the text that will run: a `cd <folder> &&` commit meets the gate too (#3199).
+				const runs = commandAfterCdPrefix(command, this.workingDirectory, activeShellKind());
+				return target && sanitizeShellCommand(runs).safe ? this.gatedCommit(run, target) : run();
 			}
 
 			case "powershell": {
@@ -3112,26 +3115,38 @@ export class ToolExecutor {
 		return gate.note ? `${gate.note}\n${out}` : out;
 	}
 
-	/** `env` replaces process.env for the child (the done gate passes a scrubbed one). */
+	/**
+	 * `env` replaces process.env for the child (the done gate passes a scrubbed one).
+	 * `cwd` is set only by the one leading `cd <folder> &&` this accepts (#3199).
+	 */
 	async runCommand(
 		command: string,
 		timeoutSec?: number,
 		env?: Record<string, string | undefined>,
 		windowsShell?: ResolvedShell,
+		cwd?: string,
 	): Promise<string> {
+		// One leading `cd <folder> &&` inside the project: the folder is the working
+		// directory and only the rest runs, through every check below (#3199).
+		if (cwd === undefined) {
+			const cd = cdPrefix(command, this.workingDirectory, activeShellKind(windowsShell));
+			if (cd.kind === "refused") return cd.message;
+			if (cd.kind === "cd") return this.runCommand(cd.rest, timeoutSec, env, windowsShell, cd.dir);
+		}
+		const dir = cwd ?? this.workingDirectory;
 		if (this.permission && currentPermissionHolder() !== this.permission) {
 			return runWithPermissionHolder(this.permission, () =>
-				this.runCommand(command, timeoutSec, env, windowsShell),
+				this.runCommand(command, timeoutSec, env, windowsShell, dir),
 			);
 		}
 		// Judge git state against the directory this command runs in (#3748).
-		if (commandDir() !== this.workingDirectory) {
-			return withCommandDir(this.workingDirectory, () =>
-				this.runCommand(command, timeoutSec, env, windowsShell),
+		if (commandDir() !== dir) {
+			return withCommandDir(dir, () =>
+				this.runCommand(command, timeoutSec, env, windowsShell, dir),
 			);
 		}
 		// The four pre-spawn backstops, shared with the native path (#3993).
-		const backstop = preSpawnRefusal(command, this.workingDirectory);
+		const backstop = preSpawnRefusal(command, dir);
 		if (backstop) return backstop;
 		const mode = currentPermissionMode();
 		const permissionCheck = this.permissionManager.checkPermission(
@@ -3154,11 +3169,7 @@ export class ToolExecutor {
 		if (!validation.safe) {
 			// A piece of the chain System One would refuse on its own is named now,
 			// so the pieces are not resent as they are and blocked again (#4072).
-			const piece = await chainedPieceRefusal(
-				command,
-				this.workingDirectory,
-				systemOneEnvFor(mode),
-			);
+			const piece = await chainedPieceRefusal(command, dir, systemOneEnvFor(mode));
 			const also = piece ? ` One part would be refused on its own too. ${piece}` : "";
 			return `[BLOCKED] ${validation.reason}.${also} Command: ${command}`;
 		}
@@ -3170,12 +3181,7 @@ export class ToolExecutor {
 		// the card. One command, at most one card.
 		// Guarded mode (#3170) turns System One on for this call whatever the
 		// env says; the env flag stays on in every mode.
-		const systemOne = await systemOneGate(
-			command,
-			systemOneEnvFor(mode),
-			this.workingDirectory,
-			this.createdFiles,
-		);
+		const systemOne = await systemOneGate(command, systemOneEnvFor(mode), dir, this.createdFiles);
 		if (!systemOne.run) return systemOne.message as string;
 
 		if (
@@ -3202,7 +3208,7 @@ export class ToolExecutor {
 		const startTime = Date.now();
 		await this.hookManager.executeHooks("beforeCommand", {
 			command,
-			workingDirectory: this.workingDirectory,
+			workingDirectory: dir,
 		});
 
 		let finalCommand = command;
@@ -3220,11 +3226,7 @@ export class ToolExecutor {
 
 		return new Promise((resolve) => {
 			// Redirect targets this command creates are this agent's own files (#3177).
-			const recordRedirects = watchRedirects(
-				finalCommand,
-				this.workingDirectory,
-				this.createdFiles,
-			);
+			const recordRedirects = watchRedirects(finalCommand, dir, this.createdFiles);
 			let resolved = false;
 			const safeResolve = (value: string) => {
 				if (resolved) return;
@@ -3235,7 +3237,7 @@ export class ToolExecutor {
 
 			// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
 			const proc = spawnShell(wrapRunCommand(finalCommand), {
-				cwd: this.workingDirectory,
+				cwd: dir,
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
 				windowsShell,
@@ -3265,7 +3267,7 @@ export class ToolExecutor {
 					stdout,
 					stderr: `${stderr}\nTIMEOUT`,
 					duration: Date.now() - startTime,
-					workingDirectory: this.workingDirectory,
+					workingDirectory: dir,
 				});
 
 				safeResolve(
@@ -3284,14 +3286,12 @@ export class ToolExecutor {
 					stdout,
 					stderr,
 					duration: Date.now() - startTime,
-					workingDirectory: this.workingDirectory,
+					workingDirectory: dir,
 				});
 
 				const output = formatCommandOutput(code, stdout, stderr);
 				// Report images the command drew, and any cut off at an edge (#3580).
-				withImagesWritten(output, this.workingDirectory, startTime).then(safeResolve, () =>
-					safeResolve(output),
-				);
+				withImagesWritten(output, dir, startTime).then(safeResolve, () => safeResolve(output));
 			});
 
 			proc.on("error", (err) => {
@@ -3300,7 +3300,7 @@ export class ToolExecutor {
 				this.hookManager.executeHooks("onError", {
 					command: finalCommand,
 					error: err.message,
-					workingDirectory: this.workingDirectory,
+					workingDirectory: dir,
 				});
 
 				safeResolve(`Error: ${err.message}`);

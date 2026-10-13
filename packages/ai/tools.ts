@@ -13,7 +13,7 @@ import * as path from "node:path";
 import { tool } from "ai";
 import type { ToolSet } from "ai";
 import { z } from "zod";
-import { killProcessTree, spawnShell } from "../core/shell";
+import { activeShellKind, killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import { safePath } from "../eight/tools";
 import {
@@ -28,6 +28,7 @@ import {
 	listAgentsTool,
 	spawnAgentTool,
 } from "../orchestration/delegation-tools";
+import { cdPrefix } from "../permissions/cd-prefix";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import {
 	editScopeViolation,
@@ -719,16 +720,22 @@ const runCommand = tool({
 	inputSchema: z.object({
 		command: z.string().describe("Command to run"),
 	}),
-	execute: async ({ command }) => {
+	execute: async ({ command: line }) => {
+		// One leading `cd <folder> &&` inside the project: the folder is the working
+		// directory and only the rest runs, through every check below (#3199).
+		const cd = cdPrefix(line, getToolContext().workingDirectory, activeShellKind());
+		if (cd.kind === "refused") return cd.message;
+		const command = cd.kind === "cd" ? cd.rest : line;
+		const cwd = cd.kind === "cd" ? cd.dir : getToolContext().workingDirectory;
 		// Same guards, in the same order, as ToolExecutor.run_command (#3993).
-		const backstop = preSpawnRefusal(command, getToolContext().workingDirectory);
+		const backstop = preSpawnRefusal(command, cwd);
 		if (backstop) return backstop;
 		const validation = sanitizeShellCommand(command);
 		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		const startedAt = Date.now();
-		const output = await runShellCommand(command);
+		const output = await runShellCommand(command, cwd);
 		// Report images the command drew, and any cut off at an edge (#3580).
-		return withImagesWritten(output, getToolContext().workingDirectory, startedAt);
+		return withImagesWritten(output, cwd, startedAt);
 	},
 });
 
@@ -1447,12 +1454,15 @@ const backgroundOutput = tool({
  * Shared by the shell runner and the argv runner, so a git or gh tool is
  * judged exactly as the same command typed into run_command would be.
  */
-async function commandRefusal(command: string): Promise<string | null> {
+async function commandRefusal(
+	command: string,
+	cwd: string = getToolContext().workingDirectory,
+): Promise<string | null> {
 	// The text path's pre-spawn backstops (#3993): protected files such as
 	// ~/.8gent/settings.json and the browser control tokens, for shell and argv alike.
-	// Judged in the tool's working directory, so relative paths and `cd` resolve as
+	// Judged in the directory the command runs in, so relative paths and `cd` resolve as
 	// the command will (#4009 startup-code check), not against process.cwd().
-	const backstop = preSpawnRefusal(command, getToolContext().workingDirectory);
+	const backstop = preSpawnRefusal(command, cwd);
 	if (backstop) return backstop;
 	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 	const ctx = getToolContext();
@@ -1470,12 +1480,7 @@ async function commandRefusal(command: string): Promise<string | null> {
 	const { systemOneGate } = await import("../permissions/system-one-gate");
 	// Guarded mode (#3170) turns System One on for this call whatever the env
 	// says; the env flag stays on in every mode.
-	const systemOne = await systemOneGate(
-		command,
-		systemOneEnvFor(mode),
-		ctx.workingDirectory,
-		ctx.createdFiles,
-	);
+	const systemOne = await systemOneGate(command, systemOneEnvFor(mode), cwd, ctx.createdFiles);
 	if (!systemOne.run) return systemOne.message as string;
 
 	if (
@@ -1495,23 +1500,26 @@ async function commandRefusal(command: string): Promise<string | null> {
 	return null;
 }
 
-async function runShellCommand(command: string): Promise<string> {
+/** `cwd` differs from the tool context's only after a leading `cd <folder> &&` (#3199). */
+async function runShellCommand(
+	command: string,
+	cwd: string = getToolContext().workingDirectory,
+): Promise<string> {
 	// Judge git state against the directory this command runs in (#3748).
-	const cwd = getToolContext().workingDirectory;
-	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command));
+	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command, cwd));
 	const { getHookManager } = await import("../hooks");
 
 	// Captured once: the timer and process callbacks below run after this call.
 	const ctx = getToolContext();
 	const hookManager = getHookManager();
 
-	const refusal = await commandRefusal(command);
+	const refusal = await commandRefusal(command, cwd);
 	if (refusal !== null) return refusal;
 
 	const startTime = Date.now();
 	await hookManager.executeHooks("beforeCommand", {
 		command,
-		workingDirectory: ctx.workingDirectory,
+		workingDirectory: cwd,
 	});
 
 	let finalCommand = command;
@@ -1527,14 +1535,14 @@ async function runShellCommand(command: string): Promise<string> {
 
 	return new Promise((settle) => {
 		// Redirect targets this command creates are this agent's own files (#3177).
-		const recordRedirects = watchRedirects(finalCommand, ctx.workingDirectory, ctx.createdFiles);
+		const recordRedirects = watchRedirects(finalCommand, cwd, ctx.createdFiles);
 		const resolve = (value: string) => {
 			recordRedirects();
 			settle(value);
 		};
 		// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
 		const proc = spawnShell(wrapRunCommand(finalCommand), {
-			cwd: ctx.workingDirectory,
+			cwd,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,
 		});
@@ -1572,7 +1580,7 @@ async function runShellCommand(command: string): Promise<string> {
 					stdout,
 					stderr,
 					duration: Date.now() - startTime,
-					workingDirectory: ctx.workingDirectory,
+					workingDirectory: cwd,
 				});
 
 				const partialOutput = (stdout + stderr).trim().slice(-500);
@@ -1598,7 +1606,7 @@ async function runShellCommand(command: string): Promise<string> {
 				stdout,
 				stderr: `${stderr}\nTIMEOUT`,
 				duration: Date.now() - startTime,
-				workingDirectory: ctx.workingDirectory,
+				workingDirectory: cwd,
 			});
 			resolve(
 				`TIMEOUT after 2 min. Partial output:\n${stdout}\n${stderr}\nTIP: Use background_start for long-running processes.`,
@@ -1618,7 +1626,7 @@ async function runShellCommand(command: string): Promise<string> {
 				stdout,
 				stderr,
 				duration: Date.now() - startTime,
-				workingDirectory: ctx.workingDirectory,
+				workingDirectory: cwd,
 			});
 			resolve(
 				code === 0
@@ -1635,7 +1643,7 @@ async function runShellCommand(command: string): Promise<string> {
 			hookManager.executeHooks("onError", {
 				command: finalCommand,
 				error: err.message,
-				workingDirectory: ctx.workingDirectory,
+				workingDirectory: cwd,
 			});
 			resolve(`Error: ${err.message}`);
 		});

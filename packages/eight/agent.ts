@@ -216,6 +216,7 @@ import {
 	toolDefsToSpecs,
 } from "../ai";
 import { resolveUselessStreak } from "../ai/useless-streak";
+import { cdPrefixShape } from "../permissions/cd-prefix";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { isShellToolName } from "../permissions/shell-tools";
 
@@ -242,7 +243,10 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
 	const command = args.command;
 	if (typeof command !== "string") return false;
 	const kind = toolName === "powershell" ? "powershell" : undefined;
-	return !sanitizeShellCommand(command, process.platform, kind).safe;
+	// A leading `cd <folder> &&` runs the rest (#3199); judged by shape alone, so a folder
+	// the executor later refuses still counts as a call, never the other way round.
+	const runs = kind ? undefined : cdPrefixShape(command)?.rest;
+	return !sanitizeShellCommand(runs ?? command, process.platform, kind).safe;
 }
 
 /**
