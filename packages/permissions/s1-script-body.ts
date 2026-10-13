@@ -440,7 +440,13 @@ function pathWords(line: string): string[] {
 	return line
 		.split(/\s+/)
 		.slice(1)
-		.filter((w) => w !== "" && !w.startsWith("-"))
+		.flatMap((w) => {
+			if (w === "") return [];
+			if (!w.startsWith("-")) return [w];
+			// A path attached to a flag: --output=p, -op, -c.tmp/k.txt. Over-approximate: keep the tail.
+			if (w.startsWith("--")) return w.includes("=") ? [w.slice(w.indexOf("=") + 1)] : [];
+			return w.length > 2 ? [w.slice(2), w.slice(1)] : [];
+		})
 		.map((w) =>
 			w
 				.replace(/^['"]|['"]$/g, "")
@@ -489,5 +495,60 @@ export function laterLineReusesEarlierPath(cmds: string[]): boolean {
 		for (const w of reached) if (seen.has(w)) return true;
 		for (const w of reached) seen.add(w);
 	}
+	return false;
+}
+
+/** Commands that cannot write, move or delete a file whatever their arguments (plain-line only: no redirects reach here). */
+const READ_ONLY = new Set([
+	"echo",
+	"printf",
+	"cat",
+	"ls",
+	"pwd",
+	"true",
+	"false",
+	"test",
+	"[",
+	"head",
+	"tail",
+	"wc",
+	"grep",
+	"whoami",
+	"id",
+	"uname",
+	"stat",
+	"which",
+	"basename",
+	"dirname",
+	"diff",
+	"cmp",
+	"sleep",
+]);
+const CURL_WRITE_SHORT = /^-[^-]*[oOcDJK]/;
+const CURL_WRITE_LONG =
+	/^--(output|remote-name|remote-header-name|cookie-jar|dump-header|trace|stderr|libcurl|etag-save|hsts|alt-svc|config|create-dirs|output-dir|upload-file|netrc-file)/;
+
+/** True when the line may write, move or delete a file. Fail closed: any command not known to be read-only. */
+function lineCanWrite(line: string): boolean {
+	const words = line.split(/\s+/);
+	const cmd = (words[0] ?? "").replace(/^.*\//, "").toLowerCase();
+	const rest = words.slice(1);
+	if (cmd === "curl")
+		return rest.some(
+			(w) => CURL_WRITE_LONG.test(w) || (!w.startsWith("--") && CURL_WRITE_SHORT.test(w)),
+		);
+	if (cmd === "sed") return rest.some((w) => /^--in-place|^-[a-zA-Z]*i/.test(w));
+	return !READ_ONLY.has(cmd);
+}
+
+/**
+ * Fail closed (#3878, 8SO third FAIL): a script with more than one line that can write, move or delete
+ * files goes to the judge. Only scripts whose writes sit on a single line may skip it. This does not
+ * depend on parsing paths, so a flag-attached path (`curl -o.tmp/k.txt`) or an unknown command cannot
+ * slip an overwrite past the lanes.
+ */
+export function hasMultipleWriters(cmds: string[]): boolean {
+	let n = 0;
+	for (const c of cmds) if (lineCanWrite(c) && ++n > 1) return true;
 	return false;
 }

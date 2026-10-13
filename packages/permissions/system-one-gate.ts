@@ -92,6 +92,7 @@ import type { RmOwnDir } from "./s1-rm-own-dir";
 import type { RunOwnScript } from "./s1-run-own-script";
 import {
 	type ScriptRef,
+	hasMultipleWriters,
 	laterLineReusesEarlierPath,
 	resolveScriptRun,
 	splitSimpleCommands,
@@ -679,7 +680,7 @@ export async function systemOneGate(
 		let cmds = scriptDepth === 0 ? splitSimpleCommands(sr.body) : null;
 		// A later line aimed at a path an earlier line made or overwrote: lanes read the files as
 		// they stand before the script runs, so judge the whole body instead.
-		if (cmds && laterLineReusesEarlierPath(cmds)) cmds = null;
+		if (cmds && (hasMultipleWriters(cmds) || laterLineReusesEarlierPath(cmds))) cmds = null;
 		if (cmds) {
 			let all = true;
 			for (const c of cmds) {

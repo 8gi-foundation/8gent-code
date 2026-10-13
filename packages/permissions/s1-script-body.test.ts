@@ -20,6 +20,7 @@ import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
 import {
 	MAX_SCRIPT_BYTES,
+	hasMultipleWriters,
 	laterLineReusesEarlierPath,
 	resolveScriptRun,
 	scriptChanged,
@@ -439,6 +440,30 @@ curl -sS -X POST "$TELEGRAM_API_BASE/bot$TELEGRAM_BOT_TOKEN/sendMessage" \\
 			laterLineReusesEarlierPath(["mv precious.txt sub/", "mv other.txt sub/precious.txt"]),
 		).toBe(true);
 		r.cleanup?.();
+	});
+	test("mv then curl -o.tmp/k.txt / -c.tmp/k.txt overwrites without the judge (8SO third FAIL)", async () => {
+		writeFileSync(join(ws, "precious.txt"), "p");
+		for (const flag of ["-o.tmp/k.txt", "-c.tmp/k.txt", "--output=.tmp/k.txt"]) {
+			const cmds = ["mv precious.txt .tmp/k.txt", `curl -sS ${flag} http://127.0.0.1:8081/x`];
+			expect(laterLineReusesEarlierPath(cmds)).toBe(true);
+			expect(hasMultipleWriters(cmds)).toBe(true);
+		}
+		writeFileSync(
+			join(ws, ".tmp", "curlo.sh"),
+			"#!/bin/sh\nmv precious.txt .tmp/k.txt\ncurl -sS -o.tmp/k.txt http://127.0.0.1:8081/x\n",
+		);
+		const r = await gate("bash .tmp/curlo.sh");
+		expect(r.guard?.reason ?? "").not.toContain("plain command(s)");
+		r.cleanup?.();
+	});
+	test("two-line script with an unknown command is judged, not lane-allowed", async () => {
+		expect(hasMultipleWriters(["mv a.txt b.txt", "frobnicate --now"])).toBe(true);
+		expect(hasMultipleWriters(["echo hi", "frobnicate --now"])).toBe(false);
+		expect(hasMultipleWriters(["mv a.txt b.txt", "echo done"])).toBe(false);
+		writeFileSync(join(ws, "a.txt"), "a");
+		writeFileSync(join(ws, ".tmp", "unk.sh"), "#!/bin/sh\nmv a.txt b.txt\nfrobnicate --now\n");
+		const r = await gate("bash .tmp/unk.sh");
+		expect(r.guard?.reason ?? "").not.toContain("plain command(s)");
 	});
 	test("two lane commands, one non-lane line: the whole body goes to the judge", async () => {
 		writeFileSync(join(ws, ".tmp", "mix.sh"), `${POST}\nwipe-it now\n`);
