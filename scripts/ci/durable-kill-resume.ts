@@ -1,13 +1,21 @@
 // Kill-and-resume proof for the daemon (#4107). Runs on Windows CI and locally.
 //
 // Starts the daemon with resume-on-boot and auto-continue on, has a session
-// start a slow shell command, hard-kills the daemon mid-command (TerminateProcess
-// on Windows, SIGKILL elsewhere: no shutdown handler runs, like a power cut or
-// Stop-Process -Force), starts it again and requires that:
+// read a file and then start a slow shell command, hard-kills the daemon
+// mid-command (TerminateProcess on Windows, SIGKILL elsewhere: no shutdown
+// handler runs, like a power cut or Stop-Process -Force), starts it again and
+// requires that:
 //   - the journal was written on this platform's paths while the command ran,
-//   - the session comes back and the cut command is reported as not replayed,
-//   - the turn is continued and finishes,
-//   - the command ran exactly once.
+//   - the session comes back and the turn is continued and finishes,
+//   - each interrupted call is handled by its replay class (#4113): the shell
+//     call (class "never") is reported not replayed and ran exactly once; the
+//     read (class "replay") is re-run on boot, completes, and ran twice.
+//
+// One reply's calls run in sequence (packages/ai/text-tool-loop.ts), so a kill
+// cannot catch a read and a shell call in flight together. The read runs for
+// real before the kill; after the kill this script records it as in flight
+// with the daemon's own SessionJournal.markToolStart, as if the kill had landed
+// during it. Everything after that is the real daemon boot.
 // The model is a stub served from this process, so no model or network is used.
 //
 // Usage: bun scripts/ci/durable-kill-resume.ts <daemon command...>
@@ -18,6 +26,8 @@ import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { SessionJournal } from "../../packages/daemon/session-journal";
+import { toolReplayClass } from "../../packages/eight/tools";
 
 // The daemon runs in its own work dir, so existing relative paths (bin/8gent.ts)
 // are resolved here first.
@@ -47,6 +57,19 @@ fs.writeFileSync(
 	"echo start >> runs.txt; i=0; while [ ! -f stop ] && [ $i -lt 120 ]; do sleep 1; i=$((i+1)); done\n",
 );
 const RESUME_MARK = "[resume] continued-after-crash";
+// The read: a file whose content proves the re-run completed and returned it.
+const READ_PATH = "notes.txt";
+const READ_TOKEN = `read-token-${process.pid}-${Date.now()}`;
+fs.writeFileSync(path.join(work, READ_PATH), `${READ_TOKEN}\n`);
+// The invariant is the replay class, not a bare count.
+const SHELL_CLASS = toolReplayClass("run_command");
+const READ_CLASS = toolReplayClass("read_file");
+if (SHELL_CLASS !== "never")
+	throw new Error(`run_command replay class is ${SHELL_CLASS}, expected never`);
+if (READ_CLASS !== "replay")
+	throw new Error(`read_file replay class is ${READ_CLASS}, expected replay`);
+// Before the kill each call runs once; on boot a "replay" call runs again, a "never" call does not.
+const expectedRuns = (cls: string) => (cls === "replay" ? 2 : 1);
 
 const fail = (msg: string): never => {
 	console.error(`FAIL: ${msg}`);
@@ -63,7 +86,8 @@ const fail = (msg: string): never => {
 
 // ----- stub model -----
 let continuation = "";
-const toolReply = `\`\`\`tool_call\n${JSON.stringify({ name: "run_command", arguments: { command: COMMAND } })}\n\`\`\``;
+const toolCall = (name: string, args: Record<string, unknown>) =>
+	`\`\`\`tool_call\n${JSON.stringify({ name, arguments: args })}\n\`\`\``;
 const model = Bun.serve({
 	port: MODEL_PORT,
 	hostname: "127.0.0.1",
@@ -85,10 +109,15 @@ const model = Bun.serve({
 		if (text.includes(RESUME_MARK)) {
 			continuation = text;
 			content = "DONE: checked runs.txt after the restart, the command already ran once";
-		} else if (msgs.some((m) => m.role === "assistant")) {
-			content = "DONE";
 		} else {
-			content = toolReply;
+			// First reply reads the file, the second starts the slow command.
+			const replies = msgs.filter((m) => m.role === "assistant").length;
+			content =
+				replies === 0
+					? toolCall("read_file", { path: READ_PATH })
+					: replies === 1
+						? toolCall("run_command", { command: COMMAND })
+						: "DONE";
 		}
 		if (!body.stream) {
 			return Response.json({
@@ -185,6 +214,10 @@ type JournalEntry = {
 };
 const journal = (): JournalEntry[] =>
 	JSON.parse(fs.readFileSync(journalPath, "utf8")).sessions ?? [];
+// The daemon logs "  -> <tool>(" for each call the model makes (text tool path in packages/eight).
+const readCallsLogged = (n: number) =>
+	(fs.readFileSync(path.join(root, `daemon-${n}.log`), "utf8").match(/-> read_file\(/g) ?? [])
+		.length;
 const runs = () =>
 	fs.existsSync(runsFile)
 		? fs
@@ -226,6 +259,8 @@ for (let attempt = 1; ; attempt++) {
 	await sleep(1_000);
 }
 await until("the command to start", 60_000, () => runs() === 1);
+if (readCallsLogged(1) !== 1)
+	fail(`expected the read to run once before the kill, saw ${readCallsLogged(1)}`);
 const before = await until("the journal to record the running command", 10_000, () =>
 	journal().find(
 		(e) =>
@@ -248,6 +283,22 @@ await until(
 	() => daemon?.exitCode !== null || daemon?.signalCode !== null,
 );
 console.log(`daemon hard-killed mid-command (${process.platform})`);
+// The read as in flight, written by the daemon's own journal code (see header).
+const shellCall = before.inFlight?.find((c) => c.tool === "run_command") as
+	| { startedAt?: number }
+	| undefined;
+new SessionJournal(journalPath).markToolStart(sessionId, {
+	id: "tt-read-before-kill",
+	tool: "read_file",
+	args: { path: READ_PATH },
+	startedAt: (shellCall?.startedAt ?? Date.now()) - 1,
+});
+if (
+	!journal()
+		.find((e) => e.sessionId === sessionId)
+		?.inFlight?.some((c) => c.tool === "read_file")
+)
+	fail("the journal did not keep the in-flight read");
 
 // ----- 3. restart and require the work to come back and finish -----
 daemon = startDaemon(2);
@@ -261,20 +312,41 @@ const restored = await until(
 		undefined,
 );
 if (restored[1] !== "1") fail(`expected 1 restored session, got ${restored[1]}`);
-await until("the cut command to be reported as not replayed", 10_000, () =>
-	/1 call\(s\) not replayed/.test(log2()),
+await until("the read re-run and the cut command reported as not replayed", 10_000, () =>
+	/1 interrupted read\(s\) re-run, 1 call\(s\) not replayed/.test(log2()),
 );
 await until("the continuation to reach the model", 60_000, () => continuation);
 if (!continuation.includes("not replayed"))
 	fail("the continuation did not tell the model the command was not replayed");
+// The re-run read completed: its result, with the file's content, reached the model.
+// The token must sit inside the read's own "Result:" block (before the next
+// "- " call line), so it cannot come from the earlier, pre-kill read.
+const tokenRe = READ_TOKEN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+if (
+	!new RegExp(
+		`read_file .*: re-run \\(read only, safe to replay\\)\\. Result:(?:(?!\\n- )[\\s\\S])*${tokenRe}`,
+	).test(continuation)
+)
+	fail("the continuation did not carry the re-run read's result with the file's content");
 await until("the continued turn to finish", 60_000, () => {
 	const e = journal().find((x) => x.sessionId === sessionId);
 	return e && !e.pendingTurn && !(e.inFlight?.length ?? 0);
 });
 const count = runs();
 if (count !== 1) fail(`the command ran ${count} times, expected exactly 1`);
+if (count !== expectedRuns(SHELL_CLASS))
+	fail(
+		`run_command (class ${SHELL_CLASS}) ran ${count} times, expected ${expectedRuns(SHELL_CLASS)}`,
+	);
+// Once in daemon 1 (logged call), once on boot (the "re-run" line above). The
+// continuation must not have asked for it a third time.
+const readRuns = readCallsLogged(1) + 1 + readCallsLogged(2);
+if (readRuns !== expectedRuns(READ_CLASS))
+	fail(
+		`read_file (class ${READ_CLASS}) ran ${readRuns} times, expected ${expectedRuns(READ_CLASS)}`,
+	);
 console.log(
-	`PASS: session restored in ${restored[2]}ms (${Date.now() - t0}ms kill to finished), cut command not replayed, turn continued and finished, command ran once`,
+	`PASS: session restored in ${restored[2]}ms (${Date.now() - t0}ms kill to finished), turn continued and finished; run_command (${SHELL_CLASS}) not replayed, ran ${count} time; read_file (${READ_CLASS}) re-run and completed, ran ${readRuns} times`,
 );
 cleanup();
 // Windows keeps the work dir busy until the orphaned slow.sh sees the stop file.
