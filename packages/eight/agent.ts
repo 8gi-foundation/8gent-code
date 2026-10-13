@@ -90,6 +90,7 @@ import {
 	setDefaultLocalProfile,
 } from "../tools/eight-browser";
 import { type Evidence, EvidenceCollector, summarizeEvidence } from "../validation/evidence";
+import { reviewTurn, turnReviewEnabled } from "../verify/turn-review";
 import { isNoToolScope, isVerbatimScope } from "./agent-scopes";
 import { type Settings, computeAutoTune } from "./auto-tune";
 import { createClient } from "./clients";
@@ -104,7 +105,6 @@ import {
 } from "./compaction";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
-import { reviewTurn, turnReviewEnabled } from "../verify/turn-review";
 import { projectInstructionsSection } from "./instruction-loader";
 import { getModeManager } from "./modes";
 import { isLocalProvider } from "./registry";
@@ -3182,7 +3182,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						const recovery = await autonomy.handleError(
 							err,
 							"agent-chat",
-							() => this.runChatTurn(textForAgent, imageBase64, imageMimeType),
+							() => this.runTurn(textForAgent, imageBase64, imageMimeType),
 							2, // max 2 retries in infinite mode
 						);
 						if (recovery.success) {

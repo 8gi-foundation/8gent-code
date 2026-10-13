@@ -163,10 +163,10 @@ async function turn(
 
 /** Count calls to the private turn body, still running the real one. */
 function countTurns(agent: AgentT): { n: number } {
-	const a = agent as unknown as { runChatTurn: (...args: unknown[]) => Promise<string> };
+	const a = agent as unknown as { runTurn: (...args: unknown[]) => Promise<string> };
 	const counter = { n: 0 };
-	const real = a.runChatTurn.bind(agent);
-	a.runChatTurn = (...args: unknown[]) => {
+	const real = a.runTurn.bind(agent);
+	a.runTurn = (...args: unknown[]) => {
 		counter.n++;
 		return real(...args);
 	};
@@ -223,7 +223,7 @@ describe("turn-end side reviewer flag (#3419)", () => {
 		// The heal retry only exists on the native path. The first model attempt
 		// throws a transient error from inside the turn's try block (the first
 		// abortController assignment); the real self-heal waits about 1 s and
-		// retries through runChatTurn. Were it to call chat() again, the review
+		// retries through runTurn. Were it to call chat() again, the review
 		// would print twice.
 		process.env.EIGHT_TEXT_TOOLS = "0";
 		let counter = { n: 0 };
@@ -254,7 +254,7 @@ describe("turn-end side reviewer flag (#3419)", () => {
 	test("a turn that throws propagates the error and prints no review line", async () => {
 		process.env.EIGHT_TURN_REVIEW = "1";
 		const agent = build();
-		(agent as unknown as { runChatTurn: () => Promise<string> }).runChatTurn = async () => {
+		(agent as unknown as { runTurn: () => Promise<string> }).runTurn = async () => {
 			throw new Error("provider exploded");
 		};
 		const lines: string[] = [];
