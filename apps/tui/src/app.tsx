@@ -405,7 +405,8 @@ function loadEnvFile() {
 	const candidates = [
 		pathMod.join(process.cwd(), ".env"),
 		pathMod.resolve(import.meta.dirname, "../../../.env"), // 8gent-code repo root
-		pathMod.join(process.env.HOME || "", ".8gent", ".env"), // ~/.8gent/.env
+		// USERPROFILE: Windows shells usually have no HOME, which read .8gent/.env from the cwd.
+		pathMod.join(process.env.HOME || process.env.USERPROFILE || "", ".8gent", ".env"), // ~/.8gent/.env
 	];
 	for (const envPath of candidates) {
 		try {
