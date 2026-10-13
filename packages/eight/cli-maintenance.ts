@@ -37,6 +37,7 @@ import {
 	detectChannel,
 	latestBinaryRelease,
 	latestForNpmChannel,
+	npmPrefixFromModulePath,
 	runSelfUpdate,
 } from "./self-update";
 import { type ExecFn, runSourceUpdate } from "./source-update";
@@ -298,6 +299,7 @@ export async function runUpdateCommand(args: string[], deps: UpdateCliDeps): Pro
 		fetchImpl,
 		run: deps.run,
 		releasesUrl,
+		npmPrefix: npmPrefixFromModulePath(deps.modulePath, platform),
 		log,
 	});
 	log(describeResult(result));

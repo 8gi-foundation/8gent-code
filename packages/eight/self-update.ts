@@ -20,6 +20,7 @@ import { createHash, createPublicKey, verify as cryptoVerify, randomBytes } from
 import { chmodSync, existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const NPM_PACKAGE = "@8gi-foundation/8gent-code";
 export const GITHUB_REPO = "8gi-foundation/8gent-code";
@@ -342,6 +343,8 @@ export interface SelfUpdateOptions {
 	signingKey?: string;
 	/** Where the npm channel stages a release tarball; defaults to os.tmpdir(). Tests only. */
 	tmpDir?: string;
+	/** npm global prefix to install into (npmPrefixFromModulePath); npm's own default when absent. */
+	npmPrefix?: string | null;
 }
 
 export type SelfUpdateResult =
@@ -352,23 +355,74 @@ export type SelfUpdateResult =
 	| { status: "failed"; message: string; channel: InstallChannel };
 
 /**
+ * The npm global prefix this 8gent was installed into, read from its own path
+ * (#4188): <prefix>/lib/node_modules/@8gi-foundation/8gent-code on macOS and
+ * Linux, <prefix>\node_modules\@8gi-foundation\8gent-code on Windows. The `npm`
+ * first on PATH can have another prefix (Homebrew 8gent under /opt/homebrew,
+ * a second npm defaulting to /usr/local): updating there fails EACCES or
+ * installs a second copy beside the one running. null when not an npm global.
+ */
+export function npmPrefixFromModulePath(modulePath: string, platform: string): string | null {
+	let p = modulePath;
+	if (p.startsWith("file:")) {
+		try {
+			p = fileURLToPath(p);
+		} catch {
+			return null;
+		}
+	}
+	const pkg = NPM_PACKAGE.split("/").join("[\\\\/]");
+	const re =
+		platform === "win32"
+			? new RegExp(`^(.+?)[\\\\/]node_modules[\\\\/]${pkg}([\\\\/]|$)`)
+			: new RegExp(`^(.*?)/lib/node_modules/${pkg}(/|$)`);
+	const m = re.exec(p);
+	if (!m) return null;
+	return m[1] || "/";
+}
+
+/**
  * The npm command for an exact version, or for a verified release tarball on
- * disk. Windows needs npm.cmd through a shell, so a file path is quoted there.
+ * disk, into `prefix` when known. --force only on the retry (`force`): it
+ * replaces stale `8` / `8gent` / `8gent-code` bin links (EEXIST), and must not
+ * paper over anything else. Windows needs npm.cmd through a shell, so paths
+ * are quoted there.
  */
 export function npmInstallCommand(
 	version: string,
 	platform: string,
 	tarball?: string,
+	opts: { prefix?: string | null; force?: boolean } = {},
 ): { cmd: string; args: string[]; shell: boolean } {
 	const win = platform === "win32";
-	const spec = tarball ? (win ? `"${tarball}"` : tarball) : `${NPM_PACKAGE}@${version}`;
-	return {
-		cmd: win ? "npm.cmd" : "npm",
-		// Exact version, never a tag: what was checked is what gets installed.
-		// --force replaces stale `8` / `8gent` / `8gent-code` bin links (EEXIST).
-		args: ["install", "-g", spec, "--force"],
-		shell: win,
-	};
+	const q = (path: string) => (win ? `"${path}"` : path);
+	// Exact version, never a tag: what was checked is what gets installed.
+	const spec = tarball ? q(tarball) : `${NPM_PACKAGE}@${version}`;
+	const args = ["install", "-g", spec];
+	if (opts.prefix) args.push("--prefix", q(opts.prefix));
+	if (opts.force) args.push("--force");
+	return { cmd: win ? "npm.cmd" : "npm", args, shell: win };
+}
+
+/** Run the npm install; once more with --force if it fails. The exit code of the last run. */
+async function runNpmInstall(
+	o: Pick<SelfUpdateOptions, "run" | "npmPrefix"> & { log: (line: string) => void },
+	version: string,
+	platform: string,
+	tarball?: string,
+): Promise<number> {
+	const run = o.run ?? defaultRun;
+	const first = npmInstallCommand(version, platform, tarball, { prefix: o.npmPrefix });
+	const code = await run(first.cmd, first.args, { shell: first.shell });
+	if (code === 0) return 0;
+	o.log(`npm exited ${code}; retrying once with --force (replaces stale 8gent bin links).`);
+	const retry = npmInstallCommand(version, platform, tarball, { prefix: o.npmPrefix, force: true });
+	return run(retry.cmd, retry.args, { shell: retry.shell });
+}
+
+/** The command a person can run by hand after a failed update. */
+function npmHint(spec: string, prefix?: string | null): string {
+	return `npm install -g ${spec}${prefix ? ` --prefix ${prefix}` : ""} --force`;
 }
 
 function defaultRun(cmd: string, args: string[], opts: { shell: boolean }): Promise<number> {
@@ -509,9 +563,8 @@ async function updateNpmFromRelease(
 	try {
 		const file = join(dir, name);
 		writeFileSync(file, bytes, { flag: "wx" });
-		const c = npmInstallCommand(rel.version, platform, file);
-		const code = await (o.run ?? defaultRun)(c.cmd, c.args, { shell: c.shell });
-		return code === 0 ? null : `npm exited ${code}. Try: npm install -g ${rel.urls[name]} --force`;
+		const code = await runNpmInstall(o, rel.version, platform, file);
+		return code === 0 ? null : `npm exited ${code}. Try: ${npmHint(rel.urls[name], o.npmPrefix)}`;
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -598,14 +651,13 @@ export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdate
 				if (err) return { status: "failed", channel: ch, message: err };
 				return { status: "updated", from: d.from, to: d.to, channel: ch };
 			}
-			const c = npmInstallCommand(d.to, platform);
 			o.log(`Updating ${NPM_PACKAGE} v${d.from} -> v${d.to} with npm...`);
-			const code = await (o.run ?? defaultRun)(c.cmd, c.args, { shell: c.shell });
+			const code = await runNpmInstall(o, d.to, platform);
 			if (code !== 0)
 				return {
 					status: "failed",
 					channel: ch,
-					message: `npm exited ${code}. Try: npm install -g ${NPM_PACKAGE}@${d.to} --force`,
+					message: `npm exited ${code}. Try: ${npmHint(`${NPM_PACKAGE}@${d.to}`, o.npmPrefix)}`,
 				};
 			return { status: "updated", from: d.from, to: d.to, channel: ch };
 		}

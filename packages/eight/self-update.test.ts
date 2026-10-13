@@ -9,7 +9,7 @@ import { createHash, sign as cryptoSign, generateKeyPairSync } from "node:crypto
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkUpdate, describeCheck } from "./cli-maintenance";
+import { checkUpdate, describeCheck, runUpdateCommand } from "./cli-maintenance";
 import {
 	type FetchLike,
 	PROBE_TIMEOUT_MS,
@@ -26,6 +26,7 @@ import {
 	latestBinaryRelease,
 	latestForNpmChannel,
 	npmInstallCommand,
+	npmPrefixFromModulePath,
 	npmTarballName,
 	probeVersionWithTimeout,
 	runSelfUpdate,
@@ -170,7 +171,7 @@ describe("npm channel", () => {
 		expect(runs).toEqual([
 			{
 				cmd: "npm",
-				args: ["install", "-g", "@8gi-foundation/8gent-code@0.20.0", "--force"],
+				args: ["install", "-g", "@8gi-foundation/8gent-code@0.20.0"],
 				shell: false,
 			},
 		]);
@@ -179,9 +180,113 @@ describe("npm channel", () => {
 	test("Windows runs npm.cmd through a shell", () => {
 		expect(npmInstallCommand("0.20.0", "win32")).toEqual({
 			cmd: "npm.cmd",
-			args: ["install", "-g", "@8gi-foundation/8gent-code@0.20.0", "--force"],
+			args: ["install", "-g", "@8gi-foundation/8gent-code@0.20.0"],
 			shell: true,
 		});
+	});
+
+	// #4188, 13 Oct: James's 8gent lives under /opt/homebrew, the npm npm picked
+	// defaulted to /usr/local, and `8gent update` failed EACCES there.
+	test("the global prefix comes from where this 8gent is installed", () => {
+		const brew = "/opt/homebrew/lib/node_modules/@8gi-foundation/8gent-code/bin/8gent-run.js";
+		expect(npmPrefixFromModulePath(brew, "darwin")).toBe("/opt/homebrew");
+		expect(npmPrefixFromModulePath(`file://${brew}`, "darwin")).toBe("/opt/homebrew");
+		expect(
+			npmPrefixFromModulePath(
+				"/usr/local/lib/node_modules/@8gi-foundation/8gent-code/dist/cli.js",
+				"linux",
+			),
+		).toBe("/usr/local");
+		expect(
+			npmPrefixFromModulePath(
+				"C:\\Users\\A B\\AppData\\Roaming\\npm\\node_modules\\@8gi-foundation\\8gent-code\\dist\\cli.js",
+				"win32",
+			),
+		).toBe("C:\\Users\\A B\\AppData\\Roaming\\npm");
+		// A project-local node_modules or a checkout is not an npm global install.
+		expect(
+			npmPrefixFromModulePath(
+				"/work/app/node_modules/@8gi-foundation/8gent-code/dist/cli.js",
+				"linux",
+			),
+		).toBeNull();
+		expect(npmPrefixFromModulePath("/home/a/8gent-code/bin/8gent.ts", "linux")).toBeNull();
+	});
+
+	test("installs into the running 8gent's prefix; --force only on the retry", async () => {
+		const runs: string[][] = [];
+		const codes = [1, 0];
+		const r = await runSelfUpdate({
+			currentVersion: "0.19.0",
+			channel: "npm",
+			execPath: "x",
+			platform: "darwin",
+			npmPrefix: "/opt/homebrew",
+			fetchImpl: fakeFetch(npmLatest("0.20.0")),
+			run: async (_cmd, args) => {
+				runs.push(args);
+				return codes.shift() ?? 0;
+			},
+			log: () => {},
+		});
+		expect(r.status).toBe("updated");
+		expect(runs).toEqual([
+			["install", "-g", "@8gi-foundation/8gent-code@0.20.0", "--prefix", "/opt/homebrew"],
+			[
+				"install",
+				"-g",
+				"@8gi-foundation/8gent-code@0.20.0",
+				"--prefix",
+				"/opt/homebrew",
+				"--force",
+			],
+		]);
+	});
+
+	test("8gent update on a Homebrew npm install passes /opt/homebrew to npm", async () => {
+		const ran: string[][] = [];
+		const code = await runUpdateCommand([], {
+			currentVersion: "0.19.0",
+			modulePath: "/opt/homebrew/lib/node_modules/@8gi-foundation/8gent-code/bin/8gent-run.js",
+			embedded: false,
+			execPath: "/opt/homebrew/bin/node",
+			platform: "darwin",
+			arch: "arm64",
+			fetchImpl: fakeFetch(npmLatest("0.20.0")),
+			env: { EIGHT_RELEASES_URL: RELEASES },
+			interactive: true,
+			log: () => {},
+			run: async (_cmd, args) => {
+				ran.push(args);
+				return 0;
+			},
+		});
+		expect(code).toBe(0);
+		expect(ran).toEqual([
+			["install", "-g", "@8gi-foundation/8gent-code@0.20.0", "--prefix", "/opt/homebrew"],
+		]);
+	});
+
+	test("both attempts failing names the prefix in the hint", async () => {
+		const r = await runSelfUpdate({
+			currentVersion: "0.19.0",
+			channel: "npm",
+			execPath: "x",
+			platform: "darwin",
+			npmPrefix: "/opt/homebrew",
+			fetchImpl: fakeFetch(npmLatest("0.20.0")),
+			run: async () => 243,
+			log: () => {},
+		});
+		expect(describeResult(r)).toBe(
+			"Update failed: npm exited 243. Try: npm install -g @8gi-foundation/8gent-code@0.20.0 --prefix /opt/homebrew --force",
+		);
+	});
+
+	test("Windows quotes the prefix for the npm.cmd shell", () => {
+		expect(
+			npmInstallCommand("0.20.0", "win32", undefined, { prefix: "C:\\A B\\npm" }).args,
+		).toEqual(["install", "-g", "@8gi-foundation/8gent-code@0.20.0", "--prefix", '"C:\\A B\\npm"']);
 	});
 
 	test("equal version is up to date; npm failure is reported", async () => {
@@ -284,7 +389,7 @@ describe("npm channel from the GitHub release (#3658)", () => {
 		expect(runs[0].args[0]).toBe("install");
 		expect(runs[0].args[1]).toBe("-g");
 		expect(runs[0].args[2].endsWith(`/${tgz}`)).toBe(true);
-		expect(runs[0].args[3]).toBe("--force");
+		expect(runs[0].args).toHaveLength(3);
 		// npm installed exactly the verified bytes, and nothing is left behind.
 		expect(runs[0].staged).toBe("NPM-TARBALL-0.20.0");
 		expect(readdirSync(dir)).toEqual([]);
@@ -295,7 +400,7 @@ describe("npm channel from the GitHub release (#3658)", () => {
 		const f = fakeFetch(routes(npmLatest("0.20.0")));
 		const r = await update(f, runs);
 		expect(r.status).toBe("updated");
-		expect(runs[0].args).toEqual(["install", "-g", "@8gi-foundation/8gent-code@0.20.0", "--force"]);
+		expect(runs[0].args).toEqual(["install", "-g", "@8gi-foundation/8gent-code@0.20.0"]);
 		expect(f.calls.some((u) => u.endsWith(".tgz"))).toBe(false);
 	});
 
