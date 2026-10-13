@@ -52,14 +52,21 @@ function keyOf(text: string): string {
  * (same text) keep their status and position; new steps are appended, so a
  * step added mid-run lands at the end instead of reshuffling the list.
  */
-export function mergePlanText(prev: ReadonlyArray<PlanStep>, texts: ReadonlyArray<string>): PlanStep[] {
+export function mergePlanText(
+	prev: ReadonlyArray<PlanStep>,
+	texts: ReadonlyArray<string>,
+): PlanStep[] {
 	const seen = new Set(prev.map((s) => keyOf(s.text)));
 	const next = [...prev];
 	for (const text of texts) {
 		const k = keyOf(text);
 		if (!k || seen.has(k)) continue;
 		seen.add(k);
-		next.push({ id: `step-${next.length + 1}-${k.slice(0, 24)}`, text: text.trim(), status: "pending" });
+		next.push({
+			id: `step-${next.length + 1}-${k.slice(0, 24)}`,
+			text: text.trim(),
+			status: "pending",
+		});
 	}
 	return next;
 }
@@ -77,7 +84,10 @@ export interface PlanUpdateItem {
  * stable (and so rows do not re-land); unknown text becomes a new step.
  * At most one step is active: if several say so, the first wins.
  */
-export function applyPlanUpdate(prev: ReadonlyArray<PlanStep>, items: ReadonlyArray<PlanUpdateItem>): PlanStep[] {
+export function applyPlanUpdate(
+	prev: ReadonlyArray<PlanStep>,
+	items: ReadonlyArray<PlanUpdateItem>,
+): PlanStep[] {
 	const byKey = new Map(prev.map((s) => [keyOf(s.text), s]));
 	const out: PlanStep[] = [];
 	let activeSeen = false;

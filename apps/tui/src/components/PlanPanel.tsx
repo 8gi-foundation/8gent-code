@@ -28,8 +28,8 @@ import type { PlanStep } from "../lib/plan-state.js";
 import { glyphs } from "../lib/term-caps.js";
 import { t } from "../theme.js";
 import { KeyCapRow } from "./KeyCap.js";
-import { FigureEight } from "./figure-eight-spinner.js";
 import { useLandingRows } from "./ToolTrail.js";
+import { FigureEight } from "./figure-eight-spinner.js";
 
 export interface PlanPanelProps {
 	steps: ReadonlyArray<PlanStep>;
@@ -54,7 +54,11 @@ export function formatElapsed(ms: number): string {
 
 /** The settled summary: only facts the steps themselves carry, packed into
  *  as few lines of `width` as fit, e.g. ["4 of 5 done · 1 failed", "2m 10s"]. */
-export function planSummary(steps: ReadonlyArray<PlanStep>, elapsedMs?: number | null, width = 80): string[] {
+export function planSummary(
+	steps: ReadonlyArray<PlanStep>,
+	elapsedMs?: number | null,
+	width = 80,
+): string[] {
 	const done = steps.filter((s) => s.status === "done").length;
 	const failed = steps.filter((s) => s.status === "failed").length;
 	// Without progress reports from the agent there is nothing to count as
@@ -67,7 +71,8 @@ export function planSummary(steps: ReadonlyArray<PlanStep>, elapsedMs?: number |
 	const lines: string[] = [];
 	for (const part of parts) {
 		const last = lines[lines.length - 1];
-		if (last !== undefined && last.length + 3 + part.length <= width) lines[lines.length - 1] = `${last} · ${part}`;
+		if (last !== undefined && last.length + 3 + part.length <= width)
+			lines[lines.length - 1] = `${last} · ${part}`;
 		else lines.push(part);
 	}
 	return lines;
@@ -106,7 +111,9 @@ export function PlanPanel({
 					PLAN
 				</Text>
 				<Text color={t.muted}>
-					{steps.some((s) => s.status !== "pending") ? `${done}/${steps.length}` : `${steps.length}`}
+					{steps.some((s) => s.status !== "pending")
+						? `${done}/${steps.length}`
+						: `${steps.length}`}
 				</Text>
 			</Box>
 			<Box marginTop={1} flexDirection="column">
@@ -235,7 +242,11 @@ export function usePlanPref(hasContent: boolean): [PlanPref, () => void] {
 	}, []);
 	const toggle = useCallback(() => {
 		setPref((prev) => {
-			const next: PlanPref = planColumnOpen(prev, hasContent) ? "hidden" : hasContent ? "auto" : "shown";
+			const next: PlanPref = planColumnOpen(prev, hasContent)
+				? "hidden"
+				: hasContent
+					? "auto"
+					: "shown";
 			void saveHidden(next === "hidden");
 			return next;
 		});
