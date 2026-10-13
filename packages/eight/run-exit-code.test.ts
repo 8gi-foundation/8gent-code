@@ -80,12 +80,14 @@ async function run(host: string, format: "text" | "stream-json" = "text") {
 	const out: string[] = [];
 	const ow = process.stdout.write.bind(process.stdout);
 	const ew = process.stderr.write.bind(process.stderr);
-	process.stdout.write = ((c: unknown) => (
-		out.push(String(c)), true
-	)) as typeof process.stdout.write;
-	process.stderr.write = ((c: unknown) => (
-		err.push(String(c)), true
-	)) as typeof process.stderr.write;
+	process.stdout.write = ((c: unknown) => {
+		out.push(String(c));
+		return true;
+	}) as typeof process.stdout.write;
+	process.stderr.write = ((c: unknown) => {
+		err.push(String(c));
+		return true;
+	}) as typeof process.stderr.write;
 	let code: number;
 	try {
 		code = await runRunCommand([
