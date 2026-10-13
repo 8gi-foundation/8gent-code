@@ -1,3 +1,5 @@
+import type { ExtensionScope } from "./scope";
+
 /**
  * 8gent Code - Extension System Types
  *
@@ -33,10 +35,16 @@ export interface LoadedExtension {
 	module: Record<string, Function>;
 	status: "loaded" | "error";
 	error?: string;
+	/** Present only when EIGHT_EXT_SCOPE=1 and the module exports activate(scope). */
+	scope?: ExtensionScope;
 }
 
 export interface ExtensionManager {
 	extensions: LoadedExtension[];
 	loadAll(): Promise<LoadedExtension[]>;
 	getTools(): Record<string, Function>;
+	/** Run every undo the extension registered, then drop it. Needs EIGHT_EXT_SCOPE=1. */
+	unload(name: string): Promise<{ errors: string[] }>;
+	/** Unload, then load the same directory fresh. Needs EIGHT_EXT_SCOPE=1. */
+	reload(name: string): Promise<{ errors: string[] }>;
 }
