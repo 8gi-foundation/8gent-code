@@ -20,17 +20,21 @@
  */
 
 import {
+	resolveFirstTokenMs,
+	resolveStreamIdleMs,
+	resolveTurnTimeoutMs,
+} from "../eight/turn-timeout";
+import { isKnownVisionModel } from "../eight/vision-router";
+import {
 	DEFAULT_OLLAMA_BASE_URL,
 	normaliseOllamaHost,
 	resolveOllamaBaseUrl,
 } from "../local-model-server/ollama-host";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
-import { resolveFirstTokenMs, resolveStreamIdleMs, resolveTurnTimeoutMs } from "../eight/turn-timeout";
-import { isKnownVisionModel } from "../eight/vision-router";
 import { type ModelFetchTimers, modelFetch } from "./model-fetch";
 import type { TextToolReply } from "./text-tool-client";
-import { escapeControlCharsInStrings, type ParsedToolCall, type ToolSpec } from "./text-tools";
 import type { TextTool } from "./text-tool-loop";
+import { type ParsedToolCall, type ToolSpec, escapeControlCharsInStrings } from "./text-tools";
 
 /** Per-provider OpenAI-compatible chat-completions endpoints for text tools. */
 export const TEXT_TOOL_ENDPOINTS: Record<string, string> = {
@@ -174,6 +178,34 @@ export type TextToolUsage = {
 };
 
 /**
+ * One model round as the prefill meter sees it (#3655). Counts and durations
+ * are the provider's own; null or absent when it did not report them. No
+ * prompt text, only its length. `headersMs` is the wait for the reply's
+ * headers: on a streamed reply that is roughly the prefill time.
+ */
+export type ModelRound = {
+	path: "chat" | "raw";
+	promptChars: number;
+	promptTokens: number | null;
+	completionTokens: number | null;
+	promptEvalMs?: number;
+	evalMs?: number;
+	headersMs: number;
+	wallMs: number;
+};
+
+/**
+ * The prefill meter's sink: `writer.writeModelRound` when EIGHT_PREFIX_METER=1,
+ * otherwise undefined, so an unset flag records nothing and changes nothing.
+ */
+export function prefixMeterSink(
+	writer: { writeModelRound(r: ModelRound): void },
+	env: Record<string, string | undefined> = process.env,
+): ((r: ModelRound) => void) | undefined {
+	return env.EIGHT_PREFIX_METER === "1" ? (r) => writer.writeModelRound(r) : undefined;
+}
+
+/**
  * Extract REAL usage from an OpenAI-compatible completion response (#2805).
  * Both ollama and LM Studio report `usage.{prompt,completion,total}_tokens` on
  * /v1/chat/completions. Returns null - never invented numbers - when the
@@ -222,11 +254,7 @@ const NATIVE_PARSER_ERROR_RE = /^(?:unexpected EOF|EOF|XML syntax error\b.*)$/;
  * "ollama", only status 500, only an error message that is exactly one of the
  * Go XML decoder's failures. Pure.
  */
-export function isNativeToolParserFailure(
-	provider: string,
-	status: number,
-	body: string,
-): boolean {
+export function isNativeToolParserFailure(provider: string, status: number, body: string): boolean {
 	if (provider !== "ollama" || status !== 500) return false;
 	let parsed: unknown;
 	try {
@@ -683,7 +711,9 @@ export async function readStreamedChatCompletion(res: Response): Promise<{
 	if (!done && finishReason == null) {
 		throw new StreamedReplyError("stream ended before [DONE] or a finish_reason");
 	}
-	const toolCalls = [...calls.keys()].sort((a, b) => a - b).map((k) => calls.get(k) as StreamedCall);
+	const toolCalls = [...calls.keys()]
+		.sort((a, b) => a - b)
+		.map((k) => calls.get(k) as StreamedCall);
 	return {
 		choices: [
 			{
@@ -789,6 +819,8 @@ export function buildTextToolCall(opts: {
 	 * (#2805). Never fired when the endpoint omits usage - no fabricated tokens.
 	 */
 	onUsage?: (usage: TextToolUsage) => void;
+	/** Fired once per completed request with its ModelRound (prefill meter, #3655). */
+	onRound?: (round: ModelRound) => void;
 	/**
 	 * The registered tool specs. For Ollama they are declared on the request so
 	 * the model's parser keeps native tool calls (see shouldDeclareTools).
@@ -881,6 +913,7 @@ export function buildTextToolCall(opts: {
 	// and return the assistant text and structured calls alongside what we need
 	// to judge the reply.
 	const attempt = async (messages: ChatMessage[]): Promise<Attempt> => {
+		const t0 = performance.now();
 		let res = await post(messages, declareTools);
 		if (!res.ok && declareTools) {
 			const body = await res.text().catch(() => "");
@@ -891,6 +924,7 @@ export function buildTextToolCall(opts: {
 		if (!res.ok) {
 			return { ok: false, status: res.status, body: await res.text().catch(() => "") };
 		}
+		const headersAt = performance.now();
 		let streamedData: Awaited<ReturnType<typeof readStreamedChatCompletion>> | undefined;
 		const sse = streamed && !isJsonReply(res);
 		if (sse) {
@@ -912,6 +946,14 @@ export function buildTextToolCall(opts: {
 		};
 		const usage = extractUsage(data);
 		if (usage && opts.onUsage) opts.onUsage(usage);
+		opts.onRound?.({
+			path: "chat",
+			promptChars: charsOf(messages),
+			promptTokens: usage?.promptTokens ?? null,
+			completionTokens: usage?.completionTokens ?? null,
+			headersMs: Math.round(headersAt - t0),
+			wallMs: Math.round(performance.now() - t0),
+		});
 		// The cap cut the reply off: whatever came back is a fragment, most often
 		// a repetition loop. Fail the step loudly rather than hand the loop a
 		// truncated reply it would treat as an answer (#3074).
@@ -932,8 +974,11 @@ export function buildTextToolCall(opts: {
 	const reply = (a: { content: string; toolCalls: ParsedToolCall[] }): string | TextToolReply =>
 		a.toolCalls.length > 0 ? { content: a.content, toolCalls: a.toolCalls } : a.content;
 	// A reply that carried structured calls was not swallowed, even with no text.
-	const swallowed = (a: { content: string; toolCalls: ParsedToolCall[]; completionTokens: number }) =>
-		a.toolCalls.length === 0 && isSwallowedReply(opts.provider, a.content, a.completionTokens);
+	const swallowed = (a: {
+		content: string;
+		toolCalls: ParsedToolCall[];
+		completionTokens: number;
+	}) => a.toolCalls.length === 0 && isSwallowedReply(opts.provider, a.content, a.completionTokens);
 
 	// The same conversation through Ollama's raw generate path, which never runs
 	// the model's built-in parser. Returns the visible answer, or a failure.
@@ -944,6 +989,7 @@ export function buildTextToolCall(opts: {
 		variant: QwenChatMLVariant,
 	): Promise<{ ok: true; content: string } | { ok: false; why: string }> => {
 		const root = ollamaRootFromEndpoint(endpoint);
+		const t0 = performance.now();
 		const res = await modelFetch(
 			`${root}/api/generate`,
 			{
@@ -964,6 +1010,7 @@ export function buildTextToolCall(opts: {
 			const body = await res.text().catch(() => "");
 			return { ok: false, why: `raw generate ${res.status}: ${body.slice(0, 200)}` };
 		}
+		const headersAt = performance.now();
 		let streamedRaw: Record<string, unknown> | undefined;
 		const ndjson = streamed && !isJsonReply(res);
 		if (ndjson) {
@@ -980,6 +1027,8 @@ export function buildTextToolCall(opts: {
 			response?: unknown;
 			prompt_eval_count?: unknown;
 			eval_count?: unknown;
+			prompt_eval_duration?: unknown;
+			eval_duration?: unknown;
 			done_reason?: unknown;
 		};
 		const p = typeof data?.prompt_eval_count === "number" ? data.prompt_eval_count : null;
@@ -987,6 +1036,18 @@ export function buildTextToolCall(opts: {
 		if (p !== null && c !== null && opts.onUsage) {
 			opts.onUsage({ promptTokens: p, completionTokens: c, totalTokens: p + c });
 		}
+		// Ollama reports durations in nanoseconds.
+		const ms = (v: unknown) => (typeof v === "number" ? Math.round(v / 1e6) : undefined);
+		opts.onRound?.({
+			path: "raw",
+			promptChars: charsOf(messages),
+			promptTokens: p,
+			completionTokens: c,
+			promptEvalMs: ms(data?.prompt_eval_duration),
+			evalMs: ms(data?.eval_duration),
+			headersMs: Math.round(headersAt - t0),
+			wallMs: Math.round(performance.now() - t0),
+		});
 		if (data?.done_reason === "length") {
 			return { ok: false, why: outputCapMessage(`${label} (raw)`, maxTokens) };
 		}
@@ -1023,9 +1084,10 @@ export function buildTextToolCall(opts: {
 			opts.signal,
 		);
 		if (variant) {
-			const raw = await rawAttempt(messages, variant).catch(
-				(e: unknown) => ({ ok: false as const, why: e instanceof Error ? e.message : String(e) }),
-			);
+			const raw = await rawAttempt(messages, variant).catch((e: unknown) => ({
+				ok: false as const,
+				why: e instanceof Error ? e.message : String(e),
+			}));
 			if (raw.ok) return raw.content;
 			rawNote = raw.why;
 		}
@@ -1086,10 +1148,7 @@ export function toolDefToSpec(def: OpenAiToolDef): ToolSpec | null {
  * lifecycle events around each call); use toolDefsToTextTools when a single
  * shared `execute` is enough.
  */
-export function toolDefsToSpecs(
-	defs: OpenAiToolDef[],
-	allow?: Set<string>,
-): ToolSpec[] {
+export function toolDefsToSpecs(defs: OpenAiToolDef[], allow?: Set<string>): ToolSpec[] {
 	const specs: ToolSpec[] = [];
 	for (const def of defs) {
 		const spec = toolDefToSpec(def);

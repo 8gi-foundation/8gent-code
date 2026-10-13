@@ -20,6 +20,7 @@ import type {
 	FinishReason,
 	HookExecution,
 	ModelInfo,
+	ModelRoundEntry,
 	ResponseMeta,
 	SessionEntry,
 	SessionError,
@@ -176,6 +177,21 @@ export class SessionWriter {
 			usage: options?.usage,
 			response: options?.response,
 			providerMetadata: options?.providerMetadata,
+		});
+	}
+
+	private modelRounds = 0;
+
+	/** Prefill meter (#3655): one line per model request, numbered per session. */
+	writeModelRound(
+		r: Omit<ModelRoundEntry, "type" | "timestamp" | "sequenceNumber" | "round">,
+	): void {
+		this.write({
+			type: "model_round",
+			timestamp: this.now(),
+			sequenceNumber: this.nextSeq(),
+			round: this.modelRounds++,
+			...r,
 		});
 	}
 

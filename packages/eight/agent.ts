@@ -16,7 +16,7 @@ import { jsonSchema, tool as sdkTool } from "ai";
 import type { FormattingStop } from "../ai/draft-constraints";
 import { notePlanTask } from "../ai/plan-file";
 import { postMessageAvailable } from "../ai/post-message";
-import { modelSupportsVision } from "../ai/text-tool-endpoint";
+import { modelSupportsVision, prefixMeterSink } from "../ai/text-tool-endpoint";
 import {
 	emptyReplyNote,
 	emptyReplyStall,
@@ -1315,6 +1315,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Headless: name and parameters only; the system prompt carries the
 				// descriptions, so a run does not pay for them twice on every call.
 				declareDescriptions: this.config.headless !== true,
+				// #3655: per-request prefill/decode counts into the session log,
+				// only with EIGHT_PREFIX_METER=1.
+				onRound: prefixMeterSink(this.sessionWriter),
 				onUsage: (usage) => {
 					usageTotals.promptTokens += usage.promptTokens;
 					usageTotals.completionTokens += usage.completionTokens;
