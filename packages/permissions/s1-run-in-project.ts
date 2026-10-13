@@ -67,7 +67,7 @@
  * Synchronous, never throws.
  */
 
-import { lstatSync, readFileSync, readdirSync, realpathSync as nodeRealpath } from "node:fs";
+import { lstatSync, realpathSync as nodeRealpath, readFileSync, readdirSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
@@ -129,9 +129,40 @@ const NO: RunInProject = { ok: false };
 export type Tok = { t: "id" | "num" | "str" | "p"; v: string };
 
 const KEYWORDS = new Set([
-	"return", "case", "typeof", "in", "of", "new", "void", "delete", "yield", "await", "throw", "else", "do",
-	"instanceof", "export", "default", "extends", "const", "let", "var", "if", "while", "for", "switch", "as",
-	"satisfies", "import", "from", "type", "readonly", "keyof", "is", "async", "static",
+	"return",
+	"case",
+	"typeof",
+	"in",
+	"of",
+	"new",
+	"void",
+	"delete",
+	"yield",
+	"await",
+	"throw",
+	"else",
+	"do",
+	"instanceof",
+	"export",
+	"default",
+	"extends",
+	"const",
+	"let",
+	"var",
+	"if",
+	"while",
+	"for",
+	"switch",
+	"as",
+	"satisfies",
+	"import",
+	"from",
+	"type",
+	"readonly",
+	"keyof",
+	"is",
+	"async",
+	"static",
 ]);
 const PUNCT = new Set("{}()[];,<>=+-*%&|^!~?:.".split(""));
 const ESC_OK = "ntr\\'\"`$0";
@@ -211,7 +242,8 @@ export function tokenize(src: string): Tok[] | null {
 		} else if (c === "`") {
 			const prev = out[out.length - 1];
 			// A tagged template runs a function on its text (Bun.$`...`).
-			if (prev && ((prev.t === "id" && !KEYWORDS.has(prev.v)) || prev.v === ")" || prev.v === "]")) return null;
+			if (prev && ((prev.t === "id" && !KEYWORDS.has(prev.v)) || prev.v === ")" || prev.v === "]"))
+				return null;
 			i++;
 			if (!readTemplateText()) return null;
 		} else if (/[A-Za-z_$]/.test(c)) {
@@ -262,36 +294,186 @@ export function tokenize(src: string): Tok[] | null {
 
 /** Identifiers refused wherever they appear. */
 const BANNED_ID = new Set([
-	"Bun", "process", "globalThis", "global", "window", "self", "require", "module", "exports", "eval", "Function",
-	"constructor", "__proto__", "prototype", "__dirname", "__filename", "this", "arguments", "with", "meta", "fetch",
-	"XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "WebAssembly", "Reflect", "Proxy", "Symbol",
-	"getBuiltinModule", "createRequire", "setInterval", "setImmediate", "Deno", "Object", "Intl", "navigator",
-	"prepareStackTrace", "getPrototypeOf", "setPrototypeOf", "defineProperty", "defineProperties",
-	"getOwnPropertyDescriptor", "getOwnPropertyDescriptors", "getOwnPropertyNames", "getOwnPropertySymbols",
-	"__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "binding", "dlopen", "mainModule",
-	"AsyncFunction", "GeneratorFunction", "Atomics", "debugger", "child_process",
-	"writeFile", "appendFile", "appendFileSync", "createWriteStream", "open", "openSync", "rm", "rmSync", "rmdir",
-	"rmdirSync", "unlink", "unlinkSync", "rename", "renameSync", "copyFile", "copyFileSync", "cp", "cpSync", "truncate",
-	"truncateSync", "symlink", "symlinkSync", "link", "linkSync", "chmod", "chmodSync", "chown", "chownSync", "mkdir",
-	"mkdirSync", "mkdtemp", "mkdtempSync", "utimes", "utimesSync", "exec", "execSync", "execFile", "execFileSync",
-	"spawn", "spawnSync", "fork",
+	"Bun",
+	"process",
+	"globalThis",
+	"global",
+	"window",
+	"self",
+	"require",
+	"module",
+	"exports",
+	"eval",
+	"Function",
+	"constructor",
+	"__proto__",
+	"prototype",
+	"__dirname",
+	"__filename",
+	"this",
+	"arguments",
+	"with",
+	"meta",
+	"fetch",
+	"XMLHttpRequest",
+	"WebSocket",
+	"EventSource",
+	"Worker",
+	"SharedWorker",
+	"WebAssembly",
+	"Reflect",
+	"Proxy",
+	"Symbol",
+	"getBuiltinModule",
+	"createRequire",
+	"setInterval",
+	"setImmediate",
+	"Deno",
+	"Object",
+	"Intl",
+	"navigator",
+	"prepareStackTrace",
+	"getPrototypeOf",
+	"setPrototypeOf",
+	"defineProperty",
+	"defineProperties",
+	"getOwnPropertyDescriptor",
+	"getOwnPropertyDescriptors",
+	"getOwnPropertyNames",
+	"getOwnPropertySymbols",
+	"__defineGetter__",
+	"__defineSetter__",
+	"__lookupGetter__",
+	"__lookupSetter__",
+	"binding",
+	"dlopen",
+	"mainModule",
+	"AsyncFunction",
+	"GeneratorFunction",
+	"Atomics",
+	"debugger",
+	"child_process",
+	"writeFile",
+	"appendFile",
+	"appendFileSync",
+	"createWriteStream",
+	"open",
+	"openSync",
+	"rm",
+	"rmSync",
+	"rmdir",
+	"rmdirSync",
+	"unlink",
+	"unlinkSync",
+	"rename",
+	"renameSync",
+	"copyFile",
+	"copyFileSync",
+	"cp",
+	"cpSync",
+	"truncate",
+	"truncateSync",
+	"symlink",
+	"symlinkSync",
+	"link",
+	"linkSync",
+	"chmod",
+	"chmodSync",
+	"chown",
+	"chownSync",
+	"mkdir",
+	"mkdirSync",
+	"mkdtemp",
+	"mkdtempSync",
+	"utimes",
+	"utimesSync",
+	"exec",
+	"execSync",
+	"execFile",
+	"execFileSync",
+	"spawn",
+	"spawnSync",
+	"fork",
 ]);
 /** Names refused after a dot. Plain data names (open, link, ...) stay allowed there; Bun and process are checked separately. */
 const BANNED_PROP = new Set([
-	"constructor", "__proto__", "prototype", "getBuiltinModule", "createRequire", "getPrototypeOf", "setPrototypeOf",
-	"defineProperty", "defineProperties", "getOwnPropertyDescriptor", "getOwnPropertyDescriptors", "getOwnPropertyNames",
-	"getOwnPropertySymbols", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "binding",
-	"dlopen", "mainModule", "prepareStackTrace", "writeFile", "appendFile", "appendFileSync", "createWriteStream",
-	"rmSync", "rmdir", "rmdirSync", "unlink", "unlinkSync", "renameSync", "copyFile", "copyFileSync", "cpSync",
-	"truncateSync", "symlink", "symlinkSync", "linkSync", "chmod", "chmodSync", "chown", "chownSync", "mkdir", "mkdirSync",
-	"utimes", "utimesSync", "execSync", "execFile", "execFileSync", "spawnSync", "writeFileSync", "openSync",
+	"constructor",
+	"__proto__",
+	"prototype",
+	"getBuiltinModule",
+	"createRequire",
+	"getPrototypeOf",
+	"setPrototypeOf",
+	"defineProperty",
+	"defineProperties",
+	"getOwnPropertyDescriptor",
+	"getOwnPropertyDescriptors",
+	"getOwnPropertyNames",
+	"getOwnPropertySymbols",
+	"__defineGetter__",
+	"__defineSetter__",
+	"__lookupGetter__",
+	"__lookupSetter__",
+	"binding",
+	"dlopen",
+	"mainModule",
+	"prepareStackTrace",
+	"writeFile",
+	"appendFile",
+	"appendFileSync",
+	"createWriteStream",
+	"rmSync",
+	"rmdir",
+	"rmdirSync",
+	"unlink",
+	"unlinkSync",
+	"renameSync",
+	"copyFile",
+	"copyFileSync",
+	"cpSync",
+	"truncateSync",
+	"symlink",
+	"symlinkSync",
+	"linkSync",
+	"chmod",
+	"chmodSync",
+	"chown",
+	"chownSync",
+	"mkdir",
+	"mkdirSync",
+	"utimes",
+	"utimesSync",
+	"execSync",
+	"execFile",
+	"execFileSync",
+	"spawnSync",
+	"writeFileSync",
+	"openSync",
 ]);
 const STR_BAD = /constructor|__proto__|prototype/;
 const FS_OK = new Set(["readFileSync", "existsSync", "readdirSync", "statSync", "writeFileSync"]);
 const PATH_OK = new Set(["join", "resolve", "basename", "extname"]);
 const PROC_OK = new Set(["argv", "exit", "exitCode", "cwd", "stdout", "stderr"]);
 /** Tokens after which a `[` opens an array literal or a type, not a member access. */
-const ARRAY_PREV = new Set(["=", "(", ",", ":", "[", "=>", "?", "...", "<", "|", "&", ";", "!", "${", "}$", "+", "??"]);
+const ARRAY_PREV = new Set([
+	"=",
+	"(",
+	",",
+	":",
+	"[",
+	"=>",
+	"?",
+	"...",
+	"<",
+	"|",
+	"&",
+	";",
+	"!",
+	"${",
+	"}$",
+	"+",
+	"??",
+]);
 export const WRITE_BAD_NAME =
 	/^(package(-lock)?\.json|tsconfig[\w.-]*\.json|bunfig\.toml|bun\.lockb?|makefile|dockerfile|justfile|gemfile|rakefile|procfile|claude\.md|agents\.md|\.cursorrules|.*\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|toml|sh|py|rb|pl|php|node|wasm|so|dylib|yml|yaml|plist)|.*\.config\..*)$/i;
 
@@ -361,7 +543,8 @@ function collectDefs(toks: Tok[]): Defs {
 			}
 			const body = toks.slice(i + 3, e);
 			if (consts.has(name) || fns.has(name)) dup(name);
-			else if (body[0]?.v === "(" && body[1]?.v === ")" && body[2]?.v === "=>") fns.set(name, body.slice(3));
+			else if (body[0]?.v === "(" && body[1]?.v === ")" && body[2]?.v === "=>")
+				fns.set(name, body.slice(3));
 			else consts.set(name, body);
 		} else if (
 			toks[i].v === "function" &&
@@ -388,10 +571,21 @@ function resolveSources(a: Tok[], defs: Defs, depth = 0): Src[] | null {
 	if (depth > 3 || a.length === 0) return null;
 	const s = (k: number) => a[k]?.v;
 	if (a.length === 1 && a[0].t === "str") return [{ kind: "lit", s: a[0].v }];
-	if (a.length >= 5 && s(0) === "process" && s(1) === "." && s(2) === "env" && s(3) === "." && a[4].t === "id") {
+	if (
+		a.length >= 5 &&
+		s(0) === "process" &&
+		s(1) === "." &&
+		s(2) === "env" &&
+		s(3) === "." &&
+		a[4].t === "id"
+	) {
 		const name = a[4].v;
 		if (a.length === 5) return [{ kind: "env", name }];
-		if (a.length === 7 && s(5) === "??" && a[6].t === "str") return [{ kind: "env", name }, { kind: "lit", s: a[6].v }];
+		if (a.length === 7 && s(5) === "??" && a[6].t === "str")
+			return [
+				{ kind: "env", name },
+				{ kind: "lit", s: a[6].v },
+			];
 		return null;
 	}
 	if (a.length === 3 && a[0].t === "id" && s(1) === "(" && s(2) === ")") {
@@ -503,7 +697,8 @@ function moduleSite(toks: Tok[], i: number): { next: number; spec: string; claus
 	} else {
 		while (j < toks.length && !(toks[j].t === "id" && toks[j].v === "from")) {
 			const tk = toks[j];
-			if (!(tk.t === "id" || tk.v === "," || tk.v === "{" || tk.v === "}" || tk.v === "*")) return null;
+			if (!(tk.t === "id" || tk.v === "," || tk.v === "{" || tk.v === "}" || tk.v === "*"))
+				return null;
 			j++;
 		}
 		if (j >= toks.length) return null;
@@ -536,7 +731,8 @@ function checkTokens(toks: Tok[], ctx: Ctx): { rel: string[]; strings: Set<strin
 				if (!(close === i + 2 && toks[i + 1].t === "num")) return null; // computed access
 				continue;
 			}
-			const okPrev = prev === undefined || (prev.t === "p" ? ARRAY_PREV.has(prev.v) : KEYWORDS.has(prev.v));
+			const okPrev =
+				prev === undefined || (prev.t === "p" ? ARRAY_PREV.has(prev.v) : KEYWORDS.has(prev.v));
 			if (!okPrev) return null;
 			const after = toks[close + 1];
 			if (after && after.t === "p" && (after.v === ":" || after.v === "(")) return null; // computed key or call
@@ -555,7 +751,13 @@ function checkTokens(toks: Tok[], ctx: Ctx): { rel: string[]; strings: Set<strin
 			const spec = site.spec;
 			strings.add(spec);
 			if (spec.startsWith("./") || spec.startsWith("../")) {
-				if (spec.split("/").slice(1).some((p) => p === "" || (p.startsWith(".") && p !== ".."))) return null;
+				if (
+					spec
+						.split("/")
+						.slice(1)
+						.some((p) => p === "" || (p.startsWith(".") && p !== ".."))
+				)
+					return null;
 				rel.push(spec);
 			} else if (spec === "node:fs" || spec === "fs" || spec === "node:path" || spec === "path") {
 				const names = spec.endsWith("fs") ? FS_OK : PATH_OK;
@@ -591,7 +793,22 @@ function checkTokens(toks: Tok[], ctx: Ctx): { rel: string[]; strings: Set<strin
 	return { rel, strings };
 }
 
-const CANDIDATES = [".ts", ".mts", ".js", ".mjs", ".json", ".tsx", ".jsx", ".cjs", ".cts", ".node", ".wasm", ".so", ".dylib", ".toml"];
+const CANDIDATES = [
+	".ts",
+	".mts",
+	".js",
+	".mjs",
+	".json",
+	".tsx",
+	".jsx",
+	".cjs",
+	".cts",
+	".node",
+	".wasm",
+	".so",
+	".dylib",
+	".toml",
+];
 
 /** The one file `base` names, or null if absent, ambiguous, a symlink, outside root or of a refused type. */
 function resolveRelative(base: string, root: string): string | null {
@@ -609,7 +826,9 @@ function resolveRelative(base: string, root: string): string | null {
 	return inside(real, root) ? real : null;
 }
 
-type ScanFn = new (o: { loader: string }) => { scan(s: string): { imports: Array<{ path: string }> } };
+type ScanFn = new (o: { loader: string }) => {
+	scan(s: string): { imports: Array<{ path: string }> };
+};
 
 /** Check the entry script and its relative imports. */
 function checkSource(entry: string, ctx: Ctx): boolean {
@@ -678,7 +897,9 @@ function pathOk(token: string, root: string): boolean {
 /** bunfig.toml or a .env* file in `dir` (bun would preload or load it). */
 function configInDir(dir: string): boolean {
 	try {
-		return readdirSync(dir).some((n) => n === "bunfig.toml" || n === ".bunfig.toml" || n === ".env" || n.startsWith(".env."));
+		return readdirSync(dir).some(
+			(n) => n === "bunfig.toml" || n === ".bunfig.toml" || n === ".env" || n.startsWith(".env."),
+		);
 	} catch {
 		return true;
 	}
@@ -716,7 +937,9 @@ export function runInProject(command: string, cwd: string | undefined): RunInPro
 		const scriptArg = words[i++];
 		if (!scriptArg || scriptArg.startsWith("-") || !SCRIPT_EXT.test(scriptArg)) return NO;
 		if (scriptArg.split("/").some((s) => s === "..") || SECRET.test(scriptArg)) return NO;
-		const scriptAbs = path.isAbsolute(scriptArg) ? path.normalize(scriptArg) : path.resolve(root, scriptArg);
+		const scriptAbs = path.isAbsolute(scriptArg)
+			? path.normalize(scriptArg)
+			: path.resolve(root, scriptArg);
 		const st = lstatOrNull(scriptAbs);
 		if (!st || !st.isFile() || st.isSymbolicLink()) return NO;
 		const realScript = realpathSync(scriptAbs);
@@ -724,7 +947,8 @@ export function runInProject(command: string, cwd: string | undefined): RunInPro
 
 		for (const a of words.slice(i)) {
 			if (a.startsWith("-")) {
-				if (!/^--?[A-Za-z][A-Za-z0-9-]*(=[A-Za-z0-9._/+,@:-]*)?$/.test(a) || BAD_FLAG.test(a)) return NO;
+				if (!/^--?[A-Za-z][A-Za-z0-9-]*(=[A-Za-z0-9._/+,@:-]*)?$/.test(a) || BAD_FLAG.test(a))
+					return NO;
 			}
 			const eq = a.indexOf("=");
 			for (const tok of eq === -1 ? [a] : [a, a.slice(eq + 1)]) {
@@ -740,7 +964,8 @@ export function runInProject(command: string, cwd: string | undefined): RunInPro
 		}
 		// bun also reads a global ~/.bunfig.toml (a preload there runs code).
 		for (const home of new Set([process.env.HOME, homedir()])) {
-			if (!home || readdirSync(home).some((n) => n === "bunfig.toml" || n === ".bunfig.toml")) return NO;
+			if (!home || readdirSync(home).some((n) => n === "bunfig.toml" || n === ".bunfig.toml"))
+				return NO;
 		}
 		if (!checkSource(realScript, ctx)) return NO;
 		// Every env name the command sets must be one the source reads.
