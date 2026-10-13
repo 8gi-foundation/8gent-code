@@ -291,6 +291,72 @@ describe("which 8gent would run (8SO, #4084)", () => {
 	});
 });
 
+describe("after a cd prefix, the project around the folder is workspace too (8SO, #4169)", () => {
+	const SUB_CMD = "8gent deck render deck.json out.mp4";
+
+	test("a PATH entry elsewhere in the project goes to the judge, empty or holding an 8gent", () => {
+		const sub = join(ws, "sub");
+		const projectBin = join(ws, "bin");
+		const PATH = `${projectBin}:${installedBin}:${SYSTEM_PATH}`;
+		// Seen from the folder alone, <project>/bin is outside it, so only the project check refuses.
+		expect(deckRenderInProject(SUB_CMD, sub, { PATH }).ok).toBe(DECK_LANE);
+		expect(deckRenderInProject(SUB_CMD, sub, { PATH }, ws).ok).toBe(false);
+		// The planted binary the folder-only check would have run.
+		put("bin/8gent", "#!/bin/sh\necho pwned\n", ws, true);
+		expect(deckRenderInProject(SUB_CMD, sub, { PATH }, ws).ok).toBe(false);
+		// The installed 8gent alone still passes from the folder.
+		rmSync(join(ws, "bin"), { recursive: true, force: true });
+		expect(
+			deckRenderInProject(SUB_CMD, sub, { PATH: `${installedBin}:${SYSTEM_PATH}` }, ws).ok,
+		).toBe(DECK_LANE);
+	});
+
+	test("a source checkout at the project root goes to the judge from a folder inside it", () => {
+		put("bin/8gent.ts", "// source\n");
+		const sub = join(ws, "sub");
+		expect(
+			deckRenderInProject(SUB_CMD, sub, { PATH: `${installedBin}:${SYSTEM_PATH}` }, ws).ok,
+		).toBe(false);
+	});
+
+	test("an 8gent that resolves into the project, or a shim whose entry is there, goes to the judge from a folder", () => {
+		const sub = join(ws, "sub");
+		// The installed name is a link from outside to a binary in the project, beside the folder.
+		put("tool/8gent", "#!/bin/sh\necho pwned\n", ws, true);
+		mkdirSync(join(outside, "linked-bin"));
+		symlinkSync(join(ws, "tool", "8gent"), join(outside, "linked-bin", "8gent"));
+		const linked = `${join(outside, "linked-bin")}:${SYSTEM_PATH}`;
+		expect(deckRenderInProject(SUB_CMD, sub, { PATH: linked }, ws).ok).toBe(false);
+		// A shim outside whose entry script lives in the project, beside the folder.
+		put("src/8gent.ts", "// source\n");
+		const shimBin = shim(join(outside, "shim-bin"), join(ws, "src", "8gent.ts"));
+		const viaShim = `${shimBin}:${SYSTEM_PATH}`;
+		expect(deckRenderInProject(SUB_CMD, sub, { PATH: viaShim }, ws).ok).toBe(false);
+	});
+
+	test("a dangling link from outside to a folder not yet made in the project goes to the judge (8SO, #4171)", () => {
+		const sub = join(ws, "sub");
+		symlinkSync(join(ws, "bin"), join(outside, "later-bin"));
+		const PATH = `${join(outside, "later-bin")}:${installedBin}:${SYSTEM_PATH}`;
+		expect(deckRenderInProject(SUB_CMD, sub, { PATH }, ws).ok).toBe(false);
+		expect(deckRenderInProject(CMD, ws, { PATH }).ok).toBe(false);
+		// A link loop on PATH never resolves, so it is not shown to be outside.
+		symlinkSync(join(outside, "loop-b"), join(outside, "loop-a"));
+		symlinkSync(join(outside, "loop-a"), join(outside, "loop-b"));
+		const loop = `${join(outside, "loop-a")}:${installedBin}:${SYSTEM_PATH}`;
+		expect(deckRenderInProject(CMD, ws, { PATH: loop }).ok).toBe(false);
+	});
+
+	test("systemOneGate passes the project through: cd sub && the recipe with <project>/bin on PATH reaches the judge", async () => {
+		const sub = join(ws, "sub");
+		const p = { ...process.env, PATH: `${join(ws, "bin")}:${installedBin}:${SYSTEM_PATH}` };
+		const g = await systemOneGate(SUB_CMD, p, sub, undefined, "sub", { project: ws });
+		expect(g.guard?.backend).not.toBe("allowlist");
+		const ok = await systemOneGate(SUB_CMD, process.env, sub, undefined, "sub", { project: ws });
+		if (DECK_LANE) expect(ok.guard?.backend).toBe("allowlist");
+	});
+});
+
 describe("systemOneGate end to end (default mode) with a judge that says dangerous", () => {
 	test("the recipe runs without asking the judge", async () => {
 		for (const cmd of ALLOWED) {

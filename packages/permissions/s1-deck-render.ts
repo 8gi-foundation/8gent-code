@@ -33,6 +33,11 @@
  *     its existing ancestors, is absent or a regular file, and is not under a
  *     protected prefix or a protected name.
  *
+ * After a `cd <folder> &&` (#3199) the cwd is that folder, but the project
+ * around it is workspace too (8SO, #4169): the PATH, the installed `8gent`, its
+ * entry scripts and the planted-checkout names are checked against the project
+ * root as well as the cwd. The spec and output stay confined to the cwd.
+ *
  * The CLI re-checks every path with the tool's own confinement, so this lane
  * only decides who gets asked; it never widens what the renderer may write.
  *
@@ -42,7 +47,15 @@
  * Synchronous, never throws.
  */
 
-import { constants, accessSync, closeSync, openSync, readSync, realpathSync } from "node:fs";
+import {
+	constants,
+	accessSync,
+	closeSync,
+	openSync,
+	readSync,
+	readlinkSync,
+	realpathSync,
+} from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -98,14 +111,24 @@ function head(file: string): string | null {
 	}
 }
 
-/** The real location of `p` when it exists, else the real location of its nearest existing ancestor. */
-function realOrAncestor(p: string): string {
+/**
+ * The real location of `p` when it exists, else the real location of its nearest existing ancestor.
+ * A dangling symlink on the way is followed to where it points (8SO review of #4171): a link from
+ * outside to a folder not yet made in the workspace names a workspace path. null when a link chain
+ * never resolves (a loop); callers treat that as inside.
+ */
+function realOrAncestor(p: string, depth = 0): string | null {
 	let cur = p;
 	let rest = "";
 	for (let i = 0; i < 64 && cur !== path.dirname(cur); i++) {
 		try {
 			return path.join(realpathSync(cur), rest);
 		} catch {
+			if (lstatOrNull(cur)?.isSymbolicLink()) {
+				if (depth >= 8) return null;
+				const target = path.resolve(path.dirname(cur), readlinkSync(cur));
+				return realOrAncestor(path.join(target, rest), depth + 1);
+			}
 			rest = path.join(path.basename(cur), rest);
 			cur = path.dirname(cur);
 		}
@@ -123,17 +146,19 @@ export function pathOutsideWorkspace(root: string, pathEnv: string): boolean {
 	if (entries.length === 0) return false;
 	for (const dir of entries) {
 		if (!dir || !path.isAbsolute(dir)) return false;
-		if (inside(realOrAncestor(dir), root)) return false;
+		const real = realOrAncestor(dir);
+		if (real === null || inside(real, root)) return false;
 	}
 	return true;
 }
 
 /**
  * True only when `8gent` on an all-absolute PATH is an executable regular file
- * outside the workspace and nothing it runs resolves inside the workspace.
+ * outside every one of `roots` and nothing it runs resolves inside any of them.
  */
-function installedOutside(root: string, pathEnv: string): boolean {
-	if (!pathOutsideWorkspace(root, pathEnv)) return false;
+function installedOutside(roots: string[], pathEnv: string): boolean {
+	if (roots.some((r) => !pathOutsideWorkspace(r, pathEnv))) return false;
+	const within = (p: string) => roots.some((r) => inside(p, r));
 	const entries = pathEnv.split(path.delimiter);
 	let bin: string | null = null;
 	for (const dir of entries) {
@@ -151,7 +176,7 @@ function installedOutside(root: string, pathEnv: string): boolean {
 		}
 		break;
 	}
-	if (!bin || inside(bin, root)) return false;
+	if (!bin || within(bin)) return false;
 	const dir = path.dirname(bin);
 	const text = head(bin);
 	if (text === null) return false;
@@ -161,7 +186,10 @@ function installedOutside(root: string, pathEnv: string): boolean {
 	for (const m of text.match(PATH_TOKEN) ?? []) {
 		entries2.push(path.isAbsolute(m) ? m : path.resolve(dir, m));
 	}
-	for (const e of entries2) if (inside(realOrAncestor(e), root)) return false;
+	for (const e of entries2) {
+		const real = realOrAncestor(e);
+		if (real === null || within(real)) return false;
+	}
 	return true;
 }
 
@@ -169,6 +197,8 @@ export function deckRenderInProject(
 	command: string,
 	cwd: string | undefined,
 	env: Record<string, string | undefined> = process.env,
+	/** The project root when `cwd` is a folder a `cd <folder> &&` chose inside it (#3199, #4169). */
+	project?: string,
 ): DeckRender {
 	try {
 		if (process.platform === "win32") return NO;
@@ -185,9 +215,11 @@ export function deckRenderInProject(
 		if (!plainOperand(specArg, /\.json$/i)) return NO;
 
 		const root = realpathSync(cwd);
+		const roots = project === undefined ? [root] : [root, realpathSync(project)];
 		// The `8gent` that runs must be the installed one, not something in the workspace.
-		for (const rel of WORKSPACE_8GENT) if (lstatOrNull(path.join(root, rel))) return NO;
-		if (!installedOutside(root, env.PATH ?? process.env.PATH ?? "")) return NO;
+		for (const r of roots)
+			for (const rel of WORKSPACE_8GENT) if (lstatOrNull(path.join(r, rel))) return NO;
+		if (!installedOutside(roots, env.PATH ?? process.env.PATH ?? "")) return NO;
 
 		const specAbs = path.resolve(root, specArg);
 		const st = lstatOrNull(specAbs);
