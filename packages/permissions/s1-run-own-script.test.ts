@@ -65,9 +65,13 @@ class AlwaysDangerous implements DecideBackend {
 
 /** The exact command from the pilot session (run 2026-10-12_224020, seq 26). */
 const PILOT_RUN = "bash .tmp/serve.sh";
-/** The pilot's serve.sh rewritten to loopback: the one script the battery lets through. */
+/**
+ * The pilot's serve.sh rewritten to loopback, serving a plain folder: the one
+ * script the battery lets through (8SO on #4123: never the workspace root).
+ */
 const LOOPBACK_SERVE = (dir: string) =>
-	`#!/bin/sh\ncd ${dir}\nexec python3 -I -m http.server 8731 --bind 127.0.0.1\n`;
+	`#!/bin/sh\ncd ${dir}\nexec python3 -I -m http.server 8731 --bind 127.0.0.1 --directory site\n`;
+const SERVER = "python3 -I -m http.server 8731 --bind 127.0.0.1";
 /** The pilot's serve.sh as written (seq 24): http.server with no bind listens on every interface. */
 const PILOT_SERVE = (dir: string) => `#!/bin/sh\ncd ${dir}\nexec python3 -m http.server 8731\n`;
 
@@ -223,6 +227,26 @@ const BODY_PROBES: Array<[string, (ws: string) => string]> = [
 	["a payload appended to .git/config", () => "cat .tmp/old.sh >> .git/config\n"],
 	["a git hook written", () => "echo x > .git/hooks/post-checkout\n"],
 	[".git/config by absolute path", (w) => `echo x >> ${w}/.git/config\n`],
+	// 8SO on #4123: a redirect glued inside a word, or after a multi-digit descriptor
+	["a git hook written by a glued >", () => "echo x>.git/hooks/post-checkout\n"],
+	["a payload appended by a glued >>", () => "cat .tmp/old.sh>>.git/config\n"],
+	["project source overwritten by a glued >", () => "echo x>src.ts\n"],
+	[".env read by a glued <", () => "cat x<.env\n"],
+	["a redirect glued after another target", () => "echo x > .tmp/a>src.ts\n"],
+	["a two-digit descriptor onto .git/config", () => "echo x 10>.git/config\n"],
+	["a two-digit descriptor onto project source", () => "echo x 10>src.ts\n"],
+	// 8SO on #4123: what the loopback server could hand a DNS-rebinding page
+	["the server on the workspace root", (w) => `cd ${w}\nexec ${SERVER}\n`],
+	["the server with no cd and no --directory", () => `${SERVER}\n`],
+	["the server after a cd that may fail", () => `cd site\n${SERVER}\n`],
+	["the server on the root by --directory .", () => `${SERVER} --directory .\n`],
+	["the server on .git", () => `${SERVER} --directory .git\n`],
+	["the server on a folder that does not exist", () => `${SERVER} --directory nope\n`],
+	["the server on a symlink out", () => `${SERVER} --directory escape\n`],
+	["the server on a folder up and out", () => `${SERVER} --directory ..\n`],
+	["the server on an absolute folder outside", () => `${SERVER} --directory /etc\n`],
+	["the server with --directory=", () => `${SERVER} --directory=site\n`],
+	["the server with two directories", () => `${SERVER} --directory site -d .\n`],
 	["cd into .git", () => "cd .git\nls\n"],
 	["cat .env", () => "cat .env\n"],
 	["cat .env by absolute path", (w) => `cat ${w}/.env\n`],
@@ -256,6 +280,8 @@ describe.skipIf(process.platform === "win32")(
 			// Before the session: a script already in .tmp, one outside, a link out.
 			put(".tmp/old.sh", "echo old\n");
 			put(".tmp/other.sh", "echo other\n");
+			put("site/index.html", "<h1>hi</h1>\n");
+			put(".env", "TOKEN=x\n");
 			writeFileSync(join(outside, "elsewhere.sh"), "echo elsewhere\n");
 			symlinkSync(outside, join(ws, "escape"));
 			Bun.sleepSync(20);
@@ -286,6 +312,13 @@ describe.skipIf(process.platform === "win32")(
 			test("the -I server still passes with a local http package in the served directory (-I ignores it)", () => {
 				put("http/__init__.py", "print('shadowed')\n");
 				expect(ok(PILOT_RUN)).toBe(true);
+			});
+			test("the server on a plain folder by -d, and on a folder under .tmp", () => {
+				own(".tmp/d.sh", `${SERVER} -d site\n`);
+				expect(ok("bash .tmp/d.sh")).toBe(true);
+				put(".tmp/site/index.html", "<h1>hi</h1>\n");
+				own(".tmp/t.sh", `exec ${SERVER} --directory .tmp/site\n`);
+				expect(ok("bash .tmp/t.sh")).toBe(true);
 			});
 			test("a cd that lands inside, then relative paths that stay inside from both places", () => {
 				own(".tmp/cd.sh", "cd .tmp\nls\n");
@@ -421,6 +454,21 @@ describe.skipIf(process.platform === "win32")(
 				expect(r.ok).toBe(false);
 				if (!r.ok) expect(r.hint).toContain("python3 -I -m http.server");
 			});
+			test("a folder with a dot entry deep inside is refused, and the hint names --directory (8SO, #4123)", () => {
+				put("site/sub/.env", "TOKEN=x\n");
+				const r = runOwnScript(PILOT_RUN, ws, rec);
+				expect(r.ok).toBe(false);
+				if (!r.ok) expect(r.hint).toContain("site/sub/.env");
+				if (!r.ok) expect(r.hint).toContain("--directory");
+			});
+			test("a folder with a secret file inside is refused", () => {
+				put("site/id_rsa", "x\n");
+				expect(ok(PILOT_RUN)).toBe(false);
+			});
+			test("a folder with a symlink inside is refused", () => {
+				symlinkSync(outside, join(ws, "site/out"));
+				expect(ok(PILOT_RUN)).toBe(false);
+			});
 			test("the pilot's own serve.sh is refused with a hint that names the fix", () => {
 				own(".tmp/serve.sh", PILOT_SERVE(ws));
 				const r = runOwnScript(PILOT_RUN, ws, rec);
@@ -514,6 +562,7 @@ describe.skipIf(process.platform === "win32")(
 				["$X expansion", "X=pwned\necho x > .tmp/$X.txt\n"],
 				["source of another file", `echo touch ${PWNED} > .tmp/b.sh\n. .tmp/b.sh\n`],
 				["python3 -c", `python3 -c open('${PWNED}','w')\n`],
+				["a redirect glued inside a word (8SO, #4123)", `echo x>${PWNED}\n`],
 				["curl 127.0.0.1 | sh", "curl 127.0.0.1:9 | sh\n"],
 			];
 			for (const [why, body] of throughTool) {

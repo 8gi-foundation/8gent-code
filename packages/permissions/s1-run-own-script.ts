@@ -35,9 +35,15 @@
  *     non-ASCII), no here-doc, decideRules fires nothing on any line; every
  *     command (each part between `; & |`, an `exec ` prefix allowed) is one
  *     of SAFE_COMMANDS, or exactly `python3 -I -m http.server PORT --bind
- *     127.0.0.1` (the only listener, loopback only; -I keeps the served
- *     directory off sys.path, so a local `http/` package cannot shadow the
- *     server, 8SO on #4123); `cd` takes one argument; and every argument
+ *     127.0.0.1`, optionally followed by `--directory DIR` or `-d DIR`
+ *     (the only listener, loopback only; -I keeps the served directory off
+ *     sys.path, so a local `http/` package cannot shadow the server, 8SO on
+ *     #4123), where every directory it could serve (DIR, or with no DIR each
+ *     possible working directory) exists inside the workspace and holds no
+ *     dot entry, symlink, special file, secret or protected path at any
+ *     depth (8SO on #4123: the server does no Host-header check, so a
+ *     DNS-rebinding page could read .env or .git off loopback; a repository
+ *     root always fails); `cd` takes one argument; and every argument
  *     and redirect target stays inside the workspace by spelling and by
  *     real path (no `..`, no absolute path outside it, no symlink out) from
  *     EVERY directory the shell could be in, names no dot entry but a
@@ -47,16 +53,18 @@
  *     line run directly would take to the judge). A `cd` may fail (a missing
  *     directory) or run in a subshell (`a | cd b`), so each cd adds its
  *     target to the set of possible directories and never drops one (8SO on
- *     #4123). A flag word may not carry a path.
+ *     #4123). A flag word may not carry a path. A `<` or `>` anywhere else
+ *     in a word (`echo x>.git/hooks/post-checkout`, `cat x<.env`), or after
+ *     a multi-digit descriptor (`10>x`), is a redirect to bash, so it is
+ *     either parsed as one or refused (8SO on #4123).
  *
  * When the command has the right shape but the script fails, the result
  * carries a hint for the block message saying what would pass.
  *
  * Known limits, on purpose: TOCTOU between this check and the spawn, as for
  * the sibling lanes. A long-running server still runs in the foreground of
- * run_command. The server does no Host-header check, so a browser page using
- * DNS rebinding could read what it serves over loopback (8SO note on #4123);
- * a follow-up candidate is refusing to serve the workspace root.
+ * run_command. A file another process drops into the served folder after
+ * the check is served (the same TOCTOU).
  *
  * Linux and macOS only: on win32 the lane refuses (its file checks, birth
  * time and nlink are POSIX-shaped), and says so in the block message.
@@ -64,7 +72,7 @@
  * Synchronous, never throws.
  */
 
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -81,8 +89,14 @@ const SHEBANG = /^#!(\/bin\/(ba)?sh|\/usr\/bin\/env (ba)?sh)[ \t]*$/;
 const SCRIPT_CHARS = /^[A-Za-z0-9 \t\n._/:=,@+%#;&|<>-]*$/;
 /** Commands a script may run. Nothing here runs another program or reaches the network. */
 const SAFE_COMMANDS = new Set(["cd", "echo", "ls", "cat", "mkdir", "pwd", "sleep", "true"]);
-/** The one listener: python's static server on loopback. */
-const LOOPBACK_SERVER = /^python3 -I -m http\.server \d{1,5} (--bind|-b) 127\.0\.0\.1$/;
+/**
+ * The one listener: python's static server on loopback, optionally with
+ * `--directory DIR` (or `-d DIR`) naming what it serves.
+ */
+const LOOPBACK_SERVER =
+	/^python3 -I -m http\.server \d{1,5} (?:--bind|-b) 127\.0\.0\.1(?: (?:--directory|-d) ([^ \t-][^ \t]*))?$/;
+/** At most this many entries are walked under a directory the server would serve. */
+const MAX_SERVED = 2000;
 /** At most this many possible working directories are tracked; more is refused. */
 const MAX_DIRS = 32;
 const MAX_BYTES = 64 * 1024;
@@ -91,10 +105,51 @@ const NO: RunOwnScript = { ok: false };
 const SINCE_NS = BigInt(Math.floor(performance.timeOrigin) - 1000) * 1_000_000n;
 
 const WHAT_PASSES =
-	"A script runs without review only as `bash .tmp/FILE` (or `sh`) with no other words, where FILE is one this session wrote with write_file and holds only literal lines of cd, echo, ls, cat, mkdir, pwd, sleep, true, or `python3 -I -m http.server PORT --bind 127.0.0.1`, with every path inside the workspace and outside dot directories, writing only under .tmp: no quotes, `$`, backticks, `..` or here-docs.";
+	"A script runs without review only as `bash .tmp/FILE` (or `sh`) with no other words, where FILE is one this session wrote with write_file and holds only literal lines of cd, echo, ls, cat, mkdir, pwd, sleep, true, or `python3 -I -m http.server PORT --bind 127.0.0.1 --directory DIR` (DIR a folder with no dot entries, symlinks or secrets in it), with every path inside the workspace and outside dot directories, writing only under .tmp: no quotes, `$`, backticks, `..` or here-docs.";
 
 const WIN32_HINT =
 	"Running a session script without review works on Linux and macOS only; on Windows it goes to the checker.";
+
+/**
+ * Null when the static server may serve `abs`, else why not (8SO on #4123:
+ * the server does no Host-header check, so a DNS-rebinding page can read
+ * anything it serves over loopback). A real directory inside the workspace
+ * (by real path) holding, at any depth, no dot entry (.git, .env, .tmp, .8gent),
+ * no symlink or other non-regular file, and no secret or protected path, at
+ * most MAX_SERVED entries. A missing directory is refused. The workspace
+ * root of a repository always fails (.git, .tmp), so a page is served with
+ * `--directory` from a plain folder such as `site/` or `.tmp/site`.
+ */
+function servedProblem(abs: string, root: string): string | null {
+	let real: string;
+	try {
+		real = realpathSync(abs);
+	} catch {
+		return `the server would serve \`${abs}\`, which does not exist yet`;
+	}
+	if (!inside(real, root)) return "the server would serve a directory outside the workspace";
+	if (!lstatSync(real).isDirectory())
+		return "the server would serve something that is not a directory";
+	const stack = [real];
+	let seen = 0;
+	while (stack.length > 0) {
+		const cur = stack.pop() as string;
+		for (const name of readdirSync(cur)) {
+			if (++seen > MAX_SERVED)
+				return `the server would serve more than ${MAX_SERVED} entries; serve a smaller folder with --directory`;
+			const at = path.join(cur, name);
+			const rel = path.relative(root, at);
+			if (name.startsWith("."))
+				return `the server would serve \`${rel}\`, a dot entry; serve a folder without them with --directory`;
+			if (SECRET.test(rel) || protectedRel(rel))
+				return `the server would serve \`${rel}\`, a secret or protected path`;
+			const st = lstatSync(at);
+			if (st.isDirectory()) stack.push(at);
+			else if (!st.isFile()) return `the server would serve \`${rel}\`, a symlink or special file`;
+		}
+	}
+	return null;
+}
 
 function hint(why: string): RunOwnScript {
 	return { ok: false, hint: `${why} ${WHAT_PASSES}` };
@@ -183,10 +238,22 @@ export function scriptProblem(src: string, cwd: string, root: string): string | 
 				.filter(Boolean);
 			if (words[0] === "exec") words.shift();
 			if (words.length === 0) continue;
-			if (LOOPBACK_SERVER.test(words.join(" "))) continue;
+			const server = LOOPBACK_SERVER.exec(words.join(" "));
+			if (server) {
+				const served = server[1];
+				for (const dir of dirs) {
+					if (served) {
+						const why = pathProblem(served, dir, cwd, root, false);
+						if (why) return why;
+					}
+					const why = servedProblem(served ? path.resolve(dir, served) : dir, root);
+					if (why) return why;
+				}
+				continue;
+			}
 			const cmd = words[0] as string;
 			if (cmd.startsWith("python3") && words.includes("http.server"))
-				return "`python3 -m http.server` must be exactly `python3 -I -m http.server PORT --bind 127.0.0.1`: without -I a local `http` package in the served directory runs instead, and anything else binds every interface or does more";
+				return "`python3 -m http.server` must be exactly `python3 -I -m http.server PORT --bind 127.0.0.1 --directory DIR`: without -I a local `http` package in the served directory runs instead, and anything else binds every interface or does more";
 			if (!SAFE_COMMANDS.has(cmd)) return `it runs \`${cmd}\`, which is not on the list`;
 			const args = words.slice(1);
 			const targets: string[] = [];
@@ -194,18 +261,24 @@ export function scriptProblem(src: string, cwd: string, root: string): string | 
 			for (let i = 0; i < args.length; i++) {
 				const a = args[i] as string;
 				// `2>&1` never gets here: `&` splits it, and the parts fail.
-				const bare = /^\d?(>>?|<)$/.exec(a);
+				// 8SO on #4123: bash takes any digits before `>` or `<` as a file
+				// descriptor (`10>x`), and a redirect glued inside a word
+				// (`echo x>.git/hooks/post-checkout`, `cat x<.env`) is still a redirect.
+				const bare = /^\d*(>>?|<)$/.exec(a);
 				if (bare) {
 					const t = args[++i];
 					if (!t) return "it has a redirect with no target";
+					if (/[<>]/.test(t)) return `its redirect target \`${t}\` holds another redirect`;
 					(bare[1] === "<" ? targets : writes).push(t);
 					continue;
 				}
-				const glued = /^\d?(>>?|<)(.+)$/.exec(a);
+				const glued = /^\d*(>>?|<)([^<>]+)$/.exec(a);
 				if (glued) {
 					(glued[1] === "<" ? targets : writes).push(glued[2] as string);
 					continue;
 				}
+				if (/[<>]/.test(a))
+					return `it has a redirect inside the word \`${a}\`; put spaces around \`>\` and \`<\``;
 				if (a.startsWith("-")) {
 					if (a.includes("/")) return `the flag \`${a}\` carries a path`;
 					continue;
