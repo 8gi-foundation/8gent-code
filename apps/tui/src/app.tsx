@@ -573,13 +573,14 @@ function computeCliOverrides(
 
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
-import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
 import {
 	describeMissingVoiceSetup,
 	describeTranscriberBackend,
 	formatMicLabel,
 	resolveInputDevice,
 } from "../../../packages/voice/input-device.js";
+import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
+import { VoiceReplyTracker } from "../../../packages/voice/voice-chat.js";
 import {
 	FALLBACK_SYSTEM_VOICE,
 	listInstalledSystemVoices,
@@ -1074,8 +1075,11 @@ export function App({
 	}, [voice.state]);
 
 	// Voice chat — adds messages to screen AND calls agent directly
+	// Heard-only memory (#3428): only amend the reply this voice turn produced.
+	const voiceReplyRef = useRef(new VoiceReplyTracker());
 	const voiceChat = useVoiceChat({
 		onAgentMessage: async (transcript) => {
+			voiceReplyRef.current.begin(agent && agentReady ? agent : null);
 			if (!agent || !agentReady) return "8gent not ready.";
 			const clean = transcript
 				.replace(/\[_EOT_\]/g, "")
@@ -1103,6 +1107,7 @@ export function App({
 						`${clean}\n\n[Your previous response was critiqued: ${feedback}. Please address the flaws and try again.]`,
 					);
 				}
+				voiceReplyRef.current.commit(agent, response || "");
 				const cleanResponse = (response || "")
 					.replace(/\[_EOT_\]/g, "")
 					.replace(/<\|.*?\|>/g, "")
@@ -1127,6 +1132,10 @@ export function App({
 		},
 		voice: "Daniel",
 		silenceMs: 1500,
+		// Heard-only voice memory (#3428): only fires with EIGHT_VOICE_HEARD_ONLY=1.
+		onAgentHeard: (heard) => {
+			voiceReplyRef.current.amend(agent, heard);
+		},
 		onActiveChange: (active) => {
 			if (active) {
 				addSystemMessage(

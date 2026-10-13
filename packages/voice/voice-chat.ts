@@ -50,12 +50,16 @@ export interface VoiceChatConfig {
 	onError?: (error: string) => void;
 	/** Max TTS text length (default: 500 chars) */
 	maxSpeakLength?: number;
+	/** Heard-only voice memory (#3428). Default: EIGHT_VOICE_HEARD_ONLY=1, off otherwise. */
+	heardOnly?: boolean;
 }
 
 export interface VoiceChatEvents {
 	"state-change": [VoiceChatState, string?];
 	"user-said": [string];
 	"agent-said": [string];
+	/** Heard-only mode: a reply was cut off; this is the part that was played, marked. */
+	"agent-heard": [string];
 	error: [string];
 	stopped: [];
 }
@@ -80,6 +84,8 @@ export class VoiceChatLoop {
 	private recProcess: { kill: () => void; exited: Promise<number> } | null = null;
 	private listeners: Map<string, Array<(...args: unknown[]) => void>> = new Map();
 	private ttsEngine: TTSEngine;
+	private heardOnly: boolean;
+	private interruptSeq = 0;
 
 	constructor(config: VoiceChatConfig) {
 		this.engine = config.engine;
@@ -91,6 +97,7 @@ export class VoiceChatLoop {
 		this.onStateChange = config.onStateChange;
 		this.onError = config.onError;
 		this.ttsEngine = getTTSEngine();
+		this.heardOnly = config.heardOnly ?? isHeardOnlyEnabled();
 	}
 
 	// ---- Public API ----
@@ -170,6 +177,7 @@ export class VoiceChatLoop {
 	 * Interrupt the agent mid-speech and go back to listening.
 	 */
 	async interrupt(): Promise<void> {
+		this.interruptSeq++;
 		await this.killTTS();
 		// Loop will continue to next turn (listening)
 	}
@@ -392,9 +400,13 @@ export class VoiceChatLoop {
 
 		// Split into sentence chunks for more responsive delivery
 		const chunks = splitIntoSentences(clean);
+		const startSeq = this.interruptSeq;
+		let heard = 0;
 
 		for (const chunk of chunks) {
 			if (!this.running) break;
+			if (this.heardOnly && this.interruptSeq !== startSeq) break;
+			const seq = this.interruptSeq;
 
 			try {
 				this.ttsProcess = await this.ttsEngine.speak(chunk, {
@@ -408,6 +420,15 @@ export class VoiceChatLoop {
 				this.ttsProcess = null;
 				break;
 			}
+			// A chunk counts as heard only if it ended with no interrupt or stop in between.
+			if (this.interruptSeq === seq && this.running) heard++;
+		}
+
+		// Trim only when the user cut playback off (interrupt or stop), never on a TTS failure.
+		const cutOff = this.interruptSeq !== startSeq || !this.running;
+		if (this.heardOnly && cutOff) {
+			const kept = heardOnlyText(chunks, heard);
+			if (kept !== null) this.emit("agent-heard", kept);
 		}
 	}
 
@@ -439,6 +460,71 @@ function cleanupFile(path: string): void {
 	try {
 		if (existsSync(path)) unlinkSync(path);
 	} catch {}
+}
+
+/** Marker appended to a reply the user cut off (#3428). */
+export const HEARD_ONLY_MARK = "[interrupted]";
+
+/** EIGHT_VOICE_HEARD_ONLY=1 turns heard-only voice memory on. Anything else is off. */
+export function isHeardOnlyEnabled(env: Record<string, string | undefined> = process.env): boolean {
+	return env.EIGHT_VOICE_HEARD_ONLY === "1";
+}
+
+/**
+ * What history should keep after playback: the chunks that finished, plus the
+ * mark. Returns null when every chunk was played, meaning leave history alone.
+ * Granularity is the TTS sentence chunk; no word timing.
+ */
+export function heardOnlyText(chunks: string[], heardCount: number): string | null {
+	if (heardCount >= chunks.length) return null;
+	const said = chunks.slice(0, heardCount).join(" ");
+	return said ? `${said} ${HEARD_ONLY_MARK}` : HEARD_ONLY_MARK;
+}
+
+/** The agent surface heard-only memory needs. `Agent` in packages/eight satisfies it. */
+export interface HeardOnlyHistory {
+	getHistoryLength(): number;
+	getMessageHistory(): Array<{ role: string; content: string }>;
+	amendLastAssistantMessage(content: string, expectedOriginal: string): boolean;
+}
+
+/**
+ * Remembers the reply a voice turn added to history, so a cut-off amends that
+ * reply and nothing else (#3428). begin() before the agent call, commit() only
+ * after it succeeds, amend() on agent-heard. A failed, skipped or reply-less
+ * turn leaves nothing to amend.
+ */
+export class VoiceReplyTracker {
+	private produced: string | null = null;
+	private before = Number.POSITIVE_INFINITY;
+
+	begin(agent: HeardOnlyHistory | null): void {
+		this.produced = null;
+		this.before = agent ? agent.getHistoryLength() : Number.POSITIVE_INFINITY;
+	}
+
+	/**
+	 * `response` is what the final agent.chat() returned, byte-identical to the
+	 * reply it pushed. Record it only if it is still the newest assistant message
+	 * added since begin(), so a typed reply that landed meanwhile is never taken.
+	 */
+	commit(agent: HeardOnlyHistory, response: string): void {
+		if (!response) return;
+		const history = agent.getMessageHistory();
+		for (let i = history.length - 1; i >= this.before; i--) {
+			if (history[i]?.role === "assistant") {
+				if (history[i]?.content === response) this.produced = response;
+				return;
+			}
+		}
+	}
+
+	amend(agent: HeardOnlyHistory | null, heard: string): boolean {
+		const expected = this.produced;
+		this.produced = null;
+		if (!agent || expected === null) return false;
+		return agent.amendLastAssistantMessage(heard, expected);
+	}
 }
 
 /**
