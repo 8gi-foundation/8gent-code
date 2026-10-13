@@ -572,7 +572,10 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: process.platform !== "win32",
-			env: { ...(buildChildEnv(process.env, GIT_ENV_NAMES) as NodeJS.ProcessEnv), ...GIT_NON_INTERACTIVE_ENV },
+			env: {
+				...(buildChildEnv(process.env, GIT_ENV_NAMES) as NodeJS.ProcessEnv),
+				...GIT_NON_INTERACTIVE_ENV,
+			},
 		});
 		let stdout = "";
 		let stderr = "";
