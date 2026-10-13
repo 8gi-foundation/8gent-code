@@ -96,7 +96,11 @@ function safeEnvName(name: string): string {
 	}
 }
 
-export function describeCommand(command: string): { program: string; envNames: string[]; argc: number } {
+export function describeCommand(command: string): {
+	program: string;
+	envNames: string[];
+	argc: number;
+} {
 	const w = words(String(command ?? ""));
 	const envNames: string[] = [];
 	let i = 0;
@@ -113,9 +117,15 @@ export function describeCommand(command: string): { program: string; envNames: s
 }
 
 /** Null under `bun test` unless EIGHT_DATA_DIR points somewhere, so test runs never write the real home. */
-export function systemOneLogPath(env: NodeJS.ProcessEnv = process.env): string | null {
+export function systemOneLogPath(
+	env: Record<string, string | undefined> = process.env,
+): string | null {
 	if (!env.EIGHT_DATA_DIR && env.NODE_ENV === "test") return null;
-	return path.join(env.EIGHT_DATA_DIR || path.join(resolveHome(), ".8gent"), "audit", "system-one.jsonl");
+	return path.join(
+		env.EIGHT_DATA_DIR || path.join(resolveHome(), ".8gent"),
+		"audit",
+		"system-one.jsonl",
+	);
 }
 
 export interface JudgeLogInput {
@@ -124,7 +134,13 @@ export interface JudgeLogInput {
 	/** BashGuardOptions in force (raw edges); absent fields mean the guard's defaults. */
 	opts?: { blockAbove?: number; escalateBand?: [number, number] };
 	memoHit?: boolean;
-	guard?: { verdict: "allow" | "block" | "escalate"; pYes: number; backend: string; model: string; rule?: string };
+	guard?: {
+		verdict: "allow" | "block" | "escalate";
+		pYes: number;
+		backend: string;
+		model: string;
+		rule?: string;
+	};
 	outcome?: JudgeOutcome;
 	error?: unknown;
 }
