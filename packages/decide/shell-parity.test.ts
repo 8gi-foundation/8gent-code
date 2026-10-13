@@ -70,6 +70,8 @@ function shArgv(line: string, cwd: string): string[] {
 }
 
 const hasSh = spawnSync("sh", ["-c", "true"]).status === 0;
+// dash (the sh on Debian and Ubuntu) rejects `>&2foo`; bash and zsh write `2foo`.
+const hasBash = spawnSync("bash", ["-c", "true"]).status === 0;
 
 describe.skipIf(!hasSh)("shellWords matches sh -c (#3303)", () => {
 	const dir = mkdtempSync(join(tmpdir(), "s1-parity-"));
@@ -165,15 +167,15 @@ describe("redirect: >&<digits> is an fd only at a word boundary (#3303)", () => 
 		expect(decideRules("echo x 2>&1").verdict).toBe("pass");
 	});
 
-	test.skipIf(!hasSh)("sh really writes the file (so the parsers must see it)", () => {
+	test.skipIf(!hasBash)("bash really writes the file (so the parsers must see it)", () => {
 		const dir = mkdtempSync(join(tmpdir(), "s1-redir-"));
 		try {
 			for (const [c, file] of [
-				// bash-as-sh calls `2>&1foo` an ambiguous redirect; zsh writes `1foo`.
+				// bash calls `2>&1foo` an ambiguous redirect; zsh writes `1foo`.
 				["ls >&2foo", "2foo"],
 				["echo x >&2-out.txt", "2-out.txt"],
 			] as const) {
-				spawnSync("sh", ["-c", c], { cwd: dir });
+				spawnSync("bash", ["-c", c], { cwd: dir });
 				expect({ c, written: existsSync(join(dir, file)) }).toEqual({ c, written: true });
 			}
 		} finally {
