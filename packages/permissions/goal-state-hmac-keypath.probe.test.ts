@@ -12,7 +12,6 @@ import { validatePath } from "./path-guard";
 import {
 	buildBwrapArgs,
 	buildRunCommandProfile,
-	canApplySeatbelt,
 	protectedRunCommandPaths,
 	refreshSecurityEnvForTests,
 	runCommandSandboxStatus,
@@ -66,16 +65,17 @@ describe("8SO probe: key confidentiality and integrity (#4132)", () => {
 		expect(readDeny.some((l) => l.includes(`(subpath "${keysDir}")`))).toBe(true);
 	});
 
-	// P1b. Same, proven by the kernel when sandbox-exec can run here.
-	test.skipIf(!canApplySeatbelt())(
+	// P1b. Same, proven by the kernel through the real run_command wrapper: seatbelt on
+	// macOS, bwrap (tmpfs over keys/) on Linux. Same live gate as P7.
+	test.skipIf(!liveSandbox)(
 		"P1b sandboxed `cat` of the key is refused by the kernel",
 		() => {
 			const data = path.join(root, "data");
 			useDataDir(data);
 			loadOrCreateKey();
 			const keyPath = getKeyPath();
-			const profile = buildRunCommandProfile(protectedRunCommandPaths());
-			const r = spawnSync("/usr/bin/sandbox-exec", ["-p", profile, "/bin/cat", keyPath]);
+			const wrapped = wrapRunCommand(`cat ${JSON.stringify(keyPath)}`);
+			const r = spawnSync("/bin/sh", ["-c", wrapped]);
 			expect(r.status).not.toBe(0);
 			expect(r.stdout.length).toBe(0);
 		},

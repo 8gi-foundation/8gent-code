@@ -7,6 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getKeyPath, loadOrCreateKey, sign, verify } from "./goal-state-hmac";
+import { validatePath } from "./path-guard";
 import { buildRunCommandProfile, protectedRunCommandPaths, refreshSecurityEnvForTests } from "./run-command-sandbox";
 
 let root: string;
@@ -113,6 +114,9 @@ describe("goal-state-hmac key path (#4132)", () => {
 		expect(getKeyPath()).toBe(keyPath);
 		expect(sign({ goal: "fallback" }).sig).toBe(signed.sig);
 		expect(fs.existsSync(other)).toBe(false);
+		// The file tools still refuse the real key dir after the live HOME move.
+		expect(validatePath(keyPath, root, { home: other }, "read").ok).toBe(false);
+		expect(validatePath(keyPath, root, { home: other }, "write").ok).toBe(false);
 	});
 
 	test("the run-from-home exemption uses the snapshot home, so a live HOME change cannot switch the refusal off", () => {

@@ -58,7 +58,7 @@ jobs:
       # bwrap is installed only for this step, after the main suite, so other tests keep
       # their unwrapped behaviour. EIGHT_REQUIRE_RUN_COMMAND_SANDBOX=1 makes the probe file
       # fail, not skip, when bwrap cannot create a namespace here.
-      - name: run_command sandbox live probes (bwrap)
+      - name: "run_command sandbox live probes (bwrap)"
         env:
           EIGHT_REQUIRE_RUN_COMMAND_SANDBOX: "1"
         run: |
