@@ -57,6 +57,7 @@ import {
 	watchRedirects,
 	watchWrite,
 } from "../permissions/s1-created-files";
+import { type ScriptRef, scriptChanged } from "../permissions/s1-script-body";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import {
 	applyAt,
@@ -1473,12 +1474,22 @@ const backgroundStart = tool({
 	}),
 	execute: async ({ command, timeout }) => {
 		const { systemOneGate } = await import("../permissions/system-one-gate");
-		const systemOne = await systemOneGate(command, systemOneEnvFor(currentPermissionMode()));
+		const systemOne = await systemOneGate(
+			command,
+			systemOneEnvFor(currentPermissionMode()),
+			getToolContext().workingDirectory,
+		);
 		if (!systemOne.run) return systemOne.message as string;
+		const changed = scriptChanged(systemOne.scripts);
+		if (changed) {
+			systemOne.cleanup?.();
+			return changed;
+		}
 		try {
 			const { getBackgroundTaskManager } = await import("../tools/background");
 			const taskManager = getBackgroundTaskManager(getToolContext().workingDirectory);
-			const taskId = taskManager.startTask(command, { timeout });
+			// The private copy lives until the process exits (the task has no end hook here).
+			const taskId = taskManager.startTask(systemOne.runCommand ?? command, { timeout });
 			return `Background task started: ${taskId}\nCommand: ${command}\nUse background_status or background_output to check progress.`;
 		} catch (err) {
 			return `Failed to start background task: ${err}`;
@@ -1536,10 +1547,18 @@ const backgroundOutput = tool({
  * Shared by the shell runner and the argv runner, so a git or gh tool is
  * judged exactly as the same command typed into run_command would be.
  */
+/** What the gates learned about a command that the runner needs afterwards. */
+interface CheckedCommand {
+	runInstead?: string;
+	scripts?: ScriptRef[];
+	runCommand?: string;
+	cleanup?: () => void;
+}
+
 async function commandRefusal(
 	command: string,
 	cwd: string = getToolContext().workingDirectory,
-	out?: { runInstead?: string },
+	out?: CheckedCommand,
 ): Promise<string | null> {
 	// The text path's pre-spawn backstops (#3993): protected files such as
 	// ~/.8gent/settings.json and the browser control tokens, for shell and argv alike.
@@ -1575,7 +1594,20 @@ async function commandRefusal(
 		{ canRunInstead: out !== undefined, project: ctx.workingDirectory },
 	);
 	if (!systemOne.run) return systemOne.message as string;
-	if (out && systemOne.runInstead !== undefined) out.runInstead = systemOne.runInstead;
+	if (out) {
+		if (systemOne.runInstead !== undefined) out.runInstead = systemOne.runInstead;
+		// A judged script (#3877): the caller re-checks it before spawn, runs the private copy
+		// and removes it afterwards (`checked.cleanup`, also on every refusal below).
+		out.scripts = systemOne.scripts;
+		out.runCommand = systemOne.runCommand;
+		out.cleanup = systemOne.cleanup;
+	} else {
+		// A caller that runs the command as typed: it cannot run the private copy, so the
+		// script must still be the bytes that were judged.
+		const moved = scriptChanged(systemOne.scripts);
+		systemOne.cleanup?.();
+		if (moved) return moved;
+	}
 
 	if (
 		permissionCheck === "ask" &&
@@ -1590,7 +1622,10 @@ async function commandRefusal(
 			command,
 			{ where },
 		);
-		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
+		if (!allowed) {
+			systemOne.cleanup?.();
+			return `[PERMISSION DENIED] User declined to execute: ${command}`;
+		}
 	}
 	return null;
 }
@@ -1608,7 +1643,7 @@ async function runShellCommand(
 	const ctx = getToolContext();
 	const hookManager = getHookManager();
 
-	const checked: { runInstead?: string } = {};
+	const checked: CheckedCommand = {};
 	const refusal = await commandRefusal(command, cwd, checked);
 	if (refusal !== null) return refusal;
 
@@ -1618,6 +1653,12 @@ async function runShellCommand(
 		workingDirectory: cwd,
 	});
 
+	const scriptMoved = scriptChanged(checked.scripts);
+	if (scriptMoved) {
+		checked.cleanup?.();
+		return scriptMoved;
+	}
+
 	let finalCommand = command;
 	if (command.includes("create-next-app") && !command.includes("--yes")) {
 		finalCommand = command.replace("create-next-app", "create-next-app --yes");
@@ -1625,17 +1666,23 @@ async function runShellCommand(
 	if (command.includes("npm init") && !command.includes("-y")) {
 		finalCommand = `${command} -y`;
 	}
+	// A judged script runs from its private copy of the judged bytes (#3877).
+	if (checked.runCommand) finalCommand = checked.runCommand;
 	// System One checked these bytes, not the file the command names: run them (8SO, #4102).
 	if (checked.runInstead !== undefined) finalCommand = checked.runInstead;
 
 	const sandboxRefusal = runCommandSandboxRefusal();
-	if (sandboxRefusal) return sandboxRefusal;
+	if (sandboxRefusal) {
+		checked.cleanup?.();
+		return sandboxRefusal;
+	}
 
 	return new Promise((settle) => {
 		// Redirect targets this command creates are this agent's own files (#3177).
 		const recordRedirects = watchRedirects(finalCommand, cwd, ctx.createdFiles);
 		const resolve = (value: string) => {
 			recordRedirects();
+			checked.cleanup?.();
 			settle(value);
 		};
 		// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.

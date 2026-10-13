@@ -90,6 +90,14 @@ import { commandInFolder } from "./cd-prefix";
 import type { CreatedFiles } from "./s1-created-files";
 import type { RmOwnDir } from "./s1-rm-own-dir";
 import type { RunOwnScript } from "./s1-run-own-script";
+import {
+	type ScriptRef,
+	hasMultipleWriters,
+	laterLineReusesEarlierPath,
+	resolveScriptRun,
+	splitSimpleCommands,
+	stageScript,
+} from "./s1-script-body";
 import { posixRulesApply } from "./shell-tools";
 import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
 
@@ -240,12 +248,34 @@ export interface SystemOneGateResult {
 	thresholds?: SystemOneThresholds;
 	/** Set when the verdict was escalate: true approved, false declined, null no human. */
 	humanApproved?: boolean | null;
+	/** Set when the verdict judged a script body (#3877): re-check with `scriptChanged` (outermost first) right before spawn. */
+	scripts?: ScriptRef[];
+	/** Set with `scripts` at the top level: run THIS (a private copy of the judged bytes), not the original command. */
+	runCommand?: string;
+	/** Delete the private copy once the command has finished. */
+	cleanup?: () => void;
 	/**
 	 * Set only for a caller that passed `canRunInstead`: the exact text to run with `/bin/sh -c` in
 	 * place of `command`, because what was checked is these bytes, not the file the command names
 	 * (s1-tg-send.ts, 8SO on #4102). A caller given this must run it, never `command`.
 	 */
 	runInstead?: string;
+}
+
+/** Plain words for a refusal shown to the model: no rule ids, probabilities or backend names. */
+function plainReason(g: BashGuardResult | undefined): string {
+	const r = g?.rule ?? "";
+	if (/remote_code/.test(r)) return "it runs downloaded code in a shell";
+	if (/^rm|rmdir|git_clean|shred|wipe|format|erase/.test(r))
+		return "it deletes files in a way that cannot be undone";
+	if (/secret|keychain|credential/.test(r)) return "it could expose a secret";
+	if (/chmod|chown|chgrp|chflags|csrutil|spctl|nvram/.test(r))
+		return "it changes system permissions or protections";
+	if (/git_/.test(r)) return "it rewrites or discards git history or changes";
+	if (g?.backend === "rules" && g.model === "script-body")
+		return g.reason ?? "it could not be checked";
+	if (r) return "it matches a pattern that is not safe to run unattended";
+	return "its contents were judged unsafe";
 }
 
 /** Ask a human. true approve, false decline, null when no human can be asked. */
@@ -542,17 +572,22 @@ export async function systemOneGate(
 	 * canRunInstead: the caller runs `runInstead` when one is handed back (#4102). project: the
 	 * project root when `cwd` is a folder a cd prefix chose inside it, so the tg-notify and
 	 * deck-render lanes' PATH checks cover the whole project, not only that folder (8SO, #4102, #4169).
+	 * scriptDepth and lanesOnly are the script-body check's own recursion (#3877).
 	 */
-	opts: { canRunInstead?: boolean; project?: string } = {},
+	opts: {
+		canRunInstead?: boolean;
+		project?: string;
+		scriptDepth?: number;
+		lanesOnly?: boolean;
+	} = {},
 ): Promise<SystemOneGateResult> {
 	const mode = systemOneMode(env);
 	if (mode === "off") return { run: true };
-	const allow = systemOneAllowlist(env);
-	/** Plain words for the block message when the single-file rule nearly matched (#3669). */
-	let hint: string | undefined;
-	// The rm/mv/run/curl shortcuts below read POSIX quoting. Where the shell parses the
-	// line another way (PowerShell, cmd ^ or %, any line break) they have no opinion.
-	if (allow.enabled && posixRulesApply(command, activeShellKind())) {
+	const scriptDepth = opts.scriptDepth ?? 0;
+	const lanesOnly = opts.lanesOnly === true;
+	// The tg-notify and token lanes see the command before the script-body check (#3877): the
+	// send recipe is itself `bash .tmp/FILE`, and a bot token in argv must be refused first.
+	if (systemOneAllowlist(env).enabled && posixRulesApply(command, activeShellKind())) {
 		// The tg-notify send recipe as a two-line script to a loopback Bot API (#4101), and a
 		// deterministic refusal, in every mode, for a bot token written into a curl command or
 		// that script. First, so no later lane (a loopback GET) can admit a token in argv.
@@ -588,6 +623,119 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through.
 		}
+	}
+	// `bash|sh .tmp/FILE` where FILE is a shell script this session wrote, made only of
+	// allowlisted literal commands on loopback and in the workspace (#4121); see
+	// s1-run-own-script.ts. Default mode only. Before the script-body check (#3877): this lane
+	// is narrower than a body judgement, and its hint names the fix when it nearly matched.
+	let ownHint: string | undefined;
+	if (mode === "default" && scriptDepth === 0 && systemOneAllowlist(env).enabled) {
+		try {
+			const { runOwnScript } = await import("./s1-run-own-script");
+			const own: RunOwnScript = runOwnScript(command, cwd, created);
+			if (own.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: own.reason,
+					},
+				};
+			}
+			if (own.hint) ownHint = own.hint;
+		} catch {
+			// No opinion: fall through.
+		}
+	}
+	// `bash <file>` (#3877): judge the file's lines exactly as if they had been
+	// typed as the command, so a script is never judged less than inline text.
+	// Anything that cannot be read and judged fails closed.
+	const sr = resolveScriptRun(command, cwd);
+	if (sr.kind === "refuse" || (sr.kind === "ok" && scriptDepth >= 2)) {
+		const reason =
+			sr.kind === "refuse" ? sr.reason : "scripts running scripts nest too deep to check";
+		const g: BashGuardResult = {
+			verdict: "block",
+			pYes: Number.NaN,
+			backend: "rules",
+			model: "script-body",
+			reason: `${reason}, failing closed`,
+		};
+		return {
+			run: false,
+			guard: g,
+			thresholds: "rules-only",
+			message: `${SYSTEM_ONE_BLOCK_MARKER} The script was not run: ${reason}. Nothing was changed. Run its lines directly as one command, or fix the script and run it again.`,
+		};
+	}
+	if (sr.kind === "ok") {
+		// Every simple command already passes a deterministic lane (allowlist,
+		// run-in-project, loopback curl, rm/mv lanes): no judge needed. Anything
+		// else, or any construct a line-by-line read cannot cover, judges the
+		// whole body below.
+		let inner: SystemOneGateResult | null = null;
+		let cmds = scriptDepth === 0 ? splitSimpleCommands(sr.body) : null;
+		// A later line aimed at a path an earlier line made or overwrote: lanes read the files as
+		// they stand before the script runs, so judge the whole body instead.
+		if (cmds && (hasMultipleWriters(cmds) || laterLineReusesEarlierPath(cmds))) cmds = null;
+		if (cmds) {
+			let all = true;
+			for (const c of cmds) {
+				const r = await systemOneGate(c, env, cwd, created, where, {
+					project: opts.project,
+					scriptDepth: scriptDepth + 1,
+					lanesOnly: true,
+				});
+				if (!r.run) {
+					all = false;
+					break;
+				}
+			}
+			if (all) {
+				inner = {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: `script of ${cmds.length} plain command(s), each passing a deterministic lane`,
+					},
+				};
+			}
+		}
+		inner ??= await systemOneGate(sr.body, env, cwd, created, where, {
+			project: opts.project,
+			scriptDepth: scriptDepth + 1,
+		});
+		if (!inner.run) {
+			return {
+				...inner,
+				message: `${SYSTEM_ONE_BLOCK_MARKER} The safety check refused the script ${sr.script.rel}: ${plainReason(inner.guard)}. It was not approved and was not run. Use a different approach, or tell the user what you need.${ownHint ? ` ${ownHint}` : ""}`,
+			};
+		}
+		const scripts = [sr.script, ...(inner.scripts ?? [])];
+		if (scriptDepth > 0) return { ...inner, scripts };
+		// Run the bytes that were judged, from a private copy (F2, F4).
+		const staged = stageScript(sr.run);
+		if (!staged) {
+			return {
+				run: false,
+				guard: inner.guard,
+				message: `${SYSTEM_ONE_BLOCK_MARKER} The script was not run: a private copy to check could not be made. Run its lines directly as one command.`,
+			};
+		}
+		return { ...inner, scripts, runCommand: staged.command, cleanup: staged.cleanup };
+	}
+	const allow = systemOneAllowlist(env);
+	/** Plain words for the block message when the single-file rule nearly matched (#3669). */
+	let hint: string | undefined;
+	// The rm/mv/run/curl shortcuts below read POSIX quoting. Where the shell parses the
+	// line another way (PowerShell, cmd ^ or %, any line break) they have no opinion.
+	if (allow.enabled && posixRulesApply(command, activeShellKind())) {
 		try {
 			const { readOnlyAllowlist } = await import("../decide/allowlist");
 			const a = readOnlyAllowlist(command, { bunTest: allow.bunTest });
@@ -699,29 +847,6 @@ export async function systemOneGate(
 					},
 				};
 			}
-		} catch {
-			// No opinion: fall through to the judge.
-		}
-		// `bash|sh .tmp/FILE` where FILE is a shell script this session
-		// wrote, made only of allowlisted literal commands on loopback and in the workspace
-		// (#4121); see s1-run-own-script.ts. Default mode only.
-		try {
-			const { runOwnScript } = await import("./s1-run-own-script");
-			const own: RunOwnScript =
-				mode === "default" ? runOwnScript(command, cwd, created) : { ok: false };
-			if (own.ok) {
-				return {
-					run: true,
-					guard: {
-						verdict: "allow",
-						pYes: Number.NaN,
-						backend: "allowlist",
-						model: "allowlist",
-						reason: own.reason,
-					},
-				};
-			}
-			if (own.hint) hint = own.hint;
 		} catch {
 			// No opinion: fall through to the judge.
 		}
@@ -869,6 +994,21 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+	}
+	if (lanesOnly) {
+		// Lane check for one line of a script (#3877): no lane took it, so the caller judges the whole body.
+		return {
+			run: false,
+			guard: {
+				verdict: "block",
+				pYes: Number.NaN,
+				backend: "rules",
+				model: "script-body",
+				reason: "no deterministic lane",
+			},
+			thresholds: "rules-only",
+			message: `${SYSTEM_ONE_BLOCK_MARKER} no deterministic lane`,
+		};
 	}
 	let guard: BashGuardResult;
 	let thresholds: SystemOneThresholds | "unknown" = "unknown";

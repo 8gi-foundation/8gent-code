@@ -183,6 +183,7 @@ import {
 	watchRedirects,
 	watchWrite,
 } from "../permissions/s1-created-files";
+import { scriptChanged } from "../permissions/s1-script-body";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate, systemOneMode } from "../permissions/system-one-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
@@ -1351,7 +1352,7 @@ export class ToolExecutor {
 				function: {
 					name: "run_command",
 					description:
-						"[SHELL] Executes a shell command and returns stdout/stderr. Use for: running tests, installing packages, checking versions, building projects, file operations (mkdir, mv, cp). Pipes (|) and redirects (>) are allowed. Command chaining (;, &&, ||) and background execution (&) are blocked for safety - use separate calls instead. If a command is blocked by permissions, simplify it or split into multiple calls.",
+						"[SHELL] Executes a shell command and returns stdout/stderr. Use for: running tests, installing packages, checking versions, building projects, file operations (mkdir, mv, cp). Pipes (|) and redirects (>) are allowed. Command chaining (;, &&, ||) and background execution (&) are blocked for safety - use separate calls instead. Prefer one command per call; if you need several steps, put them in a short script file and run it with `bash <file>`; its contents are safety-checked the same way. If a command is blocked by permissions, simplify it or split into multiple calls.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -3399,6 +3400,7 @@ export class ToolExecutor {
 			);
 
 			if (!allowed) {
+				systemOne.cleanup?.();
 				return (
 					channelDenialMessage(command) ??
 					`[PERMISSION DENIED] User declined to execute: ${command}`
@@ -3412,6 +3414,12 @@ export class ToolExecutor {
 			workingDirectory: dir,
 		});
 
+		const changed = scriptChanged(systemOne.scripts);
+		if (changed) {
+			systemOne.cleanup?.();
+			return changed;
+		}
+
 		let finalCommand = command;
 		if (command.includes("create-next-app") && !command.includes("--yes")) {
 			finalCommand = command.replace("create-next-app", "create-next-app --yes");
@@ -3419,6 +3427,8 @@ export class ToolExecutor {
 		if (command.includes("npm init") && !command.includes("-y")) {
 			finalCommand = `${command} -y`;
 		}
+		// A judged script runs from its private copy of the judged bytes (#3877).
+		if (systemOne.runCommand) finalCommand = systemOne.runCommand;
 		// System One checked these bytes, not the file the command names: run them (8SO, #4102).
 		if (systemOne.runInstead !== undefined) finalCommand = systemOne.runInstead;
 
@@ -3435,6 +3445,7 @@ export class ToolExecutor {
 				if (resolved) return;
 				resolved = true;
 				recordRedirects();
+				systemOne.cleanup?.();
 				resolve(value);
 			};
 
@@ -3492,7 +3503,13 @@ export class ToolExecutor {
 					workingDirectory: dir,
 				});
 
-				const output = formatCommandOutput(code, stdout, stderr, finalCommand, this.workingDirectory);
+				const output = formatCommandOutput(
+					code,
+					stdout,
+					stderr,
+					finalCommand,
+					this.workingDirectory,
+				);
 				// Report images the command drew, and any cut off at an edge (#3580).
 				withImagesWritten(output, dir, startTime).then(safeResolve, () => safeResolve(output));
 			});
@@ -3937,11 +3954,21 @@ export class ToolExecutor {
 	// ============================================
 
 	private async handleBackgroundStart(command: string, timeout?: number): Promise<string> {
-		const systemOne = await systemOneGate(command, systemOneEnvFor(currentPermissionMode()));
+		const systemOne = await systemOneGate(
+			command,
+			systemOneEnvFor(currentPermissionMode()),
+			this.workingDirectory,
+		);
 		if (!systemOne.run) return systemOne.message as string;
+		const changed = scriptChanged(systemOne.scripts);
+		if (changed) {
+			systemOne.cleanup?.();
+			return changed;
+		}
 		try {
 			const taskManager = getBackgroundTaskManager(this.workingDirectory);
-			const taskId = taskManager.startTask(command, { timeout });
+			// The private copy lives until the process exits (the task has no end hook here).
+			const taskId = taskManager.startTask(systemOne.runCommand ?? command, { timeout });
 			return `Background task started: ${taskId}\nCommand: ${command}\nUse background_status or background_output to check progress.`;
 		} catch (err) {
 			return `Failed to start background task: ${err}`;

@@ -357,3 +357,24 @@ describe("childAgentEnv and the process refusal (#3341)", () => {
 		}
 	});
 });
+
+describe("spawn_agent shell runtime runs the judged copy of a script (#3877, 8SO)", () => {
+	test("a bash <file> task is spawned from the private copy, not the original file", async () => {
+		const { writeFileSync } = await import("node:fs");
+		writeFileSync(join(dir, "x.sh"), "#!/bin/sh\necho hello\n");
+		const prev = process.env.EIGHT_SYSTEM_ONE;
+		process.env.EIGHT_SYSTEM_ONE = "1";
+		let out: string;
+		try {
+			out = await spawnAgentTool(dir, "bash x.sh", "shell");
+		} finally {
+			if (prev === undefined) Reflect.deleteProperty(process.env, "EIGHT_SYSTEM_ONE");
+			else process.env.EIGHT_SYSTEM_ONE = prev;
+		}
+		const parsed = JSON.parse(out);
+		const agent = listCLIAgents().find((a) => a.id === parsed.agentId);
+		expect(agent).toBeDefined();
+		expect(agent?.task).not.toBe("bash x.sh");
+		expect(agent?.task).toContain("s1-script-");
+	});
+});
