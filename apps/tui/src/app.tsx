@@ -180,6 +180,7 @@ import {
 } from "../../../packages/permissions/system-one-gate.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
+import { setKeyOwner } from "../../../packages/secrets/key-vault.js";
 import {
 	getVoiceForRole,
 	loadSettings as loadAppSettings,
@@ -302,14 +303,13 @@ import { turnEndedInError } from "./lib/turn-outcome.js";
 import { BTWView } from "./screens/BTWView.js";
 import { type ConversationEntry, HistoryScreen } from "./screens/HistoryScreen.js";
 import { IdeasView } from "./screens/IdeasView.js";
+import { KeyVaultScreen } from "./screens/KeyVaultScreen.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
 import { NarratorView } from "./screens/NarratorView.js";
 import { NotesView } from "./screens/NotesView.js";
 import { OnboardingScreen } from "./screens/OnboardingScreen.js";
 import { ProjectsView } from "./screens/ProjectsView.js";
 import { QuestionsView } from "./screens/QuestionsView.js";
-import { setKeyOwner } from "../../../packages/secrets/key-vault.js";
-import { KeyVaultScreen } from "./screens/KeyVaultScreen.js";
 import { SettingsView } from "./screens/SettingsView.js";
 import { TerminalView } from "./screens/TerminalView.js";
 import { WindowTerminalView } from "./screens/WindowTerminalView.js";

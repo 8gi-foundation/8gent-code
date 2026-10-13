@@ -616,7 +616,9 @@ export async function handleProviderCommands(trimmed: string): Promise<boolean> 
 			} else {
 				pm.setApiKey(p.name, apiKey);
 				console.log(`\x1b[32mAPI key saved for ${p.displayName}\x1b[0m`);
-				console.log("  Stored in the key vault (OS keychain when available), not in providers.json.");
+				console.log(
+					"  Stored in the key vault (OS keychain when available), not in providers.json.",
+				);
 			}
 		}
 		return true;

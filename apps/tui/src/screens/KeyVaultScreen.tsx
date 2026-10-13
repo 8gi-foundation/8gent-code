@@ -17,8 +17,8 @@ import React, { useRef, useState } from "react";
 import { getProviderManager } from "../../../../packages/providers/index.js";
 import {
 	type VaultKeyInfo,
-	deleteVaultKey,
 	currentKeyOwner,
+	deleteVaultKey,
 	keyVaultProblem,
 	listVaultKeys,
 	maskKey,
@@ -180,13 +180,13 @@ export function KeyVaultScreen({
 			{plainKeyProviders.length > 0 && (
 				<Box marginTop={1}>
 					<Text color="yellow">
-						Plain-text key in providers.json for: {plainKeyProviders.join(", ")}. Enter it here and remove
-						it from the file.
+						Plain-text key in providers.json for: {plainKeyProviders.join(", ")}. Enter it here and
+						remove it from the file.
 					</Text>
 				</Box>
 			)}
 			{note !== "" && <Text>{note}</Text>}
-			{!entering && <Text dimColor>Up/Down choose  Enter set key  D delete  Esc close</Text>}
+			{!entering && <Text dimColor>Up/Down choose Enter set key D delete Esc close</Text>}
 		</Box>
 	);
 }

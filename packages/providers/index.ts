@@ -18,18 +18,18 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { modelFetch } from "../ai/model-fetch";
-import type { ThinkingLevel } from "../types/index.js";
-import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
 import { isLlamaServerSelected, resolveLlamaServerUrl } from "../local-model-server/select";
+import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
 import { readVaultKey, storeVaultKey } from "../secrets/key-vault";
+import type { ThinkingLevel } from "../types/index.js";
 import { AuthRotator } from "./auth-rotation";
-import { type EffortTaskKind, applyEffortPolicy } from "./effort-policy";
 import {
 	type ProviderCompat,
 	discoverModelsAt,
 	normalizeDeclaredProvider,
 	parseDeclaredProviders,
 } from "./declared";
+import { type EffortTaskKind, applyEffortPolicy } from "./effort-policy";
 import { ModelFailover } from "./failover";
 import {
 	type ThinkingResolution,
@@ -735,7 +735,8 @@ export class ProviderManager {
 	private vaultKey(name: ProviderName, apiKey: string): void {
 		if (!this.settings.providers[name]) this.settings.providers[name] = {};
 		const entry = this.settings.providers[name];
-		const ref = this.getProvider(name).apiKeyRef || this.getProvider(name).apiKeyEnv || `provider-${name}`;
+		const ref =
+			this.getProvider(name).apiKeyRef || this.getProvider(name).apiKeyEnv || `provider-${name}`;
 		storeVaultKey(ref, apiKey);
 		if (!this.getProvider(name).apiKeyEnv && !entry.apiKeyRef) entry.apiKeyRef = ref;
 		delete entry.apiKey;
@@ -897,10 +898,7 @@ export class ProviderManager {
 					}
 				};
 				for (const m of msgs) for (const tc of m.toolCalls ?? []) collect(tc.arguments ?? {});
-				const gated = anonymizeMessages<{ role: string; content: string }>([
-					...msgs,
-					...leaves,
-				]);
+				const gated = anonymizeMessages<{ role: string; content: string }>([...msgs, ...leaves]);
 				const cleanLeaves = gated.messages.slice(msgs.length);
 				let next = 0;
 				const rebuild = (v: unknown): unknown => {
@@ -932,7 +930,11 @@ export class ProviderManager {
 				const outbound = [
 					...cleanMsgs.map((m) => m.content),
 					...cleanMsgs.flatMap((m) =>
-						(m.toolCalls ?? []).flatMap((tc) => [JSON.stringify(tc.arguments), tc.id ?? "", tc.name ?? ""]),
+						(m.toolCalls ?? []).flatMap((tc) => [
+							JSON.stringify(tc.arguments),
+							tc.id ?? "",
+							tc.name ?? "",
+						]),
 					),
 					...cleanMsgs.map((m) => m.toolCallId ?? ""),
 				].join("\n");
