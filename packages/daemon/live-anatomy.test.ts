@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { networkInterfaces } from "node:os";
 import { EventBus } from "./events";
 import {
 	type LiveEvent,
@@ -241,6 +242,21 @@ describe("live feed", () => {
 		expect(admit("tool:start", { sessionId: "p-telegram", tool: "x", input: {} })).toBeNull();
 	});
 
+	test("a 5 MB payload is stored clipped, not whole", () => {
+		const big = "x".repeat(5 * 1024 * 1024);
+		const entry = admit("session:start", { sessionId: "big", channel: "api" });
+		expect(entry).not.toBeNull();
+		const stored = admit("tool:start", {
+			sessionId: "big",
+			tool: "write_file",
+			input: { path: "big.txt", content: big },
+		});
+		const content = (stored?.payload.input as { content: string }).content;
+		expect(content.length).toBeLessThan(4100);
+		expect(content.endsWith("\n...")).toBe(true);
+		expect(JSON.stringify(stored).length).toBeLessThan(5000);
+	});
+
 	test("8SO 5844: /live and its script answer loopback peers only", () => {
 		for (const path of ["/live", "/live/mermaid.js"]) {
 			const r = handleLiveHttp(
@@ -286,6 +302,50 @@ describe("live feed", () => {
 });
 
 describe("live route on the real gateway", () => {
+	// A real non-loopback peer: bind the gateway to this machine's LAN address
+	// (allowed with a token) and call it on that address, so requestIP is not 127.x.
+	const lan = Object.values(networkInterfaces())
+		.flat()
+		.find((i) => i?.family === "IPv4" && !i.internal)?.address;
+
+	test.skipIf(!lan)("/live/ws and /live answer 403 to a non-loopback peer", async () => {
+		const { mkdtempSync, rmSync } = await import("node:fs");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+		const { startGateway } = await import("./gateway");
+		const dataDir = mkdtempSync(join(tmpdir(), "live-anatomy-lan-"));
+		const saved = { data: process.env.EIGHT_DATA_DIR, host: process.env.DAEMON_HOSTNAME };
+		process.env.EIGHT_DATA_DIR = dataDir;
+		process.env.DAEMON_HOSTNAME = lan as string;
+		const pool = { size: 0, hasSession: () => false, getStatus: () => ({}) };
+		// biome-ignore lint/suspicious/noExplicitAny: a stand-in pool; /live never touches it
+		const server = startGateway({ port: 0, authToken: "lan-test-token", pool: pool as any });
+		try {
+			const ws = await fetch(`http://${lan}:${server.port}/live/ws`, {
+				headers: {
+					Upgrade: "websocket",
+					Connection: "Upgrade",
+					"Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+					"Sec-WebSocket-Version": "13",
+				},
+			});
+			expect(ws.status).toBe(403);
+			expect(await ws.text()).toContain("loopback-only");
+			const page = await fetch(`http://${lan}:${server.port}/live`);
+			expect(page.status).toBe(403);
+		} finally {
+			server.stop(true);
+			for (const [k, v] of [
+				["EIGHT_DATA_DIR", saved.data],
+				["DAEMON_HOSTNAME", saved.host],
+			] as const) {
+				if (v === undefined) delete process.env[k];
+				else process.env[k] = v;
+			}
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
 	test("GET /live, then /live/ws streams the graph a real bus event builds", async () => {
 		const { mkdtempSync, rmSync } = await import("node:fs");
 		const { tmpdir } = await import("node:os");

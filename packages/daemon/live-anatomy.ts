@@ -426,9 +426,10 @@ export function installLiveAnatomy(bus: EventBus, token: string | null): void {
 	}
 }
 
-/** Every string in a payload through the daemon's secret scrubber (env keys, bearer tokens, keys). */
+/** Every string in a payload through the daemon's secret scrubber (env keys, bearer tokens, keys), clipped to DETAIL_MAX. */
 function scrubDeep(v: unknown, depth = 0): unknown {
-	if (typeof v === "string") return scrub(v).scrubbed;
+	// Scrubbed, then clipped: a few multi-MB writes must not grow the log to hundreds of MB.
+	if (typeof v === "string") return clip(scrub(v).scrubbed);
 	if (depth > 6 || v === null || typeof v !== "object") return v;
 	if (Array.isArray(v)) return v.map((x) => scrubDeep(x, depth + 1));
 	const out: Record<string, unknown> = {};
