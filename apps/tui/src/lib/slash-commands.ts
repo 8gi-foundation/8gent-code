@@ -71,7 +71,9 @@ export type SlashCommand =
 	| "terminal"
 	| "copy"
 	| "tree"
-	| "import";
+	| "import"
+	| "thinking"
+	| "scoped-models";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -499,6 +501,19 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Copy the last answer to the clipboard (works over SSH)",
 		usage: "/copy",
+	},
+	{
+		name: "thinking",
+		aliases: ["think"],
+		description:
+			"Set the thinking level, or show / hide the model's thinking (Ctrl+Z cycles, Ctrl+V toggles)",
+		usage: "/thinking [off|low|medium|high|show|hide]",
+	},
+	{
+		name: "scoped-models",
+		aliases: ["scoped", "scope"],
+		description: "The few models Alt+M cycles between",
+		usage: "/scoped-models [model|part of a name ...|clear]",
 	},
 ];
 

@@ -18,12 +18,24 @@ export interface KeyBinding {
 }
 
 export const KEYBINDINGS: readonly KeyBinding[] = [
-	{ keys: "Enter", action: "Send the message (queued while a task runs)", group: "core" },
-	{ keys: "Esc", action: "Stop the running task, or close the open view", group: "core" },
+	{
+		keys: "Enter",
+		action: "Send the message; while a task runs, steer it (lands after the current tool call)",
+		group: "core",
+	},
+	{ keys: "Alt+Enter", action: "Queue the message for after the running task", group: "core" },
+	{ keys: "Ctrl+Q", action: "Same as Alt+Enter (for Windows Terminal)", group: "core" },
+	{
+		keys: "Esc",
+		action: "Stop the running task (queued text returns to the input), or close the open view",
+		group: "core",
+	},
 	{ keys: "Tab", action: "Accept the grey suggestion", group: "core" },
 	{ keys: "Up / Down", action: "Previous / next message you sent", group: "core" },
 	{ keys: "Shift+Tab", action: "Permission mode: Plan, Ask, Guarded, Infinite", group: "core" },
 	{ keys: "Ctrl+L", action: "Model picker", group: "core" },
+	{ keys: "Alt+M", action: "Next model in the scoped list (/scoped-models)", group: "core" },
+	{ keys: "Ctrl+Z", action: "Cycle the thinking level (/thinking)", group: "core" },
 	{ keys: "/provider", action: "Provider picker", group: "core" },
 	{ keys: "Ctrl+P", action: "Command palette", group: "core" },
 	{ keys: "Ctrl+C", action: "Save the session and quit", group: "core" },
@@ -41,6 +53,7 @@ export const KEYBINDINGS: readonly KeyBinding[] = [
 	{ keys: "Ctrl+F", action: "Live view of the session in 8gent Browser", group: "views" },
 	{ keys: "Ctrl+Y", action: "Cycle the work mode", group: "views" },
 	{ keys: "Ctrl+G", action: "Send the running task to the background", group: "views" },
+	{ keys: "Ctrl+V", action: "Show or hide the model's thinking", group: "views" },
 	{ keys: "Ctrl+R", action: "Start or stop voice input", group: "extras" },
 	{
 		keys: "Ctrl+D",

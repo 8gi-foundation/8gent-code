@@ -7,7 +7,10 @@ const SRC = path.join(import.meta.dir, "..");
 const read = (f: string) => fs.readFileSync(path.join(SRC, f), "utf8");
 
 /** Files that bind a global Ctrl key, besides app.tsx. */
-const OTHER_BINDERS: Record<string, string> = { r: "hooks/useVoiceInput.ts" };
+const OTHER_BINDERS: Record<string, string> = {
+	r: "hooks/useVoiceInput.ts",
+	q: "components/command-input.tsx",
+};
 
 /**
  * Ctrl keys app.tsx handles but /hotkeys does not teach, and why. Adding a
@@ -82,6 +85,7 @@ const NOT_PRESSED: Record<string, string> = {
 	"Ctrl+C": "quits the App",
 	"Ctrl+R": "opens the microphone",
 	"Ctrl+D": "acts only with a DJ track loaded",
+	"Ctrl+Q": "queues typed text while a task runs; steer.harness.tsx presses it",
 };
 
 test("every listed Ctrl key changes the screen in the real App", async () => {

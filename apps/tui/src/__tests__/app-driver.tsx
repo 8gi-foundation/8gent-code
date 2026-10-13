@@ -51,6 +51,16 @@ function makeStdout(cols: number, rows: number): FakeStdout {
 export const strip = (s: string) => s.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, "");
 export const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Exit once every event written so far has left the pipe. process.exit right
+ * after a large write truncates it on a Linux pipe (the frames event is ~0.5 MB).
+ */
+export function finish(code = 0): Promise<never> {
+	return new Promise(() => {
+		process.stdout.write("", () => process.exit(code));
+	});
+}
+
 export async function waitFor(check: () => boolean, label: string, timeoutMs = 20000) {
 	const start = Date.now();
 	while (!check()) {
@@ -97,7 +107,9 @@ export async function bootApp(cols = 160, rows = 44): Promise<DrivenApp> {
 		mark,
 		since,
 		raw: () => stdout.written,
-		emit: (o) => console.log(JSON.stringify(o)),
+		// A leading newline ends any half line the App left on stdout, so the event
+		// always starts its own line.
+		emit: (o) => void process.stdout.write(`\n${JSON.stringify(o)}\n`),
 		exited: () => exited,
 		submit: async (text) => {
 			const m = mark();
@@ -199,13 +211,22 @@ export async function runAppHarness(
 		]);
 		const code = await proc.exited;
 		clearTimeout(timer);
-		const events = out
-			.trim()
-			.split("\n")
+		// Event lines are JSON objects with a phase. Anything else the App printed
+		// to stdout (a logged object, a warning) is not an event.
+		const events: Record<string, unknown>[] = [];
+		for (const line of out.split("\n")) {
 			// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping BEL
-			.map((l) => l.replace(/^[\x00-\x1f]+/, ""))
-			.filter((l) => l.startsWith("{"))
-			.map((l) => JSON.parse(l) as Record<string, unknown>);
+			const l = line.replace(/^[\x00-\x1f]+/, "");
+			if (!l.startsWith('{"phase"')) continue;
+			try {
+				events.push(JSON.parse(l) as Record<string, unknown>);
+			} catch {
+				events.push({
+					phase: "error",
+					message: `unreadable event line (${l.length} chars): ${l.slice(0, 80)}`,
+				});
+			}
+		}
 		if (killed) events.push({ phase: "error", message: `harness killed after ${deadlineMs} ms` });
 		if (killed || code !== 0 || events.length === 0 || events.some((e) => e.phase === "error")) {
 			console.error(
