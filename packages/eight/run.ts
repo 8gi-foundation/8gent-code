@@ -254,7 +254,56 @@ export function parseRunArgs(argv: string[]): RunOptions {
  * (not a subcommand): `-p`/`--print` (anywhere on the line) and `--mode json|text` run one prompt,
  * `--mode rpc` (like `--rpc`) is the JSON-RPC server (F1).
  */
-const SUBCOMMANDS = new Set(["init","outline","symbol","search","benchmark","demo","tui","run","pipeline","pet","infinite","chat","agent","session","export","preferences","memory","airdrop","drop","onboard","auth","cron","blueprint","daemon","rpc","mcp-server","review","doctor","update","upgrade","permissions","perms","keys","env","install","publish","start","open","stop","kill","restart","build","log","logs","login","logout","whoami","status"]);
+const SUBCOMMANDS = new Set([
+	"init",
+	"outline",
+	"symbol",
+	"search",
+	"benchmark",
+	"demo",
+	"tui",
+	"run",
+	"pipeline",
+	"pet",
+	"infinite",
+	"chat",
+	"agent",
+	"session",
+	"export",
+	"preferences",
+	"memory",
+	"airdrop",
+	"drop",
+	"onboard",
+	"auth",
+	"cron",
+	"blueprint",
+	"daemon",
+	"rpc",
+	"mcp-server",
+	"review",
+	"doctor",
+	"update",
+	"upgrade",
+	"permissions",
+	"perms",
+	"keys",
+	"env",
+	"install",
+	"publish",
+	"start",
+	"open",
+	"stop",
+	"kill",
+	"restart",
+	"build",
+	"log",
+	"logs",
+	"login",
+	"logout",
+	"whoami",
+	"status",
+]);
 
 export function headlessRoute(args: string[]): "run" | "rpc" | null {
 	if (args.length === 0) return null;
@@ -306,7 +355,9 @@ export async function unknownToolNames(tools: string[]): Promise<string[]> {
 		for (const k of Object.keys(agentTools)) known.add(k);
 		const { ToolExecutor } = await import("./tools");
 		const os = await import("node:os");
-		for (const d of new ToolExecutor(os.tmpdir()).getToolDefinitions() as Array<{ function?: { name?: unknown } }>)
+		for (const d of new ToolExecutor(os.tmpdir()).getToolDefinitions() as Array<{
+			function?: { name?: unknown };
+		}>)
 			if (typeof d.function?.name === "string") known.add(d.function.name);
 	} catch {
 		return [];
@@ -519,11 +570,13 @@ export async function runRunCommand(
 	if (opts.print || !opts.prompt) {
 		try {
 			const piped = await (deps.stdin ?? (() => readPipedStdin(Boolean(opts.prompt))))();
-			if (Buffer.byteLength(piped) > MAX_STDIN_BYTES) throw new StdinTooLargeError(Buffer.byteLength(piped));
+			if (Buffer.byteLength(piped) > MAX_STDIN_BYTES)
+				throw new StdinTooLargeError(Buffer.byteLength(piped));
 			opts.prompt = combinePromptAndStdin(opts.prompt, piped);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			if (opts.outputFormat === "stream-json") emit({ type: "error", subtype: "usage", message: msg });
+			if (opts.outputFormat === "stream-json")
+				emit({ type: "error", subtype: "usage", message: msg });
 			else process.stderr.write(`${msg}\n`);
 			return 1;
 		}
@@ -558,7 +611,8 @@ export async function runRunCommand(
 		const unknown = await unknownToolNames(opts.tools);
 		if (unknown.length) {
 			const msg = `Warning: --tools names no such tool: ${unknown.join(", ")}.`;
-			if (opts.outputFormat === "stream-json") emit({ type: "error", subtype: "usage", message: msg });
+			if (opts.outputFormat === "stream-json")
+				emit({ type: "error", subtype: "usage", message: msg });
 			else process.stderr.write(`${msg}\n`);
 		}
 		const { getModeManager } = await import("./modes");
