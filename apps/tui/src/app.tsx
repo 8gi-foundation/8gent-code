@@ -2591,7 +2591,7 @@ export function App({
 				// not ticked here either: update_plan refuses it (#4161).
 				if (isActive && event.toolName === "update_plan") {
 					const items = (event.args as { plan?: unknown } | undefined)?.plan;
-					const file = findPlanFile(process.cwd());
+					const file = findPlanFile(getTabAgent(tabId)?.getWorkingDirectory() ?? process.cwd());
 					setPlanFile(planFileTally(file));
 					if (Array.isArray(items))
 						setPlanSteps((prev) => applyPlanUpdate(prev, holdOpenBoxes(items, file)));
@@ -2641,7 +2641,9 @@ export function App({
 				const isActive = tabId === activeTabId;
 				// A tick in the plan file shows in the column as it lands (#4161).
 				if (isActive && (event.toolName === "edit_file" || event.toolName === "write_file")) {
-					setPlanFile(planFileTally(findPlanFile(process.cwd())));
+					setPlanFile(
+						planFileTally(findPlanFile(getTabAgent(tabId)?.getWorkingDirectory() ?? process.cwd())),
+					);
 				}
 				if (isActive) {
 					setToolCount((prev) => prev + 1);
@@ -6221,7 +6223,14 @@ export function App({
 				setPlanNextStep(null);
 				setKanbanBoard({ backlog: [], ready: [], inProgress: [], done: [] });
 				setPlanSteps([]);
-				setPlanFile(planFileTally(findPlanFile(process.cwd())));
+				setPlanFile(
+					planFileTally(
+						findPlanFile(
+							perTabAgents.getAgent(tabId)?.getWorkingDirectory() ?? process.cwd(),
+							message,
+						),
+					),
+				);
 				setPlanElapsedMs(null);
 				planStartedAtRef.current = Date.now();
 			}

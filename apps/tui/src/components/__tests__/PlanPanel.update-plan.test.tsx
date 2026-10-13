@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { render } from "ink";
-import { findPlanFile } from "../../../../../packages/ai/plan-file.js";
+import { findPlanFile, notePlanTask } from "../../../../../packages/ai/plan-file.js";
 import { toolDefsToSpecs } from "../../../../../packages/ai/text-tool-endpoint.js";
 import { type TextTool, runTextToolAgent } from "../../../../../packages/ai/text-tool-loop.js";
 import { ToolExecutor } from "../../../../../packages/eight/tools.js";
@@ -135,6 +135,7 @@ describe("PLAN column from update_plan", () => {
 				path.join(root, "PLAN.md"),
 				"- [x] 1. Add src/slugify.ts with a test under test/\n- [ ] 2. Update the Usage line in README.md\n",
 			);
+			notePlanTask(root, "Go ahead with the plan in PLAN.md.");
 			const executor = new ToolExecutor(root);
 			const items = [
 				{ step: "Add src/slugify.ts + test under test/", status: "done" },

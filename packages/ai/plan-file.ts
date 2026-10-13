@@ -94,14 +94,21 @@ function readInside(workingDirectory: string, name: string): string | null {
 	}
 }
 
+// A task that talks about a plan or a checklist may mean a root PLAN.md or
+// TODO.md without naming it; any other task leaves a backlog TODO.md alone.
+const PLAN_WORDS = /\b(plan|checklist|todo|tick)\b/i;
+
 /**
- * The plan of record in `workingDirectory`: the first root plan file, then the
- * first file the task names, that holds at least one checkbox. Null when there
- * is none, which leaves update_plan exactly as it was.
+ * The plan of record in `workingDirectory`: the first file the task names,
+ * then a root PLAN.md, plan.md or TODO.md when the task speaks of a plan, a
+ * checklist, a todo or ticking, whichever first holds a checkbox. A root
+ * backlog file the task has nothing to do with is never the record. Null
+ * when there is none, which leaves update_plan exactly as it was.
  */
 export function findPlanFile(workingDirectory: string, task?: string): PlanFile | null {
 	const noted = task ?? taskByDir.get(path.resolve(workingDirectory)) ?? "";
-	const candidates = [...PLAN_FILE_NAMES, ...namedPlanFiles(noted)];
+	const named = namedPlanFiles(noted);
+	const candidates = [...named, ...(PLAN_WORDS.test(noted) ? PLAN_FILE_NAMES : [])];
 	for (const name of candidates) {
 		const content = readInside(workingDirectory, name);
 		if (content === null) continue;
@@ -112,7 +119,7 @@ export function findPlanFile(workingDirectory: string, task?: string): PlanFile 
 }
 
 const STOP = new Set(
-	"a an the to of in on for and or it its so also is be with from by as at that this each every other".split(
+	"a an the to of in on for and or it its so also is be with from by as at that this each every other md markdown txt".split(
 		" ",
 	),
 );
@@ -129,18 +136,22 @@ function words(text: string): Set<string> {
 /**
  * The box a plan step refers to, or undefined. A step that starts with a
  * number ("2. Update README", "Step 2: ...") is the box with that number when
- * the file numbers its items. Otherwise it is the box whose words cover most
+ * the file numbers its items and the two share a content word: the model's
+ * own numbering alone ("1. Read PLAN.md") is not the file's item 1. Otherwise
+ * it is the box whose words cover most
  * of the step's words, when they cover at least 60% and two words: models
  * paraphrase ("Add src/slugify.ts + test under test/"), and a step that
  * matches nothing is not refused.
  */
 export function matchBox(step: string, boxes: ReadonlyArray<PlanBox>): PlanBox | undefined {
+	const want = words(step);
 	const n = /^\s*(?:step\s*)?(\d+)\s*[.):\-]/i.exec(step);
 	if (n) {
 		const byNumber = boxes.find((b) => b.number === Number(n[1]));
-		if (byNumber) return byNumber;
+		const rest = words(step.slice(n[0].length));
+		const have = byNumber ? words(byNumber.text) : new Set<string>();
+		if (byNumber && [...rest].some((w) => have.has(w))) return byNumber;
 	}
-	const want = words(step);
 	if (want.size === 0) return undefined;
 	let best: PlanBox | undefined;
 	let bestScore = 0;

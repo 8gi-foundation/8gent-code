@@ -52,8 +52,13 @@ const OF_RECORD = "the plan of record is PLAN.md; tick its boxes with edit_file"
 const tick = (plan: string, n: number) => plan.replace(`- [ ] ${n}.`, `- [x] ${n}.`);
 
 let root: string;
+// The pilot's own prompt (scenarios.json approve-go-ahead-practice).
+const TASK =
+	"Yes, go ahead with the plan in PLAN.md, and keep Dana updated in STATUS.md as you work through it.";
+
 beforeEach(() => {
 	root = fs.mkdtempSync(path.join(os.tmpdir(), "plan-file-"));
+	notePlanTask(root, TASK);
 });
 afterEach(() => {
 	fs.rmSync(root, { recursive: true, force: true });
@@ -165,6 +170,36 @@ describe("finding the plan file", () => {
 		} finally {
 			fs.rmSync(outside, { recursive: true, force: true });
 		}
+	});
+
+	test("a file the task names beats a root TODO.md", () => {
+		fs.writeFileSync(path.join(root, "TODO.md"), "- [ ] Add tests for the parser\n");
+		fs.mkdirSync(path.join(root, "docs"));
+		fs.writeFileSync(path.join(root, "docs", "rollout.md"), "- [ ] 1. Ship it\n");
+		expect(findPlanFile(root, "go ahead with docs/rollout.md")?.name).toBe("docs/rollout.md");
+	});
+
+	test("a backlog TODO.md the task has nothing to do with leaves update_plan as it was", () => {
+		fs.writeFileSync(
+			path.join(root, "TODO.md"),
+			"- [ ] Add tests for the parser\n- [ ] Speed up the lexer\n",
+		);
+		notePlanTask(root, "Fix the crash in the parser on empty input and add tests for it.");
+		const call = { plan: [{ step: "Add tests for parser", status: "done" }] };
+		expect(findPlanFile(root)).toBeNull();
+		expect(updatePlan(call, root)).toBe(updatePlan(call));
+		expect(updatePlan(call, root)).toBe("Plan updated: 1 of 1 done");
+		// The same file is the record once the task speaks of it as a checklist.
+		expect(findPlanFile(root, "Work through the todo list")?.name).toBe("TODO.md");
+	});
+
+	test("the model's own numbering alone is not the file's item number", () => {
+		fs.writeFileSync(path.join(root, "PLAN.md"), PLAN);
+		const done = (step: string) => updatePlan({ plan: [{ step, status: "done" }] }, root);
+		expect(done("1. Read PLAN.md")).toStartWith("Plan updated: 1 of 1 done");
+		expect(done("3. Run tests")).toStartWith("Plan updated: 1 of 1 done");
+		expect(done("Update STATUS.md with a Dana line")).toStartWith("Plan updated: 1 of 1 done");
+		expect(done("3. Bump the version")).toContain("PLAN.md item 3");
 	});
 
 	test("README and CHANGELOG checklists are documentation, not a plan", () => {

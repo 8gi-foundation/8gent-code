@@ -116,6 +116,9 @@ export function PlanPanel({
 	// The plan file's ticks sit in the header row beside the column's own,
 	// so the column's layout below the header is unchanged.
 	const fileCount = planFile ? `${planFile.ticked}/${planFile.total}` : "";
+	// Room left for the file name after "PLAN", both counts and the gaps;
+	// under 4 columns the name goes and the counts keep their gap.
+	const nameRoom = inner - 4 - own.length - fileCount.length - 5;
 
 	return (
 		<Box flexDirection="column" width={width} flexShrink={0} paddingX={1}>
@@ -128,7 +131,7 @@ export function PlanPanel({
 					{planFile ? (
 						<>
 							{" · "}
-							{clip(planFile.name, Math.max(4, inner - 4 - own.length - fileCount.length - 5))}{" "}
+							{nameRoom >= 4 ? `${clip(planFile.name, nameRoom)} ` : ""}
 							<Text color={planFile.ticked < done ? t.orange : t.muted}>{fileCount}</Text>
 						</>
 					) : null}
