@@ -82,17 +82,17 @@
  * `run` functions do; this module itself stays glue-only.
  */
 
+import { browserWithheldNote } from "../tools/eight-browser";
 import {
 	checkClaims,
 	claimFollowUpMessage,
 	formatHarnessNote,
 	isRefusedToolResult,
 } from "./claim-check";
-import { runTextToolTurn, type TextToolCall, type TextToolMessage } from "./text-tool-client";
-import { type PlanItem, parsePlan } from "./update-plan";
-import { browserWithheldNote } from "../tools/eight-browser";
-import { UselessStreak } from "./useless-streak";
+import { type TextToolCall, type TextToolMessage, runTextToolTurn } from "./text-tool-client";
 import type { ToolSpec } from "./text-tools";
+import { type PlanItem, parsePlan } from "./update-plan";
+import { UselessStreak } from "./useless-streak";
 
 export type TextTool = {
 	spec: ToolSpec;
@@ -598,7 +598,10 @@ async function executeTool(
 ): Promise<string> {
 	const tool = tools.find((t) => t.spec.name === name);
 	if (!tool) {
-		return unknownToolResult(name, tools.map((t) => t.spec.name));
+		return unknownToolResult(
+			name,
+			tools.map((t) => t.spec.name),
+		);
 	}
 	try {
 		return await tool.run(args);
@@ -619,9 +622,7 @@ async function executeTool(
  * asking for tools, the loop stops and returns the last round's prose content
  * (which may be empty if the final round was tool-calls only).
  */
-export async function runTextToolAgent(
-	opts: TextToolAgentOptions,
-): Promise<TextToolAgentResult> {
+export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<TextToolAgentResult> {
 	const maxRounds = opts.maxRounds ?? 6;
 	const specs = opts.tools.map((t) => t.spec);
 	const toolLog: TextToolLogEntry[] = [];
@@ -894,7 +895,9 @@ export async function runTextToolAgent(
 				}
 			}
 			const noted = stoppedOnBlocks
-				? [answer.trimEnd(), blockedStopNote(blockReasonsSinceProgress)].filter(Boolean).join("\n\n")
+				? [answer.trimEnd(), blockedStopNote(blockReasonsSinceProgress)]
+						.filter(Boolean)
+						.join("\n\n")
 				: answer;
 			return finish(noted, round);
 		}
@@ -1014,11 +1017,9 @@ export async function runTextToolAgent(
 			{ role: "assistant", content: replyText },
 			{
 				role: "user",
-				content: [
-					...resultParts,
-					"",
-					answerOnly ? streak.note() : FOLLOW_UP_INSTRUCTION,
-				].join("\n"),
+				content: [...resultParts, "", answerOnly ? streak.note() : FOLLOW_UP_INSTRUCTION].join(
+					"\n",
+				),
 				...(roundImages.length > 0 ? { images: roundImages } : {}),
 			},
 		];
