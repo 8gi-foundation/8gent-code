@@ -262,9 +262,7 @@ export class WorkspaceDb {
 
 	kvGet<T = unknown>(key: string): T | null {
 		const row = this.db
-			.query<{ value: string }, [string]>(
-				"SELECT value FROM kv_store WHERE key = ?",
-			)
+			.query<{ value: string }, [string]>("SELECT value FROM kv_store WHERE key = ?")
 			.get(key);
 		if (!row) return null;
 		return jsonParse<T>(row.value);
@@ -278,9 +276,7 @@ export class WorkspaceDb {
 			created_at: number;
 			updated_at: number;
 		}
-		const row = this.db
-			.query<Row, [string]>("SELECT * FROM kv_store WHERE key = ?")
-			.get(key);
+		const row = this.db.query<Row, [string]>("SELECT * FROM kv_store WHERE key = ?").get(key);
 		if (!row) return null;
 		return {
 			key: row.key,
@@ -310,9 +306,7 @@ export class WorkspaceDb {
 						"SELECT * FROM kv_store WHERE namespace = ? ORDER BY updated_at DESC",
 					)
 					.all(namespace)
-			: this.db
-					.query<Row, []>("SELECT * FROM kv_store ORDER BY updated_at DESC")
-					.all();
+			: this.db.query<Row, []>("SELECT * FROM kv_store ORDER BY updated_at DESC").all();
 		return rows.map((row) => ({
 			key: row.key,
 			value: jsonParse(row.value),
@@ -391,9 +385,7 @@ export class WorkspaceDb {
 		if (sets.length === 0) return this.getAgentSession(id);
 
 		args.push(id);
-		this.db
-			.prepare(`UPDATE agent_sessions SET ${sets.join(", ")} WHERE id = ?`)
-			.run(...args);
+		this.db.prepare(`UPDATE agent_sessions SET ${sets.join(", ")} WHERE id = ?`).run(...args);
 
 		return this.getAgentSession(id);
 	}
@@ -402,7 +394,9 @@ export class WorkspaceDb {
 		return this.updateAgentSession(id, { status, endedAt: Date.now() });
 	}
 
-	listAgentSessions(opts: { status?: AgentSessionStatus; limit?: number } = {}): AgentSessionRecord[] {
+	listAgentSessions(
+		opts: { status?: AgentSessionStatus; limit?: number } = {},
+	): AgentSessionRecord[] {
 		const limit = opts.limit ?? 100;
 		const rows = opts.status
 			? this.db
@@ -450,9 +444,7 @@ export class WorkspaceDb {
 			updated_at: number;
 		}
 		const rows = this.db
-			.query<Row, [string]>(
-				"SELECT * FROM app_state WHERE app_id = ? ORDER BY updated_at DESC",
-			)
+			.query<Row, [string]>("SELECT * FROM app_state WHERE app_id = ? ORDER BY updated_at DESC")
 			.all(appId);
 		return rows.map((row) => ({
 			appId: row.app_id,
@@ -518,9 +510,7 @@ export class WorkspaceDb {
 			updated_at: number;
 		}
 		const row = this.db
-			.query<Row, [string, string]>(
-				"SELECT * FROM skill_state WHERE skill_id = ? AND key = ?",
-			)
+			.query<Row, [string, string]>("SELECT * FROM skill_state WHERE skill_id = ? AND key = ?")
 			.get(skillId, key);
 		if (!row) return null;
 		return {
@@ -572,9 +562,7 @@ export class WorkspaceDb {
 			created_at: number;
 			updated_at: number;
 		}
-		const row = this.db
-			.query<Row, [string]>("SELECT * FROM memory_index WHERE id = ?")
-			.get(id);
+		const row = this.db.query<Row, [string]>("SELECT * FROM memory_index WHERE id = ?").get(id);
 		if (!row) return null;
 		return {
 			id: row.id,
@@ -587,7 +575,9 @@ export class WorkspaceDb {
 		};
 	}
 
-	listMemoryIndex(opts: { scope?: string; topic?: string; limit?: number } = {}): MemoryIndexEntry[] {
+	listMemoryIndex(
+		opts: { scope?: string; topic?: string; limit?: number } = {},
+	): MemoryIndexEntry[] {
 		interface Row {
 			id: string;
 			memory_id: string;

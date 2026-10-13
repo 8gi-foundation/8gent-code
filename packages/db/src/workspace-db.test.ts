@@ -10,8 +10,8 @@
  * 6. Workspace path resolution + .8gent dir auto-creation
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -81,7 +81,10 @@ describe("state.db is git-ignored (#3302)", () => {
 		resolveWorkspaceDbPath(tmpRoot);
 		const ignore = path.join(tmpRoot, ".8gent", ".gitignore");
 		expect(fs.existsSync(ignore)).toBe(true);
-		const lines = fs.readFileSync(ignore, "utf8").split("\n").map((l) => l.trim());
+		const lines = fs
+			.readFileSync(ignore, "utf8")
+			.split("\n")
+			.map((l) => l.trim());
 		expect(lines).toContain("state.db*");
 	});
 
@@ -153,9 +156,7 @@ describe("schema and migrations", () => {
 		expect(db.getSchemaVersion()).toBeGreaterThan(0);
 
 		// WAL: bun:sqlite returns "wal" in lowercase
-		const journalMode = db.db
-			.query<{ journal_mode: string }, []>("PRAGMA journal_mode")
-			.get();
+		const journalMode = db.db.query<{ journal_mode: string }, []>("PRAGMA journal_mode").get();
 		expect(journalMode?.journal_mode.toLowerCase()).toBe("wal");
 
 		db.close();
@@ -431,18 +432,14 @@ describe("persistence across simulated restarts", () => {
 	it("schema_migrations is preserved and not re-applied", () => {
 		const first = new WorkspaceDb({ dbPath });
 		const initialApplied = first.db
-			.query<{ version: number }, []>(
-				"SELECT version FROM schema_migrations ORDER BY version",
-			)
+			.query<{ version: number }, []>("SELECT version FROM schema_migrations ORDER BY version")
 			.all()
 			.map((r) => r.version);
 		first.close();
 
 		const second = new WorkspaceDb({ dbPath });
 		const reopenedApplied = second.db
-			.query<{ version: number }, []>(
-				"SELECT version FROM schema_migrations ORDER BY version",
-			)
+			.query<{ version: number }, []>("SELECT version FROM schema_migrations ORDER BY version")
 			.all()
 			.map((r) => r.version);
 
