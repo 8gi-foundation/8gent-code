@@ -25,11 +25,11 @@
  * tests deterministic and makes the goal pathway opt-in per surface.
  */
 
-import { Box, Text, useInput } from "ink";
-import React, { useEffect, useMemo, useRef, useState } from "react";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join as pathJoin } from "node:path";
+import { Box, Text, useInput } from "ink";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
 	VERDICT_DONE,
 	VERDICT_STILL_GOING,
@@ -39,12 +39,13 @@ import {
 } from "../../../../packages/eight/go/index.js";
 import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import type { GoalClient } from "../lib/goal-client.js";
-import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
 import { askedNote } from "../lib/model-truth.js";
+import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
 import { METER_CELLS, NOW_LABEL_WIDTH, fitNowStrip } from "../lib/now-strip-layout.js";
+import type { Readiness, ReadinessState } from "../lib/readiness.js";
 import { glyphs } from "../lib/term-caps.js";
-import { FigureEight } from "./figure-eight-spinner.js";
 import { t } from "../theme.js";
+import { FigureEight } from "./figure-eight-spinner.js";
 
 type Mode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
 
@@ -76,7 +77,15 @@ interface LiveFocalStripProps {
 	/** Columns the strip takes, borders included. When known, the route and
 	 *  meter give way before the state text is ever cut (audit #9). */
 	width?: number;
+	/** Can the active tab run a turn (lib/readiness.ts, #3290)? When not,
+	 *  the state word is NO MODEL (or CHECK while the first probe or build is
+	 *  out), the middle says why, and the route slot stays empty: no model is
+	 *  named as if it were live. Absent: treated as ready. */
+	readiness?: Readiness;
 }
+
+/** Columns the NO MODEL label takes: "○ NO MODEL ". */
+export const NO_MODEL_LABEL_WIDTH = 11;
 
 /**
  * Render a fixed-width unicode meter from a percent value. Inputs over
@@ -100,34 +109,46 @@ export function LiveFocalStrip({
 	lastTurnSuccess = null,
 	animate = true,
 	width,
+	readiness,
 }: LiveFocalStripProps) {
 	// The ^Y mode is not shown here: beside the state it read as a phase the
 	// model was in ("DONE Planning"). The footer carries it with its key
 	// (#3123). Infinite is not repeated here either (#3238): the header chip,
 	// the tab tag and the footer perm segment already name it.
-	const labelWidth = NOW_LABEL_WIDTH;
 	const showApprovalBorder = approvalPending && !autonomous;
+	// A running turn or a waiting card outranks readiness: both mean an agent
+	// answered. Otherwise a not-ready agent is never shown as READY (#3290).
+	const blocked =
+		readiness && readiness.state !== "ready" && !isProcessing && !showApprovalBorder
+			? readiness
+			: null;
+	const labelWidth = blocked?.state === "none" ? NO_MODEL_LABEL_WIDTH : NOW_LABEL_WIDTH;
 	const done = isTurnDone(isProcessing, lastTurnEndedAt, lastTurnSuccess);
 	const finished = done && lastTurnEndedAt;
 	// A pending card stops the turn on the person: the strip holds still and
 	// says so, instead of naming the gated tool as if it were running (#3118).
 	const middle = showApprovalBorder
 		? WAITING_STEP
-		: isProcessing
-			? activeStep
-			: finished
-				? `finished ${clock(lastTurnEndedAt)}`
-				: "";
+		: blocked
+			? blocked.reason
+			: isProcessing
+				? activeStep
+				: finished
+					? `finished ${clock(lastTurnEndedAt)}`
+					: "";
 	// At rest READY says it all: no "idle" beside it (#3238).
 	// The state word ("finished", "waiting") is never cut; an active
 	// step may be, past its first 12 columns.
-	const middleMin = isProcessing && !showApprovalBorder ? Math.min(12, middle.length) : middle.length;
+	const middleMin =
+		(isProcessing && !showApprovalBorder) || blocked ? Math.min(12, middle.length) : middle.length;
+	// No model can answer: the route slot names none (#3290).
+	const shownRoute = blocked ? "" : route;
 	const fit =
 		width === undefined
 			? {
 					middle,
-					route: route === "-" ? "" : route,
-					asked: route && route !== "-" && routeAsked ? askedNote(routeAsked) : "",
+					route: shownRoute === "-" ? "" : shownRoute,
+					asked: shownRoute && shownRoute !== "-" && routeAsked ? askedNote(routeAsked) : "",
 					meter: true,
 				}
 			: fitNowStrip({
@@ -136,7 +157,7 @@ export function LiveFocalStrip({
 					middle,
 					middleMin,
 					middleShort: showApprovalBorder ? "waiting" : finished ? "finished" : undefined,
-					route,
+					route: shownRoute,
 					asked: routeAsked,
 					tokens,
 				});
@@ -160,10 +181,16 @@ export function LiveFocalStrip({
 					lastTurnEndedAt={lastTurnEndedAt}
 					done={done}
 					animate={animate}
+					notReady={blocked?.state}
 				/>
 			</Box>
 
-			<Box flexGrow={1} flexShrink={1} minWidth={Math.min(middleMin, fit.middle.length) + 2} paddingX={1}>
+			<Box
+				flexGrow={1}
+				flexShrink={1}
+				minWidth={Math.min(middleMin, fit.middle.length) + 2}
+				paddingX={1}
+			>
 				<Text color={t.textSecondary} wrap="truncate-end">
 					{fit.middle}
 				</Text>
@@ -212,6 +239,7 @@ export function TurnStateLabel({
 	lastTurnEndedAt,
 	done,
 	animate,
+	notReady,
 }: {
 	/** An approval card is pending: a still mark and WAIT, never the spinner. */
 	waiting?: boolean;
@@ -219,6 +247,9 @@ export function TurnStateLabel({
 	lastTurnEndedAt: number | null;
 	done: boolean;
 	animate: boolean;
+	/** The agent cannot run a turn (#3290): NO MODEL, or CHECK while the
+	 *  first probe is out. Never READY, never the spinner. */
+	notReady?: ReadinessState;
 }) {
 	const moving = motionEnabled(animate);
 	const [settlingFor, setSettlingFor] = useState<number | null>(null);
@@ -249,11 +280,25 @@ export function TurnStateLabel({
 	if (isProcessing) {
 		return (
 			<Text>
-				{eight ? <Text color={t.orange}>{eight}</Text> : <FigureEight color={t.orange} animate={moving} />}
+				{eight ? (
+					<Text color={t.orange}>{eight}</Text>
+				) : (
+					<FigureEight color={t.orange} animate={moving} />
+				)}
 				<Text color={t.teal}> NOW </Text>
 			</Text>
 		);
 	}
+	// A hollow ring, the glyph for "not there yet": the word carries the
+	// meaning, so NO_COLOR reads the same.
+	if (notReady === "none") {
+		return (
+			<Text color={t.orange} bold>
+				{g.pending} NO MODEL{" "}
+			</Text>
+		);
+	}
+	if (notReady === "checking") return <Text color={t.muted}>{g.pending} CHECK </Text>;
 	// The render that first sees a new clean end already shows the still
 	// frame, so DONE never flashes before the settle beat.
 	const unseen = lastTurnEndedAt !== seenEndRef.current;
@@ -402,9 +447,7 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 				setGoalState((prev) => ({
 					...prev,
 					turns: prev.turns + (event.kind === "turn.completed" ? 1 : 0),
-					elapsedMs: startedAtRef.current
-						? Date.now() - startedAtRef.current
-						: prev.elapsedMs,
+					elapsedMs: startedAtRef.current ? Date.now() - startedAtRef.current : prev.elapsedMs,
 				}));
 			},
 			onSubgoalEvent: (event) => {
@@ -430,9 +473,7 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 				// terminal multiplexer can be hooked. Voiced output is
 				// reserved for terminal state per accessibility rule.
 				if (!disableTts) {
-					process.stderr.write(
-						`[1;90m[sr] sub-goal ${index} of ${total}: ${text}[0m\n`,
-					);
+					process.stderr.write(`[1;90m[sr] sub-goal ${index} of ${total}: ${text}[0m\n`);
 				}
 			},
 			onDone: (event) => {
@@ -476,9 +517,9 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 			},
 		});
 		return unsub;
-	// goalClient identity changes are the only meaningful resubscribe
-	// trigger; the listener closures intentionally read mutable refs.
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// goalClient identity changes are the only meaningful resubscribe
+		// trigger; the listener closures intentionally read mutable refs.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [goalClient, adhdMode, disableTts, kittenTtsPath]);
 
 	const goalLine = useMemo(() => buildGoalLine(goalState), [goalState]);
@@ -492,15 +533,9 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 
 	return (
 		<Box flexDirection="column" flexShrink={0}>
-			<Box
-				borderStyle="single"
-				borderColor={goalBorderColor}
-				paddingX={1}
-				flexDirection="column"
-			>
+			<Box borderStyle="single" borderColor={goalBorderColor} paddingX={1} flexDirection="column">
 				<Text color={t.textPrimary} wrap="truncate-end">
-					{goalLine}{" "}
-					<Text color={t.orange}>●</Text>
+					{goalLine} <Text color={t.orange}>●</Text>
 				</Text>
 				{showExpanded && (
 					<>
