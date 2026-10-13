@@ -194,6 +194,60 @@ describe("on win32 PowerShell reads $D as its own unset variable", () => {
 	});
 });
 
+describe("second review: every other way the shell can bind or rewrite a name", () => {
+	const refused: [label: string, command: string][] = [
+		["default operator on a bound name", "D=; cat ${D:-/etc}/passwd"],
+		["alternate operator on a bound name", "D=x; cat ${D:+/etc}/passwd"],
+		["suffix strip", "D=/etc; cat ${D%/}/passwd"],
+		["prefix strip", "D=/etc; cat ${D#x}/passwd"],
+		["substitution", "D=/etc; cat ${D/x/y}/passwd"],
+		["array element", "D=(/etc); cat ${D[0]}/passwd"],
+		["indirection", "E=HOME; cat ${!E}/.ssh/id_rsa"],
+		["default operator on a host name", "cat ${NOPE:-/etc}/passwd"],
+		["default operator in double quotes", 'cat "${NOPE:-/etc}/passwd"'],
+		["bare cd goes to HOME", "cd; cat .ssh/id_rsa"],
+		["bare cd after HOME is set", "HOME=/etc; cd; cat passwd"],
+		["cd - with OLDPWD set", "OLDPWD=/etc; cd -; cat passwd"],
+		["cd - with no earlier cd", "cd -; cat passwd"],
+		["read with no plain assignment", "read D < list.txt; cat $D"],
+		["loop over command substitution", "for D in $(cat list.txt); do cat $D; done"],
+		["loop over a variable", "for D in $X; do cat $D; done"],
+		["loop over a value with whitespace", 'for D in "a /etc"; do cat $D; done'],
+		["loop over a brace expansion", "for D in {a,/etc}; do cat $D; done"],
+		["positional loop", "for D; do cat $D; done"],
+		["reference before an assignment in a loop body", "for i in 1 2; do cat $D; D=/etc; done"],
+		["function body runs after the assignment", "f() { cat $D; }; D=/etc; f"],
+		["function keyword body runs after the assignment", "function f { cat $D; }; D=/etc; f"],
+		["source can set any name", "source ./env.sh; cat $D"],
+		["eval after a keyword", "if true; then eval 'D=/etc'; fi; cat $D"],
+		["loop variable read inside the loop", "for f in a b; do read f; cat $f; done"],
+		["loop variable with IFS set", "IFS=x; for f in x//etc; do cat $f; done"],
+		["loop value of dots", "for f in .; do cat .$f/secret.txt; done"],
+		["cd into a loop with two values", "for f in src out; do cd $f; done; cat ../../x"],
+	];
+	for (const [label, command] of refused) {
+		test(`refuses ${label}: ${JSON.stringify(command)}`, () => {
+			expect(allowed(command)).toBe(false);
+		});
+	}
+
+	const kept: Row[] = [
+		['for f in *.png; do magick "$f" "out/$f"; done', true],
+		["for f in src; do cd $f; cat ../a.txt; done", true],
+		["for a in o; do for b in ut; do cp x.png $a$b/x.png; done; done", true],
+		["for i in 1 2 3; do echo $i; done", true],
+		["cd src; cd -; cat a.txt", true],
+		["cd src && cd - && cat a.txt", true],
+		["for f in /etc; do cat $f; done", false],
+		["for a in ..; do cat $a/x; done", false],
+	];
+	for (const [command, ok] of kept) {
+		test(`${ok ? "allows" : "denies"} ${JSON.stringify(command)}`, () => {
+			expect(allowed(command)).toBe(ok);
+		});
+	}
+});
+
 describe("symlinks on a real filesystem", () => {
 	const ws = fs.mkdtempSync(path.join(os.tmpdir(), "wb-inline-ws-"));
 	const outside = fs.mkdtempSync(path.join(os.tmpdir(), "wb-inline-out-"));
@@ -219,6 +273,22 @@ describe("symlinks on a real filesystem", () => {
 	test("a relative value through the same symlink is refused", () => {
 		if (!linked) return;
 		expect(checkCommandBoundary('D=escape-link; cat "$D/secret.txt"', ws).allowed).toBe(false);
+	});
+
+	test("a loop value that is a symlink out of the workspace is refused, through cd too", () => {
+		if (!linked) return;
+		const check = (c: string) => checkCommandBoundary(c, ws).allowed;
+		expect(check('for f in escape-link; do cat "$f/secret.txt"; done')).toBe(false);
+		expect(check("for f in escape-link; do cd $f; cat secret.txt; done")).toBe(false);
+		expect(check("for f in out; do cd $f; cat ../x.txt; done")).toBe(true);
+	});
+
+	test("a cd after a reserved word is tracked, bound or literal", () => {
+		if (!linked) return;
+		const check = (c: string) => checkCommandBoundary(c, ws).allowed;
+		expect(check("if true; then cd escape-link; fi; cat secret.txt")).toBe(false);
+		expect(check("if :; then D=escape-link; fi; cd $D; cat secret.txt")).toBe(false);
+		expect(check("{ cd escape-link; cat secret.txt; }")).toBe(false);
 	});
 
 	test("a real directory inside is allowed", () => {

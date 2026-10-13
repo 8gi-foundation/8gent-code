@@ -418,6 +418,12 @@ interface InlinePlan {
 	home: boolean;
 	/** The line sets CDPATH, so `cd` may land somewhere other than its operand. */
 	cdpath: boolean;
+	/** The line sets OLDPWD, so `cd -` may land anywhere. */
+	oldpwd: boolean;
+	/** The line has a `${NAME...}` form beyond plain `${NAME}` outside single quotes. */
+	paramOps: boolean;
+	/** `for NAME in a b` variables over plain words: each value is checked in turn. */
+	loops: Map<string, string[]>;
 }
 
 const NO_INLINE: InlinePlan = {
@@ -427,6 +433,9 @@ const NO_INLINE: InlinePlan = {
 	ifs: false,
 	home: false,
 	cdpath: false,
+	oldpwd: false,
+	paramOps: false,
+	loops: new Map(),
 };
 
 const ASSIGNMENT_WORD = /^([A-Za-z_][A-Za-z0-9_]*)=([\s\S]*)$/;
@@ -437,8 +446,48 @@ const LIST_START = new Set<Separator>(["start", ";", "\n", "\r"]);
 const LIST_END = new Set<Separator>(["end", ";", "\n", "\r", "&&"]);
 const OPENS_BODY = new Set(["if", "while", "until", "for", "case", "select", "{"]);
 const CLOSES_BODY = new Set(["fi", "done", "esac", "}"]);
-/** Builtins that run code the check never sees. */
+/** Reserved words that may start a segment ahead of the command it runs: `do cd x`, `then D=y`. */
+const KEYWORD_PREFIX = new Set([
+	"if",
+	"while",
+	"until",
+	"{",
+	"do",
+	"then",
+	"else",
+	"elif",
+	"!",
+	"time",
+	...CLOSES_BODY,
+]);
+
+/** How many reserved words start this argv before the command itself. */
+function leadingKeywords(argv: string[]): number {
+	let lead = 0;
+	while (lead < argv.length && KEYWORD_PREFIX.has(argv[lead])) lead++;
+	return lead;
+}
+/** Builtins that run code the check never sees, and may set any variable. */
 const RUNS_CODE = new Set(["eval", "source", ".", "trap", "alias", "enable"]);
+/** A function body runs where it is called, not where it is written. */
+const DEFINES_CODE = new Set(["function"]);
+/** `$NAME` or `${NAME}` (plain or with an operator): the name it reads. */
+const REFERENCE = /\$\{?([A-Za-z_][A-Za-z0-9_]*)/g;
+/** A parameter expansion other than plain `${NAME}`: `${D:-x}`, `${D%/}`, `${!D}`, `${D[0]}`. */
+const PARAM_OPERATOR = /\$\{(?![A-Za-z_][A-Za-z0-9_]*\})/;
+/** At most this many loop-value combinations are checked for one word. */
+const MAX_LOOP_COMBINATIONS = 256;
+
+/**
+ * One word of a `for NAME in ...` list as the value the loop binds, or `null`
+ * when the shell would expand or split it (a variable, `~`, braces, whitespace).
+ * A glob stays a glob, so `$f` from `for f in *.png` is checked as `*.png` is.
+ */
+function loopValue(raw: string): string | null {
+	const quoted = /^'([^']*)'$/.exec(raw) ?? /^"([^"$`\\]*)"$/.exec(raw);
+	const value = quoted ? quoted[1] : raw;
+	return /^[^\s'"$`\\{}~]+$/.test(value) ? value : null;
+}
 /** Shell-maintained: a plain assignment is overwritten by the next `cd`. */
 const SHELL_MAINTAINED = new Set(["PWD", "OLDPWD"]);
 
@@ -462,6 +511,23 @@ function leadingAssignments(raw: string[]): {
 		else return { assignments, statement: false };
 	}
 	return { assignments, statement: true };
+}
+
+/** The line with single-quoted text and escaped characters blanked out; double-quoted text still expands. */
+function expandable(command: string): string {
+	let out = "";
+	let inSingle = false;
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		if (ch === "\\" && !inSingle) {
+			out += "  ";
+			i++;
+		} else if (ch === "'") {
+			inSingle = !inSingle;
+			out += " ";
+		} else out += inSingle ? " " : ch;
+	}
+	return out;
 }
 
 /** The line with quoted text and escaped characters blanked out. */
@@ -503,29 +569,55 @@ function references(command: string, name: string): number {
 }
 
 function planInlineAssignments(command: string, segments: SequencedSegment[]): InlinePlan {
-	const plan: InlinePlan = { ...NO_INLINE, assignments: [], unresolved: new Set() };
+	const plan: InlinePlan = {
+		...NO_INLINE,
+		assignments: [],
+		unresolved: new Set(),
+		loops: new Map(),
+	};
 	const assigned = new Map<string, number>();
 	let depth = 0;
+	let runsCode = false;
+	const loopHeads = new Map<string, number>();
+	const loopValues = new Map<string, string[] | null>();
 
 	segments.forEach((segment, index) => {
 		const raw = words(segment.text, POSIX_SHELL.escapes, true);
-		const head = raw[0];
-		if (CLOSES_BODY.has(head)) depth = Math.max(0, depth - 1);
+		const lead = leadingKeywords(raw);
+		for (const keyword of raw.slice(0, lead)) {
+			if (CLOSES_BODY.has(keyword)) depth = Math.max(0, depth - 1);
+			if (OPENS_BODY.has(keyword)) depth++;
+		}
+		const head = raw[lead];
 		if (
 			RUNS_CODE.has(head) ||
-			((head === "command" || head === "builtin") && RUNS_CODE.has(raw[1]))
+			((head === "command" || head === "builtin") && RUNS_CODE.has(raw[lead + 1]))
 		) {
 			plan.allUnresolved = true;
+			runsCode = true;
 		}
-		const { assignments, statement } = leadingAssignments(raw);
+		if (DEFINES_CODE.has(head)) plan.allUnresolved = true;
+		if ((head === "for" || head === "select") && NAME_WORD.test(raw[lead + 1] ?? "")) {
+			const name = raw[lead + 1];
+			loopHeads.set(name, (loopHeads.get(name) ?? 0) + 1);
+			const values = raw[lead + 2] === "in" ? raw.slice(lead + 3).map(loopValue) : [null];
+			const known = loopValues.get(name);
+			loopValues.set(
+				name,
+				known === null || values.includes(null)
+					? null
+					: [...(known ?? []), ...(values as string[])],
+			);
+		}
+		const { assignments, statement } = leadingAssignments(raw.slice(lead));
 		const certain =
 			statement && depth === 0 && LIST_START.has(segment.before) && LIST_END.has(segment.after);
 		for (const a of assignments) {
-			plan.assignments.push({ segment: index, ...a });
+			plan.assignments.push({ segment: index, ...a, word: a.word + lead });
 			assigned.set(a.name, (assigned.get(a.name) ?? 0) + 1);
 			if (!certain || SHELL_MAINTAINED.has(a.name)) plan.unresolved.add(a.name);
 		}
-		if (OPENS_BODY.has(head)) depth++;
+		if (head !== undefined && OPENS_BODY.has(head)) depth++;
 	});
 
 	// Subshells, command substitution, arrays, case arms and heredocs: the
@@ -539,11 +631,31 @@ function planInlineAssignments(command: string, segments: SequencedSegment[]): I
 		if (mentions(command, name) !== references(command, name) + times) plan.unresolved.add(name);
 	}
 
+	// A name the line reads but never assigns plainly is still the host's only
+	// if nothing on the line can set it: `read D`, `for D in $(cat f)`,
+	// `printf -v D`, or code the check never sees (`source`, `eval`).
+	// A `for` variable over plain words is the only exception: it takes each
+	// of those values in turn, so each is checked.
+	for (const [, name] of command.matchAll(REFERENCE)) {
+		if (assigned.has(name)) continue;
+		const extra = mentions(command, name) - references(command, name);
+		if (extra === 0 && !runsCode) continue;
+		const values = loopValues.get(name);
+		if (!runsCode && values && extra === loopHeads.get(name)) plan.loops.set(name, values);
+		else plan.unresolved.add(name);
+	}
+
 	const setsAnyWay = (name: string) => mentions(command, name) > references(command, name);
 	plan.ifs = setsAnyWay("IFS");
 	plan.home = setsAnyWay("HOME");
 	plan.cdpath = setsAnyWay("CDPATH");
-	if (plan.ifs) plan.allUnresolved = true;
+	plan.oldpwd = setsAnyWay("OLDPWD");
+	plan.paramOps = PARAM_OPERATOR.test(expandable(command));
+	if (plan.ifs) {
+		plan.allUnresolved = true;
+		for (const name of plan.loops.keys()) plan.unresolved.add(name);
+		plan.loops.clear();
+	}
 	return plan;
 }
 
@@ -555,6 +667,8 @@ interface ExpandScope {
 	strict?: boolean;
 	/** The line sets HOME: `~` is unresolvable. */
 	homeReassigned?: boolean;
+	/** The line has `${NAME...}` operator forms: any word still holding `${` is unresolvable. */
+	paramOps?: boolean;
 }
 
 interface Expansion {
@@ -609,6 +723,7 @@ function expand(
 			return value ?? "";
 		},
 	);
+	if (scope.paramOps && out.includes("${")) unresolved = true;
 	const tilde = (platform === "win32" ? /^~([^/\\]*)(?=$|[/\\])/ : /^~([^/]*)(?=$|\/)/).exec(out);
 	if (tilde) {
 		if (scope.homeReassigned) unresolved = true;
@@ -664,12 +779,45 @@ export function extractAndCheckPaths(
 		// Only a POSIX shell reads `NAME=value` as an assignment.
 		const plan = reading === POSIX_SHELL ? planInlineAssignments(command, segments) : NO_INLINE;
 		const locals = new Map<string, string | null>();
-		const scope: ExpandScope = { locals, homeReassigned: plan.home };
+		// A name the shell may rebind before a reference runs (a loop body, a
+		// function, `read`, `source`) is unknowable from its first appearance on.
+		for (const name of plan.unresolved) locals.set(name, null);
+		if (plan.allUnresolved) for (const a of plan.assignments) locals.set(a.name, null);
+		const scope: ExpandScope = { locals, homeReassigned: plan.home, paramOps: plan.paramOps };
 		let cwd = workspaceRoot;
+		/** The directory before the last `cd` on this line; `null` until one runs. */
+		let previous: string | null = null;
+
+		/**
+		 * The scopes a word must be checked under: one, or one per combination
+		 * of the `for` values it reads; `null` when there are too many.
+		 */
+		const scopesFor = (word: string): ExpandScope[] | null => {
+			let scopes: ExpandScope[] = [scope];
+			const names = new Set([...word.matchAll(REFERENCE)].map((m) => m[1]));
+			for (const name of names) {
+				const values = plan.loops.get(name);
+				if (!values) continue;
+				if (scopes.length * values.length > MAX_LOOP_COMBINATIONS) return null;
+				scopes = scopes.flatMap((s) =>
+					values.map((v) => ({ ...s, locals: new Map([...s.locals, [name, v]]) })),
+				);
+			}
+			return scopes;
+		};
 
 		const checkToken = (token: string): void => {
 			const operand = operandOf(token, platform);
 			if (operand === null) return;
+			const scopes = scopesFor(operand);
+			if (scopes === null) {
+				flag(token, "<unresolved>", `Path argument ${unknown}`);
+				return;
+			}
+			for (const s of scopes) checkOperand(token, operand, s);
+		};
+
+		const checkOperand = (token: string, operand: string, scope: ExpandScope): void => {
 			const candidate = expand(operand, host, reading, scope);
 			if (candidate.unresolved) {
 				flag(token, "<unresolved>", `Path argument ${unknown}`);
@@ -689,19 +837,44 @@ export function extractAndCheckPaths(
 			const argv = tokenize(segment.text, reading.escapes);
 			if (argv.length === 0) return;
 
+			// `do cd x`, `then cd x`: the reserved words are not the command.
+			const lead = reading === POSIX_SHELL ? leadingKeywords(argv) : 0;
 			let first = 1;
-			if (argv[0].toLowerCase() === "cd" && argv.length >= 2) {
+			const isCd = argv[lead]?.toLowerCase() === "cd";
+			if (isCd && argv.length === lead + 1 && reading === POSIX_SHELL) {
+				// A bare `cd` goes to $HOME.
+				const home = expand("~", host, reading, scope);
+				const resolved = resolveSafe(home.text, cwd, platform);
+				if (home.unresolved) {
+					flag(argv[lead], "<unresolved>", `cd target ${unknown}`);
+				} else if (!isConfined(resolved, workspaceRoot, allowedAbsolutePrefixes, platform)) {
+					flag(argv[lead], resolved, `cd target escapes workspace root (${workspaceRoot})`);
+				}
+				previous = cwd;
+				cwd = resolved;
+			} else if (isCd && argv.length >= lead + 2 && argv[lead + 1] === "-") {
+				// `cd -` goes to $OLDPWD: known only after a `cd` on this line set it.
+				if (previous === null || plan.oldpwd) {
+					flag(argv[lead + 1], "<unresolved>", `cd target ${unknown}`);
+				}
+				[previous, cwd] = [cwd, previous ?? cwd];
+				first = lead + 2;
+			} else if (isCd && argv.length >= lead + 2) {
 				// cmd.exe's `cd /d <dir>` also switches drive.
 				const hasDriveSwitch =
 					platform === "win32" && argv.length >= 3 && argv[1].toLowerCase() === "/d";
-				const at = hasDriveSwitch ? 2 : 1;
-				const target = expand(operandOf(argv[at], platform) ?? argv[at], host, reading, scope);
+				const at = lead + (hasDriveSwitch ? 2 : 1);
+				const operand = operandOf(argv[at], platform) ?? argv[at];
+				// A `cd` into a loop variable lands in one place only if the loop has one value.
+				const scopes = scopesFor(operand);
+				const target = expand(operand, host, reading, scopes?.[0] ?? scope);
 				const resolved = resolveSafe(target.text, cwd, platform);
-				if (target.unresolved || plan.cdpath) {
+				if (target.unresolved || plan.cdpath || scopes?.length !== 1) {
 					flag(argv[at], "<unresolved>", `cd target ${unknown}`);
 				} else if (!isConfined(resolved, workspaceRoot, allowedAbsolutePrefixes, platform)) {
 					flag(argv[at], resolved, `cd target escapes workspace root (${workspaceRoot})`);
 				}
+				previous = cwd;
 				cwd = resolved;
 				first = at + 1;
 			}
