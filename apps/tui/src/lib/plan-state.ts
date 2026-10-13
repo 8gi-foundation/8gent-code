@@ -14,6 +14,8 @@
  * says "0 of 5 done", which is the truth.
  */
 
+import { type PlanFile, matchBox, planFileCount } from "../../../../packages/ai/plan-file.js";
+
 export type PlanStepStatus = "pending" | "active" | "done" | "failed";
 
 export interface PlanStep {
@@ -128,4 +130,37 @@ export function replyPlan(
 	replyPlanLines: ReadonlyArray<string>,
 ): PlanStep[] {
 	return settlePlan(mergePlanText(held, replyPlanLines));
+}
+
+/**
+ * The checklist file the PLAN column mirrors (#4161), counted: its name and
+ * how many of its boxes are ticked. Null when the project has none.
+ */
+export interface PlanFileTally {
+	name: string;
+	ticked: number;
+	total: number;
+}
+
+export function planFileTally(file: PlanFile | null): PlanFileTally | null {
+	return file ? { name: file.name, ...planFileCount(file) } : null;
+}
+
+/**
+ * The same refusal update_plan makes (packages/ai/update-plan.ts), applied to
+ * the column: a step reported done while its box in the plan file is still
+ * open is shown as not done. The tool call that carried it was refused, so
+ * the column must not tick what the file has not.
+ */
+export function holdOpenBoxes(
+	items: ReadonlyArray<PlanUpdateItem>,
+	file: PlanFile | null,
+): PlanUpdateItem[] {
+	if (!file) return [...items];
+	return items.map((item) => {
+		const raw = item.step ?? item.text ?? item.content;
+		if (typeof raw !== "string" || normaliseStatus(item.status) !== "done") return item;
+		const box = matchBox(raw, file.boxes);
+		return box && !box.checked ? { ...item, status: "pending" } : item;
+	});
 }

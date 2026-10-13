@@ -17,6 +17,10 @@
  *
  * With no plan this turn the caller does not mount the panel at all, so the
  * chat gets the column back.
+ *
+ * When the project has a checklist plan file (#4161), a second header row
+ * shows that file's ticks beside the column's own, e.g. "PLAN.md  0/3": the
+ * file is the record, the column only mirrors it.
  */
 
 import { Box, Text } from "ink";
@@ -24,7 +28,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import { plainInline } from "../lib/inline-markdown.js";
 import { motionEnabled } from "../lib/motion.js";
-import type { PlanStep } from "../lib/plan-state.js";
+import type { PlanFileTally, PlanStep } from "../lib/plan-state.js";
 import { glyphs } from "../lib/term-caps.js";
 import { t } from "../theme.js";
 import { KeyCapRow } from "./KeyCap.js";
@@ -42,6 +46,8 @@ export interface PlanPanelProps {
 	animate?: boolean;
 	/** Key hint for the toggle, e.g. "^X". */
 	toggleHint?: string;
+	/** The project's checklist plan file and its ticks (#4161); null: none. */
+	planFile?: PlanFileTally | null;
 }
 
 export function formatElapsed(ms: number): string {
@@ -96,6 +102,7 @@ export function PlanPanel({
 	width = 26,
 	animate = true,
 	toggleHint,
+	planFile = null,
 }: PlanPanelProps) {
 	const g = glyphs();
 	const moving = motionEnabled(animate);
@@ -116,6 +123,16 @@ export function PlanPanel({
 						: `${steps.length}`}
 				</Text>
 			</Box>
+			{planFile ? (
+				<Box justifyContent="space-between">
+					<Text color={t.muted} wrap="truncate-end">
+						{clip(planFile.name, Math.max(1, inner - 8))}
+					</Text>
+					<Text color={planFile.ticked < done ? t.orange : t.muted}>
+						{`${planFile.ticked}/${planFile.total}`}
+					</Text>
+				</Box>
+			) : null}
 			<Box marginTop={1} flexDirection="column">
 				{steps.slice(0, visible).map((step) => {
 					if (step.status === "done") {

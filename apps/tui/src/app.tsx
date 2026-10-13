@@ -158,6 +158,7 @@ const SETUP_PROVIDER_NAMES: Record<string, string> = {
 	lmstudio: "LM Studio",
 	apfel: "apfel (Apple Foundation Model)",
 };
+import { findPlanFile } from "../../../packages/ai/plan-file.js";
 import { bunFlagsFor, safeBunFlags } from "../../../packages/core/bun-flags.js";
 import {
 	onRunCommandUnsandboxed,
@@ -240,9 +241,12 @@ import {
 	unreachableLine,
 } from "./lib/no-provider-guidance.js";
 import {
+	type PlanFileTally,
 	type PlanStep,
 	applyPlanUpdate,
+	holdOpenBoxes,
 	mergePlanText,
+	planFileTally,
 	replyPlan,
 	settlePlan,
 } from "./lib/plan-state.js";
@@ -1236,6 +1240,8 @@ export function App({
 	// update_plan calls, see lib/plan-state.ts). Saved tasks from the task
 	// manager show there when no turn plan exists. Ctrl+X opens and closes it.
 	const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
+	// The project's checklist plan file, if any (#4161): the record the column mirrors.
+	const [planFile, setPlanFile] = useState<PlanFileTally | null>(null);
 	// The reply stamps the plan it closes (Message.plan); the send path reads
 	// it here because its closure holds the plan from when the turn began.
 	const planStepsRef = useRef<PlanStep[]>([]);
@@ -2581,9 +2587,14 @@ export function App({
 				const isActive = tabId === activeTabId;
 				// update_plan carries the agent's own step statuses: the only
 				// thing that may tick, fail or mark the current plan step.
+				// A step whose box in the project's plan file is still open is
+				// not ticked here either: update_plan refuses it (#4161).
 				if (isActive && event.toolName === "update_plan") {
 					const items = (event.args as { plan?: unknown } | undefined)?.plan;
-					if (Array.isArray(items)) setPlanSteps((prev) => applyPlanUpdate(prev, items));
+					const file = findPlanFile(process.cwd());
+					setPlanFile(planFileTally(file));
+					if (Array.isArray(items))
+						setPlanSteps((prev) => applyPlanUpdate(prev, holdOpenBoxes(items, file)));
 				}
 				if (isActive) {
 					setActiveTool(event.toolName);
@@ -2628,6 +2639,10 @@ export function App({
 			},
 			onToolEnd: (event: AgentToolEndEvent) => {
 				const isActive = tabId === activeTabId;
+				// A tick in the plan file shows in the column as it lands (#4161).
+				if (isActive && (event.toolName === "edit_file" || event.toolName === "write_file")) {
+					setPlanFile(planFileTally(findPlanFile(process.cwd())));
+				}
 				if (isActive) {
 					setToolCount((prev) => prev + 1);
 					// Trigger the brief flash-back-to-idle on the matching part.
@@ -6206,6 +6221,7 @@ export function App({
 				setPlanNextStep(null);
 				setKanbanBoard({ backlog: [], ready: [], inProgress: [], done: [] });
 				setPlanSteps([]);
+				setPlanFile(planFileTally(findPlanFile(process.cwd())));
 				setPlanElapsedMs(null);
 				planStartedAtRef.current = Date.now();
 			}
@@ -7100,6 +7116,7 @@ export function App({
 									width={PLAN_COLUMN_WIDTH}
 									animate={showAnimations}
 									toggleHint="^X"
+									planFile={planFile}
 								/>
 							) : savedTasks.length > 0 ? (
 								<PlanRail tasks={savedTasks} limit={8} />

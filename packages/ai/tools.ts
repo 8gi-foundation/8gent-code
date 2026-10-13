@@ -425,7 +425,7 @@ const updatePlanTool = tool({
 			.describe("Every step, in order"),
 	}),
 	// Executes nothing: the TUI reads the plan from the tool-start event.
-	execute: async ({ plan }) => updatePlan({ plan }),
+	execute: async ({ plan }) => updatePlan({ plan }, getToolContext().workingDirectory),
 });
 
 // ============================================

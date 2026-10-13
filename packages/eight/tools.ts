@@ -2222,7 +2222,7 @@ export class ToolExecutor {
 			case "update_plan":
 				// Executes nothing: the plan event is the onToolStart the agent
 				// fires with these args; the TUI PLAN column reads it (#3035).
-				return updatePlan(args as { plan?: unknown });
+				return updatePlan(args as { plan?: unknown }, this.workingDirectory);
 			case "get_project_outline":
 				return this.getProjectOutline();
 
