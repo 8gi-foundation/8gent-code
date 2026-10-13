@@ -178,6 +178,7 @@ import {
 } from "../../../packages/permissions/system-one-gate.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
+import { setKeyOwner } from "../../../packages/secrets/key-vault.js";
 import {
 	getVoiceForRole,
 	loadSettings as loadAppSettings,
@@ -293,6 +294,7 @@ import { turnEndedInError } from "./lib/turn-outcome.js";
 import { BTWView } from "./screens/BTWView.js";
 import { type ConversationEntry, HistoryScreen } from "./screens/HistoryScreen.js";
 import { IdeasView } from "./screens/IdeasView.js";
+import { KeyVaultScreen } from "./screens/KeyVaultScreen.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
 import { NarratorView } from "./screens/NarratorView.js";
 import { NotesView } from "./screens/NotesView.js";
@@ -572,13 +574,13 @@ function computeCliOverrides(
 
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
-import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
 import {
 	describeMissingVoiceSetup,
 	describeTranscriberBackend,
 	formatMicLabel,
 	resolveInputDevice,
 } from "../../../packages/voice/input-device.js";
+import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
 import {
 	FALLBACK_SYSTEM_VOICE,
 	listInstalledSystemVoices,
@@ -751,6 +753,7 @@ type ViewMode =
 	| "predict"
 	| "model-select"
 	| "provider-select"
+	| "keys"
 	| "onboarding"
 	| "animations"
 	| "design"
@@ -1156,6 +1159,8 @@ export function App({
 			.then((state) => {
 				setAuthStatus(state.state === "authenticated" ? "authenticated" : "anonymous");
 				if (state.state === "authenticated") {
+					// Provider keys follow the signed-in user (packages/secrets/key-vault).
+					setKeyOwner(state.user.clerkId);
 					setAuthUser({
 						displayName: state.user.displayName || "User",
 						plan: state.user.plan,
@@ -2536,6 +2541,19 @@ export function App({
 		autoSharedRef.current = true;
 		void linkDaemonSession(activeSessionId);
 	}, [activeSessionId, linkDaemonSession]);
+
+	// Warn once per run when a provider still carries a plain-text key in
+	// providers.json. Names only; the key itself is never read into a message.
+	useEffect(() => {
+		const pm = getProviderManager();
+		for (const p of pm.listProviders()) pm.getApiKey(p.name);
+		const plain = pm.takePlainKeyWarnings();
+		if (plain.length > 0) {
+			addSystemMessage(
+				`providers.json holds a plain-text key for: ${plain.join(", ")}. Run /apikeys to move it into the keychain, then remove it from the file.`,
+			);
+		}
+	}, [addSystemMessage]);
 
 	// System One (on by default; EIGHT_SYSTEM_ONE=0 turns it off): its two
 	// one-time notices (no judge, so rules and allowlist only; or which judge
@@ -5390,6 +5408,7 @@ export function App({
 									onWaiting: () => {},
 									onTokenReceived: (result) => {
 										if (result.success) {
+											setKeyOwner(result.userId);
 											setAuthStatus("authenticated");
 											setAuthUser({
 												displayName: result.displayName || "User",
@@ -5425,6 +5444,7 @@ export function App({
 							});
 						} else if (sub === "logout") {
 							authManager?.logout?.();
+							setKeyOwner(null);
 							setAuthStatus("anonymous");
 							setAuthUser(null);
 							addSystemMessage("Logged out. Running in anonymous mode.");
@@ -5804,6 +5824,16 @@ export function App({
 							// Show provider selector
 							setViewMode("provider-select");
 						}
+					}
+					// Handle /apikeys: masked (/keys is the hotkeys list) key entry screen. Arguments are ignored on purpose;
+					// a key typed after the command would already be in the transcript.
+					else if (command === ("apikeys" as any)) {
+						if (args.length > 0) {
+							addSystemMessage(
+								"Do not type a key after /apikeys. Run /apikeys alone: the key is entered on its own masked screen.",
+							);
+						}
+						setViewMode("keys");
 					}
 					// Handle /vision command
 					else if (command === ("vision" as any)) {
@@ -6857,6 +6887,9 @@ export function App({
 					/>
 				);
 			}
+
+			case "keys":
+				return <KeyVaultScreen onClose={() => setViewMode("chat")} />;
 
 			case "provider-select":
 				return (
