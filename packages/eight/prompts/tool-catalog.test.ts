@@ -16,11 +16,11 @@ import { sanitizeShellCommand } from "../../permissions/shell-sanitizer.js";
 import { scrub } from "../secret-scanner.js";
 import { TOOL_CATEGORIES } from "../tool-registry.js";
 import {
+	LOCAL_LOGIN_NOTE,
+	LOCAL_SERVER_CURL_SHORT,
 	REVIEW_FOCUS_NOTE,
 	SLIDES_TO_VIDEO_NOTE,
 	TOOL_CATALOG_SEGMENT,
-	LOCAL_LOGIN_NOTE,
-	LOCAL_SERVER_CURL_SHORT,
 	TOOL_PATTERNS_SEGMENT,
 	buildToolCatalogSegment,
 	environmentNote,
@@ -29,13 +29,16 @@ import {
 /**
  * Size cap for the concise catalog the local TUI sends on every request.
  * Raising it is a deliberate decision (it costs every local turn), not a
- * fix for a failing test. Smallest value that fits today: 2203 (#3920, with the one-line OS and shell note).
+ * fix for a failing test. Smallest value that fits today: 2220 (#3920, with the one-line OS and shell note;
+ * +17 in #4165 so render_video_deck sits in a category and discover_tools can load it on a deferred session).
  */
-const POSIX_CAP = 2203;
+const POSIX_CAP = 2220;
 // The Windows environment line names the shell and is longer than the POSIX one; the budget
 // for everything else stays fixed, so a Windows host gets exactly the difference.
 const CONCISE_CATALOG_MAX_BYTES =
-	POSIX_CAP + Buffer.byteLength(environmentNote()) - Buffer.byteLength(environmentNote({ platform: "linux" }));
+	POSIX_CAP +
+	Buffer.byteLength(environmentNote()) -
+	Buffer.byteLength(environmentNote({ platform: "linux" }));
 
 describe("buildToolCatalogSegment", () => {
 	it("has a clear header", () => {
@@ -132,7 +135,9 @@ describe("review focus guidance (#3920)", () => {
 		for (const seg of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
 			expect(seg.split(REVIEW_FOCUS_NOTE).length - 1).toBe(1);
 		}
-		expect(Buffer.byteLength(buildToolCatalogSegment({ concise: true }))).toBeLessThanOrEqual(CONCISE_CATALOG_MAX_BYTES);
+		expect(Buffer.byteLength(buildToolCatalogSegment({ concise: true }))).toBeLessThanOrEqual(
+			CONCISE_CATALOG_MAX_BYTES,
+		);
 		expect(REVIEW_FOCUS_NOTE).toContain("cite only lines that must change");
 		expect(REVIEW_FOCUS_NOTE).toContain("security-relevant");
 	});
@@ -151,7 +156,13 @@ describe("TOOL_PATTERNS_SEGMENT local server guidance (#3941)", () => {
 	it("the compact short form is under 300 chars, has no em dash, and keeps the core rules", () => {
 		expect(LOCAL_SERVER_CURL_SHORT.length).toBeLessThanOrEqual(300);
 		expect(LOCAL_SERVER_CURL_SHORT).not.toContain("\u2014");
-		for (const rule of ["one plain curl per call", "under .tmp/", "never /tmp", "Do not pass -L", "Location header"])
+		for (const rule of [
+			"one plain curl per call",
+			"under .tmp/",
+			"never /tmp",
+			"Do not pass -L",
+			"Location header",
+		])
 			expect(LOCAL_SERVER_CURL_SHORT).toContain(rule);
 	});
 
@@ -199,9 +210,21 @@ describe("TOOL_PATTERNS_SEGMENT local server guidance (#3941)", () => {
 			expect(scrubbed.rules).toEqual(["secret_assignment"]);
 			// Both commands run as written: the sanitizer and System One's loopback lane accept them.
 			expect(sanitizeShellCommand(sedCmd)).toEqual({ safe: true });
-			const curlCmd = (curl as string).replace("NAME", "pilot-x").replace("URL", "http://127.0.0.1:5173/login");
+			const curlCmd = (curl as string)
+				.replace("NAME", "pilot-x")
+				.replace("URL", "http://127.0.0.1:5173/login");
 			expect(sanitizeShellCommand(curlCmd)).toEqual({ safe: true });
-			const keys = ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "HOME", "CURL_HOME", "XDG_CONFIG_HOME"];
+			const keys = [
+				"http_proxy",
+				"https_proxy",
+				"all_proxy",
+				"HTTP_PROXY",
+				"HTTPS_PROXY",
+				"ALL_PROXY",
+				"HOME",
+				"CURL_HOME",
+				"XDG_CONFIG_HOME",
+			];
 			const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
 			for (const k of keys) Reflect.deleteProperty(process.env, k);
 			process.env.HOME = ws;

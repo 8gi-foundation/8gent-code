@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { jsonSchema, tool as sdkTool } from "ai";
+import { notePlanTask } from "../ai/plan-file";
 import { postMessageAvailable } from "../ai/post-message";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
 import {
@@ -1671,6 +1672,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
 		this.turnTask = userMessage;
+		// A plan file the task names is update_plan's plan of record (#4161).
+		notePlanTask(this.config.workingDirectory || process.cwd(), userMessage);
 		this.turnGitBaseline = asksForCommit(userMessage)
 			? gitSnapshot(this.config.workingDirectory || process.cwd())
 			: null;
