@@ -402,6 +402,25 @@ export interface ErrorEntry extends BaseEntry {
 	error: SessionError;
 }
 
+/** Prefill meter (#3655, EIGHT_PREFIX_METER=1): one model request's counts and timings. */
+export interface ModelRoundEntry extends BaseEntry {
+	type: "model_round";
+	/** 0-based index of this request within the session. */
+	round: number;
+	/** "chat" = /v1/chat/completions, "raw" = Ollama /api/generate recovery. */
+	path: "chat" | "raw";
+	/** Characters of message content sent (history length); never the text. */
+	promptChars: number;
+	promptTokens: number | null;
+	completionTokens: number | null;
+	/** Provider-reported prefill and generation time, when it reports them. */
+	promptEvalMs?: number;
+	evalMs?: number;
+	/** Wait for the reply headers; roughly prefill time on a streamed reply. */
+	headersMs: number;
+	wallMs: number;
+}
+
 export interface SessionEndEntry extends BaseEntry {
 	type: "session_end";
 	summary: SessionSummary;
@@ -425,6 +444,7 @@ export type SessionEntry =
 	| StepStartEntry
 	| StepEndEntry
 	| ToolErrorEntry
+	| ModelRoundEntry
 	// v1 only (legacy, still parsed)
 	| AssistantMessageEntry
 	| TurnStartEntry
