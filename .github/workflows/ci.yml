@@ -48,6 +48,11 @@ jobs:
       - name: "Type check (TUI scope)"
         run: bun run typecheck:tui
 
+      # #4135: tsconfig.harness.json covers bin/8gent.ts, the binary users run.
+      # It was run by no workflow and hid six errors, two of them live bugs.
+      - name: "Type check: harness (bin/8gent.ts, tsconfig.harness.json)"
+        run: bun run check:harness
+
       - name: Lint
         run: bun run lint
 
