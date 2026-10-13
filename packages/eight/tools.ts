@@ -2142,6 +2142,8 @@ export class ToolExecutor {
 		// Notebook cell edits write text into a file too (#3011).
 		notebook_edit_cell: "write_file",
 		notebook_insert_cell: "write_file",
+		// Deleting a cell rewrites the notebook: a write, like edit and insert (#3760).
+		notebook_delete_cell: "write_file",
 		delete_file: "delete_file",
 		run_command: "run_command",
 		powershell: "run_command",
@@ -3801,7 +3803,9 @@ export class ToolExecutor {
 		newSource: string,
 	): Promise<string> {
 		try {
-			const absolutePath = this.guardedNotebookPath(notebookPath, "write");
+			this.guardedNotebookPath(notebookPath, "write");
+			// Inside the workspace root, by safePath, real parent and no symlink (#3760).
+			const absolutePath = confineWrite(notebookPath, this.workingDirectory);
 			const result = await editCell(absolutePath, cellIndex, newSource);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -3816,7 +3820,9 @@ export class ToolExecutor {
 		source: string,
 	): Promise<string> {
 		try {
-			const absolutePath = this.guardedNotebookPath(notebookPath, "write");
+			this.guardedNotebookPath(notebookPath, "write");
+			// Inside the workspace root, by safePath, real parent and no symlink (#3760).
+			const absolutePath = confineWrite(notebookPath, this.workingDirectory);
 			const result = await insertCell(absolutePath, afterIndex, cellType, source);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -3826,7 +3832,9 @@ export class ToolExecutor {
 
 	private async handleNotebookDeleteCell(notebookPath: string, cellIndex: number): Promise<string> {
 		try {
-			const absolutePath = this.guardedNotebookPath(notebookPath, "write");
+			this.guardedNotebookPath(notebookPath, "write");
+			// Inside the workspace root, by safePath, real parent and no symlink (#3760).
+			const absolutePath = confineWrite(notebookPath, this.workingDirectory);
 			const result = await deleteCell(absolutePath, cellIndex);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
