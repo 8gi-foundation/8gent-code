@@ -1,0 +1,4 @@
+benchmark_id	category	model_id	provider	score	exec_score	kw_score	method	passed_tests	total_tests	api_duration_ms	prompt_tokens	completion_tokens	total_tokens	timestamp
+BF001	bug-fixing	ollama:qwen3.8:27b-mlx	ollama	10	0	33	execution+keyword	0	1	103680	1397	2048	3445	2026-08-27T22:15:45.990Z
+BF002	bug-fixing	ollama:qwen3.8:27b-mlx	ollama	100	100	100	execution+keyword	5	5	99971	1392	1818	3210	2026-08-27T22:17:25.982Z
+BF003	bug-fixing	ollama:qwen3.8:27b-mlx	ollama	100	100	100	execution+keyword	8	8	75461	1480	1489	2969	2026-08-27T22:18:41.461Z

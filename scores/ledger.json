@@ -1,5 +1,17 @@
 {
-	"updatedAt": null,
-	"categories": {},
-	"models": {}
+	"updatedAt": "2026-08-27T22:18:50.622Z",
+	"categories": {
+		"bug-fixing": {
+			"avgScore": 70,
+			"benchmarkCount": 3
+		}
+	},
+	"models": {
+		"ollama:qwen3.8:27b-mlx": {
+			"bug-fixing": {
+				"avgScore": 70,
+				"benchmarkCount": 3
+			}
+		}
+	}
 }
