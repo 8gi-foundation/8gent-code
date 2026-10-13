@@ -23,6 +23,7 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
+import { type ScriptRef, scriptChanged } from "../permissions/s1-script-body";
 import { hostedAllowed } from "../providers/failover";
 
 export const SPAWN_AGENT_DESCRIPTION =
@@ -60,6 +61,14 @@ async function legacyParentMode(): Promise<PermissionMode> {
 	return getPermissionManager().isInfiniteMode() ? "infinite" : "ask";
 }
 
+/** Outcome of gateShellChild: a refusal, or the command to run (the judged copy of a script) and its cleanup. */
+interface ShellChildGate {
+	blocked: string | null;
+	runCommand?: string;
+	scripts?: ScriptRef[];
+	cleanup?: () => void;
+}
+
 /**
  * A shell-runtime child runs its task through sh -c, so in a permission mode
  * it passes the same gate run_command does, in the child's (clamped) mode:
@@ -70,7 +79,7 @@ async function gateShellChild(
 	command: string,
 	cwd: string,
 	holder: PermissionModeHolder,
-): Promise<string | null> {
+): Promise<ShellChildGate> {
 	// Judge git state against the directory the child runs in (#3748).
 	const { withCommandDir } = await import("../permissions/command-policy");
 	return withCommandDir(cwd, () =>
@@ -78,16 +87,16 @@ async function gateShellChild(
 			const mode = currentPermissionMode();
 			if (mode === "plan") {
 				const refusal = await planModeRefusal("run_command", { command });
-				if (refusal) return refusal;
+				if (refusal) return { blocked: refusal };
 			}
 			const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 			const pm = getPermissionManager();
 			const check = pm.checkPermission(command);
 			if (check === "denied")
-				return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
+				return { blocked: `[PERMISSION DENIED] Command blocked by security policy: ${command}` };
 			const { systemOneGate } = await import("../permissions/system-one-gate");
 			const systemOne = await systemOneGate(command, systemOneEnvFor(mode), cwd);
-			if (!systemOne.run) return systemOne.message as string;
+			if (!systemOne.run) return { blocked: systemOne.message as string };
 			const dangerous = isCommandDangerous(command);
 			if (
 				check === "ask" &&
@@ -101,9 +110,18 @@ async function gateShellChild(
 						: "The agent wants to run a shell command as a background agent.",
 					command,
 				);
-				if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
+				if (!allowed) {
+					systemOne.cleanup?.();
+					return { blocked: `[PERMISSION DENIED] User declined to execute: ${command}` };
+				}
 			}
-			return null;
+			// A script was judged by its bytes: run the private copy of those bytes (#3877).
+			return {
+				blocked: null,
+				runCommand: systemOne.runCommand,
+				scripts: systemOne.scripts,
+				cleanup: systemOne.cleanup,
+			};
 		}),
 	);
 }
@@ -172,21 +190,38 @@ export async function spawnAgentTool(
 		// CLI runtimes: claude and shell
 		if (effectiveRuntime === "claude" || effectiveRuntime === "shell") {
 			// runtime "shell" runs the task through sh -c, so it is a shell command.
+			// toRun is what is spawned: the judged private copy when the task is `bash <file>`.
+			let toRun = task;
+			let cleanup: (() => void) | undefined;
+			let scripts: ScriptRef[] | undefined;
 			if (effectiveRuntime === "shell" && child) {
-				const blocked = await gateShellChild(task, workingDirectory, child);
-				if (blocked) return blocked;
+				const gate = await gateShellChild(task, workingDirectory, child);
+				if (gate.blocked) return gate.blocked;
+				toRun = gate.runCommand ?? task;
+				cleanup = gate.cleanup;
+				scripts = gate.scripts;
 			} else if (effectiveRuntime === "shell") {
 				const { systemOneGate } = await import("../permissions/system-one-gate");
-				const systemOne = await systemOneGate(task);
+				const systemOne = await systemOneGate(task, undefined, workingDirectory);
 				if (!systemOne.run) return systemOne.message as string;
+				toRun = systemOne.runCommand ?? task;
+				cleanup = systemOne.cleanup;
+				scripts = systemOne.scripts;
+			}
+			// The judged file must still hold its judged bytes right before spawn.
+			const changed = scriptChanged(scripts);
+			if (changed) {
+				cleanup?.();
+				return changed;
 			}
 			const { spawnCLIAgent } = await import("./index");
-			const agent = spawnCLIAgent(effectiveRuntime, task, {
+			const agent = spawnCLIAgent(effectiveRuntime, toRun, {
 				workingDirectory: workingDirectory,
 				timeout: timeout || undefined,
 				// A process child starts at this depth, so an 8gent it runs is capped too.
 				env: { [AGENT_DEPTH_ENV]: String(currentAgentDepth() + 1) },
 			});
+			if (cleanup) agent.promise.then(cleanup, cleanup);
 			return JSON.stringify(
 				{
 					agentId: agent.id,
