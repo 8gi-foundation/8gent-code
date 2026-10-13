@@ -942,36 +942,44 @@ describe("Kitten on a real interpreter with a fake kittentts (N1, N2)", () => {
 		}
 	};
 
-	test.skipIf(!py)("a relative outPath lands in the caller's cwd, not the deleted temp dir", async () => {
-		const { root, lib, work } = fixture();
-		try {
-			const [r] = await run(lib, work, [{ text: "hi", voice: "Ava", outPath: "rel-out.wav" }]);
-			expect(r.ok).toBe(true);
-			expect(existsSync(join(work, "rel-out.wav"))).toBe(true);
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-		}
-	}, 30_000);
-
-	test.skipIf(!py)("a line that raises mid-write fails and its partial WAV is deleted", async () => {
-		const { root, lib, work } = fixture();
-		try {
-			const good = join(work, "good.wav");
-			const bad = join(work, "bad.wav");
-			const [g, b] = await run(lib, work, [
-				{ text: "hi", voice: "Ava", outPath: good },
-				{ text: "boom", voice: "Ava", outPath: bad },
-			]);
-			expect(g.ok).toBe(true);
-			expect(existsSync(good)).toBe(true);
-			expect(b.ok).toBe(false);
-			if (!b.ok) {
-				expect(b.error.code).toBe("engine_failed");
-				expect(b.error.attempts[0].reason).toContain("synthesis blew up mid-file");
+	test.skipIf(!py)(
+		"a relative outPath lands in the caller's cwd, not the deleted temp dir",
+		async () => {
+			const { root, lib, work } = fixture();
+			try {
+				const [r] = await run(lib, work, [{ text: "hi", voice: "Ava", outPath: "rel-out.wav" }]);
+				expect(r.ok).toBe(true);
+				expect(existsSync(join(work, "rel-out.wav"))).toBe(true);
+			} finally {
+				rmSync(root, { recursive: true, force: true });
 			}
-			expect(existsSync(bad)).toBe(false);
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-		}
-	}, 30_000);
+		},
+		30_000,
+	);
+
+	test.skipIf(!py)(
+		"a line that raises mid-write fails and its partial WAV is deleted",
+		async () => {
+			const { root, lib, work } = fixture();
+			try {
+				const good = join(work, "good.wav");
+				const bad = join(work, "bad.wav");
+				const [g, b] = await run(lib, work, [
+					{ text: "hi", voice: "Ava", outPath: good },
+					{ text: "boom", voice: "Ava", outPath: bad },
+				]);
+				expect(g.ok).toBe(true);
+				expect(existsSync(good)).toBe(true);
+				expect(b.ok).toBe(false);
+				if (!b.ok) {
+					expect(b.error.code).toBe("engine_failed");
+					expect(b.error.attempts[0].reason).toContain("synthesis blew up mid-file");
+				}
+				expect(existsSync(bad)).toBe(false);
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		},
+		30_000,
+	);
 });
