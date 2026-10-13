@@ -10,6 +10,8 @@ export type SlashCommand =
 	| "status"
 	| "model"
 	| "provider"
+	| "llama"
+	| "models"
 	| "voice"
 	| "theme"
 	| "reload"
@@ -116,6 +118,20 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["pr"],
 		description: "Select LLM provider (↑↓ to scroll)",
 		usage: "/provider [name]",
+	},
+	{
+		name: "llama",
+		aliases: [],
+		description:
+			"Takes status, load <id> or unload <id>: local llama-server health, loaded models, metrics",
+		usage: "/llama [status|load <id>|unload <id>]",
+	},
+	{
+		name: "models",
+		aliases: [],
+		description:
+			"Takes list or use <id>: llama-server models, switch model and keep the conversation",
+		usage: "/models [list|use <id>]",
 	},
 	{
 		name: "voice",
@@ -429,8 +445,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "goal",
 		aliases: ["go"],
-		description:
-			"Run a goal to completion. Sub: status | stop | resume | clear | ?",
+		description: "Run a goal to completion. Sub: status | stop | resume | clear | ?",
 		usage: "/goal <goal> | /goal status | /goal stop | /goal resume | /goal clear | /goal ?",
 	},
 	{

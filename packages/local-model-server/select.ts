@@ -37,10 +37,38 @@ export function isLlamaServerSelected(env: Env = process.env): boolean {
 	return resolveLocalServerKind(env) === "llama-server";
 }
 
-/** llama-server root: LLAMA_SERVER_URL, else 127.0.0.1:8080. Scheme added to a bare host:port. */
-export function resolveLlamaServerUrl(env: Env = process.env): string {
+/** True for localhost, 127.0.0.0/8 and ::1: the only hosts prompts may reach without opting in. */
+export function isLoopbackUrl(url: string): boolean {
+	let host: string;
+	try {
+		host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+	} catch {
+		return false;
+	}
+	return host === "localhost" || host === "::1" || /^127(\.\d{1,3}){3}$/.test(host);
+}
+
+const warnedRemote = new Set<string>();
+
+/**
+ * llama-server root: LLAMA_SERVER_URL, else 127.0.0.1:8080. Scheme added to a bare host:port.
+ * A non-loopback URL is refused (the loopback default is used, with one warning) unless
+ * EIGHT_ALLOW_REMOTE_LLAMA=1, so prompts never leave the machine by a typo or a stale env.
+ */
+export function resolveLlamaServerUrl(
+	env: Env = process.env,
+	warn: (line: string) => void = console.warn,
+): string {
 	let v = (env.LLAMA_SERVER_URL ?? "").trim().replace(/\/+$/, "");
 	if (!v) return DEFAULT_LLAMA_SERVER_URL;
 	if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) v = `http://${v}`;
-	return v.replace(/\/v1$/, "").replace(/\/+$/, "");
+	v = v.replace(/\/v1$/, "").replace(/\/+$/, "");
+	if (isLoopbackUrl(v) || env.EIGHT_ALLOW_REMOTE_LLAMA === "1") return v;
+	if (!warnedRemote.has(v)) {
+		warnedRemote.add(v);
+		warn(
+			`LLAMA_SERVER_URL ${v} is not loopback; using ${DEFAULT_LLAMA_SERVER_URL}. Set EIGHT_ALLOW_REMOTE_LLAMA=1 to allow it.`,
+		);
+	}
+	return DEFAULT_LLAMA_SERVER_URL;
 }

@@ -6,12 +6,14 @@
  * 503 while loading). It serves GGUF only, no MLX, and has no HTTP pull: a
  * model arrives by `-m file.gguf` or `-hf repo:tag` at launch.
  *
- * One model per process by default. Router mode (`llama-server --models-dir`,
- * no model argument) lists and loads several, but that is a launch choice this
- * adapter cannot see from outside, so `multiModel` stays false: a caller that
- * needs a second model starts a second server rather than assuming one.
+ * One model per process by default, so the static `multiModel` is false.
+ * Router mode (`--models-preset`, `--models-dir`, no model argument) lists and
+ * loads several and routes each request by its `model` field; once the model
+ * list shows that, `capabilitiesFor(list)` reports `multiModel: true`. The
+ * router calls themselves (load, unload, status) live in llama-router.ts.
  */
 
+import { isRouterMode } from "./llama-router";
 import {
 	type LocalFetch,
 	type LocalModelEntry,
@@ -38,6 +40,13 @@ export const LLAMA_SERVER_CAPABILITIES: LocalServerCapabilities = Object.freeze(
 	modelInfo: true,
 });
 
+/** Capabilities as the model list shows them: more than one model, or a router `status`, means router mode. */
+export function capabilitiesFor(models: readonly LocalModelEntry[]): LocalServerCapabilities {
+	return isRouterMode(models)
+		? Object.freeze({ ...LLAMA_SERVER_CAPABILITIES, multiModel: true })
+		: LLAMA_SERVER_CAPABILITIES;
+}
+
 export interface LlamaServerOptions {
 	/** Server root, without "/v1" (e.g. http://127.0.0.1:8080). Used verbatim. */
 	baseUrl: string;
@@ -54,7 +63,8 @@ export function createLlamaServer(opts: LlamaServerOptions): LocalModelServer {
 		const res = await getWithSignal(fetchImpl, modelsUrl, req);
 		if (!res.ok) throw new LocalServerHttpError(modelsUrl, res.status);
 		const body = (await res.json()) as unknown;
-		if (body === null || typeof body !== "object") throw new LocalServerResponseError(modelsUrl, "body is not an object");
+		if (body === null || typeof body !== "object")
+			throw new LocalServerResponseError(modelsUrl, "body is not an object");
 		const data = (body as { data?: unknown }).data;
 		if (data === undefined || data === null) return [];
 		if (!Array.isArray(data)) throw new LocalServerResponseError(modelsUrl, "`data` is not a list");
