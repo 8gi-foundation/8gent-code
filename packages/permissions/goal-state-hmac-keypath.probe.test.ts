@@ -1,6 +1,13 @@
 /**
  * 8SO probes for #4132 / PR #4134. Each test states the property the HMAC key
  * must have. A failing test here is a live bypass, not a flaky test.
+ *
+ * Status of the live probes (Artale, 8SO), as measured for PR #4134:
+ * - P7 rename of <data>/keys: verified live on Linux (bubblewrap, denied, CI bwrap step).
+ *   macOS: asserted-only (profile rule present, P7s; enforcement not measured, because
+ *   sandbox-exec cannot nest inside the session sandbox: "sandbox_apply: Operation not permitted").
+ * - P1b read of the key through wrapRunCommand: live where it ran (Linux CI bwrap step).
+ *   macOS: asserted-only (read deny present, P1; enforcement not measured, same limit).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -140,14 +147,17 @@ describe("8SO probe: key confidentiality and integrity (#4132)", () => {
 		},
 	);
 
-	// P7s. The static half of P7: the write deny names <data>/keys as a literal, which is what
-	// matches rename(2) of that entry (source) and a rename onto it (destination) on seatbelt.
-	test("P7s the run_command profile denies file-write* on the literal <data>/keys entry", () => {
+	// P7s. The RULE half of P7, not its enforcement: the write deny treats <data>/keys as a
+	// directory unit (subpath, which covers everything under it) plus the literal entry itself.
+	// Whether seatbelt applies it to rename(2) is P7's job, measured live only where P7 runs.
+	test("P7s the profile denies writes under <keys dir> as a subpath rule", () => {
 		const data = path.join(root, "data");
 		useDataDir(data);
+		const keysDir = path.join(data, "keys");
 		const profile = buildRunCommandProfile(protectedRunCommandPaths());
 		const writeDeny = profile.split("\n").filter((l) => l.startsWith("(deny file-write* file-link"));
-		expect(writeDeny.some((l) => l.includes(`(literal "${path.join(data, "keys")}")`))).toBe(true);
+		expect(writeDeny.some((l) => l.includes(`(subpath "${keysDir}")`))).toBe(true);
+		expect(writeDeny.some((l) => l.includes(`(literal "${keysDir}")`))).toBe(true);
 	});
 
 	// Holds: P4. A key under the data dir with a case-varied spelling is covered
