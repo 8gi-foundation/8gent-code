@@ -729,7 +729,10 @@ describe("origin allowlist", () => {
 			calls,
 			base({ "remote get-url": { stdout: "https://evil.example/o/8gent-browser.git\n" } }),
 		);
-		d.confirm = async (q, o) => (asked.push({ q, strict: o.strict }), true);
+		d.confirm = async (q, o) => {
+			asked.push({ q, strict: o.strict });
+			return true;
+		};
 		const r = await updateCheckout(d, { ...opts, repo: "8gent-browser", build: true, yes: true });
 		expect(r.status).toBe("updated");
 		expect(asked).toHaveLength(1);
@@ -743,14 +746,20 @@ describe("origin allowlist", () => {
 		const c1: Call[] = [];
 		const d1 = mk(c1);
 		let asked = 0;
-		d1.confirm = async () => (asked++, true);
+		d1.confirm = async () => {
+			asked++;
+			return true;
+		};
 		await updateCheckout(d1, opts);
 		expect(asked).toBe(0);
 
 		const c2: Call[] = [];
 		const d2 = mk(c2);
 		const strictSeen: boolean[] = [];
-		d2.confirm = async (_q, o) => (strictSeen.push(o.strict), false);
+		d2.confirm = async (_q, o) => {
+			strictSeen.push(o.strict);
+			return false;
+		};
 		const r = await updateCheckout(d2, { ...opts, yes: false });
 		expect(r.status).toBe("declined");
 		expect(strictSeen).toEqual([false]);

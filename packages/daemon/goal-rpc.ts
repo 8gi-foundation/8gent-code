@@ -23,6 +23,8 @@ import {
 	GoalLoop,
 	GoalPersistence,
 	Ledger,
+	canonical,
+	type LedgerEntry,
 	type GoalEvent,
 	type GoalEventSink,
 } from "../goal";
@@ -360,8 +362,11 @@ export class GoalManager {
 	 *
 	 * If the run is not in memory but is present in the persistence layer,
 	 * verify the ledger chain (8GO: every resume must re-verify audit
-	 * integrity before exposing the run to RPC callers). Returns true if
-	 * the run was hydrated and the chain is intact.
+	 * integrity before exposing the run to RPC callers). Returns true only
+	 * if the chain is intact AND the persisted events match it in count and,
+	 * at every seq, in kind and payload. No key, a torn or missing file, a
+	 * short chain or a rewritten event row is a refusal (#4113, conformance
+	 * in goal-resume-conformance.test.ts).
 	 *
 	 * The scaffold does NOT re-attach a live GoalLoop; the daemon factory
 	 * owns executor + judge re-creation. This hook reports readiness; the
@@ -374,25 +379,45 @@ export class GoalManager {
 		if (!this.persistence) return false;
 		const row = this.persistence.getRun(runId);
 		if (!row) return false;
-		if (this.ledgerKey) {
-			let ledger: Ledger;
-			try {
-				ledger = Ledger.open({
-					runId,
-					baseDir: this.ledgerBaseDir,
-					key: this.ledgerKey,
-				});
-			} catch {
-				return false;
-			}
+		// Fail closed (#4113): every path that cannot prove the chain is a "no",
+		// and every "no" says why.
+		const refuse = (where: string, why: string): false => {
+			// eslint-disable-next-line no-console
+			console.warn(`[GoalManager] resume(${runId}): ledger verify failed${where} - ${why}`);
+			return false;
+		};
+		if (!this.ledgerKey) return refuse("", "no ledger key, the chain cannot be verified");
+		let entries: LedgerEntry[];
+		try {
+			const ledger = Ledger.open({ runId, baseDir: this.ledgerBaseDir, key: this.ledgerKey });
 			const verdict = ledger.verify();
+			entries = verdict.ok ? ledger.readAll() : [];
 			ledger.close();
-			if (!verdict.ok) {
-				// eslint-disable-next-line no-console
-				console.warn(
-					`[GoalManager] resume(${runId}): ledger verify failed at seq=${verdict.atSeq} - ${verdict.reason}`,
+			if (!verdict.ok) return refuse(` at seq=${verdict.atSeq}`, verdict.reason ?? "chain broken");
+		} catch (err) {
+			// A torn last line (killed mid-append) or an unreadable file.
+			return refuse("", err instanceof Error ? err.message : String(err));
+		}
+		// A chain that verifies can still be short: a truncated tail, or a
+		// deleted file that Ledger.open recreated empty, is a valid prefix. And
+		// goal_events, the store the orchestrator replays, is not signed. So the
+		// two must agree in count, and at every seq in kind and payload: start()
+		// persists { ...payload, ts } and ledgers payload with that same ts.
+		const events = this.persistence.listEventsForRun(runId);
+		for (let i = 0; i < Math.max(entries.length, events.length); i++) {
+			const entry = entries[i];
+			const event = events[i];
+			if (!entry || !event) {
+				return refuse(
+					` at seq=${i + 1}`,
+					`ledger has ${entries.length} entries, persisted events ${events.length}`,
 				);
-				return false;
+			}
+			if (
+				entry.kind !== event.kind ||
+				canonical({ ...entry.payload, ts: entry.ts }) !== canonical(event.payload)
+			) {
+				return refuse(` at seq=${i + 1}`, "persisted event does not match the ledger entry");
 			}
 		}
 		return true;

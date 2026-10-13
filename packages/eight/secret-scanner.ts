@@ -171,10 +171,7 @@ function family(name: string): Family | null {
 }
 
 const UPPER_SNAKE = "[A-Z_][A-Z0-9_]*";
-const PLACEHOLDER = new RegExp(
-	`^(?:\\$\\(.*\\)|\\$\\{\\{.*\\}\\}|\\{\\{.*\\}\\}|\\*+|x+|true|false|null|none|nil|undefined|yes|no|on|off)$`,
-	"i",
-);
+const PLACEHOLDER = /^(?:\$\(.*\)|\$\{\{.*\}\}|\{\{.*\}\}|\*+|x+|true|false|null|none|nil|undefined|yes|no|on|off)$/i;
 // Wrappers count only around UPPER_SNAKE names: ${DB_PASSWORD} yes, ${Zq9x} no.
 const WRAPPED_NAME = new RegExp(`^(?:\\$${UPPER_SNAKE}|\\$\\{${UPPER_SNAKE}\\}|<${UPPER_SNAKE}>|%${UPPER_SNAKE}%)$`);
 const TEMPLATE_VALUE = /^(?:your[_\-][\w\-]*|changeme|change[_\-]me|replace[_\-]me|placeholder)$/i;

@@ -19,9 +19,12 @@ import {
 	evaluateBudgetPolicy,
 	reconcileBudgetPolicy,
 } from "./policy-engine";
+import { refreshSecurityEnvForTests } from "./run-command-sandbox";
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "autonomy-test-"));
 process.env.EIGHT_DATA_DIR = TMP_DIR;
+// The HMAC key path reads the security env snapshot, not live env (#4132).
+refreshSecurityEnvForTests();
 
 // A distinct maker/checker pair with a PASS verdict - the happy path.
 const PASSING_MC: MakerCheckerContext = {
