@@ -5,30 +5,36 @@
  *   - activity-rail-derivation pure helpers
  *   - tui-approval-channel + a simulated keypress-driven approval flow
  */
-import { describe, expect, test, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 
-import { turnEndedInError } from "../lib/turn-outcome";
-import { computeGitSync, gitView, type GitRunner } from "../hooks/useGitSync";
 import {
-	deriveTools,
-	deriveProviders,
-	fallbackFromChain,
-	deriveAgents,
-	deriveActiveTasks,
-	parseToolName,
-	queuedToolCount,
-	planStepsFromText,
-} from "../lib/activity-rail-derivation";
-import {
+	type TuiApprovalDecision,
+	_resetTuiApprovalChannel,
+	hasTuiApprovalHandler,
 	registerTuiApprovalHandler,
 	requestTuiApproval,
-	hasTuiApprovalHandler,
-	_resetTuiApprovalChannel,
-	type TuiApprovalDecision,
 } from "../../../../packages/permissions/tui-approval-channel";
 import { ModelFailover } from "../../../../packages/providers/failover";
+import { type GitRunner, computeGitSync, gitView } from "../hooks/useGitSync";
+import {
+	deriveActiveTasks,
+	deriveAgents,
+	deriveProviders,
+	deriveTools,
+	fallbackFromChain,
+	parseToolName,
+	planStepsFromText,
+	queuedToolCount,
+} from "../lib/activity-rail-derivation";
+import { turnEndedInError } from "../lib/turn-outcome";
 
-function msg(partial: { role: string; content?: string; toolSuccess?: boolean; id?: string; toolTrail?: any }) {
+function msg(partial: {
+	role: string;
+	content?: string;
+	toolSuccess?: boolean;
+	id?: string;
+	toolTrail?: any;
+}) {
 	return {
 		id: partial.id ?? `m-${Math.random().toString(36).slice(2, 8)}`,
 		role: partial.role as any,
@@ -69,8 +75,14 @@ describe("turnEndedInError", () => {
 	});
 
 	test("a turn that ends on an error is a failed turn", () => {
-		expect(turnEndedInError([msg({ role: "assistant", content: "[Error] provider timed out" })] as any)).toBe(true);
-		expect(turnEndedInError([msg({ role: "system", content: "[8gent not ready] Nothing was run." })] as any)).toBe(true);
+		expect(
+			turnEndedInError([msg({ role: "assistant", content: "[Error] provider timed out" })] as any),
+		).toBe(true);
+		expect(
+			turnEndedInError([
+				msg({ role: "system", content: "[8gent not ready] Nothing was run." }),
+			] as any),
+		).toBe(true);
 		// Stopped on a failed call with no reply after it.
 		expect(turnEndedInError([...call("1", "run_command", false)] as any)).toBe(true);
 		expect(turnEndedInError([] as any)).toBe(false);
@@ -79,7 +91,11 @@ describe("turnEndedInError", () => {
 		expect(
 			turnEndedInError([
 				...call("1", "run_command", false),
-				msg({ role: "assistant", content: 'The local model turn could not complete: ollama chat completions 500: {"error":{"message":"EOF"}}' }),
+				msg({
+					role: "assistant",
+					content:
+						'The local model turn could not complete: ollama chat completions 500: {"error":{"message":"EOF"}}',
+				}),
 			] as any),
 		).toBe(true);
 	});
@@ -214,7 +230,11 @@ describe("activity-rail-derivation", () => {
 	});
 
 	test("queued counts calls waiting behind the active one, and drains when the turn ends", () => {
-		const messages = [...call("1", "read_file"), ...call("2", "read_file"), ...call("3", "grep")] as any;
+		const messages = [
+			...call("1", "read_file"),
+			...call("2", "read_file"),
+			...call("3", "grep"),
+		] as any;
 		const live = deriveTools(messages, true, 5);
 		expect(queuedToolCount(live, true)).toBe(2);
 		const after = deriveTools(messages, false, 5);
@@ -247,7 +267,9 @@ describe("activity-rail-derivation", () => {
 			},
 			computer: {},
 		});
-		expect(fallbackFromChain(fo, "lmstudio", "ornith-1.0-9b")).toEqual({ name: "apfel:MiniMax-M2.7" });
+		expect(fallbackFromChain(fo, "lmstudio", "ornith-1.0-9b")).toEqual({
+			name: "apfel:MiniMax-M2.7",
+		});
 		// No chain for the model, no model set, no chain at all: no fallback row.
 		expect(fallbackFromChain(fo, "ollama", "qwen3.8:27b-mlx")).toBeNull();
 		expect(fallbackFromChain(fo, "lmstudio", "")).toBeNull();
@@ -302,10 +324,16 @@ describe("activity-rail-derivation", () => {
 			{ id: "waiting", label: "waiting for your answer", tone: "waiting" },
 		]);
 		const plan = [{ id: "p1", text: "a", status: "pending" as const }];
-		expect(deriveActiveTasks(plan, true, true)[0]).toMatchObject({ id: "waiting", tone: "waiting" });
+		expect(deriveActiveTasks(plan, true, true)[0]).toMatchObject({
+			id: "waiting",
+			tone: "waiting",
+		});
 		// A step in progress is still the task; the card belongs to it.
 		const running = [{ id: "p1", text: "run the tests", status: "active" as const }];
-		expect(deriveActiveTasks(running, true, true)[0]).toMatchObject({ id: "p1", label: "run the tests" });
+		expect(deriveActiveTasks(running, true, true)[0]).toMatchObject({
+			id: "p1",
+			label: "run the tests",
+		});
 	});
 
 	test("a plan-only reply reads as planned, not as an empty 0 of N bar (#3152)", () => {
@@ -314,10 +342,15 @@ describe("activity-rail-derivation", () => {
 			{ id: "p2", text: "b", status: "pending" as const },
 			{ id: "p3", text: "c", status: "pending" as const },
 		];
-		expect(deriveActiveTasks(plan, false)).toEqual([{ id: "plan-tally", label: "3 steps planned", tone: "quiet" }]);
+		expect(deriveActiveTasks(plan, false)).toEqual([
+			{ id: "plan-tally", label: "3 steps planned", tone: "quiet" },
+		]);
 		expect(deriveActiveTasks(plan.slice(0, 1), false)[0].label).toBe("1 step planned");
 		// Mid-turn the tally stays: the steps are about to run.
-		expect(deriveActiveTasks(plan, true)[0]).toMatchObject({ label: "0 of 3 steps done", detail: "0/3" });
+		expect(deriveActiveTasks(plan, true)[0]).toMatchObject({
+			label: "0 of 3 steps done",
+			detail: "0/3",
+		});
 	});
 
 	test("a fresh session with no plan shows no tasks (#2923)", () => {
@@ -389,5 +422,66 @@ describe("tui-approval-channel", () => {
 			throw new Error("boom");
 		});
 		expect(await requestTuiApproval({ action: "x", details: "y" })).toBe(null);
+	});
+});
+
+// ============================================
+// Readiness wiring in app.tsx (#3290)
+// ============================================
+// deriveReadiness is pure and tested on its own (lib/readiness.test.ts). These
+// read app.tsx itself, so the facts it feeds that function cannot be quietly
+// unplugged: each assertion below fails if one wire is cut.
+describe("readiness wiring in app.tsx (#3290)", () => {
+	const app = require("node:fs").readFileSync(
+		require("node:path").join(import.meta.dir, "..", "app.tsx"),
+		"utf8",
+	) as string;
+	const initAgent = app.slice(
+		app.indexOf("const initAgent = async () => {"),
+		app.indexOf("initAgent();"),
+	);
+
+	test("the engine probe re-runs when the nonce is bumped", () => {
+		expect(app).toMatch(/setInterval\(tick, 8000\);[\s\S]{0,160}?\}, \[probeNonce\]\);/);
+	});
+
+	test("a finished turn records its fact and acts on it", () => {
+		expect(app).toMatch(/const facts = turnEndFacts\(/);
+		expect(app).toContain("setTurnError(facts.turnError);");
+		expect(app).toContain("if (facts.probeNow) setProbeNonce((n) => n + 1);");
+		expect(app).toContain("if (facts.retryBuild) setInitRetry((n) => n + 1);");
+	});
+
+	test("built() and waiting() write the build fact, and only for a live attempt", () => {
+		expect(initAgent).toMatch(
+			/const built = \(\) => \{\s*if \(cancelled\) return;\s*setBuildFact\(\{ key: buildKey, notice: null \}\);/,
+		);
+		expect(initAgent).toMatch(
+			/const waiting = \(notice: string\) => \{\s*if \(cancelled\) return;\s*setBuildFact\(\{ key: buildKey, notice \}\);/,
+		);
+	});
+
+	test("both success paths call built()", () => {
+		// The reused agent and the newly built one.
+		expect(initAgent.match(/setAgentReady\(true\);\s*built\(\);/g)?.length).toBe(2);
+	});
+
+	test("a superseded attempt stops after autoAssign", () => {
+		expect(initAgent).toMatch(/await router\.autoAssign\(\);\s*if \(cancelled\) return;/);
+	});
+
+	test("the build key uses the same tab id as the render-side key", () => {
+		expect(initAgent).toContain("readinessBuildKey(activeTabId, currentProvider, currentModel)");
+		expect(app).toContain(
+			"buildResultFor(buildFact, readinessBuildKey(activeTabId, currentProvider, currentModel))",
+		);
+	});
+
+	test("the header strip and the NO MODEL card render from the one readiness", () => {
+		// The strip's own element only: up to its first "/>".
+		const strip = app.slice(app.indexOf("<LiveFocalStripWithGoal"));
+		expect(strip.slice(0, strip.indexOf("/>"))).toContain("readiness={readiness}");
+		expect(app).toMatch(/<NoProviderNotice\s+readiness=\{readiness\}/);
+		expect(app).toContain('route={readiness.model || "-"}');
 	});
 });

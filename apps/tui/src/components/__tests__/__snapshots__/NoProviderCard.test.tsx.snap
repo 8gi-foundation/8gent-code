@@ -4,6 +4,7 @@ exports[`no-model card in the chat area (T5) providers 0/3: the card shows both 
 "
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ NO MODEL 8gent needs a model to answer. Pick one, or type /provider.         │
+│          Ollama is not answering.                                            │
 │ 1  Run a model on this machine (free, stays local)                           │
 │    curl -fsSL https://ollama.com/install.sh | sh                             │
 │    ollama pull qwen3.5   # about 7 GB                                        │
