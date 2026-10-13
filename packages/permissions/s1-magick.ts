@@ -318,6 +318,48 @@ function outsideRoots(dir: string, roots: string[]): boolean {
 	return roots.every((r) => pathOutsideWorkspace(r, dir));
 }
 
+/**
+ * True when the magick that would run, and the configuration it reads, are not the workspace's:
+ * PATH, MAGICK_* / FONTCONFIG_* variables, per-user config folders and ImageMagick config files
+ * in `roots`. Shared with the media lane (s1-media-in-project.ts).
+ */
+export function magickEnvironmentOk(
+	roots: string[],
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	// The magick that runs, and the configuration it reads, are not the workspace's.
+	const pathEnv = env.PATH ?? process.env.PATH ?? "";
+	if (roots.some((r) => !pathOutsideWorkspace(r, pathEnv))) return false;
+	if (Object.keys(env).some((k) => CONFIG_ENV.test(k) && env[k] !== undefined)) return false;
+	const {
+		HOME: home,
+		XDG_CONFIG_HOME: xdg,
+		XDG_DATA_HOME: xdgData,
+		XDG_CACHE_HOME: xdgCache,
+	} = env;
+	const userConfig = [
+		...(home
+			? [
+					path.join(home, ".config", "ImageMagick"),
+					path.join(home, ".magick"),
+					// fontconfig: per-user configuration and font folders (FreeType parses them).
+					path.join(home, ".config", "fontconfig"),
+					path.join(home, ".fonts.conf"),
+					path.join(home, ".fonts"),
+					path.join(home, ".local", "share", "fonts"),
+				]
+			: []),
+		...(xdg ? [path.join(xdg, "ImageMagick"), path.join(xdg, "fontconfig")] : []),
+		...(xdgData ? [path.join(xdgData, "fonts")] : []),
+		// Cautious, not proven: fontconfig keeps its cache folder here.
+		...(xdgCache ? [path.join(xdgCache, "fontconfig")] : []),
+	];
+	if (userConfig.some((d) => !outsideRoots(d, roots))) return false;
+	for (const r of roots)
+		for (const n of CONFIG_NAMES) if (lstatOrNull(path.join(r, n))) return false;
+	return true;
+}
+
 export function magickRenderInProject(
 	command: string,
 	cwd: string | undefined,
@@ -370,36 +412,7 @@ export function magickRenderInProject(
 		const top = roots[roots.length - 1];
 		for (const o of outputs) if (!outputOk(o, root, top)) return NO;
 
-		// The magick that runs, and the configuration it reads, are not the workspace's.
-		const pathEnv = env.PATH ?? process.env.PATH ?? "";
-		if (roots.some((r) => !pathOutsideWorkspace(r, pathEnv))) return NO;
-		if (Object.keys(env).some((k) => CONFIG_ENV.test(k) && env[k] !== undefined)) return NO;
-		const {
-			HOME: home,
-			XDG_CONFIG_HOME: xdg,
-			XDG_DATA_HOME: xdgData,
-			XDG_CACHE_HOME: xdgCache,
-		} = env;
-		const userConfig = [
-			...(home
-				? [
-						path.join(home, ".config", "ImageMagick"),
-						path.join(home, ".magick"),
-						// fontconfig: per-user configuration and font folders (FreeType parses them).
-						path.join(home, ".config", "fontconfig"),
-						path.join(home, ".fonts.conf"),
-						path.join(home, ".fonts"),
-						path.join(home, ".local", "share", "fonts"),
-					]
-				: []),
-			...(xdg ? [path.join(xdg, "ImageMagick"), path.join(xdg, "fontconfig")] : []),
-			...(xdgData ? [path.join(xdgData, "fonts")] : []),
-			// Cautious, not proven: fontconfig keeps its cache folder here.
-			...(xdgCache ? [path.join(xdgCache, "fontconfig")] : []),
-		];
-		if (userConfig.some((d) => !outsideRoots(d, roots))) return NO;
-		for (const r of roots)
-			for (const n of CONFIG_NAMES) if (lstatOrNull(path.join(r, n))) return NO;
+		if (!magickEnvironmentOk(roots, env)) return NO;
 
 		return {
 			ok: true,

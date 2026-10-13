@@ -830,6 +830,29 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// A plain magick drawing call or ffprobe read on the workspace's own
+		// files (#3948). Default mode only; see s1-media-in-project.ts.
+		try {
+			const { mediaInProject } = await import("./s1-media-in-project");
+			const m =
+				mode === "default"
+					? mediaInProject(command, cwd, env, opts.project)
+					: { ok: false as const };
+			if (m.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: m.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 		// A plain `mv` whose every endpoint is inside the workspace and that
 		// overwrites nothing (#3809). Needs the caller's working directory.
 		try {
