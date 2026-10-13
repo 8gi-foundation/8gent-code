@@ -9,7 +9,13 @@
  *
  * update_plan is not an action tool (packages/eight/honesty.ts ACTION_TOOLS):
  * marking a step "done" can never ground a completion claim on its own.
+ *
+ * When the working directory holds a checklist plan file (#4161,
+ * packages/ai/plan-file.ts), the result names it as the plan of record, and a
+ * step marked done while its box in that file is still open is refused.
  */
+
+import { boxLabel, findPlanFile, matchBox, planOfRecordLine } from "./plan-file";
 
 export const PLAN_STATUSES = ["pending", "in_progress", "done", "failed"] as const;
 export type PlanStatus = (typeof PLAN_STATUSES)[number];
@@ -60,11 +66,33 @@ export function parsePlan(
 	return { ok: true, items };
 }
 
-/** The tool result: an acknowledgement, or an "Error:" string both paths classify as a failed call. */
-export function updatePlan(args: { plan?: unknown } | undefined): string {
+/**
+ * The tool result: an acknowledgement, or an "Error:" string both paths
+ * classify as a failed call. `workingDirectory` is where to look for a plan
+ * file; without it (or with no plan file there) the result is as before.
+ */
+export function updatePlan(
+	args: { plan?: unknown } | undefined,
+	workingDirectory?: string,
+): string {
 	const parsed = parsePlan(args?.plan);
 	if (!parsed.ok) return `Error: update_plan: ${parsed.error}`;
 	const { items } = parsed;
+	const file = workingDirectory ? findPlanFile(workingDirectory) : null;
+	if (file) {
+		const open = items.flatMap((s) => {
+			if (s.status !== "done") return [];
+			const box = matchBox(s.step, file.boxes);
+			return box && !box.checked ? [`"${s.step}" (${boxLabel(file, box)})`] : [];
+		});
+		if (open.length > 0) {
+			return [
+				`Error: update_plan: ${planOfRecordLine(file)}.`,
+				`Not marked done, its box is still open: ${open.join("; ")}.`,
+				"Tick the box in the file first, then report the step done.",
+			].join(" ");
+		}
+	}
 	const done = items.filter((s) => s.status === "done").length;
 	const failed = items.filter((s) => s.status === "failed").length;
 	const current = items.find((s) => s.status === "in_progress");
@@ -72,5 +100,6 @@ export function updatePlan(args: { plan?: unknown } | undefined): string {
 		`Plan updated: ${done} of ${items.length} done`,
 		failed ? `, ${failed} failed` : "",
 		current ? `. Current: ${current.step}` : "",
+		file ? `. Note: ${planOfRecordLine(file)}` : "",
 	].join("");
 }

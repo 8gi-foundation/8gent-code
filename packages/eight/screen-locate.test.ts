@@ -101,8 +101,9 @@ describe("screen_locate tool wiring", () => {
 			}),
 		).toBe(true);
 		const src = require("node:fs").readFileSync(join(import.meta.dir, "agent.ts"), "utf8");
-		expect(src).toContain(
-			"screenLocateOffered({ browserTools: localBrowserTools().length, desktopTools: cuaConfigured })",
+		// Whitespace-free: biome wraps the call across lines.
+		expect(src).toMatch(
+			/screenLocateOffered\(\{\s*browserTools: localBrowserTools\(\)\.length,\s*desktopTools: cuaConfigured,?\s*\}\)/,
 		);
 	});
 
