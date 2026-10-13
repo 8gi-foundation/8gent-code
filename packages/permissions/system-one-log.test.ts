@@ -18,7 +18,12 @@ import {
 	_setSystemOneOverridesForTests,
 	systemOneGate,
 } from "./system-one-gate";
-import { commandHash, describeCommand, logSystemOneJudge, systemOneLogPath } from "./system-one-log";
+import {
+	commandHash,
+	describeCommand,
+	logSystemOneJudge,
+	systemOneLogPath,
+} from "./system-one-log";
 
 afterAll(cleanupTempDirs);
 
@@ -28,9 +33,15 @@ class Stub implements DecideBackend {
 	calls = 0;
 	async ask(request: SystemOneRequest): Promise<SystemOneResponse> {
 		this.calls++;
-		const yes = request.state.includes("DANGER") ? 0.95 : request.state.includes("UNSURE") ? 0.5 : 0.001;
+		const yes = request.state.includes("DANGER")
+			? 0.95
+			: request.state.includes("UNSURE")
+				? 0.5
+				: 0.001;
 		return {
-			answers: [{ id: request.questions[0].id, kind: "noul", probabilities: { yes }, confidence: 0.9 }],
+			answers: [
+				{ id: request.questions[0].id, kind: "noul", probabilities: { yes }, confidence: 0.9 },
+			],
 			backend: this.name,
 			model: this.model,
 			latencyMs: 0,
@@ -68,7 +79,7 @@ beforeEach(() => {
 	process.env.EIGHT_DATA_DIR = dir;
 });
 afterEach(() => {
-	if (saved === undefined) delete process.env.EIGHT_DATA_DIR;
+	if (saved === undefined) Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
 	else process.env.EIGHT_DATA_DIR = saved;
 });
 
@@ -77,12 +88,18 @@ const SECRET_PAYLOADS: Array<{ cmd: string; secrets: string[] }> = [
 	{ cmd: "FOO=hunter2 run", secrets: ["hunter2"] },
 	{ cmd: "DB_PASSWORD=Sup3rSecretPw run", secrets: ["Sup3rSecretPw"] },
 	{ cmd: "MYSECRETKEY=abc123def456 run", secrets: ["abc123def456"] },
-	{ cmd: "curl https://host/v1?access_token=abcdef1234567890abcdef", secrets: ["abcdef1234567890abcdef"] },
+	{
+		cmd: "curl https://host/v1?access_token=abcdef1234567890abcdef",
+		secrets: ["abcdef1234567890abcdef"],
+	},
 	{
 		cmd: "curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sigvalue' https://x",
 		secrets: ["eyJhbGciOiJIUzI1NiJ9", "sigvalue"],
 	},
-	{ cmd: "curl -H 'Authorization: Basic dXNlcjpwYXNzd29yZA==' https://x", secrets: ["dXNlcjpwYXNzd29yZA"] },
+	{
+		cmd: "curl -H 'Authorization: Basic dXNlcjpwYXNzd29yZA==' https://x",
+		secrets: ["dXNlcjpwYXNzd29yZA"],
+	},
 	{ cmd: "curl https://user:p4ssw0rd@host/x", secrets: ["p4ssw0rd"] },
 	{ cmd: "curl -u admin:s3cretpass https://x", secrets: ["s3cretpass"] },
 	{ cmd: "mysql -pMyPassw0rd db", secrets: ["MyPassw0rd"] },
@@ -112,13 +129,19 @@ describe("record helpers", () => {
 			envNames: ["TODO_FILE"],
 			argc: 3,
 		});
-		expect(describeCommand("A=1 B=2 /bin/ls -la")).toEqual({ program: "ls", envNames: ["A", "B"], argc: 1 });
+		expect(describeCommand("A=1 B=2 /bin/ls -la")).toEqual({
+			program: "ls",
+			envNames: ["A", "B"],
+			argc: 1,
+		});
 		expect(describeCommand("").program).toBe("?");
 		expect(describeCommand('"quoted secret" x').program).toBe("?");
 	});
 	test("a secret used as an env NAME is logged as ?, a normal name is kept", () => {
 		expect(describeCommand("AKIAIOSFODNN7EXAMPLE=1 run").envNames).toEqual(["?"]);
-		expect(describeCommand("ghp_abcdefghijklmnopqrstuvwxyz0123456789=1 run").envNames).toEqual(["?"]);
+		expect(describeCommand("ghp_abcdefghijklmnopqrstuvwxyz0123456789=1 run").envNames).toEqual([
+			"?",
+		]);
 		expect(describeCommand("lower=1 A_B=2 run").envNames).toEqual(["?", "A_B"]);
 		expect(describeCommand(`${"A".repeat(33)}=1 run`).envNames).toEqual(["?"]);
 	});
@@ -128,7 +151,11 @@ describe("record helpers", () => {
 	});
 	test("the logger never throws, even on garbage input", () => {
 		expect(() =>
-			logSystemOneJudge({ command: undefined as unknown as string, thresholds: "t", guard: null as never }),
+			logSystemOneJudge({
+				command: undefined as unknown as string,
+				thresholds: "t",
+				guard: null as never,
+			}),
 		).not.toThrow();
 		const hostile = {
 			toString() {
@@ -214,9 +241,16 @@ describe("gate writes one record per judge call", () => {
 	});
 
 	test("a judge error and a judge timeout are their own records, without messages", async () => {
-		const failing = { name: "stub", model: "stub-model", ask: async () => { throw new Error("boom SECRETVALUE"); } };
+		const failing = {
+			name: "stub",
+			model: "stub-model",
+			ask: async () => {
+				throw new Error("boom SECRETVALUE");
+			},
+		};
 		_setSystemOneOverridesForTests({
-			createDecider: () => createDecider({ backend: failing as unknown as DecideBackend, cacheSize: 0 }),
+			createDecider: () =>
+				createDecider({ backend: failing as unknown as DecideBackend, cacheSize: 0 }),
 			askHuman: async () => null,
 			calibrationDir: tempDir("sys1log-nocal-"),
 		});
@@ -224,14 +258,17 @@ describe("gate writes one record per judge call", () => {
 		_resetSystemOne();
 		const hanging = { name: "stub", model: "stub-model", ask: () => new Promise(() => {}) };
 		_setSystemOneOverridesForTests({
-			createDecider: () => createDecider({ backend: hanging as unknown as DecideBackend, cacheSize: 0 }),
+			createDecider: () =>
+				createDecider({ backend: hanging as unknown as DecideBackend, cacheSize: 0 }),
 			askHuman: async () => null,
 			calibrationDir: tempDir("sys1log-nocal-"),
 		});
 		await systemOneGate("echo hi", { ...ON, [SYSTEM_ONE_TIMEOUT_ENV]: "50" });
 		const recs = lines();
 		expect(recs.map((r) => r.outcome)).toContain("timeout");
-		expect(readFileSync(join(dir, "audit", "system-one.jsonl"), "utf8")).not.toContain("SECRETVALUE");
+		expect(readFileSync(join(dir, "audit", "system-one.jsonl"), "utf8")).not.toContain(
+			"SECRETVALUE",
+		);
 		for (const r of recs.filter((r) => r.outcome !== "verdict")) {
 			expect(r.pYes).toBeNull();
 			expect(r.verdict).toBeNull();
@@ -245,7 +282,8 @@ describe("gate writes one record per judge call", () => {
 		for (const p of SECRET_PAYLOADS) await systemOneGate(p.cmd, ON);
 		const raw = readFileSync(join(dir, "audit", "system-one.jsonl"), "utf8");
 		expect(raw.length).toBeGreaterThan(0);
-		for (const p of SECRET_PAYLOADS) for (const secret of p.secrets) expect(raw).not.toContain(secret);
+		for (const p of SECRET_PAYLOADS)
+			for (const secret of p.secrets) expect(raw).not.toContain(secret);
 	});
 
 	test("file is 0600 and its directory 0700 when created", async () => {
@@ -262,7 +300,7 @@ describe("logging changes no verdict", () => {
 		const out: Array<unknown[]> = [];
 		for (const logOn of [true, false]) {
 			if (logOn) process.env.EIGHT_DATA_DIR = dir;
-			else delete process.env.EIGHT_DATA_DIR; // NODE_ENV=test => log disabled
+			else Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR"); // NODE_ENV=test => log disabled
 			_resetSystemOne();
 			install(0);
 			const rs = [];

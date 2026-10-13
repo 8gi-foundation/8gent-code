@@ -927,7 +927,8 @@ export async function systemOneGate(
 				const before = decider.cacheStats?.();
 				const g = await bashGuard(command, decider, t.opts, script.body);
 				const after = decider.cacheStats?.();
-				const memoHit = !!before && !!after && after.hits > before.hits && after.misses === before.misses;
+				const memoHit =
+					!!before && !!after && after.hits > before.hits && after.misses === before.misses;
 				// #3885: record why the judge said what it said. Observability only.
 				logSystemOneJudge({ command, thresholds: t.label, opts: t.opts, memoHit, guard: g });
 				return g;
