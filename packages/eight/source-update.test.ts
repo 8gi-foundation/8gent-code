@@ -190,12 +190,19 @@ describe("updateCheckout (injected exec)", () => {
 	test("a directory inside another work tree is not touched", async () => {
 		const calls: Call[] = [];
 		const r = await updateCheckout(
-			mk(calls, base({ "rev-parse --show-toplevel": { stdout: "/work\n" } })),
+			mk(
+				calls,
+				base({
+					"rev-parse --show-toplevel": { stdout: "/work\n" },
+					"rev-parse --show-cdup": { stdout: "../8gent-code\n" },
+				}),
+			),
 			opts,
 		);
 		expect(r.status).toBe("failed");
 		expect(r.message).toContain("another git work tree");
-		expect(calls.length).toBe(1);
+		// toplevel, then git's own answer on whether the directory is the top; nothing after.
+		expect(calls.length).toBe(2);
 	});
 
 	test("--check reports how far ahead origin is and changes nothing", async () => {
@@ -436,7 +443,10 @@ describe("integration with a file:// origin", () => {
 			["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...a],
 			{ cwd, encoding: "utf8" },
 		).trim();
-	const gitPath = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+	// The absolute git the way the updater finds it. `which` would answer a POSIX
+	// path on Windows (Git Bash's /usr/bin/git), which spawn() cannot run.
+	const gitPath =
+		resolveExecutable("git", { env: process.env, platform: process.platform }) ?? "git";
 	const fopts = (dir: string) => ({
 		dir,
 		force: false,
@@ -486,7 +496,7 @@ describe("integration with a file:// origin", () => {
 			const before = git(clone, "rev-parse", "HEAD");
 			const bunCalls: string[][] = [];
 			const r = await updateCheckout(realDeps(bunCalls), fopts(clone));
-			expect(r.status).toBe("updated");
+			expect(r.status, r.message).toBe("updated");
 			expect(r.from).toBe(before);
 			expect(r.to).toBe(git(seed, "rev-parse", "HEAD"));
 			expect(git(clone, "rev-parse", "HEAD")).toBe(r.to as string);
@@ -508,7 +518,7 @@ describe("integration with a file:// origin", () => {
 		const { clone } = setup("d", false);
 		writeFileSync(join(clone, "a.txt"), "my edit\n");
 		const refused = await updateCheckout(realDeps([]), fopts(clone));
-		expect(refused.status).toBe("refused");
+		expect(refused.status, refused.message).toBe("refused");
 		expect(git(clone, "show", "HEAD:a.txt")).toBe("1");
 		const forced = await updateCheckout(realDeps([]), { ...fopts(clone), force: true });
 		expect(forced.status).toBe("updated");
@@ -522,7 +532,7 @@ describe("integration with a file:// origin", () => {
 		writeFileSync(join(clone, "a.txt"), "my edit\n");
 		writeFileSync(join(clone, "mine.txt"), "untracked work\n");
 		const r = await updateCheckout(realDeps([]), { ...fopts(clone), force: true });
-		expect(r.status).toBe("updated");
+		expect(r.status, r.message).toBe("updated");
 		expect(readFileSync(join(clone, "mine.txt"), "utf8")).toBe("untracked work\n");
 		expect(git(clone, "show", `${r.backupBranch}:a.txt`)).toBe("my edit");
 	});
@@ -537,7 +547,7 @@ describe("integration with a file:// origin", () => {
 		writeFileSync(join(clone, "extra.txt"), "my precious untracked\n");
 		const head = git(clone, "rev-parse", "HEAD");
 		const r = await updateCheckout(realDeps([]), { ...fopts(clone), force: true });
-		expect(r.status).toBe("refused");
+		expect(r.status, r.message).toBe("refused");
 		expect(r.message).toContain("extra.txt");
 		expect(readFileSync(join(clone, "extra.txt"), "utf8")).toBe("my precious untracked\n");
 		expect(readFileSync(join(clone, "a.txt"), "utf8")).toBe("my edit\n");
@@ -560,7 +570,7 @@ describe("integration with a file:// origin", () => {
 		const before = readFileSync(join(clone, "a.txt"), "utf8");
 		expect(before).toContain("<<<<<<<");
 		const r = await updateCheckout(realDeps([]), { ...fopts(clone), force: true });
-		expect(r.status).toBe("refused");
+		expect(r.status, r.message).toBe("refused");
 		expect(r.message).toContain("unmerged");
 		expect(readFileSync(join(clone, "a.txt"), "utf8")).toBe(before);
 		expect(git(clone, "branch", "--list", "backup/*")).toBe("");
@@ -572,7 +582,7 @@ describe("integration with a file:// origin", () => {
 		const d = realDeps([]);
 		d.confirm = async () => false;
 		const r = await updateCheckout(d, fopts(clone));
-		expect(r.status).toBe("declined");
+		expect(r.status, r.message).toBe("declined");
 		expect(git(clone, "rev-parse", "HEAD")).toBe(head);
 	});
 
@@ -583,7 +593,7 @@ describe("integration with a file:// origin", () => {
 		git(clone, "commit", "-m", "local only");
 		const head = git(clone, "rev-parse", "HEAD");
 		const r = await updateCheckout(realDeps([]), fopts(clone));
-		expect(r.status).toBe("refused");
+		expect(r.status, r.message).toBe("refused");
 		expect(r.message).toContain("diverged");
 		expect(git(clone, "rev-parse", "HEAD")).toBe(head);
 	});
@@ -719,7 +729,10 @@ describe("origin allowlist", () => {
 			calls,
 			base({ "remote get-url": { stdout: "https://evil.example/o/8gent-browser.git\n" } }),
 		);
-		d.confirm = async (q, o) => (asked.push({ q, strict: o.strict }), true);
+		d.confirm = async (q, o) => {
+			asked.push({ q, strict: o.strict });
+			return true;
+		};
 		const r = await updateCheckout(d, { ...opts, repo: "8gent-browser", build: true, yes: true });
 		expect(r.status).toBe("updated");
 		expect(asked).toHaveLength(1);
@@ -733,14 +746,20 @@ describe("origin allowlist", () => {
 		const c1: Call[] = [];
 		const d1 = mk(c1);
 		let asked = 0;
-		d1.confirm = async () => (asked++, true);
+		d1.confirm = async () => {
+			asked++;
+			return true;
+		};
 		await updateCheckout(d1, opts);
 		expect(asked).toBe(0);
 
 		const c2: Call[] = [];
 		const d2 = mk(c2);
 		const strictSeen: boolean[] = [];
-		d2.confirm = async (_q, o) => (strictSeen.push(o.strict), false);
+		d2.confirm = async (_q, o) => {
+			strictSeen.push(o.strict);
+			return false;
+		};
 		const r = await updateCheckout(d2, { ...opts, yes: false });
 		expect(r.status).toBe("declined");
 		expect(strictSeen).toEqual([false]);
@@ -865,7 +884,9 @@ describe("scrubbed install and build env", () => {
 					scripts: { postinstall: "bun write-env.js" },
 				}),
 			);
-			const bun = execFileSync("which", ["bun"], { encoding: "utf8" }).trim();
+			// The bun running this test: an absolute native path on every OS (`which`
+			// answers a POSIX path on Windows, which spawn() cannot run).
+			const bun = process.execPath;
 			process.env.FAKE_API_KEY = "sk-must-not-leak";
 			const r = await bunStep(
 				{

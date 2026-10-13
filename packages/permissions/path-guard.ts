@@ -13,14 +13,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { isPathWithin, pathFor } from "../core/path-within";
+import { getKeyPath } from "./goal-state-hmac";
+import { securityEnvSnapshot } from "./run-command-sandbox";
 import { resolveSafe } from "./src/workspace-boundary";
 
 /** What the caller will do with the path. The default is "write": the stricter reading. */
 export type PathAccess = "read" | "write";
 
-export type ValidatePathResult =
-	| { ok: true }
-	| { ok: false; reason: string };
+export type ValidatePathResult = { ok: true } | { ok: false; reason: string };
 
 /**
  * The machine the path will be opened on. Defaults to the current process and
@@ -37,7 +37,15 @@ export interface PathGuardHost {
 
 /** Directories whose contents are always credential-bearing. browser-profiles holds each named
  *  8gent Browser profile's control token, port file and cookies (#3622). */
-const PROTECTED_DIRS = [".ssh", ".aws", ".kube", ".8gent/browser-profiles", ".8gent/audit"];
+const PROTECTED_DIRS = [
+	".ssh",
+	".aws",
+	".kube",
+	".8gent/browser-profiles",
+	".8gent/audit",
+	// state-hmac.key signs /goal state, approval grants and the Table ledger: no read, no write (#4132, 8SO).
+	".8gent/keys",
+];
 
 /**
  * Files under the home directory that agent tools must never touch, read or
@@ -299,6 +307,29 @@ export function validatePath(
 		}
 	}
 
+	// 5c2. The signing keys under a relocated data dir: the startup snapshot's (where the key
+	// is read from) and the live one, plus the dir getKeyPath() actually resolves to (snapshot
+	// HOME, which a live HOME change does not move) (#4132). Read and write.
+	{
+		const flavor = pathFor(platform);
+		const keyDirs: string[] = [];
+		for (const dataDir of new Set([
+			securityEnvSnapshot().values.EIGHT_DATA_DIR,
+			process.env.EIGHT_DATA_DIR,
+		])) {
+			if (dataDir) keyDirs.push(flavor.join(resolveSafe(dataDir, dataDir, platform), "keys"));
+		}
+		try {
+			const keyDir = path.dirname(getKeyPath());
+			keyDirs.push(resolveSafe(keyDir, keyDir, platform));
+		} catch {
+			// An in-project key path is refused by getKeyPath itself; nothing more to guard.
+		}
+		if (keyDirs.some((d) => isPathWithin(resolved, d, platform))) {
+			return { ok: false, reason: "protected credential file" };
+		}
+	}
+
 	// 5d. The session's own records: readable, never writable (trace integrity).
 	if (access === "write") {
 		const flavor = pathFor(platform);
@@ -343,7 +374,10 @@ export function validatePath(
  */
 export function commandTouchesAuditFiles(command: string): boolean {
 	const dataDir = process.env.EIGHT_DATA_DIR;
-	const flat = command.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "").toLowerCase();
+	const flat = command
+		.replace(/["'`\\]/g, "")
+		.replace(/\s*\+\s*/g, "")
+		.toLowerCase();
 	if (/(?:^|[^a-z0-9_-])(?:permissions-)?audit\.jsonl\b/.test(flat)) return true;
 	if (/\.8gent\/+audit\b/.test(flat)) return true;
 	if (dataDir) {
@@ -396,7 +430,10 @@ function sessionRecordPatterns(includeRoot = true): RegExp[] {
  * boundary is seatbelting run_command (#3612).
  */
 export function commandMutatesSessionRecords(command: string): boolean {
-	const flat = command.replace(/["'`\\]/g, "").replace(/\s*\+\s*/g, "").toLowerCase();
+	const flat = command
+		.replace(/["'`\\]/g, "")
+		.replace(/\s*\+\s*/g, "")
+		.toLowerCase();
 	const pats = sessionRecordPatterns();
 	const names = (t: string) => pats.some((p) => p.test(t));
 	// An interpreter that names a record can write it in ways no verb list sees; deny the naming.
@@ -406,10 +443,12 @@ export function commandMutatesSessionRecords(command: string): boolean {
 		const seg = raw.trim();
 		if (!seg) continue;
 		// A redirect onto a record: > or >> (not >&, not 2>&1).
-		for (const m of seg.matchAll(/(?:^|[^>&\d])\d?>>?\s*([^\s;&|<>]+)/g)) if (names(m[1])) return true;
+		for (const m of seg.matchAll(/(?:^|[^>&\d])\d?>>?\s*([^\s;&|<>]+)/g))
+			if (names(m[1])) return true;
 		// git checkout/restore/rm/clean of tracked logs rewrites the trace (no workspace root needed).
 		if (/(?:^|\s)git\s+(?:checkout|restore|rm|clean)(?=\s|$)/.test(seg)) {
-			if (names(seg) || /(?:^|[\s/])(?:logs|sessions|checkpoints)\/|\.log(?![\w.-])/.test(seg)) return true;
+			if (names(seg) || /(?:^|[\s/])(?:logs|sessions|checkpoints)\/|\.log(?![\w.-])/.test(seg))
+				return true;
 			continue;
 		}
 		if (/^cd(?:\s|$)/.test(seg)) {

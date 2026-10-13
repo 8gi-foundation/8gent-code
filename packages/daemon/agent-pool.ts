@@ -19,6 +19,7 @@ import {
 	CLASSROOM_SESSION_CAP,
 	CLASSROOM_SYSTEM_PROMPT,
 } from "./classroom";
+import { getDataDir } from "./data-dir";
 import { bus } from "./events";
 import type { SessionJournal } from "./session-journal";
 
@@ -714,8 +715,7 @@ export class AgentPool {
 export async function loadPoolConfig(): Promise<Partial<PoolConfig>> {
 	let fileConfig: Record<string, any> = {};
 	try {
-		const dataDir = process.env.EIGHT_DATA_DIR || `${process.env.HOME}/.8gent`;
-		const configPath = `${dataDir}/config.json`;
+		const configPath = `${getDataDir()}/config.json`;
 		const file = Bun.file(configPath);
 		if (await file.exists()) {
 			fileConfig = await file.json();

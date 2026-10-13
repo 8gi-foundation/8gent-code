@@ -127,12 +127,19 @@ describe("user themes in theme.ts", () => {
 
 describe("user theme hardening", () => {
 	test("control characters never reach the skipped list or the picker", () => {
-		put("evil\u001b[2J\u202e.json", { base: "dark", orange: "#FF8800" });
+		// NTFS refuses a name with a control character, so on Windows the evil file can
+		// never exist: the OS turns the write away and nothing of it reaches the scan.
+		// On POSIX the file is written and the loader must list it with a clean name.
+		const impossibleName = process.platform === "win32";
+		const evil = () => put("evil\u001b[2J\u202e.json", { base: "dark", orange: "#FF8800" });
+		if (impossibleName) expect(evil).toThrow();
+		else evil();
 		put("keyed.json", { base: "dark", "bad\u001b[2Jkey\u202e": "#FFF" });
 		put("ok.json", { base: "dark", label: "Ok\u001b]0;pwn\u0007\u202e Theme\u2028", description: "d\u001b[2Je", orange: "#FF8800" });
 		reloadUserThemes();
 		const bad = userThemeProblems().map((p) => p.file + p.reason).join("");
-		expect(bad).toContain("evil.json");
+		if (impossibleName) expect(bad).not.toContain("evil");
+		else expect(bad).toContain("evil.json");
 		expect(bad).toContain("badkey");
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: the point of the test
 		expect(/[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u202a-\u202e\u2028\u2029]/.test(bad)).toBeFalse();

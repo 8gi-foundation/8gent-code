@@ -5,7 +5,16 @@
  * reaches it is blocked.
  */
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	setDefaultTimeout,
+	test,
+} from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,6 +32,18 @@ import {
 } from "./system-one-gate";
 
 afterAll(cleanupTempDirs);
+
+// Every test builds nine repositories with about thirty git runs. On windows-latest
+// a git run is 100-200 ms, so the fixture alone can pass the default 5 s, and a
+// timed-out hook leaves a killed git holding the directory (EBUSY on the next rmSync).
+setDefaultTimeout(60_000);
+
+/**
+ * The lane takes an absolute source only in its POSIX spelling: a drive letter
+ * carries the `:` that marks a URL or host:path, and the plain alphabet has no
+ * backslash. On Windows an absolute source always falls through to the judge.
+ */
+const ABSOLUTE_SOURCES = process.platform !== "win32";
 
 class AlwaysDangerous implements DecideBackend {
 	readonly name = "stub";
@@ -147,12 +168,18 @@ afterEach(() => {
 describe("cloneLocalIntoProject absolute sources", () => {
 	test("absolute spelling of the sibling is allowed", () => {
 		const real = realpathSync(container);
-		expect(cloneLocalIntoProject(`git clone ${real}/shared-notes.git notes`, ws).ok).toBe(true);
+		expect(cloneLocalIntoProject(`git clone ${real}/shared-notes.git notes`, ws).ok).toBe(
+			ABSOLUTE_SOURCES,
+		);
 	});
 	test("absolute path inside the workspace is allowed", () => {
 		const real = realpathSync(ws);
-		expect(cloneLocalIntoProject(`git clone ${real}/vendor-src.git notes`, ws).ok).toBe(true);
-		expect(cloneLocalIntoProject(`git clone ${real}/inner-repo notes`, ws).ok).toBe(true);
+		expect(cloneLocalIntoProject(`git clone ${real}/vendor-src.git notes`, ws).ok).toBe(
+			ABSOLUTE_SOURCES,
+		);
+		expect(cloneLocalIntoProject(`git clone ${real}/inner-repo notes`, ws).ok).toBe(
+			ABSOLUTE_SOURCES,
+		);
 	});
 	for (const [name, rel] of [
 		["a dot sibling", ".SecretRepo"],
@@ -216,7 +243,9 @@ describe("cloneLocalIntoProject under a dot ancestor", () => {
 	});
 	test("absolute sibling, as written under the dot ancestor", () => {
 		const real = realpathSync(base);
-		expect(cloneLocalIntoProject(`git clone ${real}/shared-notes.git notes`, dws).ok).toBe(true);
+		expect(cloneLocalIntoProject(`git clone ${real}/shared-notes.git notes`, dws).ok).toBe(
+			ABSOLUTE_SOURCES,
+		);
 	});
 	test("dot sibling name is still refused", () => {
 		const real = realpathSync(base);
@@ -225,7 +254,9 @@ describe("cloneLocalIntoProject under a dot ancestor", () => {
 	});
 	test("in-workspace repo allowed, dot segments below the root refused", () => {
 		const real = realpathSync(dws);
-		expect(cloneLocalIntoProject(`git clone ${real}/inner-repo notes`, dws).ok).toBe(true);
+		expect(cloneLocalIntoProject(`git clone ${real}/inner-repo notes`, dws).ok).toBe(
+			ABSOLUTE_SOURCES,
+		);
 		expect(cloneLocalIntoProject(`git clone ${real}/.dotdir/r notes`, dws).ok).toBe(false);
 		expect(cloneLocalIntoProject("git clone .dotdir/r notes", dws).ok).toBe(false);
 		expect(cloneLocalIntoProject(`git clone ${real}/inner-repo/.git notes`, dws).ok).toBe(false);
@@ -383,8 +414,11 @@ describe("cloneLocalIntoProject refuses", () => {
 			Reflect.set(process.env, "NODE_ENV", env);
 		}
 		// Had the hook taken effect, the parent would count as the account home and be refused.
+		expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", ws).ok).toBe(true);
 		const real = realpathSync(container);
-		expect(cloneLocalIntoProject(`git clone ${real}/shared-notes.git notes`, ws).ok).toBe(true);
+		expect(cloneLocalIntoProject(`git clone ${real}/shared-notes.git notes`, ws).ok).toBe(
+			ABSOLUTE_SOURCES,
+		);
 		_setPasswdHomeForTests(undefined);
 	});
 
@@ -405,7 +439,7 @@ describe("cloneLocalIntoProject refuses", () => {
 			expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", ws).ok).toBe(true);
 			expect(
 				cloneLocalIntoProject(`git clone ${realpathSync(container)}/shared-notes.git notes`, ws).ok,
-			).toBe(true);
+			).toBe(ABSOLUTE_SOURCES);
 		} finally {
 			process.env.HOME = h;
 			_setPasswdHomeForTests(undefined);
@@ -422,7 +456,7 @@ describe("cloneLocalIntoProject refuses", () => {
 			expect(cloneLocalIntoProject("git clone ../shared-notes.git notes", ws).ok).toBe(true);
 			expect(
 				cloneLocalIntoProject(`git clone ${realpathSync(container)}/shared-notes.git notes`, ws).ok,
-			).toBe(true);
+			).toBe(ABSOLUTE_SOURCES);
 			// Still refused: a URL, and a path outside the workspace parent.
 			expect(cloneLocalIntoProject("git clone https://example.com/x.git notes", ws).ok).toBe(false);
 			expect(cloneLocalIntoProject(`git clone ${outside}/shared-notes.git notes`, ws).ok).toBe(false);

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { fakeExecutable } from "../../../tests/fake-exe";
 import { cleanupTempDirs, tempDir } from "../../../tests/temp-dirs";
 import { ToolExecutor } from "../../eight/tools";
 import { editScopeViolation, scopedWriteTarget, SCOPED_WRITE_TOOLS } from "../../permissions/edit-guards";
@@ -317,13 +318,31 @@ describe("caps", () => {
 		expect(existsSync(join(root, "o.mp4"))).toBe(false);
 	});
 
+	/**
+	 * A narration engine that never finishes: a real executable on every OS (see
+	 * tests/fake-exe.ts). It writes its pid to STUB_PIDFILE when set, and with
+	 * STUB_IGNORE_TERM=1 it shrugs off SIGTERM so only SIGKILL ends it.
+	 */
+	const slowEngine = (root: string) =>
+		fakeExecutable(
+			root,
+			"slow-engine",
+			[
+				'const fs = require("node:fs");',
+				"if (process.env.STUB_PIDFILE) fs.writeFileSync(process.env.STUB_PIDFILE, String(process.pid));",
+				'if (process.env.STUB_IGNORE_TERM === "1") process.on("SIGTERM", () => {});',
+				"setInterval(() => {}, 200);",
+				"setTimeout(() => process.exit(0), 20000);",
+				"",
+			].join("\n"),
+		);
+
 	test("one deadline covers narration", async () => {
 		const root = tempDir("vdeck-deadline-");
-		const stub = join(root, "slow");
-		writeFileSync(stub, "#!/usr/bin/env bash\nsleep 5\n");
-		chmodSync(stub, 0o755);
-		process.env.EIGHT_SUPERTONIC_BIN = stub;
+		process.env.EIGHT_SUPERTONIC_BIN = slowEngine(root);
 		process.env.EIGHT_KITTEN_PY = "/nonexistent";
+		Reflect.deleteProperty(process.env, "STUB_PIDFILE");
+		Reflect.deleteProperty(process.env, "STUB_IGNORE_TERM");
 		const t0 = Date.now();
 		await expect(
 			renderVideoDeck({ spec: { slides: [{ title: "t", narration: "hello" }] }, out: join(root, "o.mp4"), cwd: root, deadlineMs: 700 }),
@@ -334,14 +353,20 @@ describe("caps", () => {
 	test("the deadline kills the narration engine (TERM, then KILL for one that ignores TERM)", async () => {
 		const root = tempDir("vdeck-kill-");
 		const pidfile = join(root, "pid");
-		const stub = join(root, "stubborn");
-		writeFileSync(stub, `#!/usr/bin/env bash\necho $$ > ${pidfile}\ntrap '' TERM\nwhile true; do sleep 0.2; done\n`);
-		chmodSync(stub, 0o755);
-		process.env.EIGHT_SUPERTONIC_BIN = stub;
+		// On Windows a "SIGTERM" is TerminateProcess, so the engine cannot ignore it;
+		// the deadline still ends it and the pid is gone, which is what is asserted.
+		process.env.EIGHT_SUPERTONIC_BIN = slowEngine(root);
 		process.env.EIGHT_KITTEN_PY = "/nonexistent";
-		await expect(
-			renderVideoDeck({ spec: { slides: [{ title: "t", narration: "hello" }] }, out: join(root, "o.mp4"), cwd: root, deadlineMs: 700 }),
-		).rejects.toThrow(/deadline/);
+		process.env.STUB_PIDFILE = pidfile;
+		process.env.STUB_IGNORE_TERM = "1";
+		try {
+			await expect(
+				renderVideoDeck({ spec: { slides: [{ title: "t", narration: "hello" }] }, out: join(root, "o.mp4"), cwd: root, deadlineMs: 700 }),
+			).rejects.toThrow(/deadline/);
+		} finally {
+			Reflect.deleteProperty(process.env, "STUB_PIDFILE");
+			Reflect.deleteProperty(process.env, "STUB_IGNORE_TERM");
+		}
 		const pid = Number.parseInt(readFileSync(pidfile, "utf8").trim(), 10);
 		const alive = () => {
 			try {

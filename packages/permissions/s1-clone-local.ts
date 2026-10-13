@@ -53,6 +53,7 @@ import {
 	MAX_TREE,
 	protectedName,
 	protectedRel,
+	relSegments,
 	stripDot,
 } from "./s1-mv-in-project";
 import { accountHome, _setPasswdHomeForTests } from "./s1-account-home";
@@ -154,15 +155,21 @@ function bareRepo(dir: string): boolean {
 	);
 }
 
+/** Lower-cased, in this OS's separator, without a trailing separator (a bare root keeps its own). */
+function canon(p: string): string {
+	const normal = path.normalize(p);
+	return (normal.replace(/[\\/]+$/, "") || normal).toLowerCase();
+}
+
 /** Lower-cased candidates for `h`: as written, and with its nearest existing ancestor resolved. */
 function homeForms(h: string | undefined): string[] {
 	if (!h) return [];
-	const out = [h.toLowerCase()];
+	const out = [canon(h)];
 	let cur = h;
 	let rest = "";
 	for (let i = 0; i < 64 && cur !== path.dirname(cur); i++) {
 		try {
-			out.push(path.join(realpathSync(cur), rest).toLowerCase());
+			out.push(canon(path.join(realpathSync(cur), rest)));
 			break;
 		} catch {
 			rest = path.join(path.basename(cur), rest);
@@ -178,9 +185,11 @@ function homeForms(h: string | undefined): string[] {
  * session that points $HOME at a private directory does not change the answer).
  */
 function parentIsTooBroad(parent: string): boolean {
-	const p = parent.toLowerCase();
-	if (p === "/" || p === path.parse(parent).root.toLowerCase()) return true;
-	const prefix = p.endsWith("/") ? p : `${p}/`;
+	const raw = parent.toLowerCase();
+	if (raw === "/" || raw === path.parse(parent).root.toLowerCase()) return true;
+	// "contains" is judged in the OS separator: a `/` prefix never matched a Windows home.
+	const p = canon(parent);
+	const prefix = p + path.sep;
 	for (const h of homeForms(process.env.HOME)) if (h === p) return true;
 	// Fail closed: with no known account home the parent cannot be judged.
 	const account = accountHome();
@@ -228,13 +237,7 @@ export function cloneLocalIntoProject(command: string, cwd: string | undefined):
 		if (inside(realSrc, root)) {
 			// A repository inside the workspace, judged by where it resolves.
 			if (realSrc === root) return NO;
-			if (
-				path
-					.relative(root, realSrc)
-					.split("/")
-					.some((s) => s.startsWith("."))
-			)
-				return NO;
+			if (relSegments(path.relative(root, realSrc)).some((s) => s.startsWith("."))) return NO;
 			if (!looksLikeRepo(realSrc)) return NO;
 		} else {
 			// Exactly <workspace parent>/<name>, a bare repository, however it was spelled.
@@ -251,14 +254,10 @@ export function cloneLocalIntoProject(command: string, cwd: string | undefined):
 		const realParent = realpathSync(path.dirname(destAbs));
 		if (!inside(realParent, root)) return NO;
 		const finalAbs = path.join(realParent, path.basename(destAbs));
+		// path.relative answers in the OS separator: split on it (both on win32), never on "/" alone.
 		const relParent = path.relative(root, realParent);
-		if (relParent.split("/").some((s) => s.startsWith("."))) return NO;
-		if (
-			path
-				.relative(root, finalAbs)
-				.split("/")
-				.some((seg) => INSTALL_DIRS.has(seg.toLowerCase()))
-		)
+		if (relSegments(relParent).some((s) => s.startsWith("."))) return NO;
+		if (relSegments(path.relative(root, finalAbs)).some((seg) => INSTALL_DIRS.has(seg.toLowerCase())))
 			return NO;
 		if (protectedName(path.basename(finalAbs))) return NO;
 		if (protectedRel(path.relative(root, finalAbs))) return NO;

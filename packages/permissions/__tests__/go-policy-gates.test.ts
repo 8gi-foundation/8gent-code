@@ -15,6 +15,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { GO_DENY_LIST, matchDenyList } from "../go-deny-list";
+import { SECRET_PATTERNS, containsSecret, scrubGoalText } from "../goal-secret-scrub";
+import {
+	loadOrCreateKey,
+	sign as signState,
+	verifyOrThrow,
+	verify as verifyState,
+} from "../goal-state-hmac";
 import {
 	type BudgetCounters,
 	type CapabilityBudget,
@@ -22,14 +30,7 @@ import {
 	DEFAULT_TUI_BUDGET,
 	evaluateBudget,
 } from "../policy-engine";
-import { GO_DENY_LIST, matchDenyList } from "../go-deny-list";
-import { containsSecret, scrubGoalText, SECRET_PATTERNS } from "../goal-secret-scrub";
-import {
-	loadOrCreateKey,
-	sign as signState,
-	verify as verifyState,
-	verifyOrThrow,
-} from "../goal-state-hmac";
+import { refreshSecurityEnvForTests } from "../run-command-sandbox";
 
 // ============================================
 // CapabilityBudget defaults
@@ -415,14 +416,7 @@ describe("scrubGoalText", () => {
 	test("regex pack exposes all expected pattern ids", () => {
 		const ids = SECRET_PATTERNS.map((p) => p.id).sort();
 		expect(ids).toEqual(
-			[
-				"openai-key",
-				"github-pat",
-				"aws-access-key",
-				"jwt",
-				"password-kv",
-				"api-key-kv",
-			].sort(),
+			["openai-key", "github-pat", "aws-access-key", "jwt", "password-kv", "api-key-kv"].sort(),
 		);
 	});
 
@@ -445,11 +439,14 @@ describe("goal-state-hmac", () => {
 		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "go-hmac-"));
 		originalDataDir = process.env.EIGHT_DATA_DIR;
 		process.env.EIGHT_DATA_DIR = tmpDir;
+		// The HMAC key path reads the security env snapshot, not live env (#4132).
+		refreshSecurityEnvForTests();
 	});
 
 	afterEach(() => {
 		if (originalDataDir === undefined) delete process.env.EIGHT_DATA_DIR;
 		else process.env.EIGHT_DATA_DIR = originalDataDir;
+		refreshSecurityEnvForTests();
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 

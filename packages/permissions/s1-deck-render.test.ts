@@ -137,12 +137,17 @@ const ALLOWED = [
 	"  8gent deck render deck.json new/dir/out.mp4  ",
 ];
 const CMD = "8gent deck render deck.json out.mp4";
+/**
+ * The lane's grammar is POSIX (a `:`-separated PATH, a `#!` shim found by name), so
+ * on win32 deckRenderInProject has no opinion and the recipe goes to the judge.
+ */
+const DECK_LANE = process.platform !== "win32";
 
 describe("deckRenderInProject allows the recipe the prompt shows", () => {
 	for (const cmd of ALLOWED) {
 		test(cmd.trim(), () => {
 			const r = deckRenderInProject(cmd, ws);
-			expect(r.ok, cmd).toBe(true);
+			expect(r.ok, cmd).toBe(DECK_LANE);
 		});
 	}
 
@@ -158,7 +163,7 @@ describe("deckRenderInProject allows the recipe the prompt shows", () => {
 		mkdirSync(join(outside, "bin2"));
 		symlinkSync(join(pkg, "bin", "8gent-run.js"), join(outside, "bin2", "8gent"));
 		const PATH = `${join(outside, "bin2")}:${SYSTEM_PATH}`;
-		expect(deckRenderInProject(CMD, ws, { PATH }).ok).toBe(true);
+		expect(deckRenderInProject(CMD, ws, { PATH }).ok).toBe(DECK_LANE);
 	});
 });
 
@@ -291,8 +296,14 @@ describe("systemOneGate end to end (default mode) with a judge that says dangero
 		for (const cmd of ALLOWED) {
 			const r = await systemOneGate(cmd, process.env, ws);
 			expect(r.run, cmd).toBe(true);
-			expect(r.guard?.backend, cmd).toBe("allowlist");
-			expect(r.guard?.reason, cmd).toContain("8gent deck render");
+			if (DECK_LANE) {
+				expect(r.guard?.backend, cmd).toBe("allowlist");
+				expect(r.guard?.reason, cmd).toContain("8gent deck render");
+			} else {
+				// No lane on win32: default mode judges it by the rules alone (the stub judge has
+				// no calibration), so it still runs, but never through the allowlist.
+				expect(r.guard?.backend, cmd).not.toBe("allowlist");
+			}
 		}
 		expect(judge.asks).toBe(0);
 	});
