@@ -40,7 +40,11 @@
  *     server, 8SO on #4123); `cd` takes one argument; and every argument
  *     and redirect target stays inside the workspace by spelling and by
  *     real path (no `..`, no absolute path outside it, no symlink out) from
- *     EVERY directory the shell could be in. A `cd` may fail (a missing
+ *     EVERY directory the shell could be in, names no dot entry but a
+ *     leading .tmp and no secret or protected path, and every `>` / `>>`
+ *     target lands under .tmp (8TO on #4123: a script may not write
+ *     .git/config, .8gent or project source, nor read .env, that the same
+ *     line run directly would take to the judge). A `cd` may fail (a missing
  *     directory) or run in a subshell (`a | cd b`), so each cd adds its
  *     target to the set of possible directories and never drops one (8SO on
  *     #4123). A flag word may not carry a path.
@@ -65,7 +69,9 @@ import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
 import type { CreatedFiles } from "./s1-created-files";
+import { protectedRel } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
+import { SECRET } from "./s1-run-in-project";
 
 export type RunOwnScript = { ok: true; reason: string } | { ok: false; hint?: string };
 
@@ -85,7 +91,7 @@ const NO: RunOwnScript = { ok: false };
 const SINCE_NS = BigInt(Math.floor(performance.timeOrigin) - 1000) * 1_000_000n;
 
 const WHAT_PASSES =
-	"A script runs without review only as `bash .tmp/FILE` (or `sh`) with no other words, where FILE is one this session wrote with write_file and holds only literal lines of cd, echo, ls, cat, mkdir, pwd, sleep, true, or `python3 -I -m http.server PORT --bind 127.0.0.1`, with every path inside the workspace: no quotes, `$`, backticks, `..` or here-docs.";
+	"A script runs without review only as `bash .tmp/FILE` (or `sh`) with no other words, where FILE is one this session wrote with write_file and holds only literal lines of cd, echo, ls, cat, mkdir, pwd, sleep, true, or `python3 -I -m http.server PORT --bind 127.0.0.1`, with every path inside the workspace and outside dot directories, writing only under .tmp: no quotes, `$`, backticks, `..` or here-docs.";
 
 const WIN32_HINT =
 	"Running a session script without review works on Linux and macOS only; on Windows it goes to the checker.";
@@ -95,23 +101,59 @@ function hint(why: string): RunOwnScript {
 }
 
 /**
- * True when `p`, resolved from `dir`, stays inside the workspace by spelling
- * (as `cwd` or as its real path `root`) and by real path.
+ * The workspace-relative forms of `p` resolved from `dir`: as spelled (from
+ * `cwd` or its real path `root`) and by real path (the nearest existing
+ * ancestor resolved, the rest appended). Null when either is outside the
+ * workspace or `p` has a `..` segment.
  */
-function staysInside(p: string, dir: string, cwd: string, root: string): boolean {
-	if (p.split("/").includes("..")) return false;
+function workspaceRels(p: string, dir: string, cwd: string, root: string): string[] | null {
+	if (p.split("/").includes("..")) return null;
 	const abs = path.resolve(dir, p);
-	if (!inside(abs, root) && !inside(abs, cwd)) return false;
+	if (!inside(abs, root) && !inside(abs, cwd)) return null;
+	const spelled = path.relative(inside(abs, root) ? root : cwd, abs);
 	let probe = abs;
+	let tail = "";
 	for (;;) {
 		try {
-			return inside(realpathSync(probe), root);
+			const real = path.join(realpathSync(probe), tail);
+			return inside(real, root) ? [spelled, path.relative(root, real)] : null;
 		} catch {
 			const up = path.dirname(probe);
-			if (up === probe) return false;
+			if (up === probe) return null;
+			tail = path.join(path.basename(probe), tail);
 			probe = up;
 		}
 	}
+}
+
+/**
+ * Null when the script may name `p` from `dir`, else why not (8TO on #4123).
+ * Inside the workspace by spelling and real path; no dot entry on either
+ * form except a leading `.tmp` (so .git, .8gent, .ssh, .env, .aws, .kube and
+ * .gnupg are never touched); no secret or protected path. A write (`>`,
+ * `>>`) must land under `.tmp`: `cat .tmp/x >> .git/config` or
+ * `cat .tmp/x > src/app.ts` run directly would go to the judge, so a script
+ * may not do them without it.
+ */
+function pathProblem(
+	p: string,
+	dir: string,
+	cwd: string,
+	root: string,
+	write: boolean,
+): string | null {
+	const rels = workspaceRels(p, dir, cwd, root);
+	if (!rels) return `it names \`${p}\`, which is outside the workspace`;
+	for (const rel of rels) {
+		const segs = rel === "" ? [] : rel.split(path.sep);
+		if (segs.some((seg, i) => seg.startsWith(".") && !(i === 0 && seg === ".tmp")))
+			return `it names \`${p}\`, a dot file or a path in a dot directory other than .tmp`;
+		if (SECRET.test(rel) || protectedRel(rel))
+			return `it names \`${p}\`, a secret or protected path`;
+		if (write && (segs[0] !== ".tmp" || segs.length < 2))
+			return `it writes \`${p}\`, which is not under the workspace's .tmp`;
+	}
+	return null;
 }
 
 /** Null when the script text is acceptable (see the header), else why not. */
@@ -148,18 +190,20 @@ export function scriptProblem(src: string, cwd: string, root: string): string | 
 			if (!SAFE_COMMANDS.has(cmd)) return `it runs \`${cmd}\`, which is not on the list`;
 			const args = words.slice(1);
 			const targets: string[] = [];
+			const writes: string[] = [];
 			for (let i = 0; i < args.length; i++) {
 				const a = args[i] as string;
 				// `2>&1` never gets here: `&` splits it, and the parts fail.
-				if (/^\d?(>>?|<)$/.test(a)) {
+				const bare = /^\d?(>>?|<)$/.exec(a);
+				if (bare) {
 					const t = args[++i];
 					if (!t) return "it has a redirect with no target";
-					targets.push(t);
+					(bare[1] === "<" ? targets : writes).push(t);
 					continue;
 				}
-				const glued = /^\d?(?:>>?|<)(.+)$/.exec(a);
+				const glued = /^\d?(>>?|<)(.+)$/.exec(a);
 				if (glued) {
-					targets.push(glued[1] as string);
+					(glued[1] === "<" ? targets : writes).push(glued[2] as string);
 					continue;
 				}
 				if (a.startsWith("-")) {
@@ -168,12 +212,18 @@ export function scriptProblem(src: string, cwd: string, root: string): string | 
 				}
 				targets.push(a);
 			}
-			for (const t of targets)
-				for (const dir of dirs)
-					if (!staysInside(t, dir, cwd, root))
-						return `it names \`${t}\`, which is outside the workspace`;
+			for (const [list, write] of [
+				[targets, false],
+				[writes, true],
+			] as const)
+				for (const t of list)
+					for (const dir of dirs) {
+						const why = pathProblem(t, dir, cwd, root, write);
+						if (why) return why;
+					}
 			if (cmd === "cd") {
-				if (targets.length !== 1 || args.length !== 1) return "`cd` must take exactly one path";
+				if (targets.length !== 1 || args.length !== 1 || writes.length > 0)
+					return "`cd` must take exactly one path";
 				for (const dir of [...dirs]) dirs.add(path.resolve(dir, targets[0] as string));
 				if (dirs.size > MAX_DIRS) return "it changes directory too many ways to follow";
 			}

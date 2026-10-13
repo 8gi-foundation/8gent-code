@@ -219,6 +219,31 @@ const BODY_PROBES: Array<[string, (ws: string) => string]> = [
 	["non-ASCII", () => "echo сat\n"],
 	["an env prefix inside the script", () => "FOO=1 ls\n"],
 	["a #! line for another interpreter", () => "#!/usr/bin/env python3\nls\n"],
+	// 8TO on #4123: what each line, run directly, would take to the judge
+	["a payload appended to .git/config", () => "cat .tmp/old.sh >> .git/config\n"],
+	["a git hook written", () => "echo x > .git/hooks/post-checkout\n"],
+	[".git/config by absolute path", (w) => `echo x >> ${w}/.git/config\n`],
+	["cd into .git", () => "cd .git\nls\n"],
+	["cat .env", () => "cat .env\n"],
+	["cat .env by absolute path", (w) => `cat ${w}/.env\n`],
+	["cat .env.local", () => "cat .env.local\n"],
+	["mkdir .8gent", () => "mkdir .8gent\n"],
+	["write into .8gent", () => "echo x > .8gent/config.json\n"],
+	["ls .ssh", () => "ls .ssh\n"],
+	["ls .aws", () => "ls .aws\n"],
+	["ls .kube", () => "ls .kube\n"],
+	["ls .gnupg", () => "ls .gnupg\n"],
+	["a .tmp lookalike", () => "echo x > .tmpx/a\n"],
+	["cat a credentials file", () => "cat config/credentials\n"],
+	["a protected path", () => "ls packages/permissions\n"],
+	["overwrite project source", () => "cat .tmp/old.sh > src/app.ts\n"],
+	["append to a project file", () => "echo x >> package.json\n"],
+	["a write in the workspace root", () => "echo x > out.txt\n"],
+	["a write onto .tmp itself", () => "echo x > .tmp\n"],
+	[
+		"a write after cd .tmp that would land in the root if the cd failed",
+		() => "cd .tmp\necho x > out.txt\n",
+	],
 ];
 
 // The lane reads POSIX shell text and is off on win32, like the rm/mv lanes.
@@ -377,6 +402,15 @@ describe.skipIf(process.platform === "win32")(
 					expect(ok("bash .tmp/p.sh")).toBe(false);
 				});
 			}
+			test("a read through a symlink to .git is refused by its real path (8TO, #4123)", () => {
+				mkdirSync(join(ws, ".git/hooks"), { recursive: true });
+				symlinkSync(join(ws, ".git"), join(ws, "g"));
+				put(".git/config", "[core]\n");
+				own(".tmp/p.sh", "cat g/config\n");
+				const r = runOwnScript("bash .tmp/p.sh", ws, rec);
+				expect(r.ok).toBe(false);
+				expect((r as { hint?: string }).hint).toContain("dot directory");
+			});
 			test("the non -I server is refused while a local http package sits in the served directory", () => {
 				put("http/__init__.py", "print('shadowed')\n");
 				own(
@@ -410,6 +444,14 @@ describe.skipIf(process.platform === "win32")(
 				expect(r.guard?.backend).not.toBe("allowlist");
 				expect(judge.asks).toBe(1);
 				if (!r.run) expect(r.message).toContain("--bind 127.0.0.1");
+			});
+			test("a script that appends a payload to .git/config goes to the judge (8TO, #4123)", async () => {
+				own(".tmp/payload", "[core]\n\tfsmonitor = x\n");
+				own(".tmp/p.sh", "cat .tmp/payload >> .git/config\n");
+				const r = await systemOneGate("bash .tmp/p.sh", process.env, ws, rec);
+				expect(r.run).toBe(false);
+				expect(r.guard?.backend).not.toBe("allowlist");
+				expect(judge.asks).toBe(1);
 			});
 			test("a pre-existing script goes to the judge", async () => {
 				const r = await systemOneGate("bash .tmp/old.sh", process.env, ws, rec);
