@@ -3492,7 +3492,7 @@ export class ToolExecutor {
 					workingDirectory: dir,
 				});
 
-				const output = formatCommandOutput(code, stdout, stderr);
+				const output = formatCommandOutput(code, stdout, stderr, finalCommand, this.workingDirectory);
 				// Report images the command drew, and any cut off at an edge (#3580).
 				withImagesWritten(output, dir, startTime).then(safeResolve, () => safeResolve(output));
 			});
