@@ -387,6 +387,21 @@ describe("bornScopes: only the directories a command names", () => {
 		expect(scopes("ls away/x")).toEqual([]);
 	});
 
+	test("a word through a symlink out of the project, or into a dot directory, is not a scope", () => {
+		execFileSync("ln", ["-s", outside, join(ws, "linkout")]);
+		mkdirSync(join(ws, ".8gent"));
+		execFileSync("ln", ["-s", ".8gent", join(ws, "hid")]);
+		expect(scopes("touch linkout/x")).toEqual([]);
+		expect(scopes("touch hid/x")).toEqual([]);
+	});
+
+	test("a dot word is not a scope, even when it resolves to a plain directory", () => {
+		mkdirSync(join(ws, ".cache"));
+		execFileSync("ln", ["-s", "video", join(ws, ".vid")]);
+		expect(scopes("bash x.sh .cache/t.bin")).toEqual([]);
+		expect(scopes("bash x.sh .vid/t.bin")).toEqual([]);
+	});
+
 	test("nested scopes collapse, and at most four are kept", () => {
 		for (const d of ["a", "b", "c", "d", "e"]) mkdirSync(join(ws, d));
 		mkdirSync(join(ws, "a", "inner"));
@@ -443,6 +458,21 @@ describe.skipIf(!HAS_BIRTH)(
 			for (const d of ["a", "b"])
 				for (let i = 0; i < 400; i++) rmSync(join(root, "video", d, `f${i}`));
 			done();
+			expect(record.size).toBe(0);
+		});
+
+		test("a scope swapped for a symlink out of the project during the command records nothing", () => {
+			const root = realpathSync(ws);
+			writeFileSync(
+				join(root, "video", "swap.sh"),
+				`cd ${root}\nmv video video.old\nln -s ${outside} video\nprintf x > ${outside}/f.png\n`,
+			);
+			const record = new CreatedFiles();
+			const done = watchBorn("bash video/swap.sh", root, record);
+			execFileSync("bash", [join(root, "video", "swap.sh")]);
+			done();
+			expect(existsSync(join(outside, "f.png"))).toBe(true);
+			expect(record.createdBySession(join(outside, "f.png"))).toBe(false);
 			expect(record.size).toBe(0);
 		});
 

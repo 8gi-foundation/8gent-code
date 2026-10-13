@@ -395,6 +395,15 @@ export function bornScopes(command: string, root: string): string[] {
 	return found.filter((d) => !found.some((o) => within(d, o))).slice(0, MAX_BORN_SCOPES);
 }
 
+/** True when `dir` is still a real directory (lstat, not a symlink) whose realpath is itself. */
+function stillDir(dir: string): boolean {
+	try {
+		return lstatSync(dir).isDirectory() && realpathSync(dir) === dir;
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Bracket one command for the files its child processes create (#4159); see
  * the module header for the invariant. `root` is the realpath of the working
@@ -422,10 +431,15 @@ export function watchBorn(command: string, root: string, record: CreatedFiles): 
 			const until = Date.now() + BORN_SKEW_MS;
 			let recorded = 0;
 			for (const { dir, before } of scopes) {
+				// The command may have swapped the scope for a symlink (`mv video video.old;
+				// ln -s $OUTSIDE video`): a scope that is no longer that same real directory is skipped.
+				if (!stillDir(dir)) continue;
 				for (const [abs, item] of walkTree(dir).paths) {
 					if (recorded >= MAX_BORN) return;
 					if (before.has(abs) || !item.isFile()) continue;
 					if (!bornBetween(abs, since, until)) continue;
+					// And each file's real parent must still be inside the scope.
+					if (!inside(realpathSync(path.dirname(abs)), dir)) continue;
 					record.record(abs);
 					recorded++;
 				}
