@@ -15,7 +15,7 @@ Apache-2.0, 89 tasks, run by the Harbor harness.
 
 ## How it plugs in
 
-Harbor loads a custom class with `--agent module:Class`. The class extends
+Harbor loads a custom class by import path (`module:Class`, passed by the run script). The class extends
 `BaseInstalledAgent`: `install()` runs once per task container, `run()` executes the
 command and Harbor then runs the task's own test script for the score.
 
@@ -57,17 +57,11 @@ benchmarks/terminal-bench/run-easy-slice.sh ollama/qwen3.5:9b
 
 One task: `benchmarks/terminal-bench/run-easy-slice.sh ollama/qwen3.5:9b fix-git`.
 Results land in `$TB_HOME/jobs/<job-name>/` (per-trial `result.json`, run log
-`agent/8gent-run.ndjson`, verifier output).
+`8gent-run.ndjson` under the trial's run-log folder, verifier output).
 
 Optional: `EIGHTGENT_TB_MAX_TURNS=40` caps turns per task.
 
-For a wider run, pass task names, or drop to Harbor directly:
-
-```bash
-HARBOR_TELEMETRY=0 EIGHTGENT_TB_BUNDLE=dist/cli.js PYTHONPATH=benchmarks/terminal-bench \
-  $H/venv/bin/harbor run -p $H/tb2-tasks --agent eightgent_harbor:EightGentCode \
-  -m ollama/qwen3.5:9b -n 1
-```
+For a wider run, pass task names to the script. To call Harbor directly, copy the flags from `run-easy-slice.sh`.
 
 Run one heavy job at a time. The script refuses to start while
 `~/.8gent/rishi-pilot/pilot.lock` exists. Task images are large, so check free disk first
