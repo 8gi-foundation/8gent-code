@@ -19,6 +19,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { bunFlagsFor } from "../packages/core/bun-flags";
 
 const args = process.argv.slice(2);
 const arg = (name: string, fallback: string) => {
@@ -99,12 +100,15 @@ interface Daemon {
 
 async function startDaemon(label: string): Promise<Daemon> {
 	const log: string[] = [];
-	const proc = Bun.spawn([process.execPath, daemonEntry, "--local"], {
-		cwd: workDir,
-		env,
-		stdout: "pipe",
-		stderr: "pipe",
-	});
+	const proc = Bun.spawn(
+		[process.execPath, ...bunFlagsFor(process.execPath), daemonEntry, "--local"],
+		{
+			cwd: workDir,
+			env,
+			stdout: "pipe",
+			stderr: "pipe",
+		},
+	);
 	const tail = async (stream: ReadableStream<Uint8Array>) => {
 		let buf = "";
 		for await (const chunk of stream) {
