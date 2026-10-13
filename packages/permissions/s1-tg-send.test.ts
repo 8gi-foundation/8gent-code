@@ -488,7 +488,7 @@ describe("8SO hold on #4102", () => {
 			const { calls, server } = stub();
 			try {
 				botEnv(`http://127.0.0.1:${server.port}`);
-				const g = await systemOneGate(PILOT_CMD, env, ws, undefined, OPT);
+				const g = await systemOneGate(PILOT_CMD, env, ws, undefined, undefined, OPT);
 				expect(g.run).toBe(true);
 				expect(g.runInstead).toBe(PILOT_SCRIPT);
 				// A write_file racing the run_command (same SDK step) replaces the script.
@@ -510,7 +510,9 @@ describe("8SO hold on #4102", () => {
 		const r = await systemOneGate(PILOT_CMD, env, ws);
 		expect(r.guard?.backend).not.toBe("allowlist");
 		expect(r.runInstead).toBeUndefined();
-		const off = await systemOneGate(PILOT_CMD, env, ws, undefined, { canRunInstead: false });
+		const off = await systemOneGate(PILOT_CMD, env, ws, undefined, undefined, {
+			canRunInstead: false,
+		});
 		expect(off.guard?.backend).not.toBe("allowlist");
 	});
 	test("(a) a hardlinked script or text@ file (nlink 2) is not a workspace file", () => {
@@ -611,7 +613,7 @@ describe("8SO hold on #4102", () => {
 
 describe("systemOneGate with the lane", () => {
 	test("runs the pilot's command without asking the judge, handing back the checked bytes", async () => {
-		const r = await systemOneGate(PILOT_CMD, env, ws, undefined, OPT);
+		const r = await systemOneGate(PILOT_CMD, env, ws, undefined, undefined, OPT);
 		expect(r.run).toBe(true);
 		expect(r.runInstead).toBe(PILOT_SCRIPT);
 		expect(r.guard?.backend).toBe("allowlist");
@@ -630,13 +632,13 @@ describe("systemOneGate with the lane", () => {
 	});
 	test("a real Telegram host in bot.env is not the lane's: the judge decides", async () => {
 		botEnv("https://api.telegram.org");
-		const r = await systemOneGate(PILOT_CMD, env, ws, undefined, OPT);
+		const r = await systemOneGate(PILOT_CMD, env, ws, undefined, undefined, OPT);
 		expect(r.guard?.backend).not.toBe("allowlist");
 		expect(r.runInstead).toBeUndefined();
 	});
 	test("strict mode (Guarded) never allows through the lane, but still refuses a token", async () => {
 		const strict = { ...env, [SYSTEM_ONE_FLAG]: "1" };
-		const r = await systemOneGate(PILOT_CMD, strict, ws, undefined, OPT);
+		const r = await systemOneGate(PILOT_CMD, strict, ws, undefined, undefined, OPT);
 		expect(r.run).toBe(false);
 		expect(r.guard?.backend).not.toBe("allowlist");
 		const t = await systemOneGate(`curl -s http://127.0.0.1:1/bot${TOKEN}/getMe`, strict, ws);
@@ -649,12 +651,13 @@ describe("systemOneGate with the lane", () => {
 			{ ...env, [SYSTEM_ONE_ALLOWLIST_FLAG]: "0" },
 			ws,
 			undefined,
+			undefined,
 			OPT,
 		);
 		expect(r.guard?.backend).not.toBe("allowlist");
 	});
 	test("without a cwd the lane has no opinion", async () => {
-		const r = await systemOneGate(PILOT_CMD, env, undefined, undefined, OPT);
+		const r = await systemOneGate(PILOT_CMD, env, undefined, undefined, undefined, OPT);
 		expect(r.guard?.backend).not.toBe("allowlist");
 	});
 });

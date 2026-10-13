@@ -86,7 +86,10 @@ import * as readline from "node:readline";
 import { activeShellKind } from "../core/shell";
 import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
+import { commandInFolder } from "./cd-prefix";
 import type { CreatedFiles } from "./s1-created-files";
+import type { RmOwnDir } from "./s1-rm-own-dir";
+import type { RunOwnScript } from "./s1-run-own-script";
 import { posixRulesApply } from "./shell-tools";
 import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
 
@@ -533,6 +536,8 @@ export async function systemOneGate(
 	env: Record<string, string | undefined> = process.env,
 	cwd?: string,
 	created?: CreatedFiles,
+	/** The project folder after a leading `cd <folder> &&` (#3199): the escalation card names it. */
+	where?: string,
 	opts: { canRunInstead?: boolean } = {},
 ): Promise<SystemOneGateResult> {
 	const mode = systemOneMode(env);
@@ -647,6 +652,29 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// `rm -r` of plain relative directories this session made with a
+		// mkdir-only run_command, untracked, holding only files this session
+		// wrote and directories it made (#4105); see s1-rm-own-dir.ts.
+		// Default mode only.
+		try {
+			const { rmOwnDir } = await import("./s1-rm-own-dir");
+			const own: RmOwnDir = mode === "default" ? rmOwnDir(command, cwd, created) : { ok: false };
+			if (own.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: own.reason,
+					},
+				};
+			}
+			if (own.hint) hint = own.hint;
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 		// A plain run of the project's own script inside the workspace, with
 		// only workspace or /tmp paths in its environment and arguments, whose
 		// source (and local imports) spawns, fetches and deletes nothing (#3937).
@@ -666,6 +694,29 @@ export async function systemOneGate(
 					},
 				};
 			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// `bash|sh .tmp/FILE` where FILE is a shell script this session
+		// wrote, made only of allowlisted literal commands on loopback and in the workspace
+		// (#4121); see s1-run-own-script.ts. Default mode only.
+		try {
+			const { runOwnScript } = await import("./s1-run-own-script");
+			const own: RunOwnScript =
+				mode === "default" ? runOwnScript(command, cwd, created) : { ok: false };
+			if (own.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: own.reason,
+					},
+				};
+			}
+			if (own.hint) hint = own.hint;
 		} catch {
 			// No opinion: fall through to the judge.
 		}
@@ -814,7 +865,7 @@ export async function systemOneGate(
 				err instanceof SystemOneTimeoutError
 					? `the judge gave no verdict within ${ms} ms${warmupLoading ? " (still loading)" : ""}`
 					: detail;
-			return decide(command, await rulesOnly(command, reason), RULES_ONLY, hint);
+			return decide(command, await rulesOnly(command, reason), RULES_ONLY, hint, where);
 		}
 		// Strict (EIGHT_SYSTEM_ONE=1, Guarded): the checker cannot answer, so
 		// a person decides through the normal card, never an allow (#3193).
@@ -823,7 +874,7 @@ export async function systemOneGate(
 			err instanceof SystemOneTimeoutError
 				? `the checker timed out after ${ms} ms${warmupLoading ? " while still loading" : ""}`
 				: `System One unavailable: ${detail}`;
-		return decide(command, await askInstead(command, reason), RULES_ONLY, hint);
+		return decide(command, await askInstead(command, reason), RULES_ONLY, hint, where);
 	}
 	if (isModelVerdict(guard)) warmed = true;
 	if (judgeFailed(guard)) {
@@ -833,9 +884,10 @@ export async function systemOneGate(
 			mode === "default" ? await rulesOnly(command, reason) : await askInstead(command, reason),
 			RULES_ONLY,
 			hint,
+			where,
 		);
 	}
-	return decide(command, guard, thresholds as SystemOneThresholds, hint);
+	return decide(command, guard, thresholds as SystemOneThresholds, hint, where);
 }
 
 /** True when a person can be asked: a TUI approval channel, or an interactive terminal. */
@@ -878,6 +930,8 @@ async function decide(
 	guard: BashGuardResult,
 	t: SystemOneThresholds,
 	hint?: string,
+	/** The project folder after a leading `cd <folder> &&` (#3199): the question names it. */
+	where?: string,
 ): Promise<SystemOneGateResult> {
 	if (guard.verdict === "allow") return { run: true, guard, thresholds: t };
 	if (guard.verdict === "block") {
@@ -900,7 +954,7 @@ async function decide(
 				: guard.backend === RULES_ONLY
 					? "The full safety checker isn't available, so you decide whether this runs. Approve only if you meant it."
 					: `System One is unsure whether this command is safe (${pDesc}${guard.backend}/${guard.model}). Approve only if you meant it.`,
-			command,
+			command: commandInFolder(command, where),
 		});
 	} catch {
 		humanApproved = null;

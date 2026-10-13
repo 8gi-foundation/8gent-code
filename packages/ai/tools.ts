@@ -7,17 +7,20 @@
  * Tools are split into groups and composed into a single ToolSet.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { AsyncLocalStorage } from "node:async_hooks";
 import { tool } from "ai";
 import type { ToolSet } from "ai";
 import { z } from "zod";
+import { activeShellKind, killProcessTree, spawnShell } from "../core/shell";
+import { deckVideoAfterWrite } from "../deck/auto";
+import { safePath } from "../eight/tools";
 import {
 	ALLOWED_PATHS_DESCRIPTION,
-	PERMISSION_MODE_DESCRIPTION,
 	CHECK_AGENT_DESCRIPTION,
 	LIST_AGENTS_DESCRIPTION,
+	PERMISSION_MODE_DESCRIPTION,
 	SPAWN_AGENT_DESCRIPTION,
 	SPAWN_MODEL_DESCRIPTION,
 	SPAWN_RUNTIME_DESCRIPTION,
@@ -25,19 +28,14 @@ import {
 	listAgentsTool,
 	spawnAgentTool,
 } from "../orchestration/delegation-tools";
-import { killProcessTree, spawnShell } from "../core/shell";
-import { deckVideoAfterWrite } from "../deck/auto";
+import { cdPrefix, folderLabel } from "../permissions/cd-prefix";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
-import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
-import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import {
-	RunCommandSandboxRequired,
-	runCommandSandboxRefusal,
-	wrapRunCommand,
-	wrapRunCommandArgv,
-} from "../permissions/run-command-sandbox";
-import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
-import { applyAt, editRefusal, gateWriteTool, logEditRefusal, resolveEdit } from "../permissions/write-content-gate";
+	editScopeViolation,
+	emptyOldTextError,
+	normaliseAllowedPaths,
+} from "../permissions/edit-guards";
+import { type PathAccess, validatePath } from "../permissions/path-guard";
 import {
 	type PermissionModeHolder,
 	currentPermissionMode,
@@ -46,13 +44,31 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
-import { type CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
-import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
+import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
+import {
+	RunCommandSandboxRequired,
+	runCommandSandboxRefusal,
+	wrapRunCommand,
+	wrapRunCommandArgv,
+} from "../permissions/run-command-sandbox";
+import {
+	type CreatedFiles,
+	pathAbsent,
+	watchRedirects,
+	watchWrite,
+} from "../permissions/s1-created-files";
+import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import {
+	applyAt,
+	editRefusal,
+	gateWriteTool,
+	logEditRefusal,
+	resolveEdit,
+} from "../permissions/write-content-gate";
 import { withImagesWritten } from "./image-shape";
-import { writeShapeLine } from "./write-shape";
+import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
 import { writeScopeLine } from "./write-scope";
-import { safePath } from "../eight/tools";
-import { type PathAccess, validatePath } from "../permissions/path-guard";
+import { writeShapeLine } from "./write-shape";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -232,14 +248,23 @@ function resolvePath(p: string, access: PathAccess): string {
  * path, or the refusal to hand back. Used by native write_file, edit_file and
  * read_file; run_command and the notebook tools (#3760) are not covered.
  */
-function confinedPath(p: string, outcome: "written" | "read"): { path: string } | { refused: string } {
+function confinedPath(
+	p: string,
+	outcome: "written" | "read",
+): { path: string } | { refused: string } {
 	if (p.includes("\0")) {
-		return { refused: `Error: Path contains a null byte, which is not allowed in a file path. Nothing was ${outcome}.` };
+		return {
+			refused: `Error: Path contains a null byte, which is not allowed in a file path. Nothing was ${outcome}.`,
+		};
 	}
 	try {
-		return { path: safePath(p, getToolContext().workingDirectory, outcome === "read" ? "read" : "write") };
+		return {
+			path: safePath(p, getToolContext().workingDirectory, outcome === "read" ? "read" : "write"),
+		};
 	} catch (err) {
-		return { refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was ${outcome}.` };
+		return {
+			refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was ${outcome}.`,
+		};
 	}
 }
 
@@ -401,7 +426,7 @@ const updatePlanTool = tool({
 			.describe("Every step, in order"),
 	}),
 	// Executes nothing: the TUI reads the plan from the tool-start event.
-	execute: async ({ plan }) => updatePlan({ plan }),
+	execute: async ({ plan }) => updatePlan({ plan }, getToolContext().workingDirectory),
 });
 
 // ============================================
@@ -447,7 +472,11 @@ const writeFile = tool({
 		fs.writeFileSync(absolutePath, content);
 		recordWrite();
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
-		const deckLine = await deckVideoAfterWrite(absolutePath, content, getToolContext().workingDirectory);
+		const deckLine = await deckVideoAfterWrite(
+			absolutePath,
+			content,
+			getToolContext().workingDirectory,
+		);
 		// Report what is on disk so a requested count can be checked (#3580).
 		const shape = writeShapeLine(absolutePath, content);
 		// A new top-folder file while the work lives in one subfolder (#3580).
@@ -467,7 +496,9 @@ const editFile = tool({
 			.number()
 			.int()
 			.optional()
-			.describe("1-based line; when oldText appears more than once, edit the copy at or after this line"),
+			.describe(
+				"1-based line; when oldText appears more than once, edit the copy at or after this line",
+			),
 	}),
 	execute: async ({ path: filePath, oldText, newText, startLine }) => {
 		// No anchor, no edit (#3101): an empty oldText used to prepend newText.
@@ -689,16 +720,25 @@ const runCommand = tool({
 	inputSchema: z.object({
 		command: z.string().describe("Command to run"),
 	}),
-	execute: async ({ command }) => {
+	execute: async ({ command: line }) => {
+		// One leading `cd <folder> &&` inside the project: the folder is the working
+		// directory and only the rest runs, through every check below (#3199).
+		// The backstops judge the whole line first, so a cd into protected files keeps their words.
+		const lineBackstop = preSpawnRefusal(line, getToolContext().workingDirectory);
+		if (lineBackstop) return lineBackstop;
+		const cd = cdPrefix(line, getToolContext().workingDirectory, activeShellKind());
+		if (cd.kind === "refused") return cd.message;
+		const command = cd.kind === "cd" ? cd.rest : line;
+		const cwd = cd.kind === "cd" ? cd.dir : getToolContext().workingDirectory;
 		// Same guards, in the same order, as ToolExecutor.run_command (#3993).
-		const backstop = preSpawnRefusal(command, getToolContext().workingDirectory);
+		const backstop = preSpawnRefusal(command, cwd);
 		if (backstop) return backstop;
 		const validation = sanitizeShellCommand(command);
 		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		const startedAt = Date.now();
-		const output = await runShellCommand(command);
+		const output = await runShellCommand(command, cwd);
 		// Report images the command drew, and any cut off at an edge (#3580).
-		return withImagesWritten(output, getToolContext().workingDirectory, startedAt);
+		return withImagesWritten(output, cwd, startedAt);
 	},
 });
 
@@ -843,17 +883,51 @@ const generateSpriteTool = tool({
 	description:
 		"Generate a sprite sheet or animation from a natural language prompt. Local-first: uses sharp for slicing and ffmpeg for animation when available. Falls back to OpenAI DALL-E for cloud generation. Assets are saved to ~/.8gent/assets/media/. Example: 'animate a walking robot character', '16-frame idle loop for a knight sprite'.",
 	inputSchema: z.object({
-		prompt: z.string().describe("Natural language description of the sprite or animation to generate"),
-		frameCount: z.number().optional().default(8).describe("Number of frames in the animation (default: 8)"),
-		loop: z.boolean().optional().default(true).describe("Whether the animation loops (default: true)"),
-		direction: z.enum(["forward", "reverse", "pingpong"]).optional().default("forward").describe("Animation direction"),
-		style: z.enum(["pixel-art", "hand-drawn", "3d-render", "anime", "painterly"]).optional().default("pixel-art").describe("Art style"),
-		format: z.enum(["gif", "webp", "png"]).optional().default("gif").describe("Output animation format"),
-		forceCloud: z.boolean().optional().default(false).describe("Force cloud generation even if local tools are available"),
+		prompt: z
+			.string()
+			.describe("Natural language description of the sprite or animation to generate"),
+		frameCount: z
+			.number()
+			.optional()
+			.default(8)
+			.describe("Number of frames in the animation (default: 8)"),
+		loop: z
+			.boolean()
+			.optional()
+			.default(true)
+			.describe("Whether the animation loops (default: true)"),
+		direction: z
+			.enum(["forward", "reverse", "pingpong"])
+			.optional()
+			.default("forward")
+			.describe("Animation direction"),
+		style: z
+			.enum(["pixel-art", "hand-drawn", "3d-render", "anime", "painterly"])
+			.optional()
+			.default("pixel-art")
+			.describe("Art style"),
+		format: z
+			.enum(["gif", "webp", "png"])
+			.optional()
+			.default("gif")
+			.describe("Output animation format"),
+		forceCloud: z
+			.boolean()
+			.optional()
+			.default(false)
+			.describe("Force cloud generation even if local tools are available"),
 	}),
 	execute: async ({ prompt, frameCount, loop, direction, style, format, forceCloud }) => {
 		const { generate } = await import("../gamedev/harness");
-		const result = await generate({ prompt, frameCount, loop, direction, style, format, forceCloud });
+		const result = await generate({
+			prompt,
+			frameCount,
+			loop,
+			direction,
+			style,
+			format,
+			forceCloud,
+		});
 		if (result.success) {
 			return JSON.stringify(
 				{
@@ -889,11 +963,16 @@ const makePdfTool = tool({
 		html: z.string().optional().describe("Inline HTML source for the document"),
 		htmlPath: z.string().optional().describe("Path to an existing HTML file to render"),
 		mdPath: z.string().optional().describe("Path to an existing Markdown file to render"),
-		title: z.string().optional().describe("Document title (used for Markdown inputs and auto-naming)"),
+		title: z
+			.string()
+			.optional()
+			.describe("Document title (used for Markdown inputs and auto-naming)"),
 		outName: z
 			.string()
 			.optional()
-			.describe("Optional output filename; resolved inside ~/.8gent/creative/ (a .pdf extension is added if missing)"),
+			.describe(
+				"Optional output filename; resolved inside ~/.8gent/creative/ (a .pdf extension is added if missing)",
+			),
 	}),
 	execute: async ({ markdown, html, htmlPath, mdPath, title, outName }) => {
 		const { makePdf } = await import("../tools/make-pdf");
@@ -918,7 +997,10 @@ const renderVideoDeckTool = tool({
 		"Render a JSON spec into an mp4 slide video, deterministically, with local code only. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task. Returns { path, durationSec, slides, width, height, hasAudio }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?, image? (png/jpg inside the working directory), seconds? (1-60, default 4), narration? (spoken by the local voice), voice? }] }. No music, no network.",
 	inputSchema: z.object({
 		spec: z.record(z.string(), z.unknown()).describe("The deck spec"),
-		out: z.string().optional().describe("Output .mp4 path inside the working directory (default deck.mp4)"),
+		out: z
+			.string()
+			.optional()
+			.describe("Output .mp4 path inside the working directory (default deck.mp4)"),
 	}),
 	execute: async ({ spec, out }) => {
 		try {
@@ -926,7 +1008,12 @@ const renderVideoDeckTool = tool({
 			const wd = getToolContext().workingDirectory;
 			const target = resolveDeckOut(out, wd);
 			const ctx = getToolContext();
-			const scoped = editScopeViolation("render_video_deck", { out: out ?? "deck.mp4" }, wd, ctx.allowedPaths);
+			const scoped = editScopeViolation(
+				"render_video_deck",
+				{ out: out ?? "deck.mp4" },
+				wd,
+				ctx.allowedPaths,
+			);
 			if (scoped) return scoped;
 			const blocked = gateWrite("render_video_deck", { path: target });
 			if (blocked) return blocked;
@@ -948,10 +1035,7 @@ const speakTool = tool({
 	inputSchema: z.object({
 		text: z.string().describe("The words to speak (max 2000 characters)"),
 		voice: z.string().optional().describe("Voice name from the fixed list; defaults to Daniel"),
-		out: z
-			.string()
-			.optional()
-			.describe("Output .wav path inside the working directory"),
+		out: z.string().optional().describe("Output .wav path inside the working directory"),
 	}),
 	execute: async ({ text, voice, out }) => {
 		try {
@@ -1375,20 +1459,23 @@ const backgroundOutput = tool({
  */
 async function commandRefusal(
 	command: string,
+	cwd: string = getToolContext().workingDirectory,
 	out?: { runInstead?: string },
 ): Promise<string | null> {
 	// The text path's pre-spawn backstops (#3993): protected files such as
 	// ~/.8gent/settings.json and the browser control tokens, for shell and argv alike.
-	// Judged in the tool's working directory, so relative paths and `cd` resolve as
+	// Judged in the directory the command runs in, so relative paths and `cd` resolve as
 	// the command will (#4009 startup-code check), not against process.cwd().
-	const backstop = preSpawnRefusal(command, getToolContext().workingDirectory);
+	const backstop = preSpawnRefusal(command, cwd);
 	if (backstop) return backstop;
 	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 	const ctx = getToolContext();
 	const mode = currentPermissionMode();
 	const permissionManager = getPermissionManager();
 
-	const permissionCheck = permissionManager.checkPermission(command);
+	// The folder a cd prefix chose: the cards name it, and answers are kept per folder.
+	const where = folderLabel(cwd, ctx.workingDirectory);
+	const permissionCheck = permissionManager.checkPermission(command, undefined, where);
 	if (permissionCheck === "denied") {
 		return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 	}
@@ -1403,8 +1490,9 @@ async function commandRefusal(
 	const systemOne = await systemOneGate(
 		command,
 		systemOneEnvFor(mode),
-		ctx.workingDirectory,
+		cwd,
 		ctx.createdFiles,
+		where,
 		{ canRunInstead: out !== undefined },
 	);
 	if (!systemOne.run) return systemOne.message as string;
@@ -1421,16 +1509,20 @@ async function commandRefusal(
 				? "This command may modify system files or cause data loss."
 				: "The agent wants to run a shell command.",
 			command,
+			{ where },
 		);
 		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}
 	return null;
 }
 
-async function runShellCommand(command: string): Promise<string> {
+/** `cwd` differs from the tool context's only after a leading `cd <folder> &&` (#3199). */
+async function runShellCommand(
+	command: string,
+	cwd: string = getToolContext().workingDirectory,
+): Promise<string> {
 	// Judge git state against the directory this command runs in (#3748).
-	const cwd = getToolContext().workingDirectory;
-	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command));
+	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command, cwd));
 	const { getHookManager } = await import("../hooks");
 
 	// Captured once: the timer and process callbacks below run after this call.
@@ -1438,13 +1530,13 @@ async function runShellCommand(command: string): Promise<string> {
 	const hookManager = getHookManager();
 
 	const checked: { runInstead?: string } = {};
-	const refusal = await commandRefusal(command, checked);
+	const refusal = await commandRefusal(command, cwd, checked);
 	if (refusal !== null) return refusal;
 
 	const startTime = Date.now();
 	await hookManager.executeHooks("beforeCommand", {
 		command,
-		workingDirectory: ctx.workingDirectory,
+		workingDirectory: cwd,
 	});
 
 	let finalCommand = command;
@@ -1462,14 +1554,14 @@ async function runShellCommand(command: string): Promise<string> {
 
 	return new Promise((settle) => {
 		// Redirect targets this command creates are this agent's own files (#3177).
-		const recordRedirects = watchRedirects(finalCommand, ctx.workingDirectory, ctx.createdFiles);
+		const recordRedirects = watchRedirects(finalCommand, cwd, ctx.createdFiles);
 		const resolve = (value: string) => {
 			recordRedirects();
 			settle(value);
 		};
 		// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
 		const proc = spawnShell(wrapRunCommand(finalCommand), {
-			cwd: ctx.workingDirectory,
+			cwd,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,
 		});
@@ -1507,7 +1599,7 @@ async function runShellCommand(command: string): Promise<string> {
 					stdout,
 					stderr,
 					duration: Date.now() - startTime,
-					workingDirectory: ctx.workingDirectory,
+					workingDirectory: cwd,
 				});
 
 				const partialOutput = (stdout + stderr).trim().slice(-500);
@@ -1533,7 +1625,7 @@ async function runShellCommand(command: string): Promise<string> {
 				stdout,
 				stderr: `${stderr}\nTIMEOUT`,
 				duration: Date.now() - startTime,
-				workingDirectory: ctx.workingDirectory,
+				workingDirectory: cwd,
 			});
 			resolve(
 				`TIMEOUT after 2 min. Partial output:\n${stdout}\n${stderr}\nTIP: Use background_start for long-running processes.`,
@@ -1553,7 +1645,7 @@ async function runShellCommand(command: string): Promise<string> {
 				stdout,
 				stderr,
 				duration: Date.now() - startTime,
-				workingDirectory: ctx.workingDirectory,
+				workingDirectory: cwd,
 			});
 			resolve(
 				code === 0
@@ -1570,7 +1662,7 @@ async function runShellCommand(command: string): Promise<string> {
 			hookManager.executeHooks("onError", {
 				command: finalCommand,
 				error: err.message,
-				workingDirectory: ctx.workingDirectory,
+				workingDirectory: cwd,
 			});
 			resolve(`Error: ${err.message}`);
 		});
@@ -1726,17 +1818,17 @@ const spawnAgent = tool({
 	description: SPAWN_AGENT_DESCRIPTION,
 	inputSchema: z.object({
 		task: z.string().describe("Task description for the background agent to execute"),
-		runtime: z
-			.enum(["8gent", "claude", "shell"])
+		runtime: z.enum(["8gent", "claude", "shell"]).optional().describe(SPAWN_RUNTIME_DESCRIPTION),
+		model: z.string().optional().describe(SPAWN_MODEL_DESCRIPTION),
+		timeout: z
+			.number()
 			.optional()
-			.describe(SPAWN_RUNTIME_DESCRIPTION),
-		model: z
-			.string()
-			.optional()
-			.describe(SPAWN_MODEL_DESCRIPTION),
-		timeout: z.number().optional().describe("Timeout in ms (default: 5 min, only for claude/shell)"),
+			.describe("Timeout in ms (default: 5 min, only for claude/shell)"),
 		allowedPaths: z.array(z.string()).optional().describe(ALLOWED_PATHS_DESCRIPTION),
-		permissionMode: z.enum(["plan", "ask", "guarded", "infinite"]).optional().describe(PERMISSION_MODE_DESCRIPTION),
+		permissionMode: z
+			.enum(["plan", "ask", "guarded", "infinite"])
+			.optional()
+			.describe(PERMISSION_MODE_DESCRIPTION),
 	}),
 	execute: async ({ task, runtime, model, timeout, allowedPaths, permissionMode }) =>
 		spawnAgentTool(
@@ -2037,10 +2129,9 @@ const selfInspect = tool({
 				throughput: {
 					lastTokensPerSecond: p.lastTokensPerSecond ?? null,
 					avgTokensPerSecond: p.avgTokensPerSecond ?? null,
-					note:
-						p.avgTokensPerSecond
-							? `Currently generating ~${p.avgTokensPerSecond.toFixed(1)} tok/s on ${p.provider}/${p.model} (last step: ${(p.lastTokensPerSecond ?? 0).toFixed(1)} tok/s)`
-							: "No throughput data yet. It is measured after the first LLM step finishes",
+					note: p.avgTokensPerSecond
+						? `Currently generating ~${p.avgTokensPerSecond.toFixed(1)} tok/s on ${p.provider}/${p.model} (last step: ${(p.lastTokensPerSecond ?? 0).toFixed(1)} tok/s)`
+						: "No throughput data yet. It is measured after the first LLM step finishes",
 				},
 			},
 			appendedContextCount: p.appendedContext.length,
@@ -2635,7 +2726,9 @@ const runComputerTask = tool({
 			]
 				.filter(Boolean)
 				.join("\n");
-			return result.ok ? `Computer task complete.\n${summary}` : `Computer task failed.\n${summary}`;
+			return result.ok
+				? `Computer task complete.\n${summary}`
+				: `Computer task failed.\n${summary}`;
 		} catch (err) {
 			return `run_computer_task error: ${err instanceof Error ? err.message : String(err)}`;
 		}
@@ -2705,7 +2798,9 @@ const eyesSee = tool({
 		display: z
 			.union([z.number().int(), z.literal("primary"), z.literal("all")])
 			.optional()
-			.describe("Display to capture: index (0-based), 'primary', or 'all'. Default: focused display."),
+			.describe(
+				"Display to capture: index (0-based), 'primary', or 'all'. Default: focused display.",
+			),
 		region: z
 			.object({
 				x: z.number(),
@@ -2761,7 +2856,11 @@ const eyesFind = tool({
 				"For kind=label: substring/exact match. For kind=describe: natural-language target. For kind=id: element id from a prior eyes_see.",
 			),
 		role: z.string().optional().describe("For kind=role or to filter kind=label results."),
-		index: z.number().int().optional().describe("For kind=role: 0-based index of the matching element."),
+		index: z
+			.number()
+			.int()
+			.optional()
+			.describe("For kind=role: 0-based index of the matching element."),
 		x: z.number().optional().describe("For kind=coords."),
 		y: z.number().optional().describe("For kind=coords."),
 	}),
@@ -2877,7 +2976,8 @@ const eyesWaitFor = tool({
 					caseSensitive: args.case_sensitive,
 				};
 			} else {
-				if (!args.query_kind) return `eyes_wait_for: predicate=${args.predicate} requires query_kind`;
+				if (!args.query_kind)
+					return `eyes_wait_for: predicate=${args.predicate} requires query_kind`;
 				let q: import("@8gent/eyes").LocatorQuery;
 				switch (args.query_kind) {
 					case "label":
@@ -2949,9 +3049,7 @@ async function getHandeyes(): Promise<
 		hands: driver,
 	});
 
-	const adapter = await handeyesPkg.selectHandeyesAdapter([
-		...handeyesPkg.DEFAULT_ADAPTER_ORDER,
-	]);
+	const adapter = await handeyesPkg.selectHandeyesAdapter([...handeyesPkg.DEFAULT_ADAPTER_ORDER]);
 	if (!adapter) {
 		_handeyesUnavailableReason = "handeyes: no adapter available after configure (unexpected)";
 		return { ok: false, reason: _handeyesUnavailableReason };

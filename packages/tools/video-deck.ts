@@ -72,9 +72,13 @@ export interface RenderDeckOptions {
 	ffprobe?: string;
 }
 
+/** Every number here is read back from the written file by ffprobe, never taken from the spec. */
 export interface RenderDeckResult {
 	path: string;
 	durationSec: number;
+	/** Picture stream length; with audio, the sound stream length. They match within a frame. */
+	videoSec: number;
+	audioSec: number | null;
 	slides: number;
 	width: number;
 	height: number;
@@ -123,19 +127,26 @@ function readInside(named: string, cwd: string): Buffer {
 	}
 	if (!/\.(png|jpe?g)$/i.test(real)) throw new Error(`image "${named}" must be a .png or .jpg`);
 	const size = fs.statSync(real).size;
-	if (size > MAX_IMAGE_BYTES) throw new Error(`image "${named}" is ${size} bytes; the limit is ${MAX_IMAGE_BYTES}`);
+	if (size > MAX_IMAGE_BYTES)
+		throw new Error(`image "${named}" is ${size} bytes; the limit is ${MAX_IMAGE_BYTES}`);
 	const buf = fs.readFileSync(real);
 	const dim = imageDimensions(buf);
 	if (!dim) throw new Error(`image "${named}" has no readable PNG or JPEG header`);
 	if (dim.width * dim.height > MAX_IMAGE_PIXELS) {
-		throw new Error(`image "${named}" is ${dim.width}x${dim.height}; the limit is ${MAX_IMAGE_PIXELS} pixels`);
+		throw new Error(
+			`image "${named}" is ${dim.width}x${dim.height}; the limit is ${MAX_IMAGE_PIXELS} pixels`,
+		);
 	}
 	return buf;
 }
 
 /** Width and height from the PNG IHDR or the first JPEG SOF marker, before any decoding. */
 export function imageDimensions(b: Buffer): { width: number; height: number } | null {
-	if (b.length >= 24 && b.readUInt32BE(0) === 0x89504e47 && b.toString("ascii", 12, 16) === "IHDR") {
+	if (
+		b.length >= 24 &&
+		b.readUInt32BE(0) === 0x89504e47 &&
+		b.toString("ascii", 12, 16) === "IHDR"
+	) {
 		return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
 	}
 	if (b.length > 4 && b[0] === 0xff && b[1] === 0xd8) {
@@ -181,7 +192,8 @@ export async function paintSlide(
 	let y = 70 * k;
 	const hasImage = Boolean(slide.image);
 	const textW = (hasImage ? 640 : 1120) * k;
-	const sans = (px: number, bold = false) => `${bold ? "bold " : ""}${Math.round(px * k)}px sans-serif`;
+	const sans = (px: number, bold = false) =>
+		`${bold ? "bold " : ""}${Math.round(px * k)}px sans-serif`;
 
 	if (slide.kicker) {
 		ctx.fillStyle = COLORS.amber;
@@ -245,7 +257,11 @@ export async function paintSlide(
 	return canvas.toBuffer("image/png");
 }
 
-function run(cmd: string, argv: string[], timeoutMs: number): Promise<{ code: number | null; out: string; err: string }> {
+function run(
+	cmd: string,
+	argv: string[],
+	timeoutMs: number,
+): Promise<{ code: number | null; out: string; err: string }> {
 	return new Promise((resolve, reject) => {
 		// Fixed argv, no shell, a minimal environment, and a hard timeout.
 		const child = spawn(cmd, argv, {
@@ -290,7 +306,18 @@ export function buildFfmpegArgs(
 	const wavIndex: Record<number, number> = {};
 	let n = 0;
 	for (const f of frames) {
-		args.push("-protocol_whitelist", "file", "-loop", "1", "-framerate", String(FPS), "-t", f.sec.toFixed(3), "-i", f.png);
+		args.push(
+			"-protocol_whitelist",
+			"file",
+			"-loop",
+			"1",
+			"-framerate",
+			String(FPS),
+			"-t",
+			f.sec.toFixed(3),
+			"-i",
+			f.png,
+		);
 		n++;
 	}
 	frames.forEach((f, i) => {
@@ -314,34 +341,63 @@ export function buildFfmpegArgs(
 			labels.push(`[a${i}]`);
 		}
 	});
-	parts.push(`${labels.join("")}concat=n=${frames.length}:v=1:a=${anyAudio ? 1 : 0}[v]${anyAudio ? "[a]" : ""}`);
+	parts.push(
+		`${labels.join("")}concat=n=${frames.length}:v=1:a=${anyAudio ? 1 : 0}[v]${anyAudio ? "[a]" : ""}`,
+	);
 	args.push("-filter_complex", parts.join(";"), "-map", "[v]");
 	if (anyAudio) args.push("-map", "[a]", "-c:a", "aac", "-b:a", "128k", "-ar", "48000");
 	args.push(
-		"-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-		"-threads", "1", "-x264-params", "threads=1:sliced-threads=0",
-		"-fflags", "+bitexact", "-flags:v", "+bitexact", "-flags:a", "+bitexact",
-		"-map_metadata", "-1", "-movflags", "+faststart",
+		"-c:v",
+		"libx264",
+		"-preset",
+		"medium",
+		"-crf",
+		"20",
+		"-pix_fmt",
+		"yuv420p",
+		"-threads",
+		"1",
+		"-x264-params",
+		"threads=1:sliced-threads=0",
+		"-fflags",
+		"+bitexact",
+		"-flags:v",
+		"+bitexact",
+		"-flags:a",
+		"+bitexact",
+		"-map_metadata",
+		"-1",
+		"-movflags",
+		"+faststart",
 		out,
 	);
 	return args;
 }
 
-const insideRoot = (real: string, root: string) => real === root || real.startsWith(root + path.sep);
+const insideRoot = (real: string, root: string) =>
+	real === root || real.startsWith(root + path.sep);
 
 /**
  * An absolute, executable path for a tool: a named absolute override, else the first ABSOLUTE
  * PATH entry that has it. Relative PATH entries (node_modules/.bin, ".") are skipped, and a
  * binary that resolves inside the workspace is refused, so a project cannot ship its own ffmpeg.
  */
-export function resolveBinary(name: string, cwd: string, override?: string, pathEnv = process.env.PATH ?? ""): string {
+export function resolveBinary(
+	name: string,
+	cwd: string,
+	override?: string,
+	pathEnv = process.env.PATH ?? "",
+): string {
 	const root = fs.realpathSync(cwd);
 	const check = (cand: string): string | null => {
 		try {
 			const real = fs.realpathSync(cand);
 			if (!fs.statSync(real).isFile()) return null;
 			fs.accessSync(real, fs.constants.X_OK);
-			if (insideRoot(real, root)) throw new Error(`${name} resolves inside the working directory (${real}); refusing to run it`);
+			if (insideRoot(real, root))
+				throw new Error(
+					`${name} resolves inside the working directory (${real}); refusing to run it`,
+				);
 			return cand;
 		} catch (e) {
 			if ((e as NodeJS.ErrnoException).code) return null;
@@ -349,7 +405,8 @@ export function resolveBinary(name: string, cwd: string, override?: string, path
 		}
 	};
 	if (override) {
-		if (!path.isAbsolute(override)) throw new Error(`${name} override must be an absolute path ("${override}")`);
+		if (!path.isAbsolute(override))
+			throw new Error(`${name} override must be an absolute path ("${override}")`);
 		const ok = check(override);
 		if (!ok) throw new Error(`${name} not found at ${override}`);
 		return ok;
@@ -359,7 +416,9 @@ export function resolveBinary(name: string, cwd: string, override?: string, path
 		const ok = check(path.join(dir, name));
 		if (ok) return ok;
 	}
-	throw new Error(`${name} not found on an absolute PATH entry: render_video_deck needs ffmpeg installed locally`);
+	throw new Error(
+		`${name} not found on an absolute PATH entry: render_video_deck needs ffmpeg installed locally`,
+	);
 }
 
 /** Write src to out so a link swapped in after the checks cannot carry the write outside cwd. */
@@ -367,7 +426,10 @@ export function placeOutput(src: string, out: string, cwd: string): void {
 	const root = fs.realpathSync(cwd);
 	const parentOk = () => {
 		const real = fs.realpathSync(path.dirname(out));
-		if (!insideRoot(real, root)) throw new Error(`Path traversal blocked: output parent resolves outside the working directory`);
+		if (!insideRoot(real, root))
+			throw new Error(
+				"Path traversal blocked: output parent resolves outside the working directory",
+			);
 		return real;
 	};
 	const parent = parentOk();
@@ -383,21 +445,66 @@ export function placeOutput(src: string, out: string, cwd: string): void {
 	}
 }
 
-export async function probeDuration(file: string, ffprobe: string, timeoutMs = 30000): Promise<number> {
+export interface MediaProbe {
+	durationSec: number;
+	videoSec: number;
+	audioSec: number | null;
+	width: number;
+	height: number;
+}
+
+const sec = (v: unknown) => Math.round(Number.parseFloat(String(v)) * 1000) / 1000;
+
+/** One ffprobe pass: container length, picture size, and each stream's own length. */
+export async function probeMedia(
+	file: string,
+	ffprobe: string,
+	timeoutMs = 30000,
+): Promise<MediaProbe> {
 	const r = await run(
 		ffprobe,
-		["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file],
+		[
+			"-v",
+			"error",
+			"-show_entries",
+			"stream=codec_type,width,height,duration:format=duration",
+			"-of",
+			"json",
+			file,
+		],
 		timeoutMs,
 	);
-	const d = Number.parseFloat(r.out.trim());
-	if (r.code !== 0 || !Number.isFinite(d)) throw new Error(`ffprobe could not read ${path.basename(file)}`);
-	return Math.round(d * 1000) / 1000;
+	type Probe = {
+		streams?: { codec_type?: string; width?: number; height?: number; duration?: string }[];
+		format?: { duration?: string };
+	};
+	let j: Probe = {};
+	try {
+		j = JSON.parse(r.out) as Probe;
+	} catch {}
+	const v = j.streams?.find((s) => s.codec_type === "video");
+	const a = j.streams?.find((s) => s.codec_type === "audio");
+	const durationSec = sec(j.format?.duration);
+	if (r.code !== 0 || !v?.width || !v.height || !Number.isFinite(durationSec)) {
+		throw new Error(`ffprobe could not read a video stream from ${path.basename(file)}`);
+	}
+	const videoSec = sec(v.duration);
+	const audioSec = a ? sec(a.duration) : null;
+	return {
+		durationSec,
+		videoSec: Number.isFinite(videoSec) ? videoSec : durationSec,
+		audioSec: audioSec !== null && Number.isFinite(audioSec) ? audioSec : null,
+		width: v.width,
+		height: v.height,
+	};
 }
 
 export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDeckResult> {
 	const parsed = DeckSpecSchema.safeParse(opts.spec);
 	if (!parsed.success) {
-		const msg = parsed.error.issues.map((i) => `${i.path.join(".") || "spec"}: ${i.message}`).join("; ");
+		const msg = parsed.error.issues
+			.map((i) => `${i.path.join(".") || "spec"}: ${i.message}`)
+			.join("; ");
 		throw new Error(`invalid deck spec: ${msg}`);
 	}
 	const spec = parsed.data;
@@ -408,7 +515,8 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 		return ms;
 	};
 	const declared = spec.slides.reduce((n, sl) => n + (sl.seconds ?? 4), 0);
-	if (declared > MAX_TOTAL_SECONDS) throw new Error(`deck is ${declared}s; the limit is ${MAX_TOTAL_SECONDS}s`);
+	if (declared > MAX_TOTAL_SECONDS)
+		throw new Error(`deck is ${declared}s; the limit is ${MAX_TOTAL_SECONDS}s`);
 	const [W, H] = SIZES[spec.size];
 
 	fs.mkdirSync(path.dirname(opts.out), { recursive: true });
@@ -418,7 +526,8 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 		throw new Error("refusing to use .tmp: it is a symlink");
 	}
 	fs.mkdirSync(scratchRoot, { recursive: true });
-	if (!insideRoot(fs.realpathSync(scratchRoot), root)) throw new Error("refusing to use .tmp: it resolves outside the working directory");
+	if (!insideRoot(fs.realpathSync(scratchRoot), root))
+		throw new Error("refusing to use .tmp: it resolves outside the working directory");
 	const work = fs.mkdtempSync(path.join(scratchRoot, "video-deck-"));
 	try {
 		const frames: { png: string; sec: number; wav?: string }[] = [];
@@ -456,7 +565,8 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 			// Whole frames only, so the same spec always lands on the same frame count.
 			const fixed = Math.ceil(sec * FPS) / FPS;
 			total += fixed;
-			if (total > MAX_TOTAL_SECONDS) throw new Error(`deck is over ${MAX_TOTAL_SECONDS}s once narration is counted`);
+			if (total > MAX_TOTAL_SECONDS)
+				throw new Error(`deck is over ${MAX_TOTAL_SECONDS}s once narration is counted`);
 			frames.push({ png, sec: fixed, wav });
 		}
 		// Caps, images and narration are all settled above; only now are the binaries looked up.
@@ -464,16 +574,25 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 		const ffprobe = resolveBinary("ffprobe", opts.cwd, opts.ffprobe ?? process.env.EIGHT_FFPROBE);
 		const anyAudio = frames.some((f) => f.wav);
 		const tmpOut = path.join(work, "out.mp4");
-		const r = await run(ffmpeg, buildFfmpegArgs(frames, tmpOut, anyAudio), Math.min(opts.timeoutMs ?? 180000, left()));
-		if (r.code !== 0 || !fs.existsSync(tmpOut)) throw new Error(`ffmpeg failed: ${r.err.trim().split("\n").pop() ?? r.code}`);
+		const r = await run(
+			ffmpeg,
+			buildFfmpegArgs(frames, tmpOut, anyAudio),
+			Math.min(opts.timeoutMs ?? 180000, left()),
+		);
+		if (r.code !== 0 || !fs.existsSync(tmpOut))
+			throw new Error(`ffmpeg failed: ${r.err.trim().split("\n").pop() ?? r.code}`);
+		// Measured before it is placed, so a file that does not match the spec never lands in the project.
+		const m = await probeMedia(tmpOut, ffprobe, Math.min(30000, left()));
+		if (m.width !== W || m.height !== H)
+			throw new Error(`ffmpeg wrote ${m.width}x${m.height}, not the ${W}x${H} the spec asks for`);
+		if (anyAudio && m.audioSec === null)
+			throw new Error("ffmpeg wrote no audio stream although slides carry narration");
 		placeOutput(tmpOut, opts.out, opts.cwd);
 		return {
 			path: opts.out,
-			durationSec: await probeDuration(opts.out, ffprobe, Math.min(30000, left())),
+			...m,
 			slides: spec.slides.length,
-			width: W,
-			height: H,
-			hasAudio: anyAudio,
+			hasAudio: m.audioSec !== null,
 			kind: "video",
 		};
 	} finally {

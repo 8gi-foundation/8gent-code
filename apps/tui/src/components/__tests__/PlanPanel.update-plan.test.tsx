@@ -14,10 +14,17 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { render } from "ink";
+import { findPlanFile, notePlanTask } from "../../../../../packages/ai/plan-file.js";
 import { toolDefsToSpecs } from "../../../../../packages/ai/text-tool-endpoint.js";
 import { type TextTool, runTextToolAgent } from "../../../../../packages/ai/text-tool-loop.js";
 import { ToolExecutor } from "../../../../../packages/eight/tools.js";
-import { type PlanStep, applyPlanUpdate, settlePlan } from "../../lib/plan-state.js";
+import {
+	type PlanStep,
+	applyPlanUpdate,
+	holdOpenBoxes,
+	planFileTally,
+	settlePlan,
+} from "../../lib/plan-state.js";
 import { PlanPanel } from "../PlanPanel.js";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI
@@ -115,6 +122,86 @@ describe("PLAN column from update_plan", () => {
 			expect(frame).toContain("1 of 3 done · 1 failed");
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	// #4161: the project's PLAN.md is the record. A done the file has not
+	// ticked is refused by the tool and not ticked in the column, and the
+	// column shows the file's own count beside its own.
+	test("a step whose PLAN.md box is open is refused and not ticked; the file's count shows", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "plan-column-file-"));
+		try {
+			fs.writeFileSync(
+				path.join(root, "PLAN.md"),
+				"- [x] 1. Add src/slugify.ts with a test under test/\n- [ ] 2. Update the Usage line in README.md\n",
+			);
+			notePlanTask(root, "Go ahead with the plan in PLAN.md.");
+			const executor = new ToolExecutor(root);
+			const items = [
+				{ step: "Add src/slugify.ts + test under test/", status: "done" },
+				{ step: "Update README.md Usage line", status: "done" },
+			];
+			// What app.tsx onToolStart does with an update_plan call.
+			const file = findPlanFile(root);
+			const steps = applyPlanUpdate([], holdOpenBoxes(items, file));
+			const result = await executor.execute("update_plan", { plan: items });
+
+			expect(result).toStartWith(
+				"Error: update_plan: the plan of record is PLAN.md; tick its boxes with edit_file",
+			);
+			expect(result).toContain("PLAN.md item 2");
+			expect(steps.map((s) => s.status)).toEqual(["done", "pending"]);
+
+			const frame = await lastFrame(
+				<PlanPanel
+					steps={steps}
+					running={true}
+					width={30}
+					animate={false}
+					planFile={planFileTally(file)}
+				/>,
+			);
+			// One header row: the column's count, then the file's, beside it.
+			expect(frame).toMatch(/PLAN\s+1\/2 · PLAN\.md 1\/2/);
+			expect(frame).toContain("✓ Add src/slugify.ts");
+			expect(frame).not.toContain("✓ Update README.md");
+
+			// No plan file: the column and the tool behave as before.
+			fs.rmSync(path.join(root, "PLAN.md"));
+			expect(holdOpenBoxes(items, findPlanFile(root))).toEqual(items);
+			expect(await executor.execute("update_plan", { plan: items })).toBe(
+				"Plan updated: 2 of 2 done",
+			);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	// #4161 review: the first layout put the file's count on a second header
+	// row, which the pilot read as a status-strip line. At the real column
+	// width (24) and with two- and three-digit counts the header stays one row.
+	test("the header stays one row at the column's width with long counts and a long name", async () => {
+		for (const n of [12, 120]) {
+			const steps: PlanStep[] = Array.from({ length: n }, (_, i) => ({
+				id: `s${i}`,
+				text: `Step ${i}`,
+				status: i < n - 2 ? "done" : "pending",
+			}));
+			const frame = await lastFrame(
+				<PlanPanel
+					steps={steps}
+					running={true}
+					width={24}
+					animate={false}
+					planFile={{ name: "docs/a-very-long-rollout-plan.md", ticked: n - 3, total: n }}
+				/>,
+			);
+			const rows = frame.split("\n");
+			const header = rows.findIndex((r) => r.includes("PLAN"));
+			expect(rows[header]).toContain(`${n - 2}/${n}`);
+			expect(rows[header]).toContain(`${n - 3}/${n}`);
+			expect(rows[header + 1]?.trim()).toBe("");
+			for (const r of rows) expect(r.trimEnd().length).toBeLessThanOrEqual(24);
 		}
 	});
 });

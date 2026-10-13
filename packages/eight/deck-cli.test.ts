@@ -91,6 +91,8 @@ describe("8gent deck render", () => {
 			return {
 				path: o.out,
 				durationSec: 2,
+				videoSec: 2,
+				audioSec: null,
 				slides: 2,
 				width: 1280,
 				height: 720,

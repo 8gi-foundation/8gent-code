@@ -12,6 +12,7 @@
 | `8gent run <prompt>` | One-shot run, see [Headless](headless.md) |
 | `8gent review` | Review the current git diff |
 | `8gent doctor` | Check models and tools |
+| `8gent deck render <spec.json> [out.mp4]` | Render a slide video from a JSON spec, see [Slide videos](#slide-videos) |
 
 ## In the interface
 
@@ -55,6 +56,31 @@ You typed the command, so it runs like a line in your own terminal, with no appr
 **`/copy`.** Puts the last answer on your clipboard. It works over SSH and in Windows Terminal, iTerm2, kitty and WezTerm, and inside tmux or screen. If your terminal ignores the clipboard sequence, select the text instead.
 
 Sessions are saved in `~/.8gent/sessions`.
+
+## Slide videos
+
+Ask for a narrated slide video and 8gent writes a small JSON spec, then calls the `render_video_deck` tool. Code draws each slide, speaks each narration line with the local voice, holds each slide for as long as its line takes, and joins them into one mp4. No model touches the pixels, nothing goes to the network, and the same spec gives the same video.
+
+```json
+{
+  "title": "Tide Library",
+  "size": "1280x720",
+  "slides": [
+    { "title": "Tide Library", "text": "A tool-lending library", "narration": "Meet Tide Library." },
+    { "kicker": "How to borrow", "title": "Get a free card", "bullets": ["Proof of address", "Three items a week"], "narration": "Get a free card at the desk." }
+  ]
+}
+```
+
+Each slide needs a `title`, `text`, `bullets` or `image` (a png or jpg inside the project). `seconds` sets a minimum hold (default 4); narration stretches a slide to fit its voice plus half a second either side. Up to 40 slides and 10 minutes. The result is read back from the file with ffprobe: `durationSec`, `videoSec`, `audioSec`, `width`, `height` and `slides`. A video whose size does not match the spec, or that lost its sound, is refused and never written.
+
+The same renderer runs from the shell:
+
+```text
+8gent deck render deck.json video/brief.mp4
+```
+
+Both paths must be inside the current folder. It needs `ffmpeg` and `ffprobe` on your PATH, and a local voice (Supertonic or KittenTTS) for narration; without one, a narrated spec fails and says so rather than falling back to another voice.
 
 ## Approvals
 

@@ -14,6 +14,8 @@
  * says "0 of 5 done", which is the truth.
  */
 
+import { type PlanFile, matchBox, planFileCount } from "../../../../packages/ai/plan-file.js";
+
 export type PlanStepStatus = "pending" | "active" | "done" | "failed";
 
 export interface PlanStep {
@@ -52,14 +54,21 @@ function keyOf(text: string): string {
  * (same text) keep their status and position; new steps are appended, so a
  * step added mid-run lands at the end instead of reshuffling the list.
  */
-export function mergePlanText(prev: ReadonlyArray<PlanStep>, texts: ReadonlyArray<string>): PlanStep[] {
+export function mergePlanText(
+	prev: ReadonlyArray<PlanStep>,
+	texts: ReadonlyArray<string>,
+): PlanStep[] {
 	const seen = new Set(prev.map((s) => keyOf(s.text)));
 	const next = [...prev];
 	for (const text of texts) {
 		const k = keyOf(text);
 		if (!k || seen.has(k)) continue;
 		seen.add(k);
-		next.push({ id: `step-${next.length + 1}-${k.slice(0, 24)}`, text: text.trim(), status: "pending" });
+		next.push({
+			id: `step-${next.length + 1}-${k.slice(0, 24)}`,
+			text: text.trim(),
+			status: "pending",
+		});
 	}
 	return next;
 }
@@ -77,7 +86,10 @@ export interface PlanUpdateItem {
  * stable (and so rows do not re-land); unknown text becomes a new step.
  * At most one step is active: if several say so, the first wins.
  */
-export function applyPlanUpdate(prev: ReadonlyArray<PlanStep>, items: ReadonlyArray<PlanUpdateItem>): PlanStep[] {
+export function applyPlanUpdate(
+	prev: ReadonlyArray<PlanStep>,
+	items: ReadonlyArray<PlanUpdateItem>,
+): PlanStep[] {
 	const byKey = new Map(prev.map((s) => [keyOf(s.text), s]));
 	const out: PlanStep[] = [];
 	let activeSeen = false;
@@ -118,4 +130,37 @@ export function replyPlan(
 	replyPlanLines: ReadonlyArray<string>,
 ): PlanStep[] {
 	return settlePlan(mergePlanText(held, replyPlanLines));
+}
+
+/**
+ * The checklist file the PLAN column mirrors (#4161), counted: its name and
+ * how many of its boxes are ticked. Null when the project has none.
+ */
+export interface PlanFileTally {
+	name: string;
+	ticked: number;
+	total: number;
+}
+
+export function planFileTally(file: PlanFile | null): PlanFileTally | null {
+	return file ? { name: file.name, ...planFileCount(file) } : null;
+}
+
+/**
+ * The same refusal update_plan makes (packages/ai/update-plan.ts), applied to
+ * the column: a step reported done while its box in the plan file is still
+ * open is shown as not done. The tool call that carried it was refused, so
+ * the column must not tick what the file has not.
+ */
+export function holdOpenBoxes(
+	items: ReadonlyArray<PlanUpdateItem>,
+	file: PlanFile | null,
+): PlanUpdateItem[] {
+	if (!file) return [...items];
+	return items.map((item) => {
+		const raw = item.step ?? item.text ?? item.content;
+		if (typeof raw !== "string" || normaliseStatus(item.status) !== "done") return item;
+		const box = matchBox(raw, file.boxes);
+		return box && !box.checked ? { ...item, status: "pending" } : item;
+	});
 }
