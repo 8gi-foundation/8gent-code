@@ -374,7 +374,7 @@ describe("the narration carries every brief point (#4154)", () => {
 
 	test("not refused: ffmpeg named anywhere but as the executable of a video render", () => {
 		const dir = videoDir(PARAPHRASED);
-		writeShapeLine(path.join(dir, "video/narration.txt"), PARAPHRASED); // written this session
+		writeShapeLine(path.join(dir, "video/narration.txt"), PARAPHRASED); // written this process
 		for (const cmd of [
 			"ffmpeg -version",
 			"which ffmpeg",
@@ -436,12 +436,42 @@ describe("the narration carries every brief point (#4154)", () => {
 		expect(renderCoverageRefusal("bash video/pipe.sh", dir)).toBeNull();
 	});
 
-	test("a narration written this session binds a render anywhere in the session", () => {
+	test("a written narration binds renders from its project root or inside it, not from a parent", () => {
 		const dir = videoDir(PARAPHRASED);
 		const out = path.join(tempDir("out-"), "final.mp4");
 		expect(renderCoverageRefusal(`ffmpeg -i video/brief.mp4 ${out}`, dir)).toBeNull();
 		writeShapeLine(path.join(dir, "video/narration.txt"), PARAPHRASED);
 		expect(renderCoverageRefusal(`ffmpeg -i video/brief.mp4 ${out}`, dir)).toContain("How to help");
+		expect(renderCoverageRefusal(`ffmpeg -i brief.mp4 ${out}`, path.join(dir, "video"))).toContain(
+			"How to help",
+		);
+		// A parent of that working directory is not inside it.
+		expect(renderCoverageRefusal(`ffmpeg -i x.mov ${out}`, path.dirname(dir))).toBeNull();
+	});
+
+	test("another session's narration does not refuse and is never named (one process, many sessions)", async () => {
+		// Session A writes a narration with a gap and renders beside it.
+		const a = videoDir(PARAPHRASED);
+		writeShapeLine(path.join(a, "video/narration.txt"), PARAPHRASED);
+		const since = Date.now() - 1000;
+		fs.writeFileSync(path.join(a, "video/brief.mp4"), "x");
+		expect(renderCoverageRefusal("bash video/build.sh", a)).toContain("How to help");
+		// Session B, another project in the same process: an unrelated render.
+		const b = tempDir("project-b-");
+		fs.writeFileSync(path.join(b, "out.mp4"), "x");
+		expect(renderCoverageRefusal("ffmpeg -i ~/Downloads/clip.mov out.mp4", b)).toBeNull();
+		expect(preSpawnRefusal("ffmpeg -i ~/Downloads/clip.mov out.mp4", b)).toBeNull();
+		const resultB = await withImagesWritten("done", b, since);
+		expect(resultB).toBe("done");
+		expect(resultB).not.toContain(a);
+		expect(renderedCoverageLine(b, 0)).toBe("");
+		// A still sees its own.
+		expect(renderedCoverageLine(a, since)).toContain("How to help (missing: volunteers)");
+	});
+
+	test("a compound said as two words counts (boat house, boathouse)", () => {
+		const spaced = FIXED_NARRATION.replace("boathouse", "boat house");
+		expect(narrationGaps(points, spaced)).toEqual([]);
 	});
 
 	test("after render: a video beside a narration written this session is named in the command result", async () => {
@@ -456,7 +486,7 @@ describe("the narration carries every brief point (#4154)", () => {
 		expect(out).toContain("the narration has no segment for: How to help (missing: volunteers)");
 		fs.writeFileSync(path.join(dir, "video/narration.txt"), FIXED_NARRATION);
 		expect(await withImagesWritten("done", dir, since)).toBe("done");
-		expect(renderedCoverageLine(Date.now() + 60_000)).toBe("");
+		expect(renderedCoverageLine(dir, Date.now() + 60_000)).toBe("");
 	});
 
 	test("EIGHT_NARRATION_CHECK=0, false or off turns every part off", () => {
@@ -467,7 +497,7 @@ describe("the narration carries every brief point (#4154)", () => {
 				expect(writeShapeLine(path.join(dir, "video/narration.txt"), PARAPHRASED)).not.toContain(
 					"Coverage",
 				);
-				expect(renderedCoverageLine(0)).toBe("");
+				expect(renderedCoverageLine(dir, 0)).toBe("");
 			});
 		}
 	});
@@ -486,6 +516,11 @@ describe("the narration carries every brief point (#4154)", () => {
 			content: PARAPHRASED,
 		});
 		expect(text).toContain("the narration has no segment for: How to help (missing: volunteers)");
+		// ToolExecutor recorded it under its working directory: a render to elsewhere is bound.
+		const elsewhere = path.join(tempDir("out-"), "final.mp4");
+		expect(renderCoverageRefusal(`ffmpeg -i a.mov ${elsewhere}`, dir)).toContain("How to help");
+		forgetWrittenNarrations();
+		expect(renderCoverageRefusal(`ffmpeg -i a.mov ${elsewhere}`, dir)).toBeNull();
 		const before = getToolContext();
 		setToolContext({ ...before, workingDirectory: dir });
 		try {
@@ -496,6 +531,8 @@ describe("the narration carries every brief point (#4154)", () => {
 			expect(native).toContain(
 				"the narration has no segment for: How to help (missing: volunteers)",
 			);
+			// The native path recorded it under the tool context's working directory too.
+			expect(renderCoverageRefusal(`ffmpeg -i a.mov ${elsewhere}`, dir)).toContain("How to help");
 		} finally {
 			setToolContext(before);
 		}

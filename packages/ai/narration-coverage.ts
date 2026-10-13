@@ -28,7 +28,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 const SLIDES_NAMES = ["slides.md", "slides.markdown"];
 const NARRATION_NAMES = ["narration.txt", "narration.md"];
@@ -65,12 +65,32 @@ const NUMBER_WORDS = [
 	"twelve",
 ];
 
-/** Narrations write_file wrote in this process: the only ones judged without a render naming their folder. */
-const writtenNarrations = new Set<string>();
+/**
+ * Narrations write_file wrote, keyed by their project root: the folder holding
+ * the brief they answer (their own folder or the one above), else their own
+ * folder. The daemon runs several sessions in one process, so a narration binds
+ * only renders whose working directory is that root or inside it, and the
+ * after-render line names only those; a session in another project never sees
+ * it (8SO, #4158). The root, not the writer's working directory, is the key:
+ * a session working from ~ would otherwise bind every render under ~.
+ */
+const writtenNarrations = new Map<string, Set<string>>();
 
 /** Test hook: forget the narrations written so far. */
 export function forgetWrittenNarrations(): void {
 	writtenNarrations.clear();
+}
+
+function within(cwd: string, root: string): boolean {
+	const rel = relative(root, cwd);
+	return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/** The narrations written from `cwd` or a working directory that contains it. */
+function narrationsFor(cwd: string): string[] {
+	const out: string[] = [];
+	for (const [root, paths] of writtenNarrations) if (within(resolve(cwd), root)) out.push(...paths);
+	return out;
 }
 
 function checkOff(): boolean {
@@ -233,13 +253,16 @@ function firstSentence(text: string): string {
  */
 export function narrationGaps(points: BriefPoint[], narration: string): NarrationGap[] {
 	const spoken = new Set<string>();
-	for (const w of clean(narration)
+	const said = clean(narration)
 		.split(/[^\p{L}\d]+/u)
-		.filter(Boolean)) {
+		.filter(Boolean);
+	said.forEach((w, i) => {
 		spoken.add(
 			stem(/^\d+$/.test(w) && Number(w) < NUMBER_WORDS.length ? NUMBER_WORDS[Number(w)] : w),
 		);
-	}
+		// "boat house" says "boathouse".
+		if (i + 1 < said.length) spoken.add(stem(`${w}${said[i + 1]}`));
+	});
 	const gaps: NarrationGap[] = [];
 	for (const p of points) {
 		// The label adds nouns to the call to action, never warnings ("How to help" warns of nothing).
@@ -299,6 +322,13 @@ interface Coverage {
  * The narration in `dir` checked against the brief beside it or one folder up
  * (beside its video/ folder), or the slides in `dir` when there is no brief.
  */
+/** The folder holding the brief for a narration in `dir` (`dir` or its parent), else `dir`. */
+function projectRoot(dir: string): string {
+	if (firstIn(dir, BRIEF_NAMES)) return dir;
+	if (firstIn(dirname(dir), BRIEF_NAMES)) return dirname(dir);
+	return dir;
+}
+
 function coverageIn(dir: string): Coverage | null {
 	const narration = firstIn(dir, NARRATION_NAMES);
 	if (!narration) return null;
@@ -331,14 +361,19 @@ const hasHard = (c: Coverage | null): c is Coverage =>
 	c?.gaps.some((g) => g.missing.length > 0) === true;
 
 /**
- * After write_file wrote `filePath` (absolute): remember a narration, and name
- * every point the narration does not carry. "" when there is nothing to say.
+ * After write_file wrote `filePath` (absolute): remember a narration under its
+ * project root, and name every point the narration does not carry. "" when
+ * there is nothing to say.
  */
 export function narrationCoverageAfterWrite(filePath: string): string {
 	const name = basename(filePath);
 	if (checkOff() || !isAbsolute(filePath)) return "";
-	if (NARRATION_NAMES.includes(name)) writtenNarrations.add(filePath);
-	else if (!SLIDES_NAMES.includes(name)) return "";
+	if (NARRATION_NAMES.includes(name)) {
+		const root = projectRoot(dirname(filePath));
+		const paths = writtenNarrations.get(root) ?? new Set<string>();
+		paths.add(filePath);
+		writtenNarrations.set(root, paths);
+	} else if (!SLIDES_NAMES.includes(name)) return "";
 	const found = coverageIn(dirname(filePath));
 	if (!found || found.gaps.length === 0) return "";
 	const lines: string[] = [];
@@ -476,7 +511,8 @@ function renderFolders(command: string, cwd: string, depth = 0): Set<string> {
 /**
  * The refusal for a render while a narration it is bound to does not carry
  * every brief point, or null. Bound means: the narration sits in the folder
- * the render writes its video into, or write_file wrote it in this process.
+ * the render writes its video into, or write_file wrote it and the render's
+ * working directory is its project root or inside it.
  * Runs before any approval card (pre-spawn).
  */
 export function renderCoverageRefusal(command: string, cwd: string): string | null {
@@ -484,7 +520,7 @@ export function renderCoverageRefusal(command: string, cwd: string): string | nu
 	const outputs = renderFolders(command, cwd);
 	if (outputs.size === 0) return null;
 	const dirs = new Set<string>(outputs);
-	for (const n of writtenNarrations) dirs.add(dirname(n));
+	for (const n of narrationsFor(cwd)) dirs.add(dirname(n));
 	for (const dir of dirs) {
 		const found = coverageIn(dir);
 		if (hasHard(found)) {
@@ -496,12 +532,13 @@ export function renderCoverageRefusal(command: string, cwd: string): string | nu
 
 /**
  * After any command: if a video was written since `sinceMs` beside a narration
- * write_file wrote in this process, and that narration still lacks a point,
- * say so naming the point. Only those folders are scanned.
+ * write_file wrote whose project root is `cwd` or an ancestor of it, and that
+ * narration still lacks a point, say so naming the point. Only those folders
+ * are scanned; other sessions' narrations are never named.
  */
-export function renderedCoverageLine(sinceMs: number): string {
+export function renderedCoverageLine(cwd: string, sinceMs: number): string {
 	if (checkOff() || writtenNarrations.size === 0) return "";
-	for (const narration of writtenNarrations) {
+	for (const narration of narrationsFor(cwd)) {
 		const dir = dirname(narration);
 		let fresh: string[] = [];
 		try {

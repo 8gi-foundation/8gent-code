@@ -257,7 +257,7 @@ export async function withImagesWritten(
 	// #4154: a video rendered beside a narration written this session that lacks a brief point.
 	const coverage = async () => {
 		try {
-			return renderedCoverageLine(sinceMs);
+			return renderedCoverageLine(workingDirectory, sinceMs);
 		} catch {
 			return "";
 		}
