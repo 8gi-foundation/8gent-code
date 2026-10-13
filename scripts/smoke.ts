@@ -21,45 +21,46 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { generateText } from "ai";
 
-// Surfaces under test
-import { createModel, type ProviderName } from "../packages/ai/providers";
-import { agentTools } from "../packages/ai/tools";
-import { ROLE_REGISTRY } from "../packages/orchestration/role-registry";
-import { BUILT_IN_SLASH_COMMANDS } from "../apps/tui/src/lib/slash-commands";
-import { findUndispatched } from "./lib/slash-dispatch";
-import { getBuiltInSlashCommands } from "../apps/tui/src/lib/slash-registry";
 import {
 	EXTERNAL_AGENT_PRESETS,
 	getPreset,
 	listPresetIds,
 } from "../apps/tui/src/lib/external-agent-runner";
-import {
-	loadSettings,
-	saveSettings,
-	getSetting,
-	setSetting,
-	getSettingsFilePath,
-	DEFAULT_SETTINGS,
-} from "../packages/settings";
-import { computeAutoTune } from "../packages/eight/auto-tune";
-import { VoiceSilenceLearner } from "../packages/eight/voice-silence-learner";
-import {
-	setVisualiserTokenSink,
-	notifyVisualiserToken,
-	_hasSink,
-} from "../packages/eight/visualiser-bridge";
+import { BUILT_IN_SLASH_COMMANDS } from "../apps/tui/src/lib/slash-commands";
+import { getBuiltInSlashCommands } from "../apps/tui/src/lib/slash-registry";
 import {
 	DEFAULT_PARAMS,
-	perturbFromToken,
-	mutateForBoredom,
 	hashToken,
+	mutateForBoredom,
+	perturbFromToken,
 } from "../apps/tui/src/lib/visualiser-params";
+// Surfaces under test
+import { type ProviderName, createModel } from "../packages/ai/providers";
+import { agentTools } from "../packages/ai/tools";
+import { resolveHome } from "../packages/core/home";
+import { computeAutoTune } from "../packages/eight/auto-tune";
 import {
-	createAutoSkill,
-	_resetForTests as _resetSkillCreator,
-	MAX_AUTO_SKILLS_PER_SESSION,
-} from "../packages/self-autonomy/skill-creator";
+	_hasSink,
+	notifyVisualiserToken,
+	setVisualiserTokenSink,
+} from "../packages/eight/visualiser-bridge";
+import { VoiceSilenceLearner } from "../packages/eight/voice-silence-learner";
+import { ROLE_REGISTRY } from "../packages/orchestration/role-registry";
 import { ModelFailover } from "../packages/providers/failover";
+import {
+	MAX_AUTO_SKILLS_PER_SESSION,
+	_resetForTests as _resetSkillCreator,
+	createAutoSkill,
+} from "../packages/self-autonomy/skill-creator";
+import {
+	DEFAULT_SETTINGS,
+	getSetting,
+	getSettingsFilePath,
+	loadSettings,
+	saveSettings,
+	setSetting,
+} from "../packages/settings";
+import { findUndispatched } from "./lib/slash-dispatch";
 
 // ============================================================================
 // Types + helpers
@@ -152,17 +153,13 @@ async function testProviderHealth(
 	});
 }
 
-async function listModels(
-	provider: ProviderName,
-	baseURL: string,
-): Promise<string[] | null> {
+async function listModels(provider: ProviderName, baseURL: string): Promise<string[] | null> {
 	try {
 		const ctrl = new AbortController();
 		const t = setTimeout(() => ctrl.abort(), HTTP_TIMEOUT_MS);
 		try {
 			const root = baseURL.replace(/\/v1$/, "");
-			const url =
-				provider === "ollama" ? `${root}/api/tags` : `${baseURL}/models`;
+			const url = provider === "ollama" ? `${root}/api/tags` : `${baseURL}/models`;
 			const res = await fetch(url, { signal: ctrl.signal });
 			if (!res.ok) return null;
 			const json = (await res.json()) as Record<string, unknown>;
@@ -189,7 +186,7 @@ async function testProviderChatProbe(
 		if (skipNetwork) return { ok: true, skipped: "skip-network" };
 		const baseURL =
 			provider === "apfel"
-				? (process.env.APFEL_BASE_URL || "http://localhost:11500/v1")
+				? process.env.APFEL_BASE_URL || "http://localhost:11500/v1"
 				: provider === "lmstudio"
 					? "http://localhost:1234/v1"
 					: provider === "ollama"
@@ -269,10 +266,7 @@ async function testSettingsRoundTrip(): Promise<SmokeResult> {
 			};
 			saveSettings(next);
 			const after = loadSettings();
-			assert(
-				after.voice.ttsVoice === "SmokeTestVoice",
-				`round-trip: got ${after.voice.ttsVoice}`,
-			);
+			assert(after.voice.ttsVoice === "SmokeTestVoice", `round-trip: got ${after.voice.ttsVoice}`);
 			return { ok: true, detail: filePath };
 		} finally {
 			if (backup !== null) {
@@ -287,7 +281,9 @@ async function testSettingsRoundTrip(): Promise<SmokeResult> {
 async function testSettingsPath(): Promise<SmokeResult> {
 	return timeIt("settings/path", async () => {
 		const p = getSettingsFilePath();
-		const expected = path.join(os.homedir(), ".8gent", "settings.json");
+		// The store resolves through resolveHome() (EIGHT_HOME, then HOME), not
+		// os.homedir(), so compare against the same resolver (#3393).
+		const expected = path.join(resolveHome(), ".8gent", "settings.json");
 		assert(p === expected, `got ${p}, want ${expected}`);
 		return { ok: true, detail: p };
 	});
@@ -299,10 +295,7 @@ async function testSettingsDefaults(): Promise<SmokeResult> {
 		assert(DEFAULT_SETTINGS.voice.silenceThresholdMs === 2000, "silence default");
 		assert(DEFAULT_SETTINGS.performance.mode === "auto", "mode default");
 		assert(DEFAULT_SETTINGS.ui.theme === "amber", "theme default");
-		assert(
-			typeof DEFAULT_SETTINGS.providers.apfel === "object",
-			"apfel provider default",
-		);
+		assert(typeof DEFAULT_SETTINGS.providers.apfel === "object", "apfel provider default");
 		return { ok: true, detail: "defaults valid" };
 	});
 }
@@ -314,11 +307,7 @@ async function testSettingsDeepMerge(): Promise<SmokeResult> {
 		try {
 			// Write a partial file missing several keys.
 			fs.mkdirSync(path.dirname(filePath), { recursive: true });
-			fs.writeFileSync(
-				filePath,
-				JSON.stringify({ voice: { ttsVoice: "Partial" } }),
-				"utf-8",
-			);
+			fs.writeFileSync(filePath, JSON.stringify({ voice: { ttsVoice: "Partial" } }), "utf-8");
 			const merged = loadSettings();
 			assert(merged.voice.ttsVoice === "Partial", "user value preserved");
 			assert(merged.voice.silenceThresholdMs === 2000, "default backfilled");
@@ -426,14 +415,7 @@ async function testSlashUniqueAliases(): Promise<SmokeResult> {
 
 async function testSlashDispatchCoverage(): Promise<SmokeResult> {
 	return timeIt("slash/dispatch-coverage", async () => {
-		const appPath = path.join(
-			import.meta.dir,
-			"..",
-			"apps",
-			"tui",
-			"src",
-			"app.tsx",
-		);
+		const appPath = path.join(import.meta.dir, "..", "apps", "tui", "src", "app.tsx");
 		assert(fs.existsSync(appPath), `app.tsx not found at ${appPath}`);
 		const src = fs.readFileSync(appPath, "utf-8");
 		// Locate the handleSlashCommand callback.
@@ -588,9 +570,7 @@ async function testRequiredSkills(): Promise<SmokeResult> {
 	return timeIt("skills/required", async () => {
 		const skillsDir = path.join(import.meta.dir, "..", "packages", "skills");
 		const required = ["touchdesigner", "voice-chat-mode"];
-		const missing = required.filter(
-			(r) => !fs.existsSync(path.join(skillsDir, r, "SKILL.md")),
-		);
+		const missing = required.filter((r) => !fs.existsSync(path.join(skillsDir, r, "SKILL.md")));
 		assert(missing.length === 0, `missing: ${missing.join(", ")}`);
 		return { ok: true, detail: required.join(", ") };
 	});
@@ -730,10 +710,7 @@ async function testVoiceSilenceFewSamples(): Promise<SmokeResult> {
 			const learner = new VoiceSilenceLearner(tmp);
 			learner.observePause(900);
 			learner.observePause(1100);
-			assert(
-				learner.getRecommendedThreshold() === 2000,
-				"<5 samples should return default 2000",
-			);
+			assert(learner.getRecommendedThreshold() === 2000, "<5 samples should return default 2000");
 			return { ok: true, detail: "<5 samples => 2000ms" };
 		} finally {
 			if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
@@ -838,15 +815,7 @@ async function testVisualiserParamsDeterministic(): Promise<SmokeResult> {
 
 async function testVisualiserParamsClamp(): Promise<SmokeResult> {
 	return timeIt("visualiser-params/clamp", async () => {
-		const samples = [
-			"hello",
-			"12345",
-			"   ",
-			"longwordhere",
-			"!@#$%^&*()",
-			"aeiou",
-			"",
-		];
+		const samples = ["hello", "12345", "   ", "longwordhere", "!@#$%^&*()", "aeiou", ""];
 		let p = DEFAULT_PARAMS;
 		for (let i = 0; i < 200; i++) {
 			p = perturbFromToken(p, samples[i % samples.length]);
@@ -1035,9 +1004,7 @@ async function testRoleRegistry(): Promise<SmokeResult> {
 
 async function testVoiceForRole(): Promise<SmokeResult> {
 	return timeIt("voice/per-agent-defaults", async () => {
-		const { getVoiceForRole, DEFAULT_SETTINGS } = await import(
-			"../packages/settings"
-		);
+		const { getVoiceForRole, DEFAULT_SETTINGS } = await import("../packages/settings");
 		// Each role resolves to a non-empty macOS voice via defaults.
 		for (const role of ["orchestrator", "engineer", "qa"]) {
 			const v = getVoiceForRole(role, DEFAULT_SETTINGS);
@@ -1114,10 +1081,7 @@ async function testOnboardingAgentNamesDefaults(): Promise<SmokeResult> {
 			typeof names.engineer === "string" && names.engineer.length > 0,
 			`engineer: got ${names.engineer}`,
 		);
-		assert(
-			typeof names.qa === "string" && names.qa.length > 0,
-			`qa: got ${names.qa}`,
-		);
+		assert(typeof names.qa === "string" && names.qa.length > 0, `qa: got ${names.qa}`);
 		// Verify canonical defaults exist in the schema (not in the user's
 		// live settings — the user is allowed to rename their agents at any
 		// time via /settings or onboarding, and that's the whole feature).
@@ -1164,10 +1128,7 @@ async function testOnboardingAgentNamesRoundtrip(): Promise<SmokeResult> {
 				after.agents.names.engineer === "Hephaestus",
 				`got ${after.agents.names.engineer}, want Hephaestus`,
 			);
-			assert(
-				after.agents.names.qa === "Cassandra",
-				`got ${after.agents.names.qa}, want Cassandra`,
-			);
+			assert(after.agents.names.qa === "Cassandra", `got ${after.agents.names.qa}, want Cassandra`);
 
 			// resolveRoleName must reflect the persisted custom names.
 			const { resolveRoleName } = await import("../packages/settings");
@@ -1192,9 +1153,7 @@ async function testOnboardingAgentNamesRoundtrip(): Promise<SmokeResult> {
 
 async function testOnboardingProviderCheckShape(): Promise<SmokeResult> {
 	return timeIt("onboarding/provider-check-shape", async () => {
-		const { shouldShowInstallHint } = await import(
-			"../apps/tui/src/screens/OnboardingScreen"
-		);
+		const { shouldShowInstallHint } = await import("../apps/tui/src/screens/OnboardingScreen");
 		// Loading: never show hint.
 		assert(
 			shouldShowInstallHint("ollama", {
@@ -1279,10 +1238,7 @@ async function testTuiLayoutContentWidth(): Promise<SmokeResult> {
 				);
 				// Floor: content width should never collapse below 16 even when
 				// sidebar is open at narrow widths.
-				assert(
-					content >= 16,
-					`content width below floor at cols=${cols}: ${content}`,
-				);
+				assert(content >= 16, `content width below floor at cols=${cols}: ${content}`);
 			}
 		}
 		return { ok: true, detail: "content+sidebar safe at 60-160 cols" };
@@ -1291,11 +1247,9 @@ async function testTuiLayoutContentWidth(): Promise<SmokeResult> {
 
 async function testTuiLayoutSidebarShrinks(): Promise<SmokeResult> {
 	return timeIt("tui-layout/sidebar-shrinks", async () => {
-		const { computeProcessSidebarWidth } = await import(
-			"../apps/tui/src/lib/layout-breakpoints"
-		);
+		const { computeProcessSidebarWidth } = await import("../apps/tui/src/lib/layout-breakpoints");
 		// Sidebar must shrink (or stay equal) as viewport narrows; never grow.
-		let prev = Infinity;
+		let prev = Number.POSITIVE_INFINITY;
 		for (const cols of [160, 120, 100, 92, 80, 60]) {
 			const w = computeProcessSidebarWidth(true, cols);
 			assert(w <= prev, `sidebar grew when narrowing: ${prev} -> ${w} at cols=${cols}`);
@@ -1310,24 +1264,16 @@ async function testTuiLayoutSidebarShrinks(): Promise<SmokeResult> {
 
 async function testTuiLayoutBreakLongTokensSeam(): Promise<SmokeResult> {
 	return timeIt("tui-layout/break-long-tokens", async () => {
-		const { breakLongTokensForTest } = await import(
-			"../apps/tui/src/components/message-list.tsx"
-		);
+		const { breakLongTokensForTest } = await import("../apps/tui/src/components/message-list.tsx");
 		// Soft seam preferred: hyphenated compound should break at the seam,
 		// not produce mashed-up character runs like the reported
 		// "you need-whthink deeplyoding" bug.
 		const compound = "feature/long-branch-name-that-keeps-going-and-going";
 		const wrapped = breakLongTokensForTest(compound, 16);
-		assert(
-			wrapped.includes("\n"),
-			"long compound should be broken across lines",
-		);
+		assert(wrapped.includes("\n"), "long compound should be broken across lines");
 		// Each segment between newlines should fit the width budget.
 		for (const seg of wrapped.split("\n")) {
-			assert(
-				seg.length <= 16,
-				`segment exceeds width budget: "${seg}" (${seg.length} > 16)`,
-			);
+			assert(seg.length <= 16, `segment exceeds width budget: "${seg}" (${seg.length} > 16)`);
 		}
 		// Short tokens are untouched.
 		const short = "hello world";
@@ -1357,10 +1303,7 @@ async function testTuiLayoutVisualiserFitsParent(): Promise<SmokeResult> {
 			// Allow the floor to win at very narrow terminals; it's the
 			// ThinkingVisualizer's own clamp (min=20) that catches the rest.
 			if (cols >= 34) {
-				assert(
-					w + 10 <= cols,
-					`visualiser overflows parent at cols=${cols}: w=${w}`,
-				);
+				assert(w + 10 <= cols, `visualiser overflows parent at cols=${cols}: w=${w}`);
 			}
 		}
 		return { ok: true, detail: "visualiser width fits parent at 60-160 cols" };
@@ -1380,10 +1323,7 @@ async function testTypewriterProgresses(): Promise<SmokeResult> {
 		const msPerChar = 28;
 		// At t = msPerChar * 5, exactly 5 chars should be revealed.
 		const count = computeTypewriterCount(msPerChar * 5, text.length, msPerChar, true);
-		assert(
-			count === 5,
-			`expected count=5 after 5 ticks, got ${count}`,
-		);
+		assert(count === 5, `expected count=5 after 5 ticks, got ${count}`);
 		const view = deriveTypewriterView(text, count, true);
 		assert(
 			view.displayed === text.slice(0, 5),
@@ -1391,12 +1331,7 @@ async function testTypewriterProgresses(): Promise<SmokeResult> {
 		);
 		assert(view.isDone === false, "should not be done at 5/13 chars");
 		// At t = msPerChar * text.length, the reveal completes.
-		const fullCount = computeTypewriterCount(
-			msPerChar * text.length,
-			text.length,
-			msPerChar,
-			true,
-		);
+		const fullCount = computeTypewriterCount(msPerChar * text.length, text.length, msPerChar, true);
 		const fullView = deriveTypewriterView(text, fullCount, true);
 		assert(fullView.isDone === true, "should be done after full duration");
 		assert(
@@ -1410,19 +1345,14 @@ async function testTypewriterProgresses(): Promise<SmokeResult> {
 			msPerChar,
 			true,
 		);
-		assert(
-			overshoot === text.length,
-			`overshoot should clamp to ${text.length}, got ${overshoot}`,
-		);
+		assert(overshoot === text.length, `overshoot should clamp to ${text.length}, got ${overshoot}`);
 		return { ok: true, detail: `5/${text.length} at t=${msPerChar * 5}ms` };
 	});
 }
 
 async function testTypewriterSkip(): Promise<SmokeResult> {
 	return timeIt("tui-anim/typewriter-skip", async () => {
-		const { deriveTypewriterView } = await import(
-			"../apps/tui/src/hooks/useTypewriter"
-		);
+		const { deriveTypewriterView } = await import("../apps/tui/src/hooks/useTypewriter");
 		const text = "Pick a name";
 		// Mid-reveal state: count=3.
 		const partial = deriveTypewriterView(text, 3, true);
@@ -1430,10 +1360,7 @@ async function testTypewriterSkip(): Promise<SmokeResult> {
 		assert(partial.isDone === false, "partial should not be done");
 		// Simulating skip(): caller jumps count to fullText.length. Re-derive.
 		const skipped = deriveTypewriterView(text, text.length, true);
-		assert(
-			skipped.displayed === text,
-			`skipped should show full text, got "${skipped.displayed}"`,
-		);
+		assert(skipped.displayed === text, `skipped should show full text, got "${skipped.displayed}"`);
 		assert(skipped.isDone === true, "skipped should be done");
 		return { ok: true, detail: "skip jumps count to fullText.length" };
 	});
@@ -1447,15 +1374,9 @@ async function testTypewriterDisabled(): Promise<SmokeResult> {
 		const text = "Disabled path returns full text immediately.";
 		// computeTypewriterCount with enabled=false ignores elapsed time.
 		const count = computeTypewriterCount(0, text.length, 28, false);
-		assert(
-			count === text.length,
-			`disabled count should be ${text.length}, got ${count}`,
-		);
+		assert(count === text.length, `disabled count should be ${text.length}, got ${count}`);
 		const view = deriveTypewriterView(text, 0, false);
-		assert(
-			view.displayed === text,
-			`disabled view should equal fullText, got "${view.displayed}"`,
-		);
+		assert(view.displayed === text, `disabled view should equal fullText, got "${view.displayed}"`);
 		assert(view.isDone === true, "disabled view should be done");
 		return { ok: true, detail: "enabled=false short-circuits to full text" };
 	});
@@ -1468,25 +1389,13 @@ async function testTypewriterDisabled(): Promise<SmokeResult> {
 function printTable(results: SmokeResult[]): void {
 	const nameW = Math.max(4, ...results.map((r) => r.name.length));
 	const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - s.length));
-	const head = [
-		pad("test", nameW),
-		"status",
-		"ms".padStart(5),
-		"detail",
-	].join("  ");
+	const head = [pad("test", nameW), "status", "ms".padStart(5), "detail"].join("  ");
 	console.log(head);
 	console.log("-".repeat(Math.min(120, head.length + 40)));
 	for (const r of results) {
 		const status = r.skipped ? "SKIP" : r.ok ? "OK  " : "FAIL";
 		const detail = (r.skipped || r.detail || "").slice(0, 80).replace(/\n/g, " ");
-		console.log(
-			[
-				pad(r.name, nameW),
-				status,
-				String(r.durationMs).padStart(5),
-				detail,
-			].join("  "),
-		);
+		console.log([pad(r.name, nameW), status, String(r.durationMs).padStart(5), detail].join("  "));
 	}
 }
 
@@ -1541,24 +1450,55 @@ async function main(): Promise<void> {
 
 	const results: SmokeResult[] = [];
 
+	// The settings checks save, overwrite and delete settings.json. Point the
+	// store at a throwaway EIGHT_HOME so they never read or write the
+	// operator's real ~/.8gent/settings.json, and remove it afterwards (#3393).
+	const priorEightHome = process.env.EIGHT_HOME;
+	const smokeHome = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-smoke-home-"));
+	process.env.EIGHT_HOME = smokeHome;
+	try {
+		await runChecks(flags, results);
+	} finally {
+		if (priorEightHome === undefined) delete process.env.EIGHT_HOME;
+		else process.env.EIGHT_HOME = priorEightHome;
+		fs.rmSync(smokeHome, { recursive: true, force: true });
+	}
+
+	const totalMs = Math.round(performance.now() - t0);
+
+	if (isTty) {
+		printTable(results);
+	} else {
+		printJsonl(results);
+	}
+
+	writeReport(results, totalMs);
+
+	const pass = results.filter((r) => r.ok && !r.skipped).length;
+	const fail = results.filter((r) => !r.ok).length;
+	const skip = results.filter((r) => r.skipped).length;
+
+	if (isTty) {
+		console.log("");
+		console.log(`total: ${pass} pass / ${fail} fail / ${skip} skip in ${totalMs}ms`);
+		console.log(`report: ${path.join(os.homedir(), ".8gent", "smoke-report.json")}`);
+	}
+
+	if (fail > 0) process.exit(1);
+	if (flags.strict && skip > 0) process.exit(2);
+}
+
+async function runChecks(flags: CliFlags, results: SmokeResult[]): Promise<void> {
 	// A. Provider health
 	results.push(await testProviderHealth("apfel", flags.skipNetwork));
 	results.push(await testProviderHealth("lmstudio", flags.skipNetwork));
 	results.push(await testProviderHealth("ollama", flags.skipNetwork));
 
 	// A2. Provider chat probes (only run when probe URL is healthy; otherwise skip)
+	results.push(await testProviderChatProbe("apfel", "apple-foundationmodel", flags.skipNetwork));
+	results.push(await testProviderChatProbe("ollama", "qwen3.6:27b", flags.skipNetwork));
 	results.push(
-		await testProviderChatProbe("apfel", "apple-foundationmodel", flags.skipNetwork),
-	);
-	results.push(
-		await testProviderChatProbe("ollama", "qwen3.6:27b", flags.skipNetwork),
-	);
-	results.push(
-		await testProviderChatProbe(
-			"lmstudio",
-			"google/gemma-4-26b-a4b",
-			flags.skipNetwork,
-		),
+		await testProviderChatProbe("lmstudio", "google/gemma-4-26b-a4b", flags.skipNetwork),
 	);
 
 	// B. Settings
@@ -1640,31 +1580,6 @@ async function main(): Promise<void> {
 	// Bonus
 	results.push(await testRoleRegistry());
 	results.push(await testVoiceForRole());
-
-	const totalMs = Math.round(performance.now() - t0);
-
-	if (isTty) {
-		printTable(results);
-	} else {
-		printJsonl(results);
-	}
-
-	writeReport(results, totalMs);
-
-	const pass = results.filter((r) => r.ok && !r.skipped).length;
-	const fail = results.filter((r) => !r.ok).length;
-	const skip = results.filter((r) => r.skipped).length;
-
-	if (isTty) {
-		console.log("");
-		console.log(
-			`total: ${pass} pass / ${fail} fail / ${skip} skip in ${totalMs}ms`,
-		);
-		console.log(`report: ${path.join(os.homedir(), ".8gent", "smoke-report.json")}`);
-	}
-
-	if (fail > 0) process.exit(1);
-	if (flags.strict && skip > 0) process.exit(2);
 }
 
 await main();
