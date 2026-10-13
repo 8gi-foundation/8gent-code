@@ -16,6 +16,8 @@
  *   - its realpath is a directory strictly inside the realpath of the project root,
  *     and no segment of that realpath (relative to the root) starts with `.`, so a
  *     symlink out of the project or onto a dot directory is refused;
+ *   - that realpath, relative to the root, is itself a plain folder word, so the card's
+ *     `cd <folder> && <rest>` reads exactly as what runs (#4178);
  *   - the remainder is not itself a `cd` (two cds);
  *   - the shell is POSIX (bash, sh, Git Bash). PowerShell and cmd are left alone.
  *
@@ -130,6 +132,12 @@ export function cdPrefix(
 			.some((s) => s.startsWith("."))
 	)
 		return refuse("the folder resolves into a dot directory", command);
+	// The card shows `cd <real folder> && <rest>` (#4178). A plain-named symlink onto a
+	// folder named `a && b`, `a; x`, a line break, an escape code or a unicode space would
+	// make that line read as something other than what runs, so the real folder must be
+	// as plain as a typed one.
+	if (!PLAIN_FOLDER.test(path.relative(realRoot, dir).split(path.sep).join("/")))
+		return refuse("the folder resolves to a name that is not plain", command);
 	let isDir = false;
 	try {
 		isDir = lstatSync(dir).isDirectory();
@@ -142,9 +150,23 @@ export function cdPrefix(
  * What a person approving a command is shown: the command, and after a leading
  * `cd <folder> &&` the folder it runs in, since `rm -rf old` means a different
  * thing in each folder. `where` is the folder relative to the project root.
+ *
+ * Folder first, `cd <folder> && <command>`, the shape the model wrote (#4178): every
+ * card (TUI, channel, readline, System One escalation) cuts a long command at its end,
+ * so a folder after the command was the first thing lost. Display only: policy,
+ * System One and the per-folder answers still judge `command` with `where` beside it.
  */
 export function commandInFolder(command: string, where?: string): string {
-	return where ? `${command}  (in ${where}/)` : command;
+	if (!where) return command;
+	// `cdPrefix` only yields plain folders; any other `where` is shown quoted and escaped,
+	// never raw, so it cannot pose as a second command, a line break or an escape code.
+	const shown = PLAIN_FOLDER.test(where)
+		? where
+		: JSON.stringify(where).replace(
+				/[^\x20-\x7e]/g,
+				(c) => `\\u${(c.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`,
+			);
+	return `cd ${shown} && ${command}`;
 }
 
 /**

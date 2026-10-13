@@ -186,7 +186,7 @@ describe("ToolExecutor run_command with a leading cd", () => {
 		} finally {
 			registerTuiApprovalHandler(null);
 		}
-		expect(shown).toEqual(["rm -rf old  (in video/)", "rm -rf video/old"]);
+		expect(shown).toEqual(["cd video && rm -rf old", "rm -rf video/old"]);
 		expect(existsSync(join(sub, "old", "keep.txt"))).toBe(true);
 	});
 
@@ -246,7 +246,7 @@ describe("native run_command with a leading cd", () => {
 		} finally {
 			registerTuiApprovalHandler(null);
 		}
-		expect(shown).toEqual(["rm -rf old  (in video/)"]);
+		expect(shown).toEqual(["cd video && rm -rf old"]);
 		expect(existsSync(join(sub, "old", "keep.txt"))).toBe(true);
 	});
 
@@ -275,6 +275,42 @@ describe("the loop breaker counts a cd-prefixed command that runs (#3409)", () =
 // #3199 review (8SO): `rm -rf old` or `make deploy` means a different thing in each
 // folder, so a person's answer is remembered for the folder it was given in, and the
 // card shows that folder. Policy still judges the command text alone.
+// #4178: the card shows `cd <folder> && <rest>`, but that text is display only.
+describe("the folder-first card changes nothing that is judged", () => {
+	test("policy and the session memory still key on the rest and its folder, never the shown line", async () => {
+		const { PermissionManager } = await import("../permissions");
+		const { registerTuiApprovalHandler } = await import("../permissions/tui-approval-channel");
+		const manager = new PermissionManager(join(tempDir("cd-prefix-parity-"), "permissions.json"));
+		(manager as unknown as { isHeadless: () => boolean }).isHeadless = () => false;
+		const shown: (string | undefined)[] = [];
+		registerTuiApprovalHandler(async (r) => {
+			shown.push(r.command);
+			return "approve";
+		});
+		try {
+			// A dangerous rest asks every time, before and after a yes, exactly as before #4178.
+			const rm = "rm -rf old";
+			expect(manager.checkPermission(rm, "posix", "video")).toBe("ask");
+			expect(
+				await manager.requestPermission("Execute Shell Command", "d", rm, { where: "video" }),
+			).toBe(true);
+			expect(manager.checkPermission(rm, "posix", "video")).toBe("ask");
+			// A plain rest is remembered for its folder, keyed on the rest, not the shown line.
+			const mk = "make deploy-4178";
+			expect(manager.checkPermission(mk, "posix", "video")).toBe("ask");
+			expect(
+				await manager.requestPermission("Execute Shell Command", "d", mk, { where: "video" }),
+			).toBe(true);
+			expect(shown).toEqual(["cd video && rm -rf old", "cd video && make deploy-4178"]);
+			expect(manager.checkPermission(mk, "posix", "video")).toBe("allowed");
+			expect(manager.checkPermission(mk, "posix")).toBe("ask");
+			expect(manager.checkPermission("cd video && make deploy-4178", "posix")).not.toBe("allowed");
+		} finally {
+			registerTuiApprovalHandler(null);
+		}
+	});
+});
+
 describe("session answers are kept per folder", () => {
 	test("a yes in video is not a yes at the root or in another folder, and the card names video", async () => {
 		const { PermissionManager } = await import("../permissions");
@@ -292,7 +328,7 @@ describe("session answers are kept per folder", () => {
 			expect(
 				await manager.requestPermission("Execute Shell Command", "d", cmd, { where: "video" }),
 			).toBe(true);
-			expect(shown).toEqual([`${cmd}  (in video/)`]);
+			expect(shown).toEqual([`cd video && ${cmd}`]);
 			expect(manager.checkPermission(cmd, "posix", "video")).toBe("allowed");
 			expect(manager.checkPermission(cmd, "posix")).toBe("ask");
 			expect(manager.checkPermission(cmd, "posix", "site")).toBe("ask");
