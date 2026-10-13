@@ -13,10 +13,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { resolveOllamaBaseUrl } from "../ai/text-tool-endpoint";
-import { type CommunicationStyle, isCommunicationStyle } from "./communication-style";
 import { LocalServerHttpError, createOllamaServer, isOllamaEnabled } from "../local-model-server";
-import { getVault } from "../secrets";
 import type { ProviderManager } from "../providers/index";
+import { getVault } from "../secrets";
+import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings/index.js";
+import { type CommunicationStyle, isCommunicationStyle } from "./communication-style";
 import {
 	type FoundServer,
 	detectLocalServers,
@@ -24,11 +25,6 @@ import {
 	resolveProviderChoice,
 	saveProviderChoice,
 } from "./local-servers";
-import {
-	loadSettings,
-	saveSettings,
-	DEFAULT_SETTINGS,
-} from "../settings/index.js";
 
 const execAsync = promisify(exec);
 
@@ -142,15 +138,17 @@ export const PROVIDER_INSTALL_HINTS: Record<ProviderCheckId, string> = {
 	lmstudio:
 		"Install: https://lmstudio.ai. Open it, load `google/gemma-4-26b-a4b`, click Start Server (port 1234).",
 	// 11435: where the health probe and the settings default look (provider-health.ts).
-	apfel:
-		"Install: `brew install arthur-ficial/tap/apfel`. Run: `apfel --serve --port 11435`.",
+	apfel: "Install: `brew install arthur-ficial/tap/apfel`. Run: `apfel --serve --port 11435`.",
 };
 
 /**
  * The install hint for this OS. The macOS text is PROVIDER_INSTALL_HINTS;
  * Windows and Linux get their own, since `brew` is not there (#4206).
  */
-export function providerInstallHint(id: ProviderCheckId, platform: string = process.platform): string {
+export function providerInstallHint(
+	id: ProviderCheckId,
+	platform: string = process.platform,
+): string {
 	if (id === "ollama" && platform === "win32") {
 		return "Install: https://ollama.com/download/windows. Open Ollama, then in PowerShell: `ollama pull qwen3.6:27b`.";
 	}
@@ -296,7 +294,13 @@ export async function probeOllama(
 	// Another local server is selected (#3149): Ollama is off, so it is not asked.
 	// Reported as an unconfigured miss, which the welcome leaves out.
 	if (!isOllamaEnabled(env)) {
-		return { status: "unreachable", host, reason: "not used: EIGHT_LOCAL_SERVER selects another server", configured: false, timedOut: false };
+		return {
+			status: "unreachable",
+			host,
+			reason: "not used: EIGHT_LOCAL_SERVER selects another server",
+			configured: false,
+			timedOut: false,
+		};
 	}
 	try {
 		const listed = await createOllamaServer({ baseUrl: host, fetch: fetchImpl }).listModels({
@@ -309,7 +313,13 @@ export async function probeOllama(
 		return { status: "found", host, models };
 	} catch (err) {
 		if (err instanceof LocalServerHttpError) {
-			return { status: "unreachable", host, reason: `answered HTTP ${err.status}`, configured, timedOut: false };
+			return {
+				status: "unreachable",
+				host,
+				reason: `answered HTTP ${err.status}`,
+				configured,
+				timedOut: false,
+			};
 		}
 		const name = (err as Error)?.name;
 		const timedOut = name === "TimeoutError" || name === "AbortError";
@@ -346,10 +356,7 @@ export function ollamaCheckLine(check: OllamaCheck | "pending" | null): string {
  * Reads + merges so concurrent settings writes (e.g. /settings view) stay
  * consistent. Best-effort: failures are swallowed by saveSettings.
  */
-function persistAgentName(
-	roleKey: "orchestrator" | "engineer" | "qa",
-	name: string,
-): void {
+function persistAgentName(roleKey: "orchestrator" | "engineer" | "qa", name: string): void {
 	const trimmed = (name ?? "").trim();
 	if (!trimmed) return;
 	try {
@@ -440,8 +447,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	// ── 4. Project description ───────────────────────────────
 	{
 		step: "projects",
-		question:
-			"What are you working on? (one short line, optional. Press Enter to skip.)",
+		question: "What are you working on? (one short line, optional. Press Enter to skip.)",
 		placeholder: "One short line, or Enter to skip",
 		processor: (answer, user) => {
 			const desc = answer.trim();
@@ -456,9 +462,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 				projects: {
 					...user.projects,
 					primary: desc,
-					all: user.projects.all.includes(desc)
-						? user.projects.all
-						: [...user.projects.all, desc],
+					all: user.projects.all.includes(desc) ? user.projects.all : [...user.projects.all, desc],
 					descriptions: { ...user.projects.descriptions, [desc]: desc },
 				},
 				completedSteps: [...user.completedSteps, "projects"],
@@ -864,9 +868,7 @@ export class OnboardingManager {
 	 * Auto-detect user environment: git config, ollama models, gh auth.
 	 * Returns detected values so onboarding can skip questions.
 	 */
-	static async autoDetect(
-		opts: { ollama?: Promise<OllamaCheck> } = {},
-	): Promise<AutoDetected> {
+	static async autoDetect(opts: { ollama?: Promise<OllamaCheck> } = {}): Promise<AutoDetected> {
 		const detected: AutoDetected = {
 			name: null,
 			email: null,
@@ -962,7 +964,9 @@ export class OnboardingManager {
 
 	/** The questions this machine is asked: the apfel check only on Apple Silicon. */
 	private questionsHere(): OnboardingQuestion[] {
-		return ONBOARDING_QUESTIONS.filter((q) => stepAppliesHere(q.step, this.platform(), this.arch()));
+		return ONBOARDING_QUESTIONS.filter((q) =>
+			stepAppliesHere(q.step, this.platform(), this.arch()),
+		);
 	}
 
 	/** Where the Ollama check stands, for the welcome text. */
@@ -1012,7 +1016,8 @@ export class OnboardingManager {
 				// #3487: a style outside the fixed set (hand-edited file, old sync)
 				// is dropped, never carried into the prompt.
 				const style = loaded?.identity?.communicationStyle;
-				if (style != null && !isCommunicationStyle(style)) loaded.identity.communicationStyle = null;
+				if (style != null && !isCommunicationStyle(style))
+					loaded.identity.communicationStyle = null;
 				return loaded;
 			}
 		} catch {
@@ -1359,19 +1364,17 @@ export class OnboardingManager {
 			text = text.replace("{agent_engineer}", names.engineer);
 			text = text.replace("{agent_qa}", names.qa);
 		} catch {
-			text = text.replace(
-				"{agent_orchestrator}",
-				DEFAULT_SETTINGS.agents.names.orchestrator,
-			);
-			text = text.replace(
-				"{agent_engineer}",
-				DEFAULT_SETTINGS.agents.names.engineer,
-			);
+			text = text.replace("{agent_orchestrator}", DEFAULT_SETTINGS.agents.names.orchestrator);
+			text = text.replace("{agent_engineer}", DEFAULT_SETTINGS.agents.names.engineer);
 			text = text.replace("{agent_qa}", DEFAULT_SETTINGS.agents.names.qa);
 		}
 
 		if (question.kind === "providerCheck" && question.provider) {
-			return { ...question, question: text, installHint: providerInstallHint(question.provider, this.platform()) };
+			return {
+				...question,
+				question: text,
+				installHint: providerInstallHint(question.provider, this.platform()),
+			};
 		}
 		if (question.step === "provider-choice") return this.providerChoiceQuestion(question);
 		return { ...question, question: text };
@@ -1393,7 +1396,10 @@ export class OnboardingManager {
 			options: screen.choices.map((c) => c.value),
 			processor: (answer, user) => {
 				const choice = resolveProviderChoice(answer, found);
-				const done: UserConfig = { ...user, completedSteps: [...user.completedSteps, "provider-choice"] };
+				const done: UserConfig = {
+					...user,
+					completedSteps: [...user.completedSteps, "provider-choice"],
+				};
 				if (!choice) return done;
 				try {
 					saveProviderChoice(choice, host.providerManager?.());

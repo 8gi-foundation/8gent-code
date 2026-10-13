@@ -38,10 +38,16 @@ const LLAMA = {
 	"http://127.0.0.1:8080/v1/models": { data: [{ id: "qwen3-8b-q4_k_m.gguf" }] },
 };
 const LMSTUDIO = {
-	"http://127.0.0.1:1234/v1/models": { data: [{ id: "google/gemma-4-26b-a4b" }, { id: "text-embedding-nomic" }] },
+	"http://127.0.0.1:1234/v1/models": {
+		data: [{ id: "google/gemma-4-26b-a4b" }, { id: "text-embedding-nomic" }],
+	},
 };
 const APFEL = { "http://127.0.0.1:11435/v1/models": { data: [{ id: "apple-foundationmodel" }] } };
-const OLLAMA_FOUND: OllamaCheck = { status: "found", host: "http://localhost:11434", models: ["eight-1.0-q3:14b", "qwen3:14b"] };
+const OLLAMA_FOUND: OllamaCheck = {
+	status: "found",
+	host: "http://localhost:11434",
+	models: ["eight-1.0-q3:14b", "qwen3:14b"],
+};
 const OLLAMA_MISS: OllamaCheck = {
 	status: "unreachable",
 	host: "http://localhost:11434",
@@ -59,13 +65,23 @@ const OSES = [
 describe("detectLocalServers", () => {
 	for (const [platform, arch] of OSES) {
 		test(`finds llama-server on 127.0.0.1:8080 on ${platform}`, async () => {
-			const found = await detectLocalServers({ env: {}, platform, arch, fetchImpl: stubFetch(LLAMA) });
+			const found = await detectLocalServers({
+				env: {},
+				platform,
+				arch,
+				fetchImpl: stubFetch(LLAMA),
+			});
 			expect(found.map((s) => s.id)).toEqual(["llama-server"]);
 			expect(found[0].models).toEqual(["qwen3-8b-q4_k_m.gguf"]);
 		});
 
 		test(`finds LM Studio on its default port 1234 on ${platform}, embeddings left out`, async () => {
-			const found = await detectLocalServers({ env: {}, platform, arch, fetchImpl: stubFetch(LMSTUDIO) });
+			const found = await detectLocalServers({
+				env: {},
+				platform,
+				arch,
+				fetchImpl: stubFetch(LMSTUDIO),
+			});
 			expect(found.map((s) => s.id)).toEqual(["lmstudio"]);
 			expect(found[0].models).toEqual(["google/gemma-4-26b-a4b"]);
 		});
@@ -97,49 +113,95 @@ describe("detectLocalServers", () => {
 
 	test("a /health route alone is not llama-server: /v1/models must list", async () => {
 		const routes = { "http://127.0.0.1:8080/health": {}, "http://127.0.0.1:8080/v1/models": 404 };
-		expect(await detectLocalServers({ env: {}, platform: "linux", fetchImpl: stubFetch(routes) })).toEqual([]);
+		expect(
+			await detectLocalServers({ env: {}, platform: "linux", fetchImpl: stubFetch(routes) }),
+		).toEqual([]);
 	});
 
 	test("a loading llama-server (503 on /health) is not offered yet", async () => {
 		const routes = { ...LLAMA, "http://127.0.0.1:8080/health": 503 };
-		expect(await detectLocalServers({ env: {}, platform: "win32", fetchImpl: stubFetch(routes) })).toEqual([]);
+		expect(
+			await detectLocalServers({ env: {}, platform: "win32", fetchImpl: stubFetch(routes) }),
+		).toEqual([]);
 	});
 
 	test("apfel is probed on Apple Silicon only", async () => {
 		const seen: string[] = [];
-		const mac = await detectLocalServers({ env: {}, platform: "darwin", arch: "arm64", fetchImpl: stubFetch(APFEL) });
+		const mac = await detectLocalServers({
+			env: {},
+			platform: "darwin",
+			arch: "arm64",
+			fetchImpl: stubFetch(APFEL),
+		});
 		expect(mac.map((s) => s.id)).toEqual(["apfel"]);
-		await detectLocalServers({ env: {}, platform: "win32", arch: "x64", fetchImpl: stubFetch(APFEL, seen) });
+		await detectLocalServers({
+			env: {},
+			platform: "win32",
+			arch: "x64",
+			fetchImpl: stubFetch(APFEL, seen),
+		});
 		expect(seen.some((u) => u.includes("11435"))).toBe(false);
 	});
 
 	test("reuses the launch Ollama probe instead of asking again", async () => {
 		const seen: string[] = [];
-		const found = await detectLocalServers({ env: {}, platform: "linux", fetchImpl: stubFetch({}, seen), ollama: OLLAMA_FOUND });
+		const found = await detectLocalServers({
+			env: {},
+			platform: "linux",
+			fetchImpl: stubFetch({}, seen),
+			ollama: OLLAMA_FOUND,
+		});
 		expect(found.map((s) => s.id)).toEqual(["ollama"]);
 		expect(seen.some((u) => u.includes("11434"))).toBe(false);
 	});
 
 	test("a server with no chat model is not offered: there is nothing to save", async () => {
 		const empty = { "http://127.0.0.1:1234/v1/models": { data: [{ id: "text-embedding-nomic" }] } };
-		const ollamaEmpty: OllamaCheck = { status: "found", host: "http://localhost:11434", models: [] };
-		expect(await detectLocalServers({ env: {}, platform: "linux", fetchImpl: stubFetch(empty), ollama: ollamaEmpty })).toEqual([]);
+		const ollamaEmpty: OllamaCheck = {
+			status: "found",
+			host: "http://localhost:11434",
+			models: [],
+		};
+		expect(
+			await detectLocalServers({
+				env: {},
+				platform: "linux",
+				fetchImpl: stubFetch(empty),
+				ollama: ollamaEmpty,
+			}),
+		).toEqual([]);
 	});
 
 	test("several found: today's startup order, a selected llama-server first", async () => {
 		const all = { ...LLAMA, ...LMSTUDIO, ...APFEL };
-		const opts = { platform: "darwin", arch: "arm64", fetchImpl: stubFetch(all), ollama: OLLAMA_FOUND };
+		const opts = {
+			platform: "darwin",
+			arch: "arm64",
+			fetchImpl: stubFetch(all),
+			ollama: OLLAMA_FOUND,
+		};
 		const plain = await detectLocalServers({ ...opts, env: {} });
 		expect(plain.map((s) => s.id)).toEqual(["lmstudio", "ollama", "llama-server", "apfel"]);
-		const selected = await detectLocalServers({ ...opts, env: { EIGHT_LOCAL_SERVER: "llama-server" } });
+		const selected = await detectLocalServers({
+			...opts,
+			env: { EIGHT_LOCAL_SERVER: "llama-server" },
+		});
 		expect(selected[0].id).toBe("llama-server");
 	});
 
 	test("a server that never answers costs at most the timeout", async () => {
 		const hang = ((_u: string, init?: RequestInit) =>
-			new Promise((_res, rej) => init?.signal?.addEventListener("abort", () => rej(new DOMException("t", "TimeoutError"))))) as typeof fetch;
+			new Promise((_res, rej) =>
+				init?.signal?.addEventListener("abort", () => rej(new DOMException("t", "TimeoutError"))),
+			)) as typeof fetch;
 		const t0 = Date.now();
-		const found = await detectLocalServers({ env: {}, platform: "darwin", arch: "arm64", fetchImpl: hang, timeoutMs: 60 });
+		const found = await detectLocalServers({
+			env: {},
+			platform: "darwin",
+			arch: "arm64",
+			fetchImpl: hang,
+			timeoutMs: 60,
+		});
 		expect(found).toEqual([]);
 		expect(Date.now() - t0).toBeLessThan(1000);
 	});
@@ -147,7 +209,11 @@ describe("detectLocalServers", () => {
 
 describe("choice screen", () => {
 	test("none found: a plain next step with this OS's install guide", () => {
-		for (const [platform, page] of [["win32", "windows"], ["darwin", "macos"], ["linux", "linux"]] as const) {
+		for (const [platform, page] of [
+			["win32", "windows"],
+			["darwin", "macos"],
+			["linux", "linux"],
+		] as const) {
 			const screen = providerChoiceScreen([], platform);
 			expect(screen.question).toContain("No local model server is running");
 			expect(screen.question).toContain(`docs/install/${page}.md`);
@@ -158,9 +224,15 @@ describe("choice screen", () => {
 	});
 
 	test("one found: a yes-shaped question, the server is the Enter default", async () => {
-		const found = await detectLocalServers({ env: {}, platform: "win32", fetchImpl: stubFetch(LLAMA) });
+		const found = await detectLocalServers({
+			env: {},
+			platform: "win32",
+			fetchImpl: stubFetch(LLAMA),
+		});
 		const screen = providerChoiceScreen(found, "win32");
-		expect(screen.question).toBe("I found llama-server (llama.cpp) running on this machine. Shall I use it?");
+		expect(screen.question).toBe(
+			"I found llama-server (llama.cpp) running on this machine. Shall I use it?",
+		);
 		expect(screen.choices[0]).toMatchObject({ value: "llama-server" });
 		expect(screen.choices[0].description).toContain("127.0.0.1:8080");
 	});
@@ -174,14 +246,31 @@ describe("choice screen", () => {
 		});
 		const screen = providerChoiceScreen(found, "linux");
 		expect(screen.question).toContain("I found 3 local model servers");
-		expect(screen.choices.map((c) => c.value)).toEqual(["lmstudio", "ollama", "llama-server", "openrouter", "later"]);
+		expect(screen.choices.map((c) => c.value)).toEqual([
+			"lmstudio",
+			"ollama",
+			"llama-server",
+			"openrouter",
+			"later",
+		]);
 	});
 
 	test("Ollama with the 8gent model saves that model", async () => {
-		const found = await detectLocalServers({ env: {}, platform: "linux", fetchImpl: stubFetch({}), ollama: OLLAMA_FOUND });
-		expect(resolveProviderChoice("ollama", found)).toEqual({ provider: "ollama", model: "eight-1.0-q3:14b" });
+		const found = await detectLocalServers({
+			env: {},
+			platform: "linux",
+			fetchImpl: stubFetch({}),
+			ollama: OLLAMA_FOUND,
+		});
+		expect(resolveProviderChoice("ollama", found)).toEqual({
+			provider: "ollama",
+			model: "eight-1.0-q3:14b",
+		});
 		expect(resolveProviderChoice("later", found)).toBeNull();
-		expect(resolveProviderChoice("openrouter", [])).toEqual({ provider: "openrouter", model: "auto:free" });
+		expect(resolveProviderChoice("openrouter", [])).toEqual({
+			provider: "openrouter",
+			model: "auto:free",
+		});
 	});
 
 	test("loopback means loopback", () => {
@@ -216,7 +305,10 @@ describe("saving the choice", () => {
 
 	test("saveProviderChoice writes providers.json and keeps existing keys", () => {
 		const file = path.join(dir, "keep.json");
-		fs.writeFileSync(file, JSON.stringify({ activeProvider: "8gent", providers: { openrouter: { apiKey: "kept" } } }));
+		fs.writeFileSync(
+			file,
+			JSON.stringify({ activeProvider: "8gent", providers: { openrouter: { apiKey: "kept" } } }),
+		);
 		saveProviderChoice({ provider: "llama-server", model: "m.gguf" }, new ProviderManager(file));
 		const saved = JSON.parse(fs.readFileSync(file, "utf-8"));
 		expect(saved.activeProvider).toBe("llama-server");
@@ -225,7 +317,12 @@ describe("saving the choice", () => {
 		expect(saved.providers.openrouter.apiKey).toBe("kept");
 	});
 
-	async function walkToChoice(platform: string, arch: string, routes: Routes, providersFile: string) {
+	async function walkToChoice(
+		platform: string,
+		arch: string,
+		routes: Routes,
+		providersFile: string,
+	) {
 		fs.rmSync(path.join(dir, ".8gent"), { recursive: true, force: true });
 		const m = new OnboardingManager(dir, {
 			platform,
@@ -249,7 +346,9 @@ describe("saving the choice", () => {
 		const file = path.join(dir, "win.json");
 		const { m, q, asked } = await walkToChoice("win32", "x64", LLAMA, file);
 		expect(asked).not.toContain("provider-check-apfel");
-		expect(m.getTotalSteps()).toBe(new OnboardingManager(dir, { platform: "darwin", arch: "arm64" }).getTotalSteps() - 1);
+		expect(m.getTotalSteps()).toBe(
+			new OnboardingManager(dir, { platform: "darwin", arch: "arm64" }).getTotalSteps() - 1,
+		);
 		expect(q?.choices?.[0].value).toBe("llama-server");
 		m.processAnswer("llama-server");
 		expect(JSON.parse(fs.readFileSync(file, "utf-8"))).toMatchObject({
@@ -257,7 +356,11 @@ describe("saving the choice", () => {
 			activeModel: "qwen3-8b-q4_k_m.gguf",
 		});
 		const user = JSON.parse(fs.readFileSync(path.join(dir, ".8gent", "user.json"), "utf-8"));
-		expect(user.preferences.model).toMatchObject({ provider: "llama-server", default: "qwen3-8b-q4_k_m.gguf", preferLocal: true });
+		expect(user.preferences.model).toMatchObject({
+			provider: "llama-server",
+			default: "qwen3-8b-q4_k_m.gguf",
+			preferLocal: true,
+		});
 		expect(user.completedSteps).toContain("provider-choice");
 	});
 
@@ -274,6 +377,9 @@ describe("saving the choice", () => {
 		const file = path.join(dir, "cloud.json");
 		const { m } = await walkToChoice("darwin", "arm64", {}, file);
 		m.processAnswer("openrouter");
-		expect(JSON.parse(fs.readFileSync(file, "utf-8"))).toMatchObject({ activeProvider: "openrouter", activeModel: "auto:free" });
+		expect(JSON.parse(fs.readFileSync(file, "utf-8"))).toMatchObject({
+			activeProvider: "openrouter",
+			activeModel: "auto:free",
+		});
 	});
 });

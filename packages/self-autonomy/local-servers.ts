@@ -11,8 +11,8 @@
  * so first run asks it once.
  */
 
-import { getProviderManager, type ProviderManager } from "../providers/index";
 import { isLlamaServerSelected, resolveLlamaServerUrl } from "../local-model-server/select";
+import { type ProviderManager, getProviderManager } from "../providers/index";
 
 type Env = Record<string, string | undefined>;
 
@@ -65,7 +65,11 @@ function withScheme(url: string): string {
 
 const isEmbedding = (id: string) => /embed|nomic|bge-/i.test(id);
 
-async function getJson(fetchImpl: typeof fetch, url: string, timeoutMs: number): Promise<unknown | null> {
+async function getJson(
+	fetchImpl: typeof fetch,
+	url: string,
+	timeoutMs: number,
+): Promise<unknown | null> {
 	try {
 		const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
 		if (!res.ok) return null;
@@ -101,7 +105,11 @@ async function probeOpenAiServer(
  * /v1/models answers with a `data` list. Both, so an unrelated web app on
  * 8080 with a /health route is not mistaken for it.
  */
-async function probeLlamaServer(root: string, fetchImpl: typeof fetch, timeoutMs: number): Promise<FoundServer | null> {
+async function probeLlamaServer(
+	root: string,
+	fetchImpl: typeof fetch,
+	timeoutMs: number,
+): Promise<FoundServer | null> {
 	if (!isLoopbackUrl(root)) return null;
 	const [health, models] = await Promise.all([
 		getJson(fetchImpl, `${root}/health`, timeoutMs),
@@ -141,7 +149,9 @@ export async function detectLocalServers(opts: DetectOptions = {}): Promise<Foun
 	const [llama, lm, apfel] = await Promise.all([
 		probeLlamaServer(resolveLlamaServerUrl(env), fetchImpl, timeoutMs),
 		probeOpenAiServer("lmstudio", lmRoot, fetchImpl, timeoutMs),
-		appleSilicon ? probeOpenAiServer("apfel", apfelRoot, fetchImpl, timeoutMs) : Promise.resolve(null),
+		appleSilicon
+			? probeOpenAiServer("apfel", apfelRoot, fetchImpl, timeoutMs)
+			: Promise.resolve(null),
 	]);
 
 	const o = opts.ollama;
@@ -191,7 +201,11 @@ const OPENROUTER_CHOICE = {
 	value: "openrouter",
 	description: "Needs a free key from openrouter.ai, set as OPENROUTER_API_KEY in ~/.8gent/.env",
 };
-const LATER_CHOICE = { label: "Decide later", value: "later", description: "Save nothing now; /provider picks one any time" };
+const LATER_CHOICE = {
+	label: "Decide later",
+	value: "later",
+	description: "Save nothing now; /provider picks one any time",
+};
 
 /** The choice screen for what detection found: none, one, or several. */
 export function providerChoiceScreen(found: FoundServer[], platform: string): ProviderChoiceScreen {
@@ -230,7 +244,10 @@ export function resolveProviderChoice(answer: string, found: FoundServer[]): Pro
  * registry only enables it by default under EIGHT_LOCAL_SERVER. Nothing
  * else in the file changes: keys and other providers stay as they were.
  */
-export function saveProviderChoice(choice: ProviderChoice, manager: ProviderManager = getProviderManager()): void {
+export function saveProviderChoice(
+	choice: ProviderChoice,
+	manager: ProviderManager = getProviderManager(),
+): void {
 	if (choice.provider === "llama-server") manager.enableProvider("llama-server");
 	manager.setActiveProvider(choice.provider);
 	manager.setActiveModel(choice.model);
