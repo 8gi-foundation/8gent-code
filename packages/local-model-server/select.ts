@@ -37,10 +37,63 @@ export function isLlamaServerSelected(env: Env = process.env): boolean {
 	return resolveLocalServerKind(env) === "llama-server";
 }
 
-/** llama-server root: LLAMA_SERVER_URL, else 127.0.0.1:8080. Scheme added to a bare host:port. */
-export function resolveLlamaServerUrl(env: Env = process.env): string {
+/** True for an http(s) URL on localhost, 127.0.0.0/8 or ::1: the only hosts prompts may reach without opting in. */
+export function isLoopbackUrl(url: string): boolean {
+	let u: URL;
+	try {
+		u = new URL(url);
+	} catch {
+		return false;
+	}
+	if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+	const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+	return host === "localhost" || host === "::1" || /^127(\.\d{1,3}){3}$/.test(host);
+}
+
+/** The URL with any user:password removed, for log and screen lines. */
+export function redactUrl(url: string): string {
+	try {
+		const u = new URL(url);
+		if (!u.username && !u.password) return url;
+		u.username = "";
+		u.password = "";
+		return u.toString().replace(/\/+$/, "");
+	} catch {
+		return url.replace(/\/\/[^/@]*@/, "//");
+	}
+}
+
+function isHttpUrl(url: string): boolean {
+	try {
+		const p = new URL(url).protocol;
+		return p === "http:" || p === "https:";
+	} catch {
+		return false;
+	}
+}
+
+const warnedRemote = new Set<string>();
+
+/**
+ * llama-server root: LLAMA_SERVER_URL, else 127.0.0.1:8080. Scheme added to a bare host:port.
+ * A non-loopback URL is refused (the loopback default is used, with one warning) unless
+ * EIGHT_ALLOW_REMOTE_LLAMA=1, so prompts never leave the machine by a typo or a stale env.
+ * A scheme other than http(s) (file:, data:) is always refused: fetch would read it locally.
+ */
+export function resolveLlamaServerUrl(
+	env: Env = process.env,
+	warn: (line: string) => void = console.warn,
+): string {
 	let v = (env.LLAMA_SERVER_URL ?? "").trim().replace(/\/+$/, "");
 	if (!v) return DEFAULT_LLAMA_SERVER_URL;
 	if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) v = `http://${v}`;
-	return v.replace(/\/v1$/, "").replace(/\/+$/, "");
+	v = v.replace(/\/v1$/, "").replace(/\/+$/, "");
+	if (isLoopbackUrl(v) || (env.EIGHT_ALLOW_REMOTE_LLAMA === "1" && isHttpUrl(v))) return v;
+	if (!warnedRemote.has(v)) {
+		warnedRemote.add(v);
+		warn(
+			`LLAMA_SERVER_URL ${redactUrl(v)} is not a loopback http(s) URL; using ${DEFAULT_LLAMA_SERVER_URL}. Set EIGHT_ALLOW_REMOTE_LLAMA=1 to allow it.`,
+		);
+	}
+	return DEFAULT_LLAMA_SERVER_URL;
 }

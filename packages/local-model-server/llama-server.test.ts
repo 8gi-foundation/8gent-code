@@ -18,14 +18,17 @@ localModelServerContract({
 	create: (baseUrl, fetch) => createLlamaServer({ baseUrl, fetch }),
 	answer: (pathname, models) => {
 		if (pathname === "/v1/models")
-			return Response.json({ object: "list", data: models.map((id) => ({ id, object: "model", owned_by: "llamacpp" })) });
+			return Response.json({
+				object: "list",
+				data: models.map((id) => ({ id, object: "model", owned_by: "llamacpp" })),
+			});
 		if (pathname === "/health") return Response.json({ status: "ok" });
 		return null;
 	},
 });
 
 describe("llama-server adapter specifics", () => {
-	test("capabilities state what llama-server cannot do: no pull, no MLX, one model per process", () => {
+	test("capabilities state what llama-server cannot do: no pull, no MLX, one model until the list shows a router", () => {
 		expect(LLAMA_SERVER_CAPABILITIES.pull).toBe(false);
 		expect(LLAMA_SERVER_CAPABILITIES.mlx).toBe(false);
 		expect(LLAMA_SERVER_CAPABILITIES.multiModel).toBe(false);
@@ -44,7 +47,15 @@ describe("llama-server adapter specifics", () => {
 		const real = {
 			models: [{ name: "llama3.2-3b", model: "llama3.2-3b", details: { format: "gguf" } }],
 			object: "list",
-			data: [{ id: "llama3.2-3b", object: "model", created: 1, owned_by: "llamacpp", meta: { n_ctx_train: 131072 } }],
+			data: [
+				{
+					id: "llama3.2-3b",
+					object: "model",
+					created: 1,
+					owned_by: "llamacpp",
+					meta: { n_ctx_train: 131072 },
+				},
+			],
 		};
 		const s = createLlamaServer({ baseUrl: "http://h", fetch: async () => Response.json(real) });
 		const [m] = await s.listModels();
@@ -54,10 +65,17 @@ describe("llama-server adapter specifics", () => {
 
 	test("skips entries without an id; a non-list `data` is a response error", async () => {
 		const withBody = (body: unknown) =>
-			createLlamaServer({ baseUrl: "http://h", fetch: async () => Response.json(body) }).listModels();
-		expect((await withBody({ data: [{ id: "a" }, { object: "model" }, { id: "" }] })).map((m) => m.name)).toEqual(["a"]);
+			createLlamaServer({
+				baseUrl: "http://h",
+				fetch: async () => Response.json(body),
+			}).listModels();
+		expect(
+			(await withBody({ data: [{ id: "a" }, { object: "model" }, { id: "" }] })).map((m) => m.name),
+		).toEqual(["a"]);
 		expect(await withBody({})).toEqual([]);
-		expect(await withBody({ data: { id: "a" } }).catch((e) => e)).toBeInstanceOf(LocalServerResponseError);
+		expect(await withBody({ data: { id: "a" } }).catch((e) => e)).toBeInstanceOf(
+			LocalServerResponseError,
+		);
 	});
 });
 
@@ -78,7 +96,14 @@ describe("EIGHT_LOCAL_SERVER selection", () => {
 
 	test("LLAMA_SERVER_URL: default, bare host:port, trailing /v1 and slash", () => {
 		expect(resolveLlamaServerUrl({})).toBe(DEFAULT_LLAMA_SERVER_URL);
-		expect(resolveLlamaServerUrl({ LLAMA_SERVER_URL: "127.0.0.1:18080" })).toBe("http://127.0.0.1:18080");
-		expect(resolveLlamaServerUrl({ LLAMA_SERVER_URL: "http://gpu:8080/v1/" })).toBe("http://gpu:8080");
+		expect(resolveLlamaServerUrl({ LLAMA_SERVER_URL: "127.0.0.1:18080" })).toBe(
+			"http://127.0.0.1:18080",
+		);
+		expect(
+			resolveLlamaServerUrl({
+				LLAMA_SERVER_URL: "http://gpu:8080/v1/",
+				EIGHT_ALLOW_REMOTE_LLAMA: "1",
+			}),
+		).toBe("http://gpu:8080");
 	});
 });

@@ -33,6 +33,7 @@ import {
 } from "../../../packages/eight/session-store.js";
 import { setVisualiserTokenSink } from "../../../packages/eight/visualiser-bridge.js";
 import {
+	createLlamaRouter,
 	createLlamaServer,
 	isLlamaServerSelected,
 	resolveLlamaServerUrl,
@@ -1567,11 +1568,13 @@ export function App({
 						}
 					}
 				} else if (currentProvider === "llama-server") {
-					// llama-server lists the model(s) it serves (#3149).
-					const listed = await createLlamaServer({ baseUrl: resolveLlamaServerUrl() }).listModels({
-						signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-					});
-					const ids = listed.map((m) => m.name);
+					// llama-server lists the model(s) it serves (#3149). The router's GET /models
+					// lists unloaded presets too, so /models use can pick one (#4206).
+					const listed = await createLlamaRouter({
+						baseUrl: resolveLlamaServerUrl(),
+						timeoutMs: PROBE_TIMEOUT_MS,
+					}).models();
+					const ids = listed.map((m) => m.id);
 					if (!cancelled) setAvailableModels(ids);
 				} else if (currentProvider === "lmstudio") {
 					// Fetch LM Studio models — filter embedding models at source so they
@@ -5698,6 +5701,26 @@ export function App({
 							// Show model selector
 							setViewMode("model-select");
 						}
+					}
+					// /llama and /models: the llama-server router from inside a session (#4206)
+					else if (command === "llama" || command === "models") {
+						import("./lib/llama-command.js")
+							.then(async ({ runLlamaCommand, switchModelInPlace }) => {
+								const { message, useModel } = await runLlamaCommand(command, args, {
+									router: createLlamaRouter({ baseUrl: resolveLlamaServerUrl() }),
+									currentModel,
+									currentProvider,
+								});
+								if (!useModel) return addSystemMessage(message);
+								// Same server, same runtime: the live session keeps its history (#4206).
+								const runtime = providerToRuntime(currentProvider);
+								const kept = switchModelInPlace(agent, builtSpecRef.current, useModel, runtime);
+								setCurrentModel(useModel);
+								addSystemMessage(kept ? `${message} Conversation kept.` : message);
+							})
+							.catch((e) =>
+								addSystemMessage(`llama: ${e instanceof Error ? e.message : String(e)}`),
+							);
 					}
 					// Handle /provider command
 					else if (command === ("provider" as any)) {
