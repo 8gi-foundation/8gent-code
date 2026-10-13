@@ -99,6 +99,20 @@ jobs:
       - name: Test
         run: bun run test
 
+      # #4132 (8SO): the HMAC key probes must run under a real run_command boundary on Linux.
+      # bwrap is installed only for this step, after the main suite, so other tests keep
+      # their unwrapped behaviour. EIGHT_REQUIRE_RUN_COMMAND_SANDBOX=1 makes the probe file
+      # fail, not skip, when bwrap cannot create a namespace here.
+      - name: "run_command sandbox live probes (bwrap)"
+        env:
+          EIGHT_REQUIRE_RUN_COMMAND_SANDBOX: "1"
+        run: |
+          sudo apt-get install -y -qq bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --version
+          bun test packages/permissions/goal-state-hmac-keypath.probe.test.ts
+
       # compare_layout renders pages in a real Chrome (#4080). ubuntu-latest ships
       # google-chrome; this step fails, not skips, if it is missing or cannot start,
       # so the offline guarantees are proven on every run.

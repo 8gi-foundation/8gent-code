@@ -13,6 +13,7 @@
  *   ~/.8gent/{sessions,logs,checkpoints}/, daemon.log, approvals-audit.jsonl
  *   ~/.8gent/{policies.yaml,policy-checksum,mcp.json,.env,keys.env,bin/}
  *   ~/.8gent/skills-trust.json (which project skills may replace user/bundled ones)
+ *   ~/.8gent/keys/ (state-hmac.key, the /goal state and approval grant signing key)
  *
  * The same set is applied under EIGHT_HOME/.8gent and EIGHT_DATA_DIR when
  * those are set, and each path
@@ -48,6 +49,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resolveHome } from "../core/home";
+import { loadOrCreateKey } from "./goal-state-hmac";
 
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 
@@ -71,6 +73,16 @@ export const PROTECTED_DATA_FILES = [
 	"skills-trust.json", // sha256 pins that let a project skill replace a user/bundled one (#4125, 8SO)
 ] as const;
 
+/**
+ * Protected dirs that run_command may not even read (#4132, 8SO): keys/state-hmac.key
+ * signs /goal state, approval grants and the Table ledger, so reading it is forging them.
+ */
+export const READ_DENIED_DATA_DIRS = ["keys"] as const;
+
+function isReadDenied(dir: string): boolean {
+	return (READ_DENIED_DATA_DIRS as readonly string[]).includes(path.basename(dir));
+}
+
 /** Directories whose whole tree is protected, relative to a data dir. */
 export const PROTECTED_DATA_DIRS = [
 	"extensions",
@@ -83,6 +95,9 @@ export const PROTECTED_DATA_DIRS = [
 	"logs",
 	"checkpoints",
 	"bin",
+	// keys/state-hmac.key signs /goal state and approval grants (#4132, 8SO). The whole dir,
+	// not just the file: a file rule alone lets the dir be renamed aside and a forged one moved in.
+	"keys",
 	// A file or a directory: a subpath rule covers both.
 	"policy-checksum",
 ] as const;
@@ -111,13 +126,19 @@ export interface SecurityEnv {
 }
 
 /** The .env files Bun (cwd, by NODE_ENV) or the TUI loader could have read. */
-export function dotenvCandidates(cwd: string = process.cwd(), home: string = os.homedir()): string[] {
+export function dotenvCandidates(
+	cwd: string = process.cwd(),
+	home: string = os.homedir(),
+): string[] {
 	const names = [".env", ".env.local"];
-	for (const mode of ["development", "production", "test"]) names.push(`.env.${mode}`, `.env.${mode}.local`);
+	for (const mode of ["development", "production", "test"])
+		names.push(`.env.${mode}`, `.env.${mode}.local`);
 	return [
 		...names.map((n) => path.join(cwd, n)),
 		path.resolve(import.meta.dirname, "../../.env"),
 		path.join(home, ".8gent", ".env"),
+		// The keys file is shell-style too: an EIGHT_DATA_DIR in it is not trusted env (#4132, 8SO).
+		path.join(home, ".8gent", "keys.env"),
 	];
 }
 
@@ -132,7 +153,8 @@ export function dotenvDeclaredKeys(files: string[]): Set<string> {
 		} catch {
 			continue;
 		}
-		for (const m of text.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*[=:]/gm)) keys.add(m[1] as string);
+		for (const m of text.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*[=:]/gm))
+			keys.add(m[1] as string);
 	}
 	return keys;
 }
@@ -194,7 +216,10 @@ export function protectedDataRoots(): string[] {
 	const home = fake ?? os.homedir();
 	const roots = [
 		path.join(home, ".8gent"),
-		path.join(resolveHome({ EIGHT_HOME: v.EIGHT_HOME, HOME: fake ?? v.HOME, USERPROFILE: v.USERPROFILE }), ".8gent"),
+		path.join(
+			resolveHome({ EIGHT_HOME: v.EIGHT_HOME, HOME: fake ?? v.HOME, USERPROFILE: v.USERPROFILE }),
+			".8gent",
+		),
 	];
 	// Path keys only ever ADD roots: a value from .env (ignored for trust) or set
 	// after the snapshot may still be where the harness reads from, so it is
@@ -203,7 +228,8 @@ export function protectedDataRoots(): string[] {
 		if (dataDir && path.isAbsolute(dataDir)) roots.push(dataDir);
 	}
 	const liveEightHome = process.env.EIGHT_HOME;
-	if (liveEightHome && path.isAbsolute(liveEightHome)) roots.push(path.join(liveEightHome, ".8gent"));
+	if (liveEightHome && path.isAbsolute(liveEightHome))
+		roots.push(path.join(liveEightHome, ".8gent"));
 	return [...new Set(roots.filter((r) => path.isAbsolute(r)).map((r) => path.normalize(r)))];
 }
 
@@ -295,15 +321,33 @@ export function buildRunCommandProfile(p: ProtectedPaths = protectedRunCommandPa
 	});
 	const dirFilters = p.dirs.flatMap((d) => {
 		const re = caseInsensitivePathRegex(d, true);
-		return [`(literal ${sbplString(d)})`, `(subpath ${sbplString(d)})`, ...(re ? [`(regex ${re})`] : [])];
+		return [
+			`(literal ${sbplString(d)})`,
+			`(subpath ${sbplString(d)})`,
+			...(re ? [`(regex ${re})`] : []),
+		];
 	});
 	const rootFilters = p.roots.flatMap((r) => {
 		const re = caseInsensitivePathRegex(r, false);
 		return [`(literal ${sbplString(r)})`, ...(re ? [`(regex ${re})`] : [])];
 	});
+	const readDenyFilters = p.dirs.filter(isReadDenied).flatMap((d) => {
+		const re = caseInsensitivePathRegex(d, true);
+		return [
+			`(literal ${sbplString(d)})`,
+			`(subpath ${sbplString(d)})`,
+			...(re ? [`(regex ${re})`] : []),
+		];
+	});
 	return `${[
 		"(version 1)",
 		"(allow default)",
+		...(readDenyFilters.length
+			? [
+					"; signing keys: no reads either (#4132)",
+					`(deny file-read* ${readDenyFilters.join(" ")})`,
+				]
+			: []),
 		"; 8gent startup code, secrets and records: no writes from run_command (#4009, #3612)",
 		`(deny file-write* file-link ${[...fileFilters, ...dirFilters].join(" ")})`,
 		"; the data roots themselves: no rename, remove or re-create",
@@ -318,12 +362,22 @@ export function buildRunCommandProfile(p: ProtectedPaths = protectedRunCommandPa
 /**
  * bwrap argv that keeps the whole filesystem as it is and re-mounts each
  * protected path that exists read-only. A path that does not exist yet cannot
- * be bound, so it is not covered (documented gap).
+ * be bound, so it is not covered (documented gap), except the read-denied
+ * dirs (keys/): those are created (0700) first so they are always bound, and
+ * then covered by an empty tmpfs so the command cannot read the key (#4132).
  */
 export function buildBwrapArgs(p: ProtectedPaths = protectedRunCommandPaths()): string[] {
+	for (const d of p.dirs.filter(isReadDenied)) {
+		try {
+			fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+		} catch {}
+	}
 	const args = ["--dev-bind", "/", "/"];
 	for (const target of [...p.files, ...p.dirs]) {
 		if (fs.existsSync(target)) args.push("--ro-bind", target, target);
+	}
+	for (const d of p.dirs.filter(isReadDenied)) {
+		if (fs.existsSync(d)) args.push("--tmpfs", d);
 	}
 	return args;
 }
@@ -381,11 +435,15 @@ export function runCommandSandboxStatus(): RunCommandSandbox {
 }
 
 function sandboxStatusInner(): RunCommandSandbox | { applied: false; reason: string } {
-	if (securityEnv.values.EIGHT_SEATBELT === "0") return { applied: false, reason: "EIGHT_SEATBELT=0" };
+	if (securityEnv.values.EIGHT_SEATBELT === "0")
+		return { applied: false, reason: "EIGHT_SEATBELT=0" };
 	if (process.platform === "darwin") {
 		if (!fs.existsSync(SANDBOX_EXEC)) return { applied: false, reason: "sandbox-exec missing" };
 		if (!canApplySeatbelt())
-			return { applied: false, reason: "host already sandboxes this process (sandbox-exec cannot nest)" };
+			return {
+				applied: false,
+				reason: "host already sandboxes this process (sandbox-exec cannot nest)",
+			};
 		return { applied: true, mechanism: "seatbelt" };
 	}
 	if (process.platform === "linux") {
@@ -414,16 +472,22 @@ export function onRunCommandUnsandboxed(listener: UnsandboxedListener): () => vo
 
 function auditPath(): string {
 	const roots = protectedDataRoots();
-	const root = securityEnv.values.EIGHT_DATA_DIR && path.isAbsolute(securityEnv.values.EIGHT_DATA_DIR)
-		? securityEnv.values.EIGHT_DATA_DIR
-		: (roots[0] as string);
+	const root =
+		securityEnv.values.EIGHT_DATA_DIR && path.isAbsolute(securityEnv.values.EIGHT_DATA_DIR)
+			? securityEnv.values.EIGHT_DATA_DIR
+			: (roots[0] as string);
 	return path.join(root, "audit", "run-command-sandbox.jsonl");
 }
 
-function reportUnsandboxed(status: Extract<RunCommandSandbox, { applied: false }>, command: string): void {
+function reportUnsandboxed(
+	status: Extract<RunCommandSandbox, { applied: false }>,
+	command: string,
+): void {
 	if (!warned) {
 		warned = true;
-		const ignored = securityEnv.ignored.length ? ` (ignored from .env: ${securityEnv.ignored.join(", ")})` : "";
+		const ignored = securityEnv.ignored.length
+			? ` (ignored from .env: ${securityEnv.ignored.join(", ")})`
+			: "";
 		process.stderr.write(
 			`[8gent] WARNING: run_command is NOT OS-sandboxed: ${status.reason}${ignored}. ` +
 				"Writes to ~/.8gent startup code, secrets and records are stopped by text checks only. " +
@@ -473,6 +537,22 @@ export function runCommandSandboxRefusal(): string | undefined {
 
 export class RunCommandSandboxRequired extends Error {}
 
+let signingKeyEnsured = false;
+
+/**
+ * Create <data dir>/keys (0700) and state-hmac.key before the first command is
+ * wrapped, so no command runs while the key is still absent and plantable
+ * (#4132, 8SO). Once per process. A failure (for example a key path refused
+ * as in-project) never blocks the command: signing reports it on use.
+ */
+function ensureSigningKey(): void {
+	if (signingKeyEnsured) return;
+	signingKeyEnsured = true;
+	try {
+		loadOrCreateKey();
+	} catch {}
+}
+
 /**
  * Wrap a run_command so the kernel refuses writes to the protected set,
  * whatever the command text says. When no OS boundary can be applied the
@@ -480,6 +560,7 @@ export class RunCommandSandboxRequired extends Error {}
  * listeners), or, under EIGHT_SEATBELT=require, refused with a throw.
  */
 export function wrapRunCommand(command: string): string {
+	ensureSigningKey();
 	const status = runCommandSandboxStatus();
 	if (!status.applied) {
 		if (status.required) throw new RunCommandSandboxRequired(runCommandSandboxRefusal());
@@ -502,12 +583,14 @@ export function wrapRunCommand(command: string): string {
  * wrapRunCommand when no boundary applies: report, or throw under require.
  */
 export function wrapRunCommandArgv(bin: string, args: readonly string[]): string[] {
+	ensureSigningKey();
 	const status = runCommandSandboxStatus();
 	if (!status.applied) {
 		if (status.required) throw new RunCommandSandboxRequired(runCommandSandboxRefusal());
 		reportUnsandboxed(status, [bin, ...args].join(" "));
 		return [bin, ...args];
 	}
-	if (status.mechanism === "seatbelt") return [SANDBOX_EXEC, "-p", buildRunCommandProfile(), bin, ...args];
+	if (status.mechanism === "seatbelt")
+		return [SANDBOX_EXEC, "-p", buildRunCommandProfile(), bin, ...args];
 	return [findBwrap() as string, ...buildBwrapArgs(), bin, ...args];
 }
