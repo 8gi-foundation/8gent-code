@@ -151,11 +151,13 @@ npm install -g @8gi-foundation/8gent-code
 8gent
 ```
 
-That's it. 8gent uses an adaptive 11-provider router. Two run locally and are on by default: `8gent` (model `eight-1.0-q3:14b`) and `ollama`. The other nine are hosted providers, each opt-in with your own API key; the registry in `packages/providers/` is the list. Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
+That's it. 8gent uses an adaptive provider router with 16 built-in providers. Six run locally: `8gent` (model `eight-1.0-q3:14b`), `ollama` and `lmstudio` are on by default, `llama-server` is selected with `EIGHT_LOCAL_SERVER=llama-server`, and `apple-foundation` and `apfel` turn on when a macOS 26 Apple Silicon host has them. The other ten are hosted providers, each opt-in with your own API key; the full list with every variable is [docs/install/providers.md](docs/install/providers.md). Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
 
 **Hosted providers are opt-in.** OpenRouter, `auto:free`, the `claude` runtime, and the hosted failover step only run when you set `EIGHT_ALLOW_HOSTED=1`. Without the flag, failover stays local and child agents use the parent's provider and model.
 
 **No model yet?** On a machine with no local model and no key, the chat area shows a short card with both ways to connect one: install Ollama and run `ollama pull qwen3.5`, or run `8gent keys` to add `OPENROUTER_API_KEY` to `~/.8gent/keys.env` and then use `/provider openrouter` with `/model auto:free`. `/provider` lists every option. The card goes away once a model is reachable.
+
+**Pick your platform:** [macOS](docs/install/macos.md), [Windows](docs/install/windows.md), [Linux](docs/install/linux.md). Every provider, flag and environment variable is in [docs/install/providers.md](docs/install/providers.md). One-line binary installers (no Bun or Node needed) are in [docs/user/install.md](docs/user/install.md).
 
 **Ollama is optional.** To run on llama.cpp's `llama-server` instead, set `EIGHT_LOCAL_SERVER=llama-server` and start with `8gent --provider=llama-server`. 8gent then never contacts Ollama. See [docs/guides/llama-server.md](docs/guides/llama-server.md).
 
@@ -292,7 +294,7 @@ bun run tui
 <br />
 
 **Model-agnostic**<br />
-<sub>Adaptive 11-provider router: two local providers on by default (8gent, Ollama) and nine hosted providers, each opt-in with your own API key. Task router classifies prompts (code, reasoning, simple, creative) and picks the best model automatically.</sub>
+<sub>Adaptive provider router: six local providers and ten hosted providers, each hosted one opt-in with your own API key. Task router classifies prompts (code, reasoning, simple, creative) and picks the best model automatically.</sub>
 
 <br />
 
@@ -605,7 +607,7 @@ apps/
 ```
 packages/
   eight/         Core agent engine (Vercel AI SDK) - shipped
-  providers/     11-provider adaptive router + failover - shipped
+  providers/     16-provider adaptive router + failover - shipped
   memory/        SQLite + FTS5 persistent memory - shipped
   orchestration/ WorktreePool, role registry, macro actions - shipped
   permissions/   NemoClaw YAML policy engine - shipped
@@ -771,6 +773,8 @@ See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
 | [docs/guides/permissions.md](docs/guides/permissions.md) | Policy engine and approval gates |
 | [docs/guides/permission-modes.md](docs/guides/permission-modes.md) | Plan, Ask, Guarded and Infinite on Shift+Tab |
 | [docs/guides/llama-server.md](docs/guides/llama-server.md) | Running on llama-server with no Ollama |
+| [docs/install/macos.md](docs/install/macos.md), [windows.md](docs/install/windows.md), [linux.md](docs/install/linux.md) | Install and run on each OS, every model option |
+| [docs/install/providers.md](docs/install/providers.md) | Every provider, flag and environment variable |
 | [docs/guides/system-one-shared-judge.md](docs/guides/system-one-shared-judge.md) | One shared System One judge per machine |
 | [docs/guides/no-color.md](docs/guides/no-color.md) | Turning colour off with NO_COLOR |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
