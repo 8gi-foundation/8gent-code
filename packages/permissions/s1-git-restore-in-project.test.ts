@@ -136,6 +136,16 @@ describe("restoreInProject allows", () => {
 	test.skipIf(!LANE)("every shape, including the exact pilot command", () => {
 		for (const cmd of allowed()) expect([cmd, restoreInProject(cmd, ws).ok]).toEqual([cmd, true]);
 	});
+	test.skipIf(!LANE)("on win32 every one of them has no opinion (the grammar is POSIX)", () => {
+		const real = Object.getOwnPropertyDescriptor(process, "platform");
+		Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+		try {
+			for (const cmd of allowed())
+				expect([cmd, restoreInProject(cmd, ws)]).toEqual([cmd, { ok: false }]);
+		} finally {
+			if (real) Object.defineProperty(process, "platform", real);
+		}
+	});
 });
 
 describe("restoreInProject falls through on", () => {
