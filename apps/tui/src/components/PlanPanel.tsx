@@ -18,8 +18,8 @@
  * With no plan this turn the caller does not mount the panel at all, so the
  * chat gets the column back.
  *
- * When the project has a checklist plan file (#4161), a second header row
- * shows that file's ticks beside the column's own, e.g. "PLAN.md  0/3": the
+ * When the project has a checklist plan file (#4161), the header shows that
+ * file's ticks beside the column's own, e.g. "PLAN  5/5 · PLAN.md 0/3": the
  * file is the record, the column only mirrors it.
  */
 
@@ -110,6 +110,12 @@ export function PlanPanel({
 	const done = steps.filter((s) => s.status === "done").length;
 	const inner = Math.max(8, width - 2);
 	const textMax = inner - 2;
+	const own = steps.some((s) => s.status !== "pending")
+		? `${done}/${steps.length}`
+		: `${steps.length}`;
+	// The plan file's ticks sit in the header row beside the column's own,
+	// so the column's layout below the header is unchanged.
+	const fileCount = planFile ? `${planFile.ticked}/${planFile.total}` : "";
 
 	return (
 		<Box flexDirection="column" width={width} flexShrink={0} paddingX={1}>
@@ -117,22 +123,17 @@ export function PlanPanel({
 				<Text color={t.heading} bold>
 					PLAN
 				</Text>
-				<Text color={t.muted}>
-					{steps.some((s) => s.status !== "pending")
-						? `${done}/${steps.length}`
-						: `${steps.length}`}
+				<Text color={t.muted} wrap="truncate-end">
+					{own}
+					{planFile ? (
+						<>
+							{" · "}
+							{clip(planFile.name, Math.max(4, inner - 4 - own.length - fileCount.length - 5))}{" "}
+							<Text color={planFile.ticked < done ? t.orange : t.muted}>{fileCount}</Text>
+						</>
+					) : null}
 				</Text>
 			</Box>
-			{planFile ? (
-				<Box justifyContent="space-between">
-					<Text color={t.muted} wrap="truncate-end">
-						{clip(planFile.name, Math.max(1, inner - 8))}
-					</Text>
-					<Text color={planFile.ticked < done ? t.orange : t.muted}>
-						{`${planFile.ticked}/${planFile.total}`}
-					</Text>
-				</Box>
-			) : null}
 			<Box marginTop={1} flexDirection="column">
 				{steps.slice(0, visible).map((step) => {
 					if (step.status === "done") {

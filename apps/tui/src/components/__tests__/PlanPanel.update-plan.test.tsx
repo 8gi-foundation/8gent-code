@@ -160,8 +160,8 @@ describe("PLAN column from update_plan", () => {
 					planFile={planFileTally(file)}
 				/>,
 			);
-			expect(frame).toMatch(/PLAN\s+1\/2/);
-			expect(frame).toMatch(/PLAN\.md\s+1\/2/);
+			// One header row: the column's count, then the file's, beside it.
+			expect(frame).toMatch(/PLAN\s+1\/2 · PLAN\.md 1\/2/);
 			expect(frame).toContain("✓ Add src/slugify.ts");
 			expect(frame).not.toContain("✓ Update README.md");
 
