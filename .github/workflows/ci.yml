@@ -226,10 +226,39 @@ jobs:
             const list = p.policies;
             const fail = (m) => { console.error('Policy integrity: ' + m); process.exit(1); };
             if (!Array.isArray(list) || list.length === 0) fail('no policies parsed');
-            // Floor = the count on main. Removing a default policy must change this
-            // number in the same PR, so a deletion is never silent; adding one passes.
-            const MIN_POLICIES = 28;
-            if (list.length < MIN_POLICIES) fail('policy count ' + list.length + ' is below ' + MIN_POLICIES + ' - a default policy was removed');
+            // The default policies this repo ships. Any change to the set in
+            // default-policies.yaml (add, remove, rename) must update this list in the
+            // same PR, so swapping a block rule for an allow rule is never silent.
+            const EXPECTED = [
+              'no-secrets-in-files',
+              'no-env-file-leak',
+              'no-rm-rf-root',
+              'no-fork-bomb',
+              'no-pipe-to-shell',
+              'no-sudo-destructive',
+              'protected-branches-push',
+              'no-force-push-main',
+              'no-hard-reset',
+              'no-exfil-domains',
+              'desktop-require-approval',
+              'desktop-block-dangerous-keys',
+              'desktop-allow-screenshot',
+              'desktop-quit-require-approval',
+              'extension-call-unattended-require-approval',
+              'no-delete-config',
+              'mcp-config-and-policies-write-approval',
+              'mcp-config-and-policies-delete-approval',
+              'mcp-config-and-policies-shell-approval',
+              'agent-mail-cross-user-block',
+              'agent-mail-cross-channel-approval',
+              'agent-mail-read-other-user-block',
+              'peers-cross-user-block',
+              'email-send-rate-limit',
+              'email-send-bulk-approval',
+              'email-send-new-recipient-quarantine',
+              'email-receive-high-spam-block',
+              'issue-email-reserved-name-block',
+            ];
             const REQUIRED = ['name', 'action', 'condition', 'decision', 'message'];
             const DECISIONS = ['block', 'require_approval', 'allow'];
             const seen = new Set();
@@ -243,7 +272,14 @@ jobs:
               if (seen.has(pol.name)) fail('duplicate policy name: ' + pol.name);
               seen.add(pol.name);
             });
-            console.log(list.length + ' policies, ' + seen.size + ' unique, all well-formed - OK');
+            const expected = new Set(EXPECTED);
+            const removed = EXPECTED.filter((n) => !seen.has(n));
+            const added = [...seen].filter((n) => !expected.has(n));
+            if (removed.length) console.error('Policy integrity: policies removed: ' + removed.join(', '));
+            if (added.length) console.error('Policy integrity: policies added: ' + added.join(', ') +
+              ' - add each to EXPECTED in the Policy engine integrity step of ci.yml in the same PR');
+            if (removed.length || added.length) process.exit(1);
+            console.log(list.length + ' policies, all expected, unique and well-formed - OK');
           "
 
       # audit-ci was replaced: it cannot read bun.lock and errored on every run
