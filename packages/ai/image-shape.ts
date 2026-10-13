@@ -25,6 +25,7 @@
 import * as fs from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
+import { renderedCoverageLine } from "./write-shape";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const SKIP_DIRS = new Set(["node_modules", "vendor"]);
@@ -258,5 +259,13 @@ export async function withImagesWritten(
 		budget,
 	]);
 	clearTimeout(timer);
-	return line ? `${output}\n${line}` : output;
+	// #4154: a video rendered beside a narration that lacks a brief point is named here.
+	let coverage = "";
+	try {
+		coverage = renderedCoverageLine(workingDirectory, sinceMs);
+	} catch {
+		coverage = "";
+	}
+	const out = line ? `${output}\n${line}` : output;
+	return coverage ? `${out}\n${coverage}` : out;
 }

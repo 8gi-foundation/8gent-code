@@ -11,6 +11,7 @@
  * or spawn.
  */
 
+import { renderCoverageRefusal } from "../ai/write-shape";
 import { touchesBrowserSecrets } from "../tools/eight-browser";
 import {
 	commandMutatesSessionRecords,
@@ -42,5 +43,7 @@ export function preSpawnRefusal(command: string, cwd: string = process.cwd()): s
 	// #4009 (8SO F2): hooks, extensions, prompts and packages run at start; read-only to the shell.
 	if (commandWritesStartupCode(command, cwd))
 		return `[PERMISSION DENIED] Command would change 8gent hooks, extensions, prompts or packages, which agent tools may not do: ${command}`;
-	return null;
+	// #4154: not a security check. A slides video is not rendered while its
+	// narration leaves out a slide's point; refused before any approval card.
+	return renderCoverageRefusal(command, cwd);
 }
