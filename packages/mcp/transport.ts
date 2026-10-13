@@ -71,6 +71,9 @@ export function serverEnv(
 /** Longest JSON-RPC line a server may send (UTF-16 units); over it the transport closes. */
 export const MAX_MESSAGE_CHARS = 16 * 1024 * 1024;
 
+/** How long one JSON-RPC request may wait for its answer, on either transport. */
+export const MCP_REQUEST_TIMEOUT_MS = 30_000;
+
 export class StdioTransport implements Transport {
 	private proc: Subprocess | null = null;
 	private requestId = 0;
@@ -223,7 +226,7 @@ export class StdioTransport implements Transport {
 			const timeout = setTimeout(() => {
 				this.pending.delete(id);
 				reject(new Error(`MCP request timeout: ${method}`));
-			}, 30_000);
+			}, MCP_REQUEST_TIMEOUT_MS);
 
 			this.pending.set(id, {
 				resolve: (v) => {
@@ -346,41 +349,59 @@ export class SSETransport implements Transport {
 	private requestId = 0;
 	private endpoint: string;
 	private headers: Record<string, string>;
-	private abortController: AbortController | null = null;
+	// One controller for the transport's life: close() aborts every fetch in flight.
+	private abortController = new AbortController();
+	private closedReason: string | null = null;
 
-	constructor(url: string, headers?: Record<string, string>) {
+	constructor(
+		url: string,
+		headers?: Record<string, string>,
+		private timeoutMs: number = MCP_REQUEST_TIMEOUT_MS,
+	) {
 		// SSE endpoint for receiving; POST to same base for sending
 		this.endpoint = url;
 		this.headers = headers || {};
 	}
 
+	/** POST one message; aborts on close() or after timeoutMs, whichever comes first. */
+	private _post(req: JSONRPCRequest, extra?: Record<string, string> | null): Promise<Response> {
+		return sameOriginFetch(this.endpoint, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", ...this.headers, ...extra },
+			body: JSON.stringify(req),
+			signal: AbortSignal.any([this.abortController.signal, AbortSignal.timeout(this.timeoutMs)]),
+		});
+	}
+
 	async send(method: string, params?: unknown): Promise<unknown> {
+		if (this.closedReason) throw new Error(this.closedReason);
 		const id = ++this.requestId;
 		const req: JSONRPCRequest = { jsonrpc: "2.0", id, method, params };
 
 		const modern = modernHeaders(method, params);
 
-		const res = await sameOriginFetch(this.endpoint, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				...this.headers,
-				...modern,
-			},
-			body: JSON.stringify(req),
-		});
+		let body: JSONRPCResponse;
+		try {
+			const res = await this._post(req, modern);
 
-		if (!res.ok) {
-			// A modern server explains a 4xx in a JSON-RPC error body (#3549).
-			const err = modern ? await errorBody(res) : null;
-			if (err) throw new MCPRPCError(err.message, err.code, err.data);
-			throw new Error(`MCP SSE request failed: ${res.status} ${res.statusText}`);
+			if (!res.ok) {
+				// A modern server explains a 4xx in a JSON-RPC error body (#3549).
+				const err = modern ? await errorBody(res) : null;
+				if (err) throw new MCPRPCError(err.message, err.code, err.data);
+				throw new Error(`MCP SSE request failed: ${res.status} ${res.statusText}`);
+			}
+
+			body =
+				modern && res.headers.get("content-type")?.includes("text/event-stream")
+					? sseResponse(await res.text(), id)
+					: ((await res.json()) as JSONRPCResponse);
+		} catch (err) {
+			if (this.closedReason) throw new Error(this.closedReason);
+			if ((err as Error)?.name === "TimeoutError") {
+				throw new Error(`MCP request timeout: ${method}`);
+			}
+			throw err;
 		}
-
-		const body =
-			modern && res.headers.get("content-type")?.includes("text/event-stream")
-				? sseResponse(await res.text(), id)
-				: ((await res.json()) as JSONRPCResponse);
 		if (body.error) {
 			throw new MCPRPCError(body.error.message, body.error.code, body.error.data);
 		}
@@ -388,16 +409,14 @@ export class SSETransport implements Transport {
 	}
 
 	notify(method: string, params?: unknown): void {
-		const req: JSONRPCRequest = { jsonrpc: "2.0", method, params };
-		sameOriginFetch(this.endpoint, {
-			method: "POST",
-			headers: { "Content-Type": "application/json", ...this.headers },
-			body: JSON.stringify(req),
-		}).catch(() => {});
+		if (this.closedReason) return;
+		this._post({ jsonrpc: "2.0", method, params }).catch(() => {});
 	}
 
+	/** Abort every request in flight and refuse new ones. Idempotent. */
 	close(): void {
-		this.abortController?.abort();
+		this.closedReason ??= "Transport closed";
+		this.abortController.abort(new Error(this.closedReason));
 	}
 }
 
