@@ -8,7 +8,7 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, linkSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
@@ -592,18 +592,20 @@ describe("8SO hold on #4102", () => {
 		},
 	);
 	test("(d) PATH with '.', an empty entry, a relative entry or a workspace directory is refused", () => {
-		const base = process.env.PATH ?? "/usr/bin:/bin";
+		// path.delimiter: `;` on Windows, where a `:`-joined PATH is one (absolute) entry.
+		const D = delimiter;
+		const base = process.env.PATH ?? ["/usr/bin", "/bin"].join(D);
 		for (const p of [
-			`.:${base}`,
-			`${base}:`,
-			`:${base}`,
-			`bin:${base}`,
-			`${ws}/bin:${base}`,
-			`${ws}/escape/../bin:${base}`,
+			`.${D}${base}`,
+			`${base}${D}`,
+			`${D}${base}`,
+			`bin${D}${base}`,
+			`${join(ws, "bin")}${D}${base}`,
+			`${join(ws, "escape")}/../bin${D}${base}`,
 			"",
 		])
 			expect(ok(PILOT_CMD, { ...env, PATH: p }), p).toBe(false);
-		expect(ok(PILOT_CMD, { ...env, PATH: "/usr/bin:/bin" })).toBe(true);
+		expect(ok(PILOT_CMD, { ...env, PATH: ["/usr/bin", "/bin"].join(D) })).toBe(true);
 	});
 });
 
