@@ -41,8 +41,8 @@ import {
 	dirname,
 	join,
 	posix as pathPosix,
-	resolve as resolvePath,
 	win32 as pathWin32,
+	resolve as resolvePath,
 } from "node:path";
 import {
 	RESERVED_LOOPBACK_PORTS,
@@ -532,8 +532,14 @@ export type BrowserLaunchSpec = {
 	/** Where the child's stderr goes (next to the port file), so a crash leaves its own last line behind. */
 	logFile: string;
 };
-/** Resolves when the child has exited (or could not be started), with a short reason. */
-export type BrowserSpawnFn = (spec: BrowserLaunchSpec) => { exited: Promise<string> };
+/** `exited` resolves when the child has exited (or could not be started), with a short reason. `pid`
+ *  is the child to stop if it never publishes a port; `detached` means it leads its own process group,
+ *  so the whole group (Electron's helpers too) is signalled. */
+export type BrowserSpawnFn = (spec: BrowserLaunchSpec) => {
+	exited: Promise<string>;
+	pid?: number;
+	detached?: boolean;
+};
 
 let spawnOverride: BrowserSpawnFn | null = null;
 /** Test seam: fake the process launch. Never set outside tests. */
@@ -584,17 +590,18 @@ export function launchLogTail(file: string): string | null {
 	return pick.replace(/^\[\d+:\d+\/[\d.]+:/, "").slice(0, 240);
 }
 
-const realSpawn: BrowserSpawnFn = (spec) => ({
-	exited: new Promise((done) => {
-		let log: number | null = null;
-		try {
-			// The dir and the log exist before the browser does, so they get the modes the browser would
-			// give them (8gent-browser control-server.ts makes the profile dir 0o700): nothing looser.
-			mkdirSync(dirname(spec.logFile), { recursive: true, mode: 0o700 });
-			log = openSync(spec.logFile, "w", 0o600);
-		} catch {
-			log = null;
-		}
+const realSpawn: BrowserSpawnFn = (spec) => {
+	let log: number | null = null;
+	try {
+		// The dir and the log exist before the browser does, so they get the modes the browser would
+		// give them (8gent-browser control-server.ts makes the profile dir 0o700): nothing looser.
+		mkdirSync(dirname(spec.logFile), { recursive: true, mode: 0o700 });
+		log = openSync(spec.logFile, "w", 0o600);
+	} catch {
+		log = null;
+	}
+	let pid: number | undefined;
+	const exited = new Promise<string>((done) => {
 		try {
 			const child = spawn(spec.bin, [], {
 				env: spec.env as NodeJS.ProcessEnv,
@@ -602,6 +609,7 @@ const realSpawn: BrowserSpawnFn = (spec) => ({
 				stdio: ["ignore", "ignore", log ?? "ignore"],
 				windowsHide: true,
 			});
+			pid = child.pid;
 			child.once("error", (e: Error) => done(`spawn failed: ${e.message}`));
 			child.once("exit", (code: number | null, signal: string | null) => {
 				const tail = launchLogTail(spec.logFile);
@@ -613,8 +621,9 @@ const realSpawn: BrowserSpawnFn = (spec) => ({
 		} finally {
 			if (log !== null) closeSync(log);
 		}
-	}),
-});
+	});
+	return { exited, pid, detached: true };
+};
 
 /** The 8gent Browser binary: EIGHT_BROWSER_APP, else the macOS app bundle in /Applications or ~/Applications. */
 export function browserBinary(env: Env = process.env, home: string = homedir()): string | null {
@@ -645,8 +654,145 @@ function freePort(): Promise<number> {
 	});
 }
 
-const LAUNCH_WAIT_MS = 20_000;
+// ── Named-profile support (#4103) ───────────────────────────────────────────
+// Named profiles landed in 8gent-browser 18ce4ad, after desktop-v0.3.0. An older build ignores
+// EIGHT_BROWSER_PROFILE, writes the default token and runs on Electron's default userData: the
+// person's own logged-in profile. So a build that cannot honour the profile is never started.
+/** First release with named profiles. Builds of main after 18ce4ad still say 0.3.0, so for 0.3.0
+ *  and below the app's own bundle decides: it must carry PROFILE_MARKER. */
+export const PROFILE_MIN_VERSION = "0.3.1";
+/** The env var src/main/profile.ts reads; it survives bundling and minifying, and no pre-profile
+ *  build contains it (desktop-v0.3.0 app.asar: zero occurrences). */
+const PROFILE_MARKER = "EIGHT_BROWSER_PROFILE";
+
+/** Negative, zero or positive as dotted version a is below, equal to or above b. */
+export function compareVersions(a: string, b: string): number {
+	const pa = a.split(/[.+-]/).map((x) => Number.parseInt(x, 10) || 0);
+	const pb = b.split(/[.+-]/).map((x) => Number.parseInt(x, 10) || 0);
+	for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0);
+	return 0;
+}
+
+/** The bundle files next to a binary: Info.plist (macOS .app) and app.asar, where they exist. */
+function appBundleFiles(bin: string): { plist: string | null; asar: string | null } {
+	const dir = dirname(bin);
+	const contents = dirname(dir);
+	const mac = /[\\/]Contents[\\/]MacOS$/.test(dir);
+	const plist = mac ? join(contents, "Info.plist") : null;
+	const asars = mac
+		? [join(contents, "Resources", "app.asar")]
+		: [join(dir, "resources", "app.asar")];
+	return {
+		plist: plist && existsSync(plist) ? plist : null,
+		asar: asars.find((a) => existsSync(a)) ?? null,
+	};
+}
+
+/** CFBundleShortVersionString from an XML Info.plist, or null. */
+function plistVersion(plist: string): string | null {
+	try {
+		const m = readFileSync(plist, "utf8").match(
+			/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/,
+		);
+		return m ? m[1].trim() : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Why this 8gent Browser build cannot run a named profile, or null when it can. Cheap first: a version
+ * at or above PROFILE_MIN_VERSION passes on the plist alone. Otherwise the app.asar must carry the
+ * marker. With neither file (a dev binary or script in EIGHT_BROWSER_APP) nothing can be told before
+ * launch, so this returns null and launchOnce's default-token check is the guard.
+ */
+export function profileSupportProblem(bin: string): string | null {
+	const { plist, asar } = appBundleFiles(bin);
+	const version = plist ? plistVersion(plist) : null;
+	if (version && compareVersions(version, PROFILE_MIN_VERSION) >= 0) return null;
+	let marked: boolean | null = null;
+	if (asar) {
+		try {
+			marked = readFileSync(asar).includes(PROFILE_MARKER);
+		} catch {
+			marked = null;
+		}
+	}
+	if (marked === true) return null;
+	if (marked === null && !version) return null;
+	return `the installed 8gent Browser ${version ?? "(version unknown)"} does not support named profiles; it needs ${PROFILE_MIN_VERSION} or later. Update it or set EIGHT_BROWSER_APP to a newer build`;
+}
+
+const PRE_PROFILE_SEEN =
+	"the 8gent Browser it started does not support named profiles: it wrote the default profile's token, not the profile's own";
+
+let launchWaitMs = 20_000;
+/** Test seam: shorten the wait for a port file. null restores 20 s. Never set outside tests. */
+export function _setLaunchWaitForTest(ms: number | null): void {
+	launchWaitMs = ms ?? 20_000;
+	launches.clear();
+}
+const STOP_GRACE_MS = 1_500;
 const launches = new Map<string, Promise<void>>();
+
+const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
+
+let killFn: (pid: number, sig: NodeJS.Signals) => void = (pid, sig) => {
+	process.kill(pid, sig);
+};
+/** Test seam: replace process.kill for stopChild. null restores it. Never set outside tests. */
+export function _setKillForTest(fn: ((pid: number, sig: NodeJS.Signals) => void) | null): void {
+	killFn =
+		fn ??
+		((pid, sig) => {
+			process.kill(pid, sig);
+		});
+}
+
+/** Stop a launched child that did not publish a port: SIGTERM to its process group (it was started
+ *  detached), then SIGKILL after STOP_GRACE_MS. Returns the clause the error carries. */
+async function stopChild(
+	handle: { pid?: number; detached?: boolean },
+	exited: Promise<unknown>,
+): Promise<string> {
+	const pid = handle.pid;
+	if (!pid) return "";
+	const group = handle.detached === true && process.platform !== "win32";
+	// ESRCH on the group means the leader exited and was reaped: a bare-pid signal then could only
+	// reach a reused pid, so the pid itself is tried only on EPERM (8SO review of #4104).
+	const send = (sig: NodeJS.Signals) => {
+		try {
+			killFn(group ? -pid : pid, sig);
+		} catch (e) {
+			if (!group || (e as NodeJS.ErrnoException).code !== "EPERM") return;
+			try {
+				killFn(pid, sig);
+			} catch {
+				// already gone
+			}
+		}
+	};
+	send("SIGTERM");
+	const gone = await Promise.race([
+		exited.then(() => true),
+		sleep(STOP_GRACE_MS).then(() => false),
+	]);
+	// Electron helpers can outlive the main process; the group gets SIGKILL either way.
+	if (group || !gone) send("SIGKILL");
+	if (!gone) await Promise.race([exited, sleep(1_000)]);
+	return gone
+		? "; stopped the browser it started"
+		: "; killed the browser it started (SIGTERM was ignored)";
+}
+
+/** mtime of a file in ms, or null when absent. */
+function mtimeOf(file: string): number | null {
+	try {
+		return statSync(file).mtimeMs;
+	} catch {
+		return null;
+	}
+}
 
 /** The actionable error for a launch that did not produce a running profile. The curl alternative is
  *  for a browser that is missing or broken; under a host sandbox it is left out (#4099), since it only
@@ -660,6 +806,9 @@ async function launchOnce(profile: BrowserProfile, home: string, env: Env): Prom
 	const bin = browserBinary(env, home);
 	if (!bin) throw launchError("no 8gent Browser app found; set EIGHT_BROWSER_APP to its binary");
 	if (hostSandboxBlocksBrowser()) throw launchError(HOST_SANDBOX_REASON, false);
+	// A build without named profiles would run on the person's own profile: never spawned (#4103).
+	const unsupported = profileSupportProblem(bin);
+	if (unsupported) throw launchError(unsupported, false);
 	const port = await freePort();
 	const ports = [...allowedLoopbackPorts(env, home)];
 	// Built fresh: only what the browser needs to run and find its profile. Never the parent env.
@@ -680,19 +829,31 @@ async function launchOnce(profile: BrowserProfile, home: string, env: Env): Prom
 		tokenFile: profile.tokenFile,
 		logFile: join(dirname(profile.portFile), "browser-launch.log"),
 	};
-	const { exited } = (spawnOverride ?? realSpawn)(spec);
-	const exit = exited.then((reason) => ({ reason }));
-	const deadline = Date.now() + LAUNCH_WAIT_MS;
+	// A browser that ignores EIGHT_BROWSER_PROFILE writes the DEFAULT token under the same HOME.
+	const defaultToken = join(home, ".8gent", "browser-control.token");
+	const defaultTokenBefore = mtimeOf(defaultToken);
+	const handle = (spawnOverride ?? realSpawn)(spec);
+	const exit = handle.exited.then((reason) => ({ reason }));
+	const ready = () => existsSync(profile.portFile) && existsSync(profile.tokenFile);
+	const deadline = Date.now() + launchWaitMs;
 	while (Date.now() < deadline) {
-		if (existsSync(profile.portFile) && existsSync(profile.tokenFile)) return;
-		const r = await Promise.race([exit, new Promise<null>((res) => setTimeout(res, 100))]);
+		if (ready()) return;
+		if (!existsSync(profile.portFile) && mtimeOf(defaultToken) !== defaultTokenBefore) {
+			const stopped = await stopChild(handle, handle.exited);
+			throw launchError(
+				`${PRE_PROFILE_SEEN}${stopped}. Update it or set EIGHT_BROWSER_APP to a newer build`,
+				false,
+			);
+		}
+		const r = await Promise.race([exit, sleep(100).then(() => null)]);
 		if (r) {
-			if (existsSync(profile.portFile) && existsSync(profile.tokenFile)) return;
+			if (ready()) return;
 			throw launchError(r.reason);
 		}
 	}
+	const stopped = await stopChild(handle, handle.exited);
 	throw launchError(
-		`profile "${profile.name}" published no port within ${LAUNCH_WAIT_MS / 1000} s`,
+		`profile "${profile.name}" published no port within ${launchWaitMs / 1000} s${stopped}`,
 	);
 }
 
@@ -873,7 +1034,9 @@ function decodedViews(command: string): string[] {
 	const views = [command];
 	// %xx (URL-style) escapes, so %62rowser-history cannot hide a name.
 	if (/%[0-9a-f]{2}/i.test(command))
-		views.push(command.replace(/%([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16))));
+		views.push(
+			command.replace(/%([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16))),
+		);
 	views.push(
 		command
 			.replace(/\\x([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16)))
@@ -981,7 +1144,8 @@ export function touchesBrowserSecrets(command: string): boolean {
 		if (/browser-(control|profiles|history|shots|[*?[{$])/.test(lower)) return true;
 		const at = lower.indexOf(".8gent");
 		if (at >= 0) {
-			if (/[*?[{$]|token|control|profile/.test(lower.slice(at)) || browserUnder8gent(lower)) return true;
+			if (/[*?[{$]|token|control|profile/.test(lower.slice(at)) || browserUnder8gent(lower))
+				return true;
 			// A listing is refused when it is of .8gent itself or a browser-* child, not of any path under it.
 			if (lists && names8gentDir(lower)) return true;
 		}

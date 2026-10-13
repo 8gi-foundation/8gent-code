@@ -87,6 +87,7 @@ import { activeShellKind } from "../core/shell";
 import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
 import type { CreatedFiles } from "./s1-created-files";
+import type { RmOwnDir } from "./s1-rm-own-dir";
 import type { RunOwnScript } from "./s1-run-own-script";
 import { posixRulesApply } from "./shell-tools";
 import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
@@ -603,6 +604,29 @@ export async function systemOneGate(
 				};
 			}
 			hint = single.hint;
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// `rm -r` of plain relative directories this session made with a
+		// mkdir-only run_command, untracked, holding only files this session
+		// wrote and directories it made (#4105); see s1-rm-own-dir.ts.
+		// Default mode only.
+		try {
+			const { rmOwnDir } = await import("./s1-rm-own-dir");
+			const own: RmOwnDir = mode === "default" ? rmOwnDir(command, cwd, created) : { ok: false };
+			if (own.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: own.reason,
+					},
+				};
+			}
+			if (own.hint) hint = own.hint;
 		} catch {
 			// No opinion: fall through to the judge.
 		}

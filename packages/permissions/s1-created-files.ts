@@ -23,6 +23,17 @@
  * later writes to a recorded file (write_file, edit_file, a redirect) refresh
  * the entry.
  *
+ * Directories (#4105): a run_command that is only `mkdir [-p] [-v] DIR...`
+ * records each directory it made, that is each path (and, for a missing
+ * parent, each ancestor) that was absent just before the command, is a real
+ * directory just after it, and sits inside the working directory. The entry
+ * keeps device, inode and birth time; a directory renamed, replaced or made
+ * by anything else does not count, and a directory that already existed is
+ * never recorded. Where the file system reports no birth time, nothing is
+ * recorded. A directory write_file makes for a new file's parent is not
+ * recorded (it is made before the write is watched). Read by
+ * s1-rm-own-dir.ts.
+ *
  * A file that existed before the session wrote to it is never recorded: an
  * overwrite or a `>` truncation of a pre-existing file is a modification, not
  * a creation.
@@ -56,8 +67,8 @@
  *     filesystem root nor the home directory;
  *   - the command names the path's directory (bornScopes): for each plain
  *     relative path word in the command text (quotes masked; no `..`, `$`,
- *     `~`, glob, absolute path or dot segment) the word if it is a directory,
- *     else its parent; the working directory itself is never a scope and at
+ *     `~`, glob, absolute path or dot segment; for `NAME=value`, the value)
+ *     the word if it is a directory, else its parent; the working directory itself is never a scope and at
  *     most MAX_BORN_SCOPES are walked. `bash video/build_slides.sh` scopes to
  *     video/; `make`, `sleep 30` and `ls` walk nothing and record nothing;
  *   - a bounded walk of that scope just before the command (after redirect
@@ -149,8 +160,44 @@ export function pathAbsent(abs: string): boolean {
 	}
 }
 
+/**
+ * The identity of `abs` when it is a real directory (lstat: not a symlink):
+ * device, inode and birth time. Null when it is not, or when the file system
+ * reports no birth time (0), since then a recreated directory could pass for
+ * the old one.
+ */
+export function dirIdentity(abs: string): Identity | null {
+	try {
+		const st = lstatSync(abs, { bigint: true });
+		if (!st.isDirectory() || st.birthtimeNs <= 0n) return null;
+		return [st.dev, st.ino, st.birthtimeNs].join(":");
+	} catch {
+		return null;
+	}
+}
+
 export class CreatedFiles {
 	private readonly files = new Map<string, Identity>();
+	private readonly dirs = new Map<string, Identity>();
+
+	/** Record `abs` as a directory this session created, if it is now a real directory. */
+	recordDir(abs: string): void {
+		const key = keyOf(abs);
+		const id = dirIdentity(abs);
+		if (key && id) this.dirs.set(key, id);
+	}
+
+	/** True when `abs` is a directory this session created, and still that same directory. */
+	createdDirBySession(abs: string): boolean {
+		const key = keyOf(abs);
+		if (!key) return false;
+		const want = this.dirs.get(key);
+		return !!want && want === dirIdentity(abs);
+	}
+
+	get dirCount(): number {
+		return this.dirs.size;
+	}
 
 	/** Record `abs` as created by this session, if it is now a regular file. */
 	record(abs: string): void {
@@ -181,6 +228,22 @@ export class CreatedFiles {
 		const want = this.files.get(key);
 		const now = regularFile(abs);
 		return !!want && !!now && want === now;
+	}
+
+	/**
+	 * True when `abs` is a regular file this session created and it is still
+	 * the file born then (device, inode, birth time), even if rewritten in
+	 * place since (#4105: the pilot's CLI rewrites build/todos.json on every
+	 * run). A file put at the path by a rename, a copy or anything else has
+	 * another inode or birth time and does not count.
+	 */
+	bornToSession(abs: string): boolean {
+		const key = keyOf(abs);
+		if (!key) return false;
+		const want = this.files.get(key)?.split(":");
+		const now = regularFile(abs)?.split(":");
+		if (!want || !now) return false;
+		return want[0] === now[0] && want[1] === now[1] && want[3] === now[3];
 	}
 
 	get size(): number {
@@ -355,8 +418,9 @@ const MAX_BORN_SCOPES = 4;
 /**
  * The directories `command` names, as realpaths strictly inside `root`: for
  * each plain relative path word (quotes masked first; no `..`, `$`, `~`, glob,
- * absolute path, flag, or dot / node_modules / vendor segment), the word
- * itself when it is a directory, else its parent directory. The root itself is
+ * absolute path, flag, or dot / node_modules / vendor segment; for a
+ * `NAME=value` word, the value), the word itself when it is a directory, else
+ * its parent directory. The root itself is
  * never a scope, so a command naming no path (`make`, `sleep 30`, `ls`) gets
  * none. A scope inside another scope is dropped; at most MAX_BORN_SCOPES are
  * kept, in the order the command names them.
@@ -365,10 +429,12 @@ export function bornScopes(command: string, root: string): string[] {
 	const masked = maskQuotes(command);
 	const found: string[] = [];
 	for (const m of masked.matchAll(/[^\s;|&<>()]+/g)) {
-		const word = m[0];
 		const at = m.index ?? 0;
 		// Masking changed it: part of it was quoted.
-		if (command.slice(at, at + word.length) !== word) continue;
+		if (command.slice(at, at + m[0].length) !== m[0]) continue;
+		// `NAME=path` (an env assignment such as the pilot's
+		// TODO_FILE=build/todos.json, #4105) names `path`.
+		const word = /^[A-Za-z_][A-Za-z0-9_]*=(.+)$/.exec(m[0])?.[1] ?? m[0];
 		if (!PLAIN_PATH.test(word) || word.startsWith("/") || word.startsWith("-")) continue;
 		const segs = word.split("/").filter((s) => s !== "" && s !== ".");
 		if (segs.length === 0 || segs.includes("..")) continue;
@@ -465,7 +531,8 @@ export function watchRedirects(
 	record: CreatedFiles | undefined,
 ): () => void {
 	if (!record) return () => {};
-	const watches: Array<() => void> = [];
+	// A mkdir-only command records the directories it makes (#4105).
+	const watches: Array<() => void> = [watchMkdir(command, cwd, record)];
 	try {
 		if (CHANGES_DIR.test(maskQuotes(command))) return () => {};
 		if (decideRules(command).rules.length > 0) return () => {};
@@ -487,4 +554,64 @@ export function watchRedirects(
 	return () => {
 		for (const w of watches) w();
 	};
+}
+
+/** `mkdir` with only -p / -v flags and 1 to 16 plain relative paths, nothing else on the line. */
+const MKDIR_FLAG = /^-[pv]+$/;
+const MAX_MKDIR = 16;
+
+/**
+ * Bracket a mkdir-only command (#4105): call before it runs, and call the
+ * result after it exits. Records each directory the command made: a path,
+ * or an ancestor of it, that was absent before, is a real directory after,
+ * whose realpath is inside the realpath of `cwd`, and that was born no
+ * earlier than one second before the command started (8SO on #4106: an older
+ * directory renamed onto the path during the command keeps its old birth
+ * time, so it is not recorded; the second of slack covers coarse clocks).
+ * Any other command records nothing. Never throws.
+ */
+export function watchMkdir(command: string, cwd: string, record: CreatedFiles): () => void {
+	try {
+		const text = command.trim();
+		if (!PLAIN_PATH.test(text.replace(/ /g, "_"))) return () => {};
+		const [bin, ...args] = text.split(/ +/);
+		if (bin !== "mkdir") return () => {};
+		const paths: string[] = [];
+		for (const a of args) {
+			if (a.startsWith("-")) {
+				if (paths.length > 0 || !MKDIR_FLAG.test(a)) return () => {};
+				continue;
+			}
+			const segs = a.replace(/\/$/, "").split("/");
+			if (a.startsWith("/") || segs.some((s) => s === "" || s === "." || s === ".."))
+				return () => {};
+			paths.push(a);
+		}
+		if (paths.length === 0 || paths.length > MAX_MKDIR) return () => {};
+		if (decideRules(text).rules.length > 0) return () => {};
+		const root = realpathSync(cwd);
+		const since = BigInt(Date.now() - 1000) * 1_000_000n;
+		const fresh: string[] = [];
+		for (const p of paths) {
+			let cur = path.resolve(cwd, p.replace(/\/$/, ""));
+			while (cur !== path.dirname(cur) && pathAbsent(cur)) {
+				fresh.push(cur);
+				cur = path.dirname(cur);
+			}
+		}
+		return () => {
+			for (const abs of fresh) {
+				try {
+					const key = keyOf(abs);
+					if (!key || !inside(key, root) || key === root) continue;
+					const st = lstatSync(abs, { bigint: true });
+					if (st.isDirectory() && st.birthtimeNs >= since) record.recordDir(abs);
+				} catch {
+					// Recording is best effort; it never affects the command.
+				}
+			}
+		};
+	} catch {
+		return () => {};
+	}
 }
