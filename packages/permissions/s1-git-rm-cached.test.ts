@@ -188,7 +188,11 @@ function run(file: string, args: string[], dir: string) {
 	const real = realpathSync(dir);
 	if (!real.startsWith(`${SANDBOX_ROOT}/`))
 		throw new Error(`refusing to run outside ${SANDBOX_ROOT}: ${real}`);
-	const r = spawnSync(file, args, { cwd: real, encoding: "utf8", env: hermeticEnv() });
+	const r = spawnSync(file, args, {
+		cwd: real,
+		encoding: "utf8",
+		env: hermeticEnv() as NodeJS.ProcessEnv,
+	});
 	if (r.error || r.status === null)
 		throw new Error(`${file} did not run: ${r.error?.message ?? r.signal}`);
 	return r;
