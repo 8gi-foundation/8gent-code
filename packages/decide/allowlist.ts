@@ -32,6 +32,18 @@
  *     read -h or an unknown flag as an action (`shutdown -h`).
  * `bun run`, `node file.js` and any redirect into a file still go to the judge.
  *
+ * Index-only git (#3298): `git rm --cached` only untracks and leaves the
+ * files on disk; plain `git rm` deletes from the working tree. git honours
+ * `--no-cached` anywhere before `--`, so any word this parser reads
+ * differently from the shell would defeat a parsed check (review of #3299
+ * found six: mid-word `#`, braces, globs, `>&2--cached`, backslash-newline,
+ * CR). So it is deny-by-default on the RAW command text, never on parsed
+ * words: the whole command is `git rm` and nothing else, every character is
+ * in [A-Za-z0-9 ._/@+=,:%-] (plain spaces only), flags come only from
+ * `--cached` (exactly once), `-r`, `-q`, `--quiet`, `-n`, `--dry-run`,
+ * `--ignore-unmatch`, `-f`, `--force`, then an optional `--`, then one or
+ * more paths. Before `--` no path may start with `-`.
+ *
  * `bun test` runs the repo's own test code, so it is behind its own option
  * and stays off unless the caller opts in. Callers pass the options; the env
  * flags are parsed in permissions/system-one-gate.ts so that turning System
@@ -65,9 +77,43 @@ export interface AllowlistResult {
 
 /** Binaries that only read, with no argument that writes, deletes or runs another program. */
 export const READ_ONLY_BINS: ReadonlySet<string> = new Set([
-	"ls", "pwd", "which", "wc", "head", "tail", "cat", "grep", "egrep", "fgrep", "rg", "echo", "printf", "true", "false",
-	"sleep", "date", "file", "stat", "du", "df", "basename", "dirname", "realpath", "whoami", "uname", "tr", "cut", "diff",
-	"cmp", "nl", "tree", "jq", "sort", "uniq", "find", "test",
+	"ls",
+	"pwd",
+	"which",
+	"wc",
+	"head",
+	"tail",
+	"cat",
+	"grep",
+	"egrep",
+	"fgrep",
+	"rg",
+	"echo",
+	"printf",
+	"true",
+	"false",
+	"sleep",
+	"date",
+	"file",
+	"stat",
+	"du",
+	"df",
+	"basename",
+	"dirname",
+	"realpath",
+	"whoami",
+	"uname",
+	"tr",
+	"cut",
+	"diff",
+	"cmp",
+	"nl",
+	"tree",
+	"jq",
+	"sort",
+	"uniq",
+	"find",
+	"test",
 ]);
 
 /** Arguments that make an otherwise read-only binary write, delete or run something. */
@@ -86,14 +132,61 @@ const GIT_WRITING_ARG = /^(--output(=.*)?|-o|--ext-diff|-c|--exec-path(=.*)?|--c
 
 /** Dev tools whose `--version` / `--help`, given alone, only print. */
 export const VERSION_TOOLS: ReadonlySet<string> = new Set([
-	"bun", "node", "npm", "npx", "pnpm", "yarn", "deno", "python", "python3", "pip", "pip3", "uv", "git", "go", "cargo",
-	"rustc", "tsc", "gh", "docker", "make", "gcc", "clang", "java", "ruby", "perl", "php", "curl", "wget", "brew",
-	"ffmpeg", "ffprobe", "marp", "jq", "rg", "sqlite3", "psql", "tmux", "biome", "eslint", "prettier", "vite",
+	"bun",
+	"node",
+	"npm",
+	"npx",
+	"pnpm",
+	"yarn",
+	"deno",
+	"python",
+	"python3",
+	"pip",
+	"pip3",
+	"uv",
+	"git",
+	"go",
+	"cargo",
+	"rustc",
+	"tsc",
+	"gh",
+	"docker",
+	"make",
+	"gcc",
+	"clang",
+	"java",
+	"ruby",
+	"perl",
+	"php",
+	"curl",
+	"wget",
+	"brew",
+	"ffmpeg",
+	"ffprobe",
+	"marp",
+	"jq",
+	"rg",
+	"sqlite3",
+	"psql",
+	"tmux",
+	"biome",
+	"eslint",
+	"prettier",
+	"vite",
 ]);
 /** Short version flags, only for the tools that define them this way. */
 const SHORT_VERSION: Record<string, string> = {
-	node: "-v", bun: "-v", npm: "-v", pnpm: "-v", yarn: "-v", deno: "-V", python: "-V", python3: "-V",
-	ffmpeg: "-version", ffprobe: "-version", go: "version",
+	node: "-v",
+	bun: "-v",
+	npm: "-v",
+	pnpm: "-v",
+	yarn: "-v",
+	deno: "-V",
+	python: "-V",
+	python3: "-V",
+	ffmpeg: "-version",
+	ffprobe: "-version",
+	go: "version",
 };
 
 function versionOnly(b: string, args: string[]): boolean {
@@ -105,10 +198,12 @@ function versionOnly(b: string, args: string[]): boolean {
 function mkdirOk(args: string[]): string | null {
 	const flags = args.filter((a) => a.startsWith("-"));
 	const paths = args.filter((a) => !a.startsWith("-"));
-	if (flags.some((f) => !["-p", "-v", "-pv", "-vp", "--parents", "--verbose"].includes(f))) return "mkdir with a flag other than -p/-v";
+	if (flags.some((f) => !["-p", "-v", "-pv", "-vp", "--parents", "--verbose"].includes(f)))
+		return "mkdir with a flag other than -p/-v";
 	if (paths.length === 0) return "mkdir with no path";
 	for (const p of paths) {
-		if (/^[/~]/.test(p) || /(^|\/)\.\.(\/|$)/.test(p) || /[*?[\]{}$]/.test(p)) return `mkdir outside the working directory (${p})`;
+		if (/^[/~]/.test(p) || /(^|\/)\.\.(\/|$)/.test(p) || /[*?[\]{}$]/.test(p))
+			return `mkdir outside the working directory (${p})`;
 	}
 	return null;
 }
@@ -130,13 +225,29 @@ const none = (reason: string): AllowlistResult => ({ verdict: "no-opinion", reas
  * redirect-following; anything else goes to the judge. wget is not covered.
  * POST bodies are already escalated by the rules.
  */
-const LOOPBACK_URL = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?(?=[/?#]|$)[^\s[\]{}]*$/;
+const LOOPBACK_URL =
+	/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?(?=[/?#]|$)[^\s[\]{}]*$/;
 const OLLAMA_PORT = "11434";
 const FETCH_FLAGS = {
 	bare: "sSiIfv",
 	valued: "ocbHmX",
-	longBare: new Set(["--silent", "--show-error", "--include", "--head", "--fail", "--verbose", "--compressed"]),
-	longValued: new Set(["--output", "--cookie-jar", "--cookie", "--header", "--max-time", "--connect-timeout"]),
+	longBare: new Set([
+		"--silent",
+		"--show-error",
+		"--include",
+		"--head",
+		"--fail",
+		"--verbose",
+		"--compressed",
+	]),
+	longValued: new Set([
+		"--output",
+		"--cookie-jar",
+		"--cookie",
+		"--header",
+		"--max-time",
+		"--connect-timeout",
+	]),
 };
 
 function fetchTargetOk(v: string): boolean {
@@ -147,9 +258,11 @@ function fetchValueOk(bin: string, flag: string, v: string): string | null {
 	const f = flag.replace(/^-+/, "");
 	if (f === "o" || f === "output" || f === "c" || f === "cookie-jar")
 		return fetchTargetOk(v) ? null : `${bin} writes to ${v}`;
-	if (f === "b" || f === "cookie") return v.includes("=") || fetchTargetOk(v) ? null : `${bin} reads cookies from ${v}`;
+	if (f === "b" || f === "cookie")
+		return v.includes("=") || fetchTargetOk(v) ? null : `${bin} reads cookies from ${v}`;
 	if (f === "H" || f === "header") return v.startsWith("@") ? `${bin} reads ${v}` : null;
-	if (f === "m" || f === "max-time" || f === "connect-timeout") return /^\d{1,3}$/.test(v) ? null : `${bin} timeout is not a number`;
+	if (f === "m" || f === "max-time" || f === "connect-timeout")
+		return /^\d{1,3}$/.test(v) ? null : `${bin} timeout is not a number`;
 	if (f === "X") return v === "GET" || v === "HEAD" ? null : `${bin} -X ${v}`;
 	return `${bin} flag ${flag}`;
 }
@@ -163,8 +276,12 @@ const CURL_PROXY_ENV = /^(http|https|all)_proxy$/i;
  * in $CURL_HOME, $XDG_CONFIG_HOME, ~ or ~/.config and `-q` is not the first
  * argument. Shared with packages/permissions/s1-curl-loopback.ts.
  */
-export function curlEnvRefusal(qFirst: boolean, env: NodeJS.ProcessEnv = process.env): string | null {
-	for (const [k, v] of Object.entries(env)) if (v && CURL_PROXY_ENV.test(k)) return `curl with ${k} set`;
+export function curlEnvRefusal(
+	qFirst: boolean,
+	env: NodeJS.ProcessEnv = process.env,
+): string | null {
+	for (const [k, v] of Object.entries(env))
+		if (v && CURL_PROXY_ENV.test(k)) return `curl with ${k} set`;
 	if (qFirst) return null;
 	const dirs = new Set<string>();
 	for (const e of [env.CURL_HOME, env.XDG_CONFIG_HOME, env.HOME, homedir()]) if (e) dirs.add(e);
@@ -189,7 +306,8 @@ function loopbackFetchOk(bin: string, argsIn: string[]): string | null {
 		const a = args[i];
 		if (a.startsWith("--")) {
 			if (spec.longBare.has(a)) continue;
-			if (!spec.longValued.has(a) || i + 1 >= args.length) return `${bin} with ${a}, not a loopback-GET flag`;
+			if (!spec.longValued.has(a) || i + 1 >= args.length)
+				return `${bin} with ${a}, not a loopback-GET flag`;
 			const why = fetchValueOk(bin, a, args[++i]);
 			if (why) return why;
 		} else if (a.length > 1 && a.startsWith("-")) {
@@ -214,7 +332,7 @@ function loopbackFetchOk(bin: string, argsIn: string[]): string | null {
 	return null;
 }
 
-function segmentOk(text: string, opts: AllowlistOptions): string | null {
+function segmentOk(text: string, opts: AllowlistOptions, whole: string): string | null {
 	const masked = maskQuotes(text);
 	let stripped = "";
 	let last = 0;
@@ -240,7 +358,7 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	if (versionOnly(b, args)) return null;
 	if (b === "mkdir") return mkdirOk(args);
 	if (b === "curl") return loopbackFetchOk(b, args);
-	if (b === "git") return gitOk(args);
+	if (b === "git") return gitOk(args, whole);
 	if (b === "bun") {
 		if (args[0] !== "test") return "runs bun, not bun test";
 		return opts.bunTest ? null : "bun test is not enabled (EIGHT_S1_ALLOWLIST_BUN_TEST)";
@@ -248,19 +366,76 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	if (!READ_ONLY_BINS.has(b)) return `${b} is not on the read-only list`;
 	const bad = WRITING_ARGS[b];
 	if (bad && args.some((a) => bad.test(a))) return `${b} with an argument that writes or runs`;
-	if (b === "uniq" && args.filter((a) => !a.startsWith("-")).length > 1) return "uniq with an output file";
+	if (b === "uniq" && args.filter((a) => !a.startsWith("-")).length > 1)
+		return "uniq with an output file";
 	return null;
 }
 
-function gitOk(args: string[]): string | null {
+/** Characters the raw `git rm --cached` command may contain. No quoting, expansion, redirect or separator. */
+const GIT_RM_RAW = /^[A-Za-z0-9 ._/@+=,:%-]+$/;
+/** Flags `git rm --cached` may carry, exact spellings only (no clusters, no abbreviations). */
+const GIT_RM_CACHED_FLAGS: ReadonlySet<string> = new Set([
+	"--cached",
+	"-r",
+	"-q",
+	"--quiet",
+	"-n",
+	"--dry-run",
+	"--ignore-unmatch",
+	"-f",
+	"--force",
+]);
+
+/**
+ * `git rm --cached <path>...` only removes paths from the index (#3298).
+ * Decided on the raw command text, tokenised here on spaces, never through
+ * shellWords: anything the shell could read differently is no-opinion.
+ *
+ * Why each restriction exists. git honours `--no-cached` anywhere before
+ * `--`, so one word the shell sees differently turns this into plain
+ * `git rm`, which deletes the file. Each of these was shown to delete a
+ * tracked file under a real shell in review of #3299:
+ *   - mid-word `#`, braces, globs: the parser and sh disagree on the words;
+ *   - `>&2--cached`: a redirect the parser split into a separate flag;
+ *   - backslash-newline, CR, TAB: whitespace the parser and sh treat apart.
+ * GIT_RM_RAW therefore admits only plain spaces and characters with no
+ * meaning to any shell. `git` and `rm` must be the first two words (no
+ * global options, which could shift the subcommand), `--cached` must appear
+ * exactly once, flags come before paths, and only `--` may end the flags.
+ */
+function gitRmCachedOk(raw: string): string | null {
+	if (!GIT_RM_RAW.test(raw)) return "git rm with a character outside the plain set";
+	const words = raw.split(" ").filter((w) => w !== "");
+	if (words[0] !== "git" || words[1] !== "rm") return "git rm must be the whole command";
+	let cached = 0;
+	let i = 2;
+	for (; i < words.length && words[i] !== "--" && words[i].startsWith("-"); i++) {
+		if (!GIT_RM_CACHED_FLAGS.has(words[i])) return `git rm with ${words[i]}`;
+		if (words[i] === "--cached") cached++;
+	}
+	if (cached !== 1)
+		return cached === 0
+			? "git rm without --cached deletes files from disk"
+			: "git rm with --cached twice";
+	const afterDashDash = words[i] === "--";
+	const paths = words.slice(afterDashDash ? i + 1 : i);
+	if (paths.length === 0) return "git rm --cached with no path";
+	if (!afterDashDash && paths.some((p) => p.startsWith("-")))
+		return "git rm with a flag after a path";
+	return null;
+}
+
+function gitOk(args: string[], whole: string): string | null {
 	let i = 0;
-	while (i < args.length && (args[i] === "--no-pager" || args[i] === "-C")) i += args[i] === "-C" ? 2 : 1;
+	while (i < args.length && (args[i] === "--no-pager" || args[i] === "-C"))
+		i += args[i] === "-C" ? 2 : 1;
 	const sub = args[i];
 	const rest = args.slice(i + 1);
 	if (args.some((a) => GIT_WRITING_ARG.test(a))) return "git with an argument that writes or runs";
 	if (sub && GIT_READ.has(sub)) return null;
 	if (sub === "branch" && rest.every((a) => GIT_BRANCH_READ.test(a))) return null;
 	if (sub === "remote" && rest.every((a) => a === "-v" || a === "--verbose")) return null;
+	if (sub === "rm") return gitRmCachedOk(whole);
 	return `git ${sub ?? ""} is not a read-only git subcommand`.trim();
 }
 
@@ -289,20 +464,25 @@ function dollarInDoubleQuotes(s: string): boolean {
 export function readOnlyAllowlist(command: string, opts: AllowlistOptions = {}): AllowlistResult {
 	try {
 		if (!command.trim()) return none("empty command");
-		if (!posixRulesApply(command, opts.shell ?? activeShellKind())) return none("the shell does not parse this line the POSIX way");
+		if (!posixRulesApply(command, opts.shell ?? activeShellKind()))
+			return none("the shell does not parse this line the POSIX way");
 		if (promptControlText(command) !== null) return none("carries prompt-control text");
 		const rules = decideRules(command);
-		if (rules.verdict !== "pass") return none(`rule ${rules.rule} fired (${rules.verdict}); rules win`);
+		if (rules.verdict !== "pass")
+			return none(`rule ${rules.rule} fired (${rules.verdict}); rules win`);
 		if (/\$\(|`|<\(|>\(|<<|\$\[/.test(command)) return none("has a substitution or heredoc");
 		if (/\$(?!\?)/.test(maskQuotes(command))) return none("has an unquoted $ expansion");
 		if (dollarInDoubleQuotes(command)) return none("has a $ expansion inside double quotes");
 		const { segs, subs } = splitSegments(command);
 		if (subs.length) return none("has a substitution");
 		for (const { text } of segs) {
-			const why = segmentOk(text, opts);
+			const why = segmentOk(text, opts, command);
 			if (why) return none(why);
 		}
-		return { verdict: "pass-without-model", reason: opts.bunTest ? "read-only or bun test" : "read-only" };
+		return {
+			verdict: "pass-without-model",
+			reason: opts.bunTest ? "read-only or bun test" : "read-only",
+		};
 	} catch {
 		return none("allowlist parse error");
 	}
