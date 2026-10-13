@@ -172,6 +172,41 @@ describe("finding the plan file", () => {
 		}
 	});
 
+	test("a plan file symlinked out of the working directory is never read", () => {
+		const outside = fs.mkdtempSync(path.join(os.tmpdir(), "plan-outside-"));
+		try {
+			fs.writeFileSync(path.join(outside, "steps.md"), "- [ ] 1. leak this line\n");
+			// A root PLAN.md that points out of the project.
+			fs.symlinkSync(path.join(outside, "steps.md"), path.join(root, "PLAN.md"));
+			expect(findPlanFile(root, "follow the plan")).toBeNull();
+			// A directory inside the project that points out of it.
+			fs.symlinkSync(outside, path.join(root, "docs"));
+			expect(findPlanFile(root, "go ahead with docs/steps.md")).toBeNull();
+			// The refusal never names, so never invites an edit to, a file outside.
+			const call = { plan: [{ step: "1. leak this line", status: "done" }] };
+			expect(updatePlan(call, root)).toBe("Plan updated: 1 of 1 done");
+		} finally {
+			fs.rmSync(outside, { recursive: true, force: true });
+		}
+	});
+
+	test("a plan file over the size cap is not read", () => {
+		const box = "- [ ] 1. Ship the release notes\n";
+		fs.writeFileSync(
+			path.join(root, "PLAN.md"),
+			box.repeat(Math.ceil((256 * 1024 + 1) / box.length)),
+		);
+		expect(findPlanFile(root, "follow the plan")).toBeNull();
+	});
+
+	test("one quarter-megabyte line cannot stall the parser", () => {
+		const line = `- [ ] ${" ".repeat(256 * 1024 - 8)}\t`;
+		const started = performance.now();
+		expect(parseCheckboxes(line)).toEqual([]);
+		expect(parseCheckboxes(`- [ ] 2. ${"x ".repeat(100_000)}`)[0]?.number).toBe(2);
+		expect(performance.now() - started).toBeLessThan(1000);
+	});
+
 	test("a file the task names beats a root TODO.md", () => {
 		fs.writeFileSync(path.join(root, "TODO.md"), "- [ ] Add tests for the parser\n");
 		fs.mkdirSync(path.join(root, "docs"));

@@ -176,4 +176,32 @@ describe("PLAN column from update_plan", () => {
 			fs.rmSync(root, { recursive: true, force: true });
 		}
 	});
+
+	// #4161 review: the first layout put the file's count on a second header
+	// row, which the pilot read as a status-strip line. At the real column
+	// width (24) and with two- and three-digit counts the header stays one row.
+	test("the header stays one row at the column's width with long counts and a long name", async () => {
+		for (const n of [12, 120]) {
+			const steps: PlanStep[] = Array.from({ length: n }, (_, i) => ({
+				id: `s${i}`,
+				text: `Step ${i}`,
+				status: i < n - 2 ? "done" : "pending",
+			}));
+			const frame = await lastFrame(
+				<PlanPanel
+					steps={steps}
+					running={true}
+					width={24}
+					animate={false}
+					planFile={{ name: "docs/a-very-long-rollout-plan.md", ticked: n - 3, total: n }}
+				/>,
+			);
+			const rows = frame.split("\n");
+			const header = rows.findIndex((r) => r.includes("PLAN"));
+			expect(rows[header]).toContain(`${n - 2}/${n}`);
+			expect(rows[header]).toContain(`${n - 3}/${n}`);
+			expect(rows[header + 1]?.trim()).toBe("");
+			for (const r of rows) expect(r.trimEnd().length).toBeLessThanOrEqual(24);
+		}
+	});
 });

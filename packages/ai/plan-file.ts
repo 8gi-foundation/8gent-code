@@ -64,16 +64,24 @@ export function namedPlanFiles(task: string): string[] {
 	return out;
 }
 
-/** The checklist lines of a Markdown file: `- [ ] text` and `- [x] text`. */
+/**
+ * The checklist lines of a Markdown file: `- [ ] text` and `- [x] text`.
+ * The pattern has no two quantifiers that can trade the same characters, so
+ * a line of a quarter megabyte of spaces parses in linear time: the earlier
+ * `\s+(.*\S)\s*$` was quadratic there and stalled update_plan for tens of
+ * seconds on a file a cloned repository can carry (#4161 review).
+ */
 export function parseCheckboxes(content: string): PlanBox[] {
 	const boxes: PlanBox[] = [];
 	for (const line of content.split(/\r?\n/)) {
-		const m = /^\s*[-*+]\s+\[([ xX])\]\s+(.*\S)\s*$/.exec(line);
+		const m = /^\s*[-*+]\s+\[([ xX])\]\s(.*)$/.exec(line);
 		if (!m) continue;
-		const numbered = /^(\d+)[.)]\s+(.*)$/.exec(m[2]);
+		const body = m[2].trim();
+		if (!body) continue;
+		const numbered = /^(\d+)[.)]\s+(.*)$/.exec(body);
 		boxes.push({
 			checked: m[1] !== " ",
-			text: numbered ? numbered[2] : m[2],
+			text: numbered ? numbered[2] : body,
 			...(numbered ? { number: Number(numbered[1]) } : {}),
 		});
 	}
