@@ -13,6 +13,11 @@
 # installed" (packages/terminal-tab/pty-bridge.cjs). This check names the
 # missing module in its own step, before the suite starts.
 #
+# The Node it checks is picked in packages/terminal-tab/find-node.ts's order:
+# NODE_8GENT_BIN, then the newest executable managed runtime under
+# ~/.8gent/runtime, then node on PATH. find-node.ts's step 3
+# (process.execPath when it is a node) is skipped: a shell cannot reproduce it.
+#
 # POSIX sh, no network. Exit 0 when node-pty loads, 1 when it does not.
 set -u
 
@@ -42,16 +47,19 @@ check() {
 }
 
 check bun
-# The terminal-tab bridge runs node-pty under Node, picked as in
-# packages/terminal-tab/find-node.ts: NODE_8GENT_BIN, the managed runtime,
-# then node on PATH. Load it with that same binary when there is one.
+# The terminal-tab bridge runs node-pty under Node; load it with the same
+# binary the bridge would use. Lowest priority first, each later hit wins.
 node=$(command -v node 2>/dev/null)
-managed="$HOME/.8gent/runtime/node-22.14.0/bin/node"
-[ -x "$managed" ] && node=$managed
+managed=$(printf '%s\n' "$HOME"/.8gent/runtime/node-*/bin/node | sort -rV | while IFS= read -r n; do
+	[ -x "$n" ] && { printf '%s\n' "$n"; break; }
+done)
+[ -n "$managed" ] && node=$managed
 [ -n "${NODE_8GENT_BIN:-}" ] && [ -x "$NODE_8GENT_BIN" ] && node=$NODE_8GENT_BIN
-if [ -n "$node" ]; then
-	check "$node"
-fi
 
-echo "preflight: node-pty loads (bun${node:+ and $node})"
+if [ -z "$node" ]; then
+	echo "preflight: node-pty loads under bun; node: not found on PATH, not checked"
+	exit 0
+fi
+check "$node"
+echo "preflight: node-pty loads under bun and $node"
 exit 0
