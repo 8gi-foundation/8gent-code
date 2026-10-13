@@ -44,7 +44,6 @@ import {
 	normaliseAllowedPaths,
 } from "../permissions/edit-guards";
 import { type PathAccess, validatePath } from "../permissions/path-guard";
-import { ToolG8 } from "../permissions/toolg8";
 import {
 	type PermissionModeHolder,
 	currentPermissionMode,
@@ -68,6 +67,7 @@ import {
 } from "../permissions/s1-created-files";
 import { isolatedInlinePython } from "../permissions/s1-inline-python";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { ToolG8 } from "../permissions/toolg8";
 import {
 	applyAt,
 	blockedToolMessage,

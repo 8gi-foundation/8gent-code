@@ -24,7 +24,10 @@ afterEach(() => {
 
 type Exec = (args: Record<string, unknown>, opts: unknown) => Promise<string>;
 const native = (name: string, args: Record<string, unknown>) =>
-	((agentTools as Record<string, unknown>)[name] as unknown as { execute: Exec }).execute(args, { toolCallId: "t", messages: [] });
+	((agentTools as Record<string, unknown>)[name] as unknown as { execute: Exec }).execute(args, {
+		toolCallId: "t",
+		messages: [],
+	});
 
 function nb(cells = 2): string {
 	return JSON.stringify({
@@ -88,7 +91,10 @@ describe("notebook write tools (#3760)", () => {
 
 	const writes: Array<[string, (p: string) => Record<string, unknown>]> = [
 		["notebook_edit_cell", (p) => ({ path: p, cellIndex: 0, newSource: "x = 1" })],
-		["notebook_insert_cell", (p) => ({ path: p, afterIndex: 0, cellType: "code", source: "x = 1" })],
+		[
+			"notebook_insert_cell",
+			(p) => ({ path: p, afterIndex: 0, cellType: "code", source: "x = 1" }),
+		],
 		["notebook_delete_cell", (p) => ({ path: p, cellIndex: 0 })],
 	];
 
@@ -139,7 +145,9 @@ describe("notebook write tools (#3760)", () => {
 				fs.symlinkSync(target, path.join(ws, "ln.ipynb"));
 				const before = fs.readFileSync(target, "utf8");
 				const nat = await native(name, mk("ln.ipynb"));
-				const txt = await new ToolExecutor(ws, "primary").execute(name, mk("ln.ipynb")).catch((e) => String(e));
+				const txt = await new ToolExecutor(ws, "primary")
+					.execute(name, mk("ln.ipynb"))
+					.catch((e) => String(e));
 				expect(nat).toContain("symlink");
 				expect(String(txt)).toContain("symlink");
 				expect(fs.readFileSync(target, "utf8")).toBe(before);
@@ -151,7 +159,9 @@ describe("notebook write tools (#3760)", () => {
 				fs.symlinkSync(real, path.join(ws, "alias.ipynb"));
 				const nat = await native(name, mk("alias.ipynb"));
 				fs.writeFileSync(real, nb());
-				const txt = await new ToolExecutor(ws, "primary").execute(name, mk("alias.ipynb")).catch((e) => String(e));
+				const txt = await new ToolExecutor(ws, "primary")
+					.execute(name, mk("alias.ipynb"))
+					.catch((e) => String(e));
 				expect(nat.includes("success")).toBe(String(txt).includes("success"));
 			});
 
@@ -159,7 +169,9 @@ describe("notebook write tools (#3760)", () => {
 				const target = path.join(outside, "missing.ipynb");
 				fs.symlinkSync(target, path.join(ws, "dangling.ipynb"));
 				const nat = await native(name, mk("dangling.ipynb"));
-				const txt = await new ToolExecutor(ws, "primary").execute(name, mk("dangling.ipynb")).catch((e) => String(e));
+				const txt = await new ToolExecutor(ws, "primary")
+					.execute(name, mk("dangling.ipynb"))
+					.catch((e) => String(e));
 				expect(nat).toMatch(/symlink|outside/);
 				expect(String(txt)).toMatch(/symlink|outside/);
 				expect(fs.existsSync(target)).toBe(false);
@@ -170,7 +182,9 @@ describe("notebook write tools (#3760)", () => {
 				fs.symlinkSync(outside, path.join(ws, "linkdir"));
 				const before = fs.readFileSync(path.join(outside, "pd.ipynb"), "utf8");
 				const nat = await native(name, mk("linkdir/pd.ipynb"));
-				const txt = await new ToolExecutor(ws, "primary").execute(name, mk("linkdir/pd.ipynb")).catch((e) => String(e));
+				const txt = await new ToolExecutor(ws, "primary")
+					.execute(name, mk("linkdir/pd.ipynb"))
+					.catch((e) => String(e));
 				expect(nat).toContain("outside");
 				expect(String(txt)).toContain("outside");
 				expect(fs.readFileSync(path.join(outside, "pd.ipynb"), "utf8")).toBe(before);
