@@ -283,6 +283,29 @@ describe("render_video_deck catalog line carries its spec shape (#4172)", () => 
 		expect(first).toContain("narration");
 	});
 
+	it("edit_file's line opens with in-place replacement within the 140-character cap (#4198)", async () => {
+		const line = (await catalogLines()).find((l) => l.startsWith("edit_file("));
+		expect(line).toBeDefined();
+		const desc = (line as string).split(" - ").slice(1).join(" - ");
+		const head = desc.slice(0, 140);
+		for (const word of ["oldText", "in place", "whole line"]) {
+			expect(head).toContain(word);
+		}
+		// The first sentence fits the cap, so the line is not cut with an ellipsis.
+		expect(line).not.toContain("…");
+	});
+
+	it("edit_file's native description and parameters teach in-place replacement (#4198)", async () => {
+		const { agentTools } = await import("../../ai/tools.js");
+		const first = (agentTools.edit_file as { description?: string }).description?.split(
+			/(?<=\.)\s/,
+		)[0] as string;
+		expect(first.length).toBeLessThanOrEqual(140);
+		for (const word of ["oldText", "in place", "whole line"]) {
+			expect(first.slice(0, 140)).toContain(word);
+		}
+	});
+
 	/** The slide fields the renderer accepts, which a model must see as real schema fields. */
 	const SLIDE_FIELDS = ["title", "text", "bullets", "narration", "seconds", "image"];
 	type Obj = { properties?: Record<string, Obj>; items?: Obj; type?: string };

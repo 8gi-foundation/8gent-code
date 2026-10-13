@@ -488,11 +488,16 @@ const writeFile = tool({
 });
 
 const editFile = tool({
-	description: "Edit a file by replacing text",
+	description:
+		"[FILE] Replaces oldText (the exact existing line or block) with newText in place; to update a line, oldText is that whole line.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the file"),
-		oldText: z.string().describe("Text to find and replace"),
-		newText: z.string().describe("Replacement text"),
+		oldText: z
+			.string()
+			.describe(
+				"The exact existing text being changed, a whole line or block; after the edit the file contains newText and not oldText",
+			),
+		newText: z.string().describe("Replacement for oldText, in place"),
 		startLine: z
 			.number()
 			.int()
