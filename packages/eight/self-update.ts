@@ -135,7 +135,9 @@ export function urlAllowed(url: string, kind: UrlKind, repo = GITHUB_REPO): bool
 	const u = isHttps(url);
 	if (!u) return false;
 	if (kind === "npm") return u.hostname === "registry.npmjs.org";
-	if (kind === "asset") return url.startsWith(`https://github.com/${repo}/releases/download/`);
+	// The parsed href, not the raw string: fetch resolves `..` and `%2e%2e`, so a
+	// raw prefix check lets `.../releases/download/../../../../x/y/...` leave the repo.
+	if (kind === "asset") return u.href.startsWith(`https://github.com/${repo}/releases/download/`);
 	return true;
 }
 

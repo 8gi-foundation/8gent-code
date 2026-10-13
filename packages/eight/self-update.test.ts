@@ -445,13 +445,64 @@ describe("npm channel from the GitHub release (#3658)", () => {
 			...npmLatest("0.17.0"),
 			[RELEASES]: { body: [rel("v0.19.0", [])] },
 		});
-		const r = await update(f, []);
+		const runs: { args: string[]; staged: string }[] = [];
+		const r = await update(f, runs);
 		expect(r).toEqual({
 			status: "refused-downgrade",
 			from: "0.18.0",
 			to: "0.17.0",
 			channel: "npm",
 		});
+		expect(runs).toEqual([]);
+	});
+
+	test("GitHub rate-limited (403): npm alone decides, a lower npm is refused, nothing installs", async () => {
+		const runs: { args: string[]; staged: string }[] = [];
+		const f = fakeFetch({ ...npmLatest("0.17.0"), [RELEASES]: { status: 403, body: {} } });
+		const r = await update(f, runs);
+		expect(r.status).toBe("refused-downgrade");
+		expect(runs).toEqual([]);
+		expect(f.inits.every((i) => !i?.headers?.authorization)).toBe(true);
+	});
+
+	test("a release key with no SHA256SUMS.minisig refuses the tarball; npm never runs", async () => {
+		const runs: { args: string[]; staged: string }[] = [];
+		const r = await update(fakeFetch(routes(npmLatest("0.17.0"))), runs, {
+			signingKey: "RWQBI0VniavN7xxx",
+		});
+		expect(r.status).toBe("failed");
+		expect(describeResult(r)).toContain("refusing unsigned checksums");
+		expect(runs).toEqual([]);
+	});
+
+	test("a tarball URL that climbs out of the repo's releases is refused; npm never runs", async () => {
+		const runs: { args: string[]; staged: string }[] = [];
+		const evil = `${DL}/../../../../evil/repo/releases/download/v0.20.0/${tgz}`;
+		const r = await update(
+			fakeFetch({
+				...npmLatest("0.17.0"),
+				[RELEASES]: {
+					body: [
+						{
+							tag_name: "v0.20.0",
+							draft: false,
+							prerelease: false,
+							assets: [
+								{ name: tgz, browser_download_url: evil },
+								{ name: "SHA256SUMS", browser_download_url: `${DL}/v0.20.0/SHA256SUMS` },
+							],
+						},
+					],
+				},
+				[`${DL}/v0.20.0/SHA256SUMS`]: { body: `${tgzSum}  ${tgz}\n` },
+				[`https://github.com/evil/repo/releases/download/v0.20.0/${tgz}`]: { body: tgzBytes },
+				[evil]: { body: tgzBytes },
+			}),
+			runs,
+		);
+		expect(r.status).toBe("failed");
+		expect(describeResult(r)).toContain("refusing");
+		expect(runs).toEqual([]);
 	});
 
 	test("--check on the npm channel reports the release npm does not have yet", async () => {
@@ -770,6 +821,12 @@ test("only https and the right hosts pass the URL checks", () => {
 	);
 	expect(
 		urlAllowed("http://github.com/8gi-foundation/8gent-code/releases/download/v1.0.0/x", "asset"),
+	).toBe(false);
+	const dl = "https://github.com/8gi-foundation/8gent-code/releases/download";
+	expect(urlAllowed(`${dl}/../../../../evil/repo/releases/download/v1/x`, "asset")).toBe(false);
+	expect(urlAllowed(`${dl}/%2e%2e/%2e%2e/%2e%2e/%2e%2e/evil/r/x`, "asset")).toBe(false);
+	expect(
+		urlAllowed("https://x@github.com/8gi-foundation/8gent-code/releases/download/v1/x", "asset"),
 	).toBe(false);
 	expect(urlAllowed("https://registry.npmjs.org/x", "npm")).toBe(true);
 	expect(urlAllowed("https://evil.test/x", "npm")).toBe(false);
