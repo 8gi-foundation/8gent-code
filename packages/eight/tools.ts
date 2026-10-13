@@ -8,8 +8,6 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { hasTuiApprovalHandler } from "../permissions/tui-approval-channel";
-import { RepeatDenialGuard } from "./repeat-denial";
 import { type ExtractVideoMode, extractVideo, formatExtractVideoResult } from "@8gent/eyes/marlin";
 import { z } from "zod";
 import {
@@ -188,6 +186,7 @@ import {
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate, systemOneMode } from "../permissions/system-one-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
+import { hasTuiApprovalHandler } from "../permissions/tui-approval-channel";
 import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
 import type { PolicyActionType } from "../permissions/types.js";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
@@ -237,6 +236,7 @@ import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatEditNotFound } from "./edit-hint";
 import { layoutMeasureLine } from "./layout-measure";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
+import { RepeatDenialGuard } from "./repeat-denial";
 import { RetiredFacts } from "./retired-facts";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
@@ -3506,7 +3506,13 @@ export class ToolExecutor {
 					workingDirectory: dir,
 				});
 
-				const output = formatCommandOutput(code, stdout, stderr, finalCommand, this.workingDirectory);
+				const output = formatCommandOutput(
+					code,
+					stdout,
+					stderr,
+					finalCommand,
+					this.workingDirectory,
+				);
 				// Report images the command drew, and any cut off at an edge (#3580).
 				withImagesWritten(output, dir, startTime).then(safeResolve, () => safeResolve(output));
 			});
