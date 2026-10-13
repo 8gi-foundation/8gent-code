@@ -139,7 +139,7 @@ import {
 	getPermissionManager,
 	isCommandDangerous,
 } from "../permissions";
-import { cdPrefix, commandAfterCdPrefix } from "../permissions/cd-prefix";
+import { cdPrefix, commandAfterCdPrefix, folderLabel } from "../permissions/cd-prefix";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import {
 	editScopeViolation,
@@ -3152,9 +3152,12 @@ export class ToolExecutor {
 		const backstop = preSpawnRefusal(command, dir);
 		if (backstop) return backstop;
 		const mode = currentPermissionMode();
+		// The folder a cd prefix chose: the cards name it, and answers are kept per folder.
+		const where = folderLabel(dir, this.workingDirectory);
 		const permissionCheck = this.permissionManager.checkPermission(
 			command,
 			activeShellKind(windowsShell),
+			where,
 		);
 
 		if (permissionCheck === "denied") {
@@ -3184,7 +3187,13 @@ export class ToolExecutor {
 		// the card. One command, at most one card.
 		// Guarded mode (#3170) turns System One on for this call whatever the
 		// env says; the env flag stays on in every mode.
-		const systemOne = await systemOneGate(command, systemOneEnvFor(mode), dir, this.createdFiles);
+		const systemOne = await systemOneGate(
+			command,
+			systemOneEnvFor(mode),
+			dir,
+			this.createdFiles,
+			where,
+		);
 		if (!systemOne.run) return systemOne.message as string;
 
 		if (
@@ -3198,6 +3207,7 @@ export class ToolExecutor {
 					? "This command may modify system files or cause data loss."
 					: "The agent wants to run a shell command.",
 				command,
+				{ where },
 			);
 
 			if (!allowed) {

@@ -141,10 +141,49 @@ describe("ToolExecutor run_command with a leading cd", () => {
 		expect(existsSync(join(root, "z.txt"))).toBe(false);
 	});
 
-	test("the approval card is raised for the rest, as it would be alone", async () => {
-		pm.checkPermission = () => "ask";
+	test("the approval card is raised for the rest, as it would be alone, and names the folder", async () => {
+		const where: (string | undefined)[] = [];
+		const checkedIn: (string | undefined)[] = [];
+		pm.checkPermission = ((_c: string, _s: unknown, w?: string) => {
+			checkedIn.push(w);
+			return "ask";
+		}) as PM["checkPermission"];
+		const spy = pm.requestPermission;
+		pm.requestPermission = (async (a: string, d: string, c?: string, o?: { where?: string }) => {
+			where.push(o?.where);
+			return spy(a, d, c);
+		}) as PM["requestPermission"];
 		await run("cd video && ls");
-		expect(asked).toEqual(["ls"]);
+		await run("ls");
+		expect(asked).toEqual(["ls", "ls"]);
+		expect(where).toEqual(["video", undefined]);
+		expect(checkedIn).toEqual(["video", undefined]);
+	});
+
+	test("a System One escalation names the folder the rest runs in", async () => {
+		const shown: string[] = [];
+		_setSystemOneOverridesForTests({
+			createDecider: () => {
+				throw new Error("no judge in this test");
+			},
+			askHuman: async (r) => {
+				shown.push(r.command);
+				return false;
+			},
+			calibrationDir: tempDir("cd-prefix-nocal-"),
+		});
+		// A person can be asked (a TUI is up); askHuman above answers for them.
+		const { registerTuiApprovalHandler } = await import("../permissions/tui-approval-channel");
+		registerTuiApprovalHandler(async () => "deny");
+		try {
+			const o1 = await run("cd video && rm -rf old");
+			expect(o1).toStartWith("[SYSTEM ONE BLOCKED]");
+			expect(await run("rm -rf video/old")).toStartWith("[SYSTEM ONE BLOCKED]");
+		} finally {
+			registerTuiApprovalHandler(null);
+		}
+		expect(shown).toEqual(["rm -rf old  (in video/)", "rm -rf video/old"]);
+		expect(existsSync(join(sub, "old", "keep.txt"))).toBe(true);
 	});
 
 	test("a commit behind a cd still meets the test-suite gate", async () => {
@@ -184,6 +223,29 @@ describe("native run_command with a leading cd", () => {
 		expect(existsSync(join(sub, "old", "keep.txt"))).toBe(true);
 	});
 
+	test("a System One escalation names the folder the rest runs in", async () => {
+		const shown: string[] = [];
+		_setSystemOneOverridesForTests({
+			createDecider: () => {
+				throw new Error("no judge in this test");
+			},
+			askHuman: async (r) => {
+				shown.push(r.command);
+				return false;
+			},
+			calibrationDir: tempDir("cd-prefix-nocal-"),
+		});
+		const { registerTuiApprovalHandler } = await import("../permissions/tui-approval-channel");
+		registerTuiApprovalHandler(async () => "deny");
+		try {
+			expect(await execute("cd video && rm -rf old")).toStartWith("[SYSTEM ONE BLOCKED]");
+		} finally {
+			registerTuiApprovalHandler(null);
+		}
+		expect(shown).toEqual(["rm -rf old  (in video/)"]);
+		expect(existsSync(join(sub, "old", "keep.txt"))).toBe(true);
+	});
+
 	test("refused prefixes and chained rests run nothing", async () => {
 		expect(await execute("cd .. && touch z.txt")).toStartWith(
 			"[BLOCKED] Command chaining is not allowed.",
@@ -203,5 +265,52 @@ describe("the loop breaker counts a cd-prefixed command that runs (#3409)", () =
 		expect(refusedBeforeRun("run_command", { command: "cd .. && ls" })).toBe(true);
 		expect(refusedBeforeRun("run_command", { command: "cd /tmp && ls" })).toBe(true);
 		expect(refusedBeforeRun("powershell", { command: "cd video && ls" })).toBe(true);
+	});
+});
+
+// #3199 review (8SO): `rm -rf old` or `make deploy` means a different thing in each
+// folder, so a person's answer is remembered for the folder it was given in, and the
+// card shows that folder. Policy still judges the command text alone.
+describe("session answers are kept per folder", () => {
+	test("a yes in video is not a yes at the root or in another folder, and the card names video", async () => {
+		const { PermissionManager } = await import("../permissions");
+		const { registerTuiApprovalHandler } = await import("../permissions/tui-approval-channel");
+		const manager = new PermissionManager(join(tempDir("cd-prefix-perm-"), "permissions.json"));
+		(manager as unknown as { isHeadless: () => boolean }).isHeadless = () => false;
+		const shown: (string | undefined)[] = [];
+		registerTuiApprovalHandler(async (r) => {
+			shown.push(r.command);
+			return "approve";
+		});
+		try {
+			const cmd = "make deploy-site-3199";
+			expect(manager.checkPermission(cmd, "posix", "video")).toBe("ask");
+			expect(
+				await manager.requestPermission("Execute Shell Command", "d", cmd, { where: "video" }),
+			).toBe(true);
+			expect(shown).toEqual([`${cmd}  (in video/)`]);
+			expect(manager.checkPermission(cmd, "posix", "video")).toBe("allowed");
+			expect(manager.checkPermission(cmd, "posix")).toBe("ask");
+			expect(manager.checkPermission(cmd, "posix", "site")).toBe("ask");
+			// A yes at the root does not carry into a folder either.
+			await manager.requestPermission("Execute Shell Command", "d", cmd);
+			expect(shown.at(-1)).toBe(cmd);
+			expect(manager.checkPermission(cmd, "posix")).toBe("allowed");
+			expect(manager.checkPermission(cmd, "posix", "site")).toBe("ask");
+		} finally {
+			registerTuiApprovalHandler(null);
+		}
+	});
+
+	test("on a case-insensitive disk `cd VIDEO` hands every gate the folder's real name", async () => {
+		const { cdPrefix, folderLabel } = await import("../permissions/cd-prefix");
+		const cd = cdPrefix("cd VIDEO && ls", root);
+		if (cd.kind !== "cd") {
+			// A case-sensitive disk: there is no VIDEO, so it is refused.
+			expect(cd.kind).toBe("refused");
+			return;
+		}
+		expect(cd.dir).toBe(sub);
+		expect(folderLabel(cd.dir, root)).toBe("video");
 	});
 });

@@ -28,7 +28,7 @@ import {
 	listAgentsTool,
 	spawnAgentTool,
 } from "../orchestration/delegation-tools";
-import { cdPrefix } from "../permissions/cd-prefix";
+import { cdPrefix, folderLabel } from "../permissions/cd-prefix";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import {
 	editScopeViolation,
@@ -1472,7 +1472,9 @@ async function commandRefusal(
 	const mode = currentPermissionMode();
 	const permissionManager = getPermissionManager();
 
-	const permissionCheck = permissionManager.checkPermission(command);
+	// The folder a cd prefix chose: the cards name it, and answers are kept per folder.
+	const where = folderLabel(cwd, ctx.workingDirectory);
+	const permissionCheck = permissionManager.checkPermission(command, undefined, where);
 	if (permissionCheck === "denied") {
 		return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 	}
@@ -1483,7 +1485,13 @@ async function commandRefusal(
 	const { systemOneGate } = await import("../permissions/system-one-gate");
 	// Guarded mode (#3170) turns System One on for this call whatever the env
 	// says; the env flag stays on in every mode.
-	const systemOne = await systemOneGate(command, systemOneEnvFor(mode), cwd, ctx.createdFiles);
+	const systemOne = await systemOneGate(
+		command,
+		systemOneEnvFor(mode),
+		cwd,
+		ctx.createdFiles,
+		where,
+	);
 	if (!systemOne.run) return systemOne.message as string;
 
 	if (
@@ -1497,6 +1505,7 @@ async function commandRefusal(
 				? "This command may modify system files or cause data loss."
 				: "The agent wants to run a shell command.",
 			command,
+			{ where },
 		);
 		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}

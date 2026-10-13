@@ -138,6 +138,30 @@ export function cdPrefix(
 	return { kind: "cd", dir, rest: p.rest };
 }
 
+/**
+ * What a person approving a command is shown: the command, and after a leading
+ * `cd <folder> &&` the folder it runs in, since `rm -rf old` means a different
+ * thing in each folder. `where` is the folder relative to the project root.
+ */
+export function commandInFolder(command: string, where?: string): string {
+	return where ? `${command}  (in ${where}/)` : command;
+}
+
+/**
+ * The folder `dir` names relative to the project `root`, for the approval card and
+ * the session's per-folder memory; undefined at the root itself.
+ */
+export function folderLabel(dir: string, root: string): string | undefined {
+	let base = root;
+	try {
+		base = realpathSync(root);
+	} catch {}
+	const rel = path.relative(base, dir);
+	return rel && !rel.startsWith("..") && !path.isAbsolute(rel)
+		? rel.split(path.sep).join("/")
+		: undefined;
+}
+
 /** `command` without a valid cd prefix, for checks that judge the text that will run. */
 export function commandAfterCdPrefix(
 	command: string,
