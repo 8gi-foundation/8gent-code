@@ -4,7 +4,7 @@
  * the string and checks the marker never runs.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,17 @@ import { getTool } from "../registry/register";
 import { isPlainArg } from "./execution/execution-tools";
 import "./execution/run";
 import "./repo/repo-tools";
+
+// Another test file clears the shared registry; module caching then keeps these
+// imports from registering again. Re-evaluate the tool modules when that happened.
+beforeAll(async () => {
+	if (getTool("run_tests") && getTool("install_deps") && getTool("run") && getTool("find_files"))
+		return;
+	const bust = `?reload=${Date.now()}`;
+	await import(`./execution/execution-tools.ts${bust}`);
+	await import(`./execution/run.ts${bust}`);
+	await import(`./repo/repo-tools.ts${bust}`);
+});
 
 let dir: string;
 const ctx = (): ExecutionContext => ({
