@@ -232,6 +232,13 @@ import { detectBuildIntent } from "./lib/build-intent.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
 import { onCopied } from "./lib/click-targets.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
+import {
+	type ContextWindow,
+	UNKNOWN_WINDOW,
+	contextMeter,
+	resolveContextWindow,
+	stepContextUsed,
+} from "./lib/context-window.js";
 import { copyReply } from "./lib/copy-answer.js";
 import {
 	formatSessionTime,
@@ -1270,7 +1277,14 @@ export function App({
 
 	// Context window tracking
 	const [contextUsed, setContextUsed] = useState(0);
-	const [contextMax] = useState(128000); // Default max context window
+	// Window of the model that ran the turn (#3321). Null until resolved; the
+	// HUD shows "unknown", never a guessed number.
+	// Null while the resolver runs: the slot shows "--", not "? unknown".
+	const [contextWindow, setContextWindow] = useState<ContextWindow | null>(null);
+	// The model whose window is shown: the asked one, or the one a reroute ran.
+	const [windowTarget, setWindowTarget] = useState<{ provider: string; model: string } | null>(
+		null,
+	);
 
 	// Expanded view state (Ctrl+O)
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1559,6 +1573,35 @@ export function App({
 	const [currentModel, setCurrentModel] = useState(
 		() => computeCliOverrides(cliProvider, cliModel).model,
 	);
+	useEffect(() => {
+		setWindowTarget((prev) =>
+			prev?.provider === currentProvider && prev.model === currentModel
+				? prev
+				: { provider: currentProvider, model: currentModel },
+		);
+	}, [currentProvider, currentModel]);
+	useEffect(() => {
+		if (!windowTarget) return;
+		let cancelled = false;
+		const inFlight = new AbortController();
+		setContextWindow(null);
+		resolveContextWindow({
+			...windowTarget,
+			ollamaBaseUrl: resolveOllamaBaseUrl(),
+			llamaServerUrl: resolveLlamaServerUrl(),
+			signal: inFlight.signal,
+		})
+			.then((w) => {
+				if (!cancelled) setContextWindow(w);
+			})
+			.catch(() => {
+				if (!cancelled) setContextWindow(UNKNOWN_WINDOW);
+			});
+		return () => {
+			cancelled = true;
+			inFlight.abort();
+		};
+	}, [windowTarget]);
 	const [availableModels, setAvailableModels] = useState<string[]>([]);
 	// Ollama's full /api/tags list before chat filtering, so a model that is
 	// installed but cannot chat is not reported as missing (#3548).
@@ -2657,6 +2700,14 @@ export function App({
 				const routedAgent = getTabAgent(tabId);
 				if (!routedAgent) return;
 				routedModelRef.current.set(routedAgent, { model: event.used, provider: event.provider });
+				// Only the visible tab moves the bar: its reading is gated the same way.
+				if (tabId === activeTabId) {
+					setWindowTarget((prev) =>
+						prev?.provider === event.provider && prev.model === event.used
+							? prev
+							: { provider: event.provider, model: event.used },
+					);
+				}
 				setRoutedTick((n) => n + 1);
 			},
 			onToolStart: (event: AgentToolStartEvent) => {
@@ -2809,6 +2860,10 @@ export function App({
 				if (isActive) {
 					setStepCount((prev) => prev + 1);
 					setTotalTokens((prev) => prev + event.usage.totalTokens);
+					// What the last request held, not a running sum. An all-zero
+					// synthetic event measured nothing: keep the last reading.
+					const measured = stepContextUsed(event.usage);
+					if (measured !== null) setContextUsed(measured);
 					if (event.tokensPerSecond && event.tokensPerSecond > 0) {
 						// Same EWMA shape as packages/ai/agent.ts so the TUI
 						// reading matches what self_inspect reports to the agent.
@@ -3492,6 +3547,7 @@ export function App({
 				}
 
 				case "clear":
+					setContextUsed(0);
 					setMessages([
 						{
 							id: `cleared-${Date.now()}`,
@@ -7163,7 +7219,11 @@ export function App({
 	const micOn =
 		Boolean(voice?.isAvailable) && (voice?.state === "recording" || voiceChat?.isActive);
 	const isApprovalPending = approvalPending !== null;
-	const contextPct = Math.min(100, Math.round((totalTokens / Math.max(1, contextMax)) * 100));
+	const ctxMeter = contextWindow
+		? contextMeter(contextUsed > 0 ? contextUsed : null, contextWindow)
+		: ({ kind: "fresh" } as const);
+	const contextPct = ctxMeter.kind === "measured" ? ctxMeter.pct : null;
+	const contextState = ctxMeter.kind === "measured" ? ctxMeter.source : ctxMeter.kind;
 	void sessionTick;
 	void renderMainContent;
 	void tokenMeterColWidth;
@@ -7282,6 +7342,7 @@ export function App({
 									routeAsked={shownModel.asked}
 									tokens={tokenStr}
 									contextPct={contextPct}
+									contextState={contextState}
 									approvalPending={isApprovalPending}
 									autonomous={infiniteModeActive}
 									isProcessing={isProcessing}
