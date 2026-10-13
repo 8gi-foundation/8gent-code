@@ -14,6 +14,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { admitText } from "./admission.js";
 import {
 	type EmbeddingProvider,
 	NullEmbeddingProvider,
@@ -28,7 +29,6 @@ import {
 	extractPreferencesFromMessage,
 } from "./extractor.js";
 import { type Entity, KnowledgeGraph, type Relationship, type SubgraphResult } from "./graph.js";
-import { admitText } from "./admission.js";
 import { type MigrationResult, migrateV1ToV2 } from "./migrate.js";
 import {
 	PromotionManager,
@@ -1433,7 +1433,9 @@ export function extractAutoMemories(
 	}
 
 	if (toolName === "read_file" && /readme/i.test(String(args.path || ""))) {
-		const lines = fileText.split("\n").filter((l) => l.trim() && !l.startsWith("#") && l.length > 20);
+		const lines = fileText
+			.split("\n")
+			.filter((l) => l.trim() && !l.startsWith("#") && l.length > 20);
 		if (lines.length > 0) {
 			facts.push({
 				fact: `Project purpose: ${lines[0].trim().slice(0, 200)}`,
