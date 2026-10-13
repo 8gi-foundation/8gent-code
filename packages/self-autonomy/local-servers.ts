@@ -11,7 +11,11 @@
  * so first run asks it once.
  */
 
-import { isLlamaServerSelected, resolveLlamaServerUrl } from "../local-model-server/select";
+import {
+	isLlamaServerSelected,
+	isLoopbackUrl,
+	resolveLlamaServerUrl,
+} from "../local-model-server/select";
 import { type ProviderManager, getProviderManager } from "../providers/index";
 
 type Env = Record<string, string | undefined>;
@@ -47,22 +51,6 @@ export function installGuideUrl(platform: string): string {
 	return `${DOCS}/install/${page}.md`;
 }
 export const PROVIDERS_GUIDE_URL = `${DOCS}/install/providers.md`;
-
-/**
- * True for localhost, 127.0.0.0/8 and ::1. Anything else is not probed.
- * TODO(#4215): the same helper, same name and behaviour, lands in
- * packages/local-model-server/select.ts with #4215. Whichever of #4215 and
- * #4216 merges second deletes this copy and imports it from select.ts.
- */
-export function isLoopbackUrl(url: string): boolean {
-	let host: string;
-	try {
-		host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, "");
-	} catch {
-		return false;
-	}
-	return host === "localhost" || host === "::1" || /^127(\.\d{1,3}){3}$/.test(host);
-}
 
 function withScheme(url: string): string {
 	const v = url.trim().replace(/\/+$/, "");
