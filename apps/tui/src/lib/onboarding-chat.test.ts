@@ -15,6 +15,7 @@ import {
 	questionForChat,
 	settleSetupTranscript,
 	settledSetupCard,
+	setupDoneLine,
 } from "./onboarding-chat";
 
 const step = (name: string) => {
@@ -98,7 +99,11 @@ describe("provider checks", () => {
 describe("once setup is done, nothing still asks for setup input (#3090)", () => {
 	const welcome = step("language");
 	const card = `Good day. I'm 8gent.\n\nFound on this machine:\nProvider ollama\n\n${SETUP_WELCOME_PROMPT}\n\n${SETUP_SKIP_HINT}`;
-	const msg = (id: string, content: string, role = id.startsWith("user") ? "user" : "assistant") => ({
+	const msg = (
+		id: string,
+		content: string,
+		role = id.startsWith("user") ? "user" : "assistant",
+	) => ({
 		id,
 		content,
 		role,
@@ -132,11 +137,17 @@ describe("once setup is done, nothing still asks for setup input (#3090)", () =>
 		];
 		const after = settleSetupTranscript(before);
 		expect(after.map((m) => m.id)).toEqual([`${SETUP_WELCOME_ID}1`, "setup-q-2", "user-3"]);
-		expect(after.map((m) => m.content).join("\n")).not.toMatch(/Press Enter to begin|\/skip|Ready to begin/);
+		expect(after.map((m) => m.content).join("\n")).not.toMatch(
+			/Press Enter to begin|\/skip|Ready to begin/,
+		);
 	});
 
 	test("answered to the end: every card stays, only the prompt and hint go", () => {
-		const before = [msg(`${SETUP_WELCOME_ID}1`, card), msg("setup-q-2", "Ready to begin?"), msg("user-3", "1")];
+		const before = [
+			msg(`${SETUP_WELCOME_ID}1`, card),
+			msg("setup-q-2", "Ready to begin?"),
+			msg("user-3", "1"),
+		];
 		const after = settleSetupTranscript(before);
 		expect(after.map((m) => m.id)).toEqual(before.map((m) => m.id));
 		expect(after[1]).toBe(before[1]);
@@ -173,7 +184,9 @@ describe("once setup is done, nothing still asks for setup input (#3090)", () =>
 		];
 		const after = settleSetupTranscript(before);
 		expect(after.map((m) => m.id)).toEqual([`${SETUP_WELCOME_ID}1`]);
-		expect(after[0].content).toBe("Good day. I'm 8gent.\n\nFound on this machine:\nProvider ollama");
+		expect(after[0].content).toBe(
+			"Good day. I'm 8gent.\n\nFound on this machine:\nProvider ollama",
+		);
 	});
 
 	test("a system line between a question and its answer does not unanswer it", () => {
@@ -182,11 +195,37 @@ describe("once setup is done, nothing still asks for setup input (#3090)", () =>
 			msg("system-3", "Telegram token received.", "system"),
 			msg("user-onboard-4", "(skipped)"),
 		];
-		expect(settleSetupTranscript(before).map((m) => m.id)).toEqual(["setup-q-2", "system-3", "user-onboard-4"]);
+		expect(settleSetupTranscript(before).map((m) => m.id)).toEqual([
+			"setup-q-2",
+			"system-3",
+			"user-onboard-4",
+		]);
 	});
 
 	test("a transcript with no setup cards comes back as it was", () => {
 		const before = [msg("a", "hello"), msg("b", "/skip all")];
 		expect(settleSetupTranscript(before)).toEqual(before);
+	});
+});
+
+describe("defaults are kept, and said (#4219)", () => {
+	test("Enter on the 8gent name step echoes Eight, not (skipped)", () => {
+		const q = step("voice");
+		expect(answerFromInput(q, "")).toEqual({ value: "", echo: "Eight" });
+		expect(answerFromInput(q, " Nova ")).toEqual({ value: "Nova", echo: "Nova" });
+		expect(placeholderFor(q)).toBe("A name, or Enter to keep Eight");
+	});
+
+	test("Enter on a role name step echoes the role name it kept", () => {
+		expect(answerFromInput(step("agent-name-qa"), "")).toEqual({ value: "", echo: "QA" });
+		expect(placeholderFor(step("agent-name-qa"))).toBe("A name, or Enter to keep QA");
+	});
+
+	test("the closing line has no unexplained number", () => {
+		const line = setupDoneLine("Sam");
+		expect(line).toStartWith("Welcome, Sam. Setup is done;");
+		expect(line).not.toMatch(/\d+%/);
+		expect(line).not.toContain("understand you");
+		expect(line).not.toContain("\u2014");
 	});
 });

@@ -73,7 +73,9 @@ export async function filterChatCapable(
 ): Promise<string[]> {
 	const fetchImpl = opts?.fetch ?? ((url, init) => fetch(url, init));
 	const timeoutMs = opts?.timeoutMs ?? 2000;
-	const caps = await Promise.all(ids.map((id) => ollamaCapabilities(root, id, fetchImpl, timeoutMs)));
+	const caps = await Promise.all(
+		ids.map((id) => ollamaCapabilities(root, id, fetchImpl, timeoutMs)),
+	);
 	const capable = ids
 		.map((id, i) => ({ id, caps: caps[i] }))
 		.filter((m) => m.caps === null || m.caps.includes("completion"));
@@ -100,10 +102,14 @@ function scoreChatModelCandidate(id: string): number {
  */
 export function pickBestChatModel(modelIds: string[], opts?: { preference?: string }): string {
 	if (modelIds.length === 0) return "";
-	const unique = Array.from(new Set(modelIds.flatMap((x) => {
-		const t = x.trim();
-		return t ? [t] : [];
-	})));
+	const unique = Array.from(
+		new Set(
+			modelIds.flatMap((x) => {
+				const t = x.trim();
+				return t ? [t] : [];
+			}),
+		),
+	);
 	const chatOnly = unique.filter((id) => !isLikelyEmbeddingModelId(id));
 	const pool = chatOnly.length > 0 ? chatOnly : unique;
 
@@ -193,7 +199,6 @@ export interface ModelSpec {
 	model: string;
 }
 
-
 /**
  * The model the validity check should switch to once a provider's model list
  * has loaded, or null to keep the current one.
@@ -220,7 +225,8 @@ export function autoSelectModel(opts: {
 	// the user had asked for a free one (#3289). It is resolved to a real
 	// ":free" id when the agent is built (resolveAgentModel).
 	if (current === AUTO_FREE && providerToRuntime(currentProvider) === "openrouter") return null;
-	if (explicit && current && explicit.model === current && explicit.provider === currentProvider) return null;
+	if (explicit && current && explicit.model === current && explicit.provider === currentProvider)
+		return null;
 	const inList = Boolean(current && available.includes(current));
 	if (current && inList && !isLikelyEmbeddingModelId(current)) return null;
 	const next = pickBestChatModel(available, { preference: explicit?.model || undefined });
@@ -284,7 +290,10 @@ export async function planAgentBuild(
  * drop and rebuild the agent the moment the rerouted turn finished, which
  * discarded that turn's in-flight reply ("No reply.", #3084).
  */
-export function canReuseTabAgent(built: { model?: string; runtime?: string }, want: { model: string; runtime: string }): boolean {
+export function canReuseTabAgent(
+	built: { model?: string; runtime?: string },
+	want: { model: string; runtime: string },
+): boolean {
 	return built.model === want.model && built.runtime === want.runtime;
 }
 
@@ -374,8 +383,15 @@ export function missingModelNotice(opts: {
 	to: string;
 	available: string[];
 	installed?: string[];
+	/**
+	 * First-run setup is still open, so no server has been chosen yet. The
+	 * notice would name a model the person never picked, on a server they
+	 * may not use (#4220), so it stays quiet until setup ends.
+	 */
+	duringSetup?: boolean;
 }): string | null {
 	const { provider, from, to, available, installed } = opts;
+	if (opts.duringSetup) return null;
 	if (!from || !to || from === to) return null;
 	if (!listsInstalledOllamaModels(provider)) return null;
 	if (available.includes(from)) return null;

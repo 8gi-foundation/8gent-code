@@ -25,6 +25,7 @@ import {
 	resolveProviderChoice,
 	saveProviderChoice,
 } from "./local-servers";
+import { LMSTUDIO_RECOMMENDED, OLLAMA_RECOMMENDED } from "./model-recipes";
 
 const execAsync = promisify(exec);
 
@@ -131,12 +132,16 @@ export type OnboardingStep =
 
 export type ProviderCheckId = "ollama" | "lmstudio" | "apfel";
 
-/** Per-provider install hints surfaced when a provider check fails. */
+const OLLAMA_PULL = `\`ollama pull ${OLLAMA_RECOMMENDED.pull}\` (${OLLAMA_RECOMMENDED.size})`;
+const LMSTUDIO_LOAD = `load \`${LMSTUDIO_RECOMMENDED.model}\` (${LMSTUDIO_RECOMMENDED.size})`;
+
+/**
+ * Per-provider install hints surfaced when a provider check fails. The model
+ * and size come from model-recipes.ts, so every screen names the same ones (#4220).
+ */
 export const PROVIDER_INSTALL_HINTS: Record<ProviderCheckId, string> = {
-	ollama:
-		"Install: https://ollama.ai (or `brew install ollama && ollama serve`). Then `ollama pull qwen3.6:27b`.",
-	lmstudio:
-		"Install: https://lmstudio.ai. Open it, load `google/gemma-4-26b-a4b`, click Start Server (port 1234).",
+	ollama: `Install: ${OLLAMA_RECOMMENDED.site} (or \`brew install ollama && ollama serve\`). Then ${OLLAMA_PULL}.`,
+	lmstudio: `Install: ${LMSTUDIO_RECOMMENDED.site}. Open it, ${LMSTUDIO_LOAD}, click Start Server (port 1234).`,
 	// 11435: where the health probe and the settings default look (provider-health.ts).
 	apfel: "Install: `brew install arthur-ficial/tap/apfel`. Run: `apfel --serve --port 11435`.",
 };
@@ -150,13 +155,13 @@ export function providerInstallHint(
 	platform: string = process.platform,
 ): string {
 	if (id === "ollama" && platform === "win32") {
-		return "Install: https://ollama.com/download/windows. Open Ollama, then in PowerShell: `ollama pull qwen3.6:27b`.";
+		return `Install: ${OLLAMA_RECOMMENDED.site}/windows. Open Ollama, then in PowerShell: ${OLLAMA_PULL}.`;
 	}
 	if (id === "ollama" && platform !== "darwin") {
-		return "Install: https://ollama.com/download/linux (one install command). Then `ollama pull qwen3.6:27b`.";
+		return `Install: ${OLLAMA_RECOMMENDED.site}/linux (one install command). Then ${OLLAMA_PULL}.`;
 	}
 	if (id === "lmstudio" && platform !== "darwin") {
-		return "Install: https://lmstudio.ai. Open it, load a model, and start the server in the Developer tab (port 1234).";
+		return `Install: ${LMSTUDIO_RECOMMENDED.site}. Open it, ${LMSTUDIO_LOAD}, and start the server in the Developer tab (port 1234).`;
 	}
 	return PROVIDER_INSTALL_HINTS[id];
 }
@@ -609,7 +614,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	{
 		step: "agent-name-orchestrator",
 		question:
-			"Name your Orchestrator agent. (default: Orchestrator)\n\n" +
+			"Name your Orchestrator 8gent. (default: Orchestrator)\n\n" +
 			"Press Enter to keep, or type a custom name (e.g. Architect, Plato):",
 		kind: "agentName",
 		roleKey: "orchestrator",
@@ -626,7 +631,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	{
 		step: "agent-name-engineer",
 		question:
-			"Name your Engineer agent. (default: Engineer)\n\n" +
+			"Name your Engineer 8gent. (default: Engineer)\n\n" +
 			"Press Enter to keep, or type a custom name (e.g. Coder, Hephaestus):",
 		kind: "agentName",
 		roleKey: "engineer",
@@ -643,7 +648,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	{
 		step: "agent-name-qa",
 		question:
-			"Name your QA agent. (default: QA)\n\n" +
+			"Name your QA 8gent. (default: QA)\n\n" +
 			"Press Enter to keep, or type a custom name (e.g. Reviewer, Cassandra):",
 		kind: "agentName",
 		roleKey: "qa",
@@ -664,6 +669,10 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 			"What should your 8gent be called? (default: Eight)\n\n" +
 			"This is your personal AI. Name it whatever you want.\n" +
 			"Press Enter for the default, or type a name:",
+		// An empty Enter keeps Eight, and the chat echoes "Eight", not
+		// "(skipped)" (#4219).
+		default: "Eight",
+		placeholder: "A name, or Enter to keep Eight",
 		processor: (answer, user) => {
 			const agentName = answer.trim() || "Eight";
 			return {
@@ -738,7 +747,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 	},
 	{
 		step: "voice-picker",
-		question: "Pick a voice for your agent.",
+		question: "Pick a voice for your 8gent.",
 		kind: "select",
 		choices: [
 			{
@@ -1532,17 +1541,15 @@ export function shortModelName(id: string, max = 28): string {
 
 /**
  * "Found on this machine" block for the welcome: only what detection found,
- * in label/value columns. Models get a hanging indent, one per line, three
- * at most, then a count. Empty string when nothing was found.
+ * in label/value columns. Empty string when nothing was found.
  */
 export function foundOnMachine(user: UserConfig): string {
 	const rows: Array<[string, string]> = [];
 	if (user.identity.name) rows.push(["Name", user.identity.name]);
 	if (user.integrations.github.username) rows.push(["GitHub", user.integrations.github.username]);
-	if (user.preferences.model.provider) rows.push(["Provider", user.preferences.model.provider]);
-	const models = user.integrations.ollama.models ?? [];
-	models.slice(0, 3).forEach((m, i) => rows.push([i === 0 ? "Models" : "", shortModelName(m)]));
-	if (models.length > 3) rows.push(["", `and ${models.length - 3} more`]);
+	// No server or model rows (#4221): at the welcome only Ollama has been
+	// asked, so "Provider ollama" undersold a machine also running LM Studio
+	// or llama-server. The provider step lists every server it finds.
 	if (rows.length === 0) return "";
 	const pad = 10;
 	const body = rows.map(([label, value]) => `  ${label.padEnd(pad)}${value}`).join("\n");

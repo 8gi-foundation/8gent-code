@@ -106,7 +106,11 @@ async function main() {
 	// The input coming back is the whole answer: a skip leaves no status line
 	// in the transcript, and makes no promise to ask again (#3088, #3090).
 	const after = strip(stdout.written.slice(mark));
-	if (after.includes("ask again later") || after.includes("Understood.") || after.includes("Onboarding complete")) {
+	if (
+		after.includes("ask again later") ||
+		after.includes("Understood.") ||
+		after.includes("Onboarding complete")
+	) {
 		throw new Error("a skip left a status line in the chat");
 	}
 	// Setup is over, so no card may still ask for setup input (#3090). A key
@@ -116,16 +120,23 @@ async function main() {
 	await waitFor(() => /❯ x/.test(strip(stdout.written.slice(settledAt))), "a fresh frame");
 	await tick(200);
 	const settled = strip(stdout.written.slice(settledAt));
-	if (!perQuestion && !settled.includes("Good day")) throw new Error("the welcome's greeting is gone");
+	if (!perQuestion && !settled.includes("Good day"))
+		throw new Error("the welcome's greeting is gone");
 	for (const stale of ["Press Enter to begin", "/skip skips a question", "Ready to begin?"]) {
-		if (settled.includes(stale)) throw new Error(`setup is over but the chat still says "${stale}"`);
+		if (settled.includes(stale))
+			throw new Error(`setup is over but the chat still says "${stale}"`);
 	}
 	// Every question skipped on the way leaves with the setup (#3096): a
 	// question with no answer under it is not conversation. The greeting stays.
 	if (perQuestion) {
 		if (!settled.includes("Good day")) throw new Error("the welcome's greeting is gone");
-		for (const skipped of ["What should I call you", "What best describes you", "Pick a voice for your agent"]) {
-			if (settled.includes(skipped)) throw new Error(`a skipped question is still in the chat: "${skipped}"`);
+		for (const skipped of [
+			"What should I call you",
+			"What best describes you",
+			"Pick a voice for your 8gent",
+		]) {
+			if (settled.includes(skipped))
+				throw new Error(`a skipped question is still in the chat: "${skipped}"`);
 		}
 	}
 	const user = JSON.parse(fs.readFileSync(path.join(home, ".8gent", "user.json"), "utf-8"));

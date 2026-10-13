@@ -189,7 +189,9 @@ describe("normalizeProviderId validates against the provider registry (#3081)", 
 		const file = path.join(dir, "providers.json");
 		fs.writeFileSync(
 			file,
-			JSON.stringify({ providers: { myrig: { baseUrl: "http://127.0.0.1:9999/v1", compat: "openai" } } }),
+			JSON.stringify({
+				providers: { myrig: { baseUrl: "http://127.0.0.1:9999/v1", compat: "openai" } },
+			}),
 		);
 		const pm = new ProviderManager(file);
 		const isKnown = (n: string) => pm.isKnownProvider(n);
@@ -211,26 +213,46 @@ describe("an explicit --model is never overridden (#3084)", () => {
 
 	test("--provider 8gent --model X keeps X even though X is not in 8gent's declared list", () => {
 		expect(
-			autoSelectModel({ current: "qwen3.8:27b-mlx", currentProvider: "8gent", available: declared8gent, explicit: pin }),
+			autoSelectModel({
+				current: "qwen3.8:27b-mlx",
+				currentProvider: "8gent",
+				available: declared8gent,
+				explicit: pin,
+			}),
 		).toBeNull();
 	});
 
 	test("without an explicit choice, a model missing from the list is still auto-replaced", () => {
 		expect(
-			autoSelectModel({ current: "qwen3.8:27b-mlx", currentProvider: "8gent", available: declared8gent, explicit: null }),
+			autoSelectModel({
+				current: "qwen3.8:27b-mlx",
+				currentProvider: "8gent",
+				available: declared8gent,
+				explicit: null,
+			}),
 		).toBe("eight-1.0-q3:14b");
 	});
 
 	test("the pin only protects its own provider: after switching provider the check runs", () => {
 		expect(
-			autoSelectModel({ current: "qwen3.8:27b-mlx", currentProvider: "lmstudio", available: ["m-a"], explicit: pin }),
+			autoSelectModel({
+				current: "qwen3.8:27b-mlx",
+				currentProvider: "lmstudio",
+				available: ["m-a"],
+				explicit: pin,
+			}),
 		).toBe("m-a");
 	});
 
 	test("no model, an embedding model, or an empty list behave as before", () => {
-		expect(autoSelectModel({ current: "", currentProvider: "ollama", available: ["llama3.2:3b"], explicit: null })).toBe(
-			"llama3.2:3b",
-		);
+		expect(
+			autoSelectModel({
+				current: "",
+				currentProvider: "ollama",
+				available: ["llama3.2:3b"],
+				explicit: null,
+			}),
+		).toBe("llama3.2:3b");
 		expect(
 			autoSelectModel({
 				current: "nomic-embed-text:latest",
@@ -239,9 +261,16 @@ describe("an explicit --model is never overridden (#3084)", () => {
 				explicit: null,
 			}),
 		).toBe("llama3.2:3b");
-		expect(autoSelectModel({ current: "x", currentProvider: "ollama", available: [], explicit: null })).toBeNull();
 		expect(
-			autoSelectModel({ current: "llama3.2:3b", currentProvider: "ollama", available: ["llama3.2:3b"], explicit: null }),
+			autoSelectModel({ current: "x", currentProvider: "ollama", available: [], explicit: null }),
+		).toBeNull();
+		expect(
+			autoSelectModel({
+				current: "llama3.2:3b",
+				currentProvider: "ollama",
+				available: ["llama3.2:3b"],
+				explicit: null,
+			}),
 		).toBeNull();
 	});
 
@@ -284,7 +313,12 @@ describe("a missing default model is swapped before the first turn (#3332)", () 
 	});
 
 	test("default absent: the installed list replaces it with an installed chat model", () => {
-		const next = autoSelectModel({ current: "eight-1.0-q3:14b", currentProvider: "8gent", available: installed, explicit: null });
+		const next = autoSelectModel({
+			current: "eight-1.0-q3:14b",
+			currentProvider: "8gent",
+			available: installed,
+			explicit: null,
+		});
 		expect(next).not.toBeNull();
 		expect(installed).toContain(next as string);
 		expect(next).not.toBe("nomic-embed-text:latest");
@@ -293,21 +327,45 @@ describe("a missing default model is swapped before the first turn (#3332)", () 
 	test("default present: it is kept and no notice is shown", () => {
 		const withDefault = [...installed, "eight-1.0-q3:14b"];
 		expect(
-			autoSelectModel({ current: "eight-1.0-q3:14b", currentProvider: "8gent", available: withDefault, explicit: null }),
+			autoSelectModel({
+				current: "eight-1.0-q3:14b",
+				currentProvider: "8gent",
+				available: withDefault,
+				explicit: null,
+			}),
 		).toBeNull();
-		expect(missingModelNotice({ provider: "8gent", from: "eight-1.0-q3:14b", to: "qwen3.5:9b", available: withDefault })).toBeNull();
+		expect(
+			missingModelNotice({
+				provider: "8gent",
+				from: "eight-1.0-q3:14b",
+				to: "qwen3.5:9b",
+				available: withDefault,
+			}),
+		).toBeNull();
 	});
 
 	test("an explicit --model still wins over the installed list (#3084 holds)", () => {
 		const pin: ModelSpec = { provider: "8gent", model: "eight-1.0-q3:14b" };
 		expect(
-			autoSelectModel({ current: "eight-1.0-q3:14b", currentProvider: "8gent", available: installed, explicit: pin }),
+			autoSelectModel({
+				current: "eight-1.0-q3:14b",
+				currentProvider: "8gent",
+				available: installed,
+				explicit: pin,
+			}),
 		).toBeNull();
 	});
 
 	test("the swap of a missing model says so in one line, naming both models", () => {
-		const notice = missingModelNotice({ provider: "8gent", from: "eight-1.0-q3:14b", to: "qwen3.8:27b-mlx", available: installed });
-		expect(notice).toBe("eight-1.0-q3:14b is not installed in Ollama, so this session uses qwen3.8:27b-mlx. Pick another with /model.");
+		const notice = missingModelNotice({
+			provider: "8gent",
+			from: "eight-1.0-q3:14b",
+			to: "qwen3.8:27b-mlx",
+			available: installed,
+		});
+		expect(notice).toBe(
+			"eight-1.0-q3:14b is not installed in Ollama, so this session uses qwen3.8:27b-mlx. Pick another with /model.",
+		);
 		expect(notice).not.toContain("\n");
 	});
 
@@ -319,8 +377,23 @@ describe("a missing default model is swapped before the first turn (#3332)", () 
 			available: ["qwen3.5:14b"],
 			installed: ["clef:27b", "qwen3.5:14b"],
 		});
-		expect(notice).toBe("clef:27b cannot be used for chat, so this session uses qwen3.5:14b. Pick another with /model.");
+		expect(notice).toBe(
+			"clef:27b cannot be used for chat, so this session uses qwen3.5:14b. Pick another with /model.",
+		);
 		expect(notice).not.toContain("not installed");
+	});
+
+	test("no fallback notice while first-run setup is open: no server is chosen yet (#4220)", () => {
+		const args = {
+			provider: "ollama",
+			from: "qwen3.6:27b",
+			to: "gemma-4-26b-a4b-it",
+			available: ["gemma-4-26b-a4b-it"],
+		};
+		expect(missingModelNotice({ ...args, duringSetup: true })).toBeNull();
+		expect(missingModelNotice({ ...args, duringSetup: false })).toContain(
+			"is not installed in Ollama",
+		);
 	});
 
 	test("a model absent from the installed list is still called missing", () => {
@@ -332,13 +405,26 @@ describe("a missing default model is swapped before the first turn (#3332)", () 
 				available: ["qwen3.5:14b"],
 				installed: ["clef:27b", "qwen3.5:14b"],
 			}),
-		).toBe("eight-1.0-q3:14b is not installed in Ollama, so this session uses qwen3.5:14b. Pick another with /model.");
+		).toBe(
+			"eight-1.0-q3:14b is not installed in Ollama, so this session uses qwen3.5:14b. Pick another with /model.",
+		);
 	});
 
 	test("no notice for a first pick, a non-Ollama provider, or a model that is installed", () => {
-		expect(missingModelNotice({ provider: "8gent", from: "", to: "qwen3.5:9b", available: installed })).toBeNull();
-		expect(missingModelNotice({ provider: "lmstudio", from: "x", to: "m-a", available: ["m-a"] })).toBeNull();
-		expect(missingModelNotice({ provider: "ollama", from: "qwen3.5:9b", to: "qwen3.8:27b-mlx", available: installed })).toBeNull();
+		expect(
+			missingModelNotice({ provider: "8gent", from: "", to: "qwen3.5:9b", available: installed }),
+		).toBeNull();
+		expect(
+			missingModelNotice({ provider: "lmstudio", from: "x", to: "m-a", available: ["m-a"] }),
+		).toBeNull();
+		expect(
+			missingModelNotice({
+				provider: "ollama",
+				from: "qwen3.5:9b",
+				to: "qwen3.8:27b-mlx",
+				available: installed,
+			}),
+		).toBeNull();
 	});
 });
 
@@ -389,9 +475,13 @@ describe("filterChatCapable (#3548)", () => {
 			"embed-chat-tuned:8b": ["completion"],
 			"mxbai-embed-large:latest": ["embedding"],
 		});
-		const kept = await filterChatCapable(`${ROOT}/c`, ["embed-chat-tuned:8b", "mxbai-embed-large:latest"], {
-			fetch: fetchImpl,
-		});
+		const kept = await filterChatCapable(
+			`${ROOT}/c`,
+			["embed-chat-tuned:8b", "mxbai-embed-large:latest"],
+			{
+				fetch: fetchImpl,
+			},
+		);
 		expect(kept).toEqual(["embed-chat-tuned:8b"]);
 	});
 
@@ -400,7 +490,9 @@ describe("filterChatCapable (#3548)", () => {
 		const root = `${ROOT}/d`;
 		await filterChatCapable(root, ["qwen3.5:14b", "down:3b"], { fetch: fetchImpl });
 		await filterChatCapable(root, ["qwen3.5:14b", "down:3b"], { fetch: fetchImpl });
-		expect(calls.filter((c) => c.endsWith(" qwen3.5:14b"))).toEqual([`${root}/api/show qwen3.5:14b`]);
+		expect(calls.filter((c) => c.endsWith(" qwen3.5:14b"))).toEqual([
+			`${root}/api/show qwen3.5:14b`,
+		]);
 		expect(calls.filter((c) => c.endsWith(" down:3b")).length).toBe(2);
 	});
 });

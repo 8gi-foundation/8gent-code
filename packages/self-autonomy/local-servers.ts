@@ -13,6 +13,7 @@
 
 import { isLlamaServerSelected, resolveLlamaServerUrl } from "../local-model-server/select";
 import { type ProviderManager, getProviderManager } from "../providers/index";
+import { KEYS_FILE_DISPLAY } from "./model-recipes";
 
 type Env = Record<string, string | undefined>;
 
@@ -190,6 +191,35 @@ export function preferredModel(server: FoundServer): string {
 	return eight ?? server.models[0] ?? "default";
 }
 
+/** A model id that is only a content hash, as Ollama lists a GGUF imported without a name. */
+const HASH_ID = /^(?:([\w.-]+):)?([0-9a-f]{32,})$/i;
+
+/**
+ * A model id as a person reads it (#4221). Named ids keep their tag and lose
+ * the registry and org path; a bare content hash
+ * ("llamacpp:c97eb11d70b1...", 64 hex characters) becomes
+ * "unnamed model c97eb11d". Display only: what gets saved is unchanged.
+ */
+export function readableModelName(id: string, max = 32): string {
+	const hash = HASH_ID.exec(id);
+	if (hash) return `unnamed model ${hash[2].slice(0, 8)}`;
+	const last = id.split("/").pop() || id;
+	return last.length > max ? `${last.slice(0, max - 1)}…` : last;
+}
+
+/**
+ * The model line on a server's choice row: the model the choice saves, then
+ * how many more. When that model is only a hash, a named model on the same
+ * server is shown too, so the person recognises the server.
+ */
+export function serverModelsLine(server: FoundServer): string {
+	const saved = preferredModel(server);
+	const n = server.models.length;
+	const more = n > 1 ? ` and ${n - 1} more` : "";
+	const named = HASH_ID.test(saved) ? server.models.find((m) => !HASH_ID.test(m)) : undefined;
+	return `${readableModelName(saved)}${more}${named ? `, including ${readableModelName(named)}` : ""}`;
+}
+
 /** Plain next step when nothing is running: one install link for this OS. */
 export function noServerGuidance(platform: string): string {
 	return [
@@ -211,7 +241,8 @@ export interface ProviderChoiceScreen {
 const OPENROUTER_CHOICE = {
 	label: "Free cloud models (OpenRouter)",
 	value: "openrouter",
-	description: "Needs a free key from openrouter.ai, set as OPENROUTER_API_KEY in ~/.8gent/.env",
+	// Short enough for one row beside the label at 120 columns (#4220).
+	description: `Needs a free openrouter.ai key in ${KEYS_FILE_DISPLAY}`,
 };
 const LATER_CHOICE = {
 	label: "Decide later",
@@ -223,9 +254,7 @@ const LATER_CHOICE = {
 export function providerChoiceScreen(found: FoundServer[], platform: string): ProviderChoiceScreen {
 	const local = found.map((s) => {
 		const where = s.url.replace(/^https?:\/\//, "");
-		const n = s.models.length;
-		const models = `${preferredModel(s)}${n > 1 ? ` and ${n - 1} more` : ""}`;
-		return { label: s.label, value: s.id, description: `${models}, at ${where}` };
+		return { label: s.label, value: s.id, description: `${serverModelsLine(s)}, at ${where}` };
 	});
 	if (found.length === 0) {
 		return { question: noServerGuidance(platform), choices: [OPENROUTER_CHOICE, LATER_CHOICE] };

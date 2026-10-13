@@ -16,6 +16,10 @@
  */
 
 import { getProviderManager } from "../../../../packages/providers/index.js";
+import {
+	KEYS_FILE_DISPLAY,
+	OLLAMA_RECOMMENDED,
+} from "../../../../packages/self-autonomy/model-recipes.js";
 
 /** Providers served by the local engines the status bar counts. "" = not chosen yet. */
 export const LOCAL_ENGINE_PROVIDERS: ReadonlySet<string> = new Set([
@@ -121,8 +125,8 @@ export const COMPACT_BELOW_ROWS = 30;
 /**
  * The card's words. Commands are the real ones and follow the published docs
  * (8gent.dev models/ollama and models/hosted): the Ollama install script and
- * library tag were checked against ollama.com, and qwen3.5 is the Ollama
- * default model in packages/providers/index.ts. Keys go in ~/.8gent/keys.env
+ * library tag were checked against ollama.com, and the model and size come
+ * from model-recipes.ts, shared with setup's provider check (#4220). Keys go in ~/.8gent/keys.env
  * via `8gent keys` (the file `8gent keys status` reads and bin/8gent.ts loads).
  * Shell lines are pasteable as they stand: notes ride in `#` comments.
  */
@@ -130,7 +134,7 @@ export function guidanceCopy(platform: NodeJS.Platform = process.platform): Guid
 	const install =
 		platform === "linux"
 			? "curl -fsSL https://ollama.com/install.sh | sh"
-			: "Install Ollama from https://ollama.com/download";
+			: `Install Ollama from ${OLLAMA_RECOMMENDED.site}`;
 	return {
 		label: "NO MODEL",
 		lead: "8gent needs a model to answer. Pick one, or type /provider.",
@@ -138,20 +142,24 @@ export function guidanceCopy(platform: NodeJS.Platform = process.platform): Guid
 			{
 				n: "1",
 				title: "Run a model on this machine (free, stays local)",
-				steps: [install, "ollama pull qwen3.5   # about 7 GB", "In 8gent: /provider ollama"],
+				steps: [
+					install,
+					`ollama pull ${OLLAMA_RECOMMENDED.pull}   # ${OLLAMA_RECOMMENDED.size}`,
+					"In 8gent: /provider ollama",
+				],
 			},
 			{
 				n: "2",
 				title: "Use a free hosted model, key from https://openrouter.ai/keys",
 				steps: [
-					"8gent keys   # opens ~/.8gent/keys.env",
+					`8gent keys   # opens ${KEYS_FILE_DISPLAY}`,
 					"Set OPENROUTER_API_KEY=<your key>, save, restart 8gent",
 					"In 8gent: /provider openrouter, then /model auto:free",
 				],
 			},
 		],
 		compact: [
-			["Install Ollama (ollama.com), ollama pull qwen3.5, /provider ollama"],
+			[`Install Ollama (ollama.com), ollama pull ${OLLAMA_RECOMMENDED.pull}, /provider ollama`],
 			[
 				"8gent keys, set OPENROUTER_API_KEY=<your key>, restart 8gent",
 				"/provider openrouter, then /model auto:free",
