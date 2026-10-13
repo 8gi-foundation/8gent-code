@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtractVideoMode, extractVideo, formatExtractVideoResult } from "@8gent/eyes/marlin";
+import { z } from "zod";
 import { withImagesWritten } from "../ai/image-shape";
 import {
 	POST_MESSAGE_TOOL_DEF,
@@ -208,6 +209,7 @@ import {
 	vercelListProjects,
 	vercelSetEnv,
 } from "../tools/vercel";
+import { DeckSpecSchema } from "../tools/video-deck";
 import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
 import { isNoToolScope } from "./agent-scopes";
 import { ArtifactStore } from "./artifact-store";
@@ -748,6 +750,29 @@ const POWERSHELL_TOOL_DEF = {
 
 /** Policy action class for every one-file extension tool call (G1). */
 export const EXTENSION_POLICY_ACTION = "extension_call" as const;
+
+/**
+ * render_video_deck's `spec` parameter as a real nested schema (#4172), derived from the
+ * renderer's own DeckSpecSchema so the fields a model is shown are the fields it is checked
+ * against. The native tool list carries no function description in a headless run, so this
+ * schema is where a model learns slides[{title, text, bullets, narration, ...}], size and voice.
+ * String lengths and the closed-object flags are left out to keep every request lean (the
+ * headless prompt budget); the renderer still enforces them and says which one failed.
+ */
+export const DECK_SPEC_PARAMETER: Record<string, unknown> = (() => {
+	const lean = (node: unknown): unknown => {
+		if (Array.isArray(node)) return node.map(lean);
+		if (node === null || typeof node !== "object") return node;
+		const out: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(node)) {
+			if (k === "$schema" || k === "maxLength" || k === "additionalProperties") continue;
+			out[k] = lean(v);
+		}
+		return out;
+	};
+	const shape = lean(z.toJSONSchema(DeckSpecSchema, { io: "input" })) as Record<string, unknown>;
+	return { ...shape, description: "Deck spec, 1-40 slides" };
+})();
 
 export class ToolExecutor {
 	private workingDirectory: string;
@@ -1350,11 +1375,7 @@ export class ToolExecutor {
 					parameters: {
 						type: "object",
 						properties: {
-							spec: {
-								type: "object",
-								description:
-									"Deck spec: { size?: '1280x720'|'1920x1080', slides: [{ title?, bullets?: string[], narration? }] }",
-							},
+							spec: DECK_SPEC_PARAMETER,
 							out: {
 								type: "string",
 								description: "Output .mp4 path inside the working directory (default deck.mp4)",

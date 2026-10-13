@@ -222,6 +222,31 @@ describe("session watchdog abort (#4172)", () => {
 		await agent.cleanup();
 	}, 30_000);
 
+	test("a watchdog firing with no model call in flight is logged but stops nothing", async () => {
+		const { Agent, watchdogStop } = await import("./agent");
+		const agent = new Agent({
+			model: "m",
+			runtime: "ollama",
+			workingDirectory: work,
+			maxTurns: 5,
+			headless: true,
+		} as ConstructorParameters<typeof Agent>[0]);
+		const logged: string[] = [];
+		const realLog = console.log;
+		console.log = (...a: unknown[]) => {
+			logged.push(a.map(String).join(" "));
+		};
+		try {
+			agent.abort(watchdogStop(1_800_000));
+		} finally {
+			console.log = realLog;
+		}
+		// A run that goes on to finish is not reported as stopped.
+		expect(agent.getTurnStop()).toBeNull();
+		expect(logged.join("\n")).toContain("limit of 1800000 ms");
+		await agent.cleanup();
+	});
+
 	test("the result event carries the watchdog's limit and validates", async () => {
 		const { stopInfo } = await import("./run");
 		const { watchdogStop } = await import("./agent");

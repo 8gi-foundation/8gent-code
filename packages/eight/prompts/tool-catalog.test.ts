@@ -262,7 +262,7 @@ describe("render_video_deck catalog line carries its spec shape (#4172)", () => 
 	it("names slides and narration on the line the model reads, not only in the native schema", async () => {
 		const line = (await catalogLines()).find((l) => l.startsWith("render_video_deck("));
 		expect(line).toBeDefined();
-		for (const word of ["spec:", "slides", "title", "bullets", "narration", "out"]) {
+		for (const word of ["spec:", "size", "slides", "title", "bullets", "narration", "out"]) {
 			expect(line).toContain(word);
 		}
 		// Whole, not cut at the 140-character description cap.
@@ -281,5 +281,45 @@ describe("render_video_deck catalog line carries its spec shape (#4172)", () => 
 		)[0];
 		expect(first).toContain("slides");
 		expect(first).toContain("narration");
+	});
+
+	/** The slide fields the renderer accepts, which a model must see as real schema fields. */
+	const SLIDE_FIELDS = ["title", "text", "bullets", "narration", "seconds", "image"];
+	type Obj = { properties?: Record<string, Obj>; items?: Obj; type?: string };
+
+	it("the native tool list's spec parameter is a real nested schema, not a bare object", async () => {
+		const { ToolExecutor } = await import("../tools.js");
+		const { toolDefsToSpecs } = await import("../../ai/text-tool-endpoint.js");
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "deck-schema-")));
+		try {
+			const defs = new ToolExecutor(dir).getToolDefinitions() as Parameters<
+				typeof toolDefsToSpecs
+			>[0];
+			// Headless Ollama declares name and parameters only; parameters go out as-is.
+			const spec = toolDefsToSpecs(defs).find((t) => t.name === "render_video_deck");
+			const specParam = (spec?.parameters as Obj).properties?.spec;
+			expect(specParam?.type).toBe("object");
+			expect(Object.keys(specParam?.properties ?? {})).toEqual(
+				expect.arrayContaining(["slides", "size", "voice"]),
+			);
+			const slide = specParam?.properties?.slides?.items;
+			expect(Object.keys(slide?.properties ?? {})).toEqual(expect.arrayContaining(SLIDE_FIELDS));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("the AI SDK tool's spec input schema carries the same fields", async () => {
+		const { asSchema } = await import("ai");
+		const { agentTools } = await import("../../ai/tools.js");
+		const input = (agentTools.render_video_deck as { inputSchema: Parameters<typeof asSchema>[0] })
+			.inputSchema;
+		const json = (await asSchema(input).jsonSchema) as Obj;
+		const specParam = json.properties?.spec;
+		expect(Object.keys(specParam?.properties ?? {})).toEqual(
+			expect.arrayContaining(["slides", "size", "voice"]),
+		);
+		const slide = specParam?.properties?.slides?.items;
+		expect(Object.keys(slide?.properties ?? {})).toEqual(expect.arrayContaining(SLIDE_FIELDS));
 	});
 });

@@ -3287,21 +3287,25 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	/**
 	 * Abort the current generation. With no argument it is the person (ESC); the circuit
 	 * breaker and the session watchdog pass their stop, which is logged as itself and kept
-	 * for getTurnStop() (#4172).
+	 * for getTurnStop() (#4172). With no model call in flight nothing is stopped, so the stop
+	 * is not kept: a watchdog firing between calls is logged and the turn goes on.
 	 */
 	abort(stop?: TurnStop): void {
-		if (stop && this.turnStop === null) this.turnStop = stop;
-		if (this.abortController) {
-			this.abortController.abort();
-			this.abortController = null;
-			console.log(
-				stop === undefined
-					? "[8gent] Generation aborted by user"
-					: stop.kind === "watchdog"
-						? `\n[8gent] ${stop.reason} Aborting.`
-						: `[8gent] Generation stopped by the circuit breaker: ${stop.reason}`,
-			);
+		if (!this.abortController) {
+			if (stop?.kind === "watchdog")
+				console.log(`\n[8gent] ${stop.reason} No model call in flight.`);
+			return;
 		}
+		if (stop && this.turnStop === null) this.turnStop = stop;
+		this.abortController.abort();
+		this.abortController = null;
+		console.log(
+			stop === undefined
+				? "[8gent] Generation aborted by user"
+				: stop.kind === "watchdog"
+					? `\n[8gent] ${stop.reason} Aborting.`
+					: `[8gent] Generation stopped by the circuit breaker: ${stop.reason}`,
+		);
 	}
 
 	/** Why the harness stopped the last turn, or null when it ended on its own or by ESC. */
