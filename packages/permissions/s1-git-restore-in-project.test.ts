@@ -261,7 +261,7 @@ describe("restoreInProject falls through on", () => {
 			home = tempDir("s1-restore-home-");
 			writeFileSync(
 				join(home, ".gitconfig"),
-				'[filter "lfs"]\n\tclean = git-lfs clean -- %f\n\tsmudge = git-lfs smudge -- %f\n\trequired = true\n',
+				'[filter "lfs"]\n\tclean = cat\n\tsmudge = cat\n\trequired = true\n',
 			);
 			savedHome = process.env.HOME;
 			process.env.HOME = home;
@@ -273,7 +273,7 @@ describe("restoreInProject falls through on", () => {
 			rmSync(home, { recursive: true, force: true });
 		});
 		test("the pilot command is allowed when the target has no filter attribute", () => {
-			expect(git(ws, "config", "--global", "--get", "filter.lfs.clean")).toContain("git-lfs");
+			expect(git(ws, "config", "--global", "--get", "filter.lfs.clean")).toContain("cat");
 			const cmd = `git show ${sha}:config/rates.json > config/rates.json`;
 			expect(restoreInProject(cmd, ws).ok).toBe(true);
 			expect(restoreInProject("git restore config/rates.json", ws).ok).toBe(true);
@@ -282,7 +282,7 @@ describe("restoreInProject falls through on", () => {
 			writeFileSync(join(ws, ".gitattributes"), "config/rates.json filter=lfs\n");
 			git(ws, "add", ".gitattributes");
 			git(ws, "commit", "-qm", "attrs");
-			// git-lfs may install hooks on commit; clear them so the attribute alone decides.
+			// A real git-lfs may install hooks on commit; clear them so the attribute alone decides.
 			for (const h of readdirSync(join(ws, ".git", "hooks")))
 				if (!h.endsWith(".sample")) unlinkSync(join(ws, ".git", "hooks", h));
 			const cmd = `git show ${sha}:config/rates.json > config/rates.json`;
