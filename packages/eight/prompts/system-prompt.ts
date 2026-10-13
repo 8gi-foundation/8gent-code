@@ -11,16 +11,16 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveHome } from "../../core/home";
 import { type ResolvedShell, currentWindowsShell } from "../../core/shell";
-import { LOCAL_SERVER_CURL_NOTE } from "../../tools/eight-browser";
 import { getRepoMapper } from "../../repo-context";
-import { loadInstructions } from "../instruction-loader";
-import { TOOL_CATEGORIES } from "../tool-registry";
-import { type AccessTier, type UserContext, composeSoulPrompt, determineTier } from "./soul-layers";
 import {
 	type CommunicationStyle,
 	isCommunicationStyle,
 	isLanguageCode,
 } from "../../self-autonomy/communication-style";
+import { LOCAL_SERVER_CURL_NOTE } from "../../tools/eight-browser";
+import { loadInstructions } from "../instruction-loader";
+import { TOOL_CATEGORIES } from "../tool-registry";
+import { type AccessTier, type UserContext, composeSoulPrompt, determineTier } from "./soul-layers";
 
 export { composeSoulPrompt, determineTier, type AccessTier, type UserContext };
 
@@ -136,13 +136,16 @@ export function styleHasGuide(style: string): boolean {
  * @deprecated User context is now handled by composeSoulPrompt(tier, userContext).
  * Kept for backward compatibility with any direct imports.
  */
-export const USER_CONTEXT_SEGMENT = (userData: {
-	name?: string | null;
-	role?: string | null;
-	communicationStyle?: string | null;
-	language?: string;
-	preferences?: Record<string, unknown>;
-}, opts: { includeBoard?: boolean } = {}) => {
+export const USER_CONTEXT_SEGMENT = (
+	userData: {
+		name?: string | null;
+		role?: string | null;
+		communicationStyle?: string | null;
+		language?: string;
+		preferences?: Record<string, unknown>;
+	},
+	opts: { includeBoard?: boolean } = {},
+) => {
 	const parts: string[] = ["## USER CONTEXT"];
 
 	if (userData.name) {
@@ -151,7 +154,9 @@ export const USER_CONTEXT_SEGMENT = (userData: {
 	if (userData.role) {
 		parts.push(`Their role: ${userData.role}.`);
 	}
-	const styleLine = userData.communicationStyle ? communicationStyleLine(userData.communicationStyle) : "";
+	const styleLine = userData.communicationStyle
+		? communicationStyleLine(userData.communicationStyle)
+		: "";
 	if (styleLine) {
 		parts.push(styleLine);
 	}
@@ -207,6 +212,9 @@ Why: without this, the user has to re-establish the plan every turn
 because there is no persistent journey. The rail is now load-bearing.
 Treat it like the goal-loop ledger - the tasks are the audit trail of
 where we have been and what is open.
+If the task points at a checklist file (PLAN.md, TODO.md or one it names),
+that file is the record, not the rail: tick each box in the file with
+edit_file as its step finishes. update_plan only mirrors it.
 
 ADHD users in particular cannot reconstruct a 5-item list you gave them
 three turns ago. The task store is the externalized working memory.`;
@@ -290,8 +298,7 @@ export interface ToolCatalogOptions {
 export const CONCISE_WEB_NOTE =
 	"**Web, docs or URLs: `web_search`/`web_fetch`; you have internet.**";
 export const NARRATION_NOTE = "**Narration: `speak`, never espeak or say.**";
-export const SCRATCH_DIR_NOTE =
-	"**Scratch files: `.tmp/` in the project, never /tmp or ~.**";
+export const SCRATCH_DIR_NOTE = "**Scratch files: `.tmp/` in the project, never /tmp or ~.**";
 
 export type EnvironmentNoteInput = {
 	platform?: NodeJS.Platform;
@@ -302,7 +309,11 @@ export type EnvironmentNoteInput = {
 	release?: string;
 };
 
-const OS_NAMES: Partial<Record<NodeJS.Platform, string>> = { win32: "Windows", darwin: "macOS", linux: "Linux" };
+const OS_NAMES: Partial<Record<NodeJS.Platform, string>> = {
+	win32: "Windows",
+	darwin: "macOS",
+	linux: "Linux",
+};
 
 /**
  * One line telling the model which OS and shell run_command uses (B3): the
