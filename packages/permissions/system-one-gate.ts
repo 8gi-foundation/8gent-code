@@ -88,6 +88,7 @@ import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
 import type { CreatedFiles } from "./s1-created-files";
 import type { RmOwnDir } from "./s1-rm-own-dir";
+import type { RunOwnScript } from "./s1-run-own-script";
 import { posixRulesApply } from "./shell-tools";
 import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
 
@@ -648,6 +649,29 @@ export async function systemOneGate(
 					},
 				};
 			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// `bash|sh .tmp/FILE` where FILE is a shell script this session
+		// wrote, made only of allowlisted literal commands on loopback and in the workspace
+		// (#4121); see s1-run-own-script.ts. Default mode only.
+		try {
+			const { runOwnScript } = await import("./s1-run-own-script");
+			const own: RunOwnScript =
+				mode === "default" ? runOwnScript(command, cwd, created) : { ok: false };
+			if (own.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: own.reason,
+					},
+				};
+			}
+			if (own.hint) hint = own.hint;
 		} catch {
 			// No opinion: fall through to the judge.
 		}
