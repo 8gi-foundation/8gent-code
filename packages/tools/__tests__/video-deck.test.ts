@@ -214,7 +214,53 @@ h.write("data",36);h.writeUInt32LE(d.length,40);fs.writeFileSync(out,Buffer.conc
 			renderVideoDeck({ spec: SPEC, out: join(root, "w.mp4"), cwd: root, ffprobe: none }),
 		).rejects.toThrow(/could not read a video stream/);
 		expect(existsSync(join(root, "w.mp4"))).toBe(false);
+		// Nothing is left behind: no .deck-*.part beside the output, no work folder in .tmp.
+		expect(readdirSync(root).filter((f) => f.endsWith(".part"))).toEqual([]);
+		expect(readdirSync(join(root, ".tmp"))).toEqual([]);
 	});
+
+	ffTest(
+		"a narrated deck whose file has no audio stream is refused and never placed (#4165 review)",
+		async () => {
+			const root = tempDir("vdeck-noaudio-");
+			const bins = tempDir("vdeck-noaudio-bin-");
+			const tts = fakeExecutable(
+				bins,
+				"st",
+				// Supertonic stand-in: writes a 1 s silent 8 kHz wav to the path after -o.
+				`const fs=require("node:fs");const out=process.argv[process.argv.indexOf("-o")+1];
+const d=Buffer.alloc(2*8000);const h=Buffer.alloc(44);
+h.write("RIFF",0);h.writeUInt32LE(36+d.length,4);h.write("WAVEfmt ",8);h.writeUInt32LE(16,16);h.writeUInt16LE(1,20);
+h.writeUInt16LE(1,22);h.writeUInt32LE(8000,24);h.writeUInt32LE(16000,28);h.writeUInt16LE(2,32);h.writeUInt16LE(16,34);
+h.write("data",36);h.writeUInt32LE(d.length,40);fs.writeFileSync(out,Buffer.concat([h,d]));`,
+			);
+			const silent = fakeExecutable(
+				bins,
+				"ffprobe-silent",
+				`process.stdout.write(JSON.stringify({streams:[{codec_type:"video",width:1280,height:720,duration:"2.0"}],format:{duration:"2.0"}}));`,
+			);
+			const saved = [process.env.EIGHT_SUPERTONIC_BIN, process.env.EIGHT_KITTEN_PY];
+			process.env.EIGHT_SUPERTONIC_BIN = tts;
+			process.env.EIGHT_KITTEN_PY = "/nonexistent";
+			try {
+				const spec = { slides: [{ title: "Hi", seconds: 1, narration: "hello there" }] };
+				await expect(
+					renderVideoDeck({ spec, out: join(root, "v.mp4"), cwd: root, ffprobe: silent }),
+				).rejects.toThrow(/no audio stream although slides carry narration/);
+			} finally {
+				for (const [k, v] of [
+					["EIGHT_SUPERTONIC_BIN", saved[0]],
+					["EIGHT_KITTEN_PY", saved[1]],
+				] as const) {
+					if (v === undefined) Reflect.deleteProperty(process.env, k);
+					else process.env[k] = v;
+				}
+			}
+			expect(existsSync(join(root, "v.mp4"))).toBe(false);
+			expect(readdirSync(root).filter((f) => f.endsWith(".part"))).toEqual([]);
+			expect(readdirSync(join(root, ".tmp"))).toEqual([]);
+		},
+	);
 
 	test("a deferred session can load it: render_video_deck sits in the creative category (#4165)", async () => {
 		const { ToolRegistry } = await import("../../eight/tool-registry");
