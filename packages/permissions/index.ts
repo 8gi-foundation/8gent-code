@@ -13,6 +13,7 @@ import * as path from "node:path";
 import * as readline from "node:readline";
 import { activeShellKind } from "../core/shell";
 import { blockedReason, commandArgvs } from "./always-blocked";
+import { commandInFolder } from "./cd-prefix";
 import {
 	type GitState,
 	allowListIsLocalOnly,
@@ -70,6 +71,15 @@ export function channelDenialMessage(command: string): string | null {
 /** Run fn so a dangerous shell command inside it asks `approver` instead of being denied. */
 export function runWithChannelApprover<T>(approver: ChannelApprover, fn: () => T): T {
 	return _channelApprover.run({ approver }, fn);
+}
+
+/**
+ * The session's memory of an answer, per folder (#3199): a yes to `npm publish` in
+ * one folder is not a yes in another, or at the project root.
+ */
+function sessionKey(command: string, where?: string): string {
+	const key = command.toLowerCase().trim();
+	return where ? `${key}\u0000in ${where}` : key;
 }
 
 // ============================================
@@ -850,16 +860,17 @@ export class PermissionManager {
 	/**
 	 * Check if a command is pre-approved (safe or user-allowed)
 	 */
-	isAllowed(command: string, shell: ActiveShellKind = activeShellKind()): boolean {
+	isAllowed(command: string, shell: ActiveShellKind = activeShellKind(), where?: string): boolean {
 		const normalizedCmd = command.toLowerCase().trim();
+		const remembered = sessionKey(command, where);
 
 		// Check if explicitly denied
-		if (this.deniedCommands.has(normalizedCmd)) {
+		if (this.deniedCommands.has(remembered)) {
 			return false;
 		}
 
 		// Check if explicitly approved in session
-		if (this.approvedCommands.has(normalizedCmd)) {
+		if (this.approvedCommands.has(remembered)) {
 			return true;
 		}
 
@@ -930,7 +941,15 @@ export class PermissionManager {
 		action: string,
 		details: string,
 		command?: string,
-		opts: { defaultNo?: boolean } = {},
+		opts: {
+			defaultNo?: boolean;
+			/**
+			 * The project folder the command runs in, after a leading `cd <folder> &&`
+			 * (#3199). The card names it, and the session remembers the answer for that
+			 * folder only. Policy still judges `command` alone.
+			 */
+			where?: string;
+		} = {},
 	): Promise<boolean> {
 		// A refusal must never quote an earlier call's channel outcome.
 		const channel = _channelApprover.getStore();
@@ -990,7 +1009,7 @@ export class PermissionManager {
 		}
 
 		// Check if already approved or safe
-		if (command && this.isAllowed(command) && !this.isDangerous(command)) {
+		if (command && this.isAllowed(command, undefined, opts.where) && !this.isDangerous(command)) {
 			request.approved = true;
 			request.autoApproved = true;
 			this.log.requests.push(request);
@@ -1005,6 +1024,7 @@ export class PermissionManager {
 			details,
 			command,
 			opts.defaultNo || (command ? this.mustAskReason(command) !== null : false),
+			command ? commandInFolder(command, opts.where) : undefined,
 		);
 		request.approved = approved;
 		this.log.requests.push(request);
@@ -1021,12 +1041,12 @@ export class PermissionManager {
 		if (approved) {
 			this.log.approvedCount++;
 			if (command) {
-				this.approvedCommands.add(command.toLowerCase().trim());
+				this.approvedCommands.add(sessionKey(command, opts.where));
 			}
 		} else {
 			this.log.deniedCount++;
 			if (command) {
-				this.deniedCommands.add(command.toLowerCase().trim());
+				this.deniedCommands.add(sessionKey(command, opts.where));
 			}
 		}
 
@@ -1049,6 +1069,8 @@ export class PermissionManager {
 		details: string,
 		command?: string,
 		defaultNo = false,
+		/** What the person is shown: `command`, naming its folder after a cd prefix (#3199). */
+		shown: string | undefined = command,
 	): Promise<boolean> {
 		// Headless mode: no TTY available for interactive prompts
 		if (this.isHeadless()) {
@@ -1068,7 +1090,7 @@ export class PermissionManager {
 					return false;
 				}
 				if (scope) {
-					scope.last = await scope.approver({ action, details, command });
+					scope.last = await scope.approver({ action, details, command: shown ?? command });
 					return scope.last === "approved";
 				}
 				console.log(`[permissions] DENIED (headless, dangerous): ${command}`);
@@ -1083,7 +1105,7 @@ export class PermissionManager {
 		// inline approval card instead of dumping a readline prompt over the
 		// alternate-screen buffer. If no handler is registered (legacy chrome,
 		// non-TUI callers), fall back to the existing stdin flow.
-		const tuiResult = await requestTuiApproval({ action, details, command });
+		const tuiResult = await requestTuiApproval({ action, details, command: shown });
 		if (tuiResult !== null) {
 			return tuiResult;
 		}
@@ -1100,7 +1122,7 @@ export class PermissionManager {
 			prompt += `Details: ${details}\n`;
 			const mustAsk = command ? this.mustAskReason(command) : null;
 			if (command) {
-				prompt += `Command: \x1b[36m${command}\x1b[0m\n`;
+				prompt += `Command: \x1b[36m${shown}\x1b[0m\n`;
 				if (mustAsk) {
 					prompt += `\x1b[33m[ASKS EVERY TIME]\x1b[0m This command needs your approval because ${mustAsk}.\n`;
 				} else if (this.isDangerous(command)) {
@@ -1124,7 +1146,12 @@ export class PermissionManager {
 	 * Check permission for a command without prompting
 	 * Returns: "allowed" | "denied" | "ask"
 	 */
-	checkPermission(command: string, shell?: ActiveShellKind): "allowed" | "denied" | "ask" {
+	checkPermission(
+		command: string,
+		shell?: ActiveShellKind,
+		/** The project folder after a leading `cd <folder> &&` (#3199): session answers are per folder. */
+		where?: string,
+	): "allowed" | "denied" | "ask" {
 		// INFINITE MODE: Allow everything except always-blocked commands, and
 		// ask for the ask-every-time list (#3765).
 		// An always-blocked command anywhere on the line is denied in every mode (#3768).
@@ -1141,7 +1168,7 @@ export class PermissionManager {
 		const normalizedCmd = command.toLowerCase().trim();
 
 		// Check explicit deny list
-		if (this.deniedCommands.has(normalizedCmd)) {
+		if (this.deniedCommands.has(sessionKey(command, where))) {
 			return "denied";
 		}
 
@@ -1158,7 +1185,7 @@ export class PermissionManager {
 		}
 
 		// Check if allowed
-		if (this.isAllowed(command, shell)) {
+		if (this.isAllowed(command, shell, where)) {
 			return "allowed";
 		}
 
