@@ -6,12 +6,16 @@
  */
 
 export interface DaemonEvents {
-	"tool:start": { sessionId: string; tool: string; input: unknown };
+	"tool:start": { sessionId: string; tool: string; input: unknown; toolCallId?: string };
 	"tool:result": {
 		sessionId: string;
 		tool: string;
 		output: unknown;
 		durationMs: number;
+		/** Pairs the result with its start; the live anatomy page reads it (#4190). */
+		toolCallId?: string;
+		/** False when the tool failed, so a failure is shown as one (#4190). */
+		success?: boolean;
 	};
 	"agent:thinking": { sessionId: string };
 	"agent:stream": { sessionId: string; chunk: string; final?: boolean };

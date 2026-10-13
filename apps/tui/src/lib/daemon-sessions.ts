@@ -115,6 +115,32 @@ export function readDaemonToken(home = process.env.HOME || ""): string | null {
 	}
 }
 
+/** The live anatomy page (#4190) on the daemon this TUI talks to. Never carries the token. */
+export function liveViewUrl(env: Record<string, string | undefined> = process.env): string {
+	const u = new URL(env.EIGHT_DAEMON_URL ?? DEFAULT_DAEMON_URL);
+	u.protocol = u.protocol === "wss:" ? "https:" : "http:";
+	u.pathname = "/live";
+	u.search = "";
+	u.hash = "";
+	return u.toString();
+}
+
+/**
+ * Open the live page in 8gent Browser over its control channel, the path
+ * browser_open uses. The daemon token, when set, rides in the fragment, which
+ * no server log sees. Resolves null on success, else why it did not open.
+ */
+export async function openLiveView(url: string): Promise<string | null> {
+	const token = readDaemonToken();
+	try {
+		const { wsCall } = await import("../../../../packages/tools/eight-browser.js");
+		await wsCall("tab.open", { url: token ? `${url}#token=${encodeURIComponent(token)}` : url });
+		return null;
+	} catch (err) {
+		return err instanceof Error ? err.message : String(err);
+	}
+}
+
 export interface ConnectOptions {
 	url?: string;
 	token?: string | null;

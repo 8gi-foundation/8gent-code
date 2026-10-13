@@ -340,8 +340,8 @@ Server -> { "type": "event", "event": "session:end", "payload": { "sessionId": "
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `agent:thinking` | `{ sessionId }` | Agent started processing |
-| `tool:start` | `{ sessionId, tool, input }` | Tool invocation started |
-| `tool:result` | `{ sessionId, tool, output, durationMs }` | Tool completed |
+| `tool:start` | `{ sessionId, tool, input, toolCallId? }` | Tool invocation started |
+| `tool:result` | `{ sessionId, tool, output, durationMs, toolCallId?, success? }` | Tool completed. `toolCallId` pairs it with its start; `success` is false when the tool failed (#4190) |
 | `agent:stream` | `{ sessionId, chunk, final? }` | Text output. `final: true` on the complete response. |
 | `agent:error` | `{ sessionId, error }` | Error during processing |
 | `memory:saved` | `{ sessionId, key }` | Memory or evidence was saved |
@@ -357,6 +357,27 @@ Only one prompt can be in-flight per session. If the agent is already processing
 ```
 Server -> { "type": "event", "event": "agent:error", "payload": { "sessionId": "...", "error": "agent is busy processing another message" } }
 ```
+
+## Live Anatomy View (`/live`, #4190)
+
+A loopback page that draws the daemon's sessions as a Mermaid graph, rebuilt from bus events
+(`packages/daemon/live-anatomy.ts`). No model is in the path: `buildLiveGraph(events)` is pure.
+
+- `GET /live` serves the page; `GET /live/mermaid.js` serves Mermaid from the daemon's own
+  `node_modules` (no CDN). Both answer loopback peers only, whatever `DAEMON_HOSTNAME` binds to.
+- `ws://127.0.0.1:<port>/live/ws` is the feed, loopback-only. The page sends one frame,
+  `{ "type": "live:watch", "token"?: "...", "session"?: "<id>" }`; the token is required when
+  the daemon has one (the TUI passes it in the URL fragment). The daemon answers with
+  `{ "type": "live:graph", "mermaid": "...", "nodes": [...] }` now and on every event.
+- Only shareable channels (`tui`, `os`, `app`, `api`, `browser`) are drawn; telegram, table,
+  delegation, computer and classroom sessions never reach the page. Every payload string is
+  scrubbed by `secret-scanner` before it is stored. Raw events, approval request ids and chat ids
+  never leave the daemon.
+- Nodes: the session, files touched (grouped by folder), shell commands, other tools. State per
+  node from its latest call: running (green), paused (amber, waiting on an approval), failed
+  (red), done (grey).
+- The TUI opens it with Ctrl+F (in 8gent Browser when its control channel answers; the URL is
+  always printed).
 
 ## Cron Jobs
 

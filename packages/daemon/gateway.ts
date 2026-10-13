@@ -5,9 +5,10 @@
  * Routes messages to the AgentPool, broadcasts agent events to clients.
  */
 
-import { telegramBridgeHealth } from "./bridge-health";
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
+import { SessionManager, defaultSessionsDir } from "../eight/session-manager";
+import { handleHarnessRoute } from "../harness/http";
 import {
 	SPEAK_URL_RE,
 	TableStore,
@@ -15,13 +16,10 @@ import {
 	handleTableSpeakHttp,
 	installTablePolicies,
 } from "../table/index";
-import { handleHarnessRoute } from "../harness/http";
 import { type AgentPool, KNOWN_CHANNELS } from "./agent-pool";
-import {
-	CLASSROOM_CHANNEL,
-	classroomCreateRefusal,
-	installClassroomPolicies,
-} from "./classroom";
+import { telegramBridgeHealth } from "./bridge-health";
+import { channelApprovals, isBridgeSecret, parseTurn } from "./channel-approvals";
+import { CLASSROOM_CHANNEL, classroomCreateRefusal, installClassroomPolicies } from "./classroom";
 import { type CronJob, addJob, getJobs, removeJob } from "./cron";
 import type {
 	DispatchHub,
@@ -31,9 +29,17 @@ import type {
 	SurfaceRegistry,
 	TokenVerifier,
 } from "./dispatch";
-import { channelApprovals, isBridgeSecret, parseTurn } from "./channel-approvals";
 import { type EventName, bus } from "./events";
 import { type GoalManager, type GoalRpcOutbound, handleGoalRpc } from "./goal-rpc";
+import { handleStageHttp } from "./huddle-stage";
+import {
+	handleLiveHttp,
+	installLiveAnatomy,
+	liveClose,
+	liveMessage,
+	liveOpen,
+} from "./live-anatomy";
+import { assertSafeBind, guardRequest, resolveBindHost } from "./origin-guard";
 import {
 	type ComputerWS,
 	handleComputerClose,
@@ -53,16 +59,13 @@ import {
 	handleStoreMessage,
 	handleStoreOpen,
 } from "./routes/store/index";
-import { handleStageHttp } from "./huddle-stage";
-import { assertSafeBind, guardRequest, resolveBindHost } from "./origin-guard";
-import { SessionManager, defaultSessionsDir } from "../eight/session-manager";
 import {
+	ResumeSecrets,
+	SHAREABLE_CHANNELS,
 	type SharedPool,
 	type SharedSessionInbound,
 	type SharedSessionOutbound,
 	type SharedStore,
-	ResumeSecrets,
-	SHAREABLE_CHANNELS,
 	handleResume,
 	handleSharedSession,
 	isSharedSessionType,
@@ -417,7 +420,10 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			}
 			// An unknown channel string is refused, never defaulted into a wider scope.
 			if (msg.channel && !(KNOWN_CHANNELS as readonly string[]).includes(msg.channel)) {
-				send(ws, { type: "error", message: `unknown channel: ${String(msg.channel).slice(0, 40)}` });
+				send(ws, {
+					type: "error",
+					message: `unknown channel: ${String(msg.channel).slice(0, 40)}`,
+				});
 				break;
 			}
 			const sessionId = generateSessionId();
@@ -730,6 +736,8 @@ async function handleAuditAccess(req: Request, config: GatewayConfig): Promise<R
 
 export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve> {
 	subscribeToBus();
+	// The live anatomy page's event log (#4190).
+	installLiveAnatomy(bus, config.authToken);
 	// An attached session is never evicted from under its clients (#3929).
 	config.pool.setInUse?.((id) => clientsOn(id) > 0);
 
@@ -811,7 +819,37 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 				return new Response("WebSocket upgrade required", { status: 426 });
 			}
 
+			// The live anatomy page (#4190) answers loopback peers only, whatever
+			// the daemon binds to (8SO, message 5844). /live/ws asks for the daemon
+			// token in its first frame when one is set.
+			const livePeer = isLoopbackAddress(
+				(
+					server as unknown as {
+						requestIP?: (r: Request) => { address?: string } | null;
+					}
+				).requestIP?.(req)?.address ?? "",
+			);
+			if (url.pathname === "/live/ws") {
+				if (!livePeer) {
+					return new Response("forbidden: the live view is loopback-only", { status: 403 });
+				}
+				if (
+					(server.upgrade as (r: Request, opts?: any) => boolean)(req, {
+						data: { route: "live" },
+					})
+				) {
+					return undefined;
+				}
+				return new Response("WebSocket upgrade required", { status: 426 });
+			}
+
 			if (server.upgrade(req)) return undefined;
+
+			// GET /live and its pinned Mermaid copy (#4190).
+			{
+				const live = handleLiveHttp(req, url, livePeer);
+				if (live) return live;
+			}
 
 			// The huddle STAGE and its assets (spec section 8): the loopback page a
 			// Flow desktop pane points a WKWebView at once and never navigates
@@ -888,6 +926,8 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 			open(ws) {
 				const id = `c_${nextClientId++}`;
 				const data = (ws as unknown as { data?: { route?: string } }).data;
+				// The live page is a viewer, never a session client (#4190).
+				if (data?.route === "live") return liveOpen(ws);
 				const isComputer = data?.route === "computer";
 				const isDispatch = data?.route === "dispatch";
 				const isStore = data?.route === "store";
@@ -924,6 +964,9 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 			message(ws, raw) {
 				const state = clients.get(ws);
 				const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+				if ((ws as unknown as { data?: { route?: string } }).data?.route === "live") {
+					return liveMessage(ws, text);
+				}
 				if (state?.isComputerRoute) {
 					handleComputerMessage(ws as unknown as ComputerWS, config.pool, state, text);
 					return;
@@ -945,6 +988,9 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 				handleMessage(ws, config, text);
 			},
 			close(ws) {
+				if ((ws as unknown as { data?: { route?: string } }).data?.route === "live") {
+					return liveClose(ws);
+				}
 				const state = clients.get(ws);
 				if (state) {
 					console.log(`[gateway] client ${state.id} disconnected`);
