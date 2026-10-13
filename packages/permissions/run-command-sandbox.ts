@@ -126,9 +126,13 @@ export interface SecurityEnv {
 }
 
 /** The .env files Bun (cwd, by NODE_ENV) or the TUI loader could have read. */
-export function dotenvCandidates(cwd: string = process.cwd(), home: string = os.homedir()): string[] {
+export function dotenvCandidates(
+	cwd: string = process.cwd(),
+	home: string = os.homedir(),
+): string[] {
 	const names = [".env", ".env.local"];
-	for (const mode of ["development", "production", "test"]) names.push(`.env.${mode}`, `.env.${mode}.local`);
+	for (const mode of ["development", "production", "test"])
+		names.push(`.env.${mode}`, `.env.${mode}.local`);
 	return [
 		...names.map((n) => path.join(cwd, n)),
 		path.resolve(import.meta.dirname, "../../.env"),
@@ -149,7 +153,8 @@ export function dotenvDeclaredKeys(files: string[]): Set<string> {
 		} catch {
 			continue;
 		}
-		for (const m of text.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*[=:]/gm)) keys.add(m[1] as string);
+		for (const m of text.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*[=:]/gm))
+			keys.add(m[1] as string);
 	}
 	return keys;
 }
@@ -211,7 +216,10 @@ export function protectedDataRoots(): string[] {
 	const home = fake ?? os.homedir();
 	const roots = [
 		path.join(home, ".8gent"),
-		path.join(resolveHome({ EIGHT_HOME: v.EIGHT_HOME, HOME: fake ?? v.HOME, USERPROFILE: v.USERPROFILE }), ".8gent"),
+		path.join(
+			resolveHome({ EIGHT_HOME: v.EIGHT_HOME, HOME: fake ?? v.HOME, USERPROFILE: v.USERPROFILE }),
+			".8gent",
+		),
 	];
 	// Path keys only ever ADD roots: a value from .env (ignored for trust) or set
 	// after the snapshot may still be where the harness reads from, so it is
@@ -220,7 +228,8 @@ export function protectedDataRoots(): string[] {
 		if (dataDir && path.isAbsolute(dataDir)) roots.push(dataDir);
 	}
 	const liveEightHome = process.env.EIGHT_HOME;
-	if (liveEightHome && path.isAbsolute(liveEightHome)) roots.push(path.join(liveEightHome, ".8gent"));
+	if (liveEightHome && path.isAbsolute(liveEightHome))
+		roots.push(path.join(liveEightHome, ".8gent"));
 	return [...new Set(roots.filter((r) => path.isAbsolute(r)).map((r) => path.normalize(r)))];
 }
 
@@ -312,7 +321,11 @@ export function buildRunCommandProfile(p: ProtectedPaths = protectedRunCommandPa
 	});
 	const dirFilters = p.dirs.flatMap((d) => {
 		const re = caseInsensitivePathRegex(d, true);
-		return [`(literal ${sbplString(d)})`, `(subpath ${sbplString(d)})`, ...(re ? [`(regex ${re})`] : [])];
+		return [
+			`(literal ${sbplString(d)})`,
+			`(subpath ${sbplString(d)})`,
+			...(re ? [`(regex ${re})`] : []),
+		];
 	});
 	const rootFilters = p.roots.flatMap((r) => {
 		const re = caseInsensitivePathRegex(r, false);
@@ -320,13 +333,20 @@ export function buildRunCommandProfile(p: ProtectedPaths = protectedRunCommandPa
 	});
 	const readDenyFilters = p.dirs.filter(isReadDenied).flatMap((d) => {
 		const re = caseInsensitivePathRegex(d, true);
-		return [`(literal ${sbplString(d)})`, `(subpath ${sbplString(d)})`, ...(re ? [`(regex ${re})`] : [])];
+		return [
+			`(literal ${sbplString(d)})`,
+			`(subpath ${sbplString(d)})`,
+			...(re ? [`(regex ${re})`] : []),
+		];
 	});
 	return `${[
 		"(version 1)",
 		"(allow default)",
 		...(readDenyFilters.length
-			? ["; signing keys: no reads either (#4132)", `(deny file-read* ${readDenyFilters.join(" ")})`]
+			? [
+					"; signing keys: no reads either (#4132)",
+					`(deny file-read* ${readDenyFilters.join(" ")})`,
+				]
 			: []),
 		"; 8gent startup code, secrets and records: no writes from run_command (#4009, #3612)",
 		`(deny file-write* file-link ${[...fileFilters, ...dirFilters].join(" ")})`,
@@ -415,11 +435,15 @@ export function runCommandSandboxStatus(): RunCommandSandbox {
 }
 
 function sandboxStatusInner(): RunCommandSandbox | { applied: false; reason: string } {
-	if (securityEnv.values.EIGHT_SEATBELT === "0") return { applied: false, reason: "EIGHT_SEATBELT=0" };
+	if (securityEnv.values.EIGHT_SEATBELT === "0")
+		return { applied: false, reason: "EIGHT_SEATBELT=0" };
 	if (process.platform === "darwin") {
 		if (!fs.existsSync(SANDBOX_EXEC)) return { applied: false, reason: "sandbox-exec missing" };
 		if (!canApplySeatbelt())
-			return { applied: false, reason: "host already sandboxes this process (sandbox-exec cannot nest)" };
+			return {
+				applied: false,
+				reason: "host already sandboxes this process (sandbox-exec cannot nest)",
+			};
 		return { applied: true, mechanism: "seatbelt" };
 	}
 	if (process.platform === "linux") {
@@ -448,16 +472,22 @@ export function onRunCommandUnsandboxed(listener: UnsandboxedListener): () => vo
 
 function auditPath(): string {
 	const roots = protectedDataRoots();
-	const root = securityEnv.values.EIGHT_DATA_DIR && path.isAbsolute(securityEnv.values.EIGHT_DATA_DIR)
-		? securityEnv.values.EIGHT_DATA_DIR
-		: (roots[0] as string);
+	const root =
+		securityEnv.values.EIGHT_DATA_DIR && path.isAbsolute(securityEnv.values.EIGHT_DATA_DIR)
+			? securityEnv.values.EIGHT_DATA_DIR
+			: (roots[0] as string);
 	return path.join(root, "audit", "run-command-sandbox.jsonl");
 }
 
-function reportUnsandboxed(status: Extract<RunCommandSandbox, { applied: false }>, command: string): void {
+function reportUnsandboxed(
+	status: Extract<RunCommandSandbox, { applied: false }>,
+	command: string,
+): void {
 	if (!warned) {
 		warned = true;
-		const ignored = securityEnv.ignored.length ? ` (ignored from .env: ${securityEnv.ignored.join(", ")})` : "";
+		const ignored = securityEnv.ignored.length
+			? ` (ignored from .env: ${securityEnv.ignored.join(", ")})`
+			: "";
 		process.stderr.write(
 			`[8gent] WARNING: run_command is NOT OS-sandboxed: ${status.reason}${ignored}. ` +
 				"Writes to ~/.8gent startup code, secrets and records are stopped by text checks only. " +
@@ -560,6 +590,7 @@ export function wrapRunCommandArgv(bin: string, args: readonly string[]): string
 		reportUnsandboxed(status, [bin, ...args].join(" "));
 		return [bin, ...args];
 	}
-	if (status.mechanism === "seatbelt") return [SANDBOX_EXEC, "-p", buildRunCommandProfile(), bin, ...args];
+	if (status.mechanism === "seatbelt")
+		return [SANDBOX_EXEC, "-p", buildRunCommandProfile(), bin, ...args];
 	return [findBwrap() as string, ...buildBwrapArgs(), bin, ...args];
 }

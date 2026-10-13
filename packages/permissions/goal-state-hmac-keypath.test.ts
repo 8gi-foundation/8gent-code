@@ -8,7 +8,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { getKeyPath, loadOrCreateKey, sign, verify } from "./goal-state-hmac";
 import { validatePath } from "./path-guard";
-import { buildRunCommandProfile, protectedRunCommandPaths, refreshSecurityEnvForTests } from "./run-command-sandbox";
+import {
+	buildRunCommandProfile,
+	protectedRunCommandPaths,
+	refreshSecurityEnvForTests,
+} from "./run-command-sandbox";
 
 let root: string;
 let savedDataDir: string | undefined;
@@ -38,6 +42,11 @@ afterEach(() => {
 	refreshSecurityEnvForTests();
 	fs.rmSync(root, { recursive: true, force: true });
 });
+
+/** A path as the profile spells it: sbplString doubles each backslash (Windows paths). */
+function sbpl(p: string): string {
+	return p.replaceAll("\\", "\\\\");
+}
 
 function useDataDir(dir: string): void {
 	process.env.EIGHT_DATA_DIR = dir;
@@ -141,6 +150,6 @@ describe("goal-state-hmac key path (#4132)", () => {
 		const p = protectedRunCommandPaths();
 		const keysDir = path.join(data, "keys");
 		expect(p.dirs).toContain(keysDir);
-		expect(buildRunCommandProfile(p)).toContain(`(subpath "${keysDir}")`);
+		expect(buildRunCommandProfile(p)).toContain(`(subpath "${sbpl(keysDir)}")`);
 	});
 });

@@ -71,7 +71,8 @@ function assertTrustedKeyStat(st: fs.Stats, keyPath: string): void {
 	if (process.platform === "win32") return;
 	if (typeof process.getuid === "function" && st.uid !== process.getuid())
 		refuse(`it is owned by uid ${st.uid}, not ${process.getuid()}`);
-	if ((st.mode & 0o077) !== 0) refuse(`its mode ${(st.mode & 0o777).toString(8)} allows group or other access`);
+	if ((st.mode & 0o077) !== 0)
+		refuse(`its mode ${(st.mode & 0o777).toString(8)} allows group or other access`);
 }
 
 function readExistingKey(keyPath: string): Buffer {

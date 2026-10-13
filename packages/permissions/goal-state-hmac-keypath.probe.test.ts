@@ -55,6 +55,11 @@ afterEach(() => {
 	fs.rmSync(root, { recursive: true, force: true });
 });
 
+/** A path as the profile spells it: sbplString doubles each backslash (Windows paths). */
+function sbpl(p: string): string {
+	return p.replaceAll("\\", "\\\\");
+}
+
 function useDataDir(dir: string): void {
 	process.env.EIGHT_DATA_DIR = dir;
 	refreshSecurityEnvForTests();
@@ -69,24 +74,21 @@ describe("8SO probe: key confidentiality and integrity (#4132)", () => {
 		const profile = buildRunCommandProfile(protectedRunCommandPaths());
 		const keysDir = path.join(data, "keys");
 		const readDeny = profile.split("\n").filter((l) => l.startsWith("(deny file-read"));
-		expect(readDeny.some((l) => l.includes(`(subpath "${keysDir}")`))).toBe(true);
+		expect(readDeny.some((l) => l.includes(`(subpath "${sbpl(keysDir)}")`))).toBe(true);
 	});
 
 	// P1b. Same, proven by the kernel through the real run_command wrapper: seatbelt on
 	// macOS, bwrap (tmpfs over keys/) on Linux. Same live gate as P7.
-	test.skipIf(!liveSandbox)(
-		"P1b sandboxed `cat` of the key is refused by the kernel",
-		() => {
-			const data = path.join(root, "data");
-			useDataDir(data);
-			loadOrCreateKey();
-			const keyPath = getKeyPath();
-			const wrapped = wrapRunCommand(`cat ${JSON.stringify(keyPath)}`);
-			const r = spawnSync("/bin/sh", ["-c", wrapped]);
-			expect(r.status).not.toBe(0);
-			expect(r.stdout.length).toBe(0);
-		},
-	);
+	test.skipIf(!liveSandbox)("P1b sandboxed `cat` of the key is refused by the kernel", () => {
+		const data = path.join(root, "data");
+		useDataDir(data);
+		loadOrCreateKey();
+		const keyPath = getKeyPath();
+		const wrapped = wrapRunCommand(`cat ${JSON.stringify(keyPath)}`);
+		const r = spawnSync("/bin/sh", ["-c", wrapped]);
+		expect(r.status).not.toBe(0);
+		expect(r.stdout.length).toBe(0);
+	});
 
 	// P2. The file tools' path guard has no rule for keys/. With the working
 	// directory at HOME (the case getKeyPath exempts from its in-project check),
@@ -139,7 +141,9 @@ describe("8SO probe: key confidentiality and integrity (#4132)", () => {
 			useDataDir(data);
 			const key = loadOrCreateKey();
 			const keysDir = path.join(data, "keys");
-			const wrapped = wrapRunCommand(`mv ${JSON.stringify(keysDir)} ${JSON.stringify(`${keysDir}.bak`)}`);
+			const wrapped = wrapRunCommand(
+				`mv ${JSON.stringify(keysDir)} ${JSON.stringify(`${keysDir}.bak`)}`,
+			);
 			const r = spawnSync("/bin/sh", ["-c", wrapped], { encoding: "utf8" });
 			expect(r.status).not.toBe(0);
 			expect(fs.readFileSync(path.join(keysDir, "state-hmac.key")).equals(key)).toBe(true);
@@ -155,9 +159,11 @@ describe("8SO probe: key confidentiality and integrity (#4132)", () => {
 		useDataDir(data);
 		const keysDir = path.join(data, "keys");
 		const profile = buildRunCommandProfile(protectedRunCommandPaths());
-		const writeDeny = profile.split("\n").filter((l) => l.startsWith("(deny file-write* file-link"));
-		expect(writeDeny.some((l) => l.includes(`(subpath "${keysDir}")`))).toBe(true);
-		expect(writeDeny.some((l) => l.includes(`(literal "${keysDir}")`))).toBe(true);
+		const writeDeny = profile
+			.split("\n")
+			.filter((l) => l.startsWith("(deny file-write* file-link"));
+		expect(writeDeny.some((l) => l.includes(`(subpath "${sbpl(keysDir)}")`))).toBe(true);
+		expect(writeDeny.some((l) => l.includes(`(literal "${sbpl(keysDir)}")`))).toBe(true);
 	});
 
 	// Holds: P4. A key under the data dir with a case-varied spelling is covered
