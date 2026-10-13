@@ -129,7 +129,8 @@ async function whenGate(job: CronJob): Promise<"run" | "skip"> {
 		killProcessTree(pid, "SIGKILL");
 	}
 	const exitCode = typeof result === "object" ? result.code : null;
-	const failed = typeof result !== "object" || result.signal !== null || exitCode === 126 || exitCode === 127;
+	const failed =
+		typeof result !== "object" || result.signal !== null || exitCode === 126 || exitCode === 127;
 	const outcome = exitCode === 0 ? "run" : failed ? "failed-open" : "skip";
 	bus.emit("tool:result", {
 		sessionId: "cron",
@@ -138,7 +139,12 @@ async function whenGate(job: CronJob): Promise<"run" | "skip"> {
 		durationMs: Date.now() - startMs,
 	});
 	if (outcome === "failed-open") {
-		const why = typeof result === "string" ? result : result.signal ? `signal ${result.signal}` : `exit ${exitCode}`;
+		const why =
+			typeof result === "string"
+				? result
+				: result.signal
+					? `signal ${result.signal}`
+					: `exit ${exitCode}`;
 		console.log(`[cron] when: ${job.name} check failed (${why}), running anyway`);
 	}
 	return outcome === "skip" ? "skip" : "run";

@@ -17,12 +17,16 @@ type Bus = typeof import("../events")["bus"];
 
 const realHome = process.env.HOME;
 const home = mkdtempSync(join(tmpdir(), "cron-when-"));
-const cronPath = join(home, ".8gent", "cron.json");
+const dataDir = join(home, ".8gent");
+const cronPath = join(dataDir, "cron.json");
+const realDataDir = process.env.EIGHT_DATA_DIR;
 let cron: Cron;
 let bus: Bus;
 
 beforeAll(async () => {
 	process.env.HOME = home;
+	// os.homedir() ignores a runtime HOME change in Bun, so pin the data dir itself (#4111).
+	process.env.EIGHT_DATA_DIR = dataDir;
 	mkdirSync(join(home, ".8gent"), { recursive: true });
 	// Query suffix = a fresh module instance, so CRON_PATH (captured at import)
 	// sees this HOME even when another test file imported cron.ts first.
@@ -32,6 +36,8 @@ beforeAll(async () => {
 
 afterAll(() => {
 	process.env.HOME = realHome;
+	if (realDataDir === undefined) delete process.env.EIGHT_DATA_DIR;
+	else process.env.EIGHT_DATA_DIR = realDataDir;
 	rmSync(home, { recursive: true, force: true });
 });
 
@@ -147,17 +153,13 @@ describe("cron when gate", () => {
 		expect(results).toEqual([queued]);
 	});
 
-	it(
-		"flag on, check times out: fails open and queues",
-		async () => {
-			process.env.EIGHT_CRON_WHEN = "1";
-			const t0 = Date.now();
-			const { results } = await run([job({ when: "sleep 30" })]);
-			expect(results).toEqual([queued]);
-			expect(Date.now() - t0).toBeLessThan(10_000);
-		},
-		15_000,
-	);
+	it("flag on, check times out: fails open and queues", async () => {
+		process.env.EIGHT_CRON_WHEN = "1";
+		const t0 = Date.now();
+		const { results } = await run([job({ when: "sleep 30" })]);
+		expect(results).toEqual([queued]);
+		expect(Date.now() - t0).toBeLessThan(10_000);
+	}, 15_000);
 
 	it("flag on, maxSkips reached: runs anyway and resets the counter", async () => {
 		process.env.EIGHT_CRON_WHEN = "1";
@@ -194,25 +196,19 @@ describe("cron when gate", () => {
 		await expectNoSurvivor((f) => `sleep 47 & echo $! > ${f}; exit 1`, false);
 	});
 
-	it(
-		"flag on: a compound check that times out leaves no live child",
-		async () => {
-			await expectNoSurvivor((f) => `sleep 47 & echo $! > ${f}; wait`, true);
-		},
-		15_000,
-	);
+	it("flag on: a compound check that times out leaves no live child", async () => {
+		await expectNoSurvivor((f) => `sleep 47 & echo $! > ${f}; wait`, true);
+	}, 15_000);
 
-	it(
-		"flag on: a TERM-trapping check that times out leaves no live child",
-		async () => {
-			await expectNoSurvivor((f) => `trap '' TERM; sleep 47 & echo $! > ${f}; wait`, true);
-		},
-		15_000,
-	);
+	it("flag on: a TERM-trapping check that times out leaves no live child", async () => {
+		await expectNoSurvivor((f) => `trap '' TERM; sleep 47 & echo $! > ${f}; wait`, true);
+	}, 15_000);
 
 	it("flag on: shell jobs ignore `when` and run as today", async () => {
 		process.env.EIGHT_CRON_WHEN = "1";
-		const { results, saved } = await run([job({ type: "shell", payload: "echo hi", when: "exit 1" })]);
+		const { results, saved } = await run([
+			job({ type: "shell", payload: "echo hi", when: "exit 1" }),
+		]);
 		expect(results).toEqual(["hi\n"]);
 		expect(saved[0].skips).toBeUndefined();
 	});
