@@ -147,7 +147,9 @@ export function prepareSafeCopy(htmlPath: string, dir: string): string {
 	// before <html> is parsed into the implicit head. A doctype stays first. Exactly one
 	// UTF-8 BOM leads, so Chrome decodes as UTF-8 and ignores any page <meta charset>
 	// (a second U+FEFF would be text, opening the body before the CSP meta).
-	const lead = /^\s*<!doctype[^>]*>/i.exec(html)?.[0] ?? "";
+	// Only the whitespace the HTML parser skips: JS \s also takes NBSP, U+3000, U+2028 and
+	// U+FEFF, which the parser treats as text, opening the body before the CSP meta.
+	const lead = /^[\t\n\f\r ]*<!doctype[^>]*>/i.exec(html)?.[0] ?? "";
 	const withMeta = `\uFEFF${lead}${meta}${html.slice(lead.length)}`;
 	const out = path.join(dir, "page.html");
 	fs.writeFileSync(out, withMeta);

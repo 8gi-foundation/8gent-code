@@ -15,6 +15,7 @@ import type { Band, LayoutMeasure } from "../../eight/layout-measure";
 import * as http from "node:http";
 import * as os from "node:os";
 import { pathToFileURL } from "node:url";
+import { parse as parseHtml } from "parse5";
 import { MAX_HTML_BYTES, RENDER_CSP, chromeArgs, compareLayout, describeDiff, findChrome, noScreenshotMessage, pairBands, prepareSafeCopy, renderHtml, renderSafe } from "../layout-compare";
 import { measureLayout } from "../../eight/layout-measure";
 
@@ -380,6 +381,27 @@ describe("prepareSafeCopy (#4081)", () => {
 		}
 	});
 
+	test("the CSP meta is parsed into <head> whatever non-HTML whitespace leads the doctype (#4124)", () => {
+		type Node = { nodeName: string; attrs?: { name: string; value: string }[]; childNodes?: Node[] };
+		const cspIn = (n: Node | undefined): boolean =>
+			!!n?.childNodes?.some((c) => c.nodeName === "meta" && c.attrs?.some((a) => a.value === "Content-Security-Policy"));
+		for (const shape of [
+			"\u00A0<!doctype html><script>1</script><p>x</p>",
+			"\u3000<!doctype html><script>1</script><p>x</p>",
+			" \uFEFF<!doctype html><script>1</script><p>x</p>",
+			"<!doctype html><script>1</script><p>x</p>",
+			"\u00A0<script>1</script><p>x</p>",
+		]) {
+			const p = page(shape);
+			const doc = parseHtml(fs.readFileSync(prepareSafeCopy(p.file, p.out), "utf8").replace(/^\uFEFF/, "")) as unknown as Node;
+			const htmlEl = doc.childNodes?.find((c) => c.nodeName === "html");
+			const head = htmlEl?.childNodes?.find((c) => c.nodeName === "head");
+			const body = htmlEl?.childNodes?.find((c) => c.nodeName === "body");
+			expect(cspIn(head)).toBe(true);
+			expect(cspIn(body)).toBe(false);
+		}
+	});
+
 	test("a page over the size cap is refused", () => {
 		const p = page("x".repeat(MAX_HTML_BYTES + 1));
 		expect(() => prepareSafeCopy(p.file, p.out)).toThrow(/limit/);
@@ -506,6 +528,7 @@ describe.skipIf(!chrome)("real Chrome runs no page script: the CSP alone stops i
 		"meta refresh with a quoted > to an unsanitised sibling": (sibling) =>
 			`<html><head><meta content="0;url=${sibling}?>" http-equiv="refresh"></head><body style="margin:0">x</body></html>`,
 		// Written as UTF-8 bytes; in ISO-2022-JP "ESC ( B" prints nothing, so Chrome reads http-equiv.
+		"NBSP before the doctype, then script": () => `\u00A0<!doctype html><script>${PAINT}</script><html><body style="margin:0"></body></html>`,
 		"iso-2022-jp charset with an escape-split http-equiv refresh to an unsanitised sibling": (sibling) =>
 			`<html><head><meta charset="iso-2022-jp"><meta http\x1b(B-equiv="refresh" content="0;url=${sibling}"></head><body style="margin:0">x</body></html>`,
 	};
