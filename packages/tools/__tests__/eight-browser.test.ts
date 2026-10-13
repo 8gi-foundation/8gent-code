@@ -1911,8 +1911,9 @@ describeNotWin("a launch that cannot run the profile never stays running (#4103)
 	});
 
 	test("timeout: a child that ignores SIGTERM is killed, with its process group", async () => {
-		// The shell and its sleep both ignore TERM (inherited), as a wedged browser and a helper would.
-		const pids = sleeper("trap '' TERM; while :; do sleep 0.1; done");
+		// The shell and its sleeps all ignore TERM (inherited), as a wedged browser and a helper would.
+		// The background sleep outlives a kill of the leader alone, so only a group SIGKILL ends it.
+		const pids = sleeper("trap '' TERM; sleep 60 & while :; do sleep 0.1; done");
 		_setLaunchWaitForTest(300);
 		_setProfileHomeForTest(mkdtempSync(join(tmpdir(), "8b-launch-home-")));
 		const env = { EIGHT_BROWSER_PROFILE: "eightgent", EIGHT_BROWSER_APP: "/fake/8gent Browser" };
@@ -1920,13 +1921,21 @@ describeNotWin("a launch that cannot run the profile never stays running (#4103)
 			/published no port within 0\.3 s; killed the browser it started \(SIGTERM was ignored\)/,
 		);
 		expect(alive(pids[0])).toBe(false);
-		let groupGone = false;
-		try {
-			process.kill(-pids[0], 0);
-		} catch {
-			groupGone = true;
-		}
-		expect(groupGone).toBe(true);
+		// The group's other member (the loop's sleep) is orphaned when the leader dies, and is only gone
+		// once its new parent reaps it: init, or tini under the Linux gate's `docker run --init`. Until
+		// then kill(-pgid, 0) still finds it as a zombie. The CI log for #4104 showed exactly that
+		// race, so wait (bounded) for the reap, and still fail if anything in the group survives.
+		const groupAlive = () => {
+			try {
+				process.kill(-pids[0], 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+		const until = Date.now() + 3_000;
+		while (groupAlive() && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
+		expect(groupAlive()).toBe(false);
 	}, 10_000);
 
 	test("a group already gone (ESRCH) never gets a bare-pid signal, which could hit a reused pid (8SO)", async () => {
