@@ -284,6 +284,22 @@ describe("third review: an empty or unrun loop, and a cd that lands on -", () =>
 		["a background loop runs in a subshell", "for f in a; do :; done & cat $f/etc/passwd"],
 		["a redirect on done expands first", "for f in a; do :; done > $f/etc/x"],
 		["a select value can be empty", "select f in a; do cat $f/etc/passwd; break; done"],
+		// 8SO review: a loop in `then` never ran for the `else` or `elif` branch.
+		[
+			"a loop in then, read in else",
+			"if false; then for f in a; do :; done; else cat $f/etc/passwd; fi",
+		],
+		[
+			"a loop in then, read in elif",
+			"if false; then for f in a; do :; done; elif true; then cat $f/etc/passwd; fi",
+		],
+		// 8SO review: under nullglob a glob list can be empty, so the loop may not run.
+		[
+			"a glob loop under nullglob",
+			"shopt -s nullglob; for f in *.none; do :; done; cat $f/etc/passwd",
+		],
+		["a glob loop, read after it", "for f in *.png; do :; done; cat $f/etc/passwd"],
+		["a bracket glob loop, read after it", "for f in [ab]; do :; done; cat $f/etc/passwd"],
 	];
 	for (const [label, command] of refused) {
 		test(`refuses ${label}: ${JSON.stringify(command)}`, () => {
@@ -305,6 +321,8 @@ describe("third review: an empty or unrun loop, and a cd that lands on -", () =>
 		["for f in a; do cat $f/x; done | cat", true],
 		["for f in a\ndo\n:\ndone\ncat $f/x", true],
 		["if true; then for f in a; do :; done; cat $f/x; fi", true],
+		["if false; then :; else for f in a; do :; done; cat $f/x; fi", true],
+		["for f in *.png; do :; done; for f in a; do cat $f/x; done", true],
 	];
 	for (const [command, ok] of kept) {
 		test(`${ok ? "allows" : "denies"} ${JSON.stringify(command)}`, () => {

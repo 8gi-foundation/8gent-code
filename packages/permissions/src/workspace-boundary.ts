@@ -611,6 +611,8 @@ function planInlineAssignments(command: string, segments: SequencedSegment[]): I
 				depth++;
 				frames.push({ settled: new Set() });
 			}
+			// `else` and `elif` start a branch the loops in `then` never ran for.
+			if (keyword === "else" || keyword === "elif") frames[frames.length - 1].settled.clear();
 		}
 		// A redirect on `done > $f/x` expands before the loop runs, so it is read unbound.
 		for (const [, name] of segment.text.matchAll(REFERENCE)) {
@@ -651,7 +653,13 @@ function planInlineAssignments(command: string, segments: SequencedSegment[]): I
 			depth++;
 			// Only `for` binds a listed value: `select` sets its name to "" on input that picks nothing.
 			const loop = head === "for" ? raw[lead + 1] : undefined;
-			frames.push({ loop, certain: LIST_START.has(segment.before), settled: new Set() });
+			// A glob may match nothing (`nullglob`, also set through BASHOPTS), so the loop may not run.
+			const globbed = raw.slice(lead + 3).some((w) => /[*?[]/.test(w));
+			frames.push({
+				loop,
+				certain: LIST_START.has(segment.before) && !globbed,
+				settled: new Set(),
+			});
 		}
 	});
 
