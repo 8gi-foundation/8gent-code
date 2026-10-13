@@ -3,7 +3,15 @@
  * only with the helper installed, executed only through the approval gate.
  */
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _snapshotAllowedChats } from "../ai/post-message";
@@ -272,6 +280,38 @@ describe.skipIf(process.platform === "win32")("post_message pre-send check (#419
 			draft: BAD,
 		});
 		expect(exec.takePresendStop()).toBeNull();
+	});
+
+	test("a named source is read inside the workspace; a symlink to a file outside it is refused", async () => {
+		const SRC_TASK = "Post the summary. Use only numbers from facts.txt.";
+		const outside = mkdtempSync(join(tmpdir(), "presend-outside-"));
+		writeFileSync(join(outside, "secret.txt"), "apples: 5");
+		const ws = mkdtempSync(join(tmpdir(), "presend-ws-"));
+		try {
+			// Inside: the file is read, so an invented number is caught.
+			writeFileSync(join(ws, "facts.txt"), "apples: 5");
+			process.env.EIGHT_TG_BIN_DIR = bins;
+			registerTuiApprovalHandler(async () => "approve");
+			const inside = new ToolExecutor(ws, "pm-presend-src");
+			inside.beginTurn(SRC_TASK);
+			expect(
+				await inside.execute("post_message", { chat: "-1004417730052", text: "7 apples" }),
+			).toContain("not in facts.txt: 7");
+			// A link to a file outside the workspace is never read: the rule stays unchecked.
+			rmSync(join(ws, "facts.txt"));
+			symlinkSync(join(outside, "secret.txt"), join(ws, "facts.txt"));
+			const linked = new ToolExecutor(ws, "pm-presend-link");
+			linked.beginTurn(SRC_TASK);
+			const out = await linked.execute("post_message", {
+				chat: "-1004417730052",
+				text: "7 apples",
+			});
+			expect(out).not.toContain("pre-send check");
+			expect(out).toContain("message_id 777");
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+			rmSync(ws, { recursive: true, force: true });
+		}
 	});
 
 	test("a new turn resets the redraft budget; a task with no rules checks nothing", async () => {

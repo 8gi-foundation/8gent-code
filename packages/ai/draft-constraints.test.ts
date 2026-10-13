@@ -132,6 +132,19 @@ describe("constraint types", () => {
 		expect(checkDraftConstraints("do not use any emojis", "done").ok).toBe(true);
 	});
 
+	test.each([
+		"never use an em dash",
+		"Never use an em-dash.",
+		"never use a single em dash",
+		"avoid em dashes",
+		"Avoid em dash.",
+		"do not use any em dashes",
+	])("em dash rule phrasing: %s", (task) => {
+		expect(extractConstraints(task).map((c) => c.type)).toEqual(["no_em_dash"]);
+		expect(checkDraftConstraints(task, "a \u2014 b").ok).toBe(false);
+		expect(checkDraftConstraints(task, "a - b").ok).toBe(true);
+	});
+
 	test("no em dash", () => {
 		expect(checkDraftConstraints("no em dashes", "a \u2014 b").ok).toBe(false);
 		expect(checkDraftConstraints("without any em-dash", "a - b").ok).toBe(true);

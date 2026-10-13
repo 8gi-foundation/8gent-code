@@ -144,7 +144,7 @@ export function extractConstraints(task: string): DraftConstraint[] {
 		/\b(?:no|without(?:\s+any)?|(?:do not|don't|never)\s+use(?:\s+any)?)\s+emojis?\b/i.exec(t);
 	if (emoji) out.push({ type: "no_emoji", phrase: norm(emoji[0]) });
 	const dash =
-		/\b(?:no|without(?:\s+any)?|(?:do not|don't|never)\s+use(?:\s+any)?)\s+em[\s-]?dash(?:es)?\b/i.exec(
+		/\b(?:no|without|avoid(?:ing)?|(?:do not|don't|never)\s+use)(?:\s+(?:any|an?|the))?(?:\s+[a-z]+){0,2}?\s+em[\s-]?dash(?:es)?\b/i.exec(
 			t,
 		);
 	if (dash) out.push({ type: "no_em_dash", phrase: norm(dash[0]) });

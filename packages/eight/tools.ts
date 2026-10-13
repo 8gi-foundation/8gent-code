@@ -964,12 +964,20 @@ export class ToolExecutor {
 	private presendCheck(draft: string): string | null {
 		if (!this.presendTask || draft.trim() === "") return null;
 		const sources: Record<string, string> = {};
-		const root = path.resolve(this.workingDirectory);
-		for (const rel of namedSources(this.presendTask)) {
-			const abs = path.resolve(root, rel);
-			if (!abs.startsWith(root + path.sep)) continue;
+		let root: string;
+		try {
+			root = fs.realpathSync(path.resolve(this.workingDirectory));
+		} catch {
+			root = "";
+		}
+		for (const rel of root ? namedSources(this.presendTask) : []) {
 			try {
-				if (fs.statSync(abs).size <= 256 * 1024) sources[rel] = fs.readFileSync(abs, "utf8");
+				// A symlink, or a real path outside the working directory, is never read.
+				const abs = path.resolve(root, rel);
+				if (fs.lstatSync(abs).isSymbolicLink()) continue;
+				const real = fs.realpathSync(abs);
+				if (!real.startsWith(root + path.sep)) continue;
+				if (fs.statSync(real).size <= 256 * 1024) sources[rel] = fs.readFileSync(real, "utf8");
 			} catch {
 				// a source that cannot be read is unchecked, never a failure
 			}
