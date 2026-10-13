@@ -200,7 +200,10 @@ describe("thresholds are unchanged", () => {
 		let calls = 0;
 		const model = mockModel();
 		const orig = model.doGenerate.bind(model);
-		model.doGenerate = (async (o: never) => (calls++, orig(o))) as typeof model.doGenerate;
+		model.doGenerate = (async (o: never) => {
+			calls++;
+			return orig(o);
+		}) as typeof model.doGenerate;
 		expect(await compactHistory({ engine, history, model, recorder: new CompactionRecorder(store) })).toBeNull();
 		expect(calls).toBe(0);
 		expect(readFileSync(store.file, "utf-8")).toBe(before);
