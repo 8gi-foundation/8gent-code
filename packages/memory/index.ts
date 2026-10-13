@@ -1112,8 +1112,9 @@ export class MemoryManager {
 		if (this.projectStore) {
 			memories.push(...this.projectStore.searchByUser(userId, { limit: 50 }));
 		}
-		if (this.globalStore) {
-			memories.push(...this.globalStore.searchByUser(userId, { limit: 50 }));
+		const globalStore = this._distinctGlobalStore();
+		if (globalStore) {
+			memories.push(...globalStore.searchByUser(userId, { limit: 50 }));
 		}
 
 		// Extract preferences from semantic memories
