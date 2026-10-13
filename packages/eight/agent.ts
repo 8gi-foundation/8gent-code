@@ -57,6 +57,7 @@ import {
 	ollamaContextWindowLookup,
 } from "../orchestration/local-model-detect";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
+import { pinFromConfig, runWithProviderPin } from "../orchestration/provider-pin";
 import { effectivePermissionMode, systemOneEnvFor } from "../permissions/permission-mode";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { startSystemOneWarmup } from "../permissions/system-one-gate";
@@ -1656,19 +1657,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				model: this.config.model,
 				baseUrl: this.config.baseUrl,
 			}),
-			async () => {
-				// A new turn: steers left from an earlier turn are stale and are
-				// dropped, never delivered into this one (the caller had its chance
-				// to take them with takeQueuedSteers).
-				const turn = ++this.turnCounter;
-				this.steerQueue = [];
-				this.activeTurn = turn;
-				try {
-					return await this.runTurn(userMessage, imageBase64, imageMimeType);
-				} finally {
-					if (this.activeTurn === turn) this.activeTurn = null;
-				}
-			},
+			() =>
+				// Every agent this turn starts inherits a pinned parent's provider (#3762).
+				// An un-pinned agent binds nothing, so its children are as before.
+				runWithProviderPin(pinFromConfig(this.config), async () => {
+					// A new turn: steers left from an earlier turn are stale and are
+					// dropped, never delivered into this one (the caller had its chance
+					// to take them with takeQueuedSteers).
+					const turn = ++this.turnCounter;
+					this.steerQueue = [];
+					this.activeTurn = turn;
+					try {
+						return await this.runTurn(userMessage, imageBase64, imageMimeType);
+					} finally {
+						if (this.activeTurn === turn) this.activeTurn = null;
+					}
+				}),
 		);
 	}
 

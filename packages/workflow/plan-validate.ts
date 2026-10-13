@@ -13,6 +13,7 @@
 import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { currentProviderPin } from "../orchestration/provider-pin";
 import type { Evidence } from "../validation/evidence";
 
 // ============================================
@@ -203,9 +204,12 @@ export class PlanValidateLoop extends EventEmitter {
 		// Import Agent dynamically
 		const { Agent } = await import("../eight");
 
+		// A pinned session's plan steps stay on its provider (#3762).
+		const pin = currentProviderPin();
 		const agent = new Agent({
-			model: "glm-4.7-flash:latest",
-			runtime: "ollama",
+			model: pin?.model ?? "glm-4.7-flash:latest",
+			runtime: (pin?.runtime ?? "ollama") as "ollama",
+			...(pin ? { providerPinned: true } : {}),
 			workingDirectory: this.config.workingDirectory,
 			maxTurns: 10,
 		});
