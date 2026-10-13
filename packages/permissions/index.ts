@@ -1142,6 +1142,11 @@ export class PermissionManager {
 		});
 	}
 
+	/** True when this exact command was declined earlier in the session (#3870). */
+	wasDeclined(command: string): boolean {
+		return this.deniedCommands.has(command.toLowerCase().trim());
+	}
+
 	/**
 	 * Check permission for a command without prompting
 	 * Returns: "allowed" | "denied" | "ask"

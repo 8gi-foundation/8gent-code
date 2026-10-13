@@ -235,6 +235,7 @@ import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatEditNotFound } from "./edit-hint";
 import { layoutMeasureLine } from "./layout-measure";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
+import { RepeatDenialGuard } from "./repeat-denial";
 import { RetiredFacts } from "./retired-facts";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
@@ -879,6 +880,8 @@ export class ToolExecutor {
 	 * share it; another agent or tab has its own.
 	 */
 	readonly createdFiles = new CreatedFiles();
+	/** Tells the model to stop re-issuing a command that was refused twice this turn (#3870). */
+	private readonly repeatDenials = new RepeatDenialGuard();
 	/**
 	 * Runs the repo's test script before a commit and refuses a red suite (#3402).
 	 * Per executor, so "unchanged since a green run" means this agent's session.
@@ -1003,6 +1006,7 @@ export class ToolExecutor {
 		this.openedThisTurn.clear();
 		this.layoutNotesSent.clear();
 		this.retiredFacts.reset();
+		this.repeatDenials.reset();
 	}
 
 	/**
@@ -2512,7 +2516,12 @@ export class ToolExecutor {
 			// Shell
 			case "run_command": {
 				const command = args.command as string;
-				const run = () => this.runCommand(command, args.timeout as number | undefined);
+				const run = async () =>
+					this.repeatDenials.annotate(
+						command,
+						await this.runCommand(command, args.timeout as number | undefined),
+						hasTuiApprovalHandler(),
+					);
 				// A command the sanitizer refuses never commits, so it never runs the suite.
 				const target = parseGitCommit(command);
 				// Judged on the text that will run: a `cd <folder> &&` commit meets the gate too (#3199).
@@ -3346,6 +3355,10 @@ export class ToolExecutor {
 		);
 
 		if (permissionCheck === "denied") {
+			// A command declined once stays declined for the session; say so, so the
+			// model does not read the repeat as a fresh, retryable policy hit (#3870).
+			if (this.permissionManager.wasDeclined(command))
+				return `[PERMISSION DENIED] This command was declined earlier in this session and was not run: ${command}`;
 			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 		}
 
@@ -3492,7 +3505,13 @@ export class ToolExecutor {
 					workingDirectory: dir,
 				});
 
-				const output = formatCommandOutput(code, stdout, stderr, finalCommand, this.workingDirectory);
+				const output = formatCommandOutput(
+					code,
+					stdout,
+					stderr,
+					finalCommand,
+					this.workingDirectory,
+				);
 				// Report images the command drew, and any cut off at an edge (#3580).
 				withImagesWritten(output, dir, startTime).then(safeResolve, () => safeResolve(output));
 			});
