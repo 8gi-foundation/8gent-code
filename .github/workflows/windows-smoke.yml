@@ -40,7 +40,7 @@ jobs:
       CI: "true"
     steps:
       - name: Shallow checkout (what a Windows user clones)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 1
 
@@ -163,7 +163,7 @@ jobs:
           "### Windows binary`nsize: $([math]::Round($f.Length/1MB,1)) MB`nsha256: $h" | Out-File -Append $env:GITHUB_STEP_SUMMARY
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: 8gent-windows-x64
           path: |
