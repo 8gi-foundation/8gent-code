@@ -6,8 +6,10 @@ import {
 	isLoopbackUrl,
 	isRouterMode,
 	parsePrometheus,
+	redactUrl,
 	resolveLlamaServerUrl,
 } from "./index";
+import { cleanServerText, isSafeModelId } from "./llama-router";
 
 type Call = { method: string; url: string; body?: unknown; hasSignal: boolean };
 
@@ -238,5 +240,97 @@ describe("loopback guard", () => {
 		expect(resolveLlamaServerUrl({ LLAMA_SERVER_URL: "localhost:9090" }, warn)).toBe(
 			"http://localhost:9090",
 		);
+	});
+});
+
+describe("loopback guard against look-alike hosts (8SO)", () => {
+	test("names, userinfo, fragments, backslashes and non-http schemes are refused", () => {
+		for (const u of [
+			"http://localhost.evil.com",
+			"http://127.0.0.1.nip.io",
+			"http://127.0.0.1@evil.com",
+			"http://127.0.0.1:80@evil.com:8080",
+			"http://evil.com#@127.0.0.1",
+			"http://evil.com\\@127.0.0.1",
+			"http://localhost.",
+			"http://[::ffff:127.0.0.1]:8080",
+			"file://localhost/etc/passwd",
+			"ftp://127.0.0.1/",
+		])
+			expect(isLoopbackUrl(u)).toBe(false);
+	});
+
+	test("numeric IPv4 forms are judged after URL normalisation, so only real loopback passes", () => {
+		for (const u of [
+			"http://2130706433",
+			"http://0177.0.0.1",
+			"http://0x7f.1",
+			"http://127.0.0.1.",
+		])
+			expect(isLoopbackUrl(u)).toBe(true);
+		expect(isLoopbackUrl("http://3232235777")).toBe(false); // 192.168.1.1
+	});
+
+	test("a file: URL is refused even with EIGHT_ALLOW_REMOTE_LLAMA=1, and warnings never print a password", () => {
+		const warnings: string[] = [];
+		const warn = (l: string) => warnings.push(l);
+		expect(
+			resolveLlamaServerUrl(
+				{ LLAMA_SERVER_URL: "file:///etc/hosts", EIGHT_ALLOW_REMOTE_LLAMA: "1" },
+				warn,
+			),
+		).toBe("http://127.0.0.1:8080");
+		resolveLlamaServerUrl({ LLAMA_SERVER_URL: "http://me:hunter2@203.0.113.9:8080" }, warn);
+		expect(warnings.join("\n")).not.toContain("hunter2");
+		expect(redactUrl("http://me:hunter2@203.0.113.9:8080")).toBe("http://203.0.113.9:8080");
+	});
+});
+
+describe("server strings are untrusted (8SO)", () => {
+	test("ids with escapes, invisibles, spaces or over 256 chars are dropped; the list is capped", async () => {
+		const bad = [
+			"a\u001b[2Jb",
+			"x\u200by",
+			"rtl\u202egnp",
+			"two words",
+			"n\nl",
+			"z".repeat(257),
+			"",
+		];
+		const many = Array.from({ length: 1_500 }, (_, i) => ({ id: `m${i}` }));
+		const { router } = stub({
+			"GET /models": () =>
+				Response.json({
+					data: [...bad.map((id) => ({ id })), { id: "org/model:Q4_K_M" }, ...many],
+				}),
+		});
+		const ids = (await router.models()).map((m) => m.id);
+		for (const b of bad) expect(ids).not.toContain(b);
+		expect(ids[0]).toBe("org/model:Q4_K_M");
+		expect(ids.length).toBeLessThanOrEqual(1_000);
+		expect(isSafeModelId("qwen3.6-27b")).toBe(true);
+	});
+
+	test("an unknown status is kept, cleaned, so a load keeps waiting instead of calling it loaded", async () => {
+		const { router } = stub({
+			"GET /models": () =>
+				Response.json({ data: [{ id: "a", status: { value: "\u001b[31mweird" } }] }),
+		});
+		expect((await router.models())[0].status).toBe("[31mweird");
+	});
+
+	test("server error text loses escapes and newlines and is cut", async () => {
+		const { router } = stub({
+			"POST /models/unload": () =>
+				Response.json(
+					{ error: `\u001b]0;pwned\u0007line1\nline2${"x".repeat(1_000)}` },
+					{ status: 400 },
+				),
+		});
+		const r = await router.unload("a");
+		expect(r.ok).toBe(false);
+		expect(r.detail).not.toMatch(/[\u0000-\u001f\u007f]/);
+		expect(r.detail.length).toBeLessThanOrEqual(303);
+		expect(cleanServerText("a\u202eb\u200bc")).toBe("a b c");
 	});
 });

@@ -23,6 +23,7 @@ export {
 	LLAMA_SERVER_PROVIDER,
 	isLlamaServerSelected,
 	isLoopbackUrl,
+	redactUrl,
 	isOllamaEnabled,
 	resolveLlamaServerUrl,
 	resolveLocalServerKind,

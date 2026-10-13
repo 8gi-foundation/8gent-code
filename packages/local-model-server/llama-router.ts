@@ -12,6 +12,7 @@
  * Every call carries a short timeout so a dead server never hangs the TUI.
  */
 
+import { redactUrl } from "./select";
 import { type LocalFetch, lateBoundFetch } from "./server";
 
 export const LLAMA_STATUS_TIMEOUT_MS = 3_000;
@@ -65,21 +66,52 @@ export function parsePrometheus(text: string): Record<string, number> {
 	return out;
 }
 
+/** Longest model id we accept from the server, and most models we list. */
+export const MAX_MODEL_ID_CHARS = 256;
+export const MAX_MODELS = 1_000;
+const MAX_SERVER_TEXT_CHARS = 300;
+
+/**
+ * Server text made safe for a terminal line. Allowlist (as layout-compare cleanSelector):
+ * printable ASCII, Unicode letters and digits survive; controls, escape sequences, line
+ * breaks, bidi, zero-width and tag characters become a space. Cut to `max` code points.
+ */
+export function cleanServerText(s: string, max = MAX_SERVER_TEXT_CHARS): string {
+	const flat = s
+		.replace(/[^\x20-\x7e\p{L}\p{N}]/gu, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+	const points = Array.from(flat);
+	return points.length > max ? `${points.slice(0, max).join("")}...` : flat;
+}
+
+/** A model id is used verbatim in requests, so one that would need cleaning is dropped, not rewritten. */
+export function isSafeModelId(id: string): boolean {
+	return (
+		id.length > 0 &&
+		Array.from(id).length <= MAX_MODEL_ID_CHARS &&
+		!/\s/.test(id) &&
+		!/[^\x21-\x7e\p{L}\p{N}]/u.test(id)
+	);
+}
+
 function errorText(body: unknown, fallback: string): string {
 	const e = body && typeof body === "object" ? (body as { error?: unknown }).error : undefined;
-	if (typeof e === "string" && e) return e;
+	if (typeof e === "string" && e) return cleanServerText(e) || fallback;
 	const msg = e && typeof e === "object" ? (e as { message?: unknown }).message : undefined;
-	return typeof msg === "string" && msg ? msg : fallback;
+	return typeof msg === "string" && msg ? cleanServerText(msg) || fallback : fallback;
 }
 
 function why(err: unknown): string {
 	const name = (err as { name?: string })?.name;
 	if (name === "TimeoutError" || name === "AbortError") return "timed out";
-	return err instanceof Error ? err.message : String(err);
+	return cleanServerText(err instanceof Error ? err.message : String(err));
 }
 
 export function createLlamaRouter(opts: LlamaRouterOptions) {
 	const base = opts.baseUrl.replace(/\/+$/, "");
+	// Lines shown on screen never carry user:password from LLAMA_SERVER_URL.
+	const shown = redactUrl(base);
 	const fetchImpl = opts.fetch ?? lateBoundFetch;
 	const timeoutMs = opts.timeoutMs ?? LLAMA_STATUS_TIMEOUT_MS;
 	const loadTimeoutMs = opts.loadTimeoutMs ?? LLAMA_LOAD_TIMEOUT_MS;
@@ -107,7 +139,7 @@ export function createLlamaRouter(opts: LlamaRouterOptions) {
 				detail: res.ok ? "ok" : errorText(body, `HTTP ${res.status}`),
 			};
 		} catch (err) {
-			return { ok: false, httpStatus: 0, detail: `not reachable at ${base} (${why(err)})` };
+			return { ok: false, httpStatus: 0, detail: `not reachable at ${shown} (${why(err)})` };
 		}
 	}
 
@@ -115,18 +147,22 @@ export function createLlamaRouter(opts: LlamaRouterOptions) {
 	async function models(): Promise<RouterModel[]> {
 		let res = await get("/models");
 		if (!res.ok) res = await get("/v1/models");
-		if (!res.ok) throw new Error(`${base} answered HTTP ${res.status} for the model list`);
+		if (!res.ok) throw new Error(`${shown} answered HTTP ${res.status} for the model list`);
 		const data = ((await res.json()) as { data?: unknown })?.data;
 		if (!Array.isArray(data)) return [];
-		return data.flatMap((m): RouterModel[] => {
+		// Ids reach the screen and request URLs: control or invisible characters, or an
+		// over-long id, drop the entry; the list itself is capped.
+		return data.slice(0, MAX_MODELS).flatMap((m): RouterModel[] => {
 			const id = (m as { id?: unknown })?.id;
-			if (typeof id !== "string" || !id) return [];
+			if (typeof id !== "string" || !isSafeModelId(id)) return [];
 			const s = (m as { status?: { value?: unknown; failed?: unknown; exit_code?: unknown } })
 				.status;
 			return [
 				{
 					id,
-					status: typeof s?.value === "string" ? s.value : undefined,
+					// Unknown states stay set (cleaned) so load() keeps waiting rather than calling them loaded.
+					status:
+						typeof s?.value === "string" ? cleanServerText(s.value, 32) || "unknown" : undefined,
 					failed: s?.failed === true ? true : undefined,
 					exitCode: typeof s?.exit_code === "number" ? s.exit_code : undefined,
 				},
@@ -218,7 +254,7 @@ export function createLlamaRouter(opts: LlamaRouterOptions) {
 	}
 
 	return {
-		baseUrl: base,
+		baseUrl: shown,
 		health,
 		models,
 		metrics,
