@@ -108,11 +108,12 @@ export const HANDLER_TIMEOUT_MS = 2000;
  * host.test.ts.
  */
 export const RESERVED_COMMANDS = new Set(
-	`help kanban predict avenues clear quit plan status model provider voice theme infinite onboarding
-preferences skip animations adhd quarantine toolshed skills design evidence auth vision session sessions
+	`help kanban predict avenues clear quit plan status model provider llama models voice theme infinite
+onboarding preferences skip animations adhd quarantine toolshed skills design evidence auth vision session sessions
 resume history continue compact chat agent github debug music dj pet export fork rewind branch cron deploy
 vercel telegram router rename spawn settings quiet term create-app hands eyes handeyes goal subgoal build
-notes ideas btw questions projects terminal reload exit copy hotkeys tree import update`.split(/\s+/),
+notes ideas btw questions projects terminal reload exit
+copy hotkeys tree import update`.split(/\s+/),
 );
 
 /** The default extensions folder: ~/.8gent/extensions. Throws without an absolute home directory. */
