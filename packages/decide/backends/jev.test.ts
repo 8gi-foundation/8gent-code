@@ -10,7 +10,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-	DECIDE_BACKEND_ENV,
 	DecideError,
 	DecideUnavailableError,
 	FallbackBackend,
@@ -360,7 +359,7 @@ describe("fallback", () => {
 	});
 });
 
-describe("createDecider with EIGHT_DECIDE_BACKEND=jev", () => {
+describe("createDecider and the hosted judge", () => {
 	const localFetch: FetchLike = async (url) => {
 		// The local probe: no shared judge, no laya, Ollama serves one small model.
 		if (url.endsWith("/api/tags")) return json({ models: [{ name: "llama3.2:3b", size: 1 }] });
@@ -379,76 +378,34 @@ describe("createDecider with EIGHT_DECIDE_BACKEND=jev", () => {
 	};
 	const base = { HOME: "/nonexistent", EIGHT_S1_SHARED_JUDGE: "0" };
 
-	it("without the env the default path is untouched and nothing goes to the gateway", async () => {
+	it("no environment variable selects the hosted judge: EIGHT_DECIDE_BACKEND=jev with a key still goes local and nothing reaches the gateway", async () => {
 		const calls: Call[] = [];
 		const fetch: FetchLike = (url, init) =>
 			url === JEV_URL ? fakeGateway(() => json({}), calls)(url, init) : localFetch(url, init);
-		const d = createDecider({
-			fetch,
-			env: { ...base, [JEV_KEY_ENV]: KEY },
-			llamacppLoader: null,
-			log: () => {},
-		});
-		const a = await d.noul("S", "Q");
-		expect(a.backend).toBe("ollama");
+		for (const env of [
+			{ ...base, [JEV_KEY_ENV]: KEY },
+			{ ...base, [JEV_KEY_ENV]: KEY, EIGHT_DECIDE_BACKEND: "jev" },
+			{ ...base, [JEV_KEY_ENV]: KEY, EIGHT_DECIDE_BACKEND: " JEV " },
+		]) {
+			const d = createDecider({ fetch, env, llamacppLoader: null, cacheSize: 0 });
+			const a = await d.noul("S", "Q");
+			expect(a.backend).toBe("ollama");
+			expect((await d.backend()).name).toBe("ollama");
+		}
 		expect(calls).toHaveLength(0);
 	});
 
-	it("with the env and a key, Jev answers first and the local judge takes any error", async () => {
-		const logs: FallbackLog[] = [];
-		let gateway = (b: Record<string, unknown>): Response =>
-			json({ model: "jev-1", answers: { q: { probability: 0.9 } } });
-		const fetch: FetchLike = (url, init) =>
-			url === JEV_URL ? fakeGateway((b) => gateway(b))(url, init) : localFetch(url, init);
-		const env = { ...base, [JEV_KEY_ENV]: KEY, [DECIDE_BACKEND_ENV]: "jev" };
-		const d = createDecider({
-			fetch,
-			env,
-			llamacppLoader: null,
-			log: (e) => logs.push(e),
-			cacheSize: 0,
-		});
-		const a = await d.noul("S", "Q1");
-		expect(a.backend).toBe("jev");
-		close(a.probabilities.yes, 0.9);
-		gateway = refusedEchoing;
-		const b = await d.noul("S", "Q2");
-		expect(b.backend).toBe("ollama");
-		expect(b.model).toBe("llama3.2:3b");
-		close(b.probabilities.yes, 0.6);
-		expect(logs.map((l) => l.backend)).toEqual(["jev", "ollama"]);
-		expect(logs[1].fellBackFrom?.reason).toBe("jev /v1/evaluate 403 no_providers_available");
+	it("the env switch is gone from the package surface and the source", () => {
+		expect("DECIDE_BACKEND_ENV" in (require("../index") as object)).toBe(false);
+		const src = fs.readFileSync(path.join(import.meta.dir, "../index.ts"), "utf8");
+		expect(src).not.toContain("EIGHT_DECIDE_BACKEND");
 	});
 
-	it("with the env but no key, the local judge answers and the swap is logged once", async () => {
-		const logs: FallbackLog[] = [];
-		const d = createDecider({
-			fetch: localFetch,
-			env: { ...base, [DECIDE_BACKEND_ENV]: "jev" },
-			llamacppLoader: null,
-			log: (e) => logs.push(e),
-		});
-		const a = await d.noul("S", "Q");
-		expect(a.backend).toBe("ollama");
-		expect(logs).toHaveLength(1);
-		expect(logs[0].fellBackFrom?.reason).toContain(JEV_KEY_ENV);
-	});
-
-	it("under SIGI_RUN or PILOT_RUN the hosted judge is refused: auto goes local and logs it, bare jev throws, nothing reaches the gateway", async () => {
+	it("under SIGI_RUN or PILOT_RUN, or a pilot lock, bare jev throws and nothing reaches the gateway", async () => {
 		for (const flag of ["SIGI_RUN", "PILOT_RUN"]) {
 			const calls: Call[] = [];
-			const logs: FallbackLog[] = [];
-			const fetch: FetchLike = (url, init) =>
-				url === JEV_URL
-					? fakeGateway(() => json({ answers: { q: { probability: 0.9 } } }), calls)(url, init)
-					: localFetch(url, init);
-			const env = { ...base, [JEV_KEY_ENV]: KEY, [DECIDE_BACKEND_ENV]: "jev", [flag]: "1" };
-			const d = createDecider({ fetch, env, llamacppLoader: null, log: (e) => logs.push(e) });
-			const a = await d.noul("S", "Q");
-			expect(a.backend).toBe("ollama");
-			expect(calls).toHaveLength(0);
-			expect(logs).toHaveLength(1);
-			expect(logs[0].fellBackFrom?.reason).toContain(flag);
+			const fetch = fakeGateway(() => json({ answers: { q: { probability: 0.9 } } }), calls);
+			const env = { ...base, [JEV_KEY_ENV]: KEY, [flag]: "1" };
 			const bare = createDecider({ backend: "jev", fetch, env });
 			await expect(bare.noul("S", "Q")).rejects.toThrow(`jev refused: ${flag}`);
 			expect(calls).toHaveLength(0);
@@ -459,5 +416,53 @@ describe("createDecider with EIGHT_DECIDE_BACKEND=jev", () => {
 		const fetch = fakeGateway(refusedEchoing);
 		const d = createDecider({ backend: "jev", fetch, env: { ...base, [JEV_KEY_ENV]: KEY } });
 		await expect(d.noul("S", "Q")).rejects.toThrow(DecideUnavailableError);
+	});
+
+	it("backend: 'jev' with a key answers as jev, so a caller can see it and refuse it", async () => {
+		const fetch = fakeGateway(() => json({ model: "jev-1", answers: { q: { probability: 0.9 } } }));
+		const d = createDecider({ backend: "jev", fetch, env: { ...base, [JEV_KEY_ENV]: KEY } });
+		expect((await d.backend()).name).toBe("jev");
+	});
+});
+
+describe("FallbackBackend reports the backend that answered", () => {
+	const mockBuilder = () => ({ build: async () => new MockBackend() });
+
+	it("name and model are the primary's until something answers, then the answerer's", async () => {
+		const jev = new JevBackend({
+			apiKey: KEY,
+			fetch: fakeGateway(() => json({ model: "jev-1", answers: { n: { probability: 0.75 } } })),
+		});
+		const fb = new FallbackBackend(jev, mockBuilder().build, () => {});
+		expect(fb.name).toBe("jev");
+		await fb.ask({ state: "S", questions: [noul] });
+		expect(fb.name).toBe("jev");
+		expect(fb.model).toBe("jev-1");
+	});
+
+	it("after a fallback, name and model are the local backend's, not jev's", async () => {
+		const jev = new JevBackend({ apiKey: KEY, fetch: fakeGateway(refusedEchoing) });
+		const fb = new FallbackBackend(jev, mockBuilder().build, () => {});
+		const res = await fb.ask({ state: "S", questions: [noul] });
+		expect(res.backend).toBe("mock");
+		expect(fb.name).toBe("mock");
+		expect(fb.model).toBe(res.model);
+		expect(fb.name).not.toBe("jev");
+	});
+
+	it("it follows the answerer back to the primary when the primary recovers", async () => {
+		let down = true;
+		const jev = new JevBackend({
+			apiKey: KEY,
+			fetch: fakeGateway(() =>
+				down ? refusedEchoing({}) : json({ model: "jev-1", answers: { n: { probability: 0.7 } } }),
+			),
+		});
+		const fb = new FallbackBackend(jev, mockBuilder().build, () => {});
+		await fb.ask({ state: "S", questions: [noul] });
+		expect(fb.name).toBe("mock");
+		down = false;
+		await fb.ask({ state: "S", questions: [noul] });
+		expect(fb.name).toBe("jev");
 	});
 });

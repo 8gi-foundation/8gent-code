@@ -2,13 +2,15 @@
  * Jev backend: TypeSafe AI's hosted decision model, through the Vercel AI
  * Gateway. HOSTED, OPT-IN, SIDE WORK ONLY.
  *
- * Off unless env EIGHT_DECIDE_BACKEND=jev (see index.ts), and then only
- * with AI_GATEWAY_API_KEY in env. The state of every question leaves the
- * machine, so this backend never takes part in a SIGI scored run or in
- * anything labelled local: `jevForbidden` refuses it under SIGI_RUN or
- * PILOT_RUN, or while the pilot lock exists. The decider wraps it in
- * `FallbackBackend`: on any error or timeout the local judge answers, and
- * every decision is logged with the backend that made it.
+ * Only ever an explicit choice: createDecider({ backend: "jev" }), for
+ * synthetic evals, with AI_GATEWAY_API_KEY in env. No environment variable
+ * selects it. The state of every question leaves the machine, so this
+ * backend never takes part in a SIGI scored run or in anything labelled
+ * local: `jevForbidden` refuses it under SIGI_RUN or PILOT_RUN, or while
+ * the pilot lock exists, and the System One gate and locate refuse any
+ * decider whose backend is named "jev" (`JEV_BACKEND_NAME`). `FallbackBackend`
+ * can wrap it: on any error or timeout the local judge answers, and the
+ * wrapper then reports the backend that answered.
  *
  * Wire shape (checked against the gateway's own validator on 2026-10-07;
  * TypeSafe's primitives docs for the answer fields):
@@ -48,6 +50,8 @@ import {
 	validateRequest,
 } from "../types";
 
+/** The `name` of the hosted backend. The gate and locate refuse a backend with this name. */
+export const JEV_BACKEND_NAME = "jev";
 export const JEV_URL = "https://ai-gateway.vercel.sh/v1/evaluate";
 export const JEV_MODEL = "typesafe-ai/jev";
 /** The only env var the key is read from. Never a file, never an argument. */
@@ -182,7 +186,7 @@ function errorCode(text: string): string {
 }
 
 export class JevBackend implements DecideBackend {
-	readonly name = "jev";
+	readonly name = JEV_BACKEND_NAME;
 	model = JEV_MODEL;
 	private readonly url: string;
 	private readonly apiKey: string;
@@ -265,12 +269,16 @@ export class FallbackBackend implements DecideBackend {
 		this.timeoutMs = timeoutMs;
 	}
 
+	/** Who answered last (set after every ask); until then, the primary. */
+	private answered: { name: string; model: string } | null = null;
+
+	/** The backend that actually answered, never the primary when the fallback did. */
 	get name(): string {
-		return this.primary.name;
+		return this.answered?.name ?? this.primary.name;
 	}
 
 	get model(): string {
-		return this.primary.model;
+		return this.answered?.model ?? this.primary.model;
 	}
 
 	private withTimeout(p: Promise<SystemOneResponse>): Promise<SystemOneResponse> {
@@ -290,6 +298,7 @@ export class FallbackBackend implements DecideBackend {
 	async ask(request: SystemOneRequest): Promise<SystemOneResponse> {
 		try {
 			const res = await this.withTimeout(this.primary.ask(request));
+			this.answered = { name: res.backend, model: res.model };
 			this.log({ backend: res.backend, model: res.model, latencyMs: res.latencyMs });
 			return res;
 		} catch (err) {
@@ -303,6 +312,7 @@ export class FallbackBackend implements DecideBackend {
 			}
 			const local = await this.secondary;
 			const res = await local.ask(request);
+			this.answered = { name: res.backend, model: res.model };
 			this.log({
 				backend: res.backend,
 				model: res.model,
@@ -314,7 +324,7 @@ export class FallbackBackend implements DecideBackend {
 	}
 }
 
-/** One stderr line per decision; the default `log` when EIGHT_DECIDE_BACKEND=jev is set. */
+/** One stderr line per decision; a `log` for FallbackBackend. */
 export function logDecisionToStderr(entry: FallbackLog): void {
 	const tail = entry.fellBackFrom
 		? ` fallback_from=${entry.fellBackFrom.backend} reason=${JSON.stringify(entry.fellBackFrom.reason)}`
