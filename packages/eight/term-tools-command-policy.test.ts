@@ -5,7 +5,14 @@
  * cannot be read as a command needs a person; ordinary input still flows.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+
+// bun's mock.module outlives this file. Keep the real barrel and put it back afterwards so
+// later files (the terminal-tab session-store tests) see the real saveSession and loadSessions.
+const realTerminalTab = { ...(await import("../terminal-tab/index.js")) };
+afterAll(() => {
+	mock.module("../terminal-tab/index.js", () => realTerminalTab);
+});
 
 const sent: string[] = [];
 const spawned: string[] = [];
