@@ -25,11 +25,11 @@
  * tests deterministic and makes the goal pathway opt-in per surface.
  */
 
-import { Box, Text, useInput } from "ink";
-import React, { useEffect, useMemo, useRef, useState } from "react";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join as pathJoin } from "node:path";
+import { Box, Text, useInput } from "ink";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
 	VERDICT_DONE,
 	VERDICT_STILL_GOING,
@@ -39,12 +39,12 @@ import {
 } from "../../../../packages/eight/go/index.js";
 import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import type { GoalClient } from "../lib/goal-client.js";
-import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
 import { askedNote } from "../lib/model-truth.js";
+import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
 import { METER_CELLS, NOW_LABEL_WIDTH, fitNowStrip } from "../lib/now-strip-layout.js";
 import { glyphs } from "../lib/term-caps.js";
-import { FigureEight } from "./figure-eight-spinner.js";
 import { t } from "../theme.js";
+import { FigureEight } from "./figure-eight-spinner.js";
 
 type Mode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
 
@@ -58,7 +58,14 @@ interface LiveFocalStripProps {
 	 *  Shown dim after the route as "(asked ...)" (#3102). */
 	routeAsked?: string;
 	tokens: string;
-	contextPct: number;
+	/** Share of the model's real window in use. Null when there is no
+	 *  percent to show: see `contextState` (#3321). */
+	contextPct: number | null;
+	/** Why there is no percent, or where the window came from. `server`
+	 *  marks the bar with ~ (reported by the local server, not provider
+	 *  metadata); `unknown` shows "? unknown"; `fresh` shows "--" until the
+	 *  first reply is measured. */
+	contextState?: "provider" | "server" | "unknown" | "fresh";
 	approvalPending?: boolean;
 	/** The agent runs unattended (Infinite): no card can wait on the person,
 	 *  so the border never turns orange. The word is not repeated here: the
@@ -87,12 +94,24 @@ export function meter(percent: number, width = 10): string {
 	return "█".repeat(filled) + "░".repeat(width - filled);
 }
 
+/** The ctx slot, always METER_CELLS wide so the strip layout is unchanged.
+ *  Never a bar without a real window behind it (#3321). */
+export function contextMeterText(
+	pct: number | null,
+	state: "provider" | "server" | "unknown" | "fresh",
+): string {
+	if (state === "unknown") return "? unknown".padEnd(METER_CELLS);
+	if (state === "fresh" || pct === null) return "--".padEnd(METER_CELLS);
+	return state === "server" ? `${meter(pct, METER_CELLS - 1)}~` : meter(pct, METER_CELLS);
+}
+
 export function LiveFocalStrip({
 	activeStep,
 	route,
 	routeAsked,
 	tokens,
 	contextPct,
+	contextState = "provider",
 	approvalPending = false,
 	autonomous = false,
 	isProcessing = false,
@@ -121,7 +140,8 @@ export function LiveFocalStrip({
 	// At rest READY says it all: no "idle" beside it (#3238).
 	// The state word ("finished", "waiting") is never cut; an active
 	// step may be, past its first 12 columns.
-	const middleMin = isProcessing && !showApprovalBorder ? Math.min(12, middle.length) : middle.length;
+	const middleMin =
+		isProcessing && !showApprovalBorder ? Math.min(12, middle.length) : middle.length;
 	const fit =
 		width === undefined
 			? {
@@ -163,7 +183,12 @@ export function LiveFocalStrip({
 				/>
 			</Box>
 
-			<Box flexGrow={1} flexShrink={1} minWidth={Math.min(middleMin, fit.middle.length) + 2} paddingX={1}>
+			<Box
+				flexGrow={1}
+				flexShrink={1}
+				minWidth={Math.min(middleMin, fit.middle.length) + 2}
+				paddingX={1}
+			>
 				<Text color={t.textSecondary} wrap="truncate-end">
 					{fit.middle}
 				</Text>
@@ -175,7 +200,7 @@ export function LiveFocalStrip({
 				{fit.meter ? (
 					<>
 						<Text color={t.textTertiary}>{fit.route ? " ctx " : "ctx "}</Text>
-						<Text color={t.steel}>{meter(contextPct, METER_CELLS)}</Text>
+						<Text color={t.steel}>{contextMeterText(contextPct, contextState)}</Text>
 					</>
 				) : null}
 				{tokens ? <Text color={t.textTertiary}> {tokens}</Text> : null}
@@ -249,7 +274,11 @@ export function TurnStateLabel({
 	if (isProcessing) {
 		return (
 			<Text>
-				{eight ? <Text color={t.orange}>{eight}</Text> : <FigureEight color={t.orange} animate={moving} />}
+				{eight ? (
+					<Text color={t.orange}>{eight}</Text>
+				) : (
+					<FigureEight color={t.orange} animate={moving} />
+				)}
 				<Text color={t.teal}> NOW </Text>
 			</Text>
 		);
@@ -402,9 +431,7 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 				setGoalState((prev) => ({
 					...prev,
 					turns: prev.turns + (event.kind === "turn.completed" ? 1 : 0),
-					elapsedMs: startedAtRef.current
-						? Date.now() - startedAtRef.current
-						: prev.elapsedMs,
+					elapsedMs: startedAtRef.current ? Date.now() - startedAtRef.current : prev.elapsedMs,
 				}));
 			},
 			onSubgoalEvent: (event) => {
@@ -430,9 +457,7 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 				// terminal multiplexer can be hooked. Voiced output is
 				// reserved for terminal state per accessibility rule.
 				if (!disableTts) {
-					process.stderr.write(
-						`[1;90m[sr] sub-goal ${index} of ${total}: ${text}[0m\n`,
-					);
+					process.stderr.write(`[1;90m[sr] sub-goal ${index} of ${total}: ${text}[0m\n`);
 				}
 			},
 			onDone: (event) => {
@@ -476,9 +501,9 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 			},
 		});
 		return unsub;
-	// goalClient identity changes are the only meaningful resubscribe
-	// trigger; the listener closures intentionally read mutable refs.
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// goalClient identity changes are the only meaningful resubscribe
+		// trigger; the listener closures intentionally read mutable refs.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [goalClient, adhdMode, disableTts, kittenTtsPath]);
 
 	const goalLine = useMemo(() => buildGoalLine(goalState), [goalState]);
@@ -492,15 +517,9 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 
 	return (
 		<Box flexDirection="column" flexShrink={0}>
-			<Box
-				borderStyle="single"
-				borderColor={goalBorderColor}
-				paddingX={1}
-				flexDirection="column"
-			>
+			<Box borderStyle="single" borderColor={goalBorderColor} paddingX={1} flexDirection="column">
 				<Text color={t.textPrimary} wrap="truncate-end">
-					{goalLine}{" "}
-					<Text color={t.orange}>●</Text>
+					{goalLine} <Text color={t.orange}>●</Text>
 				</Text>
 				{showExpanded && (
 					<>
