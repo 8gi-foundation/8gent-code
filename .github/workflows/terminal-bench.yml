@@ -1,0 +1,106 @@
+name: terminal-bench
+
+# Manual run of the Terminal-Bench 2.0 easy slice with 8gent-code against a model
+# served by Ollama on the runner itself. No cloud model, no secrets.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Ollama model tag (must fit in 16 GB RAM)"
+        default: "qwen3.5:9b"
+      tasks:
+        description: "Space separated task names; empty = the 4 easy tasks"
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  easy-slice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      HARBOR_COMMIT: dc933be707feafbb9efcdf092cb8a0e391332617
+      TB2_COMMIT: 2fd12b88aafdd04a52c298e3940bcb189f9766d6
+      TB_HOME: ${{ github.workspace }}/tb-home
+      HARBOR_TELEMETRY: "0"
+      MODEL: ${{ inputs.model || 'qwen3.5:9b' }}
+      # push runs (temporary trigger) do one short task; dispatch runs default to the 4 easy tasks.
+      TASKS: ${{ inputs.tasks }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+
+      - name: Build the 8gent bundle
+        run: |
+          bun install --frozen-lockfile
+          bun scripts/build-bundles.ts
+          node scripts/build-finalize.js
+          test -f dist/cli.js
+
+      - name: Fetch Harbor and Terminal-Bench 2.0 tasks at pinned commits
+        run: |
+          mkdir -p "$TB_HOME"
+          fetch() { # name url commit
+            git init -q "$TB_HOME/$1"
+            git -C "$TB_HOME/$1" fetch -q --depth 1 "$2" "$3"
+            git -C "$TB_HOME/$1" checkout -q FETCH_HEAD
+          }
+          fetch harbor https://github.com/laude-institute/harbor.git "$HARBOR_COMMIT"
+          fetch tb2-tasks https://github.com/laude-institute/terminal-bench-2.git "$TB2_COMMIT"
+          python3 -m venv "$TB_HOME/venv"
+          "$TB_HOME/venv/bin/pip" install -q "$TB_HOME/harbor"
+          "$TB_HOME/venv/bin/harbor" --version
+
+      - name: Install Ollama and pull the model
+        env:
+          OLLAMA_VERSION: v0.40.3
+          # sha256 of ollama-linux-amd64.tar.zst for the release above, from the release asset digest.
+          OLLAMA_SHA256: ce6f8b671a699bf1ebafb28d60dbbabf4f37b30b499145fa308a8ba72de021d6
+        run: |
+          curl -fsSL -o ollama.tar.zst \
+            "https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst"
+          echo "${OLLAMA_SHA256}  ollama.tar.zst" | sha256sum -c -
+          sudo tar -C /usr/local --zstd -xf ollama.tar.zst
+          rm ollama.tar.zst
+          ollama --version
+          # Bind to the docker bridge address only, not 0.0.0.0: task containers reach the
+          # runner there and nothing else on the network can. The 8gent system prompt plus
+          # tools is about 5k tokens; Ollama defaults to 4k and would cut the task off.
+          BRIDGE_IP="$(ip -4 -o addr show docker0 | awk '{print $4}' | cut -d/ -f1)"
+          test -n "$BRIDGE_IP"
+          echo "BRIDGE_IP=$BRIDGE_IP" >> "$GITHUB_ENV"
+          OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_HOST="${BRIDGE_IP}:11434" nohup ollama serve > ollama.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs "http://${BRIDGE_IP}:11434/api/tags" >/dev/null && break; sleep 2; done
+          OLLAMA_HOST="${BRIDGE_IP}:11434" ollama pull "$MODEL"
+          OLLAMA_HOST="${BRIDGE_IP}:11434" ollama list
+
+      - name: Run the slice
+        run: |
+          export EIGHTGENT_TB_BASE_URL="http://${BRIDGE_IP}:11434"
+          export HARBOR_EXTRA_ARGS="--agent-timeout-multiplier 3"
+          # shellcheck disable=SC2086
+          bash benchmarks/terminal-bench/run-easy-slice.sh "ollama/$MODEL" $TASKS
+
+      - name: Summarize scores
+        if: always()
+        run: |
+          {
+            echo "## Terminal-Bench 2.0 easy slice, $MODEL"
+            for r in "$TB_HOME"/jobs/*/*/result.json; do
+              [ -f "$r" ] && echo "- $(basename "$(dirname "$r")"): $(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(json.dumps(d.get("verifier_result")))' "$r")"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: terminal-bench-results
+          path: |
+            tb-home/jobs
+            ollama.log

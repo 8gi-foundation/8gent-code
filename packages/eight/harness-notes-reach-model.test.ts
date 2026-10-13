@@ -140,6 +140,18 @@ for (const [label, textTools] of [
 			expect(JSON.stringify(notes[0]?.content)).toContain(CONTEXT_NOTE_HEADER);
 		}, 60_000);
 
+		test("proactive questioning: a headless run acts instead of asking", async () => {
+			const agent = new Agent({
+				model: "m",
+				runtime: "ollama",
+				workingDirectory: repo,
+				baseUrl: `http://127.0.0.1:${server.port}`,
+				headless: true,
+			} as ConstructorParameters<typeof Agent>[0]);
+			const body = await turn(agent, "fix it");
+			expect(carrying(body, "[PROACTIVE QUESTIONING]").length).toBe(0);
+		}, 60_000);
+
 		test("pre-tool router: the prefetched file is sent", async () => {
 			// Clear enough to skip the proactive gate, and names a file, so the
 			// router reads docs/sentinel.md before the model call.
