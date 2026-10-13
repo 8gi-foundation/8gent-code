@@ -129,7 +129,7 @@ export function prepareSafeCopy(htmlPath: string, dir: string, probe?: string): 
 	let html = fs
 		.readFileSync(htmlPath, "utf8")
 		.replace(/^\uFEFF+/, "")
-		.replace(/\x1b/g, "");
+		.replaceAll("\x1b", "");
 	const root = fs.realpathSync(path.dirname(htmlPath));
 	const inline = (ref: string): string | null => {
 		const clean = ref.trim().split(/[?#]/)[0];
@@ -411,7 +411,9 @@ export const boxesId = (token: string): string => `__8gent_layout_boxes_${token}
  * (hex, fresh per run) names the output tag so page markup cannot forge it; selectors are cut
  * to MAX_SELECTOR_CHARS in the page so a huge class name cannot balloon the dump.
  */
-export const elementProbe = (token: string): string => `addEventListener("load",function(){var E=CSS.escape,S={SCRIPT:1,STYLE:1,BR:1,TEMPLATE:1,NOSCRIPT:1},out=[];
+export const elementProbe = (
+	token: string,
+): string => `addEventListener("load",function(){var E=CSS.escape,S={SCRIPT:1,STYLE:1,BR:1,TEMPLATE:1,NOSCRIPT:1},out=[];
 function part(e){var t=e.tagName.toLowerCase();if(e.id)return t+"#"+E(e.id);var c="";if(typeof e.className==="string")e.className.trim().split(/\\s+/).forEach(function(k){if(k)c+="."+E(k)});
 var p=e.parentElement,i=0,n=0;if(p)for(var x=p.firstElementChild;x;x=x.nextElementSibling)if(x.tagName===e.tagName){n++;if(x===e)i=n}return t+c+(n>1?":nth-of-type("+i+")":"")}
 function sel(e){if(e.id)return part(e);var t=e.tagName.toLowerCase(),c=part(e).replace(/:nth-of-type\\(\\d+\\)$/,"");try{if(c!==t&&document.querySelectorAll(c).length===1)return c}catch(_){}
@@ -426,11 +428,26 @@ var j=document.createElement("script");j.type="application/json";j.id="${boxesId
  * result), whitespace collapsed, cut to MAX_SELECTOR_CHARS.
  */
 export function cleanSelector(s: string): string {
-	const flat = s
-		.replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]/g, " ")
-		.replace(/\s+/g, " ")
-		.trim();
+	let flat = "";
+	for (const ch of s) flat += hiddenOrBreaking(ch.codePointAt(0) ?? 0) ? " " : ch;
+	flat = flat.replace(/\s+/g, " ").trim();
 	return flat.length > MAX_SELECTOR_CHARS ? `${flat.slice(0, MAX_SELECTOR_CHARS)}...` : flat;
+}
+
+/** C0/C1 controls, line and paragraph separators, bidi controls and zero-width or format characters. */
+function hiddenOrBreaking(c: number): boolean {
+	return (
+		c <= 0x1f ||
+		(c >= 0x7f && c <= 0x9f) ||
+		c === 0xad ||
+		c === 0x61c ||
+		c === 0x180e ||
+		(c >= 0x200b && c <= 0x200f) ||
+		(c >= 0x2028 && c <= 0x202e) ||
+		(c >= 0x2060 && c <= 0x206f) ||
+		c === 0xfeff ||
+		(c >= 0xfff9 && c <= 0xfffb)
+	);
 }
 
 /** The element boxes out of a --dump-dom print, or null when the print holds none. */
