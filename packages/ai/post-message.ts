@@ -241,7 +241,7 @@ export const POST_MESSAGE_TOOL_DEF = {
 	function: {
 		name: "post_message",
 		description:
-			"[MESSAGING] Posts text to the Telegram chat chat, or a voice note when voice is set (an officer voice name such as Rishi). The person approves it before it sends. Returns the message id. Send once; do not retry after a refusal. Never put credentials in the text.",
+			"[MESSAGING] Posts text to the Telegram chat named in chat, or a voice note when voice is set (an officer voice name such as Rishi). The person approves it before it sends. Returns the message id. Send once; do not retry after a refusal. Never put credentials in the text.",
 		parameters: {
 			type: "object",
 			properties: {
