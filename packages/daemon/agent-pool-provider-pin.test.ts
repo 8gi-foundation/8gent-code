@@ -22,7 +22,10 @@ const saved: Record<string, string | undefined> = {};
 
 beforeAll(() => {
 	dataDir = mkdtempSync(join(tmpdir(), "pool3762-"));
-	for (const [k, v] of Object.entries({ EIGHT_DATA_DIR: dataDir, EIGHT_TABLE_CONSENT_CLOUD: undefined })) {
+	for (const [k, v] of Object.entries({
+		EIGHT_DATA_DIR: dataDir,
+		EIGHT_TABLE_CONSENT_CLOUD: undefined,
+	})) {
 		saved[k] = process.env[k];
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
@@ -38,11 +41,16 @@ afterAll(() => {
 
 type Overrides = Parameters<AgentPool["createSession"]>[2];
 
-function session(pin: { runtime: string; model?: string } | undefined, channel: string, overrides?: Overrides) {
+function session(
+	pin: { runtime: string; model?: string } | undefined,
+	channel: string,
+	overrides?: Overrides,
+) {
 	const pool = new AgentPool({ runtime: "ollama", model: "pool-m" });
 	runWithProviderPin(pin, () => pool.createSession("s1", channel, overrides));
-	const cfg = (pool as unknown as { sessions: Map<string, { agent: { config: Record<string, unknown> } }> })
-		.sessions.get("s1")!.agent.config;
+	const cfg = (
+		pool as unknown as { sessions: Map<string, { agent: { config: Record<string, unknown> } }> }
+	).sessions.get("s1")!.agent.config;
 	pool.destroySession("s1");
 	return { runtime: cfg.runtime, model: cfg.model, pinned: cfg.providerPinned };
 }
@@ -87,10 +95,18 @@ describe("daemon pool session under a pin (#3762)", () => {
 	});
 
 	test("a Table session on a local pin stays on it, pinned", () => {
-		expect(session(PIN, "table")).toEqual({ runtime: "lmstudio", model: "qwen-local", pinned: true });
+		expect(session(PIN, "table")).toEqual({
+			runtime: "lmstudio",
+			model: "qwen-local",
+			pinned: true,
+		});
 	});
 
 	test("no pin: exactly the pool defaults", () => {
-		expect(session(undefined, "api")).toEqual({ runtime: "ollama", model: "pool-m", pinned: undefined });
+		expect(session(undefined, "api")).toEqual({
+			runtime: "ollama",
+			model: "pool-m",
+			pinned: undefined,
+		});
 	});
 });

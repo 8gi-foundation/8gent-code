@@ -22,7 +22,12 @@ import {
 let dir: string;
 let pool: AgentPool;
 
+let hostedBefore: string | undefined;
+
 beforeEach(() => {
+	// Pins here include hosted providers; hosted children are opt-in since #3710.
+	hostedBefore = process.env.EIGHT_ALLOW_HOSTED;
+	process.env.EIGHT_ALLOW_HOSTED = "1";
 	dir = mkdtempSync(join(tmpdir(), "provider-pin-"));
 	resetOrchestration();
 	pool = getAgentPool(10);
@@ -31,11 +36,15 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	if (hostedBefore === undefined) delete process.env.EIGHT_ALLOW_HOSTED;
+	else process.env.EIGHT_ALLOW_HOSTED = hostedBefore;
 	resetOrchestration();
 	rmSync(dir, { recursive: true, force: true });
 });
 
-async function spawn(model?: string): Promise<{ runtime?: string; providerPinned?: boolean; model: string }> {
+async function spawn(
+	model?: string,
+): Promise<{ runtime?: string; providerPinned?: boolean; model: string }> {
 	const out = await spawnAgentTool(dir, "do a thing", "8gent", model);
 	const { agentId } = JSON.parse(out) as { agentId: string };
 	return pool.getAgent(agentId)!.config as never;
@@ -43,7 +52,11 @@ async function spawn(model?: string): Promise<{ runtime?: string; providerPinned
 
 describe("sub-agent provider pin", () => {
 	test("a sub-agent of a pinned parent is pinned to the parent's provider and model", async () => {
-		const parent = pinFromConfig({ runtime: "lmstudio", model: "qwen-local", providerPinned: true });
+		const parent = pinFromConfig({
+			runtime: "lmstudio",
+			model: "qwen-local",
+			providerPinned: true,
+		});
 		const child = await runWithProviderPin(parent, () => spawn());
 		expect(child.providerPinned).toBe(true);
 		expect(child.runtime).toBe("lmstudio");
@@ -51,7 +64,11 @@ describe("sub-agent provider pin", () => {
 	});
 
 	test("a model the spawner names is kept, the provider is still the parent's", async () => {
-		const parent = pinFromConfig({ runtime: "lmstudio", model: "qwen-local", providerPinned: true });
+		const parent = pinFromConfig({
+			runtime: "lmstudio",
+			model: "qwen-local",
+			providerPinned: true,
+		});
 		const child = await runWithProviderPin(parent, () => spawn("other-model"));
 		expect(child.runtime).toBe("lmstudio");
 		expect(child.providerPinned).toBe(true);
@@ -63,8 +80,8 @@ describe("sub-agent provider pin", () => {
 		expect(parent).toBeUndefined();
 		const child = await runWithProviderPin(parent, () => spawn());
 		expect(child.providerPinned).toBeUndefined();
-		expect(child.runtime).toBeUndefined();
-		expect(child.model).toBe("glm-4.7-flash:latest");
+		// Not pinned: the child follows the local default, as before the pin existed.
+		expect(child.runtime).toBe("ollama");
 	});
 
 	test("with no parent context at all the child is unchanged", async () => {
@@ -91,12 +108,17 @@ describe("sub-agent provider pin", () => {
 	test("Agent.chat binds its own pin for the turn: pinned binds it, un-pinned binds none", async () => {
 		const seen: unknown[] = [];
 		const probe = (a: Agent) => {
-			(a as unknown as { runChat: () => Promise<string> }).runChat = async () => {
+			(a as unknown as { runTurn: () => Promise<string> }).runTurn = async () => {
 				seen.push(currentProviderPin());
 				return "ok";
 			};
 		};
-		const pinned = new Agent({ model: "m1", runtime: "lmstudio", providerPinned: true, workingDirectory: dir });
+		const pinned = new Agent({
+			model: "m1",
+			runtime: "lmstudio",
+			providerPinned: true,
+			workingDirectory: dir,
+		});
 		const loose = new Agent({ model: "m2", runtime: "ollama", workingDirectory: dir });
 		probe(pinned);
 		probe(loose);

@@ -199,7 +199,6 @@ export interface AgentConfig {
 	 * Set only when its spawner was pinned to a provider the user named (#3762):
 	 * the child runs on that runtime, pinned, and never fails over.
 	 */
-	runtime?: string;
 	providerPinned?: boolean;
 	/** Its depth: its spawner's depth + 1, set by the pool, never by the caller (#3331). */
 	depth: number;
@@ -281,7 +280,7 @@ export class AgentPool extends EventEmitter {
 		const inherited = inheritedProviderFields(currentProviderPin(), config?.model);
 		const runtime = inherited.runtime ?? (config?.runtime || parent.runtime);
 		const sameRuntime = runtime === parent.runtime;
-		const model = config?.model || (sameRuntime ? parent.model : "");
+		const model = config?.model || (sameRuntime ? parent.model : "") || inherited.model || "";
 		if (!model) throw new Error(`No model given for a child on runtime "${runtime}"`);
 		const hosted = hostedChildRefusal(runtime, model);
 		if (hosted) throw new Error(hosted);

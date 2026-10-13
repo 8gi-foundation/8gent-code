@@ -27,7 +27,12 @@ const spies: Array<{ mockRestore: () => void }> = [];
 
 const PIN = { runtime: "lmstudio", model: "qwen-local" };
 
+let hostedBefore: string | undefined;
+
 beforeEach(() => {
+	// Pins here include hosted providers; hosted children are opt-in since #3710.
+	hostedBefore = process.env.EIGHT_ALLOW_HOSTED;
+	process.env.EIGHT_ALLOW_HOSTED = "1";
 	dir = mkdtempSync(join(tmpdir(), "pin-paths-"));
 	built.length = 0;
 	resetOrchestration();
@@ -41,12 +46,15 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	if (hostedBefore === undefined) delete process.env.EIGHT_ALLOW_HOSTED;
+	else process.env.EIGHT_ALLOW_HOSTED = hostedBefore;
 	for (const s of spies.splice(0)) s.mockRestore();
 	resetOrchestration();
 	rmSync(dir, { recursive: true, force: true });
 });
 
-const seen = () => built.map((c) => ({ runtime: c.runtime, model: c.model, pinned: c.providerPinned }));
+const seen = () =>
+	built.map((c) => ({ runtime: c.runtime, model: c.model, pinned: c.providerPinned }));
 
 describe("the pin reaches every spawn path", () => {
 	test("pool runAgent hands providerPinned to new Agent", async () => {
@@ -101,7 +109,9 @@ describe("the pin reaches every spawn path", () => {
 		const mgr = new SubAgentManager();
 		const agent = { task: "x", config: { model: undefined, workingDirectory: dir } };
 		await (mgr as unknown as { createPlan: (a: unknown) => Promise<unknown> }).createPlan(agent);
-		expect(seen()).toEqual([{ runtime: "ollama", model: "glm-4.7-flash:latest", pinned: undefined }]);
+		expect(seen()).toEqual([
+			{ runtime: "ollama", model: "glm-4.7-flash:latest", pinned: undefined },
+		]);
 	});
 
 	test("plan-validate steps run on the pin", async () => {

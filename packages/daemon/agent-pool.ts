@@ -308,7 +308,9 @@ export class AgentPool {
 		// the pin's model.
 		const pin = currentProviderPin();
 		let runtime: AgentConfig["runtime"] =
-			overrides?.runtime ?? (pin?.runtime as AgentConfig["runtime"] | undefined) ?? this.config.runtime;
+			overrides?.runtime ??
+			(pin?.runtime as AgentConfig["runtime"] | undefined) ??
+			this.config.runtime;
 		if (isTableSession && !LOCAL_PROVIDERS.has(runtime)) {
 			if (process.env.EIGHT_TABLE_CONSENT_CLOUD === "1") {
 				console.warn(
