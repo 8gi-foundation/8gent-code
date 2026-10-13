@@ -723,6 +723,9 @@ const runCommand = tool({
 	execute: async ({ command: line }) => {
 		// One leading `cd <folder> &&` inside the project: the folder is the working
 		// directory and only the rest runs, through every check below (#3199).
+		// The backstops judge the whole line first, so a cd into protected files keeps their words.
+		const lineBackstop = preSpawnRefusal(line, getToolContext().workingDirectory);
+		if (lineBackstop) return lineBackstop;
 		const cd = cdPrefix(line, getToolContext().workingDirectory, activeShellKind());
 		if (cd.kind === "refused") return cd.message;
 		const command = cd.kind === "cd" ? cd.rest : line;

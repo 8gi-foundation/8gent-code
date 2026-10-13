@@ -100,9 +100,13 @@ describe("screen_locate tool wiring", () => {
 				env: { EIGHT_SCREEN_LOCATE: "1" },
 			}),
 		).toBe(true);
-		const src = require("node:fs").readFileSync(join(import.meta.dir, "agent.ts"), "utf8");
+		// Whitespace and trailing commas are the formatter's, not the wiring's.
+		const src = require("node:fs")
+			.readFileSync(join(import.meta.dir, "agent.ts"), "utf8")
+			.replace(/\s+/g, "")
+			.replace(/,\}/g, "}");
 		expect(src).toContain(
-			"screenLocateOffered({ browserTools: localBrowserTools().length, desktopTools: cuaConfigured })",
+			"screenLocateOffered({browserTools:localBrowserTools().length,desktopTools:cuaConfigured})",
 		);
 	});
 

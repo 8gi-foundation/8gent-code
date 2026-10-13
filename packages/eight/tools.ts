@@ -3129,6 +3129,9 @@ export class ToolExecutor {
 		// One leading `cd <folder> &&` inside the project: the folder is the working
 		// directory and only the rest runs, through every check below (#3199).
 		if (cwd === undefined) {
+			// The backstops judge the whole line first, so a cd into protected files keeps their words.
+			const lineBackstop = preSpawnRefusal(command, this.workingDirectory);
+			if (lineBackstop) return lineBackstop;
 			const cd = cdPrefix(command, this.workingDirectory, activeShellKind(windowsShell));
 			if (cd.kind === "refused") return cd.message;
 			if (cd.kind === "cd") return this.runCommand(cd.rest, timeoutSec, env, windowsShell, cd.dir);
