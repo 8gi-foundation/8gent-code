@@ -62,6 +62,8 @@ class AlwaysDangerous implements DecideBackend {
 /** The exact commands from the pilot session (run 2026-10-12_194129, seq 116 and 168). */
 const PILOT_MKDIR = "mkdir -p build";
 const PILOT_RM = "rm -rf build";
+/** The pilot's write (seq 120): `TODO_FILE=build/todos.json bun src/cli.ts add ...`, the CLI as a script. */
+const PILOT_WRITE = "TODO_FILE=build/todos.json sh tools/w.sh";
 
 let ws: string;
 let outside: string;
@@ -117,7 +119,9 @@ describe.skipIf(process.platform === "win32")(
 			git("init", "-q");
 			put("src/app.ts", "export {};");
 			put("dist/keep.txt");
-			git("add", "src/app.ts", "dist/keep.txt");
+			// The pilot's CLI writes the file its TODO_FILE names; this stands in for it.
+			put("tools/w.sh", 'echo [] > "$TODO_FILE"\n');
+			git("add", "src/app.ts", "dist/keep.txt", "tools/w.sh");
 			git("commit", "-qm", "init");
 			// Before the session: a directory with a file in it, a dot directory, a link out.
 			put("old/note.txt");
@@ -125,9 +129,9 @@ describe.skipIf(process.platform === "win32")(
 			symlinkSync(outside, join(ws, "escape"));
 			Bun.sleepSync(20);
 			rec = new CreatedFiles();
-			// The pilot: mkdir -p build, then the CLI writes build/todos.json.
+			// The pilot: mkdir -p build, then the CLI (a child of the command) writes build/todos.json.
 			sh(PILOT_MKDIR);
-			put("build/todos.json", "[]");
+			sh(PILOT_WRITE);
 			sh("mkdir real");
 			symlinkSync(join(ws, "real"), join(ws, "alias"));
 			judge = new AlwaysDangerous();
@@ -168,6 +172,16 @@ describe.skipIf(process.platform === "win32")(
 				put("win/later.txt");
 				expect(rmOwnDir("rm -rf win", ws, rec).ok).toBe(false);
 			});
+			test("a file the command's child writes where a NAME=path word points is recorded (#4160 scopes)", () => {
+				expect(rec.bornToSession(join(ws, "build/todos.json"))).toBe(true);
+			});
+			test("rewritten in place, it is still the session's; replaced by a new file, it is not", () => {
+				sh("TODO_FILE=build/todos.json sh tools/w.sh");
+				expect(rec.bornToSession(join(ws, "build/todos.json"))).toBe(true);
+				put("build/new.json", "[]");
+				renameSync(join(ws, "build/new.json"), join(ws, "build/todos.json"));
+				expect(rec.bornToSession(join(ws, "build/todos.json"))).toBe(false);
+			});
 			test("a directory that existed before is never recorded", () => {
 				sh("mkdir -p old");
 				expect(rec.createdDirBySession(join(ws, "old"))).toBe(false);
@@ -195,7 +209,8 @@ describe.skipIf(process.platform === "win32")(
 				const r = rmOwnDir(PILOT_RM, ws, rec);
 				expect(r).toEqual({
 					ok: true,
-					reason: "rm -r of directories this session made (build): untracked, nothing older inside",
+					reason:
+						"rm -r of directories this session made (build): untracked, only the session's own files inside",
 				});
 			});
 			test("the other spellings of a recursive rm", () => {
@@ -214,8 +229,8 @@ describe.skipIf(process.platform === "win32")(
 				expect(ok("rm -rf out/tmp")).toBe(true);
 				expect(ok("rm -rf build out real")).toBe(true);
 			});
-			test("a symlink inside the directory (rm removes the link, not its target)", () => {
-				symlinkSync(join(ws, "src"), join(ws, "build/src-link"));
+			test("the session's file rewritten in place by a later run of its own CLI", () => {
+				sh(PILOT_WRITE);
 				expect(ok(PILOT_RM)).toBe(true);
 			});
 			test("the command then does what it says: build is gone, the rest stays", () => {
@@ -304,6 +319,30 @@ describe.skipIf(process.platform === "win32")(
 				expect(r.ok).toBe(false);
 				expect((r as { hint?: string }).hint).toContain("older than the directory");
 			});
+			test("a file another process dropped into the session's directory (8TO, #4106)", () => {
+				put("build/theirs.txt", "not the session's");
+				const r = rmOwnDir(PILOT_RM, ws, rec);
+				expect(r.ok).toBe(false);
+				expect((r as { hint?: string }).hint).toContain(
+					"theirs.txt, which is not a file this session wrote",
+				);
+			});
+			test("a directory and file another process made inside it (8TO, #4106)", () => {
+				put("build/sub/theirs.txt");
+				expect(ok(PILOT_RM)).toBe(false);
+				sh("mkdir -p out");
+				mkdirSync(join(ws, "out/empty"));
+				expect(ok("rm -rf out")).toBe(false);
+			});
+			test("the session's file replaced by another process (new inode at the same path)", () => {
+				rmSync(join(ws, "build/todos.json"));
+				put("build/todos.json", "[]");
+				expect(ok(PILOT_RM)).toBe(false);
+			});
+			test("a symlink inside the directory (the record never holds links)", () => {
+				symlinkSync(join(ws, "src"), join(ws, "build/src-link"));
+				expect(ok(PILOT_RM)).toBe(false);
+			});
 			test("a nested .git inside the session's directory", () => {
 				sh("mkdir -p build/.git");
 				expect(ok(PILOT_RM)).toBe(false);
@@ -386,11 +425,20 @@ describe.skipIf(process.platform === "win32")(
 				const ex = new ToolExecutor(ws, "owndir");
 				await ex.execute("run_command", { command: "mkdir -p scratch" });
 				expect(ex.createdFiles.dirCount).toBe(1);
-				writeFileSync(join(ws, "scratch/todos.json"), "[]");
+				await ex.execute("run_command", { command: "TODO_FILE=scratch/todos.json sh tools/w.sh" });
 				const out = await ex.execute("run_command", { command: "rm -rf scratch" });
 				expect(out).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
 				expect(existsSync(join(ws, "scratch"))).toBe(false);
 				expect(judge.asks).toBe(0);
+			});
+			test("the same, with a file another process dropped in: blocked, the file kept", async () => {
+				const ex = new ToolExecutor(ws, "owndir3");
+				await ex.execute("run_command", { command: "mkdir -p scratch" });
+				await ex.execute("run_command", { command: "TODO_FILE=scratch/todos.json sh tools/w.sh" });
+				writeFileSync(join(ws, "scratch/theirs.txt"), "x");
+				const out = await ex.execute("run_command", { command: "rm -rf scratch" });
+				expect(out).toContain(SYSTEM_ONE_BLOCK_MARKER);
+				expect(existsSync(join(realpathSync(ws), "scratch/theirs.txt"))).toBe(true);
 			});
 			test("a directory that was there before is not the lane's: blocked, with what would pass", async () => {
 				const ex = new ToolExecutor(ws, "owndir2");

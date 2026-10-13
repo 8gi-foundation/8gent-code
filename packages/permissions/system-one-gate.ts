@@ -607,8 +607,9 @@ export async function systemOneGate(
 			// No opinion: fall through to the judge.
 		}
 		// `rm -r` of plain relative directories this session made with a
-		// mkdir-only run_command, untracked, holding nothing older than
-		// themselves (#4105); see s1-rm-own-dir.ts. Default mode only.
+		// mkdir-only run_command, untracked, holding only files this session
+		// wrote and directories it made (#4105); see s1-rm-own-dir.ts.
+		// Default mode only.
 		try {
 			const { rmOwnDir } = await import("./s1-rm-own-dir");
 			const own: RmOwnDir = mode === "default" ? rmOwnDir(command, cwd, created) : { ok: false };

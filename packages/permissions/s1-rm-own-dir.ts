@@ -30,8 +30,14 @@
  *   - git tracks nothing under it (outside a repository nothing is tracked);
  *   - every entry under it (at most 2000) is on the same device (no mount
  *     point), is not named .git, and was born no earlier than the directory
- *     itself, so nothing older was moved into it. Symlinks inside are fine:
- *     rm -r removes the link, never its target.
+ *     itself, so nothing older was moved into it;
+ *   - every entry under it is the session's own (8TO on #4106, after #4160):
+ *     a directory a mkdir-only run_command of this session made, or a
+ *     regular file the record says this session wrote (write_file, a
+ *     redirect, or a file a command's child created in a directory the
+ *     command named) and that is still that file, rewritten in place or not.
+ *     A file another process dropped in, a directory something else made, a
+ *     symlink, FIFO or socket all send the rm to the judge.
  *
  * When the command is a plain recursive rm but a path fails, the result
  * carries a hint for the block message saying what would pass.
@@ -62,7 +68,7 @@ const MAX_ENTRIES = 2000;
 const NO: RmOwnDir = { ok: false };
 
 const WHAT_PASSES =
-	"A recursive delete runs without review only as `rm -rf DIR` where DIR is a plain relative directory inside the workspace (no dot names, no symlink on its path) that this session made with a run_command that was only `mkdir`, that git does not track, and that holds nothing older than itself.";
+	"A recursive delete runs without review only as `rm -rf DIR` where DIR is a plain relative directory inside the workspace (no dot names, no symlink on its path) that this session made with a run_command that was only `mkdir`, that git does not track, and that holds only files this session wrote and directories it made the same way.";
 
 function hint(why: string): RmOwnDir {
 	return {
@@ -84,7 +90,7 @@ function untracked(root: string, rel: string): boolean {
 }
 
 /** Null when every entry under `dir` is fine (see the header), else why not. */
-function contentsProblem(dir: string): string | null {
+function contentsProblem(dir: string, created: CreatedFiles): string | null {
 	const top = lstatSync(dir, { bigint: true });
 	const stack = [dir];
 	let seen = 0;
@@ -98,7 +104,13 @@ function contentsProblem(dir: string): string | null {
 			if (st.dev !== top.dev) return "it holds a mount point.";
 			if (st.birthtimeNs <= 0n || st.birthtimeNs < top.birthtimeNs)
 				return `it holds ${path.relative(dir, abs)}, which is older than the directory (moved in from elsewhere).`;
-			if (st.isDirectory()) stack.push(abs);
+			if (st.isDirectory()) {
+				if (!created.createdDirBySession(abs))
+					return `it holds the directory ${path.relative(dir, abs)}, which this session did not make with a mkdir-only run_command.`;
+				stack.push(abs);
+			} else if (!st.isFile() || !created.bornToSession(abs)) {
+				return `it holds ${path.relative(dir, abs)}, which is not a file this session wrote.`;
+			}
 		}
 	}
 	return null;
@@ -153,13 +165,13 @@ export function rmOwnDir(
 			if (!created.createdDirBySession(cur))
 				return hint(`\`${p}\` is not a directory this session made with a mkdir-only run_command.`);
 			if (!untracked(root, rel)) return hint(`git tracks files under \`${p}\`.`);
-			const why = contentsProblem(cur);
+			const why = contentsProblem(cur, created);
 			if (why) return hint(`\`${p}\`: ${why}`);
 			names.push(rel);
 		}
 		return {
 			ok: true,
-			reason: `rm -r of directories this session made (${names.join(", ")}): untracked, nothing older inside`,
+			reason: `rm -r of directories this session made (${names.join(", ")}): untracked, only the session's own files inside`,
 		};
 	} catch {
 		return NO;

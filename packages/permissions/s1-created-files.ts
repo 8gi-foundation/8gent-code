@@ -67,8 +67,8 @@
  *     filesystem root nor the home directory;
  *   - the command names the path's directory (bornScopes): for each plain
  *     relative path word in the command text (quotes masked; no `..`, `$`,
- *     `~`, glob, absolute path or dot segment) the word if it is a directory,
- *     else its parent; the working directory itself is never a scope and at
+ *     `~`, glob, absolute path or dot segment; for `NAME=value`, the value)
+ *     the word if it is a directory, else its parent; the working directory itself is never a scope and at
  *     most MAX_BORN_SCOPES are walked. `bash video/build_slides.sh` scopes to
  *     video/; `make`, `sleep 30` and `ls` walk nothing and record nothing;
  *   - a bounded walk of that scope just before the command (after redirect
@@ -228,6 +228,22 @@ export class CreatedFiles {
 		const want = this.files.get(key);
 		const now = regularFile(abs);
 		return !!want && !!now && want === now;
+	}
+
+	/**
+	 * True when `abs` is a regular file this session created and it is still
+	 * the file born then (device, inode, birth time), even if rewritten in
+	 * place since (#4105: the pilot's CLI rewrites build/todos.json on every
+	 * run). A file put at the path by a rename, a copy or anything else has
+	 * another inode or birth time and does not count.
+	 */
+	bornToSession(abs: string): boolean {
+		const key = keyOf(abs);
+		if (!key) return false;
+		const want = this.files.get(key)?.split(":");
+		const now = regularFile(abs)?.split(":");
+		if (!want || !now) return false;
+		return want[0] === now[0] && want[1] === now[1] && want[3] === now[3];
 	}
 
 	get size(): number {
@@ -402,8 +418,9 @@ const MAX_BORN_SCOPES = 4;
 /**
  * The directories `command` names, as realpaths strictly inside `root`: for
  * each plain relative path word (quotes masked first; no `..`, `$`, `~`, glob,
- * absolute path, flag, or dot / node_modules / vendor segment), the word
- * itself when it is a directory, else its parent directory. The root itself is
+ * absolute path, flag, or dot / node_modules / vendor segment; for a
+ * `NAME=value` word, the value), the word itself when it is a directory, else
+ * its parent directory. The root itself is
  * never a scope, so a command naming no path (`make`, `sleep 30`, `ls`) gets
  * none. A scope inside another scope is dropped; at most MAX_BORN_SCOPES are
  * kept, in the order the command names them.
@@ -412,10 +429,12 @@ export function bornScopes(command: string, root: string): string[] {
 	const masked = maskQuotes(command);
 	const found: string[] = [];
 	for (const m of masked.matchAll(/[^\s;|&<>()]+/g)) {
-		const word = m[0];
 		const at = m.index ?? 0;
 		// Masking changed it: part of it was quoted.
-		if (command.slice(at, at + word.length) !== word) continue;
+		if (command.slice(at, at + m[0].length) !== m[0]) continue;
+		// `NAME=path` (an env assignment such as the pilot's
+		// TODO_FILE=build/todos.json, #4105) names `path`.
+		const word = /^[A-Za-z_][A-Za-z0-9_]*=(.+)$/.exec(m[0])?.[1] ?? m[0];
 		if (!PLAIN_PATH.test(word) || word.startsWith("/") || word.startsWith("-")) continue;
 		const segs = word.split("/").filter((s) => s !== "" && s !== ".");
 		if (segs.length === 0 || segs.includes("..")) continue;
