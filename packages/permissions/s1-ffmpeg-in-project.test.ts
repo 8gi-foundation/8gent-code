@@ -30,6 +30,13 @@ beforeAll(() => {
 	writeFileSync(join(w, "video/list.txt"), "file 'seg1.mp4'\nfile 'seg2.mp4'\n");
 	writeFileSync(join(w, "video/evil.txt"), "file '/etc/passwd'\n");
 	writeFileSync(join(w, "video/up.txt"), "file '../../outside.mp4'\n");
+	// sub/etc/x.wav is a valid workspace file; the real /etc/x.wav is not the workspace's (8SO).
+	mkdirSync(join(w, "sub/etc"), { recursive: true });
+	writeFileSync(join(w, "sub/etc/x.wav"), WAV);
+	writeFileSync(join(w, "sub/abs.txt"), "file '/etc/x.wav'\n");
+	writeFileSync(join(w, "sub/drive.txt"), "file 'C:/x.wav'\n");
+	writeFileSync(join(w, "sub/back.txt"), "file 'etc\\x.wav'\n");
+	writeFileSync(join(w, "sub/rel.txt"), "file 'etc/x.wav'\n");
 	writeFileSync(join(w, "fake.wav"), "#EXTM3U\nhttp://127.0.0.1:1/x\n");
 	symlinkSync("/etc/hosts", join(w, "link.wav"));
 });
@@ -51,6 +58,31 @@ describe("ffmpegInProject passes", () => {
 	});
 	test("concat of a vetted list, -safe 0 included", () => {
 		expect(ok("ffmpeg -y -f concat -safe 0 -i video/list.txt -c copy video/brief.mp4")).toBe(true);
+	});
+});
+
+describe("ffmpegInProject concat entries and platform (8SO on #3960)", () => {
+	const cat = (l: string) => `ffmpeg -f concat -safe 0 -i ${l} -c copy out9.wav`;
+	test.each(["sub/abs.txt", "sub/drive.txt", "sub/back.txt"])(
+		"absolute, drive-letter or backslash entry is refused: %s",
+		(l) => {
+			expect(ok(cat(l))).toBe(false);
+		},
+	);
+	test.skipIf(process.platform === "win32")(
+		"a relative entry in the same folder still passes",
+		() => {
+			expect(ok(cat("sub/rel.txt"))).toBe(true);
+		},
+	);
+	test("win32: no opinion", () => {
+		const real = Object.getOwnPropertyDescriptor(process, "platform");
+		Object.defineProperty(process, "platform", { value: "win32" });
+		try {
+			expect(ok("ffmpeg -loop 1 -i slide1.png -i n1.wav -shortest out8.mp4")).toBe(false);
+		} finally {
+			if (real) Object.defineProperty(process, "platform", real);
+		}
 	});
 });
 

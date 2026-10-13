@@ -148,6 +148,11 @@ function concatList(p: string, cx: Ctx): boolean {
 			if (/^duration\s+\d+(\.\d+)?$/.test(line)) continue;
 			const m = /^file\s+(?:'([^'\\]+)'|"([^"\\]+)"|([A-Za-z0-9._/-]+))$/.exec(line);
 			const name = m?.[1] ?? m?.[2] ?? m?.[3];
+			// With -safe 0 ffmpeg opens an absolute entry as written, not under the list's folder, so
+			// "/etc/x.wav" in sub/list.txt would read the real /etc/x.wav (8SO on #3960). Refuse
+			// absolute, drive-letter and backslash entries outright.
+			if (name && (/^[\\/]/.test(name) || /^[A-Za-z]:/.test(name) || name.includes("\\")))
+				return false;
 			// ffmpeg resolves list entries against the list's own directory.
 			if (!name || !mediaInput(path.join(dir === "." ? "" : dir, name), cx)) return false;
 		}
@@ -285,6 +290,9 @@ function ffmpegOk(args: string[], cx: Ctx): boolean {
 /** ok when `command` is a plain ffmpeg call that builds one new media file from workspace files. */
 export function ffmpegInProject(command: string, cwd: string | undefined): FfmpegInProject {
 	try {
+		// The grammar is POSIX (paths are split on "/", so a\.git would be missed); on win32 the
+		// lane has no opinion, like s1-deck-render.
+		if (process.platform === "win32") return NO;
 		if (!cwd || !path.isAbsolute(cwd)) return NO;
 		const text = command.trim();
 		if (!/^ffmpeg /.test(text) || promptControlText(text) !== null) return NO;
