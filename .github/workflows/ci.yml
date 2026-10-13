@@ -84,12 +84,20 @@ jobs:
       - name: "Biome check (changed files)"
         env:
           BIOME_SINCE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
-        run: git diff -z --name-only --diff-filter=ACMR "$BIOME_SINCE"...HEAD -- . ':!package.json' | xargs -0 -r bunx biome check --no-errors-on-unmatched
+        # The default run shell is `bash -e {0}` without pipefail: a failing git diff
+        # (unreachable base sha) would feed xargs nothing and pass green. #4148.
+        run: |
+          set -o pipefail
+          git diff -z --name-only --diff-filter=ACMR "$BIOME_SINCE"...HEAD -- . ':!package.json' | xargs -0 -r bunx biome check --no-errors-on-unmatched
 
       - name: "Format check (changed files)"
         env:
           BIOME_SINCE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
-        run: git diff -z --name-only --diff-filter=ACMR "$BIOME_SINCE"...HEAD -- . ':!package.json' | xargs -0 -r bunx biome format --no-errors-on-unmatched
+        # The default run shell is `bash -e {0}` without pipefail: a failing git diff
+        # (unreachable base sha) would feed xargs nothing and pass green. #4148.
+        run: |
+          set -o pipefail
+          git diff -z --name-only --diff-filter=ACMR "$BIOME_SINCE"...HEAD -- . ':!package.json' | xargs -0 -r bunx biome format --no-errors-on-unmatched
 
       # The locate tool shells out to ripgrep; ubuntu-latest does not ship it (#3287).
       # Without rg, locate degrades to a stated note, which its own tests cover.
@@ -173,12 +181,35 @@ jobs:
         run: |
           # Test files legitimately contain fake fixtures; gitleaks (the
           # Secret Detection job) scans them properly with allowlisting.
-          FINDINGS=$(grep -rn --include='*.ts' --include='*.json' \
-            -E '(API_KEY|SECRET|PASSWORD|PRIVATE_KEY)\s*[:=]\s*"[^"]{8,}' \
-            packages/ apps/ bin/ \
+          #
+          # grep exits 1 when it matches nothing, which is the normal case here and
+          # is accepted below. Any other non-zero exit means the scan did not run -
+          # a malformed pattern, a missing path - and must fail the step rather than
+          # report a clean tree. Before this, `|| true` collapsed the two and a
+          # broken pattern passed green on the only blocking secret control.
+          # A missing directory is checked here rather than left to grep's exit code:
+          # recursive grep does not report one the same way on every platform.
+          SCAN_DIRS="packages apps bin"
+          for d in $SCAN_DIRS; do
+            if [ ! -d "$d" ]; then
+              echo "::error::secrets scan path $d/ is missing - the scan would cover less than it claims"
+              exit 1
+            fi
+          done
+          set +e
+          RAW=$(grep -rn --include='*.ts' --include='*.json' \
+            -E '(API_KEY|SECRET|PASSWORD|PRIVATE_KEY|TOKEN|CREDENTIAL)\s*[:=]\s*"[^"]{8,}' \
+            $SCAN_DIRS \
             --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.8gent --exclude-dir=__tests__ \
             --exclude='*.test.ts' \
-            2>/dev/null | grep -v 'description\|placeholder\|example\|interface\|type ' || true)
+            2>/dev/null)
+          rc=$?
+          set -e
+          if [ "$rc" -gt 1 ]; then
+            echo "::error::secrets scan could not run (grep exit $rc) - the pattern or a path is wrong"
+            exit 1
+          fi
+          FINDINGS=$(printf '%s\n' "$RAW" | grep -v 'description\|placeholder\|example\|interface\|type ' || true)
           if [ -n "$FINDINGS" ]; then
             echo "Potential hardcoded secrets found:"
             echo "$FINDINGS"
@@ -192,19 +223,42 @@ jobs:
             import {parse} from 'yaml';
             import {readFileSync} from 'fs';
             const p = parse(readFileSync('packages/permissions/default-policies.yaml','utf-8'));
-            if (!p.policies || p.policies.length < 10) {
-              console.error('Policy count too low: ' + (p.policies?.length || 0));
-              process.exit(1);
-            }
-            console.log(p.policies.length + ' policies loaded - OK');
+            const list = p.policies;
+            const fail = (m) => { console.error('Policy integrity: ' + m); process.exit(1); };
+            if (!Array.isArray(list) || list.length === 0) fail('no policies parsed');
+            // Floor = the count on main. Removing a default policy must change this
+            // number in the same PR, so a deletion is never silent; adding one passes.
+            const MIN_POLICIES = 28;
+            if (list.length < MIN_POLICIES) fail('policy count ' + list.length + ' is below ' + MIN_POLICIES + ' - a default policy was removed');
+            const REQUIRED = ['name', 'action', 'condition', 'decision', 'message'];
+            const DECISIONS = ['block', 'require_approval', 'allow'];
+            const seen = new Set();
+            list.forEach((pol, i) => {
+              for (const k of REQUIRED)
+                if (typeof pol[k] !== 'string' || pol[k].trim() === '')
+                  fail('policy ' + i + ' (' + (pol.name || 'unnamed') + ') is missing ' + k);
+              if (!DECISIONS.includes(pol.decision))
+                fail('policy ' + pol.name + ': decision ' + JSON.stringify(pol.decision) +
+                     ' is not one of ' + DECISIONS.join(', '));
+              if (seen.has(pol.name)) fail('duplicate policy name: ' + pol.name);
+              seen.add(pol.name);
+            });
+            console.log(list.length + ' policies, ' + seen.size + ' unique, all well-formed - OK');
           "
 
+      # audit-ci was replaced: it cannot read bun.lock and errored on every run
+      # ("Cannot establish package-manager type, missing package-lock.json, yarn.lock,
+      # and pnpm-lock.yaml"), so this step never audited anything and printed a warning
+      # that looked like a finding. bun audit reads bun.lock.
+      #
+      # Non-blocking until the count reaches zero, with the number stated rather than
+      # hidden: the tree carries 179 advisories (11 critical, 71 high, 77 moderate, 20 low)
+      # as of 2026-10-13; this step prints the 82 at high or above.
+      # A step that fails on every run is bypassed within a day, so this reports and the
+      # advisories are tracked as work. Delete this comment and the flag together.
       - name: Dependency audit
-        run: |
-          npx audit-ci --high 2>/dev/null || {
-            echo "::warning::Dependency audit found high/critical vulnerabilities"
-            npm audit --audit-level=high 2>/dev/null || true
-          }
+        continue-on-error: true
+        run: bun audit --audit-level=high
 
       - name: 200-line rule check
         run: |
