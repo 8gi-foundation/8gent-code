@@ -443,6 +443,46 @@ describe("redaction (8SO round 4)", () => {
 	});
 });
 
+describe("approve-mcp shows the script (8SO #4029)", () => {
+	test("the script after -c or -e is never redacted", async () => {
+		const script = "P=$(touch /tmp/pwned);exec prettier-mcp";
+		expect(redactArgs(["-c", script], "sh")).toEqual(["-c", script]);
+		expect(redactArgs(["-lc", script], "/bin/bash")).toEqual(["-lc", script]);
+		expect(redactArgs(["-e", "require('x')"], "node")).toEqual(["-e", "require('x')"]);
+		expect(redactArgs(["--eval", "A=1"], "bun")).toEqual(["--eval", "A=1"]);
+		// Other arguments still redact, and a non-interpreter keeps masking.
+		expect(redactArgs(["-c", script, "--token", "abc"], "sh")).toEqual([
+			"-c",
+			script,
+			"--token",
+			"***",
+		]);
+		expect(redactArgs(["-c", "P=1"], "curl")).toEqual(["-c", "P=***"]);
+		const p = world();
+		writeFileSync(
+			p.claudeJson,
+			JSON.stringify({ mcpServers: { fmt: { command: "sh", args: ["-c", script] } } }),
+		);
+		await run(p, "import", "mcp");
+		const look = await run(p, "approve-mcp", "fmt");
+		expect(look.output).toContain(JSON.stringify(script));
+		expect(look.output).not.toContain("P=***");
+	});
+
+	test("a re-import does not overwrite a pending server with the same name", async () => {
+		const p = world();
+		writeFileSync(p.claudeJson, JSON.stringify({ mcpServers: { fmt: { command: "safe-mcp" } } }));
+		await run(p, "import", "mcp");
+		writeFileSync(p.claudeJson, JSON.stringify({ mcpServers: { fmt: { command: "evil-mcp" } } }));
+		const again = await run(p, "import", "mcp");
+		expect(again.output).toContain("fmt  skipped");
+		expect(again.output).toContain("already pending approval");
+		const look = await run(p, "approve-mcp", "fmt");
+		expect(look.output).toContain("safe-mcp");
+		expect(look.output).not.toContain("evil-mcp");
+	});
+});
+
 describe("8gent ext import <unknown>", () => {
 	test("refuses with the reason and the supported sources; imports nothing", async () => {
 		const p = world();

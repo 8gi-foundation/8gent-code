@@ -360,6 +360,28 @@ function looksLikeSecret(arg: string): boolean {
 	return entropy(arg) >= 3.5;
 }
 
+const SHELL_SCRIPT_FLAG = /^-[A-Za-z]*c$/;
+const EVAL_FLAG = /^(?:-[A-Za-z]*[ce]|-[pP]e?|--eval|--print|-E|-Command|\/[ck])$/i;
+/** Interpreters whose script-carrying flag (-c, -e, --eval, ...) must never be redacted. */
+const INTERPRETER_FLAGS: Record<string, RegExp> = Object.fromEntries([
+	...["sh", "bash", "zsh", "dash", "ksh", "fish", "ash"].map((n) => [n, SHELL_SCRIPT_FLAG]),
+	...[
+		"python",
+		"python3",
+		"perl",
+		"ruby",
+		"php",
+		"node",
+		"nodejs",
+		"bun",
+		"deno",
+		"pwsh",
+		"powershell",
+		"cmd",
+		"cmd.exe",
+	].map((n) => [n, EVAL_FLAG]),
+]);
+
 /**
  * Redact an argument list in context: the value after a flag whose name says
  * key, token, secret, password, auth or cred, and after -H / --header, is
@@ -367,6 +389,7 @@ function looksLikeSecret(arg: string): boolean {
  * argument is masked whole.
  */
 export function redactArgs(args: readonly unknown[], command?: string): string[] {
+	const interpreter = command !== undefined ? INTERPRETER_FLAGS[programName(command)] : undefined;
 	// For HTTP clients (curl and the like) -k and -K are masked too: some take a
 	// key there, and curl's -K names a config file that can hold credentials.
 	const httpClient = command !== undefined && HTTP_CLIENTS.has(programName(command));
@@ -374,7 +397,13 @@ export function redactArgs(args: readonly unknown[], command?: string): string[]
 	for (let i = 0; i < args.length; i++) {
 		const arg = String(args[i]);
 		const prev = i > 0 ? String(args[i - 1]) : "";
-		if (SECRET_FLAG.test(prev) || HEADER_FLAG.test(prev) || (httpClient && /^-[kK]$/.test(prev))) {
+		// The script a person approves is shown whole: masking it would hide the code.
+		if (interpreter?.test(prev)) out.push(arg);
+		else if (
+			SECRET_FLAG.test(prev) ||
+			HEADER_FLAG.test(prev) ||
+			(httpClient && /^-[kK]$/.test(prev))
+		) {
 			out.push("***");
 		} else if (looksLikeSecret(arg) || isDottedToken(arg)) out.push("***");
 		else out.push(redact(arg));
@@ -488,6 +517,13 @@ function importMcp(
 			}
 			if (name in live) {
 				lines.push(`  ${name}  skipped  (${src.label}) already in ${paths.mcpConfig}`);
+				continue;
+			}
+			if (name in pending) {
+				// A re-import never replaces a pending server: the person may be reading it now.
+				lines.push(
+					`  ${name}  skipped  (${src.label}) already pending approval; approve it or remove it from "pendingServers" first`,
+				);
 				continue;
 			}
 			const hash = serverHash(entry);
