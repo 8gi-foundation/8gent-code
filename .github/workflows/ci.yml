@@ -43,8 +43,29 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      # #4135: apps/tui/tsconfig.json narrows include to the TUI's src, so it is
+      # its own typecheck scope. It was run by no workflow and sat red on main.
+      - name: "Type check (TUI scope)"
+        run: bun run typecheck:tui
+
       - name: Lint
         run: bun run lint
+
+      # #4135: biome check (lint, format, import order) and format:check were run
+      # by no workflow. main still carries 664 unformatted files and 272 unsorted
+      # import blocks, so these gate the files a change touches: new debt fails,
+      # old debt shrinks with every edit, and no repo-wide reformat has to land
+      # on top of the open PRs. The base is the PR base, or the previous main tip
+      # on a push.
+      - name: "Biome check (changed files)"
+        env:
+          BIOME_SINCE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bun run biome:check --changed --since="$BIOME_SINCE" --no-errors-on-unmatched
+
+      - name: "Format check (changed files)"
+        env:
+          BIOME_SINCE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bun run format:check --changed --since="$BIOME_SINCE" --no-errors-on-unmatched
 
       # The locate tool shells out to ripgrep; ubuntu-latest does not ship it (#3287).
       # Without rg, locate degrades to a stated note, which its own tests cover.
