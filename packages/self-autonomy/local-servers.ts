@@ -46,16 +46,22 @@ export function installGuideUrl(platform: string): string {
 	const page = platform === "win32" ? "windows" : platform === "darwin" ? "macos" : "linux";
 	return `${DOCS}/install/${page}.md`;
 }
-export const PROVIDERS_GUIDE_URL = `${DOCS}/providers.md`;
+export const PROVIDERS_GUIDE_URL = `${DOCS}/install/providers.md`;
 
-/** True for localhost, 127.0.0.0/8 and ::1. Anything else is not probed. */
+/**
+ * True for localhost, 127.0.0.0/8 and ::1. Anything else is not probed.
+ * TODO(#4215): the same helper, same name and behaviour, lands in
+ * packages/local-model-server/select.ts with #4215. Whichever of #4215 and
+ * #4216 merges second deletes this copy and imports it from select.ts.
+ */
 export function isLoopbackUrl(url: string): boolean {
+	let host: string;
 	try {
-		const host = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
-		return host === "localhost" || host === "::1" || /^127\.\d+\.\d+\.\d+$/.test(host);
+		host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, "");
 	} catch {
 		return false;
 	}
+	return host === "localhost" || host === "::1" || /^127(\.\d{1,3}){3}$/.test(host);
 }
 
 function withScheme(url: string): string {
@@ -71,8 +77,14 @@ async function getJson(
 	timeoutMs: number,
 ): Promise<unknown | null> {
 	try {
-		const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
-		if (!res.ok) return null;
+		// redirect "manual": a loopback port cannot send the probe elsewhere.
+		// A 3xx (or the opaque redirect a browser-style fetch returns) is a miss.
+		const res = await fetchImpl(url, {
+			signal: AbortSignal.timeout(timeoutMs),
+			redirect: "manual",
+		});
+		if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400) || !res.ok)
+			return null;
 		return await res.json().catch(() => ({}));
 	} catch {
 		return null;

@@ -108,7 +108,22 @@ describe("detectLocalServers", () => {
 			fetchImpl: stubFetch({}, seen),
 		});
 		expect(found).toEqual([]);
-		expect(seen).toEqual([]);
+		expect(seen.filter((u) => !isLoopbackUrl(u))).toEqual([]);
+	});
+
+	test("a redirect is a miss: the probe never follows it off loopback", async () => {
+		const inits: Array<RequestInit | undefined> = [];
+		const redirecting = (async (_u: string, init?: RequestInit) => {
+			inits.push(init);
+			return new Response("", {
+				status: 302,
+				headers: { location: "http://203.0.113.9/v1/models" },
+			});
+		}) as typeof fetch;
+		const found = await detectLocalServers({ env: {}, platform: "linux", fetchImpl: redirecting });
+		expect(found).toEqual([]);
+		expect(inits.length).toBeGreaterThan(0);
+		expect(inits.every((i) => i?.redirect === "manual")).toBe(true);
 	});
 
 	test("a /health route alone is not llama-server: /v1/models must list", async () => {
@@ -217,7 +232,7 @@ describe("choice screen", () => {
 			const screen = providerChoiceScreen([], platform);
 			expect(screen.question).toContain("No local model server is running");
 			expect(screen.question).toContain(`docs/install/${page}.md`);
-			expect(screen.question).toContain("docs/providers.md");
+			expect(screen.question).toContain("docs/install/providers.md");
 			expect(screen.choices.map((c) => c.value)).toEqual(["openrouter", "later"]);
 		}
 		expect(installGuideUrl("freebsd")).toContain("linux.md");
@@ -273,12 +288,23 @@ describe("choice screen", () => {
 		});
 	});
 
-	test("loopback means loopback", () => {
-		expect(isLoopbackUrl("http://127.0.0.1:8080")).toBe(true);
-		expect(isLoopbackUrl("http://localhost:1234")).toBe(true);
-		expect(isLoopbackUrl("http://[::1]:8080")).toBe(true);
-		expect(isLoopbackUrl("http://192.168.1.2:8080")).toBe(false);
-		expect(isLoopbackUrl("http://127.0.0.1.evil.example:8080")).toBe(false);
+	// Same cases as the isLoopbackUrl test in #4215 (packages/local-model-server), so either copy can go.
+	test("loopback hosts pass", () => {
+		for (const u of [
+			"http://127.0.0.1:8080",
+			"http://localhost:8080",
+			"http://[::1]:8080",
+			"http://127.1.2.3",
+		])
+			expect(isLoopbackUrl(u)).toBe(true);
+		for (const u of [
+			"http://192.168.77.5:8080",
+			"http://gpu:8080",
+			"http://0.0.0.0:8080",
+			"http://127.0.0.1.evil.com",
+			"nope",
+		])
+			expect(isLoopbackUrl(u)).toBe(false);
 	});
 
 	test("install hints carry no brew off macOS", () => {
