@@ -7,7 +7,7 @@
  *   - every checkout drops its credentials; every action is pinned to a SHA.
  */
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 
@@ -57,12 +57,11 @@ describe("release-binaries.yml", () => {
 });
 
 describe("all release workflows", () => {
-	for (const f of [
-		"release.yml",
-		"release-binaries.yml",
-		"release-pr.yml",
-		"release-install-smoke.yml",
-	]) {
+	// Every workflow file, not four named ones. The old list is the enumeration
+	// that let release-proxy.yml carry 8 movable refs unchecked while four sibling
+	// release workflows were verified. #4149 pinned the last of them, so the
+	// property now holds everywhere and the list can stop being hand-maintained.
+	for (const f of readdirSync(WF).filter((n) => n.endsWith(".yml"))) {
 		const wf = load(f);
 		test(`${f}: every action is pinned to a commit SHA`, () => {
 			for (const job of Object.values(wf.jobs)) {
@@ -71,16 +70,24 @@ describe("all release workflows", () => {
 				}
 			}
 		});
-		if (f !== "release-install-smoke.yml" && f !== "release-pr.yml") {
-			test(`${f}: every checkout drops its credentials`, () => {
-				for (const job of Object.values(wf.jobs)) {
-					for (const s of job.steps ?? []) {
-						if ((s.uses ?? "").startsWith("actions/checkout@"))
-							expect(s.with?.["persist-credentials"]).toBe(false);
-					}
+	}
+
+	// Not every workflow yet: 15 of the 20 do not set persist-credentials: false,
+	// so widening this would fail rather than enforce. The two the old loop
+	// excluded - release-pr.yml (1 of 4 set) and release-install-smoke.yml (0 of
+	// 4) - are two of those 15; their exclusion was an accommodation, not a
+	// policy. These two comply. Add to this list as others are fixed; do not
+	// delete the assertion to make room for a file.
+	for (const f of ["release.yml", "release-binaries.yml"]) {
+		const wf = load(f);
+		test(`${f}: every checkout drops its credentials`, () => {
+			for (const job of Object.values(wf.jobs)) {
+				for (const s of job.steps ?? []) {
+					if ((s.uses ?? "").startsWith("actions/checkout@"))
+						expect(s.with?.["persist-credentials"]).toBe(false);
 				}
-			});
-		}
+			}
+		});
 	}
 
 	test("release.yml: id-token only on the publishing job", () => {
