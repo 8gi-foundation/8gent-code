@@ -67,3 +67,5 @@ ollama pull qwen3.5
 LM Studio on `localhost:1234` is found too. Use `OLLAMA_BASE_URL` or `LM_STUDIO_HOST` for another host.
 
 Pick a model with `/model` (or Ctrl+L) and a provider with `/provider`. Save a default: `8gent preferences set model qwen3:14b`. Provider keys: `8gent keys`.
+
+Per-platform setup for every model option (Ollama, LM Studio, llama-server, OpenRouter, Apple on-device): [macOS](../install/macos.md), [Windows](../install/windows.md), [Linux](../install/linux.md). Every provider and setting: [providers](../install/providers.md).
