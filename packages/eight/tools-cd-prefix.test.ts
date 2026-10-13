@@ -73,6 +73,10 @@ afterEach(() => {
 	}
 });
 
+// The verdict and the rule behind it. The hint after "The command was not run." names the
+// path as written (`old` in the folder, `video/old` at the root), so it is left out.
+const verdictOf = (out: string) => out.split(" The command was not run.")[0];
+
 const run = (command: string) => executor.execute("run_command", { command }) as Promise<string>;
 
 describe("ToolExecutor run_command with a leading cd", () => {
@@ -89,7 +93,7 @@ describe("ToolExecutor run_command with a leading cd", () => {
 		expect(out).toStartWith("[SYSTEM ONE BLOCKED]");
 		expect(out).toEndWith("Command: rm -rf old");
 		// The same rule, the same verdict: only the command text differs.
-		expect(out.split(" Command: ")[0]).toBe(alone.split(" Command: ")[0]);
+		expect(verdictOf(out)).toBe(verdictOf(alone));
 		expect(existsSync(join(sub, "old", "keep.txt"))).toBe(true);
 	});
 
@@ -219,7 +223,7 @@ describe("native run_command with a leading cd", () => {
 		const alone = await execute("rm -rf video/old");
 		const out = await execute("cd video && rm -rf old");
 		expect(out).toStartWith("[SYSTEM ONE BLOCKED]");
-		expect(out.split(" Command: ")[0]).toBe(alone.split(" Command: ")[0]);
+		expect(verdictOf(out)).toBe(verdictOf(alone));
 		expect(existsSync(join(sub, "old", "keep.txt"))).toBe(true);
 	});
 
