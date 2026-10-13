@@ -8,10 +8,10 @@ import {
 	LibsecretBackend,
 	MacKeychainBackend,
 	type Run,
+	currentKeyOwner,
 	deleteVaultKey,
 	keyVaultProblem,
 	last4,
-	currentKeyOwner,
 	listVaultKeys,
 	maskKey,
 	readVaultKey,
@@ -269,7 +269,8 @@ describe("keychain index and account hygiene", () => {
 		expect(b.list("user:B/")).toEqual(["user:B/OPENAI_API_KEY"]);
 		const wrote = calls.filter((c) => c.args[0] === "-i").map((c) => c.stdin ?? "");
 		for (const line of wrote) {
-			if (line.includes("__index__:user:A")) expect(line).not.toContain(Buffer.from("user:B/").toString("hex"));
+			if (line.includes("__index__:user:A"))
+				expect(line).not.toContain(Buffer.from("user:B/").toString("hex"));
 		}
 	});
 

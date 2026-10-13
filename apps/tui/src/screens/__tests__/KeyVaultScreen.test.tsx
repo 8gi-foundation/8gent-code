@@ -142,7 +142,9 @@ describe("KeyVaultScreen", () => {
 	});
 
 	test("an unreadable vault is reported in plain words", async () => {
-		const { all } = await mount({ problem: "The vault file could not be read. It was left unchanged." });
+		const { all } = await mount({
+			problem: "The vault file could not be read. It was left unchanged.",
+		});
 		expect(all()).toContain("could not be read");
 	});
 });

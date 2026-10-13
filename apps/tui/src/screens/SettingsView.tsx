@@ -20,11 +20,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 // These are the canonical surface for inter-package use; deep imports would
 // bypass each package's documented API. Suppressed by design.
 // react-doctor-disable-next-line react-doctor/no-barrel-import
-import {
-	loadSettings,
-	saveSettings,
-	type Settings,
-} from "../../../../packages/settings/index.js";
+import { type Settings, loadSettings, saveSettings } from "../../../../packages/settings/index.js";
 import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
 import { Divider } from "../components/primitives/Divider.js";
 import { Stack } from "../components/primitives/Stack.js";
@@ -95,7 +91,8 @@ const CATEGORIES: Category[] = [
 			{
 				id: "voice.ttsVoice",
 				label: "TTS voice (fallback)",
-				description: "macOS voice name used when a tab has no per-8gent voice (e.g. Ava, Samantha, Daniel).",
+				description:
+					"macOS voice name used when a tab has no per-8gent voice (e.g. Ava, Samantha, Daniel).",
 				kind: "text",
 				get: (s) => s.voice.ttsVoice,
 				set: (s, v) => ({ ...s, voice: { ...s.voice, ttsVoice: String(v) } }),
@@ -505,12 +502,9 @@ export function SettingsView({ visible, onClose }: SettingsViewProps) {
 		}
 	}, [categoryIndex, fieldIndex]);
 
-	const updateField = useCallback(
-		(f: Field, value: unknown) => {
-			setSettings((prev) => f.set(prev, value));
-		},
-		[],
-	);
+	const updateField = useCallback((f: Field, value: unknown) => {
+		setSettings((prev) => f.set(prev, value));
+	}, []);
 
 	const beginEdit = useCallback((f: Field) => {
 		const current = formatValue(f, f.get(loadSettings()));
@@ -699,14 +693,14 @@ export function SettingsView({ visible, onClose }: SettingsViewProps) {
 				</Box>
 				<Divider />
 				<Box flexDirection="column" paddingY={1}>
-					<AppText>Up/Down       Move between fields and categories</AppText>
-					<AppText>Left/Right    Cycle select values, or adjust numbers by step</AppText>
-					<AppText>Tab           Next category</AppText>
+					<AppText>Up/Down Move between fields and categories</AppText>
+					<AppText>Left/Right Cycle select values, or adjust numbers by step</AppText>
+					<AppText>Tab Next category</AppText>
 					<AppText>Space / Enter Toggle a boolean, or cycle a select</AppText>
-					<AppText>e / Enter     Edit a text or number field</AppText>
-					<AppText>Esc           Cancel an edit, or close the view</AppText>
-					<AppText>q             Close the view</AppText>
-					<AppText>?             Show this help</AppText>
+					<AppText>e / Enter Edit a text or number field</AppText>
+					<AppText>Esc Cancel an edit, or close the view</AppText>
+					<AppText>q Close the view</AppText>
+					<AppText>? Show this help</AppText>
 				</Box>
 				<Divider />
 				<MutedText>Press ? or Esc to dismiss</MutedText>
@@ -759,23 +753,15 @@ export function SettingsView({ visible, onClose }: SettingsViewProps) {
 							{(category?.fields || []).map((f, i) => {
 								const selected = i === fieldIndex;
 								const display =
-									mode === "edit" && selected
-										? `${editBuffer}_`
-										: formatValue(f, f.get(settings));
+									mode === "edit" && selected ? `${editBuffer}_` : formatValue(f, f.get(settings));
 								return (
 									<Box key={f.id} flexDirection="column" marginBottom={1}>
 										<Box>
-											<Text color={selected ? "yellow" : undefined}>
-												{selected ? ">" : " "}{" "}
-											</Text>
+											<Text color={selected ? "yellow" : undefined}>{selected ? ">" : " "} </Text>
 											<AppText bold={selected}>{f.label}</AppText>
 											<Box flexGrow={1} />
 											<Text color="cyan">
-												{f.kind === "toggle"
-													? display === "on"
-														? "[x]"
-														: "[ ]"
-													: display}
+												{f.kind === "toggle" ? (display === "on" ? "[x]" : "[ ]") : display}
 											</Text>
 										</Box>
 										{selected ? (

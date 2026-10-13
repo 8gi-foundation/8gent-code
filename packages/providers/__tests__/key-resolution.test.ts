@@ -133,10 +133,10 @@ describe("leak scan", () => {
 		let sentAuth = "";
 		globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
 			sentAuth = String((init?.headers as Record<string, string>)?.Authorization ?? "");
-			return new Response(
-				JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
-				{ status: 200, headers: { "content-type": "application/json" } },
-			);
+			return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
 		}) as typeof fetch;
 
 		const res = await pm.chat({ messages: [{ role: "user", content: "hello" }] } as never);
