@@ -156,6 +156,83 @@ PY
 			]);
 		},
 	);
+
+	ffTest(
+		"two narrated slides: sound and picture are the same length, all numbers measured (#4165)",
+		async () => {
+			const root = tempDir("vdeck-sync-");
+			const stub = fakeExecutable(
+				root,
+				"st",
+				// Supertonic stand-in: argv is tts -o OUT --voice ID ...; writes a 2.5 s silent 8 kHz wav.
+				`const fs=require("node:fs");const out=process.argv[process.argv.indexOf("-o")+1];
+const d=Buffer.alloc(2*8000*2.5);const h=Buffer.alloc(44);
+h.write("RIFF",0);h.writeUInt32LE(36+d.length,4);h.write("WAVEfmt ",8);h.writeUInt32LE(16,16);h.writeUInt16LE(1,20);
+h.writeUInt16LE(1,22);h.writeUInt32LE(8000,24);h.writeUInt32LE(16000,28);h.writeUInt16LE(2,32);h.writeUInt16LE(16,34);
+h.write("data",36);h.writeUInt32LE(d.length,40);fs.writeFileSync(out,Buffer.concat([h,d]));`,
+			);
+			process.env.EIGHT_SUPERTONIC_BIN = stub;
+			process.env.EIGHT_KITTEN_PY = "/nonexistent";
+			const spec = {
+				slides: [
+					{ title: "One", seconds: 1, narration: "first line" },
+					{ title: "Two", seconds: 1, narration: "second line" },
+				],
+			};
+			const r = await renderVideoDeck({ spec, out: join(root, "v.mp4"), cwd: root });
+			const info = JSON.parse(probe(join(root, "v.mp4"))) as {
+				streams: { codec_name: string; width?: number; height?: number }[];
+				format: { duration: string };
+			};
+			const v = info.streams.find((s) => s.codec_name === "h264");
+			expect(r.slides).toBe(2);
+			expect([r.width, r.height]).toEqual([v?.width ?? 0, v?.height ?? 0]);
+			expect([r.width, r.height]).toEqual([1280, 720]);
+			expect(r.durationSec).toBeCloseTo(Number(info.format.duration), 2);
+			// Each slide holds 2.5 s of voice + 1 s pad = 3.5 s, so 7 s in all.
+			expect(r.videoSec).toBeCloseTo(7, 1);
+			expect(r.audioSec).not.toBeNull();
+			expect(Math.abs((r.audioSec ?? 0) - r.videoSec)).toBeLessThanOrEqual(0.2);
+		},
+	);
+
+	ffTest("a file that does not match the spec is refused and never placed (#4165)", async () => {
+		const root = tempDir("vdeck-probe-");
+		// The stand-ins live outside the project: a binary inside it is refused on its own.
+		const bins = tempDir("vdeck-probe-bin-");
+		const bad = fakeExecutable(
+			bins,
+			"ffprobe-small",
+			`process.stdout.write(JSON.stringify({streams:[{codec_type:"video",width:640,height:360,duration:"2.0"}],format:{duration:"2.0"}}));`,
+		);
+		await expect(
+			renderVideoDeck({ spec: SPEC, out: join(root, "v.mp4"), cwd: root, ffprobe: bad }),
+		).rejects.toThrow(/640x360, not the 1280x720/);
+		expect(existsSync(join(root, "v.mp4"))).toBe(false);
+		const none = fakeExecutable(bins, "ffprobe-none", `process.stdout.write("{}");`);
+		await expect(
+			renderVideoDeck({ spec: SPEC, out: join(root, "w.mp4"), cwd: root, ffprobe: none }),
+		).rejects.toThrow(/could not read a video stream/);
+		expect(existsSync(join(root, "w.mp4"))).toBe(false);
+	});
+
+	test("a deferred session can load it: render_video_deck sits in the creative category (#4165)", async () => {
+		const { ToolRegistry } = await import("../../eight/tool-registry");
+		expect(new ToolRegistry(false).loadCategory("creative")).toContain("render_video_deck");
+	});
+
+	test("missing ffmpeg is reported plainly, after the spec is checked (#4165)", async () => {
+		const root = tempDir("vdeck-noff-");
+		await expect(
+			renderVideoDeck({
+				spec: SPEC,
+				out: join(root, "v.mp4"),
+				cwd: root,
+				ffmpeg: join(root, "no-ffmpeg"),
+			}),
+		).rejects.toThrow(/ffmpeg not found at/);
+		expect(existsSync(join(root, "v.mp4"))).toBe(false);
+	});
 });
 
 describe("confinement", () => {

@@ -72,9 +72,13 @@ export interface RenderDeckOptions {
 	ffprobe?: string;
 }
 
+/** Every number here is read back from the written file by ffprobe, never taken from the spec. */
 export interface RenderDeckResult {
 	path: string;
 	durationSec: number;
+	/** Picture stream length; with audio, the sound stream length. They match within a frame. */
+	videoSec: number;
+	audioSec: number | null;
 	slides: number;
 	width: number;
 	height: number;
@@ -441,28 +445,58 @@ export function placeOutput(src: string, out: string, cwd: string): void {
 	}
 }
 
-export async function probeDuration(
+export interface MediaProbe {
+	durationSec: number;
+	videoSec: number;
+	audioSec: number | null;
+	width: number;
+	height: number;
+}
+
+const sec = (v: unknown) => Math.round(Number.parseFloat(String(v)) * 1000) / 1000;
+
+/** One ffprobe pass: container length, picture size, and each stream's own length. */
+export async function probeMedia(
 	file: string,
 	ffprobe: string,
 	timeoutMs = 30000,
-): Promise<number> {
+): Promise<MediaProbe> {
 	const r = await run(
 		ffprobe,
 		[
 			"-v",
 			"error",
 			"-show_entries",
-			"format=duration",
+			"stream=codec_type,width,height,duration:format=duration",
 			"-of",
-			"default=noprint_wrappers=1:nokey=1",
+			"json",
 			file,
 		],
 		timeoutMs,
 	);
-	const d = Number.parseFloat(r.out.trim());
-	if (r.code !== 0 || !Number.isFinite(d))
-		throw new Error(`ffprobe could not read ${path.basename(file)}`);
-	return Math.round(d * 1000) / 1000;
+	type Probe = {
+		streams?: { codec_type?: string; width?: number; height?: number; duration?: string }[];
+		format?: { duration?: string };
+	};
+	let j: Probe = {};
+	try {
+		j = JSON.parse(r.out) as Probe;
+	} catch {}
+	const v = j.streams?.find((s) => s.codec_type === "video");
+	const a = j.streams?.find((s) => s.codec_type === "audio");
+	const durationSec = sec(j.format?.duration);
+	if (r.code !== 0 || !v?.width || !v.height || !Number.isFinite(durationSec)) {
+		throw new Error(`ffprobe could not read a video stream from ${path.basename(file)}`);
+	}
+	const videoSec = sec(v.duration);
+	const audioSec = a ? sec(a.duration) : null;
+	return {
+		durationSec,
+		videoSec: Number.isFinite(videoSec) ? videoSec : durationSec,
+		audioSec: audioSec !== null && Number.isFinite(audioSec) ? audioSec : null,
+		width: v.width,
+		height: v.height,
+	};
 }
 
 export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDeckResult> {
@@ -547,14 +581,18 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 		);
 		if (r.code !== 0 || !fs.existsSync(tmpOut))
 			throw new Error(`ffmpeg failed: ${r.err.trim().split("\n").pop() ?? r.code}`);
+		// Measured before it is placed, so a file that does not match the spec never lands in the project.
+		const m = await probeMedia(tmpOut, ffprobe, Math.min(30000, left()));
+		if (m.width !== W || m.height !== H)
+			throw new Error(`ffmpeg wrote ${m.width}x${m.height}, not the ${W}x${H} the spec asks for`);
+		if (anyAudio && m.audioSec === null)
+			throw new Error("ffmpeg wrote no audio stream although slides carry narration");
 		placeOutput(tmpOut, opts.out, opts.cwd);
 		return {
 			path: opts.out,
-			durationSec: await probeDuration(opts.out, ffprobe, Math.min(30000, left())),
+			...m,
 			slides: spec.slides.length,
-			width: W,
-			height: H,
-			hasAudio: anyAudio,
+			hasAudio: m.audioSec !== null,
 			kind: "video",
 		};
 	} finally {
