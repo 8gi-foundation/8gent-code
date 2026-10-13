@@ -8,11 +8,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { isLoopbackUrl } from "../local-model-server/select";
 import { ProviderManager } from "../providers/index";
 import {
 	detectLocalServers,
 	installGuideUrl,
-	isLoopbackUrl,
 	providerChoiceScreen,
 	resolveProviderChoice,
 	saveProviderChoice,
@@ -286,25 +286,6 @@ describe("choice screen", () => {
 			provider: "openrouter",
 			model: "auto:free",
 		});
-	});
-
-	// Same cases as the isLoopbackUrl test in #4215 (packages/local-model-server), so either copy can go.
-	test("loopback hosts pass", () => {
-		for (const u of [
-			"http://127.0.0.1:8080",
-			"http://localhost:8080",
-			"http://[::1]:8080",
-			"http://127.1.2.3",
-		])
-			expect(isLoopbackUrl(u)).toBe(true);
-		for (const u of [
-			"http://192.168.77.5:8080",
-			"http://gpu:8080",
-			"http://0.0.0.0:8080",
-			"http://127.0.0.1.evil.com",
-			"nope",
-		])
-			expect(isLoopbackUrl(u)).toBe(false);
 	});
 
 	test("install hints carry no brew off macOS", () => {
