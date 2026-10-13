@@ -56,7 +56,11 @@ export function logPath(id: string): string {
 	try {
 		fs.chmodSync(dir, 0o700);
 	} catch {}
-	const safe = String(id).replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_").slice(0, 100) || "_";
+	const safe =
+		String(id)
+			.replace(/[^A-Za-z0-9._-]/g, "_")
+			.replace(/^\.+/, "_")
+			.slice(0, 100) || "_";
 	const p = path.join(dir, `${safe}.log`);
 	try {
 		if (fs.statSync(p).size > MAX_LOG_BYTES) fs.renameSync(p, `${p}.1`);
@@ -74,7 +78,8 @@ export function cleanEnv(env: unknown): Record<string, string> {
 	const out: Record<string, string> = {};
 	if (!env || typeof env !== "object") return out;
 	for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
-		if (typeof v === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && !v.includes("\0")) out[k] = v;
+		if (typeof v === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && !v.includes("\0"))
+			out[k] = v;
 	}
 	return out;
 }
@@ -114,9 +119,18 @@ export function validateJob(j: unknown): CronJob | null {
 export function parseVmStat(text: string): { free: number; total: number } | null {
 	const size = Number(/page size of (\d+) bytes/.exec(text)?.[1]);
 	if (!size) return null;
-	const pages = (label: string) => Number(new RegExp(`^${label}:\\s+(\\d+)`, "m").exec(text)?.[1] ?? 0);
-	const free = pages("Pages free") + pages("Pages inactive") + pages("Pages speculative") + pages("Pages purgeable");
-	const total = free + pages("Pages active") + pages("Pages wired down") + pages("Pages occupied by compressor");
+	const pages = (label: string) =>
+		Number(new RegExp(`^${label}:\\s+(\\d+)`, "m").exec(text)?.[1] ?? 0);
+	const free =
+		pages("Pages free") +
+		pages("Pages inactive") +
+		pages("Pages speculative") +
+		pages("Pages purgeable");
+	const total =
+		free +
+		pages("Pages active") +
+		pages("Pages wired down") +
+		pages("Pages occupied by compressor");
 	return total > 0 ? { free: free * size, total: total * size } : null;
 }
 function readFreeMem(): number {
@@ -312,7 +326,8 @@ function acquireHeavy(jobId: string): boolean {
 function setHeavyPid(jobId: string, pid: number): void {
 	try {
 		const cur = fs.readFileSync(lockPath(), "utf8");
-		if (JSON.parse(cur).job === jobId) fs.writeFileSync(lockPath(), lockBody(pid, jobId), { mode: 0o600 });
+		if (JSON.parse(cur).job === jobId)
+			fs.writeFileSync(lockPath(), lockBody(pid, jobId), { mode: 0o600 });
 	} catch {}
 }
 
@@ -477,7 +492,9 @@ export async function catchup(now: Date = new Date()): Promise<void> {
 	for (const job of jobs) {
 		if (!job.enabled) continue;
 		if (runs.length >= MAX_CATCHUP_PER_BOOT) {
-			console.log(`[cron] catchup capped at ${MAX_CATCHUP_PER_BOOT}; the rest wait for their next slot`);
+			console.log(
+				`[cron] catchup capped at ${MAX_CATCHUP_PER_BOOT}; the rest wait for their next slot`,
+			);
 			break;
 		}
 		const prev = previousScheduled(job.expression, now);
@@ -501,10 +518,13 @@ export async function startCron(): Promise<void> {
 	catchup().catch((err) => console.error("[cron] catchup error:", err));
 	const arm = () => {
 		// Aligned to the minute boundary; tickAt covers any minute a late timer missed.
-		tickTimer = setTimeout(() => {
-			tickAt(new Date()).catch((err) => console.error("[cron] tick error:", err));
-			arm();
-		}, 60_000 - (Date.now() % 60_000) + 25);
+		tickTimer = setTimeout(
+			() => {
+				tickAt(new Date()).catch((err) => console.error("[cron] tick error:", err));
+				arm();
+			},
+			60_000 - (Date.now() % 60_000) + 25,
+		);
 	};
 	arm();
 }

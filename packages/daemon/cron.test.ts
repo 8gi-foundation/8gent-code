@@ -56,7 +56,11 @@ describe("defect 1: edits survive", () => {
 		write([mk({ id: "a", expression: "0 0 1 1 *" }), mk({ id: "hand", expression: "0 0 1 1 *" })]);
 		cron.addJob(mk({ id: "c", expression: "0 0 1 1 *" }));
 		await new Promise((r) => setTimeout(r, 50));
-		expect(read().map((j: { id: string }) => j.id).sort()).toEqual(["a", "c", "hand"]);
+		expect(
+			read()
+				.map((j: { id: string }) => j.id)
+				.sort(),
+		).toEqual(["a", "c", "hand"]);
 	});
 	test("a corrupt cron.json is never overwritten", async () => {
 		fs.writeFileSync(file(), "{not json");
@@ -69,7 +73,14 @@ describe("defect 1: edits survive", () => {
 describe("defect 2 and 3: cwd, env, logs", () => {
 	test("cwd and env apply and stdout plus stderr land in the per-job log", async () => {
 		const wd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cron-cwd-")));
-		write([mk({ id: "j", cwd: wd, env: { CRON_X: "hello" }, payload: "pwd; echo $CRON_X; echo oops 1>&2" })]);
+		write([
+			mk({
+				id: "j",
+				cwd: wd,
+				env: { CRON_X: "hello" },
+				payload: "pwd; echo $CRON_X; echo oops 1>&2",
+			}),
+		]);
 		await cron.loadJobs();
 		await cron.tickAt(T("2026-10-10T12:00:00"));
 		const log = logOf("j");
@@ -80,7 +91,13 @@ describe("defect 2 and 3: cwd, env, logs", () => {
 		fs.rmSync(wd, { recursive: true, force: true });
 	});
 	test("a chatty stderr does not block the job", async () => {
-		write([mk({ id: "loud", payload: "i=0; while [ $i -lt 3000 ]; do echo 0123456789012345678901234567890123456789 1>&2; i=$((i+1)); done; echo done" })]);
+		write([
+			mk({
+				id: "loud",
+				payload:
+					"i=0; while [ $i -lt 3000 ]; do echo 0123456789012345678901234567890123456789 1>&2; i=$((i+1)); done; echo done",
+			}),
+		]);
 		await cron.loadJobs();
 		await cron.tickAt(T("2026-10-10T12:00:00"));
 		expect(logOf("loud")).toContain("done");
@@ -160,14 +177,20 @@ describe("heavy jobs", () => {
 	});
 	test("a lock held by a dead pid is cleared", async () => {
 		const p = Bun.spawnSync(["true"]);
-		fs.writeFileSync(path.join(dir, "cron-heavy.lock"), JSON.stringify({ pid: p.pid, job: "ghost" }));
+		fs.writeFileSync(
+			path.join(dir, "cron-heavy.lock"),
+			JSON.stringify({ pid: p.pid, job: "ghost" }),
+		);
 		write([mk({ id: "h", heavy: true, payload: "echo ran" })]);
 		await cron.loadJobs();
 		await cron.tickAt(T("2026-10-10T12:00:00"));
 		expect(logOf("h")).toContain("ran");
 	});
 	test("a lock held by a live pid blocks", async () => {
-		fs.writeFileSync(path.join(dir, "cron-heavy.lock"), JSON.stringify({ pid: process.pid, job: "other" }));
+		fs.writeFileSync(
+			path.join(dir, "cron-heavy.lock"),
+			JSON.stringify({ pid: process.pid, job: "other" }),
+		);
 		write([mk({ id: "h", heavy: true })]);
 		await cron.loadJobs();
 		await cron.tickAt(T("2026-10-10T12:00:00"));
@@ -215,7 +238,9 @@ describe("hardening (8SO)", () => {
 		expect(fs.statSync(file()).mode & 0o777).toBe(0o600);
 	});
 	test("env is cleaned: bad keys and non-strings dropped, daemon env untouched", () => {
-		expect(cron.cleanEnv({ OK: "1", "BAD KEY": "x", "A=B": "x", N: 5, Z: "a\0b" })).toEqual({ OK: "1" });
+		expect(cron.cleanEnv({ OK: "1", "BAD KEY": "x", "A=B": "x", N: 5, Z: "a\0b" })).toEqual({
+			OK: "1",
+		});
 		expect(process.env.CRON_LEAK).toBeUndefined();
 	});
 	test("addJob rejects malformed or non-absolute-cwd jobs", () => {
@@ -227,7 +252,10 @@ describe("hardening (8SO)", () => {
 	});
 	test("a lock from a previous boot with a recycled live pid is stale", async () => {
 		const oldBoot = Date.now() - 86_400_000;
-		fs.writeFileSync(path.join(dir, "cron-heavy.lock"), JSON.stringify({ pid: process.pid, job: "x", boot: oldBoot }));
+		fs.writeFileSync(
+			path.join(dir, "cron-heavy.lock"),
+			JSON.stringify({ pid: process.pid, job: "x", boot: oldBoot }),
+		);
 		write([mk({ id: "h", heavy: true, payload: "echo ran" })]);
 		await cron.loadJobs();
 		await cron.tickAt(T("2026-10-10T12:00:00"));
@@ -249,7 +277,9 @@ describe("hardening (8SO)", () => {
 		write(jobs);
 		await cron.loadJobs();
 		await cron.catchup(T("2026-10-10T12:20:00"));
-		expect(read().filter((j: { lastRun: string }) => j.lastRun > "2026-10-10T09:00:05").length).toBe(10);
+		expect(
+			read().filter((j: { lastRun: string }) => j.lastRun > "2026-10-10T09:00:05").length,
+		).toBe(10);
 	});
 	test("vm_stat parsing counts reclaimable pages as free", () => {
 		const txt = `Mach Virtual Memory Statistics: (page size of 16384 bytes)
