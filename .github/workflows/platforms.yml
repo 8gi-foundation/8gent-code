@@ -49,8 +49,18 @@ jobs:
           if [ -n "$bad" ]; then echo "::error::CRLF in working tree:"; echo "$bad"; exit 1; fi
           echo "LF OK"
 
+      # #4143: same node-gyp pin and node-pty preflight as ci.yml Validate, so the
+      # bunx node-gyp@latest race cannot turn this leg red on an unrelated PR.
+      - name: "Pin node-gyp for native builds"
+        if: runner.os == 'Linux'
+        run: npm install -g --no-fund --no-audit node-gyp@12.4.0 && node-gyp --version
+
       - name: Install dependencies
         run: bun install
+
+      - name: "Preflight native deps (node-pty)"
+        if: runner.os == 'Linux'
+        run: bun run preflight:native
 
       # The locate tool shells out to ripgrep, which neither hosted image ships (#3287).
       - name: Install ripgrep
