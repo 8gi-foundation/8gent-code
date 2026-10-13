@@ -3,6 +3,7 @@
  * pattern frequency, evolution summary, and schema versioning.
  */
 
+import { removeTree } from "../../tests/db-files";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -28,7 +29,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	resetDb();
-	fs.rmSync(tmpDir, { recursive: true, force: true });
+	removeTree(tmpDir);
 	process.env.EIGHT_DATA_DIR = undefined;
 });
 
@@ -61,7 +62,7 @@ describe("recordEvent", () => {
 			);
 		}
 		expect(ids.size).toBe(50);
-	});
+	}, 30_000); // 50 durable inserts: about 5 s on a Windows runner, over bun's 5 s default
 
 	it("stores metadata as JSON correctly", () => {
 		const meta = { tool: "grep", exitCode: 0, flags: ["--recursive"] };

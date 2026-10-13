@@ -27,7 +27,7 @@ beforeAll(() => {
 	initDatabase(emptyDbPath);
 	seededDbPath = path.join(tmpRoot, "seeded.db");
 	seedDatabase(seededDbPath);
-});
+}, 60_000); // seeding is many durable inserts: it hit bun's 5 s hook limit on a Windows runner
 
 beforeEach(() => __resetDesignContextCache());
 

@@ -80,3 +80,89 @@ describe("DaemonClient", () => {
 		expect(sock.sent.length).toBe(0);
 	});
 });
+
+describe("DaemonClient session lifecycle (#3538)", () => {
+	const frames = (sock: FakeSocket) => sock.sent.map((s) => JSON.parse(s));
+	const tick = () => new Promise((r) => setTimeout(r, 5));
+
+	it("resumes the same session on reconnect instead of creating a new one", async () => {
+		const sockets: FakeSocket[] = [];
+		const client = new DaemonClient({
+			url: "ws://test",
+			channel: "telegram",
+			reconnectDelayMs: 0,
+			socketFactory: () => {
+				const s = new FakeSocket();
+				sockets.push(s);
+				return s;
+			},
+		});
+		const connecting = client.connect();
+		sockets[0].open();
+		sockets[0].receive({ type: "session:created", sessionId: "sess_A" });
+		await connecting;
+
+		// Network blip: the socket drops, the client redials.
+		sockets[0].close();
+		await tick();
+		expect(sockets.length).toBe(2);
+		sockets[1].open();
+
+		expect(frames(sockets[1])).toEqual([
+			{ type: "session:resume", sessionId: "sess_A", channel: "telegram" },
+		]);
+		sockets[1].receive({ type: "session:resumed", sessionId: "sess_A" });
+		expect(client.getSessionId()).toBe("sess_A");
+		client.close();
+	});
+
+	it("connect() resolves on session:resumed after a reconnect", async () => {
+		const sockets: FakeSocket[] = [];
+		const client = new DaemonClient({
+			url: "ws://test",
+			reconnectDelayMs: 0,
+			socketFactory: () => {
+				const s = new FakeSocket();
+				sockets.push(s);
+				return s;
+			},
+		});
+		const first = client.connect();
+		sockets[0].open();
+		sockets[0].receive({ type: "session:created", sessionId: "sess_A" });
+		await first;
+
+		sockets[0].close();
+		await tick();
+		const again = client.connect();
+		sockets[1].open();
+		sockets[1].receive({ type: "session:resumed", sessionId: "sess_A" });
+		const result = await Promise.race([
+			again.then(() => "resolved"),
+			new Promise((r) => setTimeout(() => r("timeout"), 200)),
+		]);
+		expect(result).toBe("resolved");
+		client.close();
+	});
+
+	it("resetSession destroys the old session before creating a fresh one", async () => {
+		const sock = new FakeSocket();
+		const client = new DaemonClient({
+			url: "ws://test",
+			channel: "telegram",
+			socketFactory: () => sock,
+		});
+		const connecting = client.connect();
+		sock.open();
+		sock.receive({ type: "session:created", sessionId: "sess_A" });
+		await connecting;
+		sock.sent.length = 0;
+
+		client.resetSession();
+		expect(frames(sock)).toEqual([
+			{ type: "session:destroy", sessionId: "sess_A" },
+			{ type: "session:create", channel: "telegram" },
+		]);
+		client.close();
+	});
+});

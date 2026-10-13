@@ -10,12 +10,14 @@
 import { describe, expect, test } from "bun:test";
 import {
 	BRANCH_MAX,
+	PATH_HEAD,
 	PATH_MIN,
 	cellWidth,
 	fitHeaderMiddle,
 	headerMiddleWidth,
 	truncateEnd,
 	truncateMiddle,
+	truncatePath,
 } from "./header-layout.js";
 
 const PATH = "/Users/operator/8gent-code/.claude/worktrees/agent-a8b0f5de5b64292c6";
@@ -152,5 +154,55 @@ describe("fitHeaderMiddle without a branch (audit #10)", () => {
 		expect(fitHeaderMiddle(PATH, "", "no repo", PATH_MIN + 2)).toEqual({ path: "", branch: "", sync: "no repo" });
 		// Before the first git check there is no note, so the path keeps the room.
 		expect(fitHeaderMiddle(PATH, "", "", PATH_MIN + 2).path).not.toBe("");
+	});
+});
+
+describe("truncatePath keeps the end of a workdir recognisable (#3810)", () => {
+	const RUN = "~/.8gent/rishi-pilot/runs/2026-10-10_005813";
+	const nameOf = (n: number) => "a-b-".repeat(20).slice(0, n - 1).concat("z");
+
+	for (const n of [29, 30, 60]) {
+		test(`name of ${n} characters keeps the run id tail and the leaf at 69 columns`, () => {
+			const name = nameOf(n);
+			expect(name.length).toBe(n);
+			const path = `${RUN}/${name}/work`;
+			const out = truncatePath(path, 69);
+			expect(cellWidth(out)).toBeLessThanOrEqual(69);
+			expect(out.endsWith("/work")).toBe(true);
+			expect(out.startsWith(path.slice(0, PATH_HEAD))).toBe(true);
+			if (n <= 30) {
+				// whole scenario name visible, and the run id tail the pilot check needs
+				expect(out).toContain(`/${name}/work`);
+				expect(out).toContain("10-10_005813");
+			} else {
+				// 60 chars cannot fit whole: the end of the name stays, not just the id
+				expect(out).toContain(`${name.slice(-20)}/work`);
+			}
+		});
+	}
+
+	test("a path that fits is returned unchanged", () => {
+		expect(truncatePath("/a/b/c", 20)).toBe("/a/b/c");
+	});
+
+	test("tiny budgets still produce exactly the budget", () => {
+		expect(truncatePath(RUN, 0)).toBe("");
+		expect(truncatePath(RUN, 1)).toBe("…");
+		expect(cellWidth(truncatePath(RUN, 13))).toBe(13);
+	});
+
+	test("wide characters never overflow the budget", () => {
+		const wide = "~/プロジェクト/作業ディレクトリ/日本語のフォルダ名/work";
+		for (const max of [3, 14, 20, 24, 30]) {
+			expect(cellWidth(truncatePath(wide, max))).toBeLessThanOrEqual(max);
+		}
+		expect(truncatePath(wide, 30).endsWith("/work")).toBe(true);
+	});
+
+	test("fitHeaderMiddle uses the end-biased cut", () => {
+		const path = `${RUN}/${nameOf(30)}/work`;
+		const m = fitHeaderMiddle(path, "main", "", 69 + 3 + 4);
+		expect(m.path).toContain("10-10_005813");
+		expect(m.path.endsWith("/work")).toBe(true);
 	});
 });

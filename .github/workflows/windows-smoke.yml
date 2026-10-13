@@ -1,0 +1,172 @@
+# windows-smoke.yml - Prove 8gent-code installs and starts on Windows from a
+# shallow clone, the same path a Windows user takes: bun install, then run from
+# source. No model is contacted anywhere in this job.
+#
+# It also compiles the standalone Windows binary (bun-windows-x64) and uploads
+# it as a workflow artifact with its sha256, so a Windows user without Bun can
+# be handed a single .exe. This workflow never creates a release or a tag.
+
+name: Windows Smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-smoke.yml"
+      - "bin/**"
+      - "scripts/**"
+      - "packages/**"
+      - "apps/tui/**"
+      - "package.json"
+      - "bun.lock"
+      - ".gitattributes"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows (source + binary)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      # No-model run: point the local-model decider at a closed port.
+      EIGHT_DECIDE_OLLAMA_HOST: http://127.0.0.1:9
+      CI: "true"
+    steps:
+      - name: Shallow checkout (what a Windows user clones)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Version
+        run: bun bin/8gent.ts --version
+
+      - name: Doctor
+        run: bun bin/8gent.ts doctor
+
+      - name: Headless smoke (JSON-RPC tools.list, no model)
+        shell: bash
+        run: |
+          out=$(printf '{"jsonrpc":"2.0","id":1,"method":"tools.list"}\n' | bun bin/8gent.ts --rpc)
+          echo "$out"
+          echo "$out" | grep -q '"result"' || { echo "::error::tools.list returned no result"; exit 1; }
+
+      - name: TUI bundle builds (module graph resolves on Windows)
+        run: bun scripts/build-bundles.ts --tui
+
+      - name: TUI entry reachable from source (no TTY, no model, 20s cap)
+        shell: pwsh
+        run: |
+          New-Item empty-stdin.txt -ItemType File -Force | Out-Null
+          $p = Start-Process bun -ArgumentList "run","apps/tui/src/index.tsx","--no-pet" -NoNewWindow -PassThru -RedirectStandardOutput tui-src.out -RedirectStandardError tui-src.err -RedirectStandardInput empty-stdin.txt
+          if (-not $p.WaitForExit(20000)) { Stop-Process -Id $p.Id -Force; "still running at 20s (stopped by PID $($p.Id))" } else { "exited code $($p.ExitCode)" }
+          Get-Content tui-src.out, tui-src.err -ErrorAction SilentlyContinue | Select-Object -First 30
+          if ((Get-Content tui-src.out, tui-src.err -Raw -ErrorAction SilentlyContinue) -match "Cannot find module|ENOENT|EINVAL|is not recognized") { throw "TUI source launch hit a module or path error" }
+
+      - name: Windows path-safety tests
+        run: bun test tests/windows
+
+      - name: Compile standalone Windows binary
+        run: bun run scripts/build-binaries.ts --only=bun-windows-x64
+
+      - name: Run the compiled binary
+        shell: pwsh
+        run: |
+          .\dist\bin\8gent-windows-x64.exe --version
+          .\dist\bin\8gent-windows-x64.exe --help | Select-Object -First 5
+
+      - name: Compiled binary runs the daemon on loopback and opens a browser session
+        shell: pwsh
+        run: |
+          # The path a Windows user takes for 8gent Browser: `8gent daemon run`,
+          # then a client on ws://127.0.0.1:18789 opens a session. No model is called.
+          $home8 = Join-Path $env:RUNNER_TEMP "daemon-home"
+          New-Item -ItemType Directory -Force $home8 | Out-Null
+          $env:EIGHT_DATA_DIR = Join-Path $home8 ".8gent"
+          $env:EIGHT_DAEMON_PORT = "18797"
+          $p = Start-Process .\dist\bin\8gent-windows-x64.exe -ArgumentList "daemon","run" -NoNewWindow -PassThru -RedirectStandardOutput daemon.out -RedirectStandardError daemon.err
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try { $h = Invoke-RestMethod -Uri http://127.0.0.1:18797/health -TimeoutSec 2; if ($h.status -eq "ok") { $ok = $true; break } } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ok) { throw "daemon did not answer /health within 30 s" }
+            $bound = Get-NetTCPConnection -LocalPort 18797 -State Listen | Select-Object -ExpandProperty LocalAddress
+            "listening on: $($bound -join ', ')"
+            if ($bound | Where-Object { $_ -ne "127.0.0.1" }) { throw "daemon run must listen on 127.0.0.1 only, got: $($bound -join ', ')" }
+            # A web page that is not ours must be refused before any upgrade.
+            $code = 0
+            try { Invoke-WebRequest -Uri http://127.0.0.1:18797/ -Headers @{ Origin = "https://evil.example" } -UseBasicParsing | Out-Null } catch { $code = [int]$_.Exception.Response.StatusCode }
+            if ($code -ne 403) { throw "Origin https://evil.example must get 403, got $code" }
+            "foreign origin refused (403)"
+            $ws = [System.Net.WebSockets.ClientWebSocket]::new()
+            $ct = [Threading.CancellationToken]::None
+            $ws.ConnectAsync([Uri]"ws://127.0.0.1:18797", $ct).Wait(10000) | Out-Null
+            $req = [Text.Encoding]::UTF8.GetBytes('{"type":"session:create","channel":"browser"}')
+            $ws.SendAsync([ArraySegment[byte]]::new($req), "Text", $true, $ct).Wait(10000) | Out-Null
+            $got = ""
+            for ($i = 0; $i -lt 10 -and $got -notmatch "session:created"; $i++) {
+              $buf = [byte[]]::new(65536)
+              $r = $ws.ReceiveAsync([ArraySegment[byte]]::new($buf), $ct)
+              if (-not $r.Wait(10000)) { break }
+              $got = [Text.Encoding]::UTF8.GetString($buf, 0, $r.Result.Count)
+            }
+            if ($got -notmatch "session:created") { throw "no session:created frame, last frame: $got" }
+            "browser session opened"
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Get-Content daemon.out, daemon.err -ErrorAction SilentlyContinue | Select-Object -Last 20
+          }
+
+      # Windows never stops the daemon cleanly, so the session journal is the only
+      # durability there (#4107). Hard-kill the compiled daemon mid-command
+      # (TerminateProcess, like Stop-Process -Force or a power cut), start it
+      # again, and require the session back, the cut command not replayed, the
+      # turn continued and finished, and the command run exactly once. The model
+      # is a stub inside the script; no model or network is used.
+      - name: Compiled daemon survives a hard kill mid-command and finishes the work
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path .\dist\bin\8gent-windows-x64.exe).Path
+          bun scripts/ci/durable-kill-resume.ts $exe daemon run
+          if ($LASTEXITCODE -ne 0) { throw "kill-and-resume proof failed (exit $LASTEXITCODE)" }
+
+      # The TUI is embedded in the .exe (#2975). Launch it under ConPTY from a
+      # hostile working directory and require a real first frame (a known TUI
+      # string), not just the absence of two error strings (#3894).
+      - name: Compiled binary renders the embedded TUI first frame
+        shell: pwsh
+        run: node scripts/tui-first-frame.mjs dist\bin\8gent-windows-x64.exe 90
+
+      - name: Hash the binary
+        shell: pwsh
+        run: |
+          $f = Get-Item .\dist\bin\8gent-windows-x64.exe
+          $h = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+          "$h  $($f.Name)" | Tee-Object -FilePath .\dist\bin\8gent-windows-x64.exe.sha256
+          "size_bytes=$($f.Length)"
+          "### Windows binary`nsize: $([math]::Round($f.Length/1MB,1)) MB`nsha256: $h" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: 8gent-windows-x64
+          path: |
+            dist/bin/8gent-windows-x64.exe
+            dist/bin/8gent-windows-x64.exe.sha256
+          retention-days: 14

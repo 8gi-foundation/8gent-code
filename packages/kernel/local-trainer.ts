@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawn } from "bun";
 import type { ScoreRecord } from "./judge";
 import type { CheckpointInfo } from "./training";
@@ -127,7 +128,7 @@ const DEFAULT_CONFIG: LocalTrainerConfig = {
 	dataDir: join(KERNEL_DIR, "training"),
 	validateCommand: "bun run benchmarks/autoresearch/validate-checkpoint.ts",
 	promotionThreshold: 80,
-	trainerScript: join(dirname(new URL(import.meta.url).pathname), "train_lora.py"),
+	trainerScript: join(dirname(fileURLToPath(import.meta.url)), "train_lora.py"),
 	backend: "auto",
 };
 

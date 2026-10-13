@@ -1,0 +1,298 @@
+{
+	"$comment": "Camera pan is a fraction of the zoom margin (-1 to 1), so a move never leaves the frame. Type sizes are fractions of the short side. 8MO film craft, codified. Every value is lifted from the 8GI cinematic films (the lotus and journey updates). Hues 270-350 never appear. Films reference components by id; mix() can take the grade of one film and the titles of another.",
+	"palettes": {
+		"night-amber": {
+			"bgTop": "#05080A",
+			"bgBottom": "#0C0D0D",
+			"fog": "#1A2224",
+			"ink": "#EEE8DE",
+			"ink2": "#B0A89C",
+			"dim": "#78726A",
+			"accent": "#E8A832",
+			"accentCore": "#D4890C"
+		},
+		"night-teal": {
+			"bgTop": "#040A0B",
+			"bgBottom": "#0B0F0F",
+			"fog": "#14272A",
+			"ink": "#EAF0EC",
+			"ink2": "#A6B4AF",
+			"dim": "#6C7A76",
+			"accent": "#3FC1B0",
+			"accentCore": "#1F8F82"
+		},
+		"ember-coral": {
+			"bgTop": "#0B0706",
+			"bgBottom": "#120D0B",
+			"fog": "#2A1D18",
+			"ink": "#F2E9E0",
+			"ink2": "#BCA898",
+			"dim": "#7E6E62",
+			"accent": "#F07850",
+			"accentCore": "#C4502E"
+		},
+		"sky-ice": {
+			"bgTop": "#05080D",
+			"bgBottom": "#0A0E12",
+			"fog": "#16222E",
+			"ink": "#E8EEF2",
+			"ink2": "#A2B0BA",
+			"dim": "#6A7680",
+			"accent": "#8FD3E8",
+			"accentCore": "#58A8E8"
+		},
+		"leaf-dusk": {
+			"bgTop": "#060905",
+			"bgBottom": "#0C0E0A",
+			"fog": "#1C2416",
+			"ink": "#ECEEE2",
+			"ink2": "#AEB49E",
+			"dim": "#747A66",
+			"accent": "#9CCB5A",
+			"accentCore": "#6E9A34"
+		},
+		"paper": {
+			"bgTop": "#F4EFE6",
+			"bgBottom": "#E9E2D6",
+			"fog": "#FFFFFF",
+			"ink": "#1C1A17",
+			"ink2": "#4E4A43",
+			"dim": "#8A8378",
+			"accent": "#C4780A",
+			"accentCore": "#9A5C06"
+		}
+	},
+	"typeScales": {
+		"editorial": {
+			"display": [
+				"Didot",
+				"Bodoni-72-Book",
+				"Baskerville-SemiBold",
+				"/System/Library/Fonts/Supplemental/Georgia.ttf",
+				"/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+				"DejaVu-Serif"
+			],
+			"label": [
+				"Avenir-Next-Demi-Bold",
+				"Helvetica-Bold",
+				"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+				"DejaVu-Sans-Bold"
+			],
+			"body": [
+				"Avenir-Next-Medium",
+				"Helvetica",
+				"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+				"DejaVu-Sans"
+			],
+			"sizes": { "kicker": 0.03, "title": 0.1, "sub": 0.038, "lower": 0.03, "caption": 0.037 },
+			"kickerTracking": 6,
+			"uppercaseKicker": true
+		},
+		"technical": {
+			"display": [
+				"Avenir-Next-Bold",
+				"Helvetica-Bold",
+				"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+				"DejaVu-Sans-Bold"
+			],
+			"label": [
+				"/Library/Fonts/SourceCodePro-Medium.ttf",
+				"Menlo-Regular",
+				"/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+				"DejaVu-Sans-Mono"
+			],
+			"body": [
+				"Avenir-Next-Regular",
+				"Helvetica",
+				"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+				"DejaVu-Sans"
+			],
+			"sizes": { "kicker": 0.028, "title": 0.085, "sub": 0.034, "lower": 0.028, "caption": 0.035 },
+			"kickerTracking": 3,
+			"uppercaseKicker": true
+		}
+	},
+	"titleCards": {
+		"centred-stack": {
+			"align": "center",
+			"kickerY": 0.2,
+			"titleY": 0.3,
+			"subGap": 0.03,
+			"maxTitleWidth": 0.84,
+			"glow": { "x": 0.5, "y": 0.62, "radius": 0.11, "strength": 0.85 },
+			"motes": 22
+		},
+		"left-rule": {
+			"align": "left",
+			"kickerY": 0.3,
+			"titleY": 0.38,
+			"subGap": 0.035,
+			"maxTitleWidth": 0.72,
+			"glow": { "x": 0.78, "y": 0.5, "radius": 0.16, "strength": 0.55 },
+			"motes": 12
+		}
+	},
+	"lowerThirds": {
+		"accent-rule": { "y": 0.86, "x": 0.07, "ruleWidth": 0.05, "ruleHeight": 0.004, "scrim": 0.55 },
+		"caption-scrim": { "y": 0.9, "x": 0.5, "ruleWidth": 0, "ruleHeight": 0, "scrim": 0.6 }
+	},
+	"grades": {
+		"teal-amber": {
+			"bloom": { "opacity": 0.55, "sigma": 9, "downscale": 4 },
+			"balance": "rs=-0.035:gs=0.01:bs=0.045:rh=0.05:gh=0.02:bh=-0.05",
+			"eq": "contrast=1.05:saturation=1.06",
+			"vignette": 0.55,
+			"grain": 7
+		},
+		"cool-steel": {
+			"bloom": { "opacity": 0.4, "sigma": 8, "downscale": 4 },
+			"balance": "rs=-0.04:gs=0.0:bs=0.05:rh=0.0:gh=0.01:bh=0.03",
+			"eq": "contrast=1.07:saturation=0.96",
+			"vignette": 0.5,
+			"grain": 6
+		},
+		"warm-ember": {
+			"bloom": { "opacity": 0.5, "sigma": 10, "downscale": 4 },
+			"balance": "rs=0.02:gs=0.0:bs=-0.02:rh=0.06:gh=0.025:bh=-0.06",
+			"eq": "contrast=1.06:saturation=1.1",
+			"vignette": 0.6,
+			"grain": 7
+		},
+		"print": {
+			"bloom": { "opacity": 0.0, "sigma": 0, "downscale": 4 },
+			"balance": "rs=0.0:gs=0.0:bs=0.0:rh=0.02:gh=0.01:bh=-0.02",
+			"eq": "contrast=1.03:saturation=1.0",
+			"vignette": 0.3,
+			"grain": 4
+		}
+	},
+	"cameras": {
+		"push-in": { "zoomFrom": 1.0, "zoomTo": 1.06, "panX": 0.0, "panY": -0.3 },
+		"pull-out": { "zoomFrom": 1.07, "zoomTo": 1.0, "panX": 0.0, "panY": 0.0 },
+		"drift-left": { "zoomFrom": 1.05, "zoomTo": 1.05, "panX": -0.9, "panY": 0.0 },
+		"crane-down": { "zoomFrom": 1.06, "zoomTo": 1.04, "panX": 0.0, "panY": 0.8 },
+		"locked": { "zoomFrom": 1.0, "zoomTo": 1.0, "panX": 0.0, "panY": 0.0 }
+	},
+	"transitions": {
+		"dissolve": { "xfade": "fade", "seconds": 0.6 },
+		"dip-to-black": { "xfade": "fadeblack", "seconds": 0.7 },
+		"slide-left": { "xfade": "smoothleft", "seconds": 0.5 },
+		"wipe-soft": { "xfade": "wipeleft", "seconds": 0.5 }
+	},
+	"pacing": {
+		"half-bar-84": { "bpm": 84, "textIn": 0.7, "textBlur": 7, "minHold": 1.5 },
+		"brisk-96": { "bpm": 96, "textIn": 0.45, "textBlur": 4, "minHold": 1.2 }
+	},
+	"beds": {
+		"a-minor-lift": {
+			"key": "A minor",
+			"transpose": 0,
+			"bpm": 84,
+			"progression": "i-VI-III-VII",
+			"liftAtClose": true,
+			"pulse": true,
+			"kick": true
+		},
+		"c-minor-calm": {
+			"key": "C minor",
+			"transpose": 3,
+			"bpm": 84,
+			"progression": "i-VI-III-VII",
+			"liftAtClose": true,
+			"pulse": true,
+			"kick": false
+		},
+		"e-minor-drive": {
+			"key": "E minor",
+			"transpose": -5,
+			"bpm": 96,
+			"progression": "i-VI-III-VII",
+			"liftAtClose": false,
+			"pulse": true,
+			"kick": true
+		},
+		"d-minor-pad": {
+			"key": "D minor",
+			"transpose": 5,
+			"bpm": 72,
+			"progression": "i-VI-III-VII",
+			"liftAtClose": true,
+			"pulse": false,
+			"kick": false
+		}
+	},
+	"films": {
+		"lotus-night": {
+			"description": "The lotus update: amber seed glow on deep night, serif titles that blur in, slow push-in, dissolves, teal shadows and amber highlights.",
+			"palette": "night-amber",
+			"typeScale": "editorial",
+			"titleCard": "centred-stack",
+			"lowerThird": "accent-rule",
+			"grade": "teal-amber",
+			"camera": "push-in",
+			"transition": "dissolve",
+			"pacing": "half-bar-84",
+			"bed": "a-minor-lift"
+		},
+		"journey-teal": {
+			"description": "The journey film: teal accent, crane-down camera, dip-to-black cuts, cool-steel grade.",
+			"palette": "night-teal",
+			"typeScale": "editorial",
+			"titleCard": "centred-stack",
+			"lowerThird": "accent-rule",
+			"grade": "cool-steel",
+			"camera": "crane-down",
+			"transition": "dip-to-black",
+			"pacing": "half-bar-84",
+			"bed": "c-minor-calm"
+		},
+		"ember-launch": {
+			"description": "Launch energy: coral accent, left-ruled titles, pull-out reveal, brisk cuts, warm grade.",
+			"palette": "ember-coral",
+			"typeScale": "editorial",
+			"titleCard": "left-rule",
+			"lowerThird": "accent-rule",
+			"grade": "warm-ember",
+			"camera": "pull-out",
+			"transition": "slide-left",
+			"pacing": "brisk-96",
+			"bed": "e-minor-drive"
+		},
+		"ice-brief": {
+			"description": "Calm explainer: ice accent, lateral drift, soft wipes, cool grade.",
+			"palette": "sky-ice",
+			"typeScale": "editorial",
+			"titleCard": "left-rule",
+			"lowerThird": "caption-scrim",
+			"grade": "cool-steel",
+			"camera": "drift-left",
+			"transition": "wipe-soft",
+			"pacing": "half-bar-84",
+			"bed": "d-minor-pad"
+		},
+		"leaf-field": {
+			"description": "Field report: leaf accent, centred stack, push-in, dip-to-black, teal-amber grade.",
+			"palette": "leaf-dusk",
+			"typeScale": "editorial",
+			"titleCard": "centred-stack",
+			"lowerThird": "accent-rule",
+			"grade": "teal-amber",
+			"camera": "push-in",
+			"transition": "dip-to-black",
+			"pacing": "half-bar-84",
+			"bed": "c-minor-calm"
+		},
+		"paper-docs": {
+			"description": "Daylight technical brief: warm paper, mono labels, locked camera, print grade.",
+			"palette": "paper",
+			"typeScale": "technical",
+			"titleCard": "left-rule",
+			"lowerThird": "accent-rule",
+			"grade": "print",
+			"camera": "locked",
+			"transition": "dissolve",
+			"pacing": "brisk-96",
+			"bed": "d-minor-pad"
+		}
+	}
+}

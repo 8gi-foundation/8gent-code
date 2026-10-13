@@ -12,6 +12,7 @@ import type {
 	ChatMessage,
 	ChatRequest,
 	ChatResponse,
+	ToolCall,
 	ToolDefinition,
 } from "../../../packages/providers";
 import type { ThinkingLevel } from "../../../packages/types";
@@ -23,6 +24,11 @@ export interface OpenAIChatRequest {
 		role: string;
 		content?: unknown;
 		tool_call_id?: string;
+		tool_calls?: Array<{
+			id?: string;
+			type?: string;
+			function?: { name?: string; arguments?: unknown };
+		}>;
 	}>;
 	tools?: unknown;
 	temperature?: number;
@@ -68,8 +74,41 @@ export function toChatMessages(
 			: "user";
 		const msg: ChatMessage = { role, content: flattenContent(m.content) };
 		if (m.tool_call_id) msg.toolCallId = m.tool_call_id;
+		const toolCalls = toRouterToolCalls(m.tool_calls);
+		if (toolCalls) msg.toolCalls = toolCalls;
 		return msg;
 	});
+}
+
+/**
+ * Carry an assistant turn's OpenAI `tool_calls` into the router (#3547), so the
+ * next step upstream still sees the calls its tool replies answer. Arguments
+ * arrive as a JSON string; anything unparseable becomes `{}` rather than
+ * failing the whole request.
+ */
+function toRouterToolCalls(
+	calls: NonNullable<OpenAIChatRequest["messages"]>[number]["tool_calls"],
+): ToolCall[] | undefined {
+	if (!Array.isArray(calls) || calls.length === 0) return undefined;
+	const out: ToolCall[] = [];
+	for (const c of calls) {
+		const name = c?.function?.name;
+		if (typeof name !== "string") continue;
+		out.push({ id: typeof c.id === "string" ? c.id : "", name, arguments: parseArgs(c.function?.arguments) });
+	}
+	return out.length > 0 ? out : undefined;
+}
+
+function parseArgs(raw: unknown): Record<string, unknown> {
+	let v = raw;
+	if (typeof raw === "string") {
+		try {
+			v = JSON.parse(raw);
+		} catch {
+			return {};
+		}
+	}
+	return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
 
 /**

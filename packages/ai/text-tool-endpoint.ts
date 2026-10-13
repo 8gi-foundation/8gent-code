@@ -20,15 +20,21 @@
  */
 
 import {
+	resolveFirstTokenMs,
+	resolveStreamIdleMs,
+	resolveTurnTimeoutMs,
+} from "../eight/turn-timeout";
+import { isKnownVisionModel } from "../eight/vision-router";
+import {
 	DEFAULT_OLLAMA_BASE_URL,
 	normaliseOllamaHost,
 	resolveOllamaBaseUrl,
 } from "../local-model-server/ollama-host";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
-import { modelFetch } from "./model-fetch";
+import { type ModelFetchTimers, modelFetch } from "./model-fetch";
 import type { TextToolReply } from "./text-tool-client";
-import { escapeControlCharsInStrings, type ParsedToolCall, type ToolSpec } from "./text-tools";
 import type { TextTool } from "./text-tool-loop";
+import { type ParsedToolCall, type ToolSpec, escapeControlCharsInStrings } from "./text-tools";
 
 /** Per-provider OpenAI-compatible chat-completions endpoints for text tools. */
 export const TEXT_TOOL_ENDPOINTS: Record<string, string> = {
@@ -144,7 +150,25 @@ export function outputCapMessage(label: string, maxTokens: number): string {
 type ChatMessage = {
 	role: "system" | "user" | "assistant" | "tool";
 	content: string;
+	/** Data URLs the model should see with this message (#3641). */
+	images?: string[];
 };
+
+/**
+ * One message as the OpenAI-compatible endpoint takes it. Text stays a plain
+ * string; a message with images becomes the array form, one `image_url` part
+ * per image, which Ollama and LM Studio accept for vision models (#3641).
+ */
+export function toWireMessage(m: ChatMessage): { role: ChatMessage["role"]; content: unknown } {
+	if (!m.images || m.images.length === 0) return { role: m.role, content: m.content };
+	return {
+		role: m.role,
+		content: [
+			{ type: "text", text: m.content },
+			...m.images.map((url) => ({ type: "image_url", image_url: { url } })),
+		],
+	};
+}
 
 /** Real token usage reported by the endpoint for one completion. */
 export type TextToolUsage = {
@@ -152,6 +176,34 @@ export type TextToolUsage = {
 	completionTokens: number;
 	totalTokens: number;
 };
+
+/**
+ * One model round as the prefill meter sees it (#3655). Counts and durations
+ * are the provider's own; null or absent when it did not report them. No
+ * prompt text, only its length. `headersMs` is the wait for the reply's
+ * headers: on a streamed reply that is roughly the prefill time.
+ */
+export type ModelRound = {
+	path: "chat" | "raw";
+	promptChars: number;
+	promptTokens: number | null;
+	completionTokens: number | null;
+	promptEvalMs?: number;
+	evalMs?: number;
+	headersMs: number;
+	wallMs: number;
+};
+
+/**
+ * The prefill meter's sink: `writer.writeModelRound` when EIGHT_PREFIX_METER=1,
+ * otherwise undefined, so an unset flag records nothing and changes nothing.
+ */
+export function prefixMeterSink(
+	writer: { writeModelRound(r: ModelRound): void },
+	env: Record<string, string | undefined> = process.env,
+): ((r: ModelRound) => void) | undefined {
+	return env.EIGHT_PREFIX_METER === "1" ? (r) => writer.writeModelRound(r) : undefined;
+}
 
 /**
  * Extract REAL usage from an OpenAI-compatible completion response (#2805).
@@ -202,11 +254,7 @@ const NATIVE_PARSER_ERROR_RE = /^(?:unexpected EOF|EOF|XML syntax error\b.*)$/;
  * "ollama", only status 500, only an error message that is exactly one of the
  * Go XML decoder's failures. Pure.
  */
-export function isNativeToolParserFailure(
-	provider: string,
-	status: number,
-	body: string,
-): boolean {
+export function isNativeToolParserFailure(provider: string, status: number, body: string): boolean {
 	if (provider !== "ollama" || status !== 500) return false;
 	let parsed: unknown;
 	try {
@@ -472,6 +520,235 @@ function lookupQwenVariant(
 	return pending;
 }
 
+// Per root+model cache of the vision capability (one /api/show per model per
+// process). A failed lookup is not cached, so a server that was down retries.
+const visionCache = new Map<string, Promise<boolean | null>>();
+
+/** Test hook: forget cached vision lookups. */
+export function _resetVisionCache(): void {
+	visionCache.clear();
+}
+
+/**
+ * Can the model on this text-tool endpoint see images (#3641)? Ollama says so
+ * itself: /api/show lists "vision" in `capabilities` (measured 2026-10-08:
+ * qwen3.5:9b and qwen2.5vl:7b carry it, 8j:latest does not). Other local
+ * servers have no such endpoint, so the model name decides, through the same
+ * family list the vision router uses. False whenever nothing can be known: a
+ * text-only model is never sent pixels it would reject or ignore.
+ */
+export function modelSupportsVision(opts: {
+	provider: string;
+	model: string;
+	baseUrl?: string;
+	signal?: AbortSignal;
+}): Promise<boolean> {
+	if (opts.provider !== "ollama") return Promise.resolve(isKnownVisionModel(opts.model));
+	const root = ollamaRootFromEndpoint(resolveTextToolEndpoint(opts.provider, opts.baseUrl));
+	const key = `${root}\n${opts.model}`;
+	const cached = visionCache.get(key);
+	if (cached) return cached.then((v) => v === true);
+	const pending = (async (): Promise<boolean | null> => {
+		try {
+			const res = await modelFetch(
+				`${root}/api/show`,
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ model: opts.model }),
+					signal: opts.signal,
+				},
+				{ timeoutMs: 15_000, label: `ollama/${opts.model} show` },
+			);
+			if (!res.ok) return null;
+			const data = (await res.json()) as { capabilities?: unknown };
+			return Array.isArray(data?.capabilities) && data.capabilities.includes("vision");
+		} catch {
+			return null;
+		}
+	})();
+	visionCache.set(key, pending);
+	pending.then((v) => {
+		if (v === null) visionCache.delete(key);
+	});
+	return pending.then((v) => v === true);
+}
+
+/** Cap on one streamed reply body. A few MB is far above any real model step (#3671). */
+export const MAX_STREAMED_REPLY_BYTES = 8 * 1024 * 1024;
+/** Cap on one line of a streamed body (one SSE frame or one JSON object). */
+export const MAX_STREAMED_LINE_BYTES = 1024 * 1024;
+
+/**
+ * Yield each non-empty line of a streamed body as it arrives. Fails with a
+ * StreamedReplyError when the body passes `maxBytes` or one line passes
+ * `maxLineBytes`, so a runaway server cannot grow the reassembly buffers
+ * without bound (the idle timer alone does not stop a server that keeps
+ * writing).
+ */
+async function* bodyLines(
+	res: Response,
+	maxBytes = MAX_STREAMED_REPLY_BYTES,
+	maxLineBytes = MAX_STREAMED_LINE_BYTES,
+): AsyncGenerator<string> {
+	if (!res.body) return;
+	const decoder = new TextDecoder();
+	let buf = "";
+	let total = 0;
+	for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+		total += chunk.byteLength;
+		if (total > maxBytes) {
+			throw new StreamedReplyError(`streamed reply exceeded ${maxBytes} bytes`);
+		}
+		buf += decoder.decode(chunk, { stream: true });
+		let nl = buf.indexOf("\n");
+		while (nl >= 0) {
+			const line = buf.slice(0, nl).trim();
+			buf = buf.slice(nl + 1);
+			if (line) yield line;
+			nl = buf.indexOf("\n");
+		}
+		if (buf.length > maxLineBytes) {
+			throw new StreamedReplyError(`streamed reply line exceeded ${maxLineBytes} bytes`);
+		}
+	}
+	const rest = (buf + decoder.decode()).trim();
+	if (rest) yield rest;
+}
+
+/**
+ * A streamed reply that failed after the 200 status was sent: an in-band
+ * `{"error": ...}` frame, or a stream that closed without its terminator.
+ * `body` is a JSON error body in the shape a non-streamed failure would have,
+ * so the caller can judge it exactly like an HTTP 500 (#3553).
+ */
+export class StreamedReplyError extends Error {
+	readonly body: string;
+	constructor(error: unknown) {
+		const message =
+			typeof error === "string"
+				? error
+				: typeof (error as { message?: unknown } | null)?.message === "string"
+					? (error as { message: string }).message
+					: JSON.stringify(error);
+		super(message);
+		this.name = "StreamedReplyError";
+		this.body = JSON.stringify({ error });
+	}
+}
+
+/** Streamed tool calls are merged by `index`; anything outside 0..cap-1 is not trusted. */
+const MAX_STREAMED_TOOL_CALLS = 128;
+
+/**
+ * Reassemble an OpenAI-compatible streamed chat completion (SSE `data:` lines)
+ * into the non-streamed shape: content deltas joined, tool-call deltas merged
+ * by index (name and argument pieces concatenated), the last finish_reason,
+ * and usage from the final chunk (sent when stream_options.include_usage is
+ * set). Lines that are not JSON are skipped (#3553).
+ *
+ * Throws StreamedReplyError when a frame carries an `error` (Ollama reports a
+ * failure after the first bytes that way), or when the stream closes with
+ * neither `[DONE]` nor a finish_reason: a truncated body is a failure, never
+ * a complete reply. A tool-call `index` that is not a small non-negative
+ * integer falls back to the call's position in its delta.
+ */
+export async function readStreamedChatCompletion(res: Response): Promise<{
+	choices: Array<{ message: { content: string; tool_calls?: unknown[] }; finish_reason?: unknown }>;
+	usage?: unknown;
+}> {
+	let content = "";
+	let finishReason: unknown;
+	let usage: unknown;
+	type StreamedCall = { id?: string; type: string; function: { name: string; arguments: string } };
+	const calls = new Map<number, StreamedCall>();
+	let done = false;
+	for await (const line of bodyLines(res)) {
+		if (!line.startsWith("data:")) continue;
+		const payload = line.slice(5).trim();
+		if (payload === "[DONE]") {
+			done = true;
+			break;
+		}
+		let chunk: {
+			choices?: Array<{ delta?: Record<string, unknown>; finish_reason?: unknown }>;
+			usage?: unknown;
+			error?: unknown;
+		};
+		try {
+			chunk = JSON.parse(payload);
+		} catch {
+			continue;
+		}
+		if (chunk?.error != null) throw new StreamedReplyError(chunk.error);
+		if (chunk?.usage) usage = chunk.usage;
+		const choice = chunk?.choices?.[0];
+		if (!choice) continue;
+		if (choice.finish_reason != null) finishReason = choice.finish_reason;
+		const delta = choice.delta ?? {};
+		if (typeof delta.content === "string") content += delta.content;
+		if (!Array.isArray(delta.tool_calls)) continue;
+		for (const [n, raw] of (delta.tool_calls as Array<Record<string, unknown>>).entries()) {
+			const idx = raw?.index;
+			const i =
+				Number.isInteger(idx) && (idx as number) >= 0 && (idx as number) < MAX_STREAMED_TOOL_CALLS
+					? (idx as number)
+					: n;
+			const fn = (raw?.function ?? {}) as { name?: unknown; arguments?: unknown };
+			let slot = calls.get(i);
+			if (!slot) {
+				slot = { type: "function", function: { name: "", arguments: "" } };
+				calls.set(i, slot);
+			}
+			if (typeof raw?.id === "string") slot.id = raw.id;
+			if (typeof fn.name === "string") slot.function.name += fn.name;
+			if (typeof fn.arguments === "string") slot.function.arguments += fn.arguments;
+			else if (fn.arguments && typeof fn.arguments === "object") {
+				slot.function.arguments = JSON.stringify(fn.arguments);
+			}
+		}
+	}
+	if (!done && finishReason == null) {
+		throw new StreamedReplyError("stream ended before [DONE] or a finish_reason");
+	}
+	const toolCalls = [...calls.keys()]
+		.sort((a, b) => a - b)
+		.map((k) => calls.get(k) as StreamedCall);
+	return {
+		choices: [
+			{
+				message: { content, ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}) },
+				finish_reason: finishReason,
+			},
+		],
+		...(usage !== undefined ? { usage } : {}),
+	};
+}
+
+/**
+ * Reassemble Ollama's streamed /api/generate reply (one JSON object per line)
+ * into the non-streamed shape: `response` pieces joined, the counts and
+ * done_reason taken from the final line (#3553). Throws StreamedReplyError on
+ * an in-band `error` line, or when no line carried `done: true`.
+ */
+export async function readStreamedGenerate(res: Response): Promise<Record<string, unknown>> {
+	let response = "";
+	let last: Record<string, unknown> = {};
+	for await (const line of bodyLines(res)) {
+		let obj: Record<string, unknown>;
+		try {
+			obj = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (obj?.error != null) throw new StreamedReplyError(obj.error);
+		if (typeof obj?.response === "string") response += obj.response;
+		last = obj;
+	}
+	if (last.done !== true) throw new StreamedReplyError("stream ended before a done: true line");
+	return { ...last, response };
+}
+
 /**
  * Build a `call` function for runTextToolAgent that hits a local provider's
  * OpenAI-compatible /v1/chat/completions endpoint. Sends NO `tools` field so a
@@ -487,6 +764,12 @@ function lookupQwenVariant(
  * The request never inherits Bun's hidden 300 s fetch cap: it goes through
  * modelFetch, whose limit is `timeoutMs` (default: EIGHT_TURN_TIMEOUT_MS via
  * resolveTurnTimeoutMs). A step that runs past it rejects with TurnTimeoutError.
+ *
+ * With EIGHT_STREAM_IDLE_MS set (or `idleMs` passed), every request streams
+ * and the step is judged by silence instead (#3553): the idle timer is
+ * re-armed per chunk, `timeoutMs` stays the wall-clock ceiling, and the output
+ * cap is still sent. The streamed reply is reassembled into the same shape, so
+ * everything below behaves the same.
  *
  * When Ollama's built-in tool-call parser eats the reply (a parser 500, see
  * isNativeToolParserFailure, or an empty 200 for generated tokens, see
@@ -536,11 +819,20 @@ export function buildTextToolCall(opts: {
 	 * (#2805). Never fired when the endpoint omits usage - no fabricated tokens.
 	 */
 	onUsage?: (usage: TextToolUsage) => void;
+	/** Fired once per completed request with its ModelRound (prefill meter, #3655). */
+	onRound?: (round: ModelRound) => void;
 	/**
 	 * The registered tool specs. For Ollama they are declared on the request so
 	 * the model's parser keeps native tool calls (see shouldDeclareTools).
 	 */
 	tools?: ToolSpec[];
+	/**
+	 * Send each declared tool's description (default true). False declares name
+	 * and parameters only: the parser needs only those to keep a native call,
+	 * and the text protocol in the system prompt already describes every tool,
+	 * so a headless run does not pay for the descriptions twice per call.
+	 */
+	declareDescriptions?: boolean;
 	/**
 	 * Output token budget per model step. Default: resolveMaxOutputTokens(), so
 	 * EIGHT_MAX_OUTPUT_TOKENS governs (#3074).
@@ -554,17 +846,51 @@ export function buildTextToolCall(opts: {
 	 * Other providers: no known switch on this endpoint, so nothing is sent.
 	 */
 	noThink?: boolean;
+	/**
+	 * Stream the reply and fail after this many ms with no output (#3553, on by
+	 * default since #3657). Default: resolveStreamIdleMs(), so
+	 * EIGHT_STREAM_IDLE_MS governs; null is off (wall time only).
+	 */
+	idleMs?: number | null;
+	/** Timer source for the step's limits. Default: the global timers. */
+	timers?: ModelFetchTimers;
 }): (messages: ChatMessage[]) => Promise<string | TextToolReply> {
 	const endpoint = opts.endpoint || resolveTextToolEndpoint(opts.provider, opts.baseUrl);
 	const temperature = opts.temperature ?? 0.2;
 	const maxTokens = opts.maxTokens ?? resolveMaxOutputTokens();
+	const idleMs = opts.idleMs === undefined ? resolveStreamIdleMs() : opts.idleMs;
+	const streamed = idleMs != null;
+	const limits = {
+		timeoutMs: opts.timeoutMs,
+		...(streamed ? { idleMs } : {}),
+		...(opts.timers ? { timers: opts.timers } : {}),
+	};
+	// #3643: the runtime sends nothing while it prefills the prompt, so the
+	// wait for the first byte gets a budget sized from this request's prompt
+	// (resolveFirstTokenMs), not the idle gap. Without it a long document died
+	// on its first call at exactly the idle gap.
+	const ceilingMs = opts.timeoutMs ?? resolveTurnTimeoutMs();
+	const limitsFor = (promptChars: number) =>
+		idleMs == null
+			? limits
+			: { ...limits, firstByteMs: resolveFirstTokenMs({ idleMs, promptChars, ceilingMs }) };
+	const charsOf = (messages: ChatMessage[]) =>
+		messages.reduce((n, m) => n + (typeof m.content === "string" ? m.content.length : 0), 0);
+	// A server that answers `stream: true` with one JSON document (some
+	// OpenAI-compatible runtimes, every non-streamed fixture) is read as JSON;
+	// only an event stream goes through the SSE reader.
+	const isJsonReply = (res: Response) =>
+		(res.headers.get("content-type") ?? "").toLowerCase().includes("application/json");
 	const label = `${opts.provider}/${opts.model}`;
 	const noThink =
 		(opts.noThink === true && opts.provider === "ollama") || isOllamaNoThink(opts.provider, opts.model);
 	let declareTools = shouldDeclareTools(opts.provider, opts.tools);
 	const declared = (opts.tools ?? []).map((t) => ({
 		type: "function",
-		function: { name: t.name, description: t.description, parameters: t.parameters },
+		function:
+			opts.declareDescriptions === false
+				? { name: t.name, parameters: t.parameters }
+				: { name: t.name, description: t.description, parameters: t.parameters },
 	}));
 
 	const post = (messages: ChatMessage[], withTools: boolean) =>
@@ -575,16 +901,17 @@ export function buildTextToolCall(opts: {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					model: opts.model,
-					messages,
+					messages: messages.map(toWireMessage),
 					temperature,
 					max_tokens: maxTokens,
-					stream: false,
+					stream: streamed,
+					...(streamed ? { stream_options: { include_usage: true } } : {}),
 					...(noThink ? { reasoning_effort: "none" } : {}),
 					...(withTools ? { tools: declared } : {}),
 				}),
 				signal: opts.signal,
 			},
-			{ timeoutMs: opts.timeoutMs, label },
+			{ ...limitsFor(charsOf(messages)), label },
 		);
 
 	type Attempt =
@@ -595,6 +922,7 @@ export function buildTextToolCall(opts: {
 	// and return the assistant text and structured calls alongside what we need
 	// to judge the reply.
 	const attempt = async (messages: ChatMessage[]): Promise<Attempt> => {
+		const t0 = performance.now();
 		let res = await post(messages, declareTools);
 		if (!res.ok && declareTools) {
 			const body = await res.text().catch(() => "");
@@ -605,7 +933,20 @@ export function buildTextToolCall(opts: {
 		if (!res.ok) {
 			return { ok: false, status: res.status, body: await res.text().catch(() => "") };
 		}
-		const data = (await res.json()) as {
+		const headersAt = performance.now();
+		let streamedData: Awaited<ReturnType<typeof readStreamedChatCompletion>> | undefined;
+		const sse = streamed && !isJsonReply(res);
+		if (sse) {
+			try {
+				streamedData = await readStreamedChatCompletion(res);
+			} catch (e) {
+				// A failure after the 200 is judged like the HTTP 500 it would have
+				// been non-streamed, so parser-failure recovery still runs.
+				if (e instanceof StreamedReplyError) return { ok: false, status: 500, body: e.body };
+				throw e;
+			}
+		}
+		const data = (sse ? streamedData : await res.json()) as {
 			choices?: Array<{
 				message?: { content?: unknown; tool_calls?: unknown };
 				finish_reason?: unknown;
@@ -614,6 +955,14 @@ export function buildTextToolCall(opts: {
 		};
 		const usage = extractUsage(data);
 		if (usage && opts.onUsage) opts.onUsage(usage);
+		opts.onRound?.({
+			path: "chat",
+			promptChars: charsOf(messages),
+			promptTokens: usage?.promptTokens ?? null,
+			completionTokens: usage?.completionTokens ?? null,
+			headersMs: Math.round(headersAt - t0),
+			wallMs: Math.round(performance.now() - t0),
+		});
 		// The cap cut the reply off: whatever came back is a fragment, most often
 		// a repetition loop. Fail the step loudly rather than hand the loop a
 		// truncated reply it would treat as an answer (#3074).
@@ -634,8 +983,11 @@ export function buildTextToolCall(opts: {
 	const reply = (a: { content: string; toolCalls: ParsedToolCall[] }): string | TextToolReply =>
 		a.toolCalls.length > 0 ? { content: a.content, toolCalls: a.toolCalls } : a.content;
 	// A reply that carried structured calls was not swallowed, even with no text.
-	const swallowed = (a: { content: string; toolCalls: ParsedToolCall[]; completionTokens: number }) =>
-		a.toolCalls.length === 0 && isSwallowedReply(opts.provider, a.content, a.completionTokens);
+	const swallowed = (a: {
+		content: string;
+		toolCalls: ParsedToolCall[];
+		completionTokens: number;
+	}) => a.toolCalls.length === 0 && isSwallowedReply(opts.provider, a.content, a.completionTokens);
 
 	// The same conversation through Ollama's raw generate path, which never runs
 	// the model's built-in parser. Returns the visible answer, or a failure.
@@ -646,6 +998,7 @@ export function buildTextToolCall(opts: {
 		variant: QwenChatMLVariant,
 	): Promise<{ ok: true; content: string } | { ok: false; why: string }> => {
 		const root = ollamaRootFromEndpoint(endpoint);
+		const t0 = performance.now();
 		const res = await modelFetch(
 			`${root}/api/generate`,
 			{
@@ -655,21 +1008,36 @@ export function buildTextToolCall(opts: {
 					model: opts.model,
 					prompt: renderQwenChatML(messages, variant, noThink),
 					raw: true,
-					stream: false,
+					stream: streamed,
 					options: { temperature, num_predict: maxTokens },
 				}),
 				signal: opts.signal,
 			},
-			{ timeoutMs: opts.timeoutMs, label: `${label} (raw)` },
+			{ ...limitsFor(charsOf(messages)), label: `${label} (raw)` },
 		);
 		if (!res.ok) {
 			const body = await res.text().catch(() => "");
 			return { ok: false, why: `raw generate ${res.status}: ${body.slice(0, 200)}` };
 		}
-		const data = (await res.json()) as {
+		const headersAt = performance.now();
+		let streamedRaw: Record<string, unknown> | undefined;
+		const ndjson = streamed && !isJsonReply(res);
+		if (ndjson) {
+			try {
+				streamedRaw = await readStreamedGenerate(res);
+			} catch (e) {
+				if (e instanceof StreamedReplyError) {
+					return { ok: false, why: `raw generate stream failed: ${e.message.slice(0, 200)}` };
+				}
+				throw e;
+			}
+		}
+		const data = (ndjson ? streamedRaw : await res.json()) as {
 			response?: unknown;
 			prompt_eval_count?: unknown;
 			eval_count?: unknown;
+			prompt_eval_duration?: unknown;
+			eval_duration?: unknown;
 			done_reason?: unknown;
 		};
 		const p = typeof data?.prompt_eval_count === "number" ? data.prompt_eval_count : null;
@@ -677,6 +1045,18 @@ export function buildTextToolCall(opts: {
 		if (p !== null && c !== null && opts.onUsage) {
 			opts.onUsage({ promptTokens: p, completionTokens: c, totalTokens: p + c });
 		}
+		// Ollama reports durations in nanoseconds.
+		const ms = (v: unknown) => (typeof v === "number" ? Math.round(v / 1e6) : undefined);
+		opts.onRound?.({
+			path: "raw",
+			promptChars: charsOf(messages),
+			promptTokens: p,
+			completionTokens: c,
+			promptEvalMs: ms(data?.prompt_eval_duration),
+			evalMs: ms(data?.eval_duration),
+			headersMs: Math.round(headersAt - t0),
+			wallMs: Math.round(performance.now() - t0),
+		});
 		if (data?.done_reason === "length") {
 			return { ok: false, why: outputCapMessage(`${label} (raw)`, maxTokens) };
 		}
@@ -713,9 +1093,10 @@ export function buildTextToolCall(opts: {
 			opts.signal,
 		);
 		if (variant) {
-			const raw = await rawAttempt(messages, variant).catch(
-				(e: unknown) => ({ ok: false as const, why: e instanceof Error ? e.message : String(e) }),
-			);
+			const raw = await rawAttempt(messages, variant).catch((e: unknown) => ({
+				ok: false as const,
+				why: e instanceof Error ? e.message : String(e),
+			}));
 			if (raw.ok) return raw.content;
 			rawNote = raw.why;
 		}
@@ -776,10 +1157,7 @@ export function toolDefToSpec(def: OpenAiToolDef): ToolSpec | null {
  * lifecycle events around each call); use toolDefsToTextTools when a single
  * shared `execute` is enough.
  */
-export function toolDefsToSpecs(
-	defs: OpenAiToolDef[],
-	allow?: Set<string>,
-): ToolSpec[] {
+export function toolDefsToSpecs(defs: OpenAiToolDef[], allow?: Set<string>): ToolSpec[] {
 	const specs: ToolSpec[] = [];
 	for (const def of defs) {
 		const spec = toolDefToSpec(def);

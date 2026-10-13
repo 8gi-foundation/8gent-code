@@ -73,7 +73,7 @@ import { TypingText, WordByWord } from "./typing-text.js";
  */
 // Exposed under a stable name for the smoke harness so we can lock in the
 // soft-seam behaviour without exporting the React module's identity.
-const breakLongTokensForTest = (text: string, width: number): string =>
+export const breakLongTokensForTest = (text: string, width: number): string =>
 	breakLongTokens(text, width);
 
 function breakLongTokens(text: string, width: number): string {

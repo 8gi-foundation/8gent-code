@@ -1,4 +1,4 @@
-# LinkedIn Vessel - Control plane integrated, HyperAgent enabled
+# LinkedIn Vessel - every outward action waits for James's approval
 app = "linkedin-vessel"
 primary_region = "ams"
 
@@ -10,12 +10,18 @@ primary_region = "ams"
   VESSEL_ACCOUNT_ID = "james-main"
   INFERENCE_MODE = "proxy"
   MODEL_PROXY_URL = "http://8gi-model-proxy.internal:3200"
-  CONTROL_PLANE_URL = "wss://8gi-board-plane.fly.dev"
   PUBLIC_URL = "https://linkedin-vessel.fly.dev"
   HEALTH_PORT = "8080"
   EIGHT_DATA_DIR = "/data/.8gent"
 
-# Secrets (set via: fly secrets set LINKEDIN_SESSION_COOKIE=... --app linkedin-vessel)
+# Opt-in, off by default: CONTROL_PLANE_URL (outbound control-plane link),
+# HYPERAGENT_ENABLED=1 (template rewrite loop). LINKEDIN_VESSEL_KILL=1 pauses everything.
+
+# Secrets (set via: fly secrets set NAME=... --app linkedin-vessel)
+# LINKEDIN_VESSEL_MCP_TOKEN       required for /mcp and /manifest (32+ chars)
+# LINKEDIN_VESSEL_APPROVER_TOKEN  required for /queue, /activity, approve, reject (32+ chars, different)
+# TELEGRAM_BOT_TOKEN              approval notices
+# JAMES_TELEGRAM_CHAT_ID          approval notices go to this chat
 # LINKEDIN_SESSION_COOKIE
 # LINKEDIN_JSESSIONID
 # CRUNCHBASE_API_KEY (optional, for funding signals)

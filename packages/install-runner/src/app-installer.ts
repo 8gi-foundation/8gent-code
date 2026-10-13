@@ -213,12 +213,22 @@ async function extractTarGz(archivePath: string, destDir: string): Promise<void>
 			throw new InstallAppError(`unsafe archive entry (escapes sandbox): ${entry}`, "UNSAFE_ENTRY");
 		}
 	}
-	await runTar(["-xzf", archivePath, "-C", destDir]);
+	// Run inside destDir with the archive named relative to it: GNU tar reads any
+	// "C:..." argument (the archive or a -C directory) as host "C" plus a path.
+	const relArchive = path
+		.relative(resolvedDest, path.resolve(archivePath))
+		.split(path.sep)
+		.join("/");
+	await runTar(["-xzf", relArchive.includes("/") ? relArchive : `./${relArchive}`], resolvedDest);
 }
 
 function listTarEntries(archivePath: string): Promise<string[]> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn("tar", ["-tzf", archivePath]);
+		// GNU tar reads "host:path" as a remote archive when a colon precedes any slash
+		// ("C:\\x.tgz", "foo:bar.tgz"), so name the archive "./name" relative to its folder.
+		const proc = spawn("tar", ["-tzf", `./${path.basename(archivePath)}`], {
+			cwd: path.dirname(path.resolve(archivePath)),
+		});
 		const out: Buffer[] = [];
 		const errBuf: Buffer[] = [];
 		proc.stdout.on("data", (d) => out.push(d));
@@ -242,9 +252,9 @@ function listTarEntries(archivePath: string): Promise<string[]> {
 	});
 }
 
-function runTar(args: string[]): Promise<void> {
+function runTar(args: string[], cwd: string): Promise<void> {
 	return new Promise((resolve, reject) => {
-		const proc = spawn("tar", args);
+		const proc = spawn("tar", args, { cwd });
 		const errBuf: Buffer[] = [];
 		proc.stderr.on("data", (d) => errBuf.push(d));
 		proc.on("error", reject);

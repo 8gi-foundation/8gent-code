@@ -15,27 +15,27 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { removeDbFiles } from "../../tests/db-files";
+import { trackStatements } from "./tracked-db.js";
 import { ConceptLinker } from "./concept-linker.js";
 import { KnowledgeGraph } from "./graph.js";
 
-const TEST_DB = "/tmp/test-concept-linker-1368.db";
+const TEST_DB = join(tmpdir(), "test-concept-linker-1368.db");
 
 let db: Database;
 let graph: KnowledgeGraph;
 let linker: ConceptLinker;
 
 function cleanup() {
-	for (const suffix of ["", "-wal", "-shm"]) {
-		const p = TEST_DB + suffix;
-		if (existsSync(p)) unlinkSync(p);
-	}
+	removeDbFiles(TEST_DB);
 }
 
 describe("ConceptLinker", () => {
 	beforeEach(() => {
 		cleanup();
-		db = new Database(TEST_DB);
+		db = trackStatements(new Database(TEST_DB));
 		graph = new KnowledgeGraph(db);
 		linker = new ConceptLinker(graph);
 	});

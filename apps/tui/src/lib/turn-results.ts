@@ -78,7 +78,7 @@ const VERBS: Record<string, [string, string]> = {
 	git_log: ["Checked", "Check failed"],
 	remember: ["Remembered", "Remember failed"],
 	recall: ["Recalled", "Recall failed"],
-	spawn_agent: ["Started agent", "Agent failed"],
+	spawn_agent: ["Started 8gent", "8gent failed"],
 };
 
 /** Verbs whose consecutive successes fold into one row. */

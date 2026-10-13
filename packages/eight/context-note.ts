@@ -70,3 +70,17 @@ export function contextNote(
 export function harnessNote(body: string): string {
 	return `${CONTEXT_NOTE_HEADER}\n\n${body}`;
 }
+
+/**
+ * #3487: one request's messages with the style reminder appended as the last
+ * message (user role, so it never joins the single system turn). Returns the
+ * input unchanged when there is no reminder. Pure: never mutates `messages`,
+ * so the reminder is not carried into the next request or the history.
+ */
+export function withStyleReminder<M extends { role: string; content: string }>(
+	messages: M[],
+	reminder: string | null,
+): M[] {
+	if (!reminder) return messages;
+	return [...messages, { role: "user", content: reminder } as M];
+}

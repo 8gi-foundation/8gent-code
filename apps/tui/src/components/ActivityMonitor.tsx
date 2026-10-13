@@ -339,7 +339,7 @@ export function ActivityMonitor({
 			<Box marginBottom={1} flexDirection="row" alignItems="center">
 				<Box flexShrink={1} flexDirection="row" overflow="hidden">
 					<Text color="cyan" bold wrap="truncate-end">
-						{`┌─ Agent Activity `}
+						{`┌─ 8gent Activity `}
 					</Text>
 					<Text dimColor wrap="truncate-end">
 						{`step ${stepCount} · ${toolCount} tools · ${elapsedStr}`}

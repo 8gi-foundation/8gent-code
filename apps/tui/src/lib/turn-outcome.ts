@@ -32,7 +32,7 @@ export function turnEndedInError(
 	if (last.role === "assistant") {
 		return /^\s*\[Error\]/.test(last.content) || isLocalTurnFailureReply(last.content);
 	}
-	if (last.role === "system") return /error|failed|\[Agent not ready\]/i.test(last.content);
+	if (last.role === "system") return /error|failed|\[8gent not ready\]/i.test(last.content);
 	if (last.role === "tool") return last.toolSuccess === false;
 	return false;
 }

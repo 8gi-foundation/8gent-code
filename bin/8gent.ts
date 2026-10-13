@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 /**
  * 8gent Code - Main CLI Entry Point
  *
@@ -7,10 +7,14 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { childInvocation, materializeTui } from "../apps/tui/src/lib/embedded-bundle";
+import { safeBunFlags } from "../packages/core/bun-flags";
 
 const VERSION = "0.18.0";
+const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts
 
 // Two different "here" directories matter, and conflating them is what broke
 // the compiled build:
@@ -32,6 +36,7 @@ const VERSION = "0.18.0";
 // only the compiled case needs EXEC_DIR.
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const EXEC_DIR = path.dirname(process.execPath);
+const TUI_CACHE_DIR = path.join(os.homedir(), ".8gent", "cache");
 
 // MODULE_DIR points into Bun's embedded filesystem rather than the user's disk.
 // It still passes `fs.existsSync`, but only the embedded modules are readable
@@ -47,10 +52,7 @@ const MODULE_IS_EMBEDDED = /(^|[\\/])(\$bunfs|~BUN)([\\/]|$)/i.test(MODULE_DIR);
 // that has never existed.
 function repoRoot(): string | null {
 	if (MODULE_IS_EMBEDDED) return null;
-	const candidates = [
-		path.join(MODULE_DIR, ".."),
-		path.join(MODULE_DIR, "..", ".."),
-	];
+	const candidates = [path.join(MODULE_DIR, ".."), path.join(MODULE_DIR, "..", "..")];
 	for (const candidate of candidates) {
 		if (
 			fs.existsSync(path.join(candidate, "apps", "tui", "src", "index.tsx")) ||
@@ -65,7 +67,9 @@ function repoRoot(): string | null {
 // same install: the compiled binary alone, or the runtime plus this module
 // (bin/8gent.ts from a checkout, dist/cli.js from npm).
 function daemonProgram(): string[] {
-	const self = MODULE_IS_EMBEDDED ? [] : [fileURLToPath(import.meta.url)];
+	// The service starts in $HOME: Bun must not read a bunfig.toml or .env there (#4013).
+	// A compiled binary is built with config autoload off (scripts/build-binaries.ts).
+	const self = MODULE_IS_EMBEDDED ? [] : [...safeBunFlags(), fileURLToPath(import.meta.url)];
 	return [process.execPath, ...self, "daemon", "run"];
 }
 
@@ -94,8 +98,13 @@ USAGE:
 COMMANDS:
   tui [--name=<n>] [--resume=<n>]  Launch TUI (--name to name session, --resume to restore)
   run <prompt>                One-shot agent run. Pairs with --output-format stream-json for Orchestra/cmux/etc.
+                              --image <path> attaches one png/jpg/gif/webp: max 20 MB, downscaled to fit 1024x1024,
+                              must be inside the working directory (local vision model, text-tool path only)
   doctor                      Check system health (Ollama, models, tools, config)
-  update                      Update 8gent to the latest version on npm (uses --force to fix EEXIST)
+  deck render <spec.json> [out.mp4]  Render a JSON deck spec into an mp4: the same deterministic
+                              renderer as the render_video_deck tool, paths inside the current directory
+  update [--check]            Update 8gent through the channel it was installed from (binary release
+                              or npm); never installs a lower version. --check only reports.
   permissions                 Diagnose macOS Accessibility + Screen Recording grants for your terminal
                               Use --open to auto-launch System Settings panes for missing grants
   keys [reload|status|open]   Open ~/.8gent/keys.env in your editor for API keys
@@ -104,6 +113,9 @@ COMMANDS:
   install <preset>            Interactively install a /spawn preset CLI (claude, codex,
                               hermes, openclaw, pi, 8gent). Runs the install recipe with
                               full stdio so you can answer prompts + complete OAuth.
+  install npm:<name>@<ver>    Install an npm package into ~/.8gent/packages, pinned by the
+                              registry integrity. No scripts run, no dependencies installed.
+  packages [list|remove|verify]  Installed packages: list them, remove one, re-check one
   pet                         Launch Lil Eight dock companion only
   chat <message>              Send a message (non-interactive, pipe-friendly)
   agent <sub>                 Multi-agent orchestration
@@ -185,10 +197,14 @@ OPTIONS:
   --cwd=<dir>    Override working directory
   --fast         Start in fast mode (use fastest available model)
   --resume       Resume last session (or --resume=<name> for specific)
-  --continue <id>  Resume a specific session by ID or name
+  --continue [id] Resume this folder's latest session (or the one named by id)
+  -p, --print    Run one prompt and exit; piped stdin is added (git diff | 8gent -p "review")
+  --mode <m>     With -p: json (one event per line, docs/specs/JSON-EVENTS.md) or text; rpc = --rpc
+  --tools a,b    With -p: allow only these tools
+  --no-session   With -p: do not save the run
+  --session-dir <dir>  With -p: read and write sessions there
   --infinite     Enable infinite mode (autonomous until done)
-  --pet          Also spawn Lil Eight dock companion (auto with tui)
-  --no-pet       Disable dock pet auto-spawn
+  --pet          Also start the Lil Eight dock companion (off by default)
   --rpc          Start in JSON-RPC mode (headless, stdin/stdout)
 
 EXAMPLES:
@@ -223,6 +239,25 @@ MACHINE INTEGRATION:
   Exit codes: 0=success, 1=error, 2=auth required.
   Designed for orchestration by Claude Code, Cursor, aider, etc.
 
+RUN DONE GATE (8gent run):
+  Before and after a run, 8gent runs the project's check (Cargo.toml: cargo test;
+  package.json test script; go.mod: go test ./...). If the run made it worse (green
+  before and red after, or new failures), the failure goes back to the agent to fix;
+  still worse ends the run with exit 1 and a result/error event. Failures that were
+  already there before the run are reported as pre-existing, exit 0. A check that
+  times out or cannot run is reported as NOT VERIFIED in the final message.
+  Trade-off: failures are only told apart for cargo/rustc, bun, go and tsc output.
+  If the project was already red and its runner prints anything else (jest, vitest,
+  mocha, free text), the run is NOT VERIFIED, exit 0: new failures are not caught.
+  The check runs the project's own build and test code, so it runs only with --yes
+  (until run_command has an OS sandbox) and with credential variables (*_KEY,
+  *_TOKEN, *_SECRET, *_PASSWORD, npm _auth settings, URLs with user:pass@)
+  removed from its environment. Without --yes
+  the result says "done gate skipped (needs --yes)".
+  EIGHT_DONE_GATE=0              Turn the gate off (old behaviour, nothing checked)
+  EIGHT_DONE_GATE_ATTEMPTS=<n>   Fix rounds sent back to the agent (default 2, max 5)
+  EIGHT_DONE_GATE_TIMEOUT_SEC=<s>  Bound on each check run (default and max 300)
+
 Learn more: https://github.com/8gi-foundation/8gent-code
 `;
 
@@ -234,7 +269,7 @@ Learn more: https://github.com/8gi-foundation/8gent-code
  * TUI launch, so a command carrying them is not exempt either.
  */
 const DEPTH_EXEMPT_FLAGS = ["-h", "--help", "-v", "--version"];
-const DEPTH_EXEMPT_COMMANDS = new Set(["outline", "symbol", "search", "doctor"]);
+const DEPTH_EXEMPT_COMMANDS = new Set(["outline", "symbol", "search", "doctor", "deck"]);
 
 function depthExempt(args: string[]): boolean {
 	if (args.includes("--rpc") || args.includes("--cli")) return false;
@@ -273,8 +308,17 @@ async function main() {
 
 	let args = process.argv.slice(2);
 
+	// -p / --print / --mode json|text: one prompt, no TUI (stdin is prepended when piped).
+	// --mode rpc is the same server as --rpc.
+	const { headlessRoute, continueTarget } = await import("../packages/eight/run.ts");
+	const headless = headlessRoute(args);
+	if (headless === "run") {
+		const { runRunCommand } = await import("../packages/eight/run.ts");
+		process.exit(await runRunCommand(args));
+	}
+
 	// --rpc flag: JSON-RPC 2.0 headless mode over stdin/stdout
-	if (args.includes("--rpc")) {
+	if (args.includes("--rpc") || headless === "rpc") {
 		const { startRPCServer } = await import("../packages/eight/rpc-server.ts");
 		await startRPCServer();
 		return;
@@ -365,7 +409,7 @@ async function main() {
 	if (args.includes("--pet") || args.includes("-pet")) {
 		const filtered = args.filter((a) => a !== "--pet" && a !== "-pet");
 		if (filtered.length === 0) {
-			await petCommand(["start"]);
+			await tuiCommand(["--pet"]);
 			return;
 		}
 		// Otherwise it's a flag on another command - handled by tuiCommand
@@ -389,12 +433,24 @@ async function main() {
 		}
 	}
 
-	// --continue <id> = resume specific session
-	const continueIdx = args.indexOf("--continue");
-	if (continueIdx !== -1 && args[continueIdx + 1] && !args[continueIdx + 1].startsWith("-")) {
-		const sessionId = args[continueIdx + 1];
-		args = args.filter((_, i) => i !== continueIdx && i !== continueIdx + 1);
-		args.unshift("tui", `--resume=${sessionId}`);
+	// --continue = the latest session of this folder; --continue <id> = that session.
+	const cont = continueTarget(args);
+	if (cont) {
+		let sessionId = cont.id;
+		if (!sessionId) {
+			const { defaultRunSessionStore } = await import("../packages/eight/run-session.ts");
+			const latest = defaultRunSessionStore().latestForCwd(process.cwd());
+			if (latest) {
+				console.log(
+					`Continuing session: ${latest.name || latest.id} (${latest.model ?? "unknown"}, ${latest.messageCount} msgs)`,
+				);
+				sessionId = latest.id;
+			} else {
+				console.log("No earlier session in this folder. Starting fresh.");
+			}
+		}
+		args = cont.rest;
+		args.unshift("tui", ...(sessionId ? [`--resume=${sessionId}`] : []));
 	}
 
 	// Implicit TUI: `8gent --provider=lmstudio` so global flags reach the TUI child process
@@ -442,9 +498,7 @@ async function main() {
 		}
 
 		case "pipeline": {
-			const { runPipelineCommand } = await import(
-				"../packages/orchestration/pipeline-cli.ts"
-			);
+			const { runPipelineCommand } = await import("../packages/orchestration/pipeline-cli.ts");
 			const code = await runPipelineCommand(restArgs);
 			process.exit(code);
 			break;
@@ -503,6 +557,10 @@ async function main() {
 			await cronCommand(restArgs);
 			break;
 
+		case "blueprint":
+			await blueprintCommand(restArgs);
+			break;
+
 		case "daemon": {
 			const { daemonCommand } = await import("../packages/daemon/service.ts");
 			const code = await daemonCommand(restArgs, daemonProgram());
@@ -530,9 +588,17 @@ async function main() {
 			await doctorCommand();
 			break;
 
+		case "deck": {
+			// `8gent deck render <spec.json> [out.mp4]`: the shell door to render_video_deck.
+			// Never starts a model loop (depth-exempt above).
+			const { runDeckCommand } = await import("../packages/eight/deck-cli.ts");
+			process.exitCode = await runDeckCommand(restArgs);
+			break;
+		}
+
 		case "update":
 		case "upgrade":
-			await updateCommand();
+			await updateCommand(restArgs);
 			break;
 
 		case "permissions":
@@ -549,6 +615,12 @@ async function main() {
 			await installCommand(restArgs);
 			break;
 
+		case "packages": {
+			const { runPackagesCommand } = await import("../packages/eight/cli-maintenance.ts");
+			process.exitCode = runPackagesCommand(restArgs);
+			break;
+		}
+
 		case "publish":
 			await publishCommand(restArgs);
 			break;
@@ -561,40 +633,17 @@ async function main() {
 }
 
 /**
- * `8gent update` — pull the latest 8gent from npm. Uses --force to
- * defeat the EEXIST collision on the `8` / `8gent` / `8gent-code`
- * bin symlinks that npm refuses to overwrite by default.
- *
- * No flags. No surprises. Just: tell user what's about to happen,
- * run npm install -g @latest --force, stream output, print restart
- * hint when done.
+ * `8gent update [--check]`: packages/eight/self-update.ts decides and installs.
+ * It updates through the channel this 8gent was installed from (a release
+ * binary, or npm) and never installs a lower version. `--check` reports only.
  */
-async function updateCommand(): Promise<void> {
-	const { spawn } = await import("node:child_process");
-	console.log(`Current: v${VERSION}`);
-	console.log(`Updating @8gi-foundation/8gent-code to latest from npm...`);
-	console.log(`(uses --force to overwrite stale bin symlinks)\n`);
-
-	const proc = spawn(
-		"npm",
-		["install", "-g", "@8gi-foundation/8gent-code@latest", "--force"],
-		{ stdio: "inherit" },
-	);
-
-	await new Promise<void>((resolve) => {
-		proc.on("exit", (code) => {
-			if (code === 0) {
-				console.log(`\nDone. Restart your terminal session, then run \`8gent\` to use the new version.`);
-			} else {
-				console.error(`\nUpdate failed (exit ${code}). Try manually:`);
-				console.error(`  npm install -g @8gi-foundation/8gent-code@latest --force`);
-			}
-			resolve();
-		});
-		proc.on("error", (err) => {
-			console.error(`\nCouldn't run npm: ${err.message}`);
-			resolve();
-		});
+async function updateCommand(args: string[]): Promise<void> {
+	const { runUpdateCommand } = await import("../packages/eight/cli-maintenance.ts");
+	process.exitCode = await runUpdateCommand(args, {
+		currentVersion: VERSION,
+		modulePath: import.meta.url,
+		embedded: MODULE_IS_EMBEDDED,
+		execPath: process.execPath,
 	});
 }
 
@@ -611,9 +660,7 @@ async function updateCommand(): Promise<void> {
  * so the user can grant them in two clicks.
  */
 async function permissionsCommand(args: string[]): Promise<void> {
-	const { checkPermissions, openPrivacyPane } = await import(
-		"../packages/hands/index.ts"
-	);
+	const { checkPermissions, openPrivacyPane } = await import("../packages/hands/index.ts");
 	const shouldOpen = args.includes("--open") || args.includes("-o");
 	const report = checkPermissions();
 
@@ -632,9 +679,7 @@ async function permissionsCommand(args: string[]): Promise<void> {
 		return;
 	}
 
-	console.log(
-		`To fix, grant ${report.terminalApp} the missing permission(s) in:`,
-	);
+	console.log(`To fix, grant ${report.terminalApp} the missing permission(s) in:`);
 	console.log(`  System Settings → Privacy & Security → ...`);
 	console.log("");
 	if (!report.accessibility.granted) {
@@ -653,7 +698,9 @@ async function permissionsCommand(args: string[]): Promise<void> {
 		if (!report.accessibility.granted) openPrivacyPane("accessibility");
 		if (!report.screenRecording.granted) openPrivacyPane("screen-recording");
 	} else {
-		console.log(`Re-run with \`8gent permissions --open\` to auto-launch the right System Settings panes.\n`);
+		console.log(
+			`Re-run with \`8gent permissions --open\` to auto-launch the right System Settings panes.\n`,
+		);
 	}
 }
 
@@ -670,13 +717,9 @@ async function permissionsCommand(args: string[]): Promise<void> {
  */
 async function keysCommand(args: string[]): Promise<void> {
 	const sub = (args[0] || "open").toLowerCase();
-	const {
-		KEYS_PATH,
-		ensureKeysFile,
-		loadKeysIntoEnv,
-		openKeysFile,
-		readKeysFile,
-	} = await import("../packages/secrets/index.ts");
+	const { KEYS_PATH, ensureKeysFile, loadKeysIntoEnv, openKeysFile, readKeysFile } = await import(
+		"../packages/secrets/index.ts"
+	);
 
 	if (sub === "open" || sub === "edit" || sub === "") {
 		const path = openKeysFile();
@@ -728,9 +771,16 @@ async function keysCommand(args: string[]): Promise<void> {
  * via isInstalled() and report success/failure with next steps.
  */
 async function installCommand(args: string[]): Promise<void> {
-	const presetId = (args[0] || "").toLowerCase().trim();
+	const spec = (args[0] || "").trim();
+	// `npm:<name>@<version>` is a package, pinned by integrity (packages/marketplace/install.ts).
+	if (spec.startsWith("npm:")) {
+		const { runInstallNpmCommand } = await import("../packages/eight/cli-maintenance.ts");
+		process.exitCode = await runInstallNpmCommand(spec);
+		return;
+	}
+	const presetId = spec.toLowerCase();
 	if (!presetId) {
-		console.error(`Usage: 8gent install <preset>`);
+		console.error(`Usage: 8gent install <preset> | npm:<name>@<version>`);
 		console.error(`Available presets: claude, codex, hermes, openclaw, pi, 8gent`);
 		process.exit(1);
 	}
@@ -739,9 +789,7 @@ async function installCommand(args: string[]): Promise<void> {
 	// apps/tui (close to its consumer) but is plain data, so we pull
 	// it across package boundaries here. Layering can be tightened in
 	// a later PR by lifting the registry into its own package.
-	const { getPreset, isInstalled } = await import(
-		"../apps/tui/src/lib/external-agent-runner.ts"
-	);
+	const { getPreset, isInstalled } = await import("../apps/tui/src/lib/external-agent-runner.ts");
 	const preset = getPreset(presetId);
 	if (!preset) {
 		console.error(`Unknown preset: ${presetId}`);
@@ -786,9 +834,7 @@ async function installCommand(args: string[]): Promise<void> {
 	if (installed) {
 		console.log(`\n✓ ${preset.label} installed and on PATH.`);
 	} else {
-		console.log(
-			`\n⚠ Install reported success but \`${preset.command}\` is not on PATH yet.`,
-		);
+		console.log(`\n⚠ Install reported success but \`${preset.command}\` is not on PATH yet.`);
 		console.log(`  Open a new shell, or check the install notes:\n`);
 	}
 	if (plan.notes) console.log(`  ${plan.notes}`);
@@ -1021,7 +1067,8 @@ async function benchmarkCommand(args: string[]) {
 	}
 	const benchmarkPath = path.join(root, "scripts", "benchmark.ts");
 	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", benchmarkPath, ...args], {
+	// cwd is the 8gent checkout, which can be a workspace: no bunfig.toml or .env from it (#4013).
+	const proc = spawn("bun", [...safeBunFlags(), "run", benchmarkPath, ...args], {
 		stdio: "inherit",
 		cwd: root,
 	});
@@ -1038,7 +1085,8 @@ async function demoCommand(args: string[]) {
 	}
 	const demoPath = path.join(root, "scripts", "demo-savings.ts");
 	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", demoPath, ...args], {
+	// cwd is the 8gent checkout, which can be a workspace: no bunfig.toml or .env from it (#4013).
+	const proc = spawn("bun", [...safeBunFlags(), "run", demoPath, ...args], {
 		stdio: "inherit",
 		cwd: root,
 	});
@@ -1226,11 +1274,11 @@ async function spawnPet(sessionId?: string) {
 async function tuiCommand(args: string[]) {
 	console.log(BANNER);
 
-	// Auto-spawn pet unless --no-pet
-	const noPet = args.includes("--no-pet");
+	// The pet is opt-in: `8gent --pet` (C2). --no-pet is still accepted and wins.
+	const wantPet = args.includes("--pet") && !args.includes("--no-pet");
 	const filteredArgs = args.filter((a) => a !== "--no-pet" && a !== "--pet");
 
-	if (!noPet) {
+	if (wantPet) {
 		await spawnPet();
 	}
 
@@ -1264,12 +1312,74 @@ async function tuiCommand(args: string[]) {
  */
 async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 	const { spawn } = await import("node:child_process");
-	const proc = spawn("bun", ["run", tuiPath, ...args], { stdio: "inherit" });
+	// The TUI cannot tell which install it is from its own path (a compiled binary runs a cached
+	// bundle), so the launcher says: version, entry module and embedded-ness, for /update and the
+	// update notice (packages/eight/update-notice.ts).
+	const launcherEnv = {
+		EIGHT_RUNNING_VERSION: VERSION,
+		EIGHT_LAUNCHER_MODULE: import.meta.url,
+		EIGHT_LAUNCHER_EMBEDDED: MODULE_IS_EMBEDDED ? "1" : "0",
+	};
+	// A compiled binary may have no Bun on PATH, so it runs the bundle as its own
+	// Bun runtime (BUN_BE_BUN=1) with cwd config and .env files switched off
+	// (apps/tui/src/lib/embedded-bundle.ts, #3894).
+	let proc: ReturnType<typeof spawn>;
+	if (MODULE_IS_EMBEDDED) {
+		const inv = childInvocation(process.execPath, tuiPath, args, TUI_CACHE_DIR);
+		proc = spawn(inv.command, inv.args, { stdio: "inherit", env: { ...inv.env, ...launcherEnv } });
+	} else {
+		// Same as the compiled path: never the user's cwd bunfig.toml or .env (#4013).
+		proc = spawn("bun", [...safeBunFlags(), "run", tuiPath, ...args], {
+			stdio: "inherit",
+			env: { ...process.env, ...launcherEnv },
+		});
+	}
 	proc.on("error", (err) => {
 		console.error(`Could not start the TUI: ${err.message}`);
 		process.exit(1);
 	});
-	proc.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+	proc.on("exit", async (code, signal) => {
+		// /update asked for a restart: start a fresh 8gent (the new code) on the same session.
+		if (code === RELAUNCH_EXIT_CODE) {
+			const { consumeResumeRequest, relaunchCommand } = await import(
+				"../packages/eight/update-resume.ts"
+			);
+			const req = consumeResumeRequest();
+			if (req) {
+				const cmd = relaunchCommand({
+					embedded: MODULE_IS_EMBEDDED,
+					execPath: process.execPath,
+					entryScript: process.argv[1],
+					req,
+				});
+				const next = spawn(cmd.command, cmd.args, { stdio: "inherit", env: cmd.env });
+				next.on("error", (err) => {
+					console.error(`Could not restart 8gent: ${err.message}. Run: 8gent --resume`);
+					process.exit(1);
+				});
+				next.on("exit", (c, sig) => process.exit(c ?? (sig ? 1 : 0)));
+				return;
+			}
+		}
+		process.exit(code ?? (signal ? 1 : 0));
+	});
+}
+
+/**
+ * The compiled binary carries its own TUI bundle (scripts/build-binaries.ts
+ * embeds dist/tui.js, #2975). Bun can only execute a real file, so write it
+ * to ~/.8gent/cache/tui-<content hash>.js, verified by hash on every launch.
+ * Returns null outside a compiled binary or if the cache is not writable.
+ */
+function extractEmbeddedTui(): string | null {
+	const asset = (globalThis as Record<string, unknown>).__EIGHT_EMBEDDED_TUI;
+	if (typeof asset !== "string") return null;
+	try {
+		return materializeTui(fs.readFileSync(asset), TUI_CACHE_DIR);
+	} catch (err) {
+		console.error(`Could not prepare the embedded TUI: ${(err as Error).message}`);
+		return null;
+	}
 }
 
 /**
@@ -1286,6 +1396,8 @@ async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
  * of spawning bun against a phantom path.
  */
 function resolveTuiEntry(): string | null {
+	const embedded = extractEmbeddedTui();
+	if (embedded) return embedded;
 	for (const dir of [MODULE_DIR, EXEC_DIR]) {
 		const bundled = path.join(dir, "tui.js");
 		if (fs.existsSync(bundled)) return bundled;
@@ -1708,6 +1820,53 @@ async function cronCommand(args: string[]) {
 	}
 }
 
+// ── Blueprint Command (trial, EIGHT_BLUEPRINTS=1 only, #3463) ─────
+
+async function blueprintCommand(args: string[]) {
+	const bp = await import("../packages/cron/blueprints.ts");
+	if (!bp.blueprintsEnabled()) {
+		console.error("Blueprints are off. Set EIGHT_BLUEPRINTS=1 to try them.");
+		process.exit(1);
+	}
+	const { getRoutineManager } = await import("../packages/cron/routines.ts");
+	const [sub, target, ...pairs] = args;
+	if (!sub || sub === "list") {
+		for (const b of bp.BLUEPRINTS) {
+			console.log(`${b.name}  ${b.description}`);
+			for (const s of b.slots)
+				console.log(`  ${s.key}: ${s.label}${s.default ? ` (default ${s.default})` : ""}`);
+		}
+		return;
+	}
+	if (sub === "add" && target) {
+		const slots: Record<string, string> = Object.create(null);
+		for (const p of pairs) {
+			const i = p.indexOf("=");
+			const key = p.slice(0, i);
+			let why = "";
+			if (i < 1) why = `Expected key=value, got ${JSON.stringify(p)}`;
+			else if (key === "__proto__") why = `Not a slot name: ${JSON.stringify(key)}`;
+			else if (key in slots) why = `Slot given twice: ${JSON.stringify(key)}`;
+			if (why) {
+				console.error(why);
+				process.exit(1);
+			}
+			slots[key] = p.slice(i + 1);
+		}
+		try {
+			const r = bp.createFromBlueprint(getRoutineManager(), target, slots);
+			console.log(`Saved routine ${r.id} (${r.name}), cron pattern "${r.schedule}".`);
+			console.log("Nothing runs routines yet; this trial only saves them.");
+		} catch (e) {
+			console.error(e instanceof Error ? e.message : String(e));
+			process.exit(1);
+		}
+		return;
+	}
+	console.error("Usage: 8gent blueprint list | add <name> key=value...");
+	process.exit(1);
+}
+
 // ── Chat Command (non-interactive, pipe-friendly) ─────────────────
 
 // ── Text-Tool Chat (local-model agentic loop) ─────────────────────
@@ -1804,9 +1963,7 @@ async function chatCommand(args: string[]) {
 	const resolvedProvider = provider || "ollama";
 	const forceTextTools = !!flags["text-tools"];
 	const useTextTools =
-		forceTextTools ||
-		resolvedProvider === "lmstudio" ||
-		resolvedProvider === "ollama";
+		forceTextTools || resolvedProvider === "lmstudio" || resolvedProvider === "ollama";
 
 	if (useTextTools) {
 		try {
@@ -2150,24 +2307,28 @@ async function exportCommand(args: string[]) {
 		targetId = (convos[0] as any).sessionId;
 	}
 
-	// Fetch conversation messages
-	const convo = await sync.getConversation(targetId);
-	if (!convo || !convo.messages || convo.messages.length === 0) {
+	// Fetch conversation messages. The only stored transcript of a synced
+	// session is its checkpoint, which restoreFromRemote decodes.
+	const convo = await sync.restoreFromRemote(targetId);
+	if (!convo || convo.messages.length === 0) {
 		console.error(`Session ${targetId} not found or has no messages.`);
 		process.exit(1);
 	}
 
+	// Checkpoints store role and content only, so there is no per-message
+	// timestamp or session duration to carry into the export.
+	const exportedAt = new Date();
 	const { saveSessionExport } = await import("../packages/eight/session-export");
 	const filePath = await saveSessionExport(
-		convo.messages.map((m: any) => ({
+		convo.messages.map((m) => ({
 			role: m.role || "system",
 			content: m.content || "",
-			timestamp: new Date(m.timestamp || Date.now()),
+			timestamp: exportedAt,
 		})),
 		{
 			sessionId: targetId,
 			model: convo.model || "unknown",
-			duration: convo.duration || "unknown",
+			duration: "unknown",
 		},
 	);
 
@@ -2228,9 +2389,18 @@ async function preferencesCommand(args: string[]) {
 				case "role":
 					user.identity.role = value;
 					break;
-				case "style":
-					user.identity.communicationStyle = value as any;
+				case "style": {
+					// #3487: only a style from the fixed set is stored.
+					const { COMMUNICATION_STYLES, isCommunicationStyle } = await import(
+						"../packages/self-autonomy/communication-style"
+					);
+					if (!isCommunicationStyle(value)) {
+						console.error(`Unknown style. Use one of: ${COMMUNICATION_STYLES.join(", ")}`);
+						process.exit(1);
+					}
+					user.identity.communicationStyle = value;
 					break;
+				}
 				case "language":
 					user.identity.language = value;
 					break;
@@ -2347,7 +2517,7 @@ async function memoryCommand(args: string[]) {
 				console.error("Usage: 8gent memory remember <fact>");
 				process.exit(1);
 			}
-			const id = await memory.remember(fact, "project", { source: "cli" });
+			const id = await memory.remember(fact, "project", { source: "user:cli" });
 			if (isJson) {
 				jsonOut({ success: true, id, fact });
 			} else {
@@ -2374,12 +2544,21 @@ async function memoryCommand(args: string[]) {
 
 		case "stats": {
 			try {
-				const ctx = await memory.getContext({ maxTokens: 1 });
+				// Count the stores themselves. A context window is a ranked,
+				// token-capped selection, so its stats are not a total.
+				const counts = await memory.getStats();
+				const byType: Record<string, number> = {};
+				for (const scope of [counts.v2?.project, counts.v2?.global]) {
+					for (const [type, n] of Object.entries(scope?.byType ?? {})) {
+						byType[type] = (byType[type] ?? 0) + n;
+					}
+				}
+				const stats = { totalMemories: counts.project + counts.global, byType };
 				if (isJson) {
-					jsonOut({ stats: ctx.stats });
+					jsonOut({ stats });
 				} else {
-					console.log(`Total memories: ${ctx.stats.totalMemories}`);
-					console.log(`By type: ${JSON.stringify(ctx.stats.byType)}`);
+					console.log(`Total memories: ${stats.totalMemories}`);
+					console.log(`By type: ${JSON.stringify(stats.byType)}`);
 				}
 			} catch {
 				if (isJson) {
@@ -2646,9 +2825,10 @@ async function publishCommand(args: string[]) {
 
 	const { runPublish } = await import("../packages/marketplace/index.ts");
 
-	const maxBytes = typeof flags["max-size"] === "string"
-		? Math.floor(Number(flags["max-size"]) * 1024 * 1024)
-		: undefined;
+	const maxBytes =
+		typeof flags["max-size"] === "string"
+			? Math.floor(Number(flags["max-size"]) * 1024 * 1024)
+			: undefined;
 	if (maxBytes !== undefined && (Number.isNaN(maxBytes) || maxBytes <= 0)) {
 		const msg = `--max-size must be a positive number of megabytes, got ${flags["max-size"]}`;
 		if (isJson) jsonOut({ success: false, error: msg });
@@ -2675,8 +2855,7 @@ async function publishCommand(args: string[]) {
 		});
 	} else {
 		for (const c of result.checks) {
-			const tag =
-				c.level === "ok" ? "ok " : c.level === "warn" ? "warn" : "FAIL";
+			const tag = c.level === "ok" ? "ok " : c.level === "warn" ? "warn" : "FAIL";
 			console.log(`[${tag}] ${c.name}: ${c.message}`);
 		}
 		if (result.ok && result.archivePath) {

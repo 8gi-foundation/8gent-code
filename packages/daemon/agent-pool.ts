@@ -10,7 +10,18 @@ import { sessionApiKey } from "../eight/failover-provider-config";
 import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { getUsageMonitor } from "../providers/usage-monitor";
+import { type ApprovalTurn, withChannelApprovals } from "./channel-approvals";
+import {
+	CLASSROOM_AGENT_SCOPE,
+	CLASSROOM_CHANNEL,
+	CLASSROOM_IDLE_MS,
+	CLASSROOM_MAX_TURNS,
+	CLASSROOM_SESSION_CAP,
+	CLASSROOM_SYSTEM_PROMPT,
+} from "./classroom";
+import { getDataDir } from "./data-dir";
 import { bus } from "./events";
+import type { SessionJournal } from "./session-journal";
 
 export interface PoolConfig {
 	/** Default model to use (e.g. "qwen3.5:14b") */
@@ -32,16 +43,66 @@ interface SessionEntry {
 	lastActiveAt: number;
 	messageCount: number;
 	busy: boolean; // true while agent.chat() is in flight
+	/**
+	 * Waiters for this session, FIFO (#3554, EIGHT_SESSION_QUEUE=1 only).
+	 * Each is resolved with true when handed the session, or false when the
+	 * session ends before its turn.
+	 */
+	queue: Array<(admitted: boolean) => void>;
 	/** Tenant attribution for Wave 4 multi-tenant rollout. */
 	tenantId: string;
 	/** Optional Clerk ID — useful when tenantId is internal. */
 	clerkId?: string;
 }
 
+/** Per-session options for AgentPool.createSession. */
+export interface SessionOverrides {
+	maxTurns?: number;
+	tenantId?: string;
+	clerkId?: string;
+	/**
+	 * Restricted policy scope this session's agent gates tool calls under
+	 * (e.g. "__table__"). When set, every tool call routes through ToolG8
+	 * with this id as the agentId, so the deny-by-default rules installed
+	 * for that scope apply. Defaults to the standard "primary" scope.
+	 */
+	agentScope?: string;
+	/**
+	 * Per-session backend routing. Lets a caller (e.g. a Table officer
+	 * pinned to a specific local model) override the pool defaults for
+	 * this one session. `runtime` is still subject to the F4 local-only
+	 * gate for Table sessions; a cloud runtime is downgraded to the safe
+	 * local default unless EIGHT_TABLE_CONSENT_CLOUD=1. `model`,
+	 * `baseUrl`, and `systemPrompt` flow straight into the AgentConfig
+	 * (and, via createClient, to the LLM client) when set.
+	 */
+	runtime?: AgentConfig["runtime"];
+	model?: string;
+	baseUrl?: string;
+	systemPrompt?: string;
+	/**
+	 * Working directory for this session's tools. Set when a saved TUI
+	 * session is attached through the daemon, so its tools keep running in
+	 * the project it was started in (#3929). Defaults to the pool's.
+	 */
+	workingDirectory?: string;
+}
+
 const DEFAULT_MODEL = process.env.EIGHGENT_MODEL || "eight:latest";
 const DEFAULT_RUNTIME = "ollama" as const;
 const MAX_SESSIONS = 10;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+/** #3554: queue messages to a busy session instead of refusing them. Off by default. */
+function sessionQueueEnabled(): boolean {
+	return process.env.EIGHT_SESSION_QUEUE === "1";
+}
+
+/** #3554: max messages waiting per session (not counting the one running). */
+function sessionQueueMax(): number {
+	const n = Number(process.env.EIGHT_SESSION_QUEUE_MAX);
+	return Number.isInteger(n) && n >= 0 ? n : 32;
+}
 
 /** Known session channels. Add new entries here when wiring a new surface. */
 export const KNOWN_CHANNELS = [
@@ -54,12 +115,15 @@ export const KNOWN_CHANNELS = [
 	"computer",
 	"browser",
 	"table",
+	"tui",
+	"classroom",
 ] as const;
 export type Channel = (typeof KNOWN_CHANNELS)[number];
 
 /** Per-channel concurrency caps. Falls back to MAX_SESSIONS when unset. */
 const CHANNEL_CAPS: Partial<Record<Channel, number>> = {
 	computer: Number(process.env.MAX_COMPUTER_SESSIONS ?? 3),
+	classroom: CLASSROOM_SESSION_CAP,
 };
 
 /** Per-channel idle timeouts (ms). Falls back to IDLE_TIMEOUT_MS when unset. */
@@ -68,6 +132,8 @@ const CHANNEL_IDLE_TIMEOUTS: Partial<Record<Channel, number>> = {
 	// Table agent sessions are cheap to rebuild (deterministic sessionId) and
 	// should not linger holding a scoped agent; reap them faster than the default.
 	table: 10 * 60 * 1000, // 10 minutes
+	// Classroom sessions are one-shot lesson generators; do not let them linger.
+	classroom: CLASSROOM_IDLE_MS,
 };
 
 /** Channels that should never be evicted by the idle reaper. */
@@ -77,8 +143,16 @@ export class AgentPool {
 	private sessions = new Map<string, SessionEntry>();
 	private config: PoolConfig;
 	private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+	/** Open-session journal for resume after a crash (#3552). Unset by default. */
+	private journal: SessionJournal | null;
+	/**
+	 * True while a client is attached to a session (#3929). The gateway sets
+	 * it; an attached session is never evicted for idleness or room.
+	 */
+	private inUse: (sessionId: string) => boolean = () => false;
 
-	constructor(config: Partial<PoolConfig> = {}) {
+	constructor(config: Partial<PoolConfig> = {}, options: { journal?: SessionJournal } = {}) {
+		this.journal = options.journal ?? null;
 		this.config = {
 			model: config.model || DEFAULT_MODEL,
 			runtime: config.runtime || DEFAULT_RUNTIME,
@@ -89,6 +163,31 @@ export class AgentPool {
 
 		// Clean up idle sessions every 5 minutes
 		this.cleanupTimer = setInterval(() => this.cleanupIdleSessions(), 5 * 60 * 1000);
+	}
+
+	/** Tell the pool which sessions have clients attached (gateway, #3929). */
+	setInUse(fn: (sessionId: string) => boolean): void {
+		this.inUse = fn;
+	}
+
+	/** Whether a session may be evicted to make room or for idleness. */
+	private evictable(id: string, entry: SessionEntry): boolean {
+		return !NEVER_EVICT.has(entry.channel) && !entry.busy && !this.inUse(id);
+	}
+
+	/**
+	 * Whether a new session on `channel` fits: under both caps, or with an
+	 * evictable session to make room. Restores from disk check this first so
+	 * they never push the pool past its cap (#3929).
+	 */
+	canCreate(channel: string): boolean {
+		const entries = [...this.sessions];
+		const channelOk =
+			this.countOn(channel) < this.capFor(channel) ||
+			entries.some(([id, e]) => e.channel === channel && this.evictable(id, e));
+		const globalOk =
+			this.sessions.size < MAX_SESSIONS || entries.some(([id, e]) => this.evictable(id, e));
+		return channelOk && globalOk;
 	}
 
 	/** Idle timeout for a given channel (defaults to IDLE_TIMEOUT_MS). */
@@ -117,11 +216,12 @@ export class AgentPool {
 			// Never evict persistent channels (telegram, delegation)
 			if (NEVER_EVICT.has(entry.channel)) continue;
 			const timeout = this.idleTimeoutFor(entry.channel);
-			if (!entry.busy && now - entry.lastActiveAt > timeout) {
+			if (this.evictable(id, entry) && now - entry.lastActiveAt > timeout) {
 				console.log(
 					`[agent-pool] evicting idle session ${id} (channel=${entry.channel}, idle ${Math.round((now - entry.lastActiveAt) / 60_000)}m)`,
 				);
 				this.sessions.delete(id);
+				this.unjournal(id);
 				bus.emit("session:end", { sessionId: id, reason: "idle-timeout" });
 			}
 		}
@@ -131,31 +231,12 @@ export class AgentPool {
 	createSession(
 		sessionId: string,
 		channel: string,
-		overrides?: {
-			maxTurns?: number;
-			tenantId?: string;
-			clerkId?: string;
-			/**
-			 * Restricted policy scope this session's agent gates tool calls under
-			 * (e.g. "__table__"). When set, every tool call routes through ToolG8
-			 * with this id as the agentId, so the deny-by-default rules installed
-			 * for that scope apply. Defaults to the standard "primary" scope.
-			 */
-			agentScope?: string;
-			/**
-			 * Per-session backend routing. Lets a caller (e.g. a Table officer
-			 * pinned to a specific local model) override the pool defaults for
-			 * this one session. `runtime` is still subject to the F4 local-only
-			 * gate for Table sessions; a cloud runtime is downgraded to the safe
-			 * local default unless EIGHT_TABLE_CONSENT_CLOUD=1. `model`,
-			 * `baseUrl`, and `systemPrompt` flow straight into the AgentConfig
-			 * (and, via createClient, to the LLM client) when set.
-			 */
-			runtime?: AgentConfig["runtime"];
-			model?: string;
-			baseUrl?: string;
-			systemPrompt?: string;
-		},
+		overrides?: SessionOverrides,
+		/**
+		 * journal: false skips the resume journal write. The boot resume uses
+		 * it so the entry keeps naming the old checkpoint until restore succeeds.
+		 */
+		options: { journal?: boolean } = {},
 	): void {
 		// Per-channel cap: evict oldest idle session on the same channel first.
 		const cap = this.capFor(channel);
@@ -164,8 +245,7 @@ export class AgentPool {
 			let oldestTime = Number.POSITIVE_INFINITY;
 			for (const [id, entry] of this.sessions) {
 				if (entry.channel !== channel) continue;
-				if (NEVER_EVICT.has(entry.channel)) continue;
-				if (!entry.busy && entry.createdAt < oldestTime) {
+				if (this.evictable(id, entry) && entry.createdAt < oldestTime) {
 					oldestTime = entry.createdAt;
 					oldestId = id;
 				}
@@ -184,21 +264,29 @@ export class AgentPool {
 			let oldestId: string | null = null;
 			let oldestTime = Number.POSITIVE_INFINITY;
 			for (const [id, entry] of this.sessions) {
-				if (NEVER_EVICT.has(entry.channel)) continue;
-				if (!entry.busy && entry.createdAt < oldestTime) {
+				if (this.evictable(id, entry) && entry.createdAt < oldestTime) {
 					oldestTime = entry.createdAt;
 					oldestId = id;
 				}
 			}
 			if (oldestId) {
 				this.destroySession(oldestId);
+				// Clients still holding the id must hear it ended (#3929).
+				bus.emit("session:end", { sessionId: oldestId, reason: "channel-cap-evict" });
 			}
 		}
 
 		const events = this.buildEventCallbacks(sessionId);
 
+		// Classroom (#3939) is fixed by the channel, never by the caller: no tools,
+		// a short turn budget, and the untrusted-data system prompt. Overrides for
+		// scope, prompt and turns are ignored here on purpose.
+		const isClassroom = channel === CLASSROOM_CHANNEL;
+
 		// Delegation sessions get more tool turns than Telegram chat
-		const maxTurns = overrides?.maxTurns ?? (channel === "delegation" ? 25 : this.config.maxTurns);
+		const maxTurns = isClassroom
+			? Math.min(overrides?.maxTurns ?? CLASSROOM_MAX_TURNS, CLASSROOM_MAX_TURNS)
+			: (overrides?.maxTurns ?? (channel === "delegation" ? 25 : this.config.maxTurns));
 
 		// F4: Table sessions must run inference on a LOCAL runtime. A Table agent
 		// processes UNTRUSTED channel text; if the runtime is cloud, that text
@@ -237,8 +325,8 @@ export class AgentPool {
 			baseUrl: overrides?.baseUrl,
 			// Optional per-session persona (officer character prompt). Undefined
 			// leaves the agent on its DEFAULT_SYSTEM_PROMPT.
-			systemPrompt: overrides?.systemPrompt,
-			workingDirectory: this.config.workingDirectory,
+			systemPrompt: isClassroom ? CLASSROOM_SYSTEM_PROMPT : overrides?.systemPrompt,
+			workingDirectory: overrides?.workingDirectory ?? this.config.workingDirectory,
 			// The pool key was resolved for the pool's default runtime. A session
 			// whose runtime differs (an override, or a Table session forced local)
 			// gets only its own runtime's key, never the pool's (#3261).
@@ -255,7 +343,9 @@ export class AgentPool {
 			// installTablePolicies() rules block run_command/network/write_file etc.
 			// The agent produces only a reply; the gated post_to_channel write path
 			// is driven by the gateway. Other channels keep the default scope.
-			agentScope: overrides?.agentScope ?? (channel === "table" ? "__table__" : undefined),
+			agentScope: isClassroom
+				? CLASSROOM_AGENT_SCOPE
+				: (overrides?.agentScope ?? (channel === "table" ? "__table__" : undefined)),
 			// Delegation runs UNATTENDED (the relay autonomy engine / missions
 			// dispatch through it with no human approving each tool). Mark it so the
 			// maker-checker gate enforces at the executor: branch pushes auto-approve
@@ -277,9 +367,24 @@ export class AgentPool {
 			lastActiveAt: now,
 			messageCount: 0,
 			busy: false,
+			queue: [],
 			tenantId,
 			clerkId: overrides?.clerkId,
 		});
+
+		if (this.journal && options.journal !== false) {
+			try {
+				this.journal.upsert({
+					sessionId,
+					channel,
+					ttSessionId: agent.getTimeTravelSessionId(),
+					createdAt: now,
+					...(overrides ? { overrides } : {}),
+				});
+			} catch (err) {
+				console.error(`[agent-pool] session journal write failed for ${sessionId}: ${String(err)}`);
+			}
+		}
 
 		console.log(
 			`[agent-pool] created session ${sessionId} (channel=${channel}, tenant=${tenantId}, runtime=${runtime}, model=${model})`,
@@ -287,7 +392,16 @@ export class AgentPool {
 	}
 
 	/** Send a message to an agent and stream the response via the event bus */
-	async chat(sessionId: string, text: string): Promise<string> {
+	/**
+	 * `turn` is set only for a turn the Telegram bridge started on its own
+	 * authenticated socket (#3621); then a dangerous command asks the operator.
+	 */
+	async chat(
+		sessionId: string,
+		text: string,
+		turn?: ApprovalTurn,
+		options: { continuation?: boolean } = {},
+	): Promise<string> {
 		const entry = this.sessions.get(sessionId);
 		if (!entry) {
 			bus.emit("agent:error", { sessionId, error: "session not found" });
@@ -295,12 +409,23 @@ export class AgentPool {
 		}
 
 		if (entry.busy) {
-			bus.emit("agent:error", {
-				sessionId,
-				error: "agent is busy processing another message",
-			});
-			return "[error] agent is busy";
+			if (!sessionQueueEnabled()) {
+				bus.emit("agent:error", {
+					sessionId,
+					error: "agent is busy processing another message",
+				});
+				return "[error] agent is busy";
+			}
+			// #3554: wait in line. The finishing turn hands the session over with
+			// busy still true, so nothing can jump the queue in between.
+			if (entry.queue.length >= sessionQueueMax()) {
+				bus.emit("agent:error", { sessionId, error: "session queue full" });
+				return "[error] session queue full";
+			}
+			const admitted = await new Promise<boolean>((resolve) => entry.queue.push(resolve));
+			if (!admitted) return "[error] session ended";
 		}
+		entry.busy = true;
 
 		// Usage monitor gate - stop burning tokens when limits hit
 		const usage = getUsageMonitor();
@@ -308,6 +433,7 @@ export class AgentPool {
 		if (!budget.allowed) {
 			const msg = `[budget exceeded] ${budget.reason}. Vessels paused until limits reset.`;
 			bus.emit("agent:error", { sessionId, error: msg });
+			this.release(entry);
 			return msg;
 		}
 		const warning = usage.getWarning();
@@ -319,14 +445,25 @@ export class AgentPool {
 			});
 		}
 
-		entry.busy = true;
+		// #4082: the turn is on disk before anything is shown, so a crash can
+		// continue it. A boot continuation keeps the journaled turn and its
+		// attempt count instead of starting a fresh one.
+		if (!options.continuation) {
+			const id = `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+			this.journalTool(sessionId, () => this.journal?.markTurnStart(sessionId, { id, text }));
+		}
+
 		entry.messageCount++;
 		entry.lastActiveAt = Date.now();
 		bus.emit("agent:thinking", { sessionId });
 
 		const startMs = Date.now();
 		try {
-			const response = await entry.agent.chat(text);
+			const response = await (turn
+				? withChannelApprovals(sessionId, turn, entry.agent.getWorkingDirectory(), () =>
+						entry.agent.chat(text),
+					)
+				: entry.agent.chat(text));
 
 			// Track token usage (estimate: ~4 chars/token).
 			const promptTokens = Math.ceil(text.length / 4);
@@ -364,8 +501,32 @@ export class AgentPool {
 			bus.emit("agent:error", { sessionId, error: errorMsg });
 			return `[error] ${errorMsg}`;
 		} finally {
-			entry.busy = false;
+			// A call aborted mid-turn never sends onToolEnd; the turn is over,
+			// so nothing is running any more (#3653), and the turn finished,
+			// with an answer or an error, so it is never continued (#4082).
+			this.journalTool(sessionId, () => this.journal?.clearInFlight(sessionId));
+			this.journalTool(sessionId, () => this.journal?.markTurnEnd(sessionId));
+			this.release(entry);
 		}
+	}
+
+	/** In-flight tool and turn journaling (#3653, #4082). Only with EIGHT_RESUME_ON_BOOT; never fails a turn. */
+	private journalTool(sessionId: string, write: () => void): void {
+		if (!this.journal) return;
+		try {
+			write();
+		} catch (err) {
+			console.error(
+				`[agent-pool] in-flight tool journal write failed for ${sessionId}: ${String(err)}`,
+			);
+		}
+	}
+
+	/** Hand the session to the next queued message, or mark it idle. */
+	private release(entry: SessionEntry): void {
+		const next = entry.queue.shift();
+		if (next) next(true);
+		else entry.busy = false;
 	}
 
 	/** Destroy a session and its Agent */
@@ -374,7 +535,27 @@ export class AgentPool {
 		if (!entry) return;
 
 		this.sessions.delete(sessionId);
+		this.unjournal(sessionId);
+		// A destroyed session must not keep running its in-flight turn.
+		if (entry.busy) {
+			try {
+				entry.agent.abort();
+			} catch (err) {
+				console.error(`[agent-pool] abort on destroy failed for ${sessionId}: ${String(err)}`);
+			}
+		}
+		// #3554: queued messages never run on an ended session.
+		for (const waiter of entry.queue.splice(0)) waiter(false);
 		console.log(`[agent-pool] destroyed session ${sessionId}`);
+	}
+
+	private unjournal(sessionId: string): void {
+		if (!this.journal) return;
+		try {
+			this.journal.remove(sessionId);
+		} catch (err) {
+			console.error(`[agent-pool] session journal remove failed for ${sessionId}: ${String(err)}`);
+		}
 	}
 
 	/** Check if a session exists */
@@ -388,16 +569,34 @@ export class AgentPool {
 	}
 
 	/** Get session info */
-	getSessionInfo(
-		sessionId: string,
-	): { channel: string; messageCount: number; busy: boolean } | null {
+	getSessionInfo(sessionId: string): {
+		channel: string;
+		messageCount: number;
+		busy: boolean;
+		createdAt: number;
+		lastActiveAt: number;
+	} | null {
 		const entry = this.sessions.get(sessionId);
 		if (!entry) return null;
 		return {
 			channel: entry.channel,
 			messageCount: entry.messageCount,
 			busy: entry.busy,
+			createdAt: entry.createdAt,
+			lastActiveAt: entry.lastActiveAt,
 		};
+	}
+
+	/**
+	 * Stop the turn in flight without ending the session (#3929): the
+	 * shared-safe Stop, since session:destroy would end it for every client.
+	 * False when the session does not exist or nothing is running.
+	 */
+	abort(sessionId: string): boolean {
+		const entry = this.sessions.get(sessionId);
+		if (!entry || !entry.busy) return false;
+		entry.agent.abort();
+		return true;
 	}
 
 	/** Get count of active sessions */
@@ -468,19 +667,31 @@ export class AgentPool {
 	private buildEventCallbacks(sessionId: string): AgentEventCallbacks {
 		return {
 			onToolStart: (event) => {
+				this.journalTool(sessionId, () =>
+					this.journal?.markToolStart(sessionId, {
+						id: event.toolCallId,
+						tool: event.toolName,
+						args: event.args ?? {},
+						startedAt: Date.now(),
+					}),
+				);
 				bus.emit("tool:start", {
 					sessionId,
 					tool: event.toolName,
 					input: event.args,
+					toolCallId: event.toolCallId,
 				});
 			},
 
 			onToolEnd: (event) => {
+				this.journalTool(sessionId, () => this.journal?.markToolEnd(sessionId, event.toolCallId));
 				bus.emit("tool:result", {
 					sessionId,
 					tool: event.toolName,
 					output: event.resultPreview || "",
 					durationMs: event.durationMs,
+					toolCallId: event.toolCallId,
+					success: event.success,
 				});
 			},
 
@@ -509,8 +720,7 @@ export class AgentPool {
 export async function loadPoolConfig(): Promise<Partial<PoolConfig>> {
 	let fileConfig: Record<string, any> = {};
 	try {
-		const dataDir = process.env.EIGHT_DATA_DIR || `${process.env.HOME}/.8gent`;
-		const configPath = `${dataDir}/config.json`;
+		const configPath = `${getDataDir()}/config.json`;
 		const file = Bun.file(configPath);
 		if (await file.exists()) {
 			fileConfig = await file.json();
@@ -529,8 +739,7 @@ export async function loadPoolConfig(): Promise<Partial<PoolConfig>> {
 		// The OpenRouter env key only for an openrouter runtime (#3261).
 		// fileConfig.apiKey names no provider, so it is treated as the
 		// OpenRouter key it has always been used as, and only for openrouter.
-		apiKey:
-			sessionApiKey(runtime) || (runtime === "openrouter" ? fileConfig?.apiKey : undefined),
+		apiKey: sessionApiKey(runtime) || (runtime === "openrouter" ? fileConfig?.apiKey : undefined),
 		maxTurns: fileConfig?.maxTurns,
 	};
 }

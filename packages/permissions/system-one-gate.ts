@@ -83,9 +83,14 @@
  */
 
 import * as readline from "node:readline";
+import { activeShellKind } from "../core/shell";
 import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
+import { commandInFolder } from "./cd-prefix";
 import type { CreatedFiles } from "./s1-created-files";
+import type { RmOwnDir } from "./s1-rm-own-dir";
+import type { RunOwnScript } from "./s1-run-own-script";
+import { posixRulesApply } from "./shell-tools";
 import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
 
 export const SYSTEM_ONE_FLAG = "EIGHT_SYSTEM_ONE";
@@ -197,7 +202,13 @@ function noticeOnce(key: string, line: string): void {
  * inside the caller's working directory passes without the judge, since it
  * deletes nothing; and (#3177) so does one whose targets are absent or
  * untracked files this session created, per the caller's CreatedFiles record
- * (see s1-rm-nothing.ts and s1-created-files.ts for the exact conditions).
+ * (see s1-rm-nothing.ts and s1-created-files.ts for the exact conditions);
+ * and (#3669) so does `rm [-f] <file>` / `unlink <file>` of exactly one
+ * untracked scratch-style regular file inside the workspace (under run/,
+ * tmp/ or .cache/, or named *.lock / *.pid), such as a stale lock whose
+ * owner is dead (see s1-rm-single.ts). When that last rule says no but the
+ * command was close, its plain-words hint is appended to a block message so
+ * a block is not a dead end.
  *
  * `bun test` runs the repo's own test code, so skipping the judge for it is a
  * trust call: EIGHT_S1_ALLOWLIST_BUN_TEST=1 opts in, and it is OFF by default.
@@ -229,6 +240,12 @@ export interface SystemOneGateResult {
 	thresholds?: SystemOneThresholds;
 	/** Set when the verdict was escalate: true approved, false declined, null no human. */
 	humanApproved?: boolean | null;
+	/**
+	 * Set only for a caller that passed `canRunInstead`: the exact text to run with `/bin/sh -c` in
+	 * place of `command`, because what was checked is these bytes, not the file the command names
+	 * (s1-tg-send.ts, 8SO on #4102). A caller given this must run it, never `command`.
+	 */
+	runInstead?: string;
 }
 
 /** Ask a human. true approve, false decline, null when no human can be asked. */
@@ -481,13 +498,17 @@ function blockMessage(
 	thresholds: SystemOneThresholds | "unknown",
 	why: string,
 	command: string,
+	hint?: string,
 ): string {
 	const fields = `verdict=${g.verdict} pYes=${fmtP(g.pYes)} backend=${g.backend} model=${g.model} thresholds=${thresholds}`;
 	// A block is final: no card was shown and no approval can pass it. Say so,
 	// so the reply never tells the person their approval is what is missing (#3124).
 	const final =
 		g.verdict === "block" ? " No approval can run it: a System One block is final." : "";
-	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (on; ${SYSTEM_ONE_FLAG}=0 turns it off): ${why}. The command was not run.${final} ${SYSTEM_ONE_NO_RETRY} Command: ${command}`;
+	// Plain words on why the single-file delete rule did not take it, and what
+	// it does allow (#3669), so the block is not a dead end.
+	const help = hint ? ` ${hint}` : "";
+	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (on; ${SYSTEM_ONE_FLAG}=0 turns it off): ${why}. The command was not run.${final}${help} ${SYSTEM_ONE_NO_RETRY} Command: ${command}`;
 }
 
 /** TUI approval card if a frontend registered one, else an interactive stdin prompt (default No), else null. */
@@ -515,11 +536,58 @@ export async function systemOneGate(
 	env: Record<string, string | undefined> = process.env,
 	cwd?: string,
 	created?: CreatedFiles,
+	/** The project folder after a leading `cd <folder> &&` (#3199): the escalation card names it. */
+	where?: string,
+	/**
+	 * canRunInstead: the caller runs `runInstead` when one is handed back (#4102). project: the
+	 * project root when `cwd` is a folder a cd prefix chose inside it, so the tg-notify and
+	 * deck-render lanes' PATH checks cover the whole project, not only that folder (8SO, #4102, #4169).
+	 */
+	opts: { canRunInstead?: boolean; project?: string } = {},
 ): Promise<SystemOneGateResult> {
 	const mode = systemOneMode(env);
 	if (mode === "off") return { run: true };
 	const allow = systemOneAllowlist(env);
-	if (allow.enabled) {
+	/** Plain words for the block message when the single-file rule nearly matched (#3669). */
+	let hint: string | undefined;
+	// The rm/mv/run/curl shortcuts below read POSIX quoting. Where the shell parses the
+	// line another way (PowerShell, cmd ^ or %, any line break) they have no opinion.
+	if (allow.enabled && posixRulesApply(command, activeShellKind())) {
+		// The tg-notify send recipe as a two-line script to a loopback Bot API (#4101), and a
+		// deterministic refusal, in every mode, for a bot token written into a curl command or
+		// that script. First, so no later lane (a loopback GET) can admit a token in argv.
+		try {
+			const { redactBotToken, tgSendFromEnv } = await import("./s1-tg-send");
+			const tg = tgSendFromEnv(command, cwd, env, opts.project);
+			if (!tg.ok && tg.refuse) {
+				const guard: BashGuardResult = {
+					verdict: "block",
+					pYes: Number.NaN,
+					backend: "allowlist",
+					model: "allowlist",
+					reason: tg.refuse,
+				};
+				const shown = redactBotToken(command, env);
+				return { run: false, guard, message: blockMessage(guard, "unknown", tg.refuse, shown) };
+			}
+			// Allowed only for a caller that will run the checked body (runInstead); for any other
+			// caller the lane has no opinion and the judge decides.
+			if (tg.ok && mode === "default" && opts.canRunInstead === true) {
+				return {
+					run: true,
+					runInstead: tg.body,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: tg.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through.
+		}
 		try {
 			const { readOnlyAllowlist } = await import("../decide/allowlist");
 			const a = readOnlyAllowlist(command, { bunTest: allow.bunTest });
@@ -567,6 +635,240 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// One untracked scratch-style file that existed before the session,
+		// such as a stale lock whose owner process is dead (#3669). Exactly one
+		// named regular file inside the workspace; see s1-rm-single.ts.
+		try {
+			const { singleFileDelete } = await import("./s1-rm-single");
+			const single = singleFileDelete(command, cwd);
+			if (single.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: `rm of one untracked scratch file inside the workspace (${single.rel})`,
+					},
+				};
+			}
+			hint = single.hint;
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// `rm -r` of plain relative directories this session made with a
+		// mkdir-only run_command, untracked, holding only files this session
+		// wrote and directories it made (#4105); see s1-rm-own-dir.ts.
+		// Default mode only.
+		try {
+			const { rmOwnDir } = await import("./s1-rm-own-dir");
+			const own: RmOwnDir = mode === "default" ? rmOwnDir(command, cwd, created) : { ok: false };
+			if (own.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: own.reason,
+					},
+				};
+			}
+			if (own.hint) hint = own.hint;
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// A plain run of the project's own script inside the workspace, with
+		// only workspace or /tmp paths in its environment and arguments, whose
+		// source (and local imports) spawns, fetches and deletes nothing (#3937).
+		// Default mode only: strict/Guarded never skips the judge or the person.
+		try {
+			const { runInProject } = await import("./s1-run-in-project");
+			const run = mode === "default" ? runInProject(command, cwd) : { ok: false as const };
+			if (run.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: run.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// `bash|sh .tmp/FILE` where FILE is a shell script this session
+		// wrote, made only of allowlisted literal commands on loopback and in the workspace
+		// (#4121); see s1-run-own-script.ts. Default mode only.
+		try {
+			const { runOwnScript } = await import("./s1-run-own-script");
+			const own: RunOwnScript =
+				mode === "default" ? runOwnScript(command, cwd, created) : { ok: false };
+			if (own.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: own.reason,
+					},
+				};
+			}
+			if (own.hint) hint = own.hint;
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// `8gent deck render <spec.json> [out.mp4]` with both paths inside the
+		// workspace: the shell door to render_video_deck (same renderer, same
+		// confinement). Default mode only.
+		try {
+			const { deckRenderInProject } = await import("./s1-deck-render");
+			const deck =
+				mode === "default"
+					? deckRenderInProject(command, cwd, env, opts.project)
+					: { ok: false as const };
+			if (deck.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: deck.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// A `magick`/`convert` render from built-in generators (xc:, gradient:, caption:, ...)
+		// to an image inside the workspace: no file read, no coder that fetches, no config from
+		// the workspace (#4177); see s1-magick.ts. Default mode only.
+		try {
+			const { magickRenderInProject } = await import("./s1-magick");
+			const im =
+				mode === "default"
+					? magickRenderInProject(command, cwd, env, opts.project)
+					: { ok: false as const };
+			if (im.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: im.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// A plain curl whose every URL is a loopback http(s) server and whose
+		// every file stays inside the workspace (#3941). Default mode only.
+		try {
+			const { curlToLoopback } = await import("./s1-curl-loopback");
+			const c: { ok: boolean; reason?: string; refuse?: string } =
+				mode === "default" ? curlToLoopback(command, cwd) : { ok: false };
+			if (!c.ok && c.refuse) {
+				// Deterministic refusal (#3967): tell the model what to do, no judge call.
+				const guard: BashGuardResult = {
+					verdict: "block",
+					pYes: Number.NaN,
+					backend: "allowlist",
+					model: "allowlist",
+					reason: c.refuse,
+				};
+				return {
+					run: false,
+					guard,
+					message: blockMessage(guard, "unknown", c.refuse, command),
+				};
+			}
+			if (c.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: c.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// The login-note recipe (#4072): `sed -n 's/^Label: */field=/w .tmp/NAME' FILE`,
+		// one line of a workspace file copied into .tmp/, printing nothing. Exact
+		// shape only; see s1-login-line.ts. Default mode only.
+		try {
+			const { loginLineToTmp } = await import("./s1-login-line");
+			const line = mode === "default" ? loginLineToTmp(command, cwd) : { ok: false as const };
+			if (line.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: line.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// A plain `mv` whose every endpoint is inside the workspace and that
+		// overwrites nothing (#3809). Needs the caller's working directory.
+		try {
+			const { moveInProject } = await import("./s1-mv-in-project");
+			const mv = moveInProject(command, cwd);
+			if (mv.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: mv.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// `git clone <local repo> <new dir inside the workspace>` (#3826).
+		try {
+			const { cloneLocalIntoProject } = await import("./s1-clone-local");
+			const clone = cloneLocalIntoProject(command, cwd);
+			if (clone.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: clone.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 	}
 	let guard: BashGuardResult;
 	let thresholds: SystemOneThresholds | "unknown" = "unknown";
@@ -594,7 +896,7 @@ export async function systemOneGate(
 				err instanceof SystemOneTimeoutError
 					? `the judge gave no verdict within ${ms} ms${warmupLoading ? " (still loading)" : ""}`
 					: detail;
-			return decide(command, await rulesOnly(command, reason), RULES_ONLY);
+			return decide(command, await rulesOnly(command, reason), RULES_ONLY, hint, where);
 		}
 		// Strict (EIGHT_SYSTEM_ONE=1, Guarded): the checker cannot answer, so
 		// a person decides through the normal card, never an allow (#3193).
@@ -603,7 +905,7 @@ export async function systemOneGate(
 			err instanceof SystemOneTimeoutError
 				? `the checker timed out after ${ms} ms${warmupLoading ? " while still loading" : ""}`
 				: `System One unavailable: ${detail}`;
-		return decide(command, await askInstead(command, reason), RULES_ONLY);
+		return decide(command, await askInstead(command, reason), RULES_ONLY, hint, where);
 	}
 	if (isModelVerdict(guard)) warmed = true;
 	if (judgeFailed(guard)) {
@@ -612,9 +914,11 @@ export async function systemOneGate(
 			command,
 			mode === "default" ? await rulesOnly(command, reason) : await askInstead(command, reason),
 			RULES_ONLY,
+			hint,
+			where,
 		);
 	}
-	return decide(command, guard, thresholds as SystemOneThresholds);
+	return decide(command, guard, thresholds as SystemOneThresholds, hint, where);
 }
 
 /** True when a person can be asked: a TUI approval channel, or an interactive terminal. */
@@ -656,11 +960,19 @@ async function decide(
 	command: string,
 	guard: BashGuardResult,
 	t: SystemOneThresholds,
+	hint?: string,
+	/** The project folder after a leading `cd <folder> &&` (#3199): the question names it. */
+	where?: string,
 ): Promise<SystemOneGateResult> {
 	if (guard.verdict === "allow") return { run: true, guard, thresholds: t };
 	if (guard.verdict === "block") {
 		const why = guard.reason ?? "the command was judged dangerous";
-		return { run: false, guard, thresholds: t, message: blockMessage(guard, t, why, command) };
+		return {
+			run: false,
+			guard,
+			thresholds: t,
+			message: blockMessage(guard, t, why, command, hint),
+		};
 	}
 	// escalate
 	const pDesc = Number.isFinite(guard.pYes) ? `pYes ${fmtP(guard.pYes)}, ` : "";
@@ -673,7 +985,7 @@ async function decide(
 				: guard.backend === RULES_ONLY
 					? "The full safety checker isn't available, so you decide whether this runs. Approve only if you meant it."
 					: `System One is unsure whether this command is safe (${pDesc}${guard.backend}/${guard.model}). Approve only if you meant it.`,
-			command,
+			command: commandInFolder(command, where),
 		});
 	} catch {
 		humanApproved = null;
@@ -689,6 +1001,6 @@ async function decide(
 		guard,
 		thresholds: t,
 		humanApproved,
-		message: blockMessage(guard, t, why, command),
+		message: blockMessage(guard, t, why, command, hint),
 	};
 }

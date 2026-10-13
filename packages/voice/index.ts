@@ -101,6 +101,7 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 	private state: RecordingState = "idle";
 	private whisperBinaryPath: string | null = null;
 	private dependencyCache: DependencyCheckResult | null = null;
+	private audioRouter: ((wavPath: string) => Promise<boolean>) | null = null;
 
 	constructor(config: Partial<VoiceConfig> = {}) {
 		super();
@@ -258,6 +259,12 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 	// Recording
 	// ============================================
 
+	/** Input device name for the current recording; null until resolved. */
+	getInputDeviceName(): { resolved: boolean; name: string | null } {
+		const d = this.recorder?.getDevice() ?? null;
+		return { resolved: d !== null, name: d?.name ?? null };
+	}
+
 	/**
 	 * Start recording from the microphone.
 	 */
@@ -286,6 +293,8 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 				this.vad.processLevel(level);
 			}
 		});
+
+		this.recorder.on("device", (d) => this.emit("input-device", { name: d.name }));
 
 		this.recorder.on("error", ({ message }) => {
 			this.emitError("RECORDING_FAILED", message);
@@ -321,8 +330,20 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 				return null;
 			}
 
-			// Transcribe
 			this.setState("transcribing");
+
+			// Optional pre-transcription router (EIGHT_VOICE_DECIDE, #3688). If it
+			// handles the clip, there is no transcript. Any failure falls through.
+			if (this.audioRouter) {
+				const handled = await this.audioRouter(wavPath).catch(() => false);
+				if (handled) {
+					MicRecorder.cleanupFile(wavPath);
+					this.setState("idle");
+					return null;
+				}
+			}
+
+			// Transcribe
 			const transcript = await this.transcribe(wavPath);
 
 			// Clean up the WAV file
@@ -340,6 +361,15 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 			this.emitError("TRANSCRIPTION_FAILED", message);
 			return null;
 		}
+	}
+
+	/**
+	 * Set a router that sees each recorded WAV before transcription. It
+	 * returns true when it handled the clip (no transcript is produced),
+	 * false to fall back to Whisper. Null removes it.
+	 */
+	setAudioRouter(router: ((wavPath: string) => Promise<boolean>) | null): void {
+		this.audioRouter = router;
 	}
 
 	/**

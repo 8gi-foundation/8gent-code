@@ -26,6 +26,7 @@
         "pdf-parse": "^2.4.5",
         "pngjs": "^7.0.0",
         "sharp": "^0.34.5",
+        "string-width": "^8.1.1",
         "stripe": "^17.7.0",
         "yaml": "^2.9.1",
         "zod": "^4.3.6",
@@ -54,19 +55,19 @@
     },
     "apps/8gent-bot": {
       "name": "@8gi-foundation/8gent-bot",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "@types/bun": "latest",
       },
     },
     "apps/8gent-eyes": {
       "name": "@8gi-foundation/8gent-eyes",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "bin": {
         "8gent-eyes": "src/index.ts",
       },
       "dependencies": {
-        "@8gent/eyes": "workspace:*",
+        "@8gent/eyes": "0.18.0",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -75,12 +76,12 @@
     },
     "apps/8gent-flow": {
       "name": "@8gi-foundation/8gent-flow",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "bin": {
         "8gent-flow": "src/index.ts",
       },
       "dependencies": {
-        "@8gent/eyes": "workspace:*",
+        "@8gent/eyes": "0.18.0",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -89,7 +90,7 @@
     },
     "apps/debugger": {
       "name": "debugger",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "dependencies": {
         "next": "16.1.6",
         "react": "19.2.4",
@@ -108,7 +109,7 @@
     },
     "apps/linkedin-vessel": {
       "name": "@8gi/linkedin-vessel",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "@types/bun": "latest",
       },
@@ -122,7 +123,7 @@
     },
     "apps/tui": {
       "name": "@8gent/tui",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "dependencies": {
         "better-sqlite3": "^9.4.0",
         "ink": "^6.8.0",
@@ -131,6 +132,7 @@
         "ink-spinner": "^5.0.0",
         "ink-text-input": "^6.0.0",
         "react": "^19.0.0",
+        "string-width": "^8.1.1",
       },
       "devDependencies": {
         "@types/better-sqlite3": "^7.6.0",
@@ -139,7 +141,7 @@
     },
     "apps/video": {
       "name": "@8gent/video",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "dependencies": {
         "@remotion/cli": "4.0.250",
         "@turf/turf": "^7.1.0",
@@ -163,7 +165,7 @@
     },
     "packages/audit": {
       "name": "@8gent/audit",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.0.0",
@@ -171,7 +173,7 @@
     },
     "packages/auth": {
       "name": "@8gent/auth",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "dependencies": {
         "jose": "^6.0.0",
       },
@@ -181,23 +183,23 @@
     },
     "packages/channels": {
       "name": "@8gent/channels",
-      "version": "0.17.3",
+      "version": "0.18.0",
     },
     "packages/control-plane": {
       "name": "@8gent/control-plane",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "dependencies": {
-        "@8gent/db": "workspace:*",
+        "@8gent/db": "0.18.0",
         "stripe": "^17.7.0",
       },
     },
     "packages/daemon": {
       "name": "@8gent/daemon",
-      "version": "0.17.3",
+      "version": "0.18.0",
     },
     "packages/db": {
       "name": "@8gent/db",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "dependencies": {
         "convex": "^1.17.0",
       },
@@ -207,7 +209,7 @@
     },
     "packages/decide": {
       "name": "@8gent/decide",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
@@ -217,7 +219,7 @@
     },
     "packages/design-agent": {
       "name": "@8gent/design-agent",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
@@ -231,7 +233,7 @@
     },
     "packages/design-systems": {
       "name": "@8gent/design-systems",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "dependencies": {
         "better-sqlite3": "^11.0.0",
       },
@@ -249,23 +251,27 @@
     },
     "packages/eyes": {
       "name": "@8gent/eyes",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "dependencies": {
-        "@8gent/audit": "workspace:*",
-        "@8gent/memory": "workspace:*",
+        "@8gent/audit": "0.18.0",
+        "@8gent/memory": "0.18.0",
       },
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
+    "packages/film-craft": {
+      "name": "@8gent/film-craft",
+      "version": "0.1.0",
+    },
     "packages/g8way": {
       "name": "@8gent/g8way",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "bin": {
         "g8way": "./bin/g8way.ts",
       },
       "dependencies": {
-        "@8gent/auth": "workspace:*",
+        "@8gent/auth": "0.18.0",
         "hono": "^4.7.0",
         "jose": "^6.0.0",
       },
@@ -289,17 +295,17 @@
     },
     "packages/goal": {
       "name": "@8gent/goal",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
     "packages/handeyes": {
       "name": "@8gent/handeyes",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "dependencies": {
-        "@8gent/eyes": "workspace:*",
-        "@8gent/hands": "workspace:*",
+        "@8gent/eyes": "0.18.0",
+        "@8gent/hands": "0.18.0",
       },
       "devDependencies": {
         "typescript": "^5.3.0",
@@ -307,31 +313,31 @@
     },
     "packages/hands": {
       "name": "@8gent/hands",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
     "packages/harness": {
       "name": "@8gent/harness",
-      "version": "0.17.3",
+      "version": "0.18.0",
     },
     "packages/harness-cli": {
       "name": "@8gent/harness-cli",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "bin": {
         "8gent-harness": "./index.ts",
       },
     },
     "packages/kernel": {
       "name": "@8gent/kernel",
-      "version": "0.17.3",
+      "version": "0.18.0",
     },
     "packages/memory": {
       "name": "@8gent/memory",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "dependencies": {
-        "@8gent/eyes": "workspace:*",
+        "@8gent/eyes": "0.18.0",
         "sqlite-vec": "^0.1.9",
       },
       "devDependencies": {
@@ -340,14 +346,14 @@
     },
     "packages/personality": {
       "name": "@8gent/personality",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "typescript": "^5.0.0",
       },
     },
     "packages/pet": {
       "name": "@8gent/pet",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "peerDependencies": {
         "ink": "^5.0.0",
         "react": "^18.0.0",
@@ -355,57 +361,57 @@
     },
     "packages/planning": {
       "name": "@8gent/planning",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
     "packages/qdrant-client": {
       "name": "@8gent/qdrant-client",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
     "packages/reporting": {
       "name": "@8gent/reporting",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "typescript": "^5.0.0",
       },
     },
     "packages/secrets": {
       "name": "@8gent/secrets",
-      "version": "0.17.3",
+      "version": "0.18.0",
     },
     "packages/settings": {
       "name": "@8gent/settings",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
     "packages/specifications": {
       "name": "@8gent/specifications",
-      "version": "0.17.3",
+      "version": "0.18.0",
     },
     "packages/table": {
       "name": "@8gent/table",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
     },
     "packages/telegram-bot": {
       "name": "@8gent/telegram-bot",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "bun-types": "latest",
       },
     },
     "packages/telemetry": {
       "name": "@8gent/telemetry",
-      "version": "0.17.3",
+      "version": "0.18.0",
     },
     "packages/verify": {
       "name": "@8gent/verify",
@@ -416,7 +422,7 @@
     },
     "packages/voice": {
       "name": "@8gent/voice",
-      "version": "0.17.3",
+      "version": "0.18.0",
       "devDependencies": {
         "typescript": "^5.3.0",
       },
@@ -446,6 +452,8 @@
     "@8gent/design-systems": ["@8gent/design-systems@workspace:packages/design-systems"],
 
     "@8gent/eyes": ["@8gent/eyes@workspace:packages/eyes"],
+
+    "@8gent/film-craft": ["@8gent/film-craft@workspace:packages/film-craft"],
 
     "@8gent/g8way": ["@8gent/g8way@workspace:packages/g8way"],
 

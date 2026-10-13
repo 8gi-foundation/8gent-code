@@ -8,8 +8,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { evaluatePolicy } from "../policy-engine";
 import { validatePath } from "../path-guard";
+import { evaluatePolicy } from "../policy-engine";
 
 // Real on-disk fixtures so realpathSync resolves symlinks.
 const FAKE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "pg-home-"));
@@ -74,7 +74,8 @@ describe("AC3: '..' escape into protected dir", () => {
 });
 
 // --- AC4: device files ---
-describe("AC4: device files", () => {
+// POSIX only: /dev device files do not exist on Windows.
+describe.skipIf(process.platform === "win32")("AC4: device files", () => {
 	test("rejects /dev/zero with reason 'device file'", () => {
 		const r = validatePath("/dev/zero", "/tmp");
 		expect(r.ok).toBe(false);
@@ -212,13 +213,17 @@ describe("Integration: evaluatePolicy denies before consulting other rules", () 
 		if (!decision.allowed) expect(decision.reason).toMatch(/path-guard/i);
 	});
 
-	test("write_file on /dev/zero is denied via path-guard", () => {
-		const decision = evaluatePolicy("write_file", {
-			path: "/dev/zero",
-			workingDirectory: FAKE_PROJ,
-		});
-		expect(decision.allowed).toBe(false);
-	});
+	// POSIX only: /dev device files do not exist on Windows.
+	test.skipIf(process.platform === "win32")(
+		"write_file on /dev/zero is denied via path-guard",
+		() => {
+			const decision = evaluatePolicy("write_file", {
+				path: "/dev/zero",
+				workingDirectory: FAKE_PROJ,
+			});
+			expect(decision.allowed).toBe(false);
+		},
+	);
 
 	test("read_file inside project still allowed by path-guard layer", () => {
 		const decision = evaluatePolicy("read_file", {
@@ -231,5 +236,62 @@ describe("Integration: evaluatePolicy denies before consulting other rules", () 
 		if (!decision.allowed) {
 			expect(decision.reason).not.toMatch(/path-guard/i);
 		}
+	});
+});
+
+describe("agent settings file (#3595)", () => {
+	const home = "/Users/someone";
+	test("~/.8gent/settings.json is denied however it is spelled", () => {
+		for (const raw of [
+			"/Users/someone/.8gent/settings.json",
+			".8gent/settings.json",
+			"./x/../.8gent/settings.json",
+		]) {
+			const r = validatePath(raw, home, { platform: "linux", home });
+			expect(r.ok).toBe(false);
+		}
+	});
+	test("other files under ~/.8gent and a settings.json elsewhere are not caught", () => {
+		expect(validatePath(".8gent/other.json", home, { platform: "linux", home }).ok).toBe(true);
+		expect(validatePath("/work/proj/settings.json", home, { platform: "linux", home }).ok).toBe(
+			true,
+		);
+	});
+
+	test("a leading ~ is expanded before the compare: settings, confirmation file and credentials", () => {
+		for (const raw of [
+			"~/.8gent/settings.json",
+			"~/.ssh/id_rsa",
+			"~/.aws/credentials",
+		]) {
+			expect(validatePath(raw, home, { platform: "linux", home }).ok).toBe(false);
+		}
+		expect(validatePath("~/notes.txt", home, { platform: "linux", home }).ok).toBe(true);
+	});
+});
+
+describe("8gent Browser control tokens and profiles (#3622, 8SO HIGH-2)", () => {
+	const home = "/Users/someone";
+	test("the default control token and everything under browser-profiles are denied", () => {
+		for (const raw of [
+			"/Users/someone/.8gent/browser-control.token",
+			"~/.8gent/browser-control.token",
+			".8gent/browser-control.token",
+			"./x/../.8gent/browser-control.token",
+			"/Users/someone/.8gent/browser-profiles",
+			"/Users/someone/.8gent/browser-profiles/eightgent/browser-control.token",
+			"~/.8gent/browser-profiles/eightgent/browser-control.port",
+			".8gent/browser-profiles/eightgent/electron/Cookies",
+		]) {
+			expect(validatePath(raw, home, { platform: "linux", home }).ok).toBe(false);
+		}
+	});
+	test("neighbours are not caught", () => {
+		expect(validatePath(".8gent/browser-shots/a.png", home, { platform: "linux", home }).ok).toBe(
+			true,
+		);
+		expect(validatePath("/work/browser-profiles/x", home, { platform: "linux", home }).ok).toBe(
+			true,
+		);
 	});
 });

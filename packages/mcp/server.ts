@@ -59,6 +59,18 @@ const SAFE_TOOLS = new Set([
 	"web_fetch",
 ]);
 
+// ── Protocol eras (#3549) ───────────────────────────────────────
+// Legacy clients send `initialize` (2024-11-05). Modern clients (2026-07-28)
+// skip it, call `server/discover`, and carry their version in each request's
+// `_meta`. Both are answered; the server keeps no per-connection handshake state.
+
+const MODERN_VERSION = "2026-07-28";
+const LEGACY_VERSION = "2024-11-05";
+const SUPPORTED_VERSIONS = [MODERN_VERSION, LEGACY_VERSION];
+const VERSION_META = "io.modelcontextprotocol/protocolVersion";
+const CAPABILITIES = { tools: {}, resources: {}, prompts: {} };
+const SERVER_INFO = { name: "8gent-code", version: "0.9.0" };
+
 // ── Server ──────────────────────────────────────────────────────
 
 export class MCPServer {
@@ -127,9 +139,40 @@ export class MCPServer {
 		// Notifications (no id) don't get responses
 		if (req.id === undefined) return null;
 
+		const meta = req.params?._meta as Record<string, unknown> | undefined;
+		const version = meta?.[VERSION_META];
+		if (version === undefined) return this.dispatch(req);
+		if (version !== MODERN_VERSION)
+			return {
+				jsonrpc: "2.0",
+				id: req.id,
+				error: {
+					code: -32022,
+					message: "Unsupported protocol version",
+					data: { supported: SUPPORTED_VERSIONS, requested: version },
+				},
+			};
+		// A modern request needs no prior `initialize`; its result says it is complete.
+		const response = await this.dispatch(req);
+		if (response.result && typeof response.result === "object")
+			response.result = { resultType: "complete", ...response.result };
+		return response;
+	}
+
+	private async dispatch(req: JSONRPCRequest): Promise<JSONRPCResponse> {
 		switch (req.method) {
 			case "initialize":
 				return this.handleInitialize(req);
+			case "server/discover":
+				return {
+					jsonrpc: "2.0",
+					id: req.id!,
+					result: {
+						supportedVersions: SUPPORTED_VERSIONS,
+						capabilities: CAPABILITIES,
+						serverInfo: SERVER_INFO,
+					},
+				};
 			case "tools/list":
 				return this.handleToolsList(req);
 			case "tools/call":
@@ -137,19 +180,19 @@ export class MCPServer {
 			case "resources/list":
 				return {
 					jsonrpc: "2.0",
-					id: req.id,
+					id: req.id!,
 					result: { resources: [] },
 				};
 			case "prompts/list":
 				return {
 					jsonrpc: "2.0",
-					id: req.id,
+					id: req.id!,
 					result: { prompts: [] },
 				};
 			default:
 				return {
 					jsonrpc: "2.0",
-					id: req.id,
+					id: req.id!,
 					error: { code: -32601, message: `Method not found: ${req.method}` },
 				};
 		}
@@ -160,16 +203,9 @@ export class MCPServer {
 			jsonrpc: "2.0",
 			id: req.id!,
 			result: {
-				protocolVersion: "2024-11-05",
-				capabilities: {
-					tools: {},
-					resources: {},
-					prompts: {},
-				},
-				serverInfo: {
-					name: "8gent-code",
-					version: "0.9.0",
-				},
+				protocolVersion: LEGACY_VERSION,
+				capabilities: CAPABILITIES,
+				serverInfo: SERVER_INFO,
 			},
 		};
 	}

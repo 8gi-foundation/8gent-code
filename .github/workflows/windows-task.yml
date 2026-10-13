@@ -1,0 +1,182 @@
+# windows-task.yml - Prove one real task finishes on Windows (#3892).
+#
+# windows-smoke.yml proves install, start and RPC. Nothing there sends a prompt.
+# This job builds the standalone .exe, takes Bun off PATH, points the exe at a
+# stub OpenAI-compatible server on 127.0.0.1 and asserts the model's one
+# write_file call lands as a file with the expected content. Provider call,
+# tool dispatch, workspace boundary and file write run on the shipped binary.
+# No model, no Ollama install, no network beyond the runner. A red run is a
+# real Windows failure, not a flake in the stub: the stub is scripts/ci/stub-model-server.ts.
+
+name: Windows Task
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-task.yml"
+      - "scripts/ci/stub-model-server.ts"
+      - "bin/**"
+      - "scripts/build-*.ts"
+      - "packages/eight/**"
+      - "packages/ai/**"
+      - "packages/permissions/**"
+      - "packages/core/**"
+      - "packages/settings/**"
+      - "package.json"
+      - "bun.lock"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-task-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-task:
+    name: Windows (one task, standalone exe)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      CI: "true"
+      EIGHT_DECIDE_OLLAMA_HOST: http://127.0.0.1:9
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Compile standalone Windows binary
+        run: bun run scripts/build-binaries.ts --only=bun-windows-x64
+
+      - name: Run one task with the exe, Bun off PATH
+        shell: pwsh
+        run: |
+          # Stub starts in this same step so its lifetime cannot depend on step teardown.
+          $bun = (Get-Command bun).Source
+          $stub = Start-Process $bun -ArgumentList "scripts/ci/stub-model-server.ts","8189" -NoNewWindow -PassThru -RedirectStandardOutput stub.out -RedirectStandardError stub.err
+          "STUB_PID=$($stub.Id)" | Out-File -Append $env:GITHUB_ENV
+          $up = $false
+          for ($i = 0; $i -lt 30 -and -not $up; $i++) {
+            try { Invoke-RestMethod http://127.0.0.1:8189/v1/models | Out-Null; $up = $true } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $up) { Get-Content stub.out, stub.err -ErrorAction SilentlyContinue; throw "stub model server did not come up" }
+          "stub up (pid $($stub.Id), alive=$(-not $stub.HasExited))"
+          # Take every directory that holds bun out of PATH for this step.
+          $env:Path = ($env:Path -split ';' | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'bun.exe')) -and -not (Test-Path (Join-Path $_ 'bun.cmd')) }) -join ';'
+          if (Get-Command bun -ErrorAction SilentlyContinue) { throw "bun is still on PATH" }
+          $exe = (Resolve-Path .\dist\bin\8gent-windows-x64.exe).Path
+          $work = Join-Path $env:RUNNER_TEMP "task-work"
+          New-Item -ItemType Directory -Force $work | Out-Null
+          $env:OLLAMA_HOST = "http://127.0.0.1:8189"
+          & $exe run --yes --provider ollama --model stub --cwd $work "Create hello.txt" 2>&1 | Tee-Object -FilePath task.log
+          $code = $LASTEXITCODE
+          "exit code: $code; stub alive=$(-not $stub.HasExited)"
+          Invoke-RestMethod http://127.0.0.1:8189/v1/models | ConvertTo-Json -Compress
+          if ($code -ne 0) { throw "run exited $code" }
+          $f = Join-Path $work "hello.txt"
+          if (-not (Test-Path $f)) { throw "hello.txt was not written" }
+          $got = (Get-Content $f -Raw).Trim()
+          if ($got -ne "hello from windows ci") { throw "hello.txt content was: $got" }
+          "task finished: hello.txt = $got"
+
+      - name: Run a bash-style command with the exe (Git Bash)
+        shell: pwsh
+        run: |
+          # B1/B3 regression guard: the model issues a bash-only line. `$BASH_VERSION`
+          # expands only in bash; cmd.exe prints it literally, so the grep finds no
+          # version and bash-proof.txt stays empty. Passing proves Git Bash ran it.
+          $bun = (Get-Command bun).Source
+          $env:STUB_COMMAND = "printf '%s' ""`$BASH_VERSION"" | grep -E '^[0-9]+[.][0-9]+' > bash-proof.txt"
+          $stub = Start-Process $bun -ArgumentList "scripts/ci/stub-model-server.ts","8190" -NoNewWindow -PassThru -RedirectStandardOutput stub2.out -RedirectStandardError stub2.err
+          "STUB2_PID=$($stub.Id)" | Out-File -Append $env:GITHUB_ENV
+          Remove-Item Env:STUB_COMMAND
+          $up = $false
+          for ($i = 0; $i -lt 30 -and -not $up; $i++) {
+            try { Invoke-RestMethod http://127.0.0.1:8190/v1/models | Out-Null; $up = $true } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $up) { Get-Content stub2.out, stub2.err -ErrorAction SilentlyContinue; throw "stub model server did not come up" }
+          $env:Path = ($env:Path -split ';' | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'bun.exe')) -and -not (Test-Path (Join-Path $_ 'bun.cmd')) }) -join ';'
+          $exe = (Resolve-Path .\dist\bin\8gent-windows-x64.exe).Path
+          $work = Join-Path $env:RUNNER_TEMP "bash-work"
+          New-Item -ItemType Directory -Force $work | Out-Null
+          $env:OLLAMA_HOST = "http://127.0.0.1:8190"
+          & $exe run --yes --provider ollama --model stub --cwd $work "Print the shell version" 2>&1 | Tee-Object -FilePath bash-task.log
+          if ($LASTEXITCODE -ne 0) { throw "run exited $LASTEXITCODE" }
+          $f = Join-Path $work "bash-proof.txt"
+          if (-not (Test-Path $f)) { throw "bash-proof.txt was not written" }
+          $got = (Get-Content $f -Raw).Trim()
+          if ($got -notmatch '^\d+\.\d+') { throw "bash did not run the command; bash-proof.txt was: '$got'" }
+          "bash-style command ran in Git Bash: BASH_VERSION = $got"
+
+      - name: Chained commands are refused under Git Bash (negative cases)
+        shell: pwsh
+        run: |
+          # 8SO S2: Git Bash parses POSIX quoting, so `^` is not an escape and a
+          # single-quoted double quote does not hide a `;`. Each line below would
+          # create PWNED if the sanitizer judged it as cmd.exe. None may.
+          $bun = (Get-Command bun).Source
+          $env:Path = ($env:Path -split ';' | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'bun.exe')) -and -not (Test-Path (Join-Path $_ 'bun.cmd')) }) -join ';'
+          $exe = (Resolve-Path .\dist\bin\8gent-windows-x64.exe).Path
+          $cases = @(
+            'echo hi ^; touch PWNED',
+            'echo hi ^& touch PWNED',
+            "echo '`"'; touch PWNED; echo '`"'"
+          )
+          $port = 8191
+          foreach ($cmd in $cases) {
+            $env:STUB_COMMAND = $cmd
+            $stub = Start-Process $bun -ArgumentList "scripts/ci/stub-model-server.ts","$port" -NoNewWindow -PassThru -RedirectStandardOutput "stub-neg-$port.out" -RedirectStandardError "stub-neg-$port.err"
+            Remove-Item Env:STUB_COMMAND
+            $up = $false
+            for ($i = 0; $i -lt 30 -and -not $up; $i++) {
+              try { Invoke-RestMethod "http://127.0.0.1:$port/v1/models" | Out-Null; $up = $true } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $up) { throw "stub model server did not come up on $port" }
+            $work = Join-Path $env:RUNNER_TEMP "neg-work-$port"
+            New-Item -ItemType Directory -Force $work | Out-Null
+            $env:OLLAMA_HOST = "http://127.0.0.1:$port"
+            & $exe run --yes --provider ollama --model stub --cwd $work "Run the command" 2>&1 | Tee-Object -FilePath "neg-task-$port.log"
+            Stop-Process -Id $stub.Id -Force -ErrorAction SilentlyContinue
+            if (Test-Path (Join-Path $work "PWNED")) { throw "chained command ran and created PWNED: $cmd" }
+            "refused (no PWNED): $cmd"
+            $port++
+          }
+
+      - name: Logs
+        if: always()
+        shell: pwsh
+        run: |
+          "--- stub.out"; Get-Content stub.out -ErrorAction SilentlyContinue
+          "--- stub.err"; Get-Content stub.err -ErrorAction SilentlyContinue
+          "--- stub2.out"; Get-Content stub2.out -ErrorAction SilentlyContinue
+          "--- stub2.err"; Get-Content stub2.err -ErrorAction SilentlyContinue
+          if ($env:STUB_PID) { Stop-Process -Id $env:STUB_PID -Force -ErrorAction SilentlyContinue }
+          if ($env:STUB2_PID) { Stop-Process -Id $env:STUB2_PID -Force -ErrorAction SilentlyContinue }
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-task-logs
+          path: |
+            task.log
+            bash-task.log
+            neg-task-*.log
+            stub-neg-*.out
+            stub-neg-*.err
+            stub.out
+            stub.err
+            stub2.out
+            stub2.err
+          retention-days: 7

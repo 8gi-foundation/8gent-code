@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 /**
  * 8gent Code - Terminal UI
  *
@@ -6,6 +6,8 @@
  * Built with Ink (React for CLI).
  */
 
+// Before anything else: BUN_BE_BUN must not reach this process's subprocesses.
+import "./lib/strip-bun-be-bun.js";
 // First, before anything heavy loads: keys pressed before the first frame
 // must reach the splash, not the line buffer (lib/early-input.ts).
 import "./lib/early-input.js";
@@ -22,6 +24,8 @@ import { enableInfiniteMode } from "../../../packages/permissions/index.js";
 import { App } from "./app.js";
 import { startMouse } from "./lib/mouse-wiring.js";
 import { parseTuiArgv } from "./lib/tui-cli.js";
+import { applyTerminalBackground } from "./theme.js";
+import { probeTerminalBackground } from "./theme/terminal-probe.js";
 
 const argv = process.argv.slice(2);
 const parsed = parseTuiArgv(argv);
@@ -40,6 +44,12 @@ if (hasInfiniteFlag) {
 
 const command = parsed.positional[0] || "repl";
 const passthroughArgs = parsed.positional.slice(1);
+
+// Ask the terminal for its real background (OSC 11, #3754) before anything
+// reads stdin, then fit the palette to it. Returns at once with no TTY (CI,
+// pilots, pipes) and gives up after 100 ms on a terminal that never answers.
+const terminalBg = await probeTerminalBackground();
+if (terminalBg) applyTerminalBackground(terminalBg);
 
 // Clear screen + home cursor so Ink's first frame paints at row 1.
 // Without this, any stdout writes that happened during module load (eg

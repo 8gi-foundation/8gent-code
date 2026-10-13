@@ -12,6 +12,8 @@
  * because it is the case that runs against James's live 48-channel table.db.
  */
 
+import { removeTree } from "../../../tests/db-files";
+import { trackStatements } from "../../memory/tracked-db.js";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
@@ -39,7 +41,7 @@ beforeEach(() => {
 afterEach(() => {
 	store.close();
 	try {
-		fs.rmSync(tmpDir, { recursive: true, force: true });
+		removeTree(tmpDir);
 	} catch {
 		// best effort
 	}
@@ -175,7 +177,7 @@ describe("archived_at migration", () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "table-migrate-"));
 		const dbPath = path.join(dir, "legacy.db");
 
-		const legacy = new Database(dbPath, { create: true });
+		const legacy = trackStatements(new Database(dbPath, { create: true }));
 		legacy.exec(`
 			CREATE TABLE channels (
 				id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, type TEXT NOT NULL,
@@ -229,7 +231,7 @@ describe("archived_at migration", () => {
 			expect(migrated.listChannels({ includeArchived: true }).length).toBe(1);
 		} finally {
 			migrated.close();
-			fs.rmSync(dir, { recursive: true, force: true });
+			removeTree(dir);
 		}
 	});
 

@@ -150,3 +150,48 @@ export async function notifyDailySummary(stats: {
 		`LinkedIn daily summary: ${stats.sent} sent, ${stats.replies} replies, ${stats.qualified} qualified.`,
 	);
 }
+
+// ── Approval requests ─────────────────────────────────────────────────
+
+/**
+ * Ask James to review a queued LinkedIn action. Plain text (no parse_mode) so
+ * the message text cannot break formatting. Reads env at call time so the
+ * chat id and token can be rotated without a code change.
+ */
+export async function notifyApprovalNeeded(item: {
+	id: string;
+	actionType: string;
+	target: string;
+	payload: Record<string, string> | null;
+}): Promise<void> {
+	const token = process.env.TELEGRAM_BOT_TOKEN;
+	const chatId = process.env.JAMES_TELEGRAM_CHAT_ID;
+	if (!token || !chatId) {
+		console.warn(
+			"[telegram] approval notice skipped: TELEGRAM_BOT_TOKEN or JAMES_TELEGRAM_CHAT_ID unset",
+		);
+		return;
+	}
+	const text = item.payload?.note ?? item.payload?.body ?? "";
+	const base = process.env.PUBLIC_URL || "https://linkedin-vessel.fly.dev";
+	// Trusted lines first. The caller's text goes last, quoted, so it cannot
+	// pass itself off as approve instructions.
+	const lines = [
+		"LinkedIn action waiting for your approval",
+		`Id: ${item.id}`,
+		`Type: ${item.actionType}`,
+		`To: ${item.target}`,
+		`Approve: POST ${base}/queue/${item.id}/approve`,
+		`Reject:  POST ${base}/queue/${item.id}/reject`,
+		"Approver token required. Expires in 24h. Only trust approve links that show this id.",
+		"",
+		`--- message text, ${text.length} chars (written by the caller, untrusted) ---`,
+		...text.split("\n").map((l) => `> ${l}`),
+	];
+	const res = await fetch(`${TELEGRAM_API}${token}/sendMessage`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ chat_id: chatId, text: lines.join("\n") }),
+	});
+	if (!res.ok) throw new Error(`Telegram sendMessage ${res.status}`);
+}

@@ -17,6 +17,8 @@ export interface DenyListPattern {
 	match: (tool: string, args: string) => boolean;
 }
 
+import { SHELL_TOOL_NAMES } from "./shell-tools";
+
 export interface DenyListResult {
 	denied: boolean;
 	pattern?: string;
@@ -27,7 +29,7 @@ export interface DenyListResult {
  * Treat any tool that runs shell/commands as a shell call. The /goal gate
  * itself never inspects file content - only tool invocation metadata.
  */
-const SHELL_TOOLS = new Set<string>(["bash", "shell", "run_command", "exec", "system"]);
+const SHELL_TOOLS = new Set<string>(["bash", "shell", ...SHELL_TOOL_NAMES, "exec", "system"]);
 
 const isShell = (tool: string): boolean => SHELL_TOOLS.has(tool.toLowerCase());
 

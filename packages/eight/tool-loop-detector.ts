@@ -4,17 +4,21 @@
  * Detects three patterns:
  * 1. REPEAT: same tool+args called 3+ times in a row
  * 2. PING-PONG: alternating between two tools 4+ times
- * 3. GLOBAL: more than N total tool calls in one turn
+ * 3. GLOBAL: more than N executed tool calls in one turn
+ * 4. REFUSED: more than M refused tool calls in one turn (#3409)
  *
  * @see https://github.com/8gi-foundation/8gent-code/issues/975
  */
 
-export type LoopType = "repeat" | "ping-pong" | "global";
+export type LoopType = "repeat" | "ping-pong" | "global" | "refused";
 
 export interface LoopDetection {
 	detected: true;
 	type: LoopType;
+	/** For the logs and the model: what tripped, in the detector's terms. */
 	message: string;
+	/** For the person: why the turn stopped, in plain words (#3409). */
+	userMessage: string;
 }
 
 interface ToolCall {
@@ -29,32 +33,49 @@ export interface ToolLoopDetectorConfig {
 	repeatThreshold?: number;
 	/** Alternating pair count to trigger ping-pong detection (default 4) */
 	pingPongThreshold?: number;
-	/** Max total tool calls per turn before global limit fires (default 50) */
+	/** Max executed tool calls per turn before global limit fires (default 50) */
 	globalLimit?: number;
+	/** Max refused tool calls per turn before the refused limit fires (default 100) */
+	refusedLimit?: number;
 }
 
 export class ToolLoopDetector {
 	private history: ToolCall[] = [];
 	private totalCalls = 0;
+	private refusedCalls = 0;
 	private windowSize: number;
 	private repeatThreshold: number;
 	private pingPongThreshold: number;
 	private globalLimit: number;
+	private refusedLimit: number;
 
 	constructor(config: ToolLoopDetectorConfig = {}) {
 		this.windowSize = config.windowSize ?? 20;
 		this.repeatThreshold = config.repeatThreshold ?? 3;
 		this.pingPongThreshold = config.pingPongThreshold ?? 4;
 		this.globalLimit = config.globalLimit ?? 50;
+		this.refusedLimit = config.refusedLimit ?? 100;
 	}
 
 	/**
-	 * Record a tool call. Call this every time a tool executes.
+	 * Record a tool call. Call this every time a tool is called.
+	 *
+	 * A call the harness refused before it ran (`refused: true`) still counts
+	 * for the repeat and ping-pong checks, since the same refused call over and
+	 * over is a loop. It does not count toward the global limit: that limit
+	 * guards against runaway EXECUTION, and a refused call executed nothing.
+	 * Counting refusals ended real tasks one step short (#3409: 51 calls, 7 of
+	 * them refused chaining, the 51st was the git_add before the commit).
+	 * Refusals have their own, looser ceiling (refusedLimit) instead.
+	 *
+	 * The caller must decide `refused` from the call itself, never from the
+	 * tool's output text: output can say anything, including "[BLOCKED]".
 	 */
-	record(toolName: string, args: Record<string, unknown>): void {
+	record(toolName: string, args: Record<string, unknown>, opts: { refused?: boolean } = {}): void {
 		const argsHash = JSON.stringify(args);
 		this.history.push({ toolName, argsHash });
-		this.totalCalls++;
+		if (opts.refused) this.refusedCalls++;
+		else this.totalCalls++;
 
 		// Keep only the last N entries
 		if (this.history.length > this.windowSize) {
@@ -71,7 +92,18 @@ export class ToolLoopDetector {
 			return {
 				detected: true,
 				type: "global",
-				message: `Global tool call limit exceeded: ${this.totalCalls} calls this turn (limit: ${this.globalLimit}). Aborting to prevent runaway execution.`,
+				message: `Global tool call limit exceeded: ${this.totalCalls} executed calls this turn (limit: ${this.globalLimit}). Aborting to prevent runaway execution.`,
+				userMessage: `I reached the limit of ${this.globalLimit} tool calls in one turn.`,
+			};
+		}
+
+		// 1b. REFUSED: too many refused calls this turn (#3409)
+		if (this.refusedCalls > this.refusedLimit) {
+			return {
+				detected: true,
+				type: "refused",
+				message: `Refused tool call limit exceeded: ${this.refusedCalls} refused calls this turn (limit: ${this.refusedLimit}). Aborting to prevent a refusal loop.`,
+				userMessage: `${this.refusedCalls} of my tool calls this turn were refused, past the limit of ${this.refusedLimit}.`,
 			};
 		}
 
@@ -94,6 +126,7 @@ export class ToolLoopDetector {
 					detected: true,
 					type: "repeat",
 					message: `Repeat loop detected: "${last.toolName}" called ${streak} times in a row with identical arguments. Try a different approach.`,
+					userMessage: `I made the same ${last.toolName} call ${streak} times in a row, so I stopped to avoid a loop.`,
 				};
 			}
 		}
@@ -127,6 +160,7 @@ export class ToolLoopDetector {
 						detected: true,
 						type: "ping-pong",
 						message: `Ping-pong loop detected: alternating between "${a.toolName}" and "${b.toolName}" ${alternations} times. Break the cycle and try a different strategy.`,
+						userMessage: `I went back and forth between ${a.toolName} and ${b.toolName} ${alternations} times, so I stopped to avoid a loop.`,
 					};
 				}
 			}
@@ -141,6 +175,7 @@ export class ToolLoopDetector {
 	reset(): void {
 		this.history = [];
 		this.totalCalls = 0;
+		this.refusedCalls = 0;
 	}
 }
 

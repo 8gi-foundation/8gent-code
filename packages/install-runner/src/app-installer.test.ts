@@ -59,7 +59,8 @@ function buildFixture(label: string, opts: FixtureOpts = {}): string {
 	fs.writeFileSync(path.join(src, "main.js"), 'console.log("hi")');
 
 	const archive = path.join(dir, "app.tgz");
-	const tarArgs = ["-czf", archive, "-C", src, "."];
+	// GNU tar reads "C:\\x.tgz" as host "C" plus a path: name the archive relative to its folder.
+	const tarArgs = ["-czf", path.basename(archive), "-C", src, "."];
 	if (opts.unsafePath) {
 		// Build a tar containing an extra entry whose path escapes via "../".
 		const extraDir = fs.mkdtempSync(path.join(TMP_ROOT, "extra-"));
@@ -72,11 +73,18 @@ function buildFixture(label: string, opts: FixtureOpts = {}): string {
 		// crafted member by re-tarring with --transform.
 		spawnSync(
 			"tar",
-			["-czf", archive, "-C", src, `--transform=s,^./main.js,${opts.unsafePath},`, "."],
-			{ stdio: "ignore" },
+			[
+				"-czf",
+				path.basename(archive),
+				"-C",
+				src,
+				`--transform=s,^./main.js,${opts.unsafePath},`,
+				".",
+			],
+			{ stdio: "ignore", cwd: dir },
 		);
 	} else {
-		spawnSync("tar", tarArgs, { stdio: "ignore" });
+		spawnSync("tar", tarArgs, { stdio: "ignore", cwd: dir });
 	}
 	return archive;
 }

@@ -196,6 +196,35 @@ describe("rules: system state", () => {
 			["cp a.txt /tmp/a.txt", "pass"],
 			["rsync -a --delete src/ dest/", "escalate", "rsync_delete"],
 			["rsync -a src/ dest/", "pass"],
+			["rsync --remove-source-files notes.md /tmp/n.txt", "escalate", "rsync_delete"],
+		]));
+
+	// 8SO (2026-10-05): an archiver that deletes its inputs moves a user's file
+	// into an archive, like mv. It escalates; plain archiving still passes.
+	it("archivers that remove their sources (archive_removes_source)", () =>
+		check([
+			["zip -m out.zip notes.md", "escalate", "archive_removes_source"],
+			["zip -qm /tmp/n.zip notes.md", "escalate", "archive_removes_source"],
+			["zip -rm out.zip src", "escalate", "archive_removes_source"],
+			["zip -r -m out.zip src", "escalate", "archive_removes_source"],
+			["zip --move out.zip notes.md", "escalate", "archive_removes_source"],
+			["zip -qm - notes.md > out.zip", "escalate", "archive_removes_source"],
+			["/usr/bin/zip -qm o.zip notes.md", "escalate", "archive_removes_source"],
+			["cd src && zip -9qm ../o.zip notes.md", "escalate", "archive_removes_source"],
+			["tar --remove-files -cf out.tar notes.md", "escalate", "archive_removes_source"],
+			["tar -czf out.tgz --remove-files src", "escalate", "archive_removes_source"],
+			["gtar -cf out.tar src --remove-files", "escalate", "archive_removes_source"],
+			["7z a -sdel out.7z notes.md", "escalate", "archive_removes_source"],
+			["7za a out.7z notes.md -sdel", "escalate", "archive_removes_source"],
+			["7zz a -sdel out.7z notes.md", "escalate", "archive_removes_source"],
+			["zip out.zip notes.md", "pass"],
+			["zip -r out.zip src", "pass"],
+			["zip -q -r -9 out.zip src", "pass"],
+			["zip -MM out.zip notes.md", "pass"],
+			["tar -czf out.tgz src", "pass"],
+			["tar -xf out.tar", "pass"],
+			["7z a out.7z notes.md", "pass"],
+			["7z x out.7z", "pass"],
 		]));
 
 	// #3131: the 8J judge ladder's R1 miss was the empty-echo overwrite of

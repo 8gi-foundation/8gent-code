@@ -283,9 +283,19 @@ WantedBy=default.target
 });
 
 describe("Windows Scheduled Task", () => {
+	test("the task turns on resume-on-boot unless the user set it, because Windows never stops the daemon cleanly (#4107)", () => {
+		const script = scheduledTaskScript(windows);
+		expect(script).toContain(
+			"if (-not $env:EIGHT_RESUME_ON_BOOT) { $env:EIGHT_RESUME_ON_BOOT = ''1'' }; while ($true)",
+		);
+		// macOS and Linux get a clean SIGTERM and keep today's opt-in.
+		expect(launchdPlist(mac)).not.toContain("EIGHT_RESUME_ON_BOOT");
+		expect(systemdUnit(linux)).not.toContain("EIGHT_RESUME_ON_BOOT");
+	});
+
 	test("task runs at logon for the current user without elevation and restarts the daemon when it exits", () => {
 		expect(scheduledTaskScript(windows)).toBe(`$ErrorActionPreference = 'Stop'
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "while ($true) { & ''C:\\Users\\ada\\.bun\\bin\\bun.exe'' ''C:\\Users\\ada\\ada''''s code\\bin\\8gent.ts'' ''daemon'' ''run'' 2>&1 | ForEach-Object { $_.ToString() } | Out-File -FilePath ''C:\\Users\\ada\\.8gent\\daemon-console.log'' -Append -Encoding utf8 -Width 4096; Start-Sleep -Seconds 5 }"' -WorkingDirectory 'C:\\Users\\ada'
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "if (-not $env:EIGHT_RESUME_ON_BOOT) { $env:EIGHT_RESUME_ON_BOOT = ''1'' }; while ($true) { & ''C:\\Users\\ada\\.bun\\bin\\bun.exe'' ''C:\\Users\\ada\\ada''''s code\\bin\\8gent.ts'' ''daemon'' ''run'' 2>&1 | ForEach-Object { $_.ToString() } | Out-File -FilePath ''C:\\Users\\ada\\.8gent\\daemon-console.log'' -Append -Encoding utf8 -Width 4096; Start-Sleep -Seconds 5 }"' -WorkingDirectory 'C:\\Users\\ada'
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User 'DESKTOP-1\\ada'
 $principal = New-ScheduledTaskPrincipal -UserId 'DESKTOP-1\\ada' -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)

@@ -22,3 +22,11 @@ SECURITY.md @podjamz
 
 # Package publishing config
 package.json @podjamz
+
+# Release trust chain: one-line installers, the release signing key and its
+# helpers, and self-update all decide what code lands on users' machines (#3981)
+scripts/install.sh @podjamz
+scripts/install.ps1 @podjamz
+scripts/release-signing.pub @podjamz
+scripts/release-*.sh @podjamz
+packages/eight/self-update.ts @podjamz

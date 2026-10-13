@@ -28,6 +28,7 @@ import React, { useEffect, useRef, useState } from "react";
 import type { PaneGroup } from "../hooks/usePaneGroups.js";
 import type { WorkspaceTab } from "../hooks/useWorkspaceTabs.js";
 import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
+import { cellWidth } from "../lib/header-layout.js";
 import { SWEEP_FRAME_MS, type Span, motionEnabled, sweepFrames } from "../lib/motion.js";
 import {
 	PERM_LOOK,
@@ -96,16 +97,20 @@ export interface TabLine {
 	spans: Span[];
 }
 
-/** Each cell's whole span on the label row (number, title, tag), for clicks (#3239). */
+/**
+ * Each cell's whole span on the label row (number, title, tag, grab
+ * brackets), for clicks (#3239). Measured in terminal cells, so a title
+ * with wide characters keeps its clickable edge where it is drawn.
+ */
 export function cellSpans(cells: TabCell[]): Span[] {
 	let x = 0;
 	return cells.map((cell, i) => {
 		if (i > 0) x += GAP.length;
 		const w =
 			(cell.grabbed ? 2 : 0) +
-			cell.num.length +
-			cell.title.length +
-			(cell.tag ? cell.tag.length : 0);
+			cellWidth(cell.num) +
+			cellWidth(cell.title) +
+			(cell.tag ? cellWidth(cell.tag) : 0);
 		const span = { x, width: w };
 		x += w;
 		return span;
@@ -120,7 +125,8 @@ export function layoutTabs(cells: TabCell[]): TabLine {
 		if (i > 0) text += GAP;
 		if (cell.grabbed) text += "[";
 		text += cell.num;
-		spans.push({ x: text.length, width: cell.title.length });
+		// Cells, not code units: the underline sits under what is drawn.
+		spans.push({ x: cellWidth(text), width: cellWidth(cell.title) });
 		text += cell.title;
 		if (cell.tag) text += cell.tag;
 		if (cell.grabbed) text += "]";
@@ -207,11 +213,12 @@ export function TabBar({
 		return () => clearInterval(id);
 	}, [targetKey]);
 
-	// A click on a tab switches to it, as its number key does (#3239).
+	// A click on a tab switches to it, as its number key does (#3239). Two
+	// rows: the label and the underline under it are one target.
 	const labelRef = useRef(null);
 	const clickSpans: ClickSpan[] = cellSpans(cells).map((span, i) => {
 		const id = visibleTabs[i]?.id ?? String(i);
-		return { id: `tab:${id}`, dx: span.x, w: span.width, action: () => onSwitch(id) };
+		return { id: `tab:${id}`, dx: span.x, w: span.width, h: 2, action: () => onSwitch(id) };
 	});
 	useClickSpans(labelRef, tabs.length <= 1 ? [] : clickSpans);
 	const pressed = usePressedIn("tab:");

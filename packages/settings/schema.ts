@@ -120,12 +120,39 @@ export interface AgentsSettings {
 	names: AgentNames;
 }
 
+export interface RetrySettings {
+	/**
+	 * Retries per model request after a failure. null = built-in default (the
+	 * AI SDK's own, or 8 attempts for OpenRouter ":free" models). Valid: whole
+	 * number 0-20; anything else falls back to the default.
+	 */
+	maxRetries: number | null;
+	/** Longest wait between two retries after a rate limit, in ms. Valid 1000-600000. Default 30000. */
+	maxDelayMs: number;
+	/**
+	 * A streamed model reply that sends no bytes for this long is torn down, in
+	 * ms. null = built-in default (5 minutes; EIGHT_STREAM_IDLE_MS still wins).
+	 * Valid 1000-86400000.
+	 */
+	httpIdleTimeoutMs: number | null;
+}
+
 export interface MusicSettings {
 	/**
 	 * The DJ's volume (0-150, mpv's scale), remembered across tracks and
 	 * sessions (#3190). A new track starts here. Mute is never stored.
 	 */
 	volume: number;
+}
+
+export interface ShellSettings {
+	/**
+	 * Windows only. Full path to the shell run_command uses (bash.exe, pwsh.exe,
+	 * cmd.exe). Empty = auto: Git Bash if installed, else PowerShell 7, else cmd.exe.
+	 */
+	path: string;
+	/** Windows only. Offer the model a separate `powershell` tool. Default false. */
+	powershellTool: boolean;
 }
 
 export interface Settings {
@@ -136,7 +163,9 @@ export interface Settings {
 	providers: ProvidersSettings;
 	ui: UISettings;
 	agents: AgentsSettings;
+	retry: RetrySettings;
 	music: MusicSettings;
+	shell: ShellSettings;
 }
 
 export type SettingsKey = keyof Settings;

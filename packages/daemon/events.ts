@@ -6,12 +6,16 @@
  */
 
 export interface DaemonEvents {
-	"tool:start": { sessionId: string; tool: string; input: unknown };
+	"tool:start": { sessionId: string; tool: string; input: unknown; toolCallId?: string };
 	"tool:result": {
 		sessionId: string;
 		tool: string;
 		output: unknown;
 		durationMs: number;
+		/** Pairs the result with its start; the live anatomy page reads it (#4190). */
+		toolCallId?: string;
+		/** False when the tool failed, so a failure is shown as one (#4190). */
+		success?: boolean;
 	};
 	"agent:thinking": { sessionId: string };
 	"agent:stream": { sessionId: string; chunk: string; final?: boolean };
@@ -23,7 +27,11 @@ export interface DaemonEvents {
 		input: unknown;
 		requestId: string;
 	};
+	/** A channel approval closed with no answer (#3621). */
+	"approval:closed": { sessionId: string; requestId: string; outcome: "expired" | "replaced" };
 	"session:start": { sessionId: string; channel: string };
+	/** A prompt one client sent, echoed to the other clients on that session (#3929). */
+	"user:message": { sessionId: string; text: string; channel: string };
 	"session:end": { sessionId: string; reason: string };
 	// CEO task lifecycle events
 	"task:created": { taskId: string; description: string };

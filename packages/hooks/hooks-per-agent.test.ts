@@ -48,10 +48,18 @@ beforeAll(() => {
 	if (probe.exitCode !== 0) throw new Error(`probe exited ${probe.exitCode}\n${detail}`);
 });
 
-test("text-tool path: A's beforeCommand hook runs in A, not in B built after it", () => {
-	expect(fs.readFileSync(shellLog, "utf8").trim().split("\n")).toEqual([dirA, dirB]);
-});
+// POSIX only: the hooks are sh commands that append to a log file.
+test.skipIf(process.platform === "win32")(
+	"text-tool path: A's beforeCommand hook runs in A, not in B built after it",
+	() => {
+		expect(fs.readFileSync(shellLog, "utf8").trim().split("\n")).toEqual([dirA, dirB]);
+	},
+);
 
-test("native path: the PreToolUse hook A fires runs in A, not in the last-built B", () => {
-	expect(fs.readFileSync(yamlLog, "utf8").trim()).toBe(dirA);
-});
+// POSIX only: the hooks are sh commands that append to a log file.
+test.skipIf(process.platform === "win32")(
+	"native path: the PreToolUse hook A fires runs in A, not in the last-built B",
+	() => {
+		expect(fs.readFileSync(yamlLog, "utf8").trim()).toBe(dirA);
+	},
+);

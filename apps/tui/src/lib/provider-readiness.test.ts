@@ -114,6 +114,27 @@ describe("resolveReadyProvider", () => {
 		expect(d.notice.includes("\n")).toBe(false);
 	}, 4000);
 
+	test("a provider named with --provider is never swapped: down means none, not fallback (#3746)", async () => {
+		const d = await resolveReadyProvider(
+			{ provider: "lmstudio", model: "ornith-1.0-9b", pinned: true },
+			{ timeoutMs: 300, endpoints: endpoints(silentUrl, healthyUrl) },
+		);
+		// Ollama is healthy, but a pinned LM Studio is not left for it.
+		expect(d.kind).toBe("none");
+		if (d.kind !== "none") return;
+		expect(d.from).toBe("lmstudio");
+		expect(d.notice).toContain("It was chosen with --provider, so no other provider is used.");
+		expect(d.notice).not.toContain("Using Ollama");
+	}, 4000);
+
+	test("a pinned provider that is healthy is kept (#3746)", async () => {
+		const d = await resolveReadyProvider(
+			{ provider: "ollama", model: "my-model", pinned: true },
+			{ timeoutMs: 1000, endpoints: endpoints(silentUrl, healthyUrl) },
+		);
+		expect(d).toEqual({ kind: "ready", provider: "ollama", model: "my-model" });
+	});
+
 	test("configured provider healthy -> kept as is, no fallback", async () => {
 		const d = await resolveReadyProvider(
 			{ provider: "ollama", model: "my-model" },

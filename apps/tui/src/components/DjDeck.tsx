@@ -322,9 +322,10 @@ export function DjDeck({
 }: {
 	/** When set, the deck renders as the first segment of a one-row footer
 	 *  and `footer` fills the rest of that row. As a function it is told
-	 *  whether the station segment is drawn before it (#3238). The DJ row opens above it
+	 *  whether the station segment is drawn before it (#3238), and whether a
+	 *  track is loaded (^D only does something then). The DJ row opens above it
 	 *  while a track is loaded. */
-	footer?: React.ReactNode | ((station: boolean) => React.ReactNode);
+	footer?: React.ReactNode | ((station: boolean, hasTrack: boolean) => React.ReactNode);
 	fmWidth?: number;
 	/** Terminal columns: below 110 the row leaves the volume to the key-cap row. */
 	columns?: number;
@@ -516,7 +517,7 @@ export function DjDeck({
 	const segment = station ? (
 		<FmFooterSegment width={fmWidth} playing={playing} paused={status.paused} track={track} />
 	) : null;
-	const footerNode = typeof footer === "function" ? footer(station) : footer;
+	const footerNode = typeof footer === "function" ? footer(station, hasTrack) : footer;
 
 	return (
 		<Box width="100%" flexDirection="column" flexShrink={0}>

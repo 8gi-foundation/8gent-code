@@ -21,13 +21,18 @@ afterAll(cleanupTempDirs);
 const ORCHESTRATION_ONLY = (TOOL_CATEGORIES.orchestration ?? []).filter((t) => !DELEGATION_TOOLS.includes(t));
 
 /** One real Agent turn in a child process with HOME in a temp dir and the network stubbed. */
-function probeTurn(role: string | undefined): { tools: string[]; system: string } {
+function probeTurn(
+	role: string | undefined,
+	extraEnv: Record<string, string | undefined> = {},
+): { tools: string[]; system: string } {
 	const root = tempDir("local-delegation-");
 	mkdirSync(join(root, "home"));
 	mkdirSync(join(root, "work"));
+	const env: Record<string, string | undefined> = { ...process.env, HOME: join(root, "home"), ...extraEnv };
+	for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
 	const r = Bun.spawnSync(
 		["bun", join(import.meta.dir, "fixtures", "local-turn-probe.ts"), role ?? "-", join(root, "work")],
-		{ env: { ...process.env, HOME: join(root, "home") }, stdout: "pipe", stderr: "pipe" },
+		{ env, stdout: "pipe", stderr: "pipe" },
 	);
 	const out = r.stdout.toString();
 	const line = out.split("\n").find((l) => l.startsWith("@@PROBE@@"));
@@ -75,4 +80,25 @@ describe("local delegation tools follow the role (#3095)", () => {
 			}
 		}, 60_000);
 	}
+});
+
+const BROWSER_TOOLS = ["browser_open", "browser_state", "browser_task", "browser_screenshot"];
+
+describe("local sessions get the 8gent Browser tools by default (#3785)", () => {
+	test("real turn, EIGHT_BROWSER_PROFILE unset: the four browser tools are declared", () => {
+		const { tools } = probeTurn(undefined, {
+			EIGHT_BROWSER_PROFILE: undefined,
+			EIGHT_BROWSER_LOCAL: undefined,
+			EIGHT_BROWSER_BACKEND: undefined,
+		});
+		for (const t of BROWSER_TOOLS) expect(tools).toContain(t);
+	});
+	test("real turn, EIGHT_BROWSER_LOCAL=0: no browser tools, as before #3785", () => {
+		const { tools } = probeTurn(undefined, {
+			EIGHT_BROWSER_PROFILE: undefined,
+			EIGHT_BROWSER_LOCAL: "0",
+			EIGHT_BROWSER_BACKEND: undefined,
+		});
+		for (const t of BROWSER_TOOLS) expect(tools).not.toContain(t);
+	});
 });

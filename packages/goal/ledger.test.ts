@@ -41,7 +41,8 @@ describe("Ledger.open", () => {
 		l.close();
 	});
 
-	it("refuses to open if the directory is unwritable", () => {
+	// POSIX only: chmod 0o500 does not make a directory read-only on Windows.
+	it.skipIf(process.platform === "win32")("refuses to open if the directory is unwritable", () => {
 		// Create a read-only parent dir.
 		const ro = path.join(tmpDir, "ro");
 		fs.mkdirSync(ro);

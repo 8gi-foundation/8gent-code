@@ -21,6 +21,20 @@ import {
 import { matchTier } from "./rank";
 import { parseTypeScriptFile } from "./typescript-parser";
 
+/**
+ * Repo-relative paths are "/" separated on every OS: index keys, getFileTree,
+ * and locate rows. Accepts a Windows-style backslash path and returns the
+ * canonical form (no leading "./").
+ */
+export function normalizeRelPath(p: string): string {
+	return p.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+}
+
+/** `file` made relative to `root`, in the canonical "/" form. */
+export function relativePosix(root: string, file: string): string {
+	return normalizeRelPath(path.relative(root, file));
+}
+
 // Parser interface - will be implemented with tree-sitter or native TS parser
 export interface Parser {
 	parse(code: string, language: string): ParsedFile;
@@ -231,7 +245,7 @@ export async function indexFolder(
 		const file = files[i];
 		try {
 			const mtimeMs = fs.statSync(file).mtimeMs;
-			const relativePath = path.relative(absolutePath, file);
+			const relativePath = relativePosix(absolutePath, file);
 			const hit = cached?.get(relativePath);
 			let outline: FileOutline;
 			if (hit && hit.mtimeMs === mtimeMs) {
@@ -321,7 +335,7 @@ function* refreshSteps(repoId: string): Generator<void, RefreshCounts | null, vo
 	const seen = new Set<string>();
 	for (const file of files) {
 		yield;
-		const rel = path.relative(repo.sourceRoot, file);
+		const rel = relativePosix(repo.sourceRoot, file);
 		seen.add(rel);
 		let mtimeMs: number;
 		try {
@@ -446,7 +460,7 @@ export async function indexRepo(
 export function getFileOutline(repoId: string, filePath: string): FileOutline | null {
 	const repo = fileOutlines.get(repoId);
 	if (!repo) return null;
-	return repo.get(filePath) || null;
+	return repo.get(normalizeRelPath(filePath)) || null;
 }
 
 /**
@@ -564,8 +578,8 @@ export function getFreshFileOutline(repoId: string, filePath: string): FileOutli
 	if (!repo || !outlines || !mtimes || !symbols) return null;
 
 	const rel = path.isAbsolute(filePath)
-		? path.relative(repo.sourceRoot, filePath)
-		: path.normalize(filePath);
+		? relativePosix(repo.sourceRoot, filePath)
+		: normalizeRelPath(path.normalize(filePath));
 	const current = outlines.get(rel);
 	if (!current) return null;
 
@@ -620,7 +634,8 @@ export function getFileTree(repoId: string, pathPrefix?: string): string[] {
 	let paths = Array.from(outlines.keys());
 
 	if (pathPrefix) {
-		paths = paths.filter((p) => p.startsWith(pathPrefix));
+		const prefix = normalizeRelPath(pathPrefix);
+		paths = paths.filter((p) => p.startsWith(prefix));
 	}
 
 	return paths.sort();
@@ -675,7 +690,7 @@ export function estimateTokenSavings(
 	symbolOnlyTokens: number;
 	savingsPercent: number;
 } {
-	const outline = fileOutlines.get(repoId)?.get(filePath);
+	const outline = fileOutlines.get(repoId)?.get(normalizeRelPath(filePath));
 	if (!outline) {
 		return { fullFileTokens: 0, symbolOnlyTokens: 0, savingsPercent: 0 };
 	}

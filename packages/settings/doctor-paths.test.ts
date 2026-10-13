@@ -16,7 +16,12 @@ import path from "node:path";
 const CLI = path.resolve(import.meta.dir, "../../bin/8gent.ts");
 
 function run(home: string, args: string[], extraEnv: Record<string, string> = {}): string {
-	const env: Record<string, string> = { ...(process.env as Record<string, string>), HOME: home };
+	const env: Record<string, string> = {
+		...(process.env as Record<string, string>),
+		HOME: home,
+		// resolveHome reads USERPROFILE first on Windows.
+		USERPROFILE: home,
+	};
 	// The test preload sets EIGHT_HOME to the runner's own temp home, and
 	// resolveHome() prefers it, so an inherited EIGHT_HOME would send doctor's
 	// writes somewhere other than this throwaway HOME and hide them.

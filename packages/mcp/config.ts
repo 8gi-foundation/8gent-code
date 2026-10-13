@@ -6,8 +6,8 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { resolveHome } from "../core/home";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -52,10 +52,13 @@ export interface MCPConfigFile {
 
 // ── Loader ───────────────────────────────────────────────────────
 
-const DEFAULT_CONFIG_PATH = path.join(os.homedir(), ".8gent", "mcp.json");
+/** ~/.8gent/mcp.json, resolved per call so EIGHT_HOME decides which servers can start. */
+export function defaultConfigPath(): string {
+	return path.join(resolveHome(), ".8gent", "mcp.json");
+}
 
 export function loadConfig(configPath?: string): ServerConfig[] {
-	const filePath = configPath || DEFAULT_CONFIG_PATH;
+	const filePath = configPath || defaultConfigPath();
 
 	if (!fs.existsSync(filePath)) {
 		return [];

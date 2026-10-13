@@ -13,6 +13,7 @@ import { buildToolSystemPrompt } from "../ai/text-tools";
 import { agentTools } from "../ai/tools";
 import { PLAN_STATUSES, parsePlan, updatePlan } from "../ai/update-plan";
 import { enforceAgenticHonesty } from "./honesty";
+import { planningGateInstruction } from "./local-tool-scope";
 import { DEFAULT_SYSTEM_PROMPT, PLANNING_GATE_INSTRUCTION } from "./prompt";
 import { TOOL_CATEGORIES } from "./tool-registry";
 import { ToolExecutor } from "./tools";
@@ -140,6 +141,23 @@ describe("the agent is told to report plan progress", () => {
 		expect(PLANNING_GATE_INSTRUCTION).toContain("before your final answer");
 	});
 
+	test("only the headless run path keeps the answer in front of a DONE summary (#3638)", () => {
+		const run = fs.readFileSync(path.join(import.meta.dir, "run.ts"), "utf8");
+		const agent = fs.readFileSync(path.join(import.meta.dir, "agent.ts"), "utf8");
+		expect(run).toContain("keepAnswerFirst: true,");
+		expect(agent).toContain("keepAnswerFirst: this.config.keepAnswerFirst === true,");
+		// The TUI constructs its Agent without the option.
+		const tui = fs.readFileSync(path.join(import.meta.dir, "..", "..", "apps", "tui", "src", "app.tsx"), "utf8");
+		expect(tui).not.toContain("keepAnswerFirst");
+	});
+
+	test("a direct question is excused from planning, at depth 0 and in the sub-agent cut (#3640)", () => {
+		const excuse = "If the request is a question you can answer directly, answer it in the format it asks for, with no plan.";
+		expect(PLANNING_GATE_INSTRUCTION).toStartWith(`[PLANNING] ${excuse}`);
+		expect(planningGateInstruction(1)).toContain(excuse);
+		expect(planningGateInstruction(1)).not.toContain("update_plan");
+	});
+
 	test("every status the gate names is one update_plan accepts", () => {
 		for (const status of PLAN_STATUSES) expect(PLANNING_GATE_INSTRUCTION).toContain(status);
 		const plan = PLAN_STATUSES.map((status, i) => ({ step: `Step ${i + 1}`, status }));
@@ -153,7 +171,9 @@ describe("the agent is told to report plan progress", () => {
 
 	test("agent.ts injects the shared constant, not its own copy", () => {
 		const src = fs.readFileSync(path.join(import.meta.dir, "agent.ts"), "utf8");
-		expect(src).toContain("content: PLANNING_GATE_INSTRUCTION,");
+		// Through planningGateInstruction, which returns the constant at depth 0 (#3583).
+		expect(src).toContain("content: planningGateInstruction(this.agentDepth),");
+		expect(planningGateInstruction(0)).toBe(PLANNING_GATE_INSTRUCTION);
 		expect(src).not.toContain('"[PLANNING] ');
 	});
 });

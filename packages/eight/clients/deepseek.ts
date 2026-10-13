@@ -11,7 +11,7 @@
  */
 
 import type { LLMClient, LLMResponse, Message, MessageContent } from "../types";
-import { deanonymize } from "../../permissions/pii-anonymizer";
+import { createStreamDeanonymizer } from "../../permissions/pii-anonymizer";
 import { anonymizeOutbound, deanonymizeResponse, resolveLocalFallback } from "./pii-gate";
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com/v1";
@@ -136,7 +136,8 @@ export class DeepSeekClient implements LLMClient {
 	async *stream(messages: Message[]): AsyncGenerator<string> {
 		// PII gate: never stream raw PII to the cloud. Anonymize + verify before
 		// send; fail closed (refuse) if the payload cannot be proven clean. Each
-		// yielded delta is de-anonymized so the caller sees real values back.
+		// yielded delta is de-anonymized so the caller sees real values back; a
+		// placeholder split across deltas is held until it completes (#3545).
 		const gate = anonymizeOutbound(messages);
 		if (!gate.clean) {
 			throw new Error(
@@ -162,6 +163,7 @@ export class DeepSeekClient implements LLMClient {
 			throw new Error(`DeepSeek stream error: ${response.status} ${response.statusText}`);
 		}
 
+		const restorer = createStreamDeanonymizer(gate.map);
 		const reader = response.body.getReader();
 		const decoder = new TextDecoder();
 		let buffer = "";
@@ -175,11 +177,16 @@ export class DeepSeekClient implements LLMClient {
 				buffer = buffer.slice(idx + 1);
 				if (line.startsWith("data:")) {
 					const payload = line.slice(5).trim();
-					if (payload === "[DONE]") return;
+					if (payload === "[DONE]") {
+						const rest = restorer.flush();
+						if (rest) yield rest;
+						return;
+					}
 					try {
 						const parsed = JSON.parse(payload);
 						const delta = parsed.choices?.[0]?.delta?.content;
-						if (delta) yield deanonymize(delta as string, gate.map);
+						const restored = delta ? restorer.push(delta as string) : "";
+						if (restored) yield restored;
 					} catch {
 						// Skip non-JSON SSE keepalives.
 					}
@@ -187,6 +194,8 @@ export class DeepSeekClient implements LLMClient {
 				idx = buffer.indexOf("\n");
 			}
 		}
+		const rest = restorer.flush();
+		if (rest) yield rest;
 	}
 
 	async generate(prompt: string): Promise<string> {

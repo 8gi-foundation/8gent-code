@@ -93,21 +93,31 @@ policies:
 
   - name: "desktop-block-dangerous-keys"
     action: desktop_use
-    condition: "keys contains cmd+q or keys contains alt+f4 or keys contains ctrl+alt+delete or keys contains cmd+shift+q"
+    condition: "keys contains cmd+q or keys contains alt+f4 or keys contains ctrl+alt+delete or keys contains cmd+shift+q or keys contains cmd+alt+esc"
     decision: block
-    message: "Dangerous key combination blocked (would quit/logout)."
+    message: "Dangerous key combination blocked (would quit, log out or force quit)."
 
   - name: "desktop-allow-screenshot"
     action: desktop_use
-    condition: "action equals screenshot or action equals window_list or action equals display_list or action equals hover or action equals scroll or action equals clipboard_get or action equals list_processes or action equals suggest_quit or action equals safe_list"
+    condition: "action equals screenshot or action equals window_list or action equals display_list or action equals hover or action equals scroll or action equals clipboard_get or action equals list_processes or action equals suggest_quit or action equals safe_list or action equals act_resolve"
     decision: allow
     message: "Read-only desktop actions are allowed without confirmation."
+  # act_resolve is desktop_act's read half (screenshot + local grounding). Its
+  # act is re-gated as click / type / press above, with the point on the card.
 
   - name: "desktop-quit-require-approval"
     action: desktop_use
     condition: "action equals quit_app"
     decision: require_approval
     message: "Quitting an application requires user confirmation."
+
+  # ── One-file extensions (G1) ─────────────────────────────────────────────────
+
+  - name: "extension-call-unattended-require-approval"
+    action: extension_call
+    condition: "attended equals false"
+    decision: require_approval
+    message: "An extension tool needs a person at the keyboard: this session is unattended (daemon, channel, Table or a headless run without a terminal), so it was not run."
 
   # ── File access ───────────────────────────────────────────────────────────────
 
@@ -116,6 +126,27 @@ policies:
     condition: "path contains package.json or path contains tsconfig or path contains CLAUDE.md"
     decision: require_approval
     message: "Deleting project config files requires confirmation."
+
+  # Which programs MCP may start, and the rules themselves (#3474): an agent
+  # that could rewrite either could approve itself past every other gate.
+  - name: "mcp-config-and-policies-write-approval"
+    action: write_file
+    condition: "path contains .8gent/mcp.json or path contains .8gent/policies.yaml or resolved_path ends_with /.8gent/mcp.json or resolved_path ends_with /.8gent/policies.yaml"
+    decision: require_approval
+    message: "Changing ~/.8gent/mcp.json (the programs MCP may start) or ~/.8gent/policies.yaml (these rules) requires confirmation."
+
+  - name: "mcp-config-and-policies-delete-approval"
+    action: delete_file
+    condition: "path contains .8gent/mcp.json or path contains .8gent/policies.yaml or resolved_path ends_with /.8gent/mcp.json or resolved_path ends_with /.8gent/policies.yaml"
+    decision: require_approval
+    message: "Deleting ~/.8gent/mcp.json or ~/.8gent/policies.yaml requires confirmation."
+
+  # Literal-string match only: a speed bump, not a boundary.
+  - name: "mcp-config-and-policies-shell-approval"
+    action: run_command
+    condition: "command contains .8gent/mcp.json or command contains .8gent/policies.yaml"
+    decision: require_approval
+    message: "A command touching ~/.8gent/mcp.json or ~/.8gent/policies.yaml requires confirmation."
 
   # ── Inter-agent messaging (Agent Mail + peers-mcp) ───────────────────────────
 

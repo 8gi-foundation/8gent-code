@@ -28,7 +28,7 @@ describe("capability classes", () => {
 	});
 
 	it("defaults the store under ~/.8gent", () => {
-		expect(defaultBanditStorePath()).toMatch(/\.8gent\/router-bandit\.json$/);
+		expect(defaultBanditStorePath()).toMatch(/\.8gent[\\/]router-bandit\.json$/);
 	});
 });
 

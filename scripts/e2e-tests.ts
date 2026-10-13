@@ -10,6 +10,7 @@
  * Usage: bun run scripts/e2e-tests.ts [--model eight:latest] [--runtime ollama]
  */
 
+import { safeBunFlags } from "../packages/core/bun-flags";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -51,6 +52,7 @@ function runHarness(prompt: string, extraArgs: string[] = []): Promise<HarnessRe
 		const proc = spawn(
 			"bun",
 			[
+				...safeBunFlags(),
 				"run",
 				HARNESS_PATH,
 				"run",

@@ -135,3 +135,6 @@ celtic_hero_standalone.html
 
 # Linux packaging staging file (built by scripts/package-linux.sh)
 packaging/linux/staged-8gent
+
+# scratch files the local model is told to write (#3865)
+.tmp/

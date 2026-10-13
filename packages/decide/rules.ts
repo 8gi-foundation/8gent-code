@@ -997,6 +997,14 @@ function analyseTokens(tIn: string[], piped: boolean, prevBin: string | null, r:
 	} else if (DB_CLIENTS.has(b)) sqlScan(args.join(" "), r);
 	else if (b === "rsync") {
 		if (/--delete\b|--delete-\w+|--remove-source-files/.test(args.join(" "))) r.d("rsync_delete");
+	} else if (b === "zip") {
+		// -m / --move deletes the inputs once archived, also inside a short
+		// cluster (-qm, -rm). Lowercase only: -MM is "must match".
+		if (args.some((a) => a === "--move" || /^-[A-Za-z0-9]*m[A-Za-z0-9]*$/.test(a))) r.d("archive_removes_source");
+	} else if (b === "tar" || b === "gtar" || b === "bsdtar") {
+		if (args.some((a) => a === "--remove-files")) r.d("archive_removes_source");
+	} else if (b === "7z" || b === "7za" || b === "7zr" || b === "7zz") {
+		if (args.some((a) => a === "-sdel")) r.d("archive_removes_source");
 	} else if (b === "xcrun") {
 		if (/simctl\s+(delete|erase)/.test(args.join(" "))) r.d("simulator_delete_or_erase");
 	}

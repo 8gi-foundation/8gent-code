@@ -16,10 +16,18 @@ function getDbPath(): string {
 
 let _db: Database | null = null;
 
+/** Close the shared database so its file can be removed (tests; Windows will not delete an open file). */
+export function closeDb(): void {
+	_db?.close();
+	_db = null;
+}
+
 export function getDb(): Database {
 	if (_db) return _db;
 	_db = new Database(getDbPath());
 	_db.exec("PRAGMA journal_mode = WAL;");
+	// Cleared queue text is overwritten on disk, not left in free pages.
+	_db.exec("PRAGMA secure_delete = ON;");
 	_db.exec(`
     CREATE TABLE IF NOT EXISTS leads (
       id TEXT PRIMARY KEY,
