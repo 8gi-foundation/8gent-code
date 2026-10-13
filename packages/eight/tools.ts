@@ -186,7 +186,6 @@ import {
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate, systemOneMode } from "../permissions/system-one-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
-import { hasTuiApprovalHandler } from "../permissions/tui-approval-channel";
 import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
 import type { PolicyActionType } from "../permissions/types.js";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
