@@ -17,6 +17,8 @@
  * `runInProject` answers ok only when ALL hold:
  *   - the command is `[NAME=value ...] bun <file> [args]` or `node <file>
  *     [args]`: plain words only (no quotes, `$`, pipes, redirects, `;`, `&`),
+ *     except one trailing ` | cat` or ` | cat -FLAGS` with display flags only
+ *     (AbeEnstTuv, no file operand: it reads stdin, writes stdout) (#4185),
  *     no `bun run` (it would run a package.json script of that name), no
  *     interpreter flag, decideRules fires nothing, no prompt-control text;
  *   - no bunfig.toml and no .env* file in the working directory or on the
@@ -48,7 +50,11 @@
  *         file. A literal is a command-line path or a plain relative name;
  *         env NAME must be supplied by the command, and its vetted value is
  *         the path. A write target must also not be source, config, a dot
- *         name or a protected path. So a script cannot read or write a path
+ *         name or a protected path, and no part of it inside the workspace
+ *         may be a symlink. The one dot name allowed is a leading `.tmp/`
+ *         (#4185): `.tmp` directly under the working directory is the
+ *         sanctioned scratch directory, and every other rule still applies
+ *         below it. So a script cannot read or write a path
  *         it built itself.
  *   - Bun.Transpiler.scan agrees: it finds no import the token pass did not.
  *
@@ -79,6 +85,19 @@ export function realpathSync(p: string): string {
 }
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
+/** One trailing pipe into cat with display flags only, no file operand (#4185). */
+const CAT_TAIL = / \| cat(?: -[AbeEnstTuv]+)?$/;
+/** The one sanctioned scratch directory, directly under the working directory (#4185). */
+export const SCRATCH_DIR = ".tmp";
+
+/**
+ * True when a dot segment other than a leading `.tmp` is among `segs` (the
+ * segments of a workspace-relative path). `.tmp` counts only as the first
+ * segment and only spelt exactly so; `.tmp` alone is the caller's to judge.
+ */
+export function dotOutsideScratch(segs: string[]): boolean {
+	return segs.some((s, i) => s.startsWith(".") && !(i === 0 && s === SCRATCH_DIR));
+}
 const ENV_ASSIGN = /^([A-Z][A-Z0-9_]*)=([A-Za-z0-9._/+,@:-]*)$/;
 const ENV_DENY =
 	/^(PATH|HOME|SHELL|IFS|ENV|TMPDIR|USER|LOGNAME|CDPATH|TERM|LANG|PYTHON.*|BASH.*|SSL.*|OPENSSL.*|(LC|LD|DYLD|NODE|BUN|NPM|GIT|SSH|XDG|CURL|HTTP|HTTPS|ALL|NO|REQUESTS|CA|AWS|GOOGLE|AZURE)_.*)$/;
@@ -418,16 +437,19 @@ export function symlinkBelow(root: string, abs: string): boolean {
 function writeTargetOk(p: string, root: string): boolean {
 	if (SECRET.test(p)) return false;
 	const abs = canon(path.isAbsolute(p) ? path.normalize(p) : path.resolve(root, p));
-	// The workspace rules win even when the workspace itself sits under a temp root.
-	if (!inside(abs, root)) return underTemp(abs);
-	const rel = path.relative(root, abs);
-	if (rel === "" || hasDotSegment(rel) || protectedRel(rel)) return false;
-	if (relSegments(rel).includes("node_modules")) return false;
 	// canon() falls back to the nearest existing parent, so a dangling symlink as
-	// the final part, or one in the middle, would pass; refuse any symlink.
+	// the final part, or one in the middle, would pass; refuse any symlink. Checked
+	// before the temp-root exit, so a workspace name linked to /tmp is refused too (#4185).
 	if (p.split("/").includes("..")) return false;
 	const lexical = path.isAbsolute(p) ? path.normalize(p) : path.resolve(root, p);
 	if (inside(lexical, root) && symlinkBelow(root, lexical)) return false;
+	// The workspace rules win even when the workspace itself sits under a temp root.
+	if (!inside(abs, root)) return underTemp(abs);
+	const rel = path.relative(root, abs);
+	const segs = relSegments(rel);
+	if (rel === "" || rel === SCRATCH_DIR || dotOutsideScratch(segs) || protectedRel(rel))
+		return false;
+	if (segs.includes("node_modules")) return false;
 	return !WRITE_BAD_NAME.test(path.basename(abs));
 }
 
@@ -669,9 +691,12 @@ function configInDir(dir: string): boolean {
 export function runInProject(command: string, cwd: string | undefined): RunInProject {
 	try {
 		if (!cwd || !path.isAbsolute(cwd)) return NO;
-		const text = command.trim();
-		if (!PLAIN.test(text) || promptControlText(text) !== null) return NO;
-		if (decideRules(text).rules.length !== 0) return NO;
+		const whole = command.trim();
+		// The rules read the whole line, pipe included; the rest is checked without the cat tail.
+		if (promptControlText(whole) !== null || decideRules(whole).rules.length !== 0) return NO;
+		const piped = CAT_TAIL.test(whole);
+		const text = whole.replace(CAT_TAIL, "");
+		if (!PLAIN.test(text) || decideRules(text).rules.length !== 0) return NO;
 		const root = realpathSync(cwd);
 		const words = text.split(/ +/);
 		const ctx: Ctx = { root, env: new Map(), cmdTokens: new Set(), envReads: new Set() };
@@ -722,7 +747,7 @@ export function runInProject(command: string, cwd: string | undefined): RunInPro
 		for (const name of ctx.env.keys()) if (!ctx.envReads.has(name)) return NO;
 		return {
 			ok: true,
-			reason: `run of ${path.relative(root, realScript)}: a workspace script limited to reading and writing the paths on its command line`,
+			reason: `run of ${path.relative(root, realScript)}: a workspace script limited to reading and writing the paths on its command line${piped ? ", shown through cat" : ""}`,
 		};
 	} catch {
 		return NO;
