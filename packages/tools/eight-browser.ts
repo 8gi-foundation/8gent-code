@@ -41,8 +41,8 @@ import {
 	dirname,
 	join,
 	posix as pathPosix,
-	resolve as resolvePath,
 	win32 as pathWin32,
+	resolve as resolvePath,
 } from "node:path";
 import {
 	RESERVED_LOOPBACK_PORTS,
@@ -773,11 +773,16 @@ async function stopChild(
 		}
 	};
 	send("SIGTERM");
-	const gone = await Promise.race([exited.then(() => true), sleep(STOP_GRACE_MS).then(() => false)]);
+	const gone = await Promise.race([
+		exited.then(() => true),
+		sleep(STOP_GRACE_MS).then(() => false),
+	]);
 	// Electron helpers can outlive the main process; the group gets SIGKILL either way.
 	if (group || !gone) send("SIGKILL");
 	if (!gone) await Promise.race([exited, sleep(1_000)]);
-	return gone ? "; stopped the browser it started" : "; killed the browser it started (SIGTERM was ignored)";
+	return gone
+		? "; stopped the browser it started"
+		: "; killed the browser it started (SIGTERM was ignored)";
 }
 
 /** mtime of a file in ms, or null when absent. */
@@ -1029,7 +1034,9 @@ function decodedViews(command: string): string[] {
 	const views = [command];
 	// %xx (URL-style) escapes, so %62rowser-history cannot hide a name.
 	if (/%[0-9a-f]{2}/i.test(command))
-		views.push(command.replace(/%([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16))));
+		views.push(
+			command.replace(/%([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16))),
+		);
 	views.push(
 		command
 			.replace(/\\x([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16)))
@@ -1137,7 +1144,8 @@ export function touchesBrowserSecrets(command: string): boolean {
 		if (/browser-(control|profiles|history|shots|[*?[{$])/.test(lower)) return true;
 		const at = lower.indexOf(".8gent");
 		if (at >= 0) {
-			if (/[*?[{$]|token|control|profile/.test(lower.slice(at)) || browserUnder8gent(lower)) return true;
+			if (/[*?[{$]|token|control|profile/.test(lower.slice(at)) || browserUnder8gent(lower))
+				return true;
 			// A listing is refused when it is of .8gent itself or a browser-* child, not of any path under it.
 			if (lists && names8gentDir(lower)) return true;
 		}
