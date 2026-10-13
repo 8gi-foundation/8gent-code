@@ -25,8 +25,20 @@ jobs:
         with:
           bun-version: 1.4.3
 
+      # #4143: bun runs native install scripts via `bunx node-gyp@latest` when no
+      # node-gyp is on PATH, and parallel installs race on that download (the
+      # same race .github/docker/linux-ci/Dockerfile pins node-gyp to avoid).
+      # ubuntu-latest already ships python3, make and g++, so no apt step.
+      - name: "Pin node-gyp for native builds"
+        run: npm install -g --no-fund --no-audit node-gyp@12.4.0 && node-gyp --version
+
       - name: Install dependencies
         run: bun install
+
+      # node-pty is optional and its build fails quietly, so a missing module
+      # used to surface as five pty-session failures ("Received: 66").
+      - name: "Preflight native deps (node-pty)"
+        run: bun run preflight:native
 
       - name: Check for merge conflict markers
         run: |

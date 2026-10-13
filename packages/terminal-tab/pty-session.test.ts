@@ -9,17 +9,43 @@
  * with a clear message rather than hanging.
  */
 
-import { describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 import { findNodeBinary } from "./find-node.js";
 import { PtySession } from "./pty-session.js";
 
-const nodeAvailable = (() => {
-	const bin = findNodeBinary();
-	return Boolean(bin);
-})();
+const nodeBin = findNodeBinary();
+const nodeAvailable = Boolean(nodeBin);
 
 // POSIX-only: these cases run /bin/sh (or $SHELL) inside the pty, which a Windows host does not have.
 const posixShell = process.platform !== "win32";
+
+// #4143: when node-pty did not build, the bridge exits 66 and every case below
+// failed as "Expected: 0, Received: 66". Run the bridge once first and fail
+// with its own message instead. The cases still fail (no silent skip); CI's
+// "Preflight native deps" step explains it before the suite starts.
+beforeAll(() => {
+	if (!nodeAvailable || !posixShell) return;
+	const r = spawnSync(
+		nodeBin as string,
+		[join(import.meta.dir, "pty-bridge.cjs"), "/bin/sh", "-c", "true"],
+		{
+			cwd: import.meta.dir,
+			encoding: "utf-8",
+			timeout: 15_000,
+		},
+	);
+	if (r.status !== 66) return;
+	const exit = r.stdout
+		.split("\n")
+		.filter((l) => l.startsWith("{"))
+		.map((l) => JSON.parse(l) as { type: string; error?: string })
+		.find((m) => m.type === "exit");
+	throw new Error(
+		`pty-bridge exited 66: node-pty is not installed or did not build (${exit?.error ?? "no reason given"}). Fix: sudo apt install python3 make g++, then rm -rf node_modules/node-pty && bun install.`,
+	);
+});
 
 const SHELL = process.env.SHELL || "/bin/bash";
 
