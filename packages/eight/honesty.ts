@@ -99,6 +99,19 @@ export function claimsCompletion(content: string): boolean {
 	return SUCCESS_CLAIM_PATTERNS.some((p) => p.test(content));
 }
 
+/** First words of the failure reply below. Exported so no caller copies the literal. */
+export const HONEST_FAILURE_PREFIX = "I could not complete that action.";
+
+/**
+ * True when a failed tool result is the harness's own permission or sandbox refusal,
+ * not an outage or a bug. Bare "refused" is not a denial: "connection refused" is an outage.
+ */
+export function isDenialResult(result: string | undefined): boolean {
+	return /\b(BLOCKED|DENIED)\b|permission denied|outside working directory|path traversal|path blocked/i.test(
+		result ?? "",
+	);
+}
+
 /** Reply for a success claim made after every action tool FAILED. */
 export function buildHonestFailureReply(
 	failed: ToolLedgerEntry[],
@@ -119,7 +132,7 @@ export function buildHonestFailureReply(
 		sandboxHit && workingDirectory
 			? `\n\nI can only write inside ${workingDirectory}. Give me a path inside that directory (or change my working directory) and I will retry for real.`
 			: "";
-	return `I could not complete that action.\n\n${lines.join("\n")}\n\nNothing was written or changed on disk this turn.${sandboxNote}`;
+	return `${HONEST_FAILURE_PREFIX}\n\n${lines.join("\n")}\n\nNothing was written or changed on disk this turn.${sandboxNote}`;
 }
 
 /** Reply for a completion claim made with NO action tool run at all. */
@@ -134,6 +147,8 @@ export function buildNoActionReply(): string {
 export interface HonestyGateResult {
 	content: string;
 	violated: boolean;
+	/** True when every failed action was a permission or sandbox refusal (#3899). */
+	denied?: boolean;
 	reason?: string;
 }
 
@@ -160,6 +175,7 @@ export function enforceAgenticHonesty(opts: {
 		return {
 			content: buildHonestFailureReply(failed, workingDirectory),
 			violated: true,
+			denied: failed.every((e) => isDenialResult(e.result)),
 			reason: `success claim after ${failed.length} failed tool call(s) and zero successes`,
 		};
 	}
@@ -168,4 +184,21 @@ export function enforceAgenticHonesty(opts: {
 		violated: true,
 		reason: "success claim with no action tool call at all",
 	};
+}
+
+/**
+ * True when the turn's action tools were all refused by the harness, so the
+ * denial is why the task did not happen. Only FAILED results count: the
+ * denial text must open the result, so a successful read of a file that
+ * contains "permission denied" is not a denial. One refusal the model
+ * recovered from (a later action did something else) does not count either.
+ */
+export function denialIsCause(log: ReadonlyArray<{ name: string; result?: string }>): boolean {
+	const actions = log.filter((e) => ACTION_TOOLS.has(e.name));
+	const refused = (r: string | undefined) => {
+		const head = (r ?? "").trimStart().slice(0, 160);
+		if (/^\[[^\]]*\b(BLOCKED|DENIED)\b/.test(head)) return true;
+		return /^(Error:|Path blocked|Path traversal blocked)/.test(head) && isDenialResult(head);
+	};
+	return actions.length > 0 && actions.every((e) => refused(e.result));
 }

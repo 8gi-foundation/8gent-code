@@ -105,7 +105,12 @@ import {
 	estimateMessageTokens,
 } from "./compaction";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
-import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
+import {
+	type ToolLedgerEntry,
+	denialIsCause,
+	enforceAgenticHonesty,
+	isErrorToolResult,
+} from "./honesty";
 import { projectInstructionsSection } from "./instruction-loader";
 import { getModeManager } from "./modes";
 import { isLocalProvider } from "./registry";
@@ -122,7 +127,11 @@ import {
 	localPlanTools,
 	planningGateInstruction,
 } from "./local-tool-scope";
-import { describeLocalTurnFailure, failedTurnRunEntry } from "./local-turn-error";
+import {
+	type TurnFailureReason,
+	describeLocalTurnFailure,
+	failedTurnRunEntry,
+} from "./local-turn-error";
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
@@ -435,6 +444,22 @@ export class Agent {
 	private turnToolLedger: ToolLedgerEntry[] = [];
 	private turnTask = "";
 	private turnGitBaseline: Map<string, string> | null = null;
+	/**
+	 * Set by the harness, never from model text, when the last chat() turn
+	 * failed (#3899). `8gent run` reads it for its exit code.
+	 */
+	private lastTurnFailure: {
+		reason: TurnFailureReason;
+		message: string;
+		unverified?: string[];
+	} | null = null;
+	getLastTurnFailure(): {
+		reason: TurnFailureReason;
+		message: string;
+		unverified?: string[];
+	} | null {
+		return this.lastTurnFailure;
+	}
 	/**
 	 * An image attached to the current turn's prompt, as a data URL, when the
 	 * model can see it itself (#3641). The text-tool turn puts it on the user
@@ -1589,6 +1614,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const failure = describeLocalTurnFailure(err, { endpoint, timeoutMs: attemptTimeoutMs });
 			this.messageHistory.push({ role: "assistant", content: failure.message });
 			recordFailedRun(failure.reason);
+			this.lastTurnFailure = {
+				reason: failure.kind === "unreachable" ? "unreachable" : "turn_failed",
+				message: failure.message,
+			};
 			return failure.message;
 		}
 		this.abortController = null;
@@ -1615,6 +1644,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		});
 		if (gated.violated) {
 			console.log(`[honesty] blocked fabricated completion: ${gated.reason}`);
+			this.lastTurnFailure = {
+				reason: gated.denied ? "denied" : "turn_failed",
+				message: gated.content,
+			};
 		}
 
 		// Map into the exact shape chat() normally returns: flavored prose, pushed
@@ -1644,6 +1677,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// models; they are packages/personality/voice.ts, appended right here.
 		// Same for a reply carrying "[harness] Not verified" lines: the tool log
 		// contradicts part of it, so no completion tagline goes on the end.
+		// A turn the loop itself says is not done (claims contradicted by the tool
+		// log, or stopped early) is a failed turn for `8gent run`'s exit code
+		// (#3899). Structured: set from the loop's result, never from reply text.
+		if (!this.lastTurnFailure && (breakerStop !== null || agentResult.unverified.length > 0)) {
+			this.lastTurnFailure = {
+				// Denied only when refusals are why nothing happened, not when the
+				// model recovered from one (8PO review, #3901).
+				reason: denialIsCause(agentResult.toolLog)
+					? "denied"
+					: breakerStop !== null
+						? "stopped_early"
+						: "unverified",
+				message: content,
+				...(agentResult.unverified.length > 0 ? { unverified: agentResult.unverified } : {}),
+			};
+		}
 		const flavoredContent =
 			gated.violated ||
 			breakerStop !== null ||
@@ -1761,6 +1810,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * and baseUrl as they are when the child starts (#3710).
 	 */
 	chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+		this.lastTurnFailure = null;
 		return runAsParentSession(
 			() => ({
 				runtime: this.config.runtime,
@@ -3160,6 +3210,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			});
 			if (gatedNative.violated) {
 				console.log(`[honesty] blocked fabricated completion: ${gatedNative.reason}`);
+				this.lastTurnFailure = {
+					reason: gatedNative.denied ? "denied" : "turn_failed",
+					message: gatedNative.content,
+				};
 			}
 			// #3524: a blank reply is a failed turn, never a finished one.
 			const blankNative = gatedNative.content.trim() === "";

@@ -5,6 +5,8 @@
  * these types, and `validateRunEvent` checks a parsed line against them.
  */
 
+import type { TurnFailureReason } from "./local-turn-error";
+
 export interface RunUsage {
 	promptTokens: number;
 	completionTokens: number;
@@ -84,6 +86,10 @@ export interface ResultEvent {
 	final_text?: string;
 	project_check?: ProjectCheckInfo;
 	error?: string;
+	/** Why a turn the harness flagged as failed failed (#3899). */
+	reason?: TurnFailureReason;
+	/** The claims that stayed unverified, when that is the reason (#3899). */
+	unverified?: string[];
 	stop?: RunStopInfo;
 }
 
