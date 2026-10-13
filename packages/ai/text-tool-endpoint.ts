@@ -883,7 +883,8 @@ export function buildTextToolCall(opts: {
 		(res.headers.get("content-type") ?? "").toLowerCase().includes("application/json");
 	const label = `${opts.provider}/${opts.model}`;
 	const noThink =
-		(opts.noThink === true && opts.provider === "ollama") || isOllamaNoThink(opts.provider, opts.model);
+		(opts.noThink === true && opts.provider === "ollama") ||
+		isOllamaNoThink(opts.provider, opts.model);
 	let declareTools = shouldDeclareTools(opts.provider, opts.tools);
 	const declared = (opts.tools ?? []).map((t) => ({
 		type: "function",

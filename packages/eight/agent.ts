@@ -133,6 +133,14 @@ import {
 	buildToolCatalogSegment,
 	environmentNote,
 } from "./prompts/system-prompt";
+import {
+	classifyPrompt,
+	installedModelsFor,
+	pickQuickModel,
+	quickLaneEnabled,
+	quickMessages,
+	runQuickAnswer,
+} from "./quick-answer";
 import { SessionStore } from "./session-store";
 import { SessionSyncManager } from "./session-sync";
 import {
@@ -148,14 +156,6 @@ import { TurnJournal } from "./turn-journal";
 import { resolveStepCeilingMs, resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter, oneLineError } from "./vision-interpreter";
-import {
-	classifyPrompt,
-	installedModelsFor,
-	pickQuickModel,
-	quickLaneEnabled,
-	quickMessages,
-	runQuickAnswer,
-} from "./quick-answer";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import {

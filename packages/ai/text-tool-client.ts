@@ -12,12 +12,12 @@
  */
 
 import {
+	type ParsedToolCall,
+	type ToolSpec,
 	buildToolSystemPrompt,
 	findUnterminatedToolCall,
 	parseToolCalls,
 	stripToolCalls,
-	type ParsedToolCall,
-	type ToolSpec,
 } from "./text-tools";
 
 export type TextToolMessage = {
@@ -155,9 +155,7 @@ function withToolInstructions(
  * Never throws for normal model output. If `call` itself rejects, the rejection
  * propagates unchanged.
  */
-export async function runTextToolTurn(
-	opts: TextToolTurnOptions,
-): Promise<TextToolTurn> {
+export async function runTextToolTurn(opts: TextToolTurnOptions): Promise<TextToolTurn> {
 	const messages = withToolInstructions(opts.messages, opts.tools, opts.toolPrompt);
 	const reply = await opts.call(messages);
 	const raw = typeof reply === "string" ? reply : reply.content;
