@@ -8,12 +8,19 @@
  */
 
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveHome } from "../../core/home";
+import { type ResolvedShell, currentWindowsShell } from "../../core/shell";
+import { LOCAL_SERVER_CURL_NOTE } from "../../tools/eight-browser";
 import { getRepoMapper } from "../../repo-context";
 import { loadInstructions } from "../instruction-loader";
 import { TOOL_CATEGORIES } from "../tool-registry";
 import { type AccessTier, type UserContext, composeSoulPrompt, determineTier } from "./soul-layers";
+import {
+	type CommunicationStyle,
+	isCommunicationStyle,
+	isLanguageCode,
+} from "../../self-autonomy/communication-style";
 
 export { composeSoulPrompt, determineTier, type AccessTier, type UserContext };
 
@@ -38,7 +45,9 @@ export const IDENTITY_SEGMENT = composeSoulPrompt("owner");
  * by the relay (mac/relay/board_context.py on the heartbeat cadence) so this
  * read is pure and never needs the network.
  */
-export const BOARD_CONTEXT_PATH = join(homedir(), ".8gent", "board-context.md");
+// resolveHome (EIGHT_HOME > HOME > os.homedir) so a sandboxed run, the test
+// preload included, reads its own home; os.homedir() is frozen at process start (#3240).
+export const BOARD_CONTEXT_PATH = join(resolveHome(), ".8gent", "board-context.md");
 
 /**
  * Cap the injected briefing so a long file never bloats every agent's prompt.
@@ -81,6 +90,49 @@ export function buildBoardContextSegment(path: string = BOARD_CONTEXT_PATH): str
 }
 
 /**
+ * Opt-in reply shape for people who lose the thread in long answers (#3487).
+ * Only reaches the prompt when the user picked communicationStyle "action-first".
+ */
+export const ACTION_FIRST_PRECEDENCE =
+	'These rules override any other instruction in this prompt about greetings, completion phrases, jokes or summaries. If a completion marker (such as COMPLETED or INCOMPLETE) is required, write it as one plain line with no joke, placed just before the single "Next:" line.';
+export const ACTION_FIRST_STYLE = [
+	"Shape every reply so the reader can act without rereading:",
+	ACTION_FIRST_PRECEDENCE,
+	"1. Open with the action or the answer itself. No greeting, no restating the question, no warm-up.",
+	"2. Give steps as a numbered list, one action per step. Never more than five items in any list; if there are more, do the first five and say what comes after.",
+	"3. Put commands and paths in code blocks so they can be copied.",
+	"4. When something failed, say what failed and the fix, in plain words, with no apology.",
+	"5. If you give a time estimate, give a number of minutes.",
+	"6. No summary of what you just said and no sign-off line.",
+	'7. End with exactly one line that starts with "Next:" and names one concrete thing to do.',
+].join("\n");
+
+/** The guide line per style. "sarcastic" (the default) has none. */
+const STYLE_GUIDE: Record<CommunicationStyle, string> = {
+	sarcastic: "",
+	concise: "Be brief and direct. Skip explanations unless asked.",
+	detailed: "Explain your reasoning. Teach as you go.",
+	casual: "Keep it friendly and collaborative. We're partners.",
+	formal: "Maintain professional tone. Be precise.",
+	"action-first": ACTION_FIRST_STYLE,
+};
+
+/**
+ * The "Communication style" line of the user context. Also sent, unchanged, as
+ * the closing style reminder on the local text-tool path (#3487). Only a key
+ * from the fixed style set produces a line; any other value yields "".
+ */
+export function communicationStyleLine(style: string): string {
+	if (!isCommunicationStyle(style)) return "";
+	return `Communication style: **${style}**. ${STYLE_GUIDE[style]}`;
+}
+
+/** True when the style is a known key with a guide line (so not "sarcastic"). */
+export function styleHasGuide(style: string): boolean {
+	return isCommunicationStyle(style) && STYLE_GUIDE[style] !== "";
+}
+
+/**
  * @deprecated User context is now handled by composeSoulPrompt(tier, userContext).
  * Kept for backward compatibility with any direct imports.
  */
@@ -90,7 +142,7 @@ export const USER_CONTEXT_SEGMENT = (userData: {
 	communicationStyle?: string | null;
 	language?: string;
 	preferences?: Record<string, unknown>;
-}) => {
+}, opts: { includeBoard?: boolean } = {}) => {
 	const parts: string[] = ["## USER CONTEXT"];
 
 	if (userData.name) {
@@ -99,24 +151,19 @@ export const USER_CONTEXT_SEGMENT = (userData: {
 	if (userData.role) {
 		parts.push(`Their role: ${userData.role}.`);
 	}
-	if (userData.communicationStyle) {
-		const styleGuide: Record<string, string> = {
-			concise: "Be brief and direct. Skip explanations unless asked.",
-			detailed: "Explain your reasoning. Teach as you go.",
-			casual: "Keep it friendly and collaborative. We're partners.",
-			formal: "Maintain professional tone. Be precise.",
-		};
-		parts.push(
-			`Communication style: **${userData.communicationStyle}**. ${styleGuide[userData.communicationStyle] || ""}`,
-		);
+	const styleLine = userData.communicationStyle ? communicationStyleLine(userData.communicationStyle) : "";
+	if (styleLine) {
+		parts.push(styleLine);
 	}
-	if (userData.language && userData.language !== "en") {
+	// #3487: only a language code reaches the prompt ("pt-BR", not free text).
+	if (userData.language && userData.language !== "en" && isLanguageCode(userData.language)) {
 		parts.push(`Respond in: ${userData.language}`);
 	}
 
 	// Append the universal board briefing so every agent that gets a user-context
 	// block also gets the shared roadmap + "query the live sources" instruction.
-	const board = buildBoardContextSegment();
+	// #3487: callers leave it out for a model that is not on this machine.
+	const board = opts.includeBoard === false ? "" : buildBoardContextSegment();
 	const userPart = parts.length > 1 ? parts.join("\n") : "";
 	return [userPart, board].filter(Boolean).join("\n\n");
 };
@@ -234,7 +281,84 @@ export interface ToolCatalogOptions {
 	 * registered gets called and fails.
 	 */
 	omit?: Iterable<string>;
+	/** Working directory to name in the environment line. Omitted from the line when unset. */
+	cwd?: string;
 }
+
+/** Join guidance for slide videos (#3862): a while-read loop drops an unterminated last line. */
+/** Short notes shared by the concise catalog and the headless prompt (#3865). */
+export const CONCISE_WEB_NOTE =
+	"**Web, docs or URLs: `web_search`/`web_fetch`; you have internet.**";
+export const NARRATION_NOTE = "**Narration: `speak`, never espeak or say.**";
+export const SCRATCH_DIR_NOTE =
+	"**Scratch files: `.tmp/` in the project, never /tmp or ~.**";
+
+export type EnvironmentNoteInput = {
+	platform?: NodeJS.Platform;
+	/** Windows only: the shell run_command uses. Default: resolved from settings and disk. */
+	shell?: ResolvedShell;
+	cwd?: string;
+	/** OS release string, e.g. "Windows 11". Default: os.release(). */
+	release?: string;
+};
+
+const OS_NAMES: Partial<Record<NodeJS.Platform, string>> = { win32: "Windows", darwin: "macOS", linux: "Linux" };
+
+/**
+ * One line telling the model which OS and shell run_command uses (B3): the
+ * model otherwise guesses, writes `ls` for cmd.exe, or `dir` for bash.
+ */
+export function environmentNote(input: EnvironmentNoteInput = {}): string {
+	const platform = input.platform ?? process.platform;
+	const os = OS_NAMES[platform] ?? platform;
+	const cwd = input.cwd ? `, cwd ${input.cwd}` : "";
+	if (platform !== "win32") {
+		return `**Environment: ${os}, shell sh, paths use /${cwd}.**`;
+	}
+	const shell = input.shell ?? currentWindowsShell();
+	const how =
+		shell.kind === "git-bash"
+			? "Git Bash (POSIX syntax: ls, grep, pipes, $VAR; write paths with /)"
+			: shell.kind === "powershell"
+				? "PowerShell (use PowerShell syntax: Get-ChildItem, $env:VAR; no && in Windows PowerShell 5.1)"
+				: "cmd.exe (use dir, type, %VAR%, backslash paths; ls and grep are not installed)";
+	// Git Bash already says "write paths with /", so the separator clause is for the others only.
+	const sep = shell.kind === "git-bash" ? "" : ", path separator \\";
+	return `**Environment: ${os}, run_command uses ${how}${sep}${cwd}.**`;
+}
+
+/** Review focus (#3920): a review that cites every line it read buries the defect. */
+export const REVIEW_FOCUS_NOTE =
+	"**Reviews: cite only lines that must change and security-relevant edits.**";
+
+/**
+ * Short form of LOCAL_SERVER_CURL_NOTE (tools/eight-browser.ts, the full prompt's copy) for the
+ * compact local prompt, which local models get instead of TOOL_PATTERNS_SEGMENT (#4034). Kept
+ * short for the headless prompt budget (headless-prompt.test.ts, 60% rule).
+ */
+export const LOCAL_SERVER_CURL_SHORT =
+	"Local web servers (127.0.0.1/localhost): run_command with one plain curl per call, no pipes, ; or &&. Keep cookie/header/output files under .tmp/ in the project, never /tmp, then read_file them. Do not pass -L: on a 302 read the Location header and make a second curl.";
+
+/**
+ * The test login for a local server (#4072, run 2026-10-12_155723): read_file hides a
+ * "Password: ..." line as [REDACTED:secret_assignment], the model rebuilt the value from an
+ * `od -c` dump, typed E as e, and both sign-ins were 401. The recipe keeps the value out of
+ * the transcript (8SO on #4091: a stripped label defeats the redactor, which matches on the
+ * label): sed's `w` flag copies the line, relabelled as a form field, into .tmp/login and
+ * prints nothing; curl -d @file posts it with the newline stripped; a read_file of
+ * .tmp/login still scrubs. Sits next to the curl rules in the full prompt
+ * (TOOL_PATTERNS_SEGMENT) and both compact local prompts (agent.ts).
+ */
+export const LOCAL_LOGIN_NOTE =
+	"A test login in a project file may show as [REDACTED:...] in read_file. Never print, read_file or retype the value: copy it into a form body with run_command (sed -n 's/^Password: */password=/w .tmp/login' FILE, after mkdir -p .tmp) and send that file (curl -d username=NAME -d @.tmp/login URL).";
+
+/**
+ * Slides to video: JSON in, deterministic code out. Pilot media-brief-video (12 Oct 2026) showed a
+ * local model composing the video with raw ffmpeg in run_command instead of calling
+ * render_video_deck, so the note now shows the shell form of the same renderer as a 3-line recipe.
+ */
+export const SLIDES_TO_VIDEO_NOTE =
+	'**Slides to video: write deck.json {"slides":[{"title":"..","bullets":[".."],"narration":".."}]}, then run `8gent deck render deck.json out.mp4`, not ffmpeg by hand. By hand: segment count equals slide count; never loop over a file lacking a trailing newline.**';
 
 /**
  * Build the tool-inventory segment the model sees at system-prompt time.
@@ -254,7 +378,8 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 			"Core tools (file, shell, code exploration) are already loaded.",
 			"To use a tool from another category, call `discover_tools` first with the category name.",
 		);
-	} else {
+	} else if (!concise) {
+		// The concise catalog (local TUI, every turn) skips this line: the header says it.
 		lines.push(
 			"",
 			"These tools are available right now. Call them directly. Do not say you cannot do something until you have tried the relevant tool.",
@@ -278,8 +403,14 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 
 	lines.push(
 		"",
-		"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
+		concise
+			? CONCISE_WEB_NOTE
+			: "**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
+		NARRATION_NOTE,
+		SCRATCH_DIR_NOTE,
+		environmentNote({ cwd: opts.cwd }),
 	);
+	lines.push(SLIDES_TO_VIDEO_NOTE, REVIEW_FOCUS_NOTE);
 
 	return lines.join("\n");
 }
@@ -320,11 +451,20 @@ This is enforced at the infrastructure level: read_file on large code files will
 {"tool": "edit_file", "arguments": {"path": "src/x.ts", "oldText": "...", "newText": "..."}}
 \`\`\`
 
+### Local servers
+${LOCAL_SERVER_CURL_NOTE} A curl that writes with -o or -c prints nothing: read that file with read_file next, and never repeat the same command. ${LOCAL_LOGIN_NOTE}
+
 ### Git Flow
 \`\`\`json
 {"tool": "git_add", "arguments": {"files": "."}}
 {"tool": "git_commit", "arguments": {"message": "feat: add feature"}}
-\`\`\``;
+\`\`\`
+
+### Recovering a lost file
+Restore from git, never retype contents.
+1. Uncommitted delete (" D <path>" in \`git status\`): \`git checkout HEAD -- <path>\` (\`git restore\` may be denied).
+2. Committed delete: if \`test -e <path>\` succeeds, stop and tell the user, never overwrite. Else the first \`git log --diff-filter=D --oneline -- <path>\` hit <sha> is the deleting commit; run \`git checkout <sha>^ -- <path>\`.
+3. \`git diff <sha>^ -- <path>\` (or HEAD) must print nothing.`;
 
 export const ERROR_RECOVERY_SEGMENT = `## ERROR RECOVERY
 
@@ -393,6 +533,7 @@ When creating UI components, pages, or any visual interface:
 3. Apply the recommended design system consistently across all UI files
 4. Available query outputs: 'summary' (default), 'css' (CSS variables), 'tailwind' (Tailwind config), 'hex' (hex palette)
 5. If the project already has a design system, query it to stay consistent
+6. A Marp deck with no theme: call \`deck_theme\` with action \`list\`, then \`apply\` (or \`mix\`) so it renders designed
 
 Excellent design is the default, not an afterthought.`;
 
@@ -492,6 +633,12 @@ Write like a sharp teammate, not a text generator. Minimum formatting for clarit
 3. Never bullet a refusal or bad news; prose reads as considered, not clinical.
 4. Never write an em dash or an en dash. Use a comma, a colon, a hyphen or a new sentence. No enthusiasm inflation. Say what works, what does not, and what is unverified.`;
 
+export const REVIEW_DISCIPLINE_SEGMENT = `## WHEN ASKED TO REVIEW CODE
+
+Report only findings that matter: bugs, regressions, security or data-loss risks, broken contracts. Cap it at what you can defend; one real finding beats five weak ones.
+Cite the line number in the changed file as it reads after the change, never a diff row or hunk offset.
+Leave out nice-to-have padding: style nits, renames, speculative refactors, praise and restating the diff. If nothing matters, say so in one sentence.`;
+
 export const RULES_SEGMENT = `## CRITICAL RULES
 
 1. ALWAYS plan first for multi-step tasks
@@ -537,6 +684,7 @@ export function getFullSystemPrompt(): string {
 		ERROR_RECOVERY_SEGMENT,
 		COMPLETION_SEGMENT,
 		COMMUNICATION_SEGMENT,
+		REVIEW_DISCIPLINE_SEGMENT,
 		TRUTH_SEGMENT,
 		SOVEREIGNTY_SEGMENT,
 		DELEGATION_SEGMENT,
@@ -574,6 +722,7 @@ export function buildTieredSystemPrompt(tier: AccessTier, userContext?: UserCont
 		GITHUB_AUTH_SEGMENT,
 		COMPLETION_SEGMENT,
 		COMMUNICATION_SEGMENT,
+		REVIEW_DISCIPLINE_SEGMENT,
 		TRUTH_SEGMENT,
 		SOVEREIGNTY_SEGMENT,
 		DELEGATION_SEGMENT,

@@ -276,12 +276,12 @@ function AgentStatusItem({ running, total }: { running: number; total: number })
 			{running > 0 ? (
 				<AppText color="magenta">
 					{" "}
-					{running}/{total} agents
+					{running}/{total} 8gents
 				</AppText>
 			) : (
 				<MutedText>
 					{" "}
-					{running}/{total} agents
+					{running}/{total} 8gents
 				</MutedText>
 			)}
 		</Inline>

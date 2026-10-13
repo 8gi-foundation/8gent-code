@@ -32,6 +32,24 @@ export function providerConfigForStep(session: ProviderConfig, step: FailoverSte
 }
 
 /**
+ * Whether a turn may move from `from` to `to` (#3746). A pinned provider (the
+ * user named it) only ever moves within itself; an un-pinned session follows
+ * the adaptive router wherever it goes.
+ */
+export function mayMoveToProvider(pinned: boolean | undefined, from: string, to: string): boolean {
+	return !pinned || from === to;
+}
+
+/** The turn's error when a pinned provider failed and nothing else was tried (#3746). */
+export function pinnedProviderError(provider: string, model: string, error: string): Error {
+	return new Error(
+		`${provider}/${model} failed: ${error}\n` +
+			`The provider was chosen explicitly, so no other provider was tried. ` +
+			`Check that ${provider} is running and serves "${model}", or run without --provider to let 8gent pick one.`,
+	);
+}
+
+/**
  * The apiKey a host should put on an AgentConfig for `runtime` (#3261).
  *
  * AgentConfig.apiKey is the session provider's own key: the native path sends

@@ -10,7 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import { getHookManager } from "../hooks";
-import { getMCPClient } from "../mcp";
+import { clean, getMCPClient } from "../mcp";
 import { formatAgentStatus, getAgentPool, parseSpawnCommand } from "../orchestration";
 import { getPermissionManager } from "../permissions";
 import { type RunLogEntry, readRuns } from "../reporting/runlog";
@@ -281,12 +281,12 @@ function printHelp(): void {
   /skills             - List available skills
   /<skill> [args]     - Invoke a skill (e.g., /commit "feat: add feature")
 
-\x1b[33mMulti-Agent:\x1b[0m
-  /spawn <task>       - Spawn background agent for task
-  /agents             - List running agents
-  /agent <id>         - Get status and evidence for specific agent
-  /join <id>          - Wait for agent to complete
-  /kill <id>          - Terminate an agent
+\x1b[33mMulti-8gent:\x1b[0m
+  /spawn <task>       - Spawn background 8gent for task
+  /agents             - List running 8gents
+  /agent <id>         - Get status and evidence for specific 8gent
+  /join <id>          - Wait for 8gent to complete
+  /kill <id>          - Terminate an 8gent
   /evidence           - Show all collected evidence for current task
 
 \x1b[33mTasks:\x1b[0m
@@ -762,7 +762,7 @@ function handleMCPCommands(trimmed: string): boolean {
 			console.log("\x1b[36mMCP Tools:\x1b[0m");
 			for (const { server, tool } of tools) {
 				console.log(
-					`  [\x1b[33m${server}\x1b[0m] ${tool.name}: ${tool.description || "No description"}`,
+					`  [\x1b[33m${clean(server, 80, true)}\x1b[0m] ${clean(tool.name, 120, true)}: ${clean(tool.description || "No description", 2000, true)}`,
 				);
 			}
 		}
@@ -1227,14 +1227,14 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 		try {
 			const pool = getAgentPool();
 			const spawnedAgent = await pool.spawnAgent(parsed.task, parsed.options);
-			console.log(`\n\x1b[32mSpawned agent:\x1b[0m ${spawnedAgent.id}`);
+			console.log(`\n\x1b[32mSpawned 8gent:\x1b[0m ${spawnedAgent.id}`);
 			console.log(`  Task: ${parsed.task}`);
 			console.log(`  Model: ${spawnedAgent.config.model}`);
 			console.log(
 				`\nUse /agents to check status, /join ${spawnedAgent.id} to wait for completion.`,
 			);
 		} catch (err) {
-			console.error(`\x1b[31mFailed to spawn agent: ${err}\x1b[0m`);
+			console.error(`\x1b[31mFailed to spawn 8gent: ${err}\x1b[0m`);
 		}
 		return true;
 	}
@@ -1244,13 +1244,13 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 		const agents = pool.listAgents();
 		const stats = pool.getStats();
 
-		console.log("\n\x1b[36mAgent Pool:\x1b[0m");
+		console.log("\n\x1b[36m8gent Pool:\x1b[0m");
 		console.log(
 			`  Running: ${stats.running}/${pool.getMaxConcurrent()} | Completed: ${stats.completed} | Failed: ${stats.failed}\n`,
 		);
 
 		if (agents.length === 0) {
-			console.log("  No agents. Use /spawn <task> to create one.");
+			console.log("  No 8gents. Use /spawn <task> to create one.");
 		} else {
 			for (const spawnedAgent of agents) {
 				console.log(`  ${formatAgentStatus(spawnedAgent)}`);
@@ -1265,12 +1265,12 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 
 		const spawnedAgent = pool.getAgent(agentId);
 		if (!spawnedAgent) {
-			console.log(`\x1b[31mAgent not found: ${agentId}\x1b[0m`);
+			console.log(`\x1b[31m8gent not found: ${agentId}\x1b[0m`);
 			return true;
 		}
 
 		if (spawnedAgent.status === "completed" || spawnedAgent.status === "failed") {
-			console.log(`\n\x1b[36mAgent ${agentId}:\x1b[0m ${spawnedAgent.status}`);
+			console.log(`\n\x1b[36m8gent ${agentId}:\x1b[0m ${spawnedAgent.status}`);
 			if (spawnedAgent.task.result) {
 				console.log(`\x1b[32mResult:\x1b[0m ${String(spawnedAgent.task.result).slice(0, 500)}`);
 			}
@@ -1278,15 +1278,15 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 				console.log(`\x1b[31mError:\x1b[0m ${spawnedAgent.task.error}`);
 			}
 		} else {
-			console.log(`\x1b[33mWaiting for agent ${agentId} to complete...\x1b[0m`);
+			console.log(`\x1b[33mWaiting for 8gent ${agentId} to complete...\x1b[0m`);
 			try {
 				const result = await pool.joinAgent(agentId, 300000);
-				console.log("\n\x1b[32mAgent completed:\x1b[0m");
+				console.log("\n\x1b[32m8gent completed:\x1b[0m");
 				if (result.task.result) {
 					console.log(String(result.task.result).slice(0, 500));
 				}
 			} catch (err) {
-				console.error(`\x1b[31mError waiting for agent: ${err}\x1b[0m`);
+				console.error(`\x1b[31mError waiting for 8gent: ${err}\x1b[0m`);
 			}
 		}
 		return true;
@@ -1298,10 +1298,10 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 
 		const killed = pool.cancelAgent(agentId);
 		if (killed) {
-			console.log(`\n\x1b[32mAgent killed:\x1b[0m ${agentId}`);
+			console.log(`\n\x1b[32m8gent killed:\x1b[0m ${agentId}`);
 		} else {
 			console.log(
-				`\x1b[31mCould not kill agent ${agentId} (not found or already completed)\x1b[0m`,
+				`\x1b[31mCould not kill 8gent ${agentId} (not found or already completed)\x1b[0m`,
 			);
 		}
 		return true;
@@ -1318,9 +1318,9 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 			const subAgent = subAgentMgr.getStatus(agentId);
 
 			if (!subAgent) {
-				console.log(`\x1b[31mSubagent not found: ${agentId}\x1b[0m`);
+				console.log(`\x1b[31mChild 8gent not found: ${agentId}\x1b[0m`);
 			} else {
-				console.log("\n\x1b[36mSubagent Details:\x1b[0m");
+				console.log("\n\x1b[36mChild 8gent Details:\x1b[0m");
 				console.log(`  ${formatSubAgentStatus(subAgent)}`);
 				console.log(`\n  Task: ${subAgent.task}`);
 				console.log(`  Status: ${subAgent.status}`);
@@ -1363,7 +1363,7 @@ async function handleAgentCommands(trimmed: string): Promise<boolean> {
 
 			if (totalEvidence.length === 0) {
 				console.log("  No evidence collected yet.");
-				console.log("  Evidence is collected when subagents execute tasks.");
+				console.log("  Evidence is collected when child 8gents execute tasks.");
 			} else {
 				const summary = summarizeEvidence(totalEvidence);
 				console.log(

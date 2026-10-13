@@ -12,6 +12,7 @@
  *   bun run scripts/utility-factory.ts --dry-run
  */
 
+import { safeBunFlags } from "../packages/core/bun-flags";
 import { execSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -485,7 +486,7 @@ async function main() {
 			fs.writeFileSync(tmpValidatePath, code, "utf-8");
 			try {
 				execSync(
-					`bun build "${tmpValidatePath}" --no-bundle --outdir /tmp/.8gent-factory-out 2>&1`,
+					`bun ${safeBunFlags().map((f) => JSON.stringify(f)).join(" ")} build "${tmpValidatePath}" --no-bundle --outdir /tmp/.8gent-factory-out 2>&1`,
 					{
 						encoding: "utf-8",
 						timeout: 15000,

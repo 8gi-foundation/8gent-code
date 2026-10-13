@@ -58,13 +58,220 @@ export interface FailoverEvent {
 	reason: string;
 }
 
+/**
+ * Thrown by `resolve()` when a provider allowlist is set and no allowed
+ * provider can serve the model. Fail closed: never a silent cloud default.
+ */
+export class NoAllowedProviderError extends Error {
+	constructor(
+		readonly model: string,
+		readonly channel: FailoverChannel,
+		readonly allowed: readonly string[],
+		hostedBlocked = false,
+		/** Why a provider the chain named was dropped, e.g. a hosted apfel; host only. */
+		note: string | null = null,
+	) {
+		super(
+			(hostedBlocked
+				? `No local provider for model "${model}" (${channel} channel). Hosted providers need EIGHT_ALLOW_HOSTED=1.`
+				: `No allowed provider for model "${model}" (${channel} channel). EIGHT_PROVIDERS_ALLOW=${allowed.join(",")}`) +
+				(note ? ` ${note}` : ""),
+		);
+		this.name = "NoAllowedProviderError";
+	}
+}
+
+/**
+ * Providers whose inference runs on this machine (or on a box the user points a
+ * local runtime at). Everything else is hosted.
+ */
+export const LOCAL_FAILOVER_PROVIDERS: readonly string[] = [
+	"8gent",
+	"ollama",
+	"lmstudio",
+	"llama-server",
+	"apfel",
+	"apple-foundation",
+];
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * apfel is a generic OpenAI-compatible slot: APFEL_BASE_URL can point at a
+ * hosted API (a launcher once pointed it at MiniMax). It only counts as local
+ * while its base URL is unset (the loopback default) or has a loopback host (#3908).
+ *
+ * Deliberately narrow, failing closed:
+ * - Only localhost, 127.0.0.1 and ::1 are local. Other 127.0.0.0/8 addresses,
+ *   ::ffff:127.0.0.1, LAN and tailnet boxes count as hosted and need
+ *   EIGHT_ALLOW_HOSTED=1.
+ * - "localhost" is trusted by name, so a tampered hosts file defeats it.
+ * - This reads the env at call time while the apfel client captures its base
+ *   URL at import: set APFEL_BASE_URL before start and never change it at runtime.
+ * - Any new code path that picks a provider must go through isHostedProvider
+ *   (today: ModelFailover and the spawn_agent child gate in orchestration).
+ */
+function apfelIsLocal(env: Record<string, string | undefined>): boolean {
+	return apfelHost(env) === null;
+}
+
+/**
+ * The host of a non-local APFEL_BASE_URL, for messages, or null when apfel is
+ * local. Host only, never the full URL, which can carry a key.
+ */
+export function apfelHost(env: Record<string, string | undefined> = process.env): string | null {
+	const base = env.APFEL_BASE_URL?.trim();
+	if (!base) return null;
+	try {
+		const host = new URL(base).hostname.toLowerCase();
+		return LOOPBACK_HOSTS.has(host) ? null : host;
+	} catch {
+		return "(unparsable URL)";
+	}
+}
+
+/** Lines already printed, so a process that builds many chains says it once. */
+const warned = new Set<string>();
+
+/** True when `provider` is not a local runtime: using it sends work off the machine. */
+export function isHostedProvider(
+	provider: string,
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	const p = provider.trim().toLowerCase();
+	if (p === "apfel") return !apfelIsLocal(env);
+	return !LOCAL_FAILOVER_PROVIDERS.includes(p);
+}
+
+/**
+ * Hosted providers are opt-in (#3710): only EIGHT_ALLOW_HOSTED=1 lets a chain,
+ * a child agent or a model lookup use or contact one.
+ */
+export function hostedAllowed(env: Record<string, string | undefined> = process.env): boolean {
+	return env.EIGHT_ALLOW_HOSTED?.trim() === "1";
+}
+
+/** EIGHT_PROVIDERS_ALLOW as a lowercase list; null when unset or empty (no filtering). */
+function allowFromEnv(): string[] | null {
+	const list = (process.env.EIGHT_PROVIDERS_ALLOW ?? "")
+		.split(",")
+		.map((p) => p.trim().toLowerCase())
+		.filter(Boolean);
+	return list.length > 0 ? list : null;
+}
+
+export interface ModelFailoverOptions {
+	/**
+	 * Providers chains may use. Defaults to EIGHT_PROVIDERS_ALLOW; null or absent
+	 * means all. An empty array allows nothing, so every resolve() throws.
+	 */
+	allow?: readonly string[] | null;
+	/**
+	 * Whether chains may use hosted providers. Defaults to EIGHT_ALLOW_HOSTED=1.
+	 * Without it, hosted entries are dropped and a model with no chain throws
+	 * NoAllowedProviderError instead of going to openrouter (#3710).
+	 */
+	allowHosted?: boolean;
+}
+
 export class ModelFailover {
 	private chainsByChannel: Record<FailoverChannel, Record<string, FailoverChain>>;
 	private down: Set<string> = new Set();
 	private events: FailoverEvent[] = [];
+	private allow: string[] | null;
+	/** True when hosted providers were filtered out because there is no opt-in. */
+	private hostedBlocked: boolean;
+	/** Set when a hosted apfel entry was filtered out; host only. */
+	private apfelSkipped: string | null = null;
+	/** channel + model of every chain that lost a hosted apfel entry. */
+	private apfelChains = new Set<string>();
 
-	constructor(chains?: Record<FailoverChannel, Record<string, FailoverChain>>) {
-		this.chainsByChannel = chains || this.loadChains();
+	constructor(
+		chains?: Record<FailoverChannel, Record<string, FailoverChain>>,
+		opts: ModelFailoverOptions = {},
+	) {
+		const explicit =
+			opts.allow === undefined
+				? allowFromEnv()
+				: (opts.allow?.map((p) => p.trim().toLowerCase()) ?? null);
+		this.hostedBlocked = !(opts.allowHosted ?? hostedAllowed());
+		// No opt-in: the allowlist is the local providers (narrowed further by an explicit one).
+		this.allow = this.hostedBlocked
+			? (explicit ?? [...LOCAL_FAILOVER_PROVIDERS]).filter((p) => !isHostedProvider(p))
+			: explicit;
+		const loaded = chains || this.loadChains();
+		this.chainsByChannel = this.allow ? this.filterChains(loaded, this.allow) : loaded;
+		this.noteSkippedApfel(loaded);
+	}
+
+	/** Why apfel was dropped from these chains, or null when it was not. */
+	get skippedNote(): string | null {
+		return this.apfelSkipped;
+	}
+
+	/**
+	 * Say once, out loud, when a hosted apfel entry is filtered out, so nobody
+	 * believes they are on the hosted model while a local one answers.
+	 */
+	private noteSkippedApfel(loaded: Record<FailoverChannel, Record<string, FailoverChain>>): void {
+		if (!this.hostedBlocked) return;
+		const host = apfelHost();
+		if (host === null) return;
+		for (const [channel, byModel] of Object.entries(loaded)) {
+			for (const [model, c] of Object.entries(byModel ?? {})) {
+				const models = Array.isArray(c?.models) ? c.models : [];
+				if (
+					models.some(
+						(e) => typeof e?.provider === "string" && e.provider.toLowerCase() === "apfel",
+					)
+				)
+					this.apfelChains.add(`${channel}\0${model}`);
+			}
+		}
+		if (this.apfelChains.size === 0) return;
+		this.apfelSkipped = `apfel skipped: APFEL_BASE_URL host ${host} is not local; set EIGHT_ALLOW_HOSTED=1 to allow.`;
+		if (!warned.has(this.apfelSkipped)) {
+			warned.add(this.apfelSkipped);
+			console.warn(`[failover] ${this.apfelSkipped}`);
+		}
+	}
+
+	/**
+	 * Copy of `chains` keeping only entries whose provider is allowed. Malformed
+	 * chains (non-array `models`) and entries (non-string `provider`) from a
+	 * hand-edited failover.json are dropped, never thrown on: the chain empties
+	 * and resolve() fails closed with NoAllowedProviderError.
+	 */
+	private filterChains(
+		chains: Record<FailoverChannel, Record<string, FailoverChain>>,
+		allow: string[],
+	): Record<FailoverChannel, Record<string, FailoverChain>> {
+		const out = { text: {}, computer: {} } as Record<
+			FailoverChannel,
+			Record<string, FailoverChain>
+		>;
+		for (const channel of Object.keys(chains) as FailoverChannel[]) {
+			out[channel] = {};
+			const byModel = chains[channel];
+			if (!byModel || typeof byModel !== "object") continue;
+			for (const [model, chain] of Object.entries(byModel)) {
+				const models = Array.isArray(chain?.models) ? chain.models : [];
+				out[channel][model] = {
+					models: models.filter(
+						(e) => typeof e?.provider === "string" && allow.includes(e.provider.toLowerCase()),
+					),
+				};
+			}
+		}
+		return out;
+	}
+
+	/** The built-in chains, ignoring ~/.8gent/failover.json. */
+	static defaultChains(): Record<FailoverChannel, Record<string, FailoverChain>> {
+		return {
+			text: ModelFailover.defaultTextChains(),
+			computer: ModelFailover.defaultComputerChains(),
+		};
 	}
 
 	private loadChains(): Record<FailoverChannel, Record<string, FailoverChain>> {
@@ -75,24 +282,21 @@ export class ModelFailover {
 				// Back-compat: if the file is the old flat shape (no `text`/`computer`
 				// top-level keys), treat the whole thing as the text channel.
 				if (raw && typeof raw === "object" && !raw.text && !raw.computer) {
-					return { text: raw, computer: this.defaultComputerChains() };
+					return { text: raw, computer: ModelFailover.defaultComputerChains() };
 				}
 				return {
-					text: raw.text || this.defaultTextChains(),
-					computer: raw.computer || this.defaultComputerChains(),
+					text: raw.text || ModelFailover.defaultTextChains(),
+					computer: raw.computer || ModelFailover.defaultComputerChains(),
 				};
 			}
 		} catch {
 			// Fall through to defaults.
 		}
 
-		return {
-			text: this.defaultTextChains(),
-			computer: this.defaultComputerChains(),
-		};
+		return ModelFailover.defaultChains();
 	}
 
-	private defaultTextChains(): Record<string, FailoverChain> {
+	private static defaultTextChains(): Record<string, FailoverChain> {
 		const preferAppleFoundation = appleFoundationAvailable();
 		const prefix: FailoverEntry[] = preferAppleFoundation ? [APPLE_FOUNDATION_ENTRY] : [];
 
@@ -172,7 +376,7 @@ export class ModelFailover {
 	 * `vision-router.ts`. If apfel is asked for a vision prompt, it will throw
 	 * and the chain falls through to Qwen.
 	 */
-	private defaultComputerChains(): Record<string, FailoverChain> {
+	private static defaultComputerChains(): Record<string, FailoverChain> {
 		const computerChain: FailoverEntry[] = [
 			APFEL_ENTRY,
 			{ model: "qwen3.6:27b", provider: "ollama" },
@@ -204,13 +408,27 @@ export class ModelFailover {
 	 * Return the first healthy model in the chain for the given channel.
 	 * Defaults to the `text` channel for back-compat with existing callers.
 	 *
-	 * When no chain is registered for a model, fall back to the free cloud
-	 * tier rather than assuming ollama is installed — Windows / fresh
-	 * installs frequently lack it and "ollama is the universal fallback"
-	 * is what made the model crash on first launch.
+	 * Hosted providers are opt-in (EIGHT_ALLOW_HOSTED=1). Without it, chains
+	 * hold only local providers and a model with no chain throws
+	 * NoAllowedProviderError. With it, a model with no chain is retried on
+	 * openrouter, the free cloud tier.
+	 *
+	 * With an allowlist (EIGHT_PROVIDERS_ALLOW) chains hold only allowed
+	 * providers, and when nothing allowed can serve the model this throws
+	 * NoAllowedProviderError instead of defaulting to openrouter.
 	 */
 	resolve(model: string, channel: FailoverChannel = "text"): FailoverEntry {
 		const chain = this.chainsByChannel[channel]?.[model];
+		if (this.allow && (chain ? chain.models.length === 0 : !this.allow.includes("openrouter"))) {
+			const droppedApfel = this.apfelChains.has(`${channel}\0${model}`) ? this.apfelSkipped : null;
+			throw new NoAllowedProviderError(
+				model,
+				channel,
+				this.allow,
+				this.hostedBlocked,
+				droppedApfel,
+			);
+		}
 		if (!chain) return { model, provider: "openrouter" };
 
 		const head = chain.models[0];

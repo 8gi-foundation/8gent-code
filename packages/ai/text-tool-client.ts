@@ -23,6 +23,12 @@ import {
 export type TextToolMessage = {
 	role: "system" | "user" | "assistant" | "tool";
 	content: string;
+	/**
+	 * Images the model should see with this message, as data URLs (#3641). Set
+	 * only when the model is vision-capable; the endpoint sends them in the
+	 * provider's native image field and `content` stays the plain text.
+	 */
+	images?: string[];
 };
 
 export type TextToolTurn = {

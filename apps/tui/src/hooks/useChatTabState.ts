@@ -467,7 +467,7 @@ export function useChatTabState(
 				const notReadyMsg: Message = {
 					id: `system-${Date.now()}`,
 					role: "system",
-					content: "Agent not ready. Check your provider connection.",
+					content: "8gent not ready. Check your provider connection.",
 					timestamp: new Date(),
 				};
 				e.state.messages = [...e.state.messages, notReadyMsg];

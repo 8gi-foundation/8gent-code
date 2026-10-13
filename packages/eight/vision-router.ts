@@ -52,6 +52,17 @@ const VISION_MODELS_WITH_OCR = ["qwen2.5-vl", "minicpm-v", "internvl2", "llama3.
 
 export type VisionTaskType = "general" | "ocr";
 
+/** Compare model families ignoring case and separators: Ollama tags it
+ *  "qwen2.5vl", our lists say "qwen2.5-vl" (#3715). */
+function squash(name: string): string {
+	return name.toLowerCase().replace(/[-_\s]/g, "");
+}
+
+function familyMatches(name: string, markers: readonly string[]): boolean {
+	const n = squash(name);
+	return markers.some((v) => n.includes(squash(v)));
+}
+
 /**
  * User-configurable vision settings from .8gent/config.json
  */
@@ -156,16 +167,16 @@ async function checkOllamaModel(baseUrl: string, modelName: string): Promise<Vis
 
 		const data = await res.json();
 		const models = (data.models || []) as Array<{ name: string }>;
-		const baseName = modelName.split(":")[0].toLowerCase();
+		const baseName = squash(modelName.split(":")[0]);
 
 		const match = models.find((m) => {
 			const name = m.name.toLowerCase();
-			return name === modelName.toLowerCase() || name.split(":")[0] === baseName;
+			return name === modelName.toLowerCase() || squash(name.split(":")[0]) === baseName;
 		});
 
 		if (!match) return null;
 
-		const isOcr = OLLAMA_OCR_MODELS.some((v) => baseName.includes(v));
+		const isOcr = familyMatches(baseName, OLLAMA_OCR_MODELS);
 		return {
 			provider: "ollama",
 			model: match.name,
@@ -197,7 +208,7 @@ async function checkOllamaVision(baseUrl = "http://localhost:11434"): Promise<Vi
 			const name = m.name.toLowerCase().split(":")[0];
 
 			// Check OCR-specialized models first
-			const isOcr = OLLAMA_OCR_MODELS.some((v) => name.includes(v));
+			const isOcr = familyMatches(name, OLLAMA_OCR_MODELS);
 			if (isOcr) {
 				results.push({
 					provider: "ollama",
@@ -210,7 +221,7 @@ async function checkOllamaVision(baseUrl = "http://localhost:11434"): Promise<Vi
 			}
 
 			// Check general vision models
-			const isVision = OLLAMA_VISION_MODELS.some((v) => name.includes(v));
+			const isVision = familyMatches(name, OLLAMA_VISION_MODELS);
 			if (isVision) {
 				results.push({
 					provider: "ollama",
@@ -435,7 +446,7 @@ function pickBestModel(models: VisionModel[], taskType: VisionTaskType): VisionM
 		// Second: general vision models known to have strong OCR
 		const strongOcr = models.filter((m) => {
 			const name = m.model.toLowerCase().split(":")[0];
-			return VISION_MODELS_WITH_OCR.some((v) => name.includes(v));
+			return familyMatches(name, VISION_MODELS_WITH_OCR);
 		});
 		if (strongOcr.length > 0) return strongOcr[0];
 
@@ -469,9 +480,7 @@ export async function hasVisionSupport(options?: {
 export function isKnownVisionModel(modelId: string): boolean {
 	const lower = modelId.toLowerCase();
 	// Local vision families
-	for (const marker of [...OLLAMA_VISION_MODELS, ...OLLAMA_OCR_MODELS]) {
-		if (lower.includes(marker.toLowerCase())) return true;
-	}
+	if (familyMatches(lower, [...OLLAMA_VISION_MODELS, ...OLLAMA_OCR_MODELS])) return true;
 	// Cloud vision families
 	const cloudMarkers = ["claude", "gpt-4o", "gpt-4.1", "gpt-5", "gemini", "pixtral", "llava", "vision"];
 	return cloudMarkers.some((m) => lower.includes(m));

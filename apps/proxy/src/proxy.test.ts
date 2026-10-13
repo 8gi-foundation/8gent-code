@@ -44,6 +44,39 @@ describe("openai request mapping", () => {
 		expect(req.messages[0].content).toBe("ab");
 	});
 
+	test("keeps assistant tool_calls and the tool reply id (#3547)", () => {
+		const req = toChatRequest({
+			messages: [
+				{ role: "user", content: "weather?" },
+				{
+					role: "assistant",
+					content: null,
+					tool_calls: [
+						{ id: "call_1", type: "function", function: { name: "get_weather", arguments: '{"city":"Dublin"}' } },
+					],
+				},
+				{ role: "tool", content: "12C", tool_call_id: "call_1" },
+			],
+		});
+		expect(req.messages[1].content).toBe("");
+		expect(req.messages[1].toolCalls).toEqual([
+			{ id: "call_1", name: "get_weather", arguments: { city: "Dublin" } },
+		]);
+		expect(req.messages[2].toolCallId).toBe("call_1");
+	});
+
+	test("malformed tool_call arguments become an empty object, not a crash", () => {
+		const req = toChatRequest({
+			messages: [
+				{
+					role: "assistant",
+					tool_calls: [{ id: "c", function: { name: "f", arguments: "{not json" } }],
+				},
+			],
+		});
+		expect(req.messages[0].toolCalls).toEqual([{ id: "c", name: "f", arguments: {} }]);
+	});
+
 	test("unknown roles fall back to user", () => {
 		const req = toChatRequest({ messages: [{ role: "developer", content: "x" }] });
 		expect(req.messages[0].role).toBe("user");

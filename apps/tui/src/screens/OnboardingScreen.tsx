@@ -151,7 +151,7 @@ function useDigitShortcut(
  * provider isn't live (so the user has guidance), AND the probe finished.
  * While loading, no hint. On error, show hint as a safe default.
  */
-function shouldShowInstallHint(
+export function shouldShowInstallHint(
 	provider: OnboardingProviderId,
 	probe: ProviderProbeState,
 ): boolean {

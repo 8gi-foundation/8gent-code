@@ -45,7 +45,7 @@ export interface BashGateAudit {
 	parserError?: string;
 }
 
-type BashGateFn = (command: string, agentId?: string) => BashGateResult;
+type BashGateFn = (command: string, agentId?: string, cwd?: string) => BashGateResult;
 
 /** Cap the number of capabilities written per audit entry to keep JSONL lean. */
 const AUDIT_MAX_CAPABILITIES = 50;
@@ -122,7 +122,11 @@ export class ToolG8 {
 			typeof context.command === "string" &&
 			context.command.trim().length > 0
 		) {
-			bash = this.gateBashSegments(context.command, agentId);
+			bash = this.gateBashSegments(
+				context.command,
+				agentId,
+				typeof context.cwd === "string" ? context.cwd : undefined,
+			);
 		}
 
 		const allowed = decision.allowed && !bash?.denied;
@@ -160,9 +164,9 @@ export class ToolG8 {
 	 * never grant MORE access than the legacy check, and it is never silent
 	 * (the parserError lands in the audit JSONL).
 	 */
-	private gateBashSegments(command: string, agentId: string): BashGateAudit {
+	private gateBashSegments(command: string, agentId: string, cwd?: string): BashGateAudit {
 		try {
-			const { decision, capabilities } = this.bashGateFn(command, agentId);
+			const { decision, capabilities } = this.bashGateFn(command, agentId, cwd);
 			return {
 				denied: !decision.allowed,
 				reason: !decision.allowed && "reason" in decision ? decision.reason : undefined,

@@ -64,6 +64,12 @@ export class OpenRouterClient implements LLMClient {
 
 	/** Raw cloud dispatch. Callers must pass already-gated (pseudonymized) messages. */
 	private async chatRaw(messages: Message[], tools?: object[]): Promise<LLMResponse> {
+		// A hosted endpoint with no key gets no request at all (#3746).
+		if (this.hostedWithoutKey()) {
+			throw new Error(
+				"No API key for openrouter, so nothing was sent to the hosted endpoint. Set OPENROUTER_API_KEY to use it, or pick a local provider.",
+			);
+		}
 		const body: Record<string, unknown> = {
 			model: this.model,
 			messages: messages.map((m) => ({
@@ -122,7 +128,13 @@ export class OpenRouterClient implements LLMClient {
 		return response.message.content;
 	}
 
+	/** True when this client points at a hosted endpoint and has no key (#3746). */
+	private hostedWithoutKey(): boolean {
+		return !this.apiKey?.trim() && isCloudProvider({ baseUrl: this.baseUrl });
+	}
+
 	async isAvailable(): Promise<boolean> {
+		if (this.hostedWithoutKey()) return false;
 		try {
 			const response = await fetch(`${this.baseUrl}/models`, {
 				headers: {

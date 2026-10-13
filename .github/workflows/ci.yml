@@ -21,12 +21,24 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
+
+      # #4143: bun runs native install scripts via `bunx node-gyp@latest` when no
+      # node-gyp is on PATH, and parallel installs race on that download (the
+      # same race .github/docker/linux-ci/Dockerfile pins node-gyp to avoid).
+      # ubuntu-latest already ships python3, make and g++, so no apt step.
+      - name: "Pin node-gyp for native builds"
+        run: npm install -g --no-fund --no-audit node-gyp@12.4.0 && node-gyp --version
 
       - name: Install dependencies
         run: bun install
+
+      # node-pty is optional and its build fails quietly, so a missing module
+      # used to surface as five pty-session failures ("Received: 66").
+      - name: "Preflight native deps (node-pty)"
+        run: bun run preflight:native
 
       - name: Check for merge conflict markers
         run: |
@@ -43,8 +55,41 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      # #4135: apps/tui/tsconfig.json narrows include to the TUI's src, so it is
+      # its own typecheck scope. It was run by no workflow and sat red on main.
+      - name: "Type check (TUI scope)"
+        run: bun run typecheck:tui
+
+      # #4135: tsconfig.harness.json covers bin/8gent.ts, the binary users run.
+      # It was run by no workflow and hid six errors, two of them live bugs.
+      - name: "Type check: harness (bin/8gent.ts, tsconfig.harness.json)"
+        run: bun run check:harness
+
       - name: Lint
         run: bun run lint
+
+      # #4135: biome check (lint, format, import order) and format:check were run
+      # by no workflow. main still carries 664 unformatted files and 272 unsorted
+      # import blocks, so these gate the files a change touches: new debt fails,
+      # old debt shrinks with every edit, and no repo-wide reformat has to land
+      # on top of the open PRs. The base is HEAD^1 on a pull request (the main
+      # tip the checked-out merge commit sits on, so a PR is never failed on
+      # files it did not touch after main moved), or the previous main tip on a
+      # push. A pure move of a legacy unformatted file (R100) fails at its new
+      # path by design: a mechanical move PR reformats what it moves. -z keeps
+      # non-ASCII and unusual paths intact (git would otherwise quote them and
+      # biome would skip them). The root package.json is excluded until the
+      # full-repo reformat (the follow-up to #4135) lands: release bumps and open
+      # PRs edit it, so a whole-file reformat would conflict with all of them.
+      - name: "Biome check (changed files)"
+        env:
+          BIOME_SINCE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: git diff -z --name-only --diff-filter=ACMR "$BIOME_SINCE"...HEAD -- . ':!package.json' | xargs -0 -r bunx biome check --no-errors-on-unmatched
+
+      - name: "Format check (changed files)"
+        env:
+          BIOME_SINCE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: git diff -z --name-only --diff-filter=ACMR "$BIOME_SINCE"...HEAD -- . ':!package.json' | xargs -0 -r bunx biome format --no-errors-on-unmatched
 
       # The locate tool shells out to ripgrep; ubuntu-latest does not ship it (#3287).
       # Without rg, locate degrades to a stated note, which its own tests cover.
@@ -53,6 +98,17 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      # compare_layout renders pages in a real Chrome (#4080). ubuntu-latest ships
+      # google-chrome; this step fails, not skips, if it is missing or cannot start,
+      # so the offline guarantees are proven on every run.
+      - name: compare_layout offline guarantees (real Chrome)
+        env:
+          EIGHT_REQUIRE_CHROME: "1"
+          EIGHT_CHROME_NO_SANDBOX: "1"
+        run: |
+          google-chrome --version
+          bun test packages/tools/__tests__/layout-compare.test.ts
 
       - name: Computer-use smoke (Phase 3)
         run: bun run packages/eight/scripts/computer-use-suite.ts
@@ -63,7 +119,7 @@ jobs:
       - name: Verify build output
         run: |
           test -f dist/cli.js || (echo "Build failed: dist/cli.js not found" && exit 1)
-          head -1 dist/cli.js | grep -q "#!/usr/bin/env bun" || (echo "Shebang missing" && exit 1)
+          head -1 dist/cli.js | grep -qxF "#!/usr/bin/env -S bun --no-env-file --config=/dev/null" || (echo "Safe shebang missing (#4013)" && exit 1)
           echo "Build OK: $(wc -c < dist/cli.js | tr -d ' ') bytes"
 
       # #3219: the npm tarball must install and run on a machine that is not
@@ -78,6 +134,30 @@ jobs:
           # Comma-separated owner names/emails the bundle must never contain.
           # Held in a repository secret, never in the repo.
           PACK_SMOKE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY }}
+
+      # #3326: release dry run. The same command release.yml runs on a tag, so
+      # a PR that would make the release ship without its tarball or checksums
+      # fails here, not on release day. Nothing is uploaded or published.
+      - name: Release guard selftest
+        run: bash scripts/release-guard.sh selftest
+
+      - name: Release dry run (npm tarball + SHA256SUMS)
+        run: |
+          rm -rf "$RUNNER_TEMP/release-assets"
+          COUNT="$(bash scripts/release-guard.sh pack "$RUNNER_TEMP/release-assets")"
+          VERSION="$(node -p "require('./package.json').version")"
+          cd "$RUNNER_TEMP/release-assets"
+          ls -la
+          test -s "8gi-foundation-8gent-code-${VERSION}.tgz" || { echo "::error::no npm tarball for ${VERSION}"; exit 1; }
+          sha256sum -c SHA256SUMS
+          [ "$COUNT" -ge 2 ] || { echo "::error::expected at least 2 release assets, staged ${COUNT}"; exit 1; }
+          echo "release dry run: ${COUNT} assets staged for v${VERSION}"
+
+      - name: "No workspace: specifier in manifests, bun.lock or the npm tarball"
+        run: bun scripts/lib/no-workspace-protocol.ts "$RUNNER_TEMP"/release-assets/*.tgz
+
+      - name: Lockfile is in sync with the manifests
+        run: bun install --frozen-lockfile
 
       - name: Verify version sync
         run: |
@@ -180,15 +260,17 @@ jobs:
             }
           "
 
-      - name: CHANGELOG entry required
+      # #3575: PRs do not edit CHANGELOG.md. The release step builds it from
+      # merged PR titles (scripts/changelog-release.ts), so parallel PRs stop
+      # conflicting on the same lines. Only release PRs should touch it.
+      - name: CHANGELOG.md is built at release
         if: github.event_name == 'pull_request'
         run: |
           CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..HEAD 2>/dev/null || git diff --name-only HEAD~1)
-          if echo "$CHANGED" | grep -q "CHANGELOG.md"; then
-            echo "CHANGELOG entry found - OK"
+          if echo "$CHANGED" | grep -qxF "CHANGELOG.md"; then
+            echo "::warning::This PR edits CHANGELOG.md. Unless it is a release PR, drop that change: the release step builds the changelog from merged PR titles (#3575)."
           else
-            echo "::error::PR must include a CHANGELOG.md entry"
-            exit 1
+            echo "No CHANGELOG.md edit - OK"
           fi
 
   smoke:
@@ -197,9 +279,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
       - name: Install dependencies
         run: bun install
       - name: CLI version check

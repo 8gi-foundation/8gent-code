@@ -11,12 +11,13 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resolveHome } from "../core/home.js";
+import { fileURLToPath } from "node:url";
 import { type DecisionGate, logToolDecision } from "@8gent/audit";
 import { parse as parseYaml } from "yaml";
+import { resolveHome } from "../core/home.js";
 import { type CapabilityRequest, enforceCapability } from "./capability-manifest.js";
 import { scrubGoalText } from "./goal-secret-scrub.js";
-import { validatePath } from "./path-guard.js";
+import { commandMutatesSessionRecords, commandTouchesAuditFiles, validatePath } from "./path-guard.js";
 import { hasSecret } from "./secret-detector.js";
 import { checkCommandBoundary, checkFilePathBoundary } from "./src/workspace-boundary.js";
 import type {
@@ -32,7 +33,7 @@ import type {
 // ============================================
 
 const DEFAULT_POLICY_PATH = path.join(
-	path.dirname(typeof __filename !== "undefined" ? __filename : new URL(import.meta.url).pathname),
+	path.dirname(typeof __filename !== "undefined" ? __filename : fileURLToPath(import.meta.url)),
 	"default-policies.yaml",
 );
 
@@ -485,15 +486,34 @@ function coppaGate(action: string, context: PolicyContext): PolicyDecision | nul
  */
 const PATH_GUARDED_ACTIONS = new Set<string>([
 	"read_file",
+	"render_page",
 	"write_file",
 	"delete_file",
 	"edit_file",
 	"apply_patch",
+	"notebook_edit_cell",
+	"notebook_insert_cell",
+	"notebook_delete_cell",
+	"read_notebook",
 	"glob",
 	"list_files",
 ]);
 
+/** Actions that only read: the session's own records stay readable for these. */
+const PATH_READ_ACTIONS = new Set<string>(["read_file", "read_notebook", "glob", "list_files"]);
+
 function pathGuardGate(action: string, context: PolicyContext): PolicyDecision | null {
+	// Shell commands cannot be path-checked; refuse ones that name agent audit files (#3735).
+	if (action === "run_command") {
+		const command = typeof context.command === "string" ? context.command : "";
+		if (command && commandTouchesAuditFiles(command)) {
+			return { allowed: false, reason: "[path-guard] protected audit file named in command" };
+		}
+		if (command && commandMutatesSessionRecords(command)) {
+			return { allowed: false, reason: "[path-guard] protected session record named in command" };
+		}
+		return null;
+	}
 	if (!PATH_GUARDED_ACTIONS.has(action)) return null;
 	const filePath = typeof context.path === "string" ? context.path : "";
 	if (!filePath) return null;
@@ -501,7 +521,7 @@ function pathGuardGate(action: string, context: PolicyContext): PolicyDecision |
 		(typeof context.workingDirectory === "string" && context.workingDirectory) ||
 		(typeof context.workspaceRoot === "string" && context.workspaceRoot) ||
 		process.cwd();
-	const result = validatePath(filePath, cwd);
+	const result = validatePath(filePath, cwd, {}, PATH_READ_ACTIONS.has(action) ? "read" : "write");
 	if (!result.ok) {
 		return { allowed: false, reason: `[path-guard] ${result.reason}: ${filePath}` };
 	}
@@ -511,6 +531,50 @@ function pathGuardGate(action: string, context: PolicyContext): PolicyDecision |
 // ============================================
 // Workspace boundary hard-deny (issue #2083)
 // ============================================
+
+/** Actions whose rules may match `resolved_path` (#3474). */
+const RESOLVED_PATH_ACTIONS = new Set<string>(["write_file", "delete_file"]);
+
+/** Where a write to `p` lands: `~/` expanded, resolved against `cwd`, symlinks followed (#3474). */
+export function resolvePolicyPath(p: string, cwd: string): string {
+	const home = process.env.HOME;
+	const expanded = home && (p === "~" || p.startsWith("~/")) ? path.join(home, p.slice(1)) : p;
+	let cur = path.resolve(cwd, expanded);
+	for (let hop = 0; hop < 8; hop++) {
+		try {
+			return fs.realpathSync(cur);
+		} catch {}
+		let full: string;
+		try {
+			full = path.join(fs.realpathSync(path.dirname(cur)), path.basename(cur));
+		} catch {
+			return cur;
+		}
+		let link: string;
+		try {
+			link = fs.readlinkSync(full);
+		} catch {
+			return full;
+		}
+		cur = path.resolve(path.dirname(full), link);
+	}
+	return cur;
+}
+
+/** Rules match where a write really lands too, not only the path as typed. */
+function withResolvedPath(action: string, context: PolicyContext): PolicyContext {
+	if (!RESOLVED_PATH_ACTIONS.has(action) || typeof context.path !== "string" || !context.path)
+		return context;
+	const cwd =
+		(typeof context.cwd === "string" && context.cwd) ||
+		(typeof context.workingDirectory === "string" && context.workingDirectory) ||
+		process.cwd();
+	// Rules match with forward slashes (`ends_with /.8gent/mcp.json`); a Windows path has backslashes.
+	return {
+		...context,
+		resolved_path: resolvePolicyPath(context.path, cwd).split(path.sep).join("/"),
+	};
+}
 
 /**
  * File-system actions whose `path` field must stay inside the workspace root.
@@ -637,6 +701,8 @@ const SHADOW_DENIED_ACTIONS = new Set<string>([
 	"mcp_call",
 	// A paired device can change the physical world (8DK, #3362).
 	"device_use",
+	// An extension tool runs whatever code its file holds (G1).
+	"extension_call",
 ]);
 
 /**
@@ -688,8 +754,9 @@ function shadowGate(action: string, context: PolicyContext): PolicyDecision | nu
  */
 export function evaluatePolicy(
 	action: PolicyActionType | string,
-	context: PolicyContext,
+	given: PolicyContext,
 ): PolicyDecision {
+	const context = withResolvedPath(action, given);
 	const guard = pathGuardGate(action, context);
 	if (guard) return guard;
 
@@ -808,9 +875,14 @@ export interface BashCapabilityLike {
 	path?: string;
 }
 
-export function evaluateCapabilities(caps: BashCapabilityLike[], agentId?: string): PolicyDecision {
+export function evaluateCapabilities(
+	caps: BashCapabilityLike[],
+	agentId?: string,
+	cwd?: string,
+): PolicyDecision {
 	for (const cap of caps) {
-		const ctx: PolicyContext = { agentId };
+		// cwd: what a redirect's relative path resolves against (#3474).
+		const ctx: PolicyContext = cwd ? { agentId, cwd } : { agentId };
 		if (cap.command !== undefined) ctx.command = cap.command;
 		if (cap.path !== undefined) ctx.path = cap.path;
 		const decision = evaluatePolicy(cap.kind, ctx);

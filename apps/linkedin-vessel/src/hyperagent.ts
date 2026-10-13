@@ -11,6 +11,7 @@
  */
 
 import { getCampaignStats, getDb, getTemplates, upsertTemplate } from "./campaign-db";
+import { isKilled } from "./policy";
 import type { MessageTemplate } from "./types";
 import { randomId } from "./utils";
 
@@ -228,6 +229,7 @@ export function startReflectionLoop(): void {
 	console.log("[hyperagent] Starting reflection loop (every 6h)");
 
 	reflectionTimer = setInterval(async () => {
+		if (isKilled()) return;
 		console.log("[hyperagent] Running reflection...");
 		const result = await reflect();
 		console.log(

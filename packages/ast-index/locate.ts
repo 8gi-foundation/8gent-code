@@ -32,7 +32,13 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Symbol } from "../types";
-import { getFileOutline, getFileTree, refreshIndexAsync, searchSymbols } from "./index";
+import {
+	getFileOutline,
+	getFileTree,
+	normalizeRelPath,
+	refreshIndexAsync,
+	searchSymbols,
+} from "./index";
 import { type ProseRouter, type ProseRouting, defaultProseRouter } from "./locate-system-one";
 import { type SemanticAnswer, semanticSearch } from "./semantic";
 
@@ -381,7 +387,7 @@ export function parseRgLines(out: string): GrepHit[] {
 	for (const raw of out.split("\n")) {
 		const m = /^([^\0]+)\0(\d+):(.*)$/.exec(raw);
 		if (!m) continue;
-		hits.push({ file: m[1].replace(/^\.\//, ""), line: Number(m[2]), text: m[3] });
+		hits.push({ file: normalizeRelPath(m[1]), line: Number(m[2]), text: m[3] });
 	}
 	return hits;
 }
@@ -584,10 +590,7 @@ async function listFiles(ctx: RunCtx): Promise<string[]> {
 		["--files", "--null", "--", "./"],
 		Number.POSITIVE_INFINITY,
 	);
-	const files = out.text
-		.split("\0")
-		.filter(Boolean)
-		.map((f) => f.replace(/^\.\//, ""));
+	const files = out.text.split("\0").filter(Boolean).map(normalizeRelPath);
 	if ((out.timedOut || files.length === 0) && ctx.repoId) {
 		const seen = new Set(files);
 		for (const f of getFileTree(ctx.repoId).map(toPosix)) if (!seen.has(f)) files.push(f);
@@ -712,7 +715,7 @@ function clip(text: string): string {
 }
 
 function toPosix(p: string): string {
-	return p.split(path.sep).join("/");
+	return normalizeRelPath(p.split(path.sep).join("/"));
 }
 
 function symbolRow(root: string, s: Symbol): LocateRow {
@@ -722,7 +725,7 @@ function symbolRow(root: string, s: Symbol): LocateRow {
 
 function fileSummary(root: string, repoId: string | null, rel: string): string {
 	if (repoId) {
-		const outline = getFileOutline(repoId, rel.split("/").join(path.sep));
+		const outline = getFileOutline(repoId, rel);
 		if (outline) {
 			const top = outline.symbols.filter((s) => s.id.split("::").length === 2).map((s) => s.name);
 			if (top.length) return `${top.length} symbols: ${top.slice(0, 6).join(", ")}`;

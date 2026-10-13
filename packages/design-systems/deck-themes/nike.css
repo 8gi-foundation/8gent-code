@@ -1,0 +1,75 @@
+/* @theme nike */
+@import 'default';
+
+section {
+  width: 1280px;
+  height: 720px;
+  padding: 72px 96px;
+  background: #f6f4ee;
+  color: #141414;
+  font-family: "Helvetica Neue", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  font-size: 28px;
+  line-height: 1.5;
+  letter-spacing: normal;
+  border-left: 14px solid #141414;
+}
+section h1, section h2, section h3, section h4 {
+  font-family: "Helvetica Neue", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  color: #141414;
+  line-height: 1.15;
+  margin: 0 0 0.5em;
+}
+section h1 { font-size: 60px; }
+section h2 { font-size: 44px; }
+section h3 { font-size: 32px; }
+section h4 { font-size: 28px; }
+section p, section li { margin: 0 0 0.45em; }
+section strong { color: #000000; }
+section a { color: #141414; }
+section ul, section ol { padding-left: 1.2em; }
+section li::marker { color: #141414; }
+section blockquote {
+  margin: 0.8em 0;
+  padding: 0.3em 1em;
+  background: #e5e2dc;
+  color: #141414;
+  border-left: 6px solid #ff851a;
+}
+section code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #e5e2dc;
+  color: #141414;
+  padding: 0.05em 0.35em;
+  border-radius: 6px;
+  font-size: 0.85em;
+}
+section pre { background: #faf8f5; border: 1px solid #e0dbd1; border-radius: 10px; padding: 0.7em 1em; }
+section pre code { background: none; padding: 0; }
+section table { border-collapse: collapse; font-size: 0.85em; }
+section th { background: #141414; color: #faf8f5; padding: 0.35em 0.8em; text-align: left; }
+section td { border-bottom: 1px solid #e0dbd1; padding: 0.35em 0.8em; }
+section img { max-height: 420px; }
+section footer, section::after { color: #000000; font-size: 18px; }
+
+/* Title slide: <!-- _class: lead --> */
+section.lead {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-left: 0;
+  border-bottom: 18px solid #141414;
+}
+section.lead h1 { font-size: 84px; margin-bottom: 0.25em; }
+section.lead h2, section.lead p { font-size: 34px; color: #000000; font-weight: 400; }
+
+/* Section break: <!-- _class: invert --> */
+section.invert {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: #141414;
+  color: #faf8f5;
+  border-left: 0;
+}
+section.invert h1, section.invert h2, section.invert h3, section.invert p { color: #faf8f5; }
+section.invert h1 { font-size: 72px; }

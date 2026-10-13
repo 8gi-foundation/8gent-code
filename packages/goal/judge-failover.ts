@@ -19,7 +19,12 @@
  * extraction fails, we fall back to the raw goal as the criterion.
  */
 
-import { type FailoverChannel, ModelFailover } from "../providers/failover";
+import {
+	type FailoverChannel,
+	type FailoverEntry,
+	ModelFailover,
+	NoAllowedProviderError,
+} from "../providers/failover";
 import { createClient } from "../eight/clients";
 import type { AgentConfig, LLMClient, Message } from "../eight/types";
 import { assertDistinctJudge } from "./judge";
@@ -192,7 +197,7 @@ export class FailoverJudge implements JudgeHandle {
 
 		// 2. Resolve the judge model through the failover chain. We always
 		//    re-resolve so a marked-down model picks up the next tier.
-		const entry = this.failover.resolve(this.model, this.channel);
+		const entry = this.route();
 		const runtime = runtimeForProvider(entry.provider);
 		const client = this.clientFactory({ runtime, model: entry.model });
 
@@ -232,7 +237,7 @@ export class FailoverJudge implements JudgeHandle {
 		const cached = this.goalCriteria.get(goal);
 		if (cached) return cached;
 
-		const entry = this.failover.resolve(this.model, this.channel);
+		const entry = this.route();
 		const runtime = runtimeForProvider(entry.provider);
 		const client = this.clientFactory({ runtime, model: entry.model });
 
@@ -250,6 +255,20 @@ export class FailoverJudge implements JudgeHandle {
 		}
 		this.goalCriteria.set(goal, criterion);
 		return criterion;
+	}
+
+	/**
+	 * The judge's entry in the failover chain. With no allowed route (a model
+	 * with no chain while hosted providers are off, #3710) the judge runs on
+	 * the local runtime under the name it was given, never on a hosted one.
+	 */
+	private route(): FailoverEntry {
+		try {
+			return this.failover.resolve(this.model, this.channel);
+		} catch (err) {
+			if (err instanceof NoAllowedProviderError) return { model: this.model, provider: "ollama" };
+			throw err;
+		}
 	}
 
 	/**

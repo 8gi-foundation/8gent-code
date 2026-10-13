@@ -72,6 +72,9 @@ export interface SharedMemoryBus {
 		}>
 	>;
 
+	/** Close the underlying database. The bus is unusable afterwards. */
+	close(): void;
+
 	/** Get the knowledge graph instance for direct queries */
 	graph(): KnowledgeGraph;
 
@@ -156,6 +159,9 @@ export function createSharedMemoryBus(dbPath: string): SharedMemoryBus {
 	// ── Bus implementation ───────────────────────────────────────────
 
 	return {
+		close() {
+			store.close();
+		},
 		storeMessage(
 			content: string,
 			role: "user" | "assistant",

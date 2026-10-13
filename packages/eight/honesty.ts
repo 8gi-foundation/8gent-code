@@ -41,6 +41,8 @@ export const ACTION_TOOLS: ReadonlySet<string> = new Set([
 	"git_commit",
 	"git_push",
 	"make_pdf",
+	"speak",
+	"render_video_deck",
 	"run_computer_task",
 	"desktop_click",
 	"desktop_type",

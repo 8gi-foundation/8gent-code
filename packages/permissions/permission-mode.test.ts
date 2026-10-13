@@ -16,15 +16,17 @@
  * backend that keys on marker text, as in system-one-gate.test.ts.
  */
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	rmSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
+	afterAll,
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	onTestFinished,
+	test,
+} from "bun:test";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { agentTools } from "../ai/tools";
@@ -406,7 +408,8 @@ describe("Guarded puts System One in front of Ask, with EIGHT_SYSTEM_ONE=0", () 
 		expect(existsSync(join(w.dir, "victim.txt"))).toBe(false);
 	});
 
-	test("an allowed command that is not dangerous runs without a card (Ask would have asked)", async () => {
+	// run_command goes through cmd.exe on Windows, where printf does not exist.
+	test.skipIf(process.platform === "win32")("an allowed command that is not dangerous runs without a card (Ask would have asked)", async () => {
 		const out = await executorIn(w.dir, "guarded").execute("run_command", {
 			command: "printf ok > made.txt",
 		});
@@ -710,6 +713,13 @@ describe("spawn: a child is never more permissive than its parent", () => {
 	});
 
 	test("the claude runtime (permissions skipped) is refused under ask and guarded, even when infinite is asked for", async () => {
+		// With hosted opted in, so this exercises the permission-mode gate (#3710).
+		const before = process.env.EIGHT_ALLOW_HOSTED;
+		process.env.EIGHT_ALLOW_HOSTED = "1";
+		onTestFinished(() => {
+			if (before === undefined) delete process.env.EIGHT_ALLOW_HOSTED;
+			else process.env.EIGHT_ALLOW_HOSTED = before;
+		});
 		for (const parent of ["ask", "guarded"] as const) {
 			const out = await runWithPermissionHolder(createPermissionHolder(parent), () =>
 				spawnAgentTool(w.dir, "task", "claude", undefined, undefined, undefined, "infinite"),

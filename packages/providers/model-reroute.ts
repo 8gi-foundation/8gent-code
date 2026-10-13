@@ -295,6 +295,12 @@ export async function callLocalModelWithReroute<T>(opts: {
 	detect?: () => Promise<InstalledModel[]>;
 	hasCloudKey?: () => boolean;
 	onReroute?: (missingModel: string, chosen: InstalledModel) => void;
+	/**
+	 * The user named this provider (#3746): only models on the same provider
+	 * are considered, and with none the turn ends with `pinnedMessage`.
+	 */
+	pinned?: boolean;
+	pinnedMessage?: (model: string, error: string) => string;
 }): Promise<LocalRerouteOutcome<T>> {
 	const detect = opts.detect ?? defaultDetectInstalled;
 	const cloudKey = opts.hasCloudKey ?? hasCloudModelKey;
@@ -317,9 +323,20 @@ export async function callLocalModelWithReroute<T>(opts: {
 				throw err;
 			}
 
-			const installed = await detect().catch(() => [] as InstalledModel[]);
+			const detected = await detect().catch(() => [] as InstalledModel[]);
+			// A pinned provider is never left for another one (#3746).
+			const installed = opts.pinned ? detected.filter((m) => m.provider === provider) : detected;
 			const chosen = chooseRerouteModel(installed, model, opts.prefer);
 			if (!chosen) {
+				if (opts.pinned) {
+					const error = err instanceof Error ? err.message : String(err);
+					return {
+						ok: false,
+						message: opts.pinnedMessage
+							? opts.pinnedMessage(model, error)
+							: `${provider}/${model} failed: ${error}\nThe provider was chosen explicitly, so no other provider was tried.`,
+					};
+				}
 				return { ok: false, message: noModelAvailableMessage(model, cloudKey()) };
 			}
 

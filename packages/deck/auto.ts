@@ -9,7 +9,7 @@
  * Opt out with EIGHT_DECK_VIDEO=0.
  */
 
-import { extname, relative } from "node:path";
+import { extname, relative, sep } from "node:path";
 import { isMarpDeck } from "./parse";
 import { type DeckRenderResult, renderDeckVideo } from "./render";
 
@@ -31,7 +31,9 @@ export function shouldRenderDeckVideo(
 }
 
 export function formatDeckVideoLine(result: DeckRenderResult, baseDir?: string): string {
-	const shown = baseDir ? relative(baseDir, result.output) || result.output : result.output;
+	const shown = baseDir
+		? (relative(baseDir, result.output) || result.output).split(sep).join("/")
+		: result.output;
 	return `rendered ${shown}: ${result.slides} slides, ${result.seconds}s, voice ${result.voice}`;
 }
 

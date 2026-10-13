@@ -1,0 +1,368 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import type { TaskCategory } from "../ai/task-router";
+import {
+	EFFORT_BY_TASK_KIND,
+	applyEffortPolicy,
+	effortForTaskKind,
+	isEffortPolicyEnabled,
+} from "./effort-policy";
+import { type ChatRequest, ProviderManager } from "./index";
+import { resolveThinkingLevel } from "./thinking-level";
+
+const ON = { EIGHT_EFFORT_POLICY: "1" };
+
+/**
+ * Point HOME and EIGHT_DATA_DIR at a temp dir and clear real API keys and the
+ * flag for one test. Returns a function that restores the previous values.
+ */
+const ISOLATED_ENV = [
+	"HOME",
+	"EIGHT_DATA_DIR",
+	"OPENAI_API_KEY",
+	"ANTHROPIC_API_KEY",
+	"EIGHT_EFFORT_POLICY",
+] as const;
+function isolateEnv(dir: string): () => void {
+	const saved = ISOLATED_ENV.map((k) => [k, process.env[k]] as const);
+	process.env.HOME = dir;
+	process.env.EIGHT_DATA_DIR = path.join(dir, ".8gent");
+	delete process.env.OPENAI_API_KEY;
+	delete process.env.ANTHROPIC_API_KEY;
+	delete process.env.EIGHT_EFFORT_POLICY;
+	return () => {
+		for (const [k, v] of saved) {
+			if (v === undefined) delete process.env[k];
+			else process.env[k] = v;
+		}
+	};
+}
+const OFF_VALUES: Array<string | undefined> = [undefined, "", "0", "true", " 1", "1 ", "yes", "on"];
+
+describe("isEffortPolicyEnabled", () => {
+	test("on only for exactly '1'", () => {
+		expect(isEffortPolicyEnabled(ON)).toBe(true);
+	});
+	for (const v of OFF_VALUES) {
+		test(`off for ${JSON.stringify(v)}`, () => {
+			expect(isEffortPolicyEnabled({ EIGHT_EFFORT_POLICY: v })).toBe(false);
+		});
+	}
+	test("off when the key is absent", () => {
+		expect(isEffortPolicyEnabled({})).toBe(false);
+	});
+});
+
+describe("effortForTaskKind table", () => {
+	const cases: Array<[TaskCategory, string | undefined]> = [
+		["simple", "low"],
+		["code", "medium"],
+		["reasoning", "high"],
+		["creative", undefined],
+	];
+	for (const [kind, level] of cases) {
+		test(`${kind} -> ${level ?? "provider default"}`, () => {
+			expect(effortForTaskKind(kind)).toBe(level as never);
+		});
+	}
+	test("unknown, empty and prototype keys leave the provider default", () => {
+		for (const k of [undefined, "", "security", "toString", "__proto__", "constructor"]) {
+			expect(effortForTaskKind(k)).toBeUndefined();
+		}
+	});
+	test("review (outside TaskCategory) -> high", () => {
+		expect(effortForTaskKind("review")).toBe("high");
+	});
+	test("table names only TaskCategory values plus review", () => {
+		const known: string[] = ["code", "reasoning", "simple", "creative", "review"];
+		for (const k of Object.keys(EFFORT_BY_TASK_KIND)) {
+			expect(known).toContain(k);
+		}
+	});
+});
+
+describe("applyEffortPolicy", () => {
+	const base: ChatRequest = { messages: [], taskKind: "reasoning" };
+
+	for (const v of OFF_VALUES) {
+		test(`flag ${JSON.stringify(v)}: returns the same object, untouched`, () => {
+			const req = { ...base };
+			const snapshot = JSON.stringify(req);
+			const out = applyEffortPolicy(req, { EIGHT_EFFORT_POLICY: v });
+			expect(out).toBe(req);
+			expect(JSON.stringify(out)).toBe(snapshot);
+			expect("thinking" in out).toBe(false);
+		});
+	}
+
+	test("flag on: fills thinking from the task kind", () => {
+		expect(applyEffortPolicy({ ...base, taskKind: "simple" }, ON).thinking).toBe("low");
+		expect(applyEffortPolicy({ ...base, taskKind: "code" }, ON).thinking).toBe("medium");
+		expect(applyEffortPolicy({ ...base, taskKind: "reasoning" }, ON).thinking).toBe("high");
+		expect(applyEffortPolicy({ ...base, taskKind: "review" }, ON).thinking).toBe("high");
+	});
+
+	test("flag on: does not mutate the caller's object", () => {
+		const req = { ...base };
+		const out = applyEffortPolicy(req, ON);
+		expect(out).not.toBe(req);
+		expect("thinking" in req).toBe(false);
+	});
+
+	test("flag on: explicit caller value always wins", () => {
+		for (const level of ["minimal", "low", "medium", "high"] as const) {
+			const req = { ...base, thinking: level };
+			const out = applyEffortPolicy(req, ON);
+			expect(out).toBe(req);
+			expect(out.thinking).toBe(level);
+		}
+	});
+
+	test("flag on: no kind, unknown kind or creative leaves the request unchanged", () => {
+		for (const taskKind of [undefined, "security", "creative"]) {
+			const req = { messages: [], taskKind } as ChatRequest;
+			expect(applyEffortPolicy(req, ON)).toBe(req);
+		}
+	});
+
+	test("policy level downgrades through resolveThinkingLevel", () => {
+		const out = applyEffortPolicy({ ...base }, ON);
+		expect(resolveThinkingLevel(out.thinking!, ["minimal", "low", "medium", "high"])).toBe("high");
+		expect(resolveThinkingLevel(out.thinking!, ["minimal", "low"])).toBe("low");
+		expect(resolveThinkingLevel(out.thinking!, [])).toBeNull();
+	});
+});
+
+// ── Call site: ProviderManager.chat() ────────────────────────────────────
+
+describe("ProviderManager.chat with the effort policy", () => {
+	let tmpDir: string;
+	let settingsPath: string;
+	const realFetch = globalThis.fetch;
+	let restoreEnv: () => void;
+	let captured: Record<string, unknown> | null;
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "effort-policy-"));
+		restoreEnv = isolateEnv(tmpDir);
+		settingsPath = path.join(tmpDir, "providers.json");
+		fs.writeFileSync(
+			settingsPath,
+			JSON.stringify({
+				activeProvider: "openai",
+				activeModel: "gpt-test",
+				providers: { openai: { enabled: true, apiKey: "test-key" } },
+			}),
+		);
+		captured = null;
+		globalThis.fetch = (async (_url: string, init: { body: string }) => {
+			captured = JSON.parse(init.body);
+			return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+	});
+
+	afterEach(() => {
+		globalThis.fetch = realFetch;
+		restoreEnv();
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	const ask = (extra: Record<string, unknown>) =>
+		new ProviderManager(settingsPath).chat({
+			messages: [{ role: "user", content: "check this diff" }],
+			...extra,
+		});
+
+	for (const v of OFF_VALUES) {
+		test(`flag ${JSON.stringify(v)}: no reasoning_effort, no taskKind on the wire`, async () => {
+			if (v === undefined) delete process.env.EIGHT_EFFORT_POLICY;
+			else process.env.EIGHT_EFFORT_POLICY = v;
+			const res = await ask({ taskKind: "reasoning" });
+			expect(captured).not.toBeNull();
+			expect(captured!.reasoning_effort).toBeUndefined();
+			expect(captured!.taskKind).toBeUndefined();
+			expect(res.thinking).toBeUndefined();
+		});
+	}
+
+	test("flag on: task kind becomes reasoning_effort", async () => {
+		process.env.EIGHT_EFFORT_POLICY = "1";
+		const res = await ask({ taskKind: "reasoning" });
+		expect(captured!.reasoning_effort).toBe("high");
+		expect(captured!.taskKind).toBeUndefined();
+		expect(res.thinking?.requested).toBe("high");
+	});
+
+	test("flag on: explicit caller thinking wins over the task kind", async () => {
+		process.env.EIGHT_EFFORT_POLICY = "1";
+		await ask({ taskKind: "reasoning", thinking: "minimal" });
+		expect(captured!.reasoning_effort).toBe("minimal");
+	});
+
+	test("flag on: unknown kind leaves the provider default", async () => {
+		process.env.EIGHT_EFFORT_POLICY = "1";
+		const res = await ask({ taskKind: "security" });
+		expect(captured!.reasoning_effort).toBeUndefined();
+		expect(res.thinking).toBeUndefined();
+	});
+});
+
+describe("ProviderManager.chat with the effort policy, Anthropic shape", () => {
+	let tmpDir: string;
+	let settingsPath: string;
+	const realFetch = globalThis.fetch;
+	let restoreEnv: () => void;
+	let captured: Record<string, unknown> | null;
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "effort-policy-anthropic-"));
+		restoreEnv = isolateEnv(tmpDir);
+		settingsPath = path.join(tmpDir, "providers.json");
+		fs.writeFileSync(
+			settingsPath,
+			JSON.stringify({
+				activeProvider: "anthropic",
+				activeModel: "claude-test",
+				providers: { anthropic: { enabled: true, apiKey: "test-key" } },
+			}),
+		);
+		captured = null;
+		globalThis.fetch = (async (_url: string, init: { body: string }) => {
+			captured = JSON.parse(init.body);
+			return new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }] }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+	});
+
+	afterEach(() => {
+		globalThis.fetch = realFetch;
+		restoreEnv();
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	const ask = (extra: Record<string, unknown>) =>
+		new ProviderManager(settingsPath).chat({
+			messages: [{ role: "user", content: "review this diff" }],
+			...extra,
+		});
+
+	test("flag on: review becomes an extended-thinking budget, taskKind stays off the wire", async () => {
+		process.env.EIGHT_EFFORT_POLICY = "1";
+		const res = await ask({ taskKind: "review" });
+		expect(captured).not.toBeNull();
+		expect(captured!.thinking).toEqual({ type: "enabled", budget_tokens: expect.any(Number) });
+		expect("taskKind" in captured!).toBe(false);
+		expect(JSON.stringify(captured)).not.toContain("taskKind");
+		expect(res.thinking?.level).toBe("high");
+	});
+
+	test("flag unset: no thinking block and no taskKind on the wire", async () => {
+		delete process.env.EIGHT_EFFORT_POLICY;
+		const res = await ask({ taskKind: "review" });
+		expect(captured!.thinking).toBeUndefined();
+		expect(JSON.stringify(captured)).not.toContain("taskKind");
+		expect(res.thinking).toBeUndefined();
+	});
+
+	test("flag on: max_tokens exceeds budget_tokens for every kind in the table", async () => {
+		process.env.EIGHT_EFFORT_POLICY = "1";
+		const kinds = Object.keys(EFFORT_BY_TASK_KIND);
+		expect(kinds.length).toBeGreaterThan(0);
+		for (const taskKind of kinds) {
+			for (const maxTokens of [undefined, 16, 4096, 100_000]) {
+				captured = null;
+				await ask({ taskKind, maxTokens });
+				const thinking = captured!.thinking as { budget_tokens: number };
+				expect(thinking.budget_tokens).toBeGreaterThan(0);
+				expect(captured!.max_tokens as number).toBeGreaterThan(thinking.budget_tokens);
+				if (maxTokens === 100_000) expect(captured!.max_tokens).toBe(100_000);
+			}
+		}
+	});
+
+	test("explicit caller thinking also gets max_tokens above the budget", async () => {
+		for (const thinking of ["minimal", "low", "medium", "high"]) {
+			captured = null;
+			await ask({ thinking });
+			const t = captured!.thinking as { budget_tokens: number };
+			expect(captured!.max_tokens as number).toBeGreaterThan(t.budget_tokens);
+		}
+	});
+
+	test("a caller cap already above the budget is kept, not raised", async () => {
+		await ask({ thinking: "minimal", maxTokens: 2000 });
+		expect((captured!.thinking as { budget_tokens: number }).budget_tokens).toBe(1024);
+		expect(captured!.max_tokens).toBe(2000);
+	});
+
+	test("flag off: max_tokens is unchanged (default 4096, caller value kept)", async () => {
+		for (const flag of [undefined, "0", "true"]) {
+			if (flag === undefined) delete process.env.EIGHT_EFFORT_POLICY;
+			else process.env.EIGHT_EFFORT_POLICY = flag;
+			captured = null;
+			await ask({ taskKind: "review" });
+			expect(captured!.max_tokens).toBe(4096);
+			expect(captured!.thinking).toBeUndefined();
+			captured = null;
+			await ask({ taskKind: "review", maxTokens: 777 });
+			expect(captured!.max_tokens).toBe(777);
+		}
+	});
+});
+
+describe("ProviderManager.chat with the effort policy, Ollama shape", () => {
+	let tmpDir: string;
+	let settingsPath: string;
+	const realFetch = globalThis.fetch;
+	let restoreEnv: () => void;
+	let captured: Record<string, unknown> | null;
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "effort-policy-ollama-"));
+		restoreEnv = isolateEnv(tmpDir);
+		settingsPath = path.join(tmpDir, "providers.json");
+		fs.writeFileSync(
+			settingsPath,
+			JSON.stringify({
+				activeProvider: "ollama",
+				activeModel: "qwen-test",
+				providers: { ollama: { enabled: true } },
+			}),
+		);
+		captured = null;
+		globalThis.fetch = (async (_url: string, init: { body: string }) => {
+			captured = JSON.parse(init.body);
+			return new Response(JSON.stringify({ message: { content: "ok" } }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+	});
+
+	afterEach(() => {
+		globalThis.fetch = realFetch;
+		restoreEnv();
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	test("flag on: taskKind and any thinking field stay off the wire; level dropped", async () => {
+		process.env.EIGHT_EFFORT_POLICY = "1";
+		const res = await new ProviderManager(settingsPath).chat({
+			messages: [{ role: "user", content: "review this" }],
+			taskKind: "review",
+		});
+		expect(captured).not.toBeNull();
+		const wire = JSON.stringify(captured);
+		expect(wire).not.toContain("taskKind");
+		expect(wire).not.toContain("reasoning_effort");
+		expect(wire).not.toContain('"thinking"');
+		expect(res.thinking?.level).toBeNull();
+	});
+});

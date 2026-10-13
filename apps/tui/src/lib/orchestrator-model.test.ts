@@ -184,7 +184,7 @@ describe("formatElapsed", () => {
 describe("layoutColumns (#2802)", () => {
 	test("wide pane keeps all six columns in display order", () => {
 		expect(layoutColumns(100).map((c) => c.label)).toEqual([
-			"AGENT",
+			"8GENT",
 			"STATE",
 			"HARNESS",
 			"TOOL",
@@ -192,12 +192,12 @@ describe("layoutColumns (#2802)", () => {
 			"ELAPSED",
 		]);
 	});
-	test("mid width drops to AGENT/STATE/ELAPSED", () => {
-		expect(layoutColumns(40).map((c) => c.label)).toEqual(["AGENT", "STATE", "ELAPSED"]);
+	test("mid width drops to 8GENT/STATE/ELAPSED", () => {
+		expect(layoutColumns(40).map((c) => c.label)).toEqual(["8GENT", "STATE", "ELAPSED"]);
 	});
-	test("very narrow pane degrades to AGENT + STATE with a shrunk id column", () => {
+	test("very narrow pane degrades to 8GENT + STATE with a shrunk id column", () => {
 		const cols = layoutColumns(24);
-		expect(cols.map((c) => c.label)).toEqual(["AGENT", "STATE"]);
+		expect(cols.map((c) => c.label)).toEqual(["8GENT", "STATE"]);
 	});
 	test("columns always fit inside the pane chrome at width >= 23", () => {
 		for (let width = 23; width <= 120; width++) {

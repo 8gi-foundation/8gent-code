@@ -18,6 +18,8 @@ export type DaemonEventName =
 	| "agent:error"
 	| "memory:saved"
 	| "approval:required"
+	| "approval:closed"
+	| "approval:resolved"
 	| "session:start"
 	| "session:end";
 
@@ -33,6 +35,8 @@ export interface DaemonClientConfig {
 	reconnectDelayMs?: number;
 	pingIntervalMs?: number;
 	socketFactory?: (url: string) => WebSocketLike;
+	/** Register this socket as the approval bridge (#3621). Never logged. */
+	approvalSecret?: string;
 }
 
 export interface WebSocketLike {
@@ -57,6 +61,9 @@ export interface EventPayloads {
 	"agent:error": { sessionId: string; error: string };
 	"memory:saved": { sessionId: string; key: string };
 	"approval:required": { sessionId: string; tool: string; input: unknown; requestId: string };
+	"approval:closed": { sessionId: string; requestId: string; outcome: "expired" | "replaced" };
+	/** The daemon's verdict on an answer this socket sent (not a bus event). */
+	"approval:resolved": { requestId: string; ok: boolean; reason?: string };
 	"session:start": { sessionId: string; channel: string };
 	"session:end": { sessionId: string; reason: string };
 }
@@ -83,10 +90,11 @@ export class DaemonClient {
 			reconnectDelayMs: config.reconnectDelayMs ?? 5000,
 			pingIntervalMs: config.pingIntervalMs ?? 10 * 60 * 1000,
 			socketFactory: config.socketFactory,
+			approvalSecret: config.approvalSecret,
 		};
 	}
 
-	/** Open the WebSocket and create a session. Resolves once session:created arrives. */
+	/** Open the WebSocket and create (or resume) a session. Resolves once session:created or session:resumed arrives. */
 	connect(): Promise<void> {
 		if (this.ws && this.ws.readyState === OPEN && this.sessionId) {
 			return Promise.resolve();
@@ -108,7 +116,20 @@ export class DaemonClient {
 			if (this.config.authToken) {
 				this.send({ type: "auth", token: this.config.authToken });
 			}
-			this.send({ type: "session:create", channel: this.config.channel });
+			if (this.config.approvalSecret) {
+				this.send({ type: "approvals:register", secret: this.config.approvalSecret });
+			}
+			// Reconnect: resume the session we already own rather than leaking a
+			// new never-evicted agent and dropping the conversation (#3538).
+			if (this.sessionId) {
+				this.send({
+					type: "session:resume",
+					sessionId: this.sessionId,
+					channel: this.config.channel,
+				});
+			} else {
+				this.send({ type: "session:create", channel: this.config.channel });
+			}
 		};
 
 		ws.onmessage = (ev) => {
@@ -129,10 +150,13 @@ export class DaemonClient {
 		ws.onclose = () => {
 			this.stopPing();
 			this.ws = null;
-			this.sessionId = null;
+			// Keep sessionId so the next open resumes it.
 			this.connecting = false;
 			if (!this.closed) {
-				setTimeout(() => this.openSocket(), this.config.reconnectDelayMs);
+				setTimeout(() => {
+					// connect() may already have redialled; never open two sockets.
+					if (!this.closed && !this.ws) this.openSocket();
+				}, this.config.reconnectDelayMs);
 			}
 		};
 	}
@@ -140,13 +164,11 @@ export class DaemonClient {
 	private handleMessage(msg: { type: string; [k: string]: unknown }): void {
 		switch (msg.type) {
 			case "session:created":
+			case "session:resumed":
 				this.sessionId = String(msg.sessionId);
 				this.connecting = false;
 				this.startPing();
 				this.resolveConnect();
-				break;
-			case "session:resumed":
-				this.sessionId = String(msg.sessionId);
 				break;
 			case "auth:ok":
 				break;
@@ -159,25 +181,38 @@ export class DaemonClient {
 				this.dispatch(event, payload);
 				break;
 			}
+			case "approval:resolved":
+				this.dispatch("approval:resolved", msg as unknown as EventPayloads["approval:resolved"]);
+				break;
 			case "pong":
 				break;
 		}
 	}
 
+	/** Who started the next turn and where; the daemon trusts it only from the bridge. */
+	turn: { chatId: string; operator: boolean } | null = null;
+
 	/** Send a prompt to the current session. */
 	sendPrompt(text: string): void {
-		this.send({ type: "prompt", text });
+		this.send({ type: "prompt", text, ...(this.turn ? { turn: this.turn } : {}) });
 	}
 
 	/** Force a fresh session (e.g. on cancel / new task). */
 	resetSession(): void {
+		// Destroy the old agent first: telegram sessions are never evicted, so
+		// an abandoned one would live until the daemon restarts (#3538).
+		if (this.sessionId) this.send({ type: "session:destroy", sessionId: this.sessionId });
 		this.sessionId = null;
 		this.send({ type: "session:create", channel: this.config.channel });
 	}
 
 	/** Send an approval response back to the daemon. */
-	respondApproval(requestId: string, approved: boolean): void {
-		this.send({ type: "approval:response", requestId, approved });
+	respondApproval(
+		requestId: string,
+		approved: boolean,
+		opts: { scope?: "chat"; undelivered?: boolean; approver?: string } = {},
+	): void {
+		this.send({ type: "approval:response", requestId, approved, ...opts });
 	}
 
 	/** Subscribe to a daemon event. Returns an unsubscribe function. */

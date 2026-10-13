@@ -40,7 +40,7 @@
 		"bench": "bun run bench/vec-search.ts"
 	},
 	"dependencies": {
-		"@8gent/eyes": "workspace:*",
+		"@8gent/eyes": "0.18.0",
 		"sqlite-vec": "^0.1.9"
 	},
 	"devDependencies": {

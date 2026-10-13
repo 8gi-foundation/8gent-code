@@ -13,6 +13,7 @@ import * as os from "node:os";
 import { resolveHome } from "../core/home";
 import * as path from "node:path";
 import { getDriver } from "../hands";
+import { isDangerousCombo, normalizeKeys } from "./keys";
 import type {
 	ClickOptions,
 	CommandResult,
@@ -42,16 +43,6 @@ const MAX_SCROLL_AMOUNT = 50;
 
 /** Max drag duration in ms */
 const MAX_DRAG_DURATION = 5000;
-
-/** Dangerous key combos that require extra caution */
-const DANGEROUS_KEYS = new Set([
-	"cmd+q", // quit app
-	"cmd+w", // close window/tab
-	"alt+f4", // close app (linux/windows)
-	"ctrl+alt+delete", // system interrupt
-	"cmd+shift+q", // logout
-	"ctrl+shift+delete", // clear browser data
-]);
 
 /** Validate numeric point coordinates are within sane bounds */
 function validatePoint(p: Point, label: string): string | null {
@@ -181,8 +172,14 @@ export function press(opts: PressOptions): CommandResult {
 	// is the shared chokepoint for every caller (daemon, CLI, TUI). Previously
 	// the combo was EXECUTED and merely warned about afterwards — the keys
 	// actually fired. Now it is refused without touching the driver.
-	if (DANGEROUS_KEYS.has(normalized)) {
-		return { ok: false, error: `Blocked dangerous key combo "${normalized}"` };
+	// Matched on the canonical combo (keys.ts), so case, aliases, modifier order
+	// and extra modifiers cannot walk around the list.
+	const blocked = isDangerousCombo(normalized);
+	if (blocked) {
+		return {
+			ok: false,
+			error: `Blocked dangerous key combo "${normalizeKeys(normalized)}" (${blocked})`,
+		};
 	}
 
 	const count = opts.count ?? 1;

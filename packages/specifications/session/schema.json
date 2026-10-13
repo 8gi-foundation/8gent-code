@@ -447,6 +447,7 @@
 						"properties": {
 							"stepNumber": { "type": "integer" },
 							"finishReason": { "$ref": "#/$defs/FinishReason" },
+							"durationMs": { "type": "number", "minimum": 0 },
 							"usage": { "$ref": "#/$defs/DetailedTokenUsage" },
 							"response": { "$ref": "#/$defs/ResponseMeta" },
 							"providerMetadata": {

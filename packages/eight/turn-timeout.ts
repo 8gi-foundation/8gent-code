@@ -15,33 +15,62 @@
  * the chain, and - once the bounded chain is exhausted - throw a clean
  * "All providers exhausted" error that unblocks the caller.
  *
- * Default: 300s (5 min) per attempt. Override with EIGHT_TURN_TIMEOUT_MS.
+ * Two policies live here:
  *
- * Why 5 min and not something tighter: this is a LOCAL-FIRST daemon. A cold
- * local model (eight-1.0-q3:14b / qwen3:14b) on a busy machine can legitimately
- * take a long time for ONE attempt - first token after loading weights from
- * disk, a large context, a CPU-only fallback, or a long reasoning turn. A 5 min
- * bound gives a slow-but-alive local generation real headroom while still
- * defeating the 30-min session-watchdog hang with margin: even the worst case
- * (all 6 providers in the chain stall) caps the turn near the watchdog, and the
- * realistic case (one or two unreachable providers) fails over in minutes. Fast
- * cloud-only setups can lower this via EIGHT_TURN_TIMEOUT_MS.
+ *  - Native (non-streamed) path: one wall-clock bound per attempt,
+ *    DEFAULT_TURN_TIMEOUT_MS (5 min), override with EIGHT_TURN_TIMEOUT_MS.
+ *    A generate() that does not stream gives no progress signal, so total time
+ *    is the only thing we can judge. 5 min is the compromise for a LOCAL-FIRST
+ *    daemon: a cold local model on a busy machine can legitimately need that
+ *    long for ONE attempt, while a dead provider still fails over in minutes
+ *    and the worst case (every provider in the chain stalls) stays near the
+ *    30 min watchdog. Fast cloud-only setups lower it.
+ *
+ *  - Text-tool path (local models: ollama, lmstudio, llama-server; #3657):
+ *    the reply streams and a step fails on NO PROGRESS - no bytes for
+ *    resolveStreamIdleMs() (default DEFAULT_STREAM_IDLE_MS) - not on total
+ *    time. The wall clock becomes a much higher safety net,
+ *    resolveStepCeilingMs() (default DEFAULT_STREAM_CEILING_MS). A thinking
+ *    model that needs ten minutes of reasoning tokens before its first answer
+ *    is never cut off while it is still writing, and a connection that goes
+ *    quiet is still caught after one gap. EIGHT_TURN_TIMEOUT_MS, when set,
+ *    stays the explicit ceiling for users who want a hard wall-clock limit;
+ *    EIGHT_STREAM_IDLE_MS=0 turns the gap off and restores wall time only.
  */
+
+import { resolveRetrySettings } from "../settings/retry";
+import { loadSettings } from "../settings/store";
 
 export const DEFAULT_TURN_TIMEOUT_MS = 300_000;
 
 /** Floor so a misconfigured env can never make attempts effectively instant. */
 const MIN_TURN_TIMEOUT_MS = 1_000;
 
+/** Which limit fired: the wall-clock ceiling, or a quiet gap with no output. */
+export type TurnTimeoutKind = "ceiling" | "idle";
+
 export class TurnTimeoutError extends Error {
 	readonly timeoutMs: number;
-	constructor(timeoutMs: number, label?: string) {
+	readonly kind: TurnTimeoutKind;
+	constructor(timeoutMs: number, label?: string, kind: TurnTimeoutKind = "ceiling") {
 		super(
 			`Provider attempt timed out after ${timeoutMs}ms${label ? ` (${label})` : ""}`,
 		);
 		this.name = "TurnTimeoutError";
 		this.timeoutMs = timeoutMs;
+		this.kind = kind;
 	}
+}
+
+/**
+ * Largest delay setTimeout honours (2^31-1 ms, about 24.8 days). Above it Bun
+ * fires after 1 ms, so an env value meaning "never" would time out at once
+ * (#3671). Both resolvers clamp to it.
+ */
+export const MAX_TIMER_MS = 2_147_483_647;
+
+function clampTimerMs(ms: number): number {
+	return Math.min(MAX_TIMER_MS, ms);
 }
 
 /**
@@ -57,7 +86,7 @@ export function resolveTurnTimeoutMs(
 	if (raw == null || raw === "") return DEFAULT_TURN_TIMEOUT_MS;
 	const parsed = Number(raw);
 	if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_TURN_TIMEOUT_MS;
-	return Math.max(MIN_TURN_TIMEOUT_MS, Math.floor(parsed));
+	return clampTimerMs(Math.max(MIN_TURN_TIMEOUT_MS, Math.floor(parsed)));
 }
 
 /**
@@ -98,4 +127,106 @@ export async function withTurnTimeout<T>(
 	} finally {
 		if (timer) clearTimeout(timer);
 	}
+}
+
+/**
+ * Default no-progress gap for a streamed text-tool step (#3657). It is the
+ * old wall-clock default on purpose: anything that answered inside 5 minutes
+ * before still does, a dead endpoint (socket accepted, no body) is still
+ * caught at the same 5 minutes, and only the case that used to fail - a model
+ * still writing at 5 minutes - now continues. The gap counts bytes, so
+ * reasoning deltas keep a thinking model alive. Prompt prefill sends nothing
+ * and can take far longer than 5 minutes for a long document (#3643), so the
+ * wait for the first byte has its own budget: resolveFirstTokenMs.
+ */
+export const DEFAULT_STREAM_IDLE_MS = DEFAULT_TURN_TIMEOUT_MS;
+
+/**
+ * Stream idle gap (#3553, on by default since #3657) via EIGHT_STREAM_IDLE_MS.
+ * The text-tool path streams its reply and judges a model step by silence
+ * instead of total time: modelFetch re-arms this timer on every body chunk, so
+ * a slow model that keeps writing is never cut off and a silent connection
+ * fails after one quiet gap.
+ *
+ *  - unset / empty       -> DEFAULT_STREAM_IDLE_MS
+ *  - "0" / "off" / < 0   -> null: gap off, wall time only (the pre-#3553 policy)
+ *  - a positive number   -> that many ms, floor 1 s
+ *  - anything else       -> DEFAULT_STREAM_IDLE_MS (a typo never turns it off)
+ */
+export function resolveStreamIdleMs(
+	env: Record<string, string | undefined> = process.env,
+): number | null {
+	const raw = (env.EIGHT_STREAM_IDLE_MS ?? "").trim();
+	if (raw === "") {
+		// Not set in the environment: settings.retry.httpIdleTimeoutMs (C4), validated, else the default.
+		// Only for the real environment, so a test passing its own env object stays pure.
+		const fromSettings = env === process.env ? resolveRetrySettings(loadSettings().retry).httpIdleTimeoutMs : undefined;
+		return fromSettings ?? DEFAULT_STREAM_IDLE_MS;
+	}
+	if (raw.toLowerCase() === "off") return null;
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed)) return DEFAULT_STREAM_IDLE_MS;
+	if (parsed <= 0) return null;
+	return clampTimerMs(Math.max(MIN_TURN_TIMEOUT_MS, Math.floor(parsed)));
+}
+
+/**
+ * Default wall-clock ceiling for one step when the stream idle gap is on: high
+ * enough that a slow-but-writing local model finishes, still under the 30 min
+ * session watchdog so that watchdog stays the outer bound.
+ */
+export const DEFAULT_STREAM_CEILING_MS = 20 * 60_000;
+
+/**
+ * Wall-clock limit for one streamed text-tool step. Gap off
+ * (EIGHT_STREAM_IDLE_MS=0): exactly resolveTurnTimeoutMs(). Gap on:
+ * EIGHT_TURN_TIMEOUT_MS when set (the explicit override), otherwise
+ * DEFAULT_STREAM_CEILING_MS, since the idle gap is what catches a dead provider.
+ */
+export function resolveStepCeilingMs(
+	env: Record<string, string | undefined> = process.env,
+): number {
+	if (resolveStreamIdleMs(env) === null || env.EIGHT_TURN_TIMEOUT_MS) {
+		return resolveTurnTimeoutMs(env);
+	}
+	return DEFAULT_STREAM_CEILING_MS;
+}
+
+/**
+ * Prompt prefill rate assumed when sizing the first-token budget, in tokens
+ * per second. Deliberately slow: a large local model on a busy laptop with a
+ * long KV cache, plus a cold model load. Overestimating only delays failover
+ * for a long prompt on a dead endpoint; underestimating kills a healthy step
+ * (#3643: 3 of 4 long-document runs died at 300 s in prefill).
+ */
+export const PREFILL_FLOOR_TOKENS_PER_S = 50;
+
+/** Characters per token used for the prompt-size estimate. */
+const CHARS_PER_TOKEN = 4;
+
+/**
+ * How long a streamed step may wait for its FIRST byte (#3643). Ollama sends
+ * nothing, not even headers, until the whole prompt is prefilled, so the idle
+ * gap must not count that time as silence. The budget is the idle gap plus
+ * the prompt's estimated prefill time at PREFILL_FLOOR_TOKENS_PER_S, never
+ * below the idle gap and never above the step ceiling. A short prompt gets
+ * exactly the idle gap, so a dead endpoint still fails over in one gap.
+ * EIGHT_FIRST_TOKEN_MS (positive ms, 1 s floor) replaces the estimate; any
+ * other value falls back to it.
+ */
+export function resolveFirstTokenMs(args: {
+	idleMs: number;
+	promptChars: number;
+	ceilingMs: number;
+	env?: Record<string, string | undefined>;
+}): number {
+	const env = args.env ?? process.env;
+	const raw = (env.EIGHT_FIRST_TOKEN_MS ?? "").trim();
+	const parsed = raw === "" ? Number.NaN : Number(raw);
+	if (Number.isFinite(parsed) && parsed > 0) {
+		return clampTimerMs(Math.max(MIN_TURN_TIMEOUT_MS, Math.floor(parsed)));
+	}
+	const tokens = Math.max(0, args.promptChars) / CHARS_PER_TOKEN;
+	const prefillMs = Math.ceil((tokens / PREFILL_FLOOR_TOKENS_PER_S) * 1000);
+	return clampTimerMs(Math.max(args.idleMs, Math.min(args.ceilingMs, args.idleMs + prefillMs)));
 }

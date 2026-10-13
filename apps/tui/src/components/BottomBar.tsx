@@ -51,6 +51,8 @@ interface BottomBarProps {
 	tokensPerSecond?: number;
 	/** System One judge warm-up; undefined when System One is off. */
 	judge?: JudgeState;
+	/** Why run_command runs without its OS sandbox; undefined when it has one (#4013). */
+	sandboxOff?: string;
 }
 
 /** The signed-in display name (#2366). The OS login is not shown: it is the
@@ -70,13 +72,15 @@ export function BottomBar(props: BottomBarProps) {
 				onKeysDone={props.onDjKeysDone}
 				fmWidth={fmWidth}
 				columns={columns}
-				footer={(station) => (
+				footer={(station, hasTrack) => (
 					<StatusSegments
 						// One column of slack so a full row never triggers a terminal wrap.
 						width={Math.max(0, columns - (station ? fmWidth : 0) - 1)}
 						leading={station}
 						toast={props.permToast}
 						notice={props.notice}
+						// ^D only does something with a track loaded; its cap shows then.
+						dj={hasTrack}
 						data={{
 							mode: props.mode,
 							tokensPerSecond: props.tokensPerSecond,
@@ -88,6 +92,7 @@ export function BottomBar(props: BottomBarProps) {
 							providersTotal: props.total,
 							user: resolveUser(props.user),
 							judge: props.judge,
+							sandboxOff: props.sandboxOff,
 							adhd: props.adhd,
 						}}
 					/>

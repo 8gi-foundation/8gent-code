@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import * as path from "node:path";
 import {
 	type AgentOutcomeInput,
 	agentOutcome,
@@ -125,5 +126,5 @@ describe("pendingRespawns", () => {
 test("relativeTo keeps paths inside the working directory relative", () => {
 	expect(relativeTo(WD, "/work/src/a.ts")).toBe("src/a.ts");
 	expect(relativeTo(WD, "src/a.ts")).toBe("src/a.ts");
-	expect(relativeTo(WD, "/etc/hosts")).toBe("/etc/hosts");
+	expect(relativeTo(WD, "/etc/hosts")).toBe(path.resolve("/etc/hosts"));
 });

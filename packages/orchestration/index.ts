@@ -13,7 +13,10 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
 import * as os from "node:os";
 import * as path from "node:path";
+import { withChildGuidance } from "./child-guidance";
 import type { PermissionModeHolder } from "../permissions/permission-mode";
+import { hostedAllowed, isHostedProvider } from "../providers/failover";
+import type { AgentConfig as EightAgentConfig } from "../eight/types";
 import { type FileVerdict, type ScopeBaseline, snapshotScope, verifyScope } from "./verify-scope";
 
 // ============================================
@@ -109,8 +112,55 @@ export class AgentDepthError extends Error {
 export const AGENT_DEPTH_EXIT_CODE = 77;
 
 // ============================================
+// Parent session (#3710)
+// ============================================
+
+/** Where an agent's model runs: what a child inherits from the session that spawns it. */
+export interface ChildRuntime {
+	runtime: string;
+	model: string;
+	baseUrl?: string;
+}
+
+/** The provider of the agent whose turn is in flight, read when a child is spawned. */
+const _parentSession = new AsyncLocalStorage<() => ChildRuntime>();
+
+/**
+ * Run fn as a session whose children inherit `get()`. A getter, not a value,
+ * so a child spawned after a reroute or a /model switch gets the model the
+ * parent is on now. Agent.chat binds it around each turn.
+ */
+export function runAsParentSession<T>(get: () => ChildRuntime, fn: () => T): T {
+	return _parentSession.run(get, fn);
+}
+
+/** The spawning session's provider, model and baseUrl; undefined outside any session. */
+export function currentParentSession(): ChildRuntime | undefined {
+	const get = _parentSession.getStore();
+	if (!get) return undefined;
+	const { runtime, model, baseUrl } = get();
+	return { runtime, model, ...(baseUrl ? { baseUrl } : {}) };
+}
+
+/**
+ * The provider a child runs on when no session spawned it (a /spawn from the
+ * REPL, a direct pool call): the same local default the `8gent` CLI uses.
+ */
+function localDefaultRuntime(): ChildRuntime {
+	return { runtime: "ollama", model: process.env.EIGHT_MODEL?.trim() || "eight-1.0-q3:14b" };
+}
+
+/** Null when a child may run on `runtime`; otherwise why not. */
+export function hostedChildRefusal(runtime: string, model: string): string | null {
+	if (!isHostedProvider(runtime) || hostedAllowed()) return null;
+	return `[HOSTED BLOCKED] spawn_agent did NOT run: the child would use the hosted provider "${runtime}" (model "${model}"). Hosted providers are off unless the user sets EIGHT_ALLOW_HOSTED=1. Omit model to run the child on this session's model.`;
+}
+
+// ============================================
 // Types
 // ============================================
+
+type AgentRuntimeName = EightAgentConfig["runtime"];
 
 export type AgentStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
 
@@ -132,6 +182,10 @@ export interface AgentTask {
 export interface AgentConfig {
 	id: string;
 	model: string;
+	/** Its provider: the spawning session's unless the caller names one (#3710). */
+	runtime: string;
+	/** Its endpoint: the spawning session's when the provider is inherited. */
+	baseUrl?: string;
 	systemPrompt?: string;
 	maxTurns?: number;
 	workingDirectory: string;
@@ -212,12 +266,24 @@ export class AgentPool extends EventEmitter {
 		const refusal = agentDepthRefusal();
 		if (refusal) throw new Error(refusal);
 		const depth = currentAgentDepth() + 1;
+		// The child runs where its parent runs (#3710). A named model keeps the
+		// parent's provider and endpoint; a named runtime brings its own.
+		const parent = currentParentSession() ?? localDefaultRuntime();
+		const runtime = config?.runtime || parent.runtime;
+		const sameRuntime = runtime === parent.runtime;
+		const model = config?.model || (sameRuntime ? parent.model : "");
+		if (!model) throw new Error(`No model given for a child on runtime "${runtime}"`);
+		const hosted = hostedChildRefusal(runtime, model);
+		if (hosted) throw new Error(hosted);
+		const baseUrl = config?.baseUrl ?? (sameRuntime ? parent.baseUrl : undefined);
 		const agentId = this.generateId("agent");
 		const taskId = this.generateId("task");
 
 		const agentConfig: AgentConfig = {
 			id: agentId,
-			model: config?.model || "glm-4.7-flash:latest",
+			model,
+			runtime,
+			...(baseUrl ? { baseUrl } : {}),
 			systemPrompt: config?.systemPrompt,
 			maxTurns: config?.maxTurns || 20,
 			workingDirectory: config?.workingDirectory || process.cwd(),
@@ -283,12 +349,13 @@ export class AgentPool extends EventEmitter {
 		try {
 			// Import the Agent class dynamically to avoid circular deps
 			const { Agent } = await import("../eight");
-			const { SCOPED_WRITE_TOOLS } = await import("../permissions/edit-guards");
+			const { SCOPED_WRITE_TOOLS, scopedWriteTarget } = await import("../permissions/edit-guards");
 			const { relativeTo } = await import("./agent-outcome");
 
 			const agent = new Agent({
 				model: spawnedAgent.config.model,
-				runtime: "ollama",
+				runtime: spawnedAgent.config.runtime as AgentRuntimeName,
+				baseUrl: spawnedAgent.config.baseUrl,
 				systemPrompt: spawnedAgent.config.systemPrompt,
 				maxTurns: spawnedAgent.config.maxTurns,
 				workingDirectory: spawnedAgent.config.workingDirectory,
@@ -298,7 +365,7 @@ export class AgentPool extends EventEmitter {
 				openOnWrite: false,
 				events: {
 					onToolEnd: (e) => {
-						const file = e.args?.path;
+						const file = scopedWriteTarget(e.toolName, e.args);
 						if (!e.success || !SCOPED_WRITE_TOOLS.has(e.toolName) || typeof file !== "string")
 							return;
 						const rel = relativeTo(spawnedAgent.config.workingDirectory, file);
@@ -307,13 +374,30 @@ export class AgentPool extends EventEmitter {
 				},
 			});
 
-			// Check if Ollama is available
 			if (!(await agent.isReady())) {
-				throw new Error("Ollama is not running");
+				throw new Error(
+					`${spawnedAgent.config.runtime} is not reachable for model ${spawnedAgent.config.model}`,
+				);
 			}
 
 			// Execute the task
-			const result = await agent.chat(spawnedAgent.task.description);
+			let result = await agent.chat(withChildGuidance(spawnedAgent.task.description));
+
+			// A child that ended with part of its scope unwritten (the note beside
+			// its edit) is asked to finish by the same child, which still holds the
+			// task in its history, instead of leaving a new child to write it.
+			const { unwrittenScopeFiles, finishScopePrompt, MAX_FINISH_FOLLOW_UPS } = await import(
+				"./agent-outcome"
+			);
+			for (let i = 0; i < MAX_FINISH_FOLLOW_UPS; i++) {
+				if (spawnedAgent.status !== "running") break;
+				const unwritten = unwrittenScopeFiles(
+					spawnedAgent,
+					Object.keys(spawnedAgent.scopeBaseline),
+				);
+				if (unwritten.length === 0) break;
+				result = await agent.chat(finishScopePrompt(unwritten));
+			}
 
 			// Evidence before "completed": did the scoped files change, and do their tests pass?
 			if (Object.keys(spawnedAgent.scopeBaseline).length > 0) {
@@ -344,6 +428,10 @@ export class AgentPool extends EventEmitter {
 				}
 			}
 
+			// Read through a function: cancel() can flip status during the awaits above,
+			// which the compiler's narrowing from the earlier loop guard cannot see.
+			const wasCancelled = (): boolean => spawnedAgent.status === "cancelled";
+			if (wasCancelled()) return;
 			spawnedAgent.status = "completed";
 			spawnedAgent.task.status = "completed";
 			spawnedAgent.task.result = result;

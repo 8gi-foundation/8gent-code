@@ -19,15 +19,25 @@ import {
 	CHECK_AGENT_DESCRIPTION,
 	LIST_AGENTS_DESCRIPTION,
 	SPAWN_AGENT_DESCRIPTION,
+	SPAWN_MODEL_DESCRIPTION,
+	SPAWN_RUNTIME_DESCRIPTION,
 	checkAgentTool,
 	listAgentsTool,
 	spawnAgentTool,
 } from "../orchestration/delegation-tools";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
+import { commandDir, withCommandDir } from "../permissions/command-policy";
+import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
-import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
-import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
+import {
+	RunCommandSandboxRequired,
+	runCommandSandboxRefusal,
+	wrapRunCommand,
+	wrapRunCommandArgv,
+} from "../permissions/run-command-sandbox";
+import { editScopeViolation, emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
+import { applyAt, editRefusal, gateWriteTool, logEditRefusal, resolveEdit } from "../permissions/write-content-gate";
 import {
 	type PermissionModeHolder,
 	currentPermissionMode,
@@ -36,8 +46,13 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
-import { type CreatedFiles, watchRedirects, watchWrite } from "../permissions/s1-created-files";
+import { type CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
+import { withImagesWritten } from "./image-shape";
+import { writeShapeLine } from "./write-shape";
+import { writeScopeLine } from "./write-scope";
+import { safePath } from "../eight/tools";
+import { type PathAccess, validatePath } from "../permissions/path-guard";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -50,6 +65,8 @@ export interface ToolContext {
 	permission?: PermissionModeHolder;
 	/** Files this agent created, shared with its ToolExecutor (#3177); undefined: none recorded. */
 	createdFiles?: CreatedFiles;
+	/** Edit scope of a scoped agent; the media write tools refuse outside it. */
+	allowedPaths?: string[];
 }
 
 // The context is per agent, not per process (#3127). An agent hands its own
@@ -201,8 +218,33 @@ function gateWrite(toolName: string, args: Record<string, unknown>): string | nu
 	return gateWriteTool(ctx.agentId ?? "primary", toolName, args, ctx.workingDirectory);
 }
 
-function resolvePath(p: string): string {
-	return path.isAbsolute(p) ? p : path.join(getToolContext().workingDirectory, p);
+/** Absolute path for a tool, refused by the path guard. The access mode is explicit on every call. */
+function resolvePath(p: string, access: PathAccess): string {
+	const wd = getToolContext().workingDirectory;
+	const guard = validatePath(p, wd, {}, access);
+	if (!guard.ok) throw new Error(`Path blocked by path-guard: ${guard.reason} ("${p}")`);
+	return path.isAbsolute(p) ? p : path.join(wd, p);
+}
+
+/**
+ * The path a native file tool may touch (#3747, #3759): inside the workspace
+ * root, by safePath (traversal, symlink escape, credential paths). Returns the
+ * path, or the refusal to hand back. Used by native write_file, edit_file and
+ * read_file; run_command and the notebook tools (#3760) are not covered.
+ */
+function confinedPath(p: string, outcome: "written" | "read"): { path: string } | { refused: string } {
+	if (p.includes("\0")) {
+		return { refused: `Error: Path contains a null byte, which is not allowed in a file path. Nothing was ${outcome}.` };
+	}
+	try {
+		return { path: safePath(p, getToolContext().workingDirectory, outcome === "read" ? "read" : "write") };
+	} catch (err) {
+		return { refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was ${outcome}.` };
+	}
+}
+
+function confinedWritePath(p: string): { path: string } | { refused: string } {
+	return confinedPath(p, "written");
 }
 
 // ============================================
@@ -217,7 +259,7 @@ const getOutline = tool({
 	}),
 	execute: async ({ filePath }) => {
 		const { parseTypeScriptFile } = await import("../ast-index/typescript-parser");
-		const absolutePath = resolvePath(filePath);
+		const absolutePath = resolvePath(filePath, "read");
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 
 		try {
@@ -257,7 +299,7 @@ const getSymbol = tool({
 
 		const filePath = symbolId.slice(0, separatorIndex);
 		const symbolName = symbolId.slice(separatorIndex + 2);
-		const absolutePath = resolvePath(filePath);
+		const absolutePath = resolvePath(filePath, "read");
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 
 		try {
@@ -372,7 +414,9 @@ const readFile = tool({
 		path: z.string().describe("Path to the file to read"),
 	}),
 	execute: async ({ path: filePath }) => {
-		const absolutePath = resolvePath(filePath);
+		const target = confinedPath(filePath, "read");
+		if ("refused" in target) return target.refused;
+		const absolutePath = target.path;
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
@@ -393,15 +437,23 @@ const writeFile = tool({
 	execute: async ({ path: filePath, content }) => {
 		const blocked = gateWrite("write_file", { path: filePath, content });
 		if (blocked) return blocked;
-		const absolutePath = resolvePath(filePath);
+		const target = confinedWritePath(filePath);
+		if ("refused" in target) return target.refused;
+		const absolutePath = target.path;
 		const dir = path.dirname(absolutePath);
 		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+		const wasNew = pathAbsent(absolutePath);
 		const recordWrite = watchWrite(absolutePath, getToolContext().createdFiles);
 		fs.writeFileSync(absolutePath, content);
 		recordWrite();
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, getToolContext().workingDirectory);
-		return `File written: ${absolutePath}${deckLine ? `\n${deckLine}` : ""}`;
+		// Report what is on disk so a requested count can be checked (#3580).
+		const shape = writeShapeLine(absolutePath, content);
+		// A new top-folder file while the work lives in one subfolder (#3580).
+		const { createdFiles, workingDirectory } = getToolContext();
+		const scope = writeScopeLine(createdFiles, workingDirectory, absolutePath, wasNew);
+		return `File written: ${absolutePath}${shape ? `\n${shape}` : ""}${scope ? `\n${scope}` : ""}${deckLine ? `\n${deckLine}` : ""}`;
 	},
 });
 
@@ -411,22 +463,41 @@ const editFile = tool({
 		path: z.string().describe("Path to the file"),
 		oldText: z.string().describe("Text to find and replace"),
 		newText: z.string().describe("Replacement text"),
+		startLine: z
+			.number()
+			.int()
+			.optional()
+			.describe("1-based line; when oldText appears more than once, edit the copy at or after this line"),
 	}),
-	execute: async ({ path: filePath, oldText, newText }) => {
+	execute: async ({ path: filePath, oldText, newText, startLine }) => {
 		// No anchor, no edit (#3101): an empty oldText used to prepend newText.
 		const noAnchor = emptyOldTextError(oldText, filePath);
 		if (noAnchor) return noAnchor;
-		const blocked = gateWrite("edit_file", { path: filePath, oldText, newText });
+		const blocked = gateWrite("edit_file", { path: filePath, oldText, newText, startLine });
 		if (blocked) return blocked;
-		const absolutePath = resolvePath(filePath);
+		const target = confinedWritePath(filePath);
+		if ("refused" in target) return target.refused;
+		const absolutePath = target.path;
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 		const content = fs.readFileSync(absolutePath, "utf-8");
-		const edited = applyEdit(content, oldText, newText);
+		const resolved = resolveEdit(content, oldText, newText, startLine, filePath);
+		const refusal = editRefusal(resolved, filePath);
+		if (refusal) {
+			logEditRefusal(resolved, filePath, oldText.length);
+			return refusal;
+		}
+		const edited =
+			resolved.kind === "ok"
+				? applyAt(content, resolved.idx, resolved.oldLength, resolved.newText)
+				: null;
 		if (edited === null)
 			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
 		const recordEdit = watchWrite(absolutePath, getToolContext().createdFiles);
 		fs.writeFileSync(absolutePath, edited);
 		recordEdit();
+		if (resolved.kind === "ok" && resolved.matchedLine !== undefined) {
+			return `File edited (matched ignoring whitespace at line ${resolved.matchedLine}): ${absolutePath}`;
+		}
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
 	},
 });
@@ -439,7 +510,7 @@ const listFiles = tool({
 	}),
 	execute: async ({ path: dirPath, pattern }) => {
 		const { glob } = await import("glob");
-		const absolutePath = resolvePath(dirPath || ".");
+		const absolutePath = resolvePath(dirPath || ".", "read");
 		const files = await glob(pattern || "**/*", {
 			cwd: absolutePath,
 			ignore: ["**/node_modules/**", "**/dist/**", "**/.git/**"],
@@ -466,7 +537,7 @@ const listFiles = tool({
 const gitStatus = tool({
 	description: "Get git status",
 	inputSchema: z.object({}),
-	execute: async () => runShellCommand("git status"),
+	execute: async () => runArgv("git", ["status"]),
 });
 
 const gitDiff = tool({
@@ -474,7 +545,7 @@ const gitDiff = tool({
 	inputSchema: z.object({
 		staged: z.boolean().optional().describe("Show staged changes only"),
 	}),
-	execute: async ({ staged }) => runShellCommand(staged ? "git diff --staged" : "git diff"),
+	execute: async ({ staged }) => runArgv("git", staged ? ["diff", "--staged"] : ["diff"]),
 });
 
 const gitLog = tool({
@@ -482,7 +553,8 @@ const gitLog = tool({
 	inputSchema: z.object({
 		count: z.number().optional().describe("Number of commits to show (default: 10)"),
 	}),
-	execute: async ({ count }) => runShellCommand(`git log --oneline -${count || 10}`),
+	execute: async ({ count }) =>
+		runArgv("git", ["log", "--oneline", `-${Math.floor(Math.abs(Number(count) || 10)) || 10}`]),
 });
 
 const gitAdd = tool({
@@ -490,7 +562,13 @@ const gitAdd = tool({
 	inputSchema: z.object({
 		files: z.string().optional().describe("Files to add (default: all)"),
 	}),
-	execute: async ({ files }) => runShellCommand(`git add ${files || "."}`),
+	// Whitespace-separated pathspecs after "--": none of them can be an option.
+	execute: async ({ files }) => {
+		const paths = String(files || "")
+			.split(/\s+/)
+			.filter(Boolean);
+		return runArgv("git", ["add", "--", ...(paths.length ? paths : ["."]).map(val)]);
+	},
 });
 
 const gitCommit = tool({
@@ -498,7 +576,7 @@ const gitCommit = tool({
 	inputSchema: z.object({
 		message: z.string().describe("Commit message"),
 	}),
-	execute: async ({ message }) => runShellCommand(`git commit -m "${message}"`),
+	execute: async ({ message }) => runArgv("git", ["commit", "-m", val(message)]),
 });
 
 const gitPush = tool({
@@ -507,13 +585,13 @@ const gitPush = tool({
 		setUpstream: z.boolean().optional().describe("Set upstream tracking"),
 	}),
 	execute: async ({ setUpstream }) =>
-		runShellCommand(`git push ${setUpstream ? "-u origin HEAD" : ""}`),
+		runArgv("git", setUpstream ? ["push", "-u", "origin", "HEAD"] : ["push"]),
 });
 
 const gitBranch = tool({
 	description: "List all git branches",
 	inputSchema: z.object({}),
-	execute: async () => runShellCommand("git branch -a"),
+	execute: async () => runArgv("git", ["branch", "-a"]),
 });
 
 const gitCheckout = tool({
@@ -521,7 +599,9 @@ const gitCheckout = tool({
 	inputSchema: z.object({
 		branch: z.string().describe("Branch name to checkout"),
 	}),
-	execute: async ({ branch }) => runShellCommand(`git checkout ${branch}`),
+	// No "--" here: after it git checkout reads paths, not a branch. Refuse instead.
+	execute: async ({ branch }) =>
+		optionRefusal("Branch", String(branch)) ?? runArgv("git", ["checkout", val(branch)]),
 });
 
 const gitCreateBranch = tool({
@@ -529,7 +609,8 @@ const gitCreateBranch = tool({
 	inputSchema: z.object({
 		branch: z.string().describe("New branch name"),
 	}),
-	execute: async ({ branch }) => runShellCommand(`git checkout -b ${branch}`),
+	execute: async ({ branch }) =>
+		optionRefusal("Branch", String(branch)) ?? runArgv("git", ["checkout", "-b", val(branch)]),
 });
 
 // ============================================
@@ -539,7 +620,7 @@ const gitCreateBranch = tool({
 const ghPrList = tool({
 	description: "List pull requests",
 	inputSchema: z.object({}),
-	execute: async () => runShellCommand("gh pr list"),
+	execute: async () => runArgv("gh", ["pr", "list"]),
 });
 
 const ghPrCreate = tool({
@@ -549,7 +630,7 @@ const ghPrCreate = tool({
 		body: z.string().optional().describe("PR description"),
 	}),
 	execute: async ({ title, body }) =>
-		runShellCommand(`gh pr create --title "${title}" --body "${body || ""}"`),
+		runArgv("gh", ["pr", "create", "--title", val(title), "--body", val(body || "")]),
 });
 
 const ghPrView = tool({
@@ -557,13 +638,20 @@ const ghPrView = tool({
 	inputSchema: z.object({
 		number: z.number().optional().describe("PR number (default: current branch PR)"),
 	}),
-	execute: async ({ number }) => runShellCommand(`gh pr view ${number || ""}`),
+	execute: async ({ number }) => {
+		if (number === undefined || number === null) return runArgv("gh", ["pr", "view"]);
+		// A PR number is a positive integer; anything else is refused, never sent as NaN.
+		const n = Number(number);
+		if (!Number.isSafeInteger(n) || n <= 0)
+			return `[BLOCKED] PR number must be a positive integer. Got: ${String(number)}`;
+		return runArgv("gh", ["pr", "view", String(n)]);
+	},
 });
 
 const ghIssueList = tool({
 	description: "List issues",
 	inputSchema: z.object({}),
-	execute: async () => runShellCommand("gh issue list"),
+	execute: async () => runArgv("gh", ["issue", "list"]),
 });
 
 const ghIssueCreate = tool({
@@ -578,9 +666,16 @@ const ghIssueCreate = tool({
 	}),
 	execute: async ({ title, body, assignee }) => {
 		const who = assignee || "@me";
-		return runShellCommand(
-			`gh issue create --title "${title}" --body "${body || ""}" --assignee "${who}"`,
-		);
+		return runArgv("gh", [
+			"issue",
+			"create",
+			"--title",
+			val(title),
+			"--body",
+			val(body || ""),
+			"--assignee",
+			val(who),
+		]);
 	},
 });
 
@@ -595,10 +690,15 @@ const runCommand = tool({
 		command: z.string().describe("Command to run"),
 	}),
 	execute: async ({ command }) => {
-		// Same guard as ToolExecutor.run_command: one sanitizer for both paths.
+		// Same guards, in the same order, as ToolExecutor.run_command (#3993).
+		const backstop = preSpawnRefusal(command, getToolContext().workingDirectory);
+		if (backstop) return backstop;
 		const validation = sanitizeShellCommand(command);
 		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
-		return runShellCommand(command);
+		const startedAt = Date.now();
+		const output = await runShellCommand(command);
+		// Report images the command drew, and any cut off at an edge (#3580).
+		return withImagesWritten(output, getToolContext().workingDirectory, startedAt);
 	},
 });
 
@@ -678,7 +778,7 @@ const readImage = tool({
 	}),
 	execute: async ({ path: imagePath }) => {
 		const { readImage } = await import("../tools/image");
-		const absolutePath = resolvePath(imagePath);
+		const absolutePath = resolvePath(imagePath, "read");
 		try {
 			const imageInfo = await readImage(absolutePath);
 			return JSON.stringify(
@@ -710,7 +810,7 @@ const describeImage = tool({
 	}),
 	execute: async ({ path: imagePath, prompt }) => {
 		const { describeImage } = await import("../tools/image");
-		const absolutePath = resolvePath(imagePath);
+		const absolutePath = resolvePath(imagePath, "read");
 		try {
 			const description = await describeImage(
 				absolutePath,
@@ -813,6 +913,67 @@ const makePdfTool = tool({
 	},
 });
 
+const renderVideoDeckTool = tool({
+	description:
+		"Render a JSON spec into an mp4 slide video, deterministically, with local code only. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task. Returns { path, durationSec, slides, width, height, hasAudio }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?, image? (png/jpg inside the working directory), seconds? (1-60, default 4), narration? (spoken by the local voice), voice? }] }. No music, no network.",
+	inputSchema: z.object({
+		spec: z.record(z.string(), z.unknown()).describe("The deck spec"),
+		out: z.string().optional().describe("Output .mp4 path inside the working directory (default deck.mp4)"),
+	}),
+	execute: async ({ spec, out }) => {
+		try {
+			const { resolveDeckOut } = await import("../eight/tools");
+			const wd = getToolContext().workingDirectory;
+			const target = resolveDeckOut(out, wd);
+			const ctx = getToolContext();
+			const scoped = editScopeViolation("render_video_deck", { out: out ?? "deck.mp4" }, wd, ctx.allowedPaths);
+			if (scoped) return scoped;
+			const blocked = gateWrite("render_video_deck", { path: target });
+			if (blocked) return blocked;
+			const { renderVideoDeck } = await import("../tools/video-deck");
+			return JSON.stringify(await renderVideoDeck({ spec, out: target, cwd: wd }), null, 2);
+		} catch (err) {
+			return JSON.stringify(
+				{ error: `render_video_deck failed: ${err instanceof Error ? err.message : String(err)}` },
+				null,
+				2,
+			);
+		}
+	},
+});
+
+const speakTool = tool({
+	description:
+		"Speak text aloud with a local neural voice (Supertonic, KittenTTS fallback) and write a wav inside the working directory. Returns { path, durationSec, voice, engine }. Use for voice-overs on narrated media. Never uses macOS say or espeak; errors clearly if no neural engine is installed. Voices: Daniel (default), Rishi, Samantha, Moira, Karen, Tessa, Zara, Reed, Solomon, AIJames, Luis, Ralph, Albert, Alex, Victoria, Kathy, Allison, Ava. Example: speak({ text: 'Welcome to the briefing.', voice: 'Rishi', out: 'intro.wav' }).",
+	inputSchema: z.object({
+		text: z.string().describe("The words to speak (max 2000 characters)"),
+		voice: z.string().optional().describe("Voice name from the fixed list; defaults to Daniel"),
+		out: z
+			.string()
+			.optional()
+			.describe("Output .wav path inside the working directory"),
+	}),
+	execute: async ({ text, voice, out }) => {
+		try {
+			const { resolveSpeakOut } = await import("../eight/tools");
+			const target = resolveSpeakOut(out, getToolContext().workingDirectory);
+			const blocked = gateWrite("speak", { path: target });
+			if (blocked) return blocked;
+			const { speak } = await import("../tools/speak");
+			return JSON.stringify(await speak({ text, voice, out: target }), null, 2);
+		} catch (err) {
+			return JSON.stringify(
+				{
+					error: `speak failed: ${err instanceof Error ? err.message : String(err)}`,
+					hint: "out must be a .wav inside the working directory. Needs Supertonic or KittenTTS installed locally; do not fall back to say.",
+				},
+				null,
+				2,
+			);
+		}
+	},
+});
+
 // ============================================
 // PDF Tools
 // ============================================
@@ -823,7 +984,7 @@ const readPdf = tool({
 		path: z.string().describe("Path to the PDF file"),
 	}),
 	execute: async ({ path: pdfPath }) => {
-		const absolutePath = resolvePath(pdfPath);
+		const absolutePath = resolvePath(pdfPath, "read");
 		try {
 			// PDF support is stubbed for now
 			throw new Error("PDF support coming soon");
@@ -840,7 +1001,7 @@ const readPdfPage = tool({
 		pageNum: z.number().describe("Page number to read"),
 	}),
 	execute: async ({ path: pdfPath, pageNum }) => {
-		const absolutePath = resolvePath(pdfPath);
+		const absolutePath = resolvePath(pdfPath, "read");
 		try {
 			throw new Error("PDF support coming soon");
 		} catch (err) {
@@ -860,8 +1021,8 @@ const readNotebook = tool({
 	}),
 	execute: async ({ path: notebookPath }) => {
 		const { readNotebook } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
 		try {
+			const absolutePath = resolvePath(notebookPath, "read");
 			const notebook = await readNotebook(absolutePath);
 			const formattedCells = notebook.cells.map((cell: any) => ({
 				index: cell.index,
@@ -904,8 +1065,8 @@ const notebookEditCell = tool({
 		const blocked = gateWrite("notebook_edit_cell", { path: notebookPath, newSource });
 		if (blocked) return blocked;
 		const { editCell } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
 		try {
+			const absolutePath = resolvePath(notebookPath, "write");
 			const result = await editCell(absolutePath, cellIndex, newSource);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -926,8 +1087,8 @@ const notebookInsertCell = tool({
 		const blocked = gateWrite("notebook_insert_cell", { path: notebookPath, source });
 		if (blocked) return blocked;
 		const { insertCell } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
 		try {
+			const absolutePath = resolvePath(notebookPath, "write");
 			const result = await insertCell(absolutePath, afterIndex, cellType, source);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -944,8 +1105,8 @@ const notebookDeleteCell = tool({
 	}),
 	execute: async ({ path: notebookPath, cellIndex }) => {
 		const { deleteCell } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
 		try {
+			const absolutePath = resolvePath(notebookPath, "write");
 			const result = await deleteCell(absolutePath, cellIndex);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -1080,7 +1241,7 @@ const mcpListTools = tool({
 	inputSchema: z.object({}),
 	execute: async () => {
 		try {
-			const { getMCPClient } = await import("../mcp");
+			const { clean, getMCPClient } = await import("../mcp");
 			const mcpClient = getMCPClient();
 			const tools = mcpClient.listTools();
 
@@ -1090,8 +1251,12 @@ const mcpListTools = tool({
 
 			const grouped: Record<string, string[]> = {};
 			for (const { server, tool } of tools) {
-				if (!grouped[server]) grouped[server] = [];
-				grouped[server].push(`  - ${tool.name}: ${tool.description || "No description"}`);
+				// Server-supplied text: control and bidi characters never reach the model.
+				const key = clean(server, 80, true);
+				if (!grouped[key]) grouped[key] = [];
+				grouped[key].push(
+					`  - ${clean(tool.name, 120, true)}: ${clean(tool.description || "No description", 2000, true)}`,
+				);
 			}
 
 			let output = "Available MCP Tools:\n\n";
@@ -1202,15 +1367,23 @@ const backgroundOutput = tool({
 // Shell Command Runner (shared)
 // ============================================
 
-async function runShellCommand(command: string): Promise<string> {
+/**
+ * The gates every command passes before it runs: the text path's pre-spawn
+ * backstops (#3993), the permission policy, System One and the approval card. Returns the refusal to show, or null to run.
+ * Shared by the shell runner and the argv runner, so a git or gh tool is
+ * judged exactly as the same command typed into run_command would be.
+ */
+async function commandRefusal(command: string): Promise<string | null> {
+	// The text path's pre-spawn backstops (#3993): protected files such as
+	// ~/.8gent/settings.json and the browser control tokens, for shell and argv alike.
+	// Judged in the tool's working directory, so relative paths and `cd` resolve as
+	// the command will (#4009 startup-code check), not against process.cwd().
+	const backstop = preSpawnRefusal(command, getToolContext().workingDirectory);
+	if (backstop) return backstop;
 	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
-	const { getHookManager } = await import("../hooks");
-
-	// Captured once: the timer and process callbacks below run after this call.
 	const ctx = getToolContext();
 	const mode = currentPermissionMode();
 	const permissionManager = getPermissionManager();
-	const hookManager = getHookManager();
 
 	const permissionCheck = permissionManager.checkPermission(command);
 	if (permissionCheck === "denied") {
@@ -1245,6 +1418,21 @@ async function runShellCommand(command: string): Promise<string> {
 		);
 		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}
+	return null;
+}
+
+async function runShellCommand(command: string): Promise<string> {
+	// Judge git state against the directory this command runs in (#3748).
+	const cwd = getToolContext().workingDirectory;
+	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command));
+	const { getHookManager } = await import("../hooks");
+
+	// Captured once: the timer and process callbacks below run after this call.
+	const ctx = getToolContext();
+	const hookManager = getHookManager();
+
+	const refusal = await commandRefusal(command);
+	if (refusal !== null) return refusal;
 
 	const startTime = Date.now();
 	await hookManager.executeHooks("beforeCommand", {
@@ -1260,6 +1448,9 @@ async function runShellCommand(command: string): Promise<string> {
 		finalCommand = `${command} -y`;
 	}
 
+	const sandboxRefusal = runCommandSandboxRefusal();
+	if (sandboxRefusal) return sandboxRefusal;
+
 	return new Promise((settle) => {
 		// Redirect targets this command creates are this agent's own files (#3177).
 		const recordRedirects = watchRedirects(finalCommand, ctx.workingDirectory, ctx.createdFiles);
@@ -1267,7 +1458,8 @@ async function runShellCommand(command: string): Promise<string> {
 			recordRedirects();
 			settle(value);
 		};
-		const proc = spawnShell(finalCommand, {
+		// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
+		const proc = spawnShell(wrapRunCommand(finalCommand), {
 			cwd: ctx.workingDirectory,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,
@@ -1377,6 +1569,144 @@ async function runShellCommand(command: string): Promise<string> {
 }
 
 // ============================================
+// Argv Command Runner (git and gh tools, #3998)
+// ============================================
+
+/** Quote one argv word for display, so the gates read what actually runs. */
+/** A word the model supplied, as opposed to a flag the tool wrote itself. */
+export class ModelValue {
+	constructor(readonly text: string) {}
+}
+const val = (x: unknown) => new ModelValue(String(x));
+export type ArgvWord = string | ModelValue;
+
+const argvText = (w: ArgvWord) => (w instanceof ModelValue ? w.text : w);
+
+/**
+ * Quote one argv word for display, so the gates read what actually runs. A
+ * model value that starts with "-" is always quoted: on the approval card it
+ * must read as data, never pass for one of the tool's own flags.
+ */
+function quoteWord(word: ArgvWord): string {
+	const text = argvText(word);
+	const looksLikeFlag = word instanceof ModelValue && text.startsWith("-");
+	if (!looksLikeFlag && text !== "" && /^[A-Za-z0-9_./:@%+=,-]+$/.test(text)) return text;
+	return `'${text.replace(/'/g, `'\\''`)}'`;
+}
+
+/** The command line an argv call is judged and shown as. Display only, never run. */
+export function argvDisplay(bin: string, args: readonly ArgvWord[]): string {
+	return [bin, ...args].map(quoteWord).join(" ");
+}
+
+/**
+ * A value that goes where git or gh reads options would be read as one
+ * (`--upload-pack=x`, `-c core.sshCommand=x`). Refuse it rather than run it.
+ */
+export function optionRefusal(label: string, value: string): string | null {
+	return value.startsWith("-")
+		? `[BLOCKED] ${label} may not start with "-": it would be read as an option. Got: ${value}`
+		: null;
+}
+
+const ARGV_NON_INTERACTIVE_ENV = {
+	GIT_TERMINAL_PROMPT: "0",
+	GIT_ASKPASS: "/usr/bin/true",
+	SSH_ASKPASS: "/usr/bin/true",
+	SSH_ASKPASS_REQUIRE: "force",
+	GH_PROMPT_DISABLED: "1",
+};
+
+const ARGV_TIMEOUT_MS = 120_000;
+
+/**
+ * Run a git or gh tool as argv: the binary and an args array, no shell. Model
+ * text is one argument each and is never parsed for `;`, `$( )`, backticks,
+ * pipes or newlines (#3998). The same permission, System One and approval
+ * gates as run_command judge the quoted display line first.
+ */
+async function runArgv(bin: string, words: ArgvWord[]): Promise<string> {
+	const cwd = getToolContext().workingDirectory;
+	if (commandDir() !== cwd) return withCommandDir(cwd, () => runArgv(bin, words));
+	const display = argvDisplay(bin, words);
+	const args = words.map(argvText);
+	const refusal = await commandRefusal(display);
+	if (refusal !== null) return refusal;
+	// The kernel boundary applies to argv too (#4009, #3612): git runs repository
+	// config (fsmonitor, hooks, aliases, sshCommand), so it is no safer than a shell.
+	const sandboxRefusal = runCommandSandboxRefusal();
+	if (sandboxRefusal) return sandboxRefusal;
+	let spawnArgv: string[];
+	try {
+		spawnArgv = wrapRunCommandArgv(bin, args);
+	} catch (err) {
+		if (err instanceof RunCommandSandboxRequired) return err.message;
+		throw err;
+	}
+	const [file, ...fileArgs] = spawnArgv as [string, ...string[]];
+
+	const { getHookManager } = await import("../hooks");
+	const hookManager = getHookManager();
+	const startTime = Date.now();
+	await hookManager.executeHooks("beforeCommand", { command: display, workingDirectory: cwd });
+
+	const { spawn } = await import("node:child_process");
+	return new Promise((resolve) => {
+		const proc = spawn(file, fileArgs, {
+			cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+			detached: process.platform !== "win32",
+			shell: false,
+			env: { ...process.env, ...ARGV_NON_INTERACTIVE_ENV },
+		});
+		let stdout = "";
+		let stderr = "";
+		let settled = false;
+		proc.stdout?.on("data", (d: Buffer) => {
+			stdout += d.toString();
+		});
+		proc.stderr?.on("data", (d: Buffer) => {
+			stderr += d.toString();
+		});
+		const timer = setTimeout(() => {
+			if (settled) return;
+			settled = true;
+			killProcessTree(proc.pid, "SIGKILL");
+			resolve(`TIMEOUT after ${ARGV_TIMEOUT_MS / 1000}s. Partial output:\n${stdout}\n${stderr}`);
+		}, ARGV_TIMEOUT_MS);
+		proc.on("close", (code) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			hookManager.executeHooks("afterCommand", {
+				command: display,
+				exitCode: code ?? 0,
+				stdout,
+				stderr,
+				duration: Date.now() - startTime,
+				workingDirectory: cwd,
+			});
+			resolve(
+				code === 0
+					? stdout || stderr || "Command completed successfully."
+					: `Exit code ${code}:\n${stdout}\n${stderr}`,
+			);
+		});
+		proc.on("error", (err: Error) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			hookManager.executeHooks("onError", {
+				command: display,
+				error: err.message,
+				workingDirectory: cwd,
+			});
+			resolve(`Error: ${err.message}`);
+		});
+	});
+}
+
+// ============================================
 // Multi-Agent Orchestration Tools
 // ============================================
 
@@ -1390,13 +1720,11 @@ const spawnAgent = tool({
 		runtime: z
 			.enum(["8gent", "claude", "shell"])
 			.optional()
-			.describe("Runtime: '8gent' (default), 'claude' (Claude CLI), 'shell' (sh -c)"),
+			.describe(SPAWN_RUNTIME_DESCRIPTION),
 		model: z
 			.string()
 			.optional()
-			.describe(
-				"Model to use (only for 8gent runtime). Use 'auto:free' to automatically pick the best free model from OpenRouter.",
-			),
+			.describe(SPAWN_MODEL_DESCRIPTION),
 		timeout: z.number().optional().describe("Timeout in ms (default: 5 min, only for claude/shell)"),
 		allowedPaths: z.array(z.string()).optional().describe(ALLOWED_PATHS_DESCRIPTION),
 		permissionMode: z.enum(["plan", "ask", "guarded", "infinite"]).optional().describe(PERMISSION_MODE_DESCRIPTION),
@@ -1984,6 +2312,40 @@ const queryDesignSystem = tool({
 				style: s.style,
 			})),
 		};
+	},
+});
+
+const deckTheme = tool({
+	description:
+		"[DESIGN] Import-ready Marp deck themes, one per design system. USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
+	inputSchema: z.object({
+		action: z.enum(["list", "apply", "mix"]).describe("list | apply | mix"),
+		deck: z.string().optional().describe("Path to the deck .md (apply, mix)"),
+		name: z.string().optional().describe("Theme name from list (apply)"),
+		palette: z.string().optional().describe("Theme name to take colours from (mix)"),
+		type: z.string().optional().describe("Theme name to take fonts from (mix)"),
+	}),
+	execute: async ({ action, deck, name, palette, type }) => {
+		try {
+			const dt = await import("../design-systems/deck-themes.js");
+			if (action === "list") return { themes: dt.listThemes() };
+			if (!deck) return { error: `deck_theme ${action} needs deck (path to the deck .md)` };
+			if (action === "apply" && !name) return { error: "deck_theme apply needs name" };
+			if (action === "mix" && (!palette || !type)) {
+				return { error: "deck_theme mix needs palette and type" };
+			}
+			const cwd = getToolContext().workingDirectory;
+			const deckPath = dt.resolveDeckPath(resolvePath(deck, "write"), cwd);
+			const themeName = action === "mix" ? `${palette}-x-${type}` : String(name);
+			for (const target of [deckPath, dt.cssPathFor(deckPath, themeName)]) {
+				const blocked = gateWrite("write_file", { path: target, content: "" });
+				if (blocked) return { error: blocked };
+			}
+			if (action === "apply") return dt.applyTheme(deckPath, String(name));
+			return dt.mixTheme(deckPath, String(palette), String(type));
+		} catch (err) {
+			return { error: String(err instanceof Error ? err.message : err) };
+		}
 	},
 });
 
@@ -2950,6 +3312,7 @@ export const agentTools = bindToolContext({
 	// Design
 	suggest_design: suggestDesign,
 	query_design_system: queryDesignSystem,
+	deck_theme: deckTheme,
 
 	// Self-awareness
 	self_inspect: selfInspect,
@@ -2994,6 +3357,8 @@ export const agentTools = bindToolContext({
 
 	// Creative — document production (Markdown/HTML -> PDF in ~/.8gent/creative)
 	make_pdf: makePdfTool,
+	speak: speakTool,
+	render_video_deck: renderVideoDeckTool,
 } satisfies ToolSet);
 
 export type AgentTools = typeof agentTools;

@@ -108,7 +108,7 @@ export const NO_MODELS_REASON = "no models";
  * one probe per local provider, each capped at `timeoutMs`.
  */
 export async function resolveReadyProvider(
-	want: { provider: string; model: string },
+	want: { provider: string; model: string; pinned?: boolean },
 	opts: { timeoutMs?: number; endpoints?: LocalProviderEndpoint[] } = {},
 ): Promise<ReadinessDecision> {
 	const timeoutMs = opts.timeoutMs ?? PROBE_TIMEOUT_MS;
@@ -124,6 +124,18 @@ export async function resolveReadyProvider(
 
 	const reason = own.ok ? NO_MODELS_REASON : own.reason;
 	const what = reason === NO_MODELS_REASON ? "has no models" : `is unreachable (${reason})`;
+	// A provider named with --provider is never swapped for another (#3746).
+	if (want.pinned) {
+		return {
+			kind: "none",
+			from: configured.provider,
+			fromAddress: addressOf(configured.modelsUrl),
+			reason,
+			notice:
+				`${configured.label} ${what}. It was chosen with --provider, so no other provider is used. ` +
+				`Start ${configured.label}, or pick another provider with /provider.`,
+		};
+	}
 	for (const alt of endpoints) {
 		if (alt.provider === configured.provider) continue;
 		const r = await probeModels(alt.modelsUrl, alt.extract, timeoutMs);
@@ -181,10 +193,10 @@ export function createReadinessCache(
 	ttlMs = READINESS_RETRY_MS,
 	resolve: typeof resolveReadyProvider = resolveReadyProvider,
 	now: () => number = Date.now,
-): (want: { provider: string; model: string }) => Promise<ReadinessDecision> {
+): (want: { provider: string; model: string; pinned?: boolean }) => Promise<ReadinessDecision> {
 	const entries = new Map<string, { at: number; done: boolean; p: Promise<ReadinessDecision> }>();
 	return (want) => {
-		const key = `${want.provider}\u0000${want.model}`;
+		const key = `${want.provider}\u0000${want.model}\u0000${want.pinned ? "pinned" : ""}`;
 		const hit = entries.get(key);
 		if (hit && (!hit.done || now() - hit.at < ttlMs)) return hit.p;
 		const entry = { at: now(), done: false, p: resolve(want) };

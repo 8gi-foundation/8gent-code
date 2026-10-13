@@ -83,9 +83,11 @@
  */
 
 import * as readline from "node:readline";
+import { activeShellKind } from "../core/shell";
 import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
 import type { CreatedFiles } from "./s1-created-files";
+import { posixRulesApply } from "./shell-tools";
 import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
 
 export const SYSTEM_ONE_FLAG = "EIGHT_SYSTEM_ONE";
@@ -197,7 +199,13 @@ function noticeOnce(key: string, line: string): void {
  * inside the caller's working directory passes without the judge, since it
  * deletes nothing; and (#3177) so does one whose targets are absent or
  * untracked files this session created, per the caller's CreatedFiles record
- * (see s1-rm-nothing.ts and s1-created-files.ts for the exact conditions).
+ * (see s1-rm-nothing.ts and s1-created-files.ts for the exact conditions);
+ * and (#3669) so does `rm [-f] <file>` / `unlink <file>` of exactly one
+ * untracked scratch-style regular file inside the workspace (under run/,
+ * tmp/ or .cache/, or named *.lock / *.pid), such as a stale lock whose
+ * owner is dead (see s1-rm-single.ts). When that last rule says no but the
+ * command was close, its plain-words hint is appended to a block message so
+ * a block is not a dead end.
  *
  * `bun test` runs the repo's own test code, so skipping the judge for it is a
  * trust call: EIGHT_S1_ALLOWLIST_BUN_TEST=1 opts in, and it is OFF by default.
@@ -481,13 +489,17 @@ function blockMessage(
 	thresholds: SystemOneThresholds | "unknown",
 	why: string,
 	command: string,
+	hint?: string,
 ): string {
 	const fields = `verdict=${g.verdict} pYes=${fmtP(g.pYes)} backend=${g.backend} model=${g.model} thresholds=${thresholds}`;
 	// A block is final: no card was shown and no approval can pass it. Say so,
 	// so the reply never tells the person their approval is what is missing (#3124).
 	const final =
 		g.verdict === "block" ? " No approval can run it: a System One block is final." : "";
-	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (on; ${SYSTEM_ONE_FLAG}=0 turns it off): ${why}. The command was not run.${final} ${SYSTEM_ONE_NO_RETRY} Command: ${command}`;
+	// Plain words on why the single-file delete rule did not take it, and what
+	// it does allow (#3669), so the block is not a dead end.
+	const help = hint ? ` ${hint}` : "";
+	return `${SYSTEM_ONE_BLOCK_MARKER} ${fields}. Blocked by System One (on; ${SYSTEM_ONE_FLAG}=0 turns it off): ${why}. The command was not run.${final}${help} ${SYSTEM_ONE_NO_RETRY} Command: ${command}`;
 }
 
 /** TUI approval card if a frontend registered one, else an interactive stdin prompt (default No), else null. */
@@ -519,7 +531,11 @@ export async function systemOneGate(
 	const mode = systemOneMode(env);
 	if (mode === "off") return { run: true };
 	const allow = systemOneAllowlist(env);
-	if (allow.enabled) {
+	/** Plain words for the block message when the single-file rule nearly matched (#3669). */
+	let hint: string | undefined;
+	// The rm/mv/run/curl shortcuts below read POSIX quoting. Where the shell parses the
+	// line another way (PowerShell, cmd ^ or %, any line break) they have no opinion.
+	if (allow.enabled && posixRulesApply(command, activeShellKind())) {
 		try {
 			const { readOnlyAllowlist } = await import("../decide/allowlist");
 			const a = readOnlyAllowlist(command, { bunTest: allow.bunTest });
@@ -567,6 +583,168 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// One untracked scratch-style file that existed before the session,
+		// such as a stale lock whose owner process is dead (#3669). Exactly one
+		// named regular file inside the workspace; see s1-rm-single.ts.
+		try {
+			const { singleFileDelete } = await import("./s1-rm-single");
+			const single = singleFileDelete(command, cwd);
+			if (single.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: `rm of one untracked scratch file inside the workspace (${single.rel})`,
+					},
+				};
+			}
+			hint = single.hint;
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// A plain run of the project's own script inside the workspace, with
+		// only workspace or /tmp paths in its environment and arguments, whose
+		// source (and local imports) spawns, fetches and deletes nothing (#3937).
+		// Default mode only: strict/Guarded never skips the judge or the person.
+		try {
+			const { runInProject } = await import("./s1-run-in-project");
+			const run = mode === "default" ? runInProject(command, cwd) : { ok: false as const };
+			if (run.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: run.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// `8gent deck render <spec.json> [out.mp4]` with both paths inside the
+		// workspace: the shell door to render_video_deck (same renderer, same
+		// confinement). Default mode only.
+		try {
+			const { deckRenderInProject } = await import("./s1-deck-render");
+			const deck =
+				mode === "default" ? deckRenderInProject(command, cwd, env) : { ok: false as const };
+			if (deck.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: deck.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// A plain curl whose every URL is a loopback http(s) server and whose
+		// every file stays inside the workspace (#3941). Default mode only.
+		try {
+			const { curlToLoopback } = await import("./s1-curl-loopback");
+			const c: { ok: boolean; reason?: string; refuse?: string } =
+				mode === "default" ? curlToLoopback(command, cwd) : { ok: false };
+			if (!c.ok && c.refuse) {
+				// Deterministic refusal (#3967): tell the model what to do, no judge call.
+				const guard: BashGuardResult = {
+					verdict: "block",
+					pYes: Number.NaN,
+					backend: "allowlist",
+					model: "allowlist",
+					reason: c.refuse,
+				};
+				return {
+					run: false,
+					guard,
+					message: blockMessage(guard, "unknown", c.refuse, command),
+				};
+			}
+			if (c.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: c.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// The login-note recipe (#4072): `sed -n 's/^Label: */field=/w .tmp/NAME' FILE`,
+		// one line of a workspace file copied into .tmp/, printing nothing. Exact
+		// shape only; see s1-login-line.ts. Default mode only.
+		try {
+			const { loginLineToTmp } = await import("./s1-login-line");
+			const line = mode === "default" ? loginLineToTmp(command, cwd) : { ok: false as const };
+			if (line.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: line.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// A plain `mv` whose every endpoint is inside the workspace and that
+		// overwrites nothing (#3809). Needs the caller's working directory.
+		try {
+			const { moveInProject } = await import("./s1-mv-in-project");
+			const mv = moveInProject(command, cwd);
+			if (mv.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: mv.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// `git clone <local repo> <new dir inside the workspace>` (#3826).
+		try {
+			const { cloneLocalIntoProject } = await import("./s1-clone-local");
+			const clone = cloneLocalIntoProject(command, cwd);
+			if (clone.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: clone.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 	}
 	let guard: BashGuardResult;
 	let thresholds: SystemOneThresholds | "unknown" = "unknown";
@@ -594,7 +772,7 @@ export async function systemOneGate(
 				err instanceof SystemOneTimeoutError
 					? `the judge gave no verdict within ${ms} ms${warmupLoading ? " (still loading)" : ""}`
 					: detail;
-			return decide(command, await rulesOnly(command, reason), RULES_ONLY);
+			return decide(command, await rulesOnly(command, reason), RULES_ONLY, hint);
 		}
 		// Strict (EIGHT_SYSTEM_ONE=1, Guarded): the checker cannot answer, so
 		// a person decides through the normal card, never an allow (#3193).
@@ -603,7 +781,7 @@ export async function systemOneGate(
 			err instanceof SystemOneTimeoutError
 				? `the checker timed out after ${ms} ms${warmupLoading ? " while still loading" : ""}`
 				: `System One unavailable: ${detail}`;
-		return decide(command, await askInstead(command, reason), RULES_ONLY);
+		return decide(command, await askInstead(command, reason), RULES_ONLY, hint);
 	}
 	if (isModelVerdict(guard)) warmed = true;
 	if (judgeFailed(guard)) {
@@ -612,9 +790,10 @@ export async function systemOneGate(
 			command,
 			mode === "default" ? await rulesOnly(command, reason) : await askInstead(command, reason),
 			RULES_ONLY,
+			hint,
 		);
 	}
-	return decide(command, guard, thresholds as SystemOneThresholds);
+	return decide(command, guard, thresholds as SystemOneThresholds, hint);
 }
 
 /** True when a person can be asked: a TUI approval channel, or an interactive terminal. */
@@ -656,11 +835,17 @@ async function decide(
 	command: string,
 	guard: BashGuardResult,
 	t: SystemOneThresholds,
+	hint?: string,
 ): Promise<SystemOneGateResult> {
 	if (guard.verdict === "allow") return { run: true, guard, thresholds: t };
 	if (guard.verdict === "block") {
 		const why = guard.reason ?? "the command was judged dangerous";
-		return { run: false, guard, thresholds: t, message: blockMessage(guard, t, why, command) };
+		return {
+			run: false,
+			guard,
+			thresholds: t,
+			message: blockMessage(guard, t, why, command, hint),
+		};
 	}
 	// escalate
 	const pDesc = Number.isFinite(guard.pYes) ? `pYes ${fmtP(guard.pYes)}, ` : "";
@@ -689,6 +874,6 @@ async function decide(
 		guard,
 		thresholds: t,
 		humanApproved,
-		message: blockMessage(guard, t, why, command),
+		message: blockMessage(guard, t, why, command, hint),
 	};
 }

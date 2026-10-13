@@ -15,12 +15,21 @@
  *                                     Only James's chat_id should appear here.
  *   - EIGHT_TELEGRAM_LOCAL=1          Opt-in to auto-starting the bridge.
  *
+ * EIGHT_RESUME_ON_BOOT=1 journals open sessions to sessions-journal.json in
+ * the data dir and restores them from their newest time-travel checkpoint on
+ * the next start, so a crash or power cut does not lose the conversation.
+ * Sessions stay journaled until they are destroyed or evicted for idleness,
+ * and a clean shutdown does neither, so an ordinary restart restores them
+ * too. Intended for single-user local daemons only: do not enable it on a
+ * shared or multi-tenant host.
+ *
  * Secrets are read from process.env or any pre-loaded env file. The daemon
  * never prints token contents. See `packages/daemon/scripts/start-local.ts`
  * for the canonical launcher.
  */
 
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { TimeTravelStore } from "../eight/timetravel/checkpoint-store";
 import { ComputerUseTraceStore, defaultTraceDbPath } from "../memory/computer-use-traces";
 import { type TaskPayload, type TaskResult, VesselMesh } from "../orchestration/vessel-mesh";
 import { AgentPool, loadPoolConfig } from "./agent-pool";
@@ -38,9 +47,18 @@ import {
 } from "./dispatch";
 import { bus } from "./events";
 import { startGateway } from "./gateway";
+import { resolveBindHost } from "./origin-guard";
 import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
+import {
+	SessionJournal,
+	autoContinueEnabled,
+	continueInterruptedTurns,
+	resumeJournaledSessions,
+	resumeOnBootEnabled,
+	settleInterruptedToolCalls,
+} from "./session-journal";
 import type { DaemonChannel } from "./types";
 import { installFlowTap } from "../telemetry/flow-stream";
 
@@ -239,8 +257,24 @@ export async function main(): Promise<void> {
 		}
 	}
 
-	// Create the agent pool - manages Agent instances per session
-	pool = new AgentPool(poolConfig);
+	// Create the agent pool - manages Agent instances per session.
+	// EIGHT_RESUME_ON_BOOT=1 (#3552): journal sessions as they open and bring
+	// them back from their newest checkpoint after a crash or power cut. A tool
+	// call that was running at the crash is re-run only if it is a read; any
+	// other is reported to the model as not replayed (#3653). With
+	// EIGHT_AUTO_CONTINUE=1 as well, a turn that was running at the crash is
+	// continued once, after the restore and the settle (#4082).
+	const journal = resumeOnBootEnabled() ? new SessionJournal(`${DATA_DIR}/sessions-journal.json`) : null;
+	pool = new AgentPool(poolConfig, journal ? { journal } : {});
+	if (journal) {
+		const t0 = Date.now();
+		const resumed = resumeJournaledSessions(journal, pool, new TimeTravelStore());
+		const settled = await settleInterruptedToolCalls(journal, pool);
+		const continued = autoContinueEnabled() ? continueInterruptedTurns(journal, pool, settled) : [];
+		console.log(
+			`[daemon] resume-on-boot: ${resumed.length} session(s) restored from journal in ${Date.now() - t0}ms, ${continued.filter((c) => c.outcome !== "abandoned").length} interrupted turn(s) continued (EIGHT_AUTO_CONTINUE=${autoContinueEnabled() ? "1" : "off"})`,
+		);
+	}
 
 	// Wire the dispatch protocol (issue #1896). Surfaces register and
 	// fan results across each other; the daemon is the trusted executor.
@@ -373,8 +407,11 @@ export async function main(): Promise<void> {
 		console.log("[daemon] registered daily CEO summary cron (9 AM)");
 	}
 
-	console.log(`[daemon] ready - ws://localhost:${config.port}`);
-	console.log(`[daemon] health check: http://localhost:${config.port}/health`);
+	// Name the address actually bound, so a 0.0.0.0 daemon never reads as loopback-only.
+	const bound = resolveBindHost();
+	const healthHost = bound === "0.0.0.0" ? "localhost" : bound;
+	console.log(`[daemon] ready - ws://${bound}:${config.port}`);
+	console.log(`[daemon] health check: http://${healthHost}:${config.port}/health`);
 
 	if (localMode) {
 		console.log(`[daemon-local] listening on ws://127.0.0.1:${config.port}`);

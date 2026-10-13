@@ -13,8 +13,19 @@
  * - Multi-avenue tracking
  */
 
-import { Box, type DOMElement, useApp, useInput } from "ink";
-import { t } from "./theme.js";
+import { Box, type DOMElement, useApp, useInput, useStdout } from "ink";
+import {
+	applyDesignSystem,
+	reloadUserThemes,
+	saveThemeChoice,
+	t,
+	type ThemeChoice,
+	themeChoices,
+	themeStatus,
+	userThemeProblems,
+} from "./theme.js";
+import { isUserThemeId } from "./lib/user-themes.js";
+import { findDesignSystem } from "./theme/design-systems.js";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
 	type TaskCategory,
@@ -27,8 +38,18 @@ import {
 	isLlamaServerSelected,
 	resolveLlamaServerUrl,
 } from "../../../packages/local-model-server/index.js";
+import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
-import { SessionTree } from "../../../packages/eight/session-tree.js";
+import { DaemonSessionClient, surfaceLabel } from "./lib/daemon-sessions.js";
+import {
+	type SessionListItem,
+	SessionStore,
+	type TreeNode,
+	listSessions,
+	trashSession,
+} from "../../../packages/eight/session-store.js";
+import { SessionPicker } from "./components/SessionPicker.js";
+import { SessionTree } from "./components/SessionTree.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import {
 	ActivityMonitor,
@@ -68,7 +89,7 @@ import {
 	ADHD_MODE_ENABLED_MSG,
 	ADHD_MODE_SUGGESTION,
 } from "./components/bionic-text.js";
-import { CommandInput } from "./components/command-input.js";
+import { CommandInput, slashMenuCompact } from "./components/command-input.js";
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
 import pkgInfo from "../../../package.json" with { type: "json" };
@@ -160,17 +181,22 @@ import {
 	logError,
 	logMessage,
 	logStep,
+	logStepStart,
 	logTabSwitch,
 	logToolEnd,
 	logToolStart,
 } from "./lib/session-logger.js";
+import { expandPromptSlashCommand } from "./lib/prompt-slash.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
 import { detectBuildIntent } from "./lib/build-intent.js";
+import { copyReply } from "./lib/copy-answer.js";
 import {
-	BUILT_IN_SLASH_COMMANDS,
 	type SlashCommand,
+	builtInCommandsCoreFirst,
+	formatSlashHelp,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
+import { formatHotkeyRows, formatHotkeys } from "./lib/keybindings.js";
 import { BTWView } from "./screens/BTWView.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { MusicPlayerView } from "./screens/MusicPlayerView.js";
@@ -199,6 +225,21 @@ import {
 import { NarratorView } from "./screens/NarratorView.js";
 import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
+import {
+	BANG_ID_PREFIX,
+	BANG_USAGE,
+	type BangRun,
+	bangChatLine,
+	bangContextBlock,
+	bangRunningLine,
+	killBangsOnExit,
+	parseBang,
+	planModeRefusal,
+	sendRefusal,
+	startBang,
+	withShellContext,
+	withoutBangLines,
+} from "./lib/bang-command.js";
 import { MessageViewer } from "./components/MessageViewer.js";
 import { PlanEmpty, PlanPanel, planColumnOpen, usePlanPref } from "./components/PlanPanel.js";
 import { PlanRail, useManagerTasks } from "./components/PlanRail.js";
@@ -209,6 +250,7 @@ import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { isApprovalKeyClaimed, useApprovalCard } from "./hooks/useApprovalCard.js";
 import { ActivityRail } from "./components/ActivityRail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
+import { createProgramStatusEmitter, deriveProgramState, installProgramStatusCleanup } from "./lib/program-status.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
 import { onCopied } from "./lib/click-targets.js";
 import { gitView, useGitSync } from "./hooks/useGitSync.js";
@@ -227,6 +269,12 @@ import {
 	startSystemOneWarmup,
 	systemOneJudgeWarm,
 } from "../../../packages/permissions/system-one-gate.js";
+import { bunFlagsFor, safeBunFlags } from "../../../packages/core/bun-flags.js";
+import {
+	onRunCommandUnsandboxed,
+	runCommandSandboxStatus,
+	sandboxFooterReason,
+} from "../../../packages/permissions/run-command-sandbox.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
 import { NoProviderNotice } from "./components/NoProviderCard.js";
@@ -277,7 +325,8 @@ async function initAuthSystem() {
 }
 
 // The process-wide infinite flag (CLI --infinite) seeds each tab's starting mode.
-import { isInfiniteMode } from "../../../packages/permissions/index.js";
+import { getPermissionManager, isInfiniteMode } from "../../../packages/permissions/index.js";
+import { LOCAL_PROVIDERS } from "../../../packages/permissions/command-policy";
 import {
 	type PermissionMode,
 	type PermissionModeHolder,
@@ -318,6 +367,7 @@ import {
 	isLikelyEmbeddingModelId,
 	normalizeProviderId,
 	declaredModels,
+	filterChatCapable,
 	listsInstalledOllamaModels,
 	missingModelNotice,
 	pickBestChatModel,
@@ -411,7 +461,8 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 	let answers: any[] = [];
 	try {
 		answers = JSON.parse(
-			execFileSync(process.execPath, ["-e", PROBE, ...urls], {
+			// Runs in the user's cwd on every start: never its bunfig.toml or .env (#4013).
+			execFileSync(process.execPath, [...bunFlagsFor(process.execPath), "-e", PROBE, ...urls], {
 				timeout: 3000,
 				stdio: ["ignore", "pipe", "ignore"],
 			}).toString(),
@@ -675,15 +726,31 @@ type ViewMode =
 	| "design"
 	| "history"
 	| "music"
-	| "message-viewer";
+	| "message-viewer"
+	| "theme-select"
+	| "session-picker"
+	| "session-tree";
 
 /** Width of the PLAN column, matching the old PlanRail (24) plus its gap. */
 const PLAN_COLUMN_WIDTH = 24;
+// Pickers drawn over the chat, above the input, as the palette is. Since #2350
+// no other viewMode is drawn, so /model, /provider, /theme, Ctrl+L and
+// Ctrl+Shift+M set a view nobody saw (#3918 D3).
+const PICKER_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>([
+	"model-select",
+	"provider-select",
+	"theme-select",
+	"session-picker",
+	"session-tree",
+]);
+// These two read their own keys (Ctrl+N, Ctrl+S, Ctrl+R, Ctrl+D, Tab, Esc),
+// so the App's global key handler stays out while they are open (#3918 E3, E4).
+const SESSION_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>(["session-picker", "session-tree"]);
 
 // Honest empty states for the plan surfaces. Both fill only from a real
 // source; neither is ever padded with placeholder rows.
 const PLAN_EMPTY_LINE =
-	"No plan steps yet. They appear when the agent writes a PLAN: with numbered steps while working on a request.";
+	"No plan steps yet. They appear when the 8gent writes a PLAN: with numbered steps while working on a request.";
 const AVENUES_EMPTY_LINE =
 	"No avenues in this session. Nothing produces them yet, so this stays empty rather than showing guesses.";
 
@@ -791,6 +858,8 @@ export function App({
 // react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: AppProps) {
 	const { exit } = useApp();
+	// Raw stdout, for terminal sequences such as /copy's OSC 52.
+	const { stdout: inkStdout } = useStdout();
 
 	// Personality greetings (inline for independence)
 	const GREETINGS = [
@@ -939,7 +1008,7 @@ export function App({
 	// Voice chat — adds messages to screen AND calls agent directly
 	const voiceChat = useVoiceChat({
 		onAgentMessage: async (transcript) => {
-			if (!agent || !agentReady) return "Agent not ready.";
+			if (!agent || !agentReady) return "8gent not ready.";
 			const clean = transcript
 				.replace(/\[_EOT_\]/g, "")
 				.replace(/<\|.*?\|>/g, "")
@@ -1031,6 +1100,33 @@ export function App({
 
 	// Named session management
 	const sessionMgr = React.useMemo(() => new SessionManager(), []);
+	// "Update available" notice: one background check per 24 h, silent on any error, off with
+	// EIGHT_NO_UPDATE_CHECK=1 (packages/eight/update-notice.ts). It never blocks startup.
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			try {
+				const [{ maybeUpdateNotice, realNoticeDeps }, { launcherContext }, { getSettingsFilePath }] =
+					await Promise.all([
+						import("../../../packages/eight/update-notice.js"),
+						import("./lib/update-command.js"),
+						import("../../../packages/settings/store.js"),
+					]);
+				const line = await maybeUpdateNotice(
+					realNoticeDeps({ ...launcherContext(), settingsFile: getSettingsFilePath() }),
+				);
+				if (line && !cancelled) addSystemMessage(line);
+			} catch {}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+	// The daemon session this TUI is linked to, if any (#3929, see linkDaemonSession).
+	const daemonLinkRef = useRef<{ client: DaemonSessionClient; off: () => void } | null>(null);
+	/** Whether the history picker is showing daemon sessions (/sessions) or local ones. */
+	const historyPickDaemonRef = useRef(false);
+	const updateConfirmRef = useRef<((q: string) => Promise<boolean>) | null>(null);
 	const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1059,6 +1155,10 @@ export function App({
 				addSystemMessage(
 					`Resumed session: "${resumed.name || resumed.id}" (${resumed.messageCount} messages)`,
 				);
+				if (process.env.EIGHT_UPDATE_NOTE) {
+					addSystemMessage(sanitizeForDisplay(process.env.EIGHT_UPDATE_NOTE));
+					delete process.env.EIGHT_UPDATE_NOTE;
+				}
 			} else {
 				addSystemMessage(`Session "${sessionResume}" not found.`);
 			}
@@ -1078,6 +1178,7 @@ export function App({
 			flushSession();
 		};
 	}, []);
+
 
 	// Animation settings
 	const [showAnimations, setShowAnimations] = useState(true);
@@ -1100,8 +1201,13 @@ export function App({
 	// are never hardcoded - the header used to read "main" whatever branch
 	// was checked out, #2921).
 
-	// Session branching tree
-	const sessionTreeRef = useRef(new SessionTree());
+	// The /resume picker's rows and the /tree view's data (#3918 E3, E4). The
+	// session of record is the JSONL tree store (packages/eight/session-store.ts),
+	// written through sessionMgr; nothing is kept in a second in-memory tree.
+	const [pickerSessions, setPickerSessions] = useState<SessionListItem[]>([]);
+	const [treeView, setTreeView] = useState<{ tree: TreeNode[]; leafId: string | null } | null>(
+		null,
+	);
 
 	// Planning state (legacy predicted-step board)
 	const [kanbanBoard, setKanbanBoard] = useState<KanbanBoard>({
@@ -1144,7 +1250,8 @@ export function App({
 	// View state — now driven by workspace tabs
 	const [viewMode, setViewMode] = useState<ViewMode>("chat");
 
-	// Bubble navigation state (Ctrl+L enters, Esc/Ctrl+L exits)
+	// Bubble navigation state. No key enters it: the bubble strip is not drawn
+	// since #2350, so its old Ctrl+L only took focus from the input (#3918).
 	const [isBubbleNavMode, setIsBubbleNavMode] = useState(false);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1350,6 +1457,12 @@ export function App({
 	// back to the orchestrator's ollama default, routing the turn to the wrong
 	// engine). Cleared once the user explicitly switches provider/tab.
 	const cliProviderRequestedRef = useRef(normalizeProviderId(cliProvider));
+	// A launch --provider naming a local provider pins it: every network command
+	// then asks before it runs (#3748).
+	useEffect(() => {
+		const pinned = cliProviderRequestedRef.current;
+		if (pinned) getPermissionManager().setPinnedLocalProvider(LOCAL_PROVIDERS.has(pinned));
+	}, []);
 	// The tab that is active at launch. A CLI --provider/--model override pins
 	// THIS tab only; switching to or opening other tabs uses their role defaults.
 	const cliPinRef = useRef<CliTabPin | null>(null);
@@ -1367,6 +1480,9 @@ export function App({
 		() => computeCliOverrides(cliProvider, cliModel).model,
 	);
 	const [availableModels, setAvailableModels] = useState<string[]>([]);
+	// Ollama's full /api/tags list before chat filtering, so a model that is
+	// installed but cannot chat is not reported as missing (#3548).
+	const installedOllamaModelsRef = useRef<string[]>([]);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [modelsLoading, setModelsLoading] = useState(false);
@@ -1376,9 +1492,11 @@ export function App({
 	useEffect(() => {
 		if (!activeSessionId) return;
 		const timer = setInterval(() => {
+			// A linked session is saved by the daemon after every turn (#3929).
+			if (daemonLinkRef.current) return;
 			if (messages.length > lastSaveCount.current) {
 				lastSaveCount.current = messages.length;
-				const serializable = messages.map((m) => ({
+				const serializable = withoutBangLines(messages).map((m) => ({
 					role: m.role,
 					content: m.content,
 				}));
@@ -1390,6 +1508,7 @@ export function App({
 		}, 5_000);
 		return () => clearInterval(timer);
 	}, [activeSessionId, messages, currentModel, currentProvider]);
+
 
 	// Fetch models dynamically based on selected provider
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
@@ -1404,7 +1523,8 @@ export function App({
 					// too, not the registry's declared default that may be absent (#3332).
 					// The configured ollama, which may be remote (#3080). Bounded: a
 					// down host left the model list loading for as long as TCP took (#3115).
-					const res = await fetch(`${resolveOllamaBaseUrl()}/api/tags`, {
+					const ollamaRoot = resolveOllamaBaseUrl();
+					const res = await fetch(`${ollamaRoot}/api/tags`, {
 						signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
 					});
 					if (res.ok) {
@@ -1414,8 +1534,13 @@ export function App({
 					const id = String(m.name ?? "").trim();
 					return id.length > 0 ? [id] : [];
 				});
-						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
-						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
+						// What each model reports it can do decides first, so decision-only
+						// models are never offered for chat; the name filter is the fallback (#3548).
+						const chatModels = await filterChatCapable(ollamaRoot, allModels);
+						if (!cancelled) {
+							installedOllamaModelsRef.current = allModels;
+							setAvailableModels(chatModels);
+						}
 					}
 				} else if (currentProvider === "llama-server") {
 					// llama-server lists the model(s) it serves (#3149).
@@ -1527,6 +1652,7 @@ export function App({
 			from: currentModel,
 			to: next,
 			available: availableModels,
+			installed: installedOllamaModelsRef.current,
 		});
 		if (notice) addSystemMessage(notice);
 		setCurrentModel(next);
@@ -1604,6 +1730,8 @@ export function App({
 
 	// TV Mode state — task cards + narrator
 	const viewport = useViewport();
+	// The / menu is open: in a short terminal the focal strip steps aside for it.
+	const [slashMenuOpen, setSlashMenuOpen] = useState(false);
 	// Real rows of the chat box after layout (#3019). The viewport guess
 	// overestimated it and messages overprinted.
 	const chatBoxRef = useRef<DOMElement>(null);
@@ -1651,20 +1779,23 @@ export function App({
 	// Headless callers see no handler and PermissionManager falls back to stdin.
 	const approvalPending = useApprovalCard();
 
-	// A mouse selection copied text (#3239): the footer says so for 2 s.
+	// A short confirmation in the footer's hint slot for 2 s: a mouse
+	// selection copied text (#3239), or a toggle that draws nothing else
+	// changed (^A motion, ^S sound), so its key cap never looks dead.
 	const [copyNotice, setCopyNotice] = useState<string | null>(null);
+	const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const flashNotice = useCallback((text: string) => {
+		setCopyNotice(text);
+		if (noticeTimer.current) clearTimeout(noticeTimer.current);
+		noticeTimer.current = setTimeout(() => setCopyNotice(null), 2000);
+	}, []);
 	useEffect(() => {
-		let timer: ReturnType<typeof setTimeout> | null = null;
-		const off = onCopied((chars) => {
-			setCopyNotice(`copied ${chars} char${chars === 1 ? "" : "s"}`);
-			if (timer) clearTimeout(timer);
-			timer = setTimeout(() => setCopyNotice(null), 2000);
-		});
+		const off = onCopied((chars) => flashNotice(`copied ${chars} char${chars === 1 ? "" : "s"}`));
 		return () => {
 			off();
-			if (timer) clearTimeout(timer);
+			if (noticeTimer.current) clearTimeout(noticeTimer.current);
 		};
-	}, []);
+	}, [flashNotice]);
 
 	// Completion hook — fires when agent finishes (isProcessing true → false).
 	// Plays a chime + speaks a short summary in the configured TTS voice.
@@ -1701,6 +1832,31 @@ export function App({
 
 	}, [isProcessing, soundEnabled]);
 
+	// OSC 7501 program status: tell the host terminal working / blocked / done /
+	// error / idle. TTY-only, off with EIGHT_NO_PROGRAM_STATUS=1 (lib/program-status.ts).
+	const programStatus = useRef<ReturnType<typeof createProgramStatusEmitter> | null>(null);
+	const hasRunTurnRef = useRef(false);
+	useEffect(() => {
+		programStatus.current ??= createProgramStatusEmitter(process.stdout);
+		if (isProcessing) hasRunTurnRef.current = true;
+		programStatus.current.set(
+			deriveProgramState({
+				isProcessing,
+				approvalPending: approvalPending !== null,
+				lastTurn: hasRunTurnRef.current ? (turnEndedInError(messages) ? "error" : "ok") : null,
+			}),
+		);
+	}, [isProcessing, approvalPending, messages]);
+	useEffect(() => {
+		programStatus.current ??= createProgramStatusEmitter(process.stdout);
+		const emitter = programStatus.current;
+		const uninstall = installProgramStatusCleanup(emitter);
+		return () => {
+			uninstall();
+			emitter.clear();
+		};
+	}, []);
+
 	const processSidebarWidth = computeProcessSidebarWidth(processPanel.sidebarOpen, viewport.width);
 	const chatContentWidth = tuiChatContentWidth(viewport.width, processSidebarWidth);
 	const tokenMeterColWidth = viewport.width < 52 ? 6 : viewport.width < 72 ? 9 : 12;
@@ -1709,6 +1865,27 @@ export function App({
 	// typing on tab A while tab A's agent is busy stacks A's queue without
 	// affecting tab B's parallel submissions.
 	const messageQueuesRef = useRef<Map<string, string[]>>(new Map());
+	// Output of `!cmd` lines waiting to go to the model with the tab's next
+	// message, keyed by tab id (#3918 D5).
+	const shellContextRef = useRef<Map<string, string[]>>(new Map());
+	// Running `!cmd` processes per tab, so Esc, tab close and exit can stop them.
+	const bangRunsRef = useRef<Map<string, Set<BangRun>>>(new Map());
+	const bangSeq = useRef(0);
+	const stopBangRuns = useCallback((tabId?: string) => {
+		for (const [id, runs] of bangRunsRef.current) {
+			if (tabId !== undefined && id !== tabId) continue;
+			for (const run of runs) run.cancel();
+			runs.clear();
+		}
+	}, []);
+	// Never leave a shell command behind: unmount, exit, SIGTERM and SIGHUP kill them.
+	useEffect(() => {
+		const uninstall = killBangsOnExit(() => stopBangRuns());
+		return () => {
+			uninstall();
+			stopBangRuns();
+		};
+	}, [stopBangRuns]);
 	// Per-tab "agent currently running" guard. Replaces the legacy global
 	// boolean - now keyed by tab id so concurrent tabs no longer block each
 	// other on the same flag.
@@ -1873,6 +2050,9 @@ export function App({
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [designIntro, setDesignIntro] = useState<string>("");
+	// Rows for the /theme picker, computed when it opens (#3754).
+	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
+	const [themeRows, setThemeRows] = useState<ThemeChoice[]>([]);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [selectedDesign, setSelectedDesign] = useState<DesignSuggestion | null>(null);
@@ -1881,6 +2061,8 @@ export function App({
 	useInput((input, key) => {
 		// A pending approval card owns Y/N/E/S; useApprovalCard settles it.
 		if (isApprovalKeyClaimed(input, key)) return;
+		// The session picker and the tree read their own keys; only Ctrl+C passes.
+		if (SESSION_VIEWS.has(viewMode) && !(key.ctrl && input === "c")) return;
 
 
 		// Ctrl+P: toggle the command palette overlay.
@@ -1903,18 +2085,6 @@ export function App({
 		}
 		if (djKeys && !(key.ctrl && input === "c")) {
 			if (key.escape) setDjKeys(false);
-			return;
-		}
-
-		// Ctrl+L: toggle bubble navigation mode
-		if (key.ctrl && input === "l") {
-			setIsBubbleNavMode((prev) => {
-				if (!prev) {
-					const chatMsgs = messages.filter((m) => m.role !== "tool");
-					setSelectedBubbleIndex(Math.max(0, chatMsgs.length - 1));
-				}
-				return !prev;
-			});
 			return;
 		}
 
@@ -1966,7 +2136,7 @@ export function App({
 			if (soundEnabled) playSound("notification");
 			// Save session and finalize before exiting
 			if (activeSessionId && messages.length > 0) {
-				const serializable = messages.map((m) => ({
+				const serializable = withoutBangLines(messages).map((m) => ({
 					role: m.role,
 					content: m.content,
 				}));
@@ -1976,13 +2146,17 @@ export function App({
 				});
 			}
 			flushSession();
+			stopBangRuns();
 			if (agent) agent.cleanup().catch(() => {});
 			exit();
 		}
 
 		// Toggle animations with Ctrl+A
 		if (key.ctrl && input === "a") {
-			setShowAnimations((prev) => !prev);
+			setShowAnimations((prev) => {
+				flashNotice(prev ? "motion off" : "motion on");
+				return !prev;
+			});
 		}
 
 		// Toggle sound with Ctrl+S
@@ -1991,6 +2165,7 @@ export function App({
 				const next = !prev;
 				soundManager.setEnabled(next);
 				if (next) playSound("success");
+				flashNotice(next ? "sound on" : "sound off");
 				return next;
 			});
 		}
@@ -2014,9 +2189,11 @@ export function App({
 			setExpandedView((prev) => !prev);
 		}
 
-		// Ctrl+M: open model picker overlay
-		if (key.ctrl && input === "m" && !key.shift) {
+		// Ctrl+L: open the model picker overlay (#3918 D3). Ctrl+M stays bound,
+		// but most terminals, Windows Terminal included, send it as Enter (B4).
+		if (key.ctrl && (input === "l" || (input === "m" && !key.shift))) {
 			setViewMode("model-select");
+			return;
 		}
 
 		// Ctrl+Shift+M: open provider picker overlay
@@ -2082,6 +2259,8 @@ export function App({
 				perTabAgents.removeTabAgent(closingId);
 				setAgentRunningOnTab(closingId, false);
 				messageQueuesRef.current.delete(closingId);
+				shellContextRef.current.delete(closingId);
+				stopBangRuns(closingId);
 				permHoldersRef.current.delete(closingId);
 				workspaceTabs.removeTab(closingId);
 			}
@@ -2118,6 +2297,11 @@ export function App({
 		// With per-tab agents, ESC aborts ONLY the active tab's loop. Other
 		// tabs' in-flight runs keep going.
 		if (key.escape) {
+			const bangs = bangRunsRef.current.get(activeTabId);
+			if (bangs && bangs.size > 0) {
+				stopBangRuns(activeTabId);
+				return;
+			}
 			if (isProcessing) {
 				perTabAgents.abortTab(activeTabId);
 				setIsProcessing(false);
@@ -2165,6 +2349,106 @@ export function App({
 		]);
 	}, []);
 
+	// Shared sessions (#3929). While linked, chat goes to a daemon session that
+	// the 8gent Browser panel (or another TUI) can sit on too, and this TUI shows
+	// what they send. Unlinked, the TUI runs its own in-process 8gent as before.
+	const setMessagesLatest = useRef(setMessages);
+	setMessagesLatest.current = setMessages;
+	const sharedSeq = useRef(0);
+	const pushShared = useCallback((role: "user" | "assistant" | "system", content: string) => {
+		const id = `shared-${Date.now()}-${sharedSeq.current++}`;
+		setMessagesLatest.current((prev) => [...prev, { id, role, content, timestamp: new Date() }]);
+	}, []);
+
+	/**
+	 * Leave the shared session. The daemon owns that session's file now, so the
+	 * TUI's autosave moves to a fresh local session instead of writing over it
+	 * (unless `startFresh` is false: the TUI is closing).
+	 */
+	const unlinkDaemon = useCallback(
+		async (startFresh = true): Promise<string | null> => {
+			const link = daemonLinkRef.current;
+			if (!link) return null;
+			daemonLinkRef.current = null;
+			const sid = link.client.sessionId;
+			link.off();
+			await link.client.detach().catch(() => {});
+			link.client.close();
+			if (startFresh) setActiveSessionId(sessionMgr.create().id);
+			return sid;
+		},
+		[sessionMgr],
+	);
+
+	/** Join a daemon session (live, or past and restored), replacing the chat with its transcript. */
+	const linkDaemonSession = useCallback(
+		async (sessionId: string): Promise<boolean> => {
+			let client = daemonLinkRef.current?.client;
+			try {
+				if (!client) client = await DaemonSessionClient.connect();
+				const attached = await client.attach(sessionId, "tui");
+				if (daemonLinkRef.current?.client !== client) {
+					const off = client.onEvent((e) => {
+						switch (e.kind) {
+							case "user":
+								pushShared("user", `[${surfaceLabel(e.channel)}] ${e.text}`);
+								break;
+							case "reply":
+								pushShared("assistant", e.text);
+								break;
+							case "tool":
+								pushShared("system", `8gent is using ${e.tool}`);
+								break;
+							case "error":
+								pushShared("system", `8gent: ${e.text}`);
+								break;
+							case "ended":
+								pushShared(
+									"system",
+									"The shared session ended. Back on this TUI's own 8gent; earlier turns are not in its context.",
+								);
+								void unlinkDaemon();
+								break;
+						}
+					});
+					daemonLinkRef.current = { client, off };
+				}
+				setActiveSessionId(attached.sessionId);
+				const restored = attached.transcript.map((m, i) => ({
+					id: `shared-restored-${i}`,
+					role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+					content: m.content,
+					timestamp: new Date(),
+				}));
+				setMessages(restored as Message[]);
+				addSystemMessage(
+					`Shared session ${attached.sessionId} (${surfaceLabel(attached.channel)})` +
+						`${attached.restored ? ", restored from history" : ""}` +
+						`${attached.truncated ? ", older messages not shown" : ""}.\n` +
+						"Messages now go to the shared 8gent session. /sessions detach returns to this TUI's own 8gent.",
+				);
+				return true;
+			} catch (err) {
+				if (client && daemonLinkRef.current?.client !== client) client.close();
+				addSystemMessage(
+					`Could not open shared session ${sessionId}: ${err instanceof Error ? err.message : String(err)}.\n` +
+						"Start the daemon with `8gent daemon`, or use /resume for sessions on this machine.",
+				);
+				return false;
+			}
+		},
+		[addSystemMessage, pushShared, setMessages, unlinkDaemon],
+	);
+	useEffect(() => () => void unlinkDaemon(false), [unlinkDaemon]);
+	// EIGHT_TUI_SHARE=1: share this TUI's session through the daemon from the
+	// start, so the 8gent Browser panel can pick "the TUI session" right away.
+	const autoSharedRef = useRef(false);
+	useEffect(() => {
+		if (process.env.EIGHT_TUI_SHARE !== "1" || !activeSessionId || autoSharedRef.current) return;
+		autoSharedRef.current = true;
+		void linkDaemonSession(activeSessionId);
+	}, [activeSessionId, linkDaemonSession]);
+
 	// System One (on by default; EIGHT_SYSTEM_ONE=0 turns it off): its two
 	// one-time notices (no judge, so rules and allowlist only; or which judge
 	// is loading, and its size) land in the chat once each, not on stderr,
@@ -2202,6 +2486,14 @@ export function App({
 			() => setJudgeState("failed"),
 		);
 	}, [activePermMode]);
+	// run_command without its OS boundary (#4013): the reason lives in the
+	// footer, where the one stderr warning cannot be lost under Ink.
+	const [sandboxOff, setSandboxOff] = useState<string | undefined>(undefined);
+	useEffect(() => {
+		const status = runCommandSandboxStatus();
+		if (!status.applied) setSandboxOff(sandboxFooterReason(status.reason));
+		return onRunCommandUnsandboxed((s) => setSandboxOff(sandboxFooterReason(s.reason)));
+	}, []);
 	// A failed warm-up does not stick: the next gate call retries the load.
 	// When a turn ends, a judge that has since answered clears "failed".
 	useEffect(() => {
@@ -2235,6 +2527,15 @@ export function App({
 		},
 		[activeTabId],
 	);
+
+	/** Replace one message's text in a tab, by id (the `!cmd` running line). */
+	const replaceInTab = useCallback((tabId: string, id: string, content: string) => {
+		const swap = (list: Message[]) =>
+			list.map((m) => (m.id === id ? { ...m, content, timestamp: new Date() } : m));
+		const cur = tabMessagesRef.current.get(tabId);
+		if (cur) tabMessagesRef.current.set(tabId, swap(cur));
+		setMessagesRaw((prev) => (prev.some((m) => m.id === id) ? swap(prev) : prev));
+	}, []);
 
 	/**
 	 * Build the AgentEventCallbacks bound to a specific tab id. Messages
@@ -2393,6 +2694,9 @@ export function App({
 					toolSuccess: !isRealFailure,
 					toolTrail: toTrailEntry(event),
 				});
+			},
+			onStepStart: (event) => {
+				logStepStart(tabId, tabTitle, event.stepNumber, event.provider, event.model);
 			},
 			onStepFinish: (event: AgentStepEvent) => {
 				const isActive = tabId === activeTabId;
@@ -2566,6 +2870,10 @@ export function App({
 				const decision = await readinessCacheRef.current({
 					provider: currentProvider,
 					model: currentModel,
+					// A launch --provider is never swapped for another provider (#3746).
+					pinned:
+						cliProviderRequestedRef.current !== undefined &&
+						currentProvider === cliProviderRequestedRef.current,
 				});
 				if (cancelled) return;
 				if (decision.kind !== "none") setUnreachableNote(null);
@@ -2650,6 +2958,11 @@ export function App({
 					// Only the runtime's own key: an OpenRouter key must never reach
 					// an ollama or LM Studio host (#3261).
 					apiKey: sessionApiKey(runtime),
+					// A launch --provider names the provider: while the tab is on it, a
+					// provider error ends the turn instead of moving to another (#3746).
+					providerPinned:
+						cliProviderRequestedRef.current !== undefined &&
+						currentProvider === cliProviderRequestedRef.current,
 					events: buildEventsForTab(_initTabId, _initTabTitle),
 					// The tab's role decides the local tool set: only the
 					// Orchestrator gets spawn_agent / check_agent / list_agents (#3095).
@@ -2895,62 +3208,93 @@ export function App({
 	// Handle slash commands. Async so individual cases (e.g. /spawn with
 	// auto-install) can await long-running side effects without blocking
 	// or hacking around it via .then() chains.
+	/**
+	 * Write the chat to the tree store now and return the store, so /tree,
+	 * /fork and /export see every message, not only what the 5 s autosave
+	 * caught (#3918 E1). Null when no session is active.
+	 */
+	const saveSessionNow = useCallback((): SessionStore | null => {
+		if (!activeSessionId) return null;
+		const serializable = withoutBangLines(messages).map((m) => ({
+			role: m.role,
+			content: m.content,
+		}));
+		sessionMgr.update(activeSessionId, serializable, {
+			model: currentModel,
+			provider: currentProvider,
+		});
+		lastSaveCount.current = messages.length;
+		return sessionMgr.store(activeSessionId);
+	}, [activeSessionId, messages, sessionMgr, currentModel, currentProvider]);
+
+	/** Stored messages as chat bubbles. */
+	const restoredBubbles = (stored: ReadonlyArray<{ role: string; content: unknown }>): Message[] =>
+		stored.map((m, i) => ({
+			id: `restored-${Date.now()}-${i}`,
+			role: (m.role === "user" || m.role === "assistant" ? m.role : "system") as Message["role"],
+			content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+			timestamp: new Date(),
+		}));
+
+	/**
+	 * Make a stored session the active one and show its transcript (E3). The
+	 * 8gent's own context is not reloaded: the Agent has no history setter
+	 * yet, so the line says what was restored and nothing more.
+	 */
+	const openStoredSession = useCallback(
+		(id: string): boolean => {
+			const found = sessionMgr.get(id);
+			if (!found) {
+				addSystemMessage(`Session "${id}" could not be loaded.`);
+				return false;
+			}
+			setActiveSessionId(found.id);
+			setMessages(restoredBubbles(found.messages));
+			lastSaveCount.current = found.messages.length;
+			addSystemMessage(
+				`Resumed "${found.name || found.id}": ${found.messageCount} messages, ${found.model}, ${found.cwd}. Transcript restored.`,
+			);
+			return true;
+		},
+		[sessionMgr, addSystemMessage, setMessages],
+	);
+
+	/** Open the /resume picker over every session with at least one message (E3). */
+	const openSessionPicker = useCallback(() => {
+		saveSessionNow();
+		setPickerSessions(listSessions());
+		setViewMode("session-picker");
+	}, [saveSessionNow]);
+
+	// `--resume` with no id: the picker, once the session list can be read (E3).
+	const bootPickerShown = useRef(false);
+	useEffect(() => {
+		if (sessionResume !== "" || bootPickerShown.current || !activeSessionId) return;
+		bootPickerShown.current = true;
+		openSessionPicker();
+	}, [sessionResume, activeSessionId, openSessionPicker]);
+
 	const handleSlashCommand = useCallback(
 		async (command: SlashCommand, args: string[]) => {
 			switch (command) {
 				case "help":
 					addSystemMessage(
-						"Available commands:\n" +
-							"  /kanban (Ctrl+K) - Toggle kanban board\n" +
-							"  /predict (Ctrl+E) - Show predicted next steps\n" +
-							"  /avenues - Show planned avenues\n" +
-							"  /design [task] - Get design system suggestions\n" +
-							"  /build <task> - Adaptive three-model pipeline (self-correcting)\n" +
-							"  /evidence - Show full evidence breakdown\n" +
-							"  /notes - Open scratchpad notes tab\n" +
-							"  /ideas - Open idea capture tab\n" +
-							"  /btw - Open sidequest queue tab\n" +
-							"  /questions - Open research questions tab\n" +
-							"  /projects - Open project overview tab\n" +
-							"  /terminal - Open a live terminal tab (PTY shell)\n" +
-							"  /auth [login|logout|status] - Authentication\n" +
-							"  /github [issues|pr|repos] - GitHub integration\n" +
-							"  /deploy - Trigger Vercel deploy\n" +
-							"  /vercel [status|env|logs|projects|domains] - Vercel management\n" +
-							"  /pet [start|stop|deck|card] - Lil Eight companion\n" +
-							"  /voice record - Toggle voice input (Ctrl+R)\n" +
-							"  /vision - Vision & OCR model settings\n" +
-							"  /telegram - Connect a Telegram bot\n" +
-							"  /router - Task router settings\n" +
-							"  /plan - Show current plan status\n" +
-							"  /session [name|list|resume] - Named session management\n" +
-							"  /fork [label] - Fork conversation at current message\n" +
-							"  /rewind [n|list] - Time-travel: rewind agent state n checkpoints\n" +
-							"  /branch [list|switch <id>] - List or switch branches\n" +
-							"  /status - Show session status\n" +
-							"  /export - Export session as HTML\n" +
-							"  /clear - Clear messages\n" +
-							"  /quit - Exit 8gent Code\n" +
-							"  /skills - List loaded skills (optional)\n" +
-							"  /<skill> … - Any loaded skill name or alias expands to its prompt (e.g. /bdb, /billiondollarboardroom)\n\n" +
+						`${formatSlashHelp(args[0]?.toLowerCase() === "all")}\n\n` +
 							"Keyboard shortcuts:\n" +
-							"  Tab - Accept ghost suggestion\n" +
-							"  Ctrl+T - New chat tab\n" +
-							"  Ctrl+W - Close current tab\n" +
-							"  Ctrl+1-9 - Switch to tab by number\n" +
-							"  Shift+Tab - Permission mode: Plan, Ask, Guarded, Infinite\n" +
-							"  Ctrl+A - Toggle animations\n" +
-							"  Ctrl+S - Toggle sound\n" +
-							"  Ctrl+L - Browse messages (↑↓ navigate, Enter read, Esc exit)\n" +
-							"  Ctrl+H - Toggle fancy header\n" +
-							"  Ctrl+X - Open or close the PLAN column\n" +
-							"  Ctrl+M - Model picker\n" +
-							"  Ctrl+Shift+M - Provider picker",
+							formatHotkeyRows(),
 					);
+					break;
+
+				case "hotkeys":
+					addSystemMessage(formatHotkeys());
 					break;
 
 				case "kanban":
 					setViewMode((prev) => (prev === "kanban" ? "chat" : "kanban"));
+					break;
+
+				case "copy":
+					addSystemMessage(copyReply(messages, { write: (seq) => inkStdout.write(seq) }));
 					break;
 
 				case "predict":
@@ -3047,6 +3391,26 @@ export function App({
 					break;
 
 				case "export": {
+					// /export <file>.jsonl writes the session file itself (E7); anything
+					// else is the HTML export.
+					if (args[0]?.toLowerCase().endsWith(".jsonl")) {
+						const store = saveSessionNow();
+						if (!store) {
+							addSystemMessage("No session yet.");
+							break;
+						}
+						const target = pathMod.resolve(process.cwd(), args[0]);
+						try {
+							const text = store.exportJSONL();
+							fs.writeFileSync(target, text, { mode: 0o600 });
+							addSystemMessage(
+								`Session exported to ${target} (${store.messages().length} messages). /import ${args[0]} brings it back.`,
+							);
+						} catch (e) {
+							addSystemMessage(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
+						}
+						break;
+					}
 					const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
 					const mins = Math.floor(elapsed / 60);
 					const secs = elapsed % 60;
@@ -3125,17 +3489,24 @@ export function App({
 				}
 
 				case "fork": {
-					const tree = sessionTreeRef.current;
-					const tip = tree.tipId;
-					if (!tip) {
+					// Copy the conversation so far into a new session file and continue
+					// there; the original keeps its name and stays as it was (E4).
+					const store = saveSessionNow();
+					if (!store || store.allEntries().length === 0) {
 						addSystemMessage("No messages to fork from.");
 						break;
 					}
-					const label = args.length > 0 ? args.join(" ") : undefined;
-					const branchId = tree.fork(tip, label);
-					addSystemMessage(
-						`Forked at current message. New branch: ${branchId} (${label || branchId})\nUse /branch list to see all branches.`,
-					);
+					const name = args.length > 0 ? args.join(" ") : undefined;
+					try {
+						const child = store.fork(undefined, { name });
+						setActiveSessionId(child.id);
+						lastSaveCount.current = messages.length;
+						addSystemMessage(
+							`Forked into session ${child.id}${name ? ` "${name}"` : ""}. This chat continues there; ${store.name ? `"${store.name}"` : store.id} is unchanged. /resume lists both.`,
+						);
+					} catch (e) {
+						addSystemMessage(`Fork failed: ${e instanceof Error ? e.message : String(e)}`);
+					}
 					break;
 				}
 
@@ -3143,7 +3514,7 @@ export function App({
 					// Session time-travel (#2757 step 2): restore the agent's message
 					// history from a checkpoint cut by the interval policy.
 					if (!agent) {
-						addSystemMessage("No active agent to rewind.");
+						addSystemMessage("No active 8gent to rewind.");
 						break;
 					}
 					if (args[0] === "list") {
@@ -3199,31 +3570,41 @@ export function App({
 				}
 
 				case "branch": {
-					const tree = sessionTreeRef.current;
+					// The tree store's branches: one leaf per branch (E4). /tree shows the
+					// same with every entry; /branch switch continues from a leaf.
+					const store = saveSessionNow();
+					if (!store) {
+						addSystemMessage("No session yet.");
+						break;
+					}
 					const sub = args[0];
 					if (!sub || sub === "list") {
-						const branches = tree.getBranches();
-						const lines = branches.map((b) => {
-							const active = b.id === tree.activeBranch ? " *" : "";
-							return `  ${b.id}${active} - ${b.label} (${b.messageCount} msgs)`;
+						const leaves = store.leaves();
+						if (leaves.length === 0) {
+							addSystemMessage("No branches: the session has no messages yet.");
+							break;
+						}
+						const lines = leaves.map((leaf) => {
+							const active = leaf.id === store.leafId ? " *" : "";
+							const count = store.messages(leaf.id).length;
+							const preview =
+								leaf.type === "message"
+									? String(leaf.message.content).replace(/\s+/g, " ").slice(0, 60)
+									: leaf.type;
+							return `  ${leaf.id}${active} - ${count} msgs - ${preview}`;
 						});
-						addSystemMessage(`Branches:\n${lines.join("\n")}`);
+						addSystemMessage(`Branches (leaf entries, * = current):\n${lines.join("\n")}\n/tree shows every entry.`);
 					} else if (sub === "switch" && args[1]) {
 						try {
-							const history = tree.switchBranch(args[1]);
-							const restored = history.map((n) => ({
-								id: n.id,
-								role: n.role as "user" | "assistant" | "system",
-								content: typeof n.content === "string" ? n.content : JSON.stringify(n.content),
-								timestamp: new Date(n.timestamp),
-							}));
-							setMessages(restored);
-							addSystemMessage(`Switched to branch: ${args[1]}`);
-						} catch (e: any) {
-							addSystemMessage(`Branch error: ${e.message}`);
+							store.branch(args[1]);
+							setMessages(restoredBubbles(store.messages(args[1])));
+							lastSaveCount.current = store.messages(args[1]).length;
+							addSystemMessage(`Continuing from entry ${args[1]}.`);
+						} catch (e) {
+							addSystemMessage(`Branch error: ${e instanceof Error ? e.message : String(e)}`);
 						}
 					} else {
-						addSystemMessage("Usage: /branch [list|switch <id>]");
+						addSystemMessage("Usage: /branch [list|switch <entry id>]");
 					}
 					break;
 				}
@@ -3272,7 +3653,7 @@ export function App({
 
 				case "quit":
 					if (activeSessionId && messages.length > 0) {
-						const serializable = messages.map((m) => ({
+						const serializable = withoutBangLines(messages).map((m) => ({
 							role: m.role,
 							content: m.content,
 						}));
@@ -3282,6 +3663,7 @@ export function App({
 						});
 					}
 					flushSession();
+					stopBangRuns();
 					if (agent) agent.cleanup().catch(() => {});
 					exit();
 					break;
@@ -3357,6 +3739,55 @@ export function App({
 					}
 					break;
 
+				case "update": {
+					// Same update as `8gent update`; on success the session is saved and 8gent
+					// reopens on the new code with the same session (packages/eight/update-resume.ts).
+					void (async () => {
+						const [{ runTuiUpdate, launcherContext, makeTwoStepConfirm }, { runUpdateCommand }, resume, { spawn: spawnProc }] =
+							await Promise.all([
+								import("./lib/update-command.js"),
+								import("../../../packages/eight/cli-maintenance.js"),
+								import("../../../packages/eight/update-resume.js"),
+								import("node:child_process"),
+							]);
+						const ctx = launcherContext();
+						if (!updateConfirmRef.current) updateConfirmRef.current = makeTwoStepConfirm(addSystemMessage);
+						const outcome = await runTuiUpdate({
+							saveSession: () => {
+								saveSessionNow();
+								return activeSessionId;
+							},
+							say: addSystemMessage,
+							runUpdate: (log, report) =>
+								runUpdateCommand(args, {
+									...ctx,
+									execPath: process.execPath,
+									log,
+									report,
+									confirm: updateConfirmRef.current ?? undefined,
+									// A person typed /update. npm runs without the terminal so Ink is not garbled.
+									interactive: true,
+									run: (cmd, cmdArgs, opts) =>
+										new Promise<number>((resolve) => {
+											const p = spawnProc(cmd, cmdArgs, { stdio: "ignore", shell: opts.shell });
+											p.on("exit", (c) => resolve(c ?? 1));
+											p.on("error", () => resolve(127));
+										}),
+								}),
+							relaunch: (req) => {
+								resume.writeResumeRequest(req);
+								flushSession();
+								stopBangRuns();
+								if (agent) agent.cleanup().catch(() => {});
+								process.exitCode = resume.RELAUNCH_EXIT_CODE;
+								exit();
+							},
+						});
+						if (outcome === "unchanged") addSystemMessage("Nothing to update.");
+					})();
+					break;
+				}
+
 				case "session": {
 					const sub = args[0]?.toLowerCase();
 					if (sub === "name" && args[1]) {
@@ -3411,7 +3842,117 @@ export function App({
 					break;
 				}
 
+				case "sessions": {
+					// Shared sessions (#3929): live and past daemon sessions, shared with
+					// the 8gent Browser panel.
+					const sub = args[0]?.toLowerCase() ?? "list";
+					if (sub === "detach") {
+						const sid = await unlinkDaemon();
+						addSystemMessage(
+							sid
+								? `Left shared session ${sid}. It keeps running for anyone else on it. Back on this TUI's own 8gent; turns made there are not in its context.`
+								: "Not on a shared session.",
+						);
+						break;
+					}
+					if (sub === "stop") {
+						const link = daemonLinkRef.current;
+						if (!link) {
+							addSystemMessage("Not on a shared session.");
+							break;
+						}
+						const stopped = await link.client.abort().catch(() => false);
+						addSystemMessage(stopped ? "Stopped the shared session's current turn." : "Nothing was running.");
+						break;
+					}
+					if (sub === "share") {
+						if (!activeSessionId) {
+							addSystemMessage("No session to share yet.");
+							break;
+						}
+						if (daemonLinkRef.current?.client.sessionId === activeSessionId) {
+							addSystemMessage(`Already shared as ${activeSessionId}.`);
+							break;
+						}
+						// Save now so the daemon restores everything said so far.
+						const current = (tabMessagesRef.current.get(activeTabId) ?? []).filter(
+							(m) => m.role === "user" || m.role === "assistant",
+						);
+						sessionMgr.update(
+							activeSessionId,
+							current.map((m) => ({ role: m.role, content: m.content })),
+							{ model: currentModel, provider: currentProvider },
+						);
+						await linkDaemonSession(activeSessionId);
+						break;
+					}
+					if (sub === "attach") {
+						if (!args[1]) {
+							addSystemMessage("Usage: /sessions attach <id>");
+							break;
+						}
+						await linkDaemonSession(args[1]);
+						break;
+					}
+					if (sub !== "list") {
+						addSystemMessage(
+							"Usage:\n" +
+								"  /sessions              - Pick a live or past shared session\n" +
+								"  /sessions share        - Share this conversation (the 8gent Browser panel can join it)\n" +
+								"  /sessions attach <id>  - Join a shared session by id\n" +
+								"  /sessions stop         - Stop the shared session's current turn\n" +
+								"  /sessions detach       - Leave it and go back to this TUI's own 8gent",
+						);
+						break;
+					}
+					let lister = daemonLinkRef.current?.client;
+					let found: Awaited<ReturnType<DaemonSessionClient["list"]>>;
+					try {
+						if (!lister) lister = await DaemonSessionClient.connect();
+						found = await lister.list(30);
+					} catch (err) {
+						addSystemMessage(
+							`Shared sessions need the 8gent daemon: ${err instanceof Error ? err.message : String(err)}.\n` +
+								"Start it with `8gent daemon`, or use /resume for sessions on this machine.",
+						);
+						break;
+					} finally {
+						if (lister && lister !== daemonLinkRef.current?.client) lister.close();
+					}
+					const entries: ConversationEntry[] = [
+						...found.live.map((l) => ({
+							_id: l.sessionId,
+							sessionId: l.sessionId,
+							title: `Open now - ${surfaceLabel(l.channel)}${l.busy ? " - working" : ""} - ${l.title ?? l.sessionId}`,
+							messageCount: l.messageCount,
+							model: "",
+							workingDirectory: "",
+							startedAt: l.createdAt,
+							lastActiveAt: l.lastActiveAt,
+						})),
+						...found.past.map((p) => ({
+							_id: p.sessionId,
+							sessionId: p.sessionId,
+							title: `Earlier - ${surfaceLabel(p.channel)} - ${p.title}`,
+							messageCount: p.messageCount,
+							model: p.model,
+							workingDirectory: p.cwd,
+							startedAt: p.lastActiveAt,
+							lastActiveAt: p.lastActiveAt,
+						})),
+					];
+					if (entries.length === 0) {
+						addSystemMessage("No shared sessions yet. /sessions share shares this one.");
+						break;
+					}
+					historyPickDaemonRef.current = true;
+					setHistoryConversations(entries);
+					setViewMode("history");
+					break;
+				}
+
 				case "history": {
+					historyPickDaemonRef.current = false;
 					// Show local session history screen
 					const localSessions = sessionMgr.list(50);
 					if (localSessions.length === 0) {
@@ -3461,32 +4002,68 @@ export function App({
 				}
 
 				case "resume": {
-					// Show interactive session picker from local sessions
-					const resumeSessions = sessionMgr.list(50);
-					if (resumeSessions.length === 0) {
-						addSystemMessage("No saved sessions found. Start chatting and sessions save automatically.");
+					historyPickDaemonRef.current = false;
+					// /resume <id or name> opens it; bare /resume opens the searchable
+					// picker over the tree store (#3918 E3).
+					if (args.length > 0) {
+						const found = sessionMgr.resume(args.join(" "));
+						if (!found) addSystemMessage(`Session "${args.join(" ")}" not found. /resume lists them.`);
+						else openStoredSession(found.id);
 						break;
 					}
-					const resumeEntries: ConversationEntry[] = resumeSessions.map((s) => ({
-						_id: s.id,
-						sessionId: s.id,
-						title: s.name || `Session ${s.createdAt.slice(0, 10)}`,
-						messageCount: s.messageCount,
-						model: s.model,
-						workingDirectory: s.cwd,
-						gitBranch: s.branch,
-						startedAt: new Date(s.createdAt).getTime(),
-						lastActiveAt: new Date(s.lastActiveAt).getTime(),
-					}));
-					setHistoryConversations(resumeEntries);
-					setViewMode("history");
+					openSessionPicker();
+					break;
+				}
+
+				case "tree": {
+					// The session's tree (every branch), to continue from any entry (E4).
+					const store = saveSessionNow();
+					if (!store) {
+						addSystemMessage("No session yet.");
+						break;
+					}
+					if (store.allEntries().length === 0) {
+						addSystemMessage("The session has no messages yet.");
+						break;
+					}
+					setTreeView({ tree: store.tree(), leafId: store.leafId });
+					setViewMode("session-tree");
+					break;
+				}
+
+				case "import": {
+					// /import <file>.jsonl: a session exported with /export (E7).
+					const file = args[0];
+					if (!file) {
+						addSystemMessage("Usage: /import <file>.jsonl");
+						break;
+					}
+					const target = pathMod.resolve(process.cwd(), file);
+					let text: string;
+					try {
+						text = fs.readFileSync(target, "utf-8");
+					} catch (e) {
+						addSystemMessage(`Could not read ${target}: ${e instanceof Error ? e.message : String(e)}`);
+						break;
+					}
+					try {
+						saveSessionNow();
+						const imported = SessionStore.importJSONL(text, { cwd: process.cwd() });
+						// Open first: opening replaces the transcript, the line goes after it.
+						openStoredSession(imported.id);
+						addSystemMessage(
+							`Imported ${pathMod.basename(target)} as session ${imported.id} (${imported.messages().length} messages).`,
+						);
+					} catch (e) {
+						addSystemMessage(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+					}
 					break;
 				}
 
 				case "compact":
 					// Summarize current conversation
 					if (!agent) {
-						addSystemMessage("No agent active.");
+						addSystemMessage("No 8gent active.");
 						break;
 					}
 					addSystemMessage("Compacting conversation history...");
@@ -3525,14 +4102,14 @@ export function App({
 					if (agentSub === "list") {
 						if (orchestration.agents.length === 0) {
 							addSystemMessage(
-								"No active sub-agents. Eight is operating solo.\n\nUse /agent spawn <persona> <task> to spawn one.",
+								"No active child 8gents. Eight is operating solo.\n\nUse /agent spawn <persona> <task> to spawn one.",
 							);
 						} else {
 							const lines = orchestration.agents.map(
 								(a) => `  ${a.icon} ${a.name} (${a.role}): ${a.status}\n    Task: ${a.task}`,
 							);
 							addSystemMessage(
-								`Active agents (${orchestration.agents.length + 1}):\n\n  Eight (orchestrator): running\n${lines.join("\n")}`,
+								`Active 8gents (${orchestration.agents.length + 1}):\n\n  Eight (orchestrator): running\n${lines.join("\n")}`,
 							);
 						}
 					} else if (agentSub === "spawn") {
@@ -3550,7 +4127,7 @@ export function App({
 						const killId = args[1];
 						if (!killId) {
 							addSystemMessage(
-								"Usage: /agent kill <agent-id>\n\nUse /agent list to see active agents.",
+								"Usage: /agent kill <agent-id>\n\nUse /agent list to see active 8gents.",
 							);
 						} else {
 							const found = orchestration.agents.find(
@@ -3558,19 +4135,19 @@ export function App({
 							);
 							if (found) {
 								orchestration.killAgent(found.id);
-								addSystemMessage(`Killed agent: ${found.name} (${found.role})`);
+								addSystemMessage(`Killed 8gent: ${found.name} (${found.role})`);
 							} else {
-								addSystemMessage(`Agent "${killId}" not found.`);
+								addSystemMessage(`8gent "${killId}" not found.`);
 							}
 						}
 					} else if (agentSub === "auto") {
 						orchestration.toggleAutoSpawn();
 						addSystemMessage(
-							`Auto-spawn: ${!orchestration.autoSpawn ? "ENABLED" : "DISABLED"}\n${!orchestration.autoSpawn ? "Eight will automatically spawn sub-agents without asking." : "Eight will ask before spawning sub-agents."}`,
+							`Auto-spawn: ${!orchestration.autoSpawn ? "ENABLED" : "DISABLED"}\n${!orchestration.autoSpawn ? "Eight will automatically spawn child 8gents without asking." : "Eight will ask before spawning child 8gents."}`,
 						);
 					} else if (agentSub === "settings") {
 						addSystemMessage(
-							`Agent Settings:\n\n  Auto-spawn: ${orchestration.autoSpawn ? "on" : "off"}\n  Active agents: ${orchestration.agents.length}\n  Pending spawns: ${orchestration.pendingSpawns.length}\n\nCommands:\n  /agent list       Show active agents\n  /agent spawn <p>  Spawn persona (winston/larry/curly/mo/doc)\n  /agent kill <id>  Kill an agent\n  /agent auto       Toggle auto-spawn`,
+							`8gent Settings:\n\n  Auto-spawn: ${orchestration.autoSpawn ? "on" : "off"}\n  Active 8gents: ${orchestration.agents.length}\n  Pending spawns: ${orchestration.pendingSpawns.length}\n\nCommands:\n  /agent list       Show active 8gents\n  /agent spawn <p>  Spawn persona (winston/larry/curly/mo/doc)\n  /agent kill <id>  Kill an 8gent\n  /agent auto       Toggle auto-spawn`,
 						);
 					}
 					break;
@@ -3847,14 +4424,14 @@ export function App({
 					const subCommand = (args[1] || "").toLowerCase().trim();
 					if (!presetId) {
 						addSystemMessage(
-							`Usage: /spawn <agent> [install]\nAvailable: ${listPresetIds().join(", ")}\nExample: /spawn claude   (auto-installs if missing)\n         /spawn hermes install   (force re-install)`,
+							`Usage: /spawn <name> [install]\nAvailable: ${listPresetIds().join(", ")}\nExample: /spawn claude   (auto-installs if missing)\n         /spawn hermes install   (force re-install)`,
 						);
 						break;
 					}
 					const preset = getPreset(presetId);
 					if (!preset) {
 						addSystemMessage(
-							`Unknown agent "${presetId}". Available: ${listPresetIds().join(", ")}`,
+							`Unknown 8gent "${presetId}". Available: ${listPresetIds().join(", ")}`,
 						);
 						break;
 					}
@@ -3919,7 +4496,7 @@ export function App({
 						break;
 					}
 					try {
-						const result = Bun.spawnSync(["bun", "run", debugScript, ...debugCmd.split(" ")], {
+						const result = Bun.spawnSync(["bun", ...safeBunFlags(), "run", debugScript, ...debugCmd.split(" ")], {
 							cwd: process.cwd(),
 							env: { ...process.env, NO_COLOR: "1" }, // strip ANSI for clean display
 							timeout: 10000,
@@ -4416,7 +4993,7 @@ export function App({
 				case "evidence": {
 					// Show full evidence breakdown
 					if (!agent) {
-						addSystemMessage("No agent active. Evidence needs a running session.");
+						addSystemMessage("No 8gent active. Evidence needs a running session.");
 						break;
 					}
 					const evidence = agent.getSessionEvidence();
@@ -4459,26 +5036,57 @@ export function App({
 					break;
 				}
 
+				case "reload": {
+					reloadUserThemes();
+					const lines = ["Reloaded themes from ~/.8gent/themes."];
+					for (const p of userThemeProblems()) lines.push(`  skipped ${p.file}: ${p.reason}`);
+					addSystemMessage(lines.join("\n"));
+					break;
+				}
+
 				case "theme": {
-					// /theme           → show current resolved mode + how it was chosen
-					// /theme light     → persist light in ~/.8gent/config.json
-					// /theme dark      → persist dark
-					// /theme auto      → clear setting, defer to terminal/COLORFGBG
+					// /theme           -> picker: the 8gent theme or an indexed design system (#3754)
+					// /theme <id>      -> use that design system (saved to ~/.8gent/config.json)
+					// /theme default   -> back to the stock 8gent theme
+					// /theme status    -> what the palette is fitted to
+					// /theme light|dark|auto -> persist the light/dark mode, as before
 					const fs = await import("node:fs");
 					const path = await import("node:path");
 					const home = process.env.HOME ?? "";
 					const cfgPath = path.join(home, ".8gent", "config.json");
 					const choice = (args[0] ?? "").toLowerCase();
-					if (!choice) {
-						const themeMod = await import("./theme.js");
+					if (!choice || choice === "list" || choice === "pick") {
+						setThemeRows(themeChoices());
+						setViewMode("theme-select");
+						break;
+					}
+					if (choice === "status") {
+						const st = themeStatus();
+						const ds = st.designSystem ? findDesignSystem(st.designSystem) : undefined;
 						addSystemMessage(
-							`Theme: ${themeMod.theme.mode}. Set with /theme [light|dark|auto]. Restart the TUI for the change to take effect.`,
+							`Theme: ${ds?.label ?? "8gent"}, ${st.mode} mode, fitted to ${st.bg} (${st.bgSource === "terminal" ? "reported by the terminal" : "assumed, the terminal did not report one"}).`,
 						);
+						break;
+					}
+					if (choice === "default" || choice === "8gent" || findDesignSystem(choice) || isUserThemeId(choice)) {
+						const id = choice === "default" || choice === "8gent" ? null : choice;
+						try {
+							saveThemeChoice(id, cfgPath);
+							applyDesignSystem(id);
+							const label = isUserThemeId(id)
+								? (themeChoices().find((r) => r.value === id)?.label ?? id)
+								: id
+									? findDesignSystem(id)?.label
+									: "8gent";
+							addSystemMessage(`Theme set to ${label}.`);
+						} catch (err) {
+							addSystemMessage(`Could not write ${cfgPath}: ${(err as Error).message}`);
+						}
 						break;
 					}
 					if (choice !== "light" && choice !== "dark" && choice !== "auto") {
 						addSystemMessage(
-							"Theme must be light, dark, or auto. Example: /theme light",
+							"Unknown theme. Run /theme to pick from the list, or /theme light | dark | auto.",
 						);
 						break;
 					}
@@ -4565,8 +5173,8 @@ export function App({
 							});
 							addSystemMessage(
 								next
-									? "TTS output enabled. Agent replies will be spoken."
-									: "TTS output disabled. Agent replies will be silent.",
+									? "TTS output enabled. 8gent replies will be spoken."
+									: "TTS output disabled. 8gent replies will be silent.",
 							);
 						})().catch((err) => {
 							addSystemMessage(
@@ -5031,6 +5639,54 @@ export function App({
 					else if (command === ("vision" as any)) {
 						handleVisionCommand(args);
 					}
+					// Handle /toolshed command: skill registry list | search | stats
+					else if ((command as string) === "toolshed") {
+						const sub = args[0] || "stats";
+						import("../../../packages/toolshed/skill-registry.js")
+							.then(({ getSkillRegistry }) => {
+								const registry = getSkillRegistry();
+								if (sub === "stats") {
+									const st = registry.getStats();
+									addSystemMessage(
+										`Toolshed: ${st.skillCount} skills, ${st.capabilities} capabilities, ~${st.totalTokens} tokens (avg ${st.avgTokensPerSkill}).`,
+									);
+								} else if (sub === "list" || sub === "search") {
+									const pattern = sub === "search" ? args.slice(1).join(" ") : "";
+									if (sub === "search" && !pattern) {
+										addSystemMessage("Usage: /toolshed search <pattern>");
+										return;
+									}
+									const found = registry.search(pattern || ".");
+									addSystemMessage(
+										found.length === 0
+											? "Toolshed: no skills match."
+											: `Toolshed: ${found.length} skills\n${found
+													.slice(0, 40)
+													.map((k) => `  ${k.name}  ${k.description}`)
+													.join("\n")}`,
+									);
+								} else {
+									addSystemMessage("Usage: /toolshed [list|search <pattern>|stats]");
+								}
+							})
+							.catch((e) =>
+								addSystemMessage(`Toolshed: ${e instanceof Error ? e.message : String(e)}`),
+							);
+					}
+					// Handle /quarantine command: skill quarantine manager (no add from the TUI)
+					else if ((command as string) === "quarantine") {
+						Promise.all([
+							import("../../../packages/quarantine/index.js"),
+							import("./lib/quarantine-command.js"),
+						])
+							.then(([{ getQuarantineManager }, { runQuarantineCommand }]) =>
+								runQuarantineCommand(getQuarantineManager() as never, args),
+							)
+							.then((msg) => addSystemMessage(msg))
+							.catch((e) =>
+								addSystemMessage(`Quarantine: ${e instanceof Error ? e.message : String(e)}`),
+							);
+					}
 					// Workspace tab commands
 					else if (command === ("notes" as any)) {
 						workspaceTabs.addTab("notes");
@@ -5137,6 +5793,13 @@ export function App({
 			toggleBodyPart,
 			resolveSetupChecks,
 			addSetupQuestion,
+			saveSessionNow,
+			activeSessionId,
+			activeTabId,
+			linkDaemonSession,
+			unlinkDaemon,
+			messages,
+			inkStdout,
 		],
 	);
 
@@ -5298,6 +5961,62 @@ export function App({
 			return;
 		}
 
+		// `!cmd` runs a shell command here; its output goes with the next
+		// message. `!!cmd` runs it without sending (#3918 D5).
+		const bang = attached ? null : parseBang(input);
+		if (bang) {
+			const bangLine = (content: string): Message => ({
+				id: `${BANG_ID_PREFIX}${Date.now()}-${bangSeq.current++}`,
+				role: "system" as const,
+				content,
+				timestamp: new Date(),
+			});
+			const refused = planModeRefusal(permView(permHolderFor(tabId)).mode);
+			if (!bang.command || refused) {
+				appendToTab(tabId, bangLine(refused ?? BANG_USAGE));
+				return;
+			}
+			setRecentCommands((prev) => [input, ...prev].slice(0, 20));
+			const running = bangLine(bangRunningLine(bang));
+			appendToTab(tabId, running);
+			const run = startBang(bang.command, projectCwd);
+			const runs = bangRunsRef.current.get(tabId) ?? new Set();
+			runs.add(run);
+			bangRunsRef.current.set(tabId, runs);
+			const result = await run.done;
+			runs.delete(run);
+			const withheld = bang.send ? sendRefusal(bang.command) : null;
+			if (bang.send && !withheld && !result.cancelled) {
+				const pending = shellContextRef.current.get(tabId) ?? [];
+				pending.push(bangContextBlock(bang, result));
+				shellContextRef.current.set(tabId, pending);
+			}
+			replaceInTab(tabId, running.id, bangChatLine(bang, result, withheld));
+			return;
+		}
+
+		// Linked to a shared session (#3929): the shared 8gent answers, and every
+		// surface on the session sees the message.
+		const daemonLink = daemonLinkRef.current;
+		if (daemonLink?.client.sessionId && input && !attached) {
+			appendToTab(tabId, {
+				id: `user-${Date.now()}`,
+				role: "user" as const,
+				content: bubbleContent,
+				timestamp: new Date(),
+			});
+			setRecentCommands((prev) => [bubbleContent, ...prev].slice(0, 20));
+			try {
+				// Output from `!cmd` goes in front here too, once (#3918 D5).
+				const shellContext = shellContextRef.current.get(tabId);
+				shellContextRef.current.delete(tabId);
+				daemonLink.client.prompt(withShellContext(shellContext, input));
+			} catch (err) {
+				addSystemMessage(`Could not send to the shared session: ${err instanceof Error ? err.message : String(err)}`);
+			}
+			return;
+		}
+
 		// Build-intent auto-route: an imperative "build / create / scaffold ..."
 		// message runs the adaptive pipeline without the user typing /build.
 		// Detection is conservative (see build-intent.ts) - informational
@@ -5332,8 +6051,6 @@ export function App({
 			content: bubbleContent,
 			timestamp: new Date(),
 		});
-		// Track in session tree
-		sessionTreeRef.current.addMessage(sessionTreeRef.current.tipId, "user", bubbleContent);
 		// Session logger: user message
 		logMessage(tabId, tabTitle, "user", bubbleContent);
 
@@ -5366,8 +6083,14 @@ export function App({
 			}
 
 			const cmdStartTime = Date.now();
-			const messageForAgent = await expandSkillSlashCommand(message);
-			const routeHint = messageForAgent.trim() || "User attached an image.";
+			// A skill first, then a prompt template (#3918 G4); a line neither
+			// knows passes through unchanged.
+			const expanded = expandPromptSlashCommand(await expandSkillSlashCommand(message));
+			// Shell output from `!cmd` lines goes in front, once (#3918 D5).
+			const shellContext = shellContextRef.current.get(tabId);
+			shellContextRef.current.delete(tabId);
+			const messageForAgent = withShellContext(shellContext, expanded);
+			const routeHint = expanded.trim() || "User attached an image.";
 
 			// External-agent divert: if the target tab was spawned via /spawn,
 			// hand the prompt to the nested CLI (claude / codex / hermes / etc.)
@@ -5381,7 +6104,7 @@ export function App({
 				const preset = getPreset(targetTabData.externalAgent.presetId);
 				if (!preset) {
 					addSystemMessage(
-						`[external-agent] Unknown preset "${targetTabData.externalAgent.presetId}". Run /spawn with one of: ${listPresetIds().join(", ")}`,
+						`[external 8gent] Unknown preset "${targetTabData.externalAgent.presetId}". Run /spawn with one of: ${listPresetIds().join(", ")}`,
 					);
 					setAgentRunningOnTab(tabId, false);
 					perTabAgents.setTabProcessing(tabId, false);
@@ -5568,8 +6291,6 @@ export function App({
 					}
 					// Clear image after sending
 					if (img) imageInput.removeImage();
-					const treePreview = (reply ?? "").trim().slice(0, 160) || "(tools only)";
-					sessionTreeRef.current.addMessage(sessionTreeRef.current.tipId, "assistant", treePreview);
 					if (tabId === activeTabId) {
 						setLastResponseTime(Date.now() - cmdStartTime);
 						setStatus("success");
@@ -5597,7 +6318,7 @@ export function App({
 					id: `system-agent-not-ready-${Date.now()}`,
 					role: "system" as const,
 					content:
-						`[Agent not ready] Nothing was run. The agent for this tab has not finished starting (model: ${currentModel}).\n` +
+						`[8gent not ready] Nothing was run. The 8gent for this tab has not finished starting (model: ${currentModel}).\n` +
 						"Wait a moment and send again, or check the provider with /provider.",
 					timestamp: new Date(),
 				});
@@ -5879,6 +6600,89 @@ export function App({
 					/>
 				);
 
+			case "session-picker":
+				return (
+					<SessionPicker
+						isOpen
+						sessions={pickerSessions}
+						cwd={process.cwd()}
+						onOpen={(id) => {
+							setViewMode("chat");
+							openStoredSession(id);
+						}}
+						onRename={(id, name) => {
+							sessionMgr.rename(id, name);
+							setPickerSessions(listSessions());
+						}}
+						onDelete={(id) => {
+							if (trashSession(id)) {
+								if (id === activeSessionId) setActiveSessionId(null);
+								addSystemMessage(`Session ${id} moved to the sessions trash folder.`);
+							}
+							setPickerSessions(listSessions());
+						}}
+						onClose={() => setViewMode("chat")}
+					/>
+				);
+
+			case "session-tree":
+				return (
+					<SessionTree
+						isOpen
+						tree={treeView?.tree ?? []}
+						leafId={treeView?.leafId ?? null}
+						onSelect={(entryId) => {
+							setViewMode("chat");
+							const store = activeSessionId ? sessionMgr.store(activeSessionId) : null;
+							if (!store) return;
+							try {
+								store.branch(entryId);
+								const onPath = store.messages(entryId);
+								setMessages(restoredBubbles(onPath));
+								lastSaveCount.current = onPath.length;
+								addSystemMessage(`Continuing from entry ${entryId} (${onPath.length} messages on this path).`);
+							} catch (e) {
+								addSystemMessage(`Could not continue from ${entryId}: ${e instanceof Error ? e.message : String(e)}`);
+							}
+						}}
+						onClose={() => setViewMode("chat")}
+					/>
+				);
+
+			case "theme-select": {
+				const current = themeStatus().designSystem ?? "default";
+				return (
+					<SelectInput
+						title={`Theme (${themeRows.length - 1} themes)`}
+						options={themeRows.map((r) => ({
+							label: r.label,
+							value: r.value,
+							description: r.description,
+							swatches: r.swatches,
+						}))}
+						initialIndex={Math.max(
+							0,
+							themeRows.findIndex((r) => r.value === current),
+						)}
+						maxVisible={10}
+						onSelect={(value) => {
+							const id = value === "default" ? null : value;
+							try {
+								saveThemeChoice(id);
+								applyDesignSystem(id);
+								addSystemMessage(
+									`Theme set to ${themeRows.find((r) => r.value === value)?.label ?? value}.`,
+								);
+							} catch (err) {
+								addSystemMessage(`Could not save the theme: ${(err as Error).message}`);
+							}
+							setViewMode("chat");
+						}}
+						onCancel={() => setViewMode("chat")}
+					/>
+				);
+			}
+
 			case "provider-select":
 				return (
 					<ProviderSelector
@@ -5941,6 +6745,12 @@ export function App({
 					<HistoryScreen
 						conversations={historyConversations}
 						onSelect={(conv) => {
+							if (historyPickDaemonRef.current) {
+								historyPickDaemonRef.current = false;
+								setViewMode("chat");
+								void linkDaemonSession(conv.sessionId);
+								return;
+							}
 							const resumed = sessionMgr.resume(conv.sessionId);
 							if (resumed) {
 								setActiveSessionId(resumed.id);
@@ -6064,7 +6874,7 @@ export function App({
 								</AppText>
 								{voiceMessages.map((m) => (
 									<Box key={m.id} flexDirection="column">
-										<MutedText>{m.role === "user" ? "You:" : "Agent:"}</MutedText>
+										<MutedText>{m.role === "user" ? "You:" : "8gent:"}</MutedText>
 										<AppText wrap="wrap">{(m.content || "").slice(0, 400)}</AppText>
 									</Box>
 								))}
@@ -6265,33 +7075,35 @@ export function App({
 							))}
 
 					<Box flexGrow={1} flexDirection="column" minWidth={0}>
-						<LiveFocalStripWithGoal
-							goalClient={goalClient}
-							adhdMode={adhdMode}
-							mode={
-								agentMode === "Planning"
-									? "Planning"
-									: agentMode === "Implementing"
-										? "Implementing"
-										: agentMode === "Testing"
-											? "Testing"
-											: agentMode === "Debugging"
-												? "Debugging"
-												: "Researching"
-							}
-							activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
-							route={shownModel.ran || "-"}
-							routeAsked={shownModel.asked}
-							tokens={tokenStr}
-							contextPct={contextPct}
-							approvalPending={isApprovalPending}
-							autonomous={infiniteModeActive}
-							isProcessing={isProcessing}
-							lastTurnEndedAt={lastTurnEndedAt}
-							lastTurnSuccess={lastTurnSuccess}
-							animate={showAnimations}
-							width={chatWidth}
-						/>
+						{!(slashMenuOpen && slashMenuCompact(viewport.height)) && (
+							<LiveFocalStripWithGoal
+								goalClient={goalClient}
+								adhdMode={adhdMode}
+								mode={
+									agentMode === "Planning"
+										? "Planning"
+										: agentMode === "Implementing"
+											? "Implementing"
+											: agentMode === "Testing"
+												? "Testing"
+												: agentMode === "Debugging"
+													? "Debugging"
+													: "Researching"
+								}
+								activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
+								route={shownModel.ran || "-"}
+								routeAsked={shownModel.asked}
+								tokens={tokenStr}
+								contextPct={contextPct}
+								approvalPending={isApprovalPending}
+								autonomous={infiniteModeActive}
+								isProcessing={isProcessing}
+								lastTurnEndedAt={lastTurnEndedAt}
+								lastTurnSuccess={lastTurnSuccess}
+								animate={showAnimations}
+								width={chatWidth}
+							/>
+						)}
 
 						<NoProviderNotice
 							checked={providerHealth.checked}
@@ -6325,7 +7137,7 @@ export function App({
 									onExecute={(name) => {
 										void handleSlashCommand(name as SlashCommand, []);
 									}}
-									commands={BUILT_IN_SLASH_COMMANDS.map((c) => ({
+									commands={builtInCommandsCoreFirst().map((c) => ({
 										name: c.name,
 										description: c.description,
 									}))}
@@ -6333,15 +7145,25 @@ export function App({
 							</Box>
 						)}
 
+						{PICKER_VIEWS.has(viewMode) && activeTabType === "chat" && (
+							<Box flexShrink={0}>{renderMainContent()}</Box>
+						)}
+
 						{approvalPending && (
 							<InlineApprovalPrompt
 								target={approvalPending.target}
 								reason={approvalPending.reason}
+								full={approvalPending.full}
 							/>
 						)}
 
-						<Box flexShrink={0} display={paletteOpen ? "none" : "flex"}>
+						<Box
+							flexShrink={0}
+							display={paletteOpen || PICKER_VIEWS.has(viewMode) ? "none" : "flex"}
+						>
 							<CommandInput
+								cwd={projectCwd}
+								onSlashMenuChange={setSlashMenuOpen}
 								onSubmit={handleSubmit}
 								isProcessing={isProcessing}
 								placeholder={
@@ -6419,6 +7241,7 @@ export function App({
 					adhd={adhdMode}
 					tokensPerSecond={tokensPerSecond}
 					judge={judgeState}
+					sandboxOff={sandboxOff}
 					djKeys={djKeys}
 					onDjKeysDone={endDjKeys}
 				/>

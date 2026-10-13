@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { slugify } from "../tools/slugify.js";
 import {
 	APP_CAPABILITIES,
@@ -127,11 +127,6 @@ export function createApp(input: CreateAppInput): CreateAppResult {
 		written.push(full);
 	}
 	return { ...draft, persisted: true, written };
-}
-
-function dirname(p: string): string {
-	const idx = p.lastIndexOf("/");
-	return idx === -1 ? "." : p.slice(0, idx);
 }
 
 export function listCapabilities(): readonly AppCapability[] {

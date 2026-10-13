@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
+import { SHELL_TOOL_NAMES } from "../permissions/shell-tools";
 
 export interface AgentMode {
 	name: string;
@@ -31,7 +32,7 @@ const BUILT_IN_MODES: Record<string, AgentMode> = {
 		description: "Read-only planning mode - no file writes",
 		systemPromptPrefix:
 			"You are a software architect. Analyze, plan, and design. Do NOT write code.",
-		deniedTools: ["write_file", "edit_file", "run_command", "git_commit", "git_push"],
+		deniedTools: ["write_file", "edit_file", "speak", "make_pdf", "render_video_deck", ...SHELL_TOOL_NAMES, "git_commit", "git_push"],
 		effort: "high",
 	},
 	review: {
@@ -39,7 +40,7 @@ const BUILT_IN_MODES: Record<string, AgentMode> = {
 		description: "Code review mode - read-only with feedback",
 		systemPromptPrefix:
 			"You are a code reviewer. Read code, find issues, suggest improvements. Do NOT modify files.",
-		deniedTools: ["write_file", "edit_file", "run_command", "git_commit", "git_push"],
+		deniedTools: ["write_file", "edit_file", "speak", "make_pdf", "render_video_deck", ...SHELL_TOOL_NAMES, "git_commit", "git_push"],
 		effort: "medium",
 	},
 	debug: {
@@ -166,6 +167,22 @@ export class ModeManager {
 		}
 		this.enableFastMode(currentModel);
 		return true;
+	}
+
+	/**
+	 * Limit this process to the named tools for the rest of its life (`--tools`
+	 * on a headless run, F5). Registers a one-off mode and makes it active, so
+	 * the same filter that offers tools and refuses withheld calls applies.
+	 */
+	applyToolAllowlist(names: string[]): void {
+		this.modes["tool-allowlist"] = {
+			name: "Tool allowlist",
+			description: "Only the tools named on the command line",
+			systemPromptPrefix: "",
+			// Intersect with the mode already active: --tools can narrow, never widen.
+			allowedTools: names.filter((n) => this.isToolAllowed(n)),
+		};
+		this.active = "tool-allowlist";
 	}
 
 	setActiveMode(name: string): boolean {
