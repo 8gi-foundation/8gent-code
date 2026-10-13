@@ -591,6 +591,7 @@ function computeCliOverrides(
 
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
+import { missingKeyNotice } from "../../../packages/self-autonomy/local-servers.js";
 import {
 	describeMissingVoiceSetup,
 	describeTranscriberBackend,
@@ -3073,6 +3074,9 @@ export function App({
 	// config.model can self-correct after a reroute; reuse compares against this.
 	const builtSpecRef = useRef(new WeakMap<object, { model: string; runtime: string }>());
 	const lastReadinessNoticeRef = useRef("");
+	// Why the tab's 8gent cannot start, when init knows (#4218). The send path
+	// shows it instead of "wait a moment", which never fixes a missing key.
+	const notReadyReasonRef = useRef<string | null>(null);
 	// Set when agent init found no local provider answering (T5). The "no
 	// model" card shows it as its reason line, in place of the chat notice
 	// that used to repeat on each provider and push the setup card away.
@@ -3126,6 +3130,20 @@ export function App({
 				setBuildFact({ key: buildKey, notice });
 			};
 			try {
+				notReadyReasonRef.current = null;
+				// A provider with no key can never start, so say so once and stop:
+				// no retry, since keys.env is read at launch (#4218).
+				const _keyNotice = missingKeyNotice(
+					currentProvider,
+					Boolean(sessionApiKey(providerToRuntime(currentProvider))),
+				);
+				if (_keyNotice) {
+					setAgent(null);
+					setAgentReady(false);
+					notReadyReasonRef.current = _keyNotice;
+					notify(workspaceTabs.activeTab?.id || "default", _keyNotice);
+					return;
+				}
 				// Bounded readiness gate. A local provider whose port accepts TCP
 				// but never answers used to leave this init awaiting forever, so
 				// the tab never became ready and nothing said why. Probe first;
@@ -3152,7 +3170,9 @@ export function App({
 					const label =
 						localProviderEndpoints().find((e) => e.provider === decision.from)?.label ??
 						decision.from;
-					setUnreachableNote(unreachableLine(label, decision.fromAddress, decision.reason));
+					const _line = unreachableLine(label, decision.fromAddress, decision.reason);
+					setUnreachableNote(_line);
+					notReadyReasonRef.current = `${_line}\nStart it, or pick another provider with /provider.`;
 					retryLater();
 					return;
 				}
@@ -3231,6 +3251,7 @@ export function App({
 					setAgent(null);
 					setAgentReady(false);
 					waiting(_plan.notice);
+					notReadyReasonRef.current = _plan.notice;
 					notify(_initTabId, _plan.notice);
 					retryLater();
 					return;
@@ -3296,10 +3317,8 @@ export function App({
 					setAgentReady(false);
 					waiting(`${currentProvider} ${_check.reason ?? "did not report ready."}`);
 					retryLater();
-					notify(
-						_initTabId,
-						`Provider ${currentProvider} (${currentModel}) did not report ready within ${(PROBE_TIMEOUT_MS * 2) / 1000}s. Nothing will run until it does. Check it, or pick another with /provider.`,
-					);
+					notReadyReasonRef.current = `Provider ${currentProvider} (${currentModel}) did not report ready within ${(PROBE_TIMEOUT_MS * 2) / 1000}s. Nothing will run until it does. Check it, or pick another with /provider.`;
+					notify(_initTabId, notReadyReasonRef.current);
 				}
 			} catch (err) {
 				setAgentReady(false);
@@ -6685,9 +6704,10 @@ export function App({
 				appendToTab(tabId, {
 					id: `system-agent-not-ready-${Date.now()}`,
 					role: "system" as const,
-					content:
-						`[8gent not ready] Nothing was run. The 8gent for this tab has not finished starting (model: ${currentModel}).\n` +
-						"Wait a moment and send again, or check the provider with /provider.",
+					content: notReadyReasonRef.current
+						? `[8gent not ready] Nothing was run.\n${notReadyReasonRef.current}`
+						: `[8gent not ready] Nothing was run. The 8gent for this tab has not finished starting (model: ${currentModel}).\n` +
+							"Wait a moment and send again, or check the provider with /provider.",
 					timestamp: new Date(),
 				});
 				if (tabId === activeTabId) {

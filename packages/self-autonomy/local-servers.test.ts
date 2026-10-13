@@ -13,6 +13,7 @@ import { ProviderManager } from "../providers/index";
 import {
 	detectLocalServers,
 	installGuideUrl,
+	missingKeyNotice,
 	providerChoiceScreen,
 	readableModelName,
 	resolveProviderChoice,
@@ -231,13 +232,38 @@ describe("choice screen", () => {
 			["darwin", "macos"],
 			["linux", "linux"],
 		] as const) {
-			const screen = providerChoiceScreen([], platform);
+			const screen = providerChoiceScreen([], platform, { openRouterKey: true });
 			expect(screen.question).toContain("No local model server is running");
 			expect(screen.question).toContain(`docs/install/${page}.md`);
 			expect(screen.question).toContain("docs/install/providers.md");
 			expect(screen.choices.map((c) => c.value)).toEqual(["openrouter", "later"]);
 		}
 		expect(installGuideUrl("freebsd")).toContain("linux.md");
+	});
+
+	// #4218: Enter on this screen saved OpenRouter with no key, and the chat
+	// then said "wait a moment" forever. With no key, Enter saves nothing.
+	test("none found, no OpenRouter key: Enter is Decide later, and the key step is named", () => {
+		const screen = providerChoiceScreen([], "darwin", { openRouterKey: false });
+		expect(screen.choices.map((c) => c.value)).toEqual(["later", "openrouter"]);
+		expect(screen.question).toContain("No local model server is running");
+		expect(screen.question).toContain("8gent keys");
+		expect(screen.question).toContain("OPENROUTER_API_KEY");
+		expect(screen.question).not.toContain("Until then I can use free cloud models");
+		const cloud = screen.choices.find((c) => c.value === "openrouter");
+		expect(cloud?.description).toContain("keys.env");
+		expect(cloud?.description).not.toContain("~/.8gent/.env");
+	});
+
+	test("missing key notice: OpenRouter without a key names the cause and the fix, never wait", () => {
+		const notice = missingKeyNotice("openrouter", false);
+		expect(notice).toContain("OPENROUTER_API_KEY");
+		expect(notice).toContain("8gent keys");
+		expect(notice).toContain("free");
+		expect(notice).toContain("/provider");
+		expect(notice?.toLowerCase()).not.toContain("wait");
+		expect(missingKeyNotice("openrouter", true)).toBeNull();
+		expect(missingKeyNotice("ollama", false)).toBeNull();
 	});
 
 	test("one found: a yes-shaped question, the server is the Enter default", async () => {

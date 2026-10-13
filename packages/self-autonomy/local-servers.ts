@@ -208,8 +208,15 @@ export function serverModelsLine(server: FoundServer): string {
 	return `${readableModelName(saved)}${more}${named ? `, including ${readableModelName(named)}` : ""}`;
 }
 
-/** Plain next step when nothing is running: one install link for this OS. */
-export function noServerGuidance(platform: string): string {
+/** The one step that gives OpenRouter a key: the keys file, then a fresh launch. */
+const OPENROUTER_KEY_STEP =
+	"run `8gent keys`, add OPENROUTER_API_KEY=your-key from openrouter.ai, save, then run 8gent again";
+
+/**
+ * Plain next step when nothing is running: one install link for this OS.
+ * Without an OpenRouter key the cloud line says the key comes first (#4218).
+ */
+export function noServerGuidance(platform: string, openRouterKey = true): string {
 	return [
 		"No local model server is running on this machine.",
 		"",
@@ -217,7 +224,22 @@ export function noServerGuidance(platform: string): string {
 		`Install guide for this computer: ${installGuideUrl(platform)}`,
 		`Every provider, local and cloud: ${PROVIDERS_GUIDE_URL}`,
 		"",
-		"Until then I can use free cloud models through OpenRouter.",
+		openRouterKey
+			? "Until then I can use free cloud models through OpenRouter."
+			: `Free cloud models through OpenRouter need a free openrouter.ai account and its key: ${OPENROUTER_KEY_STEP}.`,
+	].join("\n");
+}
+
+/**
+ * What the chat says when the active provider needs a key and has none
+ * (#4218). Null when nothing is missing. Waiting never fixes a missing key,
+ * so this names the cause and the one step that does.
+ */
+export function missingKeyNotice(provider: string, hasKey: boolean): string | null {
+	if (provider !== "openrouter" || hasKey) return null;
+	return [
+		"OpenRouter has no key, so nothing can run on it yet. Its free models need a free openrouter.ai account.",
+		`Next step: ${OPENROUTER_KEY_STEP}. Or pick a local model server with /provider.`,
 	].join("\n");
 }
 
@@ -238,14 +260,29 @@ const LATER_CHOICE = {
 	description: "Save nothing now; /provider picks one any time",
 };
 
-/** The choice screen for what detection found: none, one, or several. */
-export function providerChoiceScreen(found: FoundServer[], platform: string): ProviderChoiceScreen {
+/**
+ * The choice screen for what detection found: none, one, or several.
+ * `openRouterKey` defaults to whether OPENROUTER_API_KEY is set (keys.env is
+ * loaded into the env at launch). With no server and no key, Enter is
+ * "Decide later": it used to save OpenRouter with no key, a dead end (#4218).
+ */
+export function providerChoiceScreen(
+	found: FoundServer[],
+	platform: string,
+	opts: { openRouterKey?: boolean } = {},
+): ProviderChoiceScreen {
+	const openRouterKey = opts.openRouterKey ?? Boolean(process.env.OPENROUTER_API_KEY);
 	const local = found.map((s) => {
 		const where = s.url.replace(/^https?:\/\//, "");
 		return { label: s.label, value: s.id, description: `${serverModelsLine(s)}, at ${where}` };
 	});
 	if (found.length === 0) {
-		return { question: noServerGuidance(platform), choices: [OPENROUTER_CHOICE, LATER_CHOICE] };
+		return {
+			question: noServerGuidance(platform, openRouterKey),
+			choices: openRouterKey
+				? [OPENROUTER_CHOICE, LATER_CHOICE]
+				: [LATER_CHOICE, OPENROUTER_CHOICE],
+		};
 	}
 	const question =
 		found.length === 1
