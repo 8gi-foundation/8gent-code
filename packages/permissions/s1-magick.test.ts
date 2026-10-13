@@ -531,8 +531,23 @@ describe("the binary and the configuration are not the workspace's", () => {
 			"MAGICK_TEMPORARY_PATH",
 			"FONTCONFIG_FILE",
 			"FONTCONFIG_PATH",
+			"FONTCONFIG_SYSROOT",
 		])
 			expect(ok(CMD, ws, { ...env, [k]: outside }), k).toBe(false);
+	});
+
+	test("FONTCONFIG_SYSROOT pointed into the workspace, or anywhere, is refused", () => {
+		// fontconfig loads <sysroot>/opt/homebrew/etc/fonts/fonts.conf from it.
+		expect(ok(CMD, ws, { ...env, FONTCONFIG_SYSROOT: ws })).toBe(false);
+		expect(ok(CMD, ws, { ...env, FONTCONFIG_SYSROOT: join(ws, "sub") })).toBe(false);
+		// Like FONTCONFIG_FILE and FONTCONFIG_PATH, presence alone refuses: the verdict is the same outside.
+		expect(ok(CMD, ws, { ...env, FONTCONFIG_SYSROOT: outside })).toBe(false);
+		expect(ok(CMD)).toBe(LANE);
+	});
+
+	test("XDG_CACHE_HOME pointed into the workspace is refused (cautious, not proven)", () => {
+		expect(ok(CMD, ws, { ...env, XDG_CACHE_HOME: ws })).toBe(false);
+		expect(ok(CMD, ws, { ...env, XDG_CACHE_HOME: join(outside, "cache") })).toBe(LANE);
 	});
 
 	test("ImageMagick's per-user configuration folder resolving into the workspace", () => {

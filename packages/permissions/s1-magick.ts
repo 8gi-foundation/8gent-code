@@ -49,7 +49,7 @@
  *   - every PATH entry is absolute and resolves outside the working directory and the project
  *     (pathOutsideWorkspace, shared with the deck-render and tg-notify lanes): the `magick` that
  *     runs cannot be one the workspace planted;
- *   - no MAGICK_* variable and no FONTCONFIG_FILE/FONTCONFIG_PATH; $HOME/.config/ImageMagick,
+ *   - no MAGICK_* variable and no FONTCONFIG_* variable; $HOME/.config/ImageMagick,
  *     $HOME/.magick, $XDG_CONFIG_HOME/ImageMagick and the per-user fontconfig configuration and
  *     font folders (when set) resolve outside the roots; and
  *     neither root holds an ImageMagick configuration file of its own name (CONFIG_NAMES), which
@@ -278,7 +278,7 @@ const CONFIG_NAMES = [
 ];
 
 /** Environment that points ImageMagick or fontconfig at configuration it would not otherwise read. */
-const CONFIG_ENV = /^(?:MAGICK_|FONTCONFIG_FILE$|FONTCONFIG_PATH$)/;
+const CONFIG_ENV = /^(?:MAGICK_|FONTCONFIG_)/;
 
 /** True when every existing ancestor of `abs` strictly below `root` is a real directory. */
 function noSymlinkBelow(abs: string, root: string): boolean {
@@ -374,7 +374,12 @@ export function magickRenderInProject(
 		const pathEnv = env.PATH ?? process.env.PATH ?? "";
 		if (roots.some((r) => !pathOutsideWorkspace(r, pathEnv))) return NO;
 		if (Object.keys(env).some((k) => CONFIG_ENV.test(k) && env[k] !== undefined)) return NO;
-		const { HOME: home, XDG_CONFIG_HOME: xdg, XDG_DATA_HOME: xdgData } = env;
+		const {
+			HOME: home,
+			XDG_CONFIG_HOME: xdg,
+			XDG_DATA_HOME: xdgData,
+			XDG_CACHE_HOME: xdgCache,
+		} = env;
 		const userConfig = [
 			...(home
 				? [
@@ -389,6 +394,8 @@ export function magickRenderInProject(
 				: []),
 			...(xdg ? [path.join(xdg, "ImageMagick"), path.join(xdg, "fontconfig")] : []),
 			...(xdgData ? [path.join(xdgData, "fonts")] : []),
+			// Cautious, not proven: fontconfig keeps its cache folder here.
+			...(xdgCache ? [path.join(xdgCache, "fontconfig")] : []),
 		];
 		if (userConfig.some((d) => !outsideRoots(d, roots))) return NO;
 		for (const r of roots)
