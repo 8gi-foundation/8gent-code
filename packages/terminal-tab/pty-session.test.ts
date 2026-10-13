@@ -23,8 +23,9 @@ const posixShell = process.platform !== "win32";
 
 // #4143: when node-pty did not build, the bridge exits 66 and every case below
 // failed as "Expected: 0, Received: 66". Run the bridge once first and fail
-// with its own message instead. The cases still fail (no silent skip); CI's
-// "Preflight native deps" step explains it before the suite starts.
+// with its own message instead. bun then reports one "(fail) (unnamed)" and
+// the cases do not run: still red, never a skip. CI's "Preflight native deps"
+// step explains it before the suite starts.
 beforeAll(() => {
 	if (!nodeAvailable || !posixShell) return;
 	const r = spawnSync(
@@ -43,7 +44,7 @@ beforeAll(() => {
 		.map((l) => JSON.parse(l) as { type: string; error?: string })
 		.find((m) => m.type === "exit");
 	throw new Error(
-		`pty-bridge exited 66: node-pty is not installed or did not build (${exit?.error ?? "no reason given"}). Fix: sudo apt install python3 make g++, then rm -rf node_modules/node-pty && bun install.`,
+		`pty-bridge exited 66: node-pty is not installed or did not build (${exit?.error ?? "no reason given"}). Fix: sudo apt install python3 make g++, then rm -rf node_modules/node-pty && bun install. On CI, check "node-gyp --version" is on PATH before bun install.`,
 	);
 });
 

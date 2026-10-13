@@ -27,6 +27,7 @@ quietly, and terminal tabs (and the pty-session tests) then cannot run.
 
   fix:  sudo apt install python3 make g++      (Debian or Ubuntu)
         rm -rf node_modules/node-pty && bun install
+  on CI: check `node-gyp --version` is on PATH before bun install
 EOF
 	exit 1
 }
@@ -41,11 +42,16 @@ check() {
 }
 
 check bun
-# The terminal-tab bridge runs node-pty under Node, so load it there too when
-# a Node is on PATH.
-if command -v node >/dev/null 2>&1; then
-	check node
+# The terminal-tab bridge runs node-pty under Node, picked as in
+# packages/terminal-tab/find-node.ts: NODE_8GENT_BIN, the managed runtime,
+# then node on PATH. Load it with that same binary when there is one.
+node=$(command -v node 2>/dev/null)
+managed="$HOME/.8gent/runtime/node-22.14.0/bin/node"
+[ -x "$managed" ] && node=$managed
+[ -n "${NODE_8GENT_BIN:-}" ] && [ -x "$NODE_8GENT_BIN" ] && node=$NODE_8GENT_BIN
+if [ -n "$node" ]; then
+	check "$node"
 fi
 
-echo "preflight: node-pty loads ($(command -v node >/dev/null 2>&1 && echo "bun and node" || echo "bun"))"
+echo "preflight: node-pty loads (bun${node:+ and $node})"
 exit 0
