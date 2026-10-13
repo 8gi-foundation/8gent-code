@@ -30,6 +30,7 @@ import {
 	verify as verifyState,
 	verifyOrThrow,
 } from "../goal-state-hmac";
+import { refreshSecurityEnvForTests } from "../run-command-sandbox";
 
 // ============================================
 // CapabilityBudget defaults
@@ -445,11 +446,14 @@ describe("goal-state-hmac", () => {
 		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "go-hmac-"));
 		originalDataDir = process.env.EIGHT_DATA_DIR;
 		process.env.EIGHT_DATA_DIR = tmpDir;
+		// The HMAC key path reads the security env snapshot, not live env (#4132).
+		refreshSecurityEnvForTests();
 	});
 
 	afterEach(() => {
 		if (originalDataDir === undefined) delete process.env.EIGHT_DATA_DIR;
 		else process.env.EIGHT_DATA_DIR = originalDataDir;
+		refreshSecurityEnvForTests();
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 

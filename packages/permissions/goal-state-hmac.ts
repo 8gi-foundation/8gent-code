@@ -6,6 +6,11 @@
  * `~/.8gent/keys/state-hmac.key`. The key is generated on first use,
  * 32 bytes, chmod 0600. Verify mismatch => refuse to resume.
  *
+ * The data dir is taken from the security env snapshot (#4132), never from
+ * live process.env, so a repo .env or a later env change cannot point
+ * signing at a fresh, attacker-chosen key. A key inside the project
+ * directory is refused.
+ *
  * Owner: 8SO.
  */
 
@@ -13,11 +18,34 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { realpathLoose, securityEnvSnapshot } from "./run-command-sandbox.js";
 
-/** Where the HMAC key lives on disk. */
+/**
+ * Where the HMAC key lives on disk: <data dir>/keys/state-hmac.key.
+ *
+ * The data dir is EIGHT_DATA_DIR from the startup security env snapshot
+ * (absolute only, and ignored when a .env declares it), else ~/.8gent. It is
+ * never read from live process.env, so the key cannot be redirected after
+ * startup (#4132). Throws when the key's real path is inside the current
+ * project directory: the repo being worked on cannot hold the key that signs
+ * its own state. Running from home itself, or from one of its ancestors, is
+ * not a cloned repo and is allowed.
+ */
 export function getKeyPath(): string {
-	const base = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
-	return path.join(base, "keys", "state-hmac.key");
+	const dataDir = securityEnvSnapshot().values.EIGHT_DATA_DIR;
+	const home = os.homedir();
+	const base = dataDir && path.isAbsolute(dataDir) ? dataDir : path.join(home, ".8gent");
+	const keyPath = path.join(base, "keys", "state-hmac.key");
+	const project = realpathLoose(process.cwd());
+	const realHome = realpathLoose(home);
+	const homeIsInProject = realHome === project || realHome.startsWith(project + path.sep);
+	const real = realpathLoose(keyPath);
+	if (!homeIsInProject && (real === project || real.startsWith(project + path.sep))) {
+		throw new Error(
+			`[goal-state-hmac] Refusing HMAC key path ${JSON.stringify(real)}: it is inside the project directory ${JSON.stringify(project)}.`,
+		);
+	}
+	return keyPath;
 }
 
 /** Key length in bytes. 32 = 256 bits, matches HMAC-SHA256 block. */

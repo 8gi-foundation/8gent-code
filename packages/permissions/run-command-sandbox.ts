@@ -13,6 +13,7 @@
  *   ~/.8gent/{sessions,logs,checkpoints}/, daemon.log, approvals-audit.jsonl
  *   ~/.8gent/{policies.yaml,policy-checksum,mcp.json,.env,keys.env,bin/}
  *   ~/.8gent/skills-trust.json (which project skills may replace user/bundled ones)
+ *   ~/.8gent/keys/ (state-hmac.key, the /goal state and approval grant signing key)
  *
  * The same set is applied under EIGHT_HOME/.8gent and EIGHT_DATA_DIR when
  * those are set, and each path
@@ -83,6 +84,9 @@ export const PROTECTED_DATA_DIRS = [
 	"logs",
 	"checkpoints",
 	"bin",
+	// keys/state-hmac.key signs /goal state and approval grants (#4132, 8SO). The whole dir,
+	// not just the file: a file rule alone lets the dir be renamed aside and a forged one moved in.
+	"keys",
 	// A file or a directory: a subpath rule covers both.
 	"policy-checksum",
 ] as const;
