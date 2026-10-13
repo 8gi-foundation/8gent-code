@@ -994,9 +994,13 @@ const makePdfTool = tool({
 
 const renderVideoDeckTool = tool({
 	description:
-		"Render a JSON spec into an mp4 slide video, deterministically, with local code only. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task. Returns { path, durationSec, slides, width, height, hasAudio }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?, image? (png/jpg inside the working directory), seconds? (1-60, default 4), narration? (spoken by the local voice), voice? }] }. No music, no network.",
+		"Narrated mp4 from args {spec:{size:'1280x720', slides:[{title, bullets, narration}]}, out:'deck.mp4'}, local code only. Deterministic. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task. Returns { path, durationSec, slides, width, height, hasAudio }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?, image? (png/jpg inside the working directory), seconds? (1-60, default 4), narration? (spoken by the local voice), voice? }] }. No music, no network.",
 	inputSchema: z.object({
-		spec: z.record(z.string(), z.unknown()).describe("The deck spec"),
+		spec: z
+			.record(z.string(), z.unknown())
+			.describe(
+				"Deck spec: { size?: '1280x720'|'1920x1080', slides: [{ title?, bullets?: string[], narration? }] }",
+			),
 		out: z
 			.string()
 			.optional()

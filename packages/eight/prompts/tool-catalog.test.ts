@@ -241,3 +241,45 @@ describe("TOOL_PATTERNS_SEGMENT local server guidance (#3941)", () => {
 		}
 	});
 });
+
+describe("render_video_deck catalog line carries its spec shape (#4172)", () => {
+	/** The one line the local text-tool prompt shows per tool: `name(params) - description`. */
+	async function catalogLines(): Promise<string[]> {
+		const { ToolExecutor } = await import("../tools.js");
+		const { toolDefsToSpecs } = await import("../../ai/text-tool-endpoint.js");
+		const { buildToolSystemPrompt } = await import("../../ai/text-tools.js");
+		const dir = realpathSync(mkdtempSync(join(tmpdir(), "catalog-line-")));
+		try {
+			const defs = new ToolExecutor(dir).getToolDefinitions() as Parameters<
+				typeof toolDefsToSpecs
+			>[0];
+			return buildToolSystemPrompt(toolDefsToSpecs(defs)).split("\n");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	}
+
+	it("names slides and narration on the line the model reads, not only in the native schema", async () => {
+		const line = (await catalogLines()).find((l) => l.startsWith("render_video_deck("));
+		expect(line).toBeDefined();
+		for (const word of ["spec:", "slides", "title", "bullets", "narration", "out"]) {
+			expect(line).toContain(word);
+		}
+		// Whole, not cut at the 140-character description cap.
+		expect(line).not.toContain("…");
+	});
+
+	it("speak's line keeps its input shape (text, voice, out)", async () => {
+		const line = (await catalogLines()).find((l) => l.startsWith("speak("));
+		expect(line).toStartWith("speak(text: string, voice?: string, out?: string) - ");
+	});
+
+	it("the native path's description opens with the same shape", async () => {
+		const { agentTools } = await import("../../ai/tools.js");
+		const first = (agentTools.render_video_deck as { description?: string }).description?.split(
+			/(?<=\.)\s/,
+		)[0];
+		expect(first).toContain("slides");
+		expect(first).toContain("narration");
+	});
+});

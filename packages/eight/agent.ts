@@ -306,6 +306,23 @@ function readPinnedActiveModel(): string[] {
 	}
 }
 
+/**
+ * Why the harness, not the person, stopped a turn (#4172). A headless caller reads it to
+ * report the stop as a failure with its reason instead of a finished run.
+ */
+export type TurnStop =
+	| { kind: "circuit_breaker"; reason: string }
+	| { kind: "watchdog"; reason: string; limitMs: number };
+
+/** The watchdog's stop for a turn that ran past `limitMs`. */
+export function watchdogStop(limitMs: number): TurnStop {
+	return {
+		kind: "watchdog",
+		limitMs,
+		reason: `Session watchdog abort: the turn ran past its limit of ${limitMs} ms (${Math.round(limitMs / 60000)} min).`,
+	};
+}
+
 export class Agent {
 	private executor: ToolExecutor;
 	private config: AgentConfig;
@@ -348,6 +365,8 @@ export class Agent {
 	private sessionSync: SessionSyncManager;
 	private kernel: KernelManager;
 	private abortController: AbortController | null = null;
+	/** Set when the breaker or the watchdog stopped the current turn; cleared when a turn starts. */
+	private turnStop: TurnStop | null = null;
 	/** One-file extensions from ~/.8gent/extensions (G1). */
 	private extensionHost: ExtensionHost;
 	/** Settles when the current extension load finishes; a turn waits for it. */
@@ -1156,7 +1175,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
 					if (breakerStop === null) breakerStop = loopResult.userMessage;
-					this.abort();
+					this.abort({ kind: "circuit_breaker", reason: loopResult.message });
 				}
 
 				if (success) {
@@ -1858,6 +1877,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.totalCost = null;
 
 		const chatStartTime = Date.now();
+		this.turnStop = null;
 		let totalTokensUsed = 0;
 		let stepCount = 0;
 
@@ -1865,10 +1885,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Prevents git/shell hangs from silently blocking the agent loop forever.
 		const SESSION_MAX_MS = (this.config as any).maxSessionMs ?? 30 * 60 * 1000;
 		let sessionWatchdog: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-			console.log(
-				`\n[8gent] Session watchdog: turn exceeded ${SESSION_MAX_MS / 60000} min — aborting`,
-			);
-			this.abort();
+			this.abort(watchdogStop(SESSION_MAX_MS));
 		}, SESSION_MAX_MS);
 
 		// Build provider config — main agent always uses its own model.
@@ -2284,7 +2301,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				const loopResult = this.loopDetector.check();
 				if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
-					this.abort();
+					this.abort({ kind: "circuit_breaker", reason: loopResult.message });
 				}
 
 				if (event.success) {
@@ -3268,14 +3285,28 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
-	 * Abort the current generation. Called when user presses ESC during processing.
+	 * Abort the current generation. With no argument it is the person (ESC); the circuit
+	 * breaker and the session watchdog pass their stop, which is logged as itself and kept
+	 * for getTurnStop() (#4172).
 	 */
-	abort(): void {
+	abort(stop?: TurnStop): void {
+		if (stop && this.turnStop === null) this.turnStop = stop;
 		if (this.abortController) {
 			this.abortController.abort();
 			this.abortController = null;
-			console.log("[8gent] Generation aborted by user");
+			console.log(
+				stop === undefined
+					? "[8gent] Generation aborted by user"
+					: stop.kind === "watchdog"
+						? `\n[8gent] ${stop.reason} Aborting.`
+						: `[8gent] Generation stopped by the circuit breaker: ${stop.reason}`,
+			);
 		}
+	}
+
+	/** Why the harness stopped the last turn, or null when it ended on its own or by ESC. */
+	getTurnStop(): TurnStop | null {
+		return this.turnStop;
 	}
 
 	private async collectToolEvidence(event: {

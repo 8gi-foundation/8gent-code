@@ -1346,11 +1346,15 @@ export class ToolExecutor {
 				function: {
 					name: "render_video_deck",
 					description:
-						"[MEDIA] Render a JSON spec into an mp4 slide video, deterministically, with local code only. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task: you write the spec, it draws the slides, joins them and returns { path, durationSec }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?: string[], image?: 'png/jpg path in the working directory', seconds?: 1-60 (default 4), narration?: 'spoken by the local voice', voice? }] } (1-40 slides, each needs a title, text, bullets or image). Narration uses the same local engine as speak and stretches a slide to fit its voice. No music, no network. Never shells out.",
+						"[MEDIA] Narrated mp4 from args {spec:{size:'1280x720', slides:[{title, bullets, narration}]}, out:'deck.mp4'}, local code only. Deterministic. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task: you write the spec, it draws the slides, joins them and returns { path, durationSec }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?: string[], image?: 'png/jpg path in the working directory', seconds?: 1-60 (default 4), narration?: 'spoken by the local voice', voice? }] } (1-40 slides, each needs a title, text, bullets or image). Narration uses the same local engine as speak and stretches a slide to fit its voice. No music, no network. Never shells out.",
 					parameters: {
 						type: "object",
 						properties: {
-							spec: { type: "object", description: "The deck spec described above" },
+							spec: {
+								type: "object",
+								description:
+									"Deck spec: { size?: '1280x720'|'1920x1080', slides: [{ title?, bullets?: string[], narration? }] }",
+							},
 							out: {
 								type: "string",
 								description: "Output .mp4 path inside the working directory (default deck.mp4)",
