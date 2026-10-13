@@ -677,6 +677,7 @@ export class AgentPool {
 					sessionId,
 					tool: event.toolName,
 					input: event.args,
+					toolCallId: event.toolCallId,
 				});
 			},
 
@@ -687,6 +688,8 @@ export class AgentPool {
 					tool: event.toolName,
 					output: event.resultPreview || "",
 					durationMs: event.durationMs,
+					toolCallId: event.toolCallId,
+					success: event.success,
 				});
 			},
 

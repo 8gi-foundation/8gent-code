@@ -34,6 +34,7 @@ export const KEYBINDINGS: readonly KeyBinding[] = [
 	{ keys: "Ctrl+W", action: "Close the current tab", group: "tabs" },
 	{ keys: "Ctrl+1-9", action: "Switch to tab by number", group: "tabs" },
 	{ keys: "Ctrl+X", action: "Open or close the PLAN column", group: "views" },
+	{ keys: "Ctrl+F", action: "Live view of the session in 8gent Browser", group: "views" },
 	{ keys: "Ctrl+Y", action: "Cycle the work mode", group: "views" },
 	{ keys: "Ctrl+G", action: "Send the running task to the background", group: "views" },
 	{ keys: "Ctrl+R", action: "Start or stop voice input", group: "extras" },

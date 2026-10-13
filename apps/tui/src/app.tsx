@@ -116,7 +116,12 @@ import { useVoiceChat } from "./hooks/useVoiceChat.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
 import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
 import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
-import { DaemonSessionClient, surfaceLabel } from "./lib/daemon-sessions.js";
+import {
+	DaemonSessionClient,
+	liveViewUrl,
+	openLiveView,
+	surfaceLabel,
+} from "./lib/daemon-sessions.js";
 import {
 	composePrompt,
 	ensureInstalled,
@@ -2255,6 +2260,18 @@ export function App({
 		if (key.ctrl && input === "t") {
 			workspaceTabs.addTab("chat");
 			setViewMode("chat");
+		}
+
+		// Ctrl+F: the live anatomy page (#4190) in 8gent Browser. The URL is
+		// always printed, so it works without the browser too.
+		if (key.ctrl && input === "f") {
+			const url = liveViewUrl();
+			addSystemMessage(`Live view: ${url}`);
+			openLiveView(url).then((why) => {
+				if (why) addSystemMessage(`8gent Browser did not open it (${why}). Open the URL above.`);
+				else flashNotice("live view open in 8gent Browser");
+			});
+			return;
 		}
 
 		// Ctrl+Y: cycle agent modes. Y because Ctrl+M = Enter, Ctrl+I = Tab,
