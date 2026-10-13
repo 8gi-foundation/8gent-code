@@ -72,7 +72,11 @@ export interface ExtractOptions {
  * "/workspace/symlink-to-etc/passwd" pattern even when `passwd` itself does
  * not exist under the symlinked target.
  */
-export function resolveSafe(p: string, cwd: string, platform: NodeJS.Platform = process.platform): string {
+export function resolveSafe(
+	p: string,
+	cwd: string,
+	platform: NodeJS.Platform = process.platform,
+): string {
 	const flavor = pathFor(platform);
 	const absolute = flavor.resolve(fromLongPath(cwd, platform), fromLongPath(p, platform));
 	if (platform !== process.platform) return absolute;
@@ -178,6 +182,15 @@ export interface CommandSegment {
  * deliberately left raw so we can detect them as suspicious downstream.
  */
 export function tokenize(input: string, escapes = "\\"): string[] {
+	return words(input, escapes, false);
+}
+
+/**
+ * Split on unquoted whitespace. With `raw` the words keep their quotes and
+ * escape characters, so a caller can tell `D=x` (an assignment) from `"D=x"`
+ * (a command named `D=x`); word boundaries are identical either way.
+ */
+function words(input: string, escapes: string, raw: boolean): string[] {
 	const tokens: string[] = [];
 	let current = "";
 	let started = false;
@@ -196,17 +209,20 @@ export function tokenize(input: string, escapes = "\\"): string[] {
 		}
 
 		if (escapes.includes(ch) && !inSingle) {
+			if (raw) current += ch;
 			escape = true;
 			continue;
 		}
 
 		if (ch === "'" && !inDouble) {
+			if (raw) current += ch;
 			inSingle = !inSingle;
 			started = true;
 			continue;
 		}
 
 		if (ch === '"' && !inSingle) {
+			if (raw) current += ch;
 			inDouble = !inDouble;
 			started = true;
 			continue;
@@ -235,11 +251,31 @@ export function tokenize(input: string, escapes = "\\"): string[] {
  * background operator) and line breaks, none of them inside a quoted token.
  */
 export function splitPipeline(input: string, escapes = "\\"): string[] {
-	const segments: string[] = [];
+	return splitSequence(input, escapes).map((s) => s.text);
+}
+
+/** What joins a segment to its neighbours; `start` and `end` are the line's edges. */
+type Separator = "start" | "end" | "&&" | "||" | ";" | "|" | "&" | "\n" | "\r";
+
+interface SequencedSegment {
+	text: string;
+	before: Separator;
+	after: Separator;
+}
+
+/** {@link splitPipeline}, keeping the operator on each side of every segment. */
+function splitSequence(input: string, escapes: string): SequencedSegment[] {
+	const segments: SequencedSegment[] = [];
 	let current = "";
+	let before: Separator = "start";
 	let inSingle = false;
 	let inDouble = false;
 	let escape = false;
+	const cut = (after: Separator) => {
+		segments.push({ text: current.trim(), before, after });
+		current = "";
+		before = after;
+	};
 
 	for (let i = 0; i < input.length; i++) {
 		const ch = input[i];
@@ -271,14 +307,12 @@ export function splitPipeline(input: string, escapes = "\\"): string[] {
 
 		if (!inSingle && !inDouble) {
 			if ((ch === "&" && next === "&") || (ch === "|" && next === "|")) {
-				segments.push(current);
-				current = "";
+				cut(ch === "&" ? "&&" : "||");
 				i++;
 				continue;
 			}
 			if (ch === ";" || ch === "|" || ch === "&" || ch === "\n" || ch === "\r") {
-				segments.push(current);
-				current = "";
+				cut(ch);
 				continue;
 			}
 		}
@@ -286,8 +320,8 @@ export function splitPipeline(input: string, escapes = "\\"): string[] {
 		current += ch;
 	}
 
-	if (current.trim().length > 0) segments.push(current);
-	return segments.map((s) => s.trim()).filter(Boolean);
+	cut("end");
+	return segments.filter((s) => s.text.length > 0);
 }
 
 // ============================================
@@ -351,39 +385,270 @@ function envLookup(env: HomeEnv, name: string, platform: NodeJS.Platform): strin
 	return key === undefined ? undefined : env[key];
 }
 
+// ============================================
+// Variables the command line assigns itself (#4173)
+// ============================================
+
+/**
+ * `D=<dir>; mkdir -p "$D/frames"` sets `D` before the shell expands `$D`, so
+ * the check has to read `$D` from that assignment, not from the host
+ * environment. Only what can be read with certainty is resolved: a plain
+ * assignment statement that always runs in this shell, whose value is a word
+ * with no command substitution. Every other way a line can set a variable it
+ * also assigns plainly leaves that variable unresolved, and a path built from
+ * an unresolved variable is refused as if it were outside the workspace.
+ */
+interface InlineAssignment {
+	segment: number;
+	word: number;
+	name: string;
+	/** The raw value text, or `null` for a bare `export NAME`. */
+	value: string | null;
+}
+
+interface InlinePlan {
+	assignments: InlineAssignment[];
+	/** Assigned names whose value the check cannot know. */
+	unresolved: Set<string>;
+	/** Every assigned name is unresolved: the line runs code or opens subshells the check does not parse. */
+	allUnresolved: boolean;
+	/** The line sets IFS, so unquoted expansions may split anywhere. */
+	ifs: boolean;
+	/** The line sets HOME, so `~` no longer means the host's home. */
+	home: boolean;
+	/** The line sets CDPATH, so `cd` may land somewhere other than its operand. */
+	cdpath: boolean;
+}
+
+const NO_INLINE: InlinePlan = {
+	assignments: [],
+	unresolved: new Set(),
+	allUnresolved: false,
+	ifs: false,
+	home: false,
+	cdpath: false,
+};
+
+const ASSIGNMENT_WORD = /^([A-Za-z_][A-Za-z0-9_]*)=([\s\S]*)$/;
+const NAME_WORD = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** An assignment runs in this shell only when it starts a list... */
+const LIST_START = new Set<Separator>(["start", ";", "\n", "\r"]);
+/** ...and is not piped or sent to the background. */
+const LIST_END = new Set<Separator>(["end", ";", "\n", "\r", "&&"]);
+const OPENS_BODY = new Set(["if", "while", "until", "for", "case", "select", "{"]);
+const CLOSES_BODY = new Set(["fi", "done", "esac", "}"]);
+/** Builtins that run code the check never sees. */
+const RUNS_CODE = new Set(["eval", "source", ".", "trap", "alias", "enable"]);
+/** Shell-maintained: a plain assignment is overwritten by the next `cd`. */
+const SHELL_MAINTAINED = new Set(["PWD", "OLDPWD"]);
+
+/**
+ * The leading `NAME=value` words of a segment (after `export` or `readonly`),
+ * and whether they are the whole segment. When they are not, the segment is
+ * either a prefix assignment (`D=x cmd`) or a value the word split cut short
+ * (`D=$(echo /etc)`); neither can be resolved.
+ */
+function leadingAssignments(raw: string[]): {
+	assignments: { word: number; name: string; value: string | null }[];
+	statement: boolean;
+} {
+	const declared = raw[0] === "export" || raw[0] === "readonly";
+	const assignments: { word: number; name: string; value: string | null }[] = [];
+	for (let i = declared ? 1 : 0; i < raw.length; i++) {
+		const m = ASSIGNMENT_WORD.exec(raw[i]);
+		if (m) assignments.push({ word: i, name: m[1], value: m[2] });
+		else if (declared && NAME_WORD.test(raw[i]))
+			assignments.push({ word: i, name: raw[i], value: null });
+		else return { assignments, statement: false };
+	}
+	return { assignments, statement: true };
+}
+
+/** The line with quoted text and escaped characters blanked out. */
+function unquoted(command: string): string {
+	let out = "";
+	let inSingle = false;
+	let inDouble = false;
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		if (ch === "\\" && !inSingle) {
+			out += "  ";
+			i++;
+		} else if (ch === "'" && !inDouble) {
+			inSingle = !inSingle;
+			out += " ";
+		} else if (ch === '"' && !inSingle) {
+			inDouble = !inDouble;
+			out += " ";
+		} else out += inSingle || inDouble ? " " : ch;
+	}
+	return out;
+}
+
+function count(text: string, pattern: string): number {
+	return text.match(new RegExp(pattern, "g"))?.length ?? 0;
+}
+
+/** Every appearance of `name` as a whole word. */
+function mentions(command: string, name: string): number {
+	return count(command, `(?<![A-Za-z0-9_])${name}(?![A-Za-z0-9_])`);
+}
+
+/** Appearances of `name` as a plain `$name` or `${name}` reference. */
+function references(command: string, name: string): number {
+	return (
+		count(command, `(?<![$\\\\])\\$${name}(?![A-Za-z0-9_])`) +
+		count(command, `(?<![$\\\\])\\$\\{${name}\\}`)
+	);
+}
+
+function planInlineAssignments(command: string, segments: SequencedSegment[]): InlinePlan {
+	const plan: InlinePlan = { ...NO_INLINE, assignments: [], unresolved: new Set() };
+	const assigned = new Map<string, number>();
+	let depth = 0;
+
+	segments.forEach((segment, index) => {
+		const raw = words(segment.text, POSIX_SHELL.escapes, true);
+		const head = raw[0];
+		if (CLOSES_BODY.has(head)) depth = Math.max(0, depth - 1);
+		if (
+			RUNS_CODE.has(head) ||
+			((head === "command" || head === "builtin") && RUNS_CODE.has(raw[1]))
+		) {
+			plan.allUnresolved = true;
+		}
+		const { assignments, statement } = leadingAssignments(raw);
+		const certain =
+			statement && depth === 0 && LIST_START.has(segment.before) && LIST_END.has(segment.after);
+		for (const a of assignments) {
+			plan.assignments.push({ segment: index, ...a });
+			assigned.set(a.name, (assigned.get(a.name) ?? 0) + 1);
+			if (!certain || SHELL_MAINTAINED.has(a.name)) plan.unresolved.add(a.name);
+		}
+		if (OPENS_BODY.has(head)) depth++;
+	});
+
+	// Subshells, command substitution, arrays, case arms and heredocs: the
+	// segments above are not the shell's real structure.
+	const bare = unquoted(command).replace(/\$\{[A-Za-z_][A-Za-z0-9_]*\}/g, "");
+	if (/[()`]|<</.test(bare)) plan.allUnresolved = true;
+
+	// A name set any other way as well (`read D`, `for D in`, `D+=x`,
+	// `${D:=x}`, `unset D`) cannot be trusted.
+	for (const [name, times] of assigned) {
+		if (mentions(command, name) !== references(command, name) + times) plan.unresolved.add(name);
+	}
+
+	const setsAnyWay = (name: string) => mentions(command, name) > references(command, name);
+	plan.ifs = setsAnyWay("IFS");
+	plan.home = setsAnyWay("HOME");
+	plan.cdpath = setsAnyWay("CDPATH");
+	if (plan.ifs) plan.allUnresolved = true;
+	return plan;
+}
+
+/** How the variables in a word are read. */
+interface ExpandScope {
+	/** Names this line assigned so far, with their value or `null` if unresolvable. */
+	locals: ReadonlyMap<string, string | null>;
+	/** Reading an assignment value: a variable set nowhere makes it unresolvable instead of empty. */
+	strict?: boolean;
+	/** The line sets HOME: `~` is unresolvable. */
+	homeReassigned?: boolean;
+}
+
+interface Expansion {
+	text: string;
+	/** A variable in the word has no value the check can know. */
+	unresolved: boolean;
+	/** A variable in the word came from this line, not the host environment. */
+	local: boolean;
+}
+
+const HOST_ONLY: ExpandScope = { locals: new Map() };
+
 /**
  * Expand `~`, `$VAR`, `${VAR}` and, for a Windows shell, `%VAR%` and
  * `$env:VAR` the way the shell will before the command sees them, so a path
- * rooted in the user's profile is checked where it really points. An unset
- * `$VAR` expands to nothing; an unset `%VAR%` stays literal, as in cmd.exe.
+ * rooted in the user's profile is checked where it really points. A variable
+ * the line assigned itself reads from that assignment; any other unset
+ * `$VAR` expands to nothing, and an unset `%VAR%` stays literal, as in cmd.exe.
  */
-function expand(token: string, host: BoundaryHost, reading: ShellReading): string {
+function expand(
+	token: string,
+	host: BoundaryHost,
+	reading: ShellReading,
+	scope: ExpandScope = HOST_ONLY,
+): Expansion {
 	const { env, platform } = host;
+	let unresolved = false;
+	let local = false;
 	let out = token;
 	if (reading.windowsVars) {
-		out = out.replace(/%([A-Za-z_][A-Za-z0-9_()]*)%/g, (m, name) => envLookup(env, name, platform) ?? m);
-		out = out.replace(/\$env:([A-Za-z_][A-Za-z0-9_]*)/gi, (_, name) => envLookup(env, name, platform) ?? "");
+		out = out.replace(
+			/%([A-Za-z_][A-Za-z0-9_()]*)%/g,
+			(m, name) => envLookup(env, name, platform) ?? m,
+		);
+		out = out.replace(
+			/\$env:([A-Za-z_][A-Za-z0-9_]*)/gi,
+			(_, name) => envLookup(env, name, platform) ?? "",
+		);
 	}
-	out = out.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, braced, bare) => {
-		return envLookup(env, braced ?? bare, platform) ?? "";
-	});
+	out = out.replace(
+		/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g,
+		(_, braced, bare) => {
+			const name: string = braced ?? bare;
+			if (scope.locals.has(name)) {
+				local = true;
+				const value = scope.locals.get(name);
+				if (value == null) unresolved = true;
+				return value ?? "";
+			}
+			const value = envLookup(env, name, platform);
+			if (value === undefined && scope.strict) unresolved = true;
+			return value ?? "";
+		},
+	);
 	const tilde = (platform === "win32" ? /^~([^/\\]*)(?=$|[/\\])/ : /^~([^/]*)(?=$|\/)/).exec(out);
 	if (tilde) {
+		if (scope.homeReassigned) unresolved = true;
 		const home = resolveHome(env, platform);
 		const flavor = pathFor(platform);
 		const base = tilde[1] ? flavor.join(flavor.dirname(home), tilde[1]) : home;
 		out = base + out.slice(tilde[0].length);
 	}
-	return out;
+	return { text: out, unresolved, local };
+}
+
+/**
+ * The value a plain assignment gives its variable, or `null` when the check
+ * cannot know it: command substitution, a variable set nowhere, any other
+ * `$` form, or whitespace an unquoted expansion would split into more words.
+ */
+function assignedValue(
+	raw: string,
+	host: BoundaryHost,
+	locals: ReadonlyMap<string, string | null>,
+	homeReassigned: boolean,
+): string | null {
+	if (raw.includes("$(") || raw.includes("`")) return null;
+	const word = words(raw, POSIX_SHELL.escapes, false)[0] ?? "";
+	const value = expand(word, host, POSIX_SHELL, { locals, strict: true, homeReassigned });
+	if (value.unresolved || value.text.includes("$") || /\s/.test(value.text)) return null;
+	return value.text;
 }
 
 /**
  * Walk a command line, collect every path-like argument across pipeline
  * segments, and check each one against the workspace root. Tracks `cd`
  * statements so paths in later segments are anchored to the chained cwd
- * (the holaOS attack surface).
+ * (the holaOS attack surface), and variables the line assigns so `$VAR`
+ * is checked where the shell will really point it.
  */
-export function extractAndCheckPaths(command: string, options: ExtractOptions): BoundaryCheckResult {
+export function extractAndCheckPaths(
+	command: string,
+	options: ExtractOptions,
+): BoundaryCheckResult {
 	const host = hostOf(options.host);
 	const { platform } = host;
 	const { workspaceRoot, allowedAbsolutePrefixes } = options;
@@ -392,40 +657,67 @@ export function extractAndCheckPaths(command: string, options: ExtractOptions): 
 		violations.set(`${raw}\0${resolved}`, { raw, resolved, reason });
 	};
 	const delimiter = pathFor(platform).delimiter;
+	const unknown = `uses a variable this command sets in a way the boundary cannot follow (command substitution, an unset variable, whitespace, a loop or a second assignment), so it is treated as outside the workspace root (${workspaceRoot}); set it once with a plain NAME=value statement instead`;
 
 	for (const reading of readings(platform)) {
+		const segments = splitSequence(command, reading.escapes);
+		// Only a POSIX shell reads `NAME=value` as an assignment.
+		const plan = reading === POSIX_SHELL ? planInlineAssignments(command, segments) : NO_INLINE;
+		const locals = new Map<string, string | null>();
+		const scope: ExpandScope = { locals, homeReassigned: plan.home };
 		let cwd = workspaceRoot;
-		for (const segment of splitPipeline(command, reading.escapes)) {
-			const argv = tokenize(segment, reading.escapes);
-			if (argv.length === 0) continue;
+
+		const checkToken = (token: string): void => {
+			const operand = operandOf(token, platform);
+			if (operand === null) return;
+			const candidate = expand(operand, host, reading, scope);
+			if (candidate.unresolved) {
+				flag(token, "<unresolved>", `Path argument ${unknown}`);
+				return;
+			}
+			// `echo $PATH` names a search list, not a file - unless IFS splits it.
+			const searchList = candidate.text !== operand && candidate.text.includes(delimiter);
+			if (searchList && !candidate.local && !plan.ifs) return;
+			if (!looksLikePath(candidate.text, platform)) return;
+
+			const resolved = resolveSafe(candidate.text, cwd, platform);
+			if (isConfined(resolved, workspaceRoot, allowedAbsolutePrefixes, platform)) return;
+			flag(token, resolved, `Path argument escapes workspace root (${workspaceRoot})`);
+		};
+
+		segments.forEach((segment, index) => {
+			const argv = tokenize(segment.text, reading.escapes);
+			if (argv.length === 0) return;
 
 			let first = 1;
 			if (argv[0].toLowerCase() === "cd" && argv.length >= 2) {
 				// cmd.exe's `cd /d <dir>` also switches drive.
-				const hasDriveSwitch = platform === "win32" && argv.length >= 3 && argv[1].toLowerCase() === "/d";
-				const index = hasDriveSwitch ? 2 : 1;
-				const target = expand(operandOf(argv[index], platform) ?? argv[index], host, reading);
-				const resolved = resolveSafe(target, cwd, platform);
-				if (!isConfined(resolved, workspaceRoot, allowedAbsolutePrefixes, platform)) {
-					flag(argv[index], resolved, `cd target escapes workspace root (${workspaceRoot})`);
+				const hasDriveSwitch =
+					platform === "win32" && argv.length >= 3 && argv[1].toLowerCase() === "/d";
+				const at = hasDriveSwitch ? 2 : 1;
+				const target = expand(operandOf(argv[at], platform) ?? argv[at], host, reading, scope);
+				const resolved = resolveSafe(target.text, cwd, platform);
+				if (target.unresolved || plan.cdpath) {
+					flag(argv[at], "<unresolved>", `cd target ${unknown}`);
+				} else if (!isConfined(resolved, workspaceRoot, allowedAbsolutePrefixes, platform)) {
+					flag(argv[at], resolved, `cd target escapes workspace root (${workspaceRoot})`);
 				}
 				cwd = resolved;
-				first = index + 1;
+				first = at + 1;
 			}
 
-			for (const token of argv.slice(first)) {
-				const operand = operandOf(token, platform);
-				if (operand === null) continue;
-				const candidate = expand(operand, host, reading);
-				// `echo $PATH` names a search list, not a file.
-				if (candidate !== operand && candidate.includes(delimiter)) continue;
-				if (!looksLikePath(candidate, platform)) continue;
-
-				const resolved = resolveSafe(candidate, cwd, platform);
-				if (isConfined(resolved, workspaceRoot, allowedAbsolutePrefixes, platform)) continue;
-				flag(token, resolved, `Path argument escapes workspace root (${workspaceRoot})`);
-			}
-		}
+			argv.forEach((token, word) => {
+				if (word >= first) checkToken(token);
+				const assignment = plan.assignments.find((a) => a.segment === index && a.word === word);
+				if (assignment && assignment.value !== null) {
+					const untrusted = plan.allUnresolved || plan.unresolved.has(assignment.name);
+					locals.set(
+						assignment.name,
+						untrusted ? null : assignedValue(assignment.value, host, locals, plan.home),
+					);
+				}
+			});
+		});
 	}
 
 	return { allowed: violations.size === 0, violations: [...violations.values()] };
