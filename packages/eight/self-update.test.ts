@@ -9,6 +9,7 @@ import { createHash, sign as cryptoSign, generateKeyPairSync } from "node:crypto
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { checkUpdate, describeCheck } from "./cli-maintenance";
 import {
 	type FetchLike,
 	PROBE_TIMEOUT_MS,
@@ -346,6 +347,20 @@ describe("npm channel from the GitHub release (#3658)", () => {
 			to: "0.17.0",
 			channel: "npm",
 		});
+	});
+
+	test("--check on the npm channel reports the release npm does not have yet", async () => {
+		const r = await checkUpdate({
+			currentVersion: "0.18.0",
+			channel: "npm",
+			fetchImpl: fakeFetch(routes(npmLatest("0.17.0"))),
+			platform: "linux",
+			arch: "x64",
+			releasesUrl: RELEASES,
+		});
+		expect(describeCheck(r)).toBe(
+			"v0.20.0 is available (this is v0.18.0, npm channel). Run: 8gent update",
+		);
 	});
 
 	test("Windows quotes the staged tarball path for the npm.cmd shell", () => {
