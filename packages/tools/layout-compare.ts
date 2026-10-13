@@ -64,7 +64,7 @@ export function findChrome(
 			"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
 		);
 	} else if (process.platform === "win32") {
-		for (const base of [env["PROGRAMFILES"], env["PROGRAMFILES(X86)"], env.LOCALAPPDATA]) {
+		for (const base of [env.PROGRAMFILES, env["PROGRAMFILES(X86)"], env.LOCALAPPDATA]) {
 			if (base) candidates.push(path.join(base, "Google", "Chrome", "Application", "chrome.exe"));
 		}
 	} else {
@@ -101,15 +101,17 @@ export const RENDER_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-
 
 /**
  * Write a sanitised copy of the page into `dir` and return its path. The copy
- * carries a CSP that blocks every subresource, loses <base> and meta refresh
- * (they could point the render at another file), and has the images that sit
- * inside the page's own folder inlined as data: URIs, so the page still looks
+ * carries a CSP that blocks every subresource and all script, loses <base> and has
+ * every http-equiv disarmed (a refresh could point the render at another file), and
+ * has the images that sit inside the page's own folder inlined as data: URIs, so the page still looks
  * right while no other file or address can be reached.
  */
 export function prepareSafeCopy(htmlPath: string, dir: string): string {
 	const size = fs.statSync(htmlPath).size;
 	if (size > MAX_HTML_BYTES) throw new Error(`the HTML is ${size} bytes, over the ${MAX_HTML_BYTES} byte limit`);
-	let html = fs.readFileSync(htmlPath, "utf8");
+	// No leading BOM (one is written below) and no ESC: ISO-2022-JP's escape sequences
+	// print nothing, so "http<ESC>(B-equiv" would decode to a live http-equiv.
+	let html = fs.readFileSync(htmlPath, "utf8").replace(/^\uFEFF+/, "").replace(/\x1b/g, "");
 	const root = fs.realpathSync(path.dirname(htmlPath));
 	const inline = (ref: string): string | null => {
 		const clean = ref.trim().split(/[?#]/)[0];
@@ -127,6 +129,10 @@ export function prepareSafeCopy(htmlPath: string, dir: string): string {
 	html = html
 		.replace(/<base\b[^>]*>/gi, "")
 		.replace(/<meta\b[^>]*http-equiv\s*=\s*["']?refresh[^>]*>/gi, "")
+		// The match above reads the value, which entities (&#114;efresh) or a quoted ">" slip
+		// past. An attribute NAME cannot be entity-encoded, so every http-equiv is disarmed:
+		// no page-supplied refresh can navigate to an unsanitised file that would run script.
+		.replace(/\bhttp-equiv\b/gi, "data-blocked-http-equiv")
 		.replace(/(\bsrc\s*=\s*)(["'])([^"']*)\2/gi, (m, pre, q, ref) => {
 			const d = inline(ref);
 			return d ? `${pre}${q}${d}${q}` : m;
@@ -138,9 +144,13 @@ export function prepareSafeCopy(htmlPath: string, dir: string): string {
 	const meta = `<meta http-equiv="Content-Security-Policy" content="${RENDER_CSP}">`;
 	// First thing in the document, never after a text match: a script before <head>,
 	// or a fake <head> inside a comment, must not run ahead of the policy. A meta
-	// before <html> is parsed into the implicit head. Keep a leading BOM and doctype first.
-	const lead = /^\uFEFF?\s*<!doctype[^>]*>/i.exec(html)?.[0] ?? (html.startsWith("\uFEFF") ? "\uFEFF" : "");
-	const withMeta = `${lead}${meta}${html.slice(lead.length)}`;
+	// before <html> is parsed into the implicit head. A doctype stays first. Exactly one
+	// UTF-8 BOM leads, so Chrome decodes as UTF-8 and ignores any page <meta charset>
+	// (a second U+FEFF would be text, opening the body before the CSP meta).
+	// Only the whitespace the HTML parser skips: JS \s also takes NBSP, U+3000, U+2028 and
+	// U+FEFF, which the parser treats as text, opening the body before the CSP meta.
+	const lead = /^[\t\n\f\r ]*<!doctype[^>]*>/i.exec(html)?.[0] ?? "";
+	const withMeta = `\uFEFF${lead}${meta}${html.slice(lead.length)}`;
 	const out = path.join(dir, "page.html");
 	fs.writeFileSync(out, withMeta);
 	return out;
@@ -170,8 +180,9 @@ export function chromeArgs(
 		"--disable-domain-reliability",
 		"--dns-prefetch-disable",
 		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-		// A layout render needs no JavaScript; the CSP is the second lock, this the first.
-		"--blink-settings=scriptEnabled=false",
+		// No --blink-settings=scriptEnabled=false: Chrome runs --screenshot through its own
+		// chrome://headless command page, which needs script, so that flag left no screenshot
+		// (exit 0, #4124). The page's script is blocked by RENDER_CSP, first in the document.
 		"--host-resolver-rules=MAP * ~NOTFOUND",
 		"--proxy-server=http://127.0.0.1:9",
 		"--proxy-bypass-list=<-loopback>",
@@ -202,7 +213,12 @@ export function renderHtml(
 	return new Promise((resolve, reject) => {
 		const args = chromeArgs(htmlPath, out, width, height, profileDir);
 		const useGroup = process.platform !== "win32";
-		const child = spawn(chrome, args, { stdio: "ignore", detached: useGroup });
+		// stderr is kept (last few KB) so a failed render says why Chrome stopped.
+		const child = spawn(chrome, args, { stdio: ["ignore", "ignore", "pipe"], detached: useGroup });
+		let stderr = "";
+		child.stderr?.on("data", (d) => {
+			stderr = (stderr + String(d)).slice(-STDERR_KEEP_BYTES);
+		});
 		const killGroup = () => {
 			try {
 				if (useGroup && child.pid) process.kill(-child.pid, "SIGKILL");
@@ -220,12 +236,24 @@ export function renderHtml(
 			killGroup();
 			reject(e);
 		});
-		child.on("exit", () => {
+		child.on("exit", (code, signal) => {
 			clearTimeout(timer);
 			killGroup();
-			fs.existsSync(out) ? resolve() : reject(new Error("the browser produced no screenshot"));
+			if (fs.existsSync(out)) return resolve();
+			// Give the pipe a moment to drain what Chrome wrote just before it exited.
+			setTimeout(() => reject(new Error(noScreenshotMessage(code, signal, stderr))), 50);
 		});
 	});
+}
+
+const STDERR_KEEP_BYTES = 4096;
+const STDERR_SHOW_LINES = 12;
+
+/** "the browser produced no screenshot", plus Chrome's exit status and its last stderr lines. */
+export function noScreenshotMessage(code: number | null, signal: NodeJS.Signals | null, stderr: string): string {
+	const status = signal ? `signal ${signal}` : `exit code ${code}`;
+	const tail = stderr.trim().split(/\r?\n/).slice(-STDERR_SHOW_LINES).join("\n");
+	return `the browser produced no screenshot (${status})${tail ? `; Chrome said:\n${tail}` : "; Chrome wrote nothing to stderr"}`;
 }
 
 /** Sanitise `htmlPath` (see prepareSafeCopy) and render the copy. */

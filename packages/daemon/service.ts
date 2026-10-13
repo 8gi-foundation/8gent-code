@@ -250,7 +250,12 @@ export function scheduledTaskScript(ctx: ServiceContext): string {
 	const daemon = `& ${ctx.program.map(psQuote).join(" ")} 2>&1 | ForEach-Object { $_.ToString() } | Out-File -FilePath ${psQuote(paths(ctx).consoleLog)} -Append -Encoding utf8 -Width 4096`;
 	// Task Scheduler only retries a task that fails to launch, so the host
 	// itself restarts a daemon that exits, like KeepAlive and Restart=always.
-	const invoke = `while ($true) { ${daemon}; Start-Sleep -Seconds 5 }`;
+	// Windows never stops the daemon cleanly (Stop-Process -Force, no SIGTERM),
+	// so the shutdown snapshot is never written and the session journal is the
+	// only thing that brings work back after a kill or reboot. Turn it on unless
+	// the user set EIGHT_RESUME_ON_BOOT themselves (#4107).
+	const resume = `if (-not $env:EIGHT_RESUME_ON_BOOT) { $env:EIGHT_RESUME_ON_BOOT = '1' }`;
+	const invoke = `${resume}; while ($true) { ${daemon}; Start-Sleep -Seconds 5 }`;
 	const argument = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "${invoke}"`;
 	return `$ErrorActionPreference = 'Stop'
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ${psQuote(argument)} -WorkingDirectory ${psQuote(ctx.home)}

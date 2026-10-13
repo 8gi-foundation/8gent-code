@@ -17,6 +17,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentPool } from "./agent-pool";
+import { getDataDir } from "./data-dir";
 import { bus } from "./events";
 import type { NotificationDispatcher } from "./notifications";
 import {
@@ -30,8 +31,15 @@ import {
 	updateTask,
 } from "./task-registry";
 
-const GOALS_PATH = join(process.env.HOME || "/root", ".8gent", "goals.json");
-const WORKSPACE = join(process.env.HOME || "/root", ".8gent", "workspace");
+/** goals.json under the data dir (EIGHT_DATA_DIR, then os.homedir()/.8gent; #4111). */
+export function goalsPath(): string {
+	return join(getDataDir(), "goals.json");
+}
+
+/** Repo checkouts the router delegates into, under the data dir (#4111). */
+export function cosWorkspace(): string {
+	return join(getDataDir(), "workspace");
+}
 
 interface CoSConfig {
 	pool: AgentPool;
@@ -132,7 +140,7 @@ export class CoSRouter {
 		);
 
 		// 2. Create GitHub issue
-		const repoPath = join(WORKSPACE, repo);
+		const repoPath = join(cosWorkspace(), repo);
 		let issueUrl = "";
 		let issueNumber = 0;
 
@@ -358,14 +366,14 @@ export class CoSRouter {
 
 	private loadGoals(): string[] {
 		try {
-			if (existsSync(GOALS_PATH)) {
-				return JSON.parse(readFileSync(GOALS_PATH, "utf-8"));
+			if (existsSync(goalsPath())) {
+				return JSON.parse(readFileSync(goalsPath(), "utf-8"));
 			}
 		} catch {}
 		return [];
 	}
 
 	private saveGoals(goals: string[]): void {
-		writeFileSync(GOALS_PATH, JSON.stringify(goals, null, 2));
+		writeFileSync(goalsPath(), JSON.stringify(goals, null, 2));
 	}
 }

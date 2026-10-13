@@ -540,6 +540,7 @@ describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())("run_comma
 		"echo '{}' > ~/.8gent/mcp.json",
 		"echo x > ~/.8gent/policies.yaml",
 		"echo x > ~/.8gent/policy-checksum",
+		`echo '{"retro":"${"0".repeat(64)}"}' > ~/.8gent/skills-trust.json`,
 	];
 	// Karen's (8SO) live probe on #4013: metadata, flags, replace-by-rename, forced link, clone, root move.
 	const KAREN = [
@@ -579,4 +580,14 @@ describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())("run_comma
 
 test("update-resume.json (the /update relaunch record) is a protected data file", () => {
 	expect(PROTECTED_DATA_FILES).toContain("update-resume.json");
+});
+
+test("skills-trust.json (#4125 project skill pins) is protected and denied by the profile", () => {
+	expect(PROTECTED_DATA_FILES).toContain("skills-trust.json");
+	withEnv({ EIGHT_FAKE_HOME: "/nonexistent-h", EIGHT_DATA_DIR: undefined, EIGHT_HOME: undefined }, () => {
+		const p = protectedRunCommandPaths();
+		const file = path.join(H, "skills-trust.json");
+		expect(p.files).toContain(file);
+		expect(buildRunCommandProfile(p)).toContain(file);
+	});
 });

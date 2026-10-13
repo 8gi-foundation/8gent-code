@@ -14,6 +14,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { admitText } from "./admission.js";
 import {
 	type EmbeddingProvider,
 	NullEmbeddingProvider,
@@ -28,7 +29,6 @@ import {
 	extractPreferencesFromMessage,
 } from "./extractor.js";
 import { type Entity, KnowledgeGraph, type Relationship, type SubgraphResult } from "./graph.js";
-import { admitText } from "./admission.js";
 import { type MigrationResult, migrateV1ToV2 } from "./migrate.js";
 import {
 	PromotionManager,
@@ -320,7 +320,12 @@ export class MemoryManager {
 			const globalDbDir = path.join(globalBase, "memory");
 			ensureDir(globalDbDir);
 			const globalDbPath = path.join(globalDbDir, "memory.db");
-			this.globalStore = new MemoryStore(globalDbPath, this.embeddingProvider);
+			// Run from HOME (or EIGHT_DATA_DIR's parent) and both paths name one
+			// file. Share the store so it has one SQLite handle and one count.
+			this.globalStore =
+				fs.realpathSync(projectDbDir) === fs.realpathSync(globalDbDir)
+					? this.projectStore
+					: new MemoryStore(globalDbPath, this.embeddingProvider);
 
 			this.initialized = true;
 		} catch (error) {
@@ -400,8 +405,9 @@ export class MemoryManager {
 		}
 
 		// Search global store
-		if (this.globalStore) {
-			const globalResults = await this.globalStore.recall(query, options);
+		const globalStore = this._distinctGlobalStore();
+		if (globalStore) {
+			const globalResults = await globalStore.recall(query, options);
 			results.push(...globalResults);
 		}
 
@@ -590,7 +596,9 @@ export class MemoryManager {
 
 		if (this.projectStore && this.globalStore) {
 			const projectStats = this.projectStore.getStats();
-			const globalStats = this.globalStore.getStats();
+			// A shared store is counted once, as project.
+			const globalStore = this._distinctGlobalStore();
+			const globalStats = globalStore ? globalStore.getStats() : emptyStoreStats();
 			return {
 				session,
 				project: projectStats.total,
@@ -610,8 +618,8 @@ export class MemoryManager {
 	// ── Lifecycle ─────────────────────────────────────────────────────
 
 	close(): void {
+		this._distinctGlobalStore()?.close();
 		this.projectStore?.close();
-		this.globalStore?.close();
 		this.workingMemoryCache.clear();
 	}
 
@@ -945,6 +953,11 @@ export class MemoryManager {
 		};
 	}
 
+	/** The global store, or null when it is the same store as the project one. */
+	private _distinctGlobalStore(): MemoryStore | null {
+		return this.globalStore === this.projectStore ? null : this.globalStore;
+	}
+
 	private async _searchAcrossStores(
 		query: string,
 		options: SearchOptions,
@@ -953,8 +966,9 @@ export class MemoryManager {
 		if (this.projectStore) {
 			results.push(...(await this.projectStore.recall(query, options)));
 		}
-		if (this.globalStore) {
-			results.push(...(await this.globalStore.recall(query, options)));
+		const globalStore = this._distinctGlobalStore();
+		if (globalStore) {
+			results.push(...(await globalStore.recall(query, options)));
 		}
 		results.sort((a, b) => b.score - a.score);
 		return results.slice(0, options.limit ?? 10);
@@ -1098,8 +1112,9 @@ export class MemoryManager {
 		if (this.projectStore) {
 			memories.push(...this.projectStore.searchByUser(userId, { limit: 50 }));
 		}
-		if (this.globalStore) {
-			memories.push(...this.globalStore.searchByUser(userId, { limit: 50 }));
+		const globalStore = this._distinctGlobalStore();
+		if (globalStore) {
+			memories.push(...globalStore.searchByUser(userId, { limit: 50 }));
 		}
 
 		// Extract preferences from semantic memories
@@ -1418,7 +1433,9 @@ export function extractAutoMemories(
 	}
 
 	if (toolName === "read_file" && /readme/i.test(String(args.path || ""))) {
-		const lines = fileText.split("\n").filter((l) => l.trim() && !l.startsWith("#") && l.length > 20);
+		const lines = fileText
+			.split("\n")
+			.filter((l) => l.trim() && !l.startsWith("#") && l.length > 20);
 		if (lines.length > 0) {
 			facts.push({
 				fact: `Project purpose: ${lines[0].trim().slice(0, 200)}`,
@@ -1547,4 +1564,16 @@ function readJsonlCount(filePath: string): number {
 	} catch {
 		return 0;
 	}
+}
+
+/** Stats for a store that holds nothing, used when global shares the project store. */
+function emptyStoreStats(): ReturnType<MemoryStore["getStats"]> {
+	return {
+		total: 0,
+		byType: { core: 0, episodic: 0, semantic: 0, procedural: 0, working: 0 },
+		byScope: { session: 0, project: 0, global: 0 },
+		entities: 0,
+		relationships: 0,
+		embeddingsCount: 0,
+	};
 }

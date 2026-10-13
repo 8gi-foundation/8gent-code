@@ -52,10 +52,7 @@ const MODULE_IS_EMBEDDED = /(^|[\\/])(\$bunfs|~BUN)([\\/]|$)/i.test(MODULE_DIR);
 // that has never existed.
 function repoRoot(): string | null {
 	if (MODULE_IS_EMBEDDED) return null;
-	const candidates = [
-		path.join(MODULE_DIR, ".."),
-		path.join(MODULE_DIR, "..", ".."),
-	];
+	const candidates = [path.join(MODULE_DIR, ".."), path.join(MODULE_DIR, "..", "..")];
 	for (const candidate of candidates) {
 		if (
 			fs.existsSync(path.join(candidate, "apps", "tui", "src", "index.tsx")) ||
@@ -501,9 +498,7 @@ async function main() {
 		}
 
 		case "pipeline": {
-			const { runPipelineCommand } = await import(
-				"../packages/orchestration/pipeline-cli.ts"
-			);
+			const { runPipelineCommand } = await import("../packages/orchestration/pipeline-cli.ts");
 			const code = await runPipelineCommand(restArgs);
 			process.exit(code);
 			break;
@@ -665,9 +660,7 @@ async function updateCommand(args: string[]): Promise<void> {
  * so the user can grant them in two clicks.
  */
 async function permissionsCommand(args: string[]): Promise<void> {
-	const { checkPermissions, openPrivacyPane } = await import(
-		"../packages/hands/index.ts"
-	);
+	const { checkPermissions, openPrivacyPane } = await import("../packages/hands/index.ts");
 	const shouldOpen = args.includes("--open") || args.includes("-o");
 	const report = checkPermissions();
 
@@ -686,9 +679,7 @@ async function permissionsCommand(args: string[]): Promise<void> {
 		return;
 	}
 
-	console.log(
-		`To fix, grant ${report.terminalApp} the missing permission(s) in:`,
-	);
+	console.log(`To fix, grant ${report.terminalApp} the missing permission(s) in:`);
 	console.log(`  System Settings → Privacy & Security → ...`);
 	console.log("");
 	if (!report.accessibility.granted) {
@@ -707,7 +698,9 @@ async function permissionsCommand(args: string[]): Promise<void> {
 		if (!report.accessibility.granted) openPrivacyPane("accessibility");
 		if (!report.screenRecording.granted) openPrivacyPane("screen-recording");
 	} else {
-		console.log(`Re-run with \`8gent permissions --open\` to auto-launch the right System Settings panes.\n`);
+		console.log(
+			`Re-run with \`8gent permissions --open\` to auto-launch the right System Settings panes.\n`,
+		);
 	}
 }
 
@@ -724,13 +717,9 @@ async function permissionsCommand(args: string[]): Promise<void> {
  */
 async function keysCommand(args: string[]): Promise<void> {
 	const sub = (args[0] || "open").toLowerCase();
-	const {
-		KEYS_PATH,
-		ensureKeysFile,
-		loadKeysIntoEnv,
-		openKeysFile,
-		readKeysFile,
-	} = await import("../packages/secrets/index.ts");
+	const { KEYS_PATH, ensureKeysFile, loadKeysIntoEnv, openKeysFile, readKeysFile } = await import(
+		"../packages/secrets/index.ts"
+	);
 
 	if (sub === "open" || sub === "edit" || sub === "") {
 		const path = openKeysFile();
@@ -800,9 +789,7 @@ async function installCommand(args: string[]): Promise<void> {
 	// apps/tui (close to its consumer) but is plain data, so we pull
 	// it across package boundaries here. Layering can be tightened in
 	// a later PR by lifting the registry into its own package.
-	const { getPreset, isInstalled } = await import(
-		"../apps/tui/src/lib/external-agent-runner.ts"
-	);
+	const { getPreset, isInstalled } = await import("../apps/tui/src/lib/external-agent-runner.ts");
 	const preset = getPreset(presetId);
 	if (!preset) {
 		console.error(`Unknown preset: ${presetId}`);
@@ -847,9 +834,7 @@ async function installCommand(args: string[]): Promise<void> {
 	if (installed) {
 		console.log(`\n✓ ${preset.label} installed and on PATH.`);
 	} else {
-		console.log(
-			`\n⚠ Install reported success but \`${preset.command}\` is not on PATH yet.`,
-		);
+		console.log(`\n⚠ Install reported success but \`${preset.command}\` is not on PATH yet.`);
 		console.log(`  Open a new shell, or check the install notes:\n`);
 	}
 	if (plan.notes) console.log(`  ${plan.notes}`);
@@ -1356,7 +1341,9 @@ async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 	proc.on("exit", async (code, signal) => {
 		// /update asked for a restart: start a fresh 8gent (the new code) on the same session.
 		if (code === RELAUNCH_EXIT_CODE) {
-			const { consumeResumeRequest, relaunchCommand } = await import("../packages/eight/update-resume.ts");
+			const { consumeResumeRequest, relaunchCommand } = await import(
+				"../packages/eight/update-resume.ts"
+			);
 			const req = consumeResumeRequest();
 			if (req) {
 				const cmd = relaunchCommand({
@@ -1846,7 +1833,8 @@ async function blueprintCommand(args: string[]) {
 	if (!sub || sub === "list") {
 		for (const b of bp.BLUEPRINTS) {
 			console.log(`${b.name}  ${b.description}`);
-			for (const s of b.slots) console.log(`  ${s.key}: ${s.label}${s.default ? ` (default ${s.default})` : ""}`);
+			for (const s of b.slots)
+				console.log(`  ${s.key}: ${s.label}${s.default ? ` (default ${s.default})` : ""}`);
 		}
 		return;
 	}
@@ -1975,9 +1963,7 @@ async function chatCommand(args: string[]) {
 	const resolvedProvider = provider || "ollama";
 	const forceTextTools = !!flags["text-tools"];
 	const useTextTools =
-		forceTextTools ||
-		resolvedProvider === "lmstudio" ||
-		resolvedProvider === "ollama";
+		forceTextTools || resolvedProvider === "lmstudio" || resolvedProvider === "ollama";
 
 	if (useTextTools) {
 		try {
@@ -2321,24 +2307,28 @@ async function exportCommand(args: string[]) {
 		targetId = (convos[0] as any).sessionId;
 	}
 
-	// Fetch conversation messages
-	const convo = await sync.getConversation(targetId);
-	if (!convo || !convo.messages || convo.messages.length === 0) {
+	// Fetch conversation messages. The only stored transcript of a synced
+	// session is its checkpoint, which restoreFromRemote decodes.
+	const convo = await sync.restoreFromRemote(targetId);
+	if (!convo || convo.messages.length === 0) {
 		console.error(`Session ${targetId} not found or has no messages.`);
 		process.exit(1);
 	}
 
+	// Checkpoints store role and content only, so there is no per-message
+	// timestamp or session duration to carry into the export.
+	const exportedAt = new Date();
 	const { saveSessionExport } = await import("../packages/eight/session-export");
 	const filePath = await saveSessionExport(
-		convo.messages.map((m: any) => ({
+		convo.messages.map((m) => ({
 			role: m.role || "system",
 			content: m.content || "",
-			timestamp: new Date(m.timestamp || Date.now()),
+			timestamp: exportedAt,
 		})),
 		{
 			sessionId: targetId,
 			model: convo.model || "unknown",
-			duration: convo.duration || "unknown",
+			duration: "unknown",
 		},
 	);
 
@@ -2527,7 +2517,7 @@ async function memoryCommand(args: string[]) {
 				console.error("Usage: 8gent memory remember <fact>");
 				process.exit(1);
 			}
-			const id = await memory.remember(fact, "project", { source: "cli" });
+			const id = await memory.remember(fact, "project", { source: "user:cli" });
 			if (isJson) {
 				jsonOut({ success: true, id, fact });
 			} else {
@@ -2554,12 +2544,21 @@ async function memoryCommand(args: string[]) {
 
 		case "stats": {
 			try {
-				const ctx = await memory.getContext({ maxTokens: 1 });
+				// Count the stores themselves. A context window is a ranked,
+				// token-capped selection, so its stats are not a total.
+				const counts = await memory.getStats();
+				const byType: Record<string, number> = {};
+				for (const scope of [counts.v2?.project, counts.v2?.global]) {
+					for (const [type, n] of Object.entries(scope?.byType ?? {})) {
+						byType[type] = (byType[type] ?? 0) + n;
+					}
+				}
+				const stats = { totalMemories: counts.project + counts.global, byType };
 				if (isJson) {
-					jsonOut({ stats: ctx.stats });
+					jsonOut({ stats });
 				} else {
-					console.log(`Total memories: ${ctx.stats.totalMemories}`);
-					console.log(`By type: ${JSON.stringify(ctx.stats.byType)}`);
+					console.log(`Total memories: ${stats.totalMemories}`);
+					console.log(`By type: ${JSON.stringify(stats.byType)}`);
 				}
 			} catch {
 				if (isJson) {
@@ -2826,9 +2825,10 @@ async function publishCommand(args: string[]) {
 
 	const { runPublish } = await import("../packages/marketplace/index.ts");
 
-	const maxBytes = typeof flags["max-size"] === "string"
-		? Math.floor(Number(flags["max-size"]) * 1024 * 1024)
-		: undefined;
+	const maxBytes =
+		typeof flags["max-size"] === "string"
+			? Math.floor(Number(flags["max-size"]) * 1024 * 1024)
+			: undefined;
 	if (maxBytes !== undefined && (Number.isNaN(maxBytes) || maxBytes <= 0)) {
 		const msg = `--max-size must be a positive number of megabytes, got ${flags["max-size"]}`;
 		if (isJson) jsonOut({ success: false, error: msg });
@@ -2855,8 +2855,7 @@ async function publishCommand(args: string[]) {
 		});
 	} else {
 		for (const c of result.checks) {
-			const tag =
-				c.level === "ok" ? "ok " : c.level === "warn" ? "warn" : "FAIL";
+			const tag = c.level === "ok" ? "ok " : c.level === "warn" ? "warn" : "FAIL";
 			console.log(`[${tag}] ${c.name}: ${c.message}`);
 		}
 		if (result.ok && result.archivePath) {

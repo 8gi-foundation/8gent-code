@@ -31,9 +31,14 @@
  *     directory;
  *   - git does not track it (`git ls-files` lists none of them; a working
  *     directory outside any repository tracks nothing).
+ *   - (#4159) the path guard allows writing it (validatePath: no protected
+ *     credential, audit, session-record or startup-code path), and no segment
+ *     of its real path inside the working directory is .git, .ssh, .aws,
+ *     .kube, .gnupg or .8gent (a project's own key or audit folder included).
  * Removing any other existing file is not allowed here: a file the session
  * did not create, one it only modified, one another tab created, a tracked
- * one.
+ * one. Files a command's child processes create count as created by the
+ * session (see watchBorn in s1-created-files.ts).
  *
  * Absent temp paths (#3381, the narrow option James approved on 2026-10-03
  * after the 8SO review): an ABSOLUTE path passes only when ALL of these hold:
@@ -88,11 +93,14 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
+import { validatePath } from "./path-guard";
 import type { CreatedFiles } from "./s1-created-files";
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
 const FLAG = /^-[fv]+$/;
 const MAX_PATHS = 16;
+/** Segments that make an own file still go to the judge (compared lower-cased, #4159). */
+const GUARDED_SEGMENTS = new Set([".git", ".ssh", ".aws", ".kube", ".gnupg", ".8gent"]);
 
 function absent(p: string): boolean {
 	try {
@@ -313,8 +321,13 @@ export function rmOfNothingOrOwn(
 			}
 			// It exists: only a file this session created, still the same file, may pass.
 			if (!created?.createdBySession(abs)) return null;
-			if (!inside(realpathSync(path.dirname(abs)), root)) return null;
-			own.push(path.relative(root, path.join(realpathSync(path.dirname(abs)), path.basename(abs))));
+			const realParent = realpathSync(path.dirname(abs));
+			if (!inside(realParent, root)) return null;
+			const real = path.join(realParent, path.basename(abs));
+			const rel = path.relative(root, real);
+			if (rel.split(path.sep).some((s) => GUARDED_SEGMENTS.has(s.toLowerCase()))) return null;
+			if (!validatePath(real, root, {}, "write").ok) return null;
+			own.push(rel);
 		}
 		if (own.length === 0) return temp ? "nothing-temp" : "nothing";
 		return noneTracked(root, own) ? "own-scratch" : null;
