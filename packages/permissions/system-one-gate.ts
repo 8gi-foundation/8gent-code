@@ -538,7 +538,12 @@ export async function systemOneGate(
 	created?: CreatedFiles,
 	/** The project folder after a leading `cd <folder> &&` (#3199): the escalation card names it. */
 	where?: string,
-	opts: { canRunInstead?: boolean } = {},
+	/**
+	 * canRunInstead: the caller runs `runInstead` when one is handed back (#4102). project: the
+	 * project root when `cwd` is a folder a cd prefix chose inside it, so the tg-notify lane's PATH
+	 * check covers the whole project, not only that folder (8SO, #4102).
+	 */
+	opts: { canRunInstead?: boolean; project?: string } = {},
 ): Promise<SystemOneGateResult> {
 	const mode = systemOneMode(env);
 	if (mode === "off") return { run: true };
@@ -553,7 +558,7 @@ export async function systemOneGate(
 		// that script. First, so no later lane (a loopback GET) can admit a token in argv.
 		try {
 			const { redactBotToken, tgSendFromEnv } = await import("./s1-tg-send");
-			const tg = tgSendFromEnv(command, cwd, env);
+			const tg = tgSendFromEnv(command, cwd, env, opts.project);
 			if (!tg.ok && tg.refuse) {
 				const guard: BashGuardResult = {
 					verdict: "block",

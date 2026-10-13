@@ -1493,7 +1493,7 @@ async function commandRefusal(
 		cwd,
 		ctx.createdFiles,
 		where,
-		{ canRunInstead: out !== undefined },
+		{ canRunInstead: out !== undefined, project: ctx.workingDirectory },
 	);
 	if (!systemOne.run) return systemOne.message as string;
 	if (out && systemOne.runInstead !== undefined) out.runInstead = systemOne.runInstead;

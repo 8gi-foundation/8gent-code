@@ -35,7 +35,13 @@
  *     SHELLOPTS, BASHOPTS, PS4 or IFS, no exported shell function (BASH_FUNC_*): nothing can run
  *     before or instead of curl, and xtrace cannot print the expanded URL (8SO, #4102);
  *   - every PATH entry is absolute and resolves outside the workspace (pathOutsideWorkspace, shared
- *     with the deck-render lane): sh and curl cannot be found in the workspace;
+ *     with the deck-render lane) and, after a `cd <folder> &&`, outside the project around it: sh
+ *     and curl cannot be found in either;
+ *   - TELEGRAM_API_BASE and TELEGRAM_BOT_TOKEN are not in the environment: when sourcing bot.env
+ *     fails (dash has no `source`; bash outside POSIX mode goes on past a missing `.` file), curl
+ *     must find no base and no token, never inherited ones (8SO, #4102);
+ *   - a `\`-newline is removed as sh removes it, outside quotes only; any other backslash, or a
+ *     quote spanning a line, is no opinion (8SO, #4102);
  *   - the script and the text@ file each have one link (nlink 1): a hardlink to a file outside the
  *     workspace (a $HOME secret) is not a workspace file.
  *
@@ -46,8 +52,8 @@
  * cannot run the body (a background shell spawn) never gets this lane's allow.
  *
  * Deterministic refusals (a block with the way forward, no judge), in any System One mode:
- *   - TG_TOKEN_IN_ARGV_REFUSAL: a curl command, or the script above, with a Bot API token written
- *     in it (the `<digits>:<secret>` shape, or bot.env's own token). A secret in argv shows in the
+ *   - TG_TOKEN_IN_ARGV_REFUSAL: any command (curl in any spelling, wget, anything), or the script
+ *     above, with a Bot API token written in it (the `<digits>:<secret>` shape, or bot.env's own token). A secret in argv shows in the
  *     process list, the transcript and the session log; the model is told to source the env file;
  *   - CURL_L_REFUSAL (from s1-curl-loopback.ts): the script's curl uses -L/--location.
  *
@@ -101,6 +107,8 @@ const NUM = /^\d{1,4}(\.\d{1,3})?$/;
 const CHAT = /^chat_id=-?\d{1,20}$/;
 /** Set in the environment, any of these runs code, changes parsing, or traces the token (8SO, #4102). */
 const SHELL_ENV = new Set(["BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "PS4", "IFS"]);
+/** The two variables the curl line expands: only bot.env may set them (8SO, #4102). */
+const INHERITED = new Set(["TELEGRAM_API_BASE", "TELEGRAM_BOT_TOKEN"]);
 
 /** Sentinels for the only expansions allowed, inside double quotes. */
 const BASE = "\u0001B";
@@ -222,10 +230,37 @@ function splitWords(text: string): string[] | null {
 	return words;
 }
 
+/**
+ * `body` with each `\`-newline outside quotes removed, exactly as sh removes it (no space put in its
+ * place), or null for any other backslash or a quote that spans a line. Replacing it with a space,
+ * as this lane first did, split `"text@.tmp/m"\`-newline`-s` into a checked `.tmp/m` while sh read
+ * `.tmp/m-s`, a symlink to any file on the machine, and posted it (8SO, #4102).
+ */
+function joinContinuations(body: string): string | null {
+	let out = "";
+	let quote: string | null = null;
+	for (let i = 0; i < body.length; i++) {
+		const c = body[i];
+		if (quote !== null) {
+			if (c === "\\" || c === "\n") return null;
+			if (c === quote) quote = null;
+			out += c;
+		} else if (c === "\\") {
+			if (body[i + 1] !== "\n") return null;
+			i++;
+		} else {
+			if (c === "'" || c === '"') quote = c;
+			out += c;
+		}
+	}
+	return quote === null ? out : null;
+}
+
 /** The script's two lines, or null when it is not exactly the recipe's layout. */
 function scriptLines(body: string): [string, string] | null {
 	if (/[^\x20-\x7e\n\t]/.test(body)) return null;
-	const joined = body.replace(/[ \t]*\\\n[ \t]*/g, " ");
+	const joined = joinContinuations(body);
+	if (joined === null) return null;
 	const lines = joined
 		.split("\n")
 		.map((l) => l.trim())
@@ -302,11 +337,15 @@ export function tgSendFromEnv(
 	command: string,
 	cwd: string | undefined,
 	env: Env = process.env,
+	/** The project root when `cwd` is a folder a `cd <folder> &&` chose inside it (#3199). */
+	project?: string,
 ): TgSend {
 	try {
 		const text = command.trim();
-		if (/^curl\s/.test(text))
-			return hasToken(text, env) ? { ok: false, refuse: TG_TOKEN_IN_ARGV_REFUSAL } : NO;
+		// Any command, not only one spelled `curl `: `/usr/bin/curl`, `command curl` or wget put
+		// the token in argv just the same (8SO, #4102).
+		if (hasToken(text, env)) return { ok: false, refuse: TG_TOKEN_IN_ARGV_REFUSAL };
+		if (/^curl\s/.test(text)) return NO;
 		if (!cwd || !path.isAbsolute(cwd)) return NO;
 		const m = SCRIPT_CMD.exec(text);
 		if (!m || promptControlText(text) !== null || decideRules(text).rules.length !== 0) return NO;
@@ -320,8 +359,14 @@ export function tgSendFromEnv(
 		for (const k of Object.keys(env)) {
 			if (SHELL_ENV.has(k) && env[k] !== undefined) return NO;
 			if (k.startsWith("BASH_FUNC_")) return NO;
+			// Inherited, these are what curl uses when sourcing bot.env fails and the shell goes on:
+			// dash has no `source`, bash outside POSIX mode survives a missing `.` file (8SO, #4102).
+			if (INHERITED.has(k) && env[k] !== undefined) return NO;
 		}
-		if (!pathOutsideWorkspace(root, env.PATH ?? process.env.PATH ?? "")) return NO;
+		const pathEnv = env.PATH ?? process.env.PATH ?? "";
+		if (!pathOutsideWorkspace(root, pathEnv)) return NO;
+		// After a `cd <folder> &&` the cwd is that folder; the project around it is workspace too.
+		if (project !== undefined && !pathOutsideWorkspace(canon(project), pathEnv)) return NO;
 		const vars = readBotEnv(env);
 		if (!vars || !vars.get("TELEGRAM_BOT_TOKEN")) return NO;
 		const base = API_BASE.exec(vars.get("TELEGRAM_API_BASE") ?? "");

@@ -3195,7 +3195,7 @@ export class ToolExecutor {
 			dir,
 			this.createdFiles,
 			where,
-			{ canRunInstead: env === undefined },
+			{ canRunInstead: env === undefined, project: this.workingDirectory },
 		);
 		if (!systemOne.run) return systemOne.message as string;
 
