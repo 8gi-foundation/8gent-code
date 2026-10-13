@@ -213,3 +213,77 @@ describe("post_message in ToolExecutor", () => {
 		expect(readFileSync(settings, "utf8")).toBe(before);
 	});
 });
+
+// #4191: before an outward post, the turn task's countable rules are counted in the draft.
+describe.skipIf(process.platform === "win32")("post_message pre-send check (#4191)", () => {
+	const TASK =
+		'Post a short summary with the post_message tool, input {"chat": "-1004417730052", "text": "<your 4 lines>"}. Use exactly 4 lines of plain text, include exactly 3 numbers, and do not use any word more than twice. Send it once.';
+	// The texts msg-post-tool really posted on 13 Oct: run 150728 (PASS) and 151655 (2 numbers).
+	const GOOD =
+		"Run ops-cron-backup finished with a FAIL verdict.\nChecks passed 11 out of 12 total items.\nThe old_backups_pruned item did not clear.\nElapsed time was 487 seconds.";
+	const BAD =
+		"Run ops-cron-backup finished with a FAIL verdict\nChecks passed 11/12, old_backups_pruned did not clear\nThe run took 487 seconds to finish\nNo faults were logged on the host";
+	const posts = () =>
+		Bun.file(log).size ? readFileSync(log, "utf8").split("text --chat").length - 1 : 0;
+	const ready = () => {
+		process.env.EIGHT_TG_BIN_DIR = bins;
+		registerTuiApprovalHandler(async () => "approve");
+		const exec = new ToolExecutor(work, "pm-presend");
+		exec.beginTurn(TASK);
+		return exec;
+	};
+
+	test("a draft that keeps every rule posts once, no stop", async () => {
+		const exec = ready();
+		const before = posts();
+		const out = await exec.execute("post_message", { chat: "-1004417730052", text: GOOD });
+		expect(out).toContain("message_id 777");
+		expect(posts()).toBe(before + 1);
+		expect(exec.takePresendStop()).toBeNull();
+	});
+
+	test("first failure: nothing sent, the model gets the draft and the broken rule for one redraft", async () => {
+		const exec = ready();
+		const before = posts();
+		const out = await exec.execute("post_message", { chat: "-1004417730052", text: BAD });
+		expect(out).toStartWith("[BLOCKED] post_message pre-send check");
+		expect(out).toContain('"exactly 3 numbers": 2 number(s), want exactly 3');
+		expect(out).toContain(BAD);
+		expect(posts()).toBe(before);
+		expect(exec.takePresendStop()).toBeNull();
+		// The redraft keeps the rules and posts.
+		expect(await exec.execute("post_message", { chat: "-1004417730052", text: GOOD })).toContain(
+			"message_id 777",
+		);
+		expect(posts()).toBe(before + 1);
+	});
+
+	test("second failure: nothing sent, typed formatting_rule_violation stop", async () => {
+		const exec = ready();
+		const before = posts();
+		await exec.execute("post_message", { chat: "-1004417730052", text: BAD });
+		const out = await exec.execute("post_message", { chat: "-1004417730052", text: BAD });
+		expect(out).toContain("The turn is stopped. Do not retry.");
+		expect(posts()).toBe(before);
+		const stop = exec.takePresendStop();
+		expect(stop).toMatchObject({
+			kind: "formatting_rule_violation",
+			constraint: "exactly 3 numbers",
+			draft: BAD,
+		});
+		expect(exec.takePresendStop()).toBeNull();
+	});
+
+	test("a new turn resets the redraft budget; a task with no rules checks nothing", async () => {
+		const exec = ready();
+		await exec.execute("post_message", { chat: "-1004417730052", text: BAD });
+		exec.beginTurn(TASK);
+		expect(await exec.execute("post_message", { chat: "-1004417730052", text: BAD })).toStartWith(
+			"[BLOCKED] post_message pre-send check: the draft",
+		);
+		exec.beginTurn("Post the run summary to the group.");
+		expect(await exec.execute("post_message", { chat: "-1004417730052", text: BAD })).toContain(
+			"message_id 777",
+		);
+	});
+});

@@ -9,13 +9,17 @@
  * Fake model server only; no real model is loaded.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removeDir } from "../../tests/temp-dirs";
 import { validateRunEvent } from "./run-events";
 
-type Mode = "tool-calls" | "native" | "hang";
+/** msg-post-tool run 151655's posted text: 2 numbers by the IFBench count, the task wants 3. */
+const BAD_DRAFT =
+	"Run ops-cron-backup finished with a FAIL verdict\nChecks passed 11/12, old_backups_pruned did not clear\nThe run took 487 seconds to finish\nNo faults were logged on the host";
+
+type Mode = "tool-calls" | "native" | "hang" | "post-bad";
 let mode: Mode = "tool-calls";
 let callNo = 0;
 const saved: Record<string, string | undefined> = {};
@@ -84,6 +88,30 @@ beforeAll(() => {
 					usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
 				});
 			}
+			if (mode === "post-bad") {
+				// #4191: every reply posts the same draft, which breaks "exactly 3 numbers".
+				const call = {
+					name: "post_message",
+					arguments: { chat: "-1004417730052", text: BAD_DRAFT },
+				};
+				return Response.json({
+					id: "c1",
+					object: "chat.completion",
+					created: 0,
+					model: "m",
+					choices: [
+						{
+							index: 0,
+							message: {
+								role: "assistant",
+								content: `\`\`\`tool_call\n${JSON.stringify(call)}\n\`\`\``,
+							},
+							finish_reason: "stop",
+						},
+					],
+					usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+				});
+			}
 			if (mode === "hang") {
 				// Longer than the watchdog limit under test; the abort ends the request first.
 				await new Promise((r) => setTimeout(r, 5_000));
@@ -118,7 +146,9 @@ afterAll(() => {
 	removeDir(work);
 });
 
-async function runStreamJson(): Promise<{ code: number; lines: Record<string, unknown>[] }> {
+async function runStreamJson(
+	prompt = "Make a narrated video deck.",
+): Promise<{ code: number; lines: Record<string, unknown>[] }> {
 	const { runRunCommand } = await import("./run");
 	const out: string[] = [];
 	const realWrite = process.stdout.write.bind(process.stdout);
@@ -141,7 +171,7 @@ async function runStreamJson(): Promise<{ code: number; lines: Record<string, un
 			"--max-turns",
 			"60",
 			"--no-session",
-			"Make a narrated video deck.",
+			prompt,
 		]);
 	} finally {
 		process.stdout.write = realWrite;
@@ -267,5 +297,70 @@ describe("session watchdog abort (#4172)", () => {
 		expect(validateRunEvent(event)).toEqual([]);
 		// A stop on an "ok" result is a contradiction the validator rejects.
 		expect(validateRunEvent({ ...event, subtype: "ok" })).toEqual(["stop"]);
+	});
+});
+
+describe("8gent run stopped by the pre-send check (#4191)", () => {
+	test("a draft that breaks a task rule twice posts nothing and ends with formatting_rule_violation", async () => {
+		const bins = mkdtempSync(join(tmpdir(), "run-stop-bins-"));
+		const sent = join(bins, "sent.log");
+		writeFileSync(
+			join(bins, "tg-group"),
+			`#!/bin/sh\nprintf '%s\\n' "$*" >> '${sent}'\necho 777\n`,
+		);
+		chmodSync(join(bins, "tg-group"), 0o755);
+		const savedBins = process.env.EIGHT_TG_BIN_DIR;
+		process.env.EIGHT_TG_BIN_DIR = bins;
+		mode = "post-bad";
+		try {
+			const { code, lines } = await runStreamJson(
+				'Post the run summary with the post_message tool, input {"chat": "-1004417730052", "text": "<your 4 lines>"}. Use exactly 4 lines of plain text and include exactly 3 numbers.',
+			);
+			for (const l of lines) expect(validateRunEvent(l)).toEqual([]);
+			const result = lines.at(-1) as Record<string, unknown>;
+			expect(result.type).toBe("result");
+			expect(result.subtype).toBe("error");
+			expect(result.stop).toEqual({
+				kind: "formatting_rule_violation",
+				reason: String(result.error),
+				constraint: "exactly 3 numbers",
+				draft: BAD_DRAFT,
+			});
+			expect(String(result.error)).toContain("2 number(s), want exactly 3");
+			expect(code).not.toBe(0);
+			expect(existsSync(sent)).toBe(false);
+		} finally {
+			if (savedBins === undefined) Reflect.deleteProperty(process.env, "EIGHT_TG_BIN_DIR");
+			else process.env.EIGHT_TG_BIN_DIR = savedBins;
+			removeDir(bins);
+		}
+	}, 60_000);
+
+	test("the stop info carries the broken rule and the draft, and validates", async () => {
+		const { stopInfo } = await import("./run");
+		const info = stopInfo({
+			kind: "formatting_rule_violation",
+			reason: "r",
+			constraint: "exactly 3 numbers",
+			draft: "d",
+		});
+		expect(info).toEqual({
+			kind: "formatting_rule_violation",
+			reason: "r",
+			constraint: "exactly 3 numbers",
+			draft: "d",
+		});
+		const event = {
+			type: "result",
+			subtype: "error",
+			session_id: "s",
+			ended_at: "t",
+			error: "r",
+			stop: info,
+		};
+		expect(validateRunEvent(event)).toEqual([]);
+		expect(
+			validateRunEvent({ ...event, stop: { kind: "formatting_rule_violation", reason: "r" } }),
+		).toEqual(["stop"]);
 	});
 });

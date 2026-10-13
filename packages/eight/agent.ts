@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { jsonSchema, tool as sdkTool } from "ai";
+import type { FormattingStop } from "../ai/draft-constraints";
 import { notePlanTask } from "../ai/plan-file";
 import { postMessageAvailable } from "../ai/post-message";
 import { modelSupportsVision } from "../ai/text-tool-endpoint";
@@ -312,7 +313,8 @@ function readPinnedActiveModel(): string[] {
  */
 export type TurnStop =
 	| { kind: "circuit_breaker"; reason: string }
-	| { kind: "watchdog"; reason: string; limitMs: number };
+	| { kind: "watchdog"; reason: string; limitMs: number }
+	| FormattingStop;
 
 /** The watchdog's stop for a turn that ran past `limitMs`. */
 export function watchdogStop(limitMs: number): TurnStop {
@@ -1177,6 +1179,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					if (breakerStop === null) breakerStop = loopResult.userMessage;
 					this.abort({ kind: "circuit_breaker", reason: loopResult.message });
 				}
+				// A second post_message draft that broke a task rule stops the turn (#4191).
+				const presendStop = this.executor.takePresendStop();
+				if (presendStop) {
+					if (breakerStop === null) breakerStop = presendStop.reason;
+					this.abort(presendStop);
+				}
 
 				if (success) {
 					this.sessionWriter.writeToolResult(
@@ -1697,7 +1705,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			? gitSnapshot(this.config.workingDirectory || process.cwd())
 			: null;
 		// write_file may open each deliverable once per turn (#3107).
-		this.executor.beginTurn();
+		this.executor.beginTurn(userMessage);
 
 		const textForAgent =
 			userMessage.trim() ||
@@ -2303,6 +2311,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
 					this.abort({ kind: "circuit_breaker", reason: loopResult.message });
 				}
+				// A second post_message draft that broke a task rule stops the turn (#4191).
+				const presendStop = this.executor.takePresendStop();
+				if (presendStop) this.abort(presendStop);
 
 				if (event.success) {
 					this.sessionWriter.writeToolResult(
@@ -3304,7 +3315,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				? "[8gent] Generation aborted by user"
 				: stop.kind === "watchdog"
 					? `\n[8gent] ${stop.reason} Aborting.`
-					: `[8gent] Generation stopped by the circuit breaker: ${stop.reason}`,
+					: stop.kind === "formatting_rule_violation"
+						? `[8gent] Generation stopped by the pre-send check: ${stop.reason}`
+						: `[8gent] Generation stopped by the circuit breaker: ${stop.reason}`,
 		);
 	}
 
