@@ -233,6 +233,13 @@ import { ArtifactStore } from "./artifact-store";
 import { formatCommandOutput } from "./command-output";
 import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatEditNotFound } from "./edit-hint";
+import {
+	ENV_PASS_HINT,
+	GH_ENV_NAMES,
+	GIT_ENV_NAMES,
+	buildChildEnv,
+	withheldAny,
+} from "./harness/child-env";
 import { layoutMeasureLine } from "./layout-measure";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { RetiredFacts } from "./retired-facts";
@@ -565,7 +572,10 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: process.platform !== "win32",
-			env: { ...process.env, ...GIT_NON_INTERACTIVE_ENV },
+			env: {
+				...(buildChildEnv(process.env, GIT_ENV_NAMES) as NodeJS.ProcessEnv),
+				...GIT_NON_INTERACTIVE_ENV,
+			},
 		});
 		let stdout = "";
 		let stderr = "";
@@ -906,6 +916,8 @@ export class ToolExecutor {
 	private visionCapable: () => Promise<boolean>;
 	/** Finds the vision model describe_image calls (#3642). Injectable for tests. */
 	private resolveVisionModel: () => Promise<VisionRouterResult>;
+	/** The minimal-environment hint is appended once per session (see runCommand). */
+	private envHintShown = false;
 
 	constructor(
 		workingDirectory: string = process.cwd(),
@@ -1351,7 +1363,7 @@ export class ToolExecutor {
 				function: {
 					name: "run_command",
 					description:
-						"[SHELL] Executes a shell command and returns stdout/stderr. Use for: running tests, installing packages, checking versions, building projects, file operations (mkdir, mv, cp). Pipes (|) and redirects (>) are allowed. Command chaining (;, &&, ||) and background execution (&) are blocked for safety - use separate calls instead. If a command is blocked by permissions, simplify it or split into multiple calls.",
+						"[SHELL] Executes a shell command and returns stdout/stderr. Use for: running tests, installing packages, checking versions, building projects, file operations (mkdir, mv, cp). Pipes (|) and redirects (>) are allowed. Command chaining (;, &&, ||) and background execution (&) are blocked for safety - use separate calls instead. If a command is blocked by permissions, simplify it or split into multiple calls. Commands run with a minimal environment (PATH, HOME, locale, toolchain paths); credentials are not inherited. If one is needed, tell the user to export EIGHT_SHELL_ENV_PASS=NAME in the shell that launches 8gent (a keys file cannot set it). For git push over SSH typed here, that is EIGHT_SHELL_ENV_PASS=SSH_AUTH_SOCK; the git tools keep SSH working without it.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -3445,7 +3457,8 @@ export class ToolExecutor {
 				processGroup: true,
 				windowsShell,
 				env: {
-					...((env as NodeJS.ProcessEnv | undefined) ?? process.env),
+					// The done gate hands in an already scrubbed env; everything else gets the minimal one.
+					...((env as NodeJS.ProcessEnv | undefined) ?? (buildChildEnv() as NodeJS.ProcessEnv)),
 					...SPAWN_NON_INTERACTIVE_ENV,
 				},
 			});
@@ -3492,7 +3505,12 @@ export class ToolExecutor {
 					workingDirectory: dir,
 				});
 
-				const output = formatCommandOutput(code, stdout, stderr, finalCommand, this.workingDirectory);
+				let output = formatCommandOutput(code, stdout, stderr, finalCommand, this.workingDirectory);
+				// Once per session, on a failure, say the environment is minimal (no names or values).
+				if (code !== 0 && !this.envHintShown && withheldAny()) {
+					this.envHintShown = true;
+					output = `${output}\n${ENV_PASS_HINT}`;
+				}
 				// Report images the command drew, and any cut off at an edge (#3580).
 				withImagesWritten(output, dir, startTime).then(safeResolve, () => safeResolve(output));
 			});
@@ -3520,7 +3538,10 @@ export class ToolExecutor {
 		return new Promise((resolve) => {
 			let stdout = "";
 			let stderr = "";
-			const proc = spawn(cmd, args, { cwd: this.workingDirectory });
+			const proc = spawn(cmd, args, {
+				cwd: this.workingDirectory,
+				env: buildChildEnv(process.env, GH_ENV_NAMES) as NodeJS.ProcessEnv,
+			});
 			proc.stdout?.on("data", (d: Buffer) => {
 				stdout += d.toString();
 			});
