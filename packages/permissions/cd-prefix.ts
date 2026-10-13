@@ -142,9 +142,14 @@ export function cdPrefix(
  * What a person approving a command is shown: the command, and after a leading
  * `cd <folder> &&` the folder it runs in, since `rm -rf old` means a different
  * thing in each folder. `where` is the folder relative to the project root.
+ *
+ * Folder first, `cd <folder> && <command>`, the shape the model wrote (#4178): every
+ * card (TUI, channel, readline, System One escalation) cuts a long command at its end,
+ * so a folder after the command was the first thing lost. Display only: policy,
+ * System One and the per-folder answers still judge `command` with `where` beside it.
  */
 export function commandInFolder(command: string, where?: string): string {
-	return where ? `${command}  (in ${where}/)` : command;
+	return where ? `cd ${where} && ${command}` : command;
 }
 
 /**
