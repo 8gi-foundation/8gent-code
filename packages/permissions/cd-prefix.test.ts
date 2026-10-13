@@ -110,6 +110,18 @@ describe("refused shapes", () => {
 	test("a plain-named symlink onto a dot directory", () => {
 		expect(refusedWhy("cd gitlink && ls")).toContain("resolves into a dot directory");
 	});
+	// #4178 (8SO): the card shows `cd <real folder> && <rest>`, so a plain-named symlink
+	// onto a folder whose real name would read as more shell is refused, not shown.
+	test("a plain-named symlink onto a folder whose name is not plain", () => {
+		const names = ["a && touch pwn", "a; curl x", "a\nrm -r old", "x\u001b[8m", "a\u00a0b", "-rf"];
+		names.forEach((name, i) => {
+			mkdirSync(join(root, name));
+			symlinkSync(join(root, name), join(root, `odd${i}`));
+			expect(refusedWhy(`cd odd${i} && ls`), JSON.stringify(name)).toContain(
+				"resolves to a name that is not plain",
+			);
+		});
+	});
 	test("two cds", () => {
 		expect(refusedWhy("cd video && cd frames && ls")).toContain("only one cd");
 		expect(refusedWhy("cd video && cd frames")).toContain("only one cd");
@@ -204,6 +216,14 @@ describe("commandInFolder: the folder leads the card", () => {
 		for (const width of [20, 40, 60, 76, 120]) {
 			expect(`${shown.slice(0, width - 1)}…`, String(width)).toContain("cd video/frames &&");
 		}
+	});
+	test("a folder that is not plain is shown quoted and escaped, never raw (8SO)", () => {
+		expect(commandInFolder("ls", "a && touch pwn")).toBe('cd "a && touch pwn" && ls');
+		expect(commandInFolder("ls", "a\nb")).toBe('cd "a\\nb" && ls');
+		expect(commandInFolder("rm -rf old", "x\u001b[8m")).toBe('cd "x\\u001b[8m" && rm -rf old');
+		expect(commandInFolder("ls", "a\u00a0b")).toBe('cd "a\\u00a0b" && ls');
+		for (const w of ["a && b", "a\nb", "x\u001b[8m", "a\u00a0b", "a\u2028b"])
+			expect(commandInFolder("ls", w), JSON.stringify(w)).toMatch(/^[\x20-\x7e]*$/);
 	});
 	test("the shown text parses back to the same folder and rest", () => {
 		const cd = cdPrefix(commandInFolder("bash build.sh", "video/frames"), root);
