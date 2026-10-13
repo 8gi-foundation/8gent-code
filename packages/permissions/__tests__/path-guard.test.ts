@@ -288,11 +288,7 @@ describe("agent settings file (#3595)", () => {
 	});
 
 	test("a leading ~ is expanded before the compare: settings, confirmation file and credentials", () => {
-		for (const raw of [
-			"~/.8gent/settings.json",
-			"~/.ssh/id_rsa",
-			"~/.aws/credentials",
-		]) {
+		for (const raw of ["~/.8gent/settings.json", "~/.ssh/id_rsa", "~/.aws/credentials"]) {
 			expect(validatePath(raw, home, { platform: "linux", home }).ok).toBe(false);
 		}
 		expect(validatePath("~/notes.txt", home, { platform: "linux", home }).ok).toBe(true);
