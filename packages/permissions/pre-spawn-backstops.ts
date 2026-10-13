@@ -11,7 +11,7 @@
  * or spawn.
  */
 
-import { renderCoverageRefusal } from "../ai/write-shape";
+import { renderCoverageRefusal } from "../ai/narration-coverage";
 import { touchesBrowserSecrets } from "../tools/eight-browser";
 import {
 	commandMutatesSessionRecords,

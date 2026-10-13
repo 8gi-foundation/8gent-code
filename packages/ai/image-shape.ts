@@ -25,7 +25,7 @@
 import * as fs from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
-import { renderedCoverageLine } from "./write-shape";
+import { renderedCoverageLine } from "./narration-coverage";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const SKIP_DIRS = new Set(["node_modules", "vendor"]);
@@ -254,18 +254,20 @@ export async function withImagesWritten(
 		timer = setTimeout(() => resolve(""), BUDGET_MS);
 		timer.unref?.();
 	});
-	const line = await Promise.race([
-		imagesWrittenLine(workingDirectory, sinceMs).catch(() => ""),
+	// #4154: a video rendered beside a narration written this session that lacks a brief point.
+	const coverage = async () => {
+		try {
+			return renderedCoverageLine(sinceMs);
+		} catch {
+			return "";
+		}
+	};
+	const lines = await Promise.race([
+		Promise.all([imagesWrittenLine(workingDirectory, sinceMs).catch(() => ""), coverage()]).then(
+			(all) => all.filter(Boolean).join("\n"),
+		),
 		budget,
 	]);
 	clearTimeout(timer);
-	// #4154: a video rendered beside a narration that lacks a brief point is named here.
-	let coverage = "";
-	try {
-		coverage = renderedCoverageLine(workingDirectory, sinceMs);
-	} catch {
-		coverage = "";
-	}
-	const out = line ? `${output}\n${line}` : output;
-	return coverage ? `${out}\n${coverage}` : out;
+	return lines ? `${output}\n${lines}` : output;
 }
