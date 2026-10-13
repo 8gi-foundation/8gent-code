@@ -17,18 +17,18 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
-import { animate, packSpriteSheet } from "./animation-generator.js";
-import { sliceSpriteSheet } from "./sprite-slicer.js";
-import { buildSpritePrompt, type SpritePromptConfig } from "./prompts.js";
 import {
 	BodyTooLargeError,
+	type ProbedModel,
 	isLoopbackUrl,
 	pickLocalModel,
 	probeLocalMediaCapabilities,
-	type ProbedModel,
 	readCapped,
 	safeForLog,
 } from "../local-model-server/media-probe";
+import { animate, packSpriteSheet } from "./animation-generator.js";
+import { type SpritePromptConfig, buildSpritePrompt } from "./prompts.js";
+import { sliceSpriteSheet } from "./sprite-slicer.js";
 
 // ── Paths ───────────────────────────────────────────────────────
 const ASSET_DIR = join(homedir(), ".8gent", "assets", "media");
@@ -71,7 +71,10 @@ export interface GenerateResult {
 
 function which(cmd: string): string | null {
 	try {
-		return execSync(`command -v "${cmd}" 2>/dev/null`, { encoding: "utf-8", timeout: 3000 }).trim() || null;
+		return (
+			execSync(`command -v "${cmd}" 2>/dev/null`, { encoding: "utf-8", timeout: 3000 }).trim() ||
+			null
+		);
 	} catch {
 		return null;
 	}
@@ -293,7 +296,10 @@ function isPng(bytes: Uint8Array): boolean {
  * (`POST /v1/images/generations`, `b64_json` back). Only called with a model
  * the probe found by capability; never with a guessed id.
  */
-async function generateLocalModel(options: GenerateOptions, model: ProbedModel): Promise<GenerateResult> {
+async function generateLocalModel(
+	options: GenerateOptions,
+	model: ProbedModel,
+): Promise<GenerateResult> {
 	if (!isLoopbackUrl(model.baseUrl)) {
 		return { success: false, reason: "local media server is not on loopback", path: "local" };
 	}
@@ -312,14 +318,22 @@ async function generateLocalModel(options: GenerateOptions, model: ProbedModel):
 			}),
 		});
 		if (!response.ok) {
-			return { success: false, reason: `Local image server answered HTTP ${response.status}`, path: "local" };
+			return {
+				success: false,
+				reason: `Local image server answered HTTP ${response.status}`,
+				path: "local",
+			};
 		}
 		let raw: Uint8Array;
 		try {
 			raw = await readCapped(response, MAX_LOCAL_IMAGE_BODY_BYTES);
 		} catch (err) {
 			if (err instanceof BodyTooLargeError) {
-				return { success: false, reason: "Local image server response is too large", path: "local" };
+				return {
+					success: false,
+					reason: "Local image server response is too large",
+					path: "local",
+				};
 			}
 			throw err;
 		}
@@ -330,7 +344,11 @@ async function generateLocalModel(options: GenerateOptions, model: ProbedModel):
 		}
 		const png = Buffer.from(b64, "base64");
 		if (!isPng(png)) {
-			return { success: false, reason: "Local image server returned something that is not a PNG", path: "local" };
+			return {
+				success: false,
+				reason: "Local image server returned something that is not a PNG",
+				path: "local",
+			};
 		}
 
 		const id = `local-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -495,7 +513,9 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 	const forceCloud = options.forceCloud || false;
 
 	console.log(`[media-harness] Generating: "${options.prompt}"`);
-	console.log(`[media-harness] Tools: sharp=${await checkSharp()}, ffmpeg=${tools.ffmpeg}, openai=${tools.openai}`);
+	console.log(
+		`[media-harness] Tools: sharp=${await checkSharp()}, ffmpeg=${tools.ffmpeg}, openai=${tools.openai}`,
+	);
 
 	// Try local first unless forceCloud
 	if (!forceCloud) {
@@ -506,7 +526,9 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 			// Local path: user must provide an input image or use the lil-eight generator
 			// Since we generate from prompts (not images), we go to cloud directly
 			// The local path is for slicing/processing existing images
-			console.log("[media-harness] Local sharp available but prompt-based generation requires cloud path.");
+			console.log(
+				"[media-harness] Local sharp available but prompt-based generation requires cloud path.",
+			);
 		} else {
 			console.log("[media-harness] Local sharp unavailable.");
 		}
@@ -566,7 +588,9 @@ if (import.meta.main) {
 	const prompt = args.join(" ");
 
 	if (!prompt) {
-		console.log("Usage: bun run packages/gamedev/harness.ts <prompt> [--cloud] [--frames 8] [--gif|--webp]");
+		console.log(
+			"Usage: bun run packages/gamedev/harness.ts <prompt> [--cloud] [--frames 8] [--gif|--webp]",
+		);
 		console.log("Example: bun run packages/gamedev/harness.ts 'a walking robot' --frames 8 --gif");
 		process.exit(1);
 	}
