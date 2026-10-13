@@ -13,6 +13,7 @@ import { dirname, join, resolve } from "node:path";
 
 import type { BenchmarkDefinition, BenchmarkRun, TokenUsage } from "../types";
 
+import { runImprovementCycle } from "../../packages/self-autonomy/improvement-loop";
 import { agenticBenchmarks } from "../categories/agentic/benchmarks";
 import { battleTestBenchmarks } from "../categories/battle-test/benchmarks";
 import { battleTestProBenchmarks } from "../categories/battle-test/benchmarks-pro";
@@ -23,7 +24,9 @@ import { fullstackBenchmarks } from "../categories/fullstack/benchmarks";
 import { longHorizonBenchmarks } from "../categories/long-horizon/benchmarks";
 import { uiDesignBenchmarks } from "../categories/ui-design/benchmarks";
 import { grade } from "./execution-grader";
+import { gateMutations, recordRunError, runSummary } from "./failure-ledger";
 import { getFewShot } from "./few-shot";
+import { getExperienceSummary, getModelOrder, recordResult } from "./model-router";
 import {
 	appendProposal,
 	dropHeldOutMutations,
@@ -32,9 +35,7 @@ import {
 	scoreAll,
 	splitIds,
 } from "./mutation-gate";
-import { getExperienceSummary, getModelOrder, recordResult } from "./model-router";
 import { addMutation, clearMutations, getMutations, getSystemPrompt } from "./system-prompt";
-import { runImprovementCycle } from "../../packages/self-autonomy/improvement-loop";
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -65,6 +66,8 @@ const TEMPERATURES = [0.3, 0.5, 0.7];
 const STATE_FILE = join(ROOT, "autoresearch", "loop-state.json");
 const LOG_FILE = join(ROOT, "autoresearch", "autoresearch.log");
 const PROPOSALS_FILE = join(ROOT, "autoresearch", "mutation-proposals.jsonl");
+// Written only when EIGHT_FAILURE_LEDGER=1 (#3420).
+const FAILURE_LEDGER = join(ROOT, "autoresearch", "failure-ledger.jsonl");
 
 // ── All Benchmarks ──────────────────────────────────────────────────
 
@@ -664,6 +667,8 @@ async function main(): Promise<void> {
 			for (const m of kept) addMutation(m);
 		}
 	}
+	// Failure-ledger scope (#3420): one loop run. A resumed run keeps its startedAt.
+	const ledgerRun = `autoresearch-${state.startedAt}`;
 
 	for (let iter = state.iteration; iter < MAX_ITERATIONS; iter++) {
 		log(`\n${"═".repeat(60)}`);
@@ -698,20 +703,54 @@ async function main(): Promise<void> {
 					`  └─ ${status} Best: score=${run.grade.score} temp=${run.temperature} model=${run.model} tokens=${tk?.totalTokens ?? "?"} ${run.durationMs}ms`,
 				);
 
-				// Analyze failures and derive mutations
-				if (split) {
-					if (split.tuning.includes(benchmark.id))
-						candidates.push(...analyzeAndMutate(benchmark, run));
-				} else {
-					const muts = analyzeAndMutate(benchmark, run);
-					for (const m of muts) {
+				// Analyze failures and derive mutations. Held-out tasks (gate on) never
+				// derive rules. With EIGHT_FAILURE_LEDGER=1 the failure is recorded and
+				// its mutations are applied only once this task has failed with this
+				// label 3x in this run (dropped below that); otherwise gateMutations
+				// hands back muts unchanged. A ledger error is logged and never reaches
+				// the score or this handler.
+				const muts =
+					!split || split.tuning.includes(benchmark.id) ? analyzeAndMutate(benchmark, run) : [];
+				let apply: string[] = muts;
+				try {
+					const gate = gateMutations({
+						ledgerPath: FAILURE_LEDGER,
+						run: ledgerRun,
+						runId: `${ledgerRun}-iter${iter + 1}`,
+						taskId: benchmark.id,
+						grade: run.grade,
+						hasTestHarness: Boolean(benchmark.testExecution && benchmark.testFile),
+						passThreshold: PASS_THRESHOLD,
+						mutations: muts,
+					});
+					if (gate.note) log(gate.note);
+					apply = gate.apply;
+				} catch (ledgerErr: any) {
+					log(`  │ ⚠ ledger error, mutations dropped: ${ledgerErr?.message ?? ledgerErr}`);
+					apply = [];
+				}
+				if (split) candidates.push(...apply);
+				else
+					for (const m of apply) {
 						newMutations.push(m);
 						addMutation(m);
 					}
-				}
 			} catch (err: any) {
 				log(`  └─ ✗ FAILED: ${err.message}`);
 				scores[benchmark.id] = 0;
+				try {
+					const rec = recordRunError(
+						process.env,
+						FAILURE_LEDGER,
+						ledgerRun,
+						`${ledgerRun}-iter${iter + 1}`,
+						benchmark.id,
+						err,
+					);
+					if (rec.note) log(rec.note);
+				} catch (ledgerErr: any) {
+					log(`  │ ⚠ ledger error: ${ledgerErr?.message ?? ledgerErr}`);
+				}
 			}
 
 			log("");
@@ -822,6 +861,7 @@ async function main(): Promise<void> {
 		} else {
 			log("  No new mutations (all passing or no actionable failures)");
 		}
+		for (const line of runSummary(process.env, FAILURE_LEDGER, ledgerRun)) log(line);
 
 		// ── Convergence Check ─────────────────────────────────────────
 		if (passing === benchmarks.length) {

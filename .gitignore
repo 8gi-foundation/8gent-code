@@ -138,3 +138,6 @@ packaging/linux/staged-8gent
 
 # scratch files the local model is told to write (#3865)
 .tmp/
+
+# Failure ledger (#3420), written only with EIGHT_FAILURE_LEDGER=1
+benchmarks/autoresearch/failure-ledger.jsonl
