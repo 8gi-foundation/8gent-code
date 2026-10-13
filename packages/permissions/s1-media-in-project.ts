@@ -37,6 +37,7 @@ import { closeSync, lstatSync, openSync, readSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules, maskQuotes, shellWords, splitSegments } from "../decide/rules";
+import { pathOutsideWorkspace } from "./s1-deck-render";
 import { magickEnvironmentOk } from "./s1-magick";
 import { protectedRel } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
@@ -444,6 +445,13 @@ export function mediaInProject(
 			return magickOk(args, cx)
 				? { ok: true, reason: "magick drawing a new image from workspace files" }
 				: NO;
+		// ffprobe reads no ImageMagick configuration, but the binary that runs must not be the
+		// workspace's: every PATH entry resolves outside the workspace and the project (#3949).
+		if (bin === "ffprobe") {
+			const pathEnv = env.PATH ?? process.env.PATH ?? "";
+			const roots = project === undefined ? [cx.root] : [cx.root, canon(project)];
+			if (roots.some((r) => !pathOutsideWorkspace(r, pathEnv))) return NO;
+		}
 		if (bin === "ffprobe")
 			return ffprobeOk(args, cx) ? { ok: true, reason: "ffprobe reading one workspace file" } : NO;
 		return NO;

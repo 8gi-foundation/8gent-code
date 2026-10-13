@@ -183,6 +183,15 @@ describe("media tools inside the workspace", () => {
 		expect(mediaInProject(PASS[0], undefined).ok).toBe(false);
 		expect(mediaInProject(PASS[0], "relative/dir").ok).toBe(false);
 	});
+	test("ffprobe refuses a workspace-local binary on PATH (#3949)", () => {
+		const probe = "ffprobe -v error -show_entries format=duration -of csv=p=0 video/brief.mp4";
+		expect(ok(probe)).toBe(true);
+		mkdirSync(join(ws, "fakebin"), { recursive: true });
+		writeFileSync(join(ws, "fakebin", "ffprobe"), "#!/bin/sh\necho pwned\n", { mode: 0o755 });
+		expect(ok(probe, { PATH: `${ws}/fakebin:/usr/bin:/bin` })).toBe(false);
+		expect(ok(probe, { PATH: `/usr/bin:${ws}/fakebin` })).toBe(false);
+		expect(ok(probe, { PATH: `fakebin:/usr/bin` })).toBe(false);
+	});
 	test("magick keeps the render lane's environment rules (#4177, #4184)", () => {
 		const draw = `magick -size 100x100 xc:red -fill blue -draw "rectangle 10,10 50,50" video/shape2.png`;
 		expect(ok(draw)).toBe(true);
