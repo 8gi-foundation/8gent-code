@@ -112,7 +112,7 @@ jobs:
       - name: Verify build
         run: |
           test -f dist/cli.js || (echo "Build failed" && exit 1)
-          head -1 dist/cli.js | grep -qxF "#!/usr/bin/env -S bun --no-env-file --config=/dev/null" || (echo "Safe shebang missing (#4013)" && exit 1)
+          head -1 dist/cli.js | grep -qxF "#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null" || (echo "Safe shebang missing (#4013)" && exit 1)
           echo "Build OK"
 
       # #3219: never publish a tarball that has not been installed and run

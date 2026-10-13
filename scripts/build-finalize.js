@@ -49,7 +49,7 @@ for (const name of ["cli.js", "tui.js"]) {
 const cliPath = join(ROOT, "dist", "cli.js");
 if (existsSync(cliPath)) {
 	// Run directly, Bun must not read the cwd bunfig.toml (preload = code) or .env (#4013).
-	const SAFE_SHEBANG = "#!/usr/bin/env -S bun --no-env-file --config=/dev/null";
+	const SAFE_SHEBANG = "#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null";
 	const contents = readFileSync(cliPath, "utf-8");
 	const body = contents.startsWith("#!") ? contents.slice(contents.indexOf("\n") + 1) : contents;
 	writeFileSync(cliPath, `${SAFE_SHEBANG}\n${body}`);

@@ -81,7 +81,7 @@ echo "== test"
 if dbus-run-session -- bash -c 'printf ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; bun run test'; then RESULT[test]=pass; else echo "::error::bun run test failed"; RESULT[test]=FAIL; fi
 
 echo "== build"
-if bun run build && test -f dist/cli.js && head -1 dist/cli.js | grep -qxF '#!/usr/bin/env -S bun --no-env-file --config=/dev/null'; then
+if bun run build && test -f dist/cli.js && head -1 dist/cli.js | grep -qxF '#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null'; then
   echo "Build OK: $(wc -c < dist/cli.js | tr -d ' ') bytes"; RESULT[build]=pass
 else
   echo "::error::build failed"; RESULT[build]=FAIL

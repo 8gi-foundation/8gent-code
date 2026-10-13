@@ -7,7 +7,7 @@
  *
  *   bin/8gent-run.js (npm "bin")      flags, end to end
  *   bin/8gent-cli.sh (both branches)  flags, end to end
- *   bun shebang entry points          `env -S bun --no-env-file --config=/dev/null`
+ *   bun shebang entry points          `env -S bun --no-install --no-env-file --config=/dev/null`
  *   spawned children (TUI, daemon service argv, worktree pool, adapters, /debug)
  *                                     safeBunFlags(), end to end + source check
  *   package.json scripts              run from the package root (proven) and --config
@@ -139,8 +139,8 @@ describe("spawned Bun children", () => {
 	});
 
 	test("Windows gets the shipped empty bunfig, POSIX /dev/null", () => {
-		expect(safeBunFlags("darwin")).toEqual(["--no-env-file", "--config=/dev/null"]);
-		const win = safeBunFlags("win32")[1] as string;
+		expect(safeBunFlags("darwin")).toEqual(["--no-install", "--no-env-file", "--config=/dev/null"]);
+		const win = safeBunFlags("win32")[2] as string;
 		expect(win.startsWith("--config=")).toBe(true);
 		expect(fs.readFileSync(win.slice("--config=".length), "utf8").replace(/^#.*$/gm, "").trim()).toBe("");
 	});
@@ -173,7 +173,7 @@ describe("spawned Bun children", () => {
 });
 
 describe("bun shebang entry points", () => {
-	const SAFE = "#!/usr/bin/env -S bun --no-env-file --config=/dev/null";
+	const SAFE = "#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null";
 	const ENTRIES = [
 		"bin/8gent.ts",
 		"bin/debug.ts",
@@ -222,7 +222,7 @@ describe("package.json entry points", () => {
 			if (!runsFile.test(cmd)) continue;
 			checked.push(name);
 			for (const seg of cmd.split("&&").map((c) => c.trim()).filter((c) => /^bun\s/.test(c) && !/^bun\s+test\b/.test(c)))
-				expect(`${name} => ${seg}`).toMatch(/ => bun (?:--no-env-file )?--config=bin\/bunfig\.empty\.toml (?:run )?\S/);
+				expect(`${name} => ${seg}`).toMatch(/ => bun (?:--no-install )?(?:--no-env-file )?--config=bin\/bunfig\.empty\.toml (?:run )?\S/);
 		}
 		for (const name of ["start", "agent", "daemon", "daemon:local", "tui", "cli", "install-wizard", "install:apple-foundation", "harness", "harness:run", "debug"])
 			expect(checked).toContain(name);
