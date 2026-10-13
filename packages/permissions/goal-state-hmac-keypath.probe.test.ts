@@ -15,7 +15,21 @@ import {
 	canApplySeatbelt,
 	protectedRunCommandPaths,
 	refreshSecurityEnvForTests,
+	runCommandSandboxStatus,
+	wrapRunCommand,
 } from "./run-command-sandbox";
+
+/**
+ * P7 needs a real OS boundary. Inside another sandbox (sandbox-exec cannot nest) or on a host
+ * without bwrap it is skipped; EIGHT_REQUIRE_RUN_COMMAND_SANDBOX=1 (the CI bwrap step) turns
+ * that skip into a failure so the Linux run cannot pass by skipping.
+ */
+const liveSandbox = runCommandSandboxStatus().applied;
+if (!liveSandbox && process.env.EIGHT_REQUIRE_RUN_COMMAND_SANDBOX === "1") {
+	throw new Error(
+		`EIGHT_REQUIRE_RUN_COMMAND_SANDBOX=1 but run_command cannot be OS-sandboxed here: ${JSON.stringify(runCommandSandboxStatus())}`,
+	);
+}
 
 let root: string;
 let savedDataDir: string | undefined;
@@ -109,6 +123,33 @@ describe("8SO probe: key confidentiality and integrity (#4132)", () => {
 		expect(() => loadOrCreateKey()).toThrow();
 	});
 
+	// P7 (Artale, 8SO). Renaming <data>/keys changes the PARENT's entries, and <data> itself is
+	// not a protected subpath. The key must survive `mv keys keys.bak` from run_command.
+	test.skipIf(!liveSandbox)(
+		"P7 run_command cannot rename <data>/keys aside (live: seatbelt on macOS, bwrap on Linux)",
+		() => {
+			const data = path.join(root, "data");
+			useDataDir(data);
+			const key = loadOrCreateKey();
+			const keysDir = path.join(data, "keys");
+			const wrapped = wrapRunCommand(`mv ${JSON.stringify(keysDir)} ${JSON.stringify(`${keysDir}.bak`)}`);
+			const r = spawnSync("/bin/sh", ["-c", wrapped], { encoding: "utf8" });
+			expect(r.status).not.toBe(0);
+			expect(fs.readFileSync(path.join(keysDir, "state-hmac.key")).equals(key)).toBe(true);
+			expect(fs.existsSync(path.join(`${keysDir}.bak`, "state-hmac.key"))).toBe(false);
+		},
+	);
+
+	// P7s. The static half of P7: the write deny names <data>/keys as a literal, which is what
+	// matches rename(2) of that entry (source) and a rename onto it (destination) on seatbelt.
+	test("P7s the run_command profile denies file-write* on the literal <data>/keys entry", () => {
+		const data = path.join(root, "data");
+		useDataDir(data);
+		const profile = buildRunCommandProfile(protectedRunCommandPaths());
+		const writeDeny = profile.split("\n").filter((l) => l.startsWith("(deny file-write* file-link"));
+		expect(writeDeny.some((l) => l.includes(`(literal "${path.join(data, "keys")}")`))).toBe(true);
+	});
+
 	// Holds: P4. A key under the data dir with a case-varied spelling is covered
 	// by the case-insensitive regex (APFS).
 	test("holds P4 profile carries a case-insensitive rule for keys/", () => {
@@ -130,7 +171,7 @@ describe("8SO probe: key confidentiality and integrity (#4132)", () => {
 
 	// Holds: P6. refreshSecurityEnvForTests is a no-op outside test mode.
 	test("holds P6 refreshSecurityEnvForTests cannot re-read env outside test mode", () => {
-		const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+		const env: NodeJS.ProcessEnv = { ...process.env };
 		Reflect.deleteProperty(env, "NODE_ENV");
 		Reflect.deleteProperty(env, "BUN_ENV");
 		env.EIGHT_DATA_DIR = path.join(root, "first");

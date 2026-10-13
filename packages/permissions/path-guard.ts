@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { isPathWithin, pathFor } from "../core/path-within";
+import { securityEnvSnapshot } from "./run-command-sandbox";
 import { resolveSafe } from "./src/workspace-boundary";
 
 /** What the caller will do with the path. The default is "write": the stricter reading. */
@@ -37,7 +38,15 @@ export interface PathGuardHost {
 
 /** Directories whose contents are always credential-bearing. browser-profiles holds each named
  *  8gent Browser profile's control token, port file and cookies (#3622). */
-const PROTECTED_DIRS = [".ssh", ".aws", ".kube", ".8gent/browser-profiles", ".8gent/audit"];
+const PROTECTED_DIRS = [
+	".ssh",
+	".aws",
+	".kube",
+	".8gent/browser-profiles",
+	".8gent/audit",
+	// state-hmac.key signs /goal state, approval grants and the Table ledger: no read, no write (#4132, 8SO).
+	".8gent/keys",
+];
 
 /**
  * Files under the home directory that agent tools must never touch, read or
@@ -295,6 +304,19 @@ export function validatePath(
 				AUDIT_DATA_DIR_FILES.some((f) => resolved === flavor.join(root, f))
 			) {
 				return { ok: false, reason: "protected audit file" };
+			}
+		}
+	}
+
+	// 5c2. The signing keys under a relocated data dir: the startup snapshot's (where the key
+	// is read from) and the live one (#4132). Read and write.
+	{
+		const flavor = pathFor(platform);
+		for (const dataDir of new Set([securityEnvSnapshot().values.EIGHT_DATA_DIR, process.env.EIGHT_DATA_DIR])) {
+			if (!dataDir) continue;
+			const root = resolveSafe(dataDir, dataDir, platform);
+			if (isPathWithin(resolved, flavor.join(root, "keys"), platform)) {
+				return { ok: false, reason: "protected credential file" };
 			}
 		}
 	}
