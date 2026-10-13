@@ -26,7 +26,7 @@ import {
 import { hostedAllowed } from "../providers/failover";
 
 export const SPAWN_AGENT_DESCRIPTION =
-	"[SHELL] Launches a background agent and returns an agentId for tracking; allowedPaths limits which files it may write or edit. When the task names the file(s) the agent may edit, always pass them as allowedPaths. Use runtime='8gent' (default) for coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. Omit model to run the agent on this session's model.";
+	"[SHELL] Starts a background worker on task and returns an agentId to poll; allowedPaths limits which files it may write or edit. When the task names the file(s) the agent may edit, always pass them as allowedPaths. Use runtime='8gent' (default) for coding tasks, runtime='shell' for simple one-off commands. The agent runs asynchronously - use check_agent with the returned ID to poll for results. Omit model to run the agent on this session's model.";
 
 export const SPAWN_RUNTIME_DESCRIPTION =
 	"Runtime: '8gent' (default, this session's model) or 'shell' (sh -c). 'claude' is a hosted runtime and is off by default.";
@@ -109,7 +109,7 @@ async function gateShellChild(
 }
 
 export const CHECK_AGENT_DESCRIPTION =
-	"[SHELL] Returns the status (running/completed/failed) of a background agent, the files it changed, and an outcome line saying whether its task is done. While it runs, waits up to 90s for it or any sibling to finish, so no sleep is needed between checks. If the outcome or respawnNow says an agent ended without doing its task, re-spawn it at once, before checking the others.";
+	"[SHELL] Pass agentId (from spawn_agent); returns its status (running/completed/failed), the files it changed and whether its task is done. While it runs, waits up to 90s for it or any sibling to finish, so no sleep is needed between checks. If the outcome or respawnNow says an agent ended without doing its task, re-spawn it at once, before checking the others.";
 
 export const LIST_AGENTS_DESCRIPTION =
 	"[SHELL] Returns a summary of all spawned background agents with their IDs, runtimes, statuses, and elapsed times. Use this to get an overview before checking individual agents, or to find an agentId you lost track of.";
