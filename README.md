@@ -151,7 +151,7 @@ npm install -g @8gi-foundation/8gent-code
 8gent
 ```
 
-That's it. 8gent uses an adaptive provider router with 16 built-in providers. Six run locally: `8gent` (model `eight-1.0-q3:14b`), `ollama` and `lmstudio` are on by default, `llama-server` is selected with `EIGHT_LOCAL_SERVER=llama-server`, and `apple-foundation` and `apfel` turn on when a macOS 26 Apple Silicon host has them. The other ten are hosted providers, each opt-in with your own API key; the full list with every variable is [docs/install/providers.md](docs/install/providers.md). Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
+That's it. 8gent uses an adaptive provider router with 16 model providers (plus two opt-in host-CLI slots). Six run locally: `8gent` (model `eight-1.0-q3:14b`), `ollama` and `lmstudio` are on by default, `llama-server` is selected with `EIGHT_LOCAL_SERVER=llama-server`, and `apple-foundation` and `apfel` turn on when a macOS 26 Apple Silicon host has them. The other ten are hosted providers, each opt-in with your own API key; the full list with every variable is [docs/install/providers.md](docs/install/providers.md). Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
 
 **Hosted providers are opt-in.** OpenRouter, `auto:free`, the `claude` runtime, and the hosted failover step only run when you set `EIGHT_ALLOW_HOSTED=1`. Without the flag, failover stays local and child agents use the parent's provider and model.
 
@@ -607,7 +607,7 @@ apps/
 ```
 packages/
   eight/         Core agent engine (Vercel AI SDK) - shipped
-  providers/     16-provider adaptive router + failover - shipped
+  providers/     16-provider adaptive router + two host-CLI slots + failover - shipped
   memory/        SQLite + FTS5 persistent memory - shipped
   orchestration/ WorktreePool, role registry, macro actions - shipped
   permissions/   NemoClaw YAML policy engine - shipped
