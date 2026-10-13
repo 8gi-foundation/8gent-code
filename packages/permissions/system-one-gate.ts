@@ -88,6 +88,8 @@ import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
 import { commandInFolder } from "./cd-prefix";
 import type { CreatedFiles } from "./s1-created-files";
+import type { RmOwnDir } from "./s1-rm-own-dir";
+import type { RunOwnScript } from "./s1-run-own-script";
 import { posixRulesApply } from "./shell-tools";
 import { hasTuiApprovalHandler, requestTuiApproval } from "./tui-approval-channel";
 
@@ -608,6 +610,29 @@ export async function systemOneGate(
 		} catch {
 			// No opinion: fall through to the judge.
 		}
+		// `rm -r` of plain relative directories this session made with a
+		// mkdir-only run_command, untracked, holding only files this session
+		// wrote and directories it made (#4105); see s1-rm-own-dir.ts.
+		// Default mode only.
+		try {
+			const { rmOwnDir } = await import("./s1-rm-own-dir");
+			const own: RmOwnDir = mode === "default" ? rmOwnDir(command, cwd, created) : { ok: false };
+			if (own.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: own.reason,
+					},
+				};
+			}
+			if (own.hint) hint = own.hint;
+		} catch {
+			// No opinion: fall through to the judge.
+		}
 		// A plain run of the project's own script inside the workspace, with
 		// only workspace or /tmp paths in its environment and arguments, whose
 		// source (and local imports) spawns, fetches and deletes nothing (#3937).
@@ -627,6 +652,29 @@ export async function systemOneGate(
 					},
 				};
 			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// `bash|sh .tmp/FILE` where FILE is a shell script this session
+		// wrote, made only of allowlisted literal commands on loopback and in the workspace
+		// (#4121); see s1-run-own-script.ts. Default mode only.
+		try {
+			const { runOwnScript } = await import("./s1-run-own-script");
+			const own: RunOwnScript =
+				mode === "default" ? runOwnScript(command, cwd, created) : { ok: false };
+			if (own.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: own.reason,
+					},
+				};
+			}
+			if (own.hint) hint = own.hint;
 		} catch {
 			// No opinion: fall through to the judge.
 		}
