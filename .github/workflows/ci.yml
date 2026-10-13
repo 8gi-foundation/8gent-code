@@ -43,6 +43,9 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      - name: "Type check: harness (bin/8gent.ts, tsconfig.harness.json)"
+        run: bun run check:harness
+
       - name: Lint
         run: bun run lint
 

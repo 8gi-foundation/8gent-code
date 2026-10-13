@@ -2321,24 +2321,28 @@ async function exportCommand(args: string[]) {
 		targetId = (convos[0] as any).sessionId;
 	}
 
-	// Fetch conversation messages
-	const convo = await sync.getConversation(targetId);
-	if (!convo || !convo.messages || convo.messages.length === 0) {
+	// Fetch conversation messages. The only stored transcript of a synced
+	// session is its checkpoint, which restoreFromRemote decodes.
+	const convo = await sync.restoreFromRemote(targetId);
+	if (!convo || convo.messages.length === 0) {
 		console.error(`Session ${targetId} not found or has no messages.`);
 		process.exit(1);
 	}
 
+	// Checkpoints store role and content only, so there is no per-message
+	// timestamp or session duration to carry into the export.
+	const exportedAt = new Date();
 	const { saveSessionExport } = await import("../packages/eight/session-export");
 	const filePath = await saveSessionExport(
-		convo.messages.map((m: any) => ({
+		convo.messages.map((m) => ({
 			role: m.role || "system",
 			content: m.content || "",
-			timestamp: new Date(m.timestamp || Date.now()),
+			timestamp: exportedAt,
 		})),
 		{
 			sessionId: targetId,
 			model: convo.model || "unknown",
-			duration: convo.duration || "unknown",
+			duration: "unknown",
 		},
 	);
 
@@ -2527,7 +2531,7 @@ async function memoryCommand(args: string[]) {
 				console.error("Usage: 8gent memory remember <fact>");
 				process.exit(1);
 			}
-			const id = await memory.remember(fact, "project", { source: "cli" });
+			const id = await memory.remember(fact, "project", { source: "user:cli" });
 			if (isJson) {
 				jsonOut({ success: true, id, fact });
 			} else {
@@ -2554,12 +2558,21 @@ async function memoryCommand(args: string[]) {
 
 		case "stats": {
 			try {
-				const ctx = await memory.getContext({ maxTokens: 1 });
+				// Count the stores themselves. A context window is a ranked,
+				// token-capped selection, so its stats are not a total.
+				const counts = await memory.getStats();
+				const byType: Record<string, number> = {};
+				for (const scope of [counts.v2?.project, counts.v2?.global]) {
+					for (const [type, n] of Object.entries(scope?.byType ?? {})) {
+						byType[type] = (byType[type] ?? 0) + n;
+					}
+				}
+				const stats = { totalMemories: counts.project + counts.global, byType };
 				if (isJson) {
-					jsonOut({ stats: ctx.stats });
+					jsonOut({ stats });
 				} else {
-					console.log(`Total memories: ${ctx.stats.totalMemories}`);
-					console.log(`By type: ${JSON.stringify(ctx.stats.byType)}`);
+					console.log(`Total memories: ${stats.totalMemories}`);
+					console.log(`By type: ${JSON.stringify(stats.byType)}`);
 				}
 			} catch {
 				if (isJson) {
