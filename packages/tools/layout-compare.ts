@@ -18,7 +18,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -37,6 +37,10 @@ const SIM_WIDTH = 320;
 const MAX_DOM_BYTES = 8 * 1024 * 1024;
 /** An element names a band only when their boxes overlap at least this much (intersection over union). */
 const MIN_NAME_IOU = 0.3;
+/** Selector text is page-controlled: at most this many characters reach the model. */
+const MAX_SELECTOR_CHARS = 120;
+/** At most this many element boxes are read back from the element pass. */
+const MAX_ELEMENTS = 3000;
 
 /** True when `file` is `dir` or sits inside it. */
 function insideDir(file: string, dir: string): boolean {
@@ -169,7 +173,9 @@ export function prepareSafeCopy(htmlPath: string, dir: string, probe?: string): 
 	// Only the whitespace the HTML parser skips: JS \s also takes NBSP, U+3000, U+2028 and
 	// U+FEFF, which the parser treats as text, opening the body before the CSP meta.
 	const lead = /^[\t\n\f\r ]*<!doctype[^>]*>/i.exec(html)?.[0] ?? "";
-	const withMeta = `\uFEFF${lead}${meta}${html.slice(lead.length)}${probe ? `<script>${probe}</script>` : ""}`;
+	// The probe sits straight after the policy, before any page byte: page markup that ends
+	// in an open tag, comment or raw-text element cannot swallow it or lend it attributes.
+	const withMeta = `\uFEFF${lead}${meta}${probe ? `<script>${probe}</script>` : ""}${html.slice(lead.length)}`;
 	const out = path.join(dir, probe ? "page-elements.html" : "page.html");
 	fs.writeFileSync(out, withMeta);
 	return out;
@@ -396,42 +402,62 @@ export async function pixelSimilarity(
 /** One visible element of the rendered page: a CSS selector and its box in page pixels. */
 export type ElementBox = { s: string; x: number; y: number; w: number; h: number };
 
-const BOXES_ID = "__8gent_layout_boxes__";
+/** The id of the probe's output tag. `token` is fresh per run, so the page cannot pre-place one. */
+export const boxesId = (token: string): string => `__8gent_layout_boxes_${token}__`;
 /**
  * The element pass's script (#4204). After load it records every visible element's selector
  * (tag#id; else tag.classes when that is unique; else an nth-of-type path up to an id or body)
- * and box into a JSON script tag, which --dump-dom prints. Fixed text: the CSP allows it by hash.
+ * and box into a JSON script tag, which --dump-dom prints. The CSP allows it by hash. `token`
+ * (hex, fresh per run) names the output tag so page markup cannot forge it; selectors are cut
+ * to MAX_SELECTOR_CHARS in the page so a huge class name cannot balloon the dump.
  */
-export const ELEMENT_PROBE = `addEventListener("load",function(){var E=CSS.escape,S={SCRIPT:1,STYLE:1,BR:1,TEMPLATE:1,NOSCRIPT:1},out=[];
+export const elementProbe = (token: string): string => `addEventListener("load",function(){var E=CSS.escape,S={SCRIPT:1,STYLE:1,BR:1,TEMPLATE:1,NOSCRIPT:1},out=[];
 function part(e){var t=e.tagName.toLowerCase();if(e.id)return t+"#"+E(e.id);var c="";if(typeof e.className==="string")e.className.trim().split(/\\s+/).forEach(function(k){if(k)c+="."+E(k)});
 var p=e.parentElement,i=0,n=0;if(p)for(var x=p.firstElementChild;x;x=x.nextElementSibling)if(x.tagName===e.tagName){n++;if(x===e)i=n}return t+c+(n>1?":nth-of-type("+i+")":"")}
 function sel(e){if(e.id)return part(e);var t=e.tagName.toLowerCase(),c=part(e).replace(/:nth-of-type\\(\\d+\\)$/,"");try{if(c!==t&&document.querySelectorAll(c).length===1)return c}catch(_){}
 var a=[part(e)],p=e.parentElement;while(p&&p!==document.body&&a.length<5){a.unshift(part(p));if(p.id)break;p=p.parentElement}return a.join(" > ")}
-var all=document.body?document.body.getElementsByTagName("*"):[];for(var k=0;k<all.length&&out.length<3000;k++){var e=all[k];if(S[e.tagName])continue;var r=e.getBoundingClientRect();if(r.width<1||r.height<1)continue;
-if(getComputedStyle(e).visibility!=="visible")continue;out.push({s:sel(e),x:Math.round(r.left+scrollX),y:Math.round(r.top+scrollY),w:Math.round(r.width),h:Math.round(r.height)})}
-var j=document.createElement("script");j.type="application/json";j.id="${BOXES_ID}";j.textContent=JSON.stringify(out).replace(/</g,"\\\\u003c");(document.body||document.documentElement).appendChild(j)});`;
+var all=document.body?document.body.getElementsByTagName("*"):[];for(var k=0;k<all.length&&out.length<${MAX_ELEMENTS};k++){var e=all[k];if(S[e.tagName])continue;var r=e.getBoundingClientRect();if(r.width<1||r.height<1)continue;
+if(getComputedStyle(e).visibility!=="visible")continue;out.push({s:sel(e).slice(0,${MAX_SELECTOR_CHARS}),x:Math.round(r.left+scrollX),y:Math.round(r.top+scrollY),w:Math.round(r.width),h:Math.round(r.height)})}
+var j=document.createElement("script");j.type="application/json";j.id="${boxesId(token)}";j.textContent=JSON.stringify(out).replace(/</g,"\\\\u003c");(document.body||document.documentElement).appendChild(j)});`;
+
+/**
+ * A page-controlled selector made safe to show the model: no control, line-break, bidi or
+ * zero-width characters (a class name must not open a new line of instructions in the tool
+ * result), whitespace collapsed, cut to MAX_SELECTOR_CHARS.
+ */
+export function cleanSelector(s: string): string {
+	const flat = s
+		.replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]/g, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+	return flat.length > MAX_SELECTOR_CHARS ? `${flat.slice(0, MAX_SELECTOR_CHARS)}...` : flat;
+}
 
 /** The element boxes out of a --dump-dom print, or null when the print holds none. */
-export function parseElementBoxes(dom: string): ElementBox[] | null {
-	const re = new RegExp(`<script[^>]*id="${BOXES_ID}"[^>]*>([\\s\\S]*?)</script>`, "g");
+export function parseElementBoxes(dom: string, token: string): ElementBox[] | null {
+	if (!/^[0-9a-f]{16,}$/.test(token)) return null;
+	const re = new RegExp(`<script[^>]*id="${boxesId(token)}"[^>]*>([\\s\\S]*?)</script>`, "g");
 	let last: string | null = null;
 	for (let m = re.exec(dom); m; m = re.exec(dom)) last = m[1];
 	if (last === null) return null;
 	try {
 		const list = JSON.parse(last);
 		if (!Array.isArray(list)) return null;
-		return list.filter(
-			(e): e is ElementBox =>
-				typeof e?.s === "string" &&
-				[e.x, e.y, e.w, e.h].every((n) => typeof n === "number" && Number.isFinite(n)),
-		);
+		const boxes: ElementBox[] = [];
+		for (const e of list.slice(0, MAX_ELEMENTS)) {
+			if (typeof e?.s !== "string") continue;
+			if (![e.x, e.y, e.w, e.h].every((n) => typeof n === "number" && Number.isFinite(n))) continue;
+			const s = cleanSelector(e.s);
+			if (s) boxes.push({ s, x: e.x, y: e.y, w: e.w, h: e.h });
+		}
+		return boxes;
 	} catch {
 		return null;
 	}
 }
 
 /**
- * Load the page (sanitised, with only ELEMENT_PROBE allowed to run) and return its visible
+ * Load the page (sanitised, with only elementProbe allowed to run) and return its visible
  * elements' boxes. Same offline flags as the screenshot. Null on any failure: the report then
  * goes out without names, exactly as before.
  */
@@ -443,13 +469,14 @@ export async function measureElements(
 	dir: string,
 ): Promise<ElementBox[] | null> {
 	try {
-		const copy = prepareSafeCopy(htmlPath, dir, ELEMENT_PROBE);
+		const token = randomBytes(16).toString("hex");
+		const copy = prepareSafeCopy(htmlPath, dir, elementProbe(token));
 		const exit = await runChrome(
 			chrome,
 			chromeArgs(copy, null, width, height, path.join(dir, "profile-elements")),
 			true,
 		);
-		return parseElementBoxes(exit.stdout);
+		return parseElementBoxes(exit.stdout, token);
 	} catch {
 		return null;
 	}
@@ -566,11 +593,16 @@ export async function compareLayout(
 		const height = Math.min(ref.height, MAX_VIEWPORT);
 		const elementsDir = path.join(tmp, "elements");
 		fs.mkdirSync(elementsDir);
-		// The element pass runs beside the screenshot and never fails the compare.
-		const [, elements] = await Promise.all([
-			renderSafe(chrome, htmlPath, out, width, height, tmp),
+		// The element pass runs beside the screenshot and never fails the compare. Both are
+		// awaited before `tmp` goes, so a failed screenshot never strands the element Chrome.
+		const [renderError, elements] = await Promise.all([
+			renderSafe(chrome, htmlPath, out, width, height, tmp).then(
+				() => null,
+				(e: unknown) => e,
+			),
 			measureElements(chrome, htmlPath, width, height, elementsDir),
 		]);
+		if (renderError) throw renderError;
 		const got = await measureLayout(out);
 		if (!got) return "compare_layout: your page rendered blank. Check the HTML.";
 		const similarity = await pixelSimilarity(referencePath, out, ref.width, ref.height);
