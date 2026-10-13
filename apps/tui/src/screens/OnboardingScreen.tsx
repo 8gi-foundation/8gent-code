@@ -186,7 +186,7 @@ export async function fetchProviderModels(
 		const hostBase =
 			provider === "lmstudio"
 				? process.env.LM_STUDIO_HOST || "http://localhost:1234"
-				: (process.env.APFEL_BASE_URL?.replace(/\/v1$/, "") || "http://localhost:11500");
+				: (process.env.APFEL_BASE_URL?.replace(/\/v1$/, "") || "http://127.0.0.1:11435");
 		const ctrl = new AbortController();
 		const t = setTimeout(() => ctrl.abort(), 1500);
 		const res = await fetch(`${hostBase}/v1/models`, { signal: ctrl.signal });
