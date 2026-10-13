@@ -56,7 +56,8 @@ export function BufferedTextInput({
 			const cursor = Math.min(cursorRef.current, current.length);
 
 			if (key.return) {
-				onSubmit?.(current);
+				// Alt+Enter (meta) queues a follow-up; CommandInput owns it (#3918 D1).
+				if (!key.meta) onSubmit?.(current);
 				return;
 			}
 
@@ -71,7 +72,7 @@ export function BufferedTextInput({
 					next = current.slice(0, cursor - 1) + current.slice(cursor);
 					nextCursor = cursor - 1;
 				}
-			} else if (input && !key.ctrl) {
+			} else if (input && !key.ctrl && !key.meta) {
 				// Ink reports Ctrl+P as input "p" with key.ctrl, and hands it to
 				// every active handler. Ctrl+letter is a shortcut, never text,
 				// or the app's shortcut also types its letter here (#3166).

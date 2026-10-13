@@ -20,7 +20,7 @@ async function main() {
 		path.join(dir, "review.md"),
 		"---\ndescription: Review a file for bugs\n---\nReview $1 for correctness bugs. Mode: $2.\n",
 	);
-	const app = await bootApp(160, 50);
+	const app = await bootApp(160, 62);
 	screen = () => frameOf(app);
 	const rec = recorder(app);
 

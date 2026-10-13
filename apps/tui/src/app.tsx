@@ -178,6 +178,7 @@ import {
 } from "../../../packages/permissions/system-one-gate.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
+import type { ThinkingLevel } from "../../../packages/providers/thinking-level.js";
 import {
 	getVoiceForRole,
 	loadSettings as loadAppSettings,
@@ -269,6 +270,7 @@ import {
 	localProviderEndpoints,
 	withTimeout,
 } from "./lib/provider-readiness.js";
+import { describeScope, nextModel, resolveScope } from "./lib/scoped-models.js";
 import {
 	flushSession,
 	initSessionLogger,
@@ -288,6 +290,14 @@ import {
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
 import { truncate } from "./lib/text.js";
+import {
+	THINKING_USAGE,
+	type ThinkingChoice,
+	describeThinking,
+	nextThinkingChoice,
+	parseThinkingChoice,
+	visibleMessages,
+} from "./lib/thinking.js";
 import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
 import { BTWView } from "./screens/BTWView.js";
@@ -572,13 +582,13 @@ function computeCliOverrides(
 
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
-import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
 import {
 	describeMissingVoiceSetup,
 	describeTranscriberBackend,
 	formatMicLabel,
 	resolveInputDevice,
 } from "../../../packages/voice/input-device.js";
+import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
 import {
 	FALLBACK_SYSTEM_VOICE,
 	listInstalledSystemVoices,
@@ -1550,6 +1560,26 @@ export function App({
 		() => computeCliOverrides(cliProvider, cliModel).model,
 	);
 	const [availableModels, setAvailableModels] = useState<string[]>([]);
+	// The few models Alt+M cycles between (#3918 D3); empty = all listed.
+	const [scopedModels, setScopedModels] = useState<string[]>([]);
+	// The thinking level asked for (#3918 D4). The provider clamps it; see
+	// supportedThinking(). Not yet passed into the Agent: it has no setter.
+	const [thinkingLevel, setThinkingLevel] = useState<ThinkingChoice>("off");
+	// Whether the model's intermediate thinking bubbles are drawn (#3918 D10).
+	const [showThinking, setShowThinking] = useState(true);
+	// Latest values for the key handler. Ink re-subscribes it after a render, so a
+	// second press that lands first (a held key, a slow runner) sees the old closure.
+	const thinkingKeyRef = useRef({ level: thinkingLevel, show: showThinking });
+	thinkingKeyRef.current = { level: thinkingLevel, show: showThinking };
+	// Text Esc hands back to the input: steers and follow-ups the stopped task never took (D1).
+	const [restoreInput, setRestoreInput] = useState<{ text: string; seq: number } | null>(null);
+	const supportedThinking = useCallback((): readonly ThinkingLevel[] => {
+		try {
+			return getProviderManager().getProvider(currentProvider).supportedThinkingLevels ?? [];
+		} catch {
+			return [];
+		}
+	}, [currentProvider]);
 	// Ollama's full /api/tags list before chat filtering, so a model that is
 	// installed but cannot chat is not reported as missing (#3548).
 	const installedOllamaModelsRef = useRef<string[]>([]);
@@ -1931,6 +1961,12 @@ export function App({
 	const chatContentWidth = tuiChatContentWidth(viewport.width, processSidebarWidth);
 	const tokenMeterColWidth = viewport.width < 52 ? 6 : viewport.width < 72 ? 9 : 12;
 
+	// Steers typed after a turn was submitted but before its model call began
+	// (the task router and memory run first), per tab. The engine stamps a
+	// steer with the running turn and drops stale ones when a turn starts, so
+	// these wait here and are handed over right after chat() is called (D1).
+	const pendingSteersRef = useRef<Map<string, string[]>>(new Map());
+	const chatStartedTabsRef = useRef<Set<string>>(new Set());
 	// Per-tab message queue — each tab has its own pending-submission queue so
 	// typing on tab A while tab A's agent is busy stacks A's queue without
 	// affecting tab B's parallel submissions.
@@ -2266,6 +2302,44 @@ export function App({
 			return;
 		}
 
+		// Alt+M: the next model in the scoped list, or in every listed model (#3918 D3).
+		// Ctrl+F is the live view (#4190), so the cycle key is Alt+M.
+		if (key.meta && input === "m") {
+			const list = scopedModels.length > 0 ? scopedModels : availableModels;
+			const next = nextModel(list, currentModel);
+			if (!next) {
+				addSystemMessage("No models listed to cycle. Check /provider.");
+			} else if (next === currentModel) {
+				addSystemMessage(`Only one model in scope: ${next}. /scoped-models adds more.`);
+			} else {
+				setCurrentModel(next);
+				addSystemMessage(
+					`Model switched to: ${next} (${list.indexOf(next) + 1}/${list.length}${scopedModels.length > 0 ? " scoped" : ""})`,
+				);
+			}
+			return;
+		}
+
+		// Ctrl+Z: cycle the thinking level (#3918 D4).
+		if (key.ctrl && input === "z") {
+			const next = nextThinkingChoice(thinkingKeyRef.current.level);
+			thinkingKeyRef.current.level = next;
+			setThinkingLevel(next);
+			addSystemMessage(describeThinking(next, currentProvider, supportedThinking()));
+			return;
+		}
+
+		// Ctrl+V: show or hide the model's thinking (#3918 D10).
+		if (key.ctrl && input === "v") {
+			const next = !thinkingKeyRef.current.show;
+			thinkingKeyRef.current.show = next;
+			setShowThinking(next);
+			addSystemMessage(
+				next ? "Thinking shown. Ctrl+V hides it." : "Thinking hidden. Ctrl+V shows it.",
+			);
+			return;
+		}
+
 		// Ctrl+Shift+M: open provider picker overlay
 		if (key.ctrl && input === "M" && key.shift) {
 			setViewMode("provider-select");
@@ -2391,11 +2465,29 @@ export function App({
 				return;
 			}
 			if (isProcessing) {
+				const running = agent ?? perTabAgents.getAgent(activeTabId);
 				perTabAgents.abortTab(activeTabId);
 				setIsProcessing(false);
 				setActiveTool(null);
 				setAgentRunningOnTab(activeTabId, false);
-				addSystemMessage("Generation interrupted.");
+				// Steers the turn never took and queued follow-ups go back to the
+				// input, to edit or resend (#3918 D1).
+				const steers = [
+					...(pendingSteersRef.current.get(activeTabId) ?? []),
+					...(running?.takeQueuedSteers() ?? []),
+				];
+				pendingSteersRef.current.delete(activeTabId);
+				const queued = messageQueuesRef.current.get(activeTabId) ?? [];
+				messageQueuesRef.current.set(activeTabId, []);
+				const back = [...steers, ...queued];
+				if (back.length > 0) {
+					setRestoreInput({ text: back.join("\n"), seq: Date.now() });
+					addSystemMessage(
+						`Generation interrupted. ${back.length === 1 ? "Your queued message is" : `${back.length} queued messages are`} back in the input.`,
+					);
+				} else {
+					addSystemMessage("Generation interrupted.");
+				}
 			} else if (imageInput.currentImage && (viewMode === "chat" || viewMode === "onboarding")) {
 				imageInput.removeImage();
 			} else if (activeTabType !== "chat" && viewMode === "chat") {
@@ -3389,6 +3481,52 @@ export function App({
 					addSystemMessage(formatHotkeys());
 					break;
 
+				case "thinking": {
+					const arg = args[0]?.toLowerCase();
+					if (!arg) {
+						addSystemMessage(
+							`${describeThinking(thinkingLevel, currentProvider, supportedThinking())}\nThinking is ${showThinking ? "shown" : "hidden"} in the chat.\n${THINKING_USAGE}`,
+						);
+						break;
+					}
+					if (arg === "show" || arg === "hide") {
+						const next = arg === "show";
+						setShowThinking(next);
+						addSystemMessage(
+							next ? "Thinking shown. Ctrl+V hides it." : "Thinking hidden. Ctrl+V shows it.",
+						);
+						break;
+					}
+					const choice = parseThinkingChoice(arg);
+					if (!choice) {
+						addSystemMessage(`Unknown thinking level "${args[0]}". ${THINKING_USAGE}`);
+						break;
+					}
+					setThinkingLevel(choice);
+					addSystemMessage(describeThinking(choice, currentProvider, supportedThinking()));
+					break;
+				}
+
+				case "scoped-models": {
+					if (args.length === 0) {
+						addSystemMessage(describeScope(scopedModels, availableModels));
+						break;
+					}
+					const { scope, unknown } = resolveScope(args, availableModels);
+					setScopedModels(scope);
+					const lines: string[] = [];
+					if (unknown.length > 0) {
+						lines.push(`Not listed by ${currentProvider}: ${unknown.join(", ")}. See /model.`);
+					}
+					lines.push(
+						scope.length === 0
+							? `Scope cleared: Alt+M cycles all ${availableModels.length} listed models.`
+							: describeScope(scope, availableModels),
+					);
+					addSystemMessage(lines.join("\n"));
+					break;
+				}
+
 				case "kanban":
 					setViewMode((prev) => (prev === "kanban" ? "chat" : "kanban"));
 					break;
@@ -3438,7 +3576,7 @@ export function App({
 					const mins = Math.floor(elapsed / 60);
 					const secs = elapsed % 60;
 					addSystemMessage(
-						`Session Status:\n  Duration: ${mins}:${secs.toString().padStart(2, "0")}\n  Tokens used: ${totalTokens.toLocaleString()}\n  Commands: ${recentCommands.length}\n  Branch: ${currentBranch || "N/A"}\n  Animations: ${showAnimations ? "on" : "off"}\n  Sound: ${soundEnabled ? "on" : "off"}`,
+						`Session Status:\n  Duration: ${mins}:${secs.toString().padStart(2, "0")}\n  Tokens used: ${totalTokens.toLocaleString()}\n  Commands: ${recentCommands.length}\n  Branch: ${currentBranch || "N/A"}\n  Animations: ${showAnimations ? "on" : "off"}\n  Sound: ${soundEnabled ? "on" : "off"}\n  Thinking: ${thinkingLevel}${showThinking ? "" : " (hidden)"}`,
 					);
 					break;
 				}
@@ -5970,6 +6108,10 @@ export function App({
 			unlinkDaemon,
 			messages,
 			inkStdout,
+			thinkingLevel,
+			showThinking,
+			scopedModels,
+			supportedThinking,
 		],
 	);
 
@@ -5990,7 +6132,11 @@ export function App({
 	// tab. With per-tab agents, each tab id has its own queue + Agent + ESC
 	// scope so concurrent submissions across Orchestrator / Engineer / QA do
 	// not block one another.
-	const handleSubmit = async (rawInput: string, submitTabId?: string) => {
+	const handleSubmit = async (
+		rawInput: string,
+		submitTabId?: string,
+		mode: "steer" | "followUp" = "steer",
+	) => {
 		const tabId = submitTabId ?? activeTabId;
 		const tabTitle = workspaceTabs.tabs.find((t) => t.id === tabId)?.title || "Chat";
 		const { text: afterPaths, image: pastedNow } = imageInput.processInput(rawInput);
@@ -6229,6 +6375,24 @@ export function App({
 		// If THIS tab's agent is already running, queue this message on that
 		// tab's queue. Other tabs are unaffected.
 		if (isAgentRunningOnTab(tabId)) {
+			// Enter steers the running turn: the text reaches the model after
+			// the tool calls running now, before its next call (#3918 D1).
+			// Alt+Enter or Ctrl+Q queues it for after the task instead. A steer
+			// the engine refuses (queue full, text too long) is queued too.
+			const running = (tabId === activeTabId ? agent : null) ?? perTabAgents.getAgent(tabId);
+			if (mode === "steer" && running) {
+				const started = chatStartedTabsRef.current.has(tabId);
+				const accepted = started ? running.steer(bubbleContent) : true;
+				if (accepted) {
+					if (!started) {
+						const pending = pendingSteersRef.current.get(tabId) ?? [];
+						pending.push(bubbleContent);
+						pendingSteersRef.current.set(tabId, pending);
+					}
+					addSystemMessage("Steering: it reaches the model after the current tool call.");
+					return;
+				}
+			}
 			const q = messageQueuesRef.current.get(tabId) ?? [];
 			q.push(bubbleContent);
 			messageQueuesRef.current.set(tabId, q);
@@ -6395,6 +6559,10 @@ export function App({
 						img?.base64,
 						img?.mimeType,
 					);
+					// The turn is open now: steers typed before this point join it (D1).
+					chatStartedTabsRef.current.add(tabId);
+					for (const text of pendingSteersRef.current.get(tabId) ?? []) targetAgent.steer(text);
+					pendingSteersRef.current.delete(tabId);
 					// Track for Ctrl+G background-divert (per tab).
 					perTabAgents.trackPromise(tabId, chatPromise, messageForAgent.trim());
 					let reply: string;
@@ -6505,9 +6673,20 @@ export function App({
 			}
 			setAgentRunningOnTab(tabId, false);
 
+			// Steers the turn could not take (it was already answering, with no
+			// model call left) go now, as the next turn. Their bubbles are on
+			// screen already (#3918 D1).
+			chatStartedTabsRef.current.delete(tabId);
+			const leftover = [
+				...(pendingSteersRef.current.get(tabId) ?? []),
+				...(targetAgent?.takeQueuedSteers() ?? []),
+			];
+			pendingSteersRef.current.delete(tabId);
 			// Process queued messages for THIS tab only.
 			const q = messageQueuesRef.current.get(tabId) ?? [];
-			if (q.length > 0) {
+			if (leftover.length > 0) {
+				setTimeout(() => runAgent(leftover.join("\n\n")), 100);
+			} else if (q.length > 0) {
 				const next = q.shift()!;
 				messageQueuesRef.current.set(tabId, q);
 				appendToTab(tabId, {
@@ -7299,7 +7478,7 @@ export function App({
 								overflow="hidden"
 							>
 								<MessageList
-									messages={messages}
+									messages={visibleMessages(messages, showThinking)}
 									turnRunning={isProcessing}
 									rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
 									contentWidth={chatWidth}
@@ -7370,6 +7549,8 @@ export function App({
 									planNextStep={planNextStep}
 									recentCommands={recentCommands}
 									onSlashCommand={handleSlashCommand}
+									onFollowUp={(text) => handleSubmit(text, undefined, "followUp")}
+									restoreInput={restoreInput}
 									injectedText={voiceTranscript}
 									transformInputValue={transformChatInput}
 									allowEmptySubmit={!!imageInput.currentImage || showOnboarding}
