@@ -36,7 +36,6 @@ import {
 	normaliseAllowedPaths,
 } from "../permissions/edit-guards";
 import { type PathAccess, validatePath } from "../permissions/path-guard";
-import { ToolG8 } from "../permissions/toolg8";
 import {
 	type PermissionModeHolder,
 	currentPermissionMode,
@@ -59,6 +58,7 @@ import {
 	watchWrite,
 } from "../permissions/s1-created-files";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { ToolG8 } from "../permissions/toolg8";
 import {
 	applyAt,
 	blockedToolMessage,
