@@ -50,6 +50,16 @@ describe("S2 S3: cmd.exe and line-break lines are not POSIX", () => {
 		expect(posixRulesApply("ls\ntouch PWNED", "git-bash")).toBe(false);
 		expect(posixRulesApply("echo hi ^; touch x", "git-bash")).toBe(true);
 	});
+	test("a line JS trim would shorten by more than spaces and tabs is not judged (8SO on #4185)", () => {
+		// The shell keeps these in the word; the rules, reading command.trim(), would not.
+		for (const ch of ["\u00a0", "\ufeff", "\u3000", "\u2028", "\u202f", "\v", "\f"]) {
+			expect(posixRulesApply(`rm -rf .tmp${ch}`, "posix"), JSON.stringify(ch)).toBe(false);
+			expect(posixRulesApply(`${ch}rm -rf .tmp`, "posix"), JSON.stringify(ch)).toBe(false);
+			expect(readOnlyAllowlist(`ls${ch}`, { shell: "posix" }).verdict).toBe("no-opinion");
+		}
+		expect(posixRulesApply("  rm -rf .tmp \t ", "posix")).toBe(true);
+		expect(posixRulesApply("echo a\u00a0b", "posix")).toBe(true);
+	});
 	test("the allowlist stays silent for those lines", () => {
 		expect(readOnlyAllowlist("echo hi ^; touch PWNED", { shell: "cmd" }).verdict).toBe("no-opinion");
 		expect(readOnlyAllowlist("ls\ntouch PWNED", { shell: "git-bash" }).verdict).toBe("no-opinion");

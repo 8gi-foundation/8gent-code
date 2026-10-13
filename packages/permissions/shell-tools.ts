@@ -17,9 +17,16 @@ export type ActiveShellKind = "git-bash" | "powershell" | "cmd" | "posix";
  * `{...}`, `&`) parse the same text differently, and a CR or LF ends a command
  * in every shell, so for those lines the rules give no opinion and the line
  * goes to the person or the judge.
+ *
+ * The rules read `command.trim()`, and JavaScript's trim also strips characters
+ * a POSIX shell keeps as part of a word (no-break space, BOM, ideographic space,
+ * vertical tab and the rest). `rm -rf .tmp<U+00A0>` was judged as `.tmp` and
+ * deleted `.tmp<U+00A0>`, a folder the session never made (8SO on #4185). A line
+ * that trim would shorten by anything other than spaces and tabs gets no opinion.
  */
 export function posixRulesApply(command: string, kind: ActiveShellKind): boolean {
 	if (/[\r\n]/.test(command)) return false;
+	if (command.trim() !== command.replace(/^[ \t]+|[ \t]+$/g, "")) return false;
 	if (kind === "powershell") return false;
 	if (kind === "cmd" && /[\^%]/.test(command)) return false;
 	return true;

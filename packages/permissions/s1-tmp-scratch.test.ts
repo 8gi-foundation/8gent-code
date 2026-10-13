@@ -307,6 +307,21 @@ describe.skipIf(process.platform === "win32")(
 				]);
 				expect(judge.asks).toBe(0);
 			});
+			test("8SO: `.tmp` plus a trailing no-break space is another folder: blocked, it is kept", async () => {
+				// JS trim made the lane read `.tmp`; the shell removed `.tmp<U+00A0>`.
+				for (const ch of ["\u00a0", "\ufeff", "\u3000"]) {
+					mkdirSync(join(ws, `.tmp${ch}`));
+					writeFileSync(join(ws, `.tmp${ch}`, "theirs.txt"), "x");
+				}
+				const ex = new ToolExecutor(ws, "tmp4185e");
+				await steps(ex, ["mkdir -p .tmp"]);
+				for (const ch of ["\u00a0", "\ufeff", "\u3000"]) {
+					const out = await ex.execute("run_command", { command: `rm -rf .tmp${ch}` });
+					expect(out, JSON.stringify(ch)).toContain(SYSTEM_ONE_BLOCK_MARKER);
+					expect(existsSync(join(ws, `.tmp${ch}`, "theirs.txt"))).toBe(true);
+				}
+				expect(existsSync(join(ws, ".tmp"))).toBe(true);
+			});
 			test("a file another process dropped into .tmp: blocked, the file kept", async () => {
 				const ex = new ToolExecutor(ws, "tmp4185d");
 				await steps(ex, ["mkdir -p .tmp"]);
