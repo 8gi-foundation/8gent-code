@@ -123,11 +123,7 @@ function wordsOf(span: Span): string {
  * column, the TASKS rail), where a literal backtick is noise, not meaning.
  */
 export function plainInline(text: string): string {
-	return parseInline(text, { chips: true })
-		.map(wordsOf)
-		.join("")
-		.replace(/\s+/g, " ")
-		.trim();
+	return parseInline(text, { chips: true }).map(wordsOf).join("").replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -168,7 +164,12 @@ export function parseBlocks(content: string, opts: MarkdownOptions = {}): Block[
 	let open: { depth: number; marker: string; text: string } | null = null;
 	const closeItem = () => {
 		if (!open) return;
-		blocks.push({ kind: "item", depth: open.depth, marker: open.marker, spans: parseInline(open.text, opts) });
+		blocks.push({
+			kind: "item",
+			depth: open.depth,
+			marker: open.marker,
+			spans: parseInline(open.text, opts),
+		});
 		open = null;
 	};
 
@@ -189,13 +190,17 @@ export function parseBlocks(content: string, opts: MarkdownOptions = {}): Block[
 		if (!line.trim()) {
 			closeItem();
 			// Runs of blank lines draw as one.
-			if (blocks.length && blocks[blocks.length - 1].kind !== "blank") blocks.push({ kind: "blank" });
+			if (blocks.length && blocks[blocks.length - 1].kind !== "blank")
+				blocks.push({ kind: "blank" });
 			continue;
 		}
 		const item = line.match(ITEM);
 		if (item) {
 			closeItem();
-			const depth = Math.min(MAX_DEPTH, Math.floor(item[1].replace(/\t/g, "  ").length / INDENT_STEP));
+			const depth = Math.min(
+				MAX_DEPTH,
+				Math.floor(item[1].replace(/\t/g, "  ").length / INDENT_STEP),
+			);
 			const marker = /^\d/.test(item[2]) ? item[2].replace(")", ".") : bullet;
 			open = { depth, marker, text: item[3] };
 			continue;
@@ -248,7 +253,7 @@ export function chunkWord(word: string, width: number): string[] {
 	const w = Math.max(1, width);
 	const out: string[] = [];
 	let buf = "";
-	for (let part of word.split(/(?<=[-/_.])/)) {
+	for (const part of word.split(/(?<=[-/_.])/)) {
 		if (stringWidth(buf) + stringWidth(part) <= w) {
 			buf += part;
 			continue;
@@ -392,7 +397,8 @@ function layoutKeepingSpaces(spans: Span[], w: number): Span[][] {
 
 /** Text width a block's words wrap at, inside a column `width` wide. */
 export function blockWrapWidth(block: Block, width: number): number {
-	if (block.kind === "item") return Math.max(4, width - block.depth * INDENT_STEP - markerWidth(block.marker));
+	if (block.kind === "item")
+		return Math.max(4, width - block.depth * INDENT_STEP - markerWidth(block.marker));
 	if (block.kind === "code") return Math.max(4, width - CODE_GUTTER);
 	return Math.max(1, width);
 }
@@ -408,8 +414,11 @@ export function blockRows(block: Block, width: number): number {
 			return body + (block.lang ? 1 : 0);
 		}
 		default:
-			return layoutLines(block.spans, blockWrapWidth(block, width), block.kind === "para" && block.keepSpaces)
-				.length;
+			return layoutLines(
+				block.spans,
+				blockWrapWidth(block, width),
+				block.kind === "para" && block.keepSpaces,
+			).length;
 	}
 }
 
