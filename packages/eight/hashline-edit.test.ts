@@ -160,9 +160,13 @@ describe("flag off (EIGHT_EDIT_FORMAT unset): unchanged", () => {
 			["read_file", MAIN_AI_READ],
 			["edit_file", MAIN_AI_EDIT],
 		] as const) {
-			const t = agentTools[name] as { description?: string; inputSchema: never };
+			const t = agentTools[name] as unknown as {
+				description?: string;
+				inputSchema: Parameters<typeof asSchema>[0];
+			};
 			expect(t.description).toBe(want.description);
-			expect(await asSchema(t.inputSchema).jsonSchema).toEqual(want.schema);
+			const schema: unknown = await asSchema(t.inputSchema).jsonSchema;
+			expect(schema).toEqual(want.schema);
 		}
 	});
 
