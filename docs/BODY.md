@@ -25,9 +25,9 @@ Three different things are named "computer". Do not mix them up:
    speech out) that talks to the daemon `/computer` WebSocket route. It also
    hosts the Swift source of `accessibility-tree-cli`
    (`apps/8gent-computer/Sources/AccessibilityTreeCLI/main.swift`). It is NOT
-   the computer-use agent.
+   the computer-use loop.
 3. `8gi-foundation/8gent-computer` (separate repo, cloned at `~/8gent-computer`):
-   the Electron desktop app. It contains the most complete computer-use agent
+   the Electron desktop app. It contains the most complete computer-use stack
    (CUA) we have: its own eyes, hands, loop, verified acting, dry run, replay,
    task runner. See "The other CUA" below.
 
@@ -48,7 +48,7 @@ Three different things are named "computer". Do not mix them up:
   (`packages/eyes/perception-tier.ts`).
 - `packages/eyes/marlin` is a separate video-understanding sidecar, not screen eyes.
 - Headless CLI: `apps/8gent-eyes`.
-- Agent tools: `eyes_see`, `eyes_find`, `eyes_describe`, `eyes_wait_for`.
+- Model tools: `eyes_see`, `eyes_find`, `eyes_describe`, `eyes_wait_for`.
   They are defined in `packages/ai/tools.ts` (AI SDK `tool()` definitions) and
   listed in `packages/eight/tool-registry.ts` (`perception` category). The main
   executor `packages/eight/tools.ts` has no `eyes_*` case branches today.
@@ -68,7 +68,7 @@ Three different things are named "computer". Do not mix them up:
   process manager (`listProcesses`, `quitByName`, ...) and `getToolDefinitions()`.
   (The header comment in `index.ts` still says usecomputer; the code path is
   `bridge.ts` -> `packages/hands`.)
-- Agent tools: `desktop_screenshot`, `desktop_click`, `desktop_type`,
+- Model tools: `desktop_screenshot`, `desktop_click`, `desktop_type`,
   `desktop_press`, `desktop_scroll`, `desktop_drag`, `desktop_hover`,
   `desktop_windows`, `desktop_clipboard`, `desktop_processes`,
   `desktop_quit_app`, `desktop_suggest_quit`, `desktop_safe_list`. Executed in
@@ -88,7 +88,7 @@ Three different things are named "computer". Do not mix them up:
 - The default path is eyes then hands, two plain calls. Handeyes engages only
   when stuck: `find` returns zero hits twice, `wait_for` times out, a click
   produces no screen change, or the DoomLoopDetector fires.
-- Agent tools: `handeyes_locate_and_click`, `handeyes_click_and_verify`,
+- Model tools: `handeyes_locate_and_click`, `handeyes_click_and_verify`,
   `handeyes_type_and_confirm`, `handeyes_engage_struggle_mode`,
   `handeyes_exit_struggle_mode` (same registration as `eyes_*`: `packages/ai/tools.ts`
   plus `packages/eight/tool-registry.ts`).
@@ -106,7 +106,7 @@ Three different things are named "computer". Do not mix them up:
 - Terminates on `goal_complete`, `goal_failed`, `max_steps`, `internal_error`
   or `doom_loop`. Model: `vision.computerUseModel` in `~/.8gent/config.json`
   (default `qwen3.6:27b`, resolved by `packages/eight/vision-router.ts`).
-- Reached from the agent as the `run_computer_task` tool
+- Reached by the model as the `run_computer_task` tool
   (`handleRunComputerTask` in `packages/eight/tools.ts`) and from
   `packages/eight/scripts/cua-run.ts`.
 - Note: this loop has no verification step after an action and no dry run. The
@@ -142,14 +142,14 @@ this repo today. Its public contract, in short (full detail in that repo's
 - `actionLog.ts` and `replay.ts`: per-session JSONL action log and a step
   debugger over it.
 - `targets.ts`: per-session allowlist plus frontmost-app gate for driving other apps.
-- Remote control: its agent API on `ws://127.0.0.1:7979` accepts
+- Remote control: its remote-control API on `ws://127.0.0.1:7979` accepts
   `{type:"cu:start", sessionId, goal, modelId}` and streams progress. It must
-  be running (`bun run agent-mode` there, or the app).
+  be running (started from that repo, or the app).
 
 Where 8gent-code could reuse it (PLAN, nothing wired): `verifiedAct` and the
 dry-run/risk classifier are the two pieces our `runComputerUseLoop` lacks.
 Drive it over the 7979 `cu:*` messages, or port the concepts, per the "import
-concepts, not code" rule in `AGENTS.md`.
+concepts, not code" rule in the top-level instructions file.
 
 ## Browser
 
@@ -158,27 +158,43 @@ There are two unrelated browser surfaces. Know which one you are calling.
 1. `packages/tools/browser/` is fetch plus a DuckDuckGo HTML scraper with a
    disk cache. No JavaScript, no login, no clicking. Good for reading static pages.
 2. The `browser_open`, `browser_state`, `browser_task`, `browser_screenshot`
-   tools (`packages/eight/tools.ts`, cases near `browser_open`) call
-   `packages/tools/browser-use.ts`, which shells out to the external
-   `browser-use` CLI (`~/.pyenv/shims/browser-use`). That CLI is a Python
-   package and is not installed on the pilot harness, so these tools fail
-   there with `browser-use error: ...`.
+   tools (`packages/eight/tools.ts`, cases near `browser_open`) drive 8gent Browser
+   through `packages/tools/eight-browser.ts` (issue #3589, landed). The old
+   `browser-use` CLI (`packages/tools/browser-use.ts`) is opt-in only: set
+   `EIGHT_BROWSER_BACKEND=browser-use`. Only that fallback takes a natural-language
+   `task`; on 8gent Browser, `browser_task` takes an `actions` list.
 
 **8gent Browser** (`8gi-foundation/8gent-browser`, an Electron app, local
-checkout `~/8gent-browser`) is our own browser. It exposes a token-gated
-loopback WebSocket control API on `ws://127.0.0.1:7980`
-(`src/main/control-server.ts` in that repo). The token is at
-`~/.8gent/browser-control.token`. The read-only client `~/.8gent/bin/8b-web`
-(`tabs`, `open`, `text`, `scroll`, `shot`, `close`, `close-mine`) talks to it
-and is what the X scout uses. The control API also has `page.query`,
-`page.click`, `page.type`, `nav.go` and more; `8b-web` simply does not expose
-them. See that repo's README, "Driving it from an agent".
+checkout `~/8gent-browser`) exposes a token-gated loopback WebSocket control
+API on `ws://127.0.0.1:7980` (`src/main/control-server.ts` in that repo). The
+token is at `~/.8gent/browser-control.token`. `eight-browser.ts` is the client
+the tools use. The read-only client `~/.8gent/bin/8b-web` (`tabs`, `open`,
+`text`, `scroll`, `shot`, `close`, `close-mine`) talks to the same channel and
+is what the X scout uses.
 
-PLAN, issue #3589: repoint `browser_open`, `browser_state`, `browser_task` onto
-8gent Browser through that control channel, adding write actions behind the
-existing permission policy, and keep `browser-use` as an opt-in fallback only.
-Until that lands, the shortest working route for an agent is `8b-web`
-(read-only) or the WebSocket protocol directly.
+How the tools behave on main:
+
+- `browser_open` opens the URL in a new tab and returns the tab id, title,
+  numbered elements and page text. `browser_state` re-reads the tab.
+- `browser_task` runs verified steps: `open`, `left_click`, `type`, `wait_for`,
+  `scroll` (at most 25 steps). The whole plan is checked against the current page
+  before the first step. A `type` that did not land is retried once, then the plan
+  stops. Clicks are never retried. Typed text is logged as length only.
+- `browser_screenshot` saves a `.png` of the tab.
+- Only tabs this process opened are driven, never the person's own tabs.
+- `browser_task` and `browser_screenshot` ask first, like `desktop_*`, because the
+  default tabs share the person's logged-in session. A sensitive click (sign in,
+  purchase, delete, send) gets its own approval card even inside an approved task.
+- `EIGHT_BROWSER_PROFILE=<name>` points every call at that profile's own
+  login-free 8gent Browser instance (no fallback to the default token or port).
+  A local-model session uses the isolated profile `eight-local` when none is set;
+  `EIGHT_BROWSER_LOCAL=0` opts out.
+- Loopback URLs are reachable inside an isolated profile only on the ports listed
+  in `EIGHT_BROWSER_ALLOW_LOOPBACK` (comma separated, for example `127.0.0.1:5173`).
+
+For anything the tools do not cover (`page.query`, `nav.go` and the rest of the
+control API), use the WebSocket protocol directly. See that repo's README,
+"Driving it from an 8gent".
 
 ## Decision table
 
@@ -188,5 +204,5 @@ Until that lands, the shortest working route for an agent is `8b-web`
 | Click or type on the Mac desktop | `eyes_find` then `desktop_click` / `desktop_type`; `handeyes_*` when it keeps missing |
 | Finish a multi-step desktop goal | `run_computer_task` (this repo), or `cu:start` on the Electron app's 7979 API for verified acting |
 | Read a static web page | `packages/tools/browser/` fetch, or `8b-web open` then `8b-web text` |
-| Read a JS-rendered or logged-in page | 8gent Browser via `8b-web` (read-only) or the 7980 API |
-| Click or type in a web page | 8gent Browser 7980 API (`page.query`, `page.click`, `page.type`). Not browser-use. |
+| Read a JS-rendered or logged-in page | `browser_open` / `browser_state`, or `8b-web` (read-only) |
+| Click or type in a web page | `browser_open` then `browser_task` (8gent Browser). Not browser-use. |
