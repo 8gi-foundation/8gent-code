@@ -1485,7 +1485,7 @@ export class ToolExecutor {
 				function: {
 					name: "compare_layout",
 					description:
-						"[FILE] Compares page html with the mock-up image reference, band by band; returns each block's pixel offset and a similarity number. Use it after writing a page from a mock-up, fix the largest offsets, and run it again until the bands are within 2px. Local and offline; the page cannot reach the network.",
+						"[FILE] Diffs page html with mock-up image reference and names each off band's element: fix it with edit_file, never rewrite the page. Returns each band's pixel offset and a similarity number. Use it after writing a page from a mock-up, fix the largest offsets, and run it again until the bands are within 2px. Local and offline; the page cannot reach the network.",
 					parameters: {
 						type: "object",
 						properties: {

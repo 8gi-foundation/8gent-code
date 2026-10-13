@@ -18,6 +18,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -32,6 +33,14 @@ const MAX_REPORT_ROWS = 40;
 /** Offsets at or under this are reported as "ok". */
 const OK_PX = 2;
 const SIM_WIDTH = 320;
+/** Cap on the DOM Chrome prints in the element pass: the page cap plus room for the boxes. */
+const MAX_DOM_BYTES = 8 * 1024 * 1024;
+/** An element names a band only when their boxes overlap at least this much (intersection over union). */
+const MIN_NAME_IOU = 0.3;
+/** Selector text is page-controlled: at most this many characters reach the model. */
+const MAX_SELECTOR_CHARS = 120;
+/** At most this many element boxes are read back from the element pass. */
+const MAX_ELEMENTS = 3000;
 
 /** True when `file` is `dir` or sits inside it. */
 function insideDir(file: string, dir: string): boolean {
@@ -69,7 +78,12 @@ export function findChrome(
 		}
 	} else {
 		for (const dir of (env.PATH ?? "").split(path.delimiter)) {
-			for (const name of ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]) {
+			for (const name of [
+				"google-chrome",
+				"google-chrome-stable",
+				"chromium",
+				"chromium-browser",
+			]) {
 				if (dir) candidates.push(path.join(dir, name));
 			}
 		}
@@ -106,12 +120,16 @@ export const RENDER_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-
  * has the images that sit inside the page's own folder inlined as data: URIs, so the page still looks
  * right while no other file or address can be reached.
  */
-export function prepareSafeCopy(htmlPath: string, dir: string): string {
+export function prepareSafeCopy(htmlPath: string, dir: string, probe?: string): string {
 	const size = fs.statSync(htmlPath).size;
-	if (size > MAX_HTML_BYTES) throw new Error(`the HTML is ${size} bytes, over the ${MAX_HTML_BYTES} byte limit`);
+	if (size > MAX_HTML_BYTES)
+		throw new Error(`the HTML is ${size} bytes, over the ${MAX_HTML_BYTES} byte limit`);
 	// No leading BOM (one is written below) and no ESC: ISO-2022-JP's escape sequences
 	// print nothing, so "http<ESC>(B-equiv" would decode to a live http-equiv.
-	let html = fs.readFileSync(htmlPath, "utf8").replace(/^\uFEFF+/, "").replace(/\x1b/g, "");
+	let html = fs
+		.readFileSync(htmlPath, "utf8")
+		.replace(/^\uFEFF+/, "")
+		.replaceAll("\x1b", "");
 	const root = fs.realpathSync(path.dirname(htmlPath));
 	const inline = (ref: string): string | null => {
 		const clean = ref.trim().split(/[?#]/)[0];
@@ -141,7 +159,12 @@ export function prepareSafeCopy(htmlPath: string, dir: string): string {
 			const d = inline(ref);
 			return d ? `url(${q}${d}${q})` : m;
 		});
-	const meta = `<meta http-equiv="Content-Security-Policy" content="${RENDER_CSP}">`;
+	// The element pass (#4204) runs one script of ours, allowed by its hash alone: the page's
+	// own script, handlers and javascript: URLs stay blocked exactly as in the screenshot pass.
+	const csp = probe
+		? `${RENDER_CSP}; script-src 'sha256-${createHash("sha256").update(probe).digest("base64")}'`
+		: RENDER_CSP;
+	const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
 	// First thing in the document, never after a text match: a script before <head>,
 	// or a fake <head> inside a comment, must not run ahead of the policy. A meta
 	// before <html> is parsed into the implicit head. A doctype stays first. Exactly one
@@ -150,16 +173,18 @@ export function prepareSafeCopy(htmlPath: string, dir: string): string {
 	// Only the whitespace the HTML parser skips: JS \s also takes NBSP, U+3000, U+2028 and
 	// U+FEFF, which the parser treats as text, opening the body before the CSP meta.
 	const lead = /^[\t\n\f\r ]*<!doctype[^>]*>/i.exec(html)?.[0] ?? "";
-	const withMeta = `\uFEFF${lead}${meta}${html.slice(lead.length)}`;
-	const out = path.join(dir, "page.html");
+	// The probe sits straight after the policy, before any page byte: page markup that ends
+	// in an open tag, comment or raw-text element cannot swallow it or lend it attributes.
+	const withMeta = `\uFEFF${lead}${meta}${probe ? `<script>${probe}</script>` : ""}${html.slice(lead.length)}`;
+	const out = path.join(dir, probe ? "page-elements.html" : "page.html");
 	fs.writeFileSync(out, withMeta);
 	return out;
 }
 
-/** Chrome's argv for one offline render. Exported so a test can assert the lock-down flags. */
+/** Chrome's argv for one offline render; `out` null dumps the DOM to stdout instead. Exported so a test can assert the lock-down flags. */
 export function chromeArgs(
 	htmlPath: string,
-	out: string,
+	out: string | null,
 	width: number,
 	height: number,
 	profileDir: string,
@@ -191,33 +216,39 @@ export function chromeArgs(
 		...(env.EIGHT_CHROME_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
 		`--user-data-dir=${profileDir}`,
 		`--window-size=${width},${height}`,
-		`--screenshot=${out}`,
+		out === null ? "--dump-dom" : `--screenshot=${out}`,
 		pathToFileURL(htmlPath).href,
 	];
 }
 
+type ChromeExit = {
+	code: number | null;
+	signal: NodeJS.Signals | null;
+	stderr: string;
+	stdout: string;
+};
+
 /**
- * Render an HTML file to a PNG at width x height. Offline by construction: every
- * host name fails to resolve and all traffic, loopback and LAN included, goes to
- * a dead proxy. Chrome runs in its own process group, which is killed on timeout
- * and when it exits, so no renderer is left behind.
+ * Run Chrome once and wait for it to exit. Offline by construction (see chromeArgs): every
+ * host name fails to resolve and all traffic, loopback and LAN included, goes to a dead
+ * proxy. Chrome runs in its own process group, which is killed on timeout and when it
+ * exits, so no renderer is left behind. stdout is kept only when asked, up to a cap.
  */
-export function renderHtml(
-	chrome: string,
-	htmlPath: string,
-	out: string,
-	width: number,
-	height: number,
-	profileDir: string,
-): Promise<void> {
+function runChrome(chrome: string, args: string[], keepStdout: boolean): Promise<ChromeExit> {
 	return new Promise((resolve, reject) => {
-		const args = chromeArgs(htmlPath, out, width, height, profileDir);
 		const useGroup = process.platform !== "win32";
-		// stderr is kept (last few KB) so a failed render says why Chrome stopped.
-		const child = spawn(chrome, args, { stdio: ["ignore", "ignore", "pipe"], detached: useGroup });
+		const child = spawn(chrome, args, {
+			stdio: ["ignore", keepStdout ? "pipe" : "ignore", "pipe"],
+			detached: useGroup,
+		});
 		let stderr = "";
+		let stdout = "";
+		// stderr is kept (last few KB) so a failed render says why Chrome stopped.
 		child.stderr?.on("data", (d) => {
 			stderr = (stderr + String(d)).slice(-STDERR_KEEP_BYTES);
+		});
+		child.stdout?.on("data", (d) => {
+			if (stdout.length < MAX_DOM_BYTES) stdout += String(d);
 		});
 		const killGroup = () => {
 			try {
@@ -239,18 +270,35 @@ export function renderHtml(
 		child.on("exit", (code, signal) => {
 			clearTimeout(timer);
 			killGroup();
-			if (fs.existsSync(out)) return resolve();
-			// Give the pipe a moment to drain what Chrome wrote just before it exited.
-			setTimeout(() => reject(new Error(noScreenshotMessage(code, signal, stderr))), 50);
+			// Give the pipes a moment to drain what Chrome wrote just before it exited.
+			setTimeout(() => resolve({ code, signal, stderr, stdout }), 50);
 		});
 	});
+}
+
+/** Render an HTML file to a PNG at width x height, offline (see runChrome). */
+export async function renderHtml(
+	chrome: string,
+	htmlPath: string,
+	out: string,
+	width: number,
+	height: number,
+	profileDir: string,
+): Promise<void> {
+	const exit = await runChrome(chrome, chromeArgs(htmlPath, out, width, height, profileDir), false);
+	if (!fs.existsSync(out))
+		throw new Error(noScreenshotMessage(exit.code, exit.signal, exit.stderr));
 }
 
 const STDERR_KEEP_BYTES = 4096;
 const STDERR_SHOW_LINES = 12;
 
 /** "the browser produced no screenshot", plus Chrome's exit status and its last stderr lines. */
-export function noScreenshotMessage(code: number | null, signal: NodeJS.Signals | null, stderr: string): string {
+export function noScreenshotMessage(
+	code: number | null,
+	signal: NodeJS.Signals | null,
+	stderr: string,
+): string {
 	const status = signal ? `signal ${signal}` : `exit code ${code}`;
 	const tail = stderr.trim().split(/\r?\n/).slice(-STDERR_SHOW_LINES).join("\n");
 	return `the browser produced no screenshot (${status})${tail ? `; Chrome said:\n${tail}` : "; Chrome wrote nothing to stderr"}`;
@@ -321,7 +369,12 @@ function moveAdvice(label: string, d: number, neg: string, pos: string): string 
 }
 
 /** Grey-level similarity, 0..1, of two images at the reference's size (1 = identical). */
-export async function pixelSimilarity(refFile: string, gotFile: string, width: number, height: number): Promise<number | null> {
+export async function pixelSimilarity(
+	refFile: string,
+	gotFile: string,
+	width: number,
+	height: number,
+): Promise<number | null> {
 	try {
 		const sharp = (await import("sharp")).default;
 		const w = Math.min(SIM_WIDTH, width);
@@ -346,14 +399,137 @@ export async function pixelSimilarity(refFile: string, gotFile: string, width: n
 	}
 }
 
-/** The report text for a reference measurement against a render measurement. */
-export function describeDiff(ref: LayoutMeasure, got: LayoutMeasure, similarity: number | null): string {
+/** One visible element of the rendered page: a CSS selector and its box in page pixels. */
+export type ElementBox = { s: string; x: number; y: number; w: number; h: number };
+
+/** The id of the probe's output tag. `token` is fresh per run, so the page cannot pre-place one. */
+export const boxesId = (token: string): string => `__8gent_layout_boxes_${token}__`;
+/**
+ * The element pass's script (#4204). After load it records every visible element's selector
+ * (tag#id; else tag.classes when that is unique; else an nth-of-type path up to an id or body)
+ * and box into a JSON script tag, which --dump-dom prints. The CSP allows it by hash. `token`
+ * (hex, fresh per run) names the output tag so page markup cannot forge it; selectors are cut
+ * to MAX_SELECTOR_CHARS in the page so a huge class name cannot balloon the dump.
+ */
+export const elementProbe = (
+	token: string,
+): string => `addEventListener("load",function(){var E=CSS.escape,S={SCRIPT:1,STYLE:1,BR:1,TEMPLATE:1,NOSCRIPT:1},out=[];
+function part(e){var t=e.tagName.toLowerCase();if(e.id)return t+"#"+E(e.id);var c="";if(typeof e.className==="string")e.className.trim().split(/\\s+/).forEach(function(k){if(k)c+="."+E(k)});
+var p=e.parentElement,i=0,n=0;if(p)for(var x=p.firstElementChild;x;x=x.nextElementSibling)if(x.tagName===e.tagName){n++;if(x===e)i=n}return t+c+(n>1?":nth-of-type("+i+")":"")}
+function sel(e){if(e.id)return part(e);var t=e.tagName.toLowerCase(),c=part(e).replace(/:nth-of-type\\(\\d+\\)$/,"");try{if(c!==t&&document.querySelectorAll(c).length===1)return c}catch(_){}
+var a=[part(e)],p=e.parentElement;while(p&&p!==document.body&&a.length<5){a.unshift(part(p));if(p.id)break;p=p.parentElement}return a.join(" > ")}
+var all=document.body?document.body.getElementsByTagName("*"):[];for(var k=0;k<all.length&&out.length<${MAX_ELEMENTS};k++){var e=all[k];if(S[e.tagName])continue;var r=e.getBoundingClientRect();if(r.width<1||r.height<1)continue;
+if(getComputedStyle(e).visibility!=="visible")continue;out.push({s:sel(e).slice(0,${MAX_SELECTOR_CHARS}),x:Math.round(r.left+scrollX),y:Math.round(r.top+scrollY),w:Math.round(r.width),h:Math.round(r.height)})}
+var j=document.createElement("script");j.type="application/json";j.id="${boxesId(token)}";j.textContent=JSON.stringify(out).replace(/</g,"\\\\u003c");(document.body||document.documentElement).appendChild(j)});`;
+
+/**
+ * A page-controlled selector made safe to show the model. Allowlist, not denylist: only
+ * printable ASCII and Unicode letters and digits survive; every other code point (controls,
+ * line breaks, bidi, zero-width, tag characters U+E0000.., variation selectors, combining
+ * marks, private use, lone surrogates) becomes a space, so a class name can neither open a
+ * new line nor smuggle invisible text. Whitespace collapsed, cut to MAX_SELECTOR_CHARS code
+ * points (never mid surrogate pair).
+ */
+export function cleanSelector(s: string): string {
+	const flat = s
+		.replace(/[^\x20-\x7e\p{L}\p{N}]/gu, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+	const points = Array.from(flat);
+	return points.length > MAX_SELECTOR_CHARS
+		? `${points.slice(0, MAX_SELECTOR_CHARS).join("")}...`
+		: flat;
+}
+
+/** The element boxes out of a --dump-dom print, or null when the print holds none. */
+export function parseElementBoxes(dom: string, token: string): ElementBox[] | null {
+	if (!/^[0-9a-f]{16,}$/.test(token)) return null;
+	const re = new RegExp(`<script[^>]*id="${boxesId(token)}"[^>]*>([\\s\\S]*?)</script>`, "g");
+	let last: string | null = null;
+	for (let m = re.exec(dom); m; m = re.exec(dom)) last = m[1];
+	if (last === null) return null;
+	try {
+		const list = JSON.parse(last);
+		if (!Array.isArray(list)) return null;
+		const boxes: ElementBox[] = [];
+		for (const e of list.slice(0, MAX_ELEMENTS)) {
+			if (typeof e?.s !== "string") continue;
+			if (![e.x, e.y, e.w, e.h].every((n) => typeof n === "number" && Number.isFinite(n))) continue;
+			const s = cleanSelector(e.s);
+			if (s) boxes.push({ s, x: e.x, y: e.y, w: e.w, h: e.h });
+		}
+		return boxes;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Load the page (sanitised, with only elementProbe allowed to run) and return its visible
+ * elements' boxes. Same offline flags as the screenshot. Null on any failure: the report then
+ * goes out without names, exactly as before.
+ */
+export async function measureElements(
+	chrome: string,
+	htmlPath: string,
+	width: number,
+	height: number,
+	dir: string,
+): Promise<ElementBox[] | null> {
+	try {
+		const token = randomBytes(16).toString("hex");
+		const copy = prepareSafeCopy(htmlPath, dir, elementProbe(token));
+		const exit = await runChrome(
+			chrome,
+			chromeArgs(copy, null, width, height, path.join(dir, "profile-elements")),
+			true,
+		);
+		return parseElementBoxes(exit.stdout, token);
+	} catch {
+		return null;
+	}
+}
+
+/** The element whose box best overlaps the band; on a tie the later (deeper) one. */
+export function elementForBand(band: Band, elements: ElementBox[]): ElementBox | null {
+	let best: ElementBox | null = null;
+	let bestIou = MIN_NAME_IOU;
+	for (const e of elements) {
+		const iw = Math.min(band.x + band.w, e.x + e.w) - Math.max(band.x, e.x);
+		const ih = Math.min(band.y + band.h, e.y + e.h) - Math.max(band.y, e.y);
+		if (iw <= 0 || ih <= 0) continue;
+		const inter = iw * ih;
+		const iou = inter / (band.w * band.h + e.w * e.h - inter);
+		if (iou >= bestIou) {
+			best = e;
+			bestIou = iou;
+		}
+	}
+	return best;
+}
+
+const nameOf = (b: Band, elements: ElementBox[] | null | undefined): string => {
+	const e = elements ? elementForBand(b, elements) : null;
+	return e ? ` is ${e.s} (x ${e.x} y ${e.y} w ${e.w} h ${e.h})` : "";
+};
+
+/**
+ * The report text for a reference measurement against a render measurement. `elements`
+ * names the element behind each off band (#4204); null means the element pass failed.
+ */
+export function describeDiff(
+	ref: LayoutMeasure,
+	got: LayoutMeasure,
+	similarity: number | null,
+	elements?: ElementBox[] | null,
+): string {
 	const { pairs, extra } = pairBands(ref.bands, got.bands);
 	const lines: string[] = [];
 	lines.push(
 		`Compared your render (${got.width}x${got.height} px) with the reference (${ref.width}x${ref.height} px). Offsets are yours minus the reference's: negative x or y means move it right or down.`,
 	);
-	if (similarity !== null) lines.push(`Pixel similarity ${similarity.toFixed(3)} (1.000 is identical).`);
+	if (similarity !== null)
+		lines.push(`Pixel similarity ${similarity.toFixed(3)} (1.000 is identical).`);
 	lines.push(
 		`Content column: reference x=${ref.column.left}..${ref.column.right} (w ${ref.column.width}), yours x=${got.column.left}..${got.column.right} (w ${got.column.width}).`,
 	);
@@ -375,11 +551,15 @@ export function describeDiff(ref: LayoutMeasure, got: LayoutMeasure, similarity:
 			notes.push(`blocks across ${g.spans.length}, reference has ${r.spans.length}`);
 		if (notes.length === 0) continue;
 		off++;
-		rows.push(`  ref y=${r.y} h=${r.h} x=${r.x} w=${r.w}: ${notes.join("; ")}`);
+		rows.push(
+			`  ref y=${r.y} h=${r.h} x=${r.x} w=${r.w}${nameOf(g, elements)}: ${notes.join("; ")}`,
+		);
 	}
 	for (const e of extra) {
 		off++;
-		rows.push(`  EXTRA band in your page at y=${e.y} h=${e.h} x=${e.x} w=${e.w}: the reference has nothing there`);
+		rows.push(
+			`  EXTRA band in your page at y=${e.y} h=${e.h} x=${e.x} w=${e.w}${nameOf(e, elements)}: the reference has nothing there`,
+		);
 	}
 	if (off === 0) lines.push("Every content band is within 2px of the reference.");
 	else {
@@ -389,16 +569,29 @@ export function describeDiff(ref: LayoutMeasure, got: LayoutMeasure, similarity:
 		lines.push(
 			"Fix the largest offsets first (usually the earliest band moves everything below it), then run compare_layout again.",
 		);
+		if (elements === null)
+			lines.push("Element names unavailable: the page's elements could not be measured.");
+		else if (elements)
+			lines.push(
+				"Fix each named element's CSS with edit_file; never rewrite the whole page to fix an offset.",
+			);
 	}
 	return lines.join("\n");
 }
 
 /** Render `html` and compare it with `reference`. Always resolves to a sentence. */
-export async function compareLayout(htmlPath: string, referencePath: string, workspace: string = process.cwd()): Promise<string> {
-	if (!fs.existsSync(htmlPath)) return `compare_layout: ${htmlPath} does not exist. Write the page first.`;
-	if (!fs.existsSync(referencePath)) return `compare_layout: reference image ${referencePath} does not exist.`;
+export async function compareLayout(
+	htmlPath: string,
+	referencePath: string,
+	workspace: string = process.cwd(),
+): Promise<string> {
+	if (!fs.existsSync(htmlPath))
+		return `compare_layout: ${htmlPath} does not exist. Write the page first.`;
+	if (!fs.existsSync(referencePath))
+		return `compare_layout: reference image ${referencePath} does not exist.`;
 	const chrome = findChrome(process.env, workspace);
-	if (!chrome) return "compare_layout: no Chrome or Chromium found, so the page cannot be rendered here. Set EIGHT_CHROME_BIN to one.";
+	if (!chrome)
+		return "compare_layout: no Chrome or Chromium found, so the page cannot be rendered here. Set EIGHT_CHROME_BIN to one.";
 	const ref = await measureLayout(referencePath);
 	if (!ref) return "compare_layout: could not measure the reference image.";
 	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-compare-"));
@@ -406,11 +599,22 @@ export async function compareLayout(htmlPath: string, referencePath: string, wor
 		const out = path.join(tmp, "render.png");
 		const width = Math.min(ref.width, MAX_VIEWPORT);
 		const height = Math.min(ref.height, MAX_VIEWPORT);
-		await renderSafe(chrome, htmlPath, out, width, height, tmp);
+		const elementsDir = path.join(tmp, "elements");
+		fs.mkdirSync(elementsDir);
+		// The element pass runs beside the screenshot and never fails the compare. Both are
+		// awaited before `tmp` goes, so a failed screenshot never strands the element Chrome.
+		const [renderError, elements] = await Promise.all([
+			renderSafe(chrome, htmlPath, out, width, height, tmp).then(
+				() => null,
+				(e: unknown) => e,
+			),
+			measureElements(chrome, htmlPath, width, height, elementsDir),
+		]);
+		if (renderError) throw renderError;
 		const got = await measureLayout(out);
 		if (!got) return "compare_layout: your page rendered blank. Check the HTML.";
 		const similarity = await pixelSimilarity(referencePath, out, ref.width, ref.height);
-		return describeDiff(ref, got, similarity);
+		return describeDiff(ref, got, similarity, elements);
 	} catch (err) {
 		return `compare_layout: could not render the page (${err instanceof Error ? err.message : String(err)}).`;
 	} finally {
