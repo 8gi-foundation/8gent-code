@@ -67,7 +67,8 @@
  *     filesystem root nor the home directory;
  *   - the command names the path's directory (bornScopes): for each plain
  *     relative path word in the command text (quotes masked; no `..`, `$`,
- *     `~`, glob, absolute path or dot segment; for `NAME=value`, the value)
+ *     `~`, glob, absolute path or dot segment other than a leading `.tmp`,
+ *     the sanctioned scratch directory (#4185); for `NAME=value`, the value)
  *     the word if it is a directory, else its parent; the working directory itself is never a scope and at
  *     most MAX_BORN_SCOPES are walked. `bash video/build_slides.sh` scopes to
  *     video/; `make`, `sleep 30` and `ls` walk nothing and record nothing;
@@ -78,7 +79,7 @@
  *     records nothing;
  *   - the same bounded walk after the command finds it as a regular file
  *     (lstat; never a symlink, FIFO or directory), outside any dot directory
- *     and outside node_modules / vendor;
+ *     other than a leading `.tmp` and outside node_modules / vendor;
  *   - its birth time is known (non-zero, finite) and falls between the start
  *     of the command (floored to the second) and the end of it (plus 1 s of
  *     skew): a hard link or rename of an older file keeps its old birth time
@@ -117,6 +118,7 @@ import { homedir } from "node:os";
 import * as path from "node:path";
 import { decideRules, maskQuotes } from "../decide/rules";
 import { inside } from "./s1-rm-nothing";
+import { dotOutsideScratch } from "./s1-run-in-project";
 
 /** The words a recorded path may contain: no quotes, glob, `$`, `~`, spaces. */
 const PLAIN_PATH = /^[A-Za-z0-9._/+,=@:-]+$/;
@@ -418,7 +420,7 @@ const MAX_BORN_SCOPES = 4;
 /**
  * The directories `command` names, as realpaths strictly inside `root`: for
  * each plain relative path word (quotes masked first; no `..`, `$`, `~`, glob,
- * absolute path, flag, or dot / node_modules / vendor segment; for a
+ * absolute path, flag, or dot (other than a leading .tmp) / node_modules / vendor segment; for a
  * `NAME=value` word, the value), the word itself when it is a directory, else
  * its parent directory. The root itself is
  * never a scope, so a command naming no path (`make`, `sleep 30`, `ls`) gets
@@ -438,7 +440,7 @@ export function bornScopes(command: string, root: string): string[] {
 		if (!PLAIN_PATH.test(word) || word.startsWith("/") || word.startsWith("-")) continue;
 		const segs = word.split("/").filter((s) => s !== "" && s !== ".");
 		if (segs.length === 0 || segs.includes("..")) continue;
-		if (segs.some((s) => s.startsWith(".") || BORN_SKIP_DIRS.has(s))) continue;
+		if (dotOutsideScratch(segs) || segs.some((s) => BORN_SKIP_DIRS.has(s))) continue;
 		const abs = path.resolve(root, ...segs);
 		let isDir = false;
 		try {
@@ -454,7 +456,7 @@ export function bornScopes(command: string, root: string): string[] {
 		}
 		if (dir === root || !inside(dir, root)) continue;
 		const rel = path.relative(root, dir).split(path.sep);
-		if (rel.some((s) => s.startsWith(".") || BORN_SKIP_DIRS.has(s))) continue;
+		if (dotOutsideScratch(rel) || rel.some((s) => BORN_SKIP_DIRS.has(s))) continue;
 		if (!found.includes(dir)) found.push(dir);
 	}
 	const within = (a: string, b: string) => a !== b && a.startsWith(`${b}${path.sep}`);

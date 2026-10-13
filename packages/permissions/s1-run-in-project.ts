@@ -17,6 +17,8 @@
  * `runInProject` answers ok only when ALL hold:
  *   - the command is `[NAME=value ...] bun <file> [args]` or `node <file>
  *     [args]`: plain words only (no quotes, `$`, pipes, redirects, `;`, `&`),
+ *     except one trailing ` | cat` or ` | cat -FLAGS` with display flags only
+ *     (AbeEnstTuv, no file operand: it reads stdin, writes stdout) (#4185),
  *     no `bun run` (it would run a package.json script of that name), no
  *     interpreter flag, decideRules fires nothing, no prompt-control text;
  *   - no bunfig.toml and no .env* file in the working directory or on the
@@ -48,7 +50,11 @@
  *         file. A literal is a command-line path or a plain relative name;
  *         env NAME must be supplied by the command, and its vetted value is
  *         the path. A write target must also not be source, config, a dot
- *         name or a protected path. So a script cannot read or write a path
+ *         name or a protected path, and no part of it inside the workspace
+ *         may be a symlink. The one dot name allowed is a leading `.tmp/`
+ *         (#4185): `.tmp` directly under the working directory is the
+ *         sanctioned scratch directory, and every other rule still applies
+ *         below it. So a script cannot read or write a path
  *         it built itself.
  *   - Bun.Transpiler.scan agrees: it finds no import the token pass did not.
  *
@@ -61,7 +67,7 @@
  * Synchronous, never throws.
  */
 
-import { lstatSync, readFileSync, readdirSync, realpathSync as nodeRealpath } from "node:fs";
+import { lstatSync, realpathSync as nodeRealpath, readFileSync, readdirSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
@@ -79,6 +85,19 @@ export function realpathSync(p: string): string {
 }
 
 const PLAIN = /^[A-Za-z0-9._/+,=@: -]+$/;
+/** One trailing pipe into cat with display flags only, no file operand (#4185). */
+const CAT_TAIL = / \| cat(?: -[AbeEnstTuv]+)?$/;
+/** The one sanctioned scratch directory, directly under the working directory (#4185). */
+export const SCRATCH_DIR = ".tmp";
+
+/**
+ * True when a dot segment other than a leading `.tmp` is among `segs` (the
+ * segments of a workspace-relative path). `.tmp` counts only as the first
+ * segment and only spelt exactly so; `.tmp` alone is the caller's to judge.
+ */
+export function dotOutsideScratch(segs: string[]): boolean {
+	return segs.some((s, i) => s.startsWith(".") && !(i === 0 && s === SCRATCH_DIR));
+}
 const ENV_ASSIGN = /^([A-Z][A-Z0-9_]*)=([A-Za-z0-9._/+,@:-]*)$/;
 const ENV_DENY =
 	/^(PATH|HOME|SHELL|IFS|ENV|TMPDIR|USER|LOGNAME|CDPATH|TERM|LANG|PYTHON.*|BASH.*|SSL.*|OPENSSL.*|(LC|LD|DYLD|NODE|BUN|NPM|GIT|SSH|XDG|CURL|HTTP|HTTPS|ALL|NO|REQUESTS|CA|AWS|GOOGLE|AZURE)_.*)$/;
@@ -110,9 +129,40 @@ const NO: RunInProject = { ok: false };
 export type Tok = { t: "id" | "num" | "str" | "p"; v: string };
 
 const KEYWORDS = new Set([
-	"return", "case", "typeof", "in", "of", "new", "void", "delete", "yield", "await", "throw", "else", "do",
-	"instanceof", "export", "default", "extends", "const", "let", "var", "if", "while", "for", "switch", "as",
-	"satisfies", "import", "from", "type", "readonly", "keyof", "is", "async", "static",
+	"return",
+	"case",
+	"typeof",
+	"in",
+	"of",
+	"new",
+	"void",
+	"delete",
+	"yield",
+	"await",
+	"throw",
+	"else",
+	"do",
+	"instanceof",
+	"export",
+	"default",
+	"extends",
+	"const",
+	"let",
+	"var",
+	"if",
+	"while",
+	"for",
+	"switch",
+	"as",
+	"satisfies",
+	"import",
+	"from",
+	"type",
+	"readonly",
+	"keyof",
+	"is",
+	"async",
+	"static",
 ]);
 const PUNCT = new Set("{}()[];,<>=+-*%&|^!~?:.".split(""));
 const ESC_OK = "ntr\\'\"`$0";
@@ -192,7 +242,8 @@ export function tokenize(src: string): Tok[] | null {
 		} else if (c === "`") {
 			const prev = out[out.length - 1];
 			// A tagged template runs a function on its text (Bun.$`...`).
-			if (prev && ((prev.t === "id" && !KEYWORDS.has(prev.v)) || prev.v === ")" || prev.v === "]")) return null;
+			if (prev && ((prev.t === "id" && !KEYWORDS.has(prev.v)) || prev.v === ")" || prev.v === "]"))
+				return null;
 			i++;
 			if (!readTemplateText()) return null;
 		} else if (/[A-Za-z_$]/.test(c)) {
@@ -243,36 +294,186 @@ export function tokenize(src: string): Tok[] | null {
 
 /** Identifiers refused wherever they appear. */
 const BANNED_ID = new Set([
-	"Bun", "process", "globalThis", "global", "window", "self", "require", "module", "exports", "eval", "Function",
-	"constructor", "__proto__", "prototype", "__dirname", "__filename", "this", "arguments", "with", "meta", "fetch",
-	"XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "WebAssembly", "Reflect", "Proxy", "Symbol",
-	"getBuiltinModule", "createRequire", "setInterval", "setImmediate", "Deno", "Object", "Intl", "navigator",
-	"prepareStackTrace", "getPrototypeOf", "setPrototypeOf", "defineProperty", "defineProperties",
-	"getOwnPropertyDescriptor", "getOwnPropertyDescriptors", "getOwnPropertyNames", "getOwnPropertySymbols",
-	"__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "binding", "dlopen", "mainModule",
-	"AsyncFunction", "GeneratorFunction", "Atomics", "debugger", "child_process",
-	"writeFile", "appendFile", "appendFileSync", "createWriteStream", "open", "openSync", "rm", "rmSync", "rmdir",
-	"rmdirSync", "unlink", "unlinkSync", "rename", "renameSync", "copyFile", "copyFileSync", "cp", "cpSync", "truncate",
-	"truncateSync", "symlink", "symlinkSync", "link", "linkSync", "chmod", "chmodSync", "chown", "chownSync", "mkdir",
-	"mkdirSync", "mkdtemp", "mkdtempSync", "utimes", "utimesSync", "exec", "execSync", "execFile", "execFileSync",
-	"spawn", "spawnSync", "fork",
+	"Bun",
+	"process",
+	"globalThis",
+	"global",
+	"window",
+	"self",
+	"require",
+	"module",
+	"exports",
+	"eval",
+	"Function",
+	"constructor",
+	"__proto__",
+	"prototype",
+	"__dirname",
+	"__filename",
+	"this",
+	"arguments",
+	"with",
+	"meta",
+	"fetch",
+	"XMLHttpRequest",
+	"WebSocket",
+	"EventSource",
+	"Worker",
+	"SharedWorker",
+	"WebAssembly",
+	"Reflect",
+	"Proxy",
+	"Symbol",
+	"getBuiltinModule",
+	"createRequire",
+	"setInterval",
+	"setImmediate",
+	"Deno",
+	"Object",
+	"Intl",
+	"navigator",
+	"prepareStackTrace",
+	"getPrototypeOf",
+	"setPrototypeOf",
+	"defineProperty",
+	"defineProperties",
+	"getOwnPropertyDescriptor",
+	"getOwnPropertyDescriptors",
+	"getOwnPropertyNames",
+	"getOwnPropertySymbols",
+	"__defineGetter__",
+	"__defineSetter__",
+	"__lookupGetter__",
+	"__lookupSetter__",
+	"binding",
+	"dlopen",
+	"mainModule",
+	"AsyncFunction",
+	"GeneratorFunction",
+	"Atomics",
+	"debugger",
+	"child_process",
+	"writeFile",
+	"appendFile",
+	"appendFileSync",
+	"createWriteStream",
+	"open",
+	"openSync",
+	"rm",
+	"rmSync",
+	"rmdir",
+	"rmdirSync",
+	"unlink",
+	"unlinkSync",
+	"rename",
+	"renameSync",
+	"copyFile",
+	"copyFileSync",
+	"cp",
+	"cpSync",
+	"truncate",
+	"truncateSync",
+	"symlink",
+	"symlinkSync",
+	"link",
+	"linkSync",
+	"chmod",
+	"chmodSync",
+	"chown",
+	"chownSync",
+	"mkdir",
+	"mkdirSync",
+	"mkdtemp",
+	"mkdtempSync",
+	"utimes",
+	"utimesSync",
+	"exec",
+	"execSync",
+	"execFile",
+	"execFileSync",
+	"spawn",
+	"spawnSync",
+	"fork",
 ]);
 /** Names refused after a dot. Plain data names (open, link, ...) stay allowed there; Bun and process are checked separately. */
 const BANNED_PROP = new Set([
-	"constructor", "__proto__", "prototype", "getBuiltinModule", "createRequire", "getPrototypeOf", "setPrototypeOf",
-	"defineProperty", "defineProperties", "getOwnPropertyDescriptor", "getOwnPropertyDescriptors", "getOwnPropertyNames",
-	"getOwnPropertySymbols", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "binding",
-	"dlopen", "mainModule", "prepareStackTrace", "writeFile", "appendFile", "appendFileSync", "createWriteStream",
-	"rmSync", "rmdir", "rmdirSync", "unlink", "unlinkSync", "renameSync", "copyFile", "copyFileSync", "cpSync",
-	"truncateSync", "symlink", "symlinkSync", "linkSync", "chmod", "chmodSync", "chown", "chownSync", "mkdir", "mkdirSync",
-	"utimes", "utimesSync", "execSync", "execFile", "execFileSync", "spawnSync", "writeFileSync", "openSync",
+	"constructor",
+	"__proto__",
+	"prototype",
+	"getBuiltinModule",
+	"createRequire",
+	"getPrototypeOf",
+	"setPrototypeOf",
+	"defineProperty",
+	"defineProperties",
+	"getOwnPropertyDescriptor",
+	"getOwnPropertyDescriptors",
+	"getOwnPropertyNames",
+	"getOwnPropertySymbols",
+	"__defineGetter__",
+	"__defineSetter__",
+	"__lookupGetter__",
+	"__lookupSetter__",
+	"binding",
+	"dlopen",
+	"mainModule",
+	"prepareStackTrace",
+	"writeFile",
+	"appendFile",
+	"appendFileSync",
+	"createWriteStream",
+	"rmSync",
+	"rmdir",
+	"rmdirSync",
+	"unlink",
+	"unlinkSync",
+	"renameSync",
+	"copyFile",
+	"copyFileSync",
+	"cpSync",
+	"truncateSync",
+	"symlink",
+	"symlinkSync",
+	"linkSync",
+	"chmod",
+	"chmodSync",
+	"chown",
+	"chownSync",
+	"mkdir",
+	"mkdirSync",
+	"utimes",
+	"utimesSync",
+	"execSync",
+	"execFile",
+	"execFileSync",
+	"spawnSync",
+	"writeFileSync",
+	"openSync",
 ]);
 const STR_BAD = /constructor|__proto__|prototype/;
 const FS_OK = new Set(["readFileSync", "existsSync", "readdirSync", "statSync", "writeFileSync"]);
 const PATH_OK = new Set(["join", "resolve", "basename", "extname"]);
 const PROC_OK = new Set(["argv", "exit", "exitCode", "cwd", "stdout", "stderr"]);
 /** Tokens after which a `[` opens an array literal or a type, not a member access. */
-const ARRAY_PREV = new Set(["=", "(", ",", ":", "[", "=>", "?", "...", "<", "|", "&", ";", "!", "${", "}$", "+", "??"]);
+const ARRAY_PREV = new Set([
+	"=",
+	"(",
+	",",
+	":",
+	"[",
+	"=>",
+	"?",
+	"...",
+	"<",
+	"|",
+	"&",
+	";",
+	"!",
+	"${",
+	"}$",
+	"+",
+	"??",
+]);
 export const WRITE_BAD_NAME =
 	/^(package(-lock)?\.json|tsconfig[\w.-]*\.json|bunfig\.toml|bun\.lockb?|makefile|dockerfile|justfile|gemfile|rakefile|procfile|claude\.md|agents\.md|\.cursorrules|.*\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|toml|sh|py|rb|pl|php|node|wasm|so|dylib|yml|yaml|plist)|.*\.config\..*)$/i;
 
@@ -342,7 +543,8 @@ function collectDefs(toks: Tok[]): Defs {
 			}
 			const body = toks.slice(i + 3, e);
 			if (consts.has(name) || fns.has(name)) dup(name);
-			else if (body[0]?.v === "(" && body[1]?.v === ")" && body[2]?.v === "=>") fns.set(name, body.slice(3));
+			else if (body[0]?.v === "(" && body[1]?.v === ")" && body[2]?.v === "=>")
+				fns.set(name, body.slice(3));
 			else consts.set(name, body);
 		} else if (
 			toks[i].v === "function" &&
@@ -369,10 +571,21 @@ function resolveSources(a: Tok[], defs: Defs, depth = 0): Src[] | null {
 	if (depth > 3 || a.length === 0) return null;
 	const s = (k: number) => a[k]?.v;
 	if (a.length === 1 && a[0].t === "str") return [{ kind: "lit", s: a[0].v }];
-	if (a.length >= 5 && s(0) === "process" && s(1) === "." && s(2) === "env" && s(3) === "." && a[4].t === "id") {
+	if (
+		a.length >= 5 &&
+		s(0) === "process" &&
+		s(1) === "." &&
+		s(2) === "env" &&
+		s(3) === "." &&
+		a[4].t === "id"
+	) {
 		const name = a[4].v;
 		if (a.length === 5) return [{ kind: "env", name }];
-		if (a.length === 7 && s(5) === "??" && a[6].t === "str") return [{ kind: "env", name }, { kind: "lit", s: a[6].v }];
+		if (a.length === 7 && s(5) === "??" && a[6].t === "str")
+			return [
+				{ kind: "env", name },
+				{ kind: "lit", s: a[6].v },
+			];
 		return null;
 	}
 	if (a.length === 3 && a[0].t === "id" && s(1) === "(" && s(2) === ")") {
@@ -418,16 +631,19 @@ export function symlinkBelow(root: string, abs: string): boolean {
 function writeTargetOk(p: string, root: string): boolean {
 	if (SECRET.test(p)) return false;
 	const abs = canon(path.isAbsolute(p) ? path.normalize(p) : path.resolve(root, p));
-	// The workspace rules win even when the workspace itself sits under a temp root.
-	if (!inside(abs, root)) return underTemp(abs);
-	const rel = path.relative(root, abs);
-	if (rel === "" || hasDotSegment(rel) || protectedRel(rel)) return false;
-	if (relSegments(rel).includes("node_modules")) return false;
 	// canon() falls back to the nearest existing parent, so a dangling symlink as
-	// the final part, or one in the middle, would pass; refuse any symlink.
+	// the final part, or one in the middle, would pass; refuse any symlink. Checked
+	// before the temp-root exit, so a workspace name linked to /tmp is refused too (#4185).
 	if (p.split("/").includes("..")) return false;
 	const lexical = path.isAbsolute(p) ? path.normalize(p) : path.resolve(root, p);
 	if (inside(lexical, root) && symlinkBelow(root, lexical)) return false;
+	// The workspace rules win even when the workspace itself sits under a temp root.
+	if (!inside(abs, root)) return underTemp(abs);
+	const rel = path.relative(root, abs);
+	const segs = relSegments(rel);
+	if (rel === "" || rel === SCRATCH_DIR || dotOutsideScratch(segs) || protectedRel(rel))
+		return false;
+	if (segs.includes("node_modules")) return false;
 	return !WRITE_BAD_NAME.test(path.basename(abs));
 }
 
@@ -481,7 +697,8 @@ function moduleSite(toks: Tok[], i: number): { next: number; spec: string; claus
 	} else {
 		while (j < toks.length && !(toks[j].t === "id" && toks[j].v === "from")) {
 			const tk = toks[j];
-			if (!(tk.t === "id" || tk.v === "," || tk.v === "{" || tk.v === "}" || tk.v === "*")) return null;
+			if (!(tk.t === "id" || tk.v === "," || tk.v === "{" || tk.v === "}" || tk.v === "*"))
+				return null;
 			j++;
 		}
 		if (j >= toks.length) return null;
@@ -514,7 +731,8 @@ function checkTokens(toks: Tok[], ctx: Ctx): { rel: string[]; strings: Set<strin
 				if (!(close === i + 2 && toks[i + 1].t === "num")) return null; // computed access
 				continue;
 			}
-			const okPrev = prev === undefined || (prev.t === "p" ? ARRAY_PREV.has(prev.v) : KEYWORDS.has(prev.v));
+			const okPrev =
+				prev === undefined || (prev.t === "p" ? ARRAY_PREV.has(prev.v) : KEYWORDS.has(prev.v));
 			if (!okPrev) return null;
 			const after = toks[close + 1];
 			if (after && after.t === "p" && (after.v === ":" || after.v === "(")) return null; // computed key or call
@@ -533,7 +751,13 @@ function checkTokens(toks: Tok[], ctx: Ctx): { rel: string[]; strings: Set<strin
 			const spec = site.spec;
 			strings.add(spec);
 			if (spec.startsWith("./") || spec.startsWith("../")) {
-				if (spec.split("/").slice(1).some((p) => p === "" || (p.startsWith(".") && p !== ".."))) return null;
+				if (
+					spec
+						.split("/")
+						.slice(1)
+						.some((p) => p === "" || (p.startsWith(".") && p !== ".."))
+				)
+					return null;
 				rel.push(spec);
 			} else if (spec === "node:fs" || spec === "fs" || spec === "node:path" || spec === "path") {
 				const names = spec.endsWith("fs") ? FS_OK : PATH_OK;
@@ -569,7 +793,22 @@ function checkTokens(toks: Tok[], ctx: Ctx): { rel: string[]; strings: Set<strin
 	return { rel, strings };
 }
 
-const CANDIDATES = [".ts", ".mts", ".js", ".mjs", ".json", ".tsx", ".jsx", ".cjs", ".cts", ".node", ".wasm", ".so", ".dylib", ".toml"];
+const CANDIDATES = [
+	".ts",
+	".mts",
+	".js",
+	".mjs",
+	".json",
+	".tsx",
+	".jsx",
+	".cjs",
+	".cts",
+	".node",
+	".wasm",
+	".so",
+	".dylib",
+	".toml",
+];
 
 /** The one file `base` names, or null if absent, ambiguous, a symlink, outside root or of a refused type. */
 function resolveRelative(base: string, root: string): string | null {
@@ -587,7 +826,9 @@ function resolveRelative(base: string, root: string): string | null {
 	return inside(real, root) ? real : null;
 }
 
-type ScanFn = new (o: { loader: string }) => { scan(s: string): { imports: Array<{ path: string }> } };
+type ScanFn = new (o: { loader: string }) => {
+	scan(s: string): { imports: Array<{ path: string }> };
+};
 
 /** Check the entry script and its relative imports. */
 function checkSource(entry: string, ctx: Ctx): boolean {
@@ -656,7 +897,9 @@ function pathOk(token: string, root: string): boolean {
 /** bunfig.toml or a .env* file in `dir` (bun would preload or load it). */
 function configInDir(dir: string): boolean {
 	try {
-		return readdirSync(dir).some((n) => n === "bunfig.toml" || n === ".bunfig.toml" || n === ".env" || n.startsWith(".env."));
+		return readdirSync(dir).some(
+			(n) => n === "bunfig.toml" || n === ".bunfig.toml" || n === ".env" || n.startsWith(".env."),
+		);
 	} catch {
 		return true;
 	}
@@ -669,9 +912,12 @@ function configInDir(dir: string): boolean {
 export function runInProject(command: string, cwd: string | undefined): RunInProject {
 	try {
 		if (!cwd || !path.isAbsolute(cwd)) return NO;
-		const text = command.trim();
-		if (!PLAIN.test(text) || promptControlText(text) !== null) return NO;
-		if (decideRules(text).rules.length !== 0) return NO;
+		const whole = command.trim();
+		// The rules read the whole line, pipe included; the rest is checked without the cat tail.
+		if (promptControlText(whole) !== null || decideRules(whole).rules.length !== 0) return NO;
+		const piped = CAT_TAIL.test(whole);
+		const text = whole.replace(CAT_TAIL, "");
+		if (!PLAIN.test(text) || decideRules(text).rules.length !== 0) return NO;
 		const root = realpathSync(cwd);
 		const words = text.split(/ +/);
 		const ctx: Ctx = { root, env: new Map(), cmdTokens: new Set(), envReads: new Set() };
@@ -691,7 +937,9 @@ export function runInProject(command: string, cwd: string | undefined): RunInPro
 		const scriptArg = words[i++];
 		if (!scriptArg || scriptArg.startsWith("-") || !SCRIPT_EXT.test(scriptArg)) return NO;
 		if (scriptArg.split("/").some((s) => s === "..") || SECRET.test(scriptArg)) return NO;
-		const scriptAbs = path.isAbsolute(scriptArg) ? path.normalize(scriptArg) : path.resolve(root, scriptArg);
+		const scriptAbs = path.isAbsolute(scriptArg)
+			? path.normalize(scriptArg)
+			: path.resolve(root, scriptArg);
 		const st = lstatOrNull(scriptAbs);
 		if (!st || !st.isFile() || st.isSymbolicLink()) return NO;
 		const realScript = realpathSync(scriptAbs);
@@ -699,7 +947,8 @@ export function runInProject(command: string, cwd: string | undefined): RunInPro
 
 		for (const a of words.slice(i)) {
 			if (a.startsWith("-")) {
-				if (!/^--?[A-Za-z][A-Za-z0-9-]*(=[A-Za-z0-9._/+,@:-]*)?$/.test(a) || BAD_FLAG.test(a)) return NO;
+				if (!/^--?[A-Za-z][A-Za-z0-9-]*(=[A-Za-z0-9._/+,@:-]*)?$/.test(a) || BAD_FLAG.test(a))
+					return NO;
 			}
 			const eq = a.indexOf("=");
 			for (const tok of eq === -1 ? [a] : [a, a.slice(eq + 1)]) {
@@ -715,14 +964,15 @@ export function runInProject(command: string, cwd: string | undefined): RunInPro
 		}
 		// bun also reads a global ~/.bunfig.toml (a preload there runs code).
 		for (const home of new Set([process.env.HOME, homedir()])) {
-			if (!home || readdirSync(home).some((n) => n === "bunfig.toml" || n === ".bunfig.toml")) return NO;
+			if (!home || readdirSync(home).some((n) => n === "bunfig.toml" || n === ".bunfig.toml"))
+				return NO;
 		}
 		if (!checkSource(realScript, ctx)) return NO;
 		// Every env name the command sets must be one the source reads.
 		for (const name of ctx.env.keys()) if (!ctx.envReads.has(name)) return NO;
 		return {
 			ok: true,
-			reason: `run of ${path.relative(root, realScript)}: a workspace script limited to reading and writing the paths on its command line`,
+			reason: `run of ${path.relative(root, realScript)}: a workspace script limited to reading and writing the paths on its command line${piped ? ", shown through cat" : ""}`,
 		};
 	} catch {
 		return NO;

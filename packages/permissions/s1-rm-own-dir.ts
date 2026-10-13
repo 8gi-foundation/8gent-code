@@ -18,9 +18,15 @@
  *     (at least one r or R), all before the first path; no `--`, no long
  *     option; 1 to 8 paths;
  *   - decideRules fires exactly rm_recursive, and no prompt-control text;
+ *   - or (#4185) the command is `rmdir PATH...` with no flag at all, every
+ *     PATH is `.tmp` or below it, and decideRules fires exactly
+ *     rmdir_non_temp; every condition below applies to it the same way;
  *   - each PATH is relative, has no `.`, `..` or empty segment (one trailing
- *     slash is fine), no segment starting with `.` (dotfile, dot directory,
- *     .git), is not the workspace root, not a secret or protected path;
+ *     slash is fine; a leading `./` only before `.tmp`), no segment starting
+ *     with `.` (dotfile, dot directory, .git) except a first segment that is
+ *     exactly `.tmp`, the one sanctioned scratch directory directly under
+ *     the working directory (#4185), is not the workspace root, not a secret
+ *     or protected path;
  *   - no component from the workspace root down to it is a symlink, and it is
  *     a real directory;
  *   - the session's record (s1-created-files.ts) says a mkdir-only
@@ -57,7 +63,7 @@ import { decideRules } from "../decide/rules";
 import type { CreatedFiles } from "./s1-created-files";
 import { protectedRel } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
-import { SECRET } from "./s1-run-in-project";
+import { SCRATCH_DIR, SECRET, dotOutsideScratch } from "./s1-run-in-project";
 
 export type RmOwnDir = { ok: true; reason: string } | { ok: false; hint?: string };
 
@@ -68,7 +74,7 @@ const MAX_ENTRIES = 2000;
 const NO: RmOwnDir = { ok: false };
 
 const WHAT_PASSES =
-	"A recursive delete runs without review only as `rm -rf DIR` where DIR is a plain relative directory inside the workspace (no dot names, no symlink on its path) that this session made with a run_command that was only `mkdir`, that git does not track, and that holds only files this session wrote and directories it made the same way.";
+	"A recursive delete runs without review only as `rm -rf DIR` (or `rmdir DIR` for .tmp) where DIR is a plain relative directory inside the workspace (no dot names other than a leading .tmp, no symlink on its path) that this session made with a run_command that was only `mkdir`, that git does not track, and that holds only files this session wrote and directories it made the same way.";
 
 function hint(why: string): RmOwnDir {
 	return {
@@ -128,16 +134,18 @@ export function rmOwnDir(
 	try {
 		if (process.platform === "win32" || !cwd || !path.isAbsolute(cwd) || !created) return NO;
 		const text = command.trim();
-		if (!text.startsWith("rm ") || !PLAIN.test(text)) return NO;
+		const rmdir = text.startsWith("rmdir ");
+		if (!(rmdir || text.startsWith("rm ")) || !PLAIN.test(text)) return NO;
 		if (promptControlText(text) !== null) return NO;
 		const rules = decideRules(text).rules;
-		if (rules.length !== 1 || rules[0] !== "rm_recursive") return NO;
+		if (rules.length !== 1 || rules[0] !== (rmdir ? "rmdir_non_temp" : "rm_recursive")) return NO;
 		const [, ...args] = text.split(/ +/);
 		const paths: string[] = [];
-		let recursive = false;
+		let recursive = rmdir;
 		for (const a of args) {
 			if (a.startsWith("-")) {
-				if (paths.length > 0 || !FLAG.test(a)) return hint(`\`${a}\` is not allowed here.`);
+				if (rmdir || paths.length > 0 || !FLAG.test(a))
+					return hint(`\`${a}\` is not allowed here.`);
 				if (/[rR]/.test(a)) recursive = true;
 				continue;
 			}
@@ -147,11 +155,14 @@ export function rmOwnDir(
 		const root = realpathSync(cwd);
 		const names: string[] = [];
 		for (const p of paths) {
-			const rel = p.endsWith("/") ? p.slice(0, -1) : p;
+			// `./.tmp` is `.tmp`; any other leading `./` stays a refusal, as before.
+			const bare = p === `./${SCRATCH_DIR}` || p.startsWith(`./${SCRATCH_DIR}/`) ? p.slice(2) : p;
+			const rel = bare.endsWith("/") ? bare.slice(0, -1) : bare;
 			const segs = rel.split("/");
 			if (p.startsWith("/") || segs.some((s) => s === "" || s === "." || s === ".."))
 				return hint(`\`${p}\` is not a plain relative path.`);
-			if (segs.some((s) => s.startsWith("."))) return hint(`\`${p}\` is or is inside a dot entry.`);
+			if (dotOutsideScratch(segs)) return hint(`\`${p}\` is or is inside a dot entry.`);
+			if (rmdir && segs[0] !== SCRATCH_DIR) return NO;
 			if (SECRET.test(rel) || protectedRel(rel)) return hint(`\`${p}\` is a protected path.`);
 			let cur = root;
 			for (const s of segs) {
@@ -171,7 +182,7 @@ export function rmOwnDir(
 		}
 		return {
 			ok: true,
-			reason: `rm -r of directories this session made (${names.join(", ")}): untracked, only the session's own files inside`,
+			reason: `${rmdir ? "rmdir" : "rm -r"} of directories this session made (${names.join(", ")}): untracked, only the session's own files inside`,
 		};
 	} catch {
 		return NO;

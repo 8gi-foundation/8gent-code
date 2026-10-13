@@ -5,12 +5,20 @@ import { ModeManager } from "../eight/modes";
 import { matchDenyList } from "./go-deny-list";
 import { PermissionManager } from "./index";
 import { classifyToolAction } from "./maker-checker-enforcer";
-import { createPermissionHolder, planModeRefusal, runWithPermissionHolder } from "./permission-mode";
+import {
+	createPermissionHolder,
+	planModeRefusal,
+	runWithPermissionHolder,
+} from "./permission-mode";
 import { sanitizeShellCommand } from "./shell-sanitizer";
 import { SHELL_TOOL_NAMES, posixRulesApply } from "./shell-tools";
 
 const ps = { kind: "powershell" as const, file: "pwsh.exe" };
-const PS1 = ["ls (Remove-Item -Recurse -Force src)", "echo (New-Item PWNED)", "cat @(Set-Content PWNED x)"];
+const PS1 = [
+	"ls (Remove-Item -Recurse -Force src)",
+	"echo (New-Item PWNED)",
+	"cat @(Set-Content PWNED x)",
+];
 
 describe("S1: PowerShell gets no opinion from the POSIX rule engines", () => {
 	test("the read-only allowlist stays silent under pwsh", () => {
@@ -38,7 +46,9 @@ describe("S1: PowerShell gets no opinion from the POSIX rule engines", () => {
 
 	test("plan mode refuses a PowerShell line even when it looks read-only", async () => {
 		const holder = createPermissionHolder("plan");
-		const r = await runWithPermissionHolder(holder, () => planModeRefusal("powershell", { command: "ls" }));
+		const r = await runWithPermissionHolder(holder, () =>
+			planModeRefusal("powershell", { command: "ls" }),
+		);
 		expect(r).not.toBeNull();
 	});
 });
@@ -50,8 +60,20 @@ describe("S2 S3: cmd.exe and line-break lines are not POSIX", () => {
 		expect(posixRulesApply("ls\ntouch PWNED", "git-bash")).toBe(false);
 		expect(posixRulesApply("echo hi ^; touch x", "git-bash")).toBe(true);
 	});
+	test("a line JS trim would shorten by more than spaces and tabs is not judged (8SO on #4185)", () => {
+		// The shell keeps these in the word; the rules, reading command.trim(), would not.
+		for (const ch of ["\u00a0", "\ufeff", "\u3000", "\u2028", "\u202f", "\v", "\f"]) {
+			expect(posixRulesApply(`rm -rf .tmp${ch}`, "posix"), JSON.stringify(ch)).toBe(false);
+			expect(posixRulesApply(`${ch}rm -rf .tmp`, "posix"), JSON.stringify(ch)).toBe(false);
+			expect(readOnlyAllowlist(`ls${ch}`, { shell: "posix" }).verdict).toBe("no-opinion");
+		}
+		expect(posixRulesApply("  rm -rf .tmp \t ", "posix")).toBe(true);
+		expect(posixRulesApply("echo a\u00a0b", "posix")).toBe(true);
+	});
 	test("the allowlist stays silent for those lines", () => {
-		expect(readOnlyAllowlist("echo hi ^; touch PWNED", { shell: "cmd" }).verdict).toBe("no-opinion");
+		expect(readOnlyAllowlist("echo hi ^; touch PWNED", { shell: "cmd" }).verdict).toBe(
+			"no-opinion",
+		);
 		expect(readOnlyAllowlist("ls\ntouch PWNED", { shell: "git-bash" }).verdict).toBe("no-opinion");
 	});
 });
@@ -66,7 +88,10 @@ describe("S4: one list of shell tools", () => {
 			expect(classifyToolAction(tool, { command: "git push --force origin main" })).not.toBeNull();
 			expect(modes.getMode("architect")?.deniedTools).toContain(tool);
 			expect(modes.getMode("review")?.deniedTools).toContain(tool);
-			expect(matchDenyList({ name: tool, args: { command: "curl https://api.stripe.com/v1/charges" } }).denied).toBe(true);
+			expect(
+				matchDenyList({ name: tool, args: { command: "curl https://api.stripe.com/v1/charges" } })
+					.denied,
+			).toBe(true);
 		}
 	});
 });
@@ -77,7 +102,13 @@ describe("8SO: cmd.exe expansion tricks and PowerShell -EncodedCommand are refus
 	const isRefused = (c: string, kind: K) => refused(c, kind).safe === false;
 
 	test("cmd.exe %VAR:~n,m% substring expansion", () => {
-		for (const c of ["echo %COMSPEC:~0,1%", "echo %PATH:~-3%", "echo %A:~1%%B:~2,1%", 'echo "%COMSPEC:~0,1%"', "echo %COMS^PEC:~0,1%"]) {
+		for (const c of [
+			"echo %COMSPEC:~0,1%",
+			"echo %PATH:~-3%",
+			"echo %A:~1%%B:~2,1%",
+			'echo "%COMSPEC:~0,1%"',
+			"echo %COMS^PEC:~0,1%",
+		]) {
 			const r = refused(c, "cmd");
 			expect(r.safe).toBe(false);
 			expect(r.reason).toContain("%VAR:~n,m%");
@@ -85,7 +116,8 @@ describe("8SO: cmd.exe expansion tricks and PowerShell -EncodedCommand are refus
 	});
 
 	test("cmd.exe %VAR:a=b% replace expansion, including wildcard", () => {
-		for (const c of ["echo %PATH:a=b%", "echo %X:*a=%", 'echo "%X:ab=cd%"']) expect(isRefused(c, "cmd")).toBe(true);
+		for (const c of ["echo %PATH:a=b%", "echo %X:*a=%", 'echo "%X:ab=cd%"'])
+			expect(isRefused(c, "cmd")).toBe(true);
 	});
 
 	test("cmd.exe delayed expansion !VAR! forms", () => {
@@ -112,7 +144,23 @@ describe("8SO: cmd.exe expansion tricks and PowerShell -EncodedCommand are refus
 		expect(isRefused("echo %PATH:x", "powershell")).toBe(false);
 	});
 
-	const ENC = ["e", "ec", "en", "enc", "enco", "encod", "encode", "encoded", "encodedc", "encodedco", "encodedcom", "encodedcomm", "encodedcomma", "encodedcomman", "encodedcommand"];
+	const ENC = [
+		"e",
+		"ec",
+		"en",
+		"enc",
+		"enco",
+		"encod",
+		"encode",
+		"encoded",
+		"encodedc",
+		"encodedco",
+		"encodedcom",
+		"encodedcomm",
+		"encodedcomma",
+		"encodedcomman",
+		"encodedcommand",
+	];
 
 	test("PowerShell kind: -EncodedCommand and every prefix, any case, refused", () => {
 		for (const p of ENC) {
@@ -133,8 +181,15 @@ describe("8SO: cmd.exe expansion tricks and PowerShell -EncodedCommand are refus
 				expect(isRefused(`powershell -${p} SQBFAFgA`, kind)).toBe(true);
 				expect(isRefused(`pwsh.exe /${p.toUpperCase()} SQBFAFgA`, kind)).toBe(true);
 			}
-			expect(isRefused("powershell -NoProfile -NonInteractive -EncodedCommand SQBFAFgA", kind)).toBe(true);
-			expect(isRefused('"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -ec SQBFAFgA', kind)).toBe(true);
+			expect(
+				isRefused("powershell -NoProfile -NonInteractive -EncodedCommand SQBFAFgA", kind),
+			).toBe(true);
+			expect(
+				isRefused(
+					'"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -ec SQBFAFgA',
+					kind,
+				),
+			).toBe(true);
 			expect(isRefused("powershell \u2013enc SQBFAFgA", kind)).toBe(true);
 		}
 	});
@@ -157,15 +212,21 @@ describe("8SO: cmd.exe expansion tricks and PowerShell -EncodedCommand are refus
 	});
 
 	test("near misses stay allowed: -Encoding on Out-File, -ExecutionPolicy, -Command, robocopy /e", () => {
-		expect(isRefused("Get-Content a.txt | Out-File -Encoding utf8 b.txt", "powershell")).toBe(false);
+		expect(isRefused("Get-Content a.txt | Out-File -Encoding utf8 b.txt", "powershell")).toBe(
+			false,
+		);
 		expect(isRefused("Out-File -FilePath b.txt -Encoding utf8", "powershell")).toBe(false);
 		expect(isRefused("Set-Content -Encoding UTF8 -Path b.txt -Value hi", "powershell")).toBe(false);
 		expect(isRefused("pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1", "cmd")).toBe(false);
 		expect(isRefused("pwsh -NoProfile -Command Get-Date", "git-bash")).toBe(false);
-		expect(isRefused("powershell -NoProfile -Command Get-Date | Out-File -Encoding utf8 d.txt", "posix")).toBe(false);
+		expect(
+			isRefused("powershell -NoProfile -Command Get-Date | Out-File -Encoding utf8 d.txt", "posix"),
+		).toBe(false);
 		expect(isRefused("robocopy a b /e", "powershell")).toBe(false);
 		expect(isRefused("git log -e", "git-bash")).toBe(false);
 		expect(isRefused("echo -e hi", "posix")).toBe(false);
-		expect(isRefused("powershell -NoProfile -File C:\\tools\\run.ps1 -Name x", "posix")).toBe(false);
+		expect(isRefused("powershell -NoProfile -File C:\\tools\\run.ps1 -Name x", "posix")).toBe(
+			false,
+		);
 	});
 });
