@@ -7,6 +7,19 @@
  *
  * If the test runner has no Node binary available the tests skip
  * with a clear message rather than hanging.
+ *
+ * #3458: off CI, they also skip with the reason printed when the host refuses
+ * to open a pty (a sandbox), because the bridge would exit 65 and every case
+ * would fail on the host, not the code. The check uses python3's os.openpty,
+ * independent of node-pty. If python3 is missing or fails for any other
+ * reason the check is inconclusive and the cases run.
+ *
+ * Two things never skip:
+ *   - CI. With CI or GITHUB_ACTIONS set, a refused pty only prints a warning
+ *     and the cases run and fail as before. A skipped case on a gate is
+ *     coverage nobody sees.
+ *   - node-pty missing (bridge exit 66). The beforeAll below fails the file
+ *     with the bridge's own message (#4143), on CI and off it.
  */
 
 import { beforeAll, describe, expect, it } from "bun:test";
@@ -48,10 +61,58 @@ beforeAll(() => {
 	);
 });
 
+function errorLine(s: string | undefined): string {
+	const lines = (s ?? "")
+		.split("\n")
+		.map((l) => l.trim())
+		.filter(Boolean);
+	return lines.find((l) => /Error/.test(l)) ?? lines[0] ?? "";
+}
+
+const onCI = Boolean(process.env.CI || process.env.GITHUB_ACTIONS);
+
+// Returns why this host cannot give the bridge a pty, or null when it can or
+// the answer is unknown. Never consulted for node-pty: that is exit 66, which
+// the beforeAll turns into a loud failure.
+function ptyRefusedReason(): string | null {
+	if (!nodeAvailable || !posixShell) return null;
+	// Same require the bridge makes, from the bridge's folder. If node-pty does
+	// not load, do not skip: let the beforeAll fail with the exit-66 message.
+	const load = spawnSync(nodeBin as string, ["-e", "require('node-pty')"], {
+		cwd: import.meta.dir,
+		encoding: "utf-8",
+		timeout: 15_000,
+	});
+	if (load.status !== 0) return null;
+	const open = spawnSync("python3", ["-c", "import os; os.openpty()"], {
+		encoding: "utf-8",
+		timeout: 15_000,
+	});
+	if (open.error) return null; // python3 unavailable: inconclusive, run the cases
+	// Only a refused openpty counts. Any other failure (a broken python3 shim,
+	// say) is inconclusive, and the cases run.
+	if (open.status !== 0 && /openpty|OSError|PermissionError/.test(open.stderr ?? "")) {
+		return `this host refuses to open a pty, so the bridge would exit 65: ${errorLine(open.stderr)}`;
+	}
+	return null;
+}
+
+const ptyRefused = ptyRefusedReason();
+const skipReason = ptyRefused && !onCI ? ptyRefused : null;
+if (ptyRefused && onCI) {
+	const msg = `${ptyRefused.replace(/\r?\n/g, " ")}. Running the cases anyway: CI never skips them.`;
+	console.warn(`[pty-session.test] ${msg}`);
+	if (process.env.GITHUB_ACTIONS)
+		console.log(`::warning title=pty-session: no pty on this runner::${msg}`);
+} else if (skipReason) {
+	console.warn(`[pty-session.test] SKIPPED: ${skipReason}`);
+}
+const runCases = nodeAvailable && posixShell && skipReason === null;
+
 const SHELL = process.env.SHELL || "/bin/bash";
 
 describe("PtySession — bridge spawn + capture output", () => {
-	it.if(nodeAvailable && posixShell)(
+	it.if(runCases)(
 		"spawns a one-shot command and emits its stdout via onData",
 		async () => {
 			const session = new PtySession({
@@ -75,7 +136,7 @@ describe("PtySession — bridge spawn + capture output", () => {
 		8000,
 	);
 
-	it.if(nodeAvailable && posixShell)(
+	it.if(runCases)(
 		"forwards stdin writes back through onData (echo loop)",
 		async () => {
 			const session = new PtySession({
@@ -107,7 +168,7 @@ describe("PtySession — bridge spawn + capture output", () => {
 });
 
 describe("PtySession — lifecycle", () => {
-	it.if(nodeAvailable && posixShell)(
+	it.if(runCases)(
 		"reports pid after ready and null after exit",
 		async () => {
 			const session = new PtySession({
@@ -129,7 +190,7 @@ describe("PtySession — lifecycle", () => {
 		5000,
 	);
 
-	it.if(nodeAvailable && posixShell)(
+	it.if(runCases)(
 		"invokes onExit callback with exit code",
 		async () => {
 			const session = new PtySession({
@@ -154,7 +215,7 @@ describe("PtySession — lifecycle", () => {
 });
 
 describe("PtySession — resize", () => {
-	it.if(nodeAvailable && posixShell)(
+	it.if(runCases)(
 		"resize() does not throw on a live session",
 		async () => {
 			const session = new PtySession({
@@ -170,7 +231,7 @@ describe("PtySession — resize", () => {
 		5000,
 	);
 
-	it.if(nodeAvailable && posixShell)(
+	it.if(runCases)(
 		"resize() is a no-op on a dead session (does not throw)",
 		async () => {
 			const session = new PtySession({
