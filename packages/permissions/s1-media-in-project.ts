@@ -37,6 +37,7 @@ import { closeSync, lstatSync, openSync, readSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules, maskQuotes, shellWords, splitSegments } from "../decide/rules";
+import { magickEnvironmentOk } from "./s1-magick";
 import { protectedRel } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
 import { SECRET, canon, symlinkBelow } from "./s1-run-in-project";
@@ -57,25 +58,112 @@ const PERCENT_ESCAPE = /%[[a-zA-Z@%]/;
 const DRAW = /^(point|line|rectangle|roundrectangle|circle|ellipse|polygon|text)\s/i;
 
 const MAGICK_BOOL = new Set([
-	"strip", "negate", "normalize", "flatten", "append", "flip", "flop", "monochrome", "auto-orient", "coalesce", "trim",
+	"strip",
+	"negate",
+	"normalize",
+	"flatten",
+	"append",
+	"flip",
+	"flop",
+	"monochrome",
+	"auto-orient",
+	"coalesce",
+	"trim",
 	"composite",
 ]);
 const MAGICK_PLUS_BOOL = new Set(["repage", "append", "gravity", "antialias", "dither"]);
 const MAGICK_TEXT = new Set(["label", "caption"]);
-const MAGICK_SIZED = new Set(["size", "resize", "scale", "extent", "thumbnail", "crop", "geometry", "density", "border", "shave", "splice", "page"]);
-const MAGICK_VALUE = new Set([
-	"fill", "stroke", "strokewidth", "gravity", "background", "bordercolor", "colorspace", "depth", "quality",
-	"rotate", "sharpen", "compose", "alpha", "antialias", "kerning", "interline-spacing",
-	"interword-spacing", "undercolor", "repage", "shadow", "vignette", "unsharp", "modulate", "level",
-	"brightness-contrast", "gamma", "sepia-tone", "roll", "fuzz", "transparent", "opaque", "delay", "loop", "layers",
-	"colors", "dither", "type", "units", "text-encoding", "family", "style", "weight", "stretch", "virtual-pixel",
-	"filter", "sampling-factor", "interlace", "orient",
+const MAGICK_SIZED = new Set([
+	"size",
+	"resize",
+	"scale",
+	"extent",
+	"thumbnail",
+	"crop",
+	"geometry",
+	"density",
+	"border",
+	"shave",
+	"splice",
+	"page",
 ]);
-const GENERATORS = new Set(["xc", "canvas", "caption", "label", "gradient", "radial-gradient", "plasma", "null", "pattern"]);
+const MAGICK_VALUE = new Set([
+	"fill",
+	"stroke",
+	"strokewidth",
+	"gravity",
+	"background",
+	"bordercolor",
+	"colorspace",
+	"depth",
+	"quality",
+	"rotate",
+	"sharpen",
+	"compose",
+	"alpha",
+	"antialias",
+	"kerning",
+	"interline-spacing",
+	"interword-spacing",
+	"undercolor",
+	"repage",
+	"shadow",
+	"vignette",
+	"unsharp",
+	"modulate",
+	"level",
+	"brightness-contrast",
+	"gamma",
+	"sepia-tone",
+	"roll",
+	"fuzz",
+	"transparent",
+	"opaque",
+	"delay",
+	"loop",
+	"layers",
+	"colors",
+	"dither",
+	"type",
+	"units",
+	"text-encoding",
+	"family",
+	"style",
+	"weight",
+	"stretch",
+	"virtual-pixel",
+	"filter",
+	"sampling-factor",
+	"interlace",
+	"orient",
+]);
+const GENERATORS = new Set([
+	"xc",
+	"canvas",
+	"caption",
+	"label",
+	"gradient",
+	"radial-gradient",
+	"plasma",
+	"null",
+	"pattern",
+]);
 
 const FFPROBE_BOOL = new Set([
-	"hide_banner", "show_format", "show_streams", "count_frames", "count_packets", "sexagesimal", "pretty", "show_chapters",
-	"show_programs", "show_packets", "show_frames", "show_error", "bitexact", "byte_binary_prefix",
+	"hide_banner",
+	"show_format",
+	"show_streams",
+	"count_frames",
+	"count_packets",
+	"sexagesimal",
+	"pretty",
+	"show_chapters",
+	"show_programs",
+	"show_packets",
+	"show_frames",
+	"show_error",
+	"bitexact",
+	"byte_binary_prefix",
 ]);
 
 interface Ctx {
@@ -119,7 +207,8 @@ function head16(abs: string): Buffer | null {
 /** magick sniffs content, not the name: only a real raster signature is an image (#3949). */
 function isRasterBytes(b: Buffer): boolean {
 	const t = b.toString("latin1");
-	if (/^\s*</.test(t) || /^\s*push graphic-context/i.test(t) || /^\s*viewbox/i.test(t)) return false;
+	if (/^\s*</.test(t) || /^\s*push graphic-context/i.test(t) || /^\s*viewbox/i.test(t))
+		return false;
 	const at = (i: number, ...v: number[]) => v.every((x, k) => b[i + k] === x);
 	return (
 		at(0, 0x89, 0x50, 0x4e, 0x47) || // PNG
@@ -135,7 +224,12 @@ function isRasterBytes(b: Buffer): boolean {
 
 function isFontBytes(b: Buffer): boolean {
 	const t = b.toString("latin1");
-	return at4(b, 0x00, 0x01, 0x00, 0x00) || t.startsWith("OTTO") || t.startsWith("true") || t.startsWith("ttcf");
+	return (
+		at4(b, 0x00, 0x01, 0x00, 0x00) ||
+		t.startsWith("OTTO") ||
+		t.startsWith("true") ||
+		t.startsWith("ttcf")
+	);
 }
 function at4(b: Buffer, ...v: number[]): boolean {
 	return v.every((x, k) => b[k] === x);
@@ -209,7 +303,8 @@ function magickOk(args: string[], cx: Ctx): boolean {
 			if (name === "annotate") {
 				const geo = value();
 				const text = value();
-				if (geo === null || text === null || !/^[0-9x+-]+$/.test(geo) || !textOk(text)) return false;
+				if (geo === null || text === null || !/^[0-9x+-]+$/.test(geo) || !textOk(text))
+					return false;
 			} else if (name === "draw") {
 				const v = value();
 				if (v === null || !DRAW.test(v) || /image|[@:/%]/i.test(v)) return false;
@@ -236,7 +331,15 @@ function magickOk(args: string[], cx: Ctx): boolean {
 				if (v === null || !sizedOk(v)) return false;
 			} else if (MAGICK_VALUE.has(name)) {
 				const v = value();
-				if (v === null || v.startsWith("@") || SCHEME.test(v) || v.includes("/") || PERCENT_ESCAPE.test(v) || URL_FN.test(v)) return false;
+				if (
+					v === null ||
+					v.startsWith("@") ||
+					SCHEME.test(v) ||
+					v.includes("/") ||
+					PERCENT_ESCAPE.test(v) ||
+					URL_FN.test(v)
+				)
+					return false;
 			} else return false;
 			continue;
 		}
@@ -279,7 +382,8 @@ function ffprobeOk(args: string[], cx: Ctx): boolean {
 				break;
 			case "v":
 			case "loglevel":
-				if (!/^(quiet|panic|fatal|error|warning|info|verbose|debug|-?\d{1,2})$/.test(v)) return false;
+				if (!/^(quiet|panic|fatal|error|warning|info|verbose|debug|-?\d{1,2})$/.test(v))
+					return false;
 				break;
 			case "select_streams":
 				if (!/^[avsdt]?(:\d{1,3})?$/.test(v)) return false;
@@ -303,7 +407,13 @@ function ffprobeOk(args: string[], cx: Ctx): boolean {
 }
 
 /** ok when `command` is a plain magick drawing call or ffprobe read on the workspace's own files. */
-export function mediaInProject(command: string, cwd: string | undefined): MediaInProject {
+export function mediaInProject(
+	command: string,
+	cwd: string | undefined,
+	env: Record<string, string | undefined> = process.env,
+	/** The project root when `cwd` is a folder a `cd <folder> &&` chose inside it (#3199, #4169). */
+	project?: string,
+): MediaInProject {
 	try {
 		if (!cwd || !path.isAbsolute(cwd)) return NO;
 		const text = command.trim();
@@ -314,11 +424,28 @@ export function mediaInProject(command: string, cwd: string | undefined): MediaI
 		if (segs.length !== 1 || subs.length) return NO;
 		if (/[<>|&;()]/.test(maskQuotes(text))) return NO;
 		const words = shellWords(text);
-		if (!words || words.length < 2 || words.length > MAX_WORDS || words.some((w) => w.length > MAX_WORD_LEN)) return NO;
+		if (
+			!words ||
+			words.length < 2 ||
+			words.length > MAX_WORDS ||
+			words.some((w) => w.length > MAX_WORD_LEN)
+		)
+			return NO;
 		const cx: Ctx = { root: canon(cwd) };
 		const [bin, ...args] = words;
-		if (bin === "magick") return magickOk(args, cx) ? { ok: true, reason: "magick drawing a new image from workspace files" } : NO;
-		if (bin === "ffprobe") return ffprobeOk(args, cx) ? { ok: true, reason: "ffprobe reading one workspace file" } : NO;
+		// Same environment rules as the magick render lane (#4177, #4184): the binary and its
+		// configuration must not be the workspace's.
+		if (
+			bin === "magick" &&
+			!magickEnvironmentOk(project === undefined ? [cx.root] : [cx.root, canon(project)], env)
+		)
+			return NO;
+		if (bin === "magick")
+			return magickOk(args, cx)
+				? { ok: true, reason: "magick drawing a new image from workspace files" }
+				: NO;
+		if (bin === "ffprobe")
+			return ffprobeOk(args, cx) ? { ok: true, reason: "ffprobe reading one workspace file" } : NO;
 		return NO;
 	} catch {
 		return NO;

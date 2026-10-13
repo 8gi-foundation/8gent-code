@@ -16,17 +16,27 @@ beforeAll(() => {
 	ws = realpathSync(mkdtempSync(join(tmpdir(), "s1-media-")));
 	mkdirSync(join(ws, "video"));
 	mkdirSync(join(ws, ".hidden"));
-	const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(8)]);
-	for (const f of ["video/slide1.png", "tile.png", "video/exists.png"]) writeFileSync(join(ws, f), PNG);
+	const PNG = Buffer.concat([
+		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+		Buffer.alloc(8),
+	]);
+	for (const f of ["video/slide1.png", "tile.png", "video/exists.png"])
+		writeFileSync(join(ws, f), PNG);
 	for (const f of ["video/brief.mp4", "t.txt", "src.ts"]) writeFileSync(join(ws, f), "x");
-	writeFileSync(join(ws, "font.ttf"), Buffer.from([0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+	writeFileSync(
+		join(ws, "font.ttf"),
+		Buffer.from([0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+	);
 	writeFileSync(join(ws, "ok.jpg"), Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]));
 	writeFileSync(join(ws, "ok.gif"), "GIF89a......");
 	writeFileSync(join(ws, "ok.webp"), "RIFF....WEBPVP8 ");
 	writeFileSync(join(ws, "ok.bmp"), "BM......");
 	writeFileSync(join(ws, "ok.tif"), Buffer.from([0x49, 0x49, 0x2a, 0, 0, 0, 0, 0]));
 	writeFileSync(join(ws, "ok.ppm"), "P6\n1 1\n255\n");
-	writeFileSync(join(ws, "evil-svg.png"), `<svg xmlns="http://www.w3.org/2000/svg"><text>text:/etc/hosts</text></svg>`);
+	writeFileSync(
+		join(ws, "evil-svg.png"),
+		`<svg xmlns="http://www.w3.org/2000/svg"><text>text:/etc/hosts</text></svg>`,
+	);
 	writeFileSync(join(ws, "evil-ws.png"), `\n  <svg/>`);
 	writeFileSync(join(ws, "evil-mvg.png"), "push graphic-context\nviewbox 0 0 10 10\n");
 	writeFileSync(join(ws, "evil-msl.png"), `<?xml version="1.0"?><image/>`);
@@ -39,7 +49,10 @@ beforeAll(() => {
 });
 afterAll(() => rmSync(ws, { recursive: true, force: true }));
 
-const ok = (c: string) => mediaInProject(c, ws).ok;
+// A clean environment, so the machine running the test does not decide the answer.
+const CLEAN_ENV = { PATH: "/usr/bin:/bin" };
+const ok = (c: string, env: Record<string, string | undefined> = CLEAN_ENV) =>
+	mediaInProject(c, ws, env).ok;
 
 const PASS = [
 	`magick -size 1280x720 xc:'#123c4a' -fill '#cfe3e8' -font Helvetica -pointsize 84 -gravity north -annotate +0+150 "What it is" -fill '#f2e9d8' -pointsize 42 -gravity north -annotate +0+300 "Tide Library is a tool-lending library:\\ndrills, ladders" video/slide2.png`,
@@ -162,11 +175,28 @@ const REFUSE = [
 ];
 
 describe("media tools inside the workspace", () => {
-	for (const c of PASS) test(`passes without the judge: ${c.slice(0, 80)}`, () => expect(ok(c)).toBe(true));
-	for (const c of REFUSE) test(`still goes to the judge: ${c.slice(0, 80)}`, () => expect(ok(c)).toBe(false));
+	for (const c of PASS)
+		test(`passes without the judge: ${c.slice(0, 80)}`, () => expect(ok(c)).toBe(true));
+	for (const c of REFUSE)
+		test(`still goes to the judge: ${c.slice(0, 80)}`, () => expect(ok(c)).toBe(false));
 	test("no working directory means no opinion", () => {
 		expect(mediaInProject(PASS[0], undefined).ok).toBe(false);
 		expect(mediaInProject(PASS[0], "relative/dir").ok).toBe(false);
+	});
+	test("magick keeps the render lane's environment rules (#4177, #4184)", () => {
+		const draw = `magick -size 100x100 xc:red -fill blue -draw "rectangle 10,10 50,50" video/shape2.png`;
+		expect(ok(draw)).toBe(true);
+		expect(ok(draw, { ...CLEAN_ENV, MAGICK_CONFIGURE_PATH: "/tmp/x" })).toBe(false);
+		expect(ok(draw, { ...CLEAN_ENV, FONTCONFIG_SYSROOT: ws })).toBe(false);
+		expect(ok(draw, { PATH: `${ws}/video:/usr/bin` })).toBe(false);
+		writeFileSync(join(ws, "policy.xml"), "<x/>");
+		try {
+			expect(ok(draw)).toBe(false);
+			// ffprobe does not read ImageMagick configuration.
+			expect(ok("ffprobe video/brief.mp4")).toBe(true);
+		} finally {
+			rmSync(join(ws, "policy.xml"));
+		}
 	});
 	test("a long command is refused", () => {
 		expect(ok(`magick xc:red ${"-strip ".repeat(100)}out9.png`)).toBe(false);

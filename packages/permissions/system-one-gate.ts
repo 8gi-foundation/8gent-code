@@ -834,7 +834,10 @@ export async function systemOneGate(
 		// files (#3948). Default mode only; see s1-media-in-project.ts.
 		try {
 			const { mediaInProject } = await import("./s1-media-in-project");
-			const m = mode === "default" ? mediaInProject(command, cwd) : { ok: false as const };
+			const m =
+				mode === "default"
+					? mediaInProject(command, cwd, env, opts.project)
+					: { ok: false as const };
 			if (m.ok) {
 				return {
 					run: true,
