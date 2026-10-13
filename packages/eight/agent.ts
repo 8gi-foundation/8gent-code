@@ -90,6 +90,7 @@ import {
 	setDefaultLocalProfile,
 } from "../tools/eight-browser";
 import { type Evidence, EvidenceCollector, summarizeEvidence } from "../validation/evidence";
+import { reviewTurn, turnReviewEnabled } from "../verify/turn-review";
 import { isNoToolScope, isVerbatimScope } from "./agent-scopes";
 import { type Settings, computeAutoTune } from "./auto-tune";
 import { createClient } from "./clients";
@@ -1742,7 +1743,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.steerQueue = [];
 				this.activeTurn = turn;
 				try {
-					return await this.runTurn(userMessage, imageBase64, imageMimeType);
+					const reply = await this.runTurn(userMessage, imageBase64, imageMimeType);
+					this.reviewFinishedTurn(userMessage, reply);
+					return reply;
 				} finally {
 					if (this.activeTurn === turn) this.activeTurn = null;
 				}
@@ -1766,6 +1769,23 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				ledger: this.turnToolLedger,
 			})
 		);
+	}
+
+	/**
+	 * Turn-end side reviewer (#3419): EIGHT_TURN_REVIEW=1 only. Reads the finished turn and
+	 * prints at most three scrubbed lines about what the reply left unsaid. Display only: the
+	 * reply is returned unchanged and a reviewer failure never reaches the turn.
+	 */
+	private reviewFinishedTurn(userMessage: string, reply: string): void {
+		if (!turnReviewEnabled()) return;
+		for (const line of reviewTurn({
+			prompt: userMessage,
+			toolCalls: this.turnToolLedger,
+			reply,
+			workingDirectory: this.config.workingDirectory || process.cwd(),
+		})) {
+			console.log(`[turn-review] ${line}`);
+		}
 	}
 
 	private async runTurn(
@@ -3247,7 +3267,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						const recovery = await autonomy.handleError(
 							err,
 							"agent-chat",
-							() => this.chat(textForAgent, imageBase64, imageMimeType),
+							() => this.runTurn(textForAgent, imageBase64, imageMimeType),
 							2, // max 2 retries in infinite mode
 						);
 						if (recovery.success) {
