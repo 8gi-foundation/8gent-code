@@ -572,14 +572,14 @@ function computeCliOverrides(
 
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
-import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
-import { VoiceReplyTracker } from "../../../packages/voice/voice-chat.js";
 import {
 	describeMissingVoiceSetup,
 	describeTranscriberBackend,
 	formatMicLabel,
 	resolveInputDevice,
 } from "../../../packages/voice/input-device.js";
+import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
+import { VoiceReplyTracker } from "../../../packages/voice/voice-chat.js";
 import {
 	FALLBACK_SYSTEM_VOICE,
 	listInstalledSystemVoices,
