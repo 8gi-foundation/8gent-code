@@ -169,7 +169,10 @@ export function resolveStreamIdleMs(
 	if (raw === "") {
 		// Not set in the environment: settings.retry.httpIdleTimeoutMs (C4), validated, else the default.
 		// Only for the real environment, so a test passing its own env object stays pure.
-		const fromSettings = env === process.env ? resolveRetrySettings(loadSettings().retry).httpIdleTimeoutMs : undefined;
+		const fromSettings =
+			env === process.env
+				? resolveRetrySettings(loadSettings().retry).httpIdleTimeoutMs
+				: undefined;
 		return fromSettings ?? DEFAULT_STREAM_IDLE_MS;
 	}
 	if (raw.toLowerCase() === "off") return null;
