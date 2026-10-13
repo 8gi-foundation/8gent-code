@@ -130,10 +130,13 @@ describe("docs/user", () => {
 	test("Windows Terminal section names only keys 8gent's table does not bind, or says so", () => {
 		const wt = keysPage.slice(wtAt);
 		expect(wt).toContain("Alt+Enter");
+		expect(wt).toContain("Ctrl+Q");
 		expect(wt).toContain("Shift+Enter");
 		expect(wt).toContain("Ctrl+Shift");
 		// 8gent must really have no binding for the keys the page says it lacks.
-		for (const k of ["Alt+Enter", "Shift+Enter"]) expect(tableKeys.has(k)).toBe(false);
+		expect(tableKeys.has("Shift+Enter")).toBe(false);
+		// Alt+Enter is bound, but Windows Terminal swallows it, so Ctrl+Q does the same.
+		for (const k of ["Alt+Enter", "Ctrl+Q"]) expect(tableKeys.has(k)).toBe(true);
 		for (const k of tableKeys) expect(k.startsWith("Ctrl+Shift")).toBe(false);
 		// The remap advice is valid JSON.
 		const json = wt.match(/```json\n([\s\S]*?)```/);
