@@ -2498,14 +2498,25 @@ export class ToolExecutor {
 			case "gh_issue_list":
 				return this.runCommand("gh issue list");
 			case "post_message": {
-				// Pre-send check (#4191): the task's countable rules, counted in the draft with code.
-				const presend = this.presendCheck(typeof args.text === "string" ? args.text : "");
-				if (presend) return presend;
 				// Policy gate, then the person, inside postMessage; never a shell string.
+				let text = typeof args.text === "string" ? args.text : "";
+				// text_file (#3838): a drafted message in the project, read here so no
+				// shell substitution is needed. safePath keeps it inside the workspace.
+				if (text === "" && typeof args.text_file === "string" && args.text_file !== "") {
+					const file = safePath(args.text_file, this.workingDirectory, "read");
+					if (!fs.existsSync(file)) return `[ERROR] text_file not found: ${args.text_file}`;
+					if (fs.statSync(file).size > 64 * 1024)
+						return "[ERROR] text_file is over 64 KB; a message is at most 4096 characters.";
+					text = fs.readFileSync(file, "utf8").replace(/\s+$/, "");
+				}
+				// Pre-send check (#4191): the task's countable rules, counted in the draft with code
+				// (after text_file is read, so a drafted file is counted too).
+				const presend = this.presendCheck(text);
+				if (presend) return presend;
 				return postMessage(
 					{
 						chat: String(args.chat ?? ""),
-						text: typeof args.text === "string" ? args.text : "",
+						text,
 						voice: typeof args.voice === "string" && args.voice ? args.voice : undefined,
 					},
 					postMessageDeps(this.agentId, this.postSession),
