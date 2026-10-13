@@ -2491,7 +2491,7 @@ export class ToolExecutor {
 				// text_file (#3838): a drafted message in the project, read here so no
 				// shell substitution is needed. safePath keeps it inside the workspace.
 				if (text === "" && typeof args.text_file === "string" && args.text_file !== "") {
-					const file = safePath(args.text_file, this.workingDirectory);
+					const file = safePath(args.text_file, this.workingDirectory, "read");
 					if (!fs.existsSync(file)) return `[ERROR] text_file not found: ${args.text_file}`;
 					if (fs.statSync(file).size > 64 * 1024)
 						return "[ERROR] text_file is over 64 KB; a message is at most 4096 characters.";
