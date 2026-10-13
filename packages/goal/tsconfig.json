@@ -6,6 +6,6 @@
 		"composite": false,
 		"noEmit": true
 	},
-	"include": ["./**/*.ts"],
+	"include": ["./**/*.ts", "../memory/sql.d.ts"],
 	"exclude": ["dist", "node_modules", "**/*.test.ts"]
 }

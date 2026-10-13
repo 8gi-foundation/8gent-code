@@ -16,11 +16,10 @@
 		"types": ["bun", "node"],
 		"typeRoots": ["../../node_modules/@types"],
 		"lib": ["ES2022", "DOM"],
-		"baseUrl": "../..",
 		"paths": {
-			"@8gent/eyes": ["packages/eyes/index.ts"],
-			"@8gent/eyes/types": ["packages/eyes/types.ts"],
-			"@8gent/hands": ["packages/hands/index.ts"]
+			"@8gent/eyes": ["../../packages/eyes/index.ts"],
+			"@8gent/eyes/types": ["../../packages/eyes/types.ts"],
+			"@8gent/hands": ["../../packages/hands/index.ts"]
 		}
 	},
 	"include": ["**/*.ts"],

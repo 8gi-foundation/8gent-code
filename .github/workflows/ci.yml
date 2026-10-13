@@ -43,8 +43,36 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      # #4135: apps/tui/tsconfig.json narrows include to the TUI's src, so it is
+      # its own typecheck scope. It was run by no workflow and sat red on main.
+      - name: "Type check (TUI scope)"
+        run: bun run typecheck:tui
+
       - name: Lint
         run: bun run lint
+
+      # #4135: biome check (lint, format, import order) and format:check were run
+      # by no workflow. main still carries 664 unformatted files and 272 unsorted
+      # import blocks, so these gate the files a change touches: new debt fails,
+      # old debt shrinks with every edit, and no repo-wide reformat has to land
+      # on top of the open PRs. The base is HEAD^1 on a pull request (the main
+      # tip the checked-out merge commit sits on, so a PR is never failed on
+      # files it did not touch after main moved), or the previous main tip on a
+      # push. A pure move of a legacy unformatted file (R100) fails at its new
+      # path by design: a mechanical move PR reformats what it moves. -z keeps
+      # non-ASCII and unusual paths intact (git would otherwise quote them and
+      # biome would skip them). The root package.json is excluded until the
+      # full-repo reformat (the follow-up to #4135) lands: release bumps and open
+      # PRs edit it, so a whole-file reformat would conflict with all of them.
+      - name: "Biome check (changed files)"
+        env:
+          BIOME_SINCE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: git diff -z --name-only --diff-filter=ACMR "$BIOME_SINCE"...HEAD -- . ':!package.json' | xargs -0 -r bunx biome check --no-errors-on-unmatched
+
+      - name: "Format check (changed files)"
+        env:
+          BIOME_SINCE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: git diff -z --name-only --diff-filter=ACMR "$BIOME_SINCE"...HEAD -- . ':!package.json' | xargs -0 -r bunx biome format --no-errors-on-unmatched
 
       # The locate tool shells out to ripgrep; ubuntu-latest does not ship it (#3287).
       # Without rg, locate degrades to a stated note, which its own tests cover.
