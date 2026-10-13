@@ -47,7 +47,15 @@
  * Synchronous, never throws.
  */
 
-import { constants, accessSync, closeSync, openSync, readSync, realpathSync } from "node:fs";
+import {
+	constants,
+	accessSync,
+	closeSync,
+	openSync,
+	readSync,
+	readlinkSync,
+	realpathSync,
+} from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -103,14 +111,24 @@ function head(file: string): string | null {
 	}
 }
 
-/** The real location of `p` when it exists, else the real location of its nearest existing ancestor. */
-function realOrAncestor(p: string): string {
+/**
+ * The real location of `p` when it exists, else the real location of its nearest existing ancestor.
+ * A dangling symlink on the way is followed to where it points (8SO review of #4171): a link from
+ * outside to a folder not yet made in the workspace names a workspace path. null when a link chain
+ * never resolves (a loop); callers treat that as inside.
+ */
+function realOrAncestor(p: string, depth = 0): string | null {
 	let cur = p;
 	let rest = "";
 	for (let i = 0; i < 64 && cur !== path.dirname(cur); i++) {
 		try {
 			return path.join(realpathSync(cur), rest);
 		} catch {
+			if (lstatOrNull(cur)?.isSymbolicLink()) {
+				if (depth >= 8) return null;
+				const target = path.resolve(path.dirname(cur), readlinkSync(cur));
+				return realOrAncestor(path.join(target, rest), depth + 1);
+			}
 			rest = path.join(path.basename(cur), rest);
 			cur = path.dirname(cur);
 		}
@@ -128,7 +146,8 @@ export function pathOutsideWorkspace(root: string, pathEnv: string): boolean {
 	if (entries.length === 0) return false;
 	for (const dir of entries) {
 		if (!dir || !path.isAbsolute(dir)) return false;
-		if (inside(realOrAncestor(dir), root)) return false;
+		const real = realOrAncestor(dir);
+		if (real === null || inside(real, root)) return false;
 	}
 	return true;
 }
@@ -167,7 +186,10 @@ function installedOutside(roots: string[], pathEnv: string): boolean {
 	for (const m of text.match(PATH_TOKEN) ?? []) {
 		entries2.push(path.isAbsolute(m) ? m : path.resolve(dir, m));
 	}
-	for (const e of entries2) if (within(realOrAncestor(e))) return false;
+	for (const e of entries2) {
+		const real = realOrAncestor(e);
+		if (real === null || within(real)) return false;
+	}
 	return true;
 }
 

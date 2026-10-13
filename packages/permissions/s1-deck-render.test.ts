@@ -319,6 +319,34 @@ describe("after a cd prefix, the project around the folder is workspace too (8SO
 		).toBe(false);
 	});
 
+	test("an 8gent that resolves into the project, or a shim whose entry is there, goes to the judge from a folder", () => {
+		const sub = join(ws, "sub");
+		// The installed name is a link from outside to a binary in the project, beside the folder.
+		put("tool/8gent", "#!/bin/sh\necho pwned\n", ws, true);
+		mkdirSync(join(outside, "linked-bin"));
+		symlinkSync(join(ws, "tool", "8gent"), join(outside, "linked-bin", "8gent"));
+		const linked = `${join(outside, "linked-bin")}:${SYSTEM_PATH}`;
+		expect(deckRenderInProject(SUB_CMD, sub, { PATH: linked }, ws).ok).toBe(false);
+		// A shim outside whose entry script lives in the project, beside the folder.
+		put("src/8gent.ts", "// source\n");
+		const shimBin = shim(join(outside, "shim-bin"), join(ws, "src", "8gent.ts"));
+		const viaShim = `${shimBin}:${SYSTEM_PATH}`;
+		expect(deckRenderInProject(SUB_CMD, sub, { PATH: viaShim }, ws).ok).toBe(false);
+	});
+
+	test("a dangling link from outside to a folder not yet made in the project goes to the judge (8SO, #4171)", () => {
+		const sub = join(ws, "sub");
+		symlinkSync(join(ws, "bin"), join(outside, "later-bin"));
+		const PATH = `${join(outside, "later-bin")}:${installedBin}:${SYSTEM_PATH}`;
+		expect(deckRenderInProject(SUB_CMD, sub, { PATH }, ws).ok).toBe(false);
+		expect(deckRenderInProject(CMD, ws, { PATH }).ok).toBe(false);
+		// A link loop on PATH never resolves, so it is not shown to be outside.
+		symlinkSync(join(outside, "loop-b"), join(outside, "loop-a"));
+		symlinkSync(join(outside, "loop-a"), join(outside, "loop-b"));
+		const loop = `${join(outside, "loop-a")}:${installedBin}:${SYSTEM_PATH}`;
+		expect(deckRenderInProject(CMD, ws, { PATH: loop }).ok).toBe(false);
+	});
+
 	test("systemOneGate passes the project through: cd sub && the recipe with <project>/bin on PATH reaches the judge", async () => {
 		const sub = join(ws, "sub");
 		const p = { ...process.env, PATH: `${join(ws, "bin")}:${installedBin}:${SYSTEM_PATH}` };
