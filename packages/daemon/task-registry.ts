@@ -8,8 +8,12 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { getDataDir } from "./data-dir";
 
-const TASKS_PATH = join(process.env.HOME || "/root", ".8gent", "tasks.json");
+/** tasks.json under the data dir (EIGHT_DATA_DIR, then os.homedir()/.8gent; #4111). */
+export function tasksPath(): string {
+	return join(getDataDir(), "tasks.json");
+}
 const MAX_TASKS = 100;
 
 export type TaskStatus = "planned" | "delegated" | "in-progress" | "review" | "done" | "failed";
@@ -34,15 +38,15 @@ let tasks: CEOTask[] = [];
 let loaded = false;
 
 function ensureDir(): void {
-	const dir = join(process.env.HOME || "/root", ".8gent");
+	const dir = getDataDir();
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
 function load(): void {
 	if (loaded) return;
 	try {
-		if (existsSync(TASKS_PATH)) {
-			tasks = JSON.parse(readFileSync(TASKS_PATH, "utf-8"));
+		if (existsSync(tasksPath())) {
+			tasks = JSON.parse(readFileSync(tasksPath(), "utf-8"));
 		}
 	} catch {
 		tasks = [];
@@ -56,7 +60,7 @@ function save(): void {
 	if (tasks.length > MAX_TASKS) {
 		tasks = tasks.slice(-MAX_TASKS);
 	}
-	writeFileSync(TASKS_PATH, JSON.stringify(tasks, null, 2));
+	writeFileSync(tasksPath(), JSON.stringify(tasks, null, 2));
 }
 
 function generateId(): string {

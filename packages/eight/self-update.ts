@@ -346,7 +346,8 @@ export function probeVersionWithTimeout(
 	return new Promise((resolve) => {
 		let out = "";
 		let done = false;
-		let timer: ReturnType<typeof setTimeout> | undefined;
+		// Assigned after spawn; finish() can run first (spawn throws) and must see undefined, not a TDZ error.
+		let timer: ReturnType<typeof setTimeout> | undefined = undefined;
 		const finish = (v: string) => {
 			if (done) return;
 			done = true;

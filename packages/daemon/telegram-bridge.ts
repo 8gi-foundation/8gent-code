@@ -40,6 +40,7 @@ import {
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
 import { recordTelegramPoll, registerTelegramBridge } from "./bridge-health";
 import { approvalTtlMs, bridgeSecret } from "./channel-approvals";
+import { getDataDir } from "./data-dir";
 import { NO_LINK_PREVIEW } from "./notifications";
 import {
 	decideVoice,
@@ -120,8 +121,10 @@ const MAX_MSG_LENGTH = 4000;
 
 /** Multi-step mode is on by default. Set EIGHT_TG_LEGACY=1 to fall back. */
 const MULTI_STEP_ENABLED = process.env.EIGHT_TG_LEGACY !== "1";
-const SESSION_STORE_PATH =
-	process.env.EIGHT_TG_SESSIONS || `${process.env.HOME ?? ""}/.8gent/telegram-sessions.json`;
+/** EIGHT_TG_SESSIONS wins; otherwise telegram-sessions.json under the data dir (#4111). */
+export function sessionStorePath(): string {
+	return process.env.EIGHT_TG_SESSIONS || join(getDataDir(), "telegram-sessions.json");
+}
 
 export interface MsgEntity {
 	type: string;
@@ -245,14 +248,22 @@ export async function tgSend(
  * note in well under a second on Apple Silicon, which is faster than the round
  * trip to any hosted Whisper would be.
  */
-const WHISPER_MODELS = [
-	`${process.env.HOME}/.8gent/models/whisper/ggml-base.en.bin`,
-	`${process.env.HOME}/.8gent/models/whisper/ggml-tiny.bin`,
-	`${process.env.HOME}/models/ggml-base.en.bin`,
-];
+export function whisperModelPaths(): string[] {
+	return [
+		join(getDataDir(), "models", "whisper", "ggml-base.en.bin"),
+		join(getDataDir(), "models", "whisper", "ggml-tiny.bin"),
+		// Outside .8gent: the user's own ~/models folder, via the shared home resolver (#4111).
+		join(resolveHome(), "models", "ggml-base.en.bin"),
+	];
+}
+
+/** Working directory for the bridge's delegation pool, under the data dir (was /app with no HOME; #4111). */
+export function cosPoolWorkspace(): string {
+	return join(getDataDir(), "workspace");
+}
 
 function localWhisperModel(): string | null {
-	for (const m of WHISPER_MODELS) {
+	for (const m of whisperModelPaths()) {
 		if (existsSync(m)) return m;
 	}
 	return null;
@@ -784,7 +795,7 @@ class TelegramDaemonBridge {
 					approvalSecret: bridgeSecret(),
 				});
 				await this.daemonClient.connect();
-				this.sessionStore = new SessionStore({ persistPath: SESSION_STORE_PATH });
+				this.sessionStore = new SessionStore({ persistPath: sessionStorePath() });
 				this.adapter = new TelegramBridgeAdapter({
 					telegramToken: this.config.telegramToken,
 					resolveChatId: () => this.replyChat(),
@@ -815,7 +826,7 @@ class TelegramDaemonBridge {
 			const cosPool = new AgentPool({
 				model: cosModel,
 				runtime: cosRuntime,
-				workingDirectory: process.env.HOME ? `${process.env.HOME}/.8gent/workspace` : "/app",
+				workingDirectory: cosPoolWorkspace(),
 				// Only the runtime's own key (#3261).
 				apiKey: sessionApiKey(cosRuntime),
 			});

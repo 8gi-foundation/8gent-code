@@ -40,7 +40,7 @@ jobs:
       CI: "true"
     steps:
       - name: Shallow checkout (what a Windows user clones)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 1
 
@@ -133,6 +133,19 @@ jobs:
             Get-Content daemon.out, daemon.err -ErrorAction SilentlyContinue | Select-Object -Last 20
           }
 
+      # Windows never stops the daemon cleanly, so the session journal is the only
+      # durability there (#4107). Hard-kill the compiled daemon mid-command
+      # (TerminateProcess, like Stop-Process -Force or a power cut), start it
+      # again, and require the session back, the cut command not replayed, the
+      # turn continued and finished, and the command run exactly once. The model
+      # is a stub inside the script; no model or network is used.
+      - name: Compiled daemon survives a hard kill mid-command and finishes the work
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path .\dist\bin\8gent-windows-x64.exe).Path
+          bun scripts/ci/durable-kill-resume.ts $exe daemon run
+          if ($LASTEXITCODE -ne 0) { throw "kill-and-resume proof failed (exit $LASTEXITCODE)" }
+
       # The TUI is embedded in the .exe (#2975). Launch it under ConPTY from a
       # hostile working directory and require a real first frame (a known TUI
       # string), not just the absence of two error strings (#3894).
@@ -150,7 +163,7 @@ jobs:
           "### Windows binary`nsize: $([math]::Round($f.Length/1MB,1)) MB`nsha256: $h" | Out-File -Append $env:GITHUB_STEP_SUMMARY
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: 8gent-windows-x64
           path: |

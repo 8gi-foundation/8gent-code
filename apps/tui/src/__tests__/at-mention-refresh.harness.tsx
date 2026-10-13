@@ -13,6 +13,7 @@ async function main() {
 	fs.writeFileSync(path.join(dir, "alpha-first.ts"), "");
 	const back = process.cwd();
 	process.chdir(dir);
+	let cleanupError: unknown;
 	try {
 		const app = await bootApp(160, 50);
 		let m = app.mark();
@@ -34,9 +35,11 @@ async function main() {
 			// The app's file watcher can hold the folder open until exit on Windows; it is under the
 			// run's temp dir, which the test sweep removes. Elsewhere any failure still throws.
 			const code = (e as NodeJS.ErrnoException).code;
-			if (!(process.platform === "win32" && (code === "EBUSY" || code === "EPERM"))) throw e;
+			if (!(process.platform === "win32" && (code === "EBUSY" || code === "EPERM"))) cleanupError = e;
 		}
 	}
+	// Thrown here, not inside finally, so a failure in the body above is never masked by cleanup.
+	if (cleanupError) throw cleanupError;
 	process.exit(0);
 }
 
