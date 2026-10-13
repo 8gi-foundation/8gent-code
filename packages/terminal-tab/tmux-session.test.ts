@@ -13,8 +13,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-	buildPipePaneArgs,
 	buildEnterKeyArgs,
+	buildPipePaneArgs,
 	buildSendKeysArgs,
 	buildTmuxNewSessionArgs,
 	hasSession,

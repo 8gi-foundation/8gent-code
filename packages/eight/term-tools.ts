@@ -16,6 +16,8 @@
  * window IDs. It just calls term_spawn / term_send / term_read.
  */
 
+import { commandSegments } from "../permissions/command-policy.js";
+import { getPermissionManager } from "../permissions/index.js";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import {
 	type WindowSession,
@@ -32,8 +34,6 @@ import {
 	sendTmuxKeys,
 	spawnTmuxSession,
 } from "../terminal-tab/index.js";
-import { getPermissionManager } from "../permissions/index.js";
-import { commandSegments } from "../permissions/command-policy.js";
 
 // ---------------- Per-session read offsets ----------------
 //
@@ -43,7 +43,6 @@ import { commandSegments } from "../permissions/command-policy.js";
 // stateless across tool calls but the cursor needs to persist.
 //
 const readOffsets = new Map<string, number>();
-
 
 // ---------------- Command policy (#3767) ----------------
 //
@@ -107,7 +106,9 @@ async function gateInput(tool: string, text: string): Promise<string | null> {
 			"The agent wants to type text that cannot be read as a plain command.",
 			text,
 		);
-		return ok ? null : refuse(`a person declined input that could not be read as a command: ${text}`);
+		return ok
+			? null
+			: refuse(`a person declined input that could not be read as a command: ${text}`);
 	}
 
 	for (const line of lines) {
