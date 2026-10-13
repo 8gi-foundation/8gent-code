@@ -572,7 +572,7 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: process.platform !== "win32",
-			env: { ...buildChildEnv(process.env, GIT_ENV_NAMES), ...GIT_NON_INTERACTIVE_ENV },
+			env: { ...(buildChildEnv(process.env, GIT_ENV_NAMES) as NodeJS.ProcessEnv), ...GIT_NON_INTERACTIVE_ENV },
 		});
 		let stdout = "";
 		let stderr = "";
@@ -3455,7 +3455,7 @@ export class ToolExecutor {
 				windowsShell,
 				env: {
 					// The done gate hands in an already scrubbed env; everything else gets the minimal one.
-					...((env as NodeJS.ProcessEnv | undefined) ?? buildChildEnv()),
+					...((env as NodeJS.ProcessEnv | undefined) ?? (buildChildEnv() as NodeJS.ProcessEnv)),
 					...SPAWN_NON_INTERACTIVE_ENV,
 				},
 			});
@@ -3537,7 +3537,7 @@ export class ToolExecutor {
 			let stderr = "";
 			const proc = spawn(cmd, args, {
 				cwd: this.workingDirectory,
-				env: buildChildEnv(process.env, GH_ENV_NAMES),
+				env: buildChildEnv(process.env, GH_ENV_NAMES) as NodeJS.ProcessEnv,
 			});
 			proc.stdout?.on("data", (d: Buffer) => {
 				stdout += d.toString();

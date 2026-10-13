@@ -196,7 +196,7 @@ describe("keys file cannot widen the pass list", () => {
 		try {
 			expect(loadKeysIntoEnv(f)).toBe(1);
 			expect(process.env.EIGHT_SHELL_ENV_PASS).toBeUndefined();
-			expect(process.env.FAKE_LOADED_KEY).toBe("ok");
+			expect(Reflect.get(process.env, "FAKE_LOADED_KEY")).toBe("ok");
 		} finally {
 			delete process.env.FAKE_LOADED_KEY;
 		}

@@ -98,7 +98,7 @@ export class BackgroundTaskManager {
 		const proc = spawnShell(wrapRunCommand(command), {
 			cwd: workingDirectory,
 			env: {
-				...buildChildEnv(),
+				...(buildChildEnv() as NodeJS.ProcessEnv),
 				...options.env,
 			},
 			stdio: ["ignore", "pipe", "pipe"],
