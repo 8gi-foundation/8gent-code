@@ -22,7 +22,15 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 function run(args: string[]): { code: number; out: string; err: string } {
 	const r = Bun.spawnSync(["bun", ...args], {
 		cwd: ROOT,
-		env: { ...process.env, HOME: home, USERPROFILE: home },
+		// The test preload points EIGHT_DATA_DIR at its own home; point it at this
+		// one so the global store sits where a user's would: <HOME>/.8gent.
+		env: {
+			...process.env,
+			HOME: home,
+			USERPROFILE: home,
+			EIGHT_HOME: join(home, ".8gent"),
+			EIGHT_DATA_DIR: join(home, ".8gent"),
+		},
 		stdout: "pipe",
 		stderr: "pipe",
 	});
@@ -42,6 +50,17 @@ describe("8gent memory stats", () => {
 		};
 		expect(stats.totalMemories).toBe(2);
 		expect(stats.byType.semantic).toBe(2);
+	}, 60_000);
+
+	test("run from HOME, where project and global are one file, counts once", () => {
+		for (const fact of ["home facts are stored once", "and counted once"]) {
+			const r = run([BIN, "memory", "remember", `--cwd=${home}`, fact]);
+			expect(r.code).toBe(0);
+		}
+		const r = run([BIN, "memory", "stats", "--json", `--cwd=${home}`]);
+		expect(r.code).toBe(0);
+		const { stats } = JSON.parse(r.out) as { stats: { totalMemories: number } };
+		expect(stats.totalMemories).toBe(2);
 	}, 60_000);
 });
 
