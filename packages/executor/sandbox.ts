@@ -11,6 +11,7 @@
  *   else console.error(result.error);
  */
 
+import { safeBunFlags } from "../core/bun-flags";
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -49,7 +50,8 @@ export async function executeSecure(
 	writeFileSync(scriptPath, code);
 
 	try {
-		const output = execSync(`bun run "${scriptPath}"`, {
+		// tmpDir is a predictable /tmp path: never a bunfig.toml or .env planted there (#4013).
+		const output = execSync(`bun ${safeBunFlags().map((f) => JSON.stringify(f)).join(" ")} run "${scriptPath}"`, {
 			timeout,
 			encoding: "utf-8",
 			cwd: tmpDir,

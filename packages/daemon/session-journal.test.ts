@@ -8,7 +8,7 @@
  *     and removed when it ends,
  *   - a boot reload that recreates each journaled session and restores its
  *     newest time-travel checkpoint, without running any tool call again,
- *   - the real path: a process that is SIGKILLed mid-task (no shutdown hook
+ *   - the real path: a process hard-killed mid-task by a second process (no shutdown hook
  *     runs) and a fresh pool that brings the session back.
  *
  * Uses a REAL AgentPool and a REAL TimeTravelStore on temp dirs. No model is
@@ -20,6 +20,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { TimeTravelStore } from "../eight/timetravel/checkpoint-store";
+import { forceKillFromSecondProcess, isAlive, waitForFile } from "../../tests/force-kill";
 import { rmRetry } from "../../tests/rm-retry";
 
 const saved: Record<string, string | undefined> = {};
@@ -48,7 +49,9 @@ beforeAll(async () => {
 	}
 	mod = await import("./session-journal");
 	({ AgentPool } = await import("./agent-pool"));
-});
+	// A cold import of the pool module takes over 5 s on windows-latest when this
+	// file runs on its own (resume-conformance.yml, #4113).
+}, 60_000);
 
 afterAll(() => {
 	for (const [k, v] of Object.entries(saved)) {
@@ -211,7 +214,7 @@ describe("resumeJournaledSessions", () => {
 
 		const restored = after.getAgent("s_task")!;
 		expect(restored.getMessageHistory().slice(1)).toEqual(history.slice(1));
-		expect(after.getSessionInfo("s_task")).toEqual({
+		expect(after.getSessionInfo("s_task")).toMatchObject({
 			channel: "api",
 			messageCount: 0,
 			busy: false,
@@ -305,12 +308,17 @@ describe("resumeJournaledSessions", () => {
 	});
 });
 
-describe("SIGKILL mid-task", () => {
-	// POSIX only: asserts the child died of SIGKILL; Windows processes have no signals.
-	test.skipIf(process.platform === "win32")(
+describe("hard kill mid-task", () => {
+	// Every platform: a second process force-kills the child after its journal
+	// and checkpoint are on disk. POSIX uses kill -KILL; Windows has no signals,
+	// so it is Stop-Process -Force (TerminateProcess), as the Scheduled Task does (#4113).
+	test(
 		"a killed process's open session comes back with its last checkpoint",
 		async () => {
-			const script = path.join(path.dirname(journalPath), "crash.ts");
+			const dir = path.dirname(journalPath);
+			const script = path.join(dir, "crash.ts");
+			const ready = path.join(dir, "crash.ready");
+			const survived = path.join(dir, "crash.survived");
 			const poolPath = path.join(import.meta.dir, "agent-pool.ts");
 			const journalMod = path.join(import.meta.dir, "session-journal.ts");
 			const storeMod = path.join(
@@ -322,7 +330,8 @@ describe("SIGKILL mid-task", () => {
 			);
 			fs.writeFileSync(
 				script,
-				`import { AgentPool } from ${JSON.stringify(poolPath)};
+				`import { writeFileSync } from "node:fs";
+import { AgentPool } from ${JSON.stringify(poolPath)};
 import { SessionJournal } from ${JSON.stringify(journalMod)};
 import { TimeTravelStore } from ${JSON.stringify(storeMod)};
 const journal = new SessionJournal(${JSON.stringify(journalPath)});
@@ -335,17 +344,27 @@ store.save(agent.getTimeTravelSessionId(), [
   { role: "user", content: "deploy the site" },
   { role: "assistant", content: "step 3 of 5" },
 ], { reason: "interval", toolCallCount: 8 });
-process.kill(process.pid, "SIGKILL");
+writeFileSync(${JSON.stringify(ready)}, String(process.pid));
+// Still mid-task: only a kill from outside stops this before the marker below.
+setTimeout(() => { writeFileSync(${JSON.stringify(survived)}, "1"); process.exit(0); }, 30_000);
 `,
 			);
 			const proc = Bun.spawn([process.execPath, script], {
 				env: { ...process.env, EIGHT_TIMETRAVEL_DIR: ttDir },
 				stdout: "ignore",
-				stderr: "ignore",
+				stderr: "pipe",
 			});
+			await waitForFile(ready, proc);
+			await forceKillFromSecondProcess(proc.pid);
 			await proc.exited;
-			expect(proc.signalCode).toBe("SIGKILL");
 
+			// The child died from outside, not by finishing its work.
+			expect(proc.exitCode).not.toBe(0);
+			if (process.platform !== "win32") expect(proc.signalCode).toBe("SIGKILL");
+			expect(isAlive(proc.pid)).toBe(false);
+			expect(fs.existsSync(survived)).toBe(false);
+
+			// The journal survived the kill and brings the session back.
 			const journal = new mod.SessionJournal(journalPath);
 			expect(journal.read().map((e) => e.sessionId)).toEqual(["s_crash"]);
 			const pool = newPool(journal);
@@ -432,8 +451,20 @@ describe("interrupted tool calls on resume", () => {
 			ttSessionId: "session_mid_tool",
 			createdAt: 1,
 			inFlight: [
-				{ id: "w1", tool: "write_file", args: { path: "out-3653.txt" }, startedAt: 2 },
-				{ id: "r1", tool: "read_file", args: { path: "notes-3653.txt" }, startedAt: 3 },
+				{
+					id: "w1",
+					tool: "write_file",
+					cls: "never",
+					args: { path: "out-3653.txt" },
+					startedAt: 2,
+				},
+				{
+					id: "r1",
+					tool: "read_file",
+					cls: "replay",
+					args: { path: "notes-3653.txt" },
+					startedAt: 3,
+				},
 			],
 		});
 		const store = new TimeTravelStore({ dataDir: ttDir });
@@ -488,6 +519,151 @@ describe("interrupted tool calls on resume", () => {
 });
 
 /**
+ * 8SO review of the replay wording (#4118, group msg 5611): the note says what
+ * is knowable about an interrupted call. A missing class is unknown, a class
+ * recorded under a different policy says so, and a genuine "never" says it
+ * changed something. The wording is asserted because collapsing the messages
+ * is how the defect arose.
+ */
+describe("replay class on resume (#4118)", () => {
+	const UNKNOWN = "Its replay class is unknown";
+	const CHANGES = "It changes something (file, shell, git, network or a message)";
+	const OTHER_POLICY = "It was recorded under a different replay policy";
+
+	async function settleOne(call: {
+		id: string;
+		tool: string;
+		cls?: import("./session-journal").InFlightToolCall["cls"];
+		args?: Record<string, unknown>;
+	}) {
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_cls",
+			channel: "api",
+			ttSessionId: "session_cls",
+			createdAt: 1,
+			inFlight: [{ startedAt: 1, args: {}, ...call }],
+		});
+		const pool = newPool(journal);
+		mod.resumeJournaledSessions(journal, pool, new TimeTravelStore({ dataDir: ttDir }));
+		const [settled] = await mod.settleInterruptedToolCalls(journal, pool);
+		const history = pool.getAgent("s_cls")!.getMessageHistory();
+		return { settled, note: String(history[history.length - 1].content) };
+	}
+
+	test("a call with no recorded class resolves to ask and says unknown, not changes something", async () => {
+		const { settled, note } = await settleOne({
+			id: "w0",
+			tool: "write_file",
+			args: { path: "x.txt" },
+		});
+		expect(settled.notReplayed).toEqual(["w0"]);
+		expect(note).toContain(UNKNOWN);
+		expect(note).not.toContain(CHANGES);
+		expect(note).not.toContain(OTHER_POLICY);
+	});
+
+	test("a read with no recorded class is not re-run", async () => {
+		const { settled, note } = await settleOne({
+			id: "r0",
+			tool: "read_file",
+			args: { path: "a.txt" },
+		});
+		expect(settled.replayed).toEqual([]);
+		expect(settled.notReplayed).toEqual(["r0"]);
+		expect(note).toContain(UNKNOWN);
+	});
+
+	test("a call recorded under a different policy says so and is not re-run", async () => {
+		const asRead = await settleOne({
+			id: "w2",
+			tool: "write_file",
+			cls: "replay",
+			args: { path: "x.txt" },
+		});
+		expect(asRead.settled.notReplayed).toEqual(["w2"]);
+		expect(asRead.note).toContain(OTHER_POLICY);
+		expect(asRead.note).not.toContain(UNKNOWN);
+		expect(asRead.note).not.toContain(CHANGES);
+
+		// A class that is a read now but was not when the call started is still not re-run.
+		const nowRead = await settleOne({
+			id: "r2",
+			tool: "read_file",
+			cls: "never",
+			args: { path: "a.txt" },
+		});
+		expect(nowRead.settled.replayed).toEqual([]);
+		expect(nowRead.note).toContain(OTHER_POLICY);
+	});
+
+	test("a genuine never says it changes something, not unknown", async () => {
+		const { settled, note } = await settleOne({
+			id: "w3",
+			tool: "write_file",
+			cls: "never",
+			args: { path: "x.txt" },
+		});
+		expect(settled.notReplayed).toEqual(["w3"]);
+		expect(note).toContain(CHANGES);
+		expect(note).not.toContain(UNKNOWN);
+		expect(note).not.toContain(OTHER_POLICY);
+	});
+
+	test("a running call is journaled with its class and the policy version", async () => {
+		const { REPLAY_POLICY_VERSION } = await import("../eight/tools");
+		const journal = new mod.SessionJournal(journalPath);
+		const pool = newPool(journal);
+		pool.createSession("s_rec", "api");
+		const events = (pool.getAgent("s_rec") as any).events;
+		events.onToolStart({ toolName: "read_file", toolCallId: "c1", args: { path: "a.txt" } });
+		events.onToolStart({ toolName: "write_file", toolCallId: "c2", args: { path: "b.txt" } });
+		events.onToolStart({ toolName: "some_new_tool", toolCallId: "c3", args: {} });
+		expect(journal.read()[0].inFlight!.map((c) => c.cls)).toEqual(["replay", "never", "ask"]);
+		const onDisk = JSON.parse(fs.readFileSync(journalPath, "utf8"));
+		expect(typeof REPLAY_POLICY_VERSION).toBe("number");
+		expect(onDisk.replayPolicy).toBe(REPLAY_POLICY_VERSION);
+	});
+
+	test("a pre-upgrade journal (no class) passes validation, an unrecognised class degrades to ask", async () => {
+		fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+		fs.writeFileSync(
+			journalPath,
+			JSON.stringify({
+				version: 1,
+				sessions: [
+					{
+						sessionId: "s_old",
+						channel: "api",
+						ttSessionId: "session_old",
+						createdAt: 1,
+						inFlight: [
+							{ id: "old1", tool: "write_file", args: { path: "x.txt" }, startedAt: 1 },
+							{
+								id: "odd1",
+								tool: "read_file",
+								cls: "sometimes",
+								args: { path: "a.txt" },
+								startedAt: 2,
+							},
+						],
+					},
+				],
+			}),
+		);
+		const journal = new mod.SessionJournal(journalPath);
+		const [entry] = journal.read();
+		expect(entry.inFlight!.map((c) => c.id)).toEqual(["old1", "odd1"]);
+		expect(entry.inFlight!.map((c) => c.cls)).toEqual([undefined, undefined]);
+		const pool = newPool(journal);
+		mod.resumeJournaledSessions(journal, pool, new TimeTravelStore({ dataDir: ttDir }));
+		const [settled] = await mod.settleInterruptedToolCalls(journal, pool);
+		expect(settled.replayed).toEqual([]);
+		expect(settled.notReplayed).toEqual(["old1", "odd1"]);
+	});
+});
+
+/**
  * 8SO review of #3698: the replay set holds only reads that have no side
  * effects and pass the standard path and policy checks, and journal text is
  * scrubbed of secrets.
@@ -529,7 +705,9 @@ describe("replay set review (#3653)", () => {
 			channel: "api",
 			ttSessionId: "session_escape",
 			createdAt: 1,
-			inFlight: [{ id: "r9", tool: "read_file", args: { path: secretFile }, startedAt: 1 }],
+			inFlight: [
+				{ id: "r9", tool: "read_file", cls: "replay", args: { path: secretFile }, startedAt: 1 },
+			],
 		});
 		const pool = newPool(journal);
 		mod.resumeJournaledSessions(journal, pool, new TimeTravelStore({ dataDir: ttDir }));
@@ -570,4 +748,301 @@ describe("replay set review (#3653)", () => {
 		expect(note).toContain("not replayed, needs confirmation");
 		expect(note).not.toContain(token);
 	});
+});
+
+/**
+ * #4082: a turn that was running at the crash is journaled before it runs
+ * and, with EIGHT_AUTO_CONTINUE=1, continued exactly once on the next boot.
+ */
+describe("durable turns (#4082)", () => {
+	function fakePool(missing: string[] = []) {
+		const calls: Array<{ sessionId: string; text: string; continuation: boolean }> = [];
+		const notes: string[] = [];
+		const pool: import("./session-journal").ContinuePool = {
+			async chat(sessionId, text, _turn, options) {
+				calls.push({ sessionId, text, continuation: options.continuation });
+				return "ok";
+			},
+			getAgent: (id) => (missing.includes(id) ? null : { addHarnessNote: (b) => notes.push(b) }),
+		};
+		return { pool, calls, notes };
+	}
+
+	const journal = (p: string) => new mod.SessionJournal(p);
+
+	test("EIGHT_AUTO_CONTINUE=1 enables, anything else does not", () => {
+		expect(mod.autoContinueEnabled({ EIGHT_AUTO_CONTINUE: "1" })).toBe(true);
+		expect(mod.autoContinueEnabled({})).toBe(false);
+		expect(mod.autoContinueEnabled({ EIGHT_AUTO_CONTINUE: "true" })).toBe(false);
+	});
+
+	test("the pool journals the turn before it runs, scrubbed, and drops it when the turn ends", async () => {
+		const journal = new mod.SessionJournal(journalPath);
+		const pool = newPool(journal);
+		pool.createSession("s_turn", "api");
+		const agent = pool.getAgent("s_turn") as any;
+		const token = `ghp_${"a1B2c3D4e5".repeat(3)}abcdef`;
+		let seen: import("./session-journal").PendingTurn | undefined;
+		agent.chat = async () => {
+			seen = journal.read()[0].pendingTurn;
+			return "done";
+		};
+		await pool.chat("s_turn", `deploy the site with ${token}`);
+		expect(seen?.id).toMatch(/^t_/);
+		expect(seen?.attempts).toBe(0);
+		expect(seen?.text).toContain("deploy the site");
+		expect(seen?.text).not.toContain(token);
+		expect(journal.read()[0].pendingTurn).toBeUndefined();
+
+		// A turn that ends in an error is finished too: nothing to continue.
+		agent.chat = async () => {
+			throw new Error("model down");
+		};
+		expect(await pool.chat("s_turn", "again")).toContain("[error]");
+		expect(journal.read()[0].pendingTurn).toBeUndefined();
+	});
+
+	test("a crash after turn-started is continued exactly once; a crash during the continuation does not loop", () => {
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_cut",
+			channel: "api",
+			ttSessionId: "session_cut",
+			createdAt: 1,
+			pendingTurn: { id: "t_one", text: "deploy the site", startedAt: 2, attempts: 0 },
+		});
+
+		// First boot after the crash: one continuation, journaled before it runs.
+		const first = fakePool();
+		expect(mod.continueInterruptedTurns(journal, first.pool, [])).toEqual([
+			{ sessionId: "s_cut", turnId: "t_one", attempts: 1, outcome: "continued" },
+		]);
+		expect(first.calls).toHaveLength(1);
+		expect(first.calls[0].sessionId).toBe("s_cut");
+		expect(first.calls[0].continuation).toBe(true);
+		expect(first.calls[0].text).toContain("[resume] continued-after-crash");
+		expect(first.calls[0].text).toContain("deploy the site");
+		expect(journal.read()[0].pendingTurn).toEqual({
+			id: "t_one",
+			text: "deploy the site",
+			startedAt: 2,
+			attempts: 1,
+		});
+
+		// The fake pool never ends the turn: the daemon died again during the
+		// continuation. Second boot: nothing runs, the turn is abandoned.
+		const second = fakePool();
+		expect(mod.continueInterruptedTurns(journal, second.pool, [])).toEqual([
+			{ sessionId: "s_cut", turnId: "t_one", attempts: 2, outcome: "abandoned" },
+		]);
+		expect(second.calls).toHaveLength(0);
+		expect(second.notes).toHaveLength(1);
+		expect(second.notes[0]).toContain("not continued again");
+		expect(journal.read()[0].pendingTurn).toBeUndefined();
+
+		// Third boot: nothing pending, nothing to do.
+		const third = fakePool();
+		expect(mod.continueInterruptedTurns(journal, third.pool, [])).toEqual([]);
+		expect(third.calls).toHaveLength(0);
+	});
+
+	test("a session that could not be recreated is skipped", () => {
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_gone",
+			channel: "api",
+			ttSessionId: "session_gone",
+			createdAt: 1,
+			pendingTurn: { id: "t_g", text: "x", startedAt: 1, attempts: 0 },
+		});
+		const f = fakePool(["s_gone"]);
+		expect(mod.continueInterruptedTurns(journal, f.pool, [])).toEqual([]);
+		expect(journal.read()[0].pendingTurn!.attempts).toBe(0);
+	});
+
+	test("an unconfirmed write continues from the pre-tool checkpoint with a verify instruction, keeping the journaled turn", async () => {
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_mid_write",
+			channel: "api",
+			ttSessionId: "session_mid_write",
+			createdAt: 1,
+			inFlight: [{ id: "w1", tool: "write_file", args: { path: "out.txt" }, startedAt: 2 }],
+			pendingTurn: { id: "t_w", text: "write the notes", startedAt: 1, attempts: 0 },
+		});
+		const store = new TimeTravelStore({ dataDir: ttDir });
+		store.save("session_mid_write", [{ role: "user", content: "write the notes" }], {
+			reason: "interval",
+			toolCallCount: 1,
+		});
+
+		const pool = newPool(journal);
+		mod.resumeJournaledSessions(journal, pool, store);
+		const settled = await mod.settleInterruptedToolCalls(journal, pool);
+		const agent = pool.getAgent("s_mid_write") as any;
+		let prompt = "";
+		let duringTurn: import("./session-journal").PendingTurn | undefined;
+		const ran = new Promise<void>((resolve) => {
+			agent.chat = async (text: string) => {
+				prompt = text;
+				duringTurn = journal.read()[0].pendingTurn;
+				resolve();
+				return "continued";
+			};
+		});
+		const [r] = mod.continueInterruptedTurns(journal, pool, settled);
+		expect(r.outcome).toBe("continued-from-checkpoint");
+		await ran;
+		expect(prompt).toContain("not replayed");
+		expect(prompt).toContain("check whether they took effect");
+		expect(prompt).toContain("write the notes");
+		// The continuation runs the journaled turn, not a new one.
+		expect(duringTurn).toEqual({ id: "t_w", text: "write the notes", startedAt: 1, attempts: 1 });
+		// The session is at the pre-tool checkpoint, then the settle note.
+		const history = agent.getMessageHistory().slice(1);
+		expect(history[0]).toEqual({ role: "user", content: "write the notes" });
+		expect(history[1].content).toContain("write_file");
+		expect(history[1].content).toContain("not replayed, needs confirmation");
+		// Once the continuation returns, the turn is finished.
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(journal.read()[0].pendingTurn).toBeUndefined();
+	});
+
+	test("with the flag off, resume and settle leave the pending turn alone and run nothing", async () => {
+		const journal = new mod.SessionJournal(journalPath);
+		journal.upsert({
+			sessionId: "s_off",
+			channel: "api",
+			ttSessionId: "session_off",
+			createdAt: 1,
+			pendingTurn: { id: "t_off", text: "deploy the site", startedAt: 1, attempts: 0 },
+		});
+		const pool = newPool(journal);
+		const agent = pool.getAgent("s_off") ?? null;
+		expect(agent).toBeNull();
+		mod.resumeJournaledSessions(journal, pool, new TimeTravelStore({ dataDir: ttDir }));
+		await mod.settleInterruptedToolCalls(journal, pool);
+		expect(journal.read()[0].pendingTurn).toEqual({
+			id: "t_off",
+			text: "deploy the site",
+			startedAt: 1,
+			attempts: 0,
+		});
+		expect(pool.getAgent("s_off")!.getMessageHistory().slice(1)).toEqual([]);
+	});
+
+	test("an oversized pending turn on disk is capped on read, an oversized id drops the turn", () => {
+		fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+		const entry = (sessionId: string, turn: Record<string, unknown>) => ({
+			sessionId,
+			channel: "api",
+			ttSessionId: `session_${sessionId}`,
+			createdAt: 1,
+			pendingTurn: turn,
+		});
+		fs.writeFileSync(
+			journalPath,
+			JSON.stringify({
+				version: 1,
+				sessions: [
+					entry("s_big_text", { id: "t_big", text: "x".repeat(50_000), startedAt: 1, attempts: 0 }),
+					entry("s_big_id", { id: "t".repeat(300), text: "ok", startedAt: 1, attempts: 0 }),
+				],
+			}),
+		);
+		const [bigText, bigId] = new mod.SessionJournal(journalPath).read();
+		expect(bigText.pendingTurn!.text.length).toBeLessThan(4050);
+		expect(bigText.pendingTurn!.text).toEndWith("... (50000 chars)");
+		expect(bigId.sessionId).toBe("s_big_id");
+		expect(bigId.pendingTurn).toBeUndefined();
+		// The capped text is what the continuation carries.
+		const f = fakePool();
+		mod.continueInterruptedTurns(journal(journalPath), f.pool, []);
+		expect(f.calls[0].text.length).toBeLessThan(5000);
+		expect(f.calls[0].text).toContain("gated command in this automatic continuation");
+	});
+
+	test("a malformed pending turn is dropped, the session entry is kept", () => {
+		fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+		fs.writeFileSync(
+			journalPath,
+			JSON.stringify({
+				version: 1,
+				sessions: [
+					{
+						sessionId: "s_bad_turn",
+						channel: "api",
+						ttSessionId: "session_bad_turn",
+						createdAt: 1,
+						pendingTurn: { id: "t", text: "x", attempts: -1 },
+					},
+				],
+			}),
+		);
+		const [entry] = new mod.SessionJournal(journalPath).read();
+		expect(entry.sessionId).toBe("s_bad_turn");
+		expect(entry.pendingTurn).toBeUndefined();
+	});
+
+	// Every platform: a second process force-kills the child mid-turn (#4113).
+	test(
+		"a hard-killed process's running turn is continued once by the next pool",
+		async () => {
+			const dir = path.dirname(journalPath);
+			const script = path.join(dir, "crash-turn.ts");
+			const ready = path.join(dir, "crash-turn.ready");
+			const survived = path.join(dir, "crash-turn.survived");
+			const poolPath = path.join(import.meta.dir, "agent-pool.ts");
+			const journalMod = path.join(import.meta.dir, "session-journal.ts");
+			fs.writeFileSync(
+				script,
+				`import { writeFileSync } from "node:fs";
+import { AgentPool } from ${JSON.stringify(poolPath)};
+import { SessionJournal } from ${JSON.stringify(journalMod)};
+const journal = new SessionJournal(${JSON.stringify(journalPath)});
+const pool = new AgentPool({ model: "none", runtime: "ollama", workingDirectory: ${JSON.stringify(root)} }, { journal });
+pool.createSession("s_kill", "telegram");
+// A model call that never returns: the daemon dies mid-turn.
+pool.getAgent("s_kill").chat = () => new Promise(() => {});
+pool.chat("s_kill", "write twenty numbered lines to a file, one per tool call");
+writeFileSync(${JSON.stringify(ready)}, String(process.pid));
+setTimeout(() => { writeFileSync(${JSON.stringify(survived)}, "1"); process.exit(0); }, 30_000);
+`,
+			);
+			const proc = Bun.spawn([process.execPath, script], {
+				env: { ...process.env, EIGHT_TIMETRAVEL_DIR: ttDir },
+				stdout: "ignore",
+				stderr: "pipe",
+			});
+			await waitForFile(ready, proc);
+			await forceKillFromSecondProcess(proc.pid);
+			await proc.exited;
+			expect(proc.exitCode).not.toBe(0);
+			if (process.platform !== "win32") expect(proc.signalCode).toBe("SIGKILL");
+			expect(isAlive(proc.pid)).toBe(false);
+			expect(fs.existsSync(survived)).toBe(false);
+
+			const journal = new mod.SessionJournal(journalPath);
+			const [entry] = journal.read();
+			expect(entry.sessionId).toBe("s_kill");
+			expect(entry.pendingTurn?.text).toBe("write twenty numbered lines to a file, one per tool call");
+			expect(entry.pendingTurn?.attempts).toBe(0);
+
+			const pool = newPool(journal);
+			mod.resumeJournaledSessions(journal, pool, new TimeTravelStore({ dataDir: ttDir }));
+			const settled = await mod.settleInterruptedToolCalls(journal, pool);
+			const prompts: string[] = [];
+			(pool.getAgent("s_kill") as any).chat = async (text: string) => {
+				prompts.push(text);
+				return "continued";
+			};
+			const [r] = mod.continueInterruptedTurns(journal, pool, settled);
+			expect(r.outcome).toBe("continued");
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			expect(prompts).toHaveLength(1);
+			expect(prompts[0]).toContain("write twenty numbered lines");
+			expect(journal.read()[0].pendingTurn).toBeUndefined();
+		},
+		60_000,
+	);
 });

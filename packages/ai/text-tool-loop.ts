@@ -82,17 +82,18 @@
  * `run` functions do; this module itself stays glue-only.
  */
 
+import { REFUSED_TWICE_LINE } from "../permissions/cd-prefix";
+import { browserWithheldNote } from "../tools/eight-browser";
 import {
 	checkClaims,
 	claimFollowUpMessage,
 	formatHarnessNote,
 	isRefusedToolResult,
 } from "./claim-check";
-import { runTextToolTurn, type TextToolCall, type TextToolMessage } from "./text-tool-client";
-import { type PlanItem, parsePlan } from "./update-plan";
-import { browserWithheldNote } from "../tools/eight-browser";
-import { UselessStreak } from "./useless-streak";
+import { type TextToolCall, type TextToolMessage, runTextToolTurn } from "./text-tool-client";
 import type { ToolSpec } from "./text-tools";
+import { type PlanItem, parsePlan } from "./update-plan";
+import { UselessStreak } from "./useless-streak";
 
 export type TextTool = {
 	spec: ToolSpec;
@@ -141,6 +142,13 @@ export interface TextToolAgentOptions {
 	 * 0 or unset: off.
 	 */
 	uselessStreak?: number;
+	/**
+	 * Steering (D1). Drained before every model call after the first: each
+	 * string it returns joins the conversation as a user message, after the
+	 * results of the tool calls that were running when it was sent. The caller
+	 * owns the queue; returning [] leaves the round unchanged.
+	 */
+	steer?: () => string[];
 }
 
 export interface TextToolAgentResult {
@@ -189,6 +197,23 @@ const SHELL_WRITE_NOTE =
 	"shell. That is not the correct tool. To create or change a file, call " +
 	"write_file (or edit_file) with the path and content. Do not claim the file " +
 	"was written unless you call write_file and see its success result.";
+
+/**
+ * A run_command refused for `;`, `&&` or `||` chaining (permissions/shell-sanitizer.ts
+ * wording). Structural: the sanitizer's own [BLOCKED] prefix and reason, never prose.
+ */
+export function isChainRefusal(result: string): boolean {
+	return /^\s*\[BLOCKED\][^\n]*\bcommand chaining\b[^\n]*\bis not allowed\b/i.test(result);
+}
+
+/**
+ * Appended to the second and later chaining refusals in one turn (#4072, run
+ * 2026-10-12_155723: three `;` chains refused, each costing a 27B round). The refusal
+ * already says to split the command; this adds the count, which the model cannot see.
+ */
+export function chainRefusalNote(count: number): string {
+	return `\n\nNote: ${count} chained commands refused this turn. Send each piece as its own run_command call, in order; a chained one is refused every time, except one leading \`cd <folder> &&\` into a project folder.`;
+}
 
 /**
  * The message fed back when a reply ended inside an unclosed tool_call block.
@@ -574,7 +599,10 @@ async function executeTool(
 ): Promise<string> {
 	const tool = tools.find((t) => t.spec.name === name);
 	if (!tool) {
-		return unknownToolResult(name, tools.map((t) => t.spec.name));
+		return unknownToolResult(
+			name,
+			tools.map((t) => t.spec.name),
+		);
 	}
 	try {
 		return await tool.run(args);
@@ -595,9 +623,7 @@ async function executeTool(
  * asking for tools, the loop stops and returns the last round's prose content
  * (which may be empty if the final round was tool-calls only).
  */
-export async function runTextToolAgent(
-	opts: TextToolAgentOptions,
-): Promise<TextToolAgentResult> {
+export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<TextToolAgentResult> {
 	const maxRounds = opts.maxRounds ?? 6;
 	const specs = opts.tools.map((t) => t.spec);
 	const toolLog: TextToolLogEntry[] = [];
@@ -613,6 +639,10 @@ export async function runTextToolAgent(
 	let prevRoundHadSuccess = false;
 	// Did the previous round run tools that ALL failed or were refused?
 	let prevRoundAllRefused = false;
+	// run_command calls refused for command chaining this turn (chainRefusalNote).
+	let chainRefusals = 0;
+	// Chaining refusals this turn per exact command text (REFUSED_TWICE_LINE, #3199).
+	const chainRefusedTexts = new Map<string, number>();
 	// Gate block reasons from the previous round, and since the last round
 	// that ran a tool successfully (deduped, in order).
 	let prevRoundBlockReasons: string[] = [];
@@ -683,6 +713,14 @@ export async function runTextToolAgent(
 		// circuit breaker, user ESC). Return whatever prose the last round yielded.
 		if (opts.signal?.aborted) {
 			return finish(finalContent(lastContent), round - 1);
+		}
+		// Steering (D1): a message the person sent while the last round's tools
+		// ran lands here, after their results and before the next model call.
+		if (round > 1 && opts.steer) {
+			const steered = opts.steer();
+			if (steered.length > 0) {
+				messages = [...messages, ...steered.map((content) => ({ role: "user" as const, content }))];
+			}
 		}
 		const turn = await runTextToolTurn({
 			messages,
@@ -860,7 +898,9 @@ export async function runTextToolAgent(
 				}
 			}
 			const noted = stoppedOnBlocks
-				? [answer.trimEnd(), blockedStopNote(blockReasonsSinceProgress)].filter(Boolean).join("\n\n")
+				? [answer.trimEnd(), blockedStopNote(blockReasonsSinceProgress)]
+						.filter(Boolean)
+						.join("\n\n")
 				: answer;
 			return finish(noted, round);
 		}
@@ -933,10 +973,21 @@ export async function runTextToolAgent(
 			// Deterministic guard (Bug B): if the model wrote file contents through
 			// the shell instead of write_file, append a short corrective note to
 			// this result so the next round is steered back to the right tool.
-			const note =
+			let note =
 				tc.name === "run_command" && isShellFileWrite(tc.arguments?.command)
 					? SHELL_WRITE_NOTE
 					: "";
+			// A repeated chaining refusal gets its count: the refusal text alone was
+			// ignored three times in one turn (#4072).
+			if (tc.name === "run_command" && isChainRefusal(result) && ++chainRefusals > 1)
+				note += chainRefusalNote(chainRefusals);
+			// The same command text refused twice: one plain line on what does work (#3199).
+			if (tc.name === "run_command" && isChainRefusal(result)) {
+				const text = String(tc.arguments?.command ?? "");
+				const seen = (chainRefusedTexts.get(text) ?? 0) + 1;
+				chainRefusedTexts.set(text, seen);
+				if (seen >= 2) note += `\n${REFUSED_TWICE_LINE}`;
+			}
 			resultParts.push(`Tool ${tc.name} returned:\n${result}${note}`);
 		}
 
@@ -976,11 +1027,9 @@ export async function runTextToolAgent(
 			{ role: "assistant", content: replyText },
 			{
 				role: "user",
-				content: [
-					...resultParts,
-					"",
-					answerOnly ? streak.note() : FOLLOW_UP_INSTRUCTION,
-				].join("\n"),
+				content: [...resultParts, "", answerOnly ? streak.note() : FOLLOW_UP_INSTRUCTION].join(
+					"\n",
+				),
 				...(roundImages.length > 0 ? { images: roundImages } : {}),
 			},
 		];

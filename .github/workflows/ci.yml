@@ -16,17 +16,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
+
+      # #4143: bun runs native install scripts via `bunx node-gyp@latest` when no
+      # node-gyp is on PATH, and parallel installs race on that download (the
+      # same race .github/docker/linux-ci/Dockerfile pins node-gyp to avoid).
+      # ubuntu-latest already ships python3, make and g++, so no apt step.
+      - name: "Pin node-gyp for native builds"
+        run: npm install -g --no-fund --no-audit node-gyp@12.4.0 && node-gyp --version
 
       - name: Install dependencies
         run: bun install
+
+      # node-pty is optional and its build fails quietly, so a missing module
+      # used to surface as five pty-session failures ("Received: 66").
+      - name: "Preflight native deps (node-pty)"
+        run: bun run preflight:native
 
       - name: Check for merge conflict markers
         run: |
@@ -43,8 +55,49 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      # #4135: apps/tui/tsconfig.json narrows include to the TUI's src, so it is
+      # its own typecheck scope. It was run by no workflow and sat red on main.
+      - name: "Type check (TUI scope)"
+        run: bun run typecheck:tui
+
+      # #4135: tsconfig.harness.json covers bin/8gent.ts, the binary users run.
+      # It was run by no workflow and hid six errors, two of them live bugs.
+      - name: "Type check: harness (bin/8gent.ts, tsconfig.harness.json)"
+        run: bun run check:harness
+
       - name: Lint
         run: bun run lint
+
+      # #4135: biome check (lint, format, import order) and format:check were run
+      # by no workflow. main still carries 664 unformatted files and 272 unsorted
+      # import blocks, so these gate the files a change touches: new debt fails,
+      # old debt shrinks with every edit, and no repo-wide reformat has to land
+      # on top of the open PRs. The base is HEAD^1 on a pull request (the main
+      # tip the checked-out merge commit sits on, so a PR is never failed on
+      # files it did not touch after main moved), or the previous main tip on a
+      # push. A pure move of a legacy unformatted file (R100) fails at its new
+      # path by design: a mechanical move PR reformats what it moves. -z keeps
+      # non-ASCII and unusual paths intact (git would otherwise quote them and
+      # biome would skip them). The root package.json is excluded until the
+      # full-repo reformat (the follow-up to #4135) lands: release bumps and open
+      # PRs edit it, so a whole-file reformat would conflict with all of them.
+      - name: "Biome check (changed files)"
+        env:
+          BIOME_SINCE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        # The default run shell is `bash -e {0}` without pipefail: a failing git diff
+        # (unreachable base sha) would feed xargs nothing and pass green. #4148.
+        run: |
+          set -o pipefail
+          git diff -z --name-only --diff-filter=ACMR "$BIOME_SINCE"...HEAD -- . ':!package.json' | xargs -0 -r bunx biome check --no-errors-on-unmatched
+
+      - name: "Format check (changed files)"
+        env:
+          BIOME_SINCE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        # The default run shell is `bash -e {0}` without pipefail: a failing git diff
+        # (unreachable base sha) would feed xargs nothing and pass green. #4148.
+        run: |
+          set -o pipefail
+          git diff -z --name-only --diff-filter=ACMR "$BIOME_SINCE"...HEAD -- . ':!package.json' | xargs -0 -r bunx biome format --no-errors-on-unmatched
 
       # The locate tool shells out to ripgrep; ubuntu-latest does not ship it (#3287).
       # Without rg, locate degrades to a stated note, which its own tests cover.
@@ -53,6 +106,31 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      # #4132 (8SO): the HMAC key probes must run under a real run_command boundary on Linux.
+      # bwrap is installed only for this step, after the main suite, so other tests keep
+      # their unwrapped behaviour. EIGHT_REQUIRE_RUN_COMMAND_SANDBOX=1 makes the probe file
+      # fail, not skip, when bwrap cannot create a namespace here.
+      - name: "run_command sandbox live probes (bwrap)"
+        env:
+          EIGHT_REQUIRE_RUN_COMMAND_SANDBOX: "1"
+        run: |
+          sudo apt-get install -y -qq bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --version
+          bun test packages/permissions/goal-state-hmac-keypath.probe.test.ts
+
+      # compare_layout renders pages in a real Chrome (#4080). ubuntu-latest ships
+      # google-chrome; this step fails, not skips, if it is missing or cannot start,
+      # so the offline guarantees are proven on every run.
+      - name: compare_layout offline guarantees (real Chrome)
+        env:
+          EIGHT_REQUIRE_CHROME: "1"
+          EIGHT_CHROME_NO_SANDBOX: "1"
+        run: |
+          google-chrome --version
+          bun test packages/tools/__tests__/layout-compare.test.ts
 
       - name: Computer-use smoke (Phase 3)
         run: bun run packages/eight/scripts/computer-use-suite.ts
@@ -63,7 +141,7 @@ jobs:
       - name: Verify build output
         run: |
           test -f dist/cli.js || (echo "Build failed: dist/cli.js not found" && exit 1)
-          head -1 dist/cli.js | grep -q "#!/usr/bin/env bun" || (echo "Shebang missing" && exit 1)
+          head -1 dist/cli.js | grep -qxF "#!/usr/bin/env -S bun --no-env-file --config=/dev/null" || (echo "Safe shebang missing (#4013)" && exit 1)
           echo "Build OK: $(wc -c < dist/cli.js | tr -d ' ') bytes"
 
       # #3219: the npm tarball must install and run on a machine that is not
@@ -97,6 +175,12 @@ jobs:
           [ "$COUNT" -ge 2 ] || { echo "::error::expected at least 2 release assets, staged ${COUNT}"; exit 1; }
           echo "release dry run: ${COUNT} assets staged for v${VERSION}"
 
+      - name: "No workspace: specifier in manifests, bun.lock or the npm tarball"
+        run: bun scripts/lib/no-workspace-protocol.ts "$RUNNER_TEMP"/release-assets/*.tgz
+
+      - name: Lockfile is in sync with the manifests
+        run: bun install --frozen-lockfile
+
       - name: Verify version sync
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
@@ -111,12 +195,35 @@ jobs:
         run: |
           # Test files legitimately contain fake fixtures; gitleaks (the
           # Secret Detection job) scans them properly with allowlisting.
-          FINDINGS=$(grep -rn --include='*.ts' --include='*.json' \
-            -E '(API_KEY|SECRET|PASSWORD|PRIVATE_KEY)\s*[:=]\s*"[^"]{8,}' \
-            packages/ apps/ bin/ \
+          #
+          # grep exits 1 when it matches nothing, which is the normal case here and
+          # is accepted below. Any other non-zero exit means the scan did not run -
+          # a malformed pattern, a missing path - and must fail the step rather than
+          # report a clean tree. Before this, `|| true` collapsed the two and a
+          # broken pattern passed green on the only blocking secret control.
+          # A missing directory is checked here rather than left to grep's exit code:
+          # recursive grep does not report one the same way on every platform.
+          SCAN_DIRS="packages apps bin"
+          for d in $SCAN_DIRS; do
+            if [ ! -d "$d" ]; then
+              echo "::error::secrets scan path $d/ is missing - the scan would cover less than it claims"
+              exit 1
+            fi
+          done
+          set +e
+          RAW=$(grep -rn --include='*.ts' --include='*.json' \
+            -E '(API_KEY|SECRET|PASSWORD|PRIVATE_KEY|TOKEN|CREDENTIAL)\s*[:=]\s*"[^"]{8,}' \
+            $SCAN_DIRS \
             --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.8gent --exclude-dir=__tests__ \
             --exclude='*.test.ts' \
-            2>/dev/null | grep -v 'description\|placeholder\|example\|interface\|type ' || true)
+            2>/dev/null)
+          rc=$?
+          set -e
+          if [ "$rc" -gt 1 ]; then
+            echo "::error::secrets scan could not run (grep exit $rc) - the pattern or a path is wrong"
+            exit 1
+          fi
+          FINDINGS=$(printf '%s\n' "$RAW" | grep -v 'description\|placeholder\|example\|interface\|type ' || true)
           if [ -n "$FINDINGS" ]; then
             echo "Potential hardcoded secrets found:"
             echo "$FINDINGS"
@@ -130,19 +237,78 @@ jobs:
             import {parse} from 'yaml';
             import {readFileSync} from 'fs';
             const p = parse(readFileSync('packages/permissions/default-policies.yaml','utf-8'));
-            if (!p.policies || p.policies.length < 10) {
-              console.error('Policy count too low: ' + (p.policies?.length || 0));
-              process.exit(1);
-            }
-            console.log(p.policies.length + ' policies loaded - OK');
+            const list = p.policies;
+            const fail = (m) => { console.error('Policy integrity: ' + m); process.exit(1); };
+            if (!Array.isArray(list) || list.length === 0) fail('no policies parsed');
+            // The default policies this repo ships. Any change to the set in
+            // default-policies.yaml (add, remove, rename) must update this list in the
+            // same PR, so swapping a block rule for an allow rule is never silent.
+            const EXPECTED = [
+              'no-secrets-in-files',
+              'no-env-file-leak',
+              'no-rm-rf-root',
+              'no-fork-bomb',
+              'no-pipe-to-shell',
+              'no-sudo-destructive',
+              'protected-branches-push',
+              'no-force-push-main',
+              'no-hard-reset',
+              'no-exfil-domains',
+              'desktop-require-approval',
+              'desktop-block-dangerous-keys',
+              'desktop-allow-screenshot',
+              'desktop-quit-require-approval',
+              'extension-call-unattended-require-approval',
+              'no-delete-config',
+              'mcp-config-and-policies-write-approval',
+              'mcp-config-and-policies-delete-approval',
+              'mcp-config-and-policies-shell-approval',
+              'agent-mail-cross-user-block',
+              'agent-mail-cross-channel-approval',
+              'agent-mail-read-other-user-block',
+              'peers-cross-user-block',
+              'email-send-rate-limit',
+              'email-send-bulk-approval',
+              'email-send-new-recipient-quarantine',
+              'email-receive-high-spam-block',
+              'issue-email-reserved-name-block',
+            ];
+            const REQUIRED = ['name', 'action', 'condition', 'decision', 'message'];
+            const DECISIONS = ['block', 'require_approval', 'allow'];
+            const seen = new Set();
+            list.forEach((pol, i) => {
+              for (const k of REQUIRED)
+                if (typeof pol[k] !== 'string' || pol[k].trim() === '')
+                  fail('policy ' + i + ' (' + (pol.name || 'unnamed') + ') is missing ' + k);
+              if (!DECISIONS.includes(pol.decision))
+                fail('policy ' + pol.name + ': decision ' + JSON.stringify(pol.decision) +
+                     ' is not one of ' + DECISIONS.join(', '));
+              if (seen.has(pol.name)) fail('duplicate policy name: ' + pol.name);
+              seen.add(pol.name);
+            });
+            const expected = new Set(EXPECTED);
+            const removed = EXPECTED.filter((n) => !seen.has(n));
+            const added = [...seen].filter((n) => !expected.has(n));
+            if (removed.length) console.error('Policy integrity: policies removed: ' + removed.join(', '));
+            if (added.length) console.error('Policy integrity: policies added: ' + added.join(', ') +
+              ' - add each to EXPECTED in the Policy engine integrity step of ci.yml in the same PR');
+            if (removed.length || added.length) process.exit(1);
+            console.log(list.length + ' policies, all expected, unique and well-formed - OK');
           "
 
+      # audit-ci was replaced: it cannot read bun.lock and errored on every run
+      # ("Cannot establish package-manager type, missing package-lock.json, yarn.lock,
+      # and pnpm-lock.yaml"), so this step never audited anything and printed a warning
+      # that looked like a finding. bun audit reads bun.lock.
+      #
+      # Non-blocking until the count reaches zero, with the number stated rather than
+      # hidden: the tree carries 179 advisories (11 critical, 71 high, 77 moderate, 20 low)
+      # as of 2026-10-13; this step prints the 82 at high or above.
+      # A step that fails on every run is bypassed within a day, so this reports and the
+      # advisories are tracked as work. Delete this comment and the flag together.
       - name: Dependency audit
-        run: |
-          npx audit-ci --high 2>/dev/null || {
-            echo "::warning::Dependency audit found high/critical vulnerabilities"
-            npm audit --audit-level=high 2>/dev/null || true
-          }
+        continue-on-error: true
+        run: bun audit --audit-level=high
 
       - name: 200-line rule check
         run: |
@@ -215,11 +381,11 @@ jobs:
     name: Harness Smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
       - name: Install dependencies
         run: bun install
       - name: CLI version check

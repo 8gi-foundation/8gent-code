@@ -63,6 +63,13 @@ export interface AgentStepEvent {
 	tokensPerSecond?: number;
 }
 
+/** Event emitted just before a model call. Names only: never prompt text, args or output. */
+export interface AgentStepStartEvent {
+	stepNumber: number;
+	provider: string;
+	model: string;
+}
+
 /** Event emitted when evidence is collected */
 export interface AgentEvidenceEvent {
 	type: string;
@@ -84,6 +91,7 @@ export interface AgentEvidenceSummaryEvent {
 export interface AgentEventCallbacks {
 	onToolStart?: (event: AgentToolStartEvent) => void;
 	onToolEnd?: (event: AgentToolEndEvent) => void;
+	onStepStart?: (event: AgentStepStartEvent) => void;
 	onStepFinish?: (event: AgentStepEvent) => void;
 	onEvidence?: (event: AgentEvidenceEvent) => void;
 	onEvidenceSummary?: (event: AgentEvidenceSummaryEvent) => void;
@@ -94,6 +102,8 @@ export interface AgentEventCallbacks {
 	 * that runs the turn while it runs. Display only (#3102).
 	 */
 	onModelRouted?: (event: { requested: string; used: string; provider: string }) => void;
+	/** A steering message (Agent.steer) was delivered into the running turn (D1). */
+	onSteer?: (event: { text: string }) => void;
 	onCompaction?: (event: {
 		summary: string;
 		tokensBefore: number;
@@ -125,6 +135,20 @@ export interface AgentConfig {
 	 * provider. Unset: the adaptive router, as before.
 	 */
 	providerPinned?: boolean;
+	/**
+	 * Load one-file extensions from ~/.8gent/extensions (G1). Off by default:
+	 * the interactive TUI and the headless CLI opt in; daemon, Table and
+	 * no-tool sessions never load them.
+	 */
+	extensions?: boolean;
+	/**
+	 * A person is at the keyboard. Unset: decided from the terminal (stdin and
+	 * stdout are TTYs and the session is not unattended). Unattended sessions
+	 * need approval before an extension tool runs, so it is refused there.
+	 */
+	attended?: boolean;
+	/** Where extensions load from when enabled. Default ~/.8gent/extensions (os.homedir()). */
+	extensionsDir?: string;
 	systemPrompt?: string;
 	maxTurns?: number;
 	workingDirectory?: string;

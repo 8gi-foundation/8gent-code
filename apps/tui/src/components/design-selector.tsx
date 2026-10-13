@@ -379,7 +379,7 @@ export function InlineDesignPrompt({ message, compact = false }: InlineDesignPro
 	return (
 		<Stack marginY={1}>
 			<Inline gap={0}>
-				<Label color="magenta">{paintbrushIcon} Design Agent</Label>
+				<Label color="magenta">{paintbrushIcon} Design 8gent</Label>
 			</Inline>
 			<Box paddingLeft={2}>
 				<Label>{message}</Label>

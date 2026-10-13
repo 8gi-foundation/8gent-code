@@ -35,7 +35,7 @@ export function AgentIndicator({
 			<Text color={agentColor as any} bold>
 				{agentName}
 			</Text>
-			{agentCount > 0 && <MutedText> ({agentCount + 1} agents)</MutedText>}
+			{agentCount > 0 && <MutedText> ({agentCount + 1} 8gents)</MutedText>}
 			<Text color={agentColor as any}> {"\u276F"} </Text>
 		</Inline>
 	);

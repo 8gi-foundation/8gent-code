@@ -120,7 +120,7 @@ async function run(): Promise<void> {
 		JSON.stringify({
 			type: "session:create",
 			sessionId,
-			channel: "verify-abilities",
+			channel: "api",
 		}),
 	);
 

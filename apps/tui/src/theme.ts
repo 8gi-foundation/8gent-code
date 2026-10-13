@@ -22,6 +22,13 @@
  * (theme/design-systems.ts), saved as "designSystem" in ~/.8gent/config.json.
  * No choice means this file's stock 8gent palette.
  *
+ * USER THEMES (Pi parity N1): ~/.8gent/themes/<name>.json, each a partial
+ * palette over dark or light (lib/user-themes.ts). Valid ones are listed by
+ * themeChoices() as `user:<name>`; applyDesignSystem("user:<name>") applies
+ * one and saveThemeChoice() persists it ("userTheme" in config.json). A user
+ * theme is drawn exactly as written, never refitted to the terminal.
+ * reloadUserThemes() re-reads the folder (the /reload hook point).
+ *
  * The `inverted` semantic preserves brand identity: warm earth tones stay
  * dominant; we just flip the text/bg axis. Orange/teal/steel/red/green
  * keep their hue because they read on both backgrounds.
@@ -34,7 +41,17 @@ import {
 	fitPaletteToBackground,
 	isLightBackground,
 	readDesignSystemChoice,
+	configPath,
+	saveDesignSystemChoice,
 } from "./theme/design-systems.js";
+import {
+	type SkippedUserTheme,
+	USER_THEME_PREFIX,
+	type UserTheme,
+	isUserThemeId,
+	loadUserThemes,
+	userThemeName,
+} from "./lib/user-themes.js";
 
 export type Mode = "dark" | "light";
 
@@ -112,7 +129,7 @@ const dark = {
 	// #3238). 3.46:1 on bg, so an edge that means something clears 3:1.
 	frame:      "#6B655F",
 
-	// Section labels (WORKSPACE, AGENT ACTIVITY...): text-secondary, so
+	// Section labels (WORKSPACE, 8GENT ACTIVITY...): text-secondary, so
 	// orange stays for state and focus (the active tab, DONE, the input,
 	// the selection). 11.3:1 on bg.
 	heading:  "#C8C2BA",
@@ -181,6 +198,8 @@ interface ThemeState {
 	bgSource: BackgroundSource;
 	/** Design system id from the picker, or null for the stock 8gent theme. */
 	designSystem: string | null;
+	/** Name of the active user theme, or null. Wins over designSystem. */
+	userTheme: string | null;
 }
 
 /** True when the user forced a mode (env or config), so a probe cannot flip it. */
@@ -192,7 +211,27 @@ function forcedMode(): Mode | null {
 	return null;
 }
 
+let userThemes = new Map<string, UserTheme>();
+let userThemeSkipped: SkippedUserTheme[] = [];
+
+function readConfigUserTheme(): string | null {
+	try {
+		const fs = require("node:fs") as typeof import("node:fs");
+		const path = require("node:path") as typeof import("node:path");
+		const home = process.env.HOME ?? "";
+		if (!home) return null;
+		const raw = JSON.parse(fs.readFileSync(path.join(home, ".8gent", "config.json"), "utf-8")) as {
+			userTheme?: unknown;
+		};
+		return typeof raw.userTheme === "string" ? raw.userTheme : null;
+	} catch {
+		return null;
+	}
+}
+
 function resolvePalette(state: ThemeState): Palette {
+	const user = state.userTheme ? userThemes.get(state.userTheme) : undefined;
+	if (user) return { ...(user.base === "light" ? light : dark), ...user.overrides };
 	const stock: Palette = { ...(state.mode === "light" ? light : dark) };
 	if (state.designSystem) {
 		const p = designSystemPalette(state.designSystem, state.bg);
@@ -209,7 +248,20 @@ const state: ThemeState = {
 	bg: CANONICAL_BG[initialMode],
 	bgSource: "assumed",
 	designSystem: readDesignSystemChoice(),
+	userTheme: null,
 };
+
+/** Read the themes folder into the registry. Never throws. */
+function scanUserThemes(): void {
+	const r = loadUserThemes(Object.keys(dark), undefined, { dark, light } as unknown as Record<"dark" | "light", Record<string, string>>);
+	userThemes = new Map(r.themes.map((u) => [u.name, u]));
+	userThemeSkipped = r.skipped;
+}
+scanUserThemes();
+{
+	const saved = readConfigUserTheme();
+	if (saved && userThemes.has(saved)) state.userTheme = saved;
+}
 
 // `t` is one object for the life of the process, so every component that
 // imported it sees a re-fit (terminal background, picker choice) in place.
@@ -241,15 +293,78 @@ export function applyTerminalBackground(bgHex: string): void {
 	refit();
 }
 
-/** Switch design system now (null = stock 8gent theme). Unknown ids are ignored. */
+/**
+ * Switch theme now: null = stock 8gent theme, a design system id, or
+ * `user:<name>`. An unknown user theme falls back to the stock theme.
+ */
 export function applyDesignSystem(id: string | null): void {
-	state.designSystem = id;
+	if (isUserThemeId(id)) {
+		const name = userThemeName(id);
+		state.userTheme = userThemes.has(name) ? name : null;
+		state.designSystem = null;
+	} else {
+		state.userTheme = null;
+		state.designSystem = id;
+	}
 	refit();
+}
+
+function setConfigKey(path: string, key: string, value: string | undefined): void {
+	const fs = require("node:fs") as typeof import("node:fs");
+	const nodePath = require("node:path") as typeof import("node:path");
+	let raw: Record<string, unknown> = {};
+	if (fs.existsSync(path)) raw = JSON.parse(fs.readFileSync(path, "utf-8")) as Record<string, unknown>;
+	if (value === undefined && !(key in raw)) return;
+	if (value === undefined) delete raw[key];
+	else raw[key] = value;
+	fs.mkdirSync(nodePath.dirname(path), { recursive: true });
+	const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+	fs.writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}\n`);
+	fs.renameSync(tmp, path);
+}
+
+/**
+ * Persist a picker choice: what saveDesignSystemChoice does, plus user
+ * themes. Design systems keep their "designSystem" key; a user theme is
+ * "userTheme" and clears "designSystem". Throws on an unknown user theme or a
+ * config.json that is not a JSON object, writing nothing.
+ */
+export function saveThemeChoice(id: string | null, cfgPath?: string): void {
+	const path = cfgPath ?? configPath();
+	if (isUserThemeId(id)) {
+		if (!userThemes.has(userThemeName(id))) throw new Error(`Unknown user theme: ${userThemeName(id)}`);
+		saveDesignSystemChoice(null, path); // validates config.json, clears designSystem
+		setConfigKey(path, "userTheme", userThemeName(id));
+	} else {
+		saveDesignSystemChoice(id, path);
+		setConfigKey(path, "userTheme", undefined);
+	}
+}
+
+/**
+ * Re-read ~/.8gent/themes (the /reload hook point). A theme that vanished or
+ * went invalid drops back to the stock theme; an edited active theme is
+ * re-applied. Returns the files that were skipped, with reasons.
+ */
+export function reloadUserThemes(): SkippedUserTheme[] {
+	scanUserThemes();
+	if (state.userTheme && !userThemes.has(state.userTheme)) state.userTheme = null;
+	refit();
+	return [...userThemeSkipped];
+}
+
+/** User theme files skipped at the last scan, each with a readable reason. */
+export function userThemeProblems(): SkippedUserTheme[] {
+	return [...userThemeSkipped];
 }
 
 /** What the palette is currently fitted to, for /theme status lines. */
 export function themeStatus(): Readonly<ThemeState> {
-	return { ...state };
+	// designSystem carries the picker value, so the picker highlights a user theme too.
+	return {
+		...state,
+		designSystem: state.userTheme ? `${USER_THEME_PREFIX}${state.userTheme}` : state.designSystem,
+	};
 }
 
 export interface ThemeChoice {
@@ -277,6 +392,14 @@ export function themeChoices(): ThemeChoice[] {
 		const p = designSystemPalette(ds.id, state.bg);
 		if (!p) continue;
 		rows.push({ value: ds.id, label: ds.label, description: ds.mood === ds.style ? ds.mood : `${ds.mood}, ${ds.style}`, swatches: swatch(p) });
+	}
+	for (const u of userThemes.values()) {
+		rows.push({
+			value: `${USER_THEME_PREFIX}${u.name}`,
+			label: u.label,
+			description: u.description,
+			swatches: swatch({ ...(u.base === "light" ? light : dark), ...u.overrides }),
+		});
 	}
 	return rows;
 }

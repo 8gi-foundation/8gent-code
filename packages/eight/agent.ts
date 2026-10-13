@@ -8,13 +8,31 @@
  * full AI SDK data (finishReason, reasoning, detailed token usage, etc.)
  */
 
-import { getModeManager } from "./modes";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { jsonSchema, tool as sdkTool } from "ai";
+import type { FormattingStop } from "../ai/draft-constraints";
+import { notePlanTask } from "../ai/plan-file";
+import { postMessageAvailable } from "../ai/post-message";
+import { modelSupportsVision, prefixMeterSink } from "../ai/text-tool-endpoint";
+import {
+	emptyReplyNote,
+	emptyReplyStall,
+	splitToolImageAttachment,
+	stripDoneMarker,
+} from "../ai/text-tool-loop";
+import { agentTools } from "../ai/tools";
 import { ensureIndexed as astEnsureIndexed } from "../ast-index";
-import { getExtensionManager } from "../extensions";
+import { loggableToolArgs } from "../computer/desktop-approval";
+import {
+	ExtensionHost,
+	type ExtensionLoadResult,
+	defaultExtensionsDir,
+	getExtensionManager,
+} from "../extensions";
+import { screenLocateOffered } from "../eyes/ground/screen-locate";
 import { type HookManager, getHookManager } from "../hooks";
 import { type InfiniteRunner, type InfiniteState, createInfiniteRunner } from "../infinite";
 import type { HedgeCandidate } from "../kernel/hedge-executor";
@@ -33,11 +51,17 @@ import {
 	processAgentDepthRefusal,
 	runAsParentSession,
 } from "../orchestration/index";
+import {
+	capabilityToolMode,
+	knownContextWindow,
+	ollamaContextWindowLookup,
+} from "../orchestration/local-model-detect";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
+import { effectivePermissionMode, systemOneEnvFor } from "../permissions/permission-mode";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import { startSystemOneWarmup } from "../permissions/system-one-gate";
-import { effectivePermissionMode, systemOneEnvFor } from "../permissions/permission-mode";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
+import { type ProviderName as ProviderRegistryName, getProviderManager } from "../providers";
 import {
 	type FailoverChannel,
 	type FailoverEntry,
@@ -45,8 +69,6 @@ import {
 	NoAllowedProviderError,
 } from "../providers/failover";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
-import { getProviderManager, type ProviderName as ProviderRegistryName } from "../providers";
-import { capabilityToolMode, knownContextWindow, ollamaContextWindowLookup } from "../orchestration/local-model-detect";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
 import { getVault } from "../secrets";
@@ -60,34 +82,67 @@ import type {
 } from "../specifications/session/index.js";
 import { SessionWriter } from "../specifications/session/writer.js";
 import { getActiveTelegramBot, startTelegramBot } from "../telegram";
+import {
+	LOCAL_BROWSER_PROFILE,
+	browserProfileWarning,
+	browserWithheldNote,
+	localBrowserTools,
+	setDefaultLocalProfile,
+} from "../tools/eight-browser";
 import { type Evidence, EvidenceCollector, summarizeEvidence } from "../validation/evidence";
+import { isNoToolScope, isVerbatimScope } from "./agent-scopes";
 import { type Settings, computeAutoTune } from "./auto-tune";
 import { createClient } from "./clients";
 import {
+	CompactionRecorder,
 	type CompressionStage,
 	DEFAULT_PROACTIVE_CONFIG,
 	ProactiveCompression,
 	type ProactiveResult,
+	compactHistory,
+	estimateMessageTokens,
 } from "./compaction";
-import { type ToolLedgerEntry, denialIsCause, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
-import { postMessageAvailable } from "../ai/post-message";
-import { emptyReplyNote, emptyReplyStall, splitToolImageAttachment, stripDoneMarker } from "../ai/text-tool-loop";
-import { modelSupportsVision } from "../ai/text-tool-endpoint";
-import { verifyNudgeFor } from "./verify-gate";
+import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
+import {
+	type ToolLedgerEntry,
+	denialIsCause,
+	enforceAgenticHonesty,
+	isErrorToolResult,
+} from "./honesty";
 import { projectInstructionsSection } from "./instruction-loader";
+import { getModeManager } from "./modes";
 import { isLocalProvider } from "./registry";
-import { browserProfileWarning, browserWithheldNote, localBrowserTools } from "../tools/eight-browser";
+import { verifyNudgeFor } from "./verify-gate";
 
+import {
+	mayMoveToProvider,
+	pinnedProviderError,
+	providerConfigForStep,
+} from "./failover-provider-config";
+import {
+	localCatalogOmissions,
+	localDelegationTools,
+	localPlanTools,
+	planningGateInstruction,
+} from "./local-tool-scope";
+import {
+	type TurnFailureReason,
+	describeLocalTurnFailure,
+	failedTurnRunEntry,
+} from "./local-turn-error";
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import {
+	LOCAL_LOGIN_NOTE,
+	LOCAL_SERVER_CURL_SHORT,
 	NARRATION_NOTE,
 	SCRATCH_DIR_NOTE,
 	SLIDES_TO_VIDEO_NOTE,
 	buildToolCatalogSegment,
+	environmentNote,
 } from "./prompts/system-prompt";
-import { localCatalogOmissions, localDelegationTools, localPlanTools, planningGateInstruction } from "./local-tool-scope";
+import { SessionStore } from "./session-store";
 import { SessionSyncManager } from "./session-sync";
 import {
 	type CheckpointMeta,
@@ -99,25 +154,7 @@ import { ToolLoopDetector } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import { TurnJournal } from "./turn-journal";
-import {
-	mayMoveToProvider,
-	pinnedProviderError,
-	providerConfigForStep,
-} from "./failover-provider-config";
-import {
-	describeLocalTurnFailure,
-	failedTurnRunEntry,
-	type TurnFailureReason,
-} from "./local-turn-error";
 import { resolveStepCeilingMs, resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
-import {
-	type CheckpointEntry,
-	type Summarizer,
-	type AgentState as TwoStageAgentState,
-	TwoStageCompactor,
-	estimateMessageTokens,
-	twoStageCheckpointPrompt,
-} from "./two-stage-compactor";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter, oneLineError } from "./vision-interpreter";
 
@@ -129,6 +166,7 @@ import {
 	needsClarification,
 } from "../proactive";
 
+import { resolveHome } from "../core/home";
 import { BRAND } from "../personality/brand.js";
 // Personality voice — the infinite gentleman
 import {
@@ -139,14 +177,20 @@ import {
 	flavorResponse,
 	voice as personalityVoice,
 } from "../personality/voice.js";
-import { CONTEXT_NOTE_HEADER, type SentSections, contextNote, harnessNote, withStyleReminder } from "./context-note";
+import {
+	CONTEXT_NOTE_HEADER,
+	type SentSections,
+	contextNote,
+	harnessNote,
+	withStyleReminder,
+} from "./context-note";
+import { layoutMeasureLine } from "./layout-measure";
 import {
 	ObservationPacker,
 	ObservationStore,
 	observationPackEnabled,
 	readOutputTool,
 } from "./observation-pack";
-import { resolveHome } from "../core/home";
 
 // Workflow validation — BMAD plan-validate loop + Kanban tracking
 // (PlanValidateLoop import removed in v0.11.1 — was never used at runtime.)
@@ -183,10 +227,17 @@ import {
 	toolDefsToSpecs,
 } from "../ai";
 import { resolveUselessStreak } from "../ai/useless-streak";
+import { cdPrefixShape } from "../permissions/cd-prefix";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { isShellToolName } from "../permissions/shell-tools";
 
 /** One warning per process for a bad EIGHT_BROWSER_PROFILE (#3622). */
 let browserProfileWarned = false;
+
+/** At most this many steers wait at once (D1); more are refused. */
+export const MAX_STEERS = 8;
+/** Largest steer accepted, in UTF-8 bytes. */
+export const MAX_STEER_BYTES = 16 * 1024;
 
 /**
  * Did the harness refuse this call before it ran (#3409)? Decided from the
@@ -199,9 +250,14 @@ let browserProfileWarned = false;
  * runCommand). Every other refusal still counts as a call, as before #3409.
  */
 export function refusedBeforeRun(toolName: string, args: Record<string, unknown>): boolean {
-	if (toolName !== "run_command") return false;
+	if (!isShellToolName(toolName)) return false;
 	const command = args.command;
-	return typeof command === "string" && !sanitizeShellCommand(command).safe;
+	if (typeof command !== "string") return false;
+	const kind = toolName === "powershell" ? "powershell" : undefined;
+	// A leading `cd <folder> &&` runs the rest (#3199); judged by shape alone, so a folder
+	// the executor later refuses still counts as a call, never the other way round.
+	const runs = kind ? undefined : cdPrefixShape(command)?.rest;
+	return !sanitizeShellCommand(runs ?? command, process.platform, kind).safe;
 }
 
 /**
@@ -210,7 +266,15 @@ export function refusedBeforeRun(toolName: string, args: Record<string, unknown>
  */
 const HEADLESS_WEB_NOTE =
 	"**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**";
-const HEADLESS_TOOL_NOTES = [HEADLESS_WEB_NOTE, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE].join("\n");
+const HEADLESS_TOOL_NOTES = [
+	HEADLESS_WEB_NOTE,
+	NARRATION_NOTE,
+	SCRATCH_DIR_NOTE,
+	SLIDES_TO_VIDEO_NOTE,
+	LOCAL_SERVER_CURL_SHORT,
+	LOCAL_LOGIN_NOTE,
+].join("\n");
+const headlessToolNotes = (): string => `${HEADLESS_TOOL_NOTES}\n${environmentNote()}`;
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
@@ -250,6 +314,24 @@ function readPinnedActiveModel(): string[] {
 	} catch {
 		return [];
 	}
+}
+
+/**
+ * Why the harness, not the person, stopped a turn (#4172). A headless caller reads it to
+ * report the stop as a failure with its reason instead of a finished run.
+ */
+export type TurnStop =
+	| { kind: "circuit_breaker"; reason: string }
+	| { kind: "watchdog"; reason: string; limitMs: number }
+	| FormattingStop;
+
+/** The watchdog's stop for a turn that ran past `limitMs`. */
+export function watchdogStop(limitMs: number): TurnStop {
+	return {
+		kind: "watchdog",
+		limitMs,
+		reason: `Session watchdog abort: the turn ran past its limit of ${limitMs} ms (${Math.round(limitMs / 60000)} min).`,
+	};
 }
 
 export class Agent {
@@ -294,16 +376,34 @@ export class Agent {
 	private sessionSync: SessionSyncManager;
 	private kernel: KernelManager;
 	private abortController: AbortController | null = null;
+	/** Set when the breaker or the watchdog stopped the current turn; cleared when a turn starts. */
+	private turnStop: TurnStop | null = null;
+	/** One-file extensions from ~/.8gent/extensions (G1). */
+	private extensionHost: ExtensionHost;
+	/** Settles when the current extension load finishes; a turn waits for it. */
+	private extensionsReady: Promise<unknown> = Promise.resolve();
+	/**
+	 * Steering messages (D1), each stamped with the turn it was sent during
+	 * (null: sent while no turn ran). Only the running turn's own steers are
+	 * ever delivered into it.
+	 */
+	private steerQueue: Array<{ text: string; turn: number | null }> = [];
+	/** Id of the turn running now, or null between turns. */
+	private activeTurn: number | null = null;
+	private turnCounter = 0;
 	private orchestratorBus: OrchestratorBus;
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
-	private twoStageCompactor: TwoStageCompactor | null = null;
-	private twoStageCheckpoints: CheckpointEntry[] = [];
+	/** Where compactions are recorded (originals stay, undo works); null = not persisted. */
+	private compactionRecorder: CompactionRecorder | null = null;
 	/** The active provider's known context window (SPEC-05), shared by both compactors (#3237). */
 	private compactionContextWindow: number;
 	/** #3643: pending one-shot read of the Ollama server's real context window. */
-	private serverContextWindow: { baseUrl: string; model: string; engine: ProactiveCompression } | null =
-		null;
+	private serverContextWindow: {
+		baseUrl: string;
+		model: string;
+		engine: ProactiveCompression;
+	} | null = null;
 	/** Injectable for tests; the real lookup reads /api/ps and /api/show. */
 	private contextWindowLookup: typeof ollamaContextWindowLookup = ollamaContextWindowLookup;
 	// Time-travel (#2757): content-addressed checkpoints every N tool calls.
@@ -316,12 +416,22 @@ export class Agent {
 	// state. The agentic-honesty gate (issue #2747) checks the final reply
 	// against this so the agent can never claim completion it did not earn.
 	private turnToolLedger: ToolLedgerEntry[] = [];
+	private turnTask = "";
+	private turnGitBaseline: Map<string, string> | null = null;
 	/**
 	 * Set by the harness, never from model text, when the last chat() turn
 	 * failed (#3899). `8gent run` reads it for its exit code.
 	 */
-	private lastTurnFailure: { reason: TurnFailureReason; message: string; unverified?: string[] } | null = null;
-	getLastTurnFailure(): { reason: TurnFailureReason; message: string; unverified?: string[] } | null {
+	private lastTurnFailure: {
+		reason: TurnFailureReason;
+		message: string;
+		unverified?: string[];
+	} | null = null;
+	getLastTurnFailure(): {
+		reason: TurnFailureReason;
+		message: string;
+		unverified?: string[];
+	} | null {
 		return this.lastTurnFailure;
 	}
 	/**
@@ -357,6 +467,8 @@ export class Agent {
 			undefined,
 			{
 				unattended: config.unattended ?? false,
+				// Unset: the executor decides from the terminal (G1 extension_call policy).
+				attended: config.attended,
 				allowedPaths: config.allowedPaths,
 				openOnWrite: config.openOnWrite ?? true,
 				permission: config.permission,
@@ -396,7 +508,7 @@ export class Agent {
 					: true;
 
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
-		this.toolRegistry = new ToolRegistry(config.allTools ?? false);
+		this.toolRegistry = new ToolRegistry(config.allTools ?? false, config.role);
 		// SPEC-05 #108: feed the ACTIVE provider's detected context window into
 		// compaction instead of the hardcoded 32k. A large-context cloud model
 		// (e.g. anthropic 200k) compacts far later; a small local model compacts
@@ -416,14 +528,6 @@ export class Agent {
 				engine: this.compaction,
 			};
 		}
-
-		// Two-stage compactor (issue #2467). Layered alongside ProactiveCompression
-		// rather than replacing it: the legacy single-threshold engine still
-		// guards hard limits; the two-stage path produces cheap mid-pressure
-		// checkpoints so context loss is gradual instead of cliff-edged.
-		// Summariser is a thin wrapper around the active provider's chat client;
-		// constructed lazily on first observe so providerConfig is in scope.
-		this.twoStageCompactor = null;
 
 		// AST index for AST-first retrieval. ensureIndexed returns the build the
 		// ToolExecutor above already started for this folder, so this only
@@ -509,7 +613,7 @@ export class Agent {
 			(userData.onboardingComplete || userData.identity.name) &&
 			style &&
 			styleHasGuide(style) &&
-			config.agentScope !== "__table__"
+			!isVerbatimScope(config.agentScope)
 		) {
 			this.styleReminder = `${CONTEXT_NOTE_HEADER}\nReminder for your reply: ${communicationStyleLine(style)}`;
 		}
@@ -541,8 +645,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// system prompt, never inside it (#3222). Table officers never get them.
 		const priorSessionsBlock = recallPriorSessionsSync(config.workingDirectory || process.cwd());
 		const globalMemoriesBlock = recallGlobalMemoriesSync();
-		this.sessionMemoryContext =
-			config.agentScope === "__table__" ? "" : globalMemoriesBlock + priorSessionsBlock;
+		this.sessionMemoryContext = isVerbatimScope(config.agentScope)
+			? ""
+			: globalMemoriesBlock + priorSessionsBlock;
 
 		// Local providers have limited context windows — use a compact prompt that
 		// still includes an honest tool catalog so the model never claims it has
@@ -560,8 +665,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// not offer (desktop_*, lsp_*, gh_*). No person shares personal facts in a
 		// one-shot run, so the remember nudge goes too.
 		const compactLocalPrompt = config.headless
-			? `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n${HEADLESS_TOOL_NOTES}`
-			: `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, omit: localCatalogOmissions(config.role, this.agentDepth) })}`;
+			? `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\n${headlessToolNotes()}`
+			: `You are 8gent, an autonomous coding agent. Use tools to read, write, edit, run commands, and search the web. Be concise. Never claim you cannot do something until you have tried the relevant tool.\n\nCRITICAL: When the user shares ANY personal fact (name, preferences, habits, goals), IMMEDIATELY call the \`remember\` tool with layer \`global\`. Do not wait to be asked.\n\n${buildToolCatalogSegment({ concise: true, cwd: process.cwd(), omit: localCatalogOmissions(config.role, this.agentDepth) })}\n${LOCAL_SERVER_CURL_SHORT}\n${LOCAL_LOGIN_NOTE}`;
 
 		// A Table officer's system prompt is SUPPLIED by the daemon (persona plus
 		// the capability truth for a chat-channel colleague) and must be used
@@ -577,7 +682,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// have (they were advertised), "never claim you cannot do something"
 		// pushing them to fabricate, and private-memory leakage into an
 		// untrusted channel. Table sessions bypass it.
-		const isTableScope = config.agentScope === "__table__";
+		const isTableScope = isVerbatimScope(config.agentScope);
 		// Project instructions (AGENTS.md / 8GENT.md / CLAUDE.md) reach the model
 		// on both coding paths (#3236), as the trailing section so the prefix
 		// before it stays stable (#3222). Table officers keep their supplied
@@ -599,20 +704,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			content: isTableScope
 				? basePrompt + languageInstruction
 				: isLocalRuntime
-				? // #3487: the user context (style, name, role, language, board briefing)
-					// trails the project instructions so the cached prefix stays stable (#3222).
-					// The board briefing goes only to a model on this machine (#3236 rule).
-					compactLocalPrompt +
+					? // #3487: the user context (style, name, role, language, board briefing)
+						// trails the project instructions so the cached prefix stays stable (#3222).
+						// The board briefing goes only to a model on this machine (#3236 rule).
+						compactLocalPrompt +
 						projectInstructionsBlock +
 						(onBox ? userContextBlock : userContextNoBoard)
-				: basePrompt +
-					vesselContext +
-					userContextBlock +
-					personalityBlock +
-					orchestratorBlock +
-					deferredToolBlock +
-					languageInstruction +
-					projectInstructionsBlock,
+					: basePrompt +
+						vesselContext +
+						userContextBlock +
+						personalityBlock +
+						orchestratorBlock +
+						deferredToolBlock +
+						languageInstruction +
+						projectInstructionsBlock,
 		});
 		// #3487: a turn can be rerouted to another local provider after this
 		// prompt is built (resolveToolCapableModel, callLocalModelWithReroute), and
@@ -632,17 +737,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		}
 
 		// Initialize session persistence (v2)
-		this.sessionWriter = new SessionWriter(this.sessionId);
+		// A classroom session leaves no session file: its text is untrusted and private (#3939).
+		this.sessionWriter = new SessionWriter(
+			this.sessionId,
+			undefined,
+			undefined,
+			!isNoToolScope(config.agentScope),
+		);
 		// A Table officer is a colleague in a chat channel, not the orchestrator of a
 		// coding session. Appending the orchestrator/personality blocks told every
 		// officer "You are the orchestrator, you can spawn specialists" and re-listed
 		// capabilities they do not have - drowning their own persona + honesty rules
 		// and producing rigid "PLAN: 1. 2. 3." replies with fake shell blocks. Table
 		// sessions therefore use their supplied prompt VERBATIM.
-		const systemPromptFull =
-			this.config.agentScope === "__table__"
-				? basePrompt + languageInstruction
-				: basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction;
+		const systemPromptFull = isVerbatimScope(this.config.agentScope)
+			? basePrompt + languageInstruction
+			: basePrompt + userContextBlock + personalityBlock + orchestratorBlock + languageInstruction;
 		// TurnJournal (#2470): hash the system prompt once at boot, stamp every
 		// TurnRecord with it. Avoids re-hashing per turn for large prompts.
 		this.turnJournal = new TurnJournal(this.sessionId);
@@ -773,6 +883,30 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 		}
 
+		// ── One-file extensions (G1): ~/.8gent/extensions/*.ts ─────────
+		// Built-in tool names are reserved, so an extension never shadows one.
+		// Off unless the host opts in (config.extensions), and never in a no-tool
+		// or Table scope. Their tools run through this agent's own executor, so
+		// they get maker-checker, rate limits, the scrubber, the output filter
+		// and artifact handling like any built-in tool.
+		let extensionsDir = "";
+		if (this.extensionsEnabled()) {
+			try {
+				extensionsDir = this.config.extensionsDir ?? defaultExtensionsDir();
+			} catch (err) {
+				console.log(`[ext] ${err instanceof Error ? err.message : String(err)}`);
+			}
+		}
+		this.extensionHost = new ExtensionHost(extensionsDir, () => this.builtInToolNames());
+		this.executor.setExtensionRunner({
+			has: (name) => this.extensionHost.getTool(name) !== undefined,
+			run: (name, args) =>
+				this.extensionHost.runTool(name, args, {
+					cwd: this.config.workingDirectory || process.cwd(),
+				}),
+		});
+		if (this.extensionsEnabled()) this.extensionsReady = this.reloadExtensions().catch(() => []);
+
 		// ── Extensions: Load from ~/.8gent/extensions/ ──────────────────
 		const extMgr = getExtensionManager();
 		extMgr
@@ -819,15 +953,110 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * model emits it anyway.
 	 */
 	private modeFilter<T>(tools: Record<string, T>): Record<string, T> {
+		return Object.fromEntries(Object.entries(tools).filter(([name]) => this.modeAllows(name)));
+	}
+
+	/**
+	 * Does the active mode allow this tool? An extension tool (G1) is allowed
+	 * in the default mode; in a mode that restricts tools (allowedTools or
+	 * deniedTools) only when its allowedTools names `extension:<name>`.
+	 */
+	private modeAllows(toolName: string): boolean {
 		const mm = getModeManager();
-		return Object.fromEntries(Object.entries(tools).filter(([name]) => mm.isToolAllowed(name)));
+		if (!this.extensionHost?.getTool(toolName)) return mm.isToolAllowed(toolName);
+		const mode = mm.getActiveMode();
+		const restricted = mode.allowedTools !== undefined || (mode.deniedTools?.length ?? 0) > 0;
+		if (!restricted) return true;
+		return mode.allowedTools?.includes(`extension:${toolName}`) === true;
 	}
 
 	private modeRefusal(toolName: string): string | null {
 		const mm = getModeManager();
-		if (mm.isToolAllowed(toolName)) return null;
+		if (this.modeAllows(toolName)) return null;
 		return `Error: ${toolName} is not available in ${mm.getActiveMode().name} mode; nothing was run.`;
 	}
+
+	/**
+	 * The one refusal gate for a tool call, on both paths, before the tool runs:
+	 * the active mode's tool set, then YAML PreToolUse hooks. A string refuses
+	 * the call with that message; null lets it run. It only ever refuses: the
+	 * permission policy inside the tools still applies to every call it lets
+	 * through.
+	 */
+	private async refuseToolCall(
+		toolName: string,
+		args: Record<string, unknown>,
+	): Promise<string | null> {
+		const modeRefusal = this.modeRefusal(toolName);
+		if (modeRefusal) return modeRefusal;
+		const preResult = await this.hookManager.fire("PreToolUse", {
+			tool: toolName,
+			// Hooks never see typed desktop text (8SO, #4057).
+			args: loggableToolArgs(toolName, args),
+			sessionId: this.sessionId,
+			workingDirectory: this.config.workingDirectory || process.cwd(),
+		});
+		if (preResult.blocked) {
+			console.log(`  [BLOCKED] ${toolName} - ${preResult.reason}`);
+			return `Hook blocked tool "${toolName}": ${preResult.reason}`;
+		}
+		// Extensions (G1) come last and can only add a refusal.
+		return this.extensionHost.checkToolCall(toolName, args);
+	}
+
+	/** Every built-in tool name, on either path. Extension tools may not take one. */
+	private builtInToolNames(): string[] {
+		const names = new Set<string>(Object.keys(agentTools));
+		for (const def of this.executor.getToolDefinitions() as Array<{
+			function?: { name?: unknown };
+		}>) {
+			if (typeof def.function?.name === "string") names.add(def.function.name);
+		}
+		return [...names];
+	}
+
+	/** May this turn offer extension tools? Not to a no-tool or a Table scope. */
+	private extensionToolsAllowed(): boolean {
+		return !isNoToolScope(this.config.agentScope) && this.config.agentScope !== "__table__";
+	}
+
+	/** Extensions load only when the host opted in, and never in a no-tool or Table scope. */
+	private extensionsEnabled(): boolean {
+		return this.config.extensions === true && this.extensionToolsAllowed();
+	}
+
+	/**
+	 * Load (or reload, D12) the one-file extensions in ~/.8gent/extensions.
+	 * Replaces every extension tool, command and tool_call handler; the next
+	 * turn sees the result. One result per file, with its error if it failed.
+	 */
+	reloadExtensions(): Promise<ExtensionLoadResult[]> {
+		if (!this.extensionsEnabled()) return Promise.resolve([]);
+		const loading = this.extensionHost.load().then((results) => {
+			for (const r of results) {
+				if (!r.ok) console.log(`[ext] ${r.file}: ${r.error}`);
+			}
+			return results;
+		});
+		this.extensionsReady = loading.catch(() => []);
+		return loading;
+	}
+
+	/** Slash commands extensions registered, for the command menu (L6 wires /name). */
+	extensionCommands(): Array<{ name: string; description: string }> {
+		return this.extensionHost
+			.listCommands()
+			.map(({ name, description }) => ({ name, description }));
+	}
+
+	/** Run an extension's /name with the text after it. Null when no extension has it. */
+	async runExtensionCommand(name: string, args: string): Promise<string | null> {
+		await this.extensionsReady;
+		return this.extensionHost.runCommand(name, args, {
+			cwd: this.config.workingDirectory || process.cwd(),
+		});
+	}
+
 	/**
 	 * Can this agent's own model see images (#3641)? Only the text-tool path
 	 * attaches them natively, so the native AI SDK path answers no. The Ollama
@@ -887,6 +1116,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// last round's prose, which is usually a step announced and never taken
 		// ("Let me stage and commit."), so the reply must say the turn was cut off.
 		let breakerStop = null as string | null;
+		// Extension tools (G1) join the offered set, unless the scope or the mode withholds them.
+		if (this.extensionToolsAllowed()) {
+			for (const t of this.extensionHost.listTools()) {
+				if (this.modeAllows(t.name)) {
+					specs.push({ name: t.name, description: t.description, parameters: t.parameters });
+				}
+			}
+		}
 		const tools: TextTool[] = specs.map((spec) => ({
 			spec,
 			run: async (args: Record<string, unknown>) => {
@@ -895,9 +1132,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				const step = stepNumber++;
 				const startedAt = Date.now();
 
+				// The refusal gate runs first: a refused call never reaches the
+				// privacy tracker, the start event or a start row in the session
+				// file. Its refusal is still recorded below, as a failed call.
+				const refusal = await this.refuseToolCall(toolName, args);
+
 				// Track file paths for the privacy gate, matching the native path.
 				const toolPath = (args as { path?: unknown }).path;
 				if (
+					!refusal &&
 					typeof toolPath === "string" &&
 					["read_file", "write_file", "edit_file", "delete_file"].includes(toolName)
 				) {
@@ -905,20 +1148,25 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
 				}
 
-				console.log(`  -> ${toolName}(${JSON.stringify(args).slice(0, 50)}...)`);
-				this.events.onToolStart?.({ toolName, toolCallId, args, stepNumber: step });
-				this.sessionWriter.writeToolCall(
-					{
-						toolCallId,
-						name: toolName,
-						arguments: args,
-						success: true,
-						durationMs: 0,
-						startedAt: new Date(startedAt).toISOString(),
-					},
-					undefined,
-					step,
-				);
+				// Everything below that records the call sees typed desktop text as its length (#4057).
+				const loggedArgs = loggableToolArgs(toolName, args);
+				if (!refusal)
+					console.log(`  -> ${toolName}(${JSON.stringify(loggedArgs).slice(0, 50)}...)`);
+				if (!refusal)
+					this.events.onToolStart?.({ toolName, toolCallId, args: loggedArgs, stepNumber: step });
+				if (!refusal)
+					this.sessionWriter.writeToolCall(
+						{
+							toolCallId,
+							name: toolName,
+							arguments: loggedArgs,
+							success: true,
+							durationMs: 0,
+							startedAt: new Date(startedAt).toISOString(),
+						},
+						undefined,
+						step,
+					);
 
 				// `result` is what the loop gets, attachment included; `shown` is the
 				// text part, and the only thing the ledger, the session file, the
@@ -928,7 +1176,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				let shown = "";
 				let success = true;
 				try {
-					const refusal = this.modeRefusal(toolName);
 					if (refusal) throw new Error(refusal.replace(/^Error: /, ""));
 					result = await this.executor.execute(toolName, args);
 					shown = splitToolImageAttachment(toolName, result).text;
@@ -955,7 +1202,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
 					if (breakerStop === null) breakerStop = loopResult.userMessage;
-					this.abort();
+					this.abort({ kind: "circuit_breaker", reason: loopResult.message });
+				}
+				// A second post_message draft that broke a task rule stops the turn (#4191).
+				const presendStop = this.executor.takePresendStop();
+				if (presendStop) {
+					if (breakerStop === null) breakerStop = presendStop.reason;
+					this.abort(presendStop);
 				}
 
 				if (success) {
@@ -983,7 +1236,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.events.onToolEnd?.({
 					toolName,
 					toolCallId,
-					args,
+					args: loggedArgs,
 					success,
 					durationMs,
 					stepNumber: step,
@@ -1053,6 +1306,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// the run log + journal. Nothing fires when the endpoint omits usage -
 		// no fabricated numbers, ever.
 		let usageStepNumber = 0;
+		// Model calls begun so far on this text-tools path; step_start fires per call.
+		let startedSteps = 0;
 		const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 		const runTurn = (provider: string, model: string) => {
 			// #3487: the built prompt was judged on-box for the session's runtime. If
@@ -1085,12 +1340,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Headless: name and parameters only; the system prompt carries the
 				// descriptions, so a run does not pay for them twice on every call.
 				declareDescriptions: this.config.headless !== true,
+				// #3655: per-request prefill/decode counts into the session log,
+				// only with EIGHT_PREFIX_METER=1.
+				onRound: prefixMeterSink(this.sessionWriter),
 				onUsage: (usage) => {
 					usageTotals.promptTokens += usage.promptTokens;
 					usageTotals.completionTokens += usage.completionTokens;
 					usageTotals.totalTokens += usage.totalTokens;
 					this.events.onStepFinish?.({
-						stepNumber: usageStepNumber++,
+						// Close the step the last call opened; fall back to a counter
+						// when no call was announced.
+						stepNumber: startedSteps > 0 ? startedSteps - 1 : usageStepNumber++,
 						finishReason: "stop",
 						text: "",
 						toolCalls: [],
@@ -1102,6 +1362,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const packer = observations ? new ObservationPacker(observations) : null;
 			const call = (msgs: Parameters<typeof rawCall>[0]) => {
 				const sent = packer ? packer.pack(msgs) : msgs;
+				// Provider and model names only: never prompt text, args or output.
+				this.events.onStepStart?.({ stepNumber: startedSteps++, provider, model });
 				return withTurnTimeout(
 					() => rawCall(withStyleReminder(sent, this.styleReminder)),
 					attemptTimeoutMs,
@@ -1124,6 +1386,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// off by default): N empty or error results in a row and the next
 				// round gets no tools, only a note to answer with what it has.
 				uselessStreak: resolveUselessStreak(),
+				// Steering (D1): delivered after the running tool calls.
+				steer: () => this.drainSteers(),
 			});
 		};
 
@@ -1155,7 +1419,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// read-only text-tool set (read_file, list_files, get_outline,
 		// get_symbol, search_symbols, recall - see TABLE_SESSION_TOOLS above), so
 		// there is no genuine capability gap this gate protects against here.
-		const isTableSession = this.config.agentScope === "__table__";
+		const isTableSession = isVerbatimScope(this.config.agentScope);
 		let effectiveProvider = providerName;
 		let effectiveModel = providerModel;
 		if (!isTableSession) {
@@ -1219,7 +1483,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				run: runTurn,
 				// A named provider stays put: reroute only within it (#3746).
 				pinned: this.config.providerPinned,
-				pinnedMessage: (model, error) => pinnedProviderError(effectiveProvider, model, error).message,
+				pinnedMessage: (model, error) =>
+					pinnedProviderError(effectiveProvider, model, error).message,
 				onReroute: (missing, chosen) => {
 					console.log(
 						`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
@@ -1323,7 +1588,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			gated.violated ||
 			breakerStop !== null ||
 			agentResult.unverified.length > 0 ||
-			this.config.agentScope === "__table__"
+			isVerbatimScope(this.config.agentScope)
 				? content
 				: flavorResponse(content, flavor);
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
@@ -1441,7 +1706,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				model: this.config.model,
 				baseUrl: this.config.baseUrl,
 			}),
-			() => this.runTurn(userMessage, imageBase64, imageMimeType),
+			async () => {
+				// A new turn: steers left from an earlier turn are stale and are
+				// dropped, never delivered into this one (the caller had its chance
+				// to take them with takeQueuedSteers).
+				const turn = ++this.turnCounter;
+				this.steerQueue = [];
+				this.activeTurn = turn;
+				try {
+					return await this.runTurn(userMessage, imageBase64, imageMimeType);
+				} finally {
+					if (this.activeTurn === turn) this.activeTurn = null;
+				}
+			},
 		);
 	}
 
@@ -1451,7 +1728,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * that was warned about (#3811). Never blocks; the callers send it at most once.
 	 */
 	private turnEndNudge(): string | null {
-		return verifyNudgeFor(this.turnToolLedger) ?? this.executor.retiredTurnEndNudge();
+		return (
+			verifyNudgeFor(this.turnToolLedger) ??
+			this.executor.retiredTurnEndNudge() ??
+			completionSelfCheckNudge({
+				task: this.turnTask,
+				gitBaseline: this.turnGitBaseline,
+				cwd: this.config.workingDirectory || process.cwd(),
+				ledger: this.turnToolLedger,
+			})
+		);
 	}
 
 	private async runTurn(
@@ -1459,12 +1745,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		imageBase64?: string,
 		imageMimeType?: string,
 	): Promise<string> {
+		// The turn offers the extension tools that finished loading (G1, D12).
+		await this.extensionsReady;
 		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
+		this.turnTask = userMessage;
+		// A plan file the task names is update_plan's plan of record (#4161).
+		notePlanTask(this.config.workingDirectory || process.cwd(), userMessage);
+		this.turnGitBaseline = asksForCommit(userMessage)
+			? gitSnapshot(this.config.workingDirectory || process.cwd())
+			: null;
 		// write_file may open each deliverable once per turn (#3107).
-		this.executor.beginTurn();
+		this.executor.beginTurn(userMessage);
 
 		const textForAgent =
 			userMessage.trim() ||
@@ -1491,6 +1785,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
 				finishReason: "other",
 			});
+			// #3823: a model that sees the attachment never called read_image in 2 of 5
+			// design-mockup-practice runs (incl. the latest), so the measured layout
+			// (#3772) never reached it and position stayed 0.70 to 0.73 of 0.77. Hand it
+			// over on the attach path too. Bounded, model-free, empty on any failure.
+			try {
+				const measured = await layoutMeasureLine(Buffer.from(imageBase64, "base64"));
+				if (measured) {
+					this.messageHistory.push({ role: "user", content: harnessNote(measured) });
+					// read_image on the same file this turn must not repeat the block.
+					this.executor.markLayoutSent(measured);
+				}
+			} catch {
+				// layout hints are best-effort; the image itself is already attached
+			}
 		} else if (imageBase64) {
 			const interpreter = new VisionInterpreter({
 				apiKey: this.config.apiKey,
@@ -1546,7 +1854,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ── Proactive Questioning Gate ─────────────────────────────────
 		// For vague/ambiguous requests (short messages without clear intent),
 		// the proactive system injects clarifying questions before execution.
-		if (needsClarification(textForAgent) && !imageBase64) {
+		if (
+			needsClarification(textForAgent) &&
+			!imageBase64 &&
+			!isNoToolScope(this.config.agentScope)
+		) {
 			this.proactiveGatherer = createGatherer(textForAgent);
 			const question = this.proactiveGatherer.getCurrentQuestion();
 			if (question) {
@@ -1597,7 +1909,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ..." scaffolding in the live corpus: not a model tic, an instruction we
 		// sent. Nobody at the Table asked for a plan.
 		const needsPlanningGate =
-			this.config.agentScope !== "__table__" &&
+			!isVerbatimScope(this.config.agentScope) &&
 			(textForAgent.length > 100 || PLANNING_KEYWORDS.test(textForAgent));
 
 		// Changed session context goes in before the user's words (#3222).
@@ -1626,6 +1938,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.totalCost = null;
 
 		const chatStartTime = Date.now();
+		this.turnStop = null;
 		let totalTokensUsed = 0;
 		let stepCount = 0;
 
@@ -1633,10 +1946,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Prevents git/shell hangs from silently blocking the agent loop forever.
 		const SESSION_MAX_MS = (this.config as any).maxSessionMs ?? 30 * 60 * 1000;
 		let sessionWatchdog: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-			console.log(
-				`\n[8gent] Session watchdog: turn exceeded ${SESSION_MAX_MS / 60000} min — aborting`,
-			);
-			this.abort();
+			this.abort(watchdogStop(SESSION_MAX_MS));
 		}, SESSION_MAX_MS);
 
 		// Build provider config — main agent always uses its own model.
@@ -1675,6 +1985,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// read_image; one that cannot gets a description through describe_image.
 			"read_image",
 			"describe_image",
+			"compare_layout",
 			// A spawned sub-agent has one task and no plan to report (#3583).
 			...localPlanTools(this.agentDepth),
 			"git_status",
@@ -1684,6 +1995,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"web_search",
 			"web_fetch",
 			"speak",
+			"render_video_deck",
 			"suggest_design",
 			"query_design_system",
 			"deck_theme",
@@ -1704,6 +2016,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Deferred registry only loads `core` upfront — make sure local providers
 		// get `web` (and git) before we filter, otherwise CORE_TOOLS entries like
 		// web_search won't exist to pass through.
+		// A local provider with no EIGHT_BROWSER_PROFILE gets its own isolated 8gent Browser profile,
+		// started on demand (#3785); a native tool-caller keeps today's rules (declared default cleared).
+		setDefaultLocalProfile(isLocalProvider ? LOCAL_BROWSER_PROFILE : null);
 		if (isLocalProvider) {
 			// A bad EIGHT_BROWSER_PROFILE leaves the session without browser tools; say so once (#3622).
 			const browserWarning = browserProfileWarning();
@@ -1721,6 +2036,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.toolRegistry.loadCategory("orchestration");
 			}
 		}
+		// Native providers cannot pick up discover_tools mid-turn (#3881).
+		if (!isLocalProvider) this.toolRegistry.preloadForNative(this.config.role);
 		// Load computer category when cua:setup has been run, regardless of provider.
 		const { existsSync } = await import("node:fs");
 		const { homedir } = await import("node:os");
@@ -1745,6 +2062,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"desktop_hover",
 			"desktop_windows",
 			"desktop_clipboard",
+			// Grounded, gated, verified act through the local grounder.
+			"desktop_act",
 		];
 		// The Orchestrator also gets spawn_agent / check_agent / list_agents;
 		// Engineer, QA, sub-agents and role-less agents keep the lean set (#3095).
@@ -1756,9 +2075,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			...(postMessageAvailable() ? ["post_message"] : []),
 			// Lean MCP access (#3474): search, schema on demand, trimmed results.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? ["mcp_list_tools", "mcp_call_tool"] : []),
-			// 8gent Browser (#3622): only with a named EIGHT_BROWSER_PROFILE, the bot's own login-free
-			// instance. Without one a local model gets no browser, so it never reaches the person's profile.
+			// 8gent Browser (#3622, #3785): an isolated profile, named by EIGHT_BROWSER_PROFILE or the
+			// default "eight-local", never the person's logged-in profile. EIGHT_BROWSER_LOCAL=0 withholds them.
 			...localBrowserTools(),
+			// screen_locate (#4048) turns "the Sign in button" into a point; only useful with a screenshot source.
+			...(screenLocateOffered({
+				browserTools: localBrowserTools().length,
+				desktopTools: cuaConfigured,
+			})
+				? ["screen_locate"]
+				: []),
 		];
 		const providerTools = isLocalProvider
 			? Object.fromEntries(Object.entries(allTools).filter(([k]) => localCoreTools.includes(k)))
@@ -1778,14 +2104,30 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"search_symbols",
 			"recall",
 		]);
-		const scopedTools =
-			this.config.agentScope === "__table__"
+		const scopedTools = isNoToolScope(this.config.agentScope)
+			? {}
+			: this.config.agentScope === "__table__"
 				? Object.fromEntries(
 						Object.entries(providerTools).filter(([k]) => TABLE_SESSION_TOOLS.has(k)),
 					)
 				: providerTools;
+		// Extension tools (G1): offered beside the built-ins, never in place of one.
+		const withExtensions: typeof scopedTools = { ...scopedTools };
+		if (this.extensionToolsAllowed()) {
+			for (const t of this.extensionHost.listTools()) {
+				if (t.name in withExtensions) continue;
+				(withExtensions as Record<string, unknown>)[t.name] = sdkTool({
+					description: t.description,
+					inputSchema: jsonSchema<Record<string, unknown>>(
+						t.parameters as Parameters<typeof jsonSchema>[0],
+					),
+					// Through the executor, like every built-in tool.
+					execute: (args: Record<string, unknown>) => this.executor.execute(t.name, args),
+				});
+			}
+		}
 		// The active mode narrows what is offered (#3389).
-		const effectiveTools = this.modeFilter(scopedTools);
+		const effectiveTools = this.modeFilter(withExtensions);
 
 		// The SAME positive scope, for the text-tool path. Every Table officer on
 		// lmstudio/ollama goes through runTextToolChat, which was handed the raw
@@ -1796,7 +2138,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// have executed them (ToolG8's __table__ rules were the only thing left
 		// standing). Officers "hallucinating tool names" were reading a catalog.
 		const textToolAllowlist = (
-			this.config.agentScope === "__table__" ? [...TABLE_SESSION_TOOLS] : localCoreTools
+			isNoToolScope(this.config.agentScope)
+				? []
+				: this.config.agentScope === "__table__"
+					? [...TABLE_SESSION_TOOLS]
+					: localCoreTools
 		).filter((name) => getModeManager().isToolAllowed(name));
 
 		// ── Populate runtime params for self-awareness tools ──────────
@@ -1843,20 +2189,90 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				providerName,
 				providerModel: providerConfig.model,
 				// A withheld browser says so up front (#3785); a __table__ session has no browser by design.
-				instructions:
-					this.config.agentScope === "__table__"
-						? effectiveInstructions
-						: [effectiveInstructions, browserWithheldNote()].filter(Boolean).join("\n\n"),
+				instructions: isVerbatimScope(this.config.agentScope)
+					? effectiveInstructions
+					: [effectiveInstructions, browserWithheldNote()].filter(Boolean).join("\n\n"),
 				localCoreTools: textToolAllowlist,
 				chatStartTime,
 				textForAgent,
 			});
+			await this.readServerContextWindow();
+			await this.compactIfNeeded(providerConfig);
 			if (sessionWatchdog) {
 				clearTimeout(sessionWatchdog);
 				sessionWatchdog = null;
 			}
 			return textResult;
 		}
+
+		// What an allowed native tool call starts with (see gateToolCall below).
+		const nativeToolSteps = new Map<string, number | undefined>();
+		const startAllowedTool = async (event: {
+			toolCallId: string;
+			toolName: string;
+			args: Record<string, unknown>;
+			stepNumber?: number;
+		}) => {
+			// Everything that records the call sees typed desktop text as its length (#4057).
+			const loggedArgs = loggableToolArgs(event.toolName, event.args);
+			await this.hookManager.executeHooks("beforeTool", {
+				sessionId: this.sessionId,
+				tool: event.toolName,
+				toolInput: loggedArgs,
+				workingDirectory: this.config.workingDirectory || process.cwd(),
+			});
+
+			// ── NemoClaw Privacy Gate: track file paths for sensitive context detection
+			const toolPath = event.args?.path as string | undefined;
+			if (
+				toolPath &&
+				["read_file", "write_file", "edit_file", "delete_file"].includes(event.toolName)
+			) {
+				this.recentFilePaths.push(toolPath);
+				// Keep bounded - only last 20 paths
+				if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
+
+				const gate = privacyGate(this.recentFilePaths, providerConfig.name);
+				if (gate.shouldForceLocal) {
+					const fallback = forceLocalModel(providerConfig.name);
+					if (fallback) {
+						console.log(`\n\x1b[33m[PRIVACY] ${gate.reason}\x1b[0m`);
+						console.log(
+							`\x1b[33m[PRIVACY] Switching to ${fallback.provider}/${fallback.model}\x1b[0m`,
+						);
+						providerConfig.name = fallback.provider as typeof providerConfig.name;
+						providerConfig.model = fallback.model;
+						// The forced-local provider resolves its own endpoint and key:
+						// the session's belong to the provider it is leaving (#3261).
+						providerConfig.apiKey = undefined;
+						providerConfig.baseURL = undefined;
+						providerConfig.headers = undefined;
+					}
+				}
+			}
+
+			console.log(`  -> ${event.toolName}(${JSON.stringify(loggedArgs).slice(0, 50)}...)`);
+
+			this.events.onToolStart?.({
+				toolName: event.toolName,
+				toolCallId: event.toolCallId,
+				args: loggedArgs,
+				stepNumber: event.stepNumber,
+			});
+
+			this.sessionWriter.writeToolCall(
+				{
+					toolCallId: event.toolCallId,
+					name: event.toolName,
+					arguments: loggedArgs,
+					success: true,
+					durationMs: 0,
+					startedAt: new Date().toISOString(),
+				},
+				undefined,
+				event.stepNumber,
+			);
+		};
 
 		let agentConfig: EightAgentConfig = {
 			provider: providerConfig,
@@ -1876,85 +2292,37 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			permission: this.config.permission,
 			// The files it created, one record for both tool paths (#3177).
 			createdFiles: this.executor.createdFiles,
+			allowedPaths: this.config.allowedPaths,
 			tools: effectiveTools,
+			// Steering (D1): delivered after the running tool calls.
+			steer: () => this.drainSteers(),
 
-			onToolCallStart: async (event) => {
-				const modeRefusal = this.modeRefusal(event.toolName);
-				if (modeRefusal) throw new Error(modeRefusal);
-				await this.hookManager.executeHooks("beforeTool", {
-					sessionId: this.sessionId,
-					tool: event.toolName,
-					toolInput: event.args,
-					workingDirectory: this.config.workingDirectory || process.cwd(),
-				});
+			// Refusals live in the gate, inside each tool's execute: the SDK
+			// swallows a throw from onToolCallStart, so one there never stopped
+			// a call.
+			// The gate runs first; everything a call starts (beforeTool hooks, the
+			// privacy tracker, onToolStart, the session start row) happens only
+			// once it is allowed. onToolCallStart, which the SDK fires before
+			// execute, only remembers the step number for it.
+			gateToolCall: async (event) => {
+				const refusal = await this.refuseToolCall(event.toolName, event.args);
+				const stepNumber = nativeToolSteps.get(event.toolCallId);
+				nativeToolSteps.delete(event.toolCallId);
+				if (refusal) return refusal;
+				await startAllowedTool({ ...event, stepNumber });
+				return null;
+			},
 
-				// Fire YAML PreToolUse hooks - if any hook blocks, skip the tool
-				const preResult = await this.hookManager.fire("PreToolUse", {
-					tool: event.toolName,
-					args: event.args,
-					sessionId: this.sessionId,
-					workingDirectory: this.config.workingDirectory || process.cwd(),
-				});
-				if (preResult.blocked) {
-					console.log(`  [BLOCKED] ${event.toolName} - ${preResult.reason}`);
-					throw new Error(`Hook blocked tool "${event.toolName}": ${preResult.reason}`);
-				}
-
-				// ── NemoClaw Privacy Gate: track file paths for sensitive context detection
-				const toolPath = event.args?.path as string | undefined;
-				if (
-					toolPath &&
-					["read_file", "write_file", "edit_file", "delete_file"].includes(event.toolName)
-				) {
-					this.recentFilePaths.push(toolPath);
-					// Keep bounded - only last 20 paths
-					if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
-
-					const gate = privacyGate(this.recentFilePaths, providerConfig.name);
-					if (gate.shouldForceLocal) {
-						const fallback = forceLocalModel(providerConfig.name);
-						if (fallback) {
-							console.log(`\n\x1b[33m[PRIVACY] ${gate.reason}\x1b[0m`);
-							console.log(
-								`\x1b[33m[PRIVACY] Switching to ${fallback.provider}/${fallback.model}\x1b[0m`,
-							);
-							providerConfig.name = fallback.provider as typeof providerConfig.name;
-							providerConfig.model = fallback.model;
-							// The forced-local provider resolves its own endpoint and key:
-							// the session's belong to the provider it is leaving (#3261).
-							providerConfig.apiKey = undefined;
-							providerConfig.baseURL = undefined;
-							providerConfig.headers = undefined;
-						}
-					}
-				}
-
-				console.log(`  -> ${event.toolName}(${JSON.stringify(event.args).slice(0, 50)}...)`);
-
-				this.events.onToolStart?.({
-					toolName: event.toolName,
-					toolCallId: event.toolCallId,
-					args: event.args,
-					stepNumber: event.stepNumber,
-				});
-
-				this.sessionWriter.writeToolCall(
-					{
-						toolCallId: event.toolCallId,
-						name: event.toolName,
-						arguments: event.args,
-						success: true,
-						durationMs: 0,
-						startedAt: new Date().toISOString(),
-					},
-					undefined,
-					event.stepNumber,
-				);
+			onToolCallStart: (event) => {
+				nativeToolSteps.set(event.toolCallId, event.stepNumber);
 			},
 
 			onToolCallFinish: async (event) => {
 				const resultStr =
 					typeof event.result === "string" ? event.result : JSON.stringify(event.result);
+				// The in-memory ledger and loop checks keep the real args; everything
+				// that records or hands the call on sees typed desktop text as its length (#4057).
+				const loggedArgs = loggableToolArgs(event.toolName, event.args as Record<string, unknown>);
 
 				// Honesty ledger (issue #2747): record the REAL outcome. The executor
 				// returns error STRINGS for most failures, so a "successful" event
@@ -1996,8 +2364,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				const loopResult = this.loopDetector.check();
 				if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
-					this.abort();
+					this.abort({ kind: "circuit_breaker", reason: loopResult.message });
 				}
+				// A second post_message draft that broke a task rule stops the turn (#4191).
+				const presendStop = this.executor.takePresendStop();
+				if (presendStop) this.abort(presendStop);
 
 				if (event.success) {
 					this.sessionWriter.writeToolResult(
@@ -2027,7 +2398,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.events.onToolEnd?.({
 					toolName: event.toolName,
 					toolCallId: event.toolCallId,
-					args: event.args,
+					args: loggedArgs,
 					success: event.success,
 					durationMs: event.durationMs,
 					stepNumber: event.stepNumber,
@@ -2042,7 +2413,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// is opted in; scrubbing happens at finalize, before anything is written.
 				this.kernel.recordToolStep({
 					tool: event.toolName,
-					argsSummary: JSON.stringify(event.args ?? {}).slice(0, 300),
+					argsSummary: JSON.stringify(loggedArgs ?? {}).slice(0, 300),
 					ok: event.success,
 					durationMs: event.durationMs,
 				});
@@ -2068,7 +2439,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 				// Update proactive planner context
 				this.planner.updatePredictionContext({
-					recentCommands: [`${event.toolName}(${JSON.stringify(event.args).slice(0, 100)})`],
+					recentCommands: [`${event.toolName}(${JSON.stringify(loggedArgs).slice(0, 100)})`],
 					...(event.toolName === "write_file" || event.toolName === "edit_file"
 						? { modifiedFiles: [String(event.args.path)] }
 						: {}),
@@ -2119,7 +2490,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				await this.hookManager.executeHooks("afterTool", {
 					sessionId: this.sessionId,
 					tool: event.toolName,
-					toolInput: event.args,
+					toolInput: loggedArgs,
 					toolOutput: resultStr,
 					duration: event.durationMs,
 					workingDirectory: this.config.workingDirectory || process.cwd(),
@@ -2130,7 +2501,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					.fire("PostToolUse", {
 						workingDirectory: this.config.workingDirectory || process.cwd(),
 						tool: event.toolName,
-						args: event.args,
+						args: loggedArgs,
 						result: resultStr.slice(0, 2000),
 						success: event.success,
 						durationMs: event.durationMs,
@@ -2139,6 +2510,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					.catch(() => {
 						/* PostToolUse hooks are best-effort */
 					});
+			},
+
+			onStepStart: ({ stepNumber }) => {
+				// Provider and model names only: never prompt text, args or output.
+				this.events.onStepStart?.({
+					stepNumber,
+					provider: String(providerConfig.name),
+					model: String(providerConfig.model),
+				});
+				this.sessionWriter.writeStepStart(stepNumber, {
+					provider: String(providerConfig.name),
+					modelId: String(providerConfig.model),
+				});
 			},
 
 			onStepFinish: async (event: StepFinishEvent) => {
@@ -2179,7 +2563,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Check for premature completion claims
 				if (event.text?.includes("🎯 COMPLETED") && event.finishReason === "stop") {
 					// The agent is claiming completion — this is fine, but log it for tracking
-					console.log(`\n[Step ${event.stepNumber}] Agent claims COMPLETED. Verify tests passed.`);
+					console.log(`\n[Step ${event.stepNumber}] 8gent claims COMPLETED. Verify tests passed.`);
 				}
 
 				// ── Plan Parsing → Kanban Feed + Workflow Validation ─────────
@@ -2589,7 +2973,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// a file that drew a warning. With the gate on and nudging, its nudge wins.
 			const verifyNudge = result?.text ? this.turnEndNudge() : null;
 			if (verifyNudge) {
-				console.log("[verify-gate] change not checked yet - asking for one targeted check");
+				console.log(
+					`[turn-end] nudge fired (${verifyNudge.startsWith("[SELF-CHECK]") ? "completion self-check" : "verify gate or retired fact"}) - one extra generate`,
+				);
 				// agentConfig already holds the provider that answered (chain step
 				// or hedge winner), so the follow-up goes to the same one.
 				const verifyAgent = createEightAgent(agentConfig);
@@ -2657,7 +3043,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// text-tool path above for why a random COMPLETION_PHRASE in a channel
 			// reads as a fabricated completion claim.
 			const flavoredContent =
-				gatedNative.violated || this.config.agentScope === "__table__"
+				gatedNative.violated || isVerbatimScope(this.config.agentScope)
 					? content
 					: flavorResponse(content, flavor);
 
@@ -2673,9 +3059,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// Trace capture (#2752 step 1) also routes through here: when only
 			// traceCapture is opted in, processTurn still returns null (loop off)
 			// and collectSessionTrace persists the scrubbed trajectory locally.
-			if (this.kernel.isActive || this.kernel.isEnabled || this.kernel.isTraceCaptureEnabled) {
-				const toolCallsSucceeded =
-					this.sessionEvidence.filter((e) => !e.verified).length === 0;
+			if (
+				!isNoToolScope(this.config.agentScope) &&
+				(this.kernel.isActive || this.kernel.isEnabled || this.kernel.isTraceCaptureEnabled)
+			) {
+				const toolCallsSucceeded = this.sessionEvidence.filter((e) => !e.verified).length === 0;
 				const turnIndex = this.messageHistory.filter((m) => m.role === "assistant").length;
 				const promptForKernel = textForAgent;
 				const responseForKernel = flavoredContent;
@@ -2723,31 +3111,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 			await this.readServerContextWindow();
 
-			// Proactive context compression — Harbor Terminus-2 pattern (#1405)
-			// Monitors token pressure and escalates through 4 stages:
-			//   unwind -> summarize (3-step) -> simplify -> nuke-to-system
-			if (this.compaction.shouldCompact(this.messageHistory)) {
-				try {
-					const stage = this.compaction.getStage(this.messageHistory);
-					const compactModel = createModel(providerConfig);
-					const { messages: compacted, result: compactionResult } =
-						await this.compaction.compactProactive(this.messageHistory, compactModel);
-					this.messageHistory = compacted;
-					console.log(
-						`  [COMPRESSION:${stage}] ${compactionResult.messagesRemoved} messages compressed, ` +
-							`${compactionResult.tokensBefore} -> ${compactionResult.tokensAfter} tokens`,
-					);
-					this.events.onCompaction?.(compactionResult);
-				} catch (err) {
-					console.error("  [COMPRESSION] Failed:", (err as Error).message);
-				}
-			}
-
-			// Two-stage compactor (#2467) — additive to the legacy ProactiveCompression
-			// above. Cheap checkpoint at 65%, hard compact at 80%.
-			if (process.env["8GENT_TWO_STAGE_COMPACT"] !== "0") {
-				await this.observeTwoStage(providerConfig);
-			}
+			await this.compactIfNeeded(providerConfig);
 
 			// Move BMAD task to review/done if we had one
 			if (this.currentBmadTask) {
@@ -2939,14 +3303,86 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
-	 * Abort the current generation. Called when user presses ESC during processing.
+	 * Steer the running turn (D1). The message joins the conversation as a user
+	 * message after the tool calls running now finish, before the next model
+	 * call, on both the text-tool and the native path. A message sent when no
+	 * further model call comes (the turn is answering, or no turn runs) stays
+	 * queued: read it with takeQueuedSteers() and send it as the next chat().
+	 * Blank text is ignored. Returns false when the steer was refused: the
+	 * queue already holds MAX_STEERS, or the text is over MAX_STEER_BYTES.
 	 */
-	abort(): void {
-		if (this.abortController) {
-			this.abortController.abort();
-			this.abortController = null;
-			console.log("[8gent] Generation aborted by user");
+	steer(text: string): boolean {
+		if (text.trim() === "") return false;
+		if (this.steerQueue.length >= MAX_STEERS) return false;
+		if (Buffer.byteLength(text, "utf8") > MAX_STEER_BYTES) return false;
+		this.steerQueue.push({ text, turn: this.activeTurn });
+		return true;
+	}
+
+	/** Steering messages not delivered yet, in the order they were sent. */
+	queuedSteers(): readonly string[] {
+		return this.steerQueue.map((s) => s.text);
+	}
+
+	/**
+	 * Take the undelivered steering messages and clear the queue. Call it after
+	 * chat() resolves (send them as the follow-up turn) or after abort() (give
+	 * the text back to the person to edit).
+	 */
+	takeQueuedSteers(): string[] {
+		return this.steerQueue.splice(0).map((s) => s.text);
+	}
+
+	/**
+	 * Deliver this turn's queued steers into it: history, session file, event.
+	 * Nothing is delivered into an aborted turn, and a steer stamped with
+	 * another turn (or none) is never delivered; both stay for takeQueuedSteers.
+	 */
+	private drainSteers(): string[] {
+		const controller = this.abortController;
+		if (!controller || controller.signal.aborted) return [];
+		if (this.activeTurn === null) return [];
+		const mine = this.steerQueue.filter((s) => s.turn === this.activeTurn);
+		if (mine.length === 0) return [];
+		this.steerQueue = this.steerQueue.filter((s) => s.turn !== this.activeTurn);
+		const texts = mine.map((s) => s.text);
+		for (const text of texts) {
+			this.messageHistory.push({ role: "user", content: text });
+			this.sessionWriter.writeUserMessage(text);
+			this.events.onSteer?.({ text });
 		}
+		return texts;
+	}
+
+	/**
+	 * Abort the current generation. With no argument it is the person (ESC); the circuit
+	 * breaker and the session watchdog pass their stop, which is logged as itself and kept
+	 * for getTurnStop() (#4172). With no model call in flight nothing is stopped, so the stop
+	 * is not kept: a watchdog firing between calls is logged and the turn goes on.
+	 */
+	abort(stop?: TurnStop): void {
+		if (!this.abortController) {
+			if (stop?.kind === "watchdog")
+				console.log(`\n[8gent] ${stop.reason} No model call in flight.`);
+			return;
+		}
+		if (stop && this.turnStop === null) this.turnStop = stop;
+		this.abortController.abort();
+		this.abortController = null;
+		console.log(
+			stop === undefined
+				? "[8gent] Generation aborted by user"
+				: stop.kind === "watchdog"
+					? `\n[8gent] ${stop.reason} Aborting.`
+					: stop.kind === "formatting_rule_violation"
+						? `[8gent] Generation stopped by the pre-send check: ${stop.reason}`
+						: `[8gent] Generation stopped by the circuit breaker: ${stop.reason}`,
+		);
+	}
+
+	/** Why the harness stopped the last turn, or null when it ended on its own or by ESC. */
+	getTurnStop(): TurnStop | null {
+		return this.turnStop;
 	}
 
 	private async collectToolEvidence(event: {
@@ -3038,9 +3474,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const used = estimateMessageTokens(this.messageHistory);
 		if (used < this.compactionContextWindow * 0.65) return;
 		this.serverContextWindow = null;
-		const window = await this.contextWindowLookup({ baseUrl: pending.baseUrl, model: pending.model }).catch(
-			() => null,
-		);
+		const window = await this.contextWindowLookup({
+			baseUrl: pending.baseUrl,
+			model: pending.model,
+		}).catch(() => null);
 		if (!window) {
 			console.error(
 				`  [COMPRESSION] could not read the context window for ${pending.model}; using ${this.compactionContextWindow}`,
@@ -3052,51 +3489,49 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
-	 * One pass of the two-stage compactor (#2467) after a turn. Thresholds
-	 * resolve against the provider's known context window, the same one
-	 * ProactiveCompression uses (#3237: this used to read a `contextSize` that
-	 * ProviderConfig never carries, so every model was treated as 32,768).
+	 * The one compaction path (Pi parity E5): both the native and the text-tool
+	 * turn end here. ProactiveCompression decides and rewrites the history; a
+	 * summary is recorded in the session store as a compaction entry, so the
+	 * original messages stay in the file and undo works.
 	 */
-	private async observeTwoStage(providerConfig: ProviderConfig): Promise<void> {
+	private async compactIfNeeded(providerConfig: ProviderConfig): Promise<void> {
 		try {
-			if (!this.twoStageCompactor) {
-				const summarizer: Summarizer = async (msgs, { previousSummary }) =>
-					this.generateCheckpoint(providerConfig, twoStageCheckpointPrompt(msgs, previousSummary));
-				this.twoStageCompactor = new TwoStageCompactor({
-					checkpointPct: 0.65,
-					compactPct: 0.8,
-					keepLastN: 4,
-					summarizer,
-				});
-			}
-			const state: TwoStageAgentState = {
-				messages: this.messageHistory,
-				checkpoints: this.twoStageCheckpoints,
-				provider: { contextSize: this.compactionContextWindow },
-			};
-			const result = await this.twoStageCompactor.observe(state);
-			if (result.action !== "none") {
-				console.log(
-					`  [TWO_STAGE:${result.action}] tokens ${result.report?.tokensBefore} -> ${result.report?.tokensAfter}, removed ${result.report?.messagesRemoved}`,
+			// A headless run has no host saving its session: it keeps its own file.
+			if (
+				!this.compactionRecorder &&
+				this.config.headless &&
+				this.compaction.shouldCompact(this.messageHistory)
+			) {
+				this.attachCompactionStore(
+					SessionStore.create({
+						id: this.sessionId,
+						cwd: this.config.workingDirectory || process.cwd(),
+						model: this.config.model,
+						provider: this.config.runtime,
+					}),
 				);
 			}
+			const pass = await compactHistory({
+				engine: this.compaction,
+				history: this.messageHistory,
+				model: createModel(providerConfig),
+				recorder: this.compactionRecorder,
+			});
+			if (!pass) return;
+			this.messageHistory = pass.messages;
+			const r = pass.result;
+			console.log(
+				`  [COMPRESSION:${r.stage}] ${r.messagesRemoved} messages compressed, ${r.tokensBefore} -> ${r.tokensAfter} tokens`,
+			);
+			this.events.onCompaction?.(r);
 		} catch (err) {
-			console.error("  [TWO_STAGE] Failed:", (err as Error).message);
+			console.error("  [COMPRESSION] Failed:", (err as Error).message);
 		}
 	}
 
-	/** The model call behind a two-stage checkpoint. A method so tests can stand in for it. */
-	private async generateCheckpoint(
-		providerConfig: ProviderConfig,
-		prompt: string,
-	): Promise<string> {
-		const { generateText } = await import("ai");
-		const { text } = await generateText({
-			model: createModel(providerConfig),
-			prompt,
-			maxOutputTokens: 800,
-		});
-		return text;
+	/** Record this agent's compactions in `store` (a host that owns the session file). */
+	attachCompactionStore(store: SessionStore | null): void {
+		this.compactionRecorder = store ? new CompactionRecorder(store) : null;
 	}
 
 	/** Tell the UI a different model serves this turn (#3102). A listener
@@ -3278,9 +3713,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * same executor (permissions, secret scrub) as a normal call. The caller
 	 * only uses it for tools whose replay class is "replay".
 	 */
-	runToolForResume(toolName: string, args: Record<string, unknown>): Promise<string> {
-		const refusal = this.modeRefusal(toolName);
-		if (refusal) return Promise.resolve(refusal);
+	async runToolForResume(toolName: string, args: Record<string, unknown>): Promise<string> {
+		// The same gate as a model's call: mode, PreToolUse, then (G1) extensions.
+		const refusal = await this.refuseToolCall(toolName, args);
+		if (refusal) return refusal;
 		return this.executor.execute(toolName, args);
 	}
 
@@ -3387,6 +3823,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * a hard dependency of the agent loop.
 	 */
 	private async tryRunPreToolRouter(userMessage: string): Promise<void> {
+		// A no-tool scope (classroom) never pre-fetches: that would run a tool on untrusted text.
+		if (isNoToolScope(this.config.agentScope)) return;
 		const cwd = this.config.workingDirectory || process.cwd();
 		let decision: RouterDecision;
 		try {
@@ -3397,7 +3835,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (decision.strategy === "none" || decision.confidence <= 0.6) return;
 
 		const dispatch = mapStrategyToTool(decision);
-		if (!dispatch || this.modeRefusal(dispatch.tool)) return;
+		if (!dispatch || (await this.refuseToolCall(dispatch.tool, dispatch.args))) return;
 
 		try {
 			const result = await this.executor.execute(dispatch.tool, dispatch.args);

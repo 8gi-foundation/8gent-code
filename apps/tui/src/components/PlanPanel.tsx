@@ -17,6 +17,10 @@
  *
  * With no plan this turn the caller does not mount the panel at all, so the
  * chat gets the column back.
+ *
+ * When the project has a checklist plan file (#4161), the header shows that
+ * file's ticks beside the column's own, e.g. "PLAN  5/5 · PLAN.md 0/3": the
+ * file is the record, the column only mirrors it.
  */
 
 import { Box, Text } from "ink";
@@ -24,12 +28,12 @@ import React, { useCallback, useEffect, useState } from "react";
 import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import { plainInline } from "../lib/inline-markdown.js";
 import { motionEnabled } from "../lib/motion.js";
-import type { PlanStep } from "../lib/plan-state.js";
+import type { PlanFileTally, PlanStep } from "../lib/plan-state.js";
 import { glyphs } from "../lib/term-caps.js";
 import { t } from "../theme.js";
 import { KeyCapRow } from "./KeyCap.js";
-import { FigureEight } from "./figure-eight-spinner.js";
 import { useLandingRows } from "./ToolTrail.js";
+import { FigureEight } from "./figure-eight-spinner.js";
 
 export interface PlanPanelProps {
 	steps: ReadonlyArray<PlanStep>;
@@ -42,6 +46,8 @@ export interface PlanPanelProps {
 	animate?: boolean;
 	/** Key hint for the toggle, e.g. "^X". */
 	toggleHint?: string;
+	/** The project's checklist plan file and its ticks (#4161); null: none. */
+	planFile?: PlanFileTally | null;
 }
 
 export function formatElapsed(ms: number): string {
@@ -54,7 +60,11 @@ export function formatElapsed(ms: number): string {
 
 /** The settled summary: only facts the steps themselves carry, packed into
  *  as few lines of `width` as fit, e.g. ["4 of 5 done · 1 failed", "2m 10s"]. */
-export function planSummary(steps: ReadonlyArray<PlanStep>, elapsedMs?: number | null, width = 80): string[] {
+export function planSummary(
+	steps: ReadonlyArray<PlanStep>,
+	elapsedMs?: number | null,
+	width = 80,
+): string[] {
 	const done = steps.filter((s) => s.status === "done").length;
 	const failed = steps.filter((s) => s.status === "failed").length;
 	// Without progress reports from the agent there is nothing to count as
@@ -67,7 +77,8 @@ export function planSummary(steps: ReadonlyArray<PlanStep>, elapsedMs?: number |
 	const lines: string[] = [];
 	for (const part of parts) {
 		const last = lines[lines.length - 1];
-		if (last !== undefined && last.length + 3 + part.length <= width) lines[lines.length - 1] = `${last} · ${part}`;
+		if (last !== undefined && last.length + 3 + part.length <= width)
+			lines[lines.length - 1] = `${last} · ${part}`;
 		else lines.push(part);
 	}
 	return lines;
@@ -91,6 +102,7 @@ export function PlanPanel({
 	width = 26,
 	animate = true,
 	toggleHint,
+	planFile = null,
 }: PlanPanelProps) {
 	const g = glyphs();
 	const moving = motionEnabled(animate);
@@ -98,6 +110,15 @@ export function PlanPanel({
 	const done = steps.filter((s) => s.status === "done").length;
 	const inner = Math.max(8, width - 2);
 	const textMax = inner - 2;
+	const own = steps.some((s) => s.status !== "pending")
+		? `${done}/${steps.length}`
+		: `${steps.length}`;
+	// The plan file's ticks sit in the header row beside the column's own,
+	// so the column's layout below the header is unchanged.
+	const fileCount = planFile ? `${planFile.ticked}/${planFile.total}` : "";
+	// Room left for the file name after "PLAN", both counts and the gaps;
+	// under 4 columns the name goes and the counts keep their gap.
+	const nameRoom = inner - 4 - own.length - fileCount.length - 5;
 
 	return (
 		<Box flexDirection="column" width={width} flexShrink={0} paddingX={1}>
@@ -105,8 +126,15 @@ export function PlanPanel({
 				<Text color={t.heading} bold>
 					PLAN
 				</Text>
-				<Text color={t.muted}>
-					{steps.some((s) => s.status !== "pending") ? `${done}/${steps.length}` : `${steps.length}`}
+				<Text color={t.muted} wrap="truncate-end">
+					{own}
+					{planFile ? (
+						<>
+							{" · "}
+							{nameRoom >= 4 ? `${clip(planFile.name, nameRoom)} ` : ""}
+							<Text color={planFile.ticked < done ? t.orange : t.muted}>{fileCount}</Text>
+						</>
+					) : null}
 				</Text>
 			</Box>
 			<Box marginTop={1} flexDirection="column">
@@ -235,7 +263,11 @@ export function usePlanPref(hasContent: boolean): [PlanPref, () => void] {
 	}, []);
 	const toggle = useCallback(() => {
 		setPref((prev) => {
-			const next: PlanPref = planColumnOpen(prev, hasContent) ? "hidden" : hasContent ? "auto" : "shown";
+			const next: PlanPref = planColumnOpen(prev, hasContent)
+				? "hidden"
+				: hasContent
+					? "auto"
+					: "shown";
 			void saveHidden(next === "hidden");
 			return next;
 		});

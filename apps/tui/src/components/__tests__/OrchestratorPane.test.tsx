@@ -125,11 +125,11 @@ describe("OrchestratorPane", () => {
 		}
 	});
 
-	test("honest empty state - no agents running", () => {
+	test("honest empty state - no 8gents running", () => {
 		const { stdout, unmount } = renderHeadless(<OrchestratorPane rows={[]} />);
 		const frame = plain(stdout.lastFrame());
 		expect(frame).toContain("ORCHESTRATOR");
-		expect(frame).toContain("no agents running");
+		expect(frame).toContain("no 8gents running");
 		unmount();
 	});
 
@@ -218,14 +218,14 @@ describe("OrchestratorPane", () => {
 		// Dropped columns are gone, not mashed together.
 		expect(frame).not.toContain("TOKENS");
 		expect(frame).not.toContain("TOOLTOKENSELAPSED");
-		expect(frame).toContain("AGENT");
+		expect(frame).toContain("8GENT");
 		expect(frame).toContain("STATE");
 		expect(frame).toContain("ELAPSED");
 		expect(frame).toContain("3.2s");
 		unmount();
 	});
 
-	test("very narrow pane (24 cols) keeps AGENT + STATE inside the border", () => {
+	test("very narrow pane (24 cols) keeps 8GENT + STATE inside the border", () => {
 		const rows: OrchestratorRow[] = [
 			row({ id: "hx_work01", state: "working", tool: "read_file", tokens: 4500 }),
 			row({ id: "hx_queue1", state: "queued" }),
@@ -235,7 +235,7 @@ describe("OrchestratorPane", () => {
 		for (const line of frame.split("\n")) {
 			expect(line.length).toBeLessThanOrEqual(24);
 		}
-		expect(frame).toContain("AGENT");
+		expect(frame).toContain("8GENT");
 		expect(frame).toContain("STATE");
 		expect(frame).toContain("working");
 		expect(frame).toContain("queued");
@@ -311,7 +311,7 @@ describe("OrchestratorPaneLive", () => {
 		const { source, listenerCount } = fakeSource([]);
 		const { stdout, unmount } = renderHeadless(<OrchestratorPaneLive source={source} />);
 		await tick();
-		expect(plain(stdout.lastFrame())).toContain("no agents running");
+		expect(plain(stdout.lastFrame())).toContain("no 8gents running");
 		expect(listenerCount()).toBe(1);
 		unmount();
 		await tick();

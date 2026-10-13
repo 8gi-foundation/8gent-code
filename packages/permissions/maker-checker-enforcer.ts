@@ -129,6 +129,7 @@ export function classifyToolAction(
 		case "enable_infinite_mode":
 			return { action: "infinite:enable", risk: ACTION_RISK.RISKY };
 		case "run_command":
+		case "powershell":
 		case "background_start": {
 			const cmd = String(args.command ?? "");
 			if (!cmd) return null;

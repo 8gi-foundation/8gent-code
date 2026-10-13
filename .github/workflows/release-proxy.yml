@@ -43,10 +43,10 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_KEYCHAIN_PROFILE }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
       - name: Install workspace deps
         working-directory: .
         run: bun install --frozen-lockfile
@@ -72,7 +72,7 @@ jobs:
       - name: Note when signing was skipped
         if: ${{ env.APPLE_CERT_P12_BASE64 == '' }}
         run: echo "::warning::Apple signing secrets absent - shipping UNSIGNED darwin binaries. See apps/proxy/SIGNING.md."
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: proxy-darwin
           path: apps/proxy/dist/8gent-proxy-darwin-*
@@ -84,10 +84,10 @@ jobs:
   linux:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
       - name: Install workspace deps
         working-directory: .
         run: bun install --frozen-lockfile
@@ -108,7 +108,7 @@ jobs:
             nfpm package -f nfpm.yaml -p deb -t "../../dist/8gent-proxy_${ARCH}.deb"
             nfpm package -f nfpm.yaml -p rpm -t "../../dist/8gent-proxy_${ARCH}.rpm"
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: proxy-linux
           path: |
@@ -125,10 +125,10 @@ jobs:
       WIN_CERT_PFX_BASE64: ${{ secrets.WINDOWS_AUTHENTICODE_PFX_BASE64 }}
       WIN_CERT_PASSWORD: ${{ secrets.WINDOWS_AUTHENTICODE_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.4.3
       - name: Install workspace deps
         working-directory: .
         run: bun install --frozen-lockfile
@@ -165,7 +165,7 @@ jobs:
         if: ${{ env.WIN_CERT_PFX_BASE64 == '' }}
         shell: bash
         run: echo "::warning::Windows Authenticode secrets absent - shipping UNSIGNED exe + installer. See apps/proxy/SIGNING.md."
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: proxy-windows
           path: |
@@ -180,11 +180,11 @@ jobs:
     runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/tags/proxy-v')
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: artifacts/**/*
           fail_on_unmatched_files: false

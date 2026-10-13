@@ -85,8 +85,18 @@ export const DEFAULT_SETTINGS: Settings = {
 			qa: "QA",
 		},
 	},
+	retry: {
+		// null = the built-in behaviour of today (see packages/settings/retry.ts).
+		maxRetries: null,
+		maxDelayMs: 30000,
+		httpIdleTimeoutMs: null,
+	},
 	music: {
 		// Audible, well short of loud: a first-ever track never starts at 100% (#3190).
 		volume: 60,
+	},
+	shell: {
+		path: "",
+		powershellTool: false,
 	},
 };

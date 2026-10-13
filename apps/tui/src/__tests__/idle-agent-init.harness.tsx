@@ -120,7 +120,7 @@ async function main() {
 		stdin.feed("\r");
 		await tick(4000);
 		const after = strip(stdout.written.slice(before));
-		console.log(JSON.stringify({ phase: "submitted", notReady: after.includes("Agent not ready") }));
+		console.log(JSON.stringify({ phase: "submitted", notReady: after.includes("8gent not ready") }));
 		app.unmount();
 		process.exit(0);
 	}

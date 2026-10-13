@@ -13,29 +13,31 @@
  * - Multi-avenue tracking
  */
 
-import { Box, type DOMElement, useApp, useInput } from "ink";
-import {
-	applyDesignSystem,
-	t,
-	type ThemeChoice,
-	themeChoices,
-	themeStatus,
-} from "./theme.js";
-import { findDesignSystem, saveDesignSystemChoice } from "./theme/design-systems.js";
+import { Box, type DOMElement, useApp, useInput, useStdout } from "ink";
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import pkgInfo from "../../../package.json" with { type: "json" };
 import {
 	type TaskCategory,
 	getRouterStats,
 	getTaskRouter,
 } from "../../../packages/ai/task-router.js";
 import { resolveOllamaBaseUrl } from "../../../packages/ai/text-tool-endpoint.js";
+import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
+import { SessionManager } from "../../../packages/eight/session-manager.js";
 import {
+	type SessionListItem,
+	SessionStore,
+	type TreeNode,
+	listSessions,
+	trashSession,
+} from "../../../packages/eight/session-store.js";
+import { setVisualiserTokenSink } from "../../../packages/eight/visualiser-bridge.js";
+import {
+	createLlamaRouter,
 	createLlamaServer,
 	isLlamaServerSelected,
 	resolveLlamaServerUrl,
 } from "../../../packages/local-model-server/index.js";
-import { SessionManager } from "../../../packages/eight/session-manager.js";
-import { SessionTree } from "../../../packages/eight/session-tree.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import {
 	ActivityMonitor,
@@ -43,21 +45,14 @@ import {
 	completeActivity,
 	pushActivity,
 } from "./components/ActivityMonitor.js";
-import { TabBar } from "./components/TabBar.js";
+import { CommandPalette } from "./components/CommandPalette.js";
+import { HeaderBar } from "./components/HeaderBar.js";
 import { IntroBanner, stopIntroMusic } from "./components/IntroBanner.js";
-import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gate.js";
-import { motionEnabled } from "./lib/motion.js";
-import { pushVisualiserToken } from "./components/ThinkingVisualizer.js";
-import { setVisualiserTokenSink } from "../../../packages/eight/visualiser-bridge.js";
-import {
-	composePrompt,
-	ensureInstalled,
-	getPreset,
-	isInstalled,
-	listPresetIds,
-	runExternalAgent,
-} from "./lib/external-agent-runner.js";
+import { SessionPicker } from "./components/SessionPicker.js";
+import { SessionTree } from "./components/SessionTree.js";
+import { TabBar } from "./components/TabBar.js";
 import { ThinkingView } from "./components/ThinkingView.js";
+import { pushVisualiserToken } from "./components/ThinkingVisualizer.js";
 import { VoiceIndicator } from "./components/VoiceIndicator.js";
 import { AgentIndicator } from "./components/agent-panel/AgentIndicator.js";
 import { AgentSidebar } from "./components/agent-panel/AgentSidebar.js";
@@ -75,13 +70,8 @@ import {
 	ADHD_MODE_ENABLED_MSG,
 	ADHD_MODE_SUGGESTION,
 } from "./components/bionic-text.js";
-import { CommandInput } from "./components/command-input.js";
-import { GoalClient } from "./lib/goal-client.js";
-import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
-import pkgInfo from "../../../package.json" with { type: "json" };
-import { CommandPalette } from "./components/CommandPalette.js";
+import { CommandInput, slashMenuCompact } from "./components/command-input.js";
 import { FixedFrame } from "./components/fixed-frame/FixedFrame.js";
-import { HeaderBar } from "./components/HeaderBar.js";
 import {
 	ImageBadge,
 	consumeIfWholeValueIsImagePath,
@@ -117,26 +107,56 @@ import { AnimatedStatusVerb } from "./components/status-verb.js";
 import type { TaskItem } from "./components/task-card/TaskCardList.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
 import { useAutoKanban } from "./hooks/useAutoKanban.js";
+import { chatRowBudget, useMeasuredHeight } from "./hooks/useMeasuredHeight.js";
+import { resolveSpecForRole, usePerTabAgents } from "./hooks/usePerTabAgents.js";
 import { useProcessPanel } from "./hooks/useProcessPanel.js";
 import { writeToTerminal } from "./hooks/useTerminal.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { useViewport } from "./hooks/useViewport.js";
-import { chatRowBudget, useMeasuredHeight } from "./hooks/useMeasuredHeight.js";
 import { useVoiceChat } from "./hooks/useVoiceChat.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
 import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
-import { resolveSpecForRole, usePerTabAgents } from "./hooks/usePerTabAgents.js";
 import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
-import { probeProviders } from "./lib/provider-health.js";
 import {
+	DaemonSessionClient,
+	liveViewUrl,
+	openLiveView,
+	surfaceLabel,
+} from "./lib/daemon-sessions.js";
+import {
+	composePrompt,
+	ensureInstalled,
+	getPreset,
+	isInstalled,
+	listPresetIds,
+	runExternalAgent,
+} from "./lib/external-agent-runner.js";
+import { GoalClient } from "./lib/goal-client.js";
+import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
+import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gate.js";
+import { motionEnabled } from "./lib/motion.js";
+import {
+	SETUP_SKIP_HINT,
+	SETUP_WELCOME_ID,
 	answerFromInput,
 	placeholderFor,
 	providerCheckLine,
 	questionForChat,
-	SETUP_SKIP_HINT,
-	SETUP_WELCOME_ID,
 	settleSetupTranscript,
 } from "./lib/onboarding-chat.js";
+import { probeProviders } from "./lib/provider-health.js";
+import { isUserThemeId } from "./lib/user-themes.js";
+import {
+	type ThemeChoice,
+	applyDesignSystem,
+	reloadUserThemes,
+	saveThemeChoice,
+	t,
+	themeChoices,
+	themeStatus,
+	userThemeProblems,
+} from "./theme.js";
+import { findDesignSystem } from "./theme/design-systems.js";
 
 /** How setup names the local engines it checks. */
 const SETUP_PROVIDER_NAMES: Record<string, string> = {
@@ -144,92 +164,13 @@ const SETUP_PROVIDER_NAMES: Record<string, string> = {
 	lmstudio: "LM Studio",
 	apfel: "apfel (Apple Foundation Model)",
 };
+import { findPlanFile } from "../../../packages/ai/plan-file.js";
+import { bunFlagsFor, safeBunFlags } from "../../../packages/core/bun-flags.js";
 import {
-	PROBE_TIMEOUT_MS,
-	READINESS_RETRY_MS,
-	createReadinessCache,
-	localProviderEndpoints,
-	withTimeout,
-} from "./lib/provider-readiness.js";
-import * as bgPool from "./lib/background-pool.js";
-import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
-import { formatSessionTime, formatTokens, hudTokens, msUntilSessionTimeChanges } from "./lib/format.js";
-import { truncate } from "./lib/text.js";
-import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
-import {
-	computeProcessSidebarWidth,
-	tuiChatContentWidth,
-} from "./lib/layout-breakpoints.js";
-import { narratePlan, narrateStep, narrateToolEnd, narrateToolStart } from "./lib/narrator.js";
-import {
-	flushSession,
-	initSessionLogger,
-	logError,
-	logMessage,
-	logStep,
-	logTabSwitch,
-	logToolEnd,
-	logToolStart,
-} from "./lib/session-logger.js";
-import { expandSkillSlashCommand } from "./lib/skill-slash.js";
-import { detectBuildIntent } from "./lib/build-intent.js";
-import {
-	BUILT_IN_SLASH_COMMANDS,
-	type SlashCommand,
-} from "./lib/slash-commands.js";
-import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
-import { BTWView } from "./screens/BTWView.js";
-import { IdeasView } from "./screens/IdeasView.js";
-import { MusicPlayerView } from "./screens/MusicPlayerView.js";
-import { BottomBar } from "./components/BottomBar.js";
-import type { JudgeState } from "./components/StatusFooter.js";
-import { djHasTrack, setDjDeckOpen } from "./components/DjDeck.js";
-import { NotesView } from "./screens/NotesView.js";
-import { OnboardingScreen } from "./screens/OnboardingScreen.js";
-import { ProjectsView } from "./screens/ProjectsView.js";
-import { QuestionsView } from "./screens/QuestionsView.js";
-import { SettingsView } from "./screens/SettingsView.js";
-import { TerminalView } from "./screens/TerminalView.js";
-import { WindowTerminalView } from "./screens/WindowTerminalView.js";
-// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
-// These are the canonical surface for inter-package use; deep imports would
-// bypass each package's documented API. Suppressed by design.
-// react-doctor-disable-next-line react-doctor/no-barrel-import
-import {
-	resolveTermCommand,
-	spawnInWindow,
-} from "../../../packages/terminal-tab/index.js";
-import {
-	loadSettings as loadAppSettings,
-	getVoiceForRole,
-} from "../../../packages/settings/index.js";
-import { NarratorView } from "./screens/NarratorView.js";
-import { HistoryScreen, type ConversationEntry } from "./screens/HistoryScreen.js";
-import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
-import { MessageViewer } from "./components/MessageViewer.js";
-import { PlanEmpty, PlanPanel, planColumnOpen, usePlanPref } from "./components/PlanPanel.js";
-import { PlanRail, useManagerTasks } from "./components/PlanRail.js";
-import { type PlanStep, applyPlanUpdate, mergePlanText, replyPlan, settlePlan } from "./lib/plan-state.js";
-import { getTaskManager } from "../../../packages/tasks/index.js";
-import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalStrip.js";
-import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
-import { isApprovalKeyClaimed, useApprovalCard } from "./hooks/useApprovalCard.js";
-import { ActivityRail } from "./components/ActivityRail.js";
-import { turnEndedInError } from "./lib/turn-outcome.js";
-import { createProgramStatusEmitter, deriveProgramState, installProgramStatusCleanup } from "./lib/program-status.js";
-import { chatColumnWidth } from "./lib/chat-layout.js";
-import { onCopied } from "./lib/click-targets.js";
-import { gitView, useGitSync } from "./hooks/useGitSync.js";
-import { useBodyParts } from "./hooks/useBodyParts.js";
-import {
-	deriveTools,
-	deriveProviders,
-	deriveAgents,
-	deriveActiveTasks,
-	fallbackFromChain,
-	planStepsFromText,
-	type OrchestrationAgentSnapshot,
-} from "./lib/activity-rail-derivation.js";
+	onRunCommandUnsandboxed,
+	runCommandSandboxStatus,
+	sandboxFooterReason,
+} from "../../../packages/permissions/run-command-sandbox.js";
 import {
 	setSystemOneNoticeSink,
 	startSystemOneWarmup,
@@ -237,8 +178,130 @@ import {
 } from "../../../packages/permissions/system-one-gate.js";
 import { ModelFailover } from "../../../packages/providers/failover.js";
 import { getProviderManager } from "../../../packages/providers/index.js";
+import {
+	getVoiceForRole,
+	loadSettings as loadAppSettings,
+} from "../../../packages/settings/index.js";
+import { getTaskManager } from "../../../packages/tasks/index.js";
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
+import { resolveTermCommand, spawnInWindow } from "../../../packages/terminal-tab/index.js";
+import { ActivityRail } from "./components/ActivityRail.js";
+import { BottomBar } from "./components/BottomBar.js";
+import { djHasTrack, setDjDeckOpen } from "./components/DjDeck.js";
+import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
+import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalStrip.js";
+import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
+import { MessageViewer } from "./components/MessageViewer.js";
 import { NoProviderNotice } from "./components/NoProviderCard.js";
-import { COMPACT_BELOW_ROWS, providerKeyStatus, unreachableLine } from "./lib/no-provider-guidance.js";
+import { PlanEmpty, PlanPanel, planColumnOpen, usePlanPref } from "./components/PlanPanel.js";
+import { PlanRail, useManagerTasks } from "./components/PlanRail.js";
+import type { JudgeState } from "./components/StatusFooter.js";
+import { isApprovalKeyClaimed, useApprovalCard } from "./hooks/useApprovalCard.js";
+import { useBodyParts } from "./hooks/useBodyParts.js";
+import { gitView, useGitSync } from "./hooks/useGitSync.js";
+import {
+	type OrchestrationAgentSnapshot,
+	deriveActiveTasks,
+	deriveAgents,
+	deriveProviders,
+	deriveTools,
+	fallbackFromChain,
+	planStepsFromText,
+} from "./lib/activity-rail-derivation.js";
+import * as bgPool from "./lib/background-pool.js";
+import {
+	BANG_ID_PREFIX,
+	BANG_USAGE,
+	type BangRun,
+	bangChatLine,
+	bangContextBlock,
+	bangRunningLine,
+	killBangsOnExit,
+	parseBang,
+	planModeRefusal,
+	sendRefusal,
+	startBang,
+	withShellContext,
+	withoutBangLines,
+} from "./lib/bang-command.js";
+import { detectBuildIntent } from "./lib/build-intent.js";
+import { chatColumnWidth } from "./lib/chat-layout.js";
+import { onCopied } from "./lib/click-targets.js";
+import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
+import { copyReply } from "./lib/copy-answer.js";
+import {
+	formatSessionTime,
+	formatTokens,
+	hudTokens,
+	msUntilSessionTimeChanges,
+} from "./lib/format.js";
+import { formatHotkeyRows, formatHotkeys } from "./lib/keybindings.js";
+import { computeProcessSidebarWidth, tuiChatContentWidth } from "./lib/layout-breakpoints.js";
+import { narratePlan, narrateStep, narrateToolEnd, narrateToolStart } from "./lib/narrator.js";
+import {
+	COMPACT_BELOW_ROWS,
+	providerKeyStatus,
+	unreachableLine,
+} from "./lib/no-provider-guidance.js";
+import {
+	type PlanFileTally,
+	type PlanStep,
+	applyPlanUpdate,
+	holdOpenBoxes,
+	mergePlanText,
+	planFileTally,
+	replyPlan,
+	settlePlan,
+} from "./lib/plan-state.js";
+import {
+	createProgramStatusEmitter,
+	deriveProgramState,
+	installProgramStatusCleanup,
+} from "./lib/program-status.js";
+import { expandPromptSlashCommand } from "./lib/prompt-slash.js";
+import {
+	PROBE_TIMEOUT_MS,
+	READINESS_RETRY_MS,
+	createReadinessCache,
+	localProviderEndpoints,
+	withTimeout,
+} from "./lib/provider-readiness.js";
+import {
+	flushSession,
+	initSessionLogger,
+	logError,
+	logMessage,
+	logStep,
+	logStepStart,
+	logTabSwitch,
+	logToolEnd,
+	logToolStart,
+} from "./lib/session-logger.js";
+import { expandSkillSlashCommand } from "./lib/skill-slash.js";
+import {
+	type SlashCommand,
+	builtInCommandsCoreFirst,
+	formatSlashHelp,
+} from "./lib/slash-commands.js";
+import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
+import { truncate } from "./lib/text.js";
+import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
+import { turnEndedInError } from "./lib/turn-outcome.js";
+import { BTWView } from "./screens/BTWView.js";
+import { type ConversationEntry, HistoryScreen } from "./screens/HistoryScreen.js";
+import { IdeasView } from "./screens/IdeasView.js";
+import { MusicPlayerView } from "./screens/MusicPlayerView.js";
+import { NarratorView } from "./screens/NarratorView.js";
+import { NotesView } from "./screens/NotesView.js";
+import { OnboardingScreen } from "./screens/OnboardingScreen.js";
+import { ProjectsView } from "./screens/ProjectsView.js";
+import { QuestionsView } from "./screens/QuestionsView.js";
+import { SettingsView } from "./screens/SettingsView.js";
+import { TerminalView } from "./screens/TerminalView.js";
+import { WindowTerminalView } from "./screens/WindowTerminalView.js";
 
 // The rail's fallback row, per configured route. The chain is read the way
 // the agent reads it (a fresh ModelFailover per route, so ~/.8gent/failover.json
@@ -284,9 +347,9 @@ async function initAuthSystem() {
 	}
 }
 
+import { LOCAL_PROVIDERS } from "../../../packages/permissions/command-policy";
 // The process-wide infinite flag (CLI --infinite) seeds each tab's starting mode.
 import { getPermissionManager, isInfiniteMode } from "../../../packages/permissions/index.js";
-import { LOCAL_PROVIDERS } from "../../../packages/permissions/command-policy";
 import {
 	type PermissionMode,
 	type PermissionModeHolder,
@@ -295,13 +358,13 @@ import {
 	setHolderMode,
 	systemOneEnvFor,
 } from "../../../packages/permissions/permission-mode.js";
+import { usePermToast } from "./hooks/usePermToast.js";
 import {
 	type PermView,
 	isPermissionCycleKey,
 	permSwitchLine,
 	permView,
 } from "./lib/perm-modes-design.js";
-import { usePermToast } from "./hooks/usePermToast.js";
 
 // Import the actual Agent for real execution
 import { sessionApiKey } from "../../../packages/eight/failover-provider-config.js";
@@ -323,17 +386,17 @@ import {
 	type ModelSpec,
 	autoSelectModel,
 	canReuseTabAgent,
-	tabAgentRole,
-	isLikelyEmbeddingModelId,
-	normalizeProviderId,
 	declaredModels,
 	filterChatCapable,
+	isLikelyEmbeddingModelId,
 	listsInstalledOllamaModels,
 	missingModelNotice,
+	normalizeProviderId,
 	pickBestChatModel,
 	planAgentBuild,
 	providerToRuntime,
 	specForActivatedTab,
+	tabAgentRole,
 } from "./lib/model-selection.js";
 import { routeOnScreen } from "./lib/model-truth.js";
 import { PACKAGE_ROOT, packageBinScript } from "./lib/package-scripts.js";
@@ -343,7 +406,8 @@ function loadEnvFile() {
 	const candidates = [
 		pathMod.join(process.cwd(), ".env"),
 		pathMod.resolve(import.meta.dirname, "../../../.env"), // 8gent-code repo root
-		pathMod.join(process.env.HOME || "", ".8gent", ".env"), // ~/.8gent/.env
+		// USERPROFILE: Windows shells usually have no HOME, which read .8gent/.env from the cwd.
+		pathMod.join(process.env.HOME || process.env.USERPROFILE || "", ".8gent", ".env"), // ~/.8gent/.env
 	];
 	for (const envPath of candidates) {
 		try {
@@ -421,7 +485,8 @@ function detectBestLocalProvider(): { provider: string; model: string } {
 	let answers: any[] = [];
 	try {
 		answers = JSON.parse(
-			execFileSync(process.execPath, ["-e", PROBE, ...urls], {
+			// Runs in the user's cwd on every start: never its bunfig.toml or .env (#4013).
+			execFileSync(process.execPath, [...bunFlagsFor(process.execPath), "-e", PROBE, ...urls], {
 				timeout: 3000,
 				stdio: ["ignore", "pipe", "ignore"],
 			}).toString(),
@@ -508,6 +573,12 @@ function computeCliOverrides(
 // Import onboarding system
 import { OnboardingManager } from "../../../packages/self-autonomy/index.js";
 import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
+import {
+	describeMissingVoiceSetup,
+	describeTranscriberBackend,
+	formatMicLabel,
+	resolveInputDevice,
+} from "../../../packages/voice/input-device.js";
 import {
 	FALLBACK_SYSTEM_VOICE,
 	listInstalledSystemVoices,
@@ -686,15 +757,30 @@ type ViewMode =
 	| "history"
 	| "music"
 	| "message-viewer"
-	| "theme-select";
+	| "theme-select"
+	| "session-picker"
+	| "session-tree";
 
 /** Width of the PLAN column, matching the old PlanRail (24) plus its gap. */
 const PLAN_COLUMN_WIDTH = 24;
+// Pickers drawn over the chat, above the input, as the palette is. Since #2350
+// no other viewMode is drawn, so /model, /provider, /theme, Ctrl+L and
+// Ctrl+Shift+M set a view nobody saw (#3918 D3).
+const PICKER_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>([
+	"model-select",
+	"provider-select",
+	"theme-select",
+	"session-picker",
+	"session-tree",
+]);
+// These two read their own keys (Ctrl+N, Ctrl+S, Ctrl+R, Ctrl+D, Tab, Esc),
+// so the App's global key handler stays out while they are open (#3918 E3, E4).
+const SESSION_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>(["session-picker", "session-tree"]);
 
 // Honest empty states for the plan surfaces. Both fill only from a real
 // source; neither is ever padded with placeholder rows.
 const PLAN_EMPTY_LINE =
-	"No plan steps yet. They appear when the agent writes a PLAN: with numbered steps while working on a request.";
+	"No plan steps yet. They appear when the 8gent writes a PLAN: with numbered steps while working on a request.";
 const AVENUES_EMPTY_LINE =
 	"No avenues in this session. Nothing produces them yet, so this stays empty rather than showing guesses.";
 
@@ -798,10 +884,12 @@ export function App({
 	cliProvider,
 	cliModel,
 	cliAutoApprove,
-// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
-// react-doctor-disable-next-line react-doctor/prefer-useReducer
+	// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
+	// react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: AppProps) {
 	const { exit } = useApp();
+	// Raw stdout, for terminal sequences such as /copy's OSC 52.
+	const { stdout: inkStdout } = useStdout();
 
 	// Personality greetings (inline for independence)
 	const GREETINGS = [
@@ -947,10 +1035,47 @@ export function App({
 		},
 	});
 
+	// Mic name for the recording indicator: re-resolved at the start of every recording.
+	const [micName, setMicName] = useState<string | null>(null);
+	const [micChecking, setMicChecking] = useState(false);
+	const [voiceBackendLabel, setVoiceBackendLabel] = useState<string>("");
+	useEffect(() => {
+		if (voice.state !== "recording") return;
+		// Never show a stale name: reset, then take the engine's per-recording lookup.
+		setMicName(null);
+		const cur = voice.engine.getInputDeviceName();
+		setMicChecking(!cur.resolved);
+		if (cur.resolved) setMicName(cur.name);
+		const onDevice = ({ name }: { name: string | null }) => {
+			setMicName(name);
+			setMicChecking(false);
+		};
+		voice.engine.on("input-device", onDevice);
+		let cancelled = false;
+		voice.engine
+			.checkDependencies()
+			.then((deps) => {
+				if (cancelled) return;
+				setVoiceBackendLabel(
+					describeTranscriberBackend({
+						whisperBinaryPath: deps.whisperBinaryPath,
+						downloadedModels: deps.downloadedModels,
+						model: voice.engine.getConfig().model,
+						mode: voice.engine.getConfig().mode,
+					}),
+				);
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+			voice.engine.off("input-device", onDevice);
+		};
+	}, [voice.state]);
+
 	// Voice chat — adds messages to screen AND calls agent directly
 	const voiceChat = useVoiceChat({
 		onAgentMessage: async (transcript) => {
-			if (!agent || !agentReady) return "Agent not ready.";
+			if (!agent || !agentReady) return "8gent not ready.";
 			const clean = transcript
 				.replace(/\[_EOT_\]/g, "")
 				.replace(/<\|.*?\|>/g, "")
@@ -1042,6 +1167,36 @@ export function App({
 
 	// Named session management
 	const sessionMgr = React.useMemo(() => new SessionManager(), []);
+	// "Update available" notice: one background check per 24 h, silent on any error, off with
+	// EIGHT_NO_UPDATE_CHECK=1 (packages/eight/update-notice.ts). It never blocks startup.
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			try {
+				const [
+					{ maybeUpdateNotice, realNoticeDeps },
+					{ launcherContext },
+					{ getSettingsFilePath },
+				] = await Promise.all([
+					import("../../../packages/eight/update-notice.js"),
+					import("./lib/update-command.js"),
+					import("../../../packages/settings/store.js"),
+				]);
+				const line = await maybeUpdateNotice(
+					realNoticeDeps({ ...launcherContext(), settingsFile: getSettingsFilePath() }),
+				);
+				if (line && !cancelled) addSystemMessage(line);
+			} catch {}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+	// The daemon session this TUI is linked to, if any (#3929, see linkDaemonSession).
+	const daemonLinkRef = useRef<{ client: DaemonSessionClient; off: () => void } | null>(null);
+	/** Whether the history picker is showing daemon sessions (/sessions) or local ones. */
+	const historyPickDaemonRef = useRef(false);
+	const updateConfirmRef = useRef<((q: string) => Promise<boolean>) | null>(null);
 	const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1070,6 +1225,10 @@ export function App({
 				addSystemMessage(
 					`Resumed session: "${resumed.name || resumed.id}" (${resumed.messageCount} messages)`,
 				);
+				if (process.env.EIGHT_UPDATE_NOTE) {
+					addSystemMessage(sanitizeForDisplay(process.env.EIGHT_UPDATE_NOTE));
+					delete process.env.EIGHT_UPDATE_NOTE;
+				}
 			} else {
 				addSystemMessage(`Session "${sessionResume}" not found.`);
 			}
@@ -1111,8 +1270,13 @@ export function App({
 	// are never hardcoded - the header used to read "main" whatever branch
 	// was checked out, #2921).
 
-	// Session branching tree
-	const sessionTreeRef = useRef(new SessionTree());
+	// The /resume picker's rows and the /tree view's data (#3918 E3, E4). The
+	// session of record is the JSONL tree store (packages/eight/session-store.ts),
+	// written through sessionMgr; nothing is kept in a second in-memory tree.
+	const [pickerSessions, setPickerSessions] = useState<SessionListItem[]>([]);
+	const [treeView, setTreeView] = useState<{ tree: TreeNode[]; leafId: string | null } | null>(
+		null,
+	);
 
 	// Planning state (legacy predicted-step board)
 	const [kanbanBoard, setKanbanBoard] = useState<KanbanBoard>({
@@ -1126,6 +1290,8 @@ export function App({
 	// update_plan calls, see lib/plan-state.ts). Saved tasks from the task
 	// manager show there when no turn plan exists. Ctrl+X opens and closes it.
 	const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
+	// The project's checklist plan file, if any (#4161): the record the column mirrors.
+	const [planFile, setPlanFile] = useState<PlanFileTally | null>(null);
 	// The reply stamps the plan it closes (Message.plan); the send path reads
 	// it here because its closure holds the plan from when the turn began.
 	const planStepsRef = useRef<PlanStep[]>([]);
@@ -1155,7 +1321,8 @@ export function App({
 	// View state — now driven by workspace tabs
 	const [viewMode, setViewMode] = useState<ViewMode>("chat");
 
-	// Bubble navigation state (Ctrl+L enters, Esc/Ctrl+L exits)
+	// Bubble navigation state. No key enters it: the bubble strip is not drawn
+	// since #2350, so its old Ctrl+L only took focus from the input (#3918).
 	const [isBubbleNavMode, setIsBubbleNavMode] = useState(false);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1225,8 +1392,7 @@ export function App({
 					{
 						id: `welcome-${activeTabId}`,
 						role: "system",
-						content:
-							"\u221E New thread. What shall we work on?",
+						content: "\u221E New thread. What shall we work on?",
 						timestamp: new Date(),
 					},
 				];
@@ -1396,9 +1562,11 @@ export function App({
 	useEffect(() => {
 		if (!activeSessionId) return;
 		const timer = setInterval(() => {
+			// A linked session is saved by the daemon after every turn (#3929).
+			if (daemonLinkRef.current) return;
 			if (messages.length > lastSaveCount.current) {
 				lastSaveCount.current = messages.length;
-				const serializable = messages.map((m) => ({
+				const serializable = withoutBangLines(messages).map((m) => ({
 					role: m.role,
 					content: m.content,
 				}));
@@ -1430,11 +1598,10 @@ export function App({
 					});
 					if (res.ok) {
 						const data = await res.json();
-						const allModels = (data.models || [])
-							.flatMap((m: any) => {
-					const id = String(m.name ?? "").trim();
-					return id.length > 0 ? [id] : [];
-				});
+						const allModels = (data.models || []).flatMap((m: any) => {
+							const id = String(m.name ?? "").trim();
+							return id.length > 0 ? [id] : [];
+						});
 						// What each model reports it can do decides first, so decision-only
 						// models are never offered for chat; the name filter is the fallback (#3548).
 						const chatModels = await filterChatCapable(ollamaRoot, allModels);
@@ -1444,11 +1611,13 @@ export function App({
 						}
 					}
 				} else if (currentProvider === "llama-server") {
-					// llama-server lists the model(s) it serves (#3149).
-					const listed = await createLlamaServer({ baseUrl: resolveLlamaServerUrl() }).listModels({
-						signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-					});
-					const ids = listed.map((m) => m.name);
+					// llama-server lists the model(s) it serves (#3149). The router's GET /models
+					// lists unloaded presets too, so /models use can pick one (#4206).
+					const listed = await createLlamaRouter({
+						baseUrl: resolveLlamaServerUrl(),
+						timeoutMs: PROBE_TIMEOUT_MS,
+					}).models();
+					const ids = listed.map((m) => m.id);
 					if (!cancelled) setAvailableModels(ids);
 				} else if (currentProvider === "lmstudio") {
 					// Fetch LM Studio models — filter embedding models at source so they
@@ -1458,11 +1627,10 @@ export function App({
 					});
 					if (res.ok) {
 						const data = await res.json();
-						const allModels = (data.data || [])
-							.flatMap((m: any) => {
-					const id = String(m.id ?? "").trim();
-					return id.length > 0 ? [id] : [];
-				});
+						const allModels = (data.data || []).flatMap((m: any) => {
+							const id = String(m.id ?? "").trim();
+							return id.length > 0 ? [id] : [];
+						});
 						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
 						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
@@ -1502,11 +1670,10 @@ export function App({
 					const res = await fetch(`${baseUrl}/models`);
 					if (res.ok) {
 						const data = await res.json();
-						const allModels = (data.data || [])
-							.flatMap((m: any) => {
-					const id = String(m.id ?? "").trim();
-					return id.length > 0 ? [id] : [];
-				});
+						const allModels = (data.data || []).flatMap((m: any) => {
+							const id = String(m.id ?? "").trim();
+							return id.length > 0 ? [id] : [];
+						});
 						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
 						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					} else if (!cancelled) {
@@ -1538,7 +1705,10 @@ export function App({
 		const explicit: ModelSpec | null =
 			cliPinRef.current?.spec ??
 			(cliModelRequestedRef.current
-				? { provider: cliProviderRequestedRef.current ?? currentProvider, model: cliModelRequestedRef.current }
+				? {
+						provider: cliProviderRequestedRef.current ?? currentProvider,
+						model: cliModelRequestedRef.current,
+					}
 				: null);
 		const next = autoSelectModel({
 			current: currentModel,
@@ -1631,6 +1801,8 @@ export function App({
 
 	// TV Mode state — task cards + narrator
 	const viewport = useViewport();
+	// The / menu is open: in a short terminal the focal strip steps aside for it.
+	const [slashMenuOpen, setSlashMenuOpen] = useState(false);
 	// Real rows of the chat box after layout (#3019). The viewport guess
 	// overestimated it and messages overprinted.
 	const chatBoxRef = useRef<DOMElement>(null);
@@ -1728,7 +1900,6 @@ export function App({
 				}).unref();
 			} catch {}
 		}
-
 	}, [isProcessing, soundEnabled]);
 
 	// OSC 7501 program status: tell the host terminal working / blocked / done /
@@ -1764,6 +1935,27 @@ export function App({
 	// typing on tab A while tab A's agent is busy stacks A's queue without
 	// affecting tab B's parallel submissions.
 	const messageQueuesRef = useRef<Map<string, string[]>>(new Map());
+	// Output of `!cmd` lines waiting to go to the model with the tab's next
+	// message, keyed by tab id (#3918 D5).
+	const shellContextRef = useRef<Map<string, string[]>>(new Map());
+	// Running `!cmd` processes per tab, so Esc, tab close and exit can stop them.
+	const bangRunsRef = useRef<Map<string, Set<BangRun>>>(new Map());
+	const bangSeq = useRef(0);
+	const stopBangRuns = useCallback((tabId?: string) => {
+		for (const [id, runs] of bangRunsRef.current) {
+			if (tabId !== undefined && id !== tabId) continue;
+			for (const run of runs) run.cancel();
+			runs.clear();
+		}
+	}, []);
+	// Never leave a shell command behind: unmount, exit, SIGTERM and SIGHUP kill them.
+	useEffect(() => {
+		const uninstall = killBangsOnExit(() => stopBangRuns());
+		return () => {
+			uninstall();
+			stopBangRuns();
+		};
+	}, [stopBangRuns]);
 	// Per-tab "agent currently running" guard. Replaces the legacy global
 	// boolean - now keyed by tab id so concurrent tabs no longer block each
 	// other on the same flag.
@@ -1809,22 +2001,23 @@ export function App({
 	const [onboardingStepIndex, setOnboardingStepIndex] = useState(0);
 	// Choices for the active onboarding question when kind === "select".
 	// null = current question is free-text (CommandInput owns input).
-	const [onboardingSelectChoices, setOnboardingSelectChoices] = useState<
-		Array<{ label: string; value: string; description?: string }> | null
-	>(null);
+	const [onboardingSelectChoices, setOnboardingSelectChoices] = useState<Array<{
+		label: string;
+		value: string;
+		description?: string;
+	}> | null>(null);
 	// kind === "providerCheck" payload: which engine to probe + install hint.
 	// The OnboardingScreen probes once on entry, shows status, and emits
 	// "live" or "skip" via onProviderResolve which we route into processAnswer.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
-	const [onboardingProviderCheck, setOnboardingProviderCheck] = useState<
-		{ provider: "ollama" | "lmstudio" | "apfel"; installHint: string } | null
-	>(null);
+	const [onboardingProviderCheck, setOnboardingProviderCheck] = useState<{
+		provider: "ollama" | "lmstudio" | "apfel";
+		installHint: string;
+	} | null>(null);
 	// kind === "agentName" payload: default value to show as a hint and accept
 	// on empty Enter. The actual input still goes through CommandInput.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
-	const [onboardingAgentDefault, setOnboardingAgentDefault] = useState<
-		string | null
-	>(null);
+	const [onboardingAgentDefault, setOnboardingAgentDefault] = useState<string | null>(null);
 	// Live total step count - set on first onboarding render so the
 	// "Step X of N" indicator reflects whatever the question list is.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1849,9 +2042,7 @@ export function App({
 		}) => {
 			setCurrentOnboardingQuestion(q.question);
 			setOnboardingPlaceholder(placeholderFor(q));
-			setOnboardingSelectChoices(
-				q.kind === "select" && q.choices ? q.choices : null,
-			);
+			setOnboardingSelectChoices(q.kind === "select" && q.choices ? q.choices : null);
 			setOnboardingProviderCheck(
 				q.kind === "providerCheck" && q.provider
 					? { provider: q.provider, installHint: q.installHint ?? "" }
@@ -1868,7 +2059,9 @@ export function App({
 	// record it, so the chat never asks a question the machine can answer.
 	// Returns the next question that needs a person, or null when done.
 	const resolveSetupChecks = useCallback(
-		async <Q extends { kind?: string; provider?: "ollama" | "lmstudio" | "apfel"; installHint?: string }>(
+		async <
+			Q extends { kind?: string; provider?: "ollama" | "lmstudio" | "apfel"; installHint?: string },
+		>(
 			q: Q,
 		): Promise<Q | null> => {
 			let next: Q | null = q;
@@ -1939,7 +2132,8 @@ export function App({
 	useInput((input, key) => {
 		// A pending approval card owns Y/N/E/S; useApprovalCard settles it.
 		if (isApprovalKeyClaimed(input, key)) return;
-
+		// The session picker and the tree read their own keys; only Ctrl+C passes.
+		if (SESSION_VIEWS.has(viewMode) && !(key.ctrl && input === "c")) return;
 
 		// Ctrl+P: toggle the command palette overlay.
 		// Palette has its own useInput listener so we early-return for
@@ -1961,18 +2155,6 @@ export function App({
 		}
 		if (djKeys && !(key.ctrl && input === "c")) {
 			if (key.escape) setDjKeys(false);
-			return;
-		}
-
-		// Ctrl+L: toggle bubble navigation mode
-		if (key.ctrl && input === "l") {
-			setIsBubbleNavMode((prev) => {
-				if (!prev) {
-					const chatMsgs = messages.filter((m) => m.role !== "tool");
-					setSelectedBubbleIndex(Math.max(0, chatMsgs.length - 1));
-				}
-				return !prev;
-			});
 			return;
 		}
 
@@ -2024,7 +2206,7 @@ export function App({
 			if (soundEnabled) playSound("notification");
 			// Save session and finalize before exiting
 			if (activeSessionId && messages.length > 0) {
-				const serializable = messages.map((m) => ({
+				const serializable = withoutBangLines(messages).map((m) => ({
 					role: m.role,
 					content: m.content,
 				}));
@@ -2034,6 +2216,7 @@ export function App({
 				});
 			}
 			flushSession();
+			stopBangRuns();
 			if (agent) agent.cleanup().catch(() => {});
 			exit();
 		}
@@ -2076,9 +2259,11 @@ export function App({
 			setExpandedView((prev) => !prev);
 		}
 
-		// Ctrl+M: open model picker overlay
-		if (key.ctrl && input === "m" && !key.shift) {
+		// Ctrl+L: open the model picker overlay (#3918 D3). Ctrl+M stays bound,
+		// but most terminals, Windows Terminal included, send it as Enter (B4).
+		if (key.ctrl && (input === "l" || (input === "m" && !key.shift))) {
 			setViewMode("model-select");
+			return;
 		}
 
 		// Ctrl+Shift+M: open provider picker overlay
@@ -2124,6 +2309,18 @@ export function App({
 			setViewMode("chat");
 		}
 
+		// Ctrl+F: the live anatomy page (#4190) in 8gent Browser. The URL is
+		// always printed, so it works without the browser too.
+		if (key.ctrl && input === "f") {
+			const url = liveViewUrl();
+			addSystemMessage(`Live view: ${url}`);
+			openLiveView(url).then((why) => {
+				if (why) addSystemMessage(`8gent Browser did not open it (${why}). Open the URL above.`);
+				else flashNotice("live view open in 8gent Browser");
+			});
+			return;
+		}
+
 		// Ctrl+Y: cycle agent modes. Y because Ctrl+M = Enter, Ctrl+I = Tab,
 		// Ctrl+S = XOFF — most single letters collide with TTY control codes.
 		// Ctrl+X: open or close the PLAN column; the chat takes the width back.
@@ -2132,7 +2329,13 @@ export function App({
 		}
 
 		if (key.ctrl && input === "y") {
-			const order: AgentMode[] = ["Planning", "Researching", "Implementing", "Testing", "Debugging"];
+			const order: AgentMode[] = [
+				"Planning",
+				"Researching",
+				"Implementing",
+				"Testing",
+				"Debugging",
+			];
 			setAgentMode((prev) => order[(order.indexOf(prev) + 1) % order.length] ?? "Planning");
 		}
 
@@ -2144,6 +2347,8 @@ export function App({
 				perTabAgents.removeTabAgent(closingId);
 				setAgentRunningOnTab(closingId, false);
 				messageQueuesRef.current.delete(closingId);
+				shellContextRef.current.delete(closingId);
+				stopBangRuns(closingId);
 				permHoldersRef.current.delete(closingId);
 				workspaceTabs.removeTab(closingId);
 			}
@@ -2180,6 +2385,11 @@ export function App({
 		// With per-tab agents, ESC aborts ONLY the active tab's loop. Other
 		// tabs' in-flight runs keep going.
 		if (key.escape) {
+			const bangs = bangRunsRef.current.get(activeTabId);
+			if (bangs && bangs.size > 0) {
+				stopBangRuns(activeTabId);
+				return;
+			}
 			if (isProcessing) {
 				perTabAgents.abortTab(activeTabId);
 				setIsProcessing(false);
@@ -2227,6 +2437,106 @@ export function App({
 		]);
 	}, []);
 
+	// Shared sessions (#3929). While linked, chat goes to a daemon session that
+	// the 8gent Browser panel (or another TUI) can sit on too, and this TUI shows
+	// what they send. Unlinked, the TUI runs its own in-process 8gent as before.
+	const setMessagesLatest = useRef(setMessages);
+	setMessagesLatest.current = setMessages;
+	const sharedSeq = useRef(0);
+	const pushShared = useCallback((role: "user" | "assistant" | "system", content: string) => {
+		const id = `shared-${Date.now()}-${sharedSeq.current++}`;
+		setMessagesLatest.current((prev) => [...prev, { id, role, content, timestamp: new Date() }]);
+	}, []);
+
+	/**
+	 * Leave the shared session. The daemon owns that session's file now, so the
+	 * TUI's autosave moves to a fresh local session instead of writing over it
+	 * (unless `startFresh` is false: the TUI is closing).
+	 */
+	const unlinkDaemon = useCallback(
+		async (startFresh = true): Promise<string | null> => {
+			const link = daemonLinkRef.current;
+			if (!link) return null;
+			daemonLinkRef.current = null;
+			const sid = link.client.sessionId;
+			link.off();
+			await link.client.detach().catch(() => {});
+			link.client.close();
+			if (startFresh) setActiveSessionId(sessionMgr.create().id);
+			return sid;
+		},
+		[sessionMgr],
+	);
+
+	/** Join a daemon session (live, or past and restored), replacing the chat with its transcript. */
+	const linkDaemonSession = useCallback(
+		async (sessionId: string): Promise<boolean> => {
+			let client = daemonLinkRef.current?.client;
+			try {
+				if (!client) client = await DaemonSessionClient.connect();
+				const attached = await client.attach(sessionId, "tui");
+				if (daemonLinkRef.current?.client !== client) {
+					const off = client.onEvent((e) => {
+						switch (e.kind) {
+							case "user":
+								pushShared("user", `[${surfaceLabel(e.channel)}] ${e.text}`);
+								break;
+							case "reply":
+								pushShared("assistant", e.text);
+								break;
+							case "tool":
+								pushShared("system", `8gent is using ${e.tool}`);
+								break;
+							case "error":
+								pushShared("system", `8gent: ${e.text}`);
+								break;
+							case "ended":
+								pushShared(
+									"system",
+									"The shared session ended. Back on this TUI's own 8gent; earlier turns are not in its context.",
+								);
+								void unlinkDaemon();
+								break;
+						}
+					});
+					daemonLinkRef.current = { client, off };
+				}
+				setActiveSessionId(attached.sessionId);
+				const restored = attached.transcript.map((m, i) => ({
+					id: `shared-restored-${i}`,
+					role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+					content: m.content,
+					timestamp: new Date(),
+				}));
+				setMessages(restored as Message[]);
+				addSystemMessage(
+					`Shared session ${attached.sessionId} (${surfaceLabel(attached.channel)})` +
+						`${attached.restored ? ", restored from history" : ""}` +
+						`${attached.truncated ? ", older messages not shown" : ""}.\n` +
+						"Messages now go to the shared 8gent session. /sessions detach returns to this TUI's own 8gent.",
+				);
+				return true;
+			} catch (err) {
+				if (client && daemonLinkRef.current?.client !== client) client.close();
+				addSystemMessage(
+					`Could not open shared session ${sessionId}: ${err instanceof Error ? err.message : String(err)}.\n` +
+						"Start the daemon with `8gent daemon`, or use /resume for sessions on this machine.",
+				);
+				return false;
+			}
+		},
+		[addSystemMessage, pushShared, setMessages, unlinkDaemon],
+	);
+	useEffect(() => () => void unlinkDaemon(false), [unlinkDaemon]);
+	// EIGHT_TUI_SHARE=1: share this TUI's session through the daemon from the
+	// start, so the 8gent Browser panel can pick "the TUI session" right away.
+	const autoSharedRef = useRef(false);
+	useEffect(() => {
+		if (process.env.EIGHT_TUI_SHARE !== "1" || !activeSessionId || autoSharedRef.current) return;
+		autoSharedRef.current = true;
+		void linkDaemonSession(activeSessionId);
+	}, [activeSessionId, linkDaemonSession]);
+
 	// System One (on by default; EIGHT_SYSTEM_ONE=0 turns it off): its two
 	// one-time notices (no judge, so rules and allowlist only; or which judge
 	// is loading, and its size) land in the chat once each, not on stderr,
@@ -2264,6 +2574,14 @@ export function App({
 			() => setJudgeState("failed"),
 		);
 	}, [activePermMode]);
+	// run_command without its OS boundary (#4013): the reason lives in the
+	// footer, where the one stderr warning cannot be lost under Ink.
+	const [sandboxOff, setSandboxOff] = useState<string | undefined>(undefined);
+	useEffect(() => {
+		const status = runCommandSandboxStatus();
+		if (!status.applied) setSandboxOff(sandboxFooterReason(status.reason));
+		return onRunCommandUnsandboxed((s) => setSandboxOff(sandboxFooterReason(s.reason)));
+	}, []);
 	// A failed warm-up does not stick: the next gate call retries the load.
 	// When a turn ends, a judge that has since answered clears "failed".
 	useEffect(() => {
@@ -2298,6 +2616,15 @@ export function App({
 		[activeTabId],
 	);
 
+	/** Replace one message's text in a tab, by id (the `!cmd` running line). */
+	const replaceInTab = useCallback((tabId: string, id: string, content: string) => {
+		const swap = (list: Message[]) =>
+			list.map((m) => (m.id === id ? { ...m, content, timestamp: new Date() } : m));
+		const cur = tabMessagesRef.current.get(tabId);
+		if (cur) tabMessagesRef.current.set(tabId, swap(cur));
+		setMessagesRaw((prev) => (prev.some((m) => m.id === id) ? swap(prev) : prev));
+	}, []);
+
 	/**
 	 * Build the AgentEventCallbacks bound to a specific tab id. Messages
 	 * stream into that tab's buffer (visible only when it is active);
@@ -2324,9 +2651,14 @@ export function App({
 				const isActive = tabId === activeTabId;
 				// update_plan carries the agent's own step statuses: the only
 				// thing that may tick, fail or mark the current plan step.
+				// A step whose box in the project's plan file is still open is
+				// not ticked here either: update_plan refuses it (#4161).
 				if (isActive && event.toolName === "update_plan") {
 					const items = (event.args as { plan?: unknown } | undefined)?.plan;
-					if (Array.isArray(items)) setPlanSteps((prev) => applyPlanUpdate(prev, items));
+					const file = findPlanFile(getTabAgent(tabId)?.getWorkingDirectory() ?? process.cwd());
+					setPlanFile(planFileTally(file));
+					if (Array.isArray(items))
+						setPlanSteps((prev) => applyPlanUpdate(prev, holdOpenBoxes(items, file)));
 				}
 				if (isActive) {
 					setActiveTool(event.toolName);
@@ -2371,6 +2703,12 @@ export function App({
 			},
 			onToolEnd: (event: AgentToolEndEvent) => {
 				const isActive = tabId === activeTabId;
+				// A tick in the plan file shows in the column as it lands (#4161).
+				if (isActive && (event.toolName === "edit_file" || event.toolName === "write_file")) {
+					setPlanFile(
+						planFileTally(findPlanFile(getTabAgent(tabId)?.getWorkingDirectory() ?? process.cwd())),
+					);
+				}
 				if (isActive) {
 					setToolCount((prev) => prev + 1);
 					// Trigger the brief flash-back-to-idle on the matching part.
@@ -2384,11 +2722,7 @@ export function App({
 					event.resultPreview,
 				);
 
-				kanbanTaskComplete(
-					event.toolCallId,
-					event.success !== false,
-					event.durationMs || 0,
-				);
+				kanbanTaskComplete(event.toolCallId, event.success !== false, event.durationMs || 0);
 
 				const isFailure =
 					!event.success ||
@@ -2438,8 +2772,7 @@ export function App({
 					!event.success ||
 					(event.resultPreview?.startsWith("Exit code ") &&
 						!event.resultPreview.startsWith("Exit code 0"));
-				const duration =
-					event.durationMs > 0 ? ` (${(event.durationMs / 1000).toFixed(1)}s)` : "";
+				const duration = event.durationMs > 0 ? ` (${(event.durationMs / 1000).toFixed(1)}s)` : "";
 				let content: string;
 				if (isRealFailure && event.resultPreview) {
 					const errMsg = event.resultPreview.slice(0, 120).split("\n").slice(0, 2).join(" ");
@@ -2455,6 +2788,9 @@ export function App({
 					toolSuccess: !isRealFailure,
 					toolTrail: toTrailEntry(event),
 				});
+			},
+			onStepStart: (event) => {
+				logStepStart(tabId, tabTitle, event.stepNumber, event.provider, event.model);
 			},
 			onStepFinish: (event: AgentStepEvent) => {
 				const isActive = tabId === activeTabId;
@@ -2488,11 +2824,7 @@ export function App({
 				// as the assistant bubble at the chat boundary, so pushing it
 				// here would double-render the same content (greyish system bubble
 				// followed by the cyan assistant bubble).
-				if (
-					event.text?.trim() &&
-					event.stepNumber === 0 &&
-					(event.toolCalls?.length ?? 0) > 0
-				) {
+				if (event.text?.trim() && event.stepNumber === 0 && (event.toolCalls?.length ?? 0) > 0) {
 					const t = event.text.trim();
 					appendToTab(tabId, {
 						id: `system-step0-${Date.now()}`,
@@ -2575,7 +2907,15 @@ export function App({
 				}
 			},
 		}),
-		[activeTabId, appendToTab, getTabAgent, kanbanTaskStart, kanbanTaskComplete, markBodyPartStart, markBodyPartEnd],
+		[
+			activeTabId,
+			appendToTab,
+			getTabAgent,
+			kanbanTaskStart,
+			kanbanTaskComplete,
+			markBodyPartStart,
+			markBodyPartEnd,
+		],
 	);
 
 	// One shared readiness probe per provider/model (see createReadinessCache)
@@ -2644,7 +2984,8 @@ export function App({
 				if (decision.kind === "none") {
 					setAgentReady(false);
 					const label =
-						localProviderEndpoints().find((e) => e.provider === decision.from)?.label ?? decision.from;
+						localProviderEndpoints().find((e) => e.provider === decision.from)?.label ??
+						decision.from;
 					setUnreachableNote(unreachableLine(label, decision.fromAddress, decision.reason));
 					retryLater();
 					return;
@@ -2676,13 +3017,18 @@ export function App({
 				const _wantRuntime = providerToRuntime(currentProvider);
 				const _existing = perTabAgents.getAgent(_initTabId);
 				if (_existing) {
-					const _cfg = (_existing as unknown as {
-						config?: { model?: string; runtime?: string };
-					}).config;
+					const _cfg = (
+						_existing as unknown as {
+							config?: { model?: string; runtime?: string };
+						}
+					).config;
 					// Compare the spec the agent was built for, not its live config: a
 					// reroute self-corrects config.model, and dropping the agent then
 					// discarded the finished turn's reply (#3084).
-					const _built = builtSpecRef.current.get(_existing) ?? { model: _cfg?.model, runtime: _cfg?.runtime };
+					const _built = builtSpecRef.current.get(_existing) ?? {
+						model: _cfg?.model,
+						runtime: _cfg?.runtime,
+					};
 					if (canReuseTabAgent(_built, { model: currentModel, runtime: _wantRuntime })) {
 						setAgent(_existing);
 						setAgentReady(true);
@@ -2795,7 +3141,6 @@ export function App({
 		}
 	}, [activeTabId]);
 
-
 	// Check onboarding status on mount
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
@@ -2821,10 +3166,7 @@ export function App({
 					setOnboardingSteps([{ question: question.question, status: "active" }]);
 					setOnboardingStepIndex(0);
 					// Speak the first question (first line only, gated by voice.outputEnabled)
-					speakOnboardingLine(
-						question.question,
-						onboardingManager.getUser()?.preferences?.voice,
-					);
+					speakOnboardingLine(question.question, onboardingManager.getUser()?.preferences?.voice);
 					// Use setMessages directly to avoid stale closure issue. The
 					// setup greeting replaces the launch greeting: one hello, not two.
 					setMessages((prev) => [
@@ -2966,62 +3308,93 @@ export function App({
 	// Handle slash commands. Async so individual cases (e.g. /spawn with
 	// auto-install) can await long-running side effects without blocking
 	// or hacking around it via .then() chains.
+	/**
+	 * Write the chat to the tree store now and return the store, so /tree,
+	 * /fork and /export see every message, not only what the 5 s autosave
+	 * caught (#3918 E1). Null when no session is active.
+	 */
+	const saveSessionNow = useCallback((): SessionStore | null => {
+		if (!activeSessionId) return null;
+		const serializable = withoutBangLines(messages).map((m) => ({
+			role: m.role,
+			content: m.content,
+		}));
+		sessionMgr.update(activeSessionId, serializable, {
+			model: currentModel,
+			provider: currentProvider,
+		});
+		lastSaveCount.current = messages.length;
+		return sessionMgr.store(activeSessionId);
+	}, [activeSessionId, messages, sessionMgr, currentModel, currentProvider]);
+
+	/** Stored messages as chat bubbles. */
+	const restoredBubbles = (stored: ReadonlyArray<{ role: string; content: unknown }>): Message[] =>
+		stored.map((m, i) => ({
+			id: `restored-${Date.now()}-${i}`,
+			role: (m.role === "user" || m.role === "assistant" ? m.role : "system") as Message["role"],
+			content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+			timestamp: new Date(),
+		}));
+
+	/**
+	 * Make a stored session the active one and show its transcript (E3). The
+	 * 8gent's own context is not reloaded: the Agent has no history setter
+	 * yet, so the line says what was restored and nothing more.
+	 */
+	const openStoredSession = useCallback(
+		(id: string): boolean => {
+			const found = sessionMgr.get(id);
+			if (!found) {
+				addSystemMessage(`Session "${id}" could not be loaded.`);
+				return false;
+			}
+			setActiveSessionId(found.id);
+			setMessages(restoredBubbles(found.messages));
+			lastSaveCount.current = found.messages.length;
+			addSystemMessage(
+				`Resumed "${found.name || found.id}": ${found.messageCount} messages, ${found.model}, ${found.cwd}. Transcript restored.`,
+			);
+			return true;
+		},
+		[sessionMgr, addSystemMessage, setMessages],
+	);
+
+	/** Open the /resume picker over every session with at least one message (E3). */
+	const openSessionPicker = useCallback(() => {
+		saveSessionNow();
+		setPickerSessions(listSessions());
+		setViewMode("session-picker");
+	}, [saveSessionNow]);
+
+	// `--resume` with no id: the picker, once the session list can be read (E3).
+	const bootPickerShown = useRef(false);
+	useEffect(() => {
+		if (sessionResume !== "" || bootPickerShown.current || !activeSessionId) return;
+		bootPickerShown.current = true;
+		openSessionPicker();
+	}, [sessionResume, activeSessionId, openSessionPicker]);
+
 	const handleSlashCommand = useCallback(
 		async (command: SlashCommand, args: string[]) => {
 			switch (command) {
 				case "help":
 					addSystemMessage(
-						"Available commands:\n" +
-							"  /kanban (Ctrl+K) - Toggle kanban board\n" +
-							"  /predict (Ctrl+E) - Show predicted next steps\n" +
-							"  /avenues - Show planned avenues\n" +
-							"  /design [task] - Get design system suggestions\n" +
-							"  /build <task> - Adaptive three-model pipeline (self-correcting)\n" +
-							"  /evidence - Show full evidence breakdown\n" +
-							"  /notes - Open scratchpad notes tab\n" +
-							"  /ideas - Open idea capture tab\n" +
-							"  /btw - Open sidequest queue tab\n" +
-							"  /questions - Open research questions tab\n" +
-							"  /projects - Open project overview tab\n" +
-							"  /terminal - Open a live terminal tab (PTY shell)\n" +
-							"  /auth [login|logout|status] - Authentication\n" +
-							"  /github [issues|pr|repos] - GitHub integration\n" +
-							"  /deploy - Trigger Vercel deploy\n" +
-							"  /vercel [status|env|logs|projects|domains] - Vercel management\n" +
-							"  /pet [start|stop|deck|card] - Lil Eight companion\n" +
-							"  /voice record - Toggle voice input (Ctrl+R)\n" +
-							"  /vision - Vision & OCR model settings\n" +
-							"  /telegram - Connect a Telegram bot\n" +
-							"  /router - Task router settings\n" +
-							"  /plan - Show current plan status\n" +
-							"  /session [name|list|resume] - Named session management\n" +
-							"  /fork [label] - Fork conversation at current message\n" +
-							"  /rewind [n|list] - Time-travel: rewind agent state n checkpoints\n" +
-							"  /branch [list|switch <id>] - List or switch branches\n" +
-							"  /status - Show session status\n" +
-							"  /export - Export session as HTML\n" +
-							"  /clear - Clear messages\n" +
-							"  /quit - Exit 8gent Code\n" +
-							"  /skills - List loaded skills (optional)\n" +
-							"  /<skill> … - Any loaded skill name or alias expands to its prompt (e.g. /bdb, /billiondollarboardroom)\n\n" +
+						`${formatSlashHelp(args[0]?.toLowerCase() === "all")}\n\n` +
 							"Keyboard shortcuts:\n" +
-							"  Tab - Accept ghost suggestion\n" +
-							"  Ctrl+T - New chat tab\n" +
-							"  Ctrl+W - Close current tab\n" +
-							"  Ctrl+1-9 - Switch to tab by number\n" +
-							"  Shift+Tab - Permission mode: Plan, Ask, Guarded, Infinite\n" +
-							"  Ctrl+A - Toggle animations\n" +
-							"  Ctrl+S - Toggle sound\n" +
-							"  Ctrl+L - Browse messages (↑↓ navigate, Enter read, Esc exit)\n" +
-							"  Ctrl+H - Toggle fancy header\n" +
-							"  Ctrl+X - Open or close the PLAN column\n" +
-							"  Ctrl+M - Model picker\n" +
-							"  Ctrl+Shift+M - Provider picker",
+							formatHotkeyRows(),
 					);
+					break;
+
+				case "hotkeys":
+					addSystemMessage(formatHotkeys());
 					break;
 
 				case "kanban":
 					setViewMode((prev) => (prev === "kanban" ? "chat" : "kanban"));
+					break;
+
+				case "copy":
+					addSystemMessage(copyReply(messages, { write: (seq) => inkStdout.write(seq) }));
 					break;
 
 				case "predict":
@@ -3118,6 +3491,26 @@ export function App({
 					break;
 
 				case "export": {
+					// /export <file>.jsonl writes the session file itself (E7); anything
+					// else is the HTML export.
+					if (args[0]?.toLowerCase().endsWith(".jsonl")) {
+						const store = saveSessionNow();
+						if (!store) {
+							addSystemMessage("No session yet.");
+							break;
+						}
+						const target = pathMod.resolve(process.cwd(), args[0]);
+						try {
+							const text = store.exportJSONL();
+							fs.writeFileSync(target, text, { mode: 0o600 });
+							addSystemMessage(
+								`Session exported to ${target} (${store.messages().length} messages). /import ${args[0]} brings it back.`,
+							);
+						} catch (e) {
+							addSystemMessage(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
+						}
+						break;
+					}
 					const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
 					const mins = Math.floor(elapsed / 60);
 					const secs = elapsed % 60;
@@ -3196,17 +3589,24 @@ export function App({
 				}
 
 				case "fork": {
-					const tree = sessionTreeRef.current;
-					const tip = tree.tipId;
-					if (!tip) {
+					// Copy the conversation so far into a new session file and continue
+					// there; the original keeps its name and stays as it was (E4).
+					const store = saveSessionNow();
+					if (!store || store.allEntries().length === 0) {
 						addSystemMessage("No messages to fork from.");
 						break;
 					}
-					const label = args.length > 0 ? args.join(" ") : undefined;
-					const branchId = tree.fork(tip, label);
-					addSystemMessage(
-						`Forked at current message. New branch: ${branchId} (${label || branchId})\nUse /branch list to see all branches.`,
-					);
+					const name = args.length > 0 ? args.join(" ") : undefined;
+					try {
+						const child = store.fork(undefined, { name });
+						setActiveSessionId(child.id);
+						lastSaveCount.current = messages.length;
+						addSystemMessage(
+							`Forked into session ${child.id}${name ? ` "${name}"` : ""}. This chat continues there; ${store.name ? `"${store.name}"` : store.id} is unchanged. /resume lists both.`,
+						);
+					} catch (e) {
+						addSystemMessage(`Fork failed: ${e instanceof Error ? e.message : String(e)}`);
+					}
 					break;
 				}
 
@@ -3214,7 +3614,7 @@ export function App({
 					// Session time-travel (#2757 step 2): restore the agent's message
 					// history from a checkpoint cut by the interval policy.
 					if (!agent) {
-						addSystemMessage("No active agent to rewind.");
+						addSystemMessage("No active 8gent to rewind.");
 						break;
 					}
 					if (args[0] === "list") {
@@ -3270,31 +3670,43 @@ export function App({
 				}
 
 				case "branch": {
-					const tree = sessionTreeRef.current;
+					// The tree store's branches: one leaf per branch (E4). /tree shows the
+					// same with every entry; /branch switch continues from a leaf.
+					const store = saveSessionNow();
+					if (!store) {
+						addSystemMessage("No session yet.");
+						break;
+					}
 					const sub = args[0];
 					if (!sub || sub === "list") {
-						const branches = tree.getBranches();
-						const lines = branches.map((b) => {
-							const active = b.id === tree.activeBranch ? " *" : "";
-							return `  ${b.id}${active} - ${b.label} (${b.messageCount} msgs)`;
+						const leaves = store.leaves();
+						if (leaves.length === 0) {
+							addSystemMessage("No branches: the session has no messages yet.");
+							break;
+						}
+						const lines = leaves.map((leaf) => {
+							const active = leaf.id === store.leafId ? " *" : "";
+							const count = store.messages(leaf.id).length;
+							const preview =
+								leaf.type === "message"
+									? String(leaf.message.content).replace(/\s+/g, " ").slice(0, 60)
+									: leaf.type;
+							return `  ${leaf.id}${active} - ${count} msgs - ${preview}`;
 						});
-						addSystemMessage(`Branches:\n${lines.join("\n")}`);
+						addSystemMessage(
+							`Branches (leaf entries, * = current):\n${lines.join("\n")}\n/tree shows every entry.`,
+						);
 					} else if (sub === "switch" && args[1]) {
 						try {
-							const history = tree.switchBranch(args[1]);
-							const restored = history.map((n) => ({
-								id: n.id,
-								role: n.role as "user" | "assistant" | "system",
-								content: typeof n.content === "string" ? n.content : JSON.stringify(n.content),
-								timestamp: new Date(n.timestamp),
-							}));
-							setMessages(restored);
-							addSystemMessage(`Switched to branch: ${args[1]}`);
-						} catch (e: any) {
-							addSystemMessage(`Branch error: ${e.message}`);
+							store.branch(args[1]);
+							setMessages(restoredBubbles(store.messages(args[1])));
+							lastSaveCount.current = store.messages(args[1]).length;
+							addSystemMessage(`Continuing from entry ${args[1]}.`);
+						} catch (e) {
+							addSystemMessage(`Branch error: ${e instanceof Error ? e.message : String(e)}`);
 						}
 					} else {
-						addSystemMessage("Usage: /branch [list|switch <id>]");
+						addSystemMessage("Usage: /branch [list|switch <entry id>]");
 					}
 					break;
 				}
@@ -3343,7 +3755,7 @@ export function App({
 
 				case "quit":
 					if (activeSessionId && messages.length > 0) {
-						const serializable = messages.map((m) => ({
+						const serializable = withoutBangLines(messages).map((m) => ({
 							role: m.role,
 							content: m.content,
 						}));
@@ -3353,6 +3765,7 @@ export function App({
 						});
 					}
 					flushSession();
+					stopBangRuns();
 					if (agent) agent.cleanup().catch(() => {});
 					exit();
 					break;
@@ -3428,6 +3841,60 @@ export function App({
 					}
 					break;
 
+				case "update": {
+					// Same update as `8gent update`; on success the session is saved and 8gent
+					// reopens on the new code with the same session (packages/eight/update-resume.ts).
+					void (async () => {
+						const [
+							{ runTuiUpdate, launcherContext, makeTwoStepConfirm },
+							{ runUpdateCommand },
+							resume,
+							{ spawn: spawnProc },
+						] = await Promise.all([
+							import("./lib/update-command.js"),
+							import("../../../packages/eight/cli-maintenance.js"),
+							import("../../../packages/eight/update-resume.js"),
+							import("node:child_process"),
+						]);
+						const ctx = launcherContext();
+						if (!updateConfirmRef.current)
+							updateConfirmRef.current = makeTwoStepConfirm(addSystemMessage);
+						const outcome = await runTuiUpdate({
+							saveSession: () => {
+								saveSessionNow();
+								return activeSessionId;
+							},
+							say: addSystemMessage,
+							runUpdate: (log, report) =>
+								runUpdateCommand(args, {
+									...ctx,
+									execPath: process.execPath,
+									log,
+									report,
+									confirm: updateConfirmRef.current ?? undefined,
+									// A person typed /update. npm runs without the terminal so Ink is not garbled.
+									interactive: true,
+									run: (cmd, cmdArgs, opts) =>
+										new Promise<number>((resolve) => {
+											const p = spawnProc(cmd, cmdArgs, { stdio: "ignore", shell: opts.shell });
+											p.on("exit", (c) => resolve(c ?? 1));
+											p.on("error", () => resolve(127));
+										}),
+								}),
+							relaunch: (req) => {
+								resume.writeResumeRequest(req);
+								flushSession();
+								stopBangRuns();
+								if (agent) agent.cleanup().catch(() => {});
+								process.exitCode = resume.RELAUNCH_EXIT_CODE;
+								exit();
+							},
+						});
+						if (outcome === "unchanged") addSystemMessage("Nothing to update.");
+					})();
+					break;
+				}
+
 				case "session": {
 					const sub = args[0]?.toLowerCase();
 					if (sub === "name" && args[1]) {
@@ -3482,11 +3949,125 @@ export function App({
 					break;
 				}
 
+				case "sessions": {
+					// Shared sessions (#3929): live and past daemon sessions, shared with
+					// the 8gent Browser panel.
+					const sub = args[0]?.toLowerCase() ?? "list";
+					if (sub === "detach") {
+						const sid = await unlinkDaemon();
+						addSystemMessage(
+							sid
+								? `Left shared session ${sid}. It keeps running for anyone else on it. Back on this TUI's own 8gent; turns made there are not in its context.`
+								: "Not on a shared session.",
+						);
+						break;
+					}
+					if (sub === "stop") {
+						const link = daemonLinkRef.current;
+						if (!link) {
+							addSystemMessage("Not on a shared session.");
+							break;
+						}
+						const stopped = await link.client.abort().catch(() => false);
+						addSystemMessage(
+							stopped ? "Stopped the shared session's current turn." : "Nothing was running.",
+						);
+						break;
+					}
+					if (sub === "share") {
+						if (!activeSessionId) {
+							addSystemMessage("No session to share yet.");
+							break;
+						}
+						if (daemonLinkRef.current?.client.sessionId === activeSessionId) {
+							addSystemMessage(`Already shared as ${activeSessionId}.`);
+							break;
+						}
+						// Save now so the daemon restores everything said so far.
+						const current = (tabMessagesRef.current.get(activeTabId) ?? []).filter(
+							(m) => m.role === "user" || m.role === "assistant",
+						);
+						sessionMgr.update(
+							activeSessionId,
+							current.map((m) => ({ role: m.role, content: m.content })),
+							{ model: currentModel, provider: currentProvider },
+						);
+						await linkDaemonSession(activeSessionId);
+						break;
+					}
+					if (sub === "attach") {
+						if (!args[1]) {
+							addSystemMessage("Usage: /sessions attach <id>");
+							break;
+						}
+						await linkDaemonSession(args[1]);
+						break;
+					}
+					if (sub !== "list") {
+						addSystemMessage(
+							"Usage:\n" +
+								"  /sessions              - Pick a live or past shared session\n" +
+								"  /sessions share        - Share this conversation (the 8gent Browser panel can join it)\n" +
+								"  /sessions attach <id>  - Join a shared session by id\n" +
+								"  /sessions stop         - Stop the shared session's current turn\n" +
+								"  /sessions detach       - Leave it and go back to this TUI's own 8gent",
+						);
+						break;
+					}
+					let lister = daemonLinkRef.current?.client;
+					let found: Awaited<ReturnType<DaemonSessionClient["list"]>>;
+					try {
+						if (!lister) lister = await DaemonSessionClient.connect();
+						found = await lister.list(30);
+					} catch (err) {
+						addSystemMessage(
+							`Shared sessions need the 8gent daemon: ${err instanceof Error ? err.message : String(err)}.\n` +
+								"Start it with `8gent daemon`, or use /resume for sessions on this machine.",
+						);
+						break;
+					} finally {
+						if (lister && lister !== daemonLinkRef.current?.client) lister.close();
+					}
+					const entries: ConversationEntry[] = [
+						...found.live.map((l) => ({
+							_id: l.sessionId,
+							sessionId: l.sessionId,
+							title: `Open now - ${surfaceLabel(l.channel)}${l.busy ? " - working" : ""} - ${l.title ?? l.sessionId}`,
+							messageCount: l.messageCount,
+							model: "",
+							workingDirectory: "",
+							startedAt: l.createdAt,
+							lastActiveAt: l.lastActiveAt,
+						})),
+						...found.past.map((p) => ({
+							_id: p.sessionId,
+							sessionId: p.sessionId,
+							title: `Earlier - ${surfaceLabel(p.channel)} - ${p.title}`,
+							messageCount: p.messageCount,
+							model: p.model,
+							workingDirectory: p.cwd,
+							startedAt: p.lastActiveAt,
+							lastActiveAt: p.lastActiveAt,
+						})),
+					];
+					if (entries.length === 0) {
+						addSystemMessage("No shared sessions yet. /sessions share shares this one.");
+						break;
+					}
+					historyPickDaemonRef.current = true;
+					setHistoryConversations(entries);
+					setViewMode("history");
+					break;
+				}
+
 				case "history": {
+					historyPickDaemonRef.current = false;
 					// Show local session history screen
 					const localSessions = sessionMgr.list(50);
 					if (localSessions.length === 0) {
-						addSystemMessage("No saved sessions found. Start chatting and sessions save automatically.");
+						addSystemMessage(
+							"No saved sessions found. Start chatting and sessions save automatically.",
+						);
 						break;
 					}
 					const convEntries: ConversationEntry[] = localSessions.map((s) => ({
@@ -3514,7 +4095,9 @@ export function App({
 					}
 					const resumedLast = sessionMgr.resume(lastSession.id);
 					if (!resumedLast || resumedLast.messages.length === 0) {
-						addSystemMessage(`Last session "${lastSession.name || lastSession.id}" has no messages to restore.`);
+						addSystemMessage(
+							`Last session "${lastSession.name || lastSession.id}" has no messages to restore.`,
+						);
 						break;
 					}
 					setActiveSessionId(resumedLast.id);
@@ -3532,32 +4115,71 @@ export function App({
 				}
 
 				case "resume": {
-					// Show interactive session picker from local sessions
-					const resumeSessions = sessionMgr.list(50);
-					if (resumeSessions.length === 0) {
-						addSystemMessage("No saved sessions found. Start chatting and sessions save automatically.");
+					historyPickDaemonRef.current = false;
+					// /resume <id or name> opens it; bare /resume opens the searchable
+					// picker over the tree store (#3918 E3).
+					if (args.length > 0) {
+						const found = sessionMgr.resume(args.join(" "));
+						if (!found)
+							addSystemMessage(`Session "${args.join(" ")}" not found. /resume lists them.`);
+						else openStoredSession(found.id);
 						break;
 					}
-					const resumeEntries: ConversationEntry[] = resumeSessions.map((s) => ({
-						_id: s.id,
-						sessionId: s.id,
-						title: s.name || `Session ${s.createdAt.slice(0, 10)}`,
-						messageCount: s.messageCount,
-						model: s.model,
-						workingDirectory: s.cwd,
-						gitBranch: s.branch,
-						startedAt: new Date(s.createdAt).getTime(),
-						lastActiveAt: new Date(s.lastActiveAt).getTime(),
-					}));
-					setHistoryConversations(resumeEntries);
-					setViewMode("history");
+					openSessionPicker();
+					break;
+				}
+
+				case "tree": {
+					// The session's tree (every branch), to continue from any entry (E4).
+					const store = saveSessionNow();
+					if (!store) {
+						addSystemMessage("No session yet.");
+						break;
+					}
+					if (store.allEntries().length === 0) {
+						addSystemMessage("The session has no messages yet.");
+						break;
+					}
+					setTreeView({ tree: store.tree(), leafId: store.leafId });
+					setViewMode("session-tree");
+					break;
+				}
+
+				case "import": {
+					// /import <file>.jsonl: a session exported with /export (E7).
+					const file = args[0];
+					if (!file) {
+						addSystemMessage("Usage: /import <file>.jsonl");
+						break;
+					}
+					const target = pathMod.resolve(process.cwd(), file);
+					let text: string;
+					try {
+						text = fs.readFileSync(target, "utf-8");
+					} catch (e) {
+						addSystemMessage(
+							`Could not read ${target}: ${e instanceof Error ? e.message : String(e)}`,
+						);
+						break;
+					}
+					try {
+						saveSessionNow();
+						const imported = SessionStore.importJSONL(text, { cwd: process.cwd() });
+						// Open first: opening replaces the transcript, the line goes after it.
+						openStoredSession(imported.id);
+						addSystemMessage(
+							`Imported ${pathMod.basename(target)} as session ${imported.id} (${imported.messages().length} messages).`,
+						);
+					} catch (e) {
+						addSystemMessage(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+					}
 					break;
 				}
 
 				case "compact":
 					// Summarize current conversation
 					if (!agent) {
-						addSystemMessage("No agent active.");
+						addSystemMessage("No 8gent active.");
 						break;
 					}
 					addSystemMessage("Compacting conversation history...");
@@ -3596,14 +4218,14 @@ export function App({
 					if (agentSub === "list") {
 						if (orchestration.agents.length === 0) {
 							addSystemMessage(
-								"No active sub-agents. Eight is operating solo.\n\nUse /agent spawn <persona> <task> to spawn one.",
+								"No active child 8gents. Eight is operating solo.\n\nUse /agent spawn <persona> <task> to spawn one.",
 							);
 						} else {
 							const lines = orchestration.agents.map(
 								(a) => `  ${a.icon} ${a.name} (${a.role}): ${a.status}\n    Task: ${a.task}`,
 							);
 							addSystemMessage(
-								`Active agents (${orchestration.agents.length + 1}):\n\n  Eight (orchestrator): running\n${lines.join("\n")}`,
+								`Active 8gents (${orchestration.agents.length + 1}):\n\n  Eight (orchestrator): running\n${lines.join("\n")}`,
 							);
 						}
 					} else if (agentSub === "spawn") {
@@ -3621,7 +4243,7 @@ export function App({
 						const killId = args[1];
 						if (!killId) {
 							addSystemMessage(
-								"Usage: /agent kill <agent-id>\n\nUse /agent list to see active agents.",
+								"Usage: /agent kill <agent-id>\n\nUse /agent list to see active 8gents.",
 							);
 						} else {
 							const found = orchestration.agents.find(
@@ -3629,19 +4251,19 @@ export function App({
 							);
 							if (found) {
 								orchestration.killAgent(found.id);
-								addSystemMessage(`Killed agent: ${found.name} (${found.role})`);
+								addSystemMessage(`Killed 8gent: ${found.name} (${found.role})`);
 							} else {
-								addSystemMessage(`Agent "${killId}" not found.`);
+								addSystemMessage(`8gent "${killId}" not found.`);
 							}
 						}
 					} else if (agentSub === "auto") {
 						orchestration.toggleAutoSpawn();
 						addSystemMessage(
-							`Auto-spawn: ${!orchestration.autoSpawn ? "ENABLED" : "DISABLED"}\n${!orchestration.autoSpawn ? "Eight will automatically spawn sub-agents without asking." : "Eight will ask before spawning sub-agents."}`,
+							`Auto-spawn: ${!orchestration.autoSpawn ? "ENABLED" : "DISABLED"}\n${!orchestration.autoSpawn ? "Eight will automatically spawn child 8gents without asking." : "Eight will ask before spawning child 8gents."}`,
 						);
 					} else if (agentSub === "settings") {
 						addSystemMessage(
-							`Agent Settings:\n\n  Auto-spawn: ${orchestration.autoSpawn ? "on" : "off"}\n  Active agents: ${orchestration.agents.length}\n  Pending spawns: ${orchestration.pendingSpawns.length}\n\nCommands:\n  /agent list       Show active agents\n  /agent spawn <p>  Spawn persona (winston/larry/curly/mo/doc)\n  /agent kill <id>  Kill an agent\n  /agent auto       Toggle auto-spawn`,
+							`8gent Settings:\n\n  Auto-spawn: ${orchestration.autoSpawn ? "on" : "off"}\n  Active 8gents: ${orchestration.agents.length}\n  Pending spawns: ${orchestration.pendingSpawns.length}\n\nCommands:\n  /agent list       Show active 8gents\n  /agent spawn <p>  Spawn persona (winston/larry/curly/mo/doc)\n  /agent kill <id>  Kill an 8gent\n  /agent auto       Toggle auto-spawn`,
 						);
 					}
 					break;
@@ -3918,14 +4540,14 @@ export function App({
 					const subCommand = (args[1] || "").toLowerCase().trim();
 					if (!presetId) {
 						addSystemMessage(
-							`Usage: /spawn <agent> [install]\nAvailable: ${listPresetIds().join(", ")}\nExample: /spawn claude   (auto-installs if missing)\n         /spawn hermes install   (force re-install)`,
+							`Usage: /spawn <name> [install]\nAvailable: ${listPresetIds().join(", ")}\nExample: /spawn claude   (auto-installs if missing)\n         /spawn hermes install   (force re-install)`,
 						);
 						break;
 					}
 					const preset = getPreset(presetId);
 					if (!preset) {
 						addSystemMessage(
-							`Unknown agent "${presetId}". Available: ${listPresetIds().join(", ")}`,
+							`Unknown 8gent "${presetId}". Available: ${listPresetIds().join(", ")}`,
 						);
 						break;
 					}
@@ -3935,9 +4557,7 @@ export function App({
 					const needsInstall = force || !isInstalled(preset);
 					if (needsInstall) {
 						if (!preset.install) {
-							const homepageHint = preset.homepage
-								? `\nProject homepage: ${preset.homepage}`
-								: "";
+							const homepageHint = preset.homepage ? `\nProject homepage: ${preset.homepage}` : "";
 							addSystemMessage(
 								`${preset.command} is not on $PATH and no auto-install recipe is configured. Install it manually then run /spawn ${preset.id} again.${homepageHint}`,
 							);
@@ -3986,15 +4606,20 @@ export function App({
 					// bin/debug.ts must not run here (#3264).
 					const debugScript = packageBinScript("debug.ts");
 					if (!debugScript) {
-						addSystemMessage("/debug needs a source checkout of 8gent-code; bin/debug.ts is not in this install.");
+						addSystemMessage(
+							"/debug needs a source checkout of 8gent-code; bin/debug.ts is not in this install.",
+						);
 						break;
 					}
 					try {
-						const result = Bun.spawnSync(["bun", "run", debugScript, ...debugCmd.split(" ")], {
-							cwd: process.cwd(),
-							env: { ...process.env, NO_COLOR: "1" }, // strip ANSI for clean display
-							timeout: 10000,
-						});
+						const result = Bun.spawnSync(
+							["bun", ...safeBunFlags(), "run", debugScript, ...debugCmd.split(" ")],
+							{
+								cwd: process.cwd(),
+								env: { ...process.env, NO_COLOR: "1" }, // strip ANSI for clean display
+								timeout: 10000,
+							},
+						);
 						const output = result.stdout?.toString()?.trim() || "No output";
 						const stderr = result.stderr?.toString()?.trim();
 						if (stderr && result.exitCode !== 0) {
@@ -4311,7 +4936,20 @@ export function App({
 							// Transient playback feedback now lives in the DjDeck. `np` is not
 							// transient: it is the text readout of what plays (#3192).
 							// `play` is not transient either: "Searching: ..." then "Now playing: ..." (#3182).
-							const playbackSubs = new Set(["radio","pause","stop","skip","vol","volume","loop","repeat","queue","resume","produce","gen"]);
+							const playbackSubs = new Set([
+								"radio",
+								"pause",
+								"stop",
+								"skip",
+								"vol",
+								"volume",
+								"loop",
+								"repeat",
+								"queue",
+								"resume",
+								"produce",
+								"gen",
+							]);
 							const looksLikeFailure =
 								/^(mpv|yt-dlp|ffmpeg|sox)\b.*(not installed|missing)/i.test(result) ||
 								/^No (results|radio stations) found/i.test(result) ||
@@ -4487,7 +5125,7 @@ export function App({
 				case "evidence": {
 					// Show full evidence breakdown
 					if (!agent) {
-						addSystemMessage("No agent active. Evidence needs a running session.");
+						addSystemMessage("No 8gent active. Evidence needs a running session.");
 						break;
 					}
 					const evidence = agent.getSessionEvidence();
@@ -4530,6 +5168,14 @@ export function App({
 					break;
 				}
 
+				case "reload": {
+					reloadUserThemes();
+					const lines = ["Reloaded themes from ~/.8gent/themes."];
+					for (const p of userThemeProblems()) lines.push(`  skipped ${p.file}: ${p.reason}`);
+					addSystemMessage(lines.join("\n"));
+					break;
+				}
+
 				case "theme": {
 					// /theme           -> picker: the 8gent theme or an indexed design system (#3754)
 					// /theme <id>      -> use that design system (saved to ~/.8gent/config.json)
@@ -4554,12 +5200,22 @@ export function App({
 						);
 						break;
 					}
-					if (choice === "default" || choice === "8gent" || findDesignSystem(choice)) {
+					if (
+						choice === "default" ||
+						choice === "8gent" ||
+						findDesignSystem(choice) ||
+						isUserThemeId(choice)
+					) {
 						const id = choice === "default" || choice === "8gent" ? null : choice;
 						try {
-							saveDesignSystemChoice(id, cfgPath);
+							saveThemeChoice(id, cfgPath);
 							applyDesignSystem(id);
-							addSystemMessage(`Theme set to ${id ? findDesignSystem(id)?.label : "8gent"}.`);
+							const label = isUserThemeId(id)
+								? (themeChoices().find((r) => r.value === id)?.label ?? id)
+								: id
+									? findDesignSystem(id)?.label
+									: "8gent";
+							addSystemMessage(`Theme set to ${label}.`);
 						} catch (err) {
 							addSystemMessage(`Could not write ${cfgPath}: ${(err as Error).message}`);
 						}
@@ -4574,22 +5230,15 @@ export function App({
 					try {
 						let raw: Record<string, unknown> = {};
 						if (fs.existsSync(cfgPath)) {
-							raw = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as Record<
-								string,
-								unknown
-							>;
+							raw = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as Record<string, unknown>;
 						} else {
 							fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
 						}
 						raw.theme = choice;
 						fs.writeFileSync(cfgPath, `${JSON.stringify(raw, null, 2)}\n`);
-						addSystemMessage(
-							`Theme set to ${choice}. Restart the TUI to apply.`,
-						);
+						addSystemMessage(`Theme set to ${choice}. Restart the TUI to apply.`);
 					} catch (err) {
-						addSystemMessage(
-							`Could not write ${cfgPath}: ${(err as Error).message}`,
-						);
+						addSystemMessage(`Could not write ${cfgPath}: ${(err as Error).message}`);
 					}
 					break;
 				}
@@ -4632,7 +5281,29 @@ export function App({
 						const status = voice.isAvailable
 							? `Voice: Available (model: ${voice.engine.getConfig().model || "base"})${voiceChatStatus}`
 							: `Voice: Not available (${setupInfo?.missing?.join(", ") || voice.errorMessage || "sox/whisper not found"})`;
-						addSystemMessage(status);
+						(async () => {
+							const deps = await voice.engine.checkDependencies();
+							const dev = await resolveInputDevice();
+							const missing = describeMissingVoiceSetup({
+								soxPath: deps.soxPath,
+								whisperBinaryPath: deps.whisperBinaryPath,
+								downloadedModels: deps.downloadedModels,
+								modelsDir: deps.modelsDir,
+							});
+							addSystemMessage(
+								[
+									status,
+									formatMicLabel(dev),
+									describeTranscriberBackend({
+										whisperBinaryPath: deps.whisperBinaryPath,
+										downloadedModels: deps.downloadedModels,
+										model: voice.engine.getConfig().model,
+										mode: voice.engine.getConfig().mode,
+									}),
+									...missing,
+								].join("\n"),
+							);
+						})().catch(() => addSystemMessage(status));
 					} else if (args[0] === "stop") {
 						if (voiceChat.isActive) {
 							voiceChat.stop();
@@ -4643,9 +5314,7 @@ export function App({
 						// /voice on|off - toggle TTS output for agent replies.
 						// Persists to ~/.8gent/settings.json so the choice survives restarts.
 						(async () => {
-							const mod = await import(
-								"../../../packages/settings/index.js"
-							);
+							const mod = await import("../../../packages/settings/index.js");
 							const next = args[0] === "on";
 							const cur = mod.loadSettings();
 							mod.saveSettings({
@@ -4654,8 +5323,8 @@ export function App({
 							});
 							addSystemMessage(
 								next
-									? "TTS output enabled. Agent replies will be spoken."
-									: "TTS output disabled. Agent replies will be silent.",
+									? "TTS output enabled. 8gent replies will be spoken."
+									: "TTS output disabled. 8gent replies will be silent.",
 							);
 						})().catch((err) => {
 							addSystemMessage(
@@ -5098,6 +5767,26 @@ export function App({
 							setViewMode("model-select");
 						}
 					}
+					// /llama and /models: the llama-server router from inside a session (#4206)
+					else if (command === "llama" || command === "models") {
+						import("./lib/llama-command.js")
+							.then(async ({ runLlamaCommand, switchModelInPlace }) => {
+								const { message, useModel } = await runLlamaCommand(command, args, {
+									router: createLlamaRouter({ baseUrl: resolveLlamaServerUrl() }),
+									currentModel,
+									currentProvider,
+								});
+								if (!useModel) return addSystemMessage(message);
+								// Same server, same runtime: the live session keeps its history (#4206).
+								const runtime = providerToRuntime(currentProvider);
+								const kept = switchModelInPlace(agent, builtSpecRef.current, useModel, runtime);
+								setCurrentModel(useModel);
+								addSystemMessage(kept ? `${message} Conversation kept.` : message);
+							})
+							.catch((e) =>
+								addSystemMessage(`llama: ${e instanceof Error ? e.message : String(e)}`),
+							);
+					}
 					// Handle /provider command
 					else if (command === ("provider" as any)) {
 						if (args.length > 0) {
@@ -5274,6 +5963,13 @@ export function App({
 			toggleBodyPart,
 			resolveSetupChecks,
 			addSetupQuestion,
+			saveSessionNow,
+			activeSessionId,
+			activeTabId,
+			linkDaemonSession,
+			unlinkDaemon,
+			messages,
+			inkStdout,
 		],
 	);
 
@@ -5415,10 +6111,7 @@ export function App({
 					// Speak the welcome (gated by voice.outputEnabled)
 					{
 						const voice = user.preferences?.voice;
-						speakOnboardingLine(
-							`Welcome ${name}. Let's build something magnificent.`,
-							voice,
-						);
+						speakOnboardingLine(`Welcome ${name}. Let's build something magnificent.`, voice);
 					}
 
 					// Apply user preferences to current session
@@ -5431,6 +6124,64 @@ export function App({
 				}
 			} else {
 				addSystemMessage("I didn't quite catch that. Please try again.");
+			}
+			return;
+		}
+
+		// `!cmd` runs a shell command here; its output goes with the next
+		// message. `!!cmd` runs it without sending (#3918 D5).
+		const bang = attached ? null : parseBang(input);
+		if (bang) {
+			const bangLine = (content: string): Message => ({
+				id: `${BANG_ID_PREFIX}${Date.now()}-${bangSeq.current++}`,
+				role: "system" as const,
+				content,
+				timestamp: new Date(),
+			});
+			const refused = planModeRefusal(permView(permHolderFor(tabId)).mode);
+			if (!bang.command || refused) {
+				appendToTab(tabId, bangLine(refused ?? BANG_USAGE));
+				return;
+			}
+			setRecentCommands((prev) => [input, ...prev].slice(0, 20));
+			const running = bangLine(bangRunningLine(bang));
+			appendToTab(tabId, running);
+			const run = startBang(bang.command, projectCwd);
+			const runs = bangRunsRef.current.get(tabId) ?? new Set();
+			runs.add(run);
+			bangRunsRef.current.set(tabId, runs);
+			const result = await run.done;
+			runs.delete(run);
+			const withheld = bang.send ? sendRefusal(bang.command) : null;
+			if (bang.send && !withheld && !result.cancelled) {
+				const pending = shellContextRef.current.get(tabId) ?? [];
+				pending.push(bangContextBlock(bang, result));
+				shellContextRef.current.set(tabId, pending);
+			}
+			replaceInTab(tabId, running.id, bangChatLine(bang, result, withheld));
+			return;
+		}
+
+		// Linked to a shared session (#3929): the shared 8gent answers, and every
+		// surface on the session sees the message.
+		const daemonLink = daemonLinkRef.current;
+		if (daemonLink?.client.sessionId && input && !attached) {
+			appendToTab(tabId, {
+				id: `user-${Date.now()}`,
+				role: "user" as const,
+				content: bubbleContent,
+				timestamp: new Date(),
+			});
+			setRecentCommands((prev) => [bubbleContent, ...prev].slice(0, 20));
+			try {
+				// Output from `!cmd` goes in front here too, once (#3918 D5).
+				const shellContext = shellContextRef.current.get(tabId);
+				shellContextRef.current.delete(tabId);
+				daemonLink.client.prompt(withShellContext(shellContext, input));
+			} catch (err) {
+				addSystemMessage(
+					`Could not send to the shared session: ${err instanceof Error ? err.message : String(err)}`,
+				);
 			}
 			return;
 		}
@@ -5469,8 +6220,6 @@ export function App({
 			content: bubbleContent,
 			timestamp: new Date(),
 		});
-		// Track in session tree
-		sessionTreeRef.current.addMessage(sessionTreeRef.current.tipId, "user", bubbleContent);
 		// Session logger: user message
 		logMessage(tabId, tabTitle, "user", bubbleContent);
 
@@ -5503,22 +6252,26 @@ export function App({
 			}
 
 			const cmdStartTime = Date.now();
-			const messageForAgent = await expandSkillSlashCommand(message);
-			const routeHint = messageForAgent.trim() || "User attached an image.";
+			// A skill first, then a prompt template (#3918 G4); a line neither
+			// knows passes through unchanged.
+			const expanded = expandPromptSlashCommand(await expandSkillSlashCommand(message));
+			// Shell output from `!cmd` lines goes in front, once (#3918 D5).
+			const shellContext = shellContextRef.current.get(tabId);
+			shellContextRef.current.delete(tabId);
+			const messageForAgent = withShellContext(shellContext, expanded);
+			const routeHint = expanded.trim() || "User attached an image.";
 
 			// External-agent divert: if the target tab was spawned via /spawn,
 			// hand the prompt to the nested CLI (claude / codex / hermes / etc.)
 			// instead of our own agent loop. Conversation history is replayed
 			// each turn since v1 is one-shot.
 			const targetTab = workspaceTabs.tabs.find((t) => t.id === tabId);
-			const targetTabData = targetTab?.data as
-				| { externalAgent?: { presetId: string } }
-				| undefined;
+			const targetTabData = targetTab?.data as { externalAgent?: { presetId: string } } | undefined;
 			if (targetTabData?.externalAgent) {
 				const preset = getPreset(targetTabData.externalAgent.presetId);
 				if (!preset) {
 					addSystemMessage(
-						`[external-agent] Unknown preset "${targetTabData.externalAgent.presetId}". Run /spawn with one of: ${listPresetIds().join(", ")}`,
+						`[external 8gent] Unknown preset "${targetTabData.externalAgent.presetId}". Run /spawn with one of: ${listPresetIds().join(", ")}`,
 					);
 					setAgentRunningOnTab(tabId, false);
 					perTabAgents.setTabProcessing(tabId, false);
@@ -5528,11 +6281,9 @@ export function App({
 				// Pull this tab's messages from the per-tab buffer (or the
 				// foreground state if it's the active tab).
 				const tabMessages =
-					tabId === activeTabId ? messages : tabMessagesRef.current.get(tabId) ?? [];
+					tabId === activeTabId ? messages : (tabMessagesRef.current.get(tabId) ?? []);
 				const history = tabMessages.flatMap((m) =>
-					m.role === "user" || m.role === "assistant"
-						? [{ role: m.role, content: m.content }]
-						: [],
+					m.role === "user" || m.role === "assistant" ? [{ role: m.role, content: m.content }] : [],
 				);
 				const composed = composePrompt(history, messageForAgent);
 				const result = await runExternalAgent(preset, composed);
@@ -5546,9 +6297,7 @@ export function App({
 					});
 					{
 						const targetTabRole = (
-							workspaceTabs.tabs.find((t) => t.id === tabId)?.data as
-								| { role?: string }
-								| undefined
+							workspaceTabs.tabs.find((t) => t.id === tabId)?.data as { role?: string } | undefined
 						)?.role;
 						speakAgentReply(targetTabRole, result.text);
 					}
@@ -5580,6 +6329,14 @@ export function App({
 				setPlanNextStep(null);
 				setKanbanBoard({ backlog: [], ready: [], inProgress: [], done: [] });
 				setPlanSteps([]);
+				setPlanFile(
+					planFileTally(
+						findPlanFile(
+							perTabAgents.getAgent(tabId)?.getWorkingDirectory() ?? process.cwd(),
+							message,
+						),
+					),
+				);
 				setPlanElapsedMs(null);
 				planStartedAtRef.current = Date.now();
 			}
@@ -5602,8 +6359,7 @@ export function App({
 			// Look up this tab's Agent. For the active tab the cached `agent`
 			// state already mirrors it; for any other tab, fetch from the
 			// per-tab map.
-			const targetAgent =
-				tabId === activeTabId ? agent : perTabAgents.getAgent(tabId);
+			const targetAgent = tabId === activeTabId ? agent : perTabAgents.getAgent(tabId);
 			const targetReady = tabId === activeTabId ? agentReady : Boolean(targetAgent);
 
 			if (targetAgent && targetReady) {
@@ -5664,7 +6420,8 @@ export function App({
 						// turn that only wrote a plan never reached the column before,
 						// and the column can be a render behind the reply in any case.
 						const replyPlanLines = tabId === activeTabId ? planStepsFromText(trimmed) : [];
-						if (replyPlanLines.length > 0) setPlanSteps((prev) => mergePlanText(prev, replyPlanLines));
+						if (replyPlanLines.length > 0)
+							setPlanSteps((prev) => mergePlanText(prev, replyPlanLines));
 						const turnPlanSteps =
 							tabId === activeTabId ? replyPlan(planStepsRef.current, replyPlanLines) : [];
 						appendToTab(tabId, {
@@ -5705,8 +6462,6 @@ export function App({
 					}
 					// Clear image after sending
 					if (img) imageInput.removeImage();
-					const treePreview = (reply ?? "").trim().slice(0, 160) || "(tools only)";
-					sessionTreeRef.current.addMessage(sessionTreeRef.current.tipId, "assistant", treePreview);
 					if (tabId === activeTabId) {
 						setLastResponseTime(Date.now() - cmdStartTime);
 						setStatus("success");
@@ -5734,7 +6489,7 @@ export function App({
 					id: `system-agent-not-ready-${Date.now()}`,
 					role: "system" as const,
 					content:
-						`[Agent not ready] Nothing was run. The agent for this tab has not finished starting (model: ${currentModel}).\n` +
+						`[8gent not ready] Nothing was run. The 8gent for this tab has not finished starting (model: ${currentModel}).\n` +
 						"Wait a moment and send again, or check the provider with /provider.",
 					timestamp: new Date(),
 				});
@@ -6016,11 +6771,64 @@ export function App({
 					/>
 				);
 
+			case "session-picker":
+				return (
+					<SessionPicker
+						isOpen
+						sessions={pickerSessions}
+						cwd={process.cwd()}
+						onOpen={(id) => {
+							setViewMode("chat");
+							openStoredSession(id);
+						}}
+						onRename={(id, name) => {
+							sessionMgr.rename(id, name);
+							setPickerSessions(listSessions());
+						}}
+						onDelete={(id) => {
+							if (trashSession(id)) {
+								if (id === activeSessionId) setActiveSessionId(null);
+								addSystemMessage(`Session ${id} moved to the sessions trash folder.`);
+							}
+							setPickerSessions(listSessions());
+						}}
+						onClose={() => setViewMode("chat")}
+					/>
+				);
+
+			case "session-tree":
+				return (
+					<SessionTree
+						isOpen
+						tree={treeView?.tree ?? []}
+						leafId={treeView?.leafId ?? null}
+						onSelect={(entryId) => {
+							setViewMode("chat");
+							const store = activeSessionId ? sessionMgr.store(activeSessionId) : null;
+							if (!store) return;
+							try {
+								store.branch(entryId);
+								const onPath = store.messages(entryId);
+								setMessages(restoredBubbles(onPath));
+								lastSaveCount.current = onPath.length;
+								addSystemMessage(
+									`Continuing from entry ${entryId} (${onPath.length} messages on this path).`,
+								);
+							} catch (e) {
+								addSystemMessage(
+									`Could not continue from ${entryId}: ${e instanceof Error ? e.message : String(e)}`,
+								);
+							}
+						}}
+						onClose={() => setViewMode("chat")}
+					/>
+				);
+
 			case "theme-select": {
 				const current = themeStatus().designSystem ?? "default";
 				return (
 					<SelectInput
-						title={`Theme (${themeRows.length - 1} design systems)`}
+						title={`Theme (${themeRows.length - 1} themes)`}
 						options={themeRows.map((r) => ({
 							label: r.label,
 							value: r.value,
@@ -6035,7 +6843,7 @@ export function App({
 						onSelect={(value) => {
 							const id = value === "default" ? null : value;
 							try {
-								saveDesignSystemChoice(id);
+								saveThemeChoice(id);
 								applyDesignSystem(id);
 								addSystemMessage(
 									`Theme set to ${themeRows.find((r) => r.value === value)?.label ?? value}.`,
@@ -6074,18 +6882,14 @@ export function App({
 						// totalSteps reads from the manager so the indicator stays accurate
 						// when questions are added/removed without code churn.
 						totalSteps={
-							onboardingTotalSteps > 0
-								? onboardingTotalSteps
-								: onboardingManager.getTotalSteps()
+							onboardingTotalSteps > 0 ? onboardingTotalSteps : onboardingManager.getTotalSteps()
 						}
 						userName={onboardingManager.getUser()?.identity?.name || undefined}
 						agentName={
 							(onboardingManager.getUser()?.preferences?.voice as any)?.agentName || undefined
 						}
 						selectChoices={onboardingSelectChoices ?? undefined}
-						onSelect={
-							onboardingSelectChoices ? (value: string) => handleSubmit(value) : undefined
-						}
+						onSelect={onboardingSelectChoices ? (value: string) => handleSubmit(value) : undefined}
 						providerCheck={onboardingProviderCheck ?? undefined}
 						onProviderResolve={
 							onboardingProviderCheck
@@ -6112,6 +6916,12 @@ export function App({
 					<HistoryScreen
 						conversations={historyConversations}
 						onSelect={(conv) => {
+							if (historyPickDaemonRef.current) {
+								historyPickDaemonRef.current = false;
+								setViewMode("chat");
+								void linkDaemonSession(conv.sessionId);
+								return;
+							}
 							const resumed = sessionMgr.resume(conv.sessionId);
 							if (resumed) {
 								setActiveSessionId(resumed.id);
@@ -6235,7 +7045,7 @@ export function App({
 								</AppText>
 								{voiceMessages.map((m) => (
 									<Box key={m.id} flexDirection="column">
-										<MutedText>{m.role === "user" ? "You:" : "Agent:"}</MutedText>
+										<MutedText>{m.role === "user" ? "You:" : "8gent:"}</MutedText>
 										<AppText wrap="wrap">{(m.content || "").slice(0, 400)}</AppText>
 									</Box>
 								))}
@@ -6265,6 +7075,18 @@ export function App({
 							contentWidth={chatContentWidth}
 							maxVisible={Math.max(5, viewport.height - (isProcessing ? 18 : 10))}
 						/>
+						{voice.state === "recording" && (
+							<Box flexShrink={0}>
+								<VoiceIndicator
+									state={voice.state}
+									audioLevel={voice.audioLevel}
+									durationMs={voice.recordingDurationMs}
+									micName={micName}
+									micChecking={micChecking}
+									backendLabel={voiceBackendLabel}
+								/>
+							</Box>
+						)}
 						{/* Thinking zone — strict 4-row compact box, full content width */}
 						{isProcessing && (
 							<Box flexShrink={0}>
@@ -6329,8 +7151,7 @@ export function App({
 	const sessionTime = formatSessionTime(Date.now() - startTime.getTime());
 	const tokenStr = hudTokens(totalTokens);
 	const micOn =
-		Boolean(voice?.isAvailable) &&
-		(voice?.state === "recording" || voiceChat?.isActive);
+		Boolean(voice?.isAvailable) && (voice?.state === "recording" || voiceChat?.isActive);
 	const isApprovalPending = approvalPending !== null;
 	const contextPct = Math.min(100, Math.round((totalTokens / Math.max(1, contextMax)) * 100));
 	void sessionTick;
@@ -6411,13 +7232,7 @@ export function App({
 					/>
 				</Box>
 
-				<Box
-					borderStyle="single"
-					borderColor={t.frame}
-					paddingX={1}
-					flexGrow={1}
-					minHeight={0}
-				>
+				<Box borderStyle="single" borderColor={t.frame} paddingX={1} flexGrow={1} minHeight={0}>
 					<Box flexGrow={1} minHeight={0} gap={1}>
 						{showPlanColumn &&
 							(planSteps.length > 0 ? (
@@ -6428,6 +7243,7 @@ export function App({
 									width={PLAN_COLUMN_WIDTH}
 									animate={showAnimations}
 									toggleHint="^X"
+									planFile={planFile}
 								/>
 							) : savedTasks.length > 0 ? (
 								<PlanRail tasks={savedTasks} limit={8} />
@@ -6435,133 +7251,144 @@ export function App({
 								<PlanEmpty width={PLAN_COLUMN_WIDTH} />
 							))}
 
-					<Box flexGrow={1} flexDirection="column" minWidth={0}>
-						<LiveFocalStripWithGoal
-							goalClient={goalClient}
-							adhdMode={adhdMode}
-							mode={
-								agentMode === "Planning"
-									? "Planning"
-									: agentMode === "Implementing"
-										? "Implementing"
-										: agentMode === "Testing"
-											? "Testing"
-											: agentMode === "Debugging"
-												? "Debugging"
-												: "Researching"
-							}
-							activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
-							route={shownModel.ran || "-"}
-							routeAsked={shownModel.asked}
-							tokens={tokenStr}
-							contextPct={contextPct}
-							approvalPending={isApprovalPending}
-							autonomous={infiniteModeActive}
-							isProcessing={isProcessing}
-							lastTurnEndedAt={lastTurnEndedAt}
-							lastTurnSuccess={lastTurnSuccess}
-							animate={showAnimations}
-							width={chatWidth}
-						/>
+						<Box flexGrow={1} flexDirection="column" minWidth={0}>
+							{!(slashMenuOpen && slashMenuCompact(viewport.height)) && (
+								<LiveFocalStripWithGoal
+									goalClient={goalClient}
+									adhdMode={adhdMode}
+									mode={
+										agentMode === "Planning"
+											? "Planning"
+											: agentMode === "Implementing"
+												? "Implementing"
+												: agentMode === "Testing"
+													? "Testing"
+													: agentMode === "Debugging"
+														? "Debugging"
+														: "Researching"
+									}
+									activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
+									route={shownModel.ran || "-"}
+									routeAsked={shownModel.asked}
+									tokens={tokenStr}
+									contextPct={contextPct}
+									approvalPending={isApprovalPending}
+									autonomous={infiniteModeActive}
+									isProcessing={isProcessing}
+									lastTurnEndedAt={lastTurnEndedAt}
+									lastTurnSuccess={lastTurnSuccess}
+									animate={showAnimations}
+									width={chatWidth}
+								/>
+							)}
 
-						<NoProviderNotice
-							checked={providerHealth.checked}
-							liveLocal={providerHealth.live}
-							provider={currentProvider}
-							keyStatus={providerKeyState}
-							unreachable={unreachableNote}
-							compact={viewport.height < COMPACT_BELOW_ROWS}
-						/>
-
-						<Box
-							ref={chatBoxRef}
-							flexGrow={1}
-							minHeight={0}
-							flexDirection="column"
-							overflow="hidden"
-						>
-							<MessageList
-								messages={messages}
-								turnRunning={isProcessing}
-								rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
-								contentWidth={chatWidth}
+							<NoProviderNotice
+								checked={providerHealth.checked}
+								liveLocal={providerHealth.live}
+								provider={currentProvider}
+								keyStatus={providerKeyState}
+								unreachable={unreachableNote}
+								compact={viewport.height < COMPACT_BELOW_ROWS}
 							/>
-						</Box>
 
-						{paletteOpen && (
-							<Box justifyContent="center" flexShrink={0}>
-								<CommandPalette
-									isOpen={paletteOpen}
-									onClose={() => setPaletteOpen(false)}
-									onExecute={(name) => {
-										void handleSlashCommand(name as SlashCommand, []);
-									}}
-									commands={BUILT_IN_SLASH_COMMANDS.map((c) => ({
-										name: c.name,
-										description: c.description,
-									}))}
+							<Box
+								ref={chatBoxRef}
+								flexGrow={1}
+								minHeight={0}
+								flexDirection="column"
+								overflow="hidden"
+							>
+								<MessageList
+									messages={messages}
+									turnRunning={isProcessing}
+									rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
+									contentWidth={chatWidth}
 								/>
 							</Box>
-						)}
 
-						{approvalPending && (
-							<InlineApprovalPrompt
-								target={approvalPending.target}
-								reason={approvalPending.reason}
-								full={approvalPending.full}
-							/>
-						)}
+							{paletteOpen && (
+								<Box justifyContent="center" flexShrink={0}>
+									<CommandPalette
+										isOpen={paletteOpen}
+										onClose={() => setPaletteOpen(false)}
+										onExecute={(name) => {
+											void handleSlashCommand(name as SlashCommand, []);
+										}}
+										commands={builtInCommandsCoreFirst().map((c) => ({
+											name: c.name,
+											description: c.description,
+										}))}
+									/>
+								</Box>
+							)}
 
-						<Box flexShrink={0} display={paletteOpen ? "none" : "flex"}>
-							<CommandInput
-								onSubmit={handleSubmit}
-								isProcessing={isProcessing}
-								placeholder={
-									showOnboarding
-										? (onboardingPlaceholder ?? "Type your answer")
-										: nameQuestionOpen
-											? "Your name"
-											: undefined
-								}
-								focused={
-									((viewMode === "chat" && activeTabType === "chat") ||
-										viewMode === "onboarding") &&
-									!isBubbleNavMode &&
-									!paletteOpen &&
-									!djKeys
-								}
-								typingPaused={djKeys}
-								processingStage={processingStage}
-								showAnimations={showAnimations}
-								approvalPending={isApprovalPending}
-								activeTool={activeTool}
-								stepCount={stepCount}
-								toolCount={toolCount}
-								totalTokens={totalTokens}
-								isGitRepo={isGitRepo}
-								currentBranch={currentBranch}
-								planNextStep={planNextStep}
-								recentCommands={recentCommands}
-								onSlashCommand={handleSlashCommand}
-								injectedText={voiceTranscript}
-								transformInputValue={transformChatInput}
-								allowEmptySubmit={!!imageInput.currentImage || showOnboarding}
-								goalClient={goalClient}
-								sessionId="tui"
-								onSystemMessage={(line) => {
-									setMessages((prev) => [
-										...prev,
-										{
-											id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-											role: "system",
-											content: line,
-											timestamp: new Date(),
-										},
-									]);
-								}}
-							/>
+							{PICKER_VIEWS.has(viewMode) && activeTabType === "chat" && (
+								<Box flexShrink={0}>{renderMainContent()}</Box>
+							)}
+
+							{approvalPending && (
+								<InlineApprovalPrompt
+									target={approvalPending.target}
+									reason={approvalPending.reason}
+									full={approvalPending.full}
+								/>
+							)}
+
+							<Box
+								flexShrink={0}
+								display={paletteOpen || PICKER_VIEWS.has(viewMode) ? "none" : "flex"}
+							>
+								<CommandInput
+									cwd={projectCwd}
+									onSlashMenuChange={setSlashMenuOpen}
+									onSubmit={handleSubmit}
+									isProcessing={isProcessing}
+									placeholder={
+										showOnboarding
+											? (onboardingPlaceholder ?? "Type your answer")
+											: nameQuestionOpen
+												? "Your name"
+												: undefined
+									}
+									focused={
+										((viewMode === "chat" && activeTabType === "chat") ||
+											viewMode === "onboarding") &&
+										!isBubbleNavMode &&
+										!paletteOpen &&
+										!djKeys
+									}
+									typingPaused={djKeys}
+									processingStage={processingStage}
+									showAnimations={showAnimations}
+									approvalPending={isApprovalPending}
+									activeTool={activeTool}
+									stepCount={stepCount}
+									toolCount={toolCount}
+									totalTokens={totalTokens}
+									isGitRepo={isGitRepo}
+									currentBranch={currentBranch}
+									planNextStep={planNextStep}
+									recentCommands={recentCommands}
+									onSlashCommand={handleSlashCommand}
+									injectedText={voiceTranscript}
+									transformInputValue={transformChatInput}
+									allowEmptySubmit={!!imageInput.currentImage || showOnboarding}
+									goalClient={goalClient}
+									sessionId="tui"
+									onSystemMessage={(line) => {
+										setMessages((prev) => [
+											...prev,
+											{
+												id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+												role: "system",
+												content: line,
+												timestamp: new Date(),
+											},
+										]);
+									}}
+								/>
+							</Box>
 						</Box>
-					</Box>
 
 						{showActivityRail && (
 							<ActivityRail
@@ -6591,6 +7418,7 @@ export function App({
 					adhd={adhdMode}
 					tokensPerSecond={tokensPerSecond}
 					judge={judgeState}
+					sandboxOff={sandboxOff}
 					djKeys={djKeys}
 					onDjKeysDone={endDjKeys}
 				/>
@@ -6598,4 +7426,3 @@ export function App({
 		</ADHDModeContext.Provider>
 	);
 }
-

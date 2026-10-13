@@ -16,11 +16,22 @@
  *
  * Restore only puts the message history back. Whatever happened after the
  * last checkpoint (up to EIGHT_CHECKPOINT_EVERY tool calls) is lost, and the
- * session waits for the user's next message.
+ * session waits for the user's next message, unless EIGHT_AUTO_CONTINUE=1.
+ *
+ * Durable turns (#4082, concept from Durable Pi, found by Artale): the pool
+ * journals a turn as it starts (pendingTurn, written before anything is
+ * shown) and drops it when the turn ends. With EIGHT_AUTO_CONTINUE=1 on top of
+ * EIGHT_RESUME_ON_BOOT=1, continueInterruptedTurns re-runs a turn that was
+ * still pending at the crash exactly once: the attempt is journaled before
+ * the run, so a second crash during the continuation abandons the turn
+ * instead of looping. A turn whose interrupted call was a write or command is
+ * not resumed as it was: the session stays at the pre-tool checkpoint the
+ * restore put back and the model is told to verify before changing anything.
  *
  * Tool calls that were running when the daemon died (#3653) are journaled as
  * they start and dropped as they end. On boot, settleInterruptedToolCalls
- * re-runs only those whose replay class is "replay" (local reads). Every
+ * re-runs only those recorded as "replay" (local reads) under a policy that
+ * still classes them that way (#4118). Every
  * other call is NOT run again: the model gets a harness note saying it was
  * not replayed and needs confirmation, so a write, command, push or message
  * is never silently repeated.
@@ -30,7 +41,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TimeTravelStore } from "../eight/timetravel/checkpoint-store";
 import { scrub as scrubSecrets } from "../eight/secret-scanner";
-import { toolReplayClass } from "../eight/tools";
+import {
+	isReplayClass,
+	REPLAY_POLICY_VERSION,
+	type ReplayClass,
+	toolReplayClass,
+} from "../eight/tools";
 import type { SessionOverrides } from "./agent-pool";
 
 export interface JournalEntry {
@@ -44,6 +60,28 @@ export interface JournalEntry {
 	overrides?: SessionOverrides;
 	/** Tool calls started and not yet ended (#3653). */
 	inFlight?: InFlightToolCall[];
+	/** The turn started and not yet finished (#4082). */
+	pendingTurn?: PendingTurn;
+}
+
+export interface PendingTurn {
+	/** The user message's turn id. */
+	id: string;
+	/** The user's text, secrets scrubbed, capped at TURN_TEXT_CHARS. */
+	text: string;
+	startedAt: number;
+	/** Automatic continuations already journaled for this turn. */
+	attempts: number;
+}
+
+/** Longest user text kept on disk for a pending turn. */
+const TURN_TEXT_CHARS = 4000;
+
+/** Cap a pending turn's text. Applied on write and again on read (8SO review of #4082). */
+function capTurnText(text: string): string {
+	return text.length > TURN_TEXT_CHARS
+		? `${text.slice(0, TURN_TEXT_CHARS)}... (${text.length} chars)`
+		: text;
 }
 
 export interface InFlightToolCall {
@@ -52,7 +90,16 @@ export interface InFlightToolCall {
 	/** Full args for a replayable call; a short summary for any other. */
 	args: Record<string, unknown>;
 	startedAt: number;
+	/**
+	 * Replay class when the call started (#4118). Optional: a journal written
+	 * before it existed, or with a value this build does not know, degrades to
+	 * "ask" and is never re-run.
+	 */
+	cls?: ReplayClass;
 }
+
+/** On-disk shape of the journal file. Not the replay policy: see REPLAY_POLICY_VERSION. */
+const JOURNAL_FORMAT_VERSION = 1;
 
 /** Longest string arg kept on disk for a call that is never replayed. */
 const ARG_SUMMARY_CHARS = 200;
@@ -111,6 +158,24 @@ function isValidInFlight(v: unknown): v is InFlightToolCall {
 	);
 }
 
+/** An unrecognised recorded class is dropped, so the call degrades to "ask". */
+function normalizeInFlight(call: InFlightToolCall): InFlightToolCall {
+	if (call.cls !== undefined && !isReplayClass(call.cls)) delete call.cls;
+	return call;
+}
+
+function isValidPendingTurn(v: unknown): v is PendingTurn {
+	return (
+		isPlainObject(v) &&
+		isPlainKey(v.id) &&
+		typeof v.text === "string" &&
+		typeof v.startedAt === "number" &&
+		typeof v.attempts === "number" &&
+		Number.isInteger(v.attempts) &&
+		v.attempts >= 0
+	);
+}
+
 /** True when `v` has the JournalEntry shape and safe ids. */
 export function isValidJournalEntry(v: unknown): v is JournalEntry {
 	if (!isPlainObject(v)) return false;
@@ -131,6 +196,13 @@ export function resumeOnBootEnabled(
 	return env.EIGHT_RESUME_ON_BOOT === "1";
 }
 
+/** EIGHT_AUTO_CONTINUE=1 (#4082). Only read when resume-on-boot is on. */
+export function autoContinueEnabled(
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	return env.EIGHT_AUTO_CONTINUE === "1";
+}
+
 export class SessionJournal {
 	constructor(readonly filePath: string) {}
 
@@ -147,8 +219,15 @@ export class SessionJournal {
 			const valid: JournalEntry[] = [];
 			for (const e of parsed.sessions as unknown[]) {
 				if (isValidJournalEntry(e)) {
-					// A malformed call is dropped; the session entry is kept.
-					if (e.inFlight) e.inFlight = e.inFlight.filter(isValidInFlight);
+					// A malformed call or turn is dropped; the session entry is kept.
+					if (e.inFlight) e.inFlight = e.inFlight.filter(isValidInFlight).map(normalizeInFlight);
+					if (e.pendingTurn !== undefined && !isValidPendingTurn(e.pendingTurn)) {
+						delete e.pendingTurn;
+					} else if (e.pendingTurn && e.pendingTurn.text.length > TURN_TEXT_CHARS + 32) {
+						// Over the cap plus the "... (N chars)" suffix: a journal
+						// edited by hand or an older build. Capped, not trusted.
+						e.pendingTurn.text = capTurnText(e.pendingTurn.text);
+					}
 					valid.push(e);
 				} else
 					console.error(`[session-journal] dropping malformed journal entry in ${this.filePath}`);
@@ -171,7 +250,7 @@ export class SessionJournal {
 	markToolStart(sessionId: string, call: InFlightToolCall): void {
 		this.updateInFlight(sessionId, (calls) => [
 			...calls.filter((c) => c.id !== call.id),
-			{ ...call, args: journalArgs(call.tool, call.args) },
+			{ ...call, cls: toolReplayClass(call.tool), args: journalArgs(call.tool, call.args) },
 		]);
 	}
 
@@ -181,6 +260,38 @@ export class SessionJournal {
 
 	clearInFlight(sessionId: string): void {
 		this.updateInFlight(sessionId, () => []);
+	}
+
+	/**
+	 * Record a turn as running (#4082), written before the turn runs or
+	 * anything is shown. Replaces any earlier pending turn. No-op for a
+	 * session not journaled.
+	 */
+	markTurnStart(sessionId: string, turn: { id: string; text: string }): void {
+		this.updateTurn(sessionId, () => ({
+			id: turn.id,
+			text: capTurnText(scrubSecrets(turn.text).scrubbed),
+			startedAt: Date.now(),
+			attempts: 0,
+		}));
+	}
+
+	markTurnEnd(sessionId: string): void {
+		this.updateTurn(sessionId, () => undefined);
+	}
+
+	private updateTurn(
+		sessionId: string,
+		fn: (turn: PendingTurn | undefined) => PendingTurn | undefined,
+	): void {
+		const sessions = this.read();
+		const entry = sessions.find((e) => e.sessionId === sessionId);
+		if (!entry) return;
+		const after = fn(entry.pendingTurn);
+		if (entry.pendingTurn === undefined && after === undefined) return;
+		if (after) entry.pendingTurn = after;
+		else delete entry.pendingTurn;
+		this.write(sessions);
 	}
 
 	private updateInFlight(
@@ -211,7 +322,14 @@ export class SessionJournal {
 		try {
 			const fd = fs.openSync(tmp, "w", 0o600);
 			try {
-				fs.writeSync(fd, JSON.stringify({ version: 1, sessions }));
+				fs.writeSync(
+					fd,
+					JSON.stringify({
+						version: JOURNAL_FORMAT_VERSION,
+						replayPolicy: REPLAY_POLICY_VERSION,
+						sessions,
+					}),
+				);
 				fs.fsyncSync(fd);
 			} finally {
 				fs.closeSync(fd);
@@ -370,7 +488,11 @@ export async function settleInterruptedToolCalls(
 			"[resume] The daemon stopped while these tool calls were running. It has restarted.",
 		];
 		for (const call of [...calls].sort((a, b) => a.startedAt - b.startedAt)) {
-			const cls = toolReplayClass(call.tool);
+			// Re-run only a call recorded as a read under a policy that still
+			// calls it one. No recorded class, or a different one, is "ask".
+			const current = toolReplayClass(call.tool);
+			const mismatch = call.cls !== undefined && call.cls !== current;
+			const cls: ReplayClass = call.cls === undefined || mismatch ? "ask" : current;
 			if (cls === "replay") {
 				let output: string;
 				try {
@@ -384,8 +506,9 @@ export async function settleInterruptedToolCalls(
 				lines.push(`- ${describeCall(call)}: re-run (read only, safe to replay). Result:\n${output}`);
 				result.replayed.push(call.id);
 			} else {
-				const why =
-					cls === "never"
+				const why = mismatch
+					? "It was recorded under a different replay policy"
+					: cls === "never"
 						? "It changes something (file, shell, git, network or a message)"
 						: "Its replay class is unknown";
 				lines.push(
@@ -402,6 +525,110 @@ export async function settleInterruptedToolCalls(
 		}
 		console.log(
 			`[resume] ${entry.sessionId}: ${result.replayed.length} interrupted read(s) re-run, ${result.notReplayed.length} call(s) not replayed, model told to confirm`,
+		);
+		results.push(result);
+	}
+	return results;
+}
+
+/** The slice of AgentPool continuing interrupted turns needs. */
+export interface ContinuePool {
+	chat(
+		sessionId: string,
+		text: string,
+		turn: undefined,
+		options: { continuation: true },
+	): Promise<string>;
+	getAgent(sessionId: string): { addHarnessNote(body: string): void } | null;
+}
+
+export interface ContinueResult {
+	sessionId: string;
+	turnId: string;
+	/** Continuations journaled for this turn, this one included. */
+	attempts: number;
+	/**
+	 * "continued": the turn is re-run from the restored state.
+	 * "continued-from-checkpoint": a write or command was in flight and never
+	 * confirmed; the session stays at the pre-tool checkpoint the restore put
+	 * back and is told to verify before changing anything.
+	 * "abandoned": the attempt cap was already spent (a crash during the
+	 * continuation), so nothing runs and the turn is dropped.
+	 */
+	outcome: "continued" | "continued-from-checkpoint" | "abandoned";
+}
+
+/**
+ * Run after settleInterruptedToolCalls, only with EIGHT_AUTO_CONTINUE=1
+ * (#4082). For each resumed session whose last journaled turn started and
+ * never finished: journal the attempt, then send one continuation carrying
+ * the original request. The attempt is on disk before the run, so a second
+ * crash during the continuation does not loop: the turn is abandoned and the
+ * model told so. The continuation turns are not awaited.
+ */
+export function continueInterruptedTurns(
+	journal: SessionJournal,
+	pool: ContinuePool,
+	settled: SettleResult[],
+	options: { maxAttempts?: number } = {},
+): ContinueResult[] {
+	const maxAttempts = options.maxAttempts ?? 1;
+	const results: ContinueResult[] = [];
+	for (const entry of journal.read()) {
+		const turn = entry.pendingTurn;
+		if (!turn) continue;
+		const agent = pool.getAgent(entry.sessionId);
+		if (!agent) continue;
+		const attempts = turn.attempts + 1;
+		const unconfirmed =
+			(settled.find((s) => s.sessionId === entry.sessionId)?.notReplayed.length ?? 0) > 0;
+		const result: ContinueResult = {
+			sessionId: entry.sessionId,
+			turnId: turn.id,
+			attempts,
+			outcome:
+				attempts > maxAttempts
+					? "abandoned"
+					: unconfirmed
+						? "continued-from-checkpoint"
+						: "continued",
+		};
+		try {
+			if (result.outcome === "abandoned") {
+				journal.markTurnEnd(entry.sessionId);
+				agent.addHarnessNote(
+					`[resume] The daemon crashed again while continuing this task after a crash (${turn.attempts} automatic continuation(s) spent). It was not continued again. Wait for the user.`,
+				);
+			} else {
+				// On disk before the run: the cap holds even if this run crashes.
+				journal.upsert({ ...entry, pendingTurn: { ...turn, attempts } });
+				const lead = unconfirmed
+					? "The daemon stopped during this task and has restarted from the checkpoint taken before the tool call(s) listed in the note above, which were not replayed. First check whether they took effect; never repeat a push, message, deploy or command without asking. Then continue the task."
+					: "The daemon stopped during this task and has restarted. Continue the task from the current state.";
+				// The original turn's approval context (a Telegram operator's chat)
+				// does not survive the restart: a gated command in this turn is
+				// denied, not asked about. Fail closed, and say so.
+				const approvals =
+					"Nobody can approve a gated command in this automatic continuation, so such a command is denied; leave it for the user and say what remains.";
+				pool
+					.chat(
+						entry.sessionId,
+						`[resume] continued-after-crash (automatic continuation ${attempts} of ${maxAttempts}). ${lead} ${approvals} The original request was:\n${turn.text}`,
+						undefined,
+						{ continuation: true },
+					)
+					.catch((err) =>
+						console.error(`[resume] ${entry.sessionId}: continuation failed: ${String(err)}`),
+					);
+			}
+		} catch (err) {
+			console.error(
+				`[resume] ${entry.sessionId}: could not continue turn ${turn.id}: ${String(err)}`,
+			);
+			continue;
+		}
+		console.log(
+			`[resume] ${entry.sessionId}: turn ${turn.id} ${result.outcome} (attempt ${attempts} of ${maxAttempts})`,
 		);
 		results.push(result);
 	}

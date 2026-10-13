@@ -197,15 +197,29 @@ describe("stillReason", () => {
 });
 
 describe("LivingMarkWriter", () => {
-	test("active on a colour terminal: the mark changes at most once a beat, one write each", async () => {
+	test("active on a colour terminal: the mark changes at most once a beat, one write each", () => {
+		// Deterministic: six beats on a hand-driven clock. On a real timer a loaded
+		// CI runner slipped beats and the count fell short (ubuntu-latest, #4094).
 		const tty = new FakeTty();
-		const w = writer(tty);
+		const timers = new ManualTimers();
+		let clock = 0;
+		const w = new LivingMarkWriter(tty, {
+			env: TTY_ENV,
+			platform: "darwin",
+			paint: () => PAINT,
+			now: () => clock,
+			timers,
+		});
 		w.setActive(true);
-		await wait(BEAT_MS * 6);
+		for (let beat = 0; beat < 6; beat++) {
+			clock += BEAT_MS;
+			expect(timers.size).toBe(1); // exactly one beat pending, never a second timer
+			timers.runPending();
+		}
 		w.dispose();
 		const marks = tty.marks();
 		expect(marks.length).toBeGreaterThanOrEqual(3);
-		expect(marks.length).toBeLessThanOrEqual(7);
+		expect(marks.length).toBeLessThanOrEqual(6);
 		for (const m of marks) {
 			expect(m.startsWith(`${BSU}\x1b7`)).toBe(true);
 			expect(m.endsWith(`\x1b8${ESU}`)).toBe(true);

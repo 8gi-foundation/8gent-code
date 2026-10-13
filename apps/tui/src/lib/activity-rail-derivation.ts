@@ -161,7 +161,7 @@ export function deriveAgents(
 		let state: ActivityRailAgentRow["state"] = "idle";
 		if (s.includes("block") || s.includes("wait") || s.includes("deny")) state = "blocked";
 		else if (s.includes("run") || s.includes("active") || s.includes("work")) state = "active";
-		return { name: a.name || "agent", state };
+		return { name: a.name || "8gent", state };
 	});
 }
 

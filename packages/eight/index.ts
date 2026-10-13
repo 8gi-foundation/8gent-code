@@ -27,6 +27,7 @@ export type {
 	AgentToolStartEvent,
 	AgentToolEndEvent,
 	AgentStepEvent,
+	AgentStepStartEvent,
 	AgentEvidenceEvent,
 	AgentEvidenceSummaryEvent,
 } from "./types";

@@ -51,6 +51,8 @@ interface BottomBarProps {
 	tokensPerSecond?: number;
 	/** System One judge warm-up; undefined when System One is off. */
 	judge?: JudgeState;
+	/** Why run_command runs without its OS sandbox; undefined when it has one (#4013). */
+	sandboxOff?: string;
 }
 
 /** The signed-in display name (#2366). The OS login is not shown: it is the
@@ -90,6 +92,7 @@ export function BottomBar(props: BottomBarProps) {
 							providersTotal: props.total,
 							user: resolveUser(props.user),
 							judge: props.judge,
+							sandboxOff: props.sandboxOff,
 							adhd: props.adhd,
 						}}
 					/>

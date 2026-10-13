@@ -62,7 +62,7 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 		"notebook_insert_cell",
 		"notebook_delete_cell",
 	],
-	creative: ["generate_sprite", "make_pdf", "speak"],
+	creative: ["generate_sprite", "make_pdf", "speak", "render_video_deck"],
 	orchestration: [
 		"spawn_agent",
 		"check_agent",
@@ -162,7 +162,11 @@ export class ToolRegistry {
 	 */
 	readonly resultCache: ToolResultCache = new ToolResultCache();
 
-	constructor(allTools = false) {
+	/** Role of the session that owns this registry; gates orchestration tools. */
+	private readonly role: string | undefined;
+
+	constructor(allTools = false, role?: string) {
+		this.role = role;
 		if (allTools) {
 			for (const [name, def] of Object.entries(agentTools)) {
 				this.activeTools.set(name, def);
@@ -190,6 +194,19 @@ export class ToolRegistry {
 		}
 		this.loadedCategories.add(category);
 		return loaded;
+	}
+
+	/**
+	 * Native tool-calling providers hand the SDK one fixed tool object at turn
+	 * start, so a mid-turn discover_tools call reports "loaded" but the tool
+	 * never reaches the model (#3881: spawn_agent missing on OpenRouter).
+	 * Load what the prompt promises before the first request, for the
+	 * Orchestrator only (same rule as the local path, #3095): engineers, QA,
+	 * spawned children and role-less agents do not delegate. Append-only, so
+	 * the #3222 byte-stable prefix holds. Text-tool providers are left alone.
+	 */
+	preloadForNative(role: string | undefined): void {
+		if (role === "orchestrator") this.loadCategory("orchestration");
 	}
 
 	/**
@@ -227,7 +244,7 @@ export class ToolRegistry {
 	/** Create the discover_tools meta-tool */
 	private createDiscoverTool() {
 		return tool({
-			description: `Load additional tool schemas by category. Available: ${CATEGORY_NAMES.join(", ")}. Core tools are already loaded. Call this to unlock a category before using its tools.`,
+			description: `Load additional tool schemas by category. Available: ${CATEGORY_NAMES.join(", ")}. Core tools are already loaded. Registers a category; its tools are callable from the next turn, not the one you are in.`,
 			inputSchema: z.object({
 				category: z.string().describe(`Category to load. One of: ${CATEGORY_NAMES.join(", ")}`),
 			}),
@@ -235,6 +252,12 @@ export class ToolRegistry {
 				if (!TOOL_CATEGORIES[category]) {
 					return {
 						error: `Unknown category "${category}". Available: ${CATEGORY_NAMES.join(", ")}`,
+					};
+				}
+				// Orchestration tools are orchestrator-only here too (same rule as preloadForNative).
+				if (category === "orchestration" && this.role !== "orchestrator") {
+					return {
+						error: "The orchestration category is available to the orchestrator role only.",
 					};
 				}
 				const loaded = this.loadCategory(category);
@@ -245,8 +268,8 @@ export class ToolRegistry {
 					tools: allInCategory,
 					message:
 						loaded.length > 0
-							? `Loaded ${loaded.length} tools: ${loaded.join(", ")}`
-							: `Category "${category}" was already loaded.`,
+							? `Registered ${loaded.length} tools: ${loaded.join(", ")}. They are callable from the next turn, not this one.`
+							: `Category "${category}" was already registered; it is callable if it was registered before this turn started.`,
 				};
 			},
 		});

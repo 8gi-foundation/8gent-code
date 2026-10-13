@@ -56,7 +56,7 @@ Client -> { "type": "session:create", "channel": "os" }
 Server -> { "type": "session:created", "sessionId": "s_abc123_xyz" }
 ```
 
-**Channels:** `"os"`, `"app"`, `"telegram"`, `"discord"`, `"api"`, `"delegation"`, `"computer"`, `"browser"`
+**Channels:** `"os"`, `"app"`, `"telegram"`, `"discord"`, `"api"`, `"delegation"`, `"computer"`, `"browser"`, `"classroom"`
 
 The channel tag is metadata for routing, concurrency caps, and analytics.
 
@@ -67,6 +67,7 @@ The channel tag is metadata for routing, concurrency caps, and analytics.
 | `computer` | 3 (`MAX_COMPUTER_SESSIONS`) | 10 min | Loopback-only in v0 |
 | `telegram` | unlimited (within global cap) | never evicted | Sandbox-style persistence |
 | `delegation` | unlimited | never evicted | Sub-agent fan-out |
+| `classroom` | 3 | 5 min | No tools, private, not saved (see Classroom Channel) |
 | other | global cap (10) | 30 min | |
 
 ### Resume Session
@@ -102,6 +103,140 @@ Server -> {
   ]
 }
 ```
+
+## Shared Sessions (v1.4)
+
+One session, many surfaces (#3929): the TUI, the 8gent Browser panel and any other
+loopback client can list sessions, join one live, and bring a past one back. Every
+client bound to a session already receives its events; these frames add discovery,
+a transcript on join, an echo of what other clients send, and a Stop that does not
+end the session.
+
+All four requests need an authenticated connection (the token, when
+`daemon.authToken` is set) **and** a loopback peer, checked per frame:
+`{ "type": "error", "message": "shared sessions are loopback-only" }` otherwise.
+Session ids must match `^[A-Za-z0-9_-]{1,64}$` before any disk access.
+Only the `tui`, `os`, `app`, `api` and `browser` channels are listed, attached,
+stopped or saved; telegram, table, delegation and computer sessions stay private.
+
+### List
+
+```
+Client -> { "type": "session:list", "past": true, "limit": 20 }   // past defaults true; limit 1..100
+Server -> {
+  "type": "session:list",
+  "live": [ { "sessionId": "s_lz1_ab12cd", "channel": "tui", "title": "auth bug", "busy": false,
+              "messageCount": 6, "clients": 2, "createdAt": 1789300000000, "lastActiveAt": 1789300100000 } ],
+  "past": [ { "sessionId": "ebeb469c", "channel": "tui", "title": "Session 2026-10-11", "messageCount": 15,
+              "model": "eight:latest", "cwd": "/Users/me/project", "lastActiveAt": 1789300000000 } ]
+}
+```
+
+`past` comes from `~/.8gent/sessions/<id>.json` (`$EIGHT_DATA_DIR/sessions` when set),
+the store the TUI saves to; ids already live are not repeated.
+
+### Attach
+
+```
+Client -> { "type": "session:attach", "sessionId": "ebeb469c", "channel": "browser" }
+Server -> { "type": "session:attached", "sessionId": "ebeb469c", "channel": "tui", "busy": false,
+            "restored": true, "transcript": [ { "role": "user", "content": "..." } ], "truncated": false }
+```
+
+- A live id binds this connection to it.
+- A past id is created in the pool on its saved channel (a file with none was written by
+  the TUI, so `tui`) and in its saved `cwd` when that directory exists, its user/assistant
+  messages are restored into the agent, and the connection is bound (`restored: true`).
+- `channel` names the attaching surface; it labels this client's `user:message` echoes.
+- The transcript is the last 200 user/assistant messages, each capped at 20,000 chars.
+- Errors: `invalid session id`, `session not found`, `session cannot be shared`.
+
+### Detach
+
+```
+Client -> { "type": "session:detach" }
+Server -> { "type": "session:detached", "sessionId": "s_..." }
+```
+
+The session keeps running for the other clients; no `session:end` is emitted.
+
+### Abort (shared-safe Stop)
+
+```
+Client -> { "type": "session:abort", "sessionId": "s_..." }   // defaults to the bound session
+Server -> { "type": "session:aborted", "sessionId": "s_...", "aborted": true }
+```
+
+Stops the turn in flight; the session and its history stay. Use it instead of
+`session:destroy`, which ends the session for every client on it.
+
+### Echo of other clients' prompts
+
+```
+Server -> { "type": "event", "event": "user:message", "payload": { "sessionId": "s_...", "text": "...", "channel": "tui" } }
+```
+
+Sent to every other client bound to the session when one sends `prompt`. The sender is not echoed.
+
+### Behaviour that changed with v1.4
+
+- A client disconnecting emits `session:end { reason: "client-disconnect" }` only when no
+  other client is still bound to that session.
+- After every turn on a shared session the daemon saves the user/assistant history to the
+  session store (SessionManager format plus `channel`; harness notes and the planning gate are
+  left out), so the TUI and a later `session:attach` can resume it after a daemon restart.
+- Approvals are unchanged: `approval:*` still reaches only the registered approval bridge, and a
+  prompt from an attached client runs with no approval turn.
+- `sessions:list` (v1.0) is unchanged.
+- `session:resume` follows the same rules. A live telegram session is resumed only by the
+  registered approval bridge; table, delegation and computer sessions never. Joining a live
+  session other clients are on needs a loopback peer. A session that is not live but has a
+  saved file is restored from it, with its history and channel (loopback only), instead of
+  being recreated empty under that id.
+- Resume secrets: `session:created`, `session:attached` and `session:resumed` carry
+  `"resumeSecret": "<32 hex>"`, one per session. A `session:resume` from a non-loopback peer
+  of a live session must send it back as `"resumeSecret"`, otherwise
+  `{ "type": "error", "message": "resume secret required" }`. Loopback clients may omit it.
+- `session:create` takes an optional `"persist": true` (shareable channels only): the session
+  is saved after every turn from the start, so a chat only one surface ever had can be resumed
+  later, also after a daemon restart. Without it (older clients) nothing changes.
+- `session:destroy` only ends the session the connection is on
+  (`can only end the session you are on` otherwise). When other clients are on it, it only
+  takes this client off, like `session:detach`.
+- `session:abort` only stops the connection's own session.
+- Only shared sessions are saved: restored from a file, or attached to when no file with
+  that id exists. A session never writes over a file it was not restored from. Files are 0600.
+- A restore from disk is refused when the pool has no room (no idle, unattached session to
+  make way), and is limited to 5 per connection per minute. A session with a client attached
+  is never evicted for idleness or room, and a cap eviction always emits `session:end`.
+- The store is `$EIGHT_DATA_DIR/sessions` when set, else `~/.8gent/sessions`, for both the
+  daemon and the TUI.
+
+## Classroom Channel (v1.5)
+
+8gent Browser builds lessons from text on the open web, which is untrusted. The
+`classroom` channel (#3939) is a session that cannot act on it.
+
+```
+Client -> { "type": "session:create", "channel": "classroom" }
+Server -> { "type": "session:created", "sessionId": "s_...", "resumeSecret": "<32 hex>" }
+```
+
+- **Who may create one:** a loopback peer. When `daemon.authToken` is set it is enforced like any frame (`not authenticated` before auth).
+  A non-loopback peer gets `{ "type": "error", "message": "classroom sessions are loopback-only" }`.
+  The session ends when the socket that created it closes.
+- **No tools at all.** The model is offered none (no file, shell, network or browser tools,
+  no delegation, no memory writes), the pre-fetch router is off, the executor refuses any
+  call for the `__classroom__` scope, and a `*` block rule backs it in the policy engine.
+  A caller cannot widen this: `agentScope`, `systemPrompt` and `maxTurns` overrides are ignored.
+- **Fixed system prompt:** the user message is untrusted data to teach from, never
+  instructions, and the reply is exactly one JSON object.
+- **Short:** at most 2 model rounds per turn, idle sessions are dropped after 5 minutes,
+  at most 3 at once.
+- **Private to its connection:** not listed (`sessions:list`, `session:list`), and
+  `session:attach`, `session:resume` and `session:abort` answer `session cannot be shared`
+  for every client, the creator included. `persist: true` is ignored and nothing is
+  written to the session store.
 
 ## Session Time-Travel
 
@@ -205,8 +340,8 @@ Server -> { "type": "event", "event": "session:end", "payload": { "sessionId": "
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `agent:thinking` | `{ sessionId }` | Agent started processing |
-| `tool:start` | `{ sessionId, tool, input }` | Tool invocation started |
-| `tool:result` | `{ sessionId, tool, output, durationMs }` | Tool completed |
+| `tool:start` | `{ sessionId, tool, input, toolCallId? }` | Tool invocation started |
+| `tool:result` | `{ sessionId, tool, output, durationMs, toolCallId?, success? }` | Tool completed. `toolCallId` pairs it with its start; `success` is false when the tool failed (#4190) |
 | `agent:stream` | `{ sessionId, chunk, final? }` | Text output. `final: true` on the complete response. |
 | `agent:error` | `{ sessionId, error }` | Error during processing |
 | `memory:saved` | `{ sessionId, key }` | Memory or evidence was saved |
@@ -222,6 +357,27 @@ Only one prompt can be in-flight per session. If the agent is already processing
 ```
 Server -> { "type": "event", "event": "agent:error", "payload": { "sessionId": "...", "error": "agent is busy processing another message" } }
 ```
+
+## Live Anatomy View (`/live`, #4190)
+
+A loopback page that draws the daemon's sessions as a Mermaid graph, rebuilt from bus events
+(`packages/daemon/live-anatomy.ts`). No model is in the path: `buildLiveGraph(events)` is pure.
+
+- `GET /live` serves the page; `GET /live/mermaid.js` serves Mermaid from the daemon's own
+  `node_modules` (no CDN). Both answer loopback peers only, whatever `DAEMON_HOSTNAME` binds to.
+- `ws://127.0.0.1:<port>/live/ws` is the feed, loopback-only. The page sends one frame,
+  `{ "type": "live:watch", "token"?: "...", "session"?: "<id>" }`; the token is required when
+  the daemon has one (the TUI passes it in the URL fragment). The daemon answers with
+  `{ "type": "live:graph", "mermaid": "...", "nodes": [...] }` now and on every event.
+- Only shareable channels (`tui`, `os`, `app`, `api`, `browser`) are drawn; telegram, table,
+  delegation, computer and classroom sessions never reach the page. Every payload string is
+  scrubbed by `secret-scanner` before it is stored. Raw events, approval request ids and chat ids
+  never leave the daemon.
+- Nodes: the session, files touched (grouped by folder), shell commands, other tools. State per
+  node from its latest call: running (green), paused (amber, waiting on an approval), failed
+  (red), done (grey).
+- The TUI opens it with Ctrl+F (in 8gent Browser when its control channel answers; the URL is
+  always printed).
 
 ## Cron Jobs
 
@@ -315,6 +471,31 @@ Common errors:
 On graceful shutdown (SIGTERM/SIGINT), the daemon writes active session metadata to `~/.8gent/daemon-state.json`. On restart, clients can resume sessions by ID. The Agent instance is recreated, but conversation history must be restored from the client side or from memory.
 
 Cron jobs persist to `~/.8gent/cron.json` and survive restarts. Missed jobs are caught up on startup (if gap exceeds 2x the interval).
+
+### Resume on boot and durable turns
+
+With `EIGHT_RESUME_ON_BOOT=1`, every open session is journaled to
+`~/.8gent/sessions-journal.json` (atomic write, owner-only) and recreated on
+the next start from its newest time-travel checkpoint. A tool call that was
+running at the crash is re-run only if it is a read; anything else is reported
+to the model as not replayed. The journal also holds the turn that was running
+(`pendingTurn`: the user text, scrubbed and capped, plus an attempt count),
+written before the daemon shows anything for that turn and dropped when the
+turn ends.
+
+With `EIGHT_AUTO_CONTINUE=1` as well (default off), a session whose last turn
+started and never finished is continued once, automatically, after the restore
+and the replay settle. The attempt is journaled before the continuation runs,
+so a second crash during it abandons the turn instead of looping. When the
+interrupted call was a write or command, the session stays at the pre-tool
+checkpoint the restore put back and the continuation tells the model to verify
+what took effect before changing anything. The pending turn's text is capped
+at 4000 characters on write and again on read, so a hand-edited journal cannot
+feed the model an oversized prompt. The original turn's approval context does
+not survive the restart: a continuation of a Telegram-started turn has no
+operator to ask, so a gated command in it is denied (fail closed) and the
+continuation note tells the model to leave such commands for the user.
+`scripts/durable-continue-demo.ts` is the kill -9 demonstration.
 
 ## Ability Access
 
@@ -730,6 +911,8 @@ goal package only emits in-memory `GoalEvent` records.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.5 | 2026-10-11 | Add the restricted `classroom` channel: no tools, loopback + token only, private, not persisted. (#3939) |
+| 1.4 | 2026-10-11 | Shared sessions: `session:list` / `session:attach` / `session:detach` / `session:abort`, `user:message` echo, disconnect only ends a session for the last client, shareable sessions saved to the session store. (#3929) |
 | 1.3 | 2026-05-16 | Add goal-loop methods (`goal.start` / `goal.status` / `goal.subgoal` / `goal.abort` / `goal.resume`) + streaming event taxonomy. Schema v2 (`goal_runs`, `goal_events`). (#2606) |
 | 1.2 | 2026-04-26 | Add remote dispatch protocol (`/dispatch` route). Surface registration, replay protection, rate limiting, capability scoping, fan-out to `replay_to` subscribers, `dispatch_source` in trace records. (#1896) |
 | 1.1 | 2026-04-25 | Add `computer` channel, dedicated `/computer` route, streaming event taxonomy (`token`/`tool_call`/`tool_result`/`approval_required`/`error`/`done`), `protocol_version: 1` on every frame, `/ops/agent-pool/status` endpoint. |

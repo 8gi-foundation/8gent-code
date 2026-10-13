@@ -20,6 +20,7 @@ import type {
 	FinishReason,
 	HookExecution,
 	ModelInfo,
+	ModelRoundEntry,
 	ResponseMeta,
 	SessionEntry,
 	SessionError,
@@ -37,6 +38,8 @@ function defaultSessionsDir(): string {
 export class SessionWriter {
 	private filePath: string;
 	private fd: number;
+	/** False for a session that must leave nothing on disk (classroom, #3939). */
+	private persist: boolean;
 	private seq = 0;
 	private sessionId: string;
 	private startTime: number;
@@ -56,11 +59,26 @@ export class SessionWriter {
 		totalTokens: 0,
 	};
 
-	constructor(sessionId: string, sessionsDir?: string) {
+	/** Epoch-ms clock; injectable so tests can prove duration = end - start. */
+	private clock: () => number;
+
+	constructor(
+		sessionId: string,
+		sessionsDir?: string,
+		clock: () => number = Date.now,
+		persist = true,
+	) {
+		this.clock = clock;
+		this.persist = persist;
 		this.sessionId = sessionId;
 		this.startTime = Date.now();
 
 		const dir = sessionsDir || defaultSessionsDir();
+		if (!persist) {
+			this.filePath = path.join(dir, `${sessionId}.jsonl`);
+			this.fd = -1;
+			return;
+		}
 		if (!fs.existsSync(dir)) {
 			fs.mkdirSync(dir, { recursive: true });
 		}
@@ -74,6 +92,7 @@ export class SessionWriter {
 	// ============================================
 
 	private write(entry: SessionEntry): void {
+		if (!this.persist) return;
 		const line = `${JSON.stringify(entry)}\n`;
 		fs.writeSync(this.fd, line);
 	}
@@ -83,8 +102,11 @@ export class SessionWriter {
 	}
 
 	private now(): string {
-		return new Date().toISOString();
+		return new Date(this.clock()).toISOString();
 	}
+
+	/** Epoch ms at which each open step began, keyed by step number. */
+	private stepStartedAt = new Map<number, number>();
 
 	// ============================================
 	// Session lifecycle
@@ -115,9 +137,11 @@ export class SessionWriter {
 	/** Write step start boundary (v2) */
 	writeStepStart(stepNumber: number, model?: ModelInfo, messageCount?: number): void {
 		this.totalSteps = Math.max(this.totalSteps, stepNumber + 1);
+		const at = this.clock();
+		this.stepStartedAt.set(stepNumber, at);
 		this.write({
 			type: "step_start",
-			timestamp: this.now(),
+			timestamp: new Date(at).toISOString(),
 			sequenceNumber: this.nextSeq(),
 			stepNumber,
 			model,
@@ -139,15 +163,35 @@ export class SessionWriter {
 		if (options?.usage) {
 			this.accumulateUsage(options.usage);
 		}
+		const at = this.clock();
+		const startedAt = this.stepStartedAt.get(stepNumber);
+		this.stepStartedAt.delete(stepNumber);
 		this.write({
 			type: "step_end",
-			timestamp: this.now(),
+			timestamp: new Date(at).toISOString(),
 			sequenceNumber: this.nextSeq(),
 			stepNumber,
 			finishReason,
+			// Wall time from step_start to step_end; absent when no start was seen.
+			durationMs: startedAt === undefined ? undefined : at - startedAt,
 			usage: options?.usage,
 			response: options?.response,
 			providerMetadata: options?.providerMetadata,
+		});
+	}
+
+	private modelRounds = 0;
+
+	/** Prefill meter (#3655): one line per model request, numbered per session. */
+	writeModelRound(
+		r: Omit<ModelRoundEntry, "type" | "timestamp" | "sequenceNumber" | "round">,
+	): void {
+		this.write({
+			type: "model_round",
+			timestamp: this.now(),
+			sequenceNumber: this.nextSeq(),
+			round: this.modelRounds++,
+			...r,
 		});
 	}
 
@@ -348,7 +392,7 @@ export class SessionWriter {
 			},
 		});
 
-		fs.closeSync(this.fd);
+		if (this.persist) fs.closeSync(this.fd);
 	}
 
 	// ============================================

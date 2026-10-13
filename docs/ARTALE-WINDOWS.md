@@ -75,6 +75,13 @@ and the TUI starting up to the point where it needs a real terminal).
 
    `reset --hard` discards local edits to tracked files. Commit or copy yours first.
 
+## A2. Models on Windows (Ollama, LM Studio, llama-server, OpenRouter)
+
+The full Windows guide, including llama-server on an NVIDIA RTX card (loopback-only start,
+preset files, env vars, health check, netstat proof, troubleshooting), is
+[install/windows.md](install/windows.md). Every provider and setting is in
+[install/providers.md](install/providers.md).
+
 ## B. WSL (Ubuntu)
 
 Work inside the Linux filesystem (`~`), not `/mnt/c/...`. Bun installs are several times slower

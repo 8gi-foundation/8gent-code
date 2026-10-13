@@ -20,6 +20,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { resolveHome } from "../core/home";
 import {
 	bakeHuddle,
 	ensureHuddleDirs,
@@ -35,6 +36,7 @@ import { resolveSlide, type SlideSpec } from "../table/slide-spec";
 import { verifySlideSpec } from "../table/slide-verify";
 import { STAGE_READY_CAP_MS, stagePage } from "../table/stage";
 import { parseWhisperJson, zenSlides } from "../table/zen";
+import { getDataDir } from "./data-dir";
 
 /** Broadcast signature, matching table-routes.ts's ChannelBroadcast. */
 type Broadcast = (channelId: string, frame: Record<string, unknown>) => void;
@@ -141,9 +143,9 @@ function nameOf(holder: string): string {
 
 /** Absolute directories a slide's claim references may read. Same default the
  *  verify substrate uses; never widened by anything an officer writes. */
-function claimRoots(): string[] {
-	const home = process.env.HOME ?? "/";
-	return [join(home, "8gent-code"), join(home, "8gi-governance"), join(home, ".8gent")];
+export function claimRoots(): string[] {
+	const home = resolveHome();
+	return [join(home, "8gent-code"), join(home, "8gi-governance"), getDataDir()];
 }
 
 export interface TurnPipelineResult {
@@ -481,6 +483,11 @@ export function snapshotManifest(huddleId: string): HuddleManifest | null {
 
 /** Ensure the creative dir exists at daemon start so the first bake never
  *  races the Create pane's scanner. */
+/** creative/ under the data dir (was /tmp/.8gent with no HOME; #4111). */
+export function creativeDir(): string {
+	return join(getDataDir(), "creative");
+}
+
 export function ensureCreativeDir(): void {
-	mkdirSync(join(process.env.HOME ?? "/tmp", ".8gent", "creative"), { recursive: true });
+	mkdirSync(creativeDir(), { recursive: true });
 }

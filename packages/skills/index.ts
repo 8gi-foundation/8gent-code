@@ -4,10 +4,21 @@
  * Skills are markdown files with frontmatter that define reusable workflows.
  * They provide specialized prompts and tool configurations for common tasks.
  *
- * Skills load order (later steps skip if name already taken):
- * 1. ~/.8gent/skills/ flat .md files (user overrides all)
- * 2. Project: .claude/skills/<name>/SKILL.md under process.cwd() (repo overrides bundled defaults)
+ * Precedence (first one found wins; a name collision is recorded, see getCollisions()):
+ * 1. Project: <cwd>/.agents/skills/<name>/SKILL.md, then <cwd>/.claude/skills/<name>/SKILL.md
+ * 2. User: ~/.8gent/skills/*.md, then ~/.agents/skills/<name>/SKILL.md, then ~/.claude/skills/<name>/SKILL.md
  * 3. Bundled: packages/skills/<name>/SKILL.md (dev) and dist/skills/<name>/SKILL.md (published CLI)
+ * 4. Learned: ~/.8gent/learned-skills/*.md
+ * Project beats user beats bundled. A collision between two project/user skills is reported
+ * once per process (console.warn) and always available from getCollisions(). A user skill
+ * shadowing a bundled or learned one is the expected override and is not reported.
+ *
+ * Exception (#4125): a project skill (from whatever repo is the cwd) may not replace a user or
+ * bundled skill unless the project file's sha256 is pinned in <data dir>/skills-trust.json as
+ * { "<name>": "<sha256>" }. Otherwise the project file is skipped, the user or bundled skill is
+ * kept, and the refusal is reported like any other collision. Editing a pinned file changes its
+ * hash, so it is refused again. The data dir is taken from the security env snapshot, never from
+ * a .env the project ships, and a trust file inside the project is never read.
  *
  * Skill format:
  * ---
@@ -21,18 +32,17 @@
  * 3. Create commit message
  */
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ActorKind, CapabilityAuditStore, LogCapabilityInput } from "../audit/index.js";
+import { realpathLoose, securityEnvSnapshot } from "../permissions/run-command-sandbox.js";
 import type { CapabilityRequest, EnforceOptions } from "../permissions/capability-manifest.js";
 import type { PolicyDecision } from "../permissions/types.js";
 import { enforceSkillScope } from "./capability-scope.js";
 import { validateSkillManifest } from "./manifest.js";
-
-// Skill compounding: learned-skills directory
-const LEARNED_DIR = path.join(os.homedir(), ".8gent", "learned-skills");
 
 // ============================================
 // Types
@@ -275,6 +285,71 @@ function discoverBundledSkillMdFiles(): string[] {
 // Skill Manager
 // ============================================
 
+type SkillTier = "project" | "user" | "bundled" | "learned";
+
+export interface SkillManagerOptions {
+	/** Project root for .agents/skills and .claude/skills. Default process.cwd(). */
+	projectDir?: string;
+	/** Home dir for ~/.agents/skills, ~/.claude/skills, ~/.8gent/skills. Default os.homedir(). */
+	homeDir?: string;
+}
+
+export interface SkillCollision {
+	name: string;
+	/** File that won (higher precedence). */
+	kept: string;
+	/** File that was ignored. */
+	ignored: string;
+}
+
+const warnedCollisions = new Set<string>();
+function warnCollisionOnce(c: SkillCollision, message?: string): void {
+	const key = `${c.name}\0${c.kept}\0${c.ignored}`;
+	if (warnedCollisions.has(key)) return;
+	warnedCollisions.add(key);
+	console.warn(
+		message ?? `[skills] Skill "${c.name}" defined twice: using ${c.kept}, ignoring ${c.ignored}`,
+	);
+}
+
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+const SKILL_TRUST_FILE = "skills-trust.json";
+
+/**
+ * name -> sha256 pins from skills-trust.json. Missing or unreadable means no trust; only
+ * own keys whose value is a lowercase 64-hex sha256 count, everything else is ignored.
+ */
+function readSkillTrust(file: string | undefined): Map<string, string> {
+	const out = new Map<string, string>();
+	if (!file) return out;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+	} catch {
+		return out;
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out;
+	for (const name of Object.keys(parsed)) {
+		if (!Object.hasOwn(parsed, name)) continue;
+		const value = (parsed as Record<string, unknown>)[name];
+		if (typeof value === "string" && SHA256_HEX.test(value)) out.set(name, value);
+	}
+	return out;
+}
+
+/** Skill name -> first file defining it, so project skills can be checked before later tiers load. */
+function skillNamesIn(files: string[], into: Map<string, string>): Map<string, string> {
+	for (const filePath of files) {
+		try {
+			const { frontmatter } = parseFrontmatter(fs.readFileSync(filePath, "utf-8"));
+			if (!into.has(frontmatter.name)) into.set(frontmatter.name, filePath);
+		} catch {
+			// Unparseable files are reported when their own tier loads.
+		}
+	}
+	return into;
+}
+
 export class SkillManager {
 	private skills: Map<string, Skill> = new Map();
 	/** Normalized lookup key (no leading slash, lowercased) -> canonical skill name */
@@ -287,9 +362,25 @@ export class SkillManager {
 	private capabilityRefs: Map<string, number> = new Map();
 	/** Default audit hook applied when installSkill is called without an override. */
 	private defaultAuditOptions: CapabilityAuditOptions | undefined;
+	private projectDir: string | undefined;
+	private homeDir: string | undefined;
+	/** Where each loaded skill came from, for collision reports. */
+	private skillOrigin: Map<string, { filePath: string; tier: SkillTier }> = new Map();
+	private collisions: SkillCollision[] = [];
+	/** User and bundled names a project skill may not replace unpinned (#4125), per loadSkills(). */
+	private guardedByName: Map<string, { filePath: string; tier: "user" | "bundled" }> = new Map();
+	private trust: Map<string, string> | undefined;
 
-	constructor(skillsDirectory?: string) {
-		this.skillsDirectory = skillsDirectory || path.join(os.homedir(), ".8gent", "skills");
+	constructor(skillsDirectory?: string, options: SkillManagerOptions = {}) {
+		this.projectDir = options.projectDir;
+		this.homeDir = options.homeDir;
+		this.skillsDirectory =
+			skillsDirectory || path.join(this.homeDir ?? os.homedir(), ".8gent", "skills");
+	}
+
+	/** Name collisions found by the last loadSkills(): winner kept, loser listed. */
+	getCollisions(): SkillCollision[] {
+		return [...this.collisions];
 	}
 
 	/** Set a default audit sink so install/uninstall write capability events automatically. */
@@ -303,47 +394,67 @@ export class SkillManager {
 	async loadSkills(): Promise<Skill[]> {
 		this.skills.clear();
 		this.aliasToCanonical.clear();
+		this.skillOrigin.clear();
+		this.collisions = [];
+		this.trust = undefined;
 
-		// Ensure directory exists
+		const home = this.homeDir ?? os.homedir();
+		const project = this.projectDir ?? process.cwd();
+
+		// The user dir (and its example skill) exists before project skills are checked against it.
 		if (!fs.existsSync(this.skillsDirectory)) {
 			fs.mkdirSync(this.skillsDirectory, { recursive: true });
 			// Create example skill
 			this.createExampleSkill();
 		}
+		const skillFiles = fs.readdirSync(this.skillsDirectory).filter((f) => f.endsWith(".md"));
+		const userNames = skillNamesIn(
+			[
+				...skillFiles.map((f) => path.join(this.skillsDirectory, f)),
+				...collectNestedSkillMdPaths(path.join(home, ".agents", "skills")),
+				...collectNestedSkillMdPaths(path.join(home, ".claude", "skills")),
+			],
+			new Map(),
+		);
+		const bundledNames = skillNamesIn(discoverBundledSkillMdFiles(), new Map());
+		this.guardedByName = new Map();
+		for (const [name, filePath] of bundledNames)
+			this.guardedByName.set(name, { filePath, tier: "bundled" });
+		for (const [name, filePath] of userNames)
+			this.guardedByName.set(name, { filePath, tier: "user" });
 
-		const files = fs.readdirSync(this.skillsDirectory);
-		const skillFiles = files.filter((f) => f.endsWith(".md"));
-
-		for (const file of skillFiles) {
-			this.tryIngestSkillFile(path.join(this.skillsDirectory, file), false);
-		}
-
-		// Discover .claude/skills from BOTH the project (repo-local override) and the
-		// user's GLOBAL ~/.claude/skills. The global root was missing, so the daemon
-		// brain could not see James's local Claude skills - only repo-bundled ones.
-		// De-duped so a project that equals home is not ingested twice.
-		const claudeSkillsRoots = [
-			path.join(process.cwd(), ".claude", "skills"),
-			path.join(os.homedir(), ".claude", "skills"),
-		];
 		const seenSkillPaths = new Set<string>();
-		for (const root of claudeSkillsRoots) {
+		const ingestNested = (root: string, tier: SkillTier) => {
 			for (const filePath of collectNestedSkillMdPaths(root)) {
+				// De-duped so a project that equals home is not ingested twice.
 				if (seenSkillPaths.has(filePath)) continue;
 				seenSkillPaths.add(filePath);
-				this.tryIngestSkillFile(filePath, true);
+				this.tryIngestSkillFile(filePath, tier);
 			}
-		}
+		};
 
+		// 1. Project (repo-local). .agents/skills is the cross-tool convention, .claude/skills the Claude one.
+		ingestNested(path.join(project, ".agents", "skills"), "project");
+		ingestNested(path.join(project, ".claude", "skills"), "project");
+
+		// 2. User: ~/.8gent/skills flat .md, then ~/.agents/skills, then ~/.claude/skills.
+		for (const file of skillFiles) {
+			this.tryIngestSkillFile(path.join(this.skillsDirectory, file), "user");
+		}
+		ingestNested(path.join(home, ".agents", "skills"), "user");
+		ingestNested(path.join(home, ".claude", "skills"), "user");
+
+		// 3. Bundled
 		for (const filePath of discoverBundledSkillMdFiles()) {
-			this.tryIngestSkillFile(filePath, true);
+			this.tryIngestSkillFile(filePath, "bundled");
 		}
 
 		// 4. Learned skills from skill compounding (~/.8gent/learned-skills/)
-		if (fs.existsSync(LEARNED_DIR)) {
-			const learnedFiles = fs.readdirSync(LEARNED_DIR).filter((f) => f.endsWith(".md"));
+		const learnedDir = path.join(home, ".8gent", "learned-skills");
+		if (fs.existsSync(learnedDir)) {
+			const learnedFiles = fs.readdirSync(learnedDir).filter((f) => f.endsWith(".md"));
 			for (const file of learnedFiles) {
-				this.tryIngestSkillFile(path.join(LEARNED_DIR, file), true);
+				this.tryIngestSkillFile(path.join(learnedDir, file), "learned");
 			}
 		}
 
@@ -405,13 +516,74 @@ export class SkillManager {
 		};
 	}
 
-	private tryIngestSkillFile(filePath: string, skipIfExists: boolean): void {
+	/**
+	 * <data dir>/skills-trust.json, or undefined when no trustworthy location exists.
+	 * The data dir comes from the security env snapshot (taken before any .env is loaded, and
+	 * ignoring keys a .env declares), absolute only, else <home>/.8gent. A trust file whose real
+	 * path is inside the project is refused: the repo being loaded cannot vouch for itself.
+	 */
+	private skillTrustFile(): string | undefined {
+		const home = this.homeDir ?? os.homedir();
+		const dataDir = securityEnvSnapshot().values.EIGHT_DATA_DIR;
+		const root = dataDir && path.isAbsolute(dataDir) ? dataDir : path.join(home, ".8gent");
+		const file = path.join(root, SKILL_TRUST_FILE);
+		const project = realpathLoose(path.resolve(this.projectDir ?? process.cwd()));
+		const real = realpathLoose(file);
+		// Running from home itself is not a cloned repo; ~/.8gent is then the user's own.
+		if (project === realpathLoose(home)) return file;
+		if (real === project || real.startsWith(project + path.sep)) return undefined;
+		return file;
+	}
+
+	private tryIngestSkillFile(filePath: string, tier: SkillTier): void {
 		try {
-			const content = fs.readFileSync(filePath, "utf-8");
-			const { frontmatter, body } = parseFrontmatter(content);
-			if (skipIfExists && this.skills.has(frontmatter.name)) return;
+			const bytes = fs.readFileSync(filePath);
+			const { frontmatter, body } = parseFrontmatter(bytes.toString("utf-8"));
+			const guarded = this.guardedByName.get(frontmatter.name);
+			if (
+				tier === "project" &&
+				guarded &&
+				guarded.filePath !== filePath &&
+				!this.skillOrigin.has(frontmatter.name)
+			) {
+				const trustFile = this.skillTrustFile();
+				this.trust ??= readSkillTrust(trustFile);
+				const hash = createHash("sha256").update(bytes).digest("hex");
+				if (this.trust.get(frontmatter.name) !== hash) {
+					const c: SkillCollision = {
+						name: frontmatter.name,
+						kept: guarded.filePath,
+						ignored: filePath,
+					};
+					this.collisions.push(c);
+					// Paths are JSON-quoted: a repo picks its folder names, which may hold newlines or escapes.
+					warnCollisionOnce(
+						c,
+						`[skills] Project skill ${JSON.stringify(c.name)} would replace the ${guarded.tier} one; ` +
+							`kept ${guarded.tier}. To trust ${JSON.stringify(filePath)}, add ` +
+							`${JSON.stringify(c.name)}: "${hash}" to ${JSON.stringify(trustFile ?? SKILL_TRUST_FILE)}`,
+					);
+					return;
+				}
+			}
+			const winner = this.skillOrigin.get(frontmatter.name);
+			if (winner) {
+				// Shadowing a bundled/learned skill is the expected override; two
+				// project/user skills with one name is a real collision: report it.
+				if (tier !== "bundled" && tier !== "learned") {
+					const c: SkillCollision = {
+						name: frontmatter.name,
+						kept: winner.filePath,
+						ignored: filePath,
+					};
+					this.collisions.push(c);
+					warnCollisionOnce(c);
+				}
+				return;
+			}
 			const skill = this.buildSkillFromParsed(filePath, frontmatter, body);
 			this.skills.set(skill.name, skill);
+			this.skillOrigin.set(skill.name, { filePath, tier });
 			this.registerLookupKeys(skill.name, frontmatter);
 		} catch (err) {
 			console.warn(`[skills] Failed to load ${filePath}: ${err}`);

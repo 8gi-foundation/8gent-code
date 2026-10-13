@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { setDefaultLocalProfile } from "../tools/eight-browser";
 import {
 	cleanDegenerateReply,
 	COMPLETION_CHECK_MESSAGE,
@@ -14,6 +15,8 @@ import {
 	blockedCheckMessage,
 	blockedStopNote,
 	blockReason,
+	chainRefusalNote,
+	isChainRefusal,
 	emptyReplyNote,
 	emptyReplyStall,
 	overCapCallResult,
@@ -1764,6 +1767,73 @@ describe("blockReason", () => {
 	});
 });
 
+describe("isChainRefusal", () => {
+	test("matches the sanitizer's ;, && and || refusals and nothing else", () => {
+		expect(isChainRefusal(RUN_014230_CHAIN_RESULT)).toBe(true);
+		expect(isChainRefusal("[BLOCKED] Command chaining with && is not allowed. Use separate run_command calls instead. Command: a && b")).toBe(true);
+		expect(isChainRefusal("[BLOCKED] Command chaining with || is not allowed. Use separate run_command calls instead. Command: a || b")).toBe(true);
+		expect(isChainRefusal(RUN_014230_DEVNULL_RESULT)).toBe(false);
+		expect(isChainRefusal("[BLOCKED] Command substitution $(...) is not allowed. Command: echo $(id)")).toBe(false);
+		expect(isChainRefusal("Error: command chaining is not allowed here, said the README")).toBe(false);
+		expect(isChainRefusal("ok")).toBe(false);
+	});
+});
+
+describe("runTextToolAgent - repeated chaining refusals carry their count (#4072)", () => {
+	test("run 155723 shape: the first refusal is bare, the second and third name the count, a plain call is untouched", async () => {
+		const ws = gatedWorkspace();
+		const chained = (n: number) => `curl -s http://127.0.0.1:50738/ -o .tmp/p${n}.html; cat .tmp/p${n}.html`;
+		const model = scriptedModel([
+			tc("run_command", { command: chained(1) }),
+			tc("run_command", { command: chained(2) }),
+			tc("run_command", { command: chained(3) }),
+			tc("run_command", { command: "which ffmpeg" }),
+			// The first prose after tool work gets the completion check; answer it the same way.
+			"DONE: ffmpeg is at /opt/homebrew/bin/ffmpeg.",
+			"DONE: ffmpeg is at /opt/homebrew/bin/ffmpeg.",
+			"UNREACHED",
+		]);
+
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "Fetch the page." }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+
+		const results = model.seen.slice(1, 5).map(lastUserMessage);
+		expect(results[0]).toContain("[BLOCKED] Semicolon command chaining is not allowed");
+		expect(results[0]).not.toContain("chained commands refused this turn");
+		expect(results[1]).toContain(chainRefusalNote(2));
+		expect(results[2]).toContain(chainRefusalNote(3));
+		expect(results[3]).toContain("Tool run_command returned:\n/opt/homebrew/bin/ffmpeg");
+		expect(results[3]).not.toContain("chained commands refused this turn");
+		expect(ws.commands).toEqual(["which ffmpeg"]);
+		expect(result.content).toBe("ffmpeg is at /opt/homebrew/bin/ffmpeg.");
+	});
+
+	test("a non-chaining block does not count toward the chaining note", async () => {
+		const ws = gatedWorkspace();
+		const model = scriptedModel([
+			tc("run_command", { command: RUN_014230_DEVNULL_CMD }),
+			tc("run_command", { command: RUN_014230_CHAIN_CMD }),
+			tc("run_command", { command: "which ffmpeg" }),
+			"DONE: ffmpeg is at /opt/homebrew/bin/ffmpeg.",
+			"UNREACHED",
+		]);
+		await runTextToolAgent({
+			messages: [{ role: "user", content: "Check which video tools are installed." }],
+			tools: ws.tools,
+			call: model.call,
+			maxRounds: 50,
+		});
+		const results = model.seen.slice(1).map(lastUserMessage);
+		expect(results[0]).toContain("[TOOLG8 BLOCKED]");
+		expect(results[1]).toContain(CHAIN_REASON);
+		expect(results.join("\n")).not.toContain("chained commands refused this turn");
+	});
+});
+
 describe("runTextToolAgent - check after an all-blocked round", () => {
 	test("run 014230 replay: two blocked calls, prose, a blocked check naming both reasons, then a working call and DONE", async () => {
 		const ws = gatedWorkspace();
@@ -2596,6 +2666,8 @@ describe("image attachments on tool results (#3641)", () => {
 });
 
 describe("unknownToolResult for a withheld browser tool (#3785)", () => {
+	// An in-process local Agent turn earlier in the run leaves the default local profile set; this case is the withheld one.
+	beforeEach(() => setDefaultLocalProfile(null));
 	test("a browser_* call that is not offered is told why and how to get it", () => {
 		const r = unknownToolResult("browser_open", ["read_file"]);
 		expect(r).toMatch(/^Error/);

@@ -14,7 +14,10 @@
  * error, so read_image behaves as before.
  */
 
-import sharp from "sharp";
+// Loaded on first use, not at import: sharp's native addon is not embedded by
+// `bun build --compile`, and a top-level import crashed every compiled command
+// (run, rpc, mcp-server) on Windows before any model call (#3892). A missing
+// sharp falls into the catch below and measureLayout returns null, as designed.
 
 /** Grey levels a pixel must differ from the background by to count as content. */
 const INK_THRESHOLD = 40;
@@ -36,8 +39,22 @@ export type LayoutMeasure = {
 	bands: Band[];
 };
 
-export async function measureLayout(file: string): Promise<LayoutMeasure | null> {
+let warnedSharpUnavailable = false;
+
+function isModuleLoadError(err: unknown): boolean {
+	const e = err as { code?: unknown; message?: unknown } | null;
+	const code = typeof e?.code === "string" ? e.code : "";
+	const msg = typeof e?.message === "string" ? e.message : "";
+	return (
+		code === "ERR_MODULE_NOT_FOUND" ||
+		code === "MODULE_NOT_FOUND" ||
+		/Cannot find (?:module|package)|Could not load the "?sharp"? module|sharp.*(?:runtime|native)/i.test(msg)
+	);
+}
+
+export async function measureLayout(file: string | Buffer): Promise<LayoutMeasure | null> {
 	try {
+		const sharp = (await import("sharp")).default;
 		const { data, info } = await sharp(file, { limitInputPixels: MAX_PIXELS })
 			.flatten({ background: "#ffffff" })
 			.greyscale()
@@ -107,13 +124,17 @@ export async function measureLayout(file: string): Promise<LayoutMeasure | null>
 			centered,
 			bands: bands.slice(0, MAX_BANDS),
 		};
-	} catch {
+	} catch (err) {
+		if (!warnedSharpUnavailable && isModuleLoadError(err)) {
+			warnedSharpUnavailable = true;
+			console.warn("[8gent] sharp is unavailable, so image layout hints are off for this run.");
+		}
 		return null;
 	}
 }
 
 /** One block of text for a read_image result, or "" when there is nothing to say. */
-export async function layoutMeasureLine(file: string): Promise<string> {
+export async function layoutMeasureLine(file: string | Buffer): Promise<string> {
 	const m = await measureLayout(file);
 	if (!m) return "";
 	const rows = m.bands.map((b) => {
@@ -125,6 +146,6 @@ export async function layoutMeasureLine(file: string): Promise<string> {
 		`  content column x=${m.column.left}..${m.column.right} (width ${m.column.width}px, left margin ${m.column.left}px, right margin ${m.width - m.column.right}px${m.centered ? ", centered" : ""})`,
 		"  content bands, top to bottom (y is the top edge, h the height, x the left edge, w the width):",
 		...rows,
-		`When you rebuild this as a page, match these positions: a ${m.column.width}px-wide column${m.centered ? " centered in the page" : ""}, with block tops, heights and side-by-side widths as listed. Do not widen the column, add extra padding or insert extra margins.`,
+		`When you rebuild this as a page, match these positions: a ${m.column.width}px-wide column${m.centered ? " centered in the page" : ""}, with block tops, heights and side-by-side widths as listed. Do not widen the column, add extra padding or insert extra margins. Once index.html is written, call compare_layout with it and the mock-up file: it renders your page and lists every block that is off, in pixels. Fix those and run it again.`,
 	].join("\n");
 }

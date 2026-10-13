@@ -7,17 +7,20 @@
  * Tools are split into groups and composed into a single ToolSet.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { AsyncLocalStorage } from "node:async_hooks";
 import { tool } from "ai";
 import type { ToolSet } from "ai";
 import { z } from "zod";
+import { activeShellKind, killProcessTree, spawnShell } from "../core/shell";
+import { deckVideoAfterWrite } from "../deck/auto";
+import { safePath } from "../eight/tools";
 import {
 	ALLOWED_PATHS_DESCRIPTION,
-	PERMISSION_MODE_DESCRIPTION,
 	CHECK_AGENT_DESCRIPTION,
 	LIST_AGENTS_DESCRIPTION,
+	PERMISSION_MODE_DESCRIPTION,
 	SPAWN_AGENT_DESCRIPTION,
 	SPAWN_MODEL_DESCRIPTION,
 	SPAWN_RUNTIME_DESCRIPTION,
@@ -25,12 +28,14 @@ import {
 	listAgentsTool,
 	spawnAgentTool,
 } from "../orchestration/delegation-tools";
-import { killProcessTree, spawnShell } from "../core/shell";
-import { deckVideoAfterWrite } from "../deck/auto";
+import { cdPrefix, folderLabel } from "../permissions/cd-prefix";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
-import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
-import { emptyOldTextError, normaliseAllowedPaths } from "../permissions/edit-guards";
-import { applyEdit, gateWriteTool } from "../permissions/write-content-gate";
+import {
+	editScopeViolation,
+	emptyOldTextError,
+	normaliseAllowedPaths,
+} from "../permissions/edit-guards";
+import { type PathAccess, validatePath } from "../permissions/path-guard";
 import {
 	type PermissionModeHolder,
 	currentPermissionMode,
@@ -39,12 +44,43 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
-import { type CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
-import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
+import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
+import {
+	RunCommandSandboxRequired,
+	runCommandSandboxRefusal,
+	wrapRunCommand,
+	wrapRunCommandArgv,
+} from "../permissions/run-command-sandbox";
+import {
+	type CreatedFiles,
+	pathAbsent,
+	watchRedirects,
+	watchWrite,
+} from "../permissions/s1-created-files";
+import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import {
+	applyAt,
+	editRefusal,
+	gateWriteTool,
+	logEditRefusal,
+	resolveEdit,
+} from "../permissions/write-content-gate";
+import {
+	ANCHORED_NEWTEXT_DESC,
+	ANCHOR_PARAM_DESC,
+	HASHLINE_EDIT_DESC,
+	HASHLINE_READ_DESC,
+	OPTIONAL_OLDTEXT_DESC,
+	anchoredEditMessage,
+	applyAnchoredEdit,
+	hashLines,
+	hashlineEnabled,
+} from "../tools/edit-anchor";
+import { DeckSpecSchema } from "../tools/video-deck";
 import { withImagesWritten } from "./image-shape";
-import { writeShapeLine } from "./write-shape";
+import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
 import { writeScopeLine } from "./write-scope";
-import { safePath } from "../eight/tools";
+import { writeShapeLine } from "./write-shape";
 
 // Execution context passed to tools
 export interface ToolContext {
@@ -57,6 +93,8 @@ export interface ToolContext {
 	permission?: PermissionModeHolder;
 	/** Files this agent created, shared with its ToolExecutor (#3177); undefined: none recorded. */
 	createdFiles?: CreatedFiles;
+	/** Edit scope of a scoped agent; the media write tools refuse outside it. */
+	allowedPaths?: string[];
 }
 
 // The context is per agent, not per process (#3127). An agent hands its own
@@ -208,8 +246,12 @@ function gateWrite(toolName: string, args: Record<string, unknown>): string | nu
 	return gateWriteTool(ctx.agentId ?? "primary", toolName, args, ctx.workingDirectory);
 }
 
-function resolvePath(p: string): string {
-	return path.isAbsolute(p) ? p : path.join(getToolContext().workingDirectory, p);
+/** Absolute path for a tool, refused by the path guard. The access mode is explicit on every call. */
+function resolvePath(p: string, access: PathAccess): string {
+	const wd = getToolContext().workingDirectory;
+	const guard = validatePath(p, wd, {}, access);
+	if (!guard.ok) throw new Error(`Path blocked by path-guard: ${guard.reason} ("${p}")`);
+	return path.isAbsolute(p) ? p : path.join(wd, p);
 }
 
 /**
@@ -218,14 +260,23 @@ function resolvePath(p: string): string {
  * path, or the refusal to hand back. Used by native write_file, edit_file and
  * read_file; run_command and the notebook tools (#3760) are not covered.
  */
-function confinedPath(p: string, outcome: "written" | "read"): { path: string } | { refused: string } {
+function confinedPath(
+	p: string,
+	outcome: "written" | "read",
+): { path: string } | { refused: string } {
 	if (p.includes("\0")) {
-		return { refused: `Error: Path contains a null byte, which is not allowed in a file path. Nothing was ${outcome}.` };
+		return {
+			refused: `Error: Path contains a null byte, which is not allowed in a file path. Nothing was ${outcome}.`,
+		};
 	}
 	try {
-		return { path: safePath(p, getToolContext().workingDirectory) };
+		return {
+			path: safePath(p, getToolContext().workingDirectory, outcome === "read" ? "read" : "write"),
+		};
 	} catch (err) {
-		return { refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was ${outcome}.` };
+		return {
+			refused: `Error: ${err instanceof Error ? err.message : String(err)} Nothing was ${outcome}.`,
+		};
 	}
 }
 
@@ -239,13 +290,13 @@ function confinedWritePath(p: string): { path: string } | { refused: string } {
 
 const getOutline = tool({
 	description:
-		"Get the outline (functions, classes, etc.) of a source file. Use this FIRST before reading full files to understand structure.",
+		"[CODE] Pass filePath; returns every symbol (functions, classes, types, exports) in that file with line numbers and signatures. Use this FIRST before reading full files to understand structure.",
 	inputSchema: z.object({
 		filePath: z.string().describe("Path to the file to analyze"),
 	}),
 	execute: async ({ filePath }) => {
 		const { parseTypeScriptFile } = await import("../ast-index/typescript-parser");
-		const absolutePath = resolvePath(filePath);
+		const absolutePath = resolvePath(filePath, "read");
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 
 		try {
@@ -273,7 +324,8 @@ const getOutline = tool({
 });
 
 const getSymbol = tool({
-	description: "Get the full source code of a specific symbol (function, class, etc.)",
+	description:
+		"[CODE] Pass symbolId as 'path/to/file.ts::name'; returns the full source of that one symbol (function, class, variable, type).",
 	inputSchema: z.object({
 		symbolId: z.string().describe("Symbol ID in format 'path/to/file.ts::symbolName'"),
 	}),
@@ -285,7 +337,7 @@ const getSymbol = tool({
 
 		const filePath = symbolId.slice(0, separatorIndex);
 		const symbolName = symbolId.slice(separatorIndex + 2);
-		const absolutePath = resolvePath(filePath);
+		const absolutePath = resolvePath(filePath, "read");
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 
 		try {
@@ -302,7 +354,8 @@ const getSymbol = tool({
 });
 
 const searchSymbols = tool({
-	description: "Search for symbols (functions, classes, etc.) across the codebase",
+	description:
+		"[CODE] Pass query (a name or a few words); returns matching symbol names, locations and kinds across the whole indexed codebase.",
 	inputSchema: z.object({
 		query: z.string().describe("Search query"),
 		kinds: z
@@ -353,7 +406,7 @@ const searchSymbols = tool({
 
 const locate = tool({
 	description:
-		'Answer "where is X?" in one call: at most 5 "file:line kind text" rows. Give a symbol name, a path or file name, a quoted string or error message, or a short description.',
+		'[CODE] Pass query (a symbol, path, quoted text or error) to answer "where is X?" in one call: at most 5 "file:line kind text" rows. Give a symbol name, a path or file name, a quoted string or error message, or a short description.',
 	inputSchema: z.object({
 		query: z
 			.string()
@@ -387,7 +440,7 @@ const updatePlanTool = tool({
 			.describe("Every step, in order"),
 	}),
 	// Executes nothing: the TUI reads the plan from the tool-start event.
-	execute: async ({ plan }) => updatePlan({ plan }),
+	execute: async ({ plan }) => updatePlan({ plan }, getToolContext().workingDirectory),
 });
 
 // ============================================
@@ -395,7 +448,9 @@ const updatePlanTool = tool({
 // ============================================
 
 const readFile = tool({
-	description: "Read the contents of a file",
+	description: hashlineEnabled()
+		? HASHLINE_READ_DESC
+		: "[FILE] Returns the text of a file at the given path, one line per row, each row starting with its line number and a tab (like `cat -n`).",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the file to read"),
 	}),
@@ -406,6 +461,8 @@ const readFile = tool({
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
+		// Anchors per row with EIGHT_EDIT_FORMAT=hashline (#3472); flag off is unchanged.
+		if (hashlineEnabled()) return hashlineRead(content);
 		const lines = content.split("\n");
 		if (lines.length > 200) {
 			return `// File has ${lines.length} lines. Showing first 200:\n\n${lines.slice(0, 200).join("\n")}\n\n// ... truncated. Use get_outline + get_symbol for specific sections.`;
@@ -414,8 +471,18 @@ const readFile = tool({
 	},
 });
 
+/** read_file rows as `N#hash<tab>text`, the first 200 lines (#3472). */
+function hashlineRead(content: string): string {
+	if (content === "") return "";
+	const lines = content.split("\n");
+	if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+	if (lines.length <= 200) return hashLines(lines, 1);
+	return `// File has ${lines.length} lines. Showing first 200:\n\n${hashLines(lines.slice(0, 200), 1)}\n\n// ... truncated. Use get_outline + get_symbol for specific sections.`;
+}
+
 const writeFile = tool({
-	description: "Write content to a file (creates or overwrites)",
+	description:
+		"[FILE] Writes content to the file at path (relative), creating it or overwriting the whole file; for small changes use edit_file.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the file"),
 		content: z.string().describe("Content to write"),
@@ -433,7 +500,11 @@ const writeFile = tool({
 		fs.writeFileSync(absolutePath, content);
 		recordWrite();
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
-		const deckLine = await deckVideoAfterWrite(absolutePath, content, getToolContext().workingDirectory);
+		const deckLine = await deckVideoAfterWrite(
+			absolutePath,
+			content,
+			getToolContext().workingDirectory,
+		);
 		// Report what is on disk so a requested count can be checked (#3580).
 		const shape = writeShapeLine(absolutePath, content);
 		// A new top-folder file while the work lives in one subfolder (#3580).
@@ -444,30 +515,90 @@ const writeFile = tool({
 });
 
 const editFile = tool({
-	description: "Edit a file by replacing text",
+	description:
+		"[FILE] Replaces oldText (exact existing line or block) in file path with newText in place; to update a line, oldText is that whole line.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the file"),
-		oldText: z.string().describe("Text to find and replace"),
-		newText: z.string().describe("Replacement text"),
+		oldText: z
+			.string()
+			.describe(
+				"The exact existing text being changed, a whole line or block; after the edit the file contains newText and not oldText",
+			),
+		newText: z.string().describe("Replacement for oldText, in place"),
+		startLine: z
+			.number()
+			.int()
+			.optional()
+			.describe(
+				"1-based line; when oldText appears more than once, edit the copy at or after this line",
+			),
 	}),
-	execute: async ({ path: filePath, oldText, newText }) => {
+	execute: async ({ path: filePath, oldText, newText, startLine }) => {
 		// No anchor, no edit (#3101): an empty oldText used to prepend newText.
 		const noAnchor = emptyOldTextError(oldText, filePath);
 		if (noAnchor) return noAnchor;
-		const blocked = gateWrite("edit_file", { path: filePath, oldText, newText });
+		const blocked = gateWrite("edit_file", { path: filePath, oldText, newText, startLine });
 		if (blocked) return blocked;
 		const target = confinedWritePath(filePath);
 		if ("refused" in target) return target.refused;
 		const absolutePath = target.path;
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
 		const content = fs.readFileSync(absolutePath, "utf-8");
-		const edited = applyEdit(content, oldText, newText);
+		const resolved = resolveEdit(content, oldText, newText, startLine, filePath);
+		const refusal = editRefusal(resolved, filePath);
+		if (refusal) {
+			logEditRefusal(resolved, filePath, oldText.length);
+			return refusal;
+		}
+		const edited =
+			resolved.kind === "ok"
+				? applyAt(content, resolved.idx, resolved.oldLength, resolved.newText)
+				: null;
 		if (edited === null)
 			return `Error: Could not find the text to replace in ${filePath}. Make sure oldText matches exactly.`;
 		const recordEdit = watchWrite(absolutePath, getToolContext().createdFiles);
 		fs.writeFileSync(absolutePath, edited);
 		recordEdit();
+		if (resolved.kind === "ok" && resolved.matchedLine !== undefined) {
+			return `File edited (matched ignoring whitespace at line ${resolved.matchedLine}): ${absolutePath}`;
+		}
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
+	},
+});
+
+/** edit_file with EIGHT_EDIT_FORMAT=hashline (#3472): anchor, or oldText as before. */
+const editFileAnchored = tool({
+	description: HASHLINE_EDIT_DESC,
+	inputSchema: z.object({
+		path: z.string().describe("Path to the file"),
+		anchor: z.string().optional().describe(ANCHOR_PARAM_DESC),
+		newText: z.string().describe(ANCHORED_NEWTEXT_DESC),
+		oldText: z.string().optional().describe(OPTIONAL_OLDTEXT_DESC),
+		startLine: z.number().int().optional(),
+	}),
+	execute: async (args, options) => {
+		if (args.anchor === undefined || args.anchor === "") {
+			const byText = editFile.execute as (input: unknown, opts: unknown) => Promise<string>;
+			return byText({ ...args, oldText: args.oldText ?? "" }, options);
+		}
+		const { path: filePath, anchor, newText } = args;
+		const blocked = gateWrite("edit_file", { path: filePath, anchor, newText });
+		if (blocked) return blocked;
+		const target = confinedWritePath(filePath);
+		if ("refused" in target) return target.refused;
+		const absolutePath = target.path;
+		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
+		const edit = applyAnchoredEdit(
+			fs.readFileSync(absolutePath, "utf-8"),
+			anchor,
+			newText,
+			filePath,
+		);
+		if (!edit.ok) return edit.error;
+		const recordEdit = watchWrite(absolutePath, getToolContext().createdFiles);
+		fs.writeFileSync(absolutePath, edit.content);
+		recordEdit();
+		return anchoredEditMessage(absolutePath, edit);
 	},
 });
 
@@ -479,7 +610,7 @@ const listFiles = tool({
 	}),
 	execute: async ({ path: dirPath, pattern }) => {
 		const { glob } = await import("glob");
-		const absolutePath = resolvePath(dirPath || ".");
+		const absolutePath = resolvePath(dirPath || ".", "read");
 		const files = await glob(pattern || "**/*", {
 			cwd: absolutePath,
 			ignore: ["**/node_modules/**", "**/dist/**", "**/.git/**"],
@@ -506,7 +637,7 @@ const listFiles = tool({
 const gitStatus = tool({
 	description: "Get git status",
 	inputSchema: z.object({}),
-	execute: async () => runShellCommand("git status"),
+	execute: async () => runArgv("git", ["status"]),
 });
 
 const gitDiff = tool({
@@ -514,7 +645,7 @@ const gitDiff = tool({
 	inputSchema: z.object({
 		staged: z.boolean().optional().describe("Show staged changes only"),
 	}),
-	execute: async ({ staged }) => runShellCommand(staged ? "git diff --staged" : "git diff"),
+	execute: async ({ staged }) => runArgv("git", staged ? ["diff", "--staged"] : ["diff"]),
 });
 
 const gitLog = tool({
@@ -522,7 +653,8 @@ const gitLog = tool({
 	inputSchema: z.object({
 		count: z.number().optional().describe("Number of commits to show (default: 10)"),
 	}),
-	execute: async ({ count }) => runShellCommand(`git log --oneline -${count || 10}`),
+	execute: async ({ count }) =>
+		runArgv("git", ["log", "--oneline", `-${Math.floor(Math.abs(Number(count) || 10)) || 10}`]),
 });
 
 const gitAdd = tool({
@@ -530,15 +662,22 @@ const gitAdd = tool({
 	inputSchema: z.object({
 		files: z.string().optional().describe("Files to add (default: all)"),
 	}),
-	execute: async ({ files }) => runShellCommand(`git add ${files || "."}`),
+	// Whitespace-separated pathspecs after "--": none of them can be an option.
+	execute: async ({ files }) => {
+		const paths = String(files || "")
+			.split(/\s+/)
+			.filter(Boolean);
+		return runArgv("git", ["add", "--", ...(paths.length ? paths : ["."]).map(val)]);
+	},
 });
 
 const gitCommit = tool({
-	description: "Create a git commit",
+	description:
+		"[GIT] Commits the staged changes with message and returns the commit hash; run git_add first.",
 	inputSchema: z.object({
 		message: z.string().describe("Commit message"),
 	}),
-	execute: async ({ message }) => runShellCommand(`git commit -m "${message}"`),
+	execute: async ({ message }) => runArgv("git", ["commit", "-m", val(message)]),
 });
 
 const gitPush = tool({
@@ -547,13 +686,13 @@ const gitPush = tool({
 		setUpstream: z.boolean().optional().describe("Set upstream tracking"),
 	}),
 	execute: async ({ setUpstream }) =>
-		runShellCommand(`git push ${setUpstream ? "-u origin HEAD" : ""}`),
+		runArgv("git", setUpstream ? ["push", "-u", "origin", "HEAD"] : ["push"]),
 });
 
 const gitBranch = tool({
 	description: "List all git branches",
 	inputSchema: z.object({}),
-	execute: async () => runShellCommand("git branch -a"),
+	execute: async () => runArgv("git", ["branch", "-a"]),
 });
 
 const gitCheckout = tool({
@@ -561,7 +700,9 @@ const gitCheckout = tool({
 	inputSchema: z.object({
 		branch: z.string().describe("Branch name to checkout"),
 	}),
-	execute: async ({ branch }) => runShellCommand(`git checkout ${branch}`),
+	// No "--" here: after it git checkout reads paths, not a branch. Refuse instead.
+	execute: async ({ branch }) =>
+		optionRefusal("Branch", String(branch)) ?? runArgv("git", ["checkout", val(branch)]),
 });
 
 const gitCreateBranch = tool({
@@ -569,7 +710,8 @@ const gitCreateBranch = tool({
 	inputSchema: z.object({
 		branch: z.string().describe("New branch name"),
 	}),
-	execute: async ({ branch }) => runShellCommand(`git checkout -b ${branch}`),
+	execute: async ({ branch }) =>
+		optionRefusal("Branch", String(branch)) ?? runArgv("git", ["checkout", "-b", val(branch)]),
 });
 
 // ============================================
@@ -579,17 +721,17 @@ const gitCreateBranch = tool({
 const ghPrList = tool({
 	description: "List pull requests",
 	inputSchema: z.object({}),
-	execute: async () => runShellCommand("gh pr list"),
+	execute: async () => runArgv("gh", ["pr", "list"]),
 });
 
 const ghPrCreate = tool({
-	description: "Create a pull request",
+	description: "Creates a pull request from the current branch with title and an optional body.",
 	inputSchema: z.object({
 		title: z.string().describe("PR title"),
 		body: z.string().optional().describe("PR description"),
 	}),
 	execute: async ({ title, body }) =>
-		runShellCommand(`gh pr create --title "${title}" --body "${body || ""}"`),
+		runArgv("gh", ["pr", "create", "--title", val(title), "--body", val(body || "")]),
 });
 
 const ghPrView = tool({
@@ -597,17 +739,25 @@ const ghPrView = tool({
 	inputSchema: z.object({
 		number: z.number().optional().describe("PR number (default: current branch PR)"),
 	}),
-	execute: async ({ number }) => runShellCommand(`gh pr view ${number || ""}`),
+	execute: async ({ number }) => {
+		if (number === undefined || number === null) return runArgv("gh", ["pr", "view"]);
+		// A PR number is a positive integer; anything else is refused, never sent as NaN.
+		const n = Number(number);
+		if (!Number.isSafeInteger(n) || n <= 0)
+			return `[BLOCKED] PR number must be a positive integer. Got: ${String(number)}`;
+		return runArgv("gh", ["pr", "view", String(n)]);
+	},
 });
 
 const ghIssueList = tool({
 	description: "List issues",
 	inputSchema: z.object({}),
-	execute: async () => runShellCommand("gh issue list"),
+	execute: async () => runArgv("gh", ["issue", "list"]),
 });
 
 const ghIssueCreate = tool({
-	description: "Create a GitHub issue and assign it to the current user",
+	description:
+		"Creates a GitHub issue with title and an optional body, assigned to the current user.",
 	inputSchema: z.object({
 		title: z.string().describe("Issue title"),
 		body: z.string().optional().describe("Issue description in markdown"),
@@ -618,9 +768,16 @@ const ghIssueCreate = tool({
 	}),
 	execute: async ({ title, body, assignee }) => {
 		const who = assignee || "@me";
-		return runShellCommand(
-			`gh issue create --title "${title}" --body "${body || ""}" --assignee "${who}"`,
-		);
+		return runArgv("gh", [
+			"issue",
+			"create",
+			"--title",
+			val(title),
+			"--body",
+			val(body || ""),
+			"--assignee",
+			val(who),
+		]);
 	},
 });
 
@@ -634,14 +791,25 @@ const runCommand = tool({
 	inputSchema: z.object({
 		command: z.string().describe("Command to run"),
 	}),
-	execute: async ({ command }) => {
-		// Same guard as ToolExecutor.run_command: one sanitizer for both paths.
+	execute: async ({ command: line }) => {
+		// One leading `cd <folder> &&` inside the project: the folder is the working
+		// directory and only the rest runs, through every check below (#3199).
+		// The backstops judge the whole line first, so a cd into protected files keeps their words.
+		const lineBackstop = preSpawnRefusal(line, getToolContext().workingDirectory);
+		if (lineBackstop) return lineBackstop;
+		const cd = cdPrefix(line, getToolContext().workingDirectory, activeShellKind());
+		if (cd.kind === "refused") return cd.message;
+		const command = cd.kind === "cd" ? cd.rest : line;
+		const cwd = cd.kind === "cd" ? cd.dir : getToolContext().workingDirectory;
+		// Same guards, in the same order, as ToolExecutor.run_command (#3993).
+		const backstop = preSpawnRefusal(command, cwd);
+		if (backstop) return backstop;
 		const validation = sanitizeShellCommand(command);
 		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		const startedAt = Date.now();
-		const output = await runShellCommand(command);
+		const output = await runShellCommand(command, cwd);
 		// Report images the command drew, and any cut off at an edge (#3580).
-		return withImagesWritten(output, getToolContext().workingDirectory, startedAt);
+		return withImagesWritten(output, cwd, startedAt);
 	},
 });
 
@@ -650,7 +818,7 @@ const runCommand = tool({
 // ============================================
 
 const lspGotoDefinition = tool({
-	description: "Go to the definition of a symbol at a specific location",
+	description: "Goes to the definition of the symbol at filePath, line, character (both 0-based).",
 	inputSchema: z.object({
 		filePath: z.string().describe("Path to the file"),
 		line: z.number().describe("Line number (0-based)"),
@@ -663,7 +831,7 @@ const lspGotoDefinition = tool({
 });
 
 const lspFindReferences = tool({
-	description: "Find all references to a symbol",
+	description: "Finds all references to the symbol at filePath, line, character (both 0-based).",
 	inputSchema: z.object({
 		filePath: z.string().describe("Path to the file"),
 		line: z.number().describe("Line number (0-based)"),
@@ -676,7 +844,8 @@ const lspFindReferences = tool({
 });
 
 const lspHover = tool({
-	description: "Get hover information about a symbol",
+	description:
+		"Returns hover information for the symbol at filePath, line, character (both 0-based).",
 	inputSchema: z.object({
 		filePath: z.string().describe("Path to the file"),
 		line: z.number().describe("Line number (0-based)"),
@@ -689,7 +858,7 @@ const lspHover = tool({
 });
 
 const lspDocumentSymbols = tool({
-	description: "Get all symbols in a document via LSP",
+	description: "Returns all symbols in the file at filePath via LSP.",
 	inputSchema: z.object({
 		filePath: z.string().describe("Path to the file"),
 	}),
@@ -700,7 +869,7 @@ const lspDocumentSymbols = tool({
 });
 
 const lspDiagnostics = tool({
-	description: "Get errors and warnings for a file via LSP",
+	description: "Returns errors and warnings for the file at filePath via LSP.",
 	inputSchema: z.object({
 		filePath: z.string().describe("Path to the file"),
 	}),
@@ -715,13 +884,13 @@ const lspDiagnostics = tool({
 // ============================================
 
 const readImage = tool({
-	description: "Read image metadata and base64 data",
+	description: "[FILE] Reads the image file at path (png, jpg, gif, webp).",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the image file"),
 	}),
 	execute: async ({ path: imagePath }) => {
 		const { readImage } = await import("../tools/image");
-		const absolutePath = resolvePath(imagePath);
+		const absolutePath = resolvePath(imagePath, "read");
 		try {
 			const imageInfo = await readImage(absolutePath);
 			return JSON.stringify(
@@ -746,14 +915,15 @@ const readImage = tool({
 });
 
 const describeImage = tool({
-	description: "Describe an image using vision model",
+	description:
+		"[FILE] Describes the image file at path in words using a local vision model; pass prompt to ask something specific.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the image file"),
 		prompt: z.string().optional().describe("Custom prompt for description"),
 	}),
 	execute: async ({ path: imagePath, prompt }) => {
 		const { describeImage } = await import("../tools/image");
-		const absolutePath = resolvePath(imagePath);
+		const absolutePath = resolvePath(imagePath, "read");
 		try {
 			const description = await describeImage(
 				absolutePath,
@@ -786,17 +956,51 @@ const generateSpriteTool = tool({
 	description:
 		"Generate a sprite sheet or animation from a natural language prompt. Local-first: uses sharp for slicing and ffmpeg for animation when available. Falls back to OpenAI DALL-E for cloud generation. Assets are saved to ~/.8gent/assets/media/. Example: 'animate a walking robot character', '16-frame idle loop for a knight sprite'.",
 	inputSchema: z.object({
-		prompt: z.string().describe("Natural language description of the sprite or animation to generate"),
-		frameCount: z.number().optional().default(8).describe("Number of frames in the animation (default: 8)"),
-		loop: z.boolean().optional().default(true).describe("Whether the animation loops (default: true)"),
-		direction: z.enum(["forward", "reverse", "pingpong"]).optional().default("forward").describe("Animation direction"),
-		style: z.enum(["pixel-art", "hand-drawn", "3d-render", "anime", "painterly"]).optional().default("pixel-art").describe("Art style"),
-		format: z.enum(["gif", "webp", "png"]).optional().default("gif").describe("Output animation format"),
-		forceCloud: z.boolean().optional().default(false).describe("Force cloud generation even if local tools are available"),
+		prompt: z
+			.string()
+			.describe("Natural language description of the sprite or animation to generate"),
+		frameCount: z
+			.number()
+			.optional()
+			.default(8)
+			.describe("Number of frames in the animation (default: 8)"),
+		loop: z
+			.boolean()
+			.optional()
+			.default(true)
+			.describe("Whether the animation loops (default: true)"),
+		direction: z
+			.enum(["forward", "reverse", "pingpong"])
+			.optional()
+			.default("forward")
+			.describe("Animation direction"),
+		style: z
+			.enum(["pixel-art", "hand-drawn", "3d-render", "anime", "painterly"])
+			.optional()
+			.default("pixel-art")
+			.describe("Art style"),
+		format: z
+			.enum(["gif", "webp", "png"])
+			.optional()
+			.default("gif")
+			.describe("Output animation format"),
+		forceCloud: z
+			.boolean()
+			.optional()
+			.default(false)
+			.describe("Force cloud generation even if local tools are available"),
 	}),
 	execute: async ({ prompt, frameCount, loop, direction, style, format, forceCloud }) => {
 		const { generate } = await import("../gamedev/harness");
-		const result = await generate({ prompt, frameCount, loop, direction, style, format, forceCloud });
+		const result = await generate({
+			prompt,
+			frameCount,
+			loop,
+			direction,
+			style,
+			format,
+			forceCloud,
+		});
 		if (result.success) {
 			return JSON.stringify(
 				{
@@ -832,11 +1036,16 @@ const makePdfTool = tool({
 		html: z.string().optional().describe("Inline HTML source for the document"),
 		htmlPath: z.string().optional().describe("Path to an existing HTML file to render"),
 		mdPath: z.string().optional().describe("Path to an existing Markdown file to render"),
-		title: z.string().optional().describe("Document title (used for Markdown inputs and auto-naming)"),
+		title: z
+			.string()
+			.optional()
+			.describe("Document title (used for Markdown inputs and auto-naming)"),
 		outName: z
 			.string()
 			.optional()
-			.describe("Optional output filename; resolved inside ~/.8gent/creative/ (a .pdf extension is added if missing)"),
+			.describe(
+				"Optional output filename; resolved inside ~/.8gent/creative/ (a .pdf extension is added if missing)",
+			),
 	}),
 	execute: async ({ markdown, html, htmlPath, mdPath, title, outName }) => {
 		const { makePdf } = await import("../tools/make-pdf");
@@ -856,16 +1065,52 @@ const makePdfTool = tool({
 	},
 });
 
+const renderVideoDeckTool = tool({
+	description:
+		"Narrated mp4 from args {spec:{size:'1280x720', slides:[{title, bullets, narration}]}, out:'deck.mp4'}, local code only. Deterministic. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task. Returns { path, durationSec, slides, width, height, hasAudio }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?, image? (png/jpg inside the working directory), seconds? (1-60, default 4), narration? (spoken by the local voice), voice? }] }. No music, no network.",
+	inputSchema: z.object({
+		// The renderer's own schema (#4172): the native request carries slides[{title, text,
+		// bullets, narration, ...}], size and voice as real fields, not a bare object.
+		spec: DeckSpecSchema.describe("Deck spec: slides (1-40), optional size, title and voice"),
+		out: z
+			.string()
+			.optional()
+			.describe("Output .mp4 path inside the working directory (default deck.mp4)"),
+	}),
+	execute: async ({ spec, out }) => {
+		try {
+			const { resolveDeckOut } = await import("../eight/tools");
+			const wd = getToolContext().workingDirectory;
+			const target = resolveDeckOut(out, wd);
+			const ctx = getToolContext();
+			const scoped = editScopeViolation(
+				"render_video_deck",
+				{ out: out ?? "deck.mp4" },
+				wd,
+				ctx.allowedPaths,
+			);
+			if (scoped) return scoped;
+			const blocked = gateWrite("render_video_deck", { path: target });
+			if (blocked) return blocked;
+			const { renderVideoDeck } = await import("../tools/video-deck");
+			return JSON.stringify(await renderVideoDeck({ spec, out: target, cwd: wd }), null, 2);
+		} catch (err) {
+			return JSON.stringify(
+				{ error: `render_video_deck failed: ${err instanceof Error ? err.message : String(err)}` },
+				null,
+				2,
+			);
+		}
+	},
+});
+
 const speakTool = tool({
 	description:
 		"Speak text aloud with a local neural voice (Supertonic, KittenTTS fallback) and write a wav inside the working directory. Returns { path, durationSec, voice, engine }. Use for voice-overs on narrated media. Never uses macOS say or espeak; errors clearly if no neural engine is installed. Voices: Daniel (default), Rishi, Samantha, Moira, Karen, Tessa, Zara, Reed, Solomon, AIJames, Luis, Ralph, Albert, Alex, Victoria, Kathy, Allison, Ava. Example: speak({ text: 'Welcome to the briefing.', voice: 'Rishi', out: 'intro.wav' }).",
 	inputSchema: z.object({
 		text: z.string().describe("The words to speak (max 2000 characters)"),
 		voice: z.string().optional().describe("Voice name from the fixed list; defaults to Daniel"),
-		out: z
-			.string()
-			.optional()
-			.describe("Output .wav path inside the working directory"),
+		out: z.string().optional().describe("Output .wav path inside the working directory"),
 	}),
 	execute: async ({ text, voice, out }) => {
 		try {
@@ -893,12 +1138,13 @@ const speakTool = tool({
 // ============================================
 
 const readPdf = tool({
-	description: "Read entire PDF content",
+	description:
+		"[FILE] Reads the PDF file at path and returns its extracted text, page count and metadata (title, author, dates).",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the PDF file"),
 	}),
 	execute: async ({ path: pdfPath }) => {
-		const absolutePath = resolvePath(pdfPath);
+		const absolutePath = resolvePath(pdfPath, "read");
 		try {
 			// PDF support is stubbed for now
 			throw new Error("PDF support coming soon");
@@ -909,13 +1155,13 @@ const readPdf = tool({
 });
 
 const readPdfPage = tool({
-	description: "Read a specific page of a PDF",
+	description: "[FILE] Reads page pageNum (1-based) of the PDF file at path and returns its text.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the PDF file"),
 		pageNum: z.number().describe("Page number to read"),
 	}),
 	execute: async ({ path: pdfPath, pageNum }) => {
-		const absolutePath = resolvePath(pdfPath);
+		const absolutePath = resolvePath(pdfPath, "read");
 		try {
 			throw new Error("PDF support coming soon");
 		} catch (err) {
@@ -929,14 +1175,14 @@ const readPdfPage = tool({
 // ============================================
 
 const readNotebook = tool({
-	description: "Read a Jupyter notebook file",
+	description: "Reads the Jupyter notebook file at path.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the notebook file"),
 	}),
 	execute: async ({ path: notebookPath }) => {
 		const { readNotebook } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
 		try {
+			const absolutePath = resolvePath(notebookPath, "read");
 			const notebook = await readNotebook(absolutePath);
 			const formattedCells = notebook.cells.map((cell: any) => ({
 				index: cell.index,
@@ -969,7 +1215,7 @@ const readNotebook = tool({
 });
 
 const notebookEditCell = tool({
-	description: "Edit a notebook cell by index",
+	description: "Replaces the source of cell cellIndex in the notebook at path with newSource.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the notebook file"),
 		cellIndex: z.number().describe("Cell index to edit"),
@@ -979,8 +1225,8 @@ const notebookEditCell = tool({
 		const blocked = gateWrite("notebook_edit_cell", { path: notebookPath, newSource });
 		if (blocked) return blocked;
 		const { editCell } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
 		try {
+			const absolutePath = resolvePath(notebookPath, "write");
 			const result = await editCell(absolutePath, cellIndex, newSource);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -990,7 +1236,8 @@ const notebookEditCell = tool({
 });
 
 const notebookInsertCell = tool({
-	description: "Insert a new cell into a notebook",
+	description:
+		"Inserts a new cell of cellType with source after cell afterIndex in the notebook at path.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the notebook file"),
 		afterIndex: z.number().describe("Insert after this cell index"),
@@ -1001,8 +1248,8 @@ const notebookInsertCell = tool({
 		const blocked = gateWrite("notebook_insert_cell", { path: notebookPath, source });
 		if (blocked) return blocked;
 		const { insertCell } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
 		try {
+			const absolutePath = resolvePath(notebookPath, "write");
 			const result = await insertCell(absolutePath, afterIndex, cellType, source);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -1012,15 +1259,15 @@ const notebookInsertCell = tool({
 });
 
 const notebookDeleteCell = tool({
-	description: "Delete a notebook cell",
+	description: "Deletes cell cellIndex from the notebook at path.",
 	inputSchema: z.object({
 		path: z.string().describe("Path to the notebook file"),
 		cellIndex: z.number().describe("Cell index to delete"),
 	}),
 	execute: async ({ path: notebookPath, cellIndex }) => {
 		const { deleteCell } = await import("../tools/notebook");
-		const absolutePath = resolvePath(notebookPath);
 		try {
+			const absolutePath = resolvePath(notebookPath, "write");
 			const result = await deleteCell(absolutePath, cellIndex);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -1034,7 +1281,8 @@ const notebookDeleteCell = tool({
 // ============================================
 
 const webSearchTool = tool({
-	description: "Search the web",
+	description:
+		"[WEB] Pass query; returns a list of search results (titles, URLs, snippets) from DuckDuckGo.",
 	inputSchema: z.object({
 		query: z.string().describe("Search query"),
 		maxResults: z.number().optional().describe("Max results (default: 5)"),
@@ -1051,7 +1299,7 @@ const webSearchTool = tool({
 });
 
 const webFetchTool = tool({
-	description: "Fetch content from a URL",
+	description: "[WEB] Pass url; returns the readable text of that web page (HTML stripped).",
 	inputSchema: z.object({
 		url: z.string().describe("URL to fetch"),
 	}),
@@ -1072,7 +1320,7 @@ const webFetchTool = tool({
 
 const travelResolveLocation = tool({
 	description:
-		"Resolve a city or airport name to IATA airport/city codes through LetsFG. Search-only: does not unlock, book, collect payment, or store passenger profiles.",
+		"Resolves query (a city, airport name or IATA code) to IATA airport/city codes through LetsFG. Search-only: does not unlock, book, collect payment, or store passenger profiles.",
 	inputSchema: z.object({
 		query: z
 			.string()
@@ -1093,7 +1341,7 @@ const travelResolveLocation = tool({
 
 const travelSearchFlights = tool({
 	description:
-		"Search live flight offers through LetsFG using IATA codes. Phase 1 is search-only: no unlock, booking, payment, or passenger profile storage.",
+		"Searches live flight offers through LetsFG from origin to destination (IATA codes) departing on dateFrom (YYYY-MM-DD). Phase 1 is search-only: no unlock, booking, payment, or passenger profile storage.",
 	inputSchema: z.object({
 		origin: z
 			.string()
@@ -1185,7 +1433,8 @@ const mcpListTools = tool({
 });
 
 const mcpCallTool = tool({
-	description: "Call a specific MCP tool",
+	description:
+		"[MCP] Calls one MCP tool: pass server, tool (its exact name) and args (per its input schema).",
 	inputSchema: z.object({
 		server: z.string().describe("MCP server name"),
 		tool: z.string().describe("Tool name"),
@@ -1217,7 +1466,7 @@ const mcpCallTool = tool({
 // ============================================
 
 const backgroundStart = tool({
-	description: "Start a background task and return task ID",
+	description: "Starts command as a background task and returns its task ID.",
 	inputSchema: z.object({
 		command: z.string().describe("Command to run in background"),
 		timeout: z.number().optional().describe("Timeout in milliseconds"),
@@ -1238,7 +1487,7 @@ const backgroundStart = tool({
 });
 
 const backgroundStatus = tool({
-	description: "Check status of a running background task",
+	description: "Returns the status of the running background task taskId.",
 	inputSchema: z.object({
 		taskId: z.string().describe("Task ID to check"),
 	}),
@@ -1256,7 +1505,7 @@ const backgroundStatus = tool({
 });
 
 const backgroundOutput = tool({
-	description: "Get output from a background task",
+	description: "Returns output from the background task taskId.",
 	inputSchema: z.object({
 		taskId: z.string().describe("Task ID"),
 		tail: z.number().optional().describe("Number of lines from end"),
@@ -1281,20 +1530,31 @@ const backgroundOutput = tool({
 // Shell Command Runner (shared)
 // ============================================
 
-async function runShellCommand(command: string): Promise<string> {
-	// Judge git state against the directory this command runs in (#3748).
-	const cwd = getToolContext().workingDirectory;
-	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command));
+/**
+ * The gates every command passes before it runs: the text path's pre-spawn
+ * backstops (#3993), the permission policy, System One and the approval card. Returns the refusal to show, or null to run.
+ * Shared by the shell runner and the argv runner, so a git or gh tool is
+ * judged exactly as the same command typed into run_command would be.
+ */
+async function commandRefusal(
+	command: string,
+	cwd: string = getToolContext().workingDirectory,
+	out?: { runInstead?: string },
+): Promise<string | null> {
+	// The text path's pre-spawn backstops (#3993): protected files such as
+	// ~/.8gent/settings.json and the browser control tokens, for shell and argv alike.
+	// Judged in the directory the command runs in, so relative paths and `cd` resolve as
+	// the command will (#4009 startup-code check), not against process.cwd().
+	const backstop = preSpawnRefusal(command, cwd);
+	if (backstop) return backstop;
 	const { getPermissionManager, isCommandDangerous } = await import("../permissions");
-	const { getHookManager } = await import("../hooks");
-
-	// Captured once: the timer and process callbacks below run after this call.
 	const ctx = getToolContext();
 	const mode = currentPermissionMode();
 	const permissionManager = getPermissionManager();
-	const hookManager = getHookManager();
 
-	const permissionCheck = permissionManager.checkPermission(command);
+	// The folder a cd prefix chose: the cards name it, and answers are kept per folder.
+	const where = folderLabel(cwd, ctx.workingDirectory);
+	const permissionCheck = permissionManager.checkPermission(command, undefined, where);
 	if (permissionCheck === "denied") {
 		return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 	}
@@ -1305,13 +1565,17 @@ async function runShellCommand(command: string): Promise<string> {
 	const { systemOneGate } = await import("../permissions/system-one-gate");
 	// Guarded mode (#3170) turns System One on for this call whatever the env
 	// says; the env flag stays on in every mode.
+	// canRunInstead only when the caller passed `out` and will run out.runInstead (#4102).
 	const systemOne = await systemOneGate(
 		command,
 		systemOneEnvFor(mode),
-		ctx.workingDirectory,
+		cwd,
 		ctx.createdFiles,
+		where,
+		{ canRunInstead: out !== undefined, project: ctx.workingDirectory },
 	);
 	if (!systemOne.run) return systemOne.message as string;
+	if (out && systemOne.runInstead !== undefined) out.runInstead = systemOne.runInstead;
 
 	if (
 		permissionCheck === "ask" &&
@@ -1324,14 +1588,34 @@ async function runShellCommand(command: string): Promise<string> {
 				? "This command may modify system files or cause data loss."
 				: "The agent wants to run a shell command.",
 			command,
+			{ where },
 		);
 		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}
+	return null;
+}
+
+/** `cwd` differs from the tool context's only after a leading `cd <folder> &&` (#3199). */
+async function runShellCommand(
+	command: string,
+	cwd: string = getToolContext().workingDirectory,
+): Promise<string> {
+	// Judge git state against the directory this command runs in (#3748).
+	if (commandDir() !== cwd) return withCommandDir(cwd, () => runShellCommand(command, cwd));
+	const { getHookManager } = await import("../hooks");
+
+	// Captured once: the timer and process callbacks below run after this call.
+	const ctx = getToolContext();
+	const hookManager = getHookManager();
+
+	const checked: { runInstead?: string } = {};
+	const refusal = await commandRefusal(command, cwd, checked);
+	if (refusal !== null) return refusal;
 
 	const startTime = Date.now();
 	await hookManager.executeHooks("beforeCommand", {
 		command,
-		workingDirectory: ctx.workingDirectory,
+		workingDirectory: cwd,
 	});
 
 	let finalCommand = command;
@@ -1341,16 +1625,22 @@ async function runShellCommand(command: string): Promise<string> {
 	if (command.includes("npm init") && !command.includes("-y")) {
 		finalCommand = `${command} -y`;
 	}
+	// System One checked these bytes, not the file the command names: run them (8SO, #4102).
+	if (checked.runInstead !== undefined) finalCommand = checked.runInstead;
+
+	const sandboxRefusal = runCommandSandboxRefusal();
+	if (sandboxRefusal) return sandboxRefusal;
 
 	return new Promise((settle) => {
 		// Redirect targets this command creates are this agent's own files (#3177).
-		const recordRedirects = watchRedirects(finalCommand, ctx.workingDirectory, ctx.createdFiles);
+		const recordRedirects = watchRedirects(finalCommand, cwd, ctx.createdFiles);
 		const resolve = (value: string) => {
 			recordRedirects();
 			settle(value);
 		};
-		const proc = spawnShell(finalCommand, {
-			cwd: ctx.workingDirectory,
+		// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
+		const proc = spawnShell(wrapRunCommand(finalCommand), {
+			cwd,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,
 		});
@@ -1388,7 +1678,7 @@ async function runShellCommand(command: string): Promise<string> {
 					stdout,
 					stderr,
 					duration: Date.now() - startTime,
-					workingDirectory: ctx.workingDirectory,
+					workingDirectory: cwd,
 				});
 
 				const partialOutput = (stdout + stderr).trim().slice(-500);
@@ -1414,7 +1704,7 @@ async function runShellCommand(command: string): Promise<string> {
 				stdout,
 				stderr: `${stderr}\nTIMEOUT`,
 				duration: Date.now() - startTime,
-				workingDirectory: ctx.workingDirectory,
+				workingDirectory: cwd,
 			});
 			resolve(
 				`TIMEOUT after 2 min. Partial output:\n${stdout}\n${stderr}\nTIP: Use background_start for long-running processes.`,
@@ -1434,7 +1724,7 @@ async function runShellCommand(command: string): Promise<string> {
 				stdout,
 				stderr,
 				duration: Date.now() - startTime,
-				workingDirectory: ctx.workingDirectory,
+				workingDirectory: cwd,
 			});
 			resolve(
 				code === 0
@@ -1451,7 +1741,145 @@ async function runShellCommand(command: string): Promise<string> {
 			hookManager.executeHooks("onError", {
 				command: finalCommand,
 				error: err.message,
-				workingDirectory: ctx.workingDirectory,
+				workingDirectory: cwd,
+			});
+			resolve(`Error: ${err.message}`);
+		});
+	});
+}
+
+// ============================================
+// Argv Command Runner (git and gh tools, #3998)
+// ============================================
+
+/** Quote one argv word for display, so the gates read what actually runs. */
+/** A word the model supplied, as opposed to a flag the tool wrote itself. */
+export class ModelValue {
+	constructor(readonly text: string) {}
+}
+const val = (x: unknown) => new ModelValue(String(x));
+export type ArgvWord = string | ModelValue;
+
+const argvText = (w: ArgvWord) => (w instanceof ModelValue ? w.text : w);
+
+/**
+ * Quote one argv word for display, so the gates read what actually runs. A
+ * model value that starts with "-" is always quoted: on the approval card it
+ * must read as data, never pass for one of the tool's own flags.
+ */
+function quoteWord(word: ArgvWord): string {
+	const text = argvText(word);
+	const looksLikeFlag = word instanceof ModelValue && text.startsWith("-");
+	if (!looksLikeFlag && text !== "" && /^[A-Za-z0-9_./:@%+=,-]+$/.test(text)) return text;
+	return `'${text.replace(/'/g, `'\\''`)}'`;
+}
+
+/** The command line an argv call is judged and shown as. Display only, never run. */
+export function argvDisplay(bin: string, args: readonly ArgvWord[]): string {
+	return [bin, ...args].map(quoteWord).join(" ");
+}
+
+/**
+ * A value that goes where git or gh reads options would be read as one
+ * (`--upload-pack=x`, `-c core.sshCommand=x`). Refuse it rather than run it.
+ */
+export function optionRefusal(label: string, value: string): string | null {
+	return value.startsWith("-")
+		? `[BLOCKED] ${label} may not start with "-": it would be read as an option. Got: ${value}`
+		: null;
+}
+
+const ARGV_NON_INTERACTIVE_ENV = {
+	GIT_TERMINAL_PROMPT: "0",
+	GIT_ASKPASS: "/usr/bin/true",
+	SSH_ASKPASS: "/usr/bin/true",
+	SSH_ASKPASS_REQUIRE: "force",
+	GH_PROMPT_DISABLED: "1",
+};
+
+const ARGV_TIMEOUT_MS = 120_000;
+
+/**
+ * Run a git or gh tool as argv: the binary and an args array, no shell. Model
+ * text is one argument each and is never parsed for `;`, `$( )`, backticks,
+ * pipes or newlines (#3998). The same permission, System One and approval
+ * gates as run_command judge the quoted display line first.
+ */
+async function runArgv(bin: string, words: ArgvWord[]): Promise<string> {
+	const cwd = getToolContext().workingDirectory;
+	if (commandDir() !== cwd) return withCommandDir(cwd, () => runArgv(bin, words));
+	const display = argvDisplay(bin, words);
+	const args = words.map(argvText);
+	const refusal = await commandRefusal(display);
+	if (refusal !== null) return refusal;
+	// The kernel boundary applies to argv too (#4009, #3612): git runs repository
+	// config (fsmonitor, hooks, aliases, sshCommand), so it is no safer than a shell.
+	const sandboxRefusal = runCommandSandboxRefusal();
+	if (sandboxRefusal) return sandboxRefusal;
+	let spawnArgv: string[];
+	try {
+		spawnArgv = wrapRunCommandArgv(bin, args);
+	} catch (err) {
+		if (err instanceof RunCommandSandboxRequired) return err.message;
+		throw err;
+	}
+	const [file, ...fileArgs] = spawnArgv as [string, ...string[]];
+
+	const { getHookManager } = await import("../hooks");
+	const hookManager = getHookManager();
+	const startTime = Date.now();
+	await hookManager.executeHooks("beforeCommand", { command: display, workingDirectory: cwd });
+
+	const { spawn } = await import("node:child_process");
+	return new Promise((resolve) => {
+		const proc = spawn(file, fileArgs, {
+			cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+			detached: process.platform !== "win32",
+			shell: false,
+			env: { ...process.env, ...ARGV_NON_INTERACTIVE_ENV },
+		});
+		let stdout = "";
+		let stderr = "";
+		let settled = false;
+		proc.stdout?.on("data", (d: Buffer) => {
+			stdout += d.toString();
+		});
+		proc.stderr?.on("data", (d: Buffer) => {
+			stderr += d.toString();
+		});
+		const timer = setTimeout(() => {
+			if (settled) return;
+			settled = true;
+			killProcessTree(proc.pid, "SIGKILL");
+			resolve(`TIMEOUT after ${ARGV_TIMEOUT_MS / 1000}s. Partial output:\n${stdout}\n${stderr}`);
+		}, ARGV_TIMEOUT_MS);
+		proc.on("close", (code) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			hookManager.executeHooks("afterCommand", {
+				command: display,
+				exitCode: code ?? 0,
+				stdout,
+				stderr,
+				duration: Date.now() - startTime,
+				workingDirectory: cwd,
+			});
+			resolve(
+				code === 0
+					? stdout || stderr || "Command completed successfully."
+					: `Exit code ${code}:\n${stdout}\n${stderr}`,
+			);
+		});
+		proc.on("error", (err: Error) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			hookManager.executeHooks("onError", {
+				command: display,
+				error: err.message,
+				workingDirectory: cwd,
 			});
 			resolve(`Error: ${err.message}`);
 		});
@@ -1469,17 +1897,17 @@ const spawnAgent = tool({
 	description: SPAWN_AGENT_DESCRIPTION,
 	inputSchema: z.object({
 		task: z.string().describe("Task description for the background agent to execute"),
-		runtime: z
-			.enum(["8gent", "claude", "shell"])
+		runtime: z.enum(["8gent", "claude", "shell"]).optional().describe(SPAWN_RUNTIME_DESCRIPTION),
+		model: z.string().optional().describe(SPAWN_MODEL_DESCRIPTION),
+		timeout: z
+			.number()
 			.optional()
-			.describe(SPAWN_RUNTIME_DESCRIPTION),
-		model: z
-			.string()
-			.optional()
-			.describe(SPAWN_MODEL_DESCRIPTION),
-		timeout: z.number().optional().describe("Timeout in ms (default: 5 min, only for claude/shell)"),
+			.describe("Timeout in ms (default: 5 min, only for claude/shell)"),
 		allowedPaths: z.array(z.string()).optional().describe(ALLOWED_PATHS_DESCRIPTION),
-		permissionMode: z.enum(["plan", "ask", "guarded", "infinite"]).optional().describe(PERMISSION_MODE_DESCRIPTION),
+		permissionMode: z
+			.enum(["plan", "ask", "guarded", "infinite"])
+			.optional()
+			.describe(PERMISSION_MODE_DESCRIPTION),
 	}),
 	execute: async ({ task, runtime, model, timeout, allowedPaths, permissionMode }) =>
 		spawnAgentTool(
@@ -1514,7 +1942,7 @@ import { getPersona, listPersonas, matchPersona } from "../orchestration/persona
 
 const suggest_spawn = tool({
 	description:
-		"Suggest spawning a specialist sub-agent for a specific task. The user will be asked to approve unless auto-spawn is enabled.",
+		"Suggests spawning the specialist persona on task, with reason saying why it is needed. The user will be asked to approve unless auto-spawn is enabled.",
 	inputSchema: z.object({
 		persona: z.string().describe("Persona ID: winston, larry, curly, mo, or doc"),
 		task: z.string().describe("The specific task for this agent"),
@@ -1562,7 +1990,7 @@ const check_agents = tool({
 
 const message_agent = tool({
 	description:
-		"Send a message to a specific sub-agent. Used for coordination between orchestrator and specialists.",
+		"Sends message to the specialist agentId. Used for coordination between orchestrator and specialists.",
 	inputSchema: z.object({
 		agentId: z.string().describe("The agent ID to message"),
 		message: z.string().describe("The message content"),
@@ -1603,7 +2031,7 @@ const message_agent = tool({
 
 const merge_agent_work = tool({
 	description:
-		"Review and merge a sub-agent's worktree changes into the main branch. Only the orchestrator should call this.",
+		"Reviews and merges the worktree changes of agentId into the main branch. Only the orchestrator should call this.",
 	inputSchema: z.object({
 		agentId: z.string().describe("The agent ID whose work to merge"),
 		commitMessage: z.string().optional().describe("Custom merge commit message"),
@@ -1656,7 +2084,7 @@ const merge_agent_work = tool({
 
 const writeNotesTool = tool({
 	description:
-		"Write or append a note to the Notes tab. The note will appear immediately in the Notes panel.",
+		"Writes or appends a note with title and content to the Notes tab. The note will appear immediately in the Notes panel.",
 	inputSchema: z.object({
 		title: z.string().describe("Note title (first line)"),
 		content: z.string().describe("Note content in plain text or markdown"),
@@ -1720,7 +2148,7 @@ const writeNotesTool = tool({
  */
 const writeTerminalTool = tool({
 	description:
-		"Send a shell command to an open terminal tab. The command runs in a real PTY shell, so interactive programs, `gh auth login --web`, and TTY-requiring commands all work. Call list_terminals first if you don't know the tabId.",
+		"Sends input (a shell command or text) to the open terminal tab tabId; a newline is appended. The command runs in a real PTY shell, so interactive programs, `gh auth login --web`, and TTY-requiring commands all work. Call list_terminals first if you don't know the tabId.",
 	inputSchema: z.object({
 		tabId: z
 			.string()
@@ -1755,7 +2183,7 @@ const writeTerminalTool = tool({
 
 const selfInspect = tool({
 	description:
-		"[SELF] Inspect your own runtime parameters: model, provider, temperature, topK, topP, maxOutputTokens, maxSteps, penalty values, tool count, loaded categories, system prompt length, message history size, step count, live tokens-per-second throughput, and any appended context. Use this when you need to understand your own configuration, answer questions about how fast you're generating, or diagnose why something isn't working.",
+		"[SELF] Inspect your own runtime parameters; takes no arguments. Returns model, provider, temperature, topK, topP, maxOutputTokens, maxSteps, penalty values, tool count, loaded categories, system prompt length, message history size, step count, live tokens-per-second throughput, and any appended context. Use this when you need to understand your own configuration, answer questions about how fast you're generating, or diagnose why something isn't working.",
 	inputSchema: z.object({}),
 	execute: async () => {
 		const p = getRuntimeParams();
@@ -1780,10 +2208,9 @@ const selfInspect = tool({
 				throughput: {
 					lastTokensPerSecond: p.lastTokensPerSecond ?? null,
 					avgTokensPerSecond: p.avgTokensPerSecond ?? null,
-					note:
-						p.avgTokensPerSecond
-							? `Currently generating ~${p.avgTokensPerSecond.toFixed(1)} tok/s on ${p.provider}/${p.model} (last step: ${(p.lastTokensPerSecond ?? 0).toFixed(1)} tok/s)`
-							: "No throughput data yet. It is measured after the first LLM step finishes",
+					note: p.avgTokensPerSecond
+						? `Currently generating ~${p.avgTokensPerSecond.toFixed(1)} tok/s on ${p.provider}/${p.model} (last step: ${(p.lastTokensPerSecond ?? 0).toFixed(1)} tok/s)`
+						: "No throughput data yet. It is measured after the first LLM step finishes",
 				},
 			},
 			appendedContextCount: p.appendedContext.length,
@@ -1807,7 +2234,7 @@ const TUNABLE_KEYS = [
 
 const selfTune = tool({
 	description:
-		"[SELF] Adjust your own runtime parameters. Tunable: temperature (0-2), topP (0-1), topK (1-100), maxOutputTokens (256-16384), maxSteps (1-100), frequencyPenalty (-2 to 2), presencePenalty (-2 to 2). Changes take effect on the next step or retry. Use when: output is truncated (bump maxOutputTokens), responses are too deterministic (raise temperature), or you're stuck in loops (adjust penalties).",
+		"[SELF] Sets your runtime parameter to value, with a reason that is logged. Tunable: temperature (0-2), topP (0-1), topK (1-100), maxOutputTokens (256-16384), maxSteps (1-100), frequencyPenalty (-2 to 2), presencePenalty (-2 to 2). Changes take effect on the next step or retry. Use when: output is truncated (bump maxOutputTokens), responses are too deterministic (raise temperature), or you're stuck in loops (adjust penalties).",
 	inputSchema: z.object({
 		parameter: z
 			.string()
@@ -1849,7 +2276,7 @@ const selfTune = tool({
 
 const selfAppendContext = tool({
 	description:
-		"[SELF] Append additional context or instructions to your own system prompt for this session. Use to record learned patterns, task-specific constraints, or intermediate findings that should influence all subsequent steps. Appends are additive (never delete existing instructions). Max 500 chars per append, max 10 appends per session.",
+		"[SELF] Appends context (max 500 chars) to your own system prompt for this session, with a reason. Use to record learned patterns, task-specific constraints, or intermediate findings that should influence all subsequent steps. Appends are additive (never delete existing instructions). Max 500 chars per append, max 10 appends per session.",
 	inputSchema: z.object({
 		context: z.string().describe("Text to append to your system prompt (max 500 chars)"),
 		reason: z.string().describe("Why this context is important for future steps"),
@@ -1878,7 +2305,7 @@ const selfAppendContext = tool({
 
 const rememberTool = tool({
 	description:
-		"[MEMORY] Save a fact to memory. Layers: 'session' (temporary, current session only), 'project' (persisted in .8gent/ for this repo), 'global' (persisted in ~/.8gent/ across projects). Keep facts concise and searchable. Pair with recall to retrieve later.",
+		"[MEMORY] Persists a fact to the specified memory layer and returns confirmation. Layers: 'session' (temporary, current session only), 'project' (persisted in .8gent/ for this repo), 'global' (persisted in ~/.8gent/ across projects). Keep facts concise and searchable. Pair with recall to retrieve later.",
 	inputSchema: z.object({
 		fact: z.string().describe("The fact to remember"),
 		layer: z.enum(["session", "project", "global"]).describe("Memory layer"),
@@ -1897,7 +2324,7 @@ const rememberTool = tool({
 
 const recallTool = tool({
 	description:
-		"[MEMORY] Search memory for relevant facts. Uses full-text search across all layers. Returns matching memories ranked by relevance.",
+		"[MEMORY] Pass query (keywords); returns matching facts from all memory layers (session, project, global) ranked by relevance. Uses full-text search across all layers. Returns matching memories ranked by relevance.",
 	inputSchema: z.object({
 		query: z.string().describe("Search query"),
 		limit: z.number().optional().describe("Max results (default: 5)"),
@@ -2069,7 +2496,7 @@ const queryDesignSystem = tool({
 
 const deckTheme = tool({
 	description:
-		"[DESIGN] Import-ready Marp deck themes, one per design system. USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
+		"[DESIGN] Import-ready Marp deck themes, one per design system: action is list, apply (to deck) or mix (palette plus type). USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
 	inputSchema: z.object({
 		action: z.enum(["list", "apply", "mix"]).describe("list | apply | mix"),
 		deck: z.string().optional().describe("Path to the deck .md (apply, mix)"),
@@ -2087,7 +2514,7 @@ const deckTheme = tool({
 				return { error: "deck_theme mix needs palette and type" };
 			}
 			const cwd = getToolContext().workingDirectory;
-			const deckPath = dt.resolveDeckPath(resolvePath(deck), cwd);
+			const deckPath = dt.resolveDeckPath(resolvePath(deck, "write"), cwd);
 			const themeName = action === "mix" ? `${palette}-x-${type}` : String(name);
 			for (const target of [deckPath, dt.cssPathFor(deckPath, themeName)]) {
 				const blocked = gateWrite("write_file", { path: target, content: "" });
@@ -2160,7 +2587,7 @@ const desktopType = tool({
 
 const desktopPress = tool({
 	description:
-		"Press a key combination. Examples: 'enter', 'cmd+s', 'ctrl+shift+p', 'tab', 'escape'. Dangerous combos (cmd+q, alt+f4) are flagged but still executed.",
+		"[DESKTOP] Presses the key combination in keys, such as 'enter', 'cmd+s' or 'ctrl+shift+p'. Examples: 'enter', 'cmd+s', 'ctrl+shift+p', 'tab', 'escape'. Dangerous combos (cmd+q, alt+f4) are flagged but still executed.",
 	inputSchema: z.object({
 		keys: z.string().describe("Key combo, e.g. 'cmd+s'"),
 		count: z.number().int().min(1).max(5).optional(),
@@ -2188,7 +2615,8 @@ const desktopScroll = tool({
 });
 
 const desktopDrag = tool({
-	description: "Drag from one point to another. Useful for resizing windows, moving files.",
+	description:
+		"[DESKTOP] Drags from screen point fromX, fromY to screen point toX, toY. Useful for resizing windows, moving files.",
 	inputSchema: z.object({
 		fromX: z.number(),
 		fromY: z.number(),
@@ -2204,7 +2632,8 @@ const desktopDrag = tool({
 });
 
 const desktopHover = tool({
-	description: "Move the cursor to a point without clicking. Triggers hover states/tooltips.",
+	description:
+		"[DESKTOP] Moves the cursor to screen point x, y without clicking. Triggers hover states/tooltips.",
 	inputSchema: z.object({
 		x: z.number(),
 		y: z.number(),
@@ -2225,7 +2654,8 @@ const desktopWindows = tool({
 });
 
 const desktopClipboard = tool({
-	description: "Get or set the system clipboard. action='get' reads, 'set' writes.",
+	description:
+		"[DESKTOP] Gets or sets the system clipboard: action 'get' reads it, action 'set' writes text. action='get' reads, 'set' writes.",
 	inputSchema: z.object({
 		action: z.enum(["get", "set"]),
 		text: z.string().optional().describe("Required when action='set'"),
@@ -2248,7 +2678,7 @@ const desktopClipboard = tool({
 
 const proposeSkillCreation = tool({
 	description:
-		"Author and persist a new SKILL.md to packages/skills/<name>/. Use this when you have noticed a recurring or reusable workflow pattern across this session that would help future sessions (or future users). The new skill ships to every 8gent-code user. Do not propose a skill that duplicates an existing one. Hard cap: 3 auto-skills per session. Returns ok=false with a reason if blocked (name-collision, session-cap-reached, etc.) so you can adjust and try again.",
+		"Writes a new skill to packages/skills/<name>/SKILL.md from name, description (one line) and body (the markdown). Use this when you have noticed a recurring or reusable workflow pattern across this session that would help future sessions (or future users). The new skill ships to every 8gent-code user. Do not propose a skill that duplicates an existing one. Hard cap: 3 auto-skills per session. Returns ok=false with a reason if blocked (name-collision, session-cap-reached, etc.) so you can adjust and try again.",
 	inputSchema: z.object({
 		name: z
 			.string()
@@ -2378,7 +2808,9 @@ const runComputerTask = tool({
 			]
 				.filter(Boolean)
 				.join("\n");
-			return result.ok ? `Computer task complete.\n${summary}` : `Computer task failed.\n${summary}`;
+			return result.ok
+				? `Computer task complete.\n${summary}`
+				: `Computer task failed.\n${summary}`;
 		} catch (err) {
 			return `run_computer_task error: ${err instanceof Error ? err.message : String(err)}`;
 		}
@@ -2448,7 +2880,9 @@ const eyesSee = tool({
 		display: z
 			.union([z.number().int(), z.literal("primary"), z.literal("all")])
 			.optional()
-			.describe("Display to capture: index (0-based), 'primary', or 'all'. Default: focused display."),
+			.describe(
+				"Display to capture: index (0-based), 'primary', or 'all'. Default: focused display.",
+			),
 		region: z
 			.object({
 				x: z.number(),
@@ -2494,7 +2928,7 @@ const eyesSee = tool({
 
 const eyesFind = tool({
 	description:
-		"Find a UI element on screen by label, role, or natural-language description. Returns one or more locators with bbox + center point you can pass to desktop_click. Captures a fresh frame if none provided.",
+		"Finds a UI element on screen; kind picks how (label, role, id, describe or coords) and returns locators to pass to desktop_click. Returns one or more locators with bbox + center point you can pass to desktop_click. Captures a fresh frame if none provided.",
 	inputSchema: z.object({
 		kind: z.enum(["label", "role", "id", "describe", "coords"]).describe("Locator kind."),
 		text: z
@@ -2504,7 +2938,11 @@ const eyesFind = tool({
 				"For kind=label: substring/exact match. For kind=describe: natural-language target. For kind=id: element id from a prior eyes_see.",
 			),
 		role: z.string().optional().describe("For kind=role or to filter kind=label results."),
-		index: z.number().int().optional().describe("For kind=role: 0-based index of the matching element."),
+		index: z
+			.number()
+			.int()
+			.optional()
+			.describe("For kind=role: 0-based index of the matching element."),
 		x: z.number().optional().describe("For kind=coords."),
 		y: z.number().optional().describe("For kind=coords."),
 	}),
@@ -2591,7 +3029,7 @@ const eyesDescribe = tool({
 
 const eyesWaitFor = tool({
 	description:
-		"Wait until a screen condition becomes true. Polls eyes_see internally. Times out cleanly with elapsed time so the agent can decide whether to retry, give up, or proceed. Use to wait for dialogs, page loads, or text to appear.",
+		"Waits until the screen condition predicate (element_visible, element_gone or text_present) becomes true. Polls eyes_see internally. Times out cleanly with elapsed time so the agent can decide whether to retry, give up, or proceed. Use to wait for dialogs, page loads, or text to appear.",
 	inputSchema: z.object({
 		predicate: z
 			.enum(["element_visible", "element_gone", "text_present"])
@@ -2620,7 +3058,8 @@ const eyesWaitFor = tool({
 					caseSensitive: args.case_sensitive,
 				};
 			} else {
-				if (!args.query_kind) return `eyes_wait_for: predicate=${args.predicate} requires query_kind`;
+				if (!args.query_kind)
+					return `eyes_wait_for: predicate=${args.predicate} requires query_kind`;
 				let q: import("@8gent/eyes").LocatorQuery;
 				switch (args.query_kind) {
 					case "label":
@@ -2692,9 +3131,7 @@ async function getHandeyes(): Promise<
 		hands: driver,
 	});
 
-	const adapter = await handeyesPkg.selectHandeyesAdapter([
-		...handeyesPkg.DEFAULT_ADAPTER_ORDER,
-	]);
+	const adapter = await handeyesPkg.selectHandeyesAdapter([...handeyesPkg.DEFAULT_ADAPTER_ORDER]);
 	if (!adapter) {
 		_handeyesUnavailableReason = "handeyes: no adapter available after configure (unexpected)";
 		return { ok: false, reason: _handeyesUnavailableReason };
@@ -2706,7 +3143,7 @@ async function getHandeyes(): Promise<
 
 const handeyesLocateAndClick = tool({
 	description:
-		"Locate a UI element by query, then click it. Compound action over eyes+hands. Retries the locate up to locate_retries times before declaring no_match. Set verify_changed=true to wait for an observe-detected screen change after the click. Auto-engages struggle mode when the locate fires the find-zero-hits-twice trigger; the result includes escalated_to with the struggle handle id.",
+		"Locates a UI element (kind picks how, as in eyes_find), then clicks it. Compound action over eyes+hands. Retries the locate up to locate_retries times before declaring no_match. Set verify_changed=true to wait for an observe-detected screen change after the click. Auto-engages struggle mode when the locate fires the find-zero-hits-twice trigger; the result includes escalated_to with the struggle handle id.",
 	inputSchema: z.object({
 		kind: z.enum(["label", "role", "id", "describe", "coords"]),
 		text: z.string().optional(),
@@ -2774,7 +3211,7 @@ const handeyesLocateAndClick = tool({
 
 const handeyesClickAndVerify = tool({
 	description:
-		"Click a known point, then poll a predicate to verify the click had the intended effect. Retries up to max_retries on failure. Use this for 'did anything actually happen?' loops where hands.click returning ok is not enough.",
+		"Clicks point x, y, then polls predicate to verify the click had the intended effect. Retries up to max_retries on failure. Use this for 'did anything actually happen?' loops where hands.click returning ok is not enough.",
 	inputSchema: z.object({
 		x: z.number(),
 		y: z.number(),
@@ -2843,7 +3280,7 @@ const handeyesClickAndVerify = tool({
 
 const handeyesTypeAndConfirm = tool({
 	description:
-		"Type into the focused field, then optionally re-locate the field and confirm its value reflects what was typed. Catches IME / focus-stolen / wrong-field-focused failure modes that look identical to success at the hands layer.",
+		"Types text into the focused field, then optionally re-locates the field and confirms its value. Catches IME / focus-stolen / wrong-field-focused failure modes that look identical to success at the hands layer.",
 	inputSchema: z.object({
 		text: z.string(),
 		expected_field_kind: z.enum(["label", "role", "id"]).optional(),
@@ -2982,7 +3419,7 @@ export const agentTools = bindToolContext({
 	// File operations
 	read_file: readFile,
 	write_file: writeFile,
-	edit_file: editFile,
+	edit_file: hashlineEnabled() ? editFileAnchored : editFile,
 	list_files: listFiles,
 
 	// Git
@@ -3110,6 +3547,7 @@ export const agentTools = bindToolContext({
 	// Creative — document production (Markdown/HTML -> PDF in ~/.8gent/creative)
 	make_pdf: makePdfTool,
 	speak: speakTool,
+	render_video_deck: renderVideoDeckTool,
 } satisfies ToolSet);
 
 export type AgentTools = typeof agentTools;

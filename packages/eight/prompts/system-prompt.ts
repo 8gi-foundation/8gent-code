@@ -10,15 +10,17 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveHome } from "../../core/home";
+import { type ResolvedShell, currentWindowsShell } from "../../core/shell";
 import { getRepoMapper } from "../../repo-context";
-import { loadInstructions } from "../instruction-loader";
-import { TOOL_CATEGORIES } from "../tool-registry";
-import { type AccessTier, type UserContext, composeSoulPrompt, determineTier } from "./soul-layers";
 import {
 	type CommunicationStyle,
 	isCommunicationStyle,
 	isLanguageCode,
 } from "../../self-autonomy/communication-style";
+import { LOCAL_SERVER_CURL_NOTE } from "../../tools/eight-browser";
+import { loadInstructions } from "../instruction-loader";
+import { TOOL_CATEGORIES } from "../tool-registry";
+import { type AccessTier, type UserContext, composeSoulPrompt, determineTier } from "./soul-layers";
 
 export { composeSoulPrompt, determineTier, type AccessTier, type UserContext };
 
@@ -134,13 +136,16 @@ export function styleHasGuide(style: string): boolean {
  * @deprecated User context is now handled by composeSoulPrompt(tier, userContext).
  * Kept for backward compatibility with any direct imports.
  */
-export const USER_CONTEXT_SEGMENT = (userData: {
-	name?: string | null;
-	role?: string | null;
-	communicationStyle?: string | null;
-	language?: string;
-	preferences?: Record<string, unknown>;
-}, opts: { includeBoard?: boolean } = {}) => {
+export const USER_CONTEXT_SEGMENT = (
+	userData: {
+		name?: string | null;
+		role?: string | null;
+		communicationStyle?: string | null;
+		language?: string;
+		preferences?: Record<string, unknown>;
+	},
+	opts: { includeBoard?: boolean } = {},
+) => {
 	const parts: string[] = ["## USER CONTEXT"];
 
 	if (userData.name) {
@@ -149,7 +154,9 @@ export const USER_CONTEXT_SEGMENT = (userData: {
 	if (userData.role) {
 		parts.push(`Their role: ${userData.role}.`);
 	}
-	const styleLine = userData.communicationStyle ? communicationStyleLine(userData.communicationStyle) : "";
+	const styleLine = userData.communicationStyle
+		? communicationStyleLine(userData.communicationStyle)
+		: "";
 	if (styleLine) {
 		parts.push(styleLine);
 	}
@@ -205,6 +212,9 @@ Why: without this, the user has to re-establish the plan every turn
 because there is no persistent journey. The rail is now load-bearing.
 Treat it like the goal-loop ledger - the tasks are the audit trail of
 where we have been and what is open.
+If the task points at a checklist file (PLAN.md, TODO.md or one it names),
+that file is the record, not the rail: tick each box in the file with
+edit_file as its step finishes. update_plan only mirrors it.
 
 ADHD users in particular cannot reconstruct a 5-item list you gave them
 three turns ago. The task store is the externalized working memory.`;
@@ -279,18 +289,87 @@ export interface ToolCatalogOptions {
 	 * registered gets called and fails.
 	 */
 	omit?: Iterable<string>;
+	/** Working directory to name in the environment line. Omitted from the line when unset. */
+	cwd?: string;
 }
 
 /** Join guidance for slide videos (#3862): a while-read loop drops an unterminated last line. */
 /** Short notes shared by the concise catalog and the headless prompt (#3865). */
 export const CONCISE_WEB_NOTE =
-	"**External info, docs or URLs: call `web_search` or `web_fetch`. You have internet.**";
-export const NARRATION_NOTE = "**Narration: use `speak`, never espeak or say.**";
-export const SCRATCH_DIR_NOTE =
-	"**Scratch files go in `.tmp/` inside the project, never /tmp or ~.**";
+	"**Web, docs or URLs: `web_search`/`web_fetch`; you have internet.**";
+export const NARRATION_NOTE = "**Narration: `speak`, never espeak or say.**";
+export const SCRATCH_DIR_NOTE = "**Scratch files: `.tmp/` in the project, never /tmp or ~.**";
 
+export type EnvironmentNoteInput = {
+	platform?: NodeJS.Platform;
+	/** Windows only: the shell run_command uses. Default: resolved from settings and disk. */
+	shell?: ResolvedShell;
+	cwd?: string;
+	/** OS release string, e.g. "Windows 11". Default: os.release(). */
+	release?: string;
+};
+
+const OS_NAMES: Partial<Record<NodeJS.Platform, string>> = {
+	win32: "Windows",
+	darwin: "macOS",
+	linux: "Linux",
+};
+
+/**
+ * One line telling the model which OS and shell run_command uses (B3): the
+ * model otherwise guesses, writes `ls` for cmd.exe, or `dir` for bash.
+ */
+export function environmentNote(input: EnvironmentNoteInput = {}): string {
+	const platform = input.platform ?? process.platform;
+	const os = OS_NAMES[platform] ?? platform;
+	const cwd = input.cwd ? `, cwd ${input.cwd}` : "";
+	if (platform !== "win32") {
+		return `**Environment: ${os}, shell sh, paths use /${cwd}.**`;
+	}
+	const shell = input.shell ?? currentWindowsShell();
+	const how =
+		shell.kind === "git-bash"
+			? "Git Bash (POSIX syntax: ls, grep, pipes, $VAR; write paths with /)"
+			: shell.kind === "powershell"
+				? "PowerShell (use PowerShell syntax: Get-ChildItem, $env:VAR; no && in Windows PowerShell 5.1)"
+				: "cmd.exe (use dir, type, %VAR%, backslash paths; ls and grep are not installed)";
+	// Git Bash already says "write paths with /", so the separator clause is for the others only.
+	const sep = shell.kind === "git-bash" ? "" : ", path separator \\";
+	return `**Environment: ${os}, run_command uses ${how}${sep}${cwd}.**`;
+}
+
+/** Review focus (#3920): a review that cites every line it read buries the defect. */
+export const REVIEW_FOCUS_NOTE =
+	"**Reviews: cite only lines that must change and security-relevant edits.**";
+
+/**
+ * Short form of LOCAL_SERVER_CURL_NOTE (tools/eight-browser.ts, the full prompt's copy) for the
+ * compact local prompt, which local models get instead of TOOL_PATTERNS_SEGMENT (#4034). Kept
+ * short for the headless prompt budget (headless-prompt.test.ts, 60% rule).
+ */
+export const LOCAL_SERVER_CURL_SHORT =
+	"Local web servers (127.0.0.1/localhost): run_command with one plain curl per call, no pipes, ; or &&. Keep cookie/header/output files under .tmp/ in the project, never /tmp, then read_file them. Do not pass -L: on a 302 read the Location header and make a second curl.";
+
+/**
+ * The test login for a local server (#4072, run 2026-10-12_155723): read_file hides a
+ * "Password: ..." line as [REDACTED:secret_assignment], the model rebuilt the value from an
+ * `od -c` dump, typed E as e, and both sign-ins were 401. The recipe keeps the value out of
+ * the transcript (8SO on #4091: a stripped label defeats the redactor, which matches on the
+ * label): sed's `w` flag copies the line, relabelled as a form field, into .tmp/login and
+ * prints nothing; curl -d @file posts it with the newline stripped; a read_file of
+ * .tmp/login still scrubs. Sits next to the curl rules in the full prompt
+ * (TOOL_PATTERNS_SEGMENT) and both compact local prompts (agent.ts).
+ */
+export const LOCAL_LOGIN_NOTE =
+	"A test login in a project file may show as [REDACTED:...] in read_file. Never print, read_file or retype the value: copy it into a form body with run_command (sed -n 's/^Password: */password=/w .tmp/login' FILE, after mkdir -p .tmp) and send that file (curl -d username=NAME -d @.tmp/login URL).";
+
+/**
+ * Slides to video: JSON in, deterministic code out. Pilot media-brief-video (12 Oct 2026) showed a
+ * local model composing the video with raw ffmpeg in run_command instead of calling
+ * render_video_deck, so the note now shows the shell form of the same renderer as a 3-line recipe.
+ */
 export const SLIDES_TO_VIDEO_NOTE =
-	"**Slides to video: one segment per slide file; check segment count equals slide count before joining; never loop over a text file that may lack a trailing newline.**";
+	'**Slides to video: write deck.json {"slides":[{"title":"..","bullets":[".."],"narration":".."}]}, then run `8gent deck render deck.json out.mp4`, not ffmpeg by hand. By hand: segment count equals slide count; never loop over a file lacking a trailing newline.**';
 
 /**
  * Build the tool-inventory segment the model sees at system-prompt time.
@@ -310,12 +389,11 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 			"Core tools (file, shell, code exploration) are already loaded.",
 			"To use a tool from another category, call `discover_tools` first with the category name.",
 		);
-	} else {
+	} else if (!concise) {
+		// The concise catalog (local TUI, every turn) skips this line: the header says it.
 		lines.push(
 			"",
-			concise
-				? "Call these tools directly."
-				: "These tools are available right now. Call them directly. Do not say you cannot do something until you have tried the relevant tool.",
+			"These tools are available right now. Call them directly. Do not say you cannot do something until you have tried the relevant tool.",
 		);
 	}
 	lines.push("");
@@ -341,8 +419,9 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 			: "**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
 		NARRATION_NOTE,
 		SCRATCH_DIR_NOTE,
+		environmentNote({ cwd: opts.cwd }),
 	);
-	lines.push(SLIDES_TO_VIDEO_NOTE);
+	lines.push(SLIDES_TO_VIDEO_NOTE, REVIEW_FOCUS_NOTE);
 
 	return lines.join("\n");
 }
@@ -382,6 +461,9 @@ This is enforced at the infrastructure level: read_file on large code files will
 {"tool": "write_file", "arguments": {"path": "new.ts", "content": "..."}}
 {"tool": "edit_file", "arguments": {"path": "src/x.ts", "oldText": "...", "newText": "..."}}
 \`\`\`
+
+### Local servers
+${LOCAL_SERVER_CURL_NOTE} A curl that writes with -o or -c prints nothing: read that file with read_file next, and never repeat the same command. ${LOCAL_LOGIN_NOTE}
 
 ### Git Flow
 \`\`\`json

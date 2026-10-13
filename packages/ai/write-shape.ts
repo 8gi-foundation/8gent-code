@@ -19,6 +19,7 @@
  */
 
 import { extname } from "node:path";
+import { narrationCoverageAfterWrite } from "./narration-coverage";
 
 const TEXT_EXTENSIONS = new Set([".md", ".markdown", ".txt"]);
 const SEPARATOR = /^---[ \t]*$/;
@@ -70,5 +71,8 @@ export function writeShapeLine(filePath: string, content: string): string {
 		const count = sections.filter((s) => s.some((l) => l.trim() !== "")).length;
 		parts = `; ${count} section${count === 1 ? "" : "s"} separated by ---`;
 	}
-	return `Shape: ${nonEmpty} non-empty line${nonEmpty === 1 ? "" : "s"}${parts}. If the request named a count, check it matches before moving on.`;
+	const shape = `Shape: ${nonEmpty} non-empty line${nonEmpty === 1 ? "" : "s"}${parts}. If the request named a count, check it matches before moving on.`;
+	// #4154: a narration beside its brief or slides names every point it does not say.
+	const coverage = narrationCoverageAfterWrite(filePath);
+	return coverage ? `${shape}\n${coverage}` : shape;
 }

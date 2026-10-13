@@ -20,8 +20,8 @@ import SelectInput from "ink-select-input";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { resolveOllamaBaseUrl } from "../../../../packages/ai/text-tool-endpoint.js";
 import { createOllamaServer } from "../../../../packages/local-model-server/index.js";
-import { probeProviders, type ProviderStatus } from "../lib/provider-health.js";
 import { useTypewriter } from "../hooks/useTypewriter.js";
+import { type ProviderStatus, probeProviders } from "../lib/provider-health.js";
 
 interface OnboardingStep {
 	question: string;
@@ -166,11 +166,8 @@ export function shouldShowInstallHint(
  * IDs (filtering obvious embedding models). Used by the providerCheck step
  * so the user can see what's actually loaded, not just "live".
  */
-export async function fetchProviderModels(
-	provider: OnboardingProviderId,
-): Promise<string[]> {
-	const isEmbed = (id: string): boolean =>
-		/embed|embedding|nomic|bge-/i.test(id);
+export async function fetchProviderModels(provider: OnboardingProviderId): Promise<string[]> {
+	const isEmbed = (id: string): boolean => /embed|embedding|nomic|bge-/i.test(id);
 	try {
 		if (provider === "ollama") {
 			// OLLAMA_BASE_URL, then OLLAMA_HOST, normalised, like the rest of the
@@ -178,7 +175,9 @@ export async function fetchProviderModels(
 			const host = resolveOllamaBaseUrl();
 			const ctrl = new AbortController();
 			const t = setTimeout(() => ctrl.abort(), 1500);
-			const listed = await createOllamaServer({ baseUrl: host }).listModels({ signal: ctrl.signal });
+			const listed = await createOllamaServer({ baseUrl: host }).listModels({
+				signal: ctrl.signal,
+			});
 			clearTimeout(t);
 			return listed.flatMap((m) => (isEmbed(m.name) ? [] : [m.name]));
 		}
@@ -186,7 +185,7 @@ export async function fetchProviderModels(
 		const hostBase =
 			provider === "lmstudio"
 				? process.env.LM_STUDIO_HOST || "http://localhost:1234"
-				: (process.env.APFEL_BASE_URL?.replace(/\/v1$/, "") || "http://localhost:11500");
+				: process.env.APFEL_BASE_URL?.replace(/\/v1$/, "") || "http://127.0.0.1:11435";
 		const ctrl = new AbortController();
 		const t = setTimeout(() => ctrl.abort(), 1500);
 		const res = await fetch(`${hostBase}/v1/models`, { signal: ctrl.signal });
@@ -225,16 +224,14 @@ export function OnboardingScreen({
 	const maxWidth = Math.min(termWidth - 4, 80);
 
 	const isProviderCheck = !!providerCheck && !!onProviderResolve;
-	const isSelect =
-		!isProviderCheck && !!selectChoices && selectChoices.length > 0 && !!onSelect;
+	const isSelect = !isProviderCheck && !!selectChoices && selectChoices.length > 0 && !!onSelect;
 
 	// ── Typewriter reveal for the active question prompt ────────
 	// Subtle per-character reveal so the agent feels like it's writing the
 	// question to the user in real time. ~28ms/char (~36 chars/sec) reads
 	// "alive but not slow" in user testing. Disabled in non-TTY/CI so the
 	// smoke harness and piped invocations see the full text instantly.
-	const typewriterEnabled =
-		!!process.stdout.isTTY && !process.env.CI;
+	const typewriterEnabled = !!process.stdout.isTTY && !process.env.CI;
 	const {
 		displayed: revealedQuestion,
 		isDone: isQuestionRevealed,
@@ -283,13 +280,9 @@ export function OnboardingScreen({
 		(async () => {
 			try {
 				const result = await probeProviders();
-				const live = result.statuses.find(
-					(s) => s.name === providerCheck?.provider,
-				)?.live;
+				const live = result.statuses.find((s) => s.name === providerCheck?.provider)?.live;
 				const models =
-					live && providerCheck
-						? await fetchProviderModels(providerCheck.provider)
-						: [];
+					live && providerCheck ? await fetchProviderModels(providerCheck.provider) : [];
 				if (cancelled) return;
 				setProbe({
 					status: "done",
@@ -316,9 +309,7 @@ export function OnboardingScreen({
 			if (!isProviderCheck || !onProviderResolve) return;
 			if (probe.status === "loading") return; // don't fire mid-probe
 			if (key.return) {
-				const live =
-					probe.statuses.find((s) => s.name === providerCheck?.provider)?.live ??
-					false;
+				const live = probe.statuses.find((s) => s.name === providerCheck?.provider)?.live ?? false;
 				onProviderResolve(live ? "live" : "skip");
 			}
 		},
@@ -439,15 +430,11 @@ export function OnboardingScreen({
 			{!isQuestionRevealed ? null : isProviderCheck && providerCheck ? (
 				<Box flexDirection="column" paddingLeft={2}>
 					{probe.status === "loading" ? (
-						<Text color="cyan">
-							Probing {PROVIDER_LABELS[providerCheck.provider]}...
-						</Text>
+						<Text color="cyan">Probing {PROVIDER_LABELS[providerCheck.provider]}...</Text>
 					) : (
 						<>
 							{(() => {
-								const live = probe.statuses.find(
-									(s) => s.name === providerCheck.provider,
-								)?.live;
+								const live = probe.statuses.find((s) => s.name === providerCheck.provider)?.live;
 								const label = PROVIDER_LABELS[providerCheck.provider];
 								if (live) {
 									const modelLine =
@@ -460,40 +447,33 @@ export function OnboardingScreen({
 										</Text>
 									);
 								}
-								return (
-									<Text color="yellow" bold>{`x ${label} not running`}</Text>
-								);
+								return <Text color="yellow" bold>{`x ${label} not running`}</Text>;
 							})()}
-							{probe.status === "done" &&
-								probe.models.length > 0 && (
-									<Box flexDirection="column" marginTop={1}>
-										<Text dimColor>Available models:</Text>
-										{probe.models.slice(0, 5).map((m) => (
-											<Text key={m} dimColor>
-												{`  - ${m}`}
-											</Text>
-										))}
-										{probe.models.length > 5 && (
-											<Text dimColor>
-												{`  ... and ${probe.models.length - 5} more`}
-											</Text>
-										)}
-									</Box>
-								)}
+							{probe.status === "done" && probe.models.length > 0 && (
+								<Box flexDirection="column" marginTop={1}>
+									<Text dimColor>Available models:</Text>
+									{probe.models.slice(0, 5).map((m) => (
+										<Text key={m} dimColor>
+											{`  - ${m}`}
+										</Text>
+									))}
+									{probe.models.length > 5 && (
+										<Text dimColor>{`  ... and ${probe.models.length - 5} more`}</Text>
+									)}
+								</Box>
+							)}
 							{shouldShowInstallHint(providerCheck.provider, probe) && (
 								<Box flexDirection="column" marginTop={1}>
 									<Text color="cyan" bold>
 										Install hint:
 									</Text>
 									{/* Per-line render of the install-hint string; rows come from a deterministic newline split and are positional. */}
-									{providerCheck.installHint
-										.split("\n")
-										.map((line, i) => (
-											// react-doctor-disable-next-line react-doctor/no-array-index-as-key
-											<Text key={i} dimColor>
-												{line}
-											</Text>
-										))}
+									{providerCheck.installHint.split("\n").map((line, i) => (
+										// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+										<Text key={i} dimColor>
+											{line}
+										</Text>
+									))}
 								</Box>
 							)}
 							<Box marginTop={1}>

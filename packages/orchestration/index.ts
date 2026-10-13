@@ -349,7 +349,7 @@ export class AgentPool extends EventEmitter {
 		try {
 			// Import the Agent class dynamically to avoid circular deps
 			const { Agent } = await import("../eight");
-			const { SCOPED_WRITE_TOOLS } = await import("../permissions/edit-guards");
+			const { SCOPED_WRITE_TOOLS, scopedWriteTarget } = await import("../permissions/edit-guards");
 			const { relativeTo } = await import("./agent-outcome");
 
 			const agent = new Agent({
@@ -365,7 +365,7 @@ export class AgentPool extends EventEmitter {
 				openOnWrite: false,
 				events: {
 					onToolEnd: (e) => {
-						const file = e.args?.path;
+						const file = scopedWriteTarget(e.toolName, e.args);
 						if (!e.success || !SCOPED_WRITE_TOOLS.has(e.toolName) || typeof file !== "string")
 							return;
 						const rel = relativeTo(spawnedAgent.config.workingDirectory, file);

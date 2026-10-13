@@ -50,7 +50,7 @@ export function getTermToolDefs(): object[] {
 			function: {
 				name: "term_spawn",
 				description:
-					"[ORCHESTRATION] Spawn an external CLI in a real Terminal.app window via tmux. Returns a sessionId you can use with term_send / term_read. Examples of valid commands: 'claude', 'openclaw', 'pi', '/bin/sh'. Use this when delegating a task to a different agent CLI is cheaper than answering yourself, or when you want to parallelise work across multiple sub-agents.",
+					"[ORCHESTRATION] Spawns command (a CLI binary on $PATH) in a real Terminal.app window via tmux. Returns a sessionId you can use with term_send / term_read. Examples of valid commands: 'claude', 'openclaw', 'pi', '/bin/sh'. Use this when delegating a task to a different agent CLI is cheaper than answering yourself, or when you want to parallelise work across multiple sub-agents.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -77,7 +77,7 @@ export function getTermToolDefs(): object[] {
 			function: {
 				name: "term_send",
 				description:
-					"[ORCHESTRATION] Send a prompt to a running session's stdin via tmux send-keys. Pair with term_read after a short delay to see the response. By default Enter is appended so the prompt is submitted.",
+					"[ORCHESTRATION] Sends text as keystrokes to the running session sessionId (from term_spawn) via tmux send-keys. Pair with term_read after a short delay to see the response. By default Enter is appended so the prompt is submitted.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -97,7 +97,7 @@ export function getTermToolDefs(): object[] {
 			function: {
 				name: "term_read",
 				description:
-					"[ORCHESTRATION] Read new output from a session's tmux pipe-pane log since the last term_read call. Returns lines with ANSI control sequences stripped. Call repeatedly to poll for the response.",
+					"[ORCHESTRATION] Reads new output from session sessionId (from term_spawn) since the last term_read call. Returns lines with ANSI control sequences stripped. Call repeatedly to poll for the response.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -125,7 +125,7 @@ export function getTermToolDefs(): object[] {
 			function: {
 				name: "term_kill",
 				description:
-					"[ORCHESTRATION] Kill a running session and close its tmux + Terminal.app window state.",
+					"[ORCHESTRATION] Kills session sessionId and closes its tmux + Terminal.app window state.",
 				parameters: {
 					type: "object",
 					properties: {

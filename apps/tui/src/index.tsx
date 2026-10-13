@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 /**
  * 8gent Code - Terminal UI
  *
@@ -6,6 +6,8 @@
  * Built with Ink (React for CLI).
  */
 
+// Before anything else: BUN_BE_BUN must not reach this process's subprocesses.
+import "./lib/strip-bun-be-bun.js";
 // First, before anything heavy loads: keys pressed before the first frame
 // must reach the splash, not the line buffer (lib/early-input.ts).
 import "./lib/early-input.js";

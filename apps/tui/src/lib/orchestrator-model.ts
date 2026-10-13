@@ -121,7 +121,7 @@ export interface ColumnSpec {
 
 /** Full column set in display order. STATE fits " needs_input " (13). */
 const FULL_COLUMNS: readonly ColumnSpec[] = [
-	{ key: "id", label: "AGENT", width: 12 },
+	{ key: "id", label: "8GENT", width: 12 },
 	{ key: "state", label: "STATE", width: 13 },
 	{ key: "harness", label: "HARNESS", width: 13 },
 	{ key: "tool", label: "TOOL", width: 13 },

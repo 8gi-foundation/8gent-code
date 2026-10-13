@@ -5,11 +5,32 @@
  * This is the bridge between LLM tool calls and actual system operations.
  */
 
-import { RetiredFacts } from "./retired-facts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtractVideoMode, extractVideo, formatExtractVideoResult } from "@8gent/eyes/marlin";
+import { z } from "zod";
+import {
+	type FormattingStop,
+	checkDraftConstraints,
+	describeFailures,
+	namedSources,
+} from "../ai/draft-constraints";
+import { withImagesWritten } from "../ai/image-shape";
+import {
+	POST_MESSAGE_TOOL_DEF,
+	postMessage,
+	postMessageAvailable,
+	postMessageDeps,
+} from "../ai/post-message";
+import {
+	IMAGE_ATTACHMENT_TOOL,
+	hasImageAttachmentLine,
+	imageAttachmentResult,
+} from "../ai/text-tool-loop";
+import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
+import { writeScopeLine } from "../ai/write-scope";
+import { writeShapeLine } from "../ai/write-shape";
 import {
 	type FileOutline,
 	type RepoIndex,
@@ -22,21 +43,12 @@ import {
 	searchSymbols as astSearchSymbols,
 } from "../ast-index";
 import {
-	awaitIndex,
-	formatLocate,
 	LOCATE_INDEX_WAIT_MS,
 	locate as astLocate,
+	awaitIndex,
+	formatLocate,
 } from "../ast-index/locate";
-import { POST_MESSAGE_TOOL_DEF, postMessage, postMessageAvailable, postMessageDeps } from "../ai/post-message";
-import { IMAGE_ATTACHMENT_TOOL, hasImageAttachmentLine, imageAttachmentResult } from "../ai/text-tool-loop";
-import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
-import { withImagesWritten } from "../ai/image-shape";
-import { layoutMeasureLine } from "./layout-measure";
-import { writeShapeLine } from "../ai/write-shape";
-import { writeScopeLine } from "../ai/write-scope";
 import { getSymbolSource, parseTypeScriptFile } from "../ast-index/typescript-parser";
-import { killProcessTree, spawnShell } from "../core/shell";
-import { deckVideoAfterWrite } from "../deck/auto";
 import {
 	addToSafeList as computerAddToSafeList,
 	click as computerClick,
@@ -60,7 +72,30 @@ import {
 	getToolDefinitions as getComputerToolDefs,
 	imageToDesktop,
 } from "../computer";
+import {
+	DESKTOP_ACT_TOOL_DEF,
+	DesktopActSession,
+	desktopAct,
+	detectScreenScale,
+	validateDesktopActArgs,
+} from "../computer/desktop-act";
+import {
+	askOnTerminal,
+	desktopApprovalCard,
+	desktopApprovalDetails,
+	redactDesktopArgs,
+} from "../computer/desktop-approval";
 import { DESKTOP_POLICY_ACTION, desktopPolicyContext } from "../computer/desktop-policy";
+import { desktopPreflight } from "../computer/preflight";
+import {
+	type ResolvedShell,
+	activeShellKind,
+	killProcessTree,
+	resolvePowerShell,
+	spawnShell,
+	withForcedShell,
+} from "../core/shell";
+import { deckVideoAfterWrite } from "../deck/auto";
 import {
 	detectDesignNeed,
 	getAvailableDesignSystems,
@@ -94,29 +129,43 @@ import {
 import { formatToolResult, getMCPClient } from "../mcp";
 import { getMemoryManager } from "../memory";
 import {
+	ALLOWED_PATHS_DESCRIPTION,
+	CHECK_AGENT_DESCRIPTION,
+	LIST_AGENTS_DESCRIPTION,
+	PERMISSION_MODE_DESCRIPTION,
+	SPAWN_AGENT_DESCRIPTION,
+	SPAWN_MODEL_DESCRIPTION,
+	SPAWN_RUNTIME_DESCRIPTION,
+	checkAgentTool,
+	listAgentsTool,
+	spawnAgentTool,
+} from "../orchestration/delegation-tools";
+import {
 	type PermissionManager,
 	channelDenialMessage,
 	getPermissionManager,
 	isCommandDangerous,
 } from "../permissions";
-import {
-	MakerCheckerBlockedError,
-	assertMakerCheckerApproved,
-} from "../permissions/maker-checker-enforcer";
+import { cdPrefix, commandAfterCdPrefix, folderLabel } from "../permissions/cd-prefix";
+import { commandDir, withCommandDir } from "../permissions/command-policy";
 import {
 	editScopeViolation,
 	emptyOldTextError,
 	filmCraftWriteTargets,
 	normaliseAllowedPaths,
 } from "../permissions/edit-guards";
-import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
-import { commandTouchesAuditFiles, validatePath as guardPath } from "../permissions/path-guard.js";
-import { gateWriteTool } from "../permissions/write-content-gate.js";
-import { CreatedFiles, pathAbsent, watchRedirects, watchWrite } from "../permissions/s1-created-files";
+import {
+	MakerCheckerBlockedError,
+	assertMakerCheckerApproved,
+} from "../permissions/maker-checker-enforcer";
+import {
+	MCP_POLICY_ACTION,
+	askMcpApproval,
+	askMcpStartApproval,
+	mcpPolicyContext,
+} from "../permissions/mcp-gate";
 import { filterToolOutput } from "../permissions/output-filter";
-import { commandDir, withCommandDir } from "../permissions/command-policy";
-import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
-import { systemOneGate } from "../permissions/system-one-gate";
+import { type PathAccess, validatePath as guardPath } from "../permissions/path-guard.js";
 import {
 	type PermissionModeHolder,
 	currentPermissionHolder,
@@ -126,36 +175,44 @@ import {
 	runWithPermissionHolder,
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
+import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
+import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import {
-	ALLOWED_PATHS_DESCRIPTION,
-	CHECK_AGENT_DESCRIPTION,
-	PERMISSION_MODE_DESCRIPTION,
-	LIST_AGENTS_DESCRIPTION,
-	SPAWN_AGENT_DESCRIPTION,
-	SPAWN_MODEL_DESCRIPTION,
-	SPAWN_RUNTIME_DESCRIPTION,
-	checkAgentTool,
-	listAgentsTool,
-	spawnAgentTool,
-} from "../orchestration/delegation-tools";
-import {
-	MCP_POLICY_ACTION,
-	askMcpApproval,
-	askMcpStartApproval,
-	mcpPolicyContext,
-} from "../permissions/mcp-gate";
+	CreatedFiles,
+	pathAbsent,
+	watchRedirects,
+	watchWrite,
+} from "../permissions/s1-created-files";
+import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import { systemOneGate, systemOneMode } from "../permissions/system-one-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
 import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
+import type { PolicyActionType } from "../permissions/types.js";
+import { gateWriteTool } from "../permissions/write-content-gate.js";
 import {
 	WRITE_CONTENT_TOOLS,
-	applyEdit,
+	applyAt,
 	blockedToolMessage,
+	editRefusal,
+	logEditRefusal,
+	resolveEdit,
 	writtenContentFor,
 } from "../permissions/write-content-gate.js";
-import type { PolicyActionType } from "../permissions/types.js";
+import { loadSettings } from "../settings/store";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
-import { createEightBrowser, isolatedBrowser, touchesBrowserSecrets } from "../tools/eight-browser";
+import {
+	ANCHORED_NEWTEXT_DESC,
+	ANCHOR_PARAM_DESC,
+	HASHLINE_EDIT_DESC,
+	HASHLINE_READ_DESC,
+	OPTIONAL_OLDTEXT_DESC,
+	anchoredEditMessage,
+	applyAnchoredEdit,
+	hashLines,
+	hashlineEnabled,
+} from "../tools/edit-anchor";
+import { createEightBrowser, isolatedBrowser } from "../tools/eight-browser";
 import { describeImage, readImage, resizeImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
@@ -169,14 +226,43 @@ import {
 	vercelListProjects,
 	vercelSetEnv,
 } from "../tools/vercel";
+import { DeckSpecSchema } from "../tools/video-deck";
 import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
+import { isNoToolScope } from "./agent-scopes";
 import { ArtifactStore } from "./artifact-store";
-import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatCommandOutput } from "./command-output";
+import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatEditNotFound } from "./edit-hint";
+import { layoutMeasureLine } from "./layout-measure";
+import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
+import { RetiredFacts } from "./retired-facts";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 import { type VisionRouterResult, findVisionModel } from "./vision-router";
+
+/**
+ * A chained command the sanitizer refuses comes back as its pieces, so a piece
+ * System One's loopback lane will refuse on its own is named in the same
+ * refusal (#4072). The browser-op pilot sent `curl -sL ...; cat ...`, was told
+ * only to split it, resent the curl with -L and was blocked a second time.
+ * Only the lane's deterministic refusal is used, only in the mode where the
+ * lane runs (system-one-gate), so this never says more than System One would.
+ * A piece that is not a loopback curl, or a split that lands inside quotes,
+ * gives no hint rather than a wrong one.
+ */
+export async function chainedPieceRefusal(
+	command: string,
+	cwd: string,
+	env: Record<string, string | undefined> = process.env,
+): Promise<string | undefined> {
+	if (systemOneMode(env) !== "default") return undefined;
+	const { curlToLoopback } = await import("../permissions/s1-curl-loopback");
+	for (const piece of command.split(/;|&&|\|\|/)) {
+		const c = curlToLoopback(piece.trim(), cwd);
+		if (!c.ok && c.refuse) return c.refuse;
+	}
+	return undefined;
+}
 
 /**
  * Replay class per tool (#3653), used when a crashed session resumes with a
@@ -190,6 +276,19 @@ import { type VisionRouterResult, findVisionModel } from "./vision-router";
 export type ReplayClass = "replay" | "never" | "ask";
 
 /**
+ * Version of the replay policy below, written into the session journal.
+ * RULE: bump this whenever REPLAY_SAFE_TOOLS, NEVER_REPLAY_TOOLS or
+ * NEVER_REPLAY_PREFIXES change. Each journaled call also records the class it
+ * started under, and resume refuses to re-run a call whose class has changed
+ * since (8SO review, #4118).
+ */
+export const REPLAY_POLICY_VERSION = 1;
+
+export function isReplayClass(v: unknown): v is ReplayClass {
+	return v === "replay" || v === "never" || v === "ask";
+}
+
+/**
  * Only reads with no side effect that pass the same path and policy checks
  * as a live call: read_file (safePath + ToolG8 read_file) and git_log (no
  * repo-configured helpers run). Language-server tools can start a server that
@@ -197,12 +296,15 @@ export type ReplayClass = "replay" | "never" | "ask";
  * textconv helpers; the PDF, notebook, outline and listing readers take paths
  * without the full checks. Those stay "ask" (#3653 review).
  */
+// Changing this set, NEVER_REPLAY_TOOLS or NEVER_REPLAY_PREFIXES: bump REPLAY_POLICY_VERSION.
 const REPLAY_SAFE_TOOLS = new Set(["read_file", "git_log"]);
 
+// Changing this set: bump REPLAY_POLICY_VERSION.
 const NEVER_REPLAY_TOOLS = new Set([
 	"write_file",
 	"edit_file",
 	"run_command",
+	"powershell",
 	"git_checkout",
 	"git_create_branch",
 	"git_add",
@@ -213,6 +315,7 @@ const NEVER_REPLAY_TOOLS = new Set([
 	"post_message",
 	"spawn_agent",
 	"speak",
+	"render_video_deck",
 	"notebook_edit_cell",
 	"notebook_insert_cell",
 	"notebook_delete_cell",
@@ -227,7 +330,7 @@ const NEVER_REPLAY_TOOLS = new Set([
 	"run_computer_task",
 ]);
 
-/** Prefixes whose tools act on the desktop or a browser: never replayed. */
+/** Prefixes whose tools act on the desktop or a browser: never replayed. Changing: bump REPLAY_POLICY_VERSION. */
 const NEVER_REPLAY_PREFIXES = ["desktop_", "browser_"];
 
 export function toolReplayClass(toolName: string): ReplayClass {
@@ -242,10 +345,10 @@ export function toolReplayClass(toolName: string): ReplayClass {
  * Prevents path traversal attacks (../../etc/passwd).
  * Always normalizes the raw input - no pre-processing should be done by callers.
  */
-export function safePath(userPath: string, workingDirectory: string): string {
+export function safePath(userPath: string, workingDirectory: string, access: PathAccess): string {
 	// Static credential / UNC / device guard runs FIRST so a misconfigured
 	// workspace boundary cannot expose protected paths. Issue #2465.
-	const guard = guardPath(userPath, workingDirectory);
+	const guard = guardPath(userPath, workingDirectory, {}, access);
 	if (!guard.ok) {
 		throw new Error(`Path blocked by path-guard: ${guard.reason} ("${userPath}")`);
 	}
@@ -297,7 +400,8 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 			`Path escapes workspace via symlink: "${userPath}" points outside ${base}. ` +
 				"Files can only be read or written inside the workspace.",
 		);
-	const inside = (real: string, realBase: string) => real === realBase || real.startsWith(realBase + path.sep);
+	const inside = (real: string, realBase: string) =>
+		real === realBase || real.startsWith(realBase + path.sep);
 
 	let realBase: string;
 	try {
@@ -311,7 +415,9 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 		finalStat = fs.lstatSync(target, { throwIfNoEntry: false });
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === "ELOOP") {
-			throw new Error(`Refused: "${userPath}" passes through a symlink loop (not a symlink escape). Use a real path.`);
+			throw new Error(
+				`Refused: "${userPath}" passes through a symlink loop (not a symlink escape). Use a real path.`,
+			);
 		}
 		throw err;
 	}
@@ -322,7 +428,9 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 		} catch (err) {
 			const code = (err as NodeJS.ErrnoException).code;
 			if (code === "ELOOP") {
-				throw new Error(`Refused: "${userPath}" is part of a symlink loop (not a symlink escape). Use a real path.`);
+				throw new Error(
+					`Refused: "${userPath}" is part of a symlink loop (not a symlink escape). Use a real path.`,
+				);
 			}
 			// Dangling: say where it points. Inside the workspace the agent can write that path directly.
 			let dest = "";
@@ -353,7 +461,9 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 		realAncestor = fs.realpathSync(ancestor);
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === "ELOOP") {
-			throw new Error(`Refused: "${userPath}" passes through a symlink loop (not a symlink escape). Use a real path.`);
+			throw new Error(
+				`Refused: "${userPath}" passes through a symlink loop (not a symlink escape). Use a real path.`,
+			);
 		}
 		throw escape();
 	}
@@ -368,7 +478,7 @@ function assertNoSymlinkEscape(target: string, base: string, userPath: string): 
 export function resolveSpeakOut(out: unknown, workingDirectory: string): string {
 	const named = typeof out === "string" && out.trim() ? out.trim() : `speak-${Date.now()}.wav`;
 	if (!named.toLowerCase().endsWith(".wav")) throw new Error(`out must end in .wav ("${named}")`);
-	const target = safePath(named, workingDirectory);
+	const target = safePath(named, workingDirectory, "write");
 	// safePath is lexical. A directory symlink inside the workspace would carry the
 	// write outside it, so check real locations: the nearest existing ancestor of the
 	// parent must sit under the real workspace, and the file itself must not be a link.
@@ -377,10 +487,13 @@ export function resolveSpeakOut(out: unknown, workingDirectory: string): string 
 	while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
 	const real = fs.realpathSync(ancestor);
 	if (real !== root && !real.startsWith(root + path.sep)) {
-		throw new Error(`Path traversal blocked: "${named}" resolves through a link outside the working directory`);
+		throw new Error(
+			`Path traversal blocked: "${named}" resolves through a link outside the working directory`,
+		);
 	}
 	try {
-		if (fs.lstatSync(target).isSymbolicLink()) throw new Error(`refusing to write through a symlink: "${named}"`);
+		if (fs.lstatSync(target).isSymbolicLink())
+			throw new Error(`refusing to write through a symlink: "${named}"`);
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
 	}
@@ -394,7 +507,9 @@ function assertRealInside(target: string, named: string, workingDirectory: strin
 	while (!fs.existsSync(ancestor)) ancestor = path.dirname(ancestor);
 	const real = fs.realpathSync(ancestor);
 	if (real !== root && !real.startsWith(root + path.sep)) {
-		throw new Error(`Path traversal blocked: "${named}" resolves through a link outside the working directory`);
+		throw new Error(
+			`Path traversal blocked: "${named}" resolves through a link outside the working directory`,
+		);
 	}
 }
 
@@ -403,16 +518,23 @@ function assertRealInside(target: string, named: string, workingDirectory: strin
  * location of its nearest existing parent inside the real workspace, and not itself a symlink.
  */
 export function confineWrite(named: string, workingDirectory: string): string {
-	const target = safePath(named, workingDirectory);
+	const target = safePath(named, workingDirectory, "write");
 	assertRealInside(path.dirname(target), named, workingDirectory);
 	const st = fs.lstatSync(target, { throwIfNoEntry: false });
 	if (st?.isSymbolicLink()) throw new Error(`refusing to write through a symlink: "${named}"`);
 	return target;
 }
 
+/** Where render_video_deck may write: a .mp4 inside the working directory, no symlinks. */
+export function resolveDeckOut(out: unknown, workingDirectory: string): string {
+	const named = typeof out === "string" && out.trim() ? out.trim() : "deck.mp4";
+	if (!named.toLowerCase().endsWith(".mp4")) throw new Error(`out must end in .mp4 ("${named}")`);
+	return confineWrite(named, workingDirectory);
+}
+
 /** A path a tool may read: inside the working directory after following every link. */
 export function confineRead(named: string, workingDirectory: string): string {
-	const target = safePath(named, workingDirectory);
+	const target = safePath(named, workingDirectory, "read");
 	assertRealInside(target, named, workingDirectory);
 	return target;
 }
@@ -539,8 +661,46 @@ function positiveInt(value: unknown): number | undefined {
 	return Number.isFinite(n) && n >= 1 ? n : undefined;
 }
 
+type FnDef = { type: string; function: { name: string; description: string; parameters: any } };
+
+/**
+ * With EIGHT_EDIT_FORMAT=hashline (#3472), read_file and edit_file advertise
+ * anchors; edit_file keeps oldText as an optional alternative. Flag off: the
+ * definitions are returned untouched.
+ */
+function withHashline(defs: object[]): object[] {
+	if (!hashlineEnabled()) return defs;
+	return defs.map((d) => {
+		const def = d as FnDef;
+		const name = def.function?.name;
+		if (name === "read_file") {
+			return { ...def, function: { ...def.function, description: HASHLINE_READ_DESC } };
+		}
+		if (name !== "edit_file") return d;
+		const { path, oldText, newText, startLine } = def.function.parameters.properties;
+		return {
+			...def,
+			function: {
+				...def.function,
+				description: HASHLINE_EDIT_DESC,
+				parameters: {
+					type: "object",
+					properties: {
+						path,
+						anchor: { type: "string", description: ANCHOR_PARAM_DESC },
+						newText: { ...newText, description: ANCHORED_NEWTEXT_DESC },
+						oldText: { ...oldText, description: OPTIONAL_OLDTEXT_DESC },
+						startLine,
+					},
+					required: ["path", "newText"],
+				},
+			},
+		};
+	});
+}
+
 /** Text-tool definitions for lean MCP access (#3474); only sent with EIGHT_MCP_LEAN=1. */
-const MCP_LEAN_TOOL_DEFS = [
+export const MCP_LEAN_TOOL_DEFS = [
 	{
 		type: "function",
 		function: {
@@ -550,7 +710,10 @@ const MCP_LEAN_TOOL_DEFS = [
 			parameters: {
 				type: "object",
 				properties: {
-					query: { type: "string", description: "Words describing the job, e.g. 'weather forecast'" },
+					query: {
+						type: "string",
+						description: "Words describing the job, e.g. 'weather forecast'",
+					},
 					tool: { type: "string", description: "Exact tool name whose input schema you need" },
 					server: { type: "string", description: "Limit to this MCP server" },
 				},
@@ -562,7 +725,7 @@ const MCP_LEAN_TOOL_DEFS = [
 		function: {
 			name: "mcp_call_tool",
 			description:
-				"[MCP] Call one MCP tool. Pass fields (dotted paths such as 'data.total') to keep only those parts of a JSON answer. Answers over 4000 characters are saved to a file and you get its path plus a short preview.",
+				"[MCP] Calls one MCP tool: pass server, tool (its exact name) and args (per its input schema). Pass fields (dotted paths such as 'data.total') to keep only those parts of a JSON answer. Answers over 4000 characters are saved to a file and you get its path plus a short preview.",
 			parameters: {
 				type: "object",
 				properties: {
@@ -580,11 +743,17 @@ const MCP_LEAN_TOOL_DEFS = [
 /** 8gent Browser drives browser_*; the external browser-use CLI is opt-in only (#3589). */
 const useBrowserUse = () => process.env.EIGHT_BROWSER_BACKEND === "browser-use";
 let eightBrowser: ReturnType<typeof createEightBrowser> | undefined;
-const getEightBrowser = () => {
+/** The workspace of the executor that last used the browser: the source of its loopback allowlist. */
+let browserWorkspace: string | undefined;
+const getEightBrowser = (workspace: string) => {
+	browserWorkspace = workspace;
 	if (!eightBrowser) {
-		// A named profile (#3622) is the bot's own login-free browser: it never types into password or
-		// payment fields and never opens loopback or private hosts.
-		eightBrowser = createEightBrowser(undefined, { isolated: () => isolatedBrowser() });
+		// A named profile (#3622) is the bot's own login-free browser: it never opens private hosts, and
+		// reaches loopback, or types into a password field, only on the run's own listed ports (#3785).
+		eightBrowser = createEightBrowser(undefined, {
+			isolated: () => isolatedBrowser(),
+			workspace: () => browserWorkspace,
+		});
 		// Session end: close the tabs this process opened (natural exit only; never other tabs).
 		process.once("beforeExit", () => void eightBrowser?.closeAll());
 	}
@@ -609,9 +778,72 @@ function redactBrowserArgs(args: Record<string, unknown>): Record<string, unknow
 	return { ...args, actions };
 }
 
+/** The PowerShell for the optional `powershell` tool: win32 only, and only when settings.shell.powershellTool is on. */
+function powershellToolShell(): ResolvedShell | undefined {
+	if (process.platform !== "win32") return undefined;
+	try {
+		if (!loadSettings().shell?.powershellTool) return undefined;
+	} catch {
+		return undefined;
+	}
+	return resolvePowerShell();
+}
+
+export const POWERSHELL_TOOL_DEF = {
+	type: "function",
+	function: {
+		name: "powershell",
+		description:
+			"[SHELL] Windows only: pass command, a PowerShell command line. Runs a PowerShell command (-NoProfile -NonInteractive) and returns stdout/stderr. Use for Windows-native work (Get-ChildItem, registry, services); use run_command for git, bun, npm and POSIX tools. Same permission checks as run_command.",
+		parameters: {
+			type: "object",
+			properties: { command: { type: "string", description: "PowerShell command to run" } },
+			required: ["command"],
+		},
+	},
+};
+
+/** Policy action class for every one-file extension tool call (G1). */
+export const EXTENSION_POLICY_ACTION = "extension_call" as const;
+
+/**
+ * render_video_deck's `spec` parameter as a real nested schema (#4172), derived from the
+ * renderer's own DeckSpecSchema so the fields a model is shown are the fields it is checked
+ * against. The native tool list carries no function description in a headless run, so this
+ * schema is where a model learns slides[{title, text, bullets, narration, ...}], size and voice.
+ * Only names, types, enums and nesting go out: lengths, counts, ranges, defaults and the
+ * closed-object flags are left out to keep every request inside the headless prompt budget
+ * (headless-prompt.test.ts, 60% rule). The renderer still enforces them and says which failed.
+ */
+const LEAN_DROP = new Set([
+	"$schema",
+	"additionalProperties",
+	"default",
+	"maxItems",
+	"maxLength",
+	"maximum",
+	"minItems",
+	"minimum",
+]);
+export const DECK_SPEC_PARAMETER: Record<string, unknown> = (() => {
+	const lean = (node: unknown): unknown => {
+		if (Array.isArray(node)) return node.map(lean);
+		if (node === null || typeof node !== "object") return node;
+		const out: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(node)) {
+			if (LEAN_DROP.has(k)) continue;
+			out[k] = lean(v);
+		}
+		return out;
+	};
+	return lean(z.toJSONSchema(DeckSpecSchema, { io: "input" })) as Record<string, unknown>;
+})();
+
 export class ToolExecutor {
 	private workingDirectory: string;
 	private permissionManager: PermissionManager;
+	/** Step cap and repeat stop for desktop_act, per executor lifetime. */
+	private desktopActSession = new DesktopActSession();
 	private hookManager: HookManager;
 	private toolG8: ToolG8;
 	private agentId: string;
@@ -659,6 +891,12 @@ export class ToolExecutor {
 	private permission: PermissionModeHolder | undefined;
 	/** Keys the post_message session limit (#3595); a real session id when one was given. */
 	private postSession: string;
+	/** The turn's task text; post_message checks its countable rules before sending (#4191). */
+	private presendTask = "";
+	/** Redrafts asked for this turn; one is allowed, a second failure stops the turn. */
+	private presendRedrafts = 0;
+	/** Set on the second failed draft; the turn loop takes it and stops the turn with it. */
+	private presendStop: FormattingStop | null = null;
 	/**
 	 * Can the model driving this executor see images (#3641)? Asked when
 	 * read_image runs, never before, so a turn that reads no image costs no
@@ -680,6 +918,11 @@ export class ToolExecutor {
 			permission?: PermissionModeHolder;
 			visionCapable?: () => Promise<boolean>;
 			resolveVisionModel?: () => Promise<VisionRouterResult>;
+			/**
+			 * A person is at the keyboard (G1 extension_call policy). Default: not
+			 * unattended and both stdin and stdout are terminals.
+			 */
+			attended?: boolean;
 		} = {},
 	) {
 		this.workingDirectory = workingDirectory;
@@ -690,6 +933,9 @@ export class ToolExecutor {
 			options.resolveVisionModel ?? (() => findVisionModel({ preferLocal: true }));
 		this.agentId = agentId;
 		this.unattended = options.unattended ?? false;
+		this.attended =
+			options.attended ??
+			(!this.unattended && Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY));
 		this.allowedPaths = normaliseAllowedPaths(options.allowedPaths);
 		this.openOnWrite = options.openOnWrite ?? true;
 		this.commitGate = new CommitGate(workingDirectory, (command, timeoutSec) =>
@@ -735,24 +981,94 @@ export class ToolExecutor {
 		});
 	}
 
+	/** Measured-layout blocks already in this turn's context (#3823), so read_image does not repeat them. */
+	private layoutNotesSent = new Set<string>();
+
+	/** The agent put this measured-layout block in front of the model already this turn. */
+	markLayoutSent(block: string): void {
+		this.layoutNotesSent.add(block);
+	}
+
+	/** The measured layout for read_image, or "" when there is none or the model already has it this turn. */
+	private async layoutForRead(file: string): Promise<string> {
+		const measured = await layoutMeasureLine(file);
+		return measured && !this.layoutNotesSent.has(measured) ? measured : "";
+	}
+
 	/** A new turn starts: files may be opened once again (#3107). */
-	beginTurn(): void {
+	beginTurn(task = ""): void {
+		this.presendTask = task;
+		this.presendRedrafts = 0;
+		this.presendStop = null;
 		this.openedThisTurn.clear();
+		this.layoutNotesSent.clear();
 		this.retiredFacts.reset();
+	}
+
+	/**
+	 * Check an outward draft against the turn task's countable rules (#4191). null: send it.
+	 * First failure: nothing is sent and the model gets the draft and the broken rule for ONE
+	 * redraft. Second failure: nothing is sent and the turn stops with formatting_rule_violation.
+	 */
+	private presendCheck(draft: string): string | null {
+		if (!this.presendTask || draft.trim() === "") return null;
+		const sources: Record<string, string> = {};
+		let root: string;
+		try {
+			root = fs.realpathSync(path.resolve(this.workingDirectory));
+		} catch {
+			root = "";
+		}
+		for (const rel of root ? namedSources(this.presendTask) : []) {
+			try {
+				// A symlink, or a real path outside the working directory, is never read.
+				const abs = path.resolve(root, rel);
+				if (fs.lstatSync(abs).isSymbolicLink()) continue;
+				const real = fs.realpathSync(abs);
+				if (!real.startsWith(root + path.sep)) continue;
+				if (fs.statSync(real).size <= 256 * 1024) sources[rel] = fs.readFileSync(real, "utf8");
+			} catch {
+				// a source that cannot be read is unchecked, never a failure
+			}
+		}
+		const v = checkDraftConstraints(this.presendTask, draft, sources);
+		if (v.ok) return null;
+		const broken = describeFailures(v);
+		if (this.presendRedrafts === 0) {
+			this.presendRedrafts++;
+			console.log(`[pre-send] draft breaks a task rule, one redraft asked: ${broken}`);
+			return `[BLOCKED] post_message pre-send check: the draft breaks a rule in the task, so nothing was sent. Broken: ${broken}. Your draft was:\n${draft}\nRewrite it once so every rule holds, then call post_message again. A second draft that breaks a rule stops the turn.`;
+		}
+		const constraint = v.failed[0].constraint.phrase;
+		this.presendStop = {
+			kind: "formatting_rule_violation",
+			reason: `post_message draft broke a task rule after one redraft: ${broken}`,
+			constraint,
+			draft,
+		};
+		console.log(`[pre-send] redraft broke a task rule again, turn stopped: ${broken}`);
+		return `[BLOCKED] post_message pre-send check: the redraft still breaks a rule in the task (${broken}). Nothing was sent. The turn is stopped. Do not retry.`;
+	}
+
+	/** The formatting_rule_violation stop from the second failed draft, once (#4191). */
+	takePresendStop(): FormattingStop | null {
+		const s = this.presendStop;
+		this.presendStop = null;
+		return s;
 	}
 
 	/**
 	 * Get tool definitions for the LLM
 	 */
 	getToolDefinitions(): object[] {
-		return [
+		return withHashline([
 			// Code exploration
 			{
 				type: "function",
 				function: {
 					name: "get_outline",
 					description:
-						"[CODE] Returns a list of all symbols (functions, classes, types, exports) in a file with their line numbers and signatures. Use this FIRST before read_file to understand file structure - much cheaper than reading the whole file. Typically followed by get_symbol to extract just the function you need. If the file is not indexed, falls back to AST parsing.",
+						"[CODE] Pass filePath; returns every symbol (functions, classes, types, exports) in that file with line numbers and signatures. Use this FIRST before read_file to understand file structure - much cheaper than reading the whole file. Typically followed by get_symbol to extract just the function you need. If the file is not indexed, falls back to AST parsing.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -770,7 +1086,7 @@ export class ToolExecutor {
 				function: {
 					name: "get_symbol",
 					description:
-						"[CODE] Returns the full source code of a single symbol (function, class, variable, type) by ID. Use this after get_outline to extract exactly the code you need without reading the entire file. Typically used after get_outline or search_symbols. If the symbol is not found, check the ID format: 'path/to/file.ts::symbolName'.",
+						"[CODE] Pass symbolId as 'path/to/file.ts::name'; returns the full source of that one symbol (function, class, variable, type). Use this after get_outline to extract exactly the code you need without reading the entire file. Typically used after get_outline or search_symbols. If the symbol is not found, check the ID format: 'path/to/file.ts::symbolName'.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -788,7 +1104,7 @@ export class ToolExecutor {
 				function: {
 					name: "search_symbols",
 					description:
-						"[CODE] Returns matching symbol names, locations, and kinds across the entire indexed codebase. Use this when you know what you are looking for but not where it lives. Prefer this over reading multiple files to find a function. If no results, try broader query terms or check that the project is indexed with get_project_outline.",
+						"[CODE] Pass query (a name or a few words); returns matching symbol names, locations and kinds across the whole indexed codebase. Use this when you know what you are looking for but not where it lives. Prefer this over reading multiple files to find a function. If no results, try broader query terms or check that the project is indexed with get_project_outline.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -808,7 +1124,7 @@ export class ToolExecutor {
 				function: {
 					name: "locate",
 					description:
-						'[CODE] Answers "where is X?" in one call with at most 5 "file:line kind text" rows. Give it a symbol name (createDecider, Foo::bar), a path or file name (decide/rules.ts), a quoted string or error message, or a short description. It picks symbol, path or text search itself. Use this FIRST to find where something lives, then get_symbol or read_file on the row you need.',
+						'[CODE] Pass query (a symbol, path, quoted text or error) to answer "where is X?" in one call: at most 5 "file:line kind text" rows. Give it a symbol name (createDecider, Foo::bar), a path or file name (decide/rules.ts), a quoted string or error message, or a short description. It picks symbol, path or text search itself. Use this FIRST to find where something lives, then get_symbol or read_file on the row you need.',
 					parameters: {
 						type: "object",
 						properties: {
@@ -888,7 +1204,7 @@ export class ToolExecutor {
 				function: {
 					name: "write_file",
 					description:
-						"[FILE] Creates a new file or completely overwrites an existing file with the given content. Use when creating new files or rewriting an entire file. Prefer edit_file for surgical changes to existing files. ALWAYS use relative paths (e.g. 'server.ts', 'src/index.ts'). NEVER use absolute paths. If the parent directory does not exist, this will fail - use run_command to mkdir first.",
+						"[FILE] Writes content to the file at path (relative), creating it or overwriting the whole file; for small changes use edit_file. Use when creating new files or rewriting an entire file. Prefer edit_file for surgical changes to existing files. ALWAYS use relative paths (e.g. 'server.ts', 'src/index.ts'). NEVER use absolute paths. If the parent directory does not exist, this will fail - use run_command to mkdir first.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -908,16 +1224,25 @@ export class ToolExecutor {
 				function: {
 					name: "edit_file",
 					description:
-						"[FILE] Returns confirmation after replacing an exact text match in a file with new text. Use this for surgical edits to existing files - prefer over write_file when changing a specific function or block. The oldText must match exactly (whitespace-sensitive). If the match fails, read_file first to get the exact current content, then retry.",
+						"[FILE] Replaces oldText (exact existing line or block) in file path with newText in place; to update a line, oldText is that whole line. Returns confirmation. Use this for surgical edits to existing files - prefer over write_file when changing a specific function or block. The oldText must match exactly (whitespace-sensitive). If the match fails, read_file first to get the exact current content, then retry.",
 					parameters: {
 						type: "object",
 						properties: {
 							path: { type: "string", description: "Path to the file" },
 							oldText: {
 								type: "string",
-								description: "Text to find and replace",
+								description:
+									"The exact existing text being changed, a whole line or block; after the edit the file contains newText and not oldText",
 							},
-							newText: { type: "string", description: "Replacement text" },
+							newText: {
+								type: "string",
+								description: "Replacement for oldText, in place",
+							},
+							startLine: {
+								type: "number",
+								description:
+									"Optional 1-based line. If oldText appears more than once, the copy at or after this line is edited. Without it, a duplicate oldText is refused.",
+							},
 						},
 						required: ["path", "oldText", "newText"],
 					},
@@ -1010,7 +1335,7 @@ export class ToolExecutor {
 				function: {
 					name: "git_commit",
 					description:
-						"[GIT] Creates a git commit with the staged changes and returns the commit hash. Use after git_add. If nothing is staged, this will fail - run git_status first to verify staged files. Follow the project's commit message conventions (check git_log for examples).",
+						"[GIT] Commits the staged changes with message and returns the commit hash; run git_add first. Use after git_add. If nothing is staged, this will fail - run git_status first to verify staged files. Follow the project's commit message conventions (check git_log for examples).",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1108,7 +1433,7 @@ export class ToolExecutor {
 				function: {
 					name: "web_search",
 					description:
-						"[WEB] Returns a list of search results (titles, URLs, snippets) from DuckDuckGo. Use when you need to find documentation, look up error messages, or research a topic. Follow up with web_fetch on a specific result URL to get full page content. If results are poor, try rephrasing with more specific technical terms.",
+						"[WEB] Pass query; returns a list of search results (titles, URLs, snippets) from DuckDuckGo. Use when you need to find documentation, look up error messages, or research a topic. Follow up with web_fetch on a specific result URL to get full page content. If results are poor, try rephrasing with more specific technical terms.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1127,7 +1452,7 @@ export class ToolExecutor {
 				function: {
 					name: "web_fetch",
 					description:
-						"[WEB] Returns the text content of a web page at the given URL (HTML stripped to readable text). Use after web_search to read a specific page, or directly when you have a known URL (docs, GitHub, npm). Results are cached to disk. If the page is too large, only the first portion is returned.",
+						"[WEB] Pass url; returns the readable text of that web page (HTML stripped). Use after web_search to read a specific page, or directly when you have a known URL (docs, GitHub, npm). Results are cached to disk. If the page is too large, only the first portion is returned.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1158,9 +1483,61 @@ export class ToolExecutor {
 			{
 				type: "function",
 				function: {
+					name: "compare_layout",
+					description:
+						"[FILE] Diffs page html with mock-up image reference and names each off band's element: fix it with edit_file, never rewrite the page. Returns each band's pixel offset and a similarity number. Use it after writing a page from a mock-up, fix the largest offsets, and run it again until the bands are within 2px. Local and offline; the page cannot reach the network.",
+					parameters: {
+						type: "object",
+						properties: {
+							html: { type: "string", description: "Path to the HTML file you wrote" },
+							reference: { type: "string", description: "Path to the mock-up image (png, jpg)" },
+						},
+						required: ["html", "reference"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "render_video_deck",
+					description:
+						"[MEDIA] Narrated mp4 from args {spec:{size:'1280x720', slides:[{title, bullets, narration}]}, out:'deck.mp4'}, local code only. Deterministic. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task: you write the spec, it draws the slides, joins them and returns { path, durationSec }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?: string[], image?: 'png/jpg path in the working directory', seconds?: 1-60 (default 4), narration?: 'spoken by the local voice', voice? }] } (1-40 slides, each needs a title, text, bullets or image). Narration uses the same local engine as speak and stretches a slide to fit its voice. No music, no network. Never shells out.",
+					parameters: {
+						type: "object",
+						properties: {
+							spec: DECK_SPEC_PARAMETER,
+							out: {
+								type: "string",
+								description: "Output .mp4 path inside the working directory (default deck.mp4)",
+							},
+						},
+						required: ["spec"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "screen_locate",
+					description:
+						"[FILE] Returns the point to click for target (a thing named in words) in the screenshot at image.",
+					parameters: {
+						type: "object",
+						properties: {
+							image: { type: "string", description: "Screenshot path" },
+							target: { type: "string", description: "e.g. the Sign in button" },
+							viewport: { type: "string", description: 'Optional "WxH" for cssX/cssY' },
+						},
+						required: ["image", "target"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
 					name: "read_image",
 					description:
-						"[FILE] Reads an image file (png, jpg, gif, webp). If you can see images, the picture is attached to the next message for you to look at; otherwise you get its size and format, and describe_image can tell you what is in it. Use for screenshots, UI mockups, charts and diagrams the task refers to.",
+						"[FILE] Reads the image file at path (png, jpg, gif, webp). If you can see images, the picture is attached to the next message for you to look at; otherwise you get its size and format, and describe_image can tell you what is in it. Use for screenshots, UI mockups, charts and diagrams the task refers to.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1175,7 +1552,7 @@ export class ToolExecutor {
 				function: {
 					name: "describe_image",
 					description:
-						"[FILE] Describes an image file in words using a local vision model. Use when you cannot see images yourself, or need a second reading of a screenshot, chart or diagram. Pass a prompt to ask something specific about the image.",
+						"[FILE] Describes the image file at path in words using a local vision model; pass prompt to ask something specific. Use when you cannot see images yourself, or need a second reading of a screenshot, chart or diagram. Pass a prompt to ask something specific about the image.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1194,7 +1571,7 @@ export class ToolExecutor {
 				function: {
 					name: "read_pdf",
 					description:
-						"[FILE] Reads a PDF file and returns extracted text content, page count, and metadata (title, author, dates). Use for analyzing PDF documents, contracts, reports, or papers. For large PDFs, use read_pdf_page to read specific pages. Follow up with search_pdf to find specific content within a PDF.",
+						"[FILE] Reads the PDF file at path and returns its extracted text, page count and metadata (title, author, dates). Use for analyzing PDF documents, contracts, reports, or papers. For large PDFs, use read_pdf_page to read specific pages. Follow up with search_pdf to find specific content within a PDF.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1209,7 +1586,7 @@ export class ToolExecutor {
 				function: {
 					name: "read_pdf_page",
 					description:
-						"[FILE] Reads a specific page from a PDF file and returns its text content. Use when you only need content from certain pages of a large PDF, or when the full PDF text was truncated. Page numbers start at 1.",
+						"[FILE] Reads page pageNum (1-based) of the PDF file at path and returns its text. Use when you only need content from certain pages of a large PDF, or when the full PDF text was truncated. Page numbers start at 1.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1228,7 +1605,7 @@ export class ToolExecutor {
 				function: {
 					name: "search_pdf",
 					description:
-						"[FILE] Searches for text within a PDF file and returns matching positions with surrounding context. Use when you need to find specific content, keywords, or phrases in a PDF without reading the entire document.",
+						"[FILE] Searches the PDF file at path for query and returns matching positions with surrounding context. Use when you need to find specific content, keywords, or phrases in a PDF without reading the entire document.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1252,7 +1629,7 @@ export class ToolExecutor {
 				function: {
 					name: "extract_video",
 					description:
-						"[VIDEO] Extracts structured information from a video file: a scene summary, timestamped visual events, and a speech transcript. Use to understand screen recordings, demos, meetings, or clips, or to ingest a video into the knowledge graph. Runs fully local on-device. Requires the video-understanding capability to be installed (8gent vision install).",
+						"[VIDEO] Extracts from the video file at path a scene summary, timestamped visual events and a speech transcript. Use to understand screen recordings, demos, meetings, or clips, or to ingest a video into the knowledge graph. Runs fully local on-device. Requires the video-understanding capability to be installed (8gent vision install).",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1292,7 +1669,7 @@ export class ToolExecutor {
 				function: {
 					name: "vercel_get_deployments",
 					description:
-						"[DEPLOY] Returns recent deployments for a Vercel project including state, URL, and commit message. Use after vercel_list_projects to check deployment status.",
+						"[DEPLOY] Returns recent deployments for the Vercel project projectId, including state, URL and commit message. Use after vercel_list_projects to check deployment status.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1311,7 +1688,7 @@ export class ToolExecutor {
 				function: {
 					name: "vercel_deploy",
 					description:
-						"[DEPLOY] Triggers a redeployment of the latest deployment for a Vercel project. Returns the new deployment ID and URL.",
+						"[DEPLOY] Triggers a redeployment of the latest deployment for the Vercel project projectId. Returns the new deployment ID and URL.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1326,7 +1703,7 @@ export class ToolExecutor {
 				function: {
 					name: "vercel_set_env",
 					description:
-						"[DEPLOY] Creates or updates an environment variable on a Vercel project. Value is stored encrypted. Targets production, preview, and development by default.",
+						"[DEPLOY] Sets environment variable key to value on the Vercel project projectId, creating or updating it. Value is stored encrypted. Targets production, preview, and development by default.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1351,7 +1728,7 @@ export class ToolExecutor {
 				function: {
 					name: "vercel_get_env",
 					description:
-						"[DEPLOY] Returns all environment variables for a Vercel project (keys and targets only, values are encrypted).",
+						"[DEPLOY] Returns all environment variables for the Vercel project projectId (keys and targets only, values are encrypted).",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1366,7 +1743,7 @@ export class ToolExecutor {
 				function: {
 					name: "vercel_list_domains",
 					description:
-						"[DEPLOY] Returns all custom domains configured for a Vercel project with verification status.",
+						"[DEPLOY] Returns all custom domains for the Vercel project projectId with verification status.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1381,7 +1758,7 @@ export class ToolExecutor {
 				function: {
 					name: "vercel_get_deployment_logs",
 					description:
-						"[DEPLOY] Returns build/runtime logs for a specific deployment. Use the deployment ID from vercel_get_deployments.",
+						"[DEPLOY] Returns build/runtime logs for the deployment deploymentId (the uid from vercel_get_deployments). Use the deployment ID from vercel_get_deployments.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1400,22 +1777,47 @@ export class ToolExecutor {
 				function: {
 					name: "film_craft",
 					description:
-						"[VIDEO] Makes slide videos look designed, not like a default slideshow. action=list shows the film presets (palette, type, title card, lower third, grade, camera move, transition, pacing, music bed). action=plan takes slides [{title, kicker?, sub?, lower?, seconds}] and writes out_dir/film.sh: magick draws each slide (no drawtext needed), ffmpeg adds the camera move, text blur-in, transitions and grade, and muxes narration and/or bed; run it with bash. Picture length equals the sum of slide seconds. action=bed writes an original music bed wav (seconds, hits = cut times). action=mix returns the grade of grade_from with the titles of preset.",
+						"[VIDEO] Makes slide videos look designed, not like a default slideshow: action is list, plan, bed or mix. action=list shows the film presets (palette, type, title card, lower third, grade, camera move, transition, pacing, music bed). action=plan takes slides [{title, kicker?, sub?, lower?, seconds}] and writes out_dir/film.sh: magick draws each slide (no drawtext needed), ffmpeg adds the camera move, text blur-in, transitions and grade, and muxes narration and/or bed; run it with bash. Picture length equals the sum of slide seconds. action=bed writes an original music bed wav (seconds, hits = cut times). action=mix returns the grade of grade_from with the titles of preset.",
 					parameters: {
 						type: "object",
 						properties: {
 							action: { type: "string", description: "list | plan | bed | mix" },
-							preset: { type: "string", description: "Film preset name from action=list (default lotus-night)" },
-							grade_from: { type: "string", description: "Optional: take grade, camera and cuts from this preset, titles from preset" },
-							slides: { type: "array", description: "plan: [{title, kicker?, sub?, lower?, seconds}] in order", items: { type: "object" } },
-							out_dir: { type: "string", description: "plan: folder for film.sh, frames and the mp4 (default video)" },
-							out: { type: "string", description: "plan: output mp4 file name in out_dir (default film.mp4); bed: wav path" },
+							preset: {
+								type: "string",
+								description: "Film preset name from action=list (default lotus-night)",
+							},
+							grade_from: {
+								type: "string",
+								description:
+									"Optional: take grade, camera and cuts from this preset, titles from preset",
+							},
+							slides: {
+								type: "array",
+								description: "plan: [{title, kicker?, sub?, lower?, seconds}] in order",
+								items: { type: "object" },
+							},
+							out_dir: {
+								type: "string",
+								description: "plan: folder for film.sh, frames and the mp4 (default video)",
+							},
+							out: {
+								type: "string",
+								description:
+									"plan: output mp4 file name in out_dir (default film.mp4); bed: wav path",
+							},
 							width: { type: "number", description: "plan: width (default 1280)" },
 							height: { type: "number", description: "plan: height (default 720)" },
-							narration: { type: "string", description: "plan: narration audio file; the bed ducks under it" },
+							narration: {
+								type: "string",
+								description: "plan: narration audio file; the bed ducks under it",
+							},
 							bed: { type: "string", description: "plan: music bed wav from action=bed" },
 							seconds: { type: "number", description: "bed: length in seconds" },
-							hits: { type: "array", items: { type: "number" }, description: "bed: cut times in seconds (risers and booms land on them)" },
+							hits: {
+								type: "array",
+								items: { type: "number" },
+								description: "bed: cut times in seconds (risers and booms land on them)",
+							},
 						},
 						required: ["action"],
 					},
@@ -1427,7 +1829,7 @@ export class ToolExecutor {
 				function: {
 					name: "deck_theme",
 					description:
-						"[DESIGN] Import-ready Marp deck themes, one per design system. USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
+						"[DESIGN] Import-ready Marp deck themes, one per design system: action is list, apply (to deck) or mix (palette plus type). USE THIS when a deck (Marp markdown) has no theme: `list` shows name, mood and 3 swatches; `apply` sets `theme: <name>` in the deck's front matter and copies the CSS next to it (overwrites <name>.css); `mix` (palette=<a>, type=<b>) writes a derived theme. Title slide: `<!-- _class: lead -->`, section break: `<!-- _class: invert -->`. Render with the marp command the result returns.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1551,7 +1953,7 @@ export class ToolExecutor {
 				function: {
 					name: "recall",
 					description:
-						"[MEMORY] Returns matching facts from all memory layers (session, project, global) ranked by relevance. Use this when you need context about the user, project conventions, past decisions, or previously learned information. Search with broad keywords first, then narrow down. If no results, try synonyms or related terms. Useful at the start of a task to check for prior context.",
+						"[MEMORY] Pass query (keywords); returns matching facts from all memory layers (session, project, global) ranked by relevance. Use this when you need context about the user, project conventions, past decisions, or previously learned information. Search with broad keywords first, then narrow down. If no results, try synonyms or related terms. Useful at the start of a task to check for prior context.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1570,12 +1972,13 @@ export class ToolExecutor {
 			},
 			// Desktop Computer Use tools (Power #10)
 			...getComputerToolDefs(),
+			DESKTOP_ACT_TOOL_DEF,
 			{
 				type: "function",
 				function: {
 					name: "run_computer_task",
 					description:
-						"[DESKTOP] Run an autonomous multi-step computer-use task. The agent perceives the screen (accessibility tree first, screenshot as fallback) and uses mouse/keyboard tools to complete the goal. Use for tasks that span multiple apps or require navigating a GUI. The vision model is configured via ~/.8gent/config.json vision.computerUseModel.",
+						"[DESKTOP] Runs an autonomous multi-step computer-use task until goal (plain words) is done on the desktop. The agent perceives the screen (accessibility tree first, screenshot as fallback) and uses mouse/keyboard tools to complete the goal. Use for tasks that span multiple apps or require navigating a GUI. The vision model is configured via ~/.8gent/config.json vision.computerUseModel.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1598,7 +2001,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_open",
 					description:
-						"Open a URL in a new 8gent Browser tab and return its state: tab id, URL, title, numbered actionable elements, page text. Use for web interaction, form filling, scraping dynamic pages. Then act with browser_task actions.",
+						"Opens url in a new 8gent Browser tab and returns its tab id, title, numbered elements and page text.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1609,7 +2012,8 @@ export class ToolExecutor {
 							},
 							session: {
 								type: "string",
-								description: "Unused by 8gent Browser (each open is a new tab); browser-use fallback session id",
+								description:
+									"Unused by 8gent Browser (each open is a new tab); browser-use fallback session id",
 							},
 						},
 						required: ["url"],
@@ -1621,7 +2025,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_state",
 					description:
-						"Get the current browser page state: URL, title, and all clickable/interactive elements with their indices. Use after browser_open to see what you can interact with.",
+						'Re-read the current tab: URL, title and the numbered elements ([n] role "name") that browser_task acts on.',
 					parameters: {
 						type: "object",
 						properties: {
@@ -1638,7 +2042,7 @@ export class ToolExecutor {
 				function: {
 					name: "browser_task",
 					description:
-						"Act in the 8gent Browser tab from browser_open with a list of steps. The whole plan is checked before the first step, every step is verified after it runs, and the result lists each step plus the new page state. Steps: {action:'type',selector,text} (CSS selector, e.g. input[name=email]), {action:'left_click',index} (index from the element list) or {action:'left_click',selector}, {action:'wait_for',selector}, {action:'open',url}, {action:'scroll',dy}. Typed text is never echoed back. Sensitive clicks (sign in, buy, delete, send...) ask the person first.",
+						"Run verified steps in the tab: type{index|selector,text}, left_click{index|selector}, wait_for{selector}, open{url}, scroll{dy}.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1649,7 +2053,8 @@ export class ToolExecutor {
 							},
 							task: {
 								type: "string",
-								description: "Natural language task; only runs on the opt-in browser-use fallback (EIGHT_BROWSER_BACKEND=browser-use)",
+								description:
+									"Natural language task; only runs on the opt-in browser-use fallback (EIGHT_BROWSER_BACKEND=browser-use)",
 							},
 							browser: {
 								type: "string",
@@ -1668,8 +2073,7 @@ export class ToolExecutor {
 				type: "function",
 				function: {
 					name: "browser_screenshot",
-					description:
-						"Take a screenshot of an 8gent Browser tab opened with browser_open. Returns the file path where the screenshot was saved.",
+					description: "Screenshot the current tab to a .png and return '<path> <W>x<H>'.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -1691,27 +2095,56 @@ export class ToolExecutor {
 			...(process.env.EIGHT_MCP_LEAN === "1" ? MCP_LEAN_TOOL_DEFS : []),
 			// Posting (#3595): advertised only where the tg-group helper is installed.
 			...(postMessageAvailable() ? [POST_MESSAGE_TOOL_DEF] : []),
-		];
+			// Windows only, off by default (settings.shell.powershellTool).
+			...(powershellToolShell() ? [POWERSHELL_TOOL_DEF] : []),
+		]);
 	}
 
 	private rateLimiter = new RateLimiter();
 
+	/** Is a person at the keyboard? Decides the extension_call default policy (G1). */
+	private readonly attended: boolean;
+
+	/** One-file extension tools (G1), set by the agent that owns this executor. */
+	private extensionRunner: {
+		has(name: string): boolean;
+		run(name: string, args: Record<string, unknown>): Promise<string>;
+	} | null = null;
+
+	/**
+	 * Route extension tools through this executor (G1), so they pass the same
+	 * maker-checker, edit-scope, rate-limit and plan-mode checks as built-in
+	 * tools, and their output is scrubbed, filtered and chipped the same way.
+	 */
+	setExtensionRunner(runner: ToolExecutor["extensionRunner"]): void {
+		this.extensionRunner = runner;
+	}
+
 	/**
 	 * Map tool names to policy action types for ToolG8 gate evaluation.
+	 * Extension tools (G1) are not listed: their names are dynamic, so
+	 * executeRaw maps any tool the extension runner has to EXTENSION_POLICY_ACTION.
 	 */
 	private static TOOL_ACTION_MAP: Record<string, PolicyActionType> = {
 		read_file: "read_file",
 		// Image tools read a file the model names, so they take the read gate too.
 		read_image: "read_file",
 		describe_image: "read_file",
+		// READ-ONLY class: reads the html and the reference inside the workspace and writes
+		// nothing there (Chrome profile and screenshot go to an OS temp dir, removed after).
+		// Own class so policy can target it, but allowed in plan, architect and review.
+		compare_layout: "render_page",
+		screen_locate: "read_file",
 		write_file: "write_file",
 		speak: "write_file",
+		render_video_deck: "write_file",
 		edit_file: "write_file",
 		// Notebook cell edits write text into a file too (#3011).
 		notebook_edit_cell: "write_file",
 		notebook_insert_cell: "write_file",
 		delete_file: "delete_file",
 		run_command: "run_command",
+		powershell: "run_command",
 		git_push: "git_push",
 		git_commit: "git_commit",
 		web_search: "network_request",
@@ -1735,6 +2168,11 @@ export class ToolExecutor {
 	};
 
 	async execute(toolName: string, args: Record<string, unknown>): Promise<string> {
+		// A no-tool scope (classroom, #3939) runs nothing, whatever reached here:
+		// the model is offered zero tools; this is the backstop at the executor.
+		if (isNoToolScope(this.agentId)) {
+			return `Error: tool "${toolName}" is not available in this session (no tools are permitted).`;
+		}
 		// Every call runs in this agent's permission mode (#3170), so the
 		// permission layer below answers for this agent and no other.
 		if (this.permission && currentPermissionHolder() !== this.permission) {
@@ -1839,20 +2277,34 @@ export class ToolExecutor {
 		const filmWrites = toolName === "film_craft" ? filmCraftWriteTargets(args) : [];
 		// speak names its file in `out`, film_craft its first write target, everything else in `path`.
 		const writeTarget = (
-			toolName === "film_craft" ? filmWrites[0] : toolName === "speak" ? args.out : args.path
+			toolName === "film_craft"
+				? filmWrites[0]
+				: toolName === "speak" || toolName === "render_video_deck"
+					? args.out
+					: toolName === "compare_layout"
+						? args.html
+						: args.path
 		) as string | undefined;
+		// A one-file extension tool (G1) has a dynamic name, so it maps by
+		// membership, not by TOOL_ACTION_MAP, to the extension_call class.
+		const isExtension = this.extensionRunner?.has(toolName) === true;
 		const mappedAction =
 			ToolExecutor.TOOL_ACTION_MAP[toolName] ??
 			(isTermTool(toolName)
 				? "term_orchestration"
 				: isDesktop
 					? (DESKTOP_POLICY_ACTION as PolicyActionType)
-					: undefined);
-		const policyAction = toolName === "film_craft" && filmWrites.length === 0 ? undefined : mappedAction;
+					: isExtension
+						? (EXTENSION_POLICY_ACTION as PolicyActionType)
+						: undefined);
+		const policyAction =
+			toolName === "film_craft" && filmWrites.length === 0 ? undefined : mappedAction;
 		if (policyAction) {
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
 				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
 				...(isMcpCall ? mcpPolicyContext(String(args.server), String(args.tool)) : {}),
+				// Unattended sessions ask before an extension tool runs (default policy).
+				...(isExtension ? { tool: toolName, attended: this.attended } : {}),
 				path: writeTarget as string,
 				// What a relative path resolves against, for `resolved_path` rules (#3474).
 				cwd: this.workingDirectory,
@@ -1895,6 +2347,15 @@ export class ToolExecutor {
 			}
 		}
 
+		// One-file extension tools (G1): after every gate above, never in a Table
+		// session. execute() then scrubs, filters and chips the result.
+		if (this.extensionRunner?.has(toolName)) {
+			if (this.agentId === "__table__") {
+				return `Error: extension tool "${toolName}" is not available in this session; nothing was run.`;
+			}
+			return this.extensionRunner.run(toolName, args);
+		}
+
 		// Delegate windowed-session orchestration tools to their own module so the
 		// giant switch below stays focused on "operate on this repo" rather than
 		// "operate on a fleet of CLIs in tmux".
@@ -1918,7 +2379,7 @@ export class ToolExecutor {
 			case "update_plan":
 				// Executes nothing: the plan event is the onToolStart the agent
 				// fires with these args; the TUI PLAN column reads it (#3035).
-				return updatePlan(args as { plan?: unknown });
+				return updatePlan(args as { plan?: unknown }, this.workingDirectory);
 			case "get_project_outline":
 				return this.getProjectOutline();
 
@@ -1951,20 +2412,29 @@ export class ToolExecutor {
 
 			// File operations (with path traversal protection)
 			case "read_file": {
-				const safe = safePath(args.path as string, this.workingDirectory);
+				const safe = safePath(args.path as string, this.workingDirectory, "read");
 				return this.readFile(safe, args.offset, args.limit);
 			}
 			case "write_file": {
-				const safe = safePath(args.path as string, this.workingDirectory);
+				const safe = safePath(args.path as string, this.workingDirectory, "write");
 				return this.writeFile(safe, args.content as string);
 			}
 			case "edit_file": {
-				const safe = safePath(args.path as string, this.workingDirectory);
-				return this.editFile(safe, args.oldText as string, args.newText as string);
+				const safe = safePath(args.path as string, this.workingDirectory, "write");
+				// Anchored edit (#3472): only with the flag on and an anchor sent.
+				if (hashlineEnabled() && args.anchor !== undefined && args.anchor !== "") {
+					return this.editFileAnchored(safe, args.anchor, String(args.newText ?? ""));
+				}
+				return this.editFile(
+					safe,
+					args.oldText as string,
+					args.newText as string,
+					typeof args.startLine === "number" ? args.startLine : undefined,
+				);
 			}
 			case "list_files": {
 				const dir = (args.path as string) || ".";
-				const safeDir = safePath(dir, this.workingDirectory);
+				const safeDir = safePath(dir, this.workingDirectory, "read");
 				return this.listFiles(safeDir, args.pattern as string);
 			}
 
@@ -2015,7 +2485,10 @@ export class ToolExecutor {
 				return this.runSpawn("gh", ["pr", "view", String(args.number || "")]);
 			case "gh_issue_list":
 				return this.runCommand("gh issue list");
-			case "post_message":
+			case "post_message": {
+				// Pre-send check (#4191): the task's countable rules, counted in the draft with code.
+				const presend = this.presendCheck(typeof args.text === "string" ? args.text : "");
+				if (presend) return presend;
 				// Policy gate, then the person, inside postMessage; never a shell string.
 				return postMessage(
 					{
@@ -2025,6 +2498,7 @@ export class ToolExecutor {
 					},
 					postMessageDeps(this.agentId, this.postSession),
 				);
+			}
 			case "gh_issue_create":
 				return this.runSpawn("gh", [
 					"issue",
@@ -2041,9 +2515,22 @@ export class ToolExecutor {
 				const run = () => this.runCommand(command, args.timeout as number | undefined);
 				// A command the sanitizer refuses never commits, so it never runs the suite.
 				const target = parseGitCommit(command);
-				return target && sanitizeShellCommand(command).safe
-					? this.gatedCommit(run, target)
-					: run();
+				// Judged on the text that will run: a `cd <folder> &&` commit meets the gate too (#3199).
+				const runs = commandAfterCdPrefix(command, this.workingDirectory, activeShellKind());
+				return target && sanitizeShellCommand(runs).safe ? this.gatedCommit(run, target) : run();
+			}
+
+			case "powershell": {
+				const shell = powershellToolShell();
+				if (!shell) return "Error: the powershell tool is off. Use run_command.";
+				return withForcedShell(shell, () =>
+					this.runCommand(
+						args.command as string,
+						args.timeout as number | undefined,
+						undefined,
+						shell,
+					),
+				);
 			}
 
 			// Multi-agent orchestration
@@ -2064,6 +2551,21 @@ export class ToolExecutor {
 			// Image tools
 			case "read_image":
 				return this.handleReadImage(args.path as string);
+			case "compare_layout": {
+				const html = safePath(String(args.html ?? ""), this.workingDirectory, "read");
+				const reference = safePath(String(args.reference ?? ""), this.workingDirectory, "read");
+				const { compareLayout } = await import("../tools/layout-compare");
+				return compareLayout(html, reference, this.workingDirectory);
+			}
+			case "screen_locate": {
+				const image = safePath(String(args.image ?? ""), this.workingDirectory, "read");
+				const { screenLocate } = await import("../eyes/ground/screen-locate.js");
+				return screenLocate({
+					image,
+					target: String(args.target ?? ""),
+					viewport: args.viewport as string | undefined,
+				});
+			}
 			case "describe_image":
 				return this.handleDescribeImage(args.path as string, args.prompt as string | undefined);
 
@@ -2072,10 +2574,34 @@ export class ToolExecutor {
 					const out = resolveSpeakOut(args.out, this.workingDirectory);
 					const { speak } = await import("../tools/speak");
 					return JSON.stringify(
-						await speak({ text: args.text as string, voice: args.voice as string | undefined, out }),
+						await speak({
+							text: args.text as string,
+							voice: args.voice as string | undefined,
+							out,
+						}),
 					);
 				} catch (err) {
 					return `Error: speak failed: ${err instanceof Error ? err.message : String(err)}`;
+				}
+			}
+
+			case "render_video_deck": {
+				try {
+					const out = resolveDeckOut(args.out, this.workingDirectory);
+					// An edit-scoped sub-agent renders only into its scope (same check as write_file).
+					const scoped = editScopeViolation(
+						"render_video_deck",
+						{ out: args.out ?? "deck.mp4" },
+						this.workingDirectory,
+						this.allowedPaths,
+					);
+					if (scoped) return scoped;
+					const { renderVideoDeck } = await import("../tools/video-deck");
+					return JSON.stringify(
+						await renderVideoDeck({ spec: args.spec, out, cwd: this.workingDirectory }),
+					);
+				} catch (err) {
+					return `Error: render_video_deck failed: ${err instanceof Error ? err.message : String(err)}`;
 				}
 			}
 
@@ -2285,6 +2811,8 @@ export class ToolExecutor {
 				return this.handleDesktopSafeList(args.action as string, args.app as string | undefined);
 			case "run_computer_task":
 				return this.handleRunComputerTask(args.goal as string, args.maxSteps as number | undefined);
+			case "desktop_act":
+				return this.handleDesktopAct(args);
 
 			// Browser Use tools
 			case "browser_open":
@@ -2524,6 +3052,8 @@ export class ToolExecutor {
 		if (content === "") return "";
 
 		const isCodeFile = /\.(ts|tsx|js|jsx)$/.test(absolutePath);
+		// Anchors per row with EIGHT_EDIT_FORMAT=hashline (#3472), else `cat -n`.
+		const numberRows = hashlineEnabled() ? hashLines : numberLines;
 		const offset = positiveInt(offsetArg);
 		const limit = positiveInt(limitArg);
 
@@ -2535,7 +3065,7 @@ export class ToolExecutor {
 			}
 			const count = limit ?? (isCodeFile ? 200 : lines.length);
 			const end = Math.min(lines.length, start - 1 + count);
-			const body = numberLines(lines.slice(start - 1, end), start);
+			const body = numberRows(lines.slice(start - 1, end), start);
 			return end < lines.length
 				? `${body}\n\n[Lines ${start}-${end} of ${lines.length}. Use offset=${end + 1} to read more.]`
 				: body;
@@ -2581,14 +3111,14 @@ export class ToolExecutor {
 				}
 			}
 
-			return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberLines(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`;
+			return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberRows(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`;
 		}
 
 		if (DIFF_FILE.test(absolutePath)) {
 			const diff = numberDiffLines(lines);
 			if (diff !== null) return diff;
 		}
-		return numberLines(lines, 1);
+		return numberRows(lines, 1);
 	}
 
 	private async writeFile(filePath: string, content: string): Promise<string> {
@@ -2660,7 +3190,31 @@ export class ToolExecutor {
 		return `${opened ? "File written and opened" : "File written"}: ${absolutePath}${designHint}`;
 	}
 
-	private async editFile(filePath: string, oldText: string, newText: string): Promise<string> {
+	/** edit_file by read_file anchors (#3472); the hash is checked against the file now. */
+	private editFileAnchored(filePath: string, anchor: unknown, newText: string): string {
+		const absolutePath = path.isAbsolute(filePath)
+			? filePath
+			: path.join(this.workingDirectory, filePath);
+		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
+		const edit = applyAnchoredEdit(
+			fs.readFileSync(absolutePath, "utf-8"),
+			anchor,
+			newText,
+			filePath,
+		);
+		if (!edit.ok) return edit.error;
+		const recordEdit = watchWrite(absolutePath, this.createdFiles);
+		fs.writeFileSync(absolutePath, edit.content);
+		recordEdit();
+		return anchoredEditMessage(absolutePath, edit);
+	}
+
+	private async editFile(
+		filePath: string,
+		oldText: string,
+		newText: string,
+		startLine?: number,
+	): Promise<string> {
 		// No anchor, no edit (#3101): indexOf("") is 0, so an empty oldText
 		// used to prepend newText to the file.
 		const noAnchor = emptyOldTextError(oldText, filePath);
@@ -2689,8 +3243,15 @@ export class ToolExecutor {
 
 		// Literal replacement, so the bytes written are the bytes the policy
 		// gate checked (String.replace would expand `$&` etc. in newText).
-		const newContent = applyEdit(content, oldText, newText);
-		if (newContent === null) {
+		// A duplicate oldText is refused, never silently applied to the first
+		// copy (#3898); the refusal is logged so it can be counted.
+		const resolved = resolveEdit(content, oldText, newText, startLine, filePath);
+		const refusal = editRefusal(resolved, filePath);
+		if (refusal) {
+			logEditRefusal(resolved, filePath, oldText.length);
+			return refusal;
+		}
+		if (resolved.kind !== "ok") {
 			// read_file numbers its rows (#3375). A model that copies the gutter
 			// into oldText gets told so. It is never stripped silently: the
 			// bytes written must be the bytes the policy gate checked.
@@ -2699,11 +3260,15 @@ export class ToolExecutor {
 			}
 			return formatEditNotFound(filePath, content, oldText);
 		}
+		const newContent = applyAt(content, resolved.idx, resolved.oldLength, resolved.newText);
 
 		const recordEdit = watchWrite(absolutePath, this.createdFiles);
 		fs.writeFileSync(absolutePath, newContent);
 		recordEdit();
 
+		if (resolved.matchedLine !== undefined) {
+			return `File edited (matched ignoring whitespace at line ${resolved.matchedLine}): ${absolutePath}\nReplaced ${resolved.oldLength} chars with ${resolved.newText.length} chars.`;
+		}
 		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
 	}
 
@@ -2728,45 +3293,57 @@ export class ToolExecutor {
 	// ============================================
 
 	/** Commit only past the test-suite gate (#3402); its note, if any, leads the result. */
-	private async gatedCommit(
-		commit: () => Promise<string>,
-		target?: CommitTarget,
-	): Promise<string> {
+	private async gatedCommit(commit: () => Promise<string>, target?: CommitTarget): Promise<string> {
 		const gate = await this.commitGate.check(target);
 		if (!gate.commit) return gate.message;
 		const out = await commit();
 		return gate.note ? `${gate.note}\n${out}` : out;
 	}
 
-	/** `env` replaces process.env for the child (the done gate passes a scrubbed one). */
+	/**
+	 * `env` replaces process.env for the child (the done gate passes a scrubbed one).
+	 * `cwd` is set only by the one leading `cd <folder> &&` this accepts (#3199).
+	 */
 	async runCommand(
 		command: string,
 		timeoutSec?: number,
 		env?: Record<string, string | undefined>,
+		windowsShell?: ResolvedShell,
+		cwd?: string,
 	): Promise<string> {
+		// One leading `cd <folder> &&` inside the project: the folder is the working
+		// directory and only the rest runs, through every check below (#3199).
+		if (cwd === undefined) {
+			// The backstops judge the whole line first, so a cd into protected files keeps their words.
+			const lineBackstop = preSpawnRefusal(command, this.workingDirectory);
+			if (lineBackstop) return lineBackstop;
+			const cd = cdPrefix(command, this.workingDirectory, activeShellKind(windowsShell));
+			if (cd.kind === "refused") return cd.message;
+			if (cd.kind === "cd") return this.runCommand(cd.rest, timeoutSec, env, windowsShell, cd.dir);
+		}
+		const dir = cwd ?? this.workingDirectory;
 		if (this.permission && currentPermissionHolder() !== this.permission) {
 			return runWithPermissionHolder(this.permission, () =>
-				this.runCommand(command, timeoutSec, env),
+				this.runCommand(command, timeoutSec, env, windowsShell, dir),
 			);
 		}
 		// Judge git state against the directory this command runs in (#3748).
-		if (commandDir() !== this.workingDirectory) {
-			return withCommandDir(this.workingDirectory, () => this.runCommand(command, timeoutSec, env));
+		if (commandDir() !== dir) {
+			return withCommandDir(dir, () =>
+				this.runCommand(command, timeoutSec, env, windowsShell, dir),
+			);
 		}
-		// Backstop (#3595): the file that lists post_message recipients is not
-		// for the shell. A minimum, not a parser: the allowlist is also frozen
-		// at process start, so an edit that slips past this cannot take effect.
-		if (/\.8gent\S*\s*[/\\]+\s*settings/i.test(command) || /\.8gent["']?\s*[/\\]["']?settings/i.test(command))
-			return `[PERMISSION DENIED] Command touches ~/.8gent/settings.json, which agent tools may not use: ${command}`;
-		// Agent audit files are not for the shell either (#3735); same check as the policy gate.
-		if (commandTouchesAuditFiles(command))
-			return `[PERMISSION DENIED] Command touches agent audit files, which agent tools may not use: ${command}`;
-		// Backstop (#3622, 8SO HIGH-2): the 8gent Browser control tokens and profile dirs. A speed
-		// bump only; the boundary is seatbelting run_command (#3612).
-		if (touchesBrowserSecrets(command))
-			return `[PERMISSION DENIED] Command touches 8gent Browser control tokens or profiles, which agent tools may not use: ${command}`;
+		// The four pre-spawn backstops, shared with the native path (#3993).
+		const backstop = preSpawnRefusal(command, dir);
+		if (backstop) return backstop;
 		const mode = currentPermissionMode();
-		const permissionCheck = this.permissionManager.checkPermission(command);
+		// The folder a cd prefix chose: the cards name it, and answers are kept per folder.
+		const where = folderLabel(dir, this.workingDirectory);
+		const permissionCheck = this.permissionManager.checkPermission(
+			command,
+			activeShellKind(windowsShell),
+			where,
+		);
 
 		if (permissionCheck === "denied") {
 			return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
@@ -2775,9 +3352,17 @@ export class ToolExecutor {
 		// Validate command for shell injection before asking anyone: a command
 		// the sanitizer will refuse must not raise an approval card, or the
 		// person approves it and then sees it blocked anyway (#3055).
-		const validation = sanitizeShellCommand(command);
+		const validation = sanitizeShellCommand(
+			command,
+			process.platform,
+			activeShellKind(windowsShell),
+		);
 		if (!validation.safe) {
-			return `[BLOCKED] ${validation.reason}. Command: ${command}`;
+			// A piece of the chain System One would refuse on its own is named now,
+			// so the pieces are not resent as they are and blocked again (#4072).
+			const piece = await chainedPieceRefusal(command, dir, systemOneEnvFor(mode));
+			const also = piece ? ` One part would be refused on its own too. ${piece}` : "";
+			return `[BLOCKED] ${validation.reason}.${also} Command: ${command}`;
 		}
 
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 turns it off): it can only stop a
@@ -2787,11 +3372,15 @@ export class ToolExecutor {
 		// the card. One command, at most one card.
 		// Guarded mode (#3170) turns System One on for this call whatever the
 		// env says; the env flag stays on in every mode.
+		// canRunInstead: this executor runs systemOne.runInstead when set (the checked bytes, #4102),
+		// only with process.env: a caller-passed env is not the env the gate checked (8SO).
 		const systemOne = await systemOneGate(
 			command,
 			systemOneEnvFor(mode),
-			this.workingDirectory,
+			dir,
 			this.createdFiles,
+			where,
+			{ canRunInstead: env === undefined, project: this.workingDirectory },
 		);
 		if (!systemOne.run) return systemOne.message as string;
 
@@ -2806,11 +3395,13 @@ export class ToolExecutor {
 					? "This command may modify system files or cause data loss."
 					: "The agent wants to run a shell command.",
 				command,
+				{ where },
 			);
 
 			if (!allowed) {
 				return (
-					channelDenialMessage(command) ?? `[PERMISSION DENIED] User declined to execute: ${command}`
+					channelDenialMessage(command) ??
+					`[PERMISSION DENIED] User declined to execute: ${command}`
 				);
 			}
 		}
@@ -2818,7 +3409,7 @@ export class ToolExecutor {
 		const startTime = Date.now();
 		await this.hookManager.executeHooks("beforeCommand", {
 			command,
-			workingDirectory: this.workingDirectory,
+			workingDirectory: dir,
 		});
 
 		let finalCommand = command;
@@ -2828,12 +3419,17 @@ export class ToolExecutor {
 		if (command.includes("npm init") && !command.includes("-y")) {
 			finalCommand = `${command} -y`;
 		}
+		// System One checked these bytes, not the file the command names: run them (8SO, #4102).
+		if (systemOne.runInstead !== undefined) finalCommand = systemOne.runInstead;
 
 		const timeoutMs = Math.min(timeoutSec || 120, 300) * 1000;
 
+		const sandboxRefusal = runCommandSandboxRefusal();
+		if (sandboxRefusal) return sandboxRefusal;
+
 		return new Promise((resolve) => {
 			// Redirect targets this command creates are this agent's own files (#3177).
-			const recordRedirects = watchRedirects(finalCommand, this.workingDirectory, this.createdFiles);
+			const recordRedirects = watchRedirects(finalCommand, dir, this.createdFiles);
 			let resolved = false;
 			const safeResolve = (value: string) => {
 				if (resolved) return;
@@ -2842,11 +3438,16 @@ export class ToolExecutor {
 				resolve(value);
 			};
 
-			const proc = spawnShell(finalCommand, {
-				cwd: this.workingDirectory,
+			// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
+			const proc = spawnShell(wrapRunCommand(finalCommand), {
+				cwd: dir,
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
-				env: { ...((env as NodeJS.ProcessEnv | undefined) ?? process.env), ...SPAWN_NON_INTERACTIVE_ENV },
+				windowsShell,
+				env: {
+					...((env as NodeJS.ProcessEnv | undefined) ?? process.env),
+					...SPAWN_NON_INTERACTIVE_ENV,
+				},
 			});
 
 			let stdout = "";
@@ -2869,7 +3470,7 @@ export class ToolExecutor {
 					stdout,
 					stderr: `${stderr}\nTIMEOUT`,
 					duration: Date.now() - startTime,
-					workingDirectory: this.workingDirectory,
+					workingDirectory: dir,
 				});
 
 				safeResolve(
@@ -2888,12 +3489,12 @@ export class ToolExecutor {
 					stdout,
 					stderr,
 					duration: Date.now() - startTime,
-					workingDirectory: this.workingDirectory,
+					workingDirectory: dir,
 				});
 
-				const output = formatCommandOutput(code, stdout, stderr);
+				const output = formatCommandOutput(code, stdout, stderr, finalCommand, this.workingDirectory);
 				// Report images the command drew, and any cut off at an edge (#3580).
-				withImagesWritten(output, this.workingDirectory, startTime).then(safeResolve, () => safeResolve(output));
+				withImagesWritten(output, dir, startTime).then(safeResolve, () => safeResolve(output));
 			});
 
 			proc.on("error", (err) => {
@@ -2902,7 +3503,7 @@ export class ToolExecutor {
 				this.hookManager.executeHooks("onError", {
 					command: finalCommand,
 					error: err.message,
-					workingDirectory: this.workingDirectory,
+					workingDirectory: dir,
 				});
 
 				safeResolve(`Error: ${err.message}`);
@@ -2943,7 +3544,7 @@ export class ToolExecutor {
 		// so a refused path reads the same whether or not the file is there.
 		let absolutePath: string;
 		try {
-			absolutePath = safePath(imagePath, this.workingDirectory);
+			absolutePath = safePath(imagePath, this.workingDirectory, "read");
 		} catch (err) {
 			return `Error reading image: ${err instanceof Error ? err.message : String(err)}`;
 		}
@@ -2968,12 +3569,12 @@ export class ToolExecutor {
 					2,
 				);
 				// #3770: the copy above is downscaled, so give the real pixel geometry.
-				const measured = await layoutMeasureLine(absolutePath);
+				const measured = await this.layoutForRead(absolutePath);
 				const text = measured ? `${meta}\n${measured}` : meta;
 				return imageAttachmentResult(text, mimeType, shown.base64);
 			}
 			const imageInfo = await readImage(absolutePath);
-			const measured = await layoutMeasureLine(absolutePath);
+			const measured = await this.layoutForRead(absolutePath);
 			const info = JSON.stringify(
 				{
 					path: imageInfo.path,
@@ -2999,7 +3600,7 @@ export class ToolExecutor {
 		// Same guard as read_image, and before the vision router is consulted.
 		let absolutePath: string;
 		try {
-			absolutePath = safePath(imagePath, this.workingDirectory);
+			absolutePath = safePath(imagePath, this.workingDirectory, "read");
 		} catch (err) {
 			return `Error describing image: ${err instanceof Error ? err.message : String(err)}`;
 		}
@@ -3150,12 +3751,19 @@ export class ToolExecutor {
 	// Notebook Tool Handlers
 	// ============================================
 
-	private async handleReadNotebook(notebookPath: string): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
+	/** Notebook paths: absolute or workspace-relative, but refused by the path guard for this access. */
+	private guardedNotebookPath(notebookPath: string, access: PathAccess): string {
+		const guard = guardPath(notebookPath, this.workingDirectory, {}, access);
+		if (!guard.ok)
+			throw new Error(`Path blocked by path-guard: ${guard.reason} ("${notebookPath}")`);
+		return path.isAbsolute(notebookPath)
 			? notebookPath
 			: path.join(this.workingDirectory, notebookPath);
+	}
 
+	private async handleReadNotebook(notebookPath: string): Promise<string> {
 		try {
+			const absolutePath = this.guardedNotebookPath(notebookPath, "read");
 			const notebook = await readNotebook(absolutePath);
 			const formattedCells = notebook.cells.map((cell) => ({
 				index: cell.index,
@@ -3192,11 +3800,8 @@ export class ToolExecutor {
 		cellIndex: number,
 		newSource: string,
 	): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
-
 		try {
+			const absolutePath = this.guardedNotebookPath(notebookPath, "write");
 			const result = await editCell(absolutePath, cellIndex, newSource);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -3210,11 +3815,8 @@ export class ToolExecutor {
 		cellType: "code" | "markdown",
 		source: string,
 	): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
-
 		try {
+			const absolutePath = this.guardedNotebookPath(notebookPath, "write");
 			const result = await insertCell(absolutePath, afterIndex, cellType, source);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -3223,11 +3825,8 @@ export class ToolExecutor {
 	}
 
 	private async handleNotebookDeleteCell(notebookPath: string, cellIndex: number): Promise<string> {
-		const absolutePath = path.isAbsolute(notebookPath)
-			? notebookPath
-			: path.join(this.workingDirectory, notebookPath);
-
 		try {
+			const absolutePath = this.guardedNotebookPath(notebookPath, "write");
 			const result = await deleteCell(absolutePath, cellIndex);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
@@ -3248,7 +3847,15 @@ export class ToolExecutor {
 		allowedPaths?: string[],
 		permissionMode?: unknown,
 	): Promise<string> {
-		return spawnAgentTool(this.workingDirectory, task, runtime, model, timeout, allowedPaths, permissionMode);
+		return spawnAgentTool(
+			this.workingDirectory,
+			task,
+			runtime,
+			model,
+			timeout,
+			allowedPaths,
+			permissionMode,
+		);
 	}
 
 	private handleCheckAgent(agentId: string): Promise<string> {
@@ -3461,7 +4068,10 @@ export class ToolExecutor {
 			if (action === "mix" && (!args.palette || !args.type)) {
 				return "deck_theme mix needs palette and type";
 			}
-			const deck = dt.resolveDeckPath(safePath(String(args.deck), this.workingDirectory), this.workingDirectory);
+			const deck = dt.resolveDeckPath(
+				safePath(String(args.deck), this.workingDirectory, "write"),
+				this.workingDirectory,
+			);
 			const themeName =
 				action === "mix" ? `${String(args.palette)}-x-${String(args.type)}` : String(args.name);
 			for (const target of [deck, dt.cssPathFor(deck, themeName)]) {
@@ -3852,6 +4462,61 @@ export class ToolExecutor {
 	}
 
 	/**
+	 * desktop_act: ground the target with the local grounder, ask, act, verify.
+	 * The outer gate admitted only the read half (act_resolve); the act is
+	 * gated here as click / type / press, so a block stays a block and a
+	 * require_approval rule reaches the person with the point on the card.
+	 * EIGHT_DESKTOP_ACT_DRY=<png> runs the whole flow against a saved frame
+	 * and records the act instead of executing it.
+	 */
+	private async handleDesktopAct(args: Record<string, unknown>): Promise<string> {
+		const parsed = validateDesktopActArgs(args);
+		if (typeof parsed === "string") return parsed;
+		const dry = process.env.EIGHT_DESKTOP_ACT_DRY;
+		const { ground } = await import("../eyes/ground");
+		const result = await desktopAct(
+			parsed,
+			{
+				dryRun: !!dry,
+				preflight: () => desktopPreflight(),
+				screenshot: () => {
+					if (dry) {
+						return {
+							ok: true,
+							path: dry,
+							coordMap: {
+								captureX: 0,
+								captureY: 0,
+								captureWidth: 0,
+								captureHeight: 0,
+								imageWidth: 0,
+								imageHeight: 0,
+							},
+						};
+					}
+					return computerScreenshot({});
+				},
+				ground: (image, instruction) => ground({ image, instruction }),
+				policy: (ctx) =>
+					this.toolG8.gate(this.agentId, DESKTOP_POLICY_ACTION as PolicyActionType, ctx),
+				// Every act reaches the person; the card carries the exact text and
+				// the crop, the log carries neither (desktop-approval.ts).
+				approve: (req, reason) =>
+					this.askDesktopApproval("desktop_act", {}, reason, {
+						card: desktopApprovalCard(req, reason),
+						details: desktopApprovalDetails(req, reason),
+					}),
+				click: (point, button, count) => computerClick({ point, button, count }),
+				type: (text) => computerType({ text }),
+				press: (keys) => computerPress({ keys }),
+				screenScale: () => (dry ? 1 : detectScreenScale()),
+			},
+			this.desktopActSession,
+		);
+		return JSON.stringify(result);
+	}
+
+	/**
 	 * A desktop action the policy says needs the person (#3213). Returns null
 	 * when they approved, or the refusal to hand back to the model. With no
 	 * person to ask (headless, no approval card) it refuses: desktop control
@@ -3861,18 +4526,31 @@ export class ToolExecutor {
 		toolName: string,
 		args: Record<string, unknown>,
 		reason: string | undefined,
+		card?: { card: string; details: string },
 	): Promise<string | null> {
-		if (this.permissionManager.isInfiniteMode()) return null;
 		const browser = toolName.startsWith("browser_");
-		const request = {
-			action: browser ? "Browser control" : "Desktop control",
-			details: `${reason ?? "This desktop action needs your approval."} Tool: ${toolName} ${JSON.stringify(browser ? redactBrowserArgs(args) : args)}`,
-		};
+		// Infinite lifts the browser card only. Desktop control reaches every
+		// app the person has open, so it asks in every mode, Infinite included.
+		if (browser && this.permissionManager.isInfiniteMode()) return null;
+		const why = reason ?? "This desktop action needs your approval.";
+		// What may be logged: never typed text (8SO). The card is separate.
+		const details =
+			card?.details ??
+			`${why} Tool: ${toolName} ${JSON.stringify(browser ? redactBrowserArgs(args) : redactDesktopArgs(args))}`;
+		const shown = card?.card ?? `${toolName}: ${details}`;
 		let approved: boolean;
 		if (hasTuiApprovalHandler()) {
-			approved = (await requestTuiApproval(request)) === true;
+			// `full`: the card is laid out whole or answered "unfit", never cut.
+			approved =
+				(await requestTuiApproval(
+					browser
+						? { action: "Browser control", details }
+						: { action: "Desktop control", details, command: shown, full: true },
+				)) === true;
 		} else if (process.stdin.isTTY && !process.env.EIGHT_HEADLESS) {
-			approved = await this.permissionManager.requestPermission(request.action, request.details);
+			approved = browser
+				? await this.permissionManager.requestPermission("Browser control", details)
+				: await askOnTerminal(shown);
 		} else {
 			return `[BLOCKED] ${toolName} needs the person's approval and there is no one to ask in this session. Nothing was done. Do not retry this call.`;
 		}
@@ -3961,7 +4639,7 @@ export class ToolExecutor {
 		session?: string,
 	): Promise<string> {
 		try {
-			if (!useBrowserUse()) return await getEightBrowser().open(url);
+			if (!useBrowserUse()) return await getEightBrowser(this.workingDirectory).open(url);
 			return browserOpen(url, { browser, session });
 		} catch (err) {
 			return `browser_open failed: ${err}`;
@@ -3970,7 +4648,7 @@ export class ToolExecutor {
 
 	private async handleBrowserState(session?: string): Promise<string> {
 		try {
-			if (!useBrowserUse()) return await getEightBrowser().state(session);
+			if (!useBrowserUse()) return await getEightBrowser(this.workingDirectory).state(session);
 			return browserState(session);
 		} catch (err) {
 			return `browser_state failed: ${err}`;
@@ -3986,12 +4664,19 @@ export class ToolExecutor {
 		try {
 			if (!useBrowserUse()) {
 				if (typeof actions === "string") actions = JSON.parse(actions); // small models send the list as a string
-				if (!Array.isArray(actions)) return "browser_task failed: 8gent Browser needs an actions list (natural-language tasks run only on the opt-in browser-use fallback)";
+				if (!Array.isArray(actions))
+					return "browser_task failed: 8gent Browser needs an actions list (natural-language tasks run only on the opt-in browser-use fallback)";
 				// A sensitive click (sign in, buy, delete, send...) gets its own card, even inside an approved task.
-				const where = isolatedBrowser() ? "the bot's own browser profile" : "your logged-in browser";
+				const where = isolatedBrowser()
+					? "the bot's own browser profile"
+					: "your logged-in browser";
 				const approve = async (what: string) =>
-					(await this.askDesktopApproval("browser_task", { click: what }, `This click looks sensitive in ${where}.`)) === null;
-				return await getEightBrowser().run(actions, session, approve);
+					(await this.askDesktopApproval(
+						"browser_task",
+						{ click: what },
+						`This click looks sensitive in ${where}.`,
+					)) === null;
+				return await getEightBrowser(this.workingDirectory).run(actions, session, approve);
 			}
 			return browserTask(task ?? "", { browser, session });
 		} catch (err) {
@@ -4004,15 +4689,19 @@ export class ToolExecutor {
 			if (!useBrowserUse()) {
 				let out: string | undefined;
 				if (filePath) {
-					if (!filePath.toLowerCase().endsWith(".png")) return "browser_screenshot failed: path must end in .png";
+					if (!filePath.toLowerCase().endsWith(".png"))
+						return "browser_screenshot failed: path must end in .png";
 					const shots = path.join(os.homedir(), ".8gent", "browser-shots");
 					const abs = path.resolve(this.workingDirectory, filePath);
 					// A named profile's dir is protected from the agent (#3622), so its shots go to the workspace.
-					out = abs.startsWith(shots + path.sep) && !isolatedBrowser() ? abs : safePath(filePath, this.workingDirectory);
+					out =
+						abs.startsWith(shots + path.sep) && !isolatedBrowser()
+							? abs
+							: safePath(filePath, this.workingDirectory, "write");
 				} else if (isolatedBrowser()) {
-					out = safePath(`browser-shot-${Date.now()}.png`, this.workingDirectory);
+					out = safePath(`browser-shot-${Date.now()}.png`, this.workingDirectory, "write");
 				}
-				return await getEightBrowser().screenshot(out, session);
+				return await getEightBrowser(this.workingDirectory).screenshot(out, session);
 			}
 			return browserScreenshot(filePath, session);
 		} catch (err) {

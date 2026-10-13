@@ -145,7 +145,7 @@ export function permToastForms(mode: PermissionMode, held = false): ToastForms {
 	if (!held) return PERM_LOOK[mode].toast;
 	const name = PERM_LOOK[mode].name;
 	return {
-		full: `Held at ${name}: the parent agent allows no more`,
+		full: `Held at ${name}: the parent 8gent allows no more`,
 		short: `held at ${name} by parent`,
 		tiny: "parent's limit",
 	};

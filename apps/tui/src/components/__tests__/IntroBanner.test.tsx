@@ -173,7 +173,10 @@ describe("the splash in a real Ink render", () => {
 		expect(runColour("bottom", true)).toBe("#E8610A");
 		// And the component still draws the whole splash without colour.
 		const { stdout } = mount({ colour: false, speed: 4 }, 160, 48);
+		// Wait for the name rather than a fixed 325 ms: timers fire late on a loaded Windows runner.
+		const deadline = Date.now() + 5000;
 		await tick(Math.ceil(1300 / 4));
+		while (!stdout.frames.join("").includes(INTRO_NAME) && Date.now() < deadline) await tick(25);
 		expect(stdout.frames.join("")).toContain(INTRO_NAME);
 		expect(stdout.frames.join("")).toMatch(/[\u2801-\u28ff]/);
 	});

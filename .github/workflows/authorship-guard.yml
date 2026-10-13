@@ -1,0 +1,35 @@
+name: Authorship guard
+
+# Fails a PR that adds a commit attributed to an AI vendor: author, committer,
+# or a Co-Authored-By / Claude-Session / "Generated with" trailer naming one
+# (AGENTS.md prohibition 4). Prose that only mentions a vendor passes.
+#
+# It checks the PR's own commits only: merge-base(PR base sha, PR head)..head.
+# Diffing origin/main on a shallow checkout flagged vendor commits already
+# merged to main (8gent-dev #126), so the checkout is full-depth and the base
+# is the sha from the event, not a branch name.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Authorship guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Reject AI-vendor authorship
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: bash scripts/check-authorship.sh

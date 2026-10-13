@@ -5,7 +5,9 @@
  * persistence to ~/.8gent/cron.json, and restart catchup.
  */
 
+import { join } from "node:path";
 import { shellInvocation } from "../core/shell";
+import { getDataDir } from "./data-dir";
 import { bus } from "./events";
 
 export type JobType = "shell" | "agent-prompt" | "webhook";
@@ -22,13 +24,17 @@ export interface CronJob {
 	recurring: boolean;
 }
 
-const CRON_PATH = `${process.env.HOME}/.8gent/cron.json`;
+/** cron.json under the data dir (EIGHT_DATA_DIR, then os.homedir()/.8gent; #4111). */
+export function cronPath(): string {
+	return join(getDataDir(), "cron.json");
+}
+
 let jobs: CronJob[] = [];
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 
 export async function loadJobs(): Promise<CronJob[]> {
 	try {
-		const file = Bun.file(CRON_PATH);
+		const file = Bun.file(cronPath());
 		if (!(await file.exists())) return [];
 		jobs = await file.json();
 		return jobs;
@@ -39,7 +45,7 @@ export async function loadJobs(): Promise<CronJob[]> {
 }
 
 async function saveJobs(): Promise<void> {
-	await Bun.write(CRON_PATH, JSON.stringify(jobs, null, 2));
+	await Bun.write(cronPath(), JSON.stringify(jobs, null, 2));
 }
 
 /** Parse a simple cron expression and check if it matches the current minute */

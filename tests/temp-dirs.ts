@@ -42,3 +42,20 @@ export function cleanupTempDirs(): void {
 		}
 	}
 }
+
+/**
+ * rmSync for a test's own temp dir that tolerates Windows file locks. A child
+ * process or SQLite handle can hold the directory for a few ms after the test
+ * is done (EBUSY/EPERM); retry, and on win32 leave a lock that outlives the
+ * retries to the run-end sweep instead of failing the test that finished.
+ * Elsewhere any error still throws.
+ */
+export function removeDir(dir: string): void {
+	try {
+		rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+	} catch (e) {
+		const code = (e as NodeJS.ErrnoException).code;
+		if (process.platform === "win32" && (code === "EBUSY" || code === "EPERM")) return;
+		throw e;
+	}
+}

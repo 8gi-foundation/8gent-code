@@ -106,7 +106,7 @@ export function getToolDefinitions(): object[] {
 			function: {
 				name: "desktop_click",
 				description:
-					"[DESKTOP] Click at a point on the desktop screen. Use coordinates from a recent desktop_screenshot (with coord-map awareness). Supports left/right/middle click and double-click.",
+					"[DESKTOP] Clicks at screen point x, y (from a recent desktop_screenshot). Use coordinates from a recent desktop_screenshot (with coord-map awareness). Supports left/right/middle click and double-click.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -155,7 +155,7 @@ export function getToolDefinitions(): object[] {
 			function: {
 				name: "desktop_press",
 				description:
-					"[DESKTOP] Press a key combination. Examples: 'enter', 'cmd+s', 'ctrl+shift+p', 'tab', 'escape', 'backspace'. Dangerous combos (cmd+q, alt+f4) are flagged.",
+					"[DESKTOP] Presses the key combination in keys, such as 'enter', 'cmd+s' or 'ctrl+shift+p'. Examples: 'enter', 'cmd+s', 'ctrl+shift+p', 'tab', 'escape', 'backspace'. Dangerous combos (cmd+q, alt+f4) are flagged.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -211,7 +211,7 @@ export function getToolDefinitions(): object[] {
 			function: {
 				name: "desktop_drag",
 				description:
-					"[DESKTOP] Drag from one point to another. Useful for resizing windows, moving files, drawing.",
+					"[DESKTOP] Drags from screen point fromX, fromY to screen point toX, toY. Useful for resizing windows, moving files, drawing.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -238,7 +238,7 @@ export function getToolDefinitions(): object[] {
 			function: {
 				name: "desktop_hover",
 				description:
-					"[DESKTOP] Move the cursor to a point without clicking. Useful for triggering hover states or tooltips.",
+					"[DESKTOP] Moves the cursor to screen point x, y without clicking. Useful for triggering hover states or tooltips.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -267,7 +267,7 @@ export function getToolDefinitions(): object[] {
 			function: {
 				name: "desktop_clipboard",
 				description:
-					"[DESKTOP] Get or set the system clipboard. Use action 'get' to read, 'set' to write.",
+					"[DESKTOP] Gets or sets the system clipboard: action 'get' reads it, action 'set' writes text. Use action 'get' to read, 'set' to write.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -345,7 +345,7 @@ export function getToolDefinitions(): object[] {
 			function: {
 				name: "desktop_safe_list",
 				description:
-					"[DESKTOP] Manage the safe list - apps that should never be quit during resource cleanup. Actions: 'list' to see current safe apps, 'add' to protect an app, 'remove' to unprotect.",
+					"[DESKTOP] Manages the safe list of apps never quit during cleanup: action is list, add or remove (with app). Actions: 'list' to see current safe apps, 'add' to protect an app, 'remove' to unprotect.",
 				parameters: {
 					type: "object",
 					properties: {

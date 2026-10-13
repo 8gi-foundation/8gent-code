@@ -1,5 +1,6 @@
 export type SlashCommand =
 	| "help"
+	| "hotkeys"
 	| "kanban"
 	| "predict"
 	| "avenues"
@@ -9,8 +10,11 @@ export type SlashCommand =
 	| "status"
 	| "model"
 	| "provider"
+	| "llama"
+	| "models"
 	| "voice"
 	| "theme"
+	| "reload"
 	| "infinite"
 	| "onboarding"
 	| "preferences"
@@ -25,10 +29,12 @@ export type SlashCommand =
 	| "auth"
 	| "vision"
 	| "session"
+	| "sessions"
 	| "resume"
 	| "history"
 	| "continue"
 	| "compact"
+	| "update"
 	| "chat"
 	| "agent"
 	| "github"
@@ -62,7 +68,10 @@ export type SlashCommand =
 	| "btw"
 	| "questions"
 	| "projects"
-	| "terminal";
+	| "terminal"
+	| "copy"
+	| "tree"
+	| "import";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -73,6 +82,12 @@ export interface BuiltInSlashCommandDef {
 
 export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{ name: "help", aliases: ["h", "?"], description: "Show available commands" },
+	{
+		name: "hotkeys",
+		aliases: ["keys", "shortcuts"],
+		description: "List every keyboard shortcut",
+		usage: "/hotkeys",
+	},
 	{
 		name: "kanban",
 		aliases: ["k", "board"],
@@ -105,6 +120,20 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		usage: "/provider [name]",
 	},
 	{
+		name: "llama",
+		aliases: [],
+		description:
+			"Takes status, load <id> or unload <id>: local llama-server health, loaded models, metrics",
+		usage: "/llama [status|load <id>|unload <id>]",
+	},
+	{
+		name: "models",
+		aliases: [],
+		description:
+			"Takes list or use <id>: llama-server models, switch model and keep the conversation",
+		usage: "/models [list|use <id>]",
+	},
+	{
 		name: "voice",
 		aliases: ["v"],
 		description: "Voice TTS settings",
@@ -113,8 +142,14 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "theme",
 		aliases: ["t"],
-		description: "Pick a TUI theme from the design systems, or set light / dark / auto",
+		description: "Pick a TUI theme (built in or your own), or set light / dark / auto",
 		usage: "/theme [name|default|status|light|dark|auto]",
+	},
+	{
+		name: "reload",
+		aliases: [],
+		description: "Re-read your theme files from ~/.8gent/themes",
+		usage: "/reload",
 	},
 	{
 		name: "infinite",
@@ -173,19 +208,31 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "export",
 		aliases: ["save"],
-		description: "Export current session as self-contained HTML",
-		usage: "/export",
+		description: "Export the session: <file>.jsonl for the session file, else HTML",
+		usage: "/export [file.jsonl]",
+	},
+	{
+		name: "import",
+		aliases: [],
+		description: "Import a session file written by /export <file>.jsonl",
+		usage: "/import <file.jsonl>",
+	},
+	{
+		name: "tree",
+		aliases: [],
+		description: "The session tree: pick any earlier message and continue from it",
+		usage: "/tree",
 	},
 	{
 		name: "fork",
 		aliases: ["f"],
-		description: "Fork conversation at current message",
-		usage: "/fork [label]",
+		description: "Copy the conversation so far into a new session and continue there",
+		usage: "/fork [name]",
 	},
 	{
 		name: "rewind",
 		aliases: ["rw"],
-		description: "Time-travel: rewind agent state to an earlier checkpoint",
+		description: "Time-travel: rewind 8gent state to an earlier checkpoint",
 		usage: "/rewind [n|list]",
 	},
 	{
@@ -281,8 +328,8 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "resume",
 		aliases: ["res"],
-		description: "Resume a recent session (pick from last 5)",
-		usage: "/resume",
+		description: "Resume a session: searchable picker, or /resume <id or name>",
+		usage: "/resume [id|name]",
 	},
 	{
 		name: "session",
@@ -291,8 +338,14 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		usage: "/session [name|list|resume] <args>",
 	},
 	{
+		name: "sessions",
+		aliases: ["shared"],
+		description: "Live and past shared sessions (join from the TUI or the 8gent Browser panel)",
+		usage: "/sessions [share|attach <id>|stop|detach]",
+	},
+	{
 		name: "history",
-		aliases: ["hist", "sessions"],
+		aliases: ["hist"],
 		description: "Browse all past sessions",
 		usage: "/history",
 	},
@@ -301,6 +354,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["cont", "last"],
 		description: "Continue most recent session automatically",
 		usage: "/continue",
+	},
+	{
+		name: "update",
+		aliases: ["upgrade"],
+		description: "Update 8gent, then reopen this session on the new version",
+		usage: "/update [--force]",
 	},
 	{
 		name: "compact",
@@ -317,7 +376,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "agent",
 		aliases: ["agents", "ag"],
-		description: "Manage sub-agents (list, spawn, kill, auto, settings)",
+		description: "Manage child 8gents (list, spawn, kill, auto, settings)",
 		usage: "/agent [list|spawn|kill|auto|settings]",
 	},
 	{
@@ -336,7 +395,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		name: "spawn",
 		aliases: [],
 		description:
-			"Spawn an external agent CLI as a new tab (claude, codex, hermes, openclaw, pi, 8gent)",
+			"Spawn an external 8gent CLI as a new tab (claude, codex, hermes, openclaw, pi, 8gent)",
 		usage: "/spawn <claude|codex|hermes|openclaw|pi|8gent>",
 	},
 	{
@@ -355,7 +414,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		name: "term",
 		aliases: [],
 		description:
-			"Open a new PTY terminal tab. Bare /term or /term shell launches your $SHELL; /term <preset> launches an interactive agent CLI (claude, codex, hermes, openclaw, pi, 8gent); anything else is run via the shell.",
+			"Open a new PTY terminal tab. Bare /term or /term shell launches your $SHELL; /term <preset> launches an interactive 8gent CLI (claude, codex, hermes, openclaw, pi, 8gent); anything else is run via the shell.",
 		usage: "/term [shell|<preset>|<command...>]",
 	},
 	{
@@ -386,8 +445,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "goal",
 		aliases: ["go"],
-		description:
-			"Run a goal to completion. Sub: status | stop | resume | clear | ?",
+		description: "Run a goal to completion. Sub: status | stop | resume | clear | ?",
 		usage: "/goal <goal> | /goal status | /goal stop | /goal resume | /goal clear | /goal ?",
 	},
 	{
@@ -436,8 +494,65 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		description: "Open a terminal tab in the current project (optional tab label)",
 		usage: "/terminal [label]",
 	},
+	{
+		name: "copy",
+		aliases: [],
+		description: "Copy the last answer to the clipboard (works over SSH)",
+		usage: "/copy",
+	},
 ];
 
 function getBuiltInSlashCommands(): BuiltInSlashCommandDef[] {
 	return BUILT_IN_SLASH_COMMANDS;
+}
+
+/**
+ * The commands about the work itself, few enough that a bare `/` shows every
+ * one without scrolling (the menu draws 14 rows). The `/` menu and the Ctrl+P palette show
+ * these first (the `/` menu shows only these until a letter is typed); every
+ * other command still runs when typed by name and appears once its prefix
+ * matches (#3918, Pi gap D9).
+ */
+export const CORE_SLASH_COMMANDS: ReadonlySet<SlashCommand> = new Set<SlashCommand>([
+	"help",
+	"model",
+	"provider",
+	"clear",
+	"compact",
+	"resume",
+	"fork",
+	"rewind",
+	"export",
+	"skills",
+	"settings",
+	"copy",
+	"hotkeys",
+	"quit",
+]);
+
+export function isCoreSlashCommand(name: SlashCommand): boolean {
+	return CORE_SLASH_COMMANDS.has(name);
+}
+
+/** Built-in commands with the core ones first, each group in table order. */
+export function builtInCommandsCoreFirst(
+	commands: readonly BuiltInSlashCommandDef[] = BUILT_IN_SLASH_COMMANDS,
+): BuiltInSlashCommandDef[] {
+	return [
+		...commands.filter((c) => isCoreSlashCommand(c.name)),
+		...commands.filter((c) => !isCoreSlashCommand(c.name)),
+	];
+}
+
+/** The /help text. Core commands by default; `all` lists every built-in. */
+export function formatSlashHelp(all: boolean): string {
+	const rows = all
+		? builtInCommandsCoreFirst()
+		: BUILT_IN_SLASH_COMMANDS.filter((c) => isCoreSlashCommand(c.name));
+	const lines = rows.map((c) => `  ${c.usage ?? `/${c.name}`} - ${c.description}`);
+	const hidden = BUILT_IN_SLASH_COMMANDS.length - rows.length;
+	const tail = all
+		? "  /<skill> ... - Any loaded skill name or alias expands to its prompt\n  /<template> ... - A Markdown file in ~/.8gent/prompts, sent with $1, $@ filled in"
+		: `  /help all - Show ${hidden} more commands`;
+	return `${all ? "All commands" : "Core commands"}:\n${lines.join("\n")}\n${tail}`;
 }

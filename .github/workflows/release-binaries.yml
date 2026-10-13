@@ -1,12 +1,15 @@
 # release-binaries.yml - Build self-contained binaries and installers for
-# macOS, Linux and Windows on a v* tag, and attach them to the GitHub Release.
+# macOS, Linux and Windows on a v* tag, prove they start on each OS, attach
+# them to the GitHub Release and publish it.
 #
-# RUNNER: everything builds on the org's self-hosted helm runner (Apple
-# Silicon Mac, labels self-hosted,8gi,helm). The org does not use
-# GitHub-hosted minutes. Bun cross-compiles every target from macOS; nfpm
-# builds the .deb/.rpm and makensis builds the Windows installer, both
-# installed on the runner. This proves the binaries build and package; it does
-# not run them on Linux or Windows.
+# RUNNERS (#3981): GitHub-hosted. The build ran on the self-hosted helm Mac,
+# whose disk gate refused the v0.18.0 job on 1 Oct (10 GB free, floor 12 GB),
+# so v0.18.1 and v0.19.0 shipped with no binaries at all. A release must not
+# depend on one machine's free disk. The repository is public, so hosted
+# minutes cost nothing. macos-latest (Apple Silicon) builds every target, since
+# Bun cross-compiles them all from macOS and notarization needs xcrun; the
+# Windows exe and the Linux binary are then started on windows-latest and
+# ubuntu-latest before anything is attached.
 #
 # Reproduce locally on any Mac with bun, nfpm and makensis installed:
 #   bun install && bun run scripts/build-binaries.ts
@@ -15,9 +18,13 @@
 # (makensis on macOS/Linux takes -D; the Windows build takes /D.)
 #
 # SIGNING: opt-in and skip-if-absent. With no secrets set, unsigned artifacts
-# are produced (they run, but trigger OS trust prompts). Windows Authenticode
-# signing needs signtool, which the helm runner does not have; see SIGNING.md.
-# The npm publish and the GitHub Release itself live in release.yml.
+# are produced (they run, but trigger OS trust prompts). macOS codesigning with
+# EIGHT_MAC_SIGN_IDENTITY needs that identity in the runner's keychain, which a
+# hosted runner does not have, so it is not passed here; notarization (below)
+# and Linux GPG signing still apply when their secrets exist. See SIGNING.md.
+# The GitHub Release (as a draft) and the optional npm publish live in
+# release.yml; this workflow publishes the release once every binary,
+# installer, the tarball and SHA256SUMS are on it. npm is not a gate.
 
 name: Release Binaries
 
@@ -27,8 +34,11 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Least privilege (#3803 hardening): builds and smoke tests only read. Only
+# the job that edits the release gets contents: write, and only the alarm
+# gets issues: write.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-binaries-${{ github.ref }}
@@ -37,33 +47,72 @@ concurrency:
 jobs:
   build:
     name: Build macOS, Linux and Windows
-    runs-on: [self-hosted, 8gi, helm]
+    runs-on: macos-latest
+    # Read-only. This job runs dependency install scripts (bun install), so it
+    # must never hold id-token or attestations: those live only in `attest`.
+    permissions:
+      contents: read
+    env:
+      # A step's own env is not visible to its `if:`, so the notarization
+      # switch lives here.
+      HAS_NOTARY_KEY: ${{ secrets.AC_API_KEY_ID != '' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - name: Toolchain
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      # better-sqlite3's install script builds against the runner's Node. The
+      # macOS image's Node 24 has no prebuilt better-sqlite3 binary and its
+      # headers do not compile with the image's clang, so pin an LTS that does.
+      - name: Setup Node (native dependency builds)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      # nfpm: an exact release, checked against its published SHA256.
+      # makensis: Homebrew checks the bottle's SHA256 against its formula;
+      # the version is asserted so a formula bump is a visible change here.
+      - name: Toolchain (nfpm 2.47.0, makensis 3.12, pinned)
+        env:
+          NFPM_URL: https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Darwin_arm64.tar.gz
+          NFPM_SHA256: e8c9d1d9ac218eeed479375143dc46b8d51a2b8dbba8e2f9f15ecc8faa2e404b
         run: |
-          bun --version
-          nfpm --version
+          mkdir -p "$RUNNER_TEMP/tools"
+          curl -fsSL --proto =https -o "$RUNNER_TEMP/nfpm.tgz" "$NFPM_URL"
+          echo "${NFPM_SHA256}  $RUNNER_TEMP/nfpm.tgz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/nfpm.tgz" -C "$RUNNER_TEMP/tools" nfpm
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+          brew install makensis
+          test "$(brew list --versions makensis)" = "makensis 3.12" || { echo "::error::makensis is $(brew list --versions makensis), pinned 3.12"; exit 1; }
+          "$RUNNER_TEMP/tools/nfpm" --version
           makensis -VERSION
 
+      # Scripts stay on here: better-sqlite3 must build its native addon for
+      # the compiled binary's memory store, so --ignore-scripts would ship a
+      # broken binary.
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Compile all targets
         run: bun run scripts/build-binaries.ts
-        env:
-          EIGHT_MAC_SIGN_IDENTITY: ${{ secrets.EIGHT_MAC_SIGN_IDENTITY }}
 
       # Runs the real commands against the compiled binary (script from #2966).
       # Source-mode tests cannot see import-time failures that only exist inside
       # bun build --compile output; v0.17.3 shipped with four of them.
+      # A hang here must be a red step in minutes, not a six-hour job (#3981:
+      # the TUI first-frame check, added in #3894, hung on macos-latest).
       - name: Smoke-test the compiled binary
+        timeout-minutes: 10
         run: bash scripts/smoke-compiled.sh dist/bin/8gent-darwin-arm64
 
       - name: Notarize macOS binaries (opt-in)
-        if: env.AC_API_KEY_ID != ''
+        if: env.HAS_NOTARY_KEY == 'true'
         env:
           AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
           AC_API_ISSUER: ${{ secrets.AC_API_ISSUER }}
@@ -96,21 +145,151 @@ jobs:
           cp dist/bin/* dist/installers/
           ls -la dist/installers/
 
+      # A truncated cross-compile must not ship: a Bun binary is >= 50 MB, the
+      # NSIS installer wraps one. Floors are far below real sizes, far above a
+      # stub or an empty file.
+      - name: Size floor
+        run: |
+          fail=0
+          for f in dist/installers/*; do
+            case "$f" in
+              *setup*.exe) min=5000000 ;;
+              *.deb|*.rpm|*.tar.gz) min=5000000 ;;
+              *) min=20000000 ;;
+            esac
+            size="$(wc -c < "$f" | tr -d ' ')"
+            if [ "$size" -lt "$min" ]; then
+              echo "::error::$f is $size bytes, below the $min byte floor"
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+      # Checksums are computed here, from the built files, before anything is
+      # uploaded or leaves this runner. The release job merges them into the
+      # release's SHA256SUMS. Kept out of the release assets themselves.
+      - name: Checksum every built installer
+        run: |
+          cd dist/installers
+          ls | grep -v '^installers.sha256$' | xargs shasum -a 256 | LC_ALL=C sort -k2 > installers.sha256
+          cat installers.sha256
+
       - name: Upload artifacts to workflow
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: 8gent-binaries
           path: dist/installers/*
           if-no-files-found: error
 
-  release:
-    name: Attach to GitHub Release
+  # GitHub build provenance for every built file, signed in a job that runs no
+  # repository or dependency code: it only downloads the build's artifact and
+  # calls the pinned attest action, so nothing a dependency's install script
+  # did can reach the OIDC token (#3981 N1). The installers check it with
+  #   gh attestation verify <file> --repo 8gi-foundation/8gent-code \
+  #     --signer-workflow 8gi-foundation/8gent-code/.github/workflows/release-binaries.yml \
+  #     --source-ref refs/tags/vX.Y.Z
+  attest:
+    name: Attest build provenance
     needs: build
-    runs-on: [self-hosted, 8gi, helm]
-    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: 8gent-binaries
+          path: bins
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: bins/installers.sha256
+
+  # No CI run had ever started the Windows exe before a release. Start both
+  # Windows builds on a real Windows machine; nothing is attached otherwise.
+  # --version is the gate; the memory round trip is reported as a warning so
+  # a first Windows release is not held back by a memory-store bug.
+  smoke-windows:
+    name: Start the Windows exe on Windows
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: 8gent-binaries
+          path: bins
+      - name: --version, then a memory round trip
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('8gent-windows-x64.exe', '8gent-windows-x64-baseline.exe')) {
+            $exe = Join-Path (Resolve-Path bins) $name
+            $home8 = Join-Path $env:RUNNER_TEMP ("home-" + $name)
+            New-Item -ItemType Directory -Force -Path $home8 | Out-Null
+            $env:USERPROFILE = $home8
+            $env:HOME = $home8
+            $v = & $exe --version | Out-String
+            Write-Host "${name} --version -> $v"
+            if ($LASTEXITCODE -ne 0 -or $v -notmatch '8gent Code v\d+\.\d+\.\d+') { throw "${name} did not report a version" }
+            if (($env:TAG -match '^v\d+\.\d+\.\d+$') -and ($v -notmatch [regex]::Escape("8gent Code $env:TAG"))) { throw "${name} reports '$v', not $env:TAG" }
+            try {
+              & $exe memory remember 'smoke-check-marker' | Out-Null
+              $r = & $exe memory recall smoke-check | Out-String
+            } catch { $r = "$_" }
+            if ($r -notmatch 'smoke-check-marker') { Write-Host "::warning::${name} memory recall did not return the marker: $r" }
+            Write-Host "${name} PASS"
+          }
+
+  smoke-linux:
+    name: Start the Linux binary on Linux
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (smoke-compiled.sh)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: 8gent-binaries
+          path: bins
+      - name: Smoke-test the compiled Linux binary
+        timeout-minutes: 10
+        run: |
+          chmod +x bins/8gent-linux-x64
+          bash scripts/smoke-compiled.sh bins/8gent-linux-x64
+
+  release:
+    name: Attach to GitHub Release
+    needs: [build, attest, smoke-windows, smoke-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Require a strict vX.Y.Z tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release-binaries.yml publishes from a vX.Y.Z tag only, not ${TAG}"
+            exit 1
+          fi
+
+      - name: Checkout (release-guard.sh)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: 8gent-binaries
           path: upload
@@ -124,6 +303,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
         run: |
           for i in $(seq 1 60); do
             gh release view "$TAG" --repo "$REPO" --json isDraft >/dev/null 2>&1 && break
@@ -133,4 +313,89 @@ jobs:
             fi
             sleep 30
           done
+          # --clobber repairs this run's own draft; a public release is never
+          # touched (#3981).
+          bash scripts/release-require-draft.sh "$TAG"
+          # installers.sha256 is a build-time input, not a release asset.
+          mv upload/installers.sha256 "$RUNNER_TEMP/installers.sha256"
           gh release upload "$TAG" upload/* --repo "$REPO" --clobber
+
+          # Merge the installer checksums into the release's SHA256SUMS so one
+          # file covers every attached asset. release.yml wrote the tarball line;
+          # lines for names we are about to add are replaced, so a re-run is idempotent.
+          mkdir -p "$RUNNER_TEMP/sums"
+          gh release download "$TAG" --repo "$REPO" --pattern SHA256SUMS --dir "$RUNNER_TEMP/sums" --clobber
+          awk 'NR==FNR { new[$2]=1; next } !($2 in new)' "$RUNNER_TEMP/installers.sha256" "$RUNNER_TEMP/sums/SHA256SUMS" > "$RUNNER_TEMP/merged"
+          cat "$RUNNER_TEMP/installers.sha256" >> "$RUNNER_TEMP/merged"
+          LC_ALL=C sort -k2 "$RUNNER_TEMP/merged" > "$RUNNER_TEMP/sums/SHA256SUMS"
+          cat "$RUNNER_TEMP/sums/SHA256SUMS"
+
+          # Sign the final SHA256SUMS with the release key the installers and
+          # self-update embed (scripts/release-signing.pub). No key configured
+          # yet: ships unsigned with a notice.
+          if [ -n "${MINISIGN_SECRET_KEY}" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          fi
+          bash scripts/release-sign.sh "$RUNNER_TEMP/sums/SHA256SUMS" "$TAG"
+          gh release upload "$TAG" "$RUNNER_TEMP/sums/SHA256SUMS" --repo "$REPO" --clobber
+          if [ -f "$RUNNER_TEMP/sums/SHA256SUMS.minisig" ]; then
+            gh release upload "$TAG" "$RUNNER_TEMP/sums/SHA256SUMS.minisig" --repo "$REPO" --clobber
+          fi
+
+      # #3803: the release goes public only when it carries the Windows .exe,
+      # the Windows installer, the macOS and Linux binaries, and release.yml's
+      # tarball + SHA256SUMS. Otherwise it stays a draft and this job fails, so
+      # a missing asset is a red run, not a quiet public release with nothing
+      # on it. npm is an optional channel and is not checked here (#3981).
+      - name: Publish the release once it is complete
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # With a release key configured, the signature is a required asset too.
+          SIG=()
+          if grep -v '^#' scripts/release-signing.pub | grep -q '[^[:space:]]'; then SIG=('^SHA256SUMS\.minisig$'); fi
+          bash scripts/release-guard.sh publish-complete "$TAG" "${SIG[@]}" \
+            '^8gent-windows-x64\.exe$' \
+            '^8gent-windows-x64-baseline\.exe$' \
+            '^8gent-setup-.*-x64\.exe$' \
+            '^8gent-darwin-arm64$' \
+            '^8gent-darwin-x64$' \
+            '^8gent-linux-x64$' \
+            '^8gent-linux-arm64$' \
+            '\.tgz$' \
+            '^SHA256SUMS$'
+
+  # The public release, installed the way a user installs it: the one-line
+  # installers' scripts on fresh Windows, macOS and Linux machines, checking
+  # that `8gent --version` names this tag.
+  install-smoke:
+    name: Install the published release
+    needs: release
+    uses: ./.github/workflows/release-install-smoke.yml
+    with:
+      tag: ${{ github.ref_name }}
+
+  # A failed release used to be invisible for a week (#3658). Any failure
+  # above opens (or comments on) one P0 issue, so it lands where people look.
+  alarm:
+    name: Open an issue when the release fails
+    needs: [build, attest, smoke-windows, smoke-linux, release, install-smoke]
+    # Only a release tag raises the alarm; a dispatched dry run on a branch
+    # reports its failure in the run itself.
+    if: failure() && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Open or update the release-failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash scripts/release-alarm.sh "release-binaries.yml" "$REF" "$RUN_URL"

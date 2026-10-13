@@ -2,7 +2,7 @@
  * ActivityRail - fixed-width right column for the three-zone TUI shell.
  *
  * Surfaces the agent's live ops in five stacked sections:
- *   - AGENT ACTIVITY heading
+ *   - 8GENT ACTIVITY heading
  *   - Active Tasks with progress bars
  *   - Tools status (read/patch/test/verify with state glyphs)
  *   - Providers (the configured route, its real failover hop, and a
@@ -303,7 +303,7 @@ export function ActivityRail({
 			overflow="hidden"
 		>
 			<Box flexShrink={0}>
-				<Text color={t.heading} bold>AGENT ACTIVITY</Text>
+				<Text color={t.heading} bold>8GENT ACTIVITY</Text>
 			</Box>
 
 			<RailSection title="TASKS">
@@ -395,7 +395,7 @@ export function ActivityRail({
 				</RailSection>
 			) : null}
 
-			<RailSection title="AGENTS">
+			<RailSection title="8GENTS">
 				{agents.map((agent) => (
 					<NamedRow
 						key={agent.name}
