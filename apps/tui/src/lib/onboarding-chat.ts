@@ -72,8 +72,18 @@ export function answerFromInput(q: ChatQuestion, input: string): { value: string
 		if (hit) return { value: hit.value, echo: hit.label };
 		return { value: text, echo: text };
 	}
-	if (!text && q.kind === "agentName" && q.default) return { value: "", echo: q.default };
+	// A step with a default keeps it on an empty Enter, and the chat says
+	// which name was kept, not "(skipped)" (#4219).
+	if (!text && q.default) return { value: "", echo: q.default };
 	return { value: text, echo: text || "(skipped)" };
+}
+
+/**
+ * The line when setup ends (#4219). It used to say "I now understand you
+ * 76%", a number with no meaning to a new person.
+ */
+export function setupDoneLine(name: string): string {
+	return `Welcome, ${name}. Setup is done; /onboarding runs it again.\nLet's build something magnificent.`;
 }
 
 /** One line for a provider the setup checked by itself instead of asking. */
@@ -91,7 +101,8 @@ export function providerCheckLine(name: string, live: boolean, installHint?: str
 /** The quiet hint under the welcome card. */
 export const SETUP_SKIP_HINT = "/skip skips a question. /skip all skips the setup.";
 /** The welcome's call to action. Pinned to the real copy by a test. */
-export const SETUP_WELCOME_PROMPT = "A short setup follows, so I can serve you properly. Press Enter to begin.";
+export const SETUP_WELCOME_PROMPT =
+	"A short setup follows, so I can serve you properly. Press Enter to begin.";
 /** Id prefix of the welcome card, so it can be told from later questions. */
 export const SETUP_WELCOME_ID = "setup-q-welcome-";
 const SETUP_CARD_ID = "setup-q-";

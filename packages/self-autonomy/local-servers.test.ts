@@ -14,8 +14,10 @@ import {
 	detectLocalServers,
 	installGuideUrl,
 	providerChoiceScreen,
+	readableModelName,
 	resolveProviderChoice,
 	saveProviderChoice,
+	serverModelsLine,
 } from "./local-servers";
 import { type OllamaCheck, OnboardingManager, providerInstallHint } from "./onboarding";
 
@@ -388,5 +390,42 @@ describe("saving the choice", () => {
 			activeProvider: "openrouter",
 			activeModel: "auto:free",
 		});
+	});
+});
+
+describe("model names a person can read (#4221)", () => {
+	const HASH = "llamacpp:c97eb11d70b1acdc88af01eef566c1fe4f7fbe93eb1afc06871132f293ff425a";
+
+	test("a bare content hash is shortened and called unnamed", () => {
+		expect(readableModelName(HASH)).toBe("unnamed model c97eb11d");
+		expect(readableModelName("c97eb11d70b1acdc88af01eef566c1fe")).toBe("unnamed model c97eb11d");
+	});
+
+	test("named ids keep their tag and lose the registry path", () => {
+		expect(readableModelName("qwen3.5:9b")).toBe("qwen3.5:9b");
+		expect(readableModelName("google/gemma-4-26b-a4b")).toBe("gemma-4-26b-a4b");
+	});
+
+	test("the choice row never prints a 64-character id, and names a model the person knows", () => {
+		const server = {
+			id: "ollama" as const,
+			label: "Ollama",
+			url: "http://localhost:11434",
+			models: [HASH, "qwen3.5:9b", "qwen3.8:27b-mlx"],
+		};
+		const line = serverModelsLine(server);
+		expect(line).toBe("unnamed model c97eb11d and 2 more, including qwen3.5:9b");
+		const row = providerChoiceScreen([server], "darwin").choices[0];
+		expect(row.description).not.toMatch(/[0-9a-f]{32}/);
+	});
+
+	test("a named first model reads as before", () => {
+		const server = {
+			id: "lmstudio" as const,
+			label: "LM Studio",
+			url: "http://localhost:1234",
+			models: ["gemma-4-26b-a4b-it"],
+		};
+		expect(serverModelsLine(server)).toBe("gemma-4-26b-a4b-it");
 	});
 });

@@ -143,6 +143,7 @@ import {
 	providerCheckLine,
 	questionForChat,
 	settleSetupTranscript,
+	setupDoneLine,
 } from "./lib/onboarding-chat.js";
 import { probeProviders } from "./lib/provider-health.js";
 import { isUserThemeId } from "./lib/user-themes.js";
@@ -1724,6 +1725,8 @@ export function App({
 			to: next,
 			available: availableModels,
 			installed: installedOllamaModelsRef.current,
+			// Setup has not asked which server to use yet (#4220).
+			duringSetup: onboardingManager.needsOnboarding(),
 		});
 		if (notice) addSystemMessage(notice);
 		setCurrentModel(next);
@@ -6105,9 +6108,7 @@ export function App({
 					setMessages((prev) => settleSetupTranscript(prev));
 					const user = onboardingManager.getUser();
 					const name = user.identity.name || "friend";
-					addSystemMessage(
-						`Welcome, ${name}. I now understand you ${Math.round(user.understanding.confidenceScore * 100)}%.\nLet's build something magnificent.`,
-					);
+					addSystemMessage(setupDoneLine(name));
 					// Speak the welcome (gated by voice.outputEnabled)
 					{
 						const voice = user.preferences?.voice;
