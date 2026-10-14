@@ -15,6 +15,11 @@
  *   - decideRules says pass and there is no prompt-control text;
  *   - no command, process or arithmetic substitution, backtick, heredoc or
  *     unquoted `$` expansion other than `$?`;
+ *   - no shell comment (a `#` at the start of a word), newline or CR: the
+ *     segment splitter does not model comments (#3303);
+ *   - no unquoted glob character (`*`, `?`, `[`) and no brace expansion
+ *     (`{a,b}`, `{1..3}`): sh expands them, so the argv that runs is not the
+ *     one read here (#3303);
  *   - every redirect goes to /dev/null, a temp path or another fd, never a file;
  *   - every segment is a bare read-only binary (READ_ONLY_BINS, with the
  *     per-binary argument checks below), `cd`, a read-only git subcommand, an
@@ -65,9 +70,43 @@ export interface AllowlistResult {
 
 /** Binaries that only read, with no argument that writes, deletes or runs another program. */
 export const READ_ONLY_BINS: ReadonlySet<string> = new Set([
-	"ls", "pwd", "which", "wc", "head", "tail", "cat", "grep", "egrep", "fgrep", "rg", "echo", "printf", "true", "false",
-	"sleep", "date", "file", "stat", "du", "df", "basename", "dirname", "realpath", "whoami", "uname", "tr", "cut", "diff",
-	"cmp", "nl", "tree", "jq", "sort", "uniq", "find", "test",
+	"ls",
+	"pwd",
+	"which",
+	"wc",
+	"head",
+	"tail",
+	"cat",
+	"grep",
+	"egrep",
+	"fgrep",
+	"rg",
+	"echo",
+	"printf",
+	"true",
+	"false",
+	"sleep",
+	"date",
+	"file",
+	"stat",
+	"du",
+	"df",
+	"basename",
+	"dirname",
+	"realpath",
+	"whoami",
+	"uname",
+	"tr",
+	"cut",
+	"diff",
+	"cmp",
+	"nl",
+	"tree",
+	"jq",
+	"sort",
+	"uniq",
+	"find",
+	"test",
 ]);
 
 /** Arguments that make an otherwise read-only binary write, delete or run something. */
@@ -86,14 +125,61 @@ const GIT_WRITING_ARG = /^(--output(=.*)?|-o|--ext-diff|-c|--exec-path(=.*)?|--c
 
 /** Dev tools whose `--version` / `--help`, given alone, only print. */
 export const VERSION_TOOLS: ReadonlySet<string> = new Set([
-	"bun", "node", "npm", "npx", "pnpm", "yarn", "deno", "python", "python3", "pip", "pip3", "uv", "git", "go", "cargo",
-	"rustc", "tsc", "gh", "docker", "make", "gcc", "clang", "java", "ruby", "perl", "php", "curl", "wget", "brew",
-	"ffmpeg", "ffprobe", "marp", "jq", "rg", "sqlite3", "psql", "tmux", "biome", "eslint", "prettier", "vite",
+	"bun",
+	"node",
+	"npm",
+	"npx",
+	"pnpm",
+	"yarn",
+	"deno",
+	"python",
+	"python3",
+	"pip",
+	"pip3",
+	"uv",
+	"git",
+	"go",
+	"cargo",
+	"rustc",
+	"tsc",
+	"gh",
+	"docker",
+	"make",
+	"gcc",
+	"clang",
+	"java",
+	"ruby",
+	"perl",
+	"php",
+	"curl",
+	"wget",
+	"brew",
+	"ffmpeg",
+	"ffprobe",
+	"marp",
+	"jq",
+	"rg",
+	"sqlite3",
+	"psql",
+	"tmux",
+	"biome",
+	"eslint",
+	"prettier",
+	"vite",
 ]);
 /** Short version flags, only for the tools that define them this way. */
 const SHORT_VERSION: Record<string, string> = {
-	node: "-v", bun: "-v", npm: "-v", pnpm: "-v", yarn: "-v", deno: "-V", python: "-V", python3: "-V",
-	ffmpeg: "-version", ffprobe: "-version", go: "version",
+	node: "-v",
+	bun: "-v",
+	npm: "-v",
+	pnpm: "-v",
+	yarn: "-v",
+	deno: "-V",
+	python: "-V",
+	python3: "-V",
+	ffmpeg: "-version",
+	ffprobe: "-version",
+	go: "version",
 };
 
 function versionOnly(b: string, args: string[]): boolean {
@@ -105,10 +191,12 @@ function versionOnly(b: string, args: string[]): boolean {
 function mkdirOk(args: string[]): string | null {
 	const flags = args.filter((a) => a.startsWith("-"));
 	const paths = args.filter((a) => !a.startsWith("-"));
-	if (flags.some((f) => !["-p", "-v", "-pv", "-vp", "--parents", "--verbose"].includes(f))) return "mkdir with a flag other than -p/-v";
+	if (flags.some((f) => !["-p", "-v", "-pv", "-vp", "--parents", "--verbose"].includes(f)))
+		return "mkdir with a flag other than -p/-v";
 	if (paths.length === 0) return "mkdir with no path";
 	for (const p of paths) {
-		if (/^[/~]/.test(p) || /(^|\/)\.\.(\/|$)/.test(p) || /[*?[\]{}$]/.test(p)) return `mkdir outside the working directory (${p})`;
+		if (/^[/~]/.test(p) || /(^|\/)\.\.(\/|$)/.test(p) || /[*?[\]{}$]/.test(p))
+			return `mkdir outside the working directory (${p})`;
 	}
 	return null;
 }
@@ -117,8 +205,9 @@ const SECRET_ARG =
 	/(^|\/)\.env(\.[\w.-]+)?$|(^|\/)\.env\b|id_rsa|id_ed25519|id_ecdsa|(^|\/)\.ssh(\/|$)|\.aws\/|credentials|\.netrc|\.npmrc|\.git-credentials|keychain|\.pem$|\.key$|\.p12$/;
 
 /** Redirect in masked text: fd, operator, optional noclobber bar, target. */
-const REDIR_RE = /(?<![<>&\d])(\d?|&)(>>?|<)(\|?)\s*(&\d+|[^\s;|&<>()]+)/g;
-const OK_TARGET = /^(&\d|\/dev\/null$|\/tmp\/|\/private\/tmp\/)/;
+/** The target may start with `&`; only `&<digits>` as a whole word is an fd (`>&2foo` writes the file `2foo`, #3303). */
+const REDIR_RE = /(?<![<>&\d])(\d?|&)(>>?|<)(\|?)\s*(&?[^\s;|&<>()]+)/g;
+const OK_TARGET = /^(&\d+$|\/dev\/null$|\/tmp\/|\/private\/tmp\/)/;
 
 const none = (reason: string): AllowlistResult => ({ verdict: "no-opinion", reason });
 
@@ -130,13 +219,29 @@ const none = (reason: string): AllowlistResult => ({ verdict: "no-opinion", reas
  * redirect-following; anything else goes to the judge. wget is not covered.
  * POST bodies are already escalated by the rules.
  */
-const LOOPBACK_URL = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?(?=[/?#]|$)[^\s[\]{}]*$/;
+const LOOPBACK_URL =
+	/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?(?=[/?#]|$)[^\s[\]{}]*$/;
 const OLLAMA_PORT = "11434";
 const FETCH_FLAGS = {
 	bare: "sSiIfv",
 	valued: "ocbHmX",
-	longBare: new Set(["--silent", "--show-error", "--include", "--head", "--fail", "--verbose", "--compressed"]),
-	longValued: new Set(["--output", "--cookie-jar", "--cookie", "--header", "--max-time", "--connect-timeout"]),
+	longBare: new Set([
+		"--silent",
+		"--show-error",
+		"--include",
+		"--head",
+		"--fail",
+		"--verbose",
+		"--compressed",
+	]),
+	longValued: new Set([
+		"--output",
+		"--cookie-jar",
+		"--cookie",
+		"--header",
+		"--max-time",
+		"--connect-timeout",
+	]),
 };
 
 function fetchTargetOk(v: string): boolean {
@@ -147,9 +252,11 @@ function fetchValueOk(bin: string, flag: string, v: string): string | null {
 	const f = flag.replace(/^-+/, "");
 	if (f === "o" || f === "output" || f === "c" || f === "cookie-jar")
 		return fetchTargetOk(v) ? null : `${bin} writes to ${v}`;
-	if (f === "b" || f === "cookie") return v.includes("=") || fetchTargetOk(v) ? null : `${bin} reads cookies from ${v}`;
+	if (f === "b" || f === "cookie")
+		return v.includes("=") || fetchTargetOk(v) ? null : `${bin} reads cookies from ${v}`;
 	if (f === "H" || f === "header") return v.startsWith("@") ? `${bin} reads ${v}` : null;
-	if (f === "m" || f === "max-time" || f === "connect-timeout") return /^\d{1,3}$/.test(v) ? null : `${bin} timeout is not a number`;
+	if (f === "m" || f === "max-time" || f === "connect-timeout")
+		return /^\d{1,3}$/.test(v) ? null : `${bin} timeout is not a number`;
 	if (f === "X") return v === "GET" || v === "HEAD" ? null : `${bin} -X ${v}`;
 	return `${bin} flag ${flag}`;
 }
@@ -163,8 +270,12 @@ const CURL_PROXY_ENV = /^(http|https|all)_proxy$/i;
  * in $CURL_HOME, $XDG_CONFIG_HOME, ~ or ~/.config and `-q` is not the first
  * argument. Shared with packages/permissions/s1-curl-loopback.ts.
  */
-export function curlEnvRefusal(qFirst: boolean, env: NodeJS.ProcessEnv = process.env): string | null {
-	for (const [k, v] of Object.entries(env)) if (v && CURL_PROXY_ENV.test(k)) return `curl with ${k} set`;
+export function curlEnvRefusal(
+	qFirst: boolean,
+	env: NodeJS.ProcessEnv = process.env,
+): string | null {
+	for (const [k, v] of Object.entries(env))
+		if (v && CURL_PROXY_ENV.test(k)) return `curl with ${k} set`;
 	if (qFirst) return null;
 	const dirs = new Set<string>();
 	for (const e of [env.CURL_HOME, env.XDG_CONFIG_HOME, env.HOME, homedir()]) if (e) dirs.add(e);
@@ -189,7 +300,8 @@ function loopbackFetchOk(bin: string, argsIn: string[]): string | null {
 		const a = args[i];
 		if (a.startsWith("--")) {
 			if (spec.longBare.has(a)) continue;
-			if (!spec.longValued.has(a) || i + 1 >= args.length) return `${bin} with ${a}, not a loopback-GET flag`;
+			if (!spec.longValued.has(a) || i + 1 >= args.length)
+				return `${bin} with ${a}, not a loopback-GET flag`;
 			const why = fetchValueOk(bin, a, args[++i]);
 			if (why) return why;
 		} else if (a.length > 1 && a.startsWith("-")) {
@@ -248,13 +360,15 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	if (!READ_ONLY_BINS.has(b)) return `${b} is not on the read-only list`;
 	const bad = WRITING_ARGS[b];
 	if (bad && args.some((a) => bad.test(a))) return `${b} with an argument that writes or runs`;
-	if (b === "uniq" && args.filter((a) => !a.startsWith("-")).length > 1) return "uniq with an output file";
+	if (b === "uniq" && args.filter((a) => !a.startsWith("-")).length > 1)
+		return "uniq with an output file";
 	return null;
 }
 
 function gitOk(args: string[]): string | null {
 	let i = 0;
-	while (i < args.length && (args[i] === "--no-pager" || args[i] === "-C")) i += args[i] === "-C" ? 2 : 1;
+	while (i < args.length && (args[i] === "--no-pager" || args[i] === "-C"))
+		i += args[i] === "-C" ? 2 : 1;
 	const sub = args[i];
 	const rest = args.slice(i + 1);
 	if (args.some((a) => GIT_WRITING_ARG.test(a))) return "git with an argument that writes or runs";
@@ -289,20 +403,45 @@ function dollarInDoubleQuotes(s: string): boolean {
 export function readOnlyAllowlist(command: string, opts: AllowlistOptions = {}): AllowlistResult {
 	try {
 		if (!command.trim()) return none("empty command");
-		if (!posixRulesApply(command, opts.shell ?? activeShellKind())) return none("the shell does not parse this line the POSIX way");
+		if (!posixRulesApply(command, opts.shell ?? activeShellKind()))
+			return none("the shell does not parse this line the POSIX way");
+		// maskQuotes and splitSegments do not know about comments: an apostrophe
+		// in a `# it's` comment opens a phantom quote that hides the next line
+		// from the rules and from this list (#3303 review). sh runs that line.
+		// So any word-start `#`, newline or CR is no-opinion: one judge call.
+		if (/(^|[\s;&|()<>])#/.test(command)) return none("has a shell comment");
+		if (/[\n\r]/.test(command)) return none("spans more than one line or has a CR");
 		if (promptControlText(command) !== null) return none("carries prompt-control text");
 		const rules = decideRules(command);
-		if (rules.verdict !== "pass") return none(`rule ${rules.rule} fired (${rules.verdict}); rules win`);
+		if (rules.verdict !== "pass")
+			return none(`rule ${rules.rule} fired (${rules.verdict}); rules win`);
 		if (/\$\(|`|<\(|>\(|<<|\$\[/.test(command)) return none("has a substitution or heredoc");
+		// Also covers ANSI-C quoting: `$'\x2d...'` can hide a token from the
+		// rules (they do not decode it), but its `$` is unquoted, so it is
+		// refused here and the judge sees it. Known, predates #3303.
 		if (/\$(?!\?)/.test(maskQuotes(command))) return none("has an unquoted $ expansion");
 		if (dollarInDoubleQuotes(command)) return none("has a $ expansion inside double quotes");
+		// sh expands these before the binary sees its argv, so the words read
+		// here are not the words that run: a glob can match a planted file
+		// named like a flag, a brace can produce one (#3303).
+		// The one bracket that may stay: a loopback IPv6 URL host at the start of a
+		// word (`http://[::1]:8080/`, passed by loopbackFetchOk, #3714). The word
+		// starts with http, so it can never glob into a flag.
+		const bare = maskQuotes(command)
+			.replace(/\$\?/g, "")
+			.replace(/(^|[\s;&|()])(https?:\/\/)\[::1\](?=[:/?#\s;&|()]|$)/g, "$1$2");
+		if (/[*?[]/.test(bare)) return none("has an unquoted glob");
+		if (/\{[^{}]*(,|\.\.)[^{}]*\}/.test(bare)) return none("has a brace expansion");
 		const { segs, subs } = splitSegments(command);
 		if (subs.length) return none("has a substitution");
 		for (const { text } of segs) {
 			const why = segmentOk(text, opts);
 			if (why) return none(why);
 		}
-		return { verdict: "pass-without-model", reason: opts.bunTest ? "read-only or bun test" : "read-only" };
+		return {
+			verdict: "pass-without-model",
+			reason: opts.bunTest ? "read-only or bun test" : "read-only",
+		};
 	} catch {
 		return none("allowlist parse error");
 	}
