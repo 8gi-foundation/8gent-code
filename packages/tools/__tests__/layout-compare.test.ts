@@ -35,6 +35,7 @@ import {
 	pairBands,
 	parseElementBoxes,
 	pixelSimilarity,
+	prepareChromeProfile,
 	prepareSafeCopy,
 	renderHtml,
 	renderSafe,
@@ -186,6 +187,28 @@ describe("compareLayout with a stub browser", () => {
 		expect(noScreenshotMessage(null, "SIGKILL", "")).toBe(
 			"the browser produced no screenshot (signal SIGKILL); Chrome wrote nothing to stderr",
 		);
+	});
+
+	test("stale Chrome lock files are cleared and Chrome gets a private TMPDIR (#4234)", () => {
+		const profile = tempDir("layout-compare-profile-");
+		for (const f of ["SingletonLock", "SingletonSocket", "SingletonCookie"])
+			fs.symlinkSync("/nonexistent-stale-target", path.join(profile, f));
+		const env = prepareChromeProfile(profile, { PATH: "/usr/bin", TMPDIR: "/shared/tmp" });
+		for (const f of ["SingletonLock", "SingletonSocket", "SingletonCookie"])
+			expect(fs.lstatSync(path.join(profile, f), { throwIfNoEntry: false })).toBeUndefined();
+		expect(env.TMPDIR).toBe(path.join(profile, "tmp"));
+		expect(fs.statSync(env.TMPDIR as string).isDirectory()).toBe(true);
+		expect(env.PATH).toBe("/usr/bin");
+	});
+
+	test("a ProcessSingleton failure tells the model not to delete lock files", () => {
+		const msg = noScreenshotMessage(
+			21,
+			null,
+			"Failed to create a ProcessSingleton for your profile",
+		);
+		expect(msg).toContain("clears its lock files itself");
+		expect(noScreenshotMessage(1, null, "other failure")).not.toContain("lock files");
 	});
 
 	test("a missing page or image is a sentence, not a throw", async () => {
