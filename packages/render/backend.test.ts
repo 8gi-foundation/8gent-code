@@ -10,7 +10,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
 	BACKEND_PREFERENCE,
@@ -220,9 +220,9 @@ const STAND_IN = process.platform === "win32" ? process.execPath : "/bin/sh";
 /**
  * The fake Chrome below is a shell script, and the backend ends Chrome's process group with
  * process.kill(-pid); Windows has neither (the backend finds no Chrome there and has no
- * group kill yet), so the tests that launch it run on POSIX only.
+ * group kill yet, #4292), so the tests that launch it run on POSIX only.
  */
-const posixOnly = process.platform === "win32";
+const noFakeChrome = process.platform === "win32";
 
 describe("Chrome backend: pure parts", () => {
 	test("slideUrl adds #slide=k only once a slide is shown", () => {
@@ -266,7 +266,7 @@ describe("Chrome backend: pure parts", () => {
 			.open("/nonexistent/deck.html", { width: 10, height: 10 })
 			.catch((e) => e);
 		expect(err).toBeInstanceOf(Error);
-		expect(String(err.message)).toContain("/nonexistent/deck.html");
+		expect(String(err.message)).toContain(resolve("/nonexistent/deck.html"));
 	});
 
 	test("close() removes the session's temp directory, and a closed session refuses work", async () => {
@@ -364,7 +364,7 @@ describe("Chrome backend: deck network is blocked by default (8SO R1)", () => {
 		).toBe(false);
 	});
 
-	test.skipIf(posixOnly)(
+	test.skipIf(noFakeChrome)(
 		"the flags reach the launched process; allowNetwork on the backend removes them",
 		async () => {
 			const work = mkdtempSync(join(tmpdir(), "render-net-"));
@@ -405,7 +405,7 @@ describe("Chrome backend: deck network is blocked by default (8SO R1)", () => {
 describe("Chrome backend: process and temp-dir edges (8SO R3)", () => {
 	const size = { width: 8, height: 8 };
 
-	test.skipIf(posixOnly)(
+	test.skipIf(noFakeChrome)(
 		"helpers left in the group are killed even after the leader has exited",
 		async () => {
 			const work = mkdtempSync(join(tmpdir(), "render-grp-"));
@@ -436,7 +436,7 @@ exit 0`,
 		},
 	);
 
-	test.skipIf(posixOnly)(
+	test.skipIf(noFakeChrome)(
 		"a Chrome that ignores SIGTERM is hard-killed, and capture waits for it to exit",
 		async () => {
 			const work = mkdtempSync(join(tmpdir(), "render-kill-"));
@@ -471,7 +471,7 @@ while :; do sleep 0.1; done`,
 		15_000,
 	);
 
-	test.skipIf(posixOnly)(
+	test.skipIf(noFakeChrome)(
 		"the probe waits for Chrome to exit before deleting its temp dir",
 		async () => {
 			const work = mkdtempSync(join(tmpdir(), "render-probe-"));

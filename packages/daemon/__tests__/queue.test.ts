@@ -138,7 +138,8 @@ describe("work queue (#4254)", () => {
 		expect(stub.maxInFlight).toBe(10);
 		expect(evictions).toHaveLength(0);
 		expect(pool.size).toBe(0);
-	});
+		// 15 sessions created and torn down: 6.4 s on a Windows runner, past the 5 s default.
+	}, 30_000);
 
 	test("the start throttle caps concurrent starts and never exceeds MAX_SESSIONS", async () => {
 		const stub = stubRuntime();

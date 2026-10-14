@@ -76,8 +76,10 @@ function runTurn(runtime: string, role?: string, scope?: string): string {
 		// string in every request, tool definitions included.
 		return JSON.stringify(out);
 	} finally {
-		fs.rmSync(dir, { recursive: true, force: true });
-		fs.rmSync(home, { recursive: true, force: true });
+		// Windows can still hold the folder for a moment after the probe exits (EBUSY).
+		const gone = { recursive: true, force: true, maxRetries: 10, retryDelay: 100 };
+		fs.rmSync(dir, gone);
+		fs.rmSync(home, gone);
 	}
 }
 
