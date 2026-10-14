@@ -31,7 +31,7 @@ const bodyKind = (body: string) => {
 };
 const FILE = "x=$(cat d.txt)\n";
 
-export const UNCHECKED: [string, string][] = [
+const UNCHECKED: [string, string][] = [
 	// MF1: heredocs
 	["unquoted heredoc runs a script in $(...)", "cat <<EOF\n$(bash evil.sh)\nEOF\n"],
 	["unquoted heredoc with a backtick", "cat <<EOF\n`bash evil.sh`\nEOF\n"],

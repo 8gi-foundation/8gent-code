@@ -103,7 +103,6 @@ function regions(m: string): { parts: string[]; why: string | null } {
 			}
 			// `${s:off}` and `${s:off:len}` (not `:-` `:=` `:+` `:?`) are arithmetic.
 			if (/^:(?![-=+?])/.test(rest)) parts.push(...rest.slice(1).split(":"));
-			continue;
 		}
 	}
 	// A subscript assigned to: `a[x]=`, `a[x]+=`, `arr=([x]=v)`, `declare a[x]=v`.
