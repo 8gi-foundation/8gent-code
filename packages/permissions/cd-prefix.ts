@@ -194,6 +194,17 @@ export function commandAfterCdPrefix(
 	return cd.kind === "cd" ? cd.rest : command;
 }
 
+/**
+ * Added to a chaining refusal of the rest after a valid `cd <folder> &&` (#4260). The
+ * refusal used to name only the rest, so the model split it into bare pieces that ran
+ * at the project root: `mkdir -p notes docs sheets` made folders beside inbox/, not in
+ * it, and the files moved into the wrong place. Text only: nothing is allowed by it.
+ */
+export function chainInFolderNote(where: string): string {
+	const prefix = commandInFolder("", where).trimEnd();
+	return ` It was to run in ${prefix.slice(3, -3)}, and each run_command starts in the project folder, so begin every piece with \`${prefix}\`.`;
+}
+
 /** Appended to a run_command result when the same command text is refused for chaining twice in one turn. */
 export const REFUSED_TWICE_LINE =
 	"Refused twice. Chaining is not allowed; run the steps as separate commands, or prefix one `cd <folder> &&` to run inside a project folder.";
