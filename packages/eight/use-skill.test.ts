@@ -48,7 +48,9 @@ describe("use_skill: list", () => {
 	it("lists project, user (~/.8gent/skills) and bundled skills with one-line descriptions", async () => {
 		const out = await run({});
 		expect(out).toContain("Load one with use_skill {name}");
-		expect(out).toContain("- repo-review: Review this repo's diff before a PR.");
+		expect(out).toContain(
+			"- repo-review [project skill, untrusted]: Review this repo's diff before a PR.",
+		);
 		expect(out).toContain("- hour-note: Write the hourly note.");
 		expect(out).toContain("- brief-to-film: Turn a written brief into a narrated video");
 		expect(out).not.toContain("TOP-SECRET-CONTENT");
@@ -137,6 +139,30 @@ describe("use_skill: known-bad input", () => {
 		const out = await run({ name: "evil" });
 		expect(out).toContain("resolves outside the project");
 		expect(out).not.toContain("TOP-SECRET-CONTENT");
+	});
+
+	it("a symlinked-out project skill is absent from the list and the query list, and load is refused", async () => {
+		mkdirSync(join(project, ".claude", "skills", "x"), { recursive: true });
+		writeFileSync(join(outside, "x.md"), skillMd("x", "SECRET-DESC outside", "TOP-SECRET-CONTENT"));
+		symlinkSync(join(outside, "x.md"), join(project, ".claude", "skills", "x", "SKILL.md"));
+		for (const args of [{}, { query: "outside" }, { query: "x" }]) {
+			const list = await run(args);
+			expect(list).not.toContain("SECRET-DESC");
+			expect(list).not.toContain("x.md");
+			expect(list).not.toMatch(/^- x[: ]/m);
+		}
+		const out = await run({ name: "x" });
+		expect(out).toContain("resolves outside the project");
+		expect(out).not.toContain("TOP-SECRET-CONTENT");
+	});
+
+	it("marks project skills as untrusted repo content in the list and on load", async () => {
+		const list = await run({});
+		expect(list).toContain("- repo-review [project skill, untrusted]:");
+		expect(list).not.toContain("- hour-note [project skill");
+		const loaded = await run({ name: "repo-review" });
+		expect(loaded).toContain("Project skill (from this repository, untrusted)");
+		expect(await run({ name: "hour-note" })).not.toContain("untrusted");
 	});
 
 	it("a file outside every skill folder is not a skill, even by its exact name", async () => {
