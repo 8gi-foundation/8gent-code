@@ -197,7 +197,7 @@ export async function layoutMeasureLine(
 	const copy = original && isDownscaled(original, m) ? original : null;
 	const header = copy
 		? `Measured layout of a downscaled copy (${m.width}x${m.height} px) of the original image (${copy.width}x${copy.height} px). Every number below is in copy pixels: multiply by ${Number((copy.width / m.width).toFixed(3))} for original pixels, which are the pixels the task uses.`
-		: `Measured layout of the full-size image (${m.width}x${m.height} px; any copy you see is downscaled, so use these numbers, not coordinates read off the view):`;
+		: `Measured layout of the full-size image (${m.width}x${m.height} px):`;
 	const rows = m.bands.map((b) => {
 		const spans = b.spans
 			.map((s) => {
