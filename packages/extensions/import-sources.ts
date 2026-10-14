@@ -484,17 +484,62 @@ function programName(command: string): string {
 	return first ? path.basename(first.replace(/^["']|["']$/g, "")) : "(none)";
 }
 
+/** C0, DEL and C1 control characters: any of them can rewrite or hide what a terminal shows. */
+const CONTROL_CHAR = /[\u0000-\u001f\u007f-\u009f]/;
+/** Characters JSON.stringify leaves raw that still change how a line reads: DEL, C1, bidi and zero-width marks. */
+const INVISIBLE = /[\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g;
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** A string as a JSON literal with every control and invisible character escaped: safe to print. */
+export function quoted(value: unknown): string {
+	return JSON.stringify(String(value)).replace(
+		INVISIBLE,
+		(c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
+	);
+}
+
+/** quoted() without the surrounding quotes, for names and paths inside a line. */
+function escaped(value: unknown): string {
+	return quoted(value).slice(1, -1);
+}
+
+/**
+ * Why a server cannot be imported or approved: an env name that is not a
+ * plain NAME, or a control character in the name, command, args, URL,
+ * header names or values, or env values. Undefined when it is fine.
+ */
+export function unsafeServer(name: string, e: McpEntry): string | undefined {
+	const bad = (v: unknown) => CONTROL_CHAR.test(String(v));
+	if (bad(name)) return `the server name ${quoted(name)} has a control character`;
+	if (e.command !== undefined && bad(e.command))
+		return `"command" has a control character: ${quoted(e.command)}`;
+	const args = Array.isArray(e.args) ? e.args : [];
+	for (let i = 0; i < args.length; i++)
+		if (bad(args[i])) return `"args[${i}]" has a control character: ${quoted(args[i])}`;
+	if (e.url !== undefined && bad(e.url)) return `"url" has a control character: ${quoted(e.url)}`;
+	for (const [k, v] of Object.entries(e.headers ?? {})) {
+		if (bad(k)) return `a header name has a control character: ${quoted(k)}`;
+		if (bad(v)) return `header ${quoted(k)} has a control character in its value: ${quoted(v)}`;
+	}
+	for (const [k, v] of Object.entries(e.env ?? {})) {
+		if (!ENV_NAME.test(k))
+			return `env name ${quoted(k)} is not a plain NAME ([A-Za-z_][A-Za-z0-9_]*)`;
+		if (bad(v)) return `env ${k} has a control character in its value: ${quoted(v)}`;
+	}
+	return undefined;
+}
+
 /** One line for the import summary: program name or URL host only, env key names only. */
 function summarizeServer(e: McpEntry): string {
 	if (e.url) {
 		try {
-			return `url ${new URL(e.url).host}`;
+			return `url ${escaped(new URL(e.url).host)}`;
 		} catch {
 			return "url (unparsable)";
 		}
 	}
 	const envKeys = Object.keys(e.env ?? {});
-	return `program ${programName(String(e.command))}${envKeys.length ? `, env: ${envKeys.join(", ")} (values not shown)` : ""}`;
+	return `program ${escaped(programName(String(e.command)))}${envKeys.length ? `, env: ${envKeys.map(escaped).join(", ")} (values not shown)` : ""}`;
 }
 
 /** An env name that says its value is a secret: GITHUB_TOKEN, API_KEY, DB_PASSWORD, GH_PAT (PATH is not). */
@@ -507,7 +552,7 @@ function isSecretEnvName(name: string): boolean {
 
 /** Env as NAME=value pairs (JSON-quoted values), in the order the config gives them. */
 function envPairs(env: Record<string, unknown> | undefined): string[] {
-	return Object.entries(env ?? {}).map(([k, v]) => `${k}=${JSON.stringify(String(v))}`);
+	return Object.entries(env ?? {}).map(([k, v]) => `${escaped(k)}=${quoted(v)}`);
 }
 
 /**
@@ -524,9 +569,31 @@ export function redactEnv(env: Record<string, unknown> | undefined): {
 		const value = String(v);
 		if (value !== "" && isSecretEnvName(k)) {
 			count.n++;
-			return `${k}="***"`;
+			return `${escaped(k)}="***"`;
 		}
-		return `${k}=${JSON.stringify(maskKnownShapes(value, count))}`;
+		return `${escaped(k)}=${quoted(maskKnownShapes(value, count))}`;
+	});
+	return { pairs, masked: count.n };
+}
+
+/**
+ * A URL server's headers as Name: "value". A value is masked when the header
+ * is a credential header (Authorization, X-Api-Key, Cookie and the like), its
+ * name is secret-named, or the value has a known token shape. Empty values
+ * never mask; each mask counts.
+ */
+export function redactHeaders(headers: Record<string, unknown> | undefined): {
+	pairs: string[];
+	masked: number;
+} {
+	const count = { n: 0 };
+	const pairs = Object.entries(headers ?? {}).map(([k, v]) => {
+		const value = String(v);
+		if (value !== "" && (SECRET_HEADER.test(k) || isSecretEnvName(k))) {
+			count.n++;
+			return `${escaped(k)}: "***"`;
+		}
+		return `${escaped(k)}: ${quoted(maskKnownShapes(value, count))}`;
 	});
 	return { pairs, masked: count.n };
 }
@@ -539,16 +606,22 @@ export function redactEnv(env: Record<string, unknown> | undefined): {
 function fullServer(e: McpEntry, showMasked = false): { text: string; masked: number } {
 	if (e.url) {
 		const shownUrl = showMasked ? e.url : redact(e.url);
-		const text = `url ${shownUrl}${e.headers ? ` (headers: ${Object.keys(e.headers).join(", ")}, values not shown)` : ""}`;
-		return { text, masked: shownUrl === e.url ? 0 : 1 };
+		const headers = showMasked
+			? {
+					pairs: Object.entries(e.headers ?? {}).map(([k, v]) => `${escaped(k)}: ${quoted(v)}`),
+					masked: 0,
+				}
+			: redactHeaders(e.headers);
+		const text = `url ${escaped(shownUrl)}${headers.pairs.length ? `; headers: ${headers.pairs.join(", ")}` : ""}`;
+		return { text, masked: (shownUrl === e.url ? 0 : 1) + headers.masked };
 	}
 	const command = String(e.command ?? "");
 	const raw = (e.args ?? []).map((a) => String(a));
 	const shownCommand = showMasked ? { args: [command], masked: 0 } : redactStdio([command]);
 	const shownArgs = showMasked ? { args: raw, masked: 0 } : redactStdio(raw, command);
-	const args = shownArgs.args.map((a) => JSON.stringify(a));
+	const args = shownArgs.args.map((a) => quoted(a));
 	const shownEnv = showMasked ? { pairs: envPairs(e.env), masked: 0 } : redactEnv(e.env);
-	const text = `command ${shownCommand.args[0]}${args.length ? ` ${args.join(" ")}` : ""}${shownEnv.pairs.length ? `; env: ${shownEnv.pairs.join(" ")}` : ""}`;
+	const text = `command ${escaped(shownCommand.args[0])}${args.length ? ` ${args.join(" ")}` : ""}${shownEnv.pairs.length ? `; env: ${shownEnv.pairs.join(" ")}` : ""}`;
 	return { text, masked: shownCommand.masked + shownArgs.masked + shownEnv.masked };
 }
 
@@ -556,8 +629,8 @@ function fullServer(e: McpEntry, showMasked = false): { text: string; masked: nu
  * The hash recorded for an imported server. Command and args are hashed as
  * they are, so two servers that differ anywhere (a hidden payload included)
  * never share a hash; imports.json holds only this digest, never the values.
- * Env values are hashed too (a changed NODE_OPTIONS is a new digest); header
- * values are dropped (names only) and the URL is redacted.
+ * Env values, the URL and header values are hashed as they are too (a
+ * changed NODE_OPTIONS or Authorization is a new digest).
  */
 function serverHash(e: McpEntry): string {
 	const shape = {
@@ -566,8 +639,10 @@ function serverHash(e: McpEntry): string {
 		env: Object.entries(e.env ?? {})
 			.map(([k, v]) => [k, String(v)])
 			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
-		url: e.url ? redact(String(e.url)) : undefined,
-		headers: Object.keys(e.headers ?? {}).sort(),
+		url: e.url !== undefined ? String(e.url) : undefined,
+		headers: Object.entries(e.headers ?? {})
+			.map(([k, v]) => [k, String(v)])
+			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
 		type: e.type,
 	};
 	return sha(JSON.stringify(shape));
@@ -626,17 +701,22 @@ function importMcp(
 		for (const [name, entry] of Object.entries(src.pick(json))) {
 			found++;
 			if (!entry || (!entry.command && !entry.url)) {
-				lines.push(`  ${name}  failed  (${src.label}) has neither "command" nor "url"`);
+				lines.push(`  ${escaped(name)}  failed  (${src.label}) has neither "command" nor "url"`);
+				continue;
+			}
+			const unsafe = unsafeServer(name, entry);
+			if (unsafe) {
+				lines.push(`  ${escaped(name)}  failed  (${src.label}) ${unsafe}; not imported`);
 				continue;
 			}
 			if (name in live) {
-				lines.push(`  ${name}  skipped  (${src.label}) already in ${paths.mcpConfig}`);
+				lines.push(`  ${escaped(name)}  skipped  (${src.label}) already in ${paths.mcpConfig}`);
 				continue;
 			}
 			if (name in pending) {
 				// A re-import never replaces a pending server: the person may be reading it now.
 				lines.push(
-					`  ${name}  skipped  (${src.label}) already pending approval; approve it or remove it from "pendingServers" first`,
+					`  ${escaped(name)}  skipped  (${src.label}) already pending approval; approve it or remove it from "pendingServers" first`,
 				);
 				continue;
 			}
@@ -654,7 +734,7 @@ function importMcp(
 				importedAt: now,
 				enabled: false,
 			});
-			lines.push(`  ${name}  pending approval  (${src.label}) ${summarizeServer(entry)}`);
+			lines.push(`  ${escaped(name)}  pending approval  (${src.label}) ${summarizeServer(entry)}`);
 		}
 	}
 	if (found === 0) {
@@ -701,33 +781,40 @@ export function approveMcp(
 		const names = Object.keys(pending);
 		return {
 			code: 1,
-			output: `No pending MCP server "${name}".${names.length ? ` Pending: ${names.join(", ")}` : ""}`,
+			output: `No pending MCP server ${quoted(name)}.${names.length ? ` Pending: ${names.map(escaped).join(", ")}` : ""}`,
 		};
 	}
 	const { importedFrom, ...server } = entry as McpEntry & {
 		importedFrom?: { path?: string; source?: string };
 	};
+	const unsafe = unsafeServer(name, server);
+	if (unsafe) {
+		return {
+			code: 1,
+			output: `Refused: MCP server ${quoted(name)} cannot be approved: ${unsafe}. Fix or remove it in ${paths.mcpConfig}.`,
+		};
+	}
 	const full = fullServer(server, showMasked);
 	const shown = [
 		`  ${full.text}`,
-		`  from ${importedFrom?.source ?? "unknown source"}: ${importedFrom?.path ?? "unknown file"}`,
+		`  from ${escaped(importedFrom?.source ?? "unknown source")}: ${escaped(importedFrom?.path ?? "unknown file")}`,
 	];
 	const maskedNote =
 		full.masked > 0
 			? [
-					`  ${full.masked} ${full.masked === 1 ? "value" : "values"} masked (shown as ***). See every value before approving: 8gent ext approve-mcp ${name} --show-masked`,
+					`  ${full.masked} ${full.masked === 1 ? "value" : "values"} masked (shown as ***). See every value before approving: 8gent ext approve-mcp ${escaped(name)} --show-masked`,
 				]
 			: [];
 	if (!confirm) {
 		return {
 			code: 0,
 			output: [
-				`MCP server "${name}" would run:`,
+				`MCP server ${quoted(name)} would run:`,
 				...shown,
 				...maskedNote,
 				full.masked > 0
-					? `Nothing changed. If that is what you expect: 8gent ext approve-mcp ${name} --show-masked --yes`
-					: `Nothing changed. If that is what you expect: 8gent ext approve-mcp ${name} --yes`,
+					? `Nothing changed. If that is what you expect: 8gent ext approve-mcp ${escaped(name)} --show-masked --yes`
+					: `Nothing changed. If that is what you expect: 8gent ext approve-mcp ${escaped(name)} --yes`,
 			].join("\n"),
 		};
 	}
@@ -735,10 +822,10 @@ export function approveMcp(
 		return {
 			code: 1,
 			output: [
-				`Refused: MCP server "${name}" has masked values, so you would approve something you have not seen:`,
+				`Refused: MCP server ${quoted(name)} has masked values, so you would approve something you have not seen:`,
 				...shown,
 				...maskedNote,
-				`To approve it, look at every value first: 8gent ext approve-mcp ${name} --show-masked --yes`,
+				`To approve it, look at every value first: 8gent ext approve-mcp ${escaped(name)} --show-masked --yes`,
 			].join("\n"),
 		};
 	}
@@ -750,7 +837,7 @@ export function approveMcp(
 	return {
 		code: 0,
 		output: [
-			`Approved MCP server "${name}". It starts the next time 8gent starts and runs:`,
+			`Approved MCP server ${quoted(name)}. It starts the next time 8gent starts and runs:`,
 			...shown,
 		].join("\n"),
 	};
