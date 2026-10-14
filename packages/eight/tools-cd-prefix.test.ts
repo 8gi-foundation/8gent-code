@@ -13,7 +13,7 @@ import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { agentTools, setToolContext } from "../ai/tools";
 import { CreatedFiles } from "../permissions/s1-created-files";
 import { _resetSystemOne, _setSystemOneOverridesForTests } from "../permissions/system-one-gate";
-import { ToolExecutor } from "./tools";
+import { REFUSAL_LEAD, ToolExecutor } from "./tools";
 
 afterAll(() => {
 	_resetSystemOne();
@@ -126,7 +126,8 @@ describe("ToolExecutor run_command with a leading cd", () => {
 
 	test("`cd a && b; c`: the rest is refused for chaining and nothing runs", async () => {
 		const out = await run("cd video && touch a.txt; touch b.txt");
-		expect(out).toStartWith("[BLOCKED] Semicolon command chaining is not allowed");
+		expect(out).toStartWith(REFUSAL_LEAD);
+		expect(out).toContain("Semicolon command chaining is not allowed");
 		expect(existsSync(join(sub, "a.txt"))).toBe(false);
 		expect(existsSync(join(sub, "b.txt"))).toBe(false);
 	});
@@ -139,7 +140,8 @@ describe("ToolExecutor run_command with a leading cd", () => {
 			"cd $HOME && touch z.txt",
 		]) {
 			const out = await run(command);
-			expect(out, command).toStartWith("[BLOCKED] Command chaining is not allowed.");
+			expect(out, command).toStartWith(REFUSAL_LEAD);
+			expect(out, command).toContain("Command chaining is not allowed.");
 		}
 		expect(asked).toEqual([]);
 		expect(existsSync(join(root, "z.txt"))).toBe(false);

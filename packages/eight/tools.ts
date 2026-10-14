@@ -849,6 +849,22 @@ export const DECK_SPEC_PARAMETER: Record<string, unknown> = (() => {
 	return lean(z.toJSONSchema(DeckSpecSchema, { io: "input" })) as Record<string, unknown>;
 })();
 
+/**
+ * First sentence of every refused run_command (#4238). The local model reads only that
+ * sentence, and a bare "[BLOCKED] Semicolon ..." once read as "the file is missing".
+ */
+export const REFUSAL_LEAD = "[BLOCKED] Not run: refused by policy, nothing was checked or changed.";
+
+export function refusalLead(result: string): string {
+	if (!/^\[BLOCKED\]/.test(result.trimStart())) return result;
+	const body = result.trimStart().replace(/^\[BLOCKED\]\s*/, "");
+	if (body.startsWith("Not run:")) return result;
+	if (!/chaining/i.test(body)) return `${REFUSAL_LEAD} ${body}`;
+	const at = body.indexOf(" Command:");
+	const [why, cmd] = at < 0 ? [body, ""] : [body.slice(0, at), body.slice(at)];
+	return `${REFUSAL_LEAD} ${why} Run one command at a time.${cmd}`;
+}
+
 export class ToolExecutor {
 	private workingDirectory: string;
 	private permissionManager: PermissionManager;
@@ -2547,7 +2563,9 @@ export class ToolExecutor {
 				const result = await (target && sanitizeShellCommand(runs).safe
 					? this.gatedCommit(run, target)
 					: run());
-				if (/^\[BLOCKED\]/.test(result.trimStart())) this.blockedCommands.push(command);
+				if (/^\[BLOCKED\]/.test(result.trimStart())) {
+					this.blockedCommands.push(command);
+				}
 				return result;
 			}
 
@@ -3370,9 +3388,9 @@ export class ToolExecutor {
 		if (cwd === undefined) {
 			// The backstops judge the whole line first, so a cd into protected files keeps their words.
 			const lineBackstop = preSpawnRefusal(command, this.workingDirectory);
-			if (lineBackstop) return lineBackstop;
+			if (lineBackstop) return refusalLead(lineBackstop);
 			const cd = cdPrefix(command, this.workingDirectory, activeShellKind(windowsShell));
-			if (cd.kind === "refused") return cd.message;
+			if (cd.kind === "refused") return refusalLead(cd.message);
 			if (cd.kind === "cd") return this.runCommand(cd.rest, timeoutSec, env, windowsShell, cd.dir);
 		}
 		const dir = cwd ?? this.workingDirectory;
@@ -3416,7 +3434,7 @@ export class ToolExecutor {
 			// so the pieces are not resent as they are and blocked again (#4072).
 			const piece = await chainedPieceRefusal(command, dir, systemOneEnvFor(mode));
 			const also = piece ? ` One part would be refused on its own too. ${piece}` : "";
-			return `[BLOCKED] ${validation.reason}.${also} Command: ${command}`;
+			return refusalLead(`[BLOCKED] ${validation.reason}.${also} Command: ${command}`);
 		}
 
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 turns it off): it can only stop a
@@ -3436,7 +3454,7 @@ export class ToolExecutor {
 			where,
 			{ canRunInstead: env === undefined, project: this.workingDirectory },
 		);
-		if (!systemOne.run) return systemOne.message as string;
+		if (!systemOne.run) return refusalLead(systemOne.message as string);
 
 		if (
 			permissionCheck === "ask" &&
@@ -3479,7 +3497,7 @@ export class ToolExecutor {
 		const timeoutMs = Math.min(timeoutSec || 120, 300) * 1000;
 
 		const sandboxRefusal = runCommandSandboxRefusal();
-		if (sandboxRefusal) return sandboxRefusal;
+		if (sandboxRefusal) return refusalLead(sandboxRefusal);
 
 		return new Promise((resolve) => {
 			// Redirect targets this command creates are this agent's own files (#3177).

@@ -3,7 +3,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
-import { ToolExecutor } from "./tools";
+import { REFUSAL_LEAD, ToolExecutor, refusalLead } from "./tools";
 
 afterAll(() => cleanupTempDirs());
 
@@ -59,5 +59,30 @@ describe("write_file overwrite guard", () => {
 			content: "export const real = 6;\n",
 		});
 		expect(out).not.toStartWith("Error:");
+	});
+});
+
+describe("refusal lead (#4238)", () => {
+	test("a chained command opens with the fixed not-run sentence, then the reason", async () => {
+		const { ex } = setup();
+		const out = await ex.execute("run_command", { command: "ls a; ls b" });
+		expect(out).toStartWith(REFUSAL_LEAD);
+		expect(out).toContain("Semicolon command chaining is not allowed");
+		expect(out).toContain("Run one command at a time.");
+	});
+
+	test("another refusal type gets the same lead and no chaining hint", async () => {
+		const { ex } = setup();
+		const out = await ex.execute("run_command", { command: "cd .. && touch z.txt" });
+		expect(out).toStartWith(REFUSAL_LEAD);
+		const dollar = refusalLead("[BLOCKED] Dangerous command pattern. Command: x");
+		expect(dollar).toStartWith(REFUSAL_LEAD);
+		expect(dollar).not.toContain("Run one command at a time.");
+	});
+
+	test("output that merely starts with the marker is not rewritten, and the lead is not doubled", async () => {
+		expect(refusalLead("plain output")).toBe("plain output");
+		const once = refusalLead("[BLOCKED] x");
+		expect(refusalLead(once)).toBe(once);
 	});
 });

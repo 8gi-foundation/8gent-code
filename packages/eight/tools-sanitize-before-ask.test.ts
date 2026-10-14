@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ToolExecutor } from "./tools";
+import { REFUSAL_LEAD, ToolExecutor } from "./tools";
 
 type PM = {
 	checkPermission: (command: string) => "allowed" | "denied" | "ask";
@@ -49,7 +49,7 @@ describe("run_command sanitizes before asking for approval", () => {
 
 	test("a chained command is blocked without an approval prompt", async () => {
 		const out = await executor.runCommand("printf a > one.txt && printf b > two.txt");
-		expect(out).toStartWith("[BLOCKED] Command chaining with &&");
+		expect(out).toContain("Command chaining with &&");
 		expect(asked).toEqual([]);
 		expect(existsSync(join(dir, "one.txt"))).toBe(false);
 	});
@@ -126,7 +126,7 @@ describe("run_command: a chained curl -L is told about -L in the chaining refusa
 
 	test("the pilot's chain: chaining refusal carries the lane's -L refusal, nothing runs or asks", async () => {
 		const out = await executor.runCommand(PILOT_CHAIN);
-		expect(out).toStartWith("[BLOCKED] Semicolon command chaining is not allowed");
+		expect(out).toContain("Semicolon command chaining is not allowed");
 		expect(out).toContain("One part would be refused on its own too.");
 		expect(out).toContain("Drop -L");
 		expect(out).toContain("Location header");
@@ -137,7 +137,7 @@ describe("run_command: a chained curl -L is told about -L in the chaining refusa
 
 	test("the same chain without -L: the plain chaining refusal, no -L hint", async () => {
 		const out = await executor.runCommand(PILOT_CHAIN.replace("curl -sL", "curl -s"));
-		expect(out).toStartWith("[BLOCKED] Semicolon command chaining is not allowed");
+		expect(out).toContain("Semicolon command chaining is not allowed");
 		expect(out).not.toContain("Drop -L");
 		expect(out).not.toContain("refused on its own");
 	});
@@ -145,21 +145,21 @@ describe("run_command: a chained curl -L is told about -L in the chaining refusa
 	test("a chain with no curl in it: the plain chaining refusal", async () => {
 		const out = await executor.runCommand("printf a > one.txt; printf b > two.txt");
 		expect(out).toBe(
-			"[BLOCKED] Semicolon command chaining is not allowed. Use separate run_command calls instead. Command: printf a > one.txt; printf b > two.txt",
+			`${REFUSAL_LEAD} Semicolon command chaining is not allowed. Use separate run_command calls instead. Run one command at a time. Command: printf a > one.txt; printf b > two.txt`,
 		);
 	});
 
 	test("System One off: no hint, since nothing would refuse the piece", async () => {
 		process.env.EIGHT_SYSTEM_ONE = "0";
 		const out = await executor.runCommand(PILOT_CHAIN);
-		expect(out).toStartWith("[BLOCKED] Semicolon command chaining is not allowed");
+		expect(out).toContain("Semicolon command chaining is not allowed");
 		expect(out).not.toContain("Drop -L");
 	});
 
 	test("strict mode: no hint, the judge decides there, not the lane", async () => {
 		process.env.EIGHT_SYSTEM_ONE = "1";
 		const out = await executor.runCommand(PILOT_CHAIN);
-		expect(out).toStartWith("[BLOCKED] Semicolon command chaining is not allowed");
+		expect(out).toContain("Semicolon command chaining is not allowed");
 		expect(out).not.toContain("Drop -L");
 	});
 });
