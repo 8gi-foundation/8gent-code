@@ -1,135 +1,205 @@
 /**
- * Tests for the make_pdf tool helper (packages/tools/make-pdf.ts).
+ * Tests for make_pdf (packages/tools/make-pdf.ts + pdf-writer.ts), #4267.
  *
- * The helper shells out to the canonical renderer CLI. To stay deterministic
- * and offline, most tests point EIGHT_MAKE_PDF_BIN at a tiny stub script that
- * mimics the real CLI contract (prints the absolute output path on its last
- * stdout line, exit 0). A final integration test runs the REAL CLI only when
- * it is actually installed on the host.
+ * make_pdf renders in-process, so these run the real path: no stub binary and
+ * no ~/.8gent/bin/make-pdf. The test preload gives every run a temp $HOME, so
+ * "works on a clean HOME" is what each test proves. Output is read back with
+ * pdf-parse (packages/tools/pdf.ts), an independent PDF reader.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { CREATIVE_DIR, DEFAULT_MAKE_PDF_BIN, makePdf, resolveMakePdfBin } from "../make-pdf";
+import { CREATIVE_DIR, MAX_SOURCE_CHARS, makePdf } from "../make-pdf";
+import { readPdf } from "../pdf";
+import { htmlToMarkdown, parseMarkdown, winAnsi, writePdf } from "../pdf-writer";
 
 let tmpDir: string;
-let stubBin: string;
-
-/**
- * Write a stub CLI that echoes a creative-dir path built from --title/--out,
- * matching the real CLI's "last stdout line is the absolute PDF path" contract.
- */
-function writeStub(script: string): string {
-	const p = path.join(tmpDir, "make-pdf-stub");
-	fs.writeFileSync(p, script, { mode: 0o755 });
-	fs.chmodSync(p, 0o755);
-	return p;
-}
+const made: string[] = [];
 
 beforeEach(() => {
 	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "make-pdf-test-"));
-	// Default stub: print a deterministic creative-dir path on the last line,
-	// with a leading log line to prove we capture the LAST line, not the first.
-	stubBin = writeStub(
-		`#!/usr/bin/env bash\n` +
-			`echo "[stub] rendering with fake engine" 1>&2\n` +
-			`echo "some preamble on stdout"\n` +
-			`echo "${CREATIVE_DIR}/doc-stub.pdf"\n`,
-	);
-	process.env.EIGHT_MAKE_PDF_BIN = stubBin;
 });
 
 afterEach(() => {
-	delete process.env.EIGHT_MAKE_PDF_BIN;
 	fs.rmSync(tmpDir, { recursive: true, force: true });
+	for (const p of made.splice(0)) fs.rmSync(p, { force: true });
 });
 
-// POSIX-only: the stub renderer is a #!/usr/bin/env bash script, which Windows cannot spawn.
-const posixTest = process.platform === "win32" ? test.skip : test;
+const keep = <T extends { path: string }>(r: T) => {
+	made.push(r.path);
+	return r;
+};
 
-describe("makePdf", () => {
-	posixTest("returns a creative-dir path and document kind", async () => {
-		const result = await makePdf({ markdown: "# Hi", title: "Stub" });
-		expect(result.kind).toBe("document");
-		expect(result.path.startsWith(CREATIVE_DIR)).toBe(true);
-		expect(result.path.endsWith(".pdf")).toBe(true);
+describe("makePdf renders in-process", () => {
+	test("needs no ~/.8gent/bin/make-pdf on a clean HOME", async () => {
+		const home = process.env.HOME as string;
+		expect(fs.existsSync(path.join(home, ".8gent", "bin", "make-pdf"))).toBe(false);
+		const r = keep(
+			await makePdf({ markdown: "# Clean home\n\nIt works here.", outName: "clean-home" }),
+		);
+		expect(r.kind).toBe("document");
+		expect(r.path).toBe(path.join(CREATIVE_DIR, "clean-home.pdf"));
+		expect(r.pages).toBe(1);
+		expect(fs.readFileSync(r.path).subarray(0, 8).toString("latin1")).toBe("%PDF-1.4");
 	});
 
-	posixTest("captures the LAST stdout line as the output path", async () => {
-		const result = await makePdf({ markdown: "# Hi" });
-		expect(result.path).toBe(`${CREATIVE_DIR}/doc-stub.pdf`);
+	test("an independent reader gets the text back", async () => {
+		const md = [
+			"# Weekly report",
+			"",
+			"Shipped the **media** attachment and `make_pdf`.",
+			"",
+			"- first point",
+			"- second point",
+			"",
+			"1. ordered one",
+			"",
+			"> a quote",
+			"",
+			"```",
+			"const x = (1 + 2);",
+			"```",
+			"",
+			"---",
+			"",
+			"Cafe \u2019quotes\u2019 \u2013 dash \u20ac5",
+		].join("\n");
+		const r = keep(await makePdf({ markdown: md, outName: "read-back" }));
+		const info = await readPdf(r.path);
+		expect(info.pageCount).toBe(1);
+		for (const s of [
+			"Weekly report",
+			"Shipped the media attachment and make_pdf.",
+			"first point",
+			"ordered one",
+			"a quote",
+			"const x = (1 + 2);",
+			"\u20ac5",
+		])
+			expect(info.text).toContain(s);
+		expect(info.text).not.toContain("**");
+		expect(r.replaced).toBeUndefined();
 	});
 
-	test("rejects when no source is provided", async () => {
+	test("long input flows onto more pages, each numbered", async () => {
+		const para = "word ".repeat(400);
+		const r = keep(await makePdf({ markdown: Array(12).fill(para).join("\n\n"), outName: "long" }));
+		expect(r.pages).toBeGreaterThan(2);
+		const info = await readPdf(r.path);
+		expect(info.pageCount).toBe(r.pages);
+		expect(info.text).toContain(`${r.pages} / ${r.pages}`);
+	});
+
+	test("same input, byte-identical PDF", () => {
+		const blocks = parseMarkdown("# Same\n\nOne paragraph.\n\n- item");
+		expect(writePdf(blocks, "Same").pdf.equals(writePdf(blocks, "Same").pdf)).toBe(true);
+	});
+
+	test("html keeps its structure and drops script and style", async () => {
+		const html =
+			"<html><head><style>h1{color:red}</style></head><body><h1>From HTML</h1><p>A &amp; B</p><ul><li>one</li><li>two</li></ul><script>alert(1)</script></body></html>";
+		const r = keep(await makePdf({ html, outName: "from-html" }));
+		const info = await readPdf(r.path);
+		expect(info.text).toContain("From HTML");
+		expect(info.text).toContain("A & B");
+		expect(info.text).toContain("two");
+		expect(info.text).not.toContain("alert");
+		expect(info.text).not.toContain("color:red");
+	});
+
+	test("mdPath and htmlPath read the file", async () => {
+		const md = path.join(tmpDir, "brief.md");
+		fs.writeFileSync(md, "# From disk\n\nbody");
+		const r = keep(await makePdf({ mdPath: md, outName: "from-disk" }));
+		expect((await readPdf(r.path)).text).toContain("From disk");
+		const html = path.join(tmpDir, "page.html");
+		fs.writeFileSync(html, "<h2>Html on disk</h2>");
+		const r2 = keep(await makePdf({ htmlPath: html, outName: "html-disk" }));
+		expect((await readPdf(r2.path)).text).toContain("Html on disk");
+	});
+
+	test("title becomes the heading when the source has none; auto name never overwrites", async () => {
+		const a = keep(await makePdf({ markdown: "just body", title: "Auto Name Test" }));
+		const b = keep(await makePdf({ markdown: "just body", title: "Auto Name Test" }));
+		expect(path.basename(a.path)).toBe("auto-name-test.pdf");
+		expect(path.basename(b.path)).toBe("auto-name-test-2.pdf");
+		expect((await readPdf(a.path)).text).toContain("Auto Name Test");
+	});
+
+	test("outName is kept inside the creative folder", async () => {
+		const r = keep(await makePdf({ markdown: "# x", outName: "../../escape/evil" }));
+		expect(r.path).toBe(path.join(CREATIVE_DIR, "evil.pdf"));
+	});
+
+	test("characters outside the standard fonts are counted, not hidden", async () => {
+		const r = keep(
+			await makePdf({ markdown: "# Emoji \u{1F680} and \u4e2d", outName: "replaced" }),
+		);
+		expect(r.replaced).toBe(2);
+	});
+});
+
+describe("makePdf known-bad input", () => {
+	test("no source", async () => {
 		await expect(makePdf({ title: "empty" })).rejects.toThrow(/one of/i);
 	});
 
-	test("rejects when more than one source is provided", async () => {
+	test("more than one source", async () => {
 		await expect(makePdf({ markdown: "# A", html: "<h1>B</h1>" })).rejects.toThrow(
 			/exactly one source/i,
 		);
 	});
 
-	posixTest("propagates a non-zero exit as a rejection with the stderr reason", async () => {
-		process.env.EIGHT_MAKE_PDF_BIN = writeStub(
-			`#!/usr/bin/env bash\necho "no renderer available" 1>&2\nexit 3\n`,
+	test("a missing mdPath names the file", async () => {
+		await expect(makePdf({ mdPath: path.join(tmpDir, "nope.md") })).rejects.toThrow(
+			/mdPath not found: .*nope\.md/,
 		);
-		await expect(makePdf({ markdown: "# Hi" })).rejects.toThrow(/no renderer available/);
 	});
 
-	posixTest("passes an outName resolved inside the creative folder to --out", async () => {
-		// Stub echoes back the --out value it received so we can assert resolution.
-		process.env.EIGHT_MAKE_PDF_BIN = writeStub(
-			`#!/usr/bin/env bash\n` +
-				`out=""\n` +
-				`while [ $# -gt 0 ]; do\n` +
-				`  if [ "$1" = "--out" ]; then out="$2"; shift; fi\n` +
-				`  shift\n` +
-				`done\n` +
-				`echo "$out"\n`,
-		);
-		const result = await makePdf({ markdown: "# Hi", outName: "custom-report" });
-		expect(result.path).toBe(path.join(CREATIVE_DIR, "custom-report.pdf"));
+	test("a directory is not a file", async () => {
+		await expect(makePdf({ htmlPath: tmpDir })).rejects.toThrow(/htmlPath not found/);
 	});
 
-	test("rejects when the configured binary does not exist", async () => {
-		process.env.EIGHT_MAKE_PDF_BIN = path.join(tmpDir, "does-not-exist");
-		await expect(makePdf({ markdown: "# Hi" })).rejects.toThrow(/not found/);
+	test("an oversized source is refused before layout", async () => {
+		await expect(makePdf({ markdown: "x".repeat(MAX_SOURCE_CHARS + 1) })).rejects.toThrow(
+			/at most/,
+		);
+	});
+
+	test("a source with no text", async () => {
+		await expect(makePdf({ html: "<script>only()</script>" })).rejects.toThrow(/no text/);
+	});
+
+	test("no file is left behind when a call is refused", async () => {
+		const count = () => (fs.existsSync(CREATIVE_DIR) ? fs.readdirSync(CREATIVE_DIR).length : 0);
+		const before = count();
+		await makePdf({ markdown: "# A", html: "<p>B</p>" }).catch(() => {});
+		await makePdf({ markdown: "x".repeat(MAX_SOURCE_CHARS + 1) }).catch(() => {});
+		expect(count()).toBe(before);
 	});
 });
 
-describe("resolveMakePdfBin", () => {
-	test("honours the env override", () => {
-		expect(resolveMakePdfBin()).toBe(stubBin);
+describe("pdf-writer units", () => {
+	test("winAnsi maps typographic punctuation and counts the rest", () => {
+		const t = { replaced: 0 };
+		expect(winAnsi("\u2018a\u2019 \u2014 \u2022", t)).toEqual([
+			0x91, 0x61, 0x92, 0x20, 0x97, 0x20, 0x95,
+		]);
+		winAnsi("\u{1F600}", t);
+		expect(t.replaced).toBe(1);
 	});
 
-	test("falls back to the default fleet-wide binary path", () => {
-		delete process.env.EIGHT_MAKE_PDF_BIN;
-		expect(resolveMakePdfBin()).toBe(DEFAULT_MAKE_PDF_BIN);
-		expect(DEFAULT_MAKE_PDF_BIN).toContain(path.join(".8gent", "bin", "make-pdf"));
+	test("htmlToMarkdown decodes entities and keeps headings", () => {
+		const md = htmlToMarkdown("<h2>Hi &lt;there&gt;</h2><p>&#8364;1 &nbsp;x</p>");
+		expect(md).toContain("## Hi <there>");
+		expect(md).toContain("\u20ac1");
 	});
-});
 
-// Integration: only runs when the real renderer is installed on this host.
-describe("makePdf (real CLI integration)", () => {
-	const realBin = DEFAULT_MAKE_PDF_BIN;
-	const hasReal = fs.existsSync(realBin);
-	const maybe = hasReal ? test : test.skip;
-
-	maybe(
-		"produces a real PDF file in the creative folder",
-		async () => {
-			delete process.env.EIGHT_MAKE_PDF_BIN; // use the real default binary
-			const result = await makePdf({
-				markdown: "# make_pdf test\n\nGenerated by the unit test.",
-				title: "make_pdf unit test",
-			});
-			expect(result.kind).toBe("document");
-			expect(result.path.startsWith(CREATIVE_DIR)).toBe(true);
-			expect(fs.existsSync(result.path)).toBe(true);
-		},
-		30_000,
-	);
+	test("parseMarkdown keeps snake_case and keeps a table as one block without its separator", () => {
+		const b = parseMarkdown("call make_pdf_now\n\n| a | b |\n|---|---|\n| 1 | 2 |");
+		expect(b[0].text).toBe("call make_pdf_now");
+		expect(b.filter((x) => x.kind === "code").map((x) => x.text)).toEqual(["| a | b |\n| 1 | 2 |"]);
+	});
 });

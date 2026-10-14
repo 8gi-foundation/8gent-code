@@ -1030,7 +1030,7 @@ const generateSpriteTool = tool({
 
 const makePdfTool = tool({
 	description:
-		"Produce a PDF document from Markdown or HTML, the way a human would via bash. Shells out to the canonical fleet-wide renderer (~/.8gent/bin/make-pdf; HTML/Markdown -> PDF via weasyprint or chrome-headless). The PDF is written into ~/.8gent/creative/ so it shows up on the Create surface. Non-destructive, deterministic, no network. Provide exactly ONE source. Example: make_pdf({ markdown: '# Report\\n\\nBody...', title: 'Weekly Report' }).",
+		"PDF from args {markdown:'# Title\\n\\nBody', title?, outName?}, or html, mdPath or htmlPath instead of markdown. Rendered in-process, no renderer to install. Lays out headings, paragraphs, lists, quotes and code blocks on A4 with the standard PDF fonts (HTML keeps its structure, not its CSS). Writes into ~/.8gent/creative/ so it shows on the Create surface. Returns { path, kind, pages }; replaced counts characters (emoji, CJK) printed as ?. Provide exactly ONE source. Deterministic, no network.",
 	inputSchema: z.object({
 		markdown: z.string().optional().describe("Inline Markdown source for the document"),
 		html: z.string().optional().describe("Inline HTML source for the document"),
@@ -1056,7 +1056,7 @@ const makePdfTool = tool({
 			return JSON.stringify(
 				{
 					error: `make_pdf failed: ${err instanceof Error ? err.message : String(err)}`,
-					hint: "Provide exactly one of markdown/html/htmlPath/mdPath. Ensure ~/.8gent/bin/make-pdf is installed.",
+					hint: "Provide exactly one of markdown/html/htmlPath/mdPath; a file path must exist.",
 				},
 				null,
 				2,
