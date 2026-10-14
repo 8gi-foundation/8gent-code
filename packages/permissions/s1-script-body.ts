@@ -43,7 +43,7 @@
 
 import { constants, closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
 import * as path from "node:path";
-import { type SimpleCommand, simpleCommands } from "../decide/rules";
+import { type SimpleCommand, shellWords, simpleCommands, splitSegments } from "../decide/rules";
 import { inside } from "./s1-rm-nothing";
 import { SECRET, canon, symlinkBelow } from "./s1-run-in-project";
 import { SHELL_ENV } from "./s1-tg-send";
@@ -69,14 +69,8 @@ const SHELL_NAMES = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
  * and `while IFS= read` is too common in scripts to send each one to a person.
  */
 const STARTUP_VARS = [...SHELL_ENV].filter((v) => v !== "IFS");
-/**
- * A startup variable named anywhere but in a plain `$NAME` read: an assignment (`NAME=`, after
- * env, export, declare, local), an export by name, `${NAME:=...}`, `read NAME`, `printf -v NAME`.
- * Named in the command or a body, the launch is unchecked: no file it points at is read.
- */
-const STARTUP_MENTION = new RegExp(
-	`(?<![A-Za-z0-9_$])(?:${STARTUP_VARS.join("|")})(?![A-Za-z0-9_])`,
-);
+/** A startup variable named as a whole word: used only inside arithmetic text. */
+const STARTUP_WORD = new RegExp(`(?<![A-Za-z0-9_])(?:${STARTUP_VARS.join("|")})(?![A-Za-z0-9_])`);
 const startupInEnv = (): string | undefined =>
 	STARTUP_VARS.find((v) => (process.env[v] ?? "") !== "");
 /** A word whose text is its value: no quote, escape, expansion or glob. */
@@ -160,6 +154,8 @@ const INERT = new Set([
 	"chmod",
 	"chown",
 	"touch",
+	// An editor opening files: a shell name among its words is a file name.
+	"code",
 ]);
 
 /**
@@ -374,6 +370,56 @@ function handsAShell(t: string[]): boolean {
 	return false;
 }
 
+/** git options before the subcommand that take a separate value and run nothing. */
+const GIT_VALUED = new Set(["-C", "--git-dir", "--work-tree", "--namespace"]);
+const GIT_FLAGS = new Set([
+	"--no-pager",
+	"-P",
+	"--bare",
+	"--no-replace-objects",
+	"--literal-pathspecs",
+	"--no-optional-locks",
+]);
+
+/**
+ * `handsAShell` for git, with two subcommands whose arguments are never run: a `git grep`
+ * pattern or path (unless -O/--open-files-in-pager names a program) and a `git commit -m`
+ * message. Any other git line, or a global option this does not know (`-c` sets config that
+ * can name a program), is read as any other program.
+ */
+function gitHandsAShell(t: string[]): boolean {
+	let i = 1;
+	while (i < t.length && t[i].startsWith("-")) {
+		const a = t[i];
+		if (GIT_FLAGS.has(a) || /^--(?:git-dir|work-tree|namespace)=/.test(a)) i++;
+		else if (GIT_VALUED.has(a)) i += 2;
+		else return handsAShell(t);
+	}
+	const sub = t[i];
+	const rest = t.slice(i + 1);
+	if (sub === "grep") {
+		// -O runs the program it names (attached, or the next word) with the matching files.
+		for (let j = 0; j < rest.length; j++) {
+			const m = /^(?:-[A-Za-z]*O|--op[a-z-]*=?)(.*)$/.exec(rest[j]);
+			if (!m) continue;
+			const prog = m[1] !== "" ? m[1] : rest[j + 1];
+			if (prog === undefined || !PLAIN_WORD.test(prog) || isShell(prog) || prog === "eval")
+				return true;
+		}
+		return handsAShell(t) && rest.some((w) => /^(?:-[A-Za-z]*O|--op)/.test(w));
+	}
+	if (sub === "commit") {
+		const kept: string[] = [];
+		for (let j = 0; j < rest.length; j++) {
+			const w = rest[j];
+			if (w === "-m" || w === "-am" || w === "--message") j++;
+			else if (!/^(?:-a?m.|--message=)/.test(w)) kept.push(w);
+		}
+		return handsAShell([t[0], sub, ...kept]);
+	}
+	return handsAShell(t);
+}
+
 /**
  * The script launch in one simple command, or null when it runs no script file. Fails closed: a
  * shape that cannot be rebuilt into checked bytes is "odd" and goes to a person. `direct` is true
@@ -442,7 +488,7 @@ function launchIn(c: Cmd, cwd: string | undefined, depth = 0): Found {
 	if (w0.includes("/") && pathIsScript(w0, cwd, false)) return hit({ form: "exec", file: w0 });
 	// Any other program (ssh, flock, setsid, script, ...) handing a shell a file, options or
 	// command text runs a script this check does not read.
-	if (!INERT.has(b) && handsAShell(t))
+	if (!INERT.has(b) && (b === "git" ? gitHandsAShell(t) : handsAShell(t)))
 		return {
 			launch: odd(`${b} hands a shell a file or command text, which is not read`),
 			direct: false,
@@ -570,13 +616,431 @@ function readScript(file: string, cwd: string | undefined, project: string | und
 	}
 }
 
+// ---------------------------------------------------------------- startup variables
+//
+// A startup variable is found on parsed, dequoted words in assignment positions, never on raw
+// text: the shell removes quotes and expands words before it assigns, so `"BASH"_ENV=`,
+// `B\ASH_ENV=` and `${v}_ENV=` all set BASH_ENV, while `grep ENV src` sets nothing.
+//
+// Assignment positions: leading `NAME=` words, env and sudo assignments, the arguments of
+// export, declare, typeset, readonly and local (with a nameref's target), `${NAME:=` and
+// `${NAME=`, read, printf -v, mapfile/readarray, getopts, for/select, arithmetic (`let`, `((`,
+// `$((`), eval text, alias values, and quoted words that read as command text (`sh -c '...'`,
+// trap, ssh). A name there that is not plain text (an expansion, a backslash, a brace or a glob,
+// or a whole argument that is an expansion such as `export $(...)`) fails closed.
+
+/** Builtins and programs that start no shell: a startup variable set for them goes nowhere. */
+const QUIET = new Set([
+	"ls",
+	"cat",
+	"echo",
+	"printf",
+	"pwd",
+	"true",
+	"false",
+	":",
+	"head",
+	"tail",
+	"wc",
+	"grep",
+	"rg",
+	"test",
+	"[",
+	"export",
+	"declare",
+	"typeset",
+	"readonly",
+	"local",
+	"unset",
+	"read",
+]);
+const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** Characters that leave a name unknown until the shell runs: expansion, escape, brace, glob. */
+const UNREAD = /[$`\\{}*?[\]]/;
+const DEFAULT_ASSIGN = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]*\])?:?=/g;
+const CONTROL_WORDS = new Set([
+	"if",
+	"then",
+	"else",
+	"elif",
+	"do",
+	"while",
+	"until",
+	"!",
+	"{",
+	"}",
+	"time",
+]);
+const DECLARE = new Set(["export", "declare", "typeset", "readonly", "local"]);
+const MAX_SCAN_DEPTH = 4;
+
+/** `lenient`: text that may not be command text at all; only a startup name it sets counts. */
+type Scan = { hit: string | null; lenient: boolean };
+
+const setsMsg = (n: string) =>
+	`the command sets ${n}, which makes a shell run a file this check does not read`;
+const unreadMsg = (w: string) =>
+	`a name in an assignment position (${w.slice(0, 40)}) is not plain text, so what it sets cannot be read`;
+const startup = (n: string) => (STARTUP_VARS.includes(n) ? setsMsg(n) : null);
+function record(acc: Scan, h: string | null): void {
+	if (!h || acc.hit) return;
+	if (acc.lenient && !h.startsWith("the command sets ")) return;
+	acc.hit = h;
+}
+const dequote = (w: string): string | null => {
+	const r = shellWords(w);
+	return r && r.length === 1 ? r[0] : r && r.length === 0 ? "" : null;
+};
+
+/** A word standing where a name goes: the hit it makes, or null. */
+function nameAt(w: string): string | null {
+	if (NAME_RE.test(w)) return startup(w);
+	if (UNREAD.test(w)) return unreadMsg(w);
+	const d = w.replace(/['"]/g, "");
+	return NAME_RE.test(d) ? startup(d) : null;
+}
+
+const NOT_ASSIGN = Symbol("not an assignment");
+/** A word that may be `NAME=value`: the hit, null for a harmless assignment, NOT_ASSIGN otherwise. */
+function assignAt(w: string): string | null | typeof NOT_ASSIGN {
+	const k = w.indexOf("=");
+	if (k < 0) return NOT_ASSIGN;
+	const pre = w.slice(0, k);
+	const m = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]$`]*\])?\+?$/.exec(pre);
+	if (m) return startup(m[1]);
+	if (UNREAD.test(pre)) return unreadMsg(w);
+	const d = pre.replace(/['"]/g, "").replace(/\+$/, "");
+	return NAME_RE.test(d) ? startup(d) : NOT_ASSIGN;
+}
+
+/** One segment split into words as written, quotes kept, redirects dropped. */
+function rawWords(seg: string): string[] {
+	const out: string[] = [];
+	let cur = "";
+	let has = false;
+	let q: string | null = null;
+	let depth = 0;
+	for (let i = 0; i < seg.length; i++) {
+		const c = seg[i];
+		if (q) {
+			cur += c;
+			if (c === "\\" && q === '"' && i + 1 < seg.length) cur += seg[++i];
+			else if (c === q) q = null;
+			continue;
+		}
+		if (c === "\\") {
+			cur += c + (seg[i + 1] ?? "");
+			i++;
+			has = true;
+			continue;
+		}
+		if (c === "'" || c === '"') {
+			q = c;
+			cur += c;
+			has = true;
+			continue;
+		}
+		if (c === "`") {
+			const j = seg.indexOf("`", i + 1);
+			const end = j < 0 ? seg.length : j + 1;
+			cur += seg.slice(i, end);
+			i = end - 1;
+			has = true;
+			continue;
+		}
+		if (
+			(c === "$" || c === "<" || c === ">") &&
+			(seg[i + 1] === "(" || (c === "$" && seg[i + 1] === "{"))
+		) {
+			depth++;
+			cur += c + seg[++i];
+			has = true;
+			continue;
+		}
+		// An array value: `arr=(a b)`.
+		if (c === "(" && depth === 0 && cur.endsWith("=")) {
+			depth++;
+			cur += c;
+			continue;
+		}
+		if (depth > 0) {
+			if (c === "(" || c === "{") depth++;
+			else if (c === ")" || c === "}") depth--;
+			cur += c;
+			continue;
+		}
+		if (c === " " || c === "\t" || c === "\n" || c === "\r") {
+			if (has) out.push(cur);
+			cur = "";
+			has = false;
+			continue;
+		}
+		if (c === "#" && !has) break;
+		cur += c;
+		has = true;
+	}
+	if (has) out.push(cur);
+	const words: string[] = [];
+	for (let k = 0; k < out.length; k++) {
+		const m = /^(?:\d*|&)(?:<<<|<<-?|<>|<&|>&|>>|>\||<|>)(.*)$/.exec(out[k]);
+		if (!m || /^[<>]\(/.test(out[k])) words.push(out[k]);
+		else if (m[1] === "") k++;
+	}
+	return words;
+}
+
+/** Every startup variable `text` sets, read as a shell would read it. */
+function scanText(text: string, depth: number, acc: Scan): void {
+	if (acc.hit) return;
+	if (depth > MAX_SCAN_DEPTH) {
+		record(acc, "the command text nests too deep to read");
+		return;
+	}
+	for (const m of text.matchAll(DEFAULT_ASSIGN)) record(acc, startup(m[1]));
+	const t = text.trim();
+	// `$(( ... ))` reaches here as `( ... )`: arithmetic assigns to any name in it.
+	const arith = t.startsWith("(") && t.endsWith(")") ? STARTUP_WORD.exec(t) : null;
+	if (arith) record(acc, setsMsg(arith[0]));
+	if (acc.hit) return;
+	const { segs, subs } = splitSegments(text);
+	for (const { text: seg } of segs) scanCommand(rawWords(seg), depth, acc);
+	for (const s of subs) scanText(s, depth + 1, acc);
+}
+
+/** Options read by an allowlist of the letters that take a value; returns the index after them. */
+function afterOpts(
+	ws: string[],
+	valued: string,
+	onValue?: (letter: string, v: string) => void,
+): number {
+	let k = 0;
+	while (k < ws.length && /^-./.test(ws[k])) {
+		const a = ws[k];
+		if (a === "--") return k + 1;
+		if (a.startsWith("--")) {
+			k++;
+			continue;
+		}
+		let took = 1;
+		for (let j = 1; j < a.length; j++) {
+			if (!valued.includes(a[j])) continue;
+			const attached = a.slice(j + 1);
+			const v = attached !== "" ? attached : ws[k + 1];
+			if (attached === "") took = 2;
+			if (v !== undefined) onValue?.(a[j], v);
+			break;
+		}
+		k += took;
+	}
+	return k;
+}
+
+function scanCommand(ws: string[], depth: number, acc: Scan): void {
+	if (acc.hit || !ws.length) return;
+	const hit = (h: string | null) => record(acc, h);
+	const asText = (w: string, lenient: boolean) => {
+		const d = dequote(w);
+		if (d === null || !/[\s;&|=]/.test(d)) return;
+		const child: Scan = { hit: null, lenient: acc.lenient || lenient };
+		scanText(d, depth + 1, child);
+		hit(child.hit);
+	};
+	// A quoted word may be command text for the program it is handed to (ssh, su -c, a
+	// startup file written by printf): read for a startup name it sets, never failed closed on.
+	for (const w of ws) if (/['"\\]/.test(w)) asText(w, true);
+	let i = 0;
+	let words = ws;
+	for (;;) {
+		const w = words[i];
+		if (w === undefined) return;
+		// Control words, a case pattern (`a)`), a function head (`f()`, `function f`).
+		if (CONTROL_WORDS.has(w) || /^[^$`(]*\)$/.test(w) || /^[A-Za-z_][\w:.-]*\(\)$/.test(w)) {
+			i++;
+			continue;
+		}
+		if (w === "function") {
+			i += 2;
+			continue;
+		}
+		if (w === "case") {
+			// `case WORD in PATTERN) command`: the command starts after the first pattern.
+			const k = words.findIndex((x, j) => j > i + 1 && /\)$/.test(x) && !/^\$\(/.test(x));
+			if (k < 0) return;
+			i = k + 1;
+			continue;
+		}
+		if (!w.startsWith("((") && /^[({]+./.test(w)) {
+			words = [...words.slice(0, i), w.replace(/^[({]+/, ""), ...words.slice(i + 1)];
+			continue;
+		}
+		break;
+	}
+	if (words[i].startsWith("((")) {
+		const m = STARTUP_WORD.exec(words.slice(i).join(" "));
+		hit(m ? setsMsg(m[0]) : null);
+		return;
+	}
+	for (; i < words.length; i++) {
+		const r = assignAt(words[i]);
+		if (r === NOT_ASSIGN) break;
+		if (r) {
+			hit(r);
+			return;
+		}
+	}
+	if (i >= words.length) return;
+	const raw0 = words[i];
+	const prog = base(dequote(raw0) ?? raw0);
+	const args = words.slice(i + 1);
+	// Command text in a known position is read strictly: a shell's -c text, a trap action.
+	if (SHELL_NAMES.has(prog) || OTHER_SHELLS.has(prog)) {
+		const k = afterOpts(args, "oO");
+		if (args.slice(0, k).some((a) => /^-[A-Za-z]*c/.test(a)) && args[k] !== undefined)
+			asText(args[k], false);
+		return;
+	}
+	if (prog === "trap") {
+		const k = args[0] === "--" ? 1 : 0;
+		if (args[k] !== undefined && !args[k].startsWith("-")) asText(args[k], false);
+		return;
+	}
+	if (prog === "command" || prog === "builtin") {
+		scanCommand(args.slice(afterOpts(args, "")), depth, acc);
+		return;
+	}
+	if (DECLARE.has(prog)) {
+		// Options come as -x and +x; a nameref (`declare -n r=BASH_ENV`) sets the name it holds.
+		const opts = args.filter((a) => /^[-+][A-Za-z]+$/.test(a));
+		const nameref = opts.some((a) => a[0] === "-" && a.includes("n"));
+		for (const a of args) {
+			if (/^[-+][A-Za-z]+$/.test(a) || a === "--") continue;
+			const r = assignAt(a);
+			if (r === NOT_ASSIGN) {
+				hit(nameAt(a));
+				continue;
+			}
+			hit(r);
+			const raw = a.slice(a.indexOf("=") + 1);
+			const v = dequote(raw);
+			if (v !== null && STARTUP_VARS.includes(v)) hit(setsMsg(v));
+			else if (nameref) hit(nameAt(raw));
+		}
+		return;
+	}
+	if (prog === "read") {
+		const k = afterOpts(args, "adinNptu", (l, v) => {
+			if (l === "a") hit(nameAt(v));
+		});
+		for (const a of args.slice(k)) hit(nameAt(a));
+		return;
+	}
+	if (prog === "printf") {
+		afterOpts(args, "v", (_l, v) => hit(nameAt(v)));
+		return;
+	}
+	if (prog === "mapfile" || prog === "readarray") {
+		const k = afterOpts(args, "dnOsuCc");
+		if (args[k] !== undefined) hit(nameAt(args[k]));
+		return;
+	}
+	if (prog === "getopts") {
+		if (args[1] !== undefined) hit(nameAt(args[1]));
+		return;
+	}
+	if (prog === "for" || prog === "select") {
+		const a = args[0];
+		if (a === undefined) return;
+		if (a.startsWith("((")) {
+			const m = STARTUP_WORD.exec(args.join(" "));
+			hit(m ? setsMsg(m[0]) : null);
+			return;
+		}
+		hit(nameAt(a));
+		return;
+	}
+	if (prog === "let") {
+		const m = STARTUP_WORD.exec(args.join(" "));
+		hit(m ? setsMsg(m[0]) : null);
+		return;
+	}
+	if (prog === "eval") {
+		if (args.some((a) => /[$`]/.test(a))) {
+			hit("eval runs text worked out when it runs, so what it sets cannot be read");
+			return;
+		}
+		scanText(args.map((a) => dequote(a) ?? a).join(" "), depth + 1, acc);
+		return;
+	}
+	if (prog === "alias") {
+		for (const a of args) {
+			const d = dequote(a);
+			if (d?.includes("=")) scanText(d.slice(d.indexOf("=") + 1), depth + 1, acc);
+		}
+		return;
+	}
+	// env and sudo take assignments before the command: as the command itself, or after a
+	// program that runs its words (nice, nohup, xargs, ...). A shell name among the words of an
+	// inert program (`grep env notes`) is text.
+	const fed = BUILDS_ITS_COMMAND.has(prog) || RUNS_A_LINE.has(prog);
+	for (let k = 0; k <= args.length; k++) {
+		const w = k === 0 ? prog : base(dequote(args[k - 1]) ?? args[k - 1]);
+		if (w !== "env" && w !== "sudo") continue;
+		if (k > 0 && (INERT.has(prog) || QUIET.has(prog))) break;
+		const rest = k === 0 ? args : args.slice(k);
+		const env = w === "env";
+		let j = afterOpts(rest, env ? "uCPS" : "ugCpDhrtTU", (l, v) => {
+			if (env && l === "S") scanText(dequote(v) ?? v, depth + 1, acc);
+		});
+		if (rest[j] === "-") j++;
+		let command = false;
+		for (; j < rest.length; j++) {
+			const r = assignAt(rest[j]);
+			if (r === NOT_ASSIGN) {
+				if (UNREAD.test(rest[j])) {
+					hit(unreadMsg(rest[j]));
+					return;
+				}
+				command = true;
+				break;
+			}
+			if (r) {
+				hit(r);
+				return;
+			}
+		}
+		// `... | xargs env`: the assignments come from input this check never sees.
+		if (!command && fed) {
+			hit(`${w} is handed its words by ${prog}, so what it sets cannot be read`);
+			return;
+		}
+	}
+}
+
+/**
+ * The startup variable `text` sets, or why a name it assigns cannot be read; `quiet` when every
+ * program it runs starts no shell.
+ */
+function startupSet(text: string): { hit: string | null; quiet: boolean } {
+	const acc: Scan = { hit: null, lenient: false };
+	try {
+		scanText(text, 0, acc);
+		if (!acc.hit) return { hit: null, quiet: true };
+		const quiet = simpleCommands(text).every(
+			(c) => c.raw.length === 0 || (!/[$`]/.test(c.raw[0]) && QUIET.has(base(c.raw[0]))),
+		);
+		return { hit: acc.hit, quiet };
+	} catch {
+		return { hit: "the command could not be read for startup variables", quiet: false };
+	}
+}
+
 /**
  * True when `body` itself launches a script, runs text that is not read (one level only), or
  * names a shell startup variable (a shell it starts, directly or through any program, would run
  * a file this check does not read).
  */
 function launchesScript(body: string, cwd: string): boolean {
-	if (STARTUP_MENTION.test(body)) return true;
+	if (startupSet(body).hit) return true;
 	return simpleCommands(body).some((c) => launchIn(c, cwd) !== null);
 }
 
@@ -592,7 +1056,7 @@ function rebuild(command: string, l: Launch, read: { body: string; mode: number 
 	// Leading `NAME=value` words stay in front: they set the environment of the same shell.
 	const pre = (ASSIGNMENTS.exec(trimmed) as RegExpExecArray)[0];
 	// Never carry a startup variable into the checked run (scriptLaunch refuses them first).
-	if (STARTUP_MENTION.test(pre)) return null;
+	if (startupSet(pre).hit) return null;
 	const text = trimmed.slice(pre.length);
 	const words = (ws: string[]) =>
 		ws.every((w) => PLAIN_WORD.test(w)) ? ws.map(escapeRe).join("[ \\t]+") : null;
@@ -629,12 +1093,10 @@ export function scriptLaunch(
 ): ScriptLaunch {
 	try {
 		// A startup variable set in the command makes any shell it starts, through any program,
-		// run a file first that is not read here.
-		const named = STARTUP_MENTION.exec(command);
-		if (named)
-			return unchecked(
-				`the command sets ${named[0]}, which makes a shell run a file this check does not read`,
-			);
+		// run a file first that is not read here. A line whose programs all start no shell
+		// (`PS4=x ls`) sets it for nothing: each command runs in a fresh shell (core/shell.ts).
+		const set = startupSet(command);
+		if (set.hit && !set.quiet) return unchecked(set.hit);
 		const found: { launch: Launch; first: boolean }[] = [];
 		simpleCommands(command).forEach((c, i) => {
 			const hit = launchIn(c, cwd);
