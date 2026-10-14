@@ -28,6 +28,9 @@ import { createHash } from "node:crypto";
 import {
 	closeSync,
 	existsSync,
+	constants as fsConstants,
+	fstatSync,
+	lstatSync,
 	mkdirSync,
 	openSync,
 	readFileSync,
@@ -296,19 +299,53 @@ export function resolveTaskFileField(
 	let text: string;
 	try {
 		const root = realpathSync.native(workspace);
+		/** Inside the workspace, and no segment of the resolved path (a symlink target too) is a dot name. */
+		const contained = (real: string) => {
+			if (!secretsPathInHome(real, root, process.platform)) return false;
+			const p = process.platform === "win32" ? pathWin32 : pathPosix;
+			return !p
+				.relative(root, real)
+				.split(/[\\/]/)
+				.some((x) => x.startsWith("."));
+		};
 		const real = realpathSync.native(join(root, rel));
-		if (!secretsPathInHome(real, root, process.platform))
-			return { ok: false, error: `${label}: the file resolves outside the workspace` };
-		const st = statSync(real);
-		if (!st.isFile() || st.size > MAX_TASK_FILE_BYTES)
-			return { ok: false, error: `${label}: not a small regular file` };
-		text = readFileSync(real, "utf8");
+		if (!contained(real))
+			return {
+				ok: false,
+				error: `${label}: the file resolves outside the workspace or to a dot file`,
+			};
+		const checked = lstatSync(real);
+		// Read through one handle: no follow on the last component, and the handle must be the very
+		// file checked (same device and inode), a regular file, small, with exactly one link (a hard
+		// link can alias a file outside the workspace).
+		const fd = openSync(real, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+		try {
+			const st = fstatSync(fd);
+			if (
+				!st.isFile() ||
+				st.size > MAX_TASK_FILE_BYTES ||
+				st.nlink !== 1 ||
+				st.dev !== checked.dev ||
+				st.ino !== checked.ino
+			)
+				return { ok: false, error: `${label}: not a small regular file with a single link` };
+			// The path must still resolve to the same place: a parent swapped since the check is refused.
+			const again = realpathSync.native(real);
+			if (again !== real || !contained(again))
+				return { ok: false, error: `${label}: the file moved while it was being read` };
+			text = readFileSync(fd, "utf8");
+		} finally {
+			closeSync(fd);
+		}
 	} catch {
 		return { ok: false, error: `${label}: the file could not be read` };
 	}
 	const esc = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	const m = new RegExp(`^[ \\t]*${esc}[ \\t]*:[ \\t]*(\\S(?:.*\\S)?)[ \\t\\r]*$`, "im").exec(text);
 	if (!m) return { ok: false, error: `${label}: no "${field}:" line in the file` };
+	// A tab or other control character would move focus and type the rest into another field.
+	if (/[\x00-\x1f\x7f]/.test(m[1]))
+		return { ok: false, error: `${label}: the value holds a control character` };
 	let page: URL;
 	try {
 		page = new URL(pageUrl);

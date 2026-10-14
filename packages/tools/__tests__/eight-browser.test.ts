@@ -1,16 +1,19 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { spawn } from "node:child_process";
 import {
 	chmodSync,
+	linkSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	realpathSync,
+	renameSync,
 	rmSync,
 	statSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
+import * as fsModule from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ToolExecutor } from "../../eight/tools";
@@ -1749,6 +1752,56 @@ describe("task-file placeholders: a supplied login is typed without the model ho
 			expect(JSON.stringify(r), rel).not.toContain(OUTSIDE);
 		}
 		expect(resolveTaskFileField(ws, "TASK.txt", "Password", page).ok).toBe(true);
+	});
+
+	test("a symlink with a plain name is refused when its target is a dot file", () => {
+		if (process.platform === "win32") return;
+		writeFileSync(join(ws, ".secrets.yml"), `Password: ${OUTSIDE}\nhttp://127.0.0.1:5/\n`);
+		symlinkSync(join(ws, ".secrets.yml"), join(ws, "innocent.txt"));
+		const r = resolveTaskFileField(ws, "innocent.txt", "Password", "http://127.0.0.1:5/");
+		expect(r.ok).toBe(false);
+		expect(JSON.stringify(r)).not.toContain(OUTSIDE);
+	});
+
+	test("a hard link to a file outside the workspace is refused", () => {
+		writeFileSync(join(outsideDir, "hard.txt"), `Password: ${OUTSIDE}\nhttp://127.0.0.1:5/\n`);
+		linkSync(join(outsideDir, "hard.txt"), join(ws, "hard.txt"));
+		const r = resolveTaskFileField(ws, "hard.txt", "Password", "http://127.0.0.1:5/");
+		expect(r.ok).toBe(false);
+		expect(JSON.stringify(r)).not.toContain(OUTSIDE);
+	});
+
+	test("a parent folder swapped for a symlink between check and open is refused", () => {
+		if (process.platform === "win32") return;
+		mkdirSync(join(ws, "d"), { recursive: true });
+		writeFileSync(join(ws, "d", "T.txt"), "Password: inside-ok\nhttp://127.0.0.1:5/\n");
+		mkdirSync(join(outsideDir, "d"), { recursive: true });
+		writeFileSync(join(outsideDir, "d", "T.txt"), `Password: ${OUTSIDE}\nhttp://127.0.0.1:5/\n`);
+		const realOpen = fsModule.openSync;
+		const spy = spyOn(fsModule, "openSync").mockImplementation(((
+			...a: Parameters<typeof realOpen>
+		) => {
+			if (String(a[0]).endsWith(join("d", "T.txt"))) {
+				renameSync(join(ws, "d"), join(ws, "d-moved"));
+				symlinkSync(join(outsideDir, "d"), join(ws, "d"));
+			}
+			return realOpen(...a);
+		}) as typeof realOpen);
+		try {
+			const r = resolveTaskFileField(ws, "d/T.txt", "Password", "http://127.0.0.1:5/");
+			expect(spy).toHaveBeenCalled();
+			expect(r.ok).toBe(false);
+			expect(JSON.stringify(r)).not.toContain(OUTSIDE);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	test("a value holding a control character is refused", () => {
+		writeFileSync(join(ws, "TAB.txt"), "Password: abc\tdef\nhttp://127.0.0.1:5/\n");
+		const r = resolveTaskFileField(ws, "TAB.txt", "Password", "http://127.0.0.1:5/");
+		expect(r.ok).toBe(false);
+		expect(JSON.stringify(r)).not.toContain("def");
 	});
 
 	test("a resolved value is never read again as a placeholder", () => {
