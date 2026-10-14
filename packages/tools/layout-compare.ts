@@ -225,22 +225,43 @@ export function chromeArgs(
 
 const CHROME_LOCK_FILES = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
 
+/** Longest unix socket path macOS accepts is 103 bytes; stay under it with margin. */
+export const MAX_SOCKET_PATH_BYTES = 100;
+
+/** Worst-case path of Chrome's ProcessSingleton socket under a TMPDIR. */
+export function chromeSocketPath(tmpdir: string): string {
+	return `${tmpdir}/com.google.Chrome.XXXXXX/SingletonSocket`;
+}
+
 /**
  * Get a profile dir ready for Chrome: drop any stale Singleton lock files (a lock left by an
- * earlier launch makes Chrome refuse to start) and make a private TMPDIR inside it. Chrome
- * binds its ProcessSingleton socket under TMPDIR/com.google.Chrome.XXXX, and a host that
- * forbids that bind in the shared temp dir broke the render (#4234); the dir is per-run and
- * goes away with the rest of the render's temp files, so the model never needs to delete locks.
- * Returns the env to launch Chrome with.
+ * earlier launch makes Chrome refuse to start) and, when it fits, give Chrome a short private
+ * TMPDIR (mkdtemp under /tmp, else os.tmpdir()). Chrome binds its ProcessSingleton socket under
+ * TMPDIR/com.google.Chrome.XXXXXX, and a host that forbids that bind in the shared temp dir
+ * broke the render (#4234). A base whose worst-case socket path passes the unix sun_path limit
+ * is skipped, and if none fits the inherited TMPDIR is kept rather than break the launch.
+ * Returns the env to launch Chrome with and a cleanup that removes the private dir.
  */
 export function prepareChromeProfile(
 	profileDir: string,
 	env: Record<string, string | undefined> = process.env,
-): Record<string, string | undefined> {
+	bases: string[] = ["/tmp", os.tmpdir()],
+): { env: Record<string, string | undefined>; cleanup: () => void } {
 	for (const f of CHROME_LOCK_FILES) fs.rmSync(path.join(profileDir, f), { force: true });
-	const tmp = path.join(profileDir, "tmp");
-	fs.mkdirSync(tmp, { recursive: true });
-	return { ...env, TMPDIR: tmp };
+	for (const base of bases) {
+		const prefix = path.join(base, "8gc-");
+		if (Buffer.byteLength(chromeSocketPath(`${prefix}XXXXXX`)) > MAX_SOCKET_PATH_BYTES) continue;
+		try {
+			const tmp = fs.mkdtempSync(prefix);
+			return {
+				env: { ...env, TMPDIR: tmp },
+				cleanup: () => fs.rmSync(tmp, { recursive: true, force: true }),
+			};
+		} catch {
+			// not writable: try the next base
+		}
+	}
+	return { env, cleanup: () => {} };
 }
 
 type ChromeExit = {
@@ -263,7 +284,7 @@ function runChrome(
 	profileDir: string,
 ): Promise<ChromeExit> {
 	return new Promise((resolve, reject) => {
-		const env = prepareChromeProfile(profileDir);
+		const { env, cleanup } = prepareChromeProfile(profileDir);
 		const useGroup = process.platform !== "win32";
 		const child = spawn(chrome, args, {
 			stdio: ["ignore", keepStdout ? "pipe" : "ignore", "pipe"],
@@ -279,6 +300,8 @@ function runChrome(
 		child.stdout?.on("data", (d) => {
 			if (stdout.length < MAX_DOM_BYTES) stdout += String(d);
 		});
+		child.on("close", cleanup);
+		child.on("error", cleanup);
 		const killGroup = () => {
 			try {
 				if (useGroup && child.pid) process.kill(-child.pid, "SIGKILL");
