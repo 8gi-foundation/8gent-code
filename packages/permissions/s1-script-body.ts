@@ -18,7 +18,11 @@
  *   unchecked - a launch whose file cannot be read safely: over SCRIPT_BODY_CAP, missing, not a
  *               regular file, a symlink or under one, hardlinked (nlink > 1), outside the
  *               workspace, a secret-looking name, a path with an expansion, characters outside
- *               printable ASCII, a body that launches another script, more than one launch, or a
+ *               printable ASCII, a body that launches another script, a body holding a shape
+ *               the scan does not read whole (read by an allowlist: a function definition, a
+ *               nameref, set -a or -k, eval, source, alias, a trap whose action is not literal
+ *               text, a backtick, a process substitution, a command name worked out when it
+ *               runs, an unclosed quote), more than one launch, or a
  *               shell reading its script from a pipe or a `<` file. Also every launch shape that
  *               cannot be rebuilt into checked bytes: `-c` or `eval` text worked out when it runs
  *               (`"$(cat FILE)"`, a backtick, `"$S"`), a command name that is a substitution, a
@@ -43,7 +47,13 @@
 
 import { constants, closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
 import * as path from "node:path";
-import { type SimpleCommand, shellWords, simpleCommands, splitSegments } from "../decide/rules";
+import {
+	type SimpleCommand,
+	cutHeredocs,
+	shellWords,
+	simpleCommands,
+	splitSegments,
+} from "../decide/rules";
 import { inside } from "./s1-rm-nothing";
 import { SECRET, canon, symlinkBelow } from "./s1-run-in-project";
 import { SHELL_ENV } from "./s1-tg-send";
@@ -643,7 +653,6 @@ const QUIET = new Set([
 	"tail",
 	"wc",
 	"grep",
-	"rg",
 	"test",
 	"[",
 	"export",
@@ -1025,13 +1034,219 @@ function startupSet(text: string): { hit: string | null; quiet: boolean } {
 	try {
 		scanText(text, 0, acc);
 		if (!acc.hit) return { hit: null, quiet: true };
-		const quiet = simpleCommands(text).every(
-			(c) => c.raw.length === 0 || (!/[$`]/.test(c.raw[0]) && QUIET.has(base(c.raw[0]))),
-		);
+		// A PATH change on the line can put a script where a quiet name is looked up.
+		const quiet =
+			!/(?<![A-Za-z0-9_])PATH\+?=/.test(text) &&
+			simpleCommands(text).every(
+				(c) => c.raw.length === 0 || (!/[$`]/.test(c.raw[0]) && QUIET.has(base(c.raw[0]))),
+			);
 		return { hit: acc.hit, quiet };
 	} catch {
 		return { hit: "the command could not be read for startup variables", quiet: false };
 	}
+}
+
+// A body is read by an allowlist of shapes, not by a list of bad ones: every simple command in it
+// must be a shape the scan above reads whole, or the body is unchecked. A command line keeps the
+// scan alone (a person sees it); a body is never shown, so a shape the scan does not model (a
+// function, a nameref, allexport, eval, a name worked out when it runs) must not read as checked.
+
+/** Builtins whose effect on later commands the scan does not model. */
+const BODY_REFUSED = new Set(["eval", "source", ".", "alias", "function", "enable", "coproc"]);
+/** A program name read as written: plain text after quote removal, or a test head. */
+const PLAIN_PROGRAM = /^(?:[A-Za-z0-9._/+@%,:-]+|\[|\[\[)$/;
+/** `set` letters that change nothing a later command reads from its environment. */
+const SET_LETTERS = /^[-+][euxvfCBEThHn]+$/;
+const SET_O_NAMES = new Set([
+	"errexit",
+	"nounset",
+	"pipefail",
+	"xtrace",
+	"verbose",
+	"noclobber",
+	"noglob",
+	"errtrace",
+	"functrace",
+	"noexec",
+	"notify",
+]);
+
+/**
+ * Why `seg` holds a word this check cannot classify: an unclosed quote or substitution, a
+ * backtick, a process substitution, or a parenthesis outside a substitution (a function head,
+ * `f ( )`, a regex in `[[ ]]`). A `(` before the first word opens a subshell and is read.
+ */
+function unreadWord(seg: string): string | null {
+	let q: string | null = null;
+	let depth = 0;
+	let first = true;
+	for (let i = 0; i < seg.length; i++) {
+		const c = seg[i];
+		if (q === "'") {
+			if (c === "'") q = null;
+			continue;
+		}
+		if (c === "\\") {
+			i++;
+			continue;
+		}
+		if (c === "`") return "the script uses a backtick, which this check does not read";
+		if (q === '"') {
+			if (c === '"' && depth === 0) q = null;
+			else if (c === "$" && (seg[i + 1] === "(" || seg[i + 1] === "{")) {
+				depth++;
+				i++;
+			} else if (depth > 0 && (c === ")" || c === "}")) depth--;
+			continue;
+		}
+		if (c === "'" || c === '"') {
+			q = c;
+			first = false;
+			continue;
+		}
+		if ((c === "<" || c === ">") && seg[i + 1] === "(")
+			return "the script uses a process substitution, which this check does not read";
+		if ((c === "$" || c === "=") && (seg[i + 1] === "(" || seg[i + 1] === "{")) {
+			depth++;
+			i++;
+			first = false;
+			continue;
+		}
+		if (depth > 0) {
+			if (c === "(" || c === "{") depth++;
+			else if (c === ")" || c === "}") depth--;
+			continue;
+		}
+		if (c === "(") {
+			// `((` arithmetic, or a subshell opening the command.
+			if (seg[i + 1] === "(") {
+				depth++;
+				i++;
+				first = false;
+				continue;
+			}
+			if (first) continue;
+			return "the script defines a function or uses a parenthesis this check does not read";
+		}
+		if (!/[\s{!]/.test(c)) first = false;
+	}
+	if (q || depth > 0) return "the script has an unclosed quote or substitution";
+	return null;
+}
+
+/** Why one segment's command is not a shape the scan reads whole, or null. */
+function unreadCommand(seg: string, depth: number): string | null {
+	const ws = rawWords(seg);
+	let i = 0;
+	for (;;) {
+		const w = ws[i];
+		if (w === undefined) return null;
+		if (CONTROL_WORDS.has(w) || /^[^$`(]*\)$/.test(w) || w === "(") {
+			i++;
+			continue;
+		}
+		if (w === "case") {
+			const k = ws.findIndex((x, j) => j > i + 1 && /\)$/.test(x) && !/^\$\(/.test(x));
+			if (k < 0) return null;
+			i = k + 1;
+			continue;
+		}
+		if (/^\((?!\()/.test(w)) {
+			ws[i] = w.slice(1);
+			continue;
+		}
+		if (/^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=/.test(w)) {
+			i++;
+			continue;
+		}
+		break;
+	}
+	if (ws[i].startsWith("((")) return null;
+	for (;;) {
+		const raw = ws[i];
+		if (raw === undefined) return null;
+		const prog = /[$`\\]/.test(raw) ? null : dequote(raw);
+		if (prog === null || !PLAIN_PROGRAM.test(prog))
+			return `the script runs a command whose name is not plain text (${raw.slice(0, 40)})`;
+		const name = base(prog);
+		if (BODY_REFUSED.has(name)) return `the script uses ${name}, which this check does not read`;
+		const args = ws.slice(i + 1).map((a) => dequote(a));
+		if (name === "command" || name === "builtin") {
+			i += 1 + afterOpts(ws.slice(i + 1), "");
+			continue;
+		}
+		if (name === "declare" || name === "typeset" || name === "local") {
+			// Names that are not plain text are refused by the scan; here only the options.
+			const opts = ws.slice(i + 1).map((a) => a.split("=")[0]);
+			if (
+				opts.some(
+					(h) =>
+						/^\W*[-+]/.test(h) && !/^-[A-Za-mo-z]*$|^\+[A-Za-z]*$|^--$/.test(dequote(h) ?? "-n"),
+				)
+			)
+				return `the script uses ${name} -n or an option that is not plain text`;
+			return null;
+		}
+		if (name === "set") return unreadSet(args);
+		if (name === "trap") {
+			// The action runs later as command text: read only when it is literal text that is
+			// itself a body this check reads whole (`trap 'rm -f "$LOCK"' EXIT`).
+			const k = ws[i + 1] === "--" ? i + 2 : i + 1;
+			const act = ws[k];
+			if (act === undefined || /^-[lp]$/.test(act)) return null;
+			const literal = /^'[^']*'$/.test(act) || /^"[^"$`\\]*"$/.test(act) || PLAIN_WORD.test(act);
+			const text = literal ? dequote(act) : null;
+			if (text === null) return "the script sets a trap whose action is worked out when it runs";
+			return bodyNotRead(text, depth + 1);
+		}
+		return null;
+	}
+}
+
+/** Why a `set` in a body is not read: allexport, keyword mode, or words worked out when it runs. */
+function unreadSet(args: (string | null)[]): string | null {
+	for (let k = 0; k < args.length; k++) {
+		const a = args[k];
+		if (a === null || /[$`]/.test(a))
+			return "the script runs set with words worked out when it runs";
+		if (a === "--" || a === "-" || !/^[-+]/.test(a)) return null;
+		if (/^[-+][A-Za-z]*o$/.test(a)) {
+			if (a.length > 2 && !SET_LETTERS.test(a.slice(0, -1)))
+				return `the script runs set ${a}, which this check does not read`;
+			const n = args[++k];
+			if (n === undefined) return null;
+			if (n === null || !SET_O_NAMES.has(n))
+				return `the script runs set -o ${n ?? "(unreadable)"}, which this check does not read`;
+			continue;
+		}
+		if (!SET_LETTERS.test(a)) return `the script runs set ${a}, which this check does not read`;
+	}
+	return null;
+}
+
+/** Why `body` holds a shape the scan does not read whole, or null when every command is read. */
+function bodyNotRead(body: string, depth = 0): string | null {
+	if (depth > MAX_SCAN_DEPTH) return "the script nests too deep to read";
+	const { text } = cutHeredocs(body);
+	const { segs, subs } = splitSegments(text);
+	for (const { text: seg } of segs) {
+		const why = unreadWord(seg) ?? unreadCommand(seg, depth);
+		if (why) return why;
+	}
+	for (const s of subs) {
+		const why = bodyNotRead(s, depth + 1);
+		if (why) return why;
+	}
+	// Wrappers (exec, nohup, env, time, ...) hand on a program name: it must be plain too.
+	for (const c of simpleCommands(text)) {
+		const p = c.argv[0];
+		if (p === undefined) continue;
+		if (/[$`]/.test(p))
+			return `the script runs a command whose name is not plain text (${p.slice(0, 40)})`;
+		if (BODY_REFUSED.has(base(p)))
+			return `the script uses ${base(p)}, which this check does not read`;
+	}
+	return null;
 }
 
 /**
@@ -1119,6 +1334,8 @@ export function scriptLaunch(
 		if (l.form === "odd") return unchecked(l.why);
 		const read = readScript(l.file, cwd, project);
 		if ("why" in read) return unchecked(read.why);
+		const notRead = bodyNotRead(read.body);
+		if (notRead) return unchecked(notRead);
 		if (launchesScript(read.body, canon(cwd as string)))
 			return unchecked("the script runs another script, or command text, which is not read");
 		return {
