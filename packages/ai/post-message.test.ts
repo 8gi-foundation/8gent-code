@@ -5,6 +5,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import {
 	_resetTuiApprovalChannel,
 	registerTuiApprovalHandler,
@@ -305,5 +306,49 @@ describe("post_message", () => {
 
 	test("real deps: approvals live in memory only, and a new process starts with none", () => {
 		expect(postMessageDeps("primary", "s1").approved.size).toBe(0);
+	});
+});
+
+describe("post_message attachment transport (#4265)", () => {
+	test("gif maps to tg-group gif; the caption follows --caption as one argv element", async () => {
+		person("approve");
+		const out = await postMessage(
+			{
+				chat: CHAT,
+				text: "--chat -1 tricky",
+				attachment: {
+					path: "/w/pilot.gif",
+					kind: "gif",
+					bytes: 9,
+					data: Buffer.from("GIF89a..."),
+				},
+			},
+			deps(),
+		);
+		expect(out).toBe(`Posted gif pilot.gif to ${CHAT}, message_id 4242.`);
+		expect(ran).toHaveLength(1);
+		const argv = ran[0].argv;
+		expect(ran[0].bin).toBe("/x/tg-group");
+		expect(argv.slice(0, 4)).toEqual(["gif", "--chat", CHAT, "--file"]);
+		expect(argv.slice(5)).toEqual(["--caption", "--chat -1 tricky"]);
+		// The helper uploads a private staged copy of the checked bytes, never the project path.
+		expect(argv[4]).not.toBe("/w/pilot.gif");
+		expect(argv[4]).toEndWith("/pilot.gif");
+		expect(existsSync(argv[4])).toBe(false); // removed after the send
+		expect(logged[0].attachment).toEqual({ kind: "gif", bytes: 9 });
+	});
+
+	test("a caption holding a bot token is refused before the helper runs", async () => {
+		person("approve");
+		const out = await postMessage(
+			{
+				chat: CHAT,
+				text: `key ${FAKE_TOKEN}`,
+				attachment: { path: "/w/a.mp4", kind: "video", bytes: 9, data: Buffer.from("x") },
+			},
+			deps(),
+		);
+		expect(out).toContain("holds a bot key");
+		expect(ran).toEqual([]);
 	});
 });

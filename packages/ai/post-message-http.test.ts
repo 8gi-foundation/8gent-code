@@ -43,7 +43,11 @@ writeFileSync(
 	}),
 );
 
-type Hit = { path: string; body: { chat_id?: string; text?: string } };
+type Hit = {
+	path: string;
+	body: { chat_id?: string; text?: string; caption?: string };
+	file?: { field: string; name: string; bytes: string };
+};
 const hits: Hit[] = [];
 let reply: (path: string) => Response = () =>
 	Response.json({ ok: true, result: { message_id: 4242 } });
@@ -52,7 +56,16 @@ const stub = Bun.serve({
 	port: 0,
 	async fetch(req) {
 		const path = new URL(req.url).pathname;
-		hits.push({ path, body: await req.json().catch(() => ({})) });
+		if ((req.headers.get("content-type") ?? "").startsWith("multipart/form-data")) {
+			const form = await req.formData();
+			const body: Hit["body"] = {};
+			let file: Hit["file"];
+			for (const [k, v] of form.entries()) {
+				if (typeof v === "string") (body as Record<string, string>)[k] = v;
+				else file = { field: k, name: (v as File).name, bytes: await (v as File).text() };
+			}
+			hits.push({ path, body, file });
+		} else hits.push({ path, body: await req.json().catch(() => ({})) });
 		return reply(path);
 	},
 });
@@ -416,5 +429,43 @@ describe("post_message direct send (#3838)", () => {
 		});
 		expect(out).toContain("PERMISSION DENIED");
 		expect(hits).toEqual([]);
+	});
+});
+
+describe("post_message direct send with an attachment (#4265)", () => {
+	test("a png uploads as multipart to sendPhoto; the key is in no result, log or console", async () => {
+		approve();
+		writeFileSync(join(work, "card.png"), "png bytes for the stub");
+		const out = await new ToolExecutor(work, "http-attach").execute("post_message", {
+			chat: CHAT,
+			text: "hour card",
+			attachment: { path: "card.png", kind: "photo" },
+		});
+		expect(out).toBe(`Posted photo card.png to ${CHAT}, message_id 4242.`);
+		expect(hits).toEqual([
+			{
+				path: `/bot${KEY}/sendPhoto`,
+				body: { chat_id: CHAT, caption: "hour card" },
+				file: { field: "photo", name: "card.png", bytes: "png bytes for the stub" },
+			},
+		]);
+		expect(out).not.toContain(KEY);
+		expect(readFileSync(join(home, ".8gent", "post-message.log"), "utf8")).not.toContain(KEY);
+		expect(readTree(data)).not.toContain(KEY);
+		expect(consoleOut.join("\n")).not.toContain(KEY);
+	});
+
+	test("a Bot API error comes back with the key redacted", async () => {
+		approve();
+		writeFileSync(join(work, "film.mp4"), "mp4 bytes");
+		reply = (p) =>
+			Response.json({ ok: false, description: `bad request at ${p}` }, { status: 400 });
+		const out = await new ToolExecutor(work, "http-attach-err").execute("post_message", {
+			chat: CHAT,
+			attachment: { path: "film.mp4", kind: "video" },
+		});
+		expect(out).toStartWith("[ERROR] post_message failed: HTTP 400");
+		expect(out).toContain("[redacted-token]");
+		expect(out).not.toContain(KEY);
 	});
 });
