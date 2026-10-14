@@ -32,6 +32,7 @@ import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { TimeTravelStore } from "../eight/timetravel/checkpoint-store";
 import { ComputerUseTraceStore, defaultTraceDbPath } from "../memory/computer-use-traces";
 import { type TaskPayload, type TaskResult, VesselMesh } from "../orchestration/vessel-mesh";
+import { installFlowTap } from "../telemetry/flow-stream";
 import { AgentPool, loadPoolConfig } from "./agent-pool";
 import { addJob, getJobs, startCron, stopCron } from "./cron";
 import { getDataDir } from "./data-dir";
@@ -47,10 +48,10 @@ import {
 } from "./dispatch";
 import { bus } from "./events";
 import { startGateway } from "./gateway";
-import { resolveBindHost } from "./origin-guard";
 import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { resolveBestFreeModel } from "./model-resolver";
+import { resolveBindHost } from "./origin-guard";
 import {
 	SessionJournal,
 	autoContinueEnabled,
@@ -60,7 +61,6 @@ import {
 	settleInterruptedToolCalls,
 } from "./session-journal";
 import type { DaemonChannel } from "./types";
-import { installFlowTap } from "../telemetry/flow-stream";
 
 // EIGHT_DAEMON_PORT is a test-only override (default unchanged) so an
 // isolated instance can run alongside the shared production daemon without
@@ -168,6 +168,7 @@ async function shutdown(signal: string): Promise<void> {
 		server.stop();
 		server = null;
 	}
+	pool?.shutdown(); // releases the work queue lock (#4254)
 	pool = null;
 	bus.clear();
 	console.log("[daemon] stopped");
@@ -251,7 +252,9 @@ export async function main(): Promise<void> {
 		try {
 			const perms = await import("../permissions");
 			perms.getPermissionManager().setAutoApprove(true);
-			console.log("[daemon] auto-approve ON (EIGHT_AUTO_APPROVE=1) — dangerous bash/keys still blocked");
+			console.log(
+				"[daemon] auto-approve ON (EIGHT_AUTO_APPROVE=1) - dangerous bash/keys still blocked",
+			);
 		} catch (err) {
 			console.error(`[daemon] warn: could not enable auto-approve: ${String(err)}`);
 		}
@@ -264,7 +267,9 @@ export async function main(): Promise<void> {
 	// other is reported to the model as not replayed (#3653). With
 	// EIGHT_AUTO_CONTINUE=1 as well, a turn that was running at the crash is
 	// continued once, after the restore and the settle (#4082).
-	const journal = resumeOnBootEnabled() ? new SessionJournal(`${DATA_DIR}/sessions-journal.json`) : null;
+	const journal = resumeOnBootEnabled()
+		? new SessionJournal(`${DATA_DIR}/sessions-journal.json`)
+		: null;
 	pool = new AgentPool(poolConfig, journal ? { journal } : {});
 	if (journal) {
 		const t0 = Date.now();
