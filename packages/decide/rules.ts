@@ -495,15 +495,18 @@ export function maskData(s: string): string {
 const HEREDOC_RE = /(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/;
 const HEREDOC_AT = new RegExp(HEREDOC_RE.source, "y");
 
-/** The command with heredoc bodies removed, and each body with the text before its operator. */
+/**
+ * The command with heredoc bodies removed, and each body with the text before its operator.
+ * `quoted`: the delimiter is quoted, so the body is literal (no expansion runs in it).
+ */
 export function cutHeredocs(text: string): {
 	text: string;
-	docs: { before: string; body: string }[];
+	docs: { before: string; body: string; quoted: boolean }[];
 } {
 	if (!text.includes("<<")) return { text, docs: [] };
 	const lines = text.split("\n");
 	const out: string[] = [];
-	const docs: { before: string; body: string }[] = [];
+	const docs: { before: string; body: string; quoted: boolean }[] = [];
 	let i = 0;
 	while (i < lines.length) {
 		const ln = lines[i];
@@ -516,7 +519,7 @@ export function cutHeredocs(text: string): {
 			const body: string[] = [];
 			let j = i + 1;
 			while (j < lines.length && lines[j].trim() !== name) body.push(lines[j++]);
-			docs.push({ before: ln.slice(0, m.index), body: body.join("\n") });
+			docs.push({ before: ln.slice(0, m.index), body: body.join("\n"), quoted: m[1] !== "" });
 			out.push(ln.slice(0, m.index) + ln.slice(m.index + m[0].length));
 			i = j + 1;
 			continue;

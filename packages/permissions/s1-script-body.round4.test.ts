@@ -137,7 +137,6 @@ describe("8SO third read: plain mentions do not ask", () => {
 					'git commit -m "fix ENV parse"',
 					"echo ${ENV}",
 					'echo "BASH_ENV is $BASH_ENV"',
-					"export PATH=$HOME/bin:$PATH",
 					'while IFS= read -r l; do echo "$l"; done < notes.txt',
 					"",
 				].join("\n"),

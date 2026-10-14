@@ -122,7 +122,6 @@ describe("ordinary scripts stay checked", () => {
 					"! grep -q x notes.txt || echo found",
 					"time ls",
 					"command -v git >/dev/null",
-					"export PATH=$HOME/bin:$PATH",
 					`trap 'rm -f "$LOCK"' EXIT`,
 					"trap - INT",
 					"cat <<EOF",

@@ -56,6 +56,7 @@ import {
 } from "../decide/rules";
 import { inside } from "./s1-rm-nothing";
 import { SECRET, canon, symlinkBelow } from "./s1-run-in-project";
+import { arithNotRead } from "./s1-script-arith";
 import { SHELL_ENV } from "./s1-tg-send";
 
 /** The most of a script that is read and checked: 16 KiB. Larger goes to a person. */
@@ -690,7 +691,24 @@ const setsMsg = (n: string) =>
 	`the command sets ${n}, which makes a shell run a file this check does not read`;
 const unreadMsg = (w: string) =>
 	`a name in an assignment position (${w.slice(0, 40)}) is not plain text, so what it sets cannot be read`;
-const startup = (n: string) => (STARTUP_VARS.includes(n) ? setsMsg(n) : null);
+/**
+ * Names a body may not set at all (bodyScan): PATH, and bash's command hash and alias tables,
+ * which make a plain command name run a file in the workspace (`PATH=./bin:$PATH; tool`).
+ */
+const BODY_WATCHED = ["PATH", "BASH_CMDS", "BASH_ALIASES"];
+/** Set only inside bodyScan: names written with a value that may not be an integer. */
+let bodyWrites: Set<string> | null = null;
+const startup = (n: string) =>
+	STARTUP_VARS.includes(n)
+		? setsMsg(n)
+		: bodyWrites && BODY_WATCHED.includes(n)
+			? `the script sets ${n}, so a plain command name may run a file this check does not read`
+			: null;
+/** A write the scan read; `int` when the value is an integer literal or `$((...))`. */
+function wrote(n: string, int = false): void {
+	if (bodyWrites && !int) bodyWrites.add(n);
+}
+const INT_VALUE = /^"?(?:-?[0-9]+|\$\(\(.*\)\))"?$/;
 function record(acc: Scan, h: string | null): void {
 	if (!h || acc.hit) return;
 	if (acc.lenient && !h.startsWith("the command sets ")) return;
@@ -703,10 +721,15 @@ const dequote = (w: string): string | null => {
 
 /** A word standing where a name goes: the hit it makes, or null. */
 function nameAt(w: string): string | null {
-	if (NAME_RE.test(w)) return startup(w);
+	if (NAME_RE.test(w)) {
+		wrote(w);
+		return startup(w);
+	}
 	if (UNREAD.test(w)) return unreadMsg(w);
 	const d = w.replace(/['"]/g, "");
-	return NAME_RE.test(d) ? startup(d) : null;
+	if (!NAME_RE.test(d)) return null;
+	wrote(d);
+	return startup(d);
 }
 
 const NOT_ASSIGN = Symbol("not an assignment");
@@ -716,10 +739,15 @@ function assignAt(w: string): string | null | typeof NOT_ASSIGN {
 	if (k < 0) return NOT_ASSIGN;
 	const pre = w.slice(0, k);
 	const m = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]$`]*\])?\+?$/.exec(pre);
-	if (m) return startup(m[1]);
+	if (m) {
+		wrote(m[1], !pre.includes("[") && INT_VALUE.test(w.slice(k + 1)));
+		return startup(m[1]);
+	}
 	if (UNREAD.test(pre)) return unreadMsg(w);
 	const d = pre.replace(/['"]/g, "").replace(/\+$/, "");
-	return NAME_RE.test(d) ? startup(d) : NOT_ASSIGN;
+	if (!NAME_RE.test(d)) return NOT_ASSIGN;
+	wrote(d);
+	return startup(d);
 }
 
 /** One segment split into words as written, quotes kept, redirects dropped. */
@@ -805,7 +833,10 @@ function scanText(text: string, depth: number, acc: Scan): void {
 		record(acc, "the command text nests too deep to read");
 		return;
 	}
-	for (const m of text.matchAll(DEFAULT_ASSIGN)) record(acc, startup(m[1]));
+	for (const m of text.matchAll(DEFAULT_ASSIGN)) {
+		wrote(m[1]);
+		record(acc, startup(m[1]));
+	}
 	const t = text.trim();
 	// `$(( ... ))` reaches here as `( ... )`: arithmetic assigns to any name in it.
 	const arith = t.startsWith("(") && t.endsWith(")") ? STARTUP_WORD.exec(t) : null;
@@ -1178,6 +1209,8 @@ function unreadCommand(seg: string, depth: number): string | null {
 		if (name === "declare" || name === "typeset" || name === "local") {
 			// Names that are not plain text are refused by the scan; here only the options.
 			const opts = ws.slice(i + 1).map((a) => a.split("=")[0]);
+			if (opts.some((h) => /^[-+][A-Za-z]*i/.test(dequote(h) ?? "")))
+				return `the script uses ${name} -i, which reads every value set later as arithmetic`;
 			if (
 				opts.some(
 					(h) =>
@@ -1188,6 +1221,17 @@ function unreadCommand(seg: string, depth: number): string | null {
 			return null;
 		}
 		if (name === "set") return unreadSet(args);
+		// `hash -p FILE NAME` points a plain name at any file.
+		if (name === "hash" && args.some((a) => a === null || /[$`]/.test(a) || /^-[A-Za-z]*p/.test(a)))
+			return "the script uses hash -p, which points a command name at a file";
+		// A subscript is arithmetic: `unset 'a[$(cmd)]'` runs cmd. bash 5 reads `-v a[...]` too.
+		if (
+			name === "unset" &&
+			args.some((a) => a === null || !/^(?:[A-Za-z_][A-Za-z0-9_]*|-[fvn]+)$/.test(a))
+		)
+			return "the script unsets a name that is not plain text";
+		if ((name === "[[" || name === "[" || name === "test") && args.includes("-v"))
+			return "the script tests -v, which reads a subscript as arithmetic";
 		if (name === "trap") {
 			// The action runs later as command text: read only when it is literal text that is
 			// itself a body this check reads whole (`trap 'rm -f "$LOCK"' EXIT`).
@@ -1224,6 +1268,80 @@ function unreadSet(args: (string | null)[]): string | null {
 	return null;
 }
 
+/**
+ * A shell with no script operand and no -c (`bash`, `bash -s`, `sh -`): it reads its commands
+ * from stdin, which a body can point at any file (`exec <evil.sh`).
+ */
+function readsStdin(argv: string[]): boolean {
+	if (!argv.length || !isShell(argv[0])) return false;
+	for (let i = 1; i < argv.length; i++) {
+		const a = argv[i];
+		if (a === "-") return true;
+		if (SHORT_OPTS.test(a)) {
+			if (a.slice(1).includes("c")) return false;
+			if (a.slice(1).includes("s")) return true;
+			if (/[oO]$/.test(a)) i++;
+			continue;
+		}
+		if (a.startsWith("--")) continue;
+		return false;
+	}
+	return true;
+}
+
+/**
+ * The heredocs in `body`: bodies fed to a shell that reads stdin (each a body of its own), the
+ * $(...) texts inside unquoted bodies (they run when the heredoc expands), the unquoted bodies,
+ * or why one is not read (a backtick in an unquoted body).
+ */
+function hereDocs(body: string): {
+	fed: string[];
+	subs: string[];
+	open: string[];
+	why: string | null;
+} {
+	const out = {
+		fed: [] as string[],
+		subs: [] as string[],
+		open: [] as string[],
+		why: null as string | null,
+	};
+	for (const d of cutHeredocs(body).docs) {
+		const segs = splitSegments(d.before).segs;
+		const last = segs[segs.length - 1];
+		const cmd = last ? simpleCommands(last.text)[0] : undefined;
+		if (cmd && readsStdin(cmd.argv)) out.fed.push(d.body);
+		if (d.quoted) continue;
+		out.open.push(d.body);
+		const t = d.body.replace(/\\[\s\S]/g, "  ");
+		if (t.includes("`"))
+			out.why = "the script has a backtick in a heredoc, which this check does not read";
+		for (let i = t.indexOf("$("); i >= 0; i = t.indexOf("$(", i + 2)) {
+			if (t[i + 2] === "(") continue;
+			const sub = splitSegments(t.slice(i)).subs[0];
+			if (sub === undefined) {
+				out.why = "the script has an unclosed $( in a heredoc";
+				break;
+			}
+			out.subs.push(sub);
+			i += sub.length;
+		}
+	}
+	return out;
+}
+
+/** Names `text` writes with a value that may not be an integer, or why it is not read. */
+function bodyScan(text: string): { written: Set<string>; hit: string | null } {
+	const acc: Scan = { hit: null, lenient: false };
+	bodyWrites = new Set();
+	try {
+		scanText(text, 0, acc);
+		return { written: bodyWrites, hit: acc.hit };
+	} finally {
+		bodyWrites = null;
+	}
+}
+
 /** Why `body` holds a shape the scan does not read whole, or null when every command is read. */
 function bodyNotRead(body: string, depth = 0): string | null {
 	if (depth > MAX_SCAN_DEPTH) return "the script nests too deep to read";
@@ -1233,10 +1351,21 @@ function bodyNotRead(body: string, depth = 0): string | null {
 		const why = unreadWord(seg) ?? unreadCommand(seg, depth);
 		if (why) return why;
 	}
-	for (const s of subs) {
+	const docs = hereDocs(body);
+	if (docs.why) return docs.why;
+	for (const s of [...subs, ...docs.fed, ...docs.subs]) {
 		const why = bodyNotRead(s, depth + 1);
 		if (why) return why;
 	}
+	// Each shell that reads stdin must be one a heredoc feeds; any other reads a file this
+	// check never sees (`exec <evil.sh; bash`).
+	const stdinShells = simpleCommands(text).filter((c) => readsStdin(c.argv)).length;
+	if (stdinShells > docs.fed.length)
+		return "the script starts a shell that reads its commands from stdin, which this check does not read";
+	const scan = bodyScan(body);
+	if (scan.hit) return scan.hit;
+	const arith = arithNotRead(body, scan.written, docs.open);
+	if (arith) return arith;
 	// Wrappers (exec, nohup, env, time, ...) hand on a program name: it must be plain too.
 	for (const c of simpleCommands(text)) {
 		const p = c.argv[0];
@@ -1255,8 +1384,9 @@ function bodyNotRead(body: string, depth = 0): string | null {
  * a file this check does not read).
  */
 function launchesScript(body: string, cwd: string): boolean {
-	if (startupSet(body).hit) return true;
-	return simpleCommands(body).some((c) => launchIn(c, cwd) !== null);
+	if (startupSet(body).hit || bodyScan(body).hit) return true;
+	const texts = [body, ...hereDocs(body).subs];
+	return texts.some((t) => simpleCommands(t).some((c) => launchIn(c, cwd) !== null));
 }
 
 /** Leading plain `NAME=value` assignments, each followed by a space or tab. */
