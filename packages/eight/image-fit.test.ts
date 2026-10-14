@@ -71,6 +71,16 @@ describe("layoutMeasureLine and loadRunImage", () => {
 		expect(line).toContain("multiply by 2.5");
 		expect(line).not.toContain("full-size image (1024x576");
 	});
+	test("only a downscaled copy gets the downscale wording", async () => {
+		const copy = await sharp(big).resize(1024, 576).png().toBuffer();
+		const down = await layoutMeasureLine(copy, { width: 2560, height: 1440 });
+		const same = await layoutMeasureLine(big, { width: 2560, height: 1440 });
+		const none = await layoutMeasureLine(big);
+		expect(down).toContain("downscaled");
+		expect(same).not.toContain("downscaled");
+		expect(none).not.toContain("downscaled");
+		expect(same.split("\n")[0]).toBe("Measured layout of the full-size image (2560x1440 px):");
+	});
 	test("the original keeps the full-size wording", async () => {
 		const line = await layoutMeasureLine(big, { width: 2560, height: 1440 });
 		expect(line).toContain("full-size image (2560x1440 px");
