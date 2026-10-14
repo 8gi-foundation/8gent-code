@@ -1030,7 +1030,7 @@ const generateSpriteTool = tool({
 
 const makePdfTool = tool({
 	description:
-		"PDF from args {markdown:'# Title\\n\\nBody'} (or one of html, mdPath, htmlPath), plus optional title and outName; rendered in-process, no renderer to install. Lays out headings, paragraphs, lists, quotes and code blocks on A4 with the standard PDF fonts (HTML keeps its structure, not its CSS). Writes into ~/.8gent/creative/ so it shows on the Create surface. Returns { path, kind, pages }; replaced counts characters (emoji, CJK) printed as ?. Provide exactly ONE source. Deterministic, no network.",
+		"PDF from args {markdown:'# Title\\n\\nBody', title?, outName?}, or html, mdPath or htmlPath instead of markdown. Rendered in-process, no renderer to install. Lays out headings, paragraphs, lists, quotes and code blocks on A4 with the standard PDF fonts (HTML keeps its structure, not its CSS). Writes into ~/.8gent/creative/ so it shows on the Create surface. Returns { path, kind, pages }; replaced counts characters (emoji, CJK) printed as ?. Provide exactly ONE source. Deterministic, no network.",
 	inputSchema: z.object({
 		markdown: z.string().optional().describe("Inline Markdown source for the document"),
 		html: z.string().optional().describe("Inline HTML source for the document"),
