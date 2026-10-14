@@ -201,6 +201,7 @@ import {
 	harnessNote,
 	withStyleReminder,
 } from "./context-note";
+import { downscaleNote } from "./image-fit";
 import { layoutMeasureLine } from "./layout-measure";
 import {
 	ObservationPacker,
@@ -500,6 +501,7 @@ export class Agent {
 				permission: config.permission,
 				// read_image attaches pixels only for a model that can see (#3641).
 				visionCapable: () => this.modelSees(),
+				localRuntime: () => isLocalProvider(this.config.runtime),
 			},
 		);
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 off): with the allowlist
@@ -1809,7 +1811,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * One turn. Children this turn spawns inherit this agent's provider, model
 	 * and baseUrl as they are when the child starts (#3710).
 	 */
-	chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+	chat(
+		userMessage: string,
+		imageBase64?: string,
+		imageMimeType?: string,
+		imageOriginal?: { width: number; height: number },
+	): Promise<string> {
 		this.lastTurnFailure = null;
 		return runAsParentSession(
 			() => ({
@@ -1825,7 +1832,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.steerQueue = [];
 				this.activeTurn = turn;
 				try {
-					const reply = await this.runTurn(userMessage, imageBase64, imageMimeType);
+					const reply = await this.runTurn(userMessage, imageBase64, imageMimeType, imageOriginal);
 					this.reviewFinishedTurn(userMessage, reply);
 					return reply;
 				} finally {
@@ -1874,6 +1881,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		userMessage: string,
 		imageBase64?: string,
 		imageMimeType?: string,
+		imageOriginal?: { width: number; height: number },
 	): Promise<string> {
 		// The turn offers the extension tools that finished loading (G1, D12).
 		await this.extensionsReady;
@@ -1925,11 +1933,21 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// (#3772) never reached it and position stayed 0.70 to 0.73 of 0.77. Hand it
 			// over on the attach path too. Bounded, model-free, empty on any failure.
 			try {
-				const measured = await layoutMeasureLine(Buffer.from(imageBase64, "base64"));
+				const measured = await layoutMeasureLine(Buffer.from(imageBase64, "base64"), imageOriginal);
 				if (measured) {
 					this.messageHistory.push({ role: "user", content: harnessNote(measured) });
 					// read_image on the same file this turn must not repeat the block.
 					this.executor.markLayoutSent(measured);
+				} else if (imageOriginal) {
+					// #4293: a photo or an image with no ink bands has no layout block, but
+					// a downscaled copy still needs its original size and factor stated.
+					const sharp = (await import("sharp")).default;
+					const meta = await sharp(Buffer.from(imageBase64, "base64")).metadata();
+					const note = downscaleNote(imageOriginal, {
+						width: meta.width ?? imageOriginal.width,
+						height: meta.height ?? imageOriginal.height,
+					});
+					if (note) this.messageHistory.push({ role: "user", content: harnessNote(note) });
 				}
 			} catch {
 				// layout hints are best-effort; the image itself is already attached
@@ -3406,7 +3424,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						const recovery = await autonomy.handleError(
 							err,
 							"agent-chat",
-							() => this.runTurn(textForAgent, imageBase64, imageMimeType),
+							() => this.runTurn(textForAgent, imageBase64, imageMimeType, imageOriginal),
 							2, // max 2 retries in infinite mode
 						);
 						if (recovery.success) {

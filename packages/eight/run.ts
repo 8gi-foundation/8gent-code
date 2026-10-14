@@ -442,13 +442,21 @@ export const MAX_RUN_IMAGE_BYTES = 20 * 1024 * 1024;
  * A missing file, an unsupported extension or a file over MAX_RUN_IMAGE_BYTES
  * is a usage error, reported the way a missing prompt is, before any model is
  * contacted. The image is downscaled to fit 1024x1024 exactly as read_image
- * does, so what reaches the model is bounded the same way on both paths;
- * sharp's own pixel limit bounds the decode.
+ * does (imageMaxSide: 1024 local, 2560 hosted), so what reaches the model is
+ * bounded the same way on both paths; sharp's own pixel limit bounds the decode.
+ * `original` is the file's own size, so a downscaled copy can be explained (#4293).
  */
+export type RunImage = {
+	base64: string;
+	mimeType: string;
+	original?: { width: number; height: number };
+};
+
 export async function loadRunImage(
 	file: string,
 	cwd: string,
-): Promise<{ base64: string; mimeType: string } | { error: string }> {
+	provider?: string,
+): Promise<RunImage | { error: string }> {
 	const path = await import("node:path");
 	const fs = await import("node:fs");
 	// Same containment as every file tool: inside the working directory, no
@@ -478,9 +486,19 @@ export async function loadRunImage(
 	}
 	try {
 		const { resizeImage } = await import("../tools/image");
-		const shown = await resizeImage(absolute, 1024, 1024);
+		const { isLocalProvider } = await import("./registry");
+		const { imageMaxSide } = await import("./image-fit");
+		const side = imageMaxSide(provider ? isLocalProvider(provider) : true);
+		const shown = await resizeImage(absolute, side, side);
 		const format = shown.format === "jpg" ? "jpeg" : shown.format;
-		return { base64: shown.base64, mimeType: `image/${format}` };
+		return {
+			base64: shown.base64,
+			mimeType: `image/${format}`,
+			original: {
+				width: shown.originalWidth ?? shown.width,
+				height: shown.originalHeight ?? shown.height,
+			},
+		};
 	} catch (err) {
 		return {
 			error: `Error: --image could not be decoded as an image: ${err instanceof Error ? err.message : String(err)}`,
@@ -784,9 +802,9 @@ export async function runRunCommand(
 	try {
 		// --image: the file is read before the agent exists, so a bad path is a
 		// usage error and never a model turn (#3641).
-		let image: { base64: string; mimeType: string } | undefined;
+		let image: RunImage | undefined;
 		if (opts.image) {
-			const loaded = await loadRunImage(opts.image, opts.cwd || process.cwd());
+			const loaded = await loadRunImage(opts.image, opts.cwd || process.cwd(), provider);
 			if ("error" in loaded) {
 				if (isStreamJson) {
 					emit({ type: "error", subtype: "usage", message: loaded.error });
@@ -851,7 +869,7 @@ export async function runRunCommand(
 		// The check runs repo code, so it needs --yes until run_command is sandboxed (#3612).
 		const baseline = await baselineCheck({ cwd: workDir, run, consent: opts.yes });
 		const before = projectFingerprint(workDir);
-		const answer = await agent.chat(opts.prompt, image?.base64, image?.mimeType);
+		const answer = await agent.chat(opts.prompt, image?.base64, image?.mimeType, image?.original);
 		// A turn the breaker or the watchdog cut off is not finished (#4172).
 		const firstStop = agent.getTurnStop();
 		const check = await finishWithProjectCheck({
