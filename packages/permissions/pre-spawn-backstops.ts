@@ -18,12 +18,19 @@ import {
 	commandTouchesAuditFiles,
 	commandWritesStartupCode,
 } from "./path-guard";
+import { refusalLead } from "./refusal-lead";
 
 /**
  * The refusal for `command`, or null when none of the backstops applies. `cwd` is the
  * directory the command runs in, so relative paths and `cd` resolve as the shell will.
  */
 export function preSpawnRefusal(command: string, cwd: string = process.cwd()): string | null {
+	const refusal = backstopRefusal(command, cwd);
+	// One lead for every backstop, on both tool paths: the model reads the first sentence (#4238).
+	return refusal === null ? null : refusalLead(refusal);
+}
+
+function backstopRefusal(command: string, cwd: string): string | null {
 	// #3595: the file that lists post_message recipients is not for the shell. A minimum,
 	// not a parser: the allowlist is also frozen at process start.
 	if (

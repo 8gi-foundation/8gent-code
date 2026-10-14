@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
+import { REFUSAL_NOTE } from "../permissions/refusal-lead";
 
 const saved = {
 	HOME: process.env.HOME,
@@ -35,27 +36,27 @@ const CASES: { name: string; command: string; starts: string }[] = [
 	{
 		name: "settings.json (#3595)",
 		command: "cat ~/.8gent/settings.json",
-		starts: "[PERMISSION DENIED] Command touches ~/.8gent/settings.json",
+		starts: `[PERMISSION DENIED] ${REFUSAL_NOTE} Command touches ~/.8gent/settings.json`,
 	},
 	{
 		name: "audit files (#3735)",
 		command: "tail ~/.8gent/audit/today.jsonl",
-		starts: "[PERMISSION DENIED] Command touches agent audit files",
+		starts: `[PERMISSION DENIED] ${REFUSAL_NOTE} Command touches agent audit files`,
 	},
 	{
 		name: "session records",
 		command: "rm ~/.8gent/sessions/last.json",
-		starts: "[PERMISSION DENIED] Command would change session records",
+		starts: `[PERMISSION DENIED] ${REFUSAL_NOTE} Command would change session records`,
 	},
 	{
 		name: "browser profiles (#3622, the 8SO repro)",
 		command: "ls ~/.8gent/browser-profiles",
-		starts: "[PERMISSION DENIED] Command touches 8gent Browser control tokens or profiles",
+		starts: `[PERMISSION DENIED] ${REFUSAL_NOTE} Command touches 8gent Browser control tokens or profiles`,
 	},
 	{
 		name: "browser control token (#3622)",
 		command: "cat ~/.8gent/browser-control.token",
-		starts: "[PERMISSION DENIED] Command touches",
+		starts: `[PERMISSION DENIED] ${REFUSAL_NOTE} Command touches`,
 	},
 ];
 
@@ -98,7 +99,9 @@ describe("native run_command refuses each backstop before spawn (#3993)", () => 
 
 	test("the git tools on the native path are covered too", async () => {
 		const out = await nativeGitAdd("~/.8gent/settings.json");
-		expect(out).toStartWith("[PERMISSION DENIED] Command touches ~/.8gent/settings.json");
+		expect(out).toStartWith(
+			`[PERMISSION DENIED] ${REFUSAL_NOTE} Command touches ~/.8gent/settings.json`,
+		);
 	});
 });
 

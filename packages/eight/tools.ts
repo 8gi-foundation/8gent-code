@@ -176,6 +176,7 @@ import {
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
+import { REFUSAL_LEAD, REFUSAL_NOTE, refusalLead } from "../permissions/refusal-lead";
 import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import {
 	CreatedFiles,
@@ -849,6 +850,8 @@ export const DECK_SPEC_PARAMETER: Record<string, unknown> = (() => {
 	return lean(z.toJSONSchema(DeckSpecSchema, { io: "input" })) as Record<string, unknown>;
 })();
 
+export { REFUSAL_LEAD, REFUSAL_NOTE, refusalLead };
+
 export class ToolExecutor {
 	private workingDirectory: string;
 	private permissionManager: PermissionManager;
@@ -882,6 +885,10 @@ export class ToolExecutor {
 	private openedThisTurn = new Set<string>();
 	/** Dates and numbers files read this turn mark as retired (#3811). */
 	private retiredFacts = new RetiredFacts();
+	/** Absolute paths read or written this session; write_file replaces only these or new files (#4238). */
+	private seenPaths = new Set<string>();
+	/** Commands the harness refused; a refused probe proves nothing about the files it named (#4238). */
+	private blockedCommands: string[] = [];
 	/**
 	 * Files this agent created (write_file, run_command redirects), in memory
 	 * only (#3177). System One lets it rm them without the judge. The Agent
@@ -2540,7 +2547,13 @@ export class ToolExecutor {
 				const target = parseGitCommit(command);
 				// Judged on the text that will run: a `cd <folder> &&` commit meets the gate too (#3199).
 				const runs = commandAfterCdPrefix(command, this.workingDirectory, activeShellKind());
-				return target && sanitizeShellCommand(runs).safe ? this.gatedCommit(run, target) : run();
+				const result = await (target && sanitizeShellCommand(runs).safe
+					? this.gatedCommit(run, target)
+					: run());
+				if (/^\[(BLOCKED|PERMISSION DENIED)\]/.test(result.trimStart())) {
+					this.blockedCommands.push(command);
+				}
+				return result;
 			}
 
 			case "powershell": {
@@ -3069,6 +3082,7 @@ export class ToolExecutor {
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
 		this.retiredFacts.noteRead(absolutePath, content);
+		this.seenPaths.add(absolutePath);
 		const lines = content.split("\n");
 		// A trailing newline ends the last line; it does not start another one.
 		if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
@@ -3168,6 +3182,28 @@ export class ToolExecutor {
 				// Design check is advisory, never block writes
 			}
 		}
+
+		// Overwrite guard (#4238): a file the model never read is not its to replace once a
+		// refused command named it. A blocked probe ("ls x; echo $?") once read as "missing" and it wrote over the real
+		// count-todos.ts. Same bytes, or a path read/written this session, passes.
+		const base = path.basename(absolutePath);
+		if (
+			process.env.EIGHT_OVERWRITE_GUARD !== "0" &&
+			fs.existsSync(absolutePath) &&
+			!this.seenPaths.has(absolutePath) &&
+			this.blockedCommands.some((c) => c.includes(base))
+		) {
+			let current: string | null = null;
+			try {
+				if (fs.statSync(absolutePath).isFile()) current = fs.readFileSync(absolutePath, "utf-8");
+			} catch {
+				current = null;
+			}
+			if (current !== null && current !== content) {
+				return `Error: ${absolutePath} already exists and you have not read it this session, so write_file will not replace it. A command that was blocked or errored tells you nothing about whether a file exists. Run read_file on it first; to change part of it use edit_file; to run it, leave it alone.`;
+			}
+		}
+		this.seenPaths.add(absolutePath);
 
 		const dir = path.dirname(absolutePath);
 		if (!fs.existsSync(dir)) {
@@ -3339,9 +3375,9 @@ export class ToolExecutor {
 		if (cwd === undefined) {
 			// The backstops judge the whole line first, so a cd into protected files keeps their words.
 			const lineBackstop = preSpawnRefusal(command, this.workingDirectory);
-			if (lineBackstop) return lineBackstop;
+			if (lineBackstop) return refusalLead(lineBackstop);
 			const cd = cdPrefix(command, this.workingDirectory, activeShellKind(windowsShell));
-			if (cd.kind === "refused") return cd.message;
+			if (cd.kind === "refused") return refusalLead(cd.message);
 			if (cd.kind === "cd") return this.runCommand(cd.rest, timeoutSec, env, windowsShell, cd.dir);
 		}
 		const dir = cwd ?? this.workingDirectory;
@@ -3358,7 +3394,7 @@ export class ToolExecutor {
 		}
 		// The four pre-spawn backstops, shared with the native path (#3993).
 		const backstop = preSpawnRefusal(command, dir);
-		if (backstop) return backstop;
+		if (backstop) return refusalLead(backstop);
 		const mode = currentPermissionMode();
 		// The folder a cd prefix chose: the cards name it, and answers are kept per folder.
 		const where = folderLabel(dir, this.workingDirectory);
@@ -3385,7 +3421,7 @@ export class ToolExecutor {
 			// so the pieces are not resent as they are and blocked again (#4072).
 			const piece = await chainedPieceRefusal(command, dir, systemOneEnvFor(mode));
 			const also = piece ? ` One part would be refused on its own too. ${piece}` : "";
-			return `[BLOCKED] ${validation.reason}.${also} Command: ${command}`;
+			return refusalLead(`[BLOCKED] ${validation.reason}.${also} Command: ${command}`);
 		}
 
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 turns it off): it can only stop a
@@ -3405,7 +3441,7 @@ export class ToolExecutor {
 			where,
 			{ canRunInstead: env === undefined, project: this.workingDirectory },
 		);
-		if (!systemOne.run) return systemOne.message as string;
+		if (!systemOne.run) return refusalLead(systemOne.message as string);
 
 		if (
 			permissionCheck === "ask" &&
@@ -3448,7 +3484,7 @@ export class ToolExecutor {
 		const timeoutMs = Math.min(timeoutSec || 120, 300) * 1000;
 
 		const sandboxRefusal = runCommandSandboxRefusal();
-		if (sandboxRefusal) return sandboxRefusal;
+		if (sandboxRefusal) return refusalLead(sandboxRefusal);
 
 		return new Promise((resolve) => {
 			// Redirect targets this command creates are this agent's own files (#3177).
