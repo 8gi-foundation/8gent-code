@@ -152,7 +152,6 @@ import {
 	quickMessages,
 	runQuickAnswer,
 } from "./quick-answer";
-import { ensureScratchExcluded } from "./scratch-exclude";
 import { SessionStore } from "./session-store";
 import { SessionSyncManager } from "./session-sync";
 import {
@@ -560,7 +559,6 @@ export class Agent {
 		// ToolExecutor above already started for this folder, so this only
 		// attaches the debug log; it never indexes the repo a second time.
 		const cwd = config.workingDirectory || process.cwd();
-		ensureScratchExcluded(cwd);
 		if (!LITE) {
 			astEnsureIndexed(cwd)
 				.then((index) => {

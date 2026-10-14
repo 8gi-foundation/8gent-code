@@ -39,3 +39,17 @@ export function ensureScratchExcluded(cwd: string): boolean {
 		return false;
 	}
 }
+
+/**
+ * Lazy form (#4241): touch .git/info/exclude only once `.tmp/` actually exists
+ * in the working directory, so a session that never writes scratch leaves the
+ * git directory byte-identical (the SIGI nothing-committed digest hashes info/).
+ */
+export function ensureScratchExcludedIfPresent(cwd: string): boolean {
+	try {
+		if (!existsSync(resolve(cwd, ".tmp"))) return false;
+		return ensureScratchExcluded(cwd);
+	} catch {
+		return false;
+	}
+}
