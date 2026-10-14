@@ -31,10 +31,19 @@
  */
 
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { homedir as osHome } from "node:os";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { homedir as osHome, tmpdir } from "node:os";
 import { basename, extname, join } from "node:path";
-import { scrub } from "../eight/secret-scanner";
+import { MAX_SCAN_CHARS, scrub } from "../eight/secret-scanner";
 import { getPermissionManager } from "../permissions";
 import { configuredBotEnvFile } from "../permissions/path-guard";
 import { ToolG8 } from "../permissions/toolg8";
@@ -44,9 +53,15 @@ export type AttachmentKind = "video" | "photo" | "gif" | "document";
 
 /** A file checked by resolveAttachment: absolute, inside the project, a regular file. */
 export interface Attachment {
+	/** The project path the person sees on the card. Never read again after the check. */
 	path: string;
 	kind: AttachmentKind;
 	bytes: number;
+	/**
+	 * The bytes read once at check time; the scan ran on these and these are what
+	 * leave. Swapping or relinking the project file after the check changes nothing.
+	 */
+	data: Buffer;
 }
 
 export interface PostMessageArgs {
@@ -119,8 +134,63 @@ const ATTACH_EXT: Record<AttachmentKind, string[] | null> = {
 	document: null,
 };
 const CAPTION_MAX = 1024;
-/** Documents up to this size are read and scanned for secrets before they leave. */
-const SCAN_MAX_BYTES = 2 * MB;
+/**
+ * curl -F reads `,` `;` and `"` inside an @path as form syntax: `@a.mp4,/elsewhere/key`
+ * uploads a second file from anywhere on disk. Control characters forge lines on the
+ * approval card. A path holding any of them is refused.
+ */
+const unsafePath = (p: string): boolean =>
+	/[,;"]/.test(p) ||
+	[...p].some((c) => {
+		const n = c.charCodeAt(0);
+		return n < 32 || n === 127;
+	});
+/** Chunks overlap so a secret that straddles a chunk edge is still seen whole. */
+const SCAN_OVERLAP = 16 * 1024;
+
+/**
+ * Every attachment, of every kind and at every size, is scanned before it leaves:
+ * a key file renamed to .mp4, a text file with a NUL in front, or a 40 MB log are
+ * all read. latin1 keeps bytes 1:1, so ASCII key shapes are found inside binary too.
+ * Returns the rules that fired, empty when clean.
+ */
+function secretsIn(buf: Buffer): string[] {
+	const s = buf.toString("latin1");
+	const rules = new Set<string>();
+	BOT_TOKEN_RE.lastIndex = 0;
+	if (BOT_TOKEN_RE.test(s)) rules.add("telegram_bot_token");
+	BOT_TOKEN_RE.lastIndex = 0;
+	const step = MAX_SCAN_CHARS - SCAN_OVERLAP;
+	for (let i = 0; i < s.length; i += step) {
+		for (const r of scrub(s.slice(i, i + MAX_SCAN_CHARS)).rules)
+			if (r !== "input_cap") rules.add(r);
+		if (i + MAX_SCAN_CHARS >= s.length) break;
+	}
+	return [...rules].sort();
+}
+
+/**
+ * Write the checked bytes to a private copy for tg-group, so the helper uploads
+ * exactly what was scanned and approved. The name keeps only safe characters.
+ */
+function stageForHelper(a: Attachment): { file?: string; error?: string; done: () => void } {
+	const dir = mkdtempSync(join(tmpdir(), "8gent-post-"));
+	const done = () => rmSync(dir, { recursive: true, force: true });
+	const ext = extname(a.path)
+		.toLowerCase()
+		.replace(/[^a-z0-9.]/g, "");
+	const stem = basename(a.path, extname(a.path))
+		.replace(/[^A-Za-z0-9_-]/g, "_")
+		.replace(/^[-_]+/, "")
+		.slice(0, 80);
+	const file = join(dir, `${stem || "file"}${ext}`);
+	if (unsafePath(file)) {
+		done();
+		return { error: "the temp folder path holds a character curl reads as form syntax", done };
+	}
+	writeFileSync(file, a.data, { mode: 0o600, flag: "wx" });
+	return { file, done };
+}
 
 export const POST_LIMIT_PER_SESSION = 10;
 const sessions = new Map<string, { n: number }>();
@@ -277,7 +347,7 @@ function directSend(cfg: DirectConfig): DirectSend {
 					if (caption) form.set("caption", caption);
 					form.set(
 						ATTACH_API[file.kind].field,
-						new Blob([readFileSync(file.path)]),
+						new Blob([new Uint8Array(file.data)]),
 						basename(file.path),
 					);
 					return { body: form };
@@ -310,6 +380,11 @@ export function resolveAttachment(
 			error:
 				"[BLOCKED] post_message sends files from the project only, never a URL. Nothing was sent. Save the file inside the project first.",
 		};
+	if (unsafePath(rawPath))
+		return {
+			error:
+				'[BLOCKED] post_message: the attachment path holds a comma, semicolon, quote or control character. Nothing was sent. Rename the file to letters, digits, "-", "_" and "." first.',
+		};
 	let file: string;
 	try {
 		file = resolveInProject(rawPath.trim());
@@ -318,6 +393,11 @@ export function resolveAttachment(
 			error: `[BLOCKED] post_message: attachment ${clip(String((e as Error)?.message ?? e))} Nothing was sent. Do not retry with another path outside the project.`,
 		};
 	}
+	if (unsafePath(file))
+		return {
+			error:
+				'[BLOCKED] post_message: the attachment resolves to a path holding a comma, semicolon, quote or control character. Nothing was sent. Rename the file to letters, digits, "-", "_" and "." first.',
+		};
 	let st: ReturnType<typeof statSync>;
 	try {
 		st = statSync(file);
@@ -338,19 +418,21 @@ export function resolveAttachment(
 		return {
 			error: `[ERROR] a ${k} attachment must be ${exts.join(", ")}; got "${ext || "no extension"}". Send it as kind document instead.`,
 		};
-	if (k === "document" && st.size <= SCAN_MAX_BYTES) {
-		const buf = readFileSync(file);
-		if (!buf.subarray(0, 8192).includes(0)) {
-			const content = buf.toString("utf8");
-			BOT_TOKEN_RE.lastIndex = 0;
-			const found = scrub(content);
-			if (BOT_TOKEN_RE.test(content) || found.redactedCount > 0)
-				return {
-					error: `[BLOCKED] post_message: the attachment holds a secret${found.rules.length ? ` (${found.rules.join(", ")})` : ""}. Nothing was sent. Never post credentials.`,
-				};
-		}
+	// Read once. The scan, the size and the send all use these bytes, never the path again.
+	let data: Buffer;
+	try {
+		data = readFileSync(file);
+	} catch {
+		return { error: `[ERROR] attachment could not be read: ${rawPath}. Nothing was sent.` };
 	}
-	return { attachment: { path: file, kind: k, bytes: st.size } };
+	if (data.length !== st.size || data.length > max)
+		return { error: `[ERROR] attachment changed while it was read: ${rawPath}. Nothing was sent.` };
+	const found = secretsIn(data);
+	if (found.length > 0)
+		return {
+			error: `[BLOCKED] post_message: the attachment holds a secret (${found.join(", ")}). Nothing was sent. Never post credentials.`,
+		};
+	return { attachment: { path: file, kind: k, bytes: data.length, data } };
 }
 
 function safeJson(s: string): unknown {
@@ -536,16 +618,25 @@ export async function postMessage(args: PostMessageArgs, deps: PostMessageDeps):
 	if (refusal) return refusal;
 
 	if (attachment) {
-		const r = deps.direct
-			? await deps.direct.sendFile(chat, attachment, text)
-			: await runBin(deps, [
-					attachment.kind,
-					"--chat",
-					chat,
-					"--file",
-					attachment.path,
-					...(text ? ["--caption", text] : []),
-				]);
+		let r: { id?: string; error?: string };
+		if (deps.direct) r = await deps.direct.sendFile(chat, attachment, text);
+		else {
+			const staged = stageForHelper(attachment);
+			try {
+				r = staged.file
+					? await runBin(deps, [
+							attachment.kind,
+							"--chat",
+							chat,
+							"--file",
+							staged.file,
+							...(text ? ["--caption", text] : []),
+						])
+					: { error: staged.error };
+			} finally {
+				staged.done();
+			}
+		}
 		if (!r.id) return `[ERROR] post_message failed: ${clip(r.error ?? "") || "no output"}`;
 		deps.log({
 			chat,

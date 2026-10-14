@@ -5,6 +5,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import {
 	_resetTuiApprovalChannel,
 	registerTuiApprovalHandler,
@@ -315,17 +316,25 @@ describe("post_message attachment transport (#4265)", () => {
 			{
 				chat: CHAT,
 				text: "--chat -1 tricky",
-				attachment: { path: "/w/pilot.gif", kind: "gif", bytes: 9 },
+				attachment: {
+					path: "/w/pilot.gif",
+					kind: "gif",
+					bytes: 9,
+					data: Buffer.from("GIF89a..."),
+				},
 			},
 			deps(),
 		);
 		expect(out).toBe(`Posted gif pilot.gif to ${CHAT}, message_id 4242.`);
-		expect(ran).toEqual([
-			{
-				bin: "/x/tg-group",
-				argv: ["gif", "--chat", CHAT, "--file", "/w/pilot.gif", "--caption", "--chat -1 tricky"],
-			},
-		]);
+		expect(ran).toHaveLength(1);
+		const argv = ran[0].argv;
+		expect(ran[0].bin).toBe("/x/tg-group");
+		expect(argv.slice(0, 4)).toEqual(["gif", "--chat", CHAT, "--file"]);
+		expect(argv.slice(5)).toEqual(["--caption", "--chat -1 tricky"]);
+		// The helper uploads a private staged copy of the checked bytes, never the project path.
+		expect(argv[4]).not.toBe("/w/pilot.gif");
+		expect(argv[4]).toEndWith("/pilot.gif");
+		expect(existsSync(argv[4])).toBe(false); // removed after the send
 		expect(logged[0].attachment).toEqual({ kind: "gif", bytes: 9 });
 	});
 
@@ -335,7 +344,7 @@ describe("post_message attachment transport (#4265)", () => {
 			{
 				chat: CHAT,
 				text: `key ${FAKE_TOKEN}`,
-				attachment: { path: "/w/a.mp4", kind: "video", bytes: 9 },
+				attachment: { path: "/w/a.mp4", kind: "video", bytes: 9, data: Buffer.from("x") },
 			},
 			deps(),
 		);
