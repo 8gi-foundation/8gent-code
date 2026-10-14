@@ -15,7 +15,13 @@ import type { ToolSet } from "ai";
 import { z } from "zod";
 import { activeShellKind, killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
-import { safePath } from "../eight/tools";
+import {
+	OFFICE_TOOLS,
+	OFFICE_TOOL_DESCRIPTIONS,
+	type OfficeToolName,
+	resolveOfficeOut,
+	safePath,
+} from "../eight/tools";
 import { USE_SKILL_DESCRIPTION } from "../eight/use-skill";
 import {
 	ALLOWED_PATHS_DESCRIPTION,
@@ -77,6 +83,10 @@ import {
 	hashLines,
 	hashlineEnabled,
 } from "../tools/edit-anchor";
+import { DocxSpecSchema } from "../tools/office/docx";
+import { PptxSpecSchema } from "../tools/office/pptx";
+import { isOfficeFile, readOfficeFile } from "../tools/office/read";
+import { XlsxSpecSchema } from "../tools/office/xlsx";
 import { DeckSpecSchema } from "../tools/video-deck";
 import { withImagesWritten } from "./image-shape";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
@@ -460,6 +470,9 @@ const readFile = tool({
 		if ("refused" in target) return target.refused;
 		const absolutePath = target.path;
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
+		// A Word, Excel or PowerPoint file is a zip: return its text, not its bytes (#4274).
+		if (isOfficeFile(absolutePath))
+			return readOfficeFile(absolutePath, fs.readFileSync(absolutePath));
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
 		// Anchors per row with EIGHT_EDIT_FORMAT=hashline (#3472); flag off is unchanged.
@@ -1119,6 +1132,51 @@ const renderVideoDeckTool = tool({
 		}
 	},
 });
+
+/**
+ * make_docx / make_xlsx / make_pptx (#4274): the same builders, confinement and edit scope as the
+ * text-tool path, gated like render_video_deck. The spec schema is the builder's own.
+ */
+function officeTool(name: OfficeToolName, spec: z.ZodType) {
+	return tool({
+		description: OFFICE_TOOL_DESCRIPTIONS[name],
+		inputSchema: z.object({
+			spec: spec.describe(`The ${OFFICE_TOOLS[name]} spec`),
+			out: z
+				.string()
+				.optional()
+				.describe(`Output .${OFFICE_TOOLS[name]} path inside the working directory`),
+		}),
+		execute: async ({ spec: value, out }) => {
+			try {
+				const ctx = getToolContext();
+				const wd = ctx.workingDirectory;
+				const target = resolveOfficeOut(name, out, wd);
+				const scoped = editScopeViolation(
+					name,
+					{ out: out ?? path.basename(target) },
+					wd,
+					ctx.allowedPaths,
+				);
+				if (scoped) return scoped;
+				const blocked = gateWrite(name, { path: target });
+				if (blocked) return blocked;
+				const { makeOffice } = await import("../tools/office/index");
+				return JSON.stringify(makeOffice(OFFICE_TOOLS[name], value, target, wd), null, 2);
+			} catch (err) {
+				return JSON.stringify(
+					{ error: `${name} failed: ${err instanceof Error ? err.message : String(err)}` },
+					null,
+					2,
+				);
+			}
+		},
+	});
+}
+
+const makeDocxTool = officeTool("make_docx", DocxSpecSchema);
+const makeXlsxTool = officeTool("make_xlsx", XlsxSpecSchema);
+const makePptxTool = officeTool("make_pptx", PptxSpecSchema);
 
 const speakTool = tool({
 	description:
@@ -3567,6 +3625,9 @@ export const agentTools = bindToolContext({
 	make_pdf: makePdfTool,
 	speak: speakTool,
 	render_video_deck: renderVideoDeckTool,
+	make_docx: makeDocxTool,
+	make_xlsx: makeXlsxTool,
+	make_pptx: makePptxTool,
 } satisfies ToolSet);
 
 export type AgentTools = typeof agentTools;
