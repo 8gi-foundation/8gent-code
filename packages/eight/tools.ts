@@ -882,6 +882,10 @@ export class ToolExecutor {
 	private openedThisTurn = new Set<string>();
 	/** Dates and numbers files read this turn mark as retired (#3811). */
 	private retiredFacts = new RetiredFacts();
+	/** Absolute paths read or written this session; write_file replaces only these or new files (#4238). */
+	private seenPaths = new Set<string>();
+	/** Commands the harness refused; a refused probe proves nothing about the files it named (#4238). */
+	private blockedCommands: string[] = [];
 	/**
 	 * Files this agent created (write_file, run_command redirects), in memory
 	 * only (#3177). System One lets it rm them without the judge. The Agent
@@ -2540,7 +2544,11 @@ export class ToolExecutor {
 				const target = parseGitCommit(command);
 				// Judged on the text that will run: a `cd <folder> &&` commit meets the gate too (#3199).
 				const runs = commandAfterCdPrefix(command, this.workingDirectory, activeShellKind());
-				return target && sanitizeShellCommand(runs).safe ? this.gatedCommit(run, target) : run();
+				const result = await (target && sanitizeShellCommand(runs).safe
+					? this.gatedCommit(run, target)
+					: run());
+				if (/^\[BLOCKED\]/.test(result.trimStart())) this.blockedCommands.push(command);
+				return result;
 			}
 
 			case "powershell": {
@@ -3069,6 +3077,7 @@ export class ToolExecutor {
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
 		this.retiredFacts.noteRead(absolutePath, content);
+		this.seenPaths.add(absolutePath);
 		const lines = content.split("\n");
 		// A trailing newline ends the last line; it does not start another one.
 		if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
@@ -3168,6 +3177,28 @@ export class ToolExecutor {
 				// Design check is advisory, never block writes
 			}
 		}
+
+		// Overwrite guard (#4238): a file the model never read is not its to replace once a
+		// refused command named it. A blocked probe ("ls x; echo $?") once read as "missing" and it wrote over the real
+		// count-todos.ts. Same bytes, or a path read/written this session, passes.
+		const base = path.basename(absolutePath);
+		if (
+			process.env.EIGHT_OVERWRITE_GUARD !== "0" &&
+			fs.existsSync(absolutePath) &&
+			!this.seenPaths.has(absolutePath) &&
+			this.blockedCommands.some((c) => c.includes(base))
+		) {
+			let current: string | null = null;
+			try {
+				if (fs.statSync(absolutePath).isFile()) current = fs.readFileSync(absolutePath, "utf-8");
+			} catch {
+				current = null;
+			}
+			if (current !== null && current !== content) {
+				return `Error: ${absolutePath} already exists and you have not read it this session, so write_file will not replace it. A command that was blocked or errored tells you nothing about whether a file exists. Run read_file on it first; to change part of it use edit_file; to run it, leave it alone.`;
+			}
+		}
+		this.seenPaths.add(absolutePath);
 
 		const dir = path.dirname(absolutePath);
 		if (!fs.existsSync(dir)) {
