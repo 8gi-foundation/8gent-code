@@ -1397,7 +1397,9 @@ describe("ToolExecutor.runCommand refuses browser-secret commands before anythin
 			`node -e "require('fs').readdirSync(process.env.HOME+'/.8gent')"`,
 		]) {
 			const out = await exec.runCommand(cmd);
-			expect(out).toMatch(/^\[PERMISSION DENIED\] Command touches 8gent Browser control tokens/);
+			expect(out).toMatch(
+				/^\[PERMISSION DENIED\] Not run: refused by policy, nothing was checked or changed\. Command touches 8gent Browser control tokens/,
+			);
 		}
 	});
 });
