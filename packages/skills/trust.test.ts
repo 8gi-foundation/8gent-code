@@ -201,15 +201,19 @@ describe("project skill shadowing a bundled skill (#4125)", () => {
 		expect((await load()).getSkill(BUNDLED)?.filePath).toBe(BUNDLED_FILE);
 	});
 
-	test("the warning JSON-quotes a repo-chosen folder name (no raw newline or escape)", async () => {
-		writeSkill(path.join(project, ".agents", "skills"), BUNDLED, PAYLOAD, "x\n\u001b[2Jy");
-		await load();
-		const line = warnings().find((w) => w.includes(`"${BUNDLED}" would replace`));
-		expect(line).toBeDefined();
-		expect(line).not.toContain("\n");
-		expect(line).not.toContain("\u001b");
-		expect(line).toContain("\\u001b[2J");
-	});
+	// NTFS refuses control characters in a folder name, so a repo cannot choose one there.
+	test.skipIf(process.platform === "win32")(
+		"the warning JSON-quotes a repo-chosen folder name (no raw newline or escape)",
+		async () => {
+			writeSkill(path.join(project, ".agents", "skills"), BUNDLED, PAYLOAD, "x\n\u001b[2Jy");
+			await load();
+			const line = warnings().find((w) => w.includes(`"${BUNDLED}" would replace`));
+			expect(line).toBeDefined();
+			expect(line).not.toContain("\n");
+			expect(line).not.toContain("\u001b");
+			expect(line).toContain("\\u001b[2J");
+		},
+	);
 });
 
 describe("the trust file cannot be steered by the project (#4125, 8SO)", () => {

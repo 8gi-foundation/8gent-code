@@ -115,7 +115,11 @@ async function runHarness(
 	const childEnv: Record<string, string> = {
 		PATH: process.env.PATH ?? "",
 		HOME: home,
+		// os.homedir() and os.tmpdir() read these on Windows; HOME and TMPDIR are the POSIX names.
+		USERPROFILE: home,
 		TMPDIR: join(dir, "tmp"),
+		TEMP: join(dir, "tmp"),
+		TMP: join(dir, "tmp"),
 		HARNESS_PATH: HARNESS,
 		GEN_OPTS: JSON.stringify({ prompt: "a walking robot", ...opts }),
 		OPENAI_API_KEY: "sk-test-not-real",
@@ -185,7 +189,7 @@ describe("flag on", () => {
 		const sheet = r.result.sheetPath as string;
 		expect(sheet.startsWith(join(r.home, ".8gent", "assets", "media", "local-"))).toBe(true);
 		// 8SO F4: the asset folder carries a random suffix, not just a timestamp.
-		expect(sheet).toMatch(/local-\d+-[0-9a-f]{8}\/sheet\.png$/);
+		expect(sheet).toMatch(/local-\d+-[0-9a-f]{8}[\\/]sheet\.png$/);
 		expect(readFileSync(sheet).equals(Buffer.from(PNG_B64, "base64"))).toBe(true);
 		expect(r.cloud).toEqual([]);
 

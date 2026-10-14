@@ -113,7 +113,15 @@ describe("refused shapes", () => {
 	// #4178 (8SO): the card shows `cd <real folder> && <rest>`, so a plain-named symlink
 	// onto a folder whose real name would read as more shell is refused, not shown.
 	test("a plain-named symlink onto a folder whose name is not plain", () => {
-		const names = ["a && touch pwn", "a; curl x", "a\nrm -r old", "x\u001b[8m", "a\u00a0b", "-rf"];
+		// NTFS refuses control characters in a name, so those two cannot exist there.
+		const names = [
+			"a && touch pwn",
+			"a; curl x",
+			"a\nrm -r old",
+			"x\u001b[8m",
+			"a\u00a0b",
+			"-rf",
+		].filter((n) => process.platform !== "win32" || !/[\u0000-\u001f]/.test(n));
 		names.forEach((name, i) => {
 			mkdirSync(join(root, name));
 			symlinkSync(join(root, name), join(root, `odd${i}`));

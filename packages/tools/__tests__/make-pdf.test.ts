@@ -81,7 +81,9 @@ describe("makePdf renders in-process", () => {
 			expect(info.text).toContain(s);
 		expect(info.text).not.toContain("**");
 		expect(r.replaced).toBeUndefined();
-	});
+		// The first readPdf in the process loads pdf-parse and pdfjs (readPdf imports them lazily):
+		// 6-12 s cold on a Windows runner, past the 5 s default. Later tests find it cached.
+	}, 30_000);
 
 	test("long input flows onto more pages, each numbered", async () => {
 		const para = "word ".repeat(400);

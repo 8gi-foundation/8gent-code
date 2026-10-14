@@ -175,7 +175,7 @@ describe("work queue (#4254)", () => {
 		const q = new WorkQueue(path, { maxSessions: 10, startLimit: 1 });
 		q.enqueue({ requestId: "a", text: "x" });
 		q.close();
-		expect(statSync(path).mode & 0o777).toBe(0o600);
+		if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
 		appendFileSync(path, '{"op":"accept","requ');
 		const again = new WorkQueue(path, { maxSessions: 10, startLimit: 1 });
 		expect(again.status("a")).toBe("queued");
@@ -234,7 +234,7 @@ describe("work queue (#4254)", () => {
 		const path = freshPath();
 		const first = new WorkQueue(path, { maxSessions: 10, startLimit: 1 });
 		expect(readFileSync(`${path}.lock`, "utf8").trim()).toBe(String(process.pid));
-		expect(statSync(`${path}.lock`).mode & 0o777).toBe(0o600);
+		if (process.platform !== "win32") expect(statSync(`${path}.lock`).mode & 0o777).toBe(0o600);
 		expect(() => new WorkQueue(path, { maxSessions: 10, startLimit: 1 })).toThrow(
 			/locked by pid \d+/,
 		);
@@ -322,12 +322,12 @@ describe("work queue (#4254)", () => {
 		const fresh = join(dataDir, `newdir-${++n}`, "nested");
 		const q = new WorkQueue(join(fresh, "q.jsonl"), { maxSessions: 10, startLimit: 1 });
 		q.close();
-		expect(statSync(fresh).mode & 0o777).toBe(0o700);
+		if (process.platform !== "win32") expect(statSync(fresh).mode & 0o777).toBe(0o700);
 		const existing = join(dataDir, `olddir-${++n}`);
 		mkdirSync(existing, { mode: 0o755 });
 		const q2 = new WorkQueue(join(existing, "q.jsonl"), { maxSessions: 10, startLimit: 1 });
 		q2.close();
-		expect(statSync(existing).mode & 0o777).toBe(0o755);
+		if (process.platform !== "win32") expect(statSync(existing).mode & 0o777).toBe(0o755);
 	});
 
 	test("flag off: no queue, and an eleventh session still evicts the oldest idle one", () => {
@@ -351,7 +351,8 @@ describe("work queue (#4254)", () => {
 		const pool = stubPool(stubRuntime());
 		const r = pool.submit({ requestId: "env-1", text: "hi" });
 		expect(r.receipt.requestId).toBe("env-1");
-		expect(statSync(join(dataDir, "work-queue.jsonl")).mode & 0o777).toBe(0o600);
+		if (process.platform !== "win32")
+			expect(statSync(join(dataDir, "work-queue.jsonl")).mode & 0o777).toBe(0o600);
 		pool.shutdown();
 		expect(existsSync(join(dataDir, "work-queue.jsonl.lock"))).toBe(false);
 	});
