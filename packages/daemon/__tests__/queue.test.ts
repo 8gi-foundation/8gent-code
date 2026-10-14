@@ -7,7 +7,16 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { appendFileSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -200,6 +209,73 @@ describe("work queue (#4254)", () => {
 		expect(third.status("q1")).toBe("done");
 		expect(third.status("inflight")).toBe("unknown");
 		expect(third.unknownAfterRestart).toEqual([]);
+	});
+
+	test("a torn tail with no newline does not swallow the next accept: it replays after a restart", () => {
+		const path = freshPath();
+		const q = new WorkQueue(path, { maxSessions: 10, startLimit: 1 });
+		q.enqueue({ requestId: "a", text: "x" });
+		q.close();
+		appendFileSync(path, '{"op":"accept","requ'); // crash mid-write, no trailing newline
+		const second = new WorkQueue(path, { maxSessions: 10, startLimit: 1 });
+		second.enqueue({ requestId: "b", text: "after the tear" });
+		second.close();
+		const third = new WorkQueue(path, { maxSessions: 10, startLimit: 1 });
+		expect(third.status("a")).toBe("queued");
+		expect(third.status("b")).toBe("queued");
+		third.close();
+		expect(readFileSync(path, "utf8").endsWith("\n")).toBe(true);
+	});
+
+	test("single writer: a second queue on the same file is refused while the first holds the lock", () => {
+		const path = freshPath();
+		const first = new WorkQueue(path, { maxSessions: 10, startLimit: 1 });
+		expect(readFileSync(`${path}.lock`, "utf8").trim()).toBe(String(process.pid));
+		expect(statSync(`${path}.lock`).mode & 0o777).toBe(0o600);
+		expect(() => new WorkQueue(path, { maxSessions: 10, startLimit: 1 })).toThrow(
+			/locked by pid \d+/,
+		);
+		first.close();
+		expect(existsSync(`${path}.lock`)).toBe(false);
+		const next = new WorkQueue(path, { maxSessions: 10, startLimit: 1 });
+		next.close();
+	});
+
+	test("single writer: a lock left by a dead process is taken over", () => {
+		const path = freshPath();
+		const dead = Bun.spawnSync(["true"]).pid;
+		writeFileSync(`${path}.lock`, `${dead}\n`);
+		const q = new WorkQueue(path, { maxSessions: 10, startLimit: 1 });
+		expect(readFileSync(`${path}.lock`, "utf8").trim()).toBe(String(process.pid));
+		q.close();
+	});
+
+	test("single writer: a second daemon on a locked data dir runs with the queue disabled", () => {
+		const dir = mkdtempSync(join(tmpdir(), "workq-locked-"));
+		const prev = process.env.EIGHT_DATA_DIR;
+		process.env.EIGHT_DATA_DIR = dir;
+		process.env.EIGHT_WORK_QUEUE = "1";
+		const holder = new WorkQueue(join(dir, "work-queue.jsonl"), { maxSessions: 10, startLimit: 1 });
+		try {
+			const pool = stubPool(stubRuntime());
+			expect(() => pool.submit({ requestId: "x", text: "y" })).toThrow(/work queue is off/);
+		} finally {
+			holder.close();
+			process.env.EIGHT_DATA_DIR = prev;
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("a missing queue directory is created 0700; an existing one keeps its mode", () => {
+		const fresh = join(dataDir, `newdir-${++n}`, "nested");
+		const q = new WorkQueue(join(fresh, "q.jsonl"), { maxSessions: 10, startLimit: 1 });
+		q.close();
+		expect(statSync(fresh).mode & 0o777).toBe(0o700);
+		const existing = join(dataDir, `olddir-${++n}`);
+		mkdirSync(existing, { mode: 0o755 });
+		const q2 = new WorkQueue(join(existing, "q.jsonl"), { maxSessions: 10, startLimit: 1 });
+		q2.close();
+		expect(statSync(existing).mode & 0o777).toBe(0o755);
 	});
 
 	test("flag off: no queue, and an eleventh session still evicts the oldest idle one", () => {

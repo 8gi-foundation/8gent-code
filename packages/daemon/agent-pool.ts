@@ -19,7 +19,7 @@ import {
 	CLASSROOM_SESSION_CAP,
 	CLASSROOM_SYSTEM_PROMPT,
 } from "./classroom";
-import { getDataDir } from "./data-dir";
+import { dataDirPath, getDataDir } from "./data-dir";
 import { bus } from "./events";
 import { type QueueRequest, type QueueStatus, type Receipt, WorkQueue } from "./queue";
 import type { SessionJournal } from "./session-journal";
@@ -110,6 +110,17 @@ function workQueueEnabled(): boolean {
 	return process.env.EIGHT_WORK_QUEUE === "1";
 }
 
+/** Open the data dir's queue, or null (queue off) when another daemon holds its lock. */
+function openWorkQueue(): WorkQueue | null {
+	const path = `${dataDirPath()}/work-queue.jsonl`;
+	try {
+		return new WorkQueue(path, { maxSessions: MAX_SESSIONS });
+	} catch (err) {
+		console.error(`[agent-pool] ${(err as Error).message}; running with the work queue disabled`);
+		return null;
+	}
+}
+
 /** Known session channels. Add new entries here when wiring a new surface. */
 export const KNOWN_CHANNELS = [
 	"os",
@@ -164,11 +175,7 @@ export class AgentPool {
 		options: { journal?: SessionJournal; queue?: WorkQueue } = {},
 	) {
 		this.journal = options.journal ?? null;
-		this.queue =
-			options.queue ??
-			(workQueueEnabled()
-				? new WorkQueue(`${getDataDir()}/work-queue.jsonl`, { maxSessions: MAX_SESSIONS })
-				: null);
+		this.queue = options.queue ?? (workQueueEnabled() ? openWorkQueue() : null);
 		for (const id of this.queue?.unknownAfterRestart ?? []) {
 			console.warn(
 				`[agent-pool] work item ${id} was in flight at shutdown: status unknown, not resent`,
