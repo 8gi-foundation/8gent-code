@@ -224,6 +224,10 @@ import {
 import { createEightBrowser, isolatedBrowser } from "../tools/eight-browser";
 import { describeImage, readImage, resizeImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
+import { DocxSpecSchema } from "../tools/office/docx";
+import { PptxSpecSchema } from "../tools/office/pptx";
+import { isOfficeFile, readOfficeFile } from "../tools/office/read";
+import { XlsxSpecSchema } from "../tools/office/xlsx";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
 import { RateLimiter } from "../tools/rate-limiter";
 import {
@@ -300,7 +304,7 @@ export type ReplayClass = "replay" | "never" | "ask";
  * started under, and resume refuses to re-run a call whose class has changed
  * since (8SO review, #4118).
  */
-export const REPLAY_POLICY_VERSION = 1;
+export const REPLAY_POLICY_VERSION = 2;
 
 export function isReplayClass(v: unknown): v is ReplayClass {
 	return v === "replay" || v === "never" || v === "ask";
@@ -334,6 +338,9 @@ const NEVER_REPLAY_TOOLS = new Set([
 	"spawn_agent",
 	"speak",
 	"render_video_deck",
+	"make_docx",
+	"make_xlsx",
+	"make_pptx",
 	"notebook_edit_cell",
 	"notebook_insert_cell",
 	"notebook_delete_cell",
@@ -547,6 +554,31 @@ export function confineWrite(named: string, workingDirectory: string): string {
 export function resolveDeckOut(out: unknown, workingDirectory: string): string {
 	const named = typeof out === "string" && out.trim() ? out.trim() : "deck.mp4";
 	if (!named.toLowerCase().endsWith(".mp4")) throw new Error(`out must end in .mp4 ("${named}")`);
+	return confineWrite(named, workingDirectory);
+}
+
+/** The office tools and the extension each one writes (#4274). */
+export const OFFICE_TOOLS = { make_docx: "docx", make_xlsx: "xlsx", make_pptx: "pptx" } as const;
+export type OfficeToolName = keyof typeof OFFICE_TOOLS;
+
+export function isOfficeTool(name: string): name is OfficeToolName {
+	return Object.hasOwn(OFFICE_TOOLS, name);
+}
+
+/**
+ * Where make_docx / make_xlsx / make_pptx may write: a file with exactly that extension inside
+ * the working directory, no symlinks. A macro-enabled name (.docm, .xlsm, .pptm) never matches.
+ */
+export function resolveOfficeOut(
+	tool: OfficeToolName,
+	out: unknown,
+	workingDirectory: string,
+): string {
+	const ext = OFFICE_TOOLS[tool];
+	const fallback = { docx: "document.docx", xlsx: "workbook.xlsx", pptx: "deck.pptx" }[ext];
+	const named = typeof out === "string" && out.trim() ? out.trim() : fallback;
+	if (!named.toLowerCase().endsWith(`.${ext}`))
+		throw new Error(`out must end in .${ext} ("${named}")`);
 	return confineWrite(named, workingDirectory);
 }
 
@@ -844,21 +876,77 @@ const LEAN_DROP = new Set([
 	"maxLength",
 	"maximum",
 	"minItems",
+	"minLength",
 	"minimum",
+	"pattern",
 ]);
-export const DECK_SPEC_PARAMETER: Record<string, unknown> = (() => {
+
+/**
+ * A tagged union ({type:'a', ...} | {type:'b', ...}) as one object whose `type` is an enum and
+ * whose properties are every variant's: about a third of the size, and the builder still checks
+ * each variant exactly. Anything else is returned unchanged.
+ */
+function collapseTaggedUnion(node: Record<string, unknown>): Record<string, unknown> {
+	const variants = node.oneOf;
+	if (!Array.isArray(variants) || variants.length < 2) return node;
+	const tags: string[] = [];
+	const properties: Record<string, unknown> = {};
+	for (const v of variants as Array<{ properties?: Record<string, { const?: unknown }> }>) {
+		const tag = v.properties?.type?.const;
+		if (typeof tag !== "string") return node;
+		tags.push(tag);
+		for (const [k, p] of Object.entries(v.properties ?? {})) if (k !== "type") properties[k] ??= p;
+	}
+	return {
+		type: "object",
+		properties: { type: { type: "string", enum: tags }, ...properties },
+		required: ["type"],
+	};
+}
+
+/** A zod schema as the lean JSON schema a tool parameter carries (names, types, enums, nesting). */
+export function leanParameter(schema: z.ZodType): Record<string, unknown> {
 	const lean = (node: unknown): unknown => {
 		if (Array.isArray(node)) return node.map(lean);
 		if (node === null || typeof node !== "object") return node;
+		let obj = collapseTaggedUnion(node as Record<string, unknown>);
+		// anyOf inside anyOf (a union of a union) says the same thing flat.
+		if (Array.isArray(obj.anyOf)) {
+			const flat = (obj.anyOf as Array<Record<string, unknown>>).flatMap((a) =>
+				a && Array.isArray(a.anyOf) && Object.keys(a).length === 1 ? (a.anyOf as unknown[]) : [a],
+			);
+			obj = { ...obj, anyOf: flat };
+		}
 		const out: Record<string, unknown> = {};
-		for (const [k, v] of Object.entries(node)) {
+		for (const [k, v] of Object.entries(obj)) {
 			if (LEAN_DROP.has(k)) continue;
 			out[k] = lean(v);
 		}
 		return out;
 	};
-	return lean(z.toJSONSchema(DeckSpecSchema, { io: "input" })) as Record<string, unknown>;
-})();
+	return lean(z.toJSONSchema(schema, { io: "input" })) as Record<string, unknown>;
+}
+
+export const DECK_SPEC_PARAMETER: Record<string, unknown> = leanParameter(DeckSpecSchema);
+
+/**
+ * The office tools' spec parameters (#4274), from the builders' own schemas like the deck's.
+ * The first sentence of each description is the input shape: a local model reads that first.
+ */
+export const OFFICE_TOOL_DESCRIPTIONS: Record<OfficeToolName, string> = {
+	make_docx:
+		"Word .docx from args {spec:{title?, blocks:[{type:'heading'|'paragraph'|'bullets'|'table'|'image'|'pageBreak', ...}]}, out:'a.docx'}. Block fields: heading {text, level?: 1-3}, paragraph {text}, bullets {items, numbered?}, table {rows: [[cells]], header?}, image {path, caption?}. You write the spec, local code writes the file: A4, real Word heading and list styles, **bold** inside text, png/jpg images from the working directory. Returns { path, bytes, blocks, textChars }. No macros, no network. read_file on a .docx returns its text.",
+	make_xlsx:
+		"Excel .xlsx from args {spec:{sheets:[{name, rows:[[cell,...]], header?, columns?:[widths]}]}, out:'data.xlsx'}. A cell is a string, number, boolean, null or {value?, formula?:'=SUM(B2:B9)', format?:'#,##0.00', date?:'YYYY-MM-DD', bold?}. header:true bolds and freezes row 1. Formulas recalculate when the file opens; ones that reach outside the workbook are refused. Returns { path, bytes, sheets, cells }. No macros, no network. read_file on a .xlsx returns its cells.",
+	make_pptx:
+		"PowerPoint .pptx from args {spec:{title?, slides:[{kicker?, title?, text?, bullets?, image?, notes?}]}, out:'deck.pptx'}. Same slide shape as render_video_deck, so one spec can be a film or a deck: narration becomes the speaker notes when notes is absent. 16:9 slides, png/jpg images from the working directory. Returns { path, bytes, slides, notes }. No macros, no network. read_file on a .pptx returns slide text and notes.",
+};
+
+export const OFFICE_SPEC_PARAMETERS: Record<OfficeToolName, Record<string, unknown>> = {
+	make_docx: leanParameter(DocxSpecSchema),
+	make_xlsx: leanParameter(XlsxSpecSchema),
+	make_pptx: leanParameter(PptxSpecSchema),
+};
 
 export { REFUSAL_LEAD, REFUSAL_NOTE, refusalLead };
 
@@ -1562,6 +1650,24 @@ export class ToolExecutor {
 					},
 				},
 			},
+			...(Object.keys(OFFICE_TOOLS) as OfficeToolName[]).map((name) => ({
+				type: "function",
+				function: {
+					name,
+					description: `[FILE] ${OFFICE_TOOL_DESCRIPTIONS[name]}`,
+					parameters: {
+						type: "object",
+						properties: {
+							spec: OFFICE_SPEC_PARAMETERS[name],
+							out: {
+								type: "string",
+								description: `Output .${OFFICE_TOOLS[name]} path inside the working directory`,
+							},
+						},
+						required: ["spec"],
+					},
+				},
+			})),
 			{
 				type: "function",
 				function: {
@@ -2185,6 +2291,9 @@ export class ToolExecutor {
 		write_file: "write_file",
 		speak: "write_file",
 		render_video_deck: "write_file",
+		make_docx: "write_file",
+		make_xlsx: "write_file",
+		make_pptx: "write_file",
 		edit_file: "write_file",
 		// Notebook cell edits write text into a file too (#3011).
 		notebook_edit_cell: "write_file",
@@ -2328,7 +2437,7 @@ export class ToolExecutor {
 		const writeTarget = (
 			toolName === "film_craft"
 				? filmWrites[0]
-				: toolName === "speak" || toolName === "render_video_deck"
+				: toolName === "speak" || toolName === "render_video_deck" || isOfficeTool(toolName)
 					? args.out
 					: toolName === "compare_layout"
 						? args.html
@@ -2681,6 +2790,29 @@ export class ToolExecutor {
 					);
 				} catch (err) {
 					return `Error: render_video_deck failed: ${err instanceof Error ? err.message : String(err)}`;
+				}
+			}
+
+			case "make_docx":
+			case "make_xlsx":
+			case "make_pptx": {
+				try {
+					const tool = toolName as OfficeToolName;
+					const out = resolveOfficeOut(tool, args.out, this.workingDirectory);
+					// An edit-scoped child session writes only into its scope (same check as write_file).
+					const scoped = editScopeViolation(
+						toolName,
+						{ out: args.out ?? path.basename(out) },
+						this.workingDirectory,
+						this.allowedPaths,
+					);
+					if (scoped) return scoped;
+					const { makeOffice } = await import("../tools/office/index");
+					return JSON.stringify(
+						makeOffice(OFFICE_TOOLS[tool], args.spec, out, this.workingDirectory),
+					);
+				} catch (err) {
+					return `Error: ${toolName} failed: ${err instanceof Error ? err.message : String(err)}`;
 				}
 			}
 
@@ -3125,6 +3257,12 @@ export class ToolExecutor {
 
 		if (!fs.existsSync(absolutePath)) {
 			return `File not found: ${absolutePath}`;
+		}
+
+		// A Word, Excel or PowerPoint file is a zip: return its text, not its bytes (#4274).
+		if (isOfficeFile(absolutePath)) {
+			this.seenPaths.add(absolutePath);
+			return readOfficeFile(absolutePath, fs.readFileSync(absolutePath));
 		}
 
 		const content = fs.readFileSync(absolutePath, "utf-8");

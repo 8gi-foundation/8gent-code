@@ -2140,6 +2140,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"render_video_deck",
 			// Skills (#3593): the tested recipe for a multi-step task, loaded by name.
 			"use_skill",
+			"make_docx",
+			"make_xlsx",
+			"make_pptx",
 			"suggest_design",
 			"query_design_system",
 			"deck_theme",

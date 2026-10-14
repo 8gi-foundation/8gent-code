@@ -132,8 +132,11 @@ function wrap(ctx: Ctx, str: string, width: number): string[] {
 	return out;
 }
 
-/** True when the path is inside root after following links. Images are the only reads. */
-function readInside(named: string, cwd: string): Buffer {
+/**
+ * The bytes of a png/jpg inside root after following links, within the size and pixel limits.
+ * Images are the only reads; make_docx and make_pptx read theirs through this too (#4274).
+ */
+export function readInside(named: string, cwd: string): Buffer {
 	if (/^[a-z][a-z0-9+.-]*:/i.test(named) && !/^[a-z]:[\\/]/i.test(named)) {
 		throw new Error(`image "${named}" must be a file inside the working directory, not a URL`);
 	}

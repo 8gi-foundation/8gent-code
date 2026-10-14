@@ -32,7 +32,19 @@ const BUILT_IN_MODES: Record<string, AgentMode> = {
 		description: "Read-only planning mode - no file writes",
 		systemPromptPrefix:
 			"You are a software architect. Analyze, plan, and design. Do NOT write code.",
-		deniedTools: ["write_file", "edit_file", "speak", "make_pdf", "render_video_deck", ...SHELL_TOOL_NAMES, "git_commit", "git_push"],
+		deniedTools: [
+			"write_file",
+			"edit_file",
+			"speak",
+			"make_pdf",
+			"make_docx",
+			"make_xlsx",
+			"make_pptx",
+			"render_video_deck",
+			...SHELL_TOOL_NAMES,
+			"git_commit",
+			"git_push",
+		],
 		effort: "high",
 	},
 	review: {
@@ -40,7 +52,19 @@ const BUILT_IN_MODES: Record<string, AgentMode> = {
 		description: "Code review mode - read-only with feedback",
 		systemPromptPrefix:
 			"You are a code reviewer. Read code, find issues, suggest improvements. Do NOT modify files.",
-		deniedTools: ["write_file", "edit_file", "speak", "make_pdf", "render_video_deck", ...SHELL_TOOL_NAMES, "git_commit", "git_push"],
+		deniedTools: [
+			"write_file",
+			"edit_file",
+			"speak",
+			"make_pdf",
+			"make_docx",
+			"make_xlsx",
+			"make_pptx",
+			"render_video_deck",
+			...SHELL_TOOL_NAMES,
+			"git_commit",
+			"git_push",
+		],
 		effort: "medium",
 	},
 	debug: {

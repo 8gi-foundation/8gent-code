@@ -33,9 +33,10 @@ import {
  * fix for a failing test. Smallest value that fits today: 2220 (#3920, with the one-line OS and shell note;
  * +17 in #4165 so render_video_deck sits in a category and discover_tools can load it on a deferred session;
  * +28 in #4236 so the scratch note says .tmp/ is git-ignored and must not be deleted;
- * +7 in #3593 so use_skill sits in core and the model can load a skill on every session).
+ * +7 in #3593 so use_skill sits in core and the model can load a skill on every session;
+ * +29 in #4274 so make_docx, make_xlsx and make_pptx sit in the creative category beside make_pdf).
  */
-const POSIX_CAP = 2255;
+const POSIX_CAP = 2284;
 // The Windows environment line names the shell and is longer than the POSIX one; the budget
 // for everything else stays fixed, so a Windows host gets exactly the difference.
 const CONCISE_CATALOG_MAX_BYTES =
