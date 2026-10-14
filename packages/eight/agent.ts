@@ -132,7 +132,6 @@ import {
 	describeLocalTurnFailure,
 	failedTurnRunEntry,
 } from "./local-turn-error";
-import { ensureScratchExcluded } from "./scratch-exclude";
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
@@ -153,6 +152,7 @@ import {
 	quickMessages,
 	runQuickAnswer,
 } from "./quick-answer";
+import { ensureScratchExcluded } from "./scratch-exclude";
 import { SessionStore } from "./session-store";
 import { SessionSyncManager } from "./session-sync";
 import {

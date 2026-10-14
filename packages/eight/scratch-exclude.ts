@@ -29,7 +29,10 @@ export function ensureScratchExcluded(cwd: string): boolean {
 			writeFileSync(file, `${SCRATCH_EXCLUDE_LINE}\n`);
 		} else {
 			const text = readFileSync(file, "utf8");
-			appendFileSync(file, `${text.length > 0 && !text.endsWith("\n") ? "\n" : ""}${SCRATCH_EXCLUDE_LINE}\n`);
+			appendFileSync(
+				file,
+				`${text.length > 0 && !text.endsWith("\n") ? "\n" : ""}${SCRATCH_EXCLUDE_LINE}\n`,
+			);
 		}
 		return true;
 	} catch {

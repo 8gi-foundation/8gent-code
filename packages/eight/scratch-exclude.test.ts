@@ -1,14 +1,17 @@
 import { describe, expect, it } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { SCRATCH_EXCLUDE_LINE, ensureScratchExcluded } from "./scratch-exclude";
 
 const git = (cwd: string, ...a: string[]) =>
 	spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd, encoding: "utf8" });
 const dir = () => mkdtempSync(join(tmpdir(), "scratch-ex-"));
-const count = (f: string) => readFileSync(f, "utf8").split("\n").filter((l) => l === SCRATCH_EXCLUDE_LINE).length;
+const count = (f: string) =>
+	readFileSync(f, "utf8")
+		.split("\n")
+		.filter((l) => l === SCRATCH_EXCLUDE_LINE).length;
 
 describe("ensureScratchExcluded (#4236)", () => {
 	it("adds .tmp/ once and is idempotent; git status hides .tmp", () => {
