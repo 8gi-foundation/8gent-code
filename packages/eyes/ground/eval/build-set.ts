@@ -19,6 +19,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { safeBunFlags } from "../../../core/bun-flags";
 import { call, sleep } from "./browser.js";
 import { PAGES } from "./pages.js";
 import { tuiFrames } from "./tui-frames.js";
@@ -143,7 +144,7 @@ try {
 	);
 	if (existsSync(fixture)) {
 		const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "ground-fixture-"));
-		const proc = Bun.spawn(["bun", fixture, dir, "maeve", "orchard-42"], {
+		const proc = Bun.spawn(["bun", ...safeBunFlags(), fixture, dir, "maeve", "orchard-42"], {
 			stdout: "ignore",
 			stderr: "ignore",
 		});

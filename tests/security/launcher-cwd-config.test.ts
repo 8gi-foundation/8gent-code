@@ -7,7 +7,7 @@
  *
  *   bin/8gent-run.js (npm "bin")      flags, end to end
  *   bin/8gent-cli.sh (both branches)  flags, end to end
- *   bun shebang entry points          `env -S bun --no-env-file --config=/dev/null`
+ *   bun shebang entry points          `env -S bun --no-install --no-env-file --config=/dev/null`
  *   spawned children (TUI, daemon service argv, worktree pool, adapters, /debug)
  *                                     safeBunFlags(), end to end + source check
  *   package.json scripts              run from the package root (proven) and --config
@@ -30,8 +30,14 @@ describe("bin/8gent-run.js", () => {
 			const pkg = path.join(root, "pkg");
 			fs.mkdirSync(path.join(pkg, "bin"), { recursive: true });
 			fs.mkdirSync(path.join(pkg, "dist"));
-			fs.copyFileSync(path.join(REPO, "bin", "8gent-run.js"), path.join(pkg, "bin", "8gent-run.js"));
-			fs.copyFileSync(path.join(REPO, "bin", "bunfig.empty.toml"), path.join(pkg, "bin", "bunfig.empty.toml"));
+			fs.copyFileSync(
+				path.join(REPO, "bin", "8gent-run.js"),
+				path.join(pkg, "bin", "8gent-run.js"),
+			);
+			fs.copyFileSync(
+				path.join(REPO, "bin", "bunfig.empty.toml"),
+				path.join(pkg, "bin", "bunfig.empty.toml"),
+			);
 			fs.writeFileSync(path.join(pkg, "package.json"), '{"type":"module"}\n');
 			fs.writeFileSync(
 				path.join(pkg, "dist", "cli.js"),
@@ -41,17 +47,28 @@ describe("bin/8gent-run.js", () => {
 			const ws = path.join(root, "workspace");
 			fs.mkdirSync(ws);
 			fs.writeFileSync(path.join(ws, "bunfig.toml"), 'preload = ["./evil.ts"]\n');
-			fs.writeFileSync(path.join(ws, "evil.ts"), "globalThis.__evilPreload = true;\nconsole.log('EVIL PRELOAD');\n");
+			fs.writeFileSync(
+				path.join(ws, "evil.ts"),
+				"globalThis.__evilPreload = true;\nconsole.log('EVIL PRELOAD');\n",
+			);
 			fs.writeFileSync(path.join(ws, ".env"), "EIGHT_SEATBELT=0\n");
 
 			const env = { ...process.env };
 			delete env.EIGHT_SEATBELT;
-			const r = spawnSync("node", [path.join(pkg, "bin", "8gent-run.js")], { cwd: ws, env, encoding: "utf8" });
+			const r = spawnSync("node", [path.join(pkg, "bin", "8gent-run.js")], {
+				cwd: ws,
+				env,
+				encoding: "utf8",
+			});
 			expect(r.stdout).toContain("CLI seatbelt=unset preload=no");
 			expect(r.stdout).not.toContain("EVIL PRELOAD");
 
 			// Control: plain `bun` from that cwd does load both, so the test can fail.
-			const control = spawnSync("bun", [path.join(pkg, "dist", "cli.js")], { cwd: ws, env, encoding: "utf8" });
+			const control = spawnSync("bun", [path.join(pkg, "dist", "cli.js")], {
+				cwd: ws,
+				env,
+				encoding: "utf8",
+			});
 			expect(control.stdout).toContain("EVIL PRELOAD");
 			expect(control.stdout).toContain("seatbelt=0");
 		} finally {
@@ -65,7 +82,10 @@ function hostileWorkspace(root: string): string {
 	const ws = path.join(root, "workspace");
 	fs.mkdirSync(ws, { recursive: true });
 	fs.writeFileSync(path.join(ws, "bunfig.toml"), 'preload = ["./evil.ts"]\n');
-	fs.writeFileSync(path.join(ws, "evil.ts"), "globalThis.__evilPreload = true;\nconsole.log('EVIL PRELOAD');\n");
+	fs.writeFileSync(
+		path.join(ws, "evil.ts"),
+		"globalThis.__evilPreload = true;\nconsole.log('EVIL PRELOAD');\n",
+	);
 	fs.writeFileSync(path.join(ws, ".env"), "EIGHT_SEATBELT=0\n");
 	return ws;
 }
@@ -94,8 +114,14 @@ describe.if(posix)("bin/8gent-cli.sh", () => {
 				const pkg = path.join(root, "pkg");
 				fs.mkdirSync(path.join(pkg, "bin"), { recursive: true });
 				fs.mkdirSync(path.join(pkg, "apps", "tui", "src"), { recursive: true });
-				fs.copyFileSync(path.join(REPO, "bin", "8gent-cli.sh"), path.join(pkg, "bin", "8gent-cli.sh"));
-				fs.copyFileSync(path.join(REPO, "bin", "bunfig.empty.toml"), path.join(pkg, "bin", "bunfig.empty.toml"));
+				fs.copyFileSync(
+					path.join(REPO, "bin", "8gent-cli.sh"),
+					path.join(pkg, "bin", "8gent-cli.sh"),
+				);
+				fs.copyFileSync(
+					path.join(REPO, "bin", "bunfig.empty.toml"),
+					path.join(pkg, "bin", "bunfig.empty.toml"),
+				);
 				fs.writeFileSync(path.join(pkg, "bin", "8gent.ts"), PROBE);
 				fs.writeFileSync(path.join(pkg, "apps", "tui", "src", "index.tsx"), PROBE);
 				const ws = hostileWorkspace(root);
@@ -112,17 +138,23 @@ describe.if(posix)("bin/8gent-cli.sh", () => {
 });
 
 describe("spawned Bun children", () => {
-	test.if(posix)("safeBunFlags() keeps a cwd bunfig preload and .env out, with and without `run`", () => {
-		withRoot((root) => {
-			const script = path.join(root, "probe.ts");
-			fs.writeFileSync(script, PROBE);
-			const ws = hostileWorkspace(root);
-			for (const argv of [[...safeBunFlags(), script], [...safeBunFlags(), "run", script]]) {
-				const r = spawnSync("bun", argv, { cwd: ws, env: cleanEnv(), encoding: "utf8" });
-				expect(r.stdout).toContain(CLEAN);
-			}
-		});
-	});
+	test.if(posix)(
+		"safeBunFlags() keeps a cwd bunfig preload and .env out, with and without `run`",
+		() => {
+			withRoot((root) => {
+				const script = path.join(root, "probe.ts");
+				fs.writeFileSync(script, PROBE);
+				const ws = hostileWorkspace(root);
+				for (const argv of [
+					[...safeBunFlags(), script],
+					[...safeBunFlags(), "run", script],
+				]) {
+					const r = spawnSync("bun", argv, { cwd: ws, env: cleanEnv(), encoding: "utf8" });
+					expect(r.stdout).toContain(CLEAN);
+				}
+			});
+		},
+	);
 
 	test("bunFlagsFor: flags for the Bun runtime, none for a compiled 8gent binary", () => {
 		expect(bunFlagsFor("/opt/homebrew/bin/bun", "darwin")).toEqual(safeBunFlags("darwin"));
@@ -139,24 +171,35 @@ describe("spawned Bun children", () => {
 	});
 
 	test("Windows gets the shipped empty bunfig, POSIX /dev/null", () => {
-		expect(safeBunFlags("darwin")).toEqual(["--no-env-file", "--config=/dev/null"]);
-		const win = safeBunFlags("win32")[1] as string;
+		expect(safeBunFlags("darwin")).toEqual(["--no-install", "--no-env-file", "--config=/dev/null"]);
+		const win = safeBunFlags("win32")[2] as string;
 		expect(win.startsWith("--config=")).toBe(true);
-		expect(fs.readFileSync(win.slice("--config=".length), "utf8").replace(/^#.*$/gm, "").trim()).toBe("");
+		expect(
+			fs.readFileSync(win.slice("--config=".length), "utf8").replace(/^#.*$/gm, "").trim(),
+		).toBe("");
 	});
 
 	// Each site that starts Bun from a workspace or $HOME passes the flags.
 	const SITES: [string, RegExp][] = [
 		["bin/8gent.ts", /spawn\("bun", \[\.\.\.safeBunFlags\(\), "run", tuiPath/],
 		["bin/8gent.ts", /\[\.\.\.safeBunFlags\(\), fileURLToPath\(import\.meta\.url\)\]/],
-		["packages/orchestration/worktree-pool-agent.ts", /spawn\("bun", \[\.\.\.safeBunFlags\(\), "run"/],
-		["packages/orchestration/agent-adapters.ts", /\[\.\.\.safeBunFlags\(\), "run", "bin\/8gent\.ts"/],
+		[
+			"packages/orchestration/worktree-pool-agent.ts",
+			/spawn\("bun", \[\.\.\.safeBunFlags\(\), "run"/,
+		],
+		[
+			"packages/orchestration/agent-adapters.ts",
+			/\[\.\.\.safeBunFlags\(\), "run", "bin\/8gent\.ts"/,
+		],
 		["apps/tui/src/app.tsx", /\["bun", \.\.\.safeBunFlags\(\), "run", debugScript/],
 		["bin/8gent.ts", /spawn\("bun", \[\.\.\.safeBunFlags\(\), "run", benchmarkPath/],
 		["bin/8gent.ts", /spawn\("bun", \[\.\.\.safeBunFlags\(\), "run", demoPath/],
 		["packages/cron/routines.ts", /Bun\.spawn\(\["bun", \.\.\.safeBunFlags\(\), \.\.\.args\]/],
 		["packages/cron/index.ts", /Bun\.spawn\(\["bun", \.\.\.safeBunFlags\(\), "run", cli/],
-		["apps/tui/src/app.tsx", /execFileSync\(process\.execPath, \[\.\.\.bunFlagsFor\(process\.execPath\), "-e"/],
+		[
+			"apps/tui/src/app.tsx",
+			/execFileSync\(process\.execPath, \[\.\.\.bunFlagsFor\(process\.execPath\), "-e"/,
+		],
 	];
 	for (const [file, re] of SITES) {
 		test(`${file} passes safeBunFlags() (${re.source.slice(0, 40)})`, () => {
@@ -173,7 +216,7 @@ describe("spawned Bun children", () => {
 });
 
 describe("bun shebang entry points", () => {
-	const SAFE = "#!/usr/bin/env -S bun --no-env-file --config=/dev/null";
+	const SAFE = "#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null";
 	const ENTRIES = [
 		"bin/8gent.ts",
 		"bin/debug.ts",
@@ -192,14 +235,20 @@ describe("bun shebang entry points", () => {
 	}
 
 	test("build-finalize writes the safe shebang into dist/cli.js", () => {
-		expect(fs.readFileSync(path.join(REPO, "scripts", "build-finalize.js"), "utf8")).toContain(SAFE);
+		expect(fs.readFileSync(path.join(REPO, "scripts", "build-finalize.js"), "utf8")).toContain(
+			SAFE,
+		);
 	});
 
 	test.if(posix)("that shebang, executed from a hostile workspace, loads neither", () => {
 		withRoot((root) => {
 			const script = path.join(root, "entry.ts");
 			fs.writeFileSync(script, `${SAFE}\n${PROBE}`, { mode: 0o755 });
-			const r = spawnSync(script, [], { cwd: hostileWorkspace(root), env: cleanEnv(), encoding: "utf8" });
+			const r = spawnSync(script, [], {
+				cwd: hostileWorkspace(root),
+				env: cleanEnv(),
+				encoding: "utf8",
+			});
 			expect(r.stdout).toContain(CLEAN);
 		});
 	});
@@ -221,10 +270,27 @@ describe("package.json entry points", () => {
 		for (const [name, cmd] of Object.entries(pkg.scripts as Record<string, string>)) {
 			if (!runsFile.test(cmd)) continue;
 			checked.push(name);
-			for (const seg of cmd.split("&&").map((c) => c.trim()).filter((c) => /^bun\s/.test(c) && !/^bun\s+test\b/.test(c)))
-				expect(`${name} => ${seg}`).toMatch(/ => bun (?:--no-env-file )?--config=bin\/bunfig\.empty\.toml (?:run )?\S/);
+			for (const seg of cmd
+				.split("&&")
+				.map((c) => c.trim())
+				.filter((c) => /^bun\s/.test(c) && !/^bun\s+test\b/.test(c)))
+				expect(`${name} => ${seg}`).toMatch(
+					/ => bun (?:--no-install )?(?:--no-env-file )?--config=bin\/bunfig\.empty\.toml (?:run )?\S/,
+				);
 		}
-		for (const name of ["start", "agent", "daemon", "daemon:local", "tui", "cli", "install-wizard", "install:apple-foundation", "harness", "harness:run", "debug"])
+		for (const name of [
+			"start",
+			"agent",
+			"daemon",
+			"daemon:local",
+			"tui",
+			"cli",
+			"install-wizard",
+			"install:apple-foundation",
+			"harness",
+			"harness:run",
+			"debug",
+		])
 			expect(checked).toContain(name);
 	});
 
@@ -232,7 +298,10 @@ describe("package.json entry points", () => {
 		withRoot((root) => {
 			fs.writeFileSync(path.join(root, "package.json"), '{"scripts":{"where":"pwd"}}\n');
 			fs.mkdirSync(path.join(root, "deep", "sub"), { recursive: true });
-			const r = spawnSync("bun", ["run", "where"], { cwd: path.join(root, "deep", "sub"), encoding: "utf8" });
+			const r = spawnSync("bun", ["run", "where"], {
+				cwd: path.join(root, "deep", "sub"),
+				encoding: "utf8",
+			});
 			expect(r.stdout.trim().split("\n").pop()).toBe(root);
 		});
 	});
@@ -252,11 +321,13 @@ describe("repo-wide: every Bun spawn passes the safe flags", () => {
 	// Any of these within the call means the flags are there.
 	const SAFE = /safeBunFlags\(|bunFlagsFor\(|SAFE_BUN|--no-env-file/;
 	const ALLOW: Record<string, string> = {
-		"scripts/build-binaries.ts": "build tooling run in the repo root; compile output has autoload off",
+		"scripts/build-binaries.ts":
+			"build tooling run in the repo root; compile output has autoload off",
 	};
 	/** Exact snippets that are not spawns: a code example inside a model prompt. The rest of the file is scanned. */
 	const ALLOW_SNIPPETS: Record<string, string> = {
-		"packages/eight/prompt.ts": "Start the server as a subprocess: \\`Bun.spawn([\"bun\", \"run\", \"server.ts\"])\\`",
+		"packages/eight/prompt.ts":
+			'Start the server as a subprocess: \\`Bun.spawn(["bun", "run", "server.ts"])\\`',
 	};
 	const ROOTS = ["packages", "apps", "bin", "scripts", "benchmarks"];
 	const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".next", "__tests__", "fixtures"]);
@@ -304,4 +375,3 @@ describe("repo-wide: every Bun spawn passes the safe flags", () => {
 		expect('execFileSync(process.execPath, ["-e", P])'.match(SPAWN)).not.toBeNull();
 	});
 });
-

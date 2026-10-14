@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file --config=/dev/null
+#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null
 /**
  * 8gent-eyes - headless CLI for the eyes capability.
  *
@@ -32,12 +32,12 @@
  */
 
 import {
+	type CaptureOpts,
 	DEFAULT_FAILOVER,
 	type Eyes,
-	type CaptureOpts,
 	type LocatorQuery,
-	type Predicate,
 	type PeekabooBackendOpts,
+	type Predicate,
 	type VisionProvider,
 	selectEyesBackend,
 } from "@8gent/eyes";
@@ -239,7 +239,10 @@ async function cmdLocate(argv: Argv): Promise<void> {
 			break;
 		}
 		default:
-			fail(EXIT_USAGE, `locate --kind must be one of label|role|id|describe|coords; got ${kind ?? "(none)"}`);
+			fail(
+				EXIT_USAGE,
+				`locate --kind must be one of label|role|id|describe|coords; got ${kind ?? "(none)"}`,
+			);
 	}
 	const eyes = await getEyes();
 	const hits = await eyes.locate(query);
@@ -349,18 +352,30 @@ async function cmdObserve(argv: Argv): Promise<void> {
 
 async function cmdIntent(intent: string, argv: Argv): Promise<void> {
 	const t = intent.toLowerCase();
-	if (t.startsWith("describe") || t.includes("describe the screen") || t.includes("what is on screen")) {
-		argv.flags.prompt = intent.replace(/^describe[: ]?/i, "").trim() || "Describe what is on screen.";
+	if (
+		t.startsWith("describe") ||
+		t.includes("describe the screen") ||
+		t.includes("what is on screen")
+	) {
+		argv.flags.prompt =
+			intent.replace(/^describe[: ]?/i, "").trim() || "Describe what is on screen.";
 		return cmdDescribe(argv);
 	}
 	if (t.startsWith("wait") || t.includes("wait until") || t.includes("wait for")) {
 		// Intent: "wait until a Save dialog appears" -> text_present "Save"
-		const match = intent.match(/(?:wait\s+(?:until|for)\s+)?(?:an?\s+)?(.+?)\s+(?:dialog|button|appears|to appear|shows up)/i);
+		const match = intent.match(
+			/(?:wait\s+(?:until|for)\s+)?(?:an?\s+)?(.+?)\s+(?:dialog|button|appears|to appear|shows up)/i,
+		);
 		argv.flags.predicate = "text_present";
 		argv.flags.text = match ? match[1]!.trim() : intent;
 		return cmdWaitFor(argv);
 	}
-	if (t.startsWith("find") || t.startsWith("locate") || t.includes("find the") || t.includes("locate the")) {
+	if (
+		t.startsWith("find") ||
+		t.startsWith("locate") ||
+		t.includes("find the") ||
+		t.includes("locate the")
+	) {
 		const m = intent.match(/(?:find|locate)(?:\s+the)?\s+(.+?)(?:\s+(?:button|on|in)|$)/i);
 		argv.flags.kind = "label";
 		argv.flags.text = m ? m[1]!.trim() : intent.replace(/^(find|locate)\s+/i, "").trim();
@@ -385,10 +400,16 @@ async function cmdIntent(intent: string, argv: Argv): Promise<void> {
 async function printHelp(): Promise<void> {
 	out({
 		ok: true,
-		usage: "8gent-eyes <subcommand> [flags] | 8gent-eyes --intent \"<phrase>\"",
+		usage: '8gent-eyes <subcommand> [flags] | 8gent-eyes --intent "<phrase>"',
 		subcommands: ["capture", "annotate", "locate", "describe", "wait-for", "diff", "observe"],
 		spec: "docs/specs/EYES-SPEC.md",
-		exit_codes: { ok: 0, backend_error: 1, perception_remote_denied: 2, backend_unavailable: 3, usage: 64 },
+		exit_codes: {
+			ok: 0,
+			backend_error: 1,
+			perception_remote_denied: 2,
+			backend_unavailable: 3,
+			usage: 64,
+		},
 	});
 }
 

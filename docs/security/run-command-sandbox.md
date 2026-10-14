@@ -28,7 +28,7 @@ A `bunfig.toml` `preload` in a workspace would run code before the snapshot, and
 
 - **Spawned children:** `--no-env-file --config=<empty>` via `safeBunFlags()` in `packages/core/bun-flags.ts`.
 - **npm and shell launchers:** the same two flags with the shipped empty `bin/bunfig.empty.toml`.
-- **Directly executed entry points:** the shebang `#!/usr/bin/env -S bun --no-env-file --config=/dev/null`.
+- **Directly executed entry points:** the shebang `#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null`.
 - **Compiled binaries:** built with `--no-compile-autoload-bunfig --no-compile-autoload-dotenv`.
 
 `tests/security/launcher-cwd-config.test.ts` fails if any spawn of `bun` or `process.execPath` in the repo is missing the flags.

@@ -23,7 +23,7 @@ BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 REPO_ROOT="$(cd "$BIN_DIR/.." && pwd)"
 
 # Never the user's cwd bunfig.toml (preload = code) or .env (#4013).
-SAFE_BUN=(--no-env-file "--config=$BIN_DIR/bunfig.empty.toml")
+SAFE_BUN=(--no-install --no-env-file "--config=$BIN_DIR/bunfig.empty.toml")
 
 if [ "${1:-}" = "run" ]; then
   shift

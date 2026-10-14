@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file --config=/dev/null
+#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null
 /**
  * 8gent Code - Main CLI Entry Point
  *
@@ -624,6 +624,15 @@ async function main() {
 		case "publish":
 			await publishCommand(restArgs);
 			break;
+
+		// Extension housekeeping, e.g. `8gent ext import-pi [path]` (packages/extensions/ext-cli.ts).
+		case "ext": {
+			const { runExtCommand } = await import("../packages/extensions/ext-cli.ts");
+			const result = await runExtCommand(restArgs);
+			console.log(result.output);
+			process.exit(result.code);
+			break;
+		}
 
 		default:
 			console.error(`Unknown command: ${command}`);

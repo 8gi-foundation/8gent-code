@@ -22,6 +22,7 @@
  */
 import { resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
+import { extensionsWanted } from "../extensions/index";
 import type { TurnStop } from "./agent";
 import type { RunEvent, RunStopInfo } from "./run-events";
 import { type RunSessionStore, defaultRunSessionStore } from "./run-session";
@@ -810,6 +811,8 @@ export async function runRunCommand(
 			model,
 			runtime: provider as "ollama" | "lmstudio" | "openrouter" | "apple-foundation",
 			workingDirectory: opts.cwd || process.cwd(),
+			// Extensions on unless --no-extensions (G1 wiring contract).
+			extensions: extensionsWanted({ interactive: false }),
 			maxTurns: opts.maxTurns ?? 30,
 			events,
 			// --provider names the provider: a provider error ends the run

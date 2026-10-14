@@ -32,6 +32,7 @@ import { useCallback, useRef, useState } from "react";
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { Agent } from "../../../../packages/eight/index.js";
 import type { AgentEventCallbacks } from "../../../../packages/eight/index.js";
+import { extensionsWanted } from "../../../../packages/extensions/index.js";
 import { ROLE_REGISTRY } from "../../../../packages/orchestration/role-registry.js";
 import { loadSettings as loadAppSettings } from "../../../../packages/settings/index.js";
 import type { Settings } from "../../../../packages/settings/index.js";
@@ -184,6 +185,8 @@ export function usePerTabAgents() {
 					model: opts.model,
 					runtime: toAgentRuntime(opts.provider),
 					workingDirectory: opts.workingDirectory,
+					// Extensions on unless --no-extensions (G1 wiring contract).
+					extensions: extensionsWanted(),
 					maxTurns: opts.maxTurns ?? 50,
 					apiKey: opts.apiKey,
 					events: opts.events,

@@ -141,7 +141,7 @@ jobs:
       - name: Verify build output
         run: |
           test -f dist/cli.js || (echo "Build failed: dist/cli.js not found" && exit 1)
-          head -1 dist/cli.js | grep -qxF "#!/usr/bin/env -S bun --no-env-file --config=/dev/null" || (echo "Safe shebang missing (#4013)" && exit 1)
+          head -1 dist/cli.js | grep -qxF "#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null" || (echo "Safe shebang missing (#4013)" && exit 1)
           echo "Build OK: $(wc -c < dist/cli.js | tr -d ' ') bytes"
 
       # #3219: the npm tarball must install and run on a machine that is not

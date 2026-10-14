@@ -28,9 +28,17 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { resolveHome } from "../core/home";
+import {
+	createPiApi,
+	explainPiLoadError,
+	importGate,
+	isPiExtension,
+	registerPiModules,
+	unservedImports,
+} from "./pi-compat";
 
 /** JSON Schema for a tool's arguments (an object schema). */
 export interface ExtensionToolParameters {
@@ -90,6 +98,13 @@ export interface ExtensionLoadResult {
 	error?: string;
 	tools: string[];
 	commands: string[];
+	/**
+	 * loaded: everything it asked for works. partial: it loaded, but used APIs
+	 * 8gent accepts without acting on (named in `missing`). failed: see error.
+	 */
+	status?: "loaded" | "partial" | "failed" | "off";
+	/** Accepted-but-inactive APIs the extension used (Pi extensions). */
+	missing?: string[];
 }
 
 const NAME = /^[a-z][a-z0-9_-]{0,63}$/;
@@ -100,6 +115,12 @@ const EXTENSIONS = new Set([".ts", ".js", ".mjs", ".mts"]);
  * class by name, so an extension tool there would escape extension_call.
  */
 export const RESERVED_TOOL_PREFIXES = ["mcp__", "term_", "git_", "desktop_", "browser_"];
+/**
+ * Pi's built-in tool names. An extension may not register a tool under one:
+ * a second "bash" would be a shell that skips run_command's sanitizer, its
+ * pre-spawn refusal and the policy backstop.
+ */
+export const RESERVED_PI_TOOL_NAMES = ["bash", "read", "write", "edit", "ls", "grep", "find"];
 /** A tool_call handler that takes longer than this refuses the call. */
 export const HANDLER_TIMEOUT_MS = 2000;
 /**
@@ -113,12 +134,40 @@ onboarding preferences skip animations adhd quarantine toolshed skills design ev
 resume history continue compact chat agent github debug music dj pet export fork rewind branch cron deploy
 vercel telegram router rename spawn settings quiet term create-app hands eyes handeyes goal subgoal build
 notes ideas btw questions projects terminal reload exit
-copy hotkeys tree import update`.split(/\s+/),
+copy hotkeys tree import update extensions`.split(/\s+/),
 );
+
+/**
+ * Does this local process want extensions? The interactive TUI: yes unless
+ * started with `--no-extensions` or EIGHT_EXTENSIONS=0. A headless run
+ * (`interactive: false`): only with `--extensions` or EIGHT_EXTENSIONS=1.
+ * Daemon, Table, channel and no-tool sessions never pass extensions at all.
+ * Imported extensions also need `8gent ext enable <name>`.
+ */
+export function extensionsWanted(
+	opts: { interactive?: boolean } = {},
+	argv: readonly string[] = process.argv,
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	if (argv.includes("--no-extensions") || env.EIGHT_EXTENSIONS === "0") return false;
+	// Interactive TUI: on by default. Headless runs: only when asked.
+	if (opts.interactive !== false) return true;
+	return argv.includes("--extensions") || env.EIGHT_EXTENSIONS === "1";
+}
+
+/**
+ * Is this Bun process unable to auto-install packages? Only when it was
+ * started with --no-install: every 8gent launcher passes it, and the test
+ * suite runs as `bun --no-install test`. No other signal counts: a bunfig or
+ * an environment variable can be changed by whatever controls the folder.
+ */
+export function noInstallActive(execArgv: readonly string[] = process.execArgv): boolean {
+	return execArgv.includes("--no-install");
+}
 
 /** The default extensions folder: ~/.8gent/extensions. Throws without an absolute home directory. */
 export function defaultExtensionsDir(): string {
-	const home = os.homedir();
+	const home = resolveHome();
 	if (!home || !path.isAbsolute(home)) {
 		throw new Error(`no absolute home directory (got "${home}"); not loading extensions`);
 	}
@@ -164,28 +213,35 @@ export class ExtensionHost {
 		private readonly dir: string = defaultExtensionsDir(),
 		private readonly reserved: () => Iterable<string> = () => [],
 		private readonly handlerTimeoutMs: number = HANDLER_TIMEOUT_MS,
+		private readonly noInstall: () => boolean = () => noInstallActive(),
 	) {}
 
-	/** One-file extensions in the folder (real paths), sorted so load order is stable. */
+	/**
+	 * Extensions in the folder, sorted so load order is stable: one-file
+	 * extensions, and (as in Pi) folders holding an index.ts, index.js or
+	 * index.mjs, listed by that index file.
+	 */
 	files(): string[] {
-		if (!fs.existsSync(this.dir)) return [];
-		return fs
-			.readdirSync(this.dir, { withFileTypes: true })
-			.filter(
-				(e) =>
-					(e.isFile() || e.isSymbolicLink()) &&
-					EXTENSIONS.has(path.extname(e.name)) &&
-					!e.name.endsWith(".d.ts"),
-			)
-			.map((e) => path.join(this.dir, e.name))
-			.filter((f) => {
-				try {
-					return fs.statSync(f).isFile();
-				} catch {
-					return false;
-				}
-			})
-			.sort();
+		if (!this.dir || !fs.existsSync(this.dir)) return [];
+		const out: string[] = [];
+		for (const e of fs.readdirSync(this.dir, { withFileTypes: true })) {
+			const full = path.join(this.dir, e.name);
+			let stat: fs.Stats;
+			try {
+				stat = fs.statSync(full);
+			} catch {
+				continue;
+			}
+			if (stat.isFile()) {
+				if (EXTENSIONS.has(path.extname(e.name)) && !e.name.endsWith(".d.ts")) out.push(full);
+			} else if (stat.isDirectory() && e.name !== "node_modules") {
+				const index = ["index.ts", "index.js", "index.mjs"].find((i) =>
+					fs.existsSync(path.join(full, i)),
+				);
+				if (index) out.push(path.join(full, index));
+			}
+		}
+		return out.sort();
 	}
 
 	/**
@@ -200,6 +256,26 @@ export class ExtensionHost {
 	 * through a symlinked folder.
 	 */
 	async load(): Promise<ExtensionLoadResult[]> {
+		// Extension code may import anything; only a Bun that cannot auto-install
+		// keeps that to local files. Without --no-install, load nothing.
+		if (!this.noInstall()) {
+			const files = this.files();
+			const reason =
+				"extensions are off: 8gent was started without Bun's --no-install, so an import could download a package";
+			this.tools = new Map();
+			this.commands = new Map();
+			this.handlers = [];
+			this.byFile = new Map();
+			this.results = files.map((file) => ({
+				file,
+				ok: false,
+				error: reason,
+				tools: [],
+				commands: [],
+				status: "off" as const,
+			}));
+			return this.results;
+		}
 		const reserved = new Set(this.reserved());
 		const results: ExtensionLoadResult[] = [];
 		const next = new Map<string, FileRegistration>();
@@ -209,6 +285,21 @@ export class ExtensionHost {
 				real = fs.realpathSync(listed);
 			} catch (err) {
 				results.push({ file: listed, ok: false, error: String(err), tools: [], commands: [] });
+				continue;
+			}
+			// Imported extensions: off until enabled, and their sha256 must still
+			// match the import record, checked on every load. A refusal here never
+			// falls back to an earlier version.
+			const gate = importGate(this.dir, real);
+			if (gate && !gate.allowed) {
+				results.push({
+					file: real,
+					ok: false,
+					error: gate.reason,
+					tools: [],
+					commands: [],
+					status: gate.reason?.includes(" is off;") ? "off" : "failed",
+				});
 				continue;
 			}
 			const { result, reg } = await this.loadFile(real, reserved, next);
@@ -256,15 +347,44 @@ export class ExtensionHost {
 		const commandTaken = (name: string) =>
 			reg.commands.some((x) => x.name === name) ||
 			[...taken.values()].some((r) => r.commands.some((x) => x.name === name));
+		const pi = isPiExtension(file);
+		const missing: string[] = [];
 		try {
+			// Local files only: an npm import 8gent does not serve is refused here,
+			// before Bun could try to auto-install it from the network.
+			const unserved = unservedImports(file, pi);
+			const piPackages = pi ? unserved.filter((u) => u.startsWith("@earendil-works/")) : [];
+			if (piPackages.length > 0) {
+				throw new Error(
+					`Pi API package ${piPackages.map((u) => `"${u}"`).join(", ")} is not supported by 8gent's Pi compatibility (terminal UI and runtime packages)`,
+				);
+			}
+			if (unserved.length > 0) {
+				throw new Error(
+					`imports ${unserved.map((u) => `"${u}"`).join(", ")}, which 8gent does not install; extensions load local files only`,
+				);
+			}
+			if (pi) registerPiModules(this.dir);
 			// Bun keys its module cache by real path and ignores a ?query, so drop
-			// the cached copy: an edited file then loads fresh on reload.
+			// the cached copy (and, for a folder extension, every file in it): an
+			// edited file then loads fresh on reload.
 			try {
-				delete require.cache[file];
+				const folder = /^index\.[cm]?[jt]s$/.test(path.basename(file))
+					? path.dirname(file) + path.sep
+					: null;
+				for (const key of Object.keys(require.cache)) {
+					if (key === file || (folder && key.startsWith(folder))) delete require.cache[key];
+				}
 			} catch {
 				/* no CommonJS cache here: first load only */
 			}
-			const mod = (await import(pathToFileURL(file).href)) as { default?: unknown };
+			let mod: { default?: unknown };
+			try {
+				mod = (await import(pathToFileURL(file).href)) as { default?: unknown };
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				throw new Error(pi ? explainPiLoadError(message) : message);
+			}
 			const factory = mod.default;
 			if (typeof factory !== "function") throw new Error("default export is not a function");
 			const api: ExtensionAPI = {
@@ -272,7 +392,9 @@ export class ExtensionHost {
 					if (!t || typeof t.name !== "string" || !NAME.test(t.name)) {
 						throw new Error(`tool name ${JSON.stringify(t?.name)} must match ${NAME}`);
 					}
-					if (reserved.has(t.name)) throw new Error(`tool "${t.name}" is a built-in tool`);
+					if (reserved.has(t.name) || RESERVED_PI_TOOL_NAMES.includes(t.name)) {
+						throw new Error(`tool "${t.name}" is a built-in tool`);
+					}
 					const prefix = RESERVED_TOOL_PREFIXES.find((p) => t.name.startsWith(p));
 					if (prefix) throw new Error(`tool "${t.name}": the prefix "${prefix}" is reserved`);
 					if (toolTaken(t.name)) throw new Error(`tool "${t.name}" is already registered`);
@@ -299,12 +421,17 @@ export class ExtensionHost {
 					reg.handlers.push(handler);
 				},
 			};
-			await factory(api);
+			// A Pi extension gets Pi's ExtensionAPI, built over this same api, so
+			// every check above applies to what it registers (pi-compat.ts).
+			await factory(pi ? createPiApi(api, missing) : api);
 		} catch (err) {
 			result.error = err instanceof Error ? err.message : String(err);
+			result.status = "failed";
 			return { result };
 		}
 		result.ok = true;
+		result.status = missing.length > 0 ? "partial" : "loaded";
+		if (missing.length > 0) result.missing = missing;
 		result.tools = reg.tools.map((t) => t.name);
 		result.commands = reg.commands.map((c) => c.name);
 		return { result, reg };

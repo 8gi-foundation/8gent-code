@@ -70,6 +70,8 @@ export {
 	ExtensionHost,
 	defaultExtensionsDir,
 	defineExtension,
+	extensionsWanted,
+	noInstallActive,
 	type ExtensionAPI,
 	type ExtensionCommand,
 	type ExtensionContext,

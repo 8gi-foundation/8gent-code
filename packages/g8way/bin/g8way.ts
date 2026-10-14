@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file --config=/dev/null
+#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null
 /**
  * @8gent/g8way - bin entry point.
  *
@@ -34,9 +34,7 @@ console.log(
 );
 
 const shutdown = (signal: string) => {
-	console.log(
-		JSON.stringify({ ts: new Date().toISOString(), type: "g8way.shutdown", signal }),
-	);
+	console.log(JSON.stringify({ ts: new Date().toISOString(), type: "g8way.shutdown", signal }));
 	stop();
 	process.exit(0);
 };

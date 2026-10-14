@@ -2,16 +2,16 @@
 // Cross-platform replacement for: chmod +x && bash copy-bundled-skills.sh && bash copy-bundled-sounds.sh
 import {
 	chmodSync,
-	mkdirSync,
-	readdirSync,
 	copyFileSync,
 	existsSync,
+	mkdirSync,
 	readFileSync,
-	writeFileSync,
+	readdirSync,
 	realpathSync,
+	writeFileSync,
 } from "node:fs";
-import { join, dirname } from "node:path";
 import { homedir, platform } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findBakedRoots, unbakeBuildPaths } from "./lib/unbake-build-paths.js";
 
@@ -49,7 +49,7 @@ for (const name of ["cli.js", "tui.js"]) {
 const cliPath = join(ROOT, "dist", "cli.js");
 if (existsSync(cliPath)) {
 	// Run directly, Bun must not read the cwd bunfig.toml (preload = code) or .env (#4013).
-	const SAFE_SHEBANG = "#!/usr/bin/env -S bun --no-env-file --config=/dev/null";
+	const SAFE_SHEBANG = "#!/usr/bin/env -S bun --no-install --no-env-file --config=/dev/null";
 	const contents = readFileSync(cliPath, "utf-8");
 	const body = contents.startsWith("#!") ? contents.slice(contents.indexOf("\n") + 1) : contents;
 	writeFileSync(cliPath, `${SAFE_SHEBANG}\n${body}`);

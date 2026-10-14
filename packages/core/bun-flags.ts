@@ -6,6 +6,7 @@
  * started in $HOME, must not: a shell command could have written either file,
  * and they would run, or set EIGHT_* keys, before the security env snapshot.
  *
+ *   --no-install            no package auto-install, from any import (#4026)
  *   --no-env-file           no .env autoload
  *   --config=<empty file>   no $cwd/bunfig.toml
  *
@@ -37,11 +38,14 @@ export function emptyBunfig(platform: NodeJS.Platform = process.platform): strin
 
 /** Put these before the script path: `bun ...safeBunFlags() run <script>` or `bun ...safeBunFlags() <script>`. */
 export function safeBunFlags(platform: NodeJS.Platform = process.platform): string[] {
-	return ["--no-env-file", `--config=${emptyBunfig(platform)}`];
+	return ["--no-install", "--no-env-file", `--config=${emptyBunfig(platform)}`];
 }
 
 /** safeBunFlags() when `execPath` is the Bun runtime; [] for a compiled 8gent binary (built with autoload off). */
-export function bunFlagsFor(execPath: string, platform: NodeJS.Platform = process.platform): string[] {
+export function bunFlagsFor(
+	execPath: string,
+	platform: NodeJS.Platform = process.platform,
+): string[] {
 	const base = execPath.split(/[\\/]/).pop() ?? "";
 	return /^bun(\.exe)?$/i.test(base) ? safeBunFlags(platform) : [];
 }

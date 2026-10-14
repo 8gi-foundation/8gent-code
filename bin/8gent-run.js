@@ -10,7 +10,7 @@ const cli = join(__dirname, "..", "dist", "cli.js");
 // or .env would run or set things before 8gent snapshots its security env
 // (#4013). Use the package's own empty bunfig and no env file.
 const bunfig = join(__dirname, "bunfig.empty.toml");
-const SAFE_BUN = ["--no-env-file", `--config=${bunfig}`];
+const SAFE_BUN = ["--no-install", "--no-env-file", `--config=${bunfig}`];
 
 const NO_BUN = `
   8gent requires Bun to run. Install it with one command:

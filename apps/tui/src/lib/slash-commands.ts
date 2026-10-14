@@ -71,7 +71,8 @@ export type SlashCommand =
 	| "terminal"
 	| "copy"
 	| "tree"
-	| "import";
+	| "import"
+	| "extensions";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -499,6 +500,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Copy the last answer to the clipboard (works over SSH)",
 		usage: "/copy",
+	},
+	{
+		name: "extensions",
+		aliases: ["ext"],
+		description:
+			"Import Pi extensions, Claude Code commands or MCP servers (records sha256, reports each)",
+		usage: "/extensions import-pi [path] | import <pi|claude-code|mcp> | approve-mcp <name>",
 	},
 ];
 
