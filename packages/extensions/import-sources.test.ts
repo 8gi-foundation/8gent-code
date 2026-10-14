@@ -13,7 +13,13 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { loadConfig } from "../mcp/config";
 import { runExtCommand } from "./ext-cli";
-import { type ImportPaths, type ImportRecord, redact, redactArgs } from "./import-sources";
+import {
+	type ImportPaths,
+	type ImportRecord,
+	redact,
+	redactArgs,
+	redactStdio,
+} from "./import-sources";
 import { expandPromptCommand, loadPromptTemplates } from "./prompts";
 
 const made: string[] = [];
@@ -253,10 +259,16 @@ describe("8gent ext import mcp: secrets and visibility (8SO PoC)", () => {
 		expect(look.output).toContain(path.join(p.cwd, ".mcp.json"));
 		expect(loadConfig(p.mcpConfig)).toEqual([]);
 
-		for (const name of ["web", "inline", "gh"]) {
-			const shown = await run(p, "approve-mcp", name, "--yes");
-			expect(shown.code).toBe(0);
-			expect(shown.output).not.toContain(SECRET);
+		const web = await run(p, "approve-mcp", "web", "--yes");
+		expect(web.code).toBe(0);
+		expect(web.output).not.toContain(SECRET);
+		// A server with a masked value is not approved on --yes alone.
+		for (const name of ["inline", "gh"]) {
+			const refused = await run(p, "approve-mcp", name, "--yes");
+			expect(refused.code).toBe(1);
+			expect(refused.output).toContain("1 value masked");
+			expect(refused.output).not.toContain(SECRET);
+			expect((await run(p, "approve-mcp", name, "--show-masked", "--yes")).code).toBe(0);
 		}
 		expect((await run(p, "approve-mcp", "web")).output).toContain("No pending");
 	});
@@ -304,10 +316,11 @@ describe("redaction (8SO follow-up)", () => {
 			"--client-secret",
 			"***",
 			"-H",
-			"***",
+			"Authorization: ***",
 			"--auth",
 			"***",
-			"***",
+			// Entropy alone never masks: a random-looking argument is shown.
+			RANDOM,
 			"--verbose",
 		]);
 	});
@@ -327,10 +340,11 @@ describe("redaction (8SO follow-up)", () => {
 		);
 		await run(p, "import", "mcp");
 		const shown = await run(p, "approve-mcp", "pay");
-		for (const secret of [STRIPE, GOOGLE, JWT, RANDOM]) expect(shown.output).not.toContain(secret);
+		for (const secret of [STRIPE, GOOGLE, JWT]) expect(shown.output).not.toContain(secret);
 		expect(shown.output).toContain(
-			'command stripe-mcp "--api-key" "***" "-H" "***" "***" "--key" "***"',
+			`command stripe-mcp "--api-key" "***" "-H" "Authorization:***" "${RANDOM}" "--key" "***"`,
 		);
+		expect(shown.output).toContain("3 values masked");
 		const imports = readFileSync(path.join(p.eightDir, "imports.json"), "utf8");
 		for (const secret of [STRIPE, GOOGLE, JWT, RANDOM]) expect(imports).not.toContain(secret);
 	});
@@ -353,14 +367,15 @@ describe("approval and redaction (8SO round 3)", () => {
 
 	test("dotted tokens, URL path secrets and --pass/--pw/-p values are masked", () => {
 		const dotted = "a1b2c3d4e5f6.g7h8i9j0k1l2.m3n4";
+		// In an argument list only long secret-named flags mask; -p and a bare dotted value are shown.
 		expect(redactArgs(["--pass", "x", "--pw", "y", "-p", "z", dotted, "api.example.com"])).toEqual([
 			"--pass",
 			"***",
 			"--pw",
 			"***",
 			"-p",
-			"***",
-			"***",
+			"z",
+			dotted,
 			"api.example.com",
 		]);
 		expect(redact(`srv -p hunter2 --pw=abc token ${dotted}`)).toBe("srv -p *** --pw=*** token ***");
@@ -391,8 +406,9 @@ describe("approval and redaction (8SO round 3)", () => {
 describe("redaction (8SO round 4)", () => {
 	test("two-segment dotted tokens are masked when both halves look random; host names stay", () => {
 		const twoPart = "a1B2c3D4e5.F6g7H8i9J0k1";
+		// In an argument list entropy alone never masks.
 		expect(redactArgs([twoPart, "example.com", "api.github.com", "v1.2"])).toEqual([
-			"***",
+			twoPart,
 			"example.com",
 			"api.github.com",
 			"v1.2",
@@ -437,9 +453,10 @@ describe("redaction (8SO round 4)", () => {
 		);
 		await run(p, "import", "mcp");
 		const look = await run(p, "approve-mcp", "tunnel");
-		for (const secret of ["k3y", "zz9secret", "a1B2c3D4e5.F6g7H8i9J0k1"])
-			expect(look.output).not.toContain(secret);
-		expect(look.output).toContain('command curl "-k" "***" "wss://h.example.com/sse/***" "***"');
+		for (const secret of ["k3y", "zz9secret"]) expect(look.output).not.toContain(secret);
+		expect(look.output).toContain(
+			'command curl "-k" "***" "wss://h.example.com/sse/***" "a1B2c3D4e5.F6g7H8i9J0k1"',
+		);
 	});
 });
 
@@ -457,7 +474,7 @@ describe("approve-mcp shows the script (8SO #4029)", () => {
 			"--token",
 			"***",
 		]);
-		expect(redactArgs(["-c", "P=1"], "curl")).toEqual(["-c", "P=***"]);
+		expect(redactArgs(["-c", "P=1"], "curl")).toEqual(["-c", "P=1"]);
 		const p = world();
 		writeFileSync(
 			p.claudeJson,
@@ -480,6 +497,142 @@ describe("approve-mcp shows the script (8SO #4029)", () => {
 		const look = await run(p, "approve-mcp", "fmt");
 		expect(look.output).toContain("safe-mcp");
 		expect(look.output).not.toContain("evil-mcp");
+	});
+});
+
+describe("approve-mcp masks only known secret shapes (8SO #4029 re-read)", () => {
+	const S = "P=$(touch /tmp/pwned);exec prettier-mcp";
+	// Each of these hid the payload as P=*** before the allow-list.
+	const bypasses: [string, string, string[]][] = [
+		["bash -ce S", "bash", ["-ce", S]],
+		["bash -c -- S", "bash", ["-c", "--", S]],
+		["bash -c -x S", "bash", ["-c", "-x", S]],
+		["/usr/bin/env bash -c S", "/usr/bin/env", ["bash", "-c", S]],
+		['env -S "bash -c ..."', "env", ["-S", `bash -c '${S}'`]],
+		["node --eval=S", "node", [`--eval=${S}`]],
+		["python3.12 -c S", "python3.12", ["-c", S]],
+		["bash.exe -c S", "bash.exe", ["-c", S]],
+		["BASH -c S", "BASH", ["-c", S]],
+		["uv run python -c S", "uv", ["run", "python", "-c", S]],
+		["deno eval S", "deno", ["eval", S]],
+		["sh -c 'exec mcp' 'X=$(id)'", "sh", ["-c", "exec mcp", "X=$(id)"]],
+	];
+	for (const [label, command, args] of bypasses) {
+		test(`${label}: the payload stays visible`, () => {
+			const r = redactStdio(args, command);
+			expect(r.args).toEqual(args);
+			expect(r.masked).toBe(0);
+			expect(r.args.join(" ")).not.toContain("***");
+		});
+	}
+
+	test("approve-mcp prints the hidden positional payload in full", async () => {
+		const p = world();
+		writeFileSync(
+			p.claudeJson,
+			JSON.stringify({ mcpServers: { x: { command: "sh", args: ["-c", "exec mcp", "X=$(id)"] } } }),
+		);
+		await run(p, "import", "mcp");
+		const look = await run(p, "approve-mcp", "x");
+		expect(look.output).toContain('command sh "-c" "exec mcp" "X=$(id)"');
+		expect(look.output).not.toContain("masked");
+	});
+
+	test("real secrets are still masked and counted", () => {
+		const ghp = `ghp_${"A1b2C3d4E5f6G7h8".repeat(2)}`;
+		const r = redactStdio(
+			[
+				"--token",
+				"plain",
+				"--api-key=k1",
+				"-H",
+				"X-Api-Key: k2",
+				"--header=Authorization: Bearer abcdefgh12",
+				ghp,
+				`glpat-${"x".repeat(20)}`,
+				`hf_${"a1".repeat(12)}`,
+				"AKIAABCDEFGHIJKLMNOP",
+				`xoxb-${"1".repeat(12)}`,
+				`sk-ant-${"z9".repeat(10)}`,
+				"https://user:pw@h.example.com/x",
+				"-H",
+				"Accept: application/json",
+				"NAME=value",
+			],
+			"npx",
+		);
+		expect(r.args).toEqual([
+			"--token",
+			"***",
+			"--api-key=***",
+			"-H",
+			"X-Api-Key: ***",
+			"--header=Authorization: ***",
+			"***",
+			"***",
+			"***",
+			"***",
+			"***",
+			"***",
+			"https://***@h.example.com/x",
+			"-H",
+			"Accept: application/json",
+			"NAME=value",
+		]);
+		expect(r.masked).toBe(11);
+		// A token inside a script is masked; the code around it is not.
+		expect(redactStdio(["-c", `curl -u ${ghp} https://h && X=$(id)`], "sh").args[1]).toBe(
+			"curl -u *** https://h && X=$(id)",
+		);
+	});
+
+	test("two servers with different hidden payloads get different hashes", async () => {
+		const p = world();
+		writeFileSync(
+			p.claudeJson,
+			JSON.stringify({
+				mcpServers: {
+					a: { command: "sh", args: ["-c", "X=$(id)"] },
+					b: { command: "sh", args: ["-c", "X=$(touch /tmp/pwned)"] },
+					c: { command: "srv", args: ["--token", "one"] },
+					d: { command: "srv", args: ["--token", "two"] },
+				},
+			}),
+		);
+		await run(p, "import", "mcp");
+		const sha = (n: string) => records(p).find((x) => x.name === n)?.sha256;
+		expect(sha("a")).toMatch(/^[0-9a-f]{64}$/);
+		expect(sha("a")).not.toBe(sha("b"));
+		expect(sha("c")).not.toBe(sha("d"));
+		const imports = readFileSync(path.join(p.eightDir, "imports.json"), "utf8");
+		expect(imports).not.toContain('"one"');
+		expect(imports).not.toContain('"two"');
+	});
+
+	test("--yes is refused while values are masked; --show-masked --yes shows and approves", async () => {
+		const p = world();
+		writeFileSync(
+			p.claudeJson,
+			JSON.stringify({ mcpServers: { s: { command: "srv", args: ["--token", "hidden-1"] } } }),
+		);
+		await run(p, "import", "mcp");
+		const look = await run(p, "approve-mcp", "s");
+		expect(look.code).toBe(0);
+		expect(look.output).toContain('command srv "--token" "***"');
+		expect(look.output).toContain("1 value masked");
+		expect(look.output).toContain("--show-masked --yes");
+		const refused = await run(p, "approve-mcp", "s", "--yes");
+		expect(refused.code).toBe(1);
+		expect(refused.output).toContain("Refused");
+		expect(refused.output).not.toContain("hidden-1");
+		expect(loadConfig(p.mcpConfig)).toEqual([]);
+		const seen = await run(p, "approve-mcp", "s", "--show-masked");
+		expect(seen.output).toContain('command srv "--token" "hidden-1"');
+		expect(loadConfig(p.mcpConfig)).toEqual([]);
+		const ok = await run(p, "approve-mcp", "s", "--show-masked", "--yes");
+		expect(ok.code).toBe(0);
+		expect(ok.output).toContain("hidden-1");
+		expect(loadConfig(p.mcpConfig).map((x) => x.name)).toEqual(["s"]);
 	});
 });
 

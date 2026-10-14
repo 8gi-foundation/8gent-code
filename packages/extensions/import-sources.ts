@@ -247,8 +247,6 @@ function mcpSources(
  * (GitHub, OpenAI-style sk-, Slack, AWS), Authorization schemes, URL
  * userinfo and query values. Used on everything an import or approve prints.
  */
-const SECRET_FLAG =
-	/^(?:--?[\w-]*(?:key|token|secret|password|passwd|pass|pw|auth|cred)[\w-]*|-p)$/i;
 const HEADER_FLAG = /^(?:-H|--header)$/;
 /** Programs whose -k / -K value is masked (HTTP clients). */
 const HTTP_CLIENTS = new Set([
@@ -353,62 +351,128 @@ function entropy(s: string): number {
 	return h;
 }
 
-/** A 20+ character token that looks random (no spaces or path parts, mixed letters and digits, high entropy). */
-function looksLikeSecret(arg: string): boolean {
-	if (arg.length < 20 || /[\s/\\.]/.test(arg)) return false;
-	if (!/[A-Za-z]/.test(arg) || !/[0-9]/.test(arg)) return false;
-	return entropy(arg) >= 3.5;
+/**
+ * Known secret token shapes. For a server's command and args these are the
+ * only in-text masks: a script or a NAME=value pair is never masked, because
+ * hiding it would hide the code the person is approving. None of these
+ * character classes can hold shell syntax.
+ */
+const TOKEN_SHAPES: readonly RegExp[] = [
+	/\bgh[pousr]_[A-Za-z0-9]{16,}/g,
+	/\bgithub_pat_[A-Za-z0-9_]{20,}/g,
+	/\bsk-[A-Za-z0-9_-]{16,}/g,
+	/\bsk_(?:live|test)_[A-Za-z0-9]{8,}/g,
+	/\b[rp]k_(?:live|test)_[A-Za-z0-9]{8,}/g,
+	/\bAIza[0-9A-Za-z_-]{30,}/g,
+	/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{6,}/g,
+	/\bxox[abposr]-[A-Za-z0-9-]{10,}/g,
+	/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+	/\bglpat-[A-Za-z0-9_-]{16,}/g,
+	/\bhf_[A-Za-z0-9]{20,}/g,
+	/\bnpm_[A-Za-z0-9]{30,}/g,
+	/\bpypi-[A-Za-z0-9_-]{30,}/g,
+	/\bdop_v1_[a-f0-9]{40,}/g,
+	/\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/g,
+];
+/** Authorization schemes followed by a token-shaped value. */
+const AUTH_SCHEME = /\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}/gi;
+/** Header names whose value is a credential. */
+const SECRET_HEADER =
+	/^(?:(?:proxy-)?authorization|cookie|x-[\w-]*(?:key|token|secret|auth)[\w-]*|[\w-]*api[-_]?key|private-token|[\w-]*-token)$/i;
+/** Flag name segments that say the next value is a secret. */
+const SECRET_FLAG_WORDS = new Set([
+	"key",
+	"apikey",
+	"token",
+	"secret",
+	"password",
+	"passwd",
+	"pass",
+	"pw",
+	"auth",
+	"authorization",
+	"cred",
+	"creds",
+	"credential",
+	"credentials",
+	"pat",
+]);
+/** A URL with only plain URL characters: no shell or code syntax can sit inside it. */
+const PLAIN_URL = /^(?:https?|wss?):\/\/[A-Za-z0-9._~%:@/?&=+,-]+$/i;
+
+/** --token, --api-key, --client-secret, --auth (long flags only: a short flag says nothing). */
+function isSecretFlag(flag: string): boolean {
+	const m = /^--([A-Za-z][\w-]*)$/.exec(flag);
+	if (!m) return false;
+	return m[1]
+		.toLowerCase()
+		.split(/[-_]/)
+		.some((w) => SECRET_FLAG_WORDS.has(w));
 }
 
-const SHELL_SCRIPT_FLAG = /^-[A-Za-z]*c$/;
-const EVAL_FLAG = /^(?:-[A-Za-z]*[ce]|-[pP]e?|--eval|--print|-E|-Command|\/[ck])$/i;
-/** Interpreters whose script-carrying flag (-c, -e, --eval, ...) must never be redacted. */
-const INTERPRETER_FLAGS: Record<string, RegExp> = Object.fromEntries([
-	...["sh", "bash", "zsh", "dash", "ksh", "fish", "ash"].map((n) => [n, SHELL_SCRIPT_FLAG]),
-	...[
-		"python",
-		"python3",
-		"perl",
-		"ruby",
-		"php",
-		"node",
-		"nodejs",
-		"bun",
-		"deno",
-		"pwsh",
-		"powershell",
-		"cmd",
-		"cmd.exe",
-	].map((n) => [n, EVAL_FLAG]),
-]);
+/** Mask known token shapes, plain-URL secrets and password userinfo; count each mask. */
+function maskKnownShapes(text: string, count: { n: number }): string {
+	const hit = (rep: string) => () => {
+		count.n++;
+		return rep;
+	};
+	let out = text.replace(/\b(?:https?|wss?):\/\/[^\s"'`]+/g, (m) => {
+		if (!PLAIN_URL.test(m)) return m;
+		const r = redactUrl(m);
+		if (r !== m) count.n++;
+		return r;
+	});
+	for (const re of TOKEN_SHAPES) out = out.replace(re, hit("***"));
+	return out.replace(AUTH_SCHEME, (_m, scheme: string) => {
+		count.n++;
+		return `${scheme} ***`;
+	});
+}
+
+/** A header value ("Name: value") with its value masked when the name is a credential header. */
+function maskHeader(arg: string, count: { n: number }): string {
+	const m = /^([\w-]+)(\s*:\s*)(.+)$/s.exec(arg);
+	if (!m || !SECRET_HEADER.test(m[1])) return maskKnownShapes(arg, count);
+	count.n++;
+	return `${m[1]}${m[2]}***`;
+}
 
 /**
- * Redact an argument list in context: the value after a flag whose name says
- * key, token, secret, password, auth or cred, and after -H / --header, is
- * masked; every argument also goes through redact(), and a long random-looking
- * argument is masked whole.
+ * Redact a stdio server's argument list, allow-list style: a value is masked
+ * only when it has a known secret shape (a known token prefix, the value after
+ * a long flag named for a secret, a credential header after -H / --header, or
+ * curl's -k / -K). Everything else, scripts and NAME=value pairs included, is
+ * shown as is, so approve-mcp never hides code. `masked` counts the masks.
  */
-export function redactArgs(args: readonly unknown[], command?: string): string[] {
-	const interpreter = command !== undefined ? INTERPRETER_FLAGS[programName(command)] : undefined;
+export function redactStdio(
+	args: readonly unknown[],
+	command?: string,
+): { args: string[]; masked: number } {
 	// For HTTP clients (curl and the like) -k and -K are masked too: some take a
 	// key there, and curl's -K names a config file that can hold credentials.
 	const httpClient = command !== undefined && HTTP_CLIENTS.has(programName(command));
+	const count = { n: 0 };
 	const out: string[] = [];
 	for (let i = 0; i < args.length; i++) {
 		const arg = String(args[i]);
 		const prev = i > 0 ? String(args[i - 1]) : "";
-		// The script a person approves is shown whole: masking it would hide the code.
-		if (interpreter?.test(prev)) out.push(arg);
-		else if (
-			SECRET_FLAG.test(prev) ||
-			HEADER_FLAG.test(prev) ||
-			(httpClient && /^-[kK]$/.test(prev))
-		) {
+		const inline = /^(--[A-Za-z][\w-]*)=(.*)$/s.exec(arg);
+		if (isSecretFlag(prev) || (httpClient && /^-[kK]$/.test(prev))) {
+			count.n++;
 			out.push("***");
-		} else if (looksLikeSecret(arg) || isDottedToken(arg)) out.push("***");
-		else out.push(redact(arg));
+		} else if (HEADER_FLAG.test(prev)) out.push(maskHeader(arg, count));
+		else if (inline && isSecretFlag(inline[1])) {
+			count.n++;
+			out.push(`${inline[1]}=***`);
+		} else if (/^--header=/.test(arg)) out.push(`--header=${maskHeader(arg.slice(9), count)}`);
+		else out.push(maskKnownShapes(arg, count));
 	}
-	return out;
+	return { args: out, masked: count.n };
+}
+
+/** redactStdio without the count. */
+export function redactArgs(args: readonly unknown[], command?: string): string[] {
+	return redactStdio(args, command).args;
 }
 
 /** The program a server runs, by name only: env assignments skipped, no path, no args. */
@@ -433,24 +497,36 @@ function summarizeServer(e: McpEntry): string {
 	return `program ${programName(String(e.command))}${envKeys.length ? `, env: ${envKeys.join(", ")} (values not shown)` : ""}`;
 }
 
-/** What approve shows before it lets a server start: the full command or URL, redacted. */
-function fullServer(e: McpEntry): string {
-	if (e.url)
-		return `url ${redact(e.url)}${e.headers ? ` (headers: ${Object.keys(e.headers).join(", ")}, values not shown)` : ""}`;
-	const args = redactArgs(e.args ?? [], String(e.command ?? "")).map((a) => JSON.stringify(a));
+/**
+ * What approve shows before it lets a server start: the full command or URL.
+ * A stdio command keeps its code visible and masks only known secret shapes,
+ * unless `showMasked` asks for every value as is. `masked` counts the masks.
+ */
+function fullServer(e: McpEntry, showMasked = false): { text: string; masked: number } {
+	if (e.url) {
+		const text = `url ${showMasked ? e.url : redact(e.url)}${e.headers ? ` (headers: ${Object.keys(e.headers).join(", ")}, values not shown)` : ""}`;
+		return { text, masked: 0 };
+	}
+	const command = String(e.command ?? "");
+	const raw = (e.args ?? []).map((a) => String(a));
+	const shownCommand = showMasked ? { args: [command], masked: 0 } : redactStdio([command]);
+	const shownArgs = showMasked ? { args: raw, masked: 0 } : redactStdio(raw, command);
+	const args = shownArgs.args.map((a) => JSON.stringify(a));
 	const envKeys = Object.keys(e.env ?? {});
-	return `command ${redact(String(e.command))}${args.length ? ` ${args.join(" ")}` : ""}${envKeys.length ? `; env: ${envKeys.join(", ")} (values not shown)` : ""}`;
+	const text = `command ${shownCommand.args[0]}${args.length ? ` ${args.join(" ")}` : ""}${envKeys.length ? `; env: ${envKeys.join(", ")} (values not shown)` : ""}`;
+	return { text, masked: shownCommand.masked + shownArgs.masked };
 }
 
 /**
- * The hash recorded for an imported server: over its shape with every secret
- * value replaced (env and header values dropped, args, command and URL
- * redacted), so imports.json holds no secret and no hash of one.
+ * The hash recorded for an imported server. Command and args are hashed as
+ * they are, so two servers that differ anywhere (a hidden payload included)
+ * never share a hash; imports.json holds only this digest, never the values.
+ * Env and header values are dropped (names only) and the URL is redacted.
  */
 function serverHash(e: McpEntry): string {
 	const shape = {
-		command: e.command ? redact(String(e.command)) : undefined,
-		args: redactArgs(e.args ?? [], String(e.command ?? "")),
+		command: e.command !== undefined ? String(e.command) : undefined,
+		args: (e.args ?? []).map((a) => String(a)),
 		env: Object.keys(e.env ?? {}).sort(),
 		url: e.url ? redact(String(e.url)) : undefined,
 		headers: Object.keys(e.headers ?? {}).sort(),
@@ -565,13 +641,16 @@ function importMcp(
 
 /**
  * Approve one pending MCP server. Without `confirm` it only shows what would
- * run (full command and args, redacted, and the file it came from); with
- * `confirm` (`--yes`) it moves the server into the live list. Never starts it.
+ * run (full command and args, known secret shapes masked, and the file it
+ * came from); with `confirm` (`--yes`) it moves the server into the live list.
+ * When anything is masked, `--yes` is refused unless `showMasked`
+ * (`--show-masked`) printed every value as is. Never starts it.
  */
 export function approveMcp(
 	name: string,
 	paths: Pick<ImportPaths, "mcpConfig">,
 	confirm = false,
+	showMasked = false,
 ): { code: number; output: string } {
 	if (!fs.existsSync(paths.mcpConfig)) return { code: 1, output: `No ${paths.mcpConfig}.` };
 	const config = JSON.parse(fs.readFileSync(paths.mcpConfig, "utf8")) as Record<
@@ -590,17 +669,38 @@ export function approveMcp(
 	const { importedFrom, ...server } = entry as McpEntry & {
 		importedFrom?: { path?: string; source?: string };
 	};
+	const full = fullServer(server, showMasked);
 	const shown = [
-		`  ${fullServer(server)}`,
+		`  ${full.text}`,
 		`  from ${importedFrom?.source ?? "unknown source"}: ${importedFrom?.path ?? "unknown file"}`,
 	];
+	const maskedNote =
+		full.masked > 0
+			? [
+					`  ${full.masked} ${full.masked === 1 ? "value" : "values"} masked (shown as ***). See every value before approving: 8gent ext approve-mcp ${name} --show-masked`,
+				]
+			: [];
 	if (!confirm) {
 		return {
 			code: 0,
 			output: [
 				`MCP server "${name}" would run:`,
 				...shown,
-				`Nothing changed. If that is what you expect: 8gent ext approve-mcp ${name} --yes`,
+				...maskedNote,
+				full.masked > 0
+					? `Nothing changed. If that is what you expect: 8gent ext approve-mcp ${name} --show-masked --yes`
+					: `Nothing changed. If that is what you expect: 8gent ext approve-mcp ${name} --yes`,
+			].join("\n"),
+		};
+	}
+	if (full.masked > 0) {
+		return {
+			code: 1,
+			output: [
+				`Refused: MCP server "${name}" has masked values, so you would approve something you have not seen:`,
+				...shown,
+				...maskedNote,
+				`To approve it, look at every value first: 8gent ext approve-mcp ${name} --show-masked --yes`,
 			].join("\n"),
 		};
 	}

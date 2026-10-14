@@ -56,7 +56,8 @@ const USAGE = [
 	"  pi: same as import-pi. claude-code: ~/.claude/commands become /claude-<name> prompt",
 	"  templates (staged; --enable turns them on); ~/.claude/skills are already read in place.",
 	"  mcp: MCP servers from Claude Code or Pi are added as pending; none starts until approved.",
-	"       8gent ext approve-mcp <name> [--yes]   shows what it runs; --yes approves",
+	"       8gent ext approve-mcp <name> [--show-masked] [--yes]   shows what it runs; --yes approves",
+	"       a server with masked values (***) is approved only with --show-masked --yes",
 ].join("\n");
 
 /** The file the host loads for an imported entry: the file, or a folder's index. */
@@ -89,11 +90,13 @@ export async function runExtCommand(
 	let fromFlag: string | undefined;
 	let enable = false;
 	let yes = false;
+	let showMasked = false;
 	for (let i = 0; i < raw.length; i++) {
 		if (raw[i] === "--to" && raw[i + 1]) toFlag = path.resolve(raw[++i]);
 		else if (raw[i] === "--from" && raw[i + 1]) fromFlag = raw[++i];
 		else if (raw[i] === "--enable") enable = true;
 		else if (raw[i] === "--yes") yes = true;
+		else if (raw[i] === "--show-masked") showMasked = true;
 		else rest.push(raw[i]);
 	}
 	if (sub === "enable" || sub === "disable") {
@@ -125,7 +128,7 @@ export async function runExtCommand(
 				output: `Refused: approving an MCP server needs a person at an interactive terminal. Run it yourself: 8gent ext approve-mcp ${rest[0]} --yes`,
 			};
 		}
-		return approveMcp(rest[0], paths, yes);
+		return approveMcp(rest[0], paths, yes, showMasked);
 	}
 	if (sub === "import") {
 		const [source, ...more] = rest;
