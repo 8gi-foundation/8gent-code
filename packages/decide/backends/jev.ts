@@ -193,6 +193,11 @@ export class JevBackend implements DecideBackend {
 	private readonly timeoutMs: number;
 	private readonly fetchImpl: FetchLike;
 
+	/** The hosted gateway the state goes to. */
+	get endpoint(): string {
+		return this.url;
+	}
+
 	constructor(opts: JevBackendOptions) {
 		if (!opts.apiKey) throw new DecideUnavailableError(`jev: no ${JEV_KEY_ENV} in env`);
 		this.apiKey = opts.apiKey;
@@ -279,6 +284,11 @@ export class FallbackBackend implements DecideBackend {
 
 	get model(): string {
 		return this.answered?.model ?? this.primary.model;
+	}
+
+	/** The primary's endpoint, whoever answered last: the next state goes there first. */
+	get endpoint(): string | undefined {
+		return this.primary.endpoint;
 	}
 
 	private withTimeout(p: Promise<SystemOneResponse>): Promise<SystemOneResponse> {

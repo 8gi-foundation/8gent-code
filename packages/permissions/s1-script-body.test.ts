@@ -657,3 +657,161 @@ describe.skipIf(!POSIX)("a judge that fails while a script is in play never allo
 		expect(r.run).toBe(true);
 	});
 });
+
+describe.skipIf(!POSIX)("round 3: startup variables, files written in the line, trap", () => {
+	const { scriptLaunch } = require("./s1-script-body") as typeof import("./s1-script-body");
+	const kind = (cmd: string) => scriptLaunch(cmd, ws, ws).kind;
+
+	test("a startup variable before a script is never carried into the rebuilt command", () => {
+		put("ok.sh", QUIET);
+		put("evil.sh", "echo MARK_HIGH\n");
+		for (const cmd of [
+			"BASH_ENV=evil.sh bash ok.sh",
+			"ENV=evil.sh sh ok.sh",
+			"SHELLOPTS=xtrace PS4='$(bash evil.sh)' bash ok.sh",
+			"BASHOPTS=x bash ok.sh",
+			"ZDOTDIR=. zsh ok.sh",
+			"declare -x BASH_ENV=evil.sh; bash ok.sh",
+			"FOO=1 BASH_ENV=evil.sh ./ok.sh",
+		])
+			expect([cmd, kind(cmd)]).toEqual([cmd, "unchecked"]);
+	});
+
+	test("a plain assignment before a script still rebuilds (unchanged)", () => {
+		put("ok.sh", QUIET);
+		const s = scriptLaunch("FOO=1 bash ok.sh", ws, ws);
+		expect(s.kind).toBe("checked");
+		expect(s.kind === "checked" && s.runInstead).toBe(`FOO=1 bash -c ${shQuote(QUIET)} ok.sh`);
+	});
+
+	test("reading a startup variable is not setting it", () => {
+		expect(kind('echo "$BASH_ENV"')).toBe("none");
+		put("ok.sh", QUIET);
+		expect(kind("bash ok.sh")).toBe("checked");
+	});
+
+	test("IFS in a body stays checked: every shell resets it at startup", () => {
+		put("loop.sh", '#!/bin/sh\nwhile IFS= read -r l; do echo "$l"; done < notes.txt\n');
+		expect(kind("bash loop.sh")).toBe("checked");
+	});
+
+	test("a startup variable in this process's environment makes a launch unchecked", () => {
+		put("ok.sh", QUIET);
+		const before = process.env.BASH_ENV;
+		process.env.BASH_ENV = join(ws, "evil.sh");
+		try {
+			expect(kind("bash ok.sh")).toBe("unchecked");
+		} finally {
+			if (before === undefined) Reflect.deleteProperty(process.env, "BASH_ENV");
+			else process.env.BASH_ENV = before;
+		}
+	});
+
+	test("a shell handed a file written earlier in the line, by any non-inert program", () => {
+		for (const cmd of [
+			"printf x > new.sh; flock /tmp/l sh new.sh",
+			"cat > later.sh <<'X'\necho hi\nX\ndocker exec box bash later.sh",
+			"ssh host bash missing.sh",
+		])
+			expect([cmd, kind(cmd)]).toEqual([cmd, "unchecked"]);
+	});
+
+	test("process tools naming a shell are inert", () => {
+		for (const cmd of [
+			"pgrep -f bash x",
+			"pkill -f bash x",
+			"killall bash zsh",
+			"ps -C bash -o pid",
+		])
+			expect([cmd, kind(cmd)]).toEqual([cmd, "none"]);
+	});
+
+	test("trap's action is read like eval; listing and resetting run nothing", () => {
+		put("evil.sh", "echo MARK_HIGH\n");
+		expect(kind("trap 'bash evil.sh' EXIT")).not.toBe("none");
+		expect(kind("trap -- 'bash evil.sh' INT")).not.toBe("none");
+		expect(kind("trap '. evil.sh' EXIT")).not.toBe("none");
+		expect(kind('trap "$(cat evil.sh)" EXIT')).toBe("unchecked");
+		for (const cmd of ["trap -p", "trap -l", "trap - EXIT", "trap 'rm -f x' EXIT", "trap EXIT"])
+			expect([cmd, kind(cmd)]).toEqual([cmd, "none"]);
+	});
+});
+
+describe.skipIf(!POSIX)("round 3: a script body never leaves this machine for a judge", () => {
+	class EndpointJudge extends MarkerJudge {
+		constructor(readonly endpoint: string) {
+			super();
+		}
+	}
+	const at = (endpoint: string) => {
+		judge = new EndpointJudge(endpoint);
+		install();
+	};
+
+	for (const endpoint of [
+		"http://10.0.0.5:11434",
+		"https://judge.example.com",
+		"http://192.168.1.20:8000",
+		"http://127.0.0.1.example.com:8000",
+		"not a url",
+	]) {
+		test(`judge at ${endpoint}: the body is not sent, a person decides`, async () => {
+			at(endpoint);
+			put("tools/run.sh", "#!/bin/sh\necho MARK_BODY\n");
+			const r = await gate("bash tools/run.sh");
+			expect(r.run).toBe(false);
+			expect(r.guard?.verdict).toBe("escalate");
+			expect(judgeSaw("MARK_BODY")).toBe(false);
+		});
+	}
+
+	for (const endpoint of [
+		"http://127.0.0.1:11434",
+		"http://localhost:8000",
+		"http://[::1]:11434",
+	]) {
+		test(`judge at ${endpoint}: the body is judged as before`, async () => {
+			at(endpoint);
+			put("tools/run.sh", "#!/bin/sh\necho MARK_BODY\n");
+			const r = await gate("bash tools/run.sh");
+			expect(r.run).toBe(true);
+			expect(judgeSaw("MARK_BODY")).toBe(true);
+		});
+	}
+
+	test("a remote judge still judges a command with no script (unchanged)", async () => {
+		at("http://10.0.0.5:11434");
+		const r = await gate("touch notes.txt");
+		expect(r.run).toBe(true);
+		expect(judge.states.length).toBeGreaterThan(0);
+	});
+
+	test("judgeOnThisMachine", async () => {
+		const { judgeOnThisMachine } = await import("./system-one-gate");
+		expect(judgeOnThisMachine({ name: "llamacpp" })).toBe(true);
+		expect(judgeOnThisMachine({ name: "jev" })).toBe(false);
+		expect(judgeOnThisMachine({ name: "laya", endpoint: "http://127.0.0.1:8000" })).toBe(true);
+		expect(judgeOnThisMachine({ name: "laya", endpoint: "http://laya.lan:8000" })).toBe(false);
+		expect(judgeOnThisMachine({ name: "ollama", endpoint: "http://127.9.0.1:11434" })).toBe(true);
+	});
+});
+
+describe("round 3: backends say where they send the state", () => {
+	test("ollama, laya and jev expose their endpoint; llamacpp has none", async () => {
+		const { OllamaBackend } = await import("../decide/backends/ollama");
+		const { LayaBackend } = await import("../decide/backends/laya");
+		const { JevBackend, FallbackBackend, JEV_URL } = await import("../decide/backends/jev");
+		expect(new OllamaBackend({ model: "m", host: "http://10.1.2.3:11434/" }).endpoint).toBe(
+			"http://10.1.2.3:11434",
+		);
+		expect(new LayaBackend({ url: "http://laya.lan:8000" }).endpoint).toBe("http://laya.lan:8000");
+		const jev = new JevBackend({ apiKey: "k" });
+		expect(jev.endpoint).toBe(JEV_URL);
+		const fb = new FallbackBackend(
+			jev,
+			async () => new LayaBackend(),
+			() => {},
+		);
+		expect(fb.endpoint).toBe(JEV_URL);
+	});
+});

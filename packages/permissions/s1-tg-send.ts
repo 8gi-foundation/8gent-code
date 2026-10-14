@@ -105,8 +105,19 @@ const API_BASE = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?\
 const UNQUOTED = /^[A-Za-z0-9._/+,=@:%-]$/;
 const NUM = /^\d{1,4}(\.\d{1,3})?$/;
 const CHAT = /^chat_id=-?\d{1,20}$/;
-/** Set in the environment, any of these runs code, changes parsing, or traces the token (8SO, #4102). */
-const SHELL_ENV = new Set(["BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "PS4", "IFS"]);
+/**
+ * Set in the environment, any of these runs code, changes parsing, or traces the token (8SO,
+ * #4102). ZDOTDIR points zsh at startup files. Also read by s1-script-body.ts.
+ */
+export const SHELL_ENV = new Set([
+	"BASH_ENV",
+	"ENV",
+	"SHELLOPTS",
+	"BASHOPTS",
+	"PS4",
+	"IFS",
+	"ZDOTDIR",
+]);
 /** The two variables the curl line expands: only bot.env may set them (8SO, #4102). */
 const INHERITED = new Set(["TELEGRAM_API_BASE", "TELEGRAM_BOT_TOKEN"]);
 

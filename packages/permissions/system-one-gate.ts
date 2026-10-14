@@ -915,7 +915,12 @@ export async function systemOneGate(
 				const decider = await getDecider();
 				const t = await thresholdsFor(decider);
 				thresholds = t.label;
-				requireCalibrated(mode, await decider.backend(), t.label);
+				const backend = await decider.backend();
+				requireCalibrated(mode, backend, t.label);
+				// A script body is the member's own file: it never goes to a judge off this machine.
+				// The gate asks a person instead (below), with the body read by the rules here.
+				if (script.body !== undefined && !judgeOnThisMachine(backend))
+					throw new Error("the judge is not on this machine, so the script is not sent to it");
 				await announceJudgeLoad(decider, env);
 				const { bashGuard } = await import("../decide/guard");
 				return bashGuard(command, decider, t.opts, script.body);
@@ -981,6 +986,23 @@ export async function systemOneGate(
 		);
 	}
 	return decide(command, guard, thresholds as SystemOneThresholds, hint, where, script);
+}
+
+/**
+ * True when the judge runs on this machine: in this process (no endpoint), or an HTTP judge on a
+ * loopback address (127.0.0.0/8, ::1, localhost). The hosted jev judge never is. Anything else
+ * (another host, a name that is not loopback, an endpoint that does not parse) is not.
+ */
+export function judgeOnThisMachine(b: { name: string; endpoint?: string }): boolean {
+	if (b.name === "jev") return false;
+	if (b.endpoint === undefined) return true;
+	let host: string;
+	try {
+		host = new URL(b.endpoint).hostname.toLowerCase();
+	} catch {
+		return false;
+	}
+	return host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host);
 }
 
 /**

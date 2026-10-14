@@ -46,6 +46,7 @@ import * as path from "node:path";
 import { type SimpleCommand, simpleCommands } from "../decide/rules";
 import { inside } from "./s1-rm-nothing";
 import { SECRET, canon, symlinkBelow } from "./s1-run-in-project";
+import { SHELL_ENV } from "./s1-tg-send";
 
 /** The most of a script that is read and checked: 16 KiB. Larger goes to a person. */
 export const SCRIPT_BODY_CAP = 16 * 1024;
@@ -59,6 +60,25 @@ const NONE: ScriptLaunch = { kind: "none" };
 const unchecked = (why: string): ScriptLaunch => ({ kind: "unchecked", why });
 
 const SHELL_NAMES = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+
+/**
+ * Shell startup variables: set in a shell's environment, each runs a file or code the command
+ * does not show (BASH_ENV, ENV, ZDOTDIR) or changes what a checked body does (SHELLOPTS,
+ * BASHOPTS, PS4 with xtrace). The list is the tg-send one (s1-tg-send.ts SHELL_ENV) without
+ * IFS: bash, zsh, dash, sh and ksh all reset IFS at startup (measured on macOS, 14 Oct 2026),
+ * and `while IFS= read` is too common in scripts to send each one to a person.
+ */
+const STARTUP_VARS = [...SHELL_ENV].filter((v) => v !== "IFS");
+/**
+ * A startup variable named anywhere but in a plain `$NAME` read: an assignment (`NAME=`, after
+ * env, export, declare, local), an export by name, `${NAME:=...}`, `read NAME`, `printf -v NAME`.
+ * Named in the command or a body, the launch is unchecked: no file it points at is read.
+ */
+const STARTUP_MENTION = new RegExp(
+	`(?<![A-Za-z0-9_$])(?:${STARTUP_VARS.join("|")})(?![A-Za-z0-9_])`,
+);
+const startupInEnv = (): string | undefined =>
+	STARTUP_VARS.find((v) => (process.env[v] ?? "") !== "");
 /** A word whose text is its value: no quote, escape, expansion or glob. */
 const PLAIN_WORD = /^[A-Za-z0-9._/+@%,:=-]+$/;
 const SHORT_OPTS = /^[-+][A-Za-z]+$/;
@@ -128,6 +148,18 @@ const INERT = new Set([
 	"brew",
 	"apt",
 	"apt-get",
+	// Process and file tools: a shell name among their words is a process or a file name.
+	"pgrep",
+	"pkill",
+	"killall",
+	"ps",
+	"pidof",
+	"ln",
+	"cp",
+	"mv",
+	"chmod",
+	"chown",
+	"touch",
 ]);
 
 /**
@@ -321,19 +353,23 @@ function shellLaunch(
 	return hit({ form: "shell", argv0: t[0], opts, file: t[i] });
 }
 
-/** True when a shell, eval or source among `t`'s arguments is handed options, command text or a file. */
-function handsAShell(t: string[], cwd: string | undefined): boolean {
+/** A word that is itself command text starting with a shell, eval or source (`-c 'bash x.sh'`). */
+function shellText(w: string): boolean {
+	const words = w.trim().split(/[ \t\n]+/);
+	if (words.length < 2) return false;
+	return isShell(words[0]) || words[0] === "eval" || words[0] === "source" || words[0] === ".";
+}
+
+/**
+ * True when a shell, eval or source among `t`'s arguments is handed anything (options, command
+ * text, a file, whether or not that file exists yet: it may be written earlier in the same line
+ * or by the program itself), or when a word is command text that starts one.
+ */
+function handsAShell(t: string[]): boolean {
 	for (let j = 1; j < t.length; j++) {
+		if (shellText(t[j])) return true;
 		if (!isShell(t[j]) && t[j] !== "eval" && t[j] !== "source") continue;
-		const next = t[j + 1];
-		if (next === undefined) continue;
-		if (/^[-+]/.test(next) || /[$`]/.test(next)) return true;
-		const abs = cwd && !path.isAbsolute(next) ? path.resolve(cwd, next) : next;
-		try {
-			if (statSync(abs, { throwIfNoEntry: false })?.isFile()) return true;
-		} catch {
-			return true;
-		}
+		if (t[j + 1] !== undefined) return true;
 	}
 	return false;
 }
@@ -371,6 +407,14 @@ function launchIn(c: Cmd, cwd: string | undefined, depth = 0): Found {
 		if (c.hereString || c.procSub) return hit(odd("eval is fed text that is not read first"));
 		return t.length > 1 ? inlineLaunch(t.slice(1).join(" "), cwd, depth) : null;
 	}
+	// trap's action runs later in this same shell: read it as a line, like eval. `-p`, `-l` and
+	// `-` (reset) run nothing.
+	if (w0 === "trap") {
+		const k = t[1] === "--" ? 2 : 1;
+		const action = t[k];
+		if (action === undefined || action.startsWith("-") || t.length < k + 2) return null;
+		return inlineLaunch(action, cwd, depth);
+	}
 	if (w0 === "." || w0 === "source") {
 		if (c.procSub) return hit(odd("a process substitution is sourced, not read first"));
 		return t.length > 1 ? hit({ form: "source", file: t[1], args: t.length - 2 }) : null;
@@ -398,7 +442,7 @@ function launchIn(c: Cmd, cwd: string | undefined, depth = 0): Found {
 	if (w0.includes("/") && pathIsScript(w0, cwd, false)) return hit({ form: "exec", file: w0 });
 	// Any other program (ssh, flock, setsid, script, ...) handing a shell a file, options or
 	// command text runs a script this check does not read.
-	if (!INERT.has(b) && handsAShell(t, cwd))
+	if (!INERT.has(b) && handsAShell(t))
 		return {
 			launch: odd(`${b} hands a shell a file or command text, which is not read`),
 			direct: false,
@@ -526,8 +570,13 @@ function readScript(file: string, cwd: string | undefined, project: string | und
 	}
 }
 
-/** True when `body` itself launches a script, or runs text that is not read: one level only. */
+/**
+ * True when `body` itself launches a script, runs text that is not read (one level only), or
+ * names a shell startup variable (a shell it starts, directly or through any program, would run
+ * a file this check does not read).
+ */
 function launchesScript(body: string, cwd: string): boolean {
+	if (STARTUP_MENTION.test(body)) return true;
 	return simpleCommands(body).some((c) => launchIn(c, cwd) !== null);
 }
 
@@ -542,6 +591,8 @@ function rebuild(command: string, l: Launch, read: { body: string; mode: number 
 	if (/[\r\n]/.test(trimmed)) return null;
 	// Leading `NAME=value` words stay in front: they set the environment of the same shell.
 	const pre = (ASSIGNMENTS.exec(trimmed) as RegExpExecArray)[0];
+	// Never carry a startup variable into the checked run (scriptLaunch refuses them first).
+	if (STARTUP_MENTION.test(pre)) return null;
 	const text = trimmed.slice(pre.length);
 	const words = (ws: string[]) =>
 		ws.every((w) => PLAIN_WORD.test(w)) ? ws.map(escapeRe).join("[ \\t]+") : null;
@@ -577,12 +628,24 @@ export function scriptLaunch(
 	project?: string,
 ): ScriptLaunch {
 	try {
+		// A startup variable set in the command makes any shell it starts, through any program,
+		// run a file first that is not read here.
+		const named = STARTUP_MENTION.exec(command);
+		if (named)
+			return unchecked(
+				`the command sets ${named[0]}, which makes a shell run a file this check does not read`,
+			);
 		const found: { launch: Launch; first: boolean }[] = [];
 		simpleCommands(command).forEach((c, i) => {
 			const hit = launchIn(c, cwd);
 			if (hit) found.push({ launch: hit.launch, first: i === 0 && hit.direct });
 		});
 		if (!found.length) return NONE;
+		const inherited = startupInEnv();
+		if (inherited)
+			return unchecked(
+				`${inherited} is set in this environment, so the shell would run a file this check does not read`,
+			);
 		const o = found.find((f) => f.launch.form === "odd");
 		if (o?.launch.form === "odd") return unchecked(o.launch.why);
 		if (found.length > 1) return unchecked("the command runs more than one script");
