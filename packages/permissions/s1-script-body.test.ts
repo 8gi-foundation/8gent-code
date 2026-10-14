@@ -28,6 +28,7 @@ import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../deci
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_FLAG,
+	SYSTEM_ONE_TIMEOUT_ENV,
 	_resetSystemOne,
 	_setSystemOneOverridesForTests,
 	systemOneGate,
@@ -270,12 +271,14 @@ describe.skipIf(!POSIX)(
 			await refused("bash tools/big.sh");
 		});
 
-		test("exactly at the cap is read", async () => {
-			const body = `#!/bin/sh\n${"#".repeat(16 * 1024 - 11)}\n`;
+		test("exactly at the cap is read by the rules, to the last line", async () => {
+			const pad = `#!/bin/sh\n${"#".repeat(16 * 1024 - 11 - 15)}\n`;
+			const body = `${pad}rm -rf "$HOME"\n`;
 			expect(body.length).toBe(16 * 1024);
 			put("tools/cap.sh", body);
 			const r = await gate("bash tools/cap.sh");
-			expect(r.run).toBe(true);
+			expect(r.run).toBe(false);
+			expect(r.guard?.verdict).toBe("block");
 		});
 
 		test("a symlink to a script", async () => {
@@ -453,5 +456,204 @@ describe.skipIf(!POSIX)("what is unchanged", () => {
 		expect(r.run).toBe(true);
 		expect(r.runInstead).toBeUndefined();
 		expect(judge.states.length).toBe(0);
+	});
+});
+
+describe.skipIf(!POSIX)(
+	"launch shapes that cannot be rebuilt into checked bytes go to a person",
+	() => {
+		const refused = async (cmd: string) => {
+			const r = await gate(cmd);
+			expect({ cmd, run: r.run }).toEqual({ cmd, run: false });
+			expect(r.guard?.verdict).not.toBe("allow");
+			expect(r.runInstead).toBeUndefined();
+			return r;
+		};
+		beforeEach(() => {
+			put("tools/run.sh", QUIET);
+			put("tools/list", "tools/run.sh\n");
+		});
+
+		test("a shell -c whose text is worked out when it runs", async () => {
+			await refused('bash -c "$(cat tools/run.sh)"');
+			await refused('bash -c "`cat tools/run.sh`"');
+			await refused('bash -c "$(<tools/run.sh)"');
+			await refused('S=$(cat tools/run.sh); bash -c "$S"');
+			await refused('sh -ec "$S"');
+			await refused('bash -o pipefail -c "$S"');
+		});
+
+		test("a shell -c whose text runs a script file", async () => {
+			put("tools/run.sh", HIGH);
+			const r = await refused("sh -c 'bash tools/run.sh'");
+			expect(judgeSaw("MARK_HIGH")).toBe(true);
+			expect(r.guard?.verdict).toBe("block");
+		});
+
+		test("eval, or a command name that is a substitution", async () => {
+			await refused('eval "$(cat tools/run.sh)"');
+			await refused("eval `cat tools/run.sh`");
+			await refused("$(cat tools/run.sh)");
+			await refused("`cat tools/run.sh`");
+			await refused("S=$(cat tools/run.sh); $S");
+		});
+
+		test("process substitution fed to a shell or a source", async () => {
+			await refused("bash <(cat tools/run.sh)");
+			await refused("source <(cat tools/run.sh)");
+			await refused(". <(cat tools/run.sh)");
+		});
+
+		test("a here-string fed to a shell", async () => {
+			await refused('bash <<< "$(cat tools/run.sh)"');
+			await refused('bash -s <<< "$(cat tools/run.sh)"');
+			await refused('sh <<<"$S"');
+		});
+
+		test("wrappers: exec, command, builtin, nohup, sudo, env -S", async () => {
+			await refused("exec -a x bash tools/run.sh");
+			await refused("command . tools/run.sh");
+			await refused("command source tools/run.sh");
+			await refused("builtin source tools/run.sh");
+			await refused("nohup bash tools/run.sh");
+			await refused("nohup sh < tools/run.sh");
+			await refused("sudo -s < tools/run.sh");
+			await refused("sudo -i bash tools/run.sh");
+			await refused("env -S 'bash tools/run.sh'");
+			await refused('env -S"bash tools/run.sh"');
+			await refused("env -iS 'bash tools/run.sh'");
+			await refused("/usr/bin/env --split-string='bash tools/run.sh'");
+		});
+
+		test("xargs and find handing file names to a shell", async () => {
+			await refused("xargs sh < tools/list");
+			await refused("xargs bash -c 'bash \"$1\"' _ < tools/list");
+			await refused("cat tools/list | xargs -n1 bash");
+			await refused("find tools -name '*.sh' -exec sh {} \\;");
+		});
+
+		test("another program handing a shell a file or command text", async () => {
+			await refused("ssh host bash -s < tools/run.sh");
+			await refused("flock .tmp/lock bash tools/run.sh");
+			await refused("setsid sh -c 'bash tools/run.sh'");
+		});
+
+		test("a shell this check does not read", async () => {
+			put("tools/run.fish", "echo slides\n");
+			await refused("fish tools/run.fish");
+		});
+
+		test("a body that hides a launch the same ways", async () => {
+			put("tools/outer.sh", 'echo start\neval "$(cat tools/run.sh)"\n');
+			await refused("bash tools/outer.sh");
+			put("tools/outer.sh", "echo start\nenv -S 'bash tools/run.sh'\n");
+			await refused("bash tools/outer.sh");
+		});
+
+		test("literal shapes with nothing to read are unchanged", async () => {
+			for (const cmd of [
+				"bash -c 'echo $HOME'",
+				"sh -c 'ls -la'",
+				"timeout 5 bash -c 'echo hi'",
+				"command -v bash",
+				"which bash",
+				"ls -la /bin/sh",
+				"env FOO=1 node -e 1",
+				"find . -name '*.png' -print",
+				"bash <<'EOF'\necho hi\nEOF",
+			]) {
+				const r = await gate(cmd);
+				expect({ cmd, run: r.run }).toEqual({ cmd, run: true });
+				expect(r.runInstead).toBeUndefined();
+			}
+		});
+	},
+);
+
+describe.skipIf(!POSIX)("the judge reads the whole body or is not trusted with it", () => {
+	test("a body too long for the judge's window goes to a person, never an allow", async () => {
+		// Quiet lines, well under the 16 KiB read cap, far over a 4096-token window at one byte per token.
+		const body = `#!/bin/sh\n${"echo slides\n".repeat(600)}`;
+		put("tools/long.sh", body);
+		const r = await gate("bash tools/long.sh");
+		expect(r.run).toBe(false);
+		expect(r.guard?.verdict).toBe("escalate");
+		expect(r.guard?.reason ?? "").toContain("window");
+		// The judge was never shown a part of the body as if it were all of it.
+		expect(judge.states.some((s) => s.includes("echo slides"))).toBe(false);
+	});
+
+	test("the rules still read a long body, so a block rule at the end blocks", async () => {
+		put("tools/long.sh", `#!/bin/sh\n${"echo slides\n".repeat(600)}rm -rf "$HOME"\n`);
+		const r = await gate("bash tools/long.sh");
+		expect(r.guard?.verdict).toBe("block");
+	});
+
+	test("a body that fits is judged whole, down to its last line", async () => {
+		put("tools/short.sh", `#!/bin/sh\n${"echo slides\n".repeat(20)}echo MARK_HIGH\n`);
+		const r = await gate("bash tools/short.sh");
+		expect(judgeSaw("MARK_HIGH")).toBe(true);
+		expect(r.run).toBe(false);
+	});
+});
+
+describe.skipIf(!POSIX)("a judge that fails while a script is in play never allows", () => {
+	/** A judge that never answers, throws, or answers with no usable probability. */
+	class FailingJudge implements DecideBackend {
+		readonly name = "stub";
+		readonly model = "stub-model";
+		constructor(private readonly how: "hang" | "throw" | "nan") {}
+		async ask(request: SystemOneRequest): Promise<SystemOneResponse> {
+			if (this.how === "hang") await new Promise((r) => setTimeout(r, 2_000));
+			if (this.how === "throw") throw new Error("judge crashed");
+			return {
+				answers: [
+					{
+						id: request.questions[0].id,
+						kind: "noul",
+						probabilities: { yes: Number.NaN },
+						confidence: 0,
+					},
+				],
+				backend: this.name,
+				model: this.model,
+				latencyMs: 0,
+			};
+		}
+	}
+	const failing = (how: "hang" | "throw" | "nan") =>
+		_setSystemOneOverridesForTests({
+			createDecider: () => createDecider({ backend: new FailingJudge(how), cacheSize: 0 }),
+			askHuman: async (req) => {
+				cards.push({ details: req.details, command: req.command });
+				return human;
+			},
+			calibrationDir: calibratedDir(),
+		});
+
+	for (const how of ["hang", "throw", "nan"] as const) {
+		test(`judge ${how}: a quiet script escalates (headless: not run)`, async () => {
+			failing(how);
+			put("tools/run.sh", QUIET);
+			const r = await gate("bash tools/run.sh", { [SYSTEM_ONE_TIMEOUT_ENV]: "200" });
+			expect(r.run).toBe(false);
+			expect(r.guard?.verdict).toBe("escalate");
+			expect(r.runInstead).toBeUndefined();
+		});
+	}
+
+	test("approved by a person, the checked bytes run", async () => {
+		failing("hang");
+		human = true;
+		put("tools/run.sh", QUIET);
+		const r = await gate("bash tools/run.sh", { [SYSTEM_ONE_TIMEOUT_ENV]: "200" });
+		expect(r.run).toBe(true);
+		expect(r.runInstead).toBe(`bash -c ${shQuote(QUIET)} tools/run.sh`);
+	});
+
+	test("with no script, a judge timeout still falls back to the rules (unchanged)", async () => {
+		failing("hang");
+		const r = await gate("echo hi", { [SYSTEM_ONE_TIMEOUT_ENV]: "200" });
+		expect(r.run).toBe(true);
 	});
 });

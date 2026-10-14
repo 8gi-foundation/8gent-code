@@ -85,3 +85,26 @@ describe("bashGuard with a script body", () => {
 		expect(j.states.length).toBe(1);
 	});
 });
+
+describe("a script body too long for the judge's window", () => {
+	const long = `#!/bin/sh\n${"echo slides\n".repeat(600)}`;
+
+	test("is never shown to the judge in part, and the verdict is at least escalate", async () => {
+		const j = judge();
+		const g = await modelGuard("bash tools/long.sh", j, {}, long);
+		expect(g.verdict).toBe("escalate");
+		expect(g.reason ?? "").toContain("window");
+		expect(j.states.some((s) => s.includes("echo slides"))).toBe(false);
+	});
+
+	test("a loud command is still blocked on its own score", async () => {
+		const g = await modelGuard("bash MARK_HIGH.sh", judge(), {}, long);
+		expect(g.verdict).toBe("block");
+	});
+
+	test("judgePromptFits bounds tokens by bytes against the shared window", async () => {
+		const { judgePromptFits } = await import("./guard");
+		expect(judgePromptFits("echo hi")).toBe(true);
+		expect(judgePromptFits("x".repeat(4096))).toBe(false);
+	});
+});

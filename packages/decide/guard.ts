@@ -20,6 +20,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { JUDGE_NUM_CTX, buildPrompt } from "./backends/ollama";
 import type { Decider } from "./index";
 import { type RuleResult, decideRules } from "./rules";
 
@@ -229,6 +230,30 @@ function promptControlResult(command: string): BashGuardResult | null {
 }
 
 /**
+ * Tokens of the judge window kept free of the prompt: a start token, a tokenizer's leading
+ * space piece and the one answer token, with room to spare.
+ */
+const JUDGE_WINDOW_RESERVE = 64;
+
+/**
+ * True when the judge reads all of `text` (a command or a script body) as one guard prompt.
+ * The prompt is printable ASCII (`guardState` escapes everything else), and no tokenizer makes
+ * more tokens than bytes from ASCII (byte-level BPE pieces are at least one byte; SentencePiece
+ * pieces at least one character), so its length in bytes bounds its tokens. The template is the
+ * Ollama one with the longest per-model prefix; the window is the one every Ollama and in-process
+ * judge loads (`JUDGE_NUM_CTX`). A prompt over it would be cut by the server, and a cut body
+ * judged as if whole.
+ */
+export function judgePromptFits(text: string): boolean {
+	const prompt = buildPrompt("qwen3", guardState(text), {
+		id: "q",
+		kind: "noul",
+		prompt: BASH_GUARD_QUESTION,
+	});
+	return Buffer.byteLength(prompt, "utf8") + JUDGE_WINDOW_RESERVE <= JUDGE_NUM_CTX;
+}
+
+/**
  * The model-only guard (round three): the prompt-control rule, then the
  * fenced model question with thresholds in code. `bashGuard` wraps it with the
  * rule pre-filter; it is exported for evals and the strictness property test.
@@ -252,12 +277,26 @@ export async function modelGuard(
 	// never lower it.
 	// A script body is judged the same way, as written and without comments: it can raise the
 	// score, never lower it.
-	const forms: string[] = [];
+	const all: string[] = [];
 	for (const text of script === undefined ? [command] : [command, script]) {
 		const bare = stripShellComments(text);
 		for (const form of bare !== text && bare.trim() !== "" ? [text, bare] : [text])
-			if (!forms.includes(form)) forms.push(form);
+			if (!all.includes(form)) all.push(form);
 	}
+	// With a script, a form too long for the judge's window is not asked about at all (the
+	// server would cut it and the judge answer for part of it), and the verdict is at least
+	// escalate. Without a script the command is judged as before.
+	const forms = script === undefined ? all : all.filter(judgePromptFits);
+	const unread = all.length - forms.length;
+	const tooLong: BashGuardResult = {
+		verdict: "escalate",
+		pYes: Number.NaN,
+		backend: "rule",
+		model: "judge-window",
+		rule: "script_over_judge_window",
+		reason: `the script is too long for the judge's ${JUDGE_NUM_CTX}-token window to read whole, so a person decides`,
+	};
+	if (!forms.length) return tooLong;
 	let answer: Awaited<ReturnType<Decider["noul"]>>;
 	try {
 		answer = await decider.noul(guardState(forms[0]), BASH_GUARD_QUESTION);
@@ -288,7 +327,10 @@ export async function modelGuard(
 			reason: "decider returned no valid probability, failing closed",
 		};
 	}
-	if (pYes >= low && pYes <= high) return { verdict: "escalate", pYes, ...meta };
-	if (pYes > blockAbove) return { verdict: "block", pYes, ...meta };
-	return { verdict: "allow", pYes, ...meta };
+	let judged: BashGuardResult;
+	if (pYes >= low && pYes <= high) judged = { verdict: "escalate", pYes, ...meta };
+	else if (pYes > blockAbove) judged = { verdict: "block", pYes, ...meta };
+	else judged = { verdict: "allow", pYes, ...meta };
+	if (unread === 0 || judged.verdict === "block") return judged;
+	return { ...judged, verdict: "escalate", rule: tooLong.rule, reason: tooLong.reason };
 }

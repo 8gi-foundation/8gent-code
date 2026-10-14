@@ -924,7 +924,15 @@ export async function systemOneGate(
 		);
 	} catch (err) {
 		const detail = (err as Error)?.message ?? String(err);
-		if (mode === "default") {
+		// A script in play is never left to the rules alone when the judge was meant to answer
+		// and did not (a timeout, a crash): its body may be what slowed or broke the judge. Only
+		// a machine with no calibrated judge, where rules-only is the setup, keeps the fallback.
+		if (
+			mode === "default" &&
+			(script.body === undefined ||
+				err instanceof UncalibratedJudgeError ||
+				detail.includes(NO_BACKEND))
+		) {
 			const reason =
 				err instanceof SystemOneTimeoutError
 					? `the judge gave no verdict within ${ms} ms${warmupLoading ? " (still loading)" : ""}`
@@ -957,9 +965,13 @@ export async function systemOneGate(
 	if (isModelVerdict(guard)) warmed = true;
 	if (judgeFailed(guard)) {
 		const reason = guard.reason ?? "the judge gave no valid answer";
+		// As above: with a script in play, a judge that failed is a person's call, unless no
+		// judge is installed at all.
+		const fallback =
+			mode === "default" && (script.body === undefined || reason.includes(NO_BACKEND));
 		return decide(
 			command,
-			mode === "default"
+			fallback
 				? await rulesOnly(command, reason, script.body)
 				: await askInstead(command, reason, script.body),
 			RULES_ONLY,
@@ -1044,10 +1056,12 @@ async function askInstead(
 	};
 }
 
+/** The decider's message when no judge is installed or reachable (decide/index.ts). */
+const NO_BACKEND = "no decide backend available";
+
 /** The notice's short form of why there is no judge; the full reason stays on the verdict. */
 function noticeReason(reason: string): string {
-	if (reason.startsWith("no decide backend available"))
-		return "no judge model installed or reachable";
+	if (reason.startsWith(NO_BACKEND)) return "no judge model installed or reachable";
 	return reason.length > 120 ? `${reason.slice(0, 117)}...` : reason;
 }
 

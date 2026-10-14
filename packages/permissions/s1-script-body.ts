@@ -19,9 +19,21 @@
  *               regular file, a symlink or under one, hardlinked (nlink > 1), outside the
  *               workspace, a secret-looking name, a path with an expansion, characters outside
  *               printable ASCII, a body that launches another script, more than one launch, or a
- *               shell reading its script from a pipe or a `<` file. The gate asks a person
- *               (headless: block). There is no "judge the bare command" fallback: padding a
- *               script past the cap must not bring back a verdict by name.
+ *               shell reading its script from a pipe or a `<` file. Also every launch shape that
+ *               cannot be rebuilt into checked bytes: `-c` or `eval` text worked out when it runs
+ *               (`"$(cat FILE)"`, a backtick, `"$S"`), a command name that is a substitution, a
+ *               here-string or process substitution fed to a shell or a source, `env -S`,
+ *               `sudo -s`/`-i`, a wrapper option not in its allowlist, xargs or find handing a
+ *               shell the names they build, another program handing a shell a file, options or
+ *               command text, and shells this file does not read (fish, csh, ...). Wrappers are
+ *               read by an allowlist of the options each takes (`WRAPPERS`), so a shape not
+ *               listed fails closed. The gate asks a person (headless: block). There is no
+ *               "judge the bare command" fallback: padding a script past the cap must not bring
+ *               back a verdict by name.
+ *
+ * The body is read up to 16 KiB, all of it by the rules; the judge is asked about it only when
+ * the whole guard prompt fits the judge's window (`judgePromptFits` in decide/guard.ts, about
+ * 3.4 KiB of script), and a longer body is at least escalate, never judged in part.
  *
  * Out of scope, follow-up: interpreter files (python, node, bun, ...), make and package scripts,
  * and non-POSIX shells (PowerShell, cmd), where the command is still judged as written.
@@ -31,7 +43,7 @@
 
 import { constants, closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
 import * as path from "node:path";
-import { simpleCommands } from "../decide/rules";
+import { type SimpleCommand, simpleCommands } from "../decide/rules";
 import { inside } from "./s1-rm-nothing";
 import { SECRET, canon, symlinkBelow } from "./s1-run-in-project";
 
@@ -68,46 +80,329 @@ type Launch =
 	| { form: "odd"; why: string };
 
 const base = (p: string) => p.slice(p.lastIndexOf("/") + 1);
+const odd = (why: string): Launch => ({ form: "odd", why });
 
-/** The script launch in one simple command, or null when it runs no script file. */
-function launchOf(argv: string[], stdin: boolean): Launch | null {
-	if (!argv.length) return null;
-	const w0 = argv[0];
-	if (SHELL_NAMES.has(base(w0))) {
-		const opts: string[] = [];
-		let i = 1;
-		for (; i < argv.length; i++) {
-			const a = argv[i];
-			if (a === "-") return { form: "stdin" };
-			if (a === "--") return { form: "odd", why: "the shell is given `--` before the script" };
-			if (SHORT_OPTS.test(a)) {
-				// -c: the text to run is in the command, where the rules read it.
-				if (a.slice(1).includes("c")) return null;
-				// -s: the script comes from stdin.
-				if (a.slice(1).includes("s")) return stdin ? { form: "stdin" } : null;
-				opts.push(a);
-				if (/^[-+][oO]$/.test(a)) {
-					if (i + 1 >= argv.length) return null;
-					opts.push(argv[++i]);
+/** Shells this check does not read: a launch through one is never rebuilt. */
+const OTHER_SHELLS = new Set([
+	"fish",
+	"csh",
+	"tcsh",
+	"ash",
+	"mksh",
+	"yash",
+	"pwsh",
+	"powershell",
+	"nu",
+	"xonsh",
+	"elvish",
+	"busybox",
+	"osh",
+	"ysh",
+]);
+const isShell = (w: string) => SHELL_NAMES.has(base(w)) || OTHER_SHELLS.has(base(w));
+
+/**
+ * Programs that never run their arguments as a command: a shell name among their arguments is
+ * text (`grep bash notes.md`, `which sh`), so the scan for a shell handed a file skips them.
+ */
+const INERT = new Set([
+	"grep",
+	"egrep",
+	"fgrep",
+	"rg",
+	"ag",
+	"ack",
+	"echo",
+	"printf",
+	"which",
+	"type",
+	"whereis",
+	"man",
+	"ls",
+	"file",
+	"stat",
+	"cat",
+	"head",
+	"tail",
+	"wc",
+	"brew",
+	"apt",
+	"apt-get",
+]);
+
+/**
+ * The options of a wrapper, read by an allowlist: letters in `flags` take no value, letters in
+ * `valued` take one (attached, or the next word), `long` accepts whole words. Any other option
+ * is one this check cannot follow, so the launch goes to a person. Returns the words after the
+ * options.
+ */
+function skipOpts(
+	w: string,
+	t: string[],
+	flags: string,
+	valued: string,
+	long: (a: string) => boolean = () => false,
+): string[] | Launch {
+	let i = 0;
+	while (i < t.length && t[i].startsWith("-") && t[i] !== "-") {
+		const a = t[i];
+		if (a === "--") return t.slice(i + 1);
+		if (long(a)) {
+			i++;
+			continue;
+		}
+		let take = 0;
+		if (/^-[A-Za-z0-9]+$/.test(a)) {
+			take = 1;
+			for (let k = 1; k < a.length; k++) {
+				if (flags.includes(a[k])) continue;
+				if (valued.includes(a[k])) {
+					take = k === a.length - 1 ? 2 : 1;
+					break;
 				}
+				take = 0;
+				break;
+			}
+		}
+		if (take === 0) return odd(`the ${w} option ${a} is not one this check reads`);
+		i += take;
+	}
+	return t.slice(i);
+}
+
+/** Leading `NAME=value` words (env's own assignments). */
+function dropAssignments(t: string[]): string[] {
+	let i = 0;
+	while (i < t.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(t[i])) i++;
+	return t.slice(i);
+}
+
+/**
+ * Wrappers that run the rest of their words as a command, each with the options it is known to
+ * take. Words back: the command it runs. A Launch back: a shape that goes to a person (`env -S`,
+ * `sudo -s`, an option not listed). null: it runs nothing (`command -v`, a bare `exec`).
+ */
+const WRAPPERS: Record<string, (t: string[]) => string[] | Launch | null> = {
+	nohup: (t) => skipOpts("nohup", t, "", ""),
+	time: (t) => skipOpts("time", t, "p", ""),
+	noglob: (t) => t,
+	"!": (t) => t,
+	builtin: (t) => skipOpts("builtin", t, "", ""),
+	unbuffer: (t) => skipOpts("unbuffer", t, "p", ""),
+	caffeinate: (t) => skipOpts("caffeinate", t, "dimsu", "tw"),
+	arch: (t) =>
+		skipOpts("arch", t, "", "", (a) => /^-(?:x86_64h?|arm64e?|i386|ppc(?:64)?)$/.test(a)),
+	stdbuf: (t) => skipOpts("stdbuf", t, "", "ioe", (a) => /^--(?:input|output|error)=/.test(a)),
+	nice: (t) =>
+		skipOpts("nice", t, "", "n", (a) => /^-\d+$/.test(a) || a.startsWith("--adjustment=")),
+	timeout: (t) => {
+		const r = skipOpts("timeout", t, "v", "sk", (a) =>
+			/^--(?:foreground|preserve-status|verbose|signal=.*|kill-after=.*)$/.test(a),
+		);
+		// The first word after the options is the duration.
+		return Array.isArray(r) ? r.slice(1) : r;
+	},
+	env: (t) => {
+		// -S and --split-string turn one word into a command line: not in the list, never followed.
+		const r = skipOpts("env", t, "i0v", "uCP", (a) =>
+			/^--(?:ignore-environment|null|unset=.*|chdir=.*)$/.test(a),
+		);
+		if (!Array.isArray(r)) return r;
+		let rest = r;
+		while (rest[0] === "-") rest = rest.slice(1);
+		return dropAssignments(rest);
+	},
+	// -s and -i run a shell, which then reads stdin or a command line: not in the list.
+	sudo: (t) =>
+		skipOpts("sudo", t, "EHnkKbPASlv", "ugCpDhrtTU", (a) =>
+			/^--(?:preserve-env(?:=.*)?|user=.*|group=.*|non-interactive)$/.test(a),
+		),
+	doas: (t) => skipOpts("doas", t, "n", "uC"),
+	exec: (t) => {
+		const r = skipOpts("exec", t, "cl", "a");
+		return Array.isArray(r) && r.length === 0 ? null : r;
+	},
+	command: (t) => {
+		if (t.length && /^-[A-Za-z]*[vV]/.test(t[0])) return null;
+		return skipOpts("command", t, "p", "");
+	},
+};
+WRAPPERS.gtimeout = WRAPPERS.timeout;
+
+/** Programs that build the command they run from file names or input lines. */
+const BUILDS_ITS_COMMAND = new Set(["xargs", "find"]);
+/** Programs that run their arguments, joined, as a shell command line. */
+const RUNS_A_LINE = new Set(["watch", "parallel"]);
+
+/** How deep a `-c` text, an `eval` or a `watch` line is read for a launch inside it. */
+const MAX_INLINE_DEPTH = 3;
+
+type Found = { launch: Launch; direct: boolean } | null;
+type Cmd = Pick<SimpleCommand, "raw" | "stdin" | "hereString" | "procSub">;
+
+/** A path run directly that is a shell script on disk (strict), or cannot be told from one. */
+function pathIsScript(file: string, cwd: string | undefined, strict: boolean): boolean {
+	const abs = path.isAbsolute(file) ? file : cwd ? path.resolve(cwd, file) : null;
+	if (abs === null) return !strict;
+	const k = execKind(abs);
+	return strict ? k === "script" : k !== "other";
+}
+
+/**
+ * The launch inside a command line that a shell (`-c`), `eval` or `watch` will run, read the
+ * same way. Never rebuilt: the bytes it reads cannot be put back into the text.
+ */
+function inlineLaunch(text: string, cwd: string | undefined, depth: number): Found {
+	let cmds: SimpleCommand[];
+	try {
+		cmds = simpleCommands(text);
+	} catch {
+		return { launch: odd("the command text is nested too deep to read"), direct: false };
+	}
+	const hits = cmds
+		.map((c) => launchIn(c, cwd, depth + 1))
+		.filter((h): h is NonNullable<Found> => h !== null);
+	if (!hits.length) return null;
+	const o = hits.find((h) => h.launch.form === "odd");
+	if (o) return { launch: o.launch, direct: false };
+	if (hits.length > 1)
+		return { launch: odd("the command text runs more than one script"), direct: false };
+	return { launch: hits[0].launch, direct: false };
+}
+
+/** The script launch of a shell named as the command, `t[0]`. */
+function shellLaunch(
+	t: string[],
+	c: Cmd,
+	cwd: string | undefined,
+	depth: number,
+	direct: boolean,
+): Found {
+	const hit = (launch: Launch): Found => ({ launch, direct });
+	if (c.hereString || c.procSub)
+		return hit(odd("a shell is fed a here-string or a process substitution, not read first"));
+	const opts: string[] = [];
+	let text = false;
+	let fromStdin = false;
+	let i = 1;
+	for (; i < t.length; i++) {
+		const a = t[i];
+		if (a === "-") return hit({ form: "stdin" });
+		if (a === "--") return hit(odd("the shell is given `--` before the script"));
+		if (SHORT_OPTS.test(a)) {
+			if (a.slice(1).includes("c")) text = true;
+			else if (a.slice(1).includes("s")) fromStdin = true;
+			opts.push(a);
+			if (/^[-+][A-Za-z]*[oO]$/.test(a)) {
+				if (i + 1 >= t.length) return hit(odd(`the shell option ${a} has no name`));
+				opts.push(t[++i]);
+			}
+			continue;
+		}
+		if (a.startsWith("--")) {
+			if (SAFE_LONG.has(a)) {
+				opts.push(a);
 				continue;
 			}
-			if (a.startsWith("--")) {
-				if (SAFE_LONG.has(a)) {
-					opts.push(a);
-					continue;
-				}
-				return { form: "odd", why: `the shell option ${a} cannot be checked` };
-			}
-			break;
+			return hit(odd(`the shell option ${a} cannot be checked`));
 		}
-		if (i >= argv.length) return stdin ? { form: "stdin" } : null;
-		return { form: "shell", argv0: w0, opts, file: argv[i] };
+		break;
+	}
+	// -c: the text to run is in the command. It is read the same way: a launch inside it, or
+	// text worked out when it runs (`"$(cat FILE)"`, `"$S"`), goes to a person.
+	if (text) {
+		if (i >= t.length) return hit(odd("the shell is given -c with no command"));
+		return inlineLaunch(t[i], cwd, depth);
+	}
+	// No file: the script comes from stdin. A pipe or a `<` file cannot be read first. A heredoc
+	// is in the command (its lines are listed as commands of their own); a bare shell is
+	// interactive.
+	if (fromStdin || i >= t.length) return c.stdin ? hit({ form: "stdin" }) : null;
+	return hit({ form: "shell", argv0: t[0], opts, file: t[i] });
+}
+
+/** True when a shell, eval or source among `t`'s arguments is handed options, command text or a file. */
+function handsAShell(t: string[], cwd: string | undefined): boolean {
+	for (let j = 1; j < t.length; j++) {
+		if (!isShell(t[j]) && t[j] !== "eval" && t[j] !== "source") continue;
+		const next = t[j + 1];
+		if (next === undefined) continue;
+		if (/^[-+]/.test(next) || /[$`]/.test(next)) return true;
+		const abs = cwd && !path.isAbsolute(next) ? path.resolve(cwd, next) : next;
+		try {
+			if (statSync(abs, { throwIfNoEntry: false })?.isFile()) return true;
+		} catch {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * The script launch in one simple command, or null when it runs no script file. Fails closed: a
+ * shape that cannot be rebuilt into checked bytes is "odd" and goes to a person. `direct` is true
+ * only for a launch written first with no wrapper, the shape `rebuild` may put back together.
+ */
+function launchIn(c: Cmd, cwd: string | undefined, depth = 0): Found {
+	if (depth > MAX_INLINE_DEPTH)
+		return { launch: odd("the command nests shells too deep to read"), direct: false };
+	let t = c.raw;
+	let wrapped = false;
+	for (let n = 0; t.length && n < 16; n++) {
+		const w = Object.hasOwn(WRAPPERS, base(t[0])) ? WRAPPERS[base(t[0])] : undefined;
+		if (!w) break;
+		const r = w(t.slice(1));
+		if (r === null) return null;
+		if (!Array.isArray(r)) return { launch: r, direct: false };
+		t = r;
+		wrapped = true;
+	}
+	if (!t.length) return null;
+	const direct = !wrapped;
+	const hit = (launch: Launch): Found => ({ launch, direct });
+	const w0 = t[0];
+	const b = base(w0);
+	// `$(cat FILE)`, a backtick, `$S`: the program and its words come from text not in the command.
+	if (/[$`]/.test(w0) || /^[<>=]\(/.test(w0))
+		return hit(odd("the command to run is worked out when it runs, so it cannot be read first"));
+	if (SHELL_NAMES.has(b)) return shellLaunch(t, c, cwd, depth, direct);
+	if (OTHER_SHELLS.has(b)) return hit(odd(`a ${b} script is not read by this check`));
+	if (w0 === "eval") {
+		if (c.hereString || c.procSub) return hit(odd("eval is fed text that is not read first"));
+		return t.length > 1 ? inlineLaunch(t.slice(1).join(" "), cwd, depth) : null;
 	}
 	if (w0 === "." || w0 === "source") {
-		return argv.length > 1 ? { form: "source", file: argv[1], args: argv.length - 2 } : null;
+		if (c.procSub) return hit(odd("a process substitution is sourced, not read first"));
+		return t.length > 1 ? hit({ form: "source", file: t[1], args: t.length - 2 }) : null;
 	}
-	if (w0.includes("/")) return { form: "exec", file: w0 };
+	if (BUILDS_ITS_COMMAND.has(b)) {
+		// The command is built from file names or input lines: a shell, eval or source in it is
+		// handed text this check never sees. A script run by path is read, never rebuilt.
+		let from = 1;
+		if (b === "find") {
+			from = t.findIndex((w) => /^-(?:exec|execdir|ok|okdir)$/.test(w)) + 1;
+			if (from === 0) return null;
+		}
+		for (let j = from; j < t.length; j++) {
+			if (isShell(t[j]) || t[j] === "eval" || t[j] === "source")
+				return {
+					launch: odd(`${b} hands a shell names it builds, which are not read`),
+					direct: false,
+				};
+			if (t[j].includes("/") && pathIsScript(t[j], cwd, true))
+				return { launch: { form: "exec", file: t[j] }, direct: false };
+		}
+		return null;
+	}
+	if (RUNS_A_LINE.has(b)) return inlineLaunch(t.slice(1).join(" "), cwd, depth);
+	if (w0.includes("/") && pathIsScript(w0, cwd, false)) return hit({ form: "exec", file: w0 });
+	// Any other program (ssh, flock, setsid, script, ...) handing a shell a file, options or
+	// command text runs a script this check does not read.
+	if (!INERT.has(b) && handsAShell(t, cwd))
+		return {
+			launch: odd(`${b} hands a shell a file or command text, which is not read`),
+			direct: false,
+		};
 	return null;
 }
 
@@ -231,67 +526,9 @@ function readScript(file: string, cwd: string | undefined, project: string | und
 	}
 }
 
-/**
- * Programs that run their arguments as a command. The rules strip them when written by name; by
- * path (`/usr/bin/env bash FILE`), or as xargs and find -exec, the launch is found further in.
- */
-const RUNS_ITS_ARGS = new Set([
-	"env",
-	"nohup",
-	"time",
-	"nice",
-	"timeout",
-	"gtimeout",
-	"sudo",
-	"doas",
-	"stdbuf",
-	"caffeinate",
-	"arch",
-	"xargs",
-	"find",
-	"command",
-	"exec",
-	"builtin",
-	"unbuffer",
-	"watch",
-	"parallel",
-]);
-
-/** The script launch in one simple command (a path run directly counts only when it is a script), or null. */
-function launchIn(
-	argv: string[],
-	stdin: boolean,
-	cwd: string | undefined,
-): { launch: Launch; direct: boolean } | null {
-	const isScript = (l: Launch | null): l is Launch => {
-		if (!l) return false;
-		if (l.form !== "exec") return true;
-		const abs = path.isAbsolute(l.file) ? l.file : cwd ? path.resolve(cwd, l.file) : null;
-		return abs === null || execKind(abs) !== "other";
-	};
-	const l = launchOf(argv, stdin);
-	if (isScript(l)) return { launch: l, direct: true };
-	if (!argv.length || !RUNS_ITS_ARGS.has(base(argv[0]))) return null;
-	// Further in, only a shell with a file, or a path that is a script on disk (`find .` is not `. FILE`).
-	for (let j = 1; j < argv.length; j++) {
-		const inner = launchOf(argv.slice(j), false);
-		if (!inner || inner.form === "source" || inner.form === "stdin") continue;
-		if (inner.form === "exec") {
-			const abs = path.isAbsolute(inner.file)
-				? inner.file
-				: cwd
-					? path.resolve(cwd, inner.file)
-					: null;
-			if (abs === null || execKind(abs) !== "script") continue;
-		}
-		return { launch: inner, direct: false };
-	}
-	return null;
-}
-
-/** True when `body` itself launches a script (or reads one from a pipe): one level only. */
+/** True when `body` itself launches a script, or runs text that is not read: one level only. */
 function launchesScript(body: string, cwd: string): boolean {
-	return simpleCommands(body).some((c) => launchIn(c.argv, c.stdin, cwd) !== null);
+	return simpleCommands(body).some((c) => launchIn(c, cwd) !== null);
 }
 
 /** Leading plain `NAME=value` assignments, each followed by a space or tab. */
@@ -342,10 +579,12 @@ export function scriptLaunch(
 	try {
 		const found: { launch: Launch; first: boolean }[] = [];
 		simpleCommands(command).forEach((c, i) => {
-			const hit = launchIn(c.argv, c.stdin, cwd);
+			const hit = launchIn(c, cwd);
 			if (hit) found.push({ launch: hit.launch, first: i === 0 && hit.direct });
 		});
 		if (!found.length) return NONE;
+		const o = found.find((f) => f.launch.form === "odd");
+		if (o?.launch.form === "odd") return unchecked(o.launch.why);
 		if (found.length > 1) return unchecked("the command runs more than one script");
 		const { launch: l, first } = found[0];
 		if (l.form === "stdin")
@@ -356,7 +595,7 @@ export function scriptLaunch(
 		const read = readScript(l.file, cwd, project);
 		if ("why" in read) return unchecked(read.why);
 		if (launchesScript(read.body, canon(cwd as string)))
-			return unchecked("the script runs another script, which is not read");
+			return unchecked("the script runs another script, or command text, which is not read");
 		return {
 			kind: "checked",
 			rel: read.rel,

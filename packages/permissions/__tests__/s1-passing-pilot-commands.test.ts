@@ -59,8 +59,10 @@ afterAll(() => {
 });
 beforeEach(() => {
 	_setSystemOneOverridesForTests({
+		// No judge installed: the decider's own error for that setup (decide/index.ts), the one
+		// case where a command that runs a script keeps the rules-only fallback.
 		createDecider: () => {
-			throw new Error("judge must not be needed");
+			throw new Error("no decide backend available: judge must not be needed");
 		},
 		askHuman: async (req) => ESCALATES_TO_PERSON(req.command) || SCRIPT_RUNS_ANOTHER(req.command),
 		calibrationDir: tempDir("s1-keep-cal-"),
