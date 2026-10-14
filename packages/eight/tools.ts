@@ -18,10 +18,12 @@ import {
 } from "../ai/draft-constraints";
 import { withImagesWritten } from "../ai/image-shape";
 import {
+	type Attachment,
 	POST_MESSAGE_TOOL_DEF,
 	postMessage,
 	postMessageAvailable,
 	postMessageDeps,
+	resolveAttachment,
 } from "../ai/post-message";
 import {
 	IMAGE_ATTACHMENT_TOOL,
@@ -2525,15 +2527,28 @@ export class ToolExecutor {
 						return "[ERROR] text_file is over 64 KB; a message is at most 4096 characters.";
 					text = fs.readFileSync(file, "utf8").replace(/\s+$/, "");
 				}
+				// attachment (#4265): a file inside the project, resolved with the same
+				// workspace guard as every file tool (traversal, symlink escape, credential files).
+				let attachment: Attachment | undefined;
+				if (args.attachment != null && args.attachment !== "") {
+					const r = resolveAttachment(args.attachment, (p) =>
+						safePath(p, this.workingDirectory, "read"),
+					);
+					if (!r.attachment) return r.error as string;
+					attachment = r.attachment;
+				}
 				// Pre-send check (#4191): the task's countable rules, counted in the draft with code
-				// (after text_file is read, so a drafted file is counted too).
-				const presend = this.presendCheck(text);
-				if (presend) return presend;
+				// (after text_file is read, so a drafted file is counted too). A bare file has no draft.
+				if (text !== "" || !attachment) {
+					const presend = this.presendCheck(text);
+					if (presend) return presend;
+				}
 				return postMessage(
 					{
 						chat: String(args.chat ?? ""),
 						text,
 						voice: typeof args.voice === "string" && args.voice ? args.voice : undefined,
+						attachment,
 					},
 					postMessageDeps(this.agentId, this.postSession),
 				);

@@ -307,3 +307,39 @@ describe("post_message", () => {
 		expect(postMessageDeps("primary", "s1").approved.size).toBe(0);
 	});
 });
+
+describe("post_message attachment transport (#4265)", () => {
+	test("gif maps to tg-group gif; the caption follows --caption as one argv element", async () => {
+		person("approve");
+		const out = await postMessage(
+			{
+				chat: CHAT,
+				text: "--chat -1 tricky",
+				attachment: { path: "/w/pilot.gif", kind: "gif", bytes: 9 },
+			},
+			deps(),
+		);
+		expect(out).toBe(`Posted gif pilot.gif to ${CHAT}, message_id 4242.`);
+		expect(ran).toEqual([
+			{
+				bin: "/x/tg-group",
+				argv: ["gif", "--chat", CHAT, "--file", "/w/pilot.gif", "--caption", "--chat -1 tricky"],
+			},
+		]);
+		expect(logged[0].attachment).toEqual({ kind: "gif", bytes: 9 });
+	});
+
+	test("a caption holding a bot token is refused before the helper runs", async () => {
+		person("approve");
+		const out = await postMessage(
+			{
+				chat: CHAT,
+				text: `key ${FAKE_TOKEN}`,
+				attachment: { path: "/w/a.mp4", kind: "video", bytes: 9 },
+			},
+			deps(),
+		);
+		expect(out).toContain("holds a bot key");
+		expect(ran).toEqual([]);
+	});
+});
