@@ -3822,6 +3822,13 @@ export class ToolExecutor {
 				const side = imageMaxSide(this.localRuntime());
 				const shown = await resizeImage(absolutePath, side, side);
 				const mimeType = `image/${shown.format === "jpg" ? "jpeg" : shown.format}`;
+				// #4293: when the copy is smaller than the original, the fields that map
+				// its coordinates back ride inside the JSON so the text stays parseable.
+				const original = {
+					width: shown.originalWidth ?? shown.width,
+					height: shown.originalHeight ?? shown.height,
+				};
+				const note = downscaleNote(original, shown);
 				const meta = JSON.stringify(
 					{
 						path: shown.path,
@@ -3829,21 +3836,21 @@ export class ToolExecutor {
 						height: shown.height,
 						format: shown.format,
 						attached: "The image is attached to this message for you to look at.",
+						...(note
+							? {
+									original_width: original.width,
+									original_height: original.height,
+									scale: Number((original.width / shown.width).toFixed(3)),
+									note,
+								}
+							: {}),
 					},
 					null,
 					2,
 				);
-				// #4293: say how the copy relates to the original when it is smaller.
-				const note = downscaleNote(
-					{
-						width: shown.originalWidth ?? shown.width,
-						height: shown.originalHeight ?? shown.height,
-					},
-					shown,
-				);
 				// #3770: the copy above is downscaled, so give the real pixel geometry.
 				const measured = await this.layoutForRead(absolutePath);
-				const text = [meta, note, measured].filter(Boolean).join("\n");
+				const text = measured ? `${meta}\n${measured}` : meta;
 				return imageAttachmentResult(text, mimeType, shown.base64);
 			}
 			const imageInfo = await readImage(absolutePath);

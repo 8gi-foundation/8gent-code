@@ -174,6 +174,7 @@ describe("downscale note on an attached image (#4293)", () => {
 		await build().chat("Look at mock.png.");
 		expect(bodies.length).toBeGreaterThan(1);
 		expect(asked()).toContain("downscaled copy (1024x256 px) of the original (2048x512 px)");
+		expect(asked()).toContain("original_width");
 		expect(asked()).toContain("by 2");
 	}, 60_000);
 });
