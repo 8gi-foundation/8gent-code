@@ -91,7 +91,8 @@ const MANIFEST_RE =
  * Dotfiles SENSITIVE_FILE_RE does not list. Truncating one escalates
  * (truncate_dotfile); the SENSITIVE_FILE_RE set keeps its block.
  */
-const DOTFILE_EXTRA_RE = /(^|\/)(\.zshenv|\.zlogin|\.bash_login|\.bash_logout|\.inputrc|\.vimrc|\.tmux\.conf|\.ssh\/config)$/;
+const DOTFILE_EXTRA_RE =
+	/(^|\/)(\.zshenv|\.zlogin|\.bash_login|\.bash_logout|\.inputrc|\.vimrc|\.tmux\.conf|\.ssh\/config)$/;
 const NET_SINK =
 	/(?:^|[\s|;&(])(?:curl\b[^|;&\n]*(?:\s-d\b|\s--data|\s-F\b|\s--form|\s-T\b|\s--upload-file|\s-X\s*(?:POST|PUT|PATCH))|nc\b|ncat\b|netcat\b|scp\b|sftp\b|ftp\b|telnet\b|wget\b[^|;&\n]*--post|rsync\b[^|;&\n]*\S+:\S*)/;
 const SECRET_READ = new RegExp(
@@ -103,30 +104,129 @@ const SECRET_READ = new RegExp(
 		String.raw`security\s+find-(?:generic|internet)-password[^|;&\n]*-w[^\n]*\|\s*(?:curl|nc|ssh)`,
 	].join("|"),
 );
-const REMOTE_EXEC_RE = /(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*["']?\$\((?:curl|wget)\b|<\((?:curl|wget)\b|\beval\s+["']?\$\((?:curl|wget)\b/;
+const REMOTE_EXEC_RE =
+	/(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*["']?\$\((?:curl|wget)\b|<\((?:curl|wget)\b|\beval\s+["']?\$\((?:curl|wget)\b/;
 
 const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish"]);
 const INTERPRETERS = new Set([
-	"python", "python3", "python3.11", "python3.12", "python3.13", "node", "bun", "deno", "ruby", "perl", "php", "osascript", "tsx", "ts-node",
+	"python",
+	"python3",
+	"python3.11",
+	"python3.12",
+	"python3.13",
+	"node",
+	"bun",
+	"deno",
+	"ruby",
+	"perl",
+	"php",
+	"osascript",
+	"tsx",
+	"ts-node",
 ]);
-const DB_CLIENTS = new Set(["psql", "sqlite3", "mysql", "mongosh", "mongo", "redis-cli", "duckdb", "clickhouse-client"]);
+const DB_CLIENTS = new Set([
+	"psql",
+	"sqlite3",
+	"mysql",
+	"mongosh",
+	"mongo",
+	"redis-cli",
+	"duckdb",
+	"clickhouse-client",
+]);
 const WRAPPERS = new Set([
-	"sudo", "nohup", "time", "command", "builtin", "exec", "stdbuf", "unbuffer", "caffeinate", "nice", "timeout", "gtimeout", "env", "doas", "arch", "noglob", "!",
+	"sudo",
+	"nohup",
+	"time",
+	"command",
+	"builtin",
+	"exec",
+	"stdbuf",
+	"unbuffer",
+	"caffeinate",
+	"nice",
+	"timeout",
+	"gtimeout",
+	"env",
+	"doas",
+	"arch",
+	"noglob",
+	"!",
 ]);
 const CONTROL = new Set([
-	"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for", "case", "esac", "in", "{", "}", "(", ")", "function", "select", "[[", "]]", "!", "coproc",
+	"if",
+	"then",
+	"else",
+	"elif",
+	"fi",
+	"do",
+	"done",
+	"while",
+	"until",
+	"for",
+	"case",
+	"esac",
+	"in",
+	"{",
+	"}",
+	"(",
+	")",
+	"function",
+	"select",
+	"[[",
+	"]]",
+	"!",
+	"coproc",
 ]);
-const DESTRUCTIVE_ALWAYS = new Set(["mkfs", "newfs_apfs", "newfs_hfs", "newfs_msdos", "fdisk", "gpt", "shred", "srm", "wipefs", "sgdisk", "parted"]);
+const DESTRUCTIVE_ALWAYS = new Set([
+	"mkfs",
+	"newfs_apfs",
+	"newfs_hfs",
+	"newfs_msdos",
+	"fdisk",
+	"gpt",
+	"shred",
+	"srm",
+	"wipefs",
+	"sgdisk",
+	"parted",
+]);
 const CLOUD_BINS = new Set([
-	"aws", "gcloud", "gsutil", "az", "kubectl", "helm", "terraform", "tofu", "pulumi", "heroku", "railway", "netlify", "supabase", "doctl", "stripe", "firebase",
-	"hcloud", "linode-cli", "oci", "render", "neonctl", "turso", "planetscale", "pscale", "upstash", "cloudflared",
+	"aws",
+	"gcloud",
+	"gsutil",
+	"az",
+	"kubectl",
+	"helm",
+	"terraform",
+	"tofu",
+	"pulumi",
+	"heroku",
+	"railway",
+	"netlify",
+	"supabase",
+	"doctl",
+	"stripe",
+	"firebase",
+	"hcloud",
+	"linode-cli",
+	"oci",
+	"render",
+	"neonctl",
+	"turso",
+	"planetscale",
+	"pscale",
+	"upstash",
+	"cloudflared",
 ]);
 const NET_FETCHERS = new Set(["curl", "wget", "http"]);
 
 const CODE_DELETE =
 	/shutil\.rmtree|os\.remove\(|os\.unlink\(|os\.rmdir\(|\.unlink\(|rmSync|unlinkSync|rmdirSync|fs\.rm\(|fs\.promises\.rm\b|fsp?\.rm\(|\brm\s+-[a-zA-Z]*[rf]|DROP\s+(TABLE|DATABASE|SCHEMA)|TRUNCATE\s+TABLE|DELETE\s+FROM|File\.delete|FileUtils\.rm|\.drop\(\)|dropDatabase/i;
-const SQL_DESTRUCTIVE = /\b(DROP\s+(TABLE|DATABASE|SCHEMA|INDEX|VIEW|COLLECTION)|TRUNCATE\b|DELETE\s+FROM|FLUSHALL|FLUSHDB|dropDatabase|\.drop\(\)|deleteMany|\bDEL\s+\w)/i;
-const GH_DELETE = /^(repo|release|issue|label|secret|variable|run|cache|gist|ssh-key|gpg-key|project|codespace|ruleset|extension)$/;
+const SQL_DESTRUCTIVE =
+	/\b(DROP\s+(TABLE|DATABASE|SCHEMA|INDEX|VIEW|COLLECTION)|TRUNCATE\b|DELETE\s+FROM|FLUSHALL|FLUSHDB|dropDatabase|\.drop\(\)|deleteMany|\bDEL\s+\w)/i;
+const GH_DELETE =
+	/^(repo|release|issue|label|secret|variable|run|cache|gist|ssh-key|gpg-key|project|codespace|ruleset|extension)$/;
 const MAX_DEPTH = 6;
 
 // ------------------------------------------------------------------ result
@@ -195,7 +295,11 @@ class ExpansionOverflow extends Error {}
  * (a word inside `${A:-word}`), not references in sequence. Throws
  * ExpansionOverflow rather than return a partial list.
  */
-function expandCandidates(p: string, vars: ReadonlyMap<string, string[] | null>, depth = 0): string[] {
+function expandCandidates(
+	p: string,
+	vars: ReadonlyMap<string, string[] | null>,
+	depth = 0,
+): string[] {
 	const m = VAR_REF_RE.exec(p);
 	if (!m) return [p];
 	// The recursion is one frame per reference: refuse a long argument up front
@@ -211,7 +315,8 @@ function expandCandidates(p: string, vars: ReadonlyMap<string, string[] | null>,
 	let values: string[];
 	if (name === "HOME") values = ["$HOME", ...(known ?? [])];
 	else values = known ?? [`$${name}`, ""];
-	if (op === ":-" || op === "-" || op === ":=" || op === "=") values = [...values, ...expandCandidates(word, vars, depth + 1)];
+	if (op === ":-" || op === "-" || op === ":=" || op === "=")
+		values = [...values, ...expandCandidates(word, vars, depth + 1)];
 	else if (op === ":+" || op === "+") values = ["", ...expandCandidates(word, vars, depth + 1)];
 	else if (op === ":?") values = values.filter((v) => v !== "");
 	const out = new Set<string>();
@@ -239,7 +344,8 @@ function assignedValues(name: string, value: string, r: Collector): string[] | n
 	// not run, so the outer value (unknown, possibly empty) stays possible.
 	const before = prev ?? (r.conditional ? [`$${name}`, ""] : []);
 	let added: string[];
-	if (/\$\(|`|<\(/.test(value)) added = [`$${name}`, ""]; // a command's output: unknown
+	if (/\$\(|`|<\(/.test(value))
+		added = [`$${name}`, ""]; // a command's output: unknown
 	else {
 		try {
 			added = expandCandidates(value, r.vars);
@@ -291,7 +397,8 @@ function trackShellState(tIn: string[], r: Collector): void {
 // ------------------------------------------------------------------ helpers
 
 const basename = (p: string) => p.slice(p.lastIndexOf("/") + 1);
-const isTemp = (p: string) => TEMP_RE.test(p) || /\/claude-\d+\//.test(p) || p.includes("/scratchpad");
+const isTemp = (p: string) =>
+	TEMP_RE.test(p) || /\/claude-\d+\//.test(p) || p.includes("/scratchpad");
 const positional = (args: string[]) => args.filter((a) => !a.startsWith("-"));
 
 function hasFlag(args: string[], short: string | null, long: readonly string[] = []): boolean {
@@ -389,7 +496,10 @@ const HEREDOC_RE = /(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/;
 const HEREDOC_AT = new RegExp(HEREDOC_RE.source, "y");
 
 /** The command with heredoc bodies removed, and each body with the text before its operator. */
-export function cutHeredocs(text: string): { text: string; docs: { before: string; body: string }[] } {
+export function cutHeredocs(text: string): {
+	text: string;
+	docs: { before: string; body: string }[];
+} {
 	if (!text.includes("<<")) return { text, docs: [] };
 	const lines = text.split("\n");
 	const out: string[] = [];
@@ -544,7 +654,10 @@ export function splitSegments(s: string): { segs: Segment[]; subs: string[] } {
 		i++;
 	}
 	segs.push({ text: cur, piped });
-	return { segs: segs.map((x) => ({ text: x.text.trim(), piped: x.piped })).filter((x) => x.text), subs };
+	return {
+		segs: segs.map((x) => ({ text: x.text.trim(), piped: x.piped })).filter((x) => x.text),
+		subs,
+	};
 }
 
 /**
@@ -657,7 +770,10 @@ function ruleRm(b: string, args: string[], r: Collector): void {
 		return;
 	}
 	if (hasFlag(args, "rR", ["--recursive"])) {
-		const hits = (p: string) => SYSTEM_PATH_RE.test(p) || HOME_TOP_RE.test(p) || (r.cwdDanger && p !== "" && CWD_TARGET_RE.test(p));
+		const hits = (p: string) =>
+			SYSTEM_PATH_RE.test(p) ||
+			HOME_TOP_RE.test(p) ||
+			(r.cwdDanger && p !== "" && CWD_TARGET_RE.test(p));
 		// Each path as written, and every text it could expand to (#3314).
 		// Any failure to expand (overflow, or anything else) is a block: fail
 		// closed, and never rethrow, which would abort the rest of the analysis.
@@ -668,7 +784,8 @@ function ruleRm(b: string, args: string[], r: Collector): void {
 				return true;
 			}
 		};
-		const catastrophic = args.includes("--no-preserve-root") || paths.some((p) => hits(p) || expandHits(p));
+		const catastrophic =
+			args.includes("--no-preserve-root") || paths.some((p) => hits(p) || expandHits(p));
 		r.d("rm_recursive", catastrophic);
 	} else if (!(paths.length && paths.every(isTemp))) {
 		r.d("rm_non_temp");
@@ -678,40 +795,63 @@ function ruleRm(b: string, args: string[], r: Collector): void {
 function ruleGit(args: string[], r: Collector): void {
 	let a = [...args];
 	while (a.length && a[0].startsWith("-")) {
-		a = ["-C", "-c", "--git-dir", "--work-tree"].includes(a[0]) && a.length > 1 ? a.slice(2) : a.slice(1);
+		a =
+			["-C", "-c", "--git-dir", "--work-tree"].includes(a[0]) && a.length > 1
+				? a.slice(2)
+				: a.slice(1);
 	}
 	if (!a.length) return;
 	const [sub, ...rest] = a;
 	if (sub === "push") {
 		if (
-			hasFlag(rest, "f", ["--force", "--force-with-lease", "--force-if-includes", "--mirror", "--delete", "--prune"]) ||
+			hasFlag(rest, "f", [
+				"--force",
+				"--force-with-lease",
+				"--force-if-includes",
+				"--mirror",
+				"--delete",
+				"--prune",
+			]) ||
 			positional(rest).some((x) => x.startsWith("+") || (x.startsWith(":") && x.length > 1)) ||
 			hasFlag(rest, "d")
 		)
 			r.d("git_push_force_or_delete");
 	} else if (sub === "reset") {
-		if (rest.includes("--hard") || rest.includes("--merge") || rest.includes("--keep")) r.d("git_reset_hard");
+		if (rest.includes("--hard") || rest.includes("--merge") || rest.includes("--keep"))
+			r.d("git_reset_hard");
 	} else if (sub === "clean") {
-		if (!hasFlag(rest, "n", ["--dry-run"]) && hasFlag(rest, "fx", ["--force"])) r.d("git_clean_force");
+		if (!hasFlag(rest, "n", ["--dry-run"]) && hasFlag(rest, "fx", ["--force"]))
+			r.d("git_clean_force");
 	} else if (sub === "checkout") {
-		if (rest.includes("--") || rest.includes(".") || hasFlag(rest, "f", ["--force"])) r.d("git_checkout_discards_changes");
+		if (rest.includes("--") || rest.includes(".") || hasFlag(rest, "f", ["--force"]))
+			r.d("git_checkout_discards_changes");
 	} else if (sub === "restore") {
-		const stagedOnly = (rest.includes("--staged") || rest.includes("-S")) && !rest.includes("--worktree") && !rest.includes("-W");
+		const stagedOnly =
+			(rest.includes("--staged") || rest.includes("-S")) &&
+			!rest.includes("--worktree") &&
+			!rest.includes("-W");
 		if (!stagedOnly) r.d("git_restore_discards_changes");
 	} else if (sub === "stash") {
 		if (rest[0] === "drop" || rest[0] === "clear") r.d("git_stash_drop_clear");
 	} else if (sub === "branch") {
-		if (rest.includes("-D") || (rest.includes("--delete") && rest.includes("--force")) || rest.includes("-df")) r.d("git_branch_force_delete");
+		if (
+			rest.includes("-D") ||
+			(rest.includes("--delete") && rest.includes("--force")) ||
+			rest.includes("-df")
+		)
+			r.d("git_branch_force_delete");
 	} else if (sub === "filter-branch" || sub === "filter-repo") {
 		r.d("git_history_rewrite");
 	} else if (sub === "update-ref") {
 		if (rest.includes("-d")) r.d("git_update_ref_delete");
 	} else if (sub === "worktree") {
-		if (rest[0] === "remove" && hasFlag(rest.slice(1), "f", ["--force"])) r.d("git_worktree_remove_force");
+		if (rest[0] === "remove" && hasFlag(rest.slice(1), "f", ["--force"]))
+			r.d("git_worktree_remove_force");
 	} else if (sub === "reflog") {
 		if (rest[0] === "expire" || rest[0] === "delete") r.d("git_reflog_expire");
 	} else if (sub === "switch") {
-		if (hasFlag(rest, "fC", ["--force", "--discard-changes", "--force-create"])) r.d("git_switch_discards_changes");
+		if (hasFlag(rest, "fC", ["--force", "--discard-changes", "--force-create"]))
+			r.d("git_switch_discards_changes");
 	}
 }
 
@@ -724,25 +864,39 @@ function ruleGh(args: string[], r: Collector): void {
 		if (/(-X|--method)\s*=?\s*DELETE/.test(args.join(" "))) r.d("gh_api_delete");
 		return;
 	}
-	if ((["delete", "remove", "rm", "unarchive"].includes(act) && GH_DELETE.test(g)) || (g === "repo" && act === "archive")) r.d("gh_delete");
+	if (
+		(["delete", "remove", "rm", "unarchive"].includes(act) && GH_DELETE.test(g)) ||
+		(g === "repo" && act === "archive")
+	)
+		r.d("gh_delete");
 }
 
 function ruleDocker(args: string[], r: Collector): void {
 	const j = positional(args).slice(0, 3).join(" ");
-	if (/^((volume (rm|prune|remove))|(system prune)|(builder prune)|(compose .*down))/.test(j) && (!j.startsWith("compose") || hasFlag(args, "v", ["--volumes"])))
+	if (
+		/^((volume (rm|prune|remove))|(system prune)|(builder prune)|(compose .*down))/.test(j) &&
+		(!j.startsWith("compose") || hasFlag(args, "v", ["--volumes"]))
+	)
 		r.d("docker_volume_rm_or_prune");
 }
 
 function ruleNpx(args: string[], r: Collector): void {
-	const a = args.filter((x) => !["-y", "--yes", "-q", "--quiet"].includes(x) && !x.startsWith("--package"));
+	const a = args.filter(
+		(x) => !["-y", "--yes", "-q", "--quiet"].includes(x) && !x.startsWith("--package"),
+	);
 	if (!a.length) return;
 	let tool = a[0].replace(/@[\d.^~<>=*x-]+$|@latest$/, "");
-	if (tool.startsWith("@") && tool.split("/").length === 2 && tool !== "@biomejs/biome") tool = tool.split("/")[1];
+	if (tool.startsWith("@") && tool.split("/").length === 2 && tool !== "@biomejs/biome")
+		tool = tool.split("/")[1];
 	const rest = a.slice(1);
 	const pos = positional(rest);
 	if (tool === "convex") {
 		const s = pos[0] ?? "";
-		if ((s === "import" && rest.includes("--replace")) || (s === "data" && rest.includes("--delete")) || (s === "deployments" && pos.includes("delete")))
+		if (
+			(s === "import" && rest.includes("--replace")) ||
+			(s === "data" && rest.includes("--delete")) ||
+			(s === "deployments" && pos.includes("delete"))
+		)
 			r.d("convex_replace_or_delete");
 		else if (s === "env" && (pos[1] === "remove" || pos[1] === "rm")) r.d("convex_env_remove");
 	} else if (tool === "vercel") ruleVercel(rest, r);
@@ -753,21 +907,59 @@ function ruleVercel(args: string[], r: Collector): void {
 	const pos = positional(args);
 	const s = pos[0] ?? "";
 	const s2 = pos[1] ?? "";
-	const groups = ["env", "domains", "alias", "dns", "certs", "secrets", "project", "projects", "teams", "blob", "integration"];
-	if (s === "rm" || s === "remove" || ((s2 === "rm" || s2 === "remove") && groups.includes(s))) r.d("vercel_remove");
+	const groups = [
+		"env",
+		"domains",
+		"alias",
+		"dns",
+		"certs",
+		"secrets",
+		"project",
+		"projects",
+		"teams",
+		"blob",
+		"integration",
+	];
+	if (s === "rm" || s === "remove" || ((s2 === "rm" || s2 === "remove") && groups.includes(s)))
+		r.d("vercel_remove");
 }
 
 function ruleFly(args: string[], r: Collector): void {
 	const pos = positional(args);
 	const s = pos[0] ?? "";
 	const s2 = pos[1] ?? "";
-	const groups = ["apps", "app", "volumes", "volume", "machine", "machines", "m", "secrets", "ips", "certs", "postgres", "redis", "tokens", "ext"];
-	if (s === "destroy" || (["destroy", "delete", "remove", "rm", "unset", "release"].includes(s2) && groups.includes(s)) || (s === "secrets" && s2 === "unset"))
+	const groups = [
+		"apps",
+		"app",
+		"volumes",
+		"volume",
+		"machine",
+		"machines",
+		"m",
+		"secrets",
+		"ips",
+		"certs",
+		"postgres",
+		"redis",
+		"tokens",
+		"ext",
+	];
+	if (
+		s === "destroy" ||
+		(["destroy", "delete", "remove", "rm", "unset", "release"].includes(s2) &&
+			groups.includes(s)) ||
+		(s === "secrets" && s2 === "unset")
+	)
 		r.d("fly_destroy_or_unset");
 }
 
 function ruleWrangler(args: string[], r: Collector): void {
-	if (positional(args).slice(0, 3).some((p) => ["delete", "rm", "remove", "purge"].includes(p))) r.d("wrangler_delete");
+	if (
+		positional(args)
+			.slice(0, 3)
+			.some((p) => ["delete", "rm", "remove", "purge"].includes(p))
+	)
+		r.d("wrangler_delete");
 }
 
 function rulePkg(b: string, args: string[], r: Collector): void {
@@ -789,7 +981,11 @@ function rulePkg(b: string, args: string[], r: Collector): void {
 }
 
 function ruleCloud(b: string, args: string[], r: Collector): void {
-	if (/\b(delete|destroy|terminate-instances|rb|rm|remove|purge|drop|reset|uninstall|apps:destroy|sites:delete|down|unset|wipe|deleteall|delete-\w+|flushall)\b/i.test(args.join(" ")))
+	if (
+		/\b(delete|destroy|terminate-instances|rb|rm|remove|purge|drop|reset|uninstall|apps:destroy|sites:delete|down|unset|wipe|deleteall|delete-\w+|flushall)\b/i.test(
+			args.join(" "),
+		)
+	)
 		r.d(`cloud_delete:${b}`);
 }
 
@@ -801,9 +997,19 @@ function ruleChmod(b: string, args: string[], r: Collector): void {
 function ruleKill(b: string, args: string[], r: Collector): void {
 	const j = args.join(" ");
 	const last = args[args.length - 1];
-	if (b === "kill" && !j.includes("$(") && !j.includes("`") && (last === "1" || last === "-1" || /(^|\s)-(9|KILL|SIGKILL)\s+(-1|1)$/.test(j)))
+	if (
+		b === "kill" &&
+		!j.includes("$(") &&
+		!j.includes("`") &&
+		(last === "1" || last === "-1" || /(^|\s)-(9|KILL|SIGKILL)\s+(-1|1)$/.test(j))
+	)
 		r.d("kill_all_or_launchd");
-	else if ((b === "killall" || b === "pkill") && /\b(WindowServer|loginwindow|launchd|kernel_task|securityd|opendirectoryd|coreservicesd)\b/.test(j))
+	else if (
+		(b === "killall" || b === "pkill") &&
+		/\b(WindowServer|loginwindow|launchd|kernel_task|securityd|opendirectoryd|coreservicesd)\b/.test(
+			j,
+		)
+	)
 		r.d("kill_system_process");
 }
 
@@ -864,9 +1070,11 @@ function stripWrappers(t: string[]): string[] {
 			} else if (w === "nice") {
 				while (t.length && t[0].startsWith("-")) t = t.slice(t[0] === "-n" ? 2 : 1);
 			} else if (w === "sudo" || w === "doas") {
-				while (t.length && t[0].startsWith("-")) t = t.slice(["-u", "-g", "-C", "-p"].includes(t[0]) ? 2 : 1);
+				while (t.length && t[0].startsWith("-"))
+					t = t.slice(["-u", "-g", "-C", "-p"].includes(t[0]) ? 2 : 1);
 			} else if (["env", "caffeinate", "arch", "stdbuf"].includes(w)) {
-				while (t.length && t[0].startsWith("-")) t = t.slice(["-u", "-C", "-S", "-t", "-w"].includes(t[0]) ? 2 : 1);
+				while (t.length && t[0].startsWith("-"))
+					t = t.slice(["-u", "-C", "-S", "-t", "-w"].includes(t[0]) ? 2 : 1);
 			}
 			changed = true;
 		}
@@ -874,7 +1082,13 @@ function stripWrappers(t: string[]): string[] {
 	return t;
 }
 
-function analyseTokens(tIn: string[], piped: boolean, prevBin: string | null, r: Collector, depth: number): string | null {
+function analyseTokens(
+	tIn: string[],
+	piped: boolean,
+	prevBin: string | null,
+	r: Collector,
+	depth: number,
+): string | null {
 	const t = stripWrappers(tIn);
 	if (!t.length) return null;
 	const b = t[0].startsWith("$") ? t[0] : basename(t[0]);
@@ -883,7 +1097,8 @@ function analyseTokens(tIn: string[], piped: boolean, prevBin: string | null, r:
 
 	if (b === "xargs") {
 		let a = [...args];
-		while (a.length && a[0].startsWith("-")) a = a.slice(["-n", "-I", "-P", "-L", "-d", "-s", "-E", "-J"].includes(a[0]) ? 2 : 1);
+		while (a.length && a[0].startsWith("-"))
+			a = a.slice(["-n", "-I", "-P", "-L", "-d", "-s", "-E", "-J"].includes(a[0]) ? 2 : 1);
 		return a.length ? analyseTokens(a, piped, prevBin, r, depth) : "xargs";
 	}
 	if (SHELLS.has(b)) {
@@ -932,14 +1147,19 @@ function analyseTokens(tIn: string[], piped: boolean, prevBin: string | null, r:
 	else if (b === "dd") {
 		const of = args.find((a) => a.startsWith("of=") && !isTemp(a.slice(3)));
 		if (of) r.d("dd_of", of.slice(3).startsWith("/dev/"));
-	} else if (DESTRUCTIVE_ALWAYS.has(b) || b.startsWith("mkfs") || b.startsWith("newfs")) r.d("disk_format_or_wipe");
+	} else if (DESTRUCTIVE_ALWAYS.has(b) || b.startsWith("mkfs") || b.startsWith("newfs"))
+		r.d("disk_format_or_wipe");
 	else if (b === "truncate") r.d("truncate_file");
 	else if (b === "git") ruleGit(args, r);
 	else if (b === "gh") ruleGh(args, r);
-	else if (b === "docker" || b === "docker-compose" || b === "podman") ruleDocker(b === "docker-compose" ? ["compose", ...args] : args, r);
+	else if (b === "docker" || b === "docker-compose" || b === "podman")
+		ruleDocker(b === "docker-compose" ? ["compose", ...args] : args, r);
 	else if (NET_FETCHERS.has(b)) {
 		if (/(-X|--request)\s*=?\s*DELETE/.test(args.join(" "))) r.d("http_delete");
-	} else if (["npm", "pnpm", "yarn", "bun", "pip", "pip3", "uv", "brew", "cargo", "go", "make"].includes(b)) rulePkg(b, args, r);
+	} else if (
+		["npm", "pnpm", "yarn", "bun", "pip", "pip3", "uv", "brew", "cargo", "go", "make"].includes(b)
+	)
+		rulePkg(b, args, r);
 	else if (b === "npx" || b === "bunx" || b === "pnpx") ruleNpx(args, r);
 	else if (b === "vercel") ruleVercel(args, r);
 	else if (b === "fly" || b === "flyctl") ruleFly(args, r);
@@ -950,7 +1170,12 @@ function analyseTokens(tIn: string[], piped: boolean, prevBin: string | null, r:
 	else if (["kill", "killall", "pkill"].includes(b)) ruleKill(b, args, r);
 	else if (b === "find") {
 		const j = args.join(" ");
-		if (args.includes("-delete") || /-exec(dir)?\s+(rm|unlink|shred|truncate)\b/.test(j) || /-exec(dir)?\s+\S*sh\s+-c\s+.*\brm\b/.test(j)) r.d("find_delete");
+		if (
+			args.includes("-delete") ||
+			/-exec(dir)?\s+(rm|unlink|shred|truncate)\b/.test(j) ||
+			/-exec(dir)?\s+\S*sh\s+-c\s+.*\brm\b/.test(j)
+		)
+			r.d("find_delete");
 		else {
 			const idx = args.findIndex((a) => a === "-exec" || a === "-execdir" || a === "-ok");
 			if (idx >= 0) {
@@ -965,7 +1190,8 @@ function analyseTokens(tIn: string[], piped: boolean, prevBin: string | null, r:
 			(b === "cp" && dest && isTemp(dest)) ||
 			(b === "mv" && dest.includes("/.Trash")) ||
 			(b === "cp" && !hasFlag(args, "f", ["--force"]) && dest.endsWith("/"));
-		if (!safeCase && (SENSITIVE_FILE_RE.test(dest) || pos.some((p) => SYSTEM_PATH_RE.test(p)))) r.d(`${b}_overwrites_sensitive_or_system`);
+		if (!safeCase && (SENSITIVE_FILE_RE.test(dest) || pos.some((p) => SYSTEM_PATH_RE.test(p))))
+			r.d(`${b}_overwrites_sensitive_or_system`);
 		if (b === "cp" && pos.length === 2 && pos[0] === "/dev/null" && dest && !isTemp(dest)) {
 			r.d("empty_write_truncation");
 			if (MANIFEST_RE.test(dest)) r.d("overwrite_project_manifest");
@@ -974,12 +1200,20 @@ function analyseTokens(tIn: string[], piped: boolean, prevBin: string | null, r:
 	} else if (b === "tee") {
 		const files = positional(args);
 		const truncating = !hasFlag(args, "a", ["--append"]);
-		if (files.length && !files.every(isTemp) && files.some((f) => SENSITIVE_FILE_RE.test(f)) && truncating)
+		if (
+			files.length &&
+			!files.every(isTemp) &&
+			files.some((f) => SENSITIVE_FILE_RE.test(f)) &&
+			truncating
+		)
 			r.d("truncate_sensitive_file");
-		if (truncating && files.some((f) => !isTemp(f) && MANIFEST_RE.test(f))) r.d("overwrite_project_manifest");
-		if (truncating && files.some((f) => !isTemp(f) && DOTFILE_EXTRA_RE.test(f))) r.d("truncate_dotfile");
+		if (truncating && files.some((f) => !isTemp(f) && MANIFEST_RE.test(f)))
+			r.d("overwrite_project_manifest");
+		if (truncating && files.some((f) => !isTemp(f) && DOTFILE_EXTRA_RE.test(f)))
+			r.d("truncate_dotfile");
 	} else if (b === "launchctl") {
-		if (["bootout", "unload", "remove", "disable"].includes(positional(args)[0] ?? "")) r.d("launchctl_bootout_unload");
+		if (["bootout", "unload", "remove", "disable"].includes(positional(args)[0] ?? ""))
+			r.d("launchctl_bootout_unload");
 	} else if (b === "crontab") {
 		if (args.includes("-r")) r.d("crontab_remove");
 	} else if (b === "defaults") {
@@ -988,19 +1222,30 @@ function analyseTokens(tIn: string[], piped: boolean, prevBin: string | null, r:
 		if ((positional(args)[0] ?? "").startsWith("delete")) r.d("keychain_delete");
 	} else if (b === "diskutil") {
 		const s = positional(args)[0] ?? "";
-		if (s.startsWith("erase") || ["zeroDisk", "randomDisk", "secureErase", "partitionDisk", "reformat"].includes(s) || /apfs\s+(delete\w+|eraseVolume)/.test(args.join(" ")))
+		if (
+			s.startsWith("erase") ||
+			["zeroDisk", "randomDisk", "secureErase", "partitionDisk", "reformat"].includes(s) ||
+			/apfs\s+(delete\w+|eraseVolume)/.test(args.join(" "))
+		)
 			r.d("diskutil_erase");
 	} else if (b === "tmutil") {
-		if (["delete", "disable", "deletelocalsnapshots", "thinlocalsnapshots"].includes(positional(args)[0] ?? "")) r.d("tmutil_delete");
+		if (
+			["delete", "disable", "deletelocalsnapshots", "thinlocalsnapshots"].includes(
+				positional(args)[0] ?? "",
+			)
+		)
+			r.d("tmutil_delete");
 	} else if (b === "csrutil" || b === "spctl" || b === "nvram") {
-		if (/disable|--master-disable|-c\b|-d\b|clear/.test(args.join(" "))) r.d(`${b}_disable_or_clear`);
+		if (/disable|--master-disable|-c\b|-d\b|clear/.test(args.join(" ")))
+			r.d(`${b}_disable_or_clear`);
 	} else if (DB_CLIENTS.has(b)) sqlScan(args.join(" "), r);
 	else if (b === "rsync") {
 		if (/--delete\b|--delete-\w+|--remove-source-files/.test(args.join(" "))) r.d("rsync_delete");
 	} else if (b === "zip") {
 		// -m / --move deletes the inputs once archived, also inside a short
 		// cluster (-qm, -rm). Lowercase only: -MM is "must match".
-		if (args.some((a) => a === "--move" || /^-[A-Za-z0-9]*m[A-Za-z0-9]*$/.test(a))) r.d("archive_removes_source");
+		if (args.some((a) => a === "--move" || /^-[A-Za-z0-9]*m[A-Za-z0-9]*$/.test(a)))
+			r.d("archive_removes_source");
 	} else if (b === "tar" || b === "gtar" || b === "bsdtar") {
 		if (args.some((a) => a === "--remove-files")) r.d("archive_removes_source");
 	} else if (b === "7z" || b === "7za" || b === "7zr" || b === "7zz") {

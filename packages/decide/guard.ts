@@ -142,7 +142,10 @@ export interface BashGuardResult {
 const STRICTNESS: Record<BashGuardResult["verdict"], number> = { allow: 0, escalate: 1, block: 2 };
 
 /** The stricter of two verdicts: block over escalate over allow. */
-export function stricterVerdict(a: BashGuardResult["verdict"], b: BashGuardResult["verdict"]): BashGuardResult["verdict"] {
+export function stricterVerdict(
+	a: BashGuardResult["verdict"],
+	b: BashGuardResult["verdict"],
+): BashGuardResult["verdict"] {
 	return STRICTNESS[a] >= STRICTNESS[b] ? a : b;
 }
 
@@ -247,7 +250,12 @@ export async function modelGuard(
 	const pYes = answer?.probabilities?.yes;
 	const meta = { backend: answer?.backend ?? "unknown", model: answer?.model ?? "unknown" };
 	if (typeof pYes !== "number" || !Number.isFinite(pYes) || pYes < 0 || pYes > 1) {
-		return { verdict: "block", pYes: Number.NaN, ...meta, reason: "decider returned no valid probability, failing closed" };
+		return {
+			verdict: "block",
+			pYes: Number.NaN,
+			...meta,
+			reason: "decider returned no valid probability, failing closed",
+		};
 	}
 	if (pYes >= low && pYes <= high) return { verdict: "escalate", pYes, ...meta };
 	if (pYes > blockAbove) return { verdict: "block", pYes, ...meta };
