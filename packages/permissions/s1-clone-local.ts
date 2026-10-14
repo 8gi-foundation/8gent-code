@@ -9,7 +9,15 @@
  *   - a working directory, absolute;
  *   - the whole command is plain words (same alphabet as the mv lane: no quote,
  *     glob, `$`, backtick, `~`, redirect, pipe, `;`, `&`, newline), no
- *     prompt-control text, and decideRules fired no rule;
+ *     prompt-control text, and decideRules fired no rule (read on the whole
+ *     line, filter included);
+ *   - optionally ONE trailing display filter on the clone's own output, written
+ *     exactly `[2>&1] | head|tail -N` or `[2>&1] | head|tail -n N` (#4253, pilot
+ *     env-setup-practice 14 Oct: `git clone <sibling>.git ./notes 2>&1 | tail -20`
+ *     went to the judge and escalated at pYes 0.40). head and tail with a count
+ *     and no file read only the pipe, so they reach no file, host or shell. The
+ *     rest of the line is checked exactly as before, so a second pipe, a `tee`,
+ *     a `sh`, a file redirect or any chaining still falls through to the judge;
  *   - exactly `git clone [-q|--quiet] <src> <dest>`. Every other flag is
  *     refused, so --upload-pack/-u, --config/-c, --template, --recurse-submodules,
  *     --separate-git-dir, --origin, --reference, --filter and `--` never match,
@@ -47,16 +55,16 @@ import { realpathSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
+import { _setPasswdHomeForTests, accountHome } from "./s1-account-home";
 import {
+	MAX_TREE,
 	lstatOrNull,
 	plainRelative,
-	MAX_TREE,
 	protectedName,
 	protectedRel,
 	relSegments,
 	stripDot,
 } from "./s1-mv-in-project";
-import { accountHome, _setPasswdHomeForTests } from "./s1-account-home";
 import { inside } from "./s1-rm-nothing";
 
 export { _setPasswdHomeForTests };
@@ -78,6 +86,8 @@ const INSTALL_DIRS = new Set([
 	".yarn",
 ]);
 const CLONE_FLAG = /^(-q|--quiet)$/;
+/** One trailing display filter on the clone's output (#4253): `[2>&1] | head|tail -N|-n N`, nothing after. */
+const OUTPUT_FILTER = / +(?:2>&1 +)?\| +(?:head|tail) +(?:-\d{1,4}|-n +\d{1,4})$/;
 
 export type CloneLocal = { ok: true; reason: string } | { ok: false };
 
@@ -201,7 +211,10 @@ function parentIsTooBroad(parent: string): boolean {
 export function cloneLocalIntoProject(command: string, cwd: string | undefined): CloneLocal {
 	try {
 		if (!cwd || !path.isAbsolute(cwd)) return NO;
-		const text = command.trim();
+		const whole = command.trim();
+		// Prompt control and the rules read the whole line, filter included; the rest is checked without it.
+		if (promptControlText(whole) !== null || decideRules(whole).rules.length !== 0) return NO;
+		const text = whole.replace(OUTPUT_FILTER, "");
 		if (!PLAIN.test(text) || promptControlText(text) !== null) return NO;
 		const words = text.split(/ +/);
 		if (words[0] !== "git" || words[1] !== "clone") return NO;
@@ -257,7 +270,9 @@ export function cloneLocalIntoProject(command: string, cwd: string | undefined):
 		// path.relative answers in the OS separator: split on it (both on win32), never on "/" alone.
 		const relParent = path.relative(root, realParent);
 		if (relSegments(relParent).some((s) => s.startsWith("."))) return NO;
-		if (relSegments(path.relative(root, finalAbs)).some((seg) => INSTALL_DIRS.has(seg.toLowerCase())))
+		if (
+			relSegments(path.relative(root, finalAbs)).some((seg) => INSTALL_DIRS.has(seg.toLowerCase()))
+		)
 			return NO;
 		if (protectedName(path.basename(finalAbs))) return NO;
 		if (protectedRel(path.relative(root, finalAbs))) return NO;

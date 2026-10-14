@@ -272,9 +272,47 @@ describe("cloneLocalIntoProject allows", () => {
 		"git clone vendor-src.git notes",
 		"git clone vendor-src.git existing/inner",
 		"git clone inner-repo notes",
+		// One trailing display filter on the clone's own output (#4253).
+		"git clone ../shared-notes.git ./notes 2>&1 | tail -20",
+		"git clone ../shared-notes.git notes | tail -20",
+		"git clone ../shared-notes.git notes 2>&1 | head -5",
+		"git clone ../shared-notes.git notes 2>&1 | tail -n 20",
 	]) {
 		test(cmd, () => {
 			expect(cloneLocalIntoProject(cmd, ws).ok).toBe(true);
+		});
+	}
+	test("the pilot command from #4253: absolute sibling piped into tail", () => {
+		const real = realpathSync(container);
+		expect(
+			cloneLocalIntoProject(`git clone ${real}/shared-notes.git ./notes 2>&1 | tail -20`, ws).ok,
+		).toBe(ABSOLUTE_SOURCES);
+	});
+});
+
+describe("cloneLocalIntoProject refuses everything around the display filter (#4253)", () => {
+	for (const [name, cmd] of [
+		["URL source with a filter", "git clone https://github.com/a/b.git notes 2>&1 | tail -20"],
+		["filter into a shell", "git clone ../shared-notes.git notes 2>&1 | sh"],
+		["second pipe after the filter", "git clone ../shared-notes.git notes | tail -20 | sh"],
+		["tee writes a file", "git clone ../shared-notes.git notes 2>&1 | tee notes.log"],
+		["file redirect", "git clone ../shared-notes.git notes > out.txt"],
+		["stderr redirect only", "git clone ../shared-notes.git notes 2>&1"],
+		["tail with a file operand", "git clone ../shared-notes.git notes | tail -20 /etc/passwd"],
+		["tail -f", "git clone ../shared-notes.git notes | tail -f"],
+		["chained after the filter", "git clone ../shared-notes.git notes | tail -20; rm -rf notes"],
+		["or-pipe", "git clone ../shared-notes.git notes |& tail -20"],
+		[
+			"refused flag with a filter",
+			"git clone --upload-pack=touch ../shared-notes.git notes | tail -5",
+		],
+		[
+			"existing destination with a filter",
+			"git clone ../shared-notes.git existing 2>&1 | tail -20",
+		],
+	] as const) {
+		test(name, () => {
+			expect(cloneLocalIntoProject(cmd, ws).ok).toBe(false);
 		});
 	}
 });
@@ -459,7 +497,9 @@ describe("cloneLocalIntoProject refuses", () => {
 			).toBe(ABSOLUTE_SOURCES);
 			// Still refused: a URL, and a path outside the workspace parent.
 			expect(cloneLocalIntoProject("git clone https://example.com/x.git notes", ws).ok).toBe(false);
-			expect(cloneLocalIntoProject(`git clone ${outside}/shared-notes.git notes`, ws).ok).toBe(false);
+			expect(cloneLocalIntoProject(`git clone ${outside}/shared-notes.git notes`, ws).ok).toBe(
+				false,
+			);
 		} finally {
 			process.env.HOME = h;
 		}
@@ -489,6 +529,10 @@ describe("systemOneGate end to end with a judge that says dangerous", () => {
 		"git clone ../shared-notes.git ../notes",
 		"git clone --upload-pack=touch ../shared-notes.git notes",
 		"git clone ../shared-notes.git notes && echo hi",
+		// #4253: the display filter admits nothing else.
+		"git clone https://github.com/a/b.git notes 2>&1 | tail -20",
+		"git clone ../shared-notes.git notes 2>&1 | sh",
+		"git clone ../shared-notes.git notes 2>&1 | tee notes.log",
 	]) {
 		test(`still gated: ${cmd}`, async () => {
 			const r = await systemOneGate(cmd, process.env, ws);
@@ -497,6 +541,17 @@ describe("systemOneGate end to end with a judge that says dangerous", () => {
 			expect(judge.asks).toBeGreaterThan(0);
 		});
 	}
+
+	test("local clone piped into tail runs without asking the judge (#4253)", async () => {
+		const r = await systemOneGate(
+			"git clone ../shared-notes.git ./notes 2>&1 | tail -20",
+			process.env,
+			ws,
+		);
+		expect(r.run).toBe(true);
+		expect(r.guard?.backend).toBe("allowlist");
+		expect(judge.asks).toBe(0);
+	});
 
 	test("git mv with several sources runs without asking the judge", async () => {
 		mkdirSync(join(ws, "inbox", "docs"), { recursive: true });
@@ -536,10 +591,16 @@ describe("cloneLocalIntoProject tree review (8SO, #3827)", () => {
 	test("a replace ref cannot hide a symlink from the scan", () => {
 		const tmp = join(container, "rep.seed");
 		workRepo(tmp, true);
-		const real = spawnSync("git", ["rev-parse", "HEAD"], { cwd: tmp, encoding: "utf8" }).stdout.trim();
+		const real = spawnSync("git", ["rev-parse", "HEAD"], {
+			cwd: tmp,
+			encoding: "utf8",
+		}).stdout.trim();
 		git(tmp, "rm", "-q", "--cached", "l");
 		git(tmp, "commit", "-q", "-m", "fake");
-		const fake = spawnSync("git", ["rev-parse", "HEAD"], { cwd: tmp, encoding: "utf8" }).stdout.trim();
+		const fake = spawnSync("git", ["rev-parse", "HEAD"], {
+			cwd: tmp,
+			encoding: "utf8",
+		}).stdout.trim();
 		git(tmp, "reset", "-q", "--hard", real);
 		git(tmp, "replace", real, fake);
 		git(container, "clone", "-q", "--bare", tmp, join(container, "rep.git"));
