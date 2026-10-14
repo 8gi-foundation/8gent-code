@@ -176,6 +176,7 @@ import {
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
+import { REFUSAL_LEAD, REFUSAL_NOTE, refusalLead } from "../permissions/refusal-lead";
 import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import {
 	CreatedFiles,
@@ -849,21 +850,7 @@ export const DECK_SPEC_PARAMETER: Record<string, unknown> = (() => {
 	return lean(z.toJSONSchema(DeckSpecSchema, { io: "input" })) as Record<string, unknown>;
 })();
 
-/**
- * First sentence of every refused run_command (#4238). The local model reads only that
- * sentence, and a bare "[BLOCKED] Semicolon ..." once read as "the file is missing".
- */
-export const REFUSAL_LEAD = "[BLOCKED] Not run: refused by policy, nothing was checked or changed.";
-
-export function refusalLead(result: string): string {
-	if (!/^\[BLOCKED\]/.test(result.trimStart())) return result;
-	const body = result.trimStart().replace(/^\[BLOCKED\]\s*/, "");
-	if (body.startsWith("Not run:")) return result;
-	if (!/chaining/i.test(body)) return `${REFUSAL_LEAD} ${body}`;
-	const at = body.indexOf(" Command:");
-	const [why, cmd] = at < 0 ? [body, ""] : [body.slice(0, at), body.slice(at)];
-	return `${REFUSAL_LEAD} ${why} Run one command at a time.${cmd}`;
-}
+export { REFUSAL_LEAD, REFUSAL_NOTE, refusalLead };
 
 export class ToolExecutor {
 	private workingDirectory: string;
@@ -2563,7 +2550,7 @@ export class ToolExecutor {
 				const result = await (target && sanitizeShellCommand(runs).safe
 					? this.gatedCommit(run, target)
 					: run());
-				if (/^\[BLOCKED\]/.test(result.trimStart())) {
+				if (/^\[(BLOCKED|PERMISSION DENIED)\]/.test(result.trimStart())) {
 					this.blockedCommands.push(command);
 				}
 				return result;
@@ -3407,7 +3394,7 @@ export class ToolExecutor {
 		}
 		// The four pre-spawn backstops, shared with the native path (#3993).
 		const backstop = preSpawnRefusal(command, dir);
-		if (backstop) return backstop;
+		if (backstop) return refusalLead(backstop);
 		const mode = currentPermissionMode();
 		// The folder a cd prefix chose: the cards name it, and answers are kept per folder.
 		const where = folderLabel(dir, this.workingDirectory);

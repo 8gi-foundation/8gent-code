@@ -3,7 +3,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
-import { REFUSAL_LEAD, ToolExecutor, refusalLead } from "./tools";
+import { REFUSAL_LEAD, REFUSAL_NOTE, ToolExecutor, refusalLead } from "./tools";
 
 afterAll(() => cleanupTempDirs());
 
@@ -83,6 +83,26 @@ describe("refusal lead (#4238)", () => {
 	test("output that merely starts with the marker is not rewritten, and the lead is not doubled", async () => {
 		expect(refusalLead("plain output")).toBe("plain output");
 		const once = refusalLead("[BLOCKED] x");
+		expect(refusalLead(once)).toBe(once);
+	});
+});
+
+describe("[PERMISSION DENIED] refusals (#4238)", () => {
+	test("keep their tag, get the not-run note, and are recorded as refused probes", async () => {
+		const { file, ex } = setup();
+		const cmd = "cat ~/.8gent/settings.json count.ts";
+		const out = await ex.execute("run_command", { command: cmd });
+		expect(out).toStartWith(`[PERMISSION DENIED] ${REFUSAL_NOTE}`);
+		expect(out).toContain("settings.json");
+		// Recorded: the refused command named count.ts, so the unread file is protected.
+		const w = await ex.execute("write_file", { path: "count.ts", content: "mine\n" });
+		expect(w).toStartWith("Error:");
+		expect(readFileSync(file, "utf-8")).toBe("export const real = 6;\n");
+	});
+
+	test("refusalLead keeps the tag and is idempotent", () => {
+		const once = refusalLead("[PERMISSION DENIED] Command touches x: y");
+		expect(once).toStartWith(`[PERMISSION DENIED] ${REFUSAL_NOTE} Command touches x`);
 		expect(refusalLead(once)).toBe(once);
 	});
 });

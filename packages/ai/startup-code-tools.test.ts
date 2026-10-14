@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
+import { REFUSAL_NOTE } from "../permissions/refusal-lead";
 
 const saved = {
 	HOME: process.env.HOME,
@@ -69,7 +70,10 @@ beforeAll(async () => {
 	nativeIn = (cwd) => async (name, args) => {
 		ai.setToolContext({ workingDirectory: cwd });
 		const t = (
-			ai.agentTools as unknown as Record<string, { execute: (i: unknown, o: unknown) => Promise<unknown> }>
+			ai.agentTools as unknown as Record<
+				string,
+				{ execute: (i: unknown, o: unknown) => Promise<unknown> }
+			>
 		)[name];
 		try {
 			return String(await t.execute(args, opts));
@@ -165,7 +169,7 @@ describe("run_command writes are refused on both paths, before spawn (#4009)", (
 		test(command, async () => {
 			const expected = preSpawnRefusal(command, home);
 			expect(expected).toStartWith(
-				"[PERMISSION DENIED] Command would change 8gent hooks, extensions, prompts or packages",
+				`[PERMISSION DENIED] ${REFUSAL_NOTE} Command would change 8gent hooks, extensions, prompts or packages`,
 			);
 			expect(await native("run_command", { command })).toBe(expected as string);
 			expect(await text(home)("run_command", { command })).toBe(expected as string);
@@ -207,7 +211,7 @@ describe("a project-local .8gent/ is not affected (#4009)", () => {
 // tool's working directory, not process.cwd(): a relative path or a git write is
 // resolved where the command will actually run.
 describe("the startup-code check resolves against the tool's working directory (#4009, #4001)", () => {
-	const DENIED = "[PERMISSION DENIED] Command would change 8gent hooks, extensions, prompts or packages";
+	const DENIED = `[PERMISSION DENIED] ${REFUSAL_NOTE} Command would change 8gent hooks, extensions, prompts or packages`;
 	const ext = path.join(dot, "extensions", "ext1");
 
 	test("process.cwd() is outside the fake home, so the two judgements differ", () => {
