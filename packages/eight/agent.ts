@@ -12,7 +12,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { jsonSchema, tool as sdkTool } from "ai";
+import { type ModelMessage, jsonSchema, tool as sdkTool } from "ai";
 import type { FormattingStop } from "../ai/draft-constraints";
 import { notePlanTask } from "../ai/plan-file";
 import { postMessageAvailable } from "../ai/post-message";
@@ -174,6 +174,7 @@ import {
 } from "./turn-timeout";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter, oneLineError } from "./vision-interpreter";
+import { isKnownVisionModel } from "./vision-router";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import {
@@ -293,6 +294,55 @@ const HEADLESS_TOOL_NOTES = [
 	LOCAL_LOGIN_NOTE,
 ].join("\n");
 const headlessToolNotes = (): string => `${HEADLESS_TOOL_NOTES}\n${environmentNote()}`;
+
+/**
+ * Can a model on the native AI SDK path see the image attached to the prompt
+ * (#4287)? A provider declared in providers.json with supportsVision says so
+ * for whatever it serves; otherwise the model name decides, through the same
+ * family list the vision router uses. A built-in provider's flag alone is not
+ * enough: OpenRouter is marked vision-capable but serves text-only models too.
+ */
+export function nativePromptSeesImage(
+	provider: { declared?: boolean; supportsVision?: boolean } | undefined,
+	model: string,
+): boolean {
+	if (provider?.declared === true && provider.supportsVision === true) return true;
+	return isKnownVisionModel(model);
+}
+
+/**
+ * Put the prompt's image (a data URL) on the user message that carries the
+ * prompt text, as an AI SDK image part, for this request only (#4287). The
+ * prompt is matched by its text because harness notes follow it as user
+ * messages; with no match the last user message takes it. History is untouched.
+ */
+export function withPromptImage(
+	messages: Array<{ role: "user" | "assistant"; content: string }>,
+	promptText: string,
+	image: string | null,
+): ModelMessage[] {
+	const parsed = image ? /^data:([^;,]+);base64,(.+)$/s.exec(image) : null;
+	if (!parsed) return messages;
+	let target = -1;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (messages[i].role !== "user") continue;
+		if (target < 0) target = i;
+		if (messages[i].content === promptText) {
+			target = i;
+			break;
+		}
+	}
+	if (target < 0) return messages;
+	const out: ModelMessage[] = [...messages];
+	out[target] = {
+		role: "user",
+		content: [
+			{ type: "text", text: messages[target].content },
+			{ type: "image", image: parsed[2], mediaType: parsed[1] },
+		],
+	};
+	return out;
+}
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
@@ -463,7 +513,8 @@ export class Agent {
 	/**
 	 * An image attached to the current turn's prompt, as a data URL, when the
 	 * model can see it itself (#3641). The text-tool turn puts it on the user
-	 * message and clears it. Null when the VisionInterpreter describes instead.
+	 * message and clears it; the native turn does the same with an image part.
+	 * Null when the VisionInterpreter describes instead.
 	 */
 	private turnImage: string | null = null;
 	// TurnJournal (#2470): per-turn replayable record for debug + audit.
@@ -1088,6 +1139,25 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * attaches them natively, so the native AI SDK path answers no. The Ollama
 	 * answer comes from /api/show, cached per endpoint and model.
 	 */
+	/**
+	 * Does the prompt's attached image go to this session's own model? The
+	 * text-tool path asks modelSees(). The native AI SDK path sends it as an
+	 * image part when nativePromptSeesImage() says the model sees (#4287):
+	 * without that, a cloud vision model got no pixels, the local describer
+	 * failed, and the turn went on probing the file with scripts.
+	 */
+	private async promptImageSeen(): Promise<boolean> {
+		const scoped = (this.config.allowedPaths?.length ?? 0) > 0;
+		if (shouldUseTextTools(this.config.runtime, scoped)) return this.modelSees();
+		let declared: { declared?: boolean; supportsVision?: boolean } | undefined;
+		try {
+			declared = getProviderManager().getProvider(this.config.runtime as ProviderRegistryName);
+		} catch {
+			declared = undefined;
+		}
+		return nativePromptSeesImage(declared, this.config.model);
+	}
+
 	private modelSees(): Promise<boolean> {
 		const scoped = (this.config.allowedPaths?.length ?? 0) > 0;
 		if (!shouldUseTextTools(this.config.runtime, scoped)) return Promise.resolve(false);
@@ -1911,7 +1981,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// path it goes out on this turn's user message in the provider's native
 		// image field, and no side model describes it. Anything else keeps the
 		// VisionInterpreter below.
-		if (imageBase64 && (await this.modelSees())) {
+		if (imageBase64 && (await this.promptImageSeen())) {
 			this.turnImage = `data:${imageMimeType || "image/png"};base64,${imageBase64}`;
 			this.config.events?.onStepFinish?.({
 				text: `Image attached for ${this.config.model} to look at.`,
@@ -2852,12 +2922,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 		try {
 			// Build messages array once - reused across every provider attempt.
-			const messages = this.messageHistory
-				.filter((m) => m.role !== "system")
-				.map((m) => ({
-					role: m.role as "user" | "assistant",
-					content: m.content,
-				}));
+			const messages = withPromptImage(
+				this.messageHistory
+					.filter((m) => m.role !== "system")
+					.map((m) => ({
+						role: m.role as "user" | "assistant",
+						content: m.content,
+					})),
+				textForAgent,
+				this.turnImage,
+			);
+			this.turnImage = null;
 
 			// Create abort controller for ESC interruption (shared across attempts)
 			this.armController();
