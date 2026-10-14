@@ -315,10 +315,16 @@ export function resolveTaskFileField(
 				error: `${label}: the file resolves outside the workspace or to a dot file`,
 			};
 		const checked = lstatSync(real);
+		// Refuse before opening: opening a FIFO or device can block, and a big file is never a task file.
+		if (!checked.isFile() || checked.size > MAX_TASK_FILE_BYTES)
+			return { ok: false, error: `${label}: not a small regular file with a single link` };
 		// Read through one handle: no follow on the last component, and the handle must be the very
 		// file checked (same device and inode), a regular file, small, with exactly one link (a hard
 		// link can alias a file outside the workspace).
-		const fd = openSync(real, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+		const fd = openSync(
+			real,
+			fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
+		);
 		try {
 			const st = fstatSync(fd);
 			if (
@@ -1615,7 +1621,12 @@ export function createEightBrowser(
 	}
 
 	async function run(raw: unknown[], tabId?: string, approve?: ApproveFn): Promise<string> {
-		return scrub(await runSteps(raw, tabId, approve));
+		try {
+			return scrub(await runSteps(raw, tabId, approve));
+		} catch (e) {
+			// A transport error can echo what was typed; scrub it like returned output.
+			throw new Error(scrub(e instanceof Error ? e.message : String(e)));
+		}
 	}
 
 	async function runSteps(raw: unknown[], tabId?: string, approve?: ApproveFn): Promise<string> {

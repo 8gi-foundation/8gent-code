@@ -1584,6 +1584,25 @@ describe("secret placeholders: the model never holds the value (#3604)", () => {
 		expect(await b.state()).not.toContain(SECRET);
 	});
 
+	test("a transport error that echoes the value is scrubbed", async () => {
+		write(0o600);
+		const site = fakeSite();
+		const boom: BrowserCall = async (cmd, args) => {
+			if (cmd === "page.type") throw new Error(`transport died typing ${String(args?.text)}`);
+			return site.call(cmd, args);
+		};
+		const b = mk(boom);
+		await open(b);
+		let msg = "";
+		try {
+			await b.run(typeStep("{{secret:APP_PW}}"));
+		} catch (e) {
+			msg = (e as Error).message;
+		}
+		expect(msg).not.toBe("");
+		expect(msg).not.toContain(SECRET);
+	});
+
 	test("a page reply that echoes the value is scrubbed from the result", async () => {
 		write(0o600);
 		const site = fakeSite();
@@ -1695,6 +1714,25 @@ describe("task-file placeholders: a supplied login is typed without the model ho
 		expect(user.ok && user.text).toBe("pilot-abc");
 	});
 
+	test("a transport error that echoes the file value is scrubbed", async () => {
+		task("http://127.0.0.1:5/");
+		const site = fakeSite();
+		const boom: BrowserCall = async (cmd, args) => {
+			if (cmd === "page.type") throw new Error(`transport died typing ${String(args?.text)}`);
+			return site.call(cmd, args);
+		};
+		const b = mk(boom);
+		await b.open("http://127.0.0.1:5/");
+		let msg = "";
+		try {
+			await b.run(typeStep("{{file:TASK.txt:Password}}"));
+		} catch (e) {
+			msg = (e as Error).message;
+		}
+		expect(msg).not.toBe("");
+		expect(msg).not.toContain(PW);
+	});
+
 	test("a page reply that echoes the value is scrubbed from the result", async () => {
 		task("http://127.0.0.1:5/");
 		const site = fakeSite();
@@ -1761,6 +1799,24 @@ describe("task-file placeholders: a supplied login is typed without the model ho
 		const r = resolveTaskFileField(ws, "innocent.txt", "Password", "http://127.0.0.1:5/");
 		expect(r.ok).toBe(false);
 		expect(JSON.stringify(r)).not.toContain(OUTSIDE);
+	});
+
+	test("a FIFO named like a task file is refused fast instead of hanging", () => {
+		if (process.platform === "win32") return;
+		const made = Bun.spawnSync(["mkfifo", join(ws, "pipe.txt")]);
+		expect(made.exitCode).toBe(0);
+		const t0 = Date.now();
+		const r = resolveTaskFileField(ws, "pipe.txt", "Password", "http://127.0.0.1:5/");
+		expect(r.ok).toBe(false);
+		expect(Date.now() - t0).toBeLessThan(2000);
+	});
+
+	test("a file over the size cap is refused", () => {
+		writeFileSync(
+			join(ws, "big.txt"),
+			`Password: ${PW}\nhttp://127.0.0.1:5/\n${"x".repeat(70_000)}`,
+		);
+		expect(resolveTaskFileField(ws, "big.txt", "Password", "http://127.0.0.1:5/").ok).toBe(false);
 	});
 
 	test("a hard link to a file outside the workspace is refused", () => {
