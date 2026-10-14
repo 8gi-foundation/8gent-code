@@ -203,6 +203,7 @@ export const PLAN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
 	"list_agents",
 	"background_status",
 	"background_output",
+	"background_wait",
 	"query_design_system",
 	"self_inspect",
 	"recall",
@@ -235,7 +236,9 @@ export async function planModeRefusal(
 		const command = typeof args.command === "string" ? args.command : "";
 		try {
 			const { readOnlyAllowlist } = await import("../decide/allowlist");
-			const r = readOnlyAllowlist(command, { shell: toolName === "powershell" ? "powershell" : undefined });
+			const r = readOnlyAllowlist(command, {
+				shell: toolName === "powershell" ? "powershell" : undefined,
+			});
 			if (r.verdict !== "pass-without-model") {
 				return planRefusalMessage(toolName, `the command is not provably read-only: ${r.reason}`);
 			}

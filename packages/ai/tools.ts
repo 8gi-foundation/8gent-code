@@ -1526,6 +1526,25 @@ const backgroundOutput = tool({
 	},
 });
 
+const backgroundWait = tool({
+	description:
+		"Block until a background task finishes: pass taskId and timeout_s (default 60, max 300); returns exit code and output tail, or says it is still running. Use this instead of sleep.",
+	inputSchema: z.object({
+		taskId: z.string().describe("Task ID from background_start or a promoted command"),
+		timeout_s: z.number().optional().describe("Seconds to wait, default 60, max 300"),
+	}),
+	execute: async ({ taskId, timeout_s }) => {
+		try {
+			const { getBackgroundTaskManager, waitForBackgroundTask } = await import(
+				"../tools/background"
+			);
+			return await waitForBackgroundTask(getBackgroundTaskManager(), taskId, timeout_s);
+		} catch (err) {
+			return `Failed to wait for task: ${err}`;
+		}
+	},
+});
+
 // ============================================
 // Shell Command Runner (shared)
 // ============================================
@@ -1683,7 +1702,7 @@ async function runShellCommand(
 
 				const partialOutput = (stdout + stderr).trim().slice(-500);
 				resolve(
-					`[STILL RUNNING - promoted to background task]\nTask ID: ${taskId}\nThe command didn't exit within 10s, so it was moved to a background task.\nUse background_status("${taskId}") or background_output("${taskId}") to check on it.\n${partialOutput ? `\nPartial output so far:\n${partialOutput}` : ""}`,
+					`[STILL RUNNING - promoted to background task]\nTask ID: ${taskId}\nThe command didn't exit within 10s, so it was moved to a background task.\nCall background_wait("${taskId}") to block until it finishes (do not poll with sleep); background_status and background_output return at once.\n${partialOutput ? `\nPartial output so far:\n${partialOutput}` : ""}`,
 				);
 			} catch {
 				killTree();
@@ -3486,6 +3505,7 @@ export const agentTools = bindToolContext({
 	background_start: backgroundStart,
 	background_status: backgroundStatus,
 	background_output: backgroundOutput,
+	background_wait: backgroundWait,
 
 	// Multi-agent orchestration
 	spawn_agent: spawnAgent,
