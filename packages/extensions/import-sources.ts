@@ -497,6 +497,40 @@ function summarizeServer(e: McpEntry): string {
 	return `program ${programName(String(e.command))}${envKeys.length ? `, env: ${envKeys.join(", ")} (values not shown)` : ""}`;
 }
 
+/** An env name that says its value is a secret: GITHUB_TOKEN, API_KEY, DB_PASSWORD, GH_PAT (PATH is not). */
+function isSecretEnvName(name: string): boolean {
+	return name
+		.toLowerCase()
+		.split(/[-_]/)
+		.some((w) => SECRET_FLAG_WORDS.has(w));
+}
+
+/** Env as NAME=value pairs (JSON-quoted values), in the order the config gives them. */
+function envPairs(env: Record<string, unknown> | undefined): string[] {
+	return Object.entries(env ?? {}).map(([k, v]) => `${k}=${JSON.stringify(String(v))}`);
+}
+
+/**
+ * Env shown as NAME=value: env can run code (NODE_OPTIONS, BASH_ENV,
+ * LD_PRELOAD and more), so every value is shown unless the name is
+ * secret-named or the value has a known token shape. Empty values never mask.
+ */
+export function redactEnv(env: Record<string, unknown> | undefined): {
+	pairs: string[];
+	masked: number;
+} {
+	const count = { n: 0 };
+	const pairs = Object.entries(env ?? {}).map(([k, v]) => {
+		const value = String(v);
+		if (value !== "" && isSecretEnvName(k)) {
+			count.n++;
+			return `${k}="***"`;
+		}
+		return `${k}=${JSON.stringify(maskKnownShapes(value, count))}`;
+	});
+	return { pairs, masked: count.n };
+}
+
 /**
  * What approve shows before it lets a server start: the full command or URL.
  * A stdio command keeps its code visible and masks only known secret shapes,
@@ -504,30 +538,34 @@ function summarizeServer(e: McpEntry): string {
  */
 function fullServer(e: McpEntry, showMasked = false): { text: string; masked: number } {
 	if (e.url) {
-		const text = `url ${showMasked ? e.url : redact(e.url)}${e.headers ? ` (headers: ${Object.keys(e.headers).join(", ")}, values not shown)` : ""}`;
-		return { text, masked: 0 };
+		const shownUrl = showMasked ? e.url : redact(e.url);
+		const text = `url ${shownUrl}${e.headers ? ` (headers: ${Object.keys(e.headers).join(", ")}, values not shown)` : ""}`;
+		return { text, masked: shownUrl === e.url ? 0 : 1 };
 	}
 	const command = String(e.command ?? "");
 	const raw = (e.args ?? []).map((a) => String(a));
 	const shownCommand = showMasked ? { args: [command], masked: 0 } : redactStdio([command]);
 	const shownArgs = showMasked ? { args: raw, masked: 0 } : redactStdio(raw, command);
 	const args = shownArgs.args.map((a) => JSON.stringify(a));
-	const envKeys = Object.keys(e.env ?? {});
-	const text = `command ${shownCommand.args[0]}${args.length ? ` ${args.join(" ")}` : ""}${envKeys.length ? `; env: ${envKeys.join(", ")} (values not shown)` : ""}`;
-	return { text, masked: shownCommand.masked + shownArgs.masked };
+	const shownEnv = showMasked ? { pairs: envPairs(e.env), masked: 0 } : redactEnv(e.env);
+	const text = `command ${shownCommand.args[0]}${args.length ? ` ${args.join(" ")}` : ""}${shownEnv.pairs.length ? `; env: ${shownEnv.pairs.join(" ")}` : ""}`;
+	return { text, masked: shownCommand.masked + shownArgs.masked + shownEnv.masked };
 }
 
 /**
  * The hash recorded for an imported server. Command and args are hashed as
  * they are, so two servers that differ anywhere (a hidden payload included)
  * never share a hash; imports.json holds only this digest, never the values.
- * Env and header values are dropped (names only) and the URL is redacted.
+ * Env values are hashed too (a changed NODE_OPTIONS is a new digest); header
+ * values are dropped (names only) and the URL is redacted.
  */
 function serverHash(e: McpEntry): string {
 	const shape = {
 		command: e.command !== undefined ? String(e.command) : undefined,
 		args: (e.args ?? []).map((a) => String(a)),
-		env: Object.keys(e.env ?? {}).sort(),
+		env: Object.entries(e.env ?? {})
+			.map(([k, v]) => [k, String(v)])
+			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
 		url: e.url ? redact(String(e.url)) : undefined,
 		headers: Object.keys(e.headers ?? {}).sort(),
 		type: e.type,
