@@ -146,7 +146,13 @@ import {
 	getPermissionManager,
 	isCommandDangerous,
 } from "../permissions";
-import { cdPrefix, commandAfterCdPrefix, folderLabel } from "../permissions/cd-prefix";
+import {
+	cdPrefix,
+	chainInFolderNote,
+	commandAfterCdPrefix,
+	commandInFolder,
+	folderLabel,
+} from "../permissions/cd-prefix";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import {
 	editScopeViolation,
@@ -3424,7 +3430,11 @@ export class ToolExecutor {
 			// so the pieces are not resent as they are and blocked again (#4072).
 			const piece = await chainedPieceRefusal(command, dir, systemOneEnvFor(mode));
 			const also = piece ? ` One part would be refused on its own too. ${piece}` : "";
-			return refusalLead(`[BLOCKED] ${validation.reason}.${also} Command: ${command}`);
+			// After a cd prefix the refusal keeps the folder, or the pieces run at the root (#4260).
+			const inFolder = where ? chainInFolderNote(where) : "";
+			return refusalLead(
+				`[BLOCKED] ${validation.reason}.${also}${inFolder} Command: ${commandInFolder(command, where)}`,
+			);
 		}
 
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 turns it off): it can only stop a
