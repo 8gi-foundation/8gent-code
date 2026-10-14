@@ -36,10 +36,5 @@
 		]
 	},
 	"include": ["apps/**/*", "packages/**/*", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"],
-	"exclude": [
-		"node_modules",
-		"dist",
-		"packages/skills/business-builder",
-		"packages/tools/markdown-parser.ts"
-	]
+	"exclude": ["node_modules", "dist", "packages/skills/business-builder"]
 }

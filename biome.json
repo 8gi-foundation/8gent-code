@@ -21,7 +21,6 @@
 			"apps/8gent-computer/build/**",
 			"My-Brain-Is-Full-Crew/**",
 			"packages/skills/business-builder/**",
-			"packages/tools/markdown-parser.ts",
 			"packages/specifications/session/schema.json"
 		]
 	},

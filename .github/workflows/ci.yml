@@ -40,6 +40,22 @@ jobs:
       - name: "Preflight native deps (node-pty)"
         run: bun run preflight:native
 
+      # Excluding a path from typechecking must not also exclude it from
+      # PARSING. 7af2fe38 resolved three TS errors by adding them to the
+      # tsconfig exclude list and touching no source, which made
+      # `tsc --noEmit` green while the files stayed unparseable. This fails if
+      # any excluded file cannot be parsed.
+      - name: "Excluded paths must still parse"
+        run: bun run preflight:parse
+
+      # The gate above is only as good as its own tests. They pin the property
+      # (no syntax errors, cwd-independent root, no diagnostic read as a pass)
+      # rather than the machine, and without this line CI never runs them:
+      # `bun run test` is `bun test packages/ apps/ tests/preload-temp-dirs.test.ts`,
+      # and the packaging step below covers scripts/lib/ only.
+      - name: Excluded-parse gate unit tests
+        run: bun test scripts/excluded-parse-check.test.mjs
+
       - name: Check for merge conflict markers
         run: |
           if grep -rn --include='*.ts' --include='*.tsx' -lE '^<<<<<<< |^>>>>>>> ' \
