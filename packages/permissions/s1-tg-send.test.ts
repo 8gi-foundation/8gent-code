@@ -207,6 +207,19 @@ describe("tgSendFromEnv has no opinion (the judge decides)", () => {
 		["a second curl", `. ~/.config/tg-notify/bot.env\n${CURL}\n${CURL}`],
 		["a comment line", `. ~/.config/tg-notify/bot.env\n# send\n${CURL}`],
 		["set -x first", `set -x\n. ~/.config/tg-notify/bot.env\n${CURL}`],
+		[
+			"set -ex first (#4232: errexit only, never a trace)",
+			`set -ex\n. ~/.config/tg-notify/bot.env\n${CURL}`,
+		],
+		["set -e -x first", `set -e -x\n. ~/.config/tg-notify/bot.env\n${CURL}`],
+		["set -o xtrace first", `set -o xtrace\n. ~/.config/tg-notify/bot.env\n${CURL}`],
+		["set -v first", `set -v\n. ~/.config/tg-notify/bot.env\n${CURL}`],
+		["set +e first", `set +e\n. ~/.config/tg-notify/bot.env\n${CURL}`],
+		["set -a first", `set -a\n. ~/.config/tg-notify/bot.env\n${CURL}`],
+		["set -euo pipefail first", `set -euo pipefail\n. ~/.config/tg-notify/bot.env\n${CURL}`],
+		["set -e twice", `set -e\nset -e\n. ~/.config/tg-notify/bot.env\n${CURL}`],
+		["set -e after the source line", `. ~/.config/tg-notify/bot.env\nset -e\n${CURL}`],
+		["set -e before the shebang", `set -e\n#!/bin/sh\n. ~/.config/tg-notify/bot.env\n${CURL}`],
 		["source line chained", `. ~/.config/tg-notify/bot.env && ${CURL}`],
 		[
 			"another method",
@@ -756,4 +769,82 @@ describe("8SO hardening on #4102 (second pass)", () => {
 		}
 		expect(judge.asks).toBe(0);
 	});
+});
+
+/**
+ * #4232: msg-post-caption on main b4ddc0fb (run 2026-10-14_004232). The model wrote the recipe
+ * with `#!/usr/bin/env bash` and `set -e` on top. That third line took it out of this lane, and
+ * the judge, which sees only `bash .tmp/send.sh`, scored the bare command pYes 0.5880 and blocked
+ * it. The same command scores 0.5880 on every call: the judge never reads the file.
+ */
+const ERREXIT_PILOT_SCRIPT =
+	'#!/usr/bin/env bash\nset -e\n. ~/.config/tg-notify/bot.env\ncurl -sS -X POST "$TELEGRAM_API_BASE/bot$TELEGRAM_BOT_TOKEN/sendMessage" \\\n  --data-urlencode "chat_id=-1004417730052" \\\n  --data-urlencode "text@.tmp/msg.txt"\n';
+
+describe("an errexit line after the shebang (#4232)", () => {
+	test("the pilot's exact script and command are the lane's", () => {
+		put(".tmp/send.sh", ERREXIT_PILOT_SCRIPT);
+		const r = lane("bash .tmp/send.sh");
+		expect(r.ok).toBe(true);
+		expect((r as { body: string }).body).toBe(ERREXIT_PILOT_SCRIPT);
+	});
+	test("set -e, set -eu and set -ue, with or without a shebang", () => {
+		for (const set of ["set -e", "set -eu", "set -ue"]) {
+			expect(script(`${set}\n. ~/.config/tg-notify/bot.env\n${CURL}\n`).ok, set).toBe(true);
+			expect(script(`#!/bin/sh\n${set}\n. ~/.config/tg-notify/bot.env\n${CURL}\n`).ok, set).toBe(
+				true,
+			);
+		}
+	});
+	test("the gate runs it without asking the judge", async () => {
+		put(".tmp/send.sh", ERREXIT_PILOT_SCRIPT);
+		const r = await systemOneGate("bash .tmp/send.sh", env, ws, undefined, undefined, OPT);
+		expect(r.run).toBe(true);
+		expect(r.runInstead).toBe(ERREXIT_PILOT_SCRIPT);
+		expect(r.guard?.backend).toBe("allowlist");
+		expect(judge.asks).toBe(0);
+	});
+	test("a token written into the errexit script is still refused", () => {
+		put(".tmp/send.sh", ERREXIT_PILOT_SCRIPT.replace("$TELEGRAM_BOT_TOKEN", TOKEN));
+		expect((lane("bash .tmp/send.sh") as { refuse?: string }).refuse).toBe(
+			TG_TOKEN_IN_ARGV_REFUSAL,
+		);
+	});
+	test.skipIf(!POSIX)(
+		"run for real it sends exactly one message, token only in the path",
+		async () => {
+			const { calls, server } = stub();
+			try {
+				botEnv(`http://127.0.0.1:${server.port}`);
+				put(".tmp/send.sh", ERREXIT_PILOT_SCRIPT);
+				const r = lane("bash .tmp/send.sh");
+				expect(r.ok).toBe(true);
+				const res = await shC((r as { body: string }).body);
+				expect(res.code).toBe(0);
+				expect(calls).toEqual([{ path: `/bot${TOKEN}/sendMessage`, chat: CHAT, text: MSG }]);
+				expect(res.out + res.err).not.toContain(TOKEN);
+			} finally {
+				server.stop(true);
+			}
+		},
+	);
+	test.skipIf(!POSIX)(
+		"errexit only stops it sooner: bot.env gone after the check, curl never runs (sh and bash)",
+		async () => {
+			const { calls, server } = stub();
+			try {
+				botEnv(`http://127.0.0.1:${server.port}`);
+				put(".tmp/send.sh", ERREXIT_PILOT_SCRIPT);
+				const r = lane("bash .tmp/send.sh");
+				expect(r.ok).toBe(true);
+				rmSync(join(home, ".config/tg-notify/bot.env"));
+				for (const shell of ["/bin/sh", "/bin/bash"]) {
+					const res = await shC((r as { body: string }).body, env, shell);
+					expect(res.code, shell).not.toBe(0);
+				}
+				expect(calls).toEqual([]);
+			} finally {
+				server.stop(true);
+			}
+		},
+	);
 });

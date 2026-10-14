@@ -15,8 +15,9 @@
  *   - the command is exactly `sh FILE` or `bash FILE`, FILE a plain relative path to a regular file
  *     inside the workspace (no `..`, no dot directory but `.tmp`, no symlink below the root, not a
  *     secret name, at most 4 KiB, printable ASCII);
- *   - the file, after joining `\`-newline continuations and dropping blank lines and one optional
- *     shebang (`#!/bin/sh`, `#!/bin/bash`, `#!/usr/bin/env sh|bash`), is exactly two lines:
+ *   - the file, after joining `\`-newline continuations and dropping blank lines, one optional
+ *     shebang (`#!/bin/sh`, `#!/bin/bash`, `#!/usr/bin/env sh|bash`) and then one optional
+ *     `set -e` / `set -eu` / `set -ue` (#4232: it only stops the script sooner), is exactly two lines:
  *       `. ~/.config/tg-notify/bot.env` (or `source`, or `$HOME/...` / `"$HOME/..."`), then
  *       `curl [-q] OPTS "$TELEGRAM_API_BASE/bot$TELEGRAM_BOT_TOKEN/sendMessage" OPTS` where OPTS are
  *       only -s, -S, -f (or their long names), `-X POST`, `-m`/`--max-time`/`--connect-timeout N`,
@@ -98,6 +99,12 @@ const MAX_BYTES = 4096;
 const SCRIPT_CMD =
 	/^(sh|bash) (?:\.\/)?([A-Za-z0-9][A-Za-z0-9._/-]{0,199}|\.tmp\/[A-Za-z0-9._/-]{1,195})$/;
 const SHEBANG = /^#!(\/bin\/(sh|bash)|\/usr\/bin\/env (sh|bash))$/;
+/**
+ * One optional errexit line right after the shebang (#4232): `set -e`, `set -eu` or `set -ue`.
+ * It only ever stops the script sooner (a failed `.` of bot.env, an unset variable), so curl runs
+ * in fewer cases, never more. No other `set` option: -x/-v would trace the expanded token.
+ */
+const ERREXIT = /^set -(e|eu|ue)$/;
 const SOURCE =
 	/^(\.|source) (~\/\.config\/tg-notify\/bot\.env|\$HOME\/\.config\/tg-notify\/bot\.env|"\$HOME\/\.config\/tg-notify\/bot\.env")$/;
 const ENV_LINE = /^(TELEGRAM_[A-Z0-9_]{1,40})=("[A-Za-z0-9._:/@+[\]-]*"|[A-Za-z0-9._:/@+[\]-]*)$/;
@@ -266,6 +273,7 @@ function scriptLines(body: string): [string, string] | null {
 		.map((l) => l.trim())
 		.filter((l) => l !== "");
 	if (lines.length > 0 && SHEBANG.test(lines[0])) lines.shift();
+	if (lines.length > 0 && ERREXIT.test(lines[0])) lines.shift();
 	if (lines.length !== 2) return null;
 	return [lines[0], lines[1]];
 }
