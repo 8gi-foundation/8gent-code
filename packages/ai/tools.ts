@@ -16,6 +16,7 @@ import { z } from "zod";
 import { activeShellKind, killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
 import { safePath } from "../eight/tools";
+import { USE_SKILL_DESCRIPTION } from "../eight/use-skill";
 import {
 	ALLOWED_PATHS_DESCRIPTION,
 	CHECK_AGENT_DESCRIPTION,
@@ -1062,6 +1063,21 @@ const makePdfTool = tool({
 				2,
 			);
 		}
+	},
+});
+
+const useSkillTool = tool({
+	description: USE_SKILL_DESCRIPTION,
+	inputSchema: z.object({
+		name: z
+			.string()
+			.optional()
+			.describe("Skill name exactly as listed, for example brief-to-film (never a path)"),
+		query: z.string().optional().describe("Word to filter the skill list by"),
+	}),
+	execute: async (args) => {
+		const { useSkill } = await import("../eight/use-skill");
+		return useSkill(args, { projectDir: getToolContext().workingDirectory });
 	},
 });
 
@@ -3537,6 +3553,9 @@ export const agentTools = bindToolContext({
 	handeyes_type_and_confirm: handeyesTypeAndConfirm,
 	handeyes_engage_struggle_mode: handeyesEngageStruggleMode,
 	handeyes_exit_struggle_mode: handeyesExitStruggleMode,
+
+	// Skills (#3593): list them, load one by name
+	use_skill: useSkillTool,
 
 	// Self-evolution
 	propose_skill_creation: proposeSkillCreation,

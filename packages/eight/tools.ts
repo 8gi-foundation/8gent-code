@@ -255,6 +255,7 @@ import { RetiredFacts } from "./retired-facts";
 import { ensureScratchExcludedIfPresent } from "./scratch-exclude";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
+import { USE_SKILL_DESCRIPTION, useSkill } from "./use-skill";
 import { type VisionRouterResult, findVisionModel } from "./vision-router";
 
 /**
@@ -1527,6 +1528,24 @@ export class ToolExecutor {
 			{
 				type: "function",
 				function: {
+					name: "use_skill",
+					description: USE_SKILL_DESCRIPTION,
+					parameters: {
+						type: "object",
+						properties: {
+							name: {
+								type: "string",
+								description:
+									"Skill name exactly as listed, for example brief-to-film (never a path)",
+							},
+							query: { type: "string", description: "Word to filter the skill list by" },
+						},
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
 					name: "render_video_deck",
 					description:
 						"[MEDIA] Narrated mp4 from args {spec:{size:'1280x720', slides:[{title, bullets, narration}]}, out:'deck.mp4'}, local code only. Deterministic. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task: you write the spec, it draws the slides, joins them and returns { path, durationSec }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?: string[], image?: 'png/jpg path in the working directory', seconds?: 1-60 (default 4), narration?: 'spoken by the local voice', voice? }] } (1-40 slides, each needs a title, text, bullets or image). Narration uses the same local engine as speak and stretches a slide to fit its voice. No music, no network. Never shells out.",
@@ -2772,6 +2791,10 @@ export class ToolExecutor {
 				return this.handleBackgroundStatus(args.taskId as string);
 			case "background_output":
 				return this.handleBackgroundOutput(args.taskId as string, args.tail as number);
+
+			case "use_skill":
+				// Name lookup only (#3593): the model never passes a path, so nothing outside the skill folders is read.
+				return useSkill(args, { projectDir: this.workingDirectory });
 
 			case "film_craft":
 				// Every path is confined to the workspace (no traversal, no symlink out) and made
