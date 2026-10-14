@@ -132,6 +132,7 @@ import {
 	describeLocalTurnFailure,
 	failedTurnRunEntry,
 } from "./local-turn-error";
+import { ensureScratchExcluded } from "./scratch-exclude";
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
@@ -559,6 +560,7 @@ export class Agent {
 		// ToolExecutor above already started for this folder, so this only
 		// attaches the debug log; it never indexes the repo a second time.
 		const cwd = config.workingDirectory || process.cwd();
+		ensureScratchExcluded(cwd);
 		if (!LITE) {
 			astEnsureIndexed(cwd)
 				.then((index) => {

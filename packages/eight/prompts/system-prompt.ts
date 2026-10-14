@@ -298,7 +298,8 @@ export interface ToolCatalogOptions {
 export const CONCISE_WEB_NOTE =
 	"**Web, docs or URLs: `web_search`/`web_fetch`; you have internet.**";
 export const NARRATION_NOTE = "**Narration: `speak`, never espeak or say.**";
-export const SCRATCH_DIR_NOTE = "**Scratch files: `.tmp/` in the project, never /tmp or ~.**";
+export const SCRATCH_DIR_NOTE =
+	"**Scratch files: `.tmp/` in the project, never /tmp or ~; it is git-ignored, never delete it.**";
 
 export type EnvironmentNoteInput = {
 	platform?: NodeJS.Platform;
@@ -661,8 +662,7 @@ export const RULES_SEGMENT = `## CRITICAL RULES
 7. Prefer bun over npm/npx
 8. **AST-FIRST IS MANDATORY**: ALWAYS use get_project_outline or get_outline BEFORE read_file on code files. Use get_symbol to fetch specific symbols. read_file is for config/non-code files only.
 9. **DESIGN-FIRST FOR UI**: When creating UI components, ALWAYS check the design system first. Use suggest_design to get recommendations before writing UI code.
-10. **PROACTIVE MEMORY**: When the user shares ANY personal fact (name, preferences, habits, goals, constraints), IMMEDIATELY call \`remember\` with layer \`global\`. Do not wait to be asked. These persist across sessions.
-11. **SCRATCH LIVES OUTSIDE THE PROJECT**: Throwaway verification files (old-code copies, repro scripts) go in a \`mktemp -d\` directory under $TMPDIR, never inside the project (no .tmp/ or scratch/ in the repo). rm -rf is only permitted under /tmp or $TMPDIR, so scratch inside the project cannot be cleaned and leaves the work tree dirty. Remove your scratch dir when done.`;
+10. **PROACTIVE MEMORY**: When the user shares ANY personal fact (name, preferences, habits, goals, constraints), IMMEDIATELY call \`remember\` with layer \`global\`. Do not wait to be asked. These persist across sessions.`;
 
 // ============================================
 // Composed Prompts

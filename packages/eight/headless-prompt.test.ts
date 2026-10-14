@@ -165,6 +165,8 @@ describe("headless prompt diet", () => {
 		const [headless] = await run(true);
 		expect(headless.messages[0].content).toContain(SLIDES_TO_VIDEO_NOTE);
 		expect(headless.messages[0].content).toContain(SCRATCH_DIR_NOTE);
+		expect(headless.messages[0].content).toContain("it is git-ignored, never delete it");
+		expect(headless.messages[0].content).not.toContain("mktemp");
 		expect(headless.messages[0].content).toContain(NARRATION_NOTE);
 	}, 60_000);
 
