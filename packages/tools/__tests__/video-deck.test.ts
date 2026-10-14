@@ -24,10 +24,13 @@ import {
 } from "../../permissions/edit-guards";
 import {
 	DeckSpecSchema,
+	FPS,
+	INTRO_FRAMES,
 	MAX_IMAGE_BYTES,
 	buildFfmpegArgs,
 	imageDimensions,
 	paintSlide,
+	phase,
 	placeOutput,
 	renderVideoDeck,
 	resolveBinary,
@@ -671,5 +674,147 @@ describe("caps", () => {
 		// an override must be absolute
 		expect(() => resolveBinary("ffmpeg", work, "ffmpeg")).toThrow(/absolute/);
 		if (hasFfmpeg) expect(resolveBinary("ffmpeg", work)).toMatch(/^\//);
+	});
+});
+
+describe("house film look (#4263)", () => {
+	test("the entrance ends exactly on the settled slide", () => {
+		expect(phase(0, 0.2, 0.6)).toBe(0);
+		expect(phase(0.6, 0.2, 0.6)).toBe(1);
+		expect(phase(1, 0.2, 0.6)).toBe(1);
+		let prev = 0;
+		for (let t = 0; t <= 1; t += 0.05) {
+			const v = phase(t, 0.2, 0.6);
+			expect(v).toBeGreaterThanOrEqual(prev);
+			prev = v;
+		}
+	});
+
+	test("t=1 paints the same bytes as the held still; early entrance frames differ", async () => {
+		const root = tempDir("vdeck-film-");
+		const slide = {
+			title: "How to borrow",
+			bullets: ["Card at the desk", "Proof of address"],
+			narration: "Get a card.",
+		};
+		const held = await paintSlide(slide, "1280x720", root, "Tide Library", { index: 2, count: 5 });
+		const settled = await paintSlide(slide, "1280x720", root, "Tide Library", {
+			index: 2,
+			count: 5,
+			t: 1,
+		});
+		const start = await paintSlide(slide, "1280x720", root, "Tide Library", {
+			index: 2,
+			count: 5,
+			t: 0,
+		});
+		const mid = await paintSlide(slide, "1280x720", root, "Tide Library", {
+			index: 2,
+			count: 5,
+			t: 0.4,
+		});
+		expect(sha(settled)).toBe(sha(held));
+		expect(new Set([sha(start), sha(mid), sha(held)]).size).toBe(3);
+	});
+
+	test("the counter and the caption are part of the picture", async () => {
+		const root = tempDir("vdeck-film-cap-");
+		const slide = { title: "What it is", bullets: ["Tools to borrow"] };
+		const plain = await paintSlide(slide, "1280x720", root, undefined, { index: 0, count: 5 });
+		const second = await paintSlide(slide, "1280x720", root, undefined, { index: 1, count: 5 });
+		const captioned = await paintSlide(
+			{ ...slide, narration: "Borrow it, don't buy it." },
+			"1280x720",
+			root,
+			undefined,
+			{ index: 0, count: 5 },
+		);
+		expect(sha(second)).not.toBe(sha(plain));
+		expect(sha(captioned)).not.toBe(sha(plain));
+	});
+
+	test("a slide with an entrance gets a file-only image sequence before its still, and holds in whole frames", () => {
+		const args = buildFfmpegArgs(
+			[
+				{
+					png: "/w/s0.png",
+					sec: 2,
+					wav: "/w/a.wav",
+					intro: { pattern: "/w/s0-in-%03d.png", count: 12 },
+				},
+				{ png: "/w/s1.png", sec: 1 },
+			],
+			"/w/o.mp4",
+			true,
+		);
+		const inputs = args.reduce<number[]>((acc, a, i) => (a === "-i" ? [...acc, i] : acc), []);
+		expect(inputs.map((i) => args[i + 1])).toEqual([
+			"/w/s0-in-%03d.png",
+			"/w/s0.png",
+			"/w/s1.png",
+			"/w/a.wav",
+		]);
+		for (const i of inputs) expect(args.slice(i - 8, i)).toContain("-protocol_whitelist");
+		// 2 s = 48 frames; 12 are the entrance, so the still holds 36 frames.
+		const holdT = args[inputs[1] - 1];
+		expect(holdT).toBe((36 / FPS).toFixed(3));
+		const graph = args[args.indexOf("-filter_complex") + 1];
+		expect(graph).toContain("[0:v]format=yuv420p,setsar=1,fps=24[e0]");
+		expect(graph).toContain("[1:v]format=yuv420p,setsar=1,fps=24[h0]");
+		expect(graph).toContain("[e0][h0]concat=n=2:v=1:a=0[v0]");
+		expect(graph).toContain("[2:v]format=yuv420p,setsar=1,fps=24[v1]");
+		expect(graph).toContain("[3:a]aresample=48000");
+		expect(args.join(" ")).not.toMatch(/https?:|ftp:|tcp:|rtmp/);
+	});
+
+	test("without an entrance the argv is what it was before the film look", () => {
+		const args = buildFfmpegArgs([{ png: "/w/a.png", sec: 1 }], "/w/o.mp4", false);
+		expect(args.slice(5, 15)).toEqual([
+			"-protocol_whitelist",
+			"file",
+			"-loop",
+			"1",
+			"-framerate",
+			"24",
+			"-t",
+			"1.000",
+			"-i",
+			"/w/a.png",
+		]);
+		expect(args[args.indexOf("-filter_complex") + 1]).toBe(
+			"[0:v]format=yuv420p,setsar=1,fps=24[v0];[v0]concat=n=1:v=1:a=0[v]",
+		);
+	});
+
+	ffTest("each slide settles within the entrance, then holds one still to its end", async () => {
+		const root = tempDir("vdeck-film-hold-");
+		const r = await renderVideoDeck({ spec: SPEC, out: join(root, "f.mp4"), cwd: root });
+		expect(r.slides).toBe(2);
+		// Measured the way a still counter sees it: 160x90 grey, mean absolute difference per pixel
+		// (x264 P-frames of one still differ by noise, so exact frame hashes are not the test).
+		const raw = spawnSync("ffmpeg", [
+			"-v",
+			"error",
+			"-i",
+			join(root, "f.mp4"),
+			"-vf",
+			"scale=160:90,format=gray",
+			"-f",
+			"rawvideo",
+			"-",
+		]).stdout;
+		const F = 160 * 90;
+		expect(raw.length / F).toBe(48);
+		const diff = (i: number, j: number) => {
+			let d = 0;
+			for (let k = 0; k < F; k++) d += Math.abs(raw[i * F + k] - raw[j * F + k]);
+			return d / F;
+		};
+		for (const s of [0, 24]) {
+			const moves = Array.from({ length: INTRO_FRAMES - 1 }, (_, i) => diff(s + i, s + i + 1));
+			expect(Math.max(...moves)).toBeGreaterThan(0.1);
+			for (let f = s + INTRO_FRAMES; f < s + 23; f++) expect(diff(f, f + 1)).toBeLessThan(0.05);
+		}
+		expect(diff(INTRO_FRAMES + 5, 24 + INTRO_FRAMES + 5)).toBeGreaterThan(2);
 	});
 });
