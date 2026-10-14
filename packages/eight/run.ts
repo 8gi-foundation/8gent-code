@@ -806,9 +806,15 @@ export async function runRunCommand(
 		}
 
 		const { Agent } = await import("./agent");
+		// A provider declared in providers.json is reachable only at its own
+		// baseUrl; without it the native path has no base and fails "Invalid
+		// URL" before any request (#4283). Built-ins keep their own resolution.
+		const { getProviderManager } = await import("../providers");
+		const declared = getProviderManager().getProvider(provider);
 		const agent = new Agent({
 			model,
 			runtime: provider as "ollama" | "lmstudio" | "openrouter" | "apple-foundation",
+			baseUrl: declared?.declared ? declared.baseUrl : undefined,
 			workingDirectory: opts.cwd || process.cwd(),
 			maxTurns: opts.maxTurns ?? 30,
 			events,
