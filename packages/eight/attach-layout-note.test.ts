@@ -47,7 +47,9 @@ async function png(boxes: boolean): Promise<Buffer> {
 	const px = Buffer.alloc(W * H * 3, 255);
 	if (boxes)
 		for (let y = 20; y < 60; y++) for (let x = 50; x < 350; x++) px.set([0, 0, 0], (y * W + x) * 3);
-	return sharp(px, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
+	return sharp(px, { raw: { width: W, height: H, channels: 3 } })
+		.png()
+		.toBuffer();
 }
 
 beforeAll(async () => {
@@ -99,7 +101,8 @@ function build(): AgentT {
 		workingDirectory: repo,
 		baseUrl: `http://127.0.0.1:${server.port}`,
 	} as ConstructorParameters<typeof Agent>[0]);
-	(agent as unknown as { modelSees: () => Promise<boolean> }).modelSees = () => Promise.resolve(true);
+	(agent as unknown as { modelSees: () => Promise<boolean> }).modelSees = () =>
+		Promise.resolve(true);
 	return agent;
 }
 
@@ -130,5 +133,47 @@ describe("attached image layout note (#3823)", () => {
 		await build().chat("Turn mock.png into a page.", img.toString("base64"), "image/png");
 		expect(bodies.length).toBeGreaterThan(1);
 		expect(copies()).toBe(1);
+	}, 60_000);
+});
+
+describe("downscale note on an attached image (#4293)", () => {
+	const asked = () => JSON.stringify(bodies[bodies.length - 1]?.messages ?? []);
+
+	test("a no-band image still gets the note when its copy is smaller than the original", async () => {
+		const copy = await sharp(await png(false))
+			.resize(100, 50)
+			.png()
+			.toBuffer();
+		const meta = await sharp(copy).metadata();
+		await build().chat("Click the button.", copy.toString("base64"), "image/png", {
+			width: 400,
+			height: 200,
+		});
+		expect(meta.width).toBe(100);
+		expect(asked()).toContain("downscaled copy (100x50 px) of the original (400x200 px)");
+		expect(asked()).toContain("by 4");
+	}, 60_000);
+
+	test("no note when the copy is the original size", async () => {
+		const img = await png(false);
+		await build().chat("Click the button.", img.toString("base64"), "image/png", {
+			width: 400,
+			height: 200,
+		});
+		expect(asked()).not.toContain("downscaled copy");
+	}, 60_000);
+
+	test("read_image on a large file states the original size and factor", async () => {
+		const big = await sharp({
+			create: { width: 2048, height: 512, channels: 3, background: "#ffffff" },
+		})
+			.png()
+			.toBuffer();
+		writeFileSync(join(repo, "mock.png"), big);
+		readImageFirst = true;
+		await build().chat("Look at mock.png.");
+		expect(bodies.length).toBeGreaterThan(1);
+		expect(asked()).toContain("downscaled copy (1024x256 px) of the original (2048x512 px)");
+		expect(asked()).toContain("by 2");
 	}, 60_000);
 });

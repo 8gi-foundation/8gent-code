@@ -10,7 +10,6 @@ import {
 	LOCAL_IMAGE_MAX_SIDE,
 	downscaleNote,
 	imageMaxSide,
-	planResize,
 } from "./image-fit";
 import { layoutMeasureLine } from "./layout-measure";
 import { loadRunImage } from "./run";
@@ -24,26 +23,6 @@ describe("imageMaxSide", () => {
 		expect(imageMaxSide(true, "4096")).toBe(4096);
 		expect(imageMaxSide(false, "12")).toBe(HOSTED_IMAGE_MAX_SIDE);
 		expect(imageMaxSide(false, "abc")).toBe(HOSTED_IMAGE_MAX_SIDE);
-	});
-});
-
-describe("planResize", () => {
-	test("a 2560x1440 screenshot is sent as is when hosted", () => {
-		expect(planResize(2560, 1440, 2560)).toEqual({
-			resize: false,
-			width: 2560,
-			height: 1440,
-			scale: 1,
-		});
-	});
-	test("the same screenshot shrinks to 1024x576 under the local cap", () => {
-		const p = planResize(2560, 1440, 1024);
-		expect(p.resize).toBe(true);
-		expect([p.width, p.height, p.scale]).toEqual([1024, 576, 0.4]);
-	});
-	test("a genuinely huge image is still downscaled on the hosted cap", () => {
-		const p = planResize(7680, 4320, 2560);
-		expect([p.resize, p.width, p.height]).toEqual([true, 2560, 1440]);
 	});
 });
 

@@ -201,6 +201,7 @@ import {
 	harnessNote,
 	withStyleReminder,
 } from "./context-note";
+import { downscaleNote } from "./image-fit";
 import { layoutMeasureLine } from "./layout-measure";
 import {
 	ObservationPacker,
@@ -1937,6 +1938,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					this.messageHistory.push({ role: "user", content: harnessNote(measured) });
 					// read_image on the same file this turn must not repeat the block.
 					this.executor.markLayoutSent(measured);
+				} else if (imageOriginal) {
+					// #4293: a photo or an image with no ink bands has no layout block, but
+					// a downscaled copy still needs its original size and factor stated.
+					const sharp = (await import("sharp")).default;
+					const meta = await sharp(Buffer.from(imageBase64, "base64")).metadata();
+					const note = downscaleNote(imageOriginal, {
+						width: meta.width ?? imageOriginal.width,
+						height: meta.height ?? imageOriginal.height,
+					});
+					if (note) this.messageHistory.push({ role: "user", content: harnessNote(note) });
 				}
 			} catch {
 				// layout hints are best-effort; the image itself is already attached

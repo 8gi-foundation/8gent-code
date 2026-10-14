@@ -12,6 +12,8 @@
  * error, so read_image behaves as before.
  */
 
+import { isDownscaled } from "./image-fit";
+
 // Loaded on first use, not at import: sharp's native addon is not embedded by
 // `bun build --compile`, and a top-level import crashed every compiled command
 // (run, rpc, mcp-server) on Windows before any model call (#3892). A missing
@@ -182,8 +184,6 @@ export function pageHeightLines(m: LayoutMeasure): string[] {
 			]
 		: [base];
 }
-
-import { isDownscaled } from "./image-fit";
 
 /** One block of text for a read_image result, or "" when there is nothing to say. */
 export async function layoutMeasureLine(

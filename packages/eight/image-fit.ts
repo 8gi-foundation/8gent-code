@@ -24,22 +24,6 @@ export function imageMaxSide(
 	return local ? LOCAL_IMAGE_MAX_SIDE : HOSTED_IMAGE_MAX_SIDE;
 }
 
-export type ResizePlan = { resize: boolean; width: number; height: number; scale: number };
-
-/** Whether an image of width x height needs a downscale to fit `maxSide`, and to what. */
-export function planResize(width: number, height: number, maxSide: number): ResizePlan {
-	const long = Math.max(width, height);
-	if (!(long > maxSide) || width < 1 || height < 1)
-		return { resize: false, width, height, scale: 1 };
-	const scale = maxSide / long;
-	return {
-		resize: true,
-		width: Math.max(1, Math.round(width * scale)),
-		height: Math.max(1, Math.round(height * scale)),
-		scale,
-	};
-}
-
 type Size = { width: number; height: number };
 
 /** True when the copy shown is smaller than the original. */
