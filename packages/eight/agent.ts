@@ -93,6 +93,7 @@ import {
 import { type Evidence, EvidenceCollector, summarizeEvidence } from "../validation/evidence";
 import { reviewTurn, turnReviewEnabled } from "../verify/turn-review";
 import { isNoToolScope, isVerbatimScope } from "./agent-scopes";
+import { needsPlanningGate as promptNeedsPlanningGate } from "./planning-gate";
 import { type Settings, computeAutoTune } from "./auto-tune";
 import { createClient } from "./clients";
 import {
@@ -2041,8 +2042,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Local models skip the BMAD planning in the system prompt and jump
 		// straight to tool calls. For multi-step tasks we inject an explicit
 		// instruction that forces the model to emit a numbered plan first.
-		const PLANNING_KEYWORDS =
-			/\b(build|create|implement|fix|refactor|add|setup|configure|migrate|convert|redesign|scaffold|deploy|integrate)\b/i;
 		// A Table officer is answering a colleague in a chat channel, not executing
 		// a multi-step build, and its turn prompt is ALWAYS over 100 chars - so
 		// this gate fired on every single officer reply and injected the literal
@@ -2052,7 +2051,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// sent. Nobody at the Table asked for a plan.
 		const needsPlanningGate =
 			!isVerbatimScope(this.config.agentScope) &&
-			(textForAgent.length > 100 || PLANNING_KEYWORDS.test(textForAgent));
+			promptNeedsPlanningGate(textForAgent);
 
 		// Changed session context goes in before the user's words (#3222).
 		this.appendContextNote();
