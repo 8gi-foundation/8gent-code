@@ -38,8 +38,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ActorKind, CapabilityAuditStore, LogCapabilityInput } from "../audit/index.js";
-import { realpathLoose, securityEnvSnapshot } from "../permissions/run-command-sandbox.js";
 import type { CapabilityRequest, EnforceOptions } from "../permissions/capability-manifest.js";
+import { realpathLoose, securityEnvSnapshot } from "../permissions/run-command-sandbox.js";
 import type { PolicyDecision } from "../permissions/types.js";
 import { enforceSkillScope } from "./capability-scope.js";
 import { validateSkillManifest } from "./manifest.js";
@@ -312,6 +312,8 @@ function warnCollisionOnce(c: SkillCollision, message?: string): void {
 	);
 }
 
+const warnedLoadErrors = new Set<string>();
+
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const SKILL_TRUST_FILE = "skills-trust.json";
 
@@ -370,12 +372,19 @@ export class SkillManager {
 	/** User and bundled names a project skill may not replace unpinned (#4125), per loadSkills(). */
 	private guardedByName: Map<string, { filePath: string; tier: "user" | "bundled" }> = new Map();
 	private trust: Map<string, string> | undefined;
+	/** Files the last loadSkills() could not parse, with the reason (#3593: use_skill names them). */
+	private loadErrors: { filePath: string; error: string }[] = [];
 
 	constructor(skillsDirectory?: string, options: SkillManagerOptions = {}) {
 		this.projectDir = options.projectDir;
 		this.homeDir = options.homeDir;
 		this.skillsDirectory =
 			skillsDirectory || path.join(this.homeDir ?? os.homedir(), ".8gent", "skills");
+	}
+
+	/** Skill files the last loadSkills() refused as malformed, with the parser's reason. */
+	getLoadErrors(): { filePath: string; error: string }[] {
+		return [...this.loadErrors];
 	}
 
 	/** Name collisions found by the last loadSkills(): winner kept, loser listed. */
@@ -396,6 +405,7 @@ export class SkillManager {
 		this.aliasToCanonical.clear();
 		this.skillOrigin.clear();
 		this.collisions = [];
+		this.loadErrors = [];
 		this.trust = undefined;
 
 		const home = this.homeDir ?? os.homedir();
@@ -586,7 +596,14 @@ export class SkillManager {
 			this.skillOrigin.set(skill.name, { filePath, tier });
 			this.registerLookupKeys(skill.name, frontmatter);
 		} catch (err) {
-			console.warn(`[skills] Failed to load ${filePath}: ${err}`);
+			const error = err instanceof Error ? err.message : String(err);
+			this.loadErrors.push({ filePath, error });
+			// Once per file and reason: use_skill reloads on every call.
+			const key = `${filePath}\0${error}`;
+			if (!warnedLoadErrors.has(key)) {
+				warnedLoadErrors.add(key);
+				console.warn(`[skills] Failed to load ${filePath}: ${err}`);
+			}
 		}
 	}
 
