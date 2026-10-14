@@ -93,7 +93,6 @@ import {
 import { type Evidence, EvidenceCollector, summarizeEvidence } from "../validation/evidence";
 import { reviewTurn, turnReviewEnabled } from "../verify/turn-review";
 import { isNoToolScope, isVerbatimScope } from "./agent-scopes";
-import { needsPlanningGate as promptNeedsPlanningGate } from "./planning-gate";
 import { type Settings, computeAutoTune } from "./auto-tune";
 import { createClient } from "./clients";
 import {
@@ -114,6 +113,7 @@ import {
 } from "./honesty";
 import { projectInstructionsSection } from "./instruction-loader";
 import { getModeManager } from "./modes";
+import { needsPlanningGate as promptNeedsPlanningGate } from "./planning-gate";
 import { isLocalProvider } from "./registry";
 import { verifyNudgeFor } from "./verify-gate";
 
@@ -2050,8 +2050,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ..." scaffolding in the live corpus: not a model tic, an instruction we
 		// sent. Nobody at the Table asked for a plan.
 		const needsPlanningGate =
-			!isVerbatimScope(this.config.agentScope) &&
-			promptNeedsPlanningGate(textForAgent);
+			!isVerbatimScope(this.config.agentScope) && promptNeedsPlanningGate(textForAgent);
 
 		// Changed session context goes in before the user's words (#3222).
 		this.appendContextNote();

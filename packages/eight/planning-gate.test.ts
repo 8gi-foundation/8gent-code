@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { PLANNING_GATE_INSTRUCTION } from "./prompt";
 import { PLANNING_GATE_MIN_CHARS, needsPlanningGate } from "./planning-gate";
+import { PLANNING_GATE_INSTRUCTION } from "./prompt";
 
 // The exact prompt of pilot msg-post-caption (run 2026-10-14_102226, #4248).
 const MSG_POST_CAPTION =
