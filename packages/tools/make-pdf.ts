@@ -11,15 +11,15 @@
  * overwrites one already there.
  */
 
-import { resolveHome } from "../core/home";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { resolveHome } from "../core/home";
 import { type Block, htmlToMarkdown, parseMarkdown, writePdf } from "./pdf-writer";
 
 import {
 	type DesignContext,
-	type DesignHint,
 	DesignContextUnavailable,
+	type DesignHint,
 	resolveDesignContext,
 } from "../design-systems/index";
 
@@ -151,7 +151,8 @@ function readSource(input: MakePdfInput): { markdown: string } {
 	}
 	const fromFile = (p: string, label: string) => {
 		const abs = path.resolve(p);
-		if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw new Error(`${label} not found: ${p}`);
+		if (!fs.existsSync(abs) || !fs.statSync(abs).isFile())
+			throw new Error(`${label} not found: ${p}`);
 		if (fs.statSync(abs).size > MAX_SOURCE_CHARS * 4)
 			throw new Error(`${label} is too large to lay out (over ${MAX_SOURCE_CHARS} characters)`);
 		return fs.readFileSync(abs, "utf8");
@@ -162,7 +163,9 @@ function readSource(input: MakePdfInput): { markdown: string } {
 	else if (html) md = htmlToMarkdown(html);
 	else md = htmlToMarkdown(fromFile(htmlPath as string, "htmlPath"));
 	if (md.length > MAX_SOURCE_CHARS)
-		throw new Error(`source is ${md.length} characters; make_pdf lays out at most ${MAX_SOURCE_CHARS}`);
+		throw new Error(
+			`source is ${md.length} characters; make_pdf lays out at most ${MAX_SOURCE_CHARS}`,
+		);
 	return { markdown: md };
 }
 
@@ -176,7 +179,8 @@ function autoOutPath(title: string | undefined, blocks: Block[]): string {
 			.replace(/^-+|-+$/g, "")
 			.slice(0, 60) || "document";
 	let candidate = path.join(CREATIVE_DIR, `${slug}.pdf`);
-	for (let n = 2; fs.existsSync(candidate); n++) candidate = path.join(CREATIVE_DIR, `${slug}-${n}.pdf`);
+	for (let n = 2; fs.existsSync(candidate); n++)
+		candidate = path.join(CREATIVE_DIR, `${slug}-${n}.pdf`);
 	return candidate;
 }
 
@@ -197,7 +201,10 @@ export async function makePdf(input: MakePdfInput): Promise<MakePdfResult> {
 	const title = input.title?.trim() || undefined;
 	if (title && blocks[0]?.kind !== "h1") blocks = [{ kind: "h1", text: title }, ...blocks];
 	if (blocks.length === 0) throw new Error("make_pdf: the source has no text to lay out");
-	const { pdf, pages, replaced } = writePdf(blocks, title ?? blocks.find((b) => b.kind === "h1")?.text);
+	const { pdf, pages, replaced } = writePdf(
+		blocks,
+		title ?? blocks.find((b) => b.kind === "h1")?.text,
+	);
 	fs.mkdirSync(CREATIVE_DIR, { recursive: true });
 	const out = input.outName?.trim() ? resolveOutPath(input.outName) : autoOutPath(title, blocks);
 	const tmp = `${out}.${process.pid}.tmp`;

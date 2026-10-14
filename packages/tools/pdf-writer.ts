@@ -60,9 +60,17 @@ export function parseMarkdown(md: string): Block[] {
 		} else if ((m = line.match(/^\s*([-*+]|\d{1,4}[.)])\s+(.*)$/))) {
 			flush();
 			const item = [m[2]];
-			while (i + 1 < lines.length && /^\s{2,}\S/.test(lines[i + 1]) && !/^\s*([-*+]|\d{1,4}[.)])\s/.test(lines[i + 1]))
+			while (
+				i + 1 < lines.length &&
+				/^\s{2,}\S/.test(lines[i + 1]) &&
+				!/^\s*([-*+]|\d{1,4}[.)])\s/.test(lines[i + 1])
+			)
 				item.push(lines[++i].trim());
-			out.push({ kind: "li", text: inline(item.join(" ")), marker: /\d/.test(m[1]) ? m[1].replace(")", ".") : "•" });
+			out.push({
+				kind: "li",
+				text: inline(item.join(" ")),
+				marker: /\d/.test(m[1]) ? m[1].replace(")", ".") : "\u2022",
+			});
 		} else if ((m = line.match(/^\s*>\s?(.*)$/))) {
 			flush();
 			out.push({ kind: "quote", text: inline(m[1]) });
@@ -85,11 +93,13 @@ export function parseMarkdown(md: string): Block[] {
 
 // ---------- HTML to Markdown (structure only; CSS is not applied) ----------
 
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: "—", ndash: "–", hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“", bull: "•", copy: "©", euro: "€" };
+// biome-ignore format: lookup table kept on one line
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00a0", mdash: "\u2014", ndash: "\u2013", hellip: "\u2026", rsquo: "\u2019", lsquo: "\u2018", rdquo: "\u201d", ldquo: "\u201c", bull: "\u2022", copy: "\u00a9", euro: "\u20ac" };
 function decode(s: string): string {
 	return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, e: string) => {
 		if (e[0] === "#") {
-			const cp = e[1] === "x" || e[1] === "X" ? Number.parseInt(e.slice(2), 16) : Number(e.slice(1));
+			const cp =
+				e[1] === "x" || e[1] === "X" ? Number.parseInt(e.slice(2), 16) : Number(e.slice(1));
 			return cp > 0 && cp < 0x110000 ? String.fromCodePoint(cp) : all;
 		}
 		return ENTITIES[e.toLowerCase()] ?? all;
@@ -98,15 +108,31 @@ function decode(s: string): string {
 
 export function htmlToMarkdown(html: string): string {
 	// Entities are decoded once, after the last tag strip, so "&lt;b&gt;" stays text.
-	const text = (s: string) => s.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+	const text = (s: string) =>
+		s
+			.replace(/<[^>]*>/g, "")
+			.replace(/\s+/g, " ")
+			.trim();
 	return decode(
 		html
 			.replace(/<!--[\s\S]*?-->/g, "")
 			.replace(/<(script|style|head|title|svg)\b[\s\S]*?<\/\1>/gi, "")
-			.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_, b: string) => `\n\n\`\`\`\n${b.replace(/<[^>]*>/g, "")}\n\`\`\`\n\n`)
-			.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_, n: string, b: string) => `\n\n${"#".repeat(Number(n))} ${text(b)}\n\n`)
-			.replace(/<li\b[^>]*>([\s\S]*?)(<\/li>|(?=<li\b)|(?=<\/[ou]l>))/gi, (_, b: string) => `\n- ${text(b)}\n`)
-			.replace(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, b: string) => `\n\n> ${text(b)}\n\n`)
+			.replace(
+				/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi,
+				(_, b: string) => `\n\n\`\`\`\n${b.replace(/<[^>]*>/g, "")}\n\`\`\`\n\n`,
+			)
+			.replace(
+				/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi,
+				(_, n: string, b: string) => `\n\n${"#".repeat(Number(n))} ${text(b)}\n\n`,
+			)
+			.replace(
+				/<li\b[^>]*>([\s\S]*?)(<\/li>|(?=<li\b)|(?=<\/[ou]l>))/gi,
+				(_, b: string) => `\n- ${text(b)}\n`,
+			)
+			.replace(
+				/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi,
+				(_, b: string) => `\n\n> ${text(b)}\n\n`,
+			)
 			.replace(/<hr\b[^>]*>/gi, "\n\n---\n\n")
 			.replace(/<br\s*\/?>/gi, "\n")
 			.replace(/<\/(p|div|section|article|header|footer|tr|table|ul|ol|main)>/gi, "\n\n")
@@ -117,11 +143,15 @@ export function htmlToMarkdown(html: string): string {
 // ---------- Fonts and encoding ----------
 
 // Adobe AFM advance widths (1/1000 em) for WinAnsi 0x20..0x7E.
+// biome-ignore format: lookup table kept on one line
 const HELV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+// biome-ignore format: lookup table kept on one line
 const BOLD = [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584];
-const HIGH: Record<number, number> = { 0x80: 556, 0x85: 1000, 0x91: 222, 0x92: 222, 0x93: 333, 0x94: 333, 0x95: 350, 0x96: 556, 0x97: 1000, 0xa0: 278 };
+// biome-ignore format: lookup table kept on one line
+const HIGH: Record<number, number> = { 128: 556, 133: 1000, 145: 222, 146: 222, 147: 333, 148: 333, 149: 350, 150: 556, 151: 1000, 160: 278 };
 // Unicode code points WinAnsi places in 0x80..0x9F.
-const WIN: Record<number, number> = { 0x20ac: 0x80, 0x201a: 0x82, 0x0192: 0x83, 0x201e: 0x84, 0x2026: 0x85, 0x2020: 0x86, 0x2021: 0x87, 0x02c6: 0x88, 0x2030: 0x89, 0x0160: 0x8a, 0x2039: 0x8b, 0x0152: 0x8c, 0x017d: 0x8e, 0x2018: 0x91, 0x2019: 0x92, 0x201c: 0x93, 0x201d: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97, 0x02dc: 0x98, 0x2122: 0x99, 0x0161: 0x9a, 0x203a: 0x9b, 0x0153: 0x9c, 0x017e: 0x9e, 0x0178: 0x9f };
+// biome-ignore format: lookup table kept on one line
+const WIN: Record<number, number> = { 8364: 0x80, 8218: 0x82, 402: 0x83, 8222: 0x84, 8230: 0x85, 8224: 0x86, 8225: 0x87, 710: 0x88, 8240: 0x89, 352: 0x8a, 8249: 0x8b, 338: 0x8c, 381: 0x8e, 8216: 0x91, 8217: 0x92, 8220: 0x93, 8221: 0x94, 8226: 0x95, 8211: 0x96, 8212: 0x97, 732: 0x98, 8482: 0x99, 353: 0x9a, 8250: 0x9b, 339: 0x9c, 382: 0x9e, 376: 0x9f };
 
 type Font = "F1" | "F2" | "F3" | "F4"; // Helvetica, Bold, Courier, Oblique
 
@@ -146,7 +176,8 @@ function width(bytes: number[], font: Font, size: number): number {
 	if (font === "F3") return bytes.length * 600 * (size / 1000);
 	const t = font === "F2" ? BOLD : HELV;
 	let w = 0;
-	for (const b of bytes) w += b >= 0x20 && b <= 0x7e ? t[b - 0x20] : (HIGH[b] ?? (font === "F2" ? 611 : 556));
+	for (const b of bytes)
+		w += b >= 0x20 && b <= 0x7e ? t[b - 0x20] : (HIGH[b] ?? (font === "F2" ? 611 : 556));
 	return w * (size / 1000);
 }
 
@@ -191,7 +222,10 @@ const MARGIN = 56;
 const TEXT_W = PAGE_W - 2 * MARGIN;
 export const MAX_PAGES = 500;
 
-const STYLE: Record<Exclude<Kind, "hr">, { font: Font; size: number; lead: number; before: number; after: number; indent: number }> = {
+const STYLE: Record<
+	Exclude<Kind, "hr">,
+	{ font: Font; size: number; lead: number; before: number; after: number; indent: number }
+> = {
 	h1: { font: "F2", size: 20, lead: 25, before: 10, after: 6, indent: 0 },
 	h2: { font: "F2", size: 15, lead: 19, before: 10, after: 4, indent: 0 },
 	h3: { font: "F2", size: 12, lead: 16, before: 8, after: 2, indent: 0 },
@@ -216,7 +250,8 @@ export function writePdf(blocks: Block[], title?: string): WriteResult {
 	const pages: string[][] = [[]];
 	let y = PAGE_H - MARGIN;
 	const newPage = () => {
-		if (pages.length >= MAX_PAGES) throw new Error(`document is over ${MAX_PAGES} pages; split it into smaller PDFs`);
+		if (pages.length >= MAX_PAGES)
+			throw new Error(`document is over ${MAX_PAGES} pages; split it into smaller PDFs`);
 		pages.push([]);
 		y = PAGE_H - MARGIN;
 	};
@@ -256,9 +291,12 @@ export function writePdf(blocks: Block[], title?: string): WriteResult {
 			const x = MARGIN + s.indent;
 			if (b.kind === "li" && i === 0 && b.marker) {
 				const mk = winAnsi(b.marker, tally);
-				ops().push(`BT /F1 ${s.size} Tf ${fmt(x - 4 - width(mk, "F1", s.size))} ${fmt(y)} Td ${pdfStr(mk)} Tj ET`);
+				ops().push(
+					`BT /F1 ${s.size} Tf ${fmt(x - 4 - width(mk, "F1", s.size))} ${fmt(y)} Td ${pdfStr(mk)} Tj ET`,
+				);
 			}
-			if (ln.length) ops().push(`BT /${s.font} ${s.size} Tf ${fmt(x)} ${fmt(y)} Td ${pdfStr(ln)} Tj ET`);
+			if (ln.length)
+				ops().push(`BT /${s.font} ${s.size} Tf ${fmt(x)} ${fmt(y)} Td ${pdfStr(ln)} Tj ET`);
 		});
 		y -= s.after;
 	}
@@ -275,8 +313,13 @@ export function writePdf(blocks: Block[], title?: string): WriteResult {
 	objs.push(`<< ${info}/Producer (8gent Code make_pdf) >>`);
 	pages.forEach((p, i) => {
 		const footer = winAnsi(`${i + 1} / ${n}`, tally);
-		const body = [...p, `0 g BT /F1 9 Tf ${fmt(PAGE_W / 2 - width(footer, "F1", 9) / 2)} 30 Td ${pdfStr(footer)} Tj ET`].join("\n");
-		objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R /F4 6 0 R >> >> /Contents ${9 + i * 2} 0 R >>`);
+		const body = [
+			...p,
+			`0 g BT /F1 9 Tf ${fmt(PAGE_W / 2 - width(footer, "F1", 9) / 2)} 30 Td ${pdfStr(footer)} Tj ET`,
+		].join("\n");
+		objs.push(
+			`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R /F4 6 0 R >> >> /Contents ${9 + i * 2} 0 R >>`,
+		);
 		objs.push(`<< /Length ${Buffer.byteLength(body, "latin1")} >>\nstream\n${body}\nendstream`);
 	});
 

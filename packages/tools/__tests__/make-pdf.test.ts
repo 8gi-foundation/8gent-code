@@ -36,7 +36,9 @@ describe("makePdf renders in-process", () => {
 	test("needs no ~/.8gent/bin/make-pdf on a clean HOME", async () => {
 		const home = process.env.HOME as string;
 		expect(fs.existsSync(path.join(home, ".8gent", "bin", "make-pdf"))).toBe(false);
-		const r = keep(await makePdf({ markdown: "# Clean home\n\nIt works here.", outName: "clean-home" }));
+		const r = keep(
+			await makePdf({ markdown: "# Clean home\n\nIt works here.", outName: "clean-home" }),
+		);
 		expect(r.kind).toBe("document");
 		expect(r.path).toBe(path.join(CREATIVE_DIR, "clean-home.pdf"));
 		expect(r.pages).toBe(1);
@@ -62,7 +64,7 @@ describe("makePdf renders in-process", () => {
 			"",
 			"---",
 			"",
-			"Cafe ’quotes’ – dash €5",
+			"Cafe \u2019quotes\u2019 \u2013 dash \u20ac5",
 		].join("\n");
 		const r = keep(await makePdf({ markdown: md, outName: "read-back" }));
 		const info = await readPdf(r.path);
@@ -74,7 +76,7 @@ describe("makePdf renders in-process", () => {
 			"ordered one",
 			"a quote",
 			"const x = (1 + 2);",
-			"€5",
+			"\u20ac5",
 		])
 			expect(info.text).toContain(s);
 		expect(info.text).not.toContain("**");
@@ -132,7 +134,9 @@ describe("makePdf renders in-process", () => {
 	});
 
 	test("characters outside the standard fonts are counted, not hidden", async () => {
-		const r = keep(await makePdf({ markdown: "# Emoji \u{1F680} and 中", outName: "replaced" }));
+		const r = keep(
+			await makePdf({ markdown: "# Emoji \u{1F680} and \u4e2d", outName: "replaced" }),
+		);
 		expect(r.replaced).toBe(2);
 	});
 });
@@ -159,7 +163,9 @@ describe("makePdf known-bad input", () => {
 	});
 
 	test("an oversized source is refused before layout", async () => {
-		await expect(makePdf({ markdown: "x".repeat(MAX_SOURCE_CHARS + 1) })).rejects.toThrow(/at most/);
+		await expect(makePdf({ markdown: "x".repeat(MAX_SOURCE_CHARS + 1) })).rejects.toThrow(
+			/at most/,
+		);
 	});
 
 	test("a source with no text", async () => {
@@ -178,7 +184,9 @@ describe("makePdf known-bad input", () => {
 describe("pdf-writer units", () => {
 	test("winAnsi maps typographic punctuation and counts the rest", () => {
 		const t = { replaced: 0 };
-		expect(winAnsi("‘a’ — •", t)).toEqual([0x91, 0x61, 0x92, 0x20, 0x97, 0x20, 0x95]);
+		expect(winAnsi("\u2018a\u2019 \u2014 \u2022", t)).toEqual([
+			0x91, 0x61, 0x92, 0x20, 0x97, 0x20, 0x95,
+		]);
 		winAnsi("\u{1F600}", t);
 		expect(t.replaced).toBe(1);
 	});
@@ -186,7 +194,7 @@ describe("pdf-writer units", () => {
 	test("htmlToMarkdown decodes entities and keeps headings", () => {
 		const md = htmlToMarkdown("<h2>Hi &lt;there&gt;</h2><p>&#8364;1 &nbsp;x</p>");
 		expect(md).toContain("## Hi <there>");
-		expect(md).toContain("€1");
+		expect(md).toContain("\u20ac1");
 	});
 
 	test("parseMarkdown keeps snake_case and keeps a table as one block without its separator", () => {
