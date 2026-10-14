@@ -3,7 +3,11 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SCRATCH_EXCLUDE_LINE, ensureScratchExcluded } from "./scratch-exclude";
+import {
+	SCRATCH_EXCLUDE_LINE,
+	ensureScratchExcluded,
+	ensureScratchExcludedIfPresent,
+} from "./scratch-exclude";
 
 const git = (cwd: string, ...a: string[]) =>
 	spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd, encoding: "utf8" });
@@ -47,5 +51,21 @@ describe("ensureScratchExcluded (#4236)", () => {
 	it("is a silent no-op outside a git repo", () => {
 		const d = dir();
 		expect(ensureScratchExcluded(d)).toBe(false);
+	});
+});
+
+describe("ensureScratchExcludedIfPresent (#4241)", () => {
+	it("leaves .git byte-identical until .tmp/ exists, then excludes it", () => {
+		const d = dir();
+		git(d, "init", "-q");
+		const f = join(d, ".git/info/exclude");
+		const before = readFileSync(f, "utf8");
+		expect(ensureScratchExcludedIfPresent(d)).toBe(false);
+		expect(readFileSync(f, "utf8")).toBe(before);
+		spawnSync("mkdir", ["-p", join(d, ".tmp")]);
+		writeFileSync(join(d, ".tmp/x"), "x");
+		expect(ensureScratchExcludedIfPresent(d)).toBe(true);
+		expect(count(f)).toBe(1);
+		expect(git(d, "status", "--porcelain").stdout).toBe("");
 	});
 });

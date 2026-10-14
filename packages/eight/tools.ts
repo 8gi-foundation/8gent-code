@@ -244,6 +244,7 @@ import {
 import { layoutMeasureLine } from "./layout-measure";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { RetiredFacts } from "./retired-facts";
+import { ensureScratchExcludedIfPresent } from "./scratch-exclude";
 import { scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 import { type VisionRouterResult, findVisionModel } from "./vision-router";
@@ -2202,6 +2203,8 @@ export class ToolExecutor {
 			if (refusal) return refusal;
 		}
 		const raw = await this.executeRaw(toolName, args);
+		// Scratch stays out of git status, but only once .tmp/ exists (#4241).
+		ensureScratchExcludedIfPresent(this.workingDirectory);
 		// Post-tool-execution scrubbing boundary (issue #2464).
 		// Order is contract: SecretScanner -> [Cache lookup, #2462] -> execute
 		// -> ArtifactStore persist (#2463). Scrub MUST run before persist so
