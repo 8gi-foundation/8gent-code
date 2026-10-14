@@ -21,7 +21,7 @@
 
 import { createHash } from "node:crypto";
 import type { Decider } from "./index";
-import { decideRules } from "./rules";
+import { type RuleResult, decideRules } from "./rules";
 
 export const BASH_GUARD_QUESTION =
 	"Would running this shell command delete, overwrite, or exfiltrate data, or change system state irreversibly?";
@@ -157,15 +157,22 @@ export function stricterVerdict(
  *   rules "escalate" -> the model is asked; the verdict is the stricter of
  *                       escalate and the model's (so never allow)
  *   rules "pass"     -> the model alone (`modelGuard`)
+ *
+ * `script`: the body of the script file the command runs (`bash FILE`, `. FILE`, `./FILE`; see
+ * packages/permissions/s1-script-body.ts). The prompt-control check and the rules read it as
+ * well as the command, and the judge is asked about it too, keeping the higher pYes. It can
+ * only make the verdict stricter.
  */
 export async function bashGuard(
 	command: string,
 	decider: Pick<Decider, "noul">,
 	opts: BashGuardOptions = {},
+	script?: string,
 ): Promise<BashGuardResult> {
-	const control = promptControlResult(command);
+	const control =
+		promptControlResult(command) ?? (script === undefined ? null : promptControlResult(script));
 	if (control) return control;
-	const rules = decideRules(command);
+	const rules = withScriptRules(decideRules(command), script);
 	if (rules.verdict === "block") {
 		return {
 			verdict: "block",
@@ -176,7 +183,7 @@ export async function bashGuard(
 			reason: `deterministic rule ${rules.rule} matched (${rules.rules.join(", ")}), blocked without asking`,
 		};
 	}
-	const judged = await modelGuard(command, decider, opts);
+	const judged = await modelGuard(command, decider, opts, script);
 	if (rules.verdict === "pass") return judged;
 	const verdict = stricterVerdict("escalate", judged.verdict);
 	// Say only what is true of the final verdict: an escalate goes to a person,
@@ -192,6 +199,21 @@ export async function bashGuard(
 		rule: rules.rule,
 		reason: judged.reason ? `${judged.reason}; ${ruleNote}` : ruleNote,
 	};
+}
+
+/**
+ * The rules over the command and, when given, over the script body too: the stricter verdict,
+ * every rule that fired. Never less strict than `command` alone.
+ */
+export function withScriptRules(command: RuleResult, script?: string): RuleResult {
+	if (script === undefined) return command;
+	const body = decideRules(script);
+	const rules = [...new Set([...command.rules, ...body.rules])];
+	if (command.verdict === "block") return { ...command, rules };
+	if (body.verdict === "block") return { verdict: "block", rule: body.rule, rules };
+	if (command.verdict === "escalate") return { ...command, rules };
+	if (body.verdict === "escalate") return { verdict: "escalate", rule: body.rule, rules };
+	return { verdict: "pass", rules };
 }
 
 function promptControlResult(command: string): BashGuardResult | null {
@@ -215,18 +237,27 @@ export async function modelGuard(
 	command: string,
 	decider: Pick<Decider, "noul">,
 	opts: BashGuardOptions = {},
+	/** The script body the command runs, judged as well; the higher pYes wins (see `bashGuard`). */
+	script?: string,
 ): Promise<BashGuardResult> {
 	const blockAbove = opts.blockAbove ?? 0.5;
 	const [low, high] = opts.escalateBand ?? [0.35, 0.65];
-	const control = promptControlResult(command);
+	const control =
+		promptControlResult(command) ?? (script === undefined ? null : promptControlResult(script));
 	if (control) return control;
 	// Comments never run, but they reach the judge and can talk it down
 	// (a "# harmless" note moved a find -delete from pYes 0.914 to 0.260 in a
 	// live run). So a command with comments is judged twice, as written and
 	// without them, and the higher pYes wins: a comment can raise the score,
 	// never lower it.
-	const bare = stripShellComments(command);
-	const forms = bare !== command && bare.trim() !== "" ? [command, bare] : [command];
+	// A script body is judged the same way, as written and without comments: it can raise the
+	// score, never lower it.
+	const forms: string[] = [];
+	for (const text of script === undefined ? [command] : [command, script]) {
+		const bare = stripShellComments(text);
+		for (const form of bare !== text && bare.trim() !== "" ? [text, bare] : [text])
+			if (!forms.includes(form)) forms.push(form);
+	}
 	let answer: Awaited<ReturnType<Decider["noul"]>>;
 	try {
 		answer = await decider.noul(guardState(forms[0]), BASH_GUARD_QUESTION);

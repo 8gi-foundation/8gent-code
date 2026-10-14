@@ -1316,3 +1316,29 @@ export function decideRules(command: string, opts: DecideRulesOptions = {}): Rul
 	if (rules.length) return { verdict: "escalate", rule: rules[0], rules };
 	return { verdict: "pass", rules };
 }
+
+/**
+ * Every simple command in `text` as the rules read it: the argv after redirects and wrappers
+ * (env, timeout, nohup, exec, ...) are removed, and whether its stdin comes from a pipe or a
+ * `<` file. A heredoc fed to a shell, and every $(...) and backtick body, are listed as commands
+ * of their own. Used to find the script files a command runs (packages/permissions/s1-script-body.ts).
+ * Throws when nesting is too deep; the caller fails closed.
+ */
+export function simpleCommands(text: string, depth = 0): { argv: string[]; stdin: boolean }[] {
+	if (depth > MAX_DEPTH) throw new Error("nesting too deep");
+	const { text: body, docs } = cutHeredocs(text);
+	const out: { argv: string[]; stdin: boolean }[] = [];
+	for (const { before, body: doc } of docs) {
+		const segs = splitSegments(before).segs;
+		const last = segs[segs.length - 1];
+		const t = last ? stripWrappers(tokens(stripRedirects(last.text))) : [];
+		if (t.length && SHELLS.has(basename(t[0]))) out.push(...simpleCommands(doc, depth + 1));
+	}
+	const { segs, subs } = splitSegments(body);
+	for (const { text: seg, piped } of segs) {
+		const fromFile = /(^|[^<\d])\d?<(?![<(&])/.test(maskQuotes(seg));
+		out.push({ argv: stripWrappers(tokens(stripRedirects(seg))), stdin: piped || fromFile });
+	}
+	for (const s of subs) out.push(...simpleCommands(s, depth + 1));
+	return out;
+}

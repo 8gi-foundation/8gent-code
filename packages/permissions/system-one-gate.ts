@@ -400,10 +400,15 @@ async function announceJudgeLoad(
  * with no model. Rules never allow on their own, so "pass" runs the command
  * (the allowlist has already run).
  */
-async function rulesOnlyGuard(command: string, why: string): Promise<BashGuardResult> {
-	const { promptControlText } = await import("../decide/guard");
+async function rulesOnlyGuard(
+	command: string,
+	why: string,
+	script?: string,
+): Promise<BashGuardResult> {
+	const { promptControlText, withScriptRules } = await import("../decide/guard");
 	const { decideRules } = await import("../decide/rules");
-	const control = promptControlText(command);
+	const control =
+		promptControlText(command) ?? (script === undefined ? null : promptControlText(script));
 	if (control !== null) {
 		return {
 			verdict: "block",
@@ -413,7 +418,8 @@ async function rulesOnlyGuard(command: string, why: string): Promise<BashGuardRe
 			reason: `the command carries prompt-control text addressed to the judge (${JSON.stringify(control)})`,
 		};
 	}
-	const r = decideRules(command);
+	// A script the command runs is read by the same rules, every line (s1-script-body.ts).
+	const r = withScriptRules(decideRules(command), script);
 	const base = { pYes: Number.NaN, backend: RULES_ONLY, model: "none" };
 	if (r.verdict === "block") {
 		return {
@@ -893,6 +899,10 @@ export async function systemOneGate(
 			// No opinion: fall through to the judge.
 		}
 	}
+	// A script file the command runs is checked by its contents too, in every mode, with or
+	// without the allowlist (s1-script-body.ts): the rules, the prompt-control check and the judge
+	// read the body, and the caller runs the checked bytes.
+	const script = await scriptCheck(command, cwd, opts);
 	let guard: BashGuardResult;
 	let thresholds: SystemOneThresholds | "unknown" = "unknown";
 	const ms = systemOneTimeoutMs(env);
@@ -908,7 +918,7 @@ export async function systemOneGate(
 				requireCalibrated(mode, await decider.backend(), t.label);
 				await announceJudgeLoad(decider, env);
 				const { bashGuard } = await import("../decide/guard");
-				return bashGuard(command, decider, t.opts);
+				return bashGuard(command, decider, t.opts, script.body);
 			})(),
 			ms,
 		);
@@ -919,7 +929,14 @@ export async function systemOneGate(
 				err instanceof SystemOneTimeoutError
 					? `the judge gave no verdict within ${ms} ms${warmupLoading ? " (still loading)" : ""}`
 					: detail;
-			return decide(command, await rulesOnly(command, reason), RULES_ONLY, hint, where);
+			return decide(
+				command,
+				await rulesOnly(command, reason, script.body),
+				RULES_ONLY,
+				hint,
+				where,
+				script,
+			);
 		}
 		// Strict (EIGHT_SYSTEM_ONE=1, Guarded): the checker cannot answer, so
 		// a person decides through the normal card, never an allow (#3193).
@@ -928,20 +945,78 @@ export async function systemOneGate(
 			err instanceof SystemOneTimeoutError
 				? `the checker timed out after ${ms} ms${warmupLoading ? " while still loading" : ""}`
 				: `System One unavailable: ${detail}`;
-		return decide(command, await askInstead(command, reason), RULES_ONLY, hint, where);
+		return decide(
+			command,
+			await askInstead(command, reason, script.body),
+			RULES_ONLY,
+			hint,
+			where,
+			script,
+		);
 	}
 	if (isModelVerdict(guard)) warmed = true;
 	if (judgeFailed(guard)) {
 		const reason = guard.reason ?? "the judge gave no valid answer";
 		return decide(
 			command,
-			mode === "default" ? await rulesOnly(command, reason) : await askInstead(command, reason),
+			mode === "default"
+				? await rulesOnly(command, reason, script.body)
+				: await askInstead(command, reason, script.body),
 			RULES_ONLY,
 			hint,
 			where,
+			script,
 		);
 	}
-	return decide(command, guard, thresholds as SystemOneThresholds, hint, where);
+	return decide(command, guard, thresholds as SystemOneThresholds, hint, where, script);
+}
+
+/**
+ * What the gate knows about a script file the command runs (s1-script-body.ts). `body` is
+ * checked with the command. `floor` set: the verdict is at least escalate (a person decides,
+ * headless is a block), because the script could not be read safely or the checked bytes cannot
+ * be run in place of the file. `runInstead`: what the caller runs, the checked bytes.
+ */
+interface ScriptCheck {
+	body?: string;
+	rel?: string;
+	floor: string | null;
+	runInstead?: string;
+}
+
+async function scriptCheck(
+	command: string,
+	cwd: string | undefined,
+	opts: { canRunInstead?: boolean; project?: string },
+): Promise<ScriptCheck> {
+	// PowerShell and cmd parse the line another way: not read here yet (follow-up).
+	const kind = activeShellKind();
+	if (kind === "powershell" || kind === "cmd") return { floor: null };
+	try {
+		const { scriptLaunch } = await import("./s1-script-body");
+		const s = scriptLaunch(command, cwd, opts.project);
+		if (s.kind === "none") return { floor: null };
+		if (s.kind === "unchecked") return { floor: s.why };
+		if (s.runInstead === null || opts.canRunInstead !== true) {
+			return {
+				body: s.body,
+				rel: s.rel,
+				floor: "the checked copy of the script cannot be run in place of the file here",
+			};
+		}
+		return { body: s.body, rel: s.rel, floor: null, runInstead: s.runInstead };
+	} catch {
+		return { floor: "the script could not be checked" };
+	}
+}
+
+/** The first lines of a checked script, for the person's card. */
+function scriptPreview(script: ScriptCheck | undefined): string {
+	if (script?.body === undefined) return "";
+	const lines = script.body.split("\n").filter((l) => l.trim() !== "");
+	const shown = lines.slice(0, 8).map((l) => (l.length > 160 ? `${l.slice(0, 157)}...` : l));
+	const more = lines.length > shown.length ? `\n... ${lines.length - shown.length} more lines` : "";
+	return `\n\nScript ${script.rel}, first lines:\n${shown.join("\n")}${more}`;
 }
 
 /** True when a person can be asked: a TUI approval channel, or an interactive terminal. */
@@ -954,9 +1029,13 @@ function personCanBeAsked(): boolean {
  * is still final. Everything else goes to a person as an escalate, never an
  * allow. One plain line says so, once, when there is a person to ask.
  */
-async function askInstead(command: string, reason: string): Promise<BashGuardResult> {
+async function askInstead(
+	command: string,
+	reason: string,
+	script?: string,
+): Promise<BashGuardResult> {
 	if (personCanBeAsked()) noticeOnce("ask-instead", SYSTEM_ONE_ASK_INSTEAD_NOTICE);
-	const g = await rulesOnlyGuard(command, reason);
+	const g = await rulesOnlyGuard(command, reason, script);
 	if (g.verdict !== "allow") return g;
 	return {
 		...g,
@@ -973,9 +1052,13 @@ function noticeReason(reason: string): string {
 }
 
 /** Rules-only verdict plus the one-time notice that says so. */
-async function rulesOnly(command: string, reason: string): Promise<BashGuardResult> {
+async function rulesOnly(
+	command: string,
+	reason: string,
+	script?: string,
+): Promise<BashGuardResult> {
 	noticeOnce("rules-only", systemOneRulesOnlyNotice(noticeReason(reason)));
-	return rulesOnlyGuard(command, reason);
+	return rulesOnlyGuard(command, reason, script);
 }
 
 /** Turn a verdict into run / block, asking a human on escalate. */
@@ -986,8 +1069,25 @@ async function decide(
 	hint?: string,
 	/** The project folder after a leading `cd <folder> &&` (#3199): the question names it. */
 	where?: string,
+	/** A script file the command runs: its floor, its checked bytes and its first lines. */
+	script?: ScriptCheck,
 ): Promise<SystemOneGateResult> {
-	if (guard.verdict === "allow") return { run: true, guard, thresholds: t };
+	const floor = script?.floor ?? null;
+	if (script?.rel !== undefined) {
+		const note = `the contents of ${script.rel} were checked with the command`;
+		guard = { ...guard, reason: guard.reason ? `${guard.reason}; ${note}` : note };
+	}
+	// A script that could not be read safely, or whose checked bytes cannot be run, is never an allow.
+	const floored = floor !== null && guard.verdict === "allow";
+	if (floored) {
+		guard = {
+			...guard,
+			verdict: "escalate",
+			reason: guard.reason ? `${guard.reason}; ${floor}` : (floor as string),
+		};
+	}
+	const instead = script?.runInstead !== undefined ? { runInstead: script.runInstead } : {};
+	if (guard.verdict === "allow") return { run: true, guard, thresholds: t, ...instead };
 	if (guard.verdict === "block") {
 		const why = guard.reason ?? "the command was judged dangerous";
 		return {
@@ -1003,22 +1103,27 @@ async function decide(
 	try {
 		humanApproved = await (overrides.askHuman ?? defaultAskHuman)({
 			action: "System One escalation",
-			details: guard.rule
-				? `A System One safety rule (${guard.rule}) matched this command (${pDesc}${guard.backend}/${guard.model}). Approve only if you meant it.`
-				: guard.backend === RULES_ONLY
-					? "The full safety checker isn't available, so you decide whether this runs. Approve only if you meant it."
-					: `System One is unsure whether this command is safe (${pDesc}${guard.backend}/${guard.model}). Approve only if you meant it.`,
+			details:
+				(floored
+					? `System One could not check what this script runs (${floor}). Approve only if you meant it.`
+					: guard.rule
+						? `A System One safety rule (${guard.rule}) matched this command (${pDesc}${guard.backend}/${guard.model}). Approve only if you meant it.`
+						: guard.backend === RULES_ONLY
+							? "The full safety checker isn't available, so you decide whether this runs. Approve only if you meant it."
+							: `System One is unsure whether this command is safe (${pDesc}${guard.backend}/${guard.model}). Approve only if you meant it.`) +
+				scriptPreview(script),
 			command: commandInFolder(command, where),
 		});
 	} catch {
 		humanApproved = null;
 	}
-	if (humanApproved === true) return { run: true, guard, thresholds: t, humanApproved };
+	if (humanApproved === true) return { run: true, guard, thresholds: t, humanApproved, ...instead };
 	const base =
 		humanApproved === false
 			? "escalated and the user declined"
 			: "escalated but no approval channel is available, so escalate is treated as block, failing closed";
-	const why = guard.backend === RULES_ONLY && guard.reason ? `${base} (${guard.reason})` : base;
+	const why =
+		floored || (guard.backend === RULES_ONLY && guard.reason) ? `${base} (${guard.reason})` : base;
 	return {
 		run: false,
 		guard,
