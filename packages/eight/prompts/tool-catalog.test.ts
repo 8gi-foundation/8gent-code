@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { curlToLoopback } from "../../permissions/s1-curl-loopback.js";
 import { sanitizeShellCommand } from "../../permissions/shell-sanitizer.js";
+import { DeckSpecSchema } from "../../tools/video-deck.js";
 import { scrub } from "../secret-scanner.js";
 import { TOOL_CATEGORIES } from "../tool-registry.js";
 import {
@@ -110,11 +111,32 @@ describe("slides-to-video join guidance (#3862)", () => {
 
 	it("shows the shell recipe: write deck.json, then `8gent deck render deck.json` (pilot media-brief-video, 12 Oct 2026)", () => {
 		for (const text of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
-			expect(text).toContain("write deck.json");
+			expect(text).toContain("Write deck.json");
 			expect(text).toContain('{"slides":[{"title"');
 			expect(text).toContain("`8gent deck render deck.json out.mp4`");
-			expect(text).toContain("not ffmpeg by hand");
 		}
+	});
+
+	it("opens with never write a script; by hand is one magick/ffmpeg per call (#4245)", () => {
+		expect(SLIDES_TO_VIDEO_NOTE.startsWith("**Slides to video: never write a script.")).toBe(true);
+		expect(SLIDES_TO_VIDEO_NOTE).toContain("By hand: one magick/ffmpeg per call");
+		// The steer comes before the recipe, and the renderer before the by-hand path.
+		const order = ["never write a script", "8gent deck render", "By hand"].map((s) =>
+			SLIDES_TO_VIDEO_NOTE.indexOf(s),
+		);
+		expect(order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1]))).toBe(true);
+		for (const text of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
+			expect(text).toContain("never write a script");
+			expect(text).not.toContain("not ffmpeg by hand");
+		}
+	});
+
+	it("the example deck.json is a valid render_video_deck spec", () => {
+		const json = SLIDES_TO_VIDEO_NOTE.slice(
+			SLIDES_TO_VIDEO_NOTE.indexOf("{"),
+			SLIDES_TO_VIDEO_NOTE.lastIndexOf("}") + 1,
+		);
+		expect(DeckSpecSchema.safeParse(JSON.parse(json)).success).toBe(true);
 	});
 
 	it("is present on the concise path the local TUI uses, within its budget", () => {

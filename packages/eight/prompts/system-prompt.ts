@@ -367,10 +367,17 @@ export const LOCAL_LOGIN_NOTE =
 /**
  * Slides to video: JSON in, deterministic code out. Pilot media-brief-video (12 Oct 2026) showed a
  * local model composing the video with raw ffmpeg in run_command instead of calling
- * render_video_deck, so the note now shows the shell form of the same renderer as a 3-line recipe.
+ * render_video_deck, so the note shows the shell form of the same renderer as a recipe.
+ *
+ * #4245 (run 2026-10-14_092348): the model still wrote video/make_slides.sh and ran it. System One
+ * judges `bash FILE` by the command string, not the file, so the same script was allowed once and
+ * blocked once (pYes 0.473), and the run failed no_system_one_blocked. The note now opens with
+ * "never write a script", and the by-hand path is one magick or ffmpeg per call, the shape the
+ * s1-magick and s1-ffmpeg-in-project lanes already allow. Same byte budget as before (the concise
+ * catalog has no headroom: tool-catalog.test.ts POSIX_CAP).
  */
 export const SLIDES_TO_VIDEO_NOTE =
-	'**Slides to video: write deck.json {"slides":[{"title":"..","bullets":[".."],"narration":".."}]}, then run `8gent deck render deck.json out.mp4`, not ffmpeg by hand. By hand: segment count equals slide count; never loop over a file lacking a trailing newline.**';
+	'**Slides to video: never write a script. Write deck.json {"slides":[{"title":"..","text":"..","narration":".."}]}, run `8gent deck render deck.json out.mp4`. By hand: one magick/ffmpeg per call; segment count equals slide count; trailing newline on lists.**';
 
 /**
  * Build the tool-inventory segment the model sees at system-prompt time.
