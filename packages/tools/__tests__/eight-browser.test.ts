@@ -8,6 +8,7 @@ import {
 	realpathSync,
 	rmSync,
 	statSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -45,6 +46,8 @@ import {
 	launchLogTail,
 	localBrowserTools,
 	pngSize,
+	resolveSecretText,
+	resolveTaskFileField,
 	secretsPathInHome,
 	setDefaultLocalProfile,
 	touchesBrowserSecrets,
@@ -1638,6 +1641,122 @@ describe("secret placeholders: the model never holds the value (#3604)", () => {
 		await b.run(typeStep("alice {{not-a-secret}}"));
 		expect(sent(site.calls)).toEqual(["alice {{not-a-secret}}"]);
 		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+// ── Task-file credentials: {{file:PATH:Field}} (#4280) ─────────────────────
+
+describe("task-file placeholders: a supplied login is typed without the model holding it", () => {
+	const PW = "Zq7pilotPassw0rd";
+	const OUTSIDE = "outside-secret-91";
+	const ws = mkdtempSync(join(tmpdir(), "browser-taskfile-"));
+	const outsideDir = mkdtempSync(join(tmpdir(), "browser-taskfile-out-"));
+	const task = (address: string, pw = PW) =>
+		writeFileSync(
+			join(ws, "TASK.txt"),
+			`Local dashboard\n\nAddress:  ${address}\nUsername: pilot-abc\nPassword: ${pw}\n`,
+		);
+	const mk = (call: BrowserCall, workspace: string | null = ws) =>
+		createEightBrowser(call, {
+			settleMs: 0,
+			secretsFile: "",
+			allowLoopback: ["127.0.0.1:5"],
+			workspace: workspace ?? undefined,
+		});
+	const typeStep = (text: string) => [{ action: "type", selector: "input[name=username]", text }];
+	const sent = (calls: Array<{ cmd: string; args: Record<string, unknown> }>) =>
+		calls.filter((c) => c.cmd === "page.type").map((c) => c.args.text);
+
+	test("the page receives the value from the task file; no output carries it", async () => {
+		task("http://127.0.0.1:5/");
+		const site = fakeSite();
+		const b = mk(site.call);
+		await b.open("http://127.0.0.1:5/");
+		const out = await b.run(typeStep("{{file:TASK.txt:Password}}"));
+		expect(JSON.parse(out).ok).toBe(true);
+		expect(sent(site.calls)).toEqual([PW]);
+		expect(out).not.toContain(PW);
+		expect(await b.state()).not.toContain(PW);
+	});
+
+	test("works with no secrets file configured (the default local profile has none)", () => {
+		task("http://127.0.0.1:5/");
+		const r = resolveSecretText("{{file:TASK.txt:Password}}", "http://127.0.0.1:5/login", "", ws);
+		expect(r.ok && r.text).toBe(PW);
+		const user = resolveSecretText(
+			"{{file:TASK.txt:username}}",
+			"http://127.0.0.1:5/",
+			undefined,
+			ws,
+		);
+		expect(user.ok && user.text).toBe("pilot-abc");
+	});
+
+	test("a page reply that echoes the value is scrubbed from the result", async () => {
+		task("http://127.0.0.1:5/");
+		const site = fakeSite();
+		const echo: BrowserCall = async (cmd, args) =>
+			cmd === "page.type"
+				? { ok: false, error: `rejected input ${String(args?.text)}` }
+				: site.call(cmd, args);
+		const b = mk(echo);
+		await b.open("http://127.0.0.1:5/");
+		expect(await b.run(typeStep("{{file:TASK.txt:Password}}"))).not.toContain(PW);
+	});
+
+	test("refused with nothing typed: address not in the file, missing field, missing file, no workspace", async () => {
+		for (const [label, text, address, workspace] of [
+			["other port in file", "{{file:TASK.txt:Password}}", "http://127.0.0.1:6/", ws],
+			["missing field", "{{file:TASK.txt:Token}}", "http://127.0.0.1:5/", ws],
+			["missing file", "{{file:NOPE.txt:Password}}", "http://127.0.0.1:5/", ws],
+			["no workspace", "{{file:TASK.txt:Password}}", "http://127.0.0.1:5/", null],
+		] as const) {
+			task(address);
+			const site = fakeSite();
+			const b = mk(site.call, workspace);
+			await b.open("http://127.0.0.1:5/");
+			const out = await b.run(typeStep(text));
+			expect(JSON.parse(out).ok, label).toBe(false);
+			expect(sent(site.calls), label).toEqual([]);
+			expect(out, label).not.toContain(PW);
+		}
+	});
+
+	test("never typed on a non-loopback page, even when the file names that address", () => {
+		task("https://app.example.com/");
+		const r = resolveTaskFileField(ws, "TASK.txt", "Password", "https://app.example.com/login");
+		expect(r.ok).toBe(false);
+		expect(JSON.stringify(r)).not.toContain(PW);
+	});
+
+	test("path rules: no dot segments, no absolute paths, no escape through a symlink", () => {
+		task("http://127.0.0.1:5/");
+		writeFileSync(join(outsideDir, "creds.txt"), `Password: ${OUTSIDE}\nhttp://127.0.0.1:5/\n`);
+		writeFileSync(join(ws, ".env"), `Password: ${OUTSIDE}\nhttp://127.0.0.1:5/\n`);
+		mkdirSync(join(ws, "sub"), { recursive: true });
+		if (process.platform !== "win32")
+			symlinkSync(join(outsideDir, "creds.txt"), join(ws, "sub", "link.txt"));
+		const page = "http://127.0.0.1:5/";
+		for (const rel of [
+			".env",
+			"../TASK.txt",
+			"sub/../TASK.txt",
+			join(outsideDir, "creds.txt"),
+			...(process.platform !== "win32" ? ["sub/link.txt"] : []),
+		]) {
+			const r = resolveTaskFileField(ws, rel, "Password", page);
+			expect(r.ok, rel).toBe(false);
+			expect(JSON.stringify(r), rel).not.toContain(OUTSIDE);
+		}
+		expect(resolveTaskFileField(ws, "TASK.txt", "Password", page).ok).toBe(true);
+	});
+
+	test("a resolved value is never read again as a placeholder", () => {
+		task("http://127.0.0.1:5/", "{{secret:APP_PW}}");
+		const r = resolveSecretText("{{file:TASK.txt:Password}}", "http://127.0.0.1:5/", "", ws);
+		expect(r.ok && r.text).toBe("{{secret:APP_PW}}");
+		rmSync(ws, { recursive: true, force: true });
+		rmSync(outsideDir, { recursive: true, force: true });
 	});
 });
 

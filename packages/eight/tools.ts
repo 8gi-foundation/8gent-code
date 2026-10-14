@@ -2070,14 +2070,16 @@ export class ToolExecutor {
 				function: {
 					name: "browser_task",
 					description:
-						"Run verified steps in the tab: type{index|selector,text}, left_click{index|selector}, wait_for{selector}, open{url}, scroll{dy}.",
+						"Tab steps: type{index|selector,text}, left_click{index}, wait_for{selector}, open{url}, scroll{dy}; login text {{file:TASK.txt:Password}}. " +
+						"Each step is verified. left_click also takes a selector. {{file:PATH:Field}} in type text types the value of the 'Field:' line of that workspace file at act time, only on a local address written in the same file, so the value never enters the conversation or the shell.",
 					parameters: {
 						type: "object",
 						properties: {
 							actions: {
 								type: "array",
 								items: { type: "object" },
-								description: "Ordered steps to run in the tab (see tool description)",
+								description:
+									'Ordered steps, e.g. [{"action":"type","index":3,"text":"{{file:TASK.txt:Password}}"},{"action":"left_click","index":4}]',
 							},
 							task: {
 								type: "string",
