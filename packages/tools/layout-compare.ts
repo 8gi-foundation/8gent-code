@@ -198,6 +198,8 @@ export function chromeArgs(
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--disable-extensions",
+		// Crashpad would write its settings under the real home; a render needs no crash reporter.
+		"--disable-breakpad",
 		"--disable-default-apps",
 		"--disable-sync",
 		"--disable-background-networking",
@@ -221,6 +223,47 @@ export function chromeArgs(
 	];
 }
 
+const CHROME_LOCK_FILES = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
+
+/** Longest unix socket path macOS accepts is 103 bytes; stay under it with margin. */
+export const MAX_SOCKET_PATH_BYTES = 100;
+
+/** Worst-case path of Chrome's ProcessSingleton socket under a TMPDIR. */
+export function chromeSocketPath(tmpdir: string): string {
+	return `${tmpdir}/com.google.Chrome.XXXXXX/SingletonSocket`;
+}
+
+/**
+ * Get a profile dir ready for Chrome: drop any stale Singleton lock files (a lock left by an
+ * earlier launch makes Chrome refuse to start) and, when it fits, give Chrome a short private
+ * TMPDIR (mkdtemp under /tmp, else os.tmpdir()). Chrome binds its ProcessSingleton socket under
+ * TMPDIR/com.google.Chrome.XXXXXX, and a host that forbids that bind in the shared temp dir
+ * broke the render (#4234). A base whose worst-case socket path passes the unix sun_path limit
+ * is skipped, and if none fits the inherited TMPDIR is kept rather than break the launch.
+ * Returns the env to launch Chrome with and a cleanup that removes the private dir.
+ */
+export function prepareChromeProfile(
+	profileDir: string,
+	env: Record<string, string | undefined> = process.env,
+	bases: string[] = ["/tmp", os.tmpdir()],
+): { env: Record<string, string | undefined>; cleanup: () => void } {
+	for (const f of CHROME_LOCK_FILES) fs.rmSync(path.join(profileDir, f), { force: true });
+	for (const base of bases) {
+		const prefix = path.join(base, "8gc-");
+		if (Buffer.byteLength(chromeSocketPath(`${prefix}XXXXXX`)) > MAX_SOCKET_PATH_BYTES) continue;
+		try {
+			const tmp = fs.mkdtempSync(prefix);
+			return {
+				env: { ...env, TMPDIR: tmp },
+				cleanup: () => fs.rmSync(tmp, { recursive: true, force: true }),
+			};
+		} catch {
+			// not writable: try the next base
+		}
+	}
+	return { env, cleanup: () => {} };
+}
+
 type ChromeExit = {
 	code: number | null;
 	signal: NodeJS.Signals | null;
@@ -234,12 +277,19 @@ type ChromeExit = {
  * proxy. Chrome runs in its own process group, which is killed on timeout and when it
  * exits, so no renderer is left behind. stdout is kept only when asked, up to a cap.
  */
-function runChrome(chrome: string, args: string[], keepStdout: boolean): Promise<ChromeExit> {
+function runChrome(
+	chrome: string,
+	args: string[],
+	keepStdout: boolean,
+	profileDir: string,
+): Promise<ChromeExit> {
 	return new Promise((resolve, reject) => {
+		const { env, cleanup } = prepareChromeProfile(profileDir);
 		const useGroup = process.platform !== "win32";
 		const child = spawn(chrome, args, {
 			stdio: ["ignore", keepStdout ? "pipe" : "ignore", "pipe"],
 			detached: useGroup,
+			env: env as NodeJS.ProcessEnv,
 		});
 		let stderr = "";
 		let stdout = "";
@@ -250,6 +300,8 @@ function runChrome(chrome: string, args: string[], keepStdout: boolean): Promise
 		child.stdout?.on("data", (d) => {
 			if (stdout.length < MAX_DOM_BYTES) stdout += String(d);
 		});
+		child.on("close", cleanup);
+		child.on("error", cleanup);
 		const killGroup = () => {
 			try {
 				if (useGroup && child.pid) process.kill(-child.pid, "SIGKILL");
@@ -285,7 +337,12 @@ export async function renderHtml(
 	height: number,
 	profileDir: string,
 ): Promise<void> {
-	const exit = await runChrome(chrome, chromeArgs(htmlPath, out, width, height, profileDir), false);
+	const exit = await runChrome(
+		chrome,
+		chromeArgs(htmlPath, out, width, height, profileDir),
+		false,
+		profileDir,
+	);
 	if (!fs.existsSync(out))
 		throw new Error(noScreenshotMessage(exit.code, exit.signal, exit.stderr));
 }
@@ -301,7 +358,10 @@ export function noScreenshotMessage(
 ): string {
 	const status = signal ? `signal ${signal}` : `exit code ${code}`;
 	const tail = stderr.trim().split(/\r?\n/).slice(-STDERR_SHOW_LINES).join("\n");
-	return `the browser produced no screenshot (${status})${tail ? `; Chrome said:\n${tail}` : "; Chrome wrote nothing to stderr"}`;
+	const lock = /ProcessSingleton|Singleton(Lock|Socket|Cookie)/.test(stderr)
+		? "\nNote: compare_layout gives Chrome a fresh private profile and clears its lock files itself. Do not delete Singleton files or kill Chrome; this host cannot start Chrome for a render, so check the HTML by hand."
+		: "";
+	return `the browser produced no screenshot (${status})${tail ? `; Chrome said:\n${tail}` : "; Chrome wrote nothing to stderr"}${lock}`;
 }
 
 /** Sanitise `htmlPath` (see prepareSafeCopy) and render the copy. */
@@ -483,6 +543,7 @@ export async function measureElements(
 			chrome,
 			chromeArgs(copy, null, width, height, path.join(dir, "profile-elements")),
 			true,
+			path.join(dir, "profile-elements"),
 		);
 		return parseElementBoxes(exit.stdout, token);
 	} catch {

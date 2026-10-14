@@ -21,9 +21,11 @@ import { ToolExecutor } from "../../eight/tools";
 import {
 	type ElementBox,
 	MAX_HTML_BYTES,
+	MAX_SOCKET_PATH_BYTES,
 	RENDER_CSP,
 	boxesId,
 	chromeArgs,
+	chromeSocketPath,
 	cleanSelector,
 	compareLayout,
 	describeDiff,
@@ -35,6 +37,7 @@ import {
 	pairBands,
 	parseElementBoxes,
 	pixelSimilarity,
+	prepareChromeProfile,
 	prepareSafeCopy,
 	renderHtml,
 	renderSafe,
@@ -186,6 +189,46 @@ describe("compareLayout with a stub browser", () => {
 		expect(noScreenshotMessage(null, "SIGKILL", "")).toBe(
 			"the browser produced no screenshot (signal SIGKILL); Chrome wrote nothing to stderr",
 		);
+	});
+
+	test("stale Chrome lock files are cleared and Chrome gets a short private TMPDIR (#4234)", () => {
+		const profile = tempDir("layout-compare-profile-");
+		const names = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
+		for (const f of names) fs.symlinkSync("/nonexistent-stale-target", path.join(profile, f));
+		const { env, cleanup } = prepareChromeProfile(profile, {
+			PATH: "/usr/bin",
+			TMPDIR: "/shared/tmp",
+		});
+		for (const f of names)
+			expect(fs.lstatSync(path.join(profile, f), { throwIfNoEntry: false })).toBeUndefined();
+		const tmp = env.TMPDIR as string;
+		expect(tmp).not.toBe("/shared/tmp");
+		expect(fs.statSync(tmp).isDirectory()).toBe(true);
+		expect(Buffer.byteLength(chromeSocketPath(tmp))).toBeLessThanOrEqual(MAX_SOCKET_PATH_BYTES);
+		expect(env.PATH).toBe("/usr/bin");
+		cleanup();
+		expect(fs.existsSync(tmp)).toBe(false);
+	});
+
+	test("a base too long for a unix socket is skipped and the inherited TMPDIR is kept", () => {
+		const profile = tempDir("layout-compare-profile-");
+		const longBase = path.join(profile, "x".repeat(80));
+		fs.mkdirSync(longBase);
+		const inherited = { TMPDIR: "/shared/tmp" };
+		const { env, cleanup } = prepareChromeProfile(profile, inherited, [longBase]);
+		expect(env.TMPDIR).toBe("/shared/tmp");
+		expect(fs.readdirSync(longBase)).toEqual([]);
+		cleanup();
+	});
+
+	test("a ProcessSingleton failure tells the model not to delete lock files", () => {
+		const msg = noScreenshotMessage(
+			21,
+			null,
+			"Failed to create a ProcessSingleton for your profile",
+		);
+		expect(msg).toContain("clears its lock files itself");
+		expect(noScreenshotMessage(1, null, "other failure")).not.toContain("lock files");
 	});
 
 	test("a missing page or image is a sentence, not a throw", async () => {
