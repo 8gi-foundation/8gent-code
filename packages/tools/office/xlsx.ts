@@ -5,8 +5,9 @@
  * Strings go to the shared-strings table, numbers and booleans are typed, a
  * cell can carry a formula and a number format, and dates become serial days
  * with a date format. Formulas are stored without a cached value and the
- * workbook asks for a full recalculation on open. Formulas that reach outside
- * the workbook (external links, DDE, web calls) are refused. Never a macro part.
+ * workbook asks for a full recalculation on open. Formulas may call only an
+ * allowlist of local functions, and external links and DDE refs are refused,
+ * so that recalculation never reaches outside the workbook. Never a macro part.
  */
 
 import { z } from "zod";
@@ -66,20 +67,47 @@ const BUILTIN_FORMATS: Record<string, number> = {
 	"mm-dd-yy": 14,
 };
 
-/** Calls that leave the workbook: web requests, DDE, add-in or code registration. */
-const REFUSED_FUNCTIONS =
-	/\b(WEBSERVICE|RTD|CALL|REGISTER(?:\.ID)?|EXEC|DDE|IMPORTXML|IMPORTDATA|IMPORTHTML|IMPORTRANGE)\s*\(/i;
+/**
+ * The only functions a formula may call (#4274 review, 8SO). An allowlist, not a blocklist: the
+ * workbook recalculates on open, so any function that can fetch (IMAGE, WEBSERVICE, STOCKHISTORY),
+ * link out (HYPERLINK), build a reference from text (INDIRECT) or read the host (CELL, INFO) would
+ * run on the reader's machine. These are the classic local math, statistics, logic, text, date,
+ * lookup and finance functions; none of them reads anything outside the workbook.
+ */
+export const ALLOWED_FUNCTIONS: ReadonlySet<string> = new Set(
+	(
+		"ABS CEILING FLOOR INT MOD POWER PRODUCT ROUND ROUNDDOWN ROUNDUP SQRT SUM SUMIF SUMIFS SUMPRODUCT " +
+		"SUMSQ TRUNC EXP LN LOG LOG10 PI SIGN EVEN ODD FACT GCD LCM QUOTIENT RAND RANDBETWEEN MROUND " +
+		"DEGREES RADIANS SIN COS TAN ASIN ACOS ATAN ATAN2 " +
+		"AVERAGE AVERAGEA AVERAGEIF AVERAGEIFS COUNT COUNTA COUNTBLANK COUNTIF COUNTIFS MAX MAXA MIN MINA " +
+		"MEDIAN MODE STDEV STDEVP VAR VARP LARGE SMALL RANK PERCENTILE QUARTILE CORREL " +
+		"AND OR NOT IF IFERROR TRUE FALSE " +
+		"CONCATENATE LEFT RIGHT MID LEN LOWER UPPER PROPER TRIM TEXT VALUE FIND SEARCH SUBSTITUTE " +
+		"REPLACE REPT EXACT CHAR CODE CLEAN FIXED DOLLAR " +
+		"DATE DAY MONTH YEAR TODAY NOW WEEKDAY EDATE EOMONTH NETWORKDAYS WORKDAY DATEDIF DATEVALUE " +
+		"HOUR MINUTE SECOND TIME WEEKNUM YEARFRAC DAYS360 " +
+		"VLOOKUP HLOOKUP LOOKUP INDEX MATCH CHOOSE ROW ROWS COLUMN COLUMNS OFFSET " +
+		"ISBLANK ISERROR ISERR ISNA ISNUMBER ISTEXT ISLOGICAL NA N T " +
+		"PMT PV FV NPV IRR RATE NPER IPMT PPMT"
+	).split(" "),
+);
 
 /** The formula text without its leading "=", or a plain reason it is refused. */
 export function checkFormula(f: string): string {
 	const body = f.trim().replace(/^=/, "");
 	if (!body) throw new Error("formula is empty");
-	// Outside string literals: no external workbook ref ([Book]Sheet!A1), no DDE (app|topic!item).
+	// Outside string literals: no external workbook ref ([Book]Sheet!A1, 'C:\[Book]S'!A1), no DDE (app|topic!item).
 	const code = body.replace(/"(?:[^"]|"")*"/g, '""');
 	if (code.includes("[")) throw new Error(`formula "${f}" refers to another workbook`);
 	if (code.includes("|")) throw new Error(`formula "${f}" looks like a DDE link`);
-	if (REFUSED_FUNCTIONS.test(code))
-		throw new Error(`formula "${f}" calls a function that reaches outside the workbook`);
+	// Every call must be on the allowlist. Quoted sheet names ('Q1 (draft)'!A1) are not calls.
+	const calls = code.replace(/'(?:[^']|'')*'/g, "''");
+	for (const m of calls.matchAll(/([A-Za-z_\\][A-Za-z0-9_.\\]*)\s*\(/g)) {
+		const name = m[1].toUpperCase();
+		if (!ALLOWED_FUNCTIONS.has(name)) {
+			throw new Error(`formula "${f}" calls ${name}, which is not on the local function allowlist`);
+		}
+	}
 	return body;
 }
 
