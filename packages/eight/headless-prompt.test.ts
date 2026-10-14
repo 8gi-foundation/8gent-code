@@ -17,13 +17,22 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LOCAL_LOGIN_NOTE, LOCAL_SERVER_CURL_SHORT, NARRATION_NOTE, SCRATCH_DIR_NOTE, SLIDES_TO_VIDEO_NOTE } from "./prompts/system-prompt";
 import { rmRetry } from "../../tests/rm-retry";
+import {
+	LOCAL_LOGIN_NOTE,
+	LOCAL_SERVER_CURL_SHORT,
+	NARRATION_NOTE,
+	SCRATCH_DIR_NOTE,
+	SLIDES_TO_VIDEO_NOTE,
+} from "./prompts/system-prompt";
 
 let Agent: typeof import("./agent").Agent;
 
 type Msg = { role: string; content: string };
-type Decl = { type: string; function: { name: string; description?: string; parameters?: unknown } };
+type Decl = {
+	type: string;
+	function: { name: string; description?: string; parameters?: unknown };
+};
 type Body = { messages: Msg[]; tools?: Decl[] };
 
 const saved: Record<string, string | undefined> = {};
@@ -61,9 +70,7 @@ beforeAll(async () => {
 			if (body.messages?.[0]?.role === "system") bodies.push(body);
 			const content = script.shift() ?? "4";
 			return Response.json({
-				choices: [
-					{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" },
-				],
+				choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
 				usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
 			});
 		},
@@ -133,7 +140,9 @@ describe("headless prompt diet", () => {
 			] as const) {
 				console.log(`\n${label}: ${prefixChars(b)} chars, ~${approxTokens(prefixChars(b))} tokens`);
 				for (const [name, chars] of sections(b)) {
-					console.log(`  ${name.padEnd(28)} ${String(chars).padStart(6)} chars ~${approxTokens(chars)} tok`);
+					console.log(
+						`  ${name.padEnd(28)} ${String(chars).padStart(6)} chars ~${approxTokens(chars)} tok`,
+					);
 				}
 			}
 		}
@@ -165,6 +174,8 @@ describe("headless prompt diet", () => {
 		const [headless] = await run(true);
 		expect(headless.messages[0].content).toContain(SLIDES_TO_VIDEO_NOTE);
 		expect(headless.messages[0].content).toContain(SCRATCH_DIR_NOTE);
+		expect(headless.messages[0].content).toContain("git-ignored, never delete");
+		expect(headless.messages[0].content).not.toContain("mktemp");
 		expect(headless.messages[0].content).toContain(NARRATION_NOTE);
 	}, 60_000);
 
@@ -217,7 +228,8 @@ describe("headless prompt diet", () => {
 		try {
 			const [withBrowser] = await run(true);
 			const names = (withBrowser.tools ?? []).map((t) => t.function.name);
-			for (const n of ["browser_open", "browser_state", "browser_task", "browser_screenshot"]) expect(names).toContain(n);
+			for (const n of ["browser_open", "browser_state", "browser_task", "browser_screenshot"])
+				expect(names).toContain(n);
 			expect(prefixChars(withBrowser) - prefixChars(before[0])).toBeLessThanOrEqual(2500);
 		} finally {
 			process.env.EIGHT_BROWSER_LOCAL = "0";
