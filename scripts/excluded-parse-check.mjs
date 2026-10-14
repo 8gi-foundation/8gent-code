@@ -42,9 +42,23 @@ import { fileURLToPath } from "node:url";
 
 /** Codes meaning "this file is not valid TypeScript", not "this file has type errors". */
 export const SYNTAX_CODES = new Set([
-	"TS1000", "TS1002", "TS1003", "TS1005", "TS1009", "TS1010", "TS1011",
-	"TS1014", "TS1015", "TS1016", "TS1022", "TS1023", "TS1109", "TS1128",
-	"TS1144", "TS1160", "TS1434",
+	"TS1000",
+	"TS1002",
+	"TS1003",
+	"TS1005",
+	"TS1009",
+	"TS1010",
+	"TS1011",
+	"TS1014",
+	"TS1015",
+	"TS1016",
+	"TS1022",
+	"TS1023",
+	"TS1109",
+	"TS1128",
+	"TS1144",
+	"TS1160",
+	"TS1434",
 ]);
 
 /**
@@ -55,14 +69,7 @@ export const SYNTAX_CODES = new Set([
  * for a reason nobody in this repository can fix, so the coverage has to be
  * bounded by the repo, not by whatever is installed on the machine.
  */
-const SKIP_TOP_LEVEL = new Set([
-	"node_modules",
-	"dist",
-	"build",
-	"coverage",
-	".git",
-	".next",
-]);
+const SKIP_TOP_LEVEL = new Set(["node_modules", "dist", "build", "coverage", ".git", ".next"]);
 
 /**
  * Parse checker diagnostics in either format.
@@ -109,8 +116,12 @@ function runChecker(files) {
 		const child = spawn("bun", ["check", ...files], { encoding: "utf8" });
 		let out = "";
 		let err = "";
-		child.stdout.on("data", (d) => { out += d; });
-		child.stderr.on("data", (d) => { err += d; });
+		child.stdout.on("data", (d) => {
+			out += d;
+		});
+		child.stderr.on("data", (d) => {
+			err += d;
+		});
 		child.on("error", (e) => done({ spawned: false, code: null, out, err: e.message }));
 		child.on("close", (code) => done({ spawned: true, code, out, err }));
 	});
@@ -155,9 +166,7 @@ async function main() {
 		);
 		for (const ex of unresolved) console.error(`  ${ex}`);
 		console.error("");
-		console.error(
-			"This gate cannot say whether those paths parse if it cannot see them.",
-		);
+		console.error("This gate cannot say whether those paths parse if it cannot see them.");
 		console.error("Either they are wrong, or this is not a full checkout.");
 		process.exit(2);
 	}
@@ -171,7 +180,6 @@ async function main() {
 	}
 
 	const diagnostics = [];
-	let unknownOutput = "";
 	const BATCH = 40;
 	for (let i = 0; i < targets.length; i += BATCH) {
 		const batch = targets.slice(i, i + BATCH);
@@ -190,7 +198,6 @@ async function main() {
 			// The checker exited non-zero but we recognised nothing. Either it did
 			// not run, or it speaks a format this file does not parse. Both mean
 			// this gate has lost the ability to detect, so it must not pass.
-			unknownOutput = res.out + "\n" + res.err;
 			console.error(
 				`bun check exited ${res.code} on a batch of ${batch.length} file(s) but reported no`,
 			);
@@ -211,7 +218,8 @@ async function main() {
 
 	console.log(
 		`${targets.length} excluded TypeScript file(s) checked for parse errors` +
-			(skipped ? ` (${skipped} build/dependency entries skipped)` : "") + ".",
+			(skipped ? ` (${skipped} build/dependency entries skipped)` : "") +
+			".",
 	);
 	if (byFile.size === 0) {
 		console.log("No syntax errors in excluded paths.");

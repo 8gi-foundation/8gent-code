@@ -16,7 +16,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-import { parseDiagnostics, repoRootFrom, SYNTAX_CODES } from "./excluded-parse-check.mjs";
+import { SYNTAX_CODES, parseDiagnostics, repoRootFrom } from "./excluded-parse-check.mjs";
 
 const BUN_FORMAT = [
 	'<error file="packages/skills/business-builder/src/types/index.ts" line="101" column="75" code="TS1005">',
@@ -69,7 +69,13 @@ describe("parseDiagnostics reads both checker formats", () => {
 	});
 
 	it("never yields an undefined code, whatever the input", () => {
-		for (const text of [BUN_FORMAT, TSC_FORMAT, "", "garbage", '<error file="a.ts" line="1" code="TS1005">']) {
+		for (const text of [
+			BUN_FORMAT,
+			TSC_FORMAT,
+			"",
+			"garbage",
+			'<error file="a.ts" line="1" code="TS1005">',
+		]) {
 			for (const d of parseDiagnostics(text)) {
 				expect(typeof d.code).toBe("string");
 				expect(typeof d.line).toBe("number");
