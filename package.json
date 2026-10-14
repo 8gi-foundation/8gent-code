@@ -89,7 +89,8 @@
     "harness:sessions": "bun --no-env-file --config=bin/bunfig.empty.toml run packages/harness-cli/index.ts sessions",
     "harness:inspect": "bun --no-env-file --config=bin/bunfig.empty.toml run packages/harness-cli/index.ts inspect",
     "harness:doctor": "bun --no-env-file --config=bin/bunfig.empty.toml run packages/harness-cli/index.ts doctor",
-    "debug": "bun --no-env-file --config=bin/bunfig.empty.toml run bin/debug.ts"
+    "debug": "bun --no-env-file --config=bin/bunfig.empty.toml run bin/debug.ts",
+    "preflight:parse": "node scripts/excluded-parse-check.mjs"
   },
   "workspaces": [
     "apps/*",
