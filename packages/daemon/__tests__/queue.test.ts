@@ -13,18 +13,21 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	readdirSync,
+	renameSync,
 	rmSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const KEYS = ["EIGHT_WORK_QUEUE", "EIGHT_WORK_QUEUE_STARTS", "EIGHT_DATA_DIR"] as const;
 const saved: Record<string, string | undefined> = {};
 let dataDir: string;
 let AgentPool: typeof import("../agent-pool").AgentPool;
 let WorkQueue: typeof import("../queue").WorkQueue;
+let acquireLock: typeof import("../queue").acquireLock;
 let bus: typeof import("../events").bus;
 
 beforeAll(async () => {
@@ -32,7 +35,7 @@ beforeAll(async () => {
 	for (const k of KEYS) saved[k] = process.env[k];
 	process.env.EIGHT_DATA_DIR = dataDir;
 	({ AgentPool } = await import("../agent-pool"));
-	({ WorkQueue } = await import("../queue"));
+	({ WorkQueue, acquireLock } = await import("../queue"));
 	({ bus } = await import("../events"));
 });
 
@@ -250,6 +253,55 @@ describe("work queue (#4254)", () => {
 		q.close();
 	});
 
+	test("single writer: two takers racing on one stale lock leave exactly one owner (rival finishes first)", () => {
+		const lock = `${freshPath()}.lock`;
+		writeFileSync(lock, "999\n");
+		const alive = (pid: number) => pid === 111 || pid === 222;
+		// B reads the dead pid; before B moves it, A runs its whole takeover.
+		const takeB = () =>
+			acquireLock(lock, {
+				owner: 222,
+				alive,
+				beforeTakeover: () => acquireLock(lock, { owner: 111, alive }),
+			});
+		expect(takeB).toThrow(/locked by pid 111/);
+		expect(readFileSync(lock, "utf8")).toBe("111\n");
+		expect(
+			readdirSync(dirname(lock)).filter((f) => f.includes(".stale.") || f.endsWith(".tmp")),
+		).toEqual([]);
+	});
+
+	test("single writer: two takers racing on one stale lock leave exactly one owner (rival moves it first)", () => {
+		const lock = `${freshPath()}.lock`;
+		writeFileSync(lock, "999\n");
+		const alive = (pid: number) => pid === 111 || pid === 222;
+		const rivalStash = `${lock}.rival`;
+		// A moved the stale lock away first (its rename won); B's rename now finds nothing.
+		acquireLock(lock, { owner: 222, alive, beforeTakeover: () => renameSync(lock, rivalStash) });
+		expect(readFileSync(lock, "utf8")).toBe("222\n");
+		// A goes on to create the lock and loses: B is the one owner.
+		expect(() => acquireLock(lock, { owner: 111, alive })).toThrow(/locked by pid 222/);
+		expect(readFileSync(lock, "utf8")).toBe("222\n");
+	});
+
+	test("pool.shutdown() closes its queue: the lock is removed and the next pool acquires cleanly", () => {
+		const path = freshPath();
+		const pool = stubPool(stubRuntime(), {
+			queue: new WorkQueue(path, { maxSessions: 10, startLimit: 1 }),
+		});
+		expect(existsSync(`${path}.lock`)).toBe(true);
+		pool.shutdown();
+		pool.shutdown(); // idempotent
+		expect(existsSync(`${path}.lock`)).toBe(false);
+		expect(() => pool.submit({ requestId: "after", text: "x" })).toThrow(/work queue is off/);
+		const next = stubPool(stubRuntime(), {
+			queue: new WorkQueue(path, { maxSessions: 10, startLimit: 1 }),
+		});
+		expect(readFileSync(`${path}.lock`, "utf8").trim()).toBe(String(process.pid));
+		next.shutdown();
+		expect(existsSync(`${path}.lock`)).toBe(false);
+	});
+
 	test("single writer: a second daemon on a locked data dir runs with the queue disabled", () => {
 		const dir = mkdtempSync(join(tmpdir(), "workq-locked-"));
 		const prev = process.env.EIGHT_DATA_DIR;
@@ -300,5 +352,7 @@ describe("work queue (#4254)", () => {
 		const r = pool.submit({ requestId: "env-1", text: "hi" });
 		expect(r.receipt.requestId).toBe("env-1");
 		expect(statSync(join(dataDir, "work-queue.jsonl")).mode & 0o777).toBe(0o600);
+		pool.shutdown();
+		expect(existsSync(join(dataDir, "work-queue.jsonl.lock"))).toBe(false);
 	});
 });

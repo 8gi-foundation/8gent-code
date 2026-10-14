@@ -195,6 +195,18 @@ export class AgentPool {
 		this.cleanupTimer = setInterval(() => this.cleanupIdleSessions(), 5 * 60 * 1000);
 	}
 
+	/**
+	 * Clean stop: stop the idle reaper and close the work queue, which releases its
+	 * lock so the next daemon on this data dir takes it without a stale-lock takeover.
+	 * Sessions are left as they are (the daemon snapshots them first). Idempotent.
+	 */
+	shutdown(): void {
+		if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+		this.cleanupTimer = null;
+		this.queue?.close();
+		this.queue = null;
+	}
+
 	/** Tell the pool which sessions have clients attached (gateway, #3929). */
 	setInUse(fn: (sessionId: string) => boolean): void {
 		this.inUse = fn;

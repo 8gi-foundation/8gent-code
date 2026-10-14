@@ -9,8 +9,10 @@
  * - Items start in acceptance order.
  * - After a restart, accepted items that never started run once; an item that had
  *   started but not ended is marked unknown and is never resent.
- * - One writer per file: `<path>.lock` is taken with O_EXCL and holds the owner pid.
- *   A lock whose pid is no longer alive is stale and taken over.
+ * - One writer per file: `<path>.lock` holds the owner pid and is created atomically.
+ *   A lock whose pid is no longer alive is stale and taken over (see acquireLock).
+ *   The pool releases it on a clean stop (AgentPool.shutdown, from the daemon's
+ *   SIGTERM/SIGINT handler).
  *
  * Growth: the file is never compacted, so it grows by one line per event for the
  * life of the data dir, and replay reads all of it at startup. Compaction must keep
@@ -18,14 +20,17 @@
  * it is its own change: https://github.com/8gi-foundation/8gent-code/issues/4256
  */
 
+import { randomBytes } from "node:crypto";
 import {
 	closeSync,
 	existsSync,
 	fchmodSync,
 	fsyncSync,
+	linkSync,
 	mkdirSync,
 	openSync,
 	readFileSync,
+	renameSync,
 	unlinkSync,
 	writeSync,
 } from "node:fs";
@@ -77,31 +82,99 @@ function pidAlive(pid: number): boolean {
 	}
 }
 
-/** Take `lockPath` with O_EXCL, replacing it once if its owner pid is dead. Throws when held. */
-function acquireLock(lockPath: string): void {
-	for (let attempt = 0; attempt < 2; attempt++) {
+const errCode = (err: unknown) => (err as NodeJS.ErrnoException).code;
+const uniqueSuffix = (owner: number) => `${owner}.${randomBytes(6).toString("hex")}`;
+
+/**
+ * Create `lockPath` holding `owner`, or return false when it exists. The pid is
+ * written to a private temp file first and hard-linked into place, so the lock is
+ * never visible empty (an empty lock would read as stale and be taken over).
+ */
+function createLock(lockPath: string, owner: number): boolean {
+	const tmp = `${lockPath}.${uniqueSuffix(owner)}.tmp`;
+	const fd = openSync(tmp, "wx", 0o600);
+	try {
+		writeSync(fd, `${owner}\n`);
+		closeSync(fd);
+		linkSync(tmp, lockPath);
+		return true;
+	} catch (err) {
+		if (errCode(err) === "EEXIST") return false;
+		throw err;
+	} finally {
 		try {
-			const fd = openSync(lockPath, "wx", 0o600);
-			writeSync(fd, `${process.pid}\n`);
-			closeSync(fd);
-			return;
+			unlinkSync(tmp);
+		} catch {}
+	}
+}
+
+export interface LockOptions {
+	/** Pid written into the lock. Default: this process. */
+	owner?: number;
+	/** Liveness check for the pid found in an existing lock. */
+	alive?: (pid: number) => boolean;
+	/** Test seam: runs after a stale owner is read and before the takeover rename. */
+	beforeTakeover?: () => void;
+}
+
+/**
+ * Take `lockPath` for one writer. Throws when a live process holds it.
+ *
+ * Stale takeover is a rename, not an unlink: a taker moves the lock to a name only
+ * it knows, then checks that what it moved still holds the dead pid it judged.
+ * - Two takers on one stale lock: only one rename finds the file; the other gets
+ *   ENOENT, loops, and loses the create to the winner's lock.
+ * - A taker that read the dead pid but renames after a rival already replaced the
+ *   lock finds a live pid in what it moved: it links the rival's lock back and
+ *   reports it held. It never deletes a lock it did not judge stale.
+ *
+ * Limits: if a third daemon starts in the instant between that rename and the link
+ * back, the rival's lock cannot be restored (we report held, but two writers are
+ * possible); that needs three daemons starting on one data dir within microseconds.
+ * Pid reuse: liveness is `kill(pid, 0)` only, with no process start-time check
+ * (darwin would need a `ps` spawn). A dead owner's pid reused by an unrelated live
+ * process reads as held, so the queue stays off: it fails safe, never two writers,
+ * and the error names the lock file to delete.
+ */
+export function acquireLock(lockPath: string, opts: LockOptions = {}): void {
+	const owner = opts.owner ?? process.pid;
+	const alive = opts.alive ?? pidAlive;
+	for (let attempt = 0; attempt < 3; attempt++) {
+		if (createLock(lockPath, owner)) return;
+		let judged: string;
+		try {
+			judged = readFileSync(lockPath, "utf8");
 		} catch (err) {
-			if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+			if (errCode(err) === "ENOENT") continue; // released between our create and read
+			throw err;
 		}
-		let owner = Number.NaN;
-		try {
-			owner = Number.parseInt(readFileSync(lockPath, "utf8"), 10);
-		} catch {
-			continue; // removed between our open and read: try again
-		}
-		if (Number.isInteger(owner) && owner > 0 && pidAlive(owner)) {
+		const holder = Number.parseInt(judged, 10);
+		if (Number.isInteger(holder) && holder > 0 && alive(holder)) {
 			throw new Error(
-				`work queue: ${lockPath} is locked by pid ${owner}; another daemon owns this queue`,
+				`work queue: ${lockPath} is locked by pid ${holder}; another daemon owns this queue`,
 			);
 		}
+		opts.beforeTakeover?.();
+		const moved = `${lockPath}.stale.${uniqueSuffix(owner)}`;
 		try {
-			unlinkSync(lockPath); // stale: its owner is gone
+			renameSync(lockPath, moved);
+		} catch (err) {
+			if (errCode(err) === "ENOENT") continue; // another taker moved it first
+			throw err;
+		}
+		const took = readFileSync(moved, "utf8");
+		if (took === judged) {
+			unlinkSync(moved); // exactly the stale lock we judged: gone
+			continue;
+		}
+		// We moved a lock a rival took after our read: put it back, untouched.
+		try {
+			linkSync(moved, lockPath);
 		} catch {}
+		unlinkSync(moved);
+		throw new Error(
+			`work queue: ${lockPath} is locked by pid ${Number.parseInt(took, 10)}; another daemon owns this queue`,
+		);
 	}
 	throw new Error(`work queue: could not take ${lockPath}`);
 }
@@ -114,6 +187,7 @@ export class WorkQueue {
 	private nextSeq = 1;
 	private running = 0;
 	private readonly lockPath: string;
+	private closed = false;
 	readonly startLimit: number;
 	/** Items that were in flight when the previous process stopped. Reported, never resent. */
 	readonly unknownAfterRestart: string[] = [];
@@ -246,7 +320,10 @@ export class WorkQueue {
 		return this.items.get(requestId)?.status ?? null;
 	}
 
+	/** Close the store and release the lock. Safe to call more than once. */
 	close(): void {
+		if (this.closed) return;
+		this.closed = true;
 		closeSync(this.fd);
 		this.releaseLock();
 	}
