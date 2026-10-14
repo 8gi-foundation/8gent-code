@@ -92,16 +92,54 @@ export const ALLOWED_FUNCTIONS: ReadonlySet<string> = new Set(
 	).split(" "),
 );
 
+/**
+ * One left-to-right pass over a formula, the way Excel reads it: whichever quote opens first owns
+ * the span until its own closing quote ("" and '' are escapes inside their own kind only), so a
+ * double quote inside a quoted sheet name cannot hide a call (#4274 review, 8SO).
+ *   code:  string literals emptied, quoted sheet names kept (external refs live there).
+ *   calls: both emptied, so only real function calls are left to check.
+ */
+function scanQuotes(body: string, f: string): { code: string; calls: string } {
+	let code = "";
+	let calls = "";
+	let i = 0;
+	while (i < body.length) {
+		const ch = body[i];
+		if (ch !== '"' && ch !== "'") {
+			code += ch;
+			calls += ch;
+			i++;
+			continue;
+		}
+		let j = i + 1;
+		for (;;) {
+			if (j >= body.length) throw new Error(`formula "${f}" has an unclosed ${ch} quote`);
+			if (body[j] === ch) {
+				if (body[j + 1] === ch) {
+					j += 2;
+					continue;
+				}
+				break;
+			}
+			j++;
+		}
+		const span = body.slice(i, j + 1);
+		code += ch === '"' ? '""' : span;
+		calls += ch === '"' ? '""' : "''";
+		i = j + 1;
+	}
+	return { code, calls };
+}
+
 /** The formula text without its leading "=", or a plain reason it is refused. */
 export function checkFormula(f: string): string {
 	const body = f.trim().replace(/^=/, "");
 	if (!body) throw new Error("formula is empty");
 	// Outside string literals: no external workbook ref ([Book]Sheet!A1, 'C:\[Book]S'!A1), no DDE (app|topic!item).
-	const code = body.replace(/"(?:[^"]|"")*"/g, '""');
+	const { code, calls } = scanQuotes(body, f);
 	if (code.includes("[")) throw new Error(`formula "${f}" refers to another workbook`);
 	if (code.includes("|")) throw new Error(`formula "${f}" looks like a DDE link`);
 	// Every call must be on the allowlist. Quoted sheet names ('Q1 (draft)'!A1) are not calls.
-	const calls = code.replace(/'(?:[^']|'')*'/g, "''");
 	for (const m of calls.matchAll(/([A-Za-z_\\][A-Za-z0-9_.\\]*)\s*\(/g)) {
 		const name = m[1].toUpperCase();
 		if (!ALLOWED_FUNCTIONS.has(name)) {
@@ -134,7 +172,7 @@ export function dateSerial(iso: string): number {
 	return (t - Date.UTC(1899, 11, 30)) / 86400000;
 }
 
-const INVALID_SHEET_CHARS = /[\\/?*[\]:]/;
+const INVALID_SHEET_CHARS = /[\\/?*[\]:"]/;
 
 class Styles {
 	private custom = new Map<string, number>();
@@ -249,7 +287,7 @@ export function buildXlsx(rawSpec: unknown): XlsxBuild {
 	for (const sheet of spec.sheets) {
 		if (INVALID_SHEET_CHARS.test(sheet.name) || /^'|'$/.test(sheet.name)) {
 			throw new Error(
-				`sheet name "${sheet.name}" has a character Excel does not allow (\\ / ? * [ ] : or an edge ')`,
+				`sheet name "${sheet.name}" has a character that is not allowed (\\ / ? * [ ] : " or an edge ')`,
 			);
 		}
 		const key = sheet.name.toLowerCase();
