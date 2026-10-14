@@ -112,11 +112,15 @@ describe("makePdf renders in-process", () => {
 	test("mdPath and htmlPath read the file", async () => {
 		const md = path.join(tmpDir, "brief.md");
 		fs.writeFileSync(md, "# From disk\n\nbody");
-		const r = keep(await makePdf({ mdPath: md, outName: "from-disk" }));
+		const r = keep(
+			await makePdf({ mdPath: md, outName: "from-disk" }, { workingDirectory: tmpDir }),
+		);
 		expect((await readPdf(r.path)).text).toContain("From disk");
 		const html = path.join(tmpDir, "page.html");
 		fs.writeFileSync(html, "<h2>Html on disk</h2>");
-		const r2 = keep(await makePdf({ htmlPath: html, outName: "html-disk" }));
+		const r2 = keep(
+			await makePdf({ htmlPath: html, outName: "html-disk" }, { workingDirectory: tmpDir }),
+		);
 		expect((await readPdf(r2.path)).text).toContain("Html on disk");
 	});
 
@@ -153,13 +157,15 @@ describe("makePdf known-bad input", () => {
 	});
 
 	test("a missing mdPath names the file", async () => {
-		await expect(makePdf({ mdPath: path.join(tmpDir, "nope.md") })).rejects.toThrow(
-			/mdPath not found: .*nope\.md/,
-		);
+		await expect(
+			makePdf({ mdPath: path.join(tmpDir, "nope.md") }, { workingDirectory: tmpDir }),
+		).rejects.toThrow(/mdPath not found: .*nope\.md/);
 	});
 
 	test("a directory is not a file", async () => {
-		await expect(makePdf({ htmlPath: tmpDir })).rejects.toThrow(/htmlPath not found/);
+		await expect(makePdf({ htmlPath: tmpDir }, { workingDirectory: tmpDir })).rejects.toThrow(
+			/htmlPath not found/,
+		);
 	});
 
 	test("an oversized source is refused before layout", async () => {
@@ -182,6 +188,28 @@ describe("makePdf known-bad input", () => {
 });
 
 describe("pdf-writer units", () => {
+	test("a 50,000-character word lays out in under 200 ms (#4272)", () => {
+		const word = "abcdefghij".repeat(5_000);
+		const t0 = performance.now();
+		const { pages } = writePdf(parseMarkdown(word));
+		const ms = performance.now() - t0;
+		expect(pages).toBeGreaterThan(1);
+		expect(ms).toBeLessThan(200);
+	});
+
+	test("long-word cost grows in line with length, not faster", () => {
+		const time = (n: number) => {
+			const md = "W".repeat(n);
+			const t0 = performance.now();
+			for (let i = 0; i < 5; i++) writePdf(parseMarkdown(md));
+			return performance.now() - t0;
+		};
+		time(4_000); // warm up
+		const small = Math.max(time(8_000), 1);
+		// Doubling twice used to cost about 7x each step (about 50x); linear is about 4x.
+		expect(time(32_000) / small).toBeLessThan(12);
+	});
+
 	test("winAnsi maps typographic punctuation and counts the rest", () => {
 		const t = { replaced: 0 };
 		expect(winAnsi("\u2018a\u2019 \u2014 \u2022", t)).toEqual([

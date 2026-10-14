@@ -100,7 +100,9 @@ function injectDesign(html: string, ctx: DesignContext): string {
 
 /** Resolve a design context (when requested) and apply it to the HTML source so
  * the PDF inherits our tokens like every other surface. Best-effort: an
- * unavailable DB leaves the input unthemed rather than blocking the render. */
+ * unavailable DB leaves the input unthemed rather than blocking the render.
+ * Reads no files: makePdf turns htmlPath into inline html first, through the
+ * workspace confinement in loadFileSources. */
 export function applyDesign(input: MakePdfInput): {
 	input: MakePdfInput;
 	designSystemId?: string;
@@ -122,14 +124,6 @@ export function applyDesign(input: MakePdfInput): {
 			designSystemId: ctx.systemId,
 		};
 	}
-	if (input.htmlPath != null && input.htmlPath !== "") {
-		const raw = fs.readFileSync(path.resolve(input.htmlPath), "utf8");
-		const { htmlPath: _drop, ...rest } = input;
-		return {
-			input: { ...rest, html: injectDesign(raw, ctx) },
-			designSystemId: ctx.systemId,
-		};
-	}
 	// Markdown sources have no <style> to inject into; still stamp provenance.
 	return { input, designSystemId: ctx.systemId };
 }
@@ -137,8 +131,8 @@ export function applyDesign(input: MakePdfInput): {
 /** Largest source make_pdf will lay out (characters). */
 export const MAX_SOURCE_CHARS = 2_000_000;
 
-/** Exactly one source, read and checked; throws a plain reason the model can act on. */
-function readSource(input: MakePdfInput): { markdown: string } {
+/** Exactly one source; throws a plain reason the model can act on. */
+function checkOneSource(input: MakePdfInput): void {
 	const { markdown, html, htmlPath, mdPath } = input;
 	const sources = [markdown, html, htmlPath, mdPath].filter((v) => v != null && v !== "");
 	if (sources.length === 0) {
@@ -149,19 +143,45 @@ function readSource(input: MakePdfInput): { markdown: string } {
 			"make_pdf accepts exactly one source; got multiple of markdown/html/htmlPath/mdPath",
 		);
 	}
-	const fromFile = (p: string, label: string) => {
-		const abs = path.resolve(p);
-		if (!fs.existsSync(abs) || !fs.statSync(abs).isFile())
-			throw new Error(`${label} not found: ${p}`);
-		if (fs.statSync(abs).size > MAX_SOURCE_CHARS * 4)
-			throw new Error(`${label} is too large to lay out (over ${MAX_SOURCE_CHARS} characters)`);
-		return fs.readFileSync(abs, "utf8");
-	};
-	let md: string;
-	if (markdown) md = markdown;
-	else if (mdPath) md = fromFile(mdPath, "mdPath");
-	else if (html) md = htmlToMarkdown(html);
-	else md = htmlToMarkdown(fromFile(htmlPath as string, "htmlPath"));
+}
+
+export interface MakePdfOptions {
+	/**
+	 * Workspace root that mdPath and htmlPath must stay inside. Required for a
+	 * file source: the path is confined by the same safePath(read) check that
+	 * read_file uses (traversal, symlink escape, credential files, `~`).
+	 */
+	workingDirectory?: string;
+}
+
+/**
+ * Read an mdPath or htmlPath source and hand it back as inline markdown or html,
+ * so nothing after this point touches the disk. The path goes through safePath
+ * with read access, exactly as read_file does (#3747), so a file read_file
+ * refuses is refused here too. Fails closed when no workspace root is given.
+ */
+async function loadFileSources(input: MakePdfInput, opts: MakePdfOptions): Promise<MakePdfInput> {
+	const { htmlPath, mdPath, ...rest } = input;
+	const p = mdPath || htmlPath;
+	if (!p) return input;
+	const label = mdPath ? "mdPath" : "htmlPath";
+	if (!opts.workingDirectory)
+		throw new Error(`${label} needs a workspace root to stay inside; nothing was read`);
+	if (p.includes("\0"))
+		throw new Error(`${label} contains a null byte, which is not allowed in a file path`);
+	const { safePath } = await import("../eight/tools");
+	const abs = safePath(p, opts.workingDirectory, "read");
+	if (!fs.existsSync(abs) || !fs.statSync(abs).isFile())
+		throw new Error(`${label} not found: ${p}`);
+	if (fs.statSync(abs).size > MAX_SOURCE_CHARS * 4)
+		throw new Error(`${label} is too large to lay out (over ${MAX_SOURCE_CHARS} characters)`);
+	const text = fs.readFileSync(abs, "utf8");
+	return mdPath ? { ...rest, markdown: text } : { ...rest, html: text };
+}
+
+/** The inline source as Markdown, size-checked. */
+function readSource(input: MakePdfInput): { markdown: string } {
+	const md = input.markdown ? input.markdown : htmlToMarkdown(input.html ?? "");
 	if (md.length > MAX_SOURCE_CHARS)
 		throw new Error(
 			`source is ${md.length} characters; make_pdf lays out at most ${MAX_SOURCE_CHARS}`,
@@ -192,10 +212,14 @@ function autoOutPath(title: string | undefined, blocks: Block[]): string {
  * Resolves with `{ path, kind: "document", pages }`; `replaced` counts
  * characters outside the PDF standard fonts that were printed as "?".
  * Rejects with a plain reason (no source, two sources, missing or oversized
- * file, over the page cap).
+ * file, a path outside the workspace or a credential file, over the page cap).
  */
-export async function makePdf(input: MakePdfInput): Promise<MakePdfResult> {
-	const designed = applyDesign(input);
+export async function makePdf(
+	input: MakePdfInput,
+	opts: MakePdfOptions = {},
+): Promise<MakePdfResult> {
+	checkOneSource(input);
+	const designed = applyDesign(await loadFileSources(input, opts));
 	const { markdown } = readSource(designed.input);
 	let blocks = parseMarkdown(markdown);
 	const title = input.title?.trim() || undefined;

@@ -1050,13 +1050,16 @@ const makePdfTool = tool({
 	execute: async ({ markdown, html, htmlPath, mdPath, title, outName }) => {
 		const { makePdf } = await import("../tools/make-pdf");
 		try {
-			const result = await makePdf({ markdown, html, htmlPath, mdPath, title, outName });
+			const result = await makePdf(
+				{ markdown, html, htmlPath, mdPath, title, outName },
+				{ workingDirectory: getToolContext().workingDirectory },
+			);
 			return JSON.stringify(result, null, 2);
 		} catch (err) {
 			return JSON.stringify(
 				{
 					error: `make_pdf failed: ${err instanceof Error ? err.message : String(err)}`,
-					hint: "Provide exactly one of markdown/html/htmlPath/mdPath; a file path must exist.",
+					hint: "Provide exactly one of markdown/html/htmlPath/mdPath; a file path must exist inside the workspace.",
 				},
 				null,
 				2,

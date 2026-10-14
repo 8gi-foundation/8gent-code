@@ -12,10 +12,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { __resetDesignContextCache } from "../../design-systems/context";
+import { initDatabase } from "../../design-systems/db";
 import { generateCssVariables } from "../../design-systems/query";
 import { seedDatabase } from "../../design-systems/seed";
-import { initDatabase } from "../../design-systems/db";
-import { applyDesign } from "../make-pdf";
+import { applyDesign, makePdf } from "../make-pdf";
+import { readPdf } from "../pdf";
 
 let emptyDbPath: string;
 let seededDbPath: string;
@@ -41,7 +42,10 @@ describe("applyDesign", () => {
 
 	test("injects resolved tokens into inline HTML + stamps systemId", () => {
 		process.env.EIGHT_DESIGN_DB = seededDbPath;
-		const out = applyDesign({ html: "<html><head></head><body>x</body></html>", designSystemId: "vercel" });
+		const out = applyDesign({
+			html: "<html><head></head><body>x</body></html>",
+			designSystemId: "vercel",
+		});
 		expect(out.designSystemId).toBe("vercel");
 		// The exact :root token block from the resolver must be present verbatim.
 		expect(out.input.html).toContain(generateCssVariables("vercel") as string);
@@ -50,15 +54,24 @@ describe("applyDesign", () => {
 		expect(out.input.html!.indexOf("<style>")).toBeLessThan(out.input.html!.indexOf("</head>"));
 	});
 
-	test("reads htmlPath, injects, and switches to inline html", () => {
+	test("htmlPath is read by makePdf inside the workspace, then themed", async () => {
 		process.env.EIGHT_DESIGN_DB = seededDbPath;
 		const p = path.join(tmpRoot, "doc.html");
 		fs.writeFileSync(p, "<html><body>from disk</body></html>");
-		const out = applyDesign({ htmlPath: p, designSystemId: "vercel" });
-		expect(out.designSystemId).toBe("vercel");
-		expect(out.input.htmlPath).toBeUndefined();
-		expect(out.input.html).toContain("from disk");
-		expect(out.input.html).toContain("--theme-primary");
+		// applyDesign itself reads no files (#4272): an htmlPath passes through untouched.
+		const untouched = applyDesign({ htmlPath: p, designSystemId: "vercel" });
+		expect(untouched.input.htmlPath).toBe(p);
+		expect(untouched.input.html).toBeUndefined();
+		const r = await makePdf(
+			{ htmlPath: p, designSystemId: "vercel", outName: "design-disk" },
+			{ workingDirectory: tmpRoot },
+		);
+		try {
+			expect(r.designSystemId).toBe("vercel");
+			expect((await readPdf(r.path)).text).toContain("from disk");
+		} finally {
+			fs.rmSync(r.path, { force: true });
+		}
 	});
 
 	test("best-effort: unavailable DB renders unthemed (no throw, no stamp)", () => {

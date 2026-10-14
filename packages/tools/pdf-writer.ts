@@ -172,16 +172,26 @@ export function winAnsi(s: string, tally: { replaced: number }): number[] {
 	return bytes;
 }
 
-function width(bytes: number[], font: Font, size: number): number {
-	if (font === "F3") return bytes.length * 600 * (size / 1000);
+/** Width of one byte in font units (1/1000 of the size). */
+function unit(b: number, font: Font): number {
+	if (font === "F3") return 600;
 	const t = font === "F2" ? BOLD : HELV;
+	return b >= 0x20 && b <= 0x7e ? t[b - 0x20] : (HIGH[b] ?? (font === "F2" ? 611 : 556));
+}
+
+function width(bytes: number[], font: Font, size: number): number {
 	let w = 0;
-	for (const b of bytes)
-		w += b >= 0x20 && b <= 0x7e ? t[b - 0x20] : (HIGH[b] ?? (font === "F2" ? 611 : 556));
+	for (const b of bytes) w += unit(b, font);
 	return w * (size / 1000);
 }
 
-/** Greedy word wrap; a word wider than the line is split by characters. */
+/**
+ * Greedy word wrap; a word wider than the line is split by characters. The
+ * split keeps a running width, so a long word costs time in line with its
+ * length (it used to re-measure every prefix: an 8000-character word took
+ * 2.7 s). Units are summed in the same order as width(), so every break lands
+ * where it did before.
+ */
 function wrap(bytes: number[], font: Font, size: number, max: number): number[][] {
 	const lines: number[][] = [];
 	let line: number[] = [];
@@ -194,21 +204,27 @@ function wrap(bytes: number[], font: Font, size: number, max: number): number[][
 		} else cur.push(b);
 	}
 	if (cur.length) words.push(cur);
-	for (let word of words) {
+	const scale = size / 1000;
+	for (const word of words) {
 		const tryLine = line.length ? [...line, 0x20, ...word] : word;
 		if (width(tryLine, font, size) <= max) {
 			line = tryLine;
 			continue;
 		}
 		if (line.length) lines.push(line);
-		line = [];
-		while (width(word, font, size) > max) {
-			let n = word.length - 1;
-			while (n > 1 && width(word.slice(0, n), font, size) > max) n--;
-			lines.push(word.slice(0, n));
-			word = word.slice(n);
+		// Split the word: each piece is the longest prefix that fits (at least
+		// one character); the remainder that fits becomes the open line.
+		let start = 0;
+		let w = 0;
+		for (let i = 0; i < word.length; i++) {
+			const next = w + unit(word[i], font);
+			if (i > start && next * scale > max) {
+				lines.push(word.slice(start, i));
+				start = i;
+				w = unit(word[i], font);
+			} else w = next;
 		}
-		line = word;
+		line = word.slice(start);
 	}
 	if (line.length) lines.push(line);
 	return lines;
