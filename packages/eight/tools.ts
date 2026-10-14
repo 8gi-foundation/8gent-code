@@ -253,6 +253,7 @@ import {
 	buildChildEnv,
 	withheldAny,
 } from "./harness/child-env";
+import { downscaleNote, imageMaxSide } from "./image-fit";
 import { layoutMeasureLine } from "./layout-measure";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { RetiredFacts } from "./retired-facts";
@@ -1019,6 +1020,7 @@ export class ToolExecutor {
 	 * default): read_image returns metadata, as it always did.
 	 */
 	private visionCapable: () => Promise<boolean>;
+	private localRuntime: () => boolean;
 	/** Finds the vision model describe_image calls (#3642). Injectable for tests. */
 	private resolveVisionModel: () => Promise<VisionRouterResult>;
 	/** The minimal-environment hint is appended once per session (see runCommand). */
@@ -1034,6 +1036,8 @@ export class ToolExecutor {
 			openOnWrite?: boolean;
 			permission?: PermissionModeHolder;
 			visionCapable?: () => Promise<boolean>;
+			/** The model runs on this box, so read_image keeps the small image bound (#4293). */
+			localRuntime?: () => boolean;
 			resolveVisionModel?: () => Promise<VisionRouterResult>;
 			/**
 			 * A person is at the keyboard (G1 extension_call policy). Default: not
@@ -1046,6 +1050,7 @@ export class ToolExecutor {
 		this.postSession = sessionId ?? `${agentId}-${process.pid}-${Date.now()}`;
 		this.permission = options.permission;
 		this.visionCapable = options.visionCapable ?? (async () => false);
+		this.localRuntime = options.localRuntime ?? (() => true);
 		this.resolveVisionModel =
 			options.resolveVisionModel ?? (() => findVisionModel({ preferLocal: true }));
 		this.agentId = agentId;
@@ -3810,11 +3815,12 @@ export class ToolExecutor {
 
 		try {
 			// A model that can see gets the pixels (#3641): downscaled to fit
-			// 1024x1024 so a Retina screenshot does not swamp its context, and
+			// imageMaxSide (1024 local, 2560 hosted; #4293) so a Retina screenshot does not swamp its context, and
 			// attached to the next message by the text-tool loop. The text part
 			// is the metadata the model always had.
 			if (await this.visionCapable()) {
-				const shown = await resizeImage(absolutePath, 1024, 1024);
+				const side = imageMaxSide(this.localRuntime());
+				const shown = await resizeImage(absolutePath, side, side);
 				const mimeType = `image/${shown.format === "jpg" ? "jpeg" : shown.format}`;
 				const meta = JSON.stringify(
 					{
@@ -3827,9 +3833,17 @@ export class ToolExecutor {
 					null,
 					2,
 				);
+				// #4293: say how the copy relates to the original when it is smaller.
+				const note = downscaleNote(
+					{
+						width: shown.originalWidth ?? shown.width,
+						height: shown.originalHeight ?? shown.height,
+					},
+					shown,
+				);
 				// #3770: the copy above is downscaled, so give the real pixel geometry.
 				const measured = await this.layoutForRead(absolutePath);
-				const text = measured ? `${meta}\n${measured}` : meta;
+				const text = [meta, note, measured].filter(Boolean).join("\n");
 				return imageAttachmentResult(text, mimeType, shown.base64);
 			}
 			const imageInfo = await readImage(absolutePath);

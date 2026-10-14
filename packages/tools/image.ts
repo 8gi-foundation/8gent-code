@@ -27,6 +27,9 @@ export interface ImageInfo {
 	base64: string;
 	width: number;
 	height: number;
+	/** Set by resizeImage: the pixel size of the file before any downscale (#4293). */
+	originalWidth?: number;
+	originalHeight?: number;
 	format: string;
 	size: number;
 	channels: number;
@@ -116,6 +119,8 @@ export async function resizeImage(
 		base64,
 		width: resizedMetadata.width || 0,
 		height: resizedMetadata.height || 0,
+		originalWidth: metadata.width || resizedMetadata.width || 0,
+		originalHeight: metadata.height || resizedMetadata.height || 0,
 		format: resizedMetadata.format || metadata.format || "unknown",
 		size: resized.length,
 		channels: resizedMetadata.channels || 0,

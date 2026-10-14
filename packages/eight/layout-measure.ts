@@ -183,10 +183,21 @@ export function pageHeightLines(m: LayoutMeasure): string[] {
 		: [base];
 }
 
+import { isDownscaled } from "./image-fit";
+
 /** One block of text for a read_image result, or "" when there is nothing to say. */
-export async function layoutMeasureLine(file: string | Buffer): Promise<string> {
+export async function layoutMeasureLine(
+	file: string | Buffer,
+	original?: { width: number; height: number },
+): Promise<string> {
 	const m = await measureLayout(file);
 	if (!m) return "";
+	// #4293: `file` can be the downscaled copy the model sees. Never call that
+	// "full-size": name the original and the factor that maps these numbers back.
+	const copy = original && isDownscaled(original, m) ? original : null;
+	const header = copy
+		? `Measured layout of a downscaled copy (${m.width}x${m.height} px) of the original image (${copy.width}x${copy.height} px). Every number below is in copy pixels: multiply by ${Number((copy.width / m.width).toFixed(3))} for original pixels, which are the pixels the task uses.`
+		: `Measured layout of the full-size image (${m.width}x${m.height} px; any copy you see is downscaled, so use these numbers, not coordinates read off the view):`;
 	const rows = m.bands.map((b) => {
 		const spans = b.spans
 			.map((s) => {
@@ -199,7 +210,7 @@ export async function layoutMeasureLine(file: string | Buffer): Promise<string> 
 		return `  y=${b.y} h=${b.h}: ${spans}`;
 	});
 	return [
-		`Measured layout of the full-size image (${m.width}x${m.height} px; any copy you see is downscaled, so use these numbers, not coordinates read off the view):`,
+		header,
 		`  content column x=${m.column.left}..${m.column.right} (width ${m.column.width}px, left margin ${m.column.left}px, right margin ${m.width - m.column.right}px${m.centered ? ", centered" : ""})`,
 		"  content bands, top to bottom (y is the top edge, h the height, x the left edge, w the width):",
 		...rows,
