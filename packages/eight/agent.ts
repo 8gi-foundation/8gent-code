@@ -1137,11 +1137,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
-	 * Can this agent's own model see images (#3641)? Only the text-tool path
-	 * attaches them natively, so the native AI SDK path answers no. The Ollama
-	 * answer comes from /api/show, cached per endpoint and model.
-	 */
-	/**
 	 * Does the prompt's attached image go to this session's own model? The
 	 * text-tool path asks modelSees(). The native AI SDK path sends it as an
 	 * image part when nativePromptSeesImage() says the model sees (#4287):
@@ -1160,6 +1155,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return nativePromptSeesImage(declared, this.config.model);
 	}
 
+	/**
+	 * Can this agent's own model see images (#3641)? Only the text-tool path
+	 * attaches them natively, so the native AI SDK path answers no. The Ollama
+	 * answer comes from /api/show, cached per endpoint and model.
+	 */
 	private modelSees(): Promise<boolean> {
 		const scoped = (this.config.allowedPaths?.length ?? 0) > 0;
 		if (!shouldUseTextTools(this.config.runtime, scoped)) return Promise.resolve(false);

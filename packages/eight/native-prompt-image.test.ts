@@ -134,19 +134,22 @@ afterAll(() => {
 	rmRetry(repo);
 });
 
-function chat(model: string): Promise<string> {
-	const agent = new Agent({
+function build(model: string): InstanceType<typeof Agent> {
+	return new Agent({
 		model,
 		runtime: "ollama",
 		workingDirectory: repo,
 		baseUrl: `http://127.0.0.1:${server.port}`,
 	} as ConstructorParameters<typeof Agent>[0]);
-	return agent.chat("Where should I click?", PNG_B64, "image/png");
+}
+
+function chat(model: string): Promise<string> {
+	return build(model).chat("Where should I click?", PNG_B64, "image/png");
 }
 
 /** Image parts the model was sent, in any shape the provider encoder uses. */
-function imageParts(): number {
-	const first = bodies[0];
+function imageParts(index = 0): number {
+	const first = bodies[index];
 	if (!first) return -1;
 	return first.messages.reduce((n, m) => {
 		if (!Array.isArray(m.content)) return n;
@@ -170,5 +173,15 @@ describe("native chat() sends the prompt image to a model that sees (#4287)", ()
 		await chat("m");
 		expect(bodies.length).toBeGreaterThan(0);
 		expect(imageParts()).toBe(0);
+	}, 60_000);
+
+	test("the image is not resent on a later turn of the same agent", async () => {
+		const agent = build("llava:7b");
+		await agent.chat("Where should I click?", PNG_B64, "image/png");
+		const firstTurn = bodies.length;
+		expect(imageParts(0)).toBe(1);
+		await agent.chat("And now?");
+		expect(bodies.length).toBeGreaterThan(firstTurn);
+		for (let i = firstTurn; i < bodies.length; i++) expect(imageParts(i)).toBe(0);
 	}, 60_000);
 });
