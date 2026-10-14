@@ -58,12 +58,54 @@ export function classifyLocalTurnError(err: unknown): LocalTurnFailureKind {
  * `timeoutMs` is the configured per-step limit, used when the error itself
  * does not carry one.
  */
+/** Opening words of each failure reply. Exported so the recogniser and tests share one literal. */
+export const LOCAL_TURN_FAILED_PREFIX = "The local model turn could not complete: ";
+export const LOCAL_TURN_ENDPOINT_PREFIX = "The local model endpoint (";
+export const LOCAL_TURN_MODEL_PREFIX = "The local model (";
+
+/** Why a headless turn failed, as `8gent run` reports it (#3899). */
+export type TurnFailureReason =
+	| "unreachable"
+	| "turn_failed"
+	| "denied"
+	| "unverified"
+	| "stopped_early";
+
+/**
+ * An endpoint URL that is safe to print: no username, password, query or
+ * fragment. OLLAMA_HOST and baseUrl are taken verbatim, so either can carry a
+ * token. Anything that does not parse as a URL is returned as "<endpoint>".
+ */
+export function redactEndpoint(endpoint: string): string {
+	try {
+		const u = new URL(endpoint);
+		u.username = "";
+		u.password = "";
+		u.search = "";
+		u.hash = "";
+		return u.toString();
+	} catch {
+		return "<endpoint>";
+	}
+}
+
+/** Redact every http(s) URL inside free text (a raw fetch error may repeat the endpoint). */
+export function redactUrlsIn(text: string): string {
+	return (
+		text
+			.replace(/https?:\/\/[^\s)"']+/g, (m) => redactEndpoint(m))
+			// Scheme-less userinfo, e.g. "user:pass@host:11434" in a raw error.
+			.replace(/\b[\w.~%+-]+:[^\s@/:]+@(?=localhost\b|[\w-]+(?:\.[\w-]+)+|[\w.-]+:\d+)/g, "")
+	);
+}
+
 export function describeLocalTurnFailure(
 	err: unknown,
 	ctx: { endpoint: string; timeoutMs: number },
 ): { kind: LocalTurnFailureKind; message: string; reason: string } {
-	const raw = errMessage(err);
+	const raw = redactUrlsIn(errMessage(err));
 	const kind = classifyLocalTurnError(err);
+	ctx = { ...ctx, endpoint: redactEndpoint(ctx.endpoint) };
 
 	if (kind === "timeout") {
 		const ms = err instanceof TurnTimeoutError ? err.timeoutMs : ctx.timeoutMs;
@@ -95,14 +137,14 @@ export function describeLocalTurnFailure(
 	if (kind === "unreachable") {
 		return {
 			kind,
-			message: `The local model endpoint (${ctx.endpoint}) is not reachable. Is LM Studio or Ollama running? (${raw})`,
+			message: `${LOCAL_TURN_ENDPOINT_PREFIX}${ctx.endpoint}) is not reachable. Is LM Studio or Ollama running? (${raw})`,
 			reason: `unreachable: ${raw}`,
 		};
 	}
 
 	return {
 		kind,
-		message: `The local model turn could not complete: ${raw}`,
+		message: `${LOCAL_TURN_FAILED_PREFIX}${raw}`,
 		reason: raw,
 	};
 }
@@ -116,9 +158,9 @@ export function describeLocalTurnFailure(
 export function isLocalTurnFailureReply(text: string): boolean {
 	const t = text.trimStart();
 	return (
-		t.startsWith("The local model turn could not complete: ") ||
-		t.startsWith("The local model endpoint (") ||
-		(t.startsWith("The local model (") && t.includes("so the turn was stopped."))
+		t.startsWith(LOCAL_TURN_FAILED_PREFIX) ||
+		t.startsWith(LOCAL_TURN_ENDPOINT_PREFIX) ||
+		(t.startsWith(LOCAL_TURN_MODEL_PREFIX) && t.includes("so the turn was stopped."))
 	);
 }
 

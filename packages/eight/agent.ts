@@ -20,6 +20,7 @@ import { modelSupportsVision, prefixMeterSink } from "../ai/text-tool-endpoint";
 import {
 	emptyReplyNote,
 	emptyReplyStall,
+	isEmptyReplyNote,
 	splitToolImageAttachment,
 	stripDoneMarker,
 } from "../ai/text-tool-loop";
@@ -90,6 +91,7 @@ import {
 	setDefaultLocalProfile,
 } from "../tools/eight-browser";
 import { type Evidence, EvidenceCollector, summarizeEvidence } from "../validation/evidence";
+import { reviewTurn, turnReviewEnabled } from "../verify/turn-review";
 import { isNoToolScope, isVerbatimScope } from "./agent-scopes";
 import { type Settings, computeAutoTune } from "./auto-tune";
 import { createClient } from "./clients";
@@ -103,7 +105,12 @@ import {
 	estimateMessageTokens,
 } from "./compaction";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
-import { type ToolLedgerEntry, enforceAgenticHonesty, isErrorToolResult } from "./honesty";
+import {
+	type ToolLedgerEntry,
+	denialIsCause,
+	enforceAgenticHonesty,
+	isErrorToolResult,
+} from "./honesty";
 import { projectInstructionsSection } from "./instruction-loader";
 import { getModeManager } from "./modes";
 import { isLocalProvider } from "./registry";
@@ -120,7 +127,11 @@ import {
 	localPlanTools,
 	planningGateInstruction,
 } from "./local-tool-scope";
-import { describeLocalTurnFailure, failedTurnRunEntry } from "./local-turn-error";
+import {
+	type TurnFailureReason,
+	describeLocalTurnFailure,
+	failedTurnRunEntry,
+} from "./local-turn-error";
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
@@ -133,6 +144,14 @@ import {
 	buildToolCatalogSegment,
 	environmentNote,
 } from "./prompts/system-prompt";
+import {
+	classifyPrompt,
+	installedModelsFor,
+	pickQuickModel,
+	quickLaneEnabled,
+	quickMessages,
+	runQuickAnswer,
+} from "./quick-answer";
 import { SessionStore } from "./session-store";
 import { SessionSyncManager } from "./session-sync";
 import {
@@ -145,7 +164,14 @@ import { ToolLoopDetector } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import { TurnJournal } from "./turn-journal";
-import { resolveStepCeilingMs, resolveTurnTimeoutMs, withTurnTimeout } from "./turn-timeout";
+import {
+	type ProgressWatch,
+	resolveStepCeilingMs,
+	resolveStreamIdleMs,
+	resolveTurnTimeoutMs,
+	withProgressTimeout,
+	withTurnTimeout,
+} from "./turn-timeout";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter, oneLineError } from "./vision-interpreter";
 
@@ -210,6 +236,7 @@ import {
 } from "../ai";
 import {
 	type TextTool,
+	type TextToolUsage,
 	buildTextToolCall,
 	needsTextTools,
 	resolveTextToolEndpoint,
@@ -349,6 +376,8 @@ export class Agent {
 	private offBoxSystemPrompt: (() => string) | null = null;
 	private toolCallTracker: Map<string, number> = new Map(); // fingerprint -> count
 	private loopWarningInjected = false;
+	/** #3855: progress signal for the in-flight native attempt, null between attempts. */
+	private progressWatch: ProgressWatch | null = null;
 	private loopDetector = new ToolLoopDetector();
 	private events: AgentEventCallbacks;
 	private planner: ProactivePlanner;
@@ -382,6 +411,12 @@ export class Agent {
 	/** Id of the turn running now, or null between turns. */
 	private activeTurn: number | null = null;
 	private turnCounter = 0;
+	// A stop pressed in this turn (#3521). chat() awaits several pre-turn steps
+	// before a controller is armed, and the native loop re-arms after a 429
+	// backoff; without this latch an ESC in either window was dropped and the
+	// model call went ahead. Set by abort(), honoured by armController(),
+	// cleared at chat() entry.
+	private stopRequested = false;
 	private orchestratorBus: OrchestratorBus;
 	private toolRegistry: ToolRegistry;
 	private compaction: ProactiveCompression;
@@ -409,6 +444,22 @@ export class Agent {
 	private turnToolLedger: ToolLedgerEntry[] = [];
 	private turnTask = "";
 	private turnGitBaseline: Map<string, string> | null = null;
+	/**
+	 * Set by the harness, never from model text, when the last chat() turn
+	 * failed (#3899). `8gent run` reads it for its exit code.
+	 */
+	private lastTurnFailure: {
+		reason: TurnFailureReason;
+		message: string;
+		unverified?: string[];
+	} | null = null;
+	getLastTurnFailure(): {
+		reason: TurnFailureReason;
+		message: string;
+		unverified?: string[];
+	} | null {
+		return this.lastTurnFailure;
+	}
 	/**
 	 * An image attached to the current turn's prompt, as a data URL, when the
 	 * model can see it itself (#3641). The text-tool turn puts it on the user
@@ -1069,8 +1120,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// `this.abortController` is null and this.abort() - fired by the circuit
 		// breaker below, the session watchdog, and user ESC - would be a no-op.
 		// Assigning it here makes all three actually stop the turn.
-		this.abortController = new AbortController();
-		const signal = this.abortController.signal;
+		const signal = this.armController().signal;
 
 		// Build the real tool set: intersect the executor's own tool definitions
 		// (everything it can actually run) with the local CORE_TOOLS subset via a
@@ -1284,6 +1334,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Model calls begun so far on this text-tools path; step_start fires per call.
 		let startedSteps = 0;
 		const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+		const onUsage = (usage: TextToolUsage) => {
+			usageTotals.promptTokens += usage.promptTokens;
+			usageTotals.completionTokens += usage.completionTokens;
+			usageTotals.totalTokens += usage.totalTokens;
+			this.events.onStepFinish?.({
+				// Close the step the last call opened; fall back to a counter
+				// when no call was announced.
+				stepNumber: startedSteps > 0 ? startedSteps - 1 : usageStepNumber++,
+				finishReason: "stop",
+				text: "",
+				toolCalls: [],
+				usage,
+			});
+		};
 		const runTurn = (provider: string, model: string) => {
 			// #3487: the built prompt was judged on-box for the session's runtime. If
 			// this turn goes to a provider whose endpoint is off this machine (a
@@ -1318,20 +1382,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// #3655: per-request prefill/decode counts into the session log,
 				// only with EIGHT_PREFIX_METER=1.
 				onRound: prefixMeterSink(this.sessionWriter),
-				onUsage: (usage) => {
-					usageTotals.promptTokens += usage.promptTokens;
-					usageTotals.completionTokens += usage.completionTokens;
-					usageTotals.totalTokens += usage.totalTokens;
-					this.events.onStepFinish?.({
-						// Close the step the last call opened; fall back to a counter
-						// when no call was announced.
-						stepNumber: startedSteps > 0 ? startedSteps - 1 : usageStepNumber++,
-						finishReason: "stop",
-						text: "",
-						toolCalls: [],
-						usage,
-					});
-				},
+				onUsage,
 			});
 			// One packer per attempt: it counts this attempt's model requests.
 			const packer = observations ? new ObservationPacker(observations) : null;
@@ -1420,13 +1471,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 		}
 
+		// The quick-answer lane's outcome (#3411), written to the run log so the
+		// A/B can report the fall-through rate. Set below when the flag is on.
+		let quickRecord: RunLogEntry["quick"];
+
 		// A turn that ends in an error is still a run: record it in runs.jsonl
 		// with status "error" and the reason, like a successful turn records "ok".
 		const recordFailedRun = (reason: string) => {
 			if (!this.enableReporting) return;
 			try {
-				appendRun(
-					failedTurnRunEntry({
+				appendRun({
+					...failedTurnRunEntry({
 						model: this.config.model,
 						startedAt: chatStartTime,
 						tokens: usageTotals.totalTokens,
@@ -1439,11 +1494,71 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						prompt: textForAgent,
 						reason,
 					}),
-				);
+					...(quickRecord ? { quick: quickRecord } : {}),
+				});
 			} catch {
 				// The run log is best-effort; it must never mask the turn's reply.
 			}
 		};
+
+		// ── Quick-answer fast lane (#3411, EIGHT_QUICK_ANSWER=1) ─────────────
+		// A short question with no instruction in it is first answered by a
+		// bounded read-only run (3 tool calls, 15 s). A complete answer ends the
+		// turn through the same bookkeeping below; anything else falls through to
+		// the normal loop, which never sees the lane's messages.
+		let quickResult: Awaited<ReturnType<typeof runTextToolAgent>> | null = null;
+		if (quickLaneEnabled() && !isTableSession) {
+			quickRecord = { class: classifyPrompt(textForAgent), ran: false, ok: false, ms: 0, tools: 0 };
+		}
+		if (quickRecord?.class === "quick" && !this.proactiveGatherer) {
+			const pick = pickQuickModel({
+				envModel: process.env.EIGHT_QUICK_MODEL,
+				sessionModel: effectiveModel,
+				installed: process.env.EIGHT_QUICK_MODEL ? [] : await installedModelsFor(effectiveProvider),
+			});
+			const quickModel = pick.model;
+			const laneTokens: number[] = [];
+			const quick = await runQuickAnswer({
+				// Its own small prompt and the user's message only (round 4): no agent
+				// system prompt, no history.
+				messages: quickMessages(this.config.workingDirectory || process.cwd(), textForAgent),
+				tools,
+				signal,
+				makeCall: (laneSignal, timeoutMs, laneSpecs) =>
+					buildTextToolCall({
+						provider: effectiveProvider,
+						model: quickModel,
+						baseUrl: this.config.baseUrl,
+						temperature: this.runtimeParams.temperature ?? 0.2,
+						signal: laneSignal,
+						timeoutMs,
+						tools: laneSpecs,
+						onUsage: (usage) => {
+							laneTokens.push(usage.promptTokens);
+							onUsage(usage);
+						},
+						// A thinking model spent the whole 15 s budget reasoning (A/B 215452, 215752).
+						noThink: true,
+					}),
+			});
+			quickRecord = {
+				...quickRecord,
+				ran: true,
+				ok: quick.ok,
+				model: quickModel,
+				modelSource: pick.source,
+				...(laneTokens.length > 0 ? { promptTokens: laneTokens } : {}),
+				ms: quick.ms,
+				tools: quick.tools,
+				...(quick.ok ? {} : { reason: quick.reason.slice(0, 200) }),
+				...(!quick.ok && quick.claims ? { claims: quick.claims } : {}),
+			};
+			if (quick.ok) {
+				quickResult = quick.result;
+			} else {
+				console.log(`[quick-answer] full loop after ${quick.ms} ms: ${quick.reason}`);
+			}
+		}
 
 		let agentResult: Awaited<ReturnType<typeof runTextToolAgent>>;
 		try {
@@ -1452,21 +1567,23 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// found`). callLocalModelWithReroute probes what is actually installed
 			// and retries the turn on a real model; only a genuine no-model-anywhere
 			// case returns a clean human message.
-			const outcome = await callLocalModelWithReroute({
-				provider: effectiveProvider,
-				model: effectiveModel,
-				run: runTurn,
-				// A named provider stays put: reroute only within it (#3746).
-				pinned: this.config.providerPinned,
-				pinnedMessage: (model, error) =>
-					pinnedProviderError(effectiveProvider, model, error).message,
-				onReroute: (missing, chosen) => {
-					console.log(
-						`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
-					);
-					this.emitModelRouted(missing, chosen.model, chosen.provider);
-				},
-			});
+			const outcome = quickResult
+				? { ok: true as const, value: quickResult, rerouted: false, usedModel: effectiveModel }
+				: await callLocalModelWithReroute({
+						provider: effectiveProvider,
+						model: effectiveModel,
+						run: runTurn,
+						// A named provider stays put: reroute only within it (#3746).
+						pinned: this.config.providerPinned,
+						pinnedMessage: (model, error) =>
+							pinnedProviderError(effectiveProvider, model, error).message,
+						onReroute: (missing, chosen) => {
+							console.log(
+								`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
+							);
+							this.emitModelRouted(missing, chosen.model, chosen.provider);
+						},
+					});
 			if (!outcome.ok) {
 				this.abortController = null;
 				this.messageHistory.push({ role: "assistant", content: outcome.message });
@@ -1486,13 +1603,34 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// instead of throwing a raw fetch error up through the surface. A slow
 			// model is a timeout, not "not reachable" - they have different fixes.
 			this.abortController = null;
+			// A user stop (not the circuit breaker, which reports its own reason)
+			// reads as what it is, not as a model failure.
+			if (this.stopRequested && breakerStop === null) {
+				this.messageHistory.push({ role: "assistant", content: "Stopped." });
+				recordFailedRun("stopped by user");
+				return "Stopped.";
+			}
 			const endpoint = resolveTextToolEndpoint(providerName, this.config.baseUrl);
 			const failure = describeLocalTurnFailure(err, { endpoint, timeoutMs: attemptTimeoutMs });
 			this.messageHistory.push({ role: "assistant", content: failure.message });
 			recordFailedRun(failure.reason);
+			this.lastTurnFailure = {
+				reason: failure.kind === "unreachable" ? "unreachable" : "turn_failed",
+				message: failure.message,
+			};
 			return failure.message;
 		}
 		this.abortController = null;
+		// An ended turn with nothing said is an empty reply (or the harness's note for one, #3524).
+		if (
+			this.stopRequested &&
+			breakerStop === null &&
+			(agentResult.content.trim() === "" || isEmptyReplyNote(agentResult.content))
+		) {
+			this.messageHistory.push({ role: "assistant", content: "Stopped." });
+			recordFailedRun("stopped by user");
+			return "Stopped.";
+		}
 
 		// ── Law 1 (issue #2747): no fabricated completion ────────────────────
 		// The final reply is gated on the turn's tool ledger. A completion claim
@@ -1506,6 +1644,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		});
 		if (gated.violated) {
 			console.log(`[honesty] blocked fabricated completion: ${gated.reason}`);
+			this.lastTurnFailure = {
+				reason: gated.denied ? "denied" : "turn_failed",
+				message: gated.content,
+			};
 		}
 
 		// Map into the exact shape chat() normally returns: flavored prose, pushed
@@ -1535,11 +1677,28 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// models; they are packages/personality/voice.ts, appended right here.
 		// Same for a reply carrying "[harness] Not verified" lines: the tool log
 		// contradicts part of it, so no completion tagline goes on the end.
+		// A turn the loop itself says is not done (claims contradicted by the tool
+		// log, or stopped early) is a failed turn for `8gent run`'s exit code
+		// (#3899). Structured: set from the loop's result, never from reply text.
+		if (!this.lastTurnFailure && (breakerStop !== null || agentResult.unverified.length > 0)) {
+			this.lastTurnFailure = {
+				// Denied only when refusals are why nothing happened, not when the
+				// model recovered from one (8PO review, #3901).
+				reason: denialIsCause(agentResult.toolLog)
+					? "denied"
+					: breakerStop !== null
+						? "stopped_early"
+						: "unverified",
+				message: content,
+				...(agentResult.unverified.length > 0 ? { unverified: agentResult.unverified } : {}),
+			};
+		}
 		const flavoredContent =
 			gated.violated ||
 			breakerStop !== null ||
 			agentResult.unverified.length > 0 ||
-			isVerbatimScope(this.config.agentScope)
+			isVerbatimScope(this.config.agentScope) ||
+			quickResult !== null
 				? content
 				: flavorResponse(content, flavor);
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
@@ -1563,6 +1722,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				cwd: this.config.workingDirectory || process.cwd(),
 				prompt: textForAgent.slice(0, 120),
 				...(agentResult.unverified.length > 0 ? { unverified: agentResult.unverified } : {}),
+				...(quickRecord ? { quick: quickRecord } : {}),
 			});
 		}
 
@@ -1650,6 +1810,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * and baseUrl as they are when the child starts (#3710).
 	 */
 	chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+		this.lastTurnFailure = null;
 		return runAsParentSession(
 			() => ({
 				runtime: this.config.runtime,
@@ -1664,7 +1825,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.steerQueue = [];
 				this.activeTurn = turn;
 				try {
-					return await this.runTurn(userMessage, imageBase64, imageMimeType);
+					const reply = await this.runTurn(userMessage, imageBase64, imageMimeType);
+					this.reviewFinishedTurn(userMessage, reply);
+					return reply;
 				} finally {
 					if (this.activeTurn === turn) this.activeTurn = null;
 				}
@@ -1690,6 +1853,23 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		);
 	}
 
+	/**
+	 * Turn-end side reviewer (#3419): EIGHT_TURN_REVIEW=1 only. Reads the finished turn and
+	 * prints at most three scrubbed lines about what the reply left unsaid. Display only: the
+	 * reply is returned unchanged and a reviewer failure never reaches the turn.
+	 */
+	private reviewFinishedTurn(userMessage: string, reply: string): void {
+		if (!turnReviewEnabled()) return;
+		for (const line of reviewTurn({
+			prompt: userMessage,
+			toolCalls: this.turnToolLedger,
+			reply,
+			workingDirectory: this.config.workingDirectory || process.cwd(),
+		})) {
+			console.log(`[turn-review] ${line}`);
+		}
+	}
+
 	private async runTurn(
 		userMessage: string,
 		imageBase64?: string,
@@ -1699,6 +1879,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		await this.extensionsReady;
 		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
+		// A stop latched while idle belongs to no turn; it must not cancel this
+		// one (#3521). Known gap, not fixed here: an ESC between the TUI's submit
+		// and this line is also cleared, because nothing marks a turn as pending
+		// before chat() is entered.
+		this.stopRequested = false;
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
 		this.turnTask = userMessage;
@@ -1804,9 +1989,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ── Proactive Questioning Gate ─────────────────────────────────
 		// For vague/ambiguous requests (short messages without clear intent),
 		// the proactive system injects clarifying questions before execution.
+		// A prompt the quick-answer lane takes (#3411) is a precise question; the
+		// gate's heuristic flags most short prompts, and its note would make the
+		// lane ask instead of answer. Unclear prompts still get the one question.
+		const quickPrompt = quickLaneEnabled() && classifyPrompt(textForAgent) === "quick";
 		if (
 			needsClarification(textForAgent) &&
 			!imageBase64 &&
+			!quickPrompt &&
 			!isNoToolScope(this.config.agentScope)
 		) {
 			this.proactiveGatherer = createGatherer(textForAgent);
@@ -1840,8 +2030,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// pre-fetch the obvious retrieval (ast/grep/glob/vector/fileread)
 		// BEFORE the LLM turn. Model-agnostic — small local models get the
 		// same correct routing as frontier models. Skipped if the proactive
-		// gatherer already injected a clarifying question.
-		if (!this.proactiveGatherer) {
+		// gatherer already injected a clarifying question. Also skipped for a
+		// prompt the quick-answer lane takes (#3411, 8SO F1): its grep strategy
+		// runs run_command, outside the lane's read-only tools and budget.
+		if (!this.proactiveGatherer && !quickPrompt) {
 			await this.tryRunPreToolRouter(textForAgent);
 		}
 
@@ -2265,9 +2457,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 			onToolCallStart: (event) => {
 				nativeToolSteps.set(event.toolCallId, event.stepNumber);
+				// #3855: a tool is now running (or waiting on its gate); its own timeout owns that
+				// time, so the native attempt's idle gap is suspended until onToolCallFinish.
+				this.progressWatch?.hold();
 			},
 
 			onToolCallFinish: async (event) => {
+				// #3855: the tool returned; progress, re-arm the idle gap.
+				this.progressWatch?.release();
 				const resultStr =
 					typeof event.result === "string" ? event.result : JSON.stringify(event.result);
 				// The in-memory ledger and loop checks keep the real args; everything
@@ -2476,6 +2673,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			},
 
 			onStepFinish: async (event: StepFinishEvent) => {
+				this.progressWatch?.stepDone(); // #3855: a model step finished, its tools are done
 				stepCount++;
 				// Update runtime params so self_inspect shows live step count
 				Object.assign(this.runtimeParams, {
@@ -2660,7 +2858,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				}));
 
 			// Create abort controller for ESC interruption (shared across attempts)
-			this.abortController = new AbortController();
+			this.armController();
 
 			// Deterministic self-healing: walk the failover chain on ANY error
 			// (Bad Request, 5xx, network, schema, timeout). Within the same
@@ -2688,7 +2886,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// chain is exhausted the turn throws "All providers exhausted" instead
 			// of hanging for the full 30-min session watchdog. Override with
 			// EIGHT_TURN_TIMEOUT_MS.
-			const attemptTimeoutMs = resolveTurnTimeoutMs();
+			// #3855: generate() is a whole multi-step tool loop, so a flat 300 s wall
+			// clock killed healthy long turns. A native attempt now fails on NO
+			// PROGRESS (no step or tool finishing for the idle gap, default 5 min,
+			// EIGHT_STREAM_IDLE_MS) and on the outer turn budget (default 20 min,
+			// EIGHT_TURN_TIMEOUT_MS), the same policy the text-tool path uses.
+			const attemptIdleMs = resolveStreamIdleMs();
+			const attemptTimeoutMs = resolveStepCeilingMs();
 
 			outer: for (let chainStep = 0; chainStep < MAX_PROVIDERS; chainStep++) {
 				const key = `${currentEntry.provider}::${currentEntry.model}`;
@@ -2711,6 +2915,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					// TurnTimeoutError. Without this flag the catch below would treat
 					// that AbortError as a user ESC and kill the whole turn.
 					let attemptTimedOut = false;
+					// A stop during the previous attempt or its 429 backoff nulled the
+					// controller. Re-arm (honouring the latch) so this attempt is never
+					// sent with no signal, and stop before the call if it was pressed.
+					if (!this.abortController) this.armController();
+					if (this.abortController?.signal.aborted) {
+						throw Object.assign(new Error("Stopped by user"), { name: "AbortError" });
+					}
 					try {
 						// ── Hedge wrap (ISI keystone). When the hedge flag is OFF (default),
 						// this fires exactly ONE candidate (the current chain entry) and is
@@ -2749,9 +2960,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 								});
 							}
 						}
-						const hedgeOut = await withTurnTimeout(
-							() =>
-								hedge.run(
+						const hedgeOut = await withProgressTimeout(
+							(watch) => {
+								this.progressWatch = watch;
+								return hedge.run(
 									candidates,
 									async (cand, signal) => {
 										const candAgent =
@@ -2774,15 +2986,21 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 										prompt: textForAgent,
 										abortSignal: this.abortController?.signal,
 									},
-								),
-							attemptTimeoutMs,
-							// Abort the shared signal so the stalled request tears down.
-							() => {
-								attemptTimedOut = true;
-								this.abortController?.abort();
+								);
 							},
-							`${currentEntry.provider}/${currentEntry.model}`,
-						);
+							{
+								idleMs: attemptIdleMs,
+								ceilingMs: attemptTimeoutMs,
+								// Abort the shared signal so the stalled request tears down.
+								onTimeout: () => {
+									attemptTimedOut = true;
+									this.abortController?.abort();
+								},
+								label: `${currentEntry.provider}/${currentEntry.model}`,
+							},
+						).finally(() => {
+							this.progressWatch = null;
+						});
 						result = hedgeOut.result;
 						resolved = true;
 						// Update agentConfig so any downstream logic sees the provider that actually succeeded
@@ -2806,8 +3024,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						// The shared controller is now aborted (timeout tore it down).
 						// Refresh it so the next chain attempt gets a live signal instead
 						// of an already-aborted one that would fail instantly.
+						// Our own timeout aborts the controller directly, never through
+						// abort(), so it does not latch a stop; a user stop that landed
+						// in this window did, and armController() honours it.
 						if (attemptTimedOut) {
-							this.abortController = new AbortController();
+							this.armController();
 						}
 
 						const msg = String(err?.message ?? err);
@@ -2882,7 +3103,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					);
 					agentConfig.maxOutputTokens = 8192;
 					const retryAgent = createEightAgent(agentConfig);
-					this.abortController = new AbortController();
+					this.armController();
 					const messages2 = this.messageHistory
 						.filter((m) => m.role !== "system")
 						.map((m) => ({
@@ -2891,19 +3112,26 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						}));
 					let retryTimedOut = false;
 					try {
-						result = await withTurnTimeout(
-							() =>
-								retryAgent.generate({
+						result = await withProgressTimeout(
+							(watch) => {
+								this.progressWatch = watch;
+								return retryAgent.generate({
 									messages: messages2,
 									abortSignal: this.abortController?.signal,
-								}),
-							attemptTimeoutMs,
-							() => {
-								retryTimedOut = true;
-								this.abortController?.abort();
+								});
 							},
-							"retry/maxOutputTokens",
-						);
+							{
+								idleMs: attemptIdleMs,
+								ceilingMs: attemptTimeoutMs,
+								onTimeout: () => {
+									retryTimedOut = true;
+									this.abortController?.abort();
+								},
+								label: "retry/maxOutputTokens",
+							},
+						).finally(() => {
+							this.progressWatch = null;
+						});
 					} catch (retryErr: any) {
 						// Only a genuine user ESC (no timeout) re-throws. A timeout-driven
 						// abort or any other failure keeps the prior successful result.
@@ -2942,19 +3170,26 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				];
 				let verifyTimedOut = false;
 				try {
-					const verified = await withTurnTimeout(
-						() =>
-							verifyAgent.generate({
+					const verified = await withProgressTimeout(
+						(watch) => {
+							this.progressWatch = watch;
+							return verifyAgent.generate({
 								messages: verifyMessages,
 								abortSignal: this.abortController?.signal,
-							}),
-						attemptTimeoutMs,
-						() => {
-							verifyTimedOut = true;
-							this.abortController?.abort();
+							});
 						},
-						"verify-gate",
-					);
+						{
+							idleMs: attemptIdleMs,
+							ceilingMs: attemptTimeoutMs,
+							onTimeout: () => {
+								verifyTimedOut = true;
+								this.abortController?.abort();
+							},
+							label: "verify-gate",
+						},
+					).finally(() => {
+						this.progressWatch = null;
+					});
 					if (verified?.text?.trim()) {
 						result = { ...verified, text: stripDoneMarker(verified.text) };
 					}
@@ -2975,6 +3210,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			});
 			if (gatedNative.violated) {
 				console.log(`[honesty] blocked fabricated completion: ${gatedNative.reason}`);
+				this.lastTurnFailure = {
+					reason: gatedNative.denied ? "denied" : "turn_failed",
+					message: gatedNative.content,
+				};
 			}
 			// #3524: a blank reply is a failed turn, never a finished one.
 			const blankNative = gatedNative.content.trim() === "";
@@ -3162,7 +3401,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						const recovery = await autonomy.handleError(
 							err,
 							"agent-chat",
-							() => this.chat(textForAgent, imageBase64, imageMimeType),
+							() => this.runTurn(textForAgent, imageBase64, imageMimeType),
 							2, // max 2 retries in infinite mode
 						);
 						if (recovery.success) {
@@ -3310,9 +3549,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (!this.abortController) {
 			if (stop?.kind === "watchdog")
 				console.log(`\n[8gent] ${stop.reason} No model call in flight.`);
+			// The person's ESC between steps (pre-turn awaits, a timeout refresh, a retry):
+			// latch it so the next armController() in this turn aborts at once instead of
+			// the stop being lost (#3521). A harness stop with no call in flight stays unkept.
+			if (stop === undefined) {
+				this.stopRequested = true;
+				console.log("[8gent] Stop requested; the turn will stop before its next model call");
+			}
 			return;
 		}
 		if (stop && this.turnStop === null) this.turnStop = stop;
+		// Latch it too (#3521): a later step in the same turn (a 429 backoff retry, a
+		// failover attempt) arms a fresh controller through armController(), which must
+		// see the stop or the retry runs unstoppable. The latch holds until the next turn.
+		this.stopRequested = true;
 		this.abortController.abort();
 		this.abortController = null;
 		console.log(
@@ -3329,6 +3579,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	/** Why the harness stopped the last turn, or null when it ended on its own or by ESC. */
 	getTurnStop(): TurnStop | null {
 		return this.turnStop;
+	}
+
+	/**
+	 * The one place a turn's abort controller is created (#3521). If a stop was
+	 * latched earlier in this turn, the new controller is aborted before
+	 * it is returned, so the model call it guards never starts. The latch holds
+	 * until the next chat() entry, so every later arm in the same turn stops too.
+	 */
+	private armController(): AbortController {
+		const controller = new AbortController();
+		this.abortController = controller;
+		if (this.stopRequested) controller.abort();
+		return controller;
 	}
 
 	private async collectToolEvidence(event: {
@@ -3701,6 +3964,24 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 */
 	getMessageHistory(): Array<{ role: string; content: string }> {
 		return [...this.messageHistory];
+	}
+
+	/**
+	 * Replace the newest assistant message's text, only when it is still
+	 * `expectedOriginal`, the reply the caller's turn produced. Heard-only voice
+	 * memory (#3428) uses it so a cut-off spoken reply keeps only what was
+	 * played. Returns false, changing nothing, on no match or no assistant message.
+	 */
+	amendLastAssistantMessage(content: string, expectedOriginal: string): boolean {
+		for (let i = this.messageHistory.length - 1; i >= 0; i--) {
+			const msg = this.messageHistory[i];
+			if (msg?.role === "assistant") {
+				if (msg.content !== expectedOriginal) return false;
+				this.messageHistory[i] = { ...msg, content };
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

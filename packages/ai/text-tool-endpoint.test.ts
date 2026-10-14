@@ -11,38 +11,38 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
+import { resolveBaseUrl as resolveOllamaClientBaseUrl } from "../eight/clients/ollama";
 import { describeLocalTurnFailure, isLocalTurnFailureReply } from "../eight/local-turn-error";
 import { TurnTimeoutError } from "../eight/turn-timeout";
 import {
+	DEFAULT_MAX_OUTPUT_TOKENS,
+	MAX_STREAMED_LINE_BYTES,
+	MAX_STREAMED_REPLY_BYTES,
+	NATIVE_TOOL_MARKUP_REMINDER,
+	StreamedReplyError,
+	type TextToolUsage,
 	_resetQwenVariantCache,
 	_resetVisionCache,
 	answerFromRawQwen,
 	buildTextToolCall,
-	DEFAULT_MAX_OUTPUT_TOKENS,
 	extractUsage,
 	isNativeToolParserFailure,
 	isOllamaNoThink,
 	isToolsUnsupported,
-	MAX_STREAMED_LINE_BYTES,
-	MAX_STREAMED_REPLY_BYTES,
 	modelSupportsVision,
-	readStreamedChatCompletion,
-	readStreamedGenerate,
-	StreamedReplyError,
-	NATIVE_TOOL_MARKUP_REMINDER,
+	normaliseOllamaHost,
 	ollamaRootFromEndpoint,
 	qwenVariantFromModelfile,
-	normaliseOllamaHost,
+	readStreamedChatCompletion,
+	readStreamedGenerate,
 	renderQwenChatML,
 	resolveMaxOutputTokens,
 	resolveOllamaBaseUrl,
 	resolveTextToolEndpoint,
 	shouldDeclareTools,
-	type TextToolUsage,
-	toolCallsFromMessage,
 	toWireMessage,
+	toolCallsFromMessage,
 } from "./text-tool-endpoint";
-import { resolveBaseUrl as resolveOllamaClientBaseUrl } from "../eight/clients/ollama";
 import { runTextToolAgent, unknownToolResult } from "./text-tool-loop";
 
 const realFetch = globalThis.fetch;
@@ -136,9 +136,7 @@ describe("extractUsage (#2805)", () => {
 	});
 
 	it("rejects non-finite numbers", () => {
-		expect(
-			extractUsage({ usage: { prompt_tokens: Number.NaN, completion_tokens: 2 } }),
-		).toBeNull();
+		expect(extractUsage({ usage: { prompt_tokens: Number.NaN, completion_tokens: 2 } })).toBeNull();
 	});
 });
 
@@ -254,7 +252,7 @@ describe("isNativeToolParserFailure (Ollama built-in parser 500)", () => {
 
 describe("buildTextToolCall recovers from Ollama's native tool parser 500", () => {
 	it("retries once with a format reminder and returns the retried reply", async () => {
-		const seen = stubSequence([parserEof, ok("```tool_call\n{\"name\":\"run_command\"}\n```")]);
+		const seen = stubSequence([parserEof, ok('```tool_call\n{"name":"run_command"}\n```')]);
 		const call = buildTextToolCall({ provider: "ollama", model: "m" });
 		const original = [
 			{ role: "system" as const, content: "sys" },
@@ -280,9 +278,16 @@ describe("buildTextToolCall recovers from Ollama's native tool parser 500", () =
 	});
 
 	it("reports real usage from the successful retry only", async () => {
-		stubSequence([parserEof, ok("done", { prompt_tokens: 9, completion_tokens: 2, total_tokens: 11 })]);
+		stubSequence([
+			parserEof,
+			ok("done", { prompt_tokens: 9, completion_tokens: 2, total_tokens: 11 }),
+		]);
 		const seen: TextToolUsage[] = [];
-		const call = buildTextToolCall({ provider: "ollama", model: "m", onUsage: (u) => seen.push(u) });
+		const call = buildTextToolCall({
+			provider: "ollama",
+			model: "m",
+			onUsage: (u) => seen.push(u),
+		});
 		expect(await call([{ role: "user", content: "hi" }])).toBe("done");
 		expect(seen).toEqual([{ promptTokens: 9, completionTokens: 2, totalTokens: 11 }]);
 	});
@@ -360,21 +365,40 @@ describe("buildTextToolCall recovers a reply Ollama's parser silently swallowed"
 
 	it("does not retry an empty reply that generated no tokens, or other providers", async () => {
 		const noTokens = stubSequence([
-			() => Response.json({ choices: [{ message: { content: "" } }], usage: { prompt_tokens: 5, completion_tokens: 0, total_tokens: 5 } }),
+			() =>
+				Response.json({
+					choices: [{ message: { content: "" } }],
+					usage: { prompt_tokens: 5, completion_tokens: 0, total_tokens: 5 },
+				}),
 			ok("never reached"),
 		]);
-		expect(await buildTextToolCall({ provider: "ollama", model: "m" })([{ role: "user", content: "hi" }])).toBe("");
+		expect(
+			await buildTextToolCall({ provider: "ollama", model: "m" })([
+				{ role: "user", content: "hi" },
+			]),
+		).toBe("");
 		expect(noTokens.length).toBe(1);
 
 		const lm = stubSequence([swallowed, ok("never reached")]);
-		expect(await buildTextToolCall({ provider: "lmstudio", model: "m" })([{ role: "user", content: "hi" }])).toBe("");
+		expect(
+			await buildTextToolCall({ provider: "lmstudio", model: "m" })([
+				{ role: "user", content: "hi" },
+			]),
+		).toBe("");
 		expect(lm.length).toBe(1);
 	});
 
 	it("reports usage for both calls, since both really ran", async () => {
-		stubSequence([swallowed, ok("done", { prompt_tokens: 9, completion_tokens: 2, total_tokens: 11 })]);
+		stubSequence([
+			swallowed,
+			ok("done", { prompt_tokens: 9, completion_tokens: 2, total_tokens: 11 }),
+		]);
 		const usage: TextToolUsage[] = [];
-		const call = buildTextToolCall({ provider: "ollama", model: "m", onUsage: (u) => usage.push(u) });
+		const call = buildTextToolCall({
+			provider: "ollama",
+			model: "m",
+			onUsage: (u) => usage.push(u),
+		});
 		await call([{ role: "user", content: "hi" }]);
 		expect(usage).toEqual([
 			{ promptTokens: 50, completionTokens: 113, totalTokens: 163 },
@@ -433,19 +457,27 @@ describe("renderQwenChatML (mirror of Ollama's qwen3.5 / qwen3.8 renderer)", () 
 
 describe("raw-path helpers", () => {
 	it("answerFromRawQwen keeps only the text after </think>", () => {
-		expect(answerFromRawQwen("reasoning here\n</think>\n\nThe answer.<|im_end|>")).toBe("The answer.");
+		expect(answerFromRawQwen("reasoning here\n</think>\n\nThe answer.<|im_end|>")).toBe(
+			"The answer.",
+		);
 		expect(answerFromRawQwen("still thinking, cut off")).toBe("");
 	});
 
 	it("qwenVariantFromModelfile reads the RENDERER line only", () => {
-		expect(qwenVariantFromModelfile("FROM x\nTEMPLATE {{ .Prompt }}\nRENDERER qwen3.8\nPARSER qwen3.5\n")).toBe("qwen3.8");
+		expect(
+			qwenVariantFromModelfile(
+				"FROM x\nTEMPLATE {{ .Prompt }}\nRENDERER qwen3.8\nPARSER qwen3.5\n",
+			),
+		).toBe("qwen3.8");
 		expect(qwenVariantFromModelfile("FROM x\nRENDERER qwen3.5\n")).toBe("qwen3.5");
 		expect(qwenVariantFromModelfile("FROM x\nRENDERER glm47\n")).toBeNull();
 		expect(qwenVariantFromModelfile("FROM x\nPARSER qwen3.5\n")).toBeNull();
 	});
 
 	it("ollamaRootFromEndpoint strips the chat suffix in any convention", () => {
-		expect(ollamaRootFromEndpoint("http://127.0.0.1:21434/v1/chat/completions")).toBe("http://127.0.0.1:21434");
+		expect(ollamaRootFromEndpoint("http://127.0.0.1:21434/v1/chat/completions")).toBe(
+			"http://127.0.0.1:21434",
+		);
 		expect(ollamaRootFromEndpoint("http://h:11434/v1/")).toBe("http://h:11434");
 		expect(ollamaRootFromEndpoint("http://h:11434")).toBe("http://h:11434");
 	});
@@ -453,7 +485,8 @@ describe("raw-path helpers", () => {
 
 describe("buildTextToolCall recovers through Ollama's raw path", () => {
 	const QWEN38 = "FROM qwen3.8:27b-mlx\nTEMPLATE {{ .Prompt }}\nRENDERER qwen3.8\nPARSER qwen3.5\n";
-	const NATIVE_REPLY = '<tool_call>\n{"name": "run_command", "arguments": {"command": "bun test"}}\n</tool_call>';
+	const NATIVE_REPLY =
+		'<tool_call>\n{"name": "run_command", "arguments": {"command": "bun test"}}\n</tool_call>';
 	const rawOk = (response: string) => () =>
 		Response.json({ response, done: true, prompt_eval_count: 40, eval_count: 21 });
 
@@ -464,7 +497,9 @@ describe("buildTextToolCall recovers through Ollama's raw path", () => {
 		globalThis.fetch = (async (input: unknown, init?: { body?: string }) => {
 			const url = String(input);
 			if (url.endsWith("/api/show")) {
-				return modelfile === null ? new Response("nope", { status: 404 }) : Response.json({ modelfile });
+				return modelfile === null
+					? new Response("nope", { status: 404 })
+					: Response.json({ modelfile });
 			}
 			seen.push({ url, body: JSON.parse(init?.body ?? "{}") });
 			const next = responses[Math.min(i, responses.length - 1)];
@@ -475,7 +510,10 @@ describe("buildTextToolCall recovers through Ollama's raw path", () => {
 	}
 
 	it("on a parser 500, re-requests the SAME conversation raw and returns the model's text untouched", async () => {
-		const seen = stubRouted([parserEof, rawOk(`I will run the tests.\n</think>\n\n${NATIVE_REPLY}`)], QWEN38);
+		const seen = stubRouted(
+			[parserEof, rawOk(`I will run the tests.\n</think>\n\n${NATIVE_REPLY}`)],
+			QWEN38,
+		);
 		const usage: TextToolUsage[] = [];
 		const call = buildTextToolCall({
 			provider: "ollama",
@@ -505,7 +543,10 @@ describe("buildTextToolCall recovers through Ollama's raw path", () => {
 
 	it("also recovers a reply the parser silently swallowed", async () => {
 		const swallowed = () =>
-			Response.json({ choices: [{ message: { content: "" } }], usage: { prompt_tokens: 5, completion_tokens: 30, total_tokens: 35 } });
+			Response.json({
+				choices: [{ message: { content: "" } }],
+				usage: { prompt_tokens: 5, completion_tokens: 30, total_tokens: 35 },
+			});
 		const seen = stubRouted([swallowed, rawOk("ok\n</think>\n\nAll tests pass.")], QWEN38);
 		const call = buildTextToolCall({ provider: "ollama", model: "m" });
 		expect(await call([{ role: "user", content: "hi" }])).toBe("All tests pass.");
@@ -514,7 +555,11 @@ describe("buildTextToolCall recovers through Ollama's raw path", () => {
 
 	it("falls back to the one reminder retry when the raw request fails", async () => {
 		const seen = stubRouted(
-			[parserEof, () => new Response("boom", { status: 500 }), ok("```tool_call\n{\"name\":\"x\"}\n```")],
+			[
+				parserEof,
+				() => new Response("boom", { status: 500 }),
+				ok('```tool_call\n{"name":"x"}\n```'),
+			],
 			QWEN38,
 		);
 		const call = buildTextToolCall({ provider: "ollama", model: "m" });
@@ -530,7 +575,10 @@ describe("buildTextToolCall recovers through Ollama's raw path", () => {
 	});
 
 	it("names every step it tried when all recoveries fail, and never returns empty", async () => {
-		const seen = stubRouted([parserEof, rawOk("thinking forever, never closed"), parserEof], QWEN38);
+		const seen = stubRouted(
+			[parserEof, rawOk("thinking forever, never closed"), parserEof],
+			QWEN38,
+		);
 		const call = buildTextToolCall({ provider: "ollama", model: "m" });
 		const err = (await call([{ role: "user", content: "hi" }]).catch((e: unknown) => e)) as Error;
 		expect(seen.length).toBe(3);
@@ -553,7 +601,11 @@ describe("a text-tool turn hit by the Ollama parser 500 ends with a reply, never
 	const QWEN38 = "RENDERER qwen3.8\n";
 	const tools = [
 		{
-			spec: { name: "run_command", description: "run", parameters: { type: "object", properties: {} } },
+			spec: {
+				name: "run_command",
+				description: "run",
+				parameters: { type: "object", properties: {} },
+			},
 			run: async (args: Record<string, unknown>) => `ran ${String(args.command)}: 5 pass`,
 		},
 	];
@@ -578,7 +630,7 @@ describe("a text-tool turn hit by the Ollama parser 500 ends with a reply, never
 			() =>
 				Response.json({
 					response:
-						'run them\n</think>\n\n<tool_call>\n<function=run_command>\n<parameter=command>\nbun test\n</parameter>\n</function>\n</tool_call>',
+						"run them\n</think>\n\n<tool_call>\n<function=run_command>\n<parameter=command>\nbun test\n</parameter>\n</function>\n</tool_call>",
 				}),
 			() => ok("DONE: All 5 tests pass; the off-by-one in paginate was the bug.")(),
 		]);
@@ -589,9 +641,15 @@ describe("a text-tool turn hit by the Ollama parser 500 ends with a reply, never
 			call,
 			maxRounds: 4,
 		});
-		expect(result.toolLog.map((t) => [t.name, t.args])).toEqual([["run_command", { command: "bun test" }]]);
+		expect(result.toolLog.map((t) => [t.name, t.args])).toEqual([
+			["run_command", { command: "bun test" }],
+		]);
 		expect(result.content).toContain("All 5 tests pass");
-		expect(urls.slice(0, 3)).toEqual(["/v1/chat/completions", "/api/generate", "/v1/chat/completions"]);
+		expect(urls.slice(0, 3)).toEqual([
+			"/v1/chat/completions",
+			"/api/generate",
+			"/v1/chat/completions",
+		]);
 	});
 
 	it("unrecoverable: the turn rejects with a clear message the agent shows, never an empty reply", async () => {
@@ -617,26 +675,27 @@ describe("a text-tool turn hit by the Ollama parser 500 ends with a reply, never
 // from `content` and returns it in `message.tool_calls` (only when the request
 // declared the tool; without `tools` it is dropped). Captured shape from
 // qwen3.8:27b-mlx on Ollama 0.34.4, 2026-09-30.
-const structuredReply = (content: string, calls: Array<{ name: string; arguments: unknown }>) => () =>
-	Response.json({
-		choices: [
-			{
-				index: 0,
-				message: {
-					role: "assistant",
-					content,
-					tool_calls: calls.map((c, i) => ({
-						id: `call_${i}`,
-						index: i,
-						type: "function",
-						function: { name: c.name, arguments: c.arguments },
-					})),
+const structuredReply =
+	(content: string, calls: Array<{ name: string; arguments: unknown }>) => () =>
+		Response.json({
+			choices: [
+				{
+					index: 0,
+					message: {
+						role: "assistant",
+						content,
+						tool_calls: calls.map((c, i) => ({
+							id: `call_${i}`,
+							index: i,
+							type: "function",
+							function: { name: c.name, arguments: c.arguments },
+						})),
+					},
+					finish_reason: "tool_calls",
 				},
-				finish_reason: "tool_calls",
-			},
-		],
-		usage: { prompt_tokens: 462, completion_tokens: 51, total_tokens: 513 },
-	});
+			],
+			usage: { prompt_tokens: 462, completion_tokens: 51, total_tokens: 513 },
+		});
 
 describe("toolCallsFromMessage (Ollama/OpenAI message.tool_calls)", () => {
 	it("reads string and object arguments, in order", () => {
@@ -681,7 +740,12 @@ describe("shouldDeclareTools / isToolsUnsupported", () => {
 		expect(shouldDeclareTools("ollama", [spec], { EIGHT_TEXT_TOOLS_DECLARE: "0" })).toBe(false);
 	});
 	it("recognises Ollama's no-tool-support 400 only", () => {
-		expect(isToolsUnsupported(400, '{"error":"registry.ollama.ai/library/gemma:2b does not support tools"}')).toBe(true);
+		expect(
+			isToolsUnsupported(
+				400,
+				'{"error":"registry.ollama.ai/library/gemma:2b does not support tools"}',
+			),
+		).toBe(true);
 		expect(isToolsUnsupported(500, "does not support tools")).toBe(false);
 		expect(isToolsUnsupported(400, '{"error":"bad request"}')).toBe(false);
 	});
@@ -689,12 +753,18 @@ describe("shouldDeclareTools / isToolsUnsupported", () => {
 
 describe("buildTextToolCall returns structured tool_calls instead of losing them", () => {
 	const specs = [
-		{ name: "read_file", description: "read", parameters: { type: "object", properties: { path: { type: "string" } } } },
+		{
+			name: "read_file",
+			description: "read",
+			parameters: { type: "object", properties: { path: { type: "string" } } },
+		},
 	];
 
 	it("declares the registered tools to ollama and returns prose plus the structured call", async () => {
 		const seen = stubSequence([
-			structuredReply("Let me check the root README.", [{ name: "read_file", arguments: '{"path":"README.md"}' }]),
+			structuredReply("Let me check the root README.", [
+				{ name: "read_file", arguments: '{"path":"README.md"}' },
+			]),
 		]);
 		const call = buildTextToolCall({ provider: "ollama", model: "qwen3.8:27b-mlx", tools: specs });
 		const reply = await call([{ role: "user", content: "read it" }]);
@@ -707,10 +777,15 @@ describe("buildTextToolCall returns structured tool_calls instead of losing them
 	});
 
 	it("an empty content with tool_calls is a call, not a swallowed reply (no recovery request)", async () => {
-		const seen = stubSequence([structuredReply("", [{ name: "read_file", arguments: { path: "a.ts" } }])]);
+		const seen = stubSequence([
+			structuredReply("", [{ name: "read_file", arguments: { path: "a.ts" } }]),
+		]);
 		const call = buildTextToolCall({ provider: "ollama", model: "m", tools: specs });
 		const reply = await call([{ role: "user", content: "x" }]);
-		expect(reply).toEqual({ content: "", toolCalls: [{ name: "read_file", arguments: { path: "a.ts" } }] });
+		expect(reply).toEqual({
+			content: "",
+			toolCalls: [{ name: "read_file", arguments: { path: "a.ts" } }],
+		});
 		expect(seen.length).toBe(1);
 	});
 
@@ -723,7 +798,11 @@ describe("buildTextToolCall returns structured tool_calls instead of losing them
 
 	it("resends without tools when the model does not support them, and stops declaring", async () => {
 		const seen = stubSequence([
-			() => Response.json({ error: "registry.ollama.ai/library/g:2b does not support tools" }, { status: 400 }),
+			() =>
+				Response.json(
+					{ error: "registry.ollama.ai/library/g:2b does not support tools" },
+					{ status: 400 },
+				),
 			ok("first"),
 			ok("second"),
 		]);
@@ -738,7 +817,11 @@ describe("a text-tool turn whose call came back as structured tool_calls runs it
 	const ran: string[] = [];
 	const tools = [
 		{
-			spec: { name: "read_file", description: "read", parameters: { type: "object", properties: {} } },
+			spec: {
+				name: "read_file",
+				description: "read",
+				parameters: { type: "object", properties: {} },
+			},
 			run: async (args: Record<string, unknown>) => {
 				ran.push(String(args.path));
 				return `# contents of ${String(args.path)}`;
@@ -754,7 +837,11 @@ describe("a text-tool turn whose call came back as structured tool_calls runs it
 			]),
 			ok("DONE: The README has a Deck section."),
 		]);
-		const call = buildTextToolCall({ provider: "ollama", model: "qwen3.8:27b-mlx", tools: tools.map((t) => t.spec) });
+		const call = buildTextToolCall({
+			provider: "ollama",
+			model: "qwen3.8:27b-mlx",
+			tools: tools.map((t) => t.spec),
+		});
 		const result = await runTextToolAgent({
 			messages: [{ role: "user", content: "check the README" }],
 			tools,
@@ -774,7 +861,11 @@ describe("a text-tool turn whose call came back as structured tool_calls runs it
 			structuredReply("On it.", [{ name: "delete_everything", arguments: "{}" }]),
 			ok("DONE: nothing to do."),
 		]);
-		const call = buildTextToolCall({ provider: "ollama", model: "m", tools: tools.map((t) => t.spec) });
+		const call = buildTextToolCall({
+			provider: "ollama",
+			model: "m",
+			tools: tools.map((t) => t.spec),
+		});
 		const result = await runTextToolAgent({
 			messages: [{ role: "user", content: "x" }],
 			tools,
@@ -783,7 +874,11 @@ describe("a text-tool turn whose call came back as structured tool_calls runs it
 		});
 		expect(ran).toEqual([]);
 		expect(result.toolLog).toEqual([
-			{ name: "delete_everything", args: {}, result: unknownToolResult("delete_everything", ["read_file"]) },
+			{
+				name: "delete_everything",
+				args: {},
+				result: unknownToolResult("delete_everything", ["read_file"]),
+			},
 		]);
 		const fedBack = JSON.stringify(seen[1]);
 		expect(fedBack).toContain('no tool named \\"delete_everything\\"');
@@ -811,7 +906,11 @@ describe("a text-tool turn whose call came back as structured tool_calls runs it
 			spawn,
 			spawn,
 		]);
-		const call = buildTextToolCall({ provider: "ollama", model: "qwen3.8:27b-mlx", tools: tools.map((t) => t.spec) });
+		const call = buildTextToolCall({
+			provider: "ollama",
+			model: "qwen3.8:27b-mlx",
+			tools: tools.map((t) => t.spec),
+		});
 		const result = await runTextToolAgent({
 			messages: [{ role: "user", content: "Fix it: call spawn_agent with model llama3.2:3b." }],
 			tools,
@@ -974,7 +1073,9 @@ describe("Ollama base URL honours OLLAMA_BASE_URL / OLLAMA_HOST (#3076)", () => 
 			expect(resolveTextToolEndpoint("ollama")).toBe("http://localhost:11434/v1/chat/completions");
 		});
 		withEnv({ OLLAMA_HOST: "b:2" }, () => {
-			expect(resolveTextToolEndpoint("ollama", "http://pinned:9")).toBe("http://pinned:9/v1/chat/completions");
+			expect(resolveTextToolEndpoint("ollama", "http://pinned:9")).toBe(
+				"http://pinned:9/v1/chat/completions",
+			);
 			// Other providers are untouched by Ollama's variables.
 			expect(resolveTextToolEndpoint("lmstudio")).toBe("http://localhost:1234/v1/chat/completions");
 		});
@@ -1043,13 +1144,34 @@ describe("EIGHT_OLLAMA_NO_THINK turns thinking off per Ollama model", () => {
 		process.env.EIGHT_OLLAMA_NO_THINK = "qwen3.5:9b";
 		try {
 			const bodies = captureBodies();
-			await buildTextToolCall({ provider: "ollama", model: "qwen3.5:9b" })([{ role: "user", content: "hi" }]);
-			await buildTextToolCall({ provider: "ollama", model: "qwen3.8:27b-mlx" })([{ role: "user", content: "hi" }]);
+			await buildTextToolCall({ provider: "ollama", model: "qwen3.5:9b" })([
+				{ role: "user", content: "hi" },
+			]);
+			await buildTextToolCall({ provider: "ollama", model: "qwen3.8:27b-mlx" })([
+				{ role: "user", content: "hi" },
+			]);
 			expect(bodies[0].reasoning_effort).toBe("none");
 			expect("reasoning_effort" in bodies[1]).toBe(false);
 		} finally {
 			if (prev === undefined) Reflect.deleteProperty(process.env, "EIGHT_OLLAMA_NO_THINK");
 			else process.env.EIGHT_OLLAMA_NO_THINK = prev;
+		}
+	});
+
+	it("noThink turns thinking off for that call function only, and only on Ollama (#3411)", async () => {
+		const prev = process.env.EIGHT_OLLAMA_NO_THINK;
+		Reflect.deleteProperty(process.env, "EIGHT_OLLAMA_NO_THINK");
+		try {
+			const bodies = captureBodies();
+			const hi = [{ role: "user" as const, content: "hi" }];
+			await buildTextToolCall({ provider: "ollama", model: "qwen3.5:9b", noThink: true })(hi);
+			await buildTextToolCall({ provider: "ollama", model: "qwen3.5:9b" })(hi);
+			await buildTextToolCall({ provider: "lmstudio", model: "qwen3.5:9b", noThink: true })(hi);
+			expect(bodies[0].reasoning_effort).toBe("none");
+			expect("reasoning_effort" in bodies[1]).toBe(false);
+			expect("reasoning_effort" in bodies[2]).toBe(false);
+		} finally {
+			if (prev !== undefined) process.env.EIGHT_OLLAMA_NO_THINK = prev;
 		}
 	});
 
@@ -1068,7 +1190,10 @@ describe("images on the wire (#3641)", () => {
 
 	it("toWireMessage keeps a text message a plain string", () => {
 		expect(toWireMessage({ role: "user", content: "hi" })).toEqual({ role: "user", content: "hi" });
-		expect(toWireMessage({ role: "user", content: "hi", images: [] })).toEqual({ role: "user", content: "hi" });
+		expect(toWireMessage({ role: "user", content: "hi", images: [] })).toEqual({
+			role: "user",
+			content: "hi",
+		});
 	});
 
 	it("toWireMessage turns images into text plus image_url parts", () => {
@@ -1088,7 +1213,8 @@ describe("images on the wire (#3641)", () => {
 			{ role: "system", content: "sys" },
 			{ role: "user", content: "Where do I click?", images: [URL1] },
 		]);
-		const messages = (seen[0] as unknown as { messages: Array<{ role: string; content: unknown }> }).messages;
+		const messages = (seen[0] as unknown as { messages: Array<{ role: string; content: unknown }> })
+			.messages;
 		expect(messages[0]).toEqual({ role: "system", content: "sys" });
 		expect(messages[1]).toEqual({
 			role: "user",
@@ -1118,7 +1244,8 @@ describe("modelSupportsVision (#3641)", () => {
 	it("ollama: true when /api/show lists vision, false when it does not, one probe per model", async () => {
 		const asked = stubShow((model) =>
 			Response.json({
-				capabilities: model === "qwen3.5:9b" ? ["completion", "vision", "tools"] : ["completion", "tools"],
+				capabilities:
+					model === "qwen3.5:9b" ? ["completion", "vision", "tools"] : ["completion", "tools"],
 			}),
 		);
 		expect(await modelSupportsVision({ provider: "ollama", model: "qwen3.5:9b" })).toBe(true);
@@ -1143,7 +1270,11 @@ describe("modelSupportsVision (#3641)", () => {
 			return Response.json({ capabilities: ["completion", "vision"] });
 		}) as unknown as typeof fetch;
 		expect(
-			await modelSupportsVision({ provider: "ollama", model: "m", baseUrl: "http://127.0.0.1:11435/v1" }),
+			await modelSupportsVision({
+				provider: "ollama",
+				model: "m",
+				baseUrl: "http://127.0.0.1:11435/v1",
+			}),
 		).toBe(true);
 		expect(url).toBe("http://127.0.0.1:11435/api/show");
 	});
@@ -1152,7 +1283,9 @@ describe("modelSupportsVision (#3641)", () => {
 		globalThis.fetch = (async () => {
 			throw new Error("no network expected");
 		}) as unknown as typeof fetch;
-		expect(await modelSupportsVision({ provider: "lmstudio", model: "qwen2.5-vl-7b-instruct" })).toBe(true);
+		expect(
+			await modelSupportsVision({ provider: "lmstudio", model: "qwen2.5-vl-7b-instruct" }),
+		).toBe(true);
 		expect(await modelSupportsVision({ provider: "lmstudio", model: "qwen3-14b" })).toBe(false);
 	});
 });

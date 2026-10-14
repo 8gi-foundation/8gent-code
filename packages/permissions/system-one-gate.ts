@@ -308,6 +308,9 @@ async function thresholdsFor(
 	decider: Decider,
 ): Promise<{ opts: BashGuardOptions; label: SystemOneThresholds }> {
 	const backend = await decider.backend();
+	// The hosted judge sends the command off the machine: never a safety judge here (#3652).
+	if (backend.name === "jev")
+		throw new Error("the hosted jev judge is not allowed for the System One gate");
 	const key = JSON.stringify([backend.name, backend.model]);
 	const hit = thresholdCache.get(key);
 	if (hit) return hit;
@@ -824,6 +827,26 @@ export async function systemOneGate(
 						backend: "allowlist",
 						model: "allowlist",
 						reason: line.reason,
+					},
+				};
+			}
+		} catch {
+			// No opinion: fall through to the judge.
+		}
+		// A plain ffmpeg call that builds one new media file from the
+		// workspace's own files (L6 media). Default mode only.
+		try {
+			const { ffmpegInProject } = await import("./s1-ffmpeg-in-project");
+			const f = mode === "default" ? ffmpegInProject(command, cwd) : { ok: false as const };
+			if (f.ok) {
+				return {
+					run: true,
+					guard: {
+						verdict: "allow",
+						pYes: Number.NaN,
+						backend: "allowlist",
+						model: "allowlist",
+						reason: f.reason,
 					},
 				};
 			}

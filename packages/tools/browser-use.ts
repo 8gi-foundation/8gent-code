@@ -8,6 +8,7 @@
  */
 
 import { execSync } from "node:child_process";
+import { buildChildEnv } from "../eight/harness/child-env";
 
 const BROWSER_USE = "browser-use";
 const DEFAULT_TIMEOUT = 30_000;
@@ -32,7 +33,7 @@ function run(args: string[], timeout = DEFAULT_TIMEOUT): string {
 				timeout,
 				encoding: "utf-8",
 				stdio: ["pipe", "pipe", "pipe"],
-				env: { ...process.env },
+				env: buildChildEnv() as NodeJS.ProcessEnv,
 			},
 		);
 		return result.trim();

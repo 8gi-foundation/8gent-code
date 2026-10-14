@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-E8610A?style=for-the-badge&labelColor=1A1612" alt="Apache 2.0 License" /></a>
-  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.18.0-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.18.0" /></a>
+  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.20.0-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.20.0" /></a>
   <a href="https://eight-vessel.fly.dev"><img src="https://img.shields.io/badge/daemon-Fly.io_Amsterdam-E8610A?style=for-the-badge&labelColor=1A1612" alt="Daemon" /></a>
 </p>
 

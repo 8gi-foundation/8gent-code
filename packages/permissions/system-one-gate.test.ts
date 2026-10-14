@@ -1124,3 +1124,41 @@ describe("Guarded with no checker installed asks the person (#3193)", () => {
 		expect(notes).toEqual([]);
 	});
 });
+
+describe("the hosted jev judge is never the System One gate's judge (#3652)", () => {
+	class JevNamedBackend extends StubBackend {
+		constructor() {
+			super();
+			(this as { name: string }).name = "jev";
+		}
+	}
+
+	test("a decider whose backend is named jev is refused in strict mode: it is never asked, the command does not run", async () => {
+		const jev = new JevNamedBackend();
+		installStub({ decider: () => createDecider({ backend: jev, cacheSize: 0 }) });
+		const res = await systemOneGate("echo hello-jev", {
+			[SYSTEM_ONE_FLAG]: "1",
+			[SYSTEM_ONE_ALLOWLIST_FLAG]: "0",
+		});
+		expect(jev.asks).toHaveLength(0);
+		expect(res.run).toBe(false);
+	});
+
+	test("in default mode a jev-named backend is refused too: rules only, never asked", async () => {
+		const jev = new JevNamedBackend();
+		installStub({ decider: () => createDecider({ backend: jev, cacheSize: 0 }) });
+		const res = await systemOneGate("echo hello-jev", { [SYSTEM_ONE_ALLOWLIST_FLAG]: "0" });
+		expect(jev.asks).toHaveLength(0);
+		expect(res.guard?.backend).not.toBe("jev");
+	});
+
+	test("the same command is judged normally by a backend with another name", async () => {
+		installStub();
+		const res = await systemOneGate("echo hello-jev", {
+			[SYSTEM_ONE_FLAG]: "1",
+			[SYSTEM_ONE_ALLOWLIST_FLAG]: "0",
+		});
+		expect(stub.asks.length).toBeGreaterThan(0);
+		expect(res.guard?.backend).toBe("stub");
+	});
+});

@@ -839,6 +839,14 @@ export function buildTextToolCall(opts: {
 	 */
 	maxTokens?: number;
 	/**
+	 * Turn thinking off for this call function only (the quick-answer lane,
+	 * #3411). Ollama: the same switch as EIGHT_OLLAMA_NO_THINK, i.e.
+	 * `reasoning_effort: "none"` (Ollama 0.35.0 /v1 ignores `think: false`;
+	 * qwen3.5:9b went from 503 reasoning chars, 3.3 s, to 0 chars, 0.4 s).
+	 * Other providers: no known switch on this endpoint, so nothing is sent.
+	 */
+	noThink?: boolean;
+	/**
 	 * Stream the reply and fail after this many ms with no output (#3553, on by
 	 * default since #3657). Default: resolveStreamIdleMs(), so
 	 * EIGHT_STREAM_IDLE_MS governs; null is off (wall time only).
@@ -874,7 +882,9 @@ export function buildTextToolCall(opts: {
 	const isJsonReply = (res: Response) =>
 		(res.headers.get("content-type") ?? "").toLowerCase().includes("application/json");
 	const label = `${opts.provider}/${opts.model}`;
-	const noThink = isOllamaNoThink(opts.provider, opts.model);
+	const noThink =
+		(opts.noThink === true && opts.provider === "ollama") ||
+		isOllamaNoThink(opts.provider, opts.model);
 	let declareTools = shouldDeclareTools(opts.provider, opts.tools);
 	const declared = (opts.tools ?? []).map((t) => ({
 		type: "function",

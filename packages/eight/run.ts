@@ -24,7 +24,6 @@ import { resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
 import { extensionsWanted } from "../extensions/index";
 import type { TurnStop } from "./agent";
-import { isLocalTurnFailureReply } from "./local-turn-error";
 import type { RunEvent, RunStopInfo } from "./run-events";
 import { type RunSessionStore, defaultRunSessionStore } from "./run-session";
 import { scrub } from "./secret-scanner";
@@ -889,6 +888,8 @@ export async function runRunCommand(
 		if (check.status === "fail") exitCode = 1;
 		if (notice) process.stderr.write(`${notice}\n`);
 
+		// The harness sets this flag; model text cannot (#3899).
+		const turnFailure = agent.getLastTurnFailure();
 		const stop = firstStop ?? agent.getTurnStop();
 		if (stop) {
 			// #4172: the circuit breaker or the session watchdog stopped the run, so the
@@ -909,14 +910,19 @@ export async function runRunCommand(
 				process.stdout.write(`${finalText}\n`);
 				process.stderr.write(`[run] stopped: ${stop.reason}\n`);
 			}
-		} else if (isEmptyReplyNote(finalText) || isLocalTurnFailureReply(finalText)) {
-			// #3524: a blank model reply, or an unreachable or timed-out local model,
-			// is not a finished turn, so a script must not read it as success.
-			exitCode = 1;
+		} else if (isEmptyReplyNote(finalText) || turnFailure) {
+			// #3524: a blank model reply is not a finished turn, so a script must not read it
+			// as success. Same for a turn the harness flagged as failed (an unreachable or
+			// timed-out local model, a model error, an honesty-gate refusal): the agent returns
+			// those as text, so the flag, which model text cannot set, gives the exit code (#3899).
+			// Exit 2 = a permission or sandbox refusal; 1 = everything else (#3899).
+			exitCode = turnFailure?.reason === "denied" ? 2 : 1;
 			if (isStreamJson) {
 				emit({
 					type: "result",
 					subtype: "error",
+					reason: turnFailure?.reason ?? "turn_failed",
+					...(turnFailure?.unverified?.length ? { unverified: turnFailure.unverified } : {}),
 					session_id: sessionId,
 					ended_at: new Date().toISOString(),
 					error: finalText,

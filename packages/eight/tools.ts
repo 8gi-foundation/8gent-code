@@ -233,6 +233,13 @@ import { ArtifactStore } from "./artifact-store";
 import { formatCommandOutput } from "./command-output";
 import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatEditNotFound } from "./edit-hint";
+import {
+	ENV_PASS_HINT,
+	GH_ENV_NAMES,
+	GIT_ENV_NAMES,
+	buildChildEnv,
+	withheldAny,
+} from "./harness/child-env";
 import { layoutMeasureLine } from "./layout-measure";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { RetiredFacts } from "./retired-facts";
@@ -565,7 +572,10 @@ function spawnGit(args: string[], cwd: string): Promise<string> {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: process.platform !== "win32",
-			env: { ...process.env, ...GIT_NON_INTERACTIVE_ENV },
+			env: {
+				...(buildChildEnv(process.env, GIT_ENV_NAMES) as NodeJS.ProcessEnv),
+				...GIT_NON_INTERACTIVE_ENV,
+			},
 		});
 		let stdout = "";
 		let stderr = "";
@@ -906,6 +916,8 @@ export class ToolExecutor {
 	private visionCapable: () => Promise<boolean>;
 	/** Finds the vision model describe_image calls (#3642). Injectable for tests. */
 	private resolveVisionModel: () => Promise<VisionRouterResult>;
+	/** The minimal-environment hint is appended once per session (see runCommand). */
+	private envHintShown = false;
 
 	constructor(
 		workingDirectory: string = process.cwd(),
@@ -1351,7 +1363,7 @@ export class ToolExecutor {
 				function: {
 					name: "run_command",
 					description:
-						"[SHELL] Executes a shell command and returns stdout/stderr. Use for: running tests, installing packages, checking versions, building projects, file operations (mkdir, mv, cp). Pipes (|) and redirects (>) are allowed. Command chaining (;, &&, ||) and background execution (&) are blocked for safety - use separate calls instead. If a command is blocked by permissions, simplify it or split into multiple calls.",
+						"[SHELL] Executes a shell command and returns stdout/stderr. Use for: running tests, installing packages, checking versions, building projects, file operations (mkdir, mv, cp). Pipes (|) and redirects (>) are allowed. Command chaining (;, &&, ||) and background execution (&) are blocked for safety - use separate calls instead. If a command is blocked by permissions, simplify it or split into multiple calls. Commands run with a minimal environment (PATH, HOME, locale, toolchain paths); credentials are not inherited. If one is needed, tell the user to export EIGHT_SHELL_ENV_PASS=NAME in the shell that launches 8gent (a keys file cannot set it). For git push over SSH typed here, that is EIGHT_SHELL_ENV_PASS=SSH_AUTH_SOCK; the git tools keep SSH working without it.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -2486,14 +2498,25 @@ export class ToolExecutor {
 			case "gh_issue_list":
 				return this.runCommand("gh issue list");
 			case "post_message": {
-				// Pre-send check (#4191): the task's countable rules, counted in the draft with code.
-				const presend = this.presendCheck(typeof args.text === "string" ? args.text : "");
-				if (presend) return presend;
 				// Policy gate, then the person, inside postMessage; never a shell string.
+				let text = typeof args.text === "string" ? args.text : "";
+				// text_file (#3838): a drafted message in the project, read here so no
+				// shell substitution is needed. safePath keeps it inside the workspace.
+				if (text === "" && typeof args.text_file === "string" && args.text_file !== "") {
+					const file = safePath(args.text_file, this.workingDirectory, "read");
+					if (!fs.existsSync(file)) return `[ERROR] text_file not found: ${args.text_file}`;
+					if (fs.statSync(file).size > 64 * 1024)
+						return "[ERROR] text_file is over 64 KB; a message is at most 4096 characters.";
+					text = fs.readFileSync(file, "utf8").replace(/\s+$/, "");
+				}
+				// Pre-send check (#4191): the task's countable rules, counted in the draft with code
+				// (after text_file is read, so a drafted file is counted too).
+				const presend = this.presendCheck(text);
+				if (presend) return presend;
 				return postMessage(
 					{
 						chat: String(args.chat ?? ""),
-						text: typeof args.text === "string" ? args.text : "",
+						text,
 						voice: typeof args.voice === "string" && args.voice ? args.voice : undefined,
 					},
 					postMessageDeps(this.agentId, this.postSession),
@@ -3445,7 +3468,8 @@ export class ToolExecutor {
 				processGroup: true,
 				windowsShell,
 				env: {
-					...((env as NodeJS.ProcessEnv | undefined) ?? process.env),
+					// The done gate hands in an already scrubbed env; everything else gets the minimal one.
+					...((env as NodeJS.ProcessEnv | undefined) ?? (buildChildEnv() as NodeJS.ProcessEnv)),
 					...SPAWN_NON_INTERACTIVE_ENV,
 				},
 			});
@@ -3492,7 +3516,12 @@ export class ToolExecutor {
 					workingDirectory: dir,
 				});
 
-				const output = formatCommandOutput(code, stdout, stderr, finalCommand, this.workingDirectory);
+				let output = formatCommandOutput(code, stdout, stderr, finalCommand, this.workingDirectory);
+				// Once per session, on a failure, say the environment is minimal (no names or values).
+				if (code !== 0 && !this.envHintShown && withheldAny()) {
+					this.envHintShown = true;
+					output = `${output}\n${ENV_PASS_HINT}`;
+				}
 				// Report images the command drew, and any cut off at an edge (#3580).
 				withImagesWritten(output, dir, startTime).then(safeResolve, () => safeResolve(output));
 			});
@@ -3520,7 +3549,10 @@ export class ToolExecutor {
 		return new Promise((resolve) => {
 			let stdout = "";
 			let stderr = "";
-			const proc = spawn(cmd, args, { cwd: this.workingDirectory });
+			const proc = spawn(cmd, args, {
+				cwd: this.workingDirectory,
+				env: buildChildEnv(process.env, GH_ENV_NAMES) as NodeJS.ProcessEnv,
+			});
 			proc.stdout?.on("data", (d: Buffer) => {
 				stdout += d.toString();
 			});

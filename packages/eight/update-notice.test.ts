@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { FetchLike } from "./self-update";
 import {
 	CHECK_INTERVAL_MS,
 	type NoticeDeps,
@@ -138,7 +139,13 @@ describe("update notice", () => {
 	test("real wiring writes the state file under the 8gent data dir and is silent when the checkout cannot be found", async () => {
 		const home = mkdtempSync(join(tmpdir(), "notice-home-"));
 		try {
+			// Hermetic: a nonexistent path resolves to the npm channel, which would read the
+			// live registry. Inject a fetch that fails offline so no test touches the network.
+			const offline = async () => {
+				throw new Error("offline");
+			};
 			const w = realNoticeDeps({
+				fetchImpl: offline as unknown as FetchLike,
 				currentVersion: "0.18.0",
 				modulePath: "file:///nonexistent-root/8gent-code/bin/8gent.ts",
 				embedded: false,

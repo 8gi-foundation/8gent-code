@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { childInvocation, materializeTui } from "../apps/tui/src/lib/embedded-bundle";
 import { safeBunFlags } from "../packages/core/bun-flags";
 
-const VERSION = "0.18.0";
+const VERSION = "0.20.0";
 const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts
 
 // Two different "here" directories matter, and conflating them is what broke
@@ -2916,7 +2916,8 @@ async function doctorCommand() {
 	// packages/self-autonomy/onboarding.ts, packages/settings/store.ts. These checks
 	// only read; they never create these files. (The NemoClaw check below still
 	// writes ~/.8gent/policy-checksum on first run, tracked in #3344.)
-	const eightDir = path.join(process.env.HOME || require("node:os").homedir(), ".8gent");
+	const { resolveHome } = await import("../packages/core/home.ts");
+	const eightDir = path.join(resolveHome(), ".8gent");
 	const dbPath = path.join(process.env.EIGHT_DATA_DIR || eightDir, "memory", "memory.db");
 	console.log(
 		fs.existsSync(dbPath)

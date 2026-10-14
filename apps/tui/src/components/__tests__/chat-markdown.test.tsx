@@ -26,7 +26,14 @@ const reply =
 function renderReply(content: string, width = COLS): string[] {
 	const messages: Message[] = [{ id: "a1", role: "assistant", content, timestamp: at }];
 	const out = renderToString(
-		<MessageList messages={messages} contentWidth={width} animateTyping={false} showAnimations={false} turnRunning={false} rowBudget={200} />,
+		<MessageList
+			messages={messages}
+			contentWidth={width}
+			animateTyping={false}
+			showAnimations={false}
+			turnRunning={false}
+			rowBudget={200}
+		/>,
 		{ columns: width },
 	);
 	return out.split("\n");
@@ -50,7 +57,12 @@ describe("chat markdown at 80 columns", () => {
 		expect(first).toBeGreaterThan(-1);
 		const bulletCol = lines[first].indexOf("•");
 		const cont = lines[first + 1];
-		expect(cont.slice(0, bulletCol + 2).trim().replace(/[│|]/g, "")).toBe("");
+		expect(
+			cont
+				.slice(0, bulletCol + 2)
+				.trim()
+				.replace(/[│|]/g, ""),
+		).toBe("");
 		expect(cont[bulletCol + 2]).not.toBe(" ");
 		expect(text).toContain("1. Numbered steps");
 		// The nested item sits two columns further in.
@@ -80,4 +92,32 @@ describe("chat markdown at 80 columns", () => {
 			expect(drawn.length).toBe(est - 1);
 		}
 	});
+});
+
+// #3536: the estimate counted code points, but a CJK ideograph or an emoji
+// takes two terminal cells, so wide replies drew more rows than budgeted.
+describe("row estimate counts terminal cells, not code points (#3536)", () => {
+	const WIDTH = 40;
+	const cases: Array<[string, string]> = [
+		["80 CJK characters", "漢".repeat(80)],
+		["20 rocket emoji", "🚀".repeat(20)],
+		["a CJK code line", `\`\`\`\n${"漢字".repeat(30)}\n\`\`\``],
+		["an emoji code line", `\`\`\`\n${"🚀".repeat(30)}\n\`\`\``],
+		[
+			"plain English",
+			"The quick brown fox jumps over the lazy dog and keeps running until the row budget is spent.",
+		],
+	];
+	for (const [name, content] of cases) {
+		test(`${name}: estimate == drawn rows at width ${WIDTH}`, () => {
+			const drawn = renderReply(content, WIDTH);
+			while (drawn.length && drawn[drawn.length - 1].trim() === "") drawn.pop();
+			const wrap = bubbleWidths(WIDTH, "assistant").wrap;
+			const est = estimateMessageRowsForTest(
+				{ id: "a1", role: "assistant", content, timestamp: at },
+				wrap,
+			);
+			expect(drawn.length).toBe(est - 1);
+		});
+	}
 });

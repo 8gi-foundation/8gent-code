@@ -143,6 +143,8 @@ export function createProseRouter(opts: ProseRouterOptions): ProseRouter {
 			const backend = await decider.backend();
 			seen.backend = backend.name;
 			seen.model = backend.model;
+			// The hosted judge would send the query off the machine: locate routes locally or not at all (#3652).
+			if (backend.name === "jev") throw new Error("the hosted jev judge is not allowed for locate");
 			let threshold = opts.threshold;
 			if (threshold === undefined) {
 				const key = JSON.stringify([backend.name, backend.model]);
