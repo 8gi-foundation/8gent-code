@@ -606,6 +606,14 @@ describe("allowlist: git shell expansion and --git-dir ownership (#4300)", () =>
 		expect(pass(`git --git-dir=${cd} log`)).toBe(false);
 		expect(pass(`git --git-dir ${cd} branch -a`)).toBe(false);
 	});
+	test("--git-dir naming an owned dir whose config is a symlink is not auto-allowed", () => {
+		const sd = join(GD, "symconfig-4300");
+		mkdirSync(sd, { recursive: true });
+		writeFileSync(join(sd, "HEAD"), "ref: refs/heads/main\n");
+		symlinkSync("/etc/hosts", join(sd, "config"));
+		expect(pass(`git --git-dir=${sd} status`)).toBe(false);
+		expect(pass(`git --git-dir ${sd} log`)).toBe(false);
+	});
 });
 
 describe("gate wiring (EIGHT_S1_ALLOWLIST)", () => {

@@ -366,8 +366,8 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
  * so only an absolute value is judged: it must start with "/", hold no "~" (the shell
  * expands it) and no "." or ".." segment (the kernel follows links before `..`), and then
  * be stat'd as written. It must be a directory (a gitfile redirects git unchecked) with no
- * `commondir` file (that also redirects config, unchecked, to another repo; linked-worktree
- * gitdirs therefore go to the judge). No getuid (Windows) means false.
+ * `commondir` file and no symlinked `config` (both redirect config, unchecked, to another
+ * repo; linked-worktree gitdirs therefore go to the judge). No getuid (Windows) means false.
  */
 function gitDirOwnedByMe(value: string | undefined): boolean {
 	if (!value || typeof process.getuid !== "function") return false;
@@ -383,8 +383,16 @@ function gitDirOwnedByMe(value: string | undefined): boolean {
 		lstatSync(join(value, "commondir"));
 		return false;
 	} catch {
-		return true;
+		// no commondir: fine
 	}
+	try {
+		const c = lstatSync(join(value, "config"));
+		// a symlinked or foreign-owned config is read without an ownership check
+		if (!c.isFile() || c.uid !== process.getuid()) return false;
+	} catch {
+		// no config: fine
+	}
+	return true;
 }
 
 function gitOk(args: string[]): string | null {
