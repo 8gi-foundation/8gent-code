@@ -110,6 +110,15 @@ const LOGIN_COPY =
 	/^sed -n 's\/\^[A-Za-z][A-Za-z0-9 _-]*: \*\/[a-z][a-z0-9_-]*=\/w (\.tmp\/[A-Za-z0-9._-]+)' \S+$/;
 
 /**
+ * The value-only variant: a sed print of the Label line's value redirected into .tmp/NAME leaves the bare value, no field name.
+ * #4324 (run 2026-10-16_004027): the model posted that file as a curl form body, which sent the value as a
+ * field name (401), and spent the rest of the 600 s turn on the wrong cause. The note says what the file
+ * holds and gives the w-flag recipe that writes field=value into a new file.
+ */
+const LOGIN_VALUE_ONLY =
+	/^sed -n 's\/\^([A-Za-z][A-Za-z0-9 _-]*): \*?\/\/p' (\S+) > (\.tmp\/[A-Za-z0-9._-]+)$/;
+
+/**
  * Where a curl -D dump-header says the server redirected to. #4318 (run 2026-10-15_232213): a
  * login POST answered 302 /settings, but the header file is private ("do not read it") and
  * curl -L is refused with "read the Location header", so the model never learned the target,
@@ -193,7 +202,13 @@ export function silentSuccessNote(
 	const base = "Command completed successfully.";
 	const login = command ? LOGIN_COPY.exec(command.trim()) : null;
 	if (login) {
-		return `${base} It printed nothing. It copied the value into ${login[1]} and did not show it: do not read or retype it, do not repeat this command. Post it with curl -d @${login[1]} (add -d for the other fields).`;
+		return `${base} It printed nothing. It copied the value into ${login[1]} and did not show do not read or retype it, do not repeat this command. Post it with curl -d @${login[1]} (add -d for the other fields).`;
+	}
+	const bare = command ? LOGIN_VALUE_ONLY.exec(command.trim()) : null;
+	if (bare) {
+		const field = bare[1].toLowerCase().replace(/[^a-z0-9]+/g, "_");
+		const form = `${bare[3]}-form`;
+		return `${base} It printed nothing. It copied only the value into ${bare[3]}, with no field name, so posting that file would send the value as a field name and be refused. Do not read it. Write the field too: sed -n 's/^${bare[1]}: */${field}=/w ${form}' ${bare[2]} (one command, a new file), then post it with curl -d @${form} (add -d for the other fields).`;
 	}
 	const w = command ? writtenFiles(command) : { readable: [], private: [] };
 	if (w.readable.length === 0 && w.private.length === 0) return base;
