@@ -7,7 +7,7 @@
  * Idempotent; silent no-op when `.tmp/` is absent or not inside a git work tree.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { lstatSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 export const SCRATCH_DIR = ".tmp";
@@ -17,9 +17,10 @@ export const SCRATCH_IGNORE_BODY = "*\n";
 export function ensureScratchExcluded(cwd: string): boolean {
 	try {
 		const dir = resolve(cwd, SCRATCH_DIR);
-		if (!existsSync(dir)) return false;
+		// lstat, never follow: a symlinked .tmp would put the marker outside the workspace (8SO, #4317).
+		const st = lstatSync(dir, { throwIfNoEntry: false });
+		if (!st || !st.isDirectory()) return false;
 		const file = resolve(dir, ".gitignore");
-		if (existsSync(file)) return false;
 		// Read-only probe: rev-parse never writes to .git, unlike status (index refresh).
 		const r = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
 			cwd,
@@ -27,7 +28,8 @@ export function ensureScratchExcluded(cwd: string): boolean {
 			timeout: 5000,
 		});
 		if (r.status !== 0 || r.stdout.trim() !== "true") return false;
-		writeFileSync(file, SCRATCH_IGNORE_BODY);
+		// Create-exclusive: an existing file or a dangling symlink gives EEXIST, nothing is followed.
+		writeFileSync(file, SCRATCH_IGNORE_BODY, { flag: "wx" });
 		return true;
 	} catch {
 		return false;

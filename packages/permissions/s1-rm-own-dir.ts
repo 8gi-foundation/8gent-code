@@ -104,10 +104,15 @@ function untracked(root: string, rel: string): boolean {
 function isScratchMarker(
 	abs: string,
 	root: string,
-	st: { isFile(): boolean; size: bigint },
+	st: { isFile(): boolean; size: bigint; nlink: bigint },
 ): boolean {
 	try {
-		if (abs !== path.join(root, SCRATCH_DIR, ".gitignore") || !st.isFile() || st.size !== 2n)
+		if (
+			abs !== path.join(root, SCRATCH_DIR, ".gitignore") ||
+			!st.isFile() ||
+			st.size !== 2n ||
+			st.nlink !== 1n
+		)
 			return false;
 		return readFileSync(abs, "utf8") === "*\n";
 	} catch {
@@ -127,8 +132,8 @@ function contentsProblem(dir: string, created: CreatedFiles, root: string): stri
 			if (name === ".git") return "it holds a .git entry.";
 			const abs = path.join(cur, name);
 			const st = lstatSync(abs, { bigint: true });
-			if (isScratchMarker(abs, root, st)) continue;
 			if (st.dev !== top.dev) return "it holds a mount point.";
+			if (isScratchMarker(abs, root, st)) continue;
 			if (st.birthtimeNs <= 0n || st.birthtimeNs < top.birthtimeNs)
 				return `it holds ${path.relative(dir, abs)}, which is older than the directory (moved in from elsewhere).`;
 			if (st.isDirectory()) {

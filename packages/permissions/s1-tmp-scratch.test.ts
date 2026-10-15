@@ -16,6 +16,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import { execFileSync } from "node:child_process";
 import {
 	existsSync,
+	linkSync,
 	mkdirSync,
 	readdirSync,
 	realpathSync,
@@ -312,6 +313,16 @@ describe.skipIf(process.platform === "win32")(
 				const ex = new ToolExecutor(ws, "tmp4316");
 				await steps(ex, ["mkdir -p .tmp"]);
 				writeFileSync(join(ws, ".tmp/.gitignore"), "something-else\n");
+				const out = await ex.execute("run_command", { command: "rm -rf .tmp" });
+				expect(out).toContain(SYSTEM_ONE_BLOCK_MARKER);
+				expect(existsSync(join(ws, ".tmp"))).toBe(true);
+			});
+			test("a hardlinked .tmp/.gitignore is not the harness marker: rm -rf .tmp blocks (#4317)", async () => {
+				const ex = new ToolExecutor(ws, "tmp4317");
+				await steps(ex, ["mkdir -p .tmp"]);
+				writeFileSync(join(ws, "outside-link.txt"), "*\n");
+				rmSync(join(ws, ".tmp/.gitignore"), { force: true });
+				linkSync(join(ws, "outside-link.txt"), join(ws, ".tmp/.gitignore"));
 				const out = await ex.execute("run_command", { command: "rm -rf .tmp" });
 				expect(out).toContain(SYSTEM_ONE_BLOCK_MARKER);
 				expect(existsSync(join(ws, ".tmp"))).toBe(true);

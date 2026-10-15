@@ -7,6 +7,7 @@ import {
 	readFileSync,
 	readdirSync,
 	statSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -75,5 +76,24 @@ describe("ensureScratchExcluded (#4236, #4316)", () => {
 		mkdirSync(join(d, ".tmp"));
 		expect(ensureScratchExcluded(d)).toBe(false);
 		expect(existsSync(join(d, ".tmp/.gitignore"))).toBe(false);
+	});
+
+	it("refuses a symlinked .tmp: nothing is written outside the workspace (#4317)", () => {
+		const d = dir();
+		const outside = dir();
+		git(d, "init", "-q");
+		symlinkSync(outside, join(d, ".tmp"));
+		expect(ensureScratchExcluded(d)).toBe(false);
+		expect(existsSync(join(outside, ".gitignore"))).toBe(false);
+	});
+
+	it("refuses a .gitignore symlink to a missing outside path: not created (#4317)", () => {
+		const d = dir();
+		const outside = join(dir(), "created-by-follow");
+		git(d, "init", "-q");
+		mkdirSync(join(d, ".tmp"));
+		symlinkSync(outside, join(d, ".tmp/.gitignore"));
+		expect(ensureScratchExcluded(d)).toBe(false);
+		expect(existsSync(outside)).toBe(false);
 	});
 });
