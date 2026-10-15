@@ -166,8 +166,14 @@ describe("login-line copy names its file and the next step (#4303)", () => {
 		const out = formatCommandOutput(0, "", "", copy, "/work");
 		expect(out).toContain("Command completed successfully.");
 		expect(out).toContain(".tmp/login");
-		expect(out).toContain("curl -d @.tmp/login");
+		expect(out).toContain("curl -s -d @.tmp/login");
 		expect(out).toContain("do not repeat");
+	});
+
+	test("the post form names the loopback URL and says no -L (#4303, run 2026-10-15_164257)", () => {
+		const out = formatCommandOutput(0, "", "", copy, "/work");
+		expect(out).toContain("http://127.0.0.1:PORT/");
+		expect(out).toContain("no -L");
 	});
 
 	test("it never tells the model to read the file back", () => {
@@ -184,7 +190,7 @@ describe("login-line copy names its file and the next step (#4303)", () => {
 			"sed -n 's/^Token: */token=/w .tmp/tok' notes.txt",
 			"/work",
 		);
-		expect(out).toContain("curl -d @.tmp/tok");
+		expect(out).toContain("curl -s -d @.tmp/tok");
 	});
 
 	test("other sed commands are unchanged", () => {

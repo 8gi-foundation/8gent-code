@@ -238,3 +238,10 @@ describe("headless prompt diet", () => {
 		}
 	}, 60_000);
 });
+
+describe("login and curl notes say no -L (#4303)", () => {
+	test("LOCAL_LOGIN_NOTE and LOCAL_SERVER_CURL_SHORT forbid -L", () => {
+		expect(LOCAL_LOGIN_NOTE).toContain("no -L");
+		expect(LOCAL_SERVER_CURL_SHORT).toContain("Do not pass -L");
+	});
+});
