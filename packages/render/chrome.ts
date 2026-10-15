@@ -30,25 +30,91 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Availability, RenderBackend, RenderSession, RenderSize } from "./backend";
 
 type Env = Record<string, string | undefined>;
 
-const CHROME_CANDIDATES = [
-	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-	"/Applications/Chromium.app/Contents/MacOS/Chromium",
-	"/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
-	"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-	"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+/**
+ * Never a user's own browser. A GUI browser under /Applications launched from a background
+ * or sandboxed process aborts in HIServices _RegisterApplication (it cannot reach the window
+ * server) and macOS shows the user a "quit unexpectedly" report. Only a bundled headless shell
+ * or a system package binary is a candidate; /Applications is reached only through an explicit
+ * EIGHT_CHROME_PATH or EIGHT_CHROME_BIN.
+ */
+const SYSTEM_CANDIDATES = [
 	"/usr/bin/google-chrome",
 	"/usr/bin/google-chrome-stable",
 	"/usr/bin/chromium",
 	"/usr/bin/chromium-browser",
 ];
+
+/** True for a path inside a macOS applications folder, the user's own apps. */
+export function isUserGuiApp(p: string, home: string = homedir()): boolean {
+	return p.startsWith("/Applications/") || p.startsWith(`${join(home, "Applications")}/`);
+}
+
+/**
+ * Headless shells already on disk, newest first: Playwright's chromium_headless_shell and
+ * Puppeteer's chrome-headless-shell. They are built with no window-server dependency. Full
+ * Chromium.app bundles in those caches are not listed: they register with LaunchServices.
+ */
+export function cachedHeadlessShells(home: string = homedir()): string[] {
+	const shell = (d: string, dirs: string[], bin: string) => dirs.map((x) => join(d, x, bin));
+	const roots: Array<[string, RegExp, (dir: string) => string[]]> = [
+		[
+			join(home, "Library", "Caches", "ms-playwright"),
+			/^chromium_headless_shell-\d+$/,
+			(d) => [
+				...shell(
+					d,
+					["chrome-headless-shell-mac-arm64", "chrome-headless-shell-mac-x64"],
+					"chrome-headless-shell",
+				),
+				...shell(d, ["chrome-mac"], "headless_shell"),
+			],
+		],
+		[
+			join(home, ".cache", "ms-playwright"),
+			/^chromium_headless_shell-\d+$/,
+			(d) => [
+				...shell(d, ["chrome-headless-shell-linux64"], "chrome-headless-shell"),
+				...shell(d, ["chrome-linux"], "headless_shell"),
+			],
+		],
+		[
+			join(home, ".cache", "puppeteer", "chrome-headless-shell"),
+			/^(mac|mac_arm|linux)-[\d.]+$/,
+			(d) =>
+				shell(
+					d,
+					[
+						"chrome-headless-shell-mac-arm64",
+						"chrome-headless-shell-mac-x64",
+						"chrome-headless-shell-linux64",
+					],
+					"chrome-headless-shell",
+				),
+		],
+	];
+	const found: string[] = [];
+	for (const [root, name, bins] of roots) {
+		let dirs: string[];
+		try {
+			dirs = readdirSync(root)
+				.filter((n) => name.test(n))
+				.sort()
+				.reverse();
+		} catch {
+			continue;
+		}
+		for (const d of dirs) for (const b of bins(join(root, d))) if (existsSync(b)) found.push(b);
+	}
+	return found;
+}
 
 /** Settle time before the shot, in virtual ms. Same value bake.ts uses. */
 export const SETTLE_MS = 2000;
@@ -70,10 +136,14 @@ export interface ChromeOptions {
 	allowNetwork?: boolean;
 }
 
-export function findChrome(env: Env = process.env): string | null {
-	const override = env.EIGHT_CHROME_PATH?.trim();
+export function findChrome(env: Env = process.env, home: string = homedir()): string | null {
+	const override = (env.EIGHT_CHROME_PATH ?? env.EIGHT_CHROME_BIN)?.trim();
 	if (override) return existsSync(override) ? override : null;
-	return CHROME_CANDIDATES.find((p) => existsSync(p)) ?? null;
+	return (
+		[...cachedHeadlessShells(home), ...SYSTEM_CANDIDATES].find(
+			(p) => !isUserGuiApp(p, home) && existsSync(p),
+		) ?? null
+	);
 }
 
 /** The URL Chrome loads: the file, plus `#slide=k` once a slide has been shown. */
@@ -285,7 +355,7 @@ export class ChromeHeadlessBackend implements RenderBackend {
 				ok: false,
 				reason: override
 					? `EIGHT_CHROME_PATH=${override} does not exist`
-					: "no Chrome, Chromium, Edge or Brave found; set EIGHT_CHROME_PATH",
+					: "no headless browser available (your own Chrome is never launched); set EIGHT_CHROME_PATH to a headless Chromium",
 			};
 		}
 		const work = mkdtempSync(join(tmpdir(), "8gent-render-probe-"));

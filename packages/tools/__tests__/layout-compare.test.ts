@@ -153,7 +153,7 @@ describe("compareLayout with a stub browser", () => {
 			expect(same).toContain("Pixel similarity 1.000");
 		} finally {
 			if (prev === undefined) process.env.EIGHT_CHROME_BIN = undefined as never;
-			if (prev === undefined) delete process.env.EIGHT_CHROME_BIN;
+			if (prev === undefined) Reflect.deleteProperty(process.env, "EIGHT_CHROME_BIN");
 			else process.env.EIGHT_CHROME_BIN = prev;
 		}
 	});
@@ -277,7 +277,7 @@ describe("compare_layout is read-only (#4081)", () => {
 			const text = await compareLayout(path.join(ws, "index.html"), ref, ws);
 			expect(text).toContain("y +30");
 		} finally {
-			if (prev === undefined) delete process.env.EIGHT_CHROME_BIN;
+			if (prev === undefined) Reflect.deleteProperty(process.env, "EIGHT_CHROME_BIN");
 			else process.env.EIGHT_CHROME_BIN = prev;
 		}
 		expect(snapshot(ws)).toEqual(before);
@@ -761,7 +761,7 @@ describe("compare_layout names the element behind each off band (#4204)", () => 
 		try {
 			return await run();
 		} finally {
-			if (prev === undefined) delete process.env.EIGHT_CHROME_BIN;
+			if (prev === undefined) Reflect.deleteProperty(process.env, "EIGHT_CHROME_BIN");
 			else process.env.EIGHT_CHROME_BIN = prev;
 		}
 	}
@@ -950,3 +950,90 @@ describe.skipIf(!chrome)(
 		}, 60_000);
 	},
 );
+
+describe("findChrome never launches the user's own browser (#4313)", () => {
+	const emptyHome = () => tempDir("layout-compare-home-");
+
+	test("with no override it never returns an /Applications path, even when Chrome is installed", () => {
+		const hit = findChrome({ PATH: "", HOME: emptyHome() }, tempDir("layout-compare-ws-"));
+		expect(hit).toBeNull();
+	});
+
+	test("a bundled headless shell in the Playwright cache is found, and wins", () => {
+		const home = emptyHome();
+		const bin = path.join(
+			home,
+			"Library/Caches/ms-playwright/chromium_headless_shell-1200/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+		);
+		fs.mkdirSync(path.dirname(bin), { recursive: true });
+		fs.writeFileSync(bin, "");
+		expect(findChrome({ PATH: "", HOME: home }, tempDir("layout-compare-ws-"))).toBe(bin);
+	});
+
+	test("a full Chromium.app in the Puppeteer cache is not a candidate", () => {
+		const home = emptyHome();
+		const app = path.join(
+			home,
+			".cache/puppeteer/chrome/mac-1108766/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+		);
+		fs.mkdirSync(path.dirname(app), { recursive: true });
+		fs.writeFileSync(app, "");
+		expect(findChrome({ PATH: "", HOME: home }, tempDir("layout-compare-ws-"))).toBeNull();
+	});
+
+	test("compareLayout with no browser returns the honest message and spawns nothing", async () => {
+		const dir = tempDir("layout-compare-");
+		const html = path.join(dir, "index.html");
+		const ref = path.join(dir, "ref.png");
+		fs.writeFileSync(html, "<html><body>x</body></html>");
+		fs.writeFileSync(ref, "png");
+		const saved = {
+			HOME: process.env.HOME,
+			PATH: process.env.PATH,
+			BIN: process.env.EIGHT_CHROME_BIN,
+		};
+		process.env.HOME = emptyHome();
+		process.env.PATH = "";
+		Reflect.deleteProperty(process.env, "EIGHT_CHROME_BIN");
+		try {
+			const msg = await compareLayout(html, ref, dir);
+			expect(msg).toContain("no headless browser is available");
+			expect(msg).toContain("Your own Chrome is never launched");
+		} finally {
+			process.env.HOME = saved.HOME;
+			process.env.PATH = saved.PATH;
+			if (saved.BIN !== undefined) process.env.EIGHT_CHROME_BIN = saved.BIN;
+		}
+	});
+
+	test("a cached headless shell is refused up front inside a macOS sandbox", async () => {
+		const { _setHostSandboxedForTest } = await import("../eight-browser");
+		const home = emptyHome();
+		const bin = path.join(
+			home,
+			"Library/Caches/ms-playwright/chromium_headless_shell-1200/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+		);
+		fs.mkdirSync(path.dirname(bin), { recursive: true });
+		// A script that would leave a marker if it ever ran.
+		const marker = path.join(home, "launched");
+		fs.writeFileSync(bin, `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
+		const dir = tempDir("layout-compare-");
+		const html = path.join(dir, "index.html");
+		const ref = path.join(dir, "ref.png");
+		fs.writeFileSync(html, "<html><body>x</body></html>");
+		fs.writeFileSync(ref, "png");
+		const saved = { HOME: process.env.HOME, BIN: process.env.EIGHT_CHROME_BIN };
+		process.env.HOME = home;
+		Reflect.deleteProperty(process.env, "EIGHT_CHROME_BIN");
+		_setHostSandboxedForTest(true);
+		try {
+			const msg = await compareLayout(html, ref, dir);
+			expect(msg).toContain("inside a macOS sandbox");
+			expect(fs.existsSync(marker)).toBe(false);
+		} finally {
+			_setHostSandboxedForTest(null);
+			process.env.HOME = saved.HOME;
+			if (saved.BIN !== undefined) process.env.EIGHT_CHROME_BIN = saved.BIN;
+		}
+	});
+});

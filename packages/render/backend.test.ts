@@ -529,3 +529,26 @@ describe.skipIf(process.env.EIGHT_RENDER_E2E !== "1")(
 		}, 120_000);
 	},
 );
+
+describe("chrome finder never picks the user's own browser (#4313)", () => {
+	test("isUserGuiApp flags /Applications and ~/Applications only", async () => {
+		const { isUserGuiApp } = await import("./chrome");
+		expect(isUserGuiApp("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")).toBe(true);
+		expect(
+			isUserGuiApp("/Users/x/Applications/Chromium.app/Contents/MacOS/Chromium", "/Users/x"),
+		).toBe(true);
+		expect(isUserGuiApp("/usr/bin/chromium")).toBe(false);
+	});
+
+	test("with no override and an empty home findChrome returns no /Applications path", () => {
+		const home = mkdtempSync(join(tmpdir(), "render-home-"));
+		const hit = findChrome({}, home);
+		rmSync(home, { recursive: true, force: true });
+		expect(hit === null || !hit.startsWith("/Applications/")).toBe(true);
+	});
+
+	test("an explicit EIGHT_CHROME_PATH or EIGHT_CHROME_BIN is still honoured", () => {
+		expect(findChrome({ EIGHT_CHROME_BIN: "/bin/sh" })).toBe("/bin/sh");
+		expect(findChrome({ EIGHT_CHROME_PATH: "/bin/sh" })).toBe("/bin/sh");
+	});
+});
