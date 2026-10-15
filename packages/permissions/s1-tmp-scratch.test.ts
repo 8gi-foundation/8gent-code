@@ -14,7 +14,15 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
@@ -295,8 +303,18 @@ describe.skipIf(process.platform === "win32")(
 					"rm -f .tmp/t.json",
 					"rmdir .tmp",
 				]);
-				expect(existsSync(join(ws, ".tmp"))).toBe(false);
+				// The harness marker (#4316) keeps .tmp non-empty, so the real rmdir leaves the
+				// directory behind; the gate let it through and nothing else is in it.
+				expect(readdirSync(join(ws, ".tmp"))).toEqual([".gitignore"]);
 				expect(judge.asks).toBe(0);
+			});
+			test("a .tmp/.gitignore that is not the harness marker still blocks rm -rf .tmp (#4316)", async () => {
+				const ex = new ToolExecutor(ws, "tmp4316");
+				await steps(ex, ["mkdir -p .tmp"]);
+				writeFileSync(join(ws, ".tmp/.gitignore"), "something-else\n");
+				const out = await ex.execute("run_command", { command: "rm -rf .tmp" });
+				expect(out).toContain(SYSTEM_ONE_BLOCK_MARKER);
+				expect(existsSync(join(ws, ".tmp"))).toBe(true);
 			});
 			test("12:07: the piped CLI run against .tmp", async () => {
 				const ex = new ToolExecutor(ws, "tmp4185c");
