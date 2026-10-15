@@ -14,7 +14,7 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import {
@@ -534,10 +534,10 @@ describe("allowlist: git --git-dir / --work-tree global options (#4299)", () => 
 		expect(pass(`git -C /x --git-dir=${GD} push`)).toBe(false);
 	});
 	test("a value that looks like a subcommand is not the subcommand", () => {
-		expect(pass(`git -C ${GD} --git-dir=push log`)).toBe(true);
-		expect(pass(`git -C ${GD} --git-dir push log`)).toBe(true);
-		expect(pass(`git -C ${GD} --git-dir=status push`)).toBe(false);
-		expect(pass(`git -C ${GD} --git-dir status push`)).toBe(false);
+		expect(pass(`git -C ${GD} --git-dir=${GD}/push log`)).toBe(true);
+		expect(pass(`git -C ${GD} --git-dir ${GD}/push log`)).toBe(true);
+		expect(pass(`git -C ${GD} --git-dir=${GD}/status push`)).toBe(false);
+		expect(pass(`git -C ${GD} --git-dir ${GD}/status push`)).toBe(false);
 		expect(pass("git --work-tree log reset --hard")).toBe(false);
 	});
 	test("writing args after the options are still refused", () => {
@@ -566,11 +566,26 @@ describe("allowlist: git shell expansion and --git-dir ownership (#4300)", () =>
 		expect(pass(`git --git-dir=${GD} branch -a`)).toBe(true);
 		expect(pass(`git --git-dir ${GD} log`)).toBe(true);
 	});
-	test("--git-dir resolves against a preceding -C", () => {
-		expect(
-			pass(`git -C ${join(GD, "..")} --git-dir=${join(GD, "..", GD.split("/").pop() ?? "")} log`),
-		).toBe(true);
-		expect(pass(`git -C ${GD} --git-dir=nope log`)).toBe(false);
+	test("a relative --git-dir goes to the judge, with or without -C", () => {
+		for (const c of [
+			"git --git-dir=.git log",
+			"git --git-dir .git log",
+			"git --git-dir=.git -C /other log",
+			`git -C ${GD} --git-dir=nope log`,
+		]) {
+			expect(pass(c)).toBe(false);
+		}
+	});
+	test("--git-dir through a symlink and .. goes to the judge", () => {
+		mkdirSync(join(GD, "real", "sub"), { recursive: true });
+		symlinkSync(join(GD, "real", "sub"), join(GD, "link"));
+		expect(pass(`git --git-dir=${GD}/link/../.git log`)).toBe(false);
+	});
+	test("--git-dir with a tilde or a dot segment goes to the judge", () => {
+		expect(pass("git --git-dir ~root log")).toBe(false);
+		expect(pass("git --git-dir=~root log")).toBe(false);
+		expect(pass(`git --git-dir=${GD}/./real log`)).toBe(false);
+		expect(pass(`git --git-dir ${GD}/real/.. log`)).toBe(false);
 	});
 	test("--git-dir on a nonexistent path is not auto-allowed", () => {
 		expect(pass("git --git-dir=/no/such/dir-4300 branch -a")).toBe(false);

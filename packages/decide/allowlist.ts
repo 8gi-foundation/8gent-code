@@ -42,7 +42,7 @@
 
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { activeShellKind } from "../core/shell";
 import { type ActiveShellKind, posixRulesApply } from "../permissions/shell-tools";
 import { promptControlText } from "./guard";
@@ -362,13 +362,17 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 /**
  * `--git-dir` turns off git's safe.directory ownership check, so it could read config
  * (and run its hooks or helpers) from a repo another user owns; `-C` keeps the check.
- * True only when the value, resolved against any preceding -C and the cwd, exists and
- * belongs to the current user. No getuid (Windows) means false.
+ * We cannot know the directory git will run in (session workdir, `cd X &&`, option order),
+ * so only an absolute value is judged: it must start with "/", hold no "~" (the shell
+ * expands it) and no "." or ".." segment (the kernel follows links before `..`), and then
+ * be stat'd as written. No getuid (Windows) means false.
  */
-function gitDirOwnedByMe(value: string | undefined, cdirs: string[]): boolean {
+function gitDirOwnedByMe(value: string | undefined): boolean {
 	if (!value || typeof process.getuid !== "function") return false;
+	if (!value.startsWith("/") || value.includes("~")) return false;
+	if (value.split("/").some((seg) => seg === "." || seg === "..")) return false;
 	try {
-		return statSync(resolve(process.cwd(), ...cdirs, value)).uid === process.getuid();
+		return statSync(value).uid === process.getuid();
 	} catch {
 		return false;
 	}
@@ -378,22 +382,18 @@ function gitOk(args: string[]): string | null {
 	// The shell expands braces and globs before git sees them, so the words we read are not the words git gets.
 	if (args.some((a) => /[*?[\]{}]/.test(a))) return "git with a glob or brace the shell expands";
 	let i = 0;
-	const cdirs: string[] = [];
 	// Global options skipped before the subcommand: -C <p>, --git-dir[=]<p>, --work-tree[=]<p>, --no-pager (#4299).
 	// A value taken by a spaced option is consumed, so `--git-dir push` never reads `push` as the subcommand.
 	while (i < args.length) {
 		const a = args[i];
 		if (a === "--no-pager" || a.startsWith("--work-tree=")) i += 1;
 		else if (a.startsWith("--git-dir=")) {
-			if (!gitDirOwnedByMe(a.slice(10), cdirs))
-				return "git --git-dir is not a path owned by this user";
+			if (!gitDirOwnedByMe(a.slice(10))) return "git --git-dir is not a path owned by this user";
 			i += 1;
 		} else if (a === "--git-dir") {
-			if (!gitDirOwnedByMe(args[i + 1], cdirs))
-				return "git --git-dir is not a path owned by this user";
+			if (!gitDirOwnedByMe(args[i + 1])) return "git --git-dir is not a path owned by this user";
 			i += 2;
 		} else if (a === "-C") {
-			if (args[i + 1] !== undefined) cdirs.push(args[i + 1]);
 			i += 2;
 		} else if (a === "--work-tree") i += 2;
 		else break;
