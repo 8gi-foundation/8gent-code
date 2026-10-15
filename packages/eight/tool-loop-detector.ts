@@ -7,6 +7,11 @@
  * 3. GLOBAL: more than N executed tool calls in one turn
  * 4. REFUSED: more than M refused tool calls in one turn (#3409)
  *
+ * A repeat of calls that all SUCCEEDED is first answered with a recoverable
+ * nudge (`recoverable: true`), not a stop (#4301): a quiet success such as
+ * `mkdir -p` prints nothing, and a local model re-issues it because it cannot
+ * see that it worked. The stop comes only if it keeps going.
+ *
  * @see https://github.com/8gi-foundation/8gent-code/issues/975
  */
 
@@ -19,11 +24,19 @@ export interface LoopDetection {
 	message: string;
 	/** For the person: why the turn stopped, in plain words (#3409). */
 	userMessage: string;
+	/**
+	 * True when the caller should tell the model and let the turn continue
+	 * instead of stopping it (#4301). Only ever set for a repeat of successful
+	 * calls, below the stop ceiling.
+	 */
+	recoverable?: boolean;
 }
 
 interface ToolCall {
 	toolName: string;
 	argsHash: string;
+	/** Known to have run and succeeded. Unknown or failed is never true. */
+	succeeded: boolean;
 }
 
 export interface ToolLoopDetectorConfig {
@@ -48,6 +61,8 @@ export class ToolLoopDetector {
 	private pingPongThreshold: number;
 	private globalLimit: number;
 	private refusedLimit: number;
+	/** Extra identical successful calls tolerated, each nudged, before the stop. */
+	private successRepeatGrace = 2;
 
 	constructor(config: ToolLoopDetectorConfig = {}) {
 		this.windowSize = config.windowSize ?? 20;
@@ -71,9 +86,17 @@ export class ToolLoopDetector {
 	 * The caller must decide `refused` from the call itself, never from the
 	 * tool's output text: output can say anything, including "[BLOCKED]".
 	 */
-	record(toolName: string, args: Record<string, unknown>, opts: { refused?: boolean } = {}): void {
+	record(
+		toolName: string,
+		args: Record<string, unknown>,
+		opts: { refused?: boolean; succeeded?: boolean } = {},
+	): void {
 		const argsHash = JSON.stringify(args);
-		this.history.push({ toolName, argsHash });
+		this.history.push({
+			toolName,
+			argsHash,
+			succeeded: opts.succeeded === true && !opts.refused,
+		});
 		if (opts.refused) this.refusedCalls++;
 		else this.totalCalls++;
 
@@ -122,6 +145,18 @@ export class ToolLoopDetector {
 				}
 			}
 			if (streak >= this.repeatThreshold) {
+				// Identical calls that all succeeded are a model that cannot see its
+				// own success, not a stuck one: nudge first, stop only past the ceiling.
+				const allSucceeded = this.history.slice(len - streak).every((e) => e.succeeded);
+				if (allSucceeded && streak < this.repeatThreshold + this.successRepeatGrace) {
+					return {
+						detected: true,
+						type: "repeat",
+						recoverable: true,
+						message: `"${last.toolName}" has now succeeded ${streak} times in a row with identical arguments. It already worked and repeating it changes nothing. Continue with the next step of the task.`,
+						userMessage: `I repeated a ${last.toolName} call that had already worked.`,
+					};
+				}
 				return {
 					detected: true,
 					type: "repeat",
