@@ -160,7 +160,7 @@ import {
 	TimeTravelStore,
 	checkpointEveryFromEnv,
 } from "./timetravel/checkpoint-store";
-import { ToolLoopDetector } from "./tool-loop-detector";
+import { ToolLoopDetector, isQuietSuccess } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import { TurnJournal } from "./turn-journal";
@@ -1296,7 +1296,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// A call refused before it ran does not spend the global budget (#3409).
 				this.loopDetector.record(toolName, args, {
 					refused: refusedBeforeRun(toolName, args),
-					succeeded: success,
+					succeeded: success && isQuietSuccess(toolName, shown),
 				});
 				const loopResult = this.loopDetector.check();
 				if (loopResult?.recoverable) {
@@ -2607,7 +2607,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Circuit breaker: record call and check for loop patterns
 				this.loopDetector.record(event.toolName, event.args as Record<string, unknown>, {
 					refused: refusedBeforeRun(event.toolName, event.args as Record<string, unknown>),
-					succeeded: event.success && !isErrorToolResult(resultStr),
+					succeeded: event.success && isQuietSuccess(event.toolName, resultStr),
 				});
 				const loopResult = this.loopDetector.check();
 				if (loopResult?.recoverable) {

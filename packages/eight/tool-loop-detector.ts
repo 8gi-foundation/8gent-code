@@ -17,6 +17,28 @@
 
 export type LoopType = "repeat" | "ping-pong" | "global" | "refused";
 
+/** Read-only tools whose clean result may be nudged rather than stopped on repeat. */
+const READ_ONLY_NUDGEABLE = new Set(["read_file", "list_files"]);
+
+/**
+ * Positive signal for the success-repeat nudge (#4301). True only for:
+ *  - a `run_command` whose result is a clean silent success: empty, or the
+ *    "Command completed successfully." note (with its optional follow-on
+ *    sentences), with no "Exit code" and no "TIMEOUT";
+ *  - a plain read-only tool (read_file, list_files) with a non-error result.
+ * Everything else (writes, POSTs, commits, any command with output, any
+ * failure or timeout) is false and keeps the stop at 3.
+ */
+export function isQuietSuccess(toolName: string, resultText: string): boolean {
+	const text = (resultText ?? "").trim();
+	if (toolName === "run_command") {
+		if (/^Exit code\b|^TIMEOUT after\b/m.test(text)) return false;
+		return text === "" || text.startsWith("Command completed successfully.");
+	}
+	if (READ_ONLY_NUDGEABLE.has(toolName)) return !isErrorToolResult(text);
+	return false;
+}
+
 export interface LoopDetection {
 	detected: true;
 	type: LoopType;
@@ -227,6 +249,7 @@ export class ToolLoopDetector {
 // ---------------------------------------------------------------------------
 
 import { EventEmitter } from "node:events";
+import { isErrorToolResult } from "./honesty";
 
 export interface DoomToolCall {
 	toolName: string;
