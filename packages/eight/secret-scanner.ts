@@ -593,7 +593,7 @@ export function scrubKeepingAttachment(text: string, marker: string): ScrubResul
 	const last = cut === -1 ? text : text.slice(cut + 1);
 	if (
 		cut === -1 ||
-		last.length > MAX_ATTACHMENT_BASE64_CHARS + 128 ||
+		last.length - last.indexOf(",") - 1 > MAX_ATTACHMENT_BASE64_CHARS ||
 		!attachmentLineRe(marker).test(last)
 	) {
 		return scrub(text);

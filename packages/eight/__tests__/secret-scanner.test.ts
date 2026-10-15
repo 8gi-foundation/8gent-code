@@ -917,7 +917,7 @@ describe("scrubKeepingAttachment (#4295)", () => {
 	it("falls back to the full scrub above the attachment length bound", () => {
 		const over = "A".repeat(MAX_ATTACHMENT_BASE64_CHARS + 1);
 		const out = scrubKeepingAttachment(`x\n${MARKER} data:image/png;base64,${over}`, MARKER);
-		expect(out.scrubbed).toContain("[REDACTED:input_cap]");
+		expect(out.scrubbed.includes("[REDACTED:input_cap]")).toBe(true);
 		const ok = scrubKeepingAttachment(`x\n${MARKER} data:image/jpeg;base64,${b64}`, MARKER);
 		expect(ok.scrubbed).not.toContain("input_cap");
 	});
