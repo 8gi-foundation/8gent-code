@@ -40,7 +40,7 @@
  * Pure, synchronous, never throws. Prompt text only: nothing is executed.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { activeShellKind } from "../core/shell";
@@ -65,9 +65,43 @@ export interface AllowlistResult {
 
 /** Binaries that only read, with no argument that writes, deletes or runs another program. */
 export const READ_ONLY_BINS: ReadonlySet<string> = new Set([
-	"ls", "pwd", "which", "wc", "head", "tail", "cat", "grep", "egrep", "fgrep", "rg", "echo", "printf", "true", "false",
-	"sleep", "date", "file", "stat", "du", "df", "basename", "dirname", "realpath", "whoami", "uname", "tr", "cut", "diff",
-	"cmp", "nl", "tree", "jq", "sort", "uniq", "find", "test",
+	"ls",
+	"pwd",
+	"which",
+	"wc",
+	"head",
+	"tail",
+	"cat",
+	"grep",
+	"egrep",
+	"fgrep",
+	"rg",
+	"echo",
+	"printf",
+	"true",
+	"false",
+	"sleep",
+	"date",
+	"file",
+	"stat",
+	"du",
+	"df",
+	"basename",
+	"dirname",
+	"realpath",
+	"whoami",
+	"uname",
+	"tr",
+	"cut",
+	"diff",
+	"cmp",
+	"nl",
+	"tree",
+	"jq",
+	"sort",
+	"uniq",
+	"find",
+	"test",
 ]);
 
 /** Arguments that make an otherwise read-only binary write, delete or run something. */
@@ -86,14 +120,61 @@ const GIT_WRITING_ARG = /^(--output(=.*)?|-o|--ext-diff|-c|--exec-path(=.*)?|--c
 
 /** Dev tools whose `--version` / `--help`, given alone, only print. */
 export const VERSION_TOOLS: ReadonlySet<string> = new Set([
-	"bun", "node", "npm", "npx", "pnpm", "yarn", "deno", "python", "python3", "pip", "pip3", "uv", "git", "go", "cargo",
-	"rustc", "tsc", "gh", "docker", "make", "gcc", "clang", "java", "ruby", "perl", "php", "curl", "wget", "brew",
-	"ffmpeg", "ffprobe", "marp", "jq", "rg", "sqlite3", "psql", "tmux", "biome", "eslint", "prettier", "vite",
+	"bun",
+	"node",
+	"npm",
+	"npx",
+	"pnpm",
+	"yarn",
+	"deno",
+	"python",
+	"python3",
+	"pip",
+	"pip3",
+	"uv",
+	"git",
+	"go",
+	"cargo",
+	"rustc",
+	"tsc",
+	"gh",
+	"docker",
+	"make",
+	"gcc",
+	"clang",
+	"java",
+	"ruby",
+	"perl",
+	"php",
+	"curl",
+	"wget",
+	"brew",
+	"ffmpeg",
+	"ffprobe",
+	"marp",
+	"jq",
+	"rg",
+	"sqlite3",
+	"psql",
+	"tmux",
+	"biome",
+	"eslint",
+	"prettier",
+	"vite",
 ]);
 /** Short version flags, only for the tools that define them this way. */
 const SHORT_VERSION: Record<string, string> = {
-	node: "-v", bun: "-v", npm: "-v", pnpm: "-v", yarn: "-v", deno: "-V", python: "-V", python3: "-V",
-	ffmpeg: "-version", ffprobe: "-version", go: "version",
+	node: "-v",
+	bun: "-v",
+	npm: "-v",
+	pnpm: "-v",
+	yarn: "-v",
+	deno: "-V",
+	python: "-V",
+	python3: "-V",
+	ffmpeg: "-version",
+	ffprobe: "-version",
+	go: "version",
 };
 
 function versionOnly(b: string, args: string[]): boolean {
@@ -105,10 +186,12 @@ function versionOnly(b: string, args: string[]): boolean {
 function mkdirOk(args: string[]): string | null {
 	const flags = args.filter((a) => a.startsWith("-"));
 	const paths = args.filter((a) => !a.startsWith("-"));
-	if (flags.some((f) => !["-p", "-v", "-pv", "-vp", "--parents", "--verbose"].includes(f))) return "mkdir with a flag other than -p/-v";
+	if (flags.some((f) => !["-p", "-v", "-pv", "-vp", "--parents", "--verbose"].includes(f)))
+		return "mkdir with a flag other than -p/-v";
 	if (paths.length === 0) return "mkdir with no path";
 	for (const p of paths) {
-		if (/^[/~]/.test(p) || /(^|\/)\.\.(\/|$)/.test(p) || /[*?[\]{}$]/.test(p)) return `mkdir outside the working directory (${p})`;
+		if (/^[/~]/.test(p) || /(^|\/)\.\.(\/|$)/.test(p) || /[*?[\]{}$]/.test(p))
+			return `mkdir outside the working directory (${p})`;
 	}
 	return null;
 }
@@ -130,13 +213,29 @@ const none = (reason: string): AllowlistResult => ({ verdict: "no-opinion", reas
  * redirect-following; anything else goes to the judge. wget is not covered.
  * POST bodies are already escalated by the rules.
  */
-const LOOPBACK_URL = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?(?=[/?#]|$)[^\s[\]{}]*$/;
+const LOOPBACK_URL =
+	/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?(?=[/?#]|$)[^\s[\]{}]*$/;
 const OLLAMA_PORT = "11434";
 const FETCH_FLAGS = {
 	bare: "sSiIfv",
 	valued: "ocbHmX",
-	longBare: new Set(["--silent", "--show-error", "--include", "--head", "--fail", "--verbose", "--compressed"]),
-	longValued: new Set(["--output", "--cookie-jar", "--cookie", "--header", "--max-time", "--connect-timeout"]),
+	longBare: new Set([
+		"--silent",
+		"--show-error",
+		"--include",
+		"--head",
+		"--fail",
+		"--verbose",
+		"--compressed",
+	]),
+	longValued: new Set([
+		"--output",
+		"--cookie-jar",
+		"--cookie",
+		"--header",
+		"--max-time",
+		"--connect-timeout",
+	]),
 };
 
 function fetchTargetOk(v: string): boolean {
@@ -147,9 +246,11 @@ function fetchValueOk(bin: string, flag: string, v: string): string | null {
 	const f = flag.replace(/^-+/, "");
 	if (f === "o" || f === "output" || f === "c" || f === "cookie-jar")
 		return fetchTargetOk(v) ? null : `${bin} writes to ${v}`;
-	if (f === "b" || f === "cookie") return v.includes("=") || fetchTargetOk(v) ? null : `${bin} reads cookies from ${v}`;
+	if (f === "b" || f === "cookie")
+		return v.includes("=") || fetchTargetOk(v) ? null : `${bin} reads cookies from ${v}`;
 	if (f === "H" || f === "header") return v.startsWith("@") ? `${bin} reads ${v}` : null;
-	if (f === "m" || f === "max-time" || f === "connect-timeout") return /^\d{1,3}$/.test(v) ? null : `${bin} timeout is not a number`;
+	if (f === "m" || f === "max-time" || f === "connect-timeout")
+		return /^\d{1,3}$/.test(v) ? null : `${bin} timeout is not a number`;
 	if (f === "X") return v === "GET" || v === "HEAD" ? null : `${bin} -X ${v}`;
 	return `${bin} flag ${flag}`;
 }
@@ -163,8 +264,12 @@ const CURL_PROXY_ENV = /^(http|https|all)_proxy$/i;
  * in $CURL_HOME, $XDG_CONFIG_HOME, ~ or ~/.config and `-q` is not the first
  * argument. Shared with packages/permissions/s1-curl-loopback.ts.
  */
-export function curlEnvRefusal(qFirst: boolean, env: NodeJS.ProcessEnv = process.env): string | null {
-	for (const [k, v] of Object.entries(env)) if (v && CURL_PROXY_ENV.test(k)) return `curl with ${k} set`;
+export function curlEnvRefusal(
+	qFirst: boolean,
+	env: NodeJS.ProcessEnv = process.env,
+): string | null {
+	for (const [k, v] of Object.entries(env))
+		if (v && CURL_PROXY_ENV.test(k)) return `curl with ${k} set`;
 	if (qFirst) return null;
 	const dirs = new Set<string>();
 	for (const e of [env.CURL_HOME, env.XDG_CONFIG_HOME, env.HOME, homedir()]) if (e) dirs.add(e);
@@ -189,7 +294,8 @@ function loopbackFetchOk(bin: string, argsIn: string[]): string | null {
 		const a = args[i];
 		if (a.startsWith("--")) {
 			if (spec.longBare.has(a)) continue;
-			if (!spec.longValued.has(a) || i + 1 >= args.length) return `${bin} with ${a}, not a loopback-GET flag`;
+			if (!spec.longValued.has(a) || i + 1 >= args.length)
+				return `${bin} with ${a}, not a loopback-GET flag`;
 			const why = fetchValueOk(bin, a, args[++i]);
 			if (why) return why;
 		} else if (a.length > 1 && a.startsWith("-")) {
@@ -248,13 +354,67 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	if (!READ_ONLY_BINS.has(b)) return `${b} is not on the read-only list`;
 	const bad = WRITING_ARGS[b];
 	if (bad && args.some((a) => bad.test(a))) return `${b} with an argument that writes or runs`;
-	if (b === "uniq" && args.filter((a) => !a.startsWith("-")).length > 1) return "uniq with an output file";
+	if (b === "uniq" && args.filter((a) => !a.startsWith("-")).length > 1)
+		return "uniq with an output file";
 	return null;
 }
 
+/**
+ * `--git-dir` turns off git's safe.directory ownership check, so it could read config
+ * (and run its hooks or helpers) from a repo another user owns; `-C` keeps the check.
+ * We cannot know the directory git will run in (session workdir, `cd X &&`, option order),
+ * so only an absolute value is judged: it must start with "/", hold no "~" (the shell
+ * expands it) and no "." or ".." segment (the kernel follows links before `..`), and then
+ * be stat'd as written. It must be a directory (a gitfile redirects git unchecked) with no
+ * `commondir` file and no symlinked `config` (both redirect config, unchecked, to another
+ * repo; linked-worktree gitdirs therefore go to the judge). No getuid (Windows) means false.
+ */
+function gitDirOwnedByMe(value: string | undefined): boolean {
+	if (!value || typeof process.getuid !== "function") return false;
+	if (!value.startsWith("/") || value.includes("~")) return false;
+	if (value.split("/").some((seg) => seg === "." || seg === "..")) return false;
+	try {
+		const st = statSync(value);
+		if (!st.isDirectory() || st.uid !== process.getuid()) return false;
+	} catch {
+		return false;
+	}
+	try {
+		lstatSync(join(value, "commondir"));
+		return false;
+	} catch {
+		// no commondir: fine
+	}
+	try {
+		const c = lstatSync(join(value, "config"));
+		// a symlinked or foreign-owned config is read without an ownership check
+		if (!c.isFile() || c.uid !== process.getuid()) return false;
+	} catch {
+		// no config: fine
+	}
+	return true;
+}
+
 function gitOk(args: string[]): string | null {
+	// The shell expands braces and globs before git sees them, so the words we read are not the words git gets.
+	if (args.some((a) => /[*?[\]{}]/.test(a))) return "git with a glob or brace the shell expands";
 	let i = 0;
-	while (i < args.length && (args[i] === "--no-pager" || args[i] === "-C")) i += args[i] === "-C" ? 2 : 1;
+	// Global options skipped before the subcommand: -C <p>, --git-dir[=]<p>, --work-tree[=]<p>, --no-pager (#4299).
+	// A value taken by a spaced option is consumed, so `--git-dir push` never reads `push` as the subcommand.
+	while (i < args.length) {
+		const a = args[i];
+		if (a === "--no-pager" || a.startsWith("--work-tree=")) i += 1;
+		else if (a.startsWith("--git-dir=")) {
+			if (!gitDirOwnedByMe(a.slice(10))) return "git --git-dir is not a path owned by this user";
+			i += 1;
+		} else if (a === "--git-dir") {
+			if (!gitDirOwnedByMe(args[i + 1])) return "git --git-dir is not a path owned by this user";
+			i += 2;
+		} else if (a === "-C") {
+			i += 2;
+		} else if (a === "--work-tree") i += 2;
+		else break;
+	}
 	const sub = args[i];
 	const rest = args.slice(i + 1);
 	if (args.some((a) => GIT_WRITING_ARG.test(a))) return "git with an argument that writes or runs";
@@ -289,10 +449,12 @@ function dollarInDoubleQuotes(s: string): boolean {
 export function readOnlyAllowlist(command: string, opts: AllowlistOptions = {}): AllowlistResult {
 	try {
 		if (!command.trim()) return none("empty command");
-		if (!posixRulesApply(command, opts.shell ?? activeShellKind())) return none("the shell does not parse this line the POSIX way");
+		if (!posixRulesApply(command, opts.shell ?? activeShellKind()))
+			return none("the shell does not parse this line the POSIX way");
 		if (promptControlText(command) !== null) return none("carries prompt-control text");
 		const rules = decideRules(command);
-		if (rules.verdict !== "pass") return none(`rule ${rules.rule} fired (${rules.verdict}); rules win`);
+		if (rules.verdict !== "pass")
+			return none(`rule ${rules.rule} fired (${rules.verdict}); rules win`);
 		if (/\$\(|`|<\(|>\(|<<|\$\[/.test(command)) return none("has a substitution or heredoc");
 		if (/\$(?!\?)/.test(maskQuotes(command))) return none("has an unquoted $ expansion");
 		if (dollarInDoubleQuotes(command)) return none("has a $ expansion inside double quotes");
@@ -302,7 +464,10 @@ export function readOnlyAllowlist(command: string, opts: AllowlistOptions = {}):
 			const why = segmentOk(text, opts);
 			if (why) return none(why);
 		}
-		return { verdict: "pass-without-model", reason: opts.bunTest ? "read-only or bun test" : "read-only" };
+		return {
+			verdict: "pass-without-model",
+			reason: opts.bunTest ? "read-only or bun test" : "read-only",
+		};
 	} catch {
 		return none("allowlist parse error");
 	}
