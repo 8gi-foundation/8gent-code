@@ -9,7 +9,12 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { MAX_SCAN_CHARS, scrub, scrubKeepingAttachment } from "../secret-scanner";
+import {
+	MAX_ATTACHMENT_BASE64_CHARS,
+	MAX_SCAN_CHARS,
+	scrub,
+	scrubKeepingAttachment,
+} from "../secret-scanner";
 
 describe("SecretScanner - AWS access key id", () => {
 	it("redacts an AKIA key", () => {
@@ -902,5 +907,18 @@ describe("scrubKeepingAttachment (#4295)", () => {
 		// Wrong mime or marker is not exempt either.
 		const big = `y\n${MARKER} data:text/html;base64,${b64}`;
 		expect(scrubKeepingAttachment(big, MARKER).scrubbed).toContain("[REDACTED:input_cap]");
+	});
+
+	it("does not exempt an svg+xml attachment line", () => {
+		const svg = `x\n${MARKER} data:image/svg+xml;base64,${b64}`;
+		expect(scrubKeepingAttachment(svg, MARKER).scrubbed).toContain("[REDACTED:input_cap]");
+	});
+
+	it("falls back to the full scrub above the attachment length bound", () => {
+		const over = "A".repeat(MAX_ATTACHMENT_BASE64_CHARS + 1);
+		const out = scrubKeepingAttachment(`x\n${MARKER} data:image/png;base64,${over}`, MARKER);
+		expect(out.scrubbed).toContain("[REDACTED:input_cap]");
+		const ok = scrubKeepingAttachment(`x\n${MARKER} data:image/jpeg;base64,${b64}`, MARKER);
+		expect(ok.scrubbed).not.toContain("input_cap");
 	});
 });

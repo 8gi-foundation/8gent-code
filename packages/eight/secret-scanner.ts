@@ -567,9 +567,17 @@ function redactAssignments(
  * `<marker> data:<image mime>;base64,<pure base64>`. Pure base64 only, so the
  * exemption can never carry readable text.
  */
+/** Upper bound on an exempt data URL, in base64 chars. Larger falls back to the full scrub. */
+export const MAX_ATTACHMENT_BASE64_CHARS = 64 * 1024 * 1024;
+
 function attachmentLineRe(marker: string): RegExp {
 	const esc = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	return new RegExp(`^${esc} data:image/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/]+={0,2}$`);
+	// Allowlist of what resizeImage can emit: sharp keeps the input format
+	// (`image/${format}`, jpg mapped to jpeg), and an SVG input rasterizes to png.
+	// svg+xml and any other subtype fall back to the full scrub.
+	return new RegExp(
+		`^${esc} data:image/(?:png|jpeg|gif|webp|avif|heif|tiff);base64,[A-Za-z0-9+/]+={0,2}$`,
+	);
 }
 
 /**
@@ -583,7 +591,13 @@ function attachmentLineRe(marker: string): RegExp {
 export function scrubKeepingAttachment(text: string, marker: string): ScrubResult {
 	const cut = text.lastIndexOf("\n");
 	const last = cut === -1 ? text : text.slice(cut + 1);
-	if (cut === -1 || !attachmentLineRe(marker).test(last)) return scrub(text);
+	if (
+		cut === -1 ||
+		last.length > MAX_ATTACHMENT_BASE64_CHARS + 128 ||
+		!attachmentLineRe(marker).test(last)
+	) {
+		return scrub(text);
+	}
 	const result = scrub(text.slice(0, cut));
 	return { ...result, scrubbed: `${result.scrubbed}\n${last}` };
 }
