@@ -33,7 +33,7 @@ const realFetch = globalThis.fetch;
 
 beforeAll(async () => {
 	root = tempDir("tools-read-image-");
-	// 1400x900, wider than the 1024 cap, so the attached copy is downscaled.
+	// 1400x900, inside the 2560 cap, so the attached copy is the original.
 	const px = Buffer.alloc(1400 * 900 * 3, 40);
 	await sharp(px, { raw: { width: 1400, height: 900, channels: 3 } })
 		.png()
@@ -78,15 +78,15 @@ describe("read_image (#3641)", () => {
 		const { text, images } = splitImageAttachment(result);
 		expect(images).toHaveLength(1);
 		expect(images[0].startsWith("data:image/png;base64,")).toBe(true);
-		// The attached copy fits 1024x1024 and is a real PNG.
+		// A 1400x900 shot is inside the 2560 local cap, so the original is attached whole.
 		const attached = sharp(Buffer.from(images[0].slice("data:image/png;base64,".length), "base64"));
 		const meta = await attached.metadata();
 		expect(meta.format).toBe("png");
-		expect(meta.width).toBe(1024);
-		expect(meta.height).toBe(658);
+		expect(meta.width).toBe(1400);
+		expect(meta.height).toBe(900);
 		const parsed = JSON.parse(text) as Record<string, unknown>;
-		expect(parsed.width).toBe(1024);
-		expect(parsed.height).toBe(658);
+		expect(parsed.width).toBe(1400);
+		expect(parsed.height).toBe(900);
 		expect(parsed.format).toBe("png");
 		expect(String(parsed.attached)).toContain("attached");
 		expect(text).not.toContain("base64Preview");

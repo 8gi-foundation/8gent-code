@@ -71,7 +71,7 @@ export interface RunOptions {
  *   --cwd <dir>                  or --cwd=<dir>
  *   --max-turns <n>              or --max-turns=<n>
  *   --image <path>               or --image=<path>   (png, jpg, gif, webp; max 20 MB;
- *                                downscaled to fit 1024x1024; inside the working directory)
+ *                                downscaled to fit 2560x2560; inside the working directory)
  *   --no-workspace-boundary      do not set the workspace root (EIGHT_WORKSPACE_ROOT) for this run
  *                                (by default run mode sets it to the working directory; native
  *                                write_file and edit_file stay confined to the working directory either way)
@@ -84,7 +84,7 @@ export interface RunOptions {
  * model for that description, as in the TUI); the native AI SDK path (cloud
  * providers) is unchanged; Ollama's raw ChatML recovery path sends text
  * only; files over 20 MB are refused and the image is downscaled to fit
- * 1024x1024 before it leaves the process.
+ * 2560x2560 before it leaves the process.
  */
 export function parseRunArgs(argv: string[]): RunOptions {
 	let yes = false;
@@ -441,8 +441,8 @@ export const MAX_RUN_IMAGE_BYTES = 20 * 1024 * 1024;
  * The `--image` file as the agent takes it: base64 plus its media type (#3641).
  * A missing file, an unsupported extension or a file over MAX_RUN_IMAGE_BYTES
  * is a usage error, reported the way a missing prompt is, before any model is
- * contacted. The image is downscaled to fit 1024x1024 exactly as read_image
- * does (imageMaxSide: 1024 local, 2560 hosted), so what reaches the model is
+ * contacted. The image is downscaled to fit 2560x2560 exactly as read_image
+ * does (imageMaxSide: 2560 local and hosted), so what reaches the model is
  * bounded the same way on both paths; sharp's own pixel limit bounds the decode.
  * `original` is the file's own size, so a downscaled copy can be explained (#4293).
  */

@@ -3827,7 +3827,7 @@ export class ToolExecutor {
 
 		try {
 			// A model that can see gets the pixels (#3641): downscaled to fit
-			// imageMaxSide (1024 local, 2560 hosted; #4293) so a Retina screenshot does not swamp its context, and
+			// imageMaxSide (2560 local and hosted; #4293) so a Retina screenshot does not swamp its context, and
 			// attached to the next message by the text-tool loop. The text part
 			// is the metadata the model always had.
 			if (await this.visionCapable()) {

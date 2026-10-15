@@ -419,10 +419,10 @@ describe("`8gent run --image` size cap and downscale", () => {
 		expect(err?.message).toMatch(/too large|MB/);
 	});
 
-	test("a large --image reaches the model downscaled to fit 1024x1024", async () => {
+	test("a large --image reaches the model downscaled to fit 2560 on a local provider", async () => {
 		const start = bodies.length;
-		const px = Buffer.alloc(1400 * 900 * 3, 40);
-		await sharp(px, { raw: { width: 1400, height: 900, channels: 3 } })
+		const px = Buffer.alloc(3200 * 1800 * 3, 40);
+		await sharp(px, { raw: { width: 3200, height: 1800, channels: 3 } })
 			.png()
 			.toFile(join(repo, "wide.png"));
 		const write = spyOn(process.stdout, "write").mockImplementation(
@@ -454,8 +454,8 @@ describe("`8gent run --image` size cap and downscale", () => {
 		const meta = await sharp(
 			Buffer.from(url.slice("data:image/png;base64,".length), "base64"),
 		).metadata();
-		expect(meta.width).toBe(1024);
-		expect(meta.height).toBe(658);
+		expect(meta.width).toBe(2560);
+		expect(meta.height).toBe(1440);
 	}, 60_000);
 });
 
