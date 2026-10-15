@@ -110,7 +110,7 @@ describe("layoutMeasureLine and loadRunImage", () => {
 			expect([meta.width, meta.height]).toEqual([1024, 576]);
 			expect(r.original).toEqual({ width: 2560, height: 1440 });
 		} finally {
-			if (prev === undefined) process.env.EIGHT_IMAGE_MAX_SIDE = undefined;
+			if (prev === undefined) delete process.env.EIGHT_IMAGE_MAX_SIDE;
 			else process.env.EIGHT_IMAGE_MAX_SIDE = prev;
 		}
 	});
