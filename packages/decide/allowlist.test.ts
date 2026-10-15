@@ -14,7 +14,7 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, symlinkSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import {
@@ -591,6 +591,12 @@ describe("allowlist: git shell expansion and --git-dir ownership (#4300)", () =>
 		expect(pass("git --git-dir=/no/such/dir-4300 branch -a")).toBe(false);
 		expect(pass("git --git-dir /no/such/dir-4300 log")).toBe(false);
 		expect(pass("git --git-dir= log")).toBe(false);
+	});
+	test("--git-dir naming a gitfile I own is not auto-allowed (git follows it unchecked)", () => {
+		const gf = join(GD, "gitfile-4300");
+		writeFileSync(gf, "gitdir: /etc\n");
+		expect(pass(`git --git-dir=${gf} log`)).toBe(false);
+		expect(pass(`git --git-dir ${gf} branch -a`)).toBe(false);
 	});
 });
 

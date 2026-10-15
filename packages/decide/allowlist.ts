@@ -372,7 +372,8 @@ function gitDirOwnedByMe(value: string | undefined): boolean {
 	if (!value.startsWith("/") || value.includes("~")) return false;
 	if (value.split("/").some((seg) => seg === "." || seg === "..")) return false;
 	try {
-		return statSync(value).uid === process.getuid();
+		const st = statSync(value);
+		return st.isDirectory() && st.uid === process.getuid();
 	} catch {
 		return false;
 	}
