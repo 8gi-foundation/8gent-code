@@ -160,7 +160,7 @@ import {
 	TimeTravelStore,
 	checkpointEveryFromEnv,
 } from "./timetravel/checkpoint-store";
-import { ToolLoopDetector } from "./tool-loop-detector";
+import { ToolLoopDetector, isQuietSuccess } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor } from "./tools";
 import { TurnJournal } from "./turn-journal";
@@ -1294,9 +1294,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 				// Circuit breaker / loop detection, mirroring the native finish handler.
 				// A call refused before it ran does not spend the global budget (#3409).
-				this.loopDetector.record(toolName, args, { refused: refusedBeforeRun(toolName, args) });
+				this.loopDetector.record(toolName, args, {
+					refused: refusedBeforeRun(toolName, args),
+					succeeded: success && isQuietSuccess(toolName, shown),
+				});
 				const loopResult = this.loopDetector.check();
-				if (loopResult) {
+				if (loopResult?.recoverable) {
+					// A repeat of calls that all worked: tell the model, keep the turn (#4301).
+					console.log(`\n[LOOP NUDGE] ${loopResult.message}`);
+					result = `${result}\n\n[harness] ${loopResult.message}`;
+				} else if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
 					if (breakerStop === null) breakerStop = loopResult.userMessage;
 					this.abort({ kind: "circuit_breaker", reason: loopResult.message });
@@ -2600,9 +2607,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Circuit breaker: record call and check for loop patterns
 				this.loopDetector.record(event.toolName, event.args as Record<string, unknown>, {
 					refused: refusedBeforeRun(event.toolName, event.args as Record<string, unknown>),
+					succeeded: event.success && isQuietSuccess(event.toolName, resultStr),
 				});
 				const loopResult = this.loopDetector.check();
-				if (loopResult) {
+				if (loopResult?.recoverable) {
+					console.log(`\n[LOOP NUDGE] ${loopResult.message}`);
+					this.messageHistory.push({ role: "user", content: `[harness] ${loopResult.message}` });
+				} else if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
 					this.abort({ kind: "circuit_breaker", reason: loopResult.message });
 				}
