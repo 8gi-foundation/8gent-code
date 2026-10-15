@@ -14,6 +14,7 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import {
@@ -488,12 +489,11 @@ class CountingBackend implements DecideBackend {
 }
 
 describe("allowlist: git --git-dir / --work-tree global options (#4299)", () => {
-	const FORMS = [
-		"--git-dir=/srv/r.git",
-		"--git-dir /srv/r.git",
-		"--work-tree=/srv/w",
-		"--work-tree /srv/w",
-	];
+	// --git-dir must exist and be owned by the current user, so the pass cases use a real temp dir.
+	const GD = tempDir("gitdir-");
+	mkdirSync(join(GD, "push"));
+	mkdirSync(join(GD, "status"));
+	const FORMS = [`--git-dir=${GD}`, `--git-dir ${GD}`, "--work-tree=/srv/w", "--work-tree /srv/w"];
 	test("reads pass with each form", () => {
 		for (const f of FORMS) {
 			for (const sub of ["branch -a", "log", "log --oneline -5", "status", "rev-parse HEAD"]) {
@@ -528,21 +528,54 @@ describe("allowlist: git --git-dir / --work-tree global options (#4299)", () => 
 		}
 	});
 	test("combinations with -C and --no-pager still work", () => {
-		expect(pass("git -C /x --git-dir=/y log")).toBe(true);
-		expect(pass("git --no-pager --git-dir /y -C /x branch -a")).toBe(true);
-		expect(pass("git --git-dir=/y --work-tree=/w --no-pager status")).toBe(true);
-		expect(pass("git -C /x --git-dir=/y push")).toBe(false);
+		expect(pass(`git -C /x --git-dir=${GD} log`)).toBe(true);
+		expect(pass(`git --no-pager --git-dir ${GD} -C /x branch -a`)).toBe(true);
+		expect(pass(`git --git-dir=${GD} --work-tree=/w --no-pager status`)).toBe(true);
+		expect(pass(`git -C /x --git-dir=${GD} push`)).toBe(false);
 	});
 	test("a value that looks like a subcommand is not the subcommand", () => {
-		expect(pass("git --git-dir=push log")).toBe(true);
-		expect(pass("git --git-dir push log")).toBe(true);
-		expect(pass("git --git-dir=status push")).toBe(false);
-		expect(pass("git --git-dir status push")).toBe(false);
+		expect(pass(`git -C ${GD} --git-dir=push log`)).toBe(true);
+		expect(pass(`git -C ${GD} --git-dir push log`)).toBe(true);
+		expect(pass(`git -C ${GD} --git-dir=status push`)).toBe(false);
+		expect(pass(`git -C ${GD} --git-dir status push`)).toBe(false);
 		expect(pass("git --work-tree log reset --hard")).toBe(false);
 	});
 	test("writing args after the options are still refused", () => {
-		expect(pass("git --git-dir=/y diff --output=p.diff")).toBe(false);
-		expect(pass("git --git-dir=/y -c core.pager=x log")).toBe(false);
+		expect(pass(`git --git-dir=${GD} diff --output=p.diff`)).toBe(false);
+		expect(pass(`git --git-dir=${GD} -c core.pager=x log`)).toBe(false);
+	});
+});
+
+describe("allowlist: git shell expansion and --git-dir ownership (#4300)", () => {
+	const GD = tempDir("gitdir-own-");
+	test("brace forms are not auto-allowed", () => {
+		for (const c of [
+			"git --git-dir {x,push} log",
+			"git -C {x,push} log",
+			"git log {--output=f,x}",
+		]) {
+			expect(pass(c)).toBe(false);
+		}
+	});
+	test("glob forms are not auto-allowed", () => {
+		for (const c of ["git --git-dir * log", "git -C * log", "git log -- '*.ts'"]) {
+			expect(pass(c)).toBe(false);
+		}
+	});
+	test("--git-dir on a temp dir owned by the current user passes a read", () => {
+		expect(pass(`git --git-dir=${GD} branch -a`)).toBe(true);
+		expect(pass(`git --git-dir ${GD} log`)).toBe(true);
+	});
+	test("--git-dir resolves against a preceding -C", () => {
+		expect(
+			pass(`git -C ${join(GD, "..")} --git-dir=${join(GD, "..", GD.split("/").pop() ?? "")} log`),
+		).toBe(true);
+		expect(pass(`git -C ${GD} --git-dir=nope log`)).toBe(false);
+	});
+	test("--git-dir on a nonexistent path is not auto-allowed", () => {
+		expect(pass("git --git-dir=/no/such/dir-4300 branch -a")).toBe(false);
+		expect(pass("git --git-dir /no/such/dir-4300 log")).toBe(false);
+		expect(pass("git --git-dir= log")).toBe(false);
 	});
 });
 
