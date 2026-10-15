@@ -1022,6 +1022,12 @@ export class ToolExecutor {
 	 */
 	private visionCapable: () => Promise<boolean>;
 	private localRuntime: () => boolean;
+	/**
+	 * Results the harness itself built with an image attachment (#4295). Held by
+	 * value, so text a tool or a filename can produce never matches. execute()
+	 * consumes the entry; only a hit lets the scrubber hold the attachment line out.
+	 */
+	private harnessAttachmentResults = new Set<string>();
 	/** Finds the vision model describe_image calls (#3642). Injectable for tests. */
 	private resolveVisionModel: () => Promise<VisionRouterResult>;
 	/** The minimal-environment hint is appended once per session (see runCommand). */
@@ -2356,7 +2362,7 @@ export class ToolExecutor {
 		// read_image alone may end in a harness-emitted image attachment line, held out of
 		// the scan so a large image is not cut at the input cap (#4295).
 		const result =
-			toolName === IMAGE_ATTACHMENT_TOOL
+			toolName === IMAGE_ATTACHMENT_TOOL && this.harnessAttachmentResults.delete(raw)
 				? scrubKeepingAttachment(raw, IMAGE_ATTACHMENT_MARKER)
 				: scrubSecrets(raw);
 		if (result.redactedCount > 0) {
@@ -3857,7 +3863,9 @@ export class ToolExecutor {
 				// #3770: the copy above is downscaled, so give the real pixel geometry.
 				const measured = await this.layoutForRead(absolutePath);
 				const text = measured ? `${meta}\n${measured}` : meta;
-				return imageAttachmentResult(text, mimeType, shown.base64);
+				const withImage = imageAttachmentResult(text, mimeType, shown.base64);
+				this.harnessAttachmentResults.add(withImage);
+				return withImage;
 			}
 			const imageInfo = await readImage(absolutePath);
 			const measured = await this.layoutForRead(absolutePath);
