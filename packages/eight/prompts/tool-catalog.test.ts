@@ -193,6 +193,10 @@ describe("TOOL_PATTERNS_SEGMENT local server guidance (#3941)", () => {
 
 	it("the login note (#4072) is short, names the redaction marker and the file recipe, and sits with the curl rules", () => {
 		expect(LOCAL_LOGIN_NOTE.length).toBeLessThanOrEqual(300);
+		// #4303: copying the Username line to the same file truncates it and the sign-in posts no username.
+		expect(LOCAL_LOGIN_NOTE).toContain("only the password line");
+		expect(LOCAL_LOGIN_NOTE).toContain("curl -d username=NAME");
+		expect(LOCAL_LOGIN_NOTE).not.toContain("Username:");
 		expect(LOCAL_LOGIN_NOTE).not.toContain("—");
 		for (const rule of [
 			"[REDACTED:",

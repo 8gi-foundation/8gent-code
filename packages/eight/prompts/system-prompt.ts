@@ -360,9 +360,14 @@ export const LOCAL_SERVER_CURL_SHORT =
  * prints nothing; curl -d @file posts it with the newline stripped; a read_file of
  * .tmp/login still scrubs. Sits next to the curl rules in the full prompt
  * (TOOL_PATTERNS_SEGMENT) and both compact local prompts (agent.ts).
+ *
+ * #4303 (run 2026-10-15_064256): the model also sed-copied the Username line into the same
+ * .tmp/login. Each `w` truncates, so the file held the password alone and curl posted no username
+ * (401, 0 sign-ins). The username is not secret and read_file shows it, so the note says to copy
+ * the password line only.
  */
 export const LOCAL_LOGIN_NOTE =
-	"A test login in a project file may show as [REDACTED:...] in read_file. Never print, read_file or retype the value: copy it into a form body with run_command (sed -n 's/^Password: */password=/w .tmp/login' FILE, after mkdir -p .tmp) and send that file (curl -d username=NAME -d @.tmp/login URL).";
+	"A test login in a project file may show as [REDACTED:...] in read_file. Never print, read_file or retype the value: copy only the password line with run_command (sed -n 's/^Password: */password=/w .tmp/login' FILE, after mkdir -p .tmp), then post it (curl -d username=NAME -d @.tmp/login URL).";
 
 /**
  * Slides to video: JSON in, deterministic code out. Pilot media-brief-video (12 Oct 2026) showed a
