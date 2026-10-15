@@ -96,7 +96,7 @@ export function silentSuccessNote(command: string | undefined, workingDirectory?
 	const base = "Command completed successfully.";
 	const login = command ? LOGIN_COPY.exec(command.trim()) : null;
 	if (login) {
-		return `${base} It printed nothing. It copied the value into ${login[1]} and did not show it: do not read or retype it, do not repeat this command. Post it with curl -d @${login[1]} (add -d for the other fields).`;
+		return `${base} It printed nothing. It copied the value into ${login[1]} and did not show it: do not read or retype it, do not repeat this command. Post it with curl -s -d @${login[1]} http://127.0.0.1:<port>/path (add -d for the other fields, no -L: on a 302 read the Location header and make a second curl).`;
 	}
 	const w = command ? writtenFiles(command) : { readable: [], private: [] };
 	if (w.readable.length === 0 && w.private.length === 0) return base;

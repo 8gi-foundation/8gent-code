@@ -371,7 +371,7 @@ export const LOCAL_SERVER_CURL_SHORT =
  * the password line only.
  */
 export const LOCAL_LOGIN_NOTE =
-	"A test login in a project file may show as [REDACTED:...] in read_file. Never print, read_file or retype the value: copy only the password line with run_command (sed -n 's/^Password: */password=/w .tmp/login' FILE, after mkdir -p .tmp), then post it (curl -d username=NAME -d @.tmp/login URL).";
+	"A test login in a project file may show as [REDACTED:...] in read_file. Never print, read_file or retype the value: copy only the password line with run_command (sed -n 's/^Password: */password=/w .tmp/login' FILE, after mkdir -p .tmp), then post it (curl -s -d username=NAME -d @.tmp/login http://127.0.0.1:PORT/..., no -L).";
 
 /**
  * Slides to video: JSON in, deterministic code out. Pilot media-brief-video (12 Oct 2026) showed a
