@@ -1,55 +1,38 @@
 /**
- * Keep the session scratch dir (`.tmp/`) out of git status without touching
- * the committed .gitignore (#4236). Writes `.tmp/` to the repo's local
- * info/exclude, resolved with git so linked worktrees land on the right file.
- * Idempotent; silent no-op outside a git repo.
+ * Keep the session scratch dir (`.tmp/`) out of git status without touching the
+ * committed .gitignore (#4236) and without touching the git directory (#4316).
+ * The dir carries its own `.gitignore` containing `*`: git then ignores every file in
+ * it, the `.gitignore` included, so status stays clean and `.git/` stays byte-identical
+ * (the SIGI nothing-committed digest hashes config, hooks, info and refs).
+ * Idempotent; silent no-op when `.tmp/` is absent or not inside a git work tree.
  */
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 
-export const SCRATCH_EXCLUDE_LINE = ".tmp/";
+export const SCRATCH_DIR = ".tmp";
+export const SCRATCH_IGNORE_BODY = "*\n";
 
-/** Returns true when the line was added, false when already present or not a repo. */
+/** Returns true when the ignore file was written, false when already present or not applicable. */
 export function ensureScratchExcluded(cwd: string): boolean {
 	try {
-		const r = spawnSync("git", ["rev-parse", "--git-path", "info/exclude"], {
+		const dir = resolve(cwd, SCRATCH_DIR);
+		if (!existsSync(dir)) return false;
+		const file = resolve(dir, ".gitignore");
+		if (existsSync(file)) return false;
+		// Read-only probe: rev-parse never writes to .git, unlike status (index refresh).
+		const r = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
 			cwd,
 			encoding: "utf8",
 			timeout: 5000,
 		});
-		if (r.status !== 0) return false;
-		const out = (r.stdout ?? "").trim();
-		if (!out) return false;
-		const file = resolve(cwd, out);
-		const lines = existsSync(file) ? readFileSync(file, "utf8").split(/\r?\n/) : [];
-		if (lines.some((l) => l.trim() === SCRATCH_EXCLUDE_LINE || l.trim() === ".tmp")) return false;
-		mkdirSync(dirname(file), { recursive: true });
-		if (!existsSync(file)) {
-			writeFileSync(file, `${SCRATCH_EXCLUDE_LINE}\n`);
-		} else {
-			const text = readFileSync(file, "utf8");
-			appendFileSync(
-				file,
-				`${text.length > 0 && !text.endsWith("\n") ? "\n" : ""}${SCRATCH_EXCLUDE_LINE}\n`,
-			);
-		}
+		if (r.status !== 0 || r.stdout.trim() !== "true") return false;
+		writeFileSync(file, SCRATCH_IGNORE_BODY);
 		return true;
 	} catch {
 		return false;
 	}
 }
 
-/**
- * Lazy form (#4241): touch .git/info/exclude only once `.tmp/` actually exists
- * in the working directory, so a session that never writes scratch leaves the
- * git directory byte-identical (the SIGI nothing-committed digest hashes info/).
- */
-export function ensureScratchExcludedIfPresent(cwd: string): boolean {
-	try {
-		if (!existsSync(resolve(cwd, ".tmp"))) return false;
-		return ensureScratchExcluded(cwd);
-	} catch {
-		return false;
-	}
-}
+/** Kept for the call site in tools.ts: the dir must already exist, which ensureScratchExcluded checks. */
+export const ensureScratchExcludedIfPresent = ensureScratchExcluded;

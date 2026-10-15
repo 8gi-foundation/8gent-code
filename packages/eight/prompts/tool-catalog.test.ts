@@ -22,6 +22,7 @@ import {
 	LOCAL_SERVER_CURL_SHORT,
 	REVIEW_FOCUS_NOTE,
 	SLIDES_TO_VIDEO_NOTE,
+	TICKET_FILE_NOTE,
 	TOOL_CATALOG_SEGMENT,
 	TOOL_PATTERNS_SEGMENT,
 	buildToolCatalogSegment,
@@ -38,7 +39,7 @@ import {
  * +33 in #4274 so make_docx, make_xlsx and make_pptx sit in the creative category beside make_pdf;
  * +85 in #4306 so the folder note tells the model rmdir is blocked and to name the mkdir path first).
  */
-const POSIX_CAP = 2373;
+const POSIX_CAP = 2454; // +81 for TICKET_FILE_NOTE (#4316)
 // The Windows environment line names the shell and is longer than the POSIX one; the budget
 // for everything else stays fixed, so a Windows host gets exactly the difference.
 const CONCISE_CATALOG_MAX_BYTES =
@@ -93,7 +94,7 @@ describe("buildToolCatalogSegment", () => {
 	});
 
 	it("fits in a reasonable token budget (< 4KB default, within CONCISE_CATALOG_MAX_BYTES concise)", () => {
-		expect(TOOL_CATALOG_SEGMENT.length).toBeLessThan(4096);
+		expect(TOOL_CATALOG_SEGMENT.length).toBeLessThan(4176);
 		const concise = buildToolCatalogSegment({ concise: true });
 		expect(Buffer.byteLength(concise)).toBeLessThanOrEqual(CONCISE_CATALOG_MAX_BYTES);
 	});
@@ -463,5 +464,18 @@ describe("FOLDER_NOTE (#4306)", () => {
 
 	it("is in the full catalog next to the scratch-dir note", () => {
 		expect(buildToolCatalogSegment()).toContain(FOLDER_NOTE);
+	});
+});
+
+describe("TICKET_FILE_NOTE (#4316)", () => {
+	it("asks for one file, stays short and plain", () => {
+		expect(TICKET_FILE_NOTE.length).toBeLessThanOrEqual(90);
+		expect(TICKET_FILE_NOTE).toContain("only the one");
+		expect(TICKET_FILE_NOTE).not.toContain("\u2014");
+		expect(TICKET_FILE_NOTE.toLowerCase()).not.toContain("agent");
+	});
+
+	it("is in the full catalog", () => {
+		expect(buildToolCatalogSegment()).toContain(TICKET_FILE_NOTE);
 	});
 });

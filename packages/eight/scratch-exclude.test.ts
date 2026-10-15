@@ -1,10 +1,18 @@
 import { describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-	SCRATCH_EXCLUDE_LINE,
+	SCRATCH_IGNORE_BODY,
 	ensureScratchExcluded,
 	ensureScratchExcludedIfPresent,
 } from "./scratch-exclude";
@@ -12,60 +20,60 @@ import {
 const git = (cwd: string, ...a: string[]) =>
 	spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd, encoding: "utf8" });
 const dir = () => mkdtempSync(join(tmpdir(), "scratch-ex-"));
-const count = (f: string) =>
-	readFileSync(f, "utf8")
-		.split("\n")
-		.filter((l) => l === SCRATCH_EXCLUDE_LINE).length;
 
-describe("ensureScratchExcluded (#4236)", () => {
-	it("adds .tmp/ once and is idempotent; git status hides .tmp", () => {
+/** Same files the pilot judge hashes (fixtures/judges/lib.ts gitStateDigest). */
+const gitFiles = (d: string): string => {
+	const out: string[] = [];
+	const walk = (rel: string) => {
+		const p = join(d, ".git", rel);
+		if (!existsSync(p)) return;
+		if (statSync(p).isDirectory()) for (const n of readdirSync(p).sort()) walk(`${rel}/${n}`);
+		else out.push(`${rel}:${readFileSync(p, "utf8")}`);
+	};
+	for (const rel of ["config", "HEAD", "info", "refs", "packed-refs"]) walk(rel);
+	return out.join("\n");
+};
+
+describe("ensureScratchExcluded (#4236, #4316)", () => {
+	it("hides .tmp from git status and leaves .git byte-identical", () => {
 		const d = dir();
 		git(d, "init", "-q");
+		git(d, "commit", "-q", "--allow-empty", "-m", "i");
+		const before = gitFiles(d);
+		mkdirSync(join(d, ".tmp/verify"), { recursive: true });
+		writeFileSync(join(d, ".tmp/verify/x.ts"), "x");
 		expect(ensureScratchExcluded(d)).toBe(true);
 		expect(ensureScratchExcluded(d)).toBe(false);
-		expect(count(join(d, ".git/info/exclude"))).toBe(1);
-		spawnSync("mkdir", ["-p", join(d, ".tmp/verify")]);
-		writeFileSync(join(d, ".tmp/verify/x.ts"), "x");
+		expect(readFileSync(join(d, ".tmp/.gitignore"), "utf8")).toBe(SCRATCH_IGNORE_BODY);
 		expect(git(d, "status", "--porcelain").stdout).toBe("");
+		expect(gitFiles(d)).toBe(before);
 	});
 
-	it("appends on a new line when the file lacks a trailing newline", () => {
+	it("does nothing until .tmp/ exists", () => {
 		const d = dir();
 		git(d, "init", "-q");
-		const f = join(d, ".git/info/exclude");
-		writeFileSync(f, "foo");
-		ensureScratchExcluded(d);
-		expect(readFileSync(f, "utf8")).toBe("foo\n.tmp/\n");
+		const before = gitFiles(d);
+		expect(ensureScratchExcludedIfPresent(d)).toBe(false);
+		expect(existsSync(join(d, ".tmp"))).toBe(false);
+		expect(gitFiles(d)).toBe(before);
 	});
 
-	it("resolves the shared exclude file from a linked worktree", () => {
+	it("works from a linked worktree", () => {
 		const d = dir();
 		git(d, "init", "-q");
 		git(d, "commit", "-q", "--allow-empty", "-m", "i");
 		const wt = join(dir(), "wt");
 		expect(git(d, "worktree", "add", "-q", "-b", "b", wt).status).toBe(0);
+		mkdirSync(join(wt, ".tmp"));
+		writeFileSync(join(wt, ".tmp/x"), "x");
 		expect(ensureScratchExcluded(wt)).toBe(true);
-		expect(count(join(d, ".git/info/exclude"))).toBe(1);
+		expect(git(wt, "status", "--porcelain").stdout).toBe("");
 	});
 
 	it("is a silent no-op outside a git repo", () => {
 		const d = dir();
+		mkdirSync(join(d, ".tmp"));
 		expect(ensureScratchExcluded(d)).toBe(false);
-	});
-});
-
-describe("ensureScratchExcludedIfPresent (#4241)", () => {
-	it("leaves .git byte-identical until .tmp/ exists, then excludes it", () => {
-		const d = dir();
-		git(d, "init", "-q");
-		const f = join(d, ".git/info/exclude");
-		const before = readFileSync(f, "utf8");
-		expect(ensureScratchExcludedIfPresent(d)).toBe(false);
-		expect(readFileSync(f, "utf8")).toBe(before);
-		spawnSync("mkdir", ["-p", join(d, ".tmp")]);
-		writeFileSync(join(d, ".tmp/x"), "x");
-		expect(ensureScratchExcludedIfPresent(d)).toBe(true);
-		expect(count(f)).toBe(1);
-		expect(git(d, "status", "--porcelain").stdout).toBe("");
+		expect(existsSync(join(d, ".tmp/.gitignore"))).toBe(false);
 	});
 });
