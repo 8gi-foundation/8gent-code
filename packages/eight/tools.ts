@@ -26,6 +26,7 @@ import {
 	resolveAttachment,
 } from "../ai/post-message";
 import {
+	IMAGE_ATTACHMENT_MARKER,
 	IMAGE_ATTACHMENT_TOOL,
 	hasImageAttachmentLine,
 	imageAttachmentResult,
@@ -258,7 +259,7 @@ import { layoutMeasureLine } from "./layout-measure";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { RetiredFacts } from "./retired-facts";
 import { ensureScratchExcludedIfPresent } from "./scratch-exclude";
-import { scrub as scrubSecrets } from "./secret-scanner";
+import { scrubKeepingAttachment, scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
 import { USE_SKILL_DESCRIPTION, useSkill } from "./use-skill";
 import { type VisionRouterResult, findVisionModel } from "./vision-router";
@@ -2352,7 +2353,12 @@ export class ToolExecutor {
 		// Order is contract: SecretScanner -> [Cache lookup, #2462] -> execute
 		// -> ArtifactStore persist (#2463). Scrub MUST run before persist so
 		// no secret value ever lands on disk.
-		const result = scrubSecrets(raw);
+		// read_image alone may end in a harness-emitted image attachment line, held out of
+		// the scan so a large image is not cut at the input cap (#4295).
+		const result =
+			toolName === IMAGE_ATTACHMENT_TOOL
+				? scrubKeepingAttachment(raw, IMAGE_ATTACHMENT_MARKER)
+				: scrubSecrets(raw);
 		if (result.redactedCount > 0) {
 			// Log redaction event to telemetry (no secret values, just metadata).
 			console.warn(

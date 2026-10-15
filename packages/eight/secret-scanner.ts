@@ -97,7 +97,8 @@ const RULES: Rule[] = [
 	{ id: "slack_token", pattern: /\bxox[abprs]-[0-9A-Za-z\-]{10,72}\b/g },
 	{
 		id: "slack_webhook",
-		pattern: /https:\/\/hooks\.slack\.com\/services\/T[A-Za-z0-9_]{6,32}\/B[A-Za-z0-9_]{6,32}\/[A-Za-z0-9_]{16,64}/g,
+		pattern:
+			/https:\/\/hooks\.slack\.com\/services\/T[A-Za-z0-9_]{6,32}\/B[A-Za-z0-9_]{6,32}\/[A-Za-z0-9_]{16,64}/g,
 	},
 	{ id: "npm_token", pattern: /\bnpm_[A-Za-z0-9]{36}\b/g },
 	{ id: "huggingface_token", pattern: /\bhf_[A-Za-z0-9]{30,64}\b/g },
@@ -105,9 +106,15 @@ const RULES: Rule[] = [
 	{ id: "xai_api_key", pattern: /\bxai-[A-Za-z0-9]{70,100}\b/g },
 	{ id: "sendgrid_api_key", pattern: /\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}(?![\w-])/g },
 	{ id: "twilio_api_key", pattern: /\bSK[0-9a-fA-F]{32}\b/g },
-	{ id: "discord_token", pattern: /\b[MNO][A-Za-z0-9_-]{23,25}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,38}\b/g },
+	{
+		id: "discord_token",
+		pattern: /\b[MNO][A-Za-z0-9_-]{23,25}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,38}\b/g,
+	},
 	{ id: "telegram_bot_token", pattern: /(?<![\w])\d{8,10}:[A-Za-z0-9_\-]{35}(?![\w\-])/g },
-	{ id: "jwt", pattern: /\beyJ[A-Za-z0-9_\-]{8,4096}\.eyJ[A-Za-z0-9_\-]{8,8192}\.[A-Za-z0-9_\-]{8,4096}/g },
+	{
+		id: "jwt",
+		pattern: /\beyJ[A-Za-z0-9_\-]{8,4096}\.eyJ[A-Za-z0-9_\-]{8,8192}\.[A-Za-z0-9_\-]{8,4096}/g,
+	},
 	// Azure SAS signature in a query string.
 	{ id: "azure_sas", pattern: /(?<=[?&]sig=)[A-Za-z0-9%+\/=]{16,256}/g },
 ];
@@ -122,12 +129,14 @@ const URL_TOKEN =
 
 const AUTH_HEADER =
 	/(?<![\w-])((?:proxy-)?authorization[ \t]{0,16}:[ \t]{0,16})(?:(bearer|basic|token|digest|negotiate|ntlm)([ \t]{1,16}))?([^\r\n]{1,4096})/gi;
-const COOKIE_HEADER = /(?<![\w-])(set-cookie|cookie)([ \t]{0,16}:[ \t]{0,16})([^\r\n"'`]{1,8192})/gi;
+const COOKIE_HEADER =
+	/(?<![\w-])(set-cookie|cookie)([ \t]{0,16}:[ \t]{0,16})([^\r\n"'`]{1,8192})/gi;
 const BEARER = /\b(Bearer[ \t]{1,16})([A-Za-z0-9._~+\/\-]{16,4096}=*)/g;
 
 const CURL_USER =
 	/(\bcurl\b[^\n]{0,512}?[ \t](?:-u|--user)(?:[ \t]{1,16}|=)?)(["']?)([^\s:"']{0,128}):([^\s"']{1,512})\2/g;
-const SSHPASS = /(\bsshpass\b[^\n]{0,64}?[ \t]-p[ \t]{0,16})(?:'([^'\n]{1,512})'|"([^"\n]{1,512})"|([^\s'"]{1,512}))/g;
+const SSHPASS =
+	/(\bsshpass\b[^\n]{0,64}?[ \t]-p[ \t]{0,16})(?:'([^'\n]{1,512})'|"([^"\n]{1,512})"|([^\s'"]{1,512}))/g;
 const MYSQL_P =
 	/(\b(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)\b[^\n]{0,256}?[ \t]-p)(?:'([^'\n]{1,512})'|"([^"\n]{1,512})"|([^\s'"\-][^\s'"]{0,511}))/g;
 const LONG_FLAG = /(?<![\w-])--([A-Za-z][A-Za-z0-9_\-]{0,63})(=|[ \t]{1,16})/g;
@@ -146,10 +155,42 @@ const YAML_BLOCK_HEAD = /^[|>][+-]?[0-9]?[ \t]*(?:#.*)?$/;
 
 type Family = "strong" | "weak" | "auth";
 
-const STRONG_WORDS = new Set(["password", "passwd", "pwd", "secret", "secrets", "private", "passphrase", "secretkey", "privatekey", "clientsecret"]);
-const WEAK_WORDS = new Set(["key", "token", "credential", "credentials", "apikey", "accesskey", "authtoken", "accesstoken", "refreshtoken"]);
+const STRONG_WORDS = new Set([
+	"password",
+	"passwd",
+	"pwd",
+	"secret",
+	"secrets",
+	"private",
+	"passphrase",
+	"secretkey",
+	"privatekey",
+	"clientsecret",
+]);
+const WEAK_WORDS = new Set([
+	"key",
+	"token",
+	"credential",
+	"credentials",
+	"apikey",
+	"accesskey",
+	"authtoken",
+	"accesstoken",
+	"refreshtoken",
+]);
 // A name whose last part is one of these points at a secret, it is not one.
-const POINTER_SUFFIX = new Set(["url", "uri", "endpoint", "host", "path", "file", "dir", "name", "type", "header"]);
+const POINTER_SUFFIX = new Set([
+	"url",
+	"uri",
+	"endpoint",
+	"host",
+	"path",
+	"file",
+	"dir",
+	"name",
+	"type",
+	"header",
+]);
 
 function family(name: string): Family | null {
 	const parts = name
@@ -171,11 +212,15 @@ function family(name: string): Family | null {
 }
 
 const UPPER_SNAKE = "[A-Z_][A-Z0-9_]*";
-const PLACEHOLDER = /^(?:\$\(.*\)|\$\{\{.*\}\}|\{\{.*\}\}|\*+|x+|true|false|null|none|nil|undefined|yes|no|on|off)$/i;
+const PLACEHOLDER =
+	/^(?:\$\(.*\)|\$\{\{.*\}\}|\{\{.*\}\}|\*+|x+|true|false|null|none|nil|undefined|yes|no|on|off)$/i;
 // Wrappers count only around UPPER_SNAKE names: ${DB_PASSWORD} yes, ${Zq9x} no.
-const WRAPPED_NAME = new RegExp(`^(?:\\$${UPPER_SNAKE}|\\$\\{${UPPER_SNAKE}\\}|<${UPPER_SNAKE}>|%${UPPER_SNAKE}%)$`);
+const WRAPPED_NAME = new RegExp(
+	`^(?:\\$${UPPER_SNAKE}|\\$\\{${UPPER_SNAKE}\\}|<${UPPER_SNAKE}>|%${UPPER_SNAKE}%)$`,
+);
 const TEMPLATE_VALUE = /^(?:your[_\-][\w\-]*|changeme|change[_\-]me|replace[_\-]me|placeholder)$/i;
-const ENV_REF = /^(?:process\.env|import\.meta\.env|os\.environ|Deno\.env|Bun\.env)\b[\w.$\[\]'"]*[,;]?$/;
+const ENV_REF =
+	/^(?:process\.env|import\.meta\.env|os\.environ|Deno\.env|Bun\.env)\b[\w.$\[\]'"]*[,;]?$/;
 const CALL = /^(?:await\s+|new\s+)?[A-Za-z_$][\w$.]*\([^()\n]*\)[\w$.()]*[,;]?$/;
 const AWAIT_EXPR = /^await\s+[A-Za-z_$][\w$.]*[,;]?$/;
 const TS_TYPE =
@@ -212,9 +257,14 @@ function shouldRedact(value: string, fam: Family): boolean {
 	// Dotted refs, paths and plain URLs are exempt only when no segment looks
 	// like a key, so API_KEY=/<secret> and ?k=<secret> still redact.
 	if ((DOTTED_IDENT.test(v) || FILE_PATH.test(v)) && !hasKeyLikeSegment(v)) return false;
-	if (PLAIN_URL.test(v) && !hasKeyLikeSegment(v.slice(v.indexOf("?") + 1 || v.length))) return false;
+	if (PLAIN_URL.test(v) && !hasKeyLikeSegment(v.slice(v.indexOf("?") + 1 || v.length)))
+		return false;
 	// kebab cache keys: build-linux-x64-abc123, node-modules-8f3a9c1e
-	if (/^[a-z0-9]+(?:-[a-z0-9]+){2,}$/.test(v) && (v.match(/(?:^|-)[a-z]{3,}(?=-|$)/g)?.length ?? 0) >= 2) return false;
+	if (
+		/^[a-z0-9]+(?:-[a-z0-9]+){2,}$/.test(v) &&
+		(v.match(/(?:^|-)[a-z]{3,}(?=-|$)/g)?.length ?? 0) >= 2
+	)
+		return false;
 	if (fam === "auth") return v.length >= 16 || (hasLetterDigit(v) && v.length >= 8);
 	return v.length >= 16 || hasLetterDigit(v);
 }
@@ -251,7 +301,14 @@ function overrun(text: string, q: number, quote: string | null): number {
  * quote (or end of line if unclosed). Unquoted values for strong names run
  * to end of line, except in JSON/YAML flow context where , ; ) ] } end them.
  */
-function parseValue(text: string, pos: number, fam: Family, sep: string, flow: boolean, oneToken: boolean): ValueSpan | null {
+function parseValue(
+	text: string,
+	pos: number,
+	fam: Family,
+	sep: string,
+	flow: boolean,
+	oneToken: boolean,
+): ValueSpan | null {
 	let p = pos;
 	while (p < text.length && (text[p] === " " || text[p] === "\t")) p++;
 	// "password":\n  "V" - a JSON value on the next line.
@@ -338,7 +395,8 @@ export function scrub(text: string): ScrubResult {
 	}
 
 	out = out.replace(URL_PASSWORD, (match, scheme: string, user: string, pass: string) => {
-		if (pass.includes("[REDACTED:") || isPlaceholder(pass) || /^(?:pass|password)$/i.test(pass)) return match;
+		if (pass.includes("[REDACTED:") || isPlaceholder(pass) || /^(?:pass|password)$/i.test(pass))
+			return match;
 		if (/^\d{1,5}(?:\/|$)/.test(pass)) return match; // host:port/path@x, not a password
 		fire("url_password");
 		return `${scheme}${user}:[REDACTED:url_password]@`;
@@ -369,13 +427,16 @@ export function scrub(text: string): ScrubResult {
 	out = out.replace(COOKIE_HEADER, (_match, name: string, sep: string, body: string) => {
 		const setCookie = name.toLowerCase() === "set-cookie";
 		let done = false;
-		const red = body.replace(/(^|;[ \t]*)([^=;\s]{1,256})=([^;\r\n]*)/g, (m, lead: string, k: string, v: string) => {
-			if (done) return m;
-			if (setCookie) done = true; // only the first pair; the rest are attributes
-			if (!v.trim() || v.includes("[REDACTED:") || isPlaceholder(v.trim())) return m;
-			fire("cookie");
-			return `${lead}${k}=[REDACTED:cookie]`;
-		});
+		const red = body.replace(
+			/(^|;[ \t]*)([^=;\s]{1,256})=([^;\r\n]*)/g,
+			(m, lead: string, k: string, v: string) => {
+				if (done) return m;
+				if (setCookie) done = true; // only the first pair; the rest are attributes
+				if (!v.trim() || v.includes("[REDACTED:") || isPlaceholder(v.trim())) return m;
+				fire("cookie");
+				return `${lead}${k}=[REDACTED:cookie]`;
+			},
+		);
 		return `${name}${sep}${red}`;
 	});
 	out = out.replace(BEARER, (match, head: string, tok: string) => {
@@ -433,7 +494,12 @@ function looksLikeAwsSecret(v: string): boolean {
  * For --flags, group 1 is the flag name and group 2 the separator. For
  * assignments, group 1 is the name quote, 2 the name, 4 the separator.
  */
-function redactAssignments(text: string, re: RegExp, fire: (id: string) => void, isFlag: boolean): string {
+function redactAssignments(
+	text: string,
+	re: RegExp,
+	fire: (id: string) => void,
+	isFlag: boolean,
+): string {
 	const parts: string[] = [];
 	let last = 0;
 	re.lastIndex = 0;
@@ -468,7 +534,10 @@ function redactAssignments(text: string, re: RegExp, fire: (id: string) => void,
 					if (line.trim() !== "") bodyEnd = q;
 				}
 				if (bodyEnd > lineEnd + 1) {
-					parts.push(text.slice(last, lineEnd + 1), `${" ".repeat(indent + 2)}[REDACTED:secret_assignment]\n`);
+					parts.push(
+						text.slice(last, lineEnd + 1),
+						`${" ".repeat(indent + 2)}[REDACTED:secret_assignment]\n`,
+					);
 					fire("secret_assignment");
 					last = bodyEnd;
 					re.lastIndex = bodyEnd;
@@ -491,4 +560,30 @@ function redactAssignments(text: string, re: RegExp, fire: (id: string) => void,
 	if (last === 0) return text;
 	parts.push(text.slice(last));
 	return parts.join("");
+}
+
+/**
+ * Strict shape of the one line the harness emits for an image attachment:
+ * `<marker> data:<image mime>;base64,<pure base64>`. Pure base64 only, so the
+ * exemption can never carry readable text.
+ */
+function attachmentLineRe(marker: string): RegExp {
+	const esc = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return new RegExp(`^${esc} data:image/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/]+={0,2}$`);
+}
+
+/**
+ * scrub() for a tool result that may end in a harness-emitted image attachment
+ * (read_image). That line is a base64 data URL that can pass MAX_SCAN_CHARS;
+ * cutting it corrupts the image and the model endpoint answers 400. Only the
+ * FINAL line, and only when it matches the strict attachment shape, is held
+ * out; everything else, including any earlier look-alike line, is scanned as
+ * usual. The cap is unchanged.
+ */
+export function scrubKeepingAttachment(text: string, marker: string): ScrubResult {
+	const cut = text.lastIndexOf("\n");
+	const last = cut === -1 ? text : text.slice(cut + 1);
+	if (cut === -1 || !attachmentLineRe(marker).test(last)) return scrub(text);
+	const result = scrub(text.slice(0, cut));
+	return { ...result, scrubbed: `${result.scrubbed}\n${last}` };
 }

@@ -92,6 +92,35 @@ describe("read_image (#3641)", () => {
 		expect(text).not.toContain("base64Preview");
 	});
 
+	test("a hosted-size noise screenshot (over the 2 MiB scan cap) survives the scrubber whole (#4295)", async () => {
+		const w = 3000;
+		const noise = Buffer.alloc(w * w * 3);
+		let seed = 99;
+		for (let i = 0; i < noise.length; i++) {
+			seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+			noise[i] = seed >> 16;
+		}
+		await sharp(noise, { raw: { width: w, height: w, channels: 3 } })
+			.png()
+			.toFile(path.join(root, "huge.png"));
+		const executor = new ToolExecutor(root, "primary", undefined, {
+			visionCapable: async () => true,
+			localRuntime: () => false,
+		});
+		process.env.EIGHT_IMAGE_MAX_SIDE = "4096";
+		const result = await executor.execute("read_image", { path: "huge.png" }).finally(() => {
+			Reflect.deleteProperty(process.env, "EIGHT_IMAGE_MAX_SIDE");
+		});
+		expect(result.length).toBeGreaterThan(2 * 1024 * 1024);
+		expect(result).not.toContain("input_cap");
+		const { images } = splitImageAttachment(result);
+		expect(images).toHaveLength(1);
+		const meta = await sharp(
+			Buffer.from(images[0].slice("data:image/png;base64,".length), "base64"),
+		).metadata();
+		expect(meta.width).toBe(w);
+	});
+
 	test("a screenshot over the artifact threshold still arrives whole, not as a 1KB preview", async () => {
 		// Noise does not compress, so the PNG is far above the artifact store's
 		// threshold. The chip used to cut the base64 mid-stream and the model
