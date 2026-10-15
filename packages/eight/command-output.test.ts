@@ -101,14 +101,24 @@ describe("formatCommandOutput (#3373)", () => {
 describe("silent success names the file it wrote (browser_operation pilot)", () => {
 	const cwd = "/work/run";
 	test("curl -o is readable; the cookie jar is named but never offered to read_file", () => {
-		const r = formatCommandOutput(0, "", "", "curl -s -c cj.txt http://127.0.0.1:1/ -o login.html", cwd);
+		const r = formatCommandOutput(
+			0,
+			"",
+			"",
+			"curl -s -c cj.txt http://127.0.0.1:1/ -o login.html",
+			cwd,
+		);
 		expect(r).toContain("wrote login.html.");
 		expect(r).toContain("read_file on that file");
 		expect(r).toContain("cj.txt holds session cookies or headers: do not read it");
 		expect(r).not.toMatch(/wrote [^.]*cj\.txt/);
 	});
 	test("dump headers and cookie jars alone give no read_file suggestion", () => {
-		for (const c of ["curl -s -D h.txt http://x/", "curl --cookie-jar=j http://x/", "curl --dump-header h http://x/"]) {
+		for (const c of [
+			"curl -s -D h.txt http://x/",
+			"curl --cookie-jar=j http://x/",
+			"curl --dump-header h http://x/",
+		]) {
 			const r = formatCommandOutput(0, "", "", c, cwd);
 			expect(r).not.toContain("read_file");
 			expect(r).toContain("do not read");
@@ -124,7 +134,9 @@ describe("silent success names the file it wrote (browser_operation pilot)", () 
 			const r = formatCommandOutput(0, "", "", `curl -s -o ${f} http://x/`, cwd);
 			expect(r).toContain("inside the working directory");
 		}
-		expect(formatCommandOutput(0, "", "", "curl -s -o a.html http://x/", cwd)).not.toContain("inside the working");
+		expect(formatCommandOutput(0, "", "", "curl -s -o a.html http://x/", cwd)).not.toContain(
+			"inside the working",
+		);
 	});
 	test("curl -O takes no value; wget -O and -o do", () => {
 		expect(writtenFiles("curl -O http://x/f").readable).toEqual([]);
@@ -138,9 +150,46 @@ describe("silent success names the file it wrote (browser_operation pilot)", () 
 		expect(writtenFiles("bun -e x=>x").readable).toEqual([]);
 	});
 	test("no file, no note change", () => {
-		expect(formatCommandOutput(0, "", "", "mkdir -p .tmp", cwd)).toBe("Command completed successfully.");
+		expect(formatCommandOutput(0, "", "", "mkdir -p .tmp", cwd)).toBe(
+			"Command completed successfully.",
+		);
 	});
 	test("real output is never touched", () => {
 		expect(formatCommandOutput(0, "hi\n", "", "curl -o a.txt x", cwd)).toBe("hi");
+	});
+});
+
+describe("login-line copy names its file and the next step (#4303)", () => {
+	const copy = "sed -n 's/^Password: */password=/w .tmp/login' TASK.txt";
+
+	test("a silent sed w copy says where the value went and how to post it", () => {
+		const out = formatCommandOutput(0, "", "", copy, "/work");
+		expect(out).toContain("Command completed successfully.");
+		expect(out).toContain(".tmp/login");
+		expect(out).toContain("curl -d @.tmp/login");
+		expect(out).toContain("do not repeat");
+	});
+
+	test("it never tells the model to read the file back", () => {
+		const out = formatCommandOutput(0, "", "", copy, "/work");
+		expect(out).not.toContain("Run read_file");
+		expect(out).toContain("do not read");
+	});
+
+	test("it follows the output name the model chose", () => {
+		const out = formatCommandOutput(
+			0,
+			"",
+			"",
+			"sed -n 's/^Token: */token=/w .tmp/tok' notes.txt",
+			"/work",
+		);
+		expect(out).toContain("curl -d @.tmp/tok");
+	});
+
+	test("other sed commands are unchanged", () => {
+		expect(formatCommandOutput(0, "", "", "sed -i 's/a/b/' f.txt", "/work")).toBe(
+			"Command completed successfully.",
+		);
 	});
 });

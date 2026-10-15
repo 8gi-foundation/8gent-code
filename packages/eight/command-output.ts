@@ -58,7 +58,8 @@ export function writtenFiles(command: string): { readable: string[]; private: st
 	const clean = (f?: string) => f?.replace(/^["']|["']$/g, "");
 	const add = (list: string[], f?: string) => {
 		const t = clean(f);
-		if (t && t !== "-" && !t.startsWith("/dev/") && !t.startsWith("&") && !list.includes(t)) list.push(t);
+		if (t && t !== "-" && !t.startsWith("/dev/") && !t.startsWith("&") && !list.includes(t))
+			list.push(t);
 	};
 	const flags = (re: RegExp, list: string[]) => {
 		for (const m of command.matchAll(re)) add(list, m[1]);
@@ -77,12 +78,26 @@ export function writtenFiles(command: string): { readable: string[]; private: st
 }
 
 function isOutsideCwd(f: string, workingDirectory?: string): boolean {
-	if (f.startsWith("~/") || f === "~" || f === ".." || f.startsWith("../") || f.includes("/../")) return true;
+	if (f.startsWith("~/") || f === "~" || f === ".." || f.startsWith("../") || f.includes("/../"))
+		return true;
 	return f.startsWith("/") && !!workingDirectory && !f.startsWith(`${workingDirectory}/`);
 }
 
+/**
+ * The login-note recipe (sed -n with a Label line copied by the w flag into .tmp/NAME). It prints nothing and the
+ * value is scrubbed from read_file, so the model had no record of where it went. #4303 (run
+ * 2026-10-15_132220): it posted `password@.tmp/pw.txt` for a file it had written as .tmp/login,
+ * lost four minutes on the missing file and ran out the 600 s turn. The note names the file.
+ */
+const LOGIN_COPY =
+	/^sed -n 's\/\^[A-Za-z][A-Za-z0-9 _-]*: \*\/[a-z][a-z0-9_-]*=\/w (\.tmp\/[A-Za-z0-9._-]+)' \S+$/;
+
 export function silentSuccessNote(command: string | undefined, workingDirectory?: string): string {
 	const base = "Command completed successfully.";
+	const login = command ? LOGIN_COPY.exec(command.trim()) : null;
+	if (login) {
+		return `${base} It printed nothing. It copied the value into ${login[1]} and did not show it: do not read or retype it, do not repeat this command. Post it with curl -d @${login[1]} (add -d for the other fields).`;
+	}
 	const w = command ? writtenFiles(command) : { readable: [], private: [] };
 	if (w.readable.length === 0 && w.private.length === 0) return base;
 	let note = `${base} It printed nothing.`;
