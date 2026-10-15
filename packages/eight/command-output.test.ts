@@ -172,7 +172,7 @@ describe("login-line copy names its file and the next step (#4303)", () => {
 
 	test("the post form names the loopback URL and says no -L (#4303, run 2026-10-15_164257)", () => {
 		const out = formatCommandOutput(0, "", "", copy, "/work");
-		expect(out).toContain("http://127.0.0.1:<port>/");
+		expect(out).toContain("http://127.0.0.1:PORT/");
 		expect(out).toContain("no -L");
 	});
 

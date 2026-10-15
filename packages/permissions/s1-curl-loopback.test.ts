@@ -685,7 +685,7 @@ describe("an output under .tmp/ with a script or config name: refused without a 
 describe("CURL_L_REFUSAL names the accepted form (#4303)", () => {
 	test("the input shape is in the first sentence and says which flag to drop", () => {
 		const first = CURL_L_REFUSAL.split(". ")[0];
-		expect(first).toContain("curl -s -d @file http://127.0.0.1:<port>/path");
+		expect(first).toContain("curl -s -d @file http://127.0.0.1:PORT/path");
 		expect(first).toContain("no -L");
 		expect(CURL_L_REFUSAL).toContain("Drop -L");
 	});

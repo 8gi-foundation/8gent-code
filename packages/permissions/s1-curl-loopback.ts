@@ -84,7 +84,7 @@ const NO: CurlLoopback = { ok: false };
 
 /** Told to the model when a loopback curl uses -L (#3967): the way forward instead of the judge. */
 export const CURL_L_REFUSAL =
-	"Refused: the accepted form is curl -s -d @file http://127.0.0.1:<port>/path with no -L, because -L follows redirects off this machine. Drop -L, add -D .tmp/headers.txt, read the Location header, and make a second curl to that address.";
+	"Refused: the accepted form is curl -s -d @file http://127.0.0.1:PORT/path with no -L, because -L follows redirects off this machine. Drop -L, add -D .tmp/headers.txt, read the Location header, and if that address is 127.0.0.1 or localhost, make a second curl to it.";
 
 /**
  * Told to the model when the only thing wrong is the output file's name (#4072, pilot 12 Oct 17:27:
