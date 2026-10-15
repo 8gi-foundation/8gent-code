@@ -3760,7 +3760,7 @@ export class ToolExecutor {
 					workingDirectory: dir,
 				});
 
-				let output = formatCommandOutput(code, stdout, stderr, finalCommand, this.workingDirectory);
+				let output = formatCommandOutput(code, stdout, stderr, finalCommand, dir);
 				// Once per session, on a failure, say the environment is minimal (no names or values).
 				if (code !== 0 && !this.envHintShown && withheldAny()) {
 					this.envHintShown = true;

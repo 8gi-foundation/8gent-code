@@ -16,8 +16,8 @@
  * after executeRaw, but by then a token straddling a cut is two fragments the scanner no
  * longer matches, and one of them reaches the model (#2464, 8SO review of #3376).
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { constants, closeSync, fstatSync, openSync, readSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 import { redirectTargets } from "../permissions/s1-created-files";
 import { scrub } from "./secret-scanner";
 
@@ -105,21 +105,42 @@ export function redirectNote(command: string | undefined, workingDirectory?: str
 	if (!command || !/\bcurl\b/.test(command) || !workingDirectory) return "";
 	const m = /(?:^|\s)(?:-D|--dump-header)(?:\s+|=)(\S+)/.exec(command);
 	const rel = m?.[1]?.replace(/^["']|["']$/g, "");
-	if (!rel || rel.startsWith("/") || rel.startsWith("~") || rel.split("/").includes(".."))
-		return "";
-	let head: string;
+	if (!rel || rel.startsWith("~")) return "";
+	const abs = resolve(workingDirectory, rel);
+	const back = relative(workingDirectory, abs);
+	if (back === "" || back.startsWith("..") || isAbsolute(back)) return "";
+	// A header file is a regular file we opened ourselves: no symlink, no FIFO or device, 8 KB at most.
+	let head = "";
+	let fd: number | undefined;
 	try {
-		head = readFileSync(join(workingDirectory, rel), "utf8").slice(0, 8192);
+		fd = openSync(abs, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+		if (!fstatSync(fd).isFile()) return "";
+		const buf = Buffer.alloc(8192);
+		head = buf.toString("utf8", 0, readSync(fd, buf, 0, buf.length, 0));
 	} catch {
 		return "";
+	} finally {
+		if (fd !== undefined) {
+			try {
+				closeSync(fd);
+			} catch {}
+		}
 	}
-	const status = /^HTTP\/[\d.]+ (30[1-8])\b/m.exec(head)?.[1];
+	// Status and Location must come from the same block, the last one (a 100 Continue or an earlier hop is skipped).
+	const block =
+		head
+			.split(/\r?\n\r?\n/)
+			.filter((b) => /^HTTP\//.test(b.trimStart()))
+			.pop() ?? "";
+	const status = /^HTTP\/[\d.]+ (30[1-8])\b/m.exec(block)?.[1];
 	const loc =
 		/^location:[ \t]*(\/(?!\/)[A-Za-z0-9._~\/?&=%#@+,-]{0,199}|https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d{1,5})?\/[A-Za-z0-9._~\/?&=%#@+,-]{0,199})\r?$/im.exec(
-			head,
+			block,
 		)?.[1];
 	if (!status || !loc) return "";
-	return ` The server answered ${status} and redirected to ${loc}. Fetch that address with a separate curl (no -L).`;
+	// Query and fragment can carry a code or session id, and the page to fetch does not need them shown.
+	const target = loc.replace(/^https?:\/\/[^/]+/i, "").split(/[?#]/)[0];
+	return ` The server answered ${status} and redirected to ${target}. Fetch that address with a separate curl (no -L).`;
 }
 
 export function silentSuccessNote(command: string | undefined, workingDirectory?: string): string {
