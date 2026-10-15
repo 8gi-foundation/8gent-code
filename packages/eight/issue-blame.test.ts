@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -41,8 +42,21 @@ describe("sourceFilesNamed (#4320)", () => {
 			"internal/config/cors.go",
 		]);
 	});
+	test("same base name in two directories is two files", () => {
+		expect(sourceFilesNamed("a/util.go and b/util.go").sort()).toEqual(["a/util.go", "b/util.go"]);
+	});
+	test("dotted product names are not files; a path or :line makes them one", () => {
+		expect(sourceFilesNamed("Next.js, Node.js, vue.js and three.js")).toEqual([]);
+		expect(sourceFilesNamed("server.js:12 and lib/app.js").sort()).toEqual([
+			"lib/app.js",
+			"server.js",
+		]);
+		expect(sourceFilesNamed("config.go and cors.go").sort()).toEqual(["config.go", "cors.go"]);
+	});
 	test("test files and test dirs are ignored", () => {
-		expect(sourceFilesNamed("a.test.ts b.spec.ts c_test.go test/helper.go x.ts")).toEqual(["x.ts"]);
+		expect(sourceFilesNamed("a.test.ts b.spec.ts c_test.go test/helper.go src/x.ts")).toEqual([
+			"src/x.ts",
+		]);
 	});
 	test("a version number or domain is not a file", () => {
 		expect(sourceFilesNamed("foo.com v1.2 node.js-runtime")).toEqual([]);
@@ -67,6 +81,55 @@ describe("issueBodyOf", () => {
 		expect(issueBodyOf(`gh issue create --title t --body "fix a.go and b.go"`, tmp())).toBe(
 			"fix a.go and b.go",
 		);
+	});
+	test("refuses a UNC, home, drive or absolute name before any fs call", () => {
+		const d = tmp();
+		for (const n of [
+			"\\\\host\\share\\b.md",
+			"//host/share/b.md",
+			"~/b.md",
+			"C:\\b.md",
+			"/etc/hosts",
+		]) {
+			expect(issueBodyOf(`gh issue create --body-file '${n}'`, d)).toBeNull();
+		}
+	});
+	test("refuses a protected basename inside the working directory (.netrc)", () => {
+		const d = tmp();
+		fs.writeFileSync(path.join(d, ".netrc"), "alpha.py beta.go");
+		expect(issueBodyOf("gh issue create --body-file .netrc", d)).toBeNull();
+	});
+	test("refuses a FIFO without blocking", () => {
+		const d = tmp();
+		spawnSync("mkfifo", [path.join(d, "f.md")]);
+		expect(issueBodyOf("gh issue create --body-file f.md", d)).toBeNull();
+	});
+	test("refuses a hardlink to a file outside the working directory", () => {
+		const d = tmp();
+		const outside = tmp();
+		fs.writeFileSync(path.join(outside, "s.md"), "alpha.py beta.go");
+		fs.linkSync(path.join(outside, "s.md"), path.join(d, "h.md"));
+		expect(issueBodyOf("gh issue create --body-file h.md", d)).toBeNull();
+	});
+	test("refuses a symlink and an oversize file", () => {
+		const d = tmp();
+		fs.writeFileSync(path.join(d, "real.md"), "x");
+		fs.symlinkSync(path.join(d, "real.md"), path.join(d, "ln.md"));
+		fs.writeFileSync(path.join(d, "big.md"), "x".repeat(70 * 1024));
+		expect(issueBodyOf("gh issue create --body-file big.md", d)).toBeNull();
+	});
+	test("a stray -F in another command is not read", () => {
+		const d = tmp();
+		fs.writeFileSync(path.join(d, "log.txt"), "alpha.py beta.go");
+		expect(issueBodyOf('tail -F log.txt; gh issue create --title t --body "fine"', d)).toBe("fine");
+		expect(issueBodyOf("tail -F log.txt; ls", d)).toBeNull();
+	});
+	test("a cd prefix reads the body in that folder", () => {
+		const d = tmp();
+		fs.mkdirSync(path.join(d, "sub"));
+		fs.writeFileSync(path.join(d, "sub/b.md"), "in sub");
+		fs.writeFileSync(path.join(d, "b.md"), "at root");
+		expect(issueBodyOf("cd sub && gh issue create --body-file b.md", d)).toBe("in sub");
 	});
 	test("other commands are not issue bodies", () => {
 		expect(issueBodyOf("gh issue view 9 --json number", tmp())).toBeNull();
@@ -93,35 +156,29 @@ describe("IssueBlameGate", () => {
 	});
 });
 
-describe("ToolExecutor run_command path (#4320)", () => {
-	test("first two-file gh issue create is held and never reaches gh; trimmed one files", async () => {
+describe("ToolExecutor paths (#4320)", () => {
+	test("run_command: two-file body held, never reaches gh; trimmed body is not held and meets the permission layer", async () => {
 		const { ToolExecutor } = await import("./tools");
 		const d = tmp();
 		fs.mkdirSync(path.join(d, ".tmp"));
-		fs.mkdirSync(path.join(d, "bin"));
-		const calls = path.join(d, "calls.log");
-		fs.writeFileSync(
-			path.join(d, "bin/gh"),
-			`#!/bin/sh\necho "$@" >> ${calls}\necho https://x/issues/1\n`,
-			{
-				mode: 0o755,
-			},
-		);
-		const oldPath = process.env.PATH;
-		process.env.PATH = `${path.join(d, "bin")}:${oldPath}`;
-		try {
-			const ex = new ToolExecutor(d);
-			const cmd = "gh issue create --repo o/r --title t --body-file .tmp/b.md";
-			fs.writeFileSync(path.join(d, ".tmp/b.md"), PILOT_BODY);
-			const held = (await ex.execute("run_command", { command: cmd })) as string;
-			expect(held).toStartWith("[HOLD]");
-			expect(fs.existsSync(calls)).toBe(false);
-			fs.writeFileSync(path.join(d, ".tmp/b.md"), TRIMMED);
-			const filed = (await ex.execute("run_command", { command: cmd })) as string;
-			// Past the hold: it meets the permission layer (network send), not the gate.
-			expect(filed).not.toStartWith("[HOLD]");
-		} finally {
-			process.env.PATH = oldPath;
-		}
+		const ex = new ToolExecutor(d);
+		const cmd = "gh issue create --repo o/r --title t --body-file .tmp/b.md";
+		fs.writeFileSync(path.join(d, ".tmp/b.md"), PILOT_BODY);
+		const held = (await ex.execute("run_command", { command: cmd })) as string;
+		expect(held).toStartWith("[HOLD]");
+		expect(held).toContain("internal/config/cors.go");
+		fs.writeFileSync(path.join(d, ".tmp/b.md"), TRIMMED);
+		const sent = (await ex.execute("run_command", { command: cmd })) as string;
+		// No terminal here, so the network send is denied by policy: the gate let it through.
+		expect(sent).toStartWith("[PERMISSION DENIED]");
+		expect(sent).toContain("gh issue create");
+	});
+	test("gh_issue_create: a two-file body is held, a trimmed one is not", async () => {
+		const { ToolExecutor } = await import("./tools");
+		const ex = new ToolExecutor(tmp());
+		const held = (await ex.execute("gh_issue_create", { title: "t", body: PILOT_BODY })) as string;
+		expect(held).toStartWith("[HOLD]");
+		const next = (await ex.execute("gh_issue_create", { title: "t", body: TRIMMED })) as string;
+		expect(next).not.toStartWith("[HOLD]");
 	});
 });
