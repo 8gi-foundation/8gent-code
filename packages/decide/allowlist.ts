@@ -40,7 +40,7 @@
  * Pure, synchronous, never throws. Prompt text only: nothing is executed.
  */
 
-import { existsSync, statSync } from "node:fs";
+import { existsSync, lstatSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { activeShellKind } from "../core/shell";
@@ -365,7 +365,9 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
  * We cannot know the directory git will run in (session workdir, `cd X &&`, option order),
  * so only an absolute value is judged: it must start with "/", hold no "~" (the shell
  * expands it) and no "." or ".." segment (the kernel follows links before `..`), and then
- * be stat'd as written. No getuid (Windows) means false.
+ * be stat'd as written. It must be a directory (a gitfile redirects git unchecked) with no
+ * `commondir` file (that also redirects config, unchecked, to another repo; linked-worktree
+ * gitdirs therefore go to the judge). No getuid (Windows) means false.
  */
 function gitDirOwnedByMe(value: string | undefined): boolean {
 	if (!value || typeof process.getuid !== "function") return false;
@@ -373,9 +375,15 @@ function gitDirOwnedByMe(value: string | undefined): boolean {
 	if (value.split("/").some((seg) => seg === "." || seg === "..")) return false;
 	try {
 		const st = statSync(value);
-		return st.isDirectory() && st.uid === process.getuid();
+		if (!st.isDirectory() || st.uid !== process.getuid()) return false;
 	} catch {
 		return false;
+	}
+	try {
+		lstatSync(join(value, "commondir"));
+		return false;
+	} catch {
+		return true;
 	}
 }
 

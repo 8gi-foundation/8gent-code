@@ -598,6 +598,14 @@ describe("allowlist: git shell expansion and --git-dir ownership (#4300)", () =>
 		expect(pass(`git --git-dir=${gf} log`)).toBe(false);
 		expect(pass(`git --git-dir ${gf} branch -a`)).toBe(false);
 	});
+	test("--git-dir naming an owned dir with a commondir file is not auto-allowed", () => {
+		const cd = join(GD, "commondir-4300");
+		mkdirSync(cd, { recursive: true });
+		writeFileSync(join(cd, "HEAD"), "ref: refs/heads/main\n");
+		writeFileSync(join(cd, "commondir"), "/etc\n");
+		expect(pass(`git --git-dir=${cd} log`)).toBe(false);
+		expect(pass(`git --git-dir ${cd} branch -a`)).toBe(false);
+	});
 });
 
 describe("gate wiring (EIGHT_S1_ALLOWLIST)", () => {
