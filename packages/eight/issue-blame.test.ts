@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { IssueBlameGate, issueBodyOf, sourceFilesNamed } from "./issue-blame";
+import { IssueBlameGate, issueBodyOf, readBodyFile, sourceFilesNamed } from "./issue-blame";
 
 // The body the issue-file-practice pilot model wrote on 2026-10-16 (run 000847).
 const PILOT_BODY = [
@@ -118,6 +118,15 @@ describe("issueBodyOf", () => {
 		fs.writeFileSync(path.join(d, "big.md"), "x".repeat(70 * 1024));
 		expect(issueBodyOf("gh issue create --body-file big.md", d)).toBeNull();
 	});
+	test("Windows: refuses a symlink and a device name before open", () => {
+		const d = tmp();
+		fs.writeFileSync(path.join(d, "real.md"), "x");
+		fs.symlinkSync(path.join(d, "real.md"), path.join(d, "ln.md"));
+		expect(readBodyFile("real.md", d, "win32")).toBe("x");
+		expect(readBodyFile("ln.md", d, "win32")).toBeNull();
+		expect(readBodyFile("NUL", d, "win32")).toBeNull();
+		expect(readBodyFile("con.md", d, "win32")).toBeNull();
+	});
 	test("a stray -F in another command is not read", () => {
 		const d = tmp();
 		fs.writeFileSync(path.join(d, "log.txt"), "alpha.py beta.go");
@@ -161,17 +170,29 @@ describe("ToolExecutor paths (#4320)", () => {
 		const { ToolExecutor } = await import("./tools");
 		const d = tmp();
 		fs.mkdirSync(path.join(d, ".tmp"));
+		fs.mkdirSync(path.join(d, "bin"));
+		const calls = path.join(d, "calls.log");
+		fs.writeFileSync(path.join(d, "bin/gh"), `#!/bin/sh\necho "$@" >> ${calls}\n`, { mode: 0o755 });
+		const oldPath = process.env.PATH;
+		process.env.PATH = `${path.join(d, "bin")}:${oldPath}`;
 		const ex = new ToolExecutor(d);
 		const cmd = "gh issue create --repo o/r --title t --body-file .tmp/b.md";
 		fs.writeFileSync(path.join(d, ".tmp/b.md"), PILOT_BODY);
-		const held = (await ex.execute("run_command", { command: cmd })) as string;
-		expect(held).toStartWith("[HOLD]");
-		expect(held).toContain("internal/config/cors.go");
-		fs.writeFileSync(path.join(d, ".tmp/b.md"), TRIMMED);
-		const sent = (await ex.execute("run_command", { command: cmd })) as string;
-		// No terminal here, so the network send is denied by policy: the gate let it through.
-		expect(sent).toStartWith("[PERMISSION DENIED]");
-		expect(sent).toContain("gh issue create");
+		try {
+			const held = (await ex.execute("run_command", { command: cmd })) as string;
+			expect(held).toStartWith("[HOLD]");
+			expect(held).toContain("internal/config/cors.go");
+			expect(fs.existsSync(calls)).toBe(false);
+			fs.writeFileSync(path.join(d, ".tmp/b.md"), TRIMMED);
+			const sent = (await ex.execute("run_command", { command: cmd })) as string;
+			// Past the gate it meets policy: denied with no terminal, or run when an earlier
+			// test in this process switched on headless approval. Either way it is not held.
+			expect(sent).not.toStartWith("[HOLD]");
+			const ran = fs.existsSync(calls) && fs.readFileSync(calls, "utf8").includes("issue create");
+			expect(ran || sent.startsWith("[PERMISSION DENIED]")).toBe(true);
+		} finally {
+			process.env.PATH = oldPath;
+		}
 	});
 	test("gh_issue_create: a two-file body is held, a trimmed one is not", async () => {
 		const { ToolExecutor } = await import("./tools");

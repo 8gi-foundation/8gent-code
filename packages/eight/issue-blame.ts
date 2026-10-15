@@ -14,10 +14,18 @@
  * the descriptor judged (regular file, one link, 64 KB). Files are keyed by full
  * path; a bare name merges into a full path with the same base name.
  */
-import { constants, closeSync, fstatSync, openSync, readSync, realpathSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import {
+	constants,
+	closeSync,
+	fstatSync,
+	lstatSync,
+	openSync,
+	readSync,
+	realpathSync,
+} from "node:fs";
+import { basename, isAbsolute, join, relative } from "node:path";
 import { cdPrefix } from "../permissions/cd-prefix";
-import { validatePath } from "../permissions/path-guard";
+import { isWindowsDeviceName, validatePath } from "../permissions/path-guard";
 
 const SOURCE_FILE =
 	/(?<![\w./-])((?:[\w.-]+\/)*[\w.-]+\.(?:go|ts|tsx|js|jsx|mjs|cjs|py|rs|java|rb|c|cc|cpp|h|hpp|cs|kt|swift|php))(?![\w-])(:\d+)?/g;
@@ -72,14 +80,22 @@ function ghSegment(command: string): string | null {
  * Read a body file the way the file tools would: the path guard first, then one
  * open that cannot follow a link or block on a FIFO, judged on the descriptor.
  */
-function readBodyFile(name: string, dir: string): string | null {
+export function readBodyFile(
+	name: string,
+	dir: string,
+	platform: NodeJS.Platform = process.platform,
+): string | null {
 	// Text-only refusals before any filesystem call (a UNC path opens SMB on Windows).
 	if (/^(?:~|[\\/]{2}|[A-Za-z]:)/.test(name) || isAbsolute(name) || name.includes("\\"))
 		return null;
 	if (!validatePath(name, dir, {}, "read").ok) return null;
+	// Windows: O_NOFOLLOW and O_NONBLOCK are undefined there, so the open follows links
+	// and the flags drop. Refuse device names and anything that is not a plain file first.
+	if (platform === "win32" && isWindowsDeviceName(basename(name))) return null;
 	let fd = -1;
 	try {
 		const root = realpathSync(dir);
+		if (platform === "win32" && !lstatSync(join(root, name)).isFile()) return null;
 		const full = realpathSync(join(root, name));
 		const rel = relative(root, full);
 		if (rel.startsWith("..") || isAbsolute(rel)) return null;
