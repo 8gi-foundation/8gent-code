@@ -305,6 +305,10 @@ export const SCRATCH_DIR_NOTE =
 export const FOLDER_NOTE =
 	"**Folders: `rmdir` is blocked, so name the full `mkdir` path first; fix with `mv`.**";
 
+/** #4316: a ticket asked for the source file most likely at fault; the model also named a neighbour. */
+export const TICKET_FILE_NOTE =
+	"**Ticket naming the file at fault: name only the one to change, no neighbours.**";
+
 export type EnvironmentNoteInput = {
 	platform?: NodeJS.Platform;
 	/** Windows only: the shell run_command uses. Default: resolved from settings and disk. */
@@ -437,6 +441,7 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 		NARRATION_NOTE,
 		SCRATCH_DIR_NOTE,
 		FOLDER_NOTE,
+		TICKET_FILE_NOTE,
 		environmentNote({ cwd: opts.cwd }),
 	);
 	lines.push(SLIDES_TO_VIDEO_NOTE, REVIEW_FOCUS_NOTE);
