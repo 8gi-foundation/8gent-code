@@ -202,7 +202,7 @@ export function silentSuccessNote(
 	const base = "Command completed successfully.";
 	const login = command ? LOGIN_COPY.exec(command.trim()) : null;
 	if (login) {
-		return `${base} It printed nothing. It copied the value into ${login[1]} and did not show do not read or retype it, do not repeat this command. Post it with curl -d @${login[1]} (add -d for the other fields).`;
+		return `${base} It printed nothing. It copied the value into ${login[1]} and did not show it: do not read or retype it, do not repeat this command. Post it with curl -d @${login[1]} (add -d for the other fields).`;
 	}
 	const bare = command ? LOGIN_VALUE_ONLY.exec(command.trim()) : null;
 	if (bare) {

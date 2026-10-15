@@ -177,6 +177,12 @@ describe("login-line copy names its file and the next step (#4303)", () => {
 		expect(out).toContain("do not repeat");
 	});
 
+	test("the w-flag note keeps its exact sentence", () => {
+		expect(formatCommandOutput(0, "", "", copy, "/work")).toBe(
+			"Command completed successfully. It printed nothing. It copied the value into .tmp/login and did not show it: do not read or retype it, do not repeat this command. Post it with curl -d @.tmp/login (add -d for the other fields).",
+		);
+	});
+
 	test("it never tells the model to read the file back", () => {
 		const out = formatCommandOutput(0, "", "", copy, "/work");
 		expect(out).not.toContain("Run read_file");
