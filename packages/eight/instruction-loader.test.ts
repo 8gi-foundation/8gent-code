@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadInstructions } from "./instruction-loader";
+import { loadInstructions, walkUp } from "./instruction-loader";
 
 /**
  * These tests fake $HOME so the operator's real ~/.claude/CLAUDE.md is not a
@@ -95,5 +95,44 @@ describe("regression: the Telegram surface", () => {
 		const out = loadInstructions(repo);
 		expect(out).toContain("No-BS Mode is always on.");
 		expect(out).toContain("Repo rules.");
+	});
+});
+
+describe("the instruction walk-up probes", () => {
+	const probed = (start: string, home: string): string[] => {
+		const seen: string[] = [];
+		walkUp(start, home, (dir) => {
+			seen.push(dir);
+			return false;
+		});
+		return seen;
+	};
+
+	test("stop at $HOME when the working directory is inside it", () => {
+		const seen = probed("/Users/me/.8gent/pilot/runs/r1", "/Users/me");
+		expect(seen).toEqual([
+			"/Users/me/.8gent/pilot/runs/r1",
+			"/Users/me/.8gent/pilot/runs",
+			"/Users/me/.8gent/pilot",
+			"/Users/me/.8gent",
+			"/Users/me",
+		]);
+	});
+
+	test("never probe / or the autofs and volume roots", () => {
+		const seen = probed("/Volumes/Disk/proj", "/Users/me");
+		expect(seen).toEqual(["/Volumes/Disk/proj", "/Volumes/Disk"]);
+		for (const root of ["/", "/Volumes", "/Network", "/net", "/home"]) {
+			expect(probed(root, "/Users/me")).toEqual([]);
+		}
+	});
+
+	test("still collect an instruction file found on the way up", () => {
+		const dirs = walkUp(
+			"/Users/me/a/b",
+			"/Users/me",
+			(d) => d === "/Users/me/a" || d === "/Users/me",
+		);
+		expect(dirs).toEqual(["/Users/me", "/Users/me/a"]);
 	});
 });
