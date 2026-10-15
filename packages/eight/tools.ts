@@ -255,6 +255,7 @@ import {
 	withheldAny,
 } from "./harness/child-env";
 import { downscaleNote, imageMaxSide } from "./image-fit";
+import { IssueBlameGate, issueBodyOf } from "./issue-blame";
 import { layoutMeasureLine } from "./layout-measure";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { RetiredFacts } from "./retired-facts";
@@ -989,6 +990,7 @@ export class ToolExecutor {
 	private seenPaths = new Set<string>();
 	/** Commands the harness refused; a refused probe proves nothing about the files it named (#4238). */
 	private blockedCommands: string[] = [];
+	private issueBlameGate = new IssueBlameGate();
 	/**
 	 * Files this agent created (write_file, run_command redirects), in memory
 	 * only (#3177). System One lets it rm them without the judge. The Agent
@@ -2700,7 +2702,9 @@ export class ToolExecutor {
 					postMessageDeps(this.agentId, this.postSession),
 				);
 			}
-			case "gh_issue_create":
+			case "gh_issue_create": {
+				const held = this.issueBlameGate.check(String(args.body || ""));
+				if (held) return held;
 				return this.runSpawn("gh", [
 					"issue",
 					"create",
@@ -2709,10 +2713,15 @@ export class ToolExecutor {
 					"--body",
 					String(args.body || ""),
 				]);
+			}
 
 			// Shell
 			case "run_command": {
 				const command = args.command as string;
+				// #4320: a ticket blames one file; a body naming two is held once for a trim.
+				const issueBody = issueBodyOf(command, this.workingDirectory);
+				const held = issueBody === null ? null : this.issueBlameGate.check(issueBody);
+				if (held) return held;
 				const run = () => this.runCommand(command, args.timeout as number | undefined);
 				// A command the sanitizer refuses never commits, so it never runs the suite.
 				const target = parseGitCommit(command);
