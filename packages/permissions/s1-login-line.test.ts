@@ -149,6 +149,15 @@ describe("loginLineToTmp refuses", () => {
 		["-E", "sed -nE 's/^Password: */password=/w .tmp/login' TASK.txt"],
 		["-e", "sed -n -e 's/^Password: */password=/w .tmp/login' TASK.txt"],
 		["-f script", "sed -n -f script.sed TASK.txt"],
+		// #4303 (run 2026-10-15_064256): the two forms System One blocked stay refused by this lane.
+		[
+			"two -e with p and a shell redirect (run call 34)",
+			"sed -n -e 's/^Username: */username=/p' -e 's/^Password: /password=/p' TASK.txt > .tmp/login",
+		],
+		[
+			"p flag with a shell redirect to a file (run call 40)",
+			"sed -n 's/^Password: /password=/p' TASK.txt > .tmp/password.txt",
+		],
 		["two expressions", "sed -n 's/^Password: */password=/w .tmp/login' -e 'p' TASK.txt"],
 		["two files", "sed -n 's/^Password: */password=/w .tmp/login' TASK.txt .env"],
 		["no file (stdin)", "sed -n 's/^Password: */password=/w .tmp/login'"],
