@@ -3,7 +3,13 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { HEAD_BYTES, TAIL_BYTES, formatCommandOutput, writtenFiles } from "./command-output";
+import {
+	HEAD_BYTES,
+	TAIL_BYTES,
+	formatCommandOutput,
+	redirectNote,
+	writtenFiles,
+} from "./command-output";
 
 describe("formatCommandOutput (#3373)", () => {
 	test("exit 0 with both streams keeps stderr and labels it", () => {
@@ -280,5 +286,24 @@ describe("curl -D redirect target is surfaced (#4318)", () => {
 		expect(formatCommandOutput(0, "", "", none, dir)).not.toContain("redirected");
 		const up = cmd.replace(".tmp/h.txt", "../h.txt");
 		expect(formatCommandOutput(0, "", "", up, dir)).not.toContain("redirected");
+	});
+});
+
+describe("redirectNote refuses non-regular files on Windows before open", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "redir-win-"));
+	afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+	const header = "HTTP/1.1 302 Found\r\nLocation: /settings\r\n\r\n";
+	const note = (file: string, platform: NodeJS.Platform) =>
+		redirectNote(`curl -D ${file} http://127.0.0.1:1/x`, dir, undefined, platform);
+	test("a device-named header file is refused on win32 and read on linux", () => {
+		fs.writeFileSync(path.join(dir, "nul.txt"), header);
+		expect(note("nul.txt", "win32")).toBe("");
+		expect(note("nul.txt", "linux")).toContain("redirected to /settings");
+	});
+	test("a link is refused on win32 by the lstat check, not by the open flags", () => {
+		fs.writeFileSync(path.join(dir, "real.txt"), header);
+		fs.symlinkSync(path.join(dir, "real.txt"), path.join(dir, "ln.txt"));
+		expect(note("real.txt", "win32")).toContain("redirected to /settings");
+		expect(note("ln.txt", "win32")).toBe("");
 	});
 });

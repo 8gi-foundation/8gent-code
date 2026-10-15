@@ -16,8 +16,17 @@
  * after executeRaw, but by then a token straddling a cut is two fragments the scanner no
  * longer matches, and one of them reaches the model (#2464, 8SO review of #3376).
  */
-import { constants, closeSync, fstatSync, openSync, readSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import {
+	constants,
+	closeSync,
+	fstatSync,
+	lstatSync,
+	openSync,
+	readSync,
+	realpathSync,
+} from "node:fs";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { isWindowsDeviceName } from "../permissions/path-guard";
 import { redirectTargets } from "../permissions/s1-created-files";
 import { scrub } from "./secret-scanner";
 
@@ -111,6 +120,7 @@ export function redirectNote(
 	command: string | undefined,
 	workingDirectory?: string,
 	projectRoot?: string,
+	platform: NodeJS.Platform = process.platform,
 ): string {
 	if (!command || !/\bcurl\b/.test(command) || !workingDirectory) return "";
 	const m = /(?:^|\s)(?:-D|--dump-header)(?:\s+|=)(\S+)/.exec(command);
@@ -134,6 +144,16 @@ export function redirectNote(
 	// A header file is a regular file we opened ourselves: no symlink, no FIFO or device, 8 KB at most.
 	let head = "";
 	let fd: number | undefined;
+	// Windows leaves O_NOFOLLOW and O_NONBLOCK undefined, so the open below would not refuse a
+	// link or device: refuse a device name and any non-regular file first.
+	if (platform === "win32") {
+		if (isWindowsDeviceName(basename(abs))) return "";
+		try {
+			if (!lstatSync(abs).isFile()) return "";
+		} catch {
+			return "";
+		}
+	}
 	try {
 		fd = openSync(abs, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
 		if (!fstatSync(fd).isFile()) return "";
