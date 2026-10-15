@@ -1,17 +1,19 @@
 /**
  * 8gent Code - how big an image the model is shown, and what it is told about it (#4293).
  *
- * The prompt talks in the original image's pixels. A copy shrunk to fit 1024x1024
+ * The prompt talks in the original image's pixels. A copy shrunk to fit a small box
  * makes every coordinate the model reads off it wrong by the scale factor, and the
  * measured-layout block used to call that copy "full-size". Two rules fix it:
  * send the original when it is within the cap, and whenever a copy is sent, say so
  * with the original size and the factor that maps copy pixels back.
  *
- * Local runtimes keep 1024 (the bound set in #3641 so a Retina screenshot does not
- * swamp a small context); hosted providers get 2560. EIGHT_IMAGE_MAX_SIDE overrides both.
+ * Local and hosted both get 2560. Local runtimes used 1024 (the bound set in #3641 so a
+ * Retina screenshot does not swamp a small context), but at 1024 a local vision model
+ * could not read screen UI targets (D1 click task: 0/4 at 1024, 2/4 at 2560). A 2560 PNG
+ * is still one image part. EIGHT_IMAGE_MAX_SIDE overrides both.
  */
 
-export const LOCAL_IMAGE_MAX_SIDE = 1024;
+export const LOCAL_IMAGE_MAX_SIDE = 2560;
 export const HOSTED_IMAGE_MAX_SIDE = 2560;
 
 /** The longest side, in px, an image may have when it reaches the model. */

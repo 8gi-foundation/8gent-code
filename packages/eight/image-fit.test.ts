@@ -15,7 +15,8 @@ import { layoutMeasureLine } from "./layout-measure";
 import { loadRunImage } from "./run";
 
 describe("imageMaxSide", () => {
-	test("local keeps 1024, hosted gets 2560", () => {
+	test("local and hosted both get 2560", () => {
+		expect(LOCAL_IMAGE_MAX_SIDE).toBe(2560);
 		expect(imageMaxSide(true, undefined)).toBe(LOCAL_IMAGE_MAX_SIDE);
 		expect(imageMaxSide(false, undefined)).toBe(HOSTED_IMAGE_MAX_SIDE);
 	});
@@ -92,11 +93,25 @@ describe("layoutMeasureLine and loadRunImage", () => {
 		expect([meta.width, meta.height]).toEqual([2560, 1440]);
 		expect(r.original).toEqual({ width: 2560, height: 1440 });
 	});
-	test("loadRunImage keeps the 1024 bound on a local provider and reports the original", async () => {
+	test("loadRunImage sends the original to a local provider too", async () => {
 		const r = await loadRunImage("shot.png", dir, "ollama");
 		if ("error" in r) throw new Error(r.error);
 		const meta = await sharp(Buffer.from(r.base64, "base64")).metadata();
-		expect([meta.width, meta.height]).toEqual([1024, 576]);
+		expect([meta.width, meta.height]).toEqual([2560, 1440]);
 		expect(r.original).toEqual({ width: 2560, height: 1440 });
+	});
+	test("EIGHT_IMAGE_MAX_SIDE=1024 still downscales a local image and reports the original", async () => {
+		const prev = process.env.EIGHT_IMAGE_MAX_SIDE;
+		process.env.EIGHT_IMAGE_MAX_SIDE = "1024";
+		try {
+			const r = await loadRunImage("shot.png", dir, "ollama");
+			if ("error" in r) throw new Error(r.error);
+			const meta = await sharp(Buffer.from(r.base64, "base64")).metadata();
+			expect([meta.width, meta.height]).toEqual([1024, 576]);
+			expect(r.original).toEqual({ width: 2560, height: 1440 });
+		} finally {
+			if (prev === undefined) delete process.env.EIGHT_IMAGE_MAX_SIDE;
+			else process.env.EIGHT_IMAGE_MAX_SIDE = prev;
+		}
 	});
 });

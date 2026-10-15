@@ -2,7 +2,7 @@
  * 8gent Code - measured layout of a design mock-up (#3770).
  *
  * The mock-up is 1280 px wide with an 800 px column at x=240. read_image hands a
- * model that can see a copy downscaled to 1024 px, so every coordinate it guessed
+ * model that can see a downscaled copy, so every coordinate it guessed
  * was 0.8 of the real one, and it built a 1080 px column with 24 px padding. The
  * blocks then sat off the mock-up even though the words and colours were right.
  *

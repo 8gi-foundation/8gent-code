@@ -165,7 +165,7 @@ describe("downscale note on an attached image (#4293)", () => {
 
 	test("read_image on a large file states the original size and factor", async () => {
 		const big = await sharp({
-			create: { width: 2048, height: 512, channels: 3, background: "#ffffff" },
+			create: { width: 5120, height: 1280, channels: 3, background: "#ffffff" },
 		})
 			.png()
 			.toBuffer();
@@ -173,7 +173,7 @@ describe("downscale note on an attached image (#4293)", () => {
 		readImageFirst = true;
 		await build().chat("Look at mock.png.");
 		expect(bodies.length).toBeGreaterThan(1);
-		expect(asked()).toContain("downscaled copy (1024x256 px) of the original (2048x512 px)");
+		expect(asked()).toContain("downscaled copy (2560x640 px) of the original (5120x1280 px)");
 		expect(asked()).toContain("original_width");
 		expect(asked()).toContain("by 2");
 	}, 60_000);
