@@ -301,6 +301,10 @@ export const NARRATION_NOTE = "**Narration: `speak`, never espeak or say.**";
 export const SCRATCH_DIR_NOTE =
 	"**Scratch files: `.tmp/` in the project (git-ignored, never delete), never /tmp or ~.**";
 
+/** #4306: a pilot run made type folders in the wrong place, tried rmdir, and was blocked. */
+export const FOLDER_NOTE =
+	"**Folders: `rmdir` is blocked, so name the full `mkdir` path first; fix with `mv`.**";
+
 export type EnvironmentNoteInput = {
 	platform?: NodeJS.Platform;
 	/** Windows only: the shell run_command uses. Default: resolved from settings and disk. */
@@ -432,6 +436,7 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 			: "**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
 		NARRATION_NOTE,
 		SCRATCH_DIR_NOTE,
+		FOLDER_NOTE,
 		environmentNote({ cwd: opts.cwd }),
 	);
 	lines.push(SLIDES_TO_VIDEO_NOTE, REVIEW_FOCUS_NOTE);

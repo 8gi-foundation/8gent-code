@@ -17,6 +17,7 @@ import { DeckSpecSchema } from "../../tools/video-deck.js";
 import { scrub } from "../secret-scanner.js";
 import { TOOL_CATEGORIES } from "../tool-registry.js";
 import {
+	FOLDER_NOTE,
 	LOCAL_LOGIN_NOTE,
 	LOCAL_SERVER_CURL_SHORT,
 	REVIEW_FOCUS_NOTE,
@@ -34,9 +35,10 @@ import {
  * +17 in #4165 so render_video_deck sits in a category and discover_tools can load it on a deferred session;
  * +28 in #4236 so the scratch note says .tmp/ is git-ignored and must not be deleted;
  * +7 in #3593 so use_skill sits in core and the model can load a skill on every session;
- * +33 in #4274 so make_docx, make_xlsx and make_pptx sit in the creative category beside make_pdf).
+ * +33 in #4274 so make_docx, make_xlsx and make_pptx sit in the creative category beside make_pdf;
+ * +85 in #4306 so the folder note tells the model rmdir is blocked and to name the mkdir path first).
  */
-const POSIX_CAP = 2288;
+const POSIX_CAP = 2373;
 // The Windows environment line names the shell and is longer than the POSIX one; the budget
 // for everything else stays fixed, so a Windows host gets exactly the difference.
 const CONCISE_CATALOG_MAX_BYTES =
@@ -446,5 +448,20 @@ describe("every tool's first sentence carries its input shape within 140 charact
 		expect(specs.length).toBeGreaterThan(40);
 		const failures = await audit(specs);
 		expect(failures, `\n${failures.join("\n")}\n`).toEqual([]);
+	});
+});
+
+describe("FOLDER_NOTE (#4306)", () => {
+	it("tells the model rm and rmdir are blocked and to settle the target path before mkdir", () => {
+		expect(FOLDER_NOTE.length).toBeLessThanOrEqual(100);
+		expect(FOLDER_NOTE).toContain("mkdir");
+		expect(FOLDER_NOTE).toContain("rmdir");
+		expect(FOLDER_NOTE).toContain("mv");
+		expect(FOLDER_NOTE).not.toContain("\u2014");
+		expect(FOLDER_NOTE.toLowerCase()).not.toContain("agent");
+	});
+
+	it("is in the full catalog next to the scratch-dir note", () => {
+		expect(buildToolCatalogSegment()).toContain(FOLDER_NOTE);
 	});
 });

@@ -136,6 +136,7 @@ import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./p
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import {
+	FOLDER_NOTE,
 	LOCAL_LOGIN_NOTE,
 	LOCAL_SERVER_CURL_SHORT,
 	NARRATION_NOTE,
@@ -289,6 +290,7 @@ const HEADLESS_WEB_NOTE =
 const HEADLESS_TOOL_NOTES = [
 	HEADLESS_WEB_NOTE,
 	NARRATION_NOTE,
+	FOLDER_NOTE,
 	SCRATCH_DIR_NOTE,
 	SLIDES_TO_VIDEO_NOTE,
 	LOCAL_SERVER_CURL_SHORT,
