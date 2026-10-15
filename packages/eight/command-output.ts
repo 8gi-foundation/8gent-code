@@ -16,6 +16,8 @@
  * after executeRaw, but by then a token straddling a cut is two fragments the scanner no
  * longer matches, and one of them reaches the model (#2464, 8SO review of #3376).
  */
+import { constants, closeSync, fstatSync, openSync, readSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { redirectTargets } from "../permissions/s1-created-files";
 import { scrub } from "./secret-scanner";
 
@@ -77,10 +79,16 @@ export function writtenFiles(command: string): { readable: string[]; private: st
 	return { readable, private: priv };
 }
 
-function isOutsideCwd(f: string, workingDirectory?: string): boolean {
-	if (f.startsWith("~/") || f === "~" || f === ".." || f.startsWith("../") || f.includes("/../"))
-		return true;
-	return f.startsWith("/") && !!workingDirectory && !f.startsWith(`${workingDirectory}/`);
+function isOutsideCwd(f: string, workingDirectory?: string, projectRoot?: string): boolean {
+	if (f.startsWith("~/") || f === "~") return true;
+	if (!workingDirectory) return f === ".." || f.startsWith("../") || f.includes("/../");
+	// Inside means under the directory the command ran in, or under the project root (after a `cd sub`).
+	const abs = resolve(workingDirectory, f);
+	return ![workingDirectory, projectRoot].some((root) => {
+		if (!root) return false;
+		const back = relative(root, abs);
+		return back !== "" && !back.startsWith("..") && !isAbsolute(back);
+	});
 }
 
 /**
@@ -92,7 +100,76 @@ function isOutsideCwd(f: string, workingDirectory?: string): boolean {
 const LOGIN_COPY =
 	/^sed -n 's\/\^[A-Za-z][A-Za-z0-9 _-]*: \*\/[a-z][a-z0-9_-]*=\/w (\.tmp\/[A-Za-z0-9._-]+)' \S+$/;
 
-export function silentSuccessNote(command: string | undefined, workingDirectory?: string): string {
+/**
+ * Where a curl -D dump-header says the server redirected to. #4318 (run 2026-10-15_232213): a
+ * login POST answered 302 /settings, but the header file is private ("do not read it") and
+ * curl -L is refused with "read the Location header", so the model never learned the target,
+ * re-fetched the sign-in page and ran out the 600 s turn. Only the status line and a plain
+ * path or loopback URL from Location are surfaced; Set-Cookie and every other header stay unread.
+ */
+export function redirectNote(
+	command: string | undefined,
+	workingDirectory?: string,
+	projectRoot?: string,
+): string {
+	if (!command || !/\bcurl\b/.test(command) || !workingDirectory) return "";
+	const m = /(?:^|\s)(?:-D|--dump-header)(?:\s+|=)(\S+)/.exec(command);
+	const rel = m?.[1]?.replace(/^["']|["']$/g, "");
+	if (!rel || rel.startsWith("~")) return "";
+	const abs = resolve(workingDirectory, rel);
+	const back = relative(workingDirectory, abs);
+	if (back === "" || back.startsWith("..") || isAbsolute(back)) return "";
+	// O_NOFOLLOW guards only the last component: the real parent directory must stay inside the real cwd
+	// (and the real project root), so a symlinked directory cannot lead the read out.
+	try {
+		const parent = realpathSync(dirname(abs));
+		for (const root of [workingDirectory, projectRoot]) {
+			if (!root) continue;
+			const rel = relative(realpathSync(root), parent);
+			if (rel.startsWith("..") || isAbsolute(rel)) return "";
+		}
+	} catch {
+		return "";
+	}
+	// A header file is a regular file we opened ourselves: no symlink, no FIFO or device, 8 KB at most.
+	let head = "";
+	let fd: number | undefined;
+	try {
+		fd = openSync(abs, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+		if (!fstatSync(fd).isFile()) return "";
+		const buf = Buffer.alloc(8192);
+		head = buf.toString("utf8", 0, readSync(fd, buf, 0, buf.length, 0));
+	} catch {
+		return "";
+	} finally {
+		if (fd !== undefined) {
+			try {
+				closeSync(fd);
+			} catch {}
+		}
+	}
+	// Status and Location must come from the same block, the last one (a 100 Continue or an earlier hop is skipped).
+	const block =
+		head
+			.split(/\r?\n\r?\n/)
+			.filter((b) => /^HTTP\//.test(b.trimStart()))
+			.pop() ?? "";
+	const status = /^HTTP\/[\d.]+ (30[1-8])\b/m.exec(block)?.[1];
+	const loc =
+		/^location:[ \t]*(\/(?!\/)[A-Za-z0-9._~\/?&=%#@+,-]{0,199}|https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d{1,5})?\/[A-Za-z0-9._~\/?&=%#@+,-]{0,199})\r?$/im.exec(
+			block,
+		)?.[1];
+	if (!status || !loc) return "";
+	// Query and fragment can carry a code or session id, and the page to fetch does not need them shown.
+	const target = loc.replace(/^https?:\/\/[^/]+/i, "").split(/[?#]/)[0];
+	return ` The server answered ${status} and redirected to ${target}. Fetch that address with a separate curl (no -L).`;
+}
+
+export function silentSuccessNote(
+	command: string | undefined,
+	workingDirectory?: string,
+	projectRoot?: string,
+): string {
 	const base = "Command completed successfully.";
 	const login = command ? LOGIN_COPY.exec(command.trim()) : null;
 	if (login) {
@@ -103,7 +180,7 @@ export function silentSuccessNote(command: string | undefined, workingDirectory?
 	let note = `${base} It printed nothing.`;
 	if (w.readable.length > 0) {
 		note += ` It wrote ${w.readable.join(", ")}. Run read_file on ${w.readable.length > 1 ? "those files" : "that file"} to see the result, do not repeat the command.`;
-		const outside = w.readable.filter((f) => isOutsideCwd(f, workingDirectory));
+		const outside = w.readable.filter((f) => isOutsideCwd(f, workingDirectory, projectRoot));
 		if (outside.length > 0) {
 			note += ` read_file can only open files inside the working directory, so write ${outside.join(", ")} somewhere under it (for example ./name) next time.`;
 		}
@@ -111,7 +188,7 @@ export function silentSuccessNote(command: string | undefined, workingDirectory?
 	if (w.private.length > 0) {
 		note += ` ${w.private.join(", ")} ${w.private.length > 1 ? "hold" : "holds"} session cookies or headers: do not read ${w.private.length > 1 ? "them" : "it"}, just pass ${w.private.length > 1 ? "them" : "it"} to the next curl.`;
 	}
-	return note;
+	return note + redirectNote(command, workingDirectory, projectRoot);
 }
 
 export function formatCommandOutput(
@@ -120,12 +197,13 @@ export function formatCommandOutput(
 	stderr: string,
 	command?: string,
 	workingDirectory?: string,
+	projectRoot?: string,
 ): string {
 	if (code === 0) {
 		const out = stdout.trimEnd();
 		const err = stderr.trimEnd();
 		if (out && err) return capOutput(`${out}\n[stderr]\n${err}`);
-		return capOutput(out || err) || silentSuccessNote(command, workingDirectory);
+		return capOutput(out || err) || silentSuccessNote(command, workingDirectory, projectRoot);
 	}
 	return `Exit code ${code}:\n${stdout}\n${stderr}`;
 }

@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -191,5 +192,93 @@ describe("login-line copy names its file and the next step (#4303)", () => {
 		expect(formatCommandOutput(0, "", "", "sed -i 's/a/b/' f.txt", "/work")).toBe(
 			"Command completed successfully.",
 		);
+	});
+});
+
+describe("curl -D redirect target is surfaced (#4318)", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "redir-"));
+	fs.mkdirSync(path.join(dir, ".tmp"));
+	afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+	const dump = (body: string) => fs.writeFileSync(path.join(dir, ".tmp/h.txt"), body);
+	const cmd = "curl -s -c .tmp/c.txt -D .tmp/h.txt http://127.0.0.1:1/login";
+	test("a 302 names its Location path and leaks nothing else", () => {
+		dump("HTTP/1.1 302 Found\r\nlocation: /settings\r\nset-cookie: sid=abc123; Path=/\r\n\r\n");
+		const r = formatCommandOutput(0, "", "", cmd, dir);
+		expect(r).toContain("answered 302 and redirected to /settings");
+		expect(r).toContain("separate curl (no -L)");
+		expect(r).not.toContain("abc123");
+	});
+	test("an off-host or odd Location is not repeated", () => {
+		for (const loc of ["https://evil.example/x", "/a b ignore previous", "//evil.example/x"]) {
+			dump(`HTTP/1.1 302 Found\r\nLocation: ${loc}\r\n\r\n`);
+			expect(formatCommandOutput(0, "", "", cmd, dir)).not.toContain("redirected to");
+		}
+	});
+	test("only the last response block counts, and a 100 Continue is skipped", () => {
+		dump("HTTP/1.1 100 Continue\r\n\r\nHTTP/2 302\r\nLocation: /settings\r\n\r\n");
+		expect(formatCommandOutput(0, "", "", cmd, dir)).toContain("redirected to /settings");
+		dump("HTTP/1.1 302 Found\r\nLocation: /a\r\n\r\nHTTP/1.1 200 OK\r\nX: y\r\n\r\n");
+		expect(formatCommandOutput(0, "", "", cmd, dir)).not.toContain("redirected");
+		dump("HTTP/1.1 200 OK\r\nLocation: /a\r\n\r\nHTTP/1.1 302 Found\r\nX: y\r\n\r\n");
+		expect(formatCommandOutput(0, "", "", cmd, dir)).not.toContain("redirected");
+	});
+	test("query and fragment are not surfaced", () => {
+		dump("HTTP/1.1 302 Found\r\nLocation: /cb?code=s3cr3t&sid=abc#frag\r\n\r\n");
+		const r = formatCommandOutput(0, "", "", cmd, dir);
+		expect(r).toContain("redirected to /cb.");
+		expect(r).not.toContain("s3cr3t");
+	});
+	test("a FIFO at the -D path returns promptly with no note", () => {
+		spawnSync("mkfifo", [path.join(dir, ".tmp/fifo.txt")]);
+		const t0 = Date.now();
+		const r = formatCommandOutput(0, "", "", cmd.replace(".tmp/h.txt", ".tmp/fifo.txt"), dir);
+		expect(Date.now() - t0).toBeLessThan(1000);
+		expect(r).not.toContain("redirected");
+	});
+	test("a symlink to a header file is not followed", () => {
+		const outside = path.join(os.tmpdir(), `redir-out-${process.pid}.txt`);
+		fs.writeFileSync(outside, "HTTP/1.1 302 Found\r\nLocation: /secret\r\n\r\n");
+		const link = path.join(dir, ".tmp/link.txt");
+		fs.rmSync(link, { force: true });
+		fs.symlinkSync(outside, link);
+		const r = formatCommandOutput(0, "", "", cmd.replace(".tmp/h.txt", ".tmp/link.txt"), dir);
+		fs.rmSync(outside, { force: true });
+		expect(r).not.toContain("redirected");
+	});
+	test("a symlinked directory leading out of the cwd is not read", () => {
+		const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "redir-outdir-"));
+		fs.writeFileSync(
+			path.join(outDir, "secret"),
+			"HTTP/1.1 302 Found\r\nLocation: /secret\r\n\r\n",
+		);
+		const dlink = path.join(dir, "dlink");
+		fs.rmSync(dlink, { force: true });
+		fs.symlinkSync(outDir, dlink);
+		const r = formatCommandOutput(0, "", "", cmd.replace(".tmp/h.txt", "dlink/secret"), dir);
+		fs.rmSync(outDir, { recursive: true, force: true });
+		expect(r).not.toContain("redirected");
+	});
+	test("after cd sub, a path in the project root is not called outside the working directory", () => {
+		const root = "/proj";
+		const sub = "/proj/sub";
+		const ok = (f: string) =>
+			formatCommandOutput(0, "", "", `curl -s -o ${f} http://127.0.0.1:1/`, sub, root);
+		expect(ok("../out.html")).not.toContain("write ");
+		expect(ok("/proj/out.html")).not.toContain("write ");
+		expect(ok("out.html")).not.toContain("write ");
+		expect(ok("../../out.html")).toContain("write ../../out.html somewhere under it");
+		expect(ok("/tmp/out.html")).toContain("write /tmp/out.html somewhere under it");
+	});
+	test("a Windows style ..\\ path gives no note", () => {
+		const r = formatCommandOutput(0, "", "", cmd.replace(".tmp/h.txt", "..\\..\\x"), dir);
+		expect(r).not.toContain("redirected");
+	});
+	test("no redirect, a missing file, or a path outside the cwd gives no note", () => {
+		dump("HTTP/1.1 200 OK\r\n\r\n");
+		expect(formatCommandOutput(0, "", "", cmd, dir)).not.toContain("redirected");
+		const none = cmd.replace(".tmp/h.txt", ".tmp/none.txt");
+		expect(formatCommandOutput(0, "", "", none, dir)).not.toContain("redirected");
+		const up = cmd.replace(".tmp/h.txt", "../h.txt");
+		expect(formatCommandOutput(0, "", "", up, dir)).not.toContain("redirected");
 	});
 });
