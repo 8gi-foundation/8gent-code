@@ -245,6 +245,30 @@ describe("curl -D redirect target is surfaced (#4318)", () => {
 		fs.rmSync(outside, { force: true });
 		expect(r).not.toContain("redirected");
 	});
+	test("a symlinked directory leading out of the cwd is not read", () => {
+		const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "redir-outdir-"));
+		fs.writeFileSync(
+			path.join(outDir, "secret"),
+			"HTTP/1.1 302 Found\r\nLocation: /secret\r\n\r\n",
+		);
+		const dlink = path.join(dir, "dlink");
+		fs.rmSync(dlink, { force: true });
+		fs.symlinkSync(outDir, dlink);
+		const r = formatCommandOutput(0, "", "", cmd.replace(".tmp/h.txt", "dlink/secret"), dir);
+		fs.rmSync(outDir, { recursive: true, force: true });
+		expect(r).not.toContain("redirected");
+	});
+	test("after cd sub, a path in the project root is not called outside the working directory", () => {
+		const root = "/proj";
+		const sub = "/proj/sub";
+		const ok = (f: string) =>
+			formatCommandOutput(0, "", "", `curl -s -o ${f} http://127.0.0.1:1/`, sub, root);
+		expect(ok("../out.html")).not.toContain("write ");
+		expect(ok("/proj/out.html")).not.toContain("write ");
+		expect(ok("out.html")).not.toContain("write ");
+		expect(ok("../../out.html")).toContain("write ../../out.html somewhere under it");
+		expect(ok("/tmp/out.html")).toContain("write /tmp/out.html somewhere under it");
+	});
 	test("a Windows style ..\\ path gives no note", () => {
 		const r = formatCommandOutput(0, "", "", cmd.replace(".tmp/h.txt", "..\\..\\x"), dir);
 		expect(r).not.toContain("redirected");

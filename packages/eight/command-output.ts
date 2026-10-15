@@ -16,8 +16,8 @@
  * after executeRaw, but by then a token straddling a cut is two fragments the scanner no
  * longer matches, and one of them reaches the model (#2464, 8SO review of #3376).
  */
-import { constants, closeSync, fstatSync, openSync, readSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { constants, closeSync, fstatSync, openSync, readSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { redirectTargets } from "../permissions/s1-created-files";
 import { scrub } from "./secret-scanner";
 
@@ -79,10 +79,16 @@ export function writtenFiles(command: string): { readable: string[]; private: st
 	return { readable, private: priv };
 }
 
-function isOutsideCwd(f: string, workingDirectory?: string): boolean {
-	if (f.startsWith("~/") || f === "~" || f === ".." || f.startsWith("../") || f.includes("/../"))
-		return true;
-	return f.startsWith("/") && !!workingDirectory && !f.startsWith(`${workingDirectory}/`);
+function isOutsideCwd(f: string, workingDirectory?: string, projectRoot?: string): boolean {
+	if (f.startsWith("~/") || f === "~") return true;
+	if (!workingDirectory) return f === ".." || f.startsWith("../") || f.includes("/../");
+	// Inside means under the directory the command ran in, or under the project root (after a `cd sub`).
+	const abs = resolve(workingDirectory, f);
+	return ![workingDirectory, projectRoot].some((root) => {
+		if (!root) return false;
+		const back = relative(root, abs);
+		return back !== "" && !back.startsWith("..") && !isAbsolute(back);
+	});
 }
 
 /**
@@ -101,7 +107,11 @@ const LOGIN_COPY =
  * re-fetched the sign-in page and ran out the 600 s turn. Only the status line and a plain
  * path or loopback URL from Location are surfaced; Set-Cookie and every other header stay unread.
  */
-export function redirectNote(command: string | undefined, workingDirectory?: string): string {
+export function redirectNote(
+	command: string | undefined,
+	workingDirectory?: string,
+	projectRoot?: string,
+): string {
 	if (!command || !/\bcurl\b/.test(command) || !workingDirectory) return "";
 	const m = /(?:^|\s)(?:-D|--dump-header)(?:\s+|=)(\S+)/.exec(command);
 	const rel = m?.[1]?.replace(/^["']|["']$/g, "");
@@ -109,6 +119,18 @@ export function redirectNote(command: string | undefined, workingDirectory?: str
 	const abs = resolve(workingDirectory, rel);
 	const back = relative(workingDirectory, abs);
 	if (back === "" || back.startsWith("..") || isAbsolute(back)) return "";
+	// O_NOFOLLOW guards only the last component: the real parent directory must stay inside the real cwd
+	// (and the real project root), so a symlinked directory cannot lead the read out.
+	try {
+		const parent = realpathSync(dirname(abs));
+		for (const root of [workingDirectory, projectRoot]) {
+			if (!root) continue;
+			const rel = relative(realpathSync(root), parent);
+			if (rel.startsWith("..") || isAbsolute(rel)) return "";
+		}
+	} catch {
+		return "";
+	}
 	// A header file is a regular file we opened ourselves: no symlink, no FIFO or device, 8 KB at most.
 	let head = "";
 	let fd: number | undefined;
@@ -143,7 +165,11 @@ export function redirectNote(command: string | undefined, workingDirectory?: str
 	return ` The server answered ${status} and redirected to ${target}. Fetch that address with a separate curl (no -L).`;
 }
 
-export function silentSuccessNote(command: string | undefined, workingDirectory?: string): string {
+export function silentSuccessNote(
+	command: string | undefined,
+	workingDirectory?: string,
+	projectRoot?: string,
+): string {
 	const base = "Command completed successfully.";
 	const login = command ? LOGIN_COPY.exec(command.trim()) : null;
 	if (login) {
@@ -154,7 +180,7 @@ export function silentSuccessNote(command: string | undefined, workingDirectory?
 	let note = `${base} It printed nothing.`;
 	if (w.readable.length > 0) {
 		note += ` It wrote ${w.readable.join(", ")}. Run read_file on ${w.readable.length > 1 ? "those files" : "that file"} to see the result, do not repeat the command.`;
-		const outside = w.readable.filter((f) => isOutsideCwd(f, workingDirectory));
+		const outside = w.readable.filter((f) => isOutsideCwd(f, workingDirectory, projectRoot));
 		if (outside.length > 0) {
 			note += ` read_file can only open files inside the working directory, so write ${outside.join(", ")} somewhere under it (for example ./name) next time.`;
 		}
@@ -162,7 +188,7 @@ export function silentSuccessNote(command: string | undefined, workingDirectory?
 	if (w.private.length > 0) {
 		note += ` ${w.private.join(", ")} ${w.private.length > 1 ? "hold" : "holds"} session cookies or headers: do not read ${w.private.length > 1 ? "them" : "it"}, just pass ${w.private.length > 1 ? "them" : "it"} to the next curl.`;
 	}
-	return note + redirectNote(command, workingDirectory);
+	return note + redirectNote(command, workingDirectory, projectRoot);
 }
 
 export function formatCommandOutput(
@@ -171,12 +197,13 @@ export function formatCommandOutput(
 	stderr: string,
 	command?: string,
 	workingDirectory?: string,
+	projectRoot?: string,
 ): string {
 	if (code === 0) {
 		const out = stdout.trimEnd();
 		const err = stderr.trimEnd();
 		if (out && err) return capOutput(`${out}\n[stderr]\n${err}`);
-		return capOutput(out || err) || silentSuccessNote(command, workingDirectory);
+		return capOutput(out || err) || silentSuccessNote(command, workingDirectory, projectRoot);
 	}
 	return `Exit code ${code}:\n${stdout}\n${stderr}`;
 }
