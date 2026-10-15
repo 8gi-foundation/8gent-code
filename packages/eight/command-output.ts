@@ -16,6 +16,8 @@
  * after executeRaw, but by then a token straddling a cut is two fragments the scanner no
  * longer matches, and one of them reaches the model (#2464, 8SO review of #3376).
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { redirectTargets } from "../permissions/s1-created-files";
 import { scrub } from "./secret-scanner";
 
@@ -92,6 +94,34 @@ function isOutsideCwd(f: string, workingDirectory?: string): boolean {
 const LOGIN_COPY =
 	/^sed -n 's\/\^[A-Za-z][A-Za-z0-9 _-]*: \*\/[a-z][a-z0-9_-]*=\/w (\.tmp\/[A-Za-z0-9._-]+)' \S+$/;
 
+/**
+ * Where a curl -D dump-header says the server redirected to. #4318 (run 2026-10-15_232213): a
+ * login POST answered 302 /settings, but the header file is private ("do not read it") and
+ * curl -L is refused with "read the Location header", so the model never learned the target,
+ * re-fetched the sign-in page and ran out the 600 s turn. Only the status line and a plain
+ * path or loopback URL from Location are surfaced; Set-Cookie and every other header stay unread.
+ */
+export function redirectNote(command: string | undefined, workingDirectory?: string): string {
+	if (!command || !/\bcurl\b/.test(command) || !workingDirectory) return "";
+	const m = /(?:^|\s)(?:-D|--dump-header)(?:\s+|=)(\S+)/.exec(command);
+	const rel = m?.[1]?.replace(/^["']|["']$/g, "");
+	if (!rel || rel.startsWith("/") || rel.startsWith("~") || rel.split("/").includes(".."))
+		return "";
+	let head: string;
+	try {
+		head = readFileSync(join(workingDirectory, rel), "utf8").slice(0, 8192);
+	} catch {
+		return "";
+	}
+	const status = /^HTTP\/[\d.]+ (30[1-8])\b/m.exec(head)?.[1];
+	const loc =
+		/^location:[ \t]*(\/(?!\/)[A-Za-z0-9._~\/?&=%#@+,-]{0,199}|https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d{1,5})?\/[A-Za-z0-9._~\/?&=%#@+,-]{0,199})\r?$/im.exec(
+			head,
+		)?.[1];
+	if (!status || !loc) return "";
+	return ` The server answered ${status} and redirected to ${loc}. Fetch that address with a separate curl (no -L).`;
+}
+
 export function silentSuccessNote(command: string | undefined, workingDirectory?: string): string {
 	const base = "Command completed successfully.";
 	const login = command ? LOGIN_COPY.exec(command.trim()) : null;
@@ -111,7 +141,7 @@ export function silentSuccessNote(command: string | undefined, workingDirectory?
 	if (w.private.length > 0) {
 		note += ` ${w.private.join(", ")} ${w.private.length > 1 ? "hold" : "holds"} session cookies or headers: do not read ${w.private.length > 1 ? "them" : "it"}, just pass ${w.private.length > 1 ? "them" : "it"} to the next curl.`;
 	}
-	return note;
+	return note + redirectNote(command, workingDirectory);
 }
 
 export function formatCommandOutput(

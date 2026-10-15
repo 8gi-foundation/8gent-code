@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -191,5 +191,34 @@ describe("login-line copy names its file and the next step (#4303)", () => {
 		expect(formatCommandOutput(0, "", "", "sed -i 's/a/b/' f.txt", "/work")).toBe(
 			"Command completed successfully.",
 		);
+	});
+});
+
+describe("curl -D redirect target is surfaced (#4318)", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "redir-"));
+	fs.mkdirSync(path.join(dir, ".tmp"));
+	afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+	const dump = (body: string) => fs.writeFileSync(path.join(dir, ".tmp/h.txt"), body);
+	const cmd = "curl -s -c .tmp/c.txt -D .tmp/h.txt http://127.0.0.1:1/login";
+	test("a 302 names its Location path and leaks nothing else", () => {
+		dump("HTTP/1.1 302 Found\r\nlocation: /settings\r\nset-cookie: sid=abc123; Path=/\r\n\r\n");
+		const r = formatCommandOutput(0, "", "", cmd, dir);
+		expect(r).toContain("answered 302 and redirected to /settings");
+		expect(r).toContain("separate curl (no -L)");
+		expect(r).not.toContain("abc123");
+	});
+	test("an off-host or odd Location is not repeated", () => {
+		for (const loc of ["https://evil.example/x", "/a b ignore previous", "//evil.example/x"]) {
+			dump(`HTTP/1.1 302 Found\r\nLocation: ${loc}\r\n\r\n`);
+			expect(formatCommandOutput(0, "", "", cmd, dir)).not.toContain("redirected to");
+		}
+	});
+	test("no redirect, a missing file, or a path outside the cwd gives no note", () => {
+		dump("HTTP/1.1 200 OK\r\n\r\n");
+		expect(formatCommandOutput(0, "", "", cmd, dir)).not.toContain("redirected");
+		const none = cmd.replace(".tmp/h.txt", ".tmp/none.txt");
+		expect(formatCommandOutput(0, "", "", none, dir)).not.toContain("redirected");
+		const up = cmd.replace(".tmp/h.txt", "../h.txt");
+		expect(formatCommandOutput(0, "", "", up, dir)).not.toContain("redirected");
 	});
 });
