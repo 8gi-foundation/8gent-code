@@ -149,7 +149,7 @@ describe("update notice", () => {
 				currentVersion: "0.18.0",
 				modulePath: "file:///nonexistent-root/8gent-code/bin/8gent.ts",
 				embedded: false,
-				env: { EIGHT_HOME: home, PATH: "/usr/bin" },
+				env: { EIGHT_HOME: home, PATH: "/usr/bin", EIGHT_UPDATE_CHECK: "1" },
 				platform: "linux",
 				now: () => 5,
 			});

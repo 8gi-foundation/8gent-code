@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isUpdateCheckEnabled } from "../../../../packages/eight/update-notice.js";
 
 interface UpdateInfo {
 	available: boolean;
@@ -29,36 +30,39 @@ function isNewer(current: string, latest: string): boolean {
 	return false;
 }
 
+export { isUpdateCheckEnabled };
+
+export async function checkForUpdate(
+	env: Record<string, string | undefined>,
+	current: string,
+	fetchFn: typeof fetch = fetch,
+): Promise<UpdateInfo | null> {
+	if (!isUpdateCheckEnabled(env)) return null;
+	try {
+		const res = await fetchFn(
+			"https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/package.json",
+			{ signal: AbortSignal.timeout(5000) },
+		);
+		if (!res.ok) return null;
+		const latest = (await res.json()).version;
+		return latest && isNewer(current, latest) ? { available: true, latest, current } : null;
+	} catch {
+		return null;
+	}
+}
+
 /**
- * Check GitHub for the latest version on launch.
+ * Check GitHub for the latest version on launch, only when opted in.
  * Non-blocking, silent on failure.
  */
 export function useUpdateCheck(): UpdateInfo | null {
 	const [update, setUpdate] = useState<UpdateInfo | null>(null);
 
 	useEffect(() => {
-		const check = async () => {
-			try {
-				// Check GitHub API for latest package.json on main
-				const res = await fetch(
-					"https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/package.json",
-					{ signal: AbortSignal.timeout(5000) },
-				);
-				if (!res.ok) return;
-
-				const pkg = await res.json();
-				const latest = pkg.version;
-				const current = getCurrentVersion();
-
-				if (latest && isNewer(current, latest)) {
-					setUpdate({ available: true, latest, current });
-				}
-			} catch {
-				// Silent fail — don't block startup for update checks
-			}
-		};
-
-		check();
+		if (!isUpdateCheckEnabled()) return;
+		checkForUpdate(process.env, getCurrentVersion()).then((info) => {
+			if (info) setUpdate(info);
+		});
 	}, []);
 
 	return update;
