@@ -47,6 +47,28 @@ For unauthenticated dev mode:
 G8WAY_REQUIRE_AUTH=false G8WAY_PORT=18080 bun run start
 ```
 
+## Extra upstreams (8J command judge)
+
+`G8WAY_UPSTREAMS` (JSON array, see `upstreams.ts`) routes models by prefix to an
+OpenAI-compatible upstream. `upstreams.example.json` holds one entry: `8j`, the command
+judge served from the private HF Space `8GI/8j-eval` (ZeroGPU). The last user message is
+the shell command; the reply content is `allow`, `ask` or `block`, then a `p_yes=` line.
+Bands in the Space: p_yes below 0.05 allow, 0.05 to 0.5 ask, above 0.5 block. They were
+picked on the same 40 synthetic commands the checkpoints were evaluated on, so they need
+a held-out set before anything relies on them. The Space does not stream.
+
+To enable it on a g8way host:
+
+```bash
+export G8WAY_UPSTREAMS="$(cat packages/g8way/upstreams.example.json)"
+export G8WAY_ALLOWED_MODELS="<existing list>,8j/v5-final"   # 8j/20261014-125031 is the other model
+export EIGHT_ALLOW_HOSTED=1                                  # the Space is a hosted, non-loopback upstream
+export G8WAY_8J_KEYS=hf_...                                  # an HF token that can read the private Space
+```
+
+Keys come only from the env var named by `keysEnv`. A bad config throws at startup.
+Models outside `8j/` keep going to OpenRouter unchanged.
+
 ## Rate limits
 
 Token bucket per tenant, per minute. Defaults:
