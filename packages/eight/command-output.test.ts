@@ -180,7 +180,7 @@ describe("login-line copy names its file and the next step (#4303)", () => {
 
 	test("the w-flag note keeps its exact sentence", () => {
 		expect(formatCommandOutput(0, "", "", copy, "/work")).toBe(
-			"Command completed successfully. It printed nothing. It copied the value into .tmp/login and did not show it: do not read or retype it, do not repeat this command. Post it with curl -d @.tmp/login (add -d for the other fields).",
+			"Command completed successfully. It printed nothing. It copied the value into .tmp/login and did not show it: do not read or retype it, do not repeat this command. Post it with curl -d @.tmp/login and no -L (add -d for the other fields).",
 		);
 	});
 
@@ -377,6 +377,6 @@ describe("loopback form hint is shown up front (#4326)", () => {
 	});
 	test("the hint is not added to the other notes", () => {
 		const w = "sed -n 's/^Password: */password=/w .tmp/login' TASK.txt";
-		expect(formatCommandOutput(0, "", "", w, "/work")).not.toContain("no -L");
+		expect(formatCommandOutput(0, "", "", w, "/work")).not.toContain("If this page has a form");
 	});
 });

@@ -226,13 +226,13 @@ export function silentSuccessNote(
 	const base = "Command completed successfully.";
 	const login = command ? LOGIN_COPY.exec(command.trim()) : null;
 	if (login) {
-		return `${base} It printed nothing. It copied the value into ${login[1]} and did not show it: do not read or retype it, do not repeat this command. Post it with curl -d @${login[1]} (add -d for the other fields).`;
+		return `${base} It printed nothing. It copied the value into ${login[1]} and did not show it: do not read or retype it, do not repeat this command. Post it with curl -d @${login[1]} and no -L (add -d for the other fields).`;
 	}
 	const bare = command ? LOGIN_VALUE_ONLY.exec(command.trim()) : null;
 	if (bare) {
 		const field = bare[1].toLowerCase().replace(/[^a-z0-9]+/g, "_");
 		const form = `${bare[3]}-form`;
-		return `${base} It printed nothing. It copied only the value into ${bare[3]}, with no field name, so posting that file would send the value as a field name and be refused. Do not read it. Write the field too: sed -n 's/^${bare[1]}: */${field}=/w ${form}' ${bare[2]} (one command, a new file), then post it with curl -d @${form} (add -d for the other fields).`;
+		return `${base} It printed nothing. It copied only the value into ${bare[3]}, with no field name, so posting that file would send the value as a field name and be refused. Do not read it. Write the field too: sed -n 's/^${bare[1]}: */${field}=/w ${form}' ${bare[2]} (one command, a new file), then post it with curl -d @${form} and no -L (add -d for the other fields).`;
 	}
 	const w = command ? writtenFiles(command) : { readable: [], private: [] };
 	if (w.readable.length === 0 && w.private.length === 0) return base;
