@@ -756,16 +756,29 @@ const realSpawn: BrowserSpawnFn = (spec) => {
 	return { exited, pid, detached: true };
 };
 
-/** The 8gent Browser binary: EIGHT_BROWSER_APP, else the macOS app bundle in /Applications or ~/Applications. */
+let appDirsOverride: string[] | null = null;
+/** Test seam: look for app bundles in these directories instead of the real ones. Never set outside tests. */
+export function _setAppDirsForTest(dirs: string[] | null): void {
+	appDirsOverride = dirs;
+}
+
+/**
+ * The 8gent Browser binary: EIGHT_BROWSER_APP, else the macOS app bundle in /Applications,
+ * ~/Applications or ~/.8gent/apps (#3589). The first build there that can run a named profile wins, so
+ * an old desktop-v0.3.0 in /Applications no longer hides a newer build in ~/.8gent/apps. With no capable
+ * build the first one found is returned, and launchOnce refuses it with the same "update it" error.
+ */
 export function browserBinary(env: Env = process.env, home: string = homedir()): string | null {
 	if (env.EIGHT_BROWSER_APP) return env.EIGHT_BROWSER_APP;
 	if (process.platform !== "darwin") return null;
 	const rel = join("8gent Browser.app", "Contents", "MacOS", "8gent Browser");
-	for (const dir of ["/Applications", join(home, "Applications")]) {
-		const p = join(dir, rel);
-		if (existsSync(p)) return p;
-	}
-	return null;
+	const dirs = appDirsOverride ?? [
+		"/Applications",
+		join(home, "Applications"),
+		join(home, ".8gent", "apps"),
+	];
+	const found = dirs.map((d) => join(d, rel)).filter((p) => existsSync(p));
+	return found.find((p) => profileSupportProblem(p) === null) ?? found[0] ?? null;
 }
 
 /** A free TCP port on loopback that is not the default control port or a reserved service port. */

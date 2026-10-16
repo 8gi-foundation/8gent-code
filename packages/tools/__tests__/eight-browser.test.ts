@@ -34,6 +34,7 @@ import {
 	LOCAL_BROWSER_PROFILE,
 	LOCAL_SERVER_CURL_NOTE,
 	PROFILE_MIN_VERSION,
+	_setAppDirsForTest,
 	_setHostSandboxedForTest,
 	_setKillForTest,
 	_setLaunchWaitForTest,
@@ -41,6 +42,7 @@ import {
 	_setResolverForTest,
 	_setSpawnForTest,
 	blockedForProfile,
+	browserBinary,
 	browserProfile,
 	browserProfileWarning,
 	browserWithheldNote,
@@ -2354,6 +2356,92 @@ describeNotWin("a launch that cannot run the profile never stays running (#4103)
 		expect(compareVersions("0.3.1", "0.3.1")).toBe(0);
 		expect(compareVersions("1.0", "0.9.9")).toBeGreaterThan(0);
 	});
+});
+
+describe("browserBinary picks a build that can run a named profile (#3589)", () => {
+	afterEach(() => _setAppDirsForTest(null));
+
+	/** <dir>/8gent Browser.app with the given version and app.asar content; returns the binary path. */
+	function bundleIn(dir: string, version: string, asar: string): string {
+		const contents = join(dir, "8gent Browser.app", "Contents");
+		mkdirSync(join(contents, "MacOS"), { recursive: true });
+		mkdirSync(join(contents, "Resources"), { recursive: true });
+		const bin = join(contents, "MacOS", "8gent Browser");
+		writeFileSync(bin, "#!/bin/sh\nexit 0\n");
+		chmodSync(bin, 0o755);
+		writeFileSync(
+			join(contents, "Info.plist"),
+			`<?xml version="1.0"?><plist version="1.0"><dict>\n<key>CFBundleShortVersionString</key>\n<string>${version}</string>\n</dict></plist>`,
+		);
+		writeFileSync(join(contents, "Resources", "app.asar"), asar);
+		return bin;
+	}
+	const dirs = () => {
+		const root = mkdtempSync(join(tmpdir(), "8b-appdirs-"));
+		const d = ["system", "user", "own"].map((n) => join(root, n));
+		for (const x of d) mkdirSync(x, { recursive: true });
+		_setAppDirsForTest(d);
+		return d;
+	};
+
+	test.skipIf(process.platform !== "darwin")(
+		"an old build first in the list loses to a later one that supports profiles (James's /Applications 0.3.0 vs ~/.8gent/apps)",
+		() => {
+			const [system, , own] = dirs();
+			bundleIn(system, "0.3.0", "no marker here");
+			const good = bundleIn(own, "0.3.0", "...env.EIGHT_BROWSER_PROFILE...");
+			expect(browserBinary({}, "/nowhere")).toBe(good);
+		},
+	);
+
+	test.skipIf(process.platform !== "darwin")("the first capable build wins; order is kept", () => {
+		const [system, user, own] = dirs();
+		const first = bundleIn(system, PROFILE_MIN_VERSION, "x");
+		bundleIn(user, PROFILE_MIN_VERSION, "x");
+		bundleIn(own, PROFILE_MIN_VERSION, "x");
+		expect(browserBinary({}, "/nowhere")).toBe(first);
+	});
+
+	test.skipIf(process.platform !== "darwin")(
+		"with no capable build the first one found is returned, so the update error still names it",
+		() => {
+			const [system, user] = dirs();
+			const old = bundleIn(system, "0.3.0", "no marker");
+			bundleIn(user, "0.2.0", "no marker");
+			expect(browserBinary({}, "/nowhere")).toBe(old);
+		},
+	);
+
+	test.skipIf(process.platform !== "darwin")(
+		"EIGHT_BROWSER_APP still wins over every directory",
+		() => {
+			const [system] = dirs();
+			bundleIn(system, PROFILE_MIN_VERSION, "x");
+			expect(browserBinary({ EIGHT_BROWSER_APP: "/pinned/8gent Browser" }, "/nowhere")).toBe(
+				"/pinned/8gent Browser",
+			);
+		},
+	);
+
+	test.skipIf(process.platform !== "darwin")("no build anywhere is null", () => {
+		dirs();
+		expect(browserBinary({}, "/nowhere")).toBeNull();
+	});
+
+	test.skipIf(process.platform !== "darwin")(
+		"default directories: /Applications, ~/Applications, then ~/.8gent/apps under the given home",
+		() => {
+			const home = mkdtempSync(join(tmpdir(), "8b-home-"));
+			const own = join(home, ".8gent", "apps");
+			mkdirSync(own, { recursive: true });
+			const good = bundleIn(own, "0.3.0", "...EIGHT_BROWSER_PROFILE...");
+			const picked = browserBinary({}, home);
+			// A capable build in the real /Applications or ~/Applications would come first; this machine's
+			// may be the old 0.3.0, so either a real capable one or ours, never an incapable one.
+			expect(picked).not.toBeNull();
+			if (!picked?.startsWith("/Applications/")) expect(picked).toBe(good);
+		},
+	);
 });
 
 describe("the trusted port list is frozen at session start (8SO)", () => {
