@@ -113,6 +113,7 @@ import {
 } from "./honesty";
 import { projectInstructionsSection } from "./instruction-loader";
 import { getModeManager } from "./modes";
+import { needsPlanningGate as promptNeedsPlanningGate } from "./planning-gate";
 import { isLocalProvider } from "./registry";
 import { verifyNudgeFor } from "./verify-gate";
 
@@ -2140,8 +2141,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Local models skip the BMAD planning in the system prompt and jump
 		// straight to tool calls. For multi-step tasks we inject an explicit
 		// instruction that forces the model to emit a numbered plan first.
-		const PLANNING_KEYWORDS =
-			/\b(build|create|implement|fix|refactor|add|setup|configure|migrate|convert|redesign|scaffold|deploy|integrate)\b/i;
 		// A Table officer is answering a colleague in a chat channel, not executing
 		// a multi-step build, and its turn prompt is ALWAYS over 100 chars - so
 		// this gate fired on every single officer reply and injected the literal
@@ -2150,8 +2149,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ..." scaffolding in the live corpus: not a model tic, an instruction we
 		// sent. Nobody at the Table asked for a plan.
 		const needsPlanningGate =
-			!isVerbatimScope(this.config.agentScope) &&
-			(textForAgent.length > 100 || PLANNING_KEYWORDS.test(textForAgent));
+			!isVerbatimScope(this.config.agentScope) && promptNeedsPlanningGate(textForAgent);
 
 		// Changed session context goes in before the user's words (#3222).
 		this.appendContextNote();
