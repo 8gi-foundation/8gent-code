@@ -16,6 +16,7 @@
  * window IDs. It just calls term_spawn / term_send / term_read.
  */
 
+import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import {
 	type WindowSession,
 	attachInTerminal,
@@ -171,6 +172,9 @@ export async function executeTermTool(
 async function termSpawn(args: Record<string, unknown>): Promise<string> {
 	const command = String(args.command ?? "").trim();
 	if (!command) return "ERR: term_spawn needs a command.";
+	// The command is run by a shell inside the session: same guard as run_command (#3763).
+	const validation = sanitizeShellCommand(command);
+	if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 	const cmdArgs = Array.isArray(args.args) ? (args.args as string[]).map(String) : [];
 	const label = (args.label as string | undefined) ?? command;
 

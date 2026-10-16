@@ -71,6 +71,10 @@ async function gateShellChild(
 	cwd: string,
 	holder: PermissionModeHolder,
 ): Promise<string | null> {
+	// The task runs through sh -c: the same sanitizer as run_command, first (#3763).
+	const { sanitizeShellCommand } = await import("../permissions/shell-sanitizer");
+	const validation = sanitizeShellCommand(command);
+	if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 	// Judge git state against the directory the child runs in (#3748).
 	const { withCommandDir } = await import("../permissions/command-policy");
 	return withCommandDir(cwd, () =>
@@ -176,6 +180,9 @@ export async function spawnAgentTool(
 				const blocked = await gateShellChild(task, workingDirectory, child);
 				if (blocked) return blocked;
 			} else if (effectiveRuntime === "shell") {
+				const { sanitizeShellCommand } = await import("../permissions/shell-sanitizer");
+				const validation = sanitizeShellCommand(task);
+				if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${task}`;
 				const { systemOneGate } = await import("../permissions/system-one-gate");
 				const systemOne = await systemOneGate(task);
 				if (!systemOne.run) return systemOne.message as string;

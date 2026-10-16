@@ -16,8 +16,12 @@
  *   line). Repository state is read fresh for every check, from the working
  *   directory the command runs in (see withCommandDir);
  * - a network command that sends data: a request body, a form or file upload,
- *   a non-GET method, a write through `gh issue` / `gh pr`, or output
- *   redirected to a network socket;
+ *   a curl config file or stdin-sending protocol, a non-GET method, a gh
+ *   command that creates or uploads content (issue, pr, release, gist, repo,
+ *   workflow, secret and the like), a raw socket, remote shell or file copy
+ *   tool, an interpreter one-liner that opens a connection, a git push to a
+ *   URL remote, or output redirected to a network socket (judged on the path
+ *   the shell opens, after quote and escape removal);
  * - any network command at all while the user has pinned a local provider,
  *   except a plain curl fetch whose every target is this machine (loopback).
  *
@@ -73,8 +77,42 @@ export interface CommandPolicyContext {
 	pinnedLocalProvider: boolean;
 }
 
-const GH_NETWORK = new Set(["api", "issue", "pr"]);
 const GH_READ_ONLY = new Set(["list", "view", "status", "checks", "diff", "checkout"]);
+/** gh command groups other than api, issue and pr that reach GitHub. */
+const GH_GROUPS = new Set([
+	"release",
+	"gist",
+	"repo",
+	"workflow",
+	"run",
+	"secret",
+	"variable",
+	"label",
+	"ssh-key",
+	"gpg-key",
+	"codespace",
+	"project",
+	"cache",
+	"ruleset",
+	"extension",
+	"auth",
+	"attestation",
+	"org",
+	"copilot",
+]);
+/** gh commands that only read, whatever follows them. */
+const GH_FETCH_TOP = new Set(["status", "search", "browse"]);
+/** Actions in those groups that only read or download. */
+const GH_GROUP_READ = new Set([
+	...GH_READ_ONLY,
+	"download",
+	"watch",
+	"clone",
+	"get",
+	"verify",
+	"verify-asset",
+	"token",
+]);
 
 /** `2>&1` and `&>` are redirects, not the `&` sequencing operator. */
 function normaliseRedirects(command: string): string {
@@ -700,73 +738,535 @@ function nonGetMethod(m: string | undefined): boolean {
 /** curl short options that take a value (attached or the next token). */
 const CURL_SHORT_WITH_VALUE = new Set("AbcCdDeEFHKmoPQrtTuUwxXyYz".split(""));
 
-/** "send" when this argv sends data, "fetch" when it only reads, null when it is not a network command. */
-export function networkUse(argv: string[]): "send" | "fetch" | null {
-	const tool = path.basename(argv[0] ?? "");
-	const args = argv.slice(1);
+/** curl long options that send data, run commands on the server or read more options from a file. */
+const CURL_SEND_LONG = [
+	"--data",
+	"--data-raw",
+	"--data-binary",
+	"--data-urlencode",
+	"--data-ascii",
+	"--json",
+	"--form",
+	"--form-string",
+	"--upload-file",
+	"--config",
+	"--mail-from",
+	"--mail-rcpt",
+	"--mail-auth",
+	"--quote",
+	// --expand-* is the same option with {{variables}} expanded in its value.
+	"--expand-data",
+	"--expand-json",
+	"--expand-form",
+	"--expand-upload-file",
+	"--expand-mail-from",
+	"--expand-mail-rcpt",
+	"--expand-mail-auth",
+	"--expand-quote",
+	"--expand-config",
+];
+/** curl protocols that send stdin, mail or server commands rather than fetch a page. */
+const CURL_SEND_SCHEME =
+	/^(smtps?|ftps?|sftp|scp|telnet|imaps?|pop3s?|ldaps?|tftp|dict|mqtts?|rtsp|gopher|smbs?):\/\//i;
 
-	if (tool === "curl") {
-		for (let j = 0; j < args.length; j++) {
-			const a = args[j];
-			if (
-				/^--(data|data-raw|data-binary|data-urlencode|data-ascii|json|form|form-string|upload-file)(=|$)/.test(
-					a,
-				)
-			) {
-				return "send";
-			}
-			if (a === "--request") {
-				if (nonGetMethod(args[j + 1])) return "send";
-				j++;
+/** A long curl option, exactly or as the unique-prefix abbreviation curl accepts, that sends. */
+function curlLongSends(name: string): boolean {
+	if (CURL_SEND_LONG.includes(name)) return true;
+	// curl accepts a shortened long option; three letters or more, treated as the send option it starts.
+	return name.length >= 5 && CURL_SEND_LONG.some((o) => o.startsWith(name));
+}
+
+/** The option name of `--name=value`, or the token itself. */
+function longName(a: string): string {
+	const eq = a.indexOf("=");
+	return eq >= 0 ? a.slice(0, eq) : a;
+}
+
+function curlUse(args: string[]): "send" | "fetch" {
+	for (let j = 0; j < args.length; j++) {
+		const a = args[j];
+		if (a.startsWith("--")) {
+			const name = longName(a);
+			if (curlLongSends(name)) return "send";
+			if (name.length >= 5 && ("--request".startsWith(name) || name === "--expand-request")) {
+				const value = a.includes("=") ? a.slice(a.indexOf("=") + 1) : args[j + 1];
+				if (nonGetMethod(value)) return "send";
+				if (!a.includes("=")) j++;
 				continue;
 			}
-			if (a.startsWith("--request=") && nonGetMethod(a.slice(10))) return "send";
-			if (a.length > 1 && a.startsWith("-") && !a.startsWith("--")) {
-				// A short option cluster: flags up to the first that takes a value,
-				// which owns the rest of the token, or the next token.
-				for (let k = 1; k < a.length; k++) {
-					const c = a[k];
-					if (c === "d" || c === "F" || c === "T") return "send";
-					if (!CURL_SHORT_WITH_VALUE.has(c)) continue;
+		}
+		if (CURL_SEND_SCHEME.test(a) || CURL_SEND_SCHEME.test(a.slice(a.indexOf("=") + 1))) {
+			return "send";
+		}
+		if (a.length > 1 && a.startsWith("-") && !a.startsWith("--")) {
+			// A short option cluster: flags up to the first that takes a value,
+			// which owns the rest of the token, or the next token.
+			for (let k = 1; k < a.length; k++) {
+				const c = a[k];
+				if (c === "d" || c === "F" || c === "T" || c === "K" || c === "Q") return "send";
+				if (!CURL_SHORT_WITH_VALUE.has(c)) continue;
+				const attached = a.slice(k + 1);
+				const value = attached || args[j + 1];
+				if (!attached) j++;
+				if (c === "X" && nonGetMethod(value)) return "send";
+				break;
+			}
+		}
+	}
+	return "fetch";
+}
+
+function wgetUse(args: string[]): "send" | "fetch" {
+	for (let j = 0; j < args.length; j++) {
+		const a = args[j];
+		if (/^--(post-data|post-file|body-data|body-file)(=|$)/.test(a)) return "send";
+		if (a === "--method" && nonGetMethod(args[j + 1])) return "send";
+		if (a.startsWith("--method=") && nonGetMethod(a.slice(9))) return "send";
+		// -e / --execute sets a wgetrc command; the ones that attach a body or change the method.
+		const exec =
+			a === "-e" || a === "--execute"
+				? args[j + 1]
+				: a.startsWith("--execute=")
+					? a.slice(10)
+					: undefined;
+		if (
+			exec !== undefined &&
+			/^\s*(post_?data|post_?file|body_?data|body_?file|method)\b/i.test(exec)
+		) {
+			return "send";
+		}
+	}
+	return "fetch";
+}
+
+function ghApiUse(rest: string[]): "send" | "fetch" {
+	for (let j = 0; j < rest.length; j++) {
+		const a = rest[j];
+		if (/^--(field|raw-field|input)(=|$)/.test(a)) return "send";
+		if (a === "--method" && nonGetMethod(rest[j + 1])) return "send";
+		if (a.startsWith("--method=") && nonGetMethod(a.slice(9))) return "send";
+		if (a.startsWith("-") && !a.startsWith("--")) {
+			// A short cluster such as -iXPOST: flags up to the first that takes a value.
+			for (let k = 1; k < a.length; k++) {
+				const c = a[k];
+				if (c === "f" || c === "F") return "send";
+				if (c === "X") {
 					const attached = a.slice(k + 1);
-					const value = attached || args[j + 1];
-					if (!attached) j++;
-					if (c === "X" && nonGetMethod(value)) return "send";
+					const value = (attached || rest[j + 1] || "").replace(/^=/, "");
+					if (nonGetMethod(value)) return "send";
+					break;
+				}
+				if ("HqtpR".includes(c)) {
+					if (k === a.length - 1) j++;
 					break;
 				}
 			}
 		}
-		return "fetch";
 	}
+	return "fetch";
+}
 
-	if (tool === "wget") {
-		for (let j = 0; j < args.length; j++) {
-			const a = args[j];
-			if (/^--(post-data|post-file|body-data|body-file)(=|$)/.test(a)) return "send";
-			if (a === "--method" && nonGetMethod(args[j + 1])) return "send";
-			if (a.startsWith("--method=") && nonGetMethod(a.slice(9))) return "send";
-		}
-		return "fetch";
-	}
-
-	if (tool === "gh" && GH_NETWORK.has(args[0] ?? "")) {
-		const sub = args[0];
-		const rest = args.slice(1);
-		if (sub === "api") {
-			for (let j = 0; j < rest.length; j++) {
-				const a = rest[j];
-				if (/^(-f|-F|--field|--raw-field|--input)(=|$)/.test(a) || /^-[fF]./.test(a)) return "send";
-				if ((a === "-X" || a === "--method") && nonGetMethod(rest[j + 1])) return "send";
-				if (a.startsWith("--method=") && nonGetMethod(a.slice(9))) return "send";
-			}
-			return "fetch";
-		}
-		// gh issue / gh pr: anything but a read sends content to the service.
-		const action = rest.find((a) => !a.startsWith("-"));
+function ghUse(args: string[]): "send" | "fetch" | null {
+	const sub = args[0] ?? "";
+	if (sub.startsWith("-")) return null;
+	const rest = args.slice(1);
+	if (sub === "api") return ghApiUse(rest);
+	// The first word that is not an option.
+	const action = rest.find((a) => !a.startsWith("-"));
+	if (sub === "issue" || sub === "pr") {
+		// Anything but a read sends content to the service.
 		return action && GH_READ_ONLY.has(action) ? "fetch" : "send";
 	}
-
+	if (GH_FETCH_TOP.has(sub)) return "fetch";
+	if (GH_GROUPS.has(sub)) {
+		if (sub === "auth") return action && GH_GROUP_READ.has(action) ? "fetch" : "send";
+		return !action || GH_GROUP_READ.has(action) ? "fetch" : "send";
+	}
 	return null;
+}
+
+/** Tools that open a connection and can send what they are given. */
+const SEND_TOOLS = new Set([
+	"nc",
+	"ncat",
+	"netcat",
+	"nc.openbsd",
+	"nc.traditional",
+	"socat",
+	"telnet",
+	"ssh",
+	"scp",
+	"sftp",
+	"ftp",
+	"tftp",
+	"lftp",
+	"mosh",
+	"mosh-client",
+	"rcp",
+	"rsh",
+	"rlogin",
+	"pscp",
+	"plink",
+	"autossh",
+	"sshpass",
+	"ssh-copy-id",
+	"http",
+	"https",
+	"xh",
+	"curlie",
+	// Mail: a message on the command line or stdin leaves the machine.
+	"sendmail",
+	"mail",
+	"mailx",
+	"s-nail",
+	"mutt",
+	"neomutt",
+	"msmtp",
+	"ssmtp",
+	"swaks",
+	"mpack",
+	// Tunnels expose a local port to the internet.
+	"ngrok",
+]);
+/** Tools that reach the network to look something up or download it. */
+const FETCH_TOOLS = new Set([
+	"dig",
+	"nslookup",
+	"ping",
+	"ping6",
+	"traceroute",
+	"whois",
+	"nmap",
+	"ssh-keyscan",
+	"aria2c",
+	"axel",
+	"lynx",
+	"w3m",
+]);
+
+/** The words of args that are not options, up to `n` of them. */
+function plainWords(args: string[], n: number): string[] {
+	const out: string[] = [];
+	for (const a of args) {
+		if (a === "--") continue;
+		if (a.startsWith("-")) continue;
+		out.push(a);
+		if (out.length >= n) break;
+	}
+	return out;
+}
+
+/** rclone subcommands that only read; every other one moves data to or from a remote. */
+const RCLONE_READ = new Set([
+	"ls",
+	"lsd",
+	"lsl",
+	"lsf",
+	"lsjson",
+	"cat",
+	"size",
+	"tree",
+	"about",
+	"version",
+	"help",
+	"listremotes",
+	"md5sum",
+	"sha1sum",
+	"hashsum",
+	"check",
+	"cryptcheck",
+	"config",
+	"genautocomplete",
+]);
+
+/** Package and artifact publishing: the subcommands that upload to a registry or host. */
+function publishUse(tool: string, args: string[]): "send" | "fetch" | null {
+	const words = plainWords(args, 3);
+	const first = words[0] ?? "";
+	const PKG_WRITE = new Set(["publish", "unpublish", "deprecate", "dist-tag", "owner", "access"]);
+	switch (tool) {
+		case "npm":
+		case "pnpm":
+		case "bun":
+		case "yarn":
+			// `yarn npm publish` and `pnpm -r publish` put the verb after another word.
+			return words.some((w) => PKG_WRITE.has(w)) ? "send" : null;
+		case "twine":
+			return args.includes("upload") ? "send" : null;
+		case "docker":
+		case "podman":
+		case "nerdctl":
+		case "buildah":
+			return args.includes("--push") || words.includes("push") ? "send" : null;
+		case "cargo":
+			return ["publish", "owner", "yank"].includes(first) ? "send" : null;
+		case "gem":
+			return ["push", "yank", "owner"].includes(first) ? "send" : null;
+		case "aws": {
+			const i = args.findIndex((a) => a === "s3" || a === "s3api");
+			if (i < 0) return null;
+			const sub = plainWords(args.slice(i + 1), 1)[0] ?? "";
+			if (args[i] === "s3")
+				return ["cp", "sync", "mv", "rm", "mb", "rb", "website"].includes(sub) ? "send" : null;
+			return /^(put|delete|create|upload|copy|complete|restore)/.test(sub) ? "send" : null;
+		}
+		case "gcloud": {
+			const i = args.indexOf("storage");
+			if (i < 0) return null;
+			return ["cp", "mv", "rm", "rsync"].includes(plainWords(args.slice(i + 1), 1)[0] ?? "")
+				? "send"
+				: null;
+		}
+		case "gsutil":
+			return ["cp", "mv", "rm", "rsync"].includes(first) ? "send" : null;
+		case "kubectl":
+		case "oc":
+			return first === "cp" ? "send" : null;
+		case "cloudflared":
+			return words.includes("tunnel") || args.some((a) => a === "--url" || a.startsWith("--url="))
+				? "send"
+				: null;
+		case "rclone":
+			return RCLONE_READ.has(first) ? "fetch" : "send";
+		default:
+			return null;
+	}
+}
+
+/** python -m modules that talk to the network. */
+const PYTHON_NET_MODULES =
+	/^(smtplib|smtpd|aiosmtpd|urllib(\.request)?|http\.client|http\.server|ftplib|telnetlib|poplib|imaplib|socket|socketserver|xmlrpc\.(client|server)|webbrowser|requests|httpx|aiohttp|pip|twine|uvicorn|flask)$/i;
+
+/**
+ * An interpreter given its program on stdin (`python3 -`, `node -`): the line
+ * does not show what it does, so it is asked about as a possible send.
+ */
+function stdinProgram(tool: string, args: string[]): boolean {
+	if (!/^(pypy|python|node|nodejs|bun|deno|perl|ruby|php|lua)[\d.]*$/.test(tool)) return false;
+	return args.includes("-") && !args.some((a) => a === "-c" || a === "-e");
+}
+
+/** `python3 -m <module>` where the module is a network client or server. */
+function pythonNetModule(tool: string, args: string[]): string | null {
+	if (!/^(pypy|python)[\d.]*$/.test(tool)) return null;
+	const i = args.findIndex((a) => /^-[A-Za-z]*m$/.test(a));
+	const m = i >= 0 ? args[i + 1] : args.find((a) => a.startsWith("-m") && a.length > 2)?.slice(2);
+	return m && PYTHON_NET_MODULES.test(m) ? m : null;
+}
+
+/** An rsync operand that names another machine: host:path, user@host:path or rsync://. */
+function rsyncRemote(args: string[]): boolean {
+	return args.some(
+		(a) =>
+			/^--(rsh|daemon)(=|$)/.test(a) ||
+			/^-[A-Za-z]*e$/.test(a) ||
+			a.includes("://") ||
+			(!a.startsWith("-") && /^[^/\s:]+:/.test(a)),
+	);
+}
+
+/**
+ * What an interpreter one-liner can do over the network, matched by API shape
+ * and not by bare words: an ordinary line that only prints or greps the word
+ * "fetch", "https", "net", "connect", "socket" or "requests" stays unprompted.
+ *
+ * Known limits: a module name built from strings (`__import__("so"+"cket")`,
+ * `require(["n","et"].join(""))`, `getattr(__builtins__, ...)`), code read from
+ * a file or decoded at run time (base64, eval of a variable) and a program on
+ * stdin are not visible here. Stdin programs are asked about as a whole (see
+ * stdinProgram); the rest is a limit of reading a command line, not a promise.
+ */
+const NETWORK_MODULES = [
+	"socket",
+	"socketserver",
+	"ssl",
+	"tls",
+	"net",
+	"dgram",
+	"dns",
+	"http",
+	"https",
+	"http2",
+	"http\\.client",
+	"http\\.server",
+	"httplib",
+	"urllib\\d?",
+	"urllib2",
+	"urllib3",
+	"requests",
+	"httpx",
+	"aiohttp",
+	"websockets?",
+	"ftplib",
+	"smtplib",
+	"smtpd",
+	"telnetlib",
+	"imaplib",
+	"poplib",
+	"nntplib",
+	"xmlrpc",
+	"paramiko",
+	"asyncssh",
+	"pycurl",
+	"net\\/http",
+	"net\\/ftp",
+	"net\\/smtp",
+	"open-uri",
+	"node-fetch",
+	"undici",
+	"axios",
+	"got",
+	"superagent",
+	"nodemailer",
+	"ws",
+	"grpc",
+	"LWP",
+	"HTTP::Tiny",
+	"IO::Socket",
+	"Socket",
+	"Net::\\w+",
+	"WWW::\\w+",
+	"Mojo::UserAgent",
+	"Faraday",
+	"HTTParty",
+	"Typhoeus",
+].join("|");
+const NETWORK_CODE_SHAPES: RegExp[] = [
+	// import / require / use of a network module: `import socket`, `import os, socket`,
+	// `from urllib.request import urlopen`, `require('node:https')`, `use LWP::Simple`.
+	new RegExp(
+		`\\b(?:import|from|use|using|require|require_once|__import__|import_module|load)\\b\\s*\\(?\\s*["'\`]?(?:[\\w.]+\\s*(?:as\\s+\\w+\\s*)?,\\s*)*(?:node:)?(?:${NETWORK_MODULES})(?![\\w-])`,
+		"i",
+	),
+	// A call that opens a connection or fetches, whatever it was imported as.
+	/\b(?:urlopen|urlretrieve|fsockopen|pfsockopen|stream_socket_\w+|create_connection|open_connection|open_unix_connection|getaddrinfo|gethostbyname|curl_init|curl_exec|fetch|sendBeacon|socket|connect|connect_ex|createConnection|createServer)\s*\(/i,
+	/\bnew\s+(?:WebSocket|XMLHttpRequest|EventSource|WebTransport|\w*Socket)\b/i,
+	/\b(?:TCPSocket|UDPSocket|TCPServer|UNIXSocket|XMLHttpRequest)\b|IO::Socket|Net::\w|LWP::|WWW::|Mojo::UserAgent|HTTP::Tiny/i,
+	// A network module used through its name: socket.socket(, requests.get(, net.connect(, Bun.connect(.
+	/\b(?:socket|net|tls|dgram|http2?|https|requests|httpx|aiohttp|urllib\d?(?:\.request)?|Bun|Deno|ssl)\s*\.\s*(?:socket|connect|connect_ex|createConnection|create_connection|createServer|request|get|post|put|delete|patch|head|listen|urlopen|fetch|Client|ClientSession|AsyncClient|Session|open|create_default_context|wrap_socket|serve)\b/i,
+	// A URL handed to a call that fetches it.
+	/\b(?:file_get_contents|fopen|readfile|get|getstore|getprint|open|read|import|download|curl|wget)\s*\(\s*["'`]\s*(?:https?|ftps?|wss?):\/\//i,
+	// A command run from inside the program that itself goes out.
+	/\b(?:system|exec\w*|popen|spawn\w*|run|call|check_output|check_call|Popen|execSync|execFile\w*|qx)\b[^\n]{0,80}\b(?:curl|wget|nc|ncat|netcat|ssh|scp|sftp|socat|telnet|rsync)\b/i,
+	/\|\s*["']?\s*(?:curl|wget|nc|ncat|netcat|socat)\b/i,
+	/\b(?:curl|wget|nc|ncat|netcat|socat)\b[^|\n]*\|\s*getline/i,
+	/\|&/,
+	/\/(?:dev\/(?:tcp|udp)|inet\w*)\//i,
+	/Invoke-WebRequest|Invoke-RestMethod|\biwr\b|\birm\b|System\.Net\.|Net\.WebClient|Net\.Sockets/i,
+];
+const NETWORK_CODE = {
+	test: (text: string): boolean => NETWORK_CODE_SHAPES.some((re) => re.test(text)),
+};
+
+/** Whether an interpreter is given its program on the command line, not in a file. */
+function hasInlineProgram(tool: string, args: string[]): boolean {
+	if (/^(pypy|python)[\d.]*$/.test(tool)) return args.some((a) => /^-[A-Za-z]*c$/.test(a));
+	if (/^(node|nodejs|bun)$/.test(tool))
+		return args.some((a) => /^(-e|-p|-pe|--eval|--print)$/.test(a));
+	if (tool === "deno") return args[0] === "eval";
+	if (tool === "perl" || tool === "ruby") return args.some((a) => /^-[A-Za-z]*e/i.test(a));
+	if (tool === "php") return args.includes("-r");
+	if (tool === "lua") return args.some((a) => /^-e/.test(a));
+	if (/^(pwsh|powershell)$/.test(tool))
+		return args.some((a) => /^-(c|command|encodedcommand)$/i.test(a));
+	// awk takes its program as the first operand and can open /inet sockets.
+	return /^(awk|gawk|mawk|nawk)$/.test(tool);
+}
+
+/** A git remote spelled as a URL (or scp-style host:path), not a configured remote name. */
+function isUrlRemote(r: string | undefined): boolean {
+	if (!r) return false;
+	if (/^file:\/\//i.test(r)) return false;
+	return (
+		/^[a-z][a-z0-9+.-]*:\/\//i.test(r) ||
+		/^[\w.-]+@[\w.-]+:/.test(r) ||
+		/^[\w-]+(\.[\w-]+)+:/.test(r)
+	);
+}
+
+/** git subcommands that fetch from the remote they are given. */
+const GIT_FETCHING = new Set(["clone", "ls-remote", "fetch", "pull"]);
+
+function gitUse(args: string[]): "send" | "fetch" | null {
+	let i = 0;
+	while (i < args.length && args[i].startsWith("-")) {
+		i += GIT_GLOBAL_WITH_VALUE.has(args[i]) ? 2 : 1;
+	}
+	const sub = args[i];
+	if (sub !== "push" && !GIT_FETCHING.has(sub ?? "")) return null;
+	const rest = args.slice(i + 1);
+	if (sub === "push") {
+		for (const a of rest) if (a.startsWith("--repo=") && isUrlRemote(a.slice(7))) return "send";
+		const remote = firstPositional(rest, PUSH_OPTS_WITH_VALUE);
+		return isUrlRemote(remote) ? "send" : null;
+	}
+	return isUrlRemote(
+		firstPositional(rest, new Set(["--depth", "-b", "--branch", "-o", "--origin"])),
+	)
+		? "fetch"
+		: null;
+}
+
+/** "send" when this argv sends data, "fetch" when it only reads, null when it is not a network command. */
+export function networkUse(argv: string[]): "send" | "fetch" | null {
+	// A word ending in "/" is a path or a pattern such as an awk /http/ program, never a program to run.
+	const tool = (argv[0] ?? "").endsWith("/") ? "" : path.basename(argv[0] ?? "");
+	const args = argv.slice(1);
+
+	if (tool === "curl") return curlUse(args);
+	if (tool === "wget") return wgetUse(args);
+	if (tool === "gh") return ghUse(args);
+	if (tool === "git") return gitUse(args);
+	if (tool === "openssl") return /^s_(client|server|time)$/.test(args[0] ?? "") ? "send" : null;
+	if (tool === "rsync") return rsyncRemote(args) ? "send" : null;
+	// busybox and toybox run the applet named by their first operand.
+	if (tool === "busybox" || tool === "toybox") {
+		return args.length ? networkUse(args) : null;
+	}
+	if (SEND_TOOLS.has(tool)) return "send";
+	if (FETCH_TOOLS.has(tool)) return "fetch";
+	const published = publishUse(tool, args);
+	if (published) return published;
+	const pyModule = pythonNetModule(tool, args);
+	if (pyModule) {
+		// python -m twine upload is a publish; python -m pip only fetches.
+		if (/^twine$/i.test(pyModule)) return publishUse("twine", args);
+		if (/^pip$/i.test(pyModule))
+			return args.includes("download") || args.includes("install") ? "fetch" : null;
+		return "send";
+	}
+	if (stdinProgram(tool, args)) return "send";
+	if (hasInlineProgram(tool, args) && NETWORK_CODE.test(args.join(" "))) return "send";
+	return null;
+}
+
+/**
+ * The text the shell opens a path from: quotes and backslash escapes removed,
+ * and `$'...'` escapes (\xHH, octal, \uHHHH) decoded.
+ */
+function shellWords(command: string): string {
+	return command
+		.replace(/\$'((?:[^'\\]|\\.)*)'/g, (_m, body: string) =>
+			body.replace(/\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|[0-7]{1,3}|.)/g, (_e, c: string) => {
+				if (/^[xu]/.test(c)) return String.fromCharCode(Number.parseInt(c.slice(1), 16));
+				if (/^[0-7]/.test(c)) return String.fromCharCode(Number.parseInt(c, 8));
+				return c;
+			}),
+		)
+		.replace(/\\(.)/g, "$1")
+		.replace(/["']/g, "");
+}
+
+/** A redirect, exec or read of /dev/tcp or /dev/udp, however the path is quoted or escaped. */
+export function opensNetworkSocket(command: string): boolean {
+	const words = shellWords(command);
+	return (
+		/\/+dev\/+(tcp|udp)\//i.test(command) ||
+		/\/+dev\/+(tcp|udp)\//i.test(words) ||
+		// /dev/$proto/host/port, /dev/`echo tcp`/...: the shell builds the name, so assume the worst.
+		/\/+dev\/+[$`]/.test(command) ||
+		/\/+dev\/+[$`]/.test(words)
+	);
 }
 
 /** An http(s) URL on this machine, with nothing curl would expand. */
@@ -1008,7 +1508,7 @@ export function mustAskReason(
 	depth = 0,
 	line: LineState = { unknownRepo: false },
 ): string | null {
-	if (/\/dev\/(tcp|udp)\//i.test(command)) return "it redirects data to a network socket";
+	if (opensNetworkSocket(command)) return "it redirects data to a network socket";
 
 	for (const segment of commandSegments(command)) {
 		const raw = tokenize(segment);

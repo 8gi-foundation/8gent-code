@@ -133,6 +133,9 @@ const ORDINARY_LINES = [
 	"echo ok \\\n && ls",
 ];
 
+// Not blocked, but asks the person every time by policy (#3806): excluded from the unattended-run check only.
+const ASKS_BY_POLICY = new Set(["ssh host ls -la"]);
+
 describe("always-blocked segments (#3768)", () => {
 	test("the check sees a blocked command in any position", () => {
 		const pm = manager();
@@ -246,7 +249,8 @@ describe("always-blocked segments (#3768)", () => {
 		const log = console.log;
 		console.log = () => {};
 		try {
-			for (const line of ORDINARY_LINES) {
+			// #3806: a remote command (ssh) now asks every time by policy, so it cannot run unattended here.
+			for (const line of ORDINARY_LINES.filter((l) => !ASKS_BY_POLICY.has(l))) {
 				expect([line, await pm.requestPermission("Execute Shell Command", "d", line)]).toEqual([
 					line,
 					true,
