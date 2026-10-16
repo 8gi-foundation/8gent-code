@@ -63,8 +63,15 @@ To enable it on a g8way host:
 export G8WAY_UPSTREAMS="$(cat packages/g8way/upstreams.example.json)"
 export G8WAY_ALLOWED_MODELS="<existing list>,8j/v5-final"   # 8j/20261014-125031 is the other model
 export EIGHT_ALLOW_HOSTED=1                                  # the Space is a hosted, non-loopback upstream
-export G8WAY_8J_KEYS=hf_...                                  # an HF token that can read the private Space
+export G8WAY_8J_KEYS=hf_...                                  # a READ-ONLY HF token, see below
 ```
+
+`G8WAY_8J_KEYS` must be a fine-grained HF token with read access only, limited to the
+`8GI/8j-eval` Space. Never use a token with write scope: g8way holds it in memory and
+sends it on every 8j request.
+
+Restart g8way after exporting these. The upstream config is read once at startup, so a
+running process keeps its old routes until it restarts.
 
 Keys come only from the env var named by `keysEnv`. A bad config throws at startup.
 Models outside `8j/` keep going to OpenRouter unchanged.
