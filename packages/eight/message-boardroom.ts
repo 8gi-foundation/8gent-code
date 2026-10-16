@@ -120,7 +120,7 @@ export async function messageBoardroom(
 		ts: new Date(now()).toISOString(),
 		id,
 		session: ctx.session,
-		task: ctx.task.replace(/\s+/g, " ").slice(0, 300),
+		task: scrub(ctx.task.replace(/\s+/g, " ").slice(0, 300)).scrubbed, // the task is the user's prompt: scrub it too
 		text,
 		needs_reply: needsReply,
 	});

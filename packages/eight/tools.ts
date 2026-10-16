@@ -322,12 +322,12 @@ export function isReplayClass(v: unknown): v is ReplayClass {
  * textconv helpers; the PDF, notebook, outline and listing readers take paths
  * without the full checks. Those stay "ask" (#3653 review).
  */
-// Changing this set, NEVER_REPLAY_TOOLS or NEVER_REPLAY_PREFIXES: bump REPLAY_POLICY_VERSION.
 /** message_boardroom is offered unless EIGHT_MESSAGE_BOARDROOM=0 (#4344). */
 export function messageBoardroomOn(): boolean {
 	return process.env.EIGHT_MESSAGE_BOARDROOM !== "0";
 }
 
+// Changing this set, NEVER_REPLAY_TOOLS or NEVER_REPLAY_PREFIXES: bump REPLAY_POLICY_VERSION.
 const REPLAY_SAFE_TOOLS = new Set(["read_file", "git_log"]);
 
 // Changing this set: bump REPLAY_POLICY_VERSION.

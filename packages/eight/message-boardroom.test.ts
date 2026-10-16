@@ -141,3 +141,14 @@ describe("message_boardroom", () => {
 		expect(MESSAGE_BOARDROOM_TOOL_DEF.function.parameters.required).toEqual(["text"]);
 	});
 });
+
+describe("message_boardroom task field", () => {
+	test("a credential in the task prompt is scrubbed before it is written", async () => {
+		await messageBoardroom(
+			{ text: "q" },
+			{ session: "s9", task: "use 123456789:AAH7k2mQ9xYzB3nC4dE5fG6hJ7kL8mN9pQr to post" },
+		);
+		const raw = readFileSync(msgs, "utf8");
+		expect(raw).not.toContain("AAH7k2mQ9xYz");
+	});
+});
