@@ -257,6 +257,7 @@ import {
 import { downscaleNote, imageMaxSide } from "./image-fit";
 import { IssueBlameGate, issueBodyOf } from "./issue-blame";
 import { layoutMeasureLine } from "./layout-measure";
+import { MESSAGE_BOARDROOM_TOOL_DEF, messageBoardroom } from "./message-boardroom";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { RetiredFacts } from "./retired-facts";
 import { ensureScratchExcludedIfPresent } from "./scratch-exclude";
@@ -307,7 +308,7 @@ export type ReplayClass = "replay" | "never" | "ask";
  * started under, and resume refuses to re-run a call whose class has changed
  * since (8SO review, #4118).
  */
-export const REPLAY_POLICY_VERSION = 2;
+export const REPLAY_POLICY_VERSION = 3;
 
 export function isReplayClass(v: unknown): v is ReplayClass {
 	return v === "replay" || v === "never" || v === "ask";
@@ -322,6 +323,11 @@ export function isReplayClass(v: unknown): v is ReplayClass {
  * without the full checks. Those stay "ask" (#3653 review).
  */
 // Changing this set, NEVER_REPLAY_TOOLS or NEVER_REPLAY_PREFIXES: bump REPLAY_POLICY_VERSION.
+/** message_boardroom is offered unless EIGHT_MESSAGE_BOARDROOM=0 (#4344). */
+export function messageBoardroomOn(): boolean {
+	return process.env.EIGHT_MESSAGE_BOARDROOM !== "0";
+}
+
 const REPLAY_SAFE_TOOLS = new Set(["read_file", "git_log"]);
 
 // Changing this set: bump REPLAY_POLICY_VERSION.
@@ -338,6 +344,7 @@ const NEVER_REPLAY_TOOLS = new Set([
 	"gh_pr_create",
 	"gh_issue_create",
 	"post_message",
+	"message_boardroom",
 	"spawn_agent",
 	"speak",
 	"render_video_deck",
@@ -2264,6 +2271,8 @@ export class ToolExecutor {
 			...(process.env.EIGHT_MCP_LEAN === "1" ? MCP_LEAN_TOOL_DEFS : []),
 			// Posting (#3595): advertised only where the tg-group helper is installed.
 			...(postMessageAvailable() ? [POST_MESSAGE_TOOL_DEF] : []),
+			// Mid-task note to the boardroom (#4344): local file only; EIGHT_MESSAGE_BOARDROOM=0 withholds it.
+			...(messageBoardroomOn() ? [MESSAGE_BOARDROOM_TOOL_DEF] : []),
 			// Windows only, off by default (settings.shell.powershellTool).
 			...(powershellToolShell() ? [POWERSHELL_TOOL_DEF] : []),
 		]);
@@ -2702,6 +2711,10 @@ export class ToolExecutor {
 					postMessageDeps(this.agentId, this.postSession),
 				);
 			}
+			case "message_boardroom":
+				// A fixed local file, no path from the model, no network: not routed through a policy action.
+				if (!messageBoardroomOn()) return "Error: message_boardroom is switched off here.";
+				return messageBoardroom(args, { session: this.postSession, task: this.presendTask });
 			case "gh_issue_create": {
 				const held = this.issueBlameGate.check(String(args.body || ""));
 				if (held) return held;
