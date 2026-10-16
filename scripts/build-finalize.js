@@ -29,7 +29,7 @@ try {
 try {
 	buildRoots.push(dirname(realpathSync(join(ROOT, "node_modules"))));
 } catch {}
-for (const name of ["cli.js", "tui.js"]) {
+for (const name of ["cli.js", "tui.js", "sdk.js"]) {
 	const file = join(ROOT, "dist", name);
 	if (!existsSync(file)) continue;
 	const { code, replaced } = unbakeBuildPaths(readFileSync(file, "utf-8"), buildRoots);

@@ -4,6 +4,15 @@
   "private": false,
   "description": "Autonomous coding agent. Runs locally on Ollama. Zero API cost. Your code stays on your machine. Open source.",
   "type": "module",
+  "main": "./dist/sdk.js",
+  "types": "./dist/sdk.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/sdk.d.ts",
+      "default": "./dist/sdk.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "8": "./bin/8gent-run.js",
     "8gent": "./bin/8gent-run.js",
@@ -12,6 +21,8 @@
   "files": [
     "dist/cli.js",
     "dist/tui.js",
+    "dist/sdk.js",
+    "dist/sdk.d.ts",
     "dist/pty-bridge.cjs",
     "dist/skills",
     "dist/sounds",
