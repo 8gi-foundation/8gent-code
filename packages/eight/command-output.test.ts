@@ -177,6 +177,12 @@ describe("login-line copy names its file and the next step (#4303)", () => {
 		expect(out).toContain("do not repeat");
 	});
 
+	test("the w-flag note keeps its exact sentence", () => {
+		expect(formatCommandOutput(0, "", "", copy, "/work")).toBe(
+			"Command completed successfully. It printed nothing. It copied the value into .tmp/login and did not show it: do not read or retype it, do not repeat this command. Post it with curl -d @.tmp/login (add -d for the other fields).",
+		);
+	});
+
 	test("it never tells the model to read the file back", () => {
 		const out = formatCommandOutput(0, "", "", copy, "/work");
 		expect(out).not.toContain("Run read_file");
@@ -192,6 +198,41 @@ describe("login-line copy names its file and the next step (#4303)", () => {
 			"/work",
 		);
 		expect(out).toContain("curl -d @.tmp/tok");
+	});
+
+	test("a value-only copy says it has no field name and gives the w-flag recipe (#4324)", () => {
+		const out = formatCommandOutput(
+			0,
+			"",
+			"",
+			"sed -n 's/^Password: //p' TASK.txt > .tmp/login",
+			"/work",
+		);
+		expect(out).toContain("only the value into .tmp/login");
+		expect(out).toContain("Do not read it");
+		expect(out).toContain("sed -n 's/^Password: */password=/w .tmp/login-form' TASK.txt");
+		expect(out).toContain("curl -d @.tmp/login-form");
+		// the recipe it names is itself a recognised copy
+		const next = formatCommandOutput(
+			0,
+			"",
+			"",
+			"sed -n 's/^Password: */password=/w .tmp/login-form' TASK.txt",
+			"/work",
+		);
+		expect(next).toContain("curl -d @.tmp/login-form");
+		expect(next).not.toContain("only the value");
+	});
+
+	test("a value-only copy with the star form and another label follows both", () => {
+		const out = formatCommandOutput(
+			0,
+			"",
+			"",
+			"sed -n 's/^API Key: *//p' notes.txt > .tmp/k",
+			"/work",
+		);
+		expect(out).toContain("api_key=/w .tmp/k-form' notes.txt");
 	});
 
 	test("other sed commands are unchanged", () => {
