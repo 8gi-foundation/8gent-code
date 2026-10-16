@@ -14,12 +14,8 @@ import type { Context, Hono } from "hono";
 import { getTenant } from "../auth";
 import type { OpenRouterClient } from "../openrouter";
 import type { RateLimiter } from "../rate-limit";
-import type {
-	G8wayConfig,
-	OpenAIChatRequest,
-	OpenAIUsage,
-	UsageRecord,
-} from "../types";
+import type { G8wayConfig, OpenAIChatRequest, OpenAIUsage, UsageRecord } from "../types";
+import { type UpstreamRouter, loadUpstreams } from "../upstreams";
 import type { UsageLogger } from "../usage";
 
 interface Deps {
@@ -27,25 +23,17 @@ interface Deps {
 	openrouter: OpenRouterClient;
 	limiter: RateLimiter;
 	logger: UsageLogger;
+	/** Test seam. Default: parsed once from G8WAY_UPSTREAMS; null when unset. */
+	upstreams?: UpstreamRouter | null;
 }
 
 function badRequest(c: Context, message: string, code = "invalid_request") {
-	return c.json(
-		{ error: { message, type: "invalid_request_error", code } },
-		400,
-	);
+	return c.json({ error: { message, type: "invalid_request_error", code } }, 400);
 }
 
-function rateLimited(
-	c: Context,
-	message: string,
-	retryAfterSeconds: number,
-) {
+function rateLimited(c: Context, message: string, retryAfterSeconds: number) {
 	c.header("Retry-After", String(retryAfterSeconds));
-	return c.json(
-		{ error: { message, type: "rate_limit_error", code: "rate_limit_exceeded" } },
-		429,
-	);
+	return c.json({ error: { message, type: "rate_limit_error", code: "rate_limit_exceeded" } }, 429);
 }
 
 function pickModel(config: G8wayConfig, requested: string | undefined): string | null {
@@ -55,6 +43,7 @@ function pickModel(config: G8wayConfig, requested: string | undefined): string |
 }
 
 export function registerChatRoute(app: Hono, deps: Deps): void {
+	const routed = deps.upstreams === undefined ? loadUpstreams(process.env) : deps.upstreams;
 	app.post("/v1/chat/completions", async (c) => {
 		const startedAt = Date.now();
 		const tenant = getTenant(c);
@@ -106,9 +95,12 @@ export function registerChatRoute(app: Hono, deps: Deps): void {
 		}
 
 		const upstreamReq: OpenAIChatRequest = { ...body, model };
+		const target = routed?.resolve(model) ?? null;
+		// UsageRecord.upstream is typed "openrouter" (types.ts is outside this change)
+		const upstreamName = (target?.name ?? "openrouter") as "openrouter";
 
 		try {
-			const upstream = await deps.openrouter.chatCompletions(upstreamReq);
+			const upstream = await (target ?? deps.openrouter).chatCompletions(upstreamReq);
 
 			if (upstreamReq.stream) {
 				const record: UsageRecord = {
@@ -119,7 +111,7 @@ export function registerChatRoute(app: Hono, deps: Deps): void {
 					plan: tenant.plan,
 					model_requested: body.model ?? deps.config.defaultModel,
 					model_resolved: model,
-					upstream: "openrouter",
+					upstream: upstreamName,
 					prompt_tokens: 0,
 					completion_tokens: 0,
 					total_tokens: 0,
@@ -155,7 +147,7 @@ export function registerChatRoute(app: Hono, deps: Deps): void {
 				plan: tenant.plan,
 				model_requested: body.model ?? deps.config.defaultModel,
 				model_resolved: model,
-				upstream: "openrouter",
+				upstream: upstreamName,
 				prompt_tokens: usage.prompt_tokens,
 				completion_tokens: usage.completion_tokens,
 				total_tokens: usage.total_tokens,
@@ -175,7 +167,7 @@ export function registerChatRoute(app: Hono, deps: Deps): void {
 				plan: tenant.plan,
 				model_requested: body.model ?? deps.config.defaultModel,
 				model_resolved: model,
-				upstream: "openrouter",
+				upstream: upstreamName,
 				prompt_tokens: 0,
 				completion_tokens: 0,
 				total_tokens: 0,
