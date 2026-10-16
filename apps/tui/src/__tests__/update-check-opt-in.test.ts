@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { maybeUpdateNotice, realNoticeDeps } from "../../../../packages/eight/update-notice.js";
 import { checkForUpdate, isUpdateCheckEnabled } from "../hooks/useUpdateCheck.js";
 
 describe("update check is opt-in", () => {
@@ -10,7 +11,7 @@ describe("update check is opt-in", () => {
 
 	test("on with an explicit env", () => {
 		expect(isUpdateCheckEnabled({ EIGHT_UPDATE_CHECK: "1" })).toBe(true);
-		expect(isUpdateCheckEnabled({ "8GENT_UPDATE_CHECK": "true" })).toBe(true);
+		expect(isUpdateCheckEnabled({ EIGHT_UPDATE_CHECK: "true" })).toBe(true);
 	});
 
 	test("default makes no network call", async () => {
@@ -29,5 +30,34 @@ describe("update check is opt-in", () => {
 			new Response(JSON.stringify({ version: "9.9.9" }))) as unknown as typeof fetch;
 		const res = await checkForUpdate({ EIGHT_UPDATE_CHECK: "1" }, "0.1.0", fetchFn);
 		expect(res).toEqual({ available: true, latest: "9.9.9", current: "0.1.0" });
+	});
+
+	test("launch notice path makes zero calls by default", async () => {
+		let calls = 0;
+		const fetchImpl = (async () => {
+			calls++;
+			return new Response("[]");
+		}) as never;
+		const exec = (async () => {
+			calls++;
+			return { code: 1, stdout: "", stderr: "" };
+		}) as never;
+		const base = {
+			currentVersion: "0.1.0",
+			modulePath: "/x/y.js",
+			embedded: true,
+			fetchImpl,
+			exec,
+		};
+		const off = realNoticeDeps({ ...base, env: { HOME: "/nonexistent" } });
+		expect(await maybeUpdateNotice(off)).toBeNull();
+		expect(calls).toBe(0);
+		const hard = realNoticeDeps({
+			...base,
+			env: { HOME: "/nonexistent", EIGHT_UPDATE_CHECK: "1", EIGHT_NO_UPDATE_CHECK: "1" },
+		});
+		expect(hard.disabled()).toBe(true);
+		const on = realNoticeDeps({ ...base, env: { HOME: "/nonexistent", EIGHT_UPDATE_CHECK: "1" } });
+		expect(on.disabled()).toBe(false);
 	});
 });

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isUpdateCheckEnabled } from "../../../../packages/eight/update-notice.js";
 
 interface UpdateInfo {
 	available: boolean;
@@ -29,17 +30,7 @@ function isNewer(current: string, latest: string): boolean {
 	return false;
 }
 
-/**
- * The launch update check is opt-in: no network call unless the user sets
- * EIGHT_UPDATE_CHECK=1 (or 8GENT_UPDATE_CHECK=1). `8gent update` is the
- * explicit path and is unaffected.
- */
-export function isUpdateCheckEnabled(
-	env: Record<string, string | undefined> = process.env,
-): boolean {
-	const v = (env.EIGHT_UPDATE_CHECK ?? env["8GENT_UPDATE_CHECK"] ?? "").trim().toLowerCase();
-	return v === "1" || v === "true" || v === "on" || v === "yes";
-}
+export { isUpdateCheckEnabled };
 
 export async function checkForUpdate(
 	env: Record<string, string | undefined>,
