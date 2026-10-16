@@ -194,6 +194,30 @@ export function redirectNote(
 	return ` The server answered ${status} and redirected to ${target}. Fetch that address with a separate curl (no -L).`;
 }
 
+/**
+ * Shown up front after a plain loopback page fetch, so the model has the rule before its first form
+ * post and not only after a refusal. #4326 (run 2026-10-16_022237, 21/22): the first login post used
+ * -L, System One refused it (correctly), and the run lost no_system_one_blocked although the task
+ * passed. Two other runs the same hour never used -L, so it is a habit, not a hint or the task text.
+ * Only a curl to 127.0.0.1, localhost or [::1] that sends no body and has no -L gets the sentence.
+ */
+export function loopbackFormHint(command: string | undefined): string {
+	if (!command || !/\bcurl\b/.test(command)) return "";
+	if (
+		!/(?:^|[\s'"])https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])[:/\s'"]|(?:^|[\s'"])https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])$/i.test(
+			command,
+		)
+	)
+		return "";
+	if (
+		/(?:^|\s)(?:-[A-Za-z]*[LdFXT][A-Za-z]*|--(?:location|data\S*|form\S*|request|upload-file|json))(?:\s|=|$)/.test(
+			command,
+		)
+	)
+		return "";
+	return " If this page has a form, post it with curl and no -L, saving headers with -D .tmp/h.txt: the redirect target is shown after the post, then fetch it with a separate curl.";
+}
+
 export function silentSuccessNote(
 	command: string | undefined,
 	workingDirectory?: string,
@@ -223,7 +247,7 @@ export function silentSuccessNote(
 	if (w.private.length > 0) {
 		note += ` ${w.private.join(", ")} ${w.private.length > 1 ? "hold" : "holds"} session cookies or headers: do not read ${w.private.length > 1 ? "them" : "it"}, just pass ${w.private.length > 1 ? "them" : "it"} to the next curl.`;
 	}
-	return note + redirectNote(command, workingDirectory, projectRoot);
+	return note + redirectNote(command, workingDirectory, projectRoot) + loopbackFormHint(command);
 }
 
 export function formatCommandOutput(

@@ -7,6 +7,7 @@ import {
 	HEAD_BYTES,
 	TAIL_BYTES,
 	formatCommandOutput,
+	loopbackFormHint,
 	redirectNote,
 	writtenFiles,
 } from "./command-output";
@@ -346,5 +347,36 @@ describe("redirectNote refuses non-regular files on Windows before open", () => 
 		fs.symlinkSync(path.join(dir, "real.txt"), path.join(dir, "ln.txt"));
 		expect(note("real.txt", "win32")).toContain("redirected to /settings");
 		expect(note("ln.txt", "win32")).toBe("");
+	});
+});
+
+describe("loopback form hint is shown up front (#4326)", () => {
+	const get = "curl -s -c .tmp/cookies.txt http://127.0.0.1:54920/ -o .tmp/root.html";
+	test("a plain loopback page fetch carries the no -L rule", () => {
+		const r = formatCommandOutput(0, "", "", get, "/work");
+		expect(r).toContain("post it with curl and no -L");
+		expect(r).toContain("-D .tmp/h.txt");
+		expect(r).toContain("wrote .tmp/root.html");
+	});
+	test("localhost and [::1] get it too", () => {
+		expect(loopbackFormHint("curl -s http://localhost:3000/ -o .tmp/a.html")).toContain("no -L");
+		expect(loopbackFormHint("curl -s http://[::1]:3000/ -o .tmp/a.html")).toContain("no -L");
+	});
+	test("a post, -L, an upload or a non-loopback host gets nothing extra", () => {
+		for (const c of [
+			"curl -s -o .tmp/a.html http://127.0.0.1:1/login -X POST",
+			"curl -sL http://127.0.0.1:1/ -o .tmp/a.html",
+			"curl -s --location http://127.0.0.1:1/ -o .tmp/a.html",
+			"curl -s --data a=b http://127.0.0.1:1/ -o .tmp/a.html",
+			"curl -s https://example.com/ -o .tmp/a.html",
+			"curl -s https://example.com/?u=http://127.0.0.1/ -o .tmp/a.html",
+			"wget -O .tmp/a.html http://127.0.0.1:1/",
+		]) {
+			expect(loopbackFormHint(c)).toBe("");
+		}
+	});
+	test("the hint is not added to the other notes", () => {
+		const w = "sed -n 's/^Password: */password=/w .tmp/login' TASK.txt";
+		expect(formatCommandOutput(0, "", "", w, "/work")).not.toContain("no -L");
 	});
 });
