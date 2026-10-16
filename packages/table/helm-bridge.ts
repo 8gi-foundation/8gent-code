@@ -16,6 +16,7 @@
  * output settle, `asserted` when we hit the timeout and are showing a raw tail.
  * The same AgenticHonesty rule the officers follow applies to the bridge itself.
  */
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -32,8 +33,23 @@ import {
 const HELM_BASE = process.env.GLASSES_RELAY || "http://127.0.0.1:7890";
 
 /** Worker kinds Helm can run. Kept in lockstep with helm.py's KINDS. */
-export type HelmKind = "shell" | "claude" | "codex" | "8gent-local" | "pi" | "cursor-agent" | "opencode";
-const KINDS = new Set<HelmKind>(["shell", "claude", "codex", "8gent-local", "pi", "cursor-agent", "opencode"]);
+export type HelmKind =
+	| "shell"
+	| "claude"
+	| "codex"
+	| "8gent-local"
+	| "pi"
+	| "cursor-agent"
+	| "opencode";
+const KINDS = new Set<HelmKind>([
+	"shell",
+	"claude",
+	"codex",
+	"8gent-local",
+	"pi",
+	"cursor-agent",
+	"opencode",
+]);
 
 /**
  * Where work runs when the officer's guess is unusable. Itself allowlisted, so
@@ -43,8 +59,16 @@ export const DEFAULT_WORK_ROOT = path.join(os.homedir(), "8gent-code");
 
 /** Mirrors the relay's own cwd allowlist (helm.py _CWD_CANDIDATES). */
 const ALLOWED_CWD_ROOTS = [
-	"8gent-glasses", "8gent-worktrees", "8gent-code", "Foodstackai",
-	"Documents", "Desktop", "Downloads", "Projects", "code", "src",
+	"8gent-glasses",
+	"8gent-worktrees",
+	"8gent-code",
+	"Foodstackai",
+	"Documents",
+	"Desktop",
+	"Downloads",
+	"Projects",
+	"code",
+	"src",
 ].map((d) => path.join(os.homedir(), d));
 
 export interface HelmProposal {
@@ -90,7 +114,10 @@ function bearer(): string | null {
 	const env = process.env.PAIRING_SECRET;
 	if (env?.trim()) return env.trim();
 	try {
-		return fs.readFileSync(path.join(os.homedir(), ".8gent", "relay-pairing-secret"), "utf8").trim() || null;
+		return (
+			fs.readFileSync(path.join(os.homedir(), ".8gent", "relay-pairing-secret"), "utf8").trim() ||
+			null
+		);
 	} catch {
 		return null;
 	}
@@ -152,12 +179,15 @@ export function parseProposal(reply: string): HelmProposal | null {
 	let command = body.match(/\bcmd=([\s\S]+)$/)?.[1]?.trim() ?? "";
 	if (!command) {
 		command = body
-			.replace(/\bkind=[A-Za-z0-9-]*\]?/, "")   // eat kind, and a stray "]"
+			.replace(/\bkind=[A-Za-z0-9-]*\]?/, "") // eat kind, and a stray "]"
 			.replace(/\bcwd=\S+/, "")
 			.replace(/^[\s\]:;,-]+/, "")
 			.trim();
 	}
-	command = command.replace(/^(["'])([\s\S]*)\1$/, "$2").replace(/\]+$/, "").trim();
+	command = command
+		.replace(/^(["'])([\s\S]*)\1$/, "$2")
+		.replace(/\]+$/, "")
+		.trim();
 	if (!command) return null;
 	if (DESTRUCTIVE.test(command)) return null;
 
@@ -183,7 +213,8 @@ export function stripProposal(reply: string): string {
 }
 
 /** Commands we never auto-stage from a code block - they must be asked for explicitly. */
-const DESTRUCTIVE = /\b(rm\s+-|git\s+push\s+.*--force|--force-with-lease|git\s+branch\s+-D|git\s+reset\s+--hard|dd\s+if=|mkfs|shutdown|reboot|killall|chmod\s+777|curl[^|]*\|\s*(ba)?sh)\b/i;
+const DESTRUCTIVE =
+	/\b(rm\s+-|git\s+push\s+.*--force|--force-with-lease|git\s+branch\s+-D|git\s+reset\s+--hard|dd\s+if=|mkfs|shutdown|reboot|killall|chmod\s+777|curl[^|]*\|\s*(ba)?sh)\b/i;
 
 /**
  * Turn a short fenced shell block into a proposal. Deliberately conservative:
@@ -193,7 +224,9 @@ const DESTRUCTIVE = /\b(rm\s+-|git\s+push\s+.*--force|--force-with-lease|git\s+b
 function parseFencedCommand(reply: string): HelmProposal | null {
 	const fence = reply.match(/```(?:bash|sh|shell|console)?\s*\n([\s\S]*?)```/);
 	if (!fence) return null;
-	const lines = fence[1].split("\n").map((l) => l.trim())
+	const lines = fence[1]
+		.split("\n")
+		.map((l) => l.trim())
 		.filter((l) => l.length > 0 && !l.startsWith("#"));
 	if (lines.length === 0 || lines.length > 3) return null;
 	let command = lines.join(" && ").replace(/^\$\s*/, "");
@@ -214,8 +247,14 @@ function parseFencedCommand(reply: string): HelmProposal | null {
 const PENDING = new Map<string, PendingApproval>();
 const TTL_MS = 15 * 60 * 1000;
 
-function newToken(): string {
-	return Math.random().toString(36).slice(2, 8).toUpperCase();
+const TOKEN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"; // 32 symbols, no modulo bias
+
+/** 26 chars of crypto randomness (130 bits), [A-Z2-7]. */
+export function newToken(): string {
+	const bytes = randomBytes(26);
+	let out = "";
+	for (let i = 0; i < bytes.length; i++) out += TOKEN_ALPHABET[bytes[i] & 31];
+	return out;
 }
 
 export function stagePending(p: HelmProposal, channelId: string, agentId: string): PendingApproval {
@@ -271,7 +310,11 @@ function repeatKey(channelId: string, agentId: string, command: string): string 
 }
 
 /** Record a finished task so a near-identical restage can be caught. */
-export function noteCompleted(p: PendingApproval, artifactDir: string, artifactNames: string[]): void {
+export function noteCompleted(
+	p: PendingApproval,
+	artifactDir: string,
+	artifactNames: string[],
+): void {
 	for (const [k, v] of COMPLETED) if (Date.now() - v.at > REPEAT_WINDOW_MS) COMPLETED.delete(k);
 	COMPLETED.set(repeatKey(p.channelId, p.agentId, p.command), {
 		token: p.token,
@@ -311,7 +354,10 @@ export function takePending(token: string): PendingApproval | null {
 }
 
 /** Workers currently waiting on a human answer, keyed by reply token. */
-const AWAITING = new Map<string, { workerId: string; channelId: string; agentId: string; createdAt: number }>();
+const AWAITING = new Map<
+	string,
+	{ workerId: string; channelId: string; agentId: string; createdAt: number }
+>();
 
 export function stageAwaiting(workerId: string, channelId: string, agentId: string): string {
 	for (const [k, v] of AWAITING) if (Date.now() - v.createdAt > TTL_MS) AWAITING.delete(k);
@@ -330,26 +376,41 @@ export function takeAwaiting(token: string) {
 
 /** `/reply ABC123 <answer>` from a human answering a worker's question. */
 export function parseReply(content: string): { token: string; text: string } | null {
-	const m = content.trim().match(/^\/reply\s+([A-Za-z0-9]{4,12})\s+([\s\S]+)$/);
+	const m = content.trim().match(/^\/reply\s+([A-Za-z0-9]{4,32})\s+([\s\S]+)$/);
 	return m ? { token: m[1].toUpperCase(), text: m[2].trim() } : null;
 }
 
 /** `/approve ABC123` from a human. Returns the token or null. */
 export function parseApproval(content: string): string | null {
-	return content.trim().match(/^\/approve\s+([A-Za-z0-9]{4,12})\b/)?.[1]?.toUpperCase() ?? null;
+	return (
+		content
+			.trim()
+			.match(/^\/approve\s+([A-Za-z0-9]{4,32})\b/)?.[1]
+			?.toUpperCase() ?? null
+	);
 }
 
 // ── Helm HTTP (daemon-side) ──────────────────────────────────────────────────
 
-async function helm(method: "GET" | "POST", route: string, body?: unknown): Promise<{ status: number; json: any }> {
+async function helm(
+	method: "GET" | "POST",
+	route: string,
+	body?: unknown,
+): Promise<{ status: number; json: any }> {
 	const headers: Record<string, string> = { "Content-Type": "application/json" };
 	const b = bearer();
 	if (b) headers.Authorization = `Bearer ${b}`;
 	const res = await fetch(`${HELM_BASE}${route}`, {
-		method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+		method,
+		headers,
+		body: body === undefined ? undefined : JSON.stringify(body),
 	});
 	let json: any = null;
-	try { json = await res.json(); } catch { /* non-json body */ }
+	try {
+		json = await res.json();
+	} catch {
+		/* non-json body */
+	}
 	return { status: res.status, json };
 }
 
@@ -392,12 +453,20 @@ export interface ExecutionResult {
  * return the tail. `verified` = we watched it settle; `asserted` = we timed out
  * and are showing raw output without claiming completion.
  */
-export async function executeApproved(p: PendingApproval, opts?: { timeoutMs?: number }): Promise<ExecutionResult> {
+export async function executeApproved(
+	p: PendingApproval,
+	opts?: { timeoutMs?: number },
+): Promise<ExecutionResult> {
 	if (!isAllowedCwd(p.cwd)) {
 		return { ok: false, label: "failed", output: "", detail: `cwd not allowed: ${p.cwd}` };
 	}
 	if (!bearer()) {
-		return { ok: false, label: "failed", output: "", detail: "no relay secret available daemon-side" };
+		return {
+			ok: false,
+			label: "failed",
+			output: "",
+			detail: "no relay secret available daemon-side",
+		};
 	}
 	// Give the task somewhere to PUT things, and tell it so in words. helm builds
 	// a fixed minimal env with no per-spawn passthrough, and an env var an LLM
@@ -426,7 +495,12 @@ export async function executeApproved(p: PendingApproval, opts?: { timeoutMs?: n
 		},
 	});
 	if (spawn.status !== 200 || !spawn.json?.id) {
-		return { ok: false, label: "failed", output: "", detail: `spawn failed (${spawn.status}): ${JSON.stringify(spawn.json).slice(0, 200)}` };
+		return {
+			ok: false,
+			label: "failed",
+			output: "",
+			detail: `spawn failed (${spawn.status}): ${JSON.stringify(spawn.json).slice(0, 200)}`,
+		};
 	}
 	const id = String(spawn.json.id);
 	const timeout = opts?.timeoutMs ?? 90_000;
@@ -515,16 +589,29 @@ export async function watchWorker(id: string, timeout: number): Promise<Executio
 	// window, and killing it would destroy real work in progress. Say honestly
 	// that it is still running.
 	return {
-		ok: true, label: "asserted", workerId: id, output: tail(lastOut),
+		ok: true,
+		label: "asserted",
+		workerId: id,
+		output: tail(lastOut),
 		detail: "still running past my watch window - not a completion claim",
 	};
 }
 
 /** Send the human's answer to a worker that asked, then keep watching. */
-export async function answerWorker(id: string, text: string, timeoutMs = 90_000): Promise<ExecutionResult> {
+export async function answerWorker(
+	id: string,
+	text: string,
+	timeoutMs = 90_000,
+): Promise<ExecutionResult> {
 	const res = await helm("POST", `/helm/worker/${id}/input`, { text, enter: true });
 	if (res.status !== 200) {
-		return { ok: false, label: "failed", workerId: id, output: "", detail: `could not send input (${res.status})` };
+		return {
+			ok: false,
+			label: "failed",
+			workerId: id,
+			output: "",
+			detail: `could not send input (${res.status})`,
+		};
 	}
 	return watchWorker(id, timeoutMs);
 }
@@ -553,8 +640,12 @@ export function isWaitingOnAnswer(text: string): boolean {
 
 /** A single line that is itself the ask (cursor on a choice, or a confirm). */
 function isQuestionLine(line: string): boolean {
-	return /^\s*[>❯›]\s*\d+\.\s+\S/.test(line)
-		|| /(press enter to confirm|\[y\/n\]|\(y\/n\)|choose an option|select one|which (?:one|option|branch|base) should i)/i.test(line);
+	return (
+		/^\s*[>❯›]\s*\d+\.\s+\S/.test(line) ||
+		/(press enter to confirm|\[y\/n\]|\(y\/n\)|choose an option|select one|which (?:one|option|branch|base) should i)/i.test(
+			line,
+		)
+	);
 }
 
 /** A line that is part of the ask's own menu, not a response to it. */
@@ -564,7 +655,11 @@ function isOptionLine(line: string): boolean {
 
 /** Trimmed non-empty tail lines, plus the index of the LAST line that asks. */
 function questionLines(text: string): { lines: string[]; index: number } {
-	const lines = text.split("\n").map((l) => l.trim()).filter(Boolean).slice(-12);
+	const lines = text
+		.split("\n")
+		.map((l) => l.trim())
+		.filter(Boolean)
+		.slice(-12);
 	let index = -1;
 	for (let i = 0; i < lines.length; i++) if (isQuestionLine(lines[i])) index = i;
 	return { lines, index };
@@ -591,6 +686,9 @@ function questionWasAnswered(text: string): boolean {
 
 /** Last ~25 meaningful lines, so a TUI's redraw noise doesn't flood the channel. */
 function tail(text: string): string {
-	const lines = text.split("\n").map((l) => l.replace(/\s+$/, "")).filter((l) => l.trim().length > 0);
-    return lines.slice(-25).join("\n").slice(-1800);
+	const lines = text
+		.split("\n")
+		.map((l) => l.replace(/\s+$/, ""))
+		.filter((l) => l.trim().length > 0);
+	return lines.slice(-25).join("\n").slice(-1800);
 }
