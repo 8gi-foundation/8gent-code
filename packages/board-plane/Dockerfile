@@ -1,4 +1,4 @@
-FROM oven/bun:1.1-slim AS base
+FROM oven/bun:1.4.3-slim AS base
 WORKDIR /app
 
 # Install only what we need
