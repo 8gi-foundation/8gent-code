@@ -5,6 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
+import { hostedAllowed } from "../../providers/failover";
 import { resolveConfig } from "../config";
 import { OpenRouterClient } from "../openrouter";
 import { RateLimiter } from "../rate-limit";
@@ -228,5 +229,131 @@ describe("upstreams", () => {
 				{},
 			),
 		).toThrow(/keysEnv/);
+	});
+
+	test("upstream fetches use redirect: error", async () => {
+		let seen: RequestInit | undefined;
+		const fetchImpl = (async (_u: unknown, init?: RequestInit) => {
+			seen = init;
+			return ok("x");
+		}) as unknown as typeof fetch;
+		const r = loadUpstreams(
+			{
+				G8WAY_UPSTREAMS: JSON.stringify([
+					{ name: "a", baseUrl: "http://127.0.0.1:1/v1", prefixes: ["x/"] },
+				]),
+			},
+			{ fetchImpl },
+		);
+		await r?.resolve("x/1")?.chatCompletions({ model: "x/1", messages: [] });
+		expect(seen?.redirect).toBe("error");
+	});
+
+	test("http is allowed only on loopback", () => {
+		const cfg = (baseUrl: string) =>
+			JSON.stringify([{ name: "a", baseUrl, prefixes: ["x/"], keysEnv: "K" }]);
+		const env = { EIGHT_ALLOW_HOSTED: "1", K: "k" };
+		expect(() =>
+			loadUpstreams({ ...env, G8WAY_UPSTREAMS: cfg("http://api.example.com/v1") }, {}),
+		).toThrow(/https/);
+		expect(
+			loadUpstreams({ ...env, G8WAY_UPSTREAMS: cfg("https://api.example.com/v1") }, {}),
+		).not.toBeNull();
+		expect(loadUpstreams({ G8WAY_UPSTREAMS: cfg("http://localhost:1/v1") }, {})).not.toBeNull();
+	});
+
+	test("routed upstream failure does not leak baseUrl to the tenant, full error is logged", async () => {
+		const rec = recorder(() => {
+			throw new Error("connect failed http://127.0.0.1:1234/v1");
+		});
+		const env = {
+			G8WAY_UPSTREAMS: JSON.stringify([
+				{ name: "lm", baseUrl: "http://127.0.0.1:1234/v1", prefixes: ["local/"] },
+			]),
+		};
+		const h = harness(env, rec);
+		const res = await h.post({ model: "local/qwen", messages: msg });
+		expect(res.status).toBe(502);
+		expect(await res.text()).not.toContain("127.0.0.1");
+		expect(JSON.stringify(h.logger.records[0])).toContain("127.0.0.1:1234");
+	});
+
+	test("rate-limit audit line names the routed upstream", async () => {
+		const rec = recorder(() => ok("x"));
+		const env = {
+			G8WAY_UPSTREAMS: JSON.stringify([
+				{ name: "lm", baseUrl: "http://127.0.0.1:1234/v1", prefixes: ["local/"] },
+			]),
+		};
+		const h = harness(env, rec);
+		let last = 200;
+		for (let i = 0; i < 400 && last !== 429; i++) {
+			last = (await h.post({ model: "local/qwen", messages: msg })).status;
+		}
+		expect(last).toBe(429);
+		const line = h.logger.records[h.logger.records.length - 1] as {
+			upstream: string;
+			status: number;
+		};
+		expect(line.status).toBe(429);
+		expect(line.upstream).toBe("lm");
+	});
+
+	test("429 response body is cancelled before the next key", async () => {
+		let cancelled = false;
+		const rec = recorder((call) =>
+			call.auth === "Bearer key-a"
+				? new Response(
+						new ReadableStream({
+							cancel() {
+								cancelled = true;
+							},
+						}),
+						{ status: 429 },
+					)
+				: ok("b"),
+		);
+		const env = {
+			G8WAY_UPSTREAMS: JSON.stringify([
+				{ name: "p", baseUrl: "http://127.0.0.1:9/v1", prefixes: ["local/"], keysEnv: "K" },
+			]),
+			K: "key-a,key-b",
+		};
+		const h = harness(env, rec);
+		await h.post({ model: "local/qwen", messages: msg, stream: true });
+		expect(cancelled).toBe(true);
+	});
+
+	test("routed upstream 401 and 403 become a generic 502 with no upstream text", async () => {
+		for (const status of [401, 403]) {
+			const rec = recorder(
+				() => new Response(JSON.stringify({ error: "bad key sk-abc...XYZ" }), { status }),
+			);
+			const env = {
+				G8WAY_UPSTREAMS: JSON.stringify([
+					{ name: "lm", baseUrl: "http://127.0.0.1:1234/v1", prefixes: ["local/"] },
+				]),
+			};
+			const h = harness(env, rec);
+			const res = await h.post({ model: "local/qwen", messages: msg });
+			expect(res.status).toBe(502);
+			expect(await res.text()).not.toContain("sk-abc");
+		}
+	});
+
+	test("hosted gate uses the providers hostedAllowed truthiness", () => {
+		const cfg = JSON.stringify([
+			{ name: "c", baseUrl: "https://api.example.com/v1", prefixes: ["x/"], keysEnv: "K" },
+		]);
+		for (const v of ["1", " 1 ", "true", "0", undefined]) {
+			const env = { G8WAY_UPSTREAMS: cfg, K: "k", EIGHT_ALLOW_HOSTED: v };
+			let allowed = true;
+			try {
+				loadUpstreams(env, {});
+			} catch {
+				allowed = false;
+			}
+			expect(allowed).toBe(hostedAllowed(env));
+		}
 	});
 });

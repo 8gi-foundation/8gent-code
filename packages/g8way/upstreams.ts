@@ -51,6 +51,12 @@ interface Entry extends UpstreamTarget {
 	prefixes: string[];
 }
 
+/** A redirect would carry the bearer key to another host, so redirects are errors. */
+function noRedirect(base: typeof fetch = fetch): typeof fetch {
+	return ((input: unknown, init?: RequestInit) =>
+		base(input as never, { ...init, redirect: "error" })) as unknown as typeof fetch;
+}
+
 class KeyPool {
 	private next = 0;
 	private coolUntil: number[];
@@ -69,6 +75,7 @@ class KeyPool {
 			if (this.coolUntil[idx] > this.now()) continue;
 			const res = await this.clients[idx].chatCompletions(req);
 			if (res.status === 429) {
+				await res.body?.cancel();
 				this.coolUntil[idx] = this.now() + COOLDOWN_MS;
 				last = res;
 				continue;
@@ -108,6 +115,9 @@ function parseEntry(
 	if (url.protocol !== "http:" && url.protocol !== "https:") {
 		throw new Error(`G8WAY_UPSTREAMS: "${name}" baseUrl must be http or https`);
 	}
+	if (!LOOPBACK.has(url.hostname) && url.protocol !== "https:") {
+		throw new Error(`G8WAY_UPSTREAMS: "${name}" baseUrl must be https unless it is loopback`);
+	}
 	const prefixes = Array.isArray(raw.prefixes)
 		? raw.prefixes.filter((p): p is string => typeof p === "string" && p.length > 0)
 		: [];
@@ -137,7 +147,7 @@ function parseEntry(
 	// keyless loopback upstreams (local runtimes) get a fixed placeholder, not a secret
 	const pool = new KeyPool(
 		(keys.length > 0 ? keys : ["local"]).map(
-			(apiKey) => new OpenRouterClient({ apiKey, baseUrl, fetchImpl }),
+			(apiKey) => new OpenRouterClient({ apiKey, baseUrl, fetchImpl: noRedirect(fetchImpl) }),
 		),
 		now,
 	);
