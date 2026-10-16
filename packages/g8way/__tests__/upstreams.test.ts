@@ -356,4 +356,66 @@ describe("upstreams", () => {
 			expect(allowed).toBe(hostedAllowed(env));
 		}
 	});
+
+	test("routed upstream error bodies never reach the tenant (400, 429, 500)", async () => {
+		for (const status of [400, 429, 500]) {
+			const rec = recorder(
+				(call) => new Response(JSON.stringify({ error: `echo ${call.auth}` }), { status }),
+			);
+			const env = {
+				G8WAY_UPSTREAMS: JSON.stringify([
+					{ name: "p", baseUrl: "http://127.0.0.1:9/v1", prefixes: ["local/"], keysEnv: "K" },
+				]),
+				K: "sk-BBB",
+			};
+			const h = harness(env, rec);
+			const res = await h.post({ model: "local/qwen", messages: msg });
+			const text = await res.text();
+			expect(text).not.toContain("sk-BBB");
+			expect(res.status).toBe(status === 500 ? 502 : status);
+			expect((h.logger.records[0] as { status: number }).status).toBe(status);
+			expect(JSON.stringify(h.logger.records)).not.toContain("sk-BBB");
+		}
+	});
+
+	test("streamed routed upstream error is generic too", async () => {
+		const rec = recorder((call) => new Response(`echo ${call.auth}`, { status: 500 }));
+		const env = {
+			G8WAY_UPSTREAMS: JSON.stringify([
+				{ name: "p", baseUrl: "http://127.0.0.1:9/v1", prefixes: ["local/"], keysEnv: "K" },
+			]),
+			K: "sk-BBB",
+		};
+		const h = harness(env, rec);
+		const res = await h.post({ model: "local/qwen", messages: msg, stream: true });
+		expect(res.status).toBe(502);
+		expect(await res.text()).not.toContain("sk-BBB");
+	});
+
+	test("baseUrl with userinfo, query or fragment is rejected at startup", () => {
+		for (const baseUrl of [
+			"http://user:sk-key@127.0.0.1:1/v1",
+			"http://127.0.0.1:1/v1?key=sk-1",
+			"http://127.0.0.1:1/v1#frag",
+		]) {
+			expect(() =>
+				loadUpstreams(
+					{ G8WAY_UPSTREAMS: JSON.stringify([{ name: "a", baseUrl, prefixes: ["x/"] }]) },
+					{},
+				),
+			).toThrow(/credentials, a query or a fragment/);
+		}
+	});
+
+	test("usage log records the upstream name, never the baseUrl", async () => {
+		const rec = recorder(() => ok("x"));
+		const env = {
+			G8WAY_UPSTREAMS: JSON.stringify([
+				{ name: "lm", baseUrl: "http://127.0.0.1:1234/v1", prefixes: ["local/"] },
+			]),
+		};
+		const h = harness(env, rec);
+		await h.post({ model: "local/qwen", messages: msg });
+		expect(JSON.stringify(h.logger.records)).not.toContain("127.0.0.1");
+	});
 });

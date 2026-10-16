@@ -102,9 +102,11 @@ export function registerChatRoute(app: Hono, deps: Deps): void {
 		try {
 			const upstream = await (target ?? deps.openrouter).chatCompletions(upstreamReq);
 
-			// Routed upstreams: an auth failure body can echo key material, so the
-			// tenant only ever sees a generic 502.
-			if (target && (upstream.status === 401 || upstream.status === 403)) {
+			// Routed upstreams: an error body can echo key material, so the tenant
+			// only sees a generic error. The real status is logged server-side.
+			if (target && upstream.status >= 400) {
+				const outStatus =
+					upstream.status === 400 || upstream.status === 429 ? upstream.status : 502;
 				await upstream.body?.cancel();
 				deps.logger.log({
 					ts: new Date().toISOString(),
@@ -119,15 +121,15 @@ export function registerChatRoute(app: Hono, deps: Deps): void {
 					completion_tokens: 0,
 					total_tokens: 0,
 					latency_ms: Date.now() - startedAt,
-					status: 502,
+					status: upstream.status,
 					stream: body.stream === true,
-					error: `upstream_auth:${upstream.status}`,
+					error: `upstream_status:${upstream.status}`,
 				});
 				return c.json(
 					{
 						error: { message: "Upstream error", type: "upstream_error", code: "upstream_failure" },
 					},
-					502,
+					outStatus as 400 | 429 | 502,
 				);
 			}
 

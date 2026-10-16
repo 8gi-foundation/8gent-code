@@ -115,6 +115,11 @@ function parseEntry(
 	if (url.protocol !== "http:" && url.protocol !== "https:") {
 		throw new Error(`G8WAY_UPSTREAMS: "${name}" baseUrl must be http or https`);
 	}
+	if (url.username || url.password || url.search || url.hash) {
+		throw new Error(
+			`G8WAY_UPSTREAMS: "${name}" baseUrl must not carry credentials, a query or a fragment`,
+		);
+	}
 	if (!LOOPBACK.has(url.hostname) && url.protocol !== "https:") {
 		throw new Error(`G8WAY_UPSTREAMS: "${name}" baseUrl must be https unless it is loopback`);
 	}
