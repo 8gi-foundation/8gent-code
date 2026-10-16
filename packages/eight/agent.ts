@@ -165,7 +165,7 @@ import {
 } from "./timetravel/checkpoint-store";
 import { ToolLoopDetector, isQuietSuccess } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
-import { ToolExecutor } from "./tools";
+import { ToolExecutor, messageBoardroomOn } from "./tools";
 import { TurnJournal } from "./turn-journal";
 import {
 	type ProgressWatch,
@@ -2317,6 +2317,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			...localDelegationTools(this.config.role),
 			// Posting (#3595): offered only where the tg-group helper is installed.
 			...(postMessageAvailable() ? ["post_message"] : []),
+			// Mid-task note to the boardroom (#4344).
+			...(messageBoardroomOn() ? ["message_boardroom"] : []),
 			// Lean MCP access (#3474): search, schema on demand, trimmed results.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? ["mcp_list_tools", "mcp_call_tool"] : []),
 			// 8gent Browser (#3622, #3785): an isolated profile, named by EIGHT_BROWSER_PROFILE or the
