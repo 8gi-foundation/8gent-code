@@ -12,7 +12,7 @@ import { ToolExecutor } from "./tools";
 afterAll(cleanupTempDirs);
 
 const NUDGE =
-	"does not say where that folder is. Name the folder in words (the folder where the project is) or use a path relative to the project.";
+	"does not say where that folder is. In commands, do not put a made-up or described folder inside the path; tell the reader to open or cd into the project folder first, then use the path relative to it (for example `node src/app.js`).";
 
 describe("placeholderPathLine", () => {
 	test("flags the pilot's backslash path", () => {

@@ -69,7 +69,7 @@ export function placeholderPathLine(file: string, content: string, inputs: strin
 		);
 		if (invented.length === 0) return "";
 		const named = invented.slice(0, MAX_NAMED).join(", ");
-		return `[Placeholder path] ${named} in ${safeLabel(file)}: the task does not say where that folder is. Name the folder in words (the folder where the project is) or use a path relative to the project.`;
+		return `[Placeholder path] ${named} in ${safeLabel(file)}: the task does not say where that folder is. In commands, do not put a made-up or described folder inside the path; tell the reader to open or cd into the project folder first, then use the path relative to it (for example \`node src/app.js\`).`;
 	} catch {
 		return "";
 	}
