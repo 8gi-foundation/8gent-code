@@ -178,7 +178,7 @@ describe("state machine", () => {
 
 	test("log getter returns a copy and the log is capped", () => {
 		const r = rig();
-		r.m.log.length = 0; // mutating the copy changes nothing
+		(r.m.log as unknown[]).length = 0; // mutating the copy changes nothing
 		r.m.userSwitch("think", "user-key");
 		expect(r.m.log).toHaveLength(1);
 		for (let i = 0; i < 700; i++) r.m.userSwitch(i % 2 ? "act" : "quiet", "user-key");
@@ -188,7 +188,7 @@ describe("state machine", () => {
 	test("judge can never restore", () => {
 		const r = rig();
 		r.m.userSwitch("think", "user-key");
-		expect(r.m.restore("judge").changed).toBe(false);
+		expect(r.m.restore("judge" as "user-key").changed).toBe(false);
 		expect(r.judge({ to: "act" }).say).toBe(NOT_YOURS);
 		expect(r.m.mode).toBe("think");
 	});
