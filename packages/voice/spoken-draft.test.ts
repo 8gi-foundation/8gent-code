@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	SPOKEN_DRAFT_INSTRUCTION,
 	capAtSentence,
+	createSpokenQueue,
 	makeSpokenDraft,
 	prepareForSpeech,
 } from "./spoken-draft";
@@ -117,5 +118,94 @@ describe("makeSpokenDraft", () => {
 	});
 	test("nothing to say, nothing spoken", async () => {
 		expect(await makeSpokenDraft("   ", async () => "x")).toBe("");
+	});
+});
+
+describe("spoken queue", () => {
+	function deps() {
+		const log: string[] = [];
+		let active = 0;
+		return {
+			log,
+			active: () => active,
+			d: {
+				start: () => {
+					active++;
+					log.push("start");
+				},
+				end: () => {
+					active--;
+					log.push("end");
+				},
+			},
+		};
+	}
+	test("speech is pending during the rewrite and cleared after play", async () => {
+		const x = deps();
+		const q = createSpokenQueue(x.d);
+		let release: (v: string) => void = () => {};
+		const p = q.enqueue(
+			"hello there",
+			() => new Promise<string>((r) => (release = r)),
+			(d) => x.log.push(`play:${d}`),
+		);
+		expect(x.active()).toBe(1);
+		await new Promise((r) => setTimeout(r, 5));
+		expect(x.active()).toBe(1);
+		release("Hi.");
+		await p;
+		expect(x.active()).toBe(0);
+		expect(x.log).toEqual(["start", "play:Hi.", "end"]);
+	});
+	test("pending is cleared when the draft is empty or play throws", async () => {
+		const x = deps();
+		const q = createSpokenQueue(x.d);
+		await q.enqueue(
+			"   ",
+			async () => "x",
+			() => x.log.push("play"),
+		);
+		await q.enqueue(
+			"hi",
+			async () => "ok.",
+			() => {
+				throw new Error("spawn failed");
+			},
+		);
+		expect(x.active()).toBe(0);
+		expect(x.log).not.toContain("play");
+	});
+	test("two close replies are spoken in order, never overlapping", async () => {
+		const x = deps();
+		const q = createSpokenQueue(x.d);
+		const order: string[] = [];
+		const slow = q.enqueue(
+			"one",
+			() => new Promise<string>((r) => setTimeout(() => r("First."), 30)),
+			(d) => order.push(d),
+		);
+		const fast = q.enqueue(
+			"two",
+			async () => "Second.",
+			(d) => order.push(d),
+		);
+		expect(x.active()).toBe(2);
+		await Promise.all([slow, fast]);
+		expect(order).toEqual(["First.", "Second."]);
+		expect(x.active()).toBe(0);
+	});
+	test("a timed-out model call is aborted", async () => {
+		let aborted = false;
+		await makeSpokenDraft(
+			"hi",
+			(_p, signal) =>
+				new Promise<string>(() => {
+					signal?.addEventListener("abort", () => {
+						aborted = true;
+					});
+				}),
+			20,
+		);
+		expect(aborted).toBe(true);
 	});
 });

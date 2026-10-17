@@ -40,7 +40,7 @@ import {
 } from "../../../packages/local-model-server/index.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import { tabVoices } from "../../../packages/tools/speak.js";
-import { type SpokenModel, makeSpokenDraft } from "../../../packages/voice/spoken-draft.js";
+import { type SpokenModel, createSpokenQueue } from "../../../packages/voice/spoken-draft.js";
 import {
 	ActivityMonitor,
 	clearActivity,
@@ -107,6 +107,7 @@ import {
 import { playSound, soundManager } from "./components/sound-effects.js";
 import { AnimatedStatusVerb } from "./components/status-verb.js";
 import type { TaskItem } from "./components/task-card/TaskCardList.js";
+import { trackTts, ttsEnded, ttsStarted } from "./hooks/ptt-state.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
 import { useAutoKanban } from "./hooks/useAutoKanban.js";
 import { chatRowBudget, useMeasuredHeight } from "./hooks/useMeasuredHeight.js";
@@ -603,6 +604,8 @@ import {
 // and falls back to voice.ttsVoice. Fully fire-and-forget so TUI never blocks
 // on audio. macOS-only; silently no-ops on other platforms.
 // ----------------------------------------------------------------------------
+const spokenQueue = createSpokenQueue({ start: () => ttsStarted(), end: () => ttsEnded() });
+
 function speakAgentReply(role: string | undefined, text: string, model?: SpokenModel | null): void {
 	if (process.platform !== "darwin") return;
 	const trimmed = (text ?? "").trim();
@@ -617,9 +620,9 @@ function speakAgentReply(role: string | undefined, text: string, model?: SpokenM
 	const voice = getVoiceForRole(role || "engineer", s);
 	// The reply is already on screen. Speak a second-pass draft written for the
 	// ear (code, paths and links summarised); the screen text is never changed.
-	// Runs after the screen update, so a slow model never delays the reply.
-	void makeSpokenDraft(trimmed, model).then((draft) => {
-		if (!draft) return;
+	// Speech counts as pending from now, so push-to-talk cannot open during the
+	// rewrite; drafts run one at a time so two close replies never overlap.
+	spokenQueue.enqueue(trimmed, model, (draft) => {
 		try {
 			const { spawn } = require("node:child_process");
 			// "--" ends say's options, so a draft can never be read as one.
@@ -630,6 +633,7 @@ function speakAgentReply(role: string | undefined, text: string, model?: SpokenM
 			proc.on("error", () => {
 				// Voice unavailable on this machine. Stay silent.
 			});
+			trackTts(proc);
 			proc.unref();
 		} catch {
 			// Spawn failed (no shell, restricted env). Fail silently.
@@ -694,6 +698,7 @@ function speakOnboardingLine(
 			if (resolved.engine === "none") return;
 			if (resolved.engine === "kitten") {
 				const proc = await new KittenTTSProvider().speak(safe, { voice: resolved.voice });
+				trackTts(proc);
 				if ((await proc.exited) === 0) return;
 			}
 			// System voice, or the fallback when KittenTTS is missing or failed.
@@ -708,6 +713,7 @@ function speakOnboardingLine(
 				detached: true,
 			});
 			proc.on("error", () => {});
+			trackTts(proc);
 			proc.unref();
 		} catch {
 			// Fail silently
@@ -1044,6 +1050,16 @@ export function App({
 	// Voice input — transcript goes to input field for review, NOT auto-send
 	const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
 	const voice = useVoiceInput({
+		inputEnabled: (() => {
+			try {
+				return loadAppSettings().voice?.inputEnabled === true;
+			} catch {
+				return false;
+			}
+		})(),
+		onDisabled: (message) => addSystemMessage(message),
+		onNotice: (message) => addSystemMessage(message),
+		isSpeaking: () => voiceChat.state === "speaking",
 		onTranscript: (text) => {
 			setVoiceTranscript(text);
 			addSystemMessage(`Transcribed: "${text}". Edit it or press Enter to send.`);
@@ -6534,8 +6550,8 @@ export function App({
 							speakAgentReply(
 								targetTabRole,
 								trimmed,
-								(p) =>
-									(getTabAgent(tabId) ?? agent)?.completeOnce(p) ??
+								(p, signal) =>
+									(getTabAgent(tabId) ?? agent)?.completeOnce(p, signal) ??
 									Promise.reject(new Error("no 8gent")),
 							);
 						}
@@ -7175,7 +7191,7 @@ export function App({
 							contentWidth={chatContentWidth}
 							maxVisible={Math.max(5, viewport.height - (isProcessing ? 18 : 10))}
 						/>
-						{voice.state === "recording" && (
+						{(voice.state === "recording" || voice.state === "transcribing") && (
 							<Box flexShrink={0}>
 								<VoiceIndicator
 									state={voice.state}

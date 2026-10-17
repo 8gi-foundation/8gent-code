@@ -37,6 +37,7 @@ import {
 	VERDICT_STUCK,
 	assembleVerdict,
 } from "../../../../packages/eight/go/index.js";
+import { trackTts } from "../hooks/ptt-state.js";
 import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import type { GoalClient } from "../lib/goal-client.js";
 import { askedNote } from "../lib/model-truth.js";
@@ -553,6 +554,8 @@ export function speakWithKittenTts(line: string, path?: string): void {
 			detached: true,
 			stdio: "ignore",
 		});
+		// Spoken with no key press: tell push-to-talk so the mic never opens over it.
+		trackTts(child);
 		child.unref();
 	} catch {
 		// Best-effort. Voice is the accessibility companion, not the path.

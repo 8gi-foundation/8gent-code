@@ -3733,8 +3733,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/** One bare completion on this 8gent's own model: no tools, no history. Used for the spoken post-draft. */
-	async completeOnce(prompt: string): Promise<string> {
-		return createClient(this.config).generate(prompt);
+	async completeOnce(prompt: string, signal?: AbortSignal): Promise<string> {
+		// The client has no cancel hook, so an abort stops us waiting and drops the late answer.
+		const call = createClient(this.config).generate(prompt);
+		if (!signal) return call;
+		return Promise.race([
+			call,
+			new Promise<string>((_, rej) => {
+				if (signal.aborted) rej(new Error("aborted"));
+				signal.addEventListener("abort", () => rej(new Error("aborted")), { once: true });
+			}),
+		]);
 	}
 
 	async isReady(): Promise<boolean> {

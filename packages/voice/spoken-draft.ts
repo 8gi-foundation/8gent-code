@@ -108,7 +108,7 @@ export function capAtSentence(text: string, max = SPOKEN_DRAFT_MAX_CHARS): strin
 	return cut > max * 0.4 ? head.slice(0, cut + 1) : `${head.slice(0, head.lastIndexOf(" "))}.`;
 }
 
-export type SpokenModel = (prompt: string) => Promise<string>;
+export type SpokenModel = (prompt: string, signal?: AbortSignal) => Promise<string>;
 
 /**
  * The text to speak for a full reply. Never throws; always returns something
@@ -124,11 +124,15 @@ export async function makeSpokenDraft(
 	const fallback = capAtSentence(prepared);
 	if (!model) return fallback;
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	const ctl = new AbortController();
 	try {
 		const draft = await Promise.race([
-			model(SPOKEN_DRAFT_INSTRUCTION + prepared.slice(0, 6000)),
+			model(SPOKEN_DRAFT_INSTRUCTION + prepared.slice(0, 6000), ctl.signal),
 			new Promise<string>((_, rej) => {
-				timer = setTimeout(() => rej(new Error("spoken draft timed out")), timeoutMs);
+				timer = setTimeout(() => {
+					ctl.abort();
+					rej(new Error("spoken draft timed out"));
+				}, timeoutMs);
 			}),
 		]);
 		const cleaned = prepareForSpeech(String(draft ?? ""));
@@ -138,4 +142,40 @@ export async function makeSpokenDraft(
 	} finally {
 		if (timer) clearTimeout(timer);
 	}
+}
+
+export interface SpokenQueueDeps {
+	/** Speech is now pending (push-to-talk must stay shut). */
+	start: () => void;
+	/** Pending ends. Called after play, so a started utterance is already tracked. */
+	end: () => void;
+}
+
+/**
+ * Drafts one at a time, in order. Each reply is pending from the moment it is
+ * queued until its draft is played or has failed.
+ */
+export function createSpokenQueue(deps: SpokenQueueDeps) {
+	let tail: Promise<void> = Promise.resolve();
+	return {
+		enqueue(
+			reply: string,
+			model: SpokenModel | null | undefined,
+			play: (draft: string) => void,
+		): Promise<void> {
+			deps.start();
+			const run = tail.then(async () => {
+				try {
+					const draft = await makeSpokenDraft(reply, model);
+					if (draft) play(draft);
+				} catch {
+					// A failed draft is silence, never a crash.
+				} finally {
+					deps.end();
+				}
+			});
+			tail = run;
+			return run;
+		},
+	};
 }
