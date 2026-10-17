@@ -1333,6 +1333,33 @@ export interface SimpleCommand {
 	hereString: boolean;
 	/** The command has a `<(...)` or `>(...)` process substitution. */
 	procSub: boolean;
+	/** The segment has text no argv could be read from (an unparsed shape); callers fail closed. */
+	opaque?: boolean;
+}
+
+const CASE_HEAD =
+	/^\s*(?:(?:then|do|else|elif|if|while|until|!|\{)\s+)*case\s+(?:'[^']*'|"[^"]*"|[^\s'"]+)\s+in\b\s*/;
+const CASE_PAT = "(?:'[^']*'|\"[^\"]*\"|[^\\s()'\"|;&]+)";
+const CASE_ARM = new RegExp(`^\\s*\\(?\\s*${CASE_PAT}(?:\\s*\\|\\s*${CASE_PAT})*\\s*\\)\\s*`);
+/** A segment's text with a leading `case WORD in` and any `PAT)` arm head removed, so the arm's command is read. */
+function caseArm(seg: string): string {
+	let t = seg;
+	for (let i = 0; i < 4; i++) {
+		const n = t.replace(CASE_HEAD, "").replace(CASE_ARM, "");
+		if (n === t) break;
+		t = n;
+	}
+	return t;
+}
+const OPAQUE_OK = new Set([...CONTROL].filter((w) => w !== "case"));
+/** True when `t` is only keywords, assignments, or a `for`/`select` header: nothing to launch. */
+function bareKeywords(t: string[]): boolean {
+	return (
+		t.length === 0 ||
+		t.every((w) => OPAQUE_OK.has(w) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) ||
+		t[0] === "for" ||
+		t[0] === "select"
+	);
 }
 
 /**
@@ -1355,13 +1382,15 @@ export function simpleCommands(text: string, depth = 0): SimpleCommand[] {
 	for (const { text: seg, piped } of segs) {
 		const masked = maskQuotes(seg);
 		const fromFile = /(^|[^<\d])\d?<(?![<(&])/.test(masked);
-		const t = tokens(stripRedirects(seg));
+		const t = tokens(stripRedirects(caseArm(seg)));
+		const argv = stripWrappers(t);
 		out.push({
-			argv: stripWrappers(t),
+			argv,
 			raw: stripWrappers(t, false),
 			stdin: piped || fromFile,
 			hereString: masked.includes("<<<"),
 			procSub: /[<>]\(/.test(masked),
+			opaque: argv.length === 0 && !bareKeywords(t),
 		});
 	}
 	for (const s of subs) out.push(...simpleCommands(s, depth + 1));

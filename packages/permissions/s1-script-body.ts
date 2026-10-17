@@ -1385,7 +1385,7 @@ function bodyNotRead(body: string, depth = 0): string | null {
 function launchesScript(body: string, cwd: string): boolean {
 	if (startupSet(body).hit || bodyScan(body).hit) return true;
 	const texts = [body, ...hereDocs(body).subs];
-	return texts.some((t) => simpleCommands(t).some((c) => launchIn(c, cwd) !== null));
+	return texts.some((t) => simpleCommands(t).some((c) => c.opaque || launchIn(c, cwd) !== null));
 }
 
 /** Leading plain `NAME=value` assignments, each followed by a space or tab. */
@@ -1442,7 +1442,10 @@ export function scriptLaunch(
 		const set = startupSet(command);
 		if (set.hit && !set.quiet) return unchecked(set.hit);
 		const found: { launch: Launch; first: boolean }[] = [];
-		simpleCommands(command).forEach((c, i) => {
+		const cmds = simpleCommands(command);
+		if (cmds.some((c) => c.opaque))
+			return unchecked("the command has a shape this check cannot read, so it may launch a script");
+		cmds.forEach((c, i) => {
 			const hit = launchIn(c, cwd);
 			if (hit) found.push({ launch: hit.launch, first: i === 0 && hit.direct });
 		});
