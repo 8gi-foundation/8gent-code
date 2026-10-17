@@ -117,7 +117,12 @@ function make(over: Record<string, unknown> = {}, envOver: Record<string, string
 	};
 	b.adapter = { handleUserMessage: async (t: string) => void prompts.push(t), close() {} };
 	b.multiStepEnabled = true;
-	b.cosRouter = { handleCommand: async (t: string) => (cos.push(t), true) };
+	b.cosRouter = {
+		handleCommand: async (t: string) => {
+			cos.push(t);
+			return true;
+		},
+	};
 	return { b, prompts, heard, transcribed, said, cos, judge, real };
 }
 
@@ -309,7 +314,10 @@ describe("G7: voice only, capped before getFile", () => {
 		const got: string[] = [];
 		t.b.handleGroupVoice = async () => void got.push("group");
 		t.b.handleVoiceMessage = async () => void got.push("dm");
-		t.b.admitVoice = async () => (got.push("admit"), true);
+		t.b.admitVoice = async () => {
+			got.push("admit");
+			return true;
+		};
 		try {
 			t.b.startPolling();
 			const t0 = Date.now();
