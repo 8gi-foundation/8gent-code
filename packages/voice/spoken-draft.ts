@@ -96,7 +96,8 @@ export function prepareForSpeech(input: string): string {
 		.replace(/\s+([,.;:!?])/g, "$1")
 		.replace(/\.{2,}/g, ".")
 		.replace(/,\s*\./g, ".");
-	return t.trim();
+	// A draft must never start with "-": `say` would read it as an option.
+	return t.trim().replace(/^[-\s]+/, "");
 }
 
 /** Cut at a sentence end at or before max, so speech never stops mid-word. */

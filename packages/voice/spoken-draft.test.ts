@@ -50,6 +50,26 @@ describe("prepareForSpeech", () => {
 	});
 });
 
+describe("option injection", () => {
+	test("a leading dash is never left in front of say", () => {
+		expect(prepareForSpeech("-o x.aiff hello")).toBe("o x.aiff hello.");
+		expect(prepareForSpeech("-f ~/secret")[0]).not.toBe("-");
+		expect(prepareForSpeech("--voice=x go")[0]).not.toBe("-");
+		expect(prepareForSpeech("  \n- - dash")[0]).not.toBe("-");
+	});
+	test("a model draft starting with a dash is neutralised too", async () => {
+		const out = await makeSpokenDraft("hi there", async () => "-f /etc/passwd now");
+		expect(out.startsWith("-")).toBe(false);
+	});
+	test("the say call ends options with --", () => {
+		const src = require("node:fs").readFileSync(
+			require("node:path").join(import.meta.dir, "../../apps/tui/src/app.tsx"),
+			"utf8",
+		);
+		expect(src).toContain('["-v", voice, "--", draft]');
+	});
+});
+
 describe("capAtSentence", () => {
 	test("cuts at a sentence end", () => {
 		const s = `${"Hello there. ".repeat(100)}`;

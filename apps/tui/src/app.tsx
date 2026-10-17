@@ -622,8 +622,8 @@ function speakAgentReply(role: string | undefined, text: string, model?: SpokenM
 		if (!draft) return;
 		try {
 			const { spawn } = require("node:child_process");
-			// argv, not a shell: the draft needs no quoting.
-			const proc = spawn("say", ["-v", voice, draft], {
+			// "--" ends say's options, so a draft can never be read as one.
+			const proc = spawn("say", ["-v", voice, "--", draft], {
 				stdio: "ignore",
 				detached: true,
 			});
