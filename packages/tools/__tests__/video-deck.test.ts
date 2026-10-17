@@ -27,9 +27,9 @@ import {
 	FPS,
 	INTRO_FRAMES,
 	MAX_IMAGE_BYTES,
+	RENDER_VIDEO_DECK_DESCRIPTION,
 	buildFfmpegArgs,
 	chapterLines,
-	RENDER_VIDEO_DECK_DESCRIPTION,
 	clock,
 	imageDimensions,
 	paintSlide,
@@ -864,26 +864,29 @@ describe("chapters and true duration (#4389)", () => {
 		});
 	});
 
-	ffTest("a symlink or a directory named chapters.txt is refused before anything is written", async () => {
-		const spec = { slides: [{ title: "One", seconds: 1 }] };
-		const link = tempDir("vdeck-chlink-");
-		const victim = join(link, "victim.txt");
-		writeFileSync(victim, "keep");
-		mkdirSync(join(link, "video"));
-		symlinkSync(victim, join(link, "video", "chapters.txt"));
-		await expect(
-			renderVideoDeck({ spec, out: join(link, "video", "b.mp4"), cwd: link }),
-		).rejects.toThrow(/symlink/);
-		expect(existsSync(join(link, "video", "b.mp4"))).toBe(false);
-		expect(readFileSync(victim, "utf8")).toBe("keep");
+	ffTest(
+		"a symlink or a directory named chapters.txt is refused before anything is written",
+		async () => {
+			const spec = { slides: [{ title: "One", seconds: 1 }] };
+			const link = tempDir("vdeck-chlink-");
+			const victim = join(link, "victim.txt");
+			writeFileSync(victim, "keep");
+			mkdirSync(join(link, "video"));
+			symlinkSync(victim, join(link, "video", "chapters.txt"));
+			await expect(
+				renderVideoDeck({ spec, out: join(link, "video", "b.mp4"), cwd: link }),
+			).rejects.toThrow(/symlink/);
+			expect(existsSync(join(link, "video", "b.mp4"))).toBe(false);
+			expect(readFileSync(victim, "utf8")).toBe("keep");
 
-		const dir = tempDir("vdeck-chdir-");
-		mkdirSync(join(dir, "video", "chapters.txt"), { recursive: true });
-		await expect(
-			renderVideoDeck({ spec, out: join(dir, "video", "b.mp4"), cwd: dir }),
-		).rejects.toThrow(/directory/);
-		expect(existsSync(join(dir, "video", "b.mp4"))).toBe(false);
-	});
+			const dir = tempDir("vdeck-chdir-");
+			mkdirSync(join(dir, "video", "chapters.txt"), { recursive: true });
+			await expect(
+				renderVideoDeck({ spec, out: join(dir, "video", "b.mp4"), cwd: dir }),
+			).rejects.toThrow(/directory/);
+			expect(existsSync(join(dir, "video", "b.mp4"))).toBe(false);
+		},
+	);
 
 	test("chapters.txt is confined like the mp4: same folder, never outside the working directory", async () => {
 		const root = tempDir("vdeck-chscope-");
