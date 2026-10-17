@@ -46,6 +46,24 @@ describe("linksFooter", () => {
 		expect(footer).not.toContain("src/defaults.ts");
 		expect(footer).toContain("Imported by, not read yet: src/worker.ts");
 	});
+	test("an importer is listed with its own unread imports, so retry.ts is named on the config read", () => {
+		const cfg = w("src/config.ts", "export const c = 1;");
+		const worker = w(
+			"src/worker.ts",
+			`import { c } from "./config";\nimport { waitSeconds } from "./retry";\nimport { log } from "./log";`,
+		);
+		const retry = w("src/retry.ts", "export const waitSeconds = () => 1;");
+		w("src/log.ts", "export const log = 1;");
+		const footer = linksFooter(cfg, "export const c = 1;", new Set([cfg, worker]), root);
+		expect(footer).toBe("");
+		const f2 = linksFooter(cfg, "export const c = 1;", new Set([cfg]), root);
+		expect(f2).toContain(
+			"Imported by, not read yet: src/worker.ts (also imports src/log.ts, src/retry.ts)",
+		);
+		const f3 = linksFooter(cfg, "export const c = 1;", new Set([cfg, retry]), root);
+		expect(f3).toContain("src/worker.ts (also imports src/log.ts)");
+		expect(f3).not.toContain("retry.ts");
+	});
 	test("the chain config -> worker -> retry surfaces retry once worker is read", () => {
 		w("src/config.ts", "export const c = 1;");
 		const worker = w(
@@ -95,6 +113,33 @@ describe("confinement and bounds", () => {
 		expect(linksFooter(cfg, fs.readFileSync(cfg, "utf-8"), new Set([cfg]), root)).toContain(
 			"src/creds.ts",
 		);
+	});
+	test("second hop: an importer is named but its import outside cwd (../ and symlink) is not", () => {
+		const ws = path.join(root, "ws");
+		const cfg = w("ws/src/a.ts", "export const a = 1;");
+		w(
+			"ws/src/worker.ts",
+			`import { a } from "./a";\nimport { s } from "../../out/secret";\nimport { t } from "../lnk/token";`,
+		);
+		w("out/secret.ts", "export const s = 1;");
+		w("out/token.ts", "export const t = 1;");
+		fs.symlinkSync(path.join(root, "out"), path.join(ws, "lnk"));
+		const f = linksFooter(cfg, "export const a = 1;", new Set([cfg]), ws);
+		expect(f).toContain("src/worker.ts");
+		expect(f).not.toContain("secret");
+		expect(f).not.toContain("token");
+		expect(f).not.toContain("also imports");
+	});
+	test("second hop: an importer is named but its policy-denied import is not (allow-all control)", () => {
+		const cfg = w("src/a.ts", "export const a = 1;");
+		const creds = w("src/creds.ts", "export const k = 1;");
+		w("src/worker.ts", `import { a } from "./a";\nimport { k } from "./creds";`);
+		const deny = (abs: string) => abs !== creds;
+		const denied = linksFooter(cfg, "export const a = 1;", new Set([cfg]), root, deny);
+		expect(denied).toContain("src/worker.ts");
+		expect(denied).not.toContain("creds");
+		const open = linksFooter(cfg, "export const a = 1;", new Set([cfg]), root);
+		expect(open).toContain("src/worker.ts (also imports src/creds.ts)");
 	});
 	test("the directory cap truncates and says so", () => {
 		const a = w("a.ts", "export const a = 1;");
