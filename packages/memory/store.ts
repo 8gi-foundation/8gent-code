@@ -9,16 +9,17 @@
  */
 
 import { Database } from "bun:sqlite";
-import { type EmbeddingProvider, cosineSimilarity } from "./embeddings.js";
 import { admitMemory } from "./admission.js";
+import { type EmbeddingProvider, cosineSimilarity } from "./embeddings.js";
 import { safeJsonParse, safeJsonStringify } from "./json-guard.js";
-import { trackStatements } from "./tracked-db.js";
+import { type PurgeResult, type PurgeScope, purgeMemory } from "./purge.js";
 import {
 	type VecLoadResult,
 	encodeVector,
 	ensureSqliteSupportsExtensions,
 	loadSqliteVec,
 } from "./sqlite-vec.js";
+import { trackStatements } from "./tracked-db.js";
 import {
 	type Entity,
 	type EntityType,
@@ -187,12 +188,15 @@ export class MemoryStore {
 	private vecLoaded = false;
 	private vecTableDimensions: number | null = null;
 
-	constructor(dbPath: string, embeddingProvider?: EmbeddingProvider) {
+	/** `dbPath` may be a ready Database (the encrypted Telegram vault hands one in so no plaintext file exists). */
+	constructor(dbPath: string | Database, embeddingProvider?: EmbeddingProvider) {
 		// Try to swap to a SQLite build that supports loadable extensions.
 		// Must run before the first Database is opened in this process.
 		ensureSqliteSupportsExtensions();
 
-		this.db = trackStatements(new Database(dbPath, { create: true }));
+		this.db = trackStatements(
+			typeof dbPath === "string" ? new Database(dbPath, { create: true }) : dbPath,
+		);
 		this.embeddingProvider = embeddingProvider ?? null;
 
 		// Configure WAL mode and pragmas
@@ -303,15 +307,11 @@ export class MemoryStore {
 		if (vecCount > 0) return;
 
 		const rows = this.db
-			.prepare(
-				"SELECT memory_id, vector FROM embeddings WHERE dimensions = ?",
-			)
+			.prepare("SELECT memory_id, vector FROM embeddings WHERE dimensions = ?")
 			.all(dimensions) as Array<{ memory_id: string; vector: Buffer }>;
 		if (rows.length === 0) return;
 
-		const insert = this.db.prepare(
-			"INSERT INTO memories_vec (memory_id, embedding) VALUES (?, ?)",
-		);
+		const insert = this.db.prepare("INSERT INTO memories_vec (memory_id, embedding) VALUES (?, ?)");
 		const txn = this.db.transaction(() => {
 			for (const row of rows) {
 				try {
@@ -802,6 +802,17 @@ export class MemoryStore {
 			relationships,
 			embeddingsCount,
 		};
+	}
+
+	// ── Purge (true delete) ───────────────────────────────────────────
+
+	/**
+	 * Erase a user's data (or everything) for real: memories, versions, FTS index, embeddings,
+	 * entities, edges, then VACUUM. Distinct from forget(), which only flags a row. Throws, with
+	 * nothing deleted, if the post-delete count is not zero. See purge.ts.
+	 */
+	purge(scope: PurgeScope): PurgeResult {
+		return purgeMemory(this.db, scope);
 	}
 
 	// ── Lifecycle ─────────────────────────────────────────────────────
