@@ -41,6 +41,12 @@ import {
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import { tabVoices } from "../../../packages/tools/speak.js";
 import {
+	type SpokenModel,
+	createSpokenQueue,
+	rewriteAllowed,
+	sayArgs,
+} from "../../../packages/voice/spoken-draft.js";
+import {
 	ActivityMonitor,
 	clearActivity,
 	completeActivity,
@@ -106,7 +112,7 @@ import {
 import { playSound, soundManager } from "./components/sound-effects.js";
 import { AnimatedStatusVerb } from "./components/status-verb.js";
 import type { TaskItem } from "./components/task-card/TaskCardList.js";
-import { trackTts } from "./hooks/ptt-state.js";
+import { trackTts, ttsEnded, ttsStarted } from "./hooks/ptt-state.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
 import { useAutoKanban } from "./hooks/useAutoKanban.js";
 import { chatRowBudget, useMeasuredHeight } from "./hooks/useMeasuredHeight.js";
@@ -603,7 +609,9 @@ import {
 // and falls back to voice.ttsVoice. Fully fire-and-forget so TUI never blocks
 // on audio. macOS-only; silently no-ops on other platforms.
 // ----------------------------------------------------------------------------
-function speakAgentReply(role: string | undefined, text: string): void {
+const spokenQueue = createSpokenQueue({ start: () => ttsStarted(), end: () => ttsEnded() });
+
+function speakAgentReply(role: string | undefined, text: string, model?: SpokenModel | null): void {
 	if (process.platform !== "darwin") return;
 	const trimmed = (text ?? "").trim();
 	if (!trimmed) return;
@@ -615,24 +623,27 @@ function speakAgentReply(role: string | undefined, text: string): void {
 	}
 	if (!s.voice?.outputEnabled) return;
 	const voice = getVoiceForRole(role || "engineer", s);
-	// Cap utterance length so we don't tie up `say` on long answers.
-	// macOS `say` handles long text fine, but anything past ~600 chars is
-	// just noise for the user.
-	const safe = trimmed.replace(/"/g, '\\"').slice(0, 600);
-	try {
-		const { spawn } = require("node:child_process");
-		const proc = spawn("say", ["-v", voice, safe], {
-			stdio: "ignore",
-			detached: true,
-		});
-		proc.on("error", () => {
-			// Voice unavailable on this machine. Stay silent.
-		});
-		trackTts(proc);
-		proc.unref();
-	} catch {
-		// Spawn failed (no shell, restricted env). Fail silently.
-	}
+	// The reply is already on screen. Speak a second-pass draft written for the
+	// ear (code, paths and links summarised); the screen text is never changed.
+	// Speech counts as pending from now, so push-to-talk cannot open during the
+	// rewrite; drafts run one at a time so two close replies never overlap.
+	spokenQueue.enqueue(trimmed, rewriteAllowed(s.voice) ? model : null, (draft) => {
+		try {
+			const { spawn } = require("node:child_process");
+			// "--" ends say's options, so a draft can never be read as one.
+			const proc = spawn("say", sayArgs(voice, draft), {
+				stdio: "ignore",
+				detached: true,
+			});
+			proc.on("error", () => {
+				// Voice unavailable on this machine. Stay silent.
+			});
+			trackTts(proc);
+			proc.unref();
+		} catch {
+			// Spawn failed (no shell, restricted env). Fail silently.
+		}
+	});
 }
 
 // ----------------------------------------------------------------------------
@@ -6541,7 +6552,13 @@ export function App({
 									| { role?: string }
 									| undefined
 							)?.role;
-							speakAgentReply(targetTabRole, trimmed);
+							speakAgentReply(
+								targetTabRole,
+								trimmed,
+								(p, signal) =>
+									(getTabAgent(tabId) ?? agent)?.completeOnce(p, signal) ??
+									Promise.reject(new Error("no 8gent")),
+							);
 						}
 					}
 					// appendClosingQuestionIfNeeded decides whether this turn's reply
