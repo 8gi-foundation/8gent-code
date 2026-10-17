@@ -63,19 +63,50 @@ export interface SpeakResult {
 /**
  * Where the engines and their model caches live. A sandboxed session (pilot,
  * per-run HOME) points $HOME at an empty dir, so engines resolved against it are
- * "not installed" and Supertonic, which reads ~/.cache/supertonic3 through
- * Path.home(), cannot find its model. The engines are local read-only tools, so
- * they run against the account's real home; EIGHT_TTS_HOME overrides it.
- * Output paths and the creative folder still follow the session home.
+ * "not installed". Binaries and model caches are read from the account home;
+ * the engine child never gets that home as its own HOME (see engineEnv).
  */
-export function engineHome(env: Record<string, string | undefined> = process.env): string {
-	const pinned = env.EIGHT_TTS_HOME?.trim();
-	if (pinned) return pinned;
+export function engineHome(): string {
 	try {
 		return os.userInfo().homedir || resolveHome();
 	} catch {
 		return resolveHome();
 	}
+}
+
+/**
+ * Allowlisted env for an engine child. HOME is a private throwaway dir, never the
+ * account home. Supertonic's render path resolves its model through Path.home()
+ * (config.py get_model_cache_dir ignores SUPERTONIC_CACHE_DIR), so that dir holds
+ * one symlink to the supertonic3 cache and nothing else. HF_HUB_OFFLINE=1 keeps
+ * a model fetch from writing anywhere.
+ */
+export function engineEnv(
+	privateHome: string,
+	realHome: string,
+	src: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+	const env: Record<string, string> = {
+		HOME: privateHome,
+		HF_HOME: path.join(realHome, ".cache", "huggingface"),
+		SUPERTONIC_CACHE_DIR: path.join(realHome, ".cache", "supertonic3"),
+		HF_HUB_OFFLINE: "1",
+	};
+	for (const k of ["PATH", "LANG", "LC_ALL", "TMPDIR"]) {
+		const v = src[k];
+		if (v) env[k] = v;
+	}
+	return env;
+}
+
+function makePrivateHome(realHome: string): string {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "speak-home-"));
+	const cache = path.join(realHome, ".cache", "supertonic3");
+	if (fs.existsSync(cache)) {
+		fs.mkdirSync(path.join(dir, ".cache"), { recursive: true });
+		fs.symlinkSync(cache, path.join(dir, ".cache", "supertonic3"));
+	}
+	return dir;
 }
 
 const pyenvBin = (name: string) =>
@@ -87,16 +118,17 @@ const creativeDir = () => path.join(resolveHome(), ".8gent", "creative");
 /** Grace between SIGTERM and SIGKILL when a caller aborts the engine. */
 export const KILL_GRACE_MS = 1000;
 
-function run(cmd: string, args: string[], signal?: AbortSignal): Promise<boolean> {
+function run(
+	cmd: string,
+	args: string[],
+	env: NodeJS.ProcessEnv,
+	signal?: AbortSignal,
+): Promise<boolean> {
 	return new Promise((resolve) => {
 		if (signal?.aborted) return resolve(false);
 		// Own process group (POSIX) so the engine and anything it forked can be signalled together.
 		const detached = process.platform !== "win32";
-		const child = spawn(cmd, args, {
-			stdio: "ignore",
-			detached,
-			env: { ...process.env, HOME: engineHome() },
-		});
+		const child = spawn(cmd, args, { stdio: "ignore", detached, env });
 		const send = (sig: NodeJS.Signals) => {
 			try {
 				if (detached && child.pid) process.kill(-child.pid, sig);
@@ -134,17 +166,21 @@ async function synth(
 	out: string,
 	signal?: AbortSignal,
 ): Promise<boolean> {
-	if (engine === "supertonic") {
-		const bin = supertonicBin();
-		if (!fs.existsSync(bin)) return false;
+	const bin = engine === "supertonic" ? supertonicBin() : kittenPy();
+	if (!fs.existsSync(bin)) return false;
+	const args =
+		engine === "supertonic"
+			? ["tts", "-o", out, "--voice", id, "--steps", "8", "--", text]
+			: ["-c", KITTEN_SCRIPT, text, out, id];
+	const real = engineHome();
+	const home = makePrivateHome(real);
+	try {
 		return (
-			(await run(bin, ["tts", "-o", out, "--voice", id, "--steps", "8", "--", text], signal)) &&
-			nonEmpty(out)
+			(await run(bin, args, engineEnv(home, real) as NodeJS.ProcessEnv, signal)) && nonEmpty(out)
 		);
+	} finally {
+		fs.rmSync(home, { recursive: true, force: true });
 	}
-	const py = kittenPy();
-	if (!fs.existsSync(py)) return false;
-	return (await run(py, ["-c", KITTEN_SCRIPT, text, out, id], signal)) && nonEmpty(out);
 }
 
 /** Duration in seconds from a PCM wav header; throws if it is not a wav. */
