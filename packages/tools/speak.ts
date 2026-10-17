@@ -10,10 +10,11 @@
  * dependency).
  */
 
-import { resolveHome } from "../core/home";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { resolveHome } from "../core/home";
 
 type Engine = "supertonic" | "kitten";
 
@@ -59,7 +60,26 @@ export interface SpeakResult {
 	kind: "audio";
 }
 
-const pyenvBin = (name: string) => path.join(resolveHome(), ".pyenv", "versions", "3.11.4", "bin", name);
+/**
+ * Where the engines and their model caches live. A sandboxed session (pilot,
+ * per-run HOME) points $HOME at an empty dir, so engines resolved against it are
+ * "not installed" and Supertonic, which reads ~/.cache/supertonic3 through
+ * Path.home(), cannot find its model. The engines are local read-only tools, so
+ * they run against the account's real home; EIGHT_TTS_HOME overrides it.
+ * Output paths and the creative folder still follow the session home.
+ */
+export function engineHome(env: Record<string, string | undefined> = process.env): string {
+	const pinned = env.EIGHT_TTS_HOME?.trim();
+	if (pinned) return pinned;
+	try {
+		return os.userInfo().homedir || resolveHome();
+	} catch {
+		return resolveHome();
+	}
+}
+
+const pyenvBin = (name: string) =>
+	path.join(engineHome(), ".pyenv", "versions", "3.11.4", "bin", name);
 const supertonicBin = () => process.env.EIGHT_SUPERTONIC_BIN?.trim() || pyenvBin("supertonic");
 const kittenPy = () => process.env.EIGHT_KITTEN_PY?.trim() || pyenvBin("python");
 const creativeDir = () => path.join(resolveHome(), ".8gent", "creative");
@@ -72,7 +92,11 @@ function run(cmd: string, args: string[], signal?: AbortSignal): Promise<boolean
 		if (signal?.aborted) return resolve(false);
 		// Own process group (POSIX) so the engine and anything it forked can be signalled together.
 		const detached = process.platform !== "win32";
-		const child = spawn(cmd, args, { stdio: "ignore", detached });
+		const child = spawn(cmd, args, {
+			stdio: "ignore",
+			detached,
+			env: { ...process.env, HOME: engineHome() },
+		});
 		const send = (sig: NodeJS.Signals) => {
 			try {
 				if (detached && child.pid) process.kill(-child.pid, sig);
@@ -103,11 +127,20 @@ const KITTEN_SCRIPT =
 
 const nonEmpty = (p: string) => fs.existsSync(p) && fs.statSync(p).size > 44;
 
-async function synth(engine: Engine, id: string, text: string, out: string, signal?: AbortSignal): Promise<boolean> {
+async function synth(
+	engine: Engine,
+	id: string,
+	text: string,
+	out: string,
+	signal?: AbortSignal,
+): Promise<boolean> {
 	if (engine === "supertonic") {
 		const bin = supertonicBin();
 		if (!fs.existsSync(bin)) return false;
-		return (await run(bin, ["tts", "-o", out, "--voice", id, "--steps", "8", "--", text], signal)) && nonEmpty(out);
+		return (
+			(await run(bin, ["tts", "-o", out, "--voice", id, "--steps", "8", "--", text], signal)) &&
+			nonEmpty(out)
+		);
 	}
 	const py = kittenPy();
 	if (!fs.existsSync(py)) return false;
@@ -117,7 +150,11 @@ async function synth(engine: Engine, id: string, text: string, out: string, sign
 /** Duration in seconds from a PCM wav header; throws if it is not a wav. */
 export function wavDurationSec(file: string): number {
 	const b = fs.readFileSync(file);
-	if (b.length < 44 || b.toString("ascii", 0, 4) !== "RIFF" || b.toString("ascii", 8, 12) !== "WAVE") {
+	if (
+		b.length < 44 ||
+		b.toString("ascii", 0, 4) !== "RIFF" ||
+		b.toString("ascii", 8, 12) !== "WAVE"
+	) {
 		throw new Error("not a RIFF/WAVE file");
 	}
 	let byteRate = 0;
@@ -151,7 +188,10 @@ export async function speak(input: SpeakInput): Promise<SpeakResult> {
 	}
 	const voice = input.voice ?? DEFAULT_VOICE;
 	const pin = SPEAK_VOICES[voice];
-	if (!pin) throw new Error(`unknown voice "${voice}"; choose one of: ${Object.keys(SPEAK_VOICES).join(", ")}`);
+	if (!pin)
+		throw new Error(
+			`unknown voice "${voice}"; choose one of: ${Object.keys(SPEAK_VOICES).join(", ")}`,
+		);
 
 	const signal = input.signal;
 	const out = resolveOut(input.out);
@@ -161,8 +201,14 @@ export async function speak(input: SpeakInput): Promise<SpeakResult> {
 	// Preferred engine, then the other engine's default voice (as say-telegram does).
 	const ladder: Array<[Engine, string]> =
 		pin.engine === "supertonic"
-			? [["supertonic", pin.id], ["kitten", "Jasper"]]
-			: [["kitten", pin.id], ["supertonic", "M2"]];
+			? [
+					["supertonic", pin.id],
+					["kitten", "Jasper"],
+				]
+			: [
+					["kitten", pin.id],
+					["supertonic", "M2"],
+				];
 	for (const [engine, id] of ladder) {
 		if (signal?.aborted) throw new Error("speak aborted");
 		if (await synth(engine, id, text, out, signal)) {
