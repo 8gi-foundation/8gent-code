@@ -482,11 +482,10 @@ describe("TICKET_FILE_NOTE (#4316)", () => {
 });
 
 describe("UNBLOCK_NOTE (#4368)", () => {
-	it("caps the answer, binds it to the stated setup, and never names what they lack", () => {
+	it("caps the answer and binds the steps to what the stated setup can run", () => {
 		expect(UNBLOCK_NOTE.length).toBeLessThanOrEqual(100);
 		expect(UNBLOCK_NOTE).toContain("under 180 words");
-		expect(UNBLOCK_NOTE).toContain("only their stated setup");
-		expect(UNBLOCK_NOTE).toContain("never name what they lack");
+		expect(UNBLOCK_NOTE).toContain("only steps their stated setup can run");
 		expect(UNBLOCK_NOTE).not.toContain("\u2014");
 		expect(UNBLOCK_NOTE.toLowerCase()).not.toContain("agent");
 	});

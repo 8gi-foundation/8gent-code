@@ -309,9 +309,9 @@ export const FOLDER_NOTE =
 export const TICKET_FILE_NOTE =
 	"**Ticket naming the file at fault: name only the one to change, no neighbours.**";
 
-/** #4368: an unblock checklist named options the person lacks (WSL, installers) and ran 330-429 words. */
+/** #4368: an unblock checklist ran 330-429 words and told the person to use options their setup lacks. */
 export const UNBLOCK_NOTE =
-	"**Unblocking someone: under 180 words, only their stated setup, never name what they lack.**";
+	"**Unblocking someone: under 180 words, only steps their stated setup can run.**";
 
 export type EnvironmentNoteInput = {
 	platform?: NodeJS.Platform;
