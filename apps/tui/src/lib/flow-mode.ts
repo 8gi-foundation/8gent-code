@@ -64,7 +64,7 @@ export function effectivePermission(user: PermissionMode, mode: FlowMode): Permi
 }
 
 export function flowModeLabel(m: FlowMode): string {
-	return { listen: "Listen", think: "Think", quiet: "Quiet", act: "Act" }[m];
+	return { listen: "Listen", think: "Think-aloud", quiet: "Quiet", act: "Act" }[m];
 }
 
 export function nextFlowMode(m: FlowMode): FlowMode {
@@ -137,7 +137,7 @@ const NOTICE: Record<FlowMode, string> = {
 	quiet: "Going quiet.",
 	act: "Back to work.",
 };
-const UNDO_HINT = "Undo: /mode <name> or the cycle key.";
+const UNDO_HINT = "Change back with /mode or Ctrl+Q.";
 const QUESTION: Record<FlowMode, string> = {
 	listen: "Want me to just listen?",
 	think: "Want to think out loud?",

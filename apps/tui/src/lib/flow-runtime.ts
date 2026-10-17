@@ -42,8 +42,7 @@ export type { FlowMode, Outcome, SpeechKind } from "./flow-mode";
 export const TOOLS_DISCLOSURE =
 	"Listen and Think do not restrict tools yet. Permission mode still decides what runs.";
 export const VOICE_CHAT_DISCLOSURE = "Voice chat still speaks in Quiet and Listen.";
-export const MIC_WINDOW_DISCLOSURE =
-	"The mic window is not real yet: pttActive is fixed true and startedAt is t-1.";
+export const MIC_WINDOW_DISCLOSURE = "Push-to-talk timing is not wired up yet.";
 /** The footer hint beside the word in Listen and Think. */
 export const FOOTER_TOOLS_HINT = "tools not limited yet";
 
@@ -57,7 +56,31 @@ export function flowDisclosure(mode: FlowMode): string {
 	return parts.join(" ");
 }
 
-export const MODE_USAGE = "Usage: /mode listen|think|quiet|act   (no argument shows the mode)";
+/** One plain line per mode for a bare /mode. Display order. */
+const MODE_LINES: readonly [FlowMode, string, string][] = [
+	["act", "Act", "Normal. 8gent works and replies as usual."],
+	["quiet", "Quiet", "8gent speaks aloud only to ask approval or report a failure or warning."],
+	["think", "Think-aloud", "For talking things through."],
+	["listen", "Listen", 'You talk, 8gent takes it in and answers "Noted."'],
+];
+
+/** The /mode listing: every mode with what it does, the current one marked. */
+export function modeListing(current: FlowMode): string {
+	const rows = MODE_LINES.map(
+		([m, name, line]) => `${m === current ? "> " : "  "}${name.padEnd(12)} ${line}`,
+	);
+	return [
+		"Modes (> marks the current one):",
+		...rows,
+		"Set one with /mode act|quiet|think-aloud|listen. Ctrl+Q cycles Act, Think-aloud, Quiet.",
+		"Listen: /mode listen",
+		TOOLS_DISCLOSURE,
+		VOICE_CHAT_DISCLOSURE,
+	].join("\n");
+}
+
+export const MODE_USAGE =
+	"Usage: /mode listen|think-aloud|quiet|act   (no argument shows the mode)";
 
 /** What a transcript turned out to be. */
 export type TranscriptResult =
@@ -74,6 +97,9 @@ export function createFlowRuntime(
 	const gate = createCaptureGate(now);
 	let tab = "default";
 	const listeners = new Set<() => void>();
+	// The tools and voice-chat caveats show on every entry to a mode they apply to.
+	// The push-to-talk timing line is said once per session.
+	let pttDisclosed = false;
 	const notify = () => {
 		for (const l of listeners) l();
 	};
@@ -86,6 +112,17 @@ export function createFlowRuntime(
 	};
 
 	return {
+		/** Caveats to print on entering a mode. Push-to-talk timing only the first time. */
+		disclose(mode: FlowMode): string {
+			const parts: string[] = [];
+			if (mode === "listen" || mode === "think") parts.push(TOOLS_DISCLOSURE);
+			if (mode === "listen" || mode === "quiet") parts.push(VOICE_CHAT_DISCLOSURE);
+			if (mode !== "act" && !pttDisclosed) {
+				pttDisclosed = true;
+				parts.push(MIC_WINDOW_DISCLOSURE);
+			}
+			return parts.join(" ");
+		},
 		/** The footer word for the active tab. Always one of the four, in every state. */
 		footerWord: (): string => ctl().footer(),
 		mode: (): FlowMode => ctl().mode,
@@ -117,7 +154,8 @@ export function createFlowRuntime(
 
 		/** /mode <name>. User origin: a person typed it. */
 		setFlowMode(name: string): Outcome {
-			const to = name.trim().toLowerCase();
+			const typed = name.trim().toLowerCase();
+			const to = typed === "think-aloud" ? "think" : typed;
 			if (!isFlowMode(to)) return { changed: false, mode: ctl().mode, screen: MODE_USAGE };
 			return after(ctl().userSwitch(to, "user-slash"));
 		},
@@ -205,6 +243,7 @@ export function createFlowRuntime(
 		/** New session, resume, restart, daemon reattach: Act, nothing remembered. */
 		resetSession() {
 			store.resetSession();
+			pttDisclosed = false;
 			notify();
 		},
 	};

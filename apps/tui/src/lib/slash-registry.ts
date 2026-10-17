@@ -21,6 +21,7 @@ export interface SlashRegistryEntry {
 	kind: SlashRegistryKind;
 	builtInName?: SlashCommand;
 	skillName?: string;
+	bundled?: boolean;
 	/** A prompt template (#3918 G4): the Markdown file it expands to. */
 	templateFile?: string;
 }
@@ -34,6 +35,8 @@ export interface SlashCollision {
 	builtInName: SlashCommand;
 	skillName: string;
 	namespacedToken: string;
+	/** The skill ships with 8gent. Only the user's own skills are worth a startup notice. */
+	bundled?: boolean;
 }
 
 export interface SlashRegistry {
@@ -87,6 +90,7 @@ export function mergeSlashEntries(
 					builtInName: existing.builtInName,
 					skillName: entry.skillName ?? entry.canonicalName,
 					namespacedToken,
+					bundled: entry.bundled,
 				});
 			}
 			if (!byToken.has(namespacedToken)) {
@@ -113,8 +117,10 @@ export function mergeSlashEntries(
  * `/voice` runs the builtin and not their skill.
  */
 export function formatSlashCollisionLine(collisions: SlashCollision[]): string | null {
-	if (collisions.length === 0) return null;
-	const parts = collisions.map(
+	// Bundled skills collide on every clean install; a new user has nothing to act on.
+	const own = collisions.filter((c) => !c.bundled);
+	if (own.length === 0) return null;
+	const parts = own.map(
 		(c) => `${c.token} is the builtin; skill ${c.skillName} is ${c.namespacedToken}`,
 	);
 	return `Slash command collision: ${parts.join("; ")}.`;
@@ -183,6 +189,7 @@ async function buildSkillEntries(): Promise<SlashRegistryEntry[]> {
 			description: skill.description || "Loaded skill",
 			kind: "skill",
 			skillName: skill.name,
+			bundled: skillManager.getSkillTier(skill.name) === "bundled",
 		});
 	}
 	return out;

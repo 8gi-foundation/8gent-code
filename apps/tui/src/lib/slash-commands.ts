@@ -143,7 +143,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "mode",
 		aliases: [],
-		description: "Flow mode: how I work right now (Listen, Think, Quiet, Act). Ctrl+Q cycles",
+		description: "Mode: how I work right now (Listen, Think-aloud, Quiet, Act). Ctrl+Q cycles",
 		usage: "/mode [listen|think|quiet|act]",
 	},
 	{

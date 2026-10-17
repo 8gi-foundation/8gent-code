@@ -388,7 +388,7 @@ describe("on-screen disclosures (8SO #4379)", () => {
 	const TOOLS =
 		"Listen and Think do not restrict tools yet. Permission mode still decides what runs.";
 	const VOICE = "Voice chat still speaks in Quiet and Listen.";
-	const MIC = "The mic window is not real yet: pttActive is fixed true and startedAt is t-1.";
+	const MIC = "Push-to-talk timing is not wired up yet.";
 	test("exact strings", async () => {
 		const m = await import("./flow-runtime");
 		expect(m.TOOLS_DISCLOSURE).toBe(TOOLS);
@@ -421,7 +421,27 @@ describe("on-screen disclosures (8SO #4379)", () => {
 	});
 	test("/mode, Ctrl+Q and the spoken path all print the disclosure in app.tsx", () => {
 		const app = readFileSync(new URL("../app.tsx", import.meta.url), "utf8");
-		expect(app.match(/flowDisclosure\(/g)?.length).toBeGreaterThanOrEqual(5);
+		expect(app.match(/flow\.disclose\(/g)?.length).toBeGreaterThanOrEqual(3);
+	});
+	test("tools and voice caveats show on every entry; the mic line once per session", () => {
+		const { rt } = rig();
+		expect(rt.disclose("act")).toBe("");
+		expect(rt.disclose("quiet")).toBe(`${VOICE} ${MIC}`);
+		expect(rt.disclose("quiet")).toBe(VOICE);
+		expect(rt.disclose("think")).toBe(TOOLS);
+		expect(rt.disclose("listen")).toBe(`${TOOLS} ${VOICE}`);
+		expect(rt.disclose("listen")).toBe(`${TOOLS} ${VOICE}`);
+		rt.resetSession();
+		expect(rt.disclose("listen")).toBe(`${TOOLS} ${VOICE} ${MIC}`);
+	});
+	test("a bare /mode lists all four modes with a line each and marks the current one", async () => {
+		const { modeListing } = await import("./flow-runtime");
+		const out = modeListing("quiet");
+		for (const n of ["Act", "Quiet", "Think-aloud", "Listen"]) expect(out).toContain(n);
+		const marked = out.split("\n").filter((l) => l.startsWith("> "));
+		expect(marked).toHaveLength(1);
+		expect(marked[0]).toContain("Quiet");
+		expect(out).not.toContain("pttActive");
 	});
 });
 

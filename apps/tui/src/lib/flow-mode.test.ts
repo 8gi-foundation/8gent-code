@@ -249,7 +249,9 @@ describe("state machine", () => {
 		const b = store.forTab("b");
 		for (const m of FLOW_MODES) {
 			a.userSwitch(m, "user-slash");
-			expect(a.footer()).toBe({ listen: "Listen", think: "Think", quiet: "Quiet", act: "Act" }[m]);
+			expect(a.footer()).toBe(
+				{ listen: "Listen", think: "Think-aloud", quiet: "Quiet", act: "Act" }[m],
+			);
 		}
 		a.userSwitch("quiet", "user-slash");
 		expect(b.footer()).toBe("Act");

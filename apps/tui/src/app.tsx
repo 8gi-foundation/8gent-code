@@ -140,11 +140,12 @@ import {
 	runExternalAgent,
 } from "./lib/external-agent-runner.js";
 import {
+	MODE_USAGE,
 	type SpeechKind,
 	canSpeak,
 	flow,
-	flowDisclosure,
 	flowModeLabel,
+	modeListing,
 } from "./lib/flow-runtime.js";
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
@@ -1112,7 +1113,7 @@ export function App({
 				const line = [r.outcome.screen].filter(Boolean).join(" ");
 				addSystemMessage(
 					r.outcome.changed
-						? `Flow mode: ${flowModeLabel(r.outcome.mode)}. ${line} ${flowDisclosure(r.outcome.mode)}`.trim()
+						? `Mode: ${flowModeLabel(r.outcome.mode)}. ${line} ${flow.disclose(r.outcome.mode)}`.trim()
 						: line || (r.outcome.say ?? ""),
 				);
 				return;
@@ -2383,8 +2384,8 @@ export function App({
 			const o = flow.cycle();
 			if (o.changed) {
 				flashNotice(`flow ${flowModeLabel(o.mode).toLowerCase()}`);
-				const note = flowDisclosure(o.mode);
-				if (note) addSystemMessage(`Flow mode: ${flowModeLabel(o.mode)}. ${note}`);
+				const note = flow.disclose(o.mode);
+				if (note) addSystemMessage(`Mode: ${flowModeLabel(o.mode)}. ${note}`);
 				if (o.say) speakAgentReply(undefined, o.say, null, "mode-notice");
 			}
 			return;
@@ -5442,16 +5443,16 @@ export function App({
 				case "mode": {
 					// /mode [listen|think|quiet|act]: user origin, in memory only.
 					if (!args[0]) {
-						addSystemMessage(
-							`Flow mode: ${flowModeLabel(flow.mode())}. Set it with /mode listen|think|quiet|act, or Ctrl+Q to cycle. ${flowDisclosure(flow.mode())}`.trim(),
-						);
+						addSystemMessage(modeListing(flow.mode()));
 						break;
 					}
 					const o = flow.setFlowMode(args[0]);
 					addSystemMessage(
 						o.changed
-							? `Flow mode: ${flowModeLabel(o.mode)}. ${o.screen ?? ""} ${flowDisclosure(o.mode)}`.trim()
-							: `${o.screen ?? `Flow mode stays ${flowModeLabel(o.mode)}.`} ${flowDisclosure(o.mode)}`.trim(),
+							? `Mode: ${flowModeLabel(o.mode)}. ${o.screen ?? ""} ${flow.disclose(o.mode)}`.trim()
+							: o.screen === MODE_USAGE
+								? o.screen
+								: `${o.screen ?? `Mode stays ${flowModeLabel(o.mode)}.`} ${flow.disclose(o.mode)}`.trim(),
 					);
 					if (o.changed && o.say) speakAgentReply(undefined, o.say, null, "mode-notice");
 					break;
@@ -5524,6 +5525,25 @@ export function App({
 						} else {
 							addSystemMessage("Voice chat is not active.");
 						}
+					} else if (args[0] === "input" && (args[1] === "on" || args[1] === "off")) {
+						// /voice input on|off - push-to-talk (voice.inputEnabled), persisted.
+						(async () => {
+							const mod = await import("../../../packages/settings/index.js");
+							const next = args[1] === "on";
+							const cur = mod.loadSettings();
+							mod.saveSettings({ ...cur, voice: { ...cur.voice, inputEnabled: next } });
+							addSystemMessage(
+								next
+									? "Voice input is on. Press Ctrl+R to talk and Ctrl+R again to stop."
+									: "Voice input is off.",
+							);
+						})().catch((err) => {
+							addSystemMessage(
+								`Could not update voice setting: ${
+									err instanceof Error ? err.message : String(err)
+								}`,
+							);
+						});
 					} else if (args[0] === "on" || args[0] === "off") {
 						// /voice on|off - toggle TTS output for agent replies.
 						// Persists to ~/.8gent/settings.json so the choice survives restarts.
@@ -5554,7 +5574,8 @@ export function App({
 								"  /voice record  Toggle STT recording (or press Ctrl+R)\n" +
 								"  /voice status  Check voice system status\n" +
 								"  /voice stop    Stop voice chat mode\n" +
-								"  /voice on|off  Toggle TTS output",
+								"  /voice on|off  Turn spoken replies on or off\n" +
+								"  /voice input on|off  Turn push-to-talk (Ctrl+R) on or off",
 						);
 					}
 					break;

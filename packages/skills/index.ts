@@ -382,6 +382,11 @@ export class SkillManager {
 			skillsDirectory || path.join(this.homeDir ?? os.homedir(), ".8gent", "skills");
 	}
 
+	/** Where a loaded skill came from: project, user, bundled or learned. */
+	getSkillTier(name: string): SkillTier | undefined {
+		return this.skillOrigin.get(name)?.tier;
+	}
+
 	/** Skill files the last loadSkills() refused as malformed, with the parser's reason. */
 	getLoadErrors(): { filePath: string; error: string }[] {
 		return [...this.loadErrors];

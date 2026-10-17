@@ -34,7 +34,7 @@ export interface PttState {
 export const PTT_KEY_LABEL = "Ctrl+R";
 
 export const PTT_DISABLED_MESSAGE =
-	'Voice input is off. Turn it on with "voice": { "inputEnabled": true } in settings, then press Ctrl+R to talk and Ctrl+R again to stop.';
+	"Voice input is off. Turn it on with /voice input on, then press Ctrl+R to talk and Ctrl+R again to stop.";
 
 export const PTT_TTS_MESSAGE = "Wait for the spoken reply to finish, then press Ctrl+R.";
 export const PTT_ECHO_MESSAGE = "Dropped: the mic overlapped with spoken output. Try again.";
