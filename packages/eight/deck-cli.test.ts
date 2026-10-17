@@ -98,6 +98,10 @@ describe("8gent deck render", () => {
 				height: 720,
 				hasAudio: false,
 				kind: "video",
+				starts: [0, 1],
+				chapters: ["0:00 One", "0:01 Two"],
+				chaptersPath: "video/chapters.txt",
+				durationLabel: "0:02",
 			};
 		});
 		expect(code).toBe(0);
