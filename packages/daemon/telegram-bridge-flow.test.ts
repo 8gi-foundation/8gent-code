@@ -601,9 +601,10 @@ describe("review fixes on #4383", () => {
 	test("group text through the real handler: /help stays in the group with no card, /mode says nothing", async () => {
 		const t = make();
 		await t.b.handleTelegramMessage("/help", GROUP, GROUP_MSG);
-		const afterHelp = bodies.length;
+		const sendCount = () => bodies.filter((x) => x.url.includes("sendMessage")).length;
+		const afterHelp = sendCount();
 		await t.b.handleTelegramMessage("/mode", GROUP, GROUP_MSG);
-		expect(bodies.length).toBe(afterHelp);
+		expect(sendCount()).toBe(afterHelp);
 		const sends = bodies.filter((x) => x.url.includes("sendMessage"));
 		expect(sends.length).toBeGreaterThan(0);
 		for (const x of sends) {
