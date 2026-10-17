@@ -180,3 +180,15 @@ export async function runTextToolTurn(opts: TextToolTurnOptions): Promise<TextTo
 		toolCalls: calls(raw),
 	};
 }
+
+/**
+ * A model step ended at the output token cap with no usable reply (a runaway
+ * generation, or one huge answer). Typed so the agent loop can tell it from a
+ * transport failure and retry with a nudge instead of ending the turn.
+ */
+export class OutputCapError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "OutputCapError";
+	}
+}

@@ -32,7 +32,7 @@ import {
 } from "../local-model-server/ollama-host";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
 import { type ModelFetchTimers, modelFetch } from "./model-fetch";
-import type { TextToolReply } from "./text-tool-client";
+import { OutputCapError, type TextToolReply } from "./text-tool-client";
 import type { TextTool } from "./text-tool-loop";
 import { type ParsedToolCall, type ToolSpec, escapeControlCharsInStrings } from "./text-tools";
 
@@ -968,7 +968,7 @@ export function buildTextToolCall(opts: {
 		// a repetition loop. Fail the step loudly rather than hand the loop a
 		// truncated reply it would treat as an answer (#3074).
 		if (data?.choices?.[0]?.finish_reason === "length") {
-			throw new Error(outputCapMessage(label, maxTokens));
+			throw new OutputCapError(outputCapMessage(label, maxTokens));
 		}
 		const message = data?.choices?.[0]?.message;
 		const content = message?.content;
