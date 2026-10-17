@@ -16,6 +16,9 @@
  *   4. npm install -g --prefix <tmp>     with an isolated HOME and a minimal PATH
  *   5. 8gent --version                   must print this package.json version
  *   6. 8gent tui --no-pet under a pty    must render its first screen (greeting or status bar)
+ *   7. 8gent chat / 8gent run            must not die on a missing packaged file (#4355):
+ *                                           a model error is fine, ENOENT / Cannot find is not
+ *   (step 3 also fails any bundle that reads a .sql file from disk: SQL must be inlined)
  *
  * Exits non-zero if any check fails. Nothing is published.
  * Dependency install scripts are skipped (--ignore-scripts) so the smoke does
@@ -38,8 +41,8 @@ import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
-	readdirSync,
 	readFileSync,
+	readdirSync,
 	realpathSync,
 	rmSync,
 	writeFileSync,
@@ -182,6 +185,9 @@ async function main(): Promise<void> {
 		);
 		for (const r of buildRoots) check(!src.includes(r), `${f} has no build root ${r}`);
 		if (home.length > 1) check(!src.includes(`"${home}/`), `${f} has no builder home ${home}`);
+		// SQL beside the bundle is not in the package (#4355): it must be a text import.
+		const sqlReads = src.match(/(?:new URL|path\w*\.join|join)\([^)\n]*\.sql["'`]/g) ?? [];
+		check(sqlReads.length === 0, `${f} reads no .sql file from disk`, sqlReads.join(" | "));
 		const baked = findOwnerIdentity(src, ownerIdentities);
 		check(
 			baked.length === 0,
@@ -203,6 +209,12 @@ async function main(): Promise<void> {
 		LANG: "en_US.UTF-8",
 		npm_config_cache: npmCache,
 		npm_config_update_notifier: "false",
+		// Keep the machine's proxy so the install can reach the registry.
+		...Object.fromEntries(
+			Object.entries(process.env).filter(
+				([k, v]) => v !== undefined && /^(https?|no|all)_proxy$/i.test(k),
+			) as [string, string][],
+		),
 		// No CI variable on purpose: Ink detects CI and suppresses rendering, and
 		// the point is to see the screen a newcomer sees.
 	};
@@ -225,6 +237,24 @@ async function main(): Promise<void> {
 		"8gent --version",
 		ver.out.trim().split("\n").pop(),
 	);
+
+	// 5b. chat and run: the first prompt a newcomer types (#4355). No model is
+	// reachable here on purpose; the model error is expected, a missing packaged
+	// file is the failure. Each is given 40s, then stopped.
+	for (const cmd of ["chat", "run"]) {
+		const r = spawnSync(bin, [cmd, "Say hello in one short sentence."], {
+			cwd: WORK,
+			env: { ...env, EIGHT_DECIDE_OLLAMA_HOST: "http://127.0.0.1:9" },
+			encoding: "utf-8",
+			timeout: 40_000,
+			killSignal: "SIGKILL",
+		});
+		const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+		const missing = ["ENOENT", "Cannot find module", "Cannot find package"].find((m) =>
+			out.includes(m),
+		);
+		check(!missing, `8gent ${cmd} hits no missing packaged file`, missing ? out.slice(-400) : "");
+	}
 
 	// 6. TUI launch under a pseudo-terminal: it must render its first screen.
 	// The pty gets an explicit size: with no terminal on stdin it would be 0x0
