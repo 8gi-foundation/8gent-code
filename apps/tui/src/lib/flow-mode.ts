@@ -398,7 +398,7 @@ export function createFlowModeController(
 			if (ceilingRank(hit.to) > ceilingRank(mode)) {
 				// A raise (restore included) needs a keypress on screen, not just a voice.
 				pendingRaise = { to: hit.to, at: now() };
-				rec(hit.to, "user-voice-confirmed", "raise-refused", false);
+				rec(hit.to, "none", "raise-refused", false);
 				return out(false, CONFIRM_LINE, `Press Enter to switch to ${flowModeLabel(hit.to)}.`, true);
 			}
 			return apply(hit.to, "user-voice-confirmed", "explicit");
@@ -439,6 +439,11 @@ export function createFlowModeController(
 				return out(false);
 			}
 			if (now() - pendingAsk.at > INFERRED_ASK_TIMEOUT_MS) return this.tick();
+			// The yes must come after the question: not the utterance that caused it, not an earlier one.
+			if (u.id <= pendingAsk.utteranceId || u.at < pendingAsk.at) {
+				rec(pendingAsk.to, "none", "stale", false);
+				return out(false);
+			}
 			const t = u.text
 				.toLowerCase()
 				.replace(/[^\p{L}\s]/gu, "")

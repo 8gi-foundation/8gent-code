@@ -472,9 +472,46 @@ describe("adversarial (8SO list)", () => {
 	test("A13. restart in a lowered mode comes up in Act with no snapshot", () => {
 		const r = rig();
 		r.m.userSwitch("listen", "user-key");
-		const fresh = rig();
-		expect(fresh.m.mode).toBe("act");
-		expect(fresh.m.restore("user-key").changed).toBe(false);
+		expect(r.m.mode).toBe("listen");
+		r.m.resetSession();
+		expect(r.m.mode).toBe("act");
+		expect(r.m.restore("user-key").changed).toBe(false);
+	});
+
+	test("answer: an earlier yes, replayed after the proposal, is refused", () => {
+		const r = rig();
+		const early = r.say("yes");
+		r.advance(60_000);
+		r.judge({ to: "listen" });
+		r.advance(500);
+		expect(r.m.answer(early).changed).toBe(false);
+		expect(r.m.mode).toBe("act");
+	});
+
+	test("answer: the utterance that triggered the proposal cannot answer it", () => {
+		const r = rig();
+		const trigger = r.say("yes");
+		const tk = r.m.beginJudge(trigger);
+		r.advance(200);
+		expect(r.m.judgeResult(tk as NonNullable<typeof tk>, { to: "quiet" }).asking).toBe(true);
+		expect(r.m.answer(trigger).changed).toBe(false);
+		expect(r.m.mode).toBe("act");
+	});
+
+	test("answer: a fresh later yes works", () => {
+		const r = rig();
+		r.judge({ to: "quiet" });
+		r.advance(1_000);
+		expect(r.m.answer(r.say("yes")).mode).toBe("quiet");
+	});
+
+	test("an unconfirmed voice raise is not logged as user-voice-confirmed", () => {
+		const r = rig();
+		r.m.userSwitch("think", "user-key");
+		r.m.hear(r.say("back to work"));
+		expect(
+			r.m.log.some((l) => l.signal === "raise-refused" && l.origin === "user-voice-confirmed"),
+		).toBe(false);
 	});
 
 	test("R7. the log holds signal class only, never transcript text", () => {
