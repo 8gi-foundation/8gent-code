@@ -1337,25 +1337,57 @@ export interface SimpleCommand {
 	opaque?: boolean;
 }
 
-const CASE_HEAD =
-	/^\s*(?:(?:then|do|else|elif|if|while|until|!|\{)\s+)*case\s+(?:'[^']*'|"[^"]*"|[^\s'"]+)\s+in\b\s*/;
+const LEAD_KW = "(?:(?:then|do|else|elif|if|while|until|!|time)\\s+)*";
+const CASE_HEAD = new RegExp(`^\\s*${LEAD_KW}case\\s+(?:'[^']*'|"[^"]*"|[^\\s'"]+)\\s+in\\b\\s*`);
 const CASE_PAT = "(?:'[^']*'|\"[^\"]*\"|[^\\s()'\"|;&]+)";
 const CASE_ARM = new RegExp(`^\\s*\\(?\\s*${CASE_PAT}(?:\\s*\\|\\s*${CASE_PAT})*\\s*\\)\\s*`);
-/** A segment's text with a leading `case WORD in` and any `PAT)` arm head removed, so the arm's command is read. */
-function caseArm(seg: string): string {
+const LEAD_KW_RE = new RegExp(`^\\s*${LEAD_KW}`);
+/** What `case` text a segment held, and the text left once it is accounted for. */
+function peelCase(
+	seg: string,
+	inCase: number,
+): { text: string; inCase: number; explained: boolean } {
 	let t = seg;
-	for (let i = 0; i < 4; i++) {
-		const n = t.replace(CASE_HEAD, "").replace(CASE_ARM, "");
-		if (n === t) break;
-		t = n;
+	let n = inCase;
+	let explained = false;
+	const head = CASE_HEAD.exec(t);
+	if (head) {
+		t = t.slice(head[0].length);
+		n++;
+		explained = true;
 	}
-	return t;
+	// An arm head `PAT)` only counts inside a `case ... in`; a bare leading `(` is a subshell.
+	if (n > 0) {
+		const arm = CASE_ARM.exec(t);
+		if (arm) {
+			t = t.slice(arm[0].length);
+			explained = true;
+		}
+	}
+	if (/^\s*esac\b/.test(t) && n > 0) n--;
+	return { text: t, inCase: n, explained };
+}
+/** The inside of a leading `( ... )` subshell or `{ ...; }` group, or null when there is none. */
+function groupInside(seg: string): string | null {
+	const t = seg.replace(LEAD_KW_RE, "").trim();
+	if (/^\(\(/.test(t)) return null; // `(( ... ))` is arithmetic, read elsewhere
+	if (t.startsWith("(")) return t.replace(/^\(\s*/, "").replace(/\)\s*$/, "");
+	if (/^\{\s/.test(t)) return t.replace(/^\{\s*/, "").replace(/\}\s*$/, "");
+	return null;
+}
+const KEYWORDS_ONE = new Set([...CONTROL, ":", "true", "false"]);
+/** True when `name` resolves to an executable on the real PATH; unknown (no Bun) counts as no. */
+function onPath(name: string): boolean {
+	try {
+		return typeof Bun !== "undefined" && Bun.which(name) !== null;
+	} catch {
+		return false;
+	}
 }
 const OPAQUE_OK = new Set([...CONTROL].filter((w) => w !== "case"));
 /** True when `t` is only keywords, assignments, or a `for`/`select` header: nothing to launch. */
 function bareKeywords(t: string[]): boolean {
 	return (
-		t.length === 0 ||
 		t.every((w) => OPAQUE_OK.has(w) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) ||
 		t[0] === "for" ||
 		t[0] === "select"
@@ -1379,18 +1411,46 @@ export function simpleCommands(text: string, depth = 0): SimpleCommand[] {
 		if (t.length && SHELLS.has(basename(t[0]))) out.push(...simpleCommands(doc, depth + 1));
 	}
 	const { segs, subs } = splitSegments(body);
+	let inCase = 0;
 	for (const { text: seg, piped } of segs) {
+		const peeled = peelCase(seg, inCase);
+		inCase = peeled.inCase;
+		// A leading subshell or group is its own command list: judge what is inside it.
+		const inner = groupInside(peeled.text);
+		if (inner !== null) {
+			// A one-word subshell is a PATH lookup: unless it resolves to a real binary, fail closed.
+			// Top level only: a `$((x))` arithmetic body reaches here as `(x)` one level down.
+			const one = inner.trim();
+			if (
+				depth === 0 &&
+				/^[A-Za-z_.][A-Za-z0-9_.-]*$/.test(one) &&
+				!KEYWORDS_ONE.has(one) &&
+				!onPath(one)
+			)
+				out.push({
+					argv: [one],
+					raw: [one],
+					stdin: piped,
+					hereString: false,
+					procSub: false,
+					opaque: true,
+				});
+			for (const c of simpleCommands(inner, depth + 1)) out.push({ ...c, stdin: c.stdin || piped });
+			continue;
+		}
 		const masked = maskQuotes(seg);
 		const fromFile = /(^|[^<\d])\d?<(?![<(&])/.test(masked);
-		const t = tokens(stripRedirects(caseArm(seg)));
+		const t = tokens(stripRedirects(peeled.text));
 		const argv = stripWrappers(t);
+		// Opaque: no argv, and the text is not wholly keywords, assignments or a case head/arm.
+		const blank = peeled.text.trim() === "";
 		out.push({
 			argv,
 			raw: stripWrappers(t, false),
 			stdin: piped || fromFile,
 			hereString: masked.includes("<<<"),
 			procSub: /[<>]\(/.test(masked),
-			opaque: argv.length === 0 && !bareKeywords(t),
+			opaque: argv.length === 0 && !blank && !bareKeywords(t),
 		});
 	}
 	for (const s of subs) out.push(...simpleCommands(s, depth + 1));
