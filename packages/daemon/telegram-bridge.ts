@@ -37,13 +37,28 @@ import {
 	askVerdictViaClaude,
 	runBoardroom,
 } from "../telegram-bot/boardroom";
+import {
+	type FlowController,
+	type FlowLogRow,
+	type FlowModeName,
+	classifyVoice,
+	createEchoGuard,
+	createPendingStore,
+	flowOperators,
+	handleFlowTap,
+	isFlowCallback,
+	isFlowOperator,
+	menuCard,
+} from "../telegram-bot/flow-bot";
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
 import {
+	MAX_SPOKEN_CHARS,
 	decideVoice,
 	readVoiceState,
 	sendVoiceNote,
 	writeVoiceState,
 } from "../telegram-bot/voice-mode";
+import { type SpokenModel, capAtSentence, makeSpokenDraft } from "../voice/spoken-draft";
 import { recordTelegramPoll, registerTelegramBridge } from "./bridge-health";
 import { approvalTtlMs, bridgeSecret } from "./channel-approvals";
 import { getDataDir } from "./data-dir";
@@ -198,6 +213,17 @@ interface BridgeConfig {
 	 * gets to authorise a write on it. Defaults to the first authorised user.
 	 */
 	operatorUserIds?: string[];
+	/**
+	 * Flow-mode controller (L7). Absent on main until the controller lands: with
+	 * none, or with no explicit operator list, flow cards and signals are off.
+	 */
+	flowController?: FlowController;
+	/** Receives an operator voice transcript that passed every flow gate. Never forwarded or echoed text. */
+	onFlowSignal?: (signal: { source: "user-voice"; transcript: string }) => void;
+	/** Test seam for the spoken post-draft model. Default: loopback ollama, or none. */
+	spokenModel?: SpokenModel | null;
+	/** Test seam for the voice-note sender. Default: the local KittenTTS bridge. */
+	sendVoiceNote?: typeof sendVoiceNote;
 }
 
 export async function tgSend(
@@ -443,6 +469,7 @@ export const OPERATOR_COMMANDS = [
 	"/logs",
 	"/goals",
 	"/voice",
+	"/mode",
 	"/boardroom",
 	"/cancel",
 	"/unstick",
@@ -641,6 +668,40 @@ export function resolveBridgeModel(env: Record<string, string | undefined>): {
 	return { runtime, model };
 }
 
+/** A voice reply answers a voice note only if it follows soon after. */
+const VOICE_TURN_WINDOW_MS = 10 * 60_000;
+
+/**
+ * Spoken post-draft model: the local ollama on loopback only. Any other host
+ * means no model, so the deterministic text is spoken and no reply leaves the
+ * machine for a rewrite.
+ */
+export function localSpokenModel(
+	env: Record<string, string | undefined>,
+	fetchImpl: typeof fetch = fetch,
+): SpokenModel | null {
+	const host = (env.OLLAMA_HOST?.trim() || "http://127.0.0.1:11434").replace(/\/$/, "");
+	const url = /^https?:/.test(host) ? host : `http://${host}`;
+	let hostname = "";
+	try {
+		hostname = new URL(url).hostname;
+	} catch {
+		return null;
+	}
+	if (!["127.0.0.1", "localhost", "[::1]", "::1"].includes(hostname)) return null;
+	const { model } = resolveBridgeModel(env);
+	return async (prompt, signal) => {
+		const res = await fetchImpl(`${url}/api/generate`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ model, prompt, stream: false }),
+			signal,
+		});
+		const data = (await res.json()) as { response?: string };
+		return typeof data.response === "string" ? data.response : "";
+	};
+}
+
 /**
  * Two pollers on one bot token share one getUpdates lease and silently drop
  * each other's messages. Refuse to start if this bridge's token hashes to the
@@ -792,6 +853,11 @@ class TelegramDaemonBridge {
 	private voiceEnabled: boolean = readVoiceState().enabled;
 	/** One boardroom run at a time. */
 	private boardroomRunning = false;
+	/** Flow cards and echo memory: in memory only, gone on restart (C13, C23). */
+	private flowStore = createPendingStore();
+	private echo = createEchoGuard();
+	/** The next reply answers an operator voice note, so it is spoken too. Consumed once. */
+	private voiceTurnAt = 0;
 
 	constructor(config: BridgeConfig) {
 		this.config = config;
@@ -1246,6 +1312,7 @@ class TelegramDaemonBridge {
 		const transcript = await this.transcribe(this.config.telegramToken, fileId);
 		console.log(transcriptionLogLine(transcript, Date.now() - startedAt));
 		if (!transcript.startsWith("[")) {
+			this.noteVoiceTurn(message, transcript);
 			if (message.chat.type === "private") {
 				await tgSend(this.config.telegramToken, this.replyChat(), `Heard: "${transcript}"`);
 			}
@@ -1254,6 +1321,29 @@ class TelegramDaemonBridge {
 		}
 		const reply = VOICE_SENTINELS.has(transcript) ? transcript : VOICE_UNPROCESSED;
 		await tgSend(this.config.telegramToken, this.replyChat(), reply);
+	}
+
+	/** Explicit operator ids for flow. Empty means flow is off (C2). */
+	private flowOps(): string[] {
+		return this.config.flowController ? flowOperators(this.config.operatorUserIds) : [];
+	}
+
+	/**
+	 * What an admitted voice note is for: a spoken reply (operator DM) and, only for a
+	 * live, unforwarded, non-echo operator note, a flow signal (C1-C4, C6). The
+	 * transcript text itself goes nowhere new: no log, no card.
+	 */
+	private noteVoiceTurn(message: BridgeMessage, transcript: string): void {
+		const dm =
+			message.chat.type === "private" &&
+			message.chat.id === message.from?.id &&
+			this.isOperator(message.from?.id);
+		if (dm) this.voiceTurnAt = Date.now();
+		const ops = this.flowOps();
+		if (ops.length === 0) return;
+		if (classifyVoice(message, ops) !== "user-voice") return;
+		if (this.echo.isEcho(transcript)) return;
+		this.config.onFlowSignal?.({ source: "user-voice", transcript });
 	}
 
 	/** Seam for tests; production uses the local whisper pipeline. */
@@ -1539,6 +1629,18 @@ class TelegramDaemonBridge {
 			return;
 		}
 
+		if (cmd === "/mode") {
+			await this.handleModeCommand(
+				text
+					.replace(/^\/mode(@\w+)?/i, "")
+					.trim()
+					.toLowerCase(),
+				chatId,
+				sender,
+			);
+			return;
+		}
+
 		if (cmd === "/voice") {
 			await this.handleVoiceCommand(
 				text
@@ -1564,7 +1666,7 @@ class TelegramDaemonBridge {
 					"Send any message, or a voice note, to start a multi-step task.",
 					"",
 					"/boardroom <topic> - all 8 officers deliberate, one message, one verdict",
-					"/voice on|off - replies also arrive as a voice note (quiet 21:00-08:30)",
+					"/voice on|off - replies also arrive as a voice note",
 					"/voice - show the current voice setting",
 					"/status - Daemon health",
 					"/cancel - Stop the current task",
@@ -1652,14 +1754,21 @@ class TelegramDaemonBridge {
 	 * stack must never cost him the answer.
 	 */
 	private async maybeSpeak(text: string, voice = VOICE_BY_OFFICER.James): Promise<void> {
-		const decision = decideVoice(text, { enabled: this.voiceEnabled });
+		const answersVoice = Date.now() - this.voiceTurnAt < VOICE_TURN_WINDOW_MS;
+		this.voiceTurnAt = 0;
+		if (!this.voiceEnabled && !answersVoice) return;
+		// The full text is already on screen; what is spoken is a draft written for the ear.
+		const draft = capAtSentence(
+			await makeSpokenDraft(text, this.config.spokenModel ?? localSpokenModel(process.env)),
+			MAX_SPOKEN_CHARS,
+		);
+		const decision = decideVoice(draft, { enabled: true });
 		if (!decision.speak) {
-			if (decision.reason !== "voice-mode-off") {
-				console.log(`[telegram-bridge] not speaking (${decision.reason})`);
-			}
+			console.log(`[telegram-bridge] not speaking (${decision.reason})`);
 			return;
 		}
-		const result = await sendVoiceNote({
+		this.echo.record(decision.text);
+		const result = await (this.config.sendVoiceNote ?? sendVoiceNote)({
 			text: decision.text,
 			voice,
 			expectedChatId: this.replyChat(),
@@ -1996,6 +2105,66 @@ class TelegramDaemonBridge {
 		});
 	}
 
+	/** `/mode` and `/mode <name>`: operator DM only, and only with a controller and an explicit operator list. */
+	private async handleModeCommand(arg: string, chatId: number, sender?: SenderCtx): Promise<void> {
+		const ctl = this.config.flowController;
+		const ops = this.flowOps();
+		const inDm =
+			sender?.chatType === "private" &&
+			chatId === sender.fromId &&
+			isFlowOperator(ops, sender.fromId);
+		if (!inDm) {
+			if (sender?.chatType === "private") {
+				await tgSend(this.config.telegramToken, String(chatId), "Flow modes are off.", "");
+			}
+			return;
+		}
+		if (!ctl) return;
+		const named = (["act", "think", "quiet"] as FlowModeName[]).find((m) => m === arg);
+		if (named) {
+			const r = ctl.apply(named, "user-slash");
+			await tgSend(this.config.telegramToken, String(chatId), r.screen ?? `Mode is ${r.mode}.`, "");
+			return;
+		}
+		const card = menuCard(this.flowStore, { id: chatId, type: "private" }, ctl);
+		if (!card) return;
+		const sent = await this.tgPost("sendMessage", {
+			chat_id: chatId,
+			text: card.text,
+			reply_markup: card.keyboard,
+		});
+		if (sent.ok && sent.messageId !== undefined) this.flowStore.bind(card.tokens, sent.messageId);
+		else this.flowStore.drop(card.tokens);
+	}
+
+	/** One tap on a flow card. The tap, the token and the controller decide; nothing here reads the data as meaning. */
+	private async handleFlowCallback(
+		query: NonNullable<TelegramUpdate["callback_query"]>,
+	): Promise<void> {
+		const result = handleFlowTap(query, {
+			store: this.flowStore,
+			ctl: this.config.flowController,
+			ops: this.flowOps(),
+			log: (row: FlowLogRow) => console.log(`[flow] ${JSON.stringify(row)}`),
+			// Decision answers become a user turn tagged "user-button" once the flow glue lands;
+			// until then they are dropped rather than invented.
+			recordDecision: () => {},
+		});
+		await this.tgPost("answerCallbackQuery", {
+			callback_query_id: query.id,
+			text: result.say.slice(0, 190),
+		});
+		const msg = query.message;
+		if (result.editTo && msg) {
+			await this.tgPost("editMessageText", {
+				chat_id: msg.chat.id,
+				message_id: msg.message_id,
+				text: result.editTo,
+				reply_markup: { inline_keyboard: [] },
+			});
+		}
+	}
+
 	/**
 	 * Strip the inline keyboard off a message once its choice has been made.
 	 * Without this a resolved choice point keeps its buttons, which reads as
@@ -2032,6 +2201,11 @@ class TelegramDaemonBridge {
 		// trusting the channel, and a cited control has to actually exist.
 		//
 		// Fails closed: a callback with no originating chat is rejected.
+		// Flow cards use their own narrow gate (C9.1) and never reach the shared one below.
+		if (isFlowCallback(query.data)) {
+			await this.handleFlowCallback(query);
+			return;
+		}
 		const originChatId = query.message?.chat?.id;
 		// Approval cards for group turns live in the operator's DM, which need
 		// not be on the chat allowlist: accept a tap there only from the operator.
