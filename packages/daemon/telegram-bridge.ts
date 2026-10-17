@@ -345,54 +345,66 @@ function localWhisperModel(): string | null {
 	return null;
 }
 
-/**
- * Download a Telegram voice note and transcribe it LOCALLY with whisper.cpp.
- *
- * This used to POST the audio to Groq or OpenAI and, with no key set, refuse
- * outright with "[set GROQ_API_KEY or OPENAI_API_KEY]" - on a machine that has
- * had whisper.cpp and its models installed the whole time. Two things were
- * wrong with that. It broke voice input for the one user, and it shipped his
- * voice to a third party to do work the laptop does in 0.6s.
- *
- * Local only, deliberately: there is no cloud fallback. A missing model is a
- * setup error worth surfacing, not a reason to start sending audio off-box.
- */
+/** Per-stream output cap for runAsync, in bytes. Output past it is dropped and flagged. */
+export const RUN_ASYNC_MAX_BYTES = 1024 * 1024;
+
 /**
  * Async child run with a hard timeout. Replaces spawnSync, which froze the event loop for
  * the whole of ffmpeg and whisper and so made every timer (the 1.5 s voice ack wait)
- * unable to fire. Same result shape as spawnSync: status null on timeout or spawn error.
+ * unable to fire. Status is null on timeout or spawn error. Each stream keeps at most
+ * RUN_ASYNC_MAX_BYTES bytes and keeps draining; overflow sets `truncated` and the real
+ * exit status is kept, so a caller that cannot accept partial output must check the flag.
  */
-/** Per-stream output cap for runAsync, the same 1 MiB bound spawnSync had. */
-export const RUN_ASYNC_MAX_BYTES = 1024 * 1024;
-
 export function runAsync(
 	cmd: string,
 	args: string[],
 	timeoutMs: number,
-): Promise<{ status: number | null; stdout: string; stderr: string; pid?: number }> {
+): Promise<{
+	status: number | null;
+	stdout: string;
+	stderr: string;
+	truncated: boolean;
+	pid?: number;
+}> {
 	return new Promise((resolve) => {
-		let stdout = "";
-		let stderr = "";
+		const out: Buffer[] = [];
+		const err: Buffer[] = [];
+		const size = { out: 0, err: 0 };
+		let truncated = false;
 		let done = false;
+		const keep = (chunks: Buffer[], k: "out" | "err", d: Buffer) => {
+			const room = RUN_ASYNC_MAX_BYTES - size[k];
+			if (d.byteLength > room) truncated = true;
+			if (room <= 0) return;
+			const part = d.byteLength > room ? d.subarray(0, room) : d;
+			chunks.push(part);
+			size[k] += part.byteLength;
+		};
+		// A cut inside a multi-byte character decodes to U+FFFD; drop that tail so the
+		// decoded text never exceeds the byte cap.
+		const decode = (c: Buffer[]) => {
+			const t = Buffer.concat(c).toString("utf8");
+			return truncated ? t.replace(/\uFFFD+$/, "") : t;
+		};
 		const finish = (status: number | null) => {
 			if (done) return;
 			done = true;
 			clearTimeout(timer);
-			resolve({ status, stdout, stderr, pid: child.pid });
+			resolve({
+				status,
+				stdout: decode(out),
+				stderr: decode(err),
+				truncated,
+				pid: child.pid,
+			});
 		};
 		const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
 		const timer = setTimeout(() => {
 			child.kill("SIGKILL");
 			finish(null);
 		}, timeoutMs);
-		child.stdout.setEncoding("utf8").on("data", (d: string) => {
-			if (stdout.length < RUN_ASYNC_MAX_BYTES)
-				stdout += d.slice(0, RUN_ASYNC_MAX_BYTES - stdout.length);
-		});
-		child.stderr.setEncoding("utf8").on("data", (d: string) => {
-			if (stderr.length < RUN_ASYNC_MAX_BYTES)
-				stderr += d.slice(0, RUN_ASYNC_MAX_BYTES - stderr.length);
-		});
+		child.stdout.on("data", (d: Buffer) => keep(out, "out", d));
+		child.stderr.on("data", (d: Buffer) => keep(err, "err", d));
 		child.on("error", () => finish(null));
 		child.on("close", (code) => finish(code));
 	});
@@ -425,6 +437,18 @@ const VOICE_SENTINELS = new Set([
 ]);
 const VOICE_UNPROCESSED = "[voice message received - could not be processed, please send as text]";
 
+/**
+ * Download a Telegram voice note and transcribe it LOCALLY with whisper.cpp.
+ *
+ * This used to POST the audio to Groq or OpenAI and, with no key set, refuse
+ * outright with "[set GROQ_API_KEY or OPENAI_API_KEY]" - on a machine that has
+ * had whisper.cpp and its models installed the whole time. Two things were
+ * wrong with that. It broke voice input for the one user, and it shipped his
+ * voice to a third party to do work the laptop does in 0.6s.
+ *
+ * Local only, deliberately: there is no cloud fallback. A missing model is a
+ * setup error worth surfacing, not a reason to start sending audio off-box.
+ */
 export async function transcribeVoice(token: string, fileId: string): Promise<string> {
 	const model = localWhisperModel();
 	if (!model) {
@@ -464,7 +488,7 @@ export async function transcribeVoice(token: string, fileId: string): Promise<st
 		// transcript and nothing else.
 		const out = await runAsync("whisper-cli", ["-m", model, "-f", wav, "-nt", "-np"], 120_000);
 		const text = (out.stdout || "").trim();
-		if (out.status !== 0 || !text) {
+		if (out.status !== 0 || out.truncated || !text) {
 			console.error(subprocessFailure("whisper", out.status, out.stderr));
 			return "[voice message received - transcription failed, please send as text]";
 		}
@@ -1414,6 +1438,7 @@ class TelegramDaemonBridge {
 								if (!(await this.admitVoice(update.message))) continue;
 								// Transcription starts now and is shared with the ack and the turn.
 								// A busy or cloud-runtime note is not pre-transcribed: it refuses first.
+								const tpStartedAt = Date.now();
 								const tp =
 									voicePathIsLocal(this.config.env ?? process.env) && !this.agentBusy
 										? this.transcribe(this.config.telegramToken, fileId)
@@ -1421,7 +1446,7 @@ class TelegramDaemonBridge {
 								tp?.catch(() => {});
 								await this.ackDmVoice(update.message.chat.id, tp);
 								await tgTyping(this.config.telegramToken, this.replyChat());
-								await this.handleVoiceMessage(update.message, fileId, tp);
+								await this.handleVoiceMessage(update.message, fileId, tp, tpStartedAt);
 							}
 						} else if (update.message?.text) {
 							await this.handleTelegramMessage(
@@ -1502,12 +1527,12 @@ class TelegramDaemonBridge {
 		message: BridgeMessage,
 		fileId: string,
 		started?: Promise<string>,
+		startedAt: number = Date.now(),
 	): Promise<void> {
 		if (!voicePathIsLocal(this.config.env ?? process.env)) {
 			await tgSend(this.config.telegramToken, String(message.chat.id), VOICE_NEEDS_LOCAL, "");
 			return;
 		}
-		const startedAt = Date.now();
 		const transcript = await (started ?? this.transcribe(this.config.telegramToken, fileId));
 		console.log(transcriptionLogLine(transcript, Date.now() - startedAt));
 		if (!transcript.startsWith("[")) {

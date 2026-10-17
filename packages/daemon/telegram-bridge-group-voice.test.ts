@@ -851,7 +851,6 @@ describe("instant acknowledgement", () => {
 		expect(at).toBeLessThan(2000);
 		await turn;
 		expect(t.said.filter((x) => x.text === "Checking the PR status now")).toEqual([]);
-		process.stdout.write(`measured: generic ack spoken at ${at} ms, transcription 3000 ms\n`);
 	});
 	test("runAsync never blocks the event loop and times out", async () => {
 		let ticks = 0;
@@ -873,18 +872,30 @@ describe("instant acknowledgement", () => {
 		expect(r.stdout.length).toBe(RUN_ASYNC_MAX_BYTES);
 		expect(r.stderr.length).toBe(RUN_ASYNC_MAX_BYTES);
 	});
+	test("runAsync cap counts bytes, not characters, and flags truncation", async () => {
+		// 600000 euro signs = 1.8 MB of 3-byte characters, over the 1 MiB byte cap.
+		const r = await runAsync("sh", ["-c", "yes '\u20ac' | tr -d '\\n' | head -c 1800000"], 20_000);
+		expect(r.status).toBe(0);
+		expect(r.truncated).toBe(true);
+		expect(Buffer.byteLength(r.stdout, "utf8")).toBeLessThanOrEqual(RUN_ASYNC_MAX_BYTES);
+		expect(Buffer.byteLength(r.stdout, "utf8")).toBeGreaterThan(RUN_ASYNC_MAX_BYTES - 4);
+		const small = await runAsync("echo", ["hi"], 5000);
+		expect(small.truncated).toBe(false);
+	});
 	test("a timed-out child is dead after SIGKILL", async () => {
 		const r = await runAsync("sleep", ["30"], 200);
 		expect(r.status).toBeNull();
 		expect(typeof r.pid).toBe("number");
-		await new Promise((x) => setTimeout(x, 100));
-		let err: NodeJS.ErrnoException | undefined;
-		try {
-			process.kill(r.pid as number, 0);
-		} catch (e) {
-			err = e as NodeJS.ErrnoException;
+		let code: string | undefined;
+		for (const t0 = Date.now(); Date.now() - t0 < 2000 && code !== "ESRCH"; ) {
+			try {
+				process.kill(r.pid as number, 0);
+				await new Promise((x) => setTimeout(x, 20));
+			} catch (e) {
+				code = (e as NodeJS.ErrnoException).code;
+			}
 		}
-		expect(err?.code).toBe("ESRCH");
+		expect(code).toBe("ESRCH");
 	});
 	test("no ack for a dropped or rejected note", async () => {
 		const t = await ready(make());
