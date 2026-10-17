@@ -247,6 +247,7 @@ import { ArtifactStore } from "./artifact-store";
 import { formatCommandOutput } from "./command-output";
 import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatEditNotFound } from "./edit-hint";
+import { linksFooter } from "./file-links";
 import {
 	ENV_PASS_HINT,
 	GH_ENV_NAMES,
@@ -3319,6 +3320,19 @@ export class ToolExecutor {
 		if (content === "") return "";
 
 		const isCodeFile = /\.(ts|tsx|js|jsx)$/.test(absolutePath);
+		const withLinks = (body: string): string => {
+			const footer = isCodeFile
+				? linksFooter(absolutePath, content, this.seenPaths, this.workingDirectory, (abs) => {
+						try {
+							safePath(abs, this.workingDirectory, "read");
+							return true;
+						} catch {
+							return false;
+						}
+					})
+				: "";
+			return footer ? `${body}\n\n${footer}` : body;
+		};
 		// Anchors per row with EIGHT_EDIT_FORMAT=hashline (#3472), else `cat -n`.
 		const numberRows = hashlineEnabled() ? hashLines : numberLines;
 		const offset = positiveInt(offsetArg);
@@ -3333,9 +3347,11 @@ export class ToolExecutor {
 			const count = limit ?? (isCodeFile ? 200 : lines.length);
 			const end = Math.min(lines.length, start - 1 + count);
 			const body = numberRows(lines.slice(start - 1, end), start);
-			return end < lines.length
-				? `${body}\n\n[Lines ${start}-${end} of ${lines.length}. Use offset=${end + 1} to read more.]`
-				: body;
+			return withLinks(
+				end < lines.length
+					? `${body}\n\n[Lines ${start}-${end} of ${lines.length}. Use offset=${end + 1} to read more.]`
+					: body,
+			);
 		}
 
 		// AST-first interception: for code files > 200 lines, prepend outline
@@ -3378,14 +3394,16 @@ export class ToolExecutor {
 				}
 			}
 
-			return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberRows(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`;
+			return withLinks(
+				`${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberRows(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`,
+			);
 		}
 
 		if (DIFF_FILE.test(absolutePath)) {
 			const diff = numberDiffLines(lines);
 			if (diff !== null) return diff;
 		}
-		return numberRows(lines, 1);
+		return withLinks(numberRows(lines, 1));
 	}
 
 	private async writeFile(filePath: string, content: string): Promise<string> {
