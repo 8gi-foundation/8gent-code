@@ -1031,6 +1031,7 @@ export class ToolExecutor {
 	 */
 	private visionCapable: () => Promise<boolean>;
 	private localRuntime: () => boolean;
+	private tabVoice: string | undefined;
 	/**
 	 * Results the harness itself built with an image attachment (#4295). Held by
 	 * value, so text a tool or a filename can produce never matches. execute()
@@ -1054,6 +1055,8 @@ export class ToolExecutor {
 			visionCapable?: () => Promise<boolean>;
 			/** The model runs on this box, so read_image keeps the small image bound (#4293). */
 			localRuntime?: () => boolean;
+			/** Voice for `speak` when the call names none (the voice of the tab this 8gent serves). */
+			tabVoice?: string;
 			resolveVisionModel?: () => Promise<VisionRouterResult>;
 			/**
 			 * A person is at the keyboard (G1 extension_call policy). Default: not
@@ -1067,6 +1070,7 @@ export class ToolExecutor {
 		this.permission = options.permission;
 		this.visionCapable = options.visionCapable ?? (async () => false);
 		this.localRuntime = options.localRuntime ?? (() => true);
+		this.tabVoice = options.tabVoice;
 		this.resolveVisionModel =
 			options.resolveVisionModel ?? (() => findVisionModel({ preferLocal: true }));
 		this.agentId = agentId;
@@ -2805,7 +2809,7 @@ export class ToolExecutor {
 					return JSON.stringify(
 						await speak({
 							text: args.text as string,
-							voice: args.voice as string | undefined,
+							voice: (args.voice as string | undefined) ?? this.tabVoice,
 							out,
 						}),
 					);

@@ -35,6 +35,7 @@ import type { AgentEventCallbacks } from "../../../../packages/eight/index.js";
 import { ROLE_REGISTRY } from "../../../../packages/orchestration/role-registry.js";
 import { loadSettings as loadAppSettings } from "../../../../packages/settings/index.js";
 import type { Settings } from "../../../../packages/settings/index.js";
+import { tabVoices } from "../../../../packages/tools/speak.js";
 import { providerToRuntime } from "../lib/model-selection.js";
 
 // ============================================
@@ -187,6 +188,7 @@ export function usePerTabAgents() {
 					maxTurns: opts.maxTurns ?? 50,
 					apiKey: opts.apiKey,
 					events: opts.events,
+					tabVoice: tabVoices.assign(tabId),
 				});
 				const ready = await newAgent.isReady();
 				if (!ready) {
