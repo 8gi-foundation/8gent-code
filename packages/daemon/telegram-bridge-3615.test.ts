@@ -618,10 +618,13 @@ describe("gate order and authority", () => {
 		expect(await a.admitVoice(voice(ARTALE, "private"))).toBe(false);
 		expect(await a.admitVoice(voice(JAMES, "supergroup"))).toBe(false); // not addressed
 		expect(a.originChatId).toBe(String(JAMES));
+		// A group never takes the DM admission path any more: handleGroupVoice owns it (C-G1).
 		expect(
 			await a.admitVoice(voice(JAMES, "supergroup", { reply_to_message: { from: { id: 999 } } })),
-		).toBe(true);
-		expect(a.originChatId).toBe(String(GROUP));
+		).toBe(false);
+		expect(a.originChatId).toBe(String(JAMES));
+		expect(await a.admitVoice(voice(JAMES, "private"))).toBe(true);
+		expect(a.originChatId).toBe(String(JAMES));
 	});
 
 	test("reply counts only on the bot's id, never username, quote or forward", () => {

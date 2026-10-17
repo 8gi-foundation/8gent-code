@@ -17,6 +17,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -27,6 +28,15 @@ import { dirname, join } from "node:path";
  */
 export const R10_TRANSIT_NOTICE =
 	"Speech-to-text runs locally on the operator's machine (ffmpeg plus whisper-cli, no cloud STT). Audio from the Telegram path reaches the machine through Telegram's servers: a voice note the operator sends is stored and relayed by Telegram, and our spoken reply travels back the same way. Bot chats are not end-to-end encrypted. That transit is the channel the operator chose, it is not our transcription, and it applies only to the operator's own private chat. Listen-mode notes, when built, are never captured from the Telegram path. No audio or transcript is sent to any rented model API.";
+
+/**
+ * What operator voice notes do in an allowlisted group, in the words 8SO ruled (C-G11).
+ * Separate from R10_TRANSIT_NOTICE on purpose: that one is about the operator's private
+ * chat and is false in a group. Shown in /help inside the group, posted once into the
+ * group (C-G12) and in docs/telegram-bridge-voice.md; a test pins the exact string in all three.
+ */
+export const R10_GROUP_NOTICE =
+	"In this group, voice notes from the operator that reply to this bot are transcribed on the operator's machine (ffmpeg plus whisper-cli, no cloud STT). Everything posted in this group, including those voice notes and our spoken replies, is visible to every member and is stored and relayed by Telegram. Group chats are not end-to-end encrypted. Voice notes from anyone else are ignored: they are not downloaded or transcribed. The transcript is never posted here. No audio or transcript is sent to any rented model API.";
 
 /** Where the toggle lives, so it survives a bridge restart. */
 export const VOICE_STATE_PATH =
@@ -45,18 +55,27 @@ export const MAX_SPOKEN_CHARS = 600;
 export interface VoiceState {
 	enabled: boolean;
 	updatedAt: string;
+	/** chat id -> hash of the R10_GROUP_NOTICE already posted there (C-G12). */
+	groupNotices?: Record<string, string>;
 }
 
-const DEFAULT_STATE: VoiceState = { enabled: false, updatedAt: "" };
+const DEFAULT_STATE: VoiceState = { enabled: false, updatedAt: "", groupNotices: {} };
 
 /** Read the persisted toggle. A missing or corrupt file means off. */
 export function readVoiceState(path: string = VOICE_STATE_PATH): VoiceState {
 	if (!existsSync(path)) return { ...DEFAULT_STATE };
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf-8"));
+		const notices: Record<string, string> = {};
+		if (parsed?.groupNotices && typeof parsed.groupNotices === "object") {
+			for (const [k, v] of Object.entries(parsed.groupNotices)) {
+				if (typeof v === "string") notices[k] = v;
+			}
+		}
 		return {
 			enabled: parsed?.enabled === true,
 			updatedAt: typeof parsed?.updatedAt === "string" ? parsed.updatedAt : "",
+			groupNotices: notices,
 		};
 	} catch {
 		return { ...DEFAULT_STATE };
@@ -65,12 +84,38 @@ export function readVoiceState(path: string = VOICE_STATE_PATH): VoiceState {
 
 /** Persist the toggle. Creates the directory if the daemon has never run here. */
 export function writeVoiceState(enabled: boolean, path: string = VOICE_STATE_PATH): VoiceState {
-	const state: VoiceState = { enabled, updatedAt: new Date().toISOString() };
+	const state: VoiceState = {
+		enabled,
+		updatedAt: new Date().toISOString(),
+		groupNotices: readVoiceState(path).groupNotices ?? {},
+	};
 	try {
 		mkdirSync(dirname(path), { recursive: true });
 		writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
 	} catch (err) {
 		console.error("[voice-mode] could not persist state:", err);
+	}
+	return state;
+}
+
+/** Hash of the group notice wording: a changed notice is a new notice (C-G12). */
+export function groupNoticeHash(): string {
+	return createHash("sha256").update(R10_GROUP_NOTICE).digest("hex").slice(0, 16);
+}
+
+/** Record that the current group notice was posted into a chat, keeping the toggle as it is. */
+export function recordGroupNotice(chatId: string, path: string = VOICE_STATE_PATH): VoiceState {
+	const prev = readVoiceState(path);
+	const state: VoiceState = {
+		enabled: prev.enabled,
+		updatedAt: prev.updatedAt,
+		groupNotices: { ...(prev.groupNotices ?? {}), [chatId]: groupNoticeHash() },
+	};
+	try {
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
+	} catch (err) {
+		console.error("[voice-mode] could not persist group notice record:", err);
 	}
 	return state;
 }
@@ -134,21 +179,46 @@ export async function sendVoiceNote(opts: {
 	caption?: string;
 	bin?: string;
 	resolveConfiguredChatId?: () => string | null;
+	/**
+	 * A group the bridge itself admitted (C-G10). Must equal expectedChatId, and is then
+	 * passed to the TTS bridge as --chat, because TELEGRAM_CHAT_ID in the env file is the DM.
+	 */
+	explicitChat?: string;
+	/** Forum topic of the group turn (C-G6). Spoken only if the TTS bridge can address a topic. */
+	threadId?: number;
 }): Promise<{ sent: boolean; reason: string }> {
 	const bin = opts.bin ?? KITTENTTS_BIN;
 	if (!existsSync(bin)) return { sent: false, reason: "kittentts-telegram not installed" };
 
-	const configured = (opts.resolveConfiguredChatId ?? readConfiguredChatId)();
-	if (!configured) return { sent: false, reason: "no TELEGRAM_CHAT_ID configured for TTS" };
-	if (configured !== opts.expectedChatId) {
-		// Deliberately loud: this is the allowlist boundary, not a config nit.
-		console.error(
-			"[voice-mode] refusing to speak - TTS destination does not match the bridge chat",
-		);
-		return { sent: false, reason: "TTS chat does not match the bridge allowlist" };
+	const args = ["--voice", opts.voice];
+	if (opts.explicitChat !== undefined) {
+		if (opts.explicitChat !== opts.expectedChatId) {
+			console.error("[voice-mode] refusing to speak - group destination does not match the turn");
+			return { sent: false, reason: "group chat does not match the turn" };
+		}
+		args.push("--chat", opts.explicitChat);
+		if (opts.threadId !== undefined) {
+			// An unknown flag would be read as text to speak, so only pass it to a script that
+			// declares it. Otherwise stay silent: a note that lands in General leaks the thread.
+			let supportsThread = false;
+			try {
+				supportsThread = readFileSync(bin, "utf-8").includes("--thread)");
+			} catch {}
+			if (!supportsThread) return { sent: false, reason: "TTS bridge cannot address a topic" };
+			args.push("--thread", String(opts.threadId));
+		}
+	} else {
+		const configured = (opts.resolveConfiguredChatId ?? readConfiguredChatId)();
+		if (!configured) return { sent: false, reason: "no TELEGRAM_CHAT_ID configured for TTS" };
+		if (configured !== opts.expectedChatId) {
+			// Deliberately loud: this is the allowlist boundary, not a config nit.
+			console.error(
+				"[voice-mode] refusing to speak - TTS destination does not match the bridge chat",
+			);
+			return { sent: false, reason: "TTS chat does not match the bridge allowlist" };
+		}
 	}
 
-	const args = ["--voice", opts.voice];
 	if (opts.caption) args.push("--caption", opts.caption);
 
 	return new Promise((resolve) => {
