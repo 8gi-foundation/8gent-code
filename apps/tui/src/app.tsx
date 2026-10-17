@@ -386,6 +386,7 @@ import type {
 	AgentToolEndEvent,
 	AgentToolStartEvent,
 } from "../../../packages/eight/index.js";
+import { providerRouteNotice } from "../../../packages/eight/run.js";
 
 // Load .env file if present
 import * as fs from "node:fs";
@@ -2702,6 +2703,19 @@ export function App({
 				const routedAgent = getTabAgent(tabId);
 				if (!routedAgent) return;
 				routedModelRef.current.set(routedAgent, { model: event.used, provider: event.provider });
+				// Say so in the chat, once per route: the rail alone changed silently (#4363).
+				if (event.requested && event.requested !== event.used) {
+					const note = providerRouteNotice(event.requested, event.provider, event.used);
+					if (lastReadinessNoticeRef.current !== note) {
+						lastReadinessNoticeRef.current = note;
+						appendToTab(tabId, {
+							id: `model-routed-${Date.now()}`,
+							role: "system" as const,
+							content: note,
+							timestamp: new Date(),
+						});
+					}
+				}
 				// Only the visible tab moves the bar: its reading is gated the same way.
 				if (tabId === activeTabId) {
 					setWindowTarget((prev) =>

@@ -20,7 +20,9 @@
  * with this shape, the chosen shape is logged to stderr so the downstream
  * parser can be adjusted without a round-trip to the agent loop.
  */
-import { resolve as resolvePath } from "node:path";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join as joinPath, resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
 import type { TurnStop } from "./agent";
 import type { RunEvent, RunStopInfo } from "./run-events";
@@ -534,7 +536,7 @@ export function stopInfo(stop: TurnStop): RunStopInfo {
  * OpenRouter free-tier alias — instead of assuming an ollama model is
  * installed.
  */
-function defaultModelFor(provider: string): string {
+export function defaultModelFor(provider: string): string {
 	switch (provider) {
 		case "ollama":
 			return "qwen3:14b";
@@ -579,6 +581,134 @@ async function autoDetectOllamaModel(): Promise<string | null> {
 	} catch {
 		return null;
 	}
+}
+
+// ── Provider choice (#4362, #4363) ───────────────────────────────────
+// Order: --provider flag > the choice saved by onboarding/settings > the
+// adaptive router. A saved choice is skipped only when its endpoint cannot
+// be reached, and then the caller is told in words.
+
+export interface SavedProviderChoice {
+	provider: string;
+	model?: string;
+}
+
+/**
+ * The provider (and model) the user saved in providers.json, or undefined when
+ * the file has no explicit `activeProvider`. Read straight from the file: the
+ * provider manager fills a default in, which would make "nothing chosen" look
+ * like a choice.
+ */
+export function readSavedProviderChoice(
+	env: Record<string, string | undefined> = process.env,
+	home: string = homedir(),
+): SavedProviderChoice | undefined {
+	const file =
+		env.EIGHT_PROVIDERS_SETTINGS_PATH ||
+		joinPath(env.EIGHT_DATA_DIR || joinPath(home, ".8gent"), "providers.json");
+	try {
+		const raw = JSON.parse(readFileSync(file, "utf-8")) as {
+			activeProvider?: unknown;
+			activeModel?: unknown;
+		};
+		if (typeof raw.activeProvider !== "string" || !raw.activeProvider.trim()) return undefined;
+		const model =
+			typeof raw.activeModel === "string" && raw.activeModel.trim() ? raw.activeModel : undefined;
+		return { provider: raw.activeProvider.trim(), model };
+	} catch {
+		return undefined;
+	}
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+	lmstudio: "LM Studio",
+	ollama: "Ollama",
+	openrouter: "OpenRouter",
+	"8gent": "8gent",
+};
+
+export function providerLabel(provider: string): string {
+	return PROVIDER_LABELS[provider] ?? provider;
+}
+
+/** What a user reads when a turn ran on a different model than the one asked for. */
+export function providerRouteNotice(
+	asked: string,
+	usedProvider: string,
+	usedModel: string,
+): string {
+	return `${asked} did not answer, using ${providerLabel(usedProvider)} ${usedModel}.`;
+}
+
+export interface ProviderChoice {
+	provider: string;
+	model?: string;
+	source: "flag" | "saved" | "router";
+	/** Set when a saved choice was unreachable and another provider was used. */
+	notice?: string;
+}
+
+export interface ProviderChoiceDeps {
+	saved?: SavedProviderChoice;
+	/** Whether the provider's own endpoint answers (cloud providers: true). */
+	reachable: (provider: string) => Promise<boolean>;
+	ollamaUp: () => Promise<boolean>;
+	ollamaModel: () => Promise<string | null>;
+}
+
+export async function resolveProviderChoice(
+	req: { provider?: string; model?: string; routerFallback?: "openrouter" | "ollama" },
+	deps: ProviderChoiceDeps,
+): Promise<ProviderChoice> {
+	const modelFor = async (provider: string, saved?: string) =>
+		req.model ??
+		saved ??
+		(provider === "ollama" ? ((await deps.ollamaModel()) ?? undefined) : undefined);
+	if (req.provider) {
+		const saved = deps.saved?.provider === req.provider ? deps.saved.model : undefined;
+		return { provider: req.provider, model: await modelFor(req.provider, saved), source: "flag" };
+	}
+	const saved = deps.saved;
+	if (saved && (await deps.reachable(saved.provider))) {
+		return {
+			provider: saved.provider,
+			model: await modelFor(saved.provider, saved.model),
+			source: "saved",
+		};
+	}
+	const provider = (await deps.ollamaUp()) ? "ollama" : (req.routerFallback ?? "openrouter");
+	const model = await modelFor(provider);
+	const notice = saved
+		? `${providerLabel(saved.provider)} not reachable, using ${providerLabel(provider)} ${
+				model ?? defaultModelFor(provider)
+			}`
+		: undefined;
+	return { provider, model, source: "router", notice };
+}
+
+/** Any HTTP answer counts: only a refused or timed-out connection is "not reachable". */
+export async function providerReachable(provider: string): Promise<boolean> {
+	try {
+		const { getProviderManager } = await import("../providers");
+		const { isLocalProvider } = await import("./registry");
+		if (!isLocalProvider(provider)) return true;
+		const base = getProviderManager().getProvider(provider).baseUrl;
+		if (!base) return true;
+		await fetch(base, { signal: AbortSignal.timeout(1500) });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** The production wiring of the dependencies above. */
+export function liveProviderChoiceDeps(): ProviderChoiceDeps {
+	return {
+		saved: readSavedProviderChoice(),
+		reachable: providerReachable,
+		ollamaUp: isOllamaUp,
+		ollamaModel: autoDetectOllamaModel,
+	};
 }
 
 export async function runRunCommand(
@@ -643,10 +773,12 @@ export async function runRunCommand(
 	// route to it when it actually answers. Otherwise drop to the free
 	// cloud tier so the run doesn't fail with `ECONNREFUSED 127.0.0.1:11434`
 	// on a fresh Windows install that has never had ollama.
-	let provider = opts.provider;
-	if (!provider) {
-		provider = (await isOllamaUp()) ? "ollama" : "openrouter";
-	}
+	const choice = await resolveProviderChoice(
+		{ provider: opts.provider, model: opts.model },
+		liveProviderChoiceDeps(),
+	);
+	const provider = choice.provider;
+	if (choice.notice) process.stderr.write(`[run] ${choice.notice}\n`);
 	// --provider naming a local provider pins it: every network command asks
 	// before it runs, and is refused with no terminal (#3748).
 	if (opts.provider) {
@@ -662,14 +794,7 @@ export async function runRunCommand(
 			);
 		}
 	}
-	let model = opts.model;
-	if (!model) {
-		if (provider === "ollama") {
-			model = (await autoDetectOllamaModel()) || defaultModelFor(provider);
-		} else {
-			model = defaultModelFor(provider);
-		}
-	}
+	const model = choice.model ?? defaultModelFor(provider);
 
 	// Note to downstream harnesses: which stream-json shape we picked.
 	// Goes to stderr so stdout stays clean NDJSON.
