@@ -1095,8 +1095,7 @@ const useSkillTool = tool({
 });
 
 const renderVideoDeckTool = tool({
-	description:
-		`[MEDIA] ${RENDER_VIDEO_DECK_DESCRIPTION}`,
+	description: `[MEDIA] ${RENDER_VIDEO_DECK_DESCRIPTION}`,
 	inputSchema: z.object({
 		// The renderer's own schema (#4172): the native request carries slides[{title, text,
 		// bullets, narration, ...}], size and voice as real fields, not a bare object.

@@ -1670,8 +1670,7 @@ export class ToolExecutor {
 				type: "function",
 				function: {
 					name: "render_video_deck",
-					description:
-						`[MEDIA] ${RENDER_VIDEO_DECK_DESCRIPTION}`,
+					description: `[MEDIA] ${RENDER_VIDEO_DECK_DESCRIPTION}`,
 					parameters: {
 						type: "object",
 						properties: {
