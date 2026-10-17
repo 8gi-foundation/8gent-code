@@ -25,6 +25,7 @@ import {
 	TICKET_FILE_NOTE,
 	TOOL_CATALOG_SEGMENT,
 	TOOL_PATTERNS_SEGMENT,
+	UNBLOCK_NOTE,
 	buildToolCatalogSegment,
 	environmentNote,
 } from "./system-prompt.js";
@@ -39,7 +40,7 @@ import {
  * +33 in #4274 so make_docx, make_xlsx and make_pptx sit in the creative category beside make_pdf;
  * +85 in #4306 so the folder note tells the model rmdir is blocked and to name the mkdir path first).
  */
-const POSIX_CAP = 2454; // +81 for TICKET_FILE_NOTE (#4316)
+const POSIX_CAP = 2454 + 95; // +81 for TICKET_FILE_NOTE (#4316), +95 for UNBLOCK_NOTE (#4368)
 // The Windows environment line names the shell and is longer than the POSIX one; the budget
 // for everything else stays fixed, so a Windows host gets exactly the difference.
 const CONCISE_CATALOG_MAX_BYTES =
@@ -94,7 +95,7 @@ describe("buildToolCatalogSegment", () => {
 	});
 
 	it("fits in a reasonable token budget (< 4KB default, within CONCISE_CATALOG_MAX_BYTES concise)", () => {
-		expect(TOOL_CATALOG_SEGMENT.length).toBeLessThan(4176);
+		expect(TOOL_CATALOG_SEGMENT.length).toBeLessThan(4176 + 95);
 		const concise = buildToolCatalogSegment({ concise: true });
 		expect(Buffer.byteLength(concise)).toBeLessThanOrEqual(CONCISE_CATALOG_MAX_BYTES);
 	});
@@ -477,5 +478,19 @@ describe("TICKET_FILE_NOTE (#4316)", () => {
 
 	it("is in the full catalog", () => {
 		expect(buildToolCatalogSegment()).toContain(TICKET_FILE_NOTE);
+	});
+});
+
+describe("UNBLOCK_NOTE (#4368)", () => {
+	it("caps the answer and binds the steps to what the stated setup can run", () => {
+		expect(UNBLOCK_NOTE.length).toBeLessThanOrEqual(100);
+		expect(UNBLOCK_NOTE).toContain("under 180 words");
+		expect(UNBLOCK_NOTE).toContain("only steps their stated setup can run");
+		expect(UNBLOCK_NOTE).not.toContain("\u2014");
+		expect(UNBLOCK_NOTE.toLowerCase()).not.toContain("agent");
+	});
+
+	it("is in the full catalog", () => {
+		expect(buildToolCatalogSegment()).toContain(UNBLOCK_NOTE);
 	});
 });
