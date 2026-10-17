@@ -74,6 +74,14 @@ describe("slash registry", () => {
 		);
 	});
 
+	test("a collision with a bundled skill gives no startup line; the user's own skill still does", () => {
+		const bundled = mergeSlashEntries([builtInVoice], [{ ...skillVoice, bundled: true }]);
+		expect(bundled.collisions).toHaveLength(1);
+		expect(formatSlashCollisionLine(bundled.collisions)).toBeNull();
+		const own = mergeSlashEntries([builtInVoice], [{ ...skillVoice, bundled: false }]);
+		expect(formatSlashCollisionLine(own.collisions)).toContain("/voice is the builtin");
+	});
+
 	test("no collision behaves as before: skill token resolves to the skill, nothing recorded", () => {
 		const skillOnly: SlashRegistryEntry = { ...skillVoice, token: "/vcm", name: "vcm" };
 		const merged = mergeSlashEntries([builtInVoice], [skillOnly]);

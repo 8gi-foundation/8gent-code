@@ -42,8 +42,7 @@ export type { FlowMode, Outcome, SpeechKind } from "./flow-mode";
 export const TOOLS_DISCLOSURE =
 	"Listen and Think do not restrict tools yet. Permission mode still decides what runs.";
 export const VOICE_CHAT_DISCLOSURE = "Voice chat still speaks in Quiet and Listen.";
-export const MIC_WINDOW_DISCLOSURE =
-	"The mic window is not real yet: pttActive is fixed true and startedAt is t-1.";
+export const MIC_WINDOW_DISCLOSURE = "Push-to-talk timing is not wired up yet.";
 /** The footer hint beside the word in Listen and Think. */
 export const FOOTER_TOOLS_HINT = "tools not limited yet";
 
@@ -55,6 +54,26 @@ export function flowDisclosure(mode: FlowMode): string {
 	if (mode === "listen" || mode === "quiet") parts.push(VOICE_CHAT_DISCLOSURE);
 	parts.push(MIC_WINDOW_DISCLOSURE);
 	return parts.join(" ");
+}
+
+/** One plain line per mode for a bare /mode. Display order. */
+const MODE_LINES: readonly [FlowMode, string, string][] = [
+	["act", "Act", "Normal. 8gent works and replies as usual."],
+	["quiet", "Quiet", "8gent speaks aloud only to ask approval or report a failure or warning."],
+	["think", "Think-aloud", "For talking things through. 8gent should ask before it acts."],
+	["listen", "Listen", 'You talk, 8gent takes it in and answers "Noted."'],
+];
+
+/** The /mode listing: every mode with what it does, the current one marked. */
+export function modeListing(current: FlowMode): string {
+	const rows = MODE_LINES.map(
+		([m, name, line]) => `${m === current ? "> " : "  "}${name.padEnd(12)} ${line}`,
+	);
+	return [
+		"Modes (> marks the current one):",
+		...rows,
+		"Set one with /mode act|quiet|think|listen, or press Ctrl+Q to cycle.",
+	].join("\n");
 }
 
 export const MODE_USAGE = "Usage: /mode listen|think|quiet|act   (no argument shows the mode)";
@@ -74,6 +93,8 @@ export function createFlowRuntime(
 	const gate = createCaptureGate(now);
 	let tab = "default";
 	const listeners = new Set<() => void>();
+	// Caveats already shown this session: each is said once, at the first switch it applies to.
+	const disclosed = new Set<string>();
 	const notify = () => {
 		for (const l of listeners) l();
 	};
@@ -86,6 +107,16 @@ export function createFlowRuntime(
 	};
 
 	return {
+		/** Caveats for a mode not yet shown this session. Empty after the first time. */
+		disclose(mode: FlowMode): string {
+			const parts: [string, string][] = [];
+			if (mode === "listen" || mode === "think") parts.push(["tools", TOOLS_DISCLOSURE]);
+			if (mode === "listen" || mode === "quiet") parts.push(["voice", VOICE_CHAT_DISCLOSURE]);
+			if (mode !== "act") parts.push(["ptt", MIC_WINDOW_DISCLOSURE]);
+			const fresh = parts.filter(([k]) => !disclosed.has(k));
+			for (const [k] of fresh) disclosed.add(k);
+			return fresh.map(([, t]) => t).join(" ");
+		},
 		/** The footer word for the active tab. Always one of the four, in every state. */
 		footerWord: (): string => ctl().footer(),
 		mode: (): FlowMode => ctl().mode,
@@ -205,6 +236,7 @@ export function createFlowRuntime(
 		/** New session, resume, restart, daemon reattach: Act, nothing remembered. */
 		resetSession() {
 			store.resetSession();
+			disclosed.clear();
 			notify();
 		},
 	};
