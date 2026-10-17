@@ -5,14 +5,12 @@
  * text. `/voice off` goes back to text only. The setting persists, because a
  * toggle that resets when the bridge restarts is not a mode, it is a coin flip.
  *
- * Three rules decide whether a given reply is actually spoken. All three have
+ * Two rules decide whether a given reply is actually spoken. Both have
  * to pass; any one of them failing is a normal outcome, not an error, and the
  * text has already landed either way.
  *
  * 1. The toggle is on.
- * 2. It is not quiet hours (21:00 to 08:30 local, per the Voice Experience
- *    Contract). Text still lands; audio waits for the morning.
- * 3. The reply is short enough to be worth hearing. A 600-word answer read
+ * 2. The reply is short enough to be worth hearing. A 600-word answer read
  *    aloud is a punishment, and KittenTTS truncates at 600 characters anyway,
  *    so a long reply becomes a voice note that stops mid-sentence. Better to
  *    stay silent and let him read it.
@@ -22,6 +20,13 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+
+/**
+ * What voice notes do and do not do, in the words 8SO ruled (R10). Shown in /help and
+ * in docs/telegram-bridge-voice.md; a test pins the exact string in both.
+ */
+export const R10_TRANSIT_NOTICE =
+	"Speech-to-text runs locally on the operator's machine (ffmpeg plus whisper-cli, no cloud STT). Audio from the Telegram path reaches the machine through Telegram's servers: a voice note the operator sends is stored and relayed by Telegram, and our spoken reply travels back the same way. Bot chats are not end-to-end encrypted. That transit is the channel the operator chose, it is not our transcription, and it applies only to the operator's own private chat. Listen-mode notes, when built, are never captured from the Telegram path. No audio or transcript is sent to any rented model API.";
 
 /** Where the toggle lives, so it survives a bridge restart. */
 export const VOICE_STATE_PATH =
@@ -36,11 +41,6 @@ const KITTENTTS_BIN = join(homedir(), ".claude", "bin", "kittentts-telegram");
  * voice note that cuts off. 600 characters is roughly 40 seconds of speech.
  */
 export const MAX_SPOKEN_CHARS = 600;
-
-/** Quiet hours, local time. Inclusive of the start hour, exclusive of the end. */
-export const QUIET_START_HOUR = 21;
-export const QUIET_END_HOUR = 8;
-export const QUIET_END_MINUTE = 30;
 
 export interface VoiceState {
 	enabled: boolean;
@@ -75,16 +75,6 @@ export function writeVoiceState(enabled: boolean, path: string = VOICE_STATE_PAT
 	return state;
 }
 
-/** True during 21:00-08:30 local. */
-export function isQuietHours(now: Date = new Date()): boolean {
-	const h = now.getHours();
-	const m = now.getMinutes();
-	if (h >= QUIET_START_HOUR) return true;
-	if (h < QUIET_END_HOUR) return true;
-	if (h === QUIET_END_HOUR && m < QUIET_END_MINUTE) return true;
-	return false;
-}
-
 /**
  * Reduce a Markdown reply to something worth hearing: no fences, no bullets,
  * no link syntax, no runs of whitespace. Returns "" when there is nothing left
@@ -102,12 +92,7 @@ export function speakableText(markdown: string): string {
 		.trim();
 }
 
-export type VoiceSkipReason =
-	| "spoken"
-	| "voice-mode-off"
-	| "quiet-hours"
-	| "too-long"
-	| "nothing-to-say";
+export type VoiceSkipReason = "spoken" | "voice-mode-off" | "too-long" | "nothing-to-say";
 
 export interface VoiceDecision {
 	speak: boolean;
@@ -122,13 +107,12 @@ export interface VoiceDecision {
  */
 export function decideVoice(
 	markdown: string,
-	opts: { enabled: boolean; now?: Date; maxChars?: number },
+	opts: { enabled: boolean; maxChars?: number },
 ): VoiceDecision {
 	const max = opts.maxChars ?? MAX_SPOKEN_CHARS;
 	const text = speakableText(markdown);
 	if (!opts.enabled) return { speak: false, reason: "voice-mode-off", text };
 	if (text.length === 0) return { speak: false, reason: "nothing-to-say", text };
-	if (isQuietHours(opts.now ?? new Date())) return { speak: false, reason: "quiet-hours", text };
 	if (text.length > max) return { speak: false, reason: "too-long", text };
 	return { speak: true, reason: "spoken", text };
 }

@@ -5,7 +5,6 @@ import { join } from "node:path";
 import {
 	MAX_SPOKEN_CHARS,
 	decideVoice,
-	isQuietHours,
 	readConfiguredChatId,
 	readVoiceState,
 	sendVoiceNote,
@@ -44,26 +43,13 @@ describe("persisted toggle", () => {
 	});
 });
 
-describe("quiet hours 21:00-08:30", () => {
-	const at = (h: number, m = 0) => new Date(2026, 7, 9, h, m, 0);
-	test("21:00 is quiet", () => expect(isQuietHours(at(21))).toBe(true));
-	test("23:59 is quiet", () => expect(isQuietHours(at(23, 59))).toBe(true));
-	test("03:00 is quiet", () => expect(isQuietHours(at(3))).toBe(true));
-	test("08:29 is quiet", () => expect(isQuietHours(at(8, 29))).toBe(true));
-	test("08:30 is not quiet", () => expect(isQuietHours(at(8, 30))).toBe(false));
-	test("12:00 is not quiet", () => expect(isQuietHours(at(12))).toBe(false));
-	test("20:59 is not quiet", () => expect(isQuietHours(at(20, 59))).toBe(false));
-});
-
 describe("speakableText", () => {
 	test("drops fenced code, which is the worst thing to hear read aloud", () => {
 		expect(speakableText("Done.\n```ts\nconst x = 1;\n```\nShipped.")).toBe("Done. Shipped.");
 	});
 
 	test("keeps link text and drops the url", () => {
-		expect(speakableText("See [the PR](https://github.com/a/b/pull/1) now")).toBe(
-			"See the PR now",
-		);
+		expect(speakableText("See [the PR](https://github.com/a/b/pull/1) now")).toBe("See the PR now");
 	});
 
 	test("strips markdown emphasis and bullets", () => {
@@ -76,40 +62,37 @@ describe("speakableText", () => {
 });
 
 describe("decideVoice", () => {
-	const noon = new Date(2026, 7, 9, 12, 0, 0);
-	const night = new Date(2026, 7, 9, 22, 0, 0);
-
 	test("off means silent", () => {
-		expect(decideVoice("Shipped.", { enabled: false, now: noon })).toMatchObject({
+		expect(decideVoice("Shipped.", { enabled: false })).toMatchObject({
 			speak: false,
 			reason: "voice-mode-off",
 		});
 	});
 
 	test("on, short, daytime means spoken", () => {
-		expect(decideVoice("Shipped the fix.", { enabled: true, now: noon })).toMatchObject({
+		expect(decideVoice("Shipped the fix.", { enabled: true })).toMatchObject({
 			speak: true,
 			reason: "spoken",
 		});
 	});
 
-	test("quiet hours hold the audio, text has already landed", () => {
-		expect(decideVoice("Shipped the fix.", { enabled: true, now: night })).toMatchObject({
-			speak: false,
-			reason: "quiet-hours",
+	test("the middle of the night is not held: quiet hours are lifted", () => {
+		expect(decideVoice("Shipped the fix.", { enabled: true })).toMatchObject({
+			speak: true,
+			reason: "spoken",
 		});
 	});
 
 	test("a 600-word answer is not a voice note", () => {
 		const long = "word ".repeat(600);
-		const d = decideVoice(long, { enabled: true, now: noon });
+		const d = decideVoice(long, { enabled: true });
 		expect(d.speak).toBe(false);
 		expect(d.reason).toBe("too-long");
 		expect(d.text.length).toBeGreaterThan(MAX_SPOKEN_CHARS);
 	});
 
 	test("a code-only reply is skipped rather than spoken as silence", () => {
-		expect(decideVoice("```\nls\n```", { enabled: true, now: noon })).toMatchObject({
+		expect(decideVoice("```\nls\n```", { enabled: true })).toMatchObject({
 			speak: false,
 			reason: "nothing-to-say",
 		});
