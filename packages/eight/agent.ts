@@ -553,6 +553,7 @@ export class Agent {
 				// Unset: the executor decides from the terminal (G1 extension_call policy).
 				attended: config.attended,
 				allowedPaths: config.allowedPaths,
+				tabVoice: config.tabVoice,
 				openOnWrite: config.openOnWrite ?? true,
 				permission: config.permission,
 				// read_image attaches pixels only for a model that can see (#3641).

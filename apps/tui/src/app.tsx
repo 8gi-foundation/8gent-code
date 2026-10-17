@@ -39,6 +39,7 @@ import {
 	resolveLlamaServerUrl,
 } from "../../../packages/local-model-server/index.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
+import { tabVoices } from "../../../packages/tools/speak.js";
 import {
 	ActivityMonitor,
 	clearActivity,
@@ -2405,6 +2406,7 @@ export function App({
 				shellContextRef.current.delete(closingId);
 				stopBangRuns(closingId);
 				permHoldersRef.current.delete(closingId);
+				tabVoices.release(closingId);
 				workspaceTabs.removeTab(closingId);
 			}
 		}
@@ -3126,6 +3128,7 @@ export function App({
 					runtime,
 					workingDirectory: process.cwd(),
 					maxTurns: 50,
+					tabVoice: tabVoices.assign(_initTabId),
 					// Only the runtime's own key: an OpenRouter key must never reach
 					// an ollama or LM Studio host (#3261).
 					apiKey: sessionApiKey(runtime),

@@ -173,6 +173,12 @@ export interface AgentConfig {
 	 */
 	agentScope?: string;
 	/**
+	 * TTS voice of the TUI tab this 8gent serves (tabVoices.assign in tools/speak.ts),
+	 * used when the model gives `speak` no voice. Must be a SPEAK_VOICES name;
+	 * speak() rejects any other. Unset: Daniel.
+	 */
+	tabVoice?: string;
+	/**
 	 * Headless output (#3638): when the text tool loop's completion check is
 	 * answered with "DONE:", keep the model's reply before the check in front
 	 * of the summary. Set by `8gent run` (packages/eight/run.ts), whose final

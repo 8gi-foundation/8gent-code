@@ -43,6 +43,35 @@ export const SPEAK_VOICES: Readonly<Record<string, { engine: Engine; id: string 
 export const DEFAULT_VOICE = "Daniel";
 export const MAX_SPEAK_CHARS = 2000;
 
+/**
+ * One voice per TUI tab, so you can tell by ear which tab is talking. A tab takes
+ * the lowest unused slot; slot n is the n-th allowlisted voice, wrapping when
+ * there are more tabs than voices. The voice is fixed while the tab lives and its
+ * slot is reusable once the tab is released.
+ */
+export function createTabVoices() {
+	const names = Object.keys(SPEAK_VOICES);
+	const slots = new Map<string, number>();
+	return {
+		assign(tabId: string): string {
+			let slot = slots.get(tabId);
+			if (slot === undefined) {
+				const used = new Set(slots.values());
+				slot = 0;
+				while (used.has(slot)) slot++;
+				slots.set(tabId, slot);
+			}
+			return names[slot % names.length];
+		},
+		release(tabId: string): void {
+			slots.delete(tabId);
+		},
+	};
+}
+
+/** Process-wide registry used by the TUI. */
+export const tabVoices = createTabVoices();
+
 export interface SpeakInput {
 	text: string;
 	voice?: string;
