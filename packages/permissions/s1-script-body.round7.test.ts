@@ -40,10 +40,10 @@ describe("8GO second read: case arms", () => {
 			expect(scriptLaunch(line, dir, dir).kind).not.toBe("none");
 		});
 	}
-	test("control: a one-line case with a harmless command is still checked", () => {
-		expect(bodyKind("case x in x) echo hello;; esac\n")).toBe("checked");
+	test("a harmless one-line case is now unchecked (intended: case is never read)", () => {
+		expect(bodyKind("case x in x) echo hello;; esac\n")).toBe("unchecked");
 	});
-	test("control: no launch on the command line stays none", () => {
-		expect(scriptLaunch("case x in x) echo hello;; esac", dir, dir).kind).toBe("none");
+	test("a harmless one-line case on the command line is unchecked too", () => {
+		expect(scriptLaunch("case x in x) echo hello;; esac", dir, dir).kind).toBe("unchecked");
 	});
 });

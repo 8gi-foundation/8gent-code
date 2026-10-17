@@ -50,6 +50,7 @@ import * as path from "node:path";
 import {
 	type SimpleCommand,
 	cutHeredocs,
+	maskQuotes,
 	shellWords,
 	simpleCommands,
 	splitSegments,
@@ -1341,9 +1342,14 @@ function bodyScan(text: string): { written: Set<string>; hit: string | null } {
 	}
 }
 
+/** `;;` or `;&` inside a comment: arm-looking text a shell never runs, refused outright. */
+const COMMENT_TERM = /(?:^|\s)#[^\n]*(?:;;|;&)/;
+
 /** Why `body` holds a shape the scan does not read whole, or null when every command is read. */
 function bodyNotRead(body: string, depth = 0): string | null {
 	if (depth > MAX_SCAN_DEPTH) return "the script nests too deep to read";
+	if (COMMENT_TERM.test(maskQuotes(body)))
+		return "a comment holds a case terminator, which this check does not read";
 	const { text } = cutHeredocs(body);
 	const { segs, subs } = splitSegments(text);
 	for (const { text: seg } of segs) {
@@ -1367,6 +1373,8 @@ function bodyNotRead(body: string, depth = 0): string | null {
 	if (arith) return arith;
 	// Wrappers (exec, nohup, env, time, ...) hand on a program name: it must be plain too.
 	for (const c of simpleCommands(text)) {
+		if (c.opaque)
+			return "the script has a case, function, alias or glob mode this check does not read";
 		const p = c.argv[0];
 		if (p === undefined) continue;
 		if (/[$`]/.test(p))
@@ -1442,6 +1450,8 @@ export function scriptLaunch(
 		const set = startupSet(command);
 		if (set.hit && !set.quiet) return unchecked(set.hit);
 		const found: { launch: Launch; first: boolean }[] = [];
+		if (COMMENT_TERM.test(maskQuotes(command)))
+			return unchecked("a comment holds a case terminator, which this check does not read");
 		const cmds = simpleCommands(command);
 		if (cmds.some((c) => c.opaque))
 			return unchecked("the command has a shape this check cannot read, so it may launch a script");

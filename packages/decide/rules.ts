@@ -1365,7 +1365,14 @@ function peelCase(
 	seg: string,
 	inCase: number,
 	armStart: boolean,
-): { text: string; inCase: number; explained: boolean; armNext: boolean; pattern: boolean } {
+): {
+	text: string;
+	inCase: number;
+	explained: boolean;
+	armNext: boolean;
+	pattern: boolean;
+	head: boolean;
+} {
 	let t = seg;
 	let n = inCase;
 	let explained = false;
@@ -1390,7 +1397,7 @@ function peelCase(
 		}
 	}
 	if (/^\s*esac\b/.test(t) && n > 0) n--;
-	return { text: t, inCase: n, explained, armNext, pattern };
+	return { text: t, inCase: n, explained, armNext, pattern, head: head !== null };
 }
 /** The inside of a leading `( ... )` subshell or `{ ...; }` group, or null when there is none. */
 function groupInside(seg: string): string | null {
@@ -1399,6 +1406,18 @@ function groupInside(seg: string): string | null {
 	if (t.startsWith("(")) return t.replace(/^\(\s*/, "").replace(/\)\s*$/, "");
 	if (/^\{\s/.test(t)) return t.replace(/^\{\s*/, "").replace(/\}\s*$/, "");
 	return null;
+}
+/**
+ * Constructs this reader does not model, so a segment holding one is never "read": a `case`
+ * (arm parsing here is informational only), a function definition, `alias`, and `shopt`/`setopt`
+ * naming extglob or kshglob (which change what a pattern or word means). Fail closed.
+ */
+const FUNC_DEF = /^\s*(?:function\s+\S|[A-Za-z_][\w.:+-]*\s*\(\s*\))/;
+const GLOB_MODE = /^\s*(?:shopt|setopt)\b.*(?:extglob|ksh_?glob)/i;
+function unmodelled(seg: string, head: boolean): boolean {
+	if (head || FUNC_DEF.test(seg) || GLOB_MODE.test(seg)) return true;
+	const w = seg.replace(LEAD_KW_RE, "").trim().split(/\s+/)[0] ?? "";
+	return w === "alias" || w === "case";
 }
 const KEYWORDS_ONE = new Set([...CONTROL, ":", "true", "false"]);
 /** True when `name` resolves to an executable on the real PATH; unknown (no Bun) counts as no. */
@@ -1451,6 +1470,17 @@ export function simpleCommands(text: string, depth = 0): SimpleCommand[] {
 		inCase = peeled.inCase;
 		armNext = peeled.armNext;
 		patPending = peeled.pattern;
+		if (unmodelled(seg, peeled.head)) {
+			out.push({
+				argv: [],
+				raw: [],
+				stdin: piped,
+				hereString: false,
+				procSub: false,
+				opaque: true,
+			});
+			continue;
+		}
 		if (peeled.pattern) continue;
 		// A leading subshell or group is its own command list: judge what is inside it.
 		const inner = groupInside(peeled.text);

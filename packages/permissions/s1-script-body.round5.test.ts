@@ -108,10 +108,6 @@ describe("ordinary scripts stay checked", () => {
 					"arr=(one two)",
 					'echo "${arr[0]}" "$here"',
 					"if [ -f notes.txt ]; then cat notes.txt; elif [[ -d src ]]; then ls src; else echo none; fi",
-					'case "$1" in',
-					"  build) echo build ;;",
-					"  *) echo other ;;",
-					"esac",
 					'for f in *.md; do wc -l "$f"; done',
 					"i=0",
 					"while (( i < 3 )); do ((i++)); done",
@@ -132,6 +128,14 @@ describe("ordinary scripts stay checked", () => {
 				].join("\n"),
 			),
 		).toBe("checked");
+	});
+});
+
+describe("a case in a body is unchecked (8GO second read 5)", () => {
+	test("an ordinary case statement", () => {
+		expect(bodyKind('case "$1" in\n  build) echo build ;;\n  *) echo other ;;\nesac\n')).toBe(
+			"unchecked",
+		);
 	});
 });
 

@@ -310,6 +310,15 @@ const SUBSHELLS = [
 	"case x in x) echo hi;;\n(y) ./evil.sh;; esac",
 	"{ bash; } <<X\n./evil.sh\nX",
 	"(bash) <<X\n./evil.sh\nX",
+	"case x in x) echo hi # ;;\n(./evil.sh)\n;;\nesac",
+	"case x in x) true\n# ;;\n(./evil.sh)\n;;\nesac",
+	"case x in x) true\n# ;&\n(./evil.sh)\n;;\nesac",
+	"case x in x) true # ;;\n(bash) < evil.sh\n;;\nesac",
+	"f() { ./evil.sh; }; f",
+	"function f { ./evil.sh; }; f",
+	"shopt -s extglob; case x in @(x)) ./evil.sh;; esac",
+	"setopt kshglob; case x in @(x)) ./evil.sh;; esac",
+	"alias ll=./evil.sh; ll",
 ];
 
 describe("replay: reads 1-4 command lines and bodies", () => {
@@ -341,8 +350,8 @@ describe("replay: 8GO second read and 8SO read 8", () => {
 		test(`group body ${l}`, () => expect(bodyKind(`${l}\n`)).not.toBe("checked"));
 		test(`group line ${l}`, () => expect(kind(l)).not.toBe("none"));
 	}
-	test("controls: harmless arm and group", () => {
-		expect(bodyKind("case x in x) echo hello;; esac\n")).toBe("checked");
+	test("controls: a harmless case is unchecked (cost); a group is not", () => {
+		expect(bodyKind("case x in x) echo hello;; esac\n")).toBe("unchecked");
 		expect(bodyKind("(cd . && ls)\n{ echo a; echo b; } > out.txt\n")).toBe("checked");
 		expect(bodyKind("x=$((1+2))\necho $(( x + 1 ))\n")).toBe("checked");
 	});
@@ -399,4 +408,28 @@ describe("fuzz: moving a refused shape does not change the refusal", () => {
 		expect(BODIES.length).toBeGreaterThan(150);
 		expect(LINES.length).toBeGreaterThan(50);
 	});
+});
+
+describe("replay: ordinary scripts without case, functions or glob modes stay checked", () => {
+	for (const [n, b] of [
+		[
+			"if and for",
+			'if [ -f notes.txt ]; then cat notes.txt; fi\nfor f in *.md; do wc -l "$f"; done\n',
+		],
+		["subshell and group", "(cd . && ls)\n{ echo a; echo b; } > out.txt\n"],
+		["comment mentioning case", "# the case for a test\necho hi\n"],
+		["case as an argument", "grep case notes.txt\necho 'case x in'\n"],
+		["counter", "n=0\nwhile (( n < 3 )); do n=$((n + 1)); done\n"],
+	] as [string, string][])
+		test(n, () => expect(bodyKind(b)).toBe("checked"));
+	test("comment with a case terminator is refused", () => {
+		expect(bodyKind("echo hi # ;;\n")).toBe("unchecked");
+	});
+});
+
+describe("replay: every case shape is unchecked, body and command line", () => {
+	for (const l of CASE_ARMS) {
+		test(`body ${l}`, () => expect(bodyKind(`${l}\n`)).toBe("unchecked"));
+		test(`line ${l}`, () => expect(kind(l)).toBe("unchecked"));
+	}
 });
