@@ -60,7 +60,7 @@ export function flowDisclosure(mode: FlowMode): string {
 const MODE_LINES: readonly [FlowMode, string, string][] = [
 	["act", "Act", "Normal. 8gent works and replies as usual."],
 	["quiet", "Quiet", "8gent speaks aloud only to ask approval or report a failure or warning."],
-	["think", "Think-aloud", "For talking things through. 8gent should ask before it acts."],
+	["think", "Think-aloud", "For talking things through."],
 	["listen", "Listen", 'You talk, 8gent takes it in and answers "Noted."'],
 ];
 
@@ -74,6 +74,8 @@ export function modeListing(current: FlowMode): string {
 		...rows,
 		"Set one with /mode act|quiet|think-aloud|listen. Ctrl+Q cycles Act, Think-aloud, Quiet.",
 		"Listen: /mode listen",
+		TOOLS_DISCLOSURE,
+		VOICE_CHAT_DISCLOSURE,
 	].join("\n");
 }
 
@@ -95,8 +97,9 @@ export function createFlowRuntime(
 	const gate = createCaptureGate(now);
 	let tab = "default";
 	const listeners = new Set<() => void>();
-	// Caveats already shown this session: each is said once, at the first switch it applies to.
-	const disclosed = new Set<string>();
+	// The tools and voice-chat caveats show on every entry to a mode they apply to.
+	// The push-to-talk timing line is said once per session.
+	let pttDisclosed = false;
 	const notify = () => {
 		for (const l of listeners) l();
 	};
@@ -109,15 +112,16 @@ export function createFlowRuntime(
 	};
 
 	return {
-		/** Caveats for a mode not yet shown this session. Empty after the first time. */
+		/** Caveats to print on entering a mode. Push-to-talk timing only the first time. */
 		disclose(mode: FlowMode): string {
-			const parts: [string, string][] = [];
-			if (mode === "listen" || mode === "think") parts.push(["tools", TOOLS_DISCLOSURE]);
-			if (mode === "listen" || mode === "quiet") parts.push(["voice", VOICE_CHAT_DISCLOSURE]);
-			if (mode !== "act") parts.push(["ptt", MIC_WINDOW_DISCLOSURE]);
-			const fresh = parts.filter(([k]) => !disclosed.has(k));
-			for (const [k] of fresh) disclosed.add(k);
-			return fresh.map(([, t]) => t).join(" ");
+			const parts: string[] = [];
+			if (mode === "listen" || mode === "think") parts.push(TOOLS_DISCLOSURE);
+			if (mode === "listen" || mode === "quiet") parts.push(VOICE_CHAT_DISCLOSURE);
+			if (mode !== "act" && !pttDisclosed) {
+				pttDisclosed = true;
+				parts.push(MIC_WINDOW_DISCLOSURE);
+			}
+			return parts.join(" ");
 		},
 		/** The footer word for the active tab. Always one of the four, in every state. */
 		footerWord: (): string => ctl().footer(),
@@ -239,7 +243,7 @@ export function createFlowRuntime(
 		/** New session, resume, restart, daemon reattach: Act, nothing remembered. */
 		resetSession() {
 			store.resetSession();
-			disclosed.clear();
+			pttDisclosed = false;
 			notify();
 		},
 	};

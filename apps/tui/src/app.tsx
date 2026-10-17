@@ -139,7 +139,14 @@ import {
 	listPresetIds,
 	runExternalAgent,
 } from "./lib/external-agent-runner.js";
-import { type SpeechKind, canSpeak, flow, flowModeLabel, modeListing } from "./lib/flow-runtime.js";
+import {
+	MODE_USAGE,
+	type SpeechKind,
+	canSpeak,
+	flow,
+	flowModeLabel,
+	modeListing,
+} from "./lib/flow-runtime.js";
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
 import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gate.js";
@@ -5443,7 +5450,9 @@ export function App({
 					addSystemMessage(
 						o.changed
 							? `Mode: ${flowModeLabel(o.mode)}. ${o.screen ?? ""} ${flow.disclose(o.mode)}`.trim()
-							: (o.screen ?? `Mode stays ${flowModeLabel(o.mode)}.`),
+							: o.screen === MODE_USAGE
+								? o.screen
+								: `${o.screen ?? `Mode stays ${flowModeLabel(o.mode)}.`} ${flow.disclose(o.mode)}`.trim(),
 					);
 					if (o.changed && o.say) speakAgentReply(undefined, o.say, null, "mode-notice");
 					break;

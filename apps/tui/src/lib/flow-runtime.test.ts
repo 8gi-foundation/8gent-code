@@ -423,13 +423,14 @@ describe("on-screen disclosures (8SO #4379)", () => {
 		const app = readFileSync(new URL("../app.tsx", import.meta.url), "utf8");
 		expect(app.match(/flow\.disclose\(/g)?.length).toBeGreaterThanOrEqual(3);
 	});
-	test("each caveat shows once per session, at the first switch it applies to", () => {
+	test("tools and voice caveats show on every entry; the mic line once per session", () => {
 		const { rt } = rig();
 		expect(rt.disclose("act")).toBe("");
 		expect(rt.disclose("quiet")).toBe(`${VOICE} ${MIC}`);
-		expect(rt.disclose("quiet")).toBe("");
+		expect(rt.disclose("quiet")).toBe(VOICE);
 		expect(rt.disclose("think")).toBe(TOOLS);
-		expect(rt.disclose("listen")).toBe("");
+		expect(rt.disclose("listen")).toBe(`${TOOLS} ${VOICE}`);
+		expect(rt.disclose("listen")).toBe(`${TOOLS} ${VOICE}`);
 		rt.resetSession();
 		expect(rt.disclose("listen")).toBe(`${TOOLS} ${VOICE} ${MIC}`);
 	});
