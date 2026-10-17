@@ -32,7 +32,13 @@ Set `TELEGRAM_FLOW_VOICE_GROUP_IDS` in the bot's environment to a comma list of 
 TELEGRAM_FLOW_VOICE_GROUP_IDS=-1003845259821
 ```
 
-then restarts the bridge with `~/.8gent/bin/svc restart <name>` (use the bridge's service name; it prints OK or FAIL). The chat must also be on `TELEGRAM_AUTHORIZED_CHAT_IDS`; the two lists are independent and adding a chat to one never turns on the other. If the notice cannot be posted, voice stays off in that chat. A supergroup migration changes the chat id and fails closed until the list is edited.
+The bridge's environment is exported in `~/.8gent/scripts/start-eightgent-bridge.sh`, which `~/Library/LaunchAgents/com.8gent.eightgent-bridge.plist` runs (the plist itself holds only PATH and HOME; `~/.8gent/secrets/eightgent.env` holds only the bot token). Add the line there, next to TELEGRAM_AUTHORIZED_CHAT_IDS, then restart with:
+
+```
+~/.8gent/bin/svc restart eightgent
+```
+
+It prints OK or FAIL. The chat must also be on `TELEGRAM_AUTHORIZED_CHAT_IDS`; the two lists are independent and adding a chat to one never turns on the other. If the notice cannot be posted, voice stays off in that chat. A supergroup migration changes the chat id and fails closed until the list is edited.
 
 Spoken replies in the group follow the `/voice` toggle: `/voice off` silences them, `/voice on` allows one spoken reply per admitted note.
 

@@ -4,7 +4,7 @@
  * stands in for getFile + ffmpeg + whisper: if it is never called, nothing was downloaded.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFlowModeController } from "../flow/flow-mode";
@@ -67,6 +67,7 @@ afterEach(() => {
 	globalThis.fetch = saved.fetch;
 	for (const k of ["log", "warn", "error", "info"] as const) console[k] = saved[k];
 	bindChatThread("0", undefined);
+	rmSync(dir, { recursive: true, force: true });
 });
 
 const sends = () => bodies.filter((x) => /\/(sendMessage|sendVoice)$/.test(x.url));
@@ -846,6 +847,19 @@ describe("instant acknowledgement", () => {
 		await t.b.ackVoice(String(JAMES));
 		expect(acks(t)).toEqual([expect.objectContaining({ expectedChatId: String(JAMES) })]);
 		expect(acks(t)[0]?.explicitChat).toBeUndefined();
+	});
+	test("a DM note while the bot is busy, or on a cloud runtime, gets no ack", async () => {
+		const t = await ready(make());
+		t.b.agentBusy = true;
+		await t.b.ackDmVoice(JAMES);
+		expect(t.said).toEqual([]);
+		expect(sends().some((x) => x.body.text === ACK)).toBe(false);
+		t.b.agentBusy = false;
+		await t.b.ackDmVoice(JAMES);
+		expect(acks(t).length).toBe(1);
+		const cloud = await ready(make({}, { DEFAULT_RUNTIME: "openrouter" }));
+		await cloud.b.ackDmVoice(JAMES);
+		expect(cloud.said).toEqual([]);
 	});
 	test("TTS failure falls back to the same short text in the same chat and topic", async () => {
 		const t = await ready(make({ sendVoiceNote: async () => ({ sent: false, reason: "down" }) }));

@@ -1373,9 +1373,7 @@ class TelegramDaemonBridge {
 							const fileId = update.message.voice?.file_id || update.message.audio?.file_id;
 							if (fileId && update.message.chat) {
 								if (!(await this.admitVoice(update.message))) continue;
-								if (voicePathIsLocal(this.config.env ?? process.env)) {
-									await this.ackVoice(String(update.message.chat.id));
-								}
+								await this.ackDmVoice(update.message.chat.id);
 								await tgTyping(this.config.telegramToken, this.replyChat());
 								await this.handleVoiceMessage(update.message, fileId);
 							}
@@ -1583,6 +1581,16 @@ class TelegramDaemonBridge {
 		} finally {
 			bindChatThread(prev?.chatId ?? chatId, prev?.threadId);
 		}
+	}
+
+	/**
+	 * DM ack, after every refusal that can happen before the turn starts: a cloud runtime
+	 * (voice refused) and a busy bot ("Still working", note not processed) get no ack.
+	 */
+	async ackDmVoice(chatId: number): Promise<void> {
+		if (!voicePathIsLocal(this.config.env ?? process.env)) return;
+		if (this.agentBusy) return;
+		await this.ackVoice(String(chatId));
 	}
 
 	/** The topic of the group voice turn in flight, for the adapter and the spoken note. */
