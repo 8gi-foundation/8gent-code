@@ -73,11 +73,10 @@ describe("option injection", () => {
 		}
 	});
 	test("the say call ends options with --", () => {
-		const src = require("node:fs").readFileSync(
-			require("node:path").join(import.meta.dir, "../../apps/tui/src/app.tsx"),
-			"utf8",
-		);
-		expect(src).toContain("sayArgs(voice, draft)");
+		// On 8gut this greps apps/tui/src/app.tsx for the sayArgs call site. That file is not on main,
+		// so on main the same property is asserted on sayArgs itself, including option-looking text.
+		const argv = sayArgs("Daniel", "-v Fred --rate 900");
+		expect(argv).toEqual(["-v", "Daniel", "--", "-v Fred --rate 900"]);
 	});
 });
 
