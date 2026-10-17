@@ -5,6 +5,8 @@
  */
 
 import { afterAll, describe, expect, test } from "bun:test";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { placeholderPathLine } from "./placeholder-paths";
 import { ToolExecutor } from "./tools";
@@ -118,6 +120,7 @@ describe("through ToolExecutor", () => {
 	test("write_file on a doc nudges; a path the task gave does not", async () => {
 		const ex = new ToolExecutor(tempDir("placeholder-"));
 		ex.beginTurn("Help Priya run Tally.");
+		await ex.execute("write_file", { path: "UNBLOCK.md", content: doc });
 		const out = await ex.execute("write_file", { path: "UNBLOCK.md", content: doc });
 		expect(out).toContain("C:\\path\\to\\Tally");
 		expect(out).toContain(NUDGE);
@@ -132,10 +135,7 @@ describe("through ToolExecutor", () => {
 	test("a path inside a file read this turn passes", async () => {
 		const dir = tempDir("placeholder-");
 		const ex = new ToolExecutor(dir);
-		await ex.execute("write_file", {
-			path: "PRIYA.txt",
-			content: "Tally is in C:\\path\\to\\Tally.",
-		});
+		writeFileSync(join(dir, "PRIYA.txt"), "Tally is in C:\\path\\to\\Tally.");
 		ex.beginTurn("Write the guide.");
 		await ex.execute("read_file", { path: "PRIYA.txt" });
 		expect(await ex.execute("write_file", { path: "G.md", content: doc })).not.toContain(NUDGE);
@@ -151,12 +151,109 @@ describe("through ToolExecutor", () => {
 		const ex = new ToolExecutor(tempDir("placeholder-"));
 		ex.beginTurn("x");
 		await ex.execute("write_file", { path: "U.md", content: "Go to FOLDER.\n" });
-		const out = await ex.execute("edit_file", {
-			path: "U.md",
-			oldText: "FOLDER",
-			newText: "/path/to/Tally",
-		});
+		const edit = { path: "U.md", oldText: "FOLDER", newText: "/path/to/Tally" };
+		await ex.execute("edit_file", edit);
+		const out = await ex.execute("edit_file", edit);
 		expect(out).toContain("File edited");
 		expect(out).toContain(NUDGE);
+	});
+});
+
+describe("first write is refused, second goes through (#4405)", () => {
+	const doc = "# Unblock\n\ncd C:\\path\\to\\Tally\n";
+	const clean = "# Unblock\n\nOpen the Tally folder, then run node src/tally.js\n";
+
+	test("first write is rejected with the nudge and the file is untouched", async () => {
+		const dir = tempDir("placeholder-");
+		const ex = new ToolExecutor(dir);
+		ex.beginTurn("Help Priya run Tally.");
+		const out = await ex.execute("write_file", { path: "UNBLOCK.md", content: doc });
+		expect(out.startsWith("Error:")).toBe(true);
+		expect(out).toContain("nothing was written");
+		expect(out).toContain(NUDGE);
+		expect(existsSync(join(dir, "UNBLOCK.md"))).toBe(false);
+	});
+
+	test("rejection leaves an existing file as it was", async () => {
+		const dir = tempDir("placeholder-");
+		const ex = new ToolExecutor(dir);
+		ex.beginTurn("x");
+		await ex.execute("write_file", { path: "U.md", content: clean });
+		await ex.execute("write_file", { path: "U.md", content: doc });
+		expect(readFileSync(join(dir, "U.md"), "utf-8")).toBe(clean);
+	});
+
+	test("second identical write is accepted and lands on disk", async () => {
+		const dir = tempDir("placeholder-");
+		const ex = new ToolExecutor(dir);
+		ex.beginTurn("Help Priya run Tally.");
+		await ex.execute("write_file", { path: "UNBLOCK.md", content: doc });
+		const out = await ex.execute("write_file", { path: "UNBLOCK.md", content: doc });
+		expect(out).toContain("File written");
+		expect(readFileSync(join(dir, "UNBLOCK.md"), "utf-8")).toBe(doc);
+	});
+
+	test("a different file gets its own first refusal", async () => {
+		const ex = new ToolExecutor(tempDir("placeholder-"));
+		ex.beginTurn("x");
+		await ex.execute("write_file", { path: "A.md", content: doc });
+		const out = await ex.execute("write_file", { path: "B.md", content: doc });
+		expect(out.startsWith("Error:")).toBe(true);
+	});
+
+	test("a clean write is unaffected", async () => {
+		const dir = tempDir("placeholder-");
+		const ex = new ToolExecutor(dir);
+		ex.beginTurn("x");
+		const out = await ex.execute("write_file", { path: "G.md", content: clean });
+		expect(out).toContain("File written");
+		expect(readFileSync(join(dir, "G.md"), "utf-8")).toBe(clean);
+	});
+
+	test("non-prose files are unaffected", async () => {
+		const dir = tempDir("placeholder-");
+		const ex = new ToolExecutor(dir);
+		ex.beginTurn("x");
+		const out = await ex.execute("write_file", { path: "t.js", content: doc });
+		expect(out).toContain("File written");
+		expect(existsSync(join(dir, "t.js"))).toBe(true);
+	});
+
+	test("the refusal resets on the next turn", async () => {
+		const dir = tempDir("placeholder-");
+		const ex = new ToolExecutor(dir);
+		ex.beginTurn("x");
+		await ex.execute("write_file", { path: "U.md", content: doc });
+		await ex.execute("write_file", { path: "U.md", content: doc });
+		ex.beginTurn("y");
+		const out = await ex.execute("write_file", { path: "U.md", content: doc + "more\n" });
+		expect(out.startsWith("Error:")).toBe(true);
+		expect(readFileSync(join(dir, "U.md"), "utf-8")).toBe(doc);
+	});
+
+	test("edit_file is refused once, file untouched, then accepted", async () => {
+		const dir = tempDir("placeholder-");
+		const ex = new ToolExecutor(dir);
+		ex.beginTurn("x");
+		await ex.execute("write_file", { path: "U.md", content: "Go to FOLDER.\n" });
+		const edit = { path: "U.md", oldText: "FOLDER", newText: "/path/to/Tally" };
+		const first = await ex.execute("edit_file", edit);
+		expect(first.startsWith("Error:")).toBe(true);
+		expect(readFileSync(join(dir, "U.md"), "utf-8")).toBe("Go to FOLDER.\n");
+		expect(await ex.execute("edit_file", edit)).toContain("File edited");
+		expect(readFileSync(join(dir, "U.md"), "utf-8")).toBe("Go to /path/to/Tally.\n");
+	});
+
+	test("EIGHT_PLACEHOLDER_REJECT=0 restores warn-only", async () => {
+		process.env.EIGHT_PLACEHOLDER_REJECT = "0";
+		try {
+			const ex = new ToolExecutor(tempDir("placeholder-"));
+			ex.beginTurn("x");
+			const out = await ex.execute("write_file", { path: "U.md", content: doc });
+			expect(out).toContain("File written");
+			expect(out).toContain(NUDGE);
+		} finally {
+			delete process.env.EIGHT_PLACEHOLDER_REJECT;
+		}
 	});
 });

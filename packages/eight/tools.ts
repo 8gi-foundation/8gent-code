@@ -1006,6 +1006,8 @@ export class ToolExecutor {
 	private retiredFacts = new RetiredFacts();
 	/** Text files read this turn: a path in one of them is real, not invented (#4401). */
 	private readTexts: string[] = [];
+	/** Prose files whose placeholder-folder write was refused once this turn (#4405). */
+	private placeholderRefused = new Set<string>();
 	/** Absolute paths read or written this session; write_file replaces only these or new files (#4238). */
 	private seenPaths = new Set<string>();
 	/** Commands the harness refused; a refused probe proves nothing about the files it named (#4238). */
@@ -1159,6 +1161,21 @@ export class ToolExecutor {
 		this.layoutNotesSent.clear();
 		this.retiredFacts.reset();
 		this.readTexts = [];
+		this.placeholderRefused.clear();
+	}
+
+	/**
+	 * Refuse a prose-doc write that names an invented folder, once per file per turn (#4405).
+	 * The local model ignored the nudge appended to a successful write, so the first attempt
+	 * writes nothing and returns the nudge as the error. The second attempt on the same file
+	 * goes through, so a deliberate example can never loop. null: write it.
+	 */
+	private placeholderRefusal(file: string, text: string): string | null {
+		if (process.env.EIGHT_PLACEHOLDER_REJECT === "0") return null;
+		const line = placeholderPathLine(file, text, [this.presendTask, ...this.readTexts]);
+		if (!line || this.placeholderRefused.has(file)) return null;
+		this.placeholderRefused.add(file);
+		return `Error: nothing was written. ${line} Call the tool again with the made-up folder taken out. If the path is deliberate, send the same call again and it will be written.`;
 	}
 
 	/** A placeholder-folder line for a prose doc just written, or "" (#4401). */
@@ -3478,6 +3495,8 @@ export class ToolExecutor {
 				return `Error: ${absolutePath} already exists and you have not read it this session, so write_file will not replace it. A command that was blocked or errored tells you nothing about whether a file exists. Run read_file on it first; to change part of it use edit_file; to run it, leave it alone.`;
 			}
 		}
+		const placeholderRefused = this.placeholderRefusal(absolutePath, content);
+		if (placeholderRefused) return placeholderRefused;
 		this.seenPaths.add(absolutePath);
 
 		const dir = path.dirname(absolutePath);
@@ -3501,7 +3520,7 @@ export class ToolExecutor {
 		const retiredLine = this.retiredFacts.warn(absolutePath, content);
 		if (retiredLine) designHint += `\n${retiredLine}`;
 
-		// An invented folder such as C:\path\to\Tally in a prose doc (#4401): warn, never block.
+		// An invented folder in a prose doc (#4401): the first write was refused above (#4405); a repeat is warned.
 		designHint += this.placeholderLine(absolutePath, content);
 
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
@@ -3540,6 +3559,8 @@ export class ToolExecutor {
 			filePath,
 		);
 		if (!edit.ok) return edit.error;
+		const placeholderRefused = this.placeholderRefusal(absolutePath, newText);
+		if (placeholderRefused) return placeholderRefused;
 		const recordEdit = watchWrite(absolutePath, this.createdFiles);
 		fs.writeFileSync(absolutePath, edit.content);
 		recordEdit();
@@ -3597,6 +3618,8 @@ export class ToolExecutor {
 			}
 			return formatEditNotFound(filePath, content, oldText);
 		}
+		const placeholderRefused = this.placeholderRefusal(absolutePath, newText);
+		if (placeholderRefused) return placeholderRefused;
 		const newContent = applyAt(content, resolved.idx, resolved.oldLength, resolved.newText);
 
 		const recordEdit = watchWrite(absolutePath, this.createdFiles);
