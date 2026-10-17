@@ -101,7 +101,13 @@ export interface AgentEventCallbacks {
 	 * Fires before config.model self-corrects, so a UI can name the model
 	 * that runs the turn while it runs. Display only (#3102).
 	 */
-	onModelRouted?: (event: { requested: string; used: string; provider: string }) => void;
+	onModelRouted?: (event: {
+		requested: string;
+		used: string;
+		provider: string;
+		/** Why: "capability" (cannot call tools), "missing" (not installed); absent = did not answer. */
+		reason?: "capability" | "missing";
+	}) => void;
 	/** A steering message (Agent.steer) was delivered into the running turn (D1). */
 	onSteer?: (event: { text: string }) => void;
 	onCompaction?: (event: {

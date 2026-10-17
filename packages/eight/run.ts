@@ -636,8 +636,19 @@ export function providerRouteNotice(
 	asked: string,
 	usedProvider: string,
 	usedModel: string,
+	reason?: "capability" | "missing",
 ): string {
-	return `${asked} did not answer, using ${providerLabel(usedProvider)} ${usedModel}.`;
+	const used = `${providerLabel(usedProvider)} ${usedModel}`;
+	if (reason === "capability") return `${asked} cannot call tools, using ${used} for this step.`;
+	if (reason === "missing") return `${asked} is not installed, using ${used}.`;
+	return `${asked} did not answer, using ${used}.`;
+}
+
+/** True the first time a route (asked -> used + reason) is seen in a tab: A, B, A prints twice. */
+export function shouldShowRouteNotice(shown: Set<string>, key: string): boolean {
+	if (shown.has(key)) return false;
+	shown.add(key);
+	return true;
 }
 
 export interface ProviderChoice {

@@ -1547,7 +1547,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					console.log(`[honesty] ${resolution.reason}`);
 					effectiveProvider = resolution.provider;
 					effectiveModel = resolution.model;
-					this.emitModelRouted(providerModel, resolution.model, resolution.provider);
+					this.emitModelRouted(providerModel, resolution.model, resolution.provider, "capability");
 					// Session self-correction: subsequent turns start on the capable model.
 					this.config.model = resolution.model;
 				}
@@ -1666,7 +1666,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							console.log(
 								`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
 							);
-							this.emitModelRouted(missing, chosen.model, chosen.provider);
+							this.emitModelRouted(missing, chosen.model, chosen.provider, "missing");
 						},
 					});
 			if (!outcome.ok) {
@@ -3859,9 +3859,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	/** Tell the UI a different model serves this turn (#3102). A listener
 	 *  that throws must never change which model runs, so it is contained. */
-	private emitModelRouted(requested: string, used: string, provider: string): void {
+	private emitModelRouted(
+		requested: string,
+		used: string,
+		provider: string,
+		reason?: "capability" | "missing",
+	): void {
 		try {
-			this.events.onModelRouted?.({ requested, used, provider });
+			this.events.onModelRouted?.({ requested, used, provider, reason });
 		} catch {
 			// Display only.
 		}

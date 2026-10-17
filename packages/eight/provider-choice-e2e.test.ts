@@ -113,7 +113,11 @@ describe("saved provider choice (#4362)", () => {
 		// Stop the process once the notice lands: what answers after the
 		// fallback depends on the machine and is not under test.
 		const proc = Bun.spawn(["bun", BIN, "chat", "What is two plus two"], {
-			env: { ...process.env, LMSTUDIO_BASE_URL: "http://127.0.0.1:1/v1" },
+			env: {
+				...process.env,
+				LMSTUDIO_BASE_URL: "http://127.0.0.1:1/v1",
+				EIGHT_DECIDE_OLLAMA_HOST: "http://127.0.0.1:9",
+			},
 			stdout: "ignore",
 			stderr: "pipe",
 		});

@@ -13,6 +13,7 @@ import {
 	providerRouteNotice,
 	readSavedProviderChoice,
 	resolveProviderChoice,
+	shouldShowRouteNotice,
 } from "./run";
 
 function deps(over: Partial<ProviderChoiceDeps> = {}): ProviderChoiceDeps {
@@ -123,9 +124,35 @@ describe("readSavedProviderChoice", () => {
 });
 
 describe("providerRouteNotice", () => {
-	test("names who was asked, who answered and with which model", () => {
+	test("did not answer (no reason)", () => {
 		expect(providerRouteNotice("gemma-4-26b-a4b-it", "ollama", "8gate:latest")).toBe(
 			"gemma-4-26b-a4b-it did not answer, using Ollama 8gate:latest.",
 		);
+	});
+
+	test("capability switch is worded as a step-level choice", () => {
+		expect(providerRouteNotice("gemma-4", "lmstudio", "ornith-1.0-9b", "capability")).toBe(
+			"gemma-4 cannot call tools, using LM Studio ornith-1.0-9b for this step.",
+		);
+	});
+
+	test("a missing model says it is not installed", () => {
+		expect(providerRouteNotice("qwen3:14b", "ollama", "8gate:latest", "missing")).toBe(
+			"qwen3:14b is not installed, using Ollama 8gate:latest.",
+		);
+	});
+});
+
+describe("shouldShowRouteNotice", () => {
+	test("A, B, A prints A and B once each: two lines, not three", () => {
+		const shown = new Set<string>();
+		const printed = ["A", "B", "A"].filter((k) => shouldShowRouteNotice(shown, k));
+		expect(printed).toEqual(["A", "B"]);
+	});
+
+	test("the same route with a different reason is a different notice", () => {
+		const shown = new Set<string>();
+		expect(shouldShowRouteNotice(shown, "a>b|missing")).toBe(true);
+		expect(shouldShowRouteNotice(shown, "a>b|capability")).toBe(true);
 	});
 });

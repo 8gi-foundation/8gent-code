@@ -386,7 +386,7 @@ import type {
 	AgentToolEndEvent,
 	AgentToolStartEvent,
 } from "../../../packages/eight/index.js";
-import { providerRouteNotice } from "../../../packages/eight/run.js";
+import { providerRouteNotice, shouldShowRouteNotice } from "../../../packages/eight/run.js";
 
 // Load .env file if present
 import * as fs from "node:fs";
@@ -2695,6 +2695,7 @@ export function App({
 	// so this is what names the right model during the rerouted turn. Keyed
 	// by agent, so an agent rebuilt for another model starts clean.
 	const routedModelRef = useRef(new WeakMap<object, { model: string; provider: string }>());
+	const routeNoticesRef = useRef(new Map<string, Set<string>>());
 	const [, setRoutedTick] = useState(0);
 	const getTabAgent = perTabAgents.getAgent;
 	const buildEventsForTab = useCallback(
@@ -2703,15 +2704,21 @@ export function App({
 				const routedAgent = getTabAgent(tabId);
 				if (!routedAgent) return;
 				routedModelRef.current.set(routedAgent, { model: event.used, provider: event.provider });
-				// Say so in the chat, once per route: the rail alone changed silently (#4363).
+				// Say so in the chat, once per route per tab, worded by reason (#4363).
 				if (event.requested && event.requested !== event.used) {
-					const note = providerRouteNotice(event.requested, event.provider, event.used);
-					if (lastReadinessNoticeRef.current !== note) {
-						lastReadinessNoticeRef.current = note;
+					let shown = routeNoticesRef.current.get(tabId);
+					if (!shown) routeNoticesRef.current.set(tabId, (shown = new Set()));
+					const key = `${event.requested}>${event.provider}:${event.used}|${event.reason ?? ""}`;
+					if (shouldShowRouteNotice(shown, key)) {
 						appendToTab(tabId, {
 							id: `model-routed-${Date.now()}`,
 							role: "system" as const,
-							content: note,
+							content: providerRouteNotice(
+								event.requested,
+								event.provider,
+								event.used,
+								event.reason,
+							),
 							timestamp: new Date(),
 						});
 					}

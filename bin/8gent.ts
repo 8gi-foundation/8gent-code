@@ -1937,10 +1937,29 @@ async function chatCommand(args: string[]) {
 	const { resolveProviderChoice, liveProviderChoiceDeps, defaultModelFor } = await import(
 		"../packages/eight/run.ts"
 	);
-	const choice = await resolveProviderChoice(
+	const chatRuntimes = new Set([
+		"ollama",
+		"lmstudio",
+		"openrouter",
+		"apple-foundation",
+		"apfel",
+		"deepseek",
+	]);
+	const choiceDeps = liveProviderChoiceDeps();
+	let choice = await resolveProviderChoice(
 		{ provider, model, routerFallback: "ollama" },
-		liveProviderChoiceDeps(),
+		choiceDeps,
 	);
+	if (choice.source === "saved" && !chatRuntimes.has(choice.provider)) {
+		// Saved, but not something chat can run: take the router and say so.
+		const skipped = choice.provider;
+		choice = await resolveProviderChoice(
+			{ model, routerFallback: "ollama" },
+			{ ...choiceDeps, saved: undefined },
+		);
+		choice.notice =
+			`${skipped} is not a chat provider, using ${choice.provider} ${choice.model ?? ""}`.trim();
+	}
 	if (choice.notice) console.error(choice.notice);
 	let resolvedModel = choice.model;
 	if (!resolvedModel && choice.provider !== "ollama") {
