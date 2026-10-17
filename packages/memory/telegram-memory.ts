@@ -238,13 +238,17 @@ export class TelegramMemory {
 				join(this.opts.dir, "audit.jsonl"),
 				join(this.opts.dir, "audit.salt"),
 				this.clock,
+				(n) => this.log(`audit: dropped ${n} byte(s) of a torn last line`),
 			);
 		}
 		return this.audit;
 	}
 
 	private open(): MemoryVault | null {
-		if (this.vault) return this.vault;
+		if (this.vault) {
+			this.retryReseal(this.vault);
+			return this.vault;
+		}
 		if (this.openFailedAt > 0 && this.clock() - this.openFailedAt < 30_000) return null;
 		try {
 			this.vault = MemoryVault.open(this.opts.dir, this.keyProvider);
@@ -290,6 +294,14 @@ export class TelegramMemory {
 		if (!text || text.startsWith("/")) return "not_a_turn";
 		const vault = this.open();
 		if (!vault) return "vault_closed";
+		// Fail closed (#4397): no write while the audit chain cannot take a line.
+		try {
+			ensurePrivateDir(this.opts.dir);
+			this.ensureAudit();
+		} catch (err) {
+			this.log(`audit unavailable, write refused: ${(err as Error).message.split(":")[0]}`);
+			return "audit_failed";
+		}
 		const now = this.clock();
 		const row: EpisodicMemory & { chatId: string; channel: string } = {
 			id: "",
@@ -443,27 +455,65 @@ export class TelegramMemory {
 		return this.doWipe(uid, chat);
 	}
 
+	/** True once a wipe cleared the running store but the sealed file has not been re-sealed. */
+	private resealPending = false;
+
+	/** Retry a failed re-seal before the next read or write touches the vault. */
+	private retryReseal(vault: MemoryVault): void {
+		if (!this.resealPending) return;
+		try {
+			vault.persist();
+			this.resealPending = false;
+			this.log("sealed copy re-sealed after an earlier failed wipe");
+		} catch {
+			this.log("sealed copy still not re-sealed");
+		}
+	}
+
 	private doWipe(uid: string, chat: string): string {
 		const vault = this.open();
 		if (!vault) {
 			this.auditEvent(uid, chat, "memwipe", uid, {}, "vault_closed");
 			return "The memory store is not open (no key), so nothing could be erased. Fix the key first.";
 		}
+		let deleted: Record<string, number> = {};
 		try {
-			const res = vault.store.purge({ all: true });
-			const sessions = this.opts.scrubSessions?.(uid) ?? 0;
-			vault.persist();
-			const counts = { ...res.deleted, session_turns: sessions };
-			this.auditEvent(uid, chat, "memwipe", uid, counts, "ok");
-			const line = Object.entries(counts)
-				.filter(([, n]) => n > 0)
-				.map(([k, n]) => `${k} ${n}`)
-				.join(", ");
-			return `Erased. Removed: ${line || "nothing was stored"}. Checked afterwards: zero left in every memory table. Not covered: Telegram's servers, other transcripts, backups made before today.`;
+			deleted = vault.store.purge({ all: true }).deleted;
 		} catch {
-			this.auditEvent(uid, chat, "memwipe", uid, {}, "failed_rolled_back");
-			return "The wipe failed and was rolled back. Nothing was erased.";
+			// The purge transaction rolls back on a failed count check. A VACUUM that fails after
+			// the commit leaves the tables empty, so look rather than assume.
+			const left = (
+				vault.store.db.prepare("SELECT COUNT(*) AS c FROM memories").get() as { c: number }
+			).c;
+			if (left > 0) {
+				this.auditEvent(uid, chat, "memwipe", uid, {}, "failed_rolled_back");
+				return "The wipe failed and was rolled back. Nothing was erased.";
+			}
+			this.auditEvent(uid, chat, "memwipe", uid, {}, "partial_vacuum_failed");
+			return "Partly done: the memory tables are empty, but the final clean-up failed, so deleted text may still sit in free pages of the sealed copy. Send /memwipe again to retry.";
 		}
+		let sessions = 0;
+		try {
+			sessions = this.opts.scrubSessions?.(uid) ?? 0;
+		} catch {
+			this.log("session scrub failed");
+		}
+		const counts = { ...deleted, session_turns: sessions };
+		try {
+			vault.persist();
+		} catch {
+			// Memory and disk now disagree. Say so, and re-seal on the next memory call.
+			this.resealPending = true;
+			this.auditEvent(uid, chat, "memwipe", uid, counts, "partial_not_sealed");
+			return "Partly done: memory is cleared in the running store, but the sealed copy on disk has not been re-sealed and still holds the old data. It will retry on the next memory message; you can also send /memwipe again.";
+		}
+		this.resealPending = false;
+		this.auditEvent(uid, chat, "memwipe", uid, counts, "ok");
+		const line = Object.entries(counts)
+			.filter(([, n]) => n > 0)
+			.map(([k, n]) => `${k} ${n}`)
+			.join(", ");
+		return `Erased. Removed: ${line || "nothing was stored"}. Checked afterwards: zero left in every memory table. Not covered: Telegram's servers, other transcripts, backups made before today.`;
 	}
 
 	/** Test hook: the open vault, if any. */

@@ -5,10 +5,12 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+	appendFileSync,
 	chmodSync,
 	existsSync,
 	mkdtempSync,
 	readFileSync,
+	readdirSync,
 	rmSync,
 	statSync,
 	writeFileSync,
@@ -223,6 +225,88 @@ describe("review fixes on #4394", () => {
 			String(OP),
 		);
 		expect(run().exitCode).toBe(1);
+	});
+});
+
+describe("review fixes from 8GO on #4394", () => {
+	const me = { chatId: OP, chatType: "private", fromId: OP };
+
+	test("persist failing after the purge: the reply is truthful, memory is clear, and it re-seals later", () => {
+		const s = setup();
+		s.mem.record(dm("note about canarypersist"));
+		const vault = s.mem._vault!;
+		const realPersist = vault.persist.bind(vault);
+		vault.persist = () => {
+			throw new Error("disk full");
+		};
+		const code = s.mem.command("/memwipe", "", me).match(/\d{6}/)![0];
+		const reply = s.mem.command("/memwipe", code, me);
+		expect(reply).toMatch(/^Partly done/);
+		expect(reply.includes("rolled back")).toBe(false);
+		expect(reply).toMatch(/not been re-sealed/);
+		expect(rows(s.mem)).toBe(0);
+		expect(Buffer.from(vault.plainImage()).includes("canarypersist")).toBe(false);
+		expect(readFileSync(join(s.dir, "audit.jsonl"), "utf8")).toContain("partial_not_sealed");
+		// disk is restored on the next call once persist works again
+		vault.persist = realPersist;
+		expect(s.mem.recall(dm("canarypersist note"))).toBe("");
+		const again = new TelegramMemory({
+			dir: s.dir,
+			env: s.env,
+			keyProvider: () => KEY,
+			log: () => {},
+		});
+		expect(again.recall(dm("canarypersist note"))).toBe("");
+		expect(again.record(dm("fresh note here"))).toBe("stored");
+	});
+
+	test("no temp file is left behind and the sealed file survives a failed persist", () => {
+		const s = setup();
+		s.mem.record(dm("first note here"));
+		const before = readFileSync(join(s.dir, "memory.db.enc"));
+		const vault = s.mem._vault!;
+		(vault as unknown as { key: Buffer }).key = Buffer.alloc(5); // makes sealing throw
+		expect(() => vault.persist()).toThrow();
+		expect(readFileSync(join(s.dir, "memory.db.enc")).equals(before)).toBe(true);
+		expect(readdirSync(s.dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+	});
+
+	test("a torn last audit line is cut on open (logged) and memory keeps working", () => {
+		const s = setup();
+		s.mem.record(dm("first note here"));
+		const path = join(s.dir, "audit.jsonl");
+		appendFileSync(path, '{"seq":2,"at":"2026-10-17T00:00:00.000Z","actor_id":"1","cha');
+		const m = new TelegramMemory({
+			dir: s.dir,
+			env: s.env,
+			keyProvider: () => KEY,
+			log: (l) => s.logs.push(l),
+		});
+		expect(m.record(dm("second note here"))).toBe("stored");
+		expect(s.logs.some((l) => /dropped \d+ byte/.test(l))).toBe(true);
+		expect(verifyAudit(path)).toMatchObject({ ok: true, count: 2 });
+	});
+
+	test("a complete but altered audit line is tampering: memory writes stop (fail closed, #4397)", () => {
+		const s = setup();
+		s.mem.record(dm("first note here"));
+		s.mem.record(dm("second note here"));
+		const path = join(s.dir, "audit.jsonl");
+		writeFileSync(path, readFileSync(path, "utf8").replace('"rows":1', '"rows":7'));
+		const m = new TelegramMemory({ dir: s.dir, env: s.env, keyProvider: () => KEY, log: () => {} });
+		expect(m.record(dm("third note here"))).toBe("audit_failed");
+		expect(rows(m)).toBe(2); // vault open, nothing new written
+		const again = new TelegramMemory({
+			dir: s.dir,
+			env: s.env,
+			keyProvider: () => KEY,
+			log: () => {},
+		});
+		expect(again.recall(dm("second note"))).toContain("second note here");
+		const n = (
+			again._vault!.store.db.prepare("SELECT COUNT(*) c FROM memories").get() as { c: number }
+		).c;
+		expect(n).toBe(2);
 	});
 });
 

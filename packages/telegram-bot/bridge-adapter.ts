@@ -114,8 +114,8 @@ export class TelegramBridgeAdapter {
 		this.subscribe();
 	}
 
-	/** Begin a new multi-step task for an incoming user message. */
 	/**
+	 * Begin a new multi-step task for an incoming user message.
 	 * `promptPrefix` is extra context for the model only (recalled memory). It is not recorded in
 	 * session history and not shown in the task card, which both carry `text` alone.
 	 */

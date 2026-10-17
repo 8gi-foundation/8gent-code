@@ -17,6 +17,8 @@ import {
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	rmSync,
+	truncateSync,
 	writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
@@ -63,6 +65,7 @@ export class AuditLog {
 		private path: string,
 		saltPath: string,
 		private clock: () => number = Date.now,
+		onRepair: (droppedBytes: number) => void = () => {},
 	) {
 		ensurePrivateDir(dirname(path));
 		if (existsSync(saltPath)) {
@@ -73,6 +76,8 @@ export class AuditLog {
 			chmodSync(saltPath, 0o600);
 		}
 		if (existsSync(path)) {
+			const dropped = repairTornTail(path);
+			if (dropped > 0) onRepair(dropped);
 			const v = verifyAudit(path);
 			if (!v.ok)
 				throw new Error(`audit log chain broken at line ${v.brokenAt}; refusing to append`);
@@ -109,6 +114,25 @@ export class AuditLog {
 		this.lastHash = hash;
 		this.seq += 1;
 	}
+}
+
+/**
+ * A crash mid-append leaves a last line with no newline. If everything before it verifies, cut the
+ * partial line and return how many bytes were dropped. A complete line that fails verification is
+ * tampering, not a crash, and is never repaired. Returns 0 when nothing was done.
+ */
+export function repairTornTail(path: string): number {
+	const buf = readFileSync(path);
+	if (buf.length === 0 || buf[buf.length - 1] === 0x0a) return 0;
+	const cut = buf.lastIndexOf(0x0a) + 1; // 0 when the only line is the torn one
+	const prefix = buf.subarray(0, cut);
+	const probe = `${path}.probe-${process.pid}`;
+	writeFileSync(probe, prefix, { mode: 0o600 });
+	const ok = verifyAudit(probe).ok;
+	rmSync(probe, { force: true });
+	if (!ok) return 0;
+	truncateSync(path, cut);
+	return buf.length - cut;
 }
 
 export interface AuditVerdict {

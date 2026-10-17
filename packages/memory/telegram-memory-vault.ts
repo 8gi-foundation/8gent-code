@@ -13,8 +13,18 @@
 import { Database } from "bun:sqlite";
 import { spawnSync } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+	chmodSync,
+	closeSync,
+	existsSync,
+	fsyncSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { MemoryStore } from "./store.js";
 import { ensurePrivateDir } from "./telegram-memory-audit.js";
 
@@ -104,12 +114,41 @@ export class MemoryVault {
 		return vault;
 	}
 
-	/** Serialize, seal and replace the file atomically. Only ciphertext reaches disk. */
+	/**
+	 * Serialize, seal and replace the file atomically. Only ciphertext reaches disk.
+	 *
+	 * Vault operations (open, write, purge, persist) must stay synchronous: there is one in-memory
+	 * database and one file, and no lock. An `await` between a read and the write that follows it
+	 * would let another message interleave and seal a stale image over a newer one.
+	 */
 	persist(): void {
-		const tmp = `${this.file}.tmp`;
-		writeFileSync(tmp, seal(this.store.db.serialize(), this.key), { mode: 0o600 });
-		chmodSync(tmp, 0o600);
-		renameSync(tmp, this.file);
+		const tmp = `${this.file}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+		const sealed = seal(this.store.db.serialize(), this.key);
+		try {
+			const fd = openSync(tmp, "w", 0o600);
+			try {
+				writeSync(fd, sealed);
+				fsyncSync(fd);
+			} finally {
+				closeSync(fd);
+			}
+			chmodSync(tmp, 0o600);
+			renameSync(tmp, this.file);
+			// Make the rename itself durable.
+			const dfd = openSync(dirname(this.file), "r");
+			try {
+				fsyncSync(dfd);
+			} finally {
+				closeSync(dfd);
+			}
+		} catch (err) {
+			try {
+				unlinkSync(tmp);
+			} catch {
+				// already renamed or never created
+			}
+			throw err;
+		}
 	}
 
 	/** Plaintext image of the database, for tests that prove a purge removed the text. */
