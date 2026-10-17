@@ -13,13 +13,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { curlToLoopback } from "../../permissions/s1-curl-loopback.js";
 import { sanitizeShellCommand } from "../../permissions/shell-sanitizer.js";
+import { DeckSpecSchema } from "../../tools/video-deck.js";
 import { scrub } from "../secret-scanner.js";
 import { TOOL_CATEGORIES } from "../tool-registry.js";
 import {
+	FOLDER_NOTE,
 	LOCAL_LOGIN_NOTE,
 	LOCAL_SERVER_CURL_SHORT,
 	REVIEW_FOCUS_NOTE,
 	SLIDES_TO_VIDEO_NOTE,
+	TICKET_FILE_NOTE,
 	TOOL_CATALOG_SEGMENT,
 	TOOL_PATTERNS_SEGMENT,
 	buildToolCatalogSegment,
@@ -31,9 +34,12 @@ import {
  * Raising it is a deliberate decision (it costs every local turn), not a
  * fix for a failing test. Smallest value that fits today: 2220 (#3920, with the one-line OS and shell note;
  * +17 in #4165 so render_video_deck sits in a category and discover_tools can load it on a deferred session;
- * +28 in #4236 so the scratch note says .tmp/ is git-ignored and must not be deleted).
+ * +28 in #4236 so the scratch note says .tmp/ is git-ignored and must not be deleted;
+ * +7 in #3593 so use_skill sits in core and the model can load a skill on every session;
+ * +33 in #4274 so make_docx, make_xlsx and make_pptx sit in the creative category beside make_pdf;
+ * +85 in #4306 so the folder note tells the model rmdir is blocked and to name the mkdir path first).
  */
-const POSIX_CAP = 2248;
+const POSIX_CAP = 2454; // +81 for TICKET_FILE_NOTE (#4316)
 // The Windows environment line names the shell and is longer than the POSIX one; the budget
 // for everything else stays fixed, so a Windows host gets exactly the difference.
 const CONCISE_CATALOG_MAX_BYTES =
@@ -88,7 +94,7 @@ describe("buildToolCatalogSegment", () => {
 	});
 
 	it("fits in a reasonable token budget (< 4KB default, within CONCISE_CATALOG_MAX_BYTES concise)", () => {
-		expect(TOOL_CATALOG_SEGMENT.length).toBeLessThan(4096);
+		expect(TOOL_CATALOG_SEGMENT.length).toBeLessThan(4176);
 		const concise = buildToolCatalogSegment({ concise: true });
 		expect(Buffer.byteLength(concise)).toBeLessThanOrEqual(CONCISE_CATALOG_MAX_BYTES);
 	});
@@ -110,11 +116,32 @@ describe("slides-to-video join guidance (#3862)", () => {
 
 	it("shows the shell recipe: write deck.json, then `8gent deck render deck.json` (pilot media-brief-video, 12 Oct 2026)", () => {
 		for (const text of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
-			expect(text).toContain("write deck.json");
+			expect(text).toContain("Write deck.json");
 			expect(text).toContain('{"slides":[{"title"');
 			expect(text).toContain("`8gent deck render deck.json out.mp4`");
-			expect(text).toContain("not ffmpeg by hand");
 		}
+	});
+
+	it("opens with never write a script; by hand is one magick/ffmpeg per call (#4245)", () => {
+		expect(SLIDES_TO_VIDEO_NOTE.startsWith("**Slides to video: never write a script.")).toBe(true);
+		expect(SLIDES_TO_VIDEO_NOTE).toContain("By hand: one magick/ffmpeg per call");
+		// The steer comes before the recipe, and the renderer before the by-hand path.
+		const order = ["never write a script", "8gent deck render", "By hand"].map((s) =>
+			SLIDES_TO_VIDEO_NOTE.indexOf(s),
+		);
+		expect(order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1]))).toBe(true);
+		for (const text of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
+			expect(text).toContain("never write a script");
+			expect(text).not.toContain("not ffmpeg by hand");
+		}
+	});
+
+	it("the example deck.json is a valid render_video_deck spec", () => {
+		const json = SLIDES_TO_VIDEO_NOTE.slice(
+			SLIDES_TO_VIDEO_NOTE.indexOf("{"),
+			SLIDES_TO_VIDEO_NOTE.lastIndexOf("}") + 1,
+		);
+		expect(DeckSpecSchema.safeParse(JSON.parse(json)).success).toBe(true);
 	});
 
 	it("is present on the concise path the local TUI uses, within its budget", () => {
@@ -169,6 +196,10 @@ describe("TOOL_PATTERNS_SEGMENT local server guidance (#3941)", () => {
 
 	it("the login note (#4072) is short, names the redaction marker and the file recipe, and sits with the curl rules", () => {
 		expect(LOCAL_LOGIN_NOTE.length).toBeLessThanOrEqual(300);
+		// #4303: copying the Username line to the same file truncates it and the sign-in posts no username.
+		expect(LOCAL_LOGIN_NOTE).toContain("only the password line");
+		expect(LOCAL_LOGIN_NOTE).toContain("curl -d username=NAME");
+		expect(LOCAL_LOGIN_NOTE).not.toContain("Username:");
 		expect(LOCAL_LOGIN_NOTE).not.toContain("—");
 		for (const rule of [
 			"[REDACTED:",
@@ -418,5 +449,33 @@ describe("every tool's first sentence carries its input shape within 140 charact
 		expect(specs.length).toBeGreaterThan(40);
 		const failures = await audit(specs);
 		expect(failures, `\n${failures.join("\n")}\n`).toEqual([]);
+	});
+});
+
+describe("FOLDER_NOTE (#4306)", () => {
+	it("tells the model rm and rmdir are blocked and to settle the target path before mkdir", () => {
+		expect(FOLDER_NOTE.length).toBeLessThanOrEqual(100);
+		expect(FOLDER_NOTE).toContain("mkdir");
+		expect(FOLDER_NOTE).toContain("rmdir");
+		expect(FOLDER_NOTE).toContain("mv");
+		expect(FOLDER_NOTE).not.toContain("\u2014");
+		expect(FOLDER_NOTE.toLowerCase()).not.toContain("agent");
+	});
+
+	it("is in the full catalog next to the scratch-dir note", () => {
+		expect(buildToolCatalogSegment()).toContain(FOLDER_NOTE);
+	});
+});
+
+describe("TICKET_FILE_NOTE (#4316)", () => {
+	it("asks for one file, stays short and plain", () => {
+		expect(TICKET_FILE_NOTE.length).toBeLessThanOrEqual(90);
+		expect(TICKET_FILE_NOTE).toContain("only the one");
+		expect(TICKET_FILE_NOTE).not.toContain("\u2014");
+		expect(TICKET_FILE_NOTE.toLowerCase()).not.toContain("agent");
+	});
+
+	it("is in the full catalog", () => {
+		expect(buildToolCatalogSegment()).toContain(TICKET_FILE_NOTE);
 	});
 });

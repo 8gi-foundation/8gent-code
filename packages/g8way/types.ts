@@ -103,7 +103,7 @@ export interface UsageRecord {
 	plan: string;
 	model_requested: string;
 	model_resolved: string;
-	upstream: "openrouter";
+	upstream: string;
 	prompt_tokens: number;
 	completion_tokens: number;
 	total_tokens: number;

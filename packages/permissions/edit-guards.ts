@@ -38,13 +38,29 @@ export const SCOPED_WRITE_TOOLS = new Set<string>([
 	"speak",
 	// render_video_deck writes an mp4 to its `out` path.
 	"render_video_deck",
+	// The office tools write a .docx, .xlsx or .pptx to their `out` path (#4274).
+	"make_docx",
+	"make_xlsx",
+	"make_pptx",
 	// film_craft writes a bed wav or a recipe folder (#3599); see filmCraftWriteTargets.
 	"film_craft",
 ]);
 
-/** The argument that names the file a scoped write tool writes: `out` for the media tools, else `path`. */
-export function scopedWriteTarget(toolName: string, args: Record<string, unknown> | undefined): unknown {
-	return toolName === "speak" || toolName === "render_video_deck" ? args?.out : args?.path;
+/** Scoped write tools that name their file in `out`: the media and office tools. */
+const OUT_ARG_TOOLS = new Set([
+	"speak",
+	"render_video_deck",
+	"make_docx",
+	"make_xlsx",
+	"make_pptx",
+]);
+
+/** The argument that names the file a scoped write tool writes: `out` for the media and office tools, else `path`. */
+export function scopedWriteTarget(
+	toolName: string,
+	args: Record<string, unknown> | undefined,
+): unknown {
+	return OUT_ARG_TOOLS.has(toolName) ? args?.out : args?.path;
 }
 
 /**
@@ -111,7 +127,9 @@ export function editScopeViolation(
 		targets = [target];
 		if (isDeckTheme && target) {
 			const themeName =
-				args.action === "mix" ? `${String(args.palette)}-x-${String(args.type)}` : String(args.name);
+				args.action === "mix"
+					? `${String(args.palette)}-x-${String(args.type)}`
+					: String(args.name);
 			targets.push(path.join(path.dirname(target), `${themeName}.css`));
 		}
 	}

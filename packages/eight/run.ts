@@ -71,7 +71,7 @@ export interface RunOptions {
  *   --cwd <dir>                  or --cwd=<dir>
  *   --max-turns <n>              or --max-turns=<n>
  *   --image <path>               or --image=<path>   (png, jpg, gif, webp; max 20 MB;
- *                                downscaled to fit 1024x1024; inside the working directory)
+ *                                downscaled to fit 2560x2560; inside the working directory)
  *   --no-workspace-boundary      do not set the workspace root (EIGHT_WORKSPACE_ROOT) for this run
  *                                (by default run mode sets it to the working directory; native
  *                                write_file and edit_file stay confined to the working directory either way)
@@ -84,7 +84,7 @@ export interface RunOptions {
  * model for that description, as in the TUI); the native AI SDK path (cloud
  * providers) is unchanged; Ollama's raw ChatML recovery path sends text
  * only; files over 20 MB are refused and the image is downscaled to fit
- * 1024x1024 before it leaves the process.
+ * 2560x2560 before it leaves the process.
  */
 export function parseRunArgs(argv: string[]): RunOptions {
 	let yes = false;
@@ -441,14 +441,22 @@ export const MAX_RUN_IMAGE_BYTES = 20 * 1024 * 1024;
  * The `--image` file as the agent takes it: base64 plus its media type (#3641).
  * A missing file, an unsupported extension or a file over MAX_RUN_IMAGE_BYTES
  * is a usage error, reported the way a missing prompt is, before any model is
- * contacted. The image is downscaled to fit 1024x1024 exactly as read_image
- * does, so what reaches the model is bounded the same way on both paths;
- * sharp's own pixel limit bounds the decode.
+ * contacted. The image is downscaled to fit 2560x2560 exactly as read_image
+ * does (imageMaxSide: 2560 local and hosted), so what reaches the model is
+ * bounded the same way on both paths; sharp's own pixel limit bounds the decode.
+ * `original` is the file's own size, so a downscaled copy can be explained (#4293).
  */
+export type RunImage = {
+	base64: string;
+	mimeType: string;
+	original?: { width: number; height: number };
+};
+
 export async function loadRunImage(
 	file: string,
 	cwd: string,
-): Promise<{ base64: string; mimeType: string } | { error: string }> {
+	provider?: string,
+): Promise<RunImage | { error: string }> {
 	const path = await import("node:path");
 	const fs = await import("node:fs");
 	// Same containment as every file tool: inside the working directory, no
@@ -478,9 +486,19 @@ export async function loadRunImage(
 	}
 	try {
 		const { resizeImage } = await import("../tools/image");
-		const shown = await resizeImage(absolute, 1024, 1024);
+		const { isLocalProvider } = await import("./registry");
+		const { imageMaxSide } = await import("./image-fit");
+		const side = imageMaxSide(provider ? isLocalProvider(provider) : true);
+		const shown = await resizeImage(absolute, side, side);
 		const format = shown.format === "jpg" ? "jpeg" : shown.format;
-		return { base64: shown.base64, mimeType: `image/${format}` };
+		return {
+			base64: shown.base64,
+			mimeType: `image/${format}`,
+			original: {
+				width: shown.originalWidth ?? shown.width,
+				height: shown.originalHeight ?? shown.height,
+			},
+		};
 	} catch (err) {
 		return {
 			error: `Error: --image could not be decoded as an image: ${err instanceof Error ? err.message : String(err)}`,
@@ -784,9 +802,9 @@ export async function runRunCommand(
 	try {
 		// --image: the file is read before the agent exists, so a bad path is a
 		// usage error and never a model turn (#3641).
-		let image: { base64: string; mimeType: string } | undefined;
+		let image: RunImage | undefined;
 		if (opts.image) {
-			const loaded = await loadRunImage(opts.image, opts.cwd || process.cwd());
+			const loaded = await loadRunImage(opts.image, opts.cwd || process.cwd(), provider);
 			if ("error" in loaded) {
 				if (isStreamJson) {
 					emit({ type: "error", subtype: "usage", message: loaded.error });
@@ -806,9 +824,15 @@ export async function runRunCommand(
 		}
 
 		const { Agent } = await import("./agent");
+		// A provider declared in providers.json is reachable only at its own
+		// baseUrl; without it the native path has no base and fails "Invalid
+		// URL" before any request (#4283). Built-ins keep their own resolution.
+		const { getProviderManager } = await import("../providers");
+		const declared = getProviderManager().getProvider(provider);
 		const agent = new Agent({
 			model,
 			runtime: provider as "ollama" | "lmstudio" | "openrouter" | "apple-foundation",
+			baseUrl: declared?.declared ? declared.baseUrl : undefined,
 			workingDirectory: opts.cwd || process.cwd(),
 			maxTurns: opts.maxTurns ?? 30,
 			events,
@@ -845,7 +869,7 @@ export async function runRunCommand(
 		// The check runs repo code, so it needs --yes until run_command is sandboxed (#3612).
 		const baseline = await baselineCheck({ cwd: workDir, run, consent: opts.yes });
 		const before = projectFingerprint(workDir);
-		const answer = await agent.chat(opts.prompt, image?.base64, image?.mimeType);
+		const answer = await agent.chat(opts.prompt, image?.base64, image?.mimeType, image?.original);
 		// A turn the breaker or the watchdog cut off is not finished (#4172).
 		const firstStop = agent.getTurnStop();
 		const check = await finishWithProjectCheck({

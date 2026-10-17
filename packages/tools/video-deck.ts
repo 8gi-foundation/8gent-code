@@ -9,6 +9,9 @@
  * Concept lifted from the house deck renderers (deck2video-lite, officerfilm):
  * structured slide JSON in, deterministic frames, local TTS, ffmpeg concat.
  * Rebuilt here so it works for any user, with nothing read from outside the repo.
+ * The paint is officerfilm's look (#4263): glow and dust background, spaced-caps
+ * header and counter, serif title, numbered accent cards, the narration captioned,
+ * and a 12-frame entrance that settles into one held still per slide.
  */
 
 import { spawn } from "node:child_process";
@@ -86,14 +89,29 @@ export interface RenderDeckResult {
 	kind: "video";
 }
 
+/** House film palette (officerfilm): warm near-black, cream ink, one amber accent. No hue 270-350. */
 const COLORS = {
-	bg: "#14110e",
-	panel: "#1f1a15",
+	bgTop: "#0b0a09",
+	bgBottom: "#15120e",
+	panel: "rgba(255,255,255,0.028)",
 	ink: "#f3ece2",
 	muted: "#b7a993",
 	amber: "#e3a53c",
-	line: "#3a3128",
+	line: "rgba(227,165,60,0.45)",
 };
+
+/**
+ * Faces by name, with fallbacks, so a missing font never fails a render. Fraunces is the house
+ * display face when installed; Georgia (macOS) and DejaVu (Linux) stand in for it. The canvas
+ * sees one face per system .ttc family, so body text names Avenir (regular) and the spaced-caps
+ * header names Avenir Next (bold).
+ */
+const SERIF = 'Fraunces, Georgia, "DejaVu Serif", serif';
+const SANS = 'Avenir, "Helvetica Neue", "DejaVu Sans", sans-serif';
+const CAPS = '"Avenir Next", Avenir, "Helvetica Neue", "DejaVu Sans", sans-serif';
+
+/** The entrance: elements settle over this many frames, then the slide holds still. */
+export const INTRO_FRAMES = 12;
 
 type Ctx = import("@napi-rs/canvas").SKRSContext2D;
 
@@ -114,8 +132,11 @@ function wrap(ctx: Ctx, str: string, width: number): string[] {
 	return out;
 }
 
-/** True when the path is inside root after following links. Images are the only reads. */
-function readInside(named: string, cwd: string): Buffer {
+/**
+ * The bytes of a png/jpg inside root after following links, within the size and pixel limits.
+ * Images are the only reads; make_docx and make_pptx read theirs through this too (#4274).
+ */
+export function readInside(named: string, cwd: string): Buffer {
 	if (/^[a-z][a-z0-9+.-]*:/i.test(named) && !/^[a-z]:[\\/]/i.test(named)) {
 		throw new Error(`image "${named}" must be a file inside the working directory, not a URL`);
 	}
@@ -174,85 +195,278 @@ export function imageDimensions(b: Buffer): { width: number; height: number } | 
 	return null;
 }
 
-/** Paint one slide to PNG bytes. Pure function of (slide, size, image bytes). */
+/** Lines of str that fit width, at most max of them; a cut last line ends in "...". */
+function fitLines(ctx: Ctx, str: string, width: number, max: number): string[] {
+	const lines = wrap(ctx, str, width);
+	if (lines.length <= max) return lines;
+	const kept = lines.slice(0, max);
+	let last = kept[max - 1];
+	while (last && ctx.measureText(`${last}...`).width > width) last = last.replace(/\s*\S+$/, "");
+	kept[max - 1] = `${last}...`;
+	return kept;
+}
+
+/** Spaced capitals, drawn one glyph at a time so the tracking is the same on every machine. */
+function spacedCaps(
+	ctx: Ctx,
+	str: string,
+	x: number,
+	y: number,
+	track: number,
+	align: "left" | "right",
+) {
+	const chars = [...str.toUpperCase()];
+	const widths = chars.map((c) => ctx.measureText(c).width);
+	const total = widths.reduce((a, b) => a + b, 0) + track * Math.max(0, chars.length - 1);
+	let cx = align === "left" ? x : x - total;
+	chars.forEach((c, i) => {
+		ctx.fillText(c, cx, y);
+		cx += widths[i] + track;
+	});
+}
+
+function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
+	ctx.beginPath();
+	ctx.moveTo(x + r, y);
+	ctx.arcTo(x + w, y, x + w, y + h, r);
+	ctx.arcTo(x + w, y + h, x, y + h, r);
+	ctx.arcTo(x, y + h, x, y, r);
+	ctx.arcTo(x, y, x + w, y, r);
+	ctx.closePath();
+}
+
+/** Eased 0..1 share of the entrance window [a, b]; exactly 1 once t reaches b. */
+export function phase(t: number, a: number, b: number): number {
+	if (t >= b) return 1;
+	if (t <= a) return 0;
+	return 1 - (1 - (t - a) / (b - a)) ** 3;
+}
+
+/** Seeded PRNG (mulberry32): the dust field is the same on every render. */
+function rng(seed: number): () => number {
+	let s = seed >>> 0;
+	return () => {
+		s = (s + 0x6d2b79f5) >>> 0;
+		let r = Math.imul(s ^ (s >>> 15), 1 | s);
+		r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+		return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+/** The house background: warm gradient, a soft amber glow from above, fixed dust, a vignette. */
+function paintBackground(ctx: Ctx, W: number, H: number, k: number) {
+	const g = ctx.createLinearGradient(0, 0, 0, H);
+	g.addColorStop(0, COLORS.bgTop);
+	g.addColorStop(1, COLORS.bgBottom);
+	ctx.fillStyle = g;
+	ctx.fillRect(0, 0, W, H);
+	const glow = ctx.createRadialGradient(W * 0.5, -H * 0.15, 0, W * 0.5, -H * 0.15, W * 0.75);
+	glow.addColorStop(0, "rgba(227,165,60,0.16)");
+	glow.addColorStop(1, "rgba(227,165,60,0)");
+	ctx.fillStyle = glow;
+	ctx.fillRect(0, 0, W, H);
+	const r = rng(8);
+	for (let i = 0; i < 140; i++) {
+		const dx = r() * W;
+		const dy = r() * H;
+		const rad = (0.6 + r() * 1.4) * k;
+		ctx.fillStyle = `rgba(243,220,180,${(0.04 + r() * 0.18).toFixed(3)})`;
+		ctx.beginPath();
+		ctx.arc(dx, dy, rad, 0, Math.PI * 2);
+		ctx.fill();
+	}
+	const vig = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, W * 0.75);
+	vig.addColorStop(0, "rgba(0,0,0,0)");
+	vig.addColorStop(1, "rgba(0,0,0,0.55)");
+	ctx.fillStyle = vig;
+	ctx.fillRect(0, 0, W, H);
+}
+
+/** Where a slide sits in the deck, and how far its entrance has run (t: 0 start, 1 settled). */
+export interface PaintAt {
+	index?: number;
+	count?: number;
+	t?: number;
+}
+
+/**
+ * Paint one slide to PNG bytes in the house film look (officerfilm): spaced-caps amber header
+ * with the slide counter, a serif display title, bullets as numbered accent cards, the narration
+ * captioned in a lower block, and a staggered entrance while t runs 0 to 1 (1 = settled, held).
+ * A slide with only a title is a centred title card. Pure function of (slide, size, image bytes,
+ * deck title, at).
+ */
 export async function paintSlide(
 	slide: DeckSlide,
 	size: keyof typeof SIZES,
 	cwd: string,
 	deckTitle?: string,
+	at: PaintAt = {},
 ): Promise<Buffer> {
 	const { createCanvas, loadImage } = await import("@napi-rs/canvas");
 	const [W, H] = SIZES[size];
 	const k = W / 1280;
+	const t = at.t ?? 1;
 	const canvas = createCanvas(W, H);
 	const ctx = canvas.getContext("2d");
-	ctx.fillStyle = COLORS.bg;
-	ctx.fillRect(0, 0, W, H);
+	paintBackground(ctx, W, H, k);
 	const x = 80 * k;
-	let y = 70 * k;
-	const hasImage = Boolean(slide.image);
-	const textW = (hasImage ? 640 : 1120) * k;
-	const sans = (px: number, bold = false) =>
-		`${bold ? "bold " : ""}${Math.round(px * k)}px sans-serif`;
+	const px = (n: number) => Math.round(n * k);
+	const sans = (n: number, weight = 400) => `${weight} ${px(n)}px ${SANS}`;
+	const serif = (n: number) => `600 ${px(n)}px ${SERIF}`;
+	const fade = (a: number, draw: () => void) => {
+		if (a <= 0) return;
+		ctx.save();
+		ctx.globalAlpha = a;
+		draw();
+		ctx.restore();
+	};
 
-	if (slide.kicker) {
+	// Header: what this is on the left, where we are on the right.
+	const head = slide.kicker ?? deckTitle;
+	fade(phase(t, 0, 0.4), () => {
+		ctx.font = `700 ${px(17)}px ${CAPS}`;
 		ctx.fillStyle = COLORS.amber;
-		ctx.font = sans(22, true);
-		ctx.fillText(slide.kicker.toUpperCase(), x, y + 22 * k);
-		y += 56 * k;
-	}
-	if (slide.title) {
-		ctx.fillStyle = COLORS.ink;
-		ctx.font = sans(56, true);
-		for (const ln of wrap(ctx, slide.title, textW)) {
-			ctx.fillText(ln, x, y + 50 * k);
-			y += 66 * k;
+		if (head) spacedCaps(ctx, head, x, 64 * k, 4 * k, "left");
+		if (at.count && at.count > 1 && at.index !== undefined) {
+			const n = (v: number) => String(v).padStart(2, "0");
+			ctx.fillStyle = COLORS.muted;
+			spacedCaps(ctx, `${n(at.index + 1)} / ${n(at.count)}`, W - x, 64 * k, 4 * k, "right");
 		}
-		y += 20 * k;
+	});
+
+	// Caption block: the narration line, as officerfilm captions the sentence being spoken.
+	const caption = slide.narration?.trim();
+	let contentBottom = H - 60 * k;
+	if (caption) {
+		const capW = W - 184 * k;
+		let capSize = 20;
+		for (const s of [26, 23, 20]) {
+			ctx.font = sans(s);
+			capSize = s;
+			if (wrap(ctx, caption, capW).length <= 3) break;
+		}
+		ctx.font = sans(capSize);
+		const lines = fitLines(ctx, caption, capW, 3);
+		const lh = capSize * 1.32 * k;
+		const blockH = lines.length * lh;
+		const top = H - 46 * k - blockH;
+		contentBottom = top - 34 * k;
+		fade(phase(t, 0.3, 0.8), () => {
+			ctx.fillStyle = COLORS.amber;
+			ctx.fillRect(x, top - 4 * k, 4 * k, blockH + 4 * k);
+			ctx.fillStyle = COLORS.ink;
+			ctx.font = sans(capSize);
+			lines.forEach((ln, i) => ctx.fillText(ln, x + 24 * k, top + (i + 0.78) * lh));
+		});
+	}
+
+	if (!slide.text && !slide.bullets?.length && !slide.image) {
+		// Title card: centred display title over a short amber rule, like the film's cold open.
+		ctx.font = serif(76);
+		const lines = fitLines(ctx, slide.title ?? "", 1040 * k, 3);
+		const lh = 86 * k;
+		const top = 64 * k + (contentBottom - 64 * k) / 2 - (lines.length * lh) / 2 - 10 * k;
+		const a = phase(t, 0.05, 0.6);
+		fade(a, () => {
+			ctx.font = serif(76);
+			ctx.fillStyle = COLORS.ink;
+			ctx.textAlign = "center";
+			lines.forEach((ln, i) => ctx.fillText(ln, W / 2, top + (i + 0.8) * lh + (1 - a) * 18 * k));
+		});
+		const rw = 140 * k * phase(t, 0.25, 0.9);
+		if (rw > 0) {
+			ctx.fillStyle = COLORS.amber;
+			ctx.fillRect(W / 2 - rw / 2, top + lines.length * lh + 18 * k, rw, 2 * k);
+		}
+		return canvas.toBuffer("image/png");
+	}
+
+	const textW = (slide.image ? 620 : 1120) * k;
+	let y = 96 * k;
+	if (slide.title) {
+		ctx.font = serif(54);
+		const lines = fitLines(ctx, slide.title, textW, 2);
+		const a = phase(t, 0.05, 0.55);
+		const y0 = y;
+		fade(a, () => {
+			ctx.font = serif(54);
+			ctx.fillStyle = COLORS.ink;
+			lines.forEach((ln, i) => ctx.fillText(ln, x, y0 + (50 + i * 62 + (1 - a) * 18) * k));
+		});
+		y += (lines.length * 62 + 18) * k;
 	}
 	if (slide.text) {
-		ctx.fillStyle = COLORS.muted;
-		ctx.font = sans(30);
-		for (const ln of wrap(ctx, slide.text, textW)) {
-			ctx.fillText(ln, x, y + 30 * k);
-			y += 44 * k;
-		}
-		y += 16 * k;
+		ctx.font = sans(26, 400);
+		const lines = fitLines(ctx, slide.text, textW, 3);
+		const y0 = y;
+		fade(phase(t, 0.15, 0.6), () => {
+			ctx.font = sans(26, 400);
+			ctx.fillStyle = COLORS.muted;
+			lines.forEach((ln, i) => ctx.fillText(ln, x, y0 + (28 + i * 36) * k));
+		});
+		y += (lines.length * 36 + 18) * k;
 	}
-	for (const b of slide.bullets ?? []) {
-		ctx.font = sans(28);
-		const lines = wrap(ctx, b, textW - 40 * k);
-		ctx.fillStyle = COLORS.amber;
-		ctx.beginPath();
-		ctx.arc(x + 8 * k, y + 18 * k, 7 * k, 0, Math.PI * 2);
-		ctx.fill();
-		ctx.fillStyle = COLORS.ink;
-		for (const ln of lines) {
-			ctx.fillText(ln, x + 40 * k, y + 28 * k);
-			y += 40 * k;
+
+	const bullets = slide.bullets ?? [];
+	if (bullets.length) {
+		// The largest text size at which every card fits above the caption.
+		let fs = 16;
+		let cards: { lines: string[]; h: number }[] = [];
+		for (const s of [24, 21, 18, 16]) {
+			fs = s;
+			ctx.font = sans(fs);
+			cards = bullets.map((b) => {
+				const lines = fitLines(ctx, b, textW - 92 * k, 2);
+				return { lines, h: Math.max(lines.length * fs * 1.3 + fs * 1.24, fs * 2.3) * k };
+			});
+			if (cards.reduce((n, c) => n + c.h + fs * 0.45 * k, 0) <= contentBottom - y) break;
 		}
-		y += 12 * k;
-		ctx.fillStyle = COLORS.line;
-		ctx.fillRect(x, y, textW, 1);
-		y += 12 * k;
+		const lh = fs * 1.3 * k;
+		const step = bullets.length > 1 ? Math.min(0.1, 0.35 / (bullets.length - 1)) : 0;
+		cards.forEach((c, j) => {
+			if (y + c.h > contentBottom + 1) return;
+			const a = phase(t, 0.2 + j * step, 0.65 + j * step);
+			const cy = y;
+			fade(a, () => {
+				ctx.translate((1 - a) * -26 * k, 0);
+				roundRect(ctx, x, cy, textW, c.h, 12 * k);
+				ctx.fillStyle = COLORS.panel;
+				ctx.fill();
+				ctx.strokeStyle = COLORS.line;
+				ctx.lineWidth = Math.max(1, k);
+				ctx.stroke();
+				ctx.fillStyle = COLORS.amber;
+				ctx.fillRect(x, cy + 8 * k, 4 * k, c.h - 16 * k);
+				ctx.font = serif(fs * 1.45);
+				ctx.fillText(String(j + 1), x + 26 * k, cy + c.h / 2 + fs * 0.5 * k);
+				ctx.font = sans(fs);
+				ctx.fillStyle = COLORS.ink;
+				const top = cy + (c.h - c.lines.length * lh) / 2;
+				c.lines.forEach((ln, i) => ctx.fillText(ln, x + 72 * k, top + (i + 0.76) * lh));
+			});
+			y += c.h + fs * 0.45 * k;
+		});
 	}
+
 	if (slide.image) {
 		const img = await loadImage(readInside(slide.image, cwd));
-		const bx = 760 * k;
-		const by = 90 * k;
-		const bw = 440 * k;
-		const bh = H - 180 * k;
-		const s = Math.min(bw / img.width, bh / img.height);
+		const bx = 740 * k;
+		const by = 96 * k;
+		const bw = 460 * k;
+		const bh = contentBottom - by;
+		const s = Math.min((bw - 24 * k) / img.width, (bh - 24 * k) / img.height);
 		const w = Math.round(img.width * s);
 		const h = Math.round(img.height * s);
-		ctx.fillStyle = COLORS.panel;
-		ctx.fillRect(bx, by, bw, bh);
-		ctx.drawImage(img, bx + Math.round((bw - w) / 2), by + Math.round((bh - h) / 2), w, h);
-	}
-	if (deckTitle) {
-		ctx.fillStyle = COLORS.muted;
-		ctx.font = sans(18);
-		ctx.fillText(deckTitle, x, H - 36 * k);
+		fade(phase(t, 0.2, 0.7), () => {
+			roundRect(ctx, bx, by, bw, bh, 14 * k);
+			ctx.fillStyle = COLORS.panel;
+			ctx.fill();
+			ctx.strokeStyle = COLORS.line;
+			ctx.lineWidth = Math.max(1, k);
+			ctx.stroke();
+			ctx.drawImage(img, bx + Math.round((bw - w) / 2), by + Math.round((bh - h) / 2), w, h);
+		});
 	}
 	return canvas.toBuffer("image/png");
 }
@@ -296,16 +510,39 @@ function run(
 	});
 }
 
+/** One slide for ffmpeg: its held still, its length, and optionally its voice and entrance frames. */
+export interface DeckFrame {
+	png: string;
+	sec: number;
+	wav?: string;
+	/** Entrance frames before the still: an image2 pattern (e.g. in-%03d.png) and its frame count. */
+	intro?: { pattern: string; count: number };
+}
+
 /** The exact ffmpeg argv for a deck. Exported so tests can assert it is network-free. */
-export function buildFfmpegArgs(
-	frames: { png: string; sec: number; wav?: string }[],
-	out: string,
-	anyAudio: boolean,
-): string[] {
+export function buildFfmpegArgs(frames: DeckFrame[], out: string, anyAudio: boolean): string[] {
 	const args = ["-y", "-hide_banner", "-loglevel", "error", "-nostdin"];
 	const wavIndex: Record<number, number> = {};
+	const introIndex: Record<number, number> = {};
+	const stillIndex: Record<number, number> = {};
 	let n = 0;
-	for (const f of frames) {
+	frames.forEach((f, i) => {
+		let hold = f.sec;
+		if (f.intro) {
+			args.push(
+				"-protocol_whitelist",
+				"file",
+				"-framerate",
+				String(FPS),
+				"-start_number",
+				"0",
+				"-i",
+				f.intro.pattern,
+			);
+			introIndex[i] = n++;
+			// The still holds for the rest of the slide, in whole frames.
+			hold = (Math.round(f.sec * FPS) - f.intro.count) / FPS;
+		}
 		args.push(
 			"-protocol_whitelist",
 			"file",
@@ -314,12 +551,12 @@ export function buildFfmpegArgs(
 			"-framerate",
 			String(FPS),
 			"-t",
-			f.sec.toFixed(3),
+			hold.toFixed(3),
 			"-i",
 			f.png,
 		);
-		n++;
-	}
+		stillIndex[i] = n++;
+	});
 	frames.forEach((f, i) => {
 		if (f.wav) {
 			args.push("-protocol_whitelist", "file", "-i", f.wav);
@@ -329,7 +566,16 @@ export function buildFfmpegArgs(
 	const parts: string[] = [];
 	const labels: string[] = [];
 	frames.forEach((f, i) => {
-		parts.push(`[${i}:v]format=yuv420p,setsar=1,fps=${FPS}[v${i}]`);
+		const fmt = `format=yuv420p,setsar=1,fps=${FPS}`;
+		if (f.intro) {
+			parts.push(
+				`[${introIndex[i]}:v]${fmt}[e${i}]`,
+				`[${stillIndex[i]}:v]${fmt}[h${i}]`,
+				`[e${i}][h${i}]concat=n=2:v=1:a=0[v${i}]`,
+			);
+		} else {
+			parts.push(`[${stillIndex[i]}:v]${fmt}[v${i}]`);
+		}
 		labels.push(`[v${i}]`);
 		if (anyAudio) {
 			const d = f.sec.toFixed(3);
@@ -530,12 +776,17 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 		throw new Error("refusing to use .tmp: it resolves outside the working directory");
 	const work = fs.mkdtempSync(path.join(scratchRoot, "video-deck-"));
 	try {
-		const frames: { png: string; sec: number; wav?: string }[] = [];
+		const frames: DeckFrame[] = [];
 		let total = 0;
-		for (let i = 0; i < spec.slides.length; i++) {
+		const count = spec.slides.length;
+		for (let i = 0; i < count; i++) {
 			const s = spec.slides[i];
-			const png = path.join(work, `slide-${String(i).padStart(3, "0")}.png`);
-			fs.writeFileSync(png, await paintSlide(s, spec.size, opts.cwd, spec.title));
+			const stem = path.join(work, `slide-${String(i).padStart(3, "0")}`);
+			const png = `${stem}.png`;
+			fs.writeFileSync(
+				png,
+				await paintSlide(s, spec.size, opts.cwd, spec.title, { index: i, count }),
+			);
 			let sec = s.seconds ?? 4;
 			let wav: string | undefined;
 			if (s.narration?.trim()) {
@@ -567,7 +818,17 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 			total += fixed;
 			if (total > MAX_TOTAL_SECONDS)
 				throw new Error(`deck is over ${MAX_TOTAL_SECONDS}s once narration is counted`);
-			frames.push({ png, sec: fixed, wav });
+			// The entrance: the slide's elements settle over INTRO_FRAMES, then the still holds,
+			// so a viewer (and a still counter) sees one settled picture per slide.
+			const introCount = Math.min(INTRO_FRAMES, Math.round(fixed * FPS) - 1);
+			for (let f = 0; f < introCount; f++) {
+				const at = { index: i, count, t: f / introCount };
+				const frame = `${stem}-in-${String(f).padStart(3, "0")}.png`;
+				fs.writeFileSync(frame, await paintSlide(s, spec.size, opts.cwd, spec.title, at));
+			}
+			const intro =
+				introCount > 0 ? { pattern: `${stem}-in-%03d.png`, count: introCount } : undefined;
+			frames.push({ png, sec: fixed, wav, intro });
 		}
 		// Caps, images and narration are all settled above; only now are the binaries looked up.
 		const ffmpeg = resolveBinary("ffmpeg", opts.cwd, opts.ffmpeg ?? process.env.EIGHT_FFMPEG);

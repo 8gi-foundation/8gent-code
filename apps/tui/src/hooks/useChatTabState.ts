@@ -25,6 +25,7 @@ import type {
 	AgentToolEndEvent,
 	AgentToolStartEvent,
 } from "../../../../packages/eight/index.js";
+import { tabVoices } from "../../../../packages/tools/speak.js";
 import type { Message } from "../app.js";
 import { type AgentRuntime, providerToRuntime } from "../lib/model-selection.js";
 
@@ -225,6 +226,7 @@ export function useChatTabState(
 					runtime,
 					workingDirectory: process.cwd(),
 					maxTurns: 50,
+					tabVoice: tabVoices.assign(tid),
 					// Only the runtime's own key (#3261).
 					apiKey: sessionApiKey(runtime),
 					events: {

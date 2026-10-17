@@ -2,41 +2,29 @@
  * 8gent Code - make_pdf tool helper
  *
  * PDF *production* (the write-side counterpart of packages/tools/pdf.ts, which
- * reads PDFs). We do NOT reimplement rendering here: we shell out to the
- * canonical, portable renderer installed fleet-wide at ~/.8gent/bin/make-pdf
- * (a Python CLI that walks a weasyprint -> chrome-headless fallback ladder and
- * writes into ~/.8gent/creative/ so the Create surface picks the file up).
+ * reads PDFs). Rendering happens in this process via ./pdf-writer (#4267): it
+ * used to shell out to ~/.8gent/bin/make-pdf, which a fresh install does not
+ * have, so the tool was offered and then failed mid-task.
  *
- * This module owns only the marshalling: pick the right CLI flags for the
- * given input, capture the absolute PDF path the CLI prints on its LAST stdout
- * line, and hand back the { path, kind: "document" } tool-result contract.
- *
- * Deterministic, no network. Non-destructive: it only writes one new file into
- * the creative folder.
+ * Output lands in ~/.8gent/creative/ so the Create surface picks it up.
+ * Deterministic, no network. Non-destructive: an auto-named file never
+ * overwrites one already there.
  */
 
-import { resolveHome } from "../core/home";
-import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { resolveHome } from "../core/home";
+import { type Block, htmlToMarkdown, parseMarkdown, writePdf } from "./pdf-writer";
 
 import {
 	type DesignContext,
-	type DesignHint,
 	DesignContextUnavailable,
+	type DesignHint,
 	resolveDesignContext,
 } from "../design-systems/index";
 
-/** Absolute path to the creative folder the CLI writes into by default. */
+/** Absolute path to the creative folder make_pdf writes into. */
 export const CREATIVE_DIR = path.join(resolveHome(), ".8gent", "creative");
-
-/** Absolute path to the canonical renderer CLI. Overridable for tests. */
-export const DEFAULT_MAKE_PDF_BIN = path.join(resolveHome(), ".8gent", "bin", "make-pdf");
-
-/** Resolve the CLI binary, honouring an env override (used by the test suite). */
-export function resolveMakePdfBin(): string {
-	return process.env.EIGHT_MAKE_PDF_BIN?.trim() || DEFAULT_MAKE_PDF_BIN;
-}
 
 export interface MakePdfInput {
 	/** Inline Markdown source. */
@@ -70,6 +58,10 @@ export interface MakePdfResult {
 	path: string;
 	/** Tool-result kind, so downstream surfaces route it as a document. */
 	kind: "document";
+	/** Pages laid out. */
+	pages: number;
+	/** Characters outside the standard fonts, printed as "?" (absent when none). */
+	replaced?: number;
 	/** The design system the PDF inherited, if any (provenance stamp). */
 	designSystemId?: string;
 }
@@ -82,8 +74,9 @@ function resolveOutPath(outName: string): string {
 }
 
 /** A <style> block from a resolved design context: the token variables plus a
- * small base stylesheet mapping them onto document elements, so an actual PDF
- * looks themed. The renderer CLI has no --css flag, so we inject into the HTML. */
+ * small base stylesheet mapping them onto document elements. The in-process
+ * writer does not apply CSS, so today this records the choice (provenance)
+ * and keeps the themed HTML ready for a CSS-aware renderer. */
 function designStyleBlock(ctx: DesignContext): string {
 	const { headingFont, bodyFont } = ctx.typography;
 	return [
@@ -137,14 +130,16 @@ export function applyDesign(input: MakePdfInput): {
 			designSystemId: ctx.systemId,
 		};
 	}
-	// Markdown sources: the CLI owns markdown->HTML, so we cannot inject a <style>
-	// into raw markdown; still stamp provenance so the surface records the choice.
+	// Markdown sources have no <style> to inject into; still stamp provenance.
 	return { input, designSystemId: ctx.systemId };
 }
 
-/** Build the CLI argument vector for exactly one supplied input source. */
-function buildArgs(input: MakePdfInput): string[] {
-	const { markdown, html, htmlPath, mdPath, title, outName } = input;
+/** Largest source make_pdf will lay out (characters). */
+export const MAX_SOURCE_CHARS = 2_000_000;
+
+/** Exactly one source, read and checked; throws a plain reason the model can act on. */
+function readSource(input: MakePdfInput): { markdown: string } {
+	const { markdown, html, htmlPath, mdPath } = input;
 	const sources = [markdown, html, htmlPath, mdPath].filter((v) => v != null && v !== "");
 	if (sources.length === 0) {
 		throw new Error("make_pdf requires one of: markdown, html, htmlPath, mdPath");
@@ -154,81 +149,72 @@ function buildArgs(input: MakePdfInput): string[] {
 			"make_pdf accepts exactly one source; got multiple of markdown/html/htmlPath/mdPath",
 		);
 	}
+	const fromFile = (p: string, label: string) => {
+		const abs = path.resolve(p);
+		if (!fs.existsSync(abs) || !fs.statSync(abs).isFile())
+			throw new Error(`${label} not found: ${p}`);
+		if (fs.statSync(abs).size > MAX_SOURCE_CHARS * 4)
+			throw new Error(`${label} is too large to lay out (over ${MAX_SOURCE_CHARS} characters)`);
+		return fs.readFileSync(abs, "utf8");
+	};
+	let md: string;
+	if (markdown) md = markdown;
+	else if (mdPath) md = fromFile(mdPath, "mdPath");
+	else if (html) md = htmlToMarkdown(html);
+	else md = htmlToMarkdown(fromFile(htmlPath as string, "htmlPath"));
+	if (md.length > MAX_SOURCE_CHARS)
+		throw new Error(
+			`source is ${md.length} characters; make_pdf lays out at most ${MAX_SOURCE_CHARS}`,
+		);
+	return { markdown: md };
+}
 
-	const args: string[] = [];
-	if (markdown != null && markdown !== "") {
-		args.push("--markdown-text", markdown);
-	} else if (html != null && html !== "") {
-		args.push("--html-text", html);
-	} else if (htmlPath != null && htmlPath !== "") {
-		args.push("--html", path.resolve(htmlPath));
-	} else if (mdPath != null && mdPath !== "") {
-		args.push("--md", path.resolve(mdPath));
-	}
-
-	if (title != null && title !== "") args.push("--title", title);
-	if (outName != null && outName !== "") args.push("--out", resolveOutPath(outName));
-	return args;
+/** A file name from the title or first heading; never overwrites an existing file. */
+function autoOutPath(title: string | undefined, blocks: Block[]): string {
+	const seed = title || blocks.find((b) => b.kind === "h1")?.text || "document";
+	const slug =
+		seed
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-+|-+$/g, "")
+			.slice(0, 60) || "document";
+	let candidate = path.join(CREATIVE_DIR, `${slug}.pdf`);
+	for (let n = 2; fs.existsSync(candidate); n++)
+		candidate = path.join(CREATIVE_DIR, `${slug}-${n}.pdf`);
+	return candidate;
 }
 
 /**
- * Produce a PDF via the canonical renderer CLI.
+ * Produce a PDF in-process (#4267): no external renderer, so there is no
+ * missing-binary failure mode. Markdown is laid out directly; HTML keeps its
+ * structure (headings, paragraphs, lists, pre) but not its CSS.
  *
- * Resolves with `{ path, kind: "document" }` on success (the absolute PDF path
- * the CLI printed on its last stdout line). Rejects with the CLI's stderr
- * reason on a non-zero exit.
+ * Resolves with `{ path, kind: "document", pages }`; `replaced` counts
+ * characters outside the PDF standard fonts that were printed as "?".
+ * Rejects with a plain reason (no source, two sources, missing or oversized
+ * file, over the page cap).
  */
-export function makePdf(input: MakePdfInput): Promise<MakePdfResult> {
-	return new Promise((resolve, reject) => {
-		let designed: { input: MakePdfInput; designSystemId?: string };
-		try {
-			designed = applyDesign(input);
-		} catch (err) {
-			reject(err);
-			return;
-		}
-		let args: string[];
-		try {
-			args = buildArgs(designed.input);
-		} catch (err) {
-			reject(err);
-			return;
-		}
-		const bin = resolveMakePdfBin();
-
-		if (!fs.existsSync(bin)) {
-			reject(new Error(`make-pdf renderer not found at ${bin}`));
-			return;
-		}
-
-		const proc = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
-		let stdout = "";
-		let stderr = "";
-
-		proc.stdout.on("data", (d) => {
-			stdout += d.toString();
-		});
-		proc.stderr.on("data", (d) => {
-			stderr += d.toString();
-		});
-		proc.on("error", (err) => reject(err));
-		proc.on("close", (code) => {
-			if (code !== 0) {
-				const reason = stderr.trim() || `make-pdf exited with code ${code}`;
-				reject(new Error(reason));
-				return;
-			}
-			const lines = stdout
-				.trim()
-				.split("\n")
-				.map((l) => l.trim())
-				.filter(Boolean);
-			const outPath = lines[lines.length - 1];
-			if (!outPath) {
-				reject(new Error("make-pdf produced no output path"));
-				return;
-			}
-			resolve({ path: outPath, kind: "document", designSystemId: designed.designSystemId });
-		});
-	});
+export async function makePdf(input: MakePdfInput): Promise<MakePdfResult> {
+	const designed = applyDesign(input);
+	const { markdown } = readSource(designed.input);
+	let blocks = parseMarkdown(markdown);
+	const title = input.title?.trim() || undefined;
+	if (title && blocks[0]?.kind !== "h1") blocks = [{ kind: "h1", text: title }, ...blocks];
+	if (blocks.length === 0) throw new Error("make_pdf: the source has no text to lay out");
+	const { pdf, pages, replaced } = writePdf(
+		blocks,
+		title ?? blocks.find((b) => b.kind === "h1")?.text,
+	);
+	fs.mkdirSync(CREATIVE_DIR, { recursive: true });
+	const out = input.outName?.trim() ? resolveOutPath(input.outName) : autoOutPath(title, blocks);
+	const tmp = `${out}.${process.pid}.tmp`;
+	fs.writeFileSync(tmp, pdf);
+	fs.renameSync(tmp, out);
+	return {
+		path: out,
+		kind: "document",
+		pages,
+		...(replaced ? { replaced } : {}),
+		...(designed.designSystemId ? { designSystemId: designed.designSystemId } : {}),
+	};
 }

@@ -18,12 +18,15 @@ import {
 } from "../ai/draft-constraints";
 import { withImagesWritten } from "../ai/image-shape";
 import {
+	type Attachment,
 	POST_MESSAGE_TOOL_DEF,
 	postMessage,
 	postMessageAvailable,
 	postMessageDeps,
+	resolveAttachment,
 } from "../ai/post-message";
 import {
+	IMAGE_ATTACHMENT_MARKER,
 	IMAGE_ATTACHMENT_TOOL,
 	hasImageAttachmentLine,
 	imageAttachmentResult,
@@ -146,7 +149,13 @@ import {
 	getPermissionManager,
 	isCommandDangerous,
 } from "../permissions";
-import { cdPrefix, commandAfterCdPrefix, folderLabel } from "../permissions/cd-prefix";
+import {
+	cdPrefix,
+	chainInFolderNote,
+	commandAfterCdPrefix,
+	commandInFolder,
+	folderLabel,
+} from "../permissions/cd-prefix";
 import { commandDir, withCommandDir } from "../permissions/command-policy";
 import {
 	editScopeViolation,
@@ -216,6 +225,10 @@ import {
 import { createEightBrowser, isolatedBrowser } from "../tools/eight-browser";
 import { describeImage, readImage, resizeImage } from "../tools/image";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
+import { DocxSpecSchema } from "../tools/office/docx";
+import { PptxSpecSchema } from "../tools/office/pptx";
+import { isOfficeFile, readOfficeFile } from "../tools/office/read";
+import { XlsxSpecSchema } from "../tools/office/xlsx";
 import { readPdf, readPdfPage, searchPdf } from "../tools/pdf";
 import { RateLimiter } from "../tools/rate-limiter";
 import {
@@ -234,6 +247,7 @@ import { ArtifactStore } from "./artifact-store";
 import { formatCommandOutput } from "./command-output";
 import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatEditNotFound } from "./edit-hint";
+import { linksFooter } from "./file-links";
 import {
 	ENV_PASS_HINT,
 	GH_ENV_NAMES,
@@ -241,12 +255,16 @@ import {
 	buildChildEnv,
 	withheldAny,
 } from "./harness/child-env";
+import { downscaleNote, imageMaxSide } from "./image-fit";
+import { IssueBlameGate, issueBodyOf } from "./issue-blame";
 import { layoutMeasureLine } from "./layout-measure";
+import { MESSAGE_BOARDROOM_TOOL_DEF, messageBoardroom } from "./message-boardroom";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import { RetiredFacts } from "./retired-facts";
 import { ensureScratchExcludedIfPresent } from "./scratch-exclude";
-import { scrub as scrubSecrets } from "./secret-scanner";
+import { scrubKeepingAttachment, scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
+import { USE_SKILL_DESCRIPTION, useSkill } from "./use-skill";
 import { type VisionRouterResult, findVisionModel } from "./vision-router";
 
 /**
@@ -291,7 +309,7 @@ export type ReplayClass = "replay" | "never" | "ask";
  * started under, and resume refuses to re-run a call whose class has changed
  * since (8SO review, #4118).
  */
-export const REPLAY_POLICY_VERSION = 1;
+export const REPLAY_POLICY_VERSION = 3;
 
 export function isReplayClass(v: unknown): v is ReplayClass {
 	return v === "replay" || v === "never" || v === "ask";
@@ -305,6 +323,11 @@ export function isReplayClass(v: unknown): v is ReplayClass {
  * textconv helpers; the PDF, notebook, outline and listing readers take paths
  * without the full checks. Those stay "ask" (#3653 review).
  */
+/** message_boardroom is offered unless EIGHT_MESSAGE_BOARDROOM=0 (#4344). */
+export function messageBoardroomOn(): boolean {
+	return process.env.EIGHT_MESSAGE_BOARDROOM !== "0";
+}
+
 // Changing this set, NEVER_REPLAY_TOOLS or NEVER_REPLAY_PREFIXES: bump REPLAY_POLICY_VERSION.
 const REPLAY_SAFE_TOOLS = new Set(["read_file", "git_log"]);
 
@@ -322,9 +345,13 @@ const NEVER_REPLAY_TOOLS = new Set([
 	"gh_pr_create",
 	"gh_issue_create",
 	"post_message",
+	"message_boardroom",
 	"spawn_agent",
 	"speak",
 	"render_video_deck",
+	"make_docx",
+	"make_xlsx",
+	"make_pptx",
 	"notebook_edit_cell",
 	"notebook_insert_cell",
 	"notebook_delete_cell",
@@ -538,6 +565,31 @@ export function confineWrite(named: string, workingDirectory: string): string {
 export function resolveDeckOut(out: unknown, workingDirectory: string): string {
 	const named = typeof out === "string" && out.trim() ? out.trim() : "deck.mp4";
 	if (!named.toLowerCase().endsWith(".mp4")) throw new Error(`out must end in .mp4 ("${named}")`);
+	return confineWrite(named, workingDirectory);
+}
+
+/** The office tools and the extension each one writes (#4274). */
+export const OFFICE_TOOLS = { make_docx: "docx", make_xlsx: "xlsx", make_pptx: "pptx" } as const;
+export type OfficeToolName = keyof typeof OFFICE_TOOLS;
+
+export function isOfficeTool(name: string): name is OfficeToolName {
+	return Object.hasOwn(OFFICE_TOOLS, name);
+}
+
+/**
+ * Where make_docx / make_xlsx / make_pptx may write: a file with exactly that extension inside
+ * the working directory, no symlinks. A macro-enabled name (.docm, .xlsm, .pptm) never matches.
+ */
+export function resolveOfficeOut(
+	tool: OfficeToolName,
+	out: unknown,
+	workingDirectory: string,
+): string {
+	const ext = OFFICE_TOOLS[tool];
+	const fallback = { docx: "document.docx", xlsx: "workbook.xlsx", pptx: "deck.pptx" }[ext];
+	const named = typeof out === "string" && out.trim() ? out.trim() : fallback;
+	if (!named.toLowerCase().endsWith(`.${ext}`))
+		throw new Error(`out must end in .${ext} ("${named}")`);
 	return confineWrite(named, workingDirectory);
 }
 
@@ -835,21 +887,77 @@ const LEAN_DROP = new Set([
 	"maxLength",
 	"maximum",
 	"minItems",
+	"minLength",
 	"minimum",
+	"pattern",
 ]);
-export const DECK_SPEC_PARAMETER: Record<string, unknown> = (() => {
+
+/**
+ * A tagged union ({type:'a', ...} | {type:'b', ...}) as one object whose `type` is an enum and
+ * whose properties are every variant's: about a third of the size, and the builder still checks
+ * each variant exactly. Anything else is returned unchanged.
+ */
+function collapseTaggedUnion(node: Record<string, unknown>): Record<string, unknown> {
+	const variants = node.oneOf;
+	if (!Array.isArray(variants) || variants.length < 2) return node;
+	const tags: string[] = [];
+	const properties: Record<string, unknown> = {};
+	for (const v of variants as Array<{ properties?: Record<string, { const?: unknown }> }>) {
+		const tag = v.properties?.type?.const;
+		if (typeof tag !== "string") return node;
+		tags.push(tag);
+		for (const [k, p] of Object.entries(v.properties ?? {})) if (k !== "type") properties[k] ??= p;
+	}
+	return {
+		type: "object",
+		properties: { type: { type: "string", enum: tags }, ...properties },
+		required: ["type"],
+	};
+}
+
+/** A zod schema as the lean JSON schema a tool parameter carries (names, types, enums, nesting). */
+export function leanParameter(schema: z.ZodType): Record<string, unknown> {
 	const lean = (node: unknown): unknown => {
 		if (Array.isArray(node)) return node.map(lean);
 		if (node === null || typeof node !== "object") return node;
+		let obj = collapseTaggedUnion(node as Record<string, unknown>);
+		// anyOf inside anyOf (a union of a union) says the same thing flat.
+		if (Array.isArray(obj.anyOf)) {
+			const flat = (obj.anyOf as Array<Record<string, unknown>>).flatMap((a) =>
+				a && Array.isArray(a.anyOf) && Object.keys(a).length === 1 ? (a.anyOf as unknown[]) : [a],
+			);
+			obj = { ...obj, anyOf: flat };
+		}
 		const out: Record<string, unknown> = {};
-		for (const [k, v] of Object.entries(node)) {
+		for (const [k, v] of Object.entries(obj)) {
 			if (LEAN_DROP.has(k)) continue;
 			out[k] = lean(v);
 		}
 		return out;
 	};
-	return lean(z.toJSONSchema(DeckSpecSchema, { io: "input" })) as Record<string, unknown>;
-})();
+	return lean(z.toJSONSchema(schema, { io: "input" })) as Record<string, unknown>;
+}
+
+export const DECK_SPEC_PARAMETER: Record<string, unknown> = leanParameter(DeckSpecSchema);
+
+/**
+ * The office tools' spec parameters (#4274), from the builders' own schemas like the deck's.
+ * The first sentence of each description is the input shape: a local model reads that first.
+ */
+export const OFFICE_TOOL_DESCRIPTIONS: Record<OfficeToolName, string> = {
+	make_docx:
+		"Word .docx from args {spec:{title?, blocks:[{type:'heading'|'paragraph'|'bullets'|'table'|'image'|'pageBreak', ...}]}, out:'a.docx'}. Block fields: heading {text, level?: 1-3}, paragraph {text}, bullets {items, numbered?}, table {rows: [[cells]], header?}, image {path, caption?}. You write the spec, local code writes the file: A4, real Word heading and list styles, **bold** inside text, png/jpg images from the working directory. Returns { path, bytes, blocks, textChars }. No macros, no network. read_file on a .docx returns its text.",
+	make_xlsx:
+		"Excel .xlsx from args {spec:{sheets:[{name, rows:[[cell,...]], header?, columns?:[widths]}]}, out:'data.xlsx'}. A cell is a string, number, boolean, null or {value?, formula?:'=SUM(B2:B9)', format?:'#,##0.00', date?:'YYYY-MM-DD', bold?}. header:true bolds and freezes row 1. Formulas recalculate when the file opens and may call only local functions (SUM, IF, VLOOKUP...). Returns { path, bytes, sheets, cells }. No macros, no network. read_file on a .xlsx returns its cells.",
+	make_pptx:
+		"PowerPoint .pptx from args {spec:{title?, slides:[{kicker?, title?, text?, bullets?, image?, notes?}]}, out:'deck.pptx'}. Same slide shape as render_video_deck, so one spec can be a film or a deck: narration becomes the speaker notes when notes is absent. 16:9 slides, png/jpg images from the working directory. Returns { path, bytes, slides, notes }. No macros, no network. read_file on a .pptx returns slide text and notes.",
+};
+
+export const OFFICE_SPEC_PARAMETERS: Record<OfficeToolName, Record<string, unknown>> = {
+	make_docx: leanParameter(DocxSpecSchema),
+	make_xlsx: leanParameter(XlsxSpecSchema),
+	make_pptx: leanParameter(PptxSpecSchema),
+};
 
 export { REFUSAL_LEAD, REFUSAL_NOTE, refusalLead };
 
@@ -890,6 +998,7 @@ export class ToolExecutor {
 	private seenPaths = new Set<string>();
 	/** Commands the harness refused; a refused probe proves nothing about the files it named (#4238). */
 	private blockedCommands: string[] = [];
+	private issueBlameGate = new IssueBlameGate();
 	/**
 	 * Files this agent created (write_file, run_command redirects), in memory
 	 * only (#3177). System One lets it rm them without the judge. The Agent
@@ -922,6 +1031,14 @@ export class ToolExecutor {
 	 * default): read_image returns metadata, as it always did.
 	 */
 	private visionCapable: () => Promise<boolean>;
+	private localRuntime: () => boolean;
+	private tabVoice: string | undefined;
+	/**
+	 * Results the harness itself built with an image attachment (#4295). Held by
+	 * value, so text a tool or a filename can produce never matches. execute()
+	 * consumes the entry; only a hit lets the scrubber hold the attachment line out.
+	 */
+	private harnessAttachmentResults = new Set<string>();
 	/** Finds the vision model describe_image calls (#3642). Injectable for tests. */
 	private resolveVisionModel: () => Promise<VisionRouterResult>;
 	/** The minimal-environment hint is appended once per session (see runCommand). */
@@ -937,6 +1054,10 @@ export class ToolExecutor {
 			openOnWrite?: boolean;
 			permission?: PermissionModeHolder;
 			visionCapable?: () => Promise<boolean>;
+			/** The model runs on this box, so read_image keeps the small image bound (#4293). */
+			localRuntime?: () => boolean;
+			/** Voice for `speak` when the call names none (the voice of the tab this 8gent serves). */
+			tabVoice?: string;
 			resolveVisionModel?: () => Promise<VisionRouterResult>;
 			/**
 			 * A person is at the keyboard (G1 extension_call policy). Default: not
@@ -949,6 +1070,8 @@ export class ToolExecutor {
 		this.postSession = sessionId ?? `${agentId}-${process.pid}-${Date.now()}`;
 		this.permission = options.permission;
 		this.visionCapable = options.visionCapable ?? (async () => false);
+		this.localRuntime = options.localRuntime ?? (() => true);
+		this.tabVoice = options.tabVoice;
 		this.resolveVisionModel =
 			options.resolveVisionModel ?? (() => findVisionModel({ preferLocal: true }));
 		this.agentId = agentId;
@@ -1519,6 +1642,24 @@ export class ToolExecutor {
 			{
 				type: "function",
 				function: {
+					name: "use_skill",
+					description: USE_SKILL_DESCRIPTION,
+					parameters: {
+						type: "object",
+						properties: {
+							name: {
+								type: "string",
+								description:
+									"Skill name exactly as listed, for example brief-to-film (never a path)",
+							},
+							query: { type: "string", description: "Word to filter the skill list by" },
+						},
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
 					name: "render_video_deck",
 					description:
 						"[MEDIA] Narrated mp4 from args {spec:{size:'1280x720', slides:[{title, bullets, narration}]}, out:'deck.mp4'}, local code only. Deterministic. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task: you write the spec, it draws the slides, joins them and returns { path, durationSec }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?: string[], image?: 'png/jpg path in the working directory', seconds?: 1-60 (default 4), narration?: 'spoken by the local voice', voice? }] } (1-40 slides, each needs a title, text, bullets or image). Narration uses the same local engine as speak and stretches a slide to fit its voice. No music, no network. Never shells out.",
@@ -1535,6 +1676,24 @@ export class ToolExecutor {
 					},
 				},
 			},
+			...(Object.keys(OFFICE_TOOLS) as OfficeToolName[]).map((name) => ({
+				type: "function",
+				function: {
+					name,
+					description: `[FILE] ${OFFICE_TOOL_DESCRIPTIONS[name]}`,
+					parameters: {
+						type: "object",
+						properties: {
+							spec: OFFICE_SPEC_PARAMETERS[name],
+							out: {
+								type: "string",
+								description: `Output .${OFFICE_TOOLS[name]} path inside the working directory`,
+							},
+						},
+						required: ["spec"],
+					},
+				},
+			})),
 			{
 				type: "function",
 				function: {
@@ -2062,14 +2221,16 @@ export class ToolExecutor {
 				function: {
 					name: "browser_task",
 					description:
-						"Run verified steps in the tab: type{index|selector,text}, left_click{index|selector}, wait_for{selector}, open{url}, scroll{dy}.",
+						"Tab steps: type{index|selector,text}, left_click{index}, wait_for{selector}, open{url}, scroll{dy}; login text {{file:TASK.txt:Password}}. " +
+						"Each step is verified. left_click also takes a selector. {{file:PATH:Field}} in type text types the value of the 'Field:' line of that workspace file at act time, only on a local address written in the same file, so the value never enters the conversation or the shell.",
 					parameters: {
 						type: "object",
 						properties: {
 							actions: {
 								type: "array",
 								items: { type: "object" },
-								description: "Ordered steps to run in the tab (see tool description)",
+								description:
+									'Ordered steps, e.g. [{"action":"type","index":3,"text":"{{file:TASK.txt:Password}}"},{"action":"left_click","index":4}]',
 							},
 							task: {
 								type: "string",
@@ -2115,6 +2276,8 @@ export class ToolExecutor {
 			...(process.env.EIGHT_MCP_LEAN === "1" ? MCP_LEAN_TOOL_DEFS : []),
 			// Posting (#3595): advertised only where the tg-group helper is installed.
 			...(postMessageAvailable() ? [POST_MESSAGE_TOOL_DEF] : []),
+			// Mid-task note to the boardroom (#4344): local file only; EIGHT_MESSAGE_BOARDROOM=0 withholds it.
+			...(messageBoardroomOn() ? [MESSAGE_BOARDROOM_TOOL_DEF] : []),
 			// Windows only, off by default (settings.shell.powershellTool).
 			...(powershellToolShell() ? [POWERSHELL_TOOL_DEF] : []),
 		]);
@@ -2158,6 +2321,9 @@ export class ToolExecutor {
 		write_file: "write_file",
 		speak: "write_file",
 		render_video_deck: "write_file",
+		make_docx: "write_file",
+		make_xlsx: "write_file",
+		make_pptx: "write_file",
 		edit_file: "write_file",
 		// Notebook cell edits write text into a file too (#3011).
 		notebook_edit_cell: "write_file",
@@ -2209,7 +2375,12 @@ export class ToolExecutor {
 		// Order is contract: SecretScanner -> [Cache lookup, #2462] -> execute
 		// -> ArtifactStore persist (#2463). Scrub MUST run before persist so
 		// no secret value ever lands on disk.
-		const result = scrubSecrets(raw);
+		// read_image alone may end in a harness-emitted image attachment line, held out of
+		// the scan so a large image is not cut at the input cap (#4295).
+		const result =
+			toolName === IMAGE_ATTACHMENT_TOOL && this.harnessAttachmentResults.delete(raw)
+				? scrubKeepingAttachment(raw, IMAGE_ATTACHMENT_MARKER)
+				: scrubSecrets(raw);
 		if (result.redactedCount > 0) {
 			// Log redaction event to telemetry (no secret values, just metadata).
 			console.warn(
@@ -2301,7 +2472,7 @@ export class ToolExecutor {
 		const writeTarget = (
 			toolName === "film_craft"
 				? filmWrites[0]
-				: toolName === "speak" || toolName === "render_video_deck"
+				: toolName === "speak" || toolName === "render_video_deck" || isOfficeTool(toolName)
 					? args.out
 					: toolName === "compare_layout"
 						? args.html
@@ -2519,20 +2690,39 @@ export class ToolExecutor {
 						return "[ERROR] text_file is over 64 KB; a message is at most 4096 characters.";
 					text = fs.readFileSync(file, "utf8").replace(/\s+$/, "");
 				}
+				// attachment (#4265): a file inside the project, resolved with the same
+				// workspace guard as every file tool (traversal, symlink escape, credential files).
+				let attachment: Attachment | undefined;
+				if (args.attachment != null && args.attachment !== "") {
+					const r = resolveAttachment(args.attachment, (p) =>
+						safePath(p, this.workingDirectory, "read"),
+					);
+					if (!r.attachment) return r.error as string;
+					attachment = r.attachment;
+				}
 				// Pre-send check (#4191): the task's countable rules, counted in the draft with code
-				// (after text_file is read, so a drafted file is counted too).
-				const presend = this.presendCheck(text);
-				if (presend) return presend;
+				// (after text_file is read, so a drafted file is counted too). A bare file has no draft.
+				if (text !== "" || !attachment) {
+					const presend = this.presendCheck(text);
+					if (presend) return presend;
+				}
 				return postMessage(
 					{
 						chat: String(args.chat ?? ""),
 						text,
 						voice: typeof args.voice === "string" && args.voice ? args.voice : undefined,
+						attachment,
 					},
 					postMessageDeps(this.agentId, this.postSession),
 				);
 			}
-			case "gh_issue_create":
+			case "message_boardroom":
+				// A fixed local file, no path from the model, no network: not routed through a policy action.
+				if (!messageBoardroomOn()) return "Error: message_boardroom is switched off here.";
+				return messageBoardroom(args, { session: this.postSession, task: this.presendTask });
+			case "gh_issue_create": {
+				const held = this.issueBlameGate.check(String(args.body || ""));
+				if (held) return held;
 				return this.runSpawn("gh", [
 					"issue",
 					"create",
@@ -2541,10 +2731,15 @@ export class ToolExecutor {
 					"--body",
 					String(args.body || ""),
 				]);
+			}
 
 			// Shell
 			case "run_command": {
 				const command = args.command as string;
+				// #4320: a ticket blames one file; a body naming two is held once for a trim.
+				const issueBody = issueBodyOf(command, this.workingDirectory);
+				const held = issueBody === null ? null : this.issueBlameGate.check(issueBody);
+				if (held) return held;
 				const run = () => this.runCommand(command, args.timeout as number | undefined);
 				// A command the sanitizer refuses never commits, so it never runs the suite.
 				const target = parseGitCommit(command);
@@ -2615,7 +2810,7 @@ export class ToolExecutor {
 					return JSON.stringify(
 						await speak({
 							text: args.text as string,
-							voice: args.voice as string | undefined,
+							voice: (args.voice as string | undefined) ?? this.tabVoice,
 							out,
 						}),
 					);
@@ -2641,6 +2836,29 @@ export class ToolExecutor {
 					);
 				} catch (err) {
 					return `Error: render_video_deck failed: ${err instanceof Error ? err.message : String(err)}`;
+				}
+			}
+
+			case "make_docx":
+			case "make_xlsx":
+			case "make_pptx": {
+				try {
+					const tool = toolName as OfficeToolName;
+					const out = resolveOfficeOut(tool, args.out, this.workingDirectory);
+					// An edit-scoped child session writes only into its scope (same check as write_file).
+					const scoped = editScopeViolation(
+						toolName,
+						{ out: args.out ?? path.basename(out) },
+						this.workingDirectory,
+						this.allowedPaths,
+					);
+					if (scoped) return scoped;
+					const { makeOffice } = await import("../tools/office/index");
+					return JSON.stringify(
+						makeOffice(OFFICE_TOOLS[tool], args.spec, out, this.workingDirectory),
+					);
+				} catch (err) {
+					return `Error: ${toolName} failed: ${err instanceof Error ? err.message : String(err)}`;
 				}
 			}
 
@@ -2751,6 +2969,10 @@ export class ToolExecutor {
 				return this.handleBackgroundStatus(args.taskId as string);
 			case "background_output":
 				return this.handleBackgroundOutput(args.taskId as string, args.tail as number);
+
+			case "use_skill":
+				// Name lookup only (#3593): the model never passes a path, so nothing outside the skill folders is read.
+				return useSkill(args, { projectDir: this.workingDirectory });
 
 			case "film_craft":
 				// Every path is confined to the workspace (no traversal, no symlink out) and made
@@ -3083,6 +3305,12 @@ export class ToolExecutor {
 			return `File not found: ${absolutePath}`;
 		}
 
+		// A Word, Excel or PowerPoint file is a zip: return its text, not its bytes (#4274).
+		if (isOfficeFile(absolutePath)) {
+			this.seenPaths.add(absolutePath);
+			return readOfficeFile(absolutePath, fs.readFileSync(absolutePath));
+		}
+
 		const content = fs.readFileSync(absolutePath, "utf-8");
 		this.retiredFacts.noteRead(absolutePath, content);
 		this.seenPaths.add(absolutePath);
@@ -3092,6 +3320,19 @@ export class ToolExecutor {
 		if (content === "") return "";
 
 		const isCodeFile = /\.(ts|tsx|js|jsx)$/.test(absolutePath);
+		const withLinks = (body: string): string => {
+			const footer = isCodeFile
+				? linksFooter(absolutePath, content, this.seenPaths, this.workingDirectory, (abs) => {
+						try {
+							safePath(abs, this.workingDirectory, "read");
+							return true;
+						} catch {
+							return false;
+						}
+					})
+				: "";
+			return footer ? `${body}\n\n${footer}` : body;
+		};
 		// Anchors per row with EIGHT_EDIT_FORMAT=hashline (#3472), else `cat -n`.
 		const numberRows = hashlineEnabled() ? hashLines : numberLines;
 		const offset = positiveInt(offsetArg);
@@ -3106,9 +3347,11 @@ export class ToolExecutor {
 			const count = limit ?? (isCodeFile ? 200 : lines.length);
 			const end = Math.min(lines.length, start - 1 + count);
 			const body = numberRows(lines.slice(start - 1, end), start);
-			return end < lines.length
-				? `${body}\n\n[Lines ${start}-${end} of ${lines.length}. Use offset=${end + 1} to read more.]`
-				: body;
+			return withLinks(
+				end < lines.length
+					? `${body}\n\n[Lines ${start}-${end} of ${lines.length}. Use offset=${end + 1} to read more.]`
+					: body,
+			);
 		}
 
 		// AST-first interception: for code files > 200 lines, prepend outline
@@ -3151,14 +3394,16 @@ export class ToolExecutor {
 				}
 			}
 
-			return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberRows(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`;
+			return withLinks(
+				`${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberRows(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`,
+			);
 		}
 
 		if (DIFF_FILE.test(absolutePath)) {
 			const diff = numberDiffLines(lines);
 			if (diff !== null) return diff;
 		}
-		return numberRows(lines, 1);
+		return withLinks(numberRows(lines, 1));
 	}
 
 	private async writeFile(filePath: string, content: string): Promise<string> {
@@ -3424,7 +3669,11 @@ export class ToolExecutor {
 			// so the pieces are not resent as they are and blocked again (#4072).
 			const piece = await chainedPieceRefusal(command, dir, systemOneEnvFor(mode));
 			const also = piece ? ` One part would be refused on its own too. ${piece}` : "";
-			return refusalLead(`[BLOCKED] ${validation.reason}.${also} Command: ${command}`);
+			// After a cd prefix the refusal keeps the folder, or the pieces run at the root (#4260).
+			const inFolder = where ? chainInFolderNote(where) : "";
+			return refusalLead(
+				`[BLOCKED] ${validation.reason}.${also}${inFolder} Command: ${commandInFolder(command, where)}`,
+			);
 		}
 
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 turns it off): it can only stop a
@@ -3555,7 +3804,14 @@ export class ToolExecutor {
 					workingDirectory: dir,
 				});
 
-				let output = formatCommandOutput(code, stdout, stderr, finalCommand, this.workingDirectory);
+				let output = formatCommandOutput(
+					code,
+					stdout,
+					stderr,
+					finalCommand,
+					dir,
+					this.workingDirectory,
+				);
 				// Once per session, on a failure, say the environment is minimal (no names or values).
 				if (code !== 0 && !this.envHintShown && withheldAny()) {
 					this.envHintShown = true;
@@ -3622,12 +3878,20 @@ export class ToolExecutor {
 
 		try {
 			// A model that can see gets the pixels (#3641): downscaled to fit
-			// 1024x1024 so a Retina screenshot does not swamp its context, and
+			// imageMaxSide (2560 local and hosted; #4293) so a Retina screenshot does not swamp its context, and
 			// attached to the next message by the text-tool loop. The text part
 			// is the metadata the model always had.
 			if (await this.visionCapable()) {
-				const shown = await resizeImage(absolutePath, 1024, 1024);
+				const side = imageMaxSide(this.localRuntime());
+				const shown = await resizeImage(absolutePath, side, side);
 				const mimeType = `image/${shown.format === "jpg" ? "jpeg" : shown.format}`;
+				// #4293: when the copy is smaller than the original, the fields that map
+				// its coordinates back ride inside the JSON so the text stays parseable.
+				const original = {
+					width: shown.originalWidth ?? shown.width,
+					height: shown.originalHeight ?? shown.height,
+				};
+				const note = downscaleNote(original, shown);
 				const meta = JSON.stringify(
 					{
 						path: shown.path,
@@ -3635,6 +3899,14 @@ export class ToolExecutor {
 						height: shown.height,
 						format: shown.format,
 						attached: "The image is attached to this message for you to look at.",
+						...(note
+							? {
+									original_width: original.width,
+									original_height: original.height,
+									scale: Number((original.width / shown.width).toFixed(3)),
+									note,
+								}
+							: {}),
 					},
 					null,
 					2,
@@ -3642,7 +3914,9 @@ export class ToolExecutor {
 				// #3770: the copy above is downscaled, so give the real pixel geometry.
 				const measured = await this.layoutForRead(absolutePath);
 				const text = measured ? `${meta}\n${measured}` : meta;
-				return imageAttachmentResult(text, mimeType, shown.base64);
+				const withImage = imageAttachmentResult(text, mimeType, shown.base64);
+				this.harnessAttachmentResults.add(withImage);
+				return withImage;
 			}
 			const imageInfo = await readImage(absolutePath);
 			const measured = await this.layoutForRead(absolutePath);

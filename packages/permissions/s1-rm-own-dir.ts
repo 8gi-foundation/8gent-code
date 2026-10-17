@@ -56,7 +56,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { lstatSync, readdirSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -95,8 +95,33 @@ function untracked(root: string, rel: string): boolean {
 	return r.status === 128 && /not a git repository/i.test(r.stderr ?? "");
 }
 
+/**
+ * The harness's own marker (#4316): packages/eight/scratch-exclude.ts writes `.tmp/.gitignore`
+ * holding exactly `*\n` so scratch stays out of git status without editing .git. It is not a
+ * file the session wrote, but it is ours and inert. Only that exact file, directly under the
+ * workspace's `.tmp`, as a regular file with exactly that content.
+ */
+function isScratchMarker(
+	abs: string,
+	root: string,
+	st: { isFile(): boolean; size: bigint; nlink: bigint },
+): boolean {
+	try {
+		if (
+			abs !== path.join(root, SCRATCH_DIR, ".gitignore") ||
+			!st.isFile() ||
+			st.size !== 2n ||
+			st.nlink !== 1n
+		)
+			return false;
+		return readFileSync(abs, "utf8") === "*\n";
+	} catch {
+		return false;
+	}
+}
+
 /** Null when every entry under `dir` is fine (see the header), else why not. */
-function contentsProblem(dir: string, created: CreatedFiles): string | null {
+function contentsProblem(dir: string, created: CreatedFiles, root: string): string | null {
 	const top = lstatSync(dir, { bigint: true });
 	const stack = [dir];
 	let seen = 0;
@@ -108,6 +133,7 @@ function contentsProblem(dir: string, created: CreatedFiles): string | null {
 			const abs = path.join(cur, name);
 			const st = lstatSync(abs, { bigint: true });
 			if (st.dev !== top.dev) return "it holds a mount point.";
+			if (isScratchMarker(abs, root, st)) continue;
 			if (st.birthtimeNs <= 0n || st.birthtimeNs < top.birthtimeNs)
 				return `it holds ${path.relative(dir, abs)}, which is older than the directory (moved in from elsewhere).`;
 			if (st.isDirectory()) {
@@ -176,7 +202,7 @@ export function rmOwnDir(
 			if (!created.createdDirBySession(cur))
 				return hint(`\`${p}\` is not a directory this session made with a mkdir-only run_command.`);
 			if (!untracked(root, rel)) return hint(`git tracks files under \`${p}\`.`);
-			const why = contentsProblem(cur, created);
+			const why = contentsProblem(cur, created, root);
 			if (why) return hint(`\`${p}\`: ${why}`);
 			names.push(rel);
 		}

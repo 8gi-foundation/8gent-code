@@ -29,6 +29,7 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 		"search_symbols",
 		"locate",
 		"update_plan",
+		"use_skill",
 	],
 	git: [
 		"git_status",
@@ -62,7 +63,15 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 		"notebook_insert_cell",
 		"notebook_delete_cell",
 	],
-	creative: ["generate_sprite", "make_pdf", "speak", "render_video_deck"],
+	creative: [
+		"generate_sprite",
+		"make_pdf",
+		"make_docx",
+		"make_xlsx",
+		"make_pptx",
+		"speak",
+		"render_video_deck",
+	],
 	orchestration: [
 		"spawn_agent",
 		"check_agent",

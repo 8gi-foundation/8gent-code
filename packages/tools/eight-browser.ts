@@ -28,6 +28,9 @@ import { createHash } from "node:crypto";
 import {
 	closeSync,
 	existsSync,
+	constants as fsConstants,
+	fstatSync,
+	lstatSync,
 	mkdirSync,
 	openSync,
 	readFileSync,
@@ -255,10 +258,119 @@ export async function blockedBrowserDestination(
 
 const PLACEHOLDER = /\{\{secret:([A-Za-z][A-Za-z0-9_]{0,63})\}\}/g;
 
+// {{file:TASK.txt:Password}} (#4280, 8GO battle-harden move 7): a credential the task
+// itself supplies, read from a "Password: ..." line of a workspace file at act time. Login state is
+// fixture, not model labour: the model never copies the value through the shell or its context.
+// Typed only on a loopback page whose origin is written in that same file.
+const FILE_PLACEHOLDER = /\{\{file:([^{}:]{1,200}):([A-Za-z][A-Za-z0-9 _-]{0,63})\}\}/g;
+const MAX_TASK_FILE_BYTES = 64 * 1024;
+const ANY_PLACEHOLDER = new RegExp(`${PLACEHOLDER.source}|${FILE_PLACEHOLDER.source}`, "g");
+
 export const hasSecretPlaceholder = (text: string): boolean => {
 	PLACEHOLDER.lastIndex = 0;
-	return PLACEHOLDER.test(text);
+	FILE_PLACEHOLDER.lastIndex = 0;
+	return PLACEHOLDER.test(text) || FILE_PLACEHOLDER.test(text);
 };
+
+/**
+ * The value of the `field:` line in workspace file `rel`, if it may be typed on `pageUrl`. Refused:
+ * an absolute path, any dot segment (.env, .git, ..), a path that resolves outside the workspace,
+ * anything but a small regular file, a missing field, and a page that is not loopback or whose
+ * origin is not written in the file. Errors name the file and field, never the value.
+ */
+export function resolveTaskFileField(
+	workspace: string | undefined,
+	rel: string,
+	field: string,
+	pageUrl: string,
+): { ok: true; value: string } | { ok: false; error: string } {
+	const label = `${rel}:${field}`;
+	if (!workspace) return { ok: false, error: `${label}: no workspace for file placeholders` };
+	const segs = rel.split(/[\\/]/);
+	if (
+		pathPosix.isAbsolute(rel) ||
+		pathWin32.isAbsolute(rel) ||
+		segs.some((x) => x === "" || x.startsWith("."))
+	)
+		return {
+			ok: false,
+			error: `${label}: the file must be a plain relative path inside the workspace`,
+		};
+	let text: string;
+	try {
+		const root = realpathSync.native(workspace);
+		/** Inside the workspace, and no segment of the resolved path (a symlink target too) is a dot name. */
+		const contained = (real: string) => {
+			if (!secretsPathInHome(real, root, process.platform)) return false;
+			const p = process.platform === "win32" ? pathWin32 : pathPosix;
+			return !p
+				.relative(root, real)
+				.split(/[\\/]/)
+				.some((x) => x.startsWith("."));
+		};
+		const real = realpathSync.native(join(root, rel));
+		if (!contained(real))
+			return {
+				ok: false,
+				error: `${label}: the file resolves outside the workspace or to a dot file`,
+			};
+		const checked = lstatSync(real);
+		// Refuse before opening: opening a FIFO or device can block, and a big file is never a task file.
+		if (!checked.isFile() || checked.size > MAX_TASK_FILE_BYTES)
+			return { ok: false, error: `${label}: not a small regular file with a single link` };
+		// Read through one handle: no follow on the last component, and the handle must be the very
+		// file checked (same device and inode), a regular file, small, with exactly one link (a hard
+		// link can alias a file outside the workspace).
+		const fd = openSync(
+			real,
+			fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
+		);
+		try {
+			const st = fstatSync(fd);
+			if (
+				!st.isFile() ||
+				st.size > MAX_TASK_FILE_BYTES ||
+				st.nlink !== 1 ||
+				st.dev !== checked.dev ||
+				st.ino !== checked.ino
+			)
+				return { ok: false, error: `${label}: not a small regular file with a single link` };
+			// The path must still resolve to the same place: a parent swapped since the check is refused.
+			const again = realpathSync.native(real);
+			if (again !== real || !contained(again))
+				return { ok: false, error: `${label}: the file moved while it was being read` };
+			text = readFileSync(fd, "utf8");
+		} finally {
+			closeSync(fd);
+		}
+	} catch {
+		return { ok: false, error: `${label}: the file could not be read` };
+	}
+	const esc = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const m = new RegExp(`^[ \\t]*${esc}[ \\t]*:[ \\t]*(\\S(?:.*\\S)?)[ \\t\\r]*$`, "im").exec(text);
+	if (!m) return { ok: false, error: `${label}: no "${field}:" line in the file` };
+	// A tab or other control character would move focus and type the rest into another field.
+	if (/[\x00-\x1f\x7f]/.test(m[1]))
+		return { ok: false, error: `${label}: the value holds a control character` };
+	let page: URL;
+	try {
+		page = new URL(pageUrl);
+	} catch {
+		return { ok: false, error: `${label}: the page has no address` };
+	}
+	const origins = new Set<string>();
+	for (const u of text.match(/https?:\/\/[^\s<>"'`)]+/g) ?? []) {
+		try {
+			origins.add(new URL(u).origin);
+		} catch {}
+	}
+	if (!isLoopbackHost(page.hostname) || !origins.has(page.origin))
+		return {
+			ok: false,
+			error: `${label}: typed only on a local (loopback) address written in that file, not on ${page.origin}`,
+		};
+	return { ok: true, value: m[1] };
+}
 
 /**
  * True when `file` is `home` or below it, compared with the rules of `platform`
@@ -276,24 +388,29 @@ export function resolveSecretText(
 	text: string,
 	pageUrl: string,
 	file: string | undefined = process.env.EIGHT_BROWSER_SECRETS_FILE,
+	/** Workspace root for {{file:PATH:FIELD}} placeholders; none refuses them. */
+	workspace?: string,
 ): { ok: true; text: string; values: Map<string, string> } | { ok: false; error: string } {
-	if (!file) return { ok: false, error: "no secrets file is configured for placeholders" };
-	let table: Record<string, { value?: unknown; hosts?: unknown }>;
-	try {
-		// Windows has no POSIX mode bits (stat reports 0o666 for every file), so the mode check
-		// would refuse every secrets file there. Instead the file must live under the user's home,
-		// whose NTFS ACL is user-only by default. The ACL itself is not read: accepted risk,
-		// docs/security/windows-secrets-file.md.
-		if (
-			process.platform === "win32" &&
-			!secretsPathInHome(realpathSync.native(file), realpathSync.native(homedir()), "win32")
-		)
-			return { ok: false, error: "on Windows the secrets file must be inside your home folder" };
-		if (process.platform !== "win32" && statSync(file).mode & 0o077)
-			return { ok: false, error: "the secrets file must not be readable by group or others" };
-		table = JSON.parse(readFileSync(file, "utf8"));
-	} catch {
-		return { ok: false, error: "the secrets file could not be read" };
+	PLACEHOLDER.lastIndex = 0;
+	let table: Record<string, { value?: unknown; hosts?: unknown }> | null = null;
+	if (PLACEHOLDER.test(text)) {
+		if (!file) return { ok: false, error: "no secrets file is configured for placeholders" };
+		try {
+			// Windows has no POSIX mode bits (stat reports 0o666 for every file), so the mode check
+			// would refuse every secrets file there. Instead the file must live under the user's home,
+			// whose NTFS ACL is user-only by default. The ACL itself is not read: accepted risk,
+			// docs/security/windows-secrets-file.md.
+			if (
+				process.platform === "win32" &&
+				!secretsPathInHome(realpathSync.native(file), realpathSync.native(homedir()), "win32")
+			)
+				return { ok: false, error: "on Windows the secrets file must be inside your home folder" };
+			if (process.platform !== "win32" && statSync(file).mode & 0o077)
+				return { ok: false, error: "the secrets file must not be readable by group or others" };
+			table = JSON.parse(readFileSync(file, "utf8"));
+		} catch {
+			return { ok: false, error: "the secrets file could not be read" };
+		}
 	}
 	let host = "";
 	try {
@@ -301,19 +418,33 @@ export function resolveSecretText(
 	} catch {}
 	const values = new Map<string, string>();
 	let failure: string | null = null;
-	const out = text.replace(PLACEHOLDER, (_m, name: string) => {
-		const e = Object.hasOwn(table ?? {}, name) ? table[name] : undefined;
-		if (!e || typeof e.value !== "string" || e.value === "") {
-			failure ??= `secret ${name} is not available`;
-			return "";
-		}
-		if (!Array.isArray(e.hosts) || !e.hosts.some((h) => String(h).toLowerCase() === host)) {
-			failure ??= `secret ${name} is not allowed on this page`;
-			return "";
-		}
-		values.set(`{{secret:${name}}}`, e.value);
-		return e.value;
-	});
+	// One pass over both forms, so a resolved value is never itself read as a placeholder.
+	const out = text.replace(
+		ANY_PLACEHOLDER,
+		(whole, name?: string, rel?: string, field?: string) => {
+			if (rel !== undefined && field !== undefined) {
+				const r = resolveTaskFileField(workspace, rel, field, pageUrl);
+				if (!r.ok) {
+					failure ??= r.error;
+					return "";
+				}
+				values.set(whole, r.value);
+				return r.value;
+			}
+			const key = name ?? "";
+			const e = table && Object.hasOwn(table, key) ? table[key] : undefined;
+			if (!e || typeof e.value !== "string" || e.value === "") {
+				failure ??= `secret ${key} is not available`;
+				return "";
+			}
+			if (!Array.isArray(e.hosts) || !e.hosts.some((h) => String(h).toLowerCase() === host)) {
+				failure ??= `secret ${key} is not allowed on this page`;
+				return "";
+			}
+			values.set(whole, e.value);
+			return e.value;
+		},
+	);
 	if (failure) return { ok: false, error: failure };
 	if (out.length > LIMITS.maxTypeLength)
 		return { ok: false, error: `type.text > ${LIMITS.maxTypeLength} chars after resolving` };
@@ -625,16 +756,29 @@ const realSpawn: BrowserSpawnFn = (spec) => {
 	return { exited, pid, detached: true };
 };
 
-/** The 8gent Browser binary: EIGHT_BROWSER_APP, else the macOS app bundle in /Applications or ~/Applications. */
+let appDirsOverride: string[] | null = null;
+/** Test seam: look for app bundles in these directories instead of the real ones. Never set outside tests. */
+export function _setAppDirsForTest(dirs: string[] | null): void {
+	appDirsOverride = dirs;
+}
+
+/**
+ * The 8gent Browser binary: EIGHT_BROWSER_APP, else the macOS app bundle in /Applications,
+ * ~/Applications or ~/.8gent/apps (#3589). The first build there that can run a named profile wins, so
+ * an old desktop-v0.3.0 in /Applications no longer hides a newer build in ~/.8gent/apps. With no capable
+ * build the first one found is returned, and launchOnce refuses it with the same "update it" error.
+ */
 export function browserBinary(env: Env = process.env, home: string = homedir()): string | null {
 	if (env.EIGHT_BROWSER_APP) return env.EIGHT_BROWSER_APP;
 	if (process.platform !== "darwin") return null;
 	const rel = join("8gent Browser.app", "Contents", "MacOS", "8gent Browser");
-	for (const dir of ["/Applications", join(home, "Applications")]) {
-		const p = join(dir, rel);
-		if (existsSync(p)) return p;
-	}
-	return null;
+	const dirs = appDirsOverride ?? [
+		"/Applications",
+		join(home, "Applications"),
+		join(home, ".8gent", "apps"),
+	];
+	const found = dirs.map((d) => join(d, rel)).filter((p) => existsSync(p));
+	return found.find((p) => profileSupportProblem(p) === null) ?? found[0] ?? null;
 }
 
 /** A free TCP port on loopback that is not the default control port or a reserved service port. */
@@ -1490,7 +1634,12 @@ export function createEightBrowser(
 	}
 
 	async function run(raw: unknown[], tabId?: string, approve?: ApproveFn): Promise<string> {
-		return scrub(await runSteps(raw, tabId, approve));
+		try {
+			return scrub(await runSteps(raw, tabId, approve));
+		} catch (e) {
+			// A transport error can echo what was typed; scrub it like returned output.
+			throw new Error(scrub(e instanceof Error ? e.message : String(e)));
+		}
 	}
 
 	async function runSteps(raw: unknown[], tabId?: string, approve?: ApproveFn): Promise<string> {
@@ -1520,7 +1669,7 @@ export function createEightBrowser(
 			}
 
 			if (v.action.action === "type" && hasSecretPlaceholder(v.action.text)) {
-				const r = resolveSecretText(v.action.text, before.url, secretsFile());
+				const r = resolveSecretText(v.action.text, before.url, secretsFile(), workspace());
 				if (!r.ok) return fail(`dry run: step ${i}: ${r.error}`);
 			}
 			plan.push(v.action);
@@ -1580,7 +1729,7 @@ export function createEightBrowser(
 				let text = a.text;
 				if (hasSecretPlaceholder(a.text)) {
 					// Resolved now, against the page as it is now: an earlier step may have moved it.
-					const r = resolveSecretText(a.text, before.url, secretsFile());
+					const r = resolveSecretText(a.text, before.url, secretsFile(), workspace());
 					if (!r.ok) return fail(`step ${i}: ${r.error}`, steps);
 					text = r.text;
 					for (const [placeholder, value] of r.values) resolvedSecrets.set(value, placeholder);

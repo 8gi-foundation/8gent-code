@@ -74,20 +74,39 @@ function findInstructionFile(dir: string): string | null {
 }
 
 /**
- * Walk up from startDir to filesystem root, collecting directories that contain
- * an instruction file. Returns them in order from root-most to startDir (so
- * closer directories override farther ones when concatenated).
+ * Directories whose listing macOS serves through autofs or the volume mounter.
+ * Looking a name up inside one (for example /AGENTS.md at the root, which
+ * sits beside the autofs /home and /net entries) can make macOS ask for
+ * "Network Volumes" access even when none is mounted, so the walk never
+ * probes them.
  */
-function walkUp(startDir: string): string[] {
+const NEVER_PROBE = new Set(["/", "/Volumes", "/Network", "/net", "/home"]);
+
+/**
+ * Walk up from startDir, collecting directories that contain an instruction
+ * file. Returns them in order from top-most to startDir (so closer directories
+ * override farther ones when concatenated).
+ *
+ * Inside $HOME the walk stops at $HOME: nothing above it is the operator's or
+ * the repo's. Outside $HOME it climbs, but never probes the NEVER_PROBE roots.
+ * `has` is the file probe, injectable so tests can watch what is touched.
+ */
+export function walkUp(
+	startDir: string,
+	homeDir: string = resolve(home()),
+	has: (dir: string) => boolean = (d) => findInstructionFile(d) !== null,
+): string[] {
 	const dirs: string[] = [];
 	let current = resolve(startDir);
+	const insideHome = current === homeDir || current.startsWith(`${homeDir}/`);
 	const seen = new Set<string>();
 
 	while (!seen.has(current)) {
 		seen.add(current);
-		if (findInstructionFile(current) !== null) {
+		if (!NEVER_PROBE.has(current) && has(current)) {
 			dirs.push(current);
 		}
+		if (insideHome && current === homeDir) break; // never above $HOME
 		const parent = dirname(current);
 		if (parent === current) break; // filesystem root
 		current = parent;
@@ -143,7 +162,7 @@ export function loadInstructionParts(
 	}
 
 	// 3. Walk up from cwd, collecting project instructions
-	const projectDirs = walkUp(cwd);
+	const projectDirs = walkUp(cwd, homeDir);
 	for (const dir of projectDirs) {
 		// Avoid duplicating global if ~/.8gent happens to be in the walk-up path
 		if (dir === globalDir) continue;

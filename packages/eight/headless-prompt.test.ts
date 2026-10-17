@@ -19,11 +19,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmRetry } from "../../tests/rm-retry";
 import {
+	FOLDER_NOTE,
 	LOCAL_LOGIN_NOTE,
 	LOCAL_SERVER_CURL_SHORT,
 	NARRATION_NOTE,
 	SCRATCH_DIR_NOTE,
 	SLIDES_TO_VIDEO_NOTE,
+	TICKET_FILE_NOTE,
 } from "./prompts/system-prompt";
 
 let Agent: typeof import("./agent").Agent;
@@ -174,6 +176,8 @@ describe("headless prompt diet", () => {
 		const [headless] = await run(true);
 		expect(headless.messages[0].content).toContain(SLIDES_TO_VIDEO_NOTE);
 		expect(headless.messages[0].content).toContain(SCRATCH_DIR_NOTE);
+		expect(headless.messages[0].content).toContain(FOLDER_NOTE);
+		expect(headless.messages[0].content).toContain(TICKET_FILE_NOTE);
 		expect(headless.messages[0].content).toContain("git-ignored, never delete");
 		expect(headless.messages[0].content).not.toContain("mktemp");
 		expect(headless.messages[0].content).toContain(NARRATION_NOTE);

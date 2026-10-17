@@ -9,7 +9,12 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { scrub } from "../secret-scanner";
+import {
+	MAX_ATTACHMENT_BASE64_CHARS,
+	MAX_SCAN_CHARS,
+	scrub,
+	scrubKeepingAttachment,
+} from "../secret-scanner";
 
 describe("SecretScanner - AWS access key id", () => {
 	it("redacts an AKIA key", () => {
@@ -413,7 +418,14 @@ describe("SecretScanner - #3203 .env table (all nine must redact)", () => {
 		const env = lines.map(([l]) => l).join("\n");
 		const out = scrub(env);
 		for (const s of Object.values(secrets)) expect(out.scrubbed).not.toContain(s);
-		for (const name of ["OPENAI_API_KEY", "STRIPE_SECRET_KEY", "AWS_SECRET_ACCESS_KEY", "DATABASE_URL", "TELEGRAM_BOT_TOKEN", "password"]) {
+		for (const name of [
+			"OPENAI_API_KEY",
+			"STRIPE_SECRET_KEY",
+			"AWS_SECRET_ACCESS_KEY",
+			"DATABASE_URL",
+			"TELEGRAM_BOT_TOKEN",
+			"password",
+		]) {
 			expect(out.scrubbed).toContain(name);
 		}
 		expect(out.scrubbed).toContain("postgres://admin:[REDACTED:url_password]@host/x");
@@ -429,8 +441,16 @@ describe("SecretScanner - #3203 value shapes without a name", () => {
 		["sk_test", `sk_test_${rand(24, ALNUM, 14)}`, "stripe_key"],
 		["rk_live", `rk_live_${rand(24, ALNUM, 15)}`, "stripe_key"],
 		["telegram", `bot ${"987654321"}:AA${rand(33, URLSAFE, 16)} ok`, "telegram_bot_token"],
-		["jwt", `Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.${rand(43, URLSAFE, 17)}`, "jwt"],
-		["url password", `git clone https://bob:${rand(20, ALNUM, 18)}@example.com/r.git`, "url_password"],
+		[
+			"jwt",
+			`Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.${rand(43, URLSAFE, 17)}`,
+			"jwt",
+		],
+		[
+			"url password",
+			`git clone https://bob:${rand(20, ALNUM, 18)}@example.com/r.git`,
+			"url_password",
+		],
 		["aws pair", `AKIAIOSFODNN7EXAMPLE ${rand(40, B64, 19)}`, "aws_secret_key"],
 		["aws named lowercase", `aws_secret_access_key = ${rand(40, B64, 20)}`, "aws_secret_key"],
 	];
@@ -456,7 +476,9 @@ describe("SecretScanner - #3203 value shapes without a name", () => {
 		expect(scrub(`{"client_secret": "${rand(30, ALNUM, 24)}"}`).scrubbed).toBe(
 			`{"client_secret": "[REDACTED:secret_assignment]"}`,
 		);
-		expect(scrub(`  dbPassword: hunter2`).scrubbed).toBe("  dbPassword: [REDACTED:secret_assignment]");
+		expect(scrub(`  dbPassword: hunter2`).scrubbed).toBe(
+			"  dbPassword: [REDACTED:secret_assignment]",
+		);
 		expect(scrub(`export GH_TOKEN='abc123def456'`).scrubbed).toBe(
 			"export GH_TOKEN='[REDACTED:secret_assignment]'",
 		);
@@ -466,7 +488,16 @@ describe("SecretScanner - #3203 value shapes without a name", () => {
 	});
 
 	it("matches every secret-word name variant", () => {
-		for (const name of ["MY_PASSWD", "DB_PWD", "GOOGLE_CREDENTIALS", "BASIC_AUTH", "SSH_PRIVATE", "x-api-key", "apiKey", "accessToken"]) {
+		for (const name of [
+			"MY_PASSWD",
+			"DB_PWD",
+			"GOOGLE_CREDENTIALS",
+			"BASIC_AUTH",
+			"SSH_PRIVATE",
+			"x-api-key",
+			"apiKey",
+			"accessToken",
+		]) {
 			const out = scrub(`${name}=Zq8${rand(12, ALNUM, 25)}`);
 			expect(out.rules).toEqual(["secret_assignment"]);
 		}
@@ -506,7 +537,7 @@ describe("SecretScanner - #3203 false-positive guard (must stay untouched)", () 
 		"https://user@example.com/path",
 		"if (token == null) return;",
 		"keys.map((key) => key.id)",
-		"className=\"sk-loading-spinner-container-wrapper\"",
+		'className="sk-loading-spinner-container-wrapper"',
 		"sk-learn is not a package name",
 		"12:30:45 INFO server started on :8080",
 		"Authorization header missing",
@@ -554,12 +585,15 @@ describe("SecretScanner - 8SO: auth headers and cookies", () => {
 		[`token was Bearer ${V32} ok`, V32],
 		[`> X-Api-Key: ${V32}`, V32],
 	];
-	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => {
-		expectHidden(input, secret);
-	});
+	for (const [input, secret] of cases)
+		it(`hides: ${input.slice(0, 40)}`, () => {
+			expectHidden(input, secret);
+		});
 
 	it("keeps the scheme word and Set-Cookie attributes", () => {
-		expect(scrub(`Authorization: Bearer ${V32}`).scrubbed).toBe("Authorization: Bearer [REDACTED:auth_header]");
+		expect(scrub(`Authorization: Bearer ${V32}`).scrubbed).toBe(
+			"Authorization: Bearer [REDACTED:auth_header]",
+		);
 		expect(scrub(`Set-Cookie: session=${V32}; Path=/; HttpOnly`).scrubbed).toBe(
 			"Set-Cookie: session=[REDACTED:cookie]; Path=/; HttpOnly",
 		);
@@ -578,13 +612,18 @@ describe("SecretScanner - 8SO: CLI flags", () => {
 		[`curl -u 'admin:${V20}' https://x`, V20],
 		[`curl --user "admin:${V20}" https://x`, V20],
 	];
-	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => {
-		expectHidden(input, secret);
-	});
+	for (const [input, secret] of cases)
+		it(`hides: ${input.slice(0, 40)}`, () => {
+			expectHidden(input, secret);
+		});
 
 	it("keeps the rest of the command", () => {
-		expect(scrub(`curl -u admin:${V20} https://x`).scrubbed).toBe("curl -u admin:[REDACTED:cli_password] https://x");
-		expect(scrub(`mysql --password ${V20} -u root`).scrubbed).toBe("mysql --password [REDACTED:secret_assignment] -u root");
+		expect(scrub(`curl -u admin:${V20} https://x`).scrubbed).toBe(
+			"curl -u admin:[REDACTED:cli_password] https://x",
+		);
+		expect(scrub(`mysql --password ${V20} -u root`).scrubbed).toBe(
+			"mysql --password [REDACTED:secret_assignment] -u root",
+		);
 	});
 });
 
@@ -600,12 +639,15 @@ describe("SecretScanner - 8SO: punctuation tails", () => {
 		[`PASSWORD=ab"cd${V20}`, V20],
 		[`password = "${V20} ${V20}"`, V20],
 	];
-	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => {
-		expectHidden(input, secret);
-	});
+	for (const [input, secret] of cases)
+		it(`hides: ${input.slice(0, 40)}`, () => {
+			expectHidden(input, secret);
+		});
 
 	it("cuts at , only in JSON or YAML flow context", () => {
-		expect(scrub(`{password: ${V20}, user: bob}`).scrubbed).toBe("{password: [REDACTED:secret_assignment], user: bob}");
+		expect(scrub(`{password: ${V20}, user: bob}`).scrubbed).toBe(
+			"{password: [REDACTED:secret_assignment], user: bob}",
+		);
 		expect(scrub(`{"password": "${V20}", "user": "bob"}`).scrubbed).toBe(
 			'{"password": "[REDACTED:secret_assignment]", "user": "bob"}',
 		);
@@ -620,13 +662,18 @@ describe("SecretScanner - 8SO: URL userinfo", () => {
 		[`https://${V20}@github.com/a/b`, V20],
 		[`mongodb://u:${V20}@h1,h2/db?authSource=admin`, V20],
 	];
-	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => {
-		expectHidden(input, secret);
-	});
+	for (const [input, secret] of cases)
+		it(`hides: ${input.slice(0, 40)}`, () => {
+			expectHidden(input, secret);
+		});
 
 	it("keeps host and path", () => {
-		expect(scrub(`postgres://u:p@ss${V20}@host/db`).scrubbed).toBe("postgres://u:[REDACTED:url_password]@host/db");
-		expect(scrub(`https://${V20}@github.com/a/b`).scrubbed).toBe("https://[REDACTED:url_password]@github.com/a/b");
+		expect(scrub(`postgres://u:p@ss${V20}@host/db`).scrubbed).toBe(
+			"postgres://u:[REDACTED:url_password]@host/db",
+		);
+		expect(scrub(`https://${V20}@github.com/a/b`).scrubbed).toBe(
+			"https://[REDACTED:url_password]@github.com/a/b",
+		);
 	});
 });
 
@@ -643,9 +690,10 @@ describe("SecretScanner - 8SO: short values and name families", () => {
 		[`PRIVATE_KEY=config.${V20}`, V20],
 		[`"private_key_id": "${rand(40, HEX, 34)}"`, rand(40, HEX, 34)],
 	];
-	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => {
-		expectHidden(input, secret);
-	});
+	for (const [input, secret] of cases)
+		it(`hides: ${input.slice(0, 40)}`, () => {
+			expectHidden(input, secret);
+		});
 });
 
 describe("SecretScanner - 8SO: wrappers and multi-line values", () => {
@@ -658,9 +706,10 @@ describe("SecretScanner - 8SO: wrappers and multi-line values", () => {
 		[`set API_KEY=${V32}`, V32],
 		[`"password":\n  "${V20}"`, V20],
 	];
-	for (const [input, secret] of cases) it(`hides: ${input.slice(0, 40)}`, () => {
-		expectHidden(input, secret);
-	});
+	for (const [input, secret] of cases)
+		it(`hides: ${input.slice(0, 40)}`, () => {
+			expectHidden(input, secret);
+		});
 
 	it("redacts a YAML block scalar under a secret-named key and keeps the next key", () => {
 		const out = scrub(`db:\n  private_key: |\n    ${V32}\n    ${V44}\n  host: x\n`);
@@ -673,9 +722,17 @@ describe("SecretScanner - 8SO: wrappers and multi-line values", () => {
 
 describe("SecretScanner - 8SO: extra provider shapes", () => {
 	const cases: [string, string, string][] = [
-		["azure conn str", `DefaultEndpointsProtocol=https;AccountName=x;AccountKey=${V64}==;EndpointSuffix=core.windows.net`, V64],
+		[
+			"azure conn str",
+			`DefaultEndpointsProtocol=https;AccountName=x;AccountKey=${V64}==;EndpointSuffix=core.windows.net`,
+			V64,
+		],
 		["azure SAS sig", `https://x.blob.core.windows.net/c?sv=2020&sig=${V44}%3D&se=2030`, V44],
-		["azure SharedAccessKey", `Endpoint=sb://x/;SharedAccessKeyName=r;SharedAccessKey=${V44}=`, V44],
+		[
+			"azure SharedAccessKey",
+			`Endpoint=sb://x/;SharedAccessKeyName=r;SharedAccessKey=${V44}=`,
+			V44,
+		],
 		["google ya29", `access ya29.${rand(60, URLSAFE, 35)}`, rand(60, URLSAFE, 35)],
 		["npm", `//registry.npmjs.org/:_authToken=npm_${rand(36, ALNUM, 36)}`, rand(36, ALNUM, 36)],
 		["npm bare", `npm_${rand(36, ALNUM, 37)}`, rand(36, ALNUM, 37)],
@@ -685,11 +742,16 @@ describe("SecretScanner - 8SO: extra provider shapes", () => {
 		["google oauth secret", `GOCSPX-${rand(28, URLSAFE, 41)}`, rand(28, URLSAFE, 41)],
 		["sendgrid", `SG.${rand(22, URLSAFE, 42)}.${rand(43, URLSAFE, 43)}`, rand(43, URLSAFE, 43)],
 		["twilio", `SK${rand(32, HEX, 44)}`, rand(32, HEX, 44)],
-		["slack webhook", `https://hooks.slack.com/services/T${rand(8, ALNUM, 45)}/B${rand(8, ALNUM, 46)}/${rand(24, ALNUM, 47)}`, rand(24, ALNUM, 47)],
+		[
+			"slack webhook",
+			`https://hooks.slack.com/services/T${rand(8, ALNUM, 45)}/B${rand(8, ALNUM, 46)}/${rand(24, ALNUM, 47)}`,
+			rand(24, ALNUM, 47),
+		],
 	];
-	for (const [label, input, secret] of cases) it(`hides ${label}`, () => {
-		expectHidden(input, secret);
-	});
+	for (const [label, input, secret] of cases)
+		it(`hides ${label}`, () => {
+			expectHidden(input, secret);
+		});
 });
 
 describe("SecretScanner - 8SO: false positives stay untouched", () => {
@@ -768,10 +830,19 @@ describe("SecretScanner - 8SO round 3", () => {
 	const V = "Zq9xLm2pRt7vWk4nBc8dJQX4bipwDKRY";
 
 	it("dotted, path and URL exemptions still check each segment", () => {
-		for (const input of [`API_KEY=${V}.${V}`, `API_KEY=/${V}`, `API_TOKEN=https://x/?k=${V}`, `DB_PASSWORD=/etc/${V}`]) {
+		for (const input of [
+			`API_KEY=${V}.${V}`,
+			`API_KEY=/${V}`,
+			`API_TOKEN=https://x/?k=${V}`,
+			`DB_PASSWORD=/etc/${V}`,
+		]) {
 			expectHidden(input, V);
 		}
-		for (const input of ["const apiKey = process.env.OPENAI_API_KEY;", "API_KEY=/etc/secret/key", "auth_url=https://example.com/login?next=/home"]) {
+		for (const input of [
+			"const apiKey = process.env.OPENAI_API_KEY;",
+			"API_KEY=/etc/secret/key",
+			"auth_url=https://example.com/login?next=/home",
+		]) {
 			expect(scrub(input).scrubbed).toBe(input);
 		}
 	});
@@ -799,5 +870,55 @@ describe("SecretScanner - 8SO round 3", () => {
 		const tok = ["MTIzNDU2Nzg5MDEyMzQ1Njc4", "GhYtRe", "abcdefghijklmnopqrstuvwxyz1"].join(".");
 		const out = scrub(`discord ${tok}`);
 		expect(out.scrubbed).toBe("discord [REDACTED:discord_token]");
+	});
+});
+
+describe("scrubKeepingAttachment (#4295)", () => {
+	const MARKER = "[image-attachment]";
+	// ~3 MB of base64, over MAX_SCAN_CHARS. Deterministic, base64 alphabet only.
+	const b64 = "iVBORw0KGgo".repeat(280_000).slice(0, 3_000_000);
+	const line = `${MARKER} data:image/png;base64,${b64}`;
+
+	it("keeps a 3 MB harness attachment byte for byte and still a valid data URL", () => {
+		expect(line.length).toBeGreaterThan(MAX_SCAN_CHARS);
+		const out = scrubKeepingAttachment(`{"width":1024}\n${line}`, MARKER);
+		expect(out.scrubbed).toBe(`{"width":1024}\n${line}`);
+		expect(out.scrubbed).not.toContain("input_cap");
+		const url = out.scrubbed.split("\n")[1].slice(MARKER.length + 1);
+		expect(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(url)).toBe(true);
+	});
+
+	it("still redacts a secret in the surrounding text", () => {
+		const out = scrubKeepingAttachment(`note PASSWORD=hunter2hunter2\n${line}`, MARKER);
+		expect(out.scrubbed).not.toContain("hunter2hunter2");
+		expect(out.redactedCount).toBeGreaterThan(0);
+		expect(out.scrubbed.endsWith(line)).toBe(true);
+	});
+
+	it("scans a look-alike attachment line injected by tool output", () => {
+		// Not the final line: scanned, and the oversized text is capped as before.
+		const fake = `${MARKER} data:image/png;base64,${b64}\nPASSWORD=hunter2hunter2\n${line}`;
+		const early = scrubKeepingAttachment(fake, MARKER);
+		expect(early.scrubbed).not.toContain("hunter2hunter2");
+		// Final line that smuggles text instead of pure base64: scanned in full.
+		const text = `${MARKER} data:image/png;base64,AAAA PASSWORD=hunter2hunter2`;
+		const smuggle = scrubKeepingAttachment(`x\n${text}`, MARKER);
+		expect(smuggle.scrubbed).not.toContain("hunter2hunter2");
+		// Wrong mime or marker is not exempt either.
+		const big = `y\n${MARKER} data:text/html;base64,${b64}`;
+		expect(scrubKeepingAttachment(big, MARKER).scrubbed).toContain("[REDACTED:input_cap]");
+	});
+
+	it("does not exempt an svg+xml attachment line", () => {
+		const svg = `x\n${MARKER} data:image/svg+xml;base64,${b64}`;
+		expect(scrubKeepingAttachment(svg, MARKER).scrubbed).toContain("[REDACTED:input_cap]");
+	});
+
+	it("falls back to the full scrub above the attachment length bound", () => {
+		const over = "A".repeat(MAX_ATTACHMENT_BASE64_CHARS + 1);
+		const out = scrubKeepingAttachment(`x\n${MARKER} data:image/png;base64,${over}`, MARKER);
+		expect(out.scrubbed.includes("[REDACTED:input_cap]")).toBe(true);
+		const ok = scrubKeepingAttachment(`x\n${MARKER} data:image/jpeg;base64,${b64}`, MARKER);
+		expect(ok.scrubbed).not.toContain("input_cap");
 	});
 });

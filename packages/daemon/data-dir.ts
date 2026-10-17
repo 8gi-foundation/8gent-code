@@ -15,12 +15,17 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+/** The root data directory path, without creating it. */
+export function dataDirPath(): string {
+	return process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+}
+
 /**
  * Returns the root data directory for 8gent persistent storage.
  * Creates the directory if it doesn't exist.
  */
 export function getDataDir(): string {
-	const dir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+	const dir = dataDirPath();
 	if (!fs.existsSync(dir)) {
 		fs.mkdirSync(dir, { recursive: true });
 	}

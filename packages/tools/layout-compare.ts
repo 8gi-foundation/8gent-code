@@ -24,6 +24,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { type Band, type LayoutMeasure, measureLayout } from "../eight/layout-measure";
+import { cachedHeadlessShells } from "../render/chrome";
 
 const RENDER_TIMEOUT_MS = 30_000;
 const MAX_VIEWPORT = 8000;
@@ -65,18 +66,12 @@ export function findChrome(
 ): string | null {
 	const candidates: string[] = [];
 	if (env.EIGHT_CHROME_BIN?.trim()) candidates.push(env.EIGHT_CHROME_BIN.trim());
-	if (process.platform === "darwin") {
-		candidates.push(
-			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-			"/Applications/Chromium.app/Contents/MacOS/Chromium",
-			"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-			"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-		);
-	} else if (process.platform === "win32") {
-		for (const base of [env.PROGRAMFILES, env["PROGRAMFILES(X86)"], env.LOCALAPPDATA]) {
-			if (base) candidates.push(path.join(base, "Google", "Chrome", "Application", "chrome.exe"));
-		}
-	} else {
+	// Never a user's own browser under /Applications (or a Windows Program Files install):
+	// launched from a background or sandboxed process it aborts and macOS shows the user a crash
+	// report. Only EIGHT_CHROME_BIN (explicit), a bundled headless shell, or a Linux package
+	// binary on PATH qualifies.
+	candidates.push(...cachedHeadlessShells(env.HOME?.trim() || os.homedir()));
+	if (process.platform === "linux") {
 		for (const dir of (env.PATH ?? "").split(path.delimiter)) {
 			for (const name of [
 				"google-chrome",
@@ -652,7 +647,16 @@ export async function compareLayout(
 		return `compare_layout: reference image ${referencePath} does not exist.`;
 	const chrome = findChrome(process.env, workspace);
 	if (!chrome)
-		return "compare_layout: no Chrome or Chromium found, so the page cannot be rendered here. Set EIGHT_CHROME_BIN to one.";
+		return "compare_layout: no headless browser is available here, so the page cannot be rendered. Your own Chrome is never launched; set EIGHT_CHROME_BIN to a headless Chromium to enable this.";
+	// A browser started under a macOS seatbelt (the pilot's net-deny profile, a Claude session)
+	// cannot reach the window server or LaunchServices: it aborts at startup and macOS shows the
+	// person a crash report. Refuse up front. An explicit EIGHT_CHROME_BIN is the operator's call.
+	const explicit = process.env.EIGHT_CHROME_BIN?.trim();
+	if (chrome !== explicit) {
+		const { hostSandboxBlocksBrowser } = await import("./eight-browser");
+		if (hostSandboxBlocksBrowser())
+			return "compare_layout: this process runs inside a macOS sandbox, where a browser cannot start (it would crash at launch), so the page cannot be rendered here. Check the HTML by hand.";
+	}
 	const ref = await measureLayout(referencePath);
 	if (!ref) return "compare_layout: could not measure the reference image.";
 	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-compare-"));

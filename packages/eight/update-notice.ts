@@ -1,7 +1,7 @@
 /**
  * "Update available" notice for the TUI. One background check, at most every
- * 24 hours, never blocks startup, silent on any error, opt-out with
- * EIGHT_NO_UPDATE_CHECK=1 or `"updateCheck": false` in settings.json.
+ * 24 hours, never blocks startup, silent on any error. Opt-in with
+ * EIGHT_UPDATE_CHECK=1; EIGHT_NO_UPDATE_CHECK=1 stays a hard off or `"updateCheck": false` in settings.json.
  *
  * The check changes nothing: a source checkout only fetches its own origin's
  * main into refs/remotes/origin/main; binary and npm only read the release
@@ -32,6 +32,12 @@ export interface NoticeState {
 
 export function noticeText(from: string, to: string): string {
 	return `Update available (${from} -> ${to}). Run 8gent update, or type /update.`;
+}
+
+/** The launch update check is opt-in: only EIGHT_UPDATE_CHECK=1|true|on|yes turns it on. */
+export function isUpdateCheckEnabled(env: Env = process.env): boolean {
+	const v = (env.EIGHT_UPDATE_CHECK ?? "").trim().toLowerCase();
+	return v === "1" || v === "true" || v === "on" || v === "yes";
 }
 
 /** EIGHT_NO_UPDATE_CHECK set to anything but empty, 0 or false turns the check off. */
@@ -107,7 +113,7 @@ export function realNoticeDeps(o: RealNoticeOptions): NoticeDeps {
 	const srcDeps = { modulePath: o.modulePath, env, platform, exec: o.exec };
 	return {
 		now: o.now ?? Date.now,
-		disabled: () => updateCheckDisabled(env, o.settingsFile),
+		disabled: () => !isUpdateCheckEnabled(env) || updateCheckDisabled(env, o.settingsFile),
 		readState: () => {
 			try {
 				const s = JSON.parse(readFileSync(stateFile, "utf8")) as NoticeState;

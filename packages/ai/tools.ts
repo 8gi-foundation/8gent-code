@@ -15,7 +15,14 @@ import type { ToolSet } from "ai";
 import { z } from "zod";
 import { activeShellKind, killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
-import { safePath } from "../eight/tools";
+import {
+	OFFICE_TOOLS,
+	OFFICE_TOOL_DESCRIPTIONS,
+	type OfficeToolName,
+	resolveOfficeOut,
+	safePath,
+} from "../eight/tools";
+import { USE_SKILL_DESCRIPTION } from "../eight/use-skill";
 import {
 	ALLOWED_PATHS_DESCRIPTION,
 	CHECK_AGENT_DESCRIPTION,
@@ -76,6 +83,10 @@ import {
 	hashLines,
 	hashlineEnabled,
 } from "../tools/edit-anchor";
+import { DocxSpecSchema } from "../tools/office/docx";
+import { PptxSpecSchema } from "../tools/office/pptx";
+import { isOfficeFile, readOfficeFile } from "../tools/office/read";
+import { XlsxSpecSchema } from "../tools/office/xlsx";
 import { DeckSpecSchema } from "../tools/video-deck";
 import { withImagesWritten } from "./image-shape";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
@@ -459,6 +470,9 @@ const readFile = tool({
 		if ("refused" in target) return target.refused;
 		const absolutePath = target.path;
 		if (!fs.existsSync(absolutePath)) return `File not found: ${absolutePath}`;
+		// A Word, Excel or PowerPoint file is a zip: return its text, not its bytes (#4274).
+		if (isOfficeFile(absolutePath))
+			return readOfficeFile(absolutePath, fs.readFileSync(absolutePath));
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
 		// Anchors per row with EIGHT_EDIT_FORMAT=hashline (#3472); flag off is unchanged.
@@ -1030,7 +1044,7 @@ const generateSpriteTool = tool({
 
 const makePdfTool = tool({
 	description:
-		"Produce a PDF document from Markdown or HTML, the way a human would via bash. Shells out to the canonical fleet-wide renderer (~/.8gent/bin/make-pdf; HTML/Markdown -> PDF via weasyprint or chrome-headless). The PDF is written into ~/.8gent/creative/ so it shows up on the Create surface. Non-destructive, deterministic, no network. Provide exactly ONE source. Example: make_pdf({ markdown: '# Report\\n\\nBody...', title: 'Weekly Report' }).",
+		"PDF from args {markdown:'# Title\\n\\nBody', title?, outName?}, or html, mdPath or htmlPath instead of markdown. Rendered in-process, no renderer to install. Lays out headings, paragraphs, lists, quotes and code blocks on A4 with the standard PDF fonts (HTML keeps its structure, not its CSS). Writes into ~/.8gent/creative/ so it shows on the Create surface. Returns { path, kind, pages }; replaced counts characters (emoji, CJK) printed as ?. Provide exactly ONE source. Deterministic, no network.",
 	inputSchema: z.object({
 		markdown: z.string().optional().describe("Inline Markdown source for the document"),
 		html: z.string().optional().describe("Inline HTML source for the document"),
@@ -1056,12 +1070,27 @@ const makePdfTool = tool({
 			return JSON.stringify(
 				{
 					error: `make_pdf failed: ${err instanceof Error ? err.message : String(err)}`,
-					hint: "Provide exactly one of markdown/html/htmlPath/mdPath. Ensure ~/.8gent/bin/make-pdf is installed.",
+					hint: "Provide exactly one of markdown/html/htmlPath/mdPath; a file path must exist.",
 				},
 				null,
 				2,
 			);
 		}
+	},
+});
+
+const useSkillTool = tool({
+	description: USE_SKILL_DESCRIPTION,
+	inputSchema: z.object({
+		name: z
+			.string()
+			.optional()
+			.describe("Skill name exactly as listed, for example brief-to-film (never a path)"),
+		query: z.string().optional().describe("Word to filter the skill list by"),
+	}),
+	execute: async (args) => {
+		const { useSkill } = await import("../eight/use-skill");
+		return useSkill(args, { projectDir: getToolContext().workingDirectory });
 	},
 });
 
@@ -1103,6 +1132,51 @@ const renderVideoDeckTool = tool({
 		}
 	},
 });
+
+/**
+ * make_docx / make_xlsx / make_pptx (#4274): the same builders, confinement and edit scope as the
+ * text-tool path, gated like render_video_deck. The spec schema is the builder's own.
+ */
+function officeTool(name: OfficeToolName, spec: z.ZodType) {
+	return tool({
+		description: OFFICE_TOOL_DESCRIPTIONS[name],
+		inputSchema: z.object({
+			spec: spec.describe(`The ${OFFICE_TOOLS[name]} spec`),
+			out: z
+				.string()
+				.optional()
+				.describe(`Output .${OFFICE_TOOLS[name]} path inside the working directory`),
+		}),
+		execute: async ({ spec: value, out }) => {
+			try {
+				const ctx = getToolContext();
+				const wd = ctx.workingDirectory;
+				const target = resolveOfficeOut(name, out, wd);
+				const scoped = editScopeViolation(
+					name,
+					{ out: out ?? path.basename(target) },
+					wd,
+					ctx.allowedPaths,
+				);
+				if (scoped) return scoped;
+				const blocked = gateWrite(name, { path: target });
+				if (blocked) return blocked;
+				const { makeOffice } = await import("../tools/office/index");
+				return JSON.stringify(makeOffice(OFFICE_TOOLS[name], value, target, wd), null, 2);
+			} catch (err) {
+				return JSON.stringify(
+					{ error: `${name} failed: ${err instanceof Error ? err.message : String(err)}` },
+					null,
+					2,
+				);
+			}
+		},
+	});
+}
+
+const makeDocxTool = officeTool("make_docx", DocxSpecSchema);
+const makeXlsxTool = officeTool("make_xlsx", XlsxSpecSchema);
+const makePptxTool = officeTool("make_pptx", PptxSpecSchema);
 
 const speakTool = tool({
 	description:
@@ -3538,6 +3612,9 @@ export const agentTools = bindToolContext({
 	handeyes_engage_struggle_mode: handeyesEngageStruggleMode,
 	handeyes_exit_struggle_mode: handeyesExitStruggleMode,
 
+	// Skills (#3593): list them, load one by name
+	use_skill: useSkillTool,
+
 	// Self-evolution
 	propose_skill_creation: proposeSkillCreation,
 
@@ -3548,6 +3625,9 @@ export const agentTools = bindToolContext({
 	make_pdf: makePdfTool,
 	speak: speakTool,
 	render_video_deck: renderVideoDeckTool,
+	make_docx: makeDocxTool,
+	make_xlsx: makeXlsxTool,
+	make_pptx: makePptxTool,
 } satisfies ToolSet);
 
 export type AgentTools = typeof agentTools;

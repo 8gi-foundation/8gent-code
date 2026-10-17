@@ -356,3 +356,72 @@ describe("session answers are kept per folder", () => {
 		expect(folderLabel(cd.dir, root)).toBe("video");
 	});
 });
+
+// #4260: env-setup-practice sent `cd inbox && mkdir -p notes docs sheets && mv -n ...`. The
+// rest was refused for chaining and the refusal named only the rest, so the model resent
+// the pieces bare: they ran at the project root and the files left inbox/. The refusal now
+// keeps the folder. It allows nothing new: every chained rest is still refused and runs nothing.
+describe("a chained rest after a cd prefix is refused with its folder (#4260)", () => {
+	const inbox = () => join(root, "inbox");
+	beforeEach(() => {
+		mkdirSync(join(root, "inbox"));
+		mkdirSync(join(root, "notes"));
+		writeFileSync(join(root, "notes", "README.md"), "clone");
+		for (const f of ["note-1.txt", "doc-1.md", "sheet-1.csv"])
+			writeFileSync(join(root, "inbox", f), f);
+	});
+
+	const PILOT_LINE =
+		"cd inbox && mkdir -p notes docs sheets && mv -n note-*.txt notes/ && mv -n doc-*.md docs/ && mv -n sheet-*.csv sheets/";
+
+	test("the pilot's line is still refused, runs nothing, and the refusal names the folder", async () => {
+		const out = await run(PILOT_LINE);
+		expect(out).toStartWith(REFUSAL_LEAD);
+		expect(out).toContain("Command chaining with && is not allowed");
+		expect(out).toContain("begin every piece with `cd inbox &&`");
+		expect(out).toEndWith(`Command: ${PILOT_LINE}`);
+		for (const d of ["notes", "docs", "sheets"]) expect(existsSync(join(inbox(), d))).toBe(false);
+		expect(existsSync(join(root, "docs"))).toBe(false);
+		expect(readFileSync(join(inbox(), "note-1.txt"), "utf-8")).toBe("note-1.txt");
+	});
+
+	test("known-bad chained rests stay refused and run nothing", async () => {
+		for (const command of [
+			"cd inbox && mkdir docs; mv -n doc-1.md docs/",
+			"cd inbox && mkdir docs || mv -n doc-1.md docs/",
+			"cd inbox && mkdir docs & mv -n doc-1.md docs/",
+			"cd inbox && mkdir docs && mv -n doc-1.md docs/",
+			"cd inbox && mkdir docs && rm -f doc-1.md",
+		]) {
+			const out = await run(command);
+			expect(out).toStartWith("[BLOCKED]");
+			expect(out).toContain("`cd inbox &&`");
+			expect(existsSync(join(inbox(), "docs"))).toBe(false);
+			expect(existsSync(join(inbox(), "doc-1.md"))).toBe(true);
+		}
+		expect(asked).toEqual([]);
+	});
+
+	test("a chain at the project root keeps the old refusal, with no folder note", async () => {
+		const out = await run("mkdir -p docs && mv -n inbox/doc-1.md docs/");
+		expect(out).toStartWith(REFUSAL_LEAD);
+		expect(out).not.toContain("begin every piece");
+		expect(out).toEndWith("Command: mkdir -p docs && mv -n inbox/doc-1.md docs/");
+		expect(existsSync(join(root, "docs"))).toBe(false);
+	});
+
+	test("the pieces resent as the refusal says land the files inside inbox/", async () => {
+		for (const command of [
+			"cd inbox && mkdir -p notes docs sheets",
+			"cd inbox && mv -n note-*.txt notes/",
+			"cd inbox && mv -n doc-*.md docs/",
+			"cd inbox && mv -n sheet-*.csv sheets/",
+		]) {
+			expect(await run(command)).not.toContain("BLOCKED");
+		}
+		expect(readFileSync(join(inbox(), "notes", "note-1.txt"), "utf-8")).toBe("note-1.txt");
+		expect(readFileSync(join(inbox(), "docs", "doc-1.md"), "utf-8")).toBe("doc-1.md");
+		expect(readFileSync(join(inbox(), "sheets", "sheet-1.csv"), "utf-8")).toBe("sheet-1.csv");
+		expect(existsSync(join(root, "notes", "note-1.txt"))).toBe(false);
+	});
+});

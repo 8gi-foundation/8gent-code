@@ -15,8 +15,9 @@
  *   - the command is exactly `sh FILE` or `bash FILE`, FILE a plain relative path to a regular file
  *     inside the workspace (no `..`, no dot directory but `.tmp`, no symlink below the root, not a
  *     secret name, at most 4 KiB, printable ASCII);
- *   - the file, after joining `\`-newline continuations and dropping blank lines and one optional
- *     shebang (`#!/bin/sh`, `#!/bin/bash`, `#!/usr/bin/env sh|bash`), is exactly two lines:
+ *   - the file, after joining `\`-newline continuations and dropping blank lines, one optional
+ *     shebang (`#!/bin/sh`, `#!/bin/bash`, `#!/usr/bin/env sh|bash`) and then one optional
+ *     `set -e` / `set -eu` / `set -ue` (#4232: it only stops the script sooner), is exactly two lines:
  *       `. ~/.config/tg-notify/bot.env` (or `source`, or `$HOME/...` / `"$HOME/..."`), then
  *       `curl [-q] OPTS "$TELEGRAM_API_BASE/bot$TELEGRAM_BOT_TOKEN/sendMessage" OPTS` where OPTS are
  *       only -s, -S, -f (or their long names), `-X POST`, `-m`/`--max-time`/`--connect-timeout N`,
@@ -24,6 +25,13 @@
  *       workspace file under the same rules, at most 4 KiB, optionally written `$(pwd)/FILE` or
  *       `$PWD/FILE`) or `text=<literal>`. `${NAME}` spellings are accepted. No other `$`, backtick,
  *       backslash or `!` anywhere, no unquoted `$`, no redirect, no pipe, no output file;
+ *   - or those two lines with ONE message assignment directly before the curl line (#4250: a
+ *     caption is multi-line by definition): `MSG='<text>'` (or MESSAGE, TEXT, CAPTION), a single
+ *     quoted literal that may span lines, printable ASCII and newlines only, no quote character
+ *     inside. Single quotes expand nothing. The curl line may then send it only as exactly
+ *     `--data-urlencode "text=$MSG"` (or `${MSG}`), the one place that name may appear. The name
+ *     list is closed: none of them is read by sh or curl, so the assignment changes nothing but
+ *     the message;
  *   - ~/.config/tg-notify/bot.env (HOME from the environment) is a regular file, not a symlink, at
  *     most 4 KiB, whose every line is blank, a `#` comment, or `TELEGRAM_<NAME>=<plain value>`
  *     (optionally double-quoted, no `$`, backtick, quote, space or `\`). Sourcing it therefore sets
@@ -98,6 +106,12 @@ const MAX_BYTES = 4096;
 const SCRIPT_CMD =
 	/^(sh|bash) (?:\.\/)?([A-Za-z0-9][A-Za-z0-9._/-]{0,199}|\.tmp\/[A-Za-z0-9._/-]{1,195})$/;
 const SHEBANG = /^#!(\/bin\/(sh|bash)|\/usr\/bin\/env (sh|bash))$/;
+/**
+ * One optional errexit line right after the shebang (#4232): `set -e`, `set -eu` or `set -ue`.
+ * It only ever stops the script sooner (a failed `.` of bot.env, an unset variable), so curl runs
+ * in fewer cases, never more. No other `set` option: -x/-v would trace the expanded token.
+ */
+const ERREXIT = /^set -(e|eu|ue)$/;
 const SOURCE =
 	/^(\.|source) (~\/\.config\/tg-notify\/bot\.env|\$HOME\/\.config\/tg-notify\/bot\.env|"\$HOME\/\.config\/tg-notify\/bot\.env")$/;
 const ENV_LINE = /^(TELEGRAM_[A-Z0-9_]{1,40})=("[A-Za-z0-9._:/@+[\]-]*"|[A-Za-z0-9._:/@+[\]-]*)$/;
@@ -105,6 +119,11 @@ const API_BASE = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?\
 const UNQUOTED = /^[A-Za-z0-9._/+,=@:%-]$/;
 const NUM = /^\d{1,4}(\.\d{1,3})?$/;
 const CHAT = /^chat_id=-?\d{1,20}$/;
+/**
+ * The one message assignment (#4250): a closed list of names sh and curl never read, then a single
+ * quoted literal of printable ASCII and newlines with no quote character inside.
+ */
+const MSG_ASSIGN = /^(MSG|MESSAGE|TEXT|CAPTION)='([\x20-\x21\x23-\x26\x28-\x7e\n]*)'$/;
 /**
  * Set in the environment, any of these runs code, changes parsing, or traces the token (8SO,
  * #4102). ZDOTDIR points zsh at startup files. Also read by s1-script-body.ts.
@@ -125,6 +144,7 @@ const INHERITED = new Set(["TELEGRAM_API_BASE", "TELEGRAM_BOT_TOKEN"]);
 const BASE = "\u0001B";
 const TOK = "\u0001T";
 const PWD = "\u0001P";
+const MSGV = "\u0001M";
 const URL_WORD = `${BASE}/bot${TOK}/sendMessage`;
 
 /** `rel` with `/` separators: the reason names the path as the model wrote it, on every host. */
@@ -199,7 +219,7 @@ export function redactBotToken(text: string, env: Env = process.env): string {
 }
 
 /** Split the curl line into words; the three allowed expansions become sentinels. Null on anything else. */
-function splitWords(text: string): string[] | null {
+function splitWords(text: string, msgName?: string): string[] | null {
 	if (/[^\x20-\x7e]/.test(text)) return null;
 	const words: string[] = [];
 	let cur = "";
@@ -225,7 +245,11 @@ function splitWords(text: string): string[] | null {
 				.slice(i + 1, end)
 				.replace(/\$\{TELEGRAM_API_BASE\}|\$TELEGRAM_API_BASE(?![A-Za-z0-9_])/g, BASE)
 				.replace(/\$\{TELEGRAM_BOT_TOKEN\}|\$TELEGRAM_BOT_TOKEN(?![A-Za-z0-9_])/g, TOK)
-				.replace(/\$\(pwd\)\/|\$\{PWD\}\/|\$PWD\//g, `${PWD}/`);
+				.replace(/\$\(pwd\)\/|\$\{PWD\}\/|\$PWD\//g, `${PWD}/`)
+				.replace(
+					msgName ? new RegExp(`\\$\\{${msgName}\\}|\\$${msgName}(?![A-Za-z0-9_])`, "g") : /(?!)/g,
+					MSGV,
+				);
 			if (/[$`\\!]/.test(body)) return null;
 			cur += body;
 			has = true;
@@ -243,9 +267,11 @@ function splitWords(text: string): string[] | null {
 
 /**
  * `body` with each `\`-newline outside quotes removed, exactly as sh removes it (no space put in its
- * place), or null for any other backslash or a quote that spans a line. Replacing it with a space,
+ * place), or null for any other backslash or a double quote that spans a line. Replacing it with a space,
  * as this lane first did, split `"text@.tmp/m"\`-newline`-s` into a checked `.tmp/m` while sh read
- * `.tmp/m-s`, a symlink to any file on the machine, and posted it (8SO, #4102).
+ * `.tmp/m-s`, a symlink to any file on the machine, and posted it (8SO, #4102). A newline inside
+ * single quotes is kept as sh keeps it (#4250); scriptLines then holds that quote on one logical
+ * line, and only the message assignment may carry it.
  */
 function joinContinuations(body: string): string | null {
 	let out = "";
@@ -253,7 +279,7 @@ function joinContinuations(body: string): string | null {
 	for (let i = 0; i < body.length; i++) {
 		const c = body[i];
 		if (quote !== null) {
-			if (c === "\\" || c === "\n") return null;
+			if (c === "\\" || (c === "\n" && quote !== "'")) return null;
 			if (c === quote) quote = null;
 			out += c;
 		} else if (c === "\\") {
@@ -267,18 +293,45 @@ function joinContinuations(body: string): string | null {
 	return quote === null ? out : null;
 }
 
-/** The script's two lines, or null when it is not exactly the recipe's layout. */
-function scriptLines(body: string): [string, string] | null {
+/** `joined` split at each newline outside quotes: a single quoted literal stays on its line. */
+function logicalLines(joined: string): string[] {
+	const lines: string[] = [];
+	let cur = "";
+	let quote: string | null = null;
+	for (const c of joined) {
+		if (quote !== null) {
+			if (c === quote) quote = null;
+		} else if (c === "'" || c === '"') quote = c;
+		else if (c === "\n") {
+			lines.push(cur);
+			cur = "";
+			continue;
+		}
+		cur += c;
+	}
+	lines.push(cur);
+	return lines;
+}
+
+/** The script's source and curl lines, and the message variable name when it assigns one. */
+type Lines = { source: string; curl: string; msgName?: string };
+
+/** The script's lines, or null when it is not exactly the recipe's layout. */
+function scriptLines(body: string): Lines | null {
 	if (/[^\x20-\x7e\n\t]/.test(body)) return null;
 	const joined = joinContinuations(body);
 	if (joined === null) return null;
-	const lines = joined
-		.split("\n")
+	const lines = logicalLines(joined)
 		.map((l) => l.trim())
 		.filter((l) => l !== "");
 	if (lines.length > 0 && SHEBANG.test(lines[0])) lines.shift();
-	if (lines.length !== 2) return null;
-	return [lines[0], lines[1]];
+	if (lines.length > 0 && ERREXIT.test(lines[0])) lines.shift();
+	if (lines.length === 2) return { source: lines[0], curl: lines[1] };
+	if (lines.length !== 3) return null;
+	// Only the message assignment may hold a newline; every other line is one physical line.
+	const m = MSG_ASSIGN.exec(lines[1]);
+	if (!m || lines[0].includes("\n") || lines[2].includes("\n")) return null;
+	return { source: lines[0], curl: lines[2], msgName: m[1] };
 }
 
 /** The curl line checked word by word: ok, a refusal, or null (no opinion). */
@@ -286,8 +339,9 @@ function curlLine(
 	line: string,
 	root: string,
 	env: Env,
-): { ok: true; rel: string | null } | { refuse: string } | null {
-	const words = splitWords(line);
+	msgName?: string,
+): { ok: true; rel: string | null; msg: boolean } | { refuse: string } | null {
+	const words = splitWords(line, msgName);
 	if (!words || words.length < 2 || words.length > 20 || words[0] !== "curl") return null;
 	let i = 1;
 	const qFirst = words[1] === "-q" || words[1] === "--disable";
@@ -297,6 +351,7 @@ function curlLine(
 	let chat = 0;
 	let text = 0;
 	let rel: string | null = null;
+	let msg = false;
 	let location = false;
 	for (; i < words.length; i++) {
 		const w = words[i];
@@ -305,7 +360,7 @@ function curlLine(
 			url++;
 			continue;
 		}
-		if (w.includes(BASE) || w.includes(TOK)) return null;
+		if (w.includes(BASE) || w.includes(TOK) || w.includes(MSGV)) return null;
 		if (/^-[sSf]+$/.test(w)) continue;
 		if (["--silent", "--show-error", "--fail", "--fail-with-body"].includes(w)) continue;
 		if (w === "-L" || w === "--location" || /^-[sSfL]+$/.test(w)) {
@@ -315,6 +370,13 @@ function curlLine(
 		if (i + 1 >= words.length) return null;
 		const v = words[++i];
 		if (v.includes(BASE) || v.includes(TOK)) return null;
+		// The message variable only as the whole text value: `"text=$MSG"` (#4250).
+		if (v.includes(MSGV)) {
+			if (w !== "--data-urlencode" || v !== `text=${MSGV}`) return null;
+			msg = true;
+			text++;
+			continue;
+		}
 		if (w === "-X" || w === "--request") {
 			if (v !== "POST") return null;
 		} else if (w === "-m" || w === "--max-time" || w === "--connect-timeout") {
@@ -337,7 +399,7 @@ function curlLine(
 	}
 	if (url !== 1 || chat !== 1 || text !== 1) return null;
 	if (location) return { refuse: CURL_L_REFUSAL };
-	return { ok: true, rel };
+	return { ok: true, rel, msg };
 }
 
 /**
@@ -365,7 +427,7 @@ export function tgSendFromEnv(
 		if (!script) return NO;
 		const body = readFileSync(script.abs, "utf8");
 		const lines = scriptLines(body);
-		if (!lines || !SOURCE.test(lines[0]) || !/^curl\s/.test(lines[1])) return NO;
+		if (!lines || !SOURCE.test(lines.source) || !/^curl\s/.test(lines.curl)) return NO;
 		if (hasToken(body, env)) return { ok: false, refuse: TG_TOKEN_IN_ARGV_REFUSAL };
 		for (const k of Object.keys(env)) {
 			if (SHELL_ENV.has(k) && env[k] !== undefined) return NO;
@@ -383,13 +445,13 @@ export function tgSendFromEnv(
 		const base = API_BASE.exec(vars.get("TELEGRAM_API_BASE") ?? "");
 		if (!base) return NO;
 		if (base[1] !== undefined && (Number(base[1]) < 1 || Number(base[1]) > 65535)) return NO;
-		const c = curlLine(lines[1], root, env);
+		const c = curlLine(lines.curl, root, env, lines.msgName);
 		if (!c) return NO;
 		if ("refuse" in c) return { ok: false, refuse: c.refuse };
 		return {
 			ok: true,
 			body,
-			reason: `tg-notify sendMessage from ${slash(script.rel)} to the loopback Bot API in bot.env (${vars.get("TELEGRAM_API_BASE")}), token read from the env file${c.rel ? `, text from ${slash(c.rel)}` : ""}`,
+			reason: `tg-notify sendMessage from ${slash(script.rel)} to the loopback Bot API in bot.env (${vars.get("TELEGRAM_API_BASE")}), token read from the env file${c.rel ? `, text from ${slash(c.rel)}` : ""}${c.msg ? `, text from the ${lines.msgName} literal in the script` : ""}`,
 		};
 	} catch {
 		return NO;

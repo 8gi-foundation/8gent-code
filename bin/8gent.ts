@@ -98,7 +98,7 @@ USAGE:
 COMMANDS:
   tui [--name=<n>] [--resume=<n>]  Launch TUI (--name to name session, --resume to restore)
   run <prompt>                One-shot agent run. Pairs with --output-format stream-json for Orchestra/cmux/etc.
-                              --image <path> attaches one png/jpg/gif/webp: max 20 MB, downscaled to fit 1024x1024,
+                              --image <path> attaches one png/jpg/gif/webp: max 20 MB, downscaled to fit 2560x2560,
                               must be inside the working directory (local vision model, text-tool path only)
   doctor                      Check system health (Ollama, models, tools, config)
   deck render <spec.json> [out.mp4]  Render a JSON deck spec into an mp4: the same deterministic

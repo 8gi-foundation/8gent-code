@@ -301,6 +301,14 @@ export const NARRATION_NOTE = "**Narration: `speak`, never espeak or say.**";
 export const SCRATCH_DIR_NOTE =
 	"**Scratch files: `.tmp/` in the project (git-ignored, never delete), never /tmp or ~.**";
 
+/** #4306: a pilot run made type folders in the wrong place, tried rmdir, and was blocked. */
+export const FOLDER_NOTE =
+	"**Folders: `rmdir` is blocked, so name the full `mkdir` path first; fix with `mv`.**";
+
+/** #4316: a ticket asked for the source file most likely at fault; the model also named a neighbour. */
+export const TICKET_FILE_NOTE =
+	"**Ticket naming the file at fault: name only the one to change, no neighbours.**";
+
 export type EnvironmentNoteInput = {
 	platform?: NodeJS.Platform;
 	/** Windows only: the shell run_command uses. Default: resolved from settings and disk. */
@@ -360,17 +368,29 @@ export const LOCAL_SERVER_CURL_SHORT =
  * prints nothing; curl -d @file posts it with the newline stripped; a read_file of
  * .tmp/login still scrubs. Sits next to the curl rules in the full prompt
  * (TOOL_PATTERNS_SEGMENT) and both compact local prompts (agent.ts).
+ *
+ * #4303 (run 2026-10-15_064256): the model also sed-copied the Username line into the same
+ * .tmp/login. Each `w` truncates, so the file held the password alone and curl posted no username
+ * (401, 0 sign-ins). The username is not secret and read_file shows it, so the note says to copy
+ * the password line only.
  */
 export const LOCAL_LOGIN_NOTE =
-	"A test login in a project file may show as [REDACTED:...] in read_file. Never print, read_file or retype the value: copy it into a form body with run_command (sed -n 's/^Password: */password=/w .tmp/login' FILE, after mkdir -p .tmp) and send that file (curl -d username=NAME -d @.tmp/login URL).";
+	"A test login in a project file may show as [REDACTED:...] in read_file. Never print, read_file or retype the value: copy only the password line with run_command (sed -n 's/^Password: */password=/w .tmp/login' FILE, after mkdir -p .tmp), then post it (curl -d username=NAME -d @.tmp/login URL).";
 
 /**
  * Slides to video: JSON in, deterministic code out. Pilot media-brief-video (12 Oct 2026) showed a
  * local model composing the video with raw ffmpeg in run_command instead of calling
- * render_video_deck, so the note now shows the shell form of the same renderer as a 3-line recipe.
+ * render_video_deck, so the note shows the shell form of the same renderer as a recipe.
+ *
+ * #4245 (run 2026-10-14_092348): the model still wrote video/make_slides.sh and ran it. System One
+ * judges `bash FILE` by the command string, not the file, so the same script was allowed once and
+ * blocked once (pYes 0.473), and the run failed no_system_one_blocked. The note now opens with
+ * "never write a script", and the by-hand path is one magick or ffmpeg per call, the shape the
+ * s1-magick and s1-ffmpeg-in-project lanes already allow. Same byte budget as before (the concise
+ * catalog has no headroom: tool-catalog.test.ts POSIX_CAP).
  */
 export const SLIDES_TO_VIDEO_NOTE =
-	'**Slides to video: write deck.json {"slides":[{"title":"..","bullets":[".."],"narration":".."}]}, then run `8gent deck render deck.json out.mp4`, not ffmpeg by hand. By hand: segment count equals slide count; never loop over a file lacking a trailing newline.**';
+	'**Slides to video: never write a script. Write deck.json {"slides":[{"title":"..","text":"..","narration":".."}]}, run `8gent deck render deck.json out.mp4`. By hand: one magick/ffmpeg per call; segment count equals slide count; trailing newline on lists.**';
 
 /**
  * Build the tool-inventory segment the model sees at system-prompt time.
@@ -420,6 +440,8 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 			: "**When asked to do anything involving external info, current events, documentation, or URLs: call `web_search` or `web_fetch`. Do not claim you have no internet access: you do.**",
 		NARRATION_NOTE,
 		SCRATCH_DIR_NOTE,
+		FOLDER_NOTE,
+		TICKET_FILE_NOTE,
 		environmentNote({ cwd: opts.cwd }),
 	);
 	lines.push(SLIDES_TO_VIDEO_NOTE, REVIEW_FOCUS_NOTE);

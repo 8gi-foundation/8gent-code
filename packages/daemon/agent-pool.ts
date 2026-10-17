@@ -19,8 +19,9 @@ import {
 	CLASSROOM_SESSION_CAP,
 	CLASSROOM_SYSTEM_PROMPT,
 } from "./classroom";
-import { getDataDir } from "./data-dir";
+import { dataDirPath, getDataDir } from "./data-dir";
 import { bus } from "./events";
+import { type QueueRequest, type QueueStatus, type Receipt, WorkQueue } from "./queue";
 import type { SessionJournal } from "./session-journal";
 
 export interface PoolConfig {
@@ -104,6 +105,22 @@ function sessionQueueMax(): number {
 	return Number.isInteger(n) && n >= 0 ? n : 32;
 }
 
+/** #4254: durable work queue in front of the pool. Off by default. */
+function workQueueEnabled(): boolean {
+	return process.env.EIGHT_WORK_QUEUE === "1";
+}
+
+/** Open the data dir's queue, or null (queue off) when another daemon holds its lock. */
+function openWorkQueue(): WorkQueue | null {
+	const path = `${dataDirPath()}/work-queue.jsonl`;
+	try {
+		return new WorkQueue(path, { maxSessions: MAX_SESSIONS });
+	} catch (err) {
+		console.error(`[agent-pool] ${(err as Error).message}; running with the work queue disabled`);
+		return null;
+	}
+}
+
 /** Known session channels. Add new entries here when wiring a new surface. */
 export const KNOWN_CHANNELS = [
 	"os",
@@ -150,9 +167,22 @@ export class AgentPool {
 	 * it; an attached session is never evicted for idleness or room.
 	 */
 	private inUse: (sessionId: string) => boolean = () => false;
+	/** Durable work queue (#4254). Null unless EIGHT_WORK_QUEUE=1 or a queue is passed in. */
+	private queue: WorkQueue | null;
 
-	constructor(config: Partial<PoolConfig> = {}, options: { journal?: SessionJournal } = {}) {
+	constructor(
+		config: Partial<PoolConfig> = {},
+		options: { journal?: SessionJournal; queue?: WorkQueue } = {},
+	) {
 		this.journal = options.journal ?? null;
+		this.queue = options.queue ?? (workQueueEnabled() ? openWorkQueue() : null);
+		for (const id of this.queue?.unknownAfterRestart ?? []) {
+			console.warn(
+				`[agent-pool] work item ${id} was in flight at shutdown: status unknown, not resent`,
+			);
+		}
+		// Items accepted before a restart run once, after construction finishes.
+		if (this.queue) queueMicrotask(() => this.drainQueue());
 		this.config = {
 			model: config.model || DEFAULT_MODEL,
 			runtime: config.runtime || DEFAULT_RUNTIME,
@@ -163,6 +193,18 @@ export class AgentPool {
 
 		// Clean up idle sessions every 5 minutes
 		this.cleanupTimer = setInterval(() => this.cleanupIdleSessions(), 5 * 60 * 1000);
+	}
+
+	/**
+	 * Clean stop: stop the idle reaper and close the work queue, which releases its
+	 * lock so the next daemon on this data dir takes it without a stale-lock takeover.
+	 * Sessions are left as they are (the daemon snapshots them first). Idempotent.
+	 */
+	shutdown(): void {
+		if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+		this.cleanupTimer = null;
+		this.queue?.close();
+		this.queue = null;
 	}
 
 	/** Tell the pool which sessions have clients attached (gateway, #3929). */
@@ -224,6 +266,56 @@ export class AgentPool {
 				this.unjournal(id);
 				bus.emit("session:end", { sessionId: id, reason: "idle-timeout" });
 			}
+		}
+		this.drainQueue();
+	}
+
+	/**
+	 * Accept a prompt under its requestId (#4254). A repeated requestId gets
+	 * the same receipt and never a second run. The item starts when a slot
+	 * frees; the queue never evicts a session to make room.
+	 */
+	submit(req: QueueRequest): { receipt: Receipt; duplicate: boolean } {
+		if (!this.queue) throw new Error("work queue is off (set EIGHT_WORK_QUEUE=1)");
+		const result = this.queue.enqueue(req);
+		if (!result.duplicate) this.drainQueue();
+		return result;
+	}
+
+	queueStatus(requestId: string): QueueStatus | null {
+		return this.queue?.status(requestId) ?? null;
+	}
+
+	/** Start waiting items, oldest first, while a slot and the start throttle allow. */
+	private drainQueue(): void {
+		const q = this.queue;
+		if (!q) return;
+		for (let item = q.peek(); item; item = q.peek()) {
+			const { requestId } = item.receipt;
+			const sessionId = item.sessionId ?? `q_${requestId}`;
+			const entry = this.sessions.get(sessionId);
+			const blocked = entry
+				? entry.busy
+				: this.sessions.size >= MAX_SESSIONS ||
+					this.countOn(item.channel) >= this.capFor(item.channel);
+			if (blocked) return; // the head waits, so order holds
+			const oneShot = !entry;
+			if (oneShot) this.createSession(sessionId, item.channel);
+			q.markStarted(requestId);
+			this.chat(sessionId, item.text)
+				.catch((err) => `[error] ${String(err)}`)
+				.then((reply) => {
+					q.markEnded(requestId, !reply.startsWith("[error]") && !reply.startsWith("[budget"));
+					if (
+						oneShot &&
+						!q.hasPendingFor(sessionId) &&
+						this.sessions.get(sessionId)?.busy === false
+					) {
+						this.destroySession(sessionId);
+						bus.emit("session:end", { sessionId, reason: "queue-done" });
+					}
+					this.drainQueue();
+				});
 		}
 	}
 
@@ -527,6 +619,7 @@ export class AgentPool {
 		const next = entry.queue.shift();
 		if (next) next(true);
 		else entry.busy = false;
+		if (this.queue) queueMicrotask(() => this.drainQueue());
 	}
 
 	/** Destroy a session and its Agent */
@@ -547,6 +640,7 @@ export class AgentPool {
 		// #3554: queued messages never run on an ended session.
 		for (const waiter of entry.queue.splice(0)) waiter(false);
 		console.log(`[agent-pool] destroyed session ${sessionId}`);
+		if (this.queue) queueMicrotask(() => this.drainQueue());
 	}
 
 	private unjournal(sessionId: string): void {

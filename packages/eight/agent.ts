@@ -12,7 +12,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { jsonSchema, tool as sdkTool } from "ai";
+import { type ModelMessage, jsonSchema, tool as sdkTool } from "ai";
 import type { FormattingStop } from "../ai/draft-constraints";
 import { notePlanTask } from "../ai/plan-file";
 import { postMessageAvailable } from "../ai/post-message";
@@ -113,6 +113,7 @@ import {
 } from "./honesty";
 import { projectInstructionsSection } from "./instruction-loader";
 import { getModeManager } from "./modes";
+import { needsPlanningGate as promptNeedsPlanningGate } from "./planning-gate";
 import { isLocalProvider } from "./registry";
 import { verifyNudgeFor } from "./verify-gate";
 
@@ -136,11 +137,13 @@ import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./p
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
 import {
+	FOLDER_NOTE,
 	LOCAL_LOGIN_NOTE,
 	LOCAL_SERVER_CURL_SHORT,
 	NARRATION_NOTE,
 	SCRATCH_DIR_NOTE,
 	SLIDES_TO_VIDEO_NOTE,
+	TICKET_FILE_NOTE,
 	buildToolCatalogSegment,
 	environmentNote,
 } from "./prompts/system-prompt";
@@ -160,9 +163,9 @@ import {
 	TimeTravelStore,
 	checkpointEveryFromEnv,
 } from "./timetravel/checkpoint-store";
-import { ToolLoopDetector } from "./tool-loop-detector";
+import { ToolLoopDetector, isQuietSuccess } from "./tool-loop-detector";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
-import { ToolExecutor } from "./tools";
+import { ToolExecutor, messageBoardroomOn } from "./tools";
 import { TurnJournal } from "./turn-journal";
 import {
 	type ProgressWatch,
@@ -174,6 +177,7 @@ import {
 } from "./turn-timeout";
 import type { AgentConfig, AgentEventCallbacks } from "./types";
 import { VisionInterpreter, oneLineError } from "./vision-interpreter";
+import { isKnownVisionModel } from "./vision-router";
 
 // Proactive questioning — asks clarifying questions before executing vague tasks
 import {
@@ -201,6 +205,7 @@ import {
 	harnessNote,
 	withStyleReminder,
 } from "./context-note";
+import { downscaleNote } from "./image-fit";
 import { layoutMeasureLine } from "./layout-measure";
 import {
 	ObservationPacker,
@@ -287,12 +292,63 @@ const HEADLESS_WEB_NOTE =
 const HEADLESS_TOOL_NOTES = [
 	HEADLESS_WEB_NOTE,
 	NARRATION_NOTE,
+	FOLDER_NOTE,
+	TICKET_FILE_NOTE,
 	SCRATCH_DIR_NOTE,
 	SLIDES_TO_VIDEO_NOTE,
 	LOCAL_SERVER_CURL_SHORT,
 	LOCAL_LOGIN_NOTE,
 ].join("\n");
 const headlessToolNotes = (): string => `${HEADLESS_TOOL_NOTES}\n${environmentNote()}`;
+
+/**
+ * Can a model on the native AI SDK path see the image attached to the prompt
+ * (#4287)? A provider declared in providers.json with supportsVision says so
+ * for whatever it serves; otherwise the model name decides, through the same
+ * family list the vision router uses. A built-in provider's flag alone is not
+ * enough: OpenRouter is marked vision-capable but serves text-only models too.
+ */
+export function nativePromptSeesImage(
+	provider: { declared?: boolean; supportsVision?: boolean } | undefined,
+	model: string,
+): boolean {
+	if (provider?.declared === true && provider.supportsVision === true) return true;
+	return isKnownVisionModel(model);
+}
+
+/**
+ * Put the prompt's image (a data URL) on the user message that carries the
+ * prompt text, as an AI SDK image part, for this request only (#4287). The
+ * prompt is matched by its text because harness notes follow it as user
+ * messages; with no match the last user message takes it. History is untouched.
+ */
+export function withPromptImage(
+	messages: Array<{ role: "user" | "assistant"; content: string }>,
+	promptText: string,
+	image: string | null,
+): ModelMessage[] {
+	const parsed = image ? /^data:([^;,]+);base64,(.+)$/s.exec(image) : null;
+	if (!parsed) return messages;
+	let target = -1;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (messages[i].role !== "user") continue;
+		if (target < 0) target = i;
+		if (messages[i].content === promptText) {
+			target = i;
+			break;
+		}
+	}
+	if (target < 0) return messages;
+	const out: ModelMessage[] = [...messages];
+	out[target] = {
+		role: "user",
+		content: [
+			{ type: "text", text: messages[target].content },
+			{ type: "image", image: parsed[2], mediaType: parsed[1] },
+		],
+	};
+	return out;
+}
 
 /**
  * Decide whether Agent.chat() should drive tools through the harness-side text
@@ -463,7 +519,8 @@ export class Agent {
 	/**
 	 * An image attached to the current turn's prompt, as a data URL, when the
 	 * model can see it itself (#3641). The text-tool turn puts it on the user
-	 * message and clears it. Null when the VisionInterpreter describes instead.
+	 * message and clears it; the native turn does the same with an image part.
+	 * Null when the VisionInterpreter describes instead.
 	 */
 	private turnImage: string | null = null;
 	// TurnJournal (#2470): per-turn replayable record for debug + audit.
@@ -496,10 +553,12 @@ export class Agent {
 				// Unset: the executor decides from the terminal (G1 extension_call policy).
 				attended: config.attended,
 				allowedPaths: config.allowedPaths,
+				tabVoice: config.tabVoice,
 				openOnWrite: config.openOnWrite ?? true,
 				permission: config.permission,
 				// read_image attaches pixels only for a model that can see (#3641).
 				visionCapable: () => this.modelSees(),
+				localRuntime: () => isLocalProvider(this.config.runtime),
 			},
 		);
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 off): with the allowlist
@@ -1084,6 +1143,25 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Does the prompt's attached image go to this session's own model? The
+	 * text-tool path asks modelSees(). The native AI SDK path sends it as an
+	 * image part when nativePromptSeesImage() says the model sees (#4287):
+	 * without that, a cloud vision model got no pixels, the local describer
+	 * failed, and the turn went on probing the file with scripts.
+	 */
+	private async promptImageSeen(): Promise<boolean> {
+		const scoped = (this.config.allowedPaths?.length ?? 0) > 0;
+		if (shouldUseTextTools(this.config.runtime, scoped)) return this.modelSees();
+		let declared: { declared?: boolean; supportsVision?: boolean } | undefined;
+		try {
+			declared = getProviderManager().getProvider(this.config.runtime as ProviderRegistryName);
+		} catch {
+			declared = undefined;
+		}
+		return nativePromptSeesImage(declared, this.config.model);
+	}
+
+	/**
 	 * Can this agent's own model see images (#3641)? Only the text-tool path
 	 * attaches them natively, so the native AI SDK path answers no. The Ollama
 	 * answer comes from /api/show, cached per endpoint and model.
@@ -1222,9 +1300,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 				// Circuit breaker / loop detection, mirroring the native finish handler.
 				// A call refused before it ran does not spend the global budget (#3409).
-				this.loopDetector.record(toolName, args, { refused: refusedBeforeRun(toolName, args) });
+				this.loopDetector.record(toolName, args, {
+					refused: refusedBeforeRun(toolName, args),
+					succeeded: success && isQuietSuccess(toolName, shown),
+				});
 				const loopResult = this.loopDetector.check();
-				if (loopResult) {
+				if (loopResult?.recoverable) {
+					// A repeat of calls that all worked: tell the model, keep the turn (#4301).
+					console.log(`\n[LOOP NUDGE] ${loopResult.message}`);
+					result = `${result}\n\n[harness] ${loopResult.message}`;
+				} else if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
 					if (breakerStop === null) breakerStop = loopResult.userMessage;
 					this.abort({ kind: "circuit_breaker", reason: loopResult.message });
@@ -1809,7 +1894,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * One turn. Children this turn spawns inherit this agent's provider, model
 	 * and baseUrl as they are when the child starts (#3710).
 	 */
-	chat(userMessage: string, imageBase64?: string, imageMimeType?: string): Promise<string> {
+	chat(
+		userMessage: string,
+		imageBase64?: string,
+		imageMimeType?: string,
+		imageOriginal?: { width: number; height: number },
+	): Promise<string> {
 		this.lastTurnFailure = null;
 		return runAsParentSession(
 			() => ({
@@ -1825,7 +1915,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.steerQueue = [];
 				this.activeTurn = turn;
 				try {
-					const reply = await this.runTurn(userMessage, imageBase64, imageMimeType);
+					const reply = await this.runTurn(userMessage, imageBase64, imageMimeType, imageOriginal);
 					this.reviewFinishedTurn(userMessage, reply);
 					return reply;
 				} finally {
@@ -1874,6 +1964,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		userMessage: string,
 		imageBase64?: string,
 		imageMimeType?: string,
+		imageOriginal?: { width: number; height: number },
 	): Promise<string> {
 		// The turn offers the extension tools that finished loading (G1, D12).
 		await this.extensionsReady;
@@ -1911,7 +2002,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// path it goes out on this turn's user message in the provider's native
 		// image field, and no side model describes it. Anything else keeps the
 		// VisionInterpreter below.
-		if (imageBase64 && (await this.modelSees())) {
+		if (imageBase64 && (await this.promptImageSeen())) {
 			this.turnImage = `data:${imageMimeType || "image/png"};base64,${imageBase64}`;
 			this.config.events?.onStepFinish?.({
 				text: `Image attached for ${this.config.model} to look at.`,
@@ -1925,11 +2016,21 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// (#3772) never reached it and position stayed 0.70 to 0.73 of 0.77. Hand it
 			// over on the attach path too. Bounded, model-free, empty on any failure.
 			try {
-				const measured = await layoutMeasureLine(Buffer.from(imageBase64, "base64"));
+				const measured = await layoutMeasureLine(Buffer.from(imageBase64, "base64"), imageOriginal);
 				if (measured) {
 					this.messageHistory.push({ role: "user", content: harnessNote(measured) });
 					// read_image on the same file this turn must not repeat the block.
 					this.executor.markLayoutSent(measured);
+				} else if (imageOriginal) {
+					// #4293: a photo or an image with no ink bands has no layout block, but
+					// a downscaled copy still needs its original size and factor stated.
+					const sharp = (await import("sharp")).default;
+					const meta = await sharp(Buffer.from(imageBase64, "base64")).metadata();
+					const note = downscaleNote(imageOriginal, {
+						width: meta.width ?? imageOriginal.width,
+						height: meta.height ?? imageOriginal.height,
+					});
+					if (note) this.messageHistory.push({ role: "user", content: harnessNote(note) });
 				}
 			} catch {
 				// layout hints are best-effort; the image itself is already attached
@@ -2041,8 +2142,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Local models skip the BMAD planning in the system prompt and jump
 		// straight to tool calls. For multi-step tasks we inject an explicit
 		// instruction that forces the model to emit a numbered plan first.
-		const PLANNING_KEYWORDS =
-			/\b(build|create|implement|fix|refactor|add|setup|configure|migrate|convert|redesign|scaffold|deploy|integrate)\b/i;
 		// A Table officer is answering a colleague in a chat channel, not executing
 		// a multi-step build, and its turn prompt is ALWAYS over 100 chars - so
 		// this gate fired on every single officer reply and injected the literal
@@ -2051,8 +2150,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ..." scaffolding in the live corpus: not a model tic, an instruction we
 		// sent. Nobody at the Table asked for a plan.
 		const needsPlanningGate =
-			!isVerbatimScope(this.config.agentScope) &&
-			(textForAgent.length > 100 || PLANNING_KEYWORDS.test(textForAgent));
+			!isVerbatimScope(this.config.agentScope) && promptNeedsPlanningGate(textForAgent);
 
 		// Changed session context goes in before the user's words (#3222).
 		this.appendContextNote();
@@ -2138,6 +2236,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"web_fetch",
 			"speak",
 			"render_video_deck",
+			// Skills (#3593): the tested recipe for a multi-step task, loaded by name.
+			"use_skill",
+			"make_docx",
+			"make_xlsx",
+			"make_pptx",
 			"suggest_design",
 			"query_design_system",
 			"deck_theme",
@@ -2215,6 +2318,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			...localDelegationTools(this.config.role),
 			// Posting (#3595): offered only where the tg-group helper is installed.
 			...(postMessageAvailable() ? ["post_message"] : []),
+			// Mid-task note to the boardroom (#4344).
+			...(messageBoardroomOn() ? ["message_boardroom"] : []),
 			// Lean MCP access (#3474): search, schema on demand, trimmed results.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? ["mcp_list_tools", "mcp_call_tool"] : []),
 			// 8gent Browser (#3622, #3785): an isolated profile, named by EIGHT_BROWSER_PROFILE or the
@@ -2507,9 +2612,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Circuit breaker: record call and check for loop patterns
 				this.loopDetector.record(event.toolName, event.args as Record<string, unknown>, {
 					refused: refusedBeforeRun(event.toolName, event.args as Record<string, unknown>),
+					succeeded: event.success && isQuietSuccess(event.toolName, resultStr),
 				});
 				const loopResult = this.loopDetector.check();
-				if (loopResult) {
+				if (loopResult?.recoverable) {
+					console.log(`\n[LOOP NUDGE] ${loopResult.message}`);
+					this.messageHistory.push({ role: "user", content: `[harness] ${loopResult.message}` });
+				} else if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
 					this.abort({ kind: "circuit_breaker", reason: loopResult.message });
 				}
@@ -2850,12 +2959,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 		try {
 			// Build messages array once - reused across every provider attempt.
-			const messages = this.messageHistory
-				.filter((m) => m.role !== "system")
-				.map((m) => ({
-					role: m.role as "user" | "assistant",
-					content: m.content,
-				}));
+			const messages = withPromptImage(
+				this.messageHistory
+					.filter((m) => m.role !== "system")
+					.map((m) => ({
+						role: m.role as "user" | "assistant",
+						content: m.content,
+					})),
+				textForAgent,
+				this.turnImage,
+			);
+			this.turnImage = null;
 
 			// Create abort controller for ESC interruption (shared across attempts)
 			this.armController();
@@ -3401,7 +3515,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						const recovery = await autonomy.handleError(
 							err,
 							"agent-chat",
-							() => this.runTurn(textForAgent, imageBase64, imageMimeType),
+							() => this.runTurn(textForAgent, imageBase64, imageMimeType, imageOriginal),
 							2, // max 2 retries in infinite mode
 						);
 						if (recovery.success) {
