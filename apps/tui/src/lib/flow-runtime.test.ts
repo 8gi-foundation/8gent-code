@@ -424,3 +424,28 @@ describe("on-screen disclosures (8SO #4379)", () => {
 		expect(app.match(/flowDisclosure\(/g)?.length).toBeGreaterThanOrEqual(5);
 	});
 });
+
+describe("the spoken post-draft (#4373) goes through canSpeak", () => {
+	test("speakAgentReply gates before the queue and again when the draft is ready", () => {
+		const app = readFileSync(new URL("../app.tsx", import.meta.url), "utf8");
+		const fn = app.slice(
+			app.indexOf("function speakAgentReply("),
+			app.indexOf("function speakOnboardingLine("),
+		);
+		const enqueue = fn.indexOf("spokenQueue.enqueue(");
+		expect(enqueue).toBeGreaterThan(0);
+		// One gate before the rewrite starts, one inside the callback that spawns say.
+		expect(fn.slice(0, enqueue)).toContain("if (!canSpeak(kind)) return;");
+		expect(fn.slice(enqueue)).toContain("if (!canSpeak(kind)) return;");
+		expect(fn.slice(enqueue).indexOf("canSpeak(kind)")).toBeLessThan(
+			fn.slice(enqueue).indexOf('spawn("say"'),
+		);
+	});
+	test("Quiet and Listen refuse a final reply, so no draft is queued or spoken", () => {
+		const { rt } = rig();
+		rt.setFlowMode("quiet");
+		expect(rt.canSpeak("final-reply")).toBe(false);
+		rt.setFlowMode("listen");
+		expect(rt.canSpeak("final-reply")).toBe(false);
+	});
+});

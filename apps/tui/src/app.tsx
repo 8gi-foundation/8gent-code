@@ -41,6 +41,12 @@ import {
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import { tabVoices } from "../../../packages/tools/speak.js";
 import {
+	type SpokenModel,
+	createSpokenQueue,
+	rewriteAllowed,
+	sayArgs,
+} from "../../../packages/voice/spoken-draft.js";
+import {
 	ActivityMonitor,
 	clearActivity,
 	completeActivity,
@@ -106,7 +112,7 @@ import {
 import { playSound, soundManager } from "./components/sound-effects.js";
 import { AnimatedStatusVerb } from "./components/status-verb.js";
 import type { TaskItem } from "./components/task-card/TaskCardList.js";
-import { PTT_ECHO_MESSAGE, trackTts } from "./hooks/ptt-state.js";
+import { PTT_ECHO_MESSAGE, trackTts, ttsEnded, ttsStarted } from "./hooks/ptt-state.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
 import { useAutoKanban } from "./hooks/useAutoKanban.js";
 import { chatRowBudget, useMeasuredHeight } from "./hooks/useMeasuredHeight.js";
@@ -621,9 +627,12 @@ function trackFlowSpeech(
 	proc.on?.("error", ended);
 }
 
+const spokenQueue = createSpokenQueue({ start: () => ttsStarted(), end: () => ttsEnded() });
+
 function speakAgentReply(
 	role: string | undefined,
 	text: string,
+	model?: SpokenModel | null,
 	kind: SpeechKind = "final-reply",
 ): void {
 	if (process.platform !== "darwin") return;
@@ -639,25 +648,30 @@ function speakAgentReply(
 	}
 	if (!s.voice?.outputEnabled) return;
 	const voice = getVoiceForRole(role || "engineer", s);
-	// Cap utterance length so we don't tie up `say` on long answers.
-	// macOS `say` handles long text fine, but anything past ~600 chars is
-	// just noise for the user.
-	const safe = trimmed.replace(/"/g, '\\"').slice(0, 600);
-	try {
-		const { spawn } = require("node:child_process");
-		const proc = spawn("say", ["-v", voice, safe], {
-			stdio: "ignore",
-			detached: true,
-		});
-		proc.on("error", () => {
-			// Voice unavailable on this machine. Stay silent.
-		});
-		trackTts(proc);
-		trackFlowSpeech(proc, safe);
-		proc.unref();
-	} catch {
-		// Spawn failed (no shell, restricted env). Fail silently.
-	}
+	// The reply is already on screen. Speak a second-pass draft written for the
+	// ear (code, paths and links summarised); the screen text is never changed.
+	// Speech counts as pending from now, so push-to-talk cannot open during the
+	// rewrite; drafts run one at a time so two close replies never overlap.
+	spokenQueue.enqueue(trimmed, rewriteAllowed(s.voice) ? model : null, (draft) => {
+		// The draft is written after the reply: the mode may have changed since, so ask again.
+		if (!canSpeak(kind)) return;
+		try {
+			const { spawn } = require("node:child_process");
+			// "--" ends say's options, so a draft can never be read as one.
+			const proc = spawn("say", sayArgs(voice, draft), {
+				stdio: "ignore",
+				detached: true,
+			});
+			proc.on("error", () => {
+				// Voice unavailable on this machine. Stay silent.
+			});
+			trackTts(proc);
+			trackFlowSpeech(proc, draft);
+			proc.unref();
+		} catch {
+			// Spawn failed (no shell, restricted env). Fail silently.
+		}
+	});
 }
 
 // ----------------------------------------------------------------------------
@@ -1094,7 +1108,7 @@ export function App({
 				return;
 			}
 			if (r.kind === "consumed") {
-				if (r.outcome.say) speakAgentReply(undefined, r.outcome.say, "mode-notice");
+				if (r.outcome.say) speakAgentReply(undefined, r.outcome.say, null, "mode-notice");
 				const line = [r.outcome.screen].filter(Boolean).join(" ");
 				addSystemMessage(
 					r.outcome.changed
@@ -1103,7 +1117,7 @@ export function App({
 				);
 				return;
 			}
-			if (r.ack) speakAgentReply(undefined, r.ack, "ack");
+			if (r.ack) speakAgentReply(undefined, r.ack, null, "ack");
 			setVoiceTranscript(text);
 			addSystemMessage(`Transcribed: "${text}". Edit it or press Enter to send.`);
 		},
@@ -2371,7 +2385,7 @@ export function App({
 				flashNotice(`flow ${flowModeLabel(o.mode).toLowerCase()}`);
 				const note = flowDisclosure(o.mode);
 				if (note) addSystemMessage(`Flow mode: ${flowModeLabel(o.mode)}. ${note}`);
-				if (o.say) speakAgentReply(undefined, o.say, "mode-notice");
+				if (o.say) speakAgentReply(undefined, o.say, null, "mode-notice");
 			}
 			return;
 		}
@@ -5439,7 +5453,7 @@ export function App({
 							? `Flow mode: ${flowModeLabel(o.mode)}. ${o.screen ?? ""} ${flowDisclosure(o.mode)}`.trim()
 							: `${o.screen ?? `Flow mode stays ${flowModeLabel(o.mode)}.`} ${flowDisclosure(o.mode)}`.trim(),
 					);
-					if (o.changed && o.say) speakAgentReply(undefined, o.say, "mode-notice");
+					if (o.changed && o.say) speakAgentReply(undefined, o.say, null, "mode-notice");
 					break;
 				}
 
@@ -6635,7 +6649,13 @@ export function App({
 									| { role?: string }
 									| undefined
 							)?.role;
-							speakAgentReply(targetTabRole, trimmed);
+							speakAgentReply(
+								targetTabRole,
+								trimmed,
+								(p, signal) =>
+									(getTabAgent(tabId) ?? agent)?.completeOnce(p, signal) ??
+									Promise.reject(new Error("no 8gent")),
+							);
 						}
 					}
 					// appendClosingQuestionIfNeeded decides whether this turn's reply

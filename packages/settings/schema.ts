@@ -33,6 +33,10 @@ export interface VoiceSettings {
 	 * key-up). Local whisper.cpp only; the transcript lands in the prompt to edit.
 	 */
 	inputEnabled?: boolean;
+	/** Rewrite spoken replies for the ear with a second model pass. On unless false. */
+	spokenDraft?: boolean;
+	/** A child (Jr) profile: spoken replies are never sent to a model a second time. Off unless true. */
+	childProfile?: boolean;
 	/** Per-agent macOS voice overrides. Each tab role gets its own voice. */
 	perAgent: PerAgentVoices;
 }
