@@ -2987,6 +2987,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				provider: agentConfig.provider.name,
 			};
 
+			// The model the user asked for: a failover hop is announced against it (#4363).
+			const askedEntry = { ...currentEntry };
+
 			let result: any = null;
 			let resolved = false;
 			const MAX_PROVIDERS = 6; // hard cap so a misconfigured chain can't loop forever
@@ -3181,6 +3184,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						) {
 							break outer;
 						}
+						this.announceFailover(askedEntry, next);
 						currentEntry = next;
 						break; // exit inner attempt loop, outer reuses new currentEntry
 					}
@@ -3859,6 +3863,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	/** Tell the UI a different model serves this turn (#3102). A listener
 	 *  that throws must never change which model runs, so it is contained. */
+	/** A mid-turn failover moved the turn to another model: tell the UI (#4363). Reason unset = it did not answer. */
+	private announceFailover(asked: FailoverEntry, next: FailoverEntry): void {
+		if (asked.model === next.model && asked.provider === next.provider) return;
+		this.emitModelRouted(asked.model, next.model, next.provider);
+	}
+
 	private emitModelRouted(
 		requested: string,
 		used: string,

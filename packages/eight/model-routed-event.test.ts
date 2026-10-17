@@ -20,8 +20,14 @@ function agentWith(events: AgentEventCallbacks): Emit {
 
 test("onModelRouted receives the asked and the used model", () => {
 	const seen: unknown[] = [];
-	agentWith({ onModelRouted: (e) => seen.push(e) }).emitModelRouted("eight-1.0-q3:14b", "qwen3.8:27b-mlx", "ollama");
-	expect(seen).toEqual([{ requested: "eight-1.0-q3:14b", used: "qwen3.8:27b-mlx", provider: "ollama" }]);
+	agentWith({ onModelRouted: (e) => seen.push(e) }).emitModelRouted(
+		"eight-1.0-q3:14b",
+		"qwen3.8:27b-mlx",
+		"ollama",
+	);
+	expect(seen).toEqual([
+		{ requested: "eight-1.0-q3:14b", used: "qwen3.8:27b-mlx", provider: "ollama" },
+	]);
 });
 
 test("a listener that throws is contained", () => {
@@ -35,4 +41,33 @@ test("a listener that throws is contained", () => {
 
 test("no listener is fine", () => {
 	expect(() => agentWith({}).emitModelRouted("a", "b", "ollama")).not.toThrow();
+});
+
+test("a mid-turn failover emits one route event and the TUI prints the line once", async () => {
+	const { providerRouteNotice, shouldShowRouteNotice } = await import("./run");
+	const seen: Array<{ requested: string; used: string; provider: string; reason?: string }> = [];
+	const agent = new Agent({
+		model: "gemma-4-26b-a4b-it",
+		runtime: "lmstudio",
+		events: { onModelRouted: (e) => seen.push(e) },
+	}) as unknown as {
+		announceFailover: (
+			a: { model: string; provider: string },
+			n: { model: string; provider: string },
+		) => void;
+	};
+	const asked = { model: "gemma-4-26b-a4b-it", provider: "lmstudio" };
+	agent.announceFailover(asked, asked); // same entry: nothing to say
+	agent.announceFailover(asked, { model: "8gate:latest", provider: "ollama" });
+	expect(seen).toHaveLength(1);
+	expect(seen[0].reason).toBeUndefined();
+
+	const shown = new Set<string>();
+	const lines: string[] = [];
+	for (const e of [...seen, ...seen]) {
+		if (shouldShowRouteNotice(shown, `${e.requested}>${e.provider}:${e.used}|`)) {
+			lines.push(providerRouteNotice(e.requested, e.provider, e.used, e.reason as undefined));
+		}
+	}
+	expect(lines).toEqual(["gemma-4-26b-a4b-it did not answer, using Ollama 8gate:latest."]);
 });

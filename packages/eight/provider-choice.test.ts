@@ -12,6 +12,7 @@ import {
 	type ProviderChoiceDeps,
 	providerRouteNotice,
 	readSavedProviderChoice,
+	resolveChatChoice,
 	resolveProviderChoice,
 	shouldShowRouteNotice,
 } from "./run";
@@ -154,5 +155,20 @@ describe("shouldShowRouteNotice", () => {
 		const shown = new Set<string>();
 		expect(shouldShowRouteNotice(shown, "a>b|missing")).toBe(true);
 		expect(shouldShowRouteNotice(shown, "a>b|capability")).toBe(true);
+	});
+});
+
+describe("resolveChatChoice", () => {
+	test("a saved provider chat cannot run falls back to the router with the reason", async () => {
+		const c = await resolveChatChoice({}, deps({ saved: { provider: "groq", model: "llama" } }));
+		expect(c.provider).toBe("ollama");
+		expect(c.source).toBe("router");
+		expect(c.notice).toBe("groq is not a chat provider, using Ollama 8gate:latest");
+	});
+
+	test("a saved chat runtime is honoured, and an unreachable one keeps its own notice", async () => {
+		expect((await resolveChatChoice({}, deps())).provider).toBe("lmstudio");
+		const down = await resolveChatChoice({}, deps({ reachable: async () => false }));
+		expect(down.notice).toBe("LM Studio not reachable, using Ollama 8gate:latest");
 	});
 });

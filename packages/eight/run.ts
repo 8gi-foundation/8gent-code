@@ -697,6 +697,35 @@ export async function resolveProviderChoice(
 	return { provider, model, source: "router", notice };
 }
 
+export const CHAT_RUNTIMES: ReadonlySet<string> = new Set([
+	"ollama",
+	"lmstudio",
+	"openrouter",
+	"apple-foundation",
+	"apfel",
+	"deepseek",
+]);
+
+/**
+ * A saved provider chat cannot run as a runtime (e.g. "groq") is set aside for
+ * the router, with a stated reason. Flag choices are left as typed.
+ */
+export async function resolveChatChoice(
+	req: { provider?: string; model?: string },
+	deps: ProviderChoiceDeps,
+): Promise<ProviderChoice> {
+	const choice = await resolveProviderChoice({ ...req, routerFallback: "ollama" }, deps);
+	if (choice.source !== "saved" || CHAT_RUNTIMES.has(choice.provider)) return choice;
+	const next = await resolveProviderChoice(
+		{ model: req.model, routerFallback: "ollama" },
+		{ ...deps, saved: undefined },
+	);
+	next.notice = `${choice.provider} is not a chat provider, using ${providerLabel(next.provider)} ${
+		next.model ?? defaultModelFor(next.provider)
+	}`;
+	return next;
+}
+
 /** Any HTTP answer counts: only a refused or timed-out connection is "not reachable". */
 export async function providerReachable(provider: string): Promise<boolean> {
 	try {
