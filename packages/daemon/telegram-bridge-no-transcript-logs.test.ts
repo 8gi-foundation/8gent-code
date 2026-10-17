@@ -8,7 +8,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { subprocessFailure, transcribeVoice, transcriptionLogLine } from "./telegram-bridge";
+import {
+	TelegramDaemonBridge,
+	subprocessFailure,
+	transcribeVoice,
+	transcriptionLogLine,
+} from "./telegram-bridge";
 
 const CANARY = "CANARY-purple-elephant-7731 my private dictated words";
 
@@ -83,5 +88,80 @@ describe("no transcript text in logs", () => {
 	test("subprocessFailure keeps status and size, drops text", () => {
 		const l = subprocessFailure("whisper", 1, CANARY);
 		expect(l).toBe(`[telegram-bridge] whisper failed: status=1 stderr_bytes=${CANARY.length}`);
+	});
+});
+
+describe("voice branch: log line and private-chat guard", () => {
+	const JAMES = 5486040131;
+	let sent: string[];
+	let dispatched: string[];
+
+	function bridgeFor(chatId: number, transcript: string) {
+		const b = new TelegramDaemonBridge({
+			telegramToken: "tok",
+			chatId: String(chatId),
+			daemonUrl: "ws://127.0.0.1:1",
+			authorizedChatIds: [String(chatId)],
+			authorizedUserIds: [String(JAMES)],
+			operatorUserIds: [String(JAMES)],
+			// biome-ignore lint/suspicious/noExplicitAny: private fields under test.
+		}) as any;
+		b.originChatId = String(chatId);
+		b.transcribe = async () => transcript;
+		b.dispatchTranscript = async (t: string) => void dispatched.push(t);
+		return b as TelegramDaemonBridge;
+	}
+	const msg = (id: number, type: string) =>
+		// biome-ignore lint/suspicious/noExplicitAny: minimal message shape.
+		({ chat: { id, type }, from: { id: JAMES } }) as any;
+
+	beforeEach(() => {
+		sent = [];
+		dispatched = [];
+		globalThis.fetch = (async (_u: string, init?: { body?: string }) => {
+			if (init?.body) sent.push(init.body);
+			return new Response(JSON.stringify({ ok: true }));
+		}) as unknown as typeof fetch;
+	});
+
+	test("the poll-loop call site logs chars and ms, never the text", async () => {
+		await bridgeFor(JAMES, CANARY).handleVoiceMessage(msg(JAMES, "private"), "fid");
+		const line = logs.find((l) => l.includes("voice transcription"));
+		expect(line).toMatch(new RegExp(`chars=${CANARY.length} ms=\\d+`));
+		expect(logs.join("\n")).not.toContain("CANARY");
+	});
+
+	test("private chat: Heard echo sent and transcript dispatched", async () => {
+		await bridgeFor(JAMES, CANARY).handleVoiceMessage(msg(JAMES, "private"), "fid");
+		expect(sent.some((b) => b.includes(`Heard:`) && b.includes("CANARY"))).toBe(true);
+		expect(dispatched).toEqual([CANARY]);
+	});
+
+	test("group chat: no Heard echo, transcript dispatched, canary in no send", async () => {
+		await bridgeFor(-1001, CANARY).handleVoiceMessage(msg(-1001, "supergroup"), "fid");
+		expect(sent.join("\n")).not.toContain("CANARY");
+		expect(sent.join("\n")).not.toContain("Heard");
+		expect(dispatched).toEqual([CANARY]);
+	});
+
+	for (const type of ["supergroup", "private"]) {
+		test(`${type}: a "[" transcript carrying speech is never sent back raw`, async () => {
+			const t = `[Music] ${CANARY}`;
+			await bridgeFor(type === "private" ? JAMES : -1001, t).handleVoiceMessage(
+				msg(type === "private" ? JAMES : -1001, type),
+				"fid",
+			);
+			expect(sent.length).toBe(1);
+			expect(sent.join("\n")).not.toContain("CANARY");
+			expect(sent.join("\n")).toContain("could not be processed");
+			expect(dispatched).toEqual([]);
+			expect(logs.join("\n")).not.toContain("CANARY");
+		});
+	}
+
+	test("our own status string still reaches the chat", async () => {
+		const s = "[could not download voice message]";
+		await bridgeFor(-1001, s).handleVoiceMessage(msg(-1001, "supergroup"), "fid");
+		expect(sent.join("\n")).toContain("could not download voice message");
 	});
 });

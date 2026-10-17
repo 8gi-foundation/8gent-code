@@ -295,6 +295,19 @@ export function transcriptionLogLine(transcript: string, ms: number): string {
 	return `[telegram-bridge] voice transcription: chars=${transcript.length} ms=${ms}`;
 }
 
+/**
+ * Bridge-authored status strings returned in place of a transcript. Anything
+ * else that starts with "[" is model output (whisper tags such as "[Music]"
+ * can be followed by real speech) and is never sent back into a chat.
+ */
+const VOICE_SENTINELS = new Set([
+	"[no local whisper model found - expected ~/.8gent/models/whisper/ggml-base.en.bin]",
+	"[could not download voice message]",
+	"[voice message received - could not decode the audio]",
+	"[voice message received - transcription failed, please send as text]",
+]);
+const VOICE_UNPROCESSED = "[voice message received - could not be processed, please send as text]";
+
 export async function transcribeVoice(token: string, fileId: string): Promise<string> {
 	const model = localWhisperModel();
 	if (!model) {
@@ -1151,22 +1164,7 @@ class TelegramDaemonBridge {
 							if (fileId && update.message.chat) {
 								if (!(await this.admitVoice(update.message))) continue;
 								await tgTyping(this.config.telegramToken, this.replyChat());
-								const startedAt = Date.now();
-								const transcript = await transcribeVoice(this.config.telegramToken, fileId);
-								console.log(transcriptionLogLine(transcript, Date.now() - startedAt));
-								if (!transcript.startsWith("[")) {
-									// The echo is for the operator's own DM only; never into a group.
-									if (update.message.chat.type === "private") {
-										await tgSend(
-											this.config.telegramToken,
-											this.replyChat(),
-											`Heard: "${transcript}"`,
-										);
-									}
-									await this.dispatchTranscript(transcript, update.message);
-								} else {
-									await tgSend(this.config.telegramToken, this.replyChat(), transcript);
-								}
+								await this.handleVoiceMessage(update.message, fileId);
 							}
 						} else if (update.message?.text) {
 							await this.handleTelegramMessage(
@@ -1237,6 +1235,29 @@ class TelegramDaemonBridge {
 			this.senderCtx({ ...message, entities: undefined }),
 		);
 	}
+
+	/**
+	 * Transcribe an admitted voice note and route it. Logs length and duration
+	 * only. The "Heard:" echo goes to private chats only; a "[" transcript is
+	 * sent back only if it is one of our own status strings.
+	 */
+	async handleVoiceMessage(message: BridgeMessage, fileId: string): Promise<void> {
+		const startedAt = Date.now();
+		const transcript = await this.transcribe(this.config.telegramToken, fileId);
+		console.log(transcriptionLogLine(transcript, Date.now() - startedAt));
+		if (!transcript.startsWith("[")) {
+			if (message.chat.type === "private") {
+				await tgSend(this.config.telegramToken, this.replyChat(), `Heard: "${transcript}"`);
+			}
+			await this.dispatchTranscript(transcript, message);
+			return;
+		}
+		const reply = VOICE_SENTINELS.has(transcript) ? transcript : VOICE_UNPROCESSED;
+		await tgSend(this.config.telegramToken, this.replyChat(), reply);
+	}
+
+	/** Seam for tests; production uses the local whisper pipeline. */
+	transcribe: (token: string, fileId: string) => Promise<string> = transcribeVoice;
 
 	/**
 	 * Admission for a voice note, before anything is downloaded or transcribed:
