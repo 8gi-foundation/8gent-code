@@ -529,3 +529,35 @@ export function formatTaskOutput(output: TaskOutput, task: TaskInfo): string {
 
 	return result;
 }
+
+/** Longest a single background_wait may block, in seconds. */
+export const MAX_WAIT_SECONDS = 300;
+export const DEFAULT_WAIT_SECONDS = 60;
+
+/**
+ * Block until a background task finishes or timeoutSeconds passes, then return its
+ * status, exit code and the tail of its output. If the task is still running at the
+ * timeout the text says so and tells the caller to wait again.
+ */
+export async function waitForBackgroundTask(
+	manager: BackgroundTaskManager,
+	taskId: string,
+	timeoutSeconds?: number,
+	tail = 40,
+): Promise<string> {
+	const secs = Math.min(
+		MAX_WAIT_SECONDS,
+		Math.max(
+			1,
+			Number.isFinite(timeoutSeconds) ? (timeoutSeconds as number) : DEFAULT_WAIT_SECONDS,
+		),
+	);
+	const info = await manager.waitForTask(taskId, secs * 1000);
+	if (!info) return `Task not found: ${taskId}`;
+	const output = manager.getTaskOutput(taskId, { tail });
+	const body = output ? formatTaskOutput(output, info) : formatTaskStatus(info);
+	if (info.status === "running") {
+		return `[STILL RUNNING after ${secs}s] Call background_wait("${taskId}") again to keep waiting.\n${body}`;
+	}
+	return `[FINISHED ${info.status}, exit code ${info.exitCode ?? "none"}]\n${body}`;
+}
