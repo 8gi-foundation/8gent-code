@@ -264,6 +264,7 @@ import { IssueBlameGate, issueBodyOf } from "./issue-blame";
 import { layoutMeasureLine } from "./layout-measure";
 import { MESSAGE_BOARDROOM_TOOL_DEF, messageBoardroom } from "./message-boardroom";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
+import { placeholderPathLine } from "./placeholder-paths";
 import { RetiredFacts } from "./retired-facts";
 import { ensureScratchExcludedIfPresent } from "./scratch-exclude";
 import { scrubKeepingAttachment, scrub as scrubSecrets } from "./secret-scanner";
@@ -1003,6 +1004,8 @@ export class ToolExecutor {
 	private openedThisTurn = new Set<string>();
 	/** Dates and numbers files read this turn mark as retired (#3811). */
 	private retiredFacts = new RetiredFacts();
+	/** Text files read this turn: a path in one of them is real, not invented (#4401). */
+	private readTexts: string[] = [];
 	/** Absolute paths read or written this session; write_file replaces only these or new files (#4238). */
 	private seenPaths = new Set<string>();
 	/** Commands the harness refused; a refused probe proves nothing about the files it named (#4238). */
@@ -1155,6 +1158,13 @@ export class ToolExecutor {
 		this.openedThisTurn.clear();
 		this.layoutNotesSent.clear();
 		this.retiredFacts.reset();
+		this.readTexts = [];
+	}
+
+	/** A placeholder-folder line for a prose doc just written, or "" (#4401). */
+	private placeholderLine(file: string, text: string): string {
+		const line = placeholderPathLine(file, text, [this.presendTask, ...this.readTexts]);
+		return line ? `\n${line}` : "";
 	}
 
 	/**
@@ -3329,6 +3339,7 @@ export class ToolExecutor {
 
 		const content = fs.readFileSync(absolutePath, "utf-8");
 		this.retiredFacts.noteRead(absolutePath, content);
+		if (this.readTexts.length < 50) this.readTexts.push(content);
 		this.seenPaths.add(absolutePath);
 		const lines = content.split("\n");
 		// A trailing newline ends the last line; it does not start another one.
@@ -3490,6 +3501,9 @@ export class ToolExecutor {
 		const retiredLine = this.retiredFacts.warn(absolutePath, content);
 		if (retiredLine) designHint += `\n${retiredLine}`;
 
+		// An invented folder such as C:\path\to\Tally in a prose doc (#4401): warn, never block.
+		designHint += this.placeholderLine(absolutePath, content);
+
 		// Marp decks always get a narrated deck.mp4 beside them (EIGHT_DECK_VIDEO=0 opts out).
 		const deckLine = await deckVideoAfterWrite(absolutePath, content, this.workingDirectory);
 		if (deckLine) designHint += `\n${deckLine}`;
@@ -3529,7 +3543,7 @@ export class ToolExecutor {
 		const recordEdit = watchWrite(absolutePath, this.createdFiles);
 		fs.writeFileSync(absolutePath, edit.content);
 		recordEdit();
-		return anchoredEditMessage(absolutePath, edit);
+		return anchoredEditMessage(absolutePath, edit) + this.placeholderLine(absolutePath, newText);
 	}
 
 	private async editFile(
@@ -3589,10 +3603,11 @@ export class ToolExecutor {
 		fs.writeFileSync(absolutePath, newContent);
 		recordEdit();
 
+		const placeholder = this.placeholderLine(absolutePath, newText);
 		if (resolved.matchedLine !== undefined) {
-			return `File edited (matched ignoring whitespace at line ${resolved.matchedLine}): ${absolutePath}\nReplaced ${resolved.oldLength} chars with ${resolved.newText.length} chars.`;
+			return `File edited (matched ignoring whitespace at line ${resolved.matchedLine}): ${absolutePath}\nReplaced ${resolved.oldLength} chars with ${resolved.newText.length} chars.${placeholder}`;
 		}
-		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.`;
+		return `File edited: ${absolutePath}\nReplaced ${oldText.length} chars with ${newText.length} chars.${placeholder}`;
 	}
 
 	private async listFiles(dirPath = ".", pattern?: string): Promise<string> {
