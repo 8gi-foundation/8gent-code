@@ -63,6 +63,13 @@ function depsFor(scenario: Scenario, flag: boolean): DoctorDeps {
 	return deps;
 }
 
+/** The home folder as <HOME>, and the path under it slash-separated, so the golden is one text on every OS. */
+const redactHome = (line: string, home: string) =>
+	line
+		.split(home)
+		.join("<HOME>")
+		.replace(/<HOME>\S*/g, (m) => m.replaceAll("\\", "/"));
+
 async function run(scenario: Scenario, flag: boolean): Promise<string[]> {
 	const deps = depsFor(scenario, flag);
 	const lines: string[] = [];
@@ -75,7 +82,7 @@ async function run(scenario: Scenario, flag: boolean): Promise<string[]> {
 	} finally {
 		console.log = original;
 	}
-	return lines.map((l) => l.split(deps.home as string).join("<HOME>"));
+	return lines.map((l) => redactHome(l, deps.home as string));
 }
 
 const ALL: CheckName[] = [
@@ -108,7 +115,7 @@ describe("doctor flag off: output unchanged from before #3451", () => {
 		} finally {
 			console.log = original;
 		}
-		expect(lines.map((l) => l.split(deps.home as string).join("<HOME>"))).toEqual(GOLDEN.down);
+		expect(lines.map((l) => redactHome(l, deps.home as string))).toEqual(GOLDEN.down);
 	});
 });
 

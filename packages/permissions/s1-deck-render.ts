@@ -47,15 +47,7 @@
  * Synchronous, never throws.
  */
 
-import {
-	constants,
-	accessSync,
-	closeSync,
-	openSync,
-	readSync,
-	readlinkSync,
-	realpathSync,
-} from "node:fs";
+import { constants, accessSync, closeSync, openSync, readSync, readlinkSync } from "node:fs";
 import * as path from "node:path";
 import { promptControlText } from "../decide/guard";
 import { decideRules } from "../decide/rules";
@@ -67,6 +59,9 @@ import {
 	stripDot,
 } from "./s1-mv-in-project";
 import { inside } from "./s1-rm-nothing";
+// The 8.3-expanding realpath: a root and a PATH entry must be spelt the same way to compare
+// (RUNNER~1 vs runneradmin on Windows), or a PATH entry inside the workspace reads as outside it.
+import { realpathSync } from "./s1-run-in-project";
 
 const PLAIN = /^[A-Za-z0-9._/+,= -]+$/;
 /** Files whose presence makes the workspace look like an 8gent checkout or a planted binary. */

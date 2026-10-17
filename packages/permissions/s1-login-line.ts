@@ -63,6 +63,9 @@ const NO: LoginLine = { ok: false };
 const SHAPE =
 	/^sed -n 's\/\^([A-Za-z][A-Za-z0-9 _-]{0,31}): \*\/([a-z][a-z0-9_-]{0,31})=\/w (\.tmp\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})' ([A-Za-z0-9][A-Za-z0-9._/-]{0,199})$/;
 
+/** A workspace-relative path as the reason shows it: slash-separated on every platform. */
+const slash = (rel: string): string => rel.split(path.sep).join("/");
+
 /** The workspace-relative path of `p` under `root`, resolved, or null when it leaves the workspace. */
 function relInside(p: string, root: string): { abs: string; rel: string; lexical: string } | null {
 	if (p.split("/").includes("..")) return null;
@@ -112,7 +115,7 @@ export function loginLineToTmp(command: string, cwd: string | undefined): LoginL
 
 		return {
 			ok: true,
-			reason: `sed copy of the "${label}:" line of ${src.rel} into ${dst.rel}, printing nothing`,
+			reason: `sed copy of the "${label}:" line of ${slash(src.rel)} into ${slash(dst.rel)}, printing nothing`,
 		};
 	} catch {
 		return NO;

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHash, sign as cryptoSign, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import { checkUpdate, describeCheck, runUpdateCommand } from "./cli-maintenance";
 import {
 	type FetchLike,
@@ -190,7 +190,9 @@ describe("npm channel", () => {
 	test("the global prefix comes from where this 8gent is installed", () => {
 		const brew = "/opt/homebrew/lib/node_modules/@8gi-foundation/8gent-code/bin/8gent-run.js";
 		expect(npmPrefixFromModulePath(brew, "darwin")).toBe("/opt/homebrew");
-		expect(npmPrefixFromModulePath(`file://${brew}`, "darwin")).toBe("/opt/homebrew");
+		// A POSIX file URL is not a valid Windows one (fileURLToPath refuses it there).
+		if (process.platform !== "win32")
+			expect(npmPrefixFromModulePath(`file://${brew}`, "darwin")).toBe("/opt/homebrew");
 		expect(
 			npmPrefixFromModulePath(
 				"/usr/local/lib/node_modules/@8gi-foundation/8gent-code/dist/cli.js",
@@ -370,7 +372,7 @@ describe("npm channel from the GitHub release (#3658)", () => {
 			signingKey: "",
 			run: async (_cmd, args) => {
 				const file = args[2];
-				runs.push({ args, staged: file.startsWith("/") ? readFileSync(file, "utf8") : "" });
+				runs.push({ args, staged: isAbsolute(file) ? readFileSync(file, "utf8") : "" });
 				return 0;
 			},
 			log: () => {},
@@ -388,7 +390,7 @@ describe("npm channel from the GitHub release (#3658)", () => {
 		expect(runs).toHaveLength(1);
 		expect(runs[0].args[0]).toBe("install");
 		expect(runs[0].args[1]).toBe("-g");
-		expect(runs[0].args[2].endsWith(`/${tgz}`)).toBe(true);
+		expect(isAbsolute(runs[0].args[2]) && basename(runs[0].args[2]) === tgz).toBe(true);
 		expect(runs[0].args).toHaveLength(3);
 		// npm installed exactly the verified bytes, and nothing is left behind.
 		expect(runs[0].staged).toBe("NPM-TARBALL-0.20.0");

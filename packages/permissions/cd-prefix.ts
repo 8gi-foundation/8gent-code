@@ -25,7 +25,7 @@
  * a line that does not start that way is untouched and meets the sanitizer as today.
  */
 
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import type { ShellKind } from "../core/shell";
 
@@ -69,7 +69,10 @@ function parse(command: string): Parsed {
 	if (SECOND_CD.test(rest)) return { why: "only one cd is allowed" };
 	const folder = (m[1] ?? "").replace(LEADING_DOT_SLASH, "");
 	if (!folder) return { why: "name a folder" };
-	if (folder.startsWith("/")) return { why: "the folder must be relative, not absolute" };
+	// `C:\x` and `C:/x` are absolute on Windows; the plain-name check would refuse them too,
+	// but with the wrong reason.
+	if (folder.startsWith("/") || /^[A-Za-z]:/.test(folder) || folder.startsWith("\\"))
+		return { why: "the folder must be relative, not absolute" };
 	if (!PLAIN_FOLDER.test(folder))
 		return {
 			why: "the folder must be a plain name (no $, ~, quotes, globs, spaces or a leading -)",
@@ -92,6 +95,29 @@ export function cdPrefixShape(
 	if (!posix(kind)) return null;
 	const p = parse(command);
 	return p && "rest" in p ? { folder: p.folder, rest: p.rest } : null;
+}
+
+/**
+ * `segs` spelled as the disk spells them. On a case-insensitive disk `cd VIDEO` finds
+ * `video`, and realpath keeps the typed case on Windows, so every gate downstream would
+ * be handed a name the disk does not have. A segment with no entry stays as typed.
+ */
+function onDiskNames(root: string, segs: string[]): string[] {
+	const out: string[] = [];
+	let cur = root;
+	for (const seg of segs) {
+		let name = seg;
+		try {
+			const names = readdirSync(cur);
+			if (!names.includes(seg)) {
+				const lower = seg.toLowerCase();
+				name = names.find((n) => n.toLowerCase() === lower) ?? seg;
+			}
+		} catch {}
+		out.push(name);
+		cur = path.join(cur, name);
+	}
+	return out;
 }
 
 /** True when `child` is strictly inside `parent` (both realpaths). */
@@ -117,7 +143,7 @@ export function cdPrefix(
 	let dir: string;
 	try {
 		realRoot = realpathSync(root);
-		dir = realpathSync(path.resolve(realRoot, ...p.segs));
+		dir = realpathSync(path.resolve(realRoot, ...onDiskNames(realRoot, p.segs)));
 	} catch {
 		return refuse(`there is no folder ${p.folder} in the project`, command);
 	}
