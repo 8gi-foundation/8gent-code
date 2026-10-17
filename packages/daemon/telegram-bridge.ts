@@ -226,6 +226,8 @@ interface BridgeConfig {
 	 * only when TELEGRAM_OPERATOR_USER_IDS names someone. Test seam otherwise.
 	 */
 	flowController?: FlowModeController;
+	/** Test seam for the environment the runtime is read from. Default: process.env. */
+	env?: Record<string, string | undefined>;
 	/** Test seam for the judge model. Default: loopback ollama, or none. */
 	judgeModel?: SpokenModel | null;
 	/** Test seam for the spoken post-draft model. Default: loopback ollama, or none. */
@@ -666,12 +668,26 @@ export function isCommandAllowed(
  */
 export const LOCAL_DEFAULT_RUNTIME = "ollama";
 export const LOCAL_DEFAULT_MODEL = "eight-1.0-q3:14b";
+export function isLocalRuntime(runtime: string): boolean {
+	return runtime === "ollama" || runtime === "8gent" || runtime === "lmstudio";
+}
+
+/**
+ * The transit notice says no audio or transcript goes to a rented model API. That holds
+ * only while the agent runs locally, so voice notes are refused when it does not.
+ */
+export function voicePathIsLocal(env: Record<string, string | undefined>): boolean {
+	return isLocalRuntime(resolveBridgeModel(env).runtime);
+}
+export const VOICE_NEEDS_LOCAL =
+	"Voice notes are off while a cloud model is configured. Send text.";
+
 export function resolveBridgeModel(env: Record<string, string | undefined>): {
 	runtime: string;
 	model: string;
 } {
 	const runtime = env.DEFAULT_RUNTIME?.trim() || LOCAL_DEFAULT_RUNTIME;
-	const local = runtime === "ollama" || runtime === "8gent" || runtime === "lmstudio";
+	const local = isLocalRuntime(runtime);
 	const model = env.DEFAULT_MODEL?.trim() || (local ? LOCAL_DEFAULT_MODEL : "auto:free");
 	return { runtime, model };
 }
@@ -868,6 +884,8 @@ class TelegramDaemonBridge {
 	private flowReal: FlowModeController | null = null;
 	/** The next reply answers an operator voice note, so it is spoken too. Consumed once. */
 	private voiceTurnAt = 0;
+	/** The chat that armed the spoken reply; only a reply to that chat may use it (S1). */
+	private voiceTurnChat: string | null = null;
 
 	constructor(config: BridgeConfig) {
 		this.config = config;
@@ -1321,6 +1339,10 @@ class TelegramDaemonBridge {
 	 * sent back only if it is one of our own status strings.
 	 */
 	async handleVoiceMessage(message: BridgeMessage, fileId: string): Promise<void> {
+		if (!voicePathIsLocal(this.config.env ?? process.env)) {
+			await tgSend(this.config.telegramToken, String(message.chat.id), VOICE_NEEDS_LOCAL, "");
+			return;
+		}
 		const startedAt = Date.now();
 		const transcript = await this.transcribe(this.config.telegramToken, fileId);
 		console.log(transcriptionLogLine(transcript, Date.now() - startedAt));
@@ -1332,6 +1354,7 @@ class TelegramDaemonBridge {
 			// A mode command is consumed here; everything else is a normal turn.
 			if (await this.flowVoice(message, transcript)) {
 				this.voiceTurnAt = 0; // a mode command has no reply to speak
+				this.voiceTurnChat = null;
 				return;
 			}
 			await this.dispatchTranscript(transcript, message);
@@ -1356,7 +1379,10 @@ class TelegramDaemonBridge {
 	/** An operator voice note in their own DM arms a spoken reply, once. */
 	private noteVoiceTurn(message: BridgeMessage): void {
 		// The same gate as flow: explicit operator, own private DM, live (not forwarded) note.
-		if (classifyVoice(message, this.flowOps()) === "user-voice") this.voiceTurnAt = Date.now();
+		if (classifyVoice(message, this.flowOps()) === "user-voice") {
+			this.voiceTurnAt = Date.now();
+			this.voiceTurnChat = String(message.chat.id);
+		}
 	}
 
 	/**
@@ -1855,8 +1881,14 @@ class TelegramDaemonBridge {
 	 * stack must never cost him the answer.
 	 */
 	private async maybeSpeak(text: string, voice = VOICE_BY_OFFICER.James): Promise<void> {
-		const answersVoice = Date.now() - this.voiceTurnAt < VOICE_TURN_WINDOW_MS;
-		this.voiceTurnAt = 0;
+		// Only the chat that armed the arm may use or consume it: an overlapping group
+		// reply neither speaks in the DM's place nor wastes its arm.
+		const mine = this.voiceTurnChat === this.replyChat();
+		const answersVoice = mine && Date.now() - this.voiceTurnAt < VOICE_TURN_WINDOW_MS;
+		if (mine) {
+			this.voiceTurnAt = 0;
+			this.voiceTurnChat = null;
+		}
 		if (!this.voiceEnabled && !answersVoice) return;
 		// The full text is already on screen; what is spoken is a draft written for the ear.
 		const draft = capAtSentence(

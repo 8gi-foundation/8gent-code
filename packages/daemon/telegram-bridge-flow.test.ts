@@ -10,7 +10,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type FlowModeController, createFlowModeController } from "../flow/flow-mode";
 import { R10_TRANSIT_NOTICE } from "../telegram-bot/voice-mode";
-import { OPERATOR_COMMANDS, TelegramDaemonBridge } from "./telegram-bridge";
+import {
+	OPERATOR_COMMANDS,
+	TelegramDaemonBridge,
+	VOICE_NEEDS_LOCAL,
+	voicePathIsLocal,
+} from "./telegram-bridge";
 
 const JAMES = 5486040131;
 const ARTALE = 8270920648;
@@ -61,6 +66,7 @@ function make(over: Record<string, unknown> = {}, transcript = CANARY, judgeRepl
 		authorizedUserIds: [String(JAMES), String(ARTALE)],
 		operatorUserIds: [String(JAMES)],
 		flowController: real,
+		env: {},
 		judgeModel: async (p: string) => {
 			prompts.push(p);
 			return judgeReply;
@@ -612,5 +618,36 @@ describe("review fixes on #4383", () => {
 			expect(x.body.reply_markup).toBeUndefined();
 		}
 		expect(t.applied()).toEqual([]);
+	});
+
+	test("S1: a group reply that finishes first neither speaks in place of the DM reply nor uses its arm", async () => {
+		const said: string[] = [];
+		const t = make({ sendVoiceNote: recorder(said) });
+		await t.b.handleVoiceMessage(voice(JAMES, DM), "f"); // arms the DM chat
+		t.b.originChatId = String(GROUP); // an overlapping group turn is now the origin
+		await t.b.maybeSpeak("Group answer. Details are on screen.");
+		expect(said).toEqual([]);
+		t.b.originChatId = String(JAMES); // the DM reply lands after
+		await t.b.maybeSpeak("DM answer. Details are on screen.");
+		expect(said.length).toBe(1);
+		expect(said[0]).toContain("DM answer");
+	});
+	test("S2: a non-local runtime refuses the voice path: no transcription, no dispatch, one line", async () => {
+		for (const env of [{ DEFAULT_RUNTIME: "openrouter" }, { DEFAULT_RUNTIME: "anthropic" }]) {
+			bodies.length = 0;
+			const t = make({ env });
+			let transcribed = 0;
+			t.b.transcribe = async () => {
+				transcribed++;
+				return CANARY;
+			};
+			await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+			expect(transcribed).toBe(0);
+			expect(t.dispatched).toEqual([]);
+			expect(bodies.map((x) => x.body.text)).toEqual([VOICE_NEEDS_LOCAL]);
+		}
+		expect(voicePathIsLocal({})).toBe(true);
+		expect(voicePathIsLocal({ DEFAULT_RUNTIME: "ollama" })).toBe(true);
+		expect(voicePathIsLocal({ DEFAULT_RUNTIME: "openrouter" })).toBe(false);
 	});
 });
