@@ -8,13 +8,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { FlowController, FlowModeName } from "../telegram-bot/flow-bot";
+import { type FlowModeController, createFlowModeController } from "../flow/flow-mode";
 import { OPERATOR_COMMANDS, TelegramDaemonBridge } from "./telegram-bridge";
 
 const JAMES = 5486040131;
 const ARTALE = 8270920648;
 const GROUP = -1001;
-const CANARY = "CANARY-purple-elephant-7731 go ahead and do it";
+const CANARY = "CANARY-purple-elephant-7731 please read my notes";
 
 let bodies: { url: string; body: Record<string, any> }[];
 let logs: string[];
@@ -44,26 +44,14 @@ afterEach(() => {
 	for (const k of ["log", "warn", "error", "info"] as const) console[k] = saved[k];
 });
 
-function fakeCtl() {
-	const applied: { to: FlowModeName; origin: string }[] = [];
-	let mode: FlowModeName = "think";
-	const ctl: FlowController = {
-		mode: () => mode,
-		canSwitch: () => true,
-		apply: (to, origin) => {
-			applied.push({ to, origin });
-			mode = to;
-			return { changed: true, mode };
-		},
-		snapshot: () => null,
-	};
-	return { ctl, applied };
-}
+/** What the real controller accepted, in order. */
+const appliedOf = (real: FlowModeController) =>
+	real.log.filter((l) => l.accepted).map((l) => ({ to: l.to, origin: l.origin }));
 
-function make(over: Record<string, unknown> = {}, transcript = CANARY) {
-	const signals: { source: string; transcript: string }[] = [];
+function make(over: Record<string, unknown> = {}, transcript = CANARY, judgeReply = "{}") {
+	const prompts: string[] = [];
 	const dispatched: string[] = [];
-	const f = fakeCtl();
+	const real = createFlowModeController();
 	const b = new TelegramDaemonBridge({
 		telegramToken: "tok",
 		chatId: String(JAMES),
@@ -71,14 +59,25 @@ function make(over: Record<string, unknown> = {}, transcript = CANARY) {
 		authorizedChatIds: [String(JAMES), String(GROUP)],
 		authorizedUserIds: [String(JAMES), String(ARTALE)],
 		operatorUserIds: [String(JAMES)],
-		flowController: f.ctl,
-		onFlowSignal: (s) => void signals.push(s),
+		flowController: real,
+		judgeModel: async (p: string) => {
+			prompts.push(p);
+			return judgeReply;
+		},
 		...over,
 	}) as any;
 	b.transcribe = async () => transcript;
 	b.dispatchTranscript = async (t: string) => void dispatched.push(t);
-	return { b: b as any, signals, dispatched, ...f };
+	return {
+		b: b as any,
+		/** Judge prompts: one per operator voice note that reached the judge. */
+		signals: prompts,
+		dispatched,
+		real,
+		applied: () => appliedOf(real),
+	};
 }
+const settle = () => new Promise((r) => setTimeout(r, 20));
 const voice = (from: number, chat: { id: number; type: string }, extra: object = {}) =>
 	({
 		message_id: 1,
@@ -97,7 +96,9 @@ describe("voice note to flow signal (C1 C3 C4 C6 T1 T2)", () => {
 	test("a live operator DM voice note is one signal, transcript still dispatched", async () => {
 		const t = make();
 		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
-		expect(t.signals).toEqual([{ source: "user-voice", transcript: CANARY }]);
+		await settle();
+		expect(t.signals.length).toBe(1);
+		expect(t.signals[0]).toContain(CANARY);
 		expect(t.dispatched).toEqual([CANARY]);
 	});
 	test("T1: forwarded (forward_origin, then via_bot): no signal", async () => {
@@ -114,7 +115,8 @@ describe("voice note to flow signal (C1 C3 C4 C6 T1 T2)", () => {
 	});
 	test("T1: a forwarded copy of our own spoken reply is an echo: no signal", async () => {
 		const t = make({}, "The build is green and the branch is pushed to the remote.");
-		t.b.echo.record("The build is green and the branch is pushed to the remote.");
+		t.b.gate.ttsStarted("The build is green and the branch is pushed to the remote.");
+		t.b.gate.ttsEnded();
 		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
 		expect(t.signals).toEqual([]);
 	});
@@ -129,12 +131,8 @@ describe("voice note to flow signal (C1 C3 C4 C6 T1 T2)", () => {
 		await t.b.handleVoiceMessage(voice(JAMES, { id: GROUP, type: "supergroup" }), "f");
 		expect(t.signals).toEqual([]);
 	});
-	test("T9: empty operator list or no controller: no signal, /mode says off, no card", async () => {
-		for (const over of [
-			{ operatorUserIds: [] },
-			{ operatorUserIds: undefined },
-			{ flowController: undefined },
-		]) {
+	test("T9: empty operator list: no signal, /mode says off, no card", async () => {
+		for (const over of [{ operatorUserIds: [] }, { operatorUserIds: undefined }]) {
 			const t = make(over);
 			await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
 			await (t.b as any).handleTelegramMessage("/mode", JAMES, {
@@ -169,10 +167,10 @@ describe("cards through the bridge (C9 T3 T4 T7)", () => {
 		const t = make();
 		const { data, messageId } = await mintMenu(t);
 		await (t.b as any).handleCallbackQuery(q(data, messageId));
-		expect(t.applied.length).toBe(1);
-		expect(t.applied[0]?.origin).toBe("user-button");
+		expect(t.applied().length).toBe(1);
+		expect(t.applied()[0]?.origin).toBe("user-button");
 		await (t.b as any).handleCallbackQuery(q(data, messageId)); // replay
-		expect(t.applied.length).toBe(1);
+		expect(t.applied().length).toBe(1);
 	});
 	test("T3: non-operator, group copy, forwarded card, wrong message id: nothing applied", async () => {
 		const t = make();
@@ -184,7 +182,7 @@ describe("cards through the bridge (C9 T3 T4 T7)", () => {
 			q(data, messageId, JAMES, { id: GROUP, type: "supergroup" }),
 		);
 		await (t.b as any).handleCallbackQuery(q(data, messageId + 1));
-		expect(t.applied).toEqual([]);
+		expect(t.applied()).toEqual([]);
 	});
 	test("/mode in a group mints nothing and says nothing", async () => {
 		const t = make();
@@ -206,11 +204,11 @@ describe("cards through the bridge (C9 T3 T4 T7)", () => {
 		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
 		expect(t.b.pendingApprovals.has("req1")).toBe(true);
 		expect(t.b.awaitingAck.size).toBe(0);
-		expect(t.applied).toEqual([]);
+		expect(t.applied()).toEqual([]);
 		// and with nothing pending
 		const t2 = make({}, "yes");
 		await t2.b.handleVoiceMessage(voice(JAMES, DM), "f");
-		expect(t2.applied).toEqual([]);
+		expect(t2.applied()).toEqual([]);
 	});
 	test("existing approval cards still work through their own path (C9.1 does not touch them)", async () => {
 		const t = make();
@@ -392,5 +390,125 @@ describe("R9 / C22 and the operator list", () => {
 		expect(bridge).toContain(
 			"if (!ops || ops.length === 0) return true; // single-operator private chat, as before",
 		);
+	});
+});
+
+describe("the real controller through the bridge (T6, C20, voice never raises)", () => {
+	const dm = { chatType: "private", fromId: JAMES };
+	const cards = () => bodies.filter((x) => x.body.reply_markup);
+
+	test("T6: hostile judge output changes nothing, mints no card, and none of its text is shown", async () => {
+		for (const raw of [
+			'{"to":"infinite"}',
+			'{"to":"guarded"}',
+			'{"to":"quiet","origin":"user"}',
+			'{"to":"quiet","extra":1}',
+			'{"to":"think","reason":"SPOKEN-JUDGE-TEXT ' + "x".repeat(200) + '"}',
+			"not json SPOKEN-JUDGE-TEXT",
+		]) {
+			bodies.length = 0;
+			const t = make({}, CANARY, raw);
+			await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+			await settle();
+			expect(t.real.mode).toBe("act");
+			expect(cards()).toEqual([]);
+			expect(JSON.stringify(bodies)).not.toContain("SPOKEN-JUDGE-TEXT");
+			expect(t.applied()).toEqual([]);
+		}
+	});
+	test("a judge lowering becomes a fixed-text card; Yes applies user-voice-confirmed once", async () => {
+		const t = make({}, CANARY, '{"to":"quiet","reason":"too chatty"}');
+		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+		await settle();
+		expect(cards().length).toBe(1);
+		const card = cards()[0] as (typeof bodies)[number];
+		expect(card.body.text).toBe("Want me to go quiet?");
+		expect(JSON.stringify(card.body)).not.toContain("too chatty");
+		const data = card.body.reply_markup.inline_keyboard[0][0].callback_data;
+		const q = { id: "q", from: { id: JAMES }, data, message: { message_id: nextId - 1, chat: DM } };
+		await t.b.handleCallbackQuery(q);
+		await t.b.handleCallbackQuery(q);
+		expect(t.real.mode).toBe("quiet");
+		expect(t.applied()).toEqual([{ to: "quiet", origin: "user-voice-confirmed" }]);
+	});
+	test("C20: the judge prompt holds the operator's words only, not our reply or the Heard echo", async () => {
+		const t = make({
+			spokenModel: async () => "ASSISTANT-SPOKEN-LINE all done.",
+			sendVoiceNote: recorder([]),
+		});
+		await t.b.maybeSpeak("ASSISTANT-REPLY-TEXT is long enough to say aloud.");
+		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+		await settle();
+		expect(t.signals.length).toBe(1);
+		expect(t.signals[0]).toContain(CANARY);
+		expect(t.signals[0]).not.toMatch(/ASSISTANT|Heard:/);
+	});
+	test("explicit 'go quiet' by voice is consumed: Quiet, a fixed line, no agent turn, no judge call", async () => {
+		const t = make({}, "go quiet");
+		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+		await settle();
+		expect(t.real.mode).toBe("quiet");
+		expect(t.dispatched).toEqual([]);
+		expect(t.signals).toEqual([]);
+		expect(
+			bodies.some((x) => x.body.text === "Going quiet. Undo: /mode <name> or the cycle key."),
+		).toBe(true);
+	});
+	test("voice never raises: 'act mode' in Think points at /mode; 'go ahead and do it' gets the fixed refusal", async () => {
+		const loose = make({}, "go ahead and do it");
+		loose.real.userSwitch("think", "user-key");
+		await loose.b.handleVoiceMessage(voice(JAMES, DM), "f");
+		expect(loose.real.mode).toBe("think");
+		expect(bodies.some((x) => x.body.text === "Not switching, that is yours to set")).toBe(true);
+		bodies.length = 0;
+		const t = make({}, "act mode");
+		t.real.userSwitch("think", "user-key");
+		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+		await settle();
+		expect(t.real.mode).toBe("think");
+		expect(t.dispatched).toEqual([]);
+		expect(bodies.some((x) => x.body.text === "Use /mode to switch.")).toBe(true);
+		// the controller holds a pending raise, but the bridge has no path that confirms one
+		expect(readFileSync(join(import.meta.dir, "telegram-bridge.ts"), "utf8")).not.toContain(
+			"confirmOnScreen",
+		);
+	});
+	test("/mode shows a menu and a restore card; both apply as user-button", async () => {
+		const t = make();
+		t.real.userSwitch("quiet", "user-key");
+		await t.b.handleTelegramMessage("/mode", JAMES, dm);
+		expect(cards().length).toBe(2);
+		const restore = cards()[1] as (typeof bodies)[number];
+		const data = restore.body.reply_markup.inline_keyboard[0][0].callback_data;
+		await t.b.handleCallbackQuery({
+			id: "q",
+			from: { id: JAMES },
+			data,
+			message: { message_id: nextId - 1, chat: DM },
+		});
+		expect(t.real.mode).toBe("act");
+		expect(t.applied().at(-1)).toEqual({ to: "act", origin: "user-button" });
+	});
+	test("/mode quiet is a typed slash switch", async () => {
+		const t = make();
+		await t.b.handleTelegramMessage("/mode quiet", JAMES, dm);
+		expect(t.applied()).toEqual([{ to: "quiet", origin: "user-slash" }]);
+	});
+	test("C23: a session re-create resets to Act and kills every card", async () => {
+		const t = make();
+		await t.b.handleTelegramMessage("/mode", JAMES, dm);
+		const data = cards()[0]?.body.reply_markup.inline_keyboard[0][0].callback_data;
+		const id = nextId - 1;
+		t.b.freshSession();
+		t.real.userSwitch("think", "user-key");
+		await t.b.handleCallbackQuery({
+			id: "q",
+			from: { id: JAMES },
+			data,
+			message: { message_id: id, chat: DM },
+		});
+		expect(t.real.mode).toBe("think");
+		t.b.freshSession();
+		expect(t.real.mode).toBe("act");
 	});
 });

@@ -13,11 +13,7 @@
  * nothing in packages/permissions imports this file (tested).
  */
 
-import {
-	type PermissionMode,
-	permissionRank,
-	stricterMode,
-} from "../permissions/permission-mode";
+import { type PermissionMode, permissionRank, stricterMode } from "../permissions/permission-mode";
 import { type Utterance, isAdmitted } from "./flow-capture";
 
 export type FlowMode = "listen" | "think" | "quiet" | "act";
@@ -27,7 +23,9 @@ export const CYCLE_MODES: readonly FlowMode[] = ["act", "think", "quiet"];
 export const DEFAULT_FLOW_MODE: FlowMode = "act";
 
 /** Set by the call site, never read from judge output. */
-export type Origin = "user-key" | "user-slash" | "user-voice-confirmed" | "judge";
+export type Origin = "user-key" | "user-slash" | "user-voice-confirmed" | "user-button" | "judge";
+/** The user origins that are a deliberate act on a screen. */
+export type UserActOrigin = "user-key" | "user-slash" | "user-button";
 
 export const INFERRED_ASK_TIMEOUT_MS = 5_000;
 export const JUDGE_TIMEOUT_MS = 1_500;
@@ -216,6 +214,7 @@ export type SignalClass =
 	| "inferred"
 	| "key"
 	| "slash"
+	| "button"
 	| "confirm"
 	| "yes"
 	| "restore"
@@ -260,9 +259,17 @@ export interface FlowModeController {
 	readonly mode: FlowMode;
 	readonly log: readonly LogEntry[];
 	footer(): string;
-	userSwitch(to: FlowMode, origin: "user-key" | "user-slash"): Outcome;
+	userSwitch(to: FlowMode, origin: UserActOrigin): Outcome;
 	/** Restore the snapshot taken at the last switch. User origin only. */
-	restore(origin: "user-key" | "user-slash"): Outcome;
+	restore(origin: UserActOrigin): Outcome;
+	/** Mode before the last switch, or null. Read only: the bot checks a restore card against it. */
+	readonly snapshotMode: FlowMode | null;
+	/** Target of the open inferred proposal, or null. Read only. */
+	readonly pendingProposal: FlowMode | null;
+	/** A confirmed on-screen Yes for the open proposal. Still gated as judge: it can never raise. */
+	acceptProposal(to: FlowMode): Outcome;
+	/** An on-screen No for the open proposal. */
+	declineProposal(to: FlowMode): Outcome;
 	hear(u: Utterance): Outcome;
 	beginJudge(u: Utterance): JudgeTicket | null;
 	judgeResult(ticket: JudgeTicket, raw: unknown): Outcome;
@@ -367,6 +374,32 @@ export function createFlowModeController(
 			return log.slice();
 		},
 		footer: () => flowModeLabel(mode),
+		get snapshotMode() {
+			return snapshot;
+		},
+		get pendingProposal() {
+			return pendingAsk?.to ?? null;
+		},
+
+		acceptProposal(to) {
+			if (pendingAsk === null || pendingAsk.to !== to) {
+				rec(to, "user-voice-confirmed", "stale", false);
+				return out(false);
+			}
+			if (!canSwitch(mode, to, "judge", userPerm())) {
+				rec(to, "user-voice-confirmed", "raise-refused", false);
+				return out(false, NOT_YOURS);
+			}
+			return apply(to, "user-voice-confirmed", "confirm");
+		},
+
+		declineProposal(to) {
+			if (pendingAsk === null || pendingAsk.to !== to) return out(false);
+			blockedUntil.set(to, now() + OVERRIDE_NO_REPEAT_MS);
+			rec(to, "judge", "declined", false);
+			pendingAsk = null;
+			return out(false);
+		},
 
 		userSwitch(to, origin) {
 			if (!isFlowMode(to)) {
@@ -374,12 +407,19 @@ export function createFlowModeController(
 				return out(false);
 			}
 			if (to === mode) return out(false);
-			return apply(to, origin, origin === "user-key" ? "key" : "slash");
+			return apply(
+				to,
+				origin,
+				origin === "user-key" ? "key" : origin === "user-button" ? "button" : "slash",
+			);
 		},
 
 		restore(origin) {
 			// Only the key or /mode restore. Voice must go through the on-screen confirm.
-			if ((origin !== "user-key" && origin !== "user-slash") || snapshot === null) {
+			if (
+				(origin !== "user-key" && origin !== "user-slash" && origin !== "user-button") ||
+				snapshot === null
+			) {
 				rec(snapshot, origin, "restore", false);
 				return out(false);
 			}

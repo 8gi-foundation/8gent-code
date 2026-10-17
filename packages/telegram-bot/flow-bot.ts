@@ -2,39 +2,65 @@
  * Flow modes on the Telegram bot (L7): who may signal, and the single-use cards.
  *
  * Built to the 8SO pre-build conditions C1-C26. Nothing here decides a mode.
- * The mode controller (canSwitch, snapshot, the branded setter) is injected as
- * FlowController, so this file can only ask it and report the answer. With no
- * controller, or no explicit operator list, every function here is inert: no
- * card is minted, no tap is accepted, no voice note is a flow signal.
+ * The real controller (packages/flow/flow-mode.ts) is wrapped by controllerFor,
+ * which exposes only what the bot may do: ask canSwitch, switch from a card, restore,
+ * accept or decline an open proposal. With no controller, or no explicit operator
+ * list, every function here is inert: no card is minted, no tap is accepted, no
+ * voice note is a flow signal.
  *
  * In memory only (C13, C23): a restart or a session re-create empties the store
  * and every old token then fails as unknown.
  */
 
 import { randomBytes } from "node:crypto";
+import {
+	type FlowMode,
+	type FlowModeController,
+	NOT_YOURS,
+	type Origin,
+	canSwitch,
+} from "../flow/flow-mode";
+import type { PermissionMode } from "../permissions/permission-mode";
 
-export type FlowModeName = "listen" | "think" | "quiet" | "act";
+export type FlowModeName = FlowMode;
 /** C7. Set by the call site or derived from the stored record kind, never read from callback_data. */
-export type FlowOrigin =
-	| "user-key"
-	| "user-slash"
-	| "user-voice-confirmed"
-	| "user-button"
-	| "judge";
+export type FlowOrigin = Origin;
 export type CardKind = "menu" | "proposal" | "restore" | "decision";
 
-/** The slice of the mode controller the bot needs. It cannot set mode except through apply. */
+export type FlowResult = { changed: boolean; mode: FlowModeName; screen?: string; say?: string };
+
+/** The slice of the mode controller the bot needs. It cannot set mode except through these. */
 export interface FlowController {
 	mode(): FlowModeName;
 	/** The pure gate. Origin comes from this file's call sites only. */
 	canSwitch(from: FlowModeName, to: FlowModeName, origin: FlowOrigin): boolean;
-	/** Runs the switch under the controller's own checks. */
-	apply(
-		to: FlowModeName,
-		origin: FlowOrigin,
-	): { changed: boolean; mode: FlowModeName; screen?: string };
-	/** Mode before the last judge lowering, or null. Restore never goes above it. */
+	/** A tap on a menu card: origin user-button. */
+	switchTo(to: FlowModeName): FlowResult;
+	/** A tap on a restore card: origin user-button, to the controller's own snapshot. */
+	restore(): FlowResult;
+	/** Mode before the last switch. Restore never goes above it. */
 	snapshot(): FlowModeName | null;
+	/** Target of the open inferred proposal. */
+	pendingProposal(): FlowModeName | null;
+	acceptProposal(to: FlowModeName): FlowResult;
+	declineProposal(to: FlowModeName): FlowResult;
+}
+
+/** Wraps the real controller. userPerm is the permission mode canSwitch is judged under. */
+export function controllerFor(
+	real: FlowModeController,
+	userPerm: () => PermissionMode = () => "ask",
+): FlowController {
+	return {
+		mode: () => real.mode,
+		canSwitch: (from, to, origin) => canSwitch(from, to, origin, userPerm()),
+		switchTo: (to) => real.userSwitch(to, "user-button"),
+		restore: () => real.restore("user-button"),
+		snapshot: () => real.snapshotMode,
+		pendingProposal: () => real.pendingProposal,
+		acceptProposal: (to) => real.acceptProposal(to),
+		declineProposal: (to) => real.declineProposal(to),
+	};
 }
 
 /** C12. A long expiry only limits stale cards; the security control is the checks around it. */
@@ -48,7 +74,6 @@ export const EXPIRY_MS: Record<CardKind, number> = {
 export const RAISE_CONFIRM_MS_TELEGRAM = 60_000;
 export const PENDING_CAP = 16;
 export const PROPOSAL_MIN_GAP_MS = 5 * 60_000;
-export const ECHO_WINDOW_MS = 30_000;
 
 export const CB_FLOW = { mode: "fm", decision: "fd" } as const;
 export function isFlowCallback(data: string | undefined): boolean {
@@ -90,34 +115,6 @@ export function classifyVoice(
 	if (!privateDmOf(message.chat, message.from?.id)) return "plain"; // C1, C11
 	if (message.forward_origin || message.via_bot) return "user-forwarded"; // C3
 	return "user-voice";
-}
-
-// ── Echo overlap (C4) ────────────────────────────────────────────────
-
-const words = (s: string): string[] => s.toLowerCase().match(/[a-z0-9']+/g) ?? [];
-
-/** Remembers what we said in the last 30 s so a forwarded copy of our own reply is dropped. */
-export function createEchoGuard(now: () => number = Date.now) {
-	const spoken: { at: number; grams: Set<string> }[] = [];
-	const grams = (w: string[]) => {
-		const out = new Set<string>();
-		for (let i = 0; i + 2 < w.length; i++) out.add(`${w[i]} ${w[i + 1]} ${w[i + 2]}`);
-		return out;
-	};
-	return {
-		record(text: string): void {
-			spoken.push({ at: now(), grams: grams(words(text)) });
-			while (spoken.length > 8) spoken.shift();
-		},
-		/** True when most of the transcript's word triples were in our own recent speech. */
-		isEcho(transcript: string): boolean {
-			const g = [...grams(words(transcript))];
-			if (g.length === 0) return false;
-			const cutoff = now() - ECHO_WINDOW_MS;
-			const recent = spoken.filter((s) => s.at >= cutoff);
-			return recent.some((s) => g.filter((x) => s.grams.has(x)).length / g.length >= 0.6);
-		},
-	};
 }
 
 // ── Pending store (C9, C12, C13) ─────────────────────────────────────
@@ -257,7 +254,7 @@ export function proposalCard(
 	to: FlowModeName,
 ): { text: string; keyboard: Keyboard; tokens: string[] } | null {
 	if (!ctl.canSwitch(ctl.mode(), to, "judge")) return null;
-	const tokens = store.mint("proposal", chat.id, chat.type, [{ to }, {}]);
+	const tokens = store.mint("proposal", chat.id, chat.type, [{ to }, { answer: "no" }]);
 	if (!tokens) return null;
 	return {
 		text: QUESTION[to],
@@ -415,8 +412,10 @@ export function handleFlowTap(q: FlowQuery, deps: TapDeps): TapResult {
 		return { say: "Noted.", editTo: "Noted." };
 	}
 
-	// The No button carries no target; what it does is read from the record, not the data.
-	if (rec.kind === "proposal" && !rec.to) {
+	// The No button is told apart by its record, never by its data.
+	if (rec.kind === "proposal" && rec.answer === "no") {
+		const open = deps.ctl.pendingProposal();
+		if (open) deps.ctl.declineProposal(open);
 		row("declined", true);
 		return { say: "Left as is.", editTo: "Left as is." };
 	}
@@ -441,13 +440,19 @@ export function handleFlowTap(q: FlowQuery, deps: TapDeps): TapResult {
 		row("refused", false, to, origin);
 		return { say: "Not switching.", editTo: "Not switching." };
 	}
-	const r = deps.ctl.apply(to, origin);
+	const r =
+		rec.kind === "proposal"
+			? deps.ctl.acceptProposal(to)
+			: rec.kind === "restore"
+				? deps.ctl.restore()
+				: deps.ctl.switchTo(to);
 	row(
 		rec.kind === "restore" ? "restore" : rec.kind === "proposal" ? "confirm" : "button",
 		r.changed,
 		to,
 		origin,
 	);
-	const done = r.screen ?? `Mode is ${LABEL[r.mode]}.`;
+	if (!r.changed && r.say === NOT_YOURS) return { say: `${NOT_YOURS}.`, editTo: "Not switching." };
+	const done = r.changed ? `Mode is ${LABEL[r.mode]}.` : "No change.";
 	return { say: done, editTo: done };
 }
