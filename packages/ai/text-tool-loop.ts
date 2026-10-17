@@ -90,7 +90,12 @@ import {
 	formatHarnessNote,
 	isRefusedToolResult,
 } from "./claim-check";
-import { type TextToolCall, type TextToolMessage, runTextToolTurn } from "./text-tool-client";
+import {
+	OutputCapError,
+	type TextToolCall,
+	type TextToolMessage,
+	runTextToolTurn,
+} from "./text-tool-client";
 import type { ToolSpec } from "./text-tools";
 import { type PlanItem, parsePlan } from "./update-plan";
 import { UselessStreak } from "./useless-streak";
@@ -230,6 +235,23 @@ export function cutOffToolCallMessage(name: string | null): string {
 		"were writing a file, write it in smaller parts: call write_file with the " +
 		"first part, then add the rest with edit_file in further calls. Keep each " +
 		"tool_call short enough to finish."
+	);
+}
+
+/** Output-cap retries per turn: after this many the cap error surfaces as before. */
+export const MAX_OUTPUT_CAP_RETRIES = 2;
+
+/**
+ * Fed back when a whole model step hit the output token cap with nothing
+ * usable (no complete reply, no complete tool call). The partial text is
+ * dropped, so the model is told what happened and how to stay under the cap.
+ */
+export function outputCapRetryMessage(): string {
+	return (
+		"Error: your last reply hit the output token limit and was discarded; " +
+		"nothing was run. Do not plan or reason at length. Make ONE short tool_call " +
+		"now. If you are writing files, write one file per tool_call, and split a " +
+		"long file into parts (write_file, then edit_file for the rest)."
 	);
 }
 
@@ -693,6 +715,8 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 	let planCheckSent = false;
 	// The caller's final check (#3550) fires at most once per turn.
 	let finalCheckSent = false;
+	// Steps cut at the output cap and retried this turn.
+	let outputCapRetries = 0;
 	// The user's request this turn: the last user message the caller sent.
 	const request = [...opts.messages].reverse().find((m) => m.role === "user")?.content ?? "";
 	const claimsAgainstLog = (answer: string) =>
@@ -732,12 +756,31 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 				messages = [...messages, ...steered.map((content) => ({ role: "user" as const, content }))];
 			}
 		}
-		const turn = await runTextToolTurn({
-			messages,
-			tools: answerOnly ? [] : specs,
-			call: opts.call,
-			toolPrompt: opts.toolPrompt,
-		});
+		let turn: Awaited<ReturnType<typeof runTextToolTurn>>;
+		try {
+			turn = await runTextToolTurn({
+				messages,
+				tools: answerOnly ? [] : specs,
+				call: opts.call,
+				toolPrompt: opts.toolPrompt,
+			});
+		} catch (err) {
+			// A step cut at the output cap is retried with a nudge, not left to
+			// end the turn silently. Out of retries or rounds: surface as before.
+			if (
+				err instanceof OutputCapError &&
+				outputCapRetries < MAX_OUTPUT_CAP_RETRIES &&
+				round < maxRounds
+			) {
+				outputCapRetries++;
+				awaitingCheckAnswer = false;
+				prevRoundHadSuccess = false;
+				prevRoundAllRefused = false;
+				messages = [...messages, { role: "user", content: outputCapRetryMessage() }];
+				continue;
+			}
+			throw err;
+		}
 		// Strip repetition degeneration before the reply is judged, fed back to
 		// the model as its own history, or kept as the turn's last prose, which
 		// the abort exit returns.
