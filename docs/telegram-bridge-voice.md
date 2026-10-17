@@ -13,5 +13,5 @@ Speech-to-text runs locally on the operator's machine (ffmpeg plus whisper-cli, 
 - Voice never raises the mode. A raise is a `/mode` card tap.
 - Cards are single use, expire, and carry an opaque token.
 - The "Heard" echo goes to the chat the note came from, and only when that chat is private.
-- Voice notes are refused (not transcribed, not sent to the agent) when DEFAULT_RUNTIME names a non-local runtime, so the statement above stays true.
+- Voice notes are refused (not transcribed, not passed to the model) when DEFAULT_RUNTIME names a non-local runtime, so the statement above stays true.
 - A spoken reply is used only for the chat whose voice note asked for it.
