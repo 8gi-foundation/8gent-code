@@ -26,6 +26,8 @@ import { Ledger, canonical } from "../goal/ledger.js";
 import { trackStatements } from "../memory/tracked-db.js";
 import { loadOrCreateKey } from "../permissions/goal-state-hmac.js";
 import { newChannelId, newMessageId } from "./ids.js";
+// Inlined into the bundle: a path next to the bundle would not exist in the npm package (#4355).
+import SCHEMA_SQL from "./schema.sql" with { type: "text" };
 import {
 	type Channel,
 	type ChannelType,
@@ -195,8 +197,7 @@ export class TableStore {
 			console.warn("[table] PRAGMA init warning:", (err as Error).message);
 		}
 
-		const schema = fs.readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
-		this.db.exec(schema);
+		this.db.exec(SCHEMA_SQL);
 		this.migrate();
 
 		if (opts.ledger) {

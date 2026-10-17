@@ -7,10 +7,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import Database from "better-sqlite3";
+// Inlined into the bundle: a path next to the bundle would not exist in the npm package (#4355).
+import SCHEMA_SQL from "./schema.sql" with { type: "text" };
 
 const DB_PATH =
 	process.env.EIGHTGENT_DB || path.join(process.env.HOME || "", ".8gent", "registry.db");
-const SCHEMA_PATH = path.join(__dirname, "schema.sql");
 
 let db: Database.Database | null = null;
 
@@ -31,8 +32,7 @@ export function initDatabase(): Database.Database {
 	db.pragma("journal_mode = WAL");
 
 	// Run schema
-	const schema = fs.readFileSync(SCHEMA_PATH, "utf-8");
-	db.exec(schema);
+	db.exec(SCHEMA_SQL);
 
 	console.log(`[registry] Database initialized at ${DB_PATH}`);
 	return db;
