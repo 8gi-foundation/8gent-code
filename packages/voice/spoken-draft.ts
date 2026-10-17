@@ -144,19 +144,63 @@ export async function makeSpokenDraft(
 	}
 }
 
+/** argv for `say`: "--" sits immediately before the text so it is never read as an option. */
+export function sayArgs(voice: string, draft: string): string[] {
+	return ["-v", voice, "--", draft];
+}
+
+/**
+ * Child profiles never send a reply to a model a second time for speech: they get
+ * the deterministic text only. `voice.spokenDraft: false` turns the rewrite off for
+ * everyone. There is no other child or junior flag in the TUI settings, so
+ * `voice.childProfile` is the named key (default off) a Jr surface sets.
+ */
+export function rewriteAllowed(voice?: { spokenDraft?: boolean; childProfile?: boolean }): boolean {
+	return voice?.spokenDraft !== false && voice?.childProfile !== true;
+}
+
+export const SPOKEN_QUEUE_MAX = 3;
+
 export interface SpokenQueueDeps {
 	/** Speech is now pending (push-to-talk must stay shut). */
 	start: () => void;
 	/** Pending ends. Called after play, so a started utterance is already tracked. */
 	end: () => void;
+	/** Most replies waiting at once; beyond it the oldest waiting one is dropped. */
+	maxDepth?: number;
 }
 
 /**
  * Drafts one at a time, in order. Each reply is pending from the moment it is
- * queued until its draft is played or has failed.
+ * queued until its draft is played, has failed, or was dropped for depth. The one
+ * being rewritten is never dropped.
  */
 export function createSpokenQueue(deps: SpokenQueueDeps) {
-	let tail: Promise<void> = Promise.resolve();
+	const max = deps.maxDepth ?? SPOKEN_QUEUE_MAX;
+	type Item = {
+		reply: string;
+		model: SpokenModel | null | undefined;
+		play: (d: string) => void;
+		done: () => void;
+	};
+	const waiting: Item[] = [];
+	let running = false;
+	async function drain() {
+		if (running) return;
+		running = true;
+		for (let it = waiting.shift(); it; it = waiting.shift()) {
+			try {
+				const draft = await makeSpokenDraft(it.reply, it.model);
+				if (draft) it.play(draft);
+			} catch {
+				// A failed draft is silence, never a crash.
+			} finally {
+				deps.end();
+				it.done();
+			}
+		}
+		running = false;
+	}
 	return {
 		enqueue(
 			reply: string,
@@ -164,18 +208,17 @@ export function createSpokenQueue(deps: SpokenQueueDeps) {
 			play: (draft: string) => void,
 		): Promise<void> {
 			deps.start();
-			const run = tail.then(async () => {
-				try {
-					const draft = await makeSpokenDraft(reply, model);
-					if (draft) play(draft);
-				} catch {
-					// A failed draft is silence, never a crash.
-				} finally {
-					deps.end();
+			return new Promise<void>((done) => {
+				waiting.push({ reply, model, play, done });
+				while (waiting.length > max) {
+					const old = waiting.shift();
+					if (old) {
+						deps.end();
+						old.done();
+					}
 				}
+				void drain();
 			});
-			tail = run;
-			return run;
 		},
 	};
 }

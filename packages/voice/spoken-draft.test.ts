@@ -5,6 +5,8 @@ import {
 	createSpokenQueue,
 	makeSpokenDraft,
 	prepareForSpeech,
+	rewriteAllowed,
+	sayArgs,
 } from "./spoken-draft";
 
 const EM = String.fromCharCode(0x2014);
@@ -62,12 +64,20 @@ describe("option injection", () => {
 		const out = await makeSpokenDraft("hi there", async () => "-f /etc/passwd now");
 		expect(out.startsWith("-")).toBe(false);
 	});
+	test("sayArgs puts -- immediately before the text, whatever the text", () => {
+		for (const t of ["hello", "-o x.aiff", "--voice=y"]) {
+			const argv = sayArgs("Daniel", t);
+			expect(argv.at(-1)).toBe(t);
+			expect(argv.at(-2)).toBe("--");
+			expect(argv.indexOf("--")).toBeGreaterThan(argv.indexOf("-v"));
+		}
+	});
 	test("the say call ends options with --", () => {
 		const src = require("node:fs").readFileSync(
 			require("node:path").join(import.meta.dir, "../../apps/tui/src/app.tsx"),
 			"utf8",
 		);
-		expect(src).toContain('["-v", voice, "--", draft]');
+		expect(src).toContain("sayArgs(voice, draft)");
 	});
 });
 
@@ -207,5 +217,51 @@ describe("spoken queue", () => {
 			20,
 		);
 		expect(aborted).toBe(true);
+	});
+});
+
+describe("queue depth and child profiles", () => {
+	test("beyond the depth cap the oldest waiting reply is dropped and pending clears", async () => {
+		let active = 0;
+		const q = createSpokenQueue({ start: () => active++, end: () => active--, maxDepth: 2 });
+		const spoken: string[] = [];
+		let release: (v: string) => void = () => {};
+		const first = q.enqueue(
+			"a",
+			() => new Promise<string>((r) => (release = r)),
+			(d) => spoken.push(d),
+		);
+		await new Promise((r) => setTimeout(r, 5));
+		const rest = ["b", "c", "d", "e"].map((x) =>
+			q.enqueue(
+				x,
+				async () => `say ${x}.`,
+				(d) => spoken.push(d),
+			),
+		);
+		release("say a.");
+		await Promise.all([first, ...rest]);
+		expect(spoken).toEqual(["say a.", "say d.", "say e."]);
+		expect(active).toBe(0);
+	});
+	test("a child profile or spokenDraft false never rewrites", () => {
+		expect(rewriteAllowed(undefined)).toBe(true);
+		expect(rewriteAllowed({})).toBe(true);
+		expect(rewriteAllowed({ childProfile: true })).toBe(false);
+		expect(rewriteAllowed({ spokenDraft: false })).toBe(false);
+	});
+	test("with no model passed (child profile) the reply is never sent anywhere", async () => {
+		let calls = 0;
+		const out = await makeSpokenDraft(
+			"Hello there.",
+			rewriteAllowed({ childProfile: true })
+				? async () => {
+						calls++;
+						return "x";
+					}
+				: null,
+		);
+		expect(calls).toBe(0);
+		expect(out).toBe("Hello there.");
 	});
 });

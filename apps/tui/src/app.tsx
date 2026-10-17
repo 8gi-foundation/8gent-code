@@ -40,7 +40,12 @@ import {
 } from "../../../packages/local-model-server/index.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import { tabVoices } from "../../../packages/tools/speak.js";
-import { type SpokenModel, createSpokenQueue } from "../../../packages/voice/spoken-draft.js";
+import {
+	type SpokenModel,
+	createSpokenQueue,
+	rewriteAllowed,
+	sayArgs,
+} from "../../../packages/voice/spoken-draft.js";
 import {
 	ActivityMonitor,
 	clearActivity,
@@ -622,11 +627,11 @@ function speakAgentReply(role: string | undefined, text: string, model?: SpokenM
 	// ear (code, paths and links summarised); the screen text is never changed.
 	// Speech counts as pending from now, so push-to-talk cannot open during the
 	// rewrite; drafts run one at a time so two close replies never overlap.
-	spokenQueue.enqueue(trimmed, model, (draft) => {
+	spokenQueue.enqueue(trimmed, rewriteAllowed(s.voice) ? model : null, (draft) => {
 		try {
 			const { spawn } = require("node:child_process");
 			// "--" ends say's options, so a draft can never be read as one.
-			const proc = spawn("say", ["-v", voice, "--", draft], {
+			const proc = spawn("say", sayArgs(voice, draft), {
 				stdio: "ignore",
 				detached: true,
 			});
