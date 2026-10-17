@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import {
-	PERMISSION_MODES,
-	type PermissionMode,
-} from "../permissions/permission-mode";
+import { PERMISSION_MODES, type PermissionMode } from "../permissions/permission-mode";
 import { type Utterance, buildJudgePrompt, createCaptureGate, isAdmitted } from "./flow-capture";
 import {
 	CYCLE_MODES,
