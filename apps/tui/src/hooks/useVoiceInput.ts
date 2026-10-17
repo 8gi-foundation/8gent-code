@@ -15,12 +15,32 @@ import {
 } from "@8gent/voice";
 import { useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	PTT_INITIAL,
+	type PttEvent,
+	type PttPhase,
+	type PttState,
+	isTtsActive,
+	pttReduce,
+	recordingOverlappedTts,
+} from "./ptt-state.js";
 
 export interface UseVoiceInputOptions {
 	/** Voice configuration overrides */
 	config?: Partial<VoiceConfig>;
 	/** Whether voice input is active (can record) */
 	active?: boolean;
+	/**
+	 * Push-to-talk gate (settings voice.inputEnabled, default off). While false
+	 * the key never opens the mic and onDisabled explains how to turn it on.
+	 */
+	inputEnabled?: boolean;
+	/** Called with a how-to-enable message when the key is pressed while off. */
+	onDisabled?: (message: string) => void;
+	/** Called with a short user-facing line (no speech heard, echo dropped, wait for TTS). */
+	onNotice?: (message: string) => void;
+	/** Extra "is something speaking" signal (e.g. voice chat), on top of the TTS tracker. */
+	isSpeaking?: () => boolean;
 	/** Callback when a final transcript is received */
 	onTranscript?: (text: string) => void;
 	/** Callback when an error occurs */
@@ -103,6 +123,10 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 	const {
 		config = {},
 		active = true,
+		inputEnabled = false,
+		onDisabled,
+		onNotice,
+		isSpeaking,
 		onTranscript,
 		onError,
 		onDownloadProgress,
@@ -115,6 +139,16 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 		engineRef.current = new VoiceEngine(config);
 	}
 	const engine = engineRef.current;
+
+	// Push-to-talk machine, driven by engine events below (inserted/error phases).
+	const pttRef = useRef<PttState>(PTT_INITIAL);
+	const recWindowRef = useRef({ startedAt: 0, endedAt: 0 });
+	const onNoticeRef = useRef(onNotice);
+	onNoticeRef.current = onNotice;
+	const drive = useCallback((event: PttEvent) => {
+		pttRef.current = pttReduce(pttRef.current, event);
+		return pttRef.current;
+	}, []);
 
 	// State
 	const [state, setState] = useState<RecordingState>("idle");
@@ -139,8 +173,27 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 	// Wire up engine events
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
-		const onStateChange = ({ to }: { from: RecordingState; to: RecordingState }) => {
+		const onStateChange = ({ from, to }: { from: RecordingState; to: RecordingState }) => {
 			setState(to);
+			if (to === "recording") {
+				recWindowRef.current = { startedAt: Date.now(), endedAt: 0 };
+				pttRef.current = { ...PTT_INITIAL, phase: "recording" };
+			}
+			if (from === "recording" && to !== "recording") {
+				recWindowRef.current.endedAt = Date.now();
+			}
+			if (from === "recording" && to === "transcribing") {
+				drive({ type: "recorded" });
+			}
+			// Back to idle with no transcript delivered (too short, silence): say so.
+			if (to === "idle" && (from === "recording" || from === "transcribing")) {
+				const phase = pttRef.current.phase;
+				if (phase === "recording" || phase === "transcribing") {
+					drive({ type: "transcript", text: "" });
+					const msg = pttRef.current.message;
+					if (msg) onNoticeRef.current?.(msg);
+				}
+			}
 		};
 
 		// Throttle audio level updates to max 4/sec — high frequency causes Ink render collisions
@@ -154,10 +207,16 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 		};
 
 		const onFinalTranscript = (event: TranscriptEvent) => {
-			setTranscript(event.text);
 			setPartialTranscript("");
-			if (event.text && onTranscript) {
-				onTranscript(event.text);
+			const w = recWindowRef.current;
+			const echo = recordingOverlappedTts(w.startedAt, w.endedAt || Date.now());
+			const next = drive({ type: "transcript", text: event.text, echo });
+			if (next.phase === "inserted") {
+				setTranscript(event.text);
+				if (onTranscript) onTranscript(event.text);
+			} else if (next.message) {
+				setTranscript("");
+				onNoticeRef.current?.(next.message);
 			}
 		};
 
@@ -166,6 +225,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 		};
 
 		const onEngineError = ({ code, message }: { code: VoiceErrorCode; message: string }) => {
+			drive({ type: "failure", message });
 			setErrorMessage(message);
 			if (onError) {
 				onError(code, message);
@@ -212,7 +272,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 			engine.off("model-download-progress", onModelProgress);
 			engine.off("model-download-complete", onModelComplete);
 		};
-	}, [engine, onTranscript, onError, onDownloadProgress]);
+	}, [engine, onTranscript, onError, onDownloadProgress, drive]);
 
 	// Recording duration timer
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
@@ -292,11 +352,29 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 		};
 	}, [engine]);
 
-	// Keyboard handler: Ctrl+R to toggle voice recording (R for Record)
-	// Always active (don't gate on isEnabled — pressing the key auto-enables)
+	// Keyboard handler: Ctrl+R toggles push-to-talk (press to talk, press to stop).
+	// The decision goes through the pure state machine in ptt-state.ts so the
+	// gate (off by default) and the busy rule are tested without a mic.
 	useInput(
 		(input, key) => {
 			if (key.ctrl && input === "r") {
+				const st = engine.getState();
+				const phase: PttPhase =
+					st === "recording" ? "recording" : st === "transcribing" ? "transcribing" : "idle";
+				const next = pttReduce(
+					{ ...PTT_INITIAL, phase },
+					{
+						type: "key",
+						enabled: inputEnabled,
+						ttsActive: isTtsActive() || Boolean(isSpeaking?.()),
+					},
+				);
+				if (next.action === "none") {
+					if (next.message) {
+						(next.phase === "idle" && !inputEnabled ? onDisabled : onNotice)?.(next.message);
+					}
+					return;
+				}
 				if (!engine.isEnabled()) {
 					engine.enable();
 				}

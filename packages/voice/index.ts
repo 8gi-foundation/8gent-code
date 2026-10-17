@@ -320,13 +320,17 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 			return null;
 		}
 
+		let wavPath: string | null = null;
 		try {
-			const { path: wavPath, durationMs } = await this.recorder.stop();
+			const stopped = await this.recorder.stop();
+			wavPath = stopped.path;
+			const durationMs = stopped.durationMs;
 			this.emit("recording-stop", { durationMs });
 
 			// Skip transcription if recording was too short (likely accidental)
 			if (durationMs < 200) {
 				MicRecorder.cleanupFile(wavPath);
+				this.setState("idle");
 				return null;
 			}
 
@@ -356,6 +360,8 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 			this.setState("idle");
 			return transcript;
 		} catch (err) {
+			// The clip is private audio: never leave it behind when transcribe throws.
+			if (wavPath) MicRecorder.cleanupFile(wavPath);
 			this.setState("idle");
 			const message = err instanceof Error ? err.message : "Transcription failed";
 			this.emitError("TRANSCRIPTION_FAILED", message);

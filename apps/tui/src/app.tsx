@@ -106,6 +106,7 @@ import {
 import { playSound, soundManager } from "./components/sound-effects.js";
 import { AnimatedStatusVerb } from "./components/status-verb.js";
 import type { TaskItem } from "./components/task-card/TaskCardList.js";
+import { trackTts } from "./hooks/ptt-state.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
 import { useAutoKanban } from "./hooks/useAutoKanban.js";
 import { chatRowBudget, useMeasuredHeight } from "./hooks/useMeasuredHeight.js";
@@ -627,6 +628,7 @@ function speakAgentReply(role: string | undefined, text: string): void {
 		proc.on("error", () => {
 			// Voice unavailable on this machine. Stay silent.
 		});
+		trackTts(proc);
 		proc.unref();
 	} catch {
 		// Spawn failed (no shell, restricted env). Fail silently.
@@ -690,6 +692,7 @@ function speakOnboardingLine(
 			if (resolved.engine === "none") return;
 			if (resolved.engine === "kitten") {
 				const proc = await new KittenTTSProvider().speak(safe, { voice: resolved.voice });
+				trackTts(proc);
 				if ((await proc.exited) === 0) return;
 			}
 			// System voice, or the fallback when KittenTTS is missing or failed.
@@ -704,6 +707,7 @@ function speakOnboardingLine(
 				detached: true,
 			});
 			proc.on("error", () => {});
+			trackTts(proc);
 			proc.unref();
 		} catch {
 			// Fail silently
@@ -1040,6 +1044,16 @@ export function App({
 	// Voice input — transcript goes to input field for review, NOT auto-send
 	const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
 	const voice = useVoiceInput({
+		inputEnabled: (() => {
+			try {
+				return loadAppSettings().voice?.inputEnabled === true;
+			} catch {
+				return false;
+			}
+		})(),
+		onDisabled: (message) => addSystemMessage(message),
+		onNotice: (message) => addSystemMessage(message),
+		isSpeaking: () => voiceChat.state === "speaking",
 		onTranscript: (text) => {
 			setVoiceTranscript(text);
 			addSystemMessage(`Transcribed: "${text}". Edit it or press Enter to send.`);
@@ -7165,7 +7179,7 @@ export function App({
 							contentWidth={chatContentWidth}
 							maxVisible={Math.max(5, viewport.height - (isProcessing ? 18 : 10))}
 						/>
-						{voice.state === "recording" && (
+						{(voice.state === "recording" || voice.state === "transcribing") && (
 							<Box flexShrink={0}>
 								<VoiceIndicator
 									state={voice.state}

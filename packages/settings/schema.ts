@@ -27,6 +27,12 @@ export interface VoiceSettings {
 	ttsVoice: string;
 	/** Whether the agent's text replies are spoken via TTS by default. */
 	outputEnabled: boolean;
+	/**
+	 * Push-to-talk voice input. Off unless true (undefined = off). When on, Ctrl+R
+	 * opens the mic and Ctrl+R again stops it (toggle, since terminals send no
+	 * key-up). Local whisper.cpp only; the transcript lands in the prompt to edit.
+	 */
+	inputEnabled?: boolean;
 	/** Per-agent macOS voice overrides. Each tab role gets its own voice. */
 	perAgent: PerAgentVoices;
 }
