@@ -20,6 +20,7 @@ import {
 import {
 	GROUP_VOICE_BUSY,
 	GROUP_VOICE_TOO_BIG,
+	RUN_ASYNC_MAX_BYTES,
 	TelegramDaemonBridge,
 	bindChatThread,
 	groupVoiceIds,
@@ -861,6 +862,29 @@ describe("instant acknowledgement", () => {
 		expect(ticks).toBeGreaterThan(10);
 		const k = await runAsync("sleep", ["5"], 200);
 		expect(k.status).toBeNull();
+	});
+	test("runAsync caps each stream at 1 MiB and keeps draining", async () => {
+		const r = await runAsync(
+			"sh",
+			["-c", "head -c 3000000 /dev/zero | tr '\\0' a; head -c 3000000 /dev/zero | tr '\\0' b >&2"],
+			20_000,
+		);
+		expect(r.status).toBe(0);
+		expect(r.stdout.length).toBe(RUN_ASYNC_MAX_BYTES);
+		expect(r.stderr.length).toBe(RUN_ASYNC_MAX_BYTES);
+	});
+	test("a timed-out child is dead after SIGKILL", async () => {
+		const r = await runAsync("sleep", ["30"], 200);
+		expect(r.status).toBeNull();
+		expect(typeof r.pid).toBe("number");
+		await new Promise((x) => setTimeout(x, 100));
+		let err: NodeJS.ErrnoException | undefined;
+		try {
+			process.kill(r.pid as number, 0);
+		} catch (e) {
+			err = e as NodeJS.ErrnoException;
+		}
+		expect(err?.code).toBe("ESRCH");
 	});
 	test("no ack for a dropped or rejected note", async () => {
 		const t = await ready(make());

@@ -362,11 +362,14 @@ function localWhisperModel(): string | null {
  * the whole of ffmpeg and whisper and so made every timer (the 1.5 s voice ack wait)
  * unable to fire. Same result shape as spawnSync: status null on timeout or spawn error.
  */
+/** Per-stream output cap for runAsync, the same 1 MiB bound spawnSync had. */
+export const RUN_ASYNC_MAX_BYTES = 1024 * 1024;
+
 export function runAsync(
 	cmd: string,
 	args: string[],
 	timeoutMs: number,
-): Promise<{ status: number | null; stdout: string; stderr: string }> {
+): Promise<{ status: number | null; stdout: string; stderr: string; pid?: number }> {
 	return new Promise((resolve) => {
 		let stdout = "";
 		let stderr = "";
@@ -375,7 +378,7 @@ export function runAsync(
 			if (done) return;
 			done = true;
 			clearTimeout(timer);
-			resolve({ status, stdout, stderr });
+			resolve({ status, stdout, stderr, pid: child.pid });
 		};
 		const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
 		const timer = setTimeout(() => {
@@ -383,10 +386,12 @@ export function runAsync(
 			finish(null);
 		}, timeoutMs);
 		child.stdout.setEncoding("utf8").on("data", (d: string) => {
-			stdout += d;
+			if (stdout.length < RUN_ASYNC_MAX_BYTES)
+				stdout += d.slice(0, RUN_ASYNC_MAX_BYTES - stdout.length);
 		});
 		child.stderr.setEncoding("utf8").on("data", (d: string) => {
-			stderr += d;
+			if (stderr.length < RUN_ASYNC_MAX_BYTES)
+				stderr += d.slice(0, RUN_ASYNC_MAX_BYTES - stderr.length);
 		});
 		child.on("error", () => finish(null));
 		child.on("close", (code) => finish(code));
