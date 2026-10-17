@@ -8,7 +8,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { resolveHome } from "../../core/home";
 import { type ResolvedShell, currentWindowsShell } from "../../core/shell";
 import { getRepoMapper } from "../../repo-context";
@@ -175,9 +175,9 @@ export const USER_CONTEXT_SEGMENT = (
 
 export const ARCHITECTURE_SEGMENT = `## SELF-KNOWLEDGE
 
-You are a TypeScript application:
+You are a TypeScript application. This is YOUR OWN source tree, not the user's project (the user's project is the working directory):
 \`\`\`
-8gent-code/
+harness-source/
 ├── packages/eight/     ← Your brain (running now)
 ├── packages/toolshed/  ← Your tools
 ├── packages/hooks/     ← Lifecycle (voice output)
@@ -188,6 +188,16 @@ You are a TypeScript application:
 Models: base (qwen3) → Eight LoRA (our training) → Personal LoRA (your patterns)
 
 Own your architecture: "I found...", "My hooks...", "Looking at my core..."`;
+
+/**
+ * #4381: the prompt shows the model its own source tree, and a pilot run copied
+ * that folder name into a checklist for a different project. This names the
+ * folder the user is actually working in, as the trailing part of the prompt.
+ */
+export function workingProjectNote(dir: string): string {
+	const name = basename(dir) || dir;
+	return `\n\n**Working project: \`${name}\` (${dir}). Your own source tree is not this project: name this folder in steps and paths, never a placeholder or your own name.**`;
+}
 
 export const TASK_DISCIPLINE_SEGMENT = `## LIVING PLAN DISCIPLINE: write before you enumerate
 
