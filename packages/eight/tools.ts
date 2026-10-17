@@ -240,7 +240,11 @@ import {
 	vercelListProjects,
 	vercelSetEnv,
 } from "../tools/vercel";
-import { DeckSpecSchema } from "../tools/video-deck";
+import {
+	DeckSpecSchema,
+	RENDER_VIDEO_DECK_DESCRIPTION,
+	chaptersPathFor,
+} from "../tools/video-deck";
 import { formatFetchResult, formatSearchResults, webFetch, webSearch } from "../tools/web";
 import { isNoToolScope } from "./agent-scopes";
 import { ArtifactStore } from "./artifact-store";
@@ -566,6 +570,11 @@ export function resolveDeckOut(out: unknown, workingDirectory: string): string {
 	const named = typeof out === "string" && out.trim() ? out.trim() : "deck.mp4";
 	if (!named.toLowerCase().endsWith(".mp4")) throw new Error(`out must end in .mp4 ("${named}")`);
 	return confineWrite(named, workingDirectory);
+}
+
+/** The chapters.txt a deck render writes beside its mp4, confined like the mp4 itself. */
+export function resolveDeckChapters(out: string, workingDirectory: string): string {
+	return confineWrite(chaptersPathFor(out), workingDirectory);
 }
 
 /** The office tools and the extension each one writes (#4274). */
@@ -1661,8 +1670,7 @@ export class ToolExecutor {
 				type: "function",
 				function: {
 					name: "render_video_deck",
-					description:
-						"[MEDIA] Narrated mp4 from args {spec:{size:'1280x720', slides:[{title, bullets, narration}]}, out:'deck.mp4'}, local code only. Deterministic. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task: you write the spec, it draws the slides, joins them and returns { path, durationSec }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?: string[], image?: 'png/jpg path in the working directory', seconds?: 1-60 (default 4), narration?: 'spoken by the local voice', voice? }] } (1-40 slides, each needs a title, text, bullets or image). Narration uses the same local engine as speak and stretches a slide to fit its voice. No music, no network. Never shells out.",
+					description: `[MEDIA] ${RENDER_VIDEO_DECK_DESCRIPTION}`,
 					parameters: {
 						type: "object",
 						properties: {
@@ -2830,6 +2838,14 @@ export class ToolExecutor {
 						this.allowedPaths,
 					);
 					if (scoped) return scoped;
+					const chapters = resolveDeckChapters(out, this.workingDirectory);
+					const scopedChapters = editScopeViolation(
+						"render_video_deck",
+						{ out: chapters },
+						this.workingDirectory,
+						this.allowedPaths,
+					);
+					if (scopedChapters) return scopedChapters;
 					const { renderVideoDeck } = await import("../tools/video-deck");
 					return JSON.stringify(
 						await renderVideoDeck({ spec: args.spec, out, cwd: this.workingDirectory }),

@@ -87,6 +87,57 @@ export interface RenderDeckResult {
 	height: number;
 	hasAudio: boolean;
 	kind: "video";
+	/** Start of each slide in seconds, from the frame counts that were joined. */
+	starts: number[];
+	/** 'm:ss Title' lines, one per slide, also written to chaptersPath. */
+	chapters: string[];
+	/** chapters.txt next to the mp4. */
+	chaptersPath: string;
+	/** True total length as 'm:ss', read back from the written file. */
+	durationLabel: string;
+}
+
+/** The one description both tool surfaces show (first sentence = input shape, per the local-model rule). */
+export const RENDER_VIDEO_DECK_DESCRIPTION =
+	"Slides + narration to MP4 from args {spec:{size, slides:[{title, bullets, narration}]}, out:'deck.mp4'}. " +
+	"One call draws, voices and joins the video, writes chapters.txt ('m:ss Title' per slide) beside it and returns { path, durationSec, durationLabel, starts, chapters }, so no ffmpeg, ffprobe or build.sh is needed. " +
+	"The chapters file is always named chapters.txt in the mp4's folder, so a second deck rendered there overwrites it. Local code only. Deterministic. " +
+	"PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task: you write the spec, it draws the slides and joins them. " +
+	"spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?: string[], image?: 'png/jpg path in the working directory', seconds?: 1-60 (default 4), narration?: 'spoken by the local voice', voice? }] } (1-40 slides, each needs a title, text, bullets or image). " +
+	"Narration uses the same local engine as speak and stretches a slide to fit its voice. No music, no network. Never shells out.";
+
+/** Where the chapters file for an mp4 goes: fixed name, same folder. */
+export function chaptersPathFor(out: string): string {
+	return path.join(path.dirname(out), "chapters.txt");
+}
+
+/**
+ * Refuse before any render work if chapters.txt cannot be replaced cleanly: a symlink or a
+ * directory is in the way. (The final write is temp-and-rename, which never follows a link.)
+ */
+export function assertChaptersWritable(chaptersPath: string): void {
+	const st = fs.lstatSync(chaptersPath, { throwIfNoEntry: false });
+	if (st?.isSymbolicLink()) throw new Error("refusing to write chapters.txt: it is a symlink");
+	if (st?.isDirectory()) throw new Error("refusing to write chapters.txt: it is a directory");
+}
+
+/**
+ * m:ss rounded to the nearest second (half the error of flooring). A slide lasts at least 1 s,
+ * so the rounded start never lands past that slide's own end.
+ */
+export function clock(sec: number): string {
+	const t = Math.max(0, Math.round(sec));
+	return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+}
+
+function chapterTitle(s: DeckSlide, i: number): string {
+	const raw = s.title ?? s.text ?? s.bullets?.[0] ?? s.kicker ?? `Slide ${i + 1}`;
+	return raw.replace(/\s+/g, " ").trim().slice(0, 80) || `Slide ${i + 1}`;
+}
+
+/** Chapter lines from per-slide start times; the first is always 0:00. */
+export function chapterLines(slides: DeckSlide[], starts: number[]): string[] {
+	return slides.map((s, i) => `${clock(starts[i])} ${chapterTitle(s, i)}`);
 }
 
 /** House film palette (officerfilm): warm near-black, cream ink, one amber accent. No hue 270-350. */
@@ -766,6 +817,8 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 	const [W, H] = SIZES[spec.size];
 
 	fs.mkdirSync(path.dirname(opts.out), { recursive: true });
+	const chaptersPath = chaptersPathFor(opts.out);
+	assertChaptersWritable(chaptersPath);
 	const root = fs.realpathSync(opts.cwd);
 	const scratchRoot = path.join(opts.cwd, ".tmp");
 	if (fs.lstatSync(scratchRoot, { throwIfNoEntry: false })?.isSymbolicLink()) {
@@ -777,6 +830,7 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 	const work = fs.mkdtempSync(path.join(scratchRoot, "video-deck-"));
 	try {
 		const frames: DeckFrame[] = [];
+		const starts: number[] = [];
 		let total = 0;
 		const count = spec.slides.length;
 		for (let i = 0; i < count; i++) {
@@ -815,6 +869,7 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 			}
 			// Whole frames only, so the same spec always lands on the same frame count.
 			const fixed = Math.ceil(sec * FPS) / FPS;
+			starts.push(total);
 			total += fixed;
 			if (total > MAX_TOTAL_SECONDS)
 				throw new Error(`deck is over ${MAX_TOTAL_SECONDS}s once narration is counted`);
@@ -849,12 +904,21 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 		if (anyAudio && m.audioSec === null)
 			throw new Error("ffmpeg wrote no audio stream although slides carry narration");
 		placeOutput(tmpOut, opts.out, opts.cwd);
+		const chapters = chapterLines(spec.slides, starts);
+		const chaptersTmp = path.join(work, "chapters.txt");
+		fs.writeFileSync(chaptersTmp, `${chapters.join("\n")}\n`);
+		assertChaptersWritable(chaptersPath);
+		placeOutput(chaptersTmp, chaptersPath, opts.cwd);
 		return {
 			path: opts.out,
 			...m,
 			slides: spec.slides.length,
 			hasAudio: m.audioSec !== null,
 			kind: "video",
+			starts,
+			chapters,
+			chaptersPath,
+			durationLabel: clock(m.durationSec),
 		};
 	} finally {
 		fs.rmSync(work, { recursive: true, force: true });
