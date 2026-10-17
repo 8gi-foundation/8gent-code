@@ -20,10 +20,12 @@ import {
 import {
 	GROUP_VOICE_BUSY,
 	GROUP_VOICE_TOO_BIG,
+	RUN_ASYNC_MAX_BYTES,
 	TelegramDaemonBridge,
 	bindChatThread,
 	groupVoiceIds,
 	isForwardedLike,
+	runAsync,
 	tgSend,
 	transcribeVoice,
 } from "./telegram-bridge";
@@ -822,6 +824,78 @@ describe("instant acknowledgement", () => {
 		expect(acks(t).length).toBe(1);
 		expect(acks(t)[0]).toMatchObject({ explicitChat: String(GROUP), threadId: 7 });
 		expect(sends().some((x) => x.body.text === ACK)).toBe(false); // spoken, so no text copy
+	});
+	test("the spoken ack is relevant to the transcript, from the real handler", async () => {
+		const t = await ready(make());
+		t.b.transcribe = async () => "what is the status of the pull request";
+		await t.b.handleGroupVoice(voiceMsg({ message_thread_id: 7 }));
+		const said = t.said.filter((x) => x.text === "Checking the PR status now");
+		expect(said.length).toBe(1);
+		expect(said[0]).toMatchObject({ explicitChat: String(GROUP), threadId: 7 });
+		expect(acks(t)).toEqual([]);
+	});
+	test("slow transcription: generic ack goes out at the 1.5 s budget, not after whisper", async () => {
+		const t = await ready(make());
+		// A real child that runs 3 s. With spawnSync this froze the loop and the ack came late.
+		t.b.transcribe = async () => {
+			await runAsync("sleep", ["3"], 10_000);
+			return "what is the status of the pull request";
+		};
+		const t0 = Date.now();
+		const turn = t.b.handleGroupVoice(voiceMsg({ message_thread_id: 7 }));
+		while (acks(t).length === 0 && Date.now() - t0 < 2800) {
+			await new Promise((r) => setTimeout(r, 25));
+		}
+		const at = Date.now() - t0;
+		expect(acks(t).length).toBe(1); // generic, spoken while transcription still runs
+		expect(at).toBeLessThan(2000);
+		await turn;
+		expect(t.said.filter((x) => x.text === "Checking the PR status now")).toEqual([]);
+	});
+	test("runAsync never blocks the event loop and times out", async () => {
+		let ticks = 0;
+		const iv = setInterval(() => ticks++, 50);
+		const r = await runAsync("sleep", ["1"], 10_000);
+		clearInterval(iv);
+		expect(r.status).toBe(0);
+		expect(ticks).toBeGreaterThan(10);
+		const k = await runAsync("sleep", ["5"], 200);
+		expect(k.status).toBeNull();
+	});
+	test("runAsync caps each stream at 1 MiB and keeps draining", async () => {
+		const r = await runAsync(
+			"sh",
+			["-c", "head -c 3000000 /dev/zero | tr '\\0' a; head -c 3000000 /dev/zero | tr '\\0' b >&2"],
+			20_000,
+		);
+		expect(r.status).toBe(0);
+		expect(r.stdout.length).toBe(RUN_ASYNC_MAX_BYTES);
+		expect(r.stderr.length).toBe(RUN_ASYNC_MAX_BYTES);
+	});
+	test("runAsync cap counts bytes, not characters, and flags truncation", async () => {
+		// 600000 euro signs = 1.8 MB of 3-byte characters, over the 1 MiB byte cap.
+		const r = await runAsync("sh", ["-c", "yes '\u20ac' | tr -d '\\n' | head -c 1800000"], 20_000);
+		expect(r.status).toBe(0);
+		expect(r.truncated).toBe(true);
+		expect(Buffer.byteLength(r.stdout, "utf8")).toBeLessThanOrEqual(RUN_ASYNC_MAX_BYTES);
+		expect(Buffer.byteLength(r.stdout, "utf8")).toBeGreaterThan(RUN_ASYNC_MAX_BYTES - 4);
+		const small = await runAsync("echo", ["hi"], 5000);
+		expect(small.truncated).toBe(false);
+	});
+	test("a timed-out child is dead after SIGKILL", async () => {
+		const r = await runAsync("sleep", ["30"], 200);
+		expect(r.status).toBeNull();
+		expect(typeof r.pid).toBe("number");
+		let code: string | undefined;
+		for (const t0 = Date.now(); Date.now() - t0 < 2000 && code !== "ESRCH"; ) {
+			try {
+				process.kill(r.pid as number, 0);
+				await new Promise((x) => setTimeout(x, 20));
+			} catch (e) {
+				code = (e as NodeJS.ErrnoException).code;
+			}
+		}
+		expect(code).toBe("ESRCH");
 	});
 	test("no ack for a dropped or rejected note", async () => {
 		const t = await ready(make());
