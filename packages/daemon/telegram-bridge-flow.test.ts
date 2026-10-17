@@ -598,7 +598,18 @@ describe("review fixes on #4383", () => {
 		expect(modelCalls).toBe(0);
 		expect(said.length).toBe(1);
 	});
-	test("group text is untouched by these changes", () => {
-		expect(GROUP_MSG.chatType).toBe("supergroup");
+	test("group text through the real handler: /help stays in the group with no card, /mode says nothing", async () => {
+		const t = make();
+		await t.b.handleTelegramMessage("/help", GROUP, GROUP_MSG);
+		const afterHelp = bodies.length;
+		await t.b.handleTelegramMessage("/mode", GROUP, GROUP_MSG);
+		expect(bodies.length).toBe(afterHelp);
+		const sends = bodies.filter((x) => x.url.includes("sendMessage"));
+		expect(sends.length).toBeGreaterThan(0);
+		for (const x of sends) {
+			expect(String(x.body.chat_id)).toBe(String(GROUP));
+			expect(x.body.reply_markup).toBeUndefined();
+		}
+		expect(t.applied()).toEqual([]);
 	});
 });
