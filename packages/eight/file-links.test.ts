@@ -114,6 +114,33 @@ describe("confinement and bounds", () => {
 			"src/creds.ts",
 		);
 	});
+	test("second hop: an importer is named but its import outside cwd (../ and symlink) is not", () => {
+		const ws = path.join(root, "ws");
+		const cfg = w("ws/src/a.ts", "export const a = 1;");
+		w(
+			"ws/src/worker.ts",
+			`import { a } from "./a";\nimport { s } from "../../out/secret";\nimport { t } from "../lnk/token";`,
+		);
+		w("out/secret.ts", "export const s = 1;");
+		w("out/token.ts", "export const t = 1;");
+		fs.symlinkSync(path.join(root, "out"), path.join(ws, "lnk"));
+		const f = linksFooter(cfg, "export const a = 1;", new Set([cfg]), ws);
+		expect(f).toContain("src/worker.ts");
+		expect(f).not.toContain("secret");
+		expect(f).not.toContain("token");
+		expect(f).not.toContain("also imports");
+	});
+	test("second hop: an importer is named but its policy-denied import is not (allow-all control)", () => {
+		const cfg = w("src/a.ts", "export const a = 1;");
+		const creds = w("src/creds.ts", "export const k = 1;");
+		w("src/worker.ts", `import { a } from "./a";\nimport { k } from "./creds";`);
+		const deny = (abs: string) => abs !== creds;
+		const denied = linksFooter(cfg, "export const a = 1;", new Set([cfg]), root, deny);
+		expect(denied).toContain("src/worker.ts");
+		expect(denied).not.toContain("creds");
+		const open = linksFooter(cfg, "export const a = 1;", new Set([cfg]), root);
+		expect(open).toContain("src/worker.ts (also imports src/creds.ts)");
+	});
 	test("the directory cap truncates and says so", () => {
 		const a = w("a.ts", "export const a = 1;");
 		for (let i = 0; i < 20; i++) w(`d${i}/f.ts`, "export {};");
