@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { SPEAK_VOICES, speak, wavDurationSec } from "../speak";
+import { SPEAK_VOICES, accountHome, engineHome, speak, wavDurationSec } from "../speak";
 
 let dir: string;
 const saved = { ...process.env };
@@ -59,7 +59,9 @@ describe("speak", () => {
 	test("fails loudly when neither engine is installed, writes nothing", async () => {
 		process.env.EIGHT_SUPERTONIC_BIN = "/nonexistent";
 		process.env.EIGHT_KITTEN_PY = "/nonexistent";
-		await expect(speak({ text: "hi", out: path.join(dir, "none.wav") })).rejects.toThrow(/no local neural TTS/);
+		await expect(speak({ text: "hi", out: path.join(dir, "none.wav") })).rejects.toThrow(
+			/no local neural TTS/,
+		);
 		expect(fs.existsSync(path.join(dir, "none.wav"))).toBe(false);
 	});
 
@@ -75,5 +77,15 @@ describe("speak", () => {
 		const bad = path.join(dir, "bad.wav");
 		fs.writeFileSync(bad, "x".repeat(100));
 		expect(() => wavDurationSec(bad)).toThrow(/RIFF/);
+	});
+
+	// Bun's os.userInfo().homedir returns $HOME; the pilot's per-run HOME made engines "not installed".
+	posixTest("engineHome ignores a per-run $HOME (the pilot sandbox case)", () => {
+		expect(process.env.HOME).toBe(dir);
+		const home = engineHome();
+		expect(home).not.toBe(dir);
+		expect(home.startsWith("/")).toBe(true);
+		expect(accountHome()).toBe(home);
+		expect(fs.existsSync(home)).toBe(true);
 	});
 });
