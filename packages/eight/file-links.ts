@@ -87,6 +87,18 @@ function list(files: string[], cwd: string): string {
 	return rel.length > MAX_LISTED ? `${shown} (+${rel.length - MAX_LISTED} more)` : shown;
 }
 
+function listVia(importers: string[], via: Map<string, string[]>, cwd: string): string {
+	const rel = importers
+		.map((f) => ({ name: path.relative(cwd, f), more: via.get(f) ?? [] }))
+		.sort((a, b) => a.name.localeCompare(b.name));
+	const shown = rel
+		.slice(0, MAX_LISTED)
+		.map(({ name, more }) => (more.length ? `${name} (also imports ${list(more, cwd)})` : name));
+	return rel.length > MAX_LISTED
+		? `${shown.join(", ")} (+${rel.length - MAX_LISTED} more)`
+		: shown.join(", ");
+}
+
 /** "" when `file` is not code or every linked file has been read. `allow` adds the caller's read policy. */
 export function linksFooter(
 	file: string,
@@ -103,6 +115,8 @@ export function linksFooter(
 	const t0 = lim.now();
 	const walk = codeFiles(cwd, lim, t0);
 	let truncated = walk.truncated;
+	// Each unread importer, with the unread files it imports: the second hop of a chain.
+	const via = new Map<string, string[]>();
 	const importers = walk.files.filter((f) => {
 		// One budget covers the walk and every importer read after it.
 		if (lim.now() - t0 > lim.maxMs) {
@@ -111,14 +125,20 @@ export function linksFooter(
 		}
 		if (f === file || seen.has(f) || !ok(f)) return false;
 		try {
-			return localImports(f, fs.readFileSync(f, "utf-8"), ok).includes(file);
+			const theirs = localImports(f, fs.readFileSync(f, "utf-8"), ok);
+			if (!theirs.includes(file)) return false;
+			via.set(
+				f,
+				theirs.filter((g) => g !== file && !seen.has(g)),
+			);
+			return true;
 		} catch {
 			return false;
 		}
 	});
 	const parts: string[] = [];
 	if (imports.length) parts.push(`Local imports not read yet: ${list(imports, cwd)}.`);
-	if (importers.length) parts.push(`Imported by, not read yet: ${list(importers, cwd)}.`);
+	if (importers.length) parts.push(`Imported by, not read yet: ${listVia(importers, via, cwd)}.`);
 	if (truncated) parts.push("Importer search stopped early, so this list may be incomplete.");
 	return parts.length ? `[${parts.join(" ")}]` : "";
 }

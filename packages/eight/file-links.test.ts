@@ -46,6 +46,24 @@ describe("linksFooter", () => {
 		expect(footer).not.toContain("src/defaults.ts");
 		expect(footer).toContain("Imported by, not read yet: src/worker.ts");
 	});
+	test("an importer is listed with its own unread imports, so retry.ts is named on the config read", () => {
+		const cfg = w("src/config.ts", "export const c = 1;");
+		const worker = w(
+			"src/worker.ts",
+			`import { c } from "./config";\nimport { waitSeconds } from "./retry";\nimport { log } from "./log";`,
+		);
+		const retry = w("src/retry.ts", "export const waitSeconds = () => 1;");
+		w("src/log.ts", "export const log = 1;");
+		const footer = linksFooter(cfg, "export const c = 1;", new Set([cfg, worker]), root);
+		expect(footer).toBe("");
+		const f2 = linksFooter(cfg, "export const c = 1;", new Set([cfg]), root);
+		expect(f2).toContain(
+			"Imported by, not read yet: src/worker.ts (also imports src/log.ts, src/retry.ts)",
+		);
+		const f3 = linksFooter(cfg, "export const c = 1;", new Set([cfg, retry]), root);
+		expect(f3).toContain("src/worker.ts (also imports src/log.ts)");
+		expect(f3).not.toContain("retry.ts");
+	});
 	test("the chain config -> worker -> retry surfaces retry once worker is read", () => {
 		w("src/config.ts", "export const c = 1;");
 		const worker = w(
