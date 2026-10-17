@@ -146,6 +146,7 @@ import {
 	TICKET_FILE_NOTE,
 	buildToolCatalogSegment,
 	environmentNote,
+	workingProjectNote,
 } from "./prompts/system-prompt";
 import {
 	classifyPrompt,
@@ -784,6 +785,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			: projectInstructionsSection(config.workingDirectory || process.cwd(), {
 					includeUserGlobal: onBox,
 				});
+		const workingProject = isTableScope
+			? ""
+			: workingProjectNote(config.workingDirectory || process.cwd());
 		this.messageHistory.push({
 			role: "system",
 			content: isTableScope
@@ -793,6 +797,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						// trails the project instructions so the cached prefix stays stable (#3222).
 						// The board briefing goes only to a model on this machine (#3236 rule).
 						compactLocalPrompt +
+						workingProject +
 						projectInstructionsBlock +
 						(onBox ? userContextBlock : userContextNoBoard)
 					: basePrompt +
@@ -802,6 +807,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						orchestratorBlock +
 						deferredToolBlock +
 						languageInstruction +
+						workingProject +
 						projectInstructionsBlock,
 		});
 		// #3487: a turn can be rerouted to another local provider after this
@@ -815,6 +821,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			this.offBoxSystemPrompt = () => {
 				offBox ??=
 					compactLocalPrompt +
+					workingProjectNote(workingDirectory) +
 					projectInstructionsSection(workingDirectory, { includeUserGlobal: false }) +
 					userContextNoBoard;
 				return offBox;
