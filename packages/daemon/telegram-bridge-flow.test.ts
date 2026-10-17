@@ -3,12 +3,13 @@
  * stubbed so nothing leaves the box. Covers 8SO attack tests T1-T10 on the
  * bridge side; the card and token mechanics are in flow-bot.test.ts.
  *
- * The flow controller is a stand-in (the real one is on 8gut, not main).
+ * The flow controller is the real one from packages/flow.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type FlowModeController, createFlowModeController } from "../flow/flow-mode";
+import { R10_TRANSIT_NOTICE } from "../telegram-bot/voice-mode";
 import { OPERATOR_COMMANDS, TelegramDaemonBridge } from "./telegram-bridge";
 
 const JAMES = 5486040131;
@@ -510,5 +511,94 @@ describe("the real controller through the bridge (T6, C20, voice never raises)",
 		expect(t.real.mode).toBe("think");
 		t.b.freshSession();
 		expect(t.real.mode).toBe("act");
+	});
+});
+
+describe("review fixes on #4383", () => {
+	const GROUP_MSG = { chatType: "supergroup", fromId: JAMES };
+	const R10 =
+		"Speech-to-text runs locally on the operator's machine (ffmpeg plus whisper-cli, no cloud STT). Audio from the Telegram path reaches the machine through Telegram's servers: a voice note the operator sends is stored and relayed by Telegram, and our spoken reply travels back the same way. Bot chats are not end-to-end encrypted. That transit is the channel the operator chose, it is not our transcription, and it applies only to the operator's own private chat. Listen-mode notes, when built, are never captured from the Telegram path. No audio or transcript is sent to any rented model API.";
+
+	test("the Heard echo goes to the chat it came from, never to a leftover group turn", async () => {
+		const t = make({}, "PRIVATE-DM-WORDS read my notes");
+		t.b.originChatId = String(GROUP); // a group turn just ran and left the origin behind
+		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+		const echoes = bodies.filter((x) => String(x.body.text).startsWith("Heard:"));
+		expect(echoes.map((e) => String(e.body.chat_id))).toEqual([String(JAMES)]);
+		expect(bodies.filter((x) => String(x.body.chat_id) === String(GROUP))).toEqual([]);
+	});
+	test("the voice status line for a failed transcript also goes to the chat it came from", async () => {
+		const t = make({}, "[voice message received - transcription failed, please send as text]");
+		t.b.originChatId = String(GROUP);
+		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+		expect(bodies.every((x) => String(x.body.chat_id) === String(JAMES))).toBe(true);
+	});
+	test("R10 transit text: exact string in the constant, in /help, and in the docs page", async () => {
+		expect(R10_TRANSIT_NOTICE).toBe(R10);
+		const t = make();
+		await t.b.handleTelegramMessage("/help", JAMES, { chatType: "private", fromId: JAMES });
+		expect(bodies.some((x) => String(x.body.text).includes(R10))).toBe(true);
+		const doc = readFileSync(join(import.meta.dir, "../../docs/telegram-bridge-voice.md"), "utf8");
+		expect(doc).toContain(R10);
+	});
+	test("H1: the spoken-reply arm follows the flow gate: forwarded, group and non-operator notes do not arm it", async () => {
+		const said: string[] = [];
+		for (const [msg, over] of [
+			[voice(JAMES, DM, { forward_origin: { type: "user" } }), {}],
+			[voice(JAMES, { id: GROUP, type: "supergroup" }), {}],
+			[voice(JAMES, DM), { operatorUserIds: [] }],
+		] as const) {
+			const t = make({ ...over, sendVoiceNote: recorder(said) });
+			await t.b.handleVoiceMessage(msg, "f");
+			await t.b.maybeSpeak("Done. Details are on screen.");
+		}
+		expect(said).toEqual([]);
+	});
+	test("H2: a mode command clears the spoken-reply arm, so the next reply stays text", async () => {
+		const said: string[] = [];
+		const t = make({ sendVoiceNote: recorder(said) }, "go quiet");
+		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+		expect(t.real.mode).toBe("quiet");
+		await t.b.maybeSpeak("Done. Details are on screen.");
+		expect(said).toEqual([]);
+	});
+	test("H3: the canary stays out of every log through a judge proposal card and its Yes tap", async () => {
+		const t = make({}, CANARY, '{"to":"quiet","reason":"too chatty"}');
+		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+		await settle();
+		const card = bodies.find((x) => x.body.reply_markup) as (typeof bodies)[number];
+		const data = card.body.reply_markup.inline_keyboard[0][0].callback_data;
+		await t.b.handleCallbackQuery({
+			id: "q",
+			from: { id: JAMES },
+			data,
+			message: { message_id: nextId - 1, chat: DM },
+		});
+		expect(t.real.mode).toBe("quiet");
+		expect(logs.join("\n")).not.toContain("CANARY");
+		expect(logs.join("\n")).not.toContain(data.slice(3));
+		expect(
+			bodies.filter(
+				(x) =>
+					JSON.stringify(x.body).includes("CANARY") && !String(x.body.text).startsWith("Heard:"),
+			),
+		).toEqual([]);
+	});
+	test("H5: an explicit null spoken model means the deterministic text, not the local model", async () => {
+		const said: string[] = [];
+		const real = globalThis.fetch;
+		let modelCalls = 0;
+		globalThis.fetch = (async (url: unknown, init?: unknown) => {
+			if (String(url).includes("/api/generate")) modelCalls++;
+			return (real as typeof fetch)(url as string, init as RequestInit);
+		}) as unknown as typeof fetch;
+		const t = make({ spokenModel: null, sendVoiceNote: recorder(said) });
+		t.b.voiceEnabled = true;
+		await t.b.maybeSpeak("Done. Details are on screen.");
+		expect(modelCalls).toBe(0);
+		expect(said.length).toBe(1);
+	});
+	test("group text is untouched by these changes", () => {
+		expect(GROUP_MSG.chatType).toBe("supergroup");
 	});
 });

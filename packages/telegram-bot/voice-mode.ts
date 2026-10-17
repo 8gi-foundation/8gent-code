@@ -21,6 +21,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+/**
+ * What voice notes do and do not do, in the words 8SO ruled (R10). Shown in /help and
+ * in docs/telegram-bridge-voice.md; a test pins the exact string in both.
+ */
+export const R10_TRANSIT_NOTICE =
+	"Speech-to-text runs locally on the operator's machine (ffmpeg plus whisper-cli, no cloud STT). Audio from the Telegram path reaches the machine through Telegram's servers: a voice note the operator sends is stored and relayed by Telegram, and our spoken reply travels back the same way. Bot chats are not end-to-end encrypted. That transit is the channel the operator chose, it is not our transcription, and it applies only to the operator's own private chat. Listen-mode notes, when built, are never captured from the Telegram path. No audio or transcript is sent to any rented model API.";
+
 /** Where the toggle lives, so it survives a bridge restart. */
 export const VOICE_STATE_PATH =
 	process.env.EIGHT_TG_VOICE_STATE || join(homedir(), ".8gent", "telegram-voice.json");

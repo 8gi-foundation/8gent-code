@@ -60,6 +60,7 @@ import {
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
 import {
 	MAX_SPOKEN_CHARS,
+	R10_TRANSIT_NOTICE,
 	decideVoice,
 	readVoiceState,
 	sendVoiceNote,
@@ -1326,15 +1327,18 @@ class TelegramDaemonBridge {
 		if (!transcript.startsWith("[")) {
 			this.noteVoiceTurn(message);
 			if (message.chat.type === "private") {
-				await tgSend(this.config.telegramToken, this.replyChat(), `Heard: "${transcript}"`);
+				await tgSend(this.config.telegramToken, String(message.chat.id), `Heard: "${transcript}"`);
 			}
 			// A mode command is consumed here; everything else is a normal turn.
-			if (await this.flowVoice(message, transcript)) return;
+			if (await this.flowVoice(message, transcript)) {
+				this.voiceTurnAt = 0; // a mode command has no reply to speak
+				return;
+			}
 			await this.dispatchTranscript(transcript, message);
 			return;
 		}
 		const reply = VOICE_SENTINELS.has(transcript) ? transcript : VOICE_UNPROCESSED;
-		await tgSend(this.config.telegramToken, this.replyChat(), reply);
+		await tgSend(this.config.telegramToken, String(message.chat.id), reply);
 	}
 
 	/** Explicit operator ids for flow. Empty means flow is off (C2). */
@@ -1351,11 +1355,8 @@ class TelegramDaemonBridge {
 
 	/** An operator voice note in their own DM arms a spoken reply, once. */
 	private noteVoiceTurn(message: BridgeMessage): void {
-		const dm =
-			message.chat.type === "private" &&
-			message.chat.id === message.from?.id &&
-			this.isOperator(message.from?.id);
-		if (dm) this.voiceTurnAt = Date.now();
+		// The same gate as flow: explicit operator, own private DM, live (not forwarded) note.
+		if (classifyVoice(message, this.flowOps()) === "user-voice") this.voiceTurnAt = Date.now();
 	}
 
 	/**
@@ -1765,12 +1766,15 @@ class TelegramDaemonBridge {
 					"/boardroom <topic> - all 8 officers deliberate, one message, one verdict",
 					"/voice on|off - replies also arrive as a voice note",
 					"/voice - show the current voice setting",
+					"/mode - pick how I work (operator DM only)",
 					"/status - Daemon health",
 					"/cancel - Stop the current task",
 					"/unstick - Reset busy state",
 					"/delegate, /plan, /review, /goals, /kill - chief-of-staff commands",
 					"/logs - Tail daemon logs",
 					"/help - This message",
+					"",
+					R10_TRANSIT_NOTICE,
 					"",
 					"Your standing rules from ~/.claude/CLAUDE.md load on every turn. You do not have to ask for them.",
 				].join("\n"),
@@ -1856,7 +1860,12 @@ class TelegramDaemonBridge {
 		if (!this.voiceEnabled && !answersVoice) return;
 		// The full text is already on screen; what is spoken is a draft written for the ear.
 		const draft = capAtSentence(
-			await makeSpokenDraft(text, this.config.spokenModel ?? localSpokenModel(process.env)),
+			await makeSpokenDraft(
+				text,
+				this.config.spokenModel !== undefined
+					? this.config.spokenModel
+					: localSpokenModel(process.env),
+			),
 			MAX_SPOKEN_CHARS,
 		);
 		const decision = decideVoice(draft, { enabled: true });
