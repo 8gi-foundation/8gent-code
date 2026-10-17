@@ -997,7 +997,7 @@ export function buildTextToolCall(opts: {
 	const rawAttempt = async (
 		messages: ChatMessage[],
 		variant: QwenChatMLVariant,
-	): Promise<{ ok: true; content: string } | { ok: false; why: string }> => {
+	): Promise<{ ok: true; content: string } | { ok: false; why: string; capped?: true }> => {
 		const root = ollamaRootFromEndpoint(endpoint);
 		const t0 = performance.now();
 		const res = await modelFetch(
@@ -1059,7 +1059,7 @@ export function buildTextToolCall(opts: {
 			wallMs: Math.round(performance.now() - t0),
 		});
 		if (data?.done_reason === "length") {
-			return { ok: false, why: outputCapMessage(`${label} (raw)`, maxTokens) };
+			return { ok: false, why: outputCapMessage(`${label} (raw)`, maxTokens), capped: true };
 		}
 		const rawText = typeof data?.response === "string" ? data.response : "";
 		// With thinking off the prompt already closed the think block.
@@ -1087,6 +1087,7 @@ export function buildTextToolCall(opts: {
 		}
 
 		// 1. Root-cause recovery: bypass the parser with a raw request.
+		let rawCapped = false;
 		let rawNote = "the model's prompt format is not one the raw path can render";
 		const variant = await lookupQwenVariant(
 			ollamaRootFromEndpoint(endpoint),
@@ -1100,6 +1101,7 @@ export function buildTextToolCall(opts: {
 			}));
 			if (raw.ok) return raw.content;
 			rawNote = raw.why;
+			rawCapped = "capped" in raw && raw.capped === true;
 		}
 
 		// 2. One reminder retry on the normal endpoint.
@@ -1113,6 +1115,9 @@ export function buildTextToolCall(opts: {
 		const retryFailure = retry.ok
 			? `an empty reply for ${retry.completionTokens} generated tokens`
 			: `${retry.status} ${retry.body.slice(0, 200)}`;
+		// The raw re-request hit the output cap: a runaway, so the loop gets the
+		// typed error and can retry with a nudge.
+		if (rawCapped) throw new OutputCapError(rawNote);
 		throw new Error(
 			`${opts.provider} chat completions: the model replied in native tool-call markup that ` +
 				`${opts.provider}'s built-in tool-call parser rejected (${firstFailure}). ` +

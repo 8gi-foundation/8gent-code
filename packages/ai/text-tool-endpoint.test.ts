@@ -1,3 +1,4 @@
+import { OutputCapError } from "./text-tool-client";
 /**
  * Regression tests for #2805: the text-tool endpoint call must surface REAL
  * token usage when the local OpenAI-compatible endpoint reports it, and must
@@ -1014,6 +1015,26 @@ describe("buildTextToolCall output cap (#3074)", () => {
 		]);
 		expect((seen[1].body.options as Record<string, unknown>).num_predict).toBe(1000);
 		expect(seen[2].body.max_tokens).toBe(1000);
+	});
+	it("a raw cut-off that the chat retry cannot recover throws OutputCapError", async () => {
+		const QWEN38 =
+			"FROM qwen3.8:27b-mlx\nTEMPLATE {{ .Prompt }}\nRENDERER qwen3.8\nPARSER qwen3.5\n";
+		stubCapped(
+			[
+				() => new Response(OLLAMA_PARSER_EOF, { status: 500 }),
+				() => Response.json({ response: "loop loop", done: true, done_reason: "length" }),
+				() => new Response(OLLAMA_PARSER_EOF, { status: 500 }),
+			],
+			QWEN38,
+		);
+		const call = buildTextToolCall({
+			provider: "ollama",
+			model: "qwen3.8:27b-mlx",
+			maxTokens: 1000,
+		});
+		const err = await call([{ role: "user", content: "hi" }]).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(OutputCapError);
+		expect((err as Error).message).toContain("(raw) hit the 1000-token output cap");
 	});
 });
 
