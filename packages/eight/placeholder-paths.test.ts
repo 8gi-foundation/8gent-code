@@ -243,17 +243,4 @@ describe("first write is refused, second goes through (#4405)", () => {
 		expect(await ex.execute("edit_file", edit)).toContain("File edited");
 		expect(readFileSync(join(dir, "U.md"), "utf-8")).toBe("Go to /path/to/Tally.\n");
 	});
-
-	test("EIGHT_PLACEHOLDER_REJECT=0 restores warn-only", async () => {
-		process.env.EIGHT_PLACEHOLDER_REJECT = "0";
-		try {
-			const ex = new ToolExecutor(tempDir("placeholder-"));
-			ex.beginTurn("x");
-			const out = await ex.execute("write_file", { path: "U.md", content: doc });
-			expect(out).toContain("File written");
-			expect(out).toContain(NUDGE);
-		} finally {
-			delete process.env.EIGHT_PLACEHOLDER_REJECT;
-		}
-	});
 });

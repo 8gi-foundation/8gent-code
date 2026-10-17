@@ -1171,7 +1171,6 @@ export class ToolExecutor {
 	 * goes through, so a deliberate example can never loop. null: write it.
 	 */
 	private placeholderRefusal(file: string, text: string): string | null {
-		if (process.env.EIGHT_PLACEHOLDER_REJECT === "0") return null;
 		const line = placeholderPathLine(file, text, [this.presendTask, ...this.readTexts]);
 		if (!line || this.placeholderRefused.has(file)) return null;
 		this.placeholderRefused.add(file);
