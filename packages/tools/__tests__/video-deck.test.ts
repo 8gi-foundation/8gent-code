@@ -579,17 +579,20 @@ describe("caps", () => {
 
 	/**
 	 * A narration engine that never finishes: a real executable on every OS (see
-	 * tests/fake-exe.ts). It writes its pid to STUB_PIDFILE when set, and with
-	 * STUB_IGNORE_TERM=1 it shrugs off SIGTERM so only SIGKILL ends it.
+	 * tests/fake-exe.ts). With a pidfile it writes its pid there, and with
+	 * ignoreTerm it shrugs off SIGTERM so only SIGKILL ends it. Both are baked into
+	 * the script: the engine child gets an allowlisted env, not the test's process.env.
 	 */
-	const slowEngine = (root: string) =>
+	const slowEngine = (root: string, opts: { pidfile?: string; ignoreTerm?: boolean } = {}) =>
 		fakeExecutable(
 			root,
 			"slow-engine",
 			[
 				'const fs = require("node:fs");',
-				"if (process.env.STUB_PIDFILE) fs.writeFileSync(process.env.STUB_PIDFILE, String(process.pid));",
-				'if (process.env.STUB_IGNORE_TERM === "1") process.on("SIGTERM", () => {});',
+				opts.pidfile
+					? `fs.writeFileSync(${JSON.stringify(opts.pidfile)}, String(process.pid));`
+					: "",
+				opts.ignoreTerm ? 'process.on("SIGTERM", () => {});' : "",
 				"setInterval(() => {}, 200);",
 				"setTimeout(() => process.exit(0), 20000);",
 				"",
@@ -600,8 +603,6 @@ describe("caps", () => {
 		const root = tempDir("vdeck-deadline-");
 		process.env.EIGHT_SUPERTONIC_BIN = slowEngine(root);
 		process.env.EIGHT_KITTEN_PY = "/nonexistent";
-		Reflect.deleteProperty(process.env, "STUB_PIDFILE");
-		Reflect.deleteProperty(process.env, "STUB_IGNORE_TERM");
 		const t0 = Date.now();
 		await expect(
 			renderVideoDeck({
@@ -619,23 +620,16 @@ describe("caps", () => {
 		const pidfile = join(root, "pid");
 		// On Windows a "SIGTERM" is TerminateProcess, so the engine cannot ignore it;
 		// the deadline still ends it and the pid is gone, which is what is asserted.
-		process.env.EIGHT_SUPERTONIC_BIN = slowEngine(root);
+		process.env.EIGHT_SUPERTONIC_BIN = slowEngine(root, { pidfile, ignoreTerm: true });
 		process.env.EIGHT_KITTEN_PY = "/nonexistent";
-		process.env.STUB_PIDFILE = pidfile;
-		process.env.STUB_IGNORE_TERM = "1";
-		try {
-			await expect(
-				renderVideoDeck({
-					spec: { slides: [{ title: "t", narration: "hello" }] },
-					out: join(root, "o.mp4"),
-					cwd: root,
-					deadlineMs: 700,
-				}),
-			).rejects.toThrow(/deadline/);
-		} finally {
-			Reflect.deleteProperty(process.env, "STUB_PIDFILE");
-			Reflect.deleteProperty(process.env, "STUB_IGNORE_TERM");
-		}
+		await expect(
+			renderVideoDeck({
+				spec: { slides: [{ title: "t", narration: "hello" }] },
+				out: join(root, "o.mp4"),
+				cwd: root,
+				deadlineMs: 700,
+			}),
+		).rejects.toThrow(/deadline/);
 		const pid = Number.parseInt(readFileSync(pidfile, "utf8").trim(), 10);
 		const alive = () => {
 			try {
