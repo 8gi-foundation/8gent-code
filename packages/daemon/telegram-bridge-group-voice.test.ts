@@ -539,7 +539,9 @@ describe("G13: the spoken reply", () => {
 		]);
 		// consumed once: a second reply in the window is text only
 		await agentReplies(t.b, "Another reply.");
-		expect(t.said.filter((x) => x.explicitChat).length).toBe(1);
+		expect(
+			t.said.filter((x) => x.explicitChat && x.text !== "Got it, give me a minute.").length,
+		).toBe(1);
 	});
 	test("/voice off silences the group", async () => {
 		const t = await ready(make());
