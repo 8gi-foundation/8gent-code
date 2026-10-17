@@ -28,6 +28,8 @@ import {
 	INTRO_FRAMES,
 	MAX_IMAGE_BYTES,
 	buildFfmpegArgs,
+	chapterLines,
+	clock,
 	imageDimensions,
 	paintSlide,
 	phase,
@@ -810,5 +812,52 @@ describe("house film look (#4263)", () => {
 			for (let f = s + INTRO_FRAMES; f < s + 23; f++) expect(diff(f, f + 1)).toBeLessThan(0.05);
 		}
 		expect(diff(INTRO_FRAMES + 5, 24 + INTRO_FRAMES + 5)).toBeGreaterThan(2);
+	});
+});
+
+describe("chapters and true duration (#4389)", () => {
+	test("clock floors to m:ss and chapter lines are 'm:ss Title' from slide starts", () => {
+		expect(clock(0)).toBe("0:00");
+		expect(clock(59.99)).toBe("0:59");
+		expect(clock(65)).toBe("1:05");
+		const slides = [{ title: "Intro" }, { text: "Body  text" }, { image: "a.png" }];
+		expect(chapterLines(slides, [0, 3.5, 70])).toEqual([
+			"0:00 Intro",
+			"0:03 Body text",
+			"1:10 Slide 3",
+		]);
+	});
+
+	ffTest("a render writes chapters.txt whose starts match the slide durations", async () => {
+		const root = tempDir("vdeck-chapters-");
+		const spec = {
+			slides: [
+				{ title: "One", seconds: 2 },
+				{ title: "Two", seconds: 3 },
+				{ title: "Three", seconds: 1 },
+			],
+		};
+		const r = await renderVideoDeck({ spec, out: join(root, "video", "b.mp4"), cwd: root });
+		expect(r.starts).toEqual([0, 2, 5]);
+		expect(r.chaptersPath).toBe(join(root, "video", "chapters.txt"));
+		const file = readFileSync(r.chaptersPath, "utf8");
+		expect(file).toBe("0:00 One\n0:02 Two\n0:05 Three\n");
+		for (const line of file.trim().split("\n")) expect(line).toMatch(/^\d+:\d{2} \S/);
+		expect(r.chapters).toEqual(file.trim().split("\n"));
+		const real = Number(JSON.parse(probe(join(root, "video", "b.mp4"))).format.duration);
+		expect(r.durationSec).toBeCloseTo(real, 2);
+		expect(r.durationSec).toBeCloseTo(6, 1);
+		expect(r.durationLabel).toBe("0:06");
+	});
+
+	test("both tool descriptions open with the input shape: slides + narration to MP4", () => {
+		const eight = readFileSync(join(import.meta.dir, "../../eight/tools.ts"), "utf8");
+		const m = eight.match(/name: "render_video_deck",\s*description:\s*"([^"]*)"/);
+		expect(m).not.toBeNull();
+		const first = (m?.[1] ?? "").split(/(?<=\.)\s/)[0];
+		expect(first).toContain("Slides + narration to MP4");
+		expect(first).toContain("spec:{size, slides:");
+		const ai = readFileSync(join(import.meta.dir, "../../ai/tools.ts"), "utf8");
+		expect(ai).toContain('"Slides + narration to MP4 from args {spec:{size, slides:');
 	});
 });

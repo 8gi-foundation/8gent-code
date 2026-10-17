@@ -1096,7 +1096,7 @@ const useSkillTool = tool({
 
 const renderVideoDeckTool = tool({
 	description:
-		"Narrated mp4 from args {spec:{size:'1280x720', slides:[{title, bullets, narration}]}, out:'deck.mp4'}, local code only. Deterministic. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task. Returns { path, durationSec, slides, width, height, hasAudio }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?, image? (png/jpg inside the working directory), seconds? (1-60, default 4), narration? (spoken by the local voice), voice? }] }. No music, no network.",
+		"Slides + narration to MP4 from args {spec:{size, slides:[{title, bullets, narration}]}, out:'deck.mp4'}. Also writes chapters.txt ('m:ss Title' per slide) beside it. Local code only. Deterministic. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task. Returns { path, durationSec, durationLabel, starts, chapters, chaptersPath, slides, width, height, hasAudio }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?, image? (png/jpg inside the working directory), seconds? (1-60, default 4), narration? (spoken by the local voice), voice? }] }. No music, no network.",
 	inputSchema: z.object({
 		// The renderer's own schema (#4172): the native request carries slides[{title, text,
 		// bullets, narration, ...}], size and voice as real fields, not a bare object.
