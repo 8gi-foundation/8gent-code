@@ -14,34 +14,56 @@ import * as path from "node:path";
 
 const CODE = /\.(ts|tsx|js|jsx|mts|mjs)$/;
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
-const MAX_FILES = 600;
 const MAX_LISTED = 8;
 const SPEC =
 	/(?:from\s+|import\s*\(\s*|require\s*\(\s*|import\s+)["'](\.{1,2}\/[^"']*|\.{1,2})["']/g;
 
-function resolveSpec(fromFile: string, spec: string): string | undefined {
+export type Limits = { maxFiles: number; maxDirs: number; maxMs: number };
+const LIMITS: Limits = { maxFiles: 600, maxDirs: 400, maxMs: 150 };
+
+/** True when `file` really lives inside `root` once symlinks are resolved. */
+function inside(file: string, root: string): boolean {
+	try {
+		const r = fs.realpathSync(root);
+		const f = fs.realpathSync(file);
+		return f === r || f.startsWith(r + path.sep);
+	} catch {
+		return false;
+	}
+}
+
+/** Which files may be named: inside cwd by realpath, and whatever else `allow` says (the read deny policy). */
+type Allow = (abs: string) => boolean;
+
+function resolveSpec(fromFile: string, spec: string, ok: Allow): string | undefined {
 	const base = path.resolve(path.dirname(fromFile), spec);
 	const stem = base.replace(/\.(js|jsx|mjs)$/, "");
 	const tries = [base, ...[".ts", ".tsx", ".js", ".jsx", ".mts", ".mjs"].map((e) => stem + e)];
 	for (const e of [".ts", ".tsx", ".js", ".jsx"]) tries.push(path.join(base, `index${e}`));
-	return tries.find((p) => CODE.test(p) && fs.existsSync(p) && fs.statSync(p).isFile());
+	return tries.find((p) => CODE.test(p) && fs.existsSync(p) && fs.statSync(p).isFile() && ok(p));
 }
 
-/** Absolute paths of the existing local files `content` imports. */
-export function localImports(file: string, content: string): string[] {
+/** Absolute paths of the existing, allowed local files `content` imports. */
+export function localImports(file: string, content: string, ok: Allow = () => true): string[] {
 	const out = new Set<string>();
 	for (const m of content.matchAll(SPEC)) {
-		const hit = resolveSpec(file, m[1]);
+		const hit = resolveSpec(file, m[1], ok);
 		if (hit && hit !== file) out.add(hit);
 	}
 	return [...out];
 }
 
-function codeFiles(root: string): string[] {
-	const found: string[] = [];
+function codeFiles(root: string, lim: Limits): { files: string[]; truncated: boolean } {
+	const files: string[] = [];
 	const stack = [root];
-	while (stack.length && found.length < MAX_FILES) {
+	const t0 = Date.now();
+	let dirs = 0;
+	while (stack.length) {
+		if (files.length >= lim.maxFiles || dirs >= lim.maxDirs || Date.now() - t0 > lim.maxMs) {
+			return { files, truncated: true };
+		}
 		const dir = stack.pop() as string;
+		dirs++;
 		let entries: fs.Dirent[];
 		try {
 			entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -51,12 +73,13 @@ function codeFiles(root: string): string[] {
 		for (const e of entries) {
 			if (e.isDirectory()) {
 				if (!SKIP_DIRS.has(e.name) && !e.name.startsWith(".")) stack.push(path.join(dir, e.name));
-			} else if (e.isFile() && CODE.test(e.name) && found.length < MAX_FILES) {
-				found.push(path.join(dir, e.name));
+			} else if (e.isFile() && CODE.test(e.name)) {
+				if (files.length >= lim.maxFiles) return { files, truncated: true };
+				files.push(path.join(dir, e.name));
 			}
 		}
 	}
-	return found;
+	return { files, truncated: false };
 }
 
 function list(files: string[], cwd: string): string {
@@ -65,19 +88,23 @@ function list(files: string[], cwd: string): string {
 	return rel.length > MAX_LISTED ? `${shown} (+${rel.length - MAX_LISTED} more)` : shown;
 }
 
-/** "" when `file` is not code or every linked file has been read. */
+/** "" when `file` is not code or every linked file has been read. `allow` adds the caller's read policy. */
 export function linksFooter(
 	file: string,
 	content: string,
 	seen: ReadonlySet<string>,
 	cwd: string,
+	allow: Allow = () => true,
+	limits: Partial<Limits> = {},
 ): string {
 	if (!CODE.test(file)) return "";
-	const imports = localImports(file, content).filter((f) => !seen.has(f));
-	const importers = codeFiles(cwd).filter((f) => {
-		if (f === file || seen.has(f)) return false;
+	const ok: Allow = (abs) => inside(abs, cwd) && allow(abs);
+	const imports = localImports(file, content, ok).filter((f) => !seen.has(f));
+	const walk = codeFiles(cwd, { ...LIMITS, ...limits });
+	const importers = walk.files.filter((f) => {
+		if (f === file || seen.has(f) || !ok(f)) return false;
 		try {
-			return localImports(f, fs.readFileSync(f, "utf-8")).includes(file);
+			return localImports(f, fs.readFileSync(f, "utf-8"), ok).includes(file);
 		} catch {
 			return false;
 		}
@@ -85,5 +112,6 @@ export function linksFooter(
 	const parts: string[] = [];
 	if (imports.length) parts.push(`Local imports not read yet: ${list(imports, cwd)}.`);
 	if (importers.length) parts.push(`Imported by, not read yet: ${list(importers, cwd)}.`);
+	if (walk.truncated) parts.push("Importer search stopped early, so this list may be incomplete.");
 	return parts.length ? `[${parts.join(" ")}]` : "";
 }

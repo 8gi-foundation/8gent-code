@@ -1320,7 +1320,7 @@ export class ToolExecutor {
 				function: {
 					name: "read_file",
 					description:
-						"[FILE] Returns the text of a file at the given path, one line per row, each row starting with its line number and a tab (like `cat -n`), then for code a bracketed footer naming local files it imports or that import it which you have not read yet; read those before answering about a value that flows through them. The number and tab are not part of the file: cite them as line numbers, but never copy them into edit_file oldText or newText. Use offset and limit to read part of a file; the numbers stay the file's real line numbers. For large files (>500 lines), prefer get_outline first to find the specific function, then get_symbol for just that code. For config files (package.json, tsconfig.json, etc.) this is the right choice directly.",
+						"[FILE] Returns the text of a file at the given path, one line per row, each row starting with its line number and a tab (like `cat -n`). The number and tab are not part of the file: cite them as line numbers, but never copy them into edit_file oldText or newText. Use offset and limit to read part of a file; the numbers stay the file's real line numbers. For large files (>500 lines), prefer get_outline first to find the specific function, then get_symbol for just that code. For config files (package.json, tsconfig.json, etc.) this is the right choice directly.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -3316,6 +3316,19 @@ export class ToolExecutor {
 		if (content === "") return "";
 
 		const isCodeFile = /\.(ts|tsx|js|jsx)$/.test(absolutePath);
+		const withLinks = (body: string): string => {
+			const footer = isCodeFile
+				? linksFooter(absolutePath, content, this.seenPaths, this.workingDirectory, (abs) => {
+						try {
+							safePath(abs, this.workingDirectory, "read");
+							return true;
+						} catch {
+							return false;
+						}
+					})
+				: "";
+			return footer ? `${body}\n\n${footer}` : body;
+		};
 		// Anchors per row with EIGHT_EDIT_FORMAT=hashline (#3472), else `cat -n`.
 		const numberRows = hashlineEnabled() ? hashLines : numberLines;
 		const offset = positiveInt(offsetArg);
@@ -3330,9 +3343,11 @@ export class ToolExecutor {
 			const count = limit ?? (isCodeFile ? 200 : lines.length);
 			const end = Math.min(lines.length, start - 1 + count);
 			const body = numberRows(lines.slice(start - 1, end), start);
-			return end < lines.length
-				? `${body}\n\n[Lines ${start}-${end} of ${lines.length}. Use offset=${end + 1} to read more.]`
-				: body;
+			return withLinks(
+				end < lines.length
+					? `${body}\n\n[Lines ${start}-${end} of ${lines.length}. Use offset=${end + 1} to read more.]`
+					: body,
+			);
 		}
 
 		// AST-first interception: for code files > 200 lines, prepend outline
@@ -3375,17 +3390,16 @@ export class ToolExecutor {
 				}
 			}
 
-			return `${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberRows(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`;
+			return withLinks(
+				`${outlineHeader}// File has ${lines.length} lines. Showing first 200:\n\n${numberRows(lines.slice(0, 200), 1)}\n\n// ... truncated. Use offset=201 to read on, or get_outline + get_symbol for specific sections.`,
+			);
 		}
 
 		if (DIFF_FILE.test(absolutePath)) {
 			const diff = numberDiffLines(lines);
 			if (diff !== null) return diff;
 		}
-		const footer = isCodeFile
-			? linksFooter(absolutePath, content, this.seenPaths, this.workingDirectory)
-			: "";
-		return footer ? `${numberRows(lines, 1)}\n\n${footer}` : numberRows(lines, 1);
+		return withLinks(numberRows(lines, 1));
 	}
 
 	private async writeFile(filePath: string, content: string): Promise<string> {
