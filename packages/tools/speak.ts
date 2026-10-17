@@ -105,18 +105,18 @@ export function engineHome(): string {
  * Bun a per-run HOME made engineHome() the empty sandbox dir and the engines found
  * no model (pilot run 2026-10-17_175323, render_video_deck). Node reads passwd, so
  * the old os.userInfo() call only worked there. getent on Linux, `id -P` on macOS.
+ * For read-only model and binary locations only. Never a write location: those stay on resolveHome().
  */
-let accountHomeCache: string | null | undefined;
+/** Only successful lookups are cached; a failed one is retried on the next call. */
+let accountHomeCache: string | undefined;
 export function accountHome(): string | null {
-	if (accountHomeCache !== undefined) return accountHomeCache;
-	accountHomeCache = null;
+	if (accountHomeCache) return accountHomeCache;
 	if (process.platform === "win32" || typeof process.getuid !== "function") {
 		try {
-			accountHomeCache = os.userInfo().homedir || null;
+			return (accountHomeCache = os.userInfo().homedir || undefined) ?? null;
 		} catch {
-			/* resolveHome fallback */
+			return null;
 		}
-		return accountHomeCache;
 	}
 	const uid = String(process.getuid());
 	const lookups: Array<[string, string[], number]> = [
@@ -137,7 +137,7 @@ export function accountHome(): string | null {
 			/* try the next lookup */
 		}
 	}
-	return accountHomeCache;
+	return null;
 }
 
 /**
