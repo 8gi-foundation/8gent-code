@@ -40,6 +40,7 @@ export const KEYBINDINGS: readonly KeyBinding[] = [
 	{ keys: "Ctrl+X", action: "Open or close the PLAN column", group: "views" },
 	{ keys: "Ctrl+F", action: "Live view of the session in 8gent Browser", group: "views" },
 	{ keys: "Ctrl+Y", action: "Cycle the work mode", group: "views" },
+	{ keys: "Ctrl+Q", action: "Cycle the flow mode: Act, Think, Quiet", group: "views" },
 	{ keys: "Ctrl+G", action: "Send the running task to the background", group: "views" },
 	{ keys: "Ctrl+R", action: "Start or stop voice input", group: "extras" },
 	{

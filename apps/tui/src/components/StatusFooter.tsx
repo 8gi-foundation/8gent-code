@@ -22,12 +22,13 @@
  */
 
 import { Box, Text } from "ink";
-import React, { useRef } from "react";
+import React, { useRef, useSyncExternalStore } from "react";
 import {
 	type PermissionMode,
 	isPermissionMode,
 } from "../../../../packages/permissions/permission-mode.js";
 import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
+import { flow } from "../lib/flow-runtime.js";
 import { keyBytes } from "../lib/key-bytes.js";
 import { injectKeys } from "../lib/mouse-input.js";
 import {
@@ -91,6 +92,10 @@ export interface FooterData {
 	sandboxOff?: string;
 	/** ADHD mode: a segment only while on (it had a rail row before #3238). */
 	adhd?: boolean;
+	/** Flow mode word (Act, Think, Quiet, Listen). Shown in every state, never dropped. */
+	flow?: string;
+	/** Short hint after the flow word, e.g. "tools not limited yet". */
+	flowHint?: string;
 }
 
 /** A value the app passes when it does not know the real one. */
@@ -120,6 +125,16 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 	const out: FooterSegment[] = [
 		{ key: "mode", label: "mode", value: d.mode, hint: "^Y", color: ui.teal, priority: 0 },
 	];
+	if (d.flow) {
+		// Value only, no label or cap: the row is full at 80 columns, and ^Q is in /hotkeys.
+		out.push({
+			key: "flow",
+			value: d.flow,
+			note: d.flowHint || undefined,
+			color: d.flowHint ? ui.orange : ui.teal,
+			priority: 0,
+		});
+	}
 	const perm = isPermissionMode(d.permissions) ? d.permissions : undefined;
 	// Ask shows no segment, unless a parent holds the tab there: then it says so.
 	if (perm && (perm !== "ask" || d.permHeld)) {
@@ -311,6 +326,35 @@ export function fitFooterRow(
 	leading = false,
 	dj = false,
 ): { segments: FooterSegment[]; hints: string[] } {
+	// The flow word always shows (every state), but it must not cost a key cap:
+	// lower segments give way instead, as they would on a narrower row.
+	const flowSeg = all.find((s) => s.key === "flow");
+	if (!flowSeg) return fitRowCore(all, width, leading, dj);
+	const target = fitRowCore(
+		all.filter((s) => s !== flowSeg),
+		width,
+		leading,
+		dj,
+	).hints.length;
+	let rest = [...all];
+	for (;;) {
+		const row = fitRowCore(rest, width, leading, dj);
+		if (row.hints.length >= target) return row;
+		let dropAt = -1;
+		rest.forEach((s, i) => {
+			if (s.priority > 0 && (dropAt < 0 || s.priority > (rest[dropAt]?.priority ?? -1))) dropAt = i;
+		});
+		if (dropAt < 0) return row;
+		rest = rest.filter((_, i) => i !== dropAt);
+	}
+}
+
+function fitRowCore(
+	all: FooterSegment[],
+	width: number,
+	leading = false,
+	dj = false,
+): { segments: FooterSegment[]; hints: string[] } {
 	const hintsFor = (segments: FooterSegment[]) =>
 		fitFooterHints(
 			Math.max(0, width - segmentsWidth(segments, leading) - HINTS_MARGIN),
@@ -424,7 +468,10 @@ export function StatusSegments({
 	/** A DJ track is loaded, so ^D does something and its cap shows. */
 	dj?: boolean;
 }) {
-	const all = buildFooterSegments(data);
+	// The flow mode is in memory and changes outside React props: read it live.
+	const flowWord = useSyncExternalStore(flow.subscribe, flow.footerWord);
+	const flowHint = useSyncExternalStore(flow.subscribe, flow.footerHint);
+	const all = buildFooterSegments({ flow: flowWord, flowHint, ...data });
 	const toastFit = toast ? fitFooterToast(all, width, toast, leading) : null;
 	const row = fitFooterRow(all, width, leading, dj);
 	// A notice takes the hint slot, so no hint is at stake: every segment that fits shows.

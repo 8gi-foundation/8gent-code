@@ -39,6 +39,7 @@ import {
 } from "../../../../packages/eight/go/index.js";
 import { trackTts } from "../hooks/ptt-state.js";
 import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
+import { type SpeechKind, canSpeak } from "../lib/flow-runtime.js";
 import type { GoalClient } from "../lib/goal-client.js";
 import { askedNote } from "../lib/model-truth.js";
 import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
@@ -498,7 +499,11 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 				const runId = goalState.runId ?? "current";
 				if (spokenForRunRef.current === runId) return;
 				spokenForRunRef.current = runId;
-				speakWithKittenTts(verdictLine, kittenTtsPath);
+				speakWithKittenTts(
+					verdictLine,
+					kittenTtsPath,
+					terminal === "done" ? "final-reply" : "failure",
+				);
 			},
 		});
 		return unsub;
@@ -547,7 +552,13 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
  * never ElevenLabs. Path is overridable for tests but defaults to the
  * canonical user-bin location.
  */
-export function speakWithKittenTts(line: string, path?: string): void {
+export function speakWithKittenTts(
+	line: string,
+	path?: string,
+	kind: SpeechKind = "final-reply",
+): void {
+	// Flow-mode gate: Quiet silences a done verdict; a failure is a floor and still speaks.
+	if (!canSpeak(kind)) return;
 	try {
 		const bin = path ?? pathJoin(homedir(), ".claude", "bin", "kittentts-say");
 		const child = spawn(bin, [line], {

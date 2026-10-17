@@ -30,6 +30,7 @@ Type `/hotkeys` (or `/keys`) in the interface for the same list. It is printed f
 |---|---|
 | Ctrl+X | Open or close the PLAN column |
 | Ctrl+Y | Cycle the work mode |
+| Ctrl+Q | Cycle the flow mode: Act, Think, Quiet |
 | Ctrl+G | Send the running task to the background |
 
 ## Extras
