@@ -247,6 +247,7 @@ import { ArtifactStore } from "./artifact-store";
 import { formatCommandOutput } from "./command-output";
 import { CommitGate, type CommitTarget, parseGitCommit } from "./commit-gate";
 import { formatEditNotFound } from "./edit-hint";
+import { linksFooter } from "./file-links";
 import {
 	ENV_PASS_HINT,
 	GH_ENV_NAMES,
@@ -1319,7 +1320,7 @@ export class ToolExecutor {
 				function: {
 					name: "read_file",
 					description:
-						"[FILE] Returns the text of a file at the given path, one line per row, each row starting with its line number and a tab (like `cat -n`). The number and tab are not part of the file: cite them as line numbers, but never copy them into edit_file oldText or newText. Use offset and limit to read part of a file; the numbers stay the file's real line numbers. For large files (>500 lines), prefer get_outline first to find the specific function, then get_symbol for just that code. For config files (package.json, tsconfig.json, etc.) this is the right choice directly.",
+						"[FILE] Returns the text of a file at the given path, one line per row, each row starting with its line number and a tab (like `cat -n`), then for code a bracketed footer naming local files it imports or that import it which you have not read yet; read those before answering about a value that flows through them. The number and tab are not part of the file: cite them as line numbers, but never copy them into edit_file oldText or newText. Use offset and limit to read part of a file; the numbers stay the file's real line numbers. For large files (>500 lines), prefer get_outline first to find the specific function, then get_symbol for just that code. For config files (package.json, tsconfig.json, etc.) this is the right choice directly.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -3381,7 +3382,10 @@ export class ToolExecutor {
 			const diff = numberDiffLines(lines);
 			if (diff !== null) return diff;
 		}
-		return numberRows(lines, 1);
+		const footer = isCodeFile
+			? linksFooter(absolutePath, content, this.seenPaths, this.workingDirectory)
+			: "";
+		return footer ? `${numberRows(lines, 1)}\n\n${footer}` : numberRows(lines, 1);
 	}
 
 	private async writeFile(filePath: string, content: string): Promise<string> {
