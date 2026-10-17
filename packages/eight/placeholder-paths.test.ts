@@ -59,8 +59,7 @@ describe("placeholderPathLine", () => {
 
 	test("a real path passes: no placeholder shape", () => {
 		for (const text of [
-			"cd C:\\Users\\priya\\Documents\\Tally",
-			"cd /home/priya/tally",
+			"cd %USERPROFILE%\\Tally",
 			"cd Tally",
 			"cd ./Tally/src",
 			"The path to the folder is the one you chose.",
@@ -68,6 +67,54 @@ describe("placeholderPathLine", () => {
 		]) {
 			expect([text, placeholderPathLine("a.md", text, [])]).toEqual([text, ""]);
 		}
+	});
+
+	test("a plausible invented absolute path is flagged (#4405)", () => {
+		for (const text of [
+			"node c:\\users\\priya\\tally\\src\\tally.js",
+			"cd C:\\Users\\priya\\Documents\\Tally",
+			"cd D:/work/tally",
+			"cd /home/priya/tally",
+			"cd /Users/priya/tally",
+			"cd ~/tally",
+		]) {
+			expect([text, placeholderPathLine("a.md", text, ["Help Priya run Tally."])[0]]).toEqual([
+				text,
+				"[",
+			]);
+		}
+		expect(placeholderPathLine("a.md", "cd c:\\users\\priya\\tally", [])).toContain(
+			"c:\\users\\priya\\tally",
+		);
+	});
+
+	test("a given folder, or a child of it, passes (#4405)", () => {
+		const given = ["PRIYA.txt: Tally is in C:\\Tools\\node and /home/priya/tally."];
+		for (const text of [
+			"C:\\Tools\\node\\node.exe C:\\Tools\\node\\src\\tally.js",
+			"c:/tools/NODE/node.exe",
+			"cd C:\\Tools\\node",
+			"cd /HOME/priya/tally/src",
+		]) {
+			expect([text, placeholderPathLine("a.md", text, given)]).toEqual([text, ""]);
+		}
+		// A folder that merely shares a name prefix with a given one is not the given folder.
+		expect(placeholderPathLine("a.md", "cd C:\\Toolsets\\node", given)).not.toBe("");
+		// A bare root given says nothing about where a project lives.
+		expect(placeholderPathLine("a.md", "cd /Users/priya/tally", ["see /Users/ and ~"])).not.toBe(
+			"",
+		);
+	});
+
+	test("an absolute path in non-prose or a URL is untouched (#4405)", () => {
+		expect(placeholderPathLine("a.js", "cd /Users/priya/tally", [])).toBe("");
+		expect(
+			placeholderPathLine(
+				"a.md",
+				"See https://example.com/home/priya and http://x.io/Users/a.",
+				[],
+			),
+		).toBe("");
 	});
 
 	test("non-prose files are ignored", () => {
@@ -130,6 +177,24 @@ describe("through ToolExecutor", () => {
 		expect(await ex2.execute("write_file", { path: "UNBLOCK.md", content: doc })).not.toContain(
 			NUDGE,
 		);
+	});
+
+	test("refusal names the tool to call again (#4405)", async () => {
+		const ex = new ToolExecutor(tempDir("placeholder-"));
+		ex.beginTurn("x");
+		const w = await ex.execute("write_file", {
+			path: "U.md",
+			content: "cd c:\\users\\priya\\tally\n",
+		});
+		expect(w).toContain("Call write_file again with the fixed text.");
+		await ex.execute("write_file", { path: "E.md", content: "Go to FOLDER.\n" });
+		await ex.execute("write_file", { path: "E.md", content: "Go to FOLDER.\n" });
+		const e = await ex.execute("edit_file", {
+			path: "E.md",
+			oldText: "FOLDER",
+			newText: "/home/priya/t",
+		});
+		expect(e).toContain("Call edit_file again with the fixed text.");
 	});
 
 	test("a path inside a file read this turn passes", async () => {

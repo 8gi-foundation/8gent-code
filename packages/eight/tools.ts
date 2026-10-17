@@ -1170,11 +1170,11 @@ export class ToolExecutor {
 	 * writes nothing and returns the nudge as the error. The second attempt on the same file
 	 * goes through, so a deliberate example can never loop. null: write it.
 	 */
-	private placeholderRefusal(file: string, text: string): string | null {
+	private placeholderRefusal(file: string, text: string, tool: string): string | null {
 		const line = placeholderPathLine(file, text, [this.presendTask, ...this.readTexts]);
 		if (!line || this.placeholderRefused.has(file)) return null;
 		this.placeholderRefused.add(file);
-		return `Error: nothing was written. ${line} Call the tool again with the made-up folder taken out. If the path is deliberate, send the same call again and it will be written.`;
+		return `Error: nothing was written. ${line} Call ${tool} again with the fixed text. If the path is deliberate, send the same call again and it will be written.`;
 	}
 
 	/** A placeholder-folder line for a prose doc just written, or "" (#4401). */
@@ -3494,7 +3494,7 @@ export class ToolExecutor {
 				return `Error: ${absolutePath} already exists and you have not read it this session, so write_file will not replace it. A command that was blocked or errored tells you nothing about whether a file exists. Run read_file on it first; to change part of it use edit_file; to run it, leave it alone.`;
 			}
 		}
-		const placeholderRefused = this.placeholderRefusal(absolutePath, content);
+		const placeholderRefused = this.placeholderRefusal(absolutePath, content, "write_file");
 		if (placeholderRefused) return placeholderRefused;
 		this.seenPaths.add(absolutePath);
 
@@ -3558,7 +3558,7 @@ export class ToolExecutor {
 			filePath,
 		);
 		if (!edit.ok) return edit.error;
-		const placeholderRefused = this.placeholderRefusal(absolutePath, newText);
+		const placeholderRefused = this.placeholderRefusal(absolutePath, newText, "edit_file");
 		if (placeholderRefused) return placeholderRefused;
 		const recordEdit = watchWrite(absolutePath, this.createdFiles);
 		fs.writeFileSync(absolutePath, edit.content);
@@ -3617,7 +3617,7 @@ export class ToolExecutor {
 			}
 			return formatEditNotFound(filePath, content, oldText);
 		}
-		const placeholderRefused = this.placeholderRefusal(absolutePath, newText);
+		const placeholderRefused = this.placeholderRefusal(absolutePath, newText, "edit_file");
 		if (placeholderRefused) return placeholderRefused;
 		const newContent = applyAt(content, resolved.idx, resolved.oldLength, resolved.newText);
 
