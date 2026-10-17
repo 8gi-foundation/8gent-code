@@ -1931,36 +1931,33 @@ async function chatCommand(args: string[]) {
 		process.exit(1);
 	}
 
-	// Detect model dynamically if not specified
-	let resolvedModel = model;
+	// Provider + model: --provider/--model, else the choice saved by onboarding,
+	// else the router (#4362). A saved provider that does not answer falls back
+	// with a stated reason on stderr.
+	const { resolveChatChoice, liveProviderChoiceDeps, defaultModelFor } = await import(
+		"../packages/eight/run.ts"
+	);
+	const choice = await resolveChatChoice({ provider, model }, liveProviderChoiceDeps());
+	if (choice.notice) console.error(choice.notice);
+	let resolvedModel = choice.model;
+	if (!resolvedModel && choice.provider !== "ollama") {
+		resolvedModel = defaultModelFor(choice.provider);
+	}
 	if (!resolvedModel) {
-		try {
-			const res = await fetch("http://localhost:11434/api/tags", {
-				signal: AbortSignal.timeout(3000),
-			});
-			const data = (await res.json()) as any;
-			const models = (data.models || []).map((m: any) => m.name as string);
-			resolvedModel =
-				models.find((m: string) => m.startsWith("eight")) ||
-				models.find((m: string) => !m.includes("embed")) ||
-				models[0];
-		} catch {}
-		if (!resolvedModel) {
-			const errMsg = "No Ollama models available. Pull a model first: ollama pull qwen3:14b";
-			if (isJson) {
-				jsonOut({ success: false, error: errMsg });
-			} else {
-				console.error(errMsg);
-			}
-			process.exit(1);
+		const errMsg = "No Ollama models available. Pull a model first: ollama pull qwen3:14b";
+		if (isJson) {
+			jsonOut({ success: false, error: errMsg });
+		} else {
+			console.error(errMsg);
 		}
+		process.exit(1);
 	}
 
 	// Text-tool path: local models whose chat template 400s on a native `tools`
 	// payload cannot do native tool calling. For those we keep tool orchestration
 	// in the harness, driving the model agentically through fenced `tool_call`
 	// blocks. Forced with --text-tools, auto-detected for lmstudio/ollama.
-	const resolvedProvider = provider || "ollama";
+	const resolvedProvider = choice.provider;
 	const forceTextTools = !!flags["text-tools"];
 	const useTextTools =
 		forceTextTools || resolvedProvider === "lmstudio" || resolvedProvider === "ollama";
@@ -2002,15 +1999,13 @@ async function chatCommand(args: string[]) {
 
 		const agent = new Agent({
 			model: resolvedModel,
-			runtime:
-				(provider as
-					| "ollama"
-					| "lmstudio"
-					| "openrouter"
-					| "apple-foundation"
-					| "apfel"
-					| "deepseek"
-					| undefined) || "ollama",
+			runtime: resolvedProvider as
+				| "ollama"
+				| "lmstudio"
+				| "openrouter"
+				| "apple-foundation"
+				| "apfel"
+				| "deepseek",
 			workingDirectory: cwd,
 			maxTurns: 30,
 		});
@@ -2024,7 +2019,7 @@ async function chatCommand(args: string[]) {
 				message,
 				response,
 				model: resolvedModel,
-				provider: provider || "ollama",
+				provider: resolvedProvider,
 			});
 		} else {
 			console.log(response);
