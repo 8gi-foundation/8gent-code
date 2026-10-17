@@ -28,6 +28,8 @@ const PATH_CHAR = /[^\s"'`(),;]/;
 const MAX_NAMED = 3;
 const MAX_SHOWN = 60;
 const MAX_SCAN = 200_000;
+const MAX_MATCHES = 50;
+const MAX_SIDE = 200;
 
 /** Lower case, one slash style: the form two spellings of one path share. */
 const norm = (s: string) => s.toLowerCase().replace(/\\/g, "/");
@@ -36,8 +38,8 @@ const norm = (s: string) => s.toLowerCase().replace(/\\/g, "/");
 function expand(text: string, at: number, len: number): string {
 	let a = at;
 	let b = at + len;
-	while (a > 0 && PATH_CHAR.test(text[a - 1])) a--;
-	while (b < text.length && PATH_CHAR.test(text[b])) b++;
+	while (a > 0 && at - a < MAX_SIDE && PATH_CHAR.test(text[a - 1])) a--;
+	while (b < text.length && b - at - len < MAX_SIDE && PATH_CHAR.test(text[b])) b++;
 	return text.slice(a, b).replace(/[.:!?]+$/, "");
 }
 
@@ -51,9 +53,12 @@ export function placeholderPathLine(file: string, content: string, inputs: strin
 		const text = content.slice(0, MAX_SCAN);
 		const seen = new Set<string>();
 		const found: string[] = [];
+		let matches = 0;
 		for (const m of text.matchAll(PLACEHOLDER)) {
+			if (++matches > MAX_MATCHES) break;
 			const token = expand(text, m.index ?? 0, m[0].length);
-			if (!token || seen.has(norm(token))) continue;
+			// A URL is a real address, not a folder the model made up.
+			if (!token || token.includes("://") || seen.has(norm(token))) continue;
 			seen.add(norm(token));
 			found.push(token.length > MAX_SHOWN ? `${token.slice(0, MAX_SHOWN)}...` : token);
 		}

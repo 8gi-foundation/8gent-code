@@ -84,6 +84,26 @@ describe("placeholderPathLine", () => {
 		expect(placeholderPathLine("DOC.MD", "cd /path/to/x", [])).not.toBe("");
 	});
 
+	test("a URL is not an invented folder", () => {
+		expect(placeholderPathLine("a.md", "See https://example.com/path/to/page for more.", [])).toBe(
+			"",
+		);
+		expect(placeholderPathLine("a.md", "See <https://example.com/path/to/page>.", [])).toBe("");
+	});
+
+	test("a fenced code block is still checked", () => {
+		expect(placeholderPathLine("a.md", "```\ncd C:\\path\\to\\Tally\n```", [])).toContain("path");
+	});
+
+	test("an unbroken 200 KB run of matches finishes fast", () => {
+		const text = "/path/to/x".repeat(20_000);
+		const t = performance.now();
+		const out = placeholderPathLine("a.md", text, []);
+		expect(performance.now() - t).toBeLessThan(500);
+		expect(out).toContain("[Placeholder path]");
+		expect(out.length).toBeLessThan(1000);
+	});
+
 	test("one line, at most three paths named", () => {
 		const out = placeholderPathLine("a.md", "/path/to/a /path/to/b /path/to/c /path/to/d", []);
 		expect(out.split("\n")).toHaveLength(1);
