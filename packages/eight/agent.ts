@@ -1547,7 +1547,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					console.log(`[honesty] ${resolution.reason}`);
 					effectiveProvider = resolution.provider;
 					effectiveModel = resolution.model;
-					this.emitModelRouted(providerModel, resolution.model, resolution.provider);
+					this.emitModelRouted(providerModel, resolution.model, resolution.provider, "capability");
 					// Session self-correction: subsequent turns start on the capable model.
 					this.config.model = resolution.model;
 				}
@@ -1666,7 +1666,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							console.log(
 								`[reroute] local model "${missing}" is not available; rerouting to "${chosen.model}" (${chosen.provider})`,
 							);
-							this.emitModelRouted(missing, chosen.model, chosen.provider);
+							this.emitModelRouted(missing, chosen.model, chosen.provider, "missing");
 						},
 					});
 			if (!outcome.ok) {
@@ -2987,6 +2987,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				provider: agentConfig.provider.name,
 			};
 
+			// The model the user asked for: a failover hop is announced against it (#4363).
+			const askedEntry = { ...currentEntry };
+
 			let result: any = null;
 			let resolved = false;
 			const MAX_PROVIDERS = 6; // hard cap so a misconfigured chain can't loop forever
@@ -3181,6 +3184,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						) {
 							break outer;
 						}
+						this.announceFailover(askedEntry, next);
 						currentEntry = next;
 						break; // exit inner attempt loop, outer reuses new currentEntry
 					}
@@ -3859,9 +3863,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	/** Tell the UI a different model serves this turn (#3102). A listener
 	 *  that throws must never change which model runs, so it is contained. */
-	private emitModelRouted(requested: string, used: string, provider: string): void {
+	/** A mid-turn failover moved the turn to another model: tell the UI (#4363). Reason unset = it did not answer. */
+	private announceFailover(asked: FailoverEntry, next: FailoverEntry): void {
+		if (asked.model === next.model && asked.provider === next.provider) return;
+		this.emitModelRouted(asked.model, next.model, next.provider);
+	}
+
+	private emitModelRouted(
+		requested: string,
+		used: string,
+		provider: string,
+		reason?: "capability" | "missing",
+	): void {
 		try {
-			this.events.onModelRouted?.({ requested, used, provider });
+			this.events.onModelRouted?.({ requested, used, provider, reason });
 		} catch {
 			// Display only.
 		}
