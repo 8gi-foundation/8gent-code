@@ -42,9 +42,7 @@ describe("linksFooter", () => {
 		const d = w("src/defaults.ts", "export const D = 1;");
 		w("src/worker.ts", `import { loadConfig } from "./config";`);
 		const footer = linksFooter(cfg, fs.readFileSync(cfg, "utf-8"), new Set([cfg, d]), root);
-		expect(footer).toContain("Local imports not read yet: src/queue.ts");
-		expect(footer).not.toContain("src/defaults.ts");
-		expect(footer).toContain("Imported by, not read yet: src/worker.ts");
+		expect(footer).toBe("[Not read yet in this chain: src/queue.ts, src/worker.ts.]");
 	});
 	test("an importer is listed with its own unread imports, so retry.ts is named on the config read", () => {
 		const cfg = w("src/config.ts", "export const c = 1;");
@@ -57,11 +55,9 @@ describe("linksFooter", () => {
 		const footer = linksFooter(cfg, "export const c = 1;", new Set([cfg, worker]), root);
 		expect(footer).toBe("");
 		const f2 = linksFooter(cfg, "export const c = 1;", new Set([cfg]), root);
-		expect(f2).toContain(
-			"Imported by, not read yet: src/worker.ts (also imports src/log.ts, src/retry.ts)",
-		);
+		expect(f2).toContain("Not read yet in this chain: src/worker.ts, src/log.ts, src/retry.ts.");
 		const f3 = linksFooter(cfg, "export const c = 1;", new Set([cfg, retry]), root);
-		expect(f3).toContain("src/worker.ts (also imports src/log.ts)");
+		expect(f3).toContain("Not read yet in this chain: src/worker.ts, src/log.ts.");
 		expect(f3).not.toContain("retry.ts");
 	});
 	test("the chain config -> worker -> retry surfaces retry once worker is read", () => {
@@ -73,6 +69,38 @@ describe("linksFooter", () => {
 		w("src/retry.ts", "export const waitSeconds = () => 1;");
 		const footer = linksFooter(worker, fs.readFileSync(worker, "utf-8"), new Set([worker]), root);
 		expect(footer).toContain("src/config.ts, src/retry.ts");
+	});
+	test("one to-do list in reading order: imports, then importers, then their imports; no separate clause", () => {
+		const cfg = w(
+			"src/config.ts",
+			`import { D } from "./defaults";\nimport { R } from "./regions";`,
+		);
+		w("src/defaults.ts", "export const D = 1;");
+		w("src/regions.ts", "export const R = 1;");
+		w("src/worker.ts", `import { c } from "./config";\nimport { w } from "./retry";`);
+		w("src/retry.ts", "export const w = 1;");
+		const f = linksFooter(cfg, fs.readFileSync(cfg, "utf-8"), new Set([cfg]), root);
+		expect(f).toBe(
+			"[Not read yet in this chain: src/defaults.ts, src/regions.ts, src/worker.ts, src/retry.ts.]",
+		);
+		expect(f).not.toContain("Imported by");
+		expect(f).not.toContain("also imports");
+	});
+	test("a name reached twice is listed once", () => {
+		const cfg = w("src/config.ts", "export const c = 1;");
+		for (let i = 0; i < 3; i++)
+			w(`src/w${i}.ts`, `import { c } from "./config";\nimport { s } from "./shared";`);
+		w("src/shared.ts", "export const s = 1;");
+		const f = linksFooter(cfg, "export const c = 1;", new Set([cfg]), root);
+		expect(f).toBe("[Not read yet in this chain: src/w0.ts, src/w1.ts, src/w2.ts, src/shared.ts.]");
+	});
+	test("the list is capped at eight names", () => {
+		const cfg = w("src/config.ts", "export const c = 1;");
+		for (let i = 0; i < 10; i++)
+			w(`src/w${String(i).padStart(2, "0")}.ts`, `import { c } from "./config";`);
+		const f = linksFooter(cfg, "export const c = 1;", new Set([cfg]), root);
+		expect(f).toContain("src/w07.ts (+2 more).]");
+		expect(f).not.toContain("src/w08.ts");
 	});
 	test("empty when everything linked has been read", () => {
 		const a = w("src/a.ts", `import { b } from "./b";`);
@@ -128,7 +156,7 @@ describe("confinement and bounds", () => {
 		expect(f).toContain("src/worker.ts");
 		expect(f).not.toContain("secret");
 		expect(f).not.toContain("token");
-		expect(f).not.toContain("also imports");
+		expect(f).toBe("[Not read yet in this chain: src/worker.ts.]");
 	});
 	test("second hop: an importer is named but its policy-denied import is not (allow-all control)", () => {
 		const cfg = w("src/a.ts", "export const a = 1;");
@@ -139,7 +167,7 @@ describe("confinement and bounds", () => {
 		expect(denied).toContain("src/worker.ts");
 		expect(denied).not.toContain("creds");
 		const open = linksFooter(cfg, "export const a = 1;", new Set([cfg]), root);
-		expect(open).toContain("src/worker.ts (also imports src/creds.ts)");
+		expect(open).toContain("Not read yet in this chain: src/worker.ts, src/creds.ts.");
 	});
 	test("the directory cap truncates and says so", () => {
 		const a = w("a.ts", "export const a = 1;");
@@ -183,18 +211,18 @@ describe("read_file integration", () => {
 		w("src/worker.ts", `import { c } from "./config";`);
 		const ex = new ToolExecutor(root);
 		const first = await read(ex, "src/config.ts");
-		expect(first).toContain("Local imports not read yet: src/defaults.ts");
-		expect(first).toContain("Imported by, not read yet: src/worker.ts");
+		expect(first).toContain("Not read yet in this chain: src/defaults.ts, src/worker.ts.");
+		expect(first).not.toContain("Imported by");
 		await read(ex, "src/defaults.ts");
 		await read(ex, "src/worker.ts");
-		expect(await read(ex, "src/config.ts")).not.toContain("not read yet");
+		expect(await read(ex, "src/config.ts")).not.toContain("Not read yet");
 		expect(await read(new ToolExecutor(root), "src/config.ts")).toContain("src/defaults.ts");
 	});
 	test("an offset/limit slice carries the footer too", async () => {
 		w("src/config.ts", `import { d } from "./defaults";\nexport const x = 1;\n`);
 		w("src/defaults.ts", "export const d = 1;");
 		const out = await read(new ToolExecutor(root), "src/config.ts", { offset: 2, limit: 1 });
-		expect(out).toContain("Local imports not read yet: src/defaults.ts");
+		expect(out).toContain("Not read yet in this chain: src/defaults.ts");
 	});
 	test("a file over 200 lines carries the footer after the truncation note", async () => {
 		const body = `import { d } from "./defaults";\n${"export const y = 1;\n".repeat(250)}`;
@@ -202,10 +230,10 @@ describe("read_file integration", () => {
 		w("src/defaults.ts", "export const d = 1;");
 		const out = await read(new ToolExecutor(root), "src/big.ts");
 		expect(out).toContain("truncated");
-		expect(out.trimEnd().endsWith("Local imports not read yet: src/defaults.ts.]")).toBe(true);
+		expect(out.trimEnd().endsWith("Not read yet in this chain: src/defaults.ts.]")).toBe(true);
 	});
 	test("a markdown file gets no footer", async () => {
 		w("README.md", "see ./a.ts");
-		expect(await read(new ToolExecutor(root), "README.md")).not.toContain("not read yet");
+		expect(await read(new ToolExecutor(root), "README.md")).not.toContain("Not read yet");
 	});
 });
