@@ -15,7 +15,11 @@
  * never touches the permission mode itself.
  */
 
-import { type PermissionMode, permissionRank, stricterMode } from "../../../../packages/permissions/permission-mode";
+import {
+	type PermissionMode,
+	permissionRank,
+	stricterMode,
+} from "../../../../packages/permissions/permission-mode";
 
 export type FlowMode = "act" | "quiet" | "think";
 export const FLOW_MODES: readonly FlowMode[] = ["act", "think", "quiet"];
@@ -97,7 +101,11 @@ function announce(to: FlowMode): string {
 }
 
 function question(to: FlowMode): string {
-	return to === "quiet" ? "Want me to go quiet?" : to === "think" ? "Want to think out loud?" : "Want me to get on with it?";
+	return to === "quiet"
+		? "Want me to go quiet?"
+		: to === "think"
+			? "Want to think out loud?"
+			: "Want me to get on with it?";
 }
 
 // ── Phrases and judge output ─────────────────────────────────────────
@@ -184,7 +192,12 @@ export function createFlowModeController(now: () => number = Date.now): FlowMode
 
 	const rec = (to: unknown, source: LogEntry["source"], accepted: boolean, why: string) =>
 		log.push({ at: now(), from: mode, to, source, accepted, why });
-	const out = (changed: boolean, say?: string, asking = false): Outcome => ({ changed, mode, say, asking });
+	const out = (changed: boolean, say?: string, asking = false): Outcome => ({
+		changed,
+		mode,
+		say,
+		asking,
+	});
 
 	function apply(to: FlowMode, source: SwitchSource): Outcome {
 		const from = mode;

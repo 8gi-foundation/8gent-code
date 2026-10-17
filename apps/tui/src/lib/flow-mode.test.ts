@@ -26,7 +26,12 @@ describe("canSwitch", () => {
 		for (const from of FLOW_MODES)
 			for (const to of FLOW_MODES) {
 				expect(canSwitch(from, to, "judge")).toBe(rank[to] <= rank[from]);
-				for (const s of ["user-key", "user-command", "user-phrase", "user-answer"] as SwitchSource[])
+				for (const s of [
+					"user-key",
+					"user-command",
+					"user-phrase",
+					"user-answer",
+				] as SwitchSource[])
 					expect(canSwitch(from, to, s)).toBe(true);
 			}
 	});
@@ -37,7 +42,8 @@ describe("canSwitch", () => {
 	});
 	test("non-flow targets are rejected for every source", () => {
 		for (const to of ["infinite", "guarded", "plan", "ask", "", null, 3, {}])
-			for (const s of ["judge", "user-key"] as SwitchSource[]) expect(canSwitch("act", to, s)).toBe(false);
+			for (const s of ["judge", "user-key"] as SwitchSource[])
+				expect(canSwitch("act", to, s)).toBe(false);
 	});
 });
 
@@ -193,7 +199,17 @@ describe("adversarial", () => {
 
 	test("A4. malformed judge output changes nothing", () => {
 		const { m } = ctl();
-		for (const raw of ["{not json", "", "null", "42", "[]", {}, { to: undefined }, undefined, null]) {
+		for (const raw of [
+			"{not json",
+			"",
+			"null",
+			"42",
+			"[]",
+			{},
+			{ to: undefined },
+			undefined,
+			null,
+		]) {
 			const o = m.judge(raw, "user-voice");
 			expect(o.changed).toBe(false);
 			expect(o.asking).toBeFalsy();
