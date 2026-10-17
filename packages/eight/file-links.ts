@@ -2,8 +2,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 /**
- * Footer for read_file on a code file: which files it imports, and which files
- * import it, that this session has not read yet. A value traced through a
+ * Footer for read_file on a code file: one to-do list of the files it imports,
+ * the files that import it, and what those importers import, that this session
+ * has not read yet. One list, because the model acts on a list headed "not read
+ * yet" and treated a separate "Imported by" clause as information. A value traced through a
  * chain (config -> worker -> retry) otherwise ends at the first file the model
  * thinks it can answer from; the pilot scenario conv-trace-config skipped
  * retry.ts three runs running because nothing named it.
@@ -81,24 +83,6 @@ function codeFiles(root: string, lim: Limits, t0: number): { files: string[]; tr
 	return { files, truncated: false };
 }
 
-function list(files: string[], cwd: string): string {
-	const rel = files.map((f) => path.relative(cwd, f)).sort();
-	const shown = rel.slice(0, MAX_LISTED).join(", ");
-	return rel.length > MAX_LISTED ? `${shown} (+${rel.length - MAX_LISTED} more)` : shown;
-}
-
-function listVia(importers: string[], via: Map<string, string[]>, cwd: string): string {
-	const rel = importers
-		.map((f) => ({ name: path.relative(cwd, f), more: via.get(f) ?? [] }))
-		.sort((a, b) => a.name.localeCompare(b.name));
-	const shown = rel
-		.slice(0, MAX_LISTED)
-		.map(({ name, more }) => (more.length ? `${name} (also imports ${list(more, cwd)})` : name));
-	return rel.length > MAX_LISTED
-		? `${shown.join(", ")} (+${rel.length - MAX_LISTED} more)`
-		: shown.join(", ");
-}
-
 /** "" when `file` is not code or every linked file has been read. `allow` adds the caller's read policy. */
 export function linksFooter(
 	file: string,
@@ -136,9 +120,19 @@ export function linksFooter(
 			return false;
 		}
 	});
+	// One to-do list in reading order: imports, then importers, then what importers import.
+	const order = new Set<string>();
+	const rel = (fs_: string[]) => fs_.map((f) => path.relative(cwd, f)).sort();
+	for (const r of rel(imports)) order.add(r);
+	for (const r of rel(importers)) order.add(r);
+	for (const f of importers) for (const r of rel(via.get(f) ?? [])) order.add(r);
+	const names = [...order];
 	const parts: string[] = [];
-	if (imports.length) parts.push(`Local imports not read yet: ${list(imports, cwd)}.`);
-	if (importers.length) parts.push(`Imported by, not read yet: ${listVia(importers, via, cwd)}.`);
+	if (names.length) {
+		const shown = names.slice(0, MAX_LISTED).join(", ");
+		const more = names.length > MAX_LISTED ? ` (+${names.length - MAX_LISTED} more)` : "";
+		parts.push(`Not read yet in this chain: ${shown}${more}.`);
+	}
 	if (truncated) parts.push("Importer search stopped early, so this list may be incomplete.");
 	return parts.length ? `[${parts.join(" ")}]` : "";
 }
