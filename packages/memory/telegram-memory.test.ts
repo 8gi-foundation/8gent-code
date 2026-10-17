@@ -169,6 +169,63 @@ describe("C-M21 / M10: matrix, deny by default, fail closed", () => {
 	});
 });
 
+describe("review fixes on #4394", () => {
+	test("an empty rows array is a valid revoke: deny all, and it overrides a good copy", () => {
+		const s = setup();
+		expect(s.mem.record(dm("first note here"))).toBe("stored");
+		expect(parseMatrix('{"version":1,"rows":[]}')).toEqual({ version: 1, rows: [] });
+		writeFileSync(join(s.dir, "matrix.json"), '{"version":1,"rows":[]}');
+		expect(s.mem.record(dm("second note here"))).toBe("matrix_denied");
+		expect(s.mem.recall(dm("first note"))).toBe("");
+	});
+
+	test("with an empty chat list, /memoff and /memwipe create no state and no key", () => {
+		let keyCalls = 0;
+		const s = setup({ TELEGRAM_MEMORY_CHAT_IDS: undefined }, { seed: false });
+		const m = new TelegramMemory({
+			dir: s.dir,
+			env: s.env,
+			keyProvider: () => {
+				keyCalls++;
+				return KEY;
+			},
+			log: () => {},
+		});
+		const me = { chatId: OP, chatType: "private", fromId: OP };
+		for (const c of ["/memoff", "/memon", "/memwipe"]) {
+			expect(m.command(c, "", me)).toMatch(/nothing is stored/);
+		}
+		expect(existsSync(s.dir)).toBe(false);
+		expect(keyCalls).toBe(0);
+	});
+
+	test("the wipe prompt and reply do not claim to erase everything", () => {
+		const s = setup();
+		s.mem.record(dm("note one here"));
+		const me = { chatId: OP, chatType: "private", fromId: OP };
+		const ask = s.mem.command("/memwipe", "", me);
+		expect(ask.includes("everything")).toBe(false);
+		expect(ask).toMatch(/Telegram's servers/);
+		const done = s.mem.command("/memwipe", ask.match(/\d{6}/)![0], me);
+		expect(done).toMatch(/Not covered: Telegram's servers/);
+	});
+
+	test("seed-matrix CLI seeds the operator once and refuses a second time", () => {
+		const root = mkdtempSync(join(tmpdir(), "tgmem-cli-"));
+		dirs.push(root);
+		const dir = join(root, "memory");
+		const run = () =>
+			Bun.spawnSync(["bun", join(import.meta.dir, "telegram-memory.ts"), "seed-matrix", dir], {
+				env: { ...process.env, TELEGRAM_OPERATOR_USER_IDS: String(OP) },
+			});
+		expect(run().exitCode).toBe(0);
+		expect(parseMatrix(readFileSync(join(dir, "matrix.json"), "utf8"))?.rows[0].userId).toBe(
+			String(OP),
+		);
+		expect(run().exitCode).toBe(1);
+	});
+});
+
 describe("C-M10 / M8: encrypted at rest, fail closed without the key", () => {
 	test("modes, and no canary in any file on disk", () => {
 		const s = setup();

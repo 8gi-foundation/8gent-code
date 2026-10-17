@@ -44,7 +44,8 @@ export interface Matrix {
 export function parseMatrix(raw: string): Matrix | null {
 	try {
 		const m = JSON.parse(raw) as Matrix;
-		if (m?.version !== 1 || !Array.isArray(m.rows) || m.rows.length === 0) return null;
+		// An empty list is valid: it grants nothing, so emptying the file revokes everyone.
+		if (m?.version !== 1 || !Array.isArray(m.rows)) return null;
 		const seen = new Set<string>();
 		for (const r of m.rows) {
 			if (typeof r?.userId !== "string" || !/^\d{1,20}$/.test(r.userId)) return null;
@@ -391,6 +392,13 @@ export class TelegramMemory {
 		}
 		const uid = String(ctx.fromId);
 		const chat = String(ctx.chatId);
+		const listed = splitIds(this.env.TELEGRAM_MEMORY_CHAT_IDS).includes(chat);
+		const hasState = existsSync(this.opts.dir);
+		// Unlisted and nothing on disk: memory is inert, and a command must not make it otherwise
+		// (no directory, flag file, audit row or Keychain item).
+		if (!listed && !hasState) {
+			return "Memory is not enabled for this chat and nothing is stored, so there is nothing to change or erase.";
+		}
 		ensurePrivateDir(this.opts.dir);
 		if (cmd === "/memoff") {
 			writeFileSync(this.flagFile, "1\n", { mode: 0o600 });
@@ -410,10 +418,13 @@ export class TelegramMemory {
 		const now = this.clock();
 		const given = arg.trim();
 		if (!given) {
+			if (!existsSync(join(this.opts.dir, "memory.db.enc"))) {
+				return "Nothing is stored, so there is nothing to erase.";
+			}
 			const code = String(randomInt(100000, 1000000));
 			this.wipe = { code, userId: uid, until: now + WIPE_TTL_MS, tries: 0 };
 			this.auditEvent(uid, chat, "memwipe_ask", "0", {}, "ok");
-			return `This erases everything the bot remembers about you, for good. To confirm within 2 minutes, send: /memwipe ${code}`;
+			return `This erases the memory store and the bot's session history for this chat, for good. It does not reach Telegram's servers, other transcripts, or backups made earlier. To confirm within 2 minutes, send: /memwipe ${code}`;
 		}
 		const w = this.wipe;
 		if (!w || w.userId !== uid || now > w.until) {
@@ -448,7 +459,7 @@ export class TelegramMemory {
 				.filter(([, n]) => n > 0)
 				.map(([k, n]) => `${k} ${n}`)
 				.join(", ");
-			return `Erased. Removed: ${line || "nothing was stored"}. Checked afterwards: zero left in every table.`;
+			return `Erased. Removed: ${line || "nothing was stored"}. Checked afterwards: zero left in every memory table. Not covered: Telegram's servers, other transcripts, backups made before today.`;
 		} catch {
 			this.auditEvent(uid, chat, "memwipe", uid, {}, "failed_rolled_back");
 			return "The wipe failed and was rolled back. Nothing was erased.";
@@ -459,4 +470,31 @@ export class TelegramMemory {
 	get _vault(): MemoryVault | null {
 		return this.vault;
 	}
+}
+
+/**
+ * CLI: bun packages/memory/telegram-memory.ts seed-matrix [dir]
+ * Writes matrix.json for the operators in TELEGRAM_OPERATOR_USER_IDS (explicit list). Refuses to
+ * overwrite. Default dir: $EIGHT_DATA_DIR/memory, else ~/.8gent/memory.
+ */
+if (import.meta.main) {
+	const [cmd, d] = process.argv.slice(2);
+	const dir =
+		d ?? join(process.env.EIGHT_DATA_DIR || join(process.env.HOME ?? "", ".8gent"), "memory");
+	if (cmd !== "seed-matrix") {
+		console.error("usage: telegram-memory.ts seed-matrix [dir]");
+		process.exit(2);
+	}
+	const ids = splitIds(process.env.TELEGRAM_OPERATOR_USER_IDS);
+	if (ids.length === 0) {
+		console.error("TELEGRAM_OPERATOR_USER_IDS is empty; nothing to seed");
+		process.exit(1);
+	}
+	const ok = seedMatrix(dir, ids);
+	console.log(
+		ok
+			? `seeded ${join(dir, "matrix.json")} for ${ids.length} operator(s)`
+			: "not seeded: file exists or ids invalid",
+	);
+	process.exit(ok ? 0 : 1);
 }
