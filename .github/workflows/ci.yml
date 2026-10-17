@@ -2,9 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 8gut]
   pull_request:
-    branches: [main]
+    branches: [main, 8gut]
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
