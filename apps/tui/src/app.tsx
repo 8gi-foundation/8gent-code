@@ -106,7 +106,7 @@ import {
 import { playSound, soundManager } from "./components/sound-effects.js";
 import { AnimatedStatusVerb } from "./components/status-verb.js";
 import type { TaskItem } from "./components/task-card/TaskCardList.js";
-import { trackTts } from "./hooks/ptt-state.js";
+import { PTT_ECHO_MESSAGE, trackTts } from "./hooks/ptt-state.js";
 import { useAgentOrchestration } from "./hooks/useAgentOrchestration.js";
 import { useAutoKanban } from "./hooks/useAutoKanban.js";
 import { chatRowBudget, useMeasuredHeight } from "./hooks/useMeasuredHeight.js";
@@ -133,6 +133,7 @@ import {
 	listPresetIds,
 	runExternalAgent,
 } from "./lib/external-agent-runner.js";
+import { type SpeechKind, canSpeak, flow, flowModeLabel } from "./lib/flow-runtime.js";
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
 import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gate.js";
@@ -603,8 +604,25 @@ import {
 // and falls back to voice.ttsVoice. Fully fire-and-forget so TUI never blocks
 // on audio. macOS-only; silently no-ops on other platforms.
 // ----------------------------------------------------------------------------
-function speakAgentReply(role: string | undefined, text: string): void {
+/** Tell the flow echo gate this process is speaking `text`, until the process ends. */
+function trackFlowSpeech(
+	proc: { on?: (e: string, cb: () => void) => unknown },
+	text: string,
+): void {
+	const ended = flow.speechStarted(text);
+	proc.on?.("close", ended);
+	proc.on?.("exit", ended);
+	proc.on?.("error", ended);
+}
+
+function speakAgentReply(
+	role: string | undefined,
+	text: string,
+	kind: SpeechKind = "final-reply",
+): void {
 	if (process.platform !== "darwin") return;
+	// The flow-mode gate: Quiet speaks only the floors, Listen only acks.
+	if (!canSpeak(kind)) return;
 	const trimmed = (text ?? "").trim();
 	if (!trimmed) return;
 	let s: ReturnType<typeof loadAppSettings>;
@@ -629,6 +647,7 @@ function speakAgentReply(role: string | undefined, text: string): void {
 			// Voice unavailable on this machine. Stay silent.
 		});
 		trackTts(proc);
+		trackFlowSpeech(proc, safe);
 		proc.unref();
 	} catch {
 		// Spawn failed (no shell, restricted env). Fail silently.
@@ -652,6 +671,8 @@ function speakOnboardingLine(
 	preference?: { engine?: string | null; voiceId?: string | null } | null,
 ): void {
 	if (process.platform !== "darwin") return;
+	// The flow-mode gate: the greeting is a reply, so Quiet and Listen skip it.
+	if (!canSpeak("final-reply")) return;
 	// Skip TTS entirely in non-TTY/CI so the smoke harness and piped
 	// invocations don't fork off background `say` processes.
 	if (!process.stdout.isTTY) return;
@@ -708,6 +729,7 @@ function speakOnboardingLine(
 			});
 			proc.on("error", () => {});
 			trackTts(proc);
+			trackFlowSpeech(proc, safe);
 			proc.unref();
 		} catch {
 			// Fail silently
@@ -1055,6 +1077,27 @@ export function App({
 		onNotice: (message) => addSystemMessage(message),
 		isSpeaking: () => voiceChat.state === "speaking",
 		onTranscript: (text) => {
+			// Flow modes: the capture gate and mode controller see the transcript first.
+			// The key was pressed to get here, so pttActive is true; the mic window
+			// is not carried by this callback, so it is "just now" (TTS overlap was
+			// already refused by the hook before this runs).
+			const t = Date.now();
+			const r = flow.heardTranscript({ text, pttActive: true, startedAt: t - 1, endedAt: t });
+			if (r.kind === "dropped") {
+				addSystemMessage(PTT_ECHO_MESSAGE);
+				return;
+			}
+			if (r.kind === "consumed") {
+				if (r.outcome.say) speakAgentReply(undefined, r.outcome.say, "mode-notice");
+				const line = [r.outcome.screen].filter(Boolean).join(" ");
+				addSystemMessage(
+					r.outcome.changed
+						? `Flow mode: ${flowModeLabel(r.outcome.mode)}. ${line}`.trim()
+						: line || (r.outcome.say ?? ""),
+				);
+				return;
+			}
+			if (r.ack) speakAgentReply(undefined, r.ack, "ack");
 			setVoiceTranscript(text);
 			addSystemMessage(`Transcribed: "${text}". Edit it or press Enter to send.`);
 		},
@@ -1921,6 +1964,21 @@ export function App({
 	// Headless callers see no handler and PermissionManager falls back to stdin.
 	const approvalPending = useApprovalCard();
 
+	// Flow modes (in memory): follow the active tab, read the tab's real permission
+	// mode for the ceiling, and tell the controller when an approval is on screen
+	// so a spoken "yes" can never answer it.
+	const activePermModeRef = useRef(activePermMode);
+	activePermModeRef.current = activePermMode;
+	useEffect(() => {
+		flow.setUserPermission(() => activePermModeRef.current);
+	}, []);
+	useEffect(() => {
+		flow.setActiveTab(activeTabId);
+	}, [activeTabId]);
+	useEffect(() => {
+		flow.setApprovalPending(approvalPending !== null);
+	}, [approvalPending]);
+
 	// A short confirmation in the footer's hint slot for 2 s: a mouse
 	// selection copied text (#3239), or a toggle that draws nothing else
 	// changed (^A motion, ^S sound), so its key cap never looks dead.
@@ -2298,6 +2356,16 @@ export function App({
 				flashNotice(prev ? "motion off" : "motion on");
 				return !prev;
 			});
+		}
+
+		// Ctrl+Q: cycle the flow mode (Act, Think, Quiet). User origin.
+		if (key.ctrl && input === "q") {
+			const o = flow.cycle();
+			if (o.changed) {
+				flashNotice(`flow ${flowModeLabel(o.mode).toLowerCase()}`);
+				if (o.say) speakAgentReply(undefined, o.say, "mode-notice");
+			}
+			return;
 		}
 
 		// Toggle sound with Ctrl+S
@@ -5346,6 +5414,24 @@ export function App({
 					} catch (err) {
 						addSystemMessage(`Could not write ${cfgPath}: ${(err as Error).message}`);
 					}
+					break;
+				}
+
+				case "mode": {
+					// /mode [listen|think|quiet|act]: user origin, in memory only.
+					if (!args[0]) {
+						addSystemMessage(
+							`Flow mode: ${flowModeLabel(flow.mode())}. Set it with /mode listen|think|quiet|act, or Ctrl+Q to cycle.`,
+						);
+						break;
+					}
+					const o = flow.setFlowMode(args[0]);
+					addSystemMessage(
+						o.changed
+							? `Flow mode: ${flowModeLabel(o.mode)}. ${o.screen ?? ""}`.trim()
+							: (o.screen ?? `Flow mode stays ${flowModeLabel(o.mode)}.`),
+					);
+					if (o.changed && o.say) speakAgentReply(undefined, o.say, "mode-notice");
 					break;
 				}
 

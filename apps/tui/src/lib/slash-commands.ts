@@ -13,6 +13,7 @@ export type SlashCommand =
 	| "llama"
 	| "models"
 	| "voice"
+	| "mode"
 	| "theme"
 	| "reload"
 	| "infinite"
@@ -138,6 +139,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["v"],
 		description: "Voice TTS settings",
 		usage: "/voice [on|off|test]",
+	},
+	{
+		name: "mode",
+		aliases: [],
+		description: "Flow mode: how I work right now (Listen, Think, Quiet, Act). Ctrl+Q cycles",
+		usage: "/mode [listen|think|quiet|act]",
 	},
 	{
 		name: "theme",
