@@ -60,9 +60,12 @@ import {
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
 import {
 	MAX_SPOKEN_CHARS,
+	R10_GROUP_NOTICE,
 	R10_TRANSIT_NOTICE,
 	decideVoice,
+	groupNoticeHash,
 	readVoiceState,
+	recordGroupNotice,
 	sendVoiceNote,
 	writeVoiceState,
 } from "../telegram-bot/voice-mode";
@@ -166,9 +169,19 @@ interface TelegramUpdate {
 		reply_to_message?: { from?: { id?: number } };
 		entities?: MsgEntity[];
 		forward_origin?: unknown;
+		forward_from?: unknown;
+		forward_from_chat?: unknown;
+		forward_date?: unknown;
+		forward_sender_name?: unknown;
+		is_automatic_forward?: unknown;
 		via_bot?: unknown;
+		external_reply?: unknown;
+		/** Set on anonymous-admin and channel posts: the "sender" is a chat, not a person. */
+		sender_chat?: unknown;
+		/** Forum topic the message was sent in. */
+		message_thread_id?: number;
 		text?: string;
-		voice?: { file_id: string; duration: number };
+		voice?: { file_id: string; duration: number; file_size?: number };
 		audio?: { file_id: string; duration: number };
 	};
 	callback_query?: {
@@ -234,7 +247,27 @@ interface BridgeConfig {
 	spokenModel?: SpokenModel | null;
 	/** Test seam for the voice-note sender. Default: the local KittenTTS bridge. */
 	sendVoiceNote?: typeof sendVoiceNote;
+	/** Test seam: where the voice toggle and group-notice record live. Default: the real state file. */
+	voiceStatePath?: string;
+	/** Test seam: where dropped group voice notes are recorded. Default: OBSERVED_LOG. */
+	observeLogPath?: string;
 }
+
+/**
+ * Forum topic of the group voice turn in flight, by chat id (C-G6). At most one entry:
+ * the bridge serialises turns, and bindChatThread replaces any earlier binding. Every
+ * outbound to a bound chat carries the topic; a chat with no binding, a DM above all,
+ * never gets one.
+ */
+const chatThreads = new Map<string, number>();
+export function bindChatThread(chatId: string, threadId: number | undefined): void {
+	chatThreads.clear();
+	if (threadId !== undefined) chatThreads.set(chatId, threadId);
+}
+const threadOf = (chatId: string): { message_thread_id?: number } => {
+	const t = chatThreads.get(chatId);
+	return t === undefined ? {} : { message_thread_id: t };
+};
 
 export async function tgSend(
 	token: string,
@@ -265,6 +298,7 @@ export async function tgSend(
 					chat_id: chatId,
 					text: chunk,
 					...(parseMode ? { parse_mode: parseMode } : {}),
+					...threadOf(chatId),
 					...NO_LINK_PREVIEW,
 				}),
 			});
@@ -273,7 +307,12 @@ export async function tgSend(
 			await fetch(`${TELEGRAM_API}${token}/sendMessage`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ chat_id: chatId, text: chunk, ...NO_LINK_PREVIEW }),
+				body: JSON.stringify({
+					chat_id: chatId,
+					text: chunk,
+					...threadOf(chatId),
+					...NO_LINK_PREVIEW,
+				}),
 			}).catch(() => {});
 		}
 	}
@@ -406,7 +445,7 @@ async function tgTyping(token: string, chatId: string): Promise<void> {
 	await fetch(`${TELEGRAM_API}${token}/sendChatAction`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ chat_id: chatId, action: "typing" }),
+		body: JSON.stringify({ chat_id: chatId, action: "typing", ...threadOf(chatId) }),
 	}).catch(() => {});
 }
 
@@ -682,6 +721,55 @@ export function voicePathIsLocal(env: Record<string, string | undefined>): boole
 export const VOICE_NEEDS_LOCAL =
 	"Voice notes are off while a cloud model is configured. Send text.";
 
+// ── Group voice (C-G1 to C-G17, 8SO 2026-10-17) ──────────────────────
+
+/**
+ * The one operator whose voice notes are processed in a group, for this rollout (C-G2).
+ * On top of TELEGRAM_OPERATOR_USER_IDS, never instead of it.
+ */
+export const GROUP_VOICE_OPERATOR_ID = "5486040131";
+export const GROUP_VOICE_MAX_SECONDS = 60;
+export const GROUP_VOICE_MAX_BYTES = 1024 * 1024;
+export const GROUP_VOICE_TOO_BIG =
+	"That voice note is over the limit. Keep it under 60 seconds and 1 MB.";
+export const GROUP_VOICE_BUSY =
+	"Still working on the last voice note. Send it again after the reply.";
+/** A group turn that never reached a terminal event stops blocking the next note after this. */
+const GROUP_VOICE_INFLIGHT_MS = 5 * 60_000;
+
+/** Fixed acknowledgement for an accepted operator voice note. Never model output. */
+export const VOICE_ACK = "Got it, give me a minute.";
+
+export const isGroupChatType = (type: string | undefined): boolean =>
+	type === "group" || type === "supergroup";
+
+/**
+ * TELEGRAM_FLOW_VOICE_GROUP_IDS: comma list of group chat ids where operator voice is on.
+ * Empty, missing or junk entries mean off. Exact ids only: no wildcard, no derivation
+ * from the chat allowlist (C-G1).
+ */
+export function groupVoiceIds(env: Record<string, string | undefined>): string[] {
+	return (env.TELEGRAM_FLOW_VOICE_GROUP_IDS ?? "")
+		.split(",")
+		.map((x) => x.trim())
+		.filter((x) => /^-\d+$/.test(x));
+}
+
+/** Forwarded, relayed or quoted-from-elsewhere: never an operator's live voice (C-G4). */
+export function isForwardedLike(m: object): boolean {
+	const x = m as Record<string, unknown>;
+	return [
+		"forward_origin",
+		"forward_from",
+		"forward_from_chat",
+		"forward_date",
+		"forward_sender_name",
+		"is_automatic_forward",
+		"via_bot",
+		"external_reply",
+	].some((k) => x[k] !== undefined && x[k] !== null && x[k] !== false);
+}
+
 export function resolveBridgeModel(env: Record<string, string | undefined>): {
 	runtime: string;
 	model: string;
@@ -886,6 +974,18 @@ class TelegramDaemonBridge {
 	private voiceTurnAt = 0;
 	/** The chat that armed the spoken reply; only a reply to that chat may use it (S1). */
 	private voiceTurnChat: string | null = null;
+	/**
+	 * The group voice turn in flight (C-G5): chat, topic and whether its spoken reply is used.
+	 * Bound per turn at admission, dropped on the terminal event or when any other turn starts.
+	 */
+	private groupVoiceTurn: {
+		chatId: string;
+		threadId?: number;
+		at: number;
+		spoken: boolean;
+	} | null = null;
+	/** Group chats whose R10_GROUP_NOTICE is posted for the current wording (C-G12). */
+	private groupVoiceReady = new Set<string>();
 
 	constructor(config: BridgeConfig) {
 		this.config = config;
@@ -920,6 +1020,8 @@ class TelegramDaemonBridge {
 				this.adapter = new TelegramBridgeAdapter({
 					telegramToken: this.config.telegramToken,
 					resolveChatId: () => this.replyChat(),
+					resolveThreadId: () => this.boundThread(),
+					onTurnEnd: () => this.endGroupVoiceTurn(),
 					daemon: this.daemonClient,
 					sessionStore: this.sessionStore,
 					onFinalReply: (text) => this.maybeSpeak(text),
@@ -987,6 +1089,8 @@ class TelegramDaemonBridge {
 			},
 			10 * 60 * 1000,
 		); // Every 10 minutes
+
+		await this.ensureGroupVoiceNotices();
 
 		// Start Telegram polling
 		this.startPolling();
@@ -1092,7 +1196,9 @@ class TelegramDaemonBridge {
 						this._retryTimer = null;
 					}
 					tgSend(this.config.telegramToken, this.replyChat(), payload.chunk);
-					this.maybeSpeak(payload.chunk).catch(() => {});
+					this.maybeSpeak(payload.chunk)
+						.catch(() => {})
+						.finally(() => this.endGroupVoiceTurn());
 				}
 				break;
 
@@ -1109,9 +1215,11 @@ class TelegramDaemonBridge {
 					return;
 				}
 				tgSend(this.config.telegramToken, this.replyChat(), `Error: ${payload.error}`);
+				this.endGroupVoiceTurn();
 				break;
 
 			case "session:end":
+				this.endGroupVoiceTurn();
 				this.agentBusy = false;
 				if (this._retryTimer) {
 					clearTimeout(this._retryTimer);
@@ -1255,11 +1363,17 @@ class TelegramDaemonBridge {
 						if (update.callback_query) {
 							await this.handleCallbackQuery(update.callback_query);
 						} else if (update.message?.voice || update.message?.audio) {
+							// A group voice note never reaches the DM path below.
+							if (update.message.chat && isGroupChatType(update.message.chat.type)) {
+								await this.handleGroupVoice(update.message);
+								continue;
+							}
 							// Voice/audio message. Order: sender (above), addressing, tier,
 							// and only then download, transcription and origin chat.
 							const fileId = update.message.voice?.file_id || update.message.audio?.file_id;
 							if (fileId && update.message.chat) {
 								if (!(await this.admitVoice(update.message))) continue;
+								await this.ackDmVoice(update.message.chat.id);
 								await tgTyping(this.config.telegramToken, this.replyChat());
 								await this.handleVoiceMessage(update.message, fileId);
 							}
@@ -1362,6 +1476,250 @@ class TelegramDaemonBridge {
 		}
 		const reply = VOICE_SENTINELS.has(transcript) ? transcript : VOICE_UNPROCESSED;
 		await tgSend(this.config.telegramToken, String(message.chat.id), reply);
+	}
+
+	// ── Group voice (C-G1 to C-G17) ──────────────────────────────────
+
+	private groupEnv(): Record<string, string | undefined> {
+		return this.config.env ?? process.env;
+	}
+
+	/** Is voice live in this chat: listed by id, a group type, and its notice is posted (C-G1, C-G12). */
+	private groupVoiceListed(chat: { id: number; type?: string }): boolean {
+		const id = String(chat.id);
+		return (
+			isGroupChatType(chat.type) &&
+			groupVoiceIds(this.groupEnv()).includes(id) &&
+			this.groupVoiceReady.has(id)
+		);
+	}
+
+	/**
+	 * Post R10_GROUP_NOTICE once per chat per wording, before group voice turns on there
+	 * (C-G12). Recorded in the voice state file by hash: a restart repeats nothing, a
+	 * changed wording posts again. A failed post leaves that chat's group voice off.
+	 */
+	async ensureGroupVoiceNotices(): Promise<void> {
+		const ids = groupVoiceIds(this.groupEnv());
+		if (ids.length === 0) return;
+		const hash = groupNoticeHash();
+		const path = this.config.voiceStatePath;
+		for (const id of ids) {
+			if (!this.isAuthorizedChat(Number(id))) continue; // a second list, never a widening
+			if (readVoiceState(path).groupNotices?.[id] === hash) {
+				this.groupVoiceReady.add(id);
+				continue;
+			}
+			const sent = await this.tgPost("sendMessage", {
+				chat_id: id,
+				text: R10_GROUP_NOTICE,
+				...NO_LINK_PREVIEW,
+			});
+			if (sent.ok) {
+				recordGroupNotice(id, path);
+				this.groupVoiceReady.add(id);
+			} else {
+				console.warn(
+					`[telegram-bridge] group voice notice not posted in ${id}: group voice stays off`,
+				);
+			}
+		}
+	}
+
+	/** A dropped group voice note leaves sender id, chat id and duration only (C-G2). */
+	private observeVoiceDrop(message: BridgeMessage): void {
+		try {
+			const path = this.config.observeLogPath ?? OBSERVED_LOG;
+			mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+			if (!existsSync(path)) writeFileSync(path, "", { mode: 0o600 });
+			chmodSync(path, 0o600);
+			appendFileSync(
+				path,
+				`${JSON.stringify({
+					at: new Date().toISOString(),
+					kind: "voice-dropped",
+					chat_id: message.chat?.id,
+					from_id: message.from?.id,
+					duration_s: message.voice?.duration ?? message.audio?.duration,
+				})}\n`,
+				"utf8",
+			);
+		} catch {
+			// Observation never breaks the loop.
+		}
+	}
+
+	/**
+	 * Instant acknowledgement of an accepted operator voice note: a fixed phrase, spoken by
+	 * local TTS to the chat (and topic) the note came from, else the same words as text.
+	 * Called once per accepted note, only after admission, so an ignored note is never
+	 * confirmed. In a group it follows the /voice toggle; in a DM a voice note is its own ask.
+	 */
+	private async ackVoice(chatId: string, threadId?: number, group = false): Promise<void> {
+		let sent = false;
+		if (!group || this.voiceEnabled) {
+			try {
+				this.gate.ttsStarted(VOICE_ACK);
+				const r = await (this.config.sendVoiceNote ?? sendVoiceNote)({
+					text: VOICE_ACK,
+					voice: VOICE_BY_OFFICER.James,
+					expectedChatId: chatId,
+					...(group ? { explicitChat: chatId, threadId } : {}),
+				});
+				sent = r.sent;
+			} catch {
+				sent = false;
+			} finally {
+				this.gate.ttsEnded();
+			}
+		}
+		if (sent) return;
+		const prev = this.groupVoiceTurn;
+		bindChatThread(chatId, threadId);
+		try {
+			await tgSend(this.config.telegramToken, chatId, VOICE_ACK, "");
+		} finally {
+			bindChatThread(prev?.chatId ?? chatId, prev?.threadId);
+		}
+	}
+
+	/**
+	 * DM ack, after every refusal that can happen before the turn starts: a cloud runtime
+	 * (voice refused) and a busy bot ("Still working", note not processed) get no ack.
+	 */
+	async ackDmVoice(chatId: number): Promise<void> {
+		if (!voicePathIsLocal(this.config.env ?? process.env)) return;
+		if (this.agentBusy) return;
+		await this.ackVoice(String(chatId));
+	}
+
+	/** The topic of the group voice turn in flight, for the adapter and the spoken note. */
+	private boundThread(): number | undefined {
+		const gv = this.groupVoiceTurn;
+		return gv && gv.chatId === this.replyChat() ? gv.threadId : undefined;
+	}
+
+	/** Terminal event for a group voice turn: drop the binding and the sticky origin (C-G5). */
+	private endGroupVoiceTurn(): void {
+		const gv = this.groupVoiceTurn;
+		if (!gv) return;
+		if (this.originChatId === gv.chatId) this.originChatId = null;
+		if (this.voiceTurnChat === gv.chatId) {
+			this.voiceTurnAt = 0;
+			this.voiceTurnChat = null;
+		}
+		this.groupVoiceTurn = null;
+		bindChatThread(gv.chatId, undefined);
+	}
+
+	/**
+	 * The whole group voice path. Every drop happens before getFile: nothing is downloaded,
+	 * transcribed or answered for anyone but the operator, in a listed group, replying to
+	 * the bot, with a live voice note (C-G1 to C-G4, C-G13). No echo, no card, no mode, no
+	 * judge, no slash command: the transcript is a plain prompt (C-G7 to C-G9).
+	 */
+	async handleGroupVoice(message: BridgeMessage): Promise<void> {
+		const chat = message.chat;
+		const token = this.config.telegramToken;
+		const sender = this.senderCtx(message);
+		const gate = this.gateConfig();
+		const fromId = typeof message.from?.id === "number" ? String(message.from.id) : "";
+		const dropped =
+			!this.groupVoiceListed(chat) ||
+			message.sender_chat !== undefined ||
+			fromId !== GROUP_VOICE_OPERATOR_ID ||
+			!isFlowOperator(this.flowOps(), message.from?.id) ||
+			senderTier(sender, gate) !== "full" ||
+			isForwardedLike(message) ||
+			!message.voice ||
+			!sender.replyToBot ||
+			!groupAddressing("", sender, { username: this.botUsername }, gate).addressed;
+		if (dropped) {
+			this.observeVoiceDrop(message);
+			return;
+		}
+		const voice = message.voice as NonNullable<BridgeMessage["voice"]>;
+		const chatId = String(chat.id);
+		const threadId =
+			typeof message.message_thread_id === "number" ? message.message_thread_id : undefined;
+		const row = (outcome: string) =>
+			console.log(
+				`[telegram-bridge] group voice turn ${JSON.stringify({
+					at: new Date().toISOString(),
+					chat: chatId,
+					thread: threadId ?? null,
+					from: fromId,
+					duration_s: voice.duration,
+					outcome,
+				})}`,
+			);
+		// The refusals below go to the admitted operator only, with fixed text and the topic.
+		const refuse = async (text: string) => {
+			const open = this.groupVoiceTurn; // a turn in flight keeps its own binding
+			bindChatThread(chatId, threadId);
+			try {
+				await tgSend(token, chatId, text, "");
+			} finally {
+				bindChatThread(open?.chatId ?? chatId, open?.threadId);
+			}
+		};
+		if (
+			typeof voice.duration !== "number" ||
+			voice.duration > GROUP_VOICE_MAX_SECONDS ||
+			typeof voice.file_size !== "number" ||
+			voice.file_size > GROUP_VOICE_MAX_BYTES
+		) {
+			row("too-big");
+			await refuse(GROUP_VOICE_TOO_BIG);
+			return;
+		}
+		if (!voicePathIsLocal(this.groupEnv())) {
+			row("needs-local");
+			await refuse(VOICE_NEEDS_LOCAL);
+			return;
+		}
+		const now = Date.now();
+		const open = this.groupVoiceTurn;
+		if ((open && now - open.at < GROUP_VOICE_INFLIGHT_MS) || this.agentBusy) {
+			row("busy");
+			await refuse(GROUP_VOICE_BUSY);
+			return;
+		}
+
+		// Admitted. Bind this turn to its own chat and topic, never to a sticky field.
+		this.groupVoiceTurn = { chatId, threadId, at: now, spoken: false };
+		this.originChatId = chatId;
+		bindChatThread(chatId, threadId);
+		try {
+			await this.ackVoice(chatId, threadId, true);
+			await tgTyping(token, chatId);
+			const startedAt = Date.now();
+			const transcript = await this.transcribe(token, voice.file_id);
+			console.log(transcriptionLogLine(transcript, Date.now() - startedAt));
+			if (transcript.startsWith("[") || transcript.trim() === "") {
+				const status = VOICE_SENTINELS.has(transcript) ? transcript : VOICE_UNPROCESSED;
+				await tgSend(token, chatId, status, "");
+				row("unprocessed");
+				this.endGroupVoiceTurn();
+				return;
+			}
+			this.voiceTurnAt = Date.now();
+			this.voiceTurnChat = chatId;
+			row("dispatched");
+			await this.handleTelegramMessage(
+				transcript,
+				chat.id,
+				this.senderCtx({ ...message, entities: undefined }),
+				{
+					plain: true,
+					groupVoice: true,
+				},
+			);
+		} catch (err) {
+			row("error");
+			console.error("[telegram-bridge] group voice turn failed:", scrubErr(err, token));
+			this.endGroupVoiceTurn();
+		}
 	}
 
 	/** Explicit operator ids for flow. Empty means flow is off (C2). */
@@ -1478,6 +1836,8 @@ class TelegramDaemonBridge {
 	 * addressing, then tier. Sets the origin chat only once both pass.
 	 */
 	async admitVoice(message: BridgeMessage): Promise<boolean> {
+		// A group never takes this path: handleGroupVoice has its own, narrower gate (C-G1).
+		if (isGroupChatType(message.chat.type)) return false;
 		const ctx = this.senderCtx(message);
 		const cfg = this.gateConfig();
 		if (!groupAddressing("", ctx, { username: this.botUsername }, cfg).addressed) return false;
@@ -1501,7 +1861,7 @@ class TelegramDaemonBridge {
 			fromId: message.from?.id,
 			replyToBot: this.botId !== null && message.reply_to_message?.from?.id === this.botId,
 			entities: message.entities,
-			forwarded: !!(message.forward_origin || message.via_bot),
+			forwarded: isForwardedLike(message),
 		};
 	}
 
@@ -1601,6 +1961,7 @@ class TelegramDaemonBridge {
 		text: string,
 		chatId: number,
 		sender?: SenderCtx,
+		opts?: { plain?: boolean; groupVoice?: boolean },
 	): Promise<void> {
 		// Only respond to authorized chats. In local mode this is the
 		// hard boundary that prevents a leaked token from driving the
@@ -1621,7 +1982,12 @@ class TelegramDaemonBridge {
 
 		// Group text is data. Parse once: the gate and every router below work
 		// from the same cleaned text and the same commandOf() result.
-		if (!isCommandAllowed(text, sender, gate)) {
+		// A group voice transcript is data, never a command (C-G9): it skips the slash
+		// parser entirely and needs only a full-tier sender.
+		const plain = opts?.plain === true;
+		if (
+			plain ? !sender || senderTier(sender, gate) !== "full" : !isCommandAllowed(text, sender, gate)
+		) {
 			console.warn(
 				`[telegram-bridge] refused ${commandOf(cleanText(text), this.botUsername) ?? "prompt"} from ${sender?.fromId ?? "unknown"} in ${sender?.chatType ?? "unknown"} chat`,
 			);
@@ -1630,7 +1996,7 @@ class TelegramDaemonBridge {
 			return;
 		}
 		text = cleanText(text);
-		const cmd = commandOf(text, this.botUsername);
+		const cmd = plain ? null : commandOf(text, this.botUsername);
 		const fullTier = !!sender && senderTier(sender, gate) === "full";
 
 		// An authorised non-operator (prompt tier) may only reach /status and
@@ -1653,6 +2019,9 @@ class TelegramDaemonBridge {
 				}
 			} else if (cmd === "/help") {
 				reply = "/status - up or down\n/help - this message";
+				if (this.groupVoiceListed({ id: chatId, type: sender?.chatType })) {
+					reply += `\n\n${R10_GROUP_NOTICE}`;
+				}
 			}
 			await tgSend(this.config.telegramToken, String(chatId), reply, "").catch(() => {});
 			return;
@@ -1661,6 +2030,8 @@ class TelegramDaemonBridge {
 		// From here until the daemon's terminal event, this turn's output
 		// belongs to this chat. Set before the first typing indicator so even
 		// that lands in the right room.
+		// Any other turn ends a group voice binding: its topic and spoken reply are not ours.
+		if (!opts?.groupVoice) this.endGroupVoiceTurn();
 		this.originChatId = String(chatId);
 		this.turn = { chatId: String(chatId), operator: fullTier };
 		if (this.daemonClient) this.daemonClient.turn = this.turn;
@@ -1800,7 +2171,12 @@ class TelegramDaemonBridge {
 					"/logs - Tail daemon logs",
 					"/help - This message",
 					"",
-					R10_TRANSIT_NOTICE,
+					// In a group the private-chat transit sentence is false (C-G11).
+					isGroupChatType(sender?.chatType)
+						? this.groupVoiceListed({ id: chatId, type: sender?.chatType })
+							? R10_GROUP_NOTICE
+							: "Voice notes are off in this group."
+						: R10_TRANSIT_NOTICE,
 					"",
 					"Your standing rules from ~/.claude/CLAUDE.md load on every turn. You do not have to ask for them.",
 				].join("\n"),
@@ -1883,13 +2259,21 @@ class TelegramDaemonBridge {
 	private async maybeSpeak(text: string, voice = VOICE_BY_OFFICER.James): Promise<void> {
 		// Only the chat that armed the arm may use or consume it: an overlapping group
 		// reply neither speaks in the DM's place nor wastes its arm.
-		const mine = this.voiceTurnChat === this.replyChat();
+		// A group turn is judged against its own per-turn binding, not the sticky origin (C-G10).
+		const gv = this.groupVoiceTurn;
+		const mine = gv
+			? !gv.spoken && this.voiceTurnChat === gv.chatId && gv.chatId === this.replyChat()
+			: this.voiceTurnChat === this.replyChat();
 		const answersVoice = mine && Date.now() - this.voiceTurnAt < VOICE_TURN_WINDOW_MS;
 		if (mine) {
 			this.voiceTurnAt = 0;
 			this.voiceTurnChat = null;
+			if (gv) gv.spoken = true;
 		}
 		if (!this.voiceEnabled && !answersVoice) return;
+		// /voice off silences the group, which the DM's arm-by-voice-note does not (C-G10).
+		if (gv && !this.voiceEnabled) return;
+		if (gv && !mine) return;
 		// The full text is already on screen; what is spoken is a draft written for the ear.
 		const draft = capAtSentence(
 			await makeSpokenDraft(
@@ -1910,6 +2294,7 @@ class TelegramDaemonBridge {
 			text: decision.text,
 			voice,
 			expectedChatId: this.replyChat(),
+			...(gv ? { explicitChat: gv.chatId, threadId: gv.threadId } : {}),
 		});
 		this.gate.ttsEnded();
 		if (!result.sent) console.error(`[telegram-bridge] voice note failed: ${result.reason}`);

@@ -45,6 +45,10 @@ export interface BridgeAdapterConfig {
 	 * chat of its own.
 	 */
 	resolveChatId?: () => string;
+	/** Forum topic of the turn in flight, evaluated at send time (C-G6). Undefined = no topic. */
+	resolveThreadId?: () => number | undefined;
+	/** Called when a turn ends, by final reply or by error, after its last send. */
+	onTurnEnd?: () => void;
 	daemon: DaemonClient;
 	sessionStore?: SessionStore;
 	fileSender?: FileSender;
@@ -70,6 +74,8 @@ interface RunningTask {
 export class TelegramBridgeAdapter {
 	private telegramToken: string;
 	private resolveChat: () => string;
+	private resolveThread?: () => number | undefined;
+	private onTurnEnd?: () => void;
 	/** Read-through, so every existing `this.chatId` use resolves per send. */
 	private get chatId(): string {
 		return this.resolveChat();
@@ -90,6 +96,8 @@ export class TelegramBridgeAdapter {
 		}
 		const fixed = config.chatId;
 		this.resolveChat = config.resolveChatId ?? (() => fixed as string);
+		this.resolveThread = config.resolveThreadId;
+		this.onTurnEnd = config.onTurnEnd;
 		this.daemon = config.daemon;
 		this.sessions = config.sessionStore ?? new SessionStore();
 		this.files =
@@ -98,6 +106,7 @@ export class TelegramBridgeAdapter {
 				token: config.telegramToken,
 				chatId: config.chatId,
 				resolveChatId: config.resolveChatId,
+				resolveThreadId: config.resolveThreadId,
 			});
 		this.autoAttachFiles = config.autoAttachFiles ?? true;
 		this.editThrottleMs = config.editThrottleMs ?? 1100;
@@ -238,6 +247,13 @@ export class TelegramBridgeAdapter {
 		this.current.runner.destroy();
 		this.current = null;
 		this.sessions.linkTask(this.chatId, null);
+		this.endTurn();
+	}
+
+	private endTurn(): void {
+		try {
+			this.onTurnEnd?.();
+		} catch {}
 	}
 
 	private async onAgentError(payload: EventPayloads["agent:error"]): Promise<void> {
@@ -247,6 +263,7 @@ export class TelegramBridgeAdapter {
 		this.current.runner.destroy();
 		this.current = null;
 		this.sessions.linkTask(this.chatId, null);
+		this.endTurn();
 	}
 
 	private onSessionEnd(): void {
@@ -305,6 +322,8 @@ export class TelegramBridgeAdapter {
 	}
 
 	private async callTelegram(method: string, body: Record<string, unknown>): Promise<number> {
+		const thread = method === "sendMessage" ? this.resolveThread?.() : undefined;
+		if (thread !== undefined) body = { ...body, message_thread_id: thread };
 		const url = `${TELEGRAM_API}${this.telegramToken}/${method}`;
 		const res = await fetch(url, {
 			method: "POST",

@@ -24,11 +24,14 @@ export interface FileSenderConfig {
 	chatId?: string;
 	/** Destination resolver, evaluated at send time. See BridgeAdapterConfig. */
 	resolveChatId?: () => string;
+	/** Forum topic of the turn in flight, evaluated at send time. Undefined = no topic. */
+	resolveThreadId?: () => number | undefined;
 }
 
 export class FileSender {
 	private token: string;
 	private resolveChat: () => string;
+	private resolveThread?: () => number | undefined;
 	private get chatId(): string {
 		return this.resolveChat();
 	}
@@ -40,6 +43,12 @@ export class FileSender {
 		}
 		const fixed = config.chatId;
 		this.resolveChat = config.resolveChatId ?? (() => fixed as string);
+		this.resolveThread = config.resolveThreadId;
+	}
+
+	private addThread(form: FormData): void {
+		const thread = this.resolveThread?.();
+		if (thread !== undefined) form.append("message_thread_id", String(thread));
 	}
 
 	/** Send a queued attachment (used by TaskRunner). */
@@ -77,6 +86,7 @@ export class FileSender {
 		const { buffer, name } = await this.resolveInput(input, filename ?? "photo.png");
 		const form = new FormData();
 		form.append("chat_id", this.chatId);
+		this.addThread(form);
 		form.append("photo", new Blob([new Uint8Array(buffer)]), name);
 		if (caption) {
 			form.append("caption", caption.slice(0, 1024));
@@ -90,6 +100,7 @@ export class FileSender {
 		const { buffer, name } = await this.resolveInput(input, filename ?? "file.bin");
 		const form = new FormData();
 		form.append("chat_id", this.chatId);
+		this.addThread(form);
 		form.append("document", new Blob([new Uint8Array(buffer)]), name);
 		if (caption) {
 			form.append("caption", caption.slice(0, 1024));
