@@ -177,9 +177,7 @@ function setFirstAsInteger(body: string, name: string): boolean {
 	const ls = body.lastIndexOf("\n", at) + 1;
 	const le = body.indexOf("\n", at) < 0 ? body.length : body.indexOf("\n", at);
 	const line = body.slice(ls, le);
-	const assign = new RegExp(
-		`^[ \\t]*${escapeRe(name)}=(.+?)[ \\t]*(?:;[^&|]*|#.*)?$`,
-	);
+	const assign = new RegExp(`^[ \\t]*${escapeRe(name)}=(.+?)[ \\t]*(?:;[^&|]*|#.*)?$`);
 	const am = assign.exec(line);
 	if (!am || !isIntegerValue(am[1]) || body.slice(ls, at).trim() !== "") return false;
 	const prefix = body.slice(0, ls);

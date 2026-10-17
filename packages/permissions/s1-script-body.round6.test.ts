@@ -36,7 +36,14 @@ describe("8SO Read 6 NEW-1: concatenated integer values are not integers", () =>
 	test("isIntegerValue accepts plain forms, refuses stitched ones", () => {
 		for (const v of ["7", "-3", "$((1+2))", '"$((a + 1))"', "$(( (1+2)*3 ))"])
 			expect(isIntegerValue(v)).toBe(true);
-		for (const v of ["$((0))$y$((0))", "$((0))$1$((0))", "$(( $(id) ))", "$((`id`))", "$((0))x", "a$((0))"])
+		for (const v of [
+			"$((0))$y$((0))",
+			"$((0))$1$((0))",
+			"$(( $(id) ))",
+			"$((`id`))",
+			"$((0))x",
+			"a$((0))",
+		])
 			expect(isIntegerValue(v)).toBe(false);
 	});
 });
