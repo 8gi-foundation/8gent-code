@@ -56,7 +56,7 @@ import {
 } from "../decide/rules";
 import { inside } from "./s1-rm-nothing";
 import { SECRET, canon, symlinkBelow } from "./s1-run-in-project";
-import { arithNotRead } from "./s1-script-arith";
+import { arithNotRead, isIntegerValue } from "./s1-script-arith";
 import { SHELL_ENV } from "./s1-tg-send";
 
 /** The most of a script that is read and checked: 16 KiB. Larger goes to a person. */
@@ -708,7 +708,6 @@ const startup = (n: string) =>
 function wrote(n: string, int = false): void {
 	if (bodyWrites && !int) bodyWrites.add(n);
 }
-const INT_VALUE = /^"?(?:-?[0-9]+|\$\(\(.*\)\))"?$/;
 function record(acc: Scan, h: string | null): void {
 	if (!h || acc.hit) return;
 	if (acc.lenient && !h.startsWith("the command sets ")) return;
@@ -740,7 +739,7 @@ function assignAt(w: string): string | null | typeof NOT_ASSIGN {
 	const pre = w.slice(0, k);
 	const m = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]$`]*\])?\+?$/.exec(pre);
 	if (m) {
-		wrote(m[1], !pre.includes("[") && INT_VALUE.test(w.slice(k + 1)));
+		wrote(m[1], !pre.includes("[") && isIntegerValue(w.slice(k + 1)));
 		return startup(m[1]);
 	}
 	if (UNREAD.test(pre)) return unreadMsg(w);

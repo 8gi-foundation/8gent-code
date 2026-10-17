@@ -138,6 +138,25 @@ function namesIn(part: string): { names: string[]; why: string | null } {
 	};
 }
 
+/**
+ * True when `v` (the text after `name=`) is an integer literal or exactly one `$((...))` whose
+ * body is plain arithmetic: balanced, closed only by the final `))`, no `$(`, backtick, quote
+ * or backslash, and `$` only before a bare name. Names inside are read by the arithmetic gate.
+ */
+export function isIntegerValue(v: string): boolean {
+	const t = v.startsWith('"') && v.endsWith('"') && v.length >= 2 ? v.slice(1, -1) : v;
+	if (/^-?[0-9]+$/.test(t)) return true;
+	if (!t.startsWith("$((") || !t.endsWith("))")) return false;
+	const inner = t.slice(3, -2);
+	if (/[`'"\\\n]|\$(?![A-Za-z_])/.test(inner)) return false;
+	let depth = 0;
+	for (const c of inner) {
+		if (c === "(") depth++;
+		else if (c === ")" && --depth < 0) return false;
+	}
+	return depth === 0;
+}
+
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
@@ -159,9 +178,10 @@ function setFirstAsInteger(body: string, name: string): boolean {
 	const le = body.indexOf("\n", at) < 0 ? body.length : body.indexOf("\n", at);
 	const line = body.slice(ls, le);
 	const assign = new RegExp(
-		`^[ \\t]*${escapeRe(name)}=(?:-?[0-9]+|"?\\$\\(\\(.*?\\)\\)"?)[ \\t]*(?:;[^&|]*|#.*)?$`,
+		`^[ \\t]*${escapeRe(name)}=(.+?)[ \\t]*(?:;[^&|]*|#.*)?$`,
 	);
-	if (!assign.test(line) || body.slice(ls, at).trim() !== "") return false;
+	const am = assign.exec(line);
+	if (!am || !isIntegerValue(am[1]) || body.slice(ls, at).trim() !== "") return false;
 	const prefix = body.slice(0, ls);
 	if (/(?:&&|\|\||\||\\|!)\s*$/.test(prefix)) return false;
 	// The line must be real text, not part of a heredoc body.
