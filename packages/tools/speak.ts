@@ -10,7 +10,7 @@
  * dependency).
  */
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -96,11 +96,48 @@ export interface SpeakResult {
  * the engine child never gets that home as its own HOME (see engineEnv).
  */
 export function engineHome(): string {
-	try {
-		return os.userInfo().homedir || resolveHome();
-	} catch {
-		return resolveHome();
+	return accountHome() ?? resolveHome();
+}
+
+/**
+ * The account's home from the passwd database, never from $HOME. Bun's
+ * os.userInfo().homedir and os.homedir() both return $HOME when it is set, so under
+ * Bun a per-run HOME made engineHome() the empty sandbox dir and the engines found
+ * no model (pilot run 2026-10-17_175323, render_video_deck). Node reads passwd, so
+ * the old os.userInfo() call only worked there. getent on Linux, `id -P` on macOS.
+ * For read-only model and binary locations only. Never a write location: those stay on resolveHome().
+ */
+/** Only successful lookups are cached; a failed one is retried on the next call. */
+let accountHomeCache: string | undefined;
+export function accountHome(): string | null {
+	if (accountHomeCache) return accountHomeCache;
+	if (process.platform === "win32" || typeof process.getuid !== "function") {
+		try {
+			return (accountHomeCache = os.userInfo().homedir || undefined) ?? null;
+		} catch {
+			return null;
+		}
 	}
+	const uid = String(process.getuid());
+	const lookups: Array<[string, string[], number]> = [
+		["/usr/bin/getent", ["passwd", uid], 5],
+		["/usr/bin/id", ["-P", uid], 8],
+	];
+	for (const [bin, args, field] of lookups) {
+		if (!fs.existsSync(bin)) continue;
+		try {
+			const out = execFileSync(bin, args, {
+				encoding: "utf8",
+				env: {} as NodeJS.ProcessEnv,
+				timeout: 3000,
+			});
+			const home = out.trim().split("\n")[0].split(":")[field];
+			if (home?.startsWith("/")) return (accountHomeCache = home);
+		} catch {
+			/* try the next lookup */
+		}
+	}
+	return null;
 }
 
 /**
