@@ -1,0 +1,101 @@
+import { describe, expect, test } from "bun:test";
+import {
+	SPOKEN_DRAFT_INSTRUCTION,
+	capAtSentence,
+	makeSpokenDraft,
+	prepareForSpeech,
+} from "./spoken-draft";
+
+const EM = String.fromCharCode(0x2014);
+
+describe("prepareForSpeech", () => {
+	test("code fences become one cue, open fences too", () => {
+		const t = prepareForSpeech("Done.\n```ts\nconst a = 1;\n```\nNext.");
+		expect(t).toContain("There is a code block on screen.");
+		expect(t).not.toContain("const");
+		expect(prepareForSpeech("Try:\n```sh\nrm -rf x")).not.toContain("rm");
+	});
+	test("urls and markdown links never read aloud", () => {
+		const t = prepareForSpeech(
+			"See [the docs](https://example.com/a/b) or https://x.dev/y?z=1 now",
+		);
+		expect(t).toContain("the docs");
+		expect(t).toContain("a link");
+		expect(t).not.toContain("http");
+		expect(t).not.toContain("example.com");
+	});
+	test("paths shrink to the file name, with line numbers dropped", () => {
+		const t = prepareForSpeech("Edited /Users/jo/proj/src/app.tsx:42 and ./packages/voice/vad.ts");
+		expect(t).toContain("the file app.tsx");
+		expect(t).toContain("the file vad.ts");
+		expect(t).not.toContain("/Users");
+		expect(t).not.toContain(":42");
+	});
+	test("symbols and numbers are said as people say them", () => {
+		const t = prepareForSpeech("Latency fell 40% (1,200 ms) a -> b, see #4350 w/ care & more");
+		expect(t).toContain("40 percent");
+		expect(t).toContain("1200 ms");
+		expect(t).toContain("a to b");
+		expect(t).toContain("number 4350");
+		expect(t).toContain("with care and more");
+	});
+	test("markdown is stripped, em dashes become pauses, lines become sentences", () => {
+		const t = prepareForSpeech(`## Result\n- **fast** and \`safe\`\n- done ${EM} ok`);
+		expect(t).toBe("Result. fast and safe. done, ok.");
+		expect(t.includes(EM)).toBe(false);
+	});
+	test("empty in, empty out", () => {
+		expect(prepareForSpeech("")).toBe("");
+		expect(prepareForSpeech("```\nonly code\n```")).toBe("There is a code block on screen.");
+	});
+});
+
+describe("capAtSentence", () => {
+	test("cuts at a sentence end", () => {
+		const s = `${"Hello there. ".repeat(100)}`;
+		const c = capAtSentence(s, 100);
+		expect(c.length).toBeLessThanOrEqual(100);
+		expect(c.endsWith(".")).toBe(true);
+	});
+});
+
+describe("makeSpokenDraft", () => {
+	const reply = "## Fixed\nI changed `/a/b/c.ts`.\n```ts\nx()\n```\nSee https://x.dev/y";
+
+	test("the model sees the prepared text under the fixed instruction, never raw code or urls", async () => {
+		let seen = "";
+		const out = await makeSpokenDraft(reply, async (p) => {
+			seen = p;
+			return "I fixed it. Nothing else to do.";
+		});
+		expect(seen.startsWith(SPOKEN_DRAFT_INSTRUCTION)).toBe(true);
+		expect(seen).not.toContain("```");
+		expect(seen).not.toContain("https://");
+		expect(out).toBe("I fixed it. Nothing else to do.");
+	});
+	test("model output is cleaned again before speaking", async () => {
+		const out = await makeSpokenDraft(reply, async () => `**Done** ${EM} see https://x.dev/y`);
+		expect(out).toBe("Done, see a link.");
+	});
+	test("speech uses the draft while the on-screen reply is unchanged", async () => {
+		const screen = reply;
+		const spoken: string[] = [];
+		const draft = await makeSpokenDraft(screen, async () => "Short and sweet.");
+		spoken.push(draft);
+		expect(spoken).toEqual(["Short and sweet."]);
+		expect(screen).toBe(reply);
+		expect(screen).toContain("```");
+	});
+	test("falls back to the deterministic text on error, empty or timeout", async () => {
+		const fallback = prepareForSpeech(reply);
+		expect(await makeSpokenDraft(reply, async () => Promise.reject(new Error("down")))).toBe(
+			fallback,
+		);
+		expect(await makeSpokenDraft(reply, async () => "  ")).toBe(fallback);
+		expect(await makeSpokenDraft(reply, () => new Promise(() => {}), 20)).toBe(fallback);
+		expect(await makeSpokenDraft(reply, null)).toBe(fallback);
+	});
+	test("nothing to say, nothing spoken", async () => {
+		expect(await makeSpokenDraft("   ", async () => "x")).toBe("");
+	});
+});

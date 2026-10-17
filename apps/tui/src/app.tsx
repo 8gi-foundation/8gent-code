@@ -40,6 +40,7 @@ import {
 } from "../../../packages/local-model-server/index.js";
 import { critiqueResponse } from "../../../packages/orchestration/sequential-pipeline.js";
 import { tabVoices } from "../../../packages/tools/speak.js";
+import { type SpokenModel, makeSpokenDraft } from "../../../packages/voice/spoken-draft.js";
 import {
 	ActivityMonitor,
 	clearActivity,
@@ -602,7 +603,7 @@ import {
 // and falls back to voice.ttsVoice. Fully fire-and-forget so TUI never blocks
 // on audio. macOS-only; silently no-ops on other platforms.
 // ----------------------------------------------------------------------------
-function speakAgentReply(role: string | undefined, text: string): void {
+function speakAgentReply(role: string | undefined, text: string, model?: SpokenModel | null): void {
 	if (process.platform !== "darwin") return;
 	const trimmed = (text ?? "").trim();
 	if (!trimmed) return;
@@ -614,23 +615,26 @@ function speakAgentReply(role: string | undefined, text: string): void {
 	}
 	if (!s.voice?.outputEnabled) return;
 	const voice = getVoiceForRole(role || "engineer", s);
-	// Cap utterance length so we don't tie up `say` on long answers.
-	// macOS `say` handles long text fine, but anything past ~600 chars is
-	// just noise for the user.
-	const safe = trimmed.replace(/"/g, '\\"').slice(0, 600);
-	try {
-		const { spawn } = require("node:child_process");
-		const proc = spawn("say", ["-v", voice, safe], {
-			stdio: "ignore",
-			detached: true,
-		});
-		proc.on("error", () => {
-			// Voice unavailable on this machine. Stay silent.
-		});
-		proc.unref();
-	} catch {
-		// Spawn failed (no shell, restricted env). Fail silently.
-	}
+	// The reply is already on screen. Speak a second-pass draft written for the
+	// ear (code, paths and links summarised); the screen text is never changed.
+	// Runs after the screen update, so a slow model never delays the reply.
+	void makeSpokenDraft(trimmed, model).then((draft) => {
+		if (!draft) return;
+		try {
+			const { spawn } = require("node:child_process");
+			// argv, not a shell: the draft needs no quoting.
+			const proc = spawn("say", ["-v", voice, draft], {
+				stdio: "ignore",
+				detached: true,
+			});
+			proc.on("error", () => {
+				// Voice unavailable on this machine. Stay silent.
+			});
+			proc.unref();
+		} catch {
+			// Spawn failed (no shell, restricted env). Fail silently.
+		}
+	});
 }
 
 // ----------------------------------------------------------------------------
@@ -6527,7 +6531,13 @@ export function App({
 									| { role?: string }
 									| undefined
 							)?.role;
-							speakAgentReply(targetTabRole, trimmed);
+							speakAgentReply(
+								targetTabRole,
+								trimmed,
+								(p) =>
+									(getTabAgent(tabId) ?? agent)?.completeOnce(p) ??
+									Promise.reject(new Error("no 8gent")),
+							);
 						}
 					}
 					// appendClosingQuestionIfNeeded decides whether this turn's reply

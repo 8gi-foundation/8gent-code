@@ -3732,6 +3732,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return [];
 	}
 
+	/** One bare completion on this 8gent's own model: no tools, no history. Used for the spoken post-draft. */
+	async completeOnce(prompt: string): Promise<string> {
+		return createClient(this.config).generate(prompt);
+	}
+
 	async isReady(): Promise<boolean> {
 		const client = createClient(this.config);
 		return client.isAvailable();
