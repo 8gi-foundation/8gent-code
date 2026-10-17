@@ -110,6 +110,19 @@ describe("confinement and bounds", () => {
 		});
 		expect(f).toContain("stopped early");
 	});
+	test("the time budget covers the importer reads, not just the walk", () => {
+		const a = w("a.ts", "export const a = 1;");
+		for (let i = 0; i < 5; i++) w(`f${i}.ts`, `import { a } from "./a";`);
+		let t = 0;
+		// The walk is done on the first calls (t stays 0); each later call ticks past the budget.
+		const clock = () => (t++ < 3 ? 0 : 1000);
+		const f = linksFooter(a, "export const a = 1;", new Set([a]), root, () => true, {
+			maxMs: 100,
+			now: clock,
+		});
+		expect(f).toContain("stopped early");
+		expect(f).not.toContain("f4.ts");
+	});
 	test("a small tree is not reported as truncated", () => {
 		const a = w("a.ts", "export const a = 1;");
 		expect(linksFooter(a, "export const a = 1;", new Set([a]), root)).toBe("");

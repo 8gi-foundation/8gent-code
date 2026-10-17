@@ -18,8 +18,8 @@ const MAX_LISTED = 8;
 const SPEC =
 	/(?:from\s+|import\s*\(\s*|require\s*\(\s*|import\s+)["'](\.{1,2}\/[^"']*|\.{1,2})["']/g;
 
-export type Limits = { maxFiles: number; maxDirs: number; maxMs: number };
-const LIMITS: Limits = { maxFiles: 600, maxDirs: 400, maxMs: 150 };
+export type Limits = { maxFiles: number; maxDirs: number; maxMs: number; now: () => number };
+const LIMITS: Limits = { maxFiles: 600, maxDirs: 400, maxMs: 150, now: Date.now };
 
 /** True when `file` really lives inside `root` once symlinks are resolved. */
 function inside(file: string, root: string): boolean {
@@ -53,13 +53,12 @@ export function localImports(file: string, content: string, ok: Allow = () => tr
 	return [...out];
 }
 
-function codeFiles(root: string, lim: Limits): { files: string[]; truncated: boolean } {
+function codeFiles(root: string, lim: Limits, t0: number): { files: string[]; truncated: boolean } {
 	const files: string[] = [];
 	const stack = [root];
-	const t0 = Date.now();
 	let dirs = 0;
 	while (stack.length) {
-		if (files.length >= lim.maxFiles || dirs >= lim.maxDirs || Date.now() - t0 > lim.maxMs) {
+		if (files.length >= lim.maxFiles || dirs >= lim.maxDirs || lim.now() - t0 > lim.maxMs) {
 			return { files, truncated: true };
 		}
 		const dir = stack.pop() as string;
@@ -100,8 +99,16 @@ export function linksFooter(
 	if (!CODE.test(file)) return "";
 	const ok: Allow = (abs) => inside(abs, cwd) && allow(abs);
 	const imports = localImports(file, content, ok).filter((f) => !seen.has(f));
-	const walk = codeFiles(cwd, { ...LIMITS, ...limits });
+	const lim = { ...LIMITS, ...limits };
+	const t0 = lim.now();
+	const walk = codeFiles(cwd, lim, t0);
+	let truncated = walk.truncated;
 	const importers = walk.files.filter((f) => {
+		// One budget covers the walk and every importer read after it.
+		if (lim.now() - t0 > lim.maxMs) {
+			truncated = true;
+			return false;
+		}
 		if (f === file || seen.has(f) || !ok(f)) return false;
 		try {
 			return localImports(f, fs.readFileSync(f, "utf-8"), ok).includes(file);
@@ -112,6 +119,6 @@ export function linksFooter(
 	const parts: string[] = [];
 	if (imports.length) parts.push(`Local imports not read yet: ${list(imports, cwd)}.`);
 	if (importers.length) parts.push(`Imported by, not read yet: ${list(importers, cwd)}.`);
-	if (walk.truncated) parts.push("Importer search stopped early, so this list may be incomplete.");
+	if (truncated) parts.push("Importer search stopped early, so this list may be incomplete.");
 	return parts.length ? `[${parts.join(" ")}]` : "";
 }
