@@ -13,7 +13,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../../tests/temp-dirs";
 import { decideRules } from "../../decide/rules";
@@ -29,6 +29,13 @@ const commands: { command: string; scenarios: string[] }[] = fixture.commands;
 const ESCALATES_TO_PERSON = (c: string) =>
 	/^git push --force-with-lease\b/.test(c) || /^git checkout [0-9a-f]{7,40} -- \S+$/.test(c);
 
+/**
+ * The ops-cron-backup script sources config/backup.env, a second script. System One reads the
+ * script it is asked to run, but not one that script runs in turn, so this goes to a person
+ * (headless: refused). A known cost of checking scripts by their contents, not a block.
+ */
+const SCRIPT_RUNS_ANOTHER = (c: string) => /\.\/scripts\/nightly-backup\.sh$/.test(c);
+
 /** Escalated by the rules, then cleared by the single-scratch-file delete allowlist (#3669) since the file exists. */
 const CLEARED_BY_ALLOWLIST = (c: string) => c === "rm -f run/worker.lock";
 
@@ -38,6 +45,13 @@ beforeAll(() => {
 	ws = tempDir("s1-keep-");
 	mkdirSync(join(ws, "run"), { recursive: true });
 	writeFileSync(join(ws, "run", "worker.lock"), "3771\n");
+	// The scripts the pilots ran, as their fixtures ship them: System One reads them now.
+	const scripts = join(import.meta.dir, "fixtures", "s1-pilot-scripts");
+	mkdirSync(join(ws, "scripts"), { recursive: true });
+	for (const rel of ["worker.sh", "scripts/nightly-backup.sh"]) {
+		copyFileSync(join(scripts, rel), join(ws, rel));
+		chmodSync(join(ws, rel), 0o755);
+	}
 });
 afterAll(() => {
 	_resetSystemOne();
@@ -45,10 +59,12 @@ afterAll(() => {
 });
 beforeEach(() => {
 	_setSystemOneOverridesForTests({
+		// No judge installed: the decider's own error for that setup (decide/index.ts), the one
+		// case where a command that runs a script keeps the rules-only fallback.
 		createDecider: () => {
-			throw new Error("judge must not be needed");
+			throw new Error("no decide backend available: judge must not be needed");
 		},
-		askHuman: async (req) => ESCALATES_TO_PERSON(req.command),
+		askHuman: async (req) => ESCALATES_TO_PERSON(req.command) || SCRIPT_RUNS_ANOTHER(req.command),
 		calibrationDir: tempDir("s1-keep-cal-"),
 	});
 });
@@ -85,19 +101,25 @@ describe("System One keeps allowing the commands of passing pilot runs", () => {
 		const escalated = commands
 			.filter((c) => decideRules(c.command, { cwd: ws }).verdict === "escalate")
 			.map((c) => c.command);
-		expect(
-			escalated.filter((c) => !ESCALATES_TO_PERSON(c) && !CLEARED_BY_ALLOWLIST(c)),
-		).toEqual([]);
+		expect(escalated.filter((c) => !ESCALATES_TO_PERSON(c) && !CLEARED_BY_ALLOWLIST(c))).toEqual(
+			[],
+		);
 		expect(escalated.length).toBeGreaterThan(0);
 	});
 
 	test("the gate runs all of them with no judge", async () => {
 		const env = { EIGHT_SYSTEM_ONE: "", EIGHT_HEADLESS: "1" };
 		const refused: string[] = [];
+		const asked: string[] = [];
 		for (const { command } of commands) {
-			const r = await systemOneGate(command, env, ws);
+			// canRunInstead, as the real run_command executor passes it: it runs the checked bytes.
+			const r = await systemOneGate(command, env, ws, undefined, undefined, {
+				canRunInstead: true,
+			});
 			if (!r.run) refused.push(`${command}\n  -> ${r.message?.slice(0, 200)}`);
+			if (r.humanApproved === true) asked.push(command);
 		}
 		expect(refused).toEqual([]);
+		expect(asked.filter((c) => !ESCALATES_TO_PERSON(c) && !SCRIPT_RUNS_ANOTHER(c))).toEqual([]);
 	});
 });

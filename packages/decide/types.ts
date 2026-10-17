@@ -90,6 +90,12 @@ export interface SystemOneResponse {
 export interface DecideBackend {
 	readonly name: string;
 	readonly model: string;
+	/**
+	 * Where the state is sent: the server root of an HTTP backend. Absent for a backend that
+	 * answers in this process. The System One gate sends a script body only to a judge on this
+	 * machine (`judgeOnThisMachine`).
+	 */
+	readonly endpoint?: string;
 	ask(request: SystemOneRequest): Promise<SystemOneResponse>;
 }
 
@@ -119,7 +125,8 @@ export function validateRequest(request: SystemOneRequest): void {
 	}
 	const seen = new Set<string>();
 	for (const q of request.questions) {
-		if (!q || typeof q.id !== "string" || q.id.length === 0) throw new DecideError("question.id must be a non-empty string");
+		if (!q || typeof q.id !== "string" || q.id.length === 0)
+			throw new DecideError("question.id must be a non-empty string");
 		if (seen.has(q.id)) throw new DecideError(`duplicate question id "${q.id}"`);
 		seen.add(q.id);
 		if (typeof q.prompt !== "string" || q.prompt.length === 0) {
@@ -127,18 +134,30 @@ export function validateRequest(request: SystemOneRequest): void {
 		}
 		if (q.kind === "noul") continue;
 		if (q.kind === "choice") {
-			if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > MAX_CHOICE_OPTIONS) {
+			if (
+				!Array.isArray(q.options) ||
+				q.options.length < 2 ||
+				q.options.length > MAX_CHOICE_OPTIONS
+			) {
 				throw new DecideError(`question "${q.id}": choice needs 2..${MAX_CHOICE_OPTIONS} options`);
 			}
 			continue;
 		}
 		if (q.kind === "score") {
-			if (!Array.isArray(q.levels) || q.levels.length < MIN_SCORE_LEVELS || q.levels.length > MAX_SCORE_LEVELS) {
-				throw new DecideError(`question "${q.id}": score needs ${MIN_SCORE_LEVELS}..${MAX_SCORE_LEVELS} levels`);
+			if (
+				!Array.isArray(q.levels) ||
+				q.levels.length < MIN_SCORE_LEVELS ||
+				q.levels.length > MAX_SCORE_LEVELS
+			) {
+				throw new DecideError(
+					`question "${q.id}": score needs ${MIN_SCORE_LEVELS}..${MAX_SCORE_LEVELS} levels`,
+				);
 			}
 			continue;
 		}
-		throw new DecideError(`question "${(q as { id: string }).id}": unknown kind "${String((q as { kind: unknown }).kind)}"`);
+		throw new DecideError(
+			`question "${(q as { id: string }).id}": unknown kind "${String((q as { kind: unknown }).kind)}"`,
+		);
 	}
 }
 
@@ -170,8 +189,19 @@ export function argmax(values: number[]): number {
 export function answerFromDistribution(question: Question, dist: number[]): Answer {
 	if (question.kind === "noul") {
 		const yes = dist[0];
-		return { id: question.id, kind: "noul", probabilities: { yes }, confidence: Math.max(yes, 1 - yes) };
+		return {
+			id: question.id,
+			kind: "noul",
+			probabilities: { yes },
+			confidence: Math.max(yes, 1 - yes),
+		};
 	}
 	const chosen = argmax(dist);
-	return { id: question.id, kind: question.kind, probabilities: dist, chosen, confidence: dist[chosen] };
+	return {
+		id: question.id,
+		kind: question.kind,
+		probabilities: dist,
+		chosen,
+		confidence: dist[chosen],
+	};
 }

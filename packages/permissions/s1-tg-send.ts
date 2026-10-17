@@ -124,8 +124,19 @@ const CHAT = /^chat_id=-?\d{1,20}$/;
  * quoted literal of printable ASCII and newlines with no quote character inside.
  */
 const MSG_ASSIGN = /^(MSG|MESSAGE|TEXT|CAPTION)='([\x20-\x21\x23-\x26\x28-\x7e\n]*)'$/;
-/** Set in the environment, any of these runs code, changes parsing, or traces the token (8SO, #4102). */
-const SHELL_ENV = new Set(["BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "PS4", "IFS"]);
+/**
+ * Set in the environment, any of these runs code, changes parsing, or traces the token (8SO,
+ * #4102). ZDOTDIR points zsh at startup files. Also read by s1-script-body.ts.
+ */
+export const SHELL_ENV = new Set([
+	"BASH_ENV",
+	"ENV",
+	"SHELLOPTS",
+	"BASHOPTS",
+	"PS4",
+	"IFS",
+	"ZDOTDIR",
+]);
 /** The two variables the curl line expands: only bot.env may set them (8SO, #4102). */
 const INHERITED = new Set(["TELEGRAM_API_BASE", "TELEGRAM_BOT_TOKEN"]);
 

@@ -13,7 +13,10 @@
  * input gives the same output.
  */
 
-import { DEFAULT_OLLAMA_BASE_URL, resolveOllamaBaseUrl } from "../../local-model-server/ollama-host";
+import {
+	DEFAULT_OLLAMA_BASE_URL,
+	resolveOllamaBaseUrl,
+} from "../../local-model-server/ollama-host";
 import {
 	type Answer,
 	type ChoiceQuestion,
@@ -135,7 +138,10 @@ function optionLines(items: string[], labels: string[]): string {
 
 /** Strip whitespace and surrounding punctuation so " (A", "A." and "A)" all read as "A". */
 export function normaliseToken(token: string): string {
-	return token.trim().replace(/^[\s(\[{"'*`]+/, "").replace(/[\s)\]}"'*`.:,;!]+$/, "");
+	return token
+		.trim()
+		.replace(/^[\s(\[{"'*`]+/, "")
+		.replace(/[\s)\]}"'*`.:,;!]+$/, "");
 }
 
 function tokenMatches(kind: Question["kind"], token: string, label: string): boolean {
@@ -149,7 +155,11 @@ function tokenMatches(kind: Question["kind"], token: string, label: string): boo
  * Sum probability mass per label over the returned top logprobs and
  * renormalise over the labels. Throws when no label token appears at all.
  */
-export function distributionFromLogprobs(kind: Question["kind"], labels: string[], top: TopLogprob[]): number[] {
+export function distributionFromLogprobs(
+	kind: Question["kind"],
+	labels: string[],
+	top: TopLogprob[],
+): number[] {
 	const masses = labels.map(() => 0);
 	for (const entry of top) {
 		if (!entry || typeof entry.token !== "string" || !Number.isFinite(entry.logprob)) continue;
@@ -165,7 +175,9 @@ export function distributionFromLogprobs(kind: Question["kind"], labels: string[
 
 /** True when any entry in `top` is a spelling of one of the labels. Shared with the llamacpp backend. */
 export function hasLabelMass(kind: Question["kind"], labels: string[], top: TopLogprob[]): boolean {
-	return top.some((e) => typeof e?.token === "string" && labels.some((l) => tokenMatches(kind, e.token, l)));
+	return top.some(
+		(e) => typeof e?.token === "string" && labels.some((l) => tokenMatches(kind, e.token, l)),
+	);
 }
 
 // ----- Backend -----------------------------------------------------------------
@@ -185,6 +197,11 @@ export class OllamaBackend implements DecideBackend {
 	private readonly timeoutMs: number;
 	private readonly numCtx: number | undefined;
 	private readonly fetchImpl: FetchLike;
+
+	/** The server the state goes to. */
+	get endpoint(): string {
+		return this.host;
+	}
 
 	constructor(opts: OllamaBackendOptions) {
 		if (!opts.model) throw new DecideError("ollama backend needs a model");
@@ -221,7 +238,10 @@ export class OllamaBackend implements DecideBackend {
 			const lead = top.reduce((a, b) => (b.logprob > a.logprob ? b : a), top[0])?.token;
 			if (typeof lead === "string" && lead.length > 0 && lead.trim() === "") {
 				const next = await this.topLogprobs(prompt + lead);
-				return answerFromDistribution(question, distributionFromLogprobs(question.kind, labels, next));
+				return answerFromDistribution(
+					question,
+					distributionFromLogprobs(question.kind, labels, next),
+				);
 			}
 		}
 		return answerFromDistribution(question, distributionFromLogprobs(question.kind, labels, top));
@@ -235,7 +255,9 @@ export class OllamaBackend implements DecideBackend {
 	 */
 	private async topLogprobs(prompt: string): Promise<TopLogprob[]> {
 		const res = await this.post(prompt).catch((err: Error) => {
-			throw new DecideUnavailableError(`ollama unreachable at ${this.host}: ${err?.message ?? String(err)}`);
+			throw new DecideUnavailableError(
+				`ollama unreachable at ${this.host}: ${err?.message ?? String(err)}`,
+			);
 		});
 		if (!res.ok) {
 			const body = await res.text().catch(() => "");
@@ -243,11 +265,15 @@ export class OllamaBackend implements DecideBackend {
 		}
 		// A body cut off mid-read is the server going away, not a bad answer.
 		const json = (await res.json().catch((err: Error) => {
-			throw new DecideUnavailableError(`ollama /api/generate body unreadable: ${err?.message ?? String(err)}`);
+			throw new DecideUnavailableError(
+				`ollama /api/generate body unreadable: ${err?.message ?? String(err)}`,
+			);
 		})) as { logprobs?: Array<{ top_logprobs?: TopLogprob[] }> };
 		const top = json?.logprobs?.[0]?.top_logprobs;
 		if (!Array.isArray(top) || top.length === 0) {
-			throw new DecideError(`ollama returned no logprobs for model "${this.model}" (does this Ollama build support logprobs?)`);
+			throw new DecideError(
+				`ollama returned no logprobs for model "${this.model}" (does this Ollama build support logprobs?)`,
+			);
 		}
 		return top;
 	}
@@ -261,7 +287,12 @@ export class OllamaBackend implements DecideBackend {
 				prompt,
 				stream: false,
 				raw: true,
-				options: { temperature: 0, num_predict: 1, seed: 1, ...(this.numCtx ? { num_ctx: this.numCtx } : {}) },
+				options: {
+					temperature: 0,
+					num_predict: 1,
+					seed: 1,
+					...(this.numCtx ? { num_ctx: this.numCtx } : {}),
+				},
 				logprobs: true,
 				top_logprobs: TOP_LOGPROBS,
 			}),

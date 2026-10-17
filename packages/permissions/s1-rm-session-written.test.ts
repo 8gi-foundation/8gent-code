@@ -330,11 +330,13 @@ describe.skipIf(!HAS_BIRTH || !POSIX)(
 			test(`video/${name}, written by a child of a command that names video/`, async () => {
 				const ex = new ToolExecutor(ws, "born-a");
 				const session = executorAgent(ex);
+				// The name comes in as an argument: a script that names a key file outright is now
+				// stopped by the rules reading its body, before anything is recorded.
 				await session.write(
 					"video/mk.sh",
-					`#!/usr/bin/env bash\ncd "$(dirname "$0")"\nprintf k > ${name}\n`,
+					'#!/usr/bin/env bash\ncd "$(dirname "$0")"\nprintf k > "$1"\n',
 				);
-				await session.run("bash video/mk.sh");
+				await session.run(`bash video/mk.sh ${name}`);
 				// Recorded: only the write refusal in rmOfNothingOrOwn stands between it and the lane.
 				expect(ex.createdFiles.createdBySession(join(ws, "video", name))).toBe(true);
 				expectJudgedAndBlocked(await session.run(`rm -f video/${name}`), `video/${name}`);

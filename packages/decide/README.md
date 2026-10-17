@@ -136,7 +136,10 @@ the model once for every agent, child and tab on the machine.
   `(ollama, Selene)`. Otherwise, or when the server is down, or when
   `EIGHT_DECIDE_GGUF` names a file, the in-process path runs as before.
 - Context is pinned to 4096 (`JUDGE_NUM_CTX` in `backends/ollama.ts`, the
-  llamacpp context) on every Ollama judge, shared or not (#3212). Without it
+  llamacpp context) on every Ollama judge, shared or not (#3212). A script body
+  is judged only when its whole guard prompt fits that window at one token per
+  byte (`judgePromptFits` in `guard.ts`, about 3.4 KiB of script); a longer one
+  is escalated (rule `script_over_judge_window`), never judged in part. Without it
   Ollama 0.34 sized Selene's context to free memory (131072 tokens, 21.3 to
   21.9 GB resident on a 96 GB Mac); the opt-out path
   (`EIGHT_S1_SHARED_JUDGE=0` with no `node-llama-cpp`) hit exactly that.

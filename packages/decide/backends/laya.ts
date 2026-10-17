@@ -58,7 +58,9 @@ export function mapProbabilities(question: Question, raw: unknown): number[] {
 	const slots = question.kind === "choice" ? question.options : question.levels;
 	if (Array.isArray(raw)) {
 		if (raw.length !== slots.length) {
-			throw new DecideError(`laya: answer "${question.id}" has ${raw.length} probabilities for ${slots.length} slots`);
+			throw new DecideError(
+				`laya: answer "${question.id}" has ${raw.length} probabilities for ${slots.length} slots`,
+			);
 		}
 		return renormalise(raw.map(Number));
 	}
@@ -76,6 +78,11 @@ export class LayaBackend implements DecideBackend {
 	private readonly url: string;
 	private readonly timeoutMs: number;
 	private readonly fetchImpl: FetchLike;
+
+	/** The server the state goes to. */
+	get endpoint(): string {
+		return this.url;
+	}
 
 	constructor(opts: LayaBackendOptions = {}) {
 		this.url = (opts.url ?? resolveLayaUrl(opts.env)).replace(/\/+$/, "");
@@ -96,16 +103,22 @@ export class LayaBackend implements DecideBackend {
 				signal: AbortSignal.timeout(this.timeoutMs),
 			});
 		} catch (err) {
-			throw new DecideUnavailableError(`laya unreachable at ${this.url}: ${(err as Error).message}`);
+			throw new DecideUnavailableError(
+				`laya unreachable at ${this.url}: ${(err as Error).message}`,
+			);
 		}
 		if (!res.ok) {
 			const body = await res.text().catch(() => "");
 			throw new DecideError(`laya /v1/systemone ${res.status}: ${body.slice(0, 200)}`);
 		}
 		const json = (await res.json()) as Record<string, unknown>;
-		const rawAnswers = Array.isArray(json.answers) ? (json.answers as Array<Record<string, unknown>>) : null;
+		const rawAnswers = Array.isArray(json.answers)
+			? (json.answers as Array<Record<string, unknown>>)
+			: null;
 		if (!rawAnswers) throw new DecideError("laya: response has no answers array");
-		const byId = new Map(rawAnswers.filter((a) => a && typeof a.id === "string").map((a) => [a.id as string, a]));
+		const byId = new Map(
+			rawAnswers.filter((a) => a && typeof a.id === "string").map((a) => [a.id as string, a]),
+		);
 		const answers: Answer[] = request.questions.map((q) => {
 			const raw = byId.get(q.id);
 			if (!raw) throw new DecideError(`laya: no answer for question "${q.id}"`);
