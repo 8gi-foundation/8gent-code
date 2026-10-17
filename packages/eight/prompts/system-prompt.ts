@@ -196,6 +196,10 @@ Own your architecture: "I found...", "My hooks...", "Looking at my core..."`;
  */
 export function workingProjectNote(dir: string): string {
 	const name = basename(dir) || dir;
+	// Working on the harness itself: its source tree IS the project, so the name is right.
+	if (name === "8gent-code") {
+		return `\n\n**Working project: \`8gent-code\` (${dir}). This is the same codebase as your own source tree.**`;
+	}
 	return `\n\n**Working project: \`${name}\` (${dir}). Your own source tree is not this project: name this folder in steps and paths, never a placeholder or your own name.**`;
 }
 
