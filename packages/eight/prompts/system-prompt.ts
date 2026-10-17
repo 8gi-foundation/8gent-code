@@ -309,6 +309,10 @@ export const FOLDER_NOTE =
 export const TICKET_FILE_NOTE =
 	"**Ticket naming the file at fault: name only the one to change, no neighbours.**";
 
+/** #4368: an unblock checklist named options the person lacks (WSL, installers) and ran 330-429 words. */
+export const UNBLOCK_NOTE =
+	"**Unblocking someone: under 180 words, only their stated setup, never name what they lack.**";
+
 export type EnvironmentNoteInput = {
 	platform?: NodeJS.Platform;
 	/** Windows only: the shell run_command uses. Default: resolved from settings and disk. */
@@ -442,6 +446,7 @@ export function buildToolCatalogSegment(opts: ToolCatalogOptions = {}): string {
 		SCRATCH_DIR_NOTE,
 		FOLDER_NOTE,
 		TICKET_FILE_NOTE,
+		UNBLOCK_NOTE,
 		environmentNote({ cwd: opts.cwd }),
 	);
 	lines.push(SLIDES_TO_VIDEO_NOTE, REVIEW_FOCUS_NOTE);
