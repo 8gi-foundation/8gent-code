@@ -72,11 +72,13 @@ export function modeListing(current: FlowMode): string {
 	return [
 		"Modes (> marks the current one):",
 		...rows,
-		"Set one with /mode act|quiet|think|listen, or press Ctrl+Q to cycle.",
+		"Set one with /mode act|quiet|think-aloud|listen. Ctrl+Q cycles Act, Think-aloud, Quiet.",
+		"Listen: /mode listen",
 	].join("\n");
 }
 
-export const MODE_USAGE = "Usage: /mode listen|think|quiet|act   (no argument shows the mode)";
+export const MODE_USAGE =
+	"Usage: /mode listen|think-aloud|quiet|act   (no argument shows the mode)";
 
 /** What a transcript turned out to be. */
 export type TranscriptResult =
@@ -148,7 +150,8 @@ export function createFlowRuntime(
 
 		/** /mode <name>. User origin: a person typed it. */
 		setFlowMode(name: string): Outcome {
-			const to = name.trim().toLowerCase();
+			const typed = name.trim().toLowerCase();
+			const to = typed === "think-aloud" ? "think" : typed;
 			if (!isFlowMode(to)) return { changed: false, mode: ctl().mode, screen: MODE_USAGE };
 			return after(ctl().userSwitch(to, "user-slash"));
 		},

@@ -1106,7 +1106,7 @@ export function App({
 				const line = [r.outcome.screen].filter(Boolean).join(" ");
 				addSystemMessage(
 					r.outcome.changed
-						? `Flow mode: ${flowModeLabel(r.outcome.mode)}. ${line} ${flow.disclose(r.outcome.mode)}`.trim()
+						? `Mode: ${flowModeLabel(r.outcome.mode)}. ${line} ${flow.disclose(r.outcome.mode)}`.trim()
 						: line || (r.outcome.say ?? ""),
 				);
 				return;
@@ -2378,7 +2378,7 @@ export function App({
 			if (o.changed) {
 				flashNotice(`flow ${flowModeLabel(o.mode).toLowerCase()}`);
 				const note = flow.disclose(o.mode);
-				if (note) addSystemMessage(`Flow mode: ${flowModeLabel(o.mode)}. ${note}`);
+				if (note) addSystemMessage(`Mode: ${flowModeLabel(o.mode)}. ${note}`);
 				if (o.say) speakAgentReply(undefined, o.say, null, "mode-notice");
 			}
 			return;
@@ -5442,8 +5442,8 @@ export function App({
 					const o = flow.setFlowMode(args[0]);
 					addSystemMessage(
 						o.changed
-							? `Flow mode: ${flowModeLabel(o.mode)}. ${o.screen ?? ""} ${flow.disclose(o.mode)}`.trim()
-							: (o.screen ?? `Flow mode stays ${flowModeLabel(o.mode)}.`),
+							? `Mode: ${flowModeLabel(o.mode)}. ${o.screen ?? ""} ${flow.disclose(o.mode)}`.trim()
+							: (o.screen ?? `Mode stays ${flowModeLabel(o.mode)}.`),
 					);
 					if (o.changed && o.say) speakAgentReply(undefined, o.say, null, "mode-notice");
 					break;
@@ -5565,7 +5565,7 @@ export function App({
 								"  /voice record  Toggle STT recording (or press Ctrl+R)\n" +
 								"  /voice status  Check voice system status\n" +
 								"  /voice stop    Stop voice chat mode\n" +
-								"  /voice on|off  Toggle TTS output\n" +
+								"  /voice on|off  Turn spoken replies on or off\n" +
 								"  /voice input on|off  Turn push-to-talk (Ctrl+R) on or off",
 						);
 					}
