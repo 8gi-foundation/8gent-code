@@ -383,3 +383,44 @@ describe("the KittenTTS verdict path is gated", () => {
 		await new Promise((r) => setTimeout(r, 50));
 	});
 });
+
+describe("on-screen disclosures (8SO #4379)", () => {
+	const TOOLS =
+		"Listen and Think do not restrict tools yet. Permission mode still decides what runs.";
+	const VOICE = "Voice chat still speaks in Quiet and Listen.";
+	const MIC = "The mic window is not real yet: pttActive is fixed true and startedAt is t-1.";
+	test("exact strings", async () => {
+		const m = await import("./flow-runtime");
+		expect(m.TOOLS_DISCLOSURE).toBe(TOOLS);
+		expect(m.VOICE_CHAT_DISCLOSURE).toBe(VOICE);
+		expect(m.MIC_WINDOW_DISCLOSURE).toBe(MIC);
+		expect(m.FOOTER_TOOLS_HINT).toBe("tools not limited yet");
+	});
+	test("Listen says all three, Think tools and mic, Quiet voice chat and mic, Act nothing", async () => {
+		const { flowDisclosure } = await import("./flow-runtime");
+		expect(flowDisclosure("listen")).toBe(`${TOOLS} ${VOICE} ${MIC}`);
+		expect(flowDisclosure("think")).toBe(`${TOOLS} ${MIC}`);
+		expect(flowDisclosure("quiet")).toBe(`${VOICE} ${MIC}`);
+		expect(flowDisclosure("act")).toBe("");
+	});
+	test("the footer hint shows in Listen and Think only, and the segment carries it", () => {
+		const { rt } = rig();
+		expect(rt.footerHint()).toBe("");
+		rt.setFlowMode("think");
+		expect(rt.footerHint()).toBe("tools not limited yet");
+		rt.setFlowMode("listen");
+		expect(rt.footerHint()).toBe("tools not limited yet");
+		rt.setFlowMode("quiet");
+		expect(rt.footerHint()).toBe("");
+		const seg = buildFooterSegments({
+			mode: "Planning",
+			flow: "Listen",
+			flowHint: "tools not limited yet",
+		}).find((s) => s.key === "flow");
+		expect(seg?.note).toBe("tools not limited yet");
+	});
+	test("/mode, Ctrl+Q and the spoken path all print the disclosure in app.tsx", () => {
+		const app = readFileSync(new URL("../app.tsx", import.meta.url), "utf8");
+		expect(app.match(/flowDisclosure\(/g)?.length).toBeGreaterThanOrEqual(5);
+	});
+});

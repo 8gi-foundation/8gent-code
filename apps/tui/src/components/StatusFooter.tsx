@@ -94,6 +94,8 @@ export interface FooterData {
 	adhd?: boolean;
 	/** Flow mode word (Act, Think, Quiet, Listen). Shown in every state, never dropped. */
 	flow?: string;
+	/** Short hint after the flow word, e.g. "tools not limited yet". */
+	flowHint?: string;
 }
 
 /** A value the app passes when it does not know the real one. */
@@ -125,7 +127,13 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 	];
 	if (d.flow) {
 		// Value only, no label or cap: the row is full at 80 columns, and ^Q is in /hotkeys.
-		out.push({ key: "flow", value: d.flow, color: ui.teal, priority: 0 });
+		out.push({
+			key: "flow",
+			value: d.flow,
+			note: d.flowHint || undefined,
+			color: d.flowHint ? ui.orange : ui.teal,
+			priority: 0,
+		});
 	}
 	const perm = isPermissionMode(d.permissions) ? d.permissions : undefined;
 	// Ask shows no segment, unless a parent holds the tab there: then it says so.
@@ -462,7 +470,8 @@ export function StatusSegments({
 }) {
 	// The flow mode is in memory and changes outside React props: read it live.
 	const flowWord = useSyncExternalStore(flow.subscribe, flow.footerWord);
-	const all = buildFooterSegments({ flow: flowWord, ...data });
+	const flowHint = useSyncExternalStore(flow.subscribe, flow.footerHint);
+	const all = buildFooterSegments({ flow: flowWord, flowHint, ...data });
 	const toastFit = toast ? fitFooterToast(all, width, toast, leading) : null;
 	const row = fitFooterRow(all, width, leading, dj);
 	// A notice takes the hint slot, so no hint is at stake: every segment that fits shows.

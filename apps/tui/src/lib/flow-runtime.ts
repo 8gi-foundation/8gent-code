@@ -38,6 +38,25 @@ import {
 
 export type { FlowMode, Outcome, SpeechKind } from "./flow-mode";
 
+/** Plain disclosures, shown on screen. Tested by exact string. */
+export const TOOLS_DISCLOSURE =
+	"Listen and Think do not restrict tools yet. Permission mode still decides what runs.";
+export const VOICE_CHAT_DISCLOSURE = "Voice chat still speaks in Quiet and Listen.";
+export const MIC_WINDOW_DISCLOSURE =
+	"The mic window is not real yet: pttActive is fixed true and startedAt is t-1.";
+/** The footer hint beside the word in Listen and Think. */
+export const FOOTER_TOOLS_HINT = "tools not limited yet";
+
+/** What the screen must say for a mode. Empty for Act, which promises nothing. */
+export function flowDisclosure(mode: FlowMode): string {
+	if (mode === "act") return "";
+	const parts: string[] = [];
+	if (mode === "listen" || mode === "think") parts.push(TOOLS_DISCLOSURE);
+	if (mode === "listen" || mode === "quiet") parts.push(VOICE_CHAT_DISCLOSURE);
+	parts.push(MIC_WINDOW_DISCLOSURE);
+	return parts.join(" ");
+}
+
 export const MODE_USAGE = "Usage: /mode listen|think|quiet|act   (no argument shows the mode)";
 
 /** What a transcript turned out to be. */
@@ -70,6 +89,11 @@ export function createFlowRuntime(
 		/** The footer word for the active tab. Always one of the four, in every state. */
 		footerWord: (): string => ctl().footer(),
 		mode: (): FlowMode => ctl().mode,
+		/** Footer hint for the active tab: Listen and Think do not limit tools yet. */
+		footerHint: (): string => {
+			const m = ctl().mode;
+			return m === "listen" || m === "think" ? FOOTER_TOOLS_HINT : "";
+		},
 		subscribe(cb: () => void): () => void {
 			listeners.add(cb);
 			return () => listeners.delete(cb);

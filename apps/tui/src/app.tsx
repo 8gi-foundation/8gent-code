@@ -133,7 +133,13 @@ import {
 	listPresetIds,
 	runExternalAgent,
 } from "./lib/external-agent-runner.js";
-import { type SpeechKind, canSpeak, flow, flowModeLabel } from "./lib/flow-runtime.js";
+import {
+	type SpeechKind,
+	canSpeak,
+	flow,
+	flowDisclosure,
+	flowModeLabel,
+} from "./lib/flow-runtime.js";
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
 import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gate.js";
@@ -1092,7 +1098,7 @@ export function App({
 				const line = [r.outcome.screen].filter(Boolean).join(" ");
 				addSystemMessage(
 					r.outcome.changed
-						? `Flow mode: ${flowModeLabel(r.outcome.mode)}. ${line}`.trim()
+						? `Flow mode: ${flowModeLabel(r.outcome.mode)}. ${line} ${flowDisclosure(r.outcome.mode)}`.trim()
 						: line || (r.outcome.say ?? ""),
 				);
 				return;
@@ -2363,6 +2369,8 @@ export function App({
 			const o = flow.cycle();
 			if (o.changed) {
 				flashNotice(`flow ${flowModeLabel(o.mode).toLowerCase()}`);
+				const note = flowDisclosure(o.mode);
+				if (note) addSystemMessage(`Flow mode: ${flowModeLabel(o.mode)}. ${note}`);
 				if (o.say) speakAgentReply(undefined, o.say, "mode-notice");
 			}
 			return;
@@ -5421,15 +5429,15 @@ export function App({
 					// /mode [listen|think|quiet|act]: user origin, in memory only.
 					if (!args[0]) {
 						addSystemMessage(
-							`Flow mode: ${flowModeLabel(flow.mode())}. Set it with /mode listen|think|quiet|act, or Ctrl+Q to cycle.`,
+							`Flow mode: ${flowModeLabel(flow.mode())}. Set it with /mode listen|think|quiet|act, or Ctrl+Q to cycle. ${flowDisclosure(flow.mode())}`.trim(),
 						);
 						break;
 					}
 					const o = flow.setFlowMode(args[0]);
 					addSystemMessage(
 						o.changed
-							? `Flow mode: ${flowModeLabel(o.mode)}. ${o.screen ?? ""}`.trim()
-							: (o.screen ?? `Flow mode stays ${flowModeLabel(o.mode)}.`),
+							? `Flow mode: ${flowModeLabel(o.mode)}. ${o.screen ?? ""} ${flowDisclosure(o.mode)}`.trim()
+							: `${o.screen ?? `Flow mode stays ${flowModeLabel(o.mode)}.`} ${flowDisclosure(o.mode)}`.trim(),
 					);
 					if (o.changed && o.say) speakAgentReply(undefined, o.say, "mode-notice");
 					break;
