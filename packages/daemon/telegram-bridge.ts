@@ -35,6 +35,7 @@ import {
 	JUDGE_TIMEOUT_MS,
 	createFlowModeController,
 } from "../flow/flow-mode";
+import { MEMORY_COMMANDS, TelegramMemory } from "../memory/telegram-memory";
 import { DaemonClient, SessionStore, TelegramBridgeAdapter } from "../telegram-bot";
 import {
 	BOARD_ROSTER,
@@ -588,6 +589,8 @@ export const OPERATOR_COMMANDS = [
 	"/unstick",
 	"/plan",
 	"/review",
+	// Memory kill switch and erase (C-M24). The handler itself insists on a private chat.
+	...MEMORY_COMMANDS,
 ] as const;
 
 /** Commands anyone in the allowlist may use. Everything else starting with "/" is refused. */
@@ -1024,6 +1027,33 @@ class TelegramDaemonBridge {
 	private daemonClient: DaemonClient | null = null;
 	private adapter: TelegramBridgeAdapter | null = null;
 	private sessionStore: SessionStore | null = null;
+
+	/**
+	 * Operator memory, Phase 1 (#4391). Inert unless TELEGRAM_MEMORY_CHAT_IDS lists the operator's
+	 * DM: with the default (empty) list it never touches disk.
+	 */
+	private memoryStore: TelegramMemory | null = null;
+	private get memory(): TelegramMemory {
+		if (!this.memoryStore) {
+			this.memoryStore = new TelegramMemory({
+				dir: join(getDataDir(), "memory"),
+				env: this.config.env ?? process.env,
+				scrubSessions: (uid) => this.scrubSessionTurns(uid),
+			});
+		}
+		return this.memoryStore;
+	}
+
+	/** Empty the operator's plaintext turn history in telegram-sessions.json (part of /memwipe). */
+	private scrubSessionTurns(userId: string): number {
+		const s = this.sessionStore?.get(userId);
+		if (!s) return 0;
+		const n = s.history.length;
+		s.history.length = 0;
+		s.messageCount = 0;
+		this.sessionStore?.flush();
+		return n;
+	}
 
 	/** Voice mode toggle, restored from disk at construction so it survives a restart. */
 	private voiceEnabled: boolean = readVoiceState().enabled;
@@ -2110,6 +2140,18 @@ class TelegramDaemonBridge {
 			return;
 		}
 
+		// Memory kill switch and erase. Operator only, private chat only, answered in place.
+		if (cmd && (MEMORY_COMMANDS as readonly string[]).includes(cmd)) {
+			const arg = text.replace(/^\S+\s*/, "");
+			const reply = this.memory.command(cmd, arg, {
+				chatId,
+				chatType: sender?.chatType,
+				fromId: sender?.fromId,
+			});
+			await tgSend(this.config.telegramToken, String(chatId), reply, "").catch(() => {});
+			return;
+		}
+
 		// From here until the daemon's terminal event, this turn's output
 		// belongs to this chat. Set before the first typing indicator so even
 		// that lands in the right room.
@@ -2252,6 +2294,7 @@ class TelegramDaemonBridge {
 					"/unstick - Reset busy state",
 					"/delegate, /plan, /review, /goals, /kill - chief-of-staff commands",
 					"/logs - Tail daemon logs",
+					"/memoff, /memon, /memwipe - memory kill switch and erase (operator DM only)",
 					"/help - This message",
 					"",
 					// In a group the private-chat transit sentence is false (C-G11).
@@ -2267,11 +2310,31 @@ class TelegramDaemonBridge {
 			return;
 		}
 
+		// Operator memory: recall first (so a turn never recalls itself), then remember. Recalled
+		// text rides only in the prompt prefix, never in session history or the task card.
+		let memoryPrefix = "";
+		if (!plain && !opts?.groupVoice && sender) {
+			const mctx = {
+				text,
+				chatId,
+				chatType: sender.chatType,
+				fromId: sender.fromId,
+				forwarded: sender.forwarded,
+			};
+			try {
+				memoryPrefix = this.memory.recall(mctx);
+				this.memory.record(mctx);
+			} catch (err) {
+				console.error(`[telegram-bridge] memory error: ${(err as Error).name}`);
+			}
+		}
+
 		// Multi-step path: TaskRunner adapter owns the response message, edits
 		// it as steps complete, and sends final files automatically.
 		if (this.multiStepEnabled && this.adapter) {
 			try {
-				await this.adapter.handleUserMessage(text);
+				if (memoryPrefix) await this.adapter.handleUserMessage(text, memoryPrefix);
+				else await this.adapter.handleUserMessage(text);
 			} catch (err) {
 				console.error(
 					"[telegram-bridge] adapter error, falling back to legacy:",

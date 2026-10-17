@@ -115,7 +115,11 @@ export class TelegramBridgeAdapter {
 	}
 
 	/** Begin a new multi-step task for an incoming user message. */
-	async handleUserMessage(text: string): Promise<void> {
+	/**
+	 * `promptPrefix` is extra context for the model only (recalled memory). It is not recorded in
+	 * session history and not shown in the task card, which both carry `text` alone.
+	 */
+	async handleUserMessage(text: string, promptPrefix = ""): Promise<void> {
 		const session = this.sessions.getOrCreate(this.chatId);
 		session.sessionId = this.daemon.getSessionId();
 		this.sessions.recordMessage(this.chatId, "user", text);
@@ -136,7 +140,7 @@ export class TelegramBridgeAdapter {
 		this.sessions.linkTask(this.chatId, runner.task.id);
 
 		await runner.start(taskRunningKeyboard(runner.task.id));
-		this.daemon.sendPrompt(text);
+		this.daemon.sendPrompt(promptPrefix ? `${promptPrefix}\n\n${text}` : text);
 	}
 
 	/** Cancel the in-flight task (callback handler). */
