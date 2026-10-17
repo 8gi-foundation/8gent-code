@@ -97,9 +97,36 @@ export interface RenderDeckResult {
 	durationLabel: string;
 }
 
-/** m:ss, whole seconds floored, so a chapter never points past its slide start. */
+/** The one description both tool surfaces show (first sentence = input shape, per the local-model rule). */
+export const RENDER_VIDEO_DECK_DESCRIPTION =
+	"Slides + narration to MP4 from args {spec:{size, slides:[{title, bullets, narration}]}, out:'deck.mp4'}. " +
+	"One call draws, voices and joins the video, writes chapters.txt ('m:ss Title' per slide) beside it and returns { path, durationSec, durationLabel, starts, chapters }, so no ffmpeg, ffprobe or build.sh is needed. " +
+	"The chapters file is always named chapters.txt in the mp4's folder, so a second deck rendered there overwrites it. Local code only. Deterministic. " +
+	"PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task: you write the spec, it draws the slides and joins them. " +
+	"spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?: string[], image?: 'png/jpg path in the working directory', seconds?: 1-60 (default 4), narration?: 'spoken by the local voice', voice? }] } (1-40 slides, each needs a title, text, bullets or image). " +
+	"Narration uses the same local engine as speak and stretches a slide to fit its voice. No music, no network. Never shells out.";
+
+/** Where the chapters file for an mp4 goes: fixed name, same folder. */
+export function chaptersPathFor(out: string): string {
+	return path.join(path.dirname(out), "chapters.txt");
+}
+
+/**
+ * Refuse before any render work if chapters.txt cannot be replaced cleanly: a symlink or a
+ * directory is in the way. (The final write is temp-and-rename, which never follows a link.)
+ */
+export function assertChaptersWritable(chaptersPath: string): void {
+	const st = fs.lstatSync(chaptersPath, { throwIfNoEntry: false });
+	if (st?.isSymbolicLink()) throw new Error("refusing to write chapters.txt: it is a symlink");
+	if (st?.isDirectory()) throw new Error("refusing to write chapters.txt: it is a directory");
+}
+
+/**
+ * m:ss rounded to the nearest second (half the error of flooring). A slide lasts at least 1 s,
+ * so the rounded start never lands past that slide's own end.
+ */
 export function clock(sec: number): string {
-	const t = Math.max(0, Math.floor(sec + 1e-6));
+	const t = Math.max(0, Math.round(sec));
 	return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
 }
 
@@ -790,6 +817,8 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 	const [W, H] = SIZES[spec.size];
 
 	fs.mkdirSync(path.dirname(opts.out), { recursive: true });
+	const chaptersPath = chaptersPathFor(opts.out);
+	assertChaptersWritable(chaptersPath);
 	const root = fs.realpathSync(opts.cwd);
 	const scratchRoot = path.join(opts.cwd, ".tmp");
 	if (fs.lstatSync(scratchRoot, { throwIfNoEntry: false })?.isSymbolicLink()) {
@@ -876,10 +905,10 @@ export async function renderVideoDeck(opts: RenderDeckOptions): Promise<RenderDe
 			throw new Error("ffmpeg wrote no audio stream although slides carry narration");
 		placeOutput(tmpOut, opts.out, opts.cwd);
 		const chapters = chapterLines(spec.slides, starts);
-		const chaptersPath = path.join(path.dirname(opts.out), "chapters.txt");
-		if (fs.lstatSync(chaptersPath, { throwIfNoEntry: false })?.isSymbolicLink())
-			throw new Error("refusing to write chapters.txt: it is a symlink");
-		fs.writeFileSync(chaptersPath, `${chapters.join("\n")}\n`);
+		const chaptersTmp = path.join(work, "chapters.txt");
+		fs.writeFileSync(chaptersTmp, `${chapters.join("\n")}\n`);
+		assertChaptersWritable(chaptersPath);
+		placeOutput(chaptersTmp, chaptersPath, opts.cwd);
 		return {
 			path: opts.out,
 			...m,

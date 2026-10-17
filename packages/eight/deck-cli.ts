@@ -15,7 +15,8 @@
  * outside the workspace, and a fixed ffmpeg argv that allows only the file
  * protocol. The command never starts a model loop and never touches the network.
  *
- * Prints the tool's result JSON ({ path, durationSec, slides, ... }) on success.
+ * Prints the tool's result JSON ({ path, durationSec, durationLabel, starts, chapters, chaptersPath, slides, ... })
+ * on success, and writes chapters.txt ('m:ss Title' per slide) next to the mp4.
  * Exit codes: 0 rendered, 1 refused or failed, 2 usage.
  */
 import * as fs from "node:fs";
@@ -30,7 +31,8 @@ export const DECK_USAGE =
 	"  Renders a JSON deck spec into an mp4 with the same code as the render_video_deck tool.\n" +
 	'  spec: { "title"?, "size"?: "1280x720"|"1920x1080", "voice"?, "slides": [ { "kicker"?, "title"?, "text"?,\n' +
 	'          "bullets"?: [..], "image"?: "png/jpg inside this directory", "seconds"?: 1-60, "narration"?, "voice"? } ] }\n' +
-	"  Both paths must be inside the current directory. out defaults to deck.mp4.";
+	"  Both paths must be inside the current directory. out defaults to deck.mp4.\n" +
+	"  Also writes chapters.txt ('m:ss Title' per slide) beside the mp4; the name is fixed, so it overwrites.";
 
 export interface DeckCliDeps {
 	/** The working directory every path is confined to (default process.cwd()). */
@@ -53,7 +55,7 @@ export async function runDeckCommand(args: string[], deps: DeckCliDeps = {}): Pr
 	const cwd = deps.cwd ?? process.cwd();
 	try {
 		// The tool's own path confinement: lexical, then the real location after links.
-		const { confineRead, resolveDeckOut } = await import("./tools");
+		const { confineRead, resolveDeckOut, resolveDeckChapters } = await import("./tools");
 		const specPath = confineRead(specArg, cwd);
 		if (!/\.json$/i.test(specPath)) throw new Error(`spec must be a .json file ("${specArg}")`);
 		const st = fs.statSync(specPath);
@@ -67,6 +69,7 @@ export async function runDeckCommand(args: string[], deps: DeckCliDeps = {}): Pr
 			throw new Error(`spec is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
 		}
 		const out = resolveDeckOut(outArg, cwd);
+		resolveDeckChapters(out, cwd);
 		const render = deps.render ?? (await import("../tools/video-deck")).renderVideoDeck;
 		const result = await render({ spec, out, cwd });
 		log(JSON.stringify({ ...result, path: path.relative(cwd, result.path) || result.path }));

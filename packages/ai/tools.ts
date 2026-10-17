@@ -87,7 +87,7 @@ import { DocxSpecSchema } from "../tools/office/docx";
 import { PptxSpecSchema } from "../tools/office/pptx";
 import { isOfficeFile, readOfficeFile } from "../tools/office/read";
 import { XlsxSpecSchema } from "../tools/office/xlsx";
-import { DeckSpecSchema } from "../tools/video-deck";
+import { DeckSpecSchema, RENDER_VIDEO_DECK_DESCRIPTION } from "../tools/video-deck";
 import { withImagesWritten } from "./image-shape";
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "./update-plan";
 import { writeScopeLine } from "./write-scope";
@@ -1096,7 +1096,7 @@ const useSkillTool = tool({
 
 const renderVideoDeckTool = tool({
 	description:
-		"Slides + narration to MP4 from args {spec:{size, slides:[{title, bullets, narration}]}, out:'deck.mp4'}. Also writes chapters.txt ('m:ss Title' per slide) beside it. Local code only. Deterministic. PREFER THIS over hand-written ffmpeg/magick/Pillow commands for any 'make a video / deck / brief film / slideshow' task. Returns { path, durationSec, durationLabel, starts, chapters, chaptersPath, slides, width, height, hasAudio }. spec = { title?, size?: '1280x720'|'1920x1080', voice?, slides: [{ kicker?, title?, text?, bullets?, image? (png/jpg inside the working directory), seconds? (1-60, default 4), narration? (spoken by the local voice), voice? }] }. No music, no network.",
+		`[MEDIA] ${RENDER_VIDEO_DECK_DESCRIPTION}`,
 	inputSchema: z.object({
 		// The renderer's own schema (#4172): the native request carries slides[{title, text,
 		// bullets, narration, ...}], size and voice as real fields, not a bare object.
@@ -1108,9 +1108,10 @@ const renderVideoDeckTool = tool({
 	}),
 	execute: async ({ spec, out }) => {
 		try {
-			const { resolveDeckOut } = await import("../eight/tools");
+			const { resolveDeckOut, resolveDeckChapters } = await import("../eight/tools");
 			const wd = getToolContext().workingDirectory;
 			const target = resolveDeckOut(out, wd);
+			const chaptersTarget = resolveDeckChapters(target, wd);
 			const ctx = getToolContext();
 			const scoped = editScopeViolation(
 				"render_video_deck",
@@ -1119,6 +1120,13 @@ const renderVideoDeckTool = tool({
 				ctx.allowedPaths,
 			);
 			if (scoped) return scoped;
+			const scopedChapters = editScopeViolation(
+				"render_video_deck",
+				{ out: chaptersTarget },
+				wd,
+				ctx.allowedPaths,
+			);
+			if (scopedChapters) return scopedChapters;
 			const blocked = gateWrite("render_video_deck", { path: target });
 			if (blocked) return blocked;
 			const { renderVideoDeck } = await import("../tools/video-deck");

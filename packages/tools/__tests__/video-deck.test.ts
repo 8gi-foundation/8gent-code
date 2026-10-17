@@ -29,6 +29,7 @@ import {
 	MAX_IMAGE_BYTES,
 	buildFfmpegArgs,
 	chapterLines,
+	RENDER_VIDEO_DECK_DESCRIPTION,
 	clock,
 	imageDimensions,
 	paintSlide,
@@ -818,12 +819,13 @@ describe("house film look (#4263)", () => {
 describe("chapters and true duration (#4389)", () => {
 	test("clock floors to m:ss and chapter lines are 'm:ss Title' from slide starts", () => {
 		expect(clock(0)).toBe("0:00");
-		expect(clock(59.99)).toBe("0:59");
+		expect(clock(59.49)).toBe("0:59");
+		expect(clock(59.5)).toBe("1:00");
 		expect(clock(65)).toBe("1:05");
 		const slides = [{ title: "Intro" }, { text: "Body  text" }, { image: "a.png" }];
 		expect(chapterLines(slides, [0, 3.5, 70])).toEqual([
 			"0:00 Intro",
-			"0:03 Body text",
+			"0:04 Body text",
 			"1:10 Slide 3",
 		]);
 	});
@@ -850,14 +852,66 @@ describe("chapters and true duration (#4389)", () => {
 		expect(r.durationLabel).toBe("0:06");
 	});
 
-	test("both tool descriptions open with the input shape: slides + narration to MP4", () => {
-		const eight = readFileSync(join(import.meta.dir, "../../eight/tools.ts"), "utf8");
-		const m = eight.match(/name: "render_video_deck",\s*description:\s*"([^"]*)"/);
-		expect(m).not.toBeNull();
-		const first = (m?.[1] ?? "").split(/(?<=\.)\s/)[0];
-		expect(first).toContain("Slides + narration to MP4");
-		expect(first).toContain("spec:{size, slides:");
-		const ai = readFileSync(join(import.meta.dir, "../../ai/tools.ts"), "utf8");
-		expect(ai).toContain('"Slides + narration to MP4 from args {spec:{size, slides:');
+	test("a rounded start never lands past its own slide", () => {
+		const slides = [{ title: "A" }, { title: "B" }, { title: "C" }];
+		// slides last >= 1 s, so round(start) <= start + 0.5 <= end
+		const starts = [0, 2.6, 3.6];
+		const lines = chapterLines(slides, starts);
+		expect(lines[0]).toBe("0:00 A");
+		lines.forEach((l, i) => {
+			const [m, sec] = l.split(" ")[0].split(":").map(Number);
+			if (i + 1 < starts.length) expect(m * 60 + sec).toBeLessThanOrEqual(starts[i + 1]);
+		});
+	});
+
+	ffTest("a symlink or a directory named chapters.txt is refused before anything is written", async () => {
+		const spec = { slides: [{ title: "One", seconds: 1 }] };
+		const link = tempDir("vdeck-chlink-");
+		const victim = join(link, "victim.txt");
+		writeFileSync(victim, "keep");
+		mkdirSync(join(link, "video"));
+		symlinkSync(victim, join(link, "video", "chapters.txt"));
+		await expect(
+			renderVideoDeck({ spec, out: join(link, "video", "b.mp4"), cwd: link }),
+		).rejects.toThrow(/symlink/);
+		expect(existsSync(join(link, "video", "b.mp4"))).toBe(false);
+		expect(readFileSync(victim, "utf8")).toBe("keep");
+
+		const dir = tempDir("vdeck-chdir-");
+		mkdirSync(join(dir, "video", "chapters.txt"), { recursive: true });
+		await expect(
+			renderVideoDeck({ spec, out: join(dir, "video", "b.mp4"), cwd: dir }),
+		).rejects.toThrow(/directory/);
+		expect(existsSync(join(dir, "video", "b.mp4"))).toBe(false);
+	});
+
+	test("chapters.txt is confined like the mp4: same folder, never outside the working directory", async () => {
+		const root = tempDir("vdeck-chscope-");
+		mkdirSync(join(root, "video"));
+		const { resolveDeckChapters } = await import("../../eight/tools");
+		expect(resolveDeckChapters(join(root, "video", "b.mp4"), root)).toBe(
+			join(root, "video", "chapters.txt"),
+		);
+		expect(() => resolveDeckChapters(join(root, "..", "x", "b.mp4"), root)).toThrow();
+	});
+
+	test("both tool surfaces carry the one complete description", async () => {
+		const d = RENDER_VIDEO_DECK_DESCRIPTION;
+		expect(d.split(/(?<=\.)\s/)[0]).toBe(
+			"Slides + narration to MP4 from args {spec:{size, slides:[{title, bullets, narration}]}, out:'deck.mp4'}.",
+		);
+		expect(d).toContain("returns { path, durationSec, durationLabel, starts, chapters }");
+		expect(d).toContain("overwrites it");
+		expect(d).toContain("PREFER THIS");
+		expect(d).toContain("spec = { title?, size?");
+		expect(d).not.toContain("joins them and spec");
+		const eight = new ToolExecutor(tempDir("vdeck-desc-")).getToolDefinitions() as {
+			function: { name: string; description: string };
+		}[];
+		const e = eight.find((t) => t.function.name === "render_video_deck");
+		expect(e?.function.description).toBe(`[MEDIA] ${d}`);
+		const ai = (agentTools as unknown as Record<string, { description?: string }>)
+			.render_video_deck;
+		expect(ai.description).toBe(`[MEDIA] ${d}`);
 	});
 });
