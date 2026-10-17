@@ -41,7 +41,7 @@ Spoken replies in the group follow the `/voice` toggle: `/voice off` silences th
 - Only user 5486040131 (and only if also in TELEGRAM_OPERATOR_USER_IDS). Anyone else, anonymous-admin posts and channel posts are dropped before getFile, with no reply and no refusal. A drop is recorded as sender id, chat id and duration only.
 - The note must be a reply to one of the bot's own messages. An unaddressed note is ignored: the bot never transcribes a room.
 - `message.voice` only, at most 60 s and 1 MB, checked before getFile. Audio files, forwarded, via-bot, automatic-forward and external-reply notes are dropped.
-- The transcript is never posted. It reaches the agent as plain prompt text; a transcript starting with "/" is never parsed as a command.
+- The transcript is never posted. It reaches 8gent as plain prompt text; a transcript starting with "/" is never parsed as a command.
 - The reply, any status line and the spoken note go to the group and forum topic the note came from, bound per turn. The binding ends on the turn's terminal event.
 - The spoken note is written from the reply text already posted in the group, nothing else. Inside a forum topic it is spoken only if the TTS bridge (`kittentts-telegram`) declares a `--thread` option; otherwise the text lands and the note is skipped, because a note in General would leak the topic.
 - One group voice turn at a time. A second note while one is in flight gets a fixed "still working" line.
