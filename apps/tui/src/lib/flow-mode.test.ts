@@ -166,6 +166,25 @@ describe("state machine", () => {
 		expect(r.m.confirmOnScreen().mode).toBe("act");
 	});
 
+	test("restore refuses voice-confirmed and judge origins at runtime", () => {
+		for (const o of ["user-voice-confirmed", "judge"]) {
+			const r = rig();
+			r.m.userSwitch("think", "user-key");
+			const out = r.m.restore(o as "user-key");
+			expect(out.changed).toBe(false);
+			expect(r.m.mode).toBe("think");
+		}
+	});
+
+	test("log getter returns a copy and the log is capped", () => {
+		const r = rig();
+		r.m.log.length = 0; // mutating the copy changes nothing
+		r.m.userSwitch("think", "user-key");
+		expect(r.m.log).toHaveLength(1);
+		for (let i = 0; i < 700; i++) r.m.userSwitch(i % 2 ? "act" : "quiet", "user-key");
+		expect(r.m.log.length).toBeLessThanOrEqual(500);
+	});
+
 	test("judge can never restore", () => {
 		const r = rig();
 		r.m.userSwitch("think", "user-key");

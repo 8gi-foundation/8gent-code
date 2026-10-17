@@ -36,6 +36,7 @@ export const INFERRED_RATE_LIMIT_MS = 5 * 60 * 1000;
 export const RAISE_CONFIRM_MS = 10_000;
 export const FLAP_WINDOW_MS = 60_000;
 export const FLAP_MAX_LOWERINGS = 3;
+const LOG_MAX = 500;
 const REASON_MAX = 80;
 
 /** Flow ceiling over permission. null = the user's own mode. Order: plan < ask < guarded < infinite. */
@@ -261,7 +262,7 @@ export interface FlowModeController {
 	footer(): string;
 	userSwitch(to: FlowMode, origin: "user-key" | "user-slash"): Outcome;
 	/** Restore the snapshot taken at the last switch. User origin only. */
-	restore(origin: Origin): Outcome;
+	restore(origin: "user-key" | "user-slash"): Outcome;
 	hear(u: Utterance): Outcome;
 	beginJudge(u: Utterance): JudgeTicket | null;
 	judgeResult(ticket: JudgeTicket, raw: unknown): Outcome;
@@ -298,7 +299,10 @@ export function createFlowModeController(
 		origin: Origin | "none",
 		signal: SignalClass,
 		accepted: boolean,
-	) => log.push({ at: now(), from: mode, to, origin, signal, accepted });
+	) => {
+		log.push({ at: now(), from: mode, to, origin, signal, accepted });
+		if (log.length > LOG_MAX) log.splice(0, log.length - LOG_MAX);
+	};
 	const out = (changed: boolean, say?: string, screen?: string, asking = false): Outcome => ({
 		changed,
 		mode,
@@ -360,7 +364,7 @@ export function createFlowModeController(
 			return mode;
 		},
 		get log() {
-			return log;
+			return log.slice();
 		},
 		footer: () => flowModeLabel(mode),
 
@@ -374,7 +378,8 @@ export function createFlowModeController(
 		},
 
 		restore(origin) {
-			if (origin === "judge" || snapshot === null) {
+			// Only the key or /mode restore. Voice must go through the on-screen confirm.
+			if ((origin !== "user-key" && origin !== "user-slash") || snapshot === null) {
 				rec(snapshot, origin, "restore", false);
 				return out(false);
 			}
