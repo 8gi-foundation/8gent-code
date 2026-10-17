@@ -534,6 +534,8 @@ export interface Segment {
 	text: string;
 	/** stdin is piped from the previous segment. */
 	piped: boolean;
+	/** The segment follows a case-arm terminator (`;;`, `;&`, `;;&`): an arm head may start it. */
+	arm?: boolean;
 }
 
 /**
@@ -550,8 +552,11 @@ export function splitSegments(s: string): { segs: Segment[]; subs: string[] } {
 	let depth = 0;
 	let subStart = -1;
 	let piped = false;
-	const push = (nextPiped: boolean) => {
-		segs.push({ text: cur, piped });
+	let arm = false;
+	const push = (nextPiped: boolean, term = false) => {
+		segs.push({ text: cur, piped, arm });
+		// A blank piece (a newline after `;;`) keeps the arm start; any text ends it.
+		if (cur.trim() !== "" || term) arm = term;
 		cur = "";
 		piped = nextPiped;
 	};
@@ -648,6 +653,11 @@ export function splitSegments(s: string): { segs: Segment[]; subs: string[] } {
 			i++;
 			continue;
 		}
+		if (ch === ";" && (s[i + 1] === ";" || s[i + 1] === "&")) {
+			push(false, true);
+			i += s.startsWith(";;&", i) ? 3 : 2;
+			continue;
+		}
 		if (ch === ";" || ch === "\n") {
 			push(false);
 			i++;
@@ -656,9 +666,11 @@ export function splitSegments(s: string): { segs: Segment[]; subs: string[] } {
 		cur += ch;
 		i++;
 	}
-	segs.push({ text: cur, piped });
+	segs.push({ text: cur, piped, arm });
 	return {
-		segs: segs.map((x) => ({ text: x.text.trim(), piped: x.piped })).filter((x) => x.text),
+		segs: segs
+			.map((x) => ({ text: x.text.trim(), piped: x.piped, arm: x.arm }))
+			.filter((x) => x.text),
 		subs,
 	};
 }
@@ -1341,31 +1353,44 @@ const LEAD_KW = "(?:(?:then|do|else|elif|if|while|until|!|time)\\s+)*";
 const CASE_HEAD = new RegExp(`^\\s*${LEAD_KW}case\\s+(?:'[^']*'|"[^"]*"|[^\\s'"]+)\\s+in\\b\\s*`);
 const CASE_PAT = "(?:'[^']*'|\"[^\"]*\"|[^\\s()'\"|;&]+)";
 const CASE_ARM = new RegExp(`^\\s*\\(?\\s*${CASE_PAT}(?:\\s*\\|\\s*${CASE_PAT})*\\s*\\)\\s*`);
+const CASE_ALT = new RegExp(`^\\s*\\(?\\s*${CASE_PAT}\\s*$`);
 const LEAD_KW_RE = new RegExp(`^\\s*${LEAD_KW}`);
-/** What `case` text a segment held, and the text left once it is accounted for. */
+/**
+ * What `case` text a segment held, and the text left once it is accounted for. An arm head
+ * `PAT)` is stripped only at an arm start (`armStart`): right after `case WORD in`, after a
+ * `;;` `;&` `;;&` terminator, or after an `a|` pattern alternative. Never mid-arm, never on a
+ * bare leading `(` elsewhere.
+ */
 function peelCase(
 	seg: string,
 	inCase: number,
-): { text: string; inCase: number; explained: boolean } {
+	armStart: boolean,
+): { text: string; inCase: number; explained: boolean; armNext: boolean; pattern: boolean } {
 	let t = seg;
 	let n = inCase;
 	let explained = false;
+	let start = armStart;
 	const head = CASE_HEAD.exec(t);
 	if (head) {
 		t = t.slice(head[0].length);
 		n++;
 		explained = true;
+		start = true;
 	}
-	// An arm head `PAT)` only counts inside a `case ... in`; a bare leading `(` is a subshell.
-	if (n > 0) {
+	const armNext = head !== null && t.trim() === "";
+	let pattern = false;
+	if (n > 0 && start) {
 		const arm = CASE_ARM.exec(t);
 		if (arm) {
 			t = t.slice(arm[0].length);
 			explained = true;
+		} else if (CASE_ALT.test(t)) {
+			pattern = true; // `a` of `a|x)`: the rest follows in the next, piped, segment
+			explained = true;
 		}
 	}
 	if (/^\s*esac\b/.test(t) && n > 0) n--;
-	return { text: t, inCase: n, explained };
+	return { text: t, inCase: n, explained, armNext, pattern };
 }
 /** The inside of a leading `( ... )` subshell or `{ ...; }` group, or null when there is none. */
 function groupInside(seg: string): string | null {
@@ -1408,13 +1433,25 @@ export function simpleCommands(text: string, depth = 0): SimpleCommand[] {
 		const segs = splitSegments(before).segs;
 		const last = segs[segs.length - 1];
 		const t = last ? stripWrappers(tokens(stripRedirects(last.text))) : [];
-		if (t.length && SHELLS.has(basename(t[0]))) out.push(...simpleCommands(doc, depth + 1));
+		// `{ bash; } <<X` and `(bash) <<X`: the group's closer is last, its shell is earlier.
+		const grouped = last !== undefined && /[)}]$/.test(last.text.trim());
+		const feedsShell = grouped
+			? simpleCommands(before, depth + 1).some(
+					(c) => c.argv.length > 0 && SHELLS.has(basename(c.argv[0])),
+				)
+			: t.length > 0 && SHELLS.has(basename(t[0]));
+		if (feedsShell) out.push(...simpleCommands(doc, depth + 1));
 	}
 	const { segs, subs } = splitSegments(body);
 	let inCase = 0;
-	for (const { text: seg, piped } of segs) {
-		const peeled = peelCase(seg, inCase);
+	let armNext = false;
+	let patPending = false;
+	for (const { text: seg, piped, arm } of segs) {
+		const peeled = peelCase(seg, inCase, !!arm || armNext || (patPending && piped));
 		inCase = peeled.inCase;
+		armNext = peeled.armNext;
+		patPending = peeled.pattern;
+		if (peeled.pattern) continue;
 		// A leading subshell or group is its own command list: judge what is inside it.
 		const inner = groupInside(peeled.text);
 		if (inner !== null) {
@@ -1450,7 +1487,10 @@ export function simpleCommands(text: string, depth = 0): SimpleCommand[] {
 			stdin: piped || fromFile,
 			hereString: masked.includes("<<<"),
 			procSub: /[<>]\(/.test(masked),
-			opaque: argv.length === 0 && !blank && !bareKeywords(t),
+			// Backstop: no argv, or a word shaped like an arm head left standing inside a case.
+			opaque:
+				(argv.length === 0 && !blank && !bareKeywords(t)) ||
+				(inCase > 0 && /^\(?[^\s()$`]*\)$/.test(argv[0] ?? "")),
 		});
 	}
 	for (const s of subs) out.push(...simpleCommands(s, depth + 1));

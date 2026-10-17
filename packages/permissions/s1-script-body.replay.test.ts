@@ -303,6 +303,13 @@ const SUBSHELLS = [
 	"case x in (x) (./evil.sh);; esac",
 	"case x in (x) bash evil.sh;; esac",
 	"(evil.sh)",
+	"case x in x) true; (./evil.sh);; esac",
+	'case "$1" in\n*)\necho go\n(./evil.sh)\n;;\nesac',
+	"case x in x) echo a | (bash);; esac",
+	"case x in x)\n(./evil.sh)\n;;\nesac",
+	"case x in x) echo hi;;\n(y) ./evil.sh;; esac",
+	"{ bash; } <<X\n./evil.sh\nX",
+	"(bash) <<X\n./evil.sh\nX",
 ];
 
 describe("replay: reads 1-4 command lines and bodies", () => {
@@ -338,5 +345,58 @@ describe("replay: 8GO second read and 8SO read 8", () => {
 		expect(bodyKind("case x in x) echo hello;; esac\n")).toBe("checked");
 		expect(bodyKind("(cd . && ls)\n{ echo a; echo b; } > out.txt\n")).toBe("checked");
 		expect(bodyKind("x=$((1+2))\necho $(( x + 1 ))\n")).toBe("checked");
+	});
+});
+
+// Every refused body and command line above, moved: after `true;`, before `;true`, inside a
+// case arm (one line, several lines, after another command). The invariant: where it sits does
+// not change the refusal. Collected into one list per kind so a failure names the shape.
+const BODIES: string[] = [
+	...R4_QUOTE.map((l) => `${l}\n${SPAWN}`),
+	...R5_HEADS.map((l) => `${l}\n${SPAWN}`),
+	...[...R4_ASSIGN, ...R4_NAME, ...R4_TEXT, ...R4_CHAIN].map((l) => `${l}\n`),
+	...R5_REFUSED.map((l) => `${l}\necho done\n`),
+	...R5F.map(([, b]) => b),
+	...R58.map(([, b]) => b),
+	...R6.map(([, b]) => b),
+	...[...CASE_ARMS, ...SUBSHELLS].map((l) => `${l}\n`),
+];
+const LINES: string[] = [
+	...R4_CMDLINE,
+	...SR_CTRL,
+	...SR_NONE,
+	...SR_TEXT,
+	...CASE_ARMS,
+	...SUBSHELLS,
+];
+const MOVES: [string, (b: string) => string][] = [
+	["true; before", (b) => `true; ${b}`],
+	["; true after", (b) => `${b.replace(/\n$/, "")}\ntrue\n`],
+	[
+		"case arm, one line",
+		(b) => (b.includes("\n") ? `case x in x)\n${b}\n;;\nesac\n` : `case x in x) ${b};; esac\n`),
+	],
+	["case arm, several lines", (b) => `case x in\n x)\n${b.replace(/\n$/, "")}\n ;;\nesac\n`],
+	["case arm, after a command", (b) => `case x in x) true; ${b.replace(/\n$/, "")}\n;; esac\n`],
+	[
+		"case arm, second arm",
+		(b) => `case x in y) echo no;;\n x)\n${b.replace(/\n$/, "")}\n;;\nesac\n`,
+	],
+];
+
+describe("fuzz: moving a refused shape does not change the refusal", () => {
+	for (const [move, f] of MOVES) {
+		test(`bodies, ${move}`, () => {
+			const leaked = BODIES.filter((b) => bodyKind(f(b)) === "checked");
+			expect(leaked).toEqual([]);
+		});
+		test(`command lines, ${move}`, () => {
+			const leaked = LINES.filter((l) => kind(f(l)) === "none");
+			expect(leaked).toEqual([]);
+		});
+	}
+	test("the fuzz covers a real number of shapes", () => {
+		expect(BODIES.length).toBeGreaterThan(150);
+		expect(LINES.length).toBeGreaterThan(50);
 	});
 });
