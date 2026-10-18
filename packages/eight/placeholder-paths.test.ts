@@ -8,7 +8,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
-import { placeholderPathLine } from "./placeholder-paths";
+import { placeholderPathLine, placeholderPaths } from "./placeholder-paths";
 import { ToolExecutor } from "./tools";
 
 afterAll(cleanupTempDirs);
@@ -307,5 +307,107 @@ describe("first write is refused, second goes through (#4405)", () => {
 		expect(readFileSync(join(dir, "U.md"), "utf-8")).toBe("Go to FOLDER.\n");
 		expect(await ex.execute("edit_file", edit)).toContain("File edited");
 		expect(readFileSync(join(dir, "U.md"), "utf-8")).toBe("Go to /path/to/Tally.\n");
+	});
+});
+
+describe("a retry that invents a new path is refused again (#4407)", () => {
+	const first = "# Unblock\n\ncd C:\\path\\to\\Tally\n";
+	const second = "# Unblock\n\ncd c:\\users\\priya\\tally\n";
+	const third = "# Unblock\n\ncd /home/priya/tally\n";
+	const fourth = "# Unblock\n\ncd ~/priya/tally\n";
+	const clean = "# Unblock\n\nOpen the Tally folder, then run node src/tally.js\n";
+	const write = (ex: ToolExecutor, content: string) =>
+		ex.execute("write_file", { path: "UNBLOCK.md", content });
+
+	test("placeholderPaths lists every invented path", () => {
+		expect(placeholderPaths("U.md", `${first}${second}`, ["x"]).length).toBe(2);
+		expect(placeholderPaths("U.md", clean, ["x"])).toEqual([]);
+	});
+
+	test("same flagged path on retry is allowed", async () => {
+		const dir = tempDir("placeholder-");
+		const ex = new ToolExecutor(dir);
+		ex.beginTurn("Help Priya run Tally.");
+		await write(ex, first);
+		expect(await write(ex, first)).toContain("File written");
+		expect(readFileSync(join(dir, "UNBLOCK.md"), "utf-8")).toBe(first);
+	});
+
+	test("same path in another slash style or case is still the flagged path", async () => {
+		const ex = new ToolExecutor(tempDir("placeholder-"));
+		ex.beginTurn("x");
+		await write(ex, first);
+		expect(await write(ex, "cd c:/PATH/to/tally\n")).toContain("File written");
+	});
+
+	test("a retry with a NEW invented path is refused and names it", async () => {
+		const dir = tempDir("placeholder-");
+		const ex = new ToolExecutor(dir);
+		ex.beginTurn("Help Priya run Tally.");
+		await write(ex, first);
+		const out = await write(ex, second);
+		expect(out.startsWith("Error:")).toBe(true);
+		expect(out).toContain("c:\\users\\priya\\tally");
+		expect(out).not.toContain("path\\to");
+		expect(existsSync(join(dir, "UNBLOCK.md"))).toBe(false);
+	});
+
+	test("after the new path was flagged, retrying it is allowed", async () => {
+		const dir = tempDir("placeholder-");
+		const ex = new ToolExecutor(dir);
+		ex.beginTurn("x");
+		await write(ex, first);
+		await write(ex, second);
+		expect(await write(ex, second)).toContain("File written");
+	});
+
+	test("a retry mixing flagged and new paths is refused", async () => {
+		const ex = new ToolExecutor(tempDir("placeholder-"));
+		ex.beginTurn("x");
+		await write(ex, first);
+		const out = await write(ex, `${first}${second}`);
+		expect(out.startsWith("Error:")).toBe(true);
+	});
+
+	test("cap: three refusals per file, then the fourth is allowed", async () => {
+		const dir = tempDir("placeholder-");
+		const ex = new ToolExecutor(dir);
+		ex.beginTurn("x");
+		for (const doc of [first, second, third]) {
+			expect((await write(ex, doc)).startsWith("Error:")).toBe(true);
+		}
+		const out = await write(ex, fourth);
+		expect(out).toContain("File written");
+		expect(out).toContain("[Placeholder path]");
+		expect(readFileSync(join(dir, "UNBLOCK.md"), "utf-8")).toBe(fourth);
+	});
+
+	test("a clean retry is allowed", async () => {
+		const dir = tempDir("placeholder-");
+		const ex = new ToolExecutor(dir);
+		ex.beginTurn("x");
+		await write(ex, first);
+		await write(ex, second);
+		expect(await write(ex, clean)).toContain("File written");
+		expect(readFileSync(join(dir, "UNBLOCK.md"), "utf-8")).toBe(clean);
+	});
+
+	test("each file keeps its own flagged set", async () => {
+		const ex = new ToolExecutor(tempDir("placeholder-"));
+		ex.beginTurn("x");
+		await write(ex, first);
+		const out = await ex.execute("write_file", { path: "OTHER.md", content: first });
+		expect(out.startsWith("Error:")).toBe(true);
+	});
+
+	test("beginTurn resets flagged paths and the cap", async () => {
+		const ex = new ToolExecutor(tempDir("placeholder-"));
+		ex.beginTurn("x");
+		await write(ex, first);
+		await write(ex, second);
+		await write(ex, third);
+		ex.beginTurn("y");
+		expect((await write(ex, first)).startsWith("Error:")).toBe(true);
+		expect(await write(ex, first)).toContain("File written");
 	});
 });

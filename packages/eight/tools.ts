@@ -264,7 +264,13 @@ import { IssueBlameGate, issueBodyOf } from "./issue-blame";
 import { layoutMeasureLine } from "./layout-measure";
 import { MESSAGE_BOARDROOM_TOOL_DEF, messageBoardroom } from "./message-boardroom";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
-import { placeholderPathLine } from "./placeholder-paths";
+import {
+	MAX_PLACEHOLDER_REFUSALS,
+	placeholderKey,
+	placeholderLineFor,
+	placeholderPathLine,
+	placeholderPaths,
+} from "./placeholder-paths";
 import { RetiredFacts } from "./retired-facts";
 import { ensureScratchExcludedIfPresent } from "./scratch-exclude";
 import { scrubKeepingAttachment, scrub as scrubSecrets } from "./secret-scanner";
@@ -1006,8 +1012,8 @@ export class ToolExecutor {
 	private retiredFacts = new RetiredFacts();
 	/** Text files read this turn: a path in one of them is real, not invented (#4401). */
 	private readTexts: string[] = [];
-	/** Prose files whose placeholder-folder write was refused once this turn (#4405). */
-	private placeholderRefused = new Set<string>();
+	/** Per prose file this turn: invented paths already flagged and refusals spent (#4405, #4407). */
+	private placeholderRefused = new Map<string, { flagged: Set<string>; refusals: number }>();
 	/** Absolute paths read or written this session; write_file replaces only these or new files (#4238). */
 	private seenPaths = new Set<string>();
 	/** Commands the harness refused; a refused probe proves nothing about the files it named (#4238). */
@@ -1165,15 +1171,26 @@ export class ToolExecutor {
 	}
 
 	/**
-	 * Refuse a prose-doc write that names an invented folder, once per file per turn (#4405).
-	 * The local model ignored the nudge appended to a successful write, so the first attempt
-	 * writes nothing and returns the nudge as the error. The second attempt on the same file
-	 * goes through, so a deliberate example can never loop. null: write it.
+	 * Refuse a prose-doc write that names an invented folder (#4405). The local model ignored
+	 * the nudge appended to a successful write, so the attempt writes nothing and returns the
+	 * nudge as the error. A retry is refused again only when it names an invented path not
+	 * flagged earlier for that file this turn (#4407: a swapped-in `c:\users\priya\tally` is
+	 * no safer than `path\to`); a retry whose invented paths were all flagged is a deliberate
+	 * example and goes through. After MAX_PLACEHOLDER_REFUSALS refusals the write is allowed,
+	 * so it can never loop. null: write it.
 	 */
 	private placeholderRefusal(file: string, text: string, tool: string): string | null {
-		const line = placeholderPathLine(file, text, [this.presendTask, ...this.readTexts]);
-		if (!line || this.placeholderRefused.has(file)) return null;
-		this.placeholderRefused.add(file);
+		const invented = placeholderPaths(file, text, [this.presendTask, ...this.readTexts]);
+		if (invented.length === 0) return null;
+		const state = this.placeholderRefused.get(file) ?? { flagged: new Set<string>(), refusals: 0 };
+		const fresh = invented.filter((p) => !state.flagged.has(placeholderKey(p)));
+		if (state.refusals > 0 && (fresh.length === 0 || state.refusals >= MAX_PLACEHOLDER_REFUSALS)) {
+			return null;
+		}
+		for (const p of fresh) state.flagged.add(placeholderKey(p));
+		state.refusals++;
+		this.placeholderRefused.set(file, state);
+		const line = placeholderLineFor(file, state.refusals === 1 ? invented : fresh);
 		return `Error: nothing was written. ${line} Call ${tool} again with the fixed text. If the path is deliberate, send the same call again and it will be written.`;
 	}
 

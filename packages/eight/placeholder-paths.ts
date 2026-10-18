@@ -11,8 +11,8 @@
  * prose doc ANY absolute path (a drive path, `/Users/...`, `/home/...`, `~/...`) is invented
  * unless it, or a parent folder of it, appears in the task or a file read this turn
  * (case-insensitive, either slash style). This module only names the paths and never changes
- * content; the caller (ToolExecutor) refuses the write once per file per turn and then lets
- * the same file through.
+ * content; the caller (ToolExecutor) refuses the write, and refuses a retry only when it invents a
+ * path not already flagged for that file (#4407), at most 3 times per file per turn.
  */
 
 import { safeLabel } from "./retired-facts";
@@ -36,6 +36,8 @@ const BARE_ROOT = new Set(["/users", "/home", "~", "c:/users", "c:/windows", "c:
 const PROSE = /\.(?:md|markdown|txt)$/i;
 const PATH_CHAR = /[^\s"'`(),;]/;
 const MAX_NAMED = 3;
+/** Refusals per file per turn before a placeholder write is let through with the warning (#4407). */
+export const MAX_PLACEHOLDER_REFUSALS = 3;
 const MAX_SHOWN = 60;
 const MAX_SCAN = 200_000;
 const MAX_MATCHES = 50;
@@ -73,13 +75,16 @@ function isGiven(token: string, given: string[]): boolean {
 	return false;
 }
 
+/** The comparison form of a path: two spellings of one path share it (#4407). */
+export const placeholderKey = norm;
+
 /**
- * One line naming invented folders in `content`, or "". `inputs` is the text the task gave
- * (the request, files read this turn). Prose docs only. Never throws.
+ * Every invented folder in `content`, in order of appearance, or []. `inputs` is the text
+ * the task gave (the request, files read this turn). Prose docs only. Never throws.
  */
-export function placeholderPathLine(file: string, content: string, inputs: string[]): string {
+export function placeholderPaths(file: string, content: string, inputs: string[]): string[] {
 	try {
-		if (!PROSE.test(file)) return "";
+		if (!PROSE.test(file)) return [];
 		const text = content.slice(0, MAX_SCAN);
 		const seen = new Set<string>();
 		const found: string[] = [];
@@ -104,10 +109,20 @@ export function placeholderPathLine(file: string, content: string, inputs: strin
 			if (isGiven(token, given)) continue;
 			invented.push(token.length > MAX_SHOWN ? `${token.slice(0, MAX_SHOWN)}...` : token);
 		}
-		if (invented.length === 0) return "";
-		const named = invented.slice(0, MAX_NAMED).join(", ");
-		return `[Placeholder path] ${named} in ${safeLabel(file)}: the task does not say where that folder is. In commands, do not put a made-up or described folder inside the path; tell the reader to open or cd into the project folder first, then use the path relative to it (for example \`node src/app.js\`).`;
+		return invented;
 	} catch {
-		return "";
+		return [];
 	}
+}
+
+/** The one-line nudge naming up to three of `paths`, or "" when there are none. */
+export function placeholderLineFor(file: string, paths: string[]): string {
+	if (paths.length === 0) return "";
+	const named = paths.slice(0, MAX_NAMED).join(", ");
+	return `[Placeholder path] ${named} in ${safeLabel(file)}: the task does not say where that folder is. In commands, do not put a made-up or described folder inside the path; tell the reader to open or cd into the project folder first, then use the path relative to it (for example \`node src/app.js\`).`;
+}
+
+/** One line naming invented folders in `content`, or "". */
+export function placeholderPathLine(file: string, content: string, inputs: string[]): string {
+	return placeholderLineFor(file, placeholderPaths(file, content, inputs));
 }
