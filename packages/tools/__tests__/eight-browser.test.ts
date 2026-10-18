@@ -1745,15 +1745,34 @@ describe("task-file placeholders: a supplied login is typed without the model ho
 
 	const pwStep = (text: string) => [{ action: "type", selector: "input[type=password]", text }];
 
+	/** run() scrubs its return value, so scan the raw JSON built before scrubbing: every
+	 *  JSON.stringify output produced during the run (step rows, the result object). */
+	const rawRun = async (b: ReturnType<typeof createEightBrowser>, steps: unknown[]) => {
+		const real = JSON.stringify;
+		const raw: string[] = [];
+		JSON.stringify = ((...a: Parameters<typeof JSON.stringify>) => {
+			const o = real(...a);
+			if (typeof o === "string") raw.push(o);
+			return o;
+		}) as typeof JSON.stringify;
+		try {
+			const out = await b.run(steps);
+			return { out, raw: raw.join("\n") };
+		} finally {
+			JSON.stringify = real;
+		}
+	};
+
 	test("a file secret typed into a password input passes verification when the browser hides the value", async () => {
 		task("http://127.0.0.1:5/");
 		const site = fakeSite({ hideSecrets: true });
 		const b = mk(site.call);
 		await b.open("http://127.0.0.1:5/");
-		const out = await b.run(pwStep("{{file:TASK.txt:Password}}"));
+		const { out, raw } = await rawRun(b, pwStep("{{file:TASK.txt:Password}}"));
 		expect(JSON.parse(out).ok).toBe(true);
 		expect(sent(site.calls)).toEqual([PW]);
 		expect(out).not.toContain(PW);
+		expect(raw).not.toContain(PW);
 		expect(await b.state()).not.toContain(PW);
 	});
 
@@ -1766,6 +1785,8 @@ describe("task-file placeholders: a supplied login is typed without the model ho
 				: site.call(cmd, args);
 		const b = mk(refuse);
 		await b.open("http://127.0.0.1:5/");
+		// The browser echoes the value in its own error reply, so the raw row carries it by design;
+		// run() scrubs it, which is what this test pins.
 		const out = await b.run(pwStep("{{file:TASK.txt:Password}}"));
 		expect(JSON.parse(out).ok).toBe(false);
 		expect(out).not.toContain(PW);
@@ -1778,9 +1799,10 @@ describe("task-file placeholders: a supplied login is typed without the model ho
 			cmd === "page.type" ? site.call(cmd, { ...args, text: `${PW}-x` }) : site.call(cmd, args);
 		const b = mk(wrong);
 		await b.open("http://127.0.0.1:5/");
-		const out = await b.run(pwStep("{{file:TASK.txt:Password}}"));
+		const { out, raw } = await rawRun(b, pwStep("{{file:TASK.txt:Password}}"));
 		expect(JSON.parse(out).ok).toBe(false);
 		expect(out).not.toContain(PW);
+		expect(raw).not.toContain(PW);
 	});
 
 	test("a secret field that reads back a different value fails even when flagged secret", async () => {
@@ -1796,9 +1818,41 @@ describe("task-file placeholders: a supplied login is typed without the model ho
 		};
 		const b = mk(tamper);
 		await b.open("http://127.0.0.1:5/");
-		const out = await b.run(pwStep("{{file:TASK.txt:Password}}"));
+		const { out, raw } = await rawRun(b, pwStep("{{file:TASK.txt:Password}}"));
 		expect(JSON.parse(out).ok).toBe(false);
 		expect(out).not.toContain(PW);
+		expect(raw).not.toContain(PW);
+	});
+
+	test("a secret field whose read-back finds no element fails, not verifies", async () => {
+		task("http://127.0.0.1:5/");
+		const site = fakeSite({ hideSecrets: true });
+		let typedOnce = false;
+		const empty: BrowserCall = async (cmd, args) => {
+			if (cmd === "page.type") typedOnce = true;
+			if (typedOnce && cmd === "page.query" && args?.selector === "input[type=password]")
+				return { ok: true, elements: [], count: 0 };
+			return site.call(cmd, args);
+		};
+		const b = mk(empty);
+		await b.open("http://127.0.0.1:5/");
+		const { out, raw } = await rawRun(b, pwStep("{{file:TASK.txt:Password}}"));
+		expect(JSON.parse(out).ok).toBe(false);
+		expect(raw).not.toContain(PW);
+	});
+
+	test("a secret field whose type reply carries no ok field fails, not verifies", async () => {
+		task("http://127.0.0.1:5/");
+		const site = fakeSite({ hideSecrets: true });
+		const noOk: BrowserCall = async (cmd, args) => {
+			const r = await site.call(cmd, args);
+			return cmd === "page.type" ? {} : r;
+		};
+		const b = mk(noOk);
+		await b.open("http://127.0.0.1:5/");
+		const { out, raw } = await rawRun(b, pwStep("{{file:TASK.txt:Password}}"));
+		expect(JSON.parse(out).ok).toBe(false);
+		expect(raw).not.toContain(PW);
 	});
 
 	test("works with no secrets file configured (the default local profile has none)", () => {

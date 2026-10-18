@@ -1816,7 +1816,13 @@ export function createEightBrowser(
 					});
 					if (r?.ok === false) row.error = r.error;
 					const got = await readBack();
-					row.verified = got === clipped(text) || (hidden && r?.ok !== false && got === preText);
+					row.verified =
+						got === clipped(text) ||
+						(hidden &&
+							r?.ok === true &&
+							typeof got === "string" &&
+							typeof preText === "string" &&
+							got === preText);
 					if (row.verified) break;
 				}
 				row.ok = row.verified;
