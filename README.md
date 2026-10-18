@@ -6,7 +6,7 @@
   <strong>The kernel of the <a href="https://8gent.world">8gent ecosystem</a>.</strong><br />
   Open source autonomous coding agent powered by local LLMs or free cloud models, for developers who want an agent that runs on their own machine.<br />
   No API keys. No usage caps. No cloud dependency.<br />
-  Run it: <code>npm install -g @8gi-foundation/8gent-code &amp;&amp; 8gent</code>
+  Install: <code>curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.sh | sh</code> (macOS, Linux), or see <a href="#install">Install</a> for Windows. Then run <code>8gent</code>.
 </p>
 
 <br />
@@ -147,9 +147,11 @@ The 8GI Foundation Discord server is the primary community hub for contributors 
 ## Quick Start
 
 ```bash
-npm install -g @8gi-foundation/8gent-code
+curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.sh | sh
 8gent
 ```
+
+On Windows (PowerShell): `irm https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.ps1 | iex`. Both install the newest GitHub release (v0.20.0 today) as a standalone binary, so no Bun or Node is needed.
 
 That's it. 8gent uses an adaptive provider router with 16 model providers (plus two opt-in host-CLI slots). Six run locally: `8gent` (model `eight-1.0-q3:14b`), `ollama` and `lmstudio` are on by default, `llama-server` is selected with `EIGHT_LOCAL_SERVER=llama-server`, and `apple-foundation` and `apfel` turn on when a macOS 26 Apple Silicon host has them. The other ten are hosted providers, each opt-in with your own API key; the full list with every variable is [docs/install/providers.md](docs/install/providers.md). Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
 
@@ -175,14 +177,21 @@ Prefer no colour? `NO_COLOR=1 8gent`. See [docs/guides/no-color.md](docs/guides/
 
 New here, or coming from another terminal coding tool? Start with the [user guide](docs/user/README.md) (Windows first).
 
-Two ways to install. The **npm** path is smallest but needs [Bun](https://bun.sh) on your machine. The **standalone binary** embeds the Bun runtime, so it needs nothing else.
+One-line installers put the newest GitHub release on your machine as a standalone binary (no Bun, no Node), check it against the release `SHA256SUMS`, and replace nothing if a check fails. They are the path that gets the current version.
 
-### npm (all platforms, needs Bun)
+Windows (PowerShell, no admin rights):
+
+```powershell
+irm https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.ps1 | iex
+```
+
+macOS and Linux (x64 and arm64):
 
 ```bash
-npm install -g @8gi-foundation/8gent-code
-8gent
+curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.sh | sh
 ```
+
+More options, including `EIGHT_VERSION` to pin a version, are in [docs/user/install.md](docs/user/install.md). Or take a binary from a [GitHub Release](https://github.com/8gi-foundation/8gent-code/releases) by hand, below.
 
 ### Standalone binary (no runtime required)
 
@@ -212,6 +221,10 @@ tar xzf 8gent-<version>-linux-amd64.tar.gz && sudo mv 8gent-*/bin/8gent /usr/loc
 **Windows** - run the installer (`8gent-setup-<version>-x64.exe`). It installs to `%LOCALAPPDATA%\Programs\8gent`, adds itself to your PATH, and registers an uninstaller. A [winget](https://learn.microsoft.com/windows/package-manager/) manifest ships under `packaging/winget/` for `winget install 8GIFoundation.8gentCode` once published.
 
 > Binaries are code-signed only on releases where the maintainer's certificates are configured (see [SIGNING.md](SIGNING.md)). Unsigned downloads run fine but may prompt Gatekeeper (macOS) or SmartScreen (Windows) - allow them through, or build your own with `bun run build:binaries`.
+
+### npm (old build, 0.17.0)
+
+The npm package is behind GitHub. `npm install -g @8gi-foundation/8gent-code` installs 0.17.0 (published 11 May 2026), not the current release, and it needs [Bun](https://bun.sh). Use a one-line installer above until npm is republished.
 
 ### Build binaries from source
 
@@ -256,7 +269,7 @@ No central vendor captures that value.
 
 The floor is zero cost. The ceiling is what a self-improving local agent can learn from your codebase.
 
-Try it: `npm install -g @8gi-foundation/8gent-code && 8gent`
+Try it: `curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.sh | sh && 8gent` (Windows: see [Install](#install)).
 
 No build tools are needed. On Linux, terminal tabs use node-pty, which compiles at install time: without Python and a C++ compiler npm skips it, 8gent still installs and runs, and a terminal tab says how to enable it (`sudo apt install python3 make g++`, then reinstall).
 
@@ -649,24 +662,18 @@ See [ROADMAP.md](ROADMAP.md) for the full ledger. Snapshot:
 <tr>
 <td valign="top" width="33%">
 
-### Just shipped (v0.18.0)
+### Just shipped (v0.20.0)
 
-**Installs anywhere, safer by default** - `npm install -g` works on a bare Linux machine, `web_fetch` only reaches the public internet, and the system prompt stays byte-stable so local models reuse their cache.
+Released 13 October 2026. Full notes on the [release page](https://github.com/8gi-foundation/8gent-code/releases/tag/v0.20.0).
 
-**From v0.17.3 (first published in this release):**
+- Local screen grounding: `screen_locate`, `desktop_act` and `chooseElement` find and act on a target through a local grounder, with approval in every mode
+- `8gent deck render spec.json` and `render_video_deck` render a JSON spec into slides or video deterministically
+- Daemon: shared sessions across the TUI and the browser panel, a live anatomy page at `/live` (Ctrl+F), crash resume that never repeats a side effect
+- Local models get 8gent Browser tools through an on-demand isolated profile
+- Onboarding finds llama-server and LM Studio on every OS and saves your choice
+- `8gent update` pulls and rebuilds source checkouts, including 8gent Browser
 
-**Adaptive three-model orchestration** - planner, engineer, and judge roles are matched to distinct local models, with dynamic detection of what is installed on the host. New `/build` slash command runs the pipeline end-to-end.
-
-- Body-parts taxonomy: eyes + hands + handeyes, selectively coordinated when the agent is stuck
-- Video ingestion: Marlin caption + Whisper transcript sidecar, `extract_video` tool, knowledge-graph folding
-- KnowledgeGraph over `graph.*` RPC; living plan rail + task discipline in the TUI
-- DoomLoopDetector EventEmitter (#2527, RFC Option A)
-
-**v0.14 hardened kernel** (folded into this release):
-
-- DoomLoopDetector / SecretScanner / PathGuard / BashParser
-- ToolResultCache / ArtifactStore / TwoStageCompactor
-- PreToolRouter / TurnJournal
+Earlier: v0.18.0 made installs work on a bare Linux machine and kept `web_fetch` to the public internet.
 
 </td>
 <td valign="top" width="33%">
