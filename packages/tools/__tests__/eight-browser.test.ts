@@ -2898,6 +2898,60 @@ describe("isolated profile: a password field is typed into only on an allowed lo
 	});
 });
 
+// 8gent Browser's page.type is { selector, text }: control-server.ts calls typeText(tab, selector, text)
+// and never reads an index; an empty selector answers "type requires a selector". This wrapper holds
+// the fixture to that, so a step that sends only an index fails here as it does against the browser.
+type Dom = { tag: string; attrs: Record<string, string>; nth: number; rect: Rect4 };
+type Rect4 = { x: number; y: number; w: number; h: number };
+/** Each input sits in its own wrapper, as most sign-in forms do: every one is nth-of-type(1). */
+function realProtocol(dom: Dom[], siteOpts: Parameters<typeof fakeSite>[0] = {}) {
+	const site = fakeSite(siteOpts);
+	const typedSelectors: unknown[] = [];
+	const fakeSel = ["input[name=username]", "input[type=password]"];
+	const matches = (e: Dom, sel: string): boolean => {
+		const m = sel.match(/^([a-z]+)(.*)$/);
+		if (!m || m[1] !== e.tag) return false;
+		const rest = m[2];
+		const parts = rest.match(/\[[^\]]+\]|:not\(\[[^)]+\]\)|:nth-(?:of-type|child)\(\d+\)/g) ?? [];
+		if (parts.join("") !== rest) return false;
+		return parts.every((p) => {
+			let q = p.match(/^\[([\w-]+)="(.*)"\]$/) ?? p.match(/^\[([\w-]+)=(\w+)\]$/);
+			if (q) return e.attrs[q[1]] === q[2];
+			q = p.match(/^:not\(\[([\w-]+)\]\)$/);
+			if (q) return !(q[1] in e.attrs);
+			q = p.match(/^:nth-(?:of-type|child)\((\d+)\)$/);
+			return q ? e.nth === Number(q[1]) : false;
+		});
+	};
+	const find = (sel: string) => dom.filter((e) => matches(e, sel));
+	const call: BrowserCall = async (cmd, args = {}) => {
+		const sel = typeof args.selector === "string" ? args.selector : "";
+		if (cmd === "page.type") {
+			typedSelectors.push(args.selector);
+			if (!sel.trim()) return { ok: false, error: "type requires a selector" };
+			const hit = find(sel)[0];
+			if (!hit) return { ok: false, error: "no element matched selector" };
+			return site.call("page.type", { ...args, selector: fakeSel[dom.indexOf(hit)] });
+		}
+		if (cmd === "page.query" && /^[a-z]+(\[|:)/.test(sel)) {
+			const hits = find(sel).map((e) => ({
+				index: 0,
+				tag: e.tag,
+				text: "",
+				rect: e.rect,
+				visible: true,
+			}));
+			return { ok: true, elements: hits, count: hits.length };
+		}
+		return withSecretFields(site.call)(cmd, args);
+	};
+	return { call, typedSelectors, site };
+}
+const form: Dom[] = [
+	{ tag: "input", attrs: { type: "text" }, nth: 1, rect: { x: 0, y: 0, w: 9, h: 9 } },
+	{ tag: "input", attrs: { type: "password" }, nth: 1, rect: { x: 0, y: 10, w: 9, h: 9 } },
+];
+
 describe('element lines read `[n] role "name"`; type accepts an index (#4043)', () => {
 	test("roles come from the tag, an input type or the ARIA role; the name is quoted and clipped as before", async () => {
 		const els = [
@@ -2938,15 +2992,8 @@ describe('element lines read `[n] role "name"`; type accepts an index (#4043)', 
 		]);
 	});
 	test("type by index lands and is verified against the element list; a bad index is refused in the dry run", async () => {
-		const site = fakeSite();
-		const call: BrowserCall = async (cmd, args = {}) =>
-			cmd === "page.type" && typeof args.index === "number"
-				? site.call("page.type", {
-						...args,
-						selector: args.index === 1 ? "input[type=password]" : "input[name=username]",
-					})
-				: site.call(cmd, args);
-		const b = createEightBrowser(call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
+		const p = realProtocol(form);
+		const b = createEightBrowser(p.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b.open("http://127.0.0.1:5/");
 		const out = JSON.parse(await b.run([{ action: "type", index: 0, text: "rishi" }]));
 		expect(out.ok).toBe(true);
@@ -2963,12 +3010,8 @@ describe('element lines read `[n] role "name"`; type accepts an index (#4043)', 
 		});
 	});
 	test("type by index: a verify that never lands stops the plan, as with a selector", async () => {
-		const site = fakeSite({ dropTyping: true });
-		const call: BrowserCall = async (cmd, args = {}) =>
-			cmd === "page.type" && typeof args.index === "number"
-				? site.call("page.type", { ...args, selector: "input[name=username]" })
-				: site.call(cmd, args);
-		const b = createEightBrowser(call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
+		const p = realProtocol(form, { dropTyping: true });
+		const b = createEightBrowser(p.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
 		await b.open("http://127.0.0.1:5/");
 		const out = JSON.parse(
 			await b.run([
@@ -2978,7 +3021,7 @@ describe('element lines read `[n] role "name"`; type accepts an index (#4043)', 
 		);
 		expect(out.ok).toBe(false);
 		expect(out.steps[0]).toMatchObject({ attempts: 2, verified: false });
-		expect(site.calls.some((c) => c.cmd === "page.click")).toBe(false);
+		expect(p.site.calls.some((c) => c.cmd === "page.click")).toBe(false);
 	});
 });
 
@@ -3032,5 +3075,71 @@ describeNotWin("ToolExecutor on the default local profile (#3785)", () => {
 			server.stop(true);
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("a type step by index reaches the real 8gent Browser protocol (#4426)", () => {
+	test("index steps become selectors that reach the same fields, and verify", async () => {
+		const p = realProtocol(form);
+		const b = createEightBrowser(p.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
+		expect(await b.open("http://127.0.0.1:5/")).not.toMatch(/failed/);
+		const out = JSON.parse(
+			await b.run([
+				{ action: "type", index: 0, text: "rishi" },
+				{ action: "type", index: 1, text: "hunter2" },
+			]),
+		);
+		expect(out.ok).toBe(true);
+		expect(out.steps.map((s: { verified: boolean }) => s.verified)).toEqual([true, true]);
+		expect(p.typedSelectors).toEqual(["input[type=text]", "input[type=password]"]);
+		for (const s of p.typedSelectors) expect(typeof s === "string" && s.length > 0).toBe(true);
+	});
+
+	test("an element no selector can single out fails with a message, never a silent pass", async () => {
+		const twin = { tag: "input", attrs: {}, nth: 1 };
+		const p = realProtocol([
+			{ ...twin, rect: { x: 0, y: 0, w: 9, h: 9 } },
+			{ ...twin, rect: { x: 0, y: 10, w: 9, h: 9 } },
+		]);
+		const b = createEightBrowser(p.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
+		await b.open("http://127.0.0.1:5/");
+		const out = JSON.parse(await b.run([{ action: "type", index: 1, text: "x" }]));
+		expect(out.ok).toBe(false);
+		expect(JSON.stringify(out)).toMatch(/index 1 has no selector/);
+		expect(p.typedSelectors).toEqual([]);
+	});
+
+	test("two inputs sharing one rect: the step fails and nothing is typed", async () => {
+		const same = { x: 0, y: 0, w: 9, h: 9 };
+		const p = realProtocol([
+			{ tag: "input", attrs: { type: "text" }, nth: 1, rect: same },
+			{ tag: "input", attrs: { type: "password" }, nth: 2, rect: same },
+		]);
+		const b = createEightBrowser(p.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
+		await b.open("http://127.0.0.1:5/");
+		const out = JSON.parse(await b.run([{ action: "type", index: 1, text: "x" }]));
+		expect(out.ok).toBe(false);
+		expect(JSON.stringify(out)).toMatch(/index 1 has no selector.*for example \{selector:/);
+		expect(p.typedSelectors).toEqual([]);
+	});
+
+	test("a hidden zero-rect target fails and nothing is typed", async () => {
+		const p = realProtocol([
+			{ tag: "input", attrs: { type: "text" }, nth: 1, rect: { x: 0, y: 0, w: 9, h: 9 } },
+			{ tag: "input", attrs: { type: "email" }, nth: 1, rect: { x: 0, y: 10, w: 0, h: 0 } },
+		]);
+		const b = createEightBrowser(p.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
+		await b.open("http://127.0.0.1:5/");
+		const out = JSON.parse(await b.run([{ action: "type", index: 1, text: "x" }]));
+		expect(out.ok).toBe(false);
+		expect(p.typedSelectors).toEqual([]);
+	});
+
+	test("the fixture holds an index-only page.type to the browser's answer", async () => {
+		const p = realProtocol(form);
+		expect(await p.call("page.type", { tabId: "t1", index: 0, text: "x" })).toEqual({
+			ok: false,
+			error: "type requires a selector",
+		});
 	});
 });
