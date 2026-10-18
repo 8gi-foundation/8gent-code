@@ -1341,6 +1341,51 @@ describe("touchesBrowserSecrets: run_command may not reach the browser token or 
 		test(`allows: ${cmd}`, () => expect(touchesBrowserSecrets(cmd)).toBe(false));
 });
 
+describe("touchesBrowserSecrets: a python f-string brace is not a brace-expansion glob (#4423)", () => {
+	// The checker the cloud rehearsal sigi-dev-ifeval-a ran; refused only because of {caps} and {caps_any}.
+	const heredoc = [
+		"python3 - <<'EOF'",
+		"import json, re, pathlib",
+		"resp = pathlib.Path('responses')",
+		"ok = True",
+		"t = (resp/'1314.txt').read_text()",
+		"caps = re.findall(r'\\b[A-Z]{2,}\\b', t)",
+		"caps_any = re.findall(r'\\b[A-Z]+\\b', t)",
+		"check('1314 all-caps <=10', len(caps) <= 10 and len(caps) >= 1, f'len>=2: {caps}')",
+		"check('1314 any all-caps <=10', len(caps_any) <= 10, f'all: {caps_any}')",
+		"print(f'{len(caps)} of {len(caps_any)}')",
+		"EOF",
+	].join("\n");
+
+	test("the exact heredoc is not refused", () =>
+		expect(touchesBrowserSecrets(heredoc)).toBe(false));
+	test("a lone {name} word is not refused", () => {
+		expect(touchesBrowserSecrets("python3 -c \"print(f'all: {caps_any}')\"")).toBe(false);
+		expect(touchesBrowserSecrets("echo {caps}")).toBe(false);
+	});
+	test("the same heredoc reading the real token is still refused", () => {
+		expect(touchesBrowserSecrets(`${heredoc}\nopen('/Users/x/.8gent/browser-control.token')`)).toBe(
+			true,
+		);
+		expect(
+			touchesBrowserSecrets(
+				`${heredoc}\nprint(open('/Users/x/.8gent/browser-profiles/p/Cookies').read())`,
+			),
+		).toBe(true);
+	});
+	test("real brace and glob expansions over browser state are still refused", () => {
+		for (const cmd of [
+			"cat ~/{.8gent}/browser-control.token",
+			"cat ~/.8gent/browser-control.{token,port}",
+			"cat ~/{.8gent,x}/browser-control.token",
+			"ls ~/.8*/browser-pro*",
+			"cat ~/{.8gent,.8x}",
+			"python3 -c \"print(open('/Users/x/.8gent/browser-control.token').read())\"",
+		])
+			expect(touchesBrowserSecrets(cmd)).toBe(true);
+	});
+});
+
 describe("touchesBrowserSecrets: a scratch login file and sed regexes are not browser state (#4417)", () => {
 	const scratch = [
 		"sed -n 's/^\\([A-Za-z]*:\\).*/\\1/p' .tmp/login",
