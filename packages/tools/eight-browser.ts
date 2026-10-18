@@ -1794,6 +1794,18 @@ export function createEightBrowser(
 					for (const [placeholder, value] of r.values) resolvedSecrets.set(value, placeholder);
 				}
 				if (text) typed.add(clipped(text));
+				const readBack = async (): Promise<unknown> =>
+					a.selector !== undefined
+						? (await call("page.query", { tabId: id, selector: a.selector }))?.elements?.[0]?.text
+						: (await call("page.query", { tabId: id }))?.elements?.[a.index as number]?.text;
+				// 8gent Browser never echoes a password or payment field's value in page.query: the text
+				// comes back blank, or as the field's label or placeholder. Reading it back can then never
+				// equal what was typed, so for those fields the check is that the type call succeeded and
+				// the read-back is either the typed text (a browser that echoes) or unchanged from before
+				// (a browser that hides it). A different value still fails. The typed text is compared
+				// in memory only and never written to the step row.
+				const hidden = await secretTarget(a, before.els);
+				const preText = hidden ? await readBack() : undefined;
 				for (let n = 1; n <= 2; n++) {
 					row.attempts = n;
 					const r = await call("page.type", {
@@ -1803,11 +1815,14 @@ export function createEightBrowser(
 						text,
 					});
 					if (r?.ok === false) row.error = r.error;
-					const got =
-						a.selector !== undefined
-							? (await call("page.query", { tabId: id, selector: a.selector }))?.elements?.[0]?.text
-							: (await call("page.query", { tabId: id }))?.elements?.[a.index as number]?.text;
-					row.verified = got === clipped(text);
+					const got = await readBack();
+					row.verified =
+						got === clipped(text) ||
+						(hidden &&
+							r?.ok === true &&
+							typeof got === "string" &&
+							typeof preText === "string" &&
+							got === preText);
 					if (row.verified) break;
 				}
 				row.ok = row.verified;
