@@ -22,6 +22,7 @@ import {
 	repoGitState,
 } from "./command-policy";
 import { currentPermissionMode } from "./permission-mode.js";
+import { readOnlyInlinePython } from "./s1-inline-python";
 import { type ActiveShellKind, posixRulesApply } from "./shell-tools";
 import { requestTuiApproval } from "./tui-approval-channel.js";
 
@@ -860,7 +861,13 @@ export class PermissionManager {
 	/**
 	 * Check if a command is pre-approved (safe or user-allowed)
 	 */
-	isAllowed(command: string, shell: ActiveShellKind = activeShellKind(), where?: string): boolean {
+	isAllowed(
+		command: string,
+		shell: ActiveShellKind = activeShellKind(),
+		where?: string,
+		/** Absolute folder the command runs in; the inline-python shadow check reads it. */
+		cwd?: string,
+	): boolean {
 		const normalizedCmd = command.toLowerCase().trim();
 		const remembered = sessionKey(command, where);
 
@@ -876,6 +883,12 @@ export class PermissionManager {
 
 		// The safe-prefix list reads POSIX quoting; under PowerShell, or a cmd.exe
 		// line with ^ or %, it cannot judge the line, so only a session approval counts.
+		// A read-only inline `python3 -c "..."` (load a file, print) raises no card (#4421). Judged
+		// before the line-break guard below: the script's line breaks sit inside one quoted word,
+		// and the module reads that quoting itself. Never under PowerShell or cmd.exe.
+		if (shell !== "powershell" && shell !== "cmd" && readOnlyInlinePython(command, cwd).ok)
+			return true;
+
 		if (!posixRulesApply(command, shell)) return false;
 
 		// Safe prefixes and the user's allowed patterns approve a line only when
@@ -949,6 +962,8 @@ export class PermissionManager {
 			 * folder only. Policy still judges `command` alone.
 			 */
 			where?: string;
+			/** Absolute folder the command runs in (for the inline-python shadow check). */
+			cwd?: string;
 		} = {},
 	): Promise<boolean> {
 		// A refusal must never quote an earlier call's channel outcome.
@@ -1009,7 +1024,11 @@ export class PermissionManager {
 		}
 
 		// Check if already approved or safe
-		if (command && this.isAllowed(command, undefined, opts.where) && !this.isDangerous(command)) {
+		if (
+			command &&
+			this.isAllowed(command, undefined, opts.where, opts.cwd) &&
+			!this.isDangerous(command)
+		) {
 			request.approved = true;
 			request.autoApproved = true;
 			this.log.requests.push(request);
@@ -1151,6 +1170,8 @@ export class PermissionManager {
 		shell?: ActiveShellKind,
 		/** The project folder after a leading `cd <folder> &&` (#3199): session answers are per folder. */
 		where?: string,
+		/** Absolute folder the command runs in (for the inline-python shadow check). */
+		cwd?: string,
 	): "allowed" | "denied" | "ask" {
 		// INFINITE MODE: Allow everything except always-blocked commands, and
 		// ask for the ask-every-time list (#3765).
@@ -1185,7 +1206,7 @@ export class PermissionManager {
 		}
 
 		// Check if allowed
-		if (this.isAllowed(command, shell, where)) {
+		if (this.isAllowed(command, shell, where, cwd)) {
 			return "allowed";
 		}
 

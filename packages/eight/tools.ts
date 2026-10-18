@@ -193,6 +193,7 @@ import {
 	watchRedirects,
 	watchWrite,
 } from "../permissions/s1-created-files";
+import { isolatedInlinePython } from "../permissions/s1-inline-python";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { systemOneGate, systemOneMode } from "../permissions/system-one-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
@@ -3720,6 +3721,7 @@ export class ToolExecutor {
 			command,
 			activeShellKind(windowsShell),
 			where,
+			dir,
 		);
 
 		if (permissionCheck === "denied") {
@@ -3776,7 +3778,7 @@ export class ToolExecutor {
 					? "This command may modify system files or cause data loss."
 					: "The agent wants to run a shell command.",
 				command,
-				{ where },
+				{ where, cwd: dir },
 			);
 
 			if (!allowed) {
@@ -3802,6 +3804,8 @@ export class ToolExecutor {
 		}
 		// System One checked these bytes, not the file the command names: run them (8SO, #4102).
 		if (systemOne.runInstead !== undefined) finalCommand = systemOne.runInstead;
+		// A read-only inline python the allowlist admits runs isolated (-I): no cwd imports.
+		finalCommand = isolatedInlinePython(finalCommand);
 
 		const timeoutMs = Math.min(timeoutSec || 120, 300) * 1000;
 

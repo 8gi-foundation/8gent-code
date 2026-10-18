@@ -64,6 +64,7 @@ import {
 	watchRedirects,
 	watchWrite,
 } from "../permissions/s1-created-files";
+import { isolatedInlinePython } from "../permissions/s1-inline-python";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import {
 	applyAt,
@@ -1635,7 +1636,7 @@ async function commandRefusal(
 
 	// The folder a cd prefix chose: the cards name it, and answers are kept per folder.
 	const where = folderLabel(cwd, ctx.workingDirectory);
-	const permissionCheck = permissionManager.checkPermission(command, undefined, where);
+	const permissionCheck = permissionManager.checkPermission(command, undefined, where, cwd);
 	if (permissionCheck === "denied") {
 		return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 	}
@@ -1669,7 +1670,7 @@ async function commandRefusal(
 				? "This command may modify system files or cause data loss."
 				: "The agent wants to run a shell command.",
 			command,
-			{ where },
+			{ where, cwd },
 		);
 		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}
@@ -1708,6 +1709,8 @@ async function runShellCommand(
 	}
 	// System One checked these bytes, not the file the command names: run them (8SO, #4102).
 	if (checked.runInstead !== undefined) finalCommand = checked.runInstead;
+	// A read-only inline python the allowlist admits runs isolated (-I): no cwd imports.
+	finalCommand = isolatedInlinePython(finalCommand);
 
 	const sandboxRefusal = runCommandSandboxRefusal();
 	if (sandboxRefusal) return sandboxRefusal;

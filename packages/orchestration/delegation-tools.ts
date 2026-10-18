@@ -82,7 +82,7 @@ async function gateShellChild(
 			}
 			const { getPermissionManager, isCommandDangerous } = await import("../permissions");
 			const pm = getPermissionManager();
-			const check = pm.checkPermission(command);
+			const check = pm.checkPermission(command, undefined, undefined, cwd);
 			if (check === "denied")
 				return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 			const { systemOneGate } = await import("../permissions/system-one-gate");
@@ -100,6 +100,7 @@ async function gateShellChild(
 						? "This command may modify system files or cause data loss."
 						: "The agent wants to run a shell command as a background agent.",
 					command,
+					{ cwd },
 				);
 				if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 			}
@@ -181,7 +182,10 @@ export async function spawnAgentTool(
 				if (!systemOne.run) return systemOne.message as string;
 			}
 			const { spawnCLIAgent } = await import("./index");
-			const agent = spawnCLIAgent(effectiveRuntime, task, {
+			// A read-only inline python the allowlist admits runs isolated (-I): no cwd imports.
+			const { isolatedInlinePython } = await import("../permissions/s1-inline-python");
+			const runTask = effectiveRuntime === "shell" ? isolatedInlinePython(task) : task;
+			const agent = spawnCLIAgent(effectiveRuntime, runTask, {
 				workingDirectory: workingDirectory,
 				timeout: timeout || undefined,
 				// A process child starts at this depth, so an 8gent it runs is capped too.
