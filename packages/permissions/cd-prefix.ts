@@ -119,7 +119,10 @@ export function cdPrefix(
 		realRoot = realpathSync(root);
 		dir = realpathSync(path.resolve(realRoot, ...p.segs));
 	} catch {
-		return refuse(`there is no folder ${p.folder} in the project`, command);
+		return refuse(
+			`there is no folder ${p.folder} in the project, so run the command without the cd: it already starts in the project folder`,
+			command,
+		);
 	}
 	// A symlink that leads out of the project, or back to its root.
 	if (!strictlyInside(dir, realRoot))

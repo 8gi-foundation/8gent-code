@@ -129,6 +129,8 @@ describe("refused shapes", () => {
 	});
 	test("a missing folder, a file, and nothing after the cd", () => {
 		expect(refusedWhy("cd nope && ls")).toContain("no folder nope");
+		// #4421: the refusal names the working alternative in one plain sentence.
+		expect(refusedWhy("cd nope && ls")).toContain("run the command without the cd");
 		expect(refusedWhy("cd notes.txt && ls")).toContain("is not a folder");
 		expect(refusedWhy("cd video && ")).toContain("nothing follows");
 		expect(refusedWhy("cd ./ && ls")).toContain("name a folder");

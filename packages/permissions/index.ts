@@ -22,6 +22,7 @@ import {
 	repoGitState,
 } from "./command-policy";
 import { currentPermissionMode } from "./permission-mode.js";
+import { readOnlyInlinePython } from "./s1-inline-python";
 import { type ActiveShellKind, posixRulesApply } from "./shell-tools";
 import { requestTuiApproval } from "./tui-approval-channel.js";
 
@@ -876,6 +877,11 @@ export class PermissionManager {
 
 		// The safe-prefix list reads POSIX quoting; under PowerShell, or a cmd.exe
 		// line with ^ or %, it cannot judge the line, so only a session approval counts.
+		// A read-only inline `python3 -c "..."` (load a file, print) raises no card (#4421). Judged
+		// before the line-break guard below: the script's line breaks sit inside one quoted word,
+		// and the module reads that quoting itself. Never under PowerShell or cmd.exe.
+		if (shell !== "powershell" && shell !== "cmd" && readOnlyInlinePython(command).ok) return true;
+
 		if (!posixRulesApply(command, shell)) return false;
 
 		// Safe prefixes and the user's allowed patterns approve a line only when
