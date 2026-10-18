@@ -253,10 +253,8 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 	// Whole-turn budget (#4418): near the end of the budget, one steer asks the
 	// model to write its best answer to the requested output. It rides the same
 	// steer log, so it persists for every later step of the run.
-	const budgetDrain = createBudgetDrain({
-		budgetMs: config.turnBudgetMs ?? resolveTurnBudgetMs(),
-		startedAt: config.turnStartedAt,
-	});
+	const budgetMs = config.turnBudgetMs ?? resolveTurnBudgetMs();
+	const budgetDrain = createBudgetDrain({ budgetMs, startedAt: config.turnStartedAt });
 	const steer = (): string[] => [...(config.steer?.() ?? []), ...budgetDrain()];
 
 	// Retries per request: only when the user set settings.retry.maxRetries; otherwise the
@@ -289,14 +287,15 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		// throwing callback never breaks the loop. Steering (D1) is the one thing
 		// that changes the step: drained messages are spliced in, see steerMessages.
 		prepareStep:
-			config.onStepStart || steer
+			config.onStepStart || config.steer || budgetMs > 0
 				? async ({ stepNumber, messages }: { stepNumber: number; messages: ModelMessage[] }) => {
 						try {
 							await config.onStepStart?.({ stepNumber });
 						} catch {
 							/* step-start logging is best-effort */
 						}
-						if (!steer) return undefined;
+						// Each generate() is a new turn: restart the budget clock.
+						if (stepNumber === 0) budgetDrain.reset();
 						const steered = steerMessages(steerLog, stepNumber, messages, steer);
 						return steered ? { messages: steered } : undefined;
 					}

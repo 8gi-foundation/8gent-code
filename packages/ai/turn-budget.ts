@@ -20,6 +20,11 @@
 export const DEFAULT_TURN_BUDGET_MS = 1_500_000;
 /** Fraction of the budget after which the nudge fires. */
 export const NUDGE_FRACTION = 0.8;
+/** Fraction of the budget the slowest step so far must not cross (the "will not fit" line). */
+export const WONT_FIT_FRACTION = 0.95;
+
+/** A budget drain: call it between steps; reset() restarts the clock for a new turn. */
+export type BudgetDrain = (() => string[]) & { reset: () => void };
 
 export function resolveTurnBudgetMs(env: Record<string, string | undefined> = process.env): number {
 	const raw = env.EIGHT_TURN_BUDGET_MS;
@@ -40,28 +45,42 @@ export function budgetNudgeText(elapsedMs: number, budgetMs: number): string {
  * after 80% of the budget, or earlier when the slowest step so far would not
  * fit in the remaining time (slow local models take minutes per step, so a pure
  * 80% line can be crossed inside a single step).
+ *
+ * The budget is per createEightAgent() agent. packages/eight/agent.ts
+ * retryAgent/verifyAgent create fresh agents, so each gets a fresh budget (this
+ * is not a whole-turn budget across retries). reset() restarts the clock and the
+ * once-only flag so a reused agent gets a fresh budget on each generate().
  */
 export function createBudgetDrain(opts: {
 	budgetMs: number;
 	startedAt?: number;
 	now?: () => number;
-}): () => string[] {
+}): BudgetDrain {
 	const now = opts.now ?? Date.now;
-	const startedAt = opts.startedAt ?? now();
+	let startedAt = opts.startedAt ?? now();
 	let fired = false;
 	let lastStepStart = now();
 	let longestStepMs = 0;
 
-	return () => {
+	const drain = () => {
 		const t = now();
 		longestStepMs = Math.max(longestStepMs, t - lastStepStart);
 		lastStepStart = t;
 		if (fired || opts.budgetMs <= 0) return [];
 		const elapsed = t - startedAt;
 		const late = elapsed >= opts.budgetMs * NUDGE_FRACTION;
-		const wontFit = elapsed + longestStepMs >= opts.budgetMs * 0.95;
+		const wontFit = elapsed + longestStepMs >= opts.budgetMs * WONT_FIT_FRACTION;
 		if (!late && !wontFit) return [];
 		fired = true;
 		return [budgetNudgeText(elapsed, opts.budgetMs)];
 	};
+	return Object.assign(drain, {
+		reset: () => {
+			// An explicit startedAt pins the clock to the caller's turn start.
+			if (opts.startedAt === undefined) startedAt = now();
+			fired = false;
+			lastStepStart = now();
+			longestStepMs = 0;
+		},
+	});
 }

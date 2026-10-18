@@ -47,6 +47,21 @@ describe("createBudgetDrain", () => {
 	});
 });
 
+describe("createBudgetDrain reset", () => {
+	it("a second turn nudges again at the right time, not immediately", () => {
+		let t = 0;
+		const step = createBudgetDrain({ budgetMs: 1000, now: () => t });
+		t = 850;
+		expect(step().length).toBe(1);
+		t = 5000; // idle between turns
+		step.reset();
+		t = 5100;
+		expect(step()).toEqual([]);
+		t = 5850;
+		expect(step().length).toBe(1);
+	});
+});
+
 describe("long task writes a best-effort file before the budget runs out", () => {
 	it("real agent loop: nudge makes the model write the output path", async () => {
 		const out = join(mkdtempSync(join(tmpdir(), "budget-")), "answer.json");
