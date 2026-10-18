@@ -6,12 +6,13 @@
  */
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { decideRules } from "../decide/rules";
 import { PermissionManager } from "./index";
-import { readOnlyInlinePython } from "./s1-inline-python";
+import { isolatedInlinePython, readOnlyInlinePython } from "./s1-inline-python";
 
 afterAll(cleanupTempDirs);
 
@@ -32,7 +33,8 @@ print(type(t['test']))
 print(json.dumps(t['test'])[:500])
 "`;
 
-const ok = (c: string) => readOnlyInlinePython(c).ok;
+const CLEAN = tempDir("inline-py-clean-");
+const ok = (c: string) => readOnlyInlinePython(c, CLEAN).ok;
 
 describe("read-only inline python is allowed", () => {
 	test("the two sweep commands", () => {
@@ -103,8 +105,8 @@ describe("PermissionManager: no card for read-only inline python, a card for the
 	const pm = () => new PermissionManager(path.join(tempDir("inline-py-"), "permissions.json"));
 
 	test("read-only is allowed", () => {
-		expect(pm().checkPermission(ARC1)).toBe("allowed");
-		expect(pm().checkPermission(ARC2)).toBe("allowed");
+		expect(pm().checkPermission(ARC1, undefined, undefined, CLEAN)).toBe("allowed");
+		expect(pm().checkPermission(ARC2, undefined, undefined, CLEAN)).toBe("allowed");
 	});
 	test("writing or deleting still asks", () => {
 		const m = pm();
@@ -209,5 +211,85 @@ describe("a planted stdlib shadow in the cwd falls back to the card (8SO bypass 
 		expect(m.checkPermission(ARC1, undefined, undefined, bad)).toBe("ask");
 		expect(m.checkPermission(ARC1, undefined, undefined, good)).toBe("allowed");
 		expect(m.checkPermission(ARC2, undefined, undefined, good)).toBe("allowed");
+	});
+});
+
+describe("the check needs the command's cwd (second read)", () => {
+	test("no cwd given: the answer is no, ARC1 asks", () => {
+		expect(readOnlyInlinePython(ARC1).ok).toBe(false);
+		const m = new PermissionManager(path.join(tempDir("inline-py-"), "permissions.json"));
+		expect(m.checkPermission(ARC1)).toBe("ask");
+		expect(m.isAllowed(ARC1)).toBe(false);
+	});
+	test("sitecustomize, usercustomize and linecache shadows ask", () => {
+		for (const f of ["sitecustomize.py", "usercustomize.py", "linecache.py"]) {
+			const d = tempDir("inline-py-sc-");
+			writeFileSync(path.join(d, f), "");
+			expect(readOnlyInlinePython(ARC1, d).ok).toBe(false);
+		}
+	});
+	// Unit level: gateShellChild is private to delegation-tools.ts, so this drives the same
+	// call it makes (checkPermission with the delegated cwd) rather than the spawn path.
+	test("delegated cwd with a planted json.py asks even when the daemon cwd is clean", () => {
+		const m = new PermissionManager(path.join(tempDir("inline-py-"), "permissions.json"));
+		const delegated = tempDir("inline-py-deleg-");
+		writeFileSync(path.join(delegated, "json.py"), "");
+		expect(m.checkPermission(ARC1, undefined, undefined, delegated)).toBe("ask");
+		expect(m.checkPermission(ARC1, undefined, undefined, CLEAN)).toBe("allowed");
+	});
+});
+
+describe("an admitted command runs isolated (-I), which closes the shadow class", () => {
+	test("the admitted command carries -I after the interpreter; ARC1 and ARC2 stay admitted", () => {
+		for (const c of [ARC1, ARC2]) {
+			expect(ok(c)).toBe(true);
+			const run = isolatedInlinePython(c, CLEAN);
+			expect(run.startsWith("python3 -I -c ")).toBe(true);
+			expect(run.slice("python3 -I -c ".length)).toBe(c.slice("python3 -c ".length));
+		}
+		expect(isolatedInlinePython(`python -I -c "print(1)"`, CLEAN)).toBe(`python -I -c "print(1)"`);
+	});
+	test("a refused command is returned unchanged", () => {
+		const w = `python3 -c "open('x', 'w').write('1')"`;
+		expect(isolatedInlinePython(w, CLEAN)).toBe(w);
+		const d = tempDir("inline-py-shadow-");
+		writeFileSync(path.join(d, "json.py"), "");
+		expect(isolatedInlinePython(ARC2, d)).toBe(ARC2);
+	});
+
+	// Real python3: each planted stub writes a marker file if it is imported.
+	const MODS = ["traceback", "linecache", "json", "sitecustomize"];
+	const plant = () => {
+		const d = tempDir("inline-py-run-");
+		for (const m of MODS) {
+			const marker = JSON.stringify(path.join(d, `ran-${m}`));
+			writeFileSync(path.join(d, `${m}.py`), `open(${marker}, 'w').write('x')\n`);
+		}
+		return d;
+	};
+	const marks = (d: string) => MODS.filter((m) => existsSync(path.join(d, `ran-${m}`)));
+	const run = (cmd: string, cwd: string) =>
+		spawnSync("/bin/sh", ["-c", cmd], {
+			cwd,
+			encoding: "utf8",
+			env: {
+				...process.env,
+				PATH: `${process.env.PATH ?? ""}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`,
+			},
+		});
+	const RAISE = `python3 -c "import json; print(open('nonexist.txt').read())"`;
+
+	test("without -I the planted modules execute (the mechanism is real)", () => {
+		const d = plant();
+		run(RAISE, d);
+		expect(marks(d).length).toBeGreaterThan(0); // 3.14 runs a planted linecache before -c even starts
+	});
+	test("with -I, the rewritten command never runs a planted module, even on the error path", () => {
+		const d = plant();
+		const rewritten = isolatedInlinePython(RAISE, CLEAN);
+		expect(rewritten).toContain(" -I -c ");
+		const r = run(rewritten, d);
+		expect(r.status).not.toBe(0); // it raised, so python took its traceback path
+		expect(marks(d)).toEqual([]);
 	});
 });

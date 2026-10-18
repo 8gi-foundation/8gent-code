@@ -36,7 +36,7 @@ import { readdirSync } from "node:fs";
  *     a json/ package) would run on `import json`. The command's working directory must
  *     hold no `<mod>`, `<mod>.py`, `<mod>.pyc`, `<mod>.pyd` or `<mod>.so` for the allowed
  *     modules and the stdlib modules they import at load (SHADOWABLE). If the directory
- *     cannot be read, the answer is no. `-I` is accepted but not required;
+ *     cannot be read, or no cwd is passed, the answer is no (the card). `-I` is accepted but not required;
  *   - every `open` is `open('<relative literal path>')` or with mode 'r' / 'rt': the
  *     path has no leading `/`, `~`, `.` or `..` segment, no dot-directory, and does not
  *     name a secret. A bare `open` (an alias) or a computed path is refused.
@@ -78,6 +78,10 @@ const MODULE_ATTRS: Readonly<Record<string, ReadonlySet<string> | "any">> = {
 const SHADOWABLE: readonly string[] = [
 	...Object.keys(MODULE_ATTRS),
 	"enum",
+	"sitecustomize",
+	"usercustomize",
+	"linecache",
+	"traceback",
 	"functools",
 	"operator",
 	"keyword",
@@ -188,13 +192,25 @@ function shadowed(cwd: string): boolean {
 	return false;
 }
 
-export function readOnlyInlinePython(command: string, cwd: string = process.cwd()): InlinePython {
+export function readOnlyInlinePython(command: string, cwd?: string): InlinePython {
 	if (typeof command !== "string" || command.length > MAX_CODE + 64) return NO;
 	const code = extractCode(command);
 	if (code === null || code.trim() === "" || code.length > MAX_CODE) return NO;
 	if (!/^[\t\n\r\x20-\x7e]*$/.test(code)) return NO; // ASCII only: no look-alike names
 	if (BANNED_WORD.test(code) || FILE_KW.test(code) || UNDERSCORE_NAME.test(code)) return NO;
 	if (!importsOk(code) || !moduleUseOk(code) || !opensOk(code)) return NO;
-	if (shadowed(cwd)) return NO;
+	if (cwd === undefined || shadowed(cwd)) return NO; // no cwd: cannot vouch, ask
 	return { ok: true, reason: "inline python that only reads a workspace file and prints" };
+}
+
+/**
+ * The command to spawn when the allowlist is what admits it: the same line with `-I` after
+ * the interpreter (isolated mode: no cwd on sys.path, no PYTHON* env, no user site), so a
+ * planted traceback.py, json.py or sitecustomize.py in the cwd is never imported, whatever
+ * module python reaches for. Any other command, or one the allowlist refuses, is returned
+ * unchanged. The admitted shape is exact, so the rewrite is deterministic.
+ */
+export function isolatedInlinePython(command: string, cwd: string): string {
+	if (!readOnlyInlinePython(command, cwd).ok) return command;
+	return command.replace(/^(\S+)([ \t]+)(?!-I\b)-c([ \t])/, "$1$2-I$2-c$3");
 }

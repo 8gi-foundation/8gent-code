@@ -64,6 +64,7 @@ import {
 	watchRedirects,
 	watchWrite,
 } from "../permissions/s1-created-files";
+import { isolatedInlinePython } from "../permissions/s1-inline-python";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import {
 	applyAt,
@@ -1708,6 +1709,8 @@ async function runShellCommand(
 	}
 	// System One checked these bytes, not the file the command names: run them (8SO, #4102).
 	if (checked.runInstead !== undefined) finalCommand = checked.runInstead;
+	// A read-only inline python the allowlist admits runs isolated (-I): no cwd imports.
+	finalCommand = isolatedInlinePython(finalCommand, cwd);
 
 	const sandboxRefusal = runCommandSandboxRefusal();
 	if (sandboxRefusal) return sandboxRefusal;
