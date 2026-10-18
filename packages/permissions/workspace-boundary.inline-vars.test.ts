@@ -368,7 +368,7 @@ describe("symlinks on a real filesystem", () => {
 
 	test("an absolute value through a symlink that leaves the workspace is refused", () => {
 		if (!linked) return;
-		const link = path.join(ws, "escape-link");
+		const link = path.join(ws, "escape-link").replaceAll("\\", "/");
 		expect(checkCommandBoundary(`D=${link}; cat "$D/secret.txt"`, ws).allowed).toBe(false);
 	});
 
@@ -382,7 +382,10 @@ describe("symlinks on a real filesystem", () => {
 		const check = (c: string) => checkCommandBoundary(c, ws).allowed;
 		expect(check('for f in escape-link; do cat "$f/secret.txt"; done')).toBe(false);
 		expect(check("for f in escape-link; do cd $f; cat secret.txt; done")).toBe(false);
-		expect(check("for f in out; do cd $f; cat ../x.txt; done")).toBe(true);
+		// On Windows the line is also read as cmd.exe and PowerShell, where `$f` is not a loop
+		// variable the boundary can follow, so it is refused there by design.
+		if (process.platform !== "win32")
+			expect(check("for f in out; do cd $f; cat ../x.txt; done")).toBe(true);
 	});
 
 	test("a cd after a reserved word is tracked, bound or literal", () => {
@@ -394,8 +397,8 @@ describe("symlinks on a real filesystem", () => {
 	});
 
 	test("a real directory inside is allowed", () => {
-		expect(
-			checkCommandBoundary(`D=${path.join(ws, "out")}; mkdir -p "$D/frames"`, ws).allowed,
-		).toBe(true);
+		// A POSIX shell reads a backslash as an escape, so a Windows path goes in as Git Bash takes it.
+		const out = path.join(ws, "out").replaceAll("\\", "/");
+		expect(checkCommandBoundary(`D=${out}; mkdir -p "$D/frames"`, ws).allowed).toBe(true);
 	});
 });

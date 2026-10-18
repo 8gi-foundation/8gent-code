@@ -25,8 +25,17 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+	existsSync,
+	mkdirSync,
+	realpathSync,
+	renameSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { join, sep } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { agentTools, setToolContext } from "../ai/tools";
 import { createDecider } from "../decide/index";
@@ -348,7 +357,13 @@ describe.skipIf(!HAS_BIRTH || !POSIX)(
 describe("bornScopes: only the directories a command names", () => {
 	const scopes = (command: string) => {
 		const root = realpathSync(ws);
-		return bornScopes(command, root).map((d) => d.slice(root.length + 1));
+		// Slash-separated on every platform: the scopes are compared as text.
+		return bornScopes(command, root).map((d) =>
+			d
+				.slice(root.length + 1)
+				.split(sep)
+				.join("/"),
+		);
 	};
 
 	test("a script path scopes to its directory; a directory to itself", () => {
@@ -385,21 +400,21 @@ describe("bornScopes: only the directories a command names", () => {
 	});
 
 	test("a symlink resolving outside the project is not a scope", () => {
-		execFileSync("ln", ["-s", outside, join(ws, "away")]);
+		symlinkSync(outside, join(ws, "away"));
 		expect(scopes("ls away/x")).toEqual([]);
 	});
 
 	test("a word through a symlink out of the project, or into a dot directory, is not a scope", () => {
-		execFileSync("ln", ["-s", outside, join(ws, "linkout")]);
+		symlinkSync(outside, join(ws, "linkout"));
 		mkdirSync(join(ws, ".8gent"));
-		execFileSync("ln", ["-s", ".8gent", join(ws, "hid")]);
+		symlinkSync(".8gent", join(ws, "hid"));
 		expect(scopes("touch linkout/x")).toEqual([]);
 		expect(scopes("touch hid/x")).toEqual([]);
 	});
 
 	test("a dot word is not a scope, even when it resolves to a plain directory", () => {
 		mkdirSync(join(ws, ".cache"));
-		execFileSync("ln", ["-s", "video", join(ws, ".vid")]);
+		symlinkSync("video", join(ws, ".vid"));
 		expect(scopes("bash x.sh .cache/t.bin")).toEqual([]);
 		expect(scopes("bash x.sh .vid/t.bin")).toEqual([]);
 	});
@@ -465,13 +480,14 @@ describe.skipIf(!HAS_BIRTH)(
 
 		test("a scope swapped for a symlink out of the project during the command records nothing", () => {
 			const root = realpathSync(ws);
-			writeFileSync(
-				join(root, "video", "swap.sh"),
-				`cd ${root}\nmv video video.old\nln -s ${outside} video\nprintf x > ${outside}/f.png\n`,
-			);
+			writeFileSync(join(root, "video", "swap.sh"), "");
 			const record = new CreatedFiles();
 			const done = watchBorn("bash video/swap.sh", root, record);
-			execFileSync("bash", [join(root, "video", "swap.sh")]);
+			// What a command that swaps its scope for a link out of the project does, done in
+			// process so it needs no POSIX shell (Git Bash's `ln -s` copies on Windows).
+			renameSync(join(root, "video"), join(root, "video.old"));
+			symlinkSync(outside, join(root, "video"));
+			writeFileSync(join(outside, "f.png"), "x");
 			done();
 			expect(existsSync(join(outside, "f.png"))).toBe(true);
 			expect(record.createdBySession(join(outside, "f.png"))).toBe(false);

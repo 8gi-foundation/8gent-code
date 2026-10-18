@@ -43,7 +43,8 @@ beforeAll(() => {
 
 const ok = (c: string) => ffmpegInProject(c, w).ok;
 
-describe("ffmpegInProject passes", () => {
+// The lane has no opinion on win32 by design (see "win32: no opinion" below), so nothing passes there.
+describe.skipIf(process.platform === "win32")("ffmpegInProject passes", () => {
 	test("slide plus narration into a segment", () => {
 		expect(
 			ok(

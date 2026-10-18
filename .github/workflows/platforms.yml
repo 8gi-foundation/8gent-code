@@ -28,7 +28,9 @@ jobs:
           - os: windows-latest
             binary: 8gent-windows-x64.exe
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # Windows runs the suite as four shards (about 25 min of tests) plus install, build and binary
+    # compile; 30 min cancelled the job before the last shard finished (#4286).
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 60 || 30 }}
     defaults:
       run:
         shell: bash

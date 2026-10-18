@@ -154,7 +154,8 @@ export async function breakdown(
 ): Promise<Breakdown> {
 	if (!refBreakdownEnabled(env))
 		throw new Error("Reference breakdown is off. Set EIGHT_REF_BREAKDOWN=1 to use it.");
-	if (/^[a-z][a-z0-9+.-]*:/i.test(videoPath))
+	// A scheme is two or more characters: `C:\clip.mp4` is a Windows drive, not a URL.
+	if (/^[a-z][a-z0-9+.-]+:/i.test(videoPath))
 		throw new Error(`Local files only, not a URL: ${videoPath}`);
 	const file = resolve(videoPath);
 	if (!existsSync(file) || !statSync(file).isFile()) throw new Error(`No such video file: ${file}`);

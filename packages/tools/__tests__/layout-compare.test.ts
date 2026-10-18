@@ -191,24 +191,29 @@ describe("compareLayout with a stub browser", () => {
 		);
 	});
 
-	test("stale Chrome lock files are cleared and Chrome gets a short private TMPDIR (#4234)", () => {
-		const profile = tempDir("layout-compare-profile-");
-		const names = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
-		for (const f of names) fs.symlinkSync("/nonexistent-stale-target", path.join(profile, f));
-		const { env, cleanup } = prepareChromeProfile(profile, {
-			PATH: "/usr/bin",
-			TMPDIR: "/shared/tmp",
-		});
-		for (const f of names)
-			expect(fs.lstatSync(path.join(profile, f), { throwIfNoEntry: false })).toBeUndefined();
-		const tmp = env.TMPDIR as string;
-		expect(tmp).not.toBe("/shared/tmp");
-		expect(fs.statSync(tmp).isDirectory()).toBe(true);
-		expect(Buffer.byteLength(chromeSocketPath(tmp))).toBeLessThanOrEqual(MAX_SOCKET_PATH_BYTES);
-		expect(env.PATH).toBe("/usr/bin");
-		cleanup();
-		expect(fs.existsSync(tmp)).toBe(false);
-	});
+	// The short TMPDIR exists for the unix-socket path limit (#4234); Windows Chrome has no
+	// Singleton socket and does not read TMPDIR.
+	test.skipIf(process.platform === "win32")(
+		"stale Chrome lock files are cleared and Chrome gets a short private TMPDIR (#4234)",
+		() => {
+			const profile = tempDir("layout-compare-profile-");
+			const names = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
+			for (const f of names) fs.symlinkSync("/nonexistent-stale-target", path.join(profile, f));
+			const { env, cleanup } = prepareChromeProfile(profile, {
+				PATH: "/usr/bin",
+				TMPDIR: "/shared/tmp",
+			});
+			for (const f of names)
+				expect(fs.lstatSync(path.join(profile, f), { throwIfNoEntry: false })).toBeUndefined();
+			const tmp = env.TMPDIR as string;
+			expect(tmp).not.toBe("/shared/tmp");
+			expect(fs.statSync(tmp).isDirectory()).toBe(true);
+			expect(Buffer.byteLength(chromeSocketPath(tmp))).toBeLessThanOrEqual(MAX_SOCKET_PATH_BYTES);
+			expect(env.PATH).toBe("/usr/bin");
+			cleanup();
+			expect(fs.existsSync(tmp)).toBe(false);
+		},
+	);
 
 	test("a base too long for a unix socket is skipped and the inherited TMPDIR is kept", () => {
 		const profile = tempDir("layout-compare-profile-");

@@ -18,9 +18,9 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removeDbFiles } from "../../tests/db-files";
-import { trackStatements } from "./tracked-db.js";
 import { KnowledgeGraph } from "./graph.js";
 import type { EntityType } from "./graph.js";
+import { trackStatements } from "./tracked-db.js";
 
 const TEST_DB = join(tmpdir(), "test-entity-dedup-1369.db");
 
@@ -32,6 +32,10 @@ describe("Entity dedup -- KnowledgeGraph", () => {
 		// Clean slate for every test
 		removeDbFiles(TEST_DB);
 		db = trackStatements(new Database(TEST_DB));
+		// What store.ts opens its database with. At the default (rollback journal, synchronous FULL)
+		// every autocommit write fsyncs, which is ~0.7 s each on a Windows runner.
+		db.exec("PRAGMA journal_mode = WAL");
+		db.exec("PRAGMA synchronous = NORMAL");
 		graph = new KnowledgeGraph(db);
 	});
 

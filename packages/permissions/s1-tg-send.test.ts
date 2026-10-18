@@ -610,7 +610,7 @@ describe("8SO hold on #4102", () => {
 		// path.delimiter: `;` on Windows, where a `:`-joined PATH is one (absolute) entry.
 		const D = delimiter;
 		const base = process.env.PATH ?? ["/usr/bin", "/bin"].join(D);
-		for (const p of [
+		const refused = [
 			`.${D}${base}`,
 			`${base}${D}`,
 			`${D}${base}`,
@@ -618,8 +618,9 @@ describe("8SO hold on #4102", () => {
 			`${join(ws, "bin")}${D}${base}`,
 			`${join(ws, "escape")}/../bin${D}${base}`,
 			"",
-		])
-			expect(ok(PILOT_CMD, { ...env, PATH: p }), p).toBe(false);
+		];
+		// The ones the lane let through, so a failure names the PATH that got past it.
+		expect(refused.filter((p) => ok(PILOT_CMD, { ...env, PATH: p }))).toEqual([]);
 		expect(ok(PILOT_CMD, { ...env, PATH: ["/usr/bin", "/bin"].join(D) })).toBe(true);
 	});
 });

@@ -147,27 +147,32 @@ describe("other model-reachable spawn paths", () => {
 		expect(out).not.toContain(CANARY);
 	});
 
-	test("gh helper gets GH_TOKEN, run_command does not, canary never", async () => {
-		const bin = join(dir, "bin");
-		mkdirSync(bin);
-		writeFileSync(
-			join(bin, "gh"),
-			'#!/bin/sh\nprintf "tok=[%s] canary=[%s]" "$GH_TOKEN" "$FAKE_SECRET_KEY"\n',
-		);
-		chmodSync(join(bin, "gh"), 0o755);
-		const oldPath = process.env.PATH;
-		process.env.PATH = `${bin}:${oldPath}`;
-		process.env.GH_TOKEN = "ghtok";
-		try {
-			const viaHelper = (await ex.execute("gh_pr_view", { number: "1" })) as string;
-			expect(viaHelper).toContain("tok=[ghtok] canary=[]");
-			const viaShell = await run("gh");
-			expect(viaShell).toContain("tok=[]");
-			expect(viaShell).toContain("canary=[]");
-		} finally {
-			process.env.PATH = oldPath;
-		}
-	});
+	// The fake gh is a shebang script, which Windows cannot execute; buildChildEnv itself is
+	// covered above on every platform.
+	test.skipIf(process.platform === "win32")(
+		"gh helper gets GH_TOKEN, run_command does not, canary never",
+		async () => {
+			const bin = join(dir, "bin");
+			mkdirSync(bin);
+			writeFileSync(
+				join(bin, "gh"),
+				'#!/bin/sh\nprintf "tok=[%s] canary=[%s]" "$GH_TOKEN" "$FAKE_SECRET_KEY"\n',
+			);
+			chmodSync(join(bin, "gh"), 0o755);
+			const oldPath = process.env.PATH;
+			process.env.PATH = `${bin}:${oldPath}`;
+			process.env.GH_TOKEN = "ghtok";
+			try {
+				const viaHelper = (await ex.execute("gh_pr_view", { number: "1" })) as string;
+				expect(viaHelper).toContain("tok=[ghtok] canary=[]");
+				const viaShell = await run("gh");
+				expect(viaShell).toContain("tok=[]");
+				expect(viaShell).toContain("canary=[]");
+			} finally {
+				process.env.PATH = oldPath;
+			}
+		},
+	);
 
 	test("git helper drops GIT_CONFIG_* but keeps identity", async () => {
 		const sh = (...a: string[]) => Bun.spawnSync(["git", ...a], { cwd: dir });

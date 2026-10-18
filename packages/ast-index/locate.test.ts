@@ -468,9 +468,10 @@ describe("a repo larger than one rg output chunk", () => {
 	}, 60_000);
 
 	afterAll(() => {
-		// Windows may still hold the folder from a ripgrep just run over it (EBUSY).
+		// Windows may still hold the folder from a ripgrep just run over it (EBUSY), and removing
+		// 12,000 files there takes longer than the 5 s hook default.
 		removeDir(big);
-	});
+	}, 60_000);
 
 	// These check what is found, not how fast: a generous rg limit and test
 	// timeout keep a heavily loaded machine from failing them.
