@@ -2273,7 +2273,7 @@ export class ToolExecutor {
 					name: "browser_task",
 					description:
 						"Tab steps: type{index|selector,text}, left_click{index}, wait_for{selector}, open{url}, scroll{dy}; login text {{file:TASK.txt:Password}}. " +
-						"Each step is verified. left_click also takes a selector. {{file:PATH:Field}} in type text types the value of the 'Field:' line of that workspace file at act time, only on a local address written in the same file, so the value never enters the conversation or the shell.",
+						'Each step is verified. left_click also takes a selector. {{file:PATH:Field}} in type text types the value of the "Field: value" or "Field=value" line of that workspace file (.tmp/ allowed) at act time, only on a local address written in the same file, so the value never enters the conversation or the shell.',
 					parameters: {
 						type: "object",
 						properties: {

@@ -16,6 +16,7 @@ import {
 import * as fsModule from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { scrub as scrubSecrets } from "../../eight/secret-scanner";
 import { ToolExecutor } from "../../eight/tools";
 import {
 	RESERVED_LOOPBACK_PORTS,
@@ -1330,6 +1331,27 @@ describe("touchesBrowserSecrets: run_command may not reach the browser token or 
 		test(`allows: ${cmd}`, () => expect(touchesBrowserSecrets(cmd)).toBe(false));
 });
 
+describe("touchesBrowserSecrets: a scratch login file and sed regexes are not browser state (#4417)", () => {
+	const scratch = [
+		"sed -n 's/^\\([A-Za-z]*:\\).*/\\1/p' .tmp/login",
+		"sed -n 's/^Password: */password=/w .tmp/login' TASK.txt",
+		"cat .tmp/login",
+		"sed -n 's/.*/x/p' login.txt",
+	];
+	for (const cmd of scratch)
+		test(`allows: ${cmd}`, () => expect(touchesBrowserSecrets(cmd)).toBe(false));
+	const real = [
+		"cat ~/.8gent/browser-control.token",
+		"sed -n p ~/.8gent/browser-control.token",
+		"sed -n 's/a/b/w ~/.8gent/browser-control.token' x",
+		"sed -n 's/a/b/p' ~/.8gent/browser-profiles/default/Cookies",
+		"sed p .*",
+		"cat ~/.8gent/browser-co*",
+	];
+	for (const cmd of real)
+		test(`still refuses: ${cmd}`, () => expect(touchesBrowserSecrets(cmd)).toBe(true));
+});
+
 describe("touchesBrowserSecrets: a browser-named run dir and a listing deeper inside .8gent are not secrets (8SO, after #3950)", () => {
 	const run = "/Users/x/.8gent/rishi-pilot/runs/2026-10-12_101500/browser-op-practice";
 	const allowed = [
@@ -1860,6 +1882,39 @@ describe("task-file placeholders: a supplied login is typed without the model ho
 		const r = resolveTaskFileField(ws, "TAB.txt", "Password", "http://127.0.0.1:5/");
 		expect(r.ok).toBe(false);
 		expect(JSON.stringify(r)).not.toContain("def");
+	});
+
+	// #4417: the login recipe copies the password line into .tmp/login as password=...
+	test("a password=... line in .tmp/login fills the field and the error path never carries the value", async () => {
+		task("http://127.0.0.1:5/", "unused-in-task");
+		mkdirSync(join(ws, ".tmp"), { recursive: true });
+		writeFileSync(join(ws, ".tmp", "login"), `password=${PW}\n`);
+		const site = fakeSite();
+		const b = mk(site.call);
+		await b.open("http://127.0.0.1:5/");
+		const out = await b.run(typeStep("{{file:.tmp/login:password}}"));
+		expect(JSON.parse(out).ok).toBe(true);
+		expect(sent(site.calls)).toContain(PW);
+		expect(out).not.toContain(PW);
+	});
+
+	test("a wrong-format file fails with one plain sentence naming the format, not a redaction marker", () => {
+		mkdirSync(join(ws, ".tmp"), { recursive: true });
+		writeFileSync(join(ws, ".tmp", "bad"), `pw ${PW}\nhttp://127.0.0.1:5/\n`);
+		const r = resolveTaskFileField(ws, ".tmp/bad", "password", "http://127.0.0.1:5/");
+		expect(r.ok).toBe(false);
+		const msg = JSON.stringify(r);
+		expect(msg).toContain("a colon or equals sign");
+		expect(msg).not.toContain(PW);
+		expect(scrubSecrets(msg).redactedCount).toBe(0);
+	});
+
+	test("other dot folders stay refused; only .tmp is allowed", () => {
+		mkdirSync(join(ws, ".git"), { recursive: true });
+		writeFileSync(join(ws, ".git", "login"), `password=${OUTSIDE}\nhttp://127.0.0.1:5/\n`);
+		const r = resolveTaskFileField(ws, ".git/login", "password", "http://127.0.0.1:5/");
+		expect(r.ok).toBe(false);
+		expect(JSON.stringify(r)).not.toContain(OUTSIDE);
 	});
 
 	test("a resolved value is never read again as a placeholder", () => {

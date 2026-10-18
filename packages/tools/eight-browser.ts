@@ -264,6 +264,8 @@ const PLACEHOLDER = /\{\{secret:([A-Za-z][A-Za-z0-9_]{0,63})\}\}/g;
 // Typed only on a loopback page whose origin is written in that same file.
 const FILE_PLACEHOLDER = /\{\{file:([^{}:]{1,200}):([A-Za-z][A-Za-z0-9 _-]{0,63})\}\}/g;
 const MAX_TASK_FILE_BYTES = 64 * 1024;
+/** The one dot folder a task file may live in: the work dir's scratch space, where the login recipe writes. */
+const SCRATCH_DIR = ".tmp";
 const ANY_PLACEHOLDER = new RegExp(`${PLACEHOLDER.source}|${FILE_PLACEHOLDER.source}`, "g");
 
 export const hasSecretPlaceholder = (text: string): boolean => {
@@ -284,17 +286,19 @@ export function resolveTaskFileField(
 	field: string,
 	pageUrl: string,
 ): { ok: true; value: string } | { ok: false; error: string } {
-	const label = `${rel}:${field}`;
+	// Not "path:field: why": the secret scanner reads "password: <text>" as a secret assignment and
+	// blanked the whole error (#4417), so the model never learned why the fill failed.
+	const label = `${rel} (field ${field})`;
 	if (!workspace) return { ok: false, error: `${label}: no workspace for file placeholders` };
 	const segs = rel.split(/[\\/]/);
 	if (
 		pathPosix.isAbsolute(rel) ||
 		pathWin32.isAbsolute(rel) ||
-		segs.some((x) => x === "" || x.startsWith("."))
+		segs.some((x, i) => x === "" || (x.startsWith(".") && !(i === 0 && x === SCRATCH_DIR)))
 	)
 		return {
 			ok: false,
-			error: `${label}: the file must be a plain relative path inside the workspace`,
+			error: `${label} must be a plain relative path inside the workspace (only the .tmp scratch folder may start with a dot)`,
 		};
 	let text: string;
 	try {
@@ -306,7 +310,7 @@ export function resolveTaskFileField(
 			return !p
 				.relative(root, real)
 				.split(/[\\/]/)
-				.some((x) => x.startsWith("."));
+				.some((x, i) => x.startsWith(".") && !(i === 0 && x === SCRATCH_DIR));
 		};
 		const real = realpathSync.native(join(root, rel));
 		if (!contained(real))
@@ -347,8 +351,15 @@ export function resolveTaskFileField(
 		return { ok: false, error: `${label}: the file could not be read` };
 	}
 	const esc = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	const m = new RegExp(`^[ \\t]*${esc}[ \\t]*:[ \\t]*(\\S(?:.*\\S)?)[ \\t\\r]*$`, "im").exec(text);
-	if (!m) return { ok: false, error: `${label}: no "${field}:" line in the file` };
+	// "Field: value" or "Field=value" (the .tmp/login recipe writes password=...).
+	const m = new RegExp(`^[ \\t]*${esc}[ \\t]*[:=][ \\t]*(\\S(?:.*\\S)?)[ \\t\\r]*$`, "im").exec(
+		text,
+	);
+	if (!m)
+		return {
+			ok: false,
+			error: `${label} found no line in ${rel} that starts with the field name and a colon or equals sign, then the value`,
+		};
 	// A tab or other control character would move focus and type the rest into another field.
 	if (/[\x00-\x1f\x7f]/.test(m[1]))
 		return { ok: false, error: `${label}: the value holds a control character` };
@@ -359,7 +370,16 @@ export function resolveTaskFileField(
 		return { ok: false, error: `${label}: the page has no address` };
 	}
 	const origins = new Set<string>();
-	for (const u of text.match(/https?:\/\/[^\s<>"'`)]+/g) ?? []) {
+	// A scratch copy of the login (.tmp/login) holds credentials only; the address stays in the task file.
+	let addressText = text;
+	if (segs[0] === SCRATCH_DIR) {
+		try {
+			const t = join(realpathSync.native(workspace), "TASK.txt");
+			if (lstatSync(t).isFile() && lstatSync(t).size <= MAX_TASK_FILE_BYTES)
+				addressText += `\n${readFileSync(t, "utf8")}`;
+		} catch {}
+	}
+	for (const u of addressText.match(/https?:\/\/[^\s<>"'`)]+/g) ?? []) {
 		try {
 			origins.add(new URL(u).origin);
 		} catch {}
@@ -1200,6 +1220,27 @@ function decodedViews(command: string): string[] {
 const PLAIN_SHORT = /^-[rRhHnioEFwvcIsaqzPxlLu]+$/;
 
 /**
+ * For one pipeline segment that runs sed with plain flags: blank the quoted s/// script (#4417). Its
+ * regex (`.*`, `[A-Za-z]*:`) is a pattern, not a shell glob, and read as one it matched ".8gent", so a
+ * sed over .tmp/login was refused as browser state. Only the glob check sees the blanked view; the
+ * .8gent and browser-* name checks still read the script as written. Any other shape is left as is.
+ */
+function blankSedScript(seg: string): string {
+	if (/\$\(|`|<\(/.test(seg) || !/^[\s;|&]*sed\s/.test(seg)) return seg;
+	const words = [...seg.matchAll(/(?:'[^']*'|"[^"]*"|\S)+/g)];
+	for (let i = 1; i < words.length; i++) {
+		const w = words[i];
+		if (/^-[nEr]+$/.test(w[0])) continue;
+		const q = w[0];
+		const m = /^'s(.)(?:(?!\1).)*\1(?:(?!\1).)*\1[a-z0-9]*'$/.exec(q);
+		if (!m || /\.8|browser/i.test(q)) return seg;
+		const at = w.index ?? 0;
+		return seg.slice(0, at) + " ".repeat(q.length) + seg.slice(at + q.length);
+	}
+	return seg;
+}
+
+/**
  * For one pipeline segment that runs grep or rg: blank the quoted pattern (the first non-option word),
  * and only when every option before it is a plain no-value flag. Any other option (--include, -g, -e,
  * -f, --pre, anything with "=") or any $( ` <( in the segment leaves the segment untouched, so it is
@@ -1299,6 +1340,7 @@ export function touchesBrowserSecrets(command: string): boolean {
 		const shellView = view
 			.split(/(?<=[;|&\n])/)
 			.map(blankSearchPattern)
+			.map(blankSedScript)
 			.join("")
 			.replace(/["'`\\]/g, "")
 			.replace(/\s*\+\s*/g, "");
