@@ -3805,7 +3805,7 @@ export class ToolExecutor {
 		// System One checked these bytes, not the file the command names: run them (8SO, #4102).
 		if (systemOne.runInstead !== undefined) finalCommand = systemOne.runInstead;
 		// A read-only inline python the allowlist admits runs isolated (-I): no cwd imports.
-		finalCommand = isolatedInlinePython(finalCommand, dir);
+		finalCommand = isolatedInlinePython(finalCommand);
 
 		const timeoutMs = Math.min(timeoutSec || 120, 300) * 1000;
 

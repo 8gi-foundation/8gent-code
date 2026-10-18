@@ -243,18 +243,17 @@ describe("an admitted command runs isolated (-I), which closes the shadow class"
 	test("the admitted command carries -I after the interpreter; ARC1 and ARC2 stay admitted", () => {
 		for (const c of [ARC1, ARC2]) {
 			expect(ok(c)).toBe(true);
-			const run = isolatedInlinePython(c, CLEAN);
+			const run = isolatedInlinePython(c);
 			expect(run.startsWith("python3 -I -c ")).toBe(true);
 			expect(run.slice("python3 -I -c ".length)).toBe(c.slice("python3 -c ".length));
 		}
-		expect(isolatedInlinePython(`python -I -c "print(1)"`, CLEAN)).toBe(`python -I -c "print(1)"`);
+		expect(isolatedInlinePython(`python -I -c "print(1)"`)).toBe(`python -I -c "print(1)"`);
 	});
-	test("a refused command is returned unchanged", () => {
+	test("a non-python line is unchanged; a shaped line gets -I whether or not the allowlist admits it", () => {
 		const w = `python3 -c "open('x', 'w').write('1')"`;
-		expect(isolatedInlinePython(w, CLEAN)).toBe(w);
-		const d = tempDir("inline-py-shadow-");
-		writeFileSync(path.join(d, "json.py"), "");
-		expect(isolatedInlinePython(ARC2, d)).toBe(ARC2);
+		expect(isolatedInlinePython(w)).toBe(w.replace("python3 -c", "python3 -I -c"));
+		expect(isolatedInlinePython("python3 analyze.py")).toBe("python3 analyze.py");
+		expect(isolatedInlinePython("ls -la")).toBe("ls -la");
 	});
 
 	// Real python3: each planted stub writes a marker file if it is imported.
@@ -286,10 +285,36 @@ describe("an admitted command runs isolated (-I), which closes the shadow class"
 	});
 	test("with -I, the rewritten command never runs a planted module, even on the error path", () => {
 		const d = plant();
-		const rewritten = isolatedInlinePython(RAISE, CLEAN);
+		const rewritten = isolatedInlinePython(RAISE);
 		expect(rewritten).toContain(" -I -c ");
 		const r = run(rewritten, d);
 		expect(r.status).not.toBe(0); // it raised, so python took its traceback path
 		expect(marks(d)).toEqual([]);
+	});
+});
+
+describe("check-then-spawn race: the rewrite does not look at the directory", () => {
+	test("admitted in a clean dir, traceback.py lands, the rewrite still carries -I and the planted file never runs", () => {
+		const d = tempDir("inline-py-race-");
+		const line = `python3 -c "import json; print(json.loads('1'))"`;
+		expect(readOnlyInlinePython(line, d).ok).toBe(true); // the permission check
+		const marker = path.join(d, "ran-traceback");
+		writeFileSync(
+			path.join(d, "traceback.py"),
+			`open(${JSON.stringify(marker)}, 'w').write('x')\n`,
+		);
+		expect(readOnlyInlinePython(line, d).ok).toBe(false); // a re-check would now say no
+		const rewritten = isolatedInlinePython(line); // the spawn-time rewrite
+		expect(rewritten).toBe(`python3 -I -c "import json; print(json.loads('1'))"`);
+		const r = spawnSync("/bin/sh", ["-c", rewritten], {
+			cwd: d,
+			encoding: "utf8",
+			env: {
+				...process.env,
+				PATH: `${process.env.PATH ?? ""}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`,
+			},
+		});
+		expect(r.stdout.trim()).toBe("1");
+		expect(existsSync(marker)).toBe(false);
 	});
 });

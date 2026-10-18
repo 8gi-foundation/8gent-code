@@ -184,8 +184,7 @@ export async function spawnAgentTool(
 			const { spawnCLIAgent } = await import("./index");
 			// A read-only inline python the allowlist admits runs isolated (-I): no cwd imports.
 			const { isolatedInlinePython } = await import("../permissions/s1-inline-python");
-			const runTask =
-				effectiveRuntime === "shell" ? isolatedInlinePython(task, workingDirectory) : task;
+			const runTask = effectiveRuntime === "shell" ? isolatedInlinePython(task) : task;
 			const agent = spawnCLIAgent(effectiveRuntime, runTask, {
 				workingDirectory: workingDirectory,
 				timeout: timeout || undefined,

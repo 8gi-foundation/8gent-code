@@ -204,13 +204,16 @@ export function readOnlyInlinePython(command: string, cwd?: string): InlinePytho
 }
 
 /**
- * The command to spawn when the allowlist is what admits it: the same line with `-I` after
+ * The command to spawn for a line of the inline-python shape: the same line with `-I` after
  * the interpreter (isolated mode: no cwd on sys.path, no PYTHON* env, no user site), so a
  * planted traceback.py, json.py or sitecustomize.py in the cwd is never imported, whatever
- * module python reaches for. Any other command, or one the allowlist refuses, is returned
- * unchanged. The admitted shape is exact, so the rewrite is deterministic.
+ * module python reaches for. It depends on the text alone (no cwd, no readdir), so a file
+ * that lands between the permission check and the spawn cannot turn the rewrite off: every
+ * line the check can admit has this shape (extractCode), and every line of this shape is
+ * spawned with -I, admitted by the allowlist or approved at a card. Any other line is
+ * returned unchanged.
  */
-export function isolatedInlinePython(command: string, cwd: string): string {
-	if (!readOnlyInlinePython(command, cwd).ok) return command;
+export function isolatedInlinePython(command: string): string {
+	if (extractCode(command) === null) return command;
 	return command.replace(/^(\S+)([ \t]+)(?!-I\b)-c([ \t])/, "$1$2-I$2-c$3");
 }
