@@ -14,6 +14,7 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { portVerdict, probePort } from "./port-probe";
 
 export const SERVICE_LABEL = "com.8gent.daemon";
 const DESCRIPTION = "Eight Agent Daemon - always-on AI agent process";
@@ -482,7 +483,15 @@ const isSubcommand = (s: string | undefined): s is Subcommand =>
 export async function daemonCommand(args: string[], program: string[]): Promise<number | null> {
 	const sub = args[0];
 	if (sub === "run") {
-		const { main } = await import("./index");
+		const { main, configuredPort } = await import("./index");
+		// A taken port usually means a daemon is already up. Ask before starting,
+		// because main() builds the pool and cron before it reaches the bind.
+		const port = await configuredPort();
+		const verdict = portVerdict(port, await probePort(port));
+		if (verdict) {
+			(verdict.code === 0 ? console.log : console.error)(verdict.message);
+			return verdict.code;
+		}
 		await main();
 		return null;
 	}
