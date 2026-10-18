@@ -1350,6 +1350,14 @@ describe("touchesBrowserSecrets: a scratch login file and sed regexes are not br
 	];
 	for (const cmd of real)
 		test(`still refuses: ${cmd}`, () => expect(touchesBrowserSecrets(cmd)).toBe(true));
+	// The s/// flags class is [gipIm0-9]: a GNU e (execute) or w (write file) flag is never blanked, so
+	// the `.*` regex is read as a glob and the command stays denied. With p it is blanked and allowed.
+	test("sed e and w flags are judged as written, not blanked", () => {
+		expect(touchesBrowserSecrets("sed -n 's/.*/x/p' x")).toBe(false);
+		expect(touchesBrowserSecrets("sed -n 's/.*/id/e' x")).toBe(true);
+		expect(touchesBrowserSecrets("sed -n 's/.*/x/wout' x")).toBe(true);
+		expect(touchesBrowserSecrets("sed -n 's/a/b/w ~/.8gent/browser-control.token'")).toBe(true);
+	});
 });
 
 describe("touchesBrowserSecrets: a browser-named run dir and a listing deeper inside .8gent are not secrets (8SO, after #3950)", () => {
@@ -1904,7 +1912,7 @@ describe("task-file placeholders: a supplied login is typed without the model ho
 		const r = resolveTaskFileField(ws, ".tmp/bad", "password", "http://127.0.0.1:5/");
 		expect(r.ok).toBe(false);
 		const msg = JSON.stringify(r);
-		expect(msg).toContain("a colon or equals sign");
+		expect(msg).toContain("Expected a line `Field: value` or `Field=value`");
 		expect(msg).not.toContain(PW);
 		expect(scrubSecrets(msg).redactedCount).toBe(0);
 	});

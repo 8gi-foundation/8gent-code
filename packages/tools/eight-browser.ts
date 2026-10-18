@@ -274,6 +274,22 @@ export const hasSecretPlaceholder = (text: string): boolean => {
 	return PLACEHOLDER.test(text) || FILE_PLACEHOLDER.test(text);
 };
 
+/** Read `path` through an O_NOFOLLOW fd: a regular file, small, one link. Throws otherwise. */
+function readSmallRegularFile(path: string): string {
+	const fd = openSync(
+		path,
+		fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0),
+	);
+	try {
+		const st = fstatSync(fd);
+		if (!st.isFile() || st.size > MAX_TASK_FILE_BYTES || st.nlink !== 1)
+			throw new Error("not a small regular file with a single link");
+		return readFileSync(fd, "utf8");
+	} finally {
+		closeSync(fd);
+	}
+}
+
 /**
  * The value of the `field:` line in workspace file `rel`, if it may be typed on `pageUrl`. Refused:
  * an absolute path, any dot segment (.env, .git, ..), a path that resolves outside the workspace,
@@ -298,7 +314,7 @@ export function resolveTaskFileField(
 	)
 		return {
 			ok: false,
-			error: `${label} must be a plain relative path inside the workspace (only the .tmp scratch folder may start with a dot)`,
+			error: `Expected a workspace path, or .tmp/<name>, not ${rel}; no absolute path, dot segment or empty segment.`,
 		};
 	let text: string;
 	try {
@@ -316,7 +332,7 @@ export function resolveTaskFileField(
 		if (!contained(real))
 			return {
 				ok: false,
-				error: `${label}: the file resolves outside the workspace or to a dot file`,
+				error: `Expected a workspace path, or .tmp/<name>, not ${rel}; it resolves outside the workspace or to a dot file.`,
 			};
 		const checked = lstatSync(real);
 		// Refuse before opening: opening a FIFO or device can block, and a big file is never a task file.
@@ -358,7 +374,7 @@ export function resolveTaskFileField(
 	if (!m)
 		return {
 			ok: false,
-			error: `${label} found no line in ${rel} that starts with the field name and a colon or equals sign, then the value`,
+			error: `Expected a line \`Field: value\` or \`Field=value\` in ${rel} for field ${field}; none found.`,
 		};
 	// A tab or other control character would move focus and type the rest into another field.
 	if (/[\x00-\x1f\x7f]/.test(m[1]))
@@ -374,10 +390,10 @@ export function resolveTaskFileField(
 	let addressText = text;
 	if (segs[0] === SCRATCH_DIR) {
 		try {
-			const t = join(realpathSync.native(workspace), "TASK.txt");
-			if (lstatSync(t).isFile() && lstatSync(t).size <= MAX_TASK_FILE_BYTES)
-				addressText += `\n${readFileSync(t, "utf8")}`;
-		} catch {}
+			addressText += `\n${readSmallRegularFile(join(realpathSync.native(workspace), "TASK.txt"))}`;
+		} catch {
+			// A missing or unreadable TASK.txt only narrows the origin set, so the empty catch is intentional.
+		}
 	}
 	for (const u of addressText.match(/https?:\/\/[^\s<>"'`)]+/g) ?? []) {
 		try {
@@ -1224,6 +1240,7 @@ const PLAIN_SHORT = /^-[rRhHnioEFwvcIsaqzPxlLu]+$/;
  * regex (`.*`, `[A-Za-z]*:`) is a pattern, not a shell glob, and read as one it matched ".8gent", so a
  * sed over .tmp/login was refused as browser state. Only the glob check sees the blanked view; the
  * .8gent and browser-* name checks still read the script as written. Any other shape is left as is.
+ * Blanks at most the first quoted s/// word; `-e a -e b` forms and e/w flags are judged as written (fail-safe).
  */
 function blankSedScript(seg: string): string {
 	if (/\$\(|`|<\(/.test(seg) || !/^[\s;|&]*sed\s/.test(seg)) return seg;
@@ -1232,7 +1249,7 @@ function blankSedScript(seg: string): string {
 		const w = words[i];
 		if (/^-[nEr]+$/.test(w[0])) continue;
 		const q = w[0];
-		const m = /^'s(.)(?:(?!\1).)*\1(?:(?!\1).)*\1[a-z0-9]*'$/.exec(q);
+		const m = /^'s(.)(?:(?!\1).)*\1(?:(?!\1).)*\1[gipIm0-9]*'$/.exec(q);
 		if (!m || /\.8|browser/i.test(q)) return seg;
 		const at = w.index ?? 0;
 		return seg.slice(0, at) + " ".repeat(q.length) + seg.slice(at + q.length);
