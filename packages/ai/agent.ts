@@ -14,7 +14,14 @@ import type { GenerateTextResult, LanguageModel, ModelMessage, ToolSet } from "a
 import { resolveRetrySettings } from "../settings/retry";
 import { loadSettings } from "../settings/store";
 import { type ProviderConfig, createModel } from "./providers";
-import { type AgentTools, type RuntimeParams, type ToolContext, agentTools, getRuntimeParams } from "./tools";
+import {
+	type AgentTools,
+	type RuntimeParams,
+	type ToolContext,
+	agentTools,
+	getRuntimeParams,
+} from "./tools";
+import { createBudgetDrain, resolveTurnBudgetMs } from "./turn-budget";
 
 export interface EightAgentConfig {
 	/** Provider configuration */
@@ -53,6 +60,12 @@ export interface EightAgentConfig {
 	 * when it was drained, and stays there for the rest of this generate() run.
 	 */
 	steer?: () => string[];
+	/** Whole-turn time budget in ms for the best-answer nudge (default EIGHT_TURN_BUDGET_MS; 0 disables) */
+	turnBudgetMs?: number;
+	/** Turn start (epoch ms) for the budget clock; defaults to agent creation */
+	turnStartedAt?: number;
+	/** Model override (tests); defaults to createModel(config.provider) */
+	model?: LanguageModel;
 	/** Callback for each step */
 	onStepFinish?: (event: StepFinishEvent) => void | Promise<void>;
 	/**
@@ -180,7 +193,7 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		allowedPaths: config.allowedPaths,
 	};
 
-	const model = createModel(config.provider);
+	const model = config.model ?? createModel(config.provider);
 
 	// Track per-step timing for tokens-per-second measurement. Reset at the
 	// start of each LLM call: build start, after tool returns, and after each
@@ -237,6 +250,14 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 	// Steering messages drained during the current generate() run, each with
 	// the position it was inserted at. Reset when a run starts again (step 0).
 	const steerLog: SteerEntry[] = [];
+	// Whole-turn budget (#4418): near the end of the budget, one steer asks the
+	// model to write its best answer to the requested output. It rides the same
+	// steer log, so it persists for every later step of the run.
+	const budgetDrain = createBudgetDrain({
+		budgetMs: config.turnBudgetMs ?? resolveTurnBudgetMs(),
+		startedAt: config.turnStartedAt,
+	});
+	const steer = (): string[] => [...(config.steer?.() ?? []), ...budgetDrain()];
 
 	// Retries per request: only when the user set settings.retry.maxRetries; otherwise the
 	// AI SDK's own default stays (C4).
@@ -264,20 +285,19 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		tools,
 		experimental_context: toolContext,
 		stopWhen: stepCountIs(config.maxSteps || 30),
-
 		// Fires before every model call. onStepStart is observation only and a
 		// throwing callback never breaks the loop. Steering (D1) is the one thing
 		// that changes the step: drained messages are spliced in, see steerMessages.
 		prepareStep:
-			config.onStepStart || config.steer
+			config.onStepStart || steer
 				? async ({ stepNumber, messages }: { stepNumber: number; messages: ModelMessage[] }) => {
 						try {
 							await config.onStepStart?.({ stepNumber });
 						} catch {
 							/* step-start logging is best-effort */
 						}
-						if (!config.steer) return undefined;
-						const steered = steerMessages(steerLog, stepNumber, messages, config.steer);
+						if (!steer) return undefined;
+						const steered = steerMessages(steerLog, stepNumber, messages, steer);
 						return steered ? { messages: steered } : undefined;
 					}
 				: undefined,
@@ -299,9 +319,10 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 					// by an upstream callback after the LLM already started).
 					// Cap at 5000 t/s — well above any real provider — so a
 					// stale measurement can never poison the EWMA.
-					const isPlausible =
-						stepOutputTokens >= 5 && durationMs >= 200;
-					const instantTps = isPlausible ? Math.min(5000, (stepOutputTokens / durationMs) * 1000) : 0;
+					const isPlausible = stepOutputTokens >= 5 && durationMs >= 200;
+					const instantTps = isPlausible
+						? Math.min(5000, (stepOutputTokens / durationMs) * 1000)
+						: 0;
 					if (instantTps > 0) {
 						smoothedTps = smoothedTps === 0 ? instantTps : smoothedTps * 0.7 + instantTps * 0.3;
 						Object.assign(toolContext.runtime as RuntimeParams, {
@@ -382,20 +403,20 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 			: undefined,
 
 		experimental_onToolCallFinish: (event: any) => {
-				// Tool finished → next LLM step is about to start. Reset the timer
-				// so the next durationMs measures only that LLM call, not the gap.
-				stepStartedAt = Date.now();
-				return config.onToolCallFinish?.({
-					toolCallId: event.toolCall?.toolCallId ?? "",
-					toolName: event.toolCall?.toolName ?? "",
-					args: event.toolCall?.args ?? event.toolCall?.input ?? {},
-					success: event.success ?? true,
-					result: event.output,
-					error: event.error,
-					durationMs: event.durationMs ?? 0,
-					stepNumber: event.stepNumber,
-				});
-			},
+			// Tool finished → next LLM step is about to start. Reset the timer
+			// so the next durationMs measures only that LLM call, not the gap.
+			stepStartedAt = Date.now();
+			return config.onToolCallFinish?.({
+				toolCallId: event.toolCall?.toolCallId ?? "",
+				toolName: event.toolCall?.toolName ?? "",
+				args: event.toolCall?.args ?? event.toolCall?.input ?? {},
+				success: event.success ?? true,
+				result: event.output,
+				error: event.error,
+				durationMs: event.durationMs ?? 0,
+				stepNumber: event.stepNumber,
+			});
+		},
 
 		onFinish: config.onFinish
 			? (event: any) => {
@@ -494,8 +515,9 @@ export function gateTools<T extends ToolSet>(
 ): T {
 	const out: Record<string, unknown> = {};
 	for (const [name, t] of Object.entries(tools)) {
-		const execute = (t as { execute?: (input: unknown, options: { toolCallId: string }) => unknown })
-			.execute;
+		const execute = (
+			t as { execute?: (input: unknown, options: { toolCallId: string }) => unknown }
+		).execute;
 		if (typeof execute !== "function") {
 			out[name] = t;
 			continue;
