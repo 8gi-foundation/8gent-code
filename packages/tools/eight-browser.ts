@@ -1514,6 +1514,32 @@ export function createEightBrowser(
 		if (!el || el.hidden || !el.rect) return true;
 		return (await rects(tabId, SECRET_FIELDS)).has(JSON.stringify(el.rect));
 	};
+	/** 8gent Browser's page.type takes a selector only (control-server.ts: typeText(tab, selector, text));
+	 *  an index is never read, so a type step by index must be turned into a selector first (#4426).
+	 *  page.query reports no id or name, so candidates are built from what it does report (tag and
+	 *  text, which is the value, aria-label or placeholder) and each is proved against the live page:
+	 *  the first match in document order, which is what page.type hits, must have the target's rect. */
+	const selectorForIndex = async (tabId: string, el: El): Promise<string | undefined> => {
+		if (!el.rect) return undefined;
+		const want = JSON.stringify(el.rect);
+		const q = (v: string) => v.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+		const candidates: string[] = [];
+		if (el.text)
+			for (const attr of ["placeholder", "aria-label", "name", "id", "title", "value"])
+				candidates.push(`${el.tag}[${attr}="${q(el.text)}"]`);
+		if (el.tag === "input")
+			for (const t of ["password", "email", "text", "search", "tel", "url", "number"])
+				candidates.push(`input[type=${t}]`);
+		if (el.tag === "input") candidates.push("input:not([type])");
+		for (let k = 1; k <= 8; k++) candidates.push(`${el.tag}:nth-of-type(${k})`);
+		for (let k = 1; k <= 8; k++) candidates.push(`${el.tag}:nth-child(${k})`);
+		for (const sel of candidates) {
+			const r = await call("page.query", { tabId, selector: sel });
+			const first = Array.isArray(r?.elements) ? r.elements[0] : undefined;
+			if (first && JSON.stringify(first.rect) === want) return sel;
+		}
+		return undefined;
+	};
 	const owned = new Set<string>();
 	const resolvedSecrets = new Map<string, string>(); // real value -> placeholder, for scrubbing output
 	const scrub = (text: string): string => {
@@ -1804,14 +1830,23 @@ export function createEightBrowser(
 				// the read-back is either the typed text (a browser that echoes) or unchanged from before
 				// (a browser that hides it). A different value still fails. The typed text is compared
 				// in memory only and never written to the step row.
+				// page.type reads only a selector: an index step is sent as the selector that reaches the same element.
+				let typeSelector = a.selector;
+				if (typeSelector === undefined) {
+					typeSelector = await selectorForIndex(id, before.els[a.index as number]);
+					if (typeSelector === undefined)
+						return fail(
+							`step ${i}: index ${a.index} has no selector 8gent Browser can type into; address it with a selector`,
+							steps,
+						);
+				}
 				const hidden = await secretTarget(a, before.els);
 				const preText = hidden ? await readBack() : undefined;
 				for (let n = 1; n <= 2; n++) {
 					row.attempts = n;
 					const r = await call("page.type", {
 						tabId: id,
-						selector: a.selector,
-						index: a.index,
+						selector: typeSelector,
 						text,
 					});
 					if (r?.ok === false) row.error = r.error;
