@@ -1185,7 +1185,7 @@ const SECRET_NAMES = [
 	"browser-profiles",
 ];
 
-/** A shell glob segment as a regex: * ? [..] and {a,b} (treated as a wildcard). */
+/** A shell glob segment as a regex: * ? [..] and {a,b} / {1..3} (treated as a wildcard; a brace group with no comma or .. is literal). */
 function globRe(seg: string): RegExp {
 	let re = "";
 	for (let i = 0; i < seg.length; i++) {
@@ -1200,7 +1200,9 @@ function globRe(seg: string): RegExp {
 				.replace(/[\\\]]/g, "\\$&");
 			re += `[${body}]`;
 			i = close;
-		} else if (c === "{" && close > 0) {
+		} else if (c === "{" && close > 0 && /,|\.\./.test(seg.slice(i + 1, close))) {
+			// Only {a,b} and {1..3} expand in a shell; a lone {name} (a python f-string, a JS template)
+			// stays literal text and must not read as a wildcard over .8gent (#4423).
 			re += ".*";
 			i = close;
 		} else re += c.replace(/[.+^$()|[\]{}\\]/g, "\\$&");
