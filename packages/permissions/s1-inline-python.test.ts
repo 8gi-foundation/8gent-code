@@ -249,9 +249,11 @@ describe("an admitted command runs isolated (-I), which closes the shadow class"
 		}
 		expect(isolatedInlinePython(`python -I -c "print(1)"`)).toBe(`python -I -c "print(1)"`);
 	});
-	test("a non-python line is unchanged; a shaped line gets -I whether or not the allowlist admits it", () => {
+	test("a non-python line and a card-shaped line that fails the text rules are unchanged", () => {
 		const w = `python3 -c "open('x', 'w').write('1')"`;
-		expect(isolatedInlinePython(w)).toBe(w.replace("python3 -c", "python3 -I -c"));
+		expect(isolatedInlinePython(w)).toBe(w);
+		expect(isolatedInlinePython(`python3 -c "import os"`)).toBe(`python3 -c "import os"`);
+		expect(isolatedInlinePython(`python3 -c "import mypkg"`)).toBe(`python3 -c "import mypkg"`);
 		expect(isolatedInlinePython("python3 analyze.py")).toBe("python3 analyze.py");
 		expect(isolatedInlinePython("ls -la")).toBe("ls -la");
 	});

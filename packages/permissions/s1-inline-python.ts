@@ -192,28 +192,32 @@ function shadowed(cwd: string): boolean {
 	return false;
 }
 
-export function readOnlyInlinePython(command: string, cwd?: string): InlinePython {
-	if (typeof command !== "string" || command.length > MAX_CODE + 64) return NO;
+/** Every text rule of the allowlist, no directory involved: pure, so it cannot race a file landing. */
+function passesTextRules(command: string): boolean {
+	if (typeof command !== "string" || command.length > MAX_CODE + 64) return false;
 	const code = extractCode(command);
-	if (code === null || code.trim() === "" || code.length > MAX_CODE) return NO;
-	if (!/^[\t\n\r\x20-\x7e]*$/.test(code)) return NO; // ASCII only: no look-alike names
-	if (BANNED_WORD.test(code) || FILE_KW.test(code) || UNDERSCORE_NAME.test(code)) return NO;
-	if (!importsOk(code) || !moduleUseOk(code) || !opensOk(code)) return NO;
+	if (code === null || code.trim() === "" || code.length > MAX_CODE) return false;
+	if (!/^[\t\n\r\x20-\x7e]*$/.test(code)) return false; // ASCII only: no look-alike names
+	if (BANNED_WORD.test(code) || FILE_KW.test(code) || UNDERSCORE_NAME.test(code)) return false;
+	return importsOk(code) && moduleUseOk(code) && opensOk(code);
+}
+
+export function readOnlyInlinePython(command: string, cwd?: string): InlinePython {
+	if (!passesTextRules(command)) return NO;
 	if (cwd === undefined || shadowed(cwd)) return NO; // no cwd: cannot vouch, ask
 	return { ok: true, reason: "inline python that only reads a workspace file and prints" };
 }
 
 /**
- * The command to spawn for a line of the inline-python shape: the same line with `-I` after
- * the interpreter (isolated mode: no cwd on sys.path, no PYTHON* env, no user site), so a
- * planted traceback.py, json.py or sitecustomize.py in the cwd is never imported, whatever
- * module python reaches for. It depends on the text alone (no cwd, no readdir), so a file
- * that lands between the permission check and the spawn cannot turn the rewrite off: every
- * line the check can admit has this shape (extractCode), and every line of this shape is
- * spawned with -I, admitted by the allowlist or approved at a card. Any other line is
- * returned unchanged.
+ * The command to spawn for a line the allowlist's text rules accept: the same line with `-I`
+ * after the interpreter (isolated mode: no cwd on sys.path, no PYTHON* env, no user site), so
+ * a planted traceback.py, json.py or sitecustomize.py in the cwd is never imported. It depends
+ * on the text alone (no cwd, no readdir), so a file that lands between the permission check
+ * and the spawn cannot turn the rewrite off: every line the check can admit passes the text
+ * rules, and every such line spawns with -I. A card-approved script that fails the text rules
+ * (it imports a local module, say) is returned unchanged, so it still sees the project folder.
  */
 export function isolatedInlinePython(command: string): string {
-	if (extractCode(command) === null) return command;
+	if (!passesTextRules(command)) return command;
 	return command.replace(/^(\S+)([ \t]+)(?!-I\b)-c([ \t])/, "$1$2-I$2-c$3");
 }
