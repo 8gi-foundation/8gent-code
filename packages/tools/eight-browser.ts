@@ -1520,8 +1520,11 @@ export function createEightBrowser(
 	 *  text, which is the value, aria-label or placeholder) and each is proved against the live page:
 	 *  the first match in document order, which is what page.type hits, must have the target's rect. */
 	const selectorForIndex = async (tabId: string, el: El): Promise<string | undefined> => {
-		if (!el.rect) return undefined;
+		if (!el.rect || el.hidden || !(el.rect.w > 0) || !(el.rect.h > 0)) return undefined;
+		if (!/^[a-z][a-z0-9-]*$/.test(el.tag)) return undefined;
 		const want = JSON.stringify(el.rect);
+		// Two elements sharing a rect cannot be told apart by where they are: refuse rather than guess.
+		if ((await rectList(tabId)).filter((r) => r === want).length !== 1) return undefined;
 		const q = (v: string) => v.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 		const candidates: string[] = [];
 		if (el.text)
@@ -1551,12 +1554,12 @@ export function createEightBrowser(
 	let current: string | undefined;
 	const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-	const rects = async (tabId: string, selector: string) =>
-		new Set<string>(
-			((await call("page.query", { tabId, selector }))?.elements ?? []).map((e: { rect?: Rect }) =>
-				JSON.stringify(e.rect),
-			),
+	const rectList = async (tabId: string, selector?: string): Promise<string[]> =>
+		((await call("page.query", { tabId, selector }))?.elements ?? []).map((e: { rect?: Rect }) =>
+			JSON.stringify(e.rect),
 		);
+	const rects = async (tabId: string, selector: string) =>
+		new Set<string>(await rectList(tabId, selector));
 	const elements = async (tabId: string): Promise<El[]> => {
 		const r = await call("page.query", { tabId });
 		const raw: Array<El & { visible?: boolean }> = r?.elements ?? [];
@@ -1836,7 +1839,7 @@ export function createEightBrowser(
 					typeSelector = await selectorForIndex(id, before.els[a.index as number]);
 					if (typeSelector === undefined)
 						return fail(
-							`step ${i}: index ${a.index} has no selector 8gent Browser can type into; address it with a selector`,
+							`step ${i}: index ${a.index} has no selector 8gent Browser can type into; address it with a selector, for example {selector:"input[type=password]"}`,
 							steps,
 						);
 				}

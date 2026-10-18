@@ -3064,6 +3064,32 @@ describe("a type step by index reaches the real 8gent Browser protocol (#4426)",
 		expect(p.typedSelectors).toEqual([]);
 	});
 
+	test("two inputs sharing one rect: the step fails and nothing is typed", async () => {
+		const same = { x: 0, y: 0, w: 9, h: 9 };
+		const p = realProtocol([
+			{ tag: "input", attrs: { type: "text" }, nth: 1, rect: same },
+			{ tag: "input", attrs: { type: "password" }, nth: 2, rect: same },
+		]);
+		const b = createEightBrowser(p.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
+		await b.open("http://127.0.0.1:5/");
+		const out = JSON.parse(await b.run([{ action: "type", index: 1, text: "x" }]));
+		expect(out.ok).toBe(false);
+		expect(JSON.stringify(out)).toMatch(/index 1 has no selector.*for example \{selector:/);
+		expect(p.typedSelectors).toEqual([]);
+	});
+
+	test("a hidden zero-rect target fails and nothing is typed", async () => {
+		const p = realProtocol([
+			{ tag: "input", attrs: { type: "text" }, nth: 1, rect: { x: 0, y: 0, w: 9, h: 9 } },
+			{ tag: "input", attrs: { type: "email" }, nth: 1, rect: { x: 0, y: 10, w: 0, h: 0 } },
+		]);
+		const b = createEightBrowser(p.call, { settleMs: 0, allowLoopback: ["127.0.0.1:5"] });
+		await b.open("http://127.0.0.1:5/");
+		const out = JSON.parse(await b.run([{ action: "type", index: 1, text: "x" }]));
+		expect(out.ok).toBe(false);
+		expect(p.typedSelectors).toEqual([]);
+	});
+
 	test("the fixture holds an index-only page.type to the browser's answer", async () => {
 		const p = realProtocol(form);
 		expect(await p.call("page.type", { tabId: "t1", index: 0, text: "x" })).toEqual({
