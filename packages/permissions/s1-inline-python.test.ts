@@ -6,6 +6,7 @@
  */
 
 import { afterAll, describe, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { decideRules } from "../decide/rules";
@@ -117,5 +118,96 @@ describe("PermissionManager: no card for read-only inline python, a card for the
 	});
 	test("a script file still asks as before", () => {
 		expect(pm().checkPermission("python3 analyze.py")).toBe("ask");
+	});
+});
+
+describe("escaped dunders and format walkers are refused (8SO bypass 1)", () => {
+	test("\\x5f spelling an underscore", () => {
+		const env = `python3 -I -c "import json; print('{0.\\x5f_globals__[codecs].sys.modules[os].environ}'.format(json.loads))"`;
+		expect(ok(env)).toBe(false);
+		expect(ok(`python3 -c "print('{0.\\x5f_class__}'.format(1))"`)).toBe(false);
+	});
+	test("no hex, unicode, octal or named escape, in either quoting", () => {
+		for (const esc of [
+			"\\x41",
+			"\\u0041",
+			"\\U00000041",
+			"\\N{LOW LINE}",
+			"\\137",
+			"\\0",
+			"\\\\",
+		]) {
+			expect(ok(`python3 -c "print('a${esc}b')"`)).toBe(false);
+			expect(ok(`python3 -c 'print("a${esc}b")'`)).toBe(false);
+		}
+	});
+	test("format, format_map and the other walkers", () => {
+		for (const w of [
+			"'{0.real}'.format(1)",
+			"'{a.real}'.format_map({'a': 1})",
+			"quit()",
+			"exit()",
+			"int.mro()",
+		]) {
+			expect(ok(`python3 -c "print(${w})"`)).toBe(false);
+		}
+	});
+	test("an f-string dunder walk is refused by the underscore rule", () => {
+		expect(ok(`python3 -c "t = 1; print(f'{t.__class__}')"`)).toBe(false);
+		expect(ok(`python3 -c "t = [1]; print(f'{t[0]} {len(t)}')"`)).toBe(true);
+	});
+	test("\\n and \\t in a print still pass", () => {
+		expect(ok(`python3 -c "print('a\\nb\\tc')"`)).toBe(true);
+		expect(ok(`python3 -c 'print("a\\nb")'`)).toBe(true);
+	});
+	test("hardened secret names", () => {
+		for (const n of ["apikey.json", "auth.json", "cookie.txt", "kubeconfig"]) {
+			expect(ok(`python3 -c "print(open('${n}').read())"`)).toBe(false);
+		}
+	});
+});
+
+describe("a planted stdlib shadow in the cwd falls back to the card (8SO bypass 2)", () => {
+	const dirWith = (...files: string[]) => {
+		const d = tempDir("inline-py-cwd-");
+		for (const f of files) {
+			const fp = path.join(d, f);
+			mkdirSync(path.dirname(fp), { recursive: true });
+			writeFileSync(fp, "");
+		}
+		return d;
+	};
+	test("clean cwd allows ARC1 and ARC2, with or without -I", () => {
+		const d = dirWith("task.json", "solve.py");
+		expect(readOnlyInlinePython(ARC1, d).ok).toBe(true);
+		expect(readOnlyInlinePython(ARC2, d).ok).toBe(true);
+		expect(readOnlyInlinePython(ARC2.replace("python3 ", "python3 -I "), d).ok).toBe(true);
+	});
+	test("json.py, re.py, math.py, collections.py, itertools.py, a package dir, a .so", () => {
+		for (const f of [
+			"json.py",
+			"re.py",
+			"math.py",
+			"collections.py",
+			"itertools.py",
+			"json/__init__.py",
+			"json.pyc",
+			"json.cpython-312-darwin.so",
+			"enum.py",
+		]) {
+			const d = dirWith(f);
+			expect(readOnlyInlinePython(ARC1, d).ok).toBe(false);
+		}
+	});
+	test("an unreadable cwd is refused", () => {
+		expect(readOnlyInlinePython(ARC1, "/nonexistent-dir-4422").ok).toBe(false);
+	});
+	test("through PermissionManager: shadowed cwd asks, clean cwd allows", () => {
+		const m = new PermissionManager(path.join(tempDir("inline-py-"), "permissions.json"));
+		const bad = dirWith("json.py");
+		const good = dirWith("task.json");
+		expect(m.checkPermission(ARC1, undefined, undefined, bad)).toBe("ask");
+		expect(m.checkPermission(ARC1, undefined, undefined, good)).toBe("allowed");
+		expect(m.checkPermission(ARC2, undefined, undefined, good)).toBe("allowed");
 	});
 });

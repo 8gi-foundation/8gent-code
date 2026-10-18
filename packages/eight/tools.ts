@@ -3720,6 +3720,7 @@ export class ToolExecutor {
 			command,
 			activeShellKind(windowsShell),
 			where,
+			dir,
 		);
 
 		if (permissionCheck === "denied") {
@@ -3776,7 +3777,7 @@ export class ToolExecutor {
 					? "This command may modify system files or cause data loss."
 					: "The agent wants to run a shell command.",
 				command,
-				{ where },
+				{ where, cwd: dir },
 			);
 
 			if (!allowed) {

@@ -1635,7 +1635,7 @@ async function commandRefusal(
 
 	// The folder a cd prefix chose: the cards name it, and answers are kept per folder.
 	const where = folderLabel(cwd, ctx.workingDirectory);
-	const permissionCheck = permissionManager.checkPermission(command, undefined, where);
+	const permissionCheck = permissionManager.checkPermission(command, undefined, where, cwd);
 	if (permissionCheck === "denied") {
 		return `[PERMISSION DENIED] Command blocked by security policy: ${command}`;
 	}
@@ -1669,7 +1669,7 @@ async function commandRefusal(
 				? "This command may modify system files or cause data loss."
 				: "The agent wants to run a shell command.",
 			command,
-			{ where },
+			{ where, cwd },
 		);
 		if (!allowed) return `[PERMISSION DENIED] User declined to execute: ${command}`;
 	}

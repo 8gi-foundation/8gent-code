@@ -120,7 +120,7 @@ export function cdPrefix(
 		dir = realpathSync(path.resolve(realRoot, ...p.segs));
 	} catch {
 		return refuse(
-			`there is no folder ${p.folder} in the project, so run the command without the cd: it already starts in the project folder`,
+			`run the command without the cd: it already starts in the project folder; there is no folder ${p.folder} under it`,
 			command,
 		);
 	}
