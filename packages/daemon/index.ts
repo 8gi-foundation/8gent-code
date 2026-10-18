@@ -184,6 +184,11 @@ function isLocalMode(argv: string[]): boolean {
 	return argv.includes("--local");
 }
 
+/** The port the daemon will bind: ~/.8gent/config.json daemon.port, else the default. */
+export async function configuredPort(): Promise<number> {
+	return (await loadConfig()).port;
+}
+
 export async function main(): Promise<void> {
 	const localMode = isLocalMode(process.argv.slice(2));
 	if (localMode) {
