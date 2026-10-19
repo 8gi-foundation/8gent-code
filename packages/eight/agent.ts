@@ -575,10 +575,10 @@ export class Agent {
 		// run_batch items skip the agent loop, so they take the same refusals here (#3502).
 		this.executor.setItemGate(async (t, a) => {
 			const refusal = await this.refuseToolCall(t, a);
-			if (refusal != null) return refusal;
-			await this.noteToolStart(t, a);
-			return null;
+			if (refusal != null) return { refusal };
+			return { refusal: null, ...(await this.noteToolStart(t, a)) };
 		});
+		this.executor.setItemEnd((id, t, a, r, ms) => this.noteToolEnd(id, t, a, r, ms));
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 off): with the allowlist
 		// opted out, start loading the judge now, in the background, so the
 		// first gated command does not pay the model load. Idempotent per
@@ -1128,8 +1128,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		args: Record<string, unknown>,
 		providerConfig?: ProviderConfig,
 	): void {
-		const toolPath = args?.path as string | undefined;
-		if (!toolPath || !["read_file", "write_file", "edit_file", "delete_file"].includes(toolName))
+		const toolPath = args?.path;
+		if (
+			typeof toolPath !== "string" ||
+			!["read_file", "write_file", "edit_file", "delete_file"].includes(toolName)
+		)
 			return;
 		this.recentFilePaths.push(toolPath);
 		// Keep bounded - only last 20 paths
@@ -1150,8 +1153,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		providerConfig.headers = undefined;
 	}
 
-	/** What an allowed run_batch item starts with: beforeTool hooks, privacy gate, start event (#3502). */
-	private async noteToolStart(toolName: string, args: Record<string, unknown>): Promise<void> {
+	private batchSeq = 0;
+
+	/** What an allowed run_batch item starts with: beforeTool hooks, privacy gate, start event, session row (#3502). */
+	private async noteToolStart(
+		toolName: string,
+		args: Record<string, unknown>,
+	): Promise<{ id: string; startedAt: number }> {
+		// Parallel reads can start in one millisecond, so the id carries a counter.
+		const id = `batch-${Date.now()}-${++this.batchSeq}`;
+		const startedAt = Date.now();
 		const loggedArgs = loggableToolArgs(toolName, args);
 		await this.hookManager.executeHooks("beforeTool", {
 			sessionId: this.sessionId,
@@ -1161,10 +1172,57 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		});
 		this.applyPrivacyGate(toolName, args, this.turnProvider);
 		console.log(`  -> ${toolName}(${JSON.stringify(loggedArgs).slice(0, 50)}...)`);
-		this.events.onToolStart?.({
+		this.events.onToolStart?.({ toolName, toolCallId: id, args: loggedArgs });
+		this.sessionWriter.writeToolCall(
+			{
+				toolCallId: id,
+				name: toolName,
+				arguments: loggedArgs,
+				success: true,
+				durationMs: 0,
+				startedAt: new Date(startedAt).toISOString(),
+			},
+			undefined,
+			undefined,
+		);
+		return { id, startedAt };
+	}
+
+	/** What an allowed run_batch item ends with: session row, end event, afterTool hooks (#3502). */
+	private async noteToolEnd(
+		id: string,
+		toolName: string,
+		args: Record<string, unknown>,
+		result: string,
+		durationMs: number,
+	): Promise<void> {
+		const loggedArgs = loggableToolArgs(toolName, args);
+		const success = !isErrorToolResult(result);
+		if (success)
+			this.sessionWriter.writeToolResult(
+				id,
+				true,
+				result.slice(0, 2000),
+				durationMs,
+				toolName,
+				undefined,
+			);
+		else this.sessionWriter.writeToolError(id, toolName, result.slice(0, 2000), undefined);
+		this.events.onToolEnd?.({
 			toolName,
-			toolCallId: `batch-${Date.now()}`,
+			toolCallId: id,
 			args: loggedArgs,
+			success,
+			durationMs,
+			resultPreview: result.slice(0, 200),
+		});
+		await this.hookManager.executeHooks("afterTool", {
+			sessionId: this.sessionId,
+			tool: toolName,
+			toolInput: loggedArgs,
+			toolOutput: result,
+			duration: durationMs,
+			workingDirectory: this.config.workingDirectory || process.cwd(),
 		});
 	}
 

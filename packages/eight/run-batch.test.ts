@@ -165,7 +165,9 @@ describe("hardening (second read)", () => {
 		const asked: string[] = [];
 		ex.setItemGate(async (t) => {
 			asked.push(t);
-			return t === "write_file" ? "Hook blocked tool write_file: read-only mode" : null;
+			return {
+				refusal: t === "write_file" ? "Hook blocked tool write_file: read-only mode" : null,
+			};
 		});
 		const out = await ex.execute("run_batch", {
 			items: [
@@ -214,7 +216,7 @@ describe("executor path", () => {
 	test("items go back through execute, so real tools run", async () => {
 		process.env.EIGHT_RUN_BATCH = "1";
 		const ex = new ToolExecutor(process.cwd());
-		ex.setItemGate(async () => null);
+		ex.setItemGate(async () => ({ refusal: null }));
 		const out = await ex.execute("run_batch", {
 			items: [
 				{ tool: "read_file", args: { path: "package.json" } },
@@ -278,6 +280,51 @@ describe("batched items take the same start path as a direct call (F8)", () => {
 			a.hookManager.executeHooks = real;
 		}
 		expect(fired).toEqual(["read_file", "list_files"]);
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+describe("batched items report their end (F9)", () => {
+	const fs = require("node:fs");
+	const path = require("node:path");
+	test("every start has one matching end, ids are unique in a parallel group, a refused item fires neither", async () => {
+		process.env.EIGHT_RUN_BATCH = "1";
+		const { Agent } = await import("./agent");
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "run-batch-end-"));
+		fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+		const starts: { id: string; tool: string }[] = [];
+		const ends: { id: string; tool: string }[] = [];
+		const a = new Agent({
+			model: "x/y",
+			runtime: "ollama",
+			workingDirectory: dir,
+			events: {
+				onToolStart: (e: { toolCallId: string; toolName: string }) =>
+					starts.push({ id: e.toolCallId, tool: e.toolName }),
+				onToolEnd: (e: { toolCallId: string; toolName: string }) =>
+					ends.push({ id: e.toolCallId, tool: e.toolName }),
+			},
+		} as never) as unknown as {
+			executor: ToolExecutor;
+			refuseToolCall: (t: string) => Promise<string | null>;
+		};
+		const real = a.refuseToolCall.bind(a);
+		a.refuseToolCall = async (t: string) =>
+			t === "write_file" ? "Hook blocked tool write_file: no" : real(t);
+		await a.executor.execute("run_batch", {
+			items: [
+				{ tool: "read_file", args: { path: "a.txt" } },
+				{ tool: "read_file", args: { path: "a.txt" } },
+				{ tool: "read_file", args: { path: "a.txt" } },
+				{ tool: "list_files", args: { path: "." } },
+				{ tool: "write_file", args: { path: "b.txt", content: "x" } },
+			],
+		});
+		expect(starts.length).toBe(4);
+		expect(new Set(starts.map((s) => s.id)).size).toBe(4);
+		expect(ends.map((e) => e.id).sort()).toEqual(starts.map((s) => s.id).sort());
+		expect(starts.some((s) => s.tool === "write_file")).toBe(false);
+		expect(ends.some((e) => e.tool === "write_file")).toBe(false);
 		fs.rmSync(dir, { recursive: true, force: true });
 	});
 });

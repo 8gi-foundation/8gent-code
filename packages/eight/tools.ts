@@ -2356,11 +2356,29 @@ export class ToolExecutor {
 	 * maker-checker, edit-scope, rate-limit and plan-mode checks as built-in
 	 * tools, and their output is scrubbed, filtered and chipped the same way.
 	 */
-	/** Per-item refusal for run_batch: the owner's mode, hook and extension checks (agent.ts refuseToolCall). */
-	private itemGate?: (tool: string, args: Record<string, unknown>) => Promise<string | null>;
+	/**
+	 * Per-item gate for run_batch: the owner's refusal checks and start bookkeeping (agent.ts).
+	 * refusal is null when the item may run; id and startedAt then name its start event.
+	 */
+	private itemGate?: (
+		tool: string,
+		args: Record<string, unknown>,
+	) => Promise<{ refusal: string | null; id?: string; startedAt?: number }>;
+	/** Per-item end bookkeeping for run_batch: end event, session row, afterTool hooks. */
+	private itemEnd?: (
+		id: string,
+		tool: string,
+		args: Record<string, unknown>,
+		result: string,
+		durationMs: number,
+	) => Promise<void>;
 
-	setItemGate(gate: (tool: string, args: Record<string, unknown>) => Promise<string | null>): void {
+	setItemGate(gate: NonNullable<ToolExecutor["itemGate"]>): void {
 		this.itemGate = gate;
+	}
+
+	setItemEnd(end: NonNullable<ToolExecutor["itemEnd"]>): void {
+		this.itemEnd = end;
 	}
 
 	setExtensionRunner(runner: ToolExecutor["extensionRunner"]): void {
@@ -3006,9 +3024,16 @@ export class ToolExecutor {
 				if (!this.itemGate)
 					return "Error: run_batch has no per-item gate in this session. Nothing was run.";
 				return runBatch(args.items, async (t, a) => {
-					const refusal = await this.itemGate?.(t, a);
-					if (refusal == null) return this.execute(t, a);
-					return isErrorToolResult(refusal) ? refusal : `Error: ${refusal}`;
+					const gate = this.itemGate;
+					if (!gate)
+						return "Error: run_batch has no per-item gate in this session. Nothing was run.";
+					const s = await gate(t, a);
+					if (s.refusal != null)
+						return isErrorToolResult(s.refusal) ? s.refusal : `Error: ${s.refusal}`;
+					const t0 = Date.now();
+					const r = await this.execute(t, a);
+					if (s.id) await this.itemEnd?.(s.id, t, a, r, Date.now() - t0);
+					return r;
 				});
 
 			// MCP tools
