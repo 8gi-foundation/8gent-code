@@ -40,6 +40,7 @@ let routes = new Map<
 	{ body?: string | Uint8Array; location?: string; failTimes?: number }
 >();
 let seenAuth: Array<string | null> = [];
+let hits = 0;
 let server: ReturnType<typeof Bun.serve>;
 let base = "";
 
@@ -49,6 +50,7 @@ beforeAll(() => {
 		port: 0,
 		fetch(req) {
 			const r = routes.get(new URL(req.url).pathname);
+			if (new URL(req.url).pathname === "/missing.json") hits += 1;
 			if (new URL(req.url).pathname === "/releases.json")
 				seenAuth.push(req.headers.get("authorization"));
 			if (!r) return new Response("not found", { status: 404 });
@@ -228,11 +230,30 @@ describe("install.sh: release list retry (#4468)", () => {
 		expect(installed()).toBeNull();
 	});
 
-	test("GITHUB_TOKEN is never required and is not sent to a local server", async () => {
+	test("403 then 200 succeeds, 404 fails at once with no retries", async () => {
+		const url = one("0.20.0");
+		routes.get("/releases.json")!.failTimes = 1;
+		expect((await install(url, fast)).code).toBe(0);
+		hits = 0;
+		const r = await install(`${base}/missing.json`, fast);
+		expect(hits).toBe(1);
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("last status: 404");
+	});
+
+	test("EIGHT_INSTALL_GITHUB_TOKEN is never required and is not sent to a local server; GITHUB_TOKEN is ignored", async () => {
 		const url = one("0.20.0");
 		seenAuth = [];
 		expect((await install(url, fast)).code).toBe(0);
-		expect((await install(url, { ...fast, GITHUB_TOKEN: "tok-secret" })).code).toBe(0);
+		expect(
+			(
+				await install(url, {
+					...fast,
+					EIGHT_INSTALL_GITHUB_TOKEN: "tok-secret",
+					GITHUB_TOKEN: "stale",
+				})
+			).code,
+		).toBe(0);
 		expect(seenAuth.every((a) => a === null)).toBe(true);
 	});
 });

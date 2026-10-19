@@ -230,7 +230,7 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           REPO: ${{ github.repository }}
-          GITHUB_TOKEN: ${{ github.token }}
+          EIGHT_INSTALL_GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $dir = Join-Path $env:RUNNER_TEMP 'bin'
@@ -258,7 +258,7 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           REPO: ${{ github.repository }}
-          GITHUB_TOKEN: ${{ github.token }}
+          EIGHT_INSTALL_GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -eu
           export EIGHT_INSTALL_DIR="$RUNNER_TEMP/bin"
