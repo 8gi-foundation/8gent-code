@@ -12,7 +12,7 @@
 		"why": "Cloud rehearsal 18 Oct (state/cloud-night/matrix-20261018.tsv): sigi-dev-a11y-b qwen FAIL 15/17 turn_timeout where minimax passed 17/17. Same weights and same 1200 s judge window as the local entry, so the same earlier nudge. 8192 is today's cloud cap; 50 matches the TUI."
 	},
 	"minimax/minimax-m3": {
-		"maxOutputTokens": 32768,
-		"why": "Cloud runs 19 Oct, sigi-dev-arc2-a (runs-cloud 2026-10-19_152316, _153418, _153911): every turn that ended empty was a step with finishReason length at exactly 8192 completion tokens, 8191 of them reasoning in _153418 and _153911, so no text or tool call was left. The #4446 auto-continue re-asked under the same cap and hit it again. OpenRouter lists 512000 max completion tokens for this model; 32768 is the harness upper bound. Steps and nudge stay at defaults."
+		"maxOutputTokens": 16384,
+		"why": "Cloud runs 19 Oct, sigi-dev-arc2-a (runs-cloud 2026-10-19_152316, _153418, _153911): every turn that ended empty was a step with finishReason length at exactly 8192 completion tokens, 8191 of them reasoning in _153418 and _153911, so no text or tool call was left. The #4446 auto-continue re-asked under the same cap and hit it again. 32768 was tried (_154821): the native path is generateText, so one step sends no progress until it ends, and a single reasoning step hit the 300 s idle gap. The slowest cut step ran 8192 tokens in 81 s (about 100 tok/s), so 16384 fits in about 164 s. Steps and nudge stay at defaults."
 	}
 }
