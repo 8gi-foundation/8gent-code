@@ -11,6 +11,11 @@
  * recursion. A second empty end is returned as is and the caller shows the
  * No reply note. Never fires after a user abort or once the turn budget
  * (EIGHT_TURN_BUDGET_MS, #4419) is spent. Model-agnostic.
+ *
+ * Length cut (#4452): a step that ends on finishReason "length" with no text
+ * and no tool call spent its whole output budget thinking (cloud MiniMax M3,
+ * arc2-a: 8191 of 8192 tokens reasoning). That continues too, even before any
+ * tool ran, and the steer adds one line asking for action over more thinking.
  */
 
 /** Fixed start of every steer. */
@@ -45,6 +50,19 @@ export function emptyTurnSteer(request: string): string {
 
 /** Fixed start of the log line, so pilot logs can count the continues. */
 export const EMPTY_TURN_CONTINUE_LOG = "[empty-turn] auto-continue";
+/** Fixed start of the length-cut log line, so pilot logs can count the cuts. */
+export const EMPTY_TURN_LENGTH_LOG = "[empty-turn] length cut";
+
+export const EMPTY_TURN_LENGTH_LINE =
+	"Your last step ran out of output space while thinking. Think less, act now: make the next tool call or write the deliverable directly.";
+
+/** The parts of a generate result this reads beyond text; all optional. */
+export interface EmptyTurnResult {
+	text?: string;
+	finishReason?: string;
+	usage?: { outputTokens?: number };
+	toolCalls?: unknown[];
+}
 
 export interface EmptyTurnContinueInput<R extends { text?: string }> {
 	/** The turn's result as the loop returned it. */
@@ -67,23 +85,26 @@ export async function continueEmptyTurn<R extends { text?: string }>(
 	input: EmptyTurnContinueInput<R>,
 ): Promise<{ result: R; continued: boolean }> {
 	const { result } = input;
+	const log = input.log ?? console.log;
 	const empty = (result.text ?? "").trim() === "";
+	const end: EmptyTurnResult = result;
+	const lengthCut = empty && end.finishReason === "length" && !end.toolCalls?.length;
+	if (lengthCut) log(`${EMPTY_TURN_LENGTH_LOG} at ${end.usage?.outputTokens ?? "unknown"} tokens`);
 	const budgetSpent = input.budgetMs > 0 && input.elapsedMs >= input.budgetMs;
-	if (!empty || input.toolCalls === 0 || input.isAborted() || budgetSpent) {
+	if (!empty || (input.toolCalls === 0 && !lengthCut) || input.isAborted() || budgetSpent) {
 		return { result, continued: false };
 	}
 	const calls = input.toolCalls === 1 ? "1 tool call" : `${input.toolCalls} tool calls`;
-	(input.log ?? console.log)(
-		`${EMPTY_TURN_CONTINUE_LOG} after ${calls} with no reply - one extra generate`,
-	);
+	log(`${EMPTY_TURN_CONTINUE_LOG} after ${calls} with no reply - one extra generate`);
+	const steer = lengthCut
+		? `${emptyTurnSteer(input.request)} ${EMPTY_TURN_LENGTH_LINE}`
+		: emptyTurnSteer(input.request);
 	try {
-		return { result: await input.generate(emptyTurnSteer(input.request)), continued: true };
+		return { result: await input.generate(steer), continued: true };
 	} catch (err) {
 		// A stop during the continue belongs to the caller's stop path.
 		if (input.isAborted()) throw err;
-		(input.log ?? console.log)(
-			`${EMPTY_TURN_CONTINUE_LOG} failed: ${err instanceof Error ? err.message : String(err)}`,
-		);
+		log(`${EMPTY_TURN_CONTINUE_LOG} failed: ${err instanceof Error ? err.message : String(err)}`);
 		return { result, continued: true };
 	}
 }
