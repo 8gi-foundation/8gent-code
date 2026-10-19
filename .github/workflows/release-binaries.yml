@@ -33,6 +33,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'existing v* tag to rebuild from this workflow file; empty = github.ref_name'
+        required: false
+        type: string
 
 # Least privilege (#3803 hardening): builds and smoke tests only read. Only
 # the job that edits the release gets contents: write, and only the alarm
@@ -60,6 +65,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
           persist-credentials: false
 
       - name: Setup Bun
@@ -78,7 +84,10 @@ jobs:
       # nfpm: an exact release, checked against its published SHA256.
       # makensis: Homebrew checks the bottle's SHA256 against its formula;
       # the version is asserted so a formula bump is a visible change here.
-      - name: Toolchain (nfpm 2.47.0, makensis 3.12, pinned)
+      # The exact-match pin exists to catch a silent supply-chain move, so it
+      # must be bumped on purpose, never loosened. Homebrew moved 3.12 -> 3.13
+      # and failed v0.20.1 (#4468, the same drift as v0.20.0 on 13 Oct).
+      - name: Toolchain (nfpm 2.47.0, makensis 3.13, pinned)
         env:
           NFPM_URL: https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Darwin_arm64.tar.gz
           NFPM_SHA256: e8c9d1d9ac218eeed479375143dc46b8d51a2b8dbba8e2f9f15ecc8faa2e404b
@@ -89,7 +98,7 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nfpm.tgz" -C "$RUNNER_TEMP/tools" nfpm
           echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
           brew install makensis
-          test "$(brew list --versions makensis)" = "makensis 3.12" || { echo "::error::makensis is $(brew list --versions makensis), pinned 3.12"; exit 1; }
+          test "$(brew list --versions makensis)" = "makensis 3.13" || { echo "::error::makensis is $(brew list --versions makensis), pinned 3.13"; exit 1; }
           "$RUNNER_TEMP/tools/nfpm" --version
           makensis -VERSION
 
@@ -225,7 +234,7 @@ jobs:
         timeout-minutes: 10
         shell: pwsh
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           $ErrorActionPreference = 'Stop'
           foreach ($name in @('8gent-windows-x64.exe', '8gent-windows-x64-baseline.exe')) {
@@ -254,6 +263,7 @@ jobs:
       - name: Checkout (smoke-compiled.sh)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
           persist-credentials: false
       - name: Download artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -276,7 +286,7 @@ jobs:
     steps:
       - name: Require a strict vX.Y.Z tag
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::release-binaries.yml publishes from a vX.Y.Z tag only, not ${TAG}"
@@ -286,6 +296,7 @@ jobs:
       - name: Checkout (release-guard.sh)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
           persist-credentials: false
 
       - name: Download artifacts
@@ -301,7 +312,7 @@ jobs:
       - name: Attach to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
           REPO: ${{ github.repository }}
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
         run: |
@@ -350,7 +361,7 @@ jobs:
       - name: Publish the release once it is complete
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           # With a release key configured, the signature is a required asset too.
           SIG=()
@@ -374,7 +385,7 @@ jobs:
     needs: release
     uses: ./.github/workflows/release-install-smoke.yml
     with:
-      tag: ${{ github.ref_name }}
+      tag: ${{ inputs.tag || github.ref_name }}
 
   # A failed release used to be invisible for a week (#3658). Any failure
   # above opens (or comments on) one P0 issue, so it lands where people look.
@@ -396,6 +407,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          REF: ${{ github.ref_name }}
+          REF: ${{ inputs.tag || github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bash scripts/release-alarm.sh "release-binaries.yml" "$REF" "$RUN_URL"
