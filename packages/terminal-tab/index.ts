@@ -35,8 +35,10 @@ export type { SpawnInWindowOpts, WindowSessionHandle } from "./window-session.js
 export {
 	attachInTerminal,
 	buildPipePaneArgs,
+	buildEnterKeyArgs,
 	buildSendKeysArgs,
 	buildTmuxNewSessionArgs,
+	composeShellCommand,
 	hasSession as hasTmuxSession,
 	isTmuxAvailable,
 	killTmuxSession,

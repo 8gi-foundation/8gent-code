@@ -16,10 +16,13 @@
  * window IDs. It just calls term_spawn / term_send / term_read.
  */
 
+import { commandSegments } from "../permissions/command-policy.js";
+import { getPermissionManager } from "../permissions/index.js";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import {
 	type WindowSession,
 	attachInTerminal,
+	composeShellCommand,
 	deleteSession,
 	getSession,
 	hasTmuxSession,
@@ -41,6 +44,139 @@ import {
 // stateless across tool calls but the cursor needs to persist.
 //
 const readOffsets = new Map<string, number>();
+
+// ---------------- Command policy (#3767) ----------------
+//
+// term_spawn starts a program and term_send types into a live session, so
+// both reach a shell the same way run_command does. Every command line they
+// carry goes through the same command policy: the always-blocked list is
+// refused, the ask-every-time list asks a person (refused with no terminal),
+// in every mode including Infinite. Text that cannot be read with confidence
+// as a command is treated as needing a person.
+
+/** Typed but not yet submitted, per session, so a later Enter is judged with it. */
+const pendingInput = new Map<string, string>();
+
+/** Most unsubmitted text held per session; past it term_send is refused and the hold is kept. */
+export const MAX_PENDING_INPUT = 64 * 1024;
+
+// Tab (0x09) counts: in a shell it triggers completion and can rewrite the line.
+const CONTROL_CHARS = /[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/;
+
+/** True when the line has quotes or shell constructs we cannot read for sure. */
+function unreadable(text: string): boolean {
+	if (CONTROL_CHARS.test(text)) return true;
+	// Known imprecision: $$' is read here as an ANSI-C quote, but bash sees $$ (the pid) then a
+	// plain quote. It only errs toward asking, and the quote tracker asks on every piece.
+	// $'...' (ANSI-C quoting) treats a backslash as an escape inside single quotes,
+	// which the quote tracking below does not model; a person reads it instead.
+	if (/\$\(|`|<<|<\(|>\(|\$'/.test(text)) return true;
+	let quote: string | null = null;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		// A line break inside an open quote, or right after a backslash, joins
+		// two lines into one command; judged line by line it would slip through.
+		if ((c === "\r" || c === "\n") && quote !== null) return true;
+		if (c === "\\" && quote !== "'") {
+			i++;
+			if (i >= text.length) return true;
+			if (text[i] === "\r" || text[i] === "\n") return true;
+			continue;
+		}
+		if (quote) {
+			if (c === quote) quote = null;
+		} else if (c === "'" || c === '"') {
+			quote = c;
+		}
+	}
+	return quote !== null;
+}
+
+/**
+ * What is still on the shell's line after `line` is typed. A newline submits,
+ * except right after a backslash or inside an open quote, where the shell
+ * keeps reading the same command: that text stays pending, so a later piece
+ * is judged together with it. Enter counts as a final newline.
+ */
+function unsubmitted(line: string, enter: boolean): string {
+	const text = enter ? `${line}\n` : line;
+	let quote: string | null = null;
+	let start = 0;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (c === "\\" && quote !== "'") {
+			i++;
+			continue;
+		}
+		if (c === "\n" || c === "\r") {
+			if (quote === null) start = i + 1;
+		} else if (quote) {
+			if (c === (quote === "$'" ? "'" : quote)) quote = null;
+		} else if (c === "$" && text[i + 1] === "'") {
+			// ANSI-C quote: a backslash escapes inside it, unlike a plain single quote.
+			quote = "$'";
+			i++;
+		} else if (c === "'" || c === '"') {
+			quote = c;
+		}
+	}
+	return text.slice(start);
+}
+
+/** What a prompt shows of long text: the tail, since the end is what a joined command finishes with. */
+const PROMPT_TAIL = 4096;
+const tail = (t: string) => (t.length > PROMPT_TAIL ? `...${t.slice(-PROMPT_TAIL)}` : t);
+
+/** Null when the input may go ahead, else the refusal to hand back to the agent. */
+async function gateInput(tool: string, text: string): Promise<string | null> {
+	const pm = getPermissionManager();
+	const lines = text.split(/[\r\n]+/).filter((l) => l.trim() !== "");
+	const refuse = (why: string) => `[PERMISSION DENIED] ${tool}: ${why}. Nothing was sent.`;
+
+	// The whole text as the shell may read it: line breaks as separators, and
+	// with a backslash continuation joined. A command split across lines is
+	// judged whole as well as piece by piece.
+	const wholes = [text.replace(/[\r\n]+/g, ";"), text.replace(/\\[\r\n]+/g, "")];
+	for (const whole of wholes) {
+		for (const part of [whole, ...commandSegments(whole)]) {
+			const blocked = pm.alwaysBlockedReason(part);
+			if (blocked) return refuse(`blocked by security policy (${blocked}): ${text}`);
+		}
+	}
+
+	for (const line of lines) {
+		for (const part of [line, ...commandSegments(line)]) {
+			const blocked = pm.alwaysBlockedReason(part);
+			if (blocked) return refuse(`blocked by security policy (${blocked}): ${line}`);
+		}
+		if (pm.checkPermission(line) === "denied") {
+			return refuse(`blocked by security policy: ${line}`);
+		}
+	}
+
+	if (unreadable(text)) {
+		const ok = await pm.askPerson(
+			"Type Into Terminal Session",
+			"The agent wants to type text that cannot be read as a plain command.",
+			tail(text),
+		);
+		return ok
+			? null
+			: refuse(`a person declined input that could not be read as a command: ${text}`);
+	}
+
+	for (const line of lines) {
+		if (pm.checkPermission(line) === "ask") {
+			const ok = await pm.requestPermission(
+				"Execute Shell Command",
+				"The agent wants to run a command in a terminal session.",
+				tail(line),
+			);
+			if (!ok) return refuse(`user declined to run: ${line}`);
+		}
+	}
+	return null;
+}
 
 // ---------------- Tool definitions ----------------
 
@@ -178,6 +314,9 @@ async function termSpawn(args: Record<string, unknown>): Promise<string> {
 	const cmdArgs = Array.isArray(args.args) ? (args.args as string[]).map(String) : [];
 	const label = (args.label as string | undefined) ?? command;
 
+	const denied = await gateInput("term_spawn", composeShellCommand(command, cmdArgs));
+	if (denied) return denied;
+
 	const handle = await spawnTmuxSession({
 		command,
 		args: cmdArgs,
@@ -224,6 +363,19 @@ async function termSend(args: Record<string, unknown>): Promise<string> {
 		return `ERR: session "${sessionId}" is not running.`;
 	}
 	const appendEnter = args.appendEnter !== false;
+	// Judge what is on the line, including text typed earlier and not yet submitted.
+	const line = (pendingInput.get(sessionId) ?? "") + text;
+	if (line.length > MAX_PENDING_INPUT) {
+		// Refuse and leave the hold exactly as it is. Clearing it would not clear the
+		// shell's line: the bytes already typed stay there, and padding past the cap
+		// would let the next piece be judged alone. Only term_kill clears the hold.
+		return `[PERMISSION DENIED] term_send: the pending unsubmitted text is over the ${MAX_PENDING_INPUT} byte cap, so it cannot be checked as one command line. Nothing was sent and the pending text is kept. Use term_kill to end this session and start clean.`;
+	}
+	const denied = await gateInput("term_send", line);
+	if (denied) return denied;
+	const rest = unsubmitted(line, appendEnter);
+	if (rest === "") pendingInput.delete(sessionId);
+	else pendingInput.set(sessionId, rest);
 	await sendTmuxKeys(sessionId, text, { appendEnter });
 	return JSON.stringify({ ok: true, sessionId, sent: text, enter: appendEnter });
 }
@@ -277,5 +429,6 @@ async function termKill(args: Record<string, unknown>): Promise<string> {
 	await killTmuxSession(sessionId);
 	deleteSession(sessionId);
 	readOffsets.delete(sessionId);
+	pendingInput.delete(sessionId);
 	return JSON.stringify({ ok: true, sessionId, killed: true });
 }

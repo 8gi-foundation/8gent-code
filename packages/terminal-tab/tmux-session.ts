@@ -13,7 +13,7 @@
  *      learn what the CLI said.
  *   3. osascript opens a Terminal.app window running `tmux attach -t
  *      <id>` so the human can also see / interact.
- *   4. `tmux send-keys -t <id> "TEXT" Enter` injects prompts on
+ *   4. `tmux send-keys -t <id> -l -- "TEXT"` then `send-keys Enter` injects prompts on
  *      demand. No Accessibility permission, no AppleScript voodoo.
  *
  * Pure command-builders are exported so the unit tests don't need
@@ -60,6 +60,18 @@ function shellSingleQuote(s: string): string {
 	return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
+/**
+ * The exact string tmux hands to sh for a spawn. With no args the command is
+ * passed through as written (so a caller may give a full command line); with
+ * args every token is single-quoted. Anything that gates a spawn must judge
+ * this string, never a re-quoted copy of its inputs.
+ */
+export function composeShellCommand(command: string, cmdArgs: string[] = []): string {
+	return cmdArgs.length === 0
+		? command
+		: `${shellSingleQuote(command)} ${cmdArgs.map(shellSingleQuote).join(" ")}`;
+}
+
 export interface BuildNewSessionArgs {
 	sessionId: string;
 	command: string;
@@ -74,13 +86,8 @@ export function buildTmuxNewSessionArgs(args: BuildNewSessionArgs): string[] {
 	const cmdArgs = args.cmdArgs ?? [];
 	const cols = args.cols ?? 200;
 	const rows = args.rows ?? 50;
-	// tmux's last positional is "shell-command" — a single string it runs through sh.
-	// If we have cmdArgs we must compose them into one string with shell-quoted args
-	// so tmux invokes the command with them intact.
-	const composed =
-		cmdArgs.length === 0
-			? args.command
-			: `${shellSingleQuote(args.command)} ${cmdArgs.map(shellSingleQuote).join(" ")}`;
+	// tmux's last positional is "shell-command": a single string it runs through sh.
+	const composed = composeShellCommand(args.command, cmdArgs);
 	return [
 		"new-session",
 		"-d",
@@ -100,14 +107,21 @@ export interface BuildSendKeysOpts {
 	appendEnter?: boolean;
 }
 
-export function buildSendKeysArgs(
-	sessionId: string,
-	text: string,
-	opts: BuildSendKeysOpts = {},
-): string[] {
-	const out = ["send-keys", "-t", sessionId, text];
-	if (opts.appendEnter !== false) out.push("Enter");
-	return out;
+/**
+ * Argv for typing `text` into a pane. `-l` sends it literally, so text that
+ * happens to spell a tmux key name (BSpace, C-u, Up, Enter...) is typed as
+ * characters and never acts as a key. `--` stops a leading dash being read
+ * as a flag. Enter is a separate call (buildEnterKeyArgs): after `-l` every
+ * argument is literal, and a trailing `;` in text must never be read by tmux
+ * as a command separator, so the two are never chained into one argv.
+ */
+export function buildSendKeysArgs(sessionId: string, text: string): string[] {
+	return ["send-keys", "-t", sessionId, "-l", "--", text];
+}
+
+/** Argv for pressing the Enter key (a key name, so no `-l`). */
+export function buildEnterKeyArgs(sessionId: string): string[] {
+	return ["send-keys", "-t", sessionId, "Enter"];
 }
 
 export function buildPipePaneArgs(sessionId: string, logPath: string): string[] {
@@ -217,8 +231,8 @@ export async function sendKeys(
 	text: string,
 	opts: BuildSendKeysOpts = {},
 ): Promise<void> {
-	const args = buildSendKeysArgs(sessionId, text, opts);
-	await execFileAsync("tmux", args);
+	if (text.length > 0) await execFileAsync("tmux", buildSendKeysArgs(sessionId, text));
+	if (opts.appendEnter !== false) await execFileAsync("tmux", buildEnterKeyArgs(sessionId));
 }
 
 export async function hasSession(sessionId: string): Promise<boolean> {
