@@ -22,6 +22,7 @@ import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import {
 	type WindowSession,
 	attachInTerminal,
+	composeShellCommand,
 	deleteSession,
 	getSession,
 	hasTmuxSession,
@@ -66,9 +67,13 @@ function unreadable(text: string): boolean {
 	let quote: string | null = null;
 	for (let i = 0; i < text.length; i++) {
 		const c = text[i];
+		// A line break inside an open quote, or right after a backslash, joins
+		// two lines into one command; judged line by line it would slip through.
+		if ((c === "\r" || c === "\n") && quote !== null) return true;
 		if (c === "\\" && quote !== "'") {
 			i++;
 			if (i >= text.length) return true;
+			if (text[i] === "\r" || text[i] === "\n") return true;
 			continue;
 		}
 		if (quote) {
@@ -80,8 +85,31 @@ function unreadable(text: string): boolean {
 	return quote !== null;
 }
 
-function shellQuote(token: string): string {
-	return /^[\w@%+=:,./-]+$/.test(token) ? token : `'${token.replace(/'/g, "'\\''")}'`;
+/**
+ * What is still on the shell's line after `line` is typed. A newline submits,
+ * except right after a backslash or inside an open quote, where the shell
+ * keeps reading the same command: that text stays pending, so a later piece
+ * is judged together with it. Enter counts as a final newline.
+ */
+function unsubmitted(line: string, enter: boolean): string {
+	const text = enter ? `${line}\n` : line;
+	let quote: string | null = null;
+	let start = 0;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (c === "\\" && quote !== "'") {
+			i++;
+			continue;
+		}
+		if (c === "\n" || c === "\r") {
+			if (quote === null) start = i + 1;
+		} else if (quote) {
+			if (c === quote) quote = null;
+		} else if (c === "'" || c === '"') {
+			quote = c;
+		}
+	}
+	return text.slice(start);
 }
 
 /** Null when the input may go ahead, else the refusal to hand back to the agent. */
@@ -89,6 +117,17 @@ async function gateInput(tool: string, text: string): Promise<string | null> {
 	const pm = getPermissionManager();
 	const lines = text.split(/[\r\n]+/).filter((l) => l.trim() !== "");
 	const refuse = (why: string) => `[PERMISSION DENIED] ${tool}: ${why}. Nothing was sent.`;
+
+	// The whole text as the shell may read it: line breaks as separators, and
+	// with a backslash continuation joined. A command split across lines is
+	// judged whole as well as piece by piece.
+	const wholes = [text.replace(/[\r\n]+/g, ";"), text.replace(/\\[\r\n]+/g, "")];
+	for (const whole of wholes) {
+		for (const part of [whole, ...commandSegments(whole)]) {
+			const blocked = pm.alwaysBlockedReason(part);
+			if (blocked) return refuse(`blocked by security policy (${blocked}): ${text}`);
+		}
+	}
 
 	for (const line of lines) {
 		for (const part of [line, ...commandSegments(line)]) {
@@ -260,7 +299,7 @@ async function termSpawn(args: Record<string, unknown>): Promise<string> {
 	const cmdArgs = Array.isArray(args.args) ? (args.args as string[]).map(String) : [];
 	const label = (args.label as string | undefined) ?? command;
 
-	const denied = await gateInput("term_spawn", [command, ...cmdArgs].map(shellQuote).join(" "));
+	const denied = await gateInput("term_spawn", composeShellCommand(command, cmdArgs));
 	if (denied) return denied;
 
 	const handle = await spawnTmuxSession({
@@ -313,11 +352,9 @@ async function termSend(args: Record<string, unknown>): Promise<string> {
 	const line = (pendingInput.get(sessionId) ?? "") + text;
 	const denied = await gateInput("term_send", line);
 	if (denied) return denied;
-	// A submit (Enter, or a newline inside the text) clears what was pending;
-	// without one, only the text after the last newline is still on the line.
-	const tail = line.slice(Math.max(line.lastIndexOf("\n"), line.lastIndexOf("\r")) + 1);
-	if (appendEnter) pendingInput.delete(sessionId);
-	else pendingInput.set(sessionId, tail);
+	const rest = unsubmitted(line, appendEnter);
+	if (rest === "") pendingInput.delete(sessionId);
+	else pendingInput.set(sessionId, rest);
 	await sendTmuxKeys(sessionId, text, { appendEnter });
 	return JSON.stringify({ ok: true, sessionId, sent: text, enter: appendEnter });
 }

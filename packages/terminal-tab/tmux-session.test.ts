@@ -17,6 +17,7 @@ import {
 	buildPipePaneArgs,
 	buildSendKeysArgs,
 	buildTmuxNewSessionArgs,
+	composeShellCommand,
 	hasSession,
 	killTmuxSession,
 	parseLogTail,
@@ -221,4 +222,25 @@ describe("spawnTmuxSession — live", () => {
 		},
 		8000,
 	);
+});
+
+describe("composeShellCommand", () => {
+	it("no args passes the command line through as written", () => {
+		expect(composeShellCommand("echo hi; ls")).toBe("echo hi; ls");
+		expect(composeShellCommand("ls", [])).toBe("ls");
+	});
+
+	it("args are single-quoted along with the command", () => {
+		expect(composeShellCommand("sh", ["-c", "it's"])).toBe("'sh' '-c' 'it'\\''s'");
+	});
+
+	it("buildTmuxNewSessionArgs hands tmux exactly that string", () => {
+		for (const [command, cmdArgs] of [
+			["echo hi; ls", []],
+			["sh", ["-c", "echo $HOME"]],
+		] as [string, string[]][]) {
+			const argv = buildTmuxNewSessionArgs({ sessionId: "x", command, cmdArgs, cwd: "/" });
+			expect(argv[argv.length - 1]).toBe(composeShellCommand(command, cmdArgs));
+		}
+	});
 });

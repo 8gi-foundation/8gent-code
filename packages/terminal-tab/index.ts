@@ -38,6 +38,7 @@ export {
 	buildEnterKeyArgs,
 	buildSendKeysArgs,
 	buildTmuxNewSessionArgs,
+	composeShellCommand,
 	hasSession as hasTmuxSession,
 	isTmuxAvailable,
 	killTmuxSession,

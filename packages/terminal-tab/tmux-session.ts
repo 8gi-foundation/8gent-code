@@ -60,6 +60,18 @@ function shellSingleQuote(s: string): string {
 	return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
+/**
+ * The exact string tmux hands to sh for a spawn. With no args the command is
+ * passed through as written (so a caller may give a full command line); with
+ * args every token is single-quoted. Anything that gates a spawn must judge
+ * this string, never a re-quoted copy of its inputs.
+ */
+export function composeShellCommand(command: string, cmdArgs: string[] = []): string {
+	return cmdArgs.length === 0
+		? command
+		: `${shellSingleQuote(command)} ${cmdArgs.map(shellSingleQuote).join(" ")}`;
+}
+
 export interface BuildNewSessionArgs {
 	sessionId: string;
 	command: string;
@@ -74,13 +86,8 @@ export function buildTmuxNewSessionArgs(args: BuildNewSessionArgs): string[] {
 	const cmdArgs = args.cmdArgs ?? [];
 	const cols = args.cols ?? 200;
 	const rows = args.rows ?? 50;
-	// tmux's last positional is "shell-command" — a single string it runs through sh.
-	// If we have cmdArgs we must compose them into one string with shell-quoted args
-	// so tmux invokes the command with them intact.
-	const composed =
-		cmdArgs.length === 0
-			? args.command
-			: `${shellSingleQuote(args.command)} ${cmdArgs.map(shellSingleQuote).join(" ")}`;
+	// tmux's last positional is "shell-command": a single string it runs through sh.
+	const composed = composeShellCommand(args.command, cmdArgs);
 	return [
 		"new-session",
 		"-d",

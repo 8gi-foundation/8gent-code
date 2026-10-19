@@ -19,6 +19,7 @@ const spawned: string[] = [];
 
 mock.module("../terminal-tab/index.js", () => ({
 	attachInTerminal: async () => {},
+	composeShellCommand: realTerminalTab.composeShellCommand,
 	deleteSession: () => {},
 	getSession: () => null,
 	hasTmuxSession: async () => true,
@@ -62,6 +63,8 @@ const git: GitState = {
 
 // Built from parts so the line is not a literal destructive command in source.
 const WIPE_ROOT = ["rm", "-rf", "/"].join(" ");
+const RM = ["rm", "-rf"].join(" ");
+const WIPE_HOME = WIPE_ROOT;
 
 const savedTTY = process.stdin.isTTY;
 const savedHeadless = process.env.EIGHT_HEADLESS;
@@ -76,7 +79,8 @@ function attachTerminal(answer: () => "approve" | "deny", asked: string[]) {
 	});
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+	await executeTermTool("term_kill", { sessionId: "s1" });
 	sent.length = 0;
 	spawned.length = 0;
 	getPermissionManager().setGitState(git);
@@ -181,6 +185,66 @@ describe("with no terminal attached", () => {
 			expect(await send(text)).toContain("[PERMISSION DENIED]");
 		}
 		expect(sent).toEqual([]);
+	});
+
+	test("term_spawn with a whole command line and no args is gated as that line", async () => {
+		const wipeHome = WIPE_HOME;
+		expect(await executeTermTool("term_spawn", { command: wipeHome })).toContain(
+			"[PERMISSION DENIED]",
+		);
+		expect(await executeTermTool("term_spawn", { command: `echo hi; ${wipeHome}` })).toContain(
+			"[PERMISSION DENIED]",
+		);
+		getPermissionManager().enableInfiniteMode();
+		expect(await executeTermTool("term_spawn", { command: wipeHome })).toContain(
+			"[PERMISSION DENIED]",
+		);
+		expect(spawned).toEqual([]);
+	});
+
+	test("a line break cannot split an always-blocked command across lines", async () => {
+		const bs = String.fromCharCode(92);
+		const payloads = [
+			`${RM} ${bs}\n~`,
+			`${RM} ${bs}\r\n~`,
+			`echo "\n"; ${WIPE_HOME}`,
+			`echo "\n"\n${WIPE_HOME}`,
+		];
+		for (const text of payloads) {
+			expect(await send(text)).toContain("[PERMISSION DENIED]");
+		}
+		expect(sent).toEqual([]);
+	});
+
+	test("the same split over two term_send calls is refused", async () => {
+		const bs = String.fromCharCode(92);
+		// A person approves the first piece, which on its own is only a dangling backslash.
+		const asked: string[] = [];
+		attachTerminal(() => "approve", asked);
+		const typed = (text: string) =>
+			executeTermTool("term_send", { sessionId: "s1", text, appendEnter: false });
+		expect(await typed(`${RM} ${bs}`)).toContain('"ok":true');
+		expect(await typed("\n/")).toContain("[PERMISSION DENIED]");
+		// Enter after a backslash does not submit, so the next piece is still the same command.
+		expect(await executeTermTool("term_send", { sessionId: "s1", text: "echo ok" })).toContain(
+			'"ok":true',
+		);
+		expect(await typed(`${RM} ${bs}`)).toContain('"ok":true');
+		expect(await typed("\n")).toContain('"ok":true');
+		expect(await typed("/")).toContain("[PERMISSION DENIED]");
+		// An open quote carried over from the first call is judged with the second.
+		await executeTermTool("term_kill", { sessionId: "s1" });
+		expect(await typed('echo "')).toContain('"ok":true');
+		expect(await typed(`"; ${WIPE_ROOT}`)).toContain("[PERMISSION DENIED]");
+	});
+
+	test("a backslash before a line break and a quote open at one need a person", async () => {
+		const asked: string[] = [];
+		attachTerminal(() => "deny", asked);
+		const bs = String.fromCharCode(92);
+		expect(await send(`ls ${bs}\n-la`)).toContain("[PERMISSION DENIED]");
+		expect(await send('echo "a\nb"')).toContain("[PERMISSION DENIED]");
+		expect(asked).toEqual([`ls ${bs}\n-la`, 'echo "a\nb"']);
 	});
 
 	test("key-name text is ordinary text for the gate and is passed on unchanged", async () => {
