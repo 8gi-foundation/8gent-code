@@ -120,6 +120,8 @@ export interface Decider {
 	ask(request: SystemOneRequest): Promise<SystemOneResponse>;
 	/** Resolve (and cache) the backend without asking anything. */
 	backend(): Promise<DecideBackend>;
+	/** Memo counters since construction (#3885): lets a caller tell a memo hit from a fresh judge call. */
+	cacheStats?(): { hits: number; misses: number };
 }
 
 interface Meta {
@@ -285,10 +287,16 @@ export function createDecider(opts: DeciderOptions = {}): Decider {
 	// (KV-cache reuse), so a bounded memo is what makes same input -> same output.
 	const cacheSize = opts.cacheSize ?? 256;
 	const memo = new Map<string, SystemOneResponse>();
+	let hits = 0;
+	let misses = 0;
 	const ask = async (request: SystemOneRequest) => {
 		const key = cacheSize > 0 ? JSON.stringify(request) : "";
 		const hit = cacheSize > 0 ? memo.get(key) : undefined;
-		if (hit) return structuredClone(hit);
+		if (hit) {
+			hits++;
+			return structuredClone(hit);
+		}
+		misses++;
 		const res = await judge(request);
 		if (cacheSize > 0) {
 			if (memo.size >= cacheSize) memo.delete(memo.keys().next().value as string);
@@ -308,6 +316,7 @@ export function createDecider(opts: DeciderOptions = {}): Decider {
 	return {
 		backend,
 		ask,
+		cacheStats: () => ({ hits, misses }),
 		noul: (state, prompt) =>
 			one<NoulAnswer>({ state, questions: [{ id: "q", kind: "noul", prompt }] }),
 		choice: (state, prompt, options) =>
