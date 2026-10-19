@@ -88,7 +88,19 @@ describe("buildSendKeysArgs", () => {
 	});
 
 	it("keeps key-name text as one literal argument, never a key", () => {
-		for (const text of ["BSpace", "C-u", "C-w", "Up", "Escape", "Enter", "C-m", "-l", "echo hi;"]) {
+		for (const text of [
+			"BSpace",
+			"C-u",
+			"C-w",
+			"Up",
+			"Escape",
+			"Enter",
+			"C-m",
+			"-l",
+			"-l --",
+			"-l -- x",
+			"echo hi;",
+		]) {
 			const args = buildSendKeysArgs("term-x", text);
 			expect(args.slice(0, 5)).toEqual(["send-keys", "-t", "term-x", "-l", "--"]);
 			expect(args).toHaveLength(6);

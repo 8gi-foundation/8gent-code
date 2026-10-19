@@ -52,7 +52,7 @@ import {
 	_resetTuiApprovalChannel,
 	registerTuiApprovalHandler,
 } from "../permissions/tui-approval-channel";
-import { executeTermTool } from "./term-tools";
+import { MAX_PENDING_INPUT, executeTermTool } from "./term-tools";
 
 const git: GitState = {
 	currentBranch: () => "feature",
@@ -307,5 +307,80 @@ describe("with a terminal attached", () => {
 		getPermissionManager().enableInfiniteMode();
 		expect(await send("echo $(whoami)")).toContain("[PERMISSION DENIED]");
 		expect(asked).toEqual(["echo $(whoami)"]);
+	});
+});
+
+describe("round two: ANSI-C quotes, literal -l text, pending lifetime", () => {
+	const typed = (text: string) =>
+		executeTermTool("term_send", { sessionId: "s1", text, appendEnter: false });
+
+	test("$' is unreadable: a person is asked, and refused with no terminal", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		expect(await send("echo $'a'")).toContain("[PERMISSION DENIED]");
+		expect(sent).toEqual([]);
+	});
+
+	test("a two-call split across $' is judged as one line and asks", async () => {
+		const asked: string[] = [];
+		attachTerminal(() => "approve", asked);
+		const bs = String.fromCharCode(92);
+		// The backslash-quote stays inside the ANSI-C string, so the quote is still open.
+		expect(await typed(`echo $'a${bs}'`)).toContain('"ok":true');
+		expect(await typed("; ls")).toContain('"ok":true');
+		expect(asked).toEqual([`echo $'a${bs}'`, `echo $'a${bs}'; ls`]);
+	});
+
+	test("the pending $' line is still held when no person is attached", async () => {
+		const asked: string[] = [];
+		attachTerminal(() => "approve", asked);
+		const bs = String.fromCharCode(92);
+		await typed(`echo $'a${bs}'`);
+		_resetTuiApprovalChannel();
+		process.env.EIGHT_HEADLESS = "1";
+		expect(await send("; ls")).toContain("[PERMISSION DENIED]");
+	});
+
+	test("text beginning with -l still lands as literal text", async () => {
+		expect(await send("-l -- echo hi")).toContain('"ok":true');
+		expect(await send("-l")).toContain('"ok":true');
+		expect(sent).toEqual(["-l -- echo hi", "-l"]);
+	});
+
+	test("pending text is dropped on term_kill", async () => {
+		await typed("git push origin ");
+		await executeTermTool("term_kill", { sessionId: "s1" });
+		expect(await send("main")).toContain('"ok":true');
+	});
+
+	test("there is no pane change in this tool: one session id is one pane, and term_kill is the only reset", () => {
+		const defs = JSON.stringify(
+			(require("./term-tools") as typeof import("./term-tools")).getTermToolDefs(),
+		);
+		expect(defs).not.toMatch(/term_(pane|select|switch|focus)/);
+	});
+
+	test("pending text has a size cap: past it a person is asked and the hold is cleared", async () => {
+		const asked: string[] = [];
+		attachTerminal(() => "approve", asked);
+		await typed("git push origin ");
+		expect(await typed(" ".repeat(MAX_PENDING_INPUT + 1))).toContain('"ok":true');
+		expect(asked.length).toBe(1);
+		// Hold cleared: "main" alone is ordinary input, not "git push origin ... main".
+		expect(await send("main")).toContain('"ok":true');
+	});
+
+	test("past the cap a decline sends nothing and still clears the hold", async () => {
+		const asked: string[] = [];
+		attachTerminal(() => "deny", asked);
+		await typed("echo ok ");
+		sent.length = 0;
+		expect(await typed("a".repeat(MAX_PENDING_INPUT + 1))).toContain("[PERMISSION DENIED]");
+		expect(sent).toEqual([]);
+	});
+
+	test("past the cap with no terminal is refused", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		expect(await typed("a".repeat(MAX_PENDING_INPUT + 1))).toContain("[PERMISSION DENIED]");
+		expect(sent).toEqual([]);
 	});
 });

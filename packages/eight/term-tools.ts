@@ -57,13 +57,18 @@ const readOffsets = new Map<string, number>();
 /** Typed but not yet submitted, per session, so a later Enter is judged with it. */
 const pendingInput = new Map<string, string>();
 
+/** Most unsubmitted text held per session; past it a person is asked and the hold is cleared. */
+export const MAX_PENDING_INPUT = 64 * 1024;
+
 // Tab (0x09) counts: in a shell it triggers completion and can rewrite the line.
 const CONTROL_CHARS = /[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/;
 
 /** True when the line has quotes or shell constructs we cannot read for sure. */
 function unreadable(text: string): boolean {
 	if (CONTROL_CHARS.test(text)) return true;
-	if (/\$\(|`|<<|<\(|>\(/.test(text)) return true;
+	// $'...' (ANSI-C quoting) treats a backslash as an escape inside single quotes,
+	// which the quote tracking below does not model; a person reads it instead.
+	if (/\$\(|`|<<|<\(|>\(|\$'/.test(text)) return true;
 	let quote: string | null = null;
 	for (let i = 0; i < text.length; i++) {
 		const c = text[i];
@@ -104,7 +109,11 @@ function unsubmitted(line: string, enter: boolean): string {
 		if (c === "\n" || c === "\r") {
 			if (quote === null) start = i + 1;
 		} else if (quote) {
-			if (c === quote) quote = null;
+			if (c === (quote === "$'" ? "'" : quote)) quote = null;
+		} else if (c === "$" && text[i + 1] === "'") {
+			// ANSI-C quote: a backslash escapes inside it, unlike a plain single quote.
+			quote = "$'";
+			i++;
 		} else if (c === "'" || c === '"') {
 			quote = c;
 		}
@@ -352,6 +361,20 @@ async function termSend(args: Record<string, unknown>): Promise<string> {
 	const line = (pendingInput.get(sessionId) ?? "") + text;
 	const denied = await gateInput("term_send", line);
 	if (denied) return denied;
+	if (line.length > MAX_PENDING_INPUT) {
+		// Held text must not grow without bound: ask a person, then drop the hold.
+		pendingInput.delete(sessionId);
+		const ok = await getPermissionManager().askPerson(
+			"Type Into Terminal Session",
+			"The agent has typed more unsubmitted text than can be checked as one command line.",
+			line.slice(0, 4096),
+		);
+		if (!ok) {
+			return "[PERMISSION DENIED] term_send: a person declined oversized pending input. Nothing was sent.";
+		}
+		await sendTmuxKeys(sessionId, text, { appendEnter });
+		return JSON.stringify({ ok: true, sessionId, sent: text, enter: appendEnter });
+	}
 	const rest = unsubmitted(line, appendEnter);
 	if (rest === "") pendingInput.delete(sessionId);
 	else pendingInput.set(sessionId, rest);
