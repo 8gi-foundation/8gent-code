@@ -183,7 +183,7 @@ describe("picker", () => {
 	test("lists the 8gent theme first, then every design system, each with a swatch row", () => {
 		const rows = themeChoices();
 		expect(rows[0]?.value).toBe("default");
-		expect(rows.length).toBe(DESIGN_SYSTEMS.length + 1);
+		expect(rows.length).toBe(DESIGN_SYSTEMS.length + 2); // stock row + the opt-in system row
 		expect(rows.find((r) => r.value === "bold-tech")?.description).toBe("tech");
 		for (const r of rows) {
 			expect(r.swatches.length).toBe(4);

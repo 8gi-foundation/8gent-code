@@ -244,19 +244,24 @@ function oklchOf(hex: string): Oklch {
  * the background is returned unchanged. Falls back to the extreme (white or
  * black) when no lightness of that hue can reach the target.
  */
-export function ensureContrast(hex: string, bgHex: string, target: number): string {
+export function ensureContrast(
+	hex: string,
+	bgHex: string,
+	target: number,
+	keepHue = false,
+): string {
 	const bg = fromHex(bgHex);
 	const lightBg = isLightBackground(bgHex);
 	const src = oklchOf(hex);
-	const srcBanned = banned(hex);
+	const srcBanned = !keepHue && banned(hex);
 	const sameSide = lightBg ? src.l < rgbToOklch(bg).l : src.l > rgbToOklch(bg).l;
 	if (!srcBanned && sameSide && contrastRatio(fromHex(hex), bg) >= target) return hex;
 
-	const hue = legalHue(src.h);
+	const hue = keepHue ? src.h : legalHue(src.h);
 	const direction = lightBg ? "darker" : "lighter";
 	for (const chroma of [src.c, src.c / 2, 0]) {
 		const solved = solveLegibleHex(hue, () => chroma, bg, target, direction);
-		if (solved && !banned(solved.hex)) return solved.hex;
+		if (solved && (keepHue || !banned(solved.hex))) return solved.hex;
 	}
 	return lightBg ? "#000000" : "#ffffff";
 }
@@ -266,15 +271,21 @@ export function ensureContrast(hex: string, bgHex: string, target: number): stri
  * roles that should be no louder than they need to be (surfaces, borders, the
  * frame). Chroma is capped at `maxChroma` so a surface stays a tint.
  */
-function tintNear(hex: string, bgHex: string, ratio: number, maxChroma = 0.04): string {
+function tintNear(
+	hex: string,
+	bgHex: string,
+	ratio: number,
+	maxChroma = 0.04,
+	keepHue = false,
+): string {
 	const bg = fromHex(bgHex);
 	const src = oklchOf(hex);
-	const hue = legalHue(src.h);
+	const hue = keepHue ? src.h : legalHue(src.h);
 	const chroma = Math.min(src.c, maxChroma);
 	const direction = isLightBackground(bgHex) ? "darker" : "lighter";
 	const solved = solveLegibleHex(hue, () => chroma, bg, ratio, direction);
 	const out = solved?.hex ?? toHex(gamutMap({ l: rgbToOklch(bg).l, c: 0, h: 0 }));
-	return banned(out) ? toHex(gamutMap({ ...oklchOf(out), c: 0 })) : out;
+	return !keepHue && banned(out) ? toHex(gamutMap({ ...oklchOf(out), c: 0 })) : out;
 }
 
 function chromatic(hex: string | undefined): hex is string {
@@ -298,10 +309,10 @@ export function fitPaletteToBackground(p: Palette, bgHex: string): Palette {
 }
 
 /** The code chip puts textPrimary on `border`; keep that pair at 4.5:1 too. */
-function fitChipTint(border: string, text: string, bgHex: string): string {
+function fitChipTint(border: string, text: string, bgHex: string, keepHue = false): string {
 	if (contrastHex(text, border) >= AA) return border;
 	for (const ratio of [1.4, 1.25, 1.12, 1.05, 1]) {
-		const tint = ratio === 1 ? bgHex : tintNear(border, bgHex, ratio);
+		const tint = ratio === 1 ? bgHex : tintNear(border, bgHex, ratio, 0.04, keepHue);
 		if (contrastHex(text, tint) >= AA) return tint;
 	}
 	return bgHex;
@@ -359,6 +370,80 @@ export function paletteFromEntry(entry: IndexEntry, bgHex: string): Palette {
 	return p;
 }
 
+// ---- the user's own terminal -> palette (#4440) --------------------------
+
+/** Picker id of the opt-in theme that follows the terminal's own palette. */
+export const SYSTEM_ID = "system";
+
+/** What the terminal reported: its foreground and 16 ANSI slots as #rrggbb (null = no answer). */
+export interface TerminalColors {
+	fg: string | null;
+	ansi: readonly (string | null)[];
+}
+
+/**
+ * The `system` theme: each role keeps the HUE and CHROMA of a terminal slot and
+ * only lightness moves, to hold the same contrast targets as the other themes.
+ * A slot the terminal did not answer, or whose hue is too far from the role's
+ * meaning, keeps the stock role colour (fitted to the background), so a
+ * terminal that reports nothing gives exactly the stock theme.
+ *
+ * BRAND.md hue ban: the ban covers colours WE author. These hues are the
+ * person's own terminal choice, so they pass through unchanged (keepHue, no
+ * legalHue snap, no banned check). Our own fallbacks stay on the stock roles,
+ * which are legal. Never use this path for a colour we pick ourselves.
+ */
+export function paletteFromTerminal(
+	stock: Palette,
+	tc: TerminalColors | null,
+	bgHex: string,
+): Palette {
+	const base = fitPaletteToBackground(stock, bgHex);
+	if (!tc) return base;
+	const slot = (...n: number[]) =>
+		n.map((i) => tc.ansi[i]).find((h): h is string => chromatic(h ?? undefined));
+	const fg = tc.fg ?? undefined;
+	// Danger red and success green must keep their meaning: take the terminal's
+	// slot only when it is still within 50 degrees of the stock hue.
+	const near = (src: string | undefined, stockHex: string) =>
+		src && circularDistance(oklchOf(src).h, oklchOf(stockHex).h) <= 50 ? src : undefined;
+	const fit = (src: string | undefined, target: number, fallback: string) =>
+		src ? ensureContrast(src, bgHex, target, true) : fallback;
+	const muted = tc.ansi[8] ?? fg;
+	const textPrimary = fit(fg, 15, base.textPrimary);
+	const orange = slot(3, 11);
+	const steel = slot(4, 12);
+	const p: Palette = {
+		...base,
+		textPrimary,
+		cream: textPrimary,
+		textSecondary: fit(fg, 7.5, base.textSecondary),
+		heading: fit(fg, 7.5, base.heading),
+		prose: fit(fg, 12, base.prose),
+		textTertiary: fit(muted ?? undefined, 5.2, base.textTertiary),
+		muted: fit(muted ?? undefined, 5.2, base.muted),
+		textDim: fit(muted ?? undefined, AA, base.textDim),
+		dim: fit(muted ?? undefined, AA, base.dim),
+		orange: fit(orange, AA, base.orange),
+		orangeAlt: fit(slot(11, 3), AA, base.orangeAlt),
+		orangeDim: orange ? tintNear(orange, bgHex, NON_TEXT, 0.2, true) : base.orangeDim,
+		steel: fit(steel, AA, base.steel),
+		steelDim: steel ? tintNear(steel, bgHex, 1.6, 0.04, true) : base.steelDim,
+		teal: fit(slot(6, 14), AA, base.teal),
+		red: fit(near(slot(1, 9), stock.red), AA, base.red),
+		green: fit(near(slot(2, 10), stock.green), AA, base.green),
+	};
+	if (fg) {
+		p.surface = tintNear(fg, bgHex, 1.08, 0.04, true);
+		p.surface2 = tintNear(fg, bgHex, 1.2, 0.04, true);
+		p.surface3 = tintNear(fg, bgHex, 1.45, 0.04, true);
+		p.border = fitChipTint(tintNear(fg, bgHex, 1.35, 0.04, true), p.textPrimary, bgHex, true);
+		p.cardBorder = tintNear(fg, bgHex, 1.8, 0.04, true);
+		p.frame = tintNear(fg, bgHex, NON_TEXT + 0.2, 0.04, true);
+	}
+	return p;
+}
+
 // ---- catalogue -----------------------------------------------------------
 
 const ENTRIES = index as IndexEntry[];
@@ -383,8 +468,23 @@ function buildCatalogue(): TuiDesignSystem[] {
 /** Every indexed design system, as the picker lists it. */
 export const DESIGN_SYSTEMS: readonly TuiDesignSystem[] = buildCatalogue();
 
+/**
+ * The opt-in system theme (#4440). It is not in DESIGN_SYSTEMS (those are the
+ * index-derived systems); findDesignSystem knows it so the saved choice,
+ * /theme system and the picker work, and its palette comes from the terminal.
+ */
+export const SYSTEM_DESIGN: TuiDesignSystem = {
+	id: SYSTEM_ID,
+	label: "System",
+	mood: "Your terminal",
+	style: "follows your palette and light/dark",
+	swatches: [],
+	source: SYSTEM_ID,
+};
+
 export function findDesignSystem(id: string): TuiDesignSystem | undefined {
 	const want = id.toLowerCase();
+	if (want === SYSTEM_ID) return SYSTEM_DESIGN;
 	return DESIGN_SYSTEMS.find((d) => d.id === want);
 }
 

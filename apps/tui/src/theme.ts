@@ -18,6 +18,12 @@
  * applyTerminalBackground(), which re-fits `t` in place so every text tone
  * keeps 4.5:1 against the colour actually behind it.
  *
+ * SYSTEM THEME (#4440): the opt-in design system id `system` keeps the hue and
+ * chroma of the terminal's own palette (OSC 10 and OSC 4, asked only when it
+ * is the saved or picked choice) and fits lightness by contrast. It follows a
+ * light/dark switch live where the terminal reports DEC 2031. The default
+ * theme is untouched and no extra byte is written when `system` is not chosen.
+ *
  * DESIGN SYSTEMS (#3754): `/theme` picks one of the indexed design systems
  * (theme/design-systems.ts), saved as "designSystem" in ~/.8gent/config.json.
  * No choice means this file's stock 8gent palette.
@@ -35,16 +41,6 @@
  */
 
 import {
-	CANONICAL_BG,
-	DESIGN_SYSTEMS,
-	designSystemPalette,
-	fitPaletteToBackground,
-	isLightBackground,
-	readDesignSystemChoice,
-	configPath,
-	saveDesignSystemChoice,
-} from "./theme/design-systems.js";
-import {
 	type SkippedUserTheme,
 	USER_THEME_PREFIX,
 	type UserTheme,
@@ -52,6 +48,27 @@ import {
 	loadUserThemes,
 	userThemeName,
 } from "./lib/user-themes.js";
+import {
+	CANONICAL_BG,
+	DESIGN_SYSTEMS,
+	SYSTEM_DESIGN,
+	SYSTEM_ID,
+	type TerminalColors,
+	configPath,
+	designSystemPalette,
+	fitPaletteToBackground,
+	isLightBackground,
+	paletteFromTerminal,
+	readDesignSystemChoice,
+	saveDesignSystemChoice,
+} from "./theme/design-systems.js";
+import {
+	type SchemeFollower,
+	type TerminalReport,
+	followTerminalScheme,
+	requestPaletteProbe,
+	takeTerminalReport,
+} from "./theme/terminal-probe.js";
 
 export type Mode = "dark" | "light";
 
@@ -76,8 +93,7 @@ function readConfigTheme(): Mode | "auto" | null {
 
 function detectMode(): Mode {
 	// 1. Hard env override (highest priority — useful for one-off launches)
-	const override = (process.env.EIGHT_THEME ?? process.env["8GENT_THEME"] ?? "")
-		.toLowerCase();
+	const override = (process.env.EIGHT_THEME ?? process.env["8GENT_THEME"] ?? "").toLowerCase();
 	if (override === "light") return "light";
 	if (override === "dark") return "dark";
 
@@ -99,49 +115,48 @@ function detectMode(): Mode {
 
 const dark = {
 	// Backgrounds (warm dark earth)
-	bg:       "#0A0908",
-	surface:  "#12100E",
+	bg: "#0A0908",
+	surface: "#12100E",
 	surface2: "#1C1A17",
 	surface3: "#252220",
 
-
 	// Text hierarchy (cream descending)
-	textPrimary:   "#FAF7F4",
+	textPrimary: "#FAF7F4",
 	textSecondary: "#C8C2BA",
-	textTertiary:  "#8A8078",
-	textDim:       "#5F5A55",
+	textTertiary: "#8A8078",
+	textDim: "#5F5A55",
 
 	// Aliases
 	cream: "#FAF7F4",
 	prose: "#E6DFD7",
 	muted: "#8A8078",
-	dim:   "#5F5A55",
+	dim: "#5F5A55",
 
 	// Brand accent
-	orange:    "#E8610A",
+	orange: "#E8610A",
 	orangeAlt: "#F07A28",
 	orangeDim: "#8B3F12",
 
 	// Border
-	border:     "#2E2A26",
+	border: "#2E2A26",
 	cardBorder: "#2E2A26",
 	// Frame: the one structural border and the key-cap brackets (HUD system,
 	// #3238). 3.46:1 on bg, so an edge that means something clears 3:1.
-	frame:      "#6B655F",
+	frame: "#6B655F",
 
 	// Section labels (WORKSPACE, 8GENT ACTIVITY...): text-secondary, so
 	// orange stays for state and focus (the active tab, DONE, the input,
 	// the selection). 11.3:1 on bg.
-	heading:  "#C8C2BA",
+	heading: "#C8C2BA",
 
 	// Semantic / UI
-	teal:     "#7DA8A3",
-	steel:    "#9DB5C8",
+	teal: "#7DA8A3",
+	steel: "#9DB5C8",
 	steelDim: "#334958",
 	// Danger: risk HIGH, N deny, MIC on, fail/error. 5.25:1 on bg (#3171;
 	// #D63A24 was 4.25:1). Hue 8, same family as before.
-	red:      "#E5503A",
-	green:    "#47A639",
+	red: "#E5503A",
+	green: "#47A639",
 } as const;
 
 // Light mode inverts the text/bg axis only. Brand orange and the
@@ -149,36 +164,36 @@ const dark = {
 // either bg. orange shifts to the deeper #C04E08 so it doesn't glare on
 // cream. Border colors get bumped from invisible-on-cream to mid-warm-grey.
 const light = {
-	bg:       "#FAF7F4",
-	surface:  "#E6DFD7",
+	bg: "#FAF7F4",
+	surface: "#E6DFD7",
 	surface2: "#C8C2BA",
 	surface3: "#8A8078",
 
-	textPrimary:   "#0A0908",
+	textPrimary: "#0A0908",
 	textSecondary: "#2E2A26",
-	textTertiary:  "#5F5A55",
-	textDim:       "#8A8078",
+	textTertiary: "#5F5A55",
+	textDim: "#8A8078",
 
-	cream: "#0A0908",     // primary text alias inverts too
+	cream: "#0A0908", // primary text alias inverts too
 	prose: "#1C1A17",
 	muted: "#5F5A55",
-	dim:   "#8A8078",
+	dim: "#8A8078",
 
-	orange:    "#C04E08",  // slightly deeper for cream-bg contrast
+	orange: "#C04E08", // slightly deeper for cream-bg contrast
 	orangeAlt: "#E8610A",
 	orangeDim: "#8B3F12",
 
-	border:     "#C8C2BA",
+	border: "#C8C2BA",
 	cardBorder: "#8A8078",
-	frame:      "#8A8078",  // 3.62:1 on cream
+	frame: "#8A8078", // 3.62:1 on cream
 
-	heading:  "#2E2A26",   // text-secondary, 13.3:1 on cream
+	heading: "#2E2A26", // text-secondary, 13.3:1 on cream
 
-	teal:     "#3F7570",
-	steel:    "#4F6E85",
+	teal: "#3F7570",
+	steel: "#4F6E85",
 	steelDim: "#1F2F3A",
-	red:      "#A8231A",
-	green:    "#2E7424",
+	red: "#A8231A",
+	green: "#2E7424",
 } as const;
 
 export type PaletteKey = keyof typeof dark;
@@ -200,6 +215,8 @@ interface ThemeState {
 	designSystem: string | null;
 	/** Name of the active user theme, or null. Wins over designSystem. */
 	userTheme: string | null;
+	/** What the terminal reported for the system theme, or null. */
+	terminal: TerminalColors | null;
 }
 
 /** True when the user forced a mode (env or config), so a probe cannot flip it. */
@@ -233,6 +250,7 @@ function resolvePalette(state: ThemeState): Palette {
 	const user = state.userTheme ? userThemes.get(state.userTheme) : undefined;
 	if (user) return { ...(user.base === "light" ? light : dark), ...user.overrides };
 	const stock: Palette = { ...(state.mode === "light" ? light : dark) };
+	if (state.designSystem === SYSTEM_ID) return paletteFromTerminal(stock, state.terminal, state.bg);
 	if (state.designSystem) {
 		const p = designSystemPalette(state.designSystem, state.bg);
 		if (p) return p;
@@ -249,11 +267,17 @@ const state: ThemeState = {
 	bgSource: "assumed",
 	designSystem: readDesignSystemChoice(),
 	userTheme: null,
+	terminal: null,
 };
+// The probe runs before Ink mounts; the palette is only asked for when needed.
+if (state.designSystem === SYSTEM_ID) requestPaletteProbe();
 
 /** Read the themes folder into the registry. Never throws. */
 function scanUserThemes(): void {
-	const r = loadUserThemes(Object.keys(dark), undefined, { dark, light } as unknown as Record<"dark" | "light", Record<string, string>>);
+	const r = loadUserThemes(Object.keys(dark), undefined, { dark, light } as unknown as Record<
+		"dark" | "light",
+		Record<string, string>
+	>);
 	userThemes = new Map(r.themes.map((u) => [u.name, u]));
 	userThemeSkipped = r.skipped;
 }
@@ -284,6 +308,11 @@ export const theme: { mode: Mode; color: Palette } = {
  * background, because that was an explicit choice.
  */
 export function applyTerminalBackground(bgHex: string): void {
+	const report = takeTerminalReport();
+	if (report) {
+		state.terminal = { fg: report.fg, ansi: report.ansi };
+		if (report.schemeNotify && state.designSystem === SYSTEM_ID) ensureFollower();
+	}
 	const reported: Mode = isLightBackground(bgHex) ? "light" : "dark";
 	const forced = forcedMode();
 	if (forced && forced !== reported) return;
@@ -293,11 +322,34 @@ export function applyTerminalBackground(bgHex: string): void {
 	refit();
 }
 
+// Live light/dark following (DEC 2031) for the system theme only. A forced
+// mode (EIGHT_THEME or config) still wins inside applyTerminalBackground.
+let follower: SchemeFollower | null = null;
+function onTerminalReport(r: TerminalReport): void {
+	if (!r.bg) return;
+	state.terminal = { fg: r.fg, ansi: r.ansi };
+	applyTerminalBackground(r.bg);
+}
+function ensureFollower(): SchemeFollower | null {
+	follower ??= followTerminalScheme(onTerminalReport);
+	return follower;
+}
+
 /**
  * Switch theme now: null = stock 8gent theme, a design system id, or
  * `user:<name>`. An unknown user theme falls back to the stock theme.
  */
 export function applyDesignSystem(id: string | null): void {
+	if (id === SYSTEM_ID) {
+		// Pick: ask the terminal now. The reply refits in place when it lands.
+		state.designSystem = SYSTEM_ID;
+		state.userTheme = null;
+		refit();
+		ensureFollower()?.refresh();
+		return;
+	}
+	follower?.stop();
+	follower = null;
 	if (isUserThemeId(id)) {
 		const name = userThemeName(id);
 		state.userTheme = userThemes.has(name) ? name : null;
@@ -313,7 +365,8 @@ function setConfigKey(path: string, key: string, value: string | undefined): voi
 	const fs = require("node:fs") as typeof import("node:fs");
 	const nodePath = require("node:path") as typeof import("node:path");
 	let raw: Record<string, unknown> = {};
-	if (fs.existsSync(path)) raw = JSON.parse(fs.readFileSync(path, "utf-8")) as Record<string, unknown>;
+	if (fs.existsSync(path))
+		raw = JSON.parse(fs.readFileSync(path, "utf-8")) as Record<string, unknown>;
 	if (value === undefined && !(key in raw)) return;
 	if (value === undefined) delete raw[key];
 	else raw[key] = value;
@@ -332,7 +385,8 @@ function setConfigKey(path: string, key: string, value: string | undefined): voi
 export function saveThemeChoice(id: string | null, cfgPath?: string): void {
 	const path = cfgPath ?? configPath();
 	if (isUserThemeId(id)) {
-		if (!userThemes.has(userThemeName(id))) throw new Error(`Unknown user theme: ${userThemeName(id)}`);
+		if (!userThemes.has(userThemeName(id)))
+			throw new Error(`Unknown user theme: ${userThemeName(id)}`);
 		saveDesignSystemChoice(null, path); // validates config.json, clears designSystem
 		setConfigKey(path, "userTheme", userThemeName(id));
 	} else {
@@ -384,15 +438,34 @@ export interface ThemeChoice {
 export function themeChoices(): ThemeChoice[] {
 	const swatch = (p: Palette) => [p.orange, p.orangeAlt, p.steel, p.heading];
 	const stock: Palette = { ...(state.mode === "light" ? light : dark) };
-	const stockFitted = state.bgSource === "terminal" ? fitPaletteToBackground(stock, state.bg) : stock;
+	const stockFitted =
+		state.bgSource === "terminal" ? fitPaletteToBackground(stock, state.bg) : stock;
 	const rows: ThemeChoice[] = [
-		{ value: "default", label: "8gent", description: "The stock 8gent theme", swatches: swatch(stockFitted) },
+		{
+			value: "default",
+			label: "8gent",
+			description: "The stock 8gent theme",
+			swatches: swatch(stockFitted),
+		},
 	];
 	for (const ds of DESIGN_SYSTEMS) {
 		const p = designSystemPalette(ds.id, state.bg);
 		if (!p) continue;
-		rows.push({ value: ds.id, label: ds.label, description: ds.mood === ds.style ? ds.mood : `${ds.mood}, ${ds.style}`, swatches: swatch(p) });
+		rows.push({
+			value: ds.id,
+			label: ds.label,
+			description: ds.mood === ds.style ? ds.mood : `${ds.mood}, ${ds.style}`,
+			swatches: swatch(p),
+		});
 	}
+	// Opt-in, last of the systems. It previews as the stock palette: its real
+	// colours are the person's own hues, and what we show or publish stays inside BRAND.md.
+	rows.push({
+		value: SYSTEM_ID,
+		label: SYSTEM_DESIGN.label,
+		description: `${SYSTEM_DESIGN.mood}, ${SYSTEM_DESIGN.style}`,
+		swatches: swatch(stockFitted),
+	});
 	for (const u of userThemes.values()) {
 		rows.push({
 			value: `${USER_THEME_PREFIX}${u.name}`,
