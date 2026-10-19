@@ -175,6 +175,12 @@ export class ReplyFilter {
 		this.held = partial;
 		return clean;
 	}
+	/** Give up the held fragment: it was typed text (Alt+], a pasted partial), not a reply. */
+	release(): string {
+		const h = this.held;
+		this.held = "";
+		return h;
+	}
 	/** What is held back right now (a reply fragment). */
 	get pending(): string {
 		return this.held;
@@ -199,6 +205,7 @@ export function installLateReplyFilter(
 	now: () => number = Date.now,
 	typed = "",
 	onReply?: (reply: string) => void,
+	flushMs = 0,
 ): void {
 	if (typeof stdin.read !== "function") return;
 	const orig = stdin.read.bind(stdin);
@@ -207,6 +214,22 @@ export function installLateReplyFilter(
 	const until = now() + windowMs;
 	let open = true;
 	let bypass = typed.length;
+	// A held fragment with no timer would swallow typing until 64 bytes pile up.
+	// With flushMs, a fragment still held after that long goes back to stdin as
+	// typed text, passed through unfiltered (bypass) so it is not held again.
+	let flushTimer: ReturnType<typeof setTimeout> | undefined;
+	const armFlush = () => {
+		clearTimeout(flushTimer);
+		if (!flushMs || !filter.pending) return;
+		flushTimer = setTimeout(() => {
+			const text = filter.release();
+			const un = (stdin as { unshift?: (c: Buffer) => void }).unshift;
+			if (!text || typeof un !== "function") return;
+			bypass += text.length;
+			un.call(stdin, Buffer.from(text, "utf8"));
+		}, flushMs);
+		flushTimer.unref?.();
+	};
 	stdin.read = (size?: number) => {
 		if (open && now() > until) {
 			open = false;
@@ -228,6 +251,7 @@ export function installLateReplyFilter(
 			bypass -= pass.length;
 			const rest = str.slice(pass.length);
 			const out = pass + (rest ? filter.push(rest) : "");
+			armFlush();
 			if (out) return typeof v === "string" ? out : Buffer.from(out, "utf8");
 		}
 	};
@@ -349,6 +373,10 @@ export function probeTerminal(opts: ProbeOptions = {}): Promise<TerminalReport |
 	});
 }
 
+/** A held reply fragment older than this is released as typed text. */
+export const FILTER_FLUSH_MS = 50;
+const replySlots = new WeakMap<object, { handler: (reply: string) => void }>();
+
 export interface SchemeFollower {
 	/** Ask again now (a scheme notice, or the user picked the theme). */
 	refresh(): void;
@@ -396,20 +424,34 @@ export function followTerminalScheme(
 		timer = setTimeout(flush, timeoutMs);
 		stdout.write(OSC11_QUERY + PALETTE_QUERY + SCHEME_SUPPORT_QUERY + DA1_QUERY);
 	};
-	installLateReplyFilter(
-		stdin as ReadableLike,
-		"",
-		Number.POSITIVE_INFINITY,
-		Date.now,
-		"",
-		(reply) => {
-			if (SCHEME_NOTICE.test(reply)) return refresh();
-			if (collected === null) return;
-			collected += reply;
-			if (DA1_REPLY.test(reply)) flush();
-		},
-	);
+	const onReply = (reply: string) => {
+		if (SCHEME_NOTICE.test(reply)) return refresh();
+		if (collected === null) return;
+		collected += reply;
+		if (DA1_REPLY.test(reply)) flush();
+	};
+	// One filter per stdin for the life of the process: a second one would stack
+	// under the first and eat the replies the first passes on. Each follower
+	// just takes over the handler.
+	let slot = replySlots.get(stdin);
+	if (!slot) {
+		const created: { handler: (reply: string) => void } = { handler: () => {} };
+		slot = created;
+		replySlots.set(stdin, created);
+		installLateReplyFilter(
+			stdin as ReadableLike,
+			"",
+			Number.POSITIVE_INFINITY,
+			Date.now,
+			"",
+			(reply) => created.handler(reply),
+			FILTER_FLUSH_MS,
+		);
+	}
+	slot.handler = onReply;
+	const mine = slot;
 	const stop = () => {
+		if (mine.handler === onReply) mine.handler = () => {};
 		if (subscribed) stdout.write(SCHEME_UNSUBSCRIBE);
 		subscribed = false;
 		stopped = true;

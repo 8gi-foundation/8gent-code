@@ -104,7 +104,9 @@ class FakeStdin extends EventEmitter {
 	pause() {
 		return this;
 	}
-	unshift() {}
+	unshift(c: Buffer | string) {
+		this.queue.unshift(Buffer.from(c));
+	}
 	read() {
 		return this.queue.shift() ?? null;
 	}
@@ -219,6 +221,37 @@ describe("followTerminalScheme", () => {
 		stdin.feed(osc("4;1", "1/2/3"));
 		expect(stdin.read()).toBeNull();
 		f?.stop();
+	});
+
+	test("a partial OSC fragment followed by silence is released as typed input within 50 ms", async () => {
+		const stdin = new FakeStdin();
+		const f = followTerminalScheme(() => {}, {
+			stdin: asStdin(stdin),
+			stdout: fakeStdout(),
+			env: {},
+		});
+		stdin.feed(`ok${ESC}]`); // Alt+] or a pasted partial OSC
+		expect(stdin.read()?.toString()).toBe("ok");
+		expect(stdin.read()).toBeNull();
+		await new Promise((r) => setTimeout(r, 90));
+		expect(stdin.read()?.toString()).toBe(`${ESC}]`);
+		expect(stdin.read()).toBeNull();
+		f?.stop();
+	});
+
+	test("system, another theme, system again: the second follower still reports", () => {
+		const stdin = new FakeStdin();
+		const stdout = fakeStdout();
+		const opts = { stdin: asStdin(stdin), stdout, env: {} };
+		const first = followTerminalScheme(() => {}, opts);
+		first?.stop();
+		const reports: string[] = [];
+		const second = followTerminalScheme((r) => reports.push(r.bg ?? ""), opts);
+		second?.refresh();
+		stdin.feed(`${osc("11", "fdfd/f6f6/e3e3")}${DA1_REPLY}`);
+		expect(stdin.read()).toBeNull();
+		expect(reports).toEqual(["#fdf6e3"]);
+		second?.stop();
 	});
 
 	test("silence after a notice reports nothing within the timeout", async () => {
