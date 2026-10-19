@@ -16,7 +16,7 @@ import { eightCliPath, safeBunFlags } from "../core/bun-flags";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { cronMatches } from "./index";
+import { cronMatches, dueSince } from "./index";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -42,6 +42,12 @@ export interface Routine {
 
 	/** Whether this routine is active */
 	enabled: boolean;
+
+	/** Run once when a scheduled slot was missed (default true). Set false to opt out. */
+	catchUp?: boolean;
+
+	/** When the schedule last fired it (ISO). Persisted so a restart can catch up. */
+	lastRun?: string;
 
 	/** Triggers that can fire this routine outside the schedule */
 	triggers?: RoutineTrigger[];
@@ -177,13 +183,19 @@ export class RoutineManager {
 	 * Check all enabled routines and run any that are due.
 	 * Call this every minute from the daemon loop.
 	 */
-	async tick(): Promise<RoutineRun[]> {
-		const now = new Date();
+	async tick(now: Date = new Date()): Promise<RoutineRun[]> {
 		const runs: RoutineRun[] = [];
 
 		for (const routine of this.routines) {
 			if (!routine.enabled) continue;
-			if (!cronMatches(routine.schedule, now)) continue;
+			// Baseline is createdAt so a new routine never replays slots from before it existed.
+			const lastRun = routine.catchUp === false ? undefined : routine.lastRun || routine.createdAt;
+			if (!dueSince(routine.schedule, lastRun, now)) continue;
+			if (!cronMatches(routine.schedule, now)) {
+				console.log(`[routines] catch-up: "${routine.name}" (${routine.id}) missed its slot since ${lastRun}, running once`);
+			}
+			routine.lastRun = now.toISOString();
+			this.save();
 
 			const run = await this.execute(routine, "schedule");
 			runs.push(run);
