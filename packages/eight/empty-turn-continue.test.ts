@@ -6,10 +6,17 @@ import { rmRetry } from "../../tests/rm-retry";
 import {
 	EMPTY_TURN_CONTINUE_LOG,
 	EMPTY_TURN_CONTINUE_STEER,
+	EMPTY_TURN_LENGTH_LINE,
+	EMPTY_TURN_LENGTH_LOG,
 	continueEmptyTurn,
 } from "./empty-turn-continue";
 
-type R = { text?: string };
+type R = {
+	text?: string;
+	finishReason?: string;
+	usage?: { outputTokens?: number };
+	toolCalls?: unknown[];
+};
 
 // The pure decision and its bounds, then the shipping chat() native path against
 // a fake OpenAI-compatible endpoint ($HOME faked).
@@ -97,7 +104,7 @@ describe("continueEmptyTurn (#4444)", () => {
 
 	test("no continue when the reply has text", async () => {
 		const h = harness([{ text: "x" }]);
-		const first = { text: "The answer is in answer.json." };
+		const first: R = { text: "The answer is in answer.json." };
 		const out = await continueEmptyTurn({ ...h.input, result: first });
 		expect(h.steers).toHaveLength(0);
 		expect(out.continued).toBe(false);
@@ -127,6 +134,69 @@ describe("continueEmptyTurn (#4444)", () => {
 		const out = await continueEmptyTurn({ ...h.input, result: {} });
 		expect(out.continued).toBe(true);
 		expect(out.result.text).toBe("done");
+	});
+});
+
+describe("continueEmptyTurn on a length cut (#4452)", () => {
+	const cut: R = {
+		text: "",
+		finishReason: "length",
+		usage: { outputTokens: 16384 },
+		toolCalls: [],
+	};
+
+	test("a length end with empty text continues once with the extra line, even with no tool calls yet", async () => {
+		const h = harness([{ text: "Wrote answer.json." }]);
+		const out = await continueEmptyTurn({ ...h.input, toolCalls: 0, result: cut });
+		expect(h.steers).toEqual([`${EMPTY_TURN_CONTINUE_STEER} ${EMPTY_TURN_LENGTH_LINE}`]);
+		expect(EMPTY_TURN_LENGTH_LINE).toBe(
+			"Your last step ran out of output space while thinking. Think less, act now: make the next tool call or write the deliverable directly.",
+		);
+		expect(out.continued).toBe(true);
+		expect(out.result.text).toBe("Wrote answer.json.");
+		expect(h.logs).toContain(`${EMPTY_TURN_LENGTH_LOG} at 16384 tokens`);
+	});
+
+	test("a stop end is unchanged: plain steer, no length log, still needs tool calls", async () => {
+		const h = harness([{ text: "ok" }]);
+		await continueEmptyTurn({ ...h.input, result: { text: "", finishReason: "stop" } });
+		expect(h.steers).toEqual([EMPTY_TURN_CONTINUE_STEER]);
+		expect(h.logs.some((l) => l.startsWith(EMPTY_TURN_LENGTH_LOG))).toBe(false);
+
+		const none = harness([{ text: "x" }]);
+		const out = await continueEmptyTurn({
+			...none.input,
+			toolCalls: 0,
+			result: { text: "", finishReason: "stop" },
+		});
+		expect(out.continued).toBe(false);
+		expect(none.steers).toHaveLength(0);
+	});
+
+	test("a second length end stops: one generate, the empty result comes back", async () => {
+		const h = harness([cut, { text: "never asked" }]);
+		const out = await continueEmptyTurn({ ...h.input, result: cut });
+		expect(h.steers).toHaveLength(1);
+		expect(out.continued).toBe(true);
+		expect(out.result.text).toBe("");
+	});
+
+	test("a length end that still carries a tool call is not treated as a cut", async () => {
+		const h = harness([{ text: "x" }]);
+		const out = await continueEmptyTurn({
+			...h.input,
+			toolCalls: 0,
+			result: { ...cut, toolCalls: [{ toolName: "write_file" }] },
+		});
+		expect(out.continued).toBe(false);
+	});
+
+	test("abort and budget rules still hold on a length cut", async () => {
+		const aborted = harness([{ text: "x" }], { aborted: true });
+		expect((await continueEmptyTurn({ ...aborted.input, result: cut })).continued).toBe(false);
+		const spent = harness([{ text: "x" }], { elapsedMs: 1_500_000, budgetMs: 1_500_000 });
+		expect((await continueEmptyTurn({ ...spent.input, result: cut })).continued).toBe(false);
+		expect(aborted.steers.length + spent.steers.length).toBe(0);
 	});
 });
 
