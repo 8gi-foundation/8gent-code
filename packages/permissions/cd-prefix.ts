@@ -9,9 +9,10 @@
  * it had been sent alone (sanitizer, System One, policy, approval card).
  *
  * Accepted only when ALL hold:
- *   - the line is `cd`, one plain relative folder, then `&&` or `;`, then a remainder;
+ *   - the line is `cd`, one plain folder (relative, or absolute and resolving to the
+ *     project root or a folder inside it), then `&&` or `;`, then a remainder;
  *   - the folder word is letters, digits and `_ - . + @ /` only: no `..`, `$`, `~`,
- *     globs, quotes, backslashes or spaces, not absolute, not a flag;
+ *     globs, quotes, backslashes or spaces, not a flag;
  *   - no segment of the folder starts with `.` (a dot directory), a leading `./` aside;
  *   - its realpath is a directory strictly inside the realpath of the project root,
  *     and no segment of that realpath (relative to the root) starts with `.`, so a
@@ -58,7 +59,10 @@ function posix(kind: ShellKind | "posix"): boolean {
 	return kind === "posix" || kind === "git-bash";
 }
 
-type Parsed = { folder: string; segs: string[]; rest: string } | { why: string } | null;
+type Parsed =
+	| { folder: string; segs: string[]; rest: string; abs: boolean }
+	| { why: string }
+	| null;
 
 /** The text checks, shared by `cdPrefixShape` and `cdPrefix`. Null: not a cd prefix at all. */
 function parse(command: string): Parsed {
@@ -69,15 +73,18 @@ function parse(command: string): Parsed {
 	if (SECOND_CD.test(rest)) return { why: "only one cd is allowed" };
 	const folder = (m[1] ?? "").replace(LEADING_DOT_SLASH, "");
 	if (!folder) return { why: "name a folder" };
-	if (folder.startsWith("/")) return { why: "the folder must be relative, not absolute" };
 	if (!PLAIN_FOLDER.test(folder))
 		return {
 			why: "the folder must be a plain name (no $, ~, quotes, globs, spaces or a leading -)",
 		};
 	const segs = folder.split("/").filter((s) => s !== "");
 	if (segs.includes("..")) return { why: "the folder may not go up with .." };
-	if (segs.some((s) => s.startsWith("."))) return { why: "the folder may not be a dot directory" };
-	return { folder, segs, rest };
+	const abs = folder.startsWith("/");
+	// An absolute word is judged after realpath, against the root: the root's own path may
+	// hold dot segments (~/.8gent/...), so the dot check runs on the part under the root.
+	if (!abs && segs.some((s) => s.startsWith(".")))
+		return { why: "the folder may not be a dot directory" };
+	return { folder, segs, rest, abs };
 }
 
 /**
@@ -91,7 +98,8 @@ export function cdPrefixShape(
 ): { folder: string; rest: string } | null {
 	if (!posix(kind)) return null;
 	const p = parse(command);
-	return p && "rest" in p ? { folder: p.folder, rest: p.rest } : null;
+	// An absolute folder needs the root to judge, so it is not a shape here.
+	return p && "rest" in p && !p.abs ? { folder: p.folder, rest: p.rest } : null;
 }
 
 /** True when `child` is strictly inside `parent` (both realpaths). */
@@ -117,7 +125,7 @@ export function cdPrefix(
 	let dir: string;
 	try {
 		realRoot = realpathSync(root);
-		dir = realpathSync(path.resolve(realRoot, ...p.segs));
+		dir = realpathSync(p.abs ? `/${p.segs.join("/")}` : path.resolve(realRoot, ...p.segs));
 	} catch {
 		return refuse(
 			`run the command without the cd: it already starts in the project folder; there is no folder ${p.folder} under it`,
@@ -125,8 +133,10 @@ export function cdPrefix(
 		);
 	}
 	// A symlink that leads out of the project, or back to its root.
-	if (!strictlyInside(dir, realRoot))
+	// An absolute word may also name the project root itself (its own working directory).
+	if (!strictlyInside(dir, realRoot) && !(p.abs && dir === realRoot))
 		return refuse("the folder resolves outside the project", command);
+	if (dir === realRoot) return { kind: "cd", dir, rest: p.rest };
 	// A symlink onto a dot directory such as .git or .8gent.
 	if (
 		path

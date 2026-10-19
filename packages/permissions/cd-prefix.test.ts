@@ -76,9 +76,19 @@ describe("refused shapes", () => {
 		expect(refusedWhy("cd .. && ls")).toContain("may not go up with ..");
 		expect(refusedWhy("cd video/../site && ls")).toContain("may not go up with ..");
 	});
-	test("an absolute folder", () => {
-		expect(refusedWhy(`cd ${outside} && ls`)).toContain("relative, not absolute");
-		expect(refusedWhy("cd /tmp && ls")).toContain("relative, not absolute");
+	test("an absolute folder outside the project", () => {
+		expect(refusedWhy(`cd ${outside} && ls`)).toContain("outside the project");
+		expect(refusedWhy("cd /tmp && ls")).toContain("outside the project");
+		expect(refusedWhy("cd /Users/x/.8gent/state && ls")).toBeTruthy();
+		expect(refusedWhy("cd ~/.8gent && ls")).toContain("plain name");
+		expect(refusedWhy("cd $HOME && ls")).toContain("plain name");
+		expect(refusedWhy("cd /tmp/* && ls")).toContain("plain name");
+		expect(refusedWhy(`cd ${root}/.. && ls`)).toContain("..");
+		expect(refusedWhy(`cd ${root}/escape && ls`)).toContain("outside the project");
+		expect(refusedWhy(`cd ${root}/.git && ls`)).toContain("dot directory");
+		expect(refusedWhy(`cd ${root}/gitlink && ls`)).toContain("dot directory");
+		expect(refusedWhy(`cd ${root}/nope && ls`)).toBeTruthy();
+		expect(cdPrefixShape(`cd ${root} && ls`)).toBeNull();
 	});
 	test("$, ~, quotes, globs, spaces, a leading -", () => {
 		for (const command of [
@@ -230,5 +240,24 @@ describe("commandInFolder: the folder leads the card", () => {
 	test("the shown text parses back to the same folder and rest", () => {
 		const cd = cdPrefix(commandInFolder("bash build.sh", "video/frames"), root);
 		expect(cd).toEqual({ kind: "cd", dir: join(root, "video", "frames"), rest: "bash build.sh" });
+	});
+});
+
+describe("absolute folders that resolve inside the project", () => {
+	test("the project root itself", () => {
+		expect(accepted(`cd ${root} && python3 x.py`)).toEqual({
+			kind: "cd",
+			dir: root,
+			rest: "python3 x.py",
+		});
+	});
+	test("an absolute subfolder", () => {
+		expect(accepted(`cd ${root}/video/frames && ls`)).toMatchObject({
+			dir: join(root, "video", "frames"),
+			rest: "ls",
+		});
+	});
+	test("an absolute symlink inside that stays inside", () => {
+		expect(accepted(`cd ${root}/videolink && ls`).dir).toBe(join(root, "video"));
 	});
 });
