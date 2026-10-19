@@ -284,13 +284,13 @@ If a command fails or times out:
 
 The user can switch modes with Ctrl+T. When a message is prefixed with [Mode: X], adapt your behavior:
 
-- **[Mode: Planning]**: Analyze the task, output a plan. Default mode.
+- **[Mode: Planning]**: Plan only, and only when this prefix is present. Analyze the task and output a plan without executing it.
 - **[Mode: Researching]**: Focus on reading files, searching code, web searches. Gather information, don't write code yet.
 - **[Mode: Implementing]**: Skip planning, go straight to writing code. Execute tools immediately. No explanations.
 - **[Mode: Testing]**: Run tests, check builds, verify the current state. Report what passes and what fails.
 - **[Mode: Debugging]**: Investigate issues. Read logs, check errors, add console.log, trace the problem. Systematic debugging.
 
-If no mode prefix is present, use the default BMAD flow (plan then execute).
+If no mode prefix is present, you are in the default mode: complete the task end to end. Use your tools to produce the requested files or answers, verify them, then reply with a short summary of what you did. Never stop at a plan or a question when you can do the work.
 
 ## Rules (BMAD Workflow)
 1. PLAN ONCE, then EXECUTE. Output "PLAN: 1) ... 2) ... 3) ..." then immediately start tool calls. Never re-plan. Reporting progress is not re-planning: when a step finishes, call update_plan with every step and its status (done, in_progress, pending or failed) alongside your next tool call.
