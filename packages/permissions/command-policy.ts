@@ -1005,7 +1005,7 @@ const RCLONE_READ = new Set([
 
 /** Package and artifact publishing: the subcommands that upload to a registry or host. */
 function publishUse(tool: string, args: string[]): "send" | "fetch" | null {
-	const words = plainWords(args, 8);
+	const words = plainWords(args, Number.POSITIVE_INFINITY);
 	const first = words[0] ?? "";
 	const PKG_WRITE = new Set(["publish", "unpublish", "deprecate", "dist-tag", "owner", "access"]);
 	switch (tool) {
@@ -1025,7 +1025,7 @@ function publishUse(tool: string, args: string[]): "send" | "fetch" | null {
 		case "cargo":
 			return ["publish", "owner", "yank"].some((v) => words.includes(v)) ? "send" : null;
 		case "gem":
-			return ["push", "yank", "owner"].includes(first) ? "send" : null;
+			return ["push", "yank", "owner"].some((v) => words.includes(v)) ? "send" : null;
 		case "aws": {
 			const i = args.findIndex((a) => a === "s3" || a === "s3api");
 			if (i < 0) return null;
@@ -1204,7 +1204,7 @@ function attachedPrograms(args: string[]): string[] {
 function hasInlineProgram(tool: string, args: string[]): boolean {
 	if (/^(pypy|python)[\d.]*$/.test(tool)) return args.some((a) => /^-[A-Za-z]*c/.test(a));
 	if (/^(node|nodejs|bun)$/.test(tool))
-		return args.some((a) => /^(-e|-p|-pe|--eval|--print)$|^--(eval|print)=/.test(a));
+		return args.some((a) => /^(-e|-p|-pe|--eval|--print)$|^--(eval|print)=|^-(e|p)\S/.test(a));
 	if (tool === "deno") return args[0] === "eval";
 	if (tool === "perl" || tool === "ruby") return args.some((a) => /^-[A-Za-z]*e/i.test(a));
 	if (tool === "php") return args.includes("-r");
@@ -1303,6 +1303,18 @@ function shellWords(command: string): string {
 		.replace(/["']/g, "");
 }
 
+/** One shell expansion: $(..), ${..}, $name or a backtick pair. */
+const EXPANSION = "(?:\\$\\([^)]*\\)|\\$\\{[^}]*\\}|\\$\\w+|`[^`]*`)";
+/** An expansion, then (on the same command) a path ending /tcp|udp/<host>/<port>. */
+const EXPANDED_SOCKET = new RegExp(
+	`${EXPANSION}[^\\s;&|]*\\/+(?:tcp|udp)\\/+[^\\s/;&|]+\\/+[^\\s/;&|]+`,
+	"i",
+);
+/** A redirect (> < or exec N<>) into a word that starts a path with an expansion and has two more segments. */
+const REDIRECT_EXPANDED_PATH = new RegExp(
+	`[<>]\\s*(?:[^\\s;&|$\`()<>]|${EXPANSION})*?${EXPANSION}\\/+[^\\s/;&|]+\\/+[^\\s/;&|]+`,
+);
+
 /** A redirect, exec or read of /dev/tcp or /dev/udp, however the path is quoted or escaped. */
 export function opensNetworkSocket(command: string): boolean {
 	const words = shellWords(command);
@@ -1314,7 +1326,13 @@ export function opensNetworkSocket(command: string): boolean {
 		/\/+dev\/+[$`]/.test(words) ||
 		// $D/tcp/host/80 with D=/dev: the directory itself is a variable.
 		/\$\{?\w+\}?\/+(tcp|udp)\//i.test(command) ||
-		/\$\{?\w+\}?\/+(tcp|udp)\//i.test(words)
+		/\$\{?\w+\}?\/+(tcp|udp)\//i.test(words) ||
+		// $(echo /dev)/tcp/h/80, `echo /dev`/tcp/h/80, ${X:-/dev}/tcp/h/80: any expansion before the socket path.
+		EXPANDED_SOCKET.test(command) ||
+		EXPANDED_SOCKET.test(words) ||
+		// >$D/$P/h/80: a redirect into a path built from an expansion plus two more segments.
+		REDIRECT_EXPANDED_PATH.test(command) ||
+		REDIRECT_EXPANDED_PATH.test(words)
 	);
 }
 
