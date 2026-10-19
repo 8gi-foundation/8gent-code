@@ -73,7 +73,9 @@ beforeAll(async () => {
 	}
 	saved.EIGHT_TURN_REVIEW = process.env.EIGHT_TURN_REVIEW;
 	saved.OLLAMA_HOST = process.env.OLLAMA_HOST;
-	saved.EIGHT_TEXT_TOOLS = process.env.EIGHT_TEXT_TOOLS;
+	// EIGHT_TEXT_TOOLS was saved by the loop above, before it was set. Saving it
+	// again here stored "1", and afterAll then leaked "1" into every later file
+	// (#4462: project-instructions-prompt got the compact prompt in CI).
 	({ Agent } = await import("./agent"));
 	({ voice: personalityVoice } = await import("../personality/voice"));
 	const { OnboardingManager } = await import("../self-autonomy/onboarding");
