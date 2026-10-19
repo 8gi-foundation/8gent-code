@@ -2,15 +2,19 @@
  * Per-model harness profile (#4439): defaults unchanged without an entry,
  * values clamped to bounds, one log line names the profile.
  */
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { generateText } from "ai";
 import { DEFAULT_STREAM_IDLE_MS } from "../eight/turn-timeout";
 import {
 	HARNESS_BOUNDS,
 	HARNESS_PROFILES,
 	type HarnessProfileTable,
+	REASONING_TEXT_RESERVE,
+	applyReasoningCap,
 	harnessProfileLine,
 	resolveHarnessProfile,
 } from "./harness-profile";
+import { type ProviderName, createModel } from "./providers";
 import { NUDGE_FRACTION, createBudgetDrain } from "./turn-budget";
 
 const defaults = { maxSteps: 30, maxOutputTokens: 4096 };
@@ -146,5 +150,103 @@ describe("createBudgetDrain nudgeFraction", () => {
 		}
 		t = 8000;
 		expect(drain()).toHaveLength(1);
+	});
+});
+
+describe("reasoning cap (#4454)", () => {
+	const table: HarnessProfileTable = { "m:r": { reasoningMaxTokens: 8192, why: "test" } };
+
+	test("openrouter with an entry gets reasoning.max_tokens", () => {
+		const body = applyReasoningCap("openrouter", "m:r", { max_tokens: 16384 }, table);
+		expect(body.reasoning).toEqual({ max_tokens: 8192 });
+	});
+
+	test("the field is clamped to leave room for text and tool calls", () => {
+		const tight = applyReasoningCap("openrouter", "m:r", { max_tokens: 9000 }, table);
+		expect(tight.reasoning).toEqual({ max_tokens: 9000 - REASONING_TEXT_RESERVE });
+		expect(REASONING_TEXT_RESERVE).toBeGreaterThanOrEqual(2048);
+		// No room at all: send nothing rather than a cap the model cannot use.
+		const none = applyReasoningCap("openrouter", "m:r", { max_tokens: 2048 }, table);
+		expect(none.reasoning).toBeUndefined();
+		// No max_tokens on the request: the entry value, unclamped by it.
+		expect(applyReasoningCap("openrouter", "m:r", {}, table).reasoning).toEqual({
+			max_tokens: 8192,
+		});
+		const junk = applyReasoningCap(
+			"openrouter",
+			"m:j",
+			{ max_tokens: 16384 },
+			{
+				"m:j": { reasoningMaxTokens: Number.NaN, why: "" },
+			},
+		);
+		expect(junk.reasoning).toBeUndefined();
+	});
+
+	test("no entry or no field sends nothing new; other providers are untouched", () => {
+		const body = { max_tokens: 16384, messages: [] };
+		expect(applyReasoningCap("openrouter", "other/model", { ...body }, table)).toEqual(body);
+		expect(
+			applyReasoningCap(
+				"openrouter",
+				"m:x",
+				{ ...body },
+				{ "m:x": { maxOutputTokens: 4096, why: "" } },
+			),
+		).toEqual(body);
+		for (const name of ["ollama", "lmstudio", "apfel", "llama-server"]) {
+			expect(applyReasoningCap(name, "m:r", { ...body }, table)).toEqual(body);
+		}
+	});
+
+	test("the shipped MiniMax M3 entry caps reasoning at 8192 inside its 16384 output cap", () => {
+		const entry = HARNESS_PROFILES["minimax/minimax-m3"];
+		expect(entry?.reasoningMaxTokens).toBe(8192);
+		const body = applyReasoningCap("openrouter", "minimax/minimax-m3", {
+			max_tokens: entry?.maxOutputTokens,
+		});
+		expect(body.reasoning).toEqual({ max_tokens: 8192 });
+	});
+
+	describe("the request createModel sends", () => {
+		const realFetch = globalThis.fetch;
+		afterEach(() => {
+			globalThis.fetch = realFetch;
+		});
+		async function sentBody(name: ProviderName, model: string): Promise<Record<string, unknown>> {
+			let sent: Record<string, unknown> = {};
+			globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+				sent = JSON.parse(String(init?.body ?? "{}"));
+				return new Response(
+					JSON.stringify({
+						id: "x",
+						created: 0,
+						model,
+						choices: [
+							{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" },
+						],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				);
+			}) as typeof fetch;
+			await generateText({
+				model: createModel({ name, model, apiKey: "test", baseURL: "https://example.invalid/v1" }),
+				prompt: "hi",
+				maxOutputTokens: 16384,
+			});
+			return sent;
+		}
+
+		test("openrouter MiniMax M3 carries reasoning.max_tokens", async () => {
+			const body = await sentBody("openrouter", "minimax/minimax-m3");
+			expect(body.max_tokens).toBe(16384);
+			expect(body.reasoning).toEqual({ max_tokens: 8192 });
+		});
+
+		test("a model without the field and a non-openrouter provider send no reasoning", async () => {
+			expect((await sentBody("openrouter", "qwen/qwen3.8-27b")).reasoning).toBeUndefined();
+			expect((await sentBody("lmstudio", "minimax/minimax-m3")).reasoning).toBeUndefined();
+		});
 	});
 });

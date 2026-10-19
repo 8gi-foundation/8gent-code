@@ -7,11 +7,12 @@
 
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
-import { modelFetchAsFetch } from "./model-fetch";
-import { loadSettings } from "../settings/store";
-import { resolveRetrySettings } from "../settings/retry";
-import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
+import { resolveRetrySettings } from "../settings/retry";
+import { loadSettings } from "../settings/store";
+import { applyReasoningCap } from "./harness-profile";
+import { modelFetchAsFetch } from "./model-fetch";
+import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 
 export type ProviderName = "ollama" | "lmstudio" | "openrouter" | "apfel" | "llama-server";
 
@@ -88,6 +89,13 @@ export function createModel(config: ProviderConfig): LanguageModel {
 					}
 				: {}),
 		},
+		// OpenRouter: a per-model reasoning cap from harness-profiles.json (#4454).
+		...(config.name === "openrouter"
+			? {
+					transformRequestBody: (body: Record<string, unknown>) =>
+						applyReasoningCap(config.name, config.model, body),
+				}
+			: {}),
 		// LM Studio requires `type: "object"` in tool parameter schemas.
 		// The AI SDK strips it — patch it back for lmstudio.
 		...(config.name === "lmstudio"
@@ -120,7 +128,11 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
  * True when a request would go to a hosted endpoint with no API key (#3746).
  * Keyless local providers and loopback endpoints never count as hosted.
  */
-export function hostedWithoutKey(name: string, baseURL: string | undefined, apiKey: string | undefined): boolean {
+export function hostedWithoutKey(
+	name: string,
+	baseURL: string | undefined,
+	apiKey: string | undefined,
+): boolean {
 	if (apiKey?.trim()) return false;
 	if (KEYLESS_PROVIDERS.has(name)) return false;
 	let host: string;

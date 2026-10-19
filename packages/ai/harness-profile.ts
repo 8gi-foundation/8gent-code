@@ -18,6 +18,11 @@ export interface HarnessProfileEntry {
 	maxSteps?: number;
 	nudgeFraction?: number;
 	maxOutputTokens?: number;
+	/**
+	 * Reasoning token cap sent to OpenRouter as `reasoning.max_tokens` (#4454).
+	 * Clamped by applyReasoningCap so text and tool calls keep room.
+	 */
+	reasoningMaxTokens?: number;
 	/** The measured runs that justify this entry. */
 	why: string;
 }
@@ -72,4 +77,32 @@ export function resolveHarnessProfile(
 /** The one line a session logs, so a run can be explained by the profile it ran under. */
 export function harnessProfileLine(model: string | undefined, p: HarnessProfile): string {
 	return `[harness-profile] model=${model ?? "unknown"} profile=${p.source} maxSteps=${p.maxSteps} nudge=${p.nudgeFraction} maxOutputTokens=${p.maxOutputTokens}`;
+}
+
+/** Output tokens a step always keeps for text and tool calls under a reasoning cap. */
+export const REASONING_TEXT_RESERVE = 2048;
+
+/**
+ * Add `reasoning: { max_tokens }` to an OpenRouter chat request body when the
+ * model's entry sets reasoningMaxTokens (#4454). A reasoning model that spends
+ * its whole output budget thinking returns no text and no tool call (finish
+ * length); capping the thinking below max_tokens leaves room to act. The cap
+ * is clamped to max_tokens - REASONING_TEXT_RESERVE and dropped when no room
+ * is left. Any other provider, model or entry: the body comes back unchanged.
+ */
+export function applyReasoningCap<B extends Record<string, unknown>>(
+	provider: string,
+	model: string,
+	body: B,
+	profiles: HarnessProfileTable = HARNESS_PROFILES,
+): B & { reasoning?: { max_tokens: number } } {
+	const want = profiles[model]?.reasoningMaxTokens;
+	if (provider !== "openrouter" || typeof want !== "number" || !Number.isFinite(want) || want < 1) {
+		return body;
+	}
+	const maxTokens =
+		typeof body.max_tokens === "number" ? body.max_tokens : Number.POSITIVE_INFINITY;
+	const cap = Math.floor(Math.min(want, maxTokens - REASONING_TEXT_RESERVE));
+	if (cap < 1) return body;
+	return { ...body, reasoning: { max_tokens: cap } };
 }
