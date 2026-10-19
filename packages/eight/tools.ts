@@ -3030,10 +3030,19 @@ export class ToolExecutor {
 					const s = await gate(t, a);
 					if (s.refusal != null)
 						return isErrorToolResult(s.refusal) ? s.refusal : `Error: ${s.refusal}`;
+					// Start already fired: the end must fire exactly once, even if execute throws,
+					// and a throwing end hook must not change the item's own status.
 					const t0 = Date.now();
-					const r = await this.execute(t, a);
-					if (s.id) await this.itemEnd?.(s.id, t, a, r, Date.now() - t0);
-					return r;
+					let r = "";
+					try {
+						r = await this.execute(t, a);
+						return r;
+					} catch (e) {
+						r = `Error: ${e instanceof Error ? e.message : String(e)}`;
+						throw e;
+					} finally {
+						if (s.id) await this.itemEnd?.(s.id, t, a, r, Date.now() - t0)?.catch(() => {});
+					}
 				});
 
 			// MCP tools

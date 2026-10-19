@@ -328,3 +328,55 @@ describe("batched items report their end (F9)", () => {
 		fs.rmSync(dir, { recursive: true, force: true });
 	});
 });
+
+describe("end bookkeeping is exact (F10)", () => {
+	test("execute throws: one end per start, the item is FAILED, later writes cancelled", async () => {
+		process.env.EIGHT_RUN_BATCH = "1";
+		const ex = new ToolExecutor(process.cwd());
+		const ends: { id: string; result: string }[] = [];
+		let n = 0;
+		ex.setItemGate(async () => ({ refusal: null, id: `i${++n}`, startedAt: 0 }));
+		ex.setItemEnd(async (id, _t, _a, result) => {
+			ends.push({ id, result });
+		});
+		const real = ex.execute.bind(ex);
+		ex.execute = async (t: string, a: Record<string, unknown>) => {
+			if (t === "read_file") throw new Error("boom");
+			return real(t, a);
+		};
+		const out = await ex.execute("run_batch", {
+			items: [
+				{ tool: "read_file", args: { path: "package.json" } },
+				{ tool: "run_command", args: { command: "true" } },
+			],
+		});
+		expect(out).toContain("1. read_file FAILED");
+		expect(out).toContain("2. run_command cancelled");
+		expect(ends).toEqual([{ id: "i1", result: "Error: boom" }]);
+	});
+	test("a throwing afterTool hook does not mark a good item FAILED", async () => {
+		process.env.EIGHT_RUN_BATCH = "1";
+		const { Agent } = await import("./agent");
+		const a = new Agent({
+			model: "x/y",
+			runtime: "ollama",
+			workingDirectory: process.cwd(),
+		}) as unknown as {
+			executor: ToolExecutor;
+			hookManager: { executeHooks: (ev: unknown, ctx: unknown) => Promise<unknown> };
+		};
+		const real = a.hookManager.executeHooks.bind(a.hookManager);
+		a.hookManager.executeHooks = async (ev, ctx) => {
+			if (ev === "afterTool") throw new Error("hook exploded");
+			return real(ev, ctx);
+		};
+		try {
+			const out = await a.executor.execute("run_batch", {
+				items: [{ tool: "read_file", args: { path: "package.json" } }],
+			});
+			expect(out).toContain("1. read_file ok");
+		} finally {
+			a.hookManager.executeHooks = real;
+		}
+	});
+});
