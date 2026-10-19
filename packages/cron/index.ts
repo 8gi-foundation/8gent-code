@@ -5,10 +5,10 @@
  * and runs 8gent commands via Bun.spawn when due.
  */
 
-import { eightCliPath, safeBunFlags } from "../core/bun-flags";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { eightCliPath, safeBunFlags } from "../core/bun-flags";
 
 export interface CronJob {
 	id: string;
@@ -18,6 +18,8 @@ export interface CronJob {
 	enabled: boolean;
 	lastRun?: string;
 	nextRun?: string;
+	/** Run once when a scheduled slot was missed (default true). Set false to opt out. */
+	catchUp?: boolean;
 }
 
 function matchField(field: string, value: number, max: number): boolean {
@@ -52,6 +54,27 @@ export function cronMatches(expression: string, date: Date): boolean {
 		matchField(month, date.getMonth() + 1, 12) &&
 		matchField(weekday, date.getDay(), 6)
 	);
+}
+
+/** Catch-up looks back at most this far, so a long outage never replays old work. */
+export const CATCHUP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const MINUTE_MS = 60 * 1000;
+
+/**
+ * True if `schedule` had a slot in the minutes after `lastRun` up to and including
+ * the minute of `now` (capped at 24 h). Without a `lastRun` only the exact minute counts.
+ * Any number of missed slots is still one boolean, so the caller fires once.
+ */
+export function dueSince(schedule: string, lastRun: Date | string | undefined, now: Date): boolean {
+	const nowMin = Math.floor(now.getTime() / MINUTE_MS);
+	const last = lastRun === undefined ? Number.NaN : new Date(lastRun).getTime();
+	const lastMin = Number.isNaN(last) ? nowMin - 1 : Math.floor(last / MINUTE_MS);
+	const floorMin = Math.max(lastMin, nowMin - CATCHUP_WINDOW_MS / MINUTE_MS);
+	for (let m = nowMin; m > floorMin; m--) {
+		if (cronMatches(schedule, new Date(m * MINUTE_MS))) return true;
+	}
+	return false;
 }
 
 export class CronManager {
@@ -119,11 +142,16 @@ export class CronManager {
 	}
 
 	/** Check all enabled jobs and run any that are due. Call every minute. */
-	tick(): void {
-		const now = new Date();
+	tick(now: Date = new Date()): void {
 		for (const job of this.jobs) {
 			if (!job.enabled) continue;
-			if (!cronMatches(job.schedule, now)) continue;
+			const lastRun = job.catchUp === false ? undefined : job.lastRun;
+			if (!dueSince(job.schedule, lastRun, now)) continue;
+			if (!cronMatches(job.schedule, now)) {
+				console.log(
+					`[cron] catch-up: job ${job.id} "${job.name}" missed its slot since ${job.lastRun}, running once`,
+				);
+			}
 			job.lastRun = now.toISOString();
 			// Fire and forget - spawn 8gent with the job's command
 			const args = job.command.split(/\s+/);
