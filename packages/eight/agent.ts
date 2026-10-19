@@ -14,6 +14,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type ModelMessage, jsonSchema, tool as sdkTool } from "ai";
 import type { FormattingStop } from "../ai/draft-constraints";
+import {
+	type HarnessProfile,
+	harnessProfileLine,
+	resolveHarnessProfile,
+} from "../ai/harness-profile";
 import { notePlanTask } from "../ai/plan-file";
 import { postMessageAvailable } from "../ai/post-message";
 import { modelSupportsVision, prefixMeterSink } from "../ai/text-tool-endpoint";
@@ -432,6 +437,8 @@ export class Agent {
 	private styleReminder: string | null = null;
 	/** #3487: the system prompt for a request rerouted to an off-box endpoint; null when the built prompt is already off-box safe. */
 	private offBoxSystemPrompt: (() => string) | null = null;
+	/** Models whose harness profile line this session already logged (#4439). */
+	private harnessProfileLogged = new Set<string>();
 	private toolCallTracker: Map<string, number> = new Map(); // fingerprint -> count
 	private loopWarningInjected = false;
 	/** #3855: progress signal for the in-flight native attempt, null between attempts. */
@@ -856,7 +863,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			model: config.model,
 			runtime: config.runtime,
 			maxTurns: config.maxTurns,
-			maxSteps: config.maxTurns || 30,
+			maxSteps:
+				config.maxTurns ||
+				resolveHarnessProfile(config.model, { maxSteps: 30, maxOutputTokens: 4096 }).maxSteps,
 			systemPromptHash: crypto
 				.createHash("sha256")
 				.update(systemPromptFull)
@@ -1447,6 +1456,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const budgetDrain = createBudgetDrain({
 			budgetMs: resolveTurnBudgetMs(),
 			startedAt: chatStartTime,
+			nudgeFraction: this.harnessProfileFor(providerModel, true).nudgeFraction,
 		});
 		const runTurn = (provider: string, model: string) => {
 			// #3487: the built prompt was judged on-box for the session's runtime. If
@@ -2407,6 +2417,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					: localCoreTools
 		).filter((name) => getModeManager().isToolAllowed(name));
 
+		const harness = this.harnessProfileFor(providerConfig.model, isLocalProvider);
 		// ── Populate runtime params for self-awareness tools ──────────
 		Object.assign(this.runtimeParams, {
 			// The voice flag is process-wide by design (one terminal, one mic): the
@@ -2419,8 +2430,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			systemPromptLength: systemPrompt?.length || 0,
 			messageHistoryLength: this.messageHistory.length,
 			stepCount: stepCount,
-			maxSteps: this.config.maxTurns || 30,
-			maxOutputTokens: isLocalProvider ? 4096 : 8192,
+			// Per-model knobs (#4439): today's values unless harness-profiles.json has an entry.
+			maxSteps: this.config.maxTurns || harness.maxSteps,
+			maxOutputTokens: harness.maxOutputTokens,
 		});
 
 		// Apply any previously tuned params (this agent's own, #3140)
@@ -2541,6 +2553,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			instructions: effectiveInstructions,
 			maxSteps: tunedParams.maxSteps,
 			maxOutputTokens: tunedParams.maxOutputTokens,
+			nudgeFraction: harness.nudgeFraction,
 			temperature: tunedParams.temperature,
 			topP: tunedParams.topP,
 			topK: tunedParams.topK,
@@ -3656,6 +3669,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * Nothing is delivered into an aborted turn, and a steer stamped with
 	 * another turn (or none) is never delivered; both stay for takeQueuedSteers.
 	 */
+	/**
+	 * The harness profile for a model (#4439), logged once per model per session
+	 * so a run can be explained by the knobs it ran under.
+	 */
+	private harnessProfileFor(model: string, isLocal: boolean): HarnessProfile {
+		const profile = resolveHarnessProfile(model, {
+			maxSteps: 30,
+			maxOutputTokens: isLocal ? 4096 : 8192,
+		});
+		if (!this.harnessProfileLogged.has(model)) {
+			this.harnessProfileLogged.add(model);
+			console.log(harnessProfileLine(model, profile));
+		}
+		return profile;
+	}
+
 	private drainSteers(): string[] {
 		const controller = this.abortController;
 		if (!controller || controller.signal.aborted) return [];
