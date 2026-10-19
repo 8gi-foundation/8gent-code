@@ -23,6 +23,11 @@ export interface HarnessProfileEntry {
 	 * Clamped by applyReasoningCap so text and tool calls keep room.
 	 */
 	reasoningMaxTokens?: number;
+	/**
+	 * Reasoning effort sent to OpenRouter as `reasoning.effort` (#4454). Wins
+	 * over reasoningMaxTokens: OpenRouter takes one or the other.
+	 */
+	reasoningEffort?: "low" | "medium" | "high";
 	/** The measured runs that justify this entry. */
 	why: string;
 }
@@ -43,7 +48,8 @@ export const HARNESS_BOUNDS = {
 	maxOutputTokens: [1024, 32768],
 } as const;
 
-export const HARNESS_PROFILES: HarnessProfileTable = table;
+// JSON types reasoningEffort as string; applyReasoningCap checks the value at runtime.
+export const HARNESS_PROFILES: HarnessProfileTable = table as HarnessProfileTable;
 
 function bounded(value: unknown, [lo, hi]: readonly [number, number], fallback: number): number {
 	if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
@@ -83,8 +89,9 @@ export function harnessProfileLine(model: string | undefined, p: HarnessProfile)
 export const REASONING_TEXT_RESERVE = 2048;
 
 /**
- * Add `reasoning: { max_tokens }` to an OpenRouter chat request body when the
- * model's entry sets reasoningMaxTokens (#4454). A reasoning model that spends
+ * Add `reasoning: { effort }` or `reasoning: { max_tokens }` to an OpenRouter
+ * chat request body when the model's entry sets reasoningEffort or
+ * reasoningMaxTokens (#4454); effort wins. A reasoning model that spends
  * its whole output budget thinking returns no text and no tool call (finish
  * length); capping the thinking below max_tokens leaves room to act. The cap
  * is clamped to max_tokens - REASONING_TEXT_RESERVE and dropped when no room
@@ -95,9 +102,14 @@ export function applyReasoningCap<B extends Record<string, unknown>>(
 	model: string,
 	body: B,
 	profiles: HarnessProfileTable = HARNESS_PROFILES,
-): B & { reasoning?: { max_tokens: number } } {
+): B & { reasoning?: { max_tokens: number } | { effort: string } } {
+	if (provider !== "openrouter") return body;
+	const effort = profiles[model]?.reasoningEffort;
+	if (effort === "low" || effort === "medium" || effort === "high") {
+		return { ...body, reasoning: { effort } };
+	}
 	const want = profiles[model]?.reasoningMaxTokens;
-	if (provider !== "openrouter" || typeof want !== "number" || !Number.isFinite(want) || want < 1) {
+	if (typeof want !== "number" || !Number.isFinite(want) || want < 1) {
 		return body;
 	}
 	const maxTokens =

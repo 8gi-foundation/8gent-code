@@ -199,13 +199,33 @@ describe("reasoning cap (#4454)", () => {
 		}
 	});
 
-	test("the shipped MiniMax M3 entry caps reasoning at 8192 inside its 16384 output cap", () => {
+	test("reasoningEffort is sent as reasoning.effort and wins over max_tokens", () => {
+		const t: HarnessProfileTable = {
+			"m:e": { reasoningEffort: "low", why: "" },
+			"m:both": { reasoningEffort: "medium", reasoningMaxTokens: 8192, why: "" },
+			"m:bad": { reasoningEffort: "extreme" as "low", why: "" },
+		};
+		expect(applyReasoningCap("openrouter", "m:e", { max_tokens: 16384 }, t).reasoning).toEqual({
+			effort: "low",
+		});
+		expect(applyReasoningCap("openrouter", "m:both", { max_tokens: 16384 }, t).reasoning).toEqual({
+			effort: "medium",
+		});
+		expect(
+			applyReasoningCap("openrouter", "m:bad", { max_tokens: 16384 }, t).reasoning,
+		).toBeUndefined();
+		expect(
+			applyReasoningCap("lmstudio", "m:e", { max_tokens: 16384 }, t).reasoning,
+		).toBeUndefined();
+	});
+
+	test("the shipped MiniMax M3 entry asks for low reasoning effort", () => {
 		const entry = HARNESS_PROFILES["minimax/minimax-m3"];
-		expect(entry?.reasoningMaxTokens).toBe(8192);
+		expect(entry?.reasoningEffort).toBe("low");
 		const body = applyReasoningCap("openrouter", "minimax/minimax-m3", {
 			max_tokens: entry?.maxOutputTokens,
 		});
-		expect(body.reasoning).toEqual({ max_tokens: 8192 });
+		expect(body.reasoning).toEqual({ effort: "low" });
 	});
 
 	describe("the request createModel sends", () => {
@@ -238,10 +258,10 @@ describe("reasoning cap (#4454)", () => {
 			return sent;
 		}
 
-		test("openrouter MiniMax M3 carries reasoning.max_tokens", async () => {
+		test("openrouter MiniMax M3 carries reasoning.effort low", async () => {
 			const body = await sentBody("openrouter", "minimax/minimax-m3");
 			expect(body.max_tokens).toBe(16384);
-			expect(body.reasoning).toEqual({ max_tokens: 8192 });
+			expect(body.reasoning).toEqual({ effort: "low" });
 		});
 
 		test("a model without the field and a non-openrouter provider send no reasoning", async () => {

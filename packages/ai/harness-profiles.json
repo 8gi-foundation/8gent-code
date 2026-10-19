@@ -13,7 +13,7 @@
 	},
 	"minimax/minimax-m3": {
 		"maxOutputTokens": 16384,
-		"reasoningMaxTokens": 8192,
-		"why": "Reasoning cap (#4454): with 16384 and the length-aware continue (#4453), runs-cloud 2026-10-19_161146 still ended two steps on length with 16383 reasoning tokens and wrote no answer; 8192 of reasoning leaves 8192 for text and tool calls. Cloud runs 19 Oct, sigi-dev-arc2-a (runs-cloud 2026-10-19_152316, _153418, _153911): every turn that ended empty was a step with finishReason length at exactly 8192 completion tokens, 8191 of them reasoning in _153418 and _153911, so no text or tool call was left. The #4446 auto-continue re-asked under the same cap and hit it again. 32768 was tried (_154821): the native path is generateText, so one step sends no progress until it ends, and a single reasoning step hit the 300 s idle gap. The slowest cut step ran 8192 tokens in 81 s (about 100 tok/s), so 16384 fits in about 164 s. Steps and nudge stay at defaults."
+		"reasoningEffort": "low",
+		"why": "Reasoning cap (#4454): with 16384 and the length-aware continue (#4453), runs-cloud 2026-10-19_161146 still ended two steps on length with 16383 reasoning tokens and wrote no answer. reasoning.max_tokens 8192 was ignored by the provider (2026-10-19_162424: two steps at 16384 reasoning), so this asks for low effort instead. Cloud runs 19 Oct, sigi-dev-arc2-a (runs-cloud 2026-10-19_152316, _153418, _153911): every turn that ended empty was a step with finishReason length at exactly 8192 completion tokens, 8191 of them reasoning in _153418 and _153911, so no text or tool call was left. The #4446 auto-continue re-asked under the same cap and hit it again. 32768 was tried (_154821): the native path is generateText, so one step sends no progress until it ends, and a single reasoning step hit the 300 s idle gap. The slowest cut step ran 8192 tokens in 81 s (about 100 tok/s), so 16384 fits in about 164 s. Steps and nudge stay at defaults."
 	}
 }
