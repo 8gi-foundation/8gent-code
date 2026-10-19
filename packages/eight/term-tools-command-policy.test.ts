@@ -192,8 +192,10 @@ describe("with no terminal attached", () => {
 		expect(await executeTermTool("term_spawn", { command: wipeHome })).toContain(
 			"[PERMISSION DENIED]",
 		);
-		expect(await executeTermTool("term_spawn", { command: `echo hi; ${wipeHome}` })).toContain(
-			"[PERMISSION DENIED]",
+		// Main's shell sanitizer (#3763) now refuses `;` chaining before the permission gate runs,
+		// so the chained wipe is stopped earlier. Either refusal is a block; neither may spawn.
+		expect(await executeTermTool("term_spawn", { command: `echo hi; ${wipeHome}` })).toMatch(
+			/\[(BLOCKED|PERMISSION DENIED)\]/,
 		);
 		getPermissionManager().enableInfiniteMode();
 		expect(await executeTermTool("term_spawn", { command: wipeHome })).toContain(
