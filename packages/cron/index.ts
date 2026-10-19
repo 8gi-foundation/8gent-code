@@ -5,10 +5,10 @@
  * and runs 8gent commands via Bun.spawn when due.
  */
 
-import { eightCliPath, safeBunFlags } from "../core/bun-flags";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { eightCliPath, safeBunFlags } from "../core/bun-flags";
 
 export interface CronJob {
 	id: string;
@@ -148,7 +148,9 @@ export class CronManager {
 			const lastRun = job.catchUp === false ? undefined : job.lastRun;
 			if (!dueSince(job.schedule, lastRun, now)) continue;
 			if (!cronMatches(job.schedule, now)) {
-				console.log(`[cron] catch-up: job ${job.id} "${job.name}" missed its slot since ${job.lastRun}, running once`);
+				console.log(
+					`[cron] catch-up: job ${job.id} "${job.name}" missed its slot since ${job.lastRun}, running once`,
+				);
 			}
 			job.lastRun = now.toISOString();
 			// Fire and forget - spawn 8gent with the job's command

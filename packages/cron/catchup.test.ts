@@ -5,6 +5,12 @@ import * as path from "node:path";
 import { CronManager, dueSince } from "./index";
 import { RoutineManager } from "./routines";
 
+type Internals = {
+	routines: Record<string, unknown>[];
+	save(): void;
+	execute(r: { name: string }, trigger: string): Promise<unknown>;
+};
+
 const at = (d: number, h: number, m: number, s = 0) => new Date(2026, 9, d, h, m, s);
 
 describe("dueSince", () => {
@@ -35,7 +41,7 @@ describe("RoutineManager catch-up", () => {
 	const make = () => {
 		const mgr = new RoutineManager(file);
 		fired = [];
-		(mgr as any).execute = async (r: any, trigger: string) => {
+		(mgr as unknown as Internals).execute = async (r, trigger) => {
 			fired.push(`${r.name}:${trigger}`);
 			return { id: "x", startedAt: "", status: "completed", trigger };
 		};
@@ -49,11 +55,11 @@ describe("RoutineManager catch-up", () => {
 
 	const seed = (mgr: RoutineManager, extra: Record<string, unknown> = {}) => {
 		const r = mgr.create({ name: "nightly", prompt: "p", schedule: "0 3 * * *" });
-		const live = (mgr as any).routines[0];
+		const live = (mgr as unknown as Internals).routines[0];
 		live.createdAt = at(1, 0, 0).toISOString();
 		live.lastRun = at(18, 3, 0).toISOString();
 		Object.assign(live, extra);
-		(mgr as any).save();
+		(mgr as unknown as Internals).save();
 		return r;
 	};
 
@@ -132,16 +138,29 @@ describe("CronManager catch-up", () => {
 	test("missed job fires once, catchUp:false does not", () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cron-catchup-"));
 		const mgr = new CronManager(path.join(dir, "cron.json"));
-		const a = mgr.add({ name: "a", schedule: "0 3 * * *", command: "chat x", enabled: true, lastRun: at(18, 3, 0).toISOString() });
-		const b = mgr.add({ name: "b", schedule: "0 3 * * *", command: "chat y", enabled: true, lastRun: at(18, 3, 0).toISOString(), catchUp: false });
+		const a = mgr.add({
+			name: "a",
+			schedule: "0 3 * * *",
+			command: "chat x",
+			enabled: true,
+			lastRun: at(18, 3, 0).toISOString(),
+		});
+		const b = mgr.add({
+			name: "b",
+			schedule: "0 3 * * *",
+			command: "chat y",
+			enabled: true,
+			lastRun: at(18, 3, 0).toISOString(),
+			catchUp: false,
+		});
 		const spawned: unknown[] = [];
 		const realSpawn = Bun.spawn;
-		(Bun as any).spawn = (cmd: string[]) => void spawned.push(cmd);
+		(Bun as unknown as { spawn: unknown }).spawn = (cmd: string[]) => void spawned.push(cmd);
 		try {
 			mgr.tick(at(19, 3, 7));
 			mgr.tick(at(19, 3, 8));
 		} finally {
-			(Bun as any).spawn = realSpawn;
+			(Bun as unknown as { spawn: unknown }).spawn = realSpawn;
 			fs.rmSync(dir, { recursive: true, force: true });
 		}
 		expect(spawned).toHaveLength(1);

@@ -12,10 +12,10 @@
  * daemon's cron tick loop. Each run spawns a headless agent session.
  */
 
-import { eightCliPath, safeBunFlags } from "../core/bun-flags";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { eightCliPath, safeBunFlags } from "../core/bun-flags";
 import { cronMatches, dueSince } from "./index";
 
 // ── Types ───────────────────────────────────────────────────────
@@ -192,7 +192,9 @@ export class RoutineManager {
 			const lastRun = routine.catchUp === false ? undefined : routine.lastRun || routine.createdAt;
 			if (!dueSince(routine.schedule, lastRun, now)) continue;
 			if (!cronMatches(routine.schedule, now)) {
-				console.log(`[routines] catch-up: "${routine.name}" (${routine.id}) missed its slot since ${lastRun}, running once`);
+				console.log(
+					`[routines] catch-up: "${routine.name}" (${routine.id}) missed its slot since ${lastRun}, running once`,
+				);
 			}
 			routine.lastRun = now.toISOString();
 			this.save();
