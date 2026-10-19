@@ -260,6 +260,7 @@ import {
 	buildChildEnv,
 	withheldAny,
 } from "./harness/child-env";
+import { isErrorToolResult } from "./honesty";
 import { downscaleNote, imageMaxSide } from "./image-fit";
 import { IssueBlameGate, issueBodyOf } from "./issue-blame";
 import { layoutMeasureLine } from "./layout-measure";
@@ -322,7 +323,7 @@ export type ReplayClass = "replay" | "never" | "ask";
  * started under, and resume refuses to re-run a call whose class has changed
  * since (8SO review, #4118).
  */
-export const REPLAY_POLICY_VERSION = 3;
+export const REPLAY_POLICY_VERSION = 4;
 
 export function isReplayClass(v: unknown): v is ReplayClass {
 	return v === "replay" || v === "never" || v === "ask";
@@ -346,6 +347,7 @@ const REPLAY_SAFE_TOOLS = new Set(["read_file", "git_log"]);
 
 // Changing this set: bump REPLAY_POLICY_VERSION.
 const NEVER_REPLAY_TOOLS = new Set([
+	"run_batch",
 	"write_file",
 	"edit_file",
 	"run_command",
@@ -2354,6 +2356,13 @@ export class ToolExecutor {
 	 * maker-checker, edit-scope, rate-limit and plan-mode checks as built-in
 	 * tools, and their output is scrubbed, filtered and chipped the same way.
 	 */
+	/** Per-item refusal for run_batch: the owner's mode, hook and extension checks (agent.ts refuseToolCall). */
+	private itemGate?: (tool: string, args: Record<string, unknown>) => Promise<string | null>;
+
+	setItemGate(gate: (tool: string, args: Record<string, unknown>) => Promise<string | null>): void {
+		this.itemGate = gate;
+	}
+
 	setExtensionRunner(runner: ToolExecutor["extensionRunner"]): void {
 		this.extensionRunner = runner;
 	}
@@ -2994,7 +3003,13 @@ export class ToolExecutor {
 
 			case "run_batch":
 				if (!runBatchOn()) return "Error: run_batch is not enabled. Nothing was run.";
-				return runBatch(args.items, (t, a) => this.execute(t, a));
+				if (!this.itemGate)
+					return "Error: run_batch has no per-item gate in this session. Nothing was run.";
+				return runBatch(args.items, async (t, a) => {
+					const refusal = await this.itemGate?.(t, a);
+					if (refusal == null) return this.execute(t, a);
+					return isErrorToolResult(refusal) ? refusal : `Error: ${refusal}`;
+				});
 
 			// MCP tools
 			case "mcp_list_tools":

@@ -572,6 +572,8 @@ export class Agent {
 				localRuntime: () => isLocalProvider(this.config.runtime),
 			},
 		);
+		// run_batch items skip the agent loop, so they take the same refusals here (#3502).
+		this.executor.setItemGate((t, a) => this.refuseToolCall(t, a));
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 off): with the allowlist
 		// opted out, start loading the judge now, in the background, so the
 		// first gated command does not pay the model load. Idempotent per

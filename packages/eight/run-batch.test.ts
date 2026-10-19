@@ -115,10 +115,106 @@ describe("runBatch", () => {
 	});
 });
 
+describe("hardening (second read)", () => {
+	test("denied markers cancel later writes", async () => {
+		for (const marker of [
+			"[TOOLG8 BLOCKED] no",
+			"[MAKER-CHECKER BLOCKED] no",
+			"[PERMISSION DENIED] no",
+			'Hook blocked tool "x": no',
+			"Unknown tool: x",
+			"Path blocked by path-guard: x",
+		]) {
+			const ran: string[] = [];
+			const out = await runBatch([{ tool: "edit_file" }, { tool: "run_command" }], async (t) => {
+				ran.push(t);
+				return marker;
+			});
+			expect(ran).toEqual(["edit_file"]);
+			expect(out).toContain("2. run_command cancelled");
+		}
+	});
+	test("args must be an object when given", async () => {
+		const exec = async () => "x";
+		for (const bad of ["s", null, [1], 3]) {
+			expect(await runBatch([{ tool: "read_file", args: bad }], exec)).toBe(
+				"Error: run_batch item 1 args must be an object. Nothing was run.",
+			);
+		}
+		expect(await runBatch([{ tool: "read_file" }], exec)).toContain("1. read_file ok");
+	});
+	test("nesting check ignores case and spaces", async () => {
+		const exec = async () => "x";
+		expect(await runBatch([{ tool: " Run_Batch " }], exec)).toContain("cannot contain run_batch");
+	});
+	test("run_batch is never replayed and the policy version moved", async () => {
+		const t = await import("./tools");
+		expect(t.toolReplayClass("run_batch")).toBe("never");
+		expect(t.REPLAY_POLICY_VERSION).toBe(4);
+	});
+	test("without a gate the executor fails closed and runs nothing", async () => {
+		process.env.EIGHT_RUN_BATCH = "1";
+		const r = await new ToolExecutor(process.cwd()).execute("run_batch", {
+			items: [{ tool: "read_file", args: { path: "package.json" } }],
+		});
+		expect(r).toContain("no per-item gate");
+	});
+	test("a gate that refuses write_file: only the read runs, refusal reported, later shell cancelled", async () => {
+		process.env.EIGHT_RUN_BATCH = "1";
+		const ex = new ToolExecutor(process.cwd());
+		const asked: string[] = [];
+		ex.setItemGate(async (t) => {
+			asked.push(t);
+			return t === "write_file" ? "Hook blocked tool write_file: read-only mode" : null;
+		});
+		const out = await ex.execute("run_batch", {
+			items: [
+				{ tool: "read_file", args: { path: "package.json" } },
+				{ tool: "write_file", args: { path: "should-not-exist-3502.txt", content: "x" } },
+				{ tool: "run_command", args: { command: "touch should-not-exist-3502.sh" } },
+			],
+		});
+		expect(out).toContain("1. read_file ok");
+		expect(out).toContain("2. write_file FAILED");
+		expect(out).toContain("read-only mode");
+		expect(out).toContain("3. run_command cancelled");
+		expect(asked).toEqual(["read_file", "write_file"]);
+		expect(require("node:fs").existsSync("should-not-exist-3502.txt")).toBe(false);
+	});
+});
+
+describe("summary budget", () => {
+	test("a late failure keeps its header when every body is huge", async () => {
+		const items = Array.from({ length: 12 }, () => ({ tool: "read_file" }));
+		let n = 0;
+		const out = await runBatch(items, async () =>
+			++n === 11 ? "[TOOLG8 BLOCKED] no" : "y".repeat(5000),
+		);
+		expect(out.split("\n")[0]).toBe("run_batch: 12 items, 1 failed (11), 0 cancelled");
+		expect(out).toContain("11. read_file FAILED");
+		expect(out).toContain("12. read_file ok");
+		expect(out.length).toBeLessThanOrEqual(13000);
+	});
+	test("summary line counts failed and cancelled", async () => {
+		const out = await runBatch(
+			[{ tool: "edit_file" }, { tool: "run_command" }, { tool: "write_file" }],
+			async () => "Error: x",
+		);
+		expect(out.split("\n")[0]).toBe("run_batch: 3 items, 1 failed (1), 2 cancelled");
+	});
+	test("git_status and git_diff are not read-only", async () => {
+		const { RUN_BATCH_READ_ONLY } = await import("./run-batch");
+		expect(RUN_BATCH_READ_ONLY.has("git_status")).toBe(false);
+		expect(RUN_BATCH_READ_ONLY.has("git_diff")).toBe(false);
+		expect(RUN_BATCH_READ_ONLY.has("git_log")).toBe(true);
+	});
+});
+
 describe("executor path", () => {
 	test("items go back through execute, so real tools run", async () => {
 		process.env.EIGHT_RUN_BATCH = "1";
 		const ex = new ToolExecutor(process.cwd());
+		ex.setItemGate(async () => null);
 		const out = await ex.execute("run_batch", {
 			items: [
 				{ tool: "read_file", args: { path: "package.json" } },
