@@ -169,13 +169,34 @@ export function logSystemOneJudge(input: JudgeLogInput): void {
 		};
 		if (g?.rule) rec.rule = g.rule;
 		if (input.error !== undefined) {
-			rec.errorKind = (input.error as { name?: string })?.name || typeof input.error;
+			const n = (input.error as { name?: unknown })?.name;
+			rec.errorKind = typeof n === "string" && /^[A-Za-z]{1,40}$/.test(n) ? n : "Error";
 		}
 		const dir = path.dirname(file);
 		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-		const fresh = !fs.existsSync(file);
-		fs.appendFileSync(file, `${JSON.stringify(rec)}\n`, { mode: 0o600 });
-		if (fresh) fs.chmodSync(file, 0o600);
+		// mkdir's mode applies only on creation: tighten an existing dir too.
+		fs.chmodSync(dir, 0o700);
+		// appendFileSync follows symlinks and blocks on a FIFO: refuse anything but a regular file.
+		try {
+			if (!fs.lstatSync(file).isFile()) return;
+		} catch (e) {
+			if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") return;
+		}
+		const fd = fs.openSync(
+			file,
+			fs.constants.O_WRONLY |
+				fs.constants.O_APPEND |
+				fs.constants.O_CREAT |
+				fs.constants.O_NOFOLLOW |
+				fs.constants.O_NONBLOCK,
+			0o600,
+		);
+		try {
+			fs.writeSync(fd, `${JSON.stringify(rec)}\n`);
+			fs.fchmodSync(fd, 0o600);
+		} finally {
+			fs.closeSync(fd);
+		}
 	} catch {
 		// Observability must not change behaviour.
 	}

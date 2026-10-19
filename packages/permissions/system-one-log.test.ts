@@ -5,7 +5,7 @@
  * verdict.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
@@ -312,5 +312,39 @@ describe("logging changes no verdict", () => {
 		}
 		expect(out[0]).toEqual(out[1]);
 		expect(lines()).toHaveLength(cases.length);
+	});
+});
+
+describe("append path hardening", () => {
+	test("a symlink in place of the log is refused, the target is untouched, the verdict is unchanged", async () => {
+		const target = join(tempDir("sys1log-target-"), "victim.txt");
+		writeFileSync(target, "keep\n");
+		mkdirSync(join(dir, "audit"), { recursive: true });
+		symlinkSync(target, join(dir, "audit", "system-one.jsonl"));
+		_resetSystemOne();
+		install(0);
+		const withLink = await systemOneGate("echo UNSURE", ON);
+		expect(readFileSync(target, "utf8")).toBe("keep\n");
+		Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
+		_resetSystemOne();
+		install(0);
+		const logOff = await systemOneGate("echo UNSURE", ON);
+		expect({ run: withLink.run, v: withLink.guard?.verdict, p: withLink.guard?.pYes }).toEqual({
+			run: logOff.run,
+			v: logOff.guard?.verdict,
+			p: logOff.guard?.pYes,
+		});
+	});
+	test("an existing audit dir is tightened to 0700 and the log is 0600", () => {
+		mkdirSync(join(dir, "audit"), { recursive: true, mode: 0o755 });
+		logSystemOneJudge({ command: "echo hi", thresholds: "t" });
+		expect(statSync(join(dir, "audit")).mode & 0o777).toBe(0o700);
+		expect(statSync(join(dir, "audit", "system-one.jsonl")).mode & 0o777).toBe(0o600);
+	});
+	test("a 60-char error name is logged as Error", () => {
+		const e = new Error("x");
+		e.name = "A".repeat(60);
+		logSystemOneJudge({ command: "echo hi", thresholds: "t", outcome: "error", error: e });
+		expect(lines()[0].errorKind).toBe("Error");
 	});
 });
