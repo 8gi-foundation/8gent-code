@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { evaluatePolicy, policyScratchDir } from "./policy-engine";
 import { destroySessionScratch, sessionScratchDir as seatbeltScratchDir } from "./seatbelt";
-import { scratchDirPath } from "./session-scratch";
+import { saveScratchOverflow, scratchDirPath, writeScratchFileExclusive } from "./session-scratch";
 import { checkFilePathBoundary } from "./src/workspace-boundary";
 
 // #4488: the shared system temp dir is not a default writable prefix.
@@ -180,5 +180,76 @@ describe("seatbelt and policy agree on one scratch dir", () => {
 		fs.chmodSync(p, 0o755);
 		const work = seatbeltScratchDir(id);
 		if (process.platform !== "win32") expect(fs.statSync(work).mode & 0o777).toBe(0o700);
+	});
+});
+
+describe("scratch parents must not be group/world writable", () => {
+	const swapData = (name: string) => {
+		const dd = path.join(ROOT, name);
+		fs.mkdirSync(dd, { mode: 0o700 });
+		return dd;
+	};
+	test("a group-writable scratch/ is refused; a 0700 chain passes", () => {
+		const dd = swapData("perm-data");
+		const saved = process.env.EIGHT_DATA_DIR;
+		process.env.EIGHT_DATA_DIR = dd;
+		try {
+			fs.mkdirSync(path.join(dd, "scratch"), { mode: 0o700 });
+			fs.chmodSync(path.join(dd, "scratch"), 0o770);
+			expect(policyScratchDir("perm")).toBeNull();
+			expect(fs.existsSync(scratchDirPath("perm"))).toBe(false);
+			fs.chmodSync(path.join(dd, "scratch"), 0o700);
+			expect(policyScratchDir("perm")).not.toBeNull();
+		} finally {
+			process.env.EIGHT_DATA_DIR = saved;
+		}
+	});
+	test("a world-writable data dir is refused", () => {
+		const dd = swapData("perm-data2");
+		fs.chmodSync(dd, 0o707);
+		const saved = process.env.EIGHT_DATA_DIR;
+		process.env.EIGHT_DATA_DIR = dd;
+		try {
+			expect(policyScratchDir("perm2")).toBeNull();
+			expect(fs.existsSync(path.join(dd, "scratch"))).toBe(false);
+		} finally {
+			process.env.EIGHT_DATA_DIR = saved;
+		}
+	});
+	test("a symlinked data dir gets nothing created in its target", () => {
+		const target = path.join(ROOT, "link-target");
+		fs.mkdirSync(target, { mode: 0o700 });
+		const link = path.join(ROOT, "data-link");
+		fs.symlinkSync(target, link);
+		const saved = process.env.EIGHT_DATA_DIR;
+		process.env.EIGHT_DATA_DIR = link;
+		try {
+			expect(policyScratchDir("lk")).toBeNull();
+			expect(fs.readdirSync(target)).toEqual([]);
+		} finally {
+			process.env.EIGHT_DATA_DIR = saved;
+		}
+	});
+});
+
+describe("overflow file is never written through a planted symlink", () => {
+	test("a symlink pre-planted at the chosen name is not followed", () => {
+		const dir = policyScratchDir("ovf") as string;
+		const victim = path.join(ROOT, "victim-rc");
+		fs.writeFileSync(victim, "ORIGINAL");
+		fs.symlinkSync(victim, path.join(dir, "cmd-1.txt"));
+		expect(() => writeScratchFileExclusive(dir, "cmd-1.txt", "x".repeat(60000))).toThrow();
+		expect(fs.readFileSync(victim, "utf-8")).toBe("ORIGINAL");
+	});
+	test("overflow saves as a fresh regular 0600 file with an unguessable name", () => {
+		const dir = policyScratchDir("ovf") as string;
+		const a = saveScratchOverflow(dir, "hello") as string;
+		const b = saveScratchOverflow(dir, "world") as string;
+		expect(a).not.toBe(b);
+		expect(path.basename(a)).toMatch(/^cmd-[0-9a-f-]{36}\.txt$/);
+		const st = fs.lstatSync(a);
+		expect(st.isFile() && !st.isSymbolicLink()).toBe(true);
+		if (process.platform !== "win32") expect(st.mode & 0o777).toBe(0o600);
+		expect(fs.readFileSync(a, "utf-8")).toBe("hello");
 	});
 });

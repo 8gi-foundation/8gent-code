@@ -44,6 +44,73 @@ function isOwnRealDir(p: string): boolean {
 	return typeof process.getuid !== "function" || st.uid === process.getuid();
 }
 
+/** A parent we rely on: own real dir that neither group nor world can write. */
+function isTrustedParent(p: string): boolean {
+	if (!isOwnRealDir(p)) return false;
+	return process.platform === "win32" || (fs.lstatSync(p).mode & 0o022) === 0;
+}
+
+/** Make a directory, tolerating "already exists"; the caller verifies it afterwards. */
+function mkdirOnce(p: string): void {
+	try {
+		fs.mkdirSync(p, { mode: 0o700 });
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+	}
+}
+
+/** Force 0700 on the session dir through an fd opened O_NOFOLLOW, so a swapped-in symlink is never chmodded. */
+function tightenNoFollow(dir: string): void {
+	const flags =
+		fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_DIRECTORY ?? 0);
+	const fd = fs.openSync(dir, flags);
+	try {
+		const st = fs.fstatSync(fd);
+		if (
+			!st.isDirectory() ||
+			(typeof process.getuid === "function" && st.uid !== process.getuid())
+		) {
+			throw new Error(`not an owned real directory: ${dir}`);
+		}
+		if ((st.mode & 0o777) !== 0o700) fs.fchmodSync(fd, 0o700);
+		if ((fs.fstatSync(fd).mode & 0o777) !== 0o700) throw new Error(`cannot set 0700: ${dir}`);
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+/**
+ * Create a new file inside a scratch dir without ever following a planted
+ * symlink: O_EXCL (fails if anything, including a symlink, already holds the
+ * name) plus O_NOFOLLOW, mode 0600. Throws on any failure; callers fall back.
+ */
+export function writeScratchFileExclusive(dir: string, name: string, data: string): string {
+	const file = path.join(dir, name);
+	const fd = fs.openSync(
+		file,
+		fs.constants.O_WRONLY |
+			fs.constants.O_CREAT |
+			fs.constants.O_EXCL |
+			(fs.constants.O_NOFOLLOW ?? 0),
+		0o600,
+	);
+	try {
+		fs.writeSync(fd, data);
+	} finally {
+		fs.closeSync(fd);
+	}
+	return file;
+}
+
+/** Save overflow output under an unguessable name; null when it cannot be saved safely. */
+export function saveScratchOverflow(dir: string, data: string): string | null {
+	try {
+		return writeScratchFileExclusive(dir, `cmd-${crypto.randomUUID()}.txt`, data);
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Create (if needed) and verify the session scratch dir; return its realpath,
  * or null when any check fails. Re-verified cheaply on every call so a dir that
@@ -59,14 +126,21 @@ export function policyScratchDir(sessionId?: unknown): string | null {
 		verified.delete(dir);
 	}
 	try {
-		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-		for (const p of [dataDir(), path.dirname(dir), dir]) {
-			if (!isOwnRealDir(p)) throw new Error(`not an owned real directory: ${p}`);
-		}
-		if (process.platform !== "win32" && (fs.lstatSync(dir).mode & 0o777) !== 0o700) {
-			fs.chmodSync(dir, 0o700);
-			if ((fs.lstatSync(dir).mode & 0o777) !== 0o700) throw new Error(`cannot set 0700: ${dir}`);
-		}
+		const data = dataDir();
+		const scratch = path.dirname(dir);
+		// Check each level before creating anything inside it, so a refused
+		// parent never gets a child created in its target.
+		fs.mkdirSync(data, { recursive: true, mode: 0o700 });
+		if (!isTrustedParent(data))
+			throw new Error(`untrusted directory (not owned, symlink or group/world writable): ${data}`);
+		mkdirOnce(scratch);
+		if (!isTrustedParent(scratch))
+			throw new Error(
+				`untrusted directory (not owned, symlink or group/world writable): ${scratch}`,
+			);
+		mkdirOnce(dir);
+		if (!isOwnRealDir(dir)) throw new Error(`not an owned real directory: ${dir}`);
+		if (process.platform !== "win32") tightenNoFollow(dir);
 		const real = fs.realpathSync(dir);
 		verified.set(dir, real);
 		return real;

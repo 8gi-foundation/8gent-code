@@ -20,7 +20,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { policyScratchDir } from "../../../permissions/session-scratch";
+import { policyScratchDir, saveScratchOverflow } from "../../../permissions/session-scratch";
 import type { ExecutionContext } from "../../../types";
 import { registerTool } from "../../registry/register";
 
@@ -735,8 +735,6 @@ function executeChain(segments: ChainSegment[], ctx: ExecutionContext): CommandR
 const OVERFLOW_LINES = 200;
 const OVERFLOW_BYTES = 50 * 1024;
 
-let overflowCounter = 0;
-
 function presentResult(result: CommandResult, durationMs: number, sessionId?: string): string {
 	let output = result.stdout;
 
@@ -752,14 +750,13 @@ function presentResult(result: CommandResult, durationMs: number, sessionId?: st
 	if (lines.length > OVERFLOW_LINES || bytes > OVERFLOW_BYTES) {
 		// Save full output
 		// Same verified 0700 scratch dir the policy allows (#4488); the model is told to cat this file.
+		// Unguessable name, O_EXCL|O_NOFOLLOW: a sandboxed command cannot pre-plant a symlink we would follow.
 		const overflowDir = policyScratchDir(sessionId);
-		if (!overflowDir) {
+		const overflowFile = overflowDir ? saveScratchOverflow(overflowDir, output) : null;
+		if (!overflowFile) {
 			const head = lines.slice(0, OVERFLOW_LINES).join("\n");
 			return `${head}\n\n--- output truncated (${lines.length} lines, ${(bytes / 1024).toFixed(1)}KB; full output not saved) ---\n[exit:${result.exitCode}]`;
 		}
-		overflowCounter++;
-		const overflowFile = path.join(overflowDir, `cmd-${overflowCounter}.txt`);
-		fs.writeFileSync(overflowFile, output, { mode: 0o600 });
 
 		output = lines.slice(0, OVERFLOW_LINES).join("\n");
 		output += `\n\n--- output truncated (${lines.length} lines, ${(bytes / 1024).toFixed(1)}KB) ---`;
