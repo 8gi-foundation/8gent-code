@@ -279,6 +279,13 @@ import {
 	withTimeout,
 } from "./lib/provider-readiness.js";
 import {
+	type TurnError,
+	buildResultFor,
+	deriveReadiness,
+	readinessBuildKey,
+	turnEndFacts,
+} from "./lib/readiness.js";
+import {
 	flushSession,
 	initSessionLogger,
 	logError,
@@ -960,11 +967,18 @@ export function App({
 		live: number;
 		total: number;
 		checked: boolean;
+		/** The latest probe per engine, for lib/readiness.ts (#3290). */
+		engines: Record<string, boolean>;
 	}>({
 		live: 0,
 		total: 1,
 		checked: false,
+		engines: {},
 	});
+	// Bumped when a turn fails to reach its engine, so the probe runs now
+	// rather than on its next 8 s tick (#3290).
+	const [probeNonce, setProbeNonce] = useState(0);
+	const probeInFlightRef = useRef(false);
 	// Launch splash, about 1.5 s, skippable with any key. Shown on the first
 	// run and once after each update only (lib/intro-gate.ts); the
 	// performance.introBanner setting ("on" / "off") and 8GENT_NO_INTRO=1 /
@@ -1467,18 +1481,25 @@ export function App({
 	useEffect(() => {
 		let cancelled = false;
 		const tick = async () => {
+			probeInFlightRef.current = true;
 			try {
-				const { live, total } = await probeProviders();
-				// Same counts keep the same object, so the 8 s probe only
-				// re-renders App when the X/Y figure actually changes.
+				const { live, total, statuses } = await probeProviders();
+				const engines = Object.fromEntries(statuses.map((s) => [s.name, s.live]));
+				// Same results keep the same object, so the 8 s probe only
+				// re-renders App when an engine actually comes or goes.
 				if (!cancelled)
 					setProviderHealth((prev) =>
-						prev.checked && prev.live === live && prev.total === total
+						prev.checked &&
+						prev.live === live &&
+						prev.total === total &&
+						statuses.every((s) => prev.engines[s.name] === s.live)
 							? prev
-							: { live, total, checked: true },
+							: { live, total, checked: true, engines },
 					);
 			} catch {
 				// best-effort - status bar can stay stale rather than crash
+			} finally {
+				probeInFlightRef.current = false;
 			}
 		};
 		tick();
@@ -1487,7 +1508,7 @@ export function App({
 			cancelled = true;
 			clearInterval(id);
 		};
-	}, []);
+	}, [probeNonce]);
 
 	// setMessages wrapper that also updates the ref map for current tab
 	const setMessages: React.Dispatch<React.SetStateAction<Message[]>> = useCallback(
@@ -1899,6 +1920,15 @@ export function App({
 	// clock left the header in #3238.
 	const [lastTurnEndedAt, setLastTurnEndedAt] = useState<number | null>(null);
 	const [lastTurnSuccess, setLastTurnSuccess] = useState<boolean | null>(null);
+	// The transport failure the last turn ended on, a readiness fact (#3290).
+	// A turn that ends cleanly clears it.
+	const [turnError, setTurnError] = useState<TurnError | null>(null);
+	// Read by the init effect without re-running it on every turn error.
+	const turnErrorRef = useRef<TurnError | null>(null);
+	turnErrorRef.current = turnError;
+	// The provider the running turn started on: a switch mid-turn must not
+	// pin this turn's failure on the new provider.
+	const turnProviderRef = useRef(currentProvider);
 
 	// V2 chrome: approval-pending state. When non-null, the V2 layout renders
 	// InlineApprovalPrompt above CommandInput, flips the LiveFocalStrip border,
@@ -1932,6 +1962,7 @@ export function App({
 	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
 	useEffect(() => {
 		const justFinished = wasProcessingRef.current && !isProcessing;
+		if (isProcessing && !wasProcessingRef.current) turnProviderRef.current = currentProvider;
 		wasProcessingRef.current = isProcessing;
 		if (justFinished) {
 			setLastTurnEndedAt(Date.now());
@@ -1939,6 +1970,14 @@ export function App({
 			// or was blocked mid-turn, then recovered from, is not an error.
 			const hadError = turnEndedInError(messages);
 			setLastTurnSuccess(!hadError);
+			const facts = turnEndFacts(
+				hadError ? messages[messages.length - 1] : undefined,
+				turnProviderRef.current,
+				probeInFlightRef.current,
+			);
+			setTurnError(facts.turnError);
+			if (facts.probeNow) setProbeNonce((n) => n + 1);
+			if (facts.retryBuild) setInitRetry((n) => n + 1);
 			// The plan settles: nothing is still in progress, and the turn's
 			// wall time goes into the summary line.
 			setPlanSteps((prev) => (prev.length > 0 ? settlePlan(prev) : prev));
@@ -3024,6 +3063,11 @@ export function App({
 	// provider started after launch is still picked up. Until #3087 that
 	// happened by accident: the effect re-ran on every render.
 	const [initRetry, setInitRetry] = useState(0);
+	// The last agent build's result and what it was for (tab, provider,
+	// model): a fact for lib/readiness.ts, never a "ready" flag (#3290). A
+	// result for another tab or spec does not count, so a switch reads
+	// "checking" until its own time-bounded build ends.
+	const [buildFact, setBuildFact] = useState<{ key: string; notice: string | null } | null>(null);
 
 	// Initialize agent for the active tab. Each chat tab owns its own Agent
 	// instance; the active-tab agent is mirrored into local `agent`/`agentReady`
@@ -3049,6 +3093,20 @@ export function App({
 			});
 		};
 		const initAgent = async () => {
+			// Same tab id as the render-side key, so the two always match.
+			const buildKey = readinessBuildKey(activeTabId, currentProvider, currentModel);
+			// A cancelled (superseded) attempt writes nothing: a late, stale
+			// result must not overwrite the current attempt's slot.
+			const built = () => {
+				if (cancelled) return;
+				setBuildFact({ key: buildKey, notice: null });
+				// A build that checked this provider supersedes its last turn error.
+				setTurnError((prev) => (prev?.provider === currentProvider ? null : prev));
+			};
+			const waiting = (notice: string) => {
+				if (cancelled) return;
+				setBuildFact({ key: buildKey, notice });
+			};
 			try {
 				// Bounded readiness gate. A local provider whose port accepts TCP
 				// but never answers used to leave this init awaiting forever, so
@@ -3085,6 +3143,7 @@ export function App({
 				if (currentProvider === "ollama") {
 					const router = getTaskRouter();
 					const _changes = await router.autoAssign();
+					if (cancelled) return;
 					// If current model is empty, use whatever autoAssign found
 					if (!currentModel) {
 						const cfg = router.getConfig();
@@ -3120,8 +3179,22 @@ export function App({
 						runtime: _cfg?.runtime,
 					};
 					if (canReuseTabAgent(_built, { model: currentModel, runtime: _wantRuntime })) {
+						// After a hosted turn could not reach the provider, a reused
+						// agent is checked again rather than taken on trust (#3290).
+						if (turnErrorRef.current?.provider === currentProvider) {
+							const check = await withTimeout(_existing.readiness(), PROBE_TIMEOUT_MS * 2, {
+								ok: false,
+							});
+							if (cancelled) return;
+							if (!check.ok) {
+								waiting(`${currentProvider} ${check.reason ?? "did not report ready."}`);
+								retryLater();
+								return;
+							}
+						}
 						setAgent(_existing);
 						setAgentReady(true);
+						built();
 						return;
 					}
 					perTabAgents.removeTabAgent(_initTabId);
@@ -3139,6 +3212,7 @@ export function App({
 				if (_plan.kind === "wait") {
 					setAgent(null);
 					setAgentReady(false);
+					waiting(_plan.notice);
 					notify(_initTabId, _plan.notice);
 					retryLater();
 					return;
@@ -3168,12 +3242,13 @@ export function App({
 				});
 				builtSpecRef.current.set(newAgent, { model: currentModel, runtime });
 				// Belt and braces: the client's own check has no bound, so cap it.
-				const _readyOuter = await withTimeout(newAgent.isReady(), PROBE_TIMEOUT_MS * 2, false);
+				const _check = await withTimeout(newAgent.readiness(), PROBE_TIMEOUT_MS * 2, { ok: false });
 				if (cancelled) return;
-				if (_readyOuter) {
+				if (_check.ok) {
 					perTabAgents.setAgent(_initTabId, newAgent);
 					setAgent(newAgent);
 					setAgentReady(true);
+					built();
 					try {
 						const loraDir = require("node:path").join(
 							require("node:os").homedir(),
@@ -3201,6 +3276,7 @@ export function App({
 				} else {
 					setAgent(null);
 					setAgentReady(false);
+					waiting(`${currentProvider} ${_check.reason ?? "did not report ready."}`);
 					retryLater();
 					notify(
 						_initTabId,
@@ -3209,6 +3285,7 @@ export function App({
 				}
 			} catch (err) {
 				setAgentReady(false);
+				waiting(`${currentProvider} failed to start.`);
 				console.error("Agent init error:", err);
 				retryLater();
 			}
@@ -7271,6 +7348,20 @@ export function App({
 		routed: agent ? routedModelRef.current.get(agent) : undefined,
 	});
 	const shownProvider = shownModel.provider;
+	// One answer to "can this tab run a turn?", re-derived from live facts on
+	// every render. The NOW strip and the NO MODEL card both read it, so they
+	// cannot disagree, and neither says READY or names a model when it is not
+	// (#3290).
+	const readiness = deriveReadiness({
+		provider: currentProvider,
+		model: shownModel.ran,
+		firstProbeLanded: providerHealth.checked,
+		engines: providerHealth.engines,
+		keyStatus: providerKeyState,
+		unreachable: unreachableNote,
+		build: buildResultFor(buildFact, readinessBuildKey(activeTabId, currentProvider, currentModel)),
+		turnError,
+	});
 	const providerRows = deriveProviders({
 		primary: currentModel
 			? { name: `${shownProvider}:${shownModel.ran}`, asked: shownModel.asked }
@@ -7362,7 +7453,7 @@ export function App({
 														: "Researching"
 									}
 									activeStep={activeTool || (isProcessing ? "thinking..." : "idle")}
-									route={shownModel.ran || "-"}
+									route={readiness.model || "-"}
 									routeAsked={shownModel.asked}
 									tokens={tokenStr}
 									contextPct={contextPct}
@@ -7374,15 +7465,12 @@ export function App({
 									lastTurnSuccess={lastTurnSuccess}
 									animate={showAnimations}
 									width={chatWidth}
+									readiness={readiness}
 								/>
 							)}
 
 							<NoProviderNotice
-								checked={providerHealth.checked}
-								liveLocal={providerHealth.live}
-								provider={currentProvider}
-								keyStatus={providerKeyState}
-								unreachable={unreachableNote}
+								readiness={readiness}
 								compact={viewport.height < COMPACT_BELOW_ROWS}
 							/>
 
