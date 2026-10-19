@@ -18,6 +18,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resolveManifestFsScopes } from "./capability-manifest.js";
+import { policyScratchDir, scratchDirPath } from "./session-scratch.js";
 
 // ============================================
 // Types
@@ -221,29 +222,29 @@ export function seatbeltSpecForTool(
 // ============================================
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
-const SCRATCH_PREFIX = "8gent-scratch-";
 
-function scratchPath(sessionId: string): string {
+function checkSessionId(sessionId: string): void {
 	if (!SESSION_ID_PATTERN.test(sessionId)) {
 		throw new Error(
 			`seatbelt: invalid session id "${sessionId}" (allowed: letters, digits, ".", "_", "-")`,
 		);
 	}
-	return path.join(os.tmpdir(), `${SCRATCH_PREFIX}${sessionId}`);
 }
 
 /**
- * Create (or reuse) the scratch dir for a session. Exec tools in the same
- * session share it across calls; it survives until the session is destroyed,
- * unlike the per-run temp dirs of the tempdir layer.
+ * Create (or reuse) the scratch dir for a session. Same verified 0700 dir the
+ * policy engine allows (session-scratch.ts), so the sandbox work dir and the
+ * policy agree. Exec tools in the same session share it across calls.
  */
 export function sessionScratchDir(sessionId: string): string {
-	const dir = scratchPath(sessionId);
-	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	checkSessionId(sessionId);
+	const dir = policyScratchDir(sessionId);
+	if (!dir) throw new Error("seatbelt: session scratch dir failed verification");
 	return dir;
 }
 
 /** Remove a session's scratch dir and everything in it. */
 export function destroySessionScratch(sessionId: string): void {
-	fs.rmSync(scratchPath(sessionId), { recursive: true, force: true });
+	checkSessionId(sessionId);
+	fs.rmSync(scratchDirPath(sessionId), { recursive: true, force: true });
 }

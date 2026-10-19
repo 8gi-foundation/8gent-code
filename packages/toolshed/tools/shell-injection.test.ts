@@ -5,9 +5,10 @@
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { evaluatePolicy } from "../../permissions/policy-engine";
 import type { ExecutionContext } from "../../types";
 import { getTool } from "../registry/register";
 import { isPlainArg } from "./execution/execution-tools";
@@ -146,5 +147,32 @@ describe("find_files and search_code", () => {
 	test("ordinary searches still work", async () => {
 		expect((await run("find_files", { pattern: "**/*.ts" })).files).toContain("./a.ts");
 		expect((await run("search_code", { pattern: "hel+o" })).count).toBe(1);
+	});
+});
+
+describe("run output overflow (#4488)", () => {
+	test("the saved full-output file sits in the session scratch dir and policy lets the model read it", async () => {
+		const data = mkdtempSync(join(tmpdir(), "overflow-data-"));
+		const saved = process.env.EIGHT_DATA_DIR;
+		process.env.EIGHT_DATA_DIR = data;
+		try {
+			const out = await run("run", { command: "seq 1 500" });
+			const text = typeof out === "string" ? out : JSON.stringify(out);
+			const m = text.match(/Full output: (\S+\.txt)/);
+			expect(m).not.toBeNull();
+			const file = (m as RegExpMatchArray)[1];
+			expect(existsSync(file)).toBe(true);
+			expect(file.startsWith(join(realpathSync(data), "scratch"))).toBe(true);
+			const d = await evaluatePolicy("read_file", {
+				path: file,
+				workspaceRoot: dir,
+				sessionId: "t",
+			} as never);
+			expect("reason" in d ? d.reason : "").not.toContain("[workspace-boundary]");
+		} finally {
+			if (saved === undefined) delete process.env.EIGHT_DATA_DIR;
+			else process.env.EIGHT_DATA_DIR = saved;
+			rmSync(data, { recursive: true, force: true });
+		}
 	});
 });

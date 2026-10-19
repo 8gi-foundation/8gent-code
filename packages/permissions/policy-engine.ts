@@ -23,6 +23,7 @@ import {
 	validatePath,
 } from "./path-guard.js";
 import { hasSecret } from "./secret-detector.js";
+import { policyScratchDir } from "./session-scratch.js";
 import { checkCommandBoundary, checkFilePathBoundary } from "./src/workspace-boundary.js";
 import type {
 	PolicyActionType,
@@ -610,37 +611,13 @@ function resolveWorkspaceRoot(context: PolicyContext): string | null {
 	return null;
 }
 
-/**
- * Per-session scratch directory: `<data dir>/scratch/<session id or pid>`.
- * Replaces the shared, world-writable os.tmpdir() as the default writable
- * location outside the workspace (#4488). Created lazily with mode 0700 and
- * resolved once per session key, so the policy and the tools agree on it.
- */
-const scratchDirCache = new Map<string, string>();
-
-export function sessionScratchDir(sessionId?: unknown): string {
-	const raw = typeof sessionId === "string" && sessionId ? sessionId : String(process.pid);
-	const key = raw.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64) || String(process.pid);
-	const base = path.join(
-		process.env.EIGHT_DATA_DIR || path.join(resolveHome(), ".8gent"),
-		"scratch",
-	);
-	const cacheKey = `${base}|${key}`;
-	const cached = scratchDirCache.get(cacheKey);
-	if (cached) return cached;
-	const dir = path.join(base, key);
-	try {
-		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-	} catch {
-		// Not creatable: the prefix simply matches nothing useful; policy stays closed.
-	}
-	scratchDirCache.set(cacheKey, dir);
-	return dir;
-}
+export { policyScratchDir } from "./session-scratch.js";
 
 function resolveAllowedPrefixes(context: PolicyContext): string[] {
 	const fromContext = context.allowedAbsolutePrefixes;
-	const base = [...DEFAULT_ALLOWED_PREFIXES, sessionScratchDir(context.sessionId)];
+	// Null (unverifiable scratch dir) leaves the prefix out: fail closed.
+	const scratch = policyScratchDir(context.sessionId);
+	const base = scratch ? [...DEFAULT_ALLOWED_PREFIXES, scratch] : [...DEFAULT_ALLOWED_PREFIXES];
 	if (Array.isArray(fromContext)) {
 		return [...base, ...fromContext.filter((s) => typeof s === "string")];
 	}

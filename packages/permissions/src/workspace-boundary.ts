@@ -147,10 +147,9 @@ function isConfined(
 ): boolean {
 	const flavor = pathFor(platform);
 	for (const prefix of prefixes ?? []) {
-		// Realpath the prefix when it exists so a symlinked prefix (macOS /var ->
-		// /private/var) compares like the realpath'd candidate; resolveSafe falls
-		// back to path.resolve when the prefix does not exist yet.
-		if (isPathWithin(resolved, resolveSafe(prefix, workspaceRoot, platform), platform)) return true;
+		// Prefixes are NOT realpath'd: a prefix that is itself a symlink must not pull
+		// its target into the allow-list.
+		if (isPathWithin(resolved, flavor.resolve(prefix), platform)) return true;
 	}
 	return isWithinWorkspace(resolved, workspaceRoot, platform);
 }
