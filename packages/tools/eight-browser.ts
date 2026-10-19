@@ -1335,6 +1335,24 @@ function names8gentDir(lower: string): boolean {
 	return false;
 }
 
+/**
+ * True when a token that holds .8gent, from its .8gent on, carries a wildcard, a parameter expansion, a
+ * real brace group ({a,b}, {1..3}, or an unclosed {) or the words token, control or profile. Only those
+ * tokens count: a [ ] or $ or the word "control" in a LATER, unrelated token (a python one-liner's
+ * d['train'] after cd ~/.8gent/rishi-pilot/runs/x/work) is not a path under .8gent (#4432).
+ */
+function tokenReaches8gentState(lower: string): boolean {
+	for (const tok of shellTokens(lower)) {
+		const at = tok.indexOf(".8gent");
+		if (at < 0) continue;
+		const tail = tok.slice(at);
+		if (/[*?[$]|token|control|profile/.test(tail)) return true;
+		const open = tail.indexOf("{");
+		if (open >= 0 && (!tail.includes("}", open) || /\{[^}]*(,|\.\.)/.test(tail))) return true;
+	}
+	return false;
+}
+
 /** True when `command` looks like it reads or lists the 8gent Browser token or profile dirs. */
 export function touchesBrowserSecrets(command: string): boolean {
 	const lists =
@@ -1348,8 +1366,7 @@ export function touchesBrowserSecrets(command: string): boolean {
 		if (/browser-(control|profiles|history|shots|[*?[{$])/.test(lower)) return true;
 		const at = lower.indexOf(".8gent");
 		if (at >= 0) {
-			if (/[*?[{$]|token|control|profile/.test(lower.slice(at)) || browserUnder8gent(lower))
-				return true;
+			if (tokenReaches8gentState(lower) || browserUnder8gent(lower)) return true;
 			// A listing is refused when it is of .8gent itself or a browser-* child, not of any path under it.
 			if (lists && names8gentDir(lower)) return true;
 		}
