@@ -18,12 +18,14 @@
 # (makensis on macOS/Linux takes -D; the Windows build takes /D.)
 #
 # DISPATCH REBUILD (#4468): dispatching with `tag` rebuilds that tag's code with
-# this workflow file. Run from main, the build provenance names refs/heads/main,
-# and scripts/install.sh and install.ps1 verify --source-ref refs/tags/vX, so
-# those binaries are NOT installable through the one-line installer. That path
-# is for diagnosis and smoke only. To ship a tag whose binaries failed, merge
-# the fix and cut the next patch release from main (v0.20.1 therefore ships as
-# v0.20.2).
+# this workflow file, and runs build, attest and both smoke jobs only. The
+# release, install-smoke and alarm jobs do not run on a dispatch (they are
+# gated on a refs/tags/v* ref): a dispatch from main carries build provenance
+# naming refs/heads/main, and scripts/install.sh and install.ps1 verify
+# --source-ref refs/tags/vX, so those binaries must never be attached or
+# published. This path is for diagnosis and smoke only. To ship a tag whose
+# binaries failed, merge the fix and cut the next patch release from main
+# (v0.20.1 therefore ships as v0.20.2).
 #
 # SIGNING: opt-in and skip-if-absent. With no secrets set, unsigned artifacts
 # are produced (they run, but trigger OS trust prompts). macOS codesigning with
@@ -43,7 +45,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'existing v* tag to rebuild from this workflow file; empty = github.ref_name. Diagnosis and smoke only when dispatched from main: provenance names refs/heads/main, so the one-line installer rejects these binaries'
+        description: 'existing v* tag to rebuild from this workflow file; empty = github.ref_name. Diagnosis and smoke only: a dispatch builds and smoke-tests but never attaches or publishes, because provenance would name refs/heads/main and the one-line installer rejects it'
         required: false
         type: string
 
@@ -304,7 +306,7 @@ jobs:
     name: Attach to GitHub Release
     needs: [build, attest, smoke-windows, smoke-linux]
     runs-on: ubuntu-latest
-    if: inputs.tag != '' || startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
@@ -418,7 +420,7 @@ jobs:
     needs: [build, attest, smoke-windows, smoke-linux, release, install-smoke]
     # Only a release tag raises the alarm; a dispatched dry run on a branch
     # reports its failure in the run itself.
-    if: failure() && (inputs.tag != '' || startsWith(github.ref, 'refs/tags/v'))
+    if: failure() && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
