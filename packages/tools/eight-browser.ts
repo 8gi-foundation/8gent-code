@@ -1392,6 +1392,9 @@ export function touchesBrowserSecrets(command: string): boolean {
 		if (/browser-(control|profiles|history|shots|[*?[{$])/.test(lower)) return true;
 		const at = lower.indexOf(".8gent");
 		if (at >= 0) {
+			// A backtick substitution is stripped from `flat`, so it is read from the raw view: it can climb
+			// out of the literal path like $( ) does, and takes the same whole-tail rule (#4434).
+			if (view.includes("`") && /[*?[{$]|token|control|profile/.test(lower.slice(at))) return true;
 			if (tokenReaches8gentState(lower) || browserUnder8gent(lower)) return true;
 			// A listing is refused when it is of .8gent itself or a browser-* child, not of any path under it.
 			if (lists && names8gentDir(lower)) return true;

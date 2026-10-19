@@ -164,3 +164,14 @@ describe("pre-spawn backstop: climbing out without .. (#4434, Karen)", () => {
 		expect(preSpawnRefusal(`cd ${PILOT_WORK} && ls -la && cat task.json`, WORK)).toBeNull();
 	});
 });
+
+describe("pre-spawn backstop: backtick substitution climbs (#4434)", () => {
+	test("a backtick dirname of pwd, bare or quoted, is denied", () => {
+		for (const cmd of [
+			"cd ~/.8gent/rishi-pilot && cd `dirname \\`pwd\\`` && cat *",
+			"cd ~/.8gent/rishi-pilot && cat `dirname \\`pwd\\``/*",
+			'cd ~/.8gent/rishi-pilot && cd "`dirname \\`pwd\\``" && cat *',
+		])
+			expect(preSpawnRefusal(cmd, WORK), cmd).toContain(DENIED);
+	});
+});
