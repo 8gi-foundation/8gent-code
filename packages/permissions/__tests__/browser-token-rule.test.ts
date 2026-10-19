@@ -44,7 +44,6 @@ describe("pre-spawn backstop: a work dir under ~/.8gent is not browser state (#4
 			`ls ${PILOT_WORK}`,
 			`cat ${PILOT_WORK}/task.json | grep control`,
 			`cat ${PILOT_WORK}/task.json | python3 -c "import sys; print(sys.stdin.read()[:10])"`,
-			`cd ${PILOT_WORK} && echo "$HOME" && python3 solve.py`,
 			`python3 -c "print(f'{1+1}')" ${PILOT_WORK}/task.json`,
 			"cat ~/.8gent/memory/notes.md",
 		])
@@ -135,5 +134,33 @@ describe("pre-spawn backstop: a .. climb from a deeper .8gent dir (#4434, Karen)
 		expect(
 			preSpawnRefusal("cd ~/.8gent/rishi-pilot/runs/x/work && cat ../task.json", WORK),
 		).toBeNull();
+	});
+});
+
+describe("pre-spawn backstop: climbing out without .. (#4434, Karen)", () => {
+	test("a second directory change, or a substituted cd target, is denied", () => {
+		for (const cmd of [
+			"cd ~/.8gent/rishi-pilot && cd $(dirname $PWD) && cat *",
+			'cd ~/.8gent/rishi-pilot && cd "$(dirname $PWD)" && cat *',
+			"cd ~/.8gent/rishi-pilot && cd ${PWD%/*} && cat *",
+			"cd ~/.8gent/rishi-pilot && cd - && cat *",
+			"cd ~/.8gent/rishi-pilot && pushd . && popd && cat *",
+			"cd ~/.8gent/rishi-pilot && cd ~/x && cd ~/.8gent && cat *",
+			"cd ~/.8gent/rishi-pilot && cat ~-/*",
+			'cd ~/.8gent/rishi-pilot && cat "$OLDPWD"/*',
+			"cd ~/.8gent/rishi-pilot && cat $(dirname $PWD)/*",
+			"cd ~/.8gent/rishi-pilot && cat $(dirname $PWD)/brow$x-control.token",
+			"cd ~/.8gent/rishi-pilot && cd $(dirname $PWD) && cat */*/Cookies",
+			"cd ~/.8gent/rishi-pilot && cd ~- && cat brow$x-control.token",
+		])
+			expect(preSpawnRefusal(cmd, WORK), cmd).toContain(DENIED);
+	});
+
+	test("a work dir command that uses $HOME is a false refusal we accept", () => {
+		expect(preSpawnRefusal(`cd ${PILOT_WORK} && echo $HOME`, WORK), "x").toContain(DENIED);
+	});
+
+	test("one cd with a literal work-dir target still passes", () => {
+		expect(preSpawnRefusal(`cd ${PILOT_WORK} && ls -la && cat task.json`, WORK)).toBeNull();
 	});
 });

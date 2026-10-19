@@ -1336,6 +1336,17 @@ function names8gentDir(lower: string): boolean {
 }
 
 /**
+ * Anything that lets a later relative name escape the literal .8gent path (#4434): a $ (a
+ * substitution, $PWD, $OLDPWD, ${..}), ~- (the previous directory), cd - or pushd -, popd, or a
+ * second directory change. Quotes and backticks are already stripped by the caller. The pilot work-dir
+ * command has none of these, so it keeps the per-token narrowing; `cd <work dir> && echo $HOME` is a
+ * false refusal we accept.
+ */
+function escapesLiteralPath(lower: string): boolean {
+	return /\$|~-|\bpopd\b|\b(?:cd|pushd)\s+-(?:\s|$)/.test(lower);
+}
+
+/**
  * True when a token that holds .8gent, from its .8gent on, carries a wildcard, a parameter expansion, a
  * real brace group ({a,b}, {1..3}, or an unclosed {) or the words token, control or profile. Only those
  * tokens count: a [ ] or $ or the word "control" in a LATER, unrelated token (a python one-liner's
@@ -1349,6 +1360,7 @@ function tokenReaches8gentState(lower: string): boolean {
 	// A `..` segment anywhere (cat ../*, cd ..) can climb from a deeper dir to the state dir with a
 	// relative name no token shows, so it takes the same strict path.
 	if (
+		escapesLiteralPath(lower) ||
 		shellTokens(lower).some(
 			(t) =>
 				/(^|[/\\])\.\.([/\\]|$)/.test(t) ||
