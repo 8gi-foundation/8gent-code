@@ -24,6 +24,7 @@ let home: string;
 let repo: string;
 let server: ReturnType<typeof Bun.serve>;
 let bodies: string[] = [];
+let modelDelayMs = 0;
 let script: (call: number, body: string) => string = () => "ok";
 
 const toolCall = (name: string, args: Record<string, unknown>) =>
@@ -45,6 +46,7 @@ beforeAll(async () => {
 		async fetch(req) {
 			if (req.method !== "POST") return Response.json({ models: [], data: [] });
 			const body = JSON.stringify(await req.json());
+			if (modelDelayMs > 0) await Bun.sleep(modelDelayMs);
 			bodies.push(body);
 			return Response.json({
 				id: "c1",
@@ -129,5 +131,40 @@ describe("#4431 the TUI text-tool path gets the turn-budget notice", () => {
 		}
 		expect(bodies.length).toBeGreaterThanOrEqual(4);
 		expect(noticeCount()).toBe(0);
+	}, 30_000);
+
+	// Live pilot 2026-10-19 (sigi-dev-arc1-b): model steps of 190-410 s under a 1500 s budget. The
+	// notice fired at a boundary past 95%, with no step left to answer it. Same shape, scaled down:
+	// 800 ms model steps under a 3000 ms budget. The write must land inside the budget.
+	test("slow model steps: the notice fires early enough for a step to answer it", async () => {
+		bodies = [];
+		modelDelayMs = 800;
+		process.env.EIGHT_TURN_BUDGET_MS = "3000";
+		const out = join(repo, "answer-slow.json");
+		let wrote = false;
+		script = (_n, body) => {
+			if (wrote) return "DONE: wrote answer-slow.json";
+			if (body.includes("TIME BUDGET")) {
+				wrote = true;
+				return toolCall("write_file", { path: out, content: "[[2]]" });
+			}
+			return toolCall("run_command", { command: "true" });
+		};
+		const t0 = Date.now();
+		let writtenAt = Number.POSITIVE_INFINITY;
+		const poll = setInterval(() => {
+			if (existsSync(out) && writtenAt === Number.POSITIVE_INFINITY) writtenAt = Date.now();
+		}, 20);
+		try {
+			await build().chat(PROMPT);
+		} finally {
+			clearInterval(poll);
+			modelDelayMs = 0;
+			process.env.EIGHT_TURN_BUDGET_MS = ENV.EIGHT_TURN_BUDGET_MS;
+		}
+		expect(existsSync(out)).toBe(true);
+		// the write must land inside the 3000 ms budget, not merely before the turn ends
+		expect(writtenAt - t0).toBeLessThan(3000);
+		expect(bodies.findIndex((b) => b.includes("TIME BUDGET"))).toBeGreaterThan(0);
 	}, 30_000);
 });

@@ -36,14 +36,52 @@ describe("createBudgetDrain", () => {
 		expect(off()).toEqual([]);
 	});
 
-	it("fires early when the slowest step would not fit in the remaining time", async () => {
+	it("fires early when the slowest step plus one reaction step would not fit", async () => {
 		let t = 0;
 		const step = createBudgetDrain({ budgetMs: 1000, now: () => t });
 		step();
-		t = 400; // one 400 ms step, 40% elapsed: another would still fit
+		t = 200; // one 200 ms step, 20% elapsed: two more still fit (200 + 400 < 95%)
 		expect(step()).toEqual([]);
-		t = 600; // 60% elapsed, below the 80% line, but 600 + 400 >= 95%
+		t = 500; // 50% elapsed, below the 80% line, but 500 + 2*300 >= 95%
 		expect(step().length).toBe(1);
+	});
+
+	// #4431 follow-up: the live pilot (sigi-dev-arc1-b, 2026-10-19) took 190-410 s model steps under a
+	// 1500 s budget. The old "elapsed + longest >= 95%" line missed the 1030 s boundary by 8 s and the
+	// notice only fired at 1446 s, 54 s before the kill, too late for any step to answer it.
+	it("replays the live pilot step boundaries: the notice lands with a full step to spare", () => {
+		const hms = (x: string) => {
+			const [h, m, s] = x.split(":").map(Number);
+			return ((h * 60 + m) * 60 + s) * 1000;
+		};
+		const start = hms("02:12:20");
+		const boundaries = [
+			"02:14:18",
+			"02:15:37",
+			"02:15:53",
+			"02:16:00",
+			"02:22:23",
+			"02:24:08",
+			"02:24:14",
+			"02:27:22",
+			"02:27:26",
+			"02:29:30",
+			"02:29:34",
+			"02:36:26",
+		];
+		let t = start;
+		const drain = createBudgetDrain({ budgetMs: 1_500_000, startedAt: start, now: () => t });
+		let firedAt = -1;
+		for (const b of boundaries) {
+			t = hms(b);
+			if (drain().length > 0) {
+				firedAt = (t - start) / 1000;
+				break;
+			}
+		}
+		expect(firedAt).toBeGreaterThan(0);
+		// the slowest step was 382 s: at least one such step must remain after the notice
+		expect(1500 - firedAt).toBeGreaterThanOrEqual(382);
 	});
 });
 
