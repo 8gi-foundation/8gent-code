@@ -31,7 +31,9 @@ type Dialect = "cmd" | "posix" | "pwsh";
  * default (win32 = cmd.exe, anything else = POSIX).
  */
 function dialectFor(platform: NodeJS.Platform, kind?: ShellKind | "posix"): Dialect {
-	const k = kind ?? (platform === process.platform ? activeShellKind() : platform === "win32" ? "cmd" : "posix");
+	const k =
+		kind ??
+		(platform === process.platform ? activeShellKind() : platform === "win32" ? "cmd" : "posix");
 	return k === "cmd" ? "cmd" : k === "powershell" ? "pwsh" : "posix";
 }
 
@@ -51,7 +53,11 @@ const PROCESS_SUBSTITUTION_REASON = "Process substitution <(...) and >(...) is n
  *  - cmd.exe: only ".." quotes, `^` escapes, a quote of any kind never hides CR/LF.
  *  - PowerShell: '..' and ".." quote, no backslash escape (backtick is refused earlier).
  */
-function walk(command: string, d: Dialect, visit: (ch: string, i: number) => Finding | null): Finding | null {
+function walk(
+	command: string,
+	d: Dialect,
+	visit: (ch: string, i: number) => Finding | null,
+): Finding | null {
 	if (d === "cmd" && /[\r\n]/.test(command)) return "newline";
 	let inSingle = false;
 	let inDouble = false;
@@ -106,16 +112,18 @@ export function hasUnquotedAmpersand(
 	kind?: ShellKind | "posix",
 ): boolean {
 	const d = dialectFor(platform, kind);
-	return walk(command, d, (ch, i) => {
-		if (ch !== "&") return null;
-		const prev = command[i - 1];
-		const next = command[i + 1];
-		if (next === "&") return null; // `&&`: its own rule (skipping the pair is below)
-		if (prev === "&") return null;
-		if (prev === ">" || prev === "<") return null;
-		if (d !== "cmd" && d !== "pwsh" && next === ">") return null; // &>file (bash)
-		return "amp";
-	}) === "amp";
+	return (
+		walk(command, d, (ch, i) => {
+			if (ch !== "&") return null;
+			const prev = command[i - 1];
+			const next = command[i + 1];
+			if (next === "&") return null; // `&&`: its own rule (skipping the pair is below)
+			if (prev === "&") return null;
+			if (prev === ">" || prev === "<") return null;
+			if (d !== "cmd" && d !== "pwsh" && next === ">") return null; // &>file (bash)
+			return "amp";
+		}) === "amp"
+	);
 }
 
 /**
@@ -138,7 +146,8 @@ export function hasUnquotedSemicolon(
  */
 function scanSemicolon(command: string, d: Dialect): "semicolon" | "dollar-quote" | null {
 	const f = walk(command, d, (ch, i) => {
-		if (d === "posix" && ch === "$" && (command[i + 1] === "'" || command[i + 1] === '"')) return "dollar-quote";
+		if (d === "posix" && ch === "$" && (command[i + 1] === "'" || command[i + 1] === '"'))
+			return "dollar-quote";
 		return ch === ";" ? "semicolon" : null;
 	});
 	return f === "semicolon" || f === "dollar-quote" ? f : null;
@@ -158,7 +167,29 @@ function scanPwshConstructs(command: string): boolean {
 }
 
 const NEWLINE_REASON =
-	"A new line outside quotes starts another command. Use separate run_command calls, or put the steps in a script file and run it with bash <file>";
+	"Write the file alone: cat > .tmp/x.py << 'EOF' then the lines then EOF, and run it in a separate run_command call (no cd/&&, nothing after EOF). A new line outside quotes starts another command";
+
+const HEREDOC_FORM_REASON =
+	"Use exactly: cat > .tmp/x.py << 'EOF' then the lines then EOF. The delimiter must be quoted and the target a relative path inside the project (no .., no leading /). A heredoc into a shell or interpreter is not allowed";
+
+/** A relative project path: no leading / or ~, no .. segment, no expansion, quote, glob or space characters. */
+const PROJECT_REL_PATH =
+	/^(?!~)(?!\/)(?:(?!\.\.(?:\/|$))[A-Za-z0-9_.@+=,-]+\/)*(?!\.\.$)[A-Za-z0-9_.@+=,-]+$/;
+
+/**
+ * The only heredoc form accepted: `cat > PATH << 'WORD'` or `cat << 'WORD' > PATH`
+ * (also `>>` and `<<-`), delimiter quoted so the body is never expanded, PATH
+ * relative and inside the project. Anything else (a shell or interpreter reading
+ * the body, a pipe, a second redirect) is refused.
+ */
+function isQuotedHeredocFileWrite(head: string, word: string): boolean {
+	const h = head.trim();
+	const marker = `<<-?\\s*(?<q>['"])${word}\\k<q>`;
+	const a = new RegExp(`^cat\\s+>>?\\s*(\\S+)\\s+${marker}$`).exec(h);
+	const b = new RegExp(`^cat\\s+${marker}\\s+>>?\\s*(\\S+)$`).exec(h);
+	const target = a ? a[1] : b ? b[2] : null;
+	return target !== null && PROJECT_REL_PATH.test(target);
+}
 
 const HEREDOC_REASON =
 	"A heredoc needs its closing line after the body, so it cannot be checked. Put the text in a file instead";
@@ -247,11 +278,24 @@ function scanQuotes(command: string): QuoteScan {
 		}
 		// Unquoted, a backslash always takes the next character (bash).
 		if (ch === "\\") escapedAt = i + 1;
-		if (ch === "\\" && (command[i + 1] === '"' || command[i + 1] === "'" || command[i + 1] === "\\" || command[i + 1] === ";")) {
+		if (
+			ch === "\\" &&
+			(command[i + 1] === '"' ||
+				command[i + 1] === "'" ||
+				command[i + 1] === "\\" ||
+				command[i + 1] === ";")
+		) {
 			i++;
 			continue;
 		}
-		if (ch === "<" && !heredoc && command[i + 1] === "<" && command[i - 1] !== "<" && command[i + 2] !== "<" && escapedAt !== i) {
+		if (
+			ch === "<" &&
+			!heredoc &&
+			command[i + 1] === "<" &&
+			command[i - 1] !== "<" &&
+			command[i + 2] !== "<" &&
+			escapedAt !== i
+		) {
 			const m = /^<<(-?)\s*(['"]?)([A-Za-z_]\w*)\2/.exec(command.slice(i));
 			if (m) heredoc = { word: m[3], dash: m[1] === "-" };
 		}
@@ -264,11 +308,20 @@ function scanQuotes(command: string): QuoteScan {
 			outside += ch;
 			continue;
 		}
-		if (ch === "#" && (i === 0 || (escapedAt !== i - 1 && /\s/.test(command[i - 1]))) && /['"\n\r]/.test(command.slice(i))) commentAmbiguous = true;
+		if (
+			ch === "#" &&
+			(i === 0 || (escapedAt !== i - 1 && /\s/.test(command[i - 1]))) &&
+			/['"\n\r]/.test(command.slice(i))
+		)
+			commentAmbiguous = true;
 		if (ch === "\\" && command[i + 1] === "$") escapedDollarAt = i + 1;
-		if ((ch === "'" || ch === '"') && command[i - 1] === "$" && escapedDollarAt !== i - 1) dollarQuote = true;
+		if ((ch === "'" || ch === '"') && command[i - 1] === "$" && escapedDollarAt !== i - 1)
+			dollarQuote = true;
 		if (ch === "'") {
-			mode = command[i - 1] === "$" && command[i - 2] !== "$" && command[i - 2] !== "\\" ? "ansi" : "single";
+			mode =
+				command[i - 1] === "$" && command[i - 2] !== "$" && command[i - 2] !== "\\"
+					? "ansi"
+					: "single";
 			outside += ch;
 			continue;
 		}
@@ -279,7 +332,17 @@ function scanQuotes(command: string): QuoteScan {
 		}
 		outside += ch;
 	}
-	return { balanced: mode === "none", outside, doubled, ansiEscape, dollarQuote, commentAmbiguous, lineBreak, heredoc, headEnd };
+	return {
+		balanced: mode === "none",
+		outside,
+		doubled,
+		ansiEscape,
+		dollarQuote,
+		commentAmbiguous,
+		lineBreak,
+		heredoc,
+		headEnd,
+	};
 }
 
 /**
@@ -301,7 +364,9 @@ export function sanitizeShellCommand(
 	// Encoded and expansion-trick forms hide the real command from every later check (8SO).
 	const hidden = refuseHiddenCommand(command, d);
 	if (hidden) return hidden;
-	return d === "posix" ? sanitizePosix(command, platform, kind) : sanitizeStrict(command, d, platform, kind);
+	return d === "posix"
+		? sanitizePosix(command, platform, kind)
+		: sanitizeStrict(command, d, platform, kind);
 }
 
 const ENCODED_COMMAND = "encodedcommand";
@@ -369,7 +434,11 @@ function refuseHiddenCommand(command: string, d: Dialect): ShellSanitizeResult |
 	return null;
 }
 
-function sanitizePosix(command: string, platform: NodeJS.Platform, kind?: ShellKind | "posix"): ShellSanitizeResult {
+function sanitizePosix(
+	command: string,
+	platform: NodeJS.Platform,
+	kind?: ShellKind | "posix",
+): ShellSanitizeResult {
 	// Text inside quotes is data (#3879).
 	const scan = scanQuotes(command);
 	if (!scan.balanced) {
@@ -382,13 +451,15 @@ function sanitizePosix(command: string, platform: NodeJS.Platform, kind?: ShellK
 	if (scan.ansiEscape) {
 		return {
 			safe: false,
-			reason: "A $'...' string with a backslash cannot be checked. Use plain quotes, or put the text in a file",
+			reason:
+				"A $'...' string with a backslash cannot be checked. Use plain quotes, or put the text in a file",
 		};
 	}
 	if (scan.commentAmbiguous) {
 		return {
 			safe: false,
-			reason: "A # followed by a quote mark or new line cannot be checked. Remove the comment, or put the steps in a script file",
+			reason:
+				"A # followed by a quote mark or new line cannot be checked. Remove the comment, or put the steps in a script file",
 		};
 	}
 	if (scan.lineBreak) {
@@ -411,9 +482,20 @@ function sanitizePosix(command: string, platform: NodeJS.Platform, kind?: ShellK
 		// terminator line, and nothing may follow that line: that would be another command.
 		const lines = command.slice(scan.headEnd + 1).split("\n");
 		const word = scan.heredoc.word;
-		const end = scan.headEnd >= command.length ? -1 : lines.findIndex((l) => (scan.heredoc?.dash ? l.replace(/^\t+/, "") : l) === word);
+		if (!isQuotedHeredocFileWrite(command.slice(0, scan.headEnd), word))
+			return { safe: false, reason: HEREDOC_FORM_REASON };
+		const end =
+			scan.headEnd >= command.length
+				? -1
+				: lines.findIndex((l) => (scan.heredoc?.dash ? l.replace(/^\t+/, "") : l) === word);
 		if (end < 0) return { safe: false, reason: HEREDOC_REASON };
-		if (lines.slice(end + 1).join("\n").trim() !== "") return { safe: false, reason: NEWLINE_REASON };
+		if (
+			lines
+				.slice(end + 1)
+				.join("\n")
+				.trim() !== ""
+		)
+			return { safe: false, reason: NEWLINE_REASON };
 		body = `\n${lines.slice(0, end + 1).join("\n")}`;
 	}
 	const text = scan.outside + body;
@@ -510,14 +592,16 @@ function sanitizeStrict(
 	if (scanNewline(command, d)) {
 		return {
 			safe: false,
-			reason: "A line break starts a second command and is not allowed. Use separate run_command calls instead",
+			reason:
+				"A line break starts a second command and is not allowed. Use separate run_command calls instead",
 		};
 	}
 
 	// Block semicolon chaining: ; cmd. A `;` inside quotes is data, not a
 	// separator (e.g. magick -annotate 'a;b'), so only an unquoted one blocks.
 	// cmd.exe keeps the strict whole-line rule: a `;` blocks, quoted or not, unless `^`-escaped.
-	const semi = d === "cmd" ? (cmdHasSemicolon(command) ? "semicolon" : null) : scanSemicolon(command, d);
+	const semi =
+		d === "cmd" ? (cmdHasSemicolon(command) ? "semicolon" : null) : scanSemicolon(command, d);
 	if (semi === "dollar-quote") {
 		return {
 			safe: false,

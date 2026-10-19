@@ -16,7 +16,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentTools, setToolContext } from "../ai/tools";
 import { ToolExecutor } from "../eight/tools";
-import { hasUnquotedAmpersand as rawAmp, sanitizeShellCommand as rawSanitize } from "./shell-sanitizer";
+import {
+	hasUnquotedAmpersand as rawAmp,
+	sanitizeShellCommand as rawSanitize,
+} from "./shell-sanitizer";
 
 // A test that names platform "win32" means cmd.exe. On a real Windows host with Git Bash the
 // resolved shell is POSIX, so say "cmd" explicitly instead of leaning on the host.
@@ -267,9 +270,9 @@ describe("sanitizeShellCommand: quoted text is data (#3879)", () => {
 	});
 	test("heredocs: here-string is not a heredoc, a command after the terminator is checked", () => {
 		no("cat <<<x\ntouch y", "new line");
-		ok("cat <<'EOF'\nit's fine\nEOF");
-		no("cat <<'EOF'\nbody\nEOF\ntouch y", "new line");
-		ok("cat <<-EOF\n\tbody\n\tEOF");
+		ok("cat > .tmp/a.txt <<'EOF'\nit's fine\nEOF");
+		no("cat > .tmp/a.txt <<'EOF'\nbody\nEOF\ntouch y", "new line");
+		ok("cat > .tmp/a.txt <<-'EOF'\n\tbody\n\tEOF");
 	});
 	test("unbalanced quotes fail closed and say how to fix it", () => {
 		no("echo 'abc", "escape the apostrophe");
@@ -278,8 +281,8 @@ describe("sanitizeShellCommand: quoted text is data (#3879)", () => {
 		no("echo it's", "Unbalanced");
 	});
 	test("a heredoc body is not quote-scanned, but its text keeps the strict rules", () => {
-		ok("cat <<'EOF'\nit's fine\nEOF");
-		no("cat <<'EOF'\nrun; id\nEOF", "Semicolon");
+		ok("cat > .tmp/a.txt <<'EOF'\nit's fine\nEOF");
+		no("cat > .tmp/a.txt <<'EOF'\nrun; id\nEOF", "Semicolon");
 	});
 	// 8SO review of #3880 (MED-4): a heredoc marker inside quotes or a comment is not a heredoc.
 	test("a heredoc marker inside quotes or after # does not hide the next line", () => {
@@ -288,9 +291,9 @@ describe("sanitizeShellCommand: quoted text is data (#3879)", () => {
 		no("echo hi # <<EOF\ntouch PWN", "new line");
 	});
 	test("a heredoc without its closing line is refused", () => {
-		no("cat <<EOF\nbody only", "closing line");
-		no("cat <<EOF", "closing line");
-		ok("cat <<EOF\nbody\nEOF");
+		no("cat > .tmp/a.txt <<'EOF'\nbody only", "closing line");
+		no("cat > .tmp/a.txt <<'EOF'", "closing line");
+		ok("cat > .tmp/a.txt <<'EOF'\nbody\nEOF");
 	});
 	test("Windows keeps the strict whole-line rules", () => {
 		expect(sanitizeShellCommand('echo "a; b"', "win32").safe).toBe(false);
@@ -299,7 +302,9 @@ describe("sanitizeShellCommand: quoted text is data (#3879)", () => {
 
 describe("sanitizeShellCommand: semicolon inside quotes is data (media-brief-video)", () => {
 	test("quoted ; passes on POSIX (single, double, escaped)", () => {
-		expect(sanitizeShellCommand("magick xc:red -annotate +0+0 'a;b' out.png", "linux").safe).toBe(true);
+		expect(sanitizeShellCommand("magick xc:red -annotate +0+0 'a;b' out.png", "linux").safe).toBe(
+			true,
+		);
 		expect(sanitizeShellCommand('echo "a;b"', "linux").safe).toBe(true);
 		expect(sanitizeShellCommand("echo a\\;b", "linux").safe).toBe(true);
 		expect(sanitizeShellCommand("echo 'it\"s;ok'", "linux").safe).toBe(true);
@@ -445,8 +450,8 @@ describe("sanitizeShellCommand: process substitution is refused like command sub
 		no("echo \\<(id)");
 	});
 	test("a heredoc body is read like the line itself", () => {
-		no("cat <<EOF\n<(id)\nEOF");
-		no("cat <<EOF\nx >(id)\nEOF");
+		no("cat > .tmp/a <<'EOF'\n<(id)\nEOF");
+		no("cat > .tmp/a <<'EOF'\nx >(id)\nEOF");
 	});
 	test("the strict dialects refuse it anywhere, as they do $(", () => {
 		for (const kind of ["cmd", "powershell"] as const) {
@@ -460,13 +465,90 @@ describe("sanitizeShellCommand: process substitution is refused like command sub
 		ok("cat < in.txt");
 		ok("ls 2>&1");
 		ok("ls > out.txt 2>&1");
-		ok("cat <<EOF\nhello\nEOF");
+		ok("cat > .tmp/a <<'EOF'\nhello\nEOF");
 		ok("grep -o 'name=csrf value=[a-f0-9]*' page.html");
 		ok("echo done (x)");
 		ok("bun test packages/tools");
 	});
 	test("the $( and backtick messages are unchanged", () => {
-		expect(sanitizeShellCommand("echo $(id)", "linux").reason).toBe("Command substitution $(...) is not allowed");
-		expect(sanitizeShellCommand("echo `id`", "linux").reason).toBe("Command substitution via backticks is not allowed");
+		expect(sanitizeShellCommand("echo $(id)", "linux").reason).toBe(
+			"Command substitution $(...) is not allowed",
+		);
+		expect(sanitizeShellCommand("echo `id`", "linux").reason).toBe(
+			"Command substitution via backticks is not allowed",
+		);
+	});
+});
+
+describe("sanitizeShellCommand: quoted heredoc that only writes a project file (fix/heredoc-write-file)", () => {
+	const ok = (c: string) => expect(sanitizeShellCommand(c, "linux")).toEqual({ safe: true });
+	const no = (c: string, why?: string) => {
+		const r = sanitizeShellCommand(c, "linux");
+		expect(r.safe).toBe(false);
+		if (why) expect(r.reason).toContain(why);
+	};
+	const FORM = "cat > .tmp/x.py << 'EOF'";
+	const PY = "import json\nprint(json.dumps({'a': 1}))\n";
+
+	test("accepted: quoted delimiter, relative project path, both redirect orders, >> and <<-", () => {
+		ok(`cat > .tmp/explore.py << 'EOF'\n${PY}EOF`);
+		ok(`cat > .tmp/explore.py << "EOF"\n${PY}EOF`);
+		ok(`cat << 'EOF' > .tmp/explore.py\n${PY}EOF`);
+		ok(`cat >> notes/log.txt <<'EOF'\nline\nEOF`);
+		ok(`cat > x.py <<-'EOF'\n\tline\n\tEOF`);
+	});
+	test("an unquoted delimiter is refused", () => {
+		no("cat > .tmp/x.py << EOF\nx\nEOF", FORM);
+	});
+	test("a command after the closing delimiter is refused", () => {
+		no("cat > .tmp/x.py << 'EOF'\nx\nEOF\npython3 .tmp/x.py", "new line");
+		no("cat > .tmp/x.py << 'EOF'\nx\nEOF\nrm -rf y", "new line");
+	});
+	test("the 19 Oct pilot shape (cd && cat ... EOF, then a run line) is refused and the message leads with the form", () => {
+		const r = sanitizeShellCommand(
+			"cd /w/work && cat > .tmp/explore.py << 'EOF'\nprint(1)\nEOF\npython3 .tmp/explore.py",
+			"linux",
+		);
+		expect(r.safe).toBe(false);
+		expect(r.reason?.startsWith("Use exactly: cat > .tmp/x.py << 'EOF'")).toBe(true);
+	});
+	test("a heredoc into a shell or interpreter is refused", () => {
+		no("bash << 'EOF'\nrm -rf y\nEOF", FORM);
+		no("sh << 'EOF'\nrm -rf y\nEOF", FORM);
+		no("python3 - << 'EOF'\nimport os\nEOF", FORM);
+		no("python3 << 'EOF'\nimport os\nEOF", FORM);
+		no("cat << 'EOF' | bash\nid\nEOF", FORM);
+		no("cat << 'EOF' | python3 -\nprint(1)\nEOF", FORM);
+		no("cat > .tmp/x.py << 'EOF' | sh\nid\nEOF", FORM);
+		no("sudo bash << 'EOF'\nid\nEOF", FORM);
+		no("cat > .tmp/x.sh << 'EOF' > /dev/null\nid\nEOF", FORM);
+	});
+	test("a target outside the project is refused", () => {
+		no("cat > /etc/passwd << 'EOF'\nx\nEOF", FORM);
+		no("cat > ../x.py << 'EOF'\nx\nEOF", FORM);
+		no("cat > a/../../x.py << 'EOF'\nx\nEOF", FORM);
+		no("cat > ~/.zshrc << 'EOF'\nx\nEOF", FORM);
+		no("cat > $HOME/x << 'EOF'\nx\nEOF", FORM);
+		no("cat > .. << 'EOF'\nx\nEOF", FORM);
+		no("cat > .tmp/*.py << 'EOF'\nx\nEOF", FORM);
+	});
+	test("a delimiter that never closes is refused", () => {
+		no("cat > .tmp/x.py << 'EOF'\nbody only", "closing line");
+		no("cat > .tmp/x.py << 'EOF'", "closing line");
+		no("cat > .tmp/x.py << 'EOF'\nbody\nEOFX", "closing line");
+	});
+	test("two heredocs are refused", () => {
+		no("cat > .tmp/a << 'A'\nx\nA\ncat > .tmp/b << 'B'\ny\nB", "new line");
+		no("cat > .tmp/a << 'A' > .tmp/c << 'B'\nx\nA\ny\nB", FORM);
+	});
+	test("command substitution inside an unquoted heredoc is refused", () => {
+		no("cat > .tmp/a << EOF\n$(id)\nEOF");
+		no("cat > .tmp/a << EOF\n`id`\nEOF");
+		no("cat > .tmp/a << EOF\n<(id)\nEOF");
+	});
+	test("a quoted body is still held to the strict text rules, and cd && stays refused", () => {
+		no("cat > .tmp/a << 'EOF'\n$(id)\nEOF", "Command substitution");
+		no("cd w && cat > .tmp/a << 'EOF'\nx\nEOF");
+		no("cat > .tmp/a << 'EOF'; id\nx\nEOF");
 	});
 });
