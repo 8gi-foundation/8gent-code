@@ -183,12 +183,15 @@ const PROJECT_REL_PATH =
  * the body, a pipe, a second redirect) is refused.
  */
 function isQuotedHeredocFileWrite(head: string, word: string): boolean {
-	const h = head.trim();
-	const marker = `<<-?\\s*(?<q>['"])${word}\\k<q>`;
-	const a = new RegExp(`^cat\\s+>>?\\s*(\\S+)\\s+${marker}$`).exec(h);
-	const b = new RegExp(`^cat\\s+${marker}\\s+>>?\\s*(\\S+)$`).exec(h);
+	// Blanks are space and tab only: \\s also matches NBSP, VT and FF, which sh reads as word characters.
+	const h = head.replace(/^[ \t]+|[ \t]+$/g, "");
+	const marker = `<<-?[ \\t]*(?<q>['"])${word}\\k<q>`;
+	const a = new RegExp(`^cat[ \\t]+>>?[ \\t]*([^ \\t]+)[ \\t]+${marker}$`).exec(h);
+	const b = new RegExp(`^cat[ \\t]+${marker}[ \\t]+>>?[ \\t]*([^ \\t]+)$`).exec(h);
 	const target = a ? a[1] : b ? b[2] : null;
-	return target !== null && PROJECT_REL_PATH.test(target);
+	if (target === null || !PROJECT_REL_PATH.test(target)) return false;
+	// Hooks and keys: a write there is code execution or access later, not a project file.
+	return !target.split("/").some((seg) => /^\.(git|ssh)$/i.test(seg));
 }
 
 const HEREDOC_REASON =
@@ -489,12 +492,7 @@ function sanitizePosix(
 				? -1
 				: lines.findIndex((l) => (scan.heredoc?.dash ? l.replace(/^\t+/, "") : l) === word);
 		if (end < 0) return { safe: false, reason: HEREDOC_REASON };
-		if (
-			lines
-				.slice(end + 1)
-				.join("\n")
-				.trim() !== ""
-		)
+		if (!/^[ \t\n]*$/.test(lines.slice(end + 1).join("\n")))
 			return { safe: false, reason: NEWLINE_REASON };
 		body = `\n${lines.slice(0, end + 1).join("\n")}`;
 	}

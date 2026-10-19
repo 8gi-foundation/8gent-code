@@ -546,6 +546,30 @@ describe("sanitizeShellCommand: quoted heredoc that only writes a project file (
 		no("cat > .tmp/a << EOF\n`id`\nEOF");
 		no("cat > .tmp/a << EOF\n<(id)\nEOF");
 	});
+	test("reviewer hardening: NBSP, VT and FF are not blanks in the heredoc head", () => {
+		no("cat\u00a0> .tmp/x << 'EOF'\nx\nEOF", FORM);
+		no("cat > .tmp/x\u00a0<< 'EOF'\nx\nEOF", FORM);
+		no("cat >\u00a0.tmp/x << 'EOF'\nx\nEOF", FORM);
+		no("cat\u000b> .tmp/x << 'EOF'\nx\nEOF", FORM);
+		no("cat\u000c> .tmp/x << 'EOF'\nx\nEOF", FORM);
+		no("cat > .tmp/x <<\u00a0'EOF'\nx\nEOF", FORM);
+	});
+	test("reviewer hardening: a Unicode-space or VT line after the terminator is refused", () => {
+		no("cat > .tmp/x << 'EOF'\nx\nEOF\n\u2028", "new line");
+		no("cat > .tmp/x << 'EOF'\nx\nEOF\n\u000b", "new line");
+		no("cat > .tmp/x << 'EOF'\nx\nEOF\n\u00a0", "new line");
+		ok("cat > .tmp/x << 'EOF'\nx\nEOF\n");
+		ok("cat > .tmp/x << 'EOF'\nx\nEOF\n \t\n");
+	});
+	test("reviewer hardening: targets inside .git/ and .ssh/ are refused", () => {
+		no("cat > .git/hooks/pre-commit << 'EOF'\nx\nEOF", FORM);
+		no("cat > sub/.git/config << 'EOF'\nx\nEOF", FORM);
+		no("cat << 'EOF' > .git/hooks/post-merge\nx\nEOF", FORM);
+		no("cat > .ssh/authorized_keys << 'EOF'\nx\nEOF", FORM);
+		no("cat >> a/.SSH/config << 'EOF'\nx\nEOF", FORM);
+		ok("cat > .github/x.yml << 'EOF'\nx\nEOF");
+		ok("cat > .gitignore << 'EOF'\nx\nEOF");
+	});
 	test("a quoted body is still held to the strict text rules, and cd && stays refused", () => {
 		no("cat > .tmp/a << 'EOF'\n$(id)\nEOF", "Command substitution");
 		no("cd w && cat > .tmp/a << 'EOF'\nx\nEOF");
