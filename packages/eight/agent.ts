@@ -25,6 +25,7 @@ import {
 	stripDoneMarker,
 } from "../ai/text-tool-loop";
 import { agentTools } from "../ai/tools";
+import { createBudgetDrain, resolveTurnBudgetMs } from "../ai/turn-budget";
 import { ensureIndexed as astEnsureIndexed } from "../ast-index";
 import { loggableToolArgs } from "../computer/desktop-approval";
 import {
@@ -1440,6 +1441,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				usage,
 			});
 		};
+		// Whole-turn budget (#4418, #4431): the same drain the native loop uses
+		// (packages/ai/turn-budget.ts, EIGHT_TURN_BUDGET_MS). One per turn, outside
+		// runTurn, so a reroute attempt does not get a second notice.
+		const budgetDrain = createBudgetDrain({
+			budgetMs: resolveTurnBudgetMs(),
+			startedAt: chatStartTime,
+		});
 		const runTurn = (provider: string, model: string) => {
 			// #3487: the built prompt was judged on-box for the session's runtime. If
 			// this turn goes to a provider whose endpoint is off this machine (a
@@ -1504,8 +1512,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// off by default): N empty or error results in a row and the next
 				// round gets no tools, only a note to answer with what it has.
 				uselessStreak: resolveUselessStreak(),
-				// Steering (D1): delivered after the running tool calls.
-				steer: () => this.drainSteers(),
+				// Steering (D1): delivered after the running tool calls; then the budget notice.
+				steer: () => [...this.drainSteers(), ...budgetDrain()],
 			});
 		};
 
