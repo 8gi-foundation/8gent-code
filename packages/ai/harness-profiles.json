@@ -3,7 +3,8 @@
 		"maxSteps": 50,
 		"nudgeFraction": 0.6,
 		"maxOutputTokens": 4096,
-		"why": "Local runs 19 Oct, main 390d63eb/fd3ddf28. sigi-dev-a11y-b (2026-10-19_141247) failed 15/17 turn_timeout: the judge gives the turn 1200 s and the default nudge fires at 0.8 x 1500 s = 1200 s, the same second; its slowest step was 123 s, so the wont-fit line (1425 s - 2 x 123 s) was also too late. At 0.6 the notice lands at 900 s with about two slow steps left. arc1-b/arc2-a steps run 256-464 s, where the wont-fit rule already fires before 0.6, so this entry does not change those runs. No run hit the step cap (most tool calls 29); 50 matches what the TUI already passes. 4096 is today's local cap."
+		"think": false,
+		"why": "think false (#4462): local run 2026-10-19_181205 sigi-dev-aider-py-a (main 06bbac38) FAIL 12/15 turn_timeout, one /v1 request ran 486 s (t=152 to 638) with no tool call, because requests set no effort and the Ollama qwen3.8 renderer defaults to xhigh; the reasoning is generated at local speed and discarded. Cloud qwen/qwen3.8-27b passed the same task 15/15 in 134 s. Local runs 19 Oct, main 390d63eb/fd3ddf28. sigi-dev-a11y-b (2026-10-19_141247) failed 15/17 turn_timeout: the judge gives the turn 1200 s and the default nudge fires at 0.8 x 1500 s = 1200 s, the same second; its slowest step was 123 s, so the wont-fit line (1425 s - 2 x 123 s) was also too late. At 0.6 the notice lands at 900 s with about two slow steps left. arc1-b/arc2-a steps run 256-464 s, where the wont-fit rule already fires before 0.6, so this entry does not change those runs. No run hit the step cap (most tool calls 29); 50 matches what the TUI already passes. 4096 is today's local cap."
 	},
 	"qwen/qwen3.8-27b": {
 		"maxSteps": 50,

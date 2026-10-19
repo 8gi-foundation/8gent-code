@@ -18,6 +18,13 @@ export interface HarnessProfileEntry {
 	maxSteps?: number;
 	nudgeFraction?: number;
 	maxOutputTokens?: number;
+	/**
+	 * `false` turns the model's thinking off on the local Ollama text-tool path
+	 * (#4462): `reasoning_effort: "none"`, the one switch Ollama /v1 honours. It
+	 * has no thinking-token budget, so only `false` acts; any other value
+	 * keeps the model's default thinking.
+	 */
+	think?: boolean;
 	/** The measured runs that justify this entry. */
 	why: string;
 }
@@ -67,6 +74,18 @@ export function resolveHarnessProfile(
 			bounded(entry.maxOutputTokens, HARNESS_BOUNDS.maxOutputTokens, defaults.maxOutputTokens),
 		),
 	};
+}
+
+/**
+ * True when `model`'s entry sets `think: false` (#4462). Only that exact value
+ * counts; a missing entry or any malformed value keeps default thinking.
+ * buildTextToolCall sends the switch to Ollama only, so cloud is untouched.
+ */
+export function harnessNoThink(
+	model: string | undefined,
+	profiles: HarnessProfileTable = HARNESS_PROFILES,
+): boolean {
+	return model !== undefined && profiles[model]?.think === false;
 }
 
 /** The one line a session logs, so a run can be explained by the profile it ran under. */

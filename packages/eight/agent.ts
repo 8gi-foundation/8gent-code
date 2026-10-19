@@ -16,6 +16,7 @@ import { type ModelMessage, jsonSchema, tool as sdkTool } from "ai";
 import type { FormattingStop } from "../ai/draft-constraints";
 import {
 	type HarnessProfile,
+	harnessNoThink,
 	harnessProfileLine,
 	resolveHarnessProfile,
 } from "../ai/harness-profile";
@@ -1494,6 +1495,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// only with EIGHT_PREFIX_METER=1.
 				onRound: prefixMeterSink(this.sessionWriter),
 				onUsage,
+				// #4462: a profile with think false (local qwen3.8) answers without
+				// reasoning; buildTextToolCall sends the switch to Ollama only.
+				noThink: harnessNoThink(model),
 			});
 			// One packer per attempt: it counts this attempt's model requests.
 			const packer = observations ? new ObservationPacker(observations) : null;
