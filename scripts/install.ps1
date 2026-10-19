@@ -90,6 +90,10 @@ function Install-Eight {
 			$req.AllowAutoRedirect = $false
 			$req.UserAgent = '8gent-installer'
 			$req.Accept = if ($kind -eq 'list') { 'application/vnd.github+json' } else { 'application/octet-stream' }
+			# Optional token (CI smoke only), first hop of the release list on api.github.com only.
+			if ($kind -eq 'list' -and $hop -eq 0 -and $env:GITHUB_TOKEN -and ([Uri]$url).Host -eq 'api.github.com') {
+				$req.Headers.Add('Authorization', "Bearer $env:GITHUB_TOKEN")
+			}
 			$resp = $null
 			try {
 				$resp = $req.GetResponse()
@@ -158,7 +162,17 @@ function Install-Eight {
 	New-Item -ItemType Directory -Path $tmp | Out-Null
 	try {
 		$listFile = Join-Path $tmp 'releases.json'
-		Get-EightFile $releasesUrl $listFile 'list'
+		# The release list can be rate limited on an unauthenticated runner (#4468):
+		# retry 3 times with 2 s, 4 s, 8 s backoff; the last error carries the HTTP status.
+		$delay = 2
+		for ($attempt = 0; ; $attempt++) {
+			try { Get-EightFile $releasesUrl $listFile 'list'; break }
+			catch {
+				if ($attempt -ge 3) { throw "Could not read the release list at $releasesUrl ($($_.Exception.Message))" }
+				Start-Sleep -Seconds $(if ($env:EIGHT_TEST_RETRY_DELAY) { [int]$env:EIGHT_TEST_RETRY_DELAY } else { $delay })
+				$delay *= 2
+			}
+		}
 		$releases = Get-Content -LiteralPath $listFile -Raw | ConvertFrom-Json
 
 		# Newest published vX.Y.Z release that carries the x64 exe and SHA256SUMS.

@@ -35,7 +35,11 @@ const ASSET = hostAsset();
 const fakeBinary = (version: string) => `#!/bin/sh\necho "8gent Code v${version}"\n`;
 
 /** path -> body, or a redirect */
-let routes = new Map<string, { body?: string | Uint8Array; location?: string }>();
+let routes = new Map<
+	string,
+	{ body?: string | Uint8Array; location?: string; failTimes?: number }
+>();
+let seenAuth: Array<string | null> = [];
 let server: ReturnType<typeof Bun.serve>;
 let base = "";
 
@@ -45,7 +49,13 @@ beforeAll(() => {
 		port: 0,
 		fetch(req) {
 			const r = routes.get(new URL(req.url).pathname);
+			if (new URL(req.url).pathname === "/releases.json")
+				seenAuth.push(req.headers.get("authorization"));
 			if (!r) return new Response("not found", { status: 404 });
+			if (r.failTimes && r.failTimes > 0) {
+				r.failTimes -= 1;
+				return new Response("rate limited", { status: 403 });
+			}
 			if (r.location) return new Response(null, { status: 302, headers: { location: r.location } });
 			return new Response(r.body ?? "");
 		},
@@ -194,6 +204,36 @@ describe("install.sh: choosing a release", () => {
 		const r = await install(publish([{ tag: "v0.19.0", assets: {} }]));
 		expect(r.code).not.toBe(0);
 		expect(r.out).toContain(`no release carries a ${ASSET} binary`);
+	});
+});
+
+describe("install.sh: release list retry (#4468)", () => {
+	const fast = { EIGHT_TEST_RETRY_DELAY: "0" };
+
+	test("a list that fails twice and then answers still installs", async () => {
+		const url = one("0.20.0");
+		routes.get("/releases.json")!.failTimes = 2;
+		const r = await install(url, fast);
+		expect(r.code).toBe(0);
+		expect(installed()).toBe("8gent Code v0.20.0");
+	});
+
+	test("gives up after 3 retries and names the last HTTP status", async () => {
+		const url = one("0.20.0");
+		routes.get("/releases.json")!.failTimes = 99;
+		const r = await install(url, fast);
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("could not read the release list");
+		expect(r.out).toContain("last status: 403");
+		expect(installed()).toBeNull();
+	});
+
+	test("GITHUB_TOKEN is never required and is not sent to a local server", async () => {
+		const url = one("0.20.0");
+		seenAuth = [];
+		expect((await install(url, fast)).code).toBe(0);
+		expect((await install(url, { ...fast, GITHUB_TOKEN: "tok-secret" })).code).toBe(0);
+		expect(seenAuth.every((a) => a === null)).toBe(true);
 	});
 });
 

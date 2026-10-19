@@ -101,7 +101,13 @@ fetch() {
 	hops=0
 	while :; do
 		if command -v curl >/dev/null 2>&1 && [ -z "${EIGHT_TEST_FORCE_WGET:-}" ]; then
-			res="$(curl -sS --proto "$proto" --max-redirs 0 -o "$2" -w '%{http_code} %{redirect_url}' "$url")" || return 1
+			# A token is optional (CI smoke runs only) and goes to the first hop of the
+			# release list on api.github.com only, via stdin so it is never in argv.
+			if [ "$3" = list ] && [ "$hops" -eq 0 ] && [ -n "${GITHUB_TOKEN:-}" ] && [ "$(host_of "$url")" = api.github.com ]; then
+				res="$(printf 'header = "Authorization: Bearer %s"\n' "$GITHUB_TOKEN" | curl -sS -K - --proto "$proto" --max-redirs 0 -o "$2" -w '%{http_code} %{redirect_url}' "$url")" || { FETCH_STATUS="curl-error"; return 1; }
+			else
+				res="$(curl -sS --proto "$proto" --max-redirs 0 -o "$2" -w '%{http_code} %{redirect_url}' "$url")" || { FETCH_STATUS="curl-error"; return 1; }
+			fi
 			code="${res%% *}"
 			next="${res#* }"
 		elif command -v wget >/dev/null 2>&1; then
@@ -115,6 +121,7 @@ fetch() {
 		else
 			die "needs curl or wget"
 		fi
+		FETCH_STATUS="$code"
 		case "$code" in
 			200) return 0 ;;
 			301 | 302 | 303 | 307 | 308)
@@ -127,6 +134,23 @@ fetch() {
 			*) return 1 ;;
 		esac
 	done
+}
+
+# fetch_list: the release list from an unauthenticated runner can be rate
+# limited or blip (the v0.20.0 macOS smoke died in 0.3 s on it, #4468), so
+# retry 3 times with 2 s, 4 s, 8 s backoff and report the last HTTP status.
+fetch_list() {
+	attempt=0
+	delay=2
+	while :; do
+		FETCH_STATUS=""
+		if fetch "$RELEASES_URL" "$1" list; then return 0; fi
+		[ "$attempt" -lt 3 ] || break
+		attempt=$((attempt + 1))
+		sleep "${EIGHT_TEST_RETRY_DELAY:-$delay}"
+		delay=$((delay * 2))
+	done
+	return 1
 }
 
 sha256_of() {
@@ -276,7 +300,7 @@ main() {
 	trap 'rm -rf "$TMP"' EXIT
 	trap 'exit 130' INT TERM
 
-	fetch "$RELEASES_URL" "$TMP/releases.json" list || die "could not read the release list at ${RELEASES_URL}"
+	fetch_list "$TMP/releases.json" || die "could not read the release list at ${RELEASES_URL} (last status: ${FETCH_STATUS:-none})"
 	release_candidates "$TMP/releases.json" "$ASSET" >"$TMP/candidates" || true
 
 	if [ -n "$WANT" ]; then
