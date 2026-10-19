@@ -111,6 +111,7 @@ import {
 	estimateMessageTokens,
 } from "./compaction";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
+import { continueEmptyTurn } from "./empty-turn-continue";
 import {
 	type ToolLedgerEntry,
 	denialIsCause,
@@ -3345,6 +3346,52 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					console.log(`[verify-gate] follow-up failed: ${verifyErr?.message}`);
 				}
 				this.abortController = null;
+			}
+
+			// #4444: tool work, then no text at all, gets one more generate with a
+			// steer (never after a stop, never past the turn budget, never twice).
+			const resultBeforeContinue = result;
+			const continued = await continueEmptyTurn({
+				result,
+				toolCalls: this.turnToolLedger.length,
+				isAborted: () => this.stopRequested,
+				elapsedMs: Date.now() - chatStartTime,
+				budgetMs: resolveTurnBudgetMs(),
+				generate: async (steer) => {
+					// Pinned to the turn start, so the budget notice still fires on time.
+					const continueAgent = createEightAgent({ ...agentConfig, turnStartedAt: chatStartTime });
+					this.armController();
+					const turnMessages: any[] = Array.isArray(resultBeforeContinue.response?.messages)
+						? resultBeforeContinue.response.messages
+						: [];
+					try {
+						return await withProgressTimeout(
+							(watch) => {
+								this.progressWatch = watch;
+								return continueAgent.generate({
+									messages: [
+										...messages,
+										...turnMessages,
+										{ role: "user" as const, content: steer },
+									],
+									abortSignal: this.abortController?.signal,
+								});
+							},
+							{
+								idleMs: attemptIdleMs,
+								ceilingMs: attemptTimeoutMs,
+								onTimeout: () => this.abortController?.abort(),
+								label: "empty-turn-continue",
+							},
+						);
+					} finally {
+						this.progressWatch = null;
+						this.abortController = null;
+					}
+				},
+			});
+			if (continued.continued && continued.result?.text?.trim()) {
+				result = { ...continued.result, text: stripDoneMarker(continued.result.text) };
 			}
 
 			// ── Law 1 (issue #2747): no fabricated completion ────────────────
