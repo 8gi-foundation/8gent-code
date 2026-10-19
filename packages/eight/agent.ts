@@ -573,7 +573,12 @@ export class Agent {
 			},
 		);
 		// run_batch items skip the agent loop, so they take the same refusals here (#3502).
-		this.executor.setItemGate((t, a) => this.refuseToolCall(t, a));
+		this.executor.setItemGate(async (t, a) => {
+			const refusal = await this.refuseToolCall(t, a);
+			if (refusal != null) return refusal;
+			await this.noteToolStart(t, a);
+			return null;
+		});
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 off): with the allowlist
 		// opted out, start loading the judge now, in the background, so the
 		// first gated command does not pay the model load. Idempotent per
@@ -1110,6 +1115,59 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return this.extensionHost.checkToolCall(toolName, args);
 	}
 
+	/** The provider config of the turn in flight, so a batched item can switch it to local (#3502). */
+	private turnProvider?: ProviderConfig;
+
+	/**
+	 * NemoClaw privacy gate for one allowed tool call: remember file paths, and when a
+	 * sensitive one is in context on a cloud provider, switch that provider config to local.
+	 * Without providerConfig (the text path) it only records the path.
+	 */
+	private applyPrivacyGate(
+		toolName: string,
+		args: Record<string, unknown>,
+		providerConfig?: ProviderConfig,
+	): void {
+		const toolPath = args?.path as string | undefined;
+		if (!toolPath || !["read_file", "write_file", "edit_file", "delete_file"].includes(toolName))
+			return;
+		this.recentFilePaths.push(toolPath);
+		// Keep bounded - only last 20 paths
+		if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
+		if (!providerConfig) return;
+		const gate = privacyGate(this.recentFilePaths, providerConfig.name);
+		if (!gate.shouldForceLocal) return;
+		const fallback = forceLocalModel(providerConfig.name);
+		if (!fallback) return;
+		console.log(`\n\x1b[33m[PRIVACY] ${gate.reason}\x1b[0m`);
+		console.log(`\x1b[33m[PRIVACY] Switching to ${fallback.provider}/${fallback.model}\x1b[0m`);
+		providerConfig.name = fallback.provider as typeof providerConfig.name;
+		providerConfig.model = fallback.model;
+		// The forced-local provider resolves its own endpoint and key:
+		// the session's belong to the provider it is leaving (#3261).
+		providerConfig.apiKey = undefined;
+		providerConfig.baseURL = undefined;
+		providerConfig.headers = undefined;
+	}
+
+	/** What an allowed run_batch item starts with: beforeTool hooks, privacy gate, start event (#3502). */
+	private async noteToolStart(toolName: string, args: Record<string, unknown>): Promise<void> {
+		const loggedArgs = loggableToolArgs(toolName, args);
+		await this.hookManager.executeHooks("beforeTool", {
+			sessionId: this.sessionId,
+			tool: toolName,
+			toolInput: loggedArgs,
+			workingDirectory: this.config.workingDirectory || process.cwd(),
+		});
+		this.applyPrivacyGate(toolName, args, this.turnProvider);
+		console.log(`  -> ${toolName}(${JSON.stringify(loggedArgs).slice(0, 50)}...)`);
+		this.events.onToolStart?.({
+			toolName,
+			toolCallId: `batch-${Date.now()}`,
+			args: loggedArgs,
+		});
+	}
+
 	/** Every built-in tool name, on either path. Extension tools may not take one. */
 	private builtInToolNames(): string[] {
 		const names = new Set<string>(Object.keys(agentTools));
@@ -1263,14 +1321,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 				// Track file paths for the privacy gate, matching the native path.
 				const toolPath = (args as { path?: unknown }).path;
-				if (
-					!refusal &&
-					typeof toolPath === "string" &&
-					["read_file", "write_file", "edit_file", "delete_file"].includes(toolName)
-				) {
-					this.recentFilePaths.push(toolPath);
-					if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
-				}
+				if (!refusal) this.applyPrivacyGate(toolName, args);
 
 				// Everything below that records the call sees typed desktop text as its length (#4057).
 				const loggedArgs = loggableToolArgs(toolName, args);
@@ -2236,6 +2287,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			apiKey: this.config.apiKey,
 			baseURL: this.config.baseUrl ? toOpenAiV1Base(this.config.baseUrl) : undefined,
 		};
+		this.turnProvider = providerConfig;
 
 		// Build system instructions
 		const systemPrompt = this.messageHistory.find((m) => m.role === "system")?.content;
@@ -2505,34 +2557,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				workingDirectory: this.config.workingDirectory || process.cwd(),
 			});
 
-			// ── NemoClaw Privacy Gate: track file paths for sensitive context detection
-			const toolPath = event.args?.path as string | undefined;
-			if (
-				toolPath &&
-				["read_file", "write_file", "edit_file", "delete_file"].includes(event.toolName)
-			) {
-				this.recentFilePaths.push(toolPath);
-				// Keep bounded - only last 20 paths
-				if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
-
-				const gate = privacyGate(this.recentFilePaths, providerConfig.name);
-				if (gate.shouldForceLocal) {
-					const fallback = forceLocalModel(providerConfig.name);
-					if (fallback) {
-						console.log(`\n\x1b[33m[PRIVACY] ${gate.reason}\x1b[0m`);
-						console.log(
-							`\x1b[33m[PRIVACY] Switching to ${fallback.provider}/${fallback.model}\x1b[0m`,
-						);
-						providerConfig.name = fallback.provider as typeof providerConfig.name;
-						providerConfig.model = fallback.model;
-						// The forced-local provider resolves its own endpoint and key:
-						// the session's belong to the provider it is leaving (#3261).
-						providerConfig.apiKey = undefined;
-						providerConfig.baseURL = undefined;
-						providerConfig.headers = undefined;
-					}
-				}
-			}
+			this.applyPrivacyGate(event.toolName, event.args, providerConfig);
 
 			console.log(`  -> ${event.toolName}(${JSON.stringify(loggedArgs).slice(0, 50)}...)`);
 

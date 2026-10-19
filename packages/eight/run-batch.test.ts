@@ -225,3 +225,59 @@ describe("executor path", () => {
 		expect(out).toContain("2. read_file FAILED");
 	});
 });
+
+describe("batched items take the same start path as a direct call (F8)", () => {
+	const fs = require("node:fs");
+	const path = require("node:path");
+	const mk = async () => {
+		const { Agent } = await import("./agent");
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "run-batch-agent-"));
+		fs.writeFileSync(path.join(dir, ".env"), "SECRET=1\n");
+		const a = new Agent({
+			model: "x/y",
+			runtime: "openrouter",
+			workingDirectory: dir,
+		}) as unknown as {
+			executor: ToolExecutor;
+			turnProvider?: { name: string; model: string; apiKey?: string };
+			hookManager: { executeHooks: (...a: unknown[]) => Promise<unknown> };
+			recentFilePaths: string[];
+		};
+		a.turnProvider = { name: "openrouter", model: "x/y", apiKey: "k" };
+		return { a, dir };
+	};
+	test("a batched read of .env on a cloud provider forces the local model", async () => {
+		process.env.EIGHT_RUN_BATCH = "1";
+		const { a, dir } = await mk();
+		const out = await a.executor.execute("run_batch", {
+			items: [{ tool: "read_file", args: { path: ".env" } }],
+		});
+		expect(out).toContain("1. read_file");
+		expect(a.recentFilePaths).toContain(".env");
+		expect(a.turnProvider?.name).not.toBe("openrouter");
+		expect(a.turnProvider?.apiKey).toBeUndefined();
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+	test("beforeTool fires once per item", async () => {
+		process.env.EIGHT_RUN_BATCH = "1";
+		const { a, dir } = await mk();
+		const fired: string[] = [];
+		const real = a.hookManager.executeHooks.bind(a.hookManager);
+		a.hookManager.executeHooks = async (ev: unknown, ctx: unknown) => {
+			if (ev === "beforeTool") fired.push((ctx as { tool: string }).tool);
+			return real(ev, ctx);
+		};
+		try {
+			await a.executor.execute("run_batch", {
+				items: [
+					{ tool: "read_file", args: { path: "package.json" } },
+					{ tool: "list_files", args: { path: "." } },
+				],
+			});
+		} finally {
+			a.hookManager.executeHooks = real;
+		}
+		expect(fired).toEqual(["read_file", "list_files"]);
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+});
