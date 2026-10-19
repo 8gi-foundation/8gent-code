@@ -88,6 +88,21 @@ describe("resolveHarnessProfile", () => {
 			expect(p.nudgeFraction).toBeLessThan(NUDGE_FRACTION);
 		}
 	});
+
+	test("cloud MiniMax M3 gets the top output bound so a long reasoning step is not cut (#4450)", () => {
+		const entry = HARNESS_PROFILES["minimax/minimax-m3"];
+		expect(entry).toBeDefined();
+		expect(entry?.why).toContain("length");
+		const cloud = resolveHarnessProfile("minimax/minimax-m3", {
+			maxSteps: 30,
+			maxOutputTokens: 8192,
+		});
+		expect(cloud.source).toBe("minimax/minimax-m3");
+		expect(cloud.maxOutputTokens).toBe(HARNESS_BOUNDS.maxOutputTokens[1]);
+		// Only the output cap moves: steps and nudge stay at today's defaults.
+		expect(cloud.maxSteps).toBe(30);
+		expect(cloud.nudgeFraction).toBe(NUDGE_FRACTION);
+	});
 });
 
 describe("harnessProfileLine", () => {
