@@ -1342,6 +1342,14 @@ function names8gentDir(lower: string): boolean {
  * d['train'] after cd ~/.8gent/rishi-pilot/runs/x/work) is not a path under .8gent (#4432).
  */
 function tokenReaches8gentState(lower: string): boolean {
+	// Any token that IS the .8gent directory (cd ~/.8gent, HOME8=~/.8gent, -C ~/.8gent) makes every
+	// later relative name, glob or expansion a path into the state dir: the whole rest of the command
+	// is judged by the strict rule (#4434). Only when every .8gent token is deeper (the pilot work
+	// dir) is each token judged on its own.
+	if (
+		shellTokens(lower).some((t) => t.includes(".8gent") && ["", null].includes(tailUnder8gent(t)))
+	)
+		return /[*?[{$]|token|control|profile/.test(lower.slice(lower.indexOf(".8gent")));
 	for (const tok of shellTokens(lower)) {
 		const at = tok.indexOf(".8gent");
 		if (at < 0) continue;

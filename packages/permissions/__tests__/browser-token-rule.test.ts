@@ -77,3 +77,39 @@ describe("pre-spawn backstop: a work dir under ~/.8gent is not browser state (#4
 			expect(preSpawnRefusal(cmd, WORK), cmd).toContain(DENIED);
 	});
 });
+
+// Karen, #4434: a relative glob after a cd into the state dir expands to the token.
+describe("pre-spawn backstop: a relative glob after a cd into ~/.8gent (#4434)", () => {
+	test("cd into the state dir then a glob is denied", () => {
+		for (const cmd of [
+			"cd ~/.8gent && cat *",
+			"cd ~/.8gent/ && cat ./*",
+			'cd ~/.8gent; for f in *; do cat "$f"; done',
+			"cd ~/.8gent && cat */*",
+			"cd ~/.8gent && tail -n1 *",
+			"cd ~/.8gent && cat -- *",
+			"cd ~/.8gent && cat $PWD/*",
+			"cd ~/.8gent && cat {a,b}",
+			"tar -C ~/.8gent -cf x.tar *",
+			"cd ~/.8gent && x=ser; cat brow$x-control.token",
+			"cd ~/.8gent && cat $(printf brow)ser-control.token",
+			"cd ~/.8gent && cat brow${x}ser-control.token",
+			"cd ~/.8gent && cat $F",
+			"cd ~/.8gent && cat */*/Cookies",
+			"cd ~/.8gent && cd brow$(echo s)er-profiles && cat Default/Cookies",
+			"pushd ~/.8gent && cat $(cat list.txt)",
+			"HOME8=~/.8gent; cd $HOME8 && cat brow$s-control.token",
+		])
+			expect(preSpawnRefusal(cmd, WORK), cmd).toContain(DENIED);
+	});
+
+	test("the pilot work dir with a glob stays allowed", () => {
+		expect(preSpawnRefusal("cd ~/.8gent/rishi-pilot/runs/x/work && ls *.json", WORK)).toBeNull();
+	});
+
+	test("the refusal says what to do first", () => {
+		expect(preSpawnRefusal("cd ~/.8gent && cat *", WORK)).toContain(
+			"Run it without touching ~/.8gent/browser-* paths",
+		);
+	});
+});
