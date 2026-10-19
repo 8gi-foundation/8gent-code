@@ -17,6 +17,14 @@
 #   makensis "-DEIGHT_VERSION=<version>" "-DEIGHT_EXE=$PWD/dist/bin/8gent-windows-x64.exe" packaging/windows/installer.nsi
 # (makensis on macOS/Linux takes -D; the Windows build takes /D.)
 #
+# DISPATCH REBUILD (#4468): dispatching with `tag` rebuilds that tag's code with
+# this workflow file. Run from main, the build provenance names refs/heads/main,
+# and scripts/install.sh and install.ps1 verify --source-ref refs/tags/vX, so
+# those binaries are NOT installable through the one-line installer. That path
+# is for diagnosis and smoke only. To ship a tag whose binaries failed, merge
+# the fix and cut the next patch release from main (v0.20.1 therefore ships as
+# v0.20.2).
+#
 # SIGNING: opt-in and skip-if-absent. With no secrets set, unsigned artifacts
 # are produced (they run, but trigger OS trust prompts). macOS codesigning with
 # EIGHT_MAC_SIGN_IDENTITY needs that identity in the runner's keychain, which a
@@ -35,7 +43,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'existing v* tag to rebuild from this workflow file; empty = github.ref_name'
+        description: 'existing v* tag to rebuild from this workflow file; empty = github.ref_name. Diagnosis and smoke only when dispatched from main: provenance names refs/heads/main, so the one-line installer rejects these binaries'
         required: false
         type: string
 
@@ -46,7 +54,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-binaries-${{ github.ref }}
+  group: release-binaries-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -62,6 +70,17 @@ jobs:
       # switch lives here.
       HAS_NOTARY_KEY: ${{ secrets.AC_API_KEY_ID != '' }}
     steps:
+      # Validate a dispatched tag before anything else runs (secrets, attest).
+      - name: Validate the tag input
+        if: inputs.tag != ''
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if ! [[ "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::tag input must look like vX.Y.Z, not ${INPUT_TAG}"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -280,7 +299,7 @@ jobs:
     name: Attach to GitHub Release
     needs: [build, attest, smoke-windows, smoke-linux]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: inputs.tag != '' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
@@ -394,7 +413,7 @@ jobs:
     needs: [build, attest, smoke-windows, smoke-linux, release, install-smoke]
     # Only a release tag raises the alarm; a dispatched dry run on a branch
     # reports its failure in the run itself.
-    if: failure() && startsWith(github.ref, 'refs/tags/v')
+    if: failure() && (inputs.tag != '' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
