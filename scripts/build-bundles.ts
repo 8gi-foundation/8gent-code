@@ -36,6 +36,8 @@ const stubDevtools: BunPlugin = {
 const targets = [
 	{ name: "cli", entry: "bin/8gent.ts", external: [] as string[] },
 	{ name: "tui", entry: "apps/tui/src/index.tsx", external: ["sharp"] },
+	// The SDK entry (package.json "exports"); its types are the hand-written sdk-public.d.ts.
+	{ name: "sdk", entry: "packages/eight/sdk.ts", external: [] as string[] },
 ].filter((t) => !process.argv.includes("--tui") || t.name === "tui");
 
 // fileURLToPath, not URL.pathname: on Windows the latter yields "/D:/..." which Bun.build rejects.
@@ -55,5 +57,8 @@ for (const t of targets) {
 		process.exit(1);
 	}
 	const size = result.outputs[0]?.size ?? 0;
+	if (t.name === "sdk") {
+		await Bun.write(join(root, "dist/sdk.d.ts"), Bun.file(join(root, "packages/eight/sdk-public.d.ts")));
+	}
 	console.log(`[build-bundles] dist/${t.name}.js ${(size / 1024 / 1024).toFixed(2)} MB`);
 }

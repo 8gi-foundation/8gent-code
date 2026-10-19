@@ -4,13 +4,19 @@ import * as readline from "node:readline";
  * Headless mode for CI/IDE integration. Newline-delimited JSON on stdin/stdout.
  * Spawn with: 8gent rpc | 8gent --rpc
  */
-import { Agent } from "./agent";
+import {
+	BusyError,
+	createSession,
+	type Session,
+	type SessionEvent,
+	UnsupportedError,
+} from "./sdk";
+import { listSessions } from "./session-store";
 import type { RPCNotification, RPCRequest, RPCResponse } from "./rpc-types";
 import { RPC_ERRORS } from "./rpc-types";
 import { TOOL_CATEGORIES } from "./tool-registry";
-import type { AgentEventCallbacks } from "./types";
 
-const sessions = new Map<string, { agent: Agent; id: string }>();
+const sessions = new Map<string, Session>();
 
 function send(msg: RPCResponse | RPCNotification): void {
 	process.stdout.write(`${JSON.stringify(msg)}\n`);
@@ -25,60 +31,66 @@ function notify(method: string, params: Record<string, unknown>): void {
 	send({ jsonrpc: "2.0", method, params });
 }
 
+/** Map an SDK session event to the stream.* notification a client reads. */
+function forward(sessionId: string, e: SessionEvent): void {
+	switch (e.type) {
+		case "tool_start":
+			return notify("stream.toolCall", { sessionId, tool: e.tool, args: e.args });
+		case "tool_end":
+			return notify("stream.toolResult", { sessionId, tool: e.tool, result: e.result });
+		case "text":
+			return notify("stream.token", { sessionId, token: e.text });
+		case "steer":
+			return notify("stream.steer", { sessionId, text: e.text });
+		case "follow_up":
+			return notify("stream.followUp", { sessionId, text: e.text });
+		case "done":
+			return notify("stream.done", { sessionId });
+		case "error":
+			return notify("stream.error", { sessionId, error: e.error });
+	}
+}
+
+function register(session: Session): void {
+	sessions.set(session.id, session);
+	session.subscribe((e) => forward(session.id, e));
+}
+
 // ── Method dispatch ───────────────────────────────────────────────
 
 type Handler = (id: number | string, params: Record<string, unknown>) => Promise<void>;
 
+/** Look up params.sessionId. Sends INVALID_PARAMS and returns null when it is missing or unknown. */
+function need(id: number | string, params: Record<string, unknown>): Session | null {
+	const sessionId = params.sessionId as string;
+	const session = sessionId ? sessions.get(sessionId) : undefined;
+	if (!session) {
+		sendError(id, RPC_ERRORS.INVALID_PARAMS, `Unknown session: ${sessionId}`);
+		return null;
+	}
+	return session;
+}
+
+/** Turn an SDK error into the right JSON-RPC error. */
+function fail(id: number | string, err: unknown): void {
+	const msg = err instanceof Error ? err.message : String(err);
+	if (err instanceof BusyError) return sendError(id, RPC_ERRORS.BUSY, msg);
+	if (err instanceof UnsupportedError) return sendError(id, RPC_ERRORS.UNSUPPORTED, msg);
+	if (err instanceof RangeError) return sendError(id, RPC_ERRORS.INVALID_PARAMS, msg);
+	sendError(id, RPC_ERRORS.INTERNAL_ERROR, msg);
+}
+
 const methods: Record<string, Handler> = {
 	"session.create": async (id, params) => {
-		const rawModel = (params.model as string) || process.env.EIGHGENT_MODEL || "eight:latest";
-		const cwd = (params.cwd as string) || process.cwd();
-		const sessionId = `rpc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-		// Auto-detect runtime from model prefix (e.g. "openrouter:auto" → runtime=openrouter, model=auto)
-		// Accept explicit runtime override via params.runtime
-		let runtime = (params.runtime as string) || "ollama";
-		let model = rawModel;
-		const KNOWN_RUNTIMES = ["openrouter","ollama","lmstudio","anthropic","openai","groq","grok","mistral","8gent","together","fireworks","replicate"];
-		const colonIdx = rawModel.indexOf(":");
-		if (colonIdx > 0) {
-			const prefix = rawModel.slice(0, colonIdx);
-			if (KNOWN_RUNTIMES.includes(prefix)) {
-				runtime = prefix;
-				model = rawModel.slice(colonIdx + 1);
-			}
-		}
-
-		const events: AgentEventCallbacks = {
-			onToolStart: (e) =>
-				notify("stream.toolCall", {
-					sessionId,
-					tool: e.toolName,
-					args: e.args,
-				}),
-			onToolEnd: (e) =>
-				notify("stream.toolResult", {
-					sessionId,
-					tool: e.toolName,
-					result: e.resultPreview,
-				}),
-			onStepFinish: (e) => {
-				if (e.text) notify("stream.token", { sessionId, token: e.text });
-			},
-		};
-
-		const agent = new Agent({
-			model,
-			runtime: runtime as "ollama" | "lmstudio" | "openrouter" | "apple-foundation" | "apfel" | "deepseek",
-			workingDirectory: cwd,
-			maxTurns: 30,
-			allTools: true,
-			events,
-			...(params.systemPrompt ? { systemPrompt: params.systemPrompt as string } : {}),
+		const session = createSession({
+			model: params.model as string | undefined,
+			runtime: params.runtime as string | undefined,
+			cwd: params.cwd as string | undefined,
+			systemPrompt: params.systemPrompt as string | undefined,
+			persist: params.persist === false ? false : undefined,
 		});
-
-		sessions.set(sessionId, { agent, id: sessionId });
-		sendResult(id, { sessionId });
+		register(session);
+		sendResult(id, { sessionId: session.id });
 	},
 
 	"session.message": async (id, params) => {
@@ -88,41 +100,29 @@ const methods: Record<string, Handler> = {
 		if (!sessionId || !content) {
 			return sendError(id, RPC_ERRORS.INVALID_PARAMS, "sessionId and content required");
 		}
-
-		const session = sessions.get(sessionId);
-		if (!session) {
-			return sendError(id, RPC_ERRORS.INVALID_PARAMS, `Unknown session: ${sessionId}`);
-		}
+		const session = need(id, params);
+		if (!session) return;
 
 		try {
-			const response = await session.agent.chat(content);
-			notify("stream.done", { sessionId });
+			const response = await session.turn(content);
 			sendResult(id, { response, usage: {} });
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			notify("stream.error", { sessionId, error: msg });
-			sendError(id, RPC_ERRORS.INTERNAL_ERROR, msg);
+			fail(id, err);
 		}
 	},
 
 	"session.abort": async (id, params) => {
-		const sessionId = params.sessionId as string;
-		const session = sessions.get(sessionId);
-		if (!session) {
-			return sendError(id, RPC_ERRORS.INVALID_PARAMS, `Unknown session: ${sessionId}`);
-		}
-		session.agent.abort();
+		const session = need(id, params);
+		if (!session) return;
+		session.abort();
 		sendResult(id, { ok: true });
 	},
 
 	"session.destroy": async (id, params) => {
-		const sessionId = params.sessionId as string;
-		const session = sessions.get(sessionId);
-		if (!session) {
-			return sendError(id, RPC_ERRORS.INVALID_PARAMS, `Unknown session: ${sessionId}`);
-		}
-		await session.agent.cleanup();
-		sessions.delete(sessionId);
+		const session = need(id, params);
+		if (!session) return;
+		await session.dispose();
+		sessions.delete(session.id);
 		sendResult(id, { ok: true });
 	},
 
@@ -131,6 +131,122 @@ const methods: Record<string, Handler> = {
 			names.map((name) => ({ name, category })),
 		);
 		sendResult(id, { tools });
+	},
+
+	// ── Added for #3918 (N3): drive a running session from a script ──
+
+	/** Like session.message, then runs queued follow-ups and late steers. Result: the final text. */
+	"session.prompt": async (id, params) => {
+		const content = params.content as string;
+		if (!params.sessionId || !content) {
+			return sendError(id, RPC_ERRORS.INVALID_PARAMS, "sessionId and content required");
+		}
+		const session = need(id, params);
+		if (!session) return;
+		try {
+			sendResult(id, { response: await session.prompt(content), usage: {} });
+		} catch (err) {
+			fail(id, err);
+		}
+	},
+
+	"session.steer": async (id, params) => {
+		const session = need(id, params);
+		if (!session) return;
+		const text = params.content as string;
+		if (typeof text !== "string" || !text.trim()) {
+			return sendError(id, RPC_ERRORS.INVALID_PARAMS, "content required");
+		}
+		const queued = session.steer(text);
+		const state = session.getState();
+		sendResult(id, { queued, busy: state.busy, queueLength: state.queueLength });
+	},
+
+	"session.followUp": async (id, params) => {
+		const session = need(id, params);
+		if (!session) return;
+		const text = params.content as string;
+		if (typeof text !== "string" || !text.trim()) {
+			return sendError(id, RPC_ERRORS.INVALID_PARAMS, "content required");
+		}
+		const queued = session.followUp(text);
+		const state = session.getState();
+		sendResult(id, { queued, busy: state.busy, queueLength: state.queueLength });
+	},
+
+	"session.clearQueue": async (id, params) => {
+		const session = need(id, params);
+		if (!session) return;
+		sendResult(id, session.clearQueue());
+	},
+
+	"session.getState": async (id, params) => {
+		const session = need(id, params);
+		if (!session) return;
+		sendResult(id, session.getState());
+	},
+
+	"session.setModel": async (id, params) => {
+		const session = need(id, params);
+		if (!session) return;
+		const model = params.model as string;
+		if (typeof model !== "string" || !model) {
+			return sendError(id, RPC_ERRORS.INVALID_PARAMS, "model required");
+		}
+		try {
+			sendResult(id, session.setModel(model));
+		} catch (err) {
+			fail(id, err);
+		}
+	},
+
+	"session.compact": async (id, params) => {
+		const session = need(id, params);
+		if (!session) return;
+		try {
+			session.compact();
+		} catch (err) {
+			fail(id, err);
+		}
+	},
+
+	"session.getMessages": async (id, params) => {
+		const session = need(id, params);
+		if (!session) return;
+		sendResult(id, { messages: session.getMessages() });
+	},
+
+	"session.getLastAssistantText": async (id, params) => {
+		const session = need(id, params);
+		if (!session) return;
+		sendResult(id, { text: session.getLastAssistantText() });
+	},
+
+	/** Stored sessions, newest first. Params: cwd?, limit?. Reads the session store, live or not. */
+	"session.list": async (id, params) => {
+		const limit = typeof params.limit === "number" ? params.limit : undefined;
+		const cwd = typeof params.cwd === "string" ? params.cwd : undefined;
+		sendResult(id, { sessions: listSessions({ cwd, limit }) });
+	},
+
+	/** Copy a live session's stored conversation into a new live session. Params: sessionId, entryId?, name?. */
+	"session.fork": async (id, params) => {
+		const session = need(id, params);
+		if (!session) return;
+		try {
+			const child = session.fork({
+				entryId: params.entryId as string | null | undefined,
+				name: params.name as string | undefined,
+			});
+			register(child);
+			sendResult(id, {
+				sessionId: child.id,
+				parentSessionId: session.id,
+				messageCount: child.getMessages().length,
+			});
+		} catch (err) {
+			fail(id, err);
+		}
 	},
 };
 
@@ -193,7 +309,7 @@ export async function startRPCServer(): Promise<void> {
 		for (const sid of ids) {
 			await sessions
 				.get(sid)
-				?.agent.cleanup()
+				?.dispose()
 				.catch(() => {});
 		}
 		process.exit(0);

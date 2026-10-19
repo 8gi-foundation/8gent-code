@@ -43,4 +43,7 @@ export const RPC_ERRORS = {
 	METHOD_NOT_FOUND: -32601,
 	INVALID_PARAMS: -32602,
 	INTERNAL_ERROR: -32603,
+	/** Server errors (-32000..-32099): the call is valid but not possible right now. */
+	BUSY: -32000,
+	UNSUPPORTED: -32001,
 } as const;
