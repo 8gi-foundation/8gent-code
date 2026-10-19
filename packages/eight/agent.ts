@@ -3354,6 +3354,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			const continued = await continueEmptyTurn({
 				result,
 				toolCalls: this.turnToolLedger.length,
+				request: this.turnTask,
 				isAborted: () => this.stopRequested,
 				elapsedMs: Date.now() - chatStartTime,
 				budgetMs: resolveTurnBudgetMs(),
