@@ -20,8 +20,14 @@
 export const DEFAULT_TURN_BUDGET_MS = 1_500_000;
 /** Fraction of the budget after which the nudge fires. */
 export const NUDGE_FRACTION = 0.8;
-/** Fraction of the budget the slowest step so far must not cross (the "will not fit" line). */
+/** Fraction of the budget the projected end of the reaction must not cross (the "will not fit" line). */
 export const WONT_FIT_FRACTION = 0.95;
+/**
+ * Steps the slowest-so-far step is assumed to cost after the notice: one for the model to
+ * read it and call write_file, one more for the answer to land. A single step (the old rule)
+ * left no time to react: live pilot 2026-10-19 fired at 1446 s of 1500 s with 190-410 s steps.
+ */
+export const REACTION_STEPS = 2;
 
 /** A budget drain: call it between steps; reset() restarts the clock for a new turn. */
 export type BudgetDrain = (() => string[]) & { reset: () => void };
@@ -42,7 +48,7 @@ export function budgetNudgeText(elapsedMs: number, budgetMs: number): string {
 /**
  * Build a steer source for the loop's existing steering path (steerMessages in
  * agent.ts). Returns the nudge text at most once: on the first step that starts
- * after 80% of the budget, or earlier when the slowest step so far would not
+ * after 80% of the budget, or earlier when two of the slowest steps so far would not
  * fit in the remaining time (slow local models take minutes per step, so a pure
  * 80% line can be crossed inside a single step).
  *
@@ -69,7 +75,7 @@ export function createBudgetDrain(opts: {
 		if (fired || opts.budgetMs <= 0) return [];
 		const elapsed = t - startedAt;
 		const late = elapsed >= opts.budgetMs * NUDGE_FRACTION;
-		const wontFit = elapsed + longestStepMs >= opts.budgetMs * WONT_FIT_FRACTION;
+		const wontFit = elapsed + longestStepMs * REACTION_STEPS >= opts.budgetMs * WONT_FIT_FRACTION;
 		if (!late && !wontFit) return [];
 		fired = true;
 		return [budgetNudgeText(elapsed, opts.budgetMs)];
