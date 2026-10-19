@@ -866,6 +866,22 @@ function ghApiUse(rest: string[]): "send" | "fetch" {
 	return "fetch";
 }
 
+const GH_WRITE_VERBS = new Set([
+	"create",
+	"edit",
+	"delete",
+	"close",
+	"comment",
+	"merge",
+	"review",
+	"transfer",
+	"push",
+	"publish",
+	"set",
+	"add",
+	"remove",
+]);
+
 function ghUse(args: string[]): "send" | "fetch" | null {
 	const sub = args[0] ?? "";
 	if (sub.startsWith("-")) return null;
@@ -873,6 +889,14 @@ function ghUse(args: string[]): "send" | "fetch" | null {
 	if (sub === "api") return ghApiUse(rest);
 	// The first word that is not an option.
 	const action = rest.find((a) => !a.startsWith("-"));
+	// Cobra lets a flag stand before the verb (`gh gist -p create`), so the first plain word may be
+	// a flag's value. Any write verb among the plain words, or a flag before the action, is a send.
+	const plain = rest.filter((a) => !a.startsWith("-"));
+	const actionAt = action ? rest.indexOf(action) : -1;
+	const hidden =
+		plain.some((w) => GH_WRITE_VERBS.has(w)) ||
+		(actionAt > 0 && rest[actionAt - 1].startsWith("-"));
+	if (hidden && (sub === "issue" || sub === "pr" || GH_GROUPS.has(sub))) return "send";
 	if (sub === "issue" || sub === "pr") {
 		// Anything but a read sends content to the service.
 		return action && GH_READ_ONLY.has(action) ? "fetch" : "send";
@@ -981,7 +1005,7 @@ const RCLONE_READ = new Set([
 
 /** Package and artifact publishing: the subcommands that upload to a registry or host. */
 function publishUse(tool: string, args: string[]): "send" | "fetch" | null {
-	const words = plainWords(args, 3);
+	const words = plainWords(args, 8);
 	const first = words[0] ?? "";
 	const PKG_WRITE = new Set(["publish", "unpublish", "deprecate", "dist-tag", "owner", "access"]);
 	switch (tool) {
@@ -999,7 +1023,7 @@ function publishUse(tool: string, args: string[]): "send" | "fetch" | null {
 		case "buildah":
 			return args.includes("--push") || words.includes("push") ? "send" : null;
 		case "cargo":
-			return ["publish", "owner", "yank"].includes(first) ? "send" : null;
+			return ["publish", "owner", "yank"].some((v) => words.includes(v)) ? "send" : null;
 		case "gem":
 			return ["push", "yank", "owner"].includes(first) ? "send" : null;
 		case "aws": {
@@ -1018,10 +1042,10 @@ function publishUse(tool: string, args: string[]): "send" | "fetch" | null {
 				: null;
 		}
 		case "gsutil":
-			return ["cp", "mv", "rm", "rsync"].includes(first) ? "send" : null;
+			return ["cp", "mv", "rm", "rsync"].some((v) => words.includes(v)) ? "send" : null;
 		case "kubectl":
 		case "oc":
-			return first === "cp" ? "send" : null;
+			return words.includes("cp") ? "send" : null;
 		case "cloudflared":
 			return words.includes("tunnel") || args.some((a) => a === "--url" || a.startsWith("--url="))
 				? "send"
@@ -1158,11 +1182,29 @@ const NETWORK_CODE = {
 	test: (text: string): boolean => NETWORK_CODE_SHAPES.some((re) => re.test(text)),
 };
 
+/**
+ * The program text of an option with its value glued on: `-c'import socket'` reaches here as
+ * `-cimport socket`, where no word boundary precedes `import`. Every split of the leading flag
+ * letters from the rest is returned, so the patterns see the program as written. Only adds text.
+ */
+function attachedPrograms(args: string[]): string[] {
+	const out: string[] = [];
+	for (const a of args) {
+		const eq = /^--[a-z]+=/i.exec(a);
+		if (eq) out.push(a.slice(eq[0].length));
+		if (!/^-[A-Za-z]/.test(a)) continue;
+		for (let k = 2; k < a.length && /^-[A-Za-z]*$/.test(a.slice(0, k)); k++) {
+			out.push(a.slice(k));
+		}
+	}
+	return out;
+}
+
 /** Whether an interpreter is given its program on the command line, not in a file. */
 function hasInlineProgram(tool: string, args: string[]): boolean {
-	if (/^(pypy|python)[\d.]*$/.test(tool)) return args.some((a) => /^-[A-Za-z]*c$/.test(a));
+	if (/^(pypy|python)[\d.]*$/.test(tool)) return args.some((a) => /^-[A-Za-z]*c/.test(a));
 	if (/^(node|nodejs|bun)$/.test(tool))
-		return args.some((a) => /^(-e|-p|-pe|--eval|--print)$/.test(a));
+		return args.some((a) => /^(-e|-p|-pe|--eval|--print)$|^--(eval|print)=/.test(a));
 	if (tool === "deno") return args[0] === "eval";
 	if (tool === "perl" || tool === "ruby") return args.some((a) => /^-[A-Za-z]*e/i.test(a));
 	if (tool === "php") return args.includes("-r");
@@ -1236,7 +1278,11 @@ export function networkUse(argv: string[]): "send" | "fetch" | null {
 		return "send";
 	}
 	if (stdinProgram(tool, args)) return "send";
-	if (hasInlineProgram(tool, args) && NETWORK_CODE.test(args.join(" "))) return "send";
+	if (hasInlineProgram(tool, args)) {
+		const text = args.join(" ");
+		if (NETWORK_CODE.test(text) || attachedPrograms(args).some((t) => NETWORK_CODE.test(t)))
+			return "send";
+	}
 	return null;
 }
 
@@ -1265,7 +1311,10 @@ export function opensNetworkSocket(command: string): boolean {
 		/\/+dev\/+(tcp|udp)\//i.test(words) ||
 		// /dev/$proto/host/port, /dev/`echo tcp`/...: the shell builds the name, so assume the worst.
 		/\/+dev\/+[$`]/.test(command) ||
-		/\/+dev\/+[$`]/.test(words)
+		/\/+dev\/+[$`]/.test(words) ||
+		// $D/tcp/host/80 with D=/dev: the directory itself is a variable.
+		/\$\{?\w+\}?\/+(tcp|udp)\//i.test(command) ||
+		/\$\{?\w+\}?\/+(tcp|udp)\//i.test(words)
 	);
 }
 

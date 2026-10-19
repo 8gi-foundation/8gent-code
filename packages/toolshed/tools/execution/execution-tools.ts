@@ -98,6 +98,14 @@ registerTool(
 		if (bad !== undefined) {
 			return { passed: false, output: `[BLOCKED] ${UNSAFE_ARG_REASON}`, command: "" };
 		}
+		// A leading "-" makes the file an option to the runner (`--config=x.js` runs x.js).
+		if (typeof file === "string" && file.startsWith("-")) {
+			return {
+				passed: false,
+				output: "[BLOCKED] A test file may not start with '-' and was not run",
+				command: "",
+			};
+		}
 
 		// Detect test runner. argv, never a shell string (#3763).
 		let argv: string[];

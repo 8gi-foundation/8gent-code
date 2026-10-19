@@ -85,6 +85,16 @@ describe("run_tests", () => {
 	}
 });
 
+describe("run_tests: option injection", () => {
+	for (const f of ["--config=x.js", "-c", "--help"]) {
+		test(`a file that starts with - is refused: ${f}`, async () => {
+			const r = await run("run_tests", { file: f });
+			expect(r.passed).toBe(false);
+			expect(r.output).toContain("[BLOCKED]");
+		});
+	}
+});
+
 describe("install_deps", () => {
 	for (const p of [...PAYLOADS, "--registry=http://x"]) {
 		test(`package is refused: ${JSON.stringify(p)}`, async () => {
