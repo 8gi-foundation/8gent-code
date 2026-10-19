@@ -113,3 +113,27 @@ describe("pre-spawn backstop: a relative glob after a cd into ~/.8gent (#4434)",
 		);
 	});
 });
+
+describe("pre-spawn backstop: a .. climb from a deeper .8gent dir (#4434, Karen)", () => {
+	test("a bare glob or expansion in a .. path is denied", () => {
+		const W = "~/.8gent/rishi-pilot/runs/x/work";
+		for (const cmd of [
+			"cd ~/.8gent/rishi-pilot && cat ../*",
+			"cd ~/.8gent/rishi-pilot && cat ../../*",
+			"cd ~/.8gent/rishi-pilot/runs && cat ../../*",
+			`cd ${W} && cat ../../../../*`,
+			`cd ${W} && cat ../../../../$x`,
+			"cd ~/.8gent/rishi-pilot && cat ../brow$x-control.token",
+			"cd ~/.8gent/rishi-pilot && cat ../*/*/Cookies",
+			"cd ~/.8gent/rishi-pilot && cd .. && cat brow$x-control.token",
+			"cd ~/.8gent/rishi-pilot/runs/r/work && cat ../../../../brow${x}ser-control.token",
+		])
+			expect(preSpawnRefusal(cmd, WORK), cmd).toContain(DENIED);
+	});
+
+	test("a plain .. file name with no glob is not refused (no glob, token or control word to see)", () => {
+		expect(
+			preSpawnRefusal("cd ~/.8gent/rishi-pilot/runs/x/work && cat ../task.json", WORK),
+		).toBeNull();
+	});
+});

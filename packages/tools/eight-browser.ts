@@ -1346,8 +1346,14 @@ function tokenReaches8gentState(lower: string): boolean {
 	// later relative name, glob or expansion a path into the state dir: the whole rest of the command
 	// is judged by the strict rule (#4434). Only when every .8gent token is deeper (the pilot work
 	// dir) is each token judged on its own.
+	// A `..` segment anywhere (cat ../*, cd ..) can climb from a deeper dir to the state dir with a
+	// relative name no token shows, so it takes the same strict path.
 	if (
-		shellTokens(lower).some((t) => t.includes(".8gent") && ["", null].includes(tailUnder8gent(t)))
+		shellTokens(lower).some(
+			(t) =>
+				/(^|[/\\])\.\.([/\\]|$)/.test(t) ||
+				(t.includes(".8gent") && ["", null].includes(tailUnder8gent(t))),
+		)
 	)
 		return /[*?[{$]|token|control|profile/.test(lower.slice(lower.indexOf(".8gent")));
 	for (const tok of shellTokens(lower)) {
