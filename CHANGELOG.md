@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-10-19
+
+### Added
+- tools: run_batch action chunks behind EIGHT_RUN_BATCH (#3502) ([#4466](https://github.com/8gi-foundation/8gent-code/pull/4466))
+
+### Fixed
+- install: retry the release-list fetch and use GITHUB_TOKEN when present (#4468) ([#4472](https://github.com/8gi-foundation/8gent-code/pull/4472))
+- release: pin makensis to the current Homebrew version and let a dispatch rebuild an existing tag (#4468) ([#4471](https://github.com/8gi-foundation/8gent-code/pull/4471))
+
 ## [0.20.1] - 2026-10-19
 
 ### Added
