@@ -15,6 +15,7 @@ import { formatAgentStatus, getAgentPool, parseSpawnCommand } from "../orchestra
 import { getPermissionManager } from "../permissions";
 import { type RunLogEntry, readRuns } from "../reporting/runlog";
 import { getVault } from "../secrets";
+import { keyStorageLocation } from "../secrets/key-vault";
 import { runTelegramSetup } from "../self-autonomy/onboarding";
 import { getSkillManager, parseSkillCommand } from "../skills";
 import { formatTask, getTaskManager, parseTaskCommand } from "../tasks";
@@ -616,9 +617,7 @@ export async function handleProviderCommands(trimmed: string): Promise<boolean> 
 			} else {
 				pm.setApiKey(p.name, apiKey);
 				console.log(`\x1b[32mAPI key saved for ${p.displayName}\x1b[0m`);
-				console.log(
-					"  Stored in the key vault (OS keychain when available), not in providers.json.",
-				);
+				console.log(`  Stored in ${keyStorageLocation()}, not in providers.json.`);
 			}
 		}
 		return true;

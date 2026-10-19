@@ -17,6 +17,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resetProviderManager } from "../../providers";
+import { resetKeyVault } from "../../secrets/key-vault";
 import { handleProviderCommands } from "../repl";
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-repl-"));
@@ -184,12 +185,30 @@ describe("/provider key", () => {
 
 	test("reports the real settings path, not a hardcoded one", async () => {
 		declareProviders({});
-		await runCommand("/provider mistral");
-		const output = await runCommand("/provider key sk-test-value");
-		expect(output).toContain("API key saved");
-		// The path is redirectable; printing "~/.8gent/providers.json" would be a
-		// lie whenever EIGHT_DATA_DIR is set.
-		expect(output).toContain(process.env.EIGHT_PROVIDERS_SETTINGS_PATH as string);
+		// Keys go to the vault, never providers.json. Force the file vault under a
+		// throwaway data dir so the test never touches the developer's keychain.
+		const dataDir = fs.mkdtempSync(path.join(tmpDir, "vault-"));
+		const saved = { backend: process.env.EIGHT_KEY_BACKEND, dir: process.env.EIGHT_DATA_DIR };
+		process.env.EIGHT_KEY_BACKEND = "file";
+		process.env.EIGHT_DATA_DIR = dataDir;
+		resetKeyVault();
+		try {
+			await runCommand("/provider mistral");
+			const output = await runCommand("/provider key sk-test-value");
+			expect(output).toContain("API key saved");
+			// The path is redirectable; printing "~/.8gent/vault.enc" would be a
+			// lie whenever EIGHT_DATA_DIR is set.
+			expect(output).toContain(path.join(dataDir, "vault.enc"));
+			expect(output).not.toContain("sk-test-value");
+			const settings = fs.readFileSync(process.env.EIGHT_PROVIDERS_SETTINGS_PATH as string, "utf8");
+			expect(settings).not.toContain("sk-test-value");
+		} finally {
+			if (saved.backend === undefined) Reflect.deleteProperty(process.env, "EIGHT_KEY_BACKEND");
+			else process.env.EIGHT_KEY_BACKEND = saved.backend;
+			if (saved.dir === undefined) Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
+			else process.env.EIGHT_DATA_DIR = saved.dir;
+			resetKeyVault();
+		}
 	});
 });
 

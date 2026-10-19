@@ -166,7 +166,9 @@ export class LibsecretBackend extends IndexedBackend {
 export class FileKeyBackend implements KeyBackend {
 	readonly name = "file" as const;
 	private vault: SecretVault;
+	readonly file: string;
 	constructor(file: string = defaultVaultPath()) {
+		this.file = file;
 		this.vault = new SecretVault(file);
 	}
 	get(name: string) {
@@ -226,6 +228,16 @@ export function resetKeyVault(backends?: { primary: KeyBackend; file?: FileKeyBa
 
 export function activeKeyBackend(): KeyBackendName {
 	return primary().name;
+}
+
+/**
+ * Where a stored key actually lives, as a phrase for the user. The file path
+ * is the real one in use (EIGHT_DATA_DIR is honoured), never a hardcoded home.
+ */
+export function keyStorageLocation(): string {
+	const b = primary();
+	if (b instanceof FileKeyBackend) return b.file;
+	return b.name === "keychain" ? "the macOS Keychain" : "the OS keyring";
 }
 
 /**
