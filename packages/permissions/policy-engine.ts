@@ -17,7 +17,11 @@ import { parse as parseYaml } from "yaml";
 import { resolveHome } from "../core/home.js";
 import { type CapabilityRequest, enforceCapability } from "./capability-manifest.js";
 import { scrubGoalText } from "./goal-secret-scrub.js";
-import { commandMutatesSessionRecords, commandTouchesAuditFiles, validatePath } from "./path-guard.js";
+import {
+	commandMutatesSessionRecords,
+	commandTouchesAuditFiles,
+	validatePath,
+} from "./path-guard.js";
 import { hasSecret } from "./secret-detector.js";
 import { checkCommandBoundary, checkFilePathBoundary } from "./src/workspace-boundary.js";
 import type {
@@ -596,7 +600,6 @@ const DEFAULT_ALLOWED_PREFIXES = [
 	"/opt/homebrew/bin",
 	"/opt/homebrew/lib",
 	"/opt/homebrew/share",
-	os.tmpdir(),
 ];
 
 function resolveWorkspaceRoot(context: PolicyContext): string | null {
@@ -607,12 +610,41 @@ function resolveWorkspaceRoot(context: PolicyContext): string | null {
 	return null;
 }
 
+/**
+ * Per-session scratch directory: `<data dir>/scratch/<session id or pid>`.
+ * Replaces the shared, world-writable os.tmpdir() as the default writable
+ * location outside the workspace (#4488). Created lazily with mode 0700 and
+ * resolved once per session key, so the policy and the tools agree on it.
+ */
+const scratchDirCache = new Map<string, string>();
+
+export function sessionScratchDir(sessionId?: unknown): string {
+	const raw = typeof sessionId === "string" && sessionId ? sessionId : String(process.pid);
+	const key = raw.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64) || String(process.pid);
+	const base = path.join(
+		process.env.EIGHT_DATA_DIR || path.join(resolveHome(), ".8gent"),
+		"scratch",
+	);
+	const cacheKey = `${base}|${key}`;
+	const cached = scratchDirCache.get(cacheKey);
+	if (cached) return cached;
+	const dir = path.join(base, key);
+	try {
+		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	} catch {
+		// Not creatable: the prefix simply matches nothing useful; policy stays closed.
+	}
+	scratchDirCache.set(cacheKey, dir);
+	return dir;
+}
+
 function resolveAllowedPrefixes(context: PolicyContext): string[] {
 	const fromContext = context.allowedAbsolutePrefixes;
+	const base = [...DEFAULT_ALLOWED_PREFIXES, sessionScratchDir(context.sessionId)];
 	if (Array.isArray(fromContext)) {
-		return [...DEFAULT_ALLOWED_PREFIXES, ...fromContext.filter((s) => typeof s === "string")];
+		return [...base, ...fromContext.filter((s) => typeof s === "string")];
 	}
-	return DEFAULT_ALLOWED_PREFIXES;
+	return base;
 }
 
 /**
