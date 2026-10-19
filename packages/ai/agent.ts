@@ -64,6 +64,8 @@ export interface EightAgentConfig {
 	turnBudgetMs?: number;
 	/** Turn start (epoch ms) for the budget clock; defaults to agent creation */
 	turnStartedAt?: number;
+	/** Fraction of the turn budget at which the nudge fires (per-model profile, #4439) */
+	nudgeFraction?: number;
 	/** Model override (tests); defaults to createModel(config.provider) */
 	model?: LanguageModel;
 	/** Callback for each step */
@@ -254,7 +256,11 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 	// model to write its best answer to the requested output. It rides the same
 	// steer log, so it persists for every later step of the run.
 	const budgetMs = config.turnBudgetMs ?? resolveTurnBudgetMs();
-	const budgetDrain = createBudgetDrain({ budgetMs, startedAt: config.turnStartedAt });
+	const budgetDrain = createBudgetDrain({
+		budgetMs,
+		startedAt: config.turnStartedAt,
+		nudgeFraction: config.nudgeFraction,
+	});
 	const steer = (): string[] => [...(config.steer?.() ?? []), ...budgetDrain()];
 
 	// Retries per request: only when the user set settings.retry.maxRetries; otherwise the

@@ -61,6 +61,8 @@ export function createBudgetDrain(opts: {
 	budgetMs: number;
 	startedAt?: number;
 	now?: () => number;
+	/** Per-model nudge point (#4439, packages/ai/harness-profile.ts); defaults to NUDGE_FRACTION. */
+	nudgeFraction?: number;
 }): BudgetDrain {
 	const now = opts.now ?? Date.now;
 	let startedAt = opts.startedAt ?? now();
@@ -74,7 +76,7 @@ export function createBudgetDrain(opts: {
 		lastStepStart = t;
 		if (fired || opts.budgetMs <= 0) return [];
 		const elapsed = t - startedAt;
-		const late = elapsed >= opts.budgetMs * NUDGE_FRACTION;
+		const late = elapsed >= opts.budgetMs * (opts.nudgeFraction ?? NUDGE_FRACTION);
 		const wontFit = elapsed + longestStepMs * REACTION_STEPS >= opts.budgetMs * WONT_FIT_FRACTION;
 		if (!late && !wontFit) return [];
 		fired = true;
