@@ -359,28 +359,64 @@ describe("round two: ANSI-C quotes, literal -l text, pending lifetime", () => {
 		expect(defs).not.toMatch(/term_(pane|select|switch|focus)/);
 	});
 
-	test("pending text has a size cap: past it a person is asked and the hold is cleared", async () => {
+	test("past the cap the send is refused with no prompt, even with a person attached", async () => {
 		const asked: string[] = [];
 		attachTerminal(() => "approve", asked);
-		await typed("git push origin ");
-		expect(await typed(" ".repeat(MAX_PENDING_INPUT + 1))).toContain('"ok":true');
-		expect(asked.length).toBe(1);
-		// Hold cleared: "main" alone is ordinary input, not "git push origin ... main".
-		expect(await send("main")).toContain('"ok":true');
-	});
-
-	test("past the cap a decline sends nothing and still clears the hold", async () => {
-		const asked: string[] = [];
-		attachTerminal(() => "deny", asked);
-		await typed("echo ok ");
 		sent.length = 0;
-		expect(await typed("a".repeat(MAX_PENDING_INPUT + 1))).toContain("[PERMISSION DENIED]");
+		const out = await typed("a".repeat(MAX_PENDING_INPUT + 1));
+		expect(out).toContain("[PERMISSION DENIED]");
+		expect(out).toContain("term_kill");
+		expect(out).toContain("over the");
+		expect(asked).toEqual([]);
 		expect(sent).toEqual([]);
 	});
 
 	test("past the cap with no terminal is refused", async () => {
 		process.env.EIGHT_HEADLESS = "1";
 		expect(await typed("a".repeat(MAX_PENDING_INPUT + 1))).toContain("[PERMISSION DENIED]");
+		expect(sent).toEqual([]);
+	});
+
+	test("padding attack: call 2 is refused, call 3 is judged with the full pending text", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		expect(await typed("true; rm -r")).toContain('"ok":true');
+		sent.length = 0;
+		// Call 2: padding that would push the held text over the cap.
+		expect(await typed(" ".repeat(MAX_PENDING_INPUT + 1))).toContain("[PERMISSION DENIED]");
+		expect(sent).toEqual([]);
+		// Call 3: not judged alone. The held "true; rm -r" joins it into the root wipe.
+		const out = await send("f /");
+		expect(out).toContain("[PERMISSION DENIED]");
+		expect(out).toContain("blocked by security policy");
+		expect(sent).toEqual([]);
+	});
+
+	test("pending text survives a cap refusal; term_kill still clears it", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		await typed("true; rm -r");
+		await typed("a".repeat(MAX_PENDING_INPUT + 1));
+		expect(await send("f /")).toContain("blocked by security policy");
+		await executeTermTool("term_kill", { sessionId: "s1" });
+		sent.length = 0;
+		expect(await send("echo hi")).toContain('"ok":true');
+		expect(sent).toEqual(["echo hi"]);
+	});
+
+	test("a prompt for long pending text shows the tail, not the head", async () => {
+		const asked: string[] = [];
+		attachTerminal(() => "deny", asked);
+		const head = `echo $'${"x".repeat(5000)}`;
+		await typed(head);
+		await typed("TAILMARK'");
+		expect(asked.length).toBeGreaterThan(0);
+		const last = asked[asked.length - 1];
+		expect(last.endsWith("TAILMARK'")).toBe(true);
+		expect(last.length).toBeLessThanOrEqual(4096 + 3);
+	});
+
+	test("$$'x' asks (read as an ANSI-C quote; imprecise but only toward asking)", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		expect(await send("echo $$'x'")).toContain("[PERMISSION DENIED]");
 		expect(sent).toEqual([]);
 	});
 });

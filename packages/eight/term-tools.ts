@@ -57,7 +57,7 @@ const readOffsets = new Map<string, number>();
 /** Typed but not yet submitted, per session, so a later Enter is judged with it. */
 const pendingInput = new Map<string, string>();
 
-/** Most unsubmitted text held per session; past it a person is asked and the hold is cleared. */
+/** Most unsubmitted text held per session; past it term_send is refused and the hold is kept. */
 export const MAX_PENDING_INPUT = 64 * 1024;
 
 // Tab (0x09) counts: in a shell it triggers completion and can rewrite the line.
@@ -66,6 +66,8 @@ const CONTROL_CHARS = /[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/;
 /** True when the line has quotes or shell constructs we cannot read for sure. */
 function unreadable(text: string): boolean {
 	if (CONTROL_CHARS.test(text)) return true;
+	// Known imprecision: $$' is read here as an ANSI-C quote, but bash sees $$ (the pid) then a
+	// plain quote. It only errs toward asking, and the quote tracker asks on every piece.
 	// $'...' (ANSI-C quoting) treats a backslash as an escape inside single quotes,
 	// which the quote tracking below does not model; a person reads it instead.
 	if (/\$\(|`|<<|<\(|>\(|\$'/.test(text)) return true;
@@ -121,6 +123,10 @@ function unsubmitted(line: string, enter: boolean): string {
 	return text.slice(start);
 }
 
+/** What a prompt shows of long text: the tail, since the end is what a joined command finishes with. */
+const PROMPT_TAIL = 4096;
+const tail = (t: string) => (t.length > PROMPT_TAIL ? `...${t.slice(-PROMPT_TAIL)}` : t);
+
 /** Null when the input may go ahead, else the refusal to hand back to the agent. */
 async function gateInput(tool: string, text: string): Promise<string | null> {
 	const pm = getPermissionManager();
@@ -152,7 +158,7 @@ async function gateInput(tool: string, text: string): Promise<string | null> {
 		const ok = await pm.askPerson(
 			"Type Into Terminal Session",
 			"The agent wants to type text that cannot be read as a plain command.",
-			text,
+			tail(text),
 		);
 		return ok
 			? null
@@ -164,7 +170,7 @@ async function gateInput(tool: string, text: string): Promise<string | null> {
 			const ok = await pm.requestPermission(
 				"Execute Shell Command",
 				"The agent wants to run a command in a terminal session.",
-				line,
+				tail(line),
 			);
 			if (!ok) return refuse(`user declined to run: ${line}`);
 		}
@@ -359,22 +365,14 @@ async function termSend(args: Record<string, unknown>): Promise<string> {
 	const appendEnter = args.appendEnter !== false;
 	// Judge what is on the line, including text typed earlier and not yet submitted.
 	const line = (pendingInput.get(sessionId) ?? "") + text;
+	if (line.length > MAX_PENDING_INPUT) {
+		// Refuse and leave the hold exactly as it is. Clearing it would not clear the
+		// shell's line: the bytes already typed stay there, and padding past the cap
+		// would let the next piece be judged alone. Only term_kill clears the hold.
+		return `[PERMISSION DENIED] term_send: the pending unsubmitted text is over the ${MAX_PENDING_INPUT} byte cap, so it cannot be checked as one command line. Nothing was sent and the pending text is kept. Use term_kill to end this session and start clean.`;
+	}
 	const denied = await gateInput("term_send", line);
 	if (denied) return denied;
-	if (line.length > MAX_PENDING_INPUT) {
-		// Held text must not grow without bound: ask a person, then drop the hold.
-		pendingInput.delete(sessionId);
-		const ok = await getPermissionManager().askPerson(
-			"Type Into Terminal Session",
-			"The agent has typed more unsubmitted text than can be checked as one command line.",
-			line.slice(0, 4096),
-		);
-		if (!ok) {
-			return "[PERMISSION DENIED] term_send: a person declined oversized pending input. Nothing was sent.";
-		}
-		await sendTmuxKeys(sessionId, text, { appendEnter });
-		return JSON.stringify({ ok: true, sessionId, sent: text, enter: appendEnter });
-	}
 	const rest = unsubmitted(line, appendEnter);
 	if (rest === "") pendingInput.delete(sessionId);
 	else pendingInput.set(sessionId, rest);
