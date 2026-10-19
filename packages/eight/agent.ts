@@ -572,6 +572,13 @@ export class Agent {
 				localRuntime: () => isLocalProvider(this.config.runtime),
 			},
 		);
+		// run_batch items skip the agent loop, so they take the same refusals here (#3502).
+		this.executor.setItemGate(async (t, a) => {
+			const refusal = await this.refuseToolCall(t, a);
+			if (refusal != null) return { refusal };
+			return { refusal: null, ...(await this.noteToolStart(t, a)) };
+		});
+		this.executor.setItemEnd((id, t, a, r, ms) => this.noteToolEnd(id, t, a, r, ms));
 		// System One (on by default, EIGHT_SYSTEM_ONE=0 off): with the allowlist
 		// opted out, start loading the judge now, in the background, so the
 		// first gated command does not pay the model load. Idempotent per
@@ -1108,6 +1115,117 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return this.extensionHost.checkToolCall(toolName, args);
 	}
 
+	/** The provider config of the turn in flight, so a batched item can switch it to local (#3502). */
+	private turnProvider?: ProviderConfig;
+
+	/**
+	 * NemoClaw privacy gate for one allowed tool call: remember file paths, and when a
+	 * sensitive one is in context on a cloud provider, switch that provider config to local.
+	 * Without providerConfig (the text path) it only records the path.
+	 */
+	private applyPrivacyGate(
+		toolName: string,
+		args: Record<string, unknown>,
+		providerConfig?: ProviderConfig,
+	): void {
+		const toolPath = args?.path;
+		if (
+			typeof toolPath !== "string" ||
+			!["read_file", "write_file", "edit_file", "delete_file"].includes(toolName)
+		)
+			return;
+		this.recentFilePaths.push(toolPath);
+		// Keep bounded - only last 20 paths
+		if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
+		if (!providerConfig) return;
+		const gate = privacyGate(this.recentFilePaths, providerConfig.name);
+		if (!gate.shouldForceLocal) return;
+		const fallback = forceLocalModel(providerConfig.name);
+		if (!fallback) return;
+		console.log(`\n\x1b[33m[PRIVACY] ${gate.reason}\x1b[0m`);
+		console.log(`\x1b[33m[PRIVACY] Switching to ${fallback.provider}/${fallback.model}\x1b[0m`);
+		providerConfig.name = fallback.provider as typeof providerConfig.name;
+		providerConfig.model = fallback.model;
+		// The forced-local provider resolves its own endpoint and key:
+		// the session's belong to the provider it is leaving (#3261).
+		providerConfig.apiKey = undefined;
+		providerConfig.baseURL = undefined;
+		providerConfig.headers = undefined;
+	}
+
+	private batchSeq = 0;
+
+	/** What an allowed run_batch item starts with: beforeTool hooks, privacy gate, start event, session row (#3502). */
+	private async noteToolStart(
+		toolName: string,
+		args: Record<string, unknown>,
+	): Promise<{ id: string; startedAt: number }> {
+		// Parallel reads can start in one millisecond, so the id carries a counter.
+		const id = `batch-${Date.now()}-${++this.batchSeq}`;
+		const startedAt = Date.now();
+		const loggedArgs = loggableToolArgs(toolName, args);
+		await this.hookManager.executeHooks("beforeTool", {
+			sessionId: this.sessionId,
+			tool: toolName,
+			toolInput: loggedArgs,
+			workingDirectory: this.config.workingDirectory || process.cwd(),
+		});
+		this.applyPrivacyGate(toolName, args, this.turnProvider);
+		console.log(`  -> ${toolName}(${JSON.stringify(loggedArgs).slice(0, 50)}...)`);
+		this.events.onToolStart?.({ toolName, toolCallId: id, args: loggedArgs });
+		this.sessionWriter.writeToolCall(
+			{
+				toolCallId: id,
+				name: toolName,
+				arguments: loggedArgs,
+				success: true,
+				durationMs: 0,
+				startedAt: new Date(startedAt).toISOString(),
+			},
+			undefined,
+			undefined,
+		);
+		return { id, startedAt };
+	}
+
+	/** What an allowed run_batch item ends with: session row, end event, afterTool hooks (#3502). */
+	private async noteToolEnd(
+		id: string,
+		toolName: string,
+		args: Record<string, unknown>,
+		result: string,
+		durationMs: number,
+	): Promise<void> {
+		const loggedArgs = loggableToolArgs(toolName, args);
+		const success = !isErrorToolResult(result);
+		if (success)
+			this.sessionWriter.writeToolResult(
+				id,
+				true,
+				result.slice(0, 2000),
+				durationMs,
+				toolName,
+				undefined,
+			);
+		else this.sessionWriter.writeToolError(id, toolName, result.slice(0, 2000), undefined);
+		this.events.onToolEnd?.({
+			toolName,
+			toolCallId: id,
+			args: loggedArgs,
+			success,
+			durationMs,
+			resultPreview: result.slice(0, 200),
+		});
+		await this.hookManager.executeHooks("afterTool", {
+			sessionId: this.sessionId,
+			tool: toolName,
+			toolInput: loggedArgs,
+			toolOutput: result,
+			duration: durationMs,
+			workingDirectory: this.config.workingDirectory || process.cwd(),
+		});
+	}
+
 	/** Every built-in tool name, on either path. Extension tools may not take one. */
 	private builtInToolNames(): string[] {
 		const names = new Set<string>(Object.keys(agentTools));
@@ -1261,14 +1379,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 				// Track file paths for the privacy gate, matching the native path.
 				const toolPath = (args as { path?: unknown }).path;
-				if (
-					!refusal &&
-					typeof toolPath === "string" &&
-					["read_file", "write_file", "edit_file", "delete_file"].includes(toolName)
-				) {
-					this.recentFilePaths.push(toolPath);
-					if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
-				}
+				if (!refusal) this.applyPrivacyGate(toolName, args);
 
 				// Everything below that records the call sees typed desktop text as its length (#4057).
 				const loggedArgs = loggableToolArgs(toolName, args);
@@ -2234,6 +2345,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			apiKey: this.config.apiKey,
 			baseURL: this.config.baseUrl ? toOpenAiV1Base(this.config.baseUrl) : undefined,
 		};
+		this.turnProvider = providerConfig;
 
 		// Build system instructions
 		const systemPrompt = this.messageHistory.find((m) => m.role === "system")?.content;
@@ -2352,6 +2464,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			...(messageBoardroomOn() ? ["message_boardroom"] : []),
 			// Lean MCP access (#3474): search, schema on demand, trimmed results.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? ["mcp_list_tools", "mcp_call_tool"] : []),
+			// Action chunks (#3502): one turn plans several tool calls.
+			...(process.env.EIGHT_RUN_BATCH === "1" ? ["run_batch"] : []),
 			// 8gent Browser (#3622, #3785): an isolated profile, named by EIGHT_BROWSER_PROFILE or the
 			// default "eight-local", never the person's logged-in profile. EIGHT_BROWSER_LOCAL=0 withholds them.
 			...localBrowserTools(),
@@ -2501,34 +2615,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				workingDirectory: this.config.workingDirectory || process.cwd(),
 			});
 
-			// ── NemoClaw Privacy Gate: track file paths for sensitive context detection
-			const toolPath = event.args?.path as string | undefined;
-			if (
-				toolPath &&
-				["read_file", "write_file", "edit_file", "delete_file"].includes(event.toolName)
-			) {
-				this.recentFilePaths.push(toolPath);
-				// Keep bounded - only last 20 paths
-				if (this.recentFilePaths.length > 20) this.recentFilePaths.shift();
-
-				const gate = privacyGate(this.recentFilePaths, providerConfig.name);
-				if (gate.shouldForceLocal) {
-					const fallback = forceLocalModel(providerConfig.name);
-					if (fallback) {
-						console.log(`\n\x1b[33m[PRIVACY] ${gate.reason}\x1b[0m`);
-						console.log(
-							`\x1b[33m[PRIVACY] Switching to ${fallback.provider}/${fallback.model}\x1b[0m`,
-						);
-						providerConfig.name = fallback.provider as typeof providerConfig.name;
-						providerConfig.model = fallback.model;
-						// The forced-local provider resolves its own endpoint and key:
-						// the session's belong to the provider it is leaving (#3261).
-						providerConfig.apiKey = undefined;
-						providerConfig.baseURL = undefined;
-						providerConfig.headers = undefined;
-					}
-				}
-			}
+			this.applyPrivacyGate(event.toolName, event.args, providerConfig);
 
 			console.log(`  -> ${event.toolName}(${JSON.stringify(loggedArgs).slice(0, 50)}...)`);
 

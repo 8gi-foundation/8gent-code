@@ -260,6 +260,7 @@ import {
 	buildChildEnv,
 	withheldAny,
 } from "./harness/child-env";
+import { isErrorToolResult } from "./honesty";
 import { downscaleNote, imageMaxSide } from "./image-fit";
 import { IssueBlameGate, issueBodyOf } from "./issue-blame";
 import { layoutMeasureLine } from "./layout-measure";
@@ -273,6 +274,7 @@ import {
 	placeholderPaths,
 } from "./placeholder-paths";
 import { RetiredFacts } from "./retired-facts";
+import { RUN_BATCH_TOOL_DEF, runBatch, runBatchOn } from "./run-batch";
 import { ensureScratchExcludedIfPresent } from "./scratch-exclude";
 import { scrubKeepingAttachment, scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
@@ -321,7 +323,7 @@ export type ReplayClass = "replay" | "never" | "ask";
  * started under, and resume refuses to re-run a call whose class has changed
  * since (8SO review, #4118).
  */
-export const REPLAY_POLICY_VERSION = 3;
+export const REPLAY_POLICY_VERSION = 4;
 
 export function isReplayClass(v: unknown): v is ReplayClass {
 	return v === "replay" || v === "never" || v === "ask";
@@ -345,6 +347,7 @@ const REPLAY_SAFE_TOOLS = new Set(["read_file", "git_log"]);
 
 // Changing this set: bump REPLAY_POLICY_VERSION.
 const NEVER_REPLAY_TOOLS = new Set([
+	"run_batch",
 	"write_file",
 	"edit_file",
 	"run_command",
@@ -2326,6 +2329,8 @@ export class ToolExecutor {
 			...getTermToolDefs(),
 			// Lean MCP access (#3474): advertised only with EIGHT_MCP_LEAN=1 exactly.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? MCP_LEAN_TOOL_DEFS : []),
+			// Action chunks (#3502): advertised only with EIGHT_RUN_BATCH=1 exactly.
+			...(runBatchOn() ? [RUN_BATCH_TOOL_DEF] : []),
 			// Posting (#3595): advertised only where the tg-group helper is installed.
 			...(postMessageAvailable() ? [POST_MESSAGE_TOOL_DEF] : []),
 			// Mid-task note to the boardroom (#4344): local file only; EIGHT_MESSAGE_BOARDROOM=0 withholds it.
@@ -2351,6 +2356,31 @@ export class ToolExecutor {
 	 * maker-checker, edit-scope, rate-limit and plan-mode checks as built-in
 	 * tools, and their output is scrubbed, filtered and chipped the same way.
 	 */
+	/**
+	 * Per-item gate for run_batch: the owner's refusal checks and start bookkeeping (agent.ts).
+	 * refusal is null when the item may run; id and startedAt then name its start event.
+	 */
+	private itemGate?: (
+		tool: string,
+		args: Record<string, unknown>,
+	) => Promise<{ refusal: string | null; id?: string; startedAt?: number }>;
+	/** Per-item end bookkeeping for run_batch: end event, session row, afterTool hooks. */
+	private itemEnd?: (
+		id: string,
+		tool: string,
+		args: Record<string, unknown>,
+		result: string,
+		durationMs: number,
+	) => Promise<void>;
+
+	setItemGate(gate: NonNullable<ToolExecutor["itemGate"]>): void {
+		this.itemGate = gate;
+	}
+
+	setItemEnd(end: NonNullable<ToolExecutor["itemEnd"]>): void {
+		this.itemEnd = end;
+	}
+
 	setExtensionRunner(runner: ToolExecutor["extensionRunner"]): void {
 		this.extensionRunner = runner;
 	}
@@ -2988,6 +3018,32 @@ export class ToolExecutor {
 				return vercelListDomains(args.projectId as string);
 			case "vercel_get_deployment_logs":
 				return vercelGetDeploymentLogs(args.deploymentId as string);
+
+			case "run_batch":
+				if (!runBatchOn()) return "Error: run_batch is not enabled. Nothing was run.";
+				if (!this.itemGate)
+					return "Error: run_batch has no per-item gate in this session. Nothing was run.";
+				return runBatch(args.items, async (t, a) => {
+					const gate = this.itemGate;
+					if (!gate)
+						return "Error: run_batch has no per-item gate in this session. Nothing was run.";
+					const s = await gate(t, a);
+					if (s.refusal != null)
+						return isErrorToolResult(s.refusal) ? s.refusal : `Error: ${s.refusal}`;
+					// Start already fired: the end must fire exactly once, even if execute throws,
+					// and a throwing end hook must not change the item's own status.
+					const t0 = Date.now();
+					let r = "";
+					try {
+						r = await this.execute(t, a);
+						return r;
+					} catch (e) {
+						r = `Error: ${e instanceof Error ? e.message : String(e)}`;
+						throw e;
+					} finally {
+						if (s.id) await this.itemEnd?.(s.id, t, a, r, Date.now() - t0)?.catch(() => {});
+					}
+				});
 
 			// MCP tools
 			case "mcp_list_tools":
