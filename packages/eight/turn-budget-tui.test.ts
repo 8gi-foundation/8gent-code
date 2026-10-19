@@ -24,6 +24,7 @@ let home: string;
 let repo: string;
 let server: ReturnType<typeof Bun.serve>;
 let bodies: string[] = [];
+let times: number[] = [];
 let modelDelayMs = 0;
 let script: (call: number, body: string) => string = () => "ok";
 
@@ -48,6 +49,7 @@ beforeAll(async () => {
 			const body = JSON.stringify(await req.json());
 			if (modelDelayMs > 0) await Bun.sleep(modelDelayMs);
 			bodies.push(body);
+			times.push(Date.now());
 			return Response.json({
 				id: "c1",
 				object: "chat.completion",
@@ -78,9 +80,9 @@ afterAll(() => {
 	removeDir(repo);
 });
 
-function build(maxTurns = 20): AgentT {
+function build(maxTurns = 20, model = "m"): AgentT {
 	return new Agent({
-		model: "m",
+		model,
 		runtime: "ollama",
 		workingDirectory: repo,
 		baseUrl: `http://127.0.0.1:${server.port}`,
@@ -167,4 +169,48 @@ describe("#4431 the TUI text-tool path gets the turn-budget notice", () => {
 		expect(writtenAt - t0).toBeLessThan(3000);
 		expect(bodies.findIndex((b) => b.includes("TIME BUDGET"))).toBeGreaterThan(0);
 	}, 30_000);
+
+	// #4439: a model with a harness profile entry gets its own nudge point on the real TUI path, and
+	// the session logs one line naming the profile. qwen3.8:27b-mlx is seeded at 0.6, so under a
+	// 10 s budget with short steps the notice lands between 6 s and 8 s (default 0.8 would be 8 s).
+	test("a profiled model gets the notice at its own nudge point and logs its profile", async () => {
+		bodies = [];
+		times = [];
+		modelDelayMs = 150;
+		process.env.EIGHT_TURN_BUDGET_MS = "10000";
+		const out = join(repo, "answer-profile.json");
+		let wrote = false;
+		let n = 0;
+		script = (_n, body) => {
+			if (wrote) return "DONE: wrote answer-profile.json";
+			if (body.includes("TIME BUDGET")) {
+				wrote = true;
+				return toolCall("write_file", { path: out, content: "[[3]]" });
+			}
+			return toolCall("run_command", { command: `echo step${n++}` });
+		};
+		const logged: string[] = [];
+		const realLog = console.log;
+		console.log = (...args: unknown[]) => {
+			logged.push(args.map(String).join(" "));
+		};
+		const t0 = Date.now();
+		try {
+			await build(80, "qwen3.8:27b-mlx").chat(PROMPT);
+		} finally {
+			console.log = realLog;
+			modelDelayMs = 0;
+			process.env.EIGHT_TURN_BUDGET_MS = ENV.EIGHT_TURN_BUDGET_MS;
+		}
+		expect(existsSync(out)).toBe(true);
+		const first = bodies.findIndex((b) => b.includes("TIME BUDGET"));
+		expect(first).toBeGreaterThan(0);
+		const at = times[first] - t0;
+		expect(at).toBeGreaterThanOrEqual(6000);
+		expect(at).toBeLessThan(8000);
+		const lines = logged.filter((l) => l.startsWith("[harness-profile]"));
+		expect(lines).toEqual([
+			"[harness-profile] model=qwen3.8:27b-mlx profile=qwen3.8:27b-mlx maxSteps=50 nudge=0.6 maxOutputTokens=4096",
+		]);
+	}, 60_000);
 });
