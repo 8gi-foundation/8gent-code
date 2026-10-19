@@ -26,7 +26,13 @@ export const EMPTY_TURN_REQUEST_MAX = 400;
  * back, as data: whitespace collapsed, capped, nothing added to it.
  */
 export function emptyTurnSteer(request: string): string {
-	const flat = request.replace(/\s+/g, " ").trim();
+	// Collapse whitespace, drop control and bidi characters, and turn " into ' so
+	// the request cannot close the quote it sits in.
+	const flat = request
+		.replace(/\s+/g, " ")
+		.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+		.replace(/"/g, "'")
+		.trim();
 	if (flat === "") {
 		return `${EMPTY_TURN_CONTINUE_LEAD} Finish the task: produce the requested output (files or answer), then reply with a short summary.`;
 	}
