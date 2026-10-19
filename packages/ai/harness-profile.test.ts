@@ -8,9 +8,11 @@ import {
 	HARNESS_BOUNDS,
 	HARNESS_PROFILES,
 	type HarnessProfileTable,
+	harnessNoThink,
 	harnessProfileLine,
 	resolveHarnessProfile,
 } from "./harness-profile";
+import { buildTextToolCall } from "./text-tool-endpoint";
 import { NUDGE_FRACTION, createBudgetDrain } from "./turn-budget";
 
 const defaults = { maxSteps: 30, maxOutputTokens: 4096 };
@@ -146,5 +148,57 @@ describe("createBudgetDrain nudgeFraction", () => {
 		}
 		t = 8000;
 		expect(drain()).toHaveLength(1);
+	});
+});
+
+describe("harnessNoThink (#4462)", () => {
+	test("think: false in an entry turns thinking off for that model only", () => {
+		const table: HarnessProfileTable = {
+			"local:a": { think: false, why: "t" },
+			"local:b": { why: "t" },
+		};
+		expect(harnessNoThink("local:a", table)).toBe(true);
+		expect(harnessNoThink("local:b", table)).toBe(false);
+		expect(harnessNoThink("local:c", table)).toBe(false);
+		expect(harnessNoThink(undefined, table)).toBe(false);
+	});
+
+	test("the seeded table turns it off for local qwen3.8:27b-mlx and nothing else", () => {
+		expect(harnessNoThink("qwen3.8:27b-mlx")).toBe(true);
+		for (const model of Object.keys(HARNESS_PROFILES).filter((m) => m !== "qwen3.8:27b-mlx")) {
+			expect(harnessNoThink(model)).toBe(false);
+		}
+	});
+
+	test("malformed values fall back to default thinking", () => {
+		for (const think of ["false", 0, null, true, "off", 4096, {}]) {
+			const table = { m: { think, why: "t" } } as unknown as HarnessProfileTable;
+			expect(harnessNoThink("m", table)).toBe(false);
+		}
+	});
+
+	test("the switch reaches the request on Ollama only", async () => {
+		const prevFetch = globalThis.fetch;
+		const prevEnv = process.env.EIGHT_OLLAMA_NO_THINK;
+		Reflect.deleteProperty(process.env, "EIGHT_OLLAMA_NO_THINK");
+		const bodies: Array<Record<string, unknown>> = [];
+		globalThis.fetch = (async (_u: unknown, init?: { body?: string }) => {
+			bodies.push(JSON.parse(init?.body ?? "{}"));
+			return Response.json({ choices: [{ message: { content: "ok" } }] });
+		}) as unknown as typeof fetch;
+		try {
+			const hi = [{ role: "user" as const, content: "hi" }];
+			const send = (provider: string, model: string) =>
+				buildTextToolCall({ provider, model, noThink: harnessNoThink(model), idleMs: null })(hi);
+			await send("ollama", "qwen3.8:27b-mlx");
+			await send("lmstudio", "qwen3.8:27b-mlx");
+			await send("ollama", "qwen3.5:9b");
+			expect(bodies[0].reasoning_effort).toBe("none");
+			expect("reasoning_effort" in bodies[1]).toBe(false);
+			expect("reasoning_effort" in bodies[2]).toBe(false);
+		} finally {
+			globalThis.fetch = prevFetch;
+			if (prevEnv !== undefined) process.env.EIGHT_OLLAMA_NO_THINK = prevEnv;
+		}
 	});
 });
