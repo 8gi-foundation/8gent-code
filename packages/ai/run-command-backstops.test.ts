@@ -51,12 +51,12 @@ const CASES: { name: string; command: string; starts: string }[] = [
 	{
 		name: "browser profiles (#3622, the 8SO repro)",
 		command: "ls ~/.8gent/browser-profiles",
-		starts: `[PERMISSION DENIED] ${REFUSAL_NOTE} Command touches 8gent Browser control tokens or profiles`,
+		starts: `[PERMISSION DENIED] ${REFUSAL_NOTE} Run it without touching ~/.8gent/browser-* paths: this command reaches 8gent Browser control tokens or profiles`,
 	},
 	{
 		name: "browser control token (#3622)",
 		command: "cat ~/.8gent/browser-control.token",
-		starts: `[PERMISSION DENIED] ${REFUSAL_NOTE} Command touches`,
+		starts: `[PERMISSION DENIED] ${REFUSAL_NOTE} Run it without touching ~/.8gent/browser-* paths: this command reaches`,
 	},
 ];
 

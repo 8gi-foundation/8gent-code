@@ -1335,6 +1335,50 @@ function names8gentDir(lower: string): boolean {
 	return false;
 }
 
+/**
+ * Anything that lets a later relative name escape the literal .8gent path (#4434): a $ (a
+ * substitution, $PWD, $OLDPWD, ${..}), ~- (the previous directory), cd - or pushd -, popd, or a
+ * second directory change. Quotes and backticks are already stripped by the caller. The pilot work-dir
+ * command has none of these, so it keeps the per-token narrowing; `cd <work dir> && echo $HOME` is a
+ * false refusal we accept.
+ */
+function escapesLiteralPath(lower: string): boolean {
+	return /\$|~-|\bpopd\b|\b(?:cd|pushd)\s+-(?:\s|$)/.test(lower);
+}
+
+/**
+ * True when a token that holds .8gent, from its .8gent on, carries a wildcard, a parameter expansion, a
+ * real brace group ({a,b}, {1..3}, or an unclosed {) or the words token, control or profile. Only those
+ * tokens count: a [ ] or $ or the word "control" in a LATER, unrelated token (a python one-liner's
+ * d['train'] after cd ~/.8gent/rishi-pilot/runs/x/work) is not a path under .8gent (#4432).
+ */
+function tokenReaches8gentState(lower: string): boolean {
+	// Any token that IS the .8gent directory (cd ~/.8gent, HOME8=~/.8gent, -C ~/.8gent) makes every
+	// later relative name, glob or expansion a path into the state dir: the whole rest of the command
+	// is judged by the strict rule (#4434). Only when every .8gent token is deeper (the pilot work
+	// dir) is each token judged on its own.
+	// A `..` segment anywhere (cat ../*, cd ..) can climb from a deeper dir to the state dir with a
+	// relative name no token shows, so it takes the same strict path.
+	if (
+		escapesLiteralPath(lower) ||
+		shellTokens(lower).some(
+			(t) =>
+				/(^|[/\\])\.\.([/\\]|$)/.test(t) ||
+				(t.includes(".8gent") && ["", null].includes(tailUnder8gent(t))),
+		)
+	)
+		return /[*?[{$]|token|control|profile/.test(lower.slice(lower.indexOf(".8gent")));
+	for (const tok of shellTokens(lower)) {
+		const at = tok.indexOf(".8gent");
+		if (at < 0) continue;
+		const tail = tok.slice(at);
+		if (/[*?[$]|token|control|profile/.test(tail)) return true;
+		const open = tail.indexOf("{");
+		if (open >= 0 && (!tail.includes("}", open) || /\{[^}]*(,|\.\.)/.test(tail))) return true;
+	}
+	return false;
+}
+
 /** True when `command` looks like it reads or lists the 8gent Browser token or profile dirs. */
 export function touchesBrowserSecrets(command: string): boolean {
 	const lists =
@@ -1348,8 +1392,10 @@ export function touchesBrowserSecrets(command: string): boolean {
 		if (/browser-(control|profiles|history|shots|[*?[{$])/.test(lower)) return true;
 		const at = lower.indexOf(".8gent");
 		if (at >= 0) {
-			if (/[*?[{$]|token|control|profile/.test(lower.slice(at)) || browserUnder8gent(lower))
-				return true;
+			// A backtick substitution is stripped from `flat`, so it is read from the raw view: it can climb
+			// out of the literal path like $( ) does, and takes the same whole-tail rule (#4434).
+			if (view.includes("`") && /[*?[{$]|token|control|profile/.test(lower.slice(at))) return true;
+			if (tokenReaches8gentState(lower) || browserUnder8gent(lower)) return true;
 			// A listing is refused when it is of .8gent itself or a browser-* child, not of any path under it.
 			if (lists && names8gentDir(lower)) return true;
 		}

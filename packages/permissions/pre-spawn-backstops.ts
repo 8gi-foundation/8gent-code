@@ -46,7 +46,7 @@ function backstopRefusal(command: string, cwd: string): string | null {
 		return `[PERMISSION DENIED] Command would change session records, which agent tools may not do: ${command}`;
 	// #3622 (8SO HIGH-2): the 8gent Browser control tokens and profile dirs.
 	if (touchesBrowserSecrets(command))
-		return `[PERMISSION DENIED] Command touches 8gent Browser control tokens or profiles, which agent tools may not use: ${command}`;
+		return `[PERMISSION DENIED] Run it without touching ~/.8gent/browser-* paths: this command reaches 8gent Browser control tokens or profiles, which tools may not use: ${command}`;
 	// #4009 (8SO F2): hooks, extensions, prompts and packages run at start; read-only to the shell.
 	if (commandWritesStartupCode(command, cwd))
 		return `[PERMISSION DENIED] Command would change 8gent hooks, extensions, prompts or packages, which agent tools may not do: ${command}`;

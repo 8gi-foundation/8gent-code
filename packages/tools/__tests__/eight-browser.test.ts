@@ -1491,7 +1491,7 @@ describe("ToolExecutor.runCommand refuses browser-secret commands before anythin
 		]) {
 			const out = await exec.runCommand(cmd);
 			expect(out).toMatch(
-				/^\[PERMISSION DENIED\] Not run: refused by policy, nothing was checked or changed\. Command touches 8gent Browser control tokens/,
+				/^\[PERMISSION DENIED\] Not run: refused by policy, nothing was checked or changed\. Run it without touching ~\/\.8gent\/browser-\* paths: this command reaches 8gent Browser control tokens/,
 			);
 		}
 	});
