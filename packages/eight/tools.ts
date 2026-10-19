@@ -273,6 +273,7 @@ import {
 	placeholderPaths,
 } from "./placeholder-paths";
 import { RetiredFacts } from "./retired-facts";
+import { RUN_BATCH_TOOL_DEF, runBatch, runBatchOn } from "./run-batch";
 import { ensureScratchExcludedIfPresent } from "./scratch-exclude";
 import { scrubKeepingAttachment, scrub as scrubSecrets } from "./secret-scanner";
 import { executeTermTool, getTermToolDefs, isTermTool } from "./term-tools.js";
@@ -2326,6 +2327,8 @@ export class ToolExecutor {
 			...getTermToolDefs(),
 			// Lean MCP access (#3474): advertised only with EIGHT_MCP_LEAN=1 exactly.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? MCP_LEAN_TOOL_DEFS : []),
+			// Action chunks (#3502): advertised only with EIGHT_RUN_BATCH=1 exactly.
+			...(runBatchOn() ? [RUN_BATCH_TOOL_DEF] : []),
 			// Posting (#3595): advertised only where the tg-group helper is installed.
 			...(postMessageAvailable() ? [POST_MESSAGE_TOOL_DEF] : []),
 			// Mid-task note to the boardroom (#4344): local file only; EIGHT_MESSAGE_BOARDROOM=0 withholds it.
@@ -2988,6 +2991,10 @@ export class ToolExecutor {
 				return vercelListDomains(args.projectId as string);
 			case "vercel_get_deployment_logs":
 				return vercelGetDeploymentLogs(args.deploymentId as string);
+
+			case "run_batch":
+				if (!runBatchOn()) return "Error: run_batch is not enabled. Nothing was run.";
+				return runBatch(args.items, (t, a) => this.execute(t, a));
 
 			// MCP tools
 			case "mcp_list_tools":

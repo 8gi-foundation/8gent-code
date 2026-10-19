@@ -2352,6 +2352,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			...(messageBoardroomOn() ? ["message_boardroom"] : []),
 			// Lean MCP access (#3474): search, schema on demand, trimmed results.
 			...(process.env.EIGHT_MCP_LEAN === "1" ? ["mcp_list_tools", "mcp_call_tool"] : []),
+			// Action chunks (#3502): one turn plans several tool calls.
+			...(process.env.EIGHT_RUN_BATCH === "1" ? ["run_batch"] : []),
 			// 8gent Browser (#3622, #3785): an isolated profile, named by EIGHT_BROWSER_PROFILE or the
 			// default "eight-local", never the person's logged-in profile. EIGHT_BROWSER_LOCAL=0 withholds them.
 			...localBrowserTools(),
