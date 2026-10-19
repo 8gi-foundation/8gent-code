@@ -3,6 +3,7 @@
  * values clamped to bounds, one log line names the profile.
  */
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_STREAM_IDLE_MS } from "../eight/turn-timeout";
 import {
 	HARNESS_BOUNDS,
 	HARNESS_PROFILES,
@@ -87,6 +88,25 @@ describe("resolveHarnessProfile", () => {
 			} as typeof p);
 			expect(p.nudgeFraction).toBeLessThan(NUDGE_FRACTION);
 		}
+	});
+
+	test("cloud MiniMax M3 gets room to finish reasoning, inside one native idle gap (#4450)", () => {
+		const entry = HARNESS_PROFILES["minimax/minimax-m3"];
+		expect(entry).toBeDefined();
+		expect(entry?.why).toContain("length");
+		const cloud = resolveHarnessProfile("minimax/minimax-m3", {
+			maxSteps: 30,
+			maxOutputTokens: 8192,
+		});
+		expect(cloud.source).toBe("minimax/minimax-m3");
+		// Above the 8192 that every empty arc2-a step hit (finishReason length).
+		expect(cloud.maxOutputTokens).toBeGreaterThan(8192);
+		// The native path is generateText: one step sends no progress until it ends,
+		// so at the slowest measured 100 tok/s it must finish inside the 300 s gap.
+		expect((cloud.maxOutputTokens / 100) * 1000).toBeLessThan(DEFAULT_STREAM_IDLE_MS);
+		// Only the output cap moves: steps and nudge stay at today's defaults.
+		expect(cloud.maxSteps).toBe(30);
+		expect(cloud.nudgeFraction).toBe(NUDGE_FRACTION);
 	});
 });
 
