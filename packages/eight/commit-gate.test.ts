@@ -67,7 +67,21 @@ function freshExecutor() {
 	ex = new ToolExecutor(dir, "commit-gate-test");
 	const pm = (ex as unknown as { permissionManager: { checkPermission: () => string } })
 		.permissionManager;
+	// The permission manager is a process-wide singleton: remember the real checkPermission so
+	// afterEach can put it back, or every later file in the run sees everything as allowed.
+	if (!patched)
+		patched = { pm, own: Object.hasOwn(pm, "checkPermission"), orig: pm.checkPermission };
 	pm.checkPermission = () => "allowed";
+}
+
+let patched: { pm: { checkPermission: () => string }; own: boolean; orig: () => string } | null =
+	null;
+
+function restorePermissionCheck() {
+	if (!patched) return;
+	if (patched.own) patched.pm.checkPermission = patched.orig;
+	else delete (patched.pm as { checkPermission?: unknown }).checkPermission;
+	patched = null;
 }
 
 const BUN_PKG = { name: "t", private: true, scripts: { test: "bun ./count.ts" } };
@@ -78,6 +92,7 @@ beforeEach(() => {
 	process.env.PATH = BUN_FIRST_PATH;
 });
 afterEach(() => {
+	restorePermissionCheck();
 	for (const [k, v] of [
 		["EIGHT_COMMIT_GATE", saved.gate],
 		["EIGHT_COMMIT_GATE_TIMEOUT_SEC", saved.t],
