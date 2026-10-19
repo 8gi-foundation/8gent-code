@@ -46,9 +46,18 @@ function nb(cells = 2): string {
 
 let ws = "";
 let outside = "";
+const outsideDirs: string[] = [];
+afterAll(() => {
+	for (const d of outsideDirs) fs.rmSync(d, { recursive: true, force: true });
+});
 beforeEach(() => {
 	ws = tempDir("nbpol-ws-");
-	outside = tempDir("nbpol-out-");
+	// The policy engine's default allowed prefixes include os.tmpdir() (policy-engine.ts
+	// DEFAULT_ALLOWED_PREFIXES). On Linux a second temp dir is therefore "allowed", while on
+	// macOS /tmp -> /private/tmp hides the match. "Outside" must sit beside this file, in the
+	// checkout, which is never a default prefix.
+	outside = fs.mkdtempSync(path.join(import.meta.dir, ".nbpol-out-"));
+	outsideDirs.push(outside);
 	process.env.EIGHT_WORKSPACE_ROOT = ws;
 	setToolContext({ ...priorContext, workingDirectory: ws, createdFiles: new CreatedFiles() });
 });
