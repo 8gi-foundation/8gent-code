@@ -276,6 +276,10 @@ interface Bracket {
 	body: string;
 	/** Explicit single characters, or null when a range is too wide to list or a POSIX class is present. */
 	members: string[] | null;
+	/** `body` without the POSIX classes: the part that can be case-folded. */
+	lit: string;
+	/** The POSIX class part of `body`. */
+	cls: string;
 	/** A POSIX class is present: matched as a pattern, never listed. */
 	hasClass: boolean;
 	/** Lists only digits, which can never spell a name, a flag or a slash. */
@@ -288,6 +292,8 @@ function parseBracket(s: string, i: number): Bracket | null {
 	const negated = s[j] === "!" || s[j] === "^";
 	if (negated) j++;
 	let body = "";
+	let lit = "";
+	let cls = "";
 	let members: string[] | null = [];
 	let hasClass = false;
 	let digitsOnly = true;
@@ -298,7 +304,9 @@ function parseBracket(s: string, i: number): Bracket | null {
 		if (c === "]" && !first) break;
 		if (c === "[" && ":.=".includes(s[j + 1] ?? "") && s.indexOf(`${s[j + 1]}]`, j + 2) > 0) {
 			const close = s.indexOf(`${s[j + 1]}]`, j + 2);
-			body += s[j + 1] === ":" ? (POSIX_CLASS[s.slice(j + 2, close)] ?? "\\x20-\\x7e") : "";
+			const named = s[j + 1] === ":" ? (POSIX_CLASS[s.slice(j + 2, close)] ?? "\\x20-\\x7e") : "";
+			body += named;
+			cls += named;
 			members = null;
 			hasClass = true;
 			digitsOnly = false;
@@ -316,14 +324,16 @@ function parseBracket(s: string, i: number): Bracket | null {
 		const a = lo.codePointAt(0) as number;
 		const b = hi.codePointAt(0) as number;
 		if (a > b) continue;
-		body += `${esc(lo)}${a === b ? "" : `-${esc(hi)}`}`;
+		const piece = `${esc(lo)}${a === b ? "" : `-${esc(hi)}`}`;
+		body += piece;
+		lit += piece;
 		if (!(a >= 48 && b <= 57)) digitsOnly = false;
 		if (members) {
 			if (b - a >= MAX_WORD_BRACES) members = null;
 			else for (let k = a; k <= b; k++) members.push(String.fromCodePoint(k));
 		}
 	}
-	return { end: j + 1, negated, body, members, hasClass, digitsOnly };
+	return { end: j + 1, negated, body, lit, cls, members, hasClass, digitsOnly };
 }
 
 /**
@@ -369,13 +379,33 @@ function expandWord(t: string, cap = MAX_WORD_BRACES): string[] | null {
  * what it lists (a negated one never matches `/`; a positive one matches `/` if it lists it). Null when
  * the word has no glob character. Used to ask whether a pattern could name the home directory or the root.
  */
+function fold1(c: string): string {
+	const e = c.replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&");
+	const other = c.toLowerCase() === c ? c.toUpperCase() : c.toLowerCase();
+	return FOLD_CASE && other !== c && other.length === 1 ? `[${c}${other}]` : e;
+}
+
+/**
+ * A positive bracket on a case-folding filesystem lists both cases of its letters. A negated one is
+ * never folded: the shell compares it case-sensitively with the real name, so `[^A-Z]` matches `j`.
+ */
+function foldBody(b: Bracket): string {
+	if (!FOLD_CASE) return b.body;
+	try {
+		new RegExp(`[${b.lit}${b.lit.toUpperCase()}${b.lit.toLowerCase()}]`);
+		return b.lit + b.lit.toUpperCase() + b.lit.toLowerCase() + b.cls;
+	} catch {
+		return b.body;
+	}
+}
+
 function globRegExp(pattern: string): RegExp | null {
 	let re = "";
 	let wild = false;
 	for (let i = 0; i < pattern.length; i++) {
 		const c = pattern[i];
 		if (c === "\\" && i + 1 < pattern.length) {
-			re += pattern[++i].replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&");
+			re += fold1(pattern[++i]);
 		} else if (c === "*" || c === "?") {
 			wild = true;
 			re += c === "*" ? "[^/]*" : "[^/]";
@@ -386,11 +416,11 @@ function globRegExp(pattern: string): RegExp | null {
 				continue;
 			}
 			wild = true;
-			re += b.negated ? `[^/${b.body}]` : `[${b.body}]`;
+			re += b.negated ? `[^/${b.body}]` : `[${foldBody(b)}]`;
 			i = b.end - 1;
-		} else re += c.replace(/[.+^${}()|\]\\/-]/g, "\\$&");
+		} else re += fold1(c);
 	}
-	return wild ? new RegExp(`^${re}$`, FOLD_CASE ? "i" : "") : null;
+	return wild ? new RegExp(`^${re}$`) : null;
 }
 
 /** True when the glob `pattern` can match the home directory, the directory above it, or the root. */

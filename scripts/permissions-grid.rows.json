@@ -314,7 +314,15 @@
 		"%RM% -rf /[U]sers/gridhome[/]",
 		"sudo %RM% -rf /[U]sers/gridhome",
 		"env %RM% -rf /Users/gri*",
-		"exec %RM% -rf /[/]"
+		"exec %RM% -rf /[/]",
+		"%RM% -rf /Users/[^A-Z]ridhome",
+		"%RM% -rf /Users/[!A-Z]ridhome",
+		"%RM% -rf /[^a-z]sers/gridhome",
+		"%RM% -rf /Users/[^A-Z][^A-Z]ridhome",
+		"%RM% -rf /[^A-Z]*/gridhome",
+		"%RM% -rf /Users/[^A-F]ridhome",
+		"sudo %RM% -rf /Users/[^A-Z]ridhome",
+		"%RM% -rf /Users/gridhom[^A-Z]"
 	],
 	"benign": [
 		"awk -F, '{print $1}' f",
@@ -387,6 +395,8 @@
 		"%RM% -rf node_modules/.cache/[a-f]*",
 		"echo /Users/gri*",
 		"ls /U?ers",
-		"chmod 644 file[0-9]"
+		"chmod 644 file[0-9]",
+		"%RM% -rf build/[^A-Z]*",
+		"echo /Users/[^A-Z]ridhome"
 	]
 }

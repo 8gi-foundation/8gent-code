@@ -551,7 +551,14 @@ describe("brace and IFS spellings of a wipe (#4514)", () => {
 // Bracket glob spellings (#4514, family 3), assembled so no line of this file is itself a wipe.
 const HOME_NAME = path.basename(HOME_DIR);
 const HOME_PARENT = path.dirname(HOME_DIR);
+// A negated class never folds case: it is the other case from the letter it stands in for.
+const OTHER_CASE = (c: string) => (c === c.toLowerCase() ? "[^A-Z]" : "[^a-z]");
 const GLOB_BLOCKED = [
+	`${RMW} -rf ${HOME_PARENT}/${OTHER_CASE(HOME_NAME[0])}${HOME_NAME.slice(1)}`,
+	`${RMW} -rf ${HOME_PARENT}/${HOME_NAME.slice(0, -1)}${OTHER_CASE(HOME_NAME.slice(-1))}`,
+	`${RMW} -rf /${OTHER_CASE(HOME_PARENT[1])}${HOME_PARENT.slice(2)}/${HOME_NAME}`,
+	`sudo ${RMW} -rf ${HOME_PARENT}/${OTHER_CASE(HOME_NAME[0])}${HOME_NAME.slice(1)}`,
+	`env X=1 ${RMW} -rf /${OTHER_CASE(HOME_PARENT[1])}${HOME_PARENT.slice(2)}/${HOME_NAME}`,
 	`${RMW} -rf ${HOME_PARENT}/[${HOME_NAME[0]}]${HOME_NAME.slice(1)}`,
 	`${RMW} -rf ${HOME_PARENT}/${HOME_NAME.slice(0, -1)}[${HOME_NAME.slice(-1)}]`,
 	`${RMW} -rf ${HOME_PARENT}/${HOME_NAME.slice(0, -1)}[a-z]`,
@@ -592,6 +599,7 @@ const GLOB_ORDINARY = [
 	`${RMW} -rf /tmp/work[12]`,
 	"chmod 644 file[0-9]",
 	"echo $arr[1] /Users/zz*",
+	`${RMW} -rf build/[^A-Z]*`,
 ];
 
 describe("bracket glob spellings of a wipe (#4514)", () => {
