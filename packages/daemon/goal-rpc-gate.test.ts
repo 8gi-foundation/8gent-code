@@ -1,6 +1,7 @@
 /** #4530: goal text reaches the executor's model, so it passes the input gate first. */
 
 import { describe, expect, test } from "bun:test";
+import { setDjSpawn, setDjTools } from "../music/dj";
 import { type GoalManager, type GoalRpcOutbound, handleGoalRpc } from "./goal-rpc";
 
 function setup() {
@@ -39,5 +40,30 @@ describe("goal rpc input gate", () => {
 		await handleGoalRpc({ type: "goal.start", sessionId: "s", goal: "ship the thing" }, t.ctx);
 		await handleGoalRpc({ type: "goal.subgoal", runId: "r", text: "also this" }, t.ctx);
 		expect(t.calls).toEqual(["start:ship the thing", "sub:also this"]);
+	});
+});
+
+describe("goal text is classified, not executed", () => {
+	test("a /dj play line in goal text is refused and nothing is spawned", async () => {
+		const spawned: string[] = [];
+		setDjTools({ mpv: "/usr/bin/mpv", ytdlp: "/usr/bin/yt-dlp" });
+		setDjSpawn(((cmd: string) => {
+			spawned.push(cmd);
+			throw new Error("must not run");
+		}) as never);
+		try {
+			const t = setup();
+			await handleGoalRpc(
+				{ type: "goal.start", sessionId: "s", goal: "/dj play something" },
+				t.ctx,
+			);
+			await handleGoalRpc({ type: "goal.subgoal", runId: "r", text: "/dj play something" }, t.ctx);
+			expect(spawned).toEqual([]);
+			expect(t.calls).toEqual([]);
+			expect(t.sent.map((m) => m.type)).toEqual(["goal.error", "goal.error"]);
+		} finally {
+			setDjSpawn();
+			setDjTools();
+		}
 	});
 });

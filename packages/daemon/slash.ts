@@ -123,13 +123,20 @@ async function runDj(args: string[]): Promise<string> {
  * Run one slash line. Not a slash line, or a name the registry does not know,
  * returns { handled: false } so the caller sends it to the model unchanged.
  */
-export async function runSlash(line: string, ctx: SlashContext): Promise<SlashResult> {
+export async function runSlash(
+	line: string,
+	ctx: SlashContext,
+	opts: { classifyOnly?: boolean } = {},
+): Promise<SlashResult> {
 	const trimmed = line.trim();
 	if (!trimmed.startsWith("/")) return { handled: false };
 	const [head, ...args] = trimmed.slice(1).split(/\s+/);
 	const name = resolve(head);
 	// A slash line never reaches the model: an unknown name is answered here.
 	if (!name) return { handled: true, text: `Unknown command /${head.slice(0, 40)}. Type /help.` };
+	// Classify only: decide handled, run nothing (text bound for a model elsewhere, not a command line).
+	if (opts.classifyOnly)
+		return { handled: true, text: `/${name} is a command, not text for a model.` };
 	if (name === "help") return { handled: true, text: helpText() };
 	if (!HEADLESS.has(name)) {
 		return {

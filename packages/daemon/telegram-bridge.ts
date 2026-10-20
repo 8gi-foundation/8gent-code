@@ -1904,7 +1904,15 @@ class TelegramDaemonBridge {
 				: localSpokenModel(process.env, fetch, true);
 		if (!real || !model) return;
 		// The transcript reaches the judge model, so it passes the input gate first (#4530).
-		if ((await gateInput(u.text, { sessionId: `tg-${chat.id}`, channel: "telegram" })).handled)
+		if (
+			(
+				await gateInput(
+					u.text,
+					{ sessionId: `tg-${chat.id}`, channel: "telegram" },
+					{ classifyOnly: true },
+				)
+			).handled
+		)
 			return;
 		const ticket = real.beginJudge(u);
 		if (!ticket) return;

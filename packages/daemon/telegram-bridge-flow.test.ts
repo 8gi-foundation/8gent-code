@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type FlowModeController, createFlowModeController } from "../flow/flow-mode";
+import { setDjSpawn, setDjTools } from "../music/dj";
 import { R10_TRANSIT_NOTICE } from "../telegram-bot/voice-mode";
 import {
 	OPERATOR_COMMANDS,
@@ -670,5 +671,23 @@ describe("voice transcript passes the input gate before the judge model (#4530)"
 		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
 		await settle();
 		expect(t.signals.length).toBe(1);
+	});
+	test("a slash transcript at the judge gate is refused without executing the command", async () => {
+		const spawned: string[] = [];
+		setDjTools({ mpv: "/usr/bin/mpv", ytdlp: "/usr/bin/yt-dlp" });
+		setDjSpawn(((cmd: string) => {
+			spawned.push(cmd);
+			throw new Error("must not run");
+		}) as never);
+		try {
+			const t = make({}, "/dj play something");
+			await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+			await settle();
+			expect(spawned).toEqual([]);
+			expect(t.signals).toEqual([]);
+		} finally {
+			setDjSpawn();
+			setDjTools();
+		}
 	});
 });

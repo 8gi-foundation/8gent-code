@@ -463,7 +463,11 @@ async function gated(
 	sessionId: string | undefined,
 	ctx: GoalRpcContext,
 ): Promise<boolean> {
-	const r = await gateInput(text, { sessionId: sessionId ?? "goal", channel: "goal" });
+	const r = await gateInput(
+		text,
+		{ sessionId: sessionId ?? "goal", channel: "goal" },
+		{ classifyOnly: true },
+	);
 	if (!r.handled) return false;
 	ctx.send({
 		type: "goal.error",
