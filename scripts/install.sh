@@ -27,6 +27,9 @@
 #   EIGHT_REPO              GitHub owner/repo (default: 8gi-foundation/8gent-code)
 #   EIGHT_RELEASES_URL      the releases list (https, or http://127.0.0.1 for tests)
 #   EIGHT_ALLOW_UNVERIFIED  1 = continue when a release key exists but no minisign can run
+#   EIGHT_INSTALL_DEBUG     1 = print what was detected (OS, libc, asset, install dir) and carry on
+#   EIGHT_ANDROID_FORCE     1 = skip the Android/Termux stop (glibc-runner setups)
+#   --dry-run               argument: print the detection and stop before any download
 #
 # It never replaces a newer 8gent with an older one unless EIGHT_VERSION asks
 # for that version by name.
@@ -279,25 +282,83 @@ main() {
 	KEY="$EIGHT_SIGNING_KEY"
 	if [ "$LOCAL" = 1 ] && [ -n "${EIGHT_TEST_SIGNING_KEY:-}" ]; then KEY="$EIGHT_TEST_SIGNING_KEY"; fi
 
-	case "$(uname -s)" in
+	DRY_RUN=0
+	for a in "$@"; do
+		case "$a" in
+			--dry-run) DRY_RUN=1 ;;
+			*) die "unknown option: $a (try --dry-run)" ;;
+		esac
+	done
+	DEBUG=0
+	if [ "$DRY_RUN" = 1 ] || [ "${EIGHT_INSTALL_DEBUG:-}" = 1 ]; then DEBUG=1; fi
+
+	uname_s="$(uname -s 2>/dev/null || echo unknown)"
+	uname_m="$(uname -m 2>/dev/null || echo unknown)"
+	uname_o="$(uname -o 2>/dev/null || echo unknown)"
+	# Android (Termux): the kernel says Linux, but the C library is bionic, not
+	# glibc, and the release binaries are glibc builds that cannot start there.
+	android=0
+	case "$uname_o" in Android) android=1 ;; esac
+	case "$(uname -a 2>/dev/null)" in *[Aa]ndroid*) android=1 ;; esac
+	if [ -n "${TERMUX_VERSION:-}" ]; then android=1; fi
+	case "${PREFIX:-}" in */com.termux/*) android=1 ;; esac
+
+	case "$uname_s" in
 		Darwin) os=darwin ;;
 		Linux) os=linux ;;
 		MINGW* | MSYS* | CYGWIN*) die "on Windows, run in PowerShell: irm https://raw.githubusercontent.com/${REPO}/main/scripts/install.ps1 | iex" ;;
-		*) die "no 8gent binary for $(uname -s)" ;;
+		*) die "no 8gent binary for ${uname_s}" ;;
 	esac
-	case "$(uname -m)" in
+	case "$uname_m" in
 		x86_64 | amd64) arch=x64 ;;
-		arm64 | aarch64) arch=arm64 ;;
-		*) die "no 8gent binary for $(uname -m)" ;;
+		arm64 | aarch64 | armv8*) arch=arm64 ;;
+		*) die "no 8gent binary for ${uname_m}" ;;
 	esac
 	# An x64 shell under Rosetta on Apple Silicon still gets the native build.
 	if [ "$os" = darwin ] && [ "$arch" = x64 ] && [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = 1 ]; then
 		arch=arm64
 	fi
-	if [ "$os" = linux ] && ldd --version 2>&1 | grep -qi musl; then
-		die "the Linux binaries need glibc; this looks like musl (Alpine)"
+	libc=glibc
+	if [ "$os" = linux ] && [ "$android" = 1 ]; then
+		libc=bionic
+	elif [ "$os" = linux ] && ldd --version 2>&1 | grep -qi musl; then
+		libc=musl
 	fi
 	ASSET="8gent-${os}-${arch}"
+	# Termux has no /usr and no sudo; its bin directory is $PREFIX/bin, already on PATH.
+	if [ "$android" = 1 ] && [ -z "${EIGHT_INSTALL_DIR:-}" ] && [ -n "${PREFIX:-}" ]; then
+		INSTALL_DIR="${PREFIX}/bin"
+	fi
+
+	if [ "$DEBUG" = 1 ]; then
+		say "8gent install: decisions"
+		say "  uname -s/-m/-o : ${uname_s} / ${uname_m} / ${uname_o}"
+		say "  android         : $([ "$android" = 1 ] && echo yes || echo no) (TERMUX_VERSION=${TERMUX_VERSION:-unset} PREFIX=${PREFIX:-unset})"
+		say "  libc            : ${libc}"
+		say "  asset           : ${ASSET}"
+		say "  install dir     : ${INSTALL_DIR}"
+		say "  fetch tools     : curl=$(command -v curl >/dev/null 2>&1 && echo yes || echo no) wget=$(command -v wget >/dev/null 2>&1 && echo yes || echo no)"
+		say "  releases url    : ${RELEASES_URL}"
+	fi
+
+	if [ "$DRY_RUN" = 1 ]; then
+		if [ "$libc" = bionic ] && [ "${EIGHT_ANDROID_FORCE:-}" != 1 ]; then say "  result          : a real run would stop here (Android, glibc binary cannot start)"; fi
+		say "Dry run: nothing downloaded or installed."
+		exit 0
+	fi
+	if [ "$libc" = bionic ] && [ "${EIGHT_ANDROID_FORCE:-}" != 1 ]; then
+		{
+			say "8gent install: this is Android (Termux). The 8gent binary is a glibc Linux build and cannot start on Android's own C library (bionic). Nothing was installed."
+			say "Use a glibc userland inside Termux, then run this installer there:"
+			say "  pkg install proot-distro && proot-distro install debian && proot-distro login debian"
+			say "  apt update && apt install -y curl ca-certificates"
+			say "  then run the install command again"
+			say "To report this, run the installer with --dry-run (sh -s -- --dry-run) and paste what it prints."
+			say "On a setup that does run glibc binaries, set EIGHT_ANDROID_FORCE=1 to skip this check."
+		} >&2
+		exit 1
+	fi
+	[ "$libc" != musl ] || die "the Linux binaries need glibc; this looks like musl (Alpine)"
 
 	TMP="$(mktemp -d 2>/dev/null || mktemp -d -t 8gent-install)"
 	trap 'rm -rf "$TMP"' EXIT

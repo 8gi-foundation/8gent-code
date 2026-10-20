@@ -122,8 +122,8 @@ function tool(name: string, script: string) {
 	chmodSync(join(fakeBin, name), 0o755);
 }
 
-async function install(releasesUrl: string, env: Record<string, string> = {}) {
-	const p = Bun.spawn(["sh", SCRIPT], {
+async function install(releasesUrl: string, env: Record<string, string> = {}, args: string[] = []) {
+	const p = Bun.spawn(["sh", SCRIPT, ...args], {
 		stdout: "pipe",
 		stderr: "pipe",
 		env: {
@@ -596,6 +596,77 @@ describe.skipIf(!realMinisign)("install.sh with the real minisign", () => {
 		});
 		expect(r.out).toContain("pinned signature verifier");
 		expect(r.out).toContain("signature on SHA256SUMS: verified");
+		expect(r.code).toBe(0);
+	});
+});
+
+describe("install.sh: Android / Termux", () => {
+	/** A uname that answers like Termux on arm64 (kernel Linux, OS Android). */
+	const termuxUname = () =>
+		tool(
+			"uname",
+			`case "$1" in -s) echo Linux;; -m) echo aarch64;; -o) echo Android;; -a) echo "Linux localhost 5.15.0 #1 SMP PREEMPT Android aarch64 Android";; *) echo Linux;; esac`,
+		);
+	const termuxEnv = { PREFIX: "/data/data/com.termux/files/usr", TERMUX_VERSION: "0.118" };
+
+	test("names Android, stops before any download, and says what to do", async () => {
+		termuxUname();
+		const url = one("0.20.0");
+		hits = 0;
+		const r = await install(url, termuxEnv);
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("Android (Termux)");
+		expect(r.out).toContain("proot-distro");
+		expect(r.out).toContain("Nothing was installed");
+		expect(installed()).toBeNull();
+	});
+
+	test("--dry-run prints the decisions: android, bionic, linux-arm64, Termux prefix, no sudo", async () => {
+		termuxUname();
+		const r = await install(one("0.20.0"), { ...termuxEnv, EIGHT_INSTALL_DIR: "" }, ["--dry-run"]);
+		expect(r.code).toBe(0);
+		expect(r.out).toContain("a real run would stop here");
+		expect(r.out).toContain("uname -s/-m/-o : Linux / aarch64 / Android");
+		expect(r.out).toContain("android         : yes");
+		expect(r.out).toContain("libc            : bionic");
+		expect(r.out).toContain("asset           : 8gent-linux-arm64");
+		expect(r.out).toContain("install dir     : /data/data/com.termux/files/usr/bin");
+		expect(r.out).not.toContain("sudo");
+	});
+
+	test("EIGHT_INSTALL_DEBUG=1 with EIGHT_ANDROID_FORCE=1 prints decisions and installs", async () => {
+		termuxUname();
+		const url = publish([
+			{ tag: "v0.20.0", assets: { "8gent-linux-arm64": fakeBinary("0.20.0") } },
+		]);
+		const r = await install(url, {
+			...termuxEnv,
+			EIGHT_INSTALL_DEBUG: "1",
+			EIGHT_ANDROID_FORCE: "1",
+			EIGHT_INSTALL_DIR: installDir,
+		});
+		expect(r.out).toContain("libc            : bionic");
+		expect(r.code).toBe(0);
+		expect(installed()).toBe("8gent Code v0.20.0");
+	});
+
+	test("detects Android from TERMUX_VERSION alone when uname says plain Linux", async () => {
+		tool(
+			"uname",
+			`case "$1" in -s) echo Linux;; -m) echo aarch64;; -o) echo GNU/Linux;; *) echo Linux;; esac`,
+		);
+		const r = await install(one("0.20.0"), { TERMUX_VERSION: "0.118" }, ["--dry-run"]);
+		expect(r.out).toContain("android         : yes");
+	});
+
+	test("a normal glibc Linux arm64 box is not treated as Android", async () => {
+		tool(
+			"uname",
+			`case "$1" in -s) echo Linux;; -m) echo aarch64;; -o) echo GNU/Linux;; -a) echo "Linux box 6.1 aarch64 GNU/Linux";; *) echo Linux;; esac`,
+		);
+		const r = await install(one("0.20.0"), {}, ["--dry-run"]);
+		expect(r.out).toContain("android         : no");
+		expect(r.out).toContain("asset           : 8gent-linux-arm64");
 		expect(r.code).toBe(0);
 	});
 });
