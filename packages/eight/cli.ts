@@ -21,6 +21,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { classifyInput, gateInput } from "../daemon/input-gate";
 import { EFFORT_BY_TASK_KIND, type EffortTaskKind } from "../providers/effort-policy";
 import {
 	type ChatRequest,
@@ -220,76 +221,146 @@ function writeOutput(filePath: string, content: string): void {
 // Main CLI Handler
 // ============================================
 
-export async function runCLI(args: string[]): Promise<void> {
+/** Named reasons a one-shot call can fail. Every failure prints one of these. */
+export type CLIFailure =
+	| "no-prompt"
+	| "unknown-provider"
+	| "no-key"
+	| "model-unavailable"
+	| "empty-completion"
+	| "request-failed";
+
+const NEXT_STEP: Record<CLIFailure, string> = {
+	"no-prompt": "pass the prompt as an argument or pipe it on stdin",
+	"unknown-provider": "run 8gent --help for the provider list or fix --provider",
+	"no-key": "set the provider's key env var or save it in ~/.8gent/providers.json",
+	"model-unavailable": "pick another --model or omit it to use the provider default",
+	"empty-completion": "retry, or try another --model or --provider",
+	"request-failed": "check the network and provider status, then retry",
+};
+
+export interface OneShotDeps {
+	manager?: Pick<
+		ReturnType<typeof getProviderManager>,
+		"chat" | "setActiveProvider" | "isKnownProvider" | "getActiveProvider" | "getApiKey"
+	>;
+	readStdin?: () => Promise<string>;
+}
+
+export interface OneShotOutcome {
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+}
+
+/**
+ * Run one prompt. Always resolves to either a non-empty stdout with exit 0,
+ * or a named reason on stderr with exit 1. It never resolves to exit 0 with
+ * empty stdout.
+ */
+export async function executeOneShot(
+	args: string[],
+	deps: OneShotDeps = {},
+): Promise<OneShotOutcome> {
 	const opts = parseCLIArgs(args);
 	if (!opts) {
-		console.error("Error: --cli flag required");
-		process.exit(1);
+		return { exitCode: 1, stdout: "", stderr: "Error: --cli flag required\n" };
 	}
 
 	if (opts.taskKindError) {
-		if (opts.jsonMode) {
-			console.log(JSON.stringify({ error: opts.taskKindError, exitCode: 1 }));
-		} else {
-			console.error(`Error: ${opts.taskKindError}`);
-		}
-		process.exit(1);
+		return {
+			exitCode: 1,
+			stdout: opts.jsonMode
+				? `${JSON.stringify({ error: opts.taskKindError, exitCode: 1 })}\n`
+				: "",
+			stderr: `Error: ${opts.taskKindError}\n`,
+		};
 	}
 
-	// Read from stdin if no inline prompt
+	const fail = (reason: CLIFailure, detail: string): OneShotOutcome => {
+		const line = `8gent: ${reason}: ${detail}. Next: ${NEXT_STEP[reason]}.\n`;
+		return {
+			exitCode: 1,
+			stdout: opts.jsonMode ? `${JSON.stringify({ error: reason, detail, exitCode: 1 })}\n` : "",
+			stderr: line,
+		};
+	};
+
 	if (!opts.prompt) {
-		opts.prompt = await readStdin();
+		opts.prompt = await (deps.readStdin ?? readStdin)();
 	}
+	if (!opts.prompt) return fail("no-prompt", "no prompt was given");
 
-	if (!opts.prompt) {
-		const err = "Error: No prompt provided. Pass a prompt argument or pipe via stdin.";
-		if (opts.jsonMode) {
-			console.log(JSON.stringify({ error: err, exitCode: 1 }));
-		} else {
-			console.error(err);
+	// Nothing goes straight to the model: the shared classifier runs first (#4530).
+	// A slash line is answered locally and never becomes a prompt.
+	const gctx = { sessionId: `cli-${process.pid}`, channel: "cli" };
+	if (classifyInput(opts.prompt, gctx).kind === "slash") {
+		const gated = await gateInput(opts.prompt, gctx);
+		if (gated.handled) {
+			const text = gated.text?.trim() ? gated.text : "done";
+			return { exitCode: 0, stdout: `${text}\n`, stderr: "" };
 		}
-		process.exit(1);
 	}
 
-	const manager = getProviderManager();
+	const manager = deps.manager ?? getProviderManager();
 
 	if (opts.provider) {
+		if (!manager.isKnownProvider(opts.provider)) {
+			return fail("unknown-provider", `"${opts.provider}" is not a known provider`);
+		}
 		try {
 			manager.setActiveProvider(opts.provider);
-		} catch {
-			// ignore unknown provider - use default
+		} catch (e) {
+			return fail("unknown-provider", e instanceof Error ? e.message : String(e));
 		}
+	}
+
+	const active = manager.getActiveProvider();
+	if (active.apiKeyEnv && !manager.getApiKey(active.name)) {
+		return fail("no-key", `no key for ${active.displayName} (${active.apiKeyEnv} is not set)`);
 	}
 
 	try {
 		const result = await manager.chat(buildCLIChatRequest(opts));
 
-		const responseText = result.content;
+		const responseText = result.content ?? "";
+		if (!responseText.trim()) {
+			return fail(
+				"empty-completion",
+				`${result.provider} returned an empty completion from ${result.model}`,
+			);
+		}
 
+		let stderr = "";
 		if (opts.outputPath) {
 			const code = extractCode(responseText) ?? responseText;
 			writeOutput(opts.outputPath, code);
+			stderr = `Written to: ${opts.outputPath}\n`;
 		}
 
 		const cliResult = buildCLIResult(result, filesCreated, filesModified);
-
-		if (opts.jsonMode) {
-			console.log(JSON.stringify(cliResult, null, 2));
-		} else {
-			console.log(responseText);
-			if (opts.outputPath) {
-				console.error(`Written to: ${opts.outputPath}`);
-			}
-		}
-
-		process.exit(0);
+		const stdout = opts.jsonMode ? JSON.stringify(cliResult, null, 2) : responseText;
+		return { exitCode: 0, stdout: `${stdout}\n`, stderr };
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
-		if (opts.jsonMode) {
-			console.log(JSON.stringify({ error: message, exitCode: 1 }));
-		} else {
-			console.error(`Error: ${message}`);
-		}
-		process.exit(1);
+		const unavailable =
+			/\b(404|400)\b/.test(message) && /model|not found|no endpoints|not a valid/i.test(message);
+		return unavailable
+			? fail("model-unavailable", message.slice(0, 200))
+			: fail("request-failed", message.slice(0, 200));
 	}
+}
+
+export async function runCLI(args: string[]): Promise<void> {
+	const out = await executeOneShot(args);
+	if (out.stdout) process.stdout.write(out.stdout);
+	if (out.stderr) process.stderr.write(out.stderr);
+	process.exit(out.exitCode);
+}
+
+// Running this file directly (`bun packages/eight/cli.ts "..."`) used to import
+// cleanly and do nothing, exiting 0 with no output. It is a one-shot entry too.
+if (import.meta.main) {
+	const argv = process.argv.slice(2);
+	await runCLI(argv.includes("--cli") ? argv : ["--cli", ...argv]);
 }
