@@ -21,6 +21,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { classifyInput, gateInput } from "../daemon/input-gate";
 import { EFFORT_BY_TASK_KIND, type EffortTaskKind } from "../providers/effort-policy";
 import {
 	type ChatRequest,
@@ -289,6 +290,17 @@ export async function executeOneShot(
 		opts.prompt = await (deps.readStdin ?? readStdin)();
 	}
 	if (!opts.prompt) return fail("no-prompt", "no prompt was given");
+
+	// Nothing goes straight to the model: the shared classifier runs first (#4530).
+	// A slash line is answered locally and never becomes a prompt.
+	const gctx = { sessionId: `cli-${process.pid}`, channel: "cli" };
+	if (classifyInput(opts.prompt, gctx).kind === "slash") {
+		const gated = await gateInput(opts.prompt, gctx);
+		if (gated.handled) {
+			const text = gated.text?.trim() ? gated.text : "done";
+			return { exitCode: 0, stdout: `${text}\n`, stderr: "" };
+		}
+	}
 
 	const manager = deps.manager ?? getProviderManager();
 

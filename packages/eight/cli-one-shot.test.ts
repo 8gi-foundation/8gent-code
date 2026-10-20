@@ -92,3 +92,23 @@ describe("one-shot cli", () => {
 		}
 	});
 });
+
+describe("input gate (#4530)", () => {
+	test("an unknown slash line is answered locally and never reaches the model", async () => {
+		let chats = 0;
+		const manager = {
+			chat: async () => {
+				chats++;
+				return { content: "x", provider: "p", model: "m" };
+			},
+			setActiveProvider: () => {},
+			isKnownProvider: () => true,
+			getActiveProvider: () => ({ name: "p", displayName: "P" }),
+			getApiKey: () => "k",
+		} as never;
+		const out = await executeOneShot(["--cli", "/definitely-not-a-command"], { manager });
+		expect(chats).toBe(0);
+		expect(out.exitCode).toBe(0);
+		expect(out.stdout.trim().length).toBeGreaterThan(0);
+	});
+});

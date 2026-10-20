@@ -163,7 +163,7 @@ describe("bin/8gent.ts refuses to start past MAX_AGENT_DEPTH (#3341)", () => {
 			const cli = fresh(depth, [BIN, "--cli"]);
 			expectNotRefused(cli);
 			expect({ depth, code: cli.code }).toEqual({ depth, code: 1 });
-			expect(cli.stderr).toContain("No prompt provided");
+			expect(cli.stderr).toContain("no-prompt");
 		}
 	});
 
