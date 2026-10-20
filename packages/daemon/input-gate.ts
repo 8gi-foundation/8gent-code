@@ -9,7 +9,20 @@
  * transcript the pool will gate again) passes `classifyOnly` and nothing executes.
  */
 
-import { type SlashContext, type SlashResult, runSlash } from "./slash";
+import {
+	type SlashContext,
+	type SlashResult,
+	isAcceptedSlashName,
+	runSlash,
+	slashCommandNames,
+} from "./slash";
+
+/** Slash names this daemon's gate accepts, advertised on session frames and /health. Clients prefer it over any local copy. */
+export function daemonCommands(): string[] {
+	return slashCommandNames();
+}
+
+export { isAcceptedSlashName };
 
 /**
  * What this daemon advertises on `session:created`, `session:resumed` and `/health`.

@@ -206,6 +206,10 @@ Sent to every other client bound to the session when one sends `prompt`. The sen
   and `/health` carries the same list as `capabilities`. The list comes from the exported
   `DAEMON_CAPABILITIES` constant beside the input gate (`packages/daemon/input-gate.ts`).
   Clients may gate slash sending on it: send `/` lines only when `input-gate` is present.
+- Commands (v1.8): `session:created` and `session:resumed` also carry `"commands": ["<name>", ...]`,
+  and `/health` carries the same list as `commands`: every slash name the input gate accepts
+  (canonical names and aliases, no leading slash, unique, sorted), from `daemonCommands()` in
+  `packages/daemon/input-gate.ts`. Clients should prefer this list over any local copy.
 - `session:create` takes an optional `"persist": true` (shareable channels only): the session
   is saved after every turn from the start, so a chat only one surface ever had can be resumed
   later, also after a daemon restart. Without it (older clients) nothing changes.
@@ -934,6 +938,7 @@ goal package only emits in-memory `GoalEvent` records.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.8 | 2026-10-23 | Add `commands` (accepted slash names) to `session:created`, `session:resumed` and `/health`. |
 | 1.7 | 2026-10-20 | Add `capabilities` (`["input-gate"]`) to `session:created`, `session:resumed` and `/health`. |
 | 1.6 | 2026-10-20 | Document the input gate on every channel (#4531, #4535), loopback bind by default and the connect-time token on every non-root path (#4532). |
 | 1.5 | 2026-10-11 | Add the restricted `classroom` channel: no tools, loopback + token only, private, not persisted. (#3939) |
