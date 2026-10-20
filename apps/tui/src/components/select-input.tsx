@@ -466,6 +466,8 @@ export interface ProviderOption {
 	name: string;
 	displayName: string;
 	hasApiKey: boolean;
+	/** False for a provider that takes no key (local engines). Absent means it does. */
+	needsKey?: boolean;
 	enabled: boolean;
 }
 
@@ -491,7 +493,9 @@ export function ProviderSelector({
 				? "Currently active"
 				: p.hasApiKey
 					? "API key configured"
-					: "No API key (requires setup)",
+					: p.needsKey === false
+						? "No key needed"
+						: "No API key (requires setup)",
 		disabled: !p.enabled && p.name !== "ollama",
 	}));
 
