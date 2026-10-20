@@ -23,11 +23,21 @@ function outlineLike(): string {
 	const slides: string[] = ["# Eight System One — Deck Outline (5 slides)", ""];
 	for (let i = 1; i <= 5; i++) {
 		slides.push(`## Slide ${i} — Topic number ${i}`);
-		slides.push("- The harness asks typed questions about a `state` string and gets probabilities back");
-		slides.push("- Request/response shape: `{ state, questions[] }` -> `{ answers[], backend, model }`");
-		slides.push("- `detectBackend()` tries llamacpp -> laya -> ollama and picks a model from the list");
-		slides.push("- Verdicts: `allow` / `escalate` / `block`; any error or missing backend fails closed");
-		slides.push("- `createDecider` memoises up to 256 requests so identical input gives identical output");
+		slides.push(
+			"- The harness asks typed questions about a `state` string and gets probabilities back",
+		);
+		slides.push(
+			"- Request/response shape: `{ state, questions[] }` -> `{ answers[], backend, model }`",
+		);
+		slides.push(
+			"- `detectBackend()` tries llamacpp -> laya -> ollama and picks a model from the list",
+		);
+		slides.push(
+			"- Verdicts: `allow` / `escalate` / `block`; any error or missing backend fails closed",
+		);
+		slides.push(
+			"- `createDecider` memoises up to 256 requests so identical input gives identical output",
+		);
 		slides.push("");
 	}
 	return slides.join("\n");
@@ -66,7 +76,10 @@ describe("previewToolArgs", () => {
 	});
 
 	test("result is valid JSON that round-trips", () => {
-		const preview = logger.previewToolArgs({ content: outlineLike(), nested: { deep: outlineLike() } });
+		const preview = logger.previewToolArgs({
+			content: outlineLike(),
+			nested: { deep: outlineLike() },
+		});
 		expect(() => JSON.parse(JSON.stringify(preview))).not.toThrow();
 	});
 
@@ -138,6 +151,43 @@ describe("step_start and step_finish timing", () => {
 		expect(fin.durationMs).toBeGreaterThanOrEqual(30);
 	});
 
+	test("step_finish records the split from an Ollama-style response", () => {
+		// ollama.ts maps prompt_eval_count/eval_count to prompt/completion tokens.
+		const r = { prompt_eval_count: 900, eval_count: 100 };
+		logger.initSessionLogger("split-1", "m", "ollama");
+		logger.logStep("t1", "Chat", 0, 1000, "x", {
+			promptTokens: r.prompt_eval_count,
+			completionTokens: r.eval_count,
+		});
+		const fin = readEvents("split-1").find((e) => e.type === "step_finish")!;
+		expect([fin.promptTokens, fin.completionTokens, fin.totalTokens]).toEqual([900, 100, 1000]);
+	});
+
+	test("step_finish records the split from an OpenAI-style usage", () => {
+		const u = { prompt_tokens: 40, completion_tokens: 8 };
+		logger.initSessionLogger("split-2", "m", "openrouter");
+		logger.logStep("t1", "Chat", 0, 48, "x", {
+			promptTokens: u.prompt_tokens,
+			completionTokens: u.completion_tokens,
+		});
+		const fin = readEvents("split-2").find((e) => e.type === "step_finish")!;
+		expect([fin.promptTokens, fin.completionTokens, fin.totalTokens]).toEqual([40, 8, 48]);
+	});
+
+	test("step_finish split is null when the provider gave none; total unchanged", () => {
+		logger.initSessionLogger("split-3", "m", "p");
+		logger.logStep("t1", "Chat", 0, 77, "x", {
+			promptTokens: Number.NaN,
+			completionTokens: Number.NaN,
+		});
+		logger.logStep("t1", "Chat", 1, 5);
+		const fins = readEvents("split-3").filter((e) => e.type === "step_finish");
+		expect(fins.map((f) => [f.promptTokens, f.completionTokens, f.totalTokens])).toEqual([
+			[null, null, 77],
+			[null, null, 5],
+		]);
+	});
+
 	test("step_finish with no step_start has no durationMs", () => {
 		logger.initSessionLogger("timing-2", "m", "p");
 		logger.logStep("t1", "Chat", 3, 1);
@@ -150,7 +200,16 @@ describe("step_start and step_finish timing", () => {
 		logger.logStepStart("t1", "Chat", 1, "ollama", "qwen");
 		const start = readEvents("timing-3").find((e) => e.type === "step_start")!;
 		expect(Object.keys(start).sort()).toEqual(
-			["model", "provider", "sequenceNumber", "stepNumber", "tabId", "tabName", "timestamp", "type"].sort(),
+			[
+				"model",
+				"provider",
+				"sequenceNumber",
+				"stepNumber",
+				"tabId",
+				"tabName",
+				"timestamp",
+				"type",
+			].sort(),
 		);
 	});
 
@@ -177,10 +236,16 @@ describe("step_start and step_finish timing", () => {
 		await new Promise((r) => setTimeout(r, 30));
 		logger.logStep("B", "B", 0, 1);
 		const ev = readEvents("timing-5");
-		const starts = Object.fromEntries(ev.filter((e) => e.type === "step_start").map((e) => [e.tabId, e]));
-		const fins = Object.fromEntries(ev.filter((e) => e.type === "step_finish").map((e) => [e.tabId, e]));
+		const starts = Object.fromEntries(
+			ev.filter((e) => e.type === "step_start").map((e) => [e.tabId, e]),
+		);
+		const fins = Object.fromEntries(
+			ev.filter((e) => e.type === "step_finish").map((e) => [e.tabId, e]),
+		);
 		for (const t of ["A", "B"]) {
-			expect(fins[t].durationMs).toBe(Date.parse(fins[t].timestamp) - Date.parse(starts[t].timestamp));
+			expect(fins[t].durationMs).toBe(
+				Date.parse(fins[t].timestamp) - Date.parse(starts[t].timestamp),
+			);
 		}
 		expect(fins.A.durationMs).toBeGreaterThan(fins.B.durationMs - 31);
 		expect(fins.B.durationMs).toBeGreaterThanOrEqual(55);

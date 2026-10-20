@@ -361,8 +361,15 @@ export function logStep(
 	stepNumber: number,
 	totalTokens: number,
 	text?: string,
+	split?: { promptTokens?: number; completionTokens?: number },
 ): void {
 	if (!sessionId) return;
+
+	// Real provider split only (Ollama/LM Studio eval counts, OpenAI-style usage).
+	// Absent, NaN or an all-zero pair means the backend gave none: null, never an estimate.
+	const p = split?.promptTokens;
+	const c = split?.completionTokens;
+	const real = Number.isFinite(p) && Number.isFinite(c) && (p as number) + (c as number) > 0;
 
 	statTotalTokens += totalTokens;
 	stepCount = Math.max(stepCount, stepNumber);
@@ -381,6 +388,8 @@ export function logStep(
 		finishReason: "stop",
 		durationMs: startedAt === undefined ? undefined : at - startedAt,
 		totalTokens,
+		promptTokens: real ? p : null,
+		completionTokens: real ? c : null,
 		// Length only: model output is never persisted in the session log.
 		textLength: text?.length ?? 0,
 		tabId,
