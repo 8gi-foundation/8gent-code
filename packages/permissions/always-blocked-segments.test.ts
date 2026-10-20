@@ -96,6 +96,14 @@ const HOME_LINES = [
 	`${RMRF} ${HOME_DIR}/./*`,
 	`${RMRF} $HOME/*/*`,
 	`${RMRF} ~/*/.*`,
+	// climbing above home (#4485 round four)
+	`${RMRF} ~/../*`,
+	`${RMRF} ~/../.*`,
+	`${RMRF} $HOME/../*`,
+	`${RMRF} $HOME/../../*`,
+	`${RMRF} ~/../${path.basename(HOME_DIR)}`,
+	`${RMRF} ${path.dirname(HOME_DIR)}`,
+	`${RMRF} ${path.dirname(HOME_DIR)}/*`,
 	// APFS and NTFS fold case: the lowercase spelling is the same directory
 	...(process.platform === "darwin" || process.platform === "win32"
 		? [`${RMRF} ${HOME_DIR.toLowerCase()}`, `${RMRF} ${HOME_REAL.toLowerCase()}/`]
@@ -185,6 +193,9 @@ const ORDINARY_LINES = [
 	"rm -rf ${HOMEX}",
 	"rm -rf $HOMEX/*",
 	"rm -rf ~/sub/*/x",
+	"rm -rf ~/*/node_modules",
+	"rm -rf ~/*/dist",
+	"rm -rf $HOME/*/node_modules",
 	"ls ~ && echo done",
 	"echo hi; echo $HOME",
 	"git status && bun test",

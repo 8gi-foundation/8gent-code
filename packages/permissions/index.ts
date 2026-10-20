@@ -673,6 +673,7 @@ export class PermissionManager {
 		blocked: boolean;
 		reason?: string;
 	} {
+		// Fail-closed by design: no try/catch here, so any throw propagates and the command is refused.
 		// Every command on the line counts, not only the first (#3768): the
 		// same segment splitting and wrapper handling as the ask-every-time list.
 		for (const argv of commandArgvs(command)) {

@@ -177,15 +177,29 @@ function afterHome(t: string): string | null {
  */
 function isHomeTarget(t: string): boolean {
 	t = t.replace(/\/+$/, "");
+	if (isHomeAncestor(t)) return true;
 	const rest = afterHome(t);
 	if (rest === null) return false;
 	const p = path.posix.normalize(HOME_TOKEN + rest).replace(/\/+$/, "");
 	if (p === "" || p === HOME_TOKEN) return true;
-	if (!p.startsWith(`${HOME_TOKEN}/`)) return p === "/";
+	// Not under home any more: `..` climbed out (`~/../*`, `$HOME/../jamesspalding`), so the delete
+	// resolves at or above home. That is a wipe.
+	if (!p.startsWith(`${HOME_TOKEN}/`)) return true;
 	const parts = p.slice(HOME_TOKEN.length + 1).split("/");
-	const first = parts[0];
-	if (first === "*") return true;
-	return parts.length === 1 && first.startsWith(".") && /[*?[]/.test(first);
+	// Every component after home is `*` or a dot-glob (`$HOME/*`, `$HOME/*/*`, `~/*/.*`, `~/.??*`).
+	// `~/*/node_modules` names a real folder in each child, so it only asks.
+	return parts.every((c) => c === "*" || (c.startsWith(".") && /[*?[]/.test(c)));
+}
+
+/** The parent of home (`/Users`, `/home`) or its direct children glob (`/Users/*`): every account. */
+function isHomeAncestor(t: string): boolean {
+	const n = fold(normTarget(t)).replace(/\/+$/, "");
+	for (const h of homePaths()) {
+		const parent = fold(path.posix.dirname(h));
+		if (parent === "/" || parent === ".") continue;
+		if (n === parent || n === `${parent}/*`) return true;
+	}
+	return false;
 }
 
 function isSystemTarget(t: string): boolean {
