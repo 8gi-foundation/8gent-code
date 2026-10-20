@@ -52,7 +52,7 @@ jobs:
       - name: Probe isolation and counts to the summary
         if: always()
         run: |
-          { echo '```'; grep -E '^(probe isolation|rows |result:)' "$RUNNER_TEMP/grid.out" || echo "no grid output"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo '```'; grep -E '^(probe |rows |result:)' "$RUNNER_TEMP/grid.out" || echo "no grid output"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Grid script tests
         run: bun test scripts/permissions-grid.test.ts

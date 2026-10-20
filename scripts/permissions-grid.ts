@@ -13,6 +13,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -22,12 +23,16 @@ import { basename, dirname, join, posix, resolve } from "node:path";
 
 const RM = ["r", "m"].join("");
 const DEL = ["-de", "lete"].join("");
-const NONE = "none (login-shell skip and rc-free flags only)";
+const NONE = "none";
 const HOME = "/Users/gridhome"; // the home the policy sees; rows spell it literally
 const ROWS_FILE = join(import.meta.dir, "permissions-grid.rows.json");
 /** Over-skips on purpose: a shell word, then anywhere later a flag cluster with l or i. Such a shell reads profile files that can reset PATH. */
 const LOGIN_SHELL =
 	/(^|[\s;&|('"])(bash|zsh|sh|dash|ksh)\b[\s\S]*?[\s'"](-[a-zA-Z]*[li][a-zA-Z]*|--login|--interactive)(?=[\s'"]|$)/;
+
+/** Rows that could put a real binary on PATH from inside the probe are never run, isolated or not. */
+const PATH_TOUCH = /\/etc\/|\bPATH\b|command\s+-p|\/s?bin\/|\/usr\/|exec\s+-a/;
+const noProbe = (t: string) => LOGIN_SHELL.test(t) || PATH_TOUCH.test(t);
 
 export interface Row {
 	id: string;
@@ -152,29 +157,9 @@ function shellProbe(rows: Row[], scratch: string) {
 		const p = Bun.which(n) ?? (n === "sh" || n === "bash" ? `/bin/${n}` : null);
 		if (p) (linux ? copyFileSync : symlinkSync)(p, join(stubs, n));
 	}
-	// Linux defence in depth: every system bin dir becomes the stub dir; without unshare, skip + rc-free stand alone.
-	const cover = [
-		"S=$1; shift; for d in /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin /sbin /bin; do",
-		'if [ -d "$d" ] && [ ! -L "$d" ]; then "$S/mount" --bind "$S" "$d" || exit 97; fi; done;',
-		'[ "$(command -v rm)" = "$S/rm" ] && [ "$(/usr/bin/rm .)" = "RAN rm ." ] || exit 97; exec "$@"',
-	].join(" ");
-	const unshare = linux ? Bun.which("unshare") : null;
 	const sh = join(stubs, "sh");
-	const isoArgs = (argv: string[]) => [
-		"--user",
-		"--map-root-user",
-		"--mount",
-		sh,
-		"-c",
-		cover,
-		"grid",
-		stubs,
-		...argv,
-	];
-	const probe = unshare
-		? spawnSync(unshare, isoArgs([sh, "-c", "exit 0"]), { stdio: "ignore" })
-		: null;
-	let isolated = !!probe && probe.status === 0; // the cover exits 97 on any failed mount or check
+	const iso = isolate(scratch, stubs, sh);
+	if (!iso) return null;
 	const shells = [
 		["bash", "/bin/bash", ["--noprofile", "--norc", "-c"]],
 		["zsh", Bun.which("zsh") ?? "", ["-f", "-c"]],
@@ -186,26 +171,62 @@ function shellProbe(rows: Row[], scratch: string) {
 	const labels = shells.map(([n, p]) => `${n} ${ver(p) ?? "?"}`);
 	const hits = new Map<string, string[]>();
 	for (const r of rows) {
-		shells.forEach(([, path, flags], si) => {
-			const argv = [path, ...flags, r.text];
-			const run = () =>
-				spawnSync(isolated ? (unshare as string) : path, isolated ? isoArgs(argv) : argv.slice(1), {
-					env: { PATH: stubs, HOME: home, BASH_ENV: "", ENV: "" },
-					cwd: scratch,
-					timeout: 5000,
-					stdio: ["ignore", "pipe", "ignore"],
-				});
-			let p = run();
-			if (isolated && p.status === 97) {
-				isolated = false;
-				p = run();
-			}
+		for (const [si, [, path, flags]] of shells.entries()) {
+			const [cmd, args] = iso.wrap([path, ...flags, r.text]);
+			const p = spawnSync(cmd, args, {
+				env: { PATH: stubs, HOME: home, BASH_ENV: "", ENV: "" },
+				cwd: scratch,
+				timeout: 5000,
+				stdio: ["ignore", "pipe", "ignore"],
+			});
+			if (p.status === 97) return null; // the Linux cover failed closed mid-run: nothing is trusted
 			const ran = (p.stdout?.toString() ?? "").split("\n").filter((l) => l.startsWith("RAN "));
 			if (ran.some((l) => isWipe(l, [HOME, home], kids)))
 				hits.set(r.id, [...(hits.get(r.id) ?? []), labels[si]]);
-		});
+		}
 	}
-	return { hits, labels, isolation: isolated ? "unshare mount namespace" : NONE };
+	return { hits, labels, isolation: iso.name };
+}
+
+/**
+ * The probe runs only under verified isolation, else not at all. Linux: an unshare mount namespace
+ * where every system bin dir is the stub dir (every mount and check fails closed, exit 97). macOS:
+ * sandbox-exec with a deny-default profile that writes only under the scratch dir; it is verified
+ * by a write outside scratch that must fail and a write inside that must succeed.
+ */
+function isolate(scratch: string, stubs: string, sh: string) {
+	type Iso = { name: string; wrap: (argv: string[]) => [string, string[]] };
+	if (process.platform === "linux") {
+		const unshare = Bun.which("unshare");
+		if (!unshare) return null;
+		const cover = [
+			"S=$1; shift; for d in /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin /sbin /bin; do",
+			'if [ -d "$d" ] && [ ! -L "$d" ]; then "$S/mount" --bind "$S" "$d" || exit 97; fi; done;',
+			'[ "$(command -v rm)" = "$S/rm" ] && [ "$(/usr/bin/rm .)" = "RAN rm ." ] || exit 97; exec "$@"',
+		].join(" ");
+		const wrap = (argv: string[]): [string, string[]] => [
+			unshare,
+			["--user", "--map-root-user", "--mount", sh, "-c", cover, "grid", stubs, ...argv],
+		];
+		const t = spawnSync(...wrap([sh, "-c", "exit 0"]), { stdio: "ignore" });
+		return t.status === 0 ? ({ name: "unshare mount namespace", wrap } as Iso) : null;
+	}
+	if (process.platform !== "darwin" || !existsSync("/usr/bin/sandbox-exec")) return null;
+	const profile = `(version 1)(deny default)(allow process*)(allow file-read*)(allow file-write* (subpath "${scratch}"))(allow file-write* (literal "/dev/null"))(allow sysctl-read)(allow mach-lookup)(allow signal (target self))`;
+	const wrap = (argv: string[]): [string, string[]] => [
+		"/usr/bin/sandbox-exec",
+		["-p", profile, ...argv],
+	];
+	const outside = mkdtempSync(join(tmpdir(), "grid-outside-"));
+	try {
+		spawnSync(...wrap(["/bin/sh", "-c", `echo x > "${outside}/c"; echo y > "${scratch}/in"`]), {
+			stdio: "ignore",
+		});
+		const ok = !existsSync(join(outside, "c")) && existsSync(join(scratch, "in"));
+		return ok ? ({ name: "sandbox-exec", wrap } as Iso) : null;
+	} finally {
+		rmSync(outside, { recursive: true, force: true });
+	}
 }
 
 export async function runGrid(o: {
@@ -216,7 +237,7 @@ export async function runGrid(o: {
 }): Promise<GridResult> {
 	// os.homedir() is read once at startup, so the fixture home has to be in the environment already.
 	if (homedir() !== HOME) throw new Error(`run with HOME=${HOME} (the CLI does this itself)`);
-	const scratch = mkdtempSync(join(tmpdir(), "permissions-grid-"));
+	const scratch = realpathSync(mkdtempSync(join(tmpdir(), "permissions-grid-")));
 	try {
 		const rows = loadRows(!!o.quick);
 		const [hd, bd] = await Promise.all([
@@ -242,13 +263,13 @@ export async function runGrid(o: {
 			const open = rows.filter(
 				(r) => !r.benign && hd.get(r.id) === "allow" && bd.get(r.id) === "allow",
 			);
-			res.skipped = open.filter((r) => LOGIN_SHELL.test(r.text));
-			const safe = open.filter((r) => !LOGIN_SHELL.test(r.text));
-			const { hits, labels, isolation } = shellProbe(safe, scratch);
-			res.probed = labels;
-			res.isolation = isolation;
-			for (const r of safe)
-				if (hits.has(r.id)) res.gaps.push({ row: r, shells: hits.get(r.id) as string[] });
+			res.skipped = open.filter((r) => noProbe(r.text));
+			const safe = open.filter((r) => !noProbe(r.text));
+			const out = shellProbe(safe, scratch);
+			res.isolation = out?.isolation ?? NONE;
+			res.probed = out?.labels ?? [];
+			for (const r of out ? safe : [])
+				if (out?.hits.has(r.id)) res.gaps.push({ row: r, shells: out.hits.get(r.id) as string[] });
 		}
 		return res;
 	} finally {
@@ -271,11 +292,16 @@ export function printGrid(r: GridResult, o: { head: string; base: string; quick?
 	console.log(`probe isolation: ${r.isolation}`);
 	section("NEWLY BLOCKED on head (information)", r.newlyBlocked.map(show));
 	section("NEWLY ALLOWED on head (FAIL)", r.newlyAllowed.map(show));
-	section("probe skipped (login/interactive)", r.skipped.map(show));
-	const gaps = r.gaps.map((g) => `${show(g.row)}  [${g.shells.join(", ")}]`);
-	section("NAMED SPELLING GAPS: run a wipe in a real shell, allowed on both trees", gaps);
+	section("probe skipped (login/interactive/path)", r.skipped.map(show));
+	if (r.isolation === NONE) console.log("\nprobe skipped: no isolation (static grid only)");
+	else {
+		const gaps = r.gaps.map((g) => `${show(g.row)}  [${g.shells.join(", ")}]`);
+		section("NAMED SPELLING GAPS: run a wipe in a real shell, allowed on both trees", gaps);
+	}
 	const n = [r.newlyBlocked.length, r.newlyAllowed.length, r.gaps.length];
-	console.log(`\nresult: newly blocked ${n[0]}, newly allowed ${n[1]}, named gaps ${n[2]}`);
+	console.log(
+		`\nresult: newly blocked ${n[0]}, newly allowed ${n[1]}, named gaps ${r.isolation === NONE ? "n/a" : n[2]}`,
+	);
 }
 
 if (import.meta.main) {

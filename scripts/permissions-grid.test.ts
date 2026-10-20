@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadRows } from "./permissions-grid";
@@ -71,7 +71,7 @@ describe("permissions grid", () => {
 		expect(r.out).toMatch(/newly blocked [1-9]\d*, newly allowed 0/);
 	});
 
-	test("a wipe both trees allow is a named gap under a real shell, exit 0", () => {
+	test("a wipe both trees allow is a named gap under isolation; without isolation the probe is skipped and no gaps are listed", () => {
 		const open = join(root, "open");
 		mkdirSync(join(open, "packages/permissions"), { recursive: true });
 		writeFileSync(
@@ -80,10 +80,23 @@ describe("permissions grid", () => {
 		);
 		const r = grid(open, open, "--quick");
 		expect(r.code).toBe(0);
-		expect(r.out).toMatch(/named gaps [1-9]\d*/);
-		expect(r.out).toContain("NAMED SPELLING GAPS");
-		expect(r.out).toContain("plain#0 ");
+		if (r.out.includes("probe isolation: none")) {
+			expect(r.out).toContain("probe skipped: no isolation (static grid only)");
+			expect(r.out).not.toContain("NAMED SPELLING GAPS");
+			expect(r.out).toContain("named gaps n/a");
+		} else {
+			expect(r.out).toMatch(/probe isolation: (sandbox-exec|unshare mount namespace)/);
+			expect(r.out).toMatch(/named gaps [1-9]\d*/);
+			expect(r.out).toContain("plain#0 ");
+		}
 	}, 60_000);
+
+	test("rows.json holds no PATH-touching token except the one blocked absolute-path spelling", () => {
+		const d = JSON.parse(readFileSync(join(import.meta.dir, "permissions-grid.rows.json"), "utf8"));
+		const tok = /\/etc\/|\bPATH\b|command\s+-p|\/s?bin\/|\/usr\/|exec\s+-a/;
+		const hits = [...d.spellings, ...d.benign].filter((x: string) => tok.test(x));
+		expect(hits).toEqual(["/bin/sh -c '%RM% -rf /'"]);
+	});
 
 	test("a rev that does not exist fails loudly", () => {
 		const r = grid("no-such-rev-4509", "no-such-rev-4509", "--no-shell");
@@ -112,6 +125,9 @@ describe("permissions grid", () => {
 			`bash -O extglob -l -c '${wipe}'`,
 			`bash --rcfile f -i -c '${wipe}'`,
 			`bash -c '${wipe}'`, // control: not a login shell, so it runs, against the stubs
+			`source /etc/profile; ${wipe}`,
+			`bash -c 'PATH=/bin:$PATH; ${wipe}'`,
+			`bash -c 'exec -a x ${wipe}'`,
 		];
 		const rowsFile = join(root, "login-rows.json");
 		writeFileSync(
@@ -121,9 +137,9 @@ describe("permissions grid", () => {
 		const r = gridEnv({ GRID_ROWS: rowsFile }, open, open);
 		expect(r.code).toBe(0);
 		const skipped = r.out
-			.split("probe skipped (login/interactive)")[1]
+			.split("probe skipped (login/interactive/path)")[1]
 			.split("NAMED SPELLING GAPS")[0];
-		for (const i of [0, 1, 2, 3, 4, 5, 6, 7]) expect(skipped).toContain(`plain#${i} `);
+		for (const i of [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11]) expect(skipped).toContain(`plain#${i} `);
 		expect(skipped).not.toContain("plain#8 ");
 		expect(existsSync(canary)).toBe(true);
 	}, 60_000);
