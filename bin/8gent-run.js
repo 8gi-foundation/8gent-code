@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,6 +31,18 @@ if (!existsSync(cli)) {
   Run: npm run build
 `);
 	process.exit(1);
+}
+
+// Boot trace (#4540): same file as apps/tui/src/lib/boot-trace.ts. Never throws.
+if (process.env.EIGHT_BOOT_TRACE !== "0") {
+	try {
+		const file = join(homedir(), ".8gent", "logs", "tui-boot.log");
+		mkdirSync(dirname(file), { recursive: true });
+		appendFileSync(
+			file,
+			`${new Date().toISOString()} +0ms pid=${process.pid} launcher-spawn platform=${process.platform} node=${process.version}\n`,
+		);
+	} catch {}
 }
 
 const result = spawnSync("bun", [...SAFE_BUN, cli, ...process.argv.slice(2)], {

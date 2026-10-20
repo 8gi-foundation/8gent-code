@@ -202,7 +202,7 @@ Sent to every other client bound to the session when one sends `prompt`. The sen
   `"resumeSecret": "<32 hex>"`, one per session. A `session:resume` from a non-loopback peer
   of a live session must send it back as `"resumeSecret"`, otherwise
   `{ "type": "error", "message": "resume secret required" }`. Loopback clients may omit it.
-- Capabilities (v1.6): `session:created` and `session:resumed` carry `"capabilities": ["input-gate"]`,
+- Capabilities (v1.7): `session:created` and `session:resumed` carry `"capabilities": ["input-gate"]`,
   and `/health` carries the same list as `capabilities`. The list comes from the exported
   `DAEMON_CAPABILITIES` constant beside the input gate (`packages/daemon/input-gate.ts`).
   Clients may gate slash sending on it: send `/` lines only when `input-gate` is present.
@@ -366,6 +366,20 @@ Only one prompt can be in-flight per session. If the agent is already processing
 ```
 Server -> { "type": "event", "event": "agent:error", "payload": { "sessionId": "...", "error": "agent is busy processing another message" } }
 ```
+
+## Input Gate
+
+Every line of text that could reach a model passes one deterministic gate first, on every channel (`os`, `app`, `telegram`, `discord`, `api`, `browser`, and the rest of `KNOWN_CHANNELS` in the daemon pool module). The gate lives in `packages/daemon/input-gate.ts`; its slash handler is `packages/daemon/slash.ts`.
+
+- **Where it runs.** `classifyInput` runs synchronously on every `prompt` frame in `packages/daemon/gateway.ts`, and again inside `AgentPool.chat`, so the dispatch queue and daemon-built prompts pass it too. A line that does not start with `/` is `pass` and goes to the model unchanged. A line that starts with `/` is `slash` and takes the async handler, `gateInput`.
+- **Dispatched or answered.** `gateInput` resolves the name against the TUI slash registry (`apps/tui/src/lib/slash-commands.ts`). The commands that can run without a terminal (`help`, `status`, `model`, `provider`, `session`, `cron`, `goal`, `subgoal`, `dj`, `music`) run or answer. Any other registry name answers `/<name> is not available in the <channel> channel. It runs in the 8gent terminal.` (`browser chat` for the `browser` channel). `/help` lists the same registry as the TUI.
+- **Refused.** An unknown name is answered `Unknown command /<name>. Type /help.` and is never forwarded to the model. A slash line is never a prompt.
+- **Reply shape.** An answered or refused line costs no model turn. The client receives the same final text-stream event as a model reply (see Response Flow), with the answer as the chunk, followed by `session:end` with reason `turn-complete`. It is not an error frame. Example chunk: `Unknown command /nope. Type /help.`
+
+- **Text bound for a model elsewhere is classified, not run.** `goal.start` and `goal.subgoal` text (`packages/daemon/goal-rpc.ts`) and a Telegram voice transcript sent to the judge model use `classifyOnly`: the gate decides but runs nothing. A slash line in goal text is refused with `{ "type": "goal.error", "message": "Goal text is a slash line, not a goal. ..." }`.
+- **`/dj play`** takes a bed name, an http(s) URL or a search term, never a file path (`Refused: /dj play takes a bed name, a URL or a search, not a file path.`).
+
+The Telegram bridge adds its own steps in front of this; see [telegram-bridge-voice.md](../telegram-bridge-voice.md).
 
 ## Live Anatomy View (`/live`, #4190)
 
@@ -920,7 +934,8 @@ goal package only emits in-memory `GoalEvent` records.
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 1.6 | 2026-10-20 | Add `capabilities` (`["input-gate"]`) to `session:created`, `session:resumed` and `/health`. |
+| 1.7 | 2026-10-20 | Add `capabilities` (`["input-gate"]`) to `session:created`, `session:resumed` and `/health`. |
+| 1.6 | 2026-10-20 | Document the input gate on every channel (#4531, #4535), loopback bind by default and the connect-time token on every non-root path (#4532). |
 | 1.5 | 2026-10-11 | Add the restricted `classroom` channel: no tools, loopback + token only, private, not persisted. (#3939) |
 | 1.4 | 2026-10-11 | Shared sessions: `session:list` / `session:attach` / `session:detach` / `session:abort`, `user:message` echo, disconnect only ends a session for the last client, shareable sessions saved to the session store. (#3929) |
 | 1.3 | 2026-05-16 | Add goal-loop methods (`goal.start` / `goal.status` / `goal.subgoal` / `goal.abort` / `goal.resume`) + streaming event taxonomy. Schema v2 (`goal_runs`, `goal_events`). (#2606) |

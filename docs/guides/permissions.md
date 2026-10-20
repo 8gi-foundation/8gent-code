@@ -38,6 +38,10 @@ The following commands always require explicit user approval:
 - **Git destructive**: `git push --force`, `git reset --hard`
 - **Code execution**: `curl | sh`, `wget | bash`
 
+## Writing files from a shell line
+
+A shell line that writes a file with a heredoc or a multi-line command is refused, and the refusal now opens with the fix: `Use the write_file tool to create or change a file.` The model reads that first sentence, so it switches to `write_file` instead of retrying the shell form. The older text still follows for the one allowed form, a quoted heredoc into a relative path inside the project (`cat > .tmp/x.py << 'EOF'`). A chained command is refused with `Send each command as its own run_command call.` first. The wording lives in `packages/permissions/shell-sanitizer.ts` and `packages/permissions/refusal-lead.ts`.
+
 ## Safe Patterns (Auto-approved)
 
 These patterns are automatically approved:
