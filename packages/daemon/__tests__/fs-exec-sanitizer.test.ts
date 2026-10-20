@@ -185,6 +185,25 @@ const CONFINED: Record<string, string[]> = {
 		"cat < ~/.zshrc",
 	],
 	"environment assignment before a command": ["FOO=1 curl x", "FOO=1 echo hi"],
+	"glob that expands to the parent directory": ["cat .?/secret", "ls .?/.?/", "ls [.][.]", "ls .*"],
+	"git that changes state": [
+		"git branch -D main",
+		"git branch -d x",
+		"git branch -m a b",
+		"git branch newbranch",
+		"git tag -d v1",
+		"git checkout main",
+		"git switch main",
+		"git reset HEAD",
+		"git clean -n",
+		"git push",
+		"git commit -m x",
+		"git merge x",
+		"git rebase x",
+		"git stash",
+		"git remote -v",
+		"git config user.name x",
+	],
 	"command off the allowlist": ["curl x", "echo x | tee out.txt", "ncat -e /bin/sh x 1"],
 };
 
@@ -211,6 +230,29 @@ describe("fs.exec is confined to the workspace (no approval card on this route)"
 	});
 });
 
+describe("fs.exec follows symlinks when it confines", () => {
+	test("a link inside the root that points outside is refused; one that points inside still runs", async () => {
+		const outside = path.join(TMP, "outside-dir");
+		fs.mkdirSync(outside, { recursive: true });
+		fs.writeFileSync(path.join(outside, "x"), "secret");
+		fs.symlinkSync(outside, path.join(WORKSPACE, "link-out"));
+		fs.mkdirSync(path.join(WORKSPACE, "real"), { recursive: true });
+		fs.writeFileSync(path.join(WORKSPACE, "real", "y"), "fine");
+		fs.symlinkSync(path.join(WORKSPACE, "real"), path.join(WORKSPACE, "link-in"));
+		for (const line of [
+			"cat link-out/x",
+			"cat link-out/missing",
+			"cat link-out/../outside-dir/x",
+			"echo x > link-out/new.txt",
+			"grep -r secret link-out",
+		]) {
+			await refused(line);
+		}
+		expect(fs.existsSync(path.join(outside, "new.txt"))).toBe(false);
+		expect((await run("cat link-in/y")).stdout).toBe("fine");
+	});
+});
+
 describe("fs.exec still runs plain allowed commands", () => {
 	test("cat and grep of a file inside the root, and an absolute path inside the root", async () => {
 		fs.writeFileSync(path.join(WORKSPACE, "in.txt"), "alpha\nbeta\n");
@@ -218,6 +260,10 @@ describe("fs.exec still runs plain allowed commands", () => {
 		expect((await run("grep -r beta .")).stdout).toContain("beta");
 		expect((await run(`cat ${path.join(WORKSPACE, "in.txt")}`)).stdout).toContain("beta");
 		expect((await run("git status")).exitCode).toBeDefined();
+		expect((await run("git branch")).exitCode).toBeDefined();
+		expect(execRefusal("git branch --list", WORKSPACE)).toBeNull();
+		expect(execRefusal("git branch -a", WORKSPACE)).toBeNull();
+		expect(execRefusal("git log --oneline", WORKSPACE)).toBeNull();
 	});
 
 	test("xargs with a harmless verb runs, also under EIGHT_LEGACY_BASH=1", async () => {

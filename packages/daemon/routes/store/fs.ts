@@ -20,9 +20,8 @@
  * (`evaluatePolicy("run_command", ...)`). On top of that we apply a
  * daemon-local allowlist (`COMMAND_ALLOWLIST`). Before either runs, `execRefusal`
  * applies the engine's shell chain (sanitizer, wipe guard, pre-spawn backstops);
- * the allowlist is an extra layer, never the only one. The `EIGHT_LEGACY_BASH=1` env var bypasses the
- * allowlist for one release; bypass is still audited and logged with a
- * warning.
+ * the allowlist is an extra layer, never the only one.
+ * There is no bypass: the same chain and allowlist run whatever the environment says.
  */
 
 import * as crypto from "node:crypto";
@@ -449,7 +448,17 @@ const COMMAND_ALLOWLIST = new Set([
 ]);
 
 /** Git subcommands that are read-only enough to allow without policy. */
-const GIT_SAFE_SUBS = new Set(["status", "diff", "log", "branch", "show", "rev-parse"]);
+const GIT_SAFE_SUBS = new Set([
+	"status",
+	"diff",
+	"log",
+	"show",
+	"blame",
+	"rev-parse",
+	"ls-files",
+	"branch",
+	"tag",
+]);
 
 interface ExecPolicyResult {
 	allowed: boolean;
@@ -534,8 +543,49 @@ function escapesRoot(root: string, word: string): boolean {
 	if (/\$[A-Za-z_{(]|`/.test(w)) return true;
 	if (w.startsWith("~")) return true;
 	if (w === "/dev/null") return false;
-	if (path.isAbsolute(w) || w.split(/[\\/]/).includes("..")) return !insideRoot(root, w);
-	return false;
+	// A glob that could expand to `..` (.?, .*, [.][.], [!a][!a]) is read by the shell, not by the lexical check.
+	if (w.split(/[\\/]+/).some((c) => /[*?[]/.test(c) && (c.startsWith(".") || c.startsWith("["))))
+		return true;
+	return !realInsideRoot(root, w);
+}
+
+const GIT_LIST_FLAG = /^(-l|--list|--contains|--merged|--no-merged|--points-at)$/;
+const GIT_READ_FLAG =
+	/^(-a|-r|-v|-vv|--all|--remotes|--verbose|--show-current|--no-color|--color(=.*)?|--sort=.*|--format=.*|--no-column|--column(=.*)?)$/;
+
+/** `git branch` / `git tag` that only lists: read-only flags, and names only as list patterns or ref filters. */
+function gitListOnly(rest: string[]): boolean {
+	const listing = rest.some((w) => GIT_LIST_FLAG.test(w));
+	return rest.every((w) =>
+		w.startsWith("-") ? GIT_LIST_FLAG.test(w) || GIT_READ_FLAG.test(w) : listing,
+	);
+}
+
+/**
+ * Walk `word` component by component from root (or /), following every symlink that exists, so a
+ * link inside root that points out is seen. A component that does not exist stays lexical, which is
+ * judging a dangling path by its nearest existing ancestor.
+ */
+function realInsideRoot(root: string, word: string): boolean {
+	let realRoot = root;
+	try {
+		realRoot = fs.realpathSync(root);
+	} catch {}
+	let cur = path.isAbsolute(word) ? path.parse(word).root : realRoot;
+	for (const comp of word.split(/[\\/]+/)) {
+		if (comp === "" || comp === ".") continue;
+		if (comp === "..") {
+			cur = path.dirname(cur);
+			continue;
+		}
+		const next = path.join(cur, comp);
+		try {
+			cur = fs.realpathSync(next);
+		} catch {
+			cur = next;
+		}
+	}
+	return insideRoot(realRoot, cur);
 }
 
 /** The first reason `command` leaves root or runs something the route cannot confine, or null. */
@@ -567,6 +617,13 @@ function confinementRefusal(command: string, root: string): string | null {
 			if ((name === "rg" || name === "grep") && RG_REFUSED_FLAG.test(w)) {
 				return deny("That search option runs a program");
 			}
+		}
+		if (
+			name === "git" &&
+			(argv[1] === "branch" || argv[1] === "tag") &&
+			!gitListOnly(argv.slice(2))
+		) {
+			return deny("git branch and git tag are accepted only to list");
 		}
 		if (name === "git") {
 			const sub = argv.findIndex((w, i) => i > 0 && !w.startsWith("-"));
@@ -645,7 +702,7 @@ export const fsExec: JsonRpcHandler = async (raw, ctx: JsonRpcContext) => {
 	const initiator = params.initiator ?? ctx.initiator;
 	const root = workspaceRoot(params.workspaceId);
 
-	// The engine's chain runs first and always, EIGHT_LEGACY_BASH included: the allowlist is not the only gate.
+	// The engine's chain runs first and always: the allowlist is not the only gate.
 	const refusal = execRefusal(params.command, root);
 	const policy: ExecPolicyResult = refusal
 		? { allowed: false, reason: refusal }
