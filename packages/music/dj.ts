@@ -16,10 +16,17 @@
  */
 
 import { type ChildProcess, type SpawnOptions, execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
 import * as net from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, posix, win32 } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, sep, win32 } from "node:path";
 import { getSettingsFilePath, loadSettings } from "../settings/store.js";
 import { type KeyJob, detectKey } from "./key-detect.js";
 import { stopOwnPlayers } from "./player.js";
@@ -155,6 +162,22 @@ export function ytSearch(
 // ---- Platform ----
 const PLATFORM = platform();
 const HOME = homedir();
+
+/** The folder of local beds. A direct file path plays only from inside it (#4530). */
+export function bedsDir(): string {
+	return process.env.EIGHT_BEDS_DIR || join(HOME, ".8gent", "creative", "music", "beds");
+}
+
+/** True when `file` exists and its realpath (symlinks resolved) is inside the beds folder. */
+export function isBedPath(file: string): boolean {
+	try {
+		const root = realpathSync(bedsDir());
+		const real = realpathSync(file);
+		return real.startsWith(root.endsWith(sep) ? root : root + sep);
+	} catch {
+		return false;
+	}
+}
 const TMP = tmpdir();
 
 /**
@@ -603,9 +626,12 @@ export class DJ {
 	async play(queryOrUrl: string): Promise<string> {
 		const t = detectTools();
 		if (!t.mpv) return `mpv not installed. Run: ${installHint()}`;
-		// A URL or an existing absolute file path plays as is; anything else is a search.
-		const direct =
-			queryOrUrl.startsWith("http") || (isAbsolute(queryOrUrl) && existsSync(queryOrUrl));
+		// A URL or a file inside the beds folder plays as is; anything else is a search.
+		// An absolute path outside the beds folder is refused, never searched or played,
+		// so chat text cannot play or probe an arbitrary local file.
+		if (isAbsolute(queryOrUrl) && !isBedPath(queryOrUrl))
+			return "Refused: only files in the beds folder play directly.";
+		const direct = queryOrUrl.startsWith("http") || isAbsolute(queryOrUrl);
 		if (!t.ytdlp && !direct) return `yt-dlp not installed. Run: ${installHint()}`;
 
 		let url = queryOrUrl;

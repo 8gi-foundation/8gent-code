@@ -115,16 +115,17 @@ describe("gateway input gate", () => {
 		s.ws.close();
 	});
 
-	it("browser channel: an unknown slash name falls through to the model", async () => {
+	it("browser channel: an unknown slash name is refused, not forwarded", async () => {
 		chatted.length = 0;
 		const s = await session("browser");
 		s.ws.send(JSON.stringify({ type: "prompt", text: "/nosuchthing hi" }));
-		await s.next(streamed);
-		expect(chatted).toEqual(["/nosuchthing hi"]);
+		const f = await s.next(streamed);
+		expect(f.payload.chunk).toContain("Unknown command /nosuchthing");
+		expect(chatted).toEqual([]);
 		s.ws.close();
 	});
 
-	it("every channel in the protocol enum passes the gate: /status never reaches the model", async () => {
+	it("every channel in the protocol enum passes the gate: /status and an unknown slash never reach the model", async () => {
 		const reached: string[] = [];
 		for (const channel of KNOWN_CHANNELS) {
 			chatted.length = 0;
@@ -132,6 +133,11 @@ describe("gateway input gate", () => {
 			s.ws.send(JSON.stringify({ type: "prompt", text: "/status" }));
 			const f = await s.next(streamed);
 			expect(f.payload.chunk).toContain("7 messages");
+			expect(chatted).toEqual([]);
+			s.frames.length = 0;
+			s.ws.send(JSON.stringify({ type: "prompt", text: "/nosuchthing" }));
+			const u = await s.next(streamed);
+			expect(u.payload.chunk).toContain("Unknown command");
 			expect(chatted).toEqual([]);
 			reached.push(channel);
 			s.ws.close();

@@ -10,10 +10,9 @@
  */
 
 import { existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { BUILT_IN_SLASH_COMMANDS } from "../../apps/tui/src/lib/slash-commands";
-import { DJ } from "../music/dj";
+import { DJ, bedsDir } from "../music/dj";
 import { getJobs } from "./cron";
 
 export interface SlashContext {
@@ -45,10 +44,6 @@ const HEADLESS = new Set([
 ]);
 
 const dj = new DJ();
-
-export function bedsDir(): string {
-	return process.env.EIGHT_BEDS_DIR || join(homedir(), ".8gent", "creative", "music", "beds");
-}
 
 /** First audio file in the beds dir whose name contains every word of the query (case-insensitive). */
 export function matchBed(query: string, dir = bedsDir()): string | null {
@@ -87,6 +82,9 @@ async function runDj(args: string[]): Promise<string> {
 			if (!rest) return "Usage: /dj play <query>";
 			const bed = matchBed(rest);
 			if (bed) return `[bed] ${await dj.play(bed)}`;
+			// A bed, an http(s) URL or a search term; never a path.
+			if (/^(\/|~|\.|file:)/i.test(rest))
+				return "Refused: /dj play takes a bed name, a URL or a search, not a file path.";
 			return `[youtube] ${await dj.play(rest)}`;
 		}
 		case "radio":
@@ -127,10 +125,11 @@ async function runDj(args: string[]): Promise<string> {
  */
 export async function runSlash(line: string, ctx: SlashContext): Promise<SlashResult> {
 	const trimmed = line.trim();
-	if (!trimmed.startsWith("/") || trimmed.length < 2) return { handled: false };
+	if (!trimmed.startsWith("/")) return { handled: false };
 	const [head, ...args] = trimmed.slice(1).split(/\s+/);
 	const name = resolve(head);
-	if (!name) return { handled: false };
+	// A slash line never reaches the model: an unknown name is answered here.
+	if (!name) return { handled: true, text: `Unknown command /${head.slice(0, 40)}. Type /help.` };
 	if (name === "help") return { handled: true, text: helpText() };
 	if (!HEADLESS.has(name)) {
 		return {

@@ -516,7 +516,7 @@ export class AgentPool {
 		if (gated.handled) {
 			if (!turn)
 				console.warn(
-					`[gate] ${entry.channel} session ${sessionId}: slash command answered without the model`,
+					`[gate] ${entry.channel} session ${sessionId}: slash line answered without the model (a daemon-built prompt should not start with a slash)`,
 				);
 			const reply = gated.text ?? "";
 			bus.emit("agent:stream", { sessionId, chunk: reply, final: true });

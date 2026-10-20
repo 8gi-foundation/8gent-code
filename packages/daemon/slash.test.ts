@@ -1,11 +1,12 @@
 /** #4530: the headless slash dispatcher the gateway runs before the model. */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BUILT_IN_SLASH_COMMANDS } from "../../apps/tui/src/lib/slash-commands";
 import { DJ, setDjSpawn, setDjTools } from "../music/dj";
+import { KNOWN_CHANNELS } from "./agent-pool";
 import { matchBed, runSlash } from "./slash";
 
 const ctx = {
@@ -49,13 +50,53 @@ afterAll(() => {
 });
 
 describe("runSlash", () => {
-	test("a plain prompt and a bare slash are not handled", async () => {
+	test("a plain prompt is not handled", async () => {
 		expect((await runSlash("hello", ctx)).handled).toBe(false);
-		expect((await runSlash("/", ctx)).handled).toBe(false);
+		expect((await runSlash("say /help", ctx)).handled).toBe(false);
 	});
 
-	test("an unknown name falls through to the model", async () => {
-		expect((await runSlash("/nosuchcommand x", ctx)).handled).toBe(false);
+	test("an unknown name is refused here, never forwarded to the model", async () => {
+		expect(await runSlash("/nosuchcommand x", ctx)).toEqual({
+			handled: true,
+			text: "Unknown command /nosuchcommand. Type /help.",
+		});
+		expect((await runSlash("/", ctx)).handled).toBe(true);
+		expect((await runSlash("/Users/me/file", ctx)).handled).toBe(true);
+	});
+
+	test("an unknown slash is refused from every channel in the protocol enum", async () => {
+		for (const channel of KNOWN_CHANNELS) {
+			const r = await runSlash("/nosuchcommand", { ...ctx, channel });
+			expect(r.handled).toBe(true);
+			expect(r.text).toContain("Unknown command");
+		}
+	});
+
+	test("/dj play with an absolute path outside the beds folder is refused, nothing spawns", async () => {
+		for (const bad of [
+			"/etc/hosts",
+			"/nonexistent/probe.mp3",
+			"~/x.mp3",
+			"../x.mp3",
+			"file:///etc/hosts",
+		]) {
+			spawned.length = 0;
+			const r = await runSlash(`/dj play ${bad}`, ctx);
+			expect(r.text).toStartWith("Refused");
+			expect(spawned).toEqual([]);
+		}
+	});
+
+	test("a symlink in the beds folder that points outside is refused", async () => {
+		const out = mkdtempSync(join(tmpdir(), "outside-"));
+		writeFileSync(join(out, "secret.mp3"), "x");
+		symlinkSync(join(out, "secret.mp3"), join(beds, "linkedsecret.mp3"));
+		spawned.length = 0;
+		const r = await runSlash("/dj play linkedsecret", ctx);
+		expect(r.text).toContain("Refused");
+		expect(spawned).toEqual([]);
+		rmSync(join(beds, "linkedsecret.mp3"));
+		rmSync(out, { recursive: true, force: true });
 	});
 
 	test("help lists every registry name, the same list the TUI has", async () => {

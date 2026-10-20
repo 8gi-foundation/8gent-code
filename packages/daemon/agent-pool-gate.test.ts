@@ -69,11 +69,11 @@ describe("AgentPool.chat gate", () => {
 		pool.destroySession("g-tui");
 	});
 
-	test("plain text and an unknown name still reach the model", async () => {
+	test("plain text reaches the model; an unknown slash name never does", async () => {
 		const { pool, reached } = poolWithFake("g-plain", "api");
 		expect(await pool.chat("g-plain", "hello")).toBe("model:hello");
-		expect(await pool.chat("g-plain", "/nosuchthing")).toBe("model:/nosuchthing");
-		expect(reached).toEqual(["hello", "/nosuchthing"]);
+		expect(await pool.chat("g-plain", "/nosuchthing")).toContain("Unknown command /nosuchthing");
+		expect(reached).toEqual(["hello"]);
 		pool.destroySession("g-plain");
 	});
 
