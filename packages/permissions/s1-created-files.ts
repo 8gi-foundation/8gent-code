@@ -30,8 +30,8 @@
  * keeps device, inode and birth time; a directory renamed, replaced or made
  * by anything else does not count, and a directory that already existed is
  * never recorded. Where the file system reports no birth time, nothing is
- * recorded. A directory write_file makes for a new file's parent is not
- * recorded (it is made before the write is watched). Read by
+ * recorded. The directories write_file makes for a new file's
+ * parent are recorded the same way (mkdirRecorded, #4516). Read by
  * s1-rm-own-dir.ts.
  *
  * A file that existed before the session wrote to it is never recorded: an
@@ -110,6 +110,7 @@ import {
 	closeSync,
 	fstatSync,
 	lstatSync,
+	mkdirSync,
 	openSync,
 	readdirSync,
 	realpathSync,
@@ -615,5 +616,38 @@ export function watchMkdir(command: string, cwd: string, record: CreatedFiles): 
 		};
 	} catch {
 		return () => {};
+	}
+}
+
+/**
+ * `mkdir -p dir` for write_file (#4516): makes the missing directories and
+ * records each one it made, deepest first up to the first that already existed,
+ * so rm -r of the session's own scratch directory (s1-rm-own-dir.ts) can tell
+ * it from a directory that was there before. Same guard as watchMkdir: a new
+ * directory is recorded only when its realpath is strictly inside the realpath
+ * of `cwd` and it was born no earlier than one second before this call. An
+ * absolute or `..` path that lands outside the cwd records nothing. Never
+ * throws from the recording; the mkdir error itself propagates as before.
+ */
+export function mkdirRecorded(dir: string, cwd: string, record: CreatedFiles | undefined): void {
+	const fresh: string[] = [];
+	let cur = path.resolve(dir);
+	while (cur !== path.dirname(cur) && pathAbsent(cur)) {
+		fresh.push(cur);
+		cur = path.dirname(cur);
+	}
+	const since = BigInt(Date.now() - 1000) * 1_000_000n;
+	mkdirSync(dir, { recursive: true });
+	if (!record) return;
+	try {
+		const root = realpathSync(cwd);
+		for (const abs of fresh) {
+			const key = keyOf(abs);
+			if (!key || !inside(key, root) || key === root) continue;
+			const st = lstatSync(abs, { bigint: true });
+			if (st.isDirectory() && st.birthtimeNs >= since) record.recordDir(abs);
+		}
+	} catch {
+		// Recording is best effort; it never affects the write.
 	}
 }

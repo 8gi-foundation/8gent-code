@@ -49,8 +49,8 @@
  * carries a hint for the block message saying what would pass.
  *
  * Known limits, on purpose: TOCTOU between this check and the spawn (accepted
- * by 8SO for the sibling lanes); a directory write_file made for a new file's
- * parent is not in the record, so its rm still goes to the judge.
+ * by 8SO for the sibling lanes). A directory write_file made for a new file's
+ * parent is in the record since #4516 (mkdirRecorded), like a mkdir's.
  *
  * Synchronous, never throws.
  */
