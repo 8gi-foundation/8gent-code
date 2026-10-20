@@ -91,6 +91,9 @@ async function run(c: Case): Promise<Outcome> {
 				H_ROWS: c.rows ?? "30",
 				NODE_ENV: "",
 				EIGHT_BOOT_TRACE: "0",
+				// Ink treats CI=true as "not interactive" and paints only on exit, so a
+				// CI runner would never show a first screen. Users are not in CI.
+				CI: "false",
 			},
 		},
 	);
