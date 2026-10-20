@@ -21,6 +21,7 @@ import {
 } from "./classroom";
 import { dataDirPath, getDataDir } from "./data-dir";
 import { bus } from "./events";
+import { gateInput } from "./input-gate";
 import { type QueueRequest, type QueueStatus, type Receipt, WorkQueue } from "./queue";
 import type { SessionJournal } from "./session-journal";
 
@@ -500,6 +501,28 @@ export class AgentPool {
 			return "[error] session not found";
 		}
 
+		// The one choke point before the model (#4530): every caller of chat(), the
+		// gateway, the dispatch queue and daemon-built prompts alike, passes the
+		// deterministic gate. A daemon-built prompt that starts with a known command
+		// name is a bug, so it is logged, not exempted.
+		const gated = await gateInput(text, {
+			sessionId,
+			channel: entry.channel,
+			model: entry.agent.getModel(),
+			runtime: entry.agent.getRuntime(),
+			messageCount: entry.messageCount,
+			busy: entry.busy,
+		});
+		if (gated.handled) {
+			if (!turn)
+				console.warn(
+					`[gate] ${entry.channel} session ${sessionId}: slash command answered without the model`,
+				);
+			const reply = gated.text ?? "";
+			bus.emit("agent:stream", { sessionId, chunk: reply, final: true });
+			return reply;
+		}
+
 		if (entry.busy) {
 			if (!sessionQueueEnabled()) {
 				bus.emit("agent:error", {
@@ -551,11 +574,10 @@ export class AgentPool {
 
 		const startMs = Date.now();
 		try {
+			const modelCall = (): Promise<string> => entry.agent.chat(text);
 			const response = await (turn
-				? withChannelApprovals(sessionId, turn, entry.agent.getWorkingDirectory(), () =>
-						entry.agent.chat(text),
-					)
-				: entry.agent.chat(text));
+				? withChannelApprovals(sessionId, turn, entry.agent.getWorkingDirectory(), modelCall)
+				: modelCall());
 
 			// Track token usage (estimate: ~4 chars/token).
 			const promptTokens = Math.ceil(text.length / 4);
