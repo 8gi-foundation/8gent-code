@@ -147,6 +147,8 @@ function isConfined(
 ): boolean {
 	const flavor = pathFor(platform);
 	for (const prefix of prefixes ?? []) {
+		// Prefixes are NOT realpath'd: a prefix that is itself a symlink must not pull
+		// its target into the allow-list.
 		if (isPathWithin(resolved, flavor.resolve(prefix), platform)) return true;
 	}
 	return isWithinWorkspace(resolved, workspaceRoot, platform);

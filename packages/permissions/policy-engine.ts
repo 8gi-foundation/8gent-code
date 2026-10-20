@@ -17,8 +17,13 @@ import { parse as parseYaml } from "yaml";
 import { resolveHome } from "../core/home.js";
 import { type CapabilityRequest, enforceCapability } from "./capability-manifest.js";
 import { scrubGoalText } from "./goal-secret-scrub.js";
-import { commandMutatesSessionRecords, commandTouchesAuditFiles, validatePath } from "./path-guard.js";
+import {
+	commandMutatesSessionRecords,
+	commandTouchesAuditFiles,
+	validatePath,
+} from "./path-guard.js";
 import { hasSecret } from "./secret-detector.js";
+import { policyScratchDir } from "./session-scratch.js";
 import { checkCommandBoundary, checkFilePathBoundary } from "./src/workspace-boundary.js";
 import type {
 	PolicyActionType,
@@ -596,7 +601,6 @@ const DEFAULT_ALLOWED_PREFIXES = [
 	"/opt/homebrew/bin",
 	"/opt/homebrew/lib",
 	"/opt/homebrew/share",
-	os.tmpdir(),
 ];
 
 function resolveWorkspaceRoot(context: PolicyContext): string | null {
@@ -607,12 +611,17 @@ function resolveWorkspaceRoot(context: PolicyContext): string | null {
 	return null;
 }
 
+export { policyScratchDir } from "./session-scratch.js";
+
 function resolveAllowedPrefixes(context: PolicyContext): string[] {
 	const fromContext = context.allowedAbsolutePrefixes;
+	// Null (unverifiable scratch dir) leaves the prefix out: fail closed.
+	const scratch = policyScratchDir(context.sessionId);
+	const base = scratch ? [...DEFAULT_ALLOWED_PREFIXES, scratch] : [...DEFAULT_ALLOWED_PREFIXES];
 	if (Array.isArray(fromContext)) {
-		return [...DEFAULT_ALLOWED_PREFIXES, ...fromContext.filter((s) => typeof s === "string")];
+		return [...base, ...fromContext.filter((s) => typeof s === "string")];
 	}
-	return DEFAULT_ALLOWED_PREFIXES;
+	return base;
 }
 
 /**
