@@ -164,7 +164,18 @@ function shellProbe(rows: Row[], scratch: string) {
 		);
 	}
 	const linux = process.platform === "linux";
-	for (const n of ["sh", "bash", "zsh", "env", "cat", "xargs", "mount"]) {
+	for (const n of [
+		"sh",
+		"bash",
+		"zsh",
+		"env",
+		"cat",
+		"xargs",
+		"mount",
+		"umount",
+		"unshare",
+		"setpriv",
+	]) {
 		const p = Bun.which(n) ?? (n === "sh" || n === "bash" ? `/bin/${n}` : null);
 		if (p) (linux ? copyFileSync : symlinkSync)(p, join(stubs, n));
 	}

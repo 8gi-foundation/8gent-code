@@ -11,7 +11,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -44,12 +44,22 @@ export function isolate(scratch: string, stubs: string, sh: string): Iso | null 
 		if (!unshare) return null;
 		const sentinel = join(scratch, `.cover-failed-${randomUUID()}`);
 		const dirs = "/usr/bin /usr/sbin /usr/local/bin /usr/local/sbin /sbin /bin";
+		// The row runs with no capabilities: root in a user namespace could undo the mounts below.
+		const drop =
+			'D="$S/unshare --user --mount --"; [ -x "$S/unshare" ] || D="$S/setpriv --no-new-privs --inh-caps=-all --ambient-caps=-all --bounding-set=-all --"; [ -x "${D%% *}" ] || die;';
+		const canary = `$D "$S/sh" -c '"$0/mount" -o remount,rw / 2>/dev/null && exit 1; "$0/umount" /usr/bin 2>/dev/null && exit 1; exit 0' "$S" || die;`;
 		const cover = [
-			'S=$1; F=$2; R=$3; shift 3; die() { : > "$F"; exit 97; };',
-			'while read -r _ _ _ _ m _; do "$S/mount" -o remount,bind,ro "$m" 2>/dev/null; done < /proc/self/mountinfo;',
+			// fd 9 is the sentinel, opened while scratch is still writable; a row never sees it (closed before exec)
+			'S=$1; F=$2; R=$3; shift 3; exec 9>>"$F"; die() { echo lost >&9; exit 97; };',
+			'L=$(while read -r _ _ _ _ m _; do echo "$m"; done < /proc/self/mountinfo);',
+			'for m in $L; do "$S/mount" -o remount,bind,ro "$m" || die; done;',
+			'while read -r _ _ _ _ m o _; do case "$o" in ro|ro,*) ;; *) [ "$m" = /dev/null ] || die;; esac; done < /proc/self/mountinfo;',
 			'"$S/mount" --bind "$R" "$R" && "$S/mount" -o remount,bind,rw "$R" || die;',
 			`for d in ${dirs}; do if [ -d "$d" ] && [ ! -L "$d" ]; then "$S/mount" --bind "$S" "$d" || die; fi; done;`,
-			'[ "$(command -v rm)" = "$S/rm" ] && [ "$(/usr/bin/rm .)" = "RAN rm ." ] || die; exec "$@"',
+			'[ "$(command -v rm)" = "$S/rm" ] && [ "$(/usr/bin/rm .)" = "RAN rm ." ] || die;',
+			drop,
+			canary,
+			'exec 9>&-; exec $D "$@"',
 		].join(" ");
 		const wrap: Iso["wrap"] = (argv) => [
 			unshare,
@@ -67,7 +77,7 @@ export function isolate(scratch: string, stubs: string, sh: string): Iso | null 
 				...argv,
 			],
 		];
-		const lost = () => existsSync(sentinel);
+		const lost = () => existsSync(sentinel) && statSync(sentinel).size > 0;
 		return writeCanary(wrap, scratch, () => !lost())
 			? { name: "unshare mount namespace", wrap, lost }
 			: null;
