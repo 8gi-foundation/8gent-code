@@ -510,7 +510,11 @@ describe("sanitizeShellCommand: quoted heredoc that only writes a project file (
 			"linux",
 		);
 		expect(r.safe).toBe(false);
-		expect(r.reason?.startsWith("Use exactly: cat > .tmp/x.py << 'EOF'")).toBe(true);
+		expect(
+			r.reason?.startsWith(
+				"Use the write_file tool to create or change a file. If a heredoc is needed, use exactly: cat > .tmp/x.py << 'EOF'",
+			),
+		).toBe(true);
 	});
 	test("a heredoc into a shell or interpreter is refused", () => {
 		no("bash << 'EOF'\nrm -rf y\nEOF", FORM);

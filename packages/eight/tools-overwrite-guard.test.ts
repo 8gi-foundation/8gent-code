@@ -75,7 +75,8 @@ describe("refusal lead (#4238)", () => {
 	test("another refusal type gets the same lead and no chaining hint", async () => {
 		const { ex } = setup();
 		const out = await ex.execute("run_command", { command: "cd .. && touch z.txt" });
-		expect(out).toStartWith(REFUSAL_LEAD);
+		// The leading-cd refusal is a chaining refusal: it opens with the chaining remedy (#4533).
+		expect(out).toStartWith(CHAIN_LEAD);
 		const dollar = refusalLead("[BLOCKED] Dangerous command pattern. Command: x");
 		expect(dollar).toStartWith(REFUSAL_LEAD);
 		expect(dollar).not.toContain("Send each command as its own run_command call.");

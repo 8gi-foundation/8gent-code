@@ -147,7 +147,9 @@ describe("refused shapes", () => {
 	});
 	test("every refusal reads as a chaining refusal, with the command", () => {
 		const msg = refusedWhy("cd .. && ls");
-		expect(msg).toStartWith("[BLOCKED] Command chaining is not allowed.");
+		expect(msg).toStartWith(
+			"[BLOCKED] Send each command as its own run_command call. Command chaining is not allowed.",
+		);
 		expect(msg).toEndWith("Command: cd .. && ls");
 	});
 });

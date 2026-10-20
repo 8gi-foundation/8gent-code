@@ -167,10 +167,10 @@ function scanPwshConstructs(command: string): boolean {
 }
 
 const NEWLINE_REASON =
-	"Write the file alone: cat > .tmp/x.py << 'EOF' then the lines then EOF, and run it in a separate run_command call (no cd/&&, nothing after EOF). A new line outside quotes starts another command";
+	"Use the write_file tool to create or change a file. Or write the file alone: cat > .tmp/x.py << 'EOF' then the lines then EOF, and run it in a separate run_command call (no cd/&&, nothing after EOF). A new line outside quotes starts another command";
 
 const HEREDOC_FORM_REASON =
-	"Use exactly: cat > .tmp/x.py << 'EOF' then the lines then EOF. The delimiter must be quoted and the target a relative path inside the project (no .., no leading /). A heredoc into a shell or interpreter is not allowed";
+	"Use the write_file tool to create or change a file. If a heredoc is needed, use exactly: cat > .tmp/x.py << 'EOF' then the lines then EOF. The delimiter must be quoted and the target a relative path inside the project (no .., no leading /). A heredoc into a shell or interpreter is not allowed";
 
 /** A relative project path: no leading / or ~, no .. segment, no expansion, quote, glob or space characters. */
 const PROJECT_REL_PATH =
@@ -195,7 +195,7 @@ function isQuotedHeredocFileWrite(head: string, word: string): boolean {
 }
 
 const HEREDOC_REASON =
-	"A heredoc needs its closing line after the body, so it cannot be checked. Put the text in a file instead";
+	"Use the write_file tool to create or change a file. A heredoc needs its closing line after the body, so it cannot be checked. Put the text in a file instead";
 
 interface QuoteScan {
 	balanced: boolean;
