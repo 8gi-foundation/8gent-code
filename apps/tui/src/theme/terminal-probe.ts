@@ -34,6 +34,7 @@
 
 import { StringDecoder } from "node:string_decoder";
 import { type Rgb, toHex } from "../../../../packages/design-compose/index.js";
+import { bootTrace } from "../lib/boot-trace.js";
 
 export const OSC11_QUERY = "\x1b]11;?\x07";
 export const DA1_QUERY = "\x1b[c";
@@ -327,6 +328,7 @@ export function probeTerminal(opts: ProbeOptions = {}): Promise<TerminalReport |
 		const finish = () => {
 			if (done) return;
 			done = true;
+			bootTrace("terminal-probe-end", `replyBytes=${buf.length}`);
 			clearTimeout(timer);
 			stdin.removeListener("data", onData);
 			stdin.pause();
@@ -359,6 +361,7 @@ export function probeTerminal(opts: ProbeOptions = {}): Promise<TerminalReport |
 		};
 
 		const timer = setTimeout(finish, timeoutMs);
+		bootTrace("terminal-probe-start", `wasRaw=${wasRaw}`);
 
 		try {
 			if (!wasRaw) stdin.setRawMode?.(true);

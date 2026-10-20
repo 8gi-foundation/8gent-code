@@ -2950,6 +2950,13 @@ async function doctorCommand() {
 			issues++;
 		}
 	} else console.log(dim("  No MCP servers (~/.8gent/mcp.json)"));
+	{
+		const { readBootTraceTail, bootTracePath } = await import("../apps/tui/src/lib/boot-trace.ts");
+		console.log("\nBoot trace");
+		const tail = readBootTraceTail(30);
+		if (tail.length === 0) console.log(dim(`  none yet (${bootTracePath()})`));
+		else for (const l of tail) console.log(dim(`  ${l}`));
+	}
 	console.log(
 		issues === 0
 			? `\n${green("All checks passed.")}\n`
