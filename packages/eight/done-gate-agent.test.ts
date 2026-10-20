@@ -123,7 +123,7 @@ for (const [label, textTools, m] of [
 			mode = m;
 		});
 		afterEach(() => {
-			Reflect.deleteProperty(process.env, "EIGHT_DONE_GATE");
+			Reflect.deleteProperty(process.env, "EIGHT_TEST_CLAIM_GATE");
 			bodies = [];
 			rmSync(join(repo, "out.txt"), { force: true });
 		});
@@ -133,7 +133,7 @@ for (const [label, textTools, m] of [
 		});
 
 		test("flag on: write, then a tests-pass claim with no test run: one nudge, then the task ends", async () => {
-			process.env.EIGHT_DONE_GATE = "1";
+			process.env.EIGHT_TEST_CLAIM_GATE = "1";
 			const agent = build();
 			await agent.chat(PROMPT);
 			expect(existsSync(join(repo, "out.txt"))).toBe(true);
@@ -145,13 +145,13 @@ for (const [label, textTools, m] of [
 			expect(agent.getLastTurnFailure()?.reason).toBe("unverified");
 		}, 60_000);
 
-		test("doneGate option on, env unset: same", async () => {
+		test("testClaimGate option on, env unset: same", async () => {
 			const agent = new Agent({
 				model: "m",
 				runtime: "ollama",
 				workingDirectory: repo,
 				baseUrl: `http://127.0.0.1:${server.port}`,
-				doneGate: true,
+				testClaimGate: true,
 			} as ConstructorParameters<typeof Agent>[0]);
 			await agent.chat(PROMPT);
 			expect(agent.getDoneGate()).toBe("stale_or_failing_tests");

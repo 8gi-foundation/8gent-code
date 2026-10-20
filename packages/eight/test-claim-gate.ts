@@ -13,10 +13,10 @@
  * timestamp it cannot tie. First violation: one user-role line, one more turn. Second:
  * the caller ends the task with done_gate "stale_or_failing_tests".
  *
- *   - Off by default. On with EIGHT_DONE_GATE=1 (or "true") or the doneGate: true option.
+ *   - Off by default. On with EIGHT_TEST_CLAIM_GATE=1 (or "true") or the testClaimGate: true option.
  *   - Pure functions, no I/O. agent.ts owns the ledger and the one-nudge counter.
  *   - Not the project check in done-gate.ts (`8gent run`, on by default, EIGHT_DONE_GATE=0
- *     turns that off). That one runs the project's tests itself; this one audits a claim.
+ *     turns that off). This gate never reads EIGHT_DONE_GATE. That one runs the project's tests itself; this one audits a claim.
  */
 
 import { CHANGE_TOOLS } from "./verify-gate";
@@ -48,7 +48,7 @@ export function isDoneGateEnabled(
 	option?: boolean,
 ): boolean {
 	if (option !== undefined) return option;
-	const v = (env.EIGHT_DONE_GATE ?? "").trim().toLowerCase();
+	const v = (env.EIGHT_TEST_CLAIM_GATE ?? "").trim().toLowerCase();
 	return v === "1" || v === "true";
 }
 

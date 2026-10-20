@@ -2076,11 +2076,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
-	 * Done gate (#4505, EIGHT_DONE_GATE=1 or config.doneGate): a reply that claims passing tests
+	 * Done gate (#4505, EIGHT_TEST_CLAIM_GATE=1 or config.testClaimGate): a reply that claims passing tests
 	 * with no newer passing test run behind it gets one nudge. See test-claim-gate.ts.
 	 */
 	private doneGateNudge(reply: string): string | null {
-		if (!isDoneGateEnabled(process.env, this.config.doneGate)) return null;
+		if (!isDoneGateEnabled(process.env, this.config.testClaimGate)) return null;
 		if (this.doneGateNudged || !testClaimViolation(this.turnToolLedger, reply)) return null;
 		this.doneGateNudged = true;
 		return TEST_CLAIM_NUDGE;
@@ -2088,7 +2088,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	/** Second violation after the nudge: the harness, not the model, ends the task as failed. */
 	private settleDoneGate(reply: string): void {
-		if (!this.doneGateNudged || !isDoneGateEnabled(process.env, this.config.doneGate)) return;
+		if (!this.doneGateNudged || !isDoneGateEnabled(process.env, this.config.testClaimGate)) return;
 		if (!testClaimViolation(this.turnToolLedger, reply)) return;
 		this.doneGate = DONE_GATE_FIELD;
 		console.log(

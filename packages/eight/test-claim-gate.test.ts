@@ -79,10 +79,15 @@ describe("testClaimViolation (fake tool logs)", () => {
 describe("flag", () => {
 	test("off by default; env or option turns it on; option wins", () => {
 		expect(isDoneGateEnabled({})).toBe(false);
-		expect(isDoneGateEnabled({ EIGHT_DONE_GATE: "1" })).toBe(true);
-		expect(isDoneGateEnabled({ EIGHT_DONE_GATE: "0" })).toBe(false);
+		expect(isDoneGateEnabled({ EIGHT_TEST_CLAIM_GATE: "1" })).toBe(true);
+		expect(isDoneGateEnabled({ EIGHT_TEST_CLAIM_GATE: "true" })).toBe(true);
+		expect(isDoneGateEnabled({ EIGHT_TEST_CLAIM_GATE: "0" })).toBe(false);
 		expect(isDoneGateEnabled({}, true)).toBe(true);
-		expect(isDoneGateEnabled({ EIGHT_DONE_GATE: "1" }, false)).toBe(false);
+		expect(isDoneGateEnabled({ EIGHT_TEST_CLAIM_GATE: "1" }, false)).toBe(false);
+	});
+	test("the project-check var EIGHT_DONE_GATE neither enables nor disables it", () => {
+		expect(isDoneGateEnabled({ EIGHT_DONE_GATE: "1" })).toBe(false);
+		expect(isDoneGateEnabled({ EIGHT_DONE_GATE: "0", EIGHT_TEST_CLAIM_GATE: "1" })).toBe(true);
 	});
 	test("constants", () => {
 		expect(DONE_GATE_FIELD).toBe("stale_or_failing_tests");
