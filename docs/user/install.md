@@ -79,3 +79,5 @@ The TUI writes one line per startup stage to `~/.8gent/logs/tui-boot.log` (on Wi
 The last stage in the file is the last one the TUI reached. If the TUI does not get past its first moment, paste the output of `8gent doctor` (or the last 30 lines of `tui-boot.log`) into your report, along with the terminal you used (Windows Terminal, PowerShell, cmd or WSL).
 
 To turn the trace off, set `EIGHT_BOOT_TRACE=0`.
+
+The splash shows the status line "8gent is starting, checking local models" as soon as it mounts, so the screen is never blank, and it advances on its own after 4 s if no key is pressed. On Windows the early raw-mode key capture is skipped by default; set `8GENT_EARLY_RAW=1` to turn it back on. If raw mode was entered and nothing has mounted after 1500 ms, a watchdog restores the terminal. These steps leave the boot-trace stages `early-raw-skipped`, `early-raw-watchdog` and `intro-auto-advance`, which `8gent doctor` shows under "Boot trace".
