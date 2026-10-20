@@ -19,25 +19,20 @@
 import { randomUUID } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { WorkspaceDb } from "../db/src/workspace-db";
 import {
+	type GoalEvent,
+	type GoalEventSink,
 	GoalLoop,
 	GoalPersistence,
 	Ledger,
-	canonical,
 	type LedgerEntry,
-	type GoalEvent,
-	type GoalEventSink,
+	canonical,
 } from "../goal";
+import type { Budget, ExecutorHandle, GoalRun, JudgeHandle, Receipt } from "../goal";
 import { EightExecutor } from "../goal/executor-eight";
 import { FailoverJudge } from "../goal/judge-failover";
-import type {
-	Budget,
-	ExecutorHandle,
-	GoalRun,
-	JudgeHandle,
-	Receipt,
-} from "../goal";
-import type { WorkspaceDb } from "../db/src/workspace-db";
+import { gateInput } from "./input-gate";
 
 // ---- Manager-side state -----------------------------------------------------
 
@@ -92,7 +87,13 @@ export class DefaultGoalExecutorFactory implements GoalExecutorFactory {
 	constructor(
 		private readonly defaults: {
 			executorModel?: string;
-			executorRuntime?: "ollama" | "lmstudio" | "openrouter" | "apple-foundation" | "apfel" | "deepseek";
+			executorRuntime?:
+				| "ollama"
+				| "lmstudio"
+				| "openrouter"
+				| "apple-foundation"
+				| "apfel"
+				| "deepseek";
 			judgeModel?: string;
 		} = {},
 	) {}
@@ -104,14 +105,10 @@ export class DefaultGoalExecutorFactory implements GoalExecutorFactory {
 		judgeModelHint?: string;
 	}): Promise<{ executor: ExecutorHandle; judge: JudgeHandle }> {
 		const executorModel =
-			opts.executorModelHint?.trim() ||
-			this.defaults.executorModel ||
-			"eight-1.0-q3:14b";
+			opts.executorModelHint?.trim() || this.defaults.executorModel || "eight-1.0-q3:14b";
 		const executorRuntime = this.defaults.executorRuntime ?? "ollama";
 		const judgeModel =
-			opts.judgeModelHint?.trim() ||
-			this.defaults.judgeModel ||
-			"apple-foundationmodel";
+			opts.judgeModelHint?.trim() || this.defaults.judgeModel || "apple-foundationmodel";
 
 		const executor = new EightExecutor({
 			model: executorModel,
@@ -190,13 +187,10 @@ export class GoalManager {
 	constructor(private readonly deps: GoalManagerDeps) {
 		this.factory = deps.factory ?? new DefaultGoalExecutorFactory();
 		this.persistence = deps.workspace ? new GoalPersistence(deps.workspace) : null;
-		this.ledgerBaseDir =
-			deps.ledgerBaseDir ?? path.join(os.homedir(), ".8gent", "runs");
+		this.ledgerBaseDir = deps.ledgerBaseDir ?? path.join(os.homedir(), ".8gent", "runs");
 		this.ledgerKey = deps.ledgerKey ?? null;
 		if (this.persistence && !this.ledgerKey) {
-			console.warn(
-				"[GoalManager] workspace provided without ledgerKey - ledger writes disabled",
-			);
+			console.warn("[GoalManager] workspace provided without ledgerKey - ledger writes disabled");
 		}
 	}
 
@@ -297,12 +291,7 @@ export class GoalManager {
 				if (entry) entry.receipt = receipt;
 				if (persistence) {
 					try {
-						persistence.markComplete(
-							runId,
-							receipt.status,
-							receipt.stopReason,
-							receipt.endedAt,
-						);
+						persistence.markComplete(runId, receipt.status, receipt.stopReason, receipt.endedAt);
 					} catch (err) {
 						// eslint-disable-next-line no-console
 						console.warn("[GoalManager] markComplete failed:", err);
@@ -468,15 +457,27 @@ export interface GoalRpcContext {
 	send: (msg: GoalRpcOutbound) => void;
 }
 
+/** True (after replying with a goal.error) when the gate answered `text`; it then never reaches the model. */
+async function gated(
+	text: unknown,
+	sessionId: string | undefined,
+	ctx: GoalRpcContext,
+): Promise<boolean> {
+	const r = await gateInput(text, { sessionId: sessionId ?? "goal", channel: "goal" });
+	if (!r.handled) return false;
+	ctx.send({
+		type: "goal.error",
+		message: `Goal text is a slash line, not a goal. ${r.text ?? ""}`.trim(),
+	});
+	return true;
+}
+
 /**
  * Single entry point used by the gateway switch. Returns true if the
  * message was handled (recognized goal.* type), false otherwise so the
  * gateway can fall through to its default branch.
  */
-export async function handleGoalRpc(
-	raw: unknown,
-	ctx: GoalRpcContext,
-): Promise<boolean> {
+export async function handleGoalRpc(raw: unknown, ctx: GoalRpcContext): Promise<boolean> {
 	if (!raw || typeof raw !== "object") return false;
 	const msg = raw as { type?: string };
 	const t = msg.type;
@@ -486,6 +487,8 @@ export async function handleGoalRpc(
 		switch (t) {
 			case "goal.start": {
 				const m = raw as Extract<GoalRpcInbound, { type: "goal.start" }>;
+				// Goal text reaches the executor's model, so it passes the input gate first (#4530).
+				if (await gated(m.goal, m.sessionId, ctx)) return true;
 				const { runId } = await ctx.manager.start({
 					sessionId: m.sessionId,
 					goal: m.goal,
@@ -504,6 +507,7 @@ export async function handleGoalRpc(
 			}
 			case "goal.subgoal": {
 				const m = raw as Extract<GoalRpcInbound, { type: "goal.subgoal" }>;
+				if (await gated(m.text, undefined, ctx)) return true;
 				const accepted = ctx.manager.injectSubgoal(m.runId, m.text);
 				ctx.send({ type: "goal.subgoal:ok", runId: m.runId, accepted });
 				return true;

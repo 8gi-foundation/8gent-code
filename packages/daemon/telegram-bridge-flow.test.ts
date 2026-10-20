@@ -651,3 +651,24 @@ describe("review fixes on #4383", () => {
 		expect(voicePathIsLocal({ DEFAULT_RUNTIME: "openrouter" })).toBe(false);
 	});
 });
+
+describe("voice transcript passes the input gate before the judge model (#4530)", () => {
+	test("a transcript that starts with a command never reaches the judge", async () => {
+		const t = make({}, "/dj play something");
+		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+		await settle();
+		expect(t.signals).toEqual([]);
+	});
+	test("an unknown slash transcript never reaches the judge either", async () => {
+		const t = make({}, "/nosuchthing now");
+		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+		await settle();
+		expect(t.signals).toEqual([]);
+	});
+	test("an ordinary transcript still reaches the judge", async () => {
+		const t = make();
+		await t.b.handleVoiceMessage(voice(JAMES, DM), "f");
+		await settle();
+		expect(t.signals.length).toBe(1);
+	});
+});
