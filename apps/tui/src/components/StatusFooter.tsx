@@ -91,6 +91,8 @@ export interface FooterData {
 	sandboxOff?: string;
 	/** ADHD mode: a segment only while on (it had a rail row before #3238). */
 	adhd?: boolean;
+	/** Credit gauge text for the active provider only (#4539): "local", "$3.20 left", "credit ?". */
+	credit?: string;
 	/** A gate flagged the last turn (#4510). Absent means nothing was flagged. */
 	verification?: "verified" | "unverified" | "tests_claimed_not_run";
 }
@@ -182,6 +184,17 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			value: `${d.providersLive}/${d.providersTotal}`,
 			color: ui.cream,
 			priority: 5,
+		});
+	}
+	if (known(d.credit)) {
+		// Amber when the lane is dry or has no key: look here before a call fails.
+		const dry = /^\$0\.00 left$|^no key$/.test(d.credit);
+		out.push({
+			key: "credit",
+			label: "credit",
+			value: d.credit,
+			color: dry ? ui.orange : ui.muted,
+			priority: dry ? 1 : 6,
 		});
 	}
 	if (d.adhd) {

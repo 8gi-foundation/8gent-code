@@ -193,6 +193,7 @@ import { getTaskManager } from "../../../packages/tasks/index.js";
 import { resolveTermCommand, spawnInWindow } from "../../../packages/terminal-tab/index.js";
 import { ActivityRail } from "./components/ActivityRail.js";
 import { BottomBar } from "./components/BottomBar.js";
+import { useCreditGauge } from "./lib/use-credit-gauge.js";
 import { djHasTrack, setDjDeckOpen } from "./components/DjDeck.js";
 import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalStrip.js";
@@ -1598,6 +1599,8 @@ export function App({
 		() => providerKeyStatus(currentProvider),
 		[currentProvider],
 	);
+
+	const creditGauge = useCreditGauge(currentProvider);
 
 	const [currentModel, setCurrentModel] = useState(
 		() => computeCliOverrides(cliProvider, cliModel).model,
@@ -7669,6 +7672,7 @@ export function App({
 					mode={agentMode}
 					adhd={adhdMode}
 					tokensPerSecond={tokensPerSecond}
+					credit={creditGauge}
 					judge={judgeState}
 					sandboxOff={sandboxOff}
 					verification={verificationByTab[activeTabId]}
