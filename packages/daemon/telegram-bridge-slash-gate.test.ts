@@ -118,12 +118,20 @@ describe("spoken input", () => {
 describe("hardening before merge", () => {
 	test("a spoken registry command never reaches the judge model and never the main model", async () => {
 		let judged = 0;
-		const t = make("/session", async () => {
+		const judge = async () => {
 			judged++;
 			return "{}";
-		});
+		};
+		const settle = () => new Promise((r) => setTimeout(r, 500));
+		// Control: a plain transcript does reach the judge within the settle window.
+		const c = make("what is on my list", judge);
+		await c.b.handleVoiceMessage(voiceMsg, "f");
+		await settle();
+		expect(judged).toBe(1);
+		judged = 0;
+		const t = make("/session", judge);
 		await t.b.handleVoiceMessage(voiceMsg, "f");
-		await new Promise((r) => setTimeout(r, 20));
+		await settle();
 		expect(judged).toBe(0);
 		expect(t.toModel).toEqual([]);
 	});
