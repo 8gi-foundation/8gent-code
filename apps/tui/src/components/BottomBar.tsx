@@ -54,6 +54,8 @@ interface BottomBarProps {
 	judge?: JudgeState;
 	/** Why run_command runs without its OS sandbox; undefined when it has one (#4013). */
 	sandboxOff?: string;
+	/** Credit gauge text for the active provider (#4539). */
+	credit?: string;
 	/** A gate flagged the last turn (#4510). */
 	verification?: FooterData["verification"];
 }
@@ -97,6 +99,7 @@ export function BottomBar(props: BottomBarProps) {
 							judge: props.judge,
 							sandboxOff: props.sandboxOff,
 							adhd: props.adhd,
+							credit: props.credit,
 							verification: props.verification,
 						}}
 					/>

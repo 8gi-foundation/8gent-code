@@ -22,6 +22,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, release } from "node:os";
 import { join } from "node:path";
+import { creditBlocks } from "./credits";
 
 /**
  * Apple Foundation Model is preferred at the top of every local chain when
@@ -192,6 +193,11 @@ export interface ModelFailoverOptions {
 	prefillTokensPerSec?: number;
 	/** Clock for the affinity TTL; injectable for tests. Default Date.now. */
 	now?: () => number;
+	/**
+	 * True when a hosted lane has no credit left or no key (#4539). Reads the
+	 * cached gauge only; injectable for tests. Defaults to `creditBlocks`.
+	 */
+	creditBlocked?: (provider: string) => boolean;
 }
 
 /** Most sessions the affinity map holds; the least recently served is evicted past this. */
@@ -232,6 +238,7 @@ export class ModelFailover {
 	 */
 	private affinity = new Map<string, Affinity>();
 	private now: () => number;
+	private creditBlocked: (provider: string) => boolean;
 
 	constructor(
 		chains?: Record<FailoverChannel, Record<string, FailoverChain>>,
@@ -245,6 +252,7 @@ export class ModelFailover {
 		this.cacheAffinity = opts.cacheAffinity ?? process.env.EIGHT_CACHE_AFFINITY?.trim() === "1";
 		this.prefillTokensPerSec = opts.prefillTokensPerSec ?? 2000;
 		this.now = opts.now ?? Date.now;
+		this.creditBlocked = opts.creditBlocked ?? ((p) => creditBlocks(p));
 		// No opt-in: the allowlist is the local providers (narrowed further by an explicit one).
 		this.allow = this.hostedBlocked
 			? (explicit ?? [...LOCAL_FAILOVER_PROVIDERS]).filter((p) => !isHostedProvider(p))
@@ -487,22 +495,32 @@ export class ModelFailover {
 		if (aff && !this.down.has(this.key(aff.entry.model, aff.entry.provider))) return aff.entry;
 		const from = aff?.entry ?? head;
 		const cold = aff ? { coldPrefillTokens: aff.promptTokens } : {};
+		let creditSkipped = false;
 		for (const entry of chain.models) {
-			if (!this.down.has(this.key(entry.model, entry.provider))) {
-				if (from && (entry.model !== from.model || entry.provider !== from.provider)) {
-					this.recordEvent({
-						ts: Date.now(),
-						channel,
-						fromModel: from.model,
-						fromProvider: from.provider,
-						toModel: entry.model,
-						toProvider: entry.provider,
-						reason: aff ? "affinity-down" : "primary-down",
-						...cold,
-					});
+			if (this.down.has(this.key(entry.model, entry.provider))) continue;
+			if (this.creditBlocked(entry.provider)) {
+				// One line per lane, never the key. The lane stays in the chain for later.
+				const note = `${entry.provider} skipped: no credit left or no key`;
+				if (!warned.has(note)) {
+					warned.add(note);
+					console.warn(`[failover] ${note}`);
 				}
-				return entry;
+				creditSkipped = true;
+				continue;
 			}
+			if (from && (entry.model !== from.model || entry.provider !== from.provider)) {
+				this.recordEvent({
+					ts: Date.now(),
+					channel,
+					fromModel: from.model,
+					fromProvider: from.provider,
+					toModel: entry.model,
+					toProvider: entry.provider,
+					reason: creditSkipped ? "credit-empty" : aff ? "affinity-down" : "primary-down",
+					...cold,
+				});
+			}
+			return entry;
 		}
 
 		// Everything is down - return last entry as a hail mary

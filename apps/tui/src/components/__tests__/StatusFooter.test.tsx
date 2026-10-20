@@ -411,3 +411,23 @@ describe("the word is held per tab (#4510)", () => {
 		expect(await row("B")).not.toContain("unverified");
 	});
 });
+
+describe("the credit gauge is a footer segment (#4539)", () => {
+	const seg = (credit?: string) =>
+		buildFooterSegments({ mode: "Planning", credit }).find((s) => s.key === "credit");
+
+	test("shows the text it is given, muted", () => {
+		expect(seg("local")?.value).toBe("local");
+		expect(seg("$3.20 left")?.value).toBe("$3.20 left");
+		expect(seg("credit ?")?.value).toBe("credit ?");
+	});
+
+	test("goes amber when the lane is dry or has no key", () => {
+		expect(seg("$0.00 left")?.color).toBe(seg("no key")?.color);
+		expect(seg("$0.00 left")?.color).not.toBe(seg("$3.20 left")?.color);
+	});
+
+	test("no segment when the app has no value", () => {
+		expect(seg(undefined)).toBeUndefined();
+	});
+});

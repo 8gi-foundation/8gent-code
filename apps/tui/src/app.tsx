@@ -307,6 +307,7 @@ import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
 import { truncate } from "./lib/text.js";
 import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
+import { useCreditGauge } from "./lib/use-credit-gauge.js";
 import { BTWView } from "./screens/BTWView.js";
 import { type ConversationEntry, HistoryScreen } from "./screens/HistoryScreen.js";
 import { IdeasView } from "./screens/IdeasView.js";
@@ -1598,6 +1599,8 @@ export function App({
 		() => providerKeyStatus(currentProvider),
 		[currentProvider],
 	);
+
+	const creditGauge = useCreditGauge(currentProvider);
 
 	const [currentModel, setCurrentModel] = useState(
 		() => computeCliOverrides(cliProvider, cliModel).model,
@@ -7669,6 +7672,7 @@ export function App({
 					mode={agentMode}
 					adhd={adhdMode}
 					tokensPerSecond={tokensPerSecond}
+					credit={creditGauge}
 					judge={judgeState}
 					sandboxOff={sandboxOff}
 					verification={verificationByTab[activeTabId]}
