@@ -4,6 +4,7 @@
  * resulting settings must post to the stub chat after approval.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import {
 	chmodSync,
 	mkdirSync,
@@ -14,7 +15,6 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -270,7 +270,7 @@ describe("hardening round 2 (F8 and LOW)", () => {
 				HOME: home,
 				TMPDIR: process.env.TMPDIR ?? "/tmp",
 				EIGHT_TG_API_BASE: "http://127.0.0.1:9",
-			},
+			} as unknown as NodeJS.ProcessEnv,
 			encoding: "utf8",
 		});
 		expect(JSON.parse(r.stdout)).toEqual({ base: "https://api.telegram.org" });

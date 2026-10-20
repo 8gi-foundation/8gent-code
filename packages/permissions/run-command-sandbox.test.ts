@@ -18,7 +18,12 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { emptyBunfig } from "../core/bun-flags";
+import { BackgroundTaskManager } from "../tools/background";
 import {
+	PROTECTED_DATA_DIRS,
+	PROTECTED_DATA_FILES,
+	RunCommandSandboxRequired,
 	buildBwrapArgs,
 	buildRunCommandProfile,
 	canApplySeatbelt,
@@ -26,11 +31,8 @@ import {
 	dotenvDeclaredKeys,
 	isTestMode,
 	onRunCommandUnsandboxed,
-	PROTECTED_DATA_DIRS,
-	PROTECTED_DATA_FILES,
 	protectedRunCommandPaths,
 	refreshSecurityEnvForTests,
-	RunCommandSandboxRequired,
 	runCommandSandboxRefusal,
 	runCommandSandboxStatus,
 	sandboxFooterReason,
@@ -38,8 +40,6 @@ import {
 	wrapRunCommand,
 	wrapRunCommandArgv,
 } from "./run-command-sandbox";
-import { emptyBunfig } from "../core/bun-flags";
-import { BackgroundTaskManager } from "../tools/background";
 
 // Paths below are built with path.join so they match on Windows too, where
 // path.normalize spells "/nonexistent-h/.8gent" as "\\nonexistent-h\\.8gent".
