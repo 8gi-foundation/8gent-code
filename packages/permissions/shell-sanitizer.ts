@@ -517,7 +517,8 @@ function sanitizePosix(
 	if (/;/.test(text)) {
 		return {
 			safe: false,
-			reason: "Semicolon command chaining is not allowed. Use separate run_command calls instead",
+			reason:
+				"Send each command as its own run_command call. Semicolon command chaining is not allowed",
 		};
 	}
 
@@ -532,13 +533,15 @@ function sanitizePosix(
 	if (/&&/.test(text)) {
 		return {
 			safe: false,
-			reason: "Command chaining with && is not allowed. Use separate run_command calls instead",
+			reason:
+				"Send each command as its own run_command call. Command chaining with && is not allowed",
 		};
 	}
 	if (/\|\|/.test(text)) {
 		return {
 			safe: false,
-			reason: "Command chaining with || is not allowed. Use separate run_command calls instead",
+			reason:
+				"Send each command as its own run_command call. Command chaining with || is not allowed",
 		};
 	}
 
@@ -546,7 +549,7 @@ function sanitizePosix(
 		return {
 			safe: false,
 			reason:
-				"Command chaining or background execution with & is not allowed. Use separate run_command calls instead",
+				"Send each command as its own run_command call. Command chaining or background execution with & is not allowed",
 		};
 	}
 
@@ -591,7 +594,7 @@ function sanitizeStrict(
 		return {
 			safe: false,
 			reason:
-				"A line break starts a second command and is not allowed. Use separate run_command calls instead",
+				"Send each command as its own run_command call. A line break starts a second command and is not allowed",
 		};
 	}
 
@@ -609,7 +612,8 @@ function sanitizeStrict(
 	if (semi) {
 		return {
 			safe: false,
-			reason: "Semicolon command chaining is not allowed. Use separate run_command calls instead",
+			reason:
+				"Send each command as its own run_command call. Semicolon command chaining is not allowed",
 		};
 	}
 
@@ -617,13 +621,15 @@ function sanitizeStrict(
 	if (/&&/.test(command)) {
 		return {
 			safe: false,
-			reason: "Command chaining with && is not allowed. Use separate run_command calls instead",
+			reason:
+				"Send each command as its own run_command call. Command chaining with && is not allowed",
 		};
 	}
 	if (/\|\|/.test(command)) {
 		return {
 			safe: false,
-			reason: "Command chaining with || is not allowed. Use separate run_command calls instead",
+			reason:
+				"Send each command as its own run_command call. Command chaining with || is not allowed",
 		};
 	}
 
@@ -633,7 +639,7 @@ function sanitizeStrict(
 		return {
 			safe: false,
 			reason:
-				"Command chaining or background execution with & is not allowed. Use separate run_command calls instead",
+				"Send each command as its own run_command call. Command chaining or background execution with & is not allowed",
 		};
 	}
 

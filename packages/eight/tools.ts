@@ -1551,7 +1551,7 @@ export class ToolExecutor {
 				function: {
 					name: "run_command",
 					description:
-						"[SHELL] Executes a shell command and returns stdout/stderr. Use for: running tests, installing packages, checking versions, building projects, file operations (mkdir, mv, cp). Pipes (|) and redirects (>) are allowed. Command chaining (;, &&, ||) and background execution (&) are blocked for safety - use separate calls instead. If a command is blocked by permissions, simplify it or split into multiple calls. Commands run with a minimal environment (PATH, HOME, locale, toolchain paths); credentials are not inherited. If one is needed, tell the user to export EIGHT_SHELL_ENV_PASS=NAME in the shell that launches 8gent (a keys file cannot set it). For git push over SSH typed here, that is EIGHT_SHELL_ENV_PASS=SSH_AUTH_SOCK; the git tools keep SSH working without it.",
+						"[SHELL] Runs exactly ONE command per call (never join commands with ;, &&, || or a newline; send each command as its own run_command call) and returns stdout/stderr. Use for: running tests, installing packages, checking versions, building projects, file operations (mkdir, mv, cp). Pipes (|) and redirects (>) are allowed. Chained commands and background execution (&) are refused. If a command is blocked by permissions, simplify it or split into multiple calls. Commands run with a minimal environment (PATH, HOME, locale, toolchain paths); credentials are not inherited. If one is needed, tell the user to export EIGHT_SHELL_ENV_PASS=NAME in the shell that launches 8gent (a keys file cannot set it). For git push over SSH typed here, that is EIGHT_SHELL_ENV_PASS=SSH_AUTH_SOCK; the git tools keep SSH working without it.",
 					parameters: {
 						type: "object",
 						properties: {

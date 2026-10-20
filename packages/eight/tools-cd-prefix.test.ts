@@ -14,6 +14,7 @@ import { agentTools, setToolContext } from "../ai/tools";
 import { CreatedFiles } from "../permissions/s1-created-files";
 import { _resetSystemOne, _setSystemOneOverridesForTests } from "../permissions/system-one-gate";
 import { REFUSAL_LEAD, ToolExecutor } from "./tools";
+const CHAIN_LEAD = "[BLOCKED] Send each command as its own run_command call.";
 
 afterAll(() => {
 	_resetSystemOne();
@@ -126,7 +127,7 @@ describe("ToolExecutor run_command with a leading cd", () => {
 
 	test("`cd a && b; c`: the rest is refused for chaining and nothing runs", async () => {
 		const out = await run("cd video && touch a.txt; touch b.txt");
-		expect(out).toStartWith(REFUSAL_LEAD);
+		expect(out).toStartWith(CHAIN_LEAD);
 		expect(out).toContain("Semicolon command chaining is not allowed");
 		expect(existsSync(join(sub, "a.txt"))).toBe(false);
 		expect(existsSync(join(sub, "b.txt"))).toBe(false);
@@ -257,7 +258,7 @@ describe("native run_command with a leading cd", () => {
 			"[BLOCKED] Command chaining is not allowed.",
 		);
 		expect(await execute("cd video && touch a.txt; touch b.txt")).toStartWith(
-			"[BLOCKED] Semicolon command chaining is not allowed",
+			"[BLOCKED] Send each command as its own run_command call. Semicolon command chaining is not allowed",
 		);
 		expect(existsSync(join(sub, "a.txt"))).toBe(false);
 	});
@@ -376,7 +377,7 @@ describe("a chained rest after a cd prefix is refused with its folder (#4260)", 
 
 	test("the pilot's line is still refused, runs nothing, and the refusal names the folder", async () => {
 		const out = await run(PILOT_LINE);
-		expect(out).toStartWith(REFUSAL_LEAD);
+		expect(out).toStartWith(CHAIN_LEAD);
 		expect(out).toContain("Command chaining with && is not allowed");
 		expect(out).toContain("begin every piece with `cd inbox &&`");
 		expect(out).toEndWith(`Command: ${PILOT_LINE}`);
@@ -404,7 +405,7 @@ describe("a chained rest after a cd prefix is refused with its folder (#4260)", 
 
 	test("a chain at the project root keeps the old refusal, with no folder note", async () => {
 		const out = await run("mkdir -p docs && mv -n inbox/doc-1.md docs/");
-		expect(out).toStartWith(REFUSAL_LEAD);
+		expect(out).toStartWith(CHAIN_LEAD);
 		expect(out).not.toContain("begin every piece");
 		expect(out).toEndWith("Command: mkdir -p docs && mv -n inbox/doc-1.md docs/");
 		expect(existsSync(join(root, "docs"))).toBe(false);

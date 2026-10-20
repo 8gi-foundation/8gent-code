@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { REFUSAL_LEAD, REFUSAL_NOTE, ToolExecutor, refusalLead } from "./tools";
+const CHAIN_LEAD = "[BLOCKED] Send each command as its own run_command call.";
 
 afterAll(() => cleanupTempDirs());
 
@@ -66,9 +67,9 @@ describe("refusal lead (#4238)", () => {
 	test("a chained command opens with the fixed not-run sentence, then the reason", async () => {
 		const { ex } = setup();
 		const out = await ex.execute("run_command", { command: "ls a; ls b" });
-		expect(out).toStartWith(REFUSAL_LEAD);
+		expect(out).toStartWith(CHAIN_LEAD);
 		expect(out).toContain("Semicolon command chaining is not allowed");
-		expect(out).toContain("Run one command at a time.");
+		expect(out).toContain("Send each command as its own run_command call.");
 	});
 
 	test("another refusal type gets the same lead and no chaining hint", async () => {
@@ -77,7 +78,7 @@ describe("refusal lead (#4238)", () => {
 		expect(out).toStartWith(REFUSAL_LEAD);
 		const dollar = refusalLead("[BLOCKED] Dangerous command pattern. Command: x");
 		expect(dollar).toStartWith(REFUSAL_LEAD);
-		expect(dollar).not.toContain("Run one command at a time.");
+		expect(dollar).not.toContain("Send each command as its own run_command call.");
 	});
 
 	test("output that merely starts with the marker is not rewritten, and the lead is not doubled", async () => {
