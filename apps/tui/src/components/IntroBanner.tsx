@@ -287,6 +287,8 @@ interface IntroBannerProps {
 	colour?: boolean;
 	/** Play the launch music. Default true. */
 	sound?: boolean;
+	/** Real-time deadline with no key, in ms (tests). Default INTRO_AUTO_ADVANCE_MS. */
+	autoAdvanceMs?: number;
 }
 
 /**
@@ -296,6 +298,12 @@ interface IntroBannerProps {
 export function runColour(colour: ColourKey | null, inColour: boolean): string | undefined {
 	return inColour && colour ? INTRO_PALETTE[colour] : undefined;
 }
+
+/** The splash never waits for a key longer than this, in real time (#4540). */
+export const INTRO_AUTO_ADVANCE_MS = 4000;
+
+/** The one-line status shown before the first frame, so the screen is never blank (#4540). */
+export const INTRO_STARTING_LINE = "8gent is starting, checking local models";
 
 /** Frame interval while the dots fly; the living mark after landing changes at 8 fps. */
 const FLY_FRAME_MS = 33;
@@ -308,6 +316,7 @@ export function IntroBanner({
 	rich,
 	colour,
 	sound = true,
+	autoAdvanceMs = INTRO_AUTO_ADVANCE_MS,
 }: IntroBannerProps) {
 	const viewport = useViewport();
 	const [elapsed, setElapsed] = useState(0);
@@ -358,6 +367,14 @@ export function IntroBanner({
 		return () => clearTimeout(timer);
 	}, [skip, speed]);
 
+	// A hard stop in real time, independent of `speed` and of the frame clock:
+	// a stalled render loop must never hold the first moment (#4540).
+	useEffect(() => {
+		if (skip) return;
+		const t = setTimeout(() => finishRef.current(), autoAdvanceMs);
+		return () => clearTimeout(t);
+	}, [skip, autoAdvanceMs]);
+
 	useInput((input, key) => {
 		finishRef.current(carriedText(input, key));
 	});
@@ -366,7 +383,8 @@ export function IntroBanner({
 	// The first commit draws nothing: a key pressed before the first paint is
 	// read in that beat, so it skips the splash before a single frame shows.
 	// The clock started at mount, so this adds nothing to the 1.49 s.
-	if (elapsed < FLY_FRAME_MS / 2) return null;
+	// A visible status line stands in for the blank beat (#4540).
+	if (elapsed < FLY_FRAME_MS / 2) return <Text>{INTRO_STARTING_LINE}</Text>;
 
 	const layout = introLayout(viewport.width, viewport.height, size);
 	const frame = introFrame(viewport.width, viewport.height, layout, introDots(size), elapsed, {
