@@ -544,6 +544,9 @@ function globReachesParent(word: string): boolean {
 	return w.split(/[\\/]+/).some((c) => /[*?[]/.test(c) && (c.startsWith(".") || c.startsWith("[")));
 }
 
+const GLOB_CHAR = /[*?[]/;
+const NO_GLOBS = "Globs are not allowed on this route, name the files";
+
 function escapesRoot(root: string, word: string): boolean {
 	const w = word.replace(OPTION_VALUE, "").replace(/^['"]|['"]$/g, "");
 	if (/\$[A-Za-z_{(]|`/.test(w)) return true;
@@ -600,6 +603,7 @@ function confinementRefusal(command: string, root: string): string | null {
 	for (const m of command.matchAll(/(?:^|[^<>&\d-])\d*(>>?|<(?!<))\s*([^\s;&|<>()]+)/g)) {
 		const target = m[2].replace(/^['"]|['"]$/g, "");
 		if (target === "/dev/null") continue;
+		if (GLOB_CHAR.test(target)) return deny(NO_GLOBS);
 		if (escapesRoot(root, target)) return deny("A redirect reaches outside the workspace");
 		if (m[1] !== "<") {
 			const c = classifySensitivePath(path.resolve(root, target));
@@ -618,6 +622,9 @@ function confinementRefusal(command: string, root: string): string | null {
 					"This operand looks like a glob that could reach the parent directory. Rephrase it or quote it differently",
 				);
 			}
+			// A glob matches names the symlink walk cannot see (li*/x reaches a link to outside): refused outright.
+			// Pattern operands of grep and rg are included until #4549 makes the guard quote-aware.
+			if (GLOB_CHAR.test(w)) return deny(NO_GLOBS);
 			if (escapesRoot(root, w)) return deny("A path reaches outside the workspace");
 			if (name === "git") {
 				if (GIT_REFUSED_FLAG.test(w))

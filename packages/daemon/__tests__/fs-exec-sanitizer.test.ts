@@ -230,6 +230,33 @@ describe("fs.exec is confined to the workspace (no approval card on this route)"
 	});
 });
 
+describe("fs.exec refuses globs outright", () => {
+	test("a glob that would match a link pointing out of the root is refused before spawn", async () => {
+		const outside = path.join(TMP, "glob-outside");
+		fs.mkdirSync(outside, { recursive: true });
+		fs.writeFileSync(path.join(outside, "passwd"), "secret");
+		fs.symlinkSync(outside, path.join(WORKSPACE, "link"));
+		for (const line of [
+			"cat li*/passwd",
+			"cat */passwd",
+			"cat l?nk/passwd",
+			"cat l[i]nk/passwd",
+			'find . -name "*.ts"',
+			"echo x > li*",
+		]) {
+			const reason = await refused(line);
+			expect([
+				line,
+				reason.includes("Globs are not allowed on this route, name the files"),
+			]).toEqual([line, true]);
+		}
+	});
+
+	test("ls with no glob still runs", async () => {
+		expect((await run("ls")).exitCode).toBe(0);
+	});
+});
+
 describe("fs.exec parent-glob refusal text", () => {
 	test("says the operand looks like a glob that could reach the parent, not that a path leaves the workspace", () => {
 		for (const line of ['grep "[Ee]rr" f', 'find . -name ".?x"', "cat .?/secret"]) {
