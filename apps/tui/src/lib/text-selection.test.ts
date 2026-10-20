@@ -170,3 +170,35 @@ describe("help", () => {
 		}
 	});
 });
+
+describe("hostile frames", () => {
+	const HOSTILE = "ok\x1b]52;c;ZXZpbA==\x07 a\rb \x1bPpayload\x1b\\ \x1bc \u009bfoo\x00\x7f\tend";
+	test("control bytes never reach the clipboard text, pbcopy stdin or the OSC 52 payload", () => {
+		const text = extractText(HOSTILE, { x0: 0, y0: 0, x1: 200, y1: 0 });
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: asserting none remain
+		expect(text).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f\x80-\x9f]/);
+		expect(text).toContain("\tend");
+		const written: string[] = [];
+		const stdin: string[] = [];
+		copyText(text, {
+			write: (s) => written.push(s),
+			env: {},
+			platform: "darwin",
+			runNative: (_a, t) => {
+				stdin.push(t);
+				return true;
+			},
+		});
+		const payload = Buffer.from(
+			(written[0] ?? "").replace("\x1b]52;c;", "").replace("\x07", ""),
+			"base64",
+		).toString("utf8");
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: asserting none remain
+		expect(payload).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f\x80-\x9f]/);
+		expect(payload).toBe(text);
+		expect(stdin).toEqual([text]);
+	});
+	test("a newline between rows survives", () => {
+		expect(extractText("a\x1b[0m\nb", { x0: 0, y0: 0, x1: 5, y1: 1 })).toContain("\n");
+	});
+});

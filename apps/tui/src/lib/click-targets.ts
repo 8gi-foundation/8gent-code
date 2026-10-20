@@ -32,8 +32,8 @@ const pressedListeners = new Set<() => void>();
 
 /** Reads the screen text for a copy; set by the app from Ink's last frame. */
 let screenReader: (() => string) | null = null;
-let copier: ((text: string) => void) | null = null;
-const copiedListeners = new Set<(chars: number) => void>();
+let copier: ((text: string) => { osc52: boolean; native: string | null } | void) | null = null;
+const copiedListeners = new Set<(chars: number, ok: boolean) => void>();
 const selection = new TextSelection(() => screenReader?.() ?? "");
 const selectionListeners = new Set<(range: SelRange | null) => void>();
 
@@ -57,7 +57,7 @@ export function clearSelection(): boolean {
 }
 
 /** Hear about each copy, e.g. to say "copied 22 chars" in the footer. */
-export function onCopied(fn: (chars: number) => void): () => void {
+export function onCopied(fn: (chars: number, ok: boolean) => void): () => void {
 	copiedListeners.add(fn);
 	return () => {
 		copiedListeners.delete(fn);
@@ -104,7 +104,7 @@ export function currentPressed(): string | null {
 /** Where the text for a copy comes from, and where it goes. */
 export function setSelectionIO(
 	read: (() => string) | null,
-	copy: ((text: string) => void) | null,
+	copy: ((text: string) => { osc52: boolean; native: string | null } | void) | null,
 ): void {
 	screenReader = read;
 	copier = copy;
@@ -153,8 +153,10 @@ export function handleMouse(e: MouseEvent): "click" | "press" | "cancel" | "copy
 		const r = selection.release(e.x, e.y);
 		selectionChanged();
 		if (r.kind === "copy" && copier) {
-			copier(r.text);
-			for (const l of [...copiedListeners]) l([...r.text].length);
+			const res = copier(r.text);
+			// Too long for OSC 52 and no local command took it: nothing was copied.
+			const ok = !res || res.osc52 || res.native !== null;
+			for (const l of [...copiedListeners]) l([...r.text].length, ok);
 			return "copy";
 		}
 		return null;

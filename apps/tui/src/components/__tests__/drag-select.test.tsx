@@ -22,6 +22,7 @@ import {
 } from "../../lib/click-targets.js";
 import { copyText } from "../../lib/copy-answer.js";
 import { _disposeMouse, installMouse, onMouse } from "../../lib/mouse-input.js";
+import { wireSelection } from "../../lib/mouse-wiring.js";
 import { osc52 } from "../../lib/text-selection.js";
 import { TabBar } from "../TabBar.js";
 
@@ -58,7 +59,7 @@ afterEach(() => {
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 
-async function mount(node: React.ReactElement) {
+async function mount(node: React.ReactElement, ownHandler = true) {
 	const stdin = new FakeStdin();
 	const out = new Writable({
 		write(_c, _e, cb) {
@@ -72,11 +73,12 @@ async function mount(node: React.ReactElement) {
 		{ write: () => true },
 		{ enabled: true, processHooks: false },
 	);
-	offs.push(
-		onMouse((e) => {
-			if (e.kind !== "wheel" && e.kind !== "move") handleMouse(e);
-		}),
-	);
+	if (ownHandler)
+		offs.push(
+			onMouse((e) => {
+				if (e.kind !== "wheel" && e.kind !== "move") handleMouse(e);
+			}),
+		);
 	instance = render(node, {
 		stdin: stdin as unknown as NodeJS.ReadStream,
 		stdout: out as unknown as NodeJS.WriteStream,
@@ -204,5 +206,60 @@ describe("drag select over rendered text", () => {
 		await tick();
 		expect(switched).toEqual(["b"]);
 		expect(wrote).toEqual([]);
+	});
+});
+
+describe("the real wiring (wireSelection, as startMouse uses it)", () => {
+	test("a drag over Ink's frame copies via OSC 52, paints reverse video, and Escape's clear repaints", async () => {
+		const { stdin, frame } = await mount(
+			<Keys>
+				<Text color="red">alpha beta gamma</Text>
+			</Keys>,
+			false,
+		);
+		const screen: string[] = [];
+		const heard: Array<[number, boolean]> = [];
+		offs.push(onCopied((n, ok) => heard.push([n, ok])));
+		const w = wireSelection({
+			raw: frame,
+			plain: frame,
+			out: { write: (s) => screen.push(s) },
+			copyDeps: { env: {}, platform: "linux" },
+		});
+		offs.push(w.off);
+		stdin.feed(sgr("press", 6, 0));
+		stdin.feed(sgr("drag", 9, 0));
+		stdin.feed(sgr("release", 9, 0));
+		await tick();
+		expect(screen).toContain(osc52("beta"));
+		expect(screen.some((s) => s.includes("\x1b[7mbeta\x1b[0m"))).toBe(true);
+		expect(heard).toEqual([[4, true]]);
+		const before = screen.length;
+		clearSelection();
+		expect(screen.slice(before).join("")).not.toContain("\x1b[7m");
+	});
+
+	test("over the OSC 52 cap with no local command, the notice says it was not copied", async () => {
+		const long = "x".repeat(80);
+		const { stdin, frame } = await mount(
+			<Keys>
+				<Text>{long}</Text>
+			</Keys>,
+			false,
+		);
+		const heard: Array<[number, boolean]> = [];
+		offs.push(onCopied((n, ok) => heard.push([n, ok])));
+		const w = wireSelection({
+			raw: frame,
+			plain: frame,
+			out: { write: () => true },
+			copyDeps: { env: { SSH_TTY: "x" }, platform: "linux", maxEncoded: 10 },
+		});
+		offs.push(w.off);
+		stdin.feed(sgr("press", 0, 0));
+		stdin.feed(sgr("drag", 40, 0));
+		stdin.feed(sgr("release", 40, 0));
+		await tick();
+		expect(heard).toEqual([[41, false]]);
 	});
 });

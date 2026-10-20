@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { handleMouse, onSelectionChange, setSelectionIO } from "./click-targets.js";
-import { copyText } from "./copy-answer.js";
+import { type CopyDeps, copyText } from "./copy-answer.js";
 import { installMouse, onMouse } from "./mouse-input.js";
 import { type SelRange, osc52, paintSelection } from "./text-selection.js";
 
@@ -17,6 +17,56 @@ export { osc52 };
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+
+export interface SelectionWiring {
+	/** The last frame Ink drew, styled. */
+	raw: () => string;
+	/** The same frame, ANSI stripped. */
+	plain: () => string;
+	out: { write: (s: string) => unknown };
+	copyDeps?: Partial<Omit<CopyDeps, "write">>;
+}
+
+/**
+ * Connect selection to a screen: the copier, the highlight painter and the
+ * mouse events. Returns `repaint` (call after any foreign write, since a
+ * redraw erases the highlight) and an `off`.
+ */
+export function wireSelection(w: SelectionWiring): { repaint: () => void; off: () => void } {
+	setSelectionIO(w.plain, (text) =>
+		copyText(text, { ...w.copyDeps, write: (seq) => w.out.write(seq) }),
+	);
+	let shown: SelRange | null = null;
+	let wanted: SelRange | null = null;
+	const paint = () => {
+		const out = paintSelection(w.raw(), w.plain(), shown, wanted);
+		shown = wanted;
+		if (!out) return;
+		try {
+			w.out.write(out);
+		} catch {
+			/* stdout closed */
+		}
+	};
+	const offSel = onSelectionChange((range) => {
+		wanted = range;
+		paint();
+	});
+	const offMouse = onMouse((e) => {
+		if (e.kind !== "wheel" && e.kind !== "move") handleMouse(e);
+	});
+	return {
+		repaint: () => {
+			if (!wanted) return;
+			shown = null;
+			paint();
+		},
+		off: () => {
+			offSel();
+			offMouse();
+		},
+	};
+}
 
 export function startMouse(): boolean {
 	const inst = installMouse();
@@ -36,49 +86,34 @@ export function startMouse(): boolean {
 	} catch {
 		/* no selection copy */
 	}
-	setSelectionIO(
-		() => lastFrame(),
-		(text) => {
-			copyText(text, { write: (seq) => process.stdout.write(seq) });
-		},
-	);
-	// The highlight is drawn straight onto the screen over Ink's frame, and
-	// drawn again after every frame Ink writes, because a redraw erases it.
-	let shown: SelRange | null = null;
-	let wanted: SelRange | null = null;
-	let painting = false;
-	const paint = () => {
-		const out = paintSelection(lastRaw(), lastFrame(), shown, wanted);
-		shown = wanted;
-		if (!out) return;
-		painting = true;
-		try {
-			process.stdout.write(out);
-		} catch {
-			/* stdout closed */
-		}
-		painting = false;
-	};
-	onSelectionChange((range) => {
-		wanted = range;
-		paint();
-	});
 	const rawWrite = process.stdout.write.bind(process.stdout) as (...a: unknown[]) => boolean;
+	let painting = false;
+	const { repaint } = wireSelection({
+		raw: () => lastRaw(),
+		plain: () => lastFrame(),
+		out: {
+			write: (s) => {
+				painting = true;
+				try {
+					return rawWrite(s);
+				} finally {
+					painting = false;
+				}
+			},
+		},
+	});
+	// Ink's redraw erases the highlight: draw it again after each frame.
 	let repaintQueued = false;
 	process.stdout.write = ((...a: unknown[]) => {
 		const ok = rawWrite(...a);
-		if (!painting && wanted && !repaintQueued) {
+		if (!painting && !repaintQueued) {
 			repaintQueued = true;
 			setImmediate(() => {
 				repaintQueued = false;
-				shown = null;
-				paint();
+				repaint();
 			});
 		}
 		return ok;
 	}) as typeof process.stdout.write;
-	onMouse((e) => {
-		if (e.kind !== "wheel" && e.kind !== "move") handleMouse(e);
-	});
 	return true;
 }

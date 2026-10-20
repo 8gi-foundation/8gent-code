@@ -312,7 +312,7 @@ import {
 	formatSlashHelp,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
-import { copiedNotice } from "./lib/text-selection.js";
+import { copiedNotice, notCopiedNotice } from "./lib/text-selection.js";
 import { truncate } from "./lib/text.js";
 import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
@@ -1958,7 +1958,9 @@ export function App({
 		noticeTimer.current = setTimeout(() => setCopyNotice(null), 2000);
 	}, []);
 	useEffect(() => {
-		const off = onCopied((chars) => flashNotice(copiedNotice(chars)));
+		const off = onCopied((chars, ok) =>
+			flashNotice(ok ? copiedNotice(chars) : notCopiedNotice(chars)),
+		);
 		return () => {
 			off();
 			if (noticeTimer.current) clearTimeout(noticeTimer.current);

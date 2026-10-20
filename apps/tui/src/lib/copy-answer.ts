@@ -61,6 +61,8 @@ export interface CopyDeps {
 	env?: Env;
 	platform?: string;
 	runNative?: (argv: string[], text: string) => boolean;
+	/** Largest base64 payload to send as OSC 52 (tests lower it). */
+	maxEncoded?: number;
 }
 
 function runNativeCopy(argv: string[], text: string): boolean {
@@ -82,8 +84,8 @@ function runNativeCopy(argv: string[], text: string): boolean {
  */
 export const OSC52_MAX_ENCODED = 100_000;
 
-export function osc52Fits(text: string): boolean {
-	return Math.ceil(Buffer.byteLength(text, "utf8") / 3) * 4 <= OSC52_MAX_ENCODED;
+export function osc52Fits(text: string, max = OSC52_MAX_ENCODED): boolean {
+	return Math.ceil(Buffer.byteLength(text, "utf8") / 3) * 4 <= max;
 }
 
 export interface CopyResult {
@@ -97,7 +99,7 @@ export interface CopyResult {
 export function copyText(text: string, deps: CopyDeps): CopyResult {
 	const env = deps.env ?? process.env;
 	let osc52 = false;
-	if (osc52Fits(text)) {
+	if (osc52Fits(text, deps.maxEncoded)) {
 		try {
 			deps.write(clipboardSequence(text, env));
 			osc52 = true;

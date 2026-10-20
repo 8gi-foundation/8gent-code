@@ -70,8 +70,12 @@ export function extractText(screen: string, sel: SelRange): string {
 		const to = y === b.y ? b.x + 1 : Number.POSITIVE_INFINITY;
 		out.push(sliceCells(lines[y] ?? "", from, to).trimEnd());
 	}
-	return out.join("\n");
+	return out.join("\n").replace(CONTROL, "");
 }
+
+/** Everything but newline and tab: model output must not reach a clipboard command or OSC 52 as escapes. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: this is the strip list
+const CONTROL = /[\x00-\x08\x0b-\x1f\x7f\x80-\x9f]/g;
 
 const WORD_CHAR = /[\p{L}\p{N}_\-/~.@]/u;
 
@@ -237,4 +241,9 @@ export function copiedNotice(chars: number): string {
 /** OSC 52: the terminal puts the text on the system clipboard. */
 export function osc52(text: string): string {
 	return `\x1b]52;c;${Buffer.from(text, "utf8").toString("base64")}\x07`;
+}
+
+/** The footer line for a copy that did not happen. */
+export function notCopiedNotice(chars: number): string {
+	return `Not copied: ${chars} characters is too long for the terminal clipboard`;
 }
