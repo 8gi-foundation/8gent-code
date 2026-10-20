@@ -373,6 +373,7 @@ async function initAuthSystem() {
 	}
 }
 
+import { isLocalProvider } from "../../../packages/eight/registry.js";
 import { LOCAL_PROVIDERS } from "../../../packages/permissions/command-policy";
 // The process-wide infinite flag (CLI --infinite) seeds each tab's starting mode.
 import { getPermissionManager, isInfiniteMode } from "../../../packages/permissions/index.js";
@@ -414,6 +415,7 @@ import {
 	type ModelSpec,
 	autoSelectModel,
 	canReuseTabAgent,
+	checkModelSwitch,
 	filterChatCapable,
 	isLikelyEmbeddingModelId,
 	listsInstalledOllamaModels,
@@ -5997,9 +5999,23 @@ export function App({
 						if (args.length > 0) {
 							// Direct model set: /model qwen2.5:14b
 							const newModel = args.join(" ");
-							// Accept any model name — Ollama models, custom fine-tunes, OpenRouter IDs
-							setCurrentModel(newModel);
-							addSystemMessage(`Model switched to: ${newModel}`);
+							// Local runtimes accept any name (custom fine-tunes). A cloud provider's
+							// model must be in that provider's own live list, fetched now, before
+							// 8gent says it switched.
+							void checkModelSwitch(
+								getProviderManager(),
+								currentProvider,
+								newModel,
+								isLocalProvider,
+							).then((verdict) => {
+								if (!verdict.ok) {
+									addSystemMessage(verdict.message);
+									return;
+								}
+								setCurrentModel(newModel);
+								if (verdict.notice) addSystemMessage(verdict.notice);
+								addSystemMessage(`Model switched to: ${newModel}`);
+							});
 						} else {
 							// Show model selector
 							setViewMode("model-select");
