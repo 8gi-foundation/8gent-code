@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-E8610A?style=for-the-badge&labelColor=1A1612" alt="Apache 2.0 License" /></a>
-  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.20.2-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.20.2" /></a>
+  <a href="https://8gent.dev"><img src="https://img.shields.io/badge/version-0.20.3-2D8A56?style=for-the-badge&labelColor=1A1612" alt="v0.20.3" /></a>
   <a href="https://eight-vessel.fly.dev"><img src="https://img.shields.io/badge/daemon-Fly.io_Amsterdam-E8610A?style=for-the-badge&labelColor=1A1612" alt="Daemon" /></a>
 </p>
 
@@ -151,7 +151,7 @@ curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scri
 8gent
 ```
 
-On Windows (PowerShell): `irm https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.ps1 | iex`. Both install the newest GitHub release (v0.20.0 today) as a standalone binary, so no Bun or Node is needed.
+On Windows (PowerShell): `irm https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.ps1 | iex`. Both install the newest GitHub release as a standalone binary, so no Bun or Node is needed.
 
 That's it. 8gent uses an adaptive provider router with 16 model providers (plus two opt-in host-CLI slots). Six run locally: `8gent` (model `eight-1.0-q3:14b`), `ollama` and `lmstudio` are on by default, `llama-server` is selected with `EIGHT_LOCAL_SERVER=llama-server`, and `apple-foundation` and `apfel` turn on when a macOS 26 Apple Silicon host has them. The other ten are hosted providers, each opt-in with your own API key; the full list with every variable is [docs/install/providers.md](docs/install/providers.md). Failover chain: local 8gent, then local Qwen, then OpenRouter free tier.
 

@@ -9,6 +9,57 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.3] - 2026-10-20
+
+### Added
+- providers: declare MiniMax as a built-in provider ([#4568](https://github.com/8gi-foundation/8gent-code/pull/4568))
+- daemon: advertise input-gate capability on session frames and /health ([#4546](https://github.com/8gi-foundation/8gent-code/pull/4546))
+- tui: boot trace to ~/.8gent/logs/tui-boot.log, shown by 8gent doctor (Refs #4540) ([#4541](https://github.com/8gi-foundation/8gent-code/pull/4541))
+- eight: friction record per session, written at session end, no UI (#4511) ([#4523](https://github.com/8gi-foundation/8gent-code/pull/4523))
+- eight: step_finish records prompt and completion tokens from provider usage (#4520) ([#4521](https://github.com/8gi-foundation/8gent-code/pull/4521))
+- permissions: three-tree spelling grid as a script and CI check (#4509) ([#4513](https://github.com/8gi-foundation/8gent-code/pull/4513))
+- tui: status bar shows unverified and tests-claimed-not-run after a gated turn (#4510) ([#4515](https://github.com/8gi-foundation/8gent-code/pull/4515))
+- eight: done gate refuses a tests-pass claim without a newer passing test run (#4505) ([#4507](https://github.com/8gi-foundation/8gent-code/pull/4507))
+- eight: wire cache-aware failover affinity into the turn loop behind the flag (#4500) ([#4506](https://github.com/8gi-foundation/8gent-code/pull/4506))
+- providers: cache-aware failover affinity behind a flag (#4500) ([#4503](https://github.com/8gi-foundation/8gent-code/pull/4503))
+- keys: key vault with masked Keys screen in Settings, per-user (#3848) ([#3852](https://github.com/8gi-foundation/8gent-code/pull/3852))
+- permissions: log every System One judge verdict (Refs #3885) ([#3886](https://github.com/8gi-foundation/8gent-code/pull/3886))
+
+### Changed
+- drop stale inline version from README install line ([#4564](https://github.com/8gi-foundation/8gent-code/pull/4564))
+- run_command: say when a missing python module is on PATH as a binary ([#4559](https://github.com/8gi-foundation/8gent-code/pull/4559))
+- first-moment splash status line, Windows early-raw skip and watchdog (Refs #4540) ([#4552](https://github.com/8gi-foundation/8gent-code/pull/4552))
+- boot trace and what to paste when the TUI does not start (Refs #4540) ([#4550](https://github.com/8gi-foundation/8gent-code/pull/4550))
+- input gate, unknown slash lines, Telegram classification, write_file loop breaker, heredoc refusal (#4531 #4532 #4534 #4535 #4536 #4538) ([#4543](https://github.com/8gi-foundation/8gent-code/pull/4543))
+- every channel's input passes a deterministic gate before the model (slash registry first) ([#4531](https://github.com/8gi-foundation/8gent-code/pull/4531))
+
+### Fixed
+- daemon: fs.exec runs the shell sanitizer and wipe guard before spawn ([#4547](https://github.com/8gi-foundation/8gent-code/pull/4547))
+- gate: rpc-server and telegram paths pass the input gate ([#4542](https://github.com/8gi-foundation/8gent-code/pull/4542))
+- install: detect Android/Termux, clear early message, --dry-run and debug echo ([#4551](https://github.com/8gi-foundation/8gent-code/pull/4551))
+- tui: the first moment is never blank or frozen ([#4544](https://github.com/8gi-foundation/8gent-code/pull/4544))
+- eight: break write_file rewrite loops within a turn ([#4538](https://github.com/8gi-foundation/8gent-code/pull/4538))
+- tui: an unknown slash line is answered locally and never reaches the model ([#4536](https://github.com/8gi-foundation/8gent-code/pull/4536))
+- daemon: the Telegram bridge classifies typed and spoken input before the model ([#4535](https://github.com/8gi-foundation/8gent-code/pull/4535))
+- daemon: bind loopback by default and require a token off loopback ([#4532](https://github.com/8gi-foundation/8gent-code/pull/4532))
+- permissions: heredoc write refusals lead with the write_file remedy ([#4534](https://github.com/8gi-foundation/8gent-code/pull/4534))
+- tools: run_command says one command per call in its first sentence ([#4527](https://github.com/8gi-foundation/8gent-code/pull/4527))
+- permissions: read variables, arrays, aliases, functions and substitutions before the wipe check, family 5 of #4514 ([#4528](https://github.com/8gi-foundation/8gent-code/pull/4528))
+- permissions: judge delegated command strings, family 4 of #4514 ([#4526](https://github.com/8gi-foundation/8gent-code/pull/4526))
+- permissions: expand bracket globs before the wipe check, family 3 of #4514 ([#4525](https://github.com/8gi-foundation/8gent-code/pull/4525))
+- permissions: expand braces and IFS before the wipe check, family 2 of #4514 ([#4524](https://github.com/8gi-foundation/8gent-code/pull/4524))
+- permissions: decode ANSI-C escapes before the wipe check, first family of #4514 ([#4522](https://github.com/8gi-foundation/8gent-code/pull/4522))
+- eight: write_file records the directories it creates so the session can remove its own scratch dir (#4516) ([#4517](https://github.com/8gi-foundation/8gent-code/pull/4517))
+- permissions: split the text before a glued here-string in the blind pass (#4501) ([#4504](https://github.com/8gi-foundation/8gent-code/pull/4504))
+- permissions: home directory wipes are always-blocked and chained lines are judged per segment (#4485) ([#4493](https://github.com/8gi-foundation/8gent-code/pull/4493))
+- permissions: drop os.tmpdir() from default allowed prefixes, realpath prefixes (#4488) ([#4491](https://github.com/8gi-foundation/8gent-code/pull/4491))
+- eight: term_spawn and term_send go through the command policy ([#3774](https://github.com/8gi-foundation/8gent-code/pull/3774))
+- tools: native run_command policy gate and notebook writes confined (#3760) ([#3797](https://github.com/8gi-foundation/8gent-code/pull/3797))
+- permissions: command policy covers more network tools and send forms ([#3806](https://github.com/8gi-foundation/8gent-code/pull/3806))
+- memory: quote FTS5 terms and keep Unicode letters in recall queries ([#3539](https://github.com/8gi-foundation/8gent-code/pull/3539))
+- onboarding: no key means Enter decides later, and the chat names what is missing (#4218) ([#4225](https://github.com/8gi-foundation/8gent-code/pull/4225))
+- tui: one deterministic readiness answer drives the header and the NO MODEL card (#3290) ([#3297](https://github.com/8gi-foundation/8gent-code/pull/3297))
+
 ## [0.20.2] - 2026-10-19
 
 ### Added
