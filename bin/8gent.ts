@@ -1934,17 +1934,20 @@ async function chatCommand(args: string[]) {
 	// Provider + model: --provider/--model, else the choice saved by onboarding,
 	// else the router (#4362). A saved provider that does not answer falls back
 	// with a stated reason on stderr.
-	const { resolveChatChoice, liveProviderChoiceDeps, defaultModelFor } = await import(
+	const { resolveChatChoice, liveProviderChoiceDeps, modelForOneShot } = await import(
 		"../packages/eight/run.ts"
 	);
 	const choice = await resolveChatChoice({ provider, model }, liveProviderChoiceDeps());
 	if (choice.notice) console.error(choice.notice);
 	let resolvedModel = choice.model;
 	if (!resolvedModel && choice.provider !== "ollama") {
-		resolvedModel = defaultModelFor(choice.provider);
+		resolvedModel = await modelForOneShot(choice.provider, undefined);
 	}
 	if (!resolvedModel) {
-		const errMsg = "No Ollama models available. Pull a model first: ollama pull qwen3:14b";
+		const errMsg =
+			choice.provider === "ollama"
+				? "No Ollama models available. Pull a model first: ollama pull qwen3:14b"
+				: `No model chosen for ${choice.provider}: its model list could not be fetched. Pass --model <name>.`;
 		if (isJson) {
 			jsonOut({ success: false, error: errMsg });
 		} else {
@@ -2776,8 +2779,12 @@ async function reviewCommand(args: string[]) {
 		} else if (prNumber) {
 			diff = execSync(`gh pr diff ${prNumber}`, { encoding: "utf-8" });
 		} else {
-			diff = execSync("git diff HEAD", { encoding: "utf-8" });
-			if (!diff.trim()) diff = execSync("git diff --cached", { encoding: "utf-8" });
+			diff = execSync("git diff HEAD", { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+			if (!diff.trim())
+				diff = execSync("git diff --cached", {
+					encoding: "utf-8",
+					stdio: ["ignore", "pipe", "pipe"],
+				});
 		}
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);

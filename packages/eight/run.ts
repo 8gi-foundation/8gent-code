@@ -552,6 +552,30 @@ export function defaultModelFor(provider: string): string {
 	}
 }
 
+/**
+ * The model a one-shot run uses when none was chosen. Providers with a built-in
+ * name keep it; every other provider is asked for its own live list (bounded by
+ * the discovery timeout) and never gets another provider's alias. "" means none.
+ */
+const BUILTIN_DEFAULT_PROVIDERS = new Set(["ollama", "lmstudio", "8gent", "openrouter"]);
+export async function modelForOneShot(
+	provider: string,
+	chosen: string | undefined,
+	discover?: (p: string) => Promise<string[]>,
+): Promise<string> {
+	if (chosen?.trim()) return chosen.trim();
+	if (BUILTIN_DEFAULT_PROVIDERS.has(provider)) return defaultModelFor(provider);
+	try {
+		const ask =
+			discover ??
+			(async (p: string) => (await import("../providers")).getProviderManager().discoverModels(p));
+		const first = (await ask(provider)).map((m) => String(m).trim()).find((m) => m.length > 0);
+		return first ?? "";
+	} catch {
+		return "";
+	}
+}
+
 /** Probe localhost:11434 once to see if ollama is actually running. */
 async function isOllamaUp(): Promise<boolean> {
 	try {
@@ -835,7 +859,14 @@ export async function runRunCommand(
 			);
 		}
 	}
-	const model = choice.model ?? defaultModelFor(provider);
+	const model = await modelForOneShot(provider, choice.model);
+	if (!model) {
+		const msg = `No model chosen for ${provider}: its model list could not be fetched. Pass --model <name>.`;
+		if (opts.outputFormat === "stream-json")
+			emit({ type: "error", subtype: "usage", message: msg });
+		else process.stderr.write(`${msg}\n`);
+		return 1;
+	}
 
 	// Note to downstream harnesses: which stream-json shape we picked.
 	// Goes to stderr so stdout stays clean NDJSON.
