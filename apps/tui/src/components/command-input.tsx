@@ -27,6 +27,7 @@ import {
 	getSlashRegistry,
 	resolveSlashInput,
 	toGhostSuggestions,
+	unknownSlashAnswer,
 } from "../lib/slash-registry.js";
 import { t } from "../theme.js";
 import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
@@ -360,7 +361,7 @@ export function CommandInput({
 		{ isActive: !isProcessing && focused },
 	);
 
-	const handleSubmit = useCallback(
+	const submitNow = useCallback(
 		(input: string) => {
 			const trimmed = input.trim();
 			if (!trimmed && !allowEmptySubmit) return;
@@ -371,11 +372,12 @@ export function CommandInput({
 
 			// Check for slash command
 			if (trimmed.startsWith("/")) {
-				const resolved = resolveSlashInput(input, {
+				const registry = {
 					entries: slashRegistryEntries,
 					byToken: slashByToken,
 					collisions: [],
-				});
+				};
+				const resolved = resolveSlashInput(input, registry);
 
 				// /goal and /subgoal: handled in-component when a GoalClient is
 				// wired in. Falls through to onSlashCommand otherwise so the
@@ -422,6 +424,24 @@ export function CommandInput({
 			sessionId,
 			onSystemMessage,
 		],
+	);
+
+	// Nothing goes straight to the model (#4530): a slash line the registry does
+	// not know is checked against skills and prompt templates read now, and only
+	// when nothing claims it is it answered here and never submitted.
+	const handleSubmit = useCallback(
+		(input: string) => {
+			const trimmed = input.trim();
+			if (!trimmed.startsWith("/")) return submitNow(input);
+			const registry = { entries: slashRegistryEntries, byToken: slashByToken, collisions: [] };
+			if (resolveSlashInput(input, registry)) return submitNow(input);
+			setValue("");
+			void unknownSlashAnswer(input, registry).then((unknown) => {
+				if (unknown === null) return submitNow(input);
+				emitSystem(onSystemMessage, unknown);
+			});
+		},
+		[submitNow, slashRegistryEntries, slashByToken, onSystemMessage],
 	);
 
 	// Get current step index
