@@ -41,18 +41,30 @@ jobs:
       - name: Install zsh
         run: sudo apt-get install -y --no-install-recommends zsh
 
+      # The gate runs the BASE ref's script and rows, so a PR cannot weaken its own check. The head's
+      # copy is used only when the base has no script yet (the PR that introduces it); the step says which.
       - name: Grid against the PR base
         shell: bash
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.base_ref }}
-        run: bun scripts/permissions-grid.ts --pr-head "$HEAD_SHA" --base "origin/$BASE_REF" | tee "$RUNNER_TEMP/grid.out"
+        run: |
+          script=scripts/permissions-grid.ts
+          if git cat-file -e "origin/$BASE_REF:$script" 2>/dev/null; then
+            mkdir -p "$RUNNER_TEMP/base"
+            git archive "origin/$BASE_REF" scripts/permissions-grid.ts scripts/permissions-grid-isolate.ts scripts/permissions-grid.rows.json | tar -x -C "$RUNNER_TEMP/base"
+            script="$RUNNER_TEMP/base/scripts/permissions-grid.ts"
+            echo "grid script: from base origin/$BASE_REF" | tee -a "$RUNNER_TEMP/grid.out"
+          else
+            echo "grid script: from the PR head (the base has none yet)" | tee -a "$RUNNER_TEMP/grid.out"
+          fi
+          bun "$script" --pr-head "$HEAD_SHA" --base "origin/$BASE_REF" | tee -a "$RUNNER_TEMP/grid.out"
 
       # Readable from the job summary without the log host.
       - name: Probe isolation and counts to the summary
         if: always()
         run: |
-          { echo '```'; grep -E '^(probe |rows |result:)' "$RUNNER_TEMP/grid.out" || echo "no grid output"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo '```'; grep -E '^(grid script|probe |rows |result:)' "$RUNNER_TEMP/grid.out" || echo "no grid output"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Grid script tests
         run: bun test scripts/permissions-grid.test.ts

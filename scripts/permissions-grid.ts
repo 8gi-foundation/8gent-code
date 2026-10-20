@@ -20,10 +20,12 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, posix, resolve } from "node:path";
+import { isolate } from "./permissions-grid-isolate";
 
 const RM = ["r", "m"].join("");
 const DEL = ["-de", "lete"].join("");
 const NONE = "none";
+const MIN_ROWS = 1206; // the shipped matrix: 230 spellings x 5 contexts + 56 benign
 const HOME = "/Users/gridhome"; // the home the policy sees; rows spell it literally
 const ROWS_FILE = join(import.meta.dir, "permissions-grid.rows.json");
 /** Over-skips on purpose: a shell word, then anywhere later a flag cluster with l or i. Such a shell reads profile files that can reset PATH. */
@@ -47,6 +49,8 @@ export interface GridResult {
 	newlyAllowed: Row[];
 	gaps: { row: Row; shells: string[] }[];
 	skipped: Row[];
+	headThrew: Row[];
+	aborted?: boolean;
 	isolation: string;
 	probed: string[];
 	baseBlocked: number;
@@ -55,7 +59,7 @@ export interface GridResult {
 
 const fill = (s: string) => s.replaceAll("%RM%", () => RM).replaceAll("%DEL%", () => DEL);
 
-export function loadRows(quick: boolean, file = process.env.GRID_ROWS ?? ROWS_FILE): Row[] {
+export function loadRows(quick: boolean, file = ROWS_FILE): Row[] {
 	const d = JSON.parse(readFileSync(file, "utf8"));
 	const rows: Row[] = [];
 	for (const [context, tpl] of Object.entries<string>(d.contexts)) {
@@ -93,8 +97,14 @@ export function treeRoot(spec: string, scratch: string): string {
 	return dir;
 }
 
-async function decideAll(root: string, rows: Row[]): Promise<Map<string, Decision>> {
+async function decideAll(
+	root: string,
+	rows: Row[],
+	threw: Set<string>,
+): Promise<Map<string, Decision>> {
 	const mod = await import(join(root, "packages/permissions/always-blocked.ts"));
+	if (typeof mod.commandArgvs !== "function" || typeof mod.blockedReason !== "function")
+		throw new Error(`${root}: always-blocked.ts must export commandArgvs and blockedReason`);
 	const out = new Map<string, Decision>();
 	for (const r of rows) {
 		let blocked = false;
@@ -107,6 +117,7 @@ async function decideAll(root: string, rows: Row[]): Promise<Map<string, Decisio
 			}
 		} catch {
 			blocked = true; // a throw refuses the command
+			threw.add(r.id);
 		}
 		out.set(r.id, blocked ? "BLOCK" : "allow");
 	}
@@ -179,7 +190,7 @@ function shellProbe(rows: Row[], scratch: string) {
 				timeout: 5000,
 				stdio: ["ignore", "pipe", "ignore"],
 			});
-			if (p.status === 97) return null; // the Linux cover failed closed mid-run: nothing is trusted
+			if (iso.lost()) return "aborted"; // the cover failed closed mid-run (secret sentinel file)
 			const ran = (p.stdout?.toString() ?? "").split("\n").filter((l) => l.startsWith("RAN "));
 			if (ran.some((l) => isWipe(l, [HOME, home], kids)))
 				hits.set(r.id, [...(hits.get(r.id) ?? []), labels[si]]);
@@ -188,61 +199,27 @@ function shellProbe(rows: Row[], scratch: string) {
 	return { hits, labels, isolation: iso.name };
 }
 
-/**
- * The probe runs only under verified isolation, else not at all. Linux: an unshare mount namespace
- * where every system bin dir is the stub dir (every mount and check fails closed, exit 97). macOS:
- * sandbox-exec with a deny-default profile that writes only under the scratch dir; it is verified
- * by a write outside scratch that must fail and a write inside that must succeed.
- */
-function isolate(scratch: string, stubs: string, sh: string) {
-	type Iso = { name: string; wrap: (argv: string[]) => [string, string[]] };
-	if (process.platform === "linux") {
-		const unshare = Bun.which("unshare");
-		if (!unshare) return null;
-		const cover = [
-			"S=$1; shift; for d in /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin /sbin /bin; do",
-			'if [ -d "$d" ] && [ ! -L "$d" ]; then "$S/mount" --bind "$S" "$d" || exit 97; fi; done;',
-			'[ "$(command -v rm)" = "$S/rm" ] && [ "$(/usr/bin/rm .)" = "RAN rm ." ] || exit 97; exec "$@"',
-		].join(" ");
-		const wrap = (argv: string[]): [string, string[]] => [
-			unshare,
-			["--user", "--map-root-user", "--mount", sh, "-c", cover, "grid", stubs, ...argv],
-		];
-		const t = spawnSync(...wrap([sh, "-c", "exit 0"]), { stdio: "ignore" });
-		return t.status === 0 ? ({ name: "unshare mount namespace", wrap } as Iso) : null;
-	}
-	if (process.platform !== "darwin" || !existsSync("/usr/bin/sandbox-exec")) return null;
-	const profile = `(version 1)(deny default)(allow process*)(allow file-read*)(allow file-write* (subpath "${scratch}"))(allow file-write* (literal "/dev/null"))(allow sysctl-read)(allow mach-lookup)(allow signal (target self))`;
-	const wrap = (argv: string[]): [string, string[]] => [
-		"/usr/bin/sandbox-exec",
-		["-p", profile, ...argv],
-	];
-	const outside = mkdtempSync(join(tmpdir(), "grid-outside-"));
-	try {
-		spawnSync(...wrap(["/bin/sh", "-c", `echo x > "${outside}/c"; echo y > "${scratch}/in"`]), {
-			stdio: "ignore",
-		});
-		const ok = !existsSync(join(outside, "c")) && existsSync(join(scratch, "in"));
-		return ok ? ({ name: "sandbox-exec", wrap } as Iso) : null;
-	} finally {
-		rmSync(outside, { recursive: true, force: true });
-	}
-}
-
 export async function runGrid(o: {
 	head: string;
 	base: string;
 	quick?: boolean;
 	shell?: boolean;
+	rows?: string;
 }): Promise<GridResult> {
 	// os.homedir() is read once at startup, so the fixture home has to be in the environment already.
 	if (homedir() !== HOME) throw new Error(`run with HOME=${HOME} (the CLI does this itself)`);
 	const scratch = realpathSync(mkdtempSync(join(tmpdir(), "permissions-grid-")));
 	try {
-		const rows = loadRows(!!o.quick);
+		// A rows file other than the shipped one is for tests and local use, never CI, and skips the floor.
+		const file = o.rows ?? (process.env.NODE_ENV === "test" ? process.env.GRID_ROWS : undefined);
+		if (file && process.env.GITHUB_ACTIONS) throw new Error("a rows override is refused in CI");
+		const rows = loadRows(!!o.quick, file ?? ROWS_FILE);
+		if (!file && !o.quick && rows.length < MIN_ROWS)
+			throw new Error(`rows file has ${rows.length} rows, the floor is ${MIN_ROWS}`);
+		const threw = new Set<string>();
 		const [hd, bd] = await Promise.all([
-			decideAll(treeRoot(o.head, scratch), rows),
-			decideAll(treeRoot(o.base, scratch), rows),
+			decideAll(treeRoot(o.head, scratch), rows, threw),
+			decideAll(treeRoot(o.base, scratch), rows, new Set()),
 		]);
 		const res: GridResult = {
 			rows: rows.length,
@@ -250,6 +227,7 @@ export async function runGrid(o: {
 			newlyAllowed: [],
 			gaps: [],
 			skipped: [],
+			headThrew: rows.filter((r) => r.benign && threw.has(r.id)),
 			isolation: "not probed",
 			probed: [],
 			baseBlocked: [...bd.values()].filter((d) => d === "BLOCK").length,
@@ -265,7 +243,9 @@ export async function runGrid(o: {
 			);
 			res.skipped = open.filter((r) => noProbe(r.text));
 			const safe = open.filter((r) => !noProbe(r.text));
-			const out = shellProbe(safe, scratch);
+			const probe = shellProbe(safe, scratch);
+			res.aborted = probe === "aborted";
+			const out = probe === "aborted" ? null : probe;
 			res.isolation = out?.isolation ?? NONE;
 			res.probed = out?.labels ?? [];
 			for (const r of out ? safe : [])
@@ -292,8 +272,10 @@ export function printGrid(r: GridResult, o: { head: string; base: string; quick?
 	console.log(`probe isolation: ${r.isolation}`);
 	section("NEWLY BLOCKED on head (information)", r.newlyBlocked.map(show));
 	section("NEWLY ALLOWED on head (FAIL)", r.newlyAllowed.map(show));
+	section("HEAD THREW on benign rows (FAIL)", r.headThrew.map(show));
 	section("probe skipped (login/interactive/path)", r.skipped.map(show));
-	if (r.isolation === NONE) console.log("\nprobe skipped: no isolation (static grid only)");
+	if (r.aborted) console.log("\nprobe aborted: isolation lost");
+	else if (r.isolation === NONE) console.log("\nprobe skipped: no isolation (static grid only)");
 	else {
 		const gaps = r.gaps.map((g) => `${show(g.row)}  [${g.shells.join(", ")}]`);
 		section("NAMED SPELLING GAPS: run a wipe in a real shell, allowed on both trees", gaps);
@@ -319,8 +301,9 @@ if (import.meta.main) {
 		base: arg("--base", "origin/main"),
 		quick: a.includes("--quick"),
 		shell: !a.includes("--no-shell"),
+		rows: a.includes("--rows") ? a[a.indexOf("--rows") + 1] : undefined,
 	};
 	const res = await runGrid(opts);
 	printGrid(res, opts);
-	process.exit(res.newlyAllowed.length > 0 ? 1 : 0);
+	process.exit(res.newlyAllowed.length + res.headThrew.length > 0 ? 1 : res.aborted ? 2 : 0);
 }

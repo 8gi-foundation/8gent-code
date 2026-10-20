@@ -1,9 +1,21 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadRows } from "./permissions-grid";
+import { isolate } from "./permissions-grid-isolate";
 
+const symlinkOrCopy = (a: string, b: string) =>
+	process.platform === "linux" ? copyFileSync(a, b) : symlinkSync(a, b);
 const SCRIPT = join(import.meta.dir, "permissions-grid.ts");
 const root = mkdtempSync(join(tmpdir(), "grid-test-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -36,9 +48,14 @@ function gridEnv(env: Record<string, string>, head: string, base: string, ...ext
 }
 
 describe("permissions grid", () => {
-	test("matrix is 842 rows: 161 spellings x 5 contexts plus 37 benign; quick is plain and comment", () => {
-		expect(loadRows(false).length).toBe(842);
-		expect(loadRows(true).length).toBe(161 * 2 + 37);
+	test("matrix is 1206 rows: 230 spellings x 5 contexts plus 56 benign; quick is plain and comment", () => {
+		expect(loadRows(false).length).toBe(230 * 5 + 56);
+		expect(loadRows(true).length).toBe(230 * 2 + 56);
+	});
+
+	test("the find row expands to a single-dash delete, built from parts", () => {
+		const want = ["find / -", "delete"].join("");
+		expect(loadRows(false).some((r) => r.context === "plain" && r.text === want)).toBe(true);
 	});
 
 	test("no wipe is spelled out in the data file or the script", () => {
@@ -88,6 +105,7 @@ describe("permissions grid", () => {
 			expect(r.out).toMatch(/probe isolation: (sandbox-exec|unshare mount namespace)/);
 			expect(r.out).toMatch(/named gaps [1-9]\d*/);
 			expect(r.out).toContain("plain#0 ");
+			expect(r.out).toContain(JSON.stringify(["find / -", "delete"].join("")));
 		}
 	}, 60_000);
 
@@ -142,5 +160,61 @@ describe("permissions grid", () => {
 		for (const i of [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11]) expect(skipped).toContain(`plain#${i} `);
 		expect(skipped).not.toContain("plain#8 ");
 		expect(existsSync(canary)).toBe(true);
+	}, 60_000);
+
+	test("a head that exports nothing fails loud instead of blocking everything", () => {
+		const bare = join(root, "bare");
+		mkdirSync(join(bare, "packages/permissions"), { recursive: true });
+		writeFileSync(join(bare, "packages/permissions/always-blocked.ts"), "export {};\n");
+		const r = grid(bare, fakeTree("base-for-bare"), "--no-shell");
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("must export commandArgvs and blockedReason");
+	});
+
+	test("a head that throws on benign rows exits 1 and names them", () => {
+		const boom = join(root, "boom");
+		mkdirSync(join(boom, "packages/permissions"), { recursive: true });
+		writeFileSync(
+			join(boom, "packages/permissions/always-blocked.ts"),
+			'export const commandArgvs = () => { throw new Error("x"); };\nexport const blockedReason = () => null;\n',
+		);
+		const r = grid(boom, fakeTree("base-for-boom"), "--no-shell");
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("HEAD THREW on benign rows (FAIL)");
+	});
+
+	test("a rows override is refused in CI", () => {
+		const t = fakeTree("ci-same");
+		const r = gridEnv(
+			{ GITHUB_ACTIONS: "true", GRID_ROWS: join(root, "login-rows.json") },
+			t,
+			t,
+			"--no-shell",
+		);
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("refused in CI");
+	});
+
+	test("where isolation exists it jails writes and a row that exits 97 does not look like a lost isolation", () => {
+		const scratch = mkdtempSync(join(root, "iso-"));
+		const stubs = join(scratch, "stubs");
+		mkdirSync(stubs);
+		for (const n of ["sh", "mount", "rm"]) {
+			const src = n === "sh" ? "/bin/sh" : (Bun.which(n) ?? "");
+			if (src && n !== "rm") symlinkOrCopy(src, join(stubs, n));
+		}
+		writeFileSync(
+			join(stubs, "rm"),
+			`#!/bin/sh\nprintf 'RAN rm'\nfor a in "$@"; do printf ' %s' "$a"; done\necho\n`,
+			{ mode: 0o755 },
+		);
+		const iso = isolate(scratch, stubs, join(stubs, "sh"));
+		if (!iso) return; // no isolation on this host: the probe is skipped there, which the other tests cover
+		const outside = join(root, "must-not-exist");
+		const [cmd, args] = iso.wrap(["/bin/sh", "-c", `echo x > "${outside}"; exit 97`]);
+		const p = Bun.spawnSync([cmd, ...args]);
+		expect(p.exitCode).toBe(97);
+		expect(existsSync(outside)).toBe(false);
+		expect(iso.lost()).toBe(false);
 	}, 60_000);
 });
