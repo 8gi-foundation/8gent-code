@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+
 /**
  * Who may talk to the daemon gateway, checked before any route runs.
  *
@@ -100,4 +102,46 @@ export function guardRequest(
 		return new Response("forbidden: host not allowed", { status: 403 });
 	}
 	return null;
+}
+
+/**
+ * The daemon token a request presents at connect time: `Authorization: Bearer`,
+ * or, on a WebSocket upgrade only, a `token` query parameter (a browser-style
+ * WebSocket cannot set headers). Plain HTTP requests never read the query,
+ * because URLs end up in proxy logs and browser history.
+ */
+export function presentedToken(req: Request): string | null {
+	const header = req.headers
+		.get("authorization")
+		?.replace(/^Bearer\s+/i, "")
+		.trim();
+	if (header) return header;
+	if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return null;
+	try {
+		return new URL(req.url).searchParams.get("token");
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Compare two tokens without leaking where or how long they differ: hash both
+ * to fixed-length SHA-256 digests, then compare the digests in constant time.
+ */
+export function sameToken(a: unknown, b: string): boolean {
+	if (typeof a !== "string") return false;
+	const x = createHash("sha256").update(a).digest();
+	const y = createHash("sha256").update(b).digest();
+	return timingSafeEqual(x, y);
+}
+
+/**
+ * 401 unless the request presents the daemon token, when one is configured.
+ * No token configured means a loopback-only bind (assertSafeBind), so null.
+ */
+export function requireToken(req: Request, authToken: string | null): Response | null {
+	if (!authToken) return null;
+	const got = presentedToken(req);
+	if (got && sameToken(got, authToken)) return null;
+	return new Response("unauthorized: daemon token required", { status: 401 });
 }
