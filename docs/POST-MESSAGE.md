@@ -28,7 +28,7 @@ For a new user, `/telegram setup` writes the settings above for you. The bot key
 4. Run `/telegram setup <chat id>` for each chat you want. It adds to `postMessage.allowedChats` (never removes), sets `botEnvFile` and `botTokenVar`, and keeps every other key in `~/.8gent/settings.json`. A settings file that is not valid JSON is left untouched.
 5. Restart 8gent. The settings are read once at process start, and the first post to each chat still asks you to approve it.
 
-Only chats the bot has actually seen can be added. `EIGHT_TG_API_BASE` (tests only) points the flow at a stub.
+Only chats the bot has actually seen can be added. In the test runner `EIGHT_TG_API_BASE` points the flow at a stub.
 
 ## Direct send with a bot env file (#3838)
 
@@ -47,7 +47,7 @@ For a machine without `tg-group`, name the env file that holds the bot key:
 - `botEnvFile` must be absolute or start with `~/`. `botTokenVar` is the variable inside it (default `TELEGRAM_BOT_TOKEN`; `export` and quotes are fine). Both are read once at process start, like `allowedChats`.
 - Text posts then go to `https://api.telegram.org/bot<key>/sendMessage` with `fetch`. The key is read from the file at send time inside the process. It is never on a command line, in the tool arguments or result, in the model's context, or in a log.
 - Text that contains the key, or anything shaped like a bot token, is refused before the card. Error text has the key redacted. Redirects are not followed.
-- The `network_request` policy gate judges the base URL the post will call. Only the process environment `EIGHT_TG_API_BASE` changes that base (used for local stubs); it is not a settings key, so nothing written during a session can move the key to another host.
+- The `network_request` policy gate judges the base URL the post will call. The base is always `https://api.telegram.org` outside the test runner: `EIGHT_TG_API_BASE` (local stubs) is honoured only in test mode, and test mode is read from the environment snapshot taken before any `.env` loads, so a `.env` in a cloned repo cannot redirect the key or switch test mode on. It is not a settings key, so nothing written during a session can move the key to another host.
 - Allowlist, recipient approval, the full-text card, the session limit and the send log work exactly as above.
 - Voice notes still need `say-telegram`.
 

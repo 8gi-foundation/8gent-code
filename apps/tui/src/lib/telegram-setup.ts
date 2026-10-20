@@ -14,6 +14,7 @@ import {
 	mkdirSync,
 	readFileSync,
 	renameSync,
+	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -38,8 +39,11 @@ const expand = (p: string) => (p.startsWith("~/") ? join(homeDir(), p.slice(2)) 
 /** Remove the key, its URL-encoded forms and anything token-shaped. */
 export function redact(text: string, key?: string | null): string {
 	let out = text;
-	if (key)
-		for (const f of [key, encodeURIComponent(key)]) out = out.split(f).join("[redacted-token]");
+	if (key) {
+		const secret = key.split(":")[1];
+		const forms = [key, encodeURIComponent(key), ...(secret && secret.length >= 8 ? [secret] : [])];
+		for (const f of forms) out = out.split(f).join("[redacted-token]");
+	}
 	return out.replace(BOT_TOKEN_RE, "[redacted-token]");
 }
 
@@ -154,7 +158,9 @@ export async function getSeenChats(key: string): Promise<{ chats?: SeenChat[]; e
 		const id = String(chat.id);
 		if (!CHAT_ID_RE.test(id)) continue;
 		const person = [chat.first_name, chat.last_name].filter(Boolean).join(" ");
-		const label = cleanLabel(chat.title || person || chat.username) || "unnamed chat";
+		const label =
+			cleanLabel(redact(String(chat.title || person || chat.username || ""), key)) ||
+			"unnamed chat";
 		seen.set(id, { id, label, kind: cleanLabel(chat.type, 16) || "chat" });
 	}
 	return { chats: [...seen.values()] };
@@ -194,7 +200,8 @@ export function mergeSettings(
 	};
 	mkdirSync(dirname(path), { recursive: true });
 	const tmp = `${path}.tmp-${process.pid}`;
-	writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+	rmSync(tmp, { force: true });
+	writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600, flag: "wx" });
 	renameSync(tmp, path);
 	return { ok: true, added };
 }

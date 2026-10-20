@@ -39,6 +39,11 @@ const CASES: { name: string; command: string; starts: string }[] = [
 		starts: `[PERMISSION DENIED] ${REFUSAL_NOTE} Command touches ~/.8gent/settings.json`,
 	},
 	{
+		name: "bot key file (#4594)",
+		command: "cat ~/.8gent/secrets/telegram-bot.env",
+		starts: `[PERMISSION DENIED] ${REFUSAL_NOTE} Command touches ~/.8gent/secrets`,
+	},
+	{
 		name: "audit files (#3735)",
 		command: "tail ~/.8gent/audit/today.jsonl",
 		starts: `[PERMISSION DENIED] ${REFUSAL_NOTE} Command touches agent audit files`,
@@ -126,5 +131,24 @@ describe("text and native paths refuse the same commands with the same words (#3
 	test("an ordinary command passes the backstops", () => {
 		expect(preSpawnRefusal("ls src")).toBeNull();
 		expect(preSpawnRefusal("cat package.json")).toBeNull();
+	});
+});
+
+describe("the default bot key file is refused to the shell in every spelling (#4594)", () => {
+	for (const command of [
+		"cat ~/.8gent/secrets/telegram-bot.env",
+		"cat $HOME/.8gent/secrets/telegram-bot.env",
+		'cat "$HOME/.8gent/secrets/telegram-bot.env"',
+		"grep -r TOKEN ~/.8gent/secrets",
+		"ls ~/.8gent/secrets",
+		"cp ~/.8gent/secrets/x ./x",
+		"echo x > ~/.8gent/secrets/telegram-bot.env",
+	]) {
+		test(command, () => {
+			expect(preSpawnRefusal(command, work)).toContain("~/.8gent/secrets");
+		});
+	}
+	test("a neighbour is not caught", () => {
+		expect(preSpawnRefusal("ls ~/.8gent/secretary-notes", work)).toBeNull();
 	});
 });

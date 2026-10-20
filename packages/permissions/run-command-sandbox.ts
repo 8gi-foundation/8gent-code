@@ -77,7 +77,8 @@ export const PROTECTED_DATA_FILES = [
  * Protected dirs that run_command may not even read (#4132, 8SO): keys/state-hmac.key
  * signs /goal state, approval grants and the Table ledger, so reading it is forging them.
  */
-export const READ_DENIED_DATA_DIRS = ["keys"] as const;
+// secrets/ holds the default Telegram bot key file (/telegram setup, #4594): no read, no write.
+export const READ_DENIED_DATA_DIRS = ["keys", "secrets"] as const;
 
 function isReadDenied(dir: string): boolean {
 	return (READ_DENIED_DATA_DIRS as readonly string[]).includes(path.basename(dir));
@@ -98,6 +99,8 @@ export const PROTECTED_DATA_DIRS = [
 	// keys/state-hmac.key signs /goal state and approval grants (#4132, 8SO). The whole dir,
 	// not just the file: a file rule alone lets the dir be renamed aside and a forged one moved in.
 	"keys",
+	// The default Telegram bot key file lives here (#4594); read-denied too.
+	"secrets",
 	// A file or a directory: a subpath rule covers both.
 	"policy-checksum",
 ] as const;

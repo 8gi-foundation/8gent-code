@@ -360,14 +360,9 @@ describe("post_message direct send (#3838)", () => {
 				text: "hi",
 			});
 			expect(a).toContain("must not carry credentials");
-			process.env.EIGHT_TG_API_BASE = saveBase;
-			(process.env as Record<string, string | undefined>).NODE_ENV = "production";
-			Reflect.deleteProperty(process.env, "BUN_TEST");
-			const b = await new ToolExecutor(work, "http-base-b").execute("post_message", {
-				chat: CHAT,
-				text: "hi",
-			});
-			expect(b).toContain("must be https");
+			// http outside test mode is refused by the pure check; test mode itself is read from
+			// the pre-.env snapshot, so a runtime NODE_ENV change cannot flip it (#4594, 8SO F8).
+			expect(checkApiBase(`http://127.0.0.1:${stub.port}`, false).error).toContain("must be https");
 			expect(hits).toEqual([]);
 		} finally {
 			process.env.EIGHT_TG_API_BASE = saveBase;

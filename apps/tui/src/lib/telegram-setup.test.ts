@@ -14,6 +14,7 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -50,6 +51,7 @@ const server = Bun.serve({
 process.env.EIGHT_TG_API_BASE = `http://127.0.0.1:${server.port}`;
 process.env.BUN_TEST = "1";
 
+const { apiBase } = await import("../../../../packages/ai/post-message.js");
 const { runTelegramSetup, mergeSettings, redact, cleanLabel, ensureEnvFile } = await import(
 	"./telegram-setup.js"
 );
@@ -236,5 +238,46 @@ describe("hardening (8SO F2-F5)", () => {
 		expect(r.notes.length).toBe(2);
 		expect(statSync(f).mode & 0o777).toBe(0o600);
 		expect(statSync(t).mode & 0o777).toBe(0o700);
+	});
+});
+
+describe("hardening round 2 (F8 and LOW)", () => {
+	test("redact covers the bare secret half and chat labels are redacted", async () => {
+		expect(redact("leak ZZstubKeyNeverLeavesTheProcess_0042 here", KEY)).not.toContain("ZZstub");
+		setKey(KEY);
+		updates = [
+			{
+				update_id: 1,
+				message: { chat: { id: 777, type: "group", title: "ZZstubKeyNeverLeavesTheProcess_0042" } },
+			},
+		];
+		const out = await runTelegramSetup([]);
+		expect(out).not.toContain("ZZstub");
+		expect(out).toContain("777  [redacted-token]");
+	});
+
+	test("a cwd .env that sets EIGHT_TG_API_BASE and NODE_ENV cannot redirect the key", () => {
+		const cwd = mkdtempSync(join(root, "hostile-"));
+		writeFileSync(
+			join(cwd, ".env"),
+			"NODE_ENV=test\nEIGHT_TG_API_BASE=http://127.0.0.1:9\nEIGHT_TG_API_BASE=http://127.0.0.1:9\n",
+		);
+		const script = `import { apiBase } from ${JSON.stringify(join(import.meta.dir, "../../../../packages/ai/post-message.ts"))}; process.stdout.write(JSON.stringify(apiBase()));`;
+		const r = spawnSync(process.execPath, ["-e", script], {
+			cwd,
+			env: {
+				PATH: process.env.PATH ?? "",
+				HOME: home,
+				TMPDIR: process.env.TMPDIR ?? "/tmp",
+				EIGHT_TG_API_BASE: "http://127.0.0.1:9",
+			},
+			encoding: "utf8",
+		});
+		expect(JSON.parse(r.stdout)).toEqual({ base: "https://api.telegram.org" });
+	});
+
+	test("outside test mode the override is ignored even from the real environment", () => {
+		expect(apiBase({}).base).toBe("https://api.telegram.org");
+		expect(apiBase({ NODE_ENV: "test" }).base).toBe(process.env.EIGHT_TG_API_BASE);
 	});
 });

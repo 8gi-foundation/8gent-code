@@ -85,6 +85,8 @@ export function sensitiveCredentialPaths(): string[] {
 		path.join(home, ".config", "gh"),
 		path.join(home, "Library", "Keychains"),
 		path.join(dataDir, "keys"),
+		// Default Telegram bot key file (/telegram setup, #4594).
+		path.join(dataDir, "secrets"),
 		// 8gent Browser control tokens (#3622): the default one drives the person's logged-in
 		// browser; browser-profiles holds each named profile's token, port file and cookies.
 		path.join(home, ".8gent", "browser-control.token"),

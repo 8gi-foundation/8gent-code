@@ -46,6 +46,11 @@ import { basename, extname, join } from "node:path";
 import { MAX_SCAN_CHARS, scrub } from "../eight/secret-scanner";
 import { getPermissionManager } from "../permissions";
 import { configuredBotEnvFile } from "../permissions/path-guard";
+import {
+	type SecurityEnv,
+	isTestMode,
+	securityEnvSnapshot,
+} from "../permissions/run-command-sandbox";
 import { ToolG8 } from "../permissions/toolg8";
 import { hasTuiApprovalHandler, requestTuiDecision } from "../permissions/tui-approval-channel";
 
@@ -281,12 +286,21 @@ export function checkApiBase(raw: string, testMode: boolean): { base?: string; e
 	return { base: raw.replace(/\/+$/, "") };
 }
 
-const testMode = () => process.env.NODE_ENV === "test" || process.env.BUN_TEST === "1";
+/**
+ * Test mode, from the security snapshot taken before any .env loads: a NODE_ENV a
+ * cloned repo's .env declares does not count, so a hostile .env cannot turn it on.
+ */
+const testMode = (values: SecurityEnv["values"] = securityEnvSnapshot().values) =>
+	isTestMode(values);
 
-/** The Bot API base. Process environment only, so nothing written during a session moves it. */
-export const apiBase = (): { base?: string; error?: string } => {
+/**
+ * The Bot API base. EIGHT_TG_API_BASE (local stubs) is honoured only in test mode:
+ * the TUI loads the cwd .env into process.env, so outside tests a cloned repo could
+ * otherwise send the bot key to its own host.
+ */
+export const apiBase = (values?: SecurityEnv["values"]): { base?: string; error?: string } => {
 	const raw = process.env.EIGHT_TG_API_BASE;
-	return raw ? checkApiBase(raw, testMode()) : { base: TG_API };
+	return raw && testMode(values) ? checkApiBase(raw, true) : { base: TG_API };
 };
 
 function directSend(cfg: DirectConfig): DirectSend {
