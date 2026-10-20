@@ -232,7 +232,8 @@ import {
 } from "./lib/bang-command.js";
 import { detectBuildIntent } from "./lib/build-intent.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
-import { onCopied } from "./lib/click-targets.js";
+import { clearSelection, onCopied } from "./lib/click-targets.js";
+import { copiedNotice } from "./lib/text-selection.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import {
 	type ContextWindow,
@@ -1957,7 +1958,7 @@ export function App({
 		noticeTimer.current = setTimeout(() => setCopyNotice(null), 2000);
 	}, []);
 	useEffect(() => {
-		const off = onCopied((chars) => flashNotice(`copied ${chars} char${chars === 1 ? "" : "s"}`));
+		const off = onCopied((chars) => flashNotice(copiedNotice(chars)));
 		return () => {
 			off();
 			if (noticeTimer.current) clearTimeout(noticeTimer.current);
@@ -2491,6 +2492,8 @@ export function App({
 		// With per-tab agents, ESC aborts ONLY the active tab's loop. Other
 		// tabs' in-flight runs keep going.
 		if (key.escape) {
+			// A highlighted mouse selection goes first (#4602).
+			if (clearSelection()) return;
 			const bangs = bangRunsRef.current.get(activeTabId);
 			if (bangs && bangs.size > 0) {
 				stopBangRuns(activeTabId);

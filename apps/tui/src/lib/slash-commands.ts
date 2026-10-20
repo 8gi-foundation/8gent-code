@@ -551,6 +551,10 @@ export function builtInCommandsCoreFirst(
 	];
 }
 
+/** Mouse tips for /help: drag to select, and the terminal's own selection as a bypass. */
+export const MOUSE_HELP =
+	"Mouse: drag to select and copy, double click a word, triple click a line, Esc clears.\n  To use your terminal's own selection instead: Option-drag (iTerm2, Terminal.app), Shift-drag (most Linux terminals, Windows Terminal).";
+
 /** The /help text. Core commands by default; `all` lists every built-in. */
 export function formatSlashHelp(all: boolean): string {
 	const rows = all
@@ -561,5 +565,5 @@ export function formatSlashHelp(all: boolean): string {
 	const tail = all
 		? "  /<skill> ... - Any loaded skill name or alias expands to its prompt\n  /<template> ... - A Markdown file in ~/.8gent/prompts, sent with $1, $@ filled in"
 		: `  /help all - Show ${hidden} more commands`;
-	return `${all ? "All commands" : "Core commands"}:\n${lines.join("\n")}\n${tail}`;
+	return `${all ? "All commands" : "Core commands"}:\n${lines.join("\n")}\n${tail}\n${MOUSE_HELP}`;
 }

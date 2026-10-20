@@ -9,7 +9,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { osc52 } from "./mouse-wiring.js";
+import { osc52 } from "./text-selection.js";
 
 type Env = Record<string, string | undefined>;
 
@@ -41,14 +41,17 @@ export function clipboardSequence(text: string, env: Env): string {
 }
 
 /** The local copy command, or null over SSH or when there is none. */
-export function nativeCopyArgv(platform: string, env: Env): string[] | null {
+export function nativeCopyArgv(platform: string, env: Env, text?: string): string[] | null {
 	if (env.SSH_CONNECTION || env.SSH_TTY) return null;
 	if (platform === "darwin") return ["pbcopy"];
 	if (platform === "linux") {
 		if (env.WAYLAND_DISPLAY) return ["wl-copy"];
 		if (env.DISPLAY) return ["xclip", "-selection", "clipboard"];
 	}
-	// Windows: clip.exe mangles non-ASCII text; Windows Terminal takes OSC 52.
+	// Windows: clip.exe mangles non-ASCII text, so it only takes plain ASCII;
+	// Windows Terminal takes the rest through OSC 52.
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: ASCII range check
+	if (platform === "win32" && text !== undefined && /^[\x00-\x7f]*$/.test(text)) return ["clip.exe"];
 	return null;
 }
 
@@ -101,7 +104,7 @@ export function copyText(text: string, deps: CopyDeps): CopyResult {
 			/* stdout closed */
 		}
 	}
-	const argv = nativeCopyArgv(deps.platform ?? process.platform, env);
+	const argv = nativeCopyArgv(deps.platform ?? process.platform, env, text);
 	const native = argv && (deps.runNative ?? runNativeCopy)(argv, text) ? argv[0] : null;
 	return { osc52, native };
 }
