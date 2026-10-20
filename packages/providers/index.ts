@@ -56,6 +56,7 @@ export type BuiltinProviderName =
 	| "openai"
 	| "anthropic"
 	| "mistral"
+	| "minimax"
 	| "together"
 	| "fireworks"
 	| "replicate"
@@ -473,6 +474,22 @@ const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
 			"mistral-small-latest",
 			"codestral-latest",
 		],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	minimax: {
+		name: "minimax",
+		displayName: "MiniMax",
+		// OpenAI-compatible. Override with MINIMAX_BASE_URL (e.g. a regional endpoint).
+		baseUrl: process.env.MINIMAX_BASE_URL || "https://api.minimax.io/v1",
+		apiKeyEnv: "MINIMAX_API_KEY",
+		// DEFAULT only, so a first answer works without hand-editing providers.json.
+		// `/provider models` (discoverModels) replaces it with what the endpoint lists.
+		defaultModel: "MiniMax-M2.7",
+		models: ["MiniMax-M2.7"],
 		enabled: false,
 		supportsTools: true,
 		supportsStreaming: true,
@@ -1602,6 +1619,7 @@ export const PROVIDER_NAMES: BuiltinProviderName[] = [
 	"openai",
 	"anthropic",
 	"mistral",
+	"minimax",
 	"together",
 	"fireworks",
 	"replicate",
