@@ -146,8 +146,36 @@ const HOME_LINES = [
 		: []),
 ];
 
+// Round ten: the quote-blind second pass in commandArgvs. Each line is one where scanLine and the
+// shell disagree about what is quoted, so the first pass sees a command the shell does not hide.
+const QUOTE_DESYNC_LINES = [
+	// A single quote inside ${...} inside double quotes (bash 3.2 runs the wipe, zsh rejects the line)
+	'echo "${x#\'"\'}" ; ' + WIPE + " ; echo \\'",
+	'echo "${x:-\'"\'}" ; ' + WIPE + " ; echo \\'",
+	'echo "${x%\'"\'}" ; ' + WIPE + " ; echo \\'",
+	'echo "${x#\'"\'}" ; ' + RMRF + " ~ ; echo \\'",
+	'echo "${x:-\'"\'}" ; ' + RMRF + " $HOME ; echo \\'",
+	'echo "${x%\'"\'}" ; ' + RMRF + " ~/* ; echo \\'",
+	// A quote in a comment: the next line still runs
+	`echo hi #'\n${WIPE}\n`,
+	`echo hi #'\n${RMRF} ~\n`,
+	// A quote in a heredoc body (#4496): the line after the terminator still runs
+	`cat <<E\n'\nE\n${WIPE}`,
+	`cat <<E\n'\nE\n${RMRF} ~`,
+	`cat <<E\n"\nE\n${RMRF} $HOME/*`,
+	// Accepted over-block: the blind pass splits on `(`, so a zsh qualifier after a home star reads
+	// as a recursive delete of `~/*` and is refused. Literal echoes (`echo 'rm -rf /'`) are NOT
+	// refused by it: the word `echo` leads the piece, so that row stays in the ordinary list.
+	`${RMRF} ~/*(D)/node_modules`,
+	// Accepted over-block: quoted text whose line starts with the command and does not end in a quote
+	// character (a multi-line message where the wipe closes a line) is refused; the blind pass cannot
+	// tell the text from a command.
+	`echo 'note:\n${WIPE}\nmore'`,
+];
+
 const BLOCKED_LINES = [
 	...HOME_LINES,
+	...QUOTE_DESYNC_LINES,
 	WIPE,
 	// round seven: quote-aware closeParen (a quoted `)` is not the group's end)
 	`echo @(")") ; ${WIPE} ; echo "x"`,
@@ -252,7 +280,6 @@ const ORDINARY_LINES = [
 	"rm -rf $HOME/*/node_modules",
 	"rm -rf ~/[a-z]*/src",
 	"rm -rf ~/{src,dist}/build",
-	"rm -rf ~/*(D)/node_modules",
 	"rm -rf ~/@(a|b)",
 	"rm -rf ~/{a,b}",
 	"rm -rf ~/[[:alpha:]]x",
@@ -264,6 +291,11 @@ const ORDINARY_LINES = [
 	"echo a; echo b",
 	"false || echo fallback",
 	"git log --oneline\ngit diff --stat",
+	'git commit -m "fix: guard rm flags"',
+	'echo "rm" ; ls',
+	'grep -r "rm -rf" docs/',
+	"cat <<E\nhello\nE",
+	"echo hi # comment",
 	`echo '${WIPE}' is a dangerous command`,
 	"grep -rf patterns.txt src",
 	"rm -rf /tmp/build",

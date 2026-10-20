@@ -556,5 +556,27 @@ function scanLine(input: string, out: string[][], depth: number): void {
 export function commandArgvs(command: string): string[][] {
 	const out: string[][] = [];
 	scanLine(command, out, 0);
+	scanQuoteBlind(command, out);
 	return out;
+}
+
+/**
+ * Second pass, fail closed. `scanLine` has to guess where quotes begin and end, and a guess
+ * that disagrees with the shell hides a command: a quote inside `${...}` in double quotes, a
+ * quote in a comment, a quote in a heredoc body. This pass guesses nothing. It splits the
+ * whole text on `;` `&` `|` `(` `)` and newline with every quote character treated as an
+ * ordinary letter, splits each piece on whitespace, and hands the words to the same segment
+ * logic, so the same blockedReason decides. A command is refused if EITHER pass finds a
+ * blocked one. Cost, accepted: a blocked command named inside quoted text (an echo, a
+ * commit message) is refused too.
+ */
+function scanQuoteBlind(input: string, out: string[][]): void {
+	const text = input
+		.replace(/\\\r?\n/g, "")
+		.replace(/\d*>&\d+/g, " ")
+		.replace(/&>/g, ">");
+	for (const piece of text.split(/[;&|()\n\r]/)) {
+		const tokens = piece.split(/\s+/).filter(Boolean);
+		if (tokens.length > 0) processSegment(tokens, null, out, 0);
+	}
 }
