@@ -1,0 +1,554 @@
+{
+	"_comment": "Hardcoded model literals still allowed: file -> literal -> allowed occurrence count. No line numbers. This list may only shrink; removing an entry is how the burn-down is measured (target: zero entries). Adding one needs a visible edit here and a justification in review. Instead, discover the model from the provider's live list.",
+	"entries": {
+		"apps/tui/src/app.tsx": {
+			":free": 3,
+			"auto:free": 1,
+			"google/gemini-2.5-flash:free": 1
+		},
+		"apps/tui/src/components/ActivityRail.tsx": {
+			"lmstudio:google/gemma-4-26b-a4b": 1
+		},
+		"apps/tui/src/lib/model-selection.ts": {
+			":free": 3,
+			"auto:free": 4,
+			"eight-1.0-q3:14b": 2
+		},
+		"benchmarks/autoresearch/arena-judge.ts": {
+			"claude-opus": 1
+		},
+		"benchmarks/autoresearch/autoresearch-loop.ts": {
+			"ollama::qwen3.5:latest": 1,
+			"ollama::qwen3:14b": 1,
+			"openrouter::google/gemini-2.5-flash:free": 1
+		},
+		"benchmarks/autoresearch/canary-measure.ts": {
+			"qwen3:14b": 2
+		},
+		"benchmarks/autoresearch/harness-v2.ts": {
+			"google/gemini-2.5-flash-lite:free": 1,
+			"google/gemini-2.5-flash:free": 1,
+			"meta-llama/llama-4-maverick:free": 1
+		},
+		"benchmarks/autoresearch/meta-optimizer.ts": {
+			"ollama::qwen3.5:latest": 2,
+			"ollama::qwen3:14b": 1,
+			"openrouter::google/gemini-2.5-flash:free": 1,
+			"qwen3.5": 1
+		},
+		"benchmarks/autoresearch/multi-model-harness.ts": {
+			"anthropic/claude-sonnet-4.5,openai/gpt-4o,google/gemini-2.0-flash-001": 1,
+			"google/gemma-4-26b-a4b": 1,
+			"lmstudio:gemma-4-26b-a4b": 1,
+			"ollama:qwen3:32b": 1,
+			"qwen3:32b": 1
+		},
+		"benchmarks/autoresearch/validate-checkpoint.ts": {
+			"qwen2.5-coder:14b": 1
+		},
+		"benchmarks/autoresearch/validate-holdout.ts": {
+			"qwen3:14b": 2
+		},
+		"benchmarks/categories/abilities/model-quality.ts": {
+			"qwen3.5:latest": 2
+		},
+		"benchmarks/categories/creative/benchmarks.ts": {
+			"gpt-4": 2
+		},
+		"benchmarks/competition/overnight-competition.ts": {
+			"claude-sonnet-4-6-20250514": 1,
+			"qwen3.5:latest": 1
+		},
+		"benchmarks/computer-use-bakeoff.ts": {
+			":free": 1,
+			"eight-1.0-q3:14b": 1,
+			"qwen3.6:27b": 1
+		},
+		"benchmarks/head-to-head.ts": {
+			"claude-sonnet-4-6-20250514": 1,
+			"qwen3.5:latest": 2
+		},
+		"benchmarks/runner.ts": {
+			"llama3.2:3b": 1
+		},
+		"benchmarks/swebench/run.ts": {
+			"qwen3.5:latest": 1
+		},
+		"benchmarks/swebench/runner.ts": {
+			"qwen3.5:latest": 1
+		},
+		"demos/multi-agent-demo.ts": {
+			"gemini-2.5-flash:free": 1,
+			"qwen3.5:latest": 1
+		},
+		"packages/ai/model-profile.ts": {
+			"gemma-4-26b*": 1,
+			"gemma-4-26b-a4b": 1,
+			"llama-3.3*": 1,
+			"llama-3.3-70b-versatile": 1,
+			"mistral-small": 1,
+			"mistral-small*": 1,
+			"qwen3:32b": 2
+		},
+		"packages/ai/providers.ts": {
+			":free": 2
+		},
+		"packages/ai/task-router.ts": {
+			"eight-1-q-14b:latest": 1,
+			"eight-1.1-q3:14b": 1,
+			"gemma": 1,
+			"qwen3.5": 1,
+			"qwen3.5:latest": 2
+		},
+		"packages/ai/text-tool-endpoint.ts": {
+			"qwen3.5": 2,
+			"qwen3.5:9b": 1,
+			"qwen3.8": 4
+		},
+		"packages/ai/tools.ts": {
+			"deepseek-flash": 1,
+			"meta-llama/llama-3-8b-instruct:free": 1
+		},
+		"packages/board-vessel/agent-runner.ts": {
+			"qwen3.6:27b": 1
+		},
+		"packages/board-vessel/inference.ts": {
+			"auto:free": 1,
+			"qwen3:latest": 1
+		},
+		"packages/board-vessel/vessel.ts": {
+			"qwen3:latest": 1
+		},
+		"packages/ci/review.ts": {
+			"meta-llama/llama-4-scout:free": 1
+		},
+		"packages/daemon/agent-pool.ts": {
+			"qwen3.5:14b": 1
+		},
+		"packages/daemon/goal-rpc.ts": {
+			"eight-1.0-q3:14b": 2
+		},
+		"packages/daemon/index.ts": {
+			"auto:free": 1,
+			"qwen3.5:14b": 1
+		},
+		"packages/daemon/model-resolver.ts": {
+			"nvidia/nemotron-3-super-120b-a12b:free": 2
+		},
+		"packages/daemon/telegram-bridge.ts": {
+			"auto:free": 1,
+			"eight-1.0-q3:14b": 1
+		},
+		"packages/db/convex/schema.ts": {
+			"eight-1.0-q3:14b": 1,
+			"gpt-4o": 1,
+			"qwen3:14b": 3
+		},
+		"packages/decide/backends/ollama.ts": {
+			"qwen3": 1
+		},
+		"packages/decide/guard.ts": {
+			"qwen3": 1
+		},
+		"packages/decide/probe.ts": {
+			"gemma": 1,
+			"llama3.1": 1,
+			"llama3.2": 1,
+			"qwen2.5": 1,
+			"qwen3": 1
+		},
+		"packages/eight/agent.ts": {
+			"qwen3.6:27b": 1
+		},
+		"packages/eight/clients/anthropic.ts": {
+			"claude-3-5-sonnet-latest": 1
+		},
+		"packages/eight/clients/deepseek.ts": {
+			"deepseek-flash": 1,
+			"deepseek-v4-pro": 1
+		},
+		"packages/eight/clients/pii-gate.ts": {
+			"qwen3:latest": 1
+		},
+		"packages/eight/index.ts": {
+			"eight-1.0-q3:14b": 1
+		},
+		"packages/eight/loops/computer-use.ts": {
+			"qwen3.6:27b": 1
+		},
+		"packages/eight/modes.ts": {
+			"gemma3:4b": 1,
+			"google/gemini-2.5-flash:free": 1,
+			"llama3.2:3b": 1,
+			"meta-llama/llama-3-8b-instruct:free": 1,
+			"qwen3:1.7b": 1,
+			"qwen3:4b": 1
+		},
+		"packages/eight/providers/openrouter.ts": {
+			":free": 2,
+			"deepseek/deepseek-r1:free": 1,
+			"google/gemma-2-9b-it:free": 1,
+			"meta-llama/llama-3.3-70b-instruct:free": 1,
+			"mistralai/mistral-7b-instruct:free": 1,
+			"nvidia/llama-3.1-nemotron-70b-instruct:free": 1,
+			"qwen/qwen3-30b-a3b:free": 1,
+			"qwen/qwen3-coder-480b:free": 1
+		},
+		"packages/eight/quick-answer.ts": {
+			"qwen3.5:9b": 1
+		},
+		"packages/eight/registry.ts": {
+			"deepseek-flash": 1,
+			"deepseek-v4-pro": 1,
+			"eight-1.0-q3:14b": 1,
+			"meta-llama/llama-3-8b-instruct:free": 1,
+			"qwen3.6:27b": 1
+		},
+		"packages/eight/run.ts": {
+			"auto:free": 3,
+			"eight-1.0-q3:14b": 1,
+			"qwen3:14b": 1
+		},
+		"packages/eight/scripts/computer-use-suite.ts": {
+			"qwen3.6:27b": 1
+		},
+		"packages/eight/scripts/cua-run.ts": {
+			"deepseek-flash": 1,
+			"meta-llama/llama-3-8b-instruct:free": 1
+		},
+		"packages/eight/scripts/smoke-failover-chain.ts": {
+			":free": 1,
+			"deepseek-flash": 1,
+			"qwen3.6:27b": 9
+		},
+		"packages/eight/scripts/smoke-qwen36.ts": {
+			"qwen3.6:27b": 1
+		},
+		"packages/eight/tools.ts": {
+			"deepseek-flash": 1,
+			"meta-llama/llama-3-8b-instruct:free": 1
+		},
+		"packages/eight/vision-router.ts": {
+			":free": 1,
+			"deepseek-ocr": 2,
+			"deepseek-ocr:latest": 1,
+			"gemma-2": 1,
+			"gemma-3": 1,
+			"gemma-4": 1,
+			"gemma2": 1,
+			"gemma3": 1,
+			"gemma4": 1,
+			"gpt-4.1": 1,
+			"gpt-4o": 1,
+			"gpt-5": 1,
+			"llama3.2-vision": 2,
+			"llama3.2-vision:11b": 1,
+			"llava-llama3": 1,
+			"openrouter:meta-llama/llama-3.2-11b-vision-instruct:free": 1,
+			"qwen2.5-vl": 4,
+			"qwen2.5-vl:latest": 1,
+			"qwen2.5vl": 1,
+			"qwen3.6:27b": 1
+		},
+		"packages/extensions/crafter.ts": {
+			"qwen3:14b": 1
+		},
+		"packages/eyes/choose/eval/run.ts": {
+			"hf.co/AtlaAI/Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF:latest": 1
+		},
+		"packages/eyes/ground/backends/qwen-vl.ts": {
+			"qwen-vl-${opts.transport}": 1
+		},
+		"packages/eyes/ground/index.ts": {
+			"gemma-4-26b-a4b-it": 1,
+			"qwen2.5vl": 2,
+			"qwen2.5vl:7b": 1,
+			"qwen3-vl": 1,
+			"qwen3-vl:8b": 1,
+			"qwen3.5": 1,
+			"qwen3.5:9b": 1
+		},
+		"packages/eyes/ground/types.ts": {
+			"qwen-vl-ollama": 1
+		},
+		"packages/g8way/config.ts": {
+			"anthropic/claude-sonnet-4-6": 2,
+			"openai/gpt-4o": 1
+		},
+		"packages/goal/executor-eight.ts": {
+			"eight-1.0-q3:14b": 1,
+			"qwen3:14b": 1
+		},
+		"packages/goal/judge.ts": {
+			":free": 1
+		},
+		"packages/harness-cli/commands/run.ts": {
+			"openai/gpt-4.1-mini": 1
+		},
+		"packages/kernel/judge.ts": {
+			"google/gemini-2.5-flash:free": 1
+		},
+		"packages/kernel/local-trainer.ts": {
+			"Qwen/Qwen3-14B": 1,
+			"qwen3:14b": 1
+		},
+		"packages/kernel/loop.ts": {
+			"qwen3:14b": 2
+		},
+		"packages/kernel/manager.ts": {
+			"qwen3:14b": 1
+		},
+		"packages/kernel/proxy.ts": {
+			"qwen3:14b": 1
+		},
+		"packages/kernel/resource-governor.ts": {
+			":free": 1
+		},
+		"packages/kernel/training.ts": {
+			"qwen3:14b": 1
+		},
+		"packages/kernel/version-manager.ts": {
+			"google/gemini-2.5-flash:free": 1,
+			"qwen3:14b": 1
+		},
+		"packages/local-model-server/media-probe.ts": {
+			"qwen": 1
+		},
+		"packages/memory/ask.ts": {
+			"auto:free": 1
+		},
+		"packages/memory/representations.ts": {
+			"auto:free": 1
+		},
+		"packages/orchestration/delegation-tools.ts": {
+			":free": 2,
+			"auto:free": 2
+		},
+		"packages/orchestration/index.ts": {
+			"eight-1.0-q3:14b": 1
+		},
+		"packages/orchestration/local-model-detect.ts": {
+			"google/gemma-4-26b-a4b": 1,
+			"qwen3.6:27b": 1
+		},
+		"packages/orchestration/role-config.ts": {
+			"auto:free": 1,
+			"eight-1.0-q3:14b": 1
+		},
+		"packages/orchestration/role-registry.ts": {
+			"google/gemma-4-26b-a4b": 1,
+			"qwen3.6:27b": 1
+		},
+		"packages/orchestration/sequential-pipeline.ts": {
+			"auto:free": 1,
+			"qwen3:14b": 1,
+			"qwen3:32b": 1
+		},
+		"packages/orchestration/worktree-pool.ts": {
+			"llama3": 1
+		},
+		"packages/permissions/output-filter.ts": {
+			"qwen3:32b": 1
+		},
+		"packages/permissions/privacy-router.ts": {
+			"qwen3.5:latest": 1
+		},
+		"packages/proactive/autoresearch.ts": {
+			"llama3.2:latest": 1
+		},
+		"packages/proactive/research-types.ts": {
+			"llama3.2:latest": 1
+		},
+		"packages/providers/failover.ts": {
+			":free": 2,
+			"deepseek-flash": 3,
+			"eight-1.0-q3:14b": 1,
+			"google/gemma-4-26b-a4b": 2,
+			"meta-llama/llama-3-8b-instruct:free": 7,
+			"meta-llama/llama-3.3-70b-instruct": 1,
+			"qwen3.5:latest": 3,
+			"qwen3.6:27b": 3,
+			"qwen3:14b": 2
+		},
+		"packages/providers/host-placement.ts": {
+			"auto:free": 1
+		},
+		"packages/providers/index.ts": {
+			":free": 3,
+			"Qwen/Qwen2-72B-Instruct": 1,
+			"accounts/fireworks/models/llama-v3p1-70b-instruct": 2,
+			"anthropic/claude-3-opus": 1,
+			"anthropic/claude-3.5-sonnet": 2,
+			"auto:free": 3,
+			"claude-3-5-sonnet-20241022": 2,
+			"claude-3-haiku-20240307": 1,
+			"claude-3-opus-20240229": 1,
+			"deepseek-flash": 2,
+			"deepseek-v4-pro": 1,
+			"eight-1.0-q3:14b": 4,
+			"gemma2-9b-it": 1,
+			"google/gemma-4-26b-a4b": 2,
+			"gpt-3.5-turbo": 1,
+			"gpt-4-turbo": 2,
+			"gpt-4o": 1,
+			"gpt-4o-mini": 1,
+			"llama-3.1-70b-versatile": 2,
+			"llama-3.1-8b-instant": 1,
+			"meta-llama/Llama-3-70b-chat-hf": 2,
+			"meta-llama/llama-3-70b-instruct": 1,
+			"meta-llama/llama-3-8b-instruct:free": 1,
+			"meta/llama-2-70b-chat": 2,
+			"mistral-large-latest": 2,
+			"mistral-medium-latest": 1,
+			"mistral-small-latest": 1,
+			"openai/gpt-4-turbo": 1,
+			"qwen3.5:latest": 3,
+			"qwen3.6:27b": 2,
+			"qwen3:14b": 2
+		},
+		"packages/providers/model-reroute.ts": {
+			"qwen3.6:27b": 1
+		},
+		"packages/providers/router-bandit.ts": {
+			":free": 1
+		},
+		"packages/self-autonomy/local-servers.ts": {
+			"auto:free": 1
+		},
+		"packages/self-autonomy/model-recipes.ts": {
+			"google/gemma-4-26b-a4b": 2,
+			"qwen3.5": 2,
+			"qwen3.5:latest": 1
+		},
+		"packages/settings/defaults.ts": {
+			"google/gemma-4-26b-a4b": 1,
+			"qwen3.6:27b": 1
+		},
+		"packages/settings/project.ts": {
+			":free": 2,
+			"auto:free": 2
+		},
+		"packages/settings/retry.ts": {
+			":free": 1
+		},
+		"packages/settings/schema.ts": {
+			":free": 1
+		},
+		"packages/skills/business-builder/orchestrator.ts": {
+			"llama3.2": 1
+		},
+		"packages/skills/index.ts": {
+			"[eight-1.0-q3:14b]": 1,
+			"eight-1.0-q3:14b": 1
+		},
+		"packages/skills/manifest.ts": {
+			"eight-1.0-q3:14b": 1,
+			"ollama:qwen2.5": 1
+		},
+		"packages/specifications/session/index.ts": {
+			"openai/gpt-4.1-mini": 2,
+			"qwen2.5-coder:7b": 1
+		},
+		"packages/table/huddle-demo.ts": {
+			"gemma-4-12b-coder-fable5-composer2.5-v1": 1
+		},
+		"packages/table/officer-config.ts": {
+			"gemma": 1
+		},
+		"packages/table/officers.ts": {
+			"gemma-4-12b-coder-fable5-composer2.5-v1": 2,
+			"gemma-4-26b-a4b-it": 3,
+			"qwen2.5vl:7b": 1
+		},
+		"packages/telegram/index.ts": {
+			"GPT-4.1": 1,
+			"model:anthropic/claude-opus-4": 1,
+			"model:anthropic/claude-sonnet-4": 1,
+			"model:deepseek-coder-v3": 1,
+			"model:openai/gpt-4.1": 1,
+			"model:qwen3:14b": 1,
+			"model:qwen3:32b": 1
+		},
+		"packages/telemetry/index.ts": {
+			"qwen3.5:14b": 1
+		},
+		"scripts/benchmark.ts": {
+			"GPT-5": 1
+		},
+		"scripts/board-vessel/daemon.ts": {
+			"qwen3:latest": 1
+		},
+		"scripts/demo-go-e2e.ts": {
+			"google/gemma-4-26b-a4b": 1,
+			"qwen3.6:27b": 1
+		},
+		"scripts/demo-savings.ts": {
+			"GPT-5": 1
+		},
+		"scripts/durable-continue-demo.ts": {
+			"qwen3.5:9b": 1
+		},
+		"scripts/generate-te-landing.ts": {
+			"qwen3.5:latest": 1
+		},
+		"scripts/install-wizard.tsx": {
+			"deepseek-coder-v2:16b": 1,
+			"deepseek-coder-v2:lite": 1,
+			"qwen": 1,
+			"qwen2.5-coder:14b": 1,
+			"qwen2.5-coder:32b": 1,
+			"qwen2.5-coder:7b": 1
+		},
+		"scripts/judge-vs-proxy-rater.ts": {
+			"anthropic/claude-sonnet-4-6": 1,
+			"claude-sonnet-4-6": 1
+		},
+		"scripts/model-shootout-v2.ts": {
+			"auto:free": 1,
+			"meta-llama/llama-3.3-70b-instruct:free": 1,
+			"mistralai/mistral-small-3.1-24b-instruct:free": 1,
+			"nvidia/nemotron-3-nano-30b-a3b:free": 1,
+			"nvidia/nemotron-3-super-120b-a12b:free": 1,
+			"stepfun/step-3.5-flash:free": 1
+		},
+		"scripts/model-shootout.ts": {
+			"GPT-OSS-120B": 1,
+			"Gemma-3-27B": 1,
+			"Qwen3-Coder": 1,
+			"Qwen3-Next-80B": 1,
+			"auto:free": 1,
+			"google/gemma-3-27b-it:free": 1,
+			"nvidia/nemotron-3-nano-30b-a3b:free": 1,
+			"openai/gpt-oss-120b:free": 1,
+			"qwen/qwen3-coder:free": 1,
+			"qwen/qwen3-next-80b-a3b-instruct:free": 1
+		},
+		"scripts/nightly-train.ts": {
+			"Qwen/Qwen2.5-Coder-14B": 1,
+			"qwen3:14b": 1
+		},
+		"scripts/run-eval-set.ts": {
+			"google/gemma-4-26b-a4b": 1,
+			"qwen3.6:27b": 1,
+			"qwen3:14b": 1
+		},
+		"scripts/smoke.ts": {
+			"google/gemma-4-26b-a4b": 1,
+			"hail-mary:free": 3,
+			"qwen3.6:27b": 2
+		},
+		"scripts/social-feed-research.ts": {
+			"google/gemini-2.5-flash:free": 1,
+			"openai/gpt-4o-mini": 1
+		},
+		"scripts/table-live-mesh.ts": {
+			"llama3.2:3b": 1
+		},
+		"scripts/table-night-loop.ts": {
+			"llama3.2:3b": 1
+		},
+		"scripts/utility-factory.ts": {
+			"eight-1-q-14b:latest": 1
+		}
+	}
+}
