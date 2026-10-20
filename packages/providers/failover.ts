@@ -8,6 +8,15 @@
  * existing local default. The `computer` channel uses the chain built for
  * the 8gent Computer surface: apfel (chat) → Qwen 3.6-27B (vision/tool)
  * → DeepSeek V4-Flash (heavy cloud) → OpenRouter `:free` (last resort).
+ *
+ * Cache affinity (#4500, off by default): with `cacheAffinity: true` or
+ * EIGHT_CACHE_AFFINITY=1, a session that passes its id to resolve() and reports
+ * each served turn with noteServed() stays on the backend that holds its prompt
+ * cache while that backend is not down, instead of restarting at the chain head.
+ * A switch away records `coldPrefillTokens` (prompt tokens the new backend must
+ * prefill from scratch), and graceRetry() allows one retry on a transient error
+ * when re-prefilling elsewhere would cost more than waiting. Flag off: no state
+ * is kept and behaviour is identical to before. Chain config files are untouched.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -56,6 +65,8 @@ export interface FailoverEvent {
 	toModel: string;
 	toProvider: string;
 	reason: string;
+	/** Prompt tokens the session's warm backend held; set on a switch away from it (cacheAffinity only). */
+	coldPrefillTokens?: number;
 }
 
 /**
@@ -172,6 +183,33 @@ export interface ModelFailoverOptions {
 	 * NoAllowedProviderError instead of going to openrouter (#3710).
 	 */
 	allowHosted?: boolean;
+	/**
+	 * Keep a session on the backend holding its prompt cache (#4500). Defaults to
+	 * EIGHT_CACHE_AFFINITY=1; off otherwise.
+	 */
+	cacheAffinity?: boolean;
+	/** Estimated prefill speed for the grace-retry decision. Default 2000 tokens/s. */
+	prefillTokensPerSec?: number;
+	/** Clock for the affinity TTL; injectable for tests. Default Date.now. */
+	now?: () => number;
+}
+
+/** Most sessions the affinity map holds; the least recently served is evicted past this. */
+export const AFFINITY_MAX_ENTRIES = 1024;
+/** An affinity entry unused for this long is treated as absent: a prompt cache will not outlive it. */
+export const AFFINITY_TTL_MS = 30 * 60 * 1000;
+/** Session ids longer than this are ignored (never stored, never matched). */
+export const AFFINITY_MAX_ID_LENGTH = 128;
+
+/** What a session's last-good backend saw: where its prompt cache lives. */
+interface Affinity {
+	channel: FailoverChannel;
+	model: string;
+	entry: FailoverEntry;
+	promptTokens: number;
+	graceUsed: boolean;
+	/** When noteServed last wrote this entry, for the TTL. */
+	servedAt: number;
 }
 
 export class ModelFailover {
@@ -185,6 +223,15 @@ export class ModelFailover {
 	private apfelSkipped: string | null = null;
 	/** channel + model of every chain that lost a hosted apfel entry. */
 	private apfelChains = new Set<string>();
+	private cacheAffinity: boolean;
+	private prefillTokensPerSec: number;
+	/**
+	 * session id to its last-good backend; only written when cacheAffinity is on.
+	 * Bounded: insertion order is recency (noteServed deletes then sets), capped at
+	 * AFFINITY_MAX_ENTRIES with LRU eviction, and entries expire after AFFINITY_TTL_MS.
+	 */
+	private affinity = new Map<string, Affinity>();
+	private now: () => number;
 
 	constructor(
 		chains?: Record<FailoverChannel, Record<string, FailoverChain>>,
@@ -195,6 +242,9 @@ export class ModelFailover {
 				? allowFromEnv()
 				: (opts.allow?.map((p) => p.trim().toLowerCase()) ?? null);
 		this.hostedBlocked = !(opts.allowHosted ?? hostedAllowed());
+		this.cacheAffinity = opts.cacheAffinity ?? process.env.EIGHT_CACHE_AFFINITY?.trim() === "1";
+		this.prefillTokensPerSec = opts.prefillTokensPerSec ?? 2000;
+		this.now = opts.now ?? Date.now;
 		// No opt-in: the allowlist is the local providers (narrowed further by an explicit one).
 		this.allow = this.hostedBlocked
 			? (explicit ?? [...LOCAL_FAILOVER_PROVIDERS]).filter((p) => !isHostedProvider(p))
@@ -417,7 +467,7 @@ export class ModelFailover {
 	 * providers, and when nothing allowed can serve the model this throws
 	 * NoAllowedProviderError instead of defaulting to openrouter.
 	 */
-	resolve(model: string, channel: FailoverChannel = "text"): FailoverEntry {
+	resolve(model: string, channel: FailoverChannel = "text", sessionId?: string): FailoverEntry {
 		const chain = this.chainsByChannel[channel]?.[model];
 		if (this.allow && (chain ? chain.models.length === 0 : !this.allow.includes("openrouter"))) {
 			const droppedApfel = this.apfelChains.has(`${channel}\0${model}`) ? this.apfelSkipped : null;
@@ -432,17 +482,23 @@ export class ModelFailover {
 		if (!chain) return { model, provider: "openrouter" };
 
 		const head = chain.models[0];
+		// Cache affinity: a warm, healthy backend wins over chain order.
+		const aff = this.warmAffinity(sessionId, model, channel, chain.models);
+		if (aff && !this.down.has(this.key(aff.entry.model, aff.entry.provider))) return aff.entry;
+		const from = aff?.entry ?? head;
+		const cold = aff ? { coldPrefillTokens: aff.promptTokens } : {};
 		for (const entry of chain.models) {
 			if (!this.down.has(this.key(entry.model, entry.provider))) {
-				if (head && (entry.model !== head.model || entry.provider !== head.provider)) {
+				if (from && (entry.model !== from.model || entry.provider !== from.provider)) {
 					this.recordEvent({
 						ts: Date.now(),
 						channel,
-						fromModel: head.model,
-						fromProvider: head.provider,
+						fromModel: from.model,
+						fromProvider: from.provider,
 						toModel: entry.model,
 						toProvider: entry.provider,
-						reason: "primary-down",
+						reason: aff ? "affinity-down" : "primary-down",
+						...cold,
 					});
 				}
 				return entry;
@@ -462,8 +518,98 @@ export class ModelFailover {
 			toModel: last.model,
 			toProvider: last.provider,
 			reason: "all-tiers-down",
+			...cold,
 		});
 		return last;
+	}
+
+	/**
+	 * The session's affinity for this model and channel, when the flag is on.
+	 * An entry past its TTL, or whose backend is no longer in the current chain
+	 * (the chain changed since it was written), is dropped and treated as absent.
+	 */
+	private warmAffinity(
+		sessionId: string | undefined,
+		model: string,
+		channel: FailoverChannel,
+		chainModels?: readonly FailoverEntry[],
+	): Affinity | undefined {
+		if (!this.cacheAffinity || !sessionId || sessionId.length > AFFINITY_MAX_ID_LENGTH) {
+			return undefined;
+		}
+		const a = this.affinity.get(sessionId);
+		if (!a) return undefined;
+		if (this.now() - a.servedAt > AFFINITY_TTL_MS) {
+			this.affinity.delete(sessionId);
+			return undefined;
+		}
+		if (a.model !== model || a.channel !== channel) return undefined;
+		if (
+			chainModels &&
+			!chainModels.some((e) => e.model === a.entry.model && e.provider === a.entry.provider)
+		) {
+			this.affinity.delete(sessionId);
+			return undefined;
+		}
+		return a;
+	}
+
+	/**
+	 * Record that `entry` served a turn for the session with `promptTokens` of
+	 * prompt, so the next resolve() starts there. No-op with the flag off, and for
+	 * a session id over AFFINITY_MAX_ID_LENGTH.
+	 *
+	 * `sessionId` must be the daemon-assigned session id, never a raw string from
+	 * a remote channel (Telegram, Discord, API): those are attacker-controlled and
+	 * would let a caller fill the map with chosen keys.
+	 */
+	noteServed(
+		sessionId: string,
+		model: string,
+		entry: FailoverEntry,
+		promptTokens: number,
+		channel: FailoverChannel = "text",
+	): void {
+		if (!this.cacheAffinity || sessionId.length > AFFINITY_MAX_ID_LENGTH) return;
+		// Delete then set so Map insertion order is recency; the first key is the LRU one.
+		this.affinity.delete(sessionId);
+		this.affinity.set(sessionId, {
+			channel,
+			model,
+			entry,
+			promptTokens,
+			graceUsed: false,
+			servedAt: this.now(),
+		});
+		if (this.affinity.size > AFFINITY_MAX_ENTRIES) {
+			const oldest = this.affinity.keys().next().value;
+			if (oldest !== undefined) this.affinity.delete(oldest);
+		}
+	}
+
+	/** Drop a session's affinity, e.g. when the daemon closes the session. */
+	forgetSession(sessionId: string): void {
+		this.affinity.delete(sessionId);
+	}
+
+	/** Number of sessions currently holding an affinity entry. */
+	get affinitySize(): number {
+		return this.affinity.size;
+	}
+
+	/**
+	 * True once per warm backend when a transient error is worth one retry before
+	 * failing over: `entry` is the session's warm backend and re-prefilling the
+	 * session's prompt elsewhere (promptTokens / prefillTokensPerSec) would take
+	 * longer than `waitMs`. The caller retries, then markDown()s if it fails again.
+	 */
+	graceRetry(sessionId: string, entry: FailoverEntry, waitMs: number): boolean {
+		const a = this.cacheAffinity ? this.affinity.get(sessionId) : undefined;
+		if (!a || a.graceUsed) return false;
+		if (a.entry.model !== entry.model || a.entry.provider !== entry.provider) return false;
+		if ((a.promptTokens / this.prefillTokensPerSec) * 1000 <= waitMs) return false;
+		a.graceUsed = true;
+		return true;
 	}
 
 	/**

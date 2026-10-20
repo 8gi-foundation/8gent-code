@@ -1,5 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
+	AFFINITY_MAX_ENTRIES,
+	AFFINITY_MAX_ID_LENGTH,
+	AFFINITY_TTL_MS,
 	type FailoverChain,
 	type FailoverChannel,
 	ModelFailover,
@@ -164,5 +167,120 @@ describe("telling the user apfel was skipped (#3908)", () => {
 		} finally {
 			warn.mockRestore();
 		}
+	});
+});
+
+describe("ModelFailover cache affinity (#4500)", () => {
+	const hosted = { allowHosted: true };
+	const lm = { model: "ornith-1.0-9b", provider: "lmstudio" };
+	const apfel = { model: "MiniMax-M2.7", provider: "apfel" };
+
+	test("starts at the warm backend, not the chain head", () => {
+		const f = new ModelFailover(chains, { ...hosted, cacheAffinity: true });
+		f.noteServed("s1", "ornith-1.0-9b", apfel, 9000);
+		expect(f.resolve("ornith-1.0-9b", "text", "s1")).toEqual(apfel);
+		expect(f.resolve("ornith-1.0-9b", "text", "other")).toEqual(lm);
+		expect(f.getEvents()).toEqual([]);
+	});
+
+	test("falls back to chain order when the warm backend is down, with coldPrefillTokens", () => {
+		const f = new ModelFailover(chains, { ...hosted, cacheAffinity: true });
+		f.noteServed("s1", "ornith-1.0-9b", apfel, 9000);
+		f.markDown(apfel.model, apfel.provider);
+		expect(f.resolve("ornith-1.0-9b", "text", "s1")).toEqual(lm);
+		const [ev] = f.getEvents();
+		expect(ev?.fromProvider).toBe("apfel");
+		expect(ev?.toProvider).toBe("lmstudio");
+		expect(ev?.reason).toBe("affinity-down");
+		expect(ev?.coldPrefillTokens).toBe(9000);
+	});
+
+	test("grace retry is allowed once when re-prefill outweighs the wait", () => {
+		const f = new ModelFailover(chains, {
+			...hosted,
+			cacheAffinity: true,
+			prefillTokensPerSec: 1000,
+		});
+		f.noteServed("s1", "ornith-1.0-9b", apfel, 8000); // 8 s of re-prefill
+		expect(f.graceRetry("s1", lm, 1500)).toBe(false); // not the warm backend
+		expect(f.graceRetry("s1", apfel, 10_000)).toBe(false); // waiting costs more
+		expect(f.graceRetry("s1", apfel, 1500)).toBe(true);
+		expect(f.graceRetry("s1", apfel, 1500)).toBe(false); // one retry only
+		f.noteServed("s1", "ornith-1.0-9b", apfel, 8000); // a served turn re-arms it
+		expect(f.graceRetry("s1", apfel, 1500)).toBe(true);
+	});
+
+	test("the map is capped with LRU eviction", () => {
+		const f = new ModelFailover(chains, { ...hosted, cacheAffinity: true });
+		for (let i = 0; i < AFFINITY_MAX_ENTRIES + 5; i++)
+			f.noteServed(`s${i}`, "ornith-1.0-9b", apfel, 1);
+		expect(f.affinitySize).toBeLessThanOrEqual(AFFINITY_MAX_ENTRIES);
+		expect(f.resolve("ornith-1.0-9b", "text", "s0")).toEqual(lm); // oldest evicted
+		expect(f.resolve("ornith-1.0-9b", "text", `s${AFFINITY_MAX_ENTRIES + 4}`)).toEqual(apfel);
+	});
+
+	test("a re-served session is recent, so it survives eviction", () => {
+		const f = new ModelFailover(chains, { ...hosted, cacheAffinity: true });
+		f.noteServed("keep", "ornith-1.0-9b", apfel, 1);
+		for (let i = 0; i < AFFINITY_MAX_ENTRIES - 1; i++)
+			f.noteServed(`s${i}`, "ornith-1.0-9b", apfel, 1);
+		f.noteServed("keep", "ornith-1.0-9b", apfel, 1);
+		f.noteServed("extra", "ornith-1.0-9b", apfel, 1);
+		expect(f.resolve("ornith-1.0-9b", "text", "keep")).toEqual(apfel);
+		expect(f.resolve("ornith-1.0-9b", "text", "s0")).toEqual(lm);
+	});
+
+	test("an entry older than the TTL is absent and deleted", () => {
+		let t = 1_000_000;
+		const f = new ModelFailover(chains, { ...hosted, cacheAffinity: true, now: () => t });
+		f.noteServed("s1", "ornith-1.0-9b", apfel, 1);
+		t += AFFINITY_TTL_MS;
+		expect(f.resolve("ornith-1.0-9b", "text", "s1")).toEqual(apfel); // exactly at TTL: still warm
+		t += 1;
+		expect(f.resolve("ornith-1.0-9b", "text", "s1")).toEqual(lm);
+		expect(f.affinitySize).toBe(0);
+	});
+
+	test("a session id over the length limit is ignored", () => {
+		const f = new ModelFailover(chains, { ...hosted, cacheAffinity: true });
+		const long = "x".repeat(AFFINITY_MAX_ID_LENGTH + 1);
+		f.noteServed(long, "ornith-1.0-9b", apfel, 1);
+		expect(f.affinitySize).toBe(0);
+		expect(f.resolve("ornith-1.0-9b", "text", long)).toEqual(lm);
+		const ok = "y".repeat(AFFINITY_MAX_ID_LENGTH);
+		f.noteServed(ok, "ornith-1.0-9b", apfel, 1);
+		expect(f.resolve("ornith-1.0-9b", "text", ok)).toEqual(apfel);
+	});
+
+	test("forgetSession drops the entry", () => {
+		const f = new ModelFailover(chains, { ...hosted, cacheAffinity: true });
+		f.noteServed("s1", "ornith-1.0-9b", apfel, 1);
+		f.forgetSession("s1");
+		expect(f.affinitySize).toBe(0);
+		expect(f.resolve("ornith-1.0-9b", "text", "s1")).toEqual(lm);
+		f.forgetSession("never-seen"); // no throw
+	});
+
+	test("an entry whose backend left the chain is dropped, not used", () => {
+		const f = new ModelFailover(chains, { ...hosted, cacheAffinity: true });
+		const gone = { model: "retired-model", provider: "lmstudio" };
+		f.noteServed("s1", "ornith-1.0-9b", gone, 1);
+		expect(f.resolve("ornith-1.0-9b", "text", "s1")).toEqual(lm);
+		expect(f.affinitySize).toBe(0);
+		expect(f.getEvents()).toEqual([]);
+	});
+
+	test("flag off behaves exactly like today", () => {
+		const off = new ModelFailover(chains, hosted);
+		const base = new ModelFailover(chains, hosted);
+		off.noteServed("s1", "ornith-1.0-9b", apfel, 9000);
+		expect(off.resolve("ornith-1.0-9b", "text", "s1")).toEqual(base.resolve("ornith-1.0-9b"));
+		off.markDown(lm.model, lm.provider);
+		base.markDown(lm.model, lm.provider);
+		expect(off.resolve("ornith-1.0-9b", "text", "s1")).toEqual(base.resolve("ornith-1.0-9b"));
+		expect(off.graceRetry("s1", apfel, 0)).toBe(false);
+		const strip = (e: { ts: number }[]) => e.map(({ ts, ...r }) => r);
+		expect(strip(off.getEvents())).toEqual(strip(base.getEvents()));
+		expect(off.getEvents().every((e) => e.coldPrefillTokens === undefined)).toBe(true);
 	});
 });
