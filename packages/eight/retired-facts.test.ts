@@ -245,8 +245,8 @@ describe("turn-end nudge (#3811 step 2)", () => {
 
 	test("both the text-tool and the native path send agent.turnEndNudge()", () => {
 		const src = fs.readFileSync(path.join(import.meta.dir, "agent.ts"), "utf-8");
-		expect(src).toContain("finalCheck: () => this.turnEndNudge()");
-		expect(src).toContain("result?.text ? this.turnEndNudge() : null");
+		expect(src).toContain("finalCheck: (reply) => this.turnEndNudge(reply)");
+		expect(src).toContain("result?.text ? this.turnEndNudge(result.text) : null");
 		expect(src.match(/verifyNudgeFor\(this\.turnToolLedger\)/g)?.length).toBe(1);
 	});
 });
