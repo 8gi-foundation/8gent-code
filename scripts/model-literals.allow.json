@@ -375,7 +375,6 @@
 		},
 		"packages/providers/index.ts": {
 			":free": 3,
-			"MiniMax-M2.7": 2,
 			"Qwen/Qwen2-72B-Instruct": 1,
 			"accounts/fireworks/models/llama-v3p1-70b-instruct": 2,
 			"anthropic/claude-3-opus": 1,
