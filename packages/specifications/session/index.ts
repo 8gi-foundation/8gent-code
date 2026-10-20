@@ -430,6 +430,22 @@ export interface SessionEndEntry extends BaseEntry {
 // Discriminated Union — all entry types
 // ============================================
 
+export interface FrictionEntry extends BaseEntry {
+	type: "friction";
+	/** Counts only, no message content (#4511). Mirrors packages/eight/friction.ts. */
+	prompts: number;
+	toolCalls: number;
+	toolErrors: number;
+	retries: number;
+	permissionPrompts: number;
+	permissionDenials: number;
+	honestyNudges: number;
+	testClaimNudges: number;
+	corrections: number;
+	turnSecondsP50: number;
+	turnSecondsMax: number;
+}
+
 export type SessionEntry =
 	// Both v1 and v2
 	| SessionStartEntry
@@ -439,6 +455,7 @@ export type SessionEntry =
 	| HookEntry
 	| ErrorEntry
 	| SessionEndEntry
+	| FrictionEntry
 	// v2 only
 	| AssistantContentEntry
 	| StepStartEntry

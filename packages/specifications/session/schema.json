@@ -317,6 +317,7 @@
 						"step_end",
 						"hook",
 						"error",
+						"friction",
 						"session_end"
 					]
 				},

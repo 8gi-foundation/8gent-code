@@ -6,7 +6,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmRetry } from "../../tests/rm-retry";
@@ -169,3 +169,38 @@ for (const [label, textTools, m] of [
 		}, 60_000);
 	});
 }
+
+describe("friction record (#4511), text-tool path", () => {
+	beforeAll(() => {
+		process.env.EIGHT_TEXT_TOOLS = "1";
+		process.env.OLLAMA_HOST = `http://127.0.0.1:${server.port}`;
+		mode = "text";
+	});
+	afterAll(() => {
+		Reflect.deleteProperty(process.env, "EIGHT_TEXT_TOOLS");
+		Reflect.deleteProperty(process.env, "OLLAMA_HOST");
+		bodies = [];
+	});
+
+	test("cleanup writes one friction line, before session_end, with the real counts", async () => {
+		const agent = build();
+		await agent.chat(PROMPT);
+		await agent.chat("no, add a second line to out.txt");
+		const before = agent.getFriction();
+		expect(before.prompts).toBe(2);
+		await agent.cleanup();
+		const dir = join(home, ".8gent", "sessions");
+		const mine = readdirSync(dir)
+			.filter((f) => f.endsWith(".jsonl"))
+			.map((f) => readFileSync(join(dir, f), "utf8").trim().split("\n"))
+			.filter((ls) => ls.some((l) => l.includes('"type":"friction"')));
+		expect(mine).toHaveLength(1);
+		const lines = mine[0].map((l) => JSON.parse(l) as Record<string, unknown>);
+		const friction = lines.filter((l) => l.type === "friction");
+		expect(friction).toHaveLength(1);
+		expect(friction[0]).toMatchObject({ prompts: 2, toolCalls: 1, toolErrors: 0, corrections: 1 });
+		expect(lines[lines.length - 1].type).toBe("session_end");
+		expect(lines[lines.length - 2].type).toBe("friction");
+		expect(JSON.stringify(friction[0])).not.toContain("second line");
+	}, 60_000);
+});

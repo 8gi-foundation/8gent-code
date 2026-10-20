@@ -19,6 +19,8 @@
  * just register their handler at boot.
  */
 
+import { noteApproval } from "../eight/friction";
+
 /** "unfit": a `full` request did not fit on screen and was not shown; yes/no callers read it as no. */
 export type TuiApprovalDecision = "approve" | "deny" | "edit" | "skip" | "unfit";
 
@@ -30,9 +32,7 @@ export interface TuiApprovalRequest {
 	full?: boolean;
 }
 
-export type TuiApprovalHandler = (
-	request: TuiApprovalRequest,
-) => Promise<TuiApprovalDecision>;
+export type TuiApprovalHandler = (request: TuiApprovalRequest) => Promise<TuiApprovalDecision>;
 
 let handler: TuiApprovalHandler | null = null;
 
@@ -50,15 +50,15 @@ export async function requestTuiDecision(
 ): Promise<TuiApprovalDecision | null> {
 	if (!handler) return null;
 	try {
-		return await handler(request);
+		const decision = await handler(request);
+		noteApproval(decision);
+		return decision;
 	} catch {
 		return null;
 	}
 }
 
-export async function requestTuiApproval(
-	request: TuiApprovalRequest,
-): Promise<boolean | null> {
+export async function requestTuiApproval(request: TuiApprovalRequest): Promise<boolean | null> {
 	const decision = await requestTuiDecision(request);
 	return decision === null ? null : decision === "approve";
 }
