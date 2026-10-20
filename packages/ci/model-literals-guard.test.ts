@@ -30,6 +30,31 @@ function violations(hits: Hit[], allow: Allow): string[] {
 	return out;
 }
 
+/** Allow-list entries (or surplus counts) that no longer match code. Delete or lower them. */
+function stale(hits: Hit[], allow: Allow): string[] {
+	const actual = new Map<string, number>();
+	for (const h of hits) {
+		const k = `${h.file}\0${h.literal}`;
+		actual.set(k, (actual.get(k) ?? 0) + 1);
+	}
+	const out: string[] = [];
+	for (const [file, lits] of Object.entries(allow)) {
+		for (const [lit, n] of Object.entries(lits)) {
+			const have = actual.get(`${file}\0${lit}`) ?? 0;
+			if (have === 0) {
+				out.push(
+					`Stale allow-list entry: "${lit}" no longer appears in ${file}. Delete that entry from scripts/model-literals.allow.json.`,
+				);
+			} else if (have < n) {
+				out.push(
+					`Stale allow-list count: "${lit}" in ${file} allows ${n} but only ${have} remain. Lower that entry to ${have} in scripts/model-literals.allow.json.`,
+				);
+			}
+		}
+	}
+	return out;
+}
+
 const allow: Allow = JSON.parse(
 	readFileSync(join(ROOT, "scripts/model-literals.allow.json"), "utf8"),
 ).entries;
@@ -38,6 +63,27 @@ describe("model literal guard", () => {
 	test("no model literal outside the allow-list", () => {
 		const v = violations(scan(ROOT), allow);
 		expect(v.join("\n")).toBe("");
+	});
+
+	test("no stale allow-list entries (the list can only shrink)", () => {
+		expect(stale(scan(ROOT), allow).join("\n")).toBe("");
+	});
+
+	test("a stale entry or surplus count fails with a delete message", () => {
+		const hits: Hit[] = [{ file: "a.ts", line: 1, literal: "qwen3:14b" }];
+		expect(stale(hits, { "a.ts": { "qwen3:14b": 1 } })).toHaveLength(0);
+		const gone = stale([], { "a.ts": { "qwen3:14b": 1 } });
+		expect(gone).toHaveLength(1);
+		expect(gone[0]).toContain("Delete that entry");
+		expect(stale(hits, { "a.ts": { "qwen3:14b": 2 } })).toHaveLength(1);
+	});
+
+	test("allow-list is keyed by file and literal, never line", () => {
+		const moved = (line: number): Hit[] => [{ file: "a.ts", line, literal: "qwen3:14b" }];
+		const a: Allow = { "a.ts": { "qwen3:14b": 1 } };
+		expect(violations(moved(3), a)).toHaveLength(0);
+		expect(violations(moved(300), a)).toHaveLength(0);
+		expect(stale(moved(300), a)).toHaveLength(0);
 	});
 
 	test("a new literal fails with the discover-live message", () => {
