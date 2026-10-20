@@ -69,3 +69,13 @@ LM Studio on `localhost:1234` is found too. Use `OLLAMA_BASE_URL` or `LM_STUDIO_
 Pick a model with `/model` (or Ctrl+L) and a provider with `/provider`. Save a default: `8gent preferences set model qwen3:14b`. Provider keys: `8gent keys`.
 
 Per-platform setup for every model option (Ollama, LM Studio, llama-server, OpenRouter, Apple on-device): [macOS](../install/macos.md), [Windows](../install/windows.md), [Linux](../install/linux.md). Every provider and setting: [providers](../install/providers.md).
+
+## If the TUI does not start
+
+Run `8gent doctor` first. Besides checking models and tools, it prints the last 30 lines of the boot trace under "Boot trace".
+
+The TUI writes one line per startup stage to `~/.8gent/logs/tui-boot.log` (on Windows, `%USERPROFILE%\.8gent\logs\tui-boot.log`). Each line has a timestamp, a millisecond offset from process start, the process id and the stage name, for example `intro-mount` or `first-prompt-render`. The first lines of a boot also record the platform, architecture, Bun version, the names and set/unset state of `TERM`, `WT_SESSION` and `TERM_PROGRAM`, whether stdin and stdout are a TTY, whether raw mode is supported, and the terminal size. It never records prompt text. The file is capped at 256 KB; when it grows past that, the oldest half is dropped.
+
+The last stage in the file is the last one the TUI reached. If the TUI does not get past its first moment, paste the output of `8gent doctor` (or the last 30 lines of `tui-boot.log`) into your report, along with the terminal you used (Windows Terminal, PowerShell, cmd or WSL).
+
+To turn the trace off, set `EIGHT_BOOT_TRACE=0`.
