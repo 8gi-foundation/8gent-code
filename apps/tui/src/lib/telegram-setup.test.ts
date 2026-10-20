@@ -51,6 +51,10 @@ const server = Bun.serve({
 process.env.EIGHT_TG_API_BASE = `http://127.0.0.1:${server.port}`;
 process.env.BUN_TEST = "1";
 
+const { refreshSecurityEnvForTests } = await import(
+	"../../../../packages/permissions/run-command-sandbox.js"
+);
+refreshSecurityEnvForTests();
 const { apiBase } = await import("../../../../packages/ai/post-message.js");
 const { runTelegramSetup, mergeSettings, redact, cleanLabel, ensureEnvFile } = await import(
 	"./telegram-setup.js"
@@ -278,6 +282,51 @@ describe("hardening round 2 (F8 and LOW)", () => {
 
 	test("outside test mode the override is ignored even from the real environment", () => {
 		expect(apiBase({}).base).toBe("https://api.telegram.org");
-		expect(apiBase({ NODE_ENV: "test" }).base).toBe(process.env.EIGHT_TG_API_BASE);
+		expect(apiBase({ NODE_ENV: "test", EIGHT_TG_API_BASE: "http://127.0.0.1:9" }).base).toBe(
+			"http://127.0.0.1:9",
+		);
+		expect(apiBase({ EIGHT_TG_API_BASE: "http://127.0.0.1:9" }).base).toBe(
+			"https://api.telegram.org",
+		);
+	});
+});
+
+describe("shell NODE_ENV=test with a .env-declared base (8SO hardening note)", () => {
+	test("a base declared only in the cwd .env is dropped even when the shell exports NODE_ENV=test", () => {
+		const cwd = mkdtempSync(join(root, "shellenv-"));
+		writeFileSync(join(cwd, ".env"), "EIGHT_TG_API_BASE=http://127.0.0.1:9\n");
+		const mod = JSON.stringify(join(import.meta.dir, "../../../../packages/ai/post-message.ts"));
+		const script = `import { apiBase } from ${mod}; process.stdout.write(JSON.stringify({ base: apiBase(), live: process.env.EIGHT_TG_API_BASE }));`;
+		const run = (env: Record<string, string>) =>
+			JSON.parse(
+				spawnSync(process.execPath, ["-e", script], {
+					cwd,
+					env: {
+						PATH: process.env.PATH ?? "",
+						HOME: home,
+						TMPDIR: process.env.TMPDIR ?? "/tmp",
+						...env,
+					} as unknown as NodeJS.ProcessEnv,
+					encoding: "utf8",
+				}).stdout,
+			);
+		const r = run({ NODE_ENV: "test" });
+		expect(r.live).toBe("http://127.0.0.1:9"); // the .env did reach process.env
+		expect(r.base).toEqual({ base: "https://api.telegram.org" });
+		// Control: exported by the shell itself (no .env declaring it), test mode still honours it.
+		const clean = mkdtempSync(join(root, "shellenv2-"));
+		const ok = JSON.parse(
+			spawnSync(process.execPath, ["-e", script], {
+				cwd: clean,
+				env: {
+					PATH: process.env.PATH ?? "",
+					HOME: home,
+					NODE_ENV: "test",
+					EIGHT_TG_API_BASE: "http://127.0.0.1:9",
+				} as unknown as NodeJS.ProcessEnv,
+				encoding: "utf8",
+			}).stdout,
+		);
+		expect(ok.base).toEqual({ base: "http://127.0.0.1:9" });
 	});
 });

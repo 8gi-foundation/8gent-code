@@ -119,6 +119,8 @@ export const SECURITY_ENV_KEYS = [
 	"USERPROFILE",
 	"NODE_ENV",
 	"BUN_ENV",
+	// Where post_message and /telegram setup send the bot key (#4594): a .env must not move it.
+	"EIGHT_TG_API_BASE",
 ] as const;
 type SecurityKey = (typeof SECURITY_ENV_KEYS)[number];
 

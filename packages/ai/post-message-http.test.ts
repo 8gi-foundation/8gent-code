@@ -83,6 +83,8 @@ process.env.EIGHT_DATA_DIR = data;
 process.env.EIGHT_TG_BIN_DIR = join(root, "no-helpers"); // no tg-group: direct send only
 process.env.EIGHT_TG_API_BASE = `http://127.0.0.1:${stub.port}`;
 
+const { refreshSecurityEnvForTests } = await import("../permissions/run-command-sandbox");
+refreshSecurityEnvForTests(); // the base is read from the pre-.env snapshot (#4594)
 const { _snapshotAllowedChats, checkApiBase } = await import("./post-message");
 const { _resetTuiApprovalChannel, registerTuiApprovalHandler } = await import(
 	"../permissions/tui-approval-channel"
@@ -355,6 +357,7 @@ describe("post_message direct send (#3838)", () => {
 		const saveEnv = { NODE_ENV: process.env.NODE_ENV, BUN_TEST: process.env.BUN_TEST };
 		try {
 			process.env.EIGHT_TG_API_BASE = `http://u:p@127.0.0.1:${stub.port}`;
+			refreshSecurityEnvForTests();
 			const a = await new ToolExecutor(work, "http-base-a").execute("post_message", {
 				chat: CHAT,
 				text: "hi",
@@ -366,6 +369,7 @@ describe("post_message direct send (#3838)", () => {
 			expect(hits).toEqual([]);
 		} finally {
 			process.env.EIGHT_TG_API_BASE = saveBase;
+			refreshSecurityEnvForTests();
 			for (const [k, v] of Object.entries(saveEnv)) {
 				if (v === undefined) Reflect.deleteProperty(process.env, k);
 				else process.env[k] = v;

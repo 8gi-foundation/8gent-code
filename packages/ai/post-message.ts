@@ -287,20 +287,15 @@ export function checkApiBase(raw: string, testMode: boolean): { base?: string; e
 }
 
 /**
- * Test mode, from the security snapshot taken before any .env loads: a NODE_ENV a
- * cloned repo's .env declares does not count, so a hostile .env cannot turn it on.
- */
-const testMode = (values: SecurityEnv["values"] = securityEnvSnapshot().values) =>
-	isTestMode(values);
-
-/**
  * The Bot API base. EIGHT_TG_API_BASE (local stubs) is honoured only in test mode:
  * the TUI loads the cwd .env into process.env, so outside tests a cloned repo could
  * otherwise send the bot key to its own host.
  */
 export const apiBase = (values?: SecurityEnv["values"]): { base?: string; error?: string } => {
-	const raw = process.env.EIGHT_TG_API_BASE;
-	return raw && testMode(values) ? checkApiBase(raw, true) : { base: TG_API };
+	// From the pre-.env snapshot: a value any .env file declares is dropped there.
+	const v = values ?? securityEnvSnapshot().values;
+	const raw = v.EIGHT_TG_API_BASE;
+	return raw && isTestMode(v) ? checkApiBase(raw, true) : { base: TG_API };
 };
 
 function directSend(cfg: DirectConfig): DirectSend {
