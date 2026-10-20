@@ -8,7 +8,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { KNOWN_CHANNELS } from "./agent-pool";
 import { bus } from "./events";
+import { setClassifyObserver } from "./input-gate";
 
 let dataDir: string;
 const savedData = process.env.EIGHT_DATA_DIR;
@@ -26,6 +28,8 @@ afterAll(() => {
 	rmSync(dataDir, { recursive: true, force: true });
 });
 
+const order: string[] = [];
+
 function poolWithFake(id: string, channel: string) {
 	const pool = new AgentPool({ runtime: "ollama", model: "fake" });
 	pool.createSession(id, channel);
@@ -36,6 +40,7 @@ function poolWithFake(id: string, channel: string) {
 		getWorkingDirectory: () => "/w",
 		async chat(text: string): Promise<string> {
 			reached.push(text);
+			order.push("model");
 			return `model:${text}`;
 		},
 	};
@@ -80,7 +85,32 @@ describe("AgentPool.chat gate", () => {
 	test("source: exactly one model-call site in the pool, after the gate", () => {
 		const src = readFileSync(join(import.meta.dir, "agent-pool.ts"), "utf8");
 		expect(src.match(/\.agent\.chat\(/g)?.length).toBe(1);
-		expect(src.indexOf("gateInput(")).toBeGreaterThan(0);
+		expect(src).not.toContain("isSlashLine");
+		expect(src.indexOf("classifyInput(")).toBeGreaterThan(0);
+		expect(src.indexOf("classifyInput(")).toBeLessThan(src.indexOf("gateInput("));
 		expect(src.indexOf("gateInput(")).toBeLessThan(src.indexOf(".agent.chat("));
+	});
+
+	test("plain text passes through classify on every channel and still reaches the model", async () => {
+		const seen: string[] = [];
+		setClassifyObserver((_t, ctx, r) => {
+			if (r.kind === "pass") {
+				seen.push(ctx.channel);
+				order.push(`classify:${ctx.channel}`);
+			}
+		});
+		try {
+			for (const channel of KNOWN_CHANNELS) {
+				order.length = 0;
+				const { pool, reached } = poolWithFake(`c-${channel}`, channel);
+				expect(await pool.chat(`c-${channel}`, "plain words")).toBe("model:plain words");
+				expect(reached).toEqual(["plain words"]);
+				expect(seen).toContain(channel);
+				expect(order).toEqual([`classify:${channel}`, "model"]);
+				pool.destroySession(`c-${channel}`);
+			}
+		} finally {
+			setClassifyObserver();
+		}
 	});
 });

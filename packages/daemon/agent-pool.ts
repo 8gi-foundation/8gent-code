@@ -21,7 +21,7 @@ import {
 } from "./classroom";
 import { dataDirPath, getDataDir } from "./data-dir";
 import { bus } from "./events";
-import { gateInput, isSlashLine } from "./input-gate";
+import { classifyInput, gateInput } from "./input-gate";
 import { type QueueRequest, type QueueStatus, type Receipt, WorkQueue } from "./queue";
 import type { SessionJournal } from "./session-journal";
 
@@ -505,7 +505,7 @@ export class AgentPool {
 		// gateway, the dispatch queue and daemon-built prompts alike, passes the
 		// deterministic gate. A daemon-built prompt that starts with a known command
 		// name is a bug, so it is logged, not exempted.
-		if (isSlashLine(text)) {
+		if (classifyInput(text, { sessionId, channel: entry.channel }).kind === "slash") {
 			const gated = await gateInput(text, {
 				sessionId,
 				channel: entry.channel,

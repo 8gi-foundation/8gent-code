@@ -8,8 +8,10 @@ import { join } from "node:path";
 import { type AgentPool, KNOWN_CHANNELS } from "./agent-pool";
 import { bus } from "./events";
 import { startGateway } from "./gateway";
+import { setClassifyObserver } from "./input-gate";
 
 const chatted: string[] = [];
+const order: string[] = [];
 
 class StubPool {
 	live = new Map<string, string>();
@@ -47,6 +49,7 @@ class StubPool {
 	}
 	async chat(sessionId: string, text: string): Promise<string> {
 		chatted.push(text);
+		order.push("model");
 		bus.emit("agent:stream", { sessionId, chunk: "model reply", final: true });
 		return "model reply";
 	}
@@ -149,6 +152,34 @@ describe("gateway input gate", () => {
 		const src = readFileSync(join(import.meta.dir, "gateway.ts"), "utf8");
 		expect(src.match(/\.chat\(sid, msg\.text/g)?.length).toBe(1);
 		expect(src.indexOf("gateInput(")).toBeGreaterThan(0);
-		expect(src.indexOf("isSlashLine(msg.text)")).toBeGreaterThan(0);
+		expect(src).not.toContain("isSlashLine");
+		expect(src.indexOf("classifyInput(")).toBeGreaterThan(0);
+		expect(src.indexOf("classifyInput(")).toBeLessThan(src.indexOf("gateInput("));
+	});
+
+	it("plain text passes through classify on every channel, then reaches the model", async () => {
+		const seen: string[] = [];
+		setClassifyObserver((_t, ctx, r) => {
+			if (r.kind === "pass") {
+				seen.push(ctx.channel);
+				order.push(`classify:${ctx.channel}`);
+			}
+		});
+		try {
+			for (const channel of KNOWN_CHANNELS) {
+				chatted.length = 0;
+				order.length = 0;
+				const s = await session(channel);
+				s.ws.send(JSON.stringify({ type: "prompt", text: "just words" }));
+				await s.next(streamed);
+				expect(chatted).toEqual(["just words"]);
+				expect(seen).toContain(channel);
+				// The gate step ran for this line, and before the model turn did.
+				expect(order).toEqual([`classify:${channel}`, "model"]);
+				s.ws.close();
+			}
+		} finally {
+			setClassifyObserver();
+		}
 	});
 });

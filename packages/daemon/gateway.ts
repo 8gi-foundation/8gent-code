@@ -32,7 +32,7 @@ import type {
 import { type EventName, bus } from "./events";
 import { type GoalManager, type GoalRpcOutbound, handleGoalRpc } from "./goal-rpc";
 import { handleStageHttp } from "./huddle-stage";
-import { gateInput, isSlashLine } from "./input-gate";
+import { classifyInput, gateInput } from "./input-gate";
 import {
 	handleLiveHttp,
 	installLiveAnatomy,
@@ -555,8 +555,8 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 					});
 			};
 			// Every channel's text passes the deterministic gate before the model (#4530).
-			// Only a slash line can be answered there; other text goes straight on, synchronously.
-			if (!isSlashLine(msg.text)) {
+			// classifyInput runs on every line, synchronously; only a slash line takes the async handler.
+			if (classifyInput(msg.text, { sessionId: sid, channel: state.channel }).kind === "pass") {
 				runModelTurn();
 				break;
 			}

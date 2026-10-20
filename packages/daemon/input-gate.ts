@@ -23,11 +23,34 @@ export async function gateInput(
 	return runSlash(text, ctx, opts);
 }
 
+export interface ClassifyContext {
+	sessionId: string;
+	channel: string;
+}
+
+export type InputKind = { kind: "pass" } | { kind: "slash" };
+
+type Observer = (text: unknown, ctx: ClassifyContext, result: InputKind) => void;
+let observer: Observer | undefined;
+
+/** Tests watch every classification; call with nothing to stop. */
+export function setClassifyObserver(fn?: Observer): void {
+	observer = fn;
+}
+
 /**
- * True when `text` is a line the gate could answer. Anything else is never handled,
- * so a caller may skip the async gate and keep its synchronous prefix (a pool turn
- * marks itself busy before its first await; the work queue and journal depend on it).
+ * The synchronous step EVERY line passes, at every call site, unconditionally
+ * (gateway.ts in front of pool.chat, AgentPool.chat in front of the session's
+ * model call). It never awaits, so a caller's synchronous prefix (the pool marks
+ * a turn busy and journals it before its first await) stays intact. Any future
+ * synchronous deterministic check hangs here; only `kind: "slash"` takes the
+ * async handler (gateInput).
  */
-export function isSlashLine(text: unknown): boolean {
-	return typeof text === "string" && text.trimStart().startsWith("/");
+export function classifyInput(text: unknown, ctx: ClassifyContext): InputKind {
+	const result: InputKind =
+		typeof text === "string" && text.trimStart().startsWith("/")
+			? { kind: "slash" }
+			: { kind: "pass" };
+	observer?.(text, ctx, result);
+	return result;
 }
