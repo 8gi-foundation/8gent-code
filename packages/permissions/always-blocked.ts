@@ -594,10 +594,8 @@ function scanQuoteBlind(input: string, out: string[][]): void {
 		// Split at every `<<<` (spaced or glued, as in `bash<<<'x'`) and read every suffix from there.
 		// A here-string glued after a closing quote (`"x"<<<y`) leaves its text and the `<<<` in one
 		// token, so the text before the `<<<` is cut off as a word of its own: zsh joins both bodies.
-		const cut = tokens.flatMap((t) => {
-			const g = t.indexOf("<<<");
-			return g > 0 ? [t.slice(0, g), t.slice(g)] : [t];
-		});
+		// Every `<<<` starts a new piece, so a wipe riding a later marker is read from that marker too.
+		const cut = tokens.flatMap((t) => t.split(/(?=<<<)/).filter(Boolean));
 		for (let i = 0; i < cut.length; i++) {
 			const at = cut[i].indexOf("<<<");
 			if (at < 0) continue;

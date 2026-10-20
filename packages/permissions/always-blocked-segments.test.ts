@@ -217,6 +217,9 @@ const C_FLAG_FORMS = [
 	(w: string) => `bash <<< "${w}"<<<x`,
 	(w: string) => `bash <<< '${w}'<<<x`,
 	(w: string) => `zsh<<<"${w}"<<<x`,
+	// #4501 round two: the wipe rides a later marker; bash 3.2 keeps the last here-string
+	(w: string) => `bash <<<'a'<<<'${w}'`,
+	(w: string) => `bash <<<'a'<<<'b'<<<'${w}'`,
 ];
 const C_FLAG_WIPES = [WIPE, `${RMRF} ~`];
 const C_FLAG_LINES = C_FLAG_WIPES.flatMap((w) =>
