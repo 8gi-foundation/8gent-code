@@ -38,7 +38,8 @@ beforeAll(() => {
 afterAll(() => {
 	ollama.stop(true);
 	minimax.stop(true);
-	if (savedEnv === undefined) process.env.OLLAMA_BASE_URL = undefined as unknown as string;
+	// Assigning undefined would store the string "undefined" and poison later files.
+	if (savedEnv === undefined) Reflect.deleteProperty(process.env, "OLLAMA_BASE_URL");
 	else process.env.OLLAMA_BASE_URL = savedEnv;
 });
 
