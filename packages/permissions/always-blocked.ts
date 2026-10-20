@@ -96,7 +96,7 @@ function isRecursive(flags: string[]): boolean {
 }
 
 function isRootTarget(t: string): boolean {
-	return t === "/" || t === "/*";
+	return t === "/" || t === "/*" || globIsRoot(t);
 }
 
 /** The person's home directory, as the shell may spell it: literal path and its realpath. */
@@ -252,6 +252,161 @@ function expandFirstBrace(s: string): string[] | null {
 	return null;
 }
 
+/** What a POSIX class inside a bracket stands for in a RegExp class. `punct` and `print` hold `/`. */
+const POSIX_CLASS: Record<string, string> = {
+	alpha: "A-Za-z",
+	digit: "0-9",
+	alnum: "A-Za-z0-9",
+	upper: "A-Z",
+	lower: "a-z",
+	space: "\\s",
+	blank: " \\t",
+	xdigit: "0-9A-Fa-f",
+	punct: "\\x21-\\x2f\\x3a-\\x40\\x5b-\\x60\\x7b-\\x7e",
+	print: "\\x20-\\x7e",
+	graph: "\\x21-\\x7e",
+	cntrl: "\\x00-\\x1f\\x7f",
+};
+
+interface Bracket {
+	/** Index just past the closing `]`. */
+	end: number;
+	negated: boolean;
+	/** The characters it lists, ranges and POSIX classes spelled out as a RegExp class body. */
+	body: string;
+	/** Explicit single characters, or null when a range is too wide to list or a POSIX class is present. */
+	members: string[] | null;
+	/** A POSIX class is present: matched as a pattern, never listed. */
+	hasClass: boolean;
+	/** Lists only digits, which can never spell a name, a flag or a slash. */
+	digitsOnly: boolean;
+}
+
+/** The bracket expression starting at s[i] === "[", or null when it never closes (then `[` is literal). */
+function parseBracket(s: string, i: number): Bracket | null {
+	let j = i + 1;
+	const negated = s[j] === "!" || s[j] === "^";
+	if (negated) j++;
+	let body = "";
+	let members: string[] | null = [];
+	let hasClass = false;
+	let digitsOnly = true;
+	const esc = (c: string) => c.replace(/[\\\]^\-[]/g, "\\$&");
+	for (let first = true; ; first = false) {
+		const c = s[j];
+		if (c === undefined) return null;
+		if (c === "]" && !first) break;
+		if (c === "[" && ":.=".includes(s[j + 1] ?? "") && s.indexOf(`${s[j + 1]}]`, j + 2) > 0) {
+			const close = s.indexOf(`${s[j + 1]}]`, j + 2);
+			body += s[j + 1] === ":" ? (POSIX_CLASS[s.slice(j + 2, close)] ?? "\\x20-\\x7e") : "";
+			members = null;
+			hasClass = true;
+			digitsOnly = false;
+			j = close + 2;
+			continue;
+		}
+		let lo = c;
+		if (c === "\\" && s[j + 1] !== undefined) lo = s[++j];
+		let hi = lo;
+		if (s[j + 1] === "-" && s[j + 2] !== undefined && s[j + 2] !== "]") {
+			hi = s[j + 2];
+			j += 2;
+		}
+		j++;
+		const a = lo.codePointAt(0) as number;
+		const b = hi.codePointAt(0) as number;
+		if (a > b) continue;
+		body += `${esc(lo)}${a === b ? "" : `-${esc(hi)}`}`;
+		if (!(a >= 48 && b <= 57)) digitsOnly = false;
+		if (members) {
+			if (b - a >= MAX_WORD_BRACES) members = null;
+			else for (let k = a; k <= b; k++) members.push(String.fromCodePoint(k));
+		}
+	}
+	return { end: j + 1, negated, body, members, hasClass, digitsOnly };
+}
+
+/**
+ * Every spelling of a word with its positive bracket expressions replaced by each listed member
+ * (`/[U]sers` -> `/Users`, `[r]m` -> `r`+`m`, `-[r]f` -> `-rf`, `[/]` -> `/`). Negated brackets, POSIX
+ * classes and digit-only brackets stay literal here: the path checks match them as patterns instead.
+ * Returns null when a range is too wide or the result would pass `cap`: the word takes the overflow refusal.
+ */
+function expandBrackets(s: string, cap = MAX_WORD_BRACES): string[] | null {
+	for (let i = 0; i < s.length; i++) {
+		if (s[i] !== "[") continue;
+		const b = parseBracket(s, i);
+		if (!b) continue;
+		if (b.negated || b.digitsOnly || b.hasClass) {
+			i = b.end - 1;
+			continue;
+		}
+		if (b.members === null) return null; // a range too wide to list
+		const rest = expandBrackets(s.slice(b.end), cap);
+		if (rest === null || rest.length * b.members.length > cap) return null;
+		const head = s.slice(0, i);
+		return b.members.flatMap((m) => rest.map((r) => head + m + r));
+	}
+	return [s];
+}
+
+/** Brace expansion and then bracket expansion of one word; null when either is too wide. */
+function expandWord(t: string, cap = MAX_WORD_BRACES): string[] | null {
+	const braced = t.includes("{") ? expandBraces(t, cap) : [t];
+	if (braced === null || !t.includes("[")) return braced;
+	const out: string[] = [];
+	for (const b of braced) {
+		const r = expandBrackets(b, cap);
+		if (r === null) return null;
+		out.push(...r);
+		if (out.length > cap) return null;
+	}
+	return out;
+}
+
+/**
+ * A shell glob as a RegExp over a whole path: `*` and `?` stay inside one component, a bracket matches
+ * what it lists (a negated one never matches `/`; a positive one matches `/` if it lists it). Null when
+ * the word has no glob character. Used to ask whether a pattern could name the home directory or the root.
+ */
+function globRegExp(pattern: string): RegExp | null {
+	let re = "";
+	let wild = false;
+	for (let i = 0; i < pattern.length; i++) {
+		const c = pattern[i];
+		if (c === "\\" && i + 1 < pattern.length) {
+			re += pattern[++i].replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&");
+		} else if (c === "*" || c === "?") {
+			wild = true;
+			re += c === "*" ? "[^/]*" : "[^/]";
+		} else if (c === "[") {
+			const b = parseBracket(pattern, i);
+			if (!b) {
+				re += "\\[";
+				continue;
+			}
+			wild = true;
+			re += b.negated ? `[^/${b.body}]` : `[${b.body}]`;
+			i = b.end - 1;
+		} else re += c.replace(/[.+^${}()|\]\\/-]/g, "\\$&");
+	}
+	return wild ? new RegExp(`^${re}$`, FOLD_CASE ? "i" : "") : null;
+}
+
+/** True when the glob `pattern` can match the home directory, the directory above it, or the root. */
+function globHitsHome(pattern: string): boolean {
+	const re = globRegExp(pattern.replace(/\/{2,}/g, "/"));
+	if (!re) return false;
+	return homePaths().some((h) => re.test(h) || re.test(path.posix.dirname(h)));
+}
+
+/** True when a bracket in `t` can match `/` and the whole word then names the root (`[/]`, `[+-0]`, `/[/]`). */
+function globIsRoot(t: string): boolean {
+	if (!t.includes("[")) return false;
+	const re = globRegExp(t);
+	return re !== null && ["/", "//", "///"].some((r) => re.test(r));
+}
+
 const GLOB_ATOM = "(?:[*?]|\\[[!^]?\\]?(?:\\[[:.=][^\\]]*[:.=]\\]|[^\\]])*\\])";
 
 /** Inner text of a balanced `(...)` starting at s[i] === "(", and the index after it; null if unbalanced. */
@@ -304,6 +459,8 @@ function isWildComponent(c: string): boolean {
 function isHomeTargetOne(t: string): boolean {
 	t = t.replace(/\/+$/, "");
 	if (isHomeAncestor(t)) return true;
+	// An absolute pattern that can match home or the directory above it (`/Users/me*`, `/U?ers/me`, `/[U]sers/me`).
+	if (t.startsWith("/") && /[*?[]/.test(t) && globHitsHome(t)) return true;
 	const rest = afterHome(t);
 	if (rest === null) return false;
 	const p = path.posix.normalize(HOME_TOKEN + rest).replace(/\/+$/, "");
@@ -342,6 +499,15 @@ function isSystemTarget(t: string): boolean {
 export function blockedReason(argv: string[]): string | null {
 	if (argv.length === 0) return null;
 	const name = path.basename(argv[0]).toLowerCase();
+	// A glob in command position (`r?`, `[!x]m`) may name a guarded command once the shell expands it.
+	if (/[*?[]/.test(name)) {
+		const re = globRegExp(name);
+		for (const g of GUARDED) {
+			if (!re?.test(g)) continue;
+			const r = blockedReason([g, ...argv.slice(1)]);
+			if (r) return r;
+		}
+	}
 	const { flags, operands } = splitArgs(argv.slice(1));
 	const targets = operands.map(normTarget);
 
@@ -409,11 +575,16 @@ function processSegment(
 	depth: number,
 ): void {
 	processSegmentOne(rawTokens, prevTokens, out, depth);
-	if (!rawTokens.some((t) => t.includes("{") && (t.includes(",") || t.includes("..")))) return;
+	if (
+		!rawTokens.some(
+			(t) => (t.includes("{") && (t.includes(",") || t.includes(".."))) || t.includes("["),
+		)
+	)
+		return;
 	const expanded: string[] = [];
 	let overflow = false;
 	for (const t of rawTokens) {
-		const alts = t.includes("{") ? expandBraces(t, MAX_WORD_BRACES) : [t];
+		const alts = expandWord(t, MAX_WORD_BRACES);
 		if (alts === null) overflow = true;
 		else expanded.push(...alts.filter((a) => a !== ""));
 	}
@@ -426,7 +597,7 @@ function processSegment(
 		const named = words.some(
 			(t) => GUARDED.has(path.basename(t).toLowerCase()) || OPAQUE_WRAPPERS.has(t),
 		);
-		const bracedCommand = (bare?.argv[0] ?? words[0] ?? "").includes("{");
+		const bracedCommand = /[{[]/.test(bare?.argv[0] ?? words[0] ?? "");
 		if (wrapped || named || bracedCommand) out.push(UNENUMERABLE);
 		return;
 	}

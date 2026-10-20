@@ -25,7 +25,7 @@ import { isolate } from "./permissions-grid-isolate";
 const RM = ["r", "m"].join("");
 const DEL = ["-de", "lete"].join("");
 const NONE = "none";
-const MIN_ROWS = 1472; // the shipped matrix: 282 spellings x 5 contexts + 62 benign
+const MIN_ROWS = 1606; // the shipped matrix: 307 spellings x 5 contexts + 71 benign
 const HOME = "/Users/gridhome"; // the home the policy sees; rows spell it literally
 const ROWS_FILE = join(import.meta.dir, "permissions-grid.rows.json");
 /** Over-skips on purpose: a shell word, then anywhere later a flag cluster with l or i. Such a shell reads profile files that can reset PATH. */
