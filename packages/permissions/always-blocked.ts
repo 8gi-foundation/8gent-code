@@ -195,6 +195,7 @@ function expandBraces(s: string, cap = MAX_BRACE_EXPANSIONS): string[] | null {
 		const next: string[] = [];
 		for (const str of out) {
 			const parts = expandFirstBrace(str);
+			if (parts === WIDE) return null;
 			if (parts) changed = true;
 			next.push(...(parts ?? [str]));
 			if (next.length > cap) return null;
@@ -207,19 +208,22 @@ function expandBraces(s: string, cap = MAX_BRACE_EXPANSIONS): string[] | null {
 
 /**
  * `{x..y}` with one character at each end (zsh expands `{/..0}` to `/` and `0`; bash 3.2 leaves it
- * literal, and refusing the literal is the safe side). Spans over 64 stay literal. Multi-digit
+ * literal, and refusing the literal is the safe side). A span of 64 or more is too wide to enumerate: the word takes the overflow refusal. Multi-digit
  * number sequences are left alone: they cannot spell a wipe target.
  */
-function charSequence(body: string): string[] | null {
+function charSequence(body: string): string[] | "wide" | null {
 	const m = /^([^.])\.\.([^.])$/u.exec(body);
 	if (!m) return null;
 	const a = m[1].codePointAt(0) as number;
 	const b = m[2].codePointAt(0) as number;
-	if (Math.abs(a - b) >= MAX_WORD_BRACES) return null;
+	if (Math.abs(a - b) >= MAX_WORD_BRACES) return "wide";
 	const out: string[] = [];
 	for (let c = a; a <= b ? c <= b : c >= b; c += a <= b ? 1 : -1) out.push(String.fromCodePoint(c));
 	return out;
 }
+
+/** expandFirstBrace result for a character range too wide to enumerate: the word takes the overflow refusal. */
+const WIDE: string[] = [];
 
 function expandFirstBrace(s: string): string[] | null {
 	for (let i = 0; i < s.length; i++) {
@@ -232,6 +236,7 @@ function expandFirstBrace(s: string): string[] | null {
 				if (cuts.length === 0) {
 					const seq = charSequence(s.slice(i + 1, j));
 					if (!seq) break;
+					if (seq === "wide") return WIDE;
 					return seq.map((c) => s.slice(0, i) + c + s.slice(j + 1));
 				}
 				const head = s.slice(0, i);

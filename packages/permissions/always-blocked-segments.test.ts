@@ -447,6 +447,8 @@ const OVERFLOW_WRAPPED = [
 	"",
 ].flatMap((w) => [64, 65, 66].map((n) => `${w} ${RMW} -rf ${wideWord(n)}`.trim()));
 const BRACE_IFS_BLOCKED = [
+	`${RMW} -rf {%..~}`,
+	`sudo ${RMW} -rf {%..~}`,
 	`{,${RMW}} -rf /`,
 	`{${RMW},} -rf /`,
 	`${RMW} -rf /{,}`,
@@ -493,6 +495,8 @@ const BRACE_IFS_BLOCKED = [
 	`${RMW} -rf ${"{/,/}".repeat(7)}`,
 ];
 const BRACE_IFS_ORDINARY = [
+	"echo {%..~}",
+	"touch {%..~}",
 	"echo {a,b}",
 	"ls {src,test}",
 	"touch f{a,b,c}",
