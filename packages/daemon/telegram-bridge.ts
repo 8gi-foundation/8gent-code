@@ -2126,8 +2126,7 @@ class TelegramDaemonBridge {
 		if (
 			sender &&
 			senderTier(sender, gate) === "full" &&
-			!notOurs &&
-			!(slashCmd && bridgeCmds.includes(slashCmd)) &&
+			(plain || (!notOurs && !(slashCmd && bridgeCmds.includes(slashCmd)))) &&
 			classifyInput(cleanText(text), { sessionId: `tg-${chatId}`, channel: "telegram" }).kind ===
 				"slash"
 		) {
@@ -2353,6 +2352,22 @@ class TelegramDaemonBridge {
 				].join("\n"),
 			);
 			return;
+		}
+
+		// A slash line the bridge's own handlers did not consume (a /delegate the router declined)
+		// is classified here, on the raw user line, before any memory prefix can hide the slash.
+		if (classifyInput(text, { sessionId: `tg-${chatId}`, channel: "telegram" }).kind === "slash") {
+			const gated = await gateInput(
+				text,
+				{ sessionId: `tg-${chatId}`, channel: "telegram" },
+				{ classifyOnly: plain },
+			);
+			if (gated.handled) {
+				await tgSend(this.config.telegramToken, this.replyChat(), gated.text ?? "", "").catch(
+					() => {},
+				);
+				return;
+			}
 		}
 
 		// Operator memory: recall first (so a turn never recalls itself), then remember. Recalled

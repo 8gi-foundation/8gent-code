@@ -3,6 +3,7 @@
  * A slash line that is not a bridge command never reaches adapter.handleUserMessage.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createFlowModeController } from "../flow/flow-mode";
 import { setDjSpawn, setDjTools } from "../music/dj";
 import { TelegramDaemonBridge } from "./telegram-bridge";
 
@@ -31,7 +32,7 @@ afterEach(() => {
 	for (const k of ["log", "warn", "error", "info"] as const) console[k] = saved[k];
 });
 
-function make(transcript = "") {
+function make(transcript = "", judgeModel: ((p: string) => Promise<string>) | null = null) {
 	const toModel: string[] = [];
 	const b = new TelegramDaemonBridge({
 		telegramToken: "tok",
@@ -41,7 +42,8 @@ function make(transcript = "") {
 		authorizedUserIds: [String(JAMES)],
 		operatorUserIds: [String(JAMES)],
 		env: {},
-		judgeModel: null,
+		judgeModel,
+		flowController: createFlowModeController(),
 	}) as any;
 	b.multiStepEnabled = true;
 	b.adapter = { handleUserMessage: async (t: string) => void toModel.push(t) };
@@ -110,5 +112,36 @@ describe("spoken input", () => {
 		const t = make("what is on my list");
 		await t.b.handleVoiceMessage(voiceMsg, "f");
 		expect(t.toModel).toEqual(["what is on my list"]);
+	});
+});
+
+describe("hardening before merge", () => {
+	test("a spoken registry command never reaches the judge model and never the main model", async () => {
+		let judged = 0;
+		const t = make("/session", async () => {
+			judged++;
+			return "{}";
+		});
+		await t.b.handleVoiceMessage(voiceMsg, "f");
+		await new Promise((r) => setTimeout(r, 20));
+		expect(judged).toBe(0);
+		expect(t.toModel).toEqual([]);
+	});
+	test("a group transcript for a bridge command name is data: refused, never routed", async () => {
+		const t = make();
+		await t.b.handleTelegramMessage("/delegate x", JAMES, sender, {
+			plain: true,
+			groupVoice: true,
+		});
+		expect(t.toModel).toEqual([]);
+	});
+	test("a /delegate the router declines never reaches the model, even with a memory prefix", async () => {
+		const t = make();
+		Object.defineProperty(t.b, "memory", {
+			value: { recall: () => "PRIOR NOTES", record: () => {} },
+		});
+		await t.b.handleTelegramMessage("/delegate build it", JAMES, sender);
+		expect(t.toModel).toEqual([]);
+		expect(sent.some((s) => s.startsWith("Unknown command /delegate"))).toBe(true);
 	});
 });
