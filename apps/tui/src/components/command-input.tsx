@@ -27,6 +27,7 @@ import {
 	getSlashRegistry,
 	resolveSlashInput,
 	toGhostSuggestions,
+	unknownSlashAnswer,
 } from "../lib/slash-registry.js";
 import { t } from "../theme.js";
 import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
@@ -371,11 +372,20 @@ export function CommandInput({
 
 			// Check for slash command
 			if (trimmed.startsWith("/")) {
-				const resolved = resolveSlashInput(input, {
+				const registry = {
 					entries: slashRegistryEntries,
 					byToken: slashByToken,
 					collisions: [],
-				});
+				};
+				// Nothing goes straight to the model: an unknown slash line is
+				// answered here and never submitted (#4530).
+				const unknown = unknownSlashAnswer(input, registry);
+				if (unknown !== null) {
+					emitSystem(onSystemMessage, unknown);
+					setValue("");
+					return;
+				}
+				const resolved = resolveSlashInput(input, registry);
 
 				// /goal and /subgoal: handled in-component when a GoalClient is
 				// wired in. Falls through to onSlashCommand otherwise so the

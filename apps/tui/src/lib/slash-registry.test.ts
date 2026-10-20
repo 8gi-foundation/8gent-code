@@ -8,6 +8,7 @@ import {
 	mergeSlashEntries,
 	namespacedSkillToken,
 	resolveSlashInput,
+	unknownSlashAnswer,
 } from "./slash-registry.js";
 
 describe("slash registry", () => {
@@ -158,5 +159,48 @@ describe("slash registry", () => {
 		const summary = getSkillSummary(registry);
 		const boardroom = summary.find((s) => s.name === "billiondollarboardroom");
 		expect(boardroom).toBeDefined();
+	});
+});
+
+describe("unknownSlashAnswer (#4530)", () => {
+	const loaded = mergeSlashEntries(
+		[],
+		[
+			{
+				token: "/hyperframes",
+				name: "hyperframes",
+				canonicalName: "hyperframes",
+				description: "skill",
+				kind: "skill",
+				skillName: "hyperframes",
+			},
+		],
+	);
+
+	test("an unknown slash line gets the local answer, leading whitespace included", () => {
+		expect(unknownSlashAnswer("/nope", loaded)).toBe("Unknown command /nope. Type /help.");
+		expect(unknownSlashAnswer("  /nope with args", loaded)).toBe(
+			"Unknown command /nope. Type /help.",
+		);
+		expect(unknownSlashAnswer("/", loaded)).toBe("Unknown command /. Type /help.");
+	});
+
+	test("a built-in, an alias and a skill trigger are known", () => {
+		for (const cmd of getBuiltInSlashCommands()) {
+			expect(unknownSlashAnswer(`/${cmd.name}`, loaded)).toBeNull();
+			for (const a of cmd.aliases)
+				expect(unknownSlashAnswer(a.startsWith("/") ? a : `/${a}`, loaded)).toBeNull();
+		}
+		expect(unknownSlashAnswer("/hyperframes make a reel", loaded)).toBeNull();
+	});
+
+	test("a built-in is known even before the registry has loaded", () => {
+		const empty = { entries: [], byToken: new Map(), collisions: [] };
+		expect(unknownSlashAnswer("/help", empty)).toBeNull();
+	});
+
+	test("plain text is not a slash line", () => {
+		expect(unknownSlashAnswer("hello /nope", loaded)).toBeNull();
+		expect(unknownSlashAnswer("what is 1/2", loaded)).toBeNull();
 	});
 });

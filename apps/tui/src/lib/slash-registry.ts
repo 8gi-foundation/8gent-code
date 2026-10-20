@@ -235,6 +235,22 @@ export function resolveSlashInput(
 	return { entry, args: parseInputArgs(input) };
 }
 
+/**
+ * The local answer for a line that starts with "/" but names no built-in and
+ * no skill or prompt trigger, or null when the line is not an unknown slash.
+ * Built-ins always count as known, so a registry still loading (skills not in
+ * yet) never turns /help into an unknown command. Same set the daemon gate
+ * reads (packages/daemon/slash.ts imports BUILT_IN_SLASH_COMMANDS).
+ */
+export function unknownSlashAnswer(input: string, registry: SlashRegistry): string | null {
+	const trimmed = input.trimStart();
+	if (!trimmed.startsWith("/")) return null;
+	const name = trimmed.split(/\s+/)[0];
+	if (resolveSlashInput(trimmed, registry)) return null;
+	if (resolveSlashInput(trimmed, mergeSlashEntries(buildBuiltInEntries(), [], []))) return null;
+	return `Unknown command ${name}. Type /help.`;
+}
+
 export function toGhostSuggestions(registry: SlashRegistry): {
 	trigger: string;
 	suggestion: string;
