@@ -445,11 +445,7 @@ const COMMAND_ALLOWLIST = new Set([
 	"echo",
 	"pwd",
 	"git",
-	"bun",
-	"npm",
-	"node",
-	"python",
-	"python3",
+	"xargs",
 ]);
 
 /** Git subcommands that are read-only enough to allow without policy. */
@@ -472,13 +468,8 @@ interface ExecPolicyResult {
  * allowlist; do not pretend a finite regex set can enumerate "bad shell".
  */
 function evaluateExec(command: string): ExecPolicyResult {
-	if (process.env.EIGHT_LEGACY_BASH === "1") {
-		console.warn(
-			"[fs.exec] EIGHT_LEGACY_BASH=1 is set; bypassing daemon allowlist (legacy mode, removed next release)",
-		);
-		return { allowed: true, bypass: true };
-	}
-
+	// EIGHT_LEGACY_BASH no longer bypasses anything: this route has no approval card, so it is
+	// strictly confined and the same chain and allowlist run whatever the environment says.
 	const trimmed = command.trim();
 	if (!trimmed) return { allowed: false, reason: "empty command" };
 
@@ -486,12 +477,11 @@ function evaluateExec(command: string): ExecPolicyResult {
 	const segments = trimmed.split(/\s*(?:\|\||\||&&|;)\s*/g);
 	for (const seg of segments) {
 		const head = seg.trim().split(/\s+/)[0] ?? "";
-		// Strip leading env-var assignments (FOO=bar BAZ=qux cmd ...).
-		let verb = head;
-		let rest = seg.trim();
-		while (/^[A-Za-z_][A-Za-z0-9_]*=\S*/.test(verb)) {
-			rest = rest.replace(/^\S+\s*/, "");
-			verb = rest.split(/\s+/)[0] ?? "";
+		// An env-assignment prefix (FOO=bar cmd) sets what the command runs under: refused.
+		const verb = head;
+		const rest = seg.trim();
+		if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(verb)) {
+			return { allowed: false, reason: "environment assignment before a command" };
 		}
 		if (!verb) return { allowed: false, reason: "empty pipeline segment" };
 		// Strip leading `-l` shell-login flag attempts on the verb itself.
@@ -516,23 +506,81 @@ function evaluateExec(command: string): ExecPolicyResult {
 				reason: `not on daemon allowlist: ${verb}`,
 			};
 		}
-		// git subcommand check.
+		// git subcommand check: the first word after git must be a safe subcommand; no policy-engine fallback.
 		if (verb === "git") {
 			const sub = rest.split(/\s+/)[1] ?? "";
 			if (!GIT_SAFE_SUBS.has(sub)) {
-				const decision = evaluatePolicy("run_command", { command: seg.trim() });
-				if (!decision.allowed) {
-					return {
-						allowed: false,
-						reason: `git subcommand not safe: ${sub}`,
-					};
-				}
+				return { allowed: false, reason: `git subcommand not safe: ${sub}` };
 			}
 		}
 	}
 
 	return { allowed: true };
 }
+
+const OPTION_VALUE = /^-[-A-Za-z0-9]*=/;
+const GIT_REFUSED_FLAG =
+	/^(--config.*|--exec-path.*|--output.*|--ext-diff|--textconv|--open-files-in-pager.*|--upload-pack.*|--receive-pack.*|-O.*|--git-dir.*|--work-tree.*|--namespace.*)$/;
+const RG_REFUSED_FLAG = /^(--pre|--pre=.*|--pre-glob.*|--hostname-bin.*|-z|--search-zip)$/;
+
+function insideRoot(root: string, target: string): boolean {
+	const rel = path.relative(root, path.resolve(root, target));
+	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/** A word that names a place the route cannot prove is inside root: absolute, ~, ..-escaping, or an expansion. */
+function escapesRoot(root: string, word: string): boolean {
+	const w = word.replace(OPTION_VALUE, "").replace(/^['"]|['"]$/g, "");
+	if (/\$[A-Za-z_{(]|`/.test(w)) return true;
+	if (w.startsWith("~")) return true;
+	if (w === "/dev/null") return false;
+	if (path.isAbsolute(w) || w.split(/[\\/]/).includes("..")) return !insideRoot(root, w);
+	return false;
+}
+
+/** The first reason `command` leaves root or runs something the route cannot confine, or null. */
+function confinementRefusal(command: string, root: string): string | null {
+	const deny = (why: string) =>
+		refusalLead(`[PERMISSION DENIED] ${why}. This route has no approval card. Command: ${command}`);
+	// Redirect targets (> >> <), judged on the line itself: the engine's parse drops them.
+	for (const m of command.matchAll(/(?:^|[^<>&\d-])\d*(>>?|<(?!<))\s*([^\s;&|<>()]+)/g)) {
+		const target = m[2].replace(/^['"]|['"]$/g, "");
+		if (target === "/dev/null") continue;
+		if (escapesRoot(root, target)) return deny("A redirect reaches outside the workspace");
+		if (m[1] !== "<") {
+			const c = classifySensitivePath(path.resolve(root, target));
+			if (c.sensitive || c.forbidden)
+				return deny("A redirect writes a sensitive or git-internal path");
+		}
+	}
+	for (const argv of commandArgvs(command)) {
+		const name = path.basename(argv[0] ?? "").toLowerCase();
+		if (name && !COMMAND_ALLOWLIST.has(name) && !name.startsWith("-") && !DELETE_VERBS.has(name)) {
+			return deny(`${name} is not on the daemon allowlist`);
+		}
+		for (const w of argv.slice(1)) {
+			if (escapesRoot(root, w)) return deny("A path reaches outside the workspace");
+			if (name === "git") {
+				if (GIT_REFUSED_FLAG.test(w))
+					return deny("That git option can run a program or move the repository");
+			}
+			if ((name === "rg" || name === "grep") && RG_REFUSED_FLAG.test(w)) {
+				return deny("That search option runs a program");
+			}
+		}
+		if (name === "git") {
+			const sub = argv.findIndex((w, i) => i > 0 && !w.startsWith("-"));
+			const flagsBefore = argv.slice(1, sub === -1 ? undefined : sub);
+			if (flagsBefore.some((w) => w === "-c" || w === "-C" || w.startsWith("-c"))) {
+				return deny("git configuration or directory flags are not accepted");
+			}
+		}
+	}
+	return null;
+}
+
+const DELETE_VERBS = new Set(["rm", "rmdir", "unlink", "shred"]);
+const SHELLS = new Set(["sh", "bash", "zsh", "dash"]);
 
 /**
  * The refusal for `command` from the same chain the TUI's run_command runs before it spawns
@@ -562,6 +610,23 @@ export function execRefusal(command: string, cwd: string): string | null {
 		) {
 			return refusalLead(
 				`[PERMISSION DENIED] find that deletes, writes or runs commands needs an approval this route cannot ask for. Command: ${command}`,
+			);
+		}
+	}
+	const confined = confinementRefusal(command, cwd);
+	if (confined) return confined;
+	// A delete verb fed its paths on stdin (`find ... -print0 | xargs -0 <verb>`): the engine's parse drops
+	// xargs and leaves the bare verb, so a delete verb with no path operand is such a feed. A delete
+	// verb named behind xargs, parallel or a shell -c is refused too.
+	for (const argv of commandArgvs(command)) {
+		const name = path.basename(argv[0] ?? "").toLowerCase();
+		const feeder = name === "xargs" || name === "parallel" || SHELLS.has(name);
+		const bare = DELETE_VERBS.has(name) && !argv.slice(1).some((a) => !a.startsWith("-"));
+		const delegated =
+			feeder && argv.slice(1).some((a) => DELETE_VERBS.has(path.basename(a).toLowerCase()));
+		if (bare || delegated) {
+			return refusalLead(
+				`[PERMISSION DENIED] A delete that takes its paths from another command needs an approval this route cannot ask for. Command: ${command}`,
 			);
 		}
 	}

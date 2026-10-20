@@ -31,7 +31,6 @@ import {
 	_registerWorkspace,
 } from "../routes/store/fs";
 import { _setGraphStorePath } from "../routes/store/graph";
-import { _setKgStorePath } from "../routes/store/kg";
 import {
 	_resetStoreRoute,
 	ensureServerToken,
@@ -39,6 +38,7 @@ import {
 	handleStoreMessage,
 	handleStoreOpen,
 } from "../routes/store/index";
+import { _setKgStorePath } from "../routes/store/kg";
 
 // ── Test workspace + sandboxed data dir ───────────────────────────────
 
@@ -268,9 +268,7 @@ describe("kg.* scope isolation + sensitive-file gate", () => {
 			conversationId: "conv-A",
 		});
 		const aHits = (a.result as { hits: unknown[] }).hits;
-		expect(
-			aHits.every((h: any) => !String(h.source).includes("code.txt")),
-		).toBe(true);
+		expect(aHits.every((h: any) => !String(h.source).includes("code.txt"))).toBe(true);
 		// Search conv-B - should hit.
 		const b = await callRpc(ws, "kg.search", {
 			query: "quick brown fox",
@@ -943,47 +941,15 @@ describe("audit log schema", () => {
 
 // ── EIGHT_LEGACY_BASH bypass ──────────────────────────────────────────
 
-describe("EIGHT_LEGACY_BASH=1 bypass", () => {
-	test("bypass evaluates as allowed without consulting allowlist", () => {
+describe("EIGHT_LEGACY_BASH=1 no longer bypasses", () => {
+	test("the allowlist still denies with the flag set", () => {
 		const before = process.env.EIGHT_LEGACY_BASH;
 		process.env.EIGHT_LEGACY_BASH = "1";
 		try {
-			const r = _evaluateExecForTest("rm -rf /tmp/whatever");
-			expect(r.allowed).toBe(true);
-			expect(r.bypass).toBe(true);
+			const r = _evaluateExecForTest("curl http://x");
+			expect(r.allowed).toBe(false);
+			expect(r.bypass).toBeUndefined();
 		} finally {
-			if (before === undefined) delete process.env.EIGHT_LEGACY_BASH;
-			else process.env.EIGHT_LEGACY_BASH = before;
-		}
-	});
-
-	test("fs.exec bypass entry records bypass=true in audit log", async () => {
-		const before = process.env.EIGHT_LEGACY_BASH;
-		process.env.EIGHT_LEGACY_BASH = "1";
-		const ws = makeWS();
-		handleStoreOpen(ws as never);
-		await handshake(ws, ensureServerToken(TOKEN_PATH));
-		try {
-			const res = await callRpc(ws, "fs.exec", {
-				workspaceId: "test-ws",
-				command: "echo bypass-probe",
-				conversationId: "bypass-conv",
-			});
-			expect(res.error).toBeUndefined();
-			const auditFile = path.join(AUDIT_DIR, "exec-ops.jsonl");
-			const lines = fs
-				.readFileSync(auditFile, "utf-8")
-				.split("\n")
-				.filter((l) => l.trim().length > 0)
-				.map((l) => JSON.parse(l));
-			const entry = lines.find(
-				(l: { op: string; conversationId: string }) =>
-					l.op === "exec" && l.conversationId === "bypass-conv",
-			);
-			expect(entry).toBeDefined();
-			expect(entry.bypass).toBe(true);
-		} finally {
-			handleStoreClose(ws as never);
 			if (before === undefined) delete process.env.EIGHT_LEGACY_BASH;
 			else process.env.EIGHT_LEGACY_BASH = before;
 		}

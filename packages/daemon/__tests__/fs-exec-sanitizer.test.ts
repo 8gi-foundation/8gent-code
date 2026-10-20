@@ -114,6 +114,27 @@ describe("fs.exec refuses before spawn with the engine's words", () => {
 		}
 	});
 
+	test("find -print0 piped to xargs -0 delete is refused and the file survives, also under EIGHT_LEGACY_BASH=1", async () => {
+		const victim = path.join(WORKSPACE, "piped.txt");
+		for (const legacy of [false, true]) {
+			fs.writeFileSync(victim, "keep");
+			if (legacy) process.env.EIGHT_LEGACY_BASH = "1";
+			try {
+				for (const line of [
+					`find . -name piped.txt -print0 | xargs -0 ${RMW}`,
+					`echo piped.txt | xargs ${RMW} -f`,
+					`ls | parallel ${RMW}`,
+					`echo piped.txt | sh -c "xargs ${RMW}"`,
+				]) {
+					await refused(line);
+					expect(fs.existsSync(victim)).toBe(true);
+				}
+			} finally {
+				delete process.env.EIGHT_LEGACY_BASH;
+			}
+		}
+	});
+
 	for (const [family, lines] of Object.entries(WIPES)) {
 		test(`${family}: every canonical string is refused with the engine text`, async () => {
 			for (const line of lines) {
@@ -125,7 +146,94 @@ describe("fs.exec refuses before spawn with the engine's words", () => {
 	}
 });
 
+// Second read: what must not reach spawn on a route with no approval card, each also under EIGHT_LEGACY_BASH=1.
+const CONFINED: Record<string, string[]> = {
+	"git option that names a program to run": [
+		"git -c diff.external='touch zz' diff --ext-diff",
+		"git -c core.pager=x log",
+		"git diff --output=out.txt",
+		"git --exec-path=. status",
+	],
+	"search option that runs a preprocessor": [
+		"rg --pre=./x.sh y",
+		"rg --pre ./x.sh y",
+		"grep -r key -f /etc/passwd .",
+	],
+	"interpreter or package runner": [
+		`node -e "require('child_process').execSync('id')"`,
+		"bun -e 'console.log(1)'",
+		"npm exec -- curl x",
+		"npx curl x",
+		"python3 -c 'print(1)'",
+		"sh -c 'echo hi'",
+	],
+	"write outside the workspace through a redirect": [
+		"echo x > ../../out",
+		"echo hi > ~/.zshrc",
+		"echo hi >> /tmp/outside-ws",
+		"echo x 1> ../out",
+	],
+	"write to a git-internal or secret path through a redirect": [
+		"echo x > .git/config",
+		"echo x > .env",
+	],
+	"read outside the workspace": [
+		"cat ~/.aws/credentials",
+		"grep -r key ~/.ssh",
+		"cat ../../etc/hosts",
+		"cat $HOME/.zshrc",
+		"cat < ~/.zshrc",
+	],
+	"environment assignment before a command": ["FOO=1 curl x", "FOO=1 echo hi"],
+	"command off the allowlist": ["curl x", "echo x | tee out.txt", "ncat -e /bin/sh x 1"],
+};
+
+describe("fs.exec is confined to the workspace (no approval card on this route)", () => {
+	for (const [name, lines] of Object.entries(CONFINED)) {
+		test(`${name}: refused before spawn, with and without EIGHT_LEGACY_BASH=1`, async () => {
+			for (const legacy of [false, true]) {
+				if (legacy) process.env.EIGHT_LEGACY_BASH = "1";
+				try {
+					for (const line of lines) {
+						await refused(line);
+					}
+				} finally {
+					delete process.env.EIGHT_LEGACY_BASH;
+				}
+			}
+		});
+	}
+
+	test("a redirect to a file inside the workspace still runs", async () => {
+		const r = await run("echo kept > inside.txt");
+		expect(r.exitCode).toBe(0);
+		expect(fs.readFileSync(path.join(WORKSPACE, "inside.txt"), "utf-8").trim()).toBe("kept");
+	});
+});
+
 describe("fs.exec still runs plain allowed commands", () => {
+	test("cat and grep of a file inside the root, and an absolute path inside the root", async () => {
+		fs.writeFileSync(path.join(WORKSPACE, "in.txt"), "alpha\nbeta\n");
+		expect((await run("cat in.txt")).stdout).toContain("alpha");
+		expect((await run("grep -r beta .")).stdout).toContain("beta");
+		expect((await run(`cat ${path.join(WORKSPACE, "in.txt")}`)).stdout).toContain("beta");
+		expect((await run("git status")).exitCode).toBeDefined();
+	});
+
+	test("xargs with a harmless verb runs, also under EIGHT_LEGACY_BASH=1", async () => {
+		fs.writeFileSync(path.join(WORKSPACE, "w.txt"), "one\ntwo\n");
+		for (const legacy of [false, true]) {
+			if (legacy) process.env.EIGHT_LEGACY_BASH = "1";
+			try {
+				const r = await run("echo w.txt | xargs wc -l");
+				expect(r.exitCode).toBe(0);
+				expect(r.stdout).toContain("2");
+			} finally {
+				delete process.env.EIGHT_LEGACY_BASH;
+			}
+		}
+	});
+
 	test("echo runs and returns its output", async () => {
 		const r = await run("echo hello-fs-exec");
 		expect(r.exitCode).toBe(0);
