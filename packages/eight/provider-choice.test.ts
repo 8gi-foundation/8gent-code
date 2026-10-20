@@ -127,19 +127,19 @@ describe("readSavedProviderChoice", () => {
 describe("providerRouteNotice", () => {
 	test("did not answer (no reason)", () => {
 		expect(providerRouteNotice("gemma-4-26b-a4b-it", "ollama", "8gate:latest")).toBe(
-			"gemma-4-26b-a4b-it did not answer, using Ollama 8gate:latest.",
+			"Asked for gemma-4-26b-a4b-it; Ollama 8gate:latest is answering instead, because it did not answer.",
 		);
 	});
 
 	test("capability switch is worded as a step-level choice", () => {
 		expect(providerRouteNotice("gemma-4", "lmstudio", "ornith-1.0-9b", "capability")).toBe(
-			"gemma-4 cannot call tools, using LM Studio ornith-1.0-9b for this step.",
+			"Asked for gemma-4; LM Studio ornith-1.0-9b is answering instead, because it cannot call tools.",
 		);
 	});
 
 	test("a missing model says it is not installed", () => {
 		expect(providerRouteNotice("qwen3:14b", "ollama", "8gate:latest", "missing")).toBe(
-			"qwen3:14b is not installed, using Ollama 8gate:latest.",
+			"Asked for qwen3:14b; Ollama 8gate:latest is answering instead, because it is not installed locally.",
 		);
 	});
 });

@@ -453,3 +453,24 @@ export function missingModelNotice(opts: {
 	}
 	return `${from} is not installed in Ollama, so this session uses ${to}. Pick another with /model.`;
 }
+
+/**
+ * Whether `model` may be announced as the one that will answer (#no-silent-swap).
+ * A cloud provider's model exists only if that provider's own list, fetched now,
+ * names it; on-box runtimes are checked elsewhere. An empty live list means it
+ * could not be verified, which is allowed (never a guess either way).
+ */
+export async function checkModelSwitch(
+	reader: LiveModelsReader,
+	provider: string,
+	model: string,
+	isLocal: (provider: string) => boolean,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+	if (isLocal(provider)) return { ok: true };
+	const live = await listProviderModels(reader, provider);
+	if (live.length === 0 || live.includes(model)) return { ok: true };
+	return {
+		ok: false,
+		message: `${provider} does not serve "${model}". It serves right now: ${live.slice(0, 20).join(", ")}${live.length > 20 ? ", ..." : ""}. Pick one with /model.`,
+	};
+}

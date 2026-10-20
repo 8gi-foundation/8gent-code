@@ -69,5 +69,7 @@ test("a mid-turn failover emits one route event and the TUI prints the line once
 			lines.push(providerRouteNotice(e.requested, e.provider, e.used, e.reason as undefined));
 		}
 	}
-	expect(lines).toEqual(["gemma-4-26b-a4b-it did not answer, using Ollama 8gate:latest."]);
+	expect(lines).toEqual([
+		"Asked for gemma-4-26b-a4b-it; Ollama 8gate:latest is answering instead, because it did not answer.",
+	]);
 });

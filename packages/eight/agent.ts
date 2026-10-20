@@ -1822,6 +1822,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						run: runTurn,
 						// A named provider stays put: reroute only within it (#3746).
 						pinned: this.config.providerPinned,
+						liveModels: async (p) =>
+							(await import("../providers")).getProviderManager().discoverModels(p),
 						pinnedMessage: (model, error) =>
 							pinnedProviderError(effectiveProvider, model, error).message,
 						onReroute: (missing, chosen) => {

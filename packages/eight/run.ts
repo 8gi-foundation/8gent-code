@@ -24,6 +24,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
+import { readableModelName } from "../providers/model-reroute";
 import type { TurnStop } from "./agent";
 import type { RunEvent, RunStopInfo } from "./run-events";
 import { type RunSessionStore, defaultRunSessionStore } from "./run-session";
@@ -656,17 +657,25 @@ export function providerLabel(provider: string): string {
 	return PROVIDER_LABELS[provider] ?? provider;
 }
 
-/** What a user reads when a turn ran on a different model than the one asked for. */
+/**
+ * What a user reads when a turn ran on a different model than the one asked
+ * for: what was asked, what is answering (provider and a readable name, never a
+ * bare hash), and why.
+ */
 export function providerRouteNotice(
 	asked: string,
 	usedProvider: string,
 	usedModel: string,
 	reason?: "capability" | "missing",
 ): string {
-	const used = `${providerLabel(usedProvider)} ${usedModel}`;
-	if (reason === "capability") return `${asked} cannot call tools, using ${used} for this step.`;
-	if (reason === "missing") return `${asked} is not installed, using ${used}.`;
-	return `${asked} did not answer, using ${used}.`;
+	const used = `${providerLabel(usedProvider)} ${readableModelName(usedModel)}`;
+	const why =
+		reason === "capability"
+			? "it cannot call tools"
+			: reason === "missing"
+				? "it is not installed locally"
+				: "it did not answer";
+	return `Asked for ${readableModelName(asked)}; ${used} is answering instead, because ${why}.`;
 }
 
 /** True the first time a route (asked -> used + reason) is seen in a tab: A, B, A prints twice. */

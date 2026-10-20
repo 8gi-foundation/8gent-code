@@ -33,6 +33,43 @@ export interface InstalledModel {
 	toolCapable?: boolean;
 }
 
+/**
+ * On-box runtimes: the only providers whose "installed" list is Ollama's or LM
+ * Studio's. Mirrors LOCAL_PROVIDERS in packages/eight/registry.ts (inlined so
+ * providers never import eight). Everything else is a cloud provider, whose
+ * models are known only by that provider's own live list.
+ */
+const LOCAL_RUNTIMES: ReadonlySet<string> = new Set([
+	"8gent",
+	"ollama",
+	"lmstudio",
+	"apfel",
+	"apple-foundation",
+]);
+
+/** True for an on-box runtime. A cloud provider's model is never checked against local installs. */
+export function isLocalRuntime(provider: string): boolean {
+	return LOCAL_RUNTIMES.has(provider);
+}
+
+/**
+ * An Ollama entry listed by content hash instead of a name (llamacpp:<sha256>,
+ * or a bare 32+ hex digest). It tells a person nothing, so it is never chosen
+ * as a fallback.
+ */
+export function isHashNamedModel(model: string): boolean {
+	const m = model.trim().toLowerCase();
+	const tail = m.split(":").pop() ?? "";
+	return /^[0-9a-f]{32,}$/.test(tail) || /^[0-9a-f]{32,}$/.test(m);
+}
+
+/** A model name a person can read: a hash-only local model becomes "an unnamed local model (<short hash>)". */
+export function readableModelName(model: string): string {
+	if (!isHashNamedModel(model)) return model;
+	const tail = model.trim().toLowerCase().split(":").pop() ?? "";
+	return `an unnamed local model (${tail.slice(0, 12)})`;
+}
+
 /** Cloud providers whose presence means "a model is still reachable". */
 const CLOUD_KEY_ENV_VARS = [
 	"OPENROUTER_API_KEY",
@@ -145,7 +182,11 @@ export function chooseRerouteModel(
 	// Law 2: a model KNOWN to reject a tools payload is never a reroute target
 	// for agentic work - it would fabricate instead of executing.
 	const usable = installed.filter(
-		(m) => m.score > 0 && m.toolCapable !== false && m.model.trim().toLowerCase() !== missing,
+		(m) =>
+			m.score > 0 &&
+			m.toolCapable !== false &&
+			!isHashNamedModel(m.model) &&
+			m.model.trim().toLowerCase() !== missing,
 	);
 	if (usable.length === 0) return null;
 
@@ -229,7 +270,11 @@ export async function resolveToolCapableModel(opts: {
 	const installed = await detect().catch(() => [] as InstalledModel[]);
 	const missing = opts.model.trim().toLowerCase();
 	const candidates = installed.filter(
-		(m) => m.score > 0 && m.toolCapable !== false && m.model.trim().toLowerCase() !== missing,
+		(m) =>
+			m.score > 0 &&
+			m.toolCapable !== false &&
+			!isHashNamedModel(m.model) &&
+			m.model.trim().toLowerCase() !== missing,
 	);
 
 	// Operator preference first, then strength order.
@@ -301,6 +346,12 @@ export async function callLocalModelWithReroute<T>(opts: {
 	 */
 	pinned?: boolean;
 	pinnedMessage?: (model: string, error: string) => string;
+	/**
+	 * The provider's own live model list, fetched now (never a literal or a
+	 * cache). Used only to tell a person what a cloud provider does serve when
+	 * it rejected the chosen model.
+	 */
+	liveModels?: (provider: string) => Promise<string[]>;
 }): Promise<LocalRerouteOutcome<T>> {
 	const detect = opts.detect ?? defaultDetectInstalled;
 	const cloudKey = opts.hasCloudKey ?? hasCloudModelKey;
@@ -321,6 +372,24 @@ export async function callLocalModelWithReroute<T>(opts: {
 			// aborts stay the caller's to handle.
 			if (rerouted || !(isModelNotFoundError(err) || isProviderUnhealthyError(err))) {
 				throw err;
+			}
+
+			// "Installed" is a local concept. A cloud provider's model is never
+			// looked up in Ollama's list and never called "missing": its own error
+			// is the answer, with its live list to choose from.
+			if (!isLocalRuntime(provider)) {
+				const error = err instanceof Error ? err.message : String(err);
+				const live = await (opts.liveModels?.(provider) ?? Promise.resolve([])).catch(
+					() => [] as string[],
+				);
+				const list =
+					live.length > 0
+						? `\n${provider} serves right now: ${live.slice(0, 20).join(", ")}${live.length > 20 ? ", ..." : ""}. Pick one with /model.`
+						: "";
+				return {
+					ok: false,
+					message: `${provider} did not accept "${model}": ${error}${list}`,
+				};
 			}
 
 			const detected = await detect().catch(() => [] as InstalledModel[]);
