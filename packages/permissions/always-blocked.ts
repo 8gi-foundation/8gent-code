@@ -398,13 +398,26 @@ function processSegment(
 	}
 }
 
-/** The index just past the `)` that closes a `(` already consumed, honouring nesting. */
+/** The index just past the `)` that closes a `(` already consumed, honouring nesting and quotes. */
 function closeParen(text: string, from: number): number {
 	let level = 1;
+	let q = "";
 	for (let i = from; i < text.length; i++) {
-		if (text[i] === "\\") i++;
-		else if (text[i] === "(") level++;
-		else if (text[i] === ")" && --level === 0) return i;
+		const c = text[i];
+		if (c === "\\" && q !== "'") {
+			i++;
+			continue;
+		}
+		if (q) {
+			if (c === q) q = "";
+			continue;
+		}
+		if (c === "'" || c === '"') {
+			q = c;
+			continue;
+		}
+		if (c === "(") level++;
+		else if (c === ")" && --level === 0) return i;
 	}
 	return text.length;
 }

@@ -134,6 +134,8 @@ const HOME_LINES = [
 	`${RMRF} "$HOME/"*`,
 	`${RMRF} "~"/*`,
 	`${RMRF} "` + "${HOME}" + `"/*`,
+	// round seven: a quoted paren inside a group must not end the group early
+	`echo @(")") ; ${RMRF} ~/* ; echo "x"`,
 	// APFS and NTFS fold case: the lowercase spelling is the same directory
 	...(process.platform === "darwin" || process.platform === "win32"
 		? [`${RMRF} ${HOME_DIR.toLowerCase()}`, `${RMRF} ${HOME_REAL.toLowerCase()}/`]
@@ -143,6 +145,11 @@ const HOME_LINES = [
 const BLOCKED_LINES = [
 	...HOME_LINES,
 	WIPE,
+	// round seven: quote-aware closeParen (a quoted `)` is not the group's end)
+	`echo @(")") ; ${WIPE} ; echo "x"`,
+	`echo *(')') ; ${WIPE} ; echo 'x'`,
+	`$(echo ")") ; ${WIPE} ; echo "x"`,
+	`echo @("\\)") ; ${WIPE} ; echo "x"`,
 	`ls && ${WIPE}`,
 	`echo hi; ${WIPE}`,
 	`false || ${WIPE}`,
