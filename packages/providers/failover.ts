@@ -592,6 +592,16 @@ export class ModelFailover {
 		this.affinity.delete(sessionId);
 	}
 
+	/** True when cache affinity is on (option or EIGHT_CACHE_AFFINITY=1). */
+	get affinityEnabled(): boolean {
+		return this.cacheAffinity;
+	}
+
+	/** True when the session holds a live, unexpired affinity for this model and channel. */
+	isWarm(sessionId: string, model: string, channel: FailoverChannel = "text"): boolean {
+		return this.warmAffinity(sessionId, model, channel) !== undefined;
+	}
+
 	/** Number of sessions currently holding an affinity entry. */
 	get affinitySize(): number {
 		return this.affinity.size;
