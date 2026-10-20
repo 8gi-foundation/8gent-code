@@ -1,20 +1,14 @@
 #!/usr/bin/env bun
 /**
- * Permissions spelling grid (#4509). Every permissions change runs this before a reader sees it.
- *
- *   bun scripts/permissions-grid.ts [--pr-head <rev|dir>] [--base <rev|dir>] [--quick] [--no-shell]
- *
- * It takes always-blocked.ts from two trees (git archive of a rev, or a directory as given), runs
- * the real commandArgvs + blockedReason over the row matrix in scripts/permissions-grid.rows.json
- * (spellings x contexts, plus benign rows), and prints:
- *   - rows newly blocked on the head (information),
- *   - rows newly ALLOWED on the head (the failure, exit 1),
- *   - named spelling gaps: rows that run a wipe under a real bash and zsh (rm, find and sudo
- *     stubbed, so nothing is ever deleted) and are allowed on both trees (exit 0, listed).
- * --quick runs only the plain and comment contexts. Wipe names are built from parts at runtime.
+ * Permissions spelling grid (#4509): bun scripts/permissions-grid.ts [--pr-head <rev|dir>]
+ * [--base <rev|dir>] [--quick] [--no-shell]. Runs the real commandArgvs + blockedReason from two
+ * trees over scripts/permissions-grid.rows.json and prints rows newly blocked, rows newly ALLOWED
+ * (exit 1), and named gaps: wipes a real bash/zsh runs (rm, find, sudo stubbed) that both trees allow.
+ * Login and interactive shell rows are never run. Wipe names are built from parts at runtime.
  */
 import { spawnSync } from "node:child_process";
 import {
+	copyFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -31,6 +25,10 @@ const DEL = ["-de", "lete"].join("");
 const HOME = "/Users/gridhome"; // the home the policy sees; rows spell it literally
 const ROWS_FILE = join(import.meta.dir, "permissions-grid.rows.json");
 const QUICK_CONTEXTS = ["plain", "comment"];
+const ROWS_OVERRIDE = process.env.GRID_ROWS; // tests only: a rows file in the same format
+/** A login or interactive shell reads profile files that can reset PATH, so the probe never runs one. */
+const LOGIN_SHELL =
+	/(^|[\s;&|('"])(bash|zsh|sh|dash|ksh)['"]?(\s+-[-a-zA-Z]+)*?\s+(-[a-zA-Z]*[li][a-zA-Z]*|--login|--interactive)(\s|$)/m;
 
 export interface Row {
 	id: string;
@@ -44,6 +42,8 @@ export interface GridResult {
 	newlyBlocked: Row[];
 	newlyAllowed: Row[];
 	gaps: { row: Row; shells: string[] }[];
+	skipped: Row[];
+	isolation: string;
 	probed: string[];
 	baseBlocked: number;
 	headBlocked: number;
@@ -51,7 +51,7 @@ export interface GridResult {
 
 const fill = (s: string) => s.replaceAll("%RM%", () => RM).replaceAll("%DEL%", () => DEL);
 
-export function loadRows(quick: boolean, file = ROWS_FILE): Row[] {
+export function loadRows(quick: boolean, file = ROWS_OVERRIDE ?? ROWS_FILE): Row[] {
 	const d = JSON.parse(readFileSync(file, "utf8"));
 	const rows: Row[] = [];
 	for (const [context, tpl] of Object.entries<string>(d.contexts)) {
@@ -149,26 +149,53 @@ function shellProbe(rows: Row[], scratch: string) {
 			{ mode: 0o755 },
 		);
 	}
-	for (const n of ["sh", "bash", "zsh", "env", "cat", "xargs"]) {
+	// Real copies on Linux, so the shells still resolve once the system bin dirs are covered below.
+	const linux = process.platform === "linux";
+	for (const n of ["sh", "bash", "zsh", "env", "cat", "xargs", "mount"]) {
 		const p = Bun.which(n) ?? (n === "sh" || n === "bash" ? `/bin/${n}` : null);
-		if (p) symlinkSync(p, join(stubs, n));
+		if (p) (linux ? copyFileSync : symlinkSync)(p, join(stubs, n));
 	}
+	// Linux defence in depth: every system bin dir becomes the stub dir; without unshare, skip + rc-free stand alone.
+	const cover =
+		'S=$1; shift; for d in /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin /sbin /bin; do [ -d "$d" ] && [ ! -L "$d" ] && "$S/mount" --bind "$S" "$d"; done; exec "$@"';
+	const unshare = linux ? Bun.which("unshare") : null;
+	const sh = join(stubs, "sh");
+	const isoArgs = (argv: string[]) => [
+		"--user",
+		"--map-root-user",
+		"--mount",
+		sh,
+		"-c",
+		cover,
+		"grid",
+		stubs,
+		...argv,
+	];
+	const probe = unshare
+		? spawnSync(unshare, isoArgs([sh, "-c", "exit 0"]), { stdio: "ignore" })
+		: null;
+	const isolated = !!probe && probe.status === 0;
+	const isolation = isolated
+		? "unshare mount namespace"
+		: "none (login-shell skip and rc-free flags only)";
 	const shells = [
-		["bash", "/bin/bash"],
-		["zsh", Bun.which("zsh") ?? ""],
-	].filter(([, p]) => p && existsSync(p));
+		["bash", "/bin/bash", ["--noprofile", "--norc", "-c"]],
+		["zsh", Bun.which("zsh") ?? "", ["-f", "-c"]],
+	].filter(([, p]) => p && existsSync(p as string)) as [string, string, string[]][];
 	const labels = shells.map(([n, p]) => {
-		const v =
+		return `${n} ${
 			spawnSync(p, ["--version"])
 				.stdout?.toString()
-				.match(/\d+\.\d+(\.\d+)?/)?.[0] ?? "?";
-		return `${n} ${v}`;
+				.match(/\d+\.\d+(\.\d+)?/)?.[0] ?? "?"
+		}`;
 	});
 	const hits = new Map<string, string[]>();
 	for (const r of rows) {
-		shells.forEach(([, path], si) => {
-			const p = spawnSync(path, ["-c", r.text], {
-				env: { PATH: stubs, HOME: home },
+		shells.forEach(([, path, flags], si) => {
+			const argv = [path, ...flags, r.text];
+			const [cmd, args] = isolated ? [unshare as string, isoArgs(argv)] : [path, argv.slice(1)];
+			const p = spawnSync(cmd, args, {
+				env: { PATH: stubs, HOME: home, BASH_ENV: "", ENV: "" },
 				cwd: scratch,
 				timeout: 5000,
 				stdio: ["ignore", "pipe", "ignore"],
@@ -178,7 +205,7 @@ function shellProbe(rows: Row[], scratch: string) {
 				hits.set(r.id, [...(hits.get(r.id) ?? []), labels[si]]);
 		});
 	}
-	return { hits, labels };
+	return { hits, labels, isolation };
 }
 
 export async function runGrid(o: {
@@ -201,6 +228,8 @@ export async function runGrid(o: {
 			newlyBlocked: [],
 			newlyAllowed: [],
 			gaps: [],
+			skipped: [],
+			isolation: "not probed",
 			probed: [],
 			baseBlocked: [...bd.values()].filter((d) => d === "BLOCK").length,
 			headBlocked: [...hd.values()].filter((d) => d === "BLOCK").length,
@@ -213,9 +242,12 @@ export async function runGrid(o: {
 			const open = rows.filter(
 				(r) => !r.benign && hd.get(r.id) === "allow" && bd.get(r.id) === "allow",
 			);
-			const { hits, labels } = shellProbe(open, scratch);
+			res.skipped = open.filter((r) => LOGIN_SHELL.test(r.text));
+			const safe = open.filter((r) => !LOGIN_SHELL.test(r.text));
+			const { hits, labels, isolation } = shellProbe(safe, scratch);
 			res.probed = labels;
-			for (const r of open)
+			res.isolation = isolation;
+			for (const r of safe)
 				if (hits.has(r.id)) res.gaps.push({ row: r, shells: hits.get(r.id) as string[] });
 		}
 		return res;
@@ -231,21 +263,19 @@ function section(title: string, lines: string[]): void {
 }
 
 export function printGrid(r: GridResult, o: { head: string; base: string; quick?: boolean }): void {
+	console.log(`permissions grid: head=${o.head} base=${o.base} ${o.quick ? "quick" : "full"}`);
+	const sh = r.probed.join(", ") || "not probed";
 	console.log(
-		`permissions grid: head=${o.head} base=${o.base} ${o.quick ? "quick (plain, comment)" : "full"}`,
-	);
-	console.log(
-		`rows ${r.rows}; blocked on base ${r.baseBlocked}, on head ${r.headBlocked}; shells: ${r.probed.join(", ") || "not probed"}`,
+		`rows ${r.rows}; blocked on base ${r.baseBlocked}, on head ${r.headBlocked}; shells: ${sh}`,
 	);
 	section("NEWLY BLOCKED on head (information)", r.newlyBlocked.map(show));
 	section("NEWLY ALLOWED on head (FAIL)", r.newlyAllowed.map(show));
-	section(
-		"NAMED SPELLING GAPS: run a wipe in a real shell, allowed on both trees",
-		r.gaps.map((g) => `${show(g.row)}  [${g.shells.join(", ")}]`),
-	);
-	console.log(
-		`\nresult: newly blocked ${r.newlyBlocked.length}, newly allowed ${r.newlyAllowed.length}, named gaps ${r.gaps.length}`,
-	);
+	section("probe skipped (login/interactive)", r.skipped.map(show));
+	console.log(`probe isolation: ${r.isolation}`);
+	const gaps = r.gaps.map((g) => `${show(g.row)}  [${g.shells.join(", ")}]`);
+	section("NAMED SPELLING GAPS: run a wipe in a real shell, allowed on both trees", gaps);
+	const n = [r.newlyBlocked.length, r.newlyAllowed.length, r.gaps.length];
+	console.log(`\nresult: newly blocked ${n[0]}, newly allowed ${n[1]}, named gaps ${n[2]}`);
 }
 
 if (import.meta.main) {

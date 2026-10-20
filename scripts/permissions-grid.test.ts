@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadRows } from "./permissions-grid";
@@ -25,8 +25,12 @@ export const blockedReason = (a: string[]) => {
 }
 
 function grid(head: string, base: string, ...extra: string[]) {
+	return gridEnv({}, head, base, ...extra);
+}
+function gridEnv(env: Record<string, string>, head: string, base: string, ...extra: string[]) {
 	const p = Bun.spawnSync(["bun", SCRIPT, "--pr-head", head, "--base", base, ...extra], {
 		stderr: "pipe",
+		env: { ...process.env, ...env },
 	});
 	return { code: p.exitCode, out: p.stdout.toString() + p.stderr.toString() };
 }
@@ -85,4 +89,37 @@ describe("permissions grid", () => {
 		const r = grid("no-such-rev-4509", "no-such-rev-4509", "--no-shell");
 		expect(r.code).not.toBe(0);
 	});
+
+	test("a policy that allows login-shell rows: they are skipped, never run, and a real file survives", () => {
+		const open = join(root, "open-login");
+		mkdirSync(join(open, "packages/permissions"), { recursive: true });
+		writeFileSync(
+			join(open, "packages/permissions/always-blocked.ts"),
+			"export const commandArgvs = (t: string) => [[t]];\nexport const blockedReason = () => null;\n",
+		);
+		const canaryDir = join(root, "canary");
+		mkdirSync(canaryDir);
+		const canary = join(canaryDir, "keep.txt");
+		writeFileSync(canary, "still here");
+		const wipe = `%RM% -rf ${canaryDir}`;
+		const spellings = [
+			`bash -lc '${wipe}'`,
+			`bash -ic '${wipe}'`,
+			`sh --login -c '${wipe}'`,
+			`zsh -c -l '${wipe}'`,
+			`env bash -xlc '${wipe}'`,
+			`bash -c '${wipe}'`, // control: not a login shell, so it runs, against the stubs
+		];
+		const rowsFile = join(root, "login-rows.json");
+		writeFileSync(
+			rowsFile,
+			JSON.stringify({ contexts: { plain: "%ROW%" }, spellings, benign: [] }),
+		);
+		const r = gridEnv({ GRID_ROWS: rowsFile }, open, open);
+		expect(r.code).toBe(0);
+		const skipped = r.out.split("probe skipped (login/interactive)")[1].split("probe isolation")[0];
+		for (const i of [0, 1, 2, 3, 4]) expect(skipped).toContain(`plain#${i} `);
+		expect(skipped).not.toContain("plain#5 ");
+		expect(existsSync(canary)).toBe(true);
+	}, 60_000);
 });

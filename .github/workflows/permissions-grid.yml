@@ -42,7 +42,10 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends zsh
 
       - name: Grid against the PR base
-        run: bun scripts/permissions-grid.ts --pr-head "${{ github.event.pull_request.head.sha }}" --base "origin/${{ github.base_ref }}"
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.base_ref }}
+        run: bun scripts/permissions-grid.ts --pr-head "$HEAD_SHA" --base "origin/$BASE_REF"
 
       - name: Grid script tests
         run: bun test scripts/permissions-grid.test.ts
