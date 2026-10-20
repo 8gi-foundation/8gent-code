@@ -2957,7 +2957,14 @@ export function App({
 						);
 					}
 				}
-				logStep(tabId, tabTitle, event.stepNumber, event.usage.totalTokens, event.text);
+				logStep(
+					tabId,
+					tabTitle,
+					event.stepNumber,
+					event.usage.totalTokens,
+					event.text,
+					event.usage,
+				);
 
 				if (isActive && event.text?.trim()) {
 					const planMatch = event.text.match(/PLAN:\s/i);
