@@ -213,6 +213,13 @@ const C_FLAG_FORMS = [
 	(w: string) => `zsh <<< "${w}"`,
 	(w: string) => `sh <<<'${w}'`,
 	(w: string) => `bash<<<'${w}'`,
+	// #4501: a second here-string glued after the closing quote; zsh joins both bodies
+	(w: string) => `bash <<< "${w}"<<<x`,
+	(w: string) => `bash <<< '${w}'<<<x`,
+	(w: string) => `zsh<<<"${w}"<<<x`,
+	// #4501 round two: the wipe rides a later marker; bash 3.2 keeps the last here-string
+	(w: string) => `bash <<<'a'<<<'${w}'`,
+	(w: string) => `bash <<<'a'<<<'b'<<<'${w}'`,
 ];
 const C_FLAG_WIPES = [WIPE, `${RMRF} ~`];
 const C_FLAG_LINES = C_FLAG_WIPES.flatMap((w) =>
@@ -357,6 +364,7 @@ const ORDINARY_LINES = [
 	'cat <<< "hello"',
 	'read x <<< "a b c"',
 	"bash <<< 'ls -la'",
+	'cat <<< "a"<<<b',
 	'grep foo <<< "$text"',
 	`echo '${WIPE}' is a dangerous command`,
 	"grep -rf patterns.txt src",

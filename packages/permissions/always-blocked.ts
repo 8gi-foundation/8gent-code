@@ -592,11 +592,15 @@ function scanQuoteBlind(input: string, out: string[][]): void {
 		}
 		// A here-string feeds its words to whatever reads stdin, and a shell runs them.
 		// Split at every `<<<` (spaced or glued, as in `bash<<<'x'`) and read every suffix from there.
-		for (let i = 0; i < tokens.length; i++) {
-			const at = tokens[i].indexOf("<<<");
+		// A here-string glued after a closing quote (`"x"<<<y`) leaves its text and the `<<<` in one
+		// token, so the text before the `<<<` is cut off as a word of its own: zsh joins both bodies.
+		// Every `<<<` starts a new piece, so a wipe riding a later marker is read from that marker too.
+		const cut = tokens.flatMap((t) => t.split(/(?=<<<)/).filter(Boolean));
+		for (let i = 0; i < cut.length; i++) {
+			const at = cut[i].indexOf("<<<");
 			if (at < 0) continue;
-			const rest = tokens[i].slice(at + 3).replace(/^<+/, "");
-			const tail = tokens.slice(i + 1);
+			const rest = cut[i].slice(at + 3).replace(/^<+/, "");
+			const tail = cut.slice(i + 1);
 			const words = rest ? [rest, ...tail] : tail;
 			for (let j = 0; j < words.length; j++) processSegment(words.slice(j), null, out, 0);
 		}
