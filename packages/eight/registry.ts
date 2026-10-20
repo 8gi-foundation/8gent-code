@@ -123,18 +123,7 @@ export const MODELS: ModelEntry[] = [
  * over the loopback ollama server today; if it is ever pointed off-box this
  * set is the single place to revisit.
  */
-export const LOCAL_PROVIDERS: ReadonlySet<string> = new Set([
-	"8gent",
-	"ollama",
-	"lmstudio",
-	"apfel",
-	"apple-foundation",
-]);
-
-/** True when `name` is an on-box provider/runtime (see LOCAL_PROVIDERS). */
-export function isLocalProvider(name: string): boolean {
-	return LOCAL_PROVIDERS.has(name);
-}
+export { LOCAL_PROVIDERS, isLocalProvider } from "../providers/local-providers";
 
 export function getModel(id: string): ModelEntry | undefined {
 	return MODELS.find((m) => m.id === id);

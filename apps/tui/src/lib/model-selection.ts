@@ -455,20 +455,32 @@ export function missingModelNotice(opts: {
 }
 
 /**
- * Whether `model` may be announced as the one that will answer (#no-silent-swap).
- * A cloud provider's model exists only if that provider's own list, fetched now,
- * names it; on-box runtimes are checked elsewhere. An empty live list means it
- * could not be verified, which is allowed (never a guess either way).
+ * Whether `model` may be announced as the one that will answer. A cloud
+ * provider's model exists only if that provider's own list, fetched now, names
+ * it; on-box runtimes are checked elsewhere. When the live list cannot be
+ * fetched (or is empty) the check fails open with a notice: the declared list
+ * is a guess and must not refuse a valid model.
  */
 export async function checkModelSwitch(
 	reader: LiveModelsReader,
 	provider: string,
 	model: string,
 	isLocal: (provider: string) => boolean,
-): Promise<{ ok: true } | { ok: false; message: string }> {
-	if (isLocal(provider)) return { ok: true };
-	const live = await listProviderModels(reader, provider);
-	if (live.length === 0 || live.includes(model)) return { ok: true };
+): Promise<{ ok: true; notice?: string } | { ok: false; message: string }> {
+	if (isLocal(provider) || !reader.isKnownProvider(provider)) return { ok: true };
+	let live: string[] = [];
+	try {
+		live = (await reader.discoverModels(provider)).map((m) => String(m).trim()).filter(Boolean);
+	} catch {
+		// handled below as an unverifiable list
+	}
+	if (live.length === 0) {
+		return {
+			ok: true,
+			notice: `Could not fetch ${provider}'s model list to check "${model}"; using it as given.`,
+		};
+	}
+	if (live.includes(model)) return { ok: true };
 	return {
 		ok: false,
 		message: `${provider} does not serve "${model}". It serves right now: ${live.slice(0, 20).join(", ")}${live.length > 20 ? ", ..." : ""}. Pick one with /model.`,

@@ -88,6 +88,14 @@ describe("a cloud provider's model is never checked against Ollama", () => {
 	});
 });
 
+describe("one local set", () => {
+	it("llama-server is local, minimax is not", async () => {
+		const { isLocalProvider } = await import("./local-providers");
+		expect(isLocalProvider("llama-server")).toBe(true);
+		expect(isLocalProvider("minimax")).toBe(false);
+	});
+});
+
 describe("a local fallback is announced and never a bare hash", () => {
 	it("a missing local model reroutes within Ollama and says what, who, and why", async () => {
 		let calls = 0;
@@ -176,6 +184,18 @@ describe("/model on a cloud provider checks the provider's live list", () => {
 		);
 		expect(v.ok).toBe(false);
 		if (!v.ok) expect(v.message).toContain("MiniMax-M2");
+	});
+	it("fails open with a notice when the live fetch fails", async () => {
+		const down = {
+			isKnownProvider: () => true,
+			getProvider: () => ({ models: ["declared-only"] }) as never,
+			discoverModels: async () => {
+				throw new Error("offline");
+			},
+		};
+		const v = await checkModelSwitch(down as never, "minimax", "MiniMax-M2.7", isLocal);
+		expect(v.ok).toBe(true);
+		if (v.ok) expect(v.notice).toContain("Could not fetch minimax");
 	});
 	it("accepts a listed model, and a local one without asking", async () => {
 		expect(

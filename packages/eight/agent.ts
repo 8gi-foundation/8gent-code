@@ -4652,11 +4652,11 @@ function tryResolve(
 
 /**
  * True when the model runs on this machine: a local provider (the registry's
- * LOCAL_PROVIDERS, plus llama-server) with no base URL, or one on loopback.
+ * LOCAL_PROVIDERS) with no base URL, or one on loopback.
  * Decides whether the operator's user-global instructions may be sent (#3236).
  */
 export function runsOnBox(runtime: string, baseUrl?: string): boolean {
-	if (!isLocalProvider(runtime) && runtime !== "llama-server") return false;
+	if (!isLocalProvider(runtime)) return false;
 	if (!baseUrl) return true;
 	try {
 		const host = new URL(baseUrl).hostname;

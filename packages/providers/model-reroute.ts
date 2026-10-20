@@ -18,6 +18,7 @@
  * the installed-model probe in `orchestration/local-model-detect` (loaded lazily
  * to keep the providers -> orchestration import graph acyclic).
  */
+import { isLocalProvider } from "./local-providers";
 
 /** Minimal shape of a detected, installed local model (mirrors DetectedModel). */
 export interface InstalledModel {
@@ -31,25 +32,6 @@ export interface InstalledModel {
 	 * it (Law 2, issue #2747). Undefined = not probed.
 	 */
 	toolCapable?: boolean;
-}
-
-/**
- * On-box runtimes: the only providers whose "installed" list is Ollama's or LM
- * Studio's. Mirrors LOCAL_PROVIDERS in packages/eight/registry.ts (inlined so
- * providers never import eight). Everything else is a cloud provider, whose
- * models are known only by that provider's own live list.
- */
-const LOCAL_RUNTIMES: ReadonlySet<string> = new Set([
-	"8gent",
-	"ollama",
-	"lmstudio",
-	"apfel",
-	"apple-foundation",
-]);
-
-/** True for an on-box runtime. A cloud provider's model is never checked against local installs. */
-export function isLocalRuntime(provider: string): boolean {
-	return LOCAL_RUNTIMES.has(provider);
 }
 
 /**
@@ -377,7 +359,7 @@ export async function callLocalModelWithReroute<T>(opts: {
 			// "Installed" is a local concept. A cloud provider's model is never
 			// looked up in Ollama's list and never called "missing": its own error
 			// is the answer, with its live list to choose from.
-			if (!isLocalRuntime(provider)) {
+			if (!isLocalProvider(provider)) {
 				const error = err instanceof Error ? err.message : String(err);
 				const live = await (opts.liveModels?.(provider) ?? Promise.resolve([])).catch(
 					() => [] as string[],

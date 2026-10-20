@@ -6014,6 +6014,7 @@ export function App({
 									return;
 								}
 								setCurrentModel(newModel);
+								if (verdict.notice) addSystemMessage(verdict.notice);
 								addSystemMessage(`Model switched to: ${newModel}`);
 							});
 						} else {
