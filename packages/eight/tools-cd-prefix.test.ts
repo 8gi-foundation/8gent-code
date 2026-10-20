@@ -13,7 +13,7 @@ import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { agentTools, setToolContext } from "../ai/tools";
 import { CreatedFiles } from "../permissions/s1-created-files";
 import { _resetSystemOne, _setSystemOneOverridesForTests } from "../permissions/system-one-gate";
-import { REFUSAL_LEAD, ToolExecutor } from "./tools";
+import { ToolExecutor } from "./tools";
 const CHAIN_LEAD = "[BLOCKED] Send each command as its own run_command call.";
 
 afterAll(() => {
@@ -141,7 +141,7 @@ describe("ToolExecutor run_command with a leading cd", () => {
 			"cd $HOME && touch z.txt",
 		]) {
 			const out = await run(command);
-			expect(out, command).toStartWith(REFUSAL_LEAD);
+			expect(out, command).toStartWith(CHAIN_LEAD);
 			expect(out, command).toContain("Command chaining is not allowed.");
 		}
 		expect(asked).toEqual([]);
@@ -255,7 +255,7 @@ describe("native run_command with a leading cd", () => {
 
 	test("refused prefixes and chained rests run nothing", async () => {
 		expect(await execute("cd .. && touch z.txt")).toStartWith(
-			"[BLOCKED] Command chaining is not allowed.",
+			"[BLOCKED] Send each command as its own run_command call. Command chaining is not allowed.",
 		);
 		expect(await execute("cd video && touch a.txt; touch b.txt")).toStartWith(
 			"[BLOCKED] Send each command as its own run_command call. Semicolon command chaining is not allowed",

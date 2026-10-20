@@ -48,7 +48,7 @@ const LEADING_DOT_SLASH = /^\.\/+/;
 const SECOND_CD = /^cd(\s|$)/;
 
 const RULE =
-	"Command chaining is not allowed. A leading `cd <folder> &&` works only for one plain folder inside the project";
+	"Send each command as its own run_command call. Command chaining is not allowed. A leading `cd <folder> &&` works only for one plain folder inside the project";
 
 /** The refusal text, in the sanitizer's [BLOCKED] form so chain-refusal counting sees it. */
 function refuse(why: string, command: string): CdPrefix {
