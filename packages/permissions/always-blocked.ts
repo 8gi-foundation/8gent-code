@@ -583,10 +583,12 @@ function scanQuoteBlind(input: string, out: string[][]): void {
 			.map((t) => t.replace(/\$(?=['"])/g, "").replace(/['"\\]/g, ""))
 			.filter(Boolean);
 		if (tokens.length > 0) processSegment(tokens, null, out, 0);
-		// Once quoting is gone a -c script is spread over several words, but the shell takes only
-		// the next word as the script. Read everything after a -c style flag as a command too.
+		// Once quoting is gone a -c script is spread over several words, and the script need not be
+		// the very next word (`bash -c -- 'x'`, `bash -cx 'x'`, `bash -ce 'x'`, `bash -c -o errexit 'x'`).
+		// After any flag cluster holding a c, read every later word as the start of a command.
 		for (let i = 0; i < tokens.length - 1; i++) {
-			if (/^-[a-zA-Z]*c$/.test(tokens[i])) processSegment(tokens.slice(i + 1), null, out, 0);
+			if (!/^-[a-zA-Z]*c[a-zA-Z]*$/.test(tokens[i])) continue;
+			for (let j = i + 1; j < tokens.length; j++) processSegment(tokens.slice(j), null, out, 0);
 		}
 	}
 }

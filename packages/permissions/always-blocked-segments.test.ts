@@ -196,10 +196,29 @@ const DESYNC_WRAPS: Array<(c: string) => string> = [
 ];
 const QUOTED_DESYNC_LINES = QUOTED_WIPES.flatMap((w) => DESYNC_WRAPS.map((wrap) => wrap(w)));
 
+// Round twelve: the -c script need not be the word right after the flag.
+const C_FLAG_FORMS = [
+	(w: string) => `bash -c -- '${w}'`,
+	(w: string) => `bash -cx '${w}'`,
+	(w: string) => `bash -ce '${w}'`,
+	(w: string) => `bash -c -e '${w}'`,
+	(w: string) => `bash -c -x -- '${w}'`,
+	(w: string) => `sh -c - '${w}'`,
+	(w: string) => `bash -xc -- '${w}'`,
+	(w: string) => `bash -c +x '${w}'`,
+	(w: string) => `bash -c -o errexit '${w}'`,
+	(w: string) => `zsh -c -- '${w}'`,
+];
+const C_FLAG_WIPES = [WIPE, `${RMRF} ~`];
+const C_FLAG_LINES = C_FLAG_WIPES.flatMap((w) =>
+	C_FLAG_FORMS.flatMap((f) => [f(w), ...DESYNC_WRAPS.map((wrap) => wrap(f(w)))]),
+);
+
 const BLOCKED_LINES = [
 	...HOME_LINES,
 	...QUOTE_DESYNC_LINES,
 	...QUOTED_DESYNC_LINES,
+	...C_FLAG_LINES,
 	WIPE,
 	// round seven: quote-aware closeParen (a quoted `)` is not the group's end)
 	`echo @(")") ; ${WIPE} ; echo "x"`,
@@ -323,6 +342,13 @@ const ORDINARY_LINES = [
 	"awk '{print $1}' f",
 	"sed 's/a;b/c/' f",
 	"python3 -c 'import os; print(1)'",
+	"gcc -c main.c",
+	"tar -cf a.tar dir",
+	"curl -c cookies.txt https://example.com",
+	"grep -c foo file",
+	'ssh host "ls -la"',
+	"bash -c 'ls -la'",
+	"bash -ce 'ls'",
 	`echo '${WIPE}' is a dangerous command`,
 	"grep -rf patterns.txt src",
 	"rm -rf /tmp/build",
@@ -351,7 +377,7 @@ const ORDINARY_LINES = [
 ];
 
 // Not blocked, but asks the person every time by policy (#3806): excluded from the unattended-run check only.
-const ASKS_BY_POLICY = new Set(["ssh host ls -la"]);
+const ASKS_BY_POLICY = new Set(["ssh host ls -la", 'ssh host "ls -la"']);
 
 describe("always-blocked segments (#3768)", () => {
 	test("the check sees a blocked command in any position", () => {
