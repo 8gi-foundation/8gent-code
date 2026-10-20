@@ -9,6 +9,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.4] - 2026-10-20
+
+### Changed
+- verify attestation without --source-ref so older gh can install ([#4579](https://github.com/8gi-foundation/8gent-code/pull/4579))
+- fail CI if the installed package contains Python or Swift (#4567) ([#4571](https://github.com/8gi-foundation/8gent-code/pull/4571))
+
+### Fixed
+- tui: quiet git probes outside a repo; resolve --provider model from the live list ([#4584](https://github.com/8gi-foundation/8gent-code/pull/4584))
+- tui: 0x0 terminal size no longer blanks the first screen ([#4576](https://github.com/8gi-foundation/8gent-code/pull/4576))
+- cli: one-shot always answers or names why it cannot ([#4573](https://github.com/8gi-foundation/8gent-code/pull/4573))
+
 ## [0.20.3] - 2026-10-20
 
 ### Added
