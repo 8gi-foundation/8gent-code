@@ -13,10 +13,10 @@
  * early raw-mode hand-off, size read and first render never wait on the
  * terminal. What it cannot prove: Windows console or ConPTY behaviour.
  *
- * Not covered, on purpose: a terminal that answers the probe at once. Over a
- * pipe, a reply written inside the probe window leaves later keys unread (seen
- * with Bun pipe stdin only; real terminals answer at once for every Mac user
- * and work). It needs a real pty to tell a harness artefact from a bug.
+ * A terminal that answers the probe at once is covered by the "answers at once"
+ * case: on Bun, ending the probe from inside the 'data' event and pausing stdin
+ * there left Ink deaf, so no key was ever read (a real bug, not a pipe artefact).
+ * Fixed in theme/terminal-probe.ts; see probe-then-typing.test.ts.
  */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -52,6 +52,7 @@ interface Case {
 const CASES: Case[] = [
 	{ name: "answers nothing (no OSC 11, no DA1 reply)", term: "xterm" },
 	{ name: "answers after the cap (400 ms)", term: "xterm-256color", replyAfterMs: 400 },
+	{ name: "answers at once (0 ms)", term: "xterm-256color", replyAfterMs: 0 },
 	{ name: "reports size 0 by 0", term: "xterm-256color", cols: "0", rows: "0" },
 	{ name: "reports no size at all", term: "xterm-256color", cols: "none", rows: "none" },
 	{ name: "TERM=dumb, no replies", term: "dumb" },
