@@ -17,6 +17,7 @@ import { Box, useStdout } from "ink";
 import React from "react";
 import { DjDeck } from "./DjDeck.js";
 import {
+	type FooterData,
 	type FooterToast,
 	type JudgeState,
 	StatusSegments,
@@ -53,6 +54,8 @@ interface BottomBarProps {
 	judge?: JudgeState;
 	/** Why run_command runs without its OS sandbox; undefined when it has one (#4013). */
 	sandboxOff?: string;
+	/** A gate flagged the last turn (#4510). */
+	verification?: FooterData["verification"];
 }
 
 /** The signed-in display name (#2366). The OS login is not shown: it is the
@@ -94,6 +97,7 @@ export function BottomBar(props: BottomBarProps) {
 							judge: props.judge,
 							sandboxOff: props.sandboxOff,
 							adhd: props.adhd,
+							verification: props.verification,
 						}}
 					/>
 				)}

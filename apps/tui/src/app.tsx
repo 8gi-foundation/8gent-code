@@ -2693,6 +2693,10 @@ export function App({
 	// run_command without its OS boundary (#4013): the reason lives in the
 	// footer, where the one stderr warning cannot be lost under Ink.
 	const [sandboxOff, setSandboxOff] = useState<string | undefined>(undefined);
+	// What a gate flagged on the last turn (#4510); cleared at the next prompt.
+	const [verificationByTab, setVerificationByTab] = useState<
+		Record<string, "unverified" | "tests_claimed_not_run" | undefined>
+	>({});
 	useEffect(() => {
 		const status = runCommandSandboxStatus();
 		if (!status.applied) setSandboxOff(sandboxFooterReason(status.reason));
@@ -6606,6 +6610,7 @@ export function App({
 					// Inject agent mode context into the message
 					const modePrefix = agentMode !== "Planning" ? `[Mode: ${agentMode}] ` : "";
 					const img = imageInput.getAttachedImage();
+					setVerificationByTab((v) => ({ ...v, [tabId]: undefined }));
 					const chatPromise = targetAgent.chat(
 						modePrefix + messageForAgent.trim(),
 						img?.base64,
@@ -6628,6 +6633,10 @@ export function App({
 						return;
 					}
 					perTabAgents.clearPromise(tabId);
+					setVerificationByTab((v) => ({
+						...v,
+						[tabId]: targetAgent.getVerification() ?? undefined,
+					}));
 					const trimmed = (reply ?? "").trim();
 					if (trimmed) {
 						// The plan column is the active tab's; a background turn has none.
@@ -7655,6 +7664,7 @@ export function App({
 					tokensPerSecond={tokensPerSecond}
 					judge={judgeState}
 					sandboxOff={sandboxOff}
+					verification={verificationByTab[activeTabId]}
 					djKeys={djKeys}
 					onDjKeysDone={endDjKeys}
 				/>

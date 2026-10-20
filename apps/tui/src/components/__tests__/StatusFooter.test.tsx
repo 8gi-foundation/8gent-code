@@ -64,7 +64,10 @@ async function frame(cols: number, rows: number, props: Partial<Props> = {}): Pr
 	app.unmount();
 	const last = stdout.frames.filter((f) => f.includes("mode ")).at(-1) ?? "";
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI
-	return last.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\n+$/, "").split("\n");
+	return last
+		.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
+		.replace(/\n+$/, "")
+		.split("\n");
 }
 
 describe("BottomBar renders one footer row, hints included (#3130, #3238)", () => {
@@ -153,11 +156,15 @@ describe("the System One judge is a footer segment, not a chat line (#3090)", ()
 	});
 
 	test("failed is the look-here colour, like the Infinite permission mode", () => {
-		const failed = buildFooterSegments({ mode: "Planning", judge: "failed" }).find((s) => s.key === "judge");
+		const failed = buildFooterSegments({ mode: "Planning", judge: "failed" }).find(
+			(s) => s.key === "judge",
+		);
 		const infinite = buildFooterSegments({ mode: "Planning", permissions: "infinite" }).find(
 			(s) => s.key === "perm",
 		);
-		const loading = buildFooterSegments({ mode: "Planning", judge: "loading" }).find((s) => s.key === "judge");
+		const loading = buildFooterSegments({ mode: "Planning", judge: "loading" }).find(
+			(s) => s.key === "judge",
+		);
 		expect(failed?.color).toBe(infinite?.color);
 		expect(loading?.color).not.toBe(infinite?.color);
 	});
@@ -176,13 +183,17 @@ describe("the System One judge is a footer segment, not a chat line (#3090)", ()
 	test("'judge ready' is the quiet state and is not shown (#3130)", async () => {
 		const row = (await frame(160, 48, { judge: "ready", user: undefined }))[0] ?? "";
 		expect(row).not.toContain("judge");
-		expect(buildFooterSegments({ mode: "Planning", judge: "ready" }).some((s) => s.key === "judge")).toBe(false);
+		expect(
+			buildFooterSegments({ mode: "Planning", judge: "ready" }).some((s) => s.key === "judge"),
+		).toBe(false);
 	});
 });
 
 describe("footer segments", () => {
 	test("the permission mode prints as a word, never as ?", () => {
-		const seg = buildFooterSegments({ mode: "Planning", permissions: "infinite" }).find((s) => s.key === "perm");
+		const seg = buildFooterSegments({ mode: "Planning", permissions: "infinite" }).find(
+			(s) => s.key === "perm",
+		);
 		expect(seg?.value).toBe("Infinite");
 	});
 
@@ -199,7 +210,12 @@ describe("footer segments", () => {
 	});
 
 	test("fit keeps display order and drops the highest priority first", () => {
-		const segs = buildFooterSegments({ mode: "Planning", sessionTime: "1s", user: "u", adhd: true });
+		const segs = buildFooterSegments({
+			mode: "Planning",
+			sessionTime: "1s",
+			user: "u",
+			adhd: true,
+		});
 		const all = fitFooterSegments(segs, 999).map((s) => s.key);
 		expect(all).toEqual(["mode", "adhd", "user", "session"]);
 		const some = fitFooterSegments(segs, 45).map((s) => s.key);
@@ -213,7 +229,10 @@ describe("footer segments", () => {
 	});
 
 	test("mode is never dropped, even when nothing fits", () => {
-		const kept = fitFooterSegments(buildFooterSegments({ mode: "Implementing", sessionTime: "1s" }), 5);
+		const kept = fitFooterSegments(
+			buildFooterSegments({ mode: "Implementing", sessionTime: "1s" }),
+			5,
+		);
 		expect(kept.map((s) => s.key)).toEqual(["mode"]);
 	});
 
@@ -225,14 +244,18 @@ describe("footer segments", () => {
 describe("quiet states leave the footer (#3130)", () => {
 	test("Ask, the default, is not a segment; every other mode is", () => {
 		const has = (permissions: string) =>
-			buildFooterSegments({ mode: "Planning", permissions }).some((s) => s.key === "perm" || s.key === "approval");
+			buildFooterSegments({ mode: "Planning", permissions }).some(
+				(s) => s.key === "perm" || s.key === "approval",
+			);
 		expect(has("ask")).toBe(false);
 		for (const m of ["plan", "guarded", "infinite"]) expect(has(m)).toBe(true);
 	});
 
 	test("the OS login is not a segment; a signed-in name is", async () => {
 		expect((await frame(160, 48, { user: undefined }))[0]).not.toContain("user");
-		expect((await frame(160, 48, { user: "james", ready: 3, total: 3 }))[0]).toContain("user james");
+		expect((await frame(160, 48, { user: "james", ready: 3, total: 3 }))[0]).toContain(
+			"user james",
+		);
 	});
 
 	test("providers show only when one is down", async () => {
@@ -241,7 +264,8 @@ describe("quiet states leave the footer (#3130)", () => {
 	});
 
 	test("the audit row: approval ask, judge ready and providers 3/3 are gone", async () => {
-		const row = (await frame(160, 48, { ready: 3, total: 3, judge: "ready", user: undefined }))[0] ?? "";
+		const row =
+			(await frame(160, 48, { ready: 3, total: 3, judge: "ready", user: undefined }))[0] ?? "";
 		for (const quiet of ["approval", "judge", "providers"]) expect(row).not.toContain(quiet);
 		expect(row).toContain("mode Planning [^Y]");
 	});
@@ -258,7 +282,10 @@ describe("footer key caps (#3238)", () => {
 		expect(fitFooterHints(0)).toEqual([]);
 		expect(fitFooterHints(first - 1)).toEqual([]);
 		expect(fitFooterHints(first)).toEqual([FOOTER_HINTS[0]]);
-		expect(fitFooterHints(first + 2 + hintWidth(FOOTER_HINTS[1] ?? ""))).toEqual([FOOTER_HINTS[0], FOOTER_HINTS[1]]);
+		expect(fitFooterHints(first + 2 + hintWidth(FOOTER_HINTS[1] ?? ""))).toEqual([
+			FOOTER_HINTS[0],
+			FOOTER_HINTS[1],
+		]);
 		expect(fitFooterHints(999)).toEqual([...FOOTER_HINTS]);
 	});
 
@@ -269,7 +296,9 @@ describe("footer key caps (#3238)", () => {
 
 describe("run_command without its OS sandbox is a footer segment (#4013)", () => {
 	test("no segment when the sandbox applies", () => {
-		expect(buildFooterSegments({ mode: "Planning" }).find((s) => s.key === "sandbox")).toBeUndefined();
+		expect(
+			buildFooterSegments({ mode: "Planning" }).find((s) => s.key === "sandbox"),
+		).toBeUndefined();
 	});
 
 	test("'sandbox off' with the reason, in the look-here colour", () => {
@@ -299,7 +328,10 @@ describe("the sandbox segment never costs a hint (#4013, Windows parity)", () =>
 	const plain = (w: number) => {
 		const segments = fitFooterSegments(withoutSandbox, w);
 		const room = Math.max(0, w - segmentsWidth(segments) - 3);
-		return fitFooterHints(room, segments.some((s) => s.key === "perm"));
+		return fitFooterHints(
+			room,
+			segments.some((s) => s.key === "perm"),
+		);
 	};
 
 	test("at every width, the row keeps every hint it would show with no sandbox segment", () => {
@@ -333,5 +365,49 @@ describe("the sandbox segment never costs a hint (#4013, Windows parity)", () =>
 			expect(row.segments).toEqual(fitFooterSegments(withoutSandbox, w));
 			expect(row.hints).toEqual(plain(w));
 		}
+	});
+});
+
+describe("a gated turn shows one word at the right end of the bar (#4510)", () => {
+	test("unverified and tests-claimed-not-run render last, in the warning colour", async () => {
+		const warn = buildFooterSegments({ mode: "Planning", sandboxOff: "x" }).find(
+			(x) => x.key === "sandbox",
+		);
+		for (const [v, word] of [
+			["unverified", "unverified"],
+			["tests_claimed_not_run", "tests-claimed-not-run"],
+		] as const) {
+			const segs = buildFooterSegments({ mode: "Planning", sessionTime: "8m", verification: v });
+			expect(segs.at(-1)?.value).toBe(word);
+			expect(segs.at(-1)?.color).toBe(warn?.color);
+			const row = (await frame(160, 48, { verification: v }))[0] ?? "";
+			expect(row).toContain(word);
+			expect(row.indexOf(word)).toBeGreaterThan(row.indexOf("session 8m 12s"));
+		}
+	});
+
+	test("verified and absent draw nothing", async () => {
+		for (const v of [undefined, "verified"] as const) {
+			expect(
+				buildFooterSegments({ mode: "Planning", verification: v }).some(
+					(x) => x.key === "verification",
+				),
+			).toBe(false);
+			expect((await frame(160, 48, { verification: v }))[0] ?? "").not.toContain("verified");
+		}
+	});
+});
+
+describe("the word is held per tab (#4510)", () => {
+	const byTab: Record<string, Props["verification"]> = { A: "unverified", B: undefined };
+	test("a flagged turn on tab A is not drawn under tab B, and is back on A", async () => {
+		expect((await frame(160, 48, { verification: byTab.B }))[0] ?? "").not.toContain("unverified");
+		expect((await frame(160, 48, { verification: byTab.A }))[0] ?? "").toContain("unverified");
+	});
+	test("switching back to A shows A's word and B shows nothing", async () => {
+		const row = async (tab: string) =>
+			(await frame(160, 48, { verification: byTab[tab] }))[0] ?? "";
+		expect(await row("A")).toContain("unverified");
+		expect(await row("B")).not.toContain("unverified");
 	});
 });

@@ -522,6 +522,8 @@ export class Agent {
 	private turnTask = "";
 	private doneGateNudged = false;
 	private doneGate: string | null = null;
+	/** True when the honesty gate rewrote this turn's reply (#4510). */
+	private honestyFired = false;
 	private turnGitBaseline: Map<string, string> | null = null;
 	/**
 	 * Set by the harness, never from model text, when the last chat() turn
@@ -1883,6 +1885,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.settleDoneGate(gated.content);
 		if (gated.violated) {
 			console.log(`[honesty] blocked fabricated completion: ${gated.reason}`);
+			this.honestyFired = true;
 			this.lastTurnFailure = {
 				reason: gated.denied ? "denied" : "turn_failed",
 				message: gated.content,
@@ -2055,6 +2058,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		imageOriginal?: { width: number; height: number },
 	): Promise<string> {
 		this.lastTurnFailure = null;
+		this.honestyFired = false;
 		return runAsParentSession(
 			() => ({
 				runtime: this.config.runtime,
@@ -2103,6 +2107,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			message: `done_gate: ${DONE_GATE_FIELD}`,
 			unverified: [TEST_CLAIM_NUDGE],
 		};
+	}
+
+	/** What the status bar flags after a turn (#4510); null means nothing was flagged, not "verified". */
+	getVerification(): "unverified" | "tests_claimed_not_run" | null {
+		if (this.doneGate) return "tests_claimed_not_run";
+		return this.honestyFired || this.lastTurnFailure?.reason === "unverified" ? "unverified" : null;
 	}
 
 	/** `done_gate` for this turn's result: "stale_or_failing_tests" or null. Set by the harness only. */
@@ -3587,6 +3597,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			this.settleDoneGate(gatedNative.content);
 			if (gatedNative.violated) {
 				console.log(`[honesty] blocked fabricated completion: ${gatedNative.reason}`);
+				this.honestyFired = true;
 				this.lastTurnFailure = {
 					reason: gatedNative.denied ? "denied" : "turn_failed",
 					message: gatedNative.content,

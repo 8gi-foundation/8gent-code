@@ -143,6 +143,7 @@ for (const [label, textTools, m] of [
 			expect(inLast).toHaveLength(1);
 			expect(agent.getDoneGate()).toBe("stale_or_failing_tests");
 			expect(agent.getLastTurnFailure()?.reason).toBe("unverified");
+			expect(agent.getVerification()).toBe("tests_claimed_not_run");
 		}, 60_000);
 
 		test("testClaimGate option on, env unset: same", async () => {
@@ -163,6 +164,8 @@ for (const [label, textTools, m] of [
 			expect(existsSync(join(repo, "out.txt"))).toBe(true);
 			expect(nudges()).toHaveLength(0);
 			expect(agent.getDoneGate()).toBeNull();
+			// Nothing flagged: null, never "verified" (#4510).
+			expect(agent.getVerification()).toBeNull();
 		}, 60_000);
 	});
 }
