@@ -8,6 +8,15 @@
  * existing local default. The `computer` channel uses the chain built for
  * the 8gent Computer surface: apfel (chat) → Qwen 3.6-27B (vision/tool)
  * → DeepSeek V4-Flash (heavy cloud) → OpenRouter `:free` (last resort).
+ *
+ * Cache affinity (#4500, off by default): with `cacheAffinity: true` or
+ * EIGHT_CACHE_AFFINITY=1, a session that passes its id to resolve() and reports
+ * each served turn with noteServed() stays on the backend that holds its prompt
+ * cache while that backend is not down, instead of restarting at the chain head.
+ * A switch away records `coldPrefillTokens` (prompt tokens the new backend must
+ * prefill from scratch), and graceRetry() allows one retry on a transient error
+ * when re-prefilling elsewhere would cost more than waiting. Flag off: no state
+ * is kept and behaviour is identical to before. Chain config files are untouched.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -56,6 +65,8 @@ export interface FailoverEvent {
 	toModel: string;
 	toProvider: string;
 	reason: string;
+	/** Prompt tokens the session's warm backend held; set on a switch away from it (cacheAffinity only). */
+	coldPrefillTokens?: number;
 }
 
 /**
@@ -172,6 +183,22 @@ export interface ModelFailoverOptions {
 	 * NoAllowedProviderError instead of going to openrouter (#3710).
 	 */
 	allowHosted?: boolean;
+	/**
+	 * Keep a session on the backend holding its prompt cache (#4500). Defaults to
+	 * EIGHT_CACHE_AFFINITY=1; off otherwise.
+	 */
+	cacheAffinity?: boolean;
+	/** Estimated prefill speed for the grace-retry decision. Default 2000 tokens/s. */
+	prefillTokensPerSec?: number;
+}
+
+/** What a session's last-good backend saw: where its prompt cache lives. */
+interface Affinity {
+	channel: FailoverChannel;
+	model: string;
+	entry: FailoverEntry;
+	promptTokens: number;
+	graceUsed: boolean;
 }
 
 export class ModelFailover {
@@ -185,6 +212,10 @@ export class ModelFailover {
 	private apfelSkipped: string | null = null;
 	/** channel + model of every chain that lost a hosted apfel entry. */
 	private apfelChains = new Set<string>();
+	private cacheAffinity: boolean;
+	private prefillTokensPerSec: number;
+	/** session id to its last-good backend; only written when cacheAffinity is on. */
+	private affinity = new Map<string, Affinity>();
 
 	constructor(
 		chains?: Record<FailoverChannel, Record<string, FailoverChain>>,
@@ -195,6 +226,8 @@ export class ModelFailover {
 				? allowFromEnv()
 				: (opts.allow?.map((p) => p.trim().toLowerCase()) ?? null);
 		this.hostedBlocked = !(opts.allowHosted ?? hostedAllowed());
+		this.cacheAffinity = opts.cacheAffinity ?? process.env.EIGHT_CACHE_AFFINITY?.trim() === "1";
+		this.prefillTokensPerSec = opts.prefillTokensPerSec ?? 2000;
 		// No opt-in: the allowlist is the local providers (narrowed further by an explicit one).
 		this.allow = this.hostedBlocked
 			? (explicit ?? [...LOCAL_FAILOVER_PROVIDERS]).filter((p) => !isHostedProvider(p))
@@ -417,7 +450,7 @@ export class ModelFailover {
 	 * providers, and when nothing allowed can serve the model this throws
 	 * NoAllowedProviderError instead of defaulting to openrouter.
 	 */
-	resolve(model: string, channel: FailoverChannel = "text"): FailoverEntry {
+	resolve(model: string, channel: FailoverChannel = "text", sessionId?: string): FailoverEntry {
 		const chain = this.chainsByChannel[channel]?.[model];
 		if (this.allow && (chain ? chain.models.length === 0 : !this.allow.includes("openrouter"))) {
 			const droppedApfel = this.apfelChains.has(`${channel}\0${model}`) ? this.apfelSkipped : null;
@@ -432,17 +465,23 @@ export class ModelFailover {
 		if (!chain) return { model, provider: "openrouter" };
 
 		const head = chain.models[0];
+		// Cache affinity: a warm, healthy backend wins over chain order.
+		const aff = this.warmAffinity(sessionId, model, channel);
+		if (aff && !this.down.has(this.key(aff.entry.model, aff.entry.provider))) return aff.entry;
+		const from = aff?.entry ?? head;
+		const cold = aff ? { coldPrefillTokens: aff.promptTokens } : {};
 		for (const entry of chain.models) {
 			if (!this.down.has(this.key(entry.model, entry.provider))) {
-				if (head && (entry.model !== head.model || entry.provider !== head.provider)) {
+				if (from && (entry.model !== from.model || entry.provider !== from.provider)) {
 					this.recordEvent({
 						ts: Date.now(),
 						channel,
-						fromModel: head.model,
-						fromProvider: head.provider,
+						fromModel: from.model,
+						fromProvider: from.provider,
 						toModel: entry.model,
 						toProvider: entry.provider,
-						reason: "primary-down",
+						reason: aff ? "affinity-down" : "primary-down",
+						...cold,
 					});
 				}
 				return entry;
@@ -462,8 +501,50 @@ export class ModelFailover {
 			toModel: last.model,
 			toProvider: last.provider,
 			reason: "all-tiers-down",
+			...cold,
 		});
 		return last;
+	}
+
+	/** The session's affinity for this model and channel, when the flag is on. */
+	private warmAffinity(
+		sessionId: string | undefined,
+		model: string,
+		channel: FailoverChannel,
+	): Affinity | undefined {
+		if (!this.cacheAffinity || !sessionId) return undefined;
+		const a = this.affinity.get(sessionId);
+		return a && a.model === model && a.channel === channel ? a : undefined;
+	}
+
+	/**
+	 * Record that `entry` served a turn for the session with `promptTokens` of
+	 * prompt, so the next resolve() starts there. No-op with the flag off.
+	 */
+	noteServed(
+		sessionId: string,
+		model: string,
+		entry: FailoverEntry,
+		promptTokens: number,
+		channel: FailoverChannel = "text",
+	): void {
+		if (!this.cacheAffinity) return;
+		this.affinity.set(sessionId, { channel, model, entry, promptTokens, graceUsed: false });
+	}
+
+	/**
+	 * True once per warm backend when a transient error is worth one retry before
+	 * failing over: `entry` is the session's warm backend and re-prefilling the
+	 * session's prompt elsewhere (promptTokens / prefillTokensPerSec) would take
+	 * longer than `waitMs`. The caller retries, then markDown()s if it fails again.
+	 */
+	graceRetry(sessionId: string, entry: FailoverEntry, waitMs: number): boolean {
+		const a = this.cacheAffinity ? this.affinity.get(sessionId) : undefined;
+		if (!a || a.graceUsed) return false;
+		if (a.entry.model !== entry.model || a.entry.provider !== entry.provider) return false;
+		if ((a.promptTokens / this.prefillTokensPerSec) * 1000 <= waitMs) return false;
+		a.graceUsed = true;
+		return true;
 	}
 
 	/**

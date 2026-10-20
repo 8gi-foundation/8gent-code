@@ -166,3 +166,58 @@ describe("telling the user apfel was skipped (#3908)", () => {
 		}
 	});
 });
+
+describe("ModelFailover cache affinity (#4500)", () => {
+	const hosted = { allowHosted: true };
+	const lm = { model: "ornith-1.0-9b", provider: "lmstudio" };
+	const apfel = { model: "MiniMax-M2.7", provider: "apfel" };
+
+	test("starts at the warm backend, not the chain head", () => {
+		const f = new ModelFailover(chains, { ...hosted, cacheAffinity: true });
+		f.noteServed("s1", "ornith-1.0-9b", apfel, 9000);
+		expect(f.resolve("ornith-1.0-9b", "text", "s1")).toEqual(apfel);
+		expect(f.resolve("ornith-1.0-9b", "text", "other")).toEqual(lm);
+		expect(f.getEvents()).toEqual([]);
+	});
+
+	test("falls back to chain order when the warm backend is down, with coldPrefillTokens", () => {
+		const f = new ModelFailover(chains, { ...hosted, cacheAffinity: true });
+		f.noteServed("s1", "ornith-1.0-9b", apfel, 9000);
+		f.markDown(apfel.model, apfel.provider);
+		expect(f.resolve("ornith-1.0-9b", "text", "s1")).toEqual(lm);
+		const [ev] = f.getEvents();
+		expect(ev?.fromProvider).toBe("apfel");
+		expect(ev?.toProvider).toBe("lmstudio");
+		expect(ev?.reason).toBe("affinity-down");
+		expect(ev?.coldPrefillTokens).toBe(9000);
+	});
+
+	test("grace retry is allowed once when re-prefill outweighs the wait", () => {
+		const f = new ModelFailover(chains, {
+			...hosted,
+			cacheAffinity: true,
+			prefillTokensPerSec: 1000,
+		});
+		f.noteServed("s1", "ornith-1.0-9b", apfel, 8000); // 8 s of re-prefill
+		expect(f.graceRetry("s1", lm, 1500)).toBe(false); // not the warm backend
+		expect(f.graceRetry("s1", apfel, 10_000)).toBe(false); // waiting costs more
+		expect(f.graceRetry("s1", apfel, 1500)).toBe(true);
+		expect(f.graceRetry("s1", apfel, 1500)).toBe(false); // one retry only
+		f.noteServed("s1", "ornith-1.0-9b", apfel, 8000); // a served turn re-arms it
+		expect(f.graceRetry("s1", apfel, 1500)).toBe(true);
+	});
+
+	test("flag off behaves exactly like today", () => {
+		const off = new ModelFailover(chains, hosted);
+		const base = new ModelFailover(chains, hosted);
+		off.noteServed("s1", "ornith-1.0-9b", apfel, 9000);
+		expect(off.resolve("ornith-1.0-9b", "text", "s1")).toEqual(base.resolve("ornith-1.0-9b"));
+		off.markDown(lm.model, lm.provider);
+		base.markDown(lm.model, lm.provider);
+		expect(off.resolve("ornith-1.0-9b", "text", "s1")).toEqual(base.resolve("ornith-1.0-9b"));
+		expect(off.graceRetry("s1", apfel, 0)).toBe(false);
+		const strip = (e: { ts: number }[]) => e.map(({ ts, ...r }) => r);
+		expect(strip(off.getEvents())).toEqual(strip(base.getEvents()));
+		expect(off.getEvents().every((e) => e.coldPrefillTokens === undefined)).toBe(true);
+	});
+});
