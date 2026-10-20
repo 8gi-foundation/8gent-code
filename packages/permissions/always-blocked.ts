@@ -525,6 +525,102 @@ function isSystemTarget(t: string): boolean {
 	);
 }
 
+/** Commands that delete what they are given; `find -exec` of one over a guarded path is a wipe. */
+const DELETERS = new Set(["rm", "unlink", "shred", "rmdir"]);
+
+/** find tests whose pattern narrows the match to named files (`-name '*.log'`), unless the pattern is wild. */
+const FIND_NAME_TESTS = /^-(name|iname|path|ipath|wholename|iwholename|regex|iregex)$/;
+
+/** Boolean structure that can invert or bypass a name test: `-o`, `-not`, `!`, groups, `,`. */
+const FIND_BOOLEAN = /^(-o|-or|-not|!|\(|\\\(|,)$/;
+/** find actions: whatever stands before the first one is a filter on it, whatever stands after is not. */
+const FIND_ACTION =
+	/^-(delete|exec|execdir|ok|okdir|print|print0|printf|ls|fprint|fprint0|fprintf|fls|prune|quit)$/;
+
+/**
+ * True when every match of the find expression is a file picked by a non-wild name test that is
+ * ANDed in before the first action. Any `-o`, `-not`, `!`, group or `,` anywhere voids it (a narrow
+ * name joined to the action by -o, or negated, still reaches everything else), and so does a name
+ * test written after the action (`-delete -name x` deletes before it tests).
+ */
+function findNarrowed(words: string[]): boolean {
+	if (words.some((w) => FIND_BOOLEAN.test(w))) return false;
+	const act = words.findIndex((w) => FIND_ACTION.test(w));
+	const end = act < 0 ? words.length : act;
+	for (let i = 0; i < end - 1; i++) {
+		if (FIND_NAME_TESTS.test(words[i]) && narrowPattern(words[i], words[i + 1])) return true;
+	}
+	return false;
+}
+
+/** A regex with none of these metacharacters names one literal path, so it cannot match everything. */
+const REGEX_META = /[.*+?[\](){}|^$\\]/;
+
+/**
+ * Does this pattern, given to this test, pick specific files? A name test needs a non-wild glob. A
+ * path-style test (`-path`, `-wholename`) must not be a glob that covers everything under home or
+ * root (`/*`, `*`, the home directory, `$HOME/*`, `/*` + `/*`). A regex test counts only when it has
+ * no regex metacharacter at all: `.*`, `.+`, `[^x]*` and `(.*)` all match every path.
+ */
+function narrowPattern(test: string, pat: string): boolean {
+	if (/^-i?regex$/.test(test)) return pat !== "" && !REGEX_META.test(pat);
+	if (/^-(name|iname)$/.test(test)) return !isWildComponent(pat);
+	const comps = pat.split("/").filter(Boolean);
+	if (comps.length === 0 || comps.every(isWildComponent)) return false;
+	return !(
+		isRootTarget(normTarget(pat)) ||
+		isHomeTarget(pat) ||
+		isHomeTarget(pat.replace(/\/\*+$/, ""))
+	);
+}
+
+/** The path operands of find: after its leading -H -L -P -D x -On options, up to the first expression word. */
+function findPaths(argv: string[]): string[] {
+	let i = 1;
+	while (i < argv.length) {
+		const a = argv[i];
+		if (a === "-H" || a === "-L" || a === "-P" || /^-O\d*$/.test(a)) i++;
+		else if (a === "-D") i += 2;
+		else if (/^-D./.test(a)) i++;
+		else break;
+	}
+	const paths: string[] = [];
+	for (; i < argv.length; i++) {
+		const a = argv[i];
+		if ((a.startsWith("-") && a !== "-") || a === "(" || a === "\\(" || a === "!" || a === ",")
+			break;
+		paths.push(a);
+	}
+	return paths;
+}
+
+/**
+ * find over the root or the home directory with `-delete`, or with `-exec`, `-execdir`, `-ok` or
+ * `-okdir` of a delete command: the wipe, spelled through find (#4514 family 4). The command that
+ * -exec runs is read the way a top-level line is, so `-exec sh -c '...'` and a wrapper in front of
+ * the delete are seen. A name test with a non-wild pattern (`-name '*.log'`) narrows the match to
+ * named files, which is ordinary cleanup, so it is not a wipe.
+ */
+function findWipeReason(argv: string[]): string | null {
+	const paths = findPaths(argv).map(normTarget);
+	const root = paths.some(isRootTarget);
+	if (!root && !paths.some(isHomeTarget)) return null;
+	const rest = argv.slice(1);
+	if (findNarrowed(rest)) return null;
+	const where = root ? "the root filesystem" : "the home directory";
+	if (rest.includes("-delete")) return `find -delete over ${where}`;
+	for (const payload of findPayloads(argv)) {
+		if (payload.length === 0) continue;
+		for (const inner of commandArgvs(payload.join(" "))) {
+			const n = path.basename(inner[0] ?? "").toLowerCase();
+			if (DELETERS.has(n) || (n === "find" && findWipeReason(inner))) {
+				return `find -exec of a delete command over ${where}`;
+			}
+		}
+	}
+	return null;
+}
+
 /** Why this one command is always refused, or null. Exact targets only. */
 export function blockedReason(argv: string[]): string | null {
 	if (argv.length === 0) return null;
@@ -548,6 +644,7 @@ export function blockedReason(argv: string[]): string | null {
 			return "recursive delete of the home directory";
 		return null;
 	}
+	if (name === "find") return findWipeReason(argv);
 	if (name === "chmod") {
 		const mode = operands[0];
 		if (targets.slice(1).some(isRootTarget) && (isRecursive(flags) || mode === "000")) {
@@ -586,7 +683,7 @@ function emitLoose(tokens: string[], out: string[][], depth: number): void {
 const MAX_WORD_BRACES = 64;
 
 /** Command names whose arguments decide a block: a word too large to enumerate behind one is refused. */
-const GUARDED = new Set(["rm", "chmod", "chown", "chgrp", "dd", "newfs"]);
+const GUARDED = new Set(["rm", "chmod", "chown", "chgrp", "dd", "newfs", "find"]);
 
 /** What a refused unenumerable word reports as: the root wipe, the strongest reason. */
 const UNENUMERABLE = ["rm", "-rf", "/"];
@@ -603,8 +700,9 @@ function processSegment(
 	prevTokens: string[] | null,
 	out: string[][],
 	depth: number,
+	upstream: string[][] | null = null,
 ): void {
-	processSegmentOne(rawTokens, prevTokens, out, depth);
+	processSegmentOne(rawTokens, prevTokens, out, depth, upstream);
 	if (
 		!rawTokens.some(
 			(t) => (t.includes("{") && (t.includes(",") || t.includes(".."))) || t.includes("["),
@@ -632,7 +730,154 @@ function processSegment(
 		return;
 	}
 	if (expanded.join("\0") !== rawTokens.join("\0"))
-		processSegmentOne(expanded, prevTokens, out, depth);
+		processSegmentOne(expanded, prevTokens, out, depth, upstream);
+}
+
+/** The option that names xargs's replacement string (`-I X`, `-IX`, `-i[X]`, `--replace[=X]`, `-J X`), or null. */
+function xargsReplStr(tokens: string[]): string | null {
+	const at = tokens.findIndex((t) => path.basename(t) === "xargs");
+	if (at < 0) return null;
+	let repl: string | null = null;
+	const takesValue = new Set(["-a", "-d", "-E", "-L", "-n", "-P", "-s", "-R", "-S"]);
+	for (let i = at + 1; i < tokens.length; i++) {
+		const t = tokens[i];
+		if (t === "--" || !t.startsWith("-")) break;
+		if (t === "-I" || t === "-J") repl = tokens[++i] ?? "{}";
+		else if (/^-[IJ]./.test(t)) repl = t.slice(2);
+		else if (t === "-i" || t === "--replace") repl = "{}";
+		else if (/^-i./.test(t)) repl = t.slice(2);
+		else if (t.startsWith("--replace=")) repl = t.slice(10) || "{}";
+		else if (takesValue.has(t)) i++;
+	}
+	return repl;
+}
+
+/**
+ * The words a pipe hands to xargs. Each upstream segment's own command name is left out (`echo`
+ * is not an argument), and `find ... -name '<specific>'` hands over only named files, never the
+ * root or home it searched. Newlines and tabs written as `\\n` or `\\t` separate words, as the
+ * shell's printf would.
+ */
+function producerWords(upstream: string[][]): string[] {
+	const words: string[] = [];
+	for (const seg of upstream) {
+		// Unwrap first: `sudo echo ...` hands over echo's words, not a command named sudo.
+		const bare = stripPrefix(seg)?.argv ?? seg;
+		if (bare.length === 0) continue;
+		if (path.basename(bare[0]) === "find" && findNarrowed(bare)) continue;
+		for (const w of bare.slice(1)) words.push(...w.split(/\\[nt0]|\\x00|\s+/).filter(Boolean));
+	}
+	return words;
+}
+
+/** Positional-parameter references in a shell script: `$1`, `${2}`, `$@`, `"$*"`. */
+const POSITIONAL = /"?\$(?:\{[0-9@*]+\}|[0-9@*])"?/g;
+
+/** Commands whose output is exactly their arguments or their input reshaped: a pipe from them is readable. */
+const TRANSPARENT_PRODUCERS = new Set(["echo", "printf", "tr", "tee", "sort", "uniq", "find"]);
+
+/** A recursive delete, bare or written inside a shell -c string. */
+function isRecursiveDeleter(argv: string[]): boolean {
+	if (argv.length === 0) return false;
+	const name = path.basename(argv[0]).toLowerCase();
+	if (name === "rm") return isRecursive(splitArgs(argv.slice(1)).flags);
+	if (!SHELLS.has(name)) return false;
+	return argv.slice(1).some((a) => RECURSIVE_RM_TEXT.test(a));
+}
+const RECURSIVE_RM_TEXT =
+	/(^|[\s;&|(`{])(\S*\/)?rm\s+(\S+\s+)*?(-[A-Za-z]*[rR][A-Za-z]*|--recursive)(\s|$)/;
+
+/** xargs reading its words from a file (`-a F`, `--arg-file`, `-aF`). */
+function xargsArgFile(tokens: string[]): boolean {
+	const at = tokens.findIndex((t) => path.basename(t) === "xargs");
+	for (let i = at + 1; at >= 0 && i < tokens.length; i++) {
+		const t = tokens[i];
+		if (t === "--" || !t.startsWith("-")) break;
+		if (t === "-a" || t.startsWith("--arg-file") || /^-a./.test(t)) return true;
+	}
+	return false;
+}
+
+/** The words xargs feeds a recursive delete come from somewhere the static pass cannot read. */
+function opaqueXargsInput(tokens: string[], upstream: string[][] | null): boolean {
+	if (xargsArgFile(tokens)) return true;
+	if (upstream && upstream.length > 0) {
+		return upstream.some((seg) => {
+			const bare = stripPrefix(seg)?.argv ?? seg;
+			return !TRANSPARENT_PRODUCERS.has(path.basename(bare[0] ?? "").toLowerCase());
+		});
+	}
+	// No pipe: a here-string or heredoc is literal text, anything else (a terminal, `< file`) is not.
+	return !tokens.some((t) => t.startsWith("<<"));
+}
+
+/**
+ * A -c script that deletes recursively and takes its target from a parameter default (`${1:-/}`,
+ * `${d:=x}`) or loops over the positional list (`for d in "$@"`, `for d; do`): the target is
+ * decided at run time from words the line does not show, so it is refused behind a deleter.
+ */
+function unjudgeableScript(script: string): boolean {
+	if (!RECURSIVE_RM_TEXT.test(script)) return false;
+	return (
+		/\$\{[A-Za-z_0-9@*#?-]+:?[-=+?]/.test(script) ||
+		/\bfor\s+\w+\s*(;|\bin\s+"?\$(@|\*|\{[@*]\}))/.test(script)
+	);
+}
+
+/**
+ * xargs feeds its stdin words to a command as arguments, or into its replacement string. The
+ * producer's words count as those arguments: judged appended, and swapped in for the replacement
+ * string one at a time. With no command named (`xargs`, `xargs env`) the words are the command.
+ */
+function delegateXargs(
+	tokens: string[],
+	argv: string[],
+	upstream: string[][],
+	out: string[][],
+	depth: number,
+): void {
+	const words = producerWords(upstream);
+	if (words.length === 0) return;
+	// With quoting guessed away, a trailing comment (`#'`) can sit where the command was.
+	if (argv.length === 0 || argv[0].startsWith("#")) judgeWords(words, out, depth);
+	if (argv.length === 0) return;
+	const repl = xargsReplStr(tokens);
+	if (repl) {
+		for (const w of words)
+			judgeWords(
+				argv.map((a) => a.split(repl).join(w)),
+				out,
+				depth,
+			);
+	}
+	judgeWords([...argv, ...words], out, depth);
+}
+
+/** A delegated command line, read as a segment and, when it is a shell with -c, from every word after the flag. */
+function judgeWords(words: string[], out: string[][], depth: number): void {
+	processSegmentOne(words, null, out, depth + 1);
+	for (let i = 0; i < words.length - 1; i++) {
+		if (!/^-[a-zA-Z]*c[a-zA-Z]*$/.test(words[i])) continue;
+		for (let j = i + 1; j < words.length; j++)
+			processSegmentOne(words.slice(j), null, out, depth + 1);
+	}
+}
+
+/**
+ * `sh -c 'script' name arg...`: the words after the script are its positional parameters, so a
+ * script that only says `rm -rf "$@"` runs on them. The script is re-read with every positional
+ * reference replaced by all of those words (over-reads: a wipe among them is enough to refuse).
+ */
+function bindPositionals(argv: string[], out: string[][], depth: number): void {
+	const c = argv.findIndex((a, i) => i > 0 && /^-[A-Za-z]*c[A-Za-z]*$/.test(a));
+	if (c < 0) return;
+	let i = c + 1;
+	while (i < argv.length && /^[-+]/.test(argv[i])) i += /^[-+][oO]$/.test(argv[i]) ? 2 : 1;
+	const script = argv[i];
+	const args = argv.slice(i + 1);
+	if (script === undefined || args.length === 0 || !POSITIONAL.test(script)) return;
+	POSITIONAL.lastIndex = 0;
+	scanLine(script.replace(POSITIONAL, ` ${args.join(" ")} `), out, depth + 1);
 }
 
 function processSegmentOne(
@@ -640,12 +885,21 @@ function processSegmentOne(
 	prevTokens: string[] | null,
 	out: string[][],
 	depth: number,
+	upstream: string[][] | null = null,
 ): void {
 	let tokens = rawTokens;
 	while (tokens.length > 0 && GRAMMAR.has(tokens[0])) tokens = tokens.slice(1);
 	if (tokens.length === 0) return;
 	if (depth > MAX_DEPTH) {
 		emitLoose(tokens, out, depth);
+		// The nesting cap is reached: a guarded name or a delegating command still in the text is refused.
+		const named = tokens.some((t) =>
+			t.split(/[\s'"`;|&()$]+/).some((w) => {
+				const b = path.basename(w).toLowerCase();
+				return GUARDED.has(b) || b === "xargs";
+			}),
+		);
+		if (named) out.push(UNENUMERABLE);
 		return;
 	}
 	const unwrapped = stripPrefix(tokens);
@@ -654,6 +908,10 @@ function processSegmentOne(
 		return;
 	}
 	const argv = unwrapped.argv;
+	if (unwrapped.appendsArgs && upstream && upstream.length > 0)
+		delegateXargs(tokens, argv, upstream, out, depth);
+	if (unwrapped.appendsArgs && isRecursiveDeleter(argv) && opaqueXargsInput(tokens, upstream))
+		out.push(UNENUMERABLE);
 	if (argv.length === 0) return;
 	out.push(argv);
 	const name = path.basename(argv[0]);
@@ -662,6 +920,8 @@ function processSegmentOne(
 	if (name === "eval") scanLine(argv.slice(1).join(" "), out, depth + 1);
 	if (SHELLS.has(name)) {
 		for (const t of argv.slice(1)) if (/\s/.test(t)) scanLine(t, out, depth + 1);
+		bindPositionals(argv, out, depth);
+		if (argv.slice(1).some((a) => /\s/.test(a) && unjudgeableScript(a))) out.push(UNENUMERABLE);
 		// A shell reading a pipe runs whatever the earlier command printed.
 		if (prevTokens && !argv.slice(1).some((a) => /^-[A-Za-z]*c/.test(a))) {
 			emitLoose(prevTokens, out, depth);
@@ -951,7 +1211,9 @@ function scanDecoded(text: string, out: string[][], depth: number): void {
 
 	for (let s = 0; s < segments.length; s++) {
 		const prev = segments[s].piped && s > 0 ? segments[s - 1].tokens : null;
-		processSegment(segments[s].tokens, prev, out, depth);
+		const upstream: string[][] = [];
+		for (let k = s; k > 0 && segments[k].piped; k--) upstream.unshift(segments[k - 1].tokens);
+		processSegment(segments[s].tokens, prev, out, depth, upstream);
 	}
 }
 
@@ -985,27 +1247,52 @@ function scanQuoteBlind(input: string, out: string[][]): void {
 		.replace(/\d*>&\d+/g, " ")
 		.replace(/&>/g, ">");
 	for (const text of decodeAnsiCVariants(prepped, true)) {
-		scanBlindDecoded(text, out);
-		const ifs = expandIfs(text);
-		if (ifs !== null) scanBlindDecoded(ifs, out);
+		// Twice: parens as separators (subshells), and parens as word characters (find's `-regex '(.*)'`).
+		for (const keepParens of [false, true]) {
+			scanBlindDecoded(text, out, keepParens);
+			const ifs = expandIfs(text);
+			if (ifs !== null) scanBlindDecoded(ifs, out, keepParens);
+		}
+		const c = /(^|\s)-[a-zA-Z]*c[a-zA-Z]*\s/.exec(text);
+		if (c && unjudgeableScript(text.slice(c.index))) out.push(UNENUMERABLE);
 	}
 }
 
-function scanBlindDecoded(text: string, out: string[][]): void {
-	for (const piece of text.split(/[;&|()\n\r]/)) {
+function scanBlindDecoded(text: string, out: string[][], keepParens = false): void {
+	// Pieces split on the separators; a piece after a single `|` or `|&` is piped from the ones before it.
+	// An escaped paren is a word (find's group), not a subshell: keep it in its segment.
+	const parts = text
+		.replace(keepParens ? /[()]/g : /\\([()])/g, (m, c) => ((c ?? m) === "(" ? "\uE000" : "\uE001"))
+		.split(/(\|&?|[;&()\n\r])/);
+	let chain: string[][] = [];
+	let pipedNext = false;
+	for (let pi = 0; pi < parts.length; pi += 2) {
+		const piece = parts[pi];
+		const sep = parts[pi + 1];
+		const upstreamNow = pipedNext && pi >= 2 && parts[pi - 2].trim() !== "" ? chain : [];
+		if (!(pipedNext && upstreamNow.length > 0)) chain = [];
+		pipedNext = sep !== undefined && sep.startsWith("|") && sep !== "||";
 		// Strip quoting from each word as the shell would: 'x', r'm', \x, "$HOME", $'/'.
 		const tokens = piece
 			.split(/\s+/)
 			.filter(Boolean)
-			.map((t) => t.replace(/\$(?=['"])/g, "").replace(/['"\\]/g, ""))
+			.map((t) =>
+				t
+					.replace(/\$(?=['"])/g, "")
+					.replace(/['"\\]/g, "")
+					.replace(/\uE000/g, "(")
+					.replace(/\uE001/g, ")"),
+			)
 			.filter(Boolean);
-		if (tokens.length > 0) processSegment(tokens, null, out, 0);
+		if (tokens.length > 0) processSegment(tokens, null, out, 0, upstreamNow);
+		if (tokens.length > 0) chain = [...chain, tokens];
 		// Once quoting is gone a -c script is spread over several words, and the script need not be
 		// the very next word (`bash -c -- 'x'`, `bash -cx 'x'`, `bash -ce 'x'`, `bash -c -o errexit 'x'`).
 		// After any flag cluster holding a c, read every later word as the start of a command.
 		for (let i = 0; i < tokens.length - 1; i++) {
 			if (!/^-[a-zA-Z]*c[a-zA-Z]*$/.test(tokens[i])) continue;
 			for (let j = i + 1; j < tokens.length; j++) processSegment(tokens.slice(j), null, out, 0);
+			if (unjudgeableScript(tokens.slice(i + 1).join(" "))) out.push(UNENUMERABLE);
 		}
 		// A here-string feeds its words to whatever reads stdin, and a shell runs them.
 		// Split at every `<<<` (spaced or glued, as in `bash<<<'x'`) and read every suffix from there.

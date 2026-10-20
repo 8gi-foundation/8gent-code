@@ -641,6 +641,161 @@ describe("bracket glob spellings of a wipe (#4514)", () => {
 	});
 });
 
+// Family 4 of #4514: the wipe handed to another command. Built from parts, like the rest.
+const DELW = ["-de", "lete"].join("");
+const DELETE_VIA_PIPE = [
+	`echo / | xargs ${RMW} -rf`,
+	`echo ~ | xargs ${RMW} -rf`,
+	`echo $HOME | xargs -n1 ${RMW} -rf`,
+	`printf '%s\\n' / | xargs ${RMW} -rf`,
+	`echo / | xargs -I{} ${RMW} -rf {}`,
+	`echo / | xargs -I{} bash -c "${RMW} -rf {}"`,
+	`echo / | xargs -i sh -c '${RMW} -rf {}'`,
+	`echo / | xargs --replace=@ sh -c '${RMW} -rf @'`,
+	`echo / | xargs sh -c '${RMW} -rf "$@"' _`,
+	`echo / | xargs -n1 sh -c '${RMW} -rf "$0"'`,
+	`echo / | tr a b | xargs ${RMW} -rf`,
+	`echo / | sudo xargs ${RMW} -rf`,
+	`echo / | env xargs -P4 ${RMW} -rf`,
+	`echo ${RMW} -rf / | xargs env`,
+	`sudo echo ${RMW} -rf / | xargs env`,
+	`env -i nice echo ${RMW} -rf / | xargs env`,
+	`xargs ${RMW} -rf <<< /`,
+	`echo / | xargs -I% sh -c '${RMW} -rf %'`,
+];
+const DELETE_VIA_FIND = [
+	`find / ${DELW}`,
+	`find ~ ${DELW}`,
+	`find $HOME -depth ${DELW}`,
+	`find -L / -mindepth 1 ${DELW}`,
+	`find / -type f ${DELW}`,
+	`find / -exec ${RMW} -rf {} +`,
+	`find / -exec ${RMW} {} \\;`,
+	`find ~ -execdir ${RMW} -rf {} \\;`,
+	`find / -ok ${RMW} {} \\;`,
+	`find / -exec sh -c '${RMW} -rf {}' \\;`,
+	`find / -exec sh -c '${RMW} -rf "$1"' _ {} \\;`,
+	`find / -exec sudo ${RMW} {} +`,
+	`sudo find / -maxdepth 1 -exec ${RMW} -rf {} +`,
+	`find / -exec find / ${DELW} \\;`,
+	`find ~ -name '*.log' -o ${DELW}`,
+	`find ~ ! -name '*.log' ${DELW}`,
+	`find ~ -not -name '*.log' ${DELW}`,
+	`find ~ \\( -name '*.log' -o -type f \\) ${DELW}`,
+	`find / ${DELW} -name '*.log'`,
+	`find ~ -name '*.log' , ${DELW}`,
+	`find ~ -type f ! -name '*.log' | xargs ${RMW} -rf`,
+];
+const DELETE_VIA_OPAQUE = [
+	`find / -path '/*' ${DELW}`,
+	`find / -path '/*/*' ${DELW}`,
+	`find / -wholename '*' ${DELW}`,
+	`find ~ -regex '.*' ${DELW}`,
+	`find ~ -regex '.+' ${DELW}`,
+	`find / -regex '^.*$' ${DELW}`,
+	`find / -regex '(.*)' ${DELW}`,
+	`find ~ -iregex '[^x]*' ${DELW}`,
+	`find ~ -name '*.log' -o -name '*' ${DELW}`,
+	`cat list.txt | xargs ${RMW} -rf`,
+	`xargs -a list.txt ${RMW} -rf`,
+	`xargs --arg-file=list.txt ${RMW} -rf`,
+	`ls / | xargs ${RMW} -rf`,
+	`echo a | wc | xargs ${RMW} -rf`,
+	`sh -c '${RMW} -rf \${1:-/}' _`,
+	`bash -c '${RMW} -rf "\${d:=/}"'`,
+	`sh -c 'for d in "$@"; do ${RMW} -rf "$d"; done' _ /`,
+	`sh -c 'for d; do ${RMW} -rf "$d"; done' _ /`,
+];
+const DELETE_VIA_STRING = [
+	`sh -c 'bash -c "${RMW} -rf /"'`,
+	`sh -c "sh -c \\"zsh -c '${RMW} -rf /'\\""`,
+	`sh -c 'find / ${DELW}'`,
+	`sh -c 'echo / | xargs ${RMW} -rf'`,
+	`env -i sh -c '${RMW} -rf /'`,
+	`command env sudo sh -c '${RMW} -rf /'`,
+	`eval 'eval "${RMW} -rf ~"'`,
+	`timeout 5 nice sh -c '${RMW} -rf ~'`,
+	`bash -c 'xargs ${RMW} -rf <<< /'`,
+	`bash <<< 'find ~ ${DELW}'`,
+	`nohup sh -c 'find / ${DELW}' &`,
+];
+const DELEGATION_ORDINARY = [
+	`find ~ -name '*.pyc' -path '*/cache/*' ${DELW}`,
+	`find ~ -iname 'thumbs.db' ${DELW}`,
+	`find ~ -regex '/tmp/x/cache' ${DELW}`,
+	`find . -type f | xargs ${RMW} -rf`,
+	`printf 'a\\nb\\n' | xargs ${RMW} -rf`,
+	`echo build | sort | xargs ${RMW} -rf`,
+	`find ~ -name '*.pyc' | xargs ${RMW} -rf`,
+	`sh -c 'ls "\${1:-.}"' _`,
+	"sh -c 'for f in a b; do echo $f; done'",
+	`sh -c '${RMW} -rf build'`,
+	`find . -name '*.log' ${DELW}`,
+	`find ~ -name '*.pyc' ${DELW}`,
+	`find ~/proj ${DELW}`,
+	`find /tmp/build -exec ${RMW} -rf {} +`,
+	`find . -exec ${RMW} -rf {} +`,
+	`find / -name core -exec ${RMW} {} \\;`,
+	"find / -exec grep -l foo {} +",
+	"find ~ -type f -exec wc -l {} +",
+	"xargs -n1 echo",
+	"echo a | xargs -n1 echo",
+	"echo / | xargs",
+	`echo build | xargs ${RMW} -rf`,
+	`find ~ -name node_modules -type d | xargs ${RMW} -rf`,
+	"sh -c 'ls'",
+	"sh -c 'echo \"$1\"' _ /",
+	"echo / | xargs -I{} sh -c 'ls {}'",
+	"echo / | xargs ls",
+];
+
+describe("delegated wipes: xargs, find, nested command strings (#4514 family 4)", () => {
+	test("a wipe handed over a pipe, found by find, or nested in a command string is refused", () => {
+		const pm = manager();
+		for (const line of [
+			...DELETE_VIA_PIPE,
+			...DELETE_VIA_FIND,
+			...DELETE_VIA_STRING,
+			...DELETE_VIA_OPAQUE,
+		]) {
+			expect([line, pm.checkPermission(line)]).toEqual([line, "denied"]);
+		}
+	});
+
+	test("the same spellings are refused behind quoting, comments and heredocs", () => {
+		const pm = manager();
+		for (const line of [
+			...DELETE_VIA_PIPE,
+			...DELETE_VIA_FIND,
+			...DELETE_VIA_STRING,
+			...DELETE_VIA_OPAQUE,
+		]) {
+			for (const wrapped of [`: # don't\n${line} #'`, `cat <<E\nit's\nE\n${line} #'`]) {
+				expect([wrapped, pm.checkPermission(wrapped)]).toEqual([wrapped, "denied"]);
+			}
+		}
+	});
+
+	test("ordinary find, xargs and sh -c use is not blocked", () => {
+		const pm = manager();
+		for (const line of DELEGATION_ORDINARY) {
+			expect([line, pm.checkPermission(line)]).not.toEqual([line, "denied"]);
+		}
+	});
+
+	test("nesting past the cap is refused behind a guarded name and allowed without one", () => {
+		const pm = manager();
+		let deep = `${RMW} -rf /`;
+		let plain = "ls";
+		for (let i = 0; i < 9; i++) {
+			deep = `sh -c '${deep.replace(/'/g, `'\\''`)}'`;
+			plain = `sh -c '${plain.replace(/'/g, `'\\''`)}'`;
+		}
+		expect(pm.checkPermission(deep)).toBe("denied");
+		expect(pm.checkPermission(plain)).not.toBe("denied");
+	});
+});
+
 describe("always-blocked segments (#3768)", () => {
 	test("the check sees a blocked command in any position", () => {
 		const pm = manager();
