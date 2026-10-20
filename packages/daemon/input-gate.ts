@@ -11,6 +11,15 @@
 
 import { type SlashContext, type SlashResult, runSlash } from "./slash";
 
+/**
+ * What this daemon advertises on `session:created`, `session:resumed` and `/health`.
+ * Lives beside gateInput so "input-gate" is only claimed where the gate is defined; clients
+ * (the 8gent Browser) send slash lines only when it is present.
+ */
+export const DAEMON_CAPABILITIES: readonly string[] = Object.freeze(
+	[typeof gateInput === "function" ? "input-gate" : ""].filter(Boolean),
+);
+
 export type GateContext = SlashContext;
 export type GateResult = SlashResult;
 

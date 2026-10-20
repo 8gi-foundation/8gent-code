@@ -32,7 +32,7 @@ import type {
 import { type EventName, bus } from "./events";
 import { type GoalManager, type GoalRpcOutbound, handleGoalRpc } from "./goal-rpc";
 import { handleStageHttp } from "./huddle-stage";
-import { classifyInput, gateInput } from "./input-gate";
+import { DAEMON_CAPABILITIES, classifyInput, gateInput } from "./input-gate";
 import {
 	handleLiveHttp,
 	installLiveAnatomy,
@@ -166,8 +166,10 @@ type OutboundMessage =
 			/** Effective policy scope and tool list, so a client can fail closed (#3939). */
 			scope?: string;
 			tools?: string[];
+			/** Daemon capabilities, e.g. "input-gate": clients may gate slash sending on it. */
+			capabilities?: string[];
 	  }
-	| { type: "session:resumed"; sessionId: string }
+	| { type: "session:resumed"; sessionId: string; capabilities?: string[] }
 	| { type: "sessions:list"; sessions: unknown[] }
 	| { type: "cron:list"; jobs: unknown[] }
 	| { type: "cron:added"; jobId: string }
@@ -446,6 +448,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 				type: "session:created",
 				sessionId,
 				resumeSecret: resumeSecrets.issue(sessionId),
+				capabilities: [...DAEMON_CAPABILITIES],
 				...(state.channel === CLASSROOM_CHANNEL
 					? { scope: CLASSROOM_CHANNEL, tools: [] as string[] }
 					: {}),
@@ -488,7 +491,11 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			send(
 				ws,
 				reply.type === "session:resumed"
-					? { ...reply, resumeSecret: resumeSecrets.issue(msg.sessionId) }
+					? {
+							...reply,
+							resumeSecret: resumeSecrets.issue(msg.sessionId),
+							capabilities: [...DAEMON_CAPABILITIES],
+						}
 					: reply,
 			);
 			break;
@@ -922,6 +929,7 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 					status: "ok",
 					sessions: config.pool.size,
 					uptime: process.uptime(),
+					capabilities: [...DAEMON_CAPABILITIES],
 					...(telegram ? { telegram } : {}),
 				});
 			}
