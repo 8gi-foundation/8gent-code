@@ -18,6 +18,7 @@ import type {
 	ContentPart,
 	DetailedTokenUsage,
 	FinishReason,
+	FrictionEntry,
 	HookExecution,
 	ModelInfo,
 	ModelRoundEntry,
@@ -369,6 +370,11 @@ export class SessionWriter {
 	// ============================================
 	// Session end
 	// ============================================
+
+	/** One counts-only friction line at session end (#4511); written before session_end. */
+	writeFriction(record: Omit<FrictionEntry, "timestamp" | "sequenceNumber">): void {
+		this.write({ ...record, timestamp: this.now(), sequenceNumber: this.nextSeq() });
+	}
 
 	writeSessionEnd(exitReason: SessionSummary["exitReason"], reportId?: string | null): void {
 		this.write({

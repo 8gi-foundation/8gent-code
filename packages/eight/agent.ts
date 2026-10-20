@@ -113,6 +113,7 @@ import {
 } from "./compaction";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { continueEmptyTurn } from "./empty-turn-continue";
+import { Friction, withFriction } from "./friction";
 import {
 	type ToolLedgerEntry,
 	denialIsCause,
@@ -444,6 +445,9 @@ export class Agent {
 	private enableReporting = true;
 	private totalCost: number | null = null;
 	private sessionWriter: SessionWriter;
+	/** Per-session friction counts (#4511); one record is written at cleanup. */
+	private friction = new Friction();
+	private frictionWritten = false;
 	private messageHistory: Array<{ role: string; content: string }> = [];
 	/** #3487: the user's communication style, restated as the last message of every local text-tool request; null when no style is set. */
 	private styleReminder: string | null = null;
@@ -1441,6 +1445,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Honesty ledger (issue #2747): record the REAL outcome so the final
 				// reply can be gated against what actually happened.
 				this.turnToolLedger.push({ name: toolName, args, success, result: shown.slice(0, 500) });
+				this.friction.tool(success);
 
 				// Circuit breaker / loop detection, mirroring the native finish handler.
 				// A call refused before it ran does not spend the global budget (#3409).
@@ -1886,6 +1891,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (gated.violated) {
 			console.log(`[honesty] blocked fabricated completion: ${gated.reason}`);
 			this.honestyFired = true;
+			this.friction.count("honestyNudges");
 			this.lastTurnFailure = {
 				reason: gated.denied ? "denied" : "turn_failed",
 				message: gated.content,
@@ -2059,27 +2065,36 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	): Promise<string> {
 		this.lastTurnFailure = null;
 		this.honestyFired = false;
-		return runAsParentSession(
-			() => ({
-				runtime: this.config.runtime,
-				model: this.config.model,
-				baseUrl: this.config.baseUrl,
-			}),
-			async () => {
-				// A new turn: steers left from an earlier turn are stale and are
-				// dropped, never delivered into this one (the caller had its chance
-				// to take them with takeQueuedSteers).
-				const turn = ++this.turnCounter;
-				this.steerQueue = [];
-				this.activeTurn = turn;
-				try {
-					const reply = await this.runTurn(userMessage, imageBase64, imageMimeType, imageOriginal);
-					this.reviewFinishedTurn(userMessage, reply);
-					return reply;
-				} finally {
-					if (this.activeTurn === turn) this.activeTurn = null;
-				}
-			},
+		this.friction.prompt(userMessage);
+		return withFriction(this.friction, () =>
+			runAsParentSession(
+				() => ({
+					runtime: this.config.runtime,
+					model: this.config.model,
+					baseUrl: this.config.baseUrl,
+				}),
+				async () => {
+					// A new turn: steers left from an earlier turn are stale and are
+					// dropped, never delivered into this one (the caller had its chance
+					// to take them with takeQueuedSteers).
+					const turn = ++this.turnCounter;
+					this.steerQueue = [];
+					this.activeTurn = turn;
+					try {
+						const reply = await this.runTurn(
+							userMessage,
+							imageBase64,
+							imageMimeType,
+							imageOriginal,
+						);
+						this.reviewFinishedTurn(userMessage, reply);
+						return reply;
+					} finally {
+						this.friction.turnEnd();
+						if (this.activeTurn === turn) this.activeTurn = null;
+					}
+				},
+			),
 		);
 	}
 
@@ -2091,6 +2106,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (!isDoneGateEnabled(process.env, this.config.testClaimGate)) return null;
 		if (this.doneGateNudged || !testClaimViolation(this.turnToolLedger, reply)) return null;
 		this.doneGateNudged = true;
+		this.friction.count("testClaimNudges");
 		return TEST_CLAIM_NUDGE;
 	}
 
@@ -2116,6 +2132,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/** `done_gate` for this turn's result: "stale_or_failing_tests" or null. Set by the harness only. */
+	getFriction() {
+		return this.friction.record();
+	}
+
 	getDoneGate(): string | null {
 		return this.doneGate;
 	}
@@ -2758,10 +2778,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Honesty ledger (issue #2747): record the REAL outcome. The executor
 				// returns error STRINGS for most failures, so a "successful" event
 				// whose result is an error marker still counts as a failure.
+				const nativeOk = event.success && !isErrorToolResult(resultStr);
+				this.friction.tool(nativeOk);
 				this.turnToolLedger.push({
 					name: event.toolName,
 					args: event.args as Record<string, unknown>,
-					success: event.success && !isErrorToolResult(resultStr),
+					success: nativeOk,
 					result: resultStr.slice(0, 500),
 				});
 
@@ -3345,6 +3367,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							msg.includes("Provider returned error");
 
 						if (isRateLimit && attempt < RATE_LIMIT_ATTEMPTS) {
+							this.friction.count("retries");
 							const delay = Math.min(2000 * 2 ** (attempt - 1), 30000);
 							console.log(
 								`[agent] ${currentEntry.provider}/${currentEntry.model} rate limited, retry in ${delay / 1000}s (${attempt}/${RATE_LIMIT_ATTEMPTS})`,
@@ -3362,6 +3385,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							isTransientProviderError(msg) &&
 							failover.graceRetry(this.sessionId, currentEntry, AFFINITY_GRACE_MS)
 						) {
+							this.friction.count("retries");
 							console.log(
 								`[agent] ${currentEntry.provider}/${currentEntry.model} transient error, grace retry in ${AFFINITY_GRACE_MS / 1000}s (cache affinity)`,
 							);
@@ -3598,6 +3622,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			if (gatedNative.violated) {
 				console.log(`[honesty] blocked fabricated completion: ${gatedNative.reason}`);
 				this.honestyFired = true;
+				this.friction.count("honestyNudges");
 				this.lastTurnFailure = {
 					reason: gatedNative.denied ? "denied" : "turn_failed",
 					message: gatedNative.content,
@@ -4452,6 +4477,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		}
 
 		try {
+			// One friction line, ahead of session_end so session_end stays the last line (#4511).
+			if (!this.frictionWritten) {
+				this.frictionWritten = true;
+				this.sessionWriter.writeFriction(this.friction.record());
+			}
 			this.sessionWriter.writeSessionEnd("user_exit", null);
 		} catch {
 			// Session writer may already be closed
