@@ -18,29 +18,25 @@
  *
  * fs.exec routes through the existing NemoClaw policy engine
  * (`evaluatePolicy("run_command", ...)`). On top of that we apply a
- * daemon-local allowlist (`COMMAND_ALLOWLIST`) which is the actual security
- * boundary for shell exec. The `EIGHT_LEGACY_BASH=1` env var bypasses the
- * allowlist for one release; bypass is still audited and logged with a
- * warning.
+ * daemon-local allowlist (`COMMAND_ALLOWLIST`). Before either runs, `execRefusal`
+ * applies the engine's shell chain (sanitizer, wipe guard, pre-spawn backstops);
+ * the allowlist is an extra layer, never the only one.
+ * There is no bypass: the same chain and allowlist run whatever the environment says.
  */
 
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { killProcessTree, shellInvocation } from "../../../core/shell";
-import { evaluatePolicy } from "../../../permissions/policy-engine";
-import {
-	isWithinWorkspace,
-	resolveSafe,
-} from "../../../permissions/src/workspace-boundary";
 import { getWorkspaceDb } from "../../../db/src/workspace-db";
+import { blockedReason, commandArgvs } from "../../../permissions/always-blocked";
+import { evaluatePolicy } from "../../../permissions/policy-engine";
+import { preSpawnRefusal } from "../../../permissions/pre-spawn-backstops";
+import { refusalLead } from "../../../permissions/refusal-lead";
+import { sanitizeShellCommand } from "../../../permissions/shell-sanitizer";
+import { isWithinWorkspace, resolveSafe } from "../../../permissions/src/workspace-boundary";
 import { logExecOp, logFsSensitive } from "./audit";
-import {
-	JSONRPC_BLOCKED,
-	JsonRpcError,
-	type JsonRpcContext,
-	type JsonRpcHandler,
-} from "./jsonrpc";
+import { JSONRPC_BLOCKED, type JsonRpcContext, JsonRpcError, type JsonRpcHandler } from "./jsonrpc";
 import { classifySensitivePath } from "./sensitive";
 
 // ── Workspace registry ────────────────────────────────────────────────
@@ -98,9 +94,7 @@ export const fsRegister: JsonRpcHandler = (raw) => {
 		throw new Error("fs.register: 'default' is reserved");
 	}
 	if (!WORKSPACE_ID_RE.test(workspaceId)) {
-		throw new Error(
-			"fs.register: invalid workspaceId (allowed: [A-Za-z0-9_.-], max 128 chars)",
-		);
+		throw new Error("fs.register: invalid workspaceId (allowed: [A-Za-z0-9_.-], max 128 chars)");
 	}
 	if (!fs.existsSync(root)) {
 		throw new Error(`fs.register: root does not exist: ${root}`);
@@ -450,15 +444,21 @@ const COMMAND_ALLOWLIST = new Set([
 	"echo",
 	"pwd",
 	"git",
-	"bun",
-	"npm",
-	"node",
-	"python",
-	"python3",
+	"xargs",
 ]);
 
 /** Git subcommands that are read-only enough to allow without policy. */
-const GIT_SAFE_SUBS = new Set(["status", "diff", "log", "branch", "show", "rev-parse"]);
+const GIT_SAFE_SUBS = new Set([
+	"status",
+	"diff",
+	"log",
+	"show",
+	"blame",
+	"rev-parse",
+	"ls-files",
+	"branch",
+	"tag",
+]);
 
 interface ExecPolicyResult {
 	allowed: boolean;
@@ -477,13 +477,8 @@ interface ExecPolicyResult {
  * allowlist; do not pretend a finite regex set can enumerate "bad shell".
  */
 function evaluateExec(command: string): ExecPolicyResult {
-	if (process.env.EIGHT_LEGACY_BASH === "1") {
-		console.warn(
-			"[fs.exec] EIGHT_LEGACY_BASH=1 is set; bypassing daemon allowlist (legacy mode, removed next release)",
-		);
-		return { allowed: true, bypass: true };
-	}
-
+	// EIGHT_LEGACY_BASH no longer bypasses anything: this route has no approval card, so it is
+	// strictly confined and the same chain and allowlist run whatever the environment says.
 	const trimmed = command.trim();
 	if (!trimmed) return { allowed: false, reason: "empty command" };
 
@@ -491,12 +486,11 @@ function evaluateExec(command: string): ExecPolicyResult {
 	const segments = trimmed.split(/\s*(?:\|\||\||&&|;)\s*/g);
 	for (const seg of segments) {
 		const head = seg.trim().split(/\s+/)[0] ?? "";
-		// Strip leading env-var assignments (FOO=bar BAZ=qux cmd ...).
-		let verb = head;
-		let rest = seg.trim();
-		while (/^[A-Za-z_][A-Za-z0-9_]*=\S*/.test(verb)) {
-			rest = rest.replace(/^\S+\s*/, "");
-			verb = rest.split(/\s+/)[0] ?? "";
+		// An env-assignment prefix (FOO=bar cmd) sets what the command runs under: refused.
+		const verb = head;
+		const rest = seg.trim();
+		if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(verb)) {
+			return { allowed: false, reason: "environment assignment before a command" };
 		}
 		if (!verb) return { allowed: false, reason: "empty pipeline segment" };
 		// Strip leading `-l` shell-login flag attempts on the verb itself.
@@ -513,7 +507,7 @@ function evaluateExec(command: string): ExecPolicyResult {
 					allowed: false,
 					reason: decision.requiresApproval
 						? `requires approval: ${decision.reason}`
-						: decision.reason ?? `not on allowlist: ${verb}`,
+						: (decision.reason ?? `not on allowlist: ${verb}`),
 				};
 			}
 			return {
@@ -521,22 +515,200 @@ function evaluateExec(command: string): ExecPolicyResult {
 				reason: `not on daemon allowlist: ${verb}`,
 			};
 		}
-		// git subcommand check.
+		// git subcommand check: the first word after git must be a safe subcommand; no policy-engine fallback.
 		if (verb === "git") {
 			const sub = rest.split(/\s+/)[1] ?? "";
 			if (!GIT_SAFE_SUBS.has(sub)) {
-				const decision = evaluatePolicy("run_command", { command: seg.trim() });
-				if (!decision.allowed) {
-					return {
-						allowed: false,
-						reason: `git subcommand not safe: ${sub}`,
-					};
-				}
+				return { allowed: false, reason: `git subcommand not safe: ${sub}` };
 			}
 		}
 	}
 
 	return { allowed: true };
+}
+
+const OPTION_VALUE = /^-[-A-Za-z0-9]*=/;
+const GIT_REFUSED_FLAG =
+	/^(--config.*|--exec-path.*|--output.*|--ext-diff|--textconv|--open-files-in-pager.*|--upload-pack.*|--receive-pack.*|-O.*|--git-dir.*|--work-tree.*|--namespace.*)$/;
+const RG_REFUSED_FLAG = /^(--pre|--pre=.*|--pre-glob.*|--hostname-bin.*|-z|--search-zip)$/;
+
+function insideRoot(root: string, target: string): boolean {
+	const rel = path.relative(root, path.resolve(root, target));
+	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/** A word that names a place the route cannot prove is inside root: absolute, ~, ..-escaping, or an expansion. */
+/** A glob that could expand to `..` (.?, .*, [.][.], [!a][!a]): the shell reads it, not the lexical check. */
+function globReachesParent(word: string): boolean {
+	const w = word.replace(OPTION_VALUE, "").replace(/^['"]|['"]$/g, "");
+	return w.split(/[\\/]+/).some((c) => /[*?[]/.test(c) && (c.startsWith(".") || c.startsWith("[")));
+}
+
+const GLOB_CHAR = /[*?[]/;
+const NO_GLOBS = "Globs are not allowed on this route, name the files";
+
+function escapesRoot(root: string, word: string): boolean {
+	const w = word.replace(OPTION_VALUE, "").replace(/^['"]|['"]$/g, "");
+	if (/\$[A-Za-z_{(]|`/.test(w)) return true;
+	if (w.startsWith("~")) return true;
+	if (w === "/dev/null") return false;
+	if (globReachesParent(w)) return true;
+	return !realInsideRoot(root, w);
+}
+
+const GIT_LIST_FLAG = /^(-l|--list|--contains|--merged|--no-merged|--points-at)$/;
+const GIT_READ_FLAG =
+	/^(-a|-r|-v|-vv|--all|--remotes|--verbose|--show-current|--no-color|--color(=.*)?|--sort=.*|--format=.*|--no-column|--column(=.*)?)$/;
+
+/** `git branch` / `git tag` that only lists: read-only flags, and names only as list patterns or ref filters. */
+function gitListOnly(rest: string[]): boolean {
+	const listing = rest.some((w) => GIT_LIST_FLAG.test(w));
+	return rest.every((w) =>
+		w.startsWith("-") ? GIT_LIST_FLAG.test(w) || GIT_READ_FLAG.test(w) : listing,
+	);
+}
+
+/**
+ * Walk `word` component by component from root (or /), following every symlink that exists, so a
+ * link inside root that points out is seen. A component that does not exist stays lexical, which is
+ * judging a dangling path by its nearest existing ancestor.
+ */
+function realInsideRoot(root: string, word: string): boolean {
+	let realRoot = root;
+	try {
+		realRoot = fs.realpathSync(root);
+	} catch {}
+	let cur = path.isAbsolute(word) ? path.parse(word).root : realRoot;
+	for (const comp of word.split(/[\\/]+/)) {
+		if (comp === "" || comp === ".") continue;
+		if (comp === "..") {
+			cur = path.dirname(cur);
+			continue;
+		}
+		const next = path.join(cur, comp);
+		try {
+			cur = fs.realpathSync(next);
+		} catch {
+			cur = next;
+		}
+	}
+	return insideRoot(realRoot, cur);
+}
+
+/** The first reason `command` leaves root or runs something the route cannot confine, or null. */
+function confinementRefusal(command: string, root: string): string | null {
+	const deny = (why: string) =>
+		refusalLead(`[PERMISSION DENIED] ${why}. This route has no approval card. Command: ${command}`);
+	// Redirect targets (> >> <), judged on the line itself: the engine's parse drops them.
+	for (const m of command.matchAll(/(?:^|[^<>&\d-])\d*(>>?|<(?!<))\s*([^\s;&|<>()]+)/g)) {
+		const target = m[2].replace(/^['"]|['"]$/g, "");
+		if (target === "/dev/null") continue;
+		if (GLOB_CHAR.test(target)) return deny(NO_GLOBS);
+		if (escapesRoot(root, target)) return deny("A redirect reaches outside the workspace");
+		if (m[1] !== "<") {
+			const c = classifySensitivePath(path.resolve(root, target));
+			if (c.sensitive || c.forbidden)
+				return deny("A redirect writes a sensitive or git-internal path");
+		}
+	}
+	for (const argv of commandArgvs(command)) {
+		const name = path.basename(argv[0] ?? "").toLowerCase();
+		if (name && !COMMAND_ALLOWLIST.has(name) && !name.startsWith("-") && !DELETE_VERBS.has(name)) {
+			return deny(`${name} is not on the daemon allowlist`);
+		}
+		for (const w of argv.slice(1)) {
+			if (globReachesParent(w)) {
+				return deny(
+					"This operand looks like a glob that could reach the parent directory. Rephrase it or quote it differently",
+				);
+			}
+			// A glob matches names the symlink walk cannot see (li*/x reaches a link to outside): refused outright.
+			// Pattern operands of grep and rg are included until #4549 makes the guard quote-aware.
+			if (GLOB_CHAR.test(w)) return deny(NO_GLOBS);
+			if (escapesRoot(root, w)) return deny("A path reaches outside the workspace");
+			if (name === "git") {
+				if (GIT_REFUSED_FLAG.test(w))
+					return deny("That git option can run a program or move the repository");
+			}
+			if ((name === "rg" || name === "grep") && RG_REFUSED_FLAG.test(w)) {
+				return deny("That search option runs a program");
+			}
+		}
+		if (
+			name === "git" &&
+			(argv[1] === "branch" || argv[1] === "tag") &&
+			!gitListOnly(argv.slice(2))
+		) {
+			return deny("git branch and git tag are accepted only to list");
+		}
+		if (name === "git") {
+			const sub = argv.findIndex((w, i) => i > 0 && !w.startsWith("-"));
+			const flagsBefore = argv.slice(1, sub === -1 ? undefined : sub);
+			if (flagsBefore.some((w) => w === "-c" || w === "-C" || w.startsWith("-c"))) {
+				return deny("git configuration or directory flags are not accepted");
+			}
+		}
+	}
+	return null;
+}
+
+const DELETE_VERBS = new Set(["rm", "rmdir", "unlink", "shred"]);
+const SHELLS = new Set(["sh", "bash", "zsh", "dash"]);
+
+/**
+ * The refusal for `command` from the same chain the TUI's run_command runs before it spawns
+ * (preSpawnRefusal, sanitizeShellCommand, blockedReason over every command on the line), in the
+ * engine's own words; null when the chain refuses nothing. The verb allowlist is an extra layer
+ * on top of this, never the only one. Then two route-local rules for what the TUI would put to a
+ * person: this route has no approval card, so `find` that deletes or runs commands, and a heredoc
+ * that writes a file, are refused outright (fs.write is the route for writing).
+ */
+export function execRefusal(command: string, cwd: string): string | null {
+	const backstop = preSpawnRefusal(command, cwd);
+	if (backstop) return refusalLead(backstop);
+	const validation = sanitizeShellCommand(command);
+	if (!validation.safe) {
+		return refusalLead(`[BLOCKED] ${validation.reason}. Command: ${command}`);
+	}
+	// Fail-closed: a throw from the engine propagates and the command is not spawned.
+	for (const argv of commandArgvs(command)) {
+		const reason = blockedReason(argv);
+		if (reason) return refusalLead(`[PERMISSION DENIED] ${reason}. Command: ${command}`);
+	}
+	for (const argv of commandArgvs(command)) {
+		const name = path.basename(argv[0] ?? "").toLowerCase();
+		if (
+			name === "find" &&
+			argv.some((a) => /^-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)$/.test(a))
+		) {
+			return refusalLead(
+				`[PERMISSION DENIED] find that deletes, writes or runs commands needs an approval this route cannot ask for. Command: ${command}`,
+			);
+		}
+	}
+	const confined = confinementRefusal(command, cwd);
+	if (confined) return confined;
+	// A delete verb fed its paths on stdin (`find ... -print0 | xargs -0 <verb>`): the engine's parse drops
+	// xargs and leaves the bare verb, so a delete verb with no path operand is such a feed. A delete
+	// verb named behind xargs, parallel or a shell -c is refused too.
+	for (const argv of commandArgvs(command)) {
+		const name = path.basename(argv[0] ?? "").toLowerCase();
+		const feeder = name === "xargs" || name === "parallel" || SHELLS.has(name);
+		const bare = DELETE_VERBS.has(name) && !argv.slice(1).some((a) => !a.startsWith("-"));
+		const delegated =
+			feeder && argv.slice(1).some((a) => DELETE_VERBS.has(path.basename(a).toLowerCase()));
+		if (bare || delegated) {
+			return refusalLead(
+				`[PERMISSION DENIED] A delete that takes its paths from another command needs an approval this route cannot ask for. Command: ${command}`,
+			);
+		}
+	}
+	if (/<<(?!<)/.test(command)) {
+		return refusalLead(
+			`[PERMISSION DENIED] Use fs.write to create or change a file; a heredoc is not accepted on fs.exec. Command: ${command}`,
+		);
+	}
+	return null;
 }
 
 export const fsExec: JsonRpcHandler = async (raw, ctx: JsonRpcContext) => {
@@ -546,7 +718,11 @@ export const fsExec: JsonRpcHandler = async (raw, ctx: JsonRpcContext) => {
 	const initiator = params.initiator ?? ctx.initiator;
 	const root = workspaceRoot(params.workspaceId);
 
-	const policy = evaluateExec(params.command);
+	// The engine's chain runs first and always: the allowlist is not the only gate.
+	const refusal = execRefusal(params.command, root);
+	const policy: ExecPolicyResult = refusal
+		? { allowed: false, reason: refusal }
+		: evaluateExec(params.command);
 	if (!policy.allowed) {
 		logExecOp({
 			op: "denied",
