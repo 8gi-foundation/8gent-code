@@ -590,5 +590,15 @@ function scanQuoteBlind(input: string, out: string[][]): void {
 			if (!/^-[a-zA-Z]*c[a-zA-Z]*$/.test(tokens[i])) continue;
 			for (let j = i + 1; j < tokens.length; j++) processSegment(tokens.slice(j), null, out, 0);
 		}
+		// A here-string feeds its words to whatever reads stdin, and a shell runs them.
+		// Split at every `<<<` (spaced or glued, as in `bash<<<'x'`) and read every suffix from there.
+		for (let i = 0; i < tokens.length; i++) {
+			const at = tokens[i].indexOf("<<<");
+			if (at < 0) continue;
+			const rest = tokens[i].slice(at + 3).replace(/^<+/, "");
+			const tail = tokens.slice(i + 1);
+			const words = rest ? [rest, ...tail] : tail;
+			for (let j = 0; j < words.length; j++) processSegment(words.slice(j), null, out, 0);
+		}
 	}
 }

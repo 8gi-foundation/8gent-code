@@ -208,6 +208,11 @@ const C_FLAG_FORMS = [
 	(w: string) => `bash -c +x '${w}'`,
 	(w: string) => `bash -c -o errexit '${w}'`,
 	(w: string) => `zsh -c -- '${w}'`,
+	// round thirteen: a here-string feeds the shell its script
+	(w: string) => `bash <<< '${w}'`,
+	(w: string) => `zsh <<< "${w}"`,
+	(w: string) => `sh <<<'${w}'`,
+	(w: string) => `bash<<<'${w}'`,
 ];
 const C_FLAG_WIPES = [WIPE, `${RMRF} ~`];
 const C_FLAG_LINES = C_FLAG_WIPES.flatMap((w) =>
@@ -349,6 +354,10 @@ const ORDINARY_LINES = [
 	'ssh host "ls -la"',
 	"bash -c 'ls -la'",
 	"bash -ce 'ls'",
+	'cat <<< "hello"',
+	'read x <<< "a b c"',
+	"bash <<< 'ls -la'",
+	'grep foo <<< "$text"',
 	`echo '${WIPE}' is a dangerous command`,
 	"grep -rf patterns.txt src",
 	"rm -rf /tmp/build",
