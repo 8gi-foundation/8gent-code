@@ -10,6 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { findPayloads, stripPrefix } from "./command-policy";
 import { tokenize } from "./src/workspace-boundary";
+import { resetStructuralBudget, structuralForms } from "./structural-spellings";
 
 const MAX_DEPTH = 6;
 
@@ -634,6 +635,16 @@ export function blockedReason(argv: string[]): string | null {
 			if (r) return r;
 		}
 	}
+	// A command name the shell decides at run time (`$r`, `${a[0]}`, an unreadable `$(...)`) may be any
+	// guarded command: judged as each of them with the words it was given (#4514). A value the static
+	// pass cannot resolve is never treated as safe.
+	if (name.includes("$") || name.includes("`")) {
+		for (const g of GUARDED) {
+			const r = blockedReason([g, ...argv.slice(1)]);
+			if (r) return r;
+		}
+		return null;
+	}
 	const { flags, operands } = splitArgs(argv.slice(1));
 	const targets = operands.map(normTarget);
 
@@ -1112,11 +1123,24 @@ function scanLine(input: string, out: string[][], depth: number): void {
 		.replace(/\d*>&\d+/g, " ")
 		.replace(/&>/g, ">");
 	// Decode first, then read `${IFS}` as a space: every ANSI-C reading gets the IFS variant too.
-	for (const text of decodeAnsiCVariants(prepped)) {
-		scanDecoded(text, out, depth);
-		const ifs = expandIfs(text);
-		if (ifs !== null) scanDecoded(ifs, out, depth);
+	for (const decoded of decodeAnsiCVariants(prepped)) {
+		for (const text of structuralVariants(decoded, out)) {
+			scanDecoded(text, out, depth);
+			const ifs = expandIfs(text);
+			if (ifs !== null) scanDecoded(ifs, out, depth);
+		}
 	}
+}
+
+/**
+ * The text as written plus its structural variants (#4514): variables, arrays, aliases, functions
+ * and readable substitutions filled in. Too many alternatives to enumerate takes the overflow refusal.
+ */
+function structuralVariants(text: string, out: string[][]): string[] {
+	const forms = structuralForms(text);
+	if (forms !== null) return forms;
+	out.push(UNENUMERABLE);
+	return [text];
 }
 
 function scanDecoded(text: string, out: string[][], depth: number): void {
@@ -1226,6 +1250,7 @@ function scanDecoded(text: string, out: string[][], depth: number): void {
  */
 export function commandArgvs(command: string): string[][] {
 	const out: string[][] = [];
+	resetStructuralBudget();
 	scanLine(command, out, 0);
 	scanQuoteBlind(command, out);
 	return out;
@@ -1246,15 +1271,17 @@ function scanQuoteBlind(input: string, out: string[][]): void {
 		.replace(/\\\r?\n/g, "")
 		.replace(/\d*>&\d+/g, " ")
 		.replace(/&>/g, ">");
-	for (const text of decodeAnsiCVariants(prepped, true)) {
-		// Twice: parens as separators (subshells), and parens as word characters (find's `-regex '(.*)'`).
-		for (const keepParens of [false, true]) {
-			scanBlindDecoded(text, out, keepParens);
-			const ifs = expandIfs(text);
-			if (ifs !== null) scanBlindDecoded(ifs, out, keepParens);
+	for (const decoded of decodeAnsiCVariants(prepped, true)) {
+		for (const text of structuralVariants(decoded, out)) {
+			// Twice: parens as separators (subshells), and parens as word characters (find's `-regex '(.*)'`).
+			for (const keepParens of [false, true]) {
+				scanBlindDecoded(text, out, keepParens);
+				const ifs = expandIfs(text);
+				if (ifs !== null) scanBlindDecoded(ifs, out, keepParens);
+			}
+			const c = /(^|\s)-[a-zA-Z]*c[a-zA-Z]*\s/.exec(text);
+			if (c && unjudgeableScript(text.slice(c.index))) out.push(UNENUMERABLE);
 		}
-		const c = /(^|\s)-[a-zA-Z]*c[a-zA-Z]*\s/.exec(text);
-		if (c && unjudgeableScript(text.slice(c.index))) out.push(UNENUMERABLE);
 	}
 }
 
