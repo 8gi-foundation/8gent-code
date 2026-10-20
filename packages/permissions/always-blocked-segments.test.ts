@@ -430,6 +430,119 @@ const ORDINARY_LINES = [
 // Not blocked, but asks the person every time by policy (#3806): excluded from the unattended-run check only.
 const ASKS_BY_POLICY = new Set(["ssh host ls -la", 'ssh host "ls -la"']);
 
+// Brace and IFS spellings (#4514, family 2), assembled so no line of this file is itself a wipe.
+const RMW = ["r", "m"].join("");
+const IFS = "${IFS}";
+// An over-wide brace word (64 and 65 and 66 alternatives, a root target among them) behind each wrapper.
+const wideWord = (n: number) =>
+	`{${[...Array.from({ length: n - 1 }, (_, i) => `a${i}`), "/"].join(",")}}`;
+const OVERFLOW_WRAPPED = [
+	"sudo",
+	"env X=1",
+	"xargs",
+	"nice",
+	"time",
+	"command",
+	"exec",
+	"",
+].flatMap((w) => [64, 65, 66].map((n) => `${w} ${RMW} -rf ${wideWord(n)}`.trim()));
+const BRACE_IFS_BLOCKED = [
+	`{,${RMW}} -rf /`,
+	`{${RMW},} -rf /`,
+	`${RMW} -rf /{,}`,
+	`${RMW} -rf {/,,}`,
+	`r{m,x} -rf /`,
+	`{r,}m -rf /`,
+	`{r,x}m -rf /`,
+	`${RMW} -rf {/..0}`,
+	`${RMW} -rf {/,{1..2}}`,
+	`${RMW} -rf "{/,}"`,
+	`'{${RMW},-rf,/}'`,
+	...OVERFLOW_WRAPPED,
+	`$'\\x72'm${IFS}-rf${IFS}/`,
+	`{$'\\x72'm,-rf,/}`,
+	`${RMW}${IFS}-rf${IFS}$'\\x2f'`,
+	`{${RMW},-rf,/}`,
+	`{${RMW},-rf,/,}`,
+	`{{${RMW},-rf},/}`,
+	`{{${RMW},-rf},{/,x}}`,
+	`${RMW} -rf {/,}`,
+	`${RMW} -rf /{,x}`,
+	`${RMW} -rf {,/}`,
+	`${RMW}{,x} -rf /`,
+	`r{m,} -rf /`,
+	`${RMW} -rf {/,/}`,
+	`{${RMW},-rf}${IFS}/`,
+	`${RMW}${IFS}-rf${IFS}/`,
+	`${RMW}$IFS-rf$IFS/`,
+	`${IFS}${RMW}${IFS}-rf${IFS}/`,
+	`${RMW}${IFS}${IFS}-rf${IFS}/`,
+	`${RMW}${IFS}-rf${IFS}{/,/}`,
+	`${RMW}"${IFS}"-rf"${IFS}"/`,
+	`${RMW}${IFS}-rf${IFS}~`,
+	`${RMW}${IFS}-rf${IFS}$HOME`,
+	`${RMW} -rf {~,x}`,
+	`echo hi; ${RMW}${IFS}-rf${IFS}/`,
+	`bash -c '${RMW}${IFS}-rf${IFS}/'`,
+	`bash -c '{${RMW},-rf,/}'`,
+	`eval ${RMW}${IFS}-rf${IFS}/`,
+	`true && {${RMW},-rf,/}`,
+	`chmod${IFS}-R${IFS}000${IFS}/`,
+	`{chmod,-R,000,/}`,
+	`${RMW} -rf ${"{a,b}".repeat(7)} /`,
+	`${RMW} -rf ${"{/,/}".repeat(7)}`,
+];
+const BRACE_IFS_ORDINARY = [
+	"echo {a,b}",
+	"ls {src,test}",
+	"touch f{a,b,c}",
+	"echo {x}",
+	"echo {}",
+	"echo $IFS",
+	`${RMW} -rf build{1..3}`,
+	"echo {a..c}",
+	`echo ${"{a,b}".repeat(2)} "{/,}"`,
+	`echo a${IFS}b`,
+	`${RMW} -rf {build,dist}`,
+	`${RMW}${IFS}-rf${IFS}build`,
+	`${RMW} -rf node_modules/{a,b}`,
+	`touch ${"{a,b}".repeat(7)}`,
+];
+
+describe("brace and IFS spellings of a wipe (#4514)", () => {
+	test("every spelling is refused", () => {
+		const pm = manager();
+		for (const line of BRACE_IFS_BLOCKED) {
+			expect([line, pm.checkPermission(line)]).toEqual([line, "denied"]);
+		}
+	});
+
+	test("the same spellings are refused behind quoting, comments and heredocs", () => {
+		const pm = manager();
+		for (const line of BRACE_IFS_BLOCKED.slice(0, 16)) {
+			for (const wrapped of [`: # don't\n${line} #'`, `cat <<E\nit's\nE\n${line} #'`]) {
+				expect([wrapped, pm.checkPermission(wrapped)]).toEqual([wrapped, "denied"]);
+			}
+		}
+	});
+
+	test("ordinary brace and IFS use is not blocked", () => {
+		const pm = manager();
+		for (const line of BRACE_IFS_ORDINARY) {
+			expect([line, pm.checkPermission(line)]).not.toEqual([line, "denied"]);
+		}
+	});
+
+	test("an over-wide brace word stays bounded and refuses only behind a guarded command", () => {
+		const wide = `{${Array.from({ length: 70 }, (_, i) => `a${i}`).join(",")}}`;
+		const pm = manager();
+		const t0 = Date.now();
+		expect(pm.checkPermission(`${RMW} -rf ${wide}`)).toBe("denied");
+		expect(pm.checkPermission(`touch ${wide}`)).not.toBe("denied");
+		expect(Date.now() - t0).toBeLessThan(2000);
+	});
+});
+
 describe("always-blocked segments (#3768)", () => {
 	test("the check sees a blocked command in any position", () => {
 		const pm = manager();
