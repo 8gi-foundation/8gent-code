@@ -9,6 +9,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.5] - 2026-10-20
+
+### Changed
+- Never swap a cloud provider's model for a local one silently ([#4592](https://github.com/8gi-foundation/8gent-code/pull/4592))
+- tui: hostile-terminal sends one Enter and waits for the screen to move (#4600) ([#4601](https://github.com/8gi-foundation/8gent-code/pull/4601))
+- block new hardcoded model names (allow-list guard) ([#4583](https://github.com/8gi-foundation/8gent-code/pull/4583))
+
+### Fixed
+- tui: draw the active non-chat tab's body (Settings, Notes, ...) ([#4597](https://github.com/8gi-foundation/8gent-code/pull/4597))
+- tui: provider picker from the registry, no cross-provider model, true missing-key and fetch-failure notices (#4598) ([#4599](https://github.com/8gi-foundation/8gent-code/pull/4599))
+- tui: take typing after a probe reply that arrives at once (Refs #4540) ([#4589](https://github.com/8gi-foundation/8gent-code/pull/4589))
+
 ## [0.20.4] - 2026-10-20
 
 ### Changed
