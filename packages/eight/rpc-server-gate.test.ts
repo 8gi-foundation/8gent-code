@@ -82,4 +82,20 @@ describe("rpc session.message gate", () => {
 		}
 		expect(reached).toEqual([]);
 	});
+	test("session.create rejects a bad systemPrompt before any Agent is built", async () => {
+		setup("r5");
+		for (const systemPrompt of [["x"], 5, "/status", "  /nosuchthing", "a\0b", "x".repeat(65537)]) {
+			out.length = 0;
+			await handleLine(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					id: 1,
+					method: "session.create",
+					params: { systemPrompt },
+				}),
+			);
+			expect(out[0].error.code).toBe(-32602);
+		}
+		expect(sessions.size).toBe(1);
+	});
 });

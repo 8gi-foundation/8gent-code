@@ -11,6 +11,8 @@ import { RPC_ERRORS } from "./rpc-types";
 import { TOOL_CATEGORIES } from "./tool-registry";
 import type { AgentEventCallbacks } from "./types";
 
+const MAX_SYSTEM_PROMPT = 64 * 1024;
+
 export const sessions = new Map<string, { agent: Agent; id: string }>();
 
 function send(msg: RPCResponse | RPCNotification): void {
@@ -32,6 +34,28 @@ type Handler = (id: number | string, params: Record<string, unknown>) => Promise
 
 const methods: Record<string, Handler> = {
 	"session.create": async (id, params) => {
+		// The system prompt is model input: shape, size, NUL and slash checks before it is used.
+		if (params.systemPrompt !== undefined) {
+			const sp = params.systemPrompt;
+			const bad =
+				typeof sp !== "string"
+					? "systemPrompt must be a string"
+					: sp.length > MAX_SYSTEM_PROMPT
+						? `systemPrompt exceeds ${MAX_SYSTEM_PROMPT} characters`
+						: sp.includes("\0")
+							? "systemPrompt must not contain NUL bytes"
+							: classifyInput(sp, { sessionId: "rpc-create", channel: "rpc" }).kind === "slash" &&
+									(
+										await gateInput(
+											sp,
+											{ sessionId: "rpc-create", channel: "rpc" },
+											{ classifyOnly: true },
+										)
+									).handled
+								? "systemPrompt must not be a slash command line"
+								: null;
+			if (bad) return sendError(id, RPC_ERRORS.INVALID_PARAMS, bad);
+		}
 		const rawModel = (params.model as string) || process.env.EIGHGENT_MODEL || "eight:latest";
 		const cwd = (params.cwd as string) || process.cwd();
 		const sessionId = `rpc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
