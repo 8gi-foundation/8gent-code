@@ -32,6 +32,7 @@ import type {
 import { type EventName, bus } from "./events";
 import { type GoalManager, type GoalRpcOutbound, handleGoalRpc } from "./goal-rpc";
 import { handleStageHttp } from "./huddle-stage";
+import { classifyInput, gateInput } from "./input-gate";
 import {
 	handleLiveHttp,
 	installLiveAnatomy,
@@ -534,23 +535,45 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			// client that merely resumed the session cannot.
 			const turn = state.approvalBridge ? parseTurn(msg.turn) : undefined;
 			if (typeof msg.text === "string") echoPrompt(ws, sid, msg.text, state.channel);
-			pool
-				.chat(sid, msg.text, turn)
-				.then((response) => {
-					// Final response - signal session:end for this turn
-					bus.emit("session:end", { sessionId: sid, reason: "turn-complete" });
-				})
-				.catch((err) => {
-					bus.emit("agent:error", {
-						sessionId: sid,
-						error: err instanceof Error ? err.message : String(err),
+			const runModelTurn = (): void => {
+				pool
+					.chat(sid, msg.text, turn)
+					.then((response) => {
+						// Final response - signal session:end for this turn
+						bus.emit("session:end", { sessionId: sid, reason: "turn-complete" });
+					})
+					.catch((err) => {
+						bus.emit("agent:error", {
+							sessionId: sid,
+							error: err instanceof Error ? err.message : String(err),
+						});
+					})
+					.finally(() => {
+						// Shareable sessions are saved after every turn so the TUI and a
+						// later session:attach can resume them (#3929).
+						persistSession(pool as unknown as SharedPool, getSessionStore, sid, persistable);
 					});
-				})
-				.finally(() => {
-					// Shareable sessions are saved after every turn so the TUI and a
-					// later session:attach can resume them (#3929).
-					persistSession(pool as unknown as SharedPool, getSessionStore, sid, persistable);
-				});
+			};
+			// Every channel's text passes the deterministic gate before the model (#4530).
+			// classifyInput runs on every line, synchronously; only a slash line takes the async handler.
+			if (classifyInput(msg.text, { sessionId: sid, channel: state.channel }).kind === "pass") {
+				runModelTurn();
+				break;
+			}
+			const agent = pool.getAgent(sid);
+			const info = pool.getSessionInfo(sid);
+			void gateInput(msg.text, {
+				sessionId: sid,
+				channel: state.channel,
+				model: agent?.getModel?.(),
+				runtime: agent?.getRuntime?.(),
+				messageCount: info?.messageCount,
+				busy: info?.busy,
+			}).then((r) => {
+				if (!r.handled) return runModelTurn();
+				bus.emit("agent:stream", { sessionId: sid, chunk: r.text ?? "", final: true });
+				bus.emit("session:end", { sessionId: sid, reason: "turn-complete" });
+			});
 			break;
 		}
 

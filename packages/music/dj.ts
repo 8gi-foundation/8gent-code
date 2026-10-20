@@ -15,17 +15,18 @@
  * - Resume across sessions
  */
 
+import { type ChildProcess, type SpawnOptions, execFileSync, spawn } from "node:child_process";
 import {
-	type ChildProcess,
-	type SpawnOptions,
-	execFileSync,
-	execSync,
-	spawn,
-} from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
 import * as net from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
-import { basename, dirname, join, posix, win32 } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, sep, win32 } from "node:path";
 import { getSettingsFilePath, loadSettings } from "../settings/store.js";
 import { type KeyJob, detectKey } from "./key-detect.js";
 import { stopOwnPlayers } from "./player.js";
@@ -161,6 +162,22 @@ export function ytSearch(
 // ---- Platform ----
 const PLATFORM = platform();
 const HOME = homedir();
+
+/** The folder of local beds. A direct file path plays only from inside it (#4530). */
+export function bedsDir(): string {
+	return process.env.EIGHT_BEDS_DIR || join(HOME, ".8gent", "creative", "music", "beds");
+}
+
+/** True when `file` exists and its realpath (symlinks resolved) is inside the beds folder. */
+export function isBedPath(file: string): boolean {
+	try {
+		const root = realpathSync(bedsDir());
+		const real = realpathSync(file);
+		return real.startsWith(root.endsWith(sep) ? root : root + sep);
+	} catch {
+		return false;
+	}
+}
 const TMP = tmpdir();
 
 /**
@@ -609,16 +626,21 @@ export class DJ {
 	async play(queryOrUrl: string): Promise<string> {
 		const t = detectTools();
 		if (!t.mpv) return `mpv not installed. Run: ${installHint()}`;
-		if (!t.ytdlp && !queryOrUrl.startsWith("http"))
-			return `yt-dlp not installed. Run: ${installHint()}`;
+		// A URL or a file inside the beds folder plays as is; anything else is a search.
+		// An absolute path outside the beds folder is refused, never searched or played,
+		// so chat text cannot play or probe an arbitrary local file.
+		if (isAbsolute(queryOrUrl) && !isBedPath(queryOrUrl))
+			return "Refused: only files in the beds folder play directly.";
+		const direct = queryOrUrl.startsWith("http") || isAbsolute(queryOrUrl);
+		if (!t.ytdlp && !direct) return `yt-dlp not installed. Run: ${installHint()}`;
 
 		let url = queryOrUrl;
-		let title = queryOrUrl;
+		let title = direct && !queryOrUrl.startsWith("http") ? basename(queryOrUrl) : queryOrUrl;
 		// A stop or a newer play while this one searches wins (#3182).
 		const gen = ++playGen;
 
 		// If not a URL, search YouTube, off the event loop so the TUI keeps drawing.
-		if (!queryOrUrl.startsWith("http")) {
+		if (!direct) {
 			const found = await ytSearch(t.ytdlp!, queryOrUrl);
 			if (gen !== playGen) return "Stopped.";
 			if (!found) return `No results found for: ${queryOrUrl}`;
@@ -819,10 +841,19 @@ export class DJ {
 			return "BPM detection needs a POSIX shell and is not available on Windows yet.";
 
 		try {
-			// Use sox + ffmpeg to estimate BPM via onset detection
-			const result = execSync(
-				`${t.sox} "${filePath}" -t raw -r 44100 -e float -c 1 - 2>/dev/null | ` +
-					`${t.ffmpeg} -f f32le -ar 44100 -ac 1 -i - -af "aresample=44100,highpass=f=100,lowpass=f=200,agate=threshold=0.01" -f null - 2>&1 | grep -o "pts_time:[0-9.]*" | head -50`,
+			// Use sox + ffmpeg to estimate BPM via onset detection. The file path and tool
+			// paths reach the shell as positional parameters, never spliced into the script.
+			const result = execFileSync(
+				"/bin/sh",
+				[
+					"-c",
+					'"$1" "$3" -t raw -r 44100 -e float -c 1 - 2>/dev/null | ' +
+						'"$2" -f f32le -ar 44100 -ac 1 -i - -af "aresample=44100,highpass=f=100,lowpass=f=200,agate=threshold=0.01" -f null - 2>&1 | grep -o "pts_time:[0-9.]*" | head -50',
+					"sh",
+					t.sox,
+					t.ffmpeg ?? "ffmpeg",
+					filePath,
+				],
 				{ encoding: "utf-8", timeout: 30000 },
 			);
 			// Count onsets and estimate BPM from inter-onset intervals

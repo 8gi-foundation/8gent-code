@@ -74,6 +74,7 @@ import { type SpokenModel, capAtSentence, makeSpokenDraft } from "../voice/spoke
 import { recordTelegramPoll, registerTelegramBridge } from "./bridge-health";
 import { approvalTtlMs, bridgeSecret } from "./channel-approvals";
 import { getDataDir } from "./data-dir";
+import { gateInput } from "./input-gate";
 import { NO_LINK_PREVIEW } from "./notifications";
 import { VOICE_ACK, ackForTranscript } from "./voice-ack";
 
@@ -1902,6 +1903,17 @@ class TelegramDaemonBridge {
 				? this.config.judgeModel
 				: localSpokenModel(process.env, fetch, true);
 		if (!real || !model) return;
+		// The transcript reaches the judge model, so it passes the input gate first (#4530).
+		if (
+			(
+				await gateInput(
+					u.text,
+					{ sessionId: `tg-${chat.id}`, channel: "telegram" },
+					{ classifyOnly: true },
+				)
+			).handled
+		)
+			return;
 		const ticket = real.beginJudge(u);
 		if (!ticket) return;
 		const ac = new AbortController();
