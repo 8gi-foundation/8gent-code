@@ -96,6 +96,18 @@ describe("ToolLoopDetector: rewrite loop (#4537)", () => {
 		expect(d.check()?.recoverable).toBe(true);
 	});
 
+	test("relative and absolute paths count together when workingDirectory differs from process.cwd()", () => {
+		const wd = "/somewhere/else/than/cwd";
+		expect(process.cwd()).not.toBe(wd);
+		const d = new ToolLoopDetector({ writeLoopMax: 4, workingDirectory: wd });
+		w(d, "src/a.js", "v0");
+		w(d, `${wd}/src/a.js`, "v1");
+		w(d, "./src/a.js", "v2");
+		expect(d.check()).toBeNull();
+		w(d, `${wd}/src/a.js`, "v3");
+		expect(d.check()?.recoverable).toBe(true);
+	});
+
 	test("A,B alternation trips each file at N", () => {
 		const d = new ToolLoopDetector({ writeLoopMax: 4 });
 		for (let i = 0; i < 3; i++) {
