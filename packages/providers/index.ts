@@ -483,11 +483,13 @@ const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
 	minimax: {
 		name: "minimax",
 		displayName: "MiniMax",
-		// OpenAI-compatible. Override with MINIMAX_BASE_URL (e.g. a regional endpoint).
+		// OpenAI-compatible. Override with MINIMAX_BASE_URL (China region: https://api.minimaxi.com/v1).
 		baseUrl: process.env.MINIMAX_BASE_URL || "https://api.minimax.io/v1",
 		apiKeyEnv: "MINIMAX_API_KEY",
 		// DEFAULT only, so a first answer works without hand-editing providers.json.
 		// `/provider models` (discoverModels) replaces it with what the endpoint lists.
+		// M2.7 is the name already in this repo; third-party sources suggest M3 is the
+		// current name. Confirm against MiniMax's own model list.
 		defaultModel: "MiniMax-M2.7",
 		models: ["MiniMax-M2.7"],
 		enabled: false,
