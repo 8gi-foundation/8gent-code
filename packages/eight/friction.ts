@@ -2,10 +2,11 @@
  * Friction record (#4511): counts of how hard a session was to use. Pure, no I/O, no message
  * content kept. Agent feeds it where each fact already happens and writes `record()` to the
  * session jsonl once, at session end. Nothing renders it until ten sessions of baseline exist.
- * Permission prompts are counted through one process-wide tracker that a session claims for the
- * length of each turn and hands back in finally, so a prompt is credited to the session whose turn
- * is running and a nested child turn returns it to its parent.
+ * Permission prompts are credited through AsyncLocalStorage: chat() runs the turn inside
+ * withFriction, so a prompt belongs to the turn whose async chain asked, however turns interleave.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
+
 const OPENERS = new Set(["no", "not", "wrong", "actually", "instead"]);
 const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []);
 
@@ -96,17 +97,10 @@ export class Friction {
 	}
 }
 
-let active: Friction | null = null;
-/** Claim the tracker for a turn; returns the previous holder to hand back with leaveFriction. */
-export const enterFriction = (f: Friction): Friction | null => {
-	const prev = active;
-	active = f;
-	return prev;
-};
-export const leaveFriction = (f: Friction, prev: Friction | null): void => {
-	if (active === f) active = prev;
-};
-/** Only prompts a person was shown count: approve, deny, edit (not skip or unfit). */
+const turnFriction = new AsyncLocalStorage<Friction>();
+/** Run one turn with `f` as the tracker that approval prompts asked inside it are counted to. */
+export const withFriction = <T>(f: Friction, fn: () => T): T => turnFriction.run(f, fn);
+/** Only prompts a person was shown count: approve, deny, edit (not skip or unfit); none outside a turn. */
 export const noteApproval = (decision: string): void => {
-	if (["approve", "deny", "edit"].includes(decision)) active?.permission(decision);
+	if (["approve", "deny", "edit"].includes(decision)) turnFriction.getStore()?.permission(decision);
 };

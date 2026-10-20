@@ -113,7 +113,7 @@ import {
 } from "./compaction";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { continueEmptyTurn } from "./empty-turn-continue";
-import { Friction, enterFriction, leaveFriction } from "./friction";
+import { Friction, withFriction } from "./friction";
 import {
 	type ToolLedgerEntry,
 	denialIsCause,
@@ -2065,31 +2065,36 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	): Promise<string> {
 		this.lastTurnFailure = null;
 		this.honestyFired = false;
-		const prevFriction = enterFriction(this.friction);
 		this.friction.prompt(userMessage);
-		return runAsParentSession(
-			() => ({
-				runtime: this.config.runtime,
-				model: this.config.model,
-				baseUrl: this.config.baseUrl,
-			}),
-			async () => {
-				// A new turn: steers left from an earlier turn are stale and are
-				// dropped, never delivered into this one (the caller had its chance
-				// to take them with takeQueuedSteers).
-				const turn = ++this.turnCounter;
-				this.steerQueue = [];
-				this.activeTurn = turn;
-				try {
-					const reply = await this.runTurn(userMessage, imageBase64, imageMimeType, imageOriginal);
-					this.reviewFinishedTurn(userMessage, reply);
-					return reply;
-				} finally {
-					this.friction.turnEnd();
-					leaveFriction(this.friction, prevFriction);
-					if (this.activeTurn === turn) this.activeTurn = null;
-				}
-			},
+		return withFriction(this.friction, () =>
+			runAsParentSession(
+				() => ({
+					runtime: this.config.runtime,
+					model: this.config.model,
+					baseUrl: this.config.baseUrl,
+				}),
+				async () => {
+					// A new turn: steers left from an earlier turn are stale and are
+					// dropped, never delivered into this one (the caller had its chance
+					// to take them with takeQueuedSteers).
+					const turn = ++this.turnCounter;
+					this.steerQueue = [];
+					this.activeTurn = turn;
+					try {
+						const reply = await this.runTurn(
+							userMessage,
+							imageBase64,
+							imageMimeType,
+							imageOriginal,
+						);
+						this.reviewFinishedTurn(userMessage, reply);
+						return reply;
+					} finally {
+						this.friction.turnEnd();
+						if (this.activeTurn === turn) this.activeTurn = null;
+					}
+				},
+			),
 		);
 	}
 
