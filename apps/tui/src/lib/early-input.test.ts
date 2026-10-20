@@ -1,24 +1,25 @@
 import { describe, expect, test } from "bun:test";
+import { PassThrough } from "node:stream";
 import { WATCHDOG_MS, armEarlyInput, earlyRawDecision } from "./early-input.js";
 
-function harness(
-	over: { platform?: string; env?: Record<string, string | undefined>; buffered?: number } = {},
-) {
+function harness(over: { platform?: string; env?: Record<string, string | undefined> } = {}) {
 	const calls: string[] = [];
 	const traces: string[] = [];
 	let fire: (() => void) | null = null;
 	let cleared = false;
-	const stdin = {
+	// A real stream: bytes written to it must survive the watchdog.
+	const stdin = Object.assign(new PassThrough(), {
 		isTTY: true,
 		isRaw: false,
-		readableLength: over.buffered ?? 0,
 		setRawMode(m: boolean) {
 			calls.push(`raw:${m}`);
 			stdin.isRaw = m;
 		},
-		resume() {
-			calls.push("resume");
-		},
+	});
+	const origResume = stdin.resume.bind(stdin);
+	stdin.resume = () => {
+		calls.push("resume");
+		return origResume();
 	};
 	const handle = armEarlyInput({
 		stdin,
@@ -35,24 +36,25 @@ function harness(
 			fire = null;
 		},
 	});
-	return { calls, traces, handle, fire: () => fire?.(), cleared: () => cleared };
+	return { stdin, calls, traces, handle, fire: () => fire?.(), cleared: () => cleared };
 }
 
 describe("early raw-mode watchdog (#4540)", () => {
-	test("fires when no key and no Ink mount: raw off, resumed, one trace line", () => {
+	test("fires when Ink never mounts: raw off, one trace line, never resumed", () => {
 		const h = harness();
 		expect(h.calls).toEqual(["raw:true"]);
 		h.fire();
-		expect(h.calls).toEqual(["raw:true", "raw:false", "resume"]);
+		expect(h.calls).toEqual(["raw:true", "raw:false"]);
 		expect(h.traces).toHaveLength(1);
 		expect(h.traces[0]).toContain("watchdog");
 	});
 
-	test("does not fire its restore when a key arrived", () => {
-		const h = harness({ buffered: 1 });
+	test("typed bytes survive the watchdog: still buffered and readable", () => {
+		const h = harness();
+		h.stdin.write("hi");
 		h.fire();
-		expect(h.calls).toEqual(["raw:true"]);
-		expect(h.traces).toEqual([]);
+		expect(h.calls).not.toContain("resume");
+		expect(h.stdin.read()?.toString()).toBe("hi");
 	});
 
 	test("does not fire once Ink has mounted", () => {

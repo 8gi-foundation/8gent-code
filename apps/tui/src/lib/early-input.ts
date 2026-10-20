@@ -18,8 +18,10 @@
  * - On win32 the hand-off is skipped unless 8GENT_EARLY_RAW=1: Bun raw mode on
  *   Windows terminals is the top suspect for a screen that never moves.
  * - A watchdog: if raw mode was entered and, WATCHDOG_MS later, Ink has not
- *   mounted and no key has arrived, stdin is handed back (raw off, resumed)
- *   and the normal path continues. One boot-trace line records it.
+ *   mounted, raw mode is turned off (stdin is never resumed, so no typed byte
+ *   is discarded) and the normal path continues. One boot-trace line records it.
+ *   markInkMounted runs when render() returns, before Ink's useEffect attaches
+ *   stdin, so a stall inside Ink's own mount is not covered.
  */
 import { bootTrace } from "./boot-trace.js";
 
@@ -28,9 +30,7 @@ export const WATCHDOG_MS = 1500;
 export interface EarlyInputStdin {
 	isTTY?: boolean;
 	isRaw?: boolean;
-	readableLength?: number;
 	setRawMode?: (mode: boolean) => unknown;
-	resume?: () => unknown;
 }
 
 export interface EarlyInputDeps {
@@ -76,12 +76,13 @@ export function armEarlyInput(deps: EarlyInputDeps): EarlyInputHandle {
 		return { raw: false, markMounted() {} };
 	}
 	const timer = deps.setTimer(() => {
-		// A key waiting in the tty means the hand-off is doing its job.
-		if ((stdin.readableLength ?? 0) > 0) return;
+		// Raw mode only: never resume() here. With no data listener a resume
+		// flows and discards the bytes the person already typed; Ink's own
+		// setRawMode(true) re-arms raw mode when it attaches. Typed bytes sit in
+		// the kernel tty buffer, so no stream-side check can tell "a key arrived".
 		try {
 			if (stdin.isRaw) stdin.setRawMode?.(false);
-			stdin.resume?.();
-			trace(`watchdog: no key and no Ink mount in ${WATCHDOG_MS} ms, stdin restored`);
+			trace(`watchdog: no Ink mount in ${WATCHDOG_MS} ms, raw mode restored`);
 		} catch {
 			// The terminal is already gone.
 		}

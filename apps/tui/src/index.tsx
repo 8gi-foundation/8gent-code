@@ -76,4 +76,6 @@ render(
 		cliAutoApprove={parsed.yes}
 	/>,
 );
+// Runs when render() returns, before Ink's useEffect attaches stdin: a stall
+// inside Ink's own mount is not covered by the watchdog.
 markInkMounted();
