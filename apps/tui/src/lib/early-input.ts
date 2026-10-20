@@ -15,6 +15,8 @@
  * mounts (a crash during load), so the shell is never left raw.
  */
 
+import { bootEnvSummary, bootTrace } from "./boot-trace.js";
+
 const stdin = process.stdin as NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void };
 
 export const EARLY_RAW =
@@ -25,6 +27,7 @@ export const EARLY_RAW =
 if (EARLY_RAW) {
 	try {
 		stdin.setRawMode?.(true);
+		bootTrace("early-raw-on", bootEnvSummary());
 		process.once("exit", () => {
 			try {
 				if (stdin.isRaw) stdin.setRawMode?.(false);
@@ -32,7 +35,9 @@ if (EARLY_RAW) {
 				// The terminal is already gone.
 			}
 		});
-	} catch {
+	} catch (e) {
+		bootTrace("early-raw-failed", String((e as Error)?.message ?? e));
 		// Not a real tty after all: nothing to hold.
 	}
 }
+if (!EARLY_RAW) bootTrace("early-raw-skipped", bootEnvSummary());
