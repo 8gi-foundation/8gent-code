@@ -108,6 +108,10 @@ const methods: Record<string, Handler> = {
 		if (!sessionId || !content) {
 			return sendError(id, RPC_ERRORS.INVALID_PARAMS, "sessionId and content required");
 		}
+		// Shape check before the gate: only a non-empty string can be classified.
+		if (typeof content !== "string" || !content.trim()) {
+			return sendError(id, RPC_ERRORS.INVALID_PARAMS, "content must be a non-empty string");
+		}
 
 		const session = sessions.get(sessionId);
 		if (!session) {

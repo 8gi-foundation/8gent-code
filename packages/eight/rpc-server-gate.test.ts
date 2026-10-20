@@ -66,4 +66,20 @@ describe("rpc session.message gate", () => {
 		expect(order).toEqual(["classify:pass", "model"]);
 		expect(out.find((m) => m.result)?.result.response).toBe("model:hello");
 	});
+	test("non-string or blank content is rejected and never reaches the model", async () => {
+		const reached = setup("r4");
+		for (const content of [["/status"], { a: 1 }, 5, "   "]) {
+			out.length = 0;
+			await handleLine(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					id: 1,
+					method: "session.message",
+					params: { sessionId: "r4", content },
+				}),
+			);
+			expect(out[0].error.code).toBe(-32602);
+		}
+		expect(reached).toEqual([]);
+	});
 });
