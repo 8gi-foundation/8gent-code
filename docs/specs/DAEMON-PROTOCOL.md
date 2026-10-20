@@ -202,6 +202,10 @@ Sent to every other client bound to the session when one sends `prompt`. The sen
   `"resumeSecret": "<32 hex>"`, one per session. A `session:resume` from a non-loopback peer
   of a live session must send it back as `"resumeSecret"`, otherwise
   `{ "type": "error", "message": "resume secret required" }`. Loopback clients may omit it.
+- Capabilities (v1.7): `session:created` and `session:resumed` carry `"capabilities": ["input-gate"]`,
+  and `/health` carries the same list as `capabilities`. The list comes from the exported
+  `DAEMON_CAPABILITIES` constant beside the input gate (`packages/daemon/input-gate.ts`).
+  Clients may gate slash sending on it: send `/` lines only when `input-gate` is present.
 - `session:create` takes an optional `"persist": true` (shareable channels only): the session
   is saved after every turn from the start, so a chat only one surface ever had can be resumed
   later, also after a daemon restart. Without it (older clients) nothing changes.
@@ -930,6 +934,7 @@ goal package only emits in-memory `GoalEvent` records.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.7 | 2026-10-20 | Add `capabilities` (`["input-gate"]`) to `session:created`, `session:resumed` and `/health`. |
 | 1.6 | 2026-10-20 | Document the input gate on every channel (#4531, #4535), loopback bind by default and the connect-time token on every non-root path (#4532). |
 | 1.5 | 2026-10-11 | Add the restricted `classroom` channel: no tools, loopback + token only, private, not persisted. (#3939) |
 | 1.4 | 2026-10-11 | Shared sessions: `session:list` / `session:attach` / `session:detach` / `session:abort`, `user:message` echo, disconnect only ends a session for the last client, shareable sessions saved to the session store. (#3929) |

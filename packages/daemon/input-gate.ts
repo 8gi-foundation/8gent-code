@@ -11,6 +11,14 @@
 
 import { type SlashContext, type SlashResult, runSlash } from "./slash";
 
+/**
+ * What this daemon advertises on `session:created`, `session:resumed` and `/health`.
+ * Clients (the 8gent Browser) send slash lines to anything advertising "input-gate", so the
+ * claim must be true on every channel. The guard is capabilities.gateway.test.ts: for each
+ * channel that advertises it, /status and an unknown slash never reach the pool's chat.
+ */
+export const DAEMON_CAPABILITIES: readonly string[] = Object.freeze(["input-gate"]);
+
 export type GateContext = SlashContext;
 export type GateResult = SlashResult;
 
