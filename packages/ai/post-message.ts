@@ -284,7 +284,7 @@ export function checkApiBase(raw: string, testMode: boolean): { base?: string; e
 const testMode = () => process.env.NODE_ENV === "test" || process.env.BUN_TEST === "1";
 
 /** The Bot API base. Process environment only, so nothing written during a session moves it. */
-const apiBase = (): { base?: string; error?: string } => {
+export const apiBase = (): { base?: string; error?: string } => {
 	const raw = process.env.EIGHT_TG_API_BASE;
 	return raw ? checkApiBase(raw, testMode()) : { base: TG_API };
 };

@@ -18,6 +18,18 @@ Outside Infinite mode each post also shows a full-text approval card. Ten posts 
 - Agent file tools: `~/.8gent/settings.json` is path-guard protected (`~` expanded, realpath compared).
 - Agent shell: a name-based refusal for commands naming the settings file. A shell can still write it by an obfuscated path; the process-start snapshot plus the per-process approval above mean that edit cannot authorise a post. An OS-level write deny is a separate change (#3612).
 
+## Guided setup: /telegram setup (#4594)
+
+For a new user, `/telegram setup` writes the settings above for you. The bot key is never typed into the chat.
+
+1. Run `/telegram setup`. If `~/.8gent/secrets/telegram-bot.env` has no key, it creates that file (private to you, mode 600) with an empty `TELEGRAM_BOT_TOKEN=` and tells you to make a bot with @BotFather, then paste the key after the `=` in an editor. The key is read from the file inside the process; it is not shown, logged, sent to the model or put on a command line.
+2. Run `/telegram setup` again. It calls `getMe` and shows the bot's @name so you know it is the right bot. A bad key gives a plain error with the key redacted.
+3. Message the bot, or add it to a group and send a message. Run `/telegram setup` again: it makes one `getUpdates` call (no long polling, nothing acknowledged, so it does not steal updates from another poller) and lists the chats it saw by name with their ids. A DM chat id is your user id.
+4. Run `/telegram setup <chat id>` for each chat you want. It adds to `postMessage.allowedChats` (never removes), sets `botEnvFile` and `botTokenVar`, and keeps every other key in `~/.8gent/settings.json`. A settings file that is not valid JSON is left untouched.
+5. Restart 8gent. The settings are read once at process start, and the first post to each chat still asks you to approve it.
+
+Only chats the bot has actually seen can be added. `EIGHT_TG_API_BASE` (tests only) points the flow at a stub.
+
 ## Direct send with a bot env file (#3838)
 
 For a machine without `tg-group`, name the env file that holds the bot key:
