@@ -176,6 +176,107 @@ function afterHome(t: string): string | null {
  * path follows (`$HOME/*` + `/*` empties every folder in home). A folder inside home is not a home target.
  */
 function isHomeTarget(t: string): boolean {
+	const all = expandBraces(t);
+	// Too many alternatives to enumerate is itself a reason to refuse: nobody types that by hand.
+	return all === null || all.some(isHomeTargetOne);
+}
+
+const MAX_BRACE_EXPANSIONS = 512;
+
+/**
+ * Shell brace expansion, every alternative (`~/{*,.*}` -> `~/*`, `~/.*`; `{~,/x}/*` -> `~/*`, `/x/*`).
+ * A `{` right after `$` is a parameter expansion, not a brace, and a brace with no top-level comma
+ * stays literal. Returns null when the result would pass MAX_BRACE_EXPANSIONS.
+ */
+function expandBraces(s: string): string[] | null {
+	let out = [s];
+	for (let guard = 0; guard < 64; guard++) {
+		let changed = false;
+		const next: string[] = [];
+		for (const str of out) {
+			const parts = expandFirstBrace(str);
+			if (parts) changed = true;
+			next.push(...(parts ?? [str]));
+			if (next.length > MAX_BRACE_EXPANSIONS) return null;
+		}
+		out = next;
+		if (!changed) return out;
+	}
+	return null;
+}
+
+function expandFirstBrace(s: string): string[] | null {
+	for (let i = 0; i < s.length; i++) {
+		if (s[i] !== "{" || s[i - 1] === "$") continue;
+		let depth = 0;
+		const cuts: number[] = [];
+		for (let j = i; j < s.length; j++) {
+			if (s[j] === "{") depth++;
+			else if (s[j] === "}" && --depth === 0) {
+				if (cuts.length === 0) break;
+				const head = s.slice(0, i);
+				const tail = s.slice(j + 1);
+				const bounds = [i, ...cuts, j];
+				const alts: string[] = [];
+				for (let k = 0; k < bounds.length - 1; k++)
+					alts.push(head + s.slice(bounds[k] + 1, bounds[k + 1]) + tail);
+				return alts;
+			} else if (s[j] === "," && depth === 1) cuts.push(j);
+		}
+	}
+	return null;
+}
+
+const GLOB_ATOM = "(?:[*?]|\\[[!^]?\\]?(?:\\[[:.=][^\\]]*[:.=]\\]|[^\\]])*\\])";
+
+/** Inner text of a balanced `(...)` starting at s[i] === "(", and the index after it; null if unbalanced. */
+function parenGroup(s: string, i: number): { inner: string; next: number } | null {
+	let depth = 0;
+	for (let j = i; j < s.length; j++) {
+		if (s[j] === "(") depth++;
+		else if (s[j] === ")" && --depth === 0) return { inner: s.slice(i + 1, j), next: j + 1 };
+	}
+	return null;
+}
+
+/**
+ * One path component that can match every entry: only glob atoms (`*`, `?`, bracket classes with
+ * POSIX classes inside), extglobs that can match anything (`!(x)`, `@(*)`, `+(*)`, `*(*)`, `?(*)`),
+ * and a trailing zsh qualifier (`*(D)`, `*(N)`, `*(.)`) on an otherwise wild component.
+ */
+function isWildComponent(c: string): boolean {
+	let i = 0;
+	let atoms = 0;
+	while (i < c.length) {
+		const rest = c.slice(i);
+		const m = new RegExp(`^${GLOB_ATOM}`).exec(rest);
+		if (m) {
+			i += m[0].length;
+			atoms++;
+			continue;
+		}
+		if (/^[@+!]\(/.test(rest)) {
+			const g = parenGroup(c, i + 1);
+			if (!g) return false;
+			const anyWild = c[i] === "!" || g.inner.split("|").some((a) => isWildComponent(a));
+			if (!anyWild) return false;
+			i = g.next;
+			atoms++;
+			continue;
+		}
+		if (c[i] === "(" && atoms > 0) {
+			// a zsh glob qualifier (or an extglob lead after a star): matches by attribute, not by name
+			const g = parenGroup(c, i);
+			if (!g) return false;
+			i = g.next;
+			continue;
+		}
+		return false;
+	}
+	return atoms > 0;
+}
+
+function isHomeTargetOne(t: string): boolean {
 	t = t.replace(/\/+$/, "");
 	if (isHomeAncestor(t)) return true;
 	const rest = afterHome(t);
@@ -189,8 +290,7 @@ function isHomeTarget(t: string): boolean {
 	// Every component after home is made only of glob metacharacters (`*`, `?`, `**`, bracket
 	// classes like `[!.]`) or is a dot-glob (`$HOME/*`, `~/*/?*`, `~/[!.]*`, `~/*/.*`, `~/.??*`).
 	// `~/*/node_modules`, `~/*.log` and `~/*/x*` name something specific, so they only ask.
-	const wild = (c: string) =>
-		/^(?:[*?]|\[[^\]]*\])+$/.test(c) || (c.startsWith(".") && /[*?[]/.test(c));
+	const wild = (c: string) => isWildComponent(c) || (c.startsWith(".") && /[*?[]|[@+!]\(/.test(c));
 	return parts.every(wild);
 }
 
@@ -327,6 +427,7 @@ function scanLine(input: string, out: string[][], depth: number): void {
 
 	let inSingle = false;
 	let inDouble = false;
+	let globEnd = -2;
 	for (let i = 0; i < text.length; i++) {
 		const ch = text[i];
 		const next = text[i + 1];
@@ -369,6 +470,18 @@ function scanLine(input: string, out: string[][], depth: number): void {
 		}
 		if (inDouble) {
 			cur += ch;
+			continue;
+		}
+		// `(` glued to a glob character is an extglob or zsh qualifier (`~/@(*)`, `~/*(D)`), part of
+		// the word and not a subshell. Its inside is still scanned as a line, so nothing hides in it.
+		if (ch === "(" && i > 0 && (/[*?+@!]/.test(text[i - 1]) || i - 1 === globEnd)) {
+			const end = closeParen(text, i + 1);
+			const inner = text.slice(i + 1, end);
+			if (depth < MAX_DEPTH) scanLine(inner, out, depth + 1);
+			else emitLoose(tokenize(inner), out, depth);
+			cur += text.slice(i, end + 1);
+			globEnd = end;
+			i = end;
 			continue;
 		}
 		if ((ch === "&" && next === "&") || (ch === "|" && next === "|")) {
