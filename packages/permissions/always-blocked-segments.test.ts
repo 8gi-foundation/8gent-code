@@ -173,9 +173,33 @@ const QUOTE_DESYNC_LINES = [
 	`echo 'note:\n${WIPE}\nmore'`,
 ];
 
+// Round eleven: one quote character inside the wipe itself must not defeat the blind pass.
+const QUOTED_WIPES = [
+	`'rm' -rf /`,
+	`"rm" -rf /`,
+	`r'm' -rf /`,
+	`rm -r'f' /`,
+	`${RMRF} '/'`,
+	`${RMRF} "$HOME"`,
+	`${RMRF} "$HOME"/*`,
+	`\\${WIPE}`,
+	`${WIPE}""`,
+	`${RMRF} $'/'`,
+	`\\${RMRF} ~`,
+	`sh -c '${WIPE}'`,
+	`sh -c "${RMRF} ~"`,
+];
+const DESYNC_WRAPS: Array<(c: string) => string> = [
+	(c) => `echo hi #'\n${c}\n`,
+	(c) => `cat <<E\n'\nE\n${c}`,
+	(c) => 'echo "${x#\'"\'}" ; ' + c + " ; echo \\'",
+];
+const QUOTED_DESYNC_LINES = QUOTED_WIPES.flatMap((w) => DESYNC_WRAPS.map((wrap) => wrap(w)));
+
 const BLOCKED_LINES = [
 	...HOME_LINES,
 	...QUOTE_DESYNC_LINES,
+	...QUOTED_DESYNC_LINES,
 	WIPE,
 	// round seven: quote-aware closeParen (a quoted `)` is not the group's end)
 	`echo @(")") ; ${WIPE} ; echo "x"`,
@@ -296,6 +320,9 @@ const ORDINARY_LINES = [
 	'grep -r "rm -rf" docs/',
 	"cat <<E\nhello\nE",
 	"echo hi # comment",
+	"awk '{print $1}' f",
+	"sed 's/a;b/c/' f",
+	"python3 -c 'import os; print(1)'",
 	`echo '${WIPE}' is a dangerous command`,
 	"grep -rf patterns.txt src",
 	"rm -rf /tmp/build",

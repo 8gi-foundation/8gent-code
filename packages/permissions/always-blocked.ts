@@ -576,7 +576,17 @@ function scanQuoteBlind(input: string, out: string[][]): void {
 		.replace(/\d*>&\d+/g, " ")
 		.replace(/&>/g, ">");
 	for (const piece of text.split(/[;&|()\n\r]/)) {
-		const tokens = piece.split(/\s+/).filter(Boolean);
+		// Strip quoting from each word as the shell would: 'x', r'm', \x, "$HOME", $'/'.
+		const tokens = piece
+			.split(/\s+/)
+			.filter(Boolean)
+			.map((t) => t.replace(/\$(?=['"])/g, "").replace(/['"\\]/g, ""))
+			.filter(Boolean);
 		if (tokens.length > 0) processSegment(tokens, null, out, 0);
+		// Once quoting is gone a -c script is spread over several words, but the shell takes only
+		// the next word as the script. Read everything after a -c style flag as a command too.
+		for (let i = 0; i < tokens.length - 1; i++) {
+			if (/^-[a-zA-Z]*c$/.test(tokens[i])) processSegment(tokens.slice(i + 1), null, out, 0);
+		}
 	}
 }
