@@ -707,4 +707,10 @@ describe("install.sh: Android / Termux", () => {
 		const r = await install(one("0.20.0"), { EIGHT_ANDROID_FORCE: "1" }, ["--dry-run"]);
 		expect(r.out).toContain("will fail unless this box runs glibc binaries");
 	});
+
+	test("the debug echo hides the query string of the releases URL", async () => {
+		const r = await install("https://example.invalid/r.json?token=abc123", {}, ["--dry-run"]);
+		expect(r.out).toContain("r.json?...");
+		expect(r.out).not.toContain("abc123");
+	});
 });

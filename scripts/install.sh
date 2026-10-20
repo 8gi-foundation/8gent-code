@@ -276,7 +276,7 @@ main() {
 	case "$RELEASES_URL" in
 		https://*) ;;
 		http://127.0.0.1:* | http://127.0.0.1/*) LOCAL=1 ;;
-		*) die "EIGHT_RELEASES_URL must be https (or http://127.0.0.1 for tests): $(printf '%s' "$RELEASES_URL" | sed -E 's#^([a-zA-Z]+://)[^/@]*@#\1#')" ;;
+		*) die "EIGHT_RELEASES_URL must be https (or http://127.0.0.1 for tests): $(printf '%s' "$RELEASES_URL" | sed -E 's#^([a-zA-Z]+://)[^/@]*@#\1#; s#\?.*$#?...#')" ;;
 	esac
 	# A local test server may supply its own key; a real install trusts only the embedded one.
 	KEY="$EIGHT_SIGNING_KEY"
@@ -338,7 +338,7 @@ main() {
 		say "  asset           : ${ASSET}"
 		say "  install dir     : ${INSTALL_DIR}"
 		say "  fetch tools     : curl=$(command -v curl >/dev/null 2>&1 && echo yes || echo no) wget=$(command -v wget >/dev/null 2>&1 && echo yes || echo no)"
-		say "  releases url    : $(printf '%s' "$RELEASES_URL" | sed -E 's#^([a-zA-Z]+://)[^/@]*@#\1#')"
+		say "  releases url    : $(printf '%s' "$RELEASES_URL" | sed -E 's#^([a-zA-Z]+://)[^/@]*@#\1#; s#\?.*$#?...#')"
 	fi
 
 	if [ "$libc" = bionic ] && [ "${EIGHT_ANDROID_FORCE:-}" = 1 ]; then
