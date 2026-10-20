@@ -12,8 +12,8 @@
  */
 
 import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
-import { cellWidth } from "./header-layout.js";
 import type { MouseEvent } from "./mouse-input.js";
+import { type SelRange, TextSelection, extractText } from "./text-selection.js";
 
 export interface ClickTarget {
 	id: string;
@@ -30,15 +30,34 @@ const targets = new Map<string, ClickTarget>();
 let pressedId: string | null = null;
 const pressedListeners = new Set<() => void>();
 
-type Selection = { x0: number; y0: number; x1: number; y1: number };
-let selection: Selection | null = null;
 /** Reads the screen text for a copy; set by the app from Ink's last frame. */
 let screenReader: (() => string) | null = null;
-let copier: ((text: string) => void) | null = null;
-const copiedListeners = new Set<(chars: number) => void>();
+let copier: ((text: string) => unknown) | null = null;
+const copiedListeners = new Set<(chars: number, ok: boolean) => void>();
+const selection = new TextSelection(() => screenReader?.() ?? "");
+const selectionListeners = new Set<(range: SelRange | null) => void>();
+
+/** Hear when the highlighted range changes (null: cleared), to redraw it. */
+export function onSelectionChange(fn: (range: SelRange | null) => void): () => void {
+	selectionListeners.add(fn);
+	return () => {
+		selectionListeners.delete(fn);
+	};
+}
+
+function selectionChanged(): void {
+	for (const l of [...selectionListeners]) l(selection.range);
+}
+
+/** Escape: drop the highlight. True when there was one to drop. */
+export function clearSelection(): boolean {
+	const had = selection.clear();
+	if (had) selectionChanged();
+	return had;
+}
 
 /** Hear about each copy, e.g. to say "copied 22 chars" in the footer. */
-export function onCopied(fn: (chars: number) => void): () => void {
+export function onCopied(fn: (chars: number, ok: boolean) => void): () => void {
 	copiedListeners.add(fn);
 	return () => {
 		copiedListeners.delete(fn);
@@ -57,7 +76,8 @@ export function removeTarget(id: string): void {
 export function clearTargets(): void {
 	targets.clear();
 	setPressed(null);
-	selection = null;
+	selection.reset();
+	selectionChanged();
 }
 
 /** The topmost target under a cell, or undefined. */
@@ -84,42 +104,14 @@ export function currentPressed(): string | null {
 /** Where the text for a copy comes from, and where it goes. */
 export function setSelectionIO(
 	read: (() => string) | null,
-	copy: ((text: string) => void) | null,
+	copy: ((text: string) => unknown) | null,
 ): void {
 	screenReader = read;
 	copier = copy;
 }
 
 /** The text a selection covers, row by row, trailing spaces trimmed. */
-export function selectText(screen: string, sel: Selection): string {
-	const lines = screen.split("\n");
-	const [a, b] =
-		sel.y0 < sel.y1 || (sel.y0 === sel.y1 && sel.x0 <= sel.x1)
-			? [
-					{ x: sel.x0, y: sel.y0 },
-					{ x: sel.x1, y: sel.y1 },
-				]
-			: [
-					{ x: sel.x1, y: sel.y1 },
-					{ x: sel.x0, y: sel.y0 },
-				];
-	const out: string[] = [];
-	for (let y = a.y; y <= b.y; y++) {
-		const from = y === a.y ? a.x : 0;
-		const to = y === b.y ? b.x + 1 : Number.POSITIVE_INFINITY;
-		// Walk cells, not code points: a wide character takes two (Codex review #9).
-		let col = 0;
-		let row = "";
-		for (const ch of lines[y] ?? "") {
-			const w = cellWidth(ch);
-			if (col + w > from && col < to) row += ch;
-			col += w;
-			if (col >= to) break;
-		}
-		out.push(row.trimEnd());
-	}
-	return out.join("\n");
-}
+export const selectText = extractText;
 
 /** Feed one mouse event. Returns what happened, for tests. */
 export function handleMouse(e: MouseEvent): "click" | "press" | "cancel" | "copy" | null {
@@ -127,10 +119,12 @@ export function handleMouse(e: MouseEvent): "click" | "press" | "cancel" | "copy
 		const t = hitTest(e.x, e.y);
 		if (t) {
 			setPressed(t.id);
-			selection = null;
+			clearSelection();
 			return "press";
 		}
-		selection = { x0: e.x, y0: e.y, x1: e.x, y1: e.y };
+		const had = selection.range !== null;
+		selection.press(e.x, e.y);
+		if (had || selection.range) selectionChanged();
 		return null;
 	}
 	if (e.kind === "drag") {
@@ -139,7 +133,10 @@ export function handleMouse(e: MouseEvent): "click" | "press" | "cancel" | "copy
 			if (!t || t.id !== pressedId) setPressed(null);
 			return null;
 		}
-		if (selection) selection = { ...selection, x1: e.x, y1: e.y };
+		const before = selection.range;
+		selection.drag(e.x, e.y);
+		const after = selection.range;
+		if (after && (!before || before.x1 !== after.x1 || before.y1 !== after.y1)) selectionChanged();
 		return null;
 	}
 	if (e.kind === "release") {
@@ -153,15 +150,15 @@ export function handleMouse(e: MouseEvent): "click" | "press" | "cancel" | "copy
 			}
 			return "cancel";
 		}
-		const sel = selection;
-		selection = null;
-		if (sel && (sel.x0 !== e.x || sel.y0 !== e.y) && screenReader && copier) {
-			const text = selectText(screenReader(), { ...sel, x1: e.x, y1: e.y });
-			if (text.trim().length > 0) {
-				copier(text);
-				for (const l of [...copiedListeners]) l([...text].length);
-				return "copy";
-			}
+		const r = selection.release(e.x, e.y);
+		selectionChanged();
+		if (r.kind === "copy" && copier) {
+			const res = copier(r.text);
+			// Too long for OSC 52 and no local command took it: nothing was copied.
+			const out = res as { osc52?: boolean; native?: string | null } | null | undefined;
+			const ok = typeof out !== "object" || out === null || out.osc52 === true || !!out.native;
+			for (const l of [...copiedListeners]) l([...r.text].length, ok);
+			return "copy";
 		}
 		return null;
 	}

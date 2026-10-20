@@ -232,7 +232,7 @@ import {
 } from "./lib/bang-command.js";
 import { detectBuildIntent } from "./lib/build-intent.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
-import { onCopied } from "./lib/click-targets.js";
+import { clearSelection, onCopied } from "./lib/click-targets.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import {
 	type ContextWindow,
@@ -312,6 +312,7 @@ import {
 	formatSlashHelp,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
+import { copiedNotice, notCopiedNotice } from "./lib/text-selection.js";
 import { truncate } from "./lib/text.js";
 import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
@@ -1963,7 +1964,9 @@ export function App({
 		noticeTimer.current = setTimeout(() => setCopyNotice(null), 2000);
 	}, []);
 	useEffect(() => {
-		const off = onCopied((chars) => flashNotice(`copied ${chars} char${chars === 1 ? "" : "s"}`));
+		const off = onCopied((chars, ok) =>
+			flashNotice(ok ? copiedNotice(chars) : notCopiedNotice(chars)),
+		);
 		return () => {
 			off();
 			if (noticeTimer.current) clearTimeout(noticeTimer.current);
@@ -2497,6 +2500,8 @@ export function App({
 		// With per-tab agents, ESC aborts ONLY the active tab's loop. Other
 		// tabs' in-flight runs keep going.
 		if (key.escape) {
+			// A highlighted mouse selection goes first (#4602).
+			if (clearSelection()) return;
 			const bangs = bangRunsRef.current.get(activeTabId);
 			if (bangs && bangs.size > 0) {
 				stopBangRuns(activeTabId);
