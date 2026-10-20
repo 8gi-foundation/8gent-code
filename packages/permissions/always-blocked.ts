@@ -398,22 +398,36 @@ function processSegment(
 	}
 }
 
+/** True when the `'` at index i opens a bash ANSI-C string: a `$` that is not itself backslash-escaped. */
+function opensAnsiC(text: string, i: number): boolean {
+	if (text[i - 1] !== "$") return false;
+	let slashes = 0;
+	for (let j = i - 2; j >= 0 && text[j] === "\\"; j--) slashes++;
+	return slashes % 2 === 0;
+}
+
 /** The index just past the `)` that closes a `(` already consumed, honouring nesting and quotes. */
 function closeParen(text: string, from: number): number {
 	let level = 1;
 	let q = "";
+	let ansi = false;
 	for (let i = from; i < text.length; i++) {
 		const c = text[i];
-		if (c === "\\" && q !== "'") {
+		// Plain single quotes take no escapes; an ANSI-C `$'...'` string does.
+		if (c === "\\" && (q !== "'" || ansi)) {
 			i++;
 			continue;
 		}
 		if (q) {
-			if (c === q) q = "";
+			if (c === q) {
+				q = "";
+				ansi = false;
+			}
 			continue;
 		}
 		if (c === "'" || c === '"') {
 			q = c;
+			ansi = c === "'" && opensAnsiC(text, i);
 			continue;
 		}
 		if (c === "(") level++;
@@ -439,18 +453,25 @@ function scanLine(input: string, out: string[][], depth: number): void {
 	};
 
 	let inSingle = false;
+	let inAnsi = false;
 	let inDouble = false;
 	let globEnd = -2;
 	for (let i = 0; i < text.length; i++) {
 		const ch = text[i];
 		const next = text[i + 1];
-		if (ch === "\\" && !inSingle) {
+		if (ch === "\\" && (!inSingle || inAnsi)) {
 			cur += ch + (next ?? "");
 			i++;
 			continue;
 		}
 		if (ch === "'" && !inDouble) {
-			inSingle = !inSingle;
+			if (inSingle) {
+				inSingle = false;
+				inAnsi = false;
+			} else {
+				inSingle = true;
+				inAnsi = opensAnsiC(text, i);
+			}
 			cur += ch;
 			continue;
 		}

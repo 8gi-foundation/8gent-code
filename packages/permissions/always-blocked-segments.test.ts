@@ -136,6 +136,8 @@ const HOME_LINES = [
 	`${RMRF} "` + "${HOME}" + `"/*`,
 	// round seven: a quoted paren inside a group must not end the group early
 	`echo @(")") ; ${RMRF} ~/* ; echo "x"`,
+	// round eight: an ANSI-C string escapes its own quote, so `$'\\''` is one apostrophe
+	`echo $'\\'' ; ${RMRF} ~/* ; echo "'"`,
 	// APFS and NTFS fold case: the lowercase spelling is the same directory
 	...(process.platform === "darwin" || process.platform === "win32"
 		? [`${RMRF} ${HOME_DIR.toLowerCase()}`, `${RMRF} ${HOME_REAL.toLowerCase()}/`]
@@ -150,6 +152,10 @@ const BLOCKED_LINES = [
 	`echo *(')') ; ${WIPE} ; echo 'x'`,
 	`$(echo ")") ; ${WIPE} ; echo "x"`,
 	`echo @("\\)") ; ${WIPE} ; echo "x"`,
+	// round eight: ANSI-C `$'\\''` is one quoted apostrophe, in a substitution, an extglob, and top level
+	`echo $(echo $'\\'') ; ${WIPE} ; echo "'"`,
+	`echo @($'\\'') ; ${WIPE} ; echo "'"`,
+	`echo $'\\'' ; ${WIPE} ; echo "'"`,
 	`ls && ${WIPE}`,
 	`echo hi; ${WIPE}`,
 	`false || ${WIPE}`,
@@ -212,6 +218,7 @@ const BLOCKED_LINES = [
 ];
 
 const ORDINARY_LINES = [
+	"echo $'a\\'b' ; ls",
 	"rm -rf ~/some/subdir",
 	"rm -rf $HOME/some/subdir",
 	'rm -rf "$HOME"/some/subdir',
