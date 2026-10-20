@@ -436,10 +436,14 @@ main() {
 			fi
 			die "GitHub build attestation for ${ASSET} v${VERSION} did not verify; nothing installed. gh said: $(head -c 2000 "$TMP/attestation.err")"
 		fi
-		refs="$(grep -o '"sourceRepositoryRef" *: *"[^"]*"' "$TMP/attestation.json" | sed 's/.*: *"\([^"]*\)"/\1/')"
-		[ -n "$refs" ] || die "gh verified ${ASSET} but reported no source ref; refusing to trust it; nothing installed"
-		if [ -n "$(printf '%s\n' "$refs" | grep -vxF "refs/tags/${TAG}")" ]; then
-			die "GitHub build attestation for ${ASSET} was built from $(printf '%s' "$refs" | head -n 1), not refs/tags/${TAG}; nothing installed"
+		# Every appearance of sourceRepositoryRef in the verified output must be
+		# exactly this tag. Count rather than capture: $(...) drops trailing empty
+		# lines, so an empty or non-string ref could otherwise vanish.
+		seen="$(grep -o '"sourceRepositoryRef"' "$TMP/attestation.json" | wc -l | tr -d ' ')"
+		exact="$(grep -o '"sourceRepositoryRef" *: *"[^"]*"' "$TMP/attestation.json" | sed 's/.*: *"\([^"]*\)"/\1/' | grep -cxF "refs/tags/${TAG}" || true)"
+		[ "$seen" -gt 0 ] || die "gh verified ${ASSET} but reported no source ref; refusing to trust it; nothing installed"
+		if [ "$exact" != "$seen" ]; then
+			die "GitHub build attestation for ${ASSET} was built from $(grep -o '"sourceRepositoryRef" *: *[^,}]*' "$TMP/attestation.json" | grep -vF "\"refs/tags/${TAG}\"" | head -n 1), not refs/tags/${TAG}; nothing installed"
 		fi
 		say "GitHub build attestation: verified."
 	fi

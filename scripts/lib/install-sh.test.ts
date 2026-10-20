@@ -393,6 +393,39 @@ describe("install.sh: verification", () => {
 		expect(installed()).toBeNull();
 	});
 
+	test("the ref check is exact and every verified attestation must match", async () => {
+		const many = (...refs: string[]) =>
+			`[${refs.map((r) => `{"verificationResult":{"signature":{"certificate":{"sourceRepositoryRef":"${r}"}}}}`).join(",")}]`;
+		const cases = [
+			many("refs/tags/v0.20.0-evil"),
+			many("refs/tags/V0.20.0"),
+			many("x/refs/tags/v0.20.0"),
+			many("refs/tags/v0.20.0", "refs/heads/main"),
+			many("refs/tags/v0.20.0", ""),
+			'[{"verificationResult":{}}]',
+		];
+		for (const json of cases) {
+			tool(
+				"gh",
+				`case "$1 $2" in "auth status") exit 0 ;; "attestation verify") echo '${json}'; exit 0 ;; esac; exit 2`,
+			);
+			const r = await install(one("0.20.0"));
+			expect(r.code).not.toBe(0);
+			expect(installed()).toBeNull();
+		}
+	});
+
+	test("a non-zero gh exit is refused even with matching JSON on stdout", async () => {
+		tool(
+			"gh",
+			`case "$1 $2" in "auth status") exit 0 ;; "attestation verify") echo '${attJson("refs/tags/v0.20.0")}'; exit 1 ;; esac; exit 2`,
+		);
+		const r = await install(one("0.20.0"));
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("did not verify");
+		expect(installed()).toBeNull();
+	});
+
 	test("a gh too old for attestation says so plainly instead of reporting a failed verification", async () => {
 		tool(
 			"gh",

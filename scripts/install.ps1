@@ -289,8 +289,10 @@ function Install-Eight {
 					throw "GitHub build attestation for $name v$version did not verify. Nothing installed. gh said: $($r.Err)"
 				}
 				$refs = @([regex]::Matches($r.Out, '"sourceRepositoryRef"\s*:\s*"([^"]*)"') | ForEach-Object { $_.Groups[1].Value })
+				$seen = ([regex]::Matches($r.Out, '"sourceRepositoryRef"')).Count
+				if ($refs.Count -ne $seen) { throw "gh verified $name but a source ref was not a plain string; refusing to trust it. Nothing installed." }
 				if ($refs.Count -eq 0) { throw "gh verified $name but reported no source ref; refusing to trust it. Nothing installed." }
-				foreach ($ref in $refs) { if ($ref -ne "refs/tags/v$version") { throw "GitHub build attestation for $name was built from $ref, not refs/tags/v$version. Nothing installed." } }
+				foreach ($ref in $refs) { if ($ref -cne "refs/tags/v$version") { throw "GitHub build attestation for $name was built from $ref, not refs/tags/v$version. Nothing installed." } }
 				Write-Host 'GitHub build attestation: verified.'
 			}
 			$got = Get-EightVersion $file
