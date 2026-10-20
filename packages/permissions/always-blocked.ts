@@ -188,22 +188,42 @@ const MAX_BRACE_EXPANSIONS = 512;
  * A `{` right after `$` is a parameter expansion, not a brace, and a brace with no top-level comma
  * stays literal. Returns null when the result would pass MAX_BRACE_EXPANSIONS.
  */
-function expandBraces(s: string): string[] | null {
+function expandBraces(s: string, cap = MAX_BRACE_EXPANSIONS): string[] | null {
 	let out = [s];
 	for (let guard = 0; guard < 64; guard++) {
 		let changed = false;
 		const next: string[] = [];
 		for (const str of out) {
 			const parts = expandFirstBrace(str);
+			if (parts === WIDE) return null;
 			if (parts) changed = true;
 			next.push(...(parts ?? [str]));
-			if (next.length > MAX_BRACE_EXPANSIONS) return null;
+			if (next.length > cap) return null;
 		}
 		out = next;
 		if (!changed) return out;
 	}
 	return null;
 }
+
+/**
+ * `{x..y}` with one character at each end (zsh expands `{/..0}` to `/` and `0`; bash 3.2 leaves it
+ * literal, and refusing the literal is the safe side). A span of 64 or more is too wide to enumerate: the word takes the overflow refusal. Multi-digit
+ * number sequences are left alone: they cannot spell a wipe target.
+ */
+function charSequence(body: string): string[] | "wide" | null {
+	const m = /^([^.])\.\.([^.])$/u.exec(body);
+	if (!m) return null;
+	const a = m[1].codePointAt(0) as number;
+	const b = m[2].codePointAt(0) as number;
+	if (Math.abs(a - b) >= MAX_WORD_BRACES) return "wide";
+	const out: string[] = [];
+	for (let c = a; a <= b ? c <= b : c >= b; c += a <= b ? 1 : -1) out.push(String.fromCodePoint(c));
+	return out;
+}
+
+/** expandFirstBrace result for a character range too wide to enumerate: the word takes the overflow refusal. */
+const WIDE: string[] = [];
 
 function expandFirstBrace(s: string): string[] | null {
 	for (let i = 0; i < s.length; i++) {
@@ -213,7 +233,12 @@ function expandFirstBrace(s: string): string[] | null {
 		for (let j = i; j < s.length; j++) {
 			if (s[j] === "{") depth++;
 			else if (s[j] === "}" && --depth === 0) {
-				if (cuts.length === 0) break;
+				if (cuts.length === 0) {
+					const seq = charSequence(s.slice(i + 1, j));
+					if (!seq) break;
+					if (seq === "wide") return WIDE;
+					return seq.map((c) => s.slice(0, i) + c + s.slice(j + 1));
+				}
 				const head = s.slice(0, i);
 				const tail = s.slice(j + 1);
 				const bounds = [i, ...cuts, j];
@@ -361,7 +386,55 @@ function emitLoose(tokens: string[], out: string[][], depth: number): void {
 	for (const t of tokens) if (/\s/.test(t)) scanLine(t, out, depth + 1);
 }
 
+/** Alternatives one word may expand to before the segment is judged by its command name alone. */
+const MAX_WORD_BRACES = 64;
+
+/** Command names whose arguments decide a block: a word too large to enumerate behind one is refused. */
+const GUARDED = new Set(["rm", "chmod", "chown", "chgrp", "dd", "newfs"]);
+
+/** What a refused unenumerable word reports as: the root wipe, the strongest reason. */
+const UNENUMERABLE = ["rm", "-rf", "/"];
+
+/**
+ * Bash expands each brace word into several words (`{rm,-rf,/}` is three, `a{b,c}d` is two), so the
+ * segment's words are rewritten the same way and judged as well as the original, never instead of it.
+ * Words are spliced as the shell splices them, so a brace in command position moves what follows.
+ * A word over MAX_WORD_BRACES alternatives cannot be enumerated: behind a guarded command (or a
+ * braced command word) it is refused, as the home-target check does for the same reason.
+ */
 function processSegment(
+	rawTokens: string[],
+	prevTokens: string[] | null,
+	out: string[][],
+	depth: number,
+): void {
+	processSegmentOne(rawTokens, prevTokens, out, depth);
+	if (!rawTokens.some((t) => t.includes("{") && (t.includes(",") || t.includes("..")))) return;
+	const expanded: string[] = [];
+	let overflow = false;
+	for (const t of rawTokens) {
+		const alts = t.includes("{") ? expandBraces(t, MAX_WORD_BRACES) : [t];
+		if (alts === null) overflow = true;
+		else expanded.push(...alts.filter((a) => a !== ""));
+	}
+	if (overflow) {
+		// Judge the whole segment, not its first word: a wrapper (sudo, env X=1, xargs, nice, time,
+		// command, exec) or a guarded name anywhere in it means the wide word may feed a wipe.
+		const words = rawTokens.filter((t) => !GRAMMAR.has(t));
+		const bare = stripPrefix(words);
+		const wrapped = bare === null || bare.argv.length !== words.length;
+		const named = words.some(
+			(t) => GUARDED.has(path.basename(t).toLowerCase()) || OPAQUE_WRAPPERS.has(t),
+		);
+		const bracedCommand = (bare?.argv[0] ?? words[0] ?? "").includes("{");
+		if (wrapped || named || bracedCommand) out.push(UNENUMERABLE);
+		return;
+	}
+	if (expanded.join("\0") !== rawTokens.join("\0"))
+		processSegmentOne(expanded, prevTokens, out, depth);
+}
+
+function processSegmentOne(
 	rawTokens: string[],
 	prevTokens: string[] | null,
 	out: string[][],
@@ -561,13 +634,28 @@ function closeParen(text: string, from: number): number {
 	return text.length;
 }
 
+/**
+ * `${IFS}`, `$IFS` and `"${IFS}"` are whitespace to the shell, so `rm${IFS}-rf${IFS}/` runs the
+ * root wipe. Returns the text with each spelling replaced by a space, or null when there is none.
+ * Callers scan this as an extra variant of the line; the line as written is still scanned.
+ */
+function expandIfs(text: string): string | null {
+	const re = /"?\$\{IFS\}"?|\$IFS(?![A-Za-z0-9_])/g;
+	return re.test(text) ? text.replace(re, " ") : null;
+}
+
 function scanLine(input: string, out: string[][], depth: number): void {
 	// A backslash-newline continues the line; a redirect operator is not a separator.
 	const prepped = input
 		.replace(/\\\r?\n/g, "")
 		.replace(/\d*>&\d+/g, " ")
 		.replace(/&>/g, ">");
-	for (const text of decodeAnsiCVariants(prepped)) scanDecoded(text, out, depth);
+	// Decode first, then read `${IFS}` as a space: every ANSI-C reading gets the IFS variant too.
+	for (const text of decodeAnsiCVariants(prepped)) {
+		scanDecoded(text, out, depth);
+		const ifs = expandIfs(text);
+		if (ifs !== null) scanDecoded(ifs, out, depth);
+	}
 }
 
 function scanDecoded(text: string, out: string[][], depth: number): void {
@@ -695,7 +783,11 @@ function scanQuoteBlind(input: string, out: string[][]): void {
 		.replace(/\\\r?\n/g, "")
 		.replace(/\d*>&\d+/g, " ")
 		.replace(/&>/g, ">");
-	for (const text of decodeAnsiCVariants(prepped, true)) scanBlindDecoded(text, out);
+	for (const text of decodeAnsiCVariants(prepped, true)) {
+		scanBlindDecoded(text, out);
+		const ifs = expandIfs(text);
+		if (ifs !== null) scanBlindDecoded(ifs, out);
+	}
 }
 
 function scanBlindDecoded(text: string, out: string[][]): void {
