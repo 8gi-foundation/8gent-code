@@ -38,6 +38,8 @@
 
 Typing `/` alone shows only the core commands. Every other command still runs when you type its name, and shows up as soon as you type its first letters. Every key is listed in [Keys](keys.md), or type `/hotkeys`.
 
+**A `/` line that is not a command.** A line that starts with `/` and matches no command is answered on the spot (`Unknown command /name. Type /help.`) and is never sent to the model. Before answering, the TUI checks the registry, the built-ins, an explicit `/skill:<name>`, the skills on disk and your prompt templates, all read when you press Enter, so a skill or template added a moment ago still works. A path such as `/Users/me/file` matches none of those and gets the same local answer. To send a path, put text in front of it or use `@` to mention a file (`apps/tui/src/lib/slash-registry.ts`, `unknownSlashAnswer`).
+
 ## Files and shell lines
 
 **`@` file mention.** Type `@` and part of a file name. The project's files that match are listed, best match first (tracked and untracked files, not ignored ones; outside a git repository it walks the folder instead). Up and Down pick one, Tab puts `@path/to/file` into your message. A line that starts with `!` is a shell line, so `@` there is left to the shell.
@@ -56,6 +58,15 @@ You typed the command, so it runs like a line in your own terminal, with no appr
 **`/copy`.** Puts the last answer on your clipboard. It works over SSH and in Windows Terminal, iTerm2, kitty and WezTerm, and inside tmux or screen. If your terminal ignores the clipboard sequence, select the text instead.
 
 Sessions are saved in `~/.8gent/sessions`.
+
+## When a turn stops on its own
+
+8gent watches each turn for loops (`packages/eight/tool-loop-detector.ts`). One of them is a rewrite loop: the same file written again and again with `write_file`. Paths are resolved against the project folder, so `a.js`, `./a.js` and the absolute path count as one file.
+
+- With nothing in between, the fourth write to one file gets a nudge in the tool result telling the model to run its checks or finish, and the turn stops two writes later. A write, run, fix, run cadence with checks between the writes is left alone until twice that many writes. A write with identical content to the last one is nudged at once and stops the turn once it has happened four times.
+- An `edit_file` or patch of a file resets that file's count.
+- When the turn stops you see: `I rewrote <path> <n> times without finishing, so I stopped to avoid a loop.`
+- `EIGHT_WRITE_LOOP_MAX` sets the number of writes before the nudge (default 4). A value that is not a whole number of 2 or more is ignored and the default is used.
 
 ## Slide videos
 

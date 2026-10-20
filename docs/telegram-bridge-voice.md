@@ -16,6 +16,14 @@ Speech-to-text runs locally on the operator's machine (ffmpeg plus whisper-cli, 
 - Voice notes are refused (not transcribed, not passed to the model) when DEFAULT_RUNTIME names a non-local runtime, so the statement above stays true.
 - A spoken reply is used only for the chat whose voice note asked for it.
 
+## Slash lines and transcripts are classified before the model
+
+The bridge passes typed text and spoken transcripts through the daemon input gate (`classifyInput` and `gateInput` in `packages/daemon/input-gate.ts`, called from `packages/daemon/telegram-bridge.ts`) before any model call.
+
+- A typed slash line from a full-tier sender that is not one of the bridge's own commands runs through the registry and the reply goes to the chat. An unknown name is answered `Unknown command /name. Type /help.` A `/cmd@otherbot` line is not ours to answer and is left alone. Senders below full tier keep the existing refusal.
+- A slash line the bridge's own handlers did not consume (for example a `/delegate` the router declined) is classified on the raw line, before any memory prefix could hide the slash.
+- A spoken transcript is data, never a command. A transcript that starts with a slash is only classified (`classifyOnly`): the chat gets `/name is a command, not text for a model.` (or `Unknown command`) and nothing runs. A transcript bound for the judge model is classified first, so a slash transcript is not run twice.
+
 ## Voice notes in a group (off by default)
 
 One narrow variant, ruled by 8SO on 17 Oct 2026 (conditions C-G1 to C-G17). It is a separate path from the private chat above. The group never gets "Heard", cards, buttons, modes or the judge.
