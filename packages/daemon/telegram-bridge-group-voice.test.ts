@@ -492,12 +492,12 @@ describe("G10 to G12: no cards, modes, slash commands or judge", () => {
 		"/mode quiet",
 		"/voice off",
 	]) {
-		test(`G11: transcript "${say}" is a plain prompt, no command handler runs`, async () => {
+		test(`G11: transcript "${say}" is data: no command handler runs and it never reaches the model (#4530)`, async () => {
 			const t = await ready(make());
 			t.b.transcribe = async () => say;
 			await t.b.handleGroupVoice(voiceMsg());
 			expect(t.cos).toEqual([]);
-			expect(t.prompts).toEqual([say]);
+			expect(t.prompts).toEqual([]);
 			expect(t.b.voiceEnabled).toBe(true);
 			expect(t.real.mode).toBe("act");
 			expect(bodies.some((x) => x.body.reply_markup)).toBe(false);
