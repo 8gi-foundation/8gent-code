@@ -1439,9 +1439,13 @@ export function App({
 			// Log tab switch for session debugger
 			logTabSwitch(prevTabIdRef.current, activeTabId, workspaceTabs.activeTab?.title || "Chat");
 
-			// Save outgoing tab's messages
+			// Save outgoing tab's messages. The updater may run after this effect
+			// has moved prevTabIdRef on (React queues it when a render is already
+			// pending, as a key press does), so capture the outgoing id now or the
+			// messages are saved under the incoming tab and lost.
+			const outgoingId = prevTabIdRef.current;
 			setMessagesRaw((currentMsgs) => {
-				tabMessagesRef.current.set(prevTabIdRef.current, currentMsgs);
+				tabMessagesRef.current.set(outgoingId, currentMsgs);
 				return currentMsgs;
 			});
 			// Load incoming tab's messages (or create fresh welcome)
@@ -2642,8 +2646,7 @@ export function App({
 			} catch (err) {
 				if (client && daemonLinkRef.current?.client !== client) client.close();
 				addSystemMessage(
-					`Could not open shared session ${sessionId}: ${err instanceof Error ? err.message : String(err)}.\n` +
-						"Start the daemon with `8gent daemon`, or use /resume for sessions on this machine.",
+					`Could not open shared session ${sessionId}: ${err instanceof Error ? err.message : String(err)}.\nStart the daemon with \`8gent daemon\`, or use /resume for sessions on this machine.`,
 				);
 				return false;
 			}
@@ -7421,7 +7424,6 @@ export function App({
 	const contextPct = ctxMeter.kind === "measured" ? ctxMeter.pct : null;
 	const contextState = ctxMeter.kind === "measured" ? ctxMeter.source : ctxMeter.kind;
 	void sessionTick;
-	void renderMainContent;
 	void tokenMeterColWidth;
 
 	// Derived ActivityRail data. Every row traces to real state or is absent:
@@ -7474,6 +7476,10 @@ export function App({
 	// view up, nothing over it. Anything that asks for attention (the palette,
 	// an approval card, setup) gets a still mark. A scrolled chat holds it from
 	// MessageList; the terminal's own limits are checked in lib/living-mark.ts.
+	// The body of a non-chat tab (settings, notes, kanban, terminal, ...). The
+	// chat shell below gives way to it; without this no tab body was drawn at
+	// all and the previous tab's content stayed on screen (#4588).
+	const tabBody = activeTabType !== "chat" ? renderMainContent() : null;
 	const headerMarkLiving =
 		motionEnabled(showAnimations) &&
 		viewMode === "chat" &&
@@ -7532,7 +7538,7 @@ export function App({
 							))}
 
 						<Box flexGrow={1} flexDirection="column" minWidth={0}>
-							{!(slashMenuOpen && slashMenuCompact(viewport.height)) && (
+							{!tabBody && !(slashMenuOpen && slashMenuCompact(viewport.height)) && (
 								<LiveFocalStripWithGoal
 									goalClient={goalClient}
 									adhdMode={adhdMode}
@@ -7564,10 +7570,12 @@ export function App({
 								/>
 							)}
 
-							<NoProviderNotice
-								readiness={readiness}
-								compact={viewport.height < COMPACT_BELOW_ROWS}
-							/>
+							{!tabBody && (
+								<NoProviderNotice
+									readiness={readiness}
+									compact={viewport.height < COMPACT_BELOW_ROWS}
+								/>
+							)}
 
 							<Box
 								ref={chatBoxRef}
@@ -7576,12 +7584,14 @@ export function App({
 								flexDirection="column"
 								overflow="hidden"
 							>
-								<MessageList
-									messages={messages}
-									turnRunning={isProcessing}
-									rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
-									contentWidth={chatWidth}
-								/>
+								{tabBody ?? (
+									<MessageList
+										messages={messages}
+										turnRunning={isProcessing}
+										rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
+										contentWidth={chatWidth}
+									/>
+								)}
 							</Box>
 
 							{paletteOpen && (
@@ -7614,7 +7624,7 @@ export function App({
 
 							<Box
 								flexShrink={0}
-								display={paletteOpen || PICKER_VIEWS.has(viewMode) ? "none" : "flex"}
+								display={paletteOpen || PICKER_VIEWS.has(viewMode) || tabBody ? "none" : "flex"}
 							>
 								<CommandInput
 									cwd={projectCwd}
