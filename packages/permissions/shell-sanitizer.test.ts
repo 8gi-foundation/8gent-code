@@ -30,7 +30,7 @@ const hasUnquotedAmpersand = (c: string, p?: NodeJS.Platform, k?: SanitizeKind) 
 	rawAmp(c, p, k ?? (p === "win32" ? "cmd" : undefined));
 
 const AMP_REASON =
-	"Command chaining or background execution with & is not allowed. Use separate run_command calls instead";
+	"Send each command as its own run_command call. Command chaining or background execution with & is not allowed";
 
 describe("sanitizeShellCommand: single & (POSIX and Windows)", () => {
 	const blocked = [
@@ -117,7 +117,7 @@ describe("sanitizeShellCommand: other rules unchanged", () => {
 			const r = sanitizeShellCommand("a && b", platform);
 			expect(r.safe).toBe(false);
 			expect(r.reason).toBe(
-				"Command chaining with && is not allowed. Use separate run_command calls instead",
+				"Send each command as its own run_command call. Command chaining with && is not allowed",
 			);
 		}
 	});

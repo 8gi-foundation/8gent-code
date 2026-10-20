@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { REFUSAL_LEAD, ToolExecutor } from "./tools";
+import { REFUSAL_LEAD, REFUSAL_NOTE, ToolExecutor } from "./tools";
 
 type PM = {
 	checkPermission: (command: string) => "allowed" | "denied" | "ask";
@@ -145,7 +145,7 @@ describe("run_command: a chained curl -L is told about -L in the chaining refusa
 	test("a chain with no curl in it: the plain chaining refusal", async () => {
 		const out = await executor.runCommand("printf a > one.txt; printf b > two.txt");
 		expect(out).toBe(
-			`${REFUSAL_LEAD} Semicolon command chaining is not allowed. Use separate run_command calls instead. Run one command at a time. Command: printf a > one.txt; printf b > two.txt`,
+			`[BLOCKED] Send each command as its own run_command call. Semicolon command chaining is not allowed. ${REFUSAL_NOTE} Command: printf a > one.txt; printf b > two.txt`,
 		);
 	});
 
