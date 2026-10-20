@@ -2,9 +2,9 @@
  * Friction record (#4511): counts of how hard a session was to use. Pure, no I/O, no message
  * content kept. Agent feeds it where each fact already happens and writes `record()` to the
  * session jsonl once, at session end. Nothing renders it until ten sessions of baseline exist.
- * Known limit: permission prompts are counted through one process-wide tracker, so with several
- * tabs live at once they go to the most recently created live session; exact per-tab attribution
- * would pass the tracker on the approval request.
+ * Permission prompts are counted through one process-wide tracker that a session claims for the
+ * length of each turn and hands back in finally, so a prompt is credited to the session whose turn
+ * is running and a nested child turn returns it to its parent.
  */
 const OPENERS = new Set(["no", "not", "wrong", "actually", "instead"]);
 const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9_]{3,}/g) ?? []);
@@ -96,13 +96,17 @@ export class Friction {
 	}
 }
 
-/** The newest live session's tracker; the approval channel counts prompts it shows into it. */
 let active: Friction | null = null;
-export const adoptFriction = (f: Friction): void => void (active = f);
-export const releaseFriction = (f: Friction): void => void (active === f && (active = null));
+/** Claim the tracker for a turn; returns the previous holder to hand back with leaveFriction. */
+export const enterFriction = (f: Friction): Friction | null => {
+	const prev = active;
+	active = f;
+	return prev;
+};
+export const leaveFriction = (f: Friction, prev: Friction | null): void => {
+	if (active === f) active = prev;
+};
 /** Only prompts a person was shown count: approve, deny, edit (not skip or unfit). */
 export const noteApproval = (decision: string): void => {
 	if (["approve", "deny", "edit"].includes(decision)) active?.permission(decision);
 };
-/** Test only: replace the tracker. */
-export const _setActiveFriction = (f: Friction | null): void => void (active = f);

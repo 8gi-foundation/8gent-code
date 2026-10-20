@@ -113,7 +113,7 @@ import {
 } from "./compaction";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { continueEmptyTurn } from "./empty-turn-continue";
-import { Friction, adoptFriction, releaseFriction } from "./friction";
+import { Friction, enterFriction, leaveFriction } from "./friction";
 import {
 	type ToolLedgerEntry,
 	denialIsCause,
@@ -865,7 +865,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 		// Initialize session persistence (v2)
 		// A classroom session leaves no session file: its text is untrusted and private (#3939).
-		adoptFriction(this.friction);
 		this.sessionWriter = new SessionWriter(
 			this.sessionId,
 			undefined,
@@ -2066,6 +2065,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	): Promise<string> {
 		this.lastTurnFailure = null;
 		this.honestyFired = false;
+		const prevFriction = enterFriction(this.friction);
 		this.friction.prompt(userMessage);
 		return runAsParentSession(
 			() => ({
@@ -2086,6 +2086,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					return reply;
 				} finally {
 					this.friction.turnEnd();
+					leaveFriction(this.friction, prevFriction);
 					if (this.activeTurn === turn) this.activeTurn = null;
 				}
 			},
@@ -4475,7 +4476,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			if (!this.frictionWritten) {
 				this.frictionWritten = true;
 				this.sessionWriter.writeFriction(this.friction.record());
-				releaseFriction(this.friction);
 			}
 			this.sessionWriter.writeSessionEnd("user_exit", null);
 		} catch {

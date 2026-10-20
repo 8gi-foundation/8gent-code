@@ -1,11 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import {
-	Friction,
-	_setActiveFriction,
-	adoptFriction,
-	noteApproval,
-	releaseFriction,
-} from "../eight/friction";
+import { Friction, enterFriction, leaveFriction, noteApproval } from "../eight/friction";
 import {
 	_resetTuiApprovalChannel,
 	registerTuiApprovalHandler,
@@ -15,36 +9,59 @@ import {
 
 afterEach(() => {
 	_resetTuiApprovalChannel();
-	_setActiveFriction(null);
 });
 
 test("a throwing friction tracker never changes the approval decision (#4511)", async () => {
-	_setActiveFriction({
-		permission() {
-			throw new Error("tracker broke");
-		},
-	} as unknown as Friction);
+	const broken = new Friction();
+	broken.permission = () => {
+		throw new Error("tracker broke");
+	};
+	const prev = enterFriction(broken);
 	registerTuiApprovalHandler(async () => "deny");
 	expect(await requestTuiDecision({ action: "a", details: "d" })).toBe("deny");
 	registerTuiApprovalHandler(async () => "approve");
 	expect(await requestTuiApproval({ action: "a", details: "d" })).toBe(true);
+	leaveFriction(broken, prev);
 });
 
-test("the newest session gets the counts; release hands the channel on; skip and unfit are not counted", () => {
-	const [one, two, three] = [new Friction(), new Friction(), new Friction()];
-	adoptFriction(one);
-	adoptFriction(two);
+const prompts = (f: Friction) => f.record().permissionPrompts;
+
+test("a child turn inside a parent turn gets its prompt; the parent gets the next one back", () => {
+	const [parent, child] = [new Friction(), new Friction()];
+	const pp = enterFriction(parent);
 	noteApproval("approve");
-	noteApproval("skip");
-	noteApproval("unfit");
-	expect([one.record().permissionPrompts, two.record().permissionPrompts]).toEqual([0, 1]);
-	releaseFriction(one);
+	const cp = enterFriction(child);
+	noteApproval("approve");
+	leaveFriction(child, cp);
 	noteApproval("deny");
-	expect(two.record().permissionDenials).toBe(1);
-	releaseFriction(two);
+	leaveFriction(parent, pp);
+	expect([prompts(parent), prompts(child)]).toEqual([2, 1]);
 	noteApproval("approve");
-	expect(two.record().permissionPrompts).toBe(2);
-	adoptFriction(three);
-	noteApproval("edit");
-	expect(three.record().permissionPrompts).toBe(1);
+	expect(prompts(parent)).toBe(2);
+});
+
+test("a child that never reaches cleanup does not keep the tracker", () => {
+	const [parent, child] = [new Friction(), new Friction()];
+	const pp = enterFriction(parent);
+	const cp = enterFriction(child);
+	leaveFriction(child, cp);
+	noteApproval("approve");
+	leaveFriction(parent, pp);
+	expect([prompts(parent), prompts(child)]).toEqual([1, 0]);
+});
+
+test("two tabs taking turns each get their own prompts; skip and unfit are not counted", () => {
+	const [a, b] = [new Friction(), new Friction()];
+	for (const [f, n] of [
+		[a, 2],
+		[b, 1],
+		[a, 1],
+	] as const) {
+		const prev = enterFriction(f);
+		for (let i = 0; i < n; i++) noteApproval("approve");
+		noteApproval("skip");
+		noteApproval("unfit");
+		leaveFriction(f, prev);
+	}
+	expect([prompts(a), prompts(b)]).toEqual([3, 1]);
 });
