@@ -8,10 +8,10 @@
 
 // Before anything else: BUN_BE_BUN must not reach this process's subprocesses.
 import "./lib/strip-bun-be-bun.js";
+import { bootTrace } from "./lib/boot-trace.js";
 // First, before anything heavy loads: keys pressed before the first frame
 // must reach the splash, not the line buffer (lib/early-input.ts).
-import "./lib/early-input.js";
-import { bootTrace } from "./lib/boot-trace.js";
+import { markInkMounted } from "./lib/early-input.js";
 // Then the colour policy, so NO_COLOR holds for every byte Ink draws
 // (lib/colour-policy.ts).
 import "./lib/colour-startup.js";
@@ -79,3 +79,6 @@ render(
 		cliAutoApprove={parsed.yes}
 	/>,
 );
+// Runs when render() returns, before Ink's useEffect attaches stdin: a stall
+// inside Ink's own mount is not covered by the watchdog.
+markInkMounted();

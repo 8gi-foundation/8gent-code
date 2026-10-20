@@ -13,31 +13,117 @@
  * index.tsx; ES modules evaluate in import order, so this runs before Ink and
  * the app are even loaded. Line mode is restored on exit in case Ink never
  * mounts (a crash during load), so the shell is never left raw.
+ *
+ * #4540 (the first moment must never be blank or frozen):
+ * - On win32 the hand-off is skipped unless 8GENT_EARLY_RAW=1: Bun raw mode on
+ *   Windows terminals is the top suspect for a screen that never moves.
+ * - A watchdog: if raw mode was entered and, WATCHDOG_MS later, Ink has not
+ *   mounted, raw mode is turned off (stdin is never resumed, so no typed byte
+ *   is discarded) and the normal path continues. One boot-trace line records it.
+ *   markInkMounted runs when render() returns, before Ink's useEffect attaches
+ *   stdin, so a stall inside Ink's own mount is not covered.
  */
-
 import { bootEnvSummary, bootTrace } from "./boot-trace.js";
 
-const stdin = process.stdin as NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void };
+export const WATCHDOG_MS = 1500;
 
-export const EARLY_RAW =
-	Boolean(stdin.isTTY) &&
-	typeof stdin.setRawMode === "function" &&
-	process.env["8GENT_EARLY_RAW"] !== "0";
+export interface EarlyInputStdin {
+	isTTY?: boolean;
+	isRaw?: boolean;
+	setRawMode?: (mode: boolean) => unknown;
+}
 
-if (EARLY_RAW) {
+export interface EarlyInputDeps {
+	stdin: EarlyInputStdin;
+	platform: string;
+	env: Record<string, string | undefined>;
+	trace: (stage: string, detail?: string) => void;
+	setTimer: (fn: () => void, ms: number) => unknown;
+	clearTimer: (t: unknown) => void;
+}
+
+export interface EarlyInputHandle {
+	raw: boolean;
+	/** Ink has mounted: the watchdog is no longer needed. */
+	markMounted: () => void;
+}
+
+/** Whether the early raw-mode hand-off should happen at all. */
+export function earlyRawDecision(
+	stdin: EarlyInputStdin,
+	platform: string,
+	env: Record<string, string | undefined>,
+): "raw" | "off" | "win32-skip" {
+	if (!stdin.isTTY || typeof stdin.setRawMode !== "function") return "off";
+	if (env["8GENT_EARLY_RAW"] === "0") return "off";
+	if (platform === "win32" && env["8GENT_EARLY_RAW"] !== "1") return "win32-skip";
+	return "raw";
+}
+
+export function armEarlyInput(deps: EarlyInputDeps): EarlyInputHandle {
+	const { stdin, platform, env, trace } = deps;
+	const decision = earlyRawDecision(stdin, platform, env);
+	if (decision === "win32-skip") {
+		trace("early-raw-skipped", `win32 (set 8GENT_EARLY_RAW=1 to force) ${bootEnvSummary()}`);
+		return { raw: false, markMounted() {} };
+	}
+	if (decision === "off") {
+		trace("early-raw-skipped", bootEnvSummary());
+		return { raw: false, markMounted() {} };
+	}
+
 	try {
 		stdin.setRawMode?.(true);
-		bootTrace("early-raw-on", bootEnvSummary());
-		process.once("exit", () => {
-			try {
-				if (stdin.isRaw) stdin.setRawMode?.(false);
-			} catch {
-				// The terminal is already gone.
-			}
-		});
+		trace("early-raw-on", bootEnvSummary());
 	} catch (e) {
-		bootTrace("early-raw-failed", String((e as Error)?.message ?? e));
+		trace("early-raw-failed", String((e as Error)?.message ?? e));
 		// Not a real tty after all: nothing to hold.
+		return { raw: false, markMounted() {} };
 	}
+	const timer = deps.setTimer(() => {
+		// Raw mode only: never resume() here. With no data listener a resume
+		// flows and discards the bytes the person already typed; Ink's own
+		// setRawMode(true) re-arms raw mode when it attaches. Typed bytes sit in
+		// the kernel tty buffer, so no stream-side check can tell "a key arrived".
+		try {
+			if (stdin.isRaw) stdin.setRawMode?.(false);
+			trace("early-raw-watchdog", `no Ink mount in ${WATCHDOG_MS} ms, raw mode restored`);
+		} catch {
+			// The terminal is already gone.
+		}
+	}, WATCHDOG_MS);
+	return {
+		raw: true,
+		markMounted() {
+			deps.clearTimer(timer);
+		},
+	};
 }
-if (!EARLY_RAW) bootTrace("early-raw-skipped", bootEnvSummary());
+
+const realStdin = process.stdin as NodeJS.ReadStream;
+
+const handle = armEarlyInput({
+	stdin: realStdin,
+	platform: process.platform,
+	env: process.env,
+	trace: bootTrace,
+	setTimer: (fn, ms) => {
+		const t = setTimeout(fn, ms);
+		(t as { unref?: () => void }).unref?.();
+		return t;
+	},
+	clearTimer: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
+});
+
+export const EARLY_RAW = handle.raw;
+export const markInkMounted = handle.markMounted;
+
+if (EARLY_RAW) {
+	process.once("exit", () => {
+		try {
+			if (realStdin.isRaw) realStdin.setRawMode?.(false);
+		} catch {
+			// The terminal is already gone.
+		}
+	});
+}
