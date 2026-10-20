@@ -132,7 +132,7 @@ export interface TextToolAgentOptions {
 	 * user message (like the plan check) while a round remains. Null lets the
 	 * answer through. The caller owns what it checks.
 	 */
-	finalCheck?: () => string | null;
+	finalCheck?: (reply: string) => string | null;
 	/**
 	 * Keep the reply a completion check was sent after in front of the "DONE:"
 	 * summary that answers it (#3638). Off by default: in the TUI the reply
@@ -921,7 +921,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 				round < maxRounds &&
 				!isQuestionToUser(replyText)
 			) {
-				const check = opts.finalCheck();
+				const check = opts.finalCheck(answer);
 				if (check) {
 					finalCheckSent = true;
 					awaitingCheckAnswer = false;

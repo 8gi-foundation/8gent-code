@@ -192,6 +192,8 @@ export interface AgentConfig {
 	 * read the same summary twice. See TextToolAgentOptions.keepAnswerFirst.
 	 */
 	keepAnswerFirst?: boolean;
+	/** Done gate (#4505): refuse a tests-pass claim without a newer passing test run. Default off; EIGHT_DONE_GATE=1 also enables. */
+	doneGate?: boolean;
 	/**
 	 * Headless run (`8gent run`, packages/eight/run.ts): one prompt, no person
 	 * at the keyboard, often a local model where every prompt token is prefill

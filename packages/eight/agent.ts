@@ -167,6 +167,12 @@ import {
 import { SessionStore } from "./session-store";
 import { SessionSyncManager } from "./session-sync";
 import {
+	DONE_GATE_FIELD,
+	TEST_CLAIM_NUDGE,
+	isDoneGateEnabled,
+	testClaimViolation,
+} from "./test-claim-gate";
+import {
 	type CheckpointMeta,
 	type RestoredCheckpoint,
 	TimeTravelStore,
@@ -510,6 +516,8 @@ export class Agent {
 	// against this so the agent can never claim completion it did not earn.
 	private turnToolLedger: ToolLedgerEntry[] = [];
 	private turnTask = "";
+	private doneGateNudged = false;
+	private doneGate: string | null = null;
 	private turnGitBaseline: Map<string, string> | null = null;
 	/**
 	 * Set by the harness, never from model text, when the last chat() turn
@@ -1633,7 +1641,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				keepAnswerFirst: this.config.keepAnswerFirst === true,
 				// Verify-before-done (#3550, EIGHT_VERIFY_GATE=1): a turn that
 				// changed files and checked nothing since gets one nudge.
-				finalCheck: () => this.turnEndNudge(),
+				finalCheck: (reply) => this.turnEndNudge(reply),
 				// Answer-only after a useless streak (#3613, EIGHT_USELESS_STREAK,
 				// off by default): N empty or error results in a row and the next
 				// round gets no tools, only a note to answer with what it has.
@@ -1868,6 +1876,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			ledger: this.turnToolLedger,
 			workingDirectory: this.config.workingDirectory || process.cwd(),
 		});
+		this.settleDoneGate(gated.content);
 		if (gated.violated) {
 			console.log(`[honesty] blocked fabricated completion: ${gated.reason}`);
 			this.lastTurnFailure = {
@@ -2067,12 +2076,44 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Done gate (#4505, EIGHT_DONE_GATE=1 or config.doneGate): a reply that claims passing tests
+	 * with no newer passing test run behind it gets one nudge. See test-claim-gate.ts.
+	 */
+	private doneGateNudge(reply: string): string | null {
+		if (!isDoneGateEnabled(process.env, this.config.doneGate)) return null;
+		if (this.doneGateNudged || !testClaimViolation(this.turnToolLedger, reply)) return null;
+		this.doneGateNudged = true;
+		return TEST_CLAIM_NUDGE;
+	}
+
+	/** Second violation after the nudge: the harness, not the model, ends the task as failed. */
+	private settleDoneGate(reply: string): void {
+		if (!this.doneGateNudged || !isDoneGateEnabled(process.env, this.config.doneGate)) return;
+		if (!testClaimViolation(this.turnToolLedger, reply)) return;
+		this.doneGate = DONE_GATE_FIELD;
+		console.log(
+			`[done-gate] ${DONE_GATE_FIELD}: tests-pass claim without a newer passing test run, task ended`,
+		);
+		this.lastTurnFailure = {
+			reason: "unverified",
+			message: `done_gate: ${DONE_GATE_FIELD}`,
+			unverified: [TEST_CLAIM_NUDGE],
+		};
+	}
+
+	/** `done_gate` for this turn's result: "stale_or_failing_tests" or null. Set by the harness only. */
+	getDoneGate(): string | null {
+		return this.doneGate;
+	}
+
+	/**
 	 * The one message a turn may get before it ends, on both the text-tool and the
 	 * native path: the verify gate (#3550) first, else a retired fact still in a file
 	 * that was warned about (#3811). Never blocks; the callers send it at most once.
 	 */
-	private turnEndNudge(): string | null {
+	private turnEndNudge(reply = ""): string | null {
 		return (
+			this.doneGateNudge(reply) ??
 			verifyNudgeFor(this.turnToolLedger) ??
 			this.executor.retiredTurnEndNudge() ??
 			completionSelfCheckNudge({
@@ -2118,6 +2159,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.stopRequested = false;
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
+		this.doneGateNudged = false;
+		this.doneGate = null;
 		this.turnTask = userMessage;
 		// A plan file the task names is update_plan's plan of record (#4161).
 		notePlanTask(this.config.workingDirectory || process.cwd(), userMessage);
@@ -3387,7 +3430,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// retired-fact nudge (#3811) rides this same branch even with the gate
 			// off: it costs one extra generate only when a retired token is left in
 			// a file that drew a warning. With the gate on and nudging, its nudge wins.
-			const verifyNudge = result?.text ? this.turnEndNudge() : null;
+			const verifyNudge = result?.text ? this.turnEndNudge(result.text) : null;
 			if (verifyNudge) {
 				console.log(
 					`[turn-end] nudge fired (${verifyNudge.startsWith("[SELF-CHECK]") ? "completion self-check" : "verify gate or retired fact"}) - one extra generate`,
@@ -3493,6 +3536,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				ledger: this.turnToolLedger,
 				workingDirectory: this.config.workingDirectory || process.cwd(),
 			});
+			this.settleDoneGate(gatedNative.content);
 			if (gatedNative.violated) {
 				console.log(`[honesty] blocked fabricated completion: ${gatedNative.reason}`);
 				this.lastTurnFailure = {
