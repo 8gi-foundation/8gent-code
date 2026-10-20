@@ -23,7 +23,7 @@ import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
 import { ToolExecutor } from "../eight/tools";
-import { CreatedFiles, watchRedirects } from "./s1-created-files";
+import { CreatedFiles, mkdirRecorded, watchRedirects } from "./s1-created-files";
 import { rmOwnDir } from "./s1-rm-own-dir";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
@@ -439,6 +439,51 @@ describe.skipIf(process.platform === "win32")(
 				const out = await ex.execute("run_command", { command: "rm -rf scratch" });
 				expect(out).toContain(SYSTEM_ONE_BLOCK_MARKER);
 				expect(existsSync(join(realpathSync(ws), "scratch/theirs.txt"))).toBe(true);
+			});
+			test("#4516 write_file makes .tmp/a.txt: rmOwnDir passes rm -rf .tmp", async () => {
+				const ex = new ToolExecutor(ws, "owndir4516a");
+				await ex.execute("write_file", { path: ".tmp/a.txt", content: "hello" });
+				expect(ex.createdFiles.dirCount).toBe(1);
+				expect(rmOwnDir("rm -rf .tmp", realpathSync(ws), ex.createdFiles).ok).toBe(true);
+				const out = await ex.execute("run_command", { command: "rm -rf .tmp" });
+				expect(out).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
+				expect(existsSync(join(ws, ".tmp"))).toBe(false);
+			});
+			test("#4516 a .tmp that was there before the write_file still escalates", async () => {
+				mkdirSync(join(ws, ".tmp"));
+				const ex = new ToolExecutor(ws, "owndir4516b");
+				await ex.execute("write_file", { path: ".tmp/a.txt", content: "hello" });
+				expect(ex.createdFiles.dirCount).toBe(0);
+				expect(rmOwnDir("rm -rf .tmp", realpathSync(ws), ex.createdFiles).ok).toBe(false);
+				const out = await ex.execute("run_command", { command: "rm -rf .tmp" });
+				expect(out).toContain(SYSTEM_ONE_BLOCK_MARKER);
+				expect(existsSync(join(realpathSync(ws), ".tmp/a.txt"))).toBe(true);
+			});
+			test("#4516 a foreign file dropped into the write_file-made .tmp still escalates", async () => {
+				const ex = new ToolExecutor(ws, "owndir4516c");
+				await ex.execute("write_file", { path: ".tmp/a.txt", content: "hello" });
+				writeFileSync(join(ws, ".tmp/theirs.txt"), "x");
+				expect(rmOwnDir("rm -rf .tmp", realpathSync(ws), ex.createdFiles).ok).toBe(false);
+				const out = await ex.execute("run_command", { command: "rm -rf .tmp" });
+				expect(out).toContain(SYSTEM_ONE_BLOCK_MARKER);
+				expect(existsSync(join(realpathSync(ws), ".tmp/theirs.txt"))).toBe(true);
+			});
+			test("#4516 mkdirRecorded for a path outside the cwd records nothing", () => {
+				const rec2 = new CreatedFiles();
+				mkdirRecorded(join(outside, "x/y"), ws, rec2);
+				expect(existsSync(join(outside, "x/y"))).toBe(true);
+				expect(rec2.dirCount).toBe(0);
+				// A symlink out of the cwd: the new directory resolves outside the realpath of cwd.
+				mkdirRecorded(join(ws, "escape/z"), ws, rec2);
+				expect(existsSync(join(outside, "z"))).toBe(true);
+				expect(rec2.dirCount).toBe(0);
+			});
+			test("#4516 nested new dirs are all recorded, an existing parent is not", () => {
+				const rec2 = new CreatedFiles();
+				mkdirRecorded(join(ws, "old/n1/n2"), ws, rec2);
+				expect(rec2.dirCount).toBe(2);
+				expect(rec2.createdDirBySession(join(ws, "old"))).toBe(false);
+				expect(rec2.createdDirBySession(join(ws, "old/n1/n2"))).toBe(true);
 			});
 			test("a directory that was there before is not the lane's: blocked, with what would pass", async () => {
 				const ex = new ToolExecutor(ws, "owndir2");

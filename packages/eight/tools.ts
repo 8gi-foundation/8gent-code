@@ -189,6 +189,7 @@ import { REFUSAL_LEAD, REFUSAL_NOTE, refusalLead } from "../permissions/refusal-
 import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import {
 	CreatedFiles,
+	mkdirRecorded,
 	pathAbsent,
 	watchRedirects,
 	watchWrite,
@@ -3576,7 +3577,8 @@ export class ToolExecutor {
 
 		const dir = path.dirname(absolutePath);
 		if (!fs.existsSync(dir)) {
-			fs.mkdirSync(dir, { recursive: true });
+			// Records the directories it makes, so the session can remove its own scratch dir (#4516).
+			mkdirRecorded(dir, this.workingDirectory, this.createdFiles);
 		}
 
 		const wasNew = pathAbsent(absolutePath);
