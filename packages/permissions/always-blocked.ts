@@ -119,15 +119,43 @@ function homePaths(): string[] {
 	return [...out];
 }
 
+/** APFS and NTFS compare paths without case, so `/users/me` is the same directory as `/Users/me`. */
+const FOLD_CASE = process.platform === "darwin" || process.platform === "win32";
+const fold = (s: string): string => (FOLD_CASE ? s.toLowerCase() : s);
+
+/** `${HOME}` and its parameter-expansion forms: `${HOME:?}`, `${HOME:-x}`, `${HOME%/}`, `${HOME#x}`. */
+const HOME_PARAM = /^\$\{HOME([:%#][^}]*)?\}$/;
+
+/** `~name` for the signed-in user only. `~root`, `~+`, `~-` and other users are not home. */
+function isTildeSelf(s: string): boolean {
+	if (!s.startsWith("~") || s.length < 2) return false;
+	try {
+		return fold(s.slice(1)) === fold(os.userInfo().username);
+	} catch {
+		return false;
+	}
+}
+
+/** One spelling of the home directory itself, no trailing slash. */
+function isHomeBase(s: string): boolean {
+	if (s === "~" || s === "$HOME" || HOME_PARAM.test(s) || isTildeSelf(s)) return true;
+	if (!s.startsWith("/")) return false;
+	return homePaths().some((h) => fold(h) === fold(normTarget(s)));
+}
+
 /**
- * The whole home directory (#4485): `~`, `$HOME`, `${HOME}`, the expanded path, with an
- * optional trailing `/`, `/*` or `/.*`. A folder inside home is not a home target.
+ * The whole home directory (#4485): `~`, `~user`, `$HOME`, `${HOME}` and its expansion forms, the
+ * expanded path in any case the filesystem folds, with an optional trailing `/`, `/*` or `/.*`.
+ * Also the dotfile wipe idiom, a glob directly under home that starts with `.` (`~/.??*`,
+ * `$HOME/.[!.]*`). A folder inside home is not a home target.
  */
 function isHomeTarget(t: string): boolean {
-	const stripped = t.replace(/\/+(\.?\*)?$/, "");
-	if (stripped === "~" || stripped === "$HOME" || stripped === "${HOME}") return true;
-	if (stripped === "" || !stripped.startsWith("/")) return false;
-	return homePaths().includes(normTarget(stripped));
+	if (isHomeBase(t.replace(/\/+(\.?\*)?$/, ""))) return true;
+	const slash = t.lastIndexOf("/");
+	if (slash < 1) return false;
+	const last = t.slice(slash + 1);
+	const globbed = last === "*" || (last.startsWith(".") && /[*?[]/.test(last));
+	return globbed && isHomeBase(t.slice(0, slash).replace(/\/+$/, ""));
 }
 
 function isSystemTarget(t: string): boolean {

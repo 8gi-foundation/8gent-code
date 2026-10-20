@@ -67,6 +67,20 @@ const HOME_LINES = [
 	`ls\n${RMRF} ~`,
 	`sudo ${RMRF} ~`,
 	`sh -c '${RMRF} ~'`,
+	// tilde-user, parameter-expansion forms, dotfile wipe idiom (#4493 round two)
+	`${RMRF} ~${os.userInfo().username}`,
+	`${RMRF} ~${os.userInfo().username}/`,
+	`${RMRF} "` + "${HOME:?}" + `"/`,
+	`${RMRF} ` + "${HOME:-x}",
+	`${RMRF} ` + "${HOME%/}",
+	`${RMRF} ` + "${HOME#x}",
+	`${RMRF} $HOME/.[!.]*`,
+	`${RMRF} ~/.??*`,
+	`${RMRF} ~/.*`,
+	// APFS and NTFS fold case: the lowercase spelling is the same directory
+	...(process.platform === "darwin" || process.platform === "win32"
+		? [`${RMRF} ${HOME_DIR.toLowerCase()}`, `${RMRF} ${HOME_REAL.toLowerCase()}/`]
+		: []),
 ];
 
 const BLOCKED_LINES = [
@@ -139,6 +153,13 @@ const ORDINARY_LINES = [
 	'rm -rf "$HOME"/some/subdir',
 	`rm -rf ${HOME_DIR}/some/subdir`,
 	"rm ~/notes.txt",
+	"rm -rf ~/.config/x",
+	"rm -rf ~/.config",
+	"rm -rf $HOME/.cache",
+	"rm -rf ~root",
+	"rm -rf ~+",
+	"rm -rf ~-",
+	"rm -rf ~/sub/*",
 	"ls ~ && echo done",
 	"echo hi; echo $HOME",
 	"git status && bun test",
