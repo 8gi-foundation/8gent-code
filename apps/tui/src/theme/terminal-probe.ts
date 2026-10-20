@@ -325,11 +325,9 @@ export function probeTerminal(opts: ProbeOptions = {}): Promise<TerminalReport |
 		let done = false;
 		const wasRaw = stdin.isRaw === true;
 
-		const finish = () => {
-			if (done) return;
-			done = true;
+		// Hand stdin back to Ink: stop listening, pause, put typed bytes back.
+		const settle = () => {
 			bootTrace("terminal-probe-end", `replyBytes=${buf.length}`);
-			clearTimeout(timer);
 			stdin.removeListener("data", onData);
 			stdin.pause();
 			try {
@@ -352,12 +350,27 @@ export function probeTerminal(opts: ProbeOptions = {}): Promise<TerminalReport |
 			resolve(parseTerminalReport(buf));
 		};
 
+		// A reply that arrives at once (a multiplexer, a local emulator) ends the
+		// probe from inside the 'data' event. Pausing stdin there leaves Bun's
+		// stream deaf: Ink's later 'readable' listener never fires and no key is
+		// ever read. So a probe ended by data settles one macrotask later, outside
+		// the event, and keeps collecting bytes until then so none is dropped.
+		// A probe ended by the timeout is already outside any event.
+		const finish = (fromData = false) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			if (fromData) setImmediate(settle);
+			else settle();
+		};
+
 		const onData = (chunk: Buffer | string) => {
 			buf += typeof chunk === "string" ? chunk : decoder.write(chunk);
+			if (done) return; // settling: keep the byte, decide nothing
 			// A palette probe waits for DA1: terminals answer in order, so it
 			// closes the window with every reply before it already in `buf`.
-			if (!opts.palette && parseOsc11Hex(buf)) return finish();
-			if (DA1_REPLY.test(buf)) finish();
+			if (!opts.palette && parseOsc11Hex(buf)) return finish(true);
+			if (DA1_REPLY.test(buf)) finish(true);
 		};
 
 		const timer = setTimeout(finish, timeoutMs);
