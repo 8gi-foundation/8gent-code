@@ -15,7 +15,13 @@ import {
 const SCREEN = ["hello brave world", "second line here", "中文 text"].join("\n");
 
 function make(now: { t: number } = { t: 0 }) {
-	return { sel: new TextSelection(() => SCREEN, () => now.t), now };
+	return {
+		sel: new TextSelection(
+			() => SCREEN,
+			() => now.t,
+		),
+		now,
+	};
 }
 
 describe("extractText and cells", () => {
@@ -126,8 +132,16 @@ describe("paint and clipboard", () => {
 	test("copy goes out as OSC 52, plus the platform command", () => {
 		const written: string[] = [];
 		const ran: string[][] = [];
-		const run = (argv: string[]) => (ran.push(argv), true);
-		copyText("héllo", { write: (s) => written.push(s), env: {}, platform: "darwin", runNative: run });
+		const run = (argv: string[]) => {
+			ran.push(argv);
+			return true;
+		};
+		copyText("héllo", {
+			write: (s) => written.push(s),
+			env: {},
+			platform: "darwin",
+			runNative: run,
+		});
 		expect(written).toEqual([osc52("héllo")]);
 		expect(written[0]).toBe(`\x1b]52;c;${Buffer.from("héllo").toString("base64")}\x07`);
 		expect(clipboardSequence("x", {})).toBe(osc52("x"));

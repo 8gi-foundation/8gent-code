@@ -233,7 +233,6 @@ import {
 import { detectBuildIntent } from "./lib/build-intent.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
 import { clearSelection, onCopied } from "./lib/click-targets.js";
-import { copiedNotice } from "./lib/text-selection.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import {
 	type ContextWindow,
@@ -313,6 +312,7 @@ import {
 	formatSlashHelp,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
+import { copiedNotice } from "./lib/text-selection.js";
 import { truncate } from "./lib/text.js";
 import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";

@@ -195,7 +195,9 @@ describe("drag select over rendered text", () => {
 		await tick();
 		expect(wrote).toEqual([]);
 		// Find the Engineer tab by scanning the frame for its title.
-		const row = frame().split("\n").findIndex((l) => l.includes("Engineer"));
+		const row = frame()
+			.split("\n")
+			.findIndex((l) => l.includes("Engineer"));
 		const col = frame().split("\n")[row].indexOf("Engineer");
 		stdin.feed(sgr("press", col + 2, row));
 		stdin.feed(sgr("release", col + 2, row));

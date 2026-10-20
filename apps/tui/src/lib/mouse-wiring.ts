@@ -8,8 +8,8 @@
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-import { copyText } from "./copy-answer.js";
 import { handleMouse, onSelectionChange, setSelectionIO } from "./click-targets.js";
+import { copyText } from "./copy-answer.js";
 import { installMouse, onMouse } from "./mouse-input.js";
 import { type SelRange, osc52, paintSelection } from "./text-selection.js";
 

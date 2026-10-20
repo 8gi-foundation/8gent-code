@@ -95,10 +95,7 @@ export function wordAt(line: string, col: number): { from: number; to: number } 
 	return { from: cells[lo].from, to: cells[i].to };
 }
 
-export type ReleaseResult =
-	| { kind: "copy"; text: string }
-	| { kind: "click" }
-	| { kind: "none" };
+export type ReleaseResult = { kind: "copy"; text: string } | { kind: "click" } | { kind: "none" };
 
 export class TextSelection {
 	private anchor = { x: 0, y: 0 };

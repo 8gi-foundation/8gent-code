@@ -51,7 +51,8 @@ export function nativeCopyArgv(platform: string, env: Env, text?: string): strin
 	// Windows: clip.exe mangles non-ASCII text, so it only takes plain ASCII;
 	// Windows Terminal takes the rest through OSC 52.
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: ASCII range check
-	if (platform === "win32" && text !== undefined && /^[\x00-\x7f]*$/.test(text)) return ["clip.exe"];
+	if (platform === "win32" && text !== undefined && /^[\x00-\x7f]*$/.test(text))
+		return ["clip.exe"];
 	return null;
 }
 
