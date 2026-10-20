@@ -459,7 +459,7 @@ export class Agent {
 	private loopWarningInjected = false;
 	/** #3855: progress signal for the in-flight native attempt, null between attempts. */
 	private progressWatch: ProgressWatch | null = null;
-	private loopDetector = new ToolLoopDetector();
+	private loopDetector: ToolLoopDetector;
 	private events: AgentEventCallbacks;
 	private planner: ProactivePlanner;
 	private evidenceCollector: EvidenceCollector;
@@ -654,6 +654,8 @@ export class Agent {
 		// ToolExecutor above already started for this folder, so this only
 		// attaches the debug log; it never indexes the repo a second time.
 		const cwd = config.workingDirectory || process.cwd();
+		// Resolve write paths against the configured directory, not the process cwd (#4537).
+		this.loopDetector = new ToolLoopDetector({ workingDirectory: cwd });
 		if (!LITE) {
 			astEnsureIndexed(cwd)
 				.then((index) => {
