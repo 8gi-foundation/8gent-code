@@ -252,6 +252,17 @@ describe("fs.exec refuses globs outright", () => {
 		}
 	});
 
+	test("brace expansion that names a link or the parent is refused", async () => {
+		for (const line of [
+			"cat {link,x}/passwd",
+			"cat {..,x}/secret",
+			"ls {..,.}",
+			"echo x > {..,x}/out",
+		]) {
+			await refused(line);
+		}
+	});
+
 	test("ls with no glob still runs", async () => {
 		expect((await run("ls")).exitCode).toBe(0);
 	});
