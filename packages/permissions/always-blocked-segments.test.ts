@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
+import { blockedReason, commandArgvs } from "./always-blocked";
 import { PermissionManager } from "./index";
 import { _resetTuiApprovalChannel, registerTuiApprovalHandler } from "./tui-approval-channel";
 
@@ -543,6 +544,99 @@ describe("brace and IFS spellings of a wipe (#4514)", () => {
 		const t0 = Date.now();
 		expect(pm.checkPermission(`${RMW} -rf ${wide}`)).toBe("denied");
 		expect(pm.checkPermission(`touch ${wide}`)).not.toBe("denied");
+		expect(Date.now() - t0).toBeLessThan(2000);
+	});
+});
+
+// Bracket glob spellings (#4514, family 3), assembled so no line of this file is itself a wipe.
+const HOME_NAME = path.basename(HOME_DIR);
+const HOME_PARENT = path.dirname(HOME_DIR);
+// A negated class never folds case: it is the other case from the letter it stands in for.
+const OTHER_CASE = (c: string) => (c === c.toLowerCase() ? "[^A-Z]" : "[^a-z]");
+const GLOB_BLOCKED = [
+	`${RMW} -rf ${HOME_PARENT}/${OTHER_CASE(HOME_NAME[0])}${HOME_NAME.slice(1)}`,
+	`${RMW} -rf ${HOME_PARENT}/${HOME_NAME.slice(0, -1)}${OTHER_CASE(HOME_NAME.slice(-1))}`,
+	`${RMW} -rf /${OTHER_CASE(HOME_PARENT[1])}${HOME_PARENT.slice(2)}/${HOME_NAME}`,
+	`sudo ${RMW} -rf ${HOME_PARENT}/${OTHER_CASE(HOME_NAME[0])}${HOME_NAME.slice(1)}`,
+	`env X=1 ${RMW} -rf /${OTHER_CASE(HOME_PARENT[1])}${HOME_PARENT.slice(2)}/${HOME_NAME}`,
+	`${RMW} -rf ${HOME_PARENT}/[${HOME_NAME[0]}]${HOME_NAME.slice(1)}`,
+	`${RMW} -rf ${HOME_PARENT}/${HOME_NAME.slice(0, -1)}[${HOME_NAME.slice(-1)}]`,
+	`${RMW} -rf ${HOME_PARENT}/${HOME_NAME.slice(0, -1)}[a-z]`,
+	`${RMW} -rf ${HOME_PARENT}/${HOME_NAME.slice(0, -1)}?`,
+	`${RMW} -rf ${HOME_PARENT}/${HOME_NAME.slice(0, 3)}*`,
+	`${RMW} -rf ${HOME_PARENT}/[!/]${HOME_NAME.slice(1)}`,
+	`${RMW} -rf ${HOME_PARENT}/[^/]${HOME_NAME.slice(1)}`,
+	`${RMW} -rf ${HOME_PARENT}/[[:alpha:]]${HOME_NAME.slice(1)}`,
+	`${RMW} -rf /*/${HOME_NAME}`,
+	`${RMW} -rf /[${HOME_PARENT[1]}]${HOME_PARENT.slice(2)}/${HOME_NAME}`,
+	`${RMW} -rf [/]`,
+	`${RMW} -rf /[/]`,
+	`${RMW} -rf [/][/]`,
+	`${RMW} -rf [[:punct:]]`,
+	`${RMW} -rf [+-0]`,
+	`[${RMW[0]}]${RMW[1]} -rf /`,
+	`[${RMW[0]}][${RMW[1]}] -rf /`,
+	`${RMW[0]}? -rf /`,
+	`[!x]${RMW[1]} -rf /`,
+	`${RMW} -[r]f /`,
+	`sudo ${RMW} -rf ${HOME_PARENT}/[${HOME_NAME[0]}]${HOME_NAME.slice(1)}`,
+	`echo x | xargs ${RMW} -rf [/]`,
+	`chmod -R 000 [/]`,
+	`chown -R me:me /[/]`,
+	`bash -c '${RMW} -rf [/]'`,
+];
+const GLOB_ORDINARY = [
+	"ls [ab]*",
+	"echo [a-z]",
+	"echo [!a]",
+	"[ -f x ]",
+	"[[ -f x ]] && echo ok",
+	`${RMW} -rf build/[ab]*`,
+	`${RMW} -rf logs/[0-9][0-9][0-9]`,
+	`${RMW} -rf dist/[!.]*`,
+	`${RMW} -rf node_modules/.cache/[a-f]*`,
+	`${RMW} -rf ${HOME_DIR}/proj/build*`,
+	`${RMW} -rf /tmp/work[12]`,
+	"chmod 644 file[0-9]",
+	"echo $arr[1] /Users/zz*",
+	`${RMW} -rf build/[^A-Z]*`,
+];
+
+describe("bracket glob spellings of a wipe (#4514)", () => {
+	test("every spelling is refused", () => {
+		const pm = manager();
+		for (const line of GLOB_BLOCKED) {
+			expect([line, pm.checkPermission(line)]).toEqual([line, "denied"]);
+		}
+	});
+
+	test("the same spellings are refused behind comments and heredocs", () => {
+		const pm = manager();
+		for (const line of GLOB_BLOCKED.slice(0, 12)) {
+			for (const wrapped of [`: # don't\n${line} #'`, `cat <<E\nit's\nE\n${line} #'`]) {
+				expect([wrapped, pm.checkPermission(wrapped)]).toEqual([wrapped, "denied"]);
+			}
+		}
+	});
+
+	test("ordinary glob use is not blocked", () => {
+		const pm = manager();
+		for (const line of GLOB_ORDINARY) {
+			expect([line, pm.checkPermission(line)]).not.toEqual([line, "denied"]);
+		}
+	});
+
+	test("a bracket that lists slash makes the word the root; one that does not does not", () => {
+		expect(commandArgvs(`${RMW} -rf [/]`).some((a) => blockedReason(a))).toBe(true);
+		expect(commandArgvs(`${RMW} -rf [ab]`).some((a) => blockedReason(a))).toBe(false);
+		expect(commandArgvs(`${RMW} -rf [!/]`).some((a) => blockedReason(a))).toBe(false);
+	});
+
+	test("an over-wide bracket word stays bounded and refuses only behind a guarded command", () => {
+		const pm = manager();
+		const t0 = Date.now();
+		expect(pm.checkPermission(`${RMW} -rf [a-z][a-z]`)).toBe("denied");
+		expect(pm.checkPermission("touch [a-z][a-z]")).not.toBe("denied");
 		expect(Date.now() - t0).toBeLessThan(2000);
 	});
 });
