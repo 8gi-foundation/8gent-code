@@ -138,6 +138,8 @@ const HOME_LINES = [
 	`echo @(")") ; ${RMRF} ~/* ; echo "x"`,
 	// round eight: an ANSI-C string escapes its own quote, so `$'\\''` is one apostrophe
 	`echo $'\\'' ; ${RMRF} ~/* ; echo "'"`,
+	// round nine: `$$` is the PID, so `$$'` opens a PLAIN quote and `\\'` is a backslash then a closing quote
+	`echo $$'\\' ; ${RMRF} ~ ; echo ''`,
 	// APFS and NTFS fold case: the lowercase spelling is the same directory
 	...(process.platform === "darwin" || process.platform === "win32"
 		? [`${RMRF} ${HOME_DIR.toLowerCase()}`, `${RMRF} ${HOME_REAL.toLowerCase()}/`]
@@ -156,6 +158,10 @@ const BLOCKED_LINES = [
 	`echo $(echo $'\\'') ; ${WIPE} ; echo "'"`,
 	`echo @($'\\'') ; ${WIPE} ; echo "'"`,
 	`echo $'\\'' ; ${WIPE} ; echo "'"`,
+	// round nine: an even run of `$` is the PID and leaves the quote plain; an odd run is ANSI-C
+	`echo $$'\\' ; ${WIPE} ; echo ''`,
+	`ls @($$'\\') ; ${WIPE} ; echo ''`,
+	`echo $$$'\\'' ; ${WIPE} ; echo "'"`,
 	`ls && ${WIPE}`,
 	`echo hi; ${WIPE}`,
 	`false || ${WIPE}`,
@@ -219,6 +225,8 @@ const BLOCKED_LINES = [
 
 const ORDINARY_LINES = [
 	"echo $'a\\'b' ; ls",
+	"echo $$'a' ; ls",
+	"echo $$$'a\\'b' ; ls",
 	"rm -rf ~/some/subdir",
 	"rm -rf $HOME/some/subdir",
 	'rm -rf "$HOME"/some/subdir',

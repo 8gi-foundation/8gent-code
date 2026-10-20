@@ -398,12 +398,20 @@ function processSegment(
 	}
 }
 
-/** True when the `'` at index i opens a bash ANSI-C string: a `$` that is not itself backslash-escaped. */
+/**
+ * True when the `'` at index i opens a bash ANSI-C string. Walk back over the run of `$`: a `$`
+ * preceded by an odd number of backslashes is escaped and ends the run uncounted; `$$` is the PID,
+ * so the quote is ANSI-C only when the count of unescaped `$` in the run is odd.
+ */
 function opensAnsiC(text: string, i: number): boolean {
-	if (text[i - 1] !== "$") return false;
-	let slashes = 0;
-	for (let j = i - 2; j >= 0 && text[j] === "\\"; j--) slashes++;
-	return slashes % 2 === 0;
+	let dollars = 0;
+	for (let j = i - 1; j >= 0 && text[j] === "$"; j--) {
+		let slashes = 0;
+		for (let k = j - 1; k >= 0 && text[k] === "\\"; k--) slashes++;
+		if (slashes % 2 === 1) break;
+		dollars++;
+	}
+	return dollars % 2 === 1;
 }
 
 /** The index just past the `)` that closes a `(` already consumed, honouring nesting and quotes. */
