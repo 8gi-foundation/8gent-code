@@ -22,13 +22,12 @@ import { basename, dirname, join, posix, resolve } from "node:path";
 
 const RM = ["r", "m"].join("");
 const DEL = ["-de", "lete"].join("");
+const NONE = "none (login-shell skip and rc-free flags only)";
 const HOME = "/Users/gridhome"; // the home the policy sees; rows spell it literally
 const ROWS_FILE = join(import.meta.dir, "permissions-grid.rows.json");
-const QUICK_CONTEXTS = ["plain", "comment"];
-const ROWS_OVERRIDE = process.env.GRID_ROWS; // tests only: a rows file in the same format
-/** A login or interactive shell reads profile files that can reset PATH, so the probe never runs one. */
+/** Over-skips on purpose: a shell word, then anywhere later a flag cluster with l or i. Such a shell reads profile files that can reset PATH. */
 const LOGIN_SHELL =
-	/(^|[\s;&|('"])(bash|zsh|sh|dash|ksh)['"]?(\s+-[-a-zA-Z]+)*?\s+(-[a-zA-Z]*[li][a-zA-Z]*|--login|--interactive)(\s|$)/m;
+	/(^|[\s;&|('"])(bash|zsh|sh|dash|ksh)\b[\s\S]*?[\s'"](-[a-zA-Z]*[li][a-zA-Z]*|--login|--interactive)(?=[\s'"]|$)/;
 
 export interface Row {
 	id: string;
@@ -36,7 +35,7 @@ export interface Row {
 	text: string;
 	benign: boolean;
 }
-export type Decision = "BLOCK" | "allow";
+type Decision = "BLOCK" | "allow";
 export interface GridResult {
 	rows: number;
 	newlyBlocked: Row[];
@@ -51,11 +50,11 @@ export interface GridResult {
 
 const fill = (s: string) => s.replaceAll("%RM%", () => RM).replaceAll("%DEL%", () => DEL);
 
-export function loadRows(quick: boolean, file = ROWS_OVERRIDE ?? ROWS_FILE): Row[] {
+export function loadRows(quick: boolean, file = process.env.GRID_ROWS ?? ROWS_FILE): Row[] {
 	const d = JSON.parse(readFileSync(file, "utf8"));
 	const rows: Row[] = [];
 	for (const [context, tpl] of Object.entries<string>(d.contexts)) {
-		if (quick && !QUICK_CONTEXTS.includes(context)) continue;
+		if (quick && !["plain", "comment"].includes(context)) continue;
 		d.spellings.forEach((s: string, i: number) =>
 			rows.push({
 				id: `${context}#${i}`,
@@ -131,7 +130,6 @@ function isWipe(line: string, homes: string[], kids: Set<string>): boolean {
 	const args = w.slice(i + 1);
 	if (!args.some((a) => /^-[A-Za-z]*[rR]/.test(a) || a === "--recursive")) return false;
 	const operands = args.filter((a) => !a.startsWith("-"));
-	// A glob over the home came out as its children: two or more of them is the whole directory.
 	return operands.some(wipeOperand) || operands.filter((o) => kids.has(o)).length >= 2;
 }
 
@@ -149,15 +147,17 @@ function shellProbe(rows: Row[], scratch: string) {
 			{ mode: 0o755 },
 		);
 	}
-	// Real copies on Linux, so the shells still resolve once the system bin dirs are covered below.
 	const linux = process.platform === "linux";
 	for (const n of ["sh", "bash", "zsh", "env", "cat", "xargs", "mount"]) {
 		const p = Bun.which(n) ?? (n === "sh" || n === "bash" ? `/bin/${n}` : null);
 		if (p) (linux ? copyFileSync : symlinkSync)(p, join(stubs, n));
 	}
 	// Linux defence in depth: every system bin dir becomes the stub dir; without unshare, skip + rc-free stand alone.
-	const cover =
-		'S=$1; shift; for d in /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin /sbin /bin; do [ -d "$d" ] && [ ! -L "$d" ] && "$S/mount" --bind "$S" "$d"; done; exec "$@"';
+	const cover = [
+		"S=$1; shift; for d in /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin /sbin /bin; do",
+		'if [ -d "$d" ] && [ ! -L "$d" ]; then "$S/mount" --bind "$S" "$d" || exit 97; fi; done;',
+		'[ "$(command -v rm)" = "$S/rm" ] && [ "$(/usr/bin/rm .)" = "RAN rm ." ] || exit 97; exec "$@"',
+	].join(" ");
 	const unshare = linux ? Bun.which("unshare") : null;
 	const sh = join(stubs, "sh");
 	const isoArgs = (argv: string[]) => [
@@ -174,38 +174,38 @@ function shellProbe(rows: Row[], scratch: string) {
 	const probe = unshare
 		? spawnSync(unshare, isoArgs([sh, "-c", "exit 0"]), { stdio: "ignore" })
 		: null;
-	const isolated = !!probe && probe.status === 0;
-	const isolation = isolated
-		? "unshare mount namespace"
-		: "none (login-shell skip and rc-free flags only)";
+	let isolated = !!probe && probe.status === 0; // the cover exits 97 on any failed mount or check
 	const shells = [
 		["bash", "/bin/bash", ["--noprofile", "--norc", "-c"]],
 		["zsh", Bun.which("zsh") ?? "", ["-f", "-c"]],
 	].filter(([, p]) => p && existsSync(p as string)) as [string, string, string[]][];
-	const labels = shells.map(([n, p]) => {
-		return `${n} ${
-			spawnSync(p, ["--version"])
-				.stdout?.toString()
-				.match(/\d+\.\d+(\.\d+)?/)?.[0] ?? "?"
-		}`;
-	});
+	const ver = (p: string) =>
+		spawnSync(p, ["--version"])
+			.stdout?.toString()
+			.match(/\d+\.\d+(\.\d+)?/)?.[0];
+	const labels = shells.map(([n, p]) => `${n} ${ver(p) ?? "?"}`);
 	const hits = new Map<string, string[]>();
 	for (const r of rows) {
 		shells.forEach(([, path, flags], si) => {
 			const argv = [path, ...flags, r.text];
-			const [cmd, args] = isolated ? [unshare as string, isoArgs(argv)] : [path, argv.slice(1)];
-			const p = spawnSync(cmd, args, {
-				env: { PATH: stubs, HOME: home, BASH_ENV: "", ENV: "" },
-				cwd: scratch,
-				timeout: 5000,
-				stdio: ["ignore", "pipe", "ignore"],
-			});
+			const run = () =>
+				spawnSync(isolated ? (unshare as string) : path, isolated ? isoArgs(argv) : argv.slice(1), {
+					env: { PATH: stubs, HOME: home, BASH_ENV: "", ENV: "" },
+					cwd: scratch,
+					timeout: 5000,
+					stdio: ["ignore", "pipe", "ignore"],
+				});
+			let p = run();
+			if (isolated && p.status === 97) {
+				isolated = false;
+				p = run();
+			}
 			const ran = (p.stdout?.toString() ?? "").split("\n").filter((l) => l.startsWith("RAN "));
 			if (ran.some((l) => isWipe(l, [HOME, home], kids)))
 				hits.set(r.id, [...(hits.get(r.id) ?? []), labels[si]]);
 		});
 	}
-	return { hits, labels, isolation };
+	return { hits, labels, isolation: isolated ? "unshare mount namespace" : NONE };
 }
 
 export async function runGrid(o: {
@@ -268,10 +268,10 @@ export function printGrid(r: GridResult, o: { head: string; base: string; quick?
 	console.log(
 		`rows ${r.rows}; blocked on base ${r.baseBlocked}, on head ${r.headBlocked}; shells: ${sh}`,
 	);
+	console.log(`probe isolation: ${r.isolation}`);
 	section("NEWLY BLOCKED on head (information)", r.newlyBlocked.map(show));
 	section("NEWLY ALLOWED on head (FAIL)", r.newlyAllowed.map(show));
 	section("probe skipped (login/interactive)", r.skipped.map(show));
-	console.log(`probe isolation: ${r.isolation}`);
 	const gaps = r.gaps.map((g) => `${show(g.row)}  [${g.shells.join(", ")}]`);
 	section("NAMED SPELLING GAPS: run a wipe in a real shell, allowed on both trees", gaps);
 	const n = [r.newlyBlocked.length, r.newlyAllowed.length, r.gaps.length];

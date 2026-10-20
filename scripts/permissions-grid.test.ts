@@ -108,6 +108,9 @@ describe("permissions grid", () => {
 			`sh --login -c '${wipe}'`,
 			`zsh -c -l '${wipe}'`,
 			`env bash -xlc '${wipe}'`,
+			`bash -o errexit -lc '${wipe}'`,
+			`bash -O extglob -l -c '${wipe}'`,
+			`bash --rcfile f -i -c '${wipe}'`,
 			`bash -c '${wipe}'`, // control: not a login shell, so it runs, against the stubs
 		];
 		const rowsFile = join(root, "login-rows.json");
@@ -117,9 +120,11 @@ describe("permissions grid", () => {
 		);
 		const r = gridEnv({ GRID_ROWS: rowsFile }, open, open);
 		expect(r.code).toBe(0);
-		const skipped = r.out.split("probe skipped (login/interactive)")[1].split("probe isolation")[0];
-		for (const i of [0, 1, 2, 3, 4]) expect(skipped).toContain(`plain#${i} `);
-		expect(skipped).not.toContain("plain#5 ");
+		const skipped = r.out
+			.split("probe skipped (login/interactive)")[1]
+			.split("NAMED SPELLING GAPS")[0];
+		for (const i of [0, 1, 2, 3, 4, 5, 6, 7]) expect(skipped).toContain(`plain#${i} `);
+		expect(skipped).not.toContain("plain#8 ");
 		expect(existsSync(canary)).toBe(true);
 	}, 60_000);
 });

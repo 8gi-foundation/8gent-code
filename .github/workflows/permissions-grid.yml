@@ -42,10 +42,17 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends zsh
 
       - name: Grid against the PR base
+        shell: bash
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.base_ref }}
-        run: bun scripts/permissions-grid.ts --pr-head "$HEAD_SHA" --base "origin/$BASE_REF"
+        run: bun scripts/permissions-grid.ts --pr-head "$HEAD_SHA" --base "origin/$BASE_REF" | tee "$RUNNER_TEMP/grid.out"
+
+      # Readable from the job summary without the log host.
+      - name: Probe isolation and counts to the summary
+        if: always()
+        run: |
+          { echo '```'; grep -E '^(probe isolation|rows |result:)' "$RUNNER_TEMP/grid.out" || echo "no grid output"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Grid script tests
         run: bun test scripts/permissions-grid.test.ts
