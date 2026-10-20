@@ -3,9 +3,12 @@
  * parameter expansion, eval, command substitution, aliases and functions on the same line.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
+import * as path from "node:path";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { blockedReason, commandArgvs } from "./always-blocked";
-import { structuralForms } from "./structural-spellings";
+import { PermissionManager } from "./index";
+import { structuralForms, unresolvedDeleteReason } from "./structural-spellings";
 
 // The destructive part is assembled so no line of this file is itself one.
 const RM = ["r", "m"].join("");
@@ -173,5 +176,78 @@ describe("structuralForms", () => {
 	test("a variable with too many values is a refusal", () => {
 		const many = Array.from({ length: 40 }, (_, i) => `x=${i}`).join("; ");
 		expect(structuralForms(`${many}; echo $x`)).toBeNull();
+	});
+});
+
+afterAll(cleanupTempDirs);
+
+describe("a recursive delete of an operand the line does not resolve must ask (#4514 family 5)", () => {
+	const asks = [
+		"%RM% -rf $DIR",
+		'%RM% -rf "$DIR"',
+		"%RM% -rf ${DIR}",
+		"%RM% -rf ${TARGET:?}",
+		"%RM% -rf ${DIR:-x}",
+		"%RM% -rf $DIR/",
+		"%RM% -rf $DIR/*",
+		"%RM% -rf $(cat list)",
+		"%RM% -rf `cat list`",
+		'%RM% -rf "$(cat list)"',
+		"%RM% -r -f $DIR",
+		"%RM% -rf -- $DIR",
+		"sudo %RM% -rf $DIR",
+		"bash -c '%RM% -rf $DIR'",
+		'eval "%RM% -rf $DIR"',
+		"d=$(cat list); %RM% -rf $d",
+		"d=$x; %RM% -rf $d",
+		"d=a; d=$(cat list); %RM% -rf $d",
+	];
+	for (const a of asks)
+		test(`asks ${a}`, () => expect(unresolvedDeleteReason(row(a))).not.toBeNull());
+
+	const passes = [
+		'd=$(mktemp -d); %RM% -rf "$d"',
+		"d=`mktemp -d`; %RM% -rf $d",
+		"d=$(mktemp -d /tmp/x.XXXX); %RM% -rf ${d}",
+		"d=build; %RM% -rf $d",
+		"d=./dist; %RM% -rf $d/",
+		"for d in a b; do %RM% -rf $d; done",
+		'%RM% -rf "$DIR/build"',
+		"%RM% -rf ./build",
+		"%RM% -f $DIR",
+		"%RM% $DIR",
+		"ls $DIR",
+		"echo %RM% -rf $DIR",
+	];
+	for (const p of passes)
+		test(`passes ${p}`, () => expect(unresolvedDeleteReason(row(p))).toBeNull());
+
+	test("Infinite mode must ask: refused with no terminal, not auto-approved", async () => {
+		const pm = new PermissionManager(path.join(tempDir("unresolved-"), "permissions.json"));
+		pm.enableInfiniteMode();
+		const log = console.log;
+		console.log = () => {};
+		const saved = process.env.EIGHT_HEADLESS;
+		process.env.EIGHT_HEADLESS = "1";
+		try {
+			for (const line of asks.slice(0, 8).map(row)) {
+				expect([line, pm.mustAskReason(line) !== null]).toEqual([line, true]);
+				expect([line, await pm.requestPermission("Execute Shell Command", "d", line)]).toEqual([
+					line,
+					false,
+				]);
+			}
+			for (const line of passes.slice(0, 5).map(row)) {
+				expect([line, await pm.requestPermission("Execute Shell Command", "d", line)]).toEqual([
+					line,
+					true,
+				]);
+			}
+		} finally {
+			console.log = log;
+			if (saved === undefined) Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
+			else process.env.EIGHT_HEADLESS = saved;
+			pm.disableInfiniteMode();
+		}
 	});
 });

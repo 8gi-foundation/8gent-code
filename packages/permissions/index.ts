@@ -25,6 +25,7 @@ import {
 import { currentPermissionMode } from "./permission-mode.js";
 import { readOnlyInlinePython } from "./s1-inline-python";
 import { type ActiveShellKind, posixRulesApply } from "./shell-tools";
+import { unresolvedDeleteReason } from "./structural-spellings";
 import { requestTuiApproval } from "./tui-approval-channel.js";
 
 /**
@@ -873,6 +874,9 @@ export class PermissionManager {
 	 * network command while a local provider is pinned.
 	 */
 	mustAskReason(command: string): string | null {
+		// A recursive delete of a value the line does not show asks, even in Infinite mode (#4514).
+		const unresolved = unresolvedDeleteReason(command);
+		if (unresolved) return unresolved;
 		return mustAskReason(command, {
 			git: this.gitState,
 			pinnedLocalProvider:

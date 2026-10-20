@@ -16,6 +16,7 @@
  * command position; as an operand it is left to the policy engine's deny-by-default backstop. Too many
  * alternatives to enumerate is itself a refusal (null): nobody types that by hand.
  */
+import { stripPrefix } from "./command-policy";
 import { tokenize } from "./src/workspace-boundary";
 
 /** What an unreadable command substitution stands for: a non-literal word, never a safe one. */
@@ -551,4 +552,55 @@ function unitVariants(
 		}
 	}
 	return out.size > MAX_UNIT_VARIANTS ? null : [...out];
+}
+
+// ── a recursive delete whose operand the line does not resolve ─────────────
+
+/** `$x`, `${x}`, `${x:?}`, `${x:-d}` standing alone as an operand, with at most a trailing `/` or `/*`. */
+const WHOLE_VAR =
+	/^\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)(?:[:]?[-=?+][^}]*)?\})\/?\*?$/;
+const RECURSIVE_FLAG = /^(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive)$/;
+/** A value the line itself fixes: plain text, or the directory `mktemp` just made. */
+const LITERAL_OR_MKTEMP = /^(?:[^$`]*|\$\(\s*mktemp(?:\s[^)]*)?\)|`\s*mktemp(?:\s[^`]*)?`)$/;
+
+/**
+ * A reason a person must approve, when a recursive `rm` on this line takes an operand that is wholly a
+ * value the line does not resolve: a variable never assigned here (or assigned from anything but plain
+ * text or `mktemp`), or an unreadable command substitution (#4514 family 5). `d=$(mktemp -d); rm -rf "$d"`
+ * and `d=build; rm -rf $d` are resolved on the line and pass; `rm -rf $DIR` and `rm -rf $(cat list)` ask.
+ * Quoted inner scripts (`sh -c`, `eval`) are read the same way. Null when nothing qualifies.
+ */
+export function unresolvedDeleteReason(text: string, depth = 0): string | null {
+	if (!TRIGGER.test(text) || depth > 3) return null;
+	const env: Env = new Map();
+	if (!collect(text, env, new Map())) return null;
+	const resolved = (name: string): boolean => {
+		const b = env.get(name);
+		return (
+			b !== undefined && b.vals.size > 0 && [...b.vals].every((v) => LITERAL_OR_MKTEMP.test(v))
+		);
+	};
+	for (const unit of splitUnits(text)) {
+		const tokens = tokenize(resolveSubstitutions(unit) ?? unit);
+		const argv = stripPrefix(tokens)?.argv ?? tokens;
+		for (const t of tokens)
+			if (/\s/.test(t) && !t.startsWith("-")) {
+				const inner = unresolvedDeleteReason(t, depth + 1);
+				if (inner) return inner;
+			}
+		if (argv.length === 0 || argv[0].split("/").pop() !== "rm") continue;
+		const dashes = argv.indexOf("--");
+		const flags = argv.slice(1, dashes < 0 ? undefined : dashes).filter((a) => a.startsWith("-"));
+		if (!flags.some((f) => RECURSIVE_FLAG.test(f))) continue;
+		const operands = argv
+			.slice(1)
+			.filter((a, i) => (dashes >= 0 ? i + 1 > dashes : !a.startsWith("-")));
+		for (const o of operands) {
+			const m = WHOLE_VAR.exec(o);
+			if ((m && !resolved(m[1] ?? m[2])) || o === SUBST || o === `${SUBST}/`) {
+				return "a recursive delete of a value the command line does not show: a person must approve it";
+			}
+		}
+	}
+	return null;
 }
