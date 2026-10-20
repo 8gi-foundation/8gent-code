@@ -22,3 +22,12 @@ export async function gateInput(
 	if (typeof text !== "string") return { handled: false };
 	return runSlash(text, ctx, opts);
 }
+
+/**
+ * True when `text` is a line the gate could answer. Anything else is never handled,
+ * so a caller may skip the async gate and keep its synchronous prefix (a pool turn
+ * marks itself busy before its first await; the work queue and journal depend on it).
+ */
+export function isSlashLine(text: unknown): boolean {
+	return typeof text === "string" && text.trimStart().startsWith("/");
+}

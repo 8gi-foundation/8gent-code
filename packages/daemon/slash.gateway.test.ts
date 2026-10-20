@@ -149,6 +149,6 @@ describe("gateway input gate", () => {
 		const src = readFileSync(join(import.meta.dir, "gateway.ts"), "utf8");
 		expect(src.match(/\.chat\(sid, msg\.text/g)?.length).toBe(1);
 		expect(src.indexOf("gateInput(")).toBeGreaterThan(0);
-		expect(src.indexOf("gateInput(")).toBeLessThan(src.indexOf("runModelTurn();\n"));
+		expect(src.indexOf("isSlashLine(msg.text)")).toBeGreaterThan(0);
 	});
 });

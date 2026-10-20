@@ -21,7 +21,7 @@ import {
 } from "./classroom";
 import { dataDirPath, getDataDir } from "./data-dir";
 import { bus } from "./events";
-import { gateInput } from "./input-gate";
+import { gateInput, isSlashLine } from "./input-gate";
 import { type QueueRequest, type QueueStatus, type Receipt, WorkQueue } from "./queue";
 import type { SessionJournal } from "./session-journal";
 
@@ -505,22 +505,24 @@ export class AgentPool {
 		// gateway, the dispatch queue and daemon-built prompts alike, passes the
 		// deterministic gate. A daemon-built prompt that starts with a known command
 		// name is a bug, so it is logged, not exempted.
-		const gated = await gateInput(text, {
-			sessionId,
-			channel: entry.channel,
-			model: entry.agent.getModel(),
-			runtime: entry.agent.getRuntime(),
-			messageCount: entry.messageCount,
-			busy: entry.busy,
-		});
-		if (gated.handled) {
-			if (!turn)
-				console.warn(
-					`[gate] ${entry.channel} session ${sessionId}: slash line answered without the model (a daemon-built prompt should not start with a slash)`,
-				);
-			const reply = gated.text ?? "";
-			bus.emit("agent:stream", { sessionId, chunk: reply, final: true });
-			return reply;
+		if (isSlashLine(text)) {
+			const gated = await gateInput(text, {
+				sessionId,
+				channel: entry.channel,
+				model: entry.agent.getModel(),
+				runtime: entry.agent.getRuntime(),
+				messageCount: entry.messageCount,
+				busy: entry.busy,
+			});
+			if (gated.handled) {
+				if (!turn)
+					console.warn(
+						`[gate] ${entry.channel} session ${sessionId}: slash line answered without the model (a daemon-built prompt should not start with a slash)`,
+					);
+				const reply = gated.text ?? "";
+				bus.emit("agent:stream", { sessionId, chunk: reply, final: true });
+				return reply;
+			}
 		}
 
 		if (entry.busy) {
