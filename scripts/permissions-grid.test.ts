@@ -42,7 +42,7 @@ function grid(head: string, base: string, ...extra: string[]) {
 function gridEnv(env: Record<string, string>, head: string, base: string, ...extra: string[]) {
 	const p = Bun.spawnSync(["bun", SCRIPT, "--pr-head", head, "--base", base, ...extra], {
 		stderr: "pipe",
-		env: { ...process.env, ...env },
+		env: { ...process.env, GITHUB_ACTIONS: "", NODE_ENV: "test", ...env },
 	});
 	return { code: p.exitCode, out: p.stdout.toString() + p.stderr.toString() };
 }
