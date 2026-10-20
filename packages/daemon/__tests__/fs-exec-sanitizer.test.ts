@@ -230,6 +230,17 @@ describe("fs.exec is confined to the workspace (no approval card on this route)"
 	});
 });
 
+describe("fs.exec parent-glob refusal text", () => {
+	test("says the operand looks like a glob that could reach the parent, not that a path leaves the workspace", () => {
+		for (const line of ['grep "[Ee]rr" f', 'find . -name ".?x"', "cat .?/secret"]) {
+			const r = execRefusal(line, WORKSPACE) ?? "";
+			expect(r).toContain("looks like a glob that could reach the parent directory");
+			expect(r).toContain("Rephrase it or quote it differently");
+			expect(r).not.toContain("outside the workspace");
+		}
+	});
+});
+
 describe("fs.exec follows symlinks when it confines", () => {
 	test("a link inside the root that points outside is refused; one that points inside still runs", async () => {
 		const outside = path.join(TMP, "outside-dir");

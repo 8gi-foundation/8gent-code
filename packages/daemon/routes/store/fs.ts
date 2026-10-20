@@ -538,14 +538,18 @@ function insideRoot(root: string, target: string): boolean {
 }
 
 /** A word that names a place the route cannot prove is inside root: absolute, ~, ..-escaping, or an expansion. */
+/** A glob that could expand to `..` (.?, .*, [.][.], [!a][!a]): the shell reads it, not the lexical check. */
+function globReachesParent(word: string): boolean {
+	const w = word.replace(OPTION_VALUE, "").replace(/^['"]|['"]$/g, "");
+	return w.split(/[\\/]+/).some((c) => /[*?[]/.test(c) && (c.startsWith(".") || c.startsWith("[")));
+}
+
 function escapesRoot(root: string, word: string): boolean {
 	const w = word.replace(OPTION_VALUE, "").replace(/^['"]|['"]$/g, "");
 	if (/\$[A-Za-z_{(]|`/.test(w)) return true;
 	if (w.startsWith("~")) return true;
 	if (w === "/dev/null") return false;
-	// A glob that could expand to `..` (.?, .*, [.][.], [!a][!a]) is read by the shell, not by the lexical check.
-	if (w.split(/[\\/]+/).some((c) => /[*?[]/.test(c) && (c.startsWith(".") || c.startsWith("["))))
-		return true;
+	if (globReachesParent(w)) return true;
 	return !realInsideRoot(root, w);
 }
 
@@ -609,6 +613,11 @@ function confinementRefusal(command: string, root: string): string | null {
 			return deny(`${name} is not on the daemon allowlist`);
 		}
 		for (const w of argv.slice(1)) {
+			if (globReachesParent(w)) {
+				return deny(
+					"This operand looks like a glob that could reach the parent directory. Rephrase it or quote it differently",
+				);
+			}
 			if (escapesRoot(root, w)) return deny("A path reaches outside the workspace");
 			if (name === "git") {
 				if (GIT_REFUSED_FLAG.test(w))
