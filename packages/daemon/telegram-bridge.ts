@@ -74,7 +74,7 @@ import { type SpokenModel, capAtSentence, makeSpokenDraft } from "../voice/spoke
 import { recordTelegramPoll, registerTelegramBridge } from "./bridge-health";
 import { approvalTtlMs, bridgeSecret } from "./channel-approvals";
 import { getDataDir } from "./data-dir";
-import { gateInput } from "./input-gate";
+import { classifyInput, gateInput } from "./input-gate";
 import { NO_LINK_PREVIEW } from "./notifications";
 import { VOICE_ACK, ackForTranscript } from "./voice-ack";
 
@@ -2110,6 +2110,38 @@ class TelegramDaemonBridge {
 		// A group voice transcript is data, never a command (C-G9): it skips the slash
 		// parser entirely and needs only a full-tier sender.
 		const plain = opts?.plain === true;
+
+		// Input gate (#4530): a slash line that is not one of the bridge's own commands never
+		// reaches the model, and is not mistaken for one the bridge refuses. A registry command
+		// runs here and replies to the chat; an unknown name is answered "Unknown command".
+		// A group voice transcript is data (C-G9), so it is only classified, never run.
+		// Non-operator senders keep the refusal below; /cmd@otherbot is not ours to answer.
+		const bridgeCmds: readonly string[] = [
+			...OPEN_COMMANDS,
+			...PRIVILEGED_COMMANDS,
+			...OPERATOR_COMMANDS,
+		];
+		const slashCmd = commandOf(cleanText(text), this.botUsername);
+		const notOurs = slashCmd === null && /^\s*\/\w+@/.test(cleanText(text));
+		if (
+			sender &&
+			senderTier(sender, gate) === "full" &&
+			(plain || (!notOurs && !(slashCmd && bridgeCmds.includes(slashCmd)))) &&
+			classifyInput(cleanText(text), { sessionId: `tg-${chatId}`, channel: "telegram" }).kind ===
+				"slash"
+		) {
+			const gated = await gateInput(
+				cleanText(text),
+				{ sessionId: `tg-${chatId}`, channel: "telegram" },
+				{ classifyOnly: plain },
+			);
+			if (gated.handled) {
+				await tgSend(this.config.telegramToken, String(chatId), gated.text ?? "", "").catch(
+					() => {},
+				);
+				return;
+			}
+		}
 		if (
 			plain ? !sender || senderTier(sender, gate) !== "full" : !isCommandAllowed(text, sender, gate)
 		) {
@@ -2320,6 +2352,22 @@ class TelegramDaemonBridge {
 				].join("\n"),
 			);
 			return;
+		}
+
+		// A slash line the bridge's own handlers did not consume (a /delegate the router declined)
+		// is classified here, on the raw user line, before any memory prefix can hide the slash.
+		if (classifyInput(text, { sessionId: `tg-${chatId}`, channel: "telegram" }).kind === "slash") {
+			const gated = await gateInput(
+				text,
+				{ sessionId: `tg-${chatId}`, channel: "telegram" },
+				{ classifyOnly: plain },
+			);
+			if (gated.handled) {
+				await tgSend(this.config.telegramToken, this.replyChat(), gated.text ?? "", "").catch(
+					() => {},
+				);
+				return;
+			}
 		}
 
 		// Operator memory: recall first (so a turn never recalls itself), then remember. Recalled
