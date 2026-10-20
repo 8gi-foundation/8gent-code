@@ -4,7 +4,16 @@
  * resulting settings must post to the stub chat after approval.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -17,7 +26,7 @@ const settingsPath = join(home, ".8gent", "settings.json");
 const envPath = join(home, ".8gent", "secrets", "telegram-bot.env");
 
 const calls: string[] = [];
-let updates: unknown[] = [];
+let updates: unknown = [];
 const server = Bun.serve({
 	port: 0,
 	async fetch(req) {
@@ -41,7 +50,9 @@ const server = Bun.serve({
 process.env.EIGHT_TG_API_BASE = `http://127.0.0.1:${server.port}`;
 process.env.BUN_TEST = "1";
 
-const { runTelegramSetup, mergeSettings, redact } = await import("./telegram-setup.js");
+const { runTelegramSetup, mergeSettings, redact, cleanLabel, ensureEnvFile } = await import(
+	"./telegram-setup.js"
+);
 
 afterAll(() => {
 	server.stop(true);
@@ -170,5 +181,60 @@ describe("telegram setup", () => {
 		const r = await postMessage({ chat: "222", text: "hello from setup" }, deps);
 		expect(String(r)).not.toContain(KEY);
 		expect(calls.some((c) => c.endsWith("sendMessage"))).toBe(true);
+	});
+});
+
+describe("hardening (8SO F2-F5)", () => {
+	test("a pasted key or long input is never echoed", async () => {
+		setKey(KEY);
+		for (const arg of [KEY, `bot${KEY}`, "x".repeat(60)]) {
+			const out = await runTelegramSetup([arg]);
+			expect(out).toContain("not a chat id");
+			expect(out).not.toContain("ZZstub");
+			expect(out).not.toContain("xxxxxxxx");
+		}
+		expect(await runTelegramSetup(["12ab"])).toContain('"12ab" is not a chat id');
+	});
+
+	test("chat names are stripped of control and bidi characters and capped", async () => {
+		expect(cleanLabel("\x1b]0;x\x07Family\nOK")).toBe("]0;x Family OK");
+		expect(cleanLabel("a\u202eb\u0085c\u007fd")).toBe("a b c d");
+		expect(cleanLabel("z".repeat(100)).length).toBeLessThanOrEqual(40);
+		updates = [
+			{
+				update_id: 1,
+				message: { chat: { id: 555, type: "group", title: "\x1b]0;x\x07Family\nOK" } },
+			},
+		];
+		const out = await runTelegramSetup([]);
+		expect(out).toContain("555  ]0;x Family OK (group)");
+		expect(out).not.toContain("\x1b");
+		expect(out).not.toContain("\x07");
+	});
+
+	test("a getUpdates reply that is not a list is a plain error", async () => {
+		updates = "oops";
+		expect(await runTelegramSetup([])).toContain("unexpected reply");
+	});
+
+	test("a symlinked key file or directory is refused", () => {
+		const t = mkdtempSync(join(root, "link-"));
+		writeFileSync(join(t, "real.env"), "TELEGRAM_BOT_TOKEN=\n");
+		symlinkSync(join(t, "real.env"), join(t, "link.env"));
+		expect(ensureEnvFile(join(t, "link.env")).error).toContain("symlink");
+		symlinkSync(t, join(root, "dirlink"));
+		expect(ensureEnvFile(join(root, "dirlink", "x.env")).error).toContain("symlink");
+	});
+
+	test("looser modes are tightened and reported", () => {
+		const t = mkdtempSync(join(root, "loose-"));
+		const f = join(t, "k.env");
+		writeFileSync(f, "TELEGRAM_BOT_TOKEN=\n");
+		chmodSync(f, 0o644);
+		chmodSync(t, 0o755);
+		const r = ensureEnvFile(f);
+		expect(r.notes.length).toBe(2);
+		expect(statSync(f).mode & 0o777).toBe(0o600);
+		expect(statSync(t).mode & 0o777).toBe(0o700);
 	});
 });

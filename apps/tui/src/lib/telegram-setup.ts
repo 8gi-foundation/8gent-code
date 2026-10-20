@@ -7,7 +7,15 @@
  * context or a log. The settings it writes are read once at process start and
  * each chat still needs a per-process approval card; neither is weakened here.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { apiBase, readBotKey } from "../../../../packages/ai/post-message.js";
@@ -35,18 +43,59 @@ export function redact(text: string, key?: string | null): string {
 	return out.replace(BOT_TOKEN_RE, "[redacted-token]");
 }
 
-/** Create the key file (0600, in a 0700 directory) with an empty placeholder if missing. */
-export function ensureEnvFile(file: string): { created: boolean } {
+/** Strip control and bidi characters, collapse whitespace, cap length. Chat names come from strangers. */
+export function cleanLabel(raw: unknown, max = 40): string {
+	const t = String(raw ?? "")
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping controls is the point
+		.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+	return t.length > max ? `${t.slice(0, max - 3)}...` : t;
+}
+
+const looser = (mode: number, allowed: number) => (mode & 0o777 & ~allowed) !== 0;
+
+/**
+ * Create the key file (0600, in a 0700 directory) with an empty placeholder if
+ * missing. A symlink at the file or its directory is refused; a looser mode is
+ * tightened and reported.
+ */
+export function ensureEnvFile(file: string): { created: boolean; notes: string[]; error?: string } {
 	const path = expand(file);
-	if (existsSync(path)) return { created: false };
-	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-	writeFileSync(
-		path,
-		`# Telegram bot key from @BotFather. Paste it after the = sign and save. Keep this file private.\n${DEFAULT_TOKEN_VAR}=\n`,
-		{ mode: 0o600, flag: "wx" },
-	);
-	chmodSync(path, 0o600);
-	return { created: true };
+	const dir = dirname(path);
+	const notes: string[] = [];
+	const kind = (p: string) => {
+		try {
+			return lstatSync(p);
+		} catch {
+			return null;
+		}
+	};
+	const d0 = kind(dir);
+	if (d0?.isSymbolicLink()) return { created: false, notes, error: `${dir} is a symlink` };
+	const f0 = kind(path);
+	if (f0?.isSymbolicLink()) return { created: false, notes, error: `${file} is a symlink` };
+	let created = false;
+	if (!f0) {
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		writeFileSync(
+			path,
+			`# Telegram bot key from @BotFather. Paste it after the = sign and save. Keep this file private.\n${DEFAULT_TOKEN_VAR}=\n`,
+			{ mode: 0o600, flag: "wx" },
+		);
+		created = true;
+	}
+	const d = kind(dir);
+	if (d && dir !== homeDir() && looser(d.mode, 0o700)) {
+		chmodSync(dir, 0o700);
+		notes.push(`Tightened ${dir} to owner-only (700).`);
+	}
+	const f = kind(path);
+	if (f && looser(f.mode, 0o600)) {
+		chmodSync(path, 0o600);
+		notes.push(`Tightened ${file} to owner-only (600); it was readable by others.`);
+	}
+	return { created, notes };
 }
 
 async function botCall(
@@ -85,7 +134,7 @@ export async function getMe(key: string): Promise<{ username?: string; error?: s
 	const r = await botCall(key, "getMe", {});
 	if (r.error) return { error: r.error };
 	const u = (r.result as { username?: string } | undefined)?.username;
-	return u ? { username: u } : { error: "Telegram returned no bot name" };
+	return u ? { username: cleanLabel(u, 64) } : { error: "Telegram returned no bot name" };
 }
 
 /** One getUpdates call, no offset (so nothing is acknowledged) and no long poll. */
@@ -97,13 +146,16 @@ export async function getSeenChats(key: string): Promise<{ chats?: SeenChat[]; e
 	});
 	if (r.error) return { error: r.error };
 	const seen = new Map<string, SeenChat>();
-	for (const u of (r.result as Record<string, any>[]) ?? []) {
+	if (!Array.isArray(r.result)) return { error: "Telegram returned an unexpected reply" };
+	for (const u of r.result as Record<string, any>[]) {
+		if (!u || typeof u !== "object") continue;
 		const chat = (u.message ?? u.channel_post ?? u.my_chat_member)?.chat;
 		if (!chat || chat.id === undefined) continue;
 		const id = String(chat.id);
+		if (!CHAT_ID_RE.test(id)) continue;
 		const person = [chat.first_name, chat.last_name].filter(Boolean).join(" ");
-		const label = String(chat.title ?? (person || chat.username || "unnamed chat"));
-		seen.set(id, { id, label, kind: String(chat.type ?? "chat") });
+		const label = cleanLabel(chat.title || person || chat.username) || "unnamed chat";
+		seen.set(id, { id, label, kind: cleanLabel(chat.type, 16) || "chat" });
 	}
 	return { chats: [...seen.values()] };
 }
@@ -170,27 +222,34 @@ const RESTART =
 export async function runTelegramSetup(args: string[]): Promise<string> {
 	const { file, name } = configured();
 	let created = false;
+	let notes: string[] = [];
 	try {
-		created = ensureEnvFile(file).created;
+		const e = ensureEnvFile(file);
+		if (e.error) return `Telegram setup: ${e.error}. Point it at a real file you own, not a link.`;
+		created = e.created;
+		notes = e.notes;
 	} catch {
 		return `Could not create ${file}. Create it yourself with ${name}=<your key>, chmod 600, then run /telegram setup again.`;
 	}
+	const tell = (text: string) => [text, ...notes].join("\n");
 	const key = readBotKey(expand(file), name);
 	if (!key) {
-		return [
-			"Telegram setup, step 1 of 3: create your bot.",
-			"  1. In Telegram, open @BotFather and send /newbot.",
-			"  2. Copy the key it gives you.",
-			`  3. Open ${file} in an editor, put the key after ${name}=, and save.`,
-			created ? `     (I just created that file, private to you, with an empty ${name}=.)` : "",
-			"Do not paste the key here. Then run /telegram setup again.",
-		]
-			.filter(Boolean)
-			.join("\n");
+		return tell(
+			[
+				"Telegram setup, step 1 of 3: create your bot.",
+				"  1. In Telegram, open @BotFather and send /newbot.",
+				"  2. Copy the key it gives you.",
+				`  3. Open ${file} in an editor, put the key after ${name}=, and save.`,
+				created ? `     (I just created that file, private to you, with an empty ${name}=.)` : "",
+				"Do not paste the key here. Then run /telegram setup again.",
+			]
+				.filter(Boolean)
+				.join("\n"),
+		);
 	}
 	const me = await getMe(key);
 	if (!me.username)
-		return `Telegram setup: ${redact(me.error ?? "failed", key)}. Check the key in ${file}.`;
+		return tell(`Telegram setup: ${redact(me.error ?? "failed", key)}. Check the key in ${file}.`);
 
 	const seen = await getSeenChats(key);
 	if (!seen.chats)
@@ -210,21 +269,29 @@ export async function runTelegramSetup(args: string[]): Promise<string> {
 			);
 			lines.push("Pick one or more: /telegram setup <chat id> [<chat id> ...]");
 		}
-		return lines.join("\n");
+		return tell(lines.join("\n"));
 	}
 	const bad = picks.find((p) => !CHAT_ID_RE.test(p));
-	if (bad) return `"${bad.slice(0, 24)}" is not a chat id. Run /telegram setup to see the list.`;
+	if (bad) {
+		// Never echo input that could be a pasted key.
+		BOT_TOKEN_RE.lastIndex = 0;
+		if (BOT_TOKEN_RE.test(bad) || bad.length > 20)
+			return "That is not a chat id. Never paste a key here. Run /telegram setup to see the list.";
+		return `"${redact(bad, key)}" is not a chat id. Run /telegram setup to see the list.`;
+	}
 	const unknown = picks.find((p) => !seen.chats?.some((c) => c.id === p));
 	if (unknown)
-		return `Chat ${unknown} is not one @${me.username} has seen. Message the bot there first, then run /telegram setup.`;
+		return `Chat ${redact(unknown, key)} is not one @${me.username} has seen. Message the bot there first, then run /telegram setup.`;
 
 	const w = mergeSettings(picks, file, name);
 	if (!w.ok) return `Telegram setup: ${w.error}`;
 	const done = picks.map((p) => `${p} ${seen.chats?.find((c) => c.id === p)?.label ?? ""}`.trim());
-	return [
-		`Telegram setup done for @${me.username}.`,
-		`Allowed chats: ${done.join(", ")}${w.added.length < picks.length ? " (some were already allowed)" : ""}.`,
-		`Key file: ${file} (variable ${name}).`,
-		RESTART,
-	].join("\n");
+	return tell(
+		[
+			`Telegram setup done for @${me.username}.`,
+			`Allowed chats: ${done.join(", ")}${w.added.length < picks.length ? " (some were already allowed)" : ""}.`,
+			`Key file: ${file} (variable ${name}).`,
+			RESTART,
+		].join("\n"),
+	);
 }
