@@ -134,16 +134,16 @@ function Install-Eight {
 		try {
 			$p = [System.Diagnostics.Process]::Start($psi)
 		} catch {
-			return @{ Code = -1; Out = '' }
+			return @{ Code = -1; Out = ''; Err = '' }
 		}
 		$outTask = $p.StandardOutput.ReadToEndAsync()
 		$errTask = $p.StandardError.ReadToEndAsync()
 		if (-not $p.WaitForExit($seconds * 1000)) {
 			try { $p.Kill() } catch {}
-			return @{ Code = -2; Out = '' }
+			return @{ Code = -2; Out = ''; Err = '' }
 		}
 		$p.WaitForExit()
-		return @{ Code = $p.ExitCode; Out = $outTask.Result }
+		return @{ Code = $p.ExitCode; Out = $outTask.Result; Err = $errTask.Result }
 	}
 
 	function Get-EightVersion([string]$exe) {
@@ -282,8 +282,15 @@ function Install-Eight {
 			$actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLower()
 			if ($actual -ne $sums[$name]) { throw "Checksum mismatch for $name (expected $($sums[$name]), got $actual). Nothing installed." }
 			if ($ghReady) {
-				$r = Invoke-EightProcess $gh.Source @('attestation', 'verify', $file, '--repo', $repo, '--signer-workflow', "$repo/.github/workflows/release-binaries.yml", '--source-ref', "refs/tags/v$version") 120
-				if ($r.Code -ne 0) { throw "GitHub build attestation for $name v$version did not verify. Nothing installed." }
+				# No --source-ref: gh before 2.64 does not have it. Ask for JSON and check the ref here.
+				$r = Invoke-EightProcess $gh.Source @('attestation', 'verify', $file, '--repo', $repo, '--signer-workflow', "$repo/.github/workflows/release-binaries.yml", '--format', 'json') 120
+				if ($r.Code -ne 0) {
+					if ($r.Err -match 'unknown (flag|command)') { throw "The GitHub CLI on this machine cannot verify build attestations the way this installer needs; no verification was run. Nothing installed. Upgrade it (winget upgrade GitHub.cli) and run this again." }
+					throw "GitHub build attestation for $name v$version did not verify. Nothing installed. gh said: $($r.Err)"
+				}
+				$refs = @([regex]::Matches($r.Out, '"sourceRepositoryRef"\s*:\s*"([^"]*)"') | ForEach-Object { $_.Groups[1].Value })
+				if ($refs.Count -eq 0) { throw "gh verified $name but reported no source ref; refusing to trust it. Nothing installed." }
+				foreach ($ref in $refs) { if ($ref -ne "refs/tags/v$version") { throw "GitHub build attestation for $name was built from $ref, not refs/tags/v$version. Nothing installed." } }
 				Write-Host 'GitHub build attestation: verified.'
 			}
 			$got = Get-EightVersion $file

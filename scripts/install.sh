@@ -426,10 +426,21 @@ main() {
 	[ "$expected" = "$actual" ] || die "checksum mismatch for ${ASSET} (expected ${expected}, got ${actual}); nothing installed"
 
 	if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-		gh attestation verify "$TMP/$ASSET" --repo "$REPO" \
+		# No --source-ref: gh before 2.64 does not have it. Ask for JSON and check
+		# the verified source ref here instead, so the check is no weaker.
+		if ! gh attestation verify "$TMP/$ASSET" --repo "$REPO" \
 			--signer-workflow "${REPO}/.github/workflows/release-binaries.yml" \
-			--source-ref "refs/tags/${TAG}" >/dev/null 2>&1 ||
-			die "GitHub build attestation for ${ASSET} v${VERSION} did not verify; nothing installed"
+			--format json >"$TMP/attestation.json" 2>"$TMP/attestation.err"; then
+			if grep -qiE 'unknown (flag|command)' "$TMP/attestation.err"; then
+				die "the GitHub CLI on this machine ($(gh --version 2>/dev/null | head -n 1)) cannot verify build attestations the way this installer needs; no verification was run and nothing installed. Upgrade it (brew upgrade gh, or your package manager) and run this again"
+			fi
+			die "GitHub build attestation for ${ASSET} v${VERSION} did not verify; nothing installed. gh said: $(head -c 2000 "$TMP/attestation.err")"
+		fi
+		refs="$(grep -o '"sourceRepositoryRef" *: *"[^"]*"' "$TMP/attestation.json" | sed 's/.*: *"\([^"]*\)"/\1/')"
+		[ -n "$refs" ] || die "gh verified ${ASSET} but reported no source ref; refusing to trust it; nothing installed"
+		if [ -n "$(printf '%s\n' "$refs" | grep -vxF "refs/tags/${TAG}")" ]; then
+			die "GitHub build attestation for ${ASSET} was built from $(printf '%s' "$refs" | head -n 1), not refs/tags/${TAG}; nothing installed"
+		fi
 		say "GitHub build attestation: verified."
 	fi
 
