@@ -5,6 +5,8 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { PermissionManager } from "./index";
@@ -37,7 +39,38 @@ const WIPE_STAR = ["rm", "-rf", "/*"].join(" ");
 const CHOWN_ROOT = ["chown", "-R", "me:me", "/"].join(" ");
 const DISK = ["dd", "if=/dev/zero", "of=/dev/disk2"].join(" ");
 
+// Home-directory wipes (#4485), assembled so no line of this file is itself one.
+const RMRF = ["rm", "-rf"].join(" ");
+const HOME_DIR = os.homedir();
+const HOME_REAL = fs.realpathSync(HOME_DIR);
+const HOME_LINES = [
+	`${RMRF} ~`,
+	`${RMRF} ~/`,
+	`${RMRF} ~/*`,
+	`${RMRF} $HOME`,
+	`${RMRF} ` + "${HOME}",
+	`${RMRF} "$HOME"`,
+	`${RMRF} "$HOME"/`,
+	`${RMRF} $HOME/`,
+	`${RMRF} $HOME/*`,
+	`${RMRF} ${HOME_DIR}`,
+	`${RMRF} ${HOME_DIR}/`,
+	`${RMRF} ${HOME_DIR}/*`,
+	`${RMRF} ${HOME_REAL}`,
+	"rm -fr ~",
+	"rm -r -f ~",
+	"rm -r ~",
+	"rm --recursive --force ~",
+	`echo hi; ${RMRF} ~`,
+	`true && ${RMRF} $HOME`,
+	`false || ${RMRF} "$HOME"/`,
+	`ls\n${RMRF} ~`,
+	`sudo ${RMRF} ~`,
+	`sh -c '${RMRF} ~'`,
+];
+
 const BLOCKED_LINES = [
+	...HOME_LINES,
 	WIPE,
 	`ls && ${WIPE}`,
 	`echo hi; ${WIPE}`,
@@ -101,6 +134,13 @@ const BLOCKED_LINES = [
 ];
 
 const ORDINARY_LINES = [
+	"rm -rf ~/some/subdir",
+	"rm -rf $HOME/some/subdir",
+	'rm -rf "$HOME"/some/subdir',
+	`rm -rf ${HOME_DIR}/some/subdir`,
+	"rm ~/notes.txt",
+	"ls ~ && echo done",
+	"echo hi; echo $HOME",
 	"git status && bun test",
 	"cd packages && ls | wc -l",
 	"echo a; echo b",
@@ -265,5 +305,75 @@ describe("always-blocked segments (#3768)", () => {
 		for (const line of ["git status && bun test", "echo a; echo b"]) {
 			expect(await auto.requestPermission("Execute Shell Command", "d", line)).toBe(true);
 		}
+	});
+});
+
+describe("chained lines are judged per segment (#4485)", () => {
+	const pm = manager();
+
+	test("isDangerous sees a dangerous command in any segment", () => {
+		for (const line of [
+			"echo hi; rm -rf ./dist",
+			"true && rm -rf ~/some/subdir",
+			"false || rm -rf build",
+			"ls | rm -rf x",
+			"echo a\nrm -rf build",
+		]) {
+			expect([line, pm.isDangerous(line)]).toEqual([line, true]);
+		}
+		// the bare form was already dangerous
+		expect(pm.isDangerous("rm -rf build")).toBe(true);
+	});
+
+	test("a harmless chained line is not dangerous and still passes", () => {
+		for (const line of ["git status && ls", "echo a; echo b", "cat x | wc -l"]) {
+			expect([line, pm.isDangerous(line)]).toEqual([line, false]);
+			expect([line, pm.checkPermission(line)]).toEqual([line, "allowed"]);
+		}
+	});
+
+	test("a dangerous segment makes the line ask, never allowed", () => {
+		for (const line of ["echo hi; rm -rf ./dist", "true && rm -rf ~/some/subdir"]) {
+			expect([line, pm.checkPermission(line)]).toEqual([line, "ask"]);
+		}
+	});
+
+	test("headless: a dangerous chained line is refused like the bare form", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		const log = console.log;
+		console.log = () => {};
+		try {
+			for (const line of [
+				"rm -rf ./dist",
+				"echo hi; rm -rf ./dist",
+				"true && rm -rf ~/some/subdir",
+				"echo hi; rm -rf ~",
+				"true && rm -rf $HOME",
+			]) {
+				expect([line, await pm.requestPermission("Execute Shell Command", "d", line)]).toEqual([
+					line,
+					false,
+				]);
+			}
+			expect(await pm.requestPermission("Execute Shell Command", "d", "echo a; echo b")).toBe(true);
+		} finally {
+			console.log = log;
+		}
+	});
+
+	test("interactive: a home wipe is never offered to the person", async () => {
+		(process.stdin as { isTTY?: boolean }).isTTY = true;
+		const asked: string[] = [];
+		registerTuiApprovalHandler(async (req) => {
+			asked.push(req.command ?? "");
+			return "approve";
+		});
+		for (const line of ["echo hi; rm -rf ~", "true && rm -rf $HOME"]) {
+			expect([line, await pm.requestPermission("Execute Shell Command", "d", line)]).toEqual([
+				line,
+				false,
+			]);
+		}
+		expect(asked).toEqual([]);
 	});
 });

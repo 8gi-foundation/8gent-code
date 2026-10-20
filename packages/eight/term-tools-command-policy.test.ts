@@ -381,13 +381,13 @@ describe("round two: ANSI-C quotes, literal -l text, pending lifetime", () => {
 
 	test("padding attack: call 2 is refused, call 3 is judged with the full pending text", async () => {
 		process.env.EIGHT_HEADLESS = "1";
-		expect(await typed("true; rm -r")).toContain('"ok":true');
+		expect(await typed("true; rm -")).toContain('"ok":true');
 		sent.length = 0;
 		// Call 2: padding that would push the held text over the cap.
 		expect(await typed(" ".repeat(MAX_PENDING_INPUT + 1))).toContain("[PERMISSION DENIED]");
 		expect(sent).toEqual([]);
-		// Call 3: not judged alone. The held "true; rm -r" joins it into the root wipe.
-		const out = await send("f /");
+		// Call 3: not judged alone. The held "true; rm -" joins it into the root wipe.
+		const out = await send("rf /");
 		expect(out).toContain("[PERMISSION DENIED]");
 		expect(out).toContain("blocked by security policy");
 		expect(sent).toEqual([]);
@@ -395,9 +395,9 @@ describe("round two: ANSI-C quotes, literal -l text, pending lifetime", () => {
 
 	test("pending text survives a cap refusal; term_kill still clears it", async () => {
 		process.env.EIGHT_HEADLESS = "1";
-		await typed("true; rm -r");
+		await typed("true; rm -");
 		await typed("a".repeat(MAX_PENDING_INPUT + 1));
-		expect(await send("f /")).toContain("blocked by security policy");
+		expect(await send("rf /")).toContain("blocked by security policy");
 		await executeTermTool("term_kill", { sessionId: "s1" });
 		sent.length = 0;
 		expect(await send("echo hi")).toContain('"ok":true');

@@ -17,6 +17,7 @@ import { commandInFolder } from "./cd-prefix";
 import {
 	type GitState,
 	allowListIsLocalOnly,
+	commandSegments,
 	everySegmentSafe,
 	mustAskReason,
 	repoGitState,
@@ -770,6 +771,15 @@ export class PermissionManager {
 	 * Uses token-based parsing instead of substring matching.
 	 */
 	isDangerous(command: string): boolean {
+		if (this.isDangerousSegment(command)) return true;
+		// Every segment of a chained line counts, not only the first word (#4485): the
+		// strictest verdict wins, so `echo hi; rm -rf x` is as dangerous as `rm -rf x`.
+		const segments = commandSegments(command);
+		if (segments.length <= 1) return false;
+		return segments.some((segment) => this.isDangerousSegment(segment));
+	}
+
+	private isDangerousSegment(command: string): boolean {
 		const normalizedCmd = command.trim();
 		const parsed = parseCommand(normalizedCmd);
 		const cmdLower = parsed.command.toLowerCase();

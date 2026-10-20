@@ -5,6 +5,8 @@
  * ownership change in the project) is never caught.
  */
 
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { findPayloads, stripPrefix } from "./command-policy";
 import { tokenize } from "./src/workspace-boundary";
@@ -31,7 +33,20 @@ const OPAQUE_WRAPPERS = new Set([
 ]);
 
 /** Shell grammar words that precede a command without being one. */
-const GRAMMAR = new Set(["{", "}", "!", "if", "then", "else", "elif", "fi", "do", "done", "while", "until"]);
+const GRAMMAR = new Set([
+	"{",
+	"}",
+	"!",
+	"if",
+	"then",
+	"else",
+	"elif",
+	"fi",
+	"do",
+	"done",
+	"while",
+	"until",
+]);
 
 const SYSTEM_DIRS = [
 	"/",
@@ -84,9 +99,43 @@ function isRootTarget(t: string): boolean {
 	return t === "/" || t === "/*";
 }
 
+/** The person's home directory, as the shell may spell it: literal path and its realpath. */
+function homePaths(): string[] {
+	const out = new Set<string>();
+	let home = "";
+	try {
+		home = os.homedir();
+	} catch {
+		return [];
+	}
+	if (!home || home === "/") return [];
+	out.add(path.posix.normalize(home).replace(/\/+$/, ""));
+	try {
+		out.add(fs.realpathSync(home).replace(/\/+$/, ""));
+	} catch {
+		// an unreadable home still has its literal spelling
+	}
+	out.delete("");
+	return [...out];
+}
+
+/**
+ * The whole home directory (#4485): `~`, `$HOME`, `${HOME}`, the expanded path, with an
+ * optional trailing `/`, `/*` or `/.*`. A folder inside home is not a home target.
+ */
+function isHomeTarget(t: string): boolean {
+	const stripped = t.replace(/\/+(\.?\*)?$/, "");
+	if (stripped === "~" || stripped === "$HOME" || stripped === "${HOME}") return true;
+	if (stripped === "" || !stripped.startsWith("/")) return false;
+	return homePaths().includes(normTarget(stripped));
+}
+
 function isSystemTarget(t: string): boolean {
 	const lower = t.toLowerCase();
-	return SYSTEM_DIRS.some((d) => lower === d || lower === `${d}/*` || lower === `${d}*`) || isRootTarget(t);
+	return (
+		SYSTEM_DIRS.some((d) => lower === d || lower === `${d}/*` || lower === `${d}*`) ||
+		isRootTarget(t)
+	);
 }
 
 /** Why this one command is always refused, or null. Exact targets only. */
@@ -97,7 +146,10 @@ export function blockedReason(argv: string[]): string | null {
 	const targets = operands.map(normTarget);
 
 	if (name === "rm") {
-		if (isRecursive(flags) && targets.some(isRootTarget)) return "recursive delete of the root filesystem";
+		if (isRecursive(flags) && targets.some(isRootTarget))
+			return "recursive delete of the root filesystem";
+		if (isRecursive(flags) && targets.some(isHomeTarget))
+			return "recursive delete of the home directory";
 		return null;
 	}
 	if (name === "chmod") {
