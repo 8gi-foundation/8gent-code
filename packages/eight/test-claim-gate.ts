@@ -34,10 +34,32 @@ export interface TestGateEntry {
 	result?: string;
 }
 
-// "tests pass", "all tests pass", "all 30 tests pass", "30 passed", "test suite passes",
-// "tests are passing", "tests now pass". Deliberately not "0 failed" or bare "passed".
-const CLAIM =
-	/\b(?:all\s+)?(?:\d+\s+)?(?:unit\s+|the\s+)?tests?(?:\s+suites?)?\s+(?:(?:are|were|now|all|still)\s+)*(?:pass(?:es|ed|ing)?|green)\b|\btest\s+suite\s+pass(?:es|ed)?\b|\b\d+\s+(?:tests?\s+)?passed\b|\ball\s+(?:\d+\s+)?(?:tests?\s+)?pass(?:es|ed|ing)?\b/i;
+// Claim forms, per sentence. Plural "tests" or "test suite" only, so "The test passed the
+// validator" is not a claim; no bare "all pass" ("all pass through the proxy").
+const PASS = "(?:pass(?:es|ed|ing)?|green)";
+const CLAIM_FORMS = [
+	new RegExp(
+		`\\b(?:all\\s+)?(?:\\d+\\s+)?(?:unit\\s+|the\\s+)?tests\\s+(?:(?:are|were|now|all|still)\\s+)*${PASS}\\b`,
+		"i",
+	),
+	new RegExp(`\\btest\\s+suites?\\s+(?:(?:are|were|now|all|still)\\s+)*${PASS}\\b`, "i"),
+	/\b\d+\s+(?:tests?\s+)?passed\b(?!\s+(?:the|through|to|by|into|on|in|from|a|an)\b)/i,
+];
+// Words that make a sentence an instruction, a plan or a condition, not a report.
+const NOT_A_REPORT =
+	/\b(?:make\s+sure|ensure|until|so\s+that|should|will|if|whether|must|need\s+to)\b/i;
+// "0 failed", "no failures", "zero errors" are clean; any other fail or error word is not.
+const ZERO_FAIL = /\b(?:0|no|zero)\s+(?:tests?\s+)?(?:fail\w*|errors?)\b/gi;
+const FAIL_WORD = /\b(?:fail\w*|errors?)\b/i;
+
+/** True when one sentence reports passing tests: a claim form, no instruction word before it, no non-zero fail count. */
+function sentenceClaims(sentence: string): boolean {
+	if (FAIL_WORD.test(sentence.replace(ZERO_FAIL, ""))) return false;
+	return CLAIM_FORMS.some((re) => {
+		const m = re.exec(sentence);
+		return m !== null && !NOT_A_REPORT.test(sentence.slice(0, m.index));
+	});
+}
 
 // A test command at the start of a shell segment, so `echo "bun test"` does not count.
 const TEST_CMD =
@@ -53,7 +75,7 @@ export function isDoneGateEnabled(
 }
 
 export function claimsTestsPass(reply: string): boolean {
-	return CLAIM.test(reply);
+	return reply.split(/(?<=[.!?])\s+|\n+/).some(sentenceClaims);
 }
 
 function isTestRun(e: TestGateEntry): boolean {
