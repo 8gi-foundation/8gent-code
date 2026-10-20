@@ -49,15 +49,17 @@ export async function requestTuiDecision(
 	request: TuiApprovalRequest,
 ): Promise<TuiApprovalDecision | null> {
 	if (!handler) return null;
+	let decision: TuiApprovalDecision;
 	try {
-		const decision = await handler(request);
-		try {
-			noteApproval(decision);
-		} catch {}
-		return decision;
+		decision = await handler(request);
 	} catch {
 		return null;
 	}
+	// Counting is outside the handler's try: it can never turn a decision into null (#4511).
+	try {
+		noteApproval(decision);
+	} catch {}
+	return decision;
 }
 
 export async function requestTuiApproval(request: TuiApprovalRequest): Promise<boolean | null> {

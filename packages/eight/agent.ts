@@ -113,7 +113,7 @@ import {
 } from "./compaction";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { continueEmptyTurn } from "./empty-turn-continue";
-import { Friction, adoptFriction } from "./friction";
+import { Friction, adoptFriction, releaseFriction } from "./friction";
 import {
 	type ToolLedgerEntry,
 	denialIsCause,
@@ -4475,6 +4475,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			if (!this.frictionWritten) {
 				this.frictionWritten = true;
 				this.sessionWriter.writeFriction(this.friction.record());
+				releaseFriction(this.friction);
 			}
 			this.sessionWriter.writeSessionEnd("user_exit", null);
 		} catch {
