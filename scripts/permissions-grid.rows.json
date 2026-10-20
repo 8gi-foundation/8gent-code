@@ -318,8 +318,8 @@
 		"%RM% -rf /Users/[^A-Z]ridhome",
 		"%RM% -rf /Users/[!A-Z]ridhome",
 		"%RM% -rf /[^a-z]sers/gridhome",
-		"%RM% -rf /Users/[^A-Z][^A-Z]ridhome",
-		"%RM% -rf /[^A-Z]*/gridhome",
+		"%RM% -rf /Users/[^A-Z]ridhom[^A-Z]",
+		"%RM% -rf /[^a-z]*/gridhome",
 		"%RM% -rf /Users/[^A-F]ridhome",
 		"sudo %RM% -rf /Users/[^A-Z]ridhome",
 		"%RM% -rf /Users/gridhom[^A-Z]"
