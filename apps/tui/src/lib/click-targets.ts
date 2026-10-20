@@ -32,7 +32,7 @@ const pressedListeners = new Set<() => void>();
 
 /** Reads the screen text for a copy; set by the app from Ink's last frame. */
 let screenReader: (() => string) | null = null;
-let copier: ((text: string) => { osc52: boolean; native: string | null } | undefined) | null = null;
+let copier: ((text: string) => unknown) | null = null;
 const copiedListeners = new Set<(chars: number, ok: boolean) => void>();
 const selection = new TextSelection(() => screenReader?.() ?? "");
 const selectionListeners = new Set<(range: SelRange | null) => void>();
@@ -104,7 +104,7 @@ export function currentPressed(): string | null {
 /** Where the text for a copy comes from, and where it goes. */
 export function setSelectionIO(
 	read: (() => string) | null,
-	copy: ((text: string) => { osc52: boolean; native: string | null } | undefined) | null,
+	copy: ((text: string) => unknown) | null,
 ): void {
 	screenReader = read;
 	copier = copy;
@@ -155,7 +155,8 @@ export function handleMouse(e: MouseEvent): "click" | "press" | "cancel" | "copy
 		if (r.kind === "copy" && copier) {
 			const res = copier(r.text);
 			// Too long for OSC 52 and no local command took it: nothing was copied.
-			const ok = !res || res.osc52 || res.native !== null;
+			const out = res as { osc52?: boolean; native?: string | null } | null | undefined;
+			const ok = typeof out !== "object" || out === null || out.osc52 === true || !!out.native;
 			for (const l of [...copiedListeners]) l([...r.text].length, ok);
 			return "copy";
 		}
