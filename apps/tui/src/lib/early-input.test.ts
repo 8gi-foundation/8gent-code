@@ -25,7 +25,7 @@ function harness(over: { platform?: string; env?: Record<string, string | undefi
 		stdin,
 		platform: over.platform ?? "darwin",
 		env: over.env ?? {},
-		trace: (l) => traces.push(l),
+		trace: (stage, detail) => traces.push(`${stage} ${detail ?? ""}`),
 		setTimer: (fn, ms) => {
 			expect(ms).toBe(WATCHDOG_MS);
 			fire = fn;
@@ -45,8 +45,7 @@ describe("early raw-mode watchdog (#4540)", () => {
 		expect(h.calls).toEqual(["raw:true"]);
 		h.fire();
 		expect(h.calls).toEqual(["raw:true", "raw:false"]);
-		expect(h.traces).toHaveLength(1);
-		expect(h.traces[0]).toContain("watchdog");
+		expect(h.traces.filter((t) => t.startsWith("early-raw-watchdog"))).toHaveLength(1);
 	});
 
 	test("typed bytes survive the watchdog: still buffered and readable", () => {
@@ -63,7 +62,7 @@ describe("early raw-mode watchdog (#4540)", () => {
 		expect(h.cleared()).toBe(true);
 		h.fire();
 		expect(h.calls).toEqual(["raw:true"]);
-		expect(h.traces).toEqual([]);
+		expect(h.traces.some((t) => t.startsWith("early-raw-watchdog"))).toBe(false);
 	});
 });
 

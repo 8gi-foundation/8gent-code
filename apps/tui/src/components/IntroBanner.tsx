@@ -43,6 +43,7 @@ import React, { useEffect, useRef, useState } from "react";
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { loadSettings } from "../../../../packages/settings/index.js";
 import { useViewport } from "../hooks/useViewport.js";
+import { bootTrace } from "../lib/boot-trace.js";
 import {
 	ALIVE_FRAME_MS,
 	type ColourKey,
@@ -340,6 +341,10 @@ export function IntroBanner({
 	});
 
 	useEffect(() => {
+		bootTrace("intro-mount", `skip=${skip} cols=${viewport.width} rows=${viewport.height}`);
+	}, []);
+
+	useEffect(() => {
 		if (sound && !skip) playIntroSound();
 	}, [sound, skip]);
 
@@ -371,11 +376,15 @@ export function IntroBanner({
 	// a stalled render loop must never hold the first moment (#4540).
 	useEffect(() => {
 		if (skip) return;
-		const t = setTimeout(() => finishRef.current(), autoAdvanceMs);
+		const t = setTimeout(() => {
+			if (!done.current) bootTrace("intro-auto-advance", `${autoAdvanceMs}ms with no key`);
+			finishRef.current();
+		}, autoAdvanceMs);
 		return () => clearTimeout(t);
 	}, [skip, autoAdvanceMs]);
 
 	useInput((input, key) => {
+		bootTrace("intro-first-key");
 		finishRef.current(carriedText(input, key));
 	});
 

@@ -400,6 +400,7 @@ import { providerRouteNotice, shouldShowRouteNotice } from "../../../packages/ei
 // Load .env file if present
 import * as fs from "node:fs";
 import * as pathMod from "node:path";
+import { bootTrace } from "./lib/boot-trace.js";
 import {
 	type CliTabPin,
 	type ModelSpec,
@@ -419,6 +420,8 @@ import {
 } from "./lib/model-selection.js";
 import { routeOnScreen } from "./lib/model-truth.js";
 import { PACKAGE_ROOT, packageBinScript } from "./lib/package-scripts.js";
+
+let firstShellTraced = false;
 
 function loadEnvFile() {
 	// Check multiple locations: cwd first, then the 8gent repo root
@@ -479,6 +482,13 @@ function loadProviderSettings(): { provider: string; model: string } {
  * Embedding-only providers are skipped.
  */
 function detectBestLocalProvider(): { provider: string; model: string } {
+	bootTrace("provider-probe-start");
+	const result = detectBestLocalProviderUntraced();
+	bootTrace("provider-probe-end", `provider=${result.provider} model=${result.model}`);
+	return result;
+}
+
+function detectBestLocalProviderUntraced(): { provider: string; model: string } {
 	const { execFileSync } = require("node:child_process");
 	const isAppleSilicon = process.arch === "arm64" && process.platform === "darwin";
 	// With llama-server selected (#3149) Ollama is off: its slot probes llama-server instead.
@@ -7352,6 +7362,7 @@ export function App({
 						version={pkgInfo.version}
 						animate={showAnimations}
 						onDone={(carried) => {
+							bootTrace("intro-done", carried ? "by-key" : "timeout");
 							setIntroVisible(false);
 							// Keys typed to skip the splash land in the input, not the void.
 							if (carried) setVoiceTranscript(carried);
@@ -7360,6 +7371,11 @@ export function App({
 				</FixedFrame>
 			</ADHDModeContext.Provider>
 		);
+	}
+
+	if (!firstShellTraced) {
+		firstShellTraced = true;
+		bootTrace("first-prompt-render");
 	}
 
 	// V2 three-zone shell - the only render path.

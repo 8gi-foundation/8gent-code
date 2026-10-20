@@ -11,6 +11,7 @@ import "./lib/strip-bun-be-bun.js";
 // First, before anything heavy loads: keys pressed before the first frame
 // must reach the splash, not the line buffer (lib/early-input.ts).
 import { markInkMounted } from "./lib/early-input.js";
+import { bootTrace } from "./lib/boot-trace.js";
 // Then the colour policy, so NO_COLOR holds for every byte Ink draws
 // (lib/colour-policy.ts).
 import "./lib/colour-startup.js";
@@ -48,6 +49,7 @@ const passthroughArgs = parsed.positional.slice(1);
 // Ask the terminal for its real background (OSC 11, #3754) before anything
 // reads stdin, then fit the palette to it. Returns at once with no TTY (CI,
 // pilots, pipes) and gives up after 100 ms on a terminal that never answers.
+bootTrace("index-start", `argv=${argv.length}`);
 const terminalBg = await probeTerminalBackground();
 if (terminalBg) applyTerminalBackground(terminalBg);
 
@@ -65,6 +67,7 @@ if (process.stdout.isTTY) {
 startMouse();
 
 // Render the TUI
+bootTrace("ink-render-call");
 render(
 	<App
 		initialCommand={command}

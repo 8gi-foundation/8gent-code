@@ -23,7 +23,7 @@
  *   markInkMounted runs when render() returns, before Ink's useEffect attaches
  *   stdin, so a stall inside Ink's own mount is not covered.
  */
-import { bootTrace } from "./boot-trace.js";
+import { bootEnvSummary, bootTrace } from "./boot-trace.js";
 
 export const WATCHDOG_MS = 1500;
 
@@ -37,7 +37,7 @@ export interface EarlyInputDeps {
 	stdin: EarlyInputStdin;
 	platform: string;
 	env: Record<string, string | undefined>;
-	trace: (line: string) => void;
+	trace: (stage: string, detail?: string) => void;
 	setTimer: (fn: () => void, ms: number) => unknown;
 	clearTimer: (t: unknown) => void;
 }
@@ -64,14 +64,19 @@ export function armEarlyInput(deps: EarlyInputDeps): EarlyInputHandle {
 	const { stdin, platform, env, trace } = deps;
 	const decision = earlyRawDecision(stdin, platform, env);
 	if (decision === "win32-skip") {
-		trace("early-raw skipped on win32 (set 8GENT_EARLY_RAW=1 to force)");
+		trace("early-raw-skipped", `win32 (set 8GENT_EARLY_RAW=1 to force) ${bootEnvSummary()}`);
 		return { raw: false, markMounted() {} };
 	}
-	if (decision === "off") return { raw: false, markMounted() {} };
+	if (decision === "off") {
+		trace("early-raw-skipped", bootEnvSummary());
+		return { raw: false, markMounted() {} };
+	}
 
 	try {
 		stdin.setRawMode?.(true);
-	} catch {
+		trace("early-raw-on", bootEnvSummary());
+	} catch (e) {
+		trace("early-raw-failed", String((e as Error)?.message ?? e));
 		// Not a real tty after all: nothing to hold.
 		return { raw: false, markMounted() {} };
 	}
@@ -82,7 +87,7 @@ export function armEarlyInput(deps: EarlyInputDeps): EarlyInputHandle {
 		// the kernel tty buffer, so no stream-side check can tell "a key arrived".
 		try {
 			if (stdin.isRaw) stdin.setRawMode?.(false);
-			trace(`watchdog: no Ink mount in ${WATCHDOG_MS} ms, raw mode restored`);
+			trace("early-raw-watchdog", `no Ink mount in ${WATCHDOG_MS} ms, raw mode restored`);
 		} catch {
 			// The terminal is already gone.
 		}
