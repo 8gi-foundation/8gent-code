@@ -4,13 +4,16 @@ import * as readline from "node:readline";
  * Headless mode for CI/IDE integration. Newline-delimited JSON on stdin/stdout.
  * Spawn with: 8gent rpc | 8gent --rpc
  */
+import { classifyInput, gateInput } from "../daemon/input-gate";
 import { Agent } from "./agent";
 import type { RPCNotification, RPCRequest, RPCResponse } from "./rpc-types";
 import { RPC_ERRORS } from "./rpc-types";
 import { TOOL_CATEGORIES } from "./tool-registry";
 import type { AgentEventCallbacks } from "./types";
 
-const sessions = new Map<string, { agent: Agent; id: string }>();
+const MAX_SYSTEM_PROMPT = 64 * 1024;
+
+export const sessions = new Map<string, { agent: Agent; id: string }>();
 
 function send(msg: RPCResponse | RPCNotification): void {
 	process.stdout.write(`${JSON.stringify(msg)}\n`);
@@ -31,6 +34,28 @@ type Handler = (id: number | string, params: Record<string, unknown>) => Promise
 
 const methods: Record<string, Handler> = {
 	"session.create": async (id, params) => {
+		// The system prompt is model input: shape, size, NUL and slash checks before it is used.
+		if (params.systemPrompt !== undefined) {
+			const sp = params.systemPrompt;
+			const bad =
+				typeof sp !== "string"
+					? "systemPrompt must be a string"
+					: sp.length > MAX_SYSTEM_PROMPT
+						? `systemPrompt exceeds ${MAX_SYSTEM_PROMPT} characters`
+						: sp.includes("\0")
+							? "systemPrompt must not contain NUL bytes"
+							: classifyInput(sp, { sessionId: "rpc-create", channel: "rpc" }).kind === "slash" &&
+									(
+										await gateInput(
+											sp,
+											{ sessionId: "rpc-create", channel: "rpc" },
+											{ classifyOnly: true },
+										)
+									).handled
+								? "systemPrompt must not be a slash command line"
+								: null;
+			if (bad) return sendError(id, RPC_ERRORS.INVALID_PARAMS, bad);
+		}
 		const rawModel = (params.model as string) || process.env.EIGHGENT_MODEL || "eight:latest";
 		const cwd = (params.cwd as string) || process.cwd();
 		const sessionId = `rpc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -39,7 +64,20 @@ const methods: Record<string, Handler> = {
 		// Accept explicit runtime override via params.runtime
 		let runtime = (params.runtime as string) || "ollama";
 		let model = rawModel;
-		const KNOWN_RUNTIMES = ["openrouter","ollama","lmstudio","anthropic","openai","groq","grok","mistral","8gent","together","fireworks","replicate"];
+		const KNOWN_RUNTIMES = [
+			"openrouter",
+			"ollama",
+			"lmstudio",
+			"anthropic",
+			"openai",
+			"groq",
+			"grok",
+			"mistral",
+			"8gent",
+			"together",
+			"fireworks",
+			"replicate",
+		];
 		const colonIdx = rawModel.indexOf(":");
 		if (colonIdx > 0) {
 			const prefix = rawModel.slice(0, colonIdx);
@@ -69,7 +107,13 @@ const methods: Record<string, Handler> = {
 
 		const agent = new Agent({
 			model,
-			runtime: runtime as "ollama" | "lmstudio" | "openrouter" | "apple-foundation" | "apfel" | "deepseek",
+			runtime: runtime as
+				| "ollama"
+				| "lmstudio"
+				| "openrouter"
+				| "apple-foundation"
+				| "apfel"
+				| "deepseek",
 			workingDirectory: cwd,
 			maxTurns: 30,
 			allTools: true,
@@ -88,10 +132,22 @@ const methods: Record<string, Handler> = {
 		if (!sessionId || !content) {
 			return sendError(id, RPC_ERRORS.INVALID_PARAMS, "sessionId and content required");
 		}
+		// Shape check before the gate: only a non-empty string can be classified.
+		if (typeof content !== "string" || !content.trim()) {
+			return sendError(id, RPC_ERRORS.INVALID_PARAMS, "content must be a non-empty string");
+		}
 
 		const session = sessions.get(sessionId);
 		if (!session) {
 			return sendError(id, RPC_ERRORS.INVALID_PARAMS, `Unknown session: ${sessionId}`);
+		}
+
+		// Nothing goes straight to the model: the shared classifier runs first (#4530).
+		// A slash line is answered here and never becomes a prompt.
+		const gctx = { sessionId, channel: "rpc" };
+		if (classifyInput(content, gctx).kind === "slash") {
+			const gated = await gateInput(content, gctx);
+			if (gated.handled) return sendResult(id, { response: gated.text ?? "", usage: {} });
 		}
 
 		try {
@@ -136,7 +192,7 @@ const methods: Record<string, Handler> = {
 
 // ── Request handler ───────────────────────────────────────────────
 
-async function handleLine(line: string): Promise<void> {
+export async function handleLine(line: string): Promise<void> {
 	let parsed: RPCRequest;
 	try {
 		parsed = JSON.parse(line);

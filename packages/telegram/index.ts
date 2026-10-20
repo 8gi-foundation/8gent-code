@@ -23,6 +23,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { shellInvocation } from "../core/shell";
+import { classifyInput, gateInput } from "../daemon/input-gate";
 
 // ============================================
 // Types
@@ -666,12 +667,33 @@ export class TelegramBot {
 			return;
 		}
 
+		// Nothing goes straight to the model: the shared classifier runs first (#4530).
+		// A slash line that is not a command above is answered here, never sent as a prompt.
+		const gctx = { sessionId: `tg-${chat.id}`, channel: "telegram" };
+		const isBtw = text.startsWith("/btw ");
+		const isRun = text.startsWith("/run ");
+		if (!isBtw && !isRun && classifyInput(text, gctx).kind === "slash") {
+			const gated = await gateInput(text, gctx);
+			if (gated.handled) {
+				await sendMsg(this.config.token, chat.id, gated.text ?? "");
+				return;
+			}
+		}
+
 		// /btw — Side question
-		if (text.startsWith("/btw ")) {
+		if (isBtw) {
 			const question = text.slice(5).trim();
 			if (!question) {
 				await sendMsg(this.config.token, chat.id, "Usage: `/btw your question here`");
 				return;
+			}
+			// The side question is model input too: a slash line is refused, never asked.
+			if (classifyInput(question, gctx).kind === "slash") {
+				const gated = await gateInput(question, gctx, { classifyOnly: true });
+				if (gated.handled) {
+					await sendMsg(this.config.token, chat.id, gated.text ?? "");
+					return;
+				}
 			}
 
 			// Typing indicator
@@ -690,7 +712,7 @@ export class TelegramBot {
 		}
 
 		// /run — Shell command
-		if (text.startsWith("/run ")) {
+		if (isRun) {
 			const cmd = text.slice(5).trim();
 			if (!cmd) {
 				await sendMsg(this.config.token, chat.id, "Usage: `/run ls -la`");
