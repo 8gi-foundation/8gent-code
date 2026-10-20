@@ -669,4 +669,42 @@ describe("install.sh: Android / Termux", () => {
 		expect(r.out).toContain("asset           : 8gent-linux-arm64");
 		expect(r.code).toBe(0);
 	});
+
+	const unameFor = (m: string, o: string, host = "box") =>
+		tool(
+			"uname",
+			`case "$1" in -s) echo Linux;; -m) echo ${m};; -o) echo ${o};; -a) echo "Linux ${host} 6.1 ${m} ${o}";; *) echo Linux;; esac`,
+		);
+
+	test("a hostname containing android on plain Linux is not Android", async () => {
+		unameFor("x86_64", "GNU/Linux", "android-ci-01");
+		const r = await install(one("0.20.0"), {}, ["--dry-run"]);
+		expect(r.out).toContain("android         : no");
+		expect(r.code).toBe(0);
+	});
+
+	test("armv8l off Android dies cleanly", async () => {
+		unameFor("armv8l", "GNU/Linux");
+		const r = await install(one("0.20.0"), {}, ["--dry-run"]);
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("no 8gent binary for armv8l");
+	});
+
+	test("armv8l on Android maps to arm64", async () => {
+		unameFor("armv8l", "Android");
+		const r = await install(one("0.20.0"), { EIGHT_INSTALL_DIR: "" }, ["--dry-run"]);
+		expect(r.out).toContain("asset           : 8gent-linux-arm64");
+	});
+
+	test("the debug echo strips userinfo from the releases URL", async () => {
+		const r = await install("https://user:secret@example.invalid/r.json", {}, ["--dry-run"]);
+		expect(r.out).toContain("releases url");
+		expect(r.out).not.toContain("secret");
+	});
+
+	test("the force path warns it will fail without glibc", async () => {
+		unameFor("aarch64", "Android");
+		const r = await install(one("0.20.0"), { EIGHT_ANDROID_FORCE: "1" }, ["--dry-run"]);
+		expect(r.out).toContain("will fail unless this box runs glibc binaries");
+	});
 });

@@ -276,7 +276,7 @@ main() {
 	case "$RELEASES_URL" in
 		https://*) ;;
 		http://127.0.0.1:* | http://127.0.0.1/*) LOCAL=1 ;;
-		*) die "EIGHT_RELEASES_URL must be https (or http://127.0.0.1 for tests): ${RELEASES_URL}" ;;
+		*) die "EIGHT_RELEASES_URL must be https (or http://127.0.0.1 for tests): $(printf '%s' "$RELEASES_URL" | sed -E 's#^([a-zA-Z]+://)[^/@]*@#\1#')" ;;
 	esac
 	# A local test server may supply its own key; a real install trusts only the embedded one.
 	KEY="$EIGHT_SIGNING_KEY"
@@ -299,7 +299,6 @@ main() {
 	# glibc, and the release binaries are glibc builds that cannot start there.
 	android=0
 	case "$uname_o" in Android) android=1 ;; esac
-	case "$(uname -a 2>/dev/null)" in *[Aa]ndroid*) android=1 ;; esac
 	if [ -n "${TERMUX_VERSION:-}" ]; then android=1; fi
 	case "${PREFIX:-}" in */com.termux/*) android=1 ;; esac
 
@@ -311,7 +310,8 @@ main() {
 	esac
 	case "$uname_m" in
 		x86_64 | amd64) arch=x64 ;;
-		arm64 | aarch64 | armv8*) arch=arm64 ;;
+		arm64 | aarch64) arch=arm64 ;;
+		armv8*) if [ "$android" = 1 ]; then arch=arm64; else die "no 8gent binary for ${uname_m}"; fi ;;
 		*) die "no 8gent binary for ${uname_m}" ;;
 	esac
 	# An x64 shell under Rosetta on Apple Silicon still gets the native build.
@@ -338,9 +338,12 @@ main() {
 		say "  asset           : ${ASSET}"
 		say "  install dir     : ${INSTALL_DIR}"
 		say "  fetch tools     : curl=$(command -v curl >/dev/null 2>&1 && echo yes || echo no) wget=$(command -v wget >/dev/null 2>&1 && echo yes || echo no)"
-		say "  releases url    : ${RELEASES_URL}"
+		say "  releases url    : $(printf '%s' "$RELEASES_URL" | sed -E 's#^([a-zA-Z]+://)[^/@]*@#\1#')"
 	fi
 
+	if [ "$libc" = bionic ] && [ "${EIGHT_ANDROID_FORCE:-}" = 1 ]; then
+		warn "EIGHT_ANDROID_FORCE=1: continuing on Android; the install will fail unless this box runs glibc binaries."
+	fi
 	if [ "$DRY_RUN" = 1 ]; then
 		if [ "$libc" = bionic ] && [ "${EIGHT_ANDROID_FORCE:-}" != 1 ]; then say "  result          : a real run would stop here (Android, glibc binary cannot start)"; fi
 		say "Dry run: nothing downloaded or installed."
