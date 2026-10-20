@@ -441,8 +441,11 @@ function ansiCEscape(s: string, i: number): { text: string; next: number; nul?: 
 	};
 	let m: RegExpExecArray | null;
 	if (c >= "0" && c <= "7") {
+		// the shells take an octal escape as one byte, value mod 256: `\457` is `/`
 		m = /^[0-7]{1,3}/.exec(s.slice(i + 1)) as RegExpExecArray;
-		return code(m[0], 8, i + 1 + m[0].length);
+		const n = Number.parseInt(m[0], 8) & 0xff;
+		const next = i + 1 + m[0].length;
+		return n === 0 ? { text: "", next, nul: true } : { text: String.fromCharCode(n), next };
 	}
 	if (c === "x" && (m = /^[0-9a-fA-F]{1,2}/.exec(s.slice(i + 2))))
 		return code(m[0], 16, i + 2 + m[0].length);
@@ -462,11 +465,13 @@ function ansiCEscape(s: string, i: number): { text: string; next: number; nul?: 
 /**
  * Replace every bash ANSI-C string `$'...'` with its decoded text in plain single quotes, so
  * `$'\x72m'`, `$'rm'`, `$'\057'` and `$'\u002f'` read as `'rm'` and `'/'` and the checks see what
- * the shell will run (#4514). A NUL escape yields two words, the text up to the NUL (bash) and the whole text (zsh may keep the tail), so neither reading hides a command. The decoded text is requoted
+ * the shell will run (#4514). A NUL escape is read two ways (bash drops the tail,
+ * zsh may keep it): `keepTail` picks the reading, and `decodeAnsiCVariants` returns both as whole
+ * lines, so a caller scans each and a command cannot hide in either. The decoded text is requoted
  * (`'` becomes `'\''`), so a decoded space, `;` or quote cannot change the line's structure.
  * `blind` skips quote tracking for the quote-blind pass, which guesses nothing about context.
  */
-export function decodeAnsiC(text: string, blind = false): string {
+export function decodeAnsiC(text: string, blind = false, keepTail = false): string {
 	if (!text.includes("$'")) return text;
 	let out = "";
 	let inSingle = false;
@@ -487,15 +492,15 @@ export function decodeAnsiC(text: string, blind = false): string {
 			if (opensAnsiC(out + text.slice(i), out.length)) {
 				let body = "";
 				let j = i + 1;
-				let cutAt = -1;
+				let stopped = false;
 				while (j < text.length && text[j] !== "'") {
 					if (text[j] === "\\") {
 						const e = ansiCEscape(text, j);
 						j = e.next;
-						body += e.text;
-						if (e.nul && cutAt < 0) cutAt = body.length;
+						if (!stopped) body += e.text;
+						if (e.nul && !keepTail) stopped = true;
 					} else {
-						body += text[j];
+						if (!stopped) body += text[j];
 						j++;
 					}
 				}
@@ -505,10 +510,7 @@ export function decodeAnsiC(text: string, blind = false): string {
 					return out;
 				}
 				// drop the `$` already copied, then emit the decoded body as a plain single-quoted word
-				const quote = (b: string) => `'${b.replace(/'/g, "'\\''")}'`;
-				// bash drops the tail after a NUL, zsh may keep it: scan both readings (fail closed)
-				const words = cutAt >= 0 ? `${quote(body.slice(0, cutAt))} ${quote(body)}` : quote(body);
-				out = `${out.slice(0, -1)}${words}`;
+				out = `${out.slice(0, -1)}'${body.replace(/'/g, "'\\''")}'`;
 				i = j;
 				continue;
 			}
@@ -520,6 +522,13 @@ export function decodeAnsiC(text: string, blind = false): string {
 		out += ch;
 	}
 	return out;
+}
+
+/** The line with every `$'...'` decoded, once per NUL reading; one entry when no NUL changes it. */
+export function decodeAnsiCVariants(text: string, blind = false): string[] {
+	const a = decodeAnsiC(text, blind, false);
+	const b = decodeAnsiC(text, blind, true);
+	return a === b ? [a] : [a, b];
 }
 
 /** The index just past the `)` that closes a `(` already consumed, honouring nesting and quotes. */
@@ -554,13 +563,14 @@ function closeParen(text: string, from: number): number {
 
 function scanLine(input: string, out: string[][], depth: number): void {
 	// A backslash-newline continues the line; a redirect operator is not a separator.
-	const text = decodeAnsiC(
-		input
-			.replace(/\\\r?\n/g, "")
-			.replace(/\d*>&\d+/g, " ")
-			.replace(/&>/g, ">"),
-	);
+	const prepped = input
+		.replace(/\\\r?\n/g, "")
+		.replace(/\d*>&\d+/g, " ")
+		.replace(/&>/g, ">");
+	for (const text of decodeAnsiCVariants(prepped)) scanDecoded(text, out, depth);
+}
 
+function scanDecoded(text: string, out: string[][], depth: number): void {
 	const segments: Array<{ tokens: string[]; piped: boolean }> = [];
 	let cur = "";
 	let piped = false;
@@ -681,13 +691,14 @@ export function commandArgvs(command: string): string[][] {
  * commit message) is refused too.
  */
 function scanQuoteBlind(input: string, out: string[][]): void {
-	const text = decodeAnsiC(
-		input
-			.replace(/\\\r?\n/g, "")
-			.replace(/\d*>&\d+/g, " ")
-			.replace(/&>/g, ">"),
-		true,
-	);
+	const prepped = input
+		.replace(/\\\r?\n/g, "")
+		.replace(/\d*>&\d+/g, " ")
+		.replace(/&>/g, ">");
+	for (const text of decodeAnsiCVariants(prepped, true)) scanBlindDecoded(text, out);
+}
+
+function scanBlindDecoded(text: string, out: string[][]): void {
 	for (const piece of text.split(/[;&|()\n\r]/)) {
 		// Strip quoting from each word as the shell would: 'x', r'm', \x, "$HOME", $'/'.
 		const tokens = piece

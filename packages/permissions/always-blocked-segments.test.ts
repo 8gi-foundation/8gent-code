@@ -201,6 +201,11 @@ const QUOTED_WIPES = [
 	`echo $'a\\x00;${WIPE}'`,
 	`bash -c $'a\\0\\n${WIPE}'`,
 	`echo $'a\\0;${WIPE}' x`,
+	`FOO=$'a\\0b' ${WIPE}`,
+	`env $'\\0' ${WIPE}`,
+	// an octal escape is one byte, value mod 256: \457 is "/"
+	`${RMRF} $'\\457'`,
+	`${RMRF} $'\\457'$'\\457'`,
 	`${RMRF} $'\\x2f' $'\\x7e'`,
 	`bash <<<$'${RMRF} \\x2f'`,
 	`zsh <<<$'a'<<<$'${RMRF} \\x2f'`,
