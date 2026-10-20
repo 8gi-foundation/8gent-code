@@ -123,8 +123,8 @@ function homePaths(): string[] {
 const FOLD_CASE = process.platform === "darwin" || process.platform === "win32";
 const fold = (s: string): string => (FOLD_CASE ? s.toLowerCase() : s);
 
-/** `${HOME}` and its parameter-expansion forms: `${HOME:?}`, `${HOME:-x}`, `${HOME%/}`, `${HOME#x}`. */
-const HOME_PARAM = /^\$\{HOME([:%#][^}]*)?\}$/;
+/** Stands in for whatever spelling of the home directory the shell was given. */
+const HOME_TOKEN = "/__H__";
 
 /** `~name` for the signed-in user only. `~root`, `~+`, `~-` and other users are not home. */
 function isTildeSelf(s: string): boolean {
@@ -136,26 +136,56 @@ function isTildeSelf(s: string): boolean {
 	}
 }
 
-/** One spelling of the home directory itself, no trailing slash. */
-function isHomeBase(s: string): boolean {
-	if (s === "~" || s === "$HOME" || HOME_PARAM.test(s) || isTildeSelf(s)) return true;
-	if (!s.startsWith("/")) return false;
-	return homePaths().some((h) => fold(h) === fold(normTarget(s)));
+/**
+ * If `t` starts with a spelling of the home directory (`~`, `~user`, `$HOME`, `${HOME<anything>}`
+ * with nesting, or the expanded path in any case the filesystem folds), return what follows it,
+ * which is "" or starts with `/`. Otherwise null.
+ */
+function afterHome(t: string): string | null {
+	const end = (r: string): string | null => (r === "" || r.startsWith("/") ? r : null);
+	if (t.startsWith("~")) {
+		const m = /^~[^/]*/.exec(t) as RegExpExecArray;
+		return m[0] === "~" || isTildeSelf(m[0]) ? end(t.slice(m[0].length)) : null;
+	}
+	if (/^\$HOME(?![A-Za-z0-9_])/.test(t)) return end(t.slice(5));
+	if (/^\$\{HOME(?![A-Za-z0-9_])/.test(t)) {
+		let depth = 0;
+		for (let i = 1; i < t.length; i++) {
+			if (t[i] === "{") depth++;
+			else if (t[i] === "}" && --depth === 0) return end(t.slice(i + 1));
+		}
+		return null;
+	}
+	if (t.startsWith("/")) {
+		const n = normTarget(t);
+		for (const h of homePaths()) {
+			if (fold(n).startsWith(fold(h))) {
+				const r = end(n.slice(h.length));
+				if (r !== null) return r;
+			}
+		}
+	}
+	return null;
 }
 
 /**
- * The whole home directory (#4485): `~`, `~user`, `$HOME`, `${HOME}` and its expansion forms, the
- * expanded path in any case the filesystem folds, with an optional trailing `/`, `/*` or `/.*`.
- * Also the dotfile wipe idiom, a glob directly under home that starts with `.` (`~/.??*`,
- * `$HOME/.[!.]*`). A folder inside home is not a home target.
+ * The whole home directory (#4485): `~`, `~user`, `$HOME`, `${HOME}` and any expansion form, the
+ * expanded path in any case the filesystem folds, with trailing slashes, `.` and `..` segments
+ * resolved, and an optional `/*` or `/.*`. Also the dotfile wipe idiom, a glob directly under home
+ * that starts with `.` (`~/.??*`, `$HOME/.[!.]*`), and a bare `*` directly under home even when more
+ * path follows (`$HOME/*` + `/*` empties every folder in home). A folder inside home is not a home target.
  */
 function isHomeTarget(t: string): boolean {
-	if (isHomeBase(t.replace(/\/+(\.?\*)?$/, ""))) return true;
-	const slash = t.lastIndexOf("/");
-	if (slash < 1) return false;
-	const last = t.slice(slash + 1);
-	const globbed = last === "*" || (last.startsWith(".") && /[*?[]/.test(last));
-	return globbed && isHomeBase(t.slice(0, slash).replace(/\/+$/, ""));
+	t = t.replace(/\/+$/, "");
+	const rest = afterHome(t);
+	if (rest === null) return false;
+	const p = path.posix.normalize(HOME_TOKEN + rest).replace(/\/+$/, "");
+	if (p === "" || p === HOME_TOKEN) return true;
+	if (!p.startsWith(`${HOME_TOKEN}/`)) return p === "/";
+	const parts = p.slice(HOME_TOKEN.length + 1).split("/");
+	const first = parts[0];
+	if (first === "*") return true;
+	return parts.length === 1 && first.startsWith(".") && /[*?[]/.test(first);
 }
 
 function isSystemTarget(t: string): boolean {
