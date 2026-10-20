@@ -204,3 +204,8 @@ describe("unknownSlashAnswer (#4530)", () => {
 		expect(unknownSlashAnswer("what is 1/2", loaded)).toBeNull();
 	});
 });
+
+test("unknownSlashAnswer leaves /skill:<name> to the skill handler", () => {
+	const reg = { entries: [], byToken: new Map(), collisions: [] } as never;
+	expect(unknownSlashAnswer("/skill:nope", reg)).toBeNull();
+});

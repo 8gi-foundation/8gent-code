@@ -246,6 +246,9 @@ export function unknownSlashAnswer(input: string, registry: SlashRegistry): stri
 	const trimmed = input.trimStart();
 	if (!trimmed.startsWith("/")) return null;
 	const name = trimmed.split(/\s+/)[0];
+	// /skill:<name> is claimed by the skill handler in app.tsx, which owns its
+	// own "Unknown skill" message.
+	if (/^\/skill:/.test(name)) return null;
 	if (resolveSlashInput(trimmed, registry)) return null;
 	if (resolveSlashInput(trimmed, mergeSlashEntries(buildBuiltInEntries(), [], []))) return null;
 	return `Unknown command ${name}. Type /help.`;
