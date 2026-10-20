@@ -51,7 +51,9 @@ export async function requestTuiDecision(
 	if (!handler) return null;
 	try {
 		const decision = await handler(request);
-		noteApproval(decision);
+		try {
+			noteApproval(decision);
+		} catch {}
 		return decision;
 	} catch {
 		return null;

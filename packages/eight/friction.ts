@@ -97,3 +97,5 @@ export class Friction {
 let active: Friction | null = null;
 export const adoptFriction = (f: Friction): void => void (active ??= f);
 export const noteApproval = (decision: string): void => active?.permission(decision);
+/** Test only: replace the tracker. */
+export const _setActiveFriction = (f: Friction | null): void => void (active = f);
