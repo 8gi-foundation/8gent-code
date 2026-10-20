@@ -508,21 +508,19 @@ export class ModelFailover {
 				creditSkipped = true;
 				continue;
 			}
-			{
-				if (from && (entry.model !== from.model || entry.provider !== from.provider)) {
-					this.recordEvent({
-						ts: Date.now(),
-						channel,
-						fromModel: from.model,
-						fromProvider: from.provider,
-						toModel: entry.model,
-						toProvider: entry.provider,
-						reason: creditSkipped ? "credit-empty" : aff ? "affinity-down" : "primary-down",
-						...cold,
-					});
-				}
-				return entry;
+			if (from && (entry.model !== from.model || entry.provider !== from.provider)) {
+				this.recordEvent({
+					ts: Date.now(),
+					channel,
+					fromModel: from.model,
+					fromProvider: from.provider,
+					toModel: entry.model,
+					toProvider: entry.provider,
+					reason: creditSkipped ? "credit-empty" : aff ? "affinity-down" : "primary-down",
+					...cold,
+				});
 			}
+			return entry;
 		}
 
 		// Everything is down - return last entry as a hail mary

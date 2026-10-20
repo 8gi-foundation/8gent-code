@@ -34,7 +34,8 @@ const opts = (env: Record<string, string | undefined> = KEY, now = T0) => ({
 
 describe("creditStatus", () => {
 	test("local providers report local without a file", () => {
-		for (const id of ["8gent", "ollama"]) expect(creditStatus(id, opts({}))).toEqual({ kind: "local" });
+		for (const id of ["8gent", "ollama"])
+			expect(creditStatus(id, opts({}))).toEqual({ kind: "local" });
 	});
 
 	test("cached amount is returned, not stale inside 10 min", () => {
@@ -126,7 +127,10 @@ describe("refreshCredits", () => {
 			},
 		});
 		expect(JSON.parse(readFileSync(file, "utf-8")).remaining.openrouter).toBe(2);
-		await refreshCredits({ ...opts(KEY, T0 + 2 * CREDIT_REFRESH_MS), fetchFn: async () => new Response("", { status: 500 }) });
+		await refreshCredits({
+			...opts(KEY, T0 + 2 * CREDIT_REFRESH_MS),
+			fetchFn: async () => new Response("", { status: 500 }),
+		});
 		expect(existsSync(file)).toBe(true);
 	});
 
