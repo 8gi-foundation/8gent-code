@@ -340,28 +340,103 @@ describe("install.sh: verification", () => {
 		expect(good.out).toContain("signature on SHA256SUMS: verified");
 	});
 
-	test("gh attestation is pinned to release-binaries.yml and the release tag; a failure stops the install", async () => {
+	const attJson = (ref: string) =>
+		`[{"verificationResult":{"signature":{"certificate":{"sourceRepositoryRef":"${ref}"}}}}]`;
+
+	test("gh attestation is pinned to release-binaries.yml and checks the release tag from JSON; a failure shows gh's message", async () => {
 		const url = one("0.20.0");
 		const log = join(root, "gh.log");
 		tool(
 			"gh",
-			`echo "$@" >> "${log}"; case "$1 $2" in "auth status") exit 0 ;; "attestation verify") exit 1 ;; esac; exit 2`,
+			`echo "$@" >> "${log}"; case "$1 $2" in "auth status") exit 0 ;; "attestation verify") echo "boom: no matching attestation" >&2; exit 1 ;; esac; exit 2`,
 		);
 		const r = await install(url);
 		expect(r.code).not.toBe(0);
-		expect(r.out).toContain("attestation");
+		expect(r.out).toContain("did not verify");
+		expect(r.out).toContain("boom: no matching attestation");
 		expect(installed()).toBeNull();
-		expect(readFileSync(log, "utf8")).toContain(
-			"--repo 8gi-foundation/8gent-code --signer-workflow 8gi-foundation/8gent-code/.github/workflows/release-binaries.yml --source-ref refs/tags/v0.20.0",
+		const logged = readFileSync(log, "utf8");
+		expect(logged).toContain(
+			"--repo 8gi-foundation/8gent-code --signer-workflow 8gi-foundation/8gent-code/.github/workflows/release-binaries.yml --format json",
 		);
+		expect(logged).not.toContain("--source-ref");
 
 		tool(
 			"gh",
-			'case "$1 $2" in "auth status") exit 0 ;; "attestation verify") exit 0 ;; esac; exit 2',
+			`case "$1 $2" in "auth status") exit 0 ;; "attestation verify") echo '${attJson("refs/tags/v0.20.0")}'; exit 0 ;; esac; exit 2`,
 		);
 		const ok = await install(url);
 		expect(ok.code).toBe(0);
 		expect(ok.out).toContain("attestation: verified");
+	});
+
+	test("an older gh that rejects --source-ref still installs, via JSON and the right ref", async () => {
+		tool(
+			"gh",
+			`case "$1 $2" in "auth status") exit 0 ;; "attestation verify") case "$*" in *--source-ref*) echo "unknown flag: --source-ref" >&2; exit 1 ;; esac; echo '${attJson("refs/tags/v0.20.0")}'; exit 0 ;; esac; exit 2`,
+		);
+		const r = await install(one("0.20.0"));
+		expect(r.code).toBe(0);
+		expect(r.out).toContain("attestation: verified");
+		expect(installed()).not.toBeNull();
+	});
+
+	test("a verified attestation from a different ref is refused", async () => {
+		tool(
+			"gh",
+			`case "$1 $2" in "auth status") exit 0 ;; "attestation verify") echo '${attJson("refs/heads/main")}'; exit 0 ;; esac; exit 2`,
+		);
+		const r = await install(one("0.20.0"));
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("refs/heads/main");
+		expect(r.out).toContain("not refs/tags/v0.20.0");
+		expect(installed()).toBeNull();
+	});
+
+	test("the ref check is exact and every verified attestation must match", async () => {
+		const many = (...refs: string[]) =>
+			`[${refs.map((r) => `{"verificationResult":{"signature":{"certificate":{"sourceRepositoryRef":"${r}"}}}}`).join(",")}]`;
+		const cases = [
+			many("refs/tags/v0.20.0-evil"),
+			many("refs/tags/V0.20.0"),
+			many("x/refs/tags/v0.20.0"),
+			many("refs/tags/v0.20.0", "refs/heads/main"),
+			many("refs/tags/v0.20.0", ""),
+			'[{"verificationResult":{}}]',
+		];
+		for (const json of cases) {
+			tool(
+				"gh",
+				`case "$1 $2" in "auth status") exit 0 ;; "attestation verify") echo '${json}'; exit 0 ;; esac; exit 2`,
+			);
+			const r = await install(one("0.20.0"));
+			expect(r.code).not.toBe(0);
+			expect(installed()).toBeNull();
+		}
+	});
+
+	test("a non-zero gh exit is refused even with matching JSON on stdout", async () => {
+		tool(
+			"gh",
+			`case "$1 $2" in "auth status") exit 0 ;; "attestation verify") echo '${attJson("refs/tags/v0.20.0")}'; exit 1 ;; esac; exit 2`,
+		);
+		const r = await install(one("0.20.0"));
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("did not verify");
+		expect(installed()).toBeNull();
+	});
+
+	test("a gh too old for attestation says so plainly instead of reporting a failed verification", async () => {
+		tool(
+			"gh",
+			'case "$1 $2" in "auth status") exit 0 ;; "attestation verify") echo "unknown command \\"attestation\\" for \\"gh\\"" >&2; exit 1 ;; esac; case "$1" in --version) echo "gh version 2.40.0"; exit 0 ;; esac; exit 2',
+		);
+		const r = await install(one("0.20.0"));
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("gh version 2.40.0");
+		expect(r.out).toContain("brew upgrade gh");
+		expect(r.out).not.toContain("did not verify");
+		expect(installed()).toBeNull();
 	});
 
 	test("without a release key: installs on the checksum, with a warning", async () => {
