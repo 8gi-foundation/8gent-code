@@ -397,3 +397,17 @@ describe("a gated turn shows one word at the right end of the bar (#4510)", () =
 		}
 	});
 });
+
+describe("the word is held per tab (#4510)", () => {
+	const byTab: Record<string, Props["verification"]> = { A: "unverified", B: undefined };
+	test("a flagged turn on tab A is not drawn under tab B, and is back on A", async () => {
+		expect((await frame(160, 48, { verification: byTab.B }))[0] ?? "").not.toContain("unverified");
+		expect((await frame(160, 48, { verification: byTab.A }))[0] ?? "").toContain("unverified");
+	});
+	test("switching back to A shows A's word and B shows nothing", async () => {
+		const row = async (tab: string) =>
+			(await frame(160, 48, { verification: byTab[tab] }))[0] ?? "";
+		expect(await row("A")).toContain("unverified");
+		expect(await row("B")).not.toContain("unverified");
+	});
+});

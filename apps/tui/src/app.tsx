@@ -2694,9 +2694,9 @@ export function App({
 	// footer, where the one stderr warning cannot be lost under Ink.
 	const [sandboxOff, setSandboxOff] = useState<string | undefined>(undefined);
 	// What a gate flagged on the last turn (#4510); cleared at the next prompt.
-	const [verification, setVerification] = useState<
-		"unverified" | "tests_claimed_not_run" | undefined
-	>(undefined);
+	const [verificationByTab, setVerificationByTab] = useState<
+		Record<string, "unverified" | "tests_claimed_not_run" | undefined>
+	>({});
 	useEffect(() => {
 		const status = runCommandSandboxStatus();
 		if (!status.applied) setSandboxOff(sandboxFooterReason(status.reason));
@@ -6610,7 +6610,7 @@ export function App({
 					// Inject agent mode context into the message
 					const modePrefix = agentMode !== "Planning" ? `[Mode: ${agentMode}] ` : "";
 					const img = imageInput.getAttachedImage();
-					if (tabId === activeTabId) setVerification(undefined);
+					setVerificationByTab((v) => ({ ...v, [tabId]: undefined }));
 					const chatPromise = targetAgent.chat(
 						modePrefix + messageForAgent.trim(),
 						img?.base64,
@@ -6633,7 +6633,10 @@ export function App({
 						return;
 					}
 					perTabAgents.clearPromise(tabId);
-					if (tabId === activeTabId) setVerification(targetAgent.getVerification() ?? undefined);
+					setVerificationByTab((v) => ({
+						...v,
+						[tabId]: targetAgent.getVerification() ?? undefined,
+					}));
 					const trimmed = (reply ?? "").trim();
 					if (trimmed) {
 						// The plan column is the active tab's; a background turn has none.
@@ -7661,7 +7664,7 @@ export function App({
 					tokensPerSecond={tokensPerSecond}
 					judge={judgeState}
 					sandboxOff={sandboxOff}
-					verification={verification}
+					verification={verificationByTab[activeTabId]}
 					djKeys={djKeys}
 					onDjKeysDone={endDjKeys}
 				/>
