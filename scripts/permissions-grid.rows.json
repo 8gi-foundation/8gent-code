@@ -363,7 +363,23 @@
 		"bash <<< 'find ~ %DEL%'",
 		"sh -c \"find ~ -exec %RM% -rf {} +\"",
 		"nohup sh -c 'find / %DEL%' &",
-		"sudo echo %RM% -rf / | xargs env"
+		"sudo echo %RM% -rf / | xargs env",
+		"find ~ -name '*.log' -o %DEL%",
+		"find ~ ! -name '*.log' %DEL%",
+		"find / %DEL% -name '*.log'",
+		"find / -path /Users/gridhome %DEL%",
+		"find / -path '/Users/gridhome/*' %DEL%",
+		"find / -path '/*' %DEL%",
+		"find ~ -regex '.*' %DEL%",
+		"find ~ -regex '.+' %DEL%",
+		"find / -regex '^.*$' %DEL%",
+		"find / -regex '(.*)' %DEL%",
+		"find / -regex '.\\{0,\\}' %DEL%",
+		"cat list.txt | xargs %RM% -rf",
+		"xargs -a list.txt %RM% -rf",
+		"ls / | xargs %RM% -rf",
+		"sh -c '%RM% -rf ${1:-/}' _",
+		"sh -c 'for d in \"$@\"; do %RM% -rf \"$d\"; done' _ /"
 	],
 	"benign": [
 		"awk -F, '{print $1}' f",
@@ -445,6 +461,16 @@
 		"echo a | xargs -n1 echo",
 		"find ~ -name '*.pyc' %DEL%",
 		"find /tmp/build -exec %RM% -rf {} +",
-		"echo build | xargs %RM% -rf"
+		"echo build | xargs %RM% -rf",
+		"find ~ -name '*.pyc' -path '*/cache/*' %DEL%",
+		"find ~ -iname 'thumbs.db' %DEL%",
+		"find ~ -regex '/tmp/x/cache' %DEL%",
+		"find . -type f | xargs %RM% -rf",
+		"printf 'a\\nb\\n' | xargs %RM% -rf",
+		"echo build | sort | xargs %RM% -rf",
+		"find ~ -name '*.pyc' | xargs %RM% -rf",
+		"sh -c 'ls \"${1:-.}\"' _",
+		"sh -c 'for f in a b; do echo $f; done'",
+		"sh -c '%RM% -rf build'"
 	]
 }

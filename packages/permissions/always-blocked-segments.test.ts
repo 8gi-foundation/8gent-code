@@ -678,6 +678,33 @@ const DELETE_VIA_FIND = [
 	`find / -exec sudo ${RMW} {} +`,
 	`sudo find / -maxdepth 1 -exec ${RMW} -rf {} +`,
 	`find / -exec find / ${DELW} \\;`,
+	`find ~ -name '*.log' -o ${DELW}`,
+	`find ~ ! -name '*.log' ${DELW}`,
+	`find ~ -not -name '*.log' ${DELW}`,
+	`find ~ \\( -name '*.log' -o -type f \\) ${DELW}`,
+	`find / ${DELW} -name '*.log'`,
+	`find ~ -name '*.log' , ${DELW}`,
+	`find ~ -type f ! -name '*.log' | xargs ${RMW} -rf`,
+];
+const DELETE_VIA_OPAQUE = [
+	`find / -path '/*' ${DELW}`,
+	`find / -path '/*/*' ${DELW}`,
+	`find / -wholename '*' ${DELW}`,
+	`find ~ -regex '.*' ${DELW}`,
+	`find ~ -regex '.+' ${DELW}`,
+	`find / -regex '^.*$' ${DELW}`,
+	`find / -regex '(.*)' ${DELW}`,
+	`find ~ -iregex '[^x]*' ${DELW}`,
+	`find ~ -name '*.log' -o -name '*' ${DELW}`,
+	`cat list.txt | xargs ${RMW} -rf`,
+	`xargs -a list.txt ${RMW} -rf`,
+	`xargs --arg-file=list.txt ${RMW} -rf`,
+	`ls / | xargs ${RMW} -rf`,
+	`echo a | wc | xargs ${RMW} -rf`,
+	`sh -c '${RMW} -rf \${1:-/}' _`,
+	`bash -c '${RMW} -rf "\${d:=/}"'`,
+	`sh -c 'for d in "$@"; do ${RMW} -rf "$d"; done' _ /`,
+	`sh -c 'for d; do ${RMW} -rf "$d"; done' _ /`,
 ];
 const DELETE_VIA_STRING = [
 	`sh -c 'bash -c "${RMW} -rf /"'`,
@@ -693,6 +720,16 @@ const DELETE_VIA_STRING = [
 	`nohup sh -c 'find / ${DELW}' &`,
 ];
 const DELEGATION_ORDINARY = [
+	`find ~ -name '*.pyc' -path '*/cache/*' ${DELW}`,
+	`find ~ -iname 'thumbs.db' ${DELW}`,
+	`find ~ -regex '/tmp/x/cache' ${DELW}`,
+	`find . -type f | xargs ${RMW} -rf`,
+	`printf 'a\\nb\\n' | xargs ${RMW} -rf`,
+	`echo build | sort | xargs ${RMW} -rf`,
+	`find ~ -name '*.pyc' | xargs ${RMW} -rf`,
+	`sh -c 'ls "\${1:-.}"' _`,
+	"sh -c 'for f in a b; do echo $f; done'",
+	`sh -c '${RMW} -rf build'`,
 	`find . -name '*.log' ${DELW}`,
 	`find ~ -name '*.pyc' ${DELW}`,
 	`find ~/proj ${DELW}`,
@@ -715,14 +752,24 @@ const DELEGATION_ORDINARY = [
 describe("delegated wipes: xargs, find, nested command strings (#4514 family 4)", () => {
 	test("a wipe handed over a pipe, found by find, or nested in a command string is refused", () => {
 		const pm = manager();
-		for (const line of [...DELETE_VIA_PIPE, ...DELETE_VIA_FIND, ...DELETE_VIA_STRING]) {
+		for (const line of [
+			...DELETE_VIA_PIPE,
+			...DELETE_VIA_FIND,
+			...DELETE_VIA_STRING,
+			...DELETE_VIA_OPAQUE,
+		]) {
 			expect([line, pm.checkPermission(line)]).toEqual([line, "denied"]);
 		}
 	});
 
 	test("the same spellings are refused behind quoting, comments and heredocs", () => {
 		const pm = manager();
-		for (const line of [...DELETE_VIA_PIPE, ...DELETE_VIA_FIND, ...DELETE_VIA_STRING]) {
+		for (const line of [
+			...DELETE_VIA_PIPE,
+			...DELETE_VIA_FIND,
+			...DELETE_VIA_STRING,
+			...DELETE_VIA_OPAQUE,
+		]) {
 			for (const wrapped of [`: # don't\n${line} #'`, `cat <<E\nit's\nE\n${line} #'`]) {
 				expect([wrapped, pm.checkPermission(wrapped)]).toEqual([wrapped, "denied"]);
 			}
