@@ -462,7 +462,7 @@ function ansiCEscape(s: string, i: number): { text: string; next: number; nul?: 
 /**
  * Replace every bash ANSI-C string `$'...'` with its decoded text in plain single quotes, so
  * `$'\x72m'`, `$'rm'`, `$'\057'` and `$'\u002f'` read as `'rm'` and `'/'` and the checks see what
- * the shell will run (#4514). Bash stops a string at a NUL escape. The decoded text is requoted
+ * the shell will run (#4514). A NUL escape yields two words, the text up to the NUL (bash) and the whole text (zsh may keep the tail), so neither reading hides a command. The decoded text is requoted
  * (`'` becomes `'\''`), so a decoded space, `;` or quote cannot change the line's structure.
  * `blind` skips quote tracking for the quote-blind pass, which guesses nothing about context.
  */
@@ -487,15 +487,15 @@ export function decodeAnsiC(text: string, blind = false): string {
 			if (opensAnsiC(out + text.slice(i), out.length)) {
 				let body = "";
 				let j = i + 1;
-				let cut = false;
+				let cutAt = -1;
 				while (j < text.length && text[j] !== "'") {
 					if (text[j] === "\\") {
 						const e = ansiCEscape(text, j);
 						j = e.next;
-						if (!cut) body += e.text;
-						if (e.nul) cut = true;
+						body += e.text;
+						if (e.nul && cutAt < 0) cutAt = body.length;
 					} else {
-						if (!cut) body += text[j];
+						body += text[j];
 						j++;
 					}
 				}
@@ -505,7 +505,10 @@ export function decodeAnsiC(text: string, blind = false): string {
 					return out;
 				}
 				// drop the `$` already copied, then emit the decoded body as a plain single-quoted word
-				out = `${out.slice(0, -1)}'${body.replace(/'/g, "'\\''")}'`;
+				const quote = (b: string) => `'${b.replace(/'/g, "'\\''")}'`;
+				// bash drops the tail after a NUL, zsh may keep it: scan both readings (fail closed)
+				const words = cutAt >= 0 ? `${quote(body.slice(0, cutAt))} ${quote(body)}` : quote(body);
+				out = `${out.slice(0, -1)}${words}`;
 				i = j;
 				continue;
 			}

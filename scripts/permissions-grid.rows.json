@@ -37,6 +37,8 @@
 		"%RM% -rf $'\\x2fUsers/gridhome'",
 		"%RM% $'-rf' /",
 		"%RM% -$'\\x72'f /",
+		"echo $'a\\x00;%RM% -rf /'",
+		"bash -c $'a\\0\\n%RM% -rf /'",
 		"{%RM%,-rf,/}",
 		"%RM% -rf {/,}",
 		"%RM%${IFS}-rf${IFS}/",

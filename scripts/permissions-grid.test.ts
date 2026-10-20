@@ -48,9 +48,9 @@ function gridEnv(env: Record<string, string>, head: string, base: string, ...ext
 }
 
 describe("permissions grid", () => {
-	test("matrix is 1206 rows: 230 spellings x 5 contexts plus 56 benign; quick is plain and comment", () => {
-		expect(loadRows(false).length).toBe(230 * 5 + 56);
-		expect(loadRows(true).length).toBe(230 * 2 + 56);
+	test("matrix is 1216 rows: 232 spellings x 5 contexts plus 56 benign; quick is plain and comment", () => {
+		expect(loadRows(false).length).toBe(232 * 5 + 56);
+		expect(loadRows(true).length).toBe(232 * 2 + 56);
 	});
 
 	test("the find row expands to a single-dash delete, built from parts", () => {

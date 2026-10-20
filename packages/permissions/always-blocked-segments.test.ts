@@ -197,6 +197,10 @@ const QUOTED_WIPES = [
 	`rm -$'\\x72'f /`,
 	`${RMRF} $'\\x2f${HOME_DIR.slice(1)}'`,
 	`${RMRF} $'\\x2f\\0ignored'`,
+	// a NUL escape never hides the tail: bash drops it, zsh may keep it, so both readings are scanned
+	`echo $'a\\x00;${WIPE}'`,
+	`bash -c $'a\\0\\n${WIPE}'`,
+	`echo $'a\\0;${WIPE}' x`,
 	`${RMRF} $'\\x2f' $'\\x7e'`,
 	`bash <<<$'${RMRF} \\x2f'`,
 	`zsh <<<$'a'<<<$'${RMRF} \\x2f'`,
