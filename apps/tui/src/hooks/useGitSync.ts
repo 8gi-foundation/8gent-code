@@ -10,9 +10,9 @@
  * injects a runner).
  */
 
-import { useEffect, useState } from "react";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { useEffect, useState } from "react";
 import { keepIfSame } from "../lib/keep-if-same.js";
 
 const execFileAsync = promisify(execFile);
@@ -124,7 +124,13 @@ export async function computeGitSync(
 	// Verify repo
 	const repoCheck = await runner([...cwdArgs, "rev-parse", "--is-inside-work-tree"]);
 	if (repoCheck.code !== 0 || repoCheck.stdout.trim() !== "true") {
-		return { status: "no-repo", ahead: 0, behind: 0, label: buildLabel("", "no-repo", 0, 0), branch: "" };
+		return {
+			status: "no-repo",
+			ahead: 0,
+			behind: 0,
+			label: buildLabel("", "no-repo", 0, 0),
+			branch: "",
+		};
 	}
 
 	// Branch name
@@ -132,7 +138,13 @@ export async function computeGitSync(
 	const branch = branchOut.stdout.trim();
 
 	if (branch === "HEAD") {
-		return { status: "detached", ahead: 0, behind: 0, label: buildLabel(branch, "detached", 0, 0), branch };
+		return {
+			status: "detached",
+			ahead: 0,
+			behind: 0,
+			label: buildLabel(branch, "detached", 0, 0),
+			branch,
+		};
 	}
 
 	// Counts. `git rev-list --left-right --count @{u}...HEAD` returns "behind\tahead".
@@ -170,11 +182,24 @@ export async function computeGitSync(
 	return { status, ahead, behind, label: buildLabel(branch, status, ahead, behind), branch };
 }
 
-export function useGitSync(
+/**
+ * One poll step per call. Once a check finds the folder is not a repository, that
+ * is a settled fact: later polls return it without spawning git again.
+ */
+export function createGitSyncPoller(
 	cwd: string,
-	intervalMs = 30_000,
-	enabled = true,
-): GitSyncResult {
+	runner: GitRunner = defaultRunner,
+): () => Promise<GitSyncResult> {
+	let noRepo: GitSyncResult | null = null;
+	return async () => {
+		if (noRepo) return noRepo;
+		const r = await computeGitSync(cwd, runner);
+		if (r.status === "no-repo") noRepo = r;
+		return r;
+	};
+}
+
+export function useGitSync(cwd: string, intervalMs = 30_000, enabled = true): GitSyncResult {
 	const [result, setResult] = useState<GitSyncResult>({
 		status: "unknown",
 		ahead: 0,
@@ -186,9 +211,11 @@ export function useGitSync(
 	useEffect(() => {
 		if (!enabled) return;
 		let cancelled = false;
+		const poll = createGitSyncPoller(cwd);
 		const run = async () => {
 			try {
-				const r = await computeGitSync(cwd);
+				const r = await poll();
+				if (r.status === "no-repo") clearInterval(id);
 				if (!cancelled) setResult(keepIfSame(r));
 			} catch {
 				/* swallow - keep last good label */

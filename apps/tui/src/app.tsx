@@ -406,9 +406,9 @@ import {
 	type ModelSpec,
 	autoSelectModel,
 	canReuseTabAgent,
-	declaredModels,
 	filterChatCapable,
 	isLikelyEmbeddingModelId,
+	listProviderModels,
 	listsInstalledOllamaModels,
 	missingModelNotice,
 	normalizeProviderId,
@@ -416,6 +416,7 @@ import {
 	planAgentBuild,
 	providerToRuntime,
 	specForActivatedTab,
+	startupModelSeed,
 	tabAgentRole,
 } from "./lib/model-selection.js";
 import { routeOnScreen } from "./lib/model-truth.js";
@@ -587,14 +588,18 @@ function computeCliOverrides(
 	const savedM = _savedProviderSettings.model;
 	const provider = norm ?? savedP;
 	const cliModelTrim = cliModel?.trim() ?? "";
-	const providerSwitchedByCli = !!norm && norm !== savedP;
-	let model = "";
-	if (cliModelTrim) model = cliModelTrim;
-	else if (providerSwitchedByCli) model = "";
-	else model = savedM;
-	if (!model) {
+	const model = startupModelSeed({
+		cliProvider: norm,
+		cliModel: cliModelTrim,
+		savedProvider: savedP,
+		savedModel: savedM,
+	});
+	// A --provider launch with no usable model is resolved from that provider's live
+	// model list once the TUI is up (never a model saved for another provider, never
+	// the OpenRouter alias). Only a launch with no explicit provider auto-detects.
+	if (!model && !norm) {
 		const d = detectBestLocalProvider();
-		model = d.model;
+		return { provider, model: d.model };
 	}
 	return { provider, model };
 }
@@ -1772,8 +1777,10 @@ export function App({
 						setAvailableModels(["apple-foundationmodel"]);
 					}
 				} else {
-					// Every other provider: the models its registry entry declares.
-					if (!cancelled) setAvailableModels(declaredModels(getProviderManager(), currentProvider));
+					// Every other provider: ask its endpoint (the /provider models path), else
+					// the models the registry already records.
+					const listed = await listProviderModels(getProviderManager(), currentProvider);
+					if (!cancelled) setAvailableModels(listed);
 				}
 			} catch {
 				// Provider not reachable — show fallback
@@ -1829,6 +1836,9 @@ export function App({
 	useEffect(() => {
 		if (modelsLoading) return;
 		if (currentModel && !isLikelyEmbeddingModelId(currentModel)) return;
+		// A --provider launch stays on its provider: planAgentBuild tells the user to
+		// pick a model with /model instead of this screen taking over.
+		if (!currentModel && cliProviderRequestedRef.current === currentProvider) return;
 		if (availableModels.some((m) => !isLikelyEmbeddingModelId(m))) return;
 		// No chat model anywhere — guide user to provider setup
 		if (viewMode === "chat") setViewMode("provider-select");

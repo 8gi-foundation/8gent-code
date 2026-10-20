@@ -275,6 +275,14 @@ export async function planAgentBuild(
 	model: string,
 	resolve?: (m: string) => Promise<{ model: string }>,
 ): Promise<AgentBuildPlan> {
+	// No model chosen yet (a --provider launch whose live model list could not be
+	// fetched): never send a request with a guessed name, ask the user to pick one.
+	if (!model.trim()) {
+		return {
+			kind: "wait",
+			notice: `No model chosen for ${provider}: its model list could not be fetched. Pick a model with /model.`,
+		};
+	}
 	const r = await resolveAgentModel(provider, model, resolve);
 	if (r.ok) return { kind: "build", model: r.model };
 	return {
@@ -352,6 +360,51 @@ export function declaredModels(reader: ProviderModelsReader, provider: string): 
 	} catch {
 		return [];
 	}
+}
+
+/** The two registry calls `listProviderModels` needs (ProviderManager in packages/providers). */
+export interface LiveModelsReader extends ProviderModelsReader {
+	discoverModels(name: string): Promise<string[]>;
+}
+
+/**
+ * The models a provider serves right now: the same discovery `/provider models`
+ * runs (ProviderManager.discoverModels, GET <baseUrl>/models). When the endpoint
+ * cannot be asked, fall back to what the registry or providers.json already
+ * records, which may be empty. Never throws and never invents a name.
+ */
+export async function listProviderModels(
+	reader: LiveModelsReader,
+	provider: string,
+): Promise<string[]> {
+	if (!provider || !reader.isKnownProvider(provider)) return [];
+	try {
+		const live = (await reader.discoverModels(provider))
+			.map((m) => String(m).trim())
+			.filter((m) => m.length > 0);
+		if (live.length > 0) return live;
+	} catch {
+		// unreachable or no key: fall through to what is recorded
+	}
+	return declaredModels(reader, provider);
+}
+
+/**
+ * The model a launch starts with, before any live list is read. An explicit
+ * --model wins. With no --model, a saved model is kept only when it belongs to
+ * the provider being launched; a model saved for a different provider (or none)
+ * gives "", which means "ask the provider's live list". No literal model name.
+ */
+export function startupModelSeed(opts: {
+	cliProvider?: string;
+	cliModel?: string;
+	savedProvider: string;
+	savedModel: string;
+}): string {
+	const cliModel = opts.cliModel?.trim() ?? "";
+	if (cliModel) return cliModel;
+	const switched = !!opts.cliProvider && opts.cliProvider !== opts.savedProvider;
+	return switched ? "" : opts.savedModel;
 }
 
 /**

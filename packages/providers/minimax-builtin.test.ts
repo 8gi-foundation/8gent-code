@@ -77,7 +77,8 @@ describe("minimax built-in provider", () => {
 		const before = JSON.stringify(others.map((n) => pm.getProvider(n)));
 		pm.setActiveProvider("minimax");
 		expect(pm.getActiveProvider().name).toBe("minimax");
-		expect(pm.getActiveModel()).toBe("MiniMax-M2.7");
+		// No model name is hardcoded: it is discovered live (see first-run-model.test.ts).
+		expect(pm.getActiveModel()).toBe("");
 		expect(JSON.stringify(others.map((n) => pm.getProvider(n)))).toBe(before);
 	});
 });

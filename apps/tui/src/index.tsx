@@ -24,6 +24,7 @@ import React from "react";
 import { enableInfiniteMode } from "../../../packages/permissions/index.js";
 import { App } from "./app.js";
 import { startMouse } from "./lib/mouse-wiring.js";
+import { ensureTerminalSize } from "./lib/terminal-size.js";
 import { parseTuiArgv } from "./lib/tui-cli.js";
 import { applyTerminalBackground } from "./theme.js";
 import { probeTerminalBackground } from "./theme/terminal-probe.js";
@@ -50,6 +51,8 @@ const passthroughArgs = parsed.positional.slice(1);
 // reads stdin, then fit the palette to it. Returns at once with no TTY (CI,
 // pilots, pipes) and gives up after 100 ms on a terminal that never answers.
 bootTrace("index-start", `argv=${argv.length}`);
+if (ensureTerminalSize())
+	bootTrace("terminal-size-fallback", "reported size missing or 0, using 80x24");
 const terminalBg = await probeTerminalBackground();
 if (terminalBg) applyTerminalBackground(terminalBg);
 
