@@ -5,6 +5,8 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { PermissionManager } from "./index";
@@ -37,8 +39,205 @@ const WIPE_STAR = ["rm", "-rf", "/*"].join(" ");
 const CHOWN_ROOT = ["chown", "-R", "me:me", "/"].join(" ");
 const DISK = ["dd", "if=/dev/zero", "of=/dev/disk2"].join(" ");
 
+// Home-directory wipes (#4485), assembled so no line of this file is itself one.
+const RMRF = ["rm", "-rf"].join(" ");
+const HOME_DIR = os.homedir();
+const HOME_REAL = fs.realpathSync(HOME_DIR);
+const HOME_LINES = [
+	`${RMRF} ~`,
+	`${RMRF} ~/`,
+	`${RMRF} ~/*`,
+	`${RMRF} $HOME`,
+	`${RMRF} ` + "${HOME}",
+	`${RMRF} "$HOME"`,
+	`${RMRF} "$HOME"/`,
+	`${RMRF} $HOME/`,
+	`${RMRF} $HOME/*`,
+	`${RMRF} ${HOME_DIR}`,
+	`${RMRF} ${HOME_DIR}/`,
+	`${RMRF} ${HOME_DIR}/*`,
+	`${RMRF} ${HOME_REAL}`,
+	"rm -fr ~",
+	"rm -r -f ~",
+	"rm -r ~",
+	"rm --recursive --force ~",
+	`echo hi; ${RMRF} ~`,
+	`true && ${RMRF} $HOME`,
+	`false || ${RMRF} "$HOME"/`,
+	`ls\n${RMRF} ~`,
+	`sudo ${RMRF} ~`,
+	`sh -c '${RMRF} ~'`,
+	// tilde-user, parameter-expansion forms, dotfile wipe idiom (#4493 round two)
+	`${RMRF} ~${os.userInfo().username}`,
+	`${RMRF} ~${os.userInfo().username}/`,
+	`${RMRF} "` + "${HOME:?}" + `"/`,
+	`${RMRF} ` + "${HOME:-x}",
+	`${RMRF} ` + "${HOME%/}",
+	`${RMRF} ` + "${HOME#x}",
+	`${RMRF} $HOME/.[!.]*`,
+	`${RMRF} ~/.??*`,
+	`${RMRF} ~/.*`,
+	`${RMRF} ~/.*/`,
+	`${RMRF} ~/*/`,
+	`${RMRF} ~/.??*/`,
+	`${RMRF} $HOME/*/`,
+	`${RMRF} $HOME/.*/`,
+	`${RMRF} ~//`,
+	`${RMRF} ` + "${HOME-}",
+	`${RMRF} ` + "${HOME?}",
+	`${RMRF} ` + "${HOME=x}",
+	`${RMRF} ` + "${HOME,,}",
+	`${RMRF} ` + "${HOME/#/}",
+	`${RMRF} ` + "${HOME:-${PWD}}",
+	`${RMRF} ~/./*`,
+	`${RMRF} ~/x/../*`,
+	`${RMRF} ~/.`,
+	`${RMRF} $HOME/./`,
+	`${RMRF} ${HOME_DIR}/./*`,
+	`${RMRF} $HOME/*/*`,
+	`${RMRF} ~/*/.*`,
+	// climbing above home (#4485 round four)
+	`${RMRF} ~/../*`,
+	`${RMRF} ~/../.*`,
+	`${RMRF} $HOME/../*`,
+	`${RMRF} $HOME/../../*`,
+	`${RMRF} ~/../${path.basename(HOME_DIR)}`,
+	`${RMRF} ${path.dirname(HOME_DIR)}`,
+	`${RMRF} ${path.dirname(HOME_DIR)}/*`,
+	// other spellings of the same star (#4485 round five)
+	`${RMRF} ~/?*`,
+	`${RMRF} ~/*/?*`,
+	`${RMRF} ~/**`,
+	`${RMRF} ~/[!.]*`,
+	`${RMRF} $HOME/?*`,
+	// round six: POSIX classes, braces, zsh qualifiers, extglobs, quoted forms
+	`${RMRF} ~/[[:alpha:]]*`,
+	`${RMRF} ~/[[:alnum:]]*`,
+	`${RMRF} ~/[![:punct:]]*`,
+	`${RMRF} ~/[^[:space:]]*`,
+	`${RMRF} ~/{*,.*}`,
+	`${RMRF} ~/{.*,*}`,
+	`${RMRF} {~,/x}/*`,
+	`${RMRF} {~,/x}`,
+	`${RMRF} ~/{a,{*,b}}`,
+	`${RMRF} $HOME/{*,.*}`,
+	`${RMRF} ~/*(D)`,
+	`${RMRF} ~/*(N)`,
+	`${RMRF} ~/*(.)`,
+	`${RMRF} ~/@(*)`,
+	`${RMRF} ~/+(*)`,
+	`${RMRF} ~/!(x)`,
+	`${RMRF} ~/?(*)`,
+	`${RMRF} ~/*(*)`,
+	`${RMRF} ~/@(*|x)`,
+	`${RMRF} "$HOME"/*`,
+	`${RMRF} "$HOME/"*`,
+	`${RMRF} "~"/*`,
+	`${RMRF} "` + "${HOME}" + `"/*`,
+	// round seven: a quoted paren inside a group must not end the group early
+	`echo @(")") ; ${RMRF} ~/* ; echo "x"`,
+	// round eight: an ANSI-C string escapes its own quote, so `$'\\''` is one apostrophe
+	`echo $'\\'' ; ${RMRF} ~/* ; echo "'"`,
+	// round nine: `$$` is the PID, so `$$'` opens a PLAIN quote and `\\'` is a backslash then a closing quote
+	`echo $$'\\' ; ${RMRF} ~ ; echo ''`,
+	// APFS and NTFS fold case: the lowercase spelling is the same directory
+	...(process.platform === "darwin" || process.platform === "win32"
+		? [`${RMRF} ${HOME_DIR.toLowerCase()}`, `${RMRF} ${HOME_REAL.toLowerCase()}/`]
+		: []),
+];
+
+// Round ten: the quote-blind second pass in commandArgvs. Each line is one where scanLine and the
+// shell disagree about what is quoted, so the first pass sees a command the shell does not hide.
+const QUOTE_DESYNC_LINES = [
+	// A single quote inside ${...} inside double quotes (bash 3.2 runs the wipe, zsh rejects the line)
+	'echo "${x#\'"\'}" ; ' + WIPE + " ; echo \\'",
+	'echo "${x:-\'"\'}" ; ' + WIPE + " ; echo \\'",
+	'echo "${x%\'"\'}" ; ' + WIPE + " ; echo \\'",
+	'echo "${x#\'"\'}" ; ' + RMRF + " ~ ; echo \\'",
+	'echo "${x:-\'"\'}" ; ' + RMRF + " $HOME ; echo \\'",
+	'echo "${x%\'"\'}" ; ' + RMRF + " ~/* ; echo \\'",
+	// A quote in a comment: the next line still runs
+	`echo hi #'\n${WIPE}\n`,
+	`echo hi #'\n${RMRF} ~\n`,
+	// A quote in a heredoc body (#4496): the line after the terminator still runs
+	`cat <<E\n'\nE\n${WIPE}`,
+	`cat <<E\n'\nE\n${RMRF} ~`,
+	`cat <<E\n"\nE\n${RMRF} $HOME/*`,
+	// Accepted over-block: the blind pass splits on `(`, so a zsh qualifier after a home star reads
+	// as a recursive delete of `~/*` and is refused. Literal echoes (`echo 'rm -rf /'`) are NOT
+	// refused by it: the word `echo` leads the piece, so that row stays in the ordinary list.
+	`${RMRF} ~/*(D)/node_modules`,
+	// Accepted over-block: quoted text whose line starts with the command and does not end in a quote
+	// character (a multi-line message where the wipe closes a line) is refused; the blind pass cannot
+	// tell the text from a command.
+	`echo 'note:\n${WIPE}\nmore'`,
+];
+
+// Round eleven: one quote character inside the wipe itself must not defeat the blind pass.
+const QUOTED_WIPES = [
+	`'rm' -rf /`,
+	`"rm" -rf /`,
+	`r'm' -rf /`,
+	`rm -r'f' /`,
+	`${RMRF} '/'`,
+	`${RMRF} "$HOME"`,
+	`${RMRF} "$HOME"/*`,
+	`\\${WIPE}`,
+	`${WIPE}""`,
+	`${RMRF} $'/'`,
+	`\\${RMRF} ~`,
+	`sh -c '${WIPE}'`,
+	`sh -c "${RMRF} ~"`,
+];
+const DESYNC_WRAPS: Array<(c: string) => string> = [
+	(c) => `echo hi #'\n${c}\n`,
+	(c) => `cat <<E\n'\nE\n${c}`,
+	(c) => 'echo "${x#\'"\'}" ; ' + c + " ; echo \\'",
+];
+const QUOTED_DESYNC_LINES = QUOTED_WIPES.flatMap((w) => DESYNC_WRAPS.map((wrap) => wrap(w)));
+
+// Round twelve: the -c script need not be the word right after the flag.
+const C_FLAG_FORMS = [
+	(w: string) => `bash -c -- '${w}'`,
+	(w: string) => `bash -cx '${w}'`,
+	(w: string) => `bash -ce '${w}'`,
+	(w: string) => `bash -c -e '${w}'`,
+	(w: string) => `bash -c -x -- '${w}'`,
+	(w: string) => `sh -c - '${w}'`,
+	(w: string) => `bash -xc -- '${w}'`,
+	(w: string) => `bash -c +x '${w}'`,
+	(w: string) => `bash -c -o errexit '${w}'`,
+	(w: string) => `zsh -c -- '${w}'`,
+	// round thirteen: a here-string feeds the shell its script
+	(w: string) => `bash <<< '${w}'`,
+	(w: string) => `zsh <<< "${w}"`,
+	(w: string) => `sh <<<'${w}'`,
+	(w: string) => `bash<<<'${w}'`,
+];
+const C_FLAG_WIPES = [WIPE, `${RMRF} ~`];
+const C_FLAG_LINES = C_FLAG_WIPES.flatMap((w) =>
+	C_FLAG_FORMS.flatMap((f) => [f(w), ...DESYNC_WRAPS.map((wrap) => wrap(f(w)))]),
+);
+
 const BLOCKED_LINES = [
+	...HOME_LINES,
+	...QUOTE_DESYNC_LINES,
+	...QUOTED_DESYNC_LINES,
+	...C_FLAG_LINES,
 	WIPE,
+	// round seven: quote-aware closeParen (a quoted `)` is not the group's end)
+	`echo @(")") ; ${WIPE} ; echo "x"`,
+	`echo *(')') ; ${WIPE} ; echo 'x'`,
+	`$(echo ")") ; ${WIPE} ; echo "x"`,
+	`echo @("\\)") ; ${WIPE} ; echo "x"`,
+	// round eight: ANSI-C `$'\\''` is one quoted apostrophe, in a substitution, an extglob, and top level
+	`echo $(echo $'\\'') ; ${WIPE} ; echo "'"`,
+	`echo @($'\\'') ; ${WIPE} ; echo "'"`,
+	`echo $'\\'' ; ${WIPE} ; echo "'"`,
+	// round nine: an even run of `$` is the PID and leaves the quote plain; an odd run is ANSI-C
+	`echo $$'\\' ; ${WIPE} ; echo ''`,
+	`ls @($$'\\') ; ${WIPE} ; echo ''`,
+	`echo $$$'\\'' ; ${WIPE} ; echo "'"`,
 	`ls && ${WIPE}`,
 	`echo hi; ${WIPE}`,
 	`false || ${WIPE}`,
@@ -101,11 +300,64 @@ const BLOCKED_LINES = [
 ];
 
 const ORDINARY_LINES = [
+	"echo $'a\\'b' ; ls",
+	"echo $$'a' ; ls",
+	"echo $$$'a\\'b' ; ls",
+	"rm -rf ~/some/subdir",
+	"rm -rf $HOME/some/subdir",
+	'rm -rf "$HOME"/some/subdir',
+	`rm -rf ${HOME_DIR}/some/subdir`,
+	"rm ~/notes.txt",
+	"rm -rf ~/.config/x",
+	"rm -rf ~/.config",
+	"rm -rf $HOME/.cache",
+	"rm -rf ~root",
+	"rm -rf ~+",
+	"rm -rf ~-",
+	"rm -rf ~/sub/*",
+	"rm -rf ~/.config/*",
+	"rm -rf ~/Documents",
+	"rm -rf ~/x/../sub",
+	"rm -rf ${HOMEX}",
+	"rm -rf $HOMEX/*",
+	"rm -rf ~/sub/*/x",
+	"rm -rf ~/*/node_modules",
+	"rm -rf ~/*/dist",
+	"rm -rf ~/*.log",
+	"rm -rf ~/*/x*",
+	"rm -rf $HOME/*/node_modules",
+	"rm -rf ~/[a-z]*/src",
+	"rm -rf ~/{src,dist}/build",
+	"rm -rf ~/@(a|b)",
+	"rm -rf ~/{a,b}",
+	"rm -rf ~/[[:alpha:]]x",
+	"rm -rf ~/+(a)",
+	"ls ~ && echo done",
+	"echo hi; echo $HOME",
 	"git status && bun test",
 	"cd packages && ls | wc -l",
 	"echo a; echo b",
 	"false || echo fallback",
 	"git log --oneline\ngit diff --stat",
+	'git commit -m "fix: guard rm flags"',
+	'echo "rm" ; ls',
+	'grep -r "rm -rf" docs/',
+	"cat <<E\nhello\nE",
+	"echo hi # comment",
+	"awk '{print $1}' f",
+	"sed 's/a;b/c/' f",
+	"python3 -c 'import os; print(1)'",
+	"gcc -c main.c",
+	"tar -cf a.tar dir",
+	"curl -c cookies.txt https://example.com",
+	"grep -c foo file",
+	'ssh host "ls -la"',
+	"bash -c 'ls -la'",
+	"bash -ce 'ls'",
+	'cat <<< "hello"',
+	'read x <<< "a b c"',
+	"bash <<< 'ls -la'",
+	'grep foo <<< "$text"',
 	`echo '${WIPE}' is a dangerous command`,
 	"grep -rf patterns.txt src",
 	"rm -rf /tmp/build",
@@ -134,7 +386,7 @@ const ORDINARY_LINES = [
 ];
 
 // Not blocked, but asks the person every time by policy (#3806): excluded from the unattended-run check only.
-const ASKS_BY_POLICY = new Set(["ssh host ls -la"]);
+const ASKS_BY_POLICY = new Set(["ssh host ls -la", 'ssh host "ls -la"']);
 
 describe("always-blocked segments (#3768)", () => {
 	test("the check sees a blocked command in any position", () => {
@@ -265,5 +517,75 @@ describe("always-blocked segments (#3768)", () => {
 		for (const line of ["git status && bun test", "echo a; echo b"]) {
 			expect(await auto.requestPermission("Execute Shell Command", "d", line)).toBe(true);
 		}
+	});
+});
+
+describe("chained lines are judged per segment (#4485)", () => {
+	const pm = manager();
+
+	test("isDangerous sees a dangerous command in any segment", () => {
+		for (const line of [
+			"echo hi; rm -rf ./dist",
+			"true && rm -rf ~/some/subdir",
+			"false || rm -rf build",
+			"ls | rm -rf x",
+			"echo a\nrm -rf build",
+		]) {
+			expect([line, pm.isDangerous(line)]).toEqual([line, true]);
+		}
+		// the bare form was already dangerous
+		expect(pm.isDangerous("rm -rf build")).toBe(true);
+	});
+
+	test("a harmless chained line is not dangerous and still passes", () => {
+		for (const line of ["git status && ls", "echo a; echo b", "cat x | wc -l"]) {
+			expect([line, pm.isDangerous(line)]).toEqual([line, false]);
+			expect([line, pm.checkPermission(line)]).toEqual([line, "allowed"]);
+		}
+	});
+
+	test("a dangerous segment makes the line ask, never allowed", () => {
+		for (const line of ["echo hi; rm -rf ./dist", "true && rm -rf ~/some/subdir"]) {
+			expect([line, pm.checkPermission(line)]).toEqual([line, "ask"]);
+		}
+	});
+
+	test("headless: a dangerous chained line is refused like the bare form", async () => {
+		process.env.EIGHT_HEADLESS = "1";
+		const log = console.log;
+		console.log = () => {};
+		try {
+			for (const line of [
+				"rm -rf ./dist",
+				"echo hi; rm -rf ./dist",
+				"true && rm -rf ~/some/subdir",
+				"echo hi; rm -rf ~",
+				"true && rm -rf $HOME",
+			]) {
+				expect([line, await pm.requestPermission("Execute Shell Command", "d", line)]).toEqual([
+					line,
+					false,
+				]);
+			}
+			expect(await pm.requestPermission("Execute Shell Command", "d", "echo a; echo b")).toBe(true);
+		} finally {
+			console.log = log;
+		}
+	});
+
+	test("interactive: a home wipe is never offered to the person", async () => {
+		(process.stdin as { isTTY?: boolean }).isTTY = true;
+		const asked: string[] = [];
+		registerTuiApprovalHandler(async (req) => {
+			asked.push(req.command ?? "");
+			return "approve";
+		});
+		for (const line of ["echo hi; rm -rf ~", "true && rm -rf $HOME"]) {
+			expect([line, await pm.requestPermission("Execute Shell Command", "d", line)]).toEqual([
+				line,
+				false,
+			]);
+		}
+		expect(asked).toEqual([]);
 	});
 });
