@@ -186,9 +186,12 @@ function isHomeTarget(t: string): boolean {
 	// resolves at or above home. That is a wipe.
 	if (!p.startsWith(`${HOME_TOKEN}/`)) return true;
 	const parts = p.slice(HOME_TOKEN.length + 1).split("/");
-	// Every component after home is `*` or a dot-glob (`$HOME/*`, `$HOME/*/*`, `~/*/.*`, `~/.??*`).
-	// `~/*/node_modules` names a real folder in each child, so it only asks.
-	return parts.every((c) => c === "*" || (c.startsWith(".") && /[*?[]/.test(c)));
+	// Every component after home is made only of glob metacharacters (`*`, `?`, `**`, bracket
+	// classes like `[!.]`) or is a dot-glob (`$HOME/*`, `~/*/?*`, `~/[!.]*`, `~/*/.*`, `~/.??*`).
+	// `~/*/node_modules`, `~/*.log` and `~/*/x*` name something specific, so they only ask.
+	const wild = (c: string) =>
+		/^(?:[*?]|\[[^\]]*\])+$/.test(c) || (c.startsWith(".") && /[*?[]/.test(c));
+	return parts.every(wild);
 }
 
 /** The parent of home (`/Users`, `/home`) or its direct children glob (`/Users/*`): every account. */
