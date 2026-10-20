@@ -18,8 +18,9 @@
  *
  * fs.exec routes through the existing NemoClaw policy engine
  * (`evaluatePolicy("run_command", ...)`). On top of that we apply a
- * daemon-local allowlist (`COMMAND_ALLOWLIST`) which is the actual security
- * boundary for shell exec. The `EIGHT_LEGACY_BASH=1` env var bypasses the
+ * daemon-local allowlist (`COMMAND_ALLOWLIST`). Before either runs, `execRefusal`
+ * applies the engine's shell chain (sanitizer, wipe guard, pre-spawn backstops);
+ * the allowlist is an extra layer, never the only one. The `EIGHT_LEGACY_BASH=1` env var bypasses the
  * allowlist for one release; bypass is still audited and logged with a
  * warning.
  */
@@ -28,19 +29,15 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { killProcessTree, shellInvocation } from "../../../core/shell";
-import { evaluatePolicy } from "../../../permissions/policy-engine";
-import {
-	isWithinWorkspace,
-	resolveSafe,
-} from "../../../permissions/src/workspace-boundary";
 import { getWorkspaceDb } from "../../../db/src/workspace-db";
+import { blockedReason, commandArgvs } from "../../../permissions/always-blocked";
+import { evaluatePolicy } from "../../../permissions/policy-engine";
+import { preSpawnRefusal } from "../../../permissions/pre-spawn-backstops";
+import { refusalLead } from "../../../permissions/refusal-lead";
+import { sanitizeShellCommand } from "../../../permissions/shell-sanitizer";
+import { isWithinWorkspace, resolveSafe } from "../../../permissions/src/workspace-boundary";
 import { logExecOp, logFsSensitive } from "./audit";
-import {
-	JSONRPC_BLOCKED,
-	JsonRpcError,
-	type JsonRpcContext,
-	type JsonRpcHandler,
-} from "./jsonrpc";
+import { JSONRPC_BLOCKED, type JsonRpcContext, JsonRpcError, type JsonRpcHandler } from "./jsonrpc";
 import { classifySensitivePath } from "./sensitive";
 
 // ── Workspace registry ────────────────────────────────────────────────
@@ -98,9 +95,7 @@ export const fsRegister: JsonRpcHandler = (raw) => {
 		throw new Error("fs.register: 'default' is reserved");
 	}
 	if (!WORKSPACE_ID_RE.test(workspaceId)) {
-		throw new Error(
-			"fs.register: invalid workspaceId (allowed: [A-Za-z0-9_.-], max 128 chars)",
-		);
+		throw new Error("fs.register: invalid workspaceId (allowed: [A-Za-z0-9_.-], max 128 chars)");
 	}
 	if (!fs.existsSync(root)) {
 		throw new Error(`fs.register: root does not exist: ${root}`);
@@ -513,7 +508,7 @@ function evaluateExec(command: string): ExecPolicyResult {
 					allowed: false,
 					reason: decision.requiresApproval
 						? `requires approval: ${decision.reason}`
-						: decision.reason ?? `not on allowlist: ${verb}`,
+						: (decision.reason ?? `not on allowlist: ${verb}`),
 				};
 			}
 			return {
@@ -539,6 +534,45 @@ function evaluateExec(command: string): ExecPolicyResult {
 	return { allowed: true };
 }
 
+/**
+ * The refusal for `command` from the same chain the TUI's run_command runs before it spawns
+ * (preSpawnRefusal, sanitizeShellCommand, blockedReason over every command on the line), in the
+ * engine's own words; null when the chain refuses nothing. The verb allowlist is an extra layer
+ * on top of this, never the only one. Then two route-local rules for what the TUI would put to a
+ * person: this route has no approval card, so `find` that deletes or runs commands, and a heredoc
+ * that writes a file, are refused outright (fs.write is the route for writing).
+ */
+export function execRefusal(command: string, cwd: string): string | null {
+	const backstop = preSpawnRefusal(command, cwd);
+	if (backstop) return refusalLead(backstop);
+	const validation = sanitizeShellCommand(command);
+	if (!validation.safe) {
+		return refusalLead(`[BLOCKED] ${validation.reason}. Command: ${command}`);
+	}
+	// Fail-closed: a throw from the engine propagates and the command is not spawned.
+	for (const argv of commandArgvs(command)) {
+		const reason = blockedReason(argv);
+		if (reason) return refusalLead(`[PERMISSION DENIED] ${reason}. Command: ${command}`);
+	}
+	for (const argv of commandArgvs(command)) {
+		const name = path.basename(argv[0] ?? "").toLowerCase();
+		if (
+			name === "find" &&
+			argv.some((a) => /^-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)$/.test(a))
+		) {
+			return refusalLead(
+				`[PERMISSION DENIED] find that deletes, writes or runs commands needs an approval this route cannot ask for. Command: ${command}`,
+			);
+		}
+	}
+	if (/<<(?!<)/.test(command)) {
+		return refusalLead(
+			`[PERMISSION DENIED] Use fs.write to create or change a file; a heredoc is not accepted on fs.exec. Command: ${command}`,
+		);
+	}
+	return null;
+}
+
 export const fsExec: JsonRpcHandler = async (raw, ctx: JsonRpcContext) => {
 	const params = raw as FsExecParams;
 	if (!params?.command) throw new Error("fs.exec: missing command");
@@ -546,7 +580,11 @@ export const fsExec: JsonRpcHandler = async (raw, ctx: JsonRpcContext) => {
 	const initiator = params.initiator ?? ctx.initiator;
 	const root = workspaceRoot(params.workspaceId);
 
-	const policy = evaluateExec(params.command);
+	// The engine's chain runs first and always, EIGHT_LEGACY_BASH included: the allowlist is not the only gate.
+	const refusal = execRefusal(params.command, root);
+	const policy: ExecPolicyResult = refusal
+		? { allowed: false, reason: refusal }
+		: evaluateExec(params.command);
 	if (!policy.allowed) {
 		logExecOp({
 			op: "denied",
