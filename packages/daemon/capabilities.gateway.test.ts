@@ -4,9 +4,11 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentPool } from "./agent-pool";
+import { type AgentPool, KNOWN_CHANNELS } from "./agent-pool";
 import { startGateway } from "./gateway";
 import { DAEMON_CAPABILITIES } from "./input-gate";
+
+const chatted: string[] = [];
 
 class StubPool {
 	live = new Map<string, string>();
@@ -41,6 +43,10 @@ class StubPool {
 	}
 	abort() {
 		return false;
+	}
+	async chat(_sessionId: string, text: string): Promise<string> {
+		chatted.push(text);
+		return "model reply";
 	}
 }
 
@@ -78,7 +84,19 @@ async function open() {
 		}
 		throw new Error(`no ${type}: ${JSON.stringify(frames)}`);
 	};
-	return { ws, next };
+	let seen = 0;
+	const nextEvent = async () => {
+		for (let i = 0; i < 200; i++) {
+			const hits = frames.filter((x) => x.type === "event" && x.event === "agent:stream");
+			if (hits.length > seen) {
+				seen++;
+				return hits[seen - 1];
+			}
+			await new Promise((r) => setTimeout(r, 10));
+		}
+		throw new Error(`no stream event: ${JSON.stringify(frames)}`);
+	};
+	return { ws, next, nextEvent };
 }
 
 describe("daemon capabilities", () => {
@@ -116,5 +134,27 @@ describe("daemon capabilities", () => {
 	it("/health carries capabilities", async () => {
 		const body = (await (await fetch(`http://127.0.0.1:${server.port}/health`)).json()) as Frame;
 		expect(body.capabilities).toEqual([...DAEMON_CAPABILITIES]);
+	});
+
+	it("every channel that advertises input-gate gates /status and an unknown slash before the model", async () => {
+		const checked: string[] = [];
+		for (const channel of KNOWN_CHANNELS) {
+			chatted.length = 0;
+			const s = await open();
+			s.ws.send(JSON.stringify({ type: "session:create", channel }));
+			const created = await s.next("session:created");
+			if (!created.capabilities?.includes("input-gate")) {
+				s.ws.close();
+				continue;
+			}
+			for (const text of ["/status", "/nosuchthing"]) {
+				s.ws.send(JSON.stringify({ type: "prompt", text }));
+				await s.nextEvent();
+			}
+			expect(chatted).toEqual([]);
+			checked.push(channel);
+			s.ws.close();
+		}
+		expect(checked).toEqual([...KNOWN_CHANNELS]);
 	});
 });
