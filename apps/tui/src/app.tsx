@@ -280,6 +280,14 @@ import {
 	withTimeout,
 } from "./lib/provider-readiness.js";
 import {
+	buildProviderOptions,
+	listBelongsToProvider,
+	listModelsWithReason,
+	modelAfterProviderSwitch,
+	modelListFailureNotice,
+	registryKeyNotice,
+} from "./lib/provider-truth.js";
+import {
 	type TurnError,
 	buildResultFor,
 	deriveReadiness,
@@ -408,7 +416,6 @@ import {
 	canReuseTabAgent,
 	filterChatCapable,
 	isLikelyEmbeddingModelId,
-	listProviderModels,
 	listsInstalledOllamaModels,
 	missingModelNotice,
 	normalizeProviderId,
@@ -1651,6 +1658,11 @@ export function App({
 		};
 	}, [windowTarget]);
 	const [availableModels, setAvailableModels] = useState<string[]>([]);
+	// Which provider availableModels was fetched for. A list from the previous
+	// provider must never be matched against the new one (#4598).
+	const [modelsOwner, setModelsOwner] = useState(currentProvider);
+	// Why the active provider's live model list could not be had (#4598).
+	const modelListErrorRef = useRef<unknown>(undefined);
 	// Ollama's full /api/tags list before chat filtering, so a model that is
 	// installed but cannot chat is not reported as missing (#3548).
 	const installedOllamaModelsRef = useRef<string[]>([]);
@@ -1783,14 +1795,23 @@ export function App({
 				} else {
 					// Every other provider: ask its endpoint (the /provider models path), else
 					// the models the registry already records.
-					const listed = await listProviderModels(getProviderManager(), currentProvider);
-					if (!cancelled) setAvailableModels(listed);
+					const { models: listed, error } = await listModelsWithReason(
+						getProviderManager(),
+						currentProvider,
+					);
+					if (!cancelled) {
+						modelListErrorRef.current = error;
+						setAvailableModels(listed);
+					}
 				}
 			} catch {
 				// Provider not reachable — show fallback
 				if (!cancelled) setAvailableModels([]);
 			}
-			if (!cancelled) setModelsLoading(false);
+			if (!cancelled) {
+				setModelsOwner(currentProvider);
+				setModelsLoading(false);
+			}
 		};
 		fetchModels();
 		return () => {
@@ -1803,6 +1824,8 @@ export function App({
 	// react-doctor-disable-next-line react-doctor/no-effect-chain
 	useEffect(() => {
 		if (modelsLoading || availableModels.length === 0) return;
+		// The list is another provider's: not a source for this provider's model (#4598).
+		if (!listBelongsToProvider(modelsOwner, currentProvider)) return;
 		// An explicit --provider/--model launch choice is never swapped for the
 		// provider's declared default (#3084).
 		const explicit: ModelSpec | null =
@@ -1832,7 +1855,7 @@ export function App({
 		});
 		if (notice) addSystemMessage(notice);
 		setCurrentModel(next);
-	}, [modelsLoading, availableModels, currentProvider, currentModel]);
+	}, [modelsLoading, availableModels, modelsOwner, currentProvider, currentModel]);
 
 	// If models have loaded and there's still no valid chat model, show provider selector
 	// so the user can pick a provider / download a model without the app crashing.
@@ -1848,51 +1871,11 @@ export function App({
 		if (viewMode === "chat") setViewMode("provider-select");
 	}, [modelsLoading, availableModels, currentModel, viewMode]);
 
-	const [availableProviders] = useState<ProviderOption[]>([
-		{
-			name: "ollama",
-			displayName: "Ollama (Local) - Free",
-			hasApiKey: true,
-			enabled: true,
-		},
-		{
-			name: "lmstudio",
-			displayName: "LM Studio (Local) - Free",
-			hasApiKey: true,
-			enabled: true,
-		},
-		{
-			name: "openrouter-free",
-			displayName: "OpenRouter (Free Models) 🆓",
-			hasApiKey: true,
-			enabled: true,
-		},
-		{
-			name: "openrouter",
-			displayName: "OpenRouter (Paid Models)",
-			hasApiKey: false,
-			enabled: true,
-		},
-		{
-			name: "groq",
-			displayName: "Groq (Free Tier)",
-			hasApiKey: false,
-			enabled: true,
-		},
-		{ name: "openai", displayName: "OpenAI", hasApiKey: false, enabled: true },
-		{
-			name: "anthropic",
-			displayName: "Anthropic",
-			hasApiKey: false,
-			enabled: true,
-		},
-		{
-			name: "mistral",
-			displayName: "Mistral AI",
-			hasApiKey: false,
-			enabled: true,
-		},
-	]);
+	// Built from the provider registry, so every registered provider shows and
+	// "key configured" is true only when its key is present (#4598).
+	const [availableProviders] = useState<ProviderOption[]>(() =>
+		buildProviderOptions(getProviderManager()),
+	);
 
 	// Active-tab Agent instance for real execution. Per-tab agents live in
 	// perTabAgents.agentsRef; this state mirrors the agent for the currently
@@ -3167,10 +3150,11 @@ export function App({
 				notReadyReasonRef.current = null;
 				// A provider with no key can never start, so say so once and stop:
 				// no retry, since keys.env is read at launch (#4218).
-				const _keyNotice = missingKeyNotice(
-					currentProvider,
-					Boolean(sessionApiKey(providerToRuntime(currentProvider))),
-				);
+				const _keyNotice =
+					missingKeyNotice(
+						currentProvider,
+						Boolean(sessionApiKey(providerToRuntime(currentProvider))),
+					) ?? registryKeyNotice(currentProvider, getProviderManager());
 				if (_keyNotice) {
 					setAgent(null);
 					setAgentReady(false);
@@ -3279,6 +3263,21 @@ export function App({
 
 				// auto:free names no real model: resolve it to a live ":free" id,
 				// and stop with the reason rather than run a paid one (#3289).
+				if (!currentModel.trim()) {
+					// Key is present (checked above), so say why the list is empty (#4598).
+					const _cfg = getProviderManager().getProvider(currentProvider);
+					const _empty = modelListFailureNotice(
+						_cfg?.displayName || currentProvider,
+						modelListErrorRef.current,
+					);
+					setAgent(null);
+					setAgentReady(false);
+					waiting(_empty);
+					notReadyReasonRef.current = _empty;
+					notify(_initTabId, _empty);
+					retryLater();
+					return;
+				}
 				const _plan = await planAgentBuild(currentProvider, currentModel);
 				if (cancelled) return;
 				if (_plan.kind === "wait") {
@@ -6035,6 +6034,7 @@ export function App({
 							const newProvider = args[0].toLowerCase();
 							const provider = availableProviders.find((p) => p.name === newProvider);
 							if (provider) {
+								setCurrentModel((m) => modelAfterProviderSwitch(currentProvider, newProvider, m));
 								setCurrentProvider(newProvider);
 								addSystemMessage(`Provider switched to: ${provider.displayName}`);
 							} else {
@@ -7123,6 +7123,7 @@ export function App({
 						providers={availableProviders}
 						currentProvider={currentProvider}
 						onSelect={(provider) => {
+							setCurrentModel((m) => modelAfterProviderSwitch(currentProvider, provider, m));
 							setCurrentProvider(provider);
 							const p = availableProviders.find((pr) => pr.name === provider);
 							addSystemMessage(`Provider switched to: ${p?.displayName || provider}`);

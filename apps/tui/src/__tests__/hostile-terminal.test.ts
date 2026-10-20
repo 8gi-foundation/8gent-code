@@ -13,10 +13,10 @@
  * early raw-mode hand-off, size read and first render never wait on the
  * terminal. What it cannot prove: Windows console or ConPTY behaviour.
  *
- * Not covered, on purpose: a terminal that answers the probe at once. Over a
- * pipe, a reply written inside the probe window leaves later keys unread (seen
- * with Bun pipe stdin only; real terminals answer at once for every Mac user
- * and work). It needs a real pty to tell a harness artefact from a bug.
+ * A terminal that answers the probe at once is covered by the "answers at once"
+ * case: on Bun, ending the probe from inside the 'data' event and pausing stdin
+ * there left Ink deaf, so no key was ever read (a real bug, not a pipe artefact).
+ * Fixed in theme/terminal-probe.ts; see probe-then-typing.test.ts.
  */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -36,9 +36,17 @@ const FIRST_PAINT_BUDGET_MS = 8000;
 /** Time from spawn within which the welcome is ready for a key. */
 const READY_BUDGET_MS = 15000;
 const BEFORE_KEY = "Enter to begin";
-const AFTER_KEY = "What should I call you";
-/** Time after a key press within which it must show on screen. */
-const KEY_BUDGET_MS = 4000;
+/**
+ * Proof that the Enter was taken: the name question, or the hint line of any
+ * later setup step. The test matches the first hint it sees after the key, not
+ * one fixed step, because Ink coalesces frames: a burst of Enters under load
+ * can move past the name step before that step is ever painted.
+ */
+const AFTER_KEY = /What should I call you|(?:A number|A name|Your answer), or Enter/;
+/** Time after the first key within which it must show on screen. */
+const KEY_BUDGET_MS = 15000;
+/** A key is sent again only if the screen has not moved this long after it. */
+const KEY_RETRY_MS = 2000;
 
 interface Case {
 	name: string;
@@ -52,6 +60,7 @@ interface Case {
 const CASES: Case[] = [
 	{ name: "answers nothing (no OSC 11, no DA1 reply)", term: "xterm" },
 	{ name: "answers after the cap (400 ms)", term: "xterm-256color", replyAfterMs: 400 },
+	{ name: "answers at once (0 ms)", term: "xterm-256color", replyAfterMs: 0 },
 	{ name: "reports size 0 by 0", term: "xterm-256color", cols: "0", rows: "0" },
 	{ name: "reports no size at all", term: "xterm-256color", cols: "none", rows: "none" },
 	{ name: "TERM=dumb, no replies", term: "dumb" },
@@ -102,6 +111,7 @@ async function run(c: Case): Promise<Outcome> {
 	let probeAsked = false;
 	let paintedMs: number | null = null;
 	let keySentAt: number | null = null;
+	let keyOffset = 0;
 	let keyMs: number | null = null;
 	let stderr = "";
 	const text = () => raw.replace(ANSI, "");
@@ -126,7 +136,11 @@ async function run(c: Case): Promise<Outcome> {
 					setTimeout(() => send(OSC11_REPLY + DA1_REPLY), c.replyAfterMs);
 			}
 			if (paintedMs === null && text().includes("8gent Code")) paintedMs = Date.now() - t0;
-			if (keySentAt !== null && keyMs === null && text().includes(AFTER_KEY)) {
+			if (
+				keySentAt !== null &&
+				keyMs === null &&
+				AFTER_KEY.test(raw.slice(keyOffset).replace(ANSI, ""))
+			) {
 				keyMs = Date.now() - keySentAt;
 			}
 		}
@@ -145,11 +159,14 @@ async function run(c: Case): Promise<Outcome> {
 			// name question. That proves the input loop is live, not just painted.
 			await waitFor(() => text().includes(BEFORE_KEY), READY_BUDGET_MS);
 			// The welcome is on screen a moment before its input handler is
-			// attached, so press again every 400 ms, as a person would.
+			// attached, so a key sent too early is lost. Send one key, wait for
+			// the screen to move, and send again only after a quiet spell. Never
+			// a burst: queued Enters all land at once under load and skip steps.
 			keySentAt = Date.now();
 			while (keyMs === null && Date.now() - keySentAt < KEY_BUDGET_MS) {
+				keyOffset = raw.length;
 				send("\r");
-				await waitFor(() => keyMs !== null, 400);
+				await waitFor(() => keyMs !== null, KEY_RETRY_MS);
 			}
 		}
 	} finally {
