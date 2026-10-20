@@ -658,6 +658,8 @@ const DELETE_VIA_PIPE = [
 	`echo / | sudo xargs ${RMW} -rf`,
 	`echo / | env xargs -P4 ${RMW} -rf`,
 	`echo ${RMW} -rf / | xargs env`,
+	`sudo echo ${RMW} -rf / | xargs env`,
+	`env -i nice echo ${RMW} -rf / | xargs env`,
 	`xargs ${RMW} -rf <<< /`,
 	`echo / | xargs -I% sh -c '${RMW} -rf %'`,
 ];

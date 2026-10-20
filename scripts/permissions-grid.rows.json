@@ -362,7 +362,8 @@
 		"xargs -I{} sh -c '%RM% -rf {}' <<< /",
 		"bash <<< 'find ~ %DEL%'",
 		"sh -c \"find ~ -exec %RM% -rf {} +\"",
-		"nohup sh -c 'find / %DEL%' &"
+		"nohup sh -c 'find / %DEL%' &",
+		"sudo echo %RM% -rf / | xargs env"
 	],
 	"benign": [
 		"awk -F, '{print $1}' f",

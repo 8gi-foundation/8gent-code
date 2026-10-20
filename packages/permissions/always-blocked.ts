@@ -726,9 +726,11 @@ function xargsReplStr(tokens: string[]): string | null {
 function producerWords(upstream: string[][]): string[] {
 	const words: string[] = [];
 	for (const seg of upstream) {
-		if (seg.length === 0) continue;
-		if (path.basename(seg[0]) === "find" && findNarrowed(seg)) continue;
-		for (const w of seg.slice(1)) words.push(...w.split(/\\[nt0]|\\x00|\s+/).filter(Boolean));
+		// Unwrap first: `sudo echo ...` hands over echo's words, not a command named sudo.
+		const bare = stripPrefix(seg)?.argv ?? seg;
+		if (bare.length === 0) continue;
+		if (path.basename(bare[0]) === "find" && findNarrowed(bare)) continue;
+		for (const w of bare.slice(1)) words.push(...w.split(/\\[nt0]|\\x00|\s+/).filter(Boolean));
 	}
 	return words;
 }
