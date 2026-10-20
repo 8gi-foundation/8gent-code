@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+
 /**
  * Who may talk to the daemon gateway, checked before any route runs.
  *
@@ -103,8 +105,10 @@ export function guardRequest(
 }
 
 /**
- * The daemon token a request presents at connect time: `Authorization: Bearer`
- * or a `token` query parameter (a browser-style WebSocket cannot set headers).
+ * The daemon token a request presents at connect time: `Authorization: Bearer`,
+ * or, on a WebSocket upgrade only, a `token` query parameter (a browser-style
+ * WebSocket cannot set headers). Plain HTTP requests never read the query,
+ * because URLs end up in proxy logs and browser history.
  */
 export function presentedToken(req: Request): string | null {
 	const header = req.headers
@@ -112,6 +116,7 @@ export function presentedToken(req: Request): string | null {
 		?.replace(/^Bearer\s+/i, "")
 		.trim();
 	if (header) return header;
+	if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return null;
 	try {
 		return new URL(req.url).searchParams.get("token");
 	} catch {
@@ -119,12 +124,15 @@ export function presentedToken(req: Request): string | null {
 	}
 }
 
-function sameToken(a: string, b: string): boolean {
-	const x = new TextEncoder().encode(a);
-	const y = new TextEncoder().encode(b);
-	let diff = x.length ^ y.length;
-	for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
-	return diff === 0;
+/**
+ * Compare two tokens without leaking where or how long they differ: hash both
+ * to fixed-length SHA-256 digests, then compare the digests in constant time.
+ */
+export function sameToken(a: unknown, b: string): boolean {
+	if (typeof a !== "string") return false;
+	const x = createHash("sha256").update(a).digest();
+	const y = createHash("sha256").update(b).digest();
+	return timingSafeEqual(x, y);
 }
 
 /**

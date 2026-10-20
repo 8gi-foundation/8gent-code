@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { requireToken } from "../origin-guard";
+import { readFileSync } from "node:fs";
+import { requireToken, sameToken } from "../origin-guard";
 
 const stubPool = {
 	size: 0,
@@ -44,11 +45,37 @@ describe("requireToken", () => {
 	it("passes when no token is configured", () => {
 		expect(requireToken(req(), null)).toBeNull();
 	});
-	it("401 without, 401 wrong, pass with header or query", () => {
+	it("401 without, 401 wrong, pass with header or upgrade query", () => {
 		expect(requireToken(req(), "s3cret")?.status).toBe(401);
 		expect(requireToken(req({ authorization: "Bearer nope" }), "s3cret")?.status).toBe(401);
 		expect(requireToken(req({ authorization: "Bearer s3cret" }), "s3cret")).toBeNull();
-		expect(requireToken(req({}, "?token=s3cret"), "s3cret")).toBeNull();
+		expect(requireToken(req({ upgrade: "websocket" }, "?token=s3cret"), "s3cret")).toBeNull();
+	});
+});
+
+describe("constant-time compare", () => {
+	it("rejects wrong tokens of equal and unequal length, accepts the right one", () => {
+		expect(sameToken("s3cret", "s3cret")).toBe(true);
+		expect(sameToken("s3creX", "s3cret")).toBe(false); // equal length
+		expect(sameToken("s3", "s3cret")).toBe(false); // shorter
+		expect(sameToken("s3cret-and-more", "s3cret")).toBe(false); // longer
+		expect(sameToken(undefined, "s3cret")).toBe(false);
+	});
+	it("the first-frame check in the gateway goes through sameToken, not ===", () => {
+		const src = readFileSync(new URL("../gateway.ts", import.meta.url), "utf8");
+		expect(src).toContain("sameToken(msg.token, config.authToken)");
+		expect(src).not.toContain("msg.token === config.authToken");
+	});
+});
+
+describe("query token", () => {
+	it("is ignored on plain HTTP and accepted on a WebSocket upgrade", () => {
+		const http = new Request("http://127.0.0.1/harnesses?token=s3cret");
+		expect(requireToken(http, "s3cret")?.status).toBe(401);
+		const upgrade = new Request("http://127.0.0.1/computer?token=s3cret", {
+			headers: { upgrade: "websocket" },
+		});
+		expect(requireToken(upgrade, "s3cret")).toBeNull();
 	});
 });
 

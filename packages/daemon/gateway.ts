@@ -46,6 +46,7 @@ import {
 	isLoopbackHost,
 	requireToken,
 	resolveBindHost,
+	sameToken,
 } from "./origin-guard";
 import {
 	type ComputerWS,
@@ -297,7 +298,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 	// Auth check
 	if (config.authToken && !state.authenticated) {
 		if (msg.type === "auth") {
-			if (msg.token === config.authToken) {
+			if (sameToken(msg.token, config.authToken)) {
 				// F2: bind + PIN the Table participant to a verified human identity
 				// BEFORE authenticating. A bad/agent/duplicate declaration fails auth,
 				// so one connection can never post as arbitrary different participants.
