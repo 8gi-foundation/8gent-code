@@ -190,7 +190,16 @@ export interface ModelFailoverOptions {
 	cacheAffinity?: boolean;
 	/** Estimated prefill speed for the grace-retry decision. Default 2000 tokens/s. */
 	prefillTokensPerSec?: number;
+	/** Clock for the affinity TTL; injectable for tests. Default Date.now. */
+	now?: () => number;
 }
+
+/** Most sessions the affinity map holds; the least recently served is evicted past this. */
+export const AFFINITY_MAX_ENTRIES = 1024;
+/** An affinity entry unused for this long is treated as absent: a prompt cache will not outlive it. */
+export const AFFINITY_TTL_MS = 30 * 60 * 1000;
+/** Session ids longer than this are ignored (never stored, never matched). */
+export const AFFINITY_MAX_ID_LENGTH = 128;
 
 /** What a session's last-good backend saw: where its prompt cache lives. */
 interface Affinity {
@@ -199,6 +208,8 @@ interface Affinity {
 	entry: FailoverEntry;
 	promptTokens: number;
 	graceUsed: boolean;
+	/** When noteServed last wrote this entry, for the TTL. */
+	servedAt: number;
 }
 
 export class ModelFailover {
@@ -214,8 +225,13 @@ export class ModelFailover {
 	private apfelChains = new Set<string>();
 	private cacheAffinity: boolean;
 	private prefillTokensPerSec: number;
-	/** session id to its last-good backend; only written when cacheAffinity is on. */
+	/**
+	 * session id to its last-good backend; only written when cacheAffinity is on.
+	 * Bounded: insertion order is recency (noteServed deletes then sets), capped at
+	 * AFFINITY_MAX_ENTRIES with LRU eviction, and entries expire after AFFINITY_TTL_MS.
+	 */
 	private affinity = new Map<string, Affinity>();
+	private now: () => number;
 
 	constructor(
 		chains?: Record<FailoverChannel, Record<string, FailoverChain>>,
@@ -228,6 +244,7 @@ export class ModelFailover {
 		this.hostedBlocked = !(opts.allowHosted ?? hostedAllowed());
 		this.cacheAffinity = opts.cacheAffinity ?? process.env.EIGHT_CACHE_AFFINITY?.trim() === "1";
 		this.prefillTokensPerSec = opts.prefillTokensPerSec ?? 2000;
+		this.now = opts.now ?? Date.now;
 		// No opt-in: the allowlist is the local providers (narrowed further by an explicit one).
 		this.allow = this.hostedBlocked
 			? (explicit ?? [...LOCAL_FAILOVER_PROVIDERS]).filter((p) => !isHostedProvider(p))
@@ -466,7 +483,7 @@ export class ModelFailover {
 
 		const head = chain.models[0];
 		// Cache affinity: a warm, healthy backend wins over chain order.
-		const aff = this.warmAffinity(sessionId, model, channel);
+		const aff = this.warmAffinity(sessionId, model, channel, chain.models);
 		if (aff && !this.down.has(this.key(aff.entry.model, aff.entry.provider))) return aff.entry;
 		const from = aff?.entry ?? head;
 		const cold = aff ? { coldPrefillTokens: aff.promptTokens } : {};
@@ -506,20 +523,45 @@ export class ModelFailover {
 		return last;
 	}
 
-	/** The session's affinity for this model and channel, when the flag is on. */
+	/**
+	 * The session's affinity for this model and channel, when the flag is on.
+	 * An entry past its TTL, or whose backend is no longer in the current chain
+	 * (the chain changed since it was written), is dropped and treated as absent.
+	 */
 	private warmAffinity(
 		sessionId: string | undefined,
 		model: string,
 		channel: FailoverChannel,
+		chainModels?: readonly FailoverEntry[],
 	): Affinity | undefined {
-		if (!this.cacheAffinity || !sessionId) return undefined;
+		if (!this.cacheAffinity || !sessionId || sessionId.length > AFFINITY_MAX_ID_LENGTH) {
+			return undefined;
+		}
 		const a = this.affinity.get(sessionId);
-		return a && a.model === model && a.channel === channel ? a : undefined;
+		if (!a) return undefined;
+		if (this.now() - a.servedAt > AFFINITY_TTL_MS) {
+			this.affinity.delete(sessionId);
+			return undefined;
+		}
+		if (a.model !== model || a.channel !== channel) return undefined;
+		if (
+			chainModels &&
+			!chainModels.some((e) => e.model === a.entry.model && e.provider === a.entry.provider)
+		) {
+			this.affinity.delete(sessionId);
+			return undefined;
+		}
+		return a;
 	}
 
 	/**
 	 * Record that `entry` served a turn for the session with `promptTokens` of
-	 * prompt, so the next resolve() starts there. No-op with the flag off.
+	 * prompt, so the next resolve() starts there. No-op with the flag off, and for
+	 * a session id over AFFINITY_MAX_ID_LENGTH.
+	 *
+	 * `sessionId` must be the daemon-assigned session id, never a raw string from
+	 * a remote channel (Telegram, Discord, API): those are attacker-controlled and
+	 * would let a caller fill the map with chosen keys.
 	 */
 	noteServed(
 		sessionId: string,
@@ -528,8 +570,31 @@ export class ModelFailover {
 		promptTokens: number,
 		channel: FailoverChannel = "text",
 	): void {
-		if (!this.cacheAffinity) return;
-		this.affinity.set(sessionId, { channel, model, entry, promptTokens, graceUsed: false });
+		if (!this.cacheAffinity || sessionId.length > AFFINITY_MAX_ID_LENGTH) return;
+		// Delete then set so Map insertion order is recency; the first key is the LRU one.
+		this.affinity.delete(sessionId);
+		this.affinity.set(sessionId, {
+			channel,
+			model,
+			entry,
+			promptTokens,
+			graceUsed: false,
+			servedAt: this.now(),
+		});
+		if (this.affinity.size > AFFINITY_MAX_ENTRIES) {
+			const oldest = this.affinity.keys().next().value;
+			if (oldest !== undefined) this.affinity.delete(oldest);
+		}
+	}
+
+	/** Drop a session's affinity, e.g. when the daemon closes the session. */
+	forgetSession(sessionId: string): void {
+		this.affinity.delete(sessionId);
+	}
+
+	/** Number of sessions currently holding an affinity entry. */
+	get affinitySize(): number {
+		return this.affinity.size;
 	}
 
 	/**
