@@ -82,7 +82,11 @@ export class AutoGit {
 
 	private exec(command: string): string {
 		try {
-			return execSync(command, { cwd: this.cwd, encoding: "utf-8" }).trim();
+			return execSync(command, {
+				cwd: this.cwd,
+				encoding: "utf-8",
+				stdio: ["ignore", "pipe", "pipe"],
+			}).trim();
 		} catch (err) {
 			return "";
 		}

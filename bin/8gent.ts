@@ -2776,8 +2776,12 @@ async function reviewCommand(args: string[]) {
 		} else if (prNumber) {
 			diff = execSync(`gh pr diff ${prNumber}`, { encoding: "utf-8" });
 		} else {
-			diff = execSync("git diff HEAD", { encoding: "utf-8" });
-			if (!diff.trim()) diff = execSync("git diff --cached", { encoding: "utf-8" });
+			diff = execSync("git diff HEAD", { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+			if (!diff.trim())
+				diff = execSync("git diff --cached", {
+					encoding: "utf-8",
+					stdio: ["ignore", "pipe", "pipe"],
+				});
 		}
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);

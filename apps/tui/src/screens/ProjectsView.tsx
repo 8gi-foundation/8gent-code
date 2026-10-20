@@ -88,6 +88,7 @@ function getGitBranch(dirPath: string): string | undefined {
 		const result = execSync(`git -C "${dirPath}" branch --show-current 2>/dev/null`, {
 			encoding: "utf8",
 			timeout: 2000,
+			stdio: ["ignore", "pipe", "ignore"],
 		});
 		return result.trim() || undefined;
 	} catch {
@@ -211,8 +212,8 @@ export function ProjectsView({
 	onClose,
 	onSwitchProject,
 	currentPath,
-// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
-// react-doctor-disable-next-line react-doctor/prefer-useReducer
+	// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
+	// react-doctor-disable-next-line react-doctor/prefer-useReducer
 }: ProjectsViewProps) {
 	const [projects, setProjects] = useState<ProjectEntry[]>([]);
 	const [selectedIndex, setSelectedIndex] = useState(0);

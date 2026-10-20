@@ -226,8 +226,13 @@ const DOCS_ONLY = (p: string) =>
 	/\.(md|mdx)$/i.test(p) || /^(LICENSE|NOTICE)(\.txt)?$/i.test(path.basename(p));
 
 /** Tracked files with changes that are not staged. */
-function hasUnstaged(cwd: string): boolean {
-	return Bun.spawnSync(["git", "diff", "--quiet"], { cwd }).exitCode === 1;
+export function hasUnstaged(cwd: string): boolean {
+	// stderr piped: outside a repository git prints "fatal: not a git repository", and an
+	// inherited stderr would write that over the TUI.
+	return (
+		Bun.spawnSync(["git", "diff", "--quiet"], { cwd, stdout: "ignore", stderr: "pipe" })
+			.exitCode === 1
+	);
 }
 
 /**
