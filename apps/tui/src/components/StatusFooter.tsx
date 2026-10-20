@@ -91,6 +91,8 @@ export interface FooterData {
 	sandboxOff?: string;
 	/** ADHD mode: a segment only while on (it had a rail row before #3238). */
 	adhd?: boolean;
+	/** A gate flagged the last turn (#4510). Absent means nothing was flagged. */
+	verification?: "verified" | "unverified" | "tests_claimed_not_run";
 }
 
 /** A value the app passes when it does not know the real one. */
@@ -195,6 +197,15 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			value: d.sessionTime,
 			color: ui.muted,
 			priority: 4,
+		});
+	}
+	// "verified" is never drawn: absence means nothing was flagged, not that it was checked.
+	if (d.verification && d.verification !== "verified") {
+		out.push({
+			key: "verification",
+			value: d.verification.replace(/_/g, "-"),
+			color: ui.orange,
+			priority: 0,
 		});
 	}
 	return out;
