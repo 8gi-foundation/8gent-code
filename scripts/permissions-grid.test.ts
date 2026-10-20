@@ -1,0 +1,88 @@
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadRows } from "./permissions-grid";
+
+const SCRIPT = join(import.meta.dir, "permissions-grid.ts");
+const root = mkdtempSync(join(tmpdir(), "grid-test-"));
+afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+/** A tree holding only a stand-in always-blocked.ts: it refuses any line with a recursive flag, minus `skip`. */
+function fakeTree(name: string, skip?: string): string {
+	const dir = join(root, name, "packages/permissions");
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(
+		join(dir, "always-blocked.ts"),
+		`export const commandArgvs = (t: string) => [t.split(/\\s+/)];
+export const blockedReason = (a: string[]) => {
+  const line = a.join(" ");
+  return line.includes("-rf") && !(${JSON.stringify(skip ?? "")} && line.includes(${JSON.stringify(skip ?? "")})) ? "wipe" : null;
+};
+`,
+	);
+	return join(root, name);
+}
+
+function grid(head: string, base: string, ...extra: string[]) {
+	const p = Bun.spawnSync(["bun", SCRIPT, "--pr-head", head, "--base", base, ...extra], {
+		stderr: "pipe",
+	});
+	return { code: p.exitCode, out: p.stdout.toString() + p.stderr.toString() };
+}
+
+describe("permissions grid", () => {
+	test("matrix is 842 rows: 161 spellings x 5 contexts plus 37 benign; quick is plain and comment", () => {
+		expect(loadRows(false).length).toBe(842);
+		expect(loadRows(true).length).toBe(161 * 2 + 37);
+	});
+
+	test("no wipe is spelled out in the data file or the script", () => {
+		const text = ["permissions-grid.rows.json", "permissions-grid.ts"].map((f) =>
+			Bun.file(join(import.meta.dir, f)).text(),
+		);
+		return Promise.all(text).then((all) => {
+			for (const t of all) expect(/\brm -rf [/~]/.test(t)).toBe(false);
+		});
+	});
+
+	test("identical trees: exit 0, nothing flips", () => {
+		const t = fakeTree("same");
+		const r = grid(t, t, "--no-shell");
+		expect(r.code).toBe(0);
+		expect(r.out).toContain("newly blocked 0, newly allowed 0");
+	});
+
+	test("head misses one spelling that base blocks: exit 1 and the row is named", () => {
+		const r = grid(fakeTree("head-gap", "$'"), fakeTree("base-full"), "--no-shell");
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("NEWLY ALLOWED on head (FAIL)");
+		expect(r.out).toMatch(/newly allowed [1-9]/);
+		expect(r.out).toContain("$'");
+	});
+
+	test("head blocks more than base: exit 0, rows listed as newly blocked", () => {
+		const r = grid(fakeTree("head-strict"), fakeTree("base-gap", "$'"), "--no-shell");
+		expect(r.code).toBe(0);
+		expect(r.out).toMatch(/newly blocked [1-9]\d*, newly allowed 0/);
+	});
+
+	test("a wipe both trees allow is a named gap under a real shell, exit 0", () => {
+		const open = join(root, "open");
+		mkdirSync(join(open, "packages/permissions"), { recursive: true });
+		writeFileSync(
+			join(open, "packages/permissions/always-blocked.ts"),
+			"export const commandArgvs = (t: string) => [[t]];\nexport const blockedReason = () => null;\n",
+		);
+		const r = grid(open, open, "--quick");
+		expect(r.code).toBe(0);
+		expect(r.out).toMatch(/named gaps [1-9]\d*/);
+		expect(r.out).toContain("NAMED SPELLING GAPS");
+		expect(r.out).toContain("plain#0 ");
+	}, 60_000);
+
+	test("a rev that does not exist fails loudly", () => {
+		const r = grid("no-such-rev-4509", "no-such-rev-4509", "--no-shell");
+		expect(r.code).not.toBe(0);
+	});
+});

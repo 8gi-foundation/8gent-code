@@ -1,0 +1,48 @@
+name: Permissions grid
+
+# Runs the spelling grid (scripts/permissions-grid.ts, #4509) on every PR that touches the
+# permissions package: the real commandArgvs + blockedReason from the PR head and from the base,
+# over every shell spelling of a wipe in five contexts. A row the head allows and the base blocks
+# fails the job. Wipes both trees allow are listed as named gaps and do not fail it.
+# No Docker, no matrix: git archive of two directories and about a thousand stubbed shell runs.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/permissions/**"
+      - "packages/core/**"
+      - "scripts/permissions-grid*"
+      - ".github/workflows/permissions-grid.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: permissions-grid-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  grid:
+    name: Permissions grid
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+
+      # The probe runs each row under bash and zsh; the runner has no zsh by default.
+      - name: Install zsh
+        run: sudo apt-get install -y --no-install-recommends zsh
+
+      - name: Grid against the PR base
+        run: bun scripts/permissions-grid.ts --pr-head "${{ github.event.pull_request.head.sha }}" --base "origin/${{ github.base_ref }}"
+
+      - name: Grid script tests
+        run: bun test scripts/permissions-grid.test.ts
