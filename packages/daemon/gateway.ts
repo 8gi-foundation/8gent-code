@@ -40,7 +40,13 @@ import {
 	liveMessage,
 	liveOpen,
 } from "./live-anatomy";
-import { assertSafeBind, guardRequest, resolveBindHost } from "./origin-guard";
+import {
+	assertSafeBind,
+	guardRequest,
+	isLoopbackHost,
+	requireToken,
+	resolveBindHost,
+} from "./origin-guard";
 import {
 	type ComputerWS,
 	handleComputerClose,
@@ -787,6 +793,20 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 
 			const url = new URL(req.url);
 
+			// With a token configured, the routes that reach a model or a tool must
+			// present it at connect time. The root socket, /store and /live/ws keep
+			// their own first-frame token check; /health and /audit/access are unchanged.
+			if (
+				url.pathname === "/computer" ||
+				url.pathname === "/dispatch" ||
+				url.pathname === "/ops/agent-pool/status" ||
+				url.pathname.startsWith("/harness") ||
+				SPEAK_URL_RE.test(url.pathname)
+			) {
+				const denied = requireToken(req, config.authToken);
+				if (denied) return denied;
+			}
+
 			// Tag computer-route upgrades so the websocket open handler can branch.
 			if (url.pathname === "/computer") {
 				const peer = (
@@ -1049,6 +1069,11 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 		},
 	});
 
+	console.log(
+		`[gateway] bind=${hostname} port=${config.port} auth=${config.authToken ? "on" : "off"}${
+			isLoopbackHost(hostname) ? "" : " (non-loopback, token required)"
+		}`,
+	);
 	console.log(`[gateway] WebSocket server listening on ws://${hostname}:${config.port}`);
 	console.log(`[gateway] computer channel: ws://${hostname}:${config.port}/computer`);
 	if (config.dispatch) {

@@ -45,6 +45,11 @@ If no `authToken` is configured, the client is authenticated immediately on conn
 }
 ```
 
+**Bind and token.** The gateway listens on `127.0.0.1` unless `DAEMON_HOSTNAME` widens it (for example `0.0.0.0`). A non-loopback bind without `daemon.authToken` is refused at startup, with a message naming the two ways out: set `daemon.authToken`, or unset `DAEMON_HOSTNAME`. A loopback bind with no token works as before. Startup logs `[gateway] bind=<host> port=<port> auth=<on|off>`.
+
+When a token is set, the root socket and `/store` and `/live/ws` require it in their first frame, as above. `/computer`, `/dispatch`, the pool status route, `/harnesses`, `/harness/*` and the Table speak route also require it at connect time, as `Authorization: Bearer <token>` or a `token` query parameter, and answer `401` without it. `/health` and `/audit/access` are unchanged.
+
+
 ## Session Lifecycle
 
 Every client interaction happens within a session. A session holds an Agent instance with conversation history, tool access, and memory.

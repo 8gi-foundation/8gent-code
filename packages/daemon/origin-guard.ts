@@ -101,3 +101,39 @@ export function guardRequest(
 	}
 	return null;
 }
+
+/**
+ * The daemon token a request presents at connect time: `Authorization: Bearer`
+ * or a `token` query parameter (a browser-style WebSocket cannot set headers).
+ */
+export function presentedToken(req: Request): string | null {
+	const header = req.headers
+		.get("authorization")
+		?.replace(/^Bearer\s+/i, "")
+		.trim();
+	if (header) return header;
+	try {
+		return new URL(req.url).searchParams.get("token");
+	} catch {
+		return null;
+	}
+}
+
+function sameToken(a: string, b: string): boolean {
+	const x = new TextEncoder().encode(a);
+	const y = new TextEncoder().encode(b);
+	let diff = x.length ^ y.length;
+	for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
+	return diff === 0;
+}
+
+/**
+ * 401 unless the request presents the daemon token, when one is configured.
+ * No token configured means a loopback-only bind (assertSafeBind), so null.
+ */
+export function requireToken(req: Request, authToken: string | null): Response | null {
+	if (!authToken) return null;
+	const got = presentedToken(req);
+	if (got && sameToken(got, authToken)) return null;
+	return new Response("unauthorized: daemon token required", { status: 401 });
+}
