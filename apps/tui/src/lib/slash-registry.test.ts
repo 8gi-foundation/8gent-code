@@ -177,35 +177,61 @@ describe("unknownSlashAnswer (#4530)", () => {
 		],
 	);
 
-	test("an unknown slash line gets the local answer, leading whitespace included", () => {
-		expect(unknownSlashAnswer("/nope", loaded)).toBe("Unknown command /nope. Type /help.");
-		expect(unknownSlashAnswer("  /nope with args", loaded)).toBe(
+	const none = { skillExists: async () => false, templateMatches: () => false };
+	const empty = { entries: [], byToken: new Map(), collisions: [] };
+
+	test("an unknown slash line gets the local answer, leading whitespace included", async () => {
+		expect(await unknownSlashAnswer("/nope", loaded, none)).toBe(
 			"Unknown command /nope. Type /help.",
 		);
-		expect(unknownSlashAnswer("/", loaded)).toBe("Unknown command /. Type /help.");
+		expect(await unknownSlashAnswer("  /nope with args", loaded, none)).toBe(
+			"Unknown command /nope. Type /help.",
+		);
+		expect(await unknownSlashAnswer("/", loaded, none)).toBe("Unknown command /. Type /help.");
 	});
 
-	test("a built-in, an alias and a skill trigger are known", () => {
+	test("a path-like line gets the local answer", async () => {
+		expect(await unknownSlashAnswer("/Users/x/file explain this", loaded, none)).toBe(
+			"Unknown command /Users/x/file. Type /help.",
+		);
+	});
+
+	test("a built-in, an alias and a skill trigger are known", async () => {
 		for (const cmd of getBuiltInSlashCommands()) {
-			expect(unknownSlashAnswer(`/${cmd.name}`, loaded)).toBeNull();
+			expect(await unknownSlashAnswer(`/${cmd.name}`, loaded, none)).toBeNull();
 			for (const a of cmd.aliases)
-				expect(unknownSlashAnswer(a.startsWith("/") ? a : `/${a}`, loaded)).toBeNull();
+				expect(await unknownSlashAnswer(a.startsWith("/") ? a : `/${a}`, loaded, none)).toBeNull();
 		}
-		expect(unknownSlashAnswer("/hyperframes make a reel", loaded)).toBeNull();
+		expect(await unknownSlashAnswer("/hyperframes make a reel", loaded, none)).toBeNull();
 	});
 
-	test("a built-in is known even before the registry has loaded", () => {
-		const empty = { entries: [], byToken: new Map(), collisions: [] };
-		expect(unknownSlashAnswer("/help", empty)).toBeNull();
+	test("a built-in is known even before the registry has loaded", async () => {
+		expect(await unknownSlashAnswer("/help", empty, none)).toBeNull();
 	});
 
-	test("plain text is not a slash line", () => {
-		expect(unknownSlashAnswer("hello /nope", loaded)).toBeNull();
-		expect(unknownSlashAnswer("what is 1/2", loaded)).toBeNull();
+	test("a skill typed before the registry loads, or added at runtime, is known", async () => {
+		const skills = { ...none, skillExists: async (n: string) => n === "late-skill" };
+		expect(await unknownSlashAnswer("/late-skill go", empty, skills)).toBeNull();
+		expect(await unknownSlashAnswer("/other go", empty, skills)).not.toBeNull();
 	});
-});
 
-test("unknownSlashAnswer leaves /skill:<name> to the skill handler", () => {
-	const reg = { entries: [], byToken: new Map(), collisions: [] } as never;
-	expect(unknownSlashAnswer("/skill:nope", reg)).toBeNull();
+	test("a template saved after the registry was built is known", async () => {
+		const tpl = { ...none, templateMatches: (l: string) => l.startsWith("/newtemplate") };
+		expect(await unknownSlashAnswer("/newtemplate x", loaded, tpl)).toBeNull();
+	});
+
+	test("/skill:<name> is left to the skill handler", async () => {
+		expect(await unknownSlashAnswer("/skill:nope", empty, none)).toBeNull();
+	});
+
+	test("plain text is not a slash line", async () => {
+		expect(await unknownSlashAnswer("hello /nope", loaded, none)).toBeNull();
+		expect(await unknownSlashAnswer("what is 1/2", loaded, none)).toBeNull();
+	});
+
+	test("the default lookups read templates and skills fresh", async () => {
+		expect(await unknownSlashAnswer("/zz-no-such-thing-4536 a", empty)).toBe(
+			"Unknown command /zz-no-such-thing-4536. Type /help.",
+		);
+	});
 });

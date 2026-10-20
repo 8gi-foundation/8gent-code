@@ -1,4 +1,7 @@
-import { loadPromptTemplates } from "../../../../packages/extensions/prompts.js";
+import {
+	expandPromptCommand,
+	loadPromptTemplates,
+} from "../../../../packages/extensions/prompts.js";
 // Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
 // These are the canonical surface for inter-package use; deep imports would
 // bypass each package's documented API. Suppressed by design.
@@ -236,21 +239,58 @@ export function resolveSlashInput(
 }
 
 /**
- * The local answer for a line that starts with "/" but names no built-in and
- * no skill or prompt trigger, or null when the line is not an unknown slash.
- * Built-ins always count as known, so a registry still loading (skills not in
- * yet) never turns /help into an unknown command. Same set the daemon gate
- * reads (packages/daemon/slash.ts imports BUILT_IN_SLASH_COMMANDS).
+ * Who else can claim a slash line after the registry and built-ins miss it.
+ * Both default to the same lookups the submit path uses (resolveSkillSlash,
+ * expandPromptSlashCommand), read fresh at submit time.
  */
-export function unknownSlashAnswer(input: string, registry: SlashRegistry): string | null {
-	const trimmed = input.trimStart();
+export interface SlashHandlerLookups {
+	/** True when a skill by this name exists (skills loaded now, not at mount). */
+	skillExists: (name: string) => Promise<boolean>;
+	/** True when a prompt template matches the line (templates read now). */
+	templateMatches: (line: string) => boolean;
+}
+
+const defaultLookups: SlashHandlerLookups = {
+	async skillExists(name) {
+		try {
+			const manager = getSkillManager();
+			await manager.loadSkills();
+			return !!manager.getSkill(name);
+		} catch {
+			return false;
+		}
+	},
+	templateMatches(line) {
+		try {
+			return expandPromptCommand(line, loadPromptTemplates()) !== null;
+		} catch {
+			return false;
+		}
+	},
+};
+
+/**
+ * The local answer for a line that starts with "/" but nothing claims, or null
+ * when something does. A line is unknown only if ALL fail: not in the registry
+ * (which may be stale or still loading), not a built-in, not an explicit
+ * `/skill:` form (resolveSkillSlash owns that and its "Unknown skill"
+ * message), no skill of that name found by loading skills now, and no prompt
+ * template matching, read fresh. A path-like line such as `/Users/x/file`
+ * matches none of these and gets the local answer.
+ */
+export async function unknownSlashAnswer(
+	input: string,
+	registry: SlashRegistry,
+	lookups: SlashHandlerLookups = defaultLookups,
+): Promise<string | null> {
+	const trimmed = input.trim();
 	if (!trimmed.startsWith("/")) return null;
 	const name = trimmed.split(/\s+/)[0];
-	// /skill:<name> is claimed by the skill handler in app.tsx, which owns its
-	// own "Unknown skill" message.
-	if (/^\/skill:/.test(name)) return null;
 	if (resolveSlashInput(trimmed, registry)) return null;
 	if (resolveSlashInput(trimmed, mergeSlashEntries(buildBuiltInEntries(), [], []))) return null;
+	if (/^\/skill:/.test(name)) return null;
+	if (await lookups.skillExists(name.slice(1))) return null;
+	if (lookups.templateMatches(trimmed)) return null;
 	return `Unknown command ${name}. Type /help.`;
 }
 
