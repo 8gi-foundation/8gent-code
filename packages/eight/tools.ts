@@ -266,6 +266,7 @@ import { downscaleNote, imageMaxSide } from "./image-fit";
 import { IssueBlameGate, issueBodyOf } from "./issue-blame";
 import { layoutMeasureLine } from "./layout-measure";
 import { MESSAGE_BOARDROOM_TOOL_DEF, messageBoardroom } from "./message-boardroom";
+import { moduleHintFor } from "./module-hint";
 import { decideOpenOnWrite, openWrittenFile } from "./open-on-write";
 import {
 	MAX_PLACEHOLDER_REFUSALS,
@@ -2836,7 +2837,8 @@ export class ToolExecutor {
 				if (/^\[(BLOCKED|PERMISSION DENIED)\]/.test(result.trimStart())) {
 					this.blockedCommands.push(command);
 				}
-				return result;
+				const modHint = moduleHintFor(command, result);
+				return modHint ? `${result}\n${modHint}` : result;
 			}
 
 			case "powershell": {
