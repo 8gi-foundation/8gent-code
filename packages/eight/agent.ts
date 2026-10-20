@@ -429,6 +429,10 @@ export class Agent {
 	private contextNoteMessages: Array<{ role: string; content: string }> = [];
 	private hookManager: HookManager;
 	private sessionId: string;
+	/** Session-scoped failover, only built with cache affinity on (#4500); off: a fresh one per turn. */
+	private affinityFailover: ModelFailover | null = null;
+	/** Entries the affinity failover marked down last turn; revived next turn so a blip is not sticky. */
+	private affinityDown: FailoverEntry[] = [];
 	private observations: ObservationStore | null = null;
 	private sessionStartTime: number;
 	private enableReporting = true;
@@ -2321,6 +2325,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const chatStartTime = Date.now();
 		this.turnStop = null;
 		let totalTokensUsed = 0;
+		// Prompt size of the latest step (cache affinity, #4500).
+		let lastPromptTokens = 0;
 		let stepCount = 0;
 
 		// Session wall-clock guard: abort if any single turn runs > 30 minutes.
@@ -2993,6 +2999,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				};
 
 				totalTokensUsed += event.usage.totalTokens;
+				lastPromptTokens = event.usage.promptTokens || lastPromptTokens;
 
 				// Record tokens for Convex session sync (fire-and-forget)
 				this.sessionSync.recordTokens(event.usage.promptTokens, event.usage.completionTokens);
@@ -3097,8 +3104,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// Deterministic self-healing: walk the failover chain on ANY error
 			// (Bad Request, 5xx, network, schema, timeout). Within the same
 			// provider, keep exponential backoff for 429 rate limits.
-			const failover = new ModelFailover();
 			const channel = "text" as const;
+			const failover = this.turnFailover();
+			const affinityOn = failover.affinityEnabled;
 			const tried = new Set<string>();
 			const errors: Array<{ provider: string; model: string; error: string }> = [];
 
@@ -3109,6 +3117,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 			// The model the user asked for: a failover hop is announced against it (#4363).
 			const askedEntry = { ...currentEntry };
+
+			// Cache affinity (#4500, flag off by default): start where the session's
+			// prompt is already warm instead of re-prefilling it on the chain head.
+			if (affinityOn && failover.isWarm(this.sessionId, askedEntry.model, channel)) {
+				const warm = tryResolve(failover, currentEntry, channel, this.sessionId);
+				if (mayMoveToProvider(this.config.providerPinned, currentEntry.provider, warm.provider)) {
+					currentEntry = warm;
+				}
+			}
 
 			let result: any = null;
 			let resolved = false;
@@ -3283,6 +3300,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							continue;
 						}
 
+						// Cache affinity: one short retry on the warm backend before failing
+						// over, when re-prefilling the prompt elsewhere would cost more than
+						// the wait. Flag off: graceRetry is always false.
+						if (
+							affinityOn &&
+							!attemptTimedOut &&
+							isTransientProviderError(msg) &&
+							failover.graceRetry(this.sessionId, currentEntry, AFFINITY_GRACE_MS)
+						) {
+							console.log(
+								`[agent] ${currentEntry.provider}/${currentEntry.model} transient error, grace retry in ${AFFINITY_GRACE_MS / 1000}s (cache affinity)`,
+							);
+							await new Promise((r) => setTimeout(r, AFFINITY_GRACE_MS));
+							continue;
+						}
+
 						// Any other error -> mark provider down, advance chain, restart
 						console.log(
 							`[agent] ${currentEntry.provider}/${currentEntry.model} failed: ${msg.slice(0, 200)} -> failover`,
@@ -3293,8 +3326,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							error: msg.slice(0, 200),
 						});
 						failover.markDown(currentEntry.model, currentEntry.provider);
+						if (affinityOn) this.affinityDown.push({ ...currentEntry });
 						// No allowed next hop (hosted off, #3710) ends the chain like exhaustion.
-						const next = tryResolve(failover, currentEntry, channel);
+						const next = tryResolve(failover, currentEntry, channel, this.sessionId);
 						if (next.model === currentEntry.model && next.provider === currentEntry.provider) {
 							break outer; // chain exhausted
 						}
@@ -3321,6 +3355,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				const summary = errors.map((e) => `  - ${e.provider}/${e.model}: ${e.error}`).join("\n");
 				throw new Error(
 					`All providers exhausted (${errors.length} attempted):\n${summary || "  (no provider errors recorded)"}`,
+				);
+			}
+
+			// Cache affinity: remember which backend now holds this session's prompt.
+			// The prompt size is the last step's real usage; the history estimate
+			// stands in when the endpoint reported none. agentConfig names the
+			// provider that answered (chain step or hedge winner).
+			if (affinityOn) {
+				failover.noteServed(
+					this.sessionId,
+					askedEntry.model,
+					{ model: agentConfig.provider.model, provider: agentConfig.provider.name },
+					lastPromptTokens > 0 ? lastPromptTokens : estimateMessageTokens(this.messageHistory),
+					channel,
 				);
 			}
 
@@ -4053,6 +4101,21 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	/** Tell the UI a different model serves this turn (#3102). A listener
 	 *  that throws must never change which model runs, so it is contained. */
+	/**
+	 * The failover for this turn. Flag off: a fresh one per turn, as before. Flag
+	 * on: one per session so the affinity map survives between turns, with last
+	 * turn's down marks cleared so the preferred backend is tried again.
+	 */
+	private turnFailover(): ModelFailover {
+		if (!this.affinityFailover) {
+			const fresh = new ModelFailover();
+			if (!fresh.affinityEnabled) return fresh;
+			this.affinityFailover = fresh;
+		}
+		for (const e of this.affinityDown.splice(0)) this.affinityFailover.markUp(e.model, e.provider);
+		return this.affinityFailover;
+	}
+
 	/** A mid-turn failover moved the turn to another model: tell the UI (#4363). Reason unset = it did not answer. */
 	private announceFailover(asked: FailoverEntry, next: FailoverEntry): void {
 		if (asked.model === next.model && asked.provider === next.provider) return;
@@ -4311,6 +4374,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	async cleanup(): Promise<void> {
+		this.affinityFailover?.forgetSession(this.sessionId);
 		// Flush and end Convex session sync
 		await this.sessionSync.endSession().catch(() => {});
 		// Stop kernel pipeline
@@ -4470,6 +4534,14 @@ function readSettingsFileSync(): Settings | null {
 	}
 }
 
+/** How long the warm backend gets to recover before the turn leaves it (cache affinity). */
+const AFFINITY_GRACE_MS = 2000;
+
+/** 5xx, connection resets and DNS/socket failures; 4xx and bad requests are not worth a retry. */
+function isTransientProviderError(msg: string): boolean {
+	return /\b5\d\d\b|ECONN|ETIMEDOUT|ENOTFOUND|EPIPE|fetch failed|socket hang up|network/i.test(msg);
+}
+
 /**
  * The failover chain's next entry, or `current` when no allowed provider can
  * serve the model: with hosted providers off (#3710) or an allowlist set,
@@ -4479,9 +4551,10 @@ function tryResolve(
 	failover: ModelFailover,
 	current: FailoverEntry,
 	channel: FailoverChannel,
+	sessionId?: string,
 ): FailoverEntry {
 	try {
-		return failover.resolve(current.model, channel);
+		return failover.resolve(current.model, channel, sessionId);
 	} catch (err) {
 		if (err instanceof NoAllowedProviderError) return current;
 		throw err;
