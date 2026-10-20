@@ -32,7 +32,7 @@ const pressedListeners = new Set<() => void>();
 
 /** Reads the screen text for a copy; set by the app from Ink's last frame. */
 let screenReader: (() => string) | null = null;
-let copier: ((text: string) => { osc52: boolean; native: string | null } | void) | null = null;
+let copier: ((text: string) => { osc52: boolean; native: string | null } | undefined) | null = null;
 const copiedListeners = new Set<(chars: number, ok: boolean) => void>();
 const selection = new TextSelection(() => screenReader?.() ?? "");
 const selectionListeners = new Set<(range: SelRange | null) => void>();
@@ -104,7 +104,7 @@ export function currentPressed(): string | null {
 /** Where the text for a copy comes from, and where it goes. */
 export function setSelectionIO(
 	read: (() => string) | null,
-	copy: ((text: string) => { osc52: boolean; native: string | null } | void) | null,
+	copy: ((text: string) => { osc52: boolean; native: string | null } | undefined) | null,
 ): void {
 	screenReader = read;
 	copier = copy;
