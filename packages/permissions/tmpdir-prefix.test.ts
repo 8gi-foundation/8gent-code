@@ -165,7 +165,12 @@ describe("seatbelt and policy agree on one scratch dir", () => {
 		const id = `sb-${process.pid}`;
 		const work = seatbeltScratchDir(id);
 		expect(work).toBe(policyScratchDir(id) as string);
-		expect(work.startsWith(os.tmpdir())).toBe(false);
+		// The test's data dir itself lives under os.tmpdir() (ROOT), so "not under
+		// tmpdir" is platform-dependent. The invariant: the dir is the shared
+		// helper's per-session dir under the data dir, owner-only.
+		expect(work).toBe(scratchDirPath(id));
+		expect(work.startsWith(path.join(DATA_DIR, "scratch") + path.sep)).toBe(true);
+		if (process.platform !== "win32") expect(fs.statSync(work).mode & 0o777).toBe(0o700);
 		fs.writeFileSync(path.join(work, "out.txt"), "x");
 		const d = await write(path.join(work, "out.txt"), id);
 		expect("reason" in d ? d.reason : "").not.toContain("[workspace-boundary]");
