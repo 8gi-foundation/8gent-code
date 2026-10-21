@@ -613,6 +613,33 @@ describe("inproc-search", () => {
 		}
 	});
 
+	test("a file swapped for a symlink after the walk is not followed", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-swap-"));
+		const outside = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-outside-"));
+		try {
+			fs.writeFileSync(path.join(outside, "secret.txt"), "needle secret\n");
+			fs.writeFileSync(path.join(d, "a.txt"), "needle\n");
+			let swapped = false;
+			const r = await searchFiles({
+				root: d,
+				pattern: "needle",
+				allow: (abs) => {
+					if (!swapped && abs.endsWith("a.txt")) {
+						swapped = true;
+						fs.rmSync(abs);
+						fs.symlinkSync(path.join(outside, "secret.txt"), abs);
+					}
+					return true;
+				},
+			});
+			expect(swapped).toBe(true);
+			expect(r.hits.length).toBe(0);
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+			fs.rmSync(outside, { recursive: true, force: true });
+		}
+	});
+
 	test("the deadline is checked while a big directory is listed", async () => {
 		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-bigdir-"));
 		try {

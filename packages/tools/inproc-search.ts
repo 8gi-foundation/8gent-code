@@ -264,8 +264,11 @@ export function parseGitignoreInfo(
 
 /** Read a file only when it fits in max bytes: stat first, then read at most max+1. A larger file returns null. */
 async function readCapped(file: string, max: number): Promise<Buffer | null> {
-	// O_NONBLOCK: opening a FIFO swapped in after the walk must not block. fstat on the fd, not the path.
-	const fh = await fs.promises.open(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+	// O_NONBLOCK: a FIFO swapped in after the walk must not block. O_NOFOLLOW: a swapped-in symlink is refused (ELOOP), not followed. fstat on the fd, not the path.
+	const fh = await fs.promises.open(
+		file,
+		fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW,
+	);
 	try {
 		const st = await fh.stat();
 		if (!st.isFile()) return null; // not a regular file: skipped
