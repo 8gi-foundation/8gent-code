@@ -13,6 +13,7 @@
  * "Local" is decided by the caller (runsOnBox in packages/eight), which reads
  * local-providers.ts. Nothing here names a model.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import {
 	appendFileSync,
@@ -270,10 +271,19 @@ export interface LedgerEntry {
 	bytesSent: number;
 	/** True when the endpoint sent no usage and the tokens are bytes / 4. */
 	est?: boolean;
+	/** True when the request went through the masker (/consult, #4608). A flag only: never the text or the map. */
+	masked?: true;
 }
 
 /** One id per process, so /privacy can split "this session" from "today". */
 export const SESSION_ID = randomUUID();
+
+/**
+ * Calls made inside maskedScope.run({ masked: true }, ...) are written to the
+ * ledger with masked:true. The wire records the call, so this is the only way
+ * /consult marks it; the ledger still gets a flag and nothing else.
+ */
+export const maskedScope = new AsyncLocalStorage<{ masked: boolean }>();
 
 const num = (n: unknown) =>
 	typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
@@ -295,6 +305,7 @@ export function makeEntry(call: CallInfo, now: Date = new Date()): LedgerEntry {
 	return {
 		id: randomUUID().slice(0, 8),
 		...(call.kind ? { kind: call.kind } : {}),
+		...(!call.local && maskedScope.getStore()?.masked ? { masked: true as const } : {}),
 		ts: now.toISOString(),
 		session: SESSION_ID,
 		provider: String(call.provider),
@@ -503,7 +514,7 @@ function section(title: string, m: Meter): string[] {
 	];
 	for (const c of m.cloudCalls.slice(-10)) {
 		lines.push(
-			`  cloud  ${c.ts.slice(11, 19)}  ${c.provider}  ${tokensOf(c)} tokens, about ${fmtBytes(c.bytesSent)} sent`,
+			`  cloud  ${c.ts.slice(11, 19)}  ${c.provider}  ${tokensOf(c)} tokens, about ${fmtBytes(c.bytesSent)} sent${c.masked ? " (masked)" : ""}`,
 		);
 	}
 	if (m.cloudCalls.length > 10)

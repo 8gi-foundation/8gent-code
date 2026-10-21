@@ -148,6 +148,12 @@ export interface ChatRequest {
 	 * OpenAI-compatible paths. Never sent to a provider as a field.
 	 */
 	signal?: AbortSignal;
+	/**
+	 * Send to this provider instead of the active one, without changing the saved
+	 * active provider (/consult, #4608). The model is that provider's default
+	 * unless `model` is set. Never sent to a provider as a field.
+	 */
+	providerName?: ProviderName;
 }
 
 export interface ToolDefinition {
@@ -866,8 +872,14 @@ export class ProviderManager {
 		// flag is exactly "1" and the caller left `thinking` empty. Otherwise
 		// returns the caller's object untouched.
 		const request = applyEffortPolicy(callerRequest);
-		const provider = this.getActiveProvider();
-		const model = request.model || this.settings.activeModel;
+		const provider = request.providerName
+			? this.getProvider(request.providerName)
+			: this.getActiveProvider();
+		const model =
+			request.model ||
+			(request.providerName && request.providerName !== this.settings.activeProvider
+				? provider.defaultModel
+				: this.settings.activeModel);
 
 		// Resolve the requested thinking level against this provider's
 		// capabilities. Downgrades silently when the exact level is unsupported;

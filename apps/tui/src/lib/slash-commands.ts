@@ -142,6 +142,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		usage: "/route [local-only|local-first|cloud-first]",
 	},
 	{
+		name: "consult",
+		aliases: [],
+		description:
+			"Takes a question: one stateless question to your cloud model with secrets and personal data masked first",
+		usage: "/consult <question>",
+	},
+	{
 		name: "privacy",
 		aliases: [],
 		description: "How much stayed on this machine today and this session, and each cloud call",

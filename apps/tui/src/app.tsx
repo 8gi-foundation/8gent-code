@@ -6053,6 +6053,21 @@ export function App({
 							setViewMode("model-select");
 						}
 					}
+					// /consult: one stateless, masked question to the cloud model (#4608)
+					else if (command === ("consult" as any)) {
+						Promise.all([
+							import("../../../packages/providers/consult.js"),
+							import("../../../packages/providers/locality.js"),
+						])
+							.then(async ([c, l]) => {
+								addSystemMessage("Consulting the cloud model with the question masked...");
+								addSystemMessage(await c.consult(args.join(" "), c.defaultConsultDeps()));
+								setLocalChip(l.chipText(l.readLedger()));
+							})
+							.catch((e) =>
+								addSystemMessage(`consult: ${e instanceof Error ? e.message : String(e)}`),
+							);
+					}
 					// /route and /privacy: where model calls may go, and what left this machine (#4607)
 					else if (command === ("route" as any) || command === ("privacy" as any)) {
 						import("../../../packages/providers/locality.js")
