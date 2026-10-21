@@ -634,7 +634,7 @@ import {
 	ANDROID_VOICE_LINE_SUBS,
 	isAndroidHost,
 } from "../../../packages/voice/termux.js";
-import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
+import { KittenTTSProvider, installTermuxTTSEngine } from "../../../packages/voice/tts-engine.js";
 import { VoiceReplyTracker } from "../../../packages/voice/voice-chat.js";
 import {
 	FALLBACK_SYSTEM_VOICE,
@@ -2611,6 +2611,11 @@ export function App({
 			},
 		]);
 	}, []);
+
+	// Android (#4706): spoken replies via termux-tts-speak; a missing tool says so in the chat, not on stderr.
+	useEffect(() => {
+		if (isAndroidHost()) installTermuxTTSEngine(addSystemMessage);
+	}, [addSystemMessage]);
 
 	// A cloud call is never silent (#4607): one line naming the provider and why.
 	useEffect(() => {

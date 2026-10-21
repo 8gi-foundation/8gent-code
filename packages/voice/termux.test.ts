@@ -13,7 +13,12 @@ import {
 	isAndroidHost,
 	voiceOutputOn,
 } from "./termux.js";
-import { TTSEngine, TermuxTTSProvider } from "./tts-engine.js";
+import {
+	TTSEngine,
+	TermuxTTSProvider,
+	getTTSEngine,
+	installTermuxTTSEngine,
+} from "./tts-engine.js";
 
 let bin: string;
 const savedEnv = { ...process.env };
@@ -213,5 +218,40 @@ describe("review fixes (#4726)", () => {
 		);
 		expect(await (await p.speak("a")).exited).toBe(0);
 		expect(hints).toEqual([]);
+	});
+});
+
+describe("hint routing (#4726)", () => {
+	test("the default provider writes nothing to stderr or stdout", async () => {
+		const out: string[] = [];
+		const origErr = console.error;
+		const origLog = console.log;
+		const origW = process.stderr.write;
+		console.error = (...a) => void out.push(a.join(" "));
+		console.log = (...a) => void out.push(a.join(" "));
+		process.stderr.write = ((c: string) => {
+			out.push(String(c));
+			return true;
+		}) as never;
+		try {
+			const p = new TermuxTTSProvider({ ...fakePath(), EIGHT_VOICE: "1" }, () => true);
+			expect(await (await p.speak("a")).exited).toBe(127);
+		} finally {
+			console.error = origErr;
+			console.log = origLog;
+			process.stderr.write = origW;
+		}
+		expect(out).toEqual([]);
+	});
+
+	test("installTermuxTTSEngine routes the hint to the supplied sink, once", async () => {
+		const hints: string[] = [];
+		process.env.PATH = bin;
+		process.env.EIGHT_VOICE = "1";
+		const engine = installTermuxTTSEngine((m) => hints.push(m));
+		expect(getTTSEngine()).toBe(engine);
+		await (await engine.speak("a")).exited;
+		await (await engine.speak("b")).exited;
+		expect(hints).toEqual([TERMUX_TTS_HINT]);
 	});
 });
