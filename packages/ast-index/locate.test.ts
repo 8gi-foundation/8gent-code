@@ -515,6 +515,26 @@ describe("a repo larger than one rg output chunk", () => {
 	);
 });
 
+describe("path-guard on locate (#4634)", () => {
+	test("credential files are not shown with rg or without it", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "locate-guard-"));
+		try {
+			fs.mkdirSync(path.join(d, ".ssh"));
+			fs.writeFileSync(path.join(d, ".ssh", "id_rsa"), "zebrafish_token\n");
+			fs.writeFileSync(path.join(d, "credentials"), "zebrafish_token\n");
+			fs.writeFileSync(path.join(d, "ok.ts"), "const zebrafish_token = 1;\n");
+			for (const rgBin of [undefined, path.join(d, "no-such", "rg")]) {
+				const r = await locate('"zebrafish_token"', { root: d, repoId: null, rg: rgBin });
+				const files = r.rows.map((x) => x.file);
+				expect(files).toContain("ok.ts");
+				expect(files.join(" ")).not.toMatch(/id_rsa|credentials/);
+			}
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("ripgrep missing", () => {
 	test("without rg the in-process search answers, no 'rg missing' note (#4633)", async () => {
 		const r = await locate('"Rate limit exceeded for tool"', {

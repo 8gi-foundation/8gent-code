@@ -1455,7 +1455,7 @@ export class ToolExecutor {
 				function: {
 					name: "search_files",
 					description:
-						"[FILE] Pass pattern (text or regex); returns up to 200 'file:line:text' rows of matching lines across the project, .gitignore respected, binary files skipped. Optional glob limits files (for example '*.ts'), literal=true treats pattern as plain text. Runs in-process, no shell. Use this instead of run_command with grep.",
+						"[FILE] Pass pattern (text or regex); returns up to 200 file:line:text rows. Optional glob (for example '*.ts'), literal=true for plain text. Respects .gitignore and path-guard, skips binaries, runs in-process with a 5 s limit. Use instead of grep.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -2738,6 +2738,8 @@ export class ToolExecutor {
 						pattern: String(args.pattern ?? ""),
 						glob: args.glob as string | undefined,
 						literal: args.literal === true,
+						// Same read guard as read_file: credential files and dirs are never walked.
+						allow: (abs) => guardPath(abs, this.workingDirectory, {}, "read").ok,
 					}),
 				);
 			}

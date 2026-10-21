@@ -8,6 +8,8 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { Worker } from "node:worker_threads";
+import { type ScanJob, scanFiles } from "./inproc-search-worker";
 
 export interface SearchHit {
 	file: string;
@@ -28,6 +30,12 @@ export interface SearchOptions {
 	maxResults?: number;
 	maxPerFile?: number;
 	maxFileBytes?: number;
+	/** Veto an absolute path (the permissions path-guard). A denied directory is not entered, a denied file is not read; both are skipped silently. */
+	allow?: (absPath: string) => boolean;
+	/** Wall-clock limit for the content scan; the worker is terminated at it. Default 5000. */
+	deadlineMs?: number;
+	/** Walk entry cap. Default 200000. */
+	maxEntries?: number;
 }
 
 export interface SearchResult {
@@ -35,9 +43,14 @@ export interface SearchResult {
 	files: string[];
 	filesScanned: number;
 	truncated: boolean;
+	/** The scan hit its deadline; hits are partial. */
+	timedOut?: boolean;
+	/** The pattern was refused (too long or not a valid regex). */
+	error?: string;
 }
 
 const ALWAYS_SKIP = new Set(["node_modules", "dist", ".git"]);
+export const MAX_PATTERN_CHARS = 512;
 const SKIP_FILE = /\.(lock|min\.js|map)$/;
 
 /** Translate a glob to a RegExp over a "/"-separated relative path. */
@@ -102,13 +115,24 @@ function isIgnored(rel: string, isDir: boolean, scopes: Scope[]): boolean {
 export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 	const root = path.resolve(opts.root);
 	const maxResults = opts.maxResults ?? 200;
-	const maxPerFile = opts.maxPerFile ?? 20;
-	const maxBytes = opts.maxFileBytes ?? 1_000_000;
+	const allow = opts.allow ?? (() => true);
 	const fileGlob = opts.glob ? globToRegExp(opts.glob, opts.glob.includes("/")) : null;
 	const out: SearchResult = { hits: [], files: [], filesScanned: 0, truncated: false };
+	if (opts.pattern) {
+		if (opts.pattern.length > MAX_PATTERN_CHARS) {
+			return { ...out, error: `pattern longer than ${MAX_PATTERN_CHARS} characters` };
+		}
+		try {
+			new RegExp(opts.pattern);
+		} catch (e) {
+			return { ...out, error: `invalid regex: ${(e as Error).message}` };
+		}
+	}
 
-	// 1. Walk: sorted, ignore-aware list of candidate files (relative, "/"-separated).
+	// 1. Walk: sorted, ignore-aware, guard-filtered list of candidate files.
 	const candidates: string[] = [];
+	let entriesSeen = 0;
+	const maxEntries = opts.maxEntries ?? 200_000;
 	const walk = (dir: string, rel: string, inherited: Scope[]): void => {
 		let entries: fs.Dirent[];
 		try {
@@ -125,68 +149,82 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 			} catch {}
 		}
 		for (const e of entries) {
+			if (out.truncated) return;
+			if (++entriesSeen > maxEntries) {
+				out.truncated = true;
+				return;
+			}
 			const childRel = rel ? `${rel}/${e.name}` : e.name;
 			const isDir = e.isDirectory();
 			if (!isDir && !e.isFile()) continue; // symlinks are not followed
 			if (isDir ? ALWAYS_SKIP.has(e.name) : SKIP_FILE.test(e.name)) continue;
 			if (isIgnored(childRel, isDir, scopes)) continue;
-			if (isDir) walk(path.join(dir, e.name), childRel, scopes);
+			const abs = path.join(dir, e.name);
+			if (!allow(abs)) continue; // path-guard denied: never entered, never read, never listed
+			if (isDir) walk(abs, childRel, scopes);
 			else if (!fileGlob || fileGlob.test(childRel)) candidates.push(childRel);
 		}
 	};
 	walk(root, "", []);
 
 	if (!opts.pattern) {
-		out.truncated = candidates.length > maxResults;
+		if (candidates.length > maxResults) out.truncated = true;
 		out.files = candidates.slice(0, maxResults);
 		return out;
 	}
 
-	// 2. Scan: read files in parallel batches, judge them in path order.
-	const src = opts.literal ? opts.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : opts.pattern;
-	const insensitive = opts.ignoreCase ?? !/[A-Z]/.test(opts.pattern);
-	const matcher = new RegExp(src, insensitive ? "i" : "");
-	const whole = new RegExp(src, insensitive ? "im" : "m");
-	// For an ASCII pattern, test raw bytes as latin1 (a 1:1 decode, far cheaper than
-	// utf8) and decode properly only a candidate file.
-	const asciiPattern = /^[\x20-\x7e]*$/.test(src);
-	const BATCH = 64;
-	for (let i = 0; i < candidates.length && !out.truncated; i += BATCH) {
-		const batch = candidates.slice(i, i + BATCH);
-		const bufs = await Promise.all(
-			batch.map((rel) =>
-				fs.promises.readFile(path.join(root, ...rel.split("/"))).catch(() => null),
-			),
-		);
-		for (let j = 0; j < batch.length && !out.truncated; j++) {
-			const buf = bufs[j];
-			if (!buf || buf.length > maxBytes || buf.subarray(0, 8192).includes(0)) continue; // unreadable, big or binary
-			out.filesScanned++;
-			if (asciiPattern && !whole.test(buf.toString("latin1"))) continue;
-			const text = buf.toString("utf8");
-			if (!asciiPattern && !whole.test(text)) continue;
-			let perFile = 0;
-			const lines = text.split(/\r?\n/);
-			for (let n = 0; n < lines.length; n++) {
-				if (!matcher.test(lines[n])) continue;
-				out.hits.push({ file: batch[j], line: n + 1, text: lines[n].slice(0, 300) });
-				if (out.hits.length >= maxResults) {
-					out.truncated = true;
-					break;
-				}
-				if (++perFile >= maxPerFile) break;
-			}
-		}
+	// 2. Scan in a worker with a hard deadline: a catastrophic regex cannot hang this thread.
+	const job: ScanJob = {
+		root,
+		candidates,
+		pattern: opts.pattern,
+		literal: opts.literal === true,
+		ignoreCase: opts.ignoreCase,
+		maxResults,
+		maxPerFile: opts.maxPerFile ?? 20,
+		maxBytes: opts.maxFileBytes ?? 1_000_000,
+	};
+	const deadlineMs = opts.deadlineMs ?? 5000;
+	let worker: Worker;
+	try {
+		worker = new Worker(new URL("./inproc-search-worker.ts", import.meta.url));
+	} catch {
+		// Worker unavailable (bundled binary): scan inline, with the pattern length cap only.
+		const r = await scanFiles(job, () => {});
+		return { ...out, hits: r.hits, filesScanned: r.scanned, truncated: r.truncated };
 	}
-	return out;
+	return new Promise<SearchResult>((resolve) => {
+		let done = false;
+		const finish = (timedOut: boolean) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			void worker.terminate();
+			resolve({ ...out, timedOut: timedOut || undefined });
+		};
+		const timer = setTimeout(() => finish(true), deadlineMs);
+		worker.on(
+			"message",
+			(m: { hits: SearchHit[]; scanned: number; truncated?: boolean; done?: boolean }) => {
+				out.hits.push(...m.hits);
+				out.filesScanned = Math.max(out.filesScanned, m.scanned);
+				if (m.truncated) out.truncated = true;
+				if (m.done) finish(false);
+			},
+		);
+		worker.on("error", () => finish(false));
+		worker.postMessage(job);
+	});
 }
 
-/** Render a result as "file:line:text" rows (or file names), with a cap note. */
+/** Render a result as "file:line:text" rows (or file names), with cap, timeout and refusal notes. */
 export function formatSearch(r: SearchResult): string {
+	if (r.error) return `Search refused: ${r.error}.`;
 	const rows = r.hits.length > 0 ? r.hits.map((h) => `${h.file}:${h.line}:${h.text}`) : r.files;
-	if (rows.length === 0) return "No matches.";
-	return (
-		rows.join("\n") +
-		(r.truncated ? "\n[truncated: result cap reached, narrow the pattern or glob]" : "")
-	);
+	const notes = [
+		r.timedOut ? "[search timed out: results are partial, use a simpler pattern]" : "",
+		r.truncated ? "[truncated: result cap reached, narrow the pattern or glob]" : "",
+	].filter(Boolean);
+	if (rows.length === 0 && notes.length === 0) return "No matches.";
+	return [...rows, ...notes].join("\n");
 }

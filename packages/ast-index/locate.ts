@@ -31,6 +31,7 @@
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { validatePath } from "../permissions/path-guard";
 import { searchFiles } from "../tools/inproc-search";
 import type { Symbol } from "../types";
 import {
@@ -520,6 +521,14 @@ export function runRg(
 	});
 }
 
+/**
+ * The read guard read_file uses (credential basenames, .ssh, .8gent/secrets ...). A path it
+ * denies is never listed or shown by locate either, rg or in-process (8SO, #4634).
+ */
+function readAllowed(root: string): (abs: string) => boolean {
+	return (abs) => validatePath(abs, root, {}, "read").ok;
+}
+
 /** Per-call state: which rg to run, and whether it turned out missing or slow. */
 interface RunState {
 	bin?: string;
@@ -579,6 +588,7 @@ async function grepLiteral(
 				literal: true,
 				ignoreCase: ignoreCase || undefined,
 				maxResults: 5000,
+				allow: readAllowed(root),
 			});
 			hits.push(...r.hits.map((h) => ({ file: h.file, line: h.line, text: h.text })));
 		}
@@ -590,7 +600,7 @@ async function grepLiteral(
 	// --sort path is single-threaded, so it would only be slower; the time
 	// limit is reported instead (LocateResult.incomplete).
 	if (out.truncated && !out.timedOut) out = await rg(state, root, ["--sort", "path", ...args]);
-	return parseRgLines(out.text);
+	return parseRgLines(out.text).filter((h) => readAllowed(root)(path.resolve(root, h.file)));
 }
 
 /**
@@ -609,9 +619,16 @@ async function listFiles(ctx: RunCtx): Promise<string[]> {
 	);
 	if (out.missing) {
 		ctx.state.rgMissing = false;
-		return (await searchFiles({ root: ctx.root, maxResults: Number.POSITIVE_INFINITY })).files;
+		return (
+			await searchFiles({ root: ctx.root, maxResults: 1_000_000, allow: readAllowed(ctx.root) })
+		).files;
 	}
-	const files = out.text.split("\0").filter(Boolean).map(normalizeRelPath);
+	const allowed = readAllowed(ctx.root);
+	const files = out.text
+		.split("\0")
+		.filter(Boolean)
+		.map(normalizeRelPath)
+		.filter((f) => allowed(path.resolve(ctx.root, f)));
 	if ((out.timedOut || files.length === 0) && ctx.repoId) {
 		const seen = new Set(files);
 		for (const f of getFileTree(ctx.repoId).map(toPosix)) if (!seen.has(f)) files.push(f);
