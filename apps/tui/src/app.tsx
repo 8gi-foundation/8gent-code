@@ -1266,6 +1266,21 @@ export function App({
 			cancelled = true;
 		};
 	}, []);
+	// Model ledger (#4609): pin the local model on first use, say so when it changed under the same name.
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			try {
+				if (!currentProvider || !currentModel) return;
+				const { checkModel } = await import("../../../packages/local-model-server/model-ledger.js");
+				const r = await checkModel(currentProvider, currentModel);
+				if (!cancelled) for (const line of r.lines) addSystemMessage(line);
+			} catch {}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 	// The daemon session this TUI is linked to, if any (#3929, see linkDaemonSession).
 	const daemonLinkRef = useRef<{ client: DaemonSessionClient; off: () => void } | null>(null);
 	/** Whether the history picker is showing daemon sessions (/sessions) or local ones. */

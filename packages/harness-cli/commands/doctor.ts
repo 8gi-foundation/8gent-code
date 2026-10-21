@@ -13,6 +13,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { modelLedgerDoctorLines } from "../../local-model-server/model-ledger.js";
 
 export type CheckName =
 	| "Sessions directory"
@@ -63,6 +64,9 @@ export const CHECK_META: Record<CheckName, { tier: Tier; layer: Layer; fix: stri
 	},
 };
 
+const SEARCH_IGNORED =
+	"EIGHT_SEARCH_URL ignored: declared in a .env file. Set it in your shell profile.";
+
 export type Check = { name: CheckName; pass: boolean; detail: string };
 
 /** Seams for tests. Every default is what the command used before #3451. */
@@ -72,6 +76,9 @@ export interface DoctorDeps {
 	fetch?: (url: string, init?: RequestInit) => Promise<Response>;
 	loadAgent?: () => Promise<unknown>;
 	loadTools?: () => Promise<{ agentTools: Record<string, unknown> }>;
+	/** Seam for tests. Default probes the EIGHT_SEARCH_URL captured at start (#4613). */
+	searchStatus?: () => Promise<{ ignored: boolean; recent: Record<string, number> }>;
+	probeSearch?: () => Promise<{ origin: string; ok: boolean; detail?: string } | null>;
 }
 
 export async function doctor(_args: string[], deps: DoctorDeps = {}): Promise<void> {
@@ -201,8 +208,41 @@ export async function doctor(_args: string[], deps: DoctorDeps = {}): Promise<vo
 		});
 	}
 
+	// A configured search endpoint gets one note. Nothing prints when it is unset.
+	let searchNote = "";
+	try {
+		const st = await (
+			deps.searchStatus ??
+			(async () => {
+				const w = await import("../../tools/web.js");
+				return {
+					ignored: w.searchUrlIgnored(),
+					recent: w.readSearchOrigins(
+						path.join(deps.home ?? os.homedir(), ".8gent", "search-origins.jsonl"),
+					),
+				};
+			})
+		)();
+		if (st.ignored) searchNote += `  ${SEARCH_IGNORED}\n`;
+		const recent = Object.entries(st.recent).map(([o, n]) => `${o} x${n}`);
+		if (recent.length)
+			searchNote += `  Recent searches went to: ${recent.join(", ")} (origins only).\n`;
+	} catch {}
+	try {
+		const probe = await (
+			deps.probeSearch ?? (async () => (await import("../../tools/web.js")).probeSearchEndpoint())
+		)();
+		if (probe) {
+			searchNote += probe.ok
+				? `  Search endpoint ${probe.origin} reachable (EIGHT_SEARCH_URL).\n`
+				: `  Search endpoint ${probe.origin} not reachable (EIGHT_SEARCH_URL).\n`;
+		}
+	} catch {}
+
 	if (tiers) {
 		printTiered(checks);
+		if (searchNote) console.log(searchNote);
+		printPinnedModels(deps.home);
 		return;
 	}
 
@@ -215,11 +255,19 @@ export async function doctor(_args: string[], deps: DoctorDeps = {}): Promise<vo
 	}
 
 	console.log();
+	if (searchNote) console.log(searchNote);
 	if (allPass) {
 		console.log("  \x1b[32mAll checks passed.\x1b[0m\n");
 	} else {
 		console.log("  \x1b[33mSome checks failed — 8gent may not work fully.\x1b[0m\n");
 	}
+	printPinnedModels(deps.home);
+}
+
+/** Pinned local models (#4609). Prints nothing until a session has pinned one. */
+function printPinnedModels(home?: string): void {
+	const lines = modelLedgerDoctorLines(home);
+	if (lines.length > 0) console.log(`${lines.map((l) => `  ${l}`).join("\n")}\n`);
 }
 
 /** Tiered report: groups critical first, the layer on each line, the fix under each failure. */
