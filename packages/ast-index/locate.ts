@@ -31,6 +31,7 @@
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { searchFiles } from "../tools/inproc-search";
 import type { Symbol } from "../types";
 import {
 	getFileOutline,
@@ -567,6 +568,22 @@ async function grepLiteral(
 		"./",
 	];
 	let out = await rg(state, root, args);
+	// No rg on PATH (Windows, Termux): the in-process walk answers instead (#4633).
+	if (out.missing) {
+		state.rgMissing = false;
+		const hits: GrepHit[] = [];
+		for (const p of patterns) {
+			const r = await searchFiles({
+				root,
+				pattern: p,
+				literal: true,
+				ignoreCase: ignoreCase || undefined,
+				maxResults: 5000,
+			});
+			hits.push(...r.hits.map((h) => ({ file: h.file, line: h.line, text: h.text })));
+		}
+		return hits;
+	}
 	// Hits are ranked after a complete read, so walk order does not matter.
 	// When the safety cap cut the output, re-run in path order so the cut
 	// (and so the answer) is the same on every run. Not after a timeout:
@@ -590,6 +607,10 @@ async function listFiles(ctx: RunCtx): Promise<string[]> {
 		["--files", "--null", "--", "./"],
 		Number.POSITIVE_INFINITY,
 	);
+	if (out.missing) {
+		ctx.state.rgMissing = false;
+		return (await searchFiles({ root: ctx.root, maxResults: Number.POSITIVE_INFINITY })).files;
+	}
 	const files = out.text.split("\0").filter(Boolean).map(normalizeRelPath);
 	if ((out.timedOut || files.length === 0) && ctx.repoId) {
 		const seen = new Set(files);

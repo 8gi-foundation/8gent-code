@@ -516,24 +516,24 @@ describe("a repo larger than one rg output chunk", () => {
 });
 
 describe("ripgrep missing", () => {
-	test("the answer says rg is unavailable instead of 'no matches'", async () => {
+	test("without rg the in-process search answers, no 'rg missing' note (#4633)", async () => {
 		const r = await locate('"Rate limit exceeded for tool"', {
 			root,
 			repoId,
 			rg: path.join(parent, "no-such-dir", "rg"),
 		});
-		expect(r.rgMissing).toBe(true);
+		expect(r.rgMissing).toBeUndefined();
 		const out = formatLocate(r);
-		expect(out).toContain("ripgrep (rg) was not found");
-		expect(out).not.toContain("no matches");
+		expect(out).not.toContain("ripgrep (rg) was not found");
+		expect(out).toContain("src/limits/rate-limiter.ts:3");
 	});
 
-	test("with PATH that has no rg, the same note appears", async () => {
+	test("with PATH that has no rg, the same hit is found", async () => {
 		const saved = process.env.PATH;
 		process.env.PATH = path.join(parent, "no-such-dir");
 		try {
 			const r = await locate('"Rate limit exceeded for tool"', { root, repoId });
-			expect(formatLocate(r)).toContain("ripgrep (rg) was not found");
+			expect(formatLocate(r)).toContain("src/limits/rate-limiter.ts:3");
 		} finally {
 			process.env.PATH = saved;
 		}
