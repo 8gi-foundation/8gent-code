@@ -167,7 +167,7 @@ const SETUP_PROVIDER_NAMES: Record<string, string> = {
 	apfel: "apfel (Apple Foundation Model)",
 };
 import { findPlanFile } from "../../../packages/ai/plan-file.js";
-import { bunFlagsFor, safeBunFlags } from "../../../packages/core/bun-flags.js";
+import { safeBunFlags } from "../../../packages/core/bun-flags.js";
 import { runBugCommand } from "../../../packages/eight/bug-command.js";
 import {
 	dotenvKeyIsAllowed,
@@ -549,10 +549,19 @@ function detectBestLocalProviderUntraced(): { provider: string; model: string } 
 	try {
 		answers = JSON.parse(
 			// Runs in the user's cwd on every start: never its bunfig.toml or .env (#4013).
-			execFileSync(process.execPath, [...bunFlagsFor(process.execPath), "-e", PROBE, ...urls], {
-				timeout: 3000,
-				stdio: ["ignore", "pipe", "ignore"],
-			}).toString(),
+			// In a compiled 8gent, process.execPath is the 8gent binary: BUN_BE_BUN makes it
+			// evaluate -e as Bun would, instead of starting another 8gent (#4671), and as a
+			// plain Bun it needs the safe flags too. The probe starts nothing, so the variable
+			// goes no further. Bun ignores it; Node ignores it and gets no Bun flags.
+			execFileSync(
+				process.execPath,
+				[...(process.versions.bun ? safeBunFlags() : []), "-e", PROBE, ...urls],
+				{
+					timeout: 3000,
+					stdio: ["ignore", "pipe", "ignore"],
+					env: { ...process.env, BUN_BE_BUN: "1" },
+				},
+			).toString(),
 		);
 	} catch {
 		answers = [];

@@ -31,20 +31,29 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { arch as osArch, platform as osPlatform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findBuildPaths, pathDefines, unresolveJsdomWorker } from "./lib/compiled-paths";
+import { stubDevtools } from "./lib/stub-devtools";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const ENTRY = join(ROOT, "bin", "8gent.ts");
 const OUT_DIR = join(ROOT, "dist", "bin");
-const TUI_BUNDLE = join(ROOT, "dist", "tui.js");
-// Generated compile entry (dist/ is gitignored). It embeds dist/tui.js into the
-// binary and then loads the real entry, so `8gent tui` works with nothing next
-// to the executable and no Bun on PATH (#2975). bin/8gent.ts reads the embedded
-// path from globalThis.__EIGHT_EMBEDDED_TUI (see resolveTuiEntry).
+// Generated compile entry (dist/ is gitignored). It puts the TUI source in the
+// binary's own module graph, so `8gent` runs the TUI with nothing next to the
+// executable, no Bun on PATH and no file written first (#4671). The launcher
+// (bin/8gent.ts, HAS_COMPILED_TUI) starts the TUI by running its own executable
+// with EIGHT_COMPILED_TUI=1; every other run loads bin/8gent.ts.
 const COMPILE_ENTRY = join(ROOT, "dist", "compile-entry.ts");
 
 interface Target {
@@ -119,49 +128,63 @@ function humanSize(bytes: number): string {
 	return `${mb.toFixed(1)}M`;
 }
 
-function buildTuiBundle(): boolean {
-	const res = spawnSync("bun", ["run", "build:tui"], { stdio: "inherit", cwd: ROOT });
-	return res.status === 0 && existsSync(TUI_BUNDLE);
-}
-
 function writeCompileEntry() {
 	const rel = (p: string) => JSON.stringify(p.replace(/\\/g, "/"));
 	writeFileSync(
 		COMPILE_ENTRY,
 		[
-			`import tuiBundle from ${rel("./tui.js")} with { type: "file" };`,
-			`(globalThis as Record<string, unknown>).__EIGHT_EMBEDDED_TUI = tuiBundle;`,
 			// CHANGELOG.md travels inside the binary too, so `/changelog` and the
 			// after-update notes work with nothing next to the executable (#3981).
 			`import changelog from ${rel("../CHANGELOG.md")} with { type: "file" };`,
-			"(globalThis as Record<string, unknown>).__EIGHT_EMBEDDED_CHANGELOG = changelog;",
-			`await import(${rel("../bin/8gent.ts")});`,
+			"const g = globalThis as Record<string, unknown>;",
+			"g.__EIGHT_EMBEDDED_CHANGELOG = changelog;",
+			"g.__EIGHT_COMPILED_TUI = true;",
+			'if (process.env.EIGHT_COMPILED_TUI === "1") {',
+			// Not inherited by the shells and sub-sessions the TUI starts: they must
+			// run the command they name, not another TUI.
+			"\tdelete process.env.EIGHT_COMPILED_TUI;",
+			`\tawait import(${rel("../apps/tui/src/index.tsx")});`,
+			"} else {",
+			`\tawait import(${rel("../bin/8gent.ts")});`,
+			"}",
 			"",
 		].join("\n"),
 	);
 }
 
-function build(target: Target): boolean {
+// The checkout, its real path, and the real directory node_modules resolves into
+// (a symlinked node_modules reports paths from its target), as in build-finalize.js.
+function buildRoots(): string[] {
+	const roots = [ROOT];
+	try {
+		roots.push(realpathSync(ROOT));
+	} catch {}
+	try {
+		roots.push(dirname(realpathSync(join(ROOT, "node_modules"))));
+	} catch {}
+	return roots;
+}
+
+async function build(target: Target): Promise<boolean> {
 	const outfile = join(OUT_DIR, target.artifact);
 	console.log(`\n-> ${target.triple}  ->  dist/bin/${target.artifact}`);
-	const res = spawnSync(
-		"bun",
-		[
-			"build",
-			"--compile",
+	// Bun.build rather than the CLI: the TUI in the graph needs the devtools stub plugin.
+	const result = await Bun.build({
+		entrypoints: [COMPILE_ENTRY],
+		plugins: [stubDevtools, unresolveJsdomWorker],
+		define: pathDefines(target.os),
+		compile: {
+			target: target.triple as Bun.Build.CompileTarget,
+			outfile,
 			// A compiled binary otherwise loads $cwd/bunfig.toml (preload = code) and .env
 			// on every launch, even `--version`, so running 8gent inside an untrusted
 			// clone would execute that repo's code (#3894). Config is never read from cwd.
-			"--no-compile-autoload-bunfig",
-			"--no-compile-autoload-dotenv",
-			`--target=${target.triple}`,
-			COMPILE_ENTRY,
-			"--outfile",
-			outfile,
-		],
-		{ stdio: "inherit", cwd: ROOT },
-	);
-	if (res.status !== 0) {
+			autoloadBunfig: false,
+			autoloadDotenv: false,
+		},
+	});
+	if (!result.success) {
+		for (const log of result.logs) console.error(log);
 		console.error(`   FAILED (${target.triple})`);
 		return false;
 	}
@@ -169,7 +192,14 @@ function build(target: Target): boolean {
 		console.error(`   FAILED: ${outfile} not produced`);
 		return false;
 	}
-	console.log(`   ok  ${humanSize(statSync(outfile).size)}`);
+	const baked = findBuildPaths(readFileSync(outfile), buildRoots());
+	if (baked.length > 0) {
+		console.error(
+			`   FAILED: ${target.artifact} contains build-machine paths: ${baked.join(", ")}`,
+		);
+		return false;
+	}
+	console.log(`   ok  ${humanSize(statSync(outfile).size)}, no build-machine paths`);
 	maybeSignMac(target, outfile);
 	return true;
 }
@@ -197,21 +227,17 @@ function maybeSignMac(target: Target, outfile: string) {
 	else console.error("   codesign FAILED - shipping unsigned");
 }
 
-function main() {
+async function main() {
 	if (!existsSync(ENTRY)) {
 		console.error(`Entry not found: ${ENTRY}`);
 		process.exit(1);
 	}
 	mkdirSync(OUT_DIR, { recursive: true });
-	if (!buildTuiBundle()) {
-		console.error("dist/tui.js could not be built; the binary would have no TUI.");
-		process.exit(1);
-	}
 	writeCompileEntry();
 	const targets = selectTargets();
 	console.log(`Building ${targets.length} target(s) from bin/8gent.ts`);
 	let failures = 0;
-	for (const t of targets) if (!build(t)) failures++;
+	for (const t of targets) if (!(await build(t))) failures++;
 	console.log("");
 	if (failures > 0) {
 		console.error(`${failures} target(s) failed.`);
@@ -220,4 +246,4 @@ function main() {
 	console.log(`All ${targets.length} target(s) built into dist/bin/`);
 }
 
-main();
+await main();

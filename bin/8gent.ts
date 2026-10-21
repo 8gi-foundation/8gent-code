@@ -7,10 +7,8 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { childInvocation, materializeTui } from "../apps/tui/src/lib/embedded-bundle";
 import { safeBunFlags } from "../packages/core/bun-flags";
 
 const VERSION = "0.20.8";
@@ -28,20 +26,29 @@ const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts
 //     embeds the module graph in Bun's virtual filesystem, where
 //     `import.meta.url` is `B:/~BUN/root/<entry>` (Windows) or
 //     `/$bunfs/root/<entry>` (POSIX) instead of a real path. `process.execPath`
-//     is the only valid anchor there, and it is the directory the installer
-//     drops `tui.js` into. (`process.argv[0]` is literally "bun" in a compiled
-//     binary, so it is no help.)
+//     is the only valid anchor there. (`process.argv[0]` is literally "bun" in
+//     a compiled binary, so it is no help.)
 //
 // `import.meta.url` is reliable under Bun, Node ESM, and a non-compiled bundle;
 // only the compiled case needs EXEC_DIR.
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const EXEC_DIR = path.dirname(process.execPath);
-const TUI_CACHE_DIR = path.join(os.homedir(), ".8gent", "cache");
 
 // MODULE_DIR points into Bun's embedded filesystem rather than the user's disk.
 // It still passes `fs.existsSync`, but only the embedded modules are readable
 // there, so joining paths onto it is meaningless.
 const MODULE_IS_EMBEDDED = /(^|[\\/])(\$bunfs|~BUN)([\\/]|$)/i.test(MODULE_DIR);
+
+// The compiled binary carries the TUI in its own module graph (#4671):
+// scripts/build-binaries.ts compiles an entry that imports apps/tui/src/index.tsx
+// when COMPILED_TUI_ENV is "1" and bin/8gent.ts otherwise, and sets this marker.
+// The launcher starts the TUI by running its own executable with that variable,
+// so no file is written, no path from the build machine is read, and no Bun is
+// needed on PATH. A compiled build without the marker has no TUI to start.
+const COMPILED_TUI_ENV = "EIGHT_COMPILED_TUI";
+const EMBEDDED_TUI = "<embedded>";
+const HAS_COMPILED_TUI =
+	MODULE_IS_EMBEDDED && (globalThis as Record<string, unknown>).__EIGHT_COMPILED_TUI === true;
 
 // Walk up from MODULE_DIR to find the source tree root. When installed via
 // npm we only ship `dist/cli.js` + `dist/tui.js`, so packages/apps/
@@ -1343,13 +1350,15 @@ async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 		EIGHT_LAUNCHER_MODULE: import.meta.url,
 		EIGHT_LAUNCHER_EMBEDDED: MODULE_IS_EMBEDDED ? "1" : "0",
 	};
-	// A compiled binary may have no Bun on PATH, so it runs the bundle as its own
-	// Bun runtime (BUN_BE_BUN=1) with cwd config and .env files switched off
-	// (apps/tui/src/lib/embedded-bundle.ts, #3894).
+	// A compiled binary runs itself in TUI mode (see HAS_COMPILED_TUI). It was
+	// built with cwd bunfig.toml and .env autoload off, so a hostile working
+	// directory is not read (#3894), and user args reach the TUI unparsed.
 	let proc: ReturnType<typeof spawn>;
-	if (MODULE_IS_EMBEDDED) {
-		const inv = childInvocation(process.execPath, tuiPath, args, TUI_CACHE_DIR);
-		proc = spawn(inv.command, inv.args, { stdio: "inherit", env: { ...inv.env, ...launcherEnv } });
+	if (tuiPath === EMBEDDED_TUI) {
+		proc = spawn(process.execPath, args, {
+			stdio: "inherit",
+			env: { ...process.env, ...launcherEnv, [COMPILED_TUI_ENV]: "1" },
+		});
 	} else if (!(process.versions as Record<string, string | undefined>).bun) {
 		// Running on Node (dist/node/cli.js): the TUI is the sibling Node bundle, run by this same Node.
 		proc = spawn(
@@ -1396,39 +1405,20 @@ async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 }
 
 /**
- * The compiled binary carries its own TUI bundle (scripts/build-binaries.ts
- * embeds dist/tui.js, #2975). Bun can only execute a real file, so write it
- * to ~/.8gent/cache/tui-<content hash>.js, verified by hash on every launch.
- * Returns null outside a compiled binary or if the cache is not writable.
- */
-function extractEmbeddedTui(): string | null {
-	const asset = (globalThis as Record<string, unknown>).__EIGHT_EMBEDDED_TUI;
-	if (typeof asset !== "string") return null;
-	try {
-		return materializeTui(fs.readFileSync(asset), TUI_CACHE_DIR);
-	} catch (err) {
-		console.error(`Could not prepare the embedded TUI: ${(err as Error).message}`);
-		return null;
-	}
-}
-
-/**
  * Find the TUI entry, trying each layout the tool can be installed in:
  *
- *   1. `tui.js` next to this module: the npm/bundled layout, where it ships
+ *   1. EMBEDDED_TUI: a compiled binary whose own module graph holds the TUI.
+ *   2. `tui.js` next to this module: the npm/bundled layout, where it ships
  *      as `dist/tui.js` beside `dist/cli.js`.
- *   2. `tui.js` next to the executable: the `bun build --compile` layout. The
- *      module path is virtual there (see MODULE_IS_EMBEDDED), so the copy the
- *      installer placed next to the binary is the one that must be picked up.
- *   3. `apps/tui/src/index.tsx`: running from a git checkout.
+ *   3. `tui.js` next to the executable: a compiled build without the TUI.
+ *   4. `apps/tui/src/index.tsx`: running from a git checkout.
  *
  * Returns null when none exists so the caller can print a clear error instead
  * of spawning bun against a phantom path.
  */
 function resolveTuiEntry(): string | null {
-	const embedded = extractEmbeddedTui();
-	if (embedded) return embedded;
-	for (const dir of [MODULE_DIR, EXEC_DIR]) {
+	if (HAS_COMPILED_TUI) return EMBEDDED_TUI;
+	for (const dir of MODULE_IS_EMBEDDED ? [EXEC_DIR] : [MODULE_DIR, EXEC_DIR]) {
 		const bundled = path.join(dir, "tui.js");
 		if (fs.existsSync(bundled)) return bundled;
 	}
