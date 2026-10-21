@@ -14,6 +14,7 @@ export type SlashCommand =
 	| "llama"
 	| "route"
 	| "privacy"
+	| "consult"
 	| "models"
 	| "voice"
 	| "theme"
@@ -140,6 +141,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Takes local-only, local-first or cloud-first: where model calls may go",
 		usage: "/route [local-only|local-first|cloud-first]",
+	},
+	{
+		name: "consult",
+		aliases: [],
+		description:
+			"Takes a question: one stateless question to your cloud model with secrets and personal data masked first",
+		usage: "/consult <question>",
 	},
 	{
 		name: "privacy",

@@ -234,6 +234,7 @@ import { detectBuildIntent } from "./lib/build-intent.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
 import { clearSelection, onCopied } from "./lib/click-targets.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
+import { runConsultCommand } from "./lib/consult-command.js";
 import {
 	type ContextWindow,
 	UNKNOWN_WINDOW,
@@ -6052,6 +6053,28 @@ export function App({
 							// Show model selector
 							setViewMode("model-select");
 						}
+					}
+					// /consult: one stateless, masked question to the cloud model (#4608)
+					else if (command === ("consult" as any)) {
+						Promise.all([
+							import("../../../packages/providers/consult.js"),
+							import("../../../packages/providers/locality.js"),
+						])
+							.then(([c, l]) =>
+								runConsultCommand(args.join(" "), {
+									// Saved nowhere: see lib/consult-command.ts (ids start with consult-).
+									add: ({ id, content }) =>
+										setMessages((prev) => [
+											...prev,
+											{ id, role: "system" as const, content, timestamp: new Date() },
+										]),
+									consult: (q) => c.consult(q, c.defaultConsultDeps()),
+									after: () => setLocalChip(l.chipText(l.readLedger())),
+								}),
+							)
+							.catch((e) =>
+								addSystemMessage(`consult: ${e instanceof Error ? e.message : String(e)}`),
+							);
 					}
 					// /route and /privacy: where model calls may go, and what left this machine (#4607)
 					else if (command === ("route" as any) || command === ("privacy" as any)) {

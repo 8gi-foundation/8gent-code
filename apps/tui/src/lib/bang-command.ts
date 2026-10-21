@@ -20,6 +20,7 @@ import {
 	commandTouchesAuditFiles,
 } from "../../../../packages/permissions/path-guard.js";
 import { touchesBrowserSecrets } from "../../../../packages/tools/eight-browser.js";
+import { CONSULT_ID_PREFIX } from "./consult-command.js";
 
 export interface BangCommand {
 	command: string;
@@ -258,9 +259,11 @@ export function killBangsOnExit(
 	};
 }
 
-/** Messages to save: everything except `!cmd` chat lines. */
+/** Messages to save: everything except `!cmd` chat lines and /consult lines (their replies hold unmasked values). */
 export function withoutBangLines<T extends { id?: string }>(messages: readonly T[]): T[] {
-	return messages.filter((m) => !m.id?.startsWith(BANG_ID_PREFIX));
+	return messages.filter(
+		(m) => !m.id?.startsWith(BANG_ID_PREFIX) && !m.id?.startsWith(CONSULT_ID_PREFIX),
+	);
 }
 
 export const BANG_USAGE =
