@@ -749,7 +749,12 @@ export async function resolveChatChoice(
 	deps: ProviderChoiceDeps,
 ): Promise<ProviderChoice> {
 	const choice = await resolveProviderChoice({ ...req, routerFallback: "ollama" }, deps);
+	// A hosted, keyed provider in the registry (minimax, groq, ...) is a chat
+	// runtime too: the native path resolves its endpoint and key from the
+	// registry entry (#4622), so it is not set aside for Ollama.
 	if (choice.source !== "saved" || CHAT_RUNTIMES.has(choice.provider)) return choice;
+	const { isHostedChatProvider } = await import("../providers/key-resolver");
+	if (isHostedChatProvider(choice.provider)) return choice;
 	const next = await resolveProviderChoice(
 		{ model: req.model, routerFallback: "ollama" },
 		{ ...deps, saved: undefined },

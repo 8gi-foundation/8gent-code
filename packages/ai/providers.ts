@@ -12,8 +12,20 @@ import { loadSettings } from "../settings/store";
 import { resolveRetrySettings } from "../settings/retry";
 import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
+import {
+	missingKeyMessage,
+	resolveProviderBaseUrl,
+	resolveProviderKey,
+} from "../providers/key-resolver";
 
-export type ProviderName = "ollama" | "lmstudio" | "openrouter" | "apfel" | "llama-server";
+export type LocalOrBuiltinProviderName =
+	| "ollama"
+	| "lmstudio"
+	| "openrouter"
+	| "apfel"
+	| "llama-server";
+/** Any provider in the registry (built-in or declared); the registry supplies its endpoint and key (#4622). */
+export type ProviderName = LocalOrBuiltinProviderName | (string & {});
 
 export interface ProviderConfig {
 	name: ProviderName;
@@ -23,7 +35,7 @@ export interface ProviderConfig {
 	headers?: Record<string, string>;
 }
 
-const DEFAULT_URLS: Record<Exclude<ProviderName, "ollama" | "llama-server">, string> = {
+const DEFAULT_URLS: Record<Exclude<LocalOrBuiltinProviderName, "ollama" | "llama-server">, string> = {
 	lmstudio: "http://localhost:1234/v1",
 	openrouter: "https://openrouter.ai/api/v1",
 	// apfel (https://github.com/Arthur-Ficial/apfel) exposes Apple Foundation
@@ -45,7 +57,11 @@ const DEFAULT_URLS: Record<Exclude<ProviderName, "ollama" | "llama-server">, str
 export function defaultBaseUrl(name: ProviderName): string {
 	if (name === "ollama") return `${resolveOllamaBaseUrl()}/v1`;
 	if (name === "llama-server") return `${resolveLlamaServerUrl()}/v1`;
-	return DEFAULT_URLS[name];
+	// A provider outside the four above (minimax, deepseek, a declared one) gets
+	// the endpoint its registry entry names, never an undefined base (#4622).
+	return (
+		(DEFAULT_URLS as Record<string, string | undefined>)[name] ?? resolveProviderBaseUrl(name) ?? ""
+	);
 }
 
 /**
@@ -132,18 +148,11 @@ export function hostedWithoutKey(name: string, baseURL: string | undefined, apiK
 	return !LOOPBACK_HOSTS.has(host);
 }
 
-/** The key's env var name, for the refusal message. */
-function keyEnvName(name: string): string {
-	return `${name.replace(/[^a-z0-9]/gi, "_").toUpperCase()}_API_KEY`;
-}
-
 /** A fetch that never sends: it rejects with a plain message naming the missing key (#3746). */
 function refuseWithoutKey(name: string, baseURL: string): typeof fetch {
 	const host = new URL(baseURL).hostname;
 	return (async () => {
-		throw new Error(
-			`No API key for ${name}, so nothing was sent to ${host}. Set ${keyEnvName(name)} to use it, or pick a local provider.`,
-		);
+		throw new Error(missingKeyMessage(name, host));
 	}) as unknown as typeof fetch;
 }
 
@@ -167,7 +176,7 @@ export function getRetryConfig(
 function getApiKeyFromEnv(name: ProviderName): string | undefined {
 	switch (name) {
 		case "openrouter":
-			return process.env.OPENROUTER_API_KEY;
+			return process.env.OPENROUTER_API_KEY || resolveProviderKey(name);
 		case "lmstudio":
 			return process.env.LM_STUDIO_API_KEY || "lm-studio";
 		case "ollama":
@@ -179,6 +188,9 @@ function getApiKeyFromEnv(name: ProviderName): string | undefined {
 			// llama-server is local and unauthenticated: the provider registry
 			// declares apiKeyEnv: "" for it, so send no key.
 			return undefined;
+		default:
+			// Every other provider: its own registry entry decides (#4622).
+			return resolveProviderKey(name);
 	}
 }
 
