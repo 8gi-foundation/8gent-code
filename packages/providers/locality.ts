@@ -16,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import {
 	appendFileSync,
+	chmodSync,
 	closeSync,
 	fstatSync,
 	mkdirSync,
@@ -156,7 +157,8 @@ export function readPolicyState(file?: string): PolicyState {
 		return {
 			policy: "local-only",
 			why: `settings.json routing.policy is not one of ${ROUTING_POLICIES.join(", ")}, so model calls are held to this machine.`,
-			localHosts: hosts,
+			// forced by a bad value: no extra hosts are trusted
+			localHosts: [],
 		};
 	}
 	return { policy: want, localHosts: hosts };
@@ -312,10 +314,23 @@ export function onLedgerEntry(fn: LedgerListener): () => void {
 	return () => ledgerListeners.delete(fn);
 }
 
+const tightened = new Set<string>();
+
 function appendPrivate(file: string, line: string): void {
-	// ~/.8gent is created 0700 and the ledger 0600: it says when and where you worked.
-	mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+	// ~/.8gent is 0700 and the ledger 0600: it says when and where you worked.
+	// New ones are created that way; ones that already exist are tightened once.
+	const dir = dirname(file);
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
 	appendFileSync(file, line, { mode: 0o600 });
+	if (!tightened.has(file)) {
+		tightened.add(file);
+		try {
+			chmodSync(dir, 0o700);
+			chmodSync(file, 0o600);
+		} catch {
+			// not ours to change: carry on
+		}
+	}
 }
 
 /** Append one call. Never throws: a full disk must not break a model turn. A call is logged even with zero counts. */
@@ -503,7 +518,7 @@ function section(title: string, m: Meter): string[] {
 
 /** What local-only does not yet cover. Shown by /privacy so the promise is not larger than the guard. */
 export const LOCAL_ONLY_GAPS =
-	"local-only covers model and network requests sent through 8gent's own HTTP client. It does not yet cover run_command tools such as curl, clients that do not use that HTTP client, or child processes that do not load the guard.";
+	"local-only covers model and network requests sent through 8gent's own HTTP client. It does not yet cover run_command tools such as curl, clients that do not use that HTTP client, or child processes that do not load the guard. Reads are not blocked: GET and HEAD go anywhere, so web_fetch, web_search or any GET can carry prompt text off this machine in a query string.";
 
 /** /privacy. Sizes only; the ledger holds no text to show. */
 export function privacyReport(

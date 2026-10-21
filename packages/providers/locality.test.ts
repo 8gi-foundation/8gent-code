@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -138,6 +146,15 @@ describe("policy storage", () => {
 		}
 	});
 
+	test("a bad policy value drops routing.localHosts: nothing extra is trusted", () => {
+		const f = join(dir, "settings.json");
+		writeFileSync(
+			f,
+			JSON.stringify({ routing: { policy: "bogus", localHosts: ["192.168.1.20"] } }),
+		);
+		expect(readPolicyState(f)).toMatchObject({ policy: "local-only", localHosts: [] });
+	});
+
 	test("routing.localHosts is read and normalised", () => {
 		const f = join(dir, "settings.json");
 		writeFileSync(
@@ -232,6 +249,22 @@ describe("ledger file permissions", () => {
 		recordCall({ provider: "ollama", local: true, tokensIn: 1, tokensOut: 1 }, f);
 		expect(statSync(f).mode & 0o777).toBe(0o600);
 		expect(statSync(join(dir, "fresh", ".8gent")).mode & 0o777).toBe(0o700);
+	});
+
+	test("an existing directory and ledger are tightened to 0700 and 0600", () => {
+		const d = join(dir, "old", ".8gent");
+		mkdirSync(d, { recursive: true, mode: 0o755 });
+		const f = join(d, "locality.jsonl");
+		writeFileSync(f, "", { mode: 0o644 });
+		chmodSync(d, 0o755);
+		chmodSync(f, 0o644);
+		recordCall({ provider: "ollama", local: true, tokensIn: 1, tokensOut: 1 }, f);
+		expect(statSync(f).mode & 0o777).toBe(0o600);
+		expect(statSync(d).mode & 0o777).toBe(0o700);
+	});
+
+	test("/privacy names the GET and query-string gap", () => {
+		expect(privacyReport([], "local-only")).toContain("GET and HEAD go anywhere");
 	});
 
 	test("a completion update folds onto its line; the call stays one entry", () => {

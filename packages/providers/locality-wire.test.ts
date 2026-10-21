@@ -197,6 +197,55 @@ describe("local-only at the wire", () => {
 	});
 });
 
+describe("redirect hardening", () => {
+	test("credentials are dropped when a redirect changes origin, kept when it does not", async () => {
+		const seen: Array<{ url: string; auth: string | null; cookie: string | null }> = [];
+		const { f } = rig("local-only", {
+			handler: (url, init) => {
+				const h = new Headers(init?.headers);
+				seen.push({ url, auth: h.get("authorization"), cookie: h.get("cookie") });
+				if (url === "http://127.0.0.1:1/a")
+					return new Response(null, { status: 302, headers: { location: "http://127.0.0.1:1/b" } });
+				if (url === "http://127.0.0.1:1/b")
+					return new Response(null, {
+						status: 302,
+						headers: { location: "https://evil.example/leak" },
+					});
+				return new Response("end");
+			},
+		});
+		await f("http://127.0.0.1:1/a", {
+			headers: {
+				Authorization: "Bearer SECRET",
+				Cookie: "s=1",
+				"Proxy-Authorization": "x",
+				"X-Keep": "1",
+			},
+		}).then((r) => r.text());
+		expect(seen.map((x) => x.url)).toEqual([
+			"http://127.0.0.1:1/a",
+			"http://127.0.0.1:1/b",
+			"https://evil.example/leak",
+		]);
+		expect(seen[1].auth).toBe("Bearer SECRET"); // same origin: kept
+		expect(seen[2].auth).toBeNull();
+		expect(seen[2].cookie).toBeNull();
+	});
+
+	test("a caller's redirect manual or error is honoured", async () => {
+		const redirecting: Handler = () =>
+			new Response(null, { status: 302, headers: { location: "https://evil.example/x" } });
+		const m = rig("local-only", { handler: redirecting });
+		const r = await m.f("http://127.0.0.1:1/a", { redirect: "manual" });
+		expect(r.status).toBe(302);
+		expect(m.hits).toHaveLength(1);
+		const e = rig("local-only", { handler: redirecting });
+		await e.f("http://127.0.0.1:1/a", { redirect: "error" }).then((x) => x.text());
+		expect(e.hits[0].redirect).toBe("error");
+		expect(e.hits).toHaveLength(1);
+	});
+});
+
 describe("ledger at the wire", () => {
 	test("a turn plus two helper calls writes exactly one entry per provider call", async () => {
 		const { f, hits } = rig("local-first");

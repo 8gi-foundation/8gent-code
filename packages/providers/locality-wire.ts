@@ -138,6 +138,7 @@ export function usageFrom(head: string, tail: string): { in: number; out: number
 const HEAD = 16 * 1024;
 const TAIL = 64 * 1024;
 const MAX_HOPS = 5;
+const CREDENTIAL_HEADERS = ["authorization", "cookie", "proxy-authorization"];
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 
 function notice(policy: string, provider: string): string {
@@ -285,6 +286,11 @@ async function followLocalOnly(
 	deps: WireDeps,
 	provider: string,
 ): Promise<Response> {
+	// A caller that asked to handle redirects itself (or to have them fail) keeps that.
+	const asked =
+		init?.redirect ??
+		(input instanceof Request && input.redirect !== "follow" ? input.redirect : undefined);
+	if (asked === "manual" || asked === "error") return base(input, init);
 	let cur = first;
 	let method = method0;
 	let curInit: any = { ...(init ?? {}), redirect: "manual" };
@@ -314,6 +320,14 @@ async function followLocalOnly(
 			throw new LocalOnlyRefusal(d.action === "refuse" ? d.message : "refused");
 		}
 		await res.body?.cancel().catch(() => {});
+		// As native fetch does: credentials do not follow a redirect to another origin.
+		if (next.origin !== cur.origin) {
+			const h = new Headers(
+				curInit.headers ?? (curInput instanceof Request ? curInput.headers : undefined),
+			);
+			for (const k of CREDENTIAL_HEADERS) h.delete(k);
+			curInit.headers = h;
+		}
 		cur = next;
 		method = nextMethod;
 		curInput = next.href;
