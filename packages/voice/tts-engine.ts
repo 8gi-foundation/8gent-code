@@ -9,7 +9,7 @@
  * Uses Bun.spawn for non-blocking subprocess management.
  */
 
-import { findOnPath, isAndroidHost, voiceOutputOn } from "./termux.js";
+import { TERMUX_TTS_HINT, findOnPath, isAndroidHost, voiceOutputOn } from "./termux.js";
 
 // ============================================
 // Types
@@ -109,17 +109,37 @@ export class TermuxTTSProvider implements TTSProvider {
 	readonly name = "termux";
 	private currentProcess: ReturnType<typeof Bun.spawn> | null = null;
 
+	private hinted = false;
+
 	constructor(
 		private readonly env: Record<string, string | undefined> = process.env,
 		private readonly outputOn: () => boolean = () => voiceOutputOn(env),
 		private readonly spawnFn: (cmd: string[]) => ReturnType<typeof Bun.spawn> = (cmd) =>
 			Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" }),
+		/** Receives the one-line hint, once, when output is on but termux-tts-speak cannot run. */
+		private readonly onHint: (message: string) => void = (m) => console.error(m),
 	) {}
 
+	private hint(): TTSProcess {
+		if (!this.hinted) {
+			this.hinted = true;
+			try {
+				this.onHint(TERMUX_TTS_HINT);
+			} catch {}
+		}
+		return { kill: () => {}, exited: Promise.resolve(127) };
+	}
+
 	async speak(text: string, _options?: TTSSpeakOptions): Promise<TTSProcess> {
+		if (!this.outputOn()) return { kill: () => {}, exited: Promise.resolve(0) };
 		const bin = findOnPath("termux-tts-speak", this.env);
-		if (!this.outputOn() || !bin) return { kill: () => {}, exited: Promise.resolve(bin ? 0 : 127) };
-		const proc = this.spawnFn([bin, text.slice(0, 2000)]);
+		if (!bin) return this.hint();
+		let proc: ReturnType<typeof Bun.spawn>;
+		try {
+			proc = this.spawnFn([bin, text.slice(0, 2000)]);
+		} catch {
+			return this.hint();
+		}
 		this.currentProcess = proc;
 		return {
 			kill: () => {

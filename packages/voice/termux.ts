@@ -62,3 +62,30 @@ export function voiceOutputOn(
 		return false;
 	}
 }
+
+/** Said once when spoken replies are on but termux-tts-speak cannot run. */
+export const TERMUX_TTS_HINT =
+	"Spoken replies need termux-tts-speak: pkg install termux-api, plus the Termux:API app from F-Droid.";
+
+/** What Ctrl+R does: Android has no recorder (the keyboard dictates), elsewhere it toggles recording. */
+export function ctrlRAction(
+	key: { ctrl?: boolean },
+	input: string,
+	android: boolean = isAndroidHost(),
+): "ignore" | "toggle" | "android-line" {
+	if (!key.ctrl || input !== "r") return "ignore";
+	return android ? "android-line" : "toggle";
+}
+
+/** /voice subcommands that print the dictation line on Android instead of the desktop text. */
+export const ANDROID_VOICE_LINE_SUBS = [
+	"",
+	"chat",
+	"conversation",
+	"talk",
+	"record",
+	"listen",
+	"stt",
+	"status",
+	"stop",
+];

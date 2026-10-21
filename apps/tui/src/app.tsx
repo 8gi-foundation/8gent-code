@@ -629,7 +629,11 @@ import {
 	formatMicLabel,
 	resolveInputDevice,
 } from "../../../packages/voice/input-device.js";
-import { ANDROID_DICTATION_LINE, isAndroidHost } from "../../../packages/voice/termux.js";
+import {
+	ANDROID_DICTATION_LINE,
+	ANDROID_VOICE_LINE_SUBS,
+	isAndroidHost,
+} from "../../../packages/voice/termux.js";
 import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
 import { VoiceReplyTracker } from "../../../packages/voice/voice-chat.js";
 import {
@@ -5559,12 +5563,7 @@ export function App({
 				case "voice":
 					// Enhanced voice command — toggle STT recording or voice chat
 					// Android (#4706): the phone keyboard already dictates; no recorder or whisper here.
-					if (
-						isAndroidHost() &&
-						["chat", "conversation", "talk", "record", "listen", "stt", "status"].includes(
-							args[0] ?? "",
-						)
-					) {
+					if (isAndroidHost() && ANDROID_VOICE_LINE_SUBS.includes(args[0] ?? "")) {
 						addSystemMessage(ANDROID_DICTATION_LINE);
 						break;
 					}
@@ -5649,6 +5648,7 @@ export function App({
 									? "TTS output enabled. 8gent replies will be spoken."
 									: "TTS output disabled. 8gent replies will be silent.",
 							);
+							if (isAndroidHost()) addSystemMessage(ANDROID_DICTATION_LINE);
 						})().catch((err) => {
 							addSystemMessage(
 								`Could not update voice setting: ${
@@ -5658,12 +5658,14 @@ export function App({
 						});
 					} else {
 						addSystemMessage(
-							"Voice commands:\n" +
-								"  /voice chat    Start/stop voice conversation mode\n" +
-								"  /voice record  Toggle STT recording (or press Ctrl+R)\n" +
-								"  /voice status  Check voice system status\n" +
-								"  /voice stop    Stop voice chat mode\n" +
-								"  /voice on|off  Toggle TTS output",
+							isAndroidHost()
+								? `${ANDROID_DICTATION_LINE}\n  /voice on|off  Toggle spoken replies`
+								: "Voice commands:\n" +
+										"  /voice chat    Start/stop voice conversation mode\n" +
+										"  /voice record  Toggle STT recording (or press Ctrl+R)\n" +
+										"  /voice status  Check voice system status\n" +
+										"  /voice stop    Stop voice chat mode\n" +
+										"  /voice on|off  Toggle TTS output",
 						);
 					}
 					break;

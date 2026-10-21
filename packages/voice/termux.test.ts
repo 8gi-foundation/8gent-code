@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installHint } from "../music/dj.js";
 import { checkSoxInstalled } from "./recorder.js";
-import { ANDROID_DICTATION_LINE, findOnPath, isAndroidHost, voiceOutputOn } from "./termux.js";
+import {
+	ANDROID_DICTATION_LINE,
+	ANDROID_VOICE_LINE_SUBS,
+	TERMUX_TTS_HINT,
+	ctrlRAction,
+	findOnPath,
+	isAndroidHost,
+	voiceOutputOn,
+} from "./termux.js";
 import { TTSEngine, TermuxTTSProvider } from "./tts-engine.js";
 
 let bin: string;
@@ -65,7 +73,12 @@ describe("tts on Android", () => {
 	test("missing termux-tts-speak is unavailable and exits 127 without spawning", async () => {
 		spawned.length = 0;
 		const env = { ...fakePath(), EIGHT_VOICE: "1" };
-		const p = new TermuxTTSProvider(env, () => true, spawnFn);
+		const p = new TermuxTTSProvider(
+			env,
+			() => true,
+			spawnFn,
+			() => {},
+		);
 		expect(await p.isAvailable()).toBe(false);
 		expect(await (await p.speak("hi")).exited).toBe(127);
 		expect(spawned).toEqual([]);
@@ -125,5 +138,80 @@ describe("android dictation line", () => {
 		delete process.env.PREFIX;
 		if (process.platform === "darwin")
 			expect((await checkSoxInstalled()).installHint).toContain("brew install sox");
+	});
+});
+
+describe("review fixes (#4726)", () => {
+	test("Ctrl+R on Android shows the line and never toggles recording; desktop toggles", () => {
+		expect(ctrlRAction({ ctrl: true }, "r", true)).toBe("android-line");
+		expect(ctrlRAction({ ctrl: true }, "r", false)).toBe("toggle");
+		expect(ctrlRAction({ ctrl: false }, "r", true)).toBe("ignore");
+		expect(ctrlRAction({ ctrl: true }, "x", true)).toBe("ignore");
+	});
+
+	test("the Android /voice intercept covers bare, chat, record, status and stop but not on/off", () => {
+		for (const sub of [
+			"",
+			"chat",
+			"conversation",
+			"talk",
+			"record",
+			"listen",
+			"stt",
+			"status",
+			"stop",
+		]) {
+			expect(ANDROID_VOICE_LINE_SUBS).toContain(sub);
+		}
+		expect(ANDROID_VOICE_LINE_SUBS).not.toContain("on");
+		expect(ANDROID_VOICE_LINE_SUBS).not.toContain("off");
+	});
+
+	test("output on but termux-tts-speak missing: one hint, exit 127, no spawn", async () => {
+		const hints: string[] = [];
+		const spawned: string[][] = [];
+		const env = { ...fakePath(), EIGHT_VOICE: "1" };
+		const p = new TermuxTTSProvider(
+			env,
+			() => true,
+			((c: string[]) => {
+				spawned.push(c);
+				return {} as never;
+			}) as never,
+			(m) => hints.push(m),
+		);
+		expect(await (await p.speak("a")).exited).toBe(127);
+		expect(await (await p.speak("b")).exited).toBe(127);
+		expect(hints).toEqual([TERMUX_TTS_HINT]);
+		expect(TERMUX_TTS_HINT).toContain("pkg install termux-api");
+		expect(TERMUX_TTS_HINT).toContain("Termux:API app");
+		expect(spawned).toEqual([]);
+	});
+
+	test("a spawn that throws is caught and turns into the hint", async () => {
+		const hints: string[] = [];
+		const env = fakePath("termux-tts-speak");
+		const p = new TermuxTTSProvider(
+			env,
+			() => true,
+			() => {
+				throw new Error("ENOENT");
+			},
+			(m) => hints.push(m),
+		);
+		expect(await (await p.speak("a")).exited).toBe(127);
+		expect(hints).toEqual([TERMUX_TTS_HINT]);
+	});
+
+	test("output off stays silent with no hint even when the tool is missing", async () => {
+		const hints: string[] = [];
+		const p = new TermuxTTSProvider(
+			fakePath(),
+			() => false,
+			(() => ({})) as never,
+			(m) => hints.push(m),
+		);
+		expect(await (await p.speak("a")).exited).toBe(0);
+		expect(hints).toEqual([]);
 	});
 });
