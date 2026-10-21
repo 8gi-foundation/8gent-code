@@ -216,7 +216,7 @@ export function LiveFocalStrip({
 			<Box
 				flexGrow={1}
 				flexShrink={1}
-				minWidth={Math.min(middleMin, fit.middle.length) + 2}
+				minWidth={blocked?.state === "none" ? 0 : Math.min(middleMin, fit.middle.length) + 2}
 				paddingX={1}
 			>
 				<Text color={t.textSecondary} wrap={blocked?.state === "none" ? "wrap" : "truncate-end"}>
@@ -233,7 +233,7 @@ export function LiveFocalStrip({
 						<Text color={t.steel}>{contextMeterText(contextPct, contextState)}</Text>
 					</>
 				) : null}
-				{tokens ? <Text color={t.textTertiary}> {tokens}</Text> : null}
+				{tokens && blocked?.state !== "none" ? <Text color={t.textTertiary}> {tokens}</Text> : null}
 			</Box>
 		</Box>
 	);

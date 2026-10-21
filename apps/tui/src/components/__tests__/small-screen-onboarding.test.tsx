@@ -116,6 +116,7 @@ describe("onboarding on a small terminal", () => {
 			for (const c of ["Concise", "Detailed", "Friendly"]) expect(f).toContain(c);
 			expect(f).toContain("short answers, no preamble");
 			expect(f).toContain("warm and conversational");
+			expect(f).toContain(NO_MODEL_HINT);
 			expect(f.match(/NO MODEL/g)?.length ?? 0).toBeLessThanOrEqual(1);
 		});
 	}
