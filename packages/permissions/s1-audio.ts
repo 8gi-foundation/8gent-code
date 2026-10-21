@@ -20,6 +20,10 @@ const AUDIO_PROGRAMS = new Set([
 	"paplay",
 ]);
 
+const BARE_NAME = new RegExp(
+	`(?<![A-Za-z0-9_.-])(?:${[...AUDIO_PROGRAMS].sort((a, b) => b.length - a.length).join("|")})(?![A-Za-z0-9_.-])`,
+);
+
 const WRAPPERS = new Set([
 	"env",
 	"nohup",
@@ -35,6 +39,8 @@ const WRAPPERS = new Set([
 	"setsid",
 	"builtin",
 ]);
+/** Shell keywords that start a command: `then say hi`, `do afplay x`, `{ say hi`, `! say`. */
+const KEYWORDS = new Set(["then", "do", "else", "elif", "if", "while", "until", "{", "!", "time"]);
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 /** Wrapper flags that take a value as the next word. */
 const FLAG_WITH_VALUE = new Set(["-u", "-g", "-h", "-p", "-C", "-I", "-n", "-P", "-s", "-S"]);
@@ -49,6 +55,10 @@ function segmentIsAudio(segment: string, command: string): boolean {
 	for (;;) {
 		while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i] ?? "")) i++;
 		const w = base(words[i] ?? "");
+		if (KEYWORDS.has(w)) {
+			i++;
+			continue;
+		}
 		if (!WRAPPERS.has(w)) break;
 		i++;
 		while (i < words.length) {
@@ -58,6 +68,8 @@ function segmentIsAudio(segment: string, command: string): boolean {
 			else break;
 		}
 	}
+	// A program word built from a variable, a backslash or empty quotes hides its name.
+	if (/[$\\]|''|""/.test(words[i] ?? "")) return true;
 	const prog = base(words[i] ?? "");
 	if (AUDIO_PROGRAMS.has(prog)) return true;
 	if (prog === "osascript" && /display\s+notification/i.test(command)) return true;
@@ -84,6 +96,13 @@ function segmentIsAudio(segment: string, command: string): boolean {
 export function isAudioCommand(command: string): boolean {
 	for (const segment of command.split(/&&|\|\||[;|&\n`()]/)) {
 		if (segmentIsAudio(segment, command)) return true;
+	}
+	// Backstop: an audio program name as a bare word anywhere (eval, find -exec, here-strings,
+	// su -c, ssh, arch, caffeinate, a variable's value). Over-refusing is accepted; a plain
+	// echo/printf/grep/rg line that only mentions the name is left alone.
+	for (const segment of command.split(/&&|\|\||[;|&\n`()]/)) {
+		if (/^\s*(echo|printf|grep|rg)\s/.test(segment)) continue;
+		if (BARE_NAME.test(segment)) return true;
 	}
 	return false;
 }

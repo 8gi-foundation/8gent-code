@@ -12,7 +12,7 @@
 export const COMPLETED_STATES = ["pushed", "deployed", "blocked", "failed", "done"] as const;
 const STATE = COMPLETED_STATES.join("|");
 const MAX_WORDS = 24;
-const LINE = /^([ \t]*(?:[>*-][ \t]*)*(?:🎯\s*)?COMPLETED:)[ \t]*(.*)$/m;
+const LINE = /^([ \t]*(?:[>*-][ \t]*)*(?:🎯\s*)?(?:\*\*|__)?COMPLETED:(?:\*\*|__)?)[ \t]*(.*)$/m;
 const FIXED = new RegExp(`^[^.!?]+\\.\\s+(?:${STATE})\\.$`, "i");
 const HAS_QUOTE = /["\u201C\u201D]/;
 const QUOTES = /["“”]/g;

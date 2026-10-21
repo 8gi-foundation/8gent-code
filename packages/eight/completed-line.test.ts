@@ -46,4 +46,10 @@ describe("COMPLETED line gate (#4713)", () => {
 			"COMPLETED: Failed. Suite red on three tests. failed.",
 		);
 	});
+
+	test("a bold COMPLETED line is gated too", () => {
+		expect(fixCompletedLine("**COMPLETED:** Draft written. pushed. Ha ha.").text).toBe(
+			"**COMPLETED:** Draft written. pushed.",
+		);
+	});
 });

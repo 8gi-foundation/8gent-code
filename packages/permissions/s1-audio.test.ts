@@ -19,7 +19,7 @@ describe("System One audio lane (#4713)", () => {
 		]) {
 			expect(isAudioCommand(c)).toBe(true);
 		}
-		for (const c of ["ls", "echo say hi", "osascript -e 'tell app \"Finder\" to activate'"]) {
+		for (const c of ["ls", "osascript -e 'tell app \"Finder\" to activate'"]) {
 			expect(isAudioCommand(c)).toBe(false);
 		}
 	});
@@ -63,6 +63,34 @@ describe("System One audio lane (#4713)", () => {
 			'sh -c "ls; say hi"',
 		];
 		for (const c of wrapped) expect([c, isAudioCommand(c)]).toEqual([c, true]);
+	});
+
+	test("obfuscated and indirect audio commands are caught", () => {
+		const cases = [
+			"SAY=say; $SAY hi",
+			"say$IFS'hi'",
+			"sa''y hi",
+			"\\say hi",
+			"if true; then say hi; fi",
+			"for f in *.aiff; do afplay $f; done",
+			"{ say hi; }",
+			"eval 'say hi'",
+			"find . -exec say hi \\;",
+			"find . -execdir afplay {} \\;",
+			"sh <<< 'say hi'",
+			"su -c 'say hi'",
+			"ssh host say hi",
+			"arch say hi",
+			"caffeinate say hi",
+			"! say hi",
+			"while true; do say hi; done",
+		];
+		for (const c of cases) expect([c, isAudioCommand(c)]).toEqual([c, true]);
+	});
+
+	test("a plain echo that only names the word is left alone", () => {
+		expect(isAudioCommand("echo say hi")).toBe(false);
+		expect(isAudioCommand("grep say notes.md")).toBe(false);
 	});
 
 	test("voice is off with no settings file and no env", async () => {
