@@ -1041,6 +1041,16 @@ export function App({
 	const [stepCount, setStepCount] = useState(0);
 	const [toolCount, setToolCount] = useState(0);
 	const [totalTokens, setTotalTokens] = useState(0);
+	// "92% local today" (#4607). Null until a model call has been measured today.
+	const [localChip, setLocalChip] = useState<string | null>(null);
+	const refreshLocalChip = useCallback(() => {
+		import("../../../packages/providers/locality.js")
+			.then((m) => setLocalChip(m.chipText(m.readLedger())))
+			.catch(() => {});
+	}, []);
+	useEffect(() => {
+		refreshLocalChip();
+	}, [refreshLocalChip]);
 	// Body-parts visual indicators (hands / eyes / handeyes). Session-scoped,
 	// in-memory only. Defaults detect cliclick + 8gent-ax-bridge on first
 	// render. Pulse driven by onToolStart / onToolEnd below. The mark*/toggle
@@ -2569,6 +2579,17 @@ export function App({
 		]);
 	}, []);
 
+	// A cloud call is never silent (#4607): one line naming the provider and why.
+	useEffect(() => {
+		let off = () => {};
+		import("../../../packages/providers/locality-wire.js")
+			.then((m) => {
+				off = m.onCloudNotice((msg) => addSystemMessage(msg));
+			})
+			.catch(() => {});
+		return () => off();
+	}, [addSystemMessage]);
+
 	// Shared sessions (#3929). While linked, chat goes to a daemon session that
 	// the 8gent Browser panel (or another TUI) can sit on too, and this TUI shows
 	// what they send. Unlinked, the TUI runs its own in-process 8gent as before.
@@ -2973,6 +2994,7 @@ export function App({
 				if (isActive) {
 					setStepCount((prev) => prev + 1);
 					setTotalTokens((prev) => prev + event.usage.totalTokens);
+					refreshLocalChip();
 					// What the last request held, not a running sum. An all-zero
 					// synthetic event measured nothing: keep the last reading.
 					const measured = stepContextUsed(event.usage);
@@ -6031,6 +6053,24 @@ export function App({
 							setViewMode("model-select");
 						}
 					}
+					// /route and /privacy: where model calls may go, and what left this machine (#4607)
+					else if (command === ("route" as any) || command === ("privacy" as any)) {
+						import("../../../packages/providers/locality.js")
+							.then((m) => {
+								if (command === ("route" as any)) {
+									addSystemMessage(m.routeCommand(args[0]));
+								} else {
+									const st = m.readPolicyState();
+									addSystemMessage(
+										m.privacyReport(m.readLedger(), st.policy, undefined, undefined, st.why),
+									);
+								}
+								setLocalChip(m.chipText(m.readLedger()));
+							})
+							.catch((e) =>
+								addSystemMessage(`privacy: ${e instanceof Error ? e.message : String(e)}`),
+							);
+					}
 					// /llama and /models: the llama-server router from inside a session (#4206)
 					else if (command === "llama" || command === "models") {
 						import("./lib/llama-command.js")
@@ -7729,6 +7769,7 @@ export function App({
 					mode={agentMode}
 					adhd={adhdMode}
 					tokensPerSecond={tokensPerSecond}
+					localChip={localChip}
 					judge={judgeState}
 					sandboxOff={sandboxOff}
 					verification={verificationByTab[activeTabId]}

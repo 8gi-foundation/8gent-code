@@ -22,6 +22,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, release } from "node:os";
 import { join } from "node:path";
+import { type RoutingPolicy, readPolicy } from "./locality";
 
 /**
  * Apple Foundation Model is preferred at the top of every local chain when
@@ -183,6 +184,8 @@ export interface ModelFailoverOptions {
 	 * NoAllowedProviderError instead of going to openrouter (#3710).
 	 */
 	allowHosted?: boolean;
+	/** Routing policy (#4607), read on every resolve(); default reads settings.json. */
+	policy?: () => RoutingPolicy;
 	/**
 	 * Keep a session on the backend holding its prompt cache (#4500). Defaults to
 	 * EIGHT_CACHE_AFFINITY=1; off otherwise.
@@ -224,6 +227,7 @@ export class ModelFailover {
 	/** channel + model of every chain that lost a hosted apfel entry. */
 	private apfelChains = new Set<string>();
 	private cacheAffinity: boolean;
+	private policy: () => RoutingPolicy;
 	private prefillTokensPerSec: number;
 	/**
 	 * session id to its last-good backend; only written when cacheAffinity is on.
@@ -245,6 +249,7 @@ export class ModelFailover {
 		this.cacheAffinity = opts.cacheAffinity ?? process.env.EIGHT_CACHE_AFFINITY?.trim() === "1";
 		this.prefillTokensPerSec = opts.prefillTokensPerSec ?? 2000;
 		this.now = opts.now ?? Date.now;
+		this.policy = opts.policy ?? (() => readPolicy());
 		// No opt-in: the allowlist is the local providers (narrowed further by an explicit one).
 		this.allow = this.hostedBlocked
 			? (explicit ?? [...LOCAL_FAILOVER_PROVIDERS]).filter((p) => !isHostedProvider(p))
@@ -468,7 +473,24 @@ export class ModelFailover {
 	 * NoAllowedProviderError instead of defaulting to openrouter.
 	 */
 	resolve(model: string, channel: FailoverChannel = "text", sessionId?: string): FailoverEntry {
-		const chain = this.chainsByChannel[channel]?.[model];
+		let chain = this.chainsByChannel[channel]?.[model];
+		// Routing policy (#4607). local-only: a hosted entry is never a candidate, so a
+		// failover from a local provider cannot land on the cloud. local-first: local
+		// entries are tried before hosted ones. cloud-first keeps the chain as written.
+		const policy = this.policy();
+		if (policy === "local-only") {
+			const local = chain?.models.filter((e) => !isHostedProvider(e.provider)) ?? [];
+			if (local.length === 0) {
+				throw new NoAllowedProviderError(model, channel, [...LOCAL_FAILOVER_PROVIDERS], true, null);
+			}
+			chain = { ...chain, models: local } as FailoverChain;
+		} else if (policy === "local-first" && chain) {
+			const models = [
+				...chain.models.filter((e) => !isHostedProvider(e.provider)),
+				...chain.models.filter((e) => isHostedProvider(e.provider)),
+			];
+			chain = { ...chain, models } as FailoverChain;
+		}
 		if (this.allow && (chain ? chain.models.length === 0 : !this.allow.includes("openrouter"))) {
 			const droppedApfel = this.apfelChains.has(`${channel}\0${model}`) ? this.apfelSkipped : null;
 			throw new NoAllowedProviderError(
@@ -640,8 +662,10 @@ export class ModelFailover {
 	): FailoverEntry | null {
 		const chain = this.chainsByChannel[channel]?.[model];
 		if (!chain) return null;
+		const localOnly = this.policy() === "local-only";
 		for (const entry of chain.models) {
 			if (entry.model === model && entry.provider === provider) continue;
+			if (localOnly && isHostedProvider(entry.provider)) continue;
 			if (this.down.has(this.key(entry.model, entry.provider))) continue;
 			return entry;
 		}
