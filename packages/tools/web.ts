@@ -5,9 +5,19 @@
  * and Readability for content extraction.
  */
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { Readability } from "@mozilla/readability";
 import * as cheerio from "cheerio";
-import { type NetDeps, guardedFetch } from "./net-guard";
+import { dotenvCandidates, dotenvDeclaredKeys } from "../permissions/run-command-sandbox";
+import {
+	type FetchImpl,
+	type NetDeps,
+	guardedFetch,
+	normalizeOrigin,
+	searchEndpointFetch,
+} from "./net-guard";
 // jsdom is imported on first use: at import time it reads its default stylesheet
 // from its own install path, which does not exist inside a compiled binary.
 
@@ -33,6 +43,14 @@ export interface WebFetchResult {
 export interface WebSearchOptions {
 	maxResults?: number;
 	region?: string;
+	/** Test seam: replaces the snapshotted EIGHT_SEARCH_URL. Product code never sets it. */
+	searchUrl?: string;
+	/** Test seam: fetch used for the configured search endpoint. */
+	fetchImpl?: FetchImpl;
+	/** Test seam: where search origins are logged. Default ~/.8gent/search-origins.jsonl. */
+	originLog?: string;
+	/** Test seam: receives the once-per-session notice. Default console.error. */
+	notify?: (line: string) => void;
 }
 
 export interface WebFetchOptions {
@@ -40,6 +58,165 @@ export interface WebFetchOptions {
 	extractMain?: boolean;
 	/** DNS and fetch seams for tests. Production uses the system resolver and fetch. */
 	net?: NetDeps;
+}
+
+// ============================================
+// Configured search endpoint (#4613)
+// ============================================
+
+/**
+ * Pure: EIGHT_SEARCH_URL counts only when it came from the real process
+ * environment. A value any .env file declares is dropped, whatever it says, so
+ * a cloned project cannot steer searches (or the guard exemption) to a host of
+ * its choosing. Same rule as securityEnvSnapshot in packages/permissions; the key
+ * is read here because packages/permissions is not touched by this change.
+ */
+export function resolveSearchUrl(
+	value: string | undefined,
+	declared: Set<string>,
+): string | undefined {
+	if (!value || declared.has("EIGHT_SEARCH_URL")) return undefined;
+	return normalizeOrigin(value) ? value : undefined;
+}
+
+/** Pure: true when a value was set but dropped because a .env file declares the key. */
+export function searchUrlDroppedByDotenv(
+	value: string | undefined,
+	declared: Set<string>,
+): boolean {
+	return !!value && declared.has("EIGHT_SEARCH_URL");
+}
+
+// Captured at module load, before the TUI's loadEnvFile() can add anything.
+const declaredAtStart = dotenvDeclaredKeys(dotenvCandidates());
+const searchUrlAtStart = resolveSearchUrl(process.env.EIGHT_SEARCH_URL, declaredAtStart);
+const droppedAtStart = searchUrlDroppedByDotenv(process.env.EIGHT_SEARCH_URL, declaredAtStart);
+
+export const SEARCH_IGNORED_NOTICE =
+	"EIGHT_SEARCH_URL ignored: declared in a .env file. Set it in your shell profile.";
+
+/** True when EIGHT_SEARCH_URL was set but ignored because a .env file declares it. */
+export function searchUrlIgnored(): boolean {
+	return droppedAtStart;
+}
+
+// ---- Where each search went (origin only, never the query) ----
+// PR #4614's ~/.8gent/locality.jsonl is not on main, so this is a small separate log.
+
+export function searchOriginLogPath(): string {
+	return path.join(os.homedir(), ".8gent", "search-origins.jsonl");
+}
+
+function recordSearchOrigin(origin: string, logPath?: string): void {
+	try {
+		const file = logPath ?? searchOriginLogPath();
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.appendFileSync(file, `${JSON.stringify({ ts: new Date().toISOString(), origin })}\n`);
+	} catch {}
+}
+
+/** Counts of destination origins from the last `limit` logged searches. */
+export function readSearchOrigins(logPath?: string, limit = 200): Record<string, number> {
+	const counts: Record<string, number> = {};
+	try {
+		const lines = fs
+			.readFileSync(logPath ?? searchOriginLogPath(), "utf8")
+			.trim()
+			.split("\n");
+		for (const line of lines.slice(-limit)) {
+			try {
+				const o = (JSON.parse(line) as { origin?: unknown }).origin;
+				if (typeof o === "string") counts[o] = (counts[o] ?? 0) + 1;
+			} catch {}
+		}
+	} catch {}
+	return counts;
+}
+
+let noticed = false;
+function noticeOnce(options: WebSearchOptions): void {
+	if (noticed || !droppedAtStart) return;
+	noticed = true;
+	(options.notify ?? ((l: string) => console.error(`[web] ${l} Searching via duckduckgo.`)))(
+		SEARCH_IGNORED_NOTICE,
+	);
+}
+/** Tests only. */
+export function resetSearchNoticeForTests(): void {
+	noticed = false;
+}
+
+/** The configured search endpoint URL, or undefined when search uses DuckDuckGo. */
+export function configuredSearchUrl(): string | undefined {
+	return searchUrlAtStart;
+}
+
+/** Strip control characters (terminal escapes, newlines in titles) and bound length. */
+function cleanText(value: unknown, max: number): string {
+	if (typeof value !== "string") return "";
+	return value
+		.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
+		.slice(0, max);
+}
+
+/** Map a SearXNG-style JSON body to SearchResult[]. Entries without a title or http(s) url are dropped. */
+export function mapSearchJson(body: string, maxResults: number): SearchResult[] {
+	let data: unknown;
+	try {
+		data = JSON.parse(body);
+	} catch {
+		throw new Error("Search endpoint did not return JSON (is format=json enabled?).");
+	}
+	const list = (data as { results?: unknown })?.results;
+	if (!Array.isArray(list)) throw new Error("Search endpoint JSON has no results array.");
+	const out: SearchResult[] = [];
+	for (const item of list) {
+		if (out.length >= maxResults) break;
+		const r = item as Record<string, unknown>;
+		const title = cleanText(r?.title, 300);
+		const url = cleanText(r?.url, 2000);
+		if (!title || !normalizeOrigin(url)) continue;
+		out.push({ title, url, snippet: cleanText(r.content ?? r.snippet, 1000) });
+	}
+	return out;
+}
+
+async function searchConfigured(
+	endpoint: string,
+	query: string,
+	options: WebSearchOptions,
+): Promise<SearchResult[]> {
+	const maxResults = options.maxResults || 10;
+	const url = new URL(endpoint);
+	url.searchParams.set("q", query);
+	url.searchParams.set("format", "json");
+	let body: string;
+	try {
+		body = await searchEndpointFetch(url.href, endpoint, { fetchImpl: options.fetchImpl });
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		// No silent fallback to the public site: that would send the query out
+		// exactly when the operator asked for it to stay in.
+		throw new Error(`Search endpoint ${url.origin} failed: ${msg}`);
+	}
+	return mapSearchJson(body, maxResults);
+}
+
+/** For `8gent doctor`: null when unconfigured, else whether the endpoint answers a query. */
+export async function probeSearchEndpoint(
+	options: WebSearchOptions = {},
+): Promise<{ origin: string; ok: boolean; detail?: string } | null> {
+	const endpoint = options.searchUrl ?? configuredSearchUrl();
+	if (!endpoint) return null;
+	const origin = new URL(endpoint).origin;
+	try {
+		await searchConfigured(endpoint, "8gent", { ...options, maxResults: 1 });
+		return { origin, ok: true };
+	} catch (err) {
+		return { origin, ok: false, detail: err instanceof Error ? err.message : String(err) };
+	}
 }
 
 // ============================================
@@ -55,6 +232,14 @@ export async function webSearch(
 	options: WebSearchOptions = {},
 ): Promise<SearchResult[]> {
 	const maxResults = options.maxResults || 10;
+
+	const endpoint = options.searchUrl ?? configuredSearchUrl();
+	if (endpoint) {
+		recordSearchOrigin(new URL(endpoint).origin, options.originLog);
+		return searchConfigured(endpoint, query, options);
+	}
+	noticeOnce(options);
+	recordSearchOrigin("duckduckgo", options.originLog);
 
 	// Use DuckDuckGo HTML lite endpoint
 	const params = new URLSearchParams({
