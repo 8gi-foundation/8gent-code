@@ -9,6 +9,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.9] - 2026-10-21
+
+### Added
+- /bug and 8gent bug write a secret-free local bug report folder ([#4657](https://github.com/8gi-foundation/8gent-code/pull/4657))
+
+### Changed
+- release smoke on a Termux arm64 userland and the Windows TUI, on the tag (#4666) ([#4672](https://github.com/8gi-foundation/8gent-code/pull/4672))
+
+### Fixed
+- the TUI never runs itself to find local models; /provider picks a hosted model (#4682) ([#4683](https://github.com/8gi-foundation/8gent-code/pull/4683))
+- say why no model was chosen; 8gent keys set; no topK to OpenAI-compatible providers ([#4681](https://github.com/8gi-foundation/8gent-code/pull/4681))
+- tui: NO MODEL once, onboarding question whole on phone-sized terminals ([#4677](https://github.com/8gi-foundation/8gent-code/pull/4677))
+- tui: drop pre-intro banner and stale usage-cap claims, keep Lil Eight opt-in ([#4670](https://github.com/8gi-foundation/8gent-code/pull/4670))
+- the standalone binary starts its own TUI, with no cache file or build paths ([#4675](https://github.com/8gi-foundation/8gent-code/pull/4675))
+- Node TUI crash on first coloured text in Termux (chalk vs ansi-styles 6) ([#4661](https://github.com/8gi-foundation/8gent-code/pull/4661))
+- npm i -g installs on Termux (remove miniflare, bundled deps to devDependencies) ([#4664](https://github.com/8gi-foundation/8gent-code/pull/4664))
+
 ## [0.20.8] - 2026-10-21
 
 ### Added
