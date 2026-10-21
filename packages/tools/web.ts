@@ -5,6 +5,9 @@
  * and Readability for content extraction.
  */
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { Readability } from "@mozilla/readability";
 import * as cheerio from "cheerio";
 import { dotenvCandidates, dotenvDeclaredKeys } from "../permissions/run-command-sandbox";
@@ -44,6 +47,10 @@ export interface WebSearchOptions {
 	searchUrl?: string;
 	/** Test seam: fetch used for the configured search endpoint. */
 	fetchImpl?: FetchImpl;
+	/** Test seam: where search origins are logged. Default ~/.8gent/search-origins.jsonl. */
+	originLog?: string;
+	/** Test seam: receives the once-per-session notice. Default console.error. */
+	notify?: (line: string) => void;
 }
 
 export interface WebFetchOptions {
@@ -72,11 +79,72 @@ export function resolveSearchUrl(
 	return normalizeOrigin(value) ? value : undefined;
 }
 
+/** Pure: true when a value was set but dropped because a .env file declares the key. */
+export function searchUrlDroppedByDotenv(
+	value: string | undefined,
+	declared: Set<string>,
+): boolean {
+	return !!value && declared.has("EIGHT_SEARCH_URL");
+}
+
 // Captured at module load, before the TUI's loadEnvFile() can add anything.
-const searchUrlAtStart = resolveSearchUrl(
-	process.env.EIGHT_SEARCH_URL,
-	dotenvDeclaredKeys(dotenvCandidates()),
-);
+const declaredAtStart = dotenvDeclaredKeys(dotenvCandidates());
+const searchUrlAtStart = resolveSearchUrl(process.env.EIGHT_SEARCH_URL, declaredAtStart);
+const droppedAtStart = searchUrlDroppedByDotenv(process.env.EIGHT_SEARCH_URL, declaredAtStart);
+
+export const SEARCH_IGNORED_NOTICE =
+	"EIGHT_SEARCH_URL ignored: declared in a .env file. Set it in your shell profile.";
+
+/** True when EIGHT_SEARCH_URL was set but ignored because a .env file declares it. */
+export function searchUrlIgnored(): boolean {
+	return droppedAtStart;
+}
+
+// ---- Where each search went (origin only, never the query) ----
+// PR #4614's ~/.8gent/locality.jsonl is not on main, so this is a small separate log.
+
+export function searchOriginLogPath(): string {
+	return path.join(os.homedir(), ".8gent", "search-origins.jsonl");
+}
+
+function recordSearchOrigin(origin: string, logPath?: string): void {
+	try {
+		const file = logPath ?? searchOriginLogPath();
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.appendFileSync(file, `${JSON.stringify({ ts: new Date().toISOString(), origin })}\n`);
+	} catch {}
+}
+
+/** Counts of destination origins from the last `limit` logged searches. */
+export function readSearchOrigins(logPath?: string, limit = 200): Record<string, number> {
+	const counts: Record<string, number> = {};
+	try {
+		const lines = fs
+			.readFileSync(logPath ?? searchOriginLogPath(), "utf8")
+			.trim()
+			.split("\n");
+		for (const line of lines.slice(-limit)) {
+			try {
+				const o = (JSON.parse(line) as { origin?: unknown }).origin;
+				if (typeof o === "string") counts[o] = (counts[o] ?? 0) + 1;
+			} catch {}
+		}
+	} catch {}
+	return counts;
+}
+
+let noticed = false;
+function noticeOnce(options: WebSearchOptions): void {
+	if (noticed || !droppedAtStart) return;
+	noticed = true;
+	(options.notify ?? ((l: string) => console.error(`[web] ${l} Searching via duckduckgo.`)))(
+		SEARCH_IGNORED_NOTICE,
+	);
+}
+/** Tests only. */
+export function resetSearchNoticeForTests(): void {
+	noticed = false;
+}
 
 /** The configured search endpoint URL, or undefined when search uses DuckDuckGo. */
 export function configuredSearchUrl(): string | undefined {
@@ -166,7 +234,12 @@ export async function webSearch(
 	const maxResults = options.maxResults || 10;
 
 	const endpoint = options.searchUrl ?? configuredSearchUrl();
-	if (endpoint) return searchConfigured(endpoint, query, options);
+	if (endpoint) {
+		recordSearchOrigin(new URL(endpoint).origin, options.originLog);
+		return searchConfigured(endpoint, query, options);
+	}
+	noticeOnce(options);
+	recordSearchOrigin("duckduckgo", options.originLog);
 
 	// Use DuckDuckGo HTML lite endpoint
 	const params = new URLSearchParams({

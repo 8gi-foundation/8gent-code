@@ -9,7 +9,17 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { dotenvDeclaredKeys } from "../../permissions/run-command-sandbox";
 import { BlockedDestinationError, normalizeOrigin, searchEndpointFetch } from "../net-guard";
-import { mapSearchJson, probeSearchEndpoint, resolveSearchUrl, webFetch, webSearch } from "../web";
+import {
+	SEARCH_IGNORED_NOTICE,
+	mapSearchJson,
+	probeSearchEndpoint,
+	readSearchOrigins,
+	resetSearchNoticeForTests,
+	resolveSearchUrl,
+	searchUrlDroppedByDotenv,
+	webFetch,
+	webSearch,
+} from "../web";
 
 const ENDPOINT = "http://127.0.0.1:8888/search";
 
@@ -95,7 +105,9 @@ describe("unset keeps the DuckDuckGo path", () => {
 			);
 		}) as unknown as typeof fetch;
 		try {
-			const r = await webSearch("q", {});
+			const r = await webSearch("q", {
+				originLog: path.join(os.tmpdir(), `ddg-${process.pid}.jsonl`),
+			});
 			expect(new URL(seen[0]).host).toBe("html.duckduckgo.com");
 			expect(r[0].url).toBe("https://a.com/");
 		} finally {
@@ -243,5 +255,75 @@ describe(".env-declared value is ignored", () => {
 			JSON.stringify(ENDPOINT),
 		);
 		expect(dotenvDeclaredKeys([path.join(dir, ".env")]).size).toBe(0);
+	});
+});
+
+describe("origin log and ignored notice (hardening)", () => {
+	let dir: string;
+	beforeAll(() => {
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), "search-4613b-"));
+	});
+	afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+	test("each search records its origin, never the query", async () => {
+		const log = path.join(dir, "origins.jsonl");
+		const { fetchImpl } = recorder(() => json({ results: [] }));
+		await webSearch("super secret query", { searchUrl: ENDPOINT, fetchImpl, originLog: log });
+		await webSearch("another secret", { searchUrl: ENDPOINT, fetchImpl, originLog: log });
+		const real = globalThis.fetch;
+		globalThis.fetch = (async () =>
+			new Response("<html></html>", { status: 200 })) as unknown as typeof fetch;
+		try {
+			await webSearch("ddg secret", { originLog: log, notify: () => {} });
+		} finally {
+			globalThis.fetch = real;
+		}
+		const text = fs.readFileSync(log, "utf8");
+		expect(text).not.toContain("secret");
+		expect(readSearchOrigins(log)).toEqual({ "http://127.0.0.1:8888": 2, duckduckgo: 1 });
+	});
+
+	test("a missing log reads as empty", () => {
+		expect(readSearchOrigins(path.join(dir, "nope.jsonl"))).toEqual({});
+	});
+
+	test("dropped-by-dotenv is detected", () => {
+		expect(searchUrlDroppedByDotenv(ENDPOINT, new Set(["EIGHT_SEARCH_URL"]))).toBe(true);
+		expect(searchUrlDroppedByDotenv(ENDPOINT, new Set())).toBe(false);
+		expect(searchUrlDroppedByDotenv(undefined, new Set(["EIGHT_SEARCH_URL"]))).toBe(false);
+	});
+
+	test("real process: .env-declared value prints the notice once, on the first search only", () => {
+		const d = fs.mkdtempSync(path.join(dir, "p-"));
+		fs.writeFileSync(path.join(d, ".env"), "EIGHT_SEARCH_URL=http://127.0.0.1:9999/search\n");
+		const log = path.join(d, "o.jsonl");
+		const web = JSON.stringify(path.resolve(import.meta.dir, "../web.ts"));
+		const script = `import { webSearch, searchUrlIgnored } from ${web};
+globalThis.fetch = async () => new Response("<html></html>");
+const lines = [];
+const notify = (l) => lines.push(l);
+await webSearch("a", { originLog: ${JSON.stringify(log)}, notify });
+await webSearch("b", { originLog: ${JSON.stringify(log)}, notify });
+console.log(JSON.stringify({ ignored: searchUrlIgnored(), lines }));`;
+		const f = path.join(d, "t.ts");
+		fs.writeFileSync(f, script);
+		const r = Bun.spawnSync(["bun", f], { cwd: d, env: { PATH: process.env.PATH ?? "", HOME: d } });
+		const out = JSON.parse(r.stdout.toString().trim());
+		expect(out).toEqual({ ignored: true, lines: [SEARCH_IGNORED_NOTICE] });
+		expect(readSearchOrigins(log)).toEqual({ duckduckgo: 2 });
+	});
+
+	test("no notice when the key is simply unset", async () => {
+		resetSearchNoticeForTests();
+		const lines: string[] = [];
+		const real = globalThis.fetch;
+		globalThis.fetch = (async () =>
+			new Response("<html></html>", { status: 200 })) as unknown as typeof fetch;
+		try {
+			await webSearch("q", { originLog: path.join(dir, "x.jsonl"), notify: (l) => lines.push(l) });
+		} finally {
+			globalThis.fetch = real;
+		}
+		expect(lines).toEqual([]);
 	});
 });
