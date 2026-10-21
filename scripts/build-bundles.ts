@@ -17,21 +17,7 @@
  */
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { BunPlugin } from "bun";
-
-const stubDevtools: BunPlugin = {
-	name: "stub-react-devtools-core",
-	setup(build) {
-		build.onResolve({ filter: /^react-devtools-core$/ }, () => ({
-			path: "react-devtools-core",
-			namespace: "stub-devtools",
-		}));
-		build.onLoad({ filter: /.*/, namespace: "stub-devtools" }, () => ({
-			contents: "export default { initialize() {}, connectToDevTools() {} };",
-			loader: "js",
-		}));
-	},
-};
+import { stubDevtools } from "./lib/stub-devtools";
 
 const targets = [
 	{ name: "cli", entry: "bin/8gent.ts", external: [] as string[] },

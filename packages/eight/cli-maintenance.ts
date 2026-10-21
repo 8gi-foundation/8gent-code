@@ -69,7 +69,7 @@ export interface UpdateCliDeps {
 	currentVersion: string;
 	/** import.meta.url of the running entry; decides the channel. */
 	modulePath: string;
-	/** true inside a compiled binary (globalThis.__EIGHT_EMBEDDED_TUI). */
+	/** true inside a compiled binary (the module path is in Bun's virtual filesystem). */
 	embedded: boolean;
 	execPath: string;
 	env?: Env;

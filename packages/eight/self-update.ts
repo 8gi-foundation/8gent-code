@@ -73,7 +73,7 @@ export function decideUpdate(current: string, available: string): UpdateDecision
 export interface ChannelProbe {
 	/** import.meta.url / module path of the running entry. */
 	modulePath: string;
-	/** true when a compiled binary set globalThis.__EIGHT_EMBEDDED_TUI. */
+	/** true inside a compiled binary (the module path is in Bun's virtual filesystem). */
 	embedded?: boolean;
 	/** Does <dir>/.git exist? Injected for tests. */
 	isGitCheckout?: (path: string) => boolean;
