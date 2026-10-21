@@ -8,8 +8,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { Worker } from "node:worker_threads";
-import { type ScanJob, scanFiles } from "./inproc-search-worker";
+import { WORKER_SOURCE } from "./inproc-search-worker-source";
 
 export interface SearchHit {
 	file: string;
@@ -30,8 +29,8 @@ export interface SearchOptions {
 	maxResults?: number;
 	maxPerFile?: number;
 	maxFileBytes?: number;
-	/** Veto an absolute path (the permissions path-guard). A denied directory is not entered, a denied file is not read; both are skipped silently. */
-	allow?: (absPath: string) => boolean;
+	/** Required: veto an absolute path (the permissions path-guard). A denied directory is not entered, a denied file is not read; both are skipped silently. */
+	allow: (absPath: string) => boolean;
 	/** Wall-clock limit for the content scan; the worker is terminated at it. Default 5000. */
 	deadlineMs?: number;
 	/** Walk entry cap. Default 200000. */
@@ -53,27 +52,74 @@ const ALWAYS_SKIP = new Set(["node_modules", "dist", ".git"]);
 export const MAX_PATTERN_CHARS = 512;
 const SKIP_FILE = /\.(lock|min\.js|map)$/;
 
-/** Translate a glob to a RegExp over a "/"-separated relative path. */
-export function globToRegExp(glob: string, anchored = true): RegExp {
-	let re = "";
-	for (let i = 0; i < glob.length; i++) {
-		const c = glob[i];
-		if (c === "*") {
-			if (glob[i + 1] === "*") {
-				i++;
-				if (glob[i + 1] === "/") {
-					i++;
-					re += "(?:.*/)?";
-				} else re += ".*";
-			} else re += "[^/]*";
-		} else if (c === "?") re += "[^/]";
-		else re += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+export const MAX_GLOB_CHARS = 256;
+const MAX_WILDCARDS = 8;
+
+/** One path segment against one glob segment: `*` and `?`, linear two-pointer, no regex backtracking. */
+function segMatch(p: string, s: string): boolean {
+	let pi = 0;
+	let si = 0;
+	let star = -1;
+	let mark = 0;
+	while (si < s.length) {
+		if (pi < p.length && (p[pi] === "?" || p[pi] === s[si])) {
+			pi++;
+			si++;
+		} else if (pi < p.length && p[pi] === "*") {
+			star = pi++;
+			mark = si;
+		} else if (star >= 0) {
+			pi = star + 1;
+			si = ++mark;
+		} else return false;
 	}
-	return new RegExp(`${anchored ? "^" : "(?:^|/)"}${re}$`);
+	while (pi < p.length && p[pi] === "*") pi++;
+	return pi === p.length;
+}
+
+/**
+ * Compile a glob to a matcher over a "/"-separated relative path, or null when it is too
+ * long or has too many wildcards. No RegExp: a hostile glob or .gitignore line cannot
+ * hang the walk. A "**" segment spans any number of directories; anchored=false matches
+ * the pattern against the tail of the path (gitignore rules without a slash).
+ */
+export function globMatcher(glob: string, anchored = true): ((rel: string) => boolean) | null {
+	const collapsed = glob.replace(/\*{2,}/g, (m, off: number, all: string) =>
+		(off === 0 || all[off - 1] === "/") &&
+		(off + m.length === all.length || all[off + m.length] === "/")
+			? "**"
+			: "*",
+	);
+	if (
+		collapsed.length > MAX_GLOB_CHARS ||
+		(collapsed.match(/[*?]/g)?.length ?? 0) > MAX_WILDCARDS
+	) {
+		return null;
+	}
+	const pat = collapsed.split("/");
+	return (rel: string) => {
+		const segs = rel.split("/");
+		const starts = anchored
+			? [0]
+			: segs.map((_, i) => i).filter((i) => segs.length - i === pat.length);
+		const memo = new Map<number, boolean>();
+		const go = (pi: number, si: number): boolean => {
+			const k = pi * 100003 + si;
+			const hit = memo.get(k);
+			if (hit !== undefined) return hit;
+			let r: boolean;
+			if (pi === pat.length) r = si === segs.length;
+			else if (pat[pi] === "**") r = go(pi + 1, si) || (si < segs.length && go(pi, si + 1));
+			else r = si < segs.length && segMatch(pat[pi], segs[si]) && go(pi + 1, si + 1);
+			memo.set(k, r);
+			return r;
+		};
+		return starts.some((st) => go(0, st));
+	};
 }
 
 interface IgnoreRule {
-	re: RegExp;
+	match: (rel: string) => boolean;
 	negate: boolean;
 	dirOnly: boolean;
 }
@@ -95,7 +141,8 @@ export function parseGitignore(text: string): IgnoreRule[] {
 		const anchored = line.includes("/");
 		line = line.replace(/^\//, "");
 		if (!line) continue;
-		rules.push({ re: globToRegExp(line, anchored), negate, dirOnly });
+		const match = globMatcher(line, anchored);
+		if (match) rules.push({ match, negate, dirOnly }); // a rule over the caps is dropped
 	}
 	return rules;
 }
@@ -106,7 +153,7 @@ function isIgnored(rel: string, isDir: boolean, scopes: Scope[]): boolean {
 		const sub = base ? rel.slice(base.length + 1) : rel;
 		for (const r of rules) {
 			if (r.dirOnly && !isDir) continue;
-			if (r.re.test(sub)) ignored = !r.negate;
+			if (r.match(sub)) ignored = !r.negate;
 		}
 	}
 	return ignored;
@@ -115,9 +162,15 @@ function isIgnored(rel: string, isDir: boolean, scopes: Scope[]): boolean {
 export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 	const root = path.resolve(opts.root);
 	const maxResults = opts.maxResults ?? 200;
-	const allow = opts.allow ?? (() => true);
-	const fileGlob = opts.glob ? globToRegExp(opts.glob, opts.glob.includes("/")) : null;
+	const allow = opts.allow;
+	const fileGlob = opts.glob ? globMatcher(opts.glob, opts.glob.includes("/")) : null;
 	const out: SearchResult = { hits: [], files: [], filesScanned: 0, truncated: false };
+	if (opts.glob && !fileGlob) {
+		return {
+			...out,
+			error: `glob longer than ${MAX_GLOB_CHARS} characters or with more than ${MAX_WILDCARDS} wildcards`,
+		};
+	}
 	if (opts.pattern) {
 		if (opts.pattern.length > MAX_PATTERN_CHARS) {
 			return { ...out, error: `pattern longer than ${MAX_PATTERN_CHARS} characters` };
@@ -162,7 +215,7 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 			const abs = path.join(dir, e.name);
 			if (!allow(abs)) continue; // path-guard denied: never entered, never read, never listed
 			if (isDir) walk(abs, childRel, scopes);
-			else if (!fileGlob || fileGlob.test(childRel)) candidates.push(childRel);
+			else if (!fileGlob || fileGlob(childRel)) candidates.push(childRel);
 		}
 	};
 	walk(root, "", []);
@@ -174,7 +227,7 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 	}
 
 	// 2. Scan in a worker with a hard deadline: a catastrophic regex cannot hang this thread.
-	const job: ScanJob = {
+	const job = {
 		root,
 		candidates,
 		pattern: opts.pattern,
@@ -185,34 +238,43 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 		maxBytes: opts.maxFileBytes ?? 1_000_000,
 	};
 	const deadlineMs = opts.deadlineMs ?? 5000;
-	let worker: Worker;
-	try {
-		worker = new Worker(new URL("./inproc-search-worker.ts", import.meta.url));
-	} catch {
-		// Worker unavailable (bundled binary): scan inline, with the pattern length cap only.
-		const r = await scanFiles(job, () => {});
-		return { ...out, hits: r.hits, filesScanned: r.scanned, truncated: r.truncated };
-	}
 	return new Promise<SearchResult>((resolve) => {
 		let done = false;
-		const finish = (timedOut: boolean) => {
+		let worker: Worker | undefined;
+		let blobUrl: string | undefined;
+		const finish = (extra: Partial<SearchResult> = {}) => {
 			if (done) return;
 			done = true;
 			clearTimeout(timer);
-			void worker.terminate();
-			resolve({ ...out, timedOut: timedOut || undefined });
+			void worker?.terminate();
+			if (blobUrl) URL.revokeObjectURL(blobUrl);
+			resolve({ ...out, ...extra });
 		};
-		const timer = setTimeout(() => finish(true), deadlineMs);
-		worker.on(
-			"message",
-			(m: { hits: SearchHit[]; scanned: number; truncated?: boolean; done?: boolean }) => {
-				out.hits.push(...m.hits);
-				out.filesScanned = Math.max(out.filesScanned, m.scanned);
-				if (m.truncated) out.truncated = true;
-				if (m.done) finish(false);
-			},
-		);
-		worker.on("error", () => finish(false));
+		const timer = setTimeout(() => finish({ timedOut: true }), deadlineMs);
+		const fail = (why: string) => finish({ error: `search worker failed: ${why}` });
+		try {
+			// The worker source is embedded (a blob), so it exists inside a bun --compile binary too.
+			blobUrl = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
+			worker = new Worker(blobUrl);
+		} catch (e) {
+			fail((e as Error).message);
+			return;
+		}
+		worker.onmessage = (ev: MessageEvent) => {
+			const m = ev.data as {
+				hits: SearchHit[];
+				scanned: number;
+				truncated?: boolean;
+				done?: boolean;
+				error?: string;
+			};
+			if (m.error) return fail(m.error);
+			out.hits.push(...m.hits);
+			out.filesScanned = Math.max(out.filesScanned, m.scanned);
+			if (m.truncated) out.truncated = true;
+			if (m.done) finish();
+		};
+		worker.onerror = (e: ErrorEvent) => fail(e.message || "worker error");
 		worker.postMessage(job);
 	});
 }

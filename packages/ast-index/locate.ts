@@ -590,6 +590,8 @@ async function grepLiteral(
 				maxResults: 5000,
 				allow: readAllowed(root),
 			});
+			// A failed search must read as "search unavailable", never as "no matches".
+			if (r.error) state.rgMissing = true;
 			hits.push(...r.hits.map((h) => ({ file: h.file, line: h.line, text: h.text })));
 		}
 		return hits;
@@ -619,9 +621,13 @@ async function listFiles(ctx: RunCtx): Promise<string[]> {
 	);
 	if (out.missing) {
 		ctx.state.rgMissing = false;
-		return (
-			await searchFiles({ root: ctx.root, maxResults: 1_000_000, allow: readAllowed(ctx.root) })
-		).files;
+		const r = await searchFiles({
+			root: ctx.root,
+			maxResults: 1_000_000,
+			allow: readAllowed(ctx.root),
+		});
+		if (r.error) ctx.state.rgMissing = true;
+		return r.files;
 	}
 	const allowed = readAllowed(ctx.root);
 	const files = out.text
@@ -631,7 +637,9 @@ async function listFiles(ctx: RunCtx): Promise<string[]> {
 		.filter((f) => allowed(path.resolve(ctx.root, f)));
 	if ((out.timedOut || files.length === 0) && ctx.repoId) {
 		const seen = new Set(files);
-		for (const f of getFileTree(ctx.repoId).map(toPosix)) if (!seen.has(f)) files.push(f);
+		for (const f of getFileTree(ctx.repoId).map(toPosix)) {
+			if (!seen.has(f) && allowed(path.resolve(ctx.root, f))) files.push(f);
+		}
 	}
 	return files;
 }

@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { validatePath } from "../../permissions/path-guard";
-import { MAX_PATTERN_CHARS, formatSearch, globToRegExp, searchFiles } from "../inproc-search";
+import { MAX_PATTERN_CHARS, formatSearch, globMatcher, searchFiles } from "../inproc-search";
 
 // A fixed fixture tree, built the same way on every host. CI runs this on
 // Linux and Windows (platforms.yml); the expected rows are literal, so any
@@ -85,11 +85,46 @@ describe("inproc-search", () => {
 		);
 	});
 
-	test("globToRegExp", async () => {
-		expect(globToRegExp("src/**/*.ts").test("src/deep/b.ts")).toBe(true);
-		expect(globToRegExp("src/**/*.ts").test("src/a.ts")).toBe(true);
-		expect(globToRegExp("*.ts", false).test("src/a.ts")).toBe(true);
-		expect(globToRegExp("*.ts").test("src/a.ts")).toBe(false);
+	test("globMatcher", async () => {
+		const m = (g: string, p: string, anchored = true) =>
+			(globMatcher(g, anchored) as (r: string) => boolean)(p);
+		expect(m("src/**/*.ts", "src/deep/b.ts")).toBe(true);
+		expect(m("src/**/*.ts", "src/a.ts")).toBe(true);
+		expect(m("src/**", "src/deep/b.ts")).toBe(true);
+		expect(m("*.ts", "src/a.ts", false)).toBe(true);
+		expect(m("*.ts", "src/a.ts")).toBe(false);
+		expect(m("a?c", "abc")).toBe(true);
+		expect(m("a*c", "abxc")).toBe(true);
+		expect(m("a*c", "abxd")).toBe(false);
+	});
+
+	test("hostile glob returns fast: refused when over the caps, linear when under", async () => {
+		const evilName = `${"a".repeat(40)}`;
+		const d = path.join(root, "evilglob");
+		fs.mkdirSync(d);
+		fs.writeFileSync(path.join(d, evilName), "x\n");
+		const t0 = Date.now();
+		// 15 wildcards: over the cap, refused
+		const over = await searchFiles({ root: d, glob: `${"*a".repeat(15)}*b`, allow: guard });
+		expect(formatSearch(over)).toContain("Search refused");
+		// 8 wildcards: allowed, and the matcher has no exponential path
+		const under = await searchFiles({ root: d, glob: `${"*a".repeat(7)}*b`, allow: guard });
+		expect(under.files).toEqual([]);
+		expect(await searchFiles({ root: d, allow: () => true, glob: "a".repeat(300) })).toMatchObject({
+			error: expect.any(String),
+		});
+		expect(Date.now() - t0).toBeLessThan(6000);
+	});
+
+	test("hostile .gitignore rule cannot hang the walk", async () => {
+		const d = path.join(root, "evilignore");
+		fs.mkdirSync(d);
+		fs.writeFileSync(path.join(d, ".gitignore"), `${"*a".repeat(15)}*b\n${"*a".repeat(7)}*b\n`);
+		fs.writeFileSync(path.join(d, "a".repeat(40)), "needle\n");
+		const t0 = Date.now();
+		const r = await searchFiles({ root: d, pattern: "needle", allow: guard });
+		expect(Date.now() - t0).toBeLessThan(6000);
+		expect(r.hits.length).toBe(1);
 	});
 
 	test("path-guard: credentials, .ssh and .8gent/secrets are never walked or returned", async () => {
@@ -100,7 +135,7 @@ describe("inproc-search", () => {
 		const list = await searchFiles({ root, allow: guard });
 		expect(list.files.join(" ")).not.toMatch(/credentials|id_rsa|secrets/);
 		// the guard is what hides them: the same walk without it finds all three
-		const open = await searchFiles({ root, pattern: "needle", literal: true });
+		const open = await searchFiles({ root, allow: () => true, pattern: "needle", literal: true });
 		expect(open.hits.map((h) => h.file)).toEqual(
 			expect.arrayContaining(["credentials", ".ssh/id_rsa", ".8gent/secrets/x"]),
 		);
@@ -132,15 +167,61 @@ describe("inproc-search", () => {
 	}, 10000);
 
 	test("pattern length cap and invalid regex are refused", async () => {
-		const long = await searchFiles({ root, pattern: "a".repeat(MAX_PATTERN_CHARS + 1) });
+		const long = await searchFiles({
+			root,
+			allow: () => true,
+			pattern: "a".repeat(MAX_PATTERN_CHARS + 1),
+		});
 		expect(formatSearch(long)).toContain("Search refused");
-		expect(formatSearch(await searchFiles({ root, pattern: "(" }))).toContain("invalid regex");
+		expect(formatSearch(await searchFiles({ root, allow: () => true, pattern: "(" }))).toContain(
+			"invalid regex",
+		);
 	});
 
 	test("walk entry cap truncates", async () => {
 		const r = await searchFiles({ root, allow: guard, maxEntries: 3 });
 		expect(r.truncated).toBe(true);
 	});
+
+	test("a refused pattern is an error, never 'No matches.'", async () => {
+		const r = await searchFiles({ root, allow: guard, pattern: "needle", maxFileBytes: -1 });
+		expect(r.error).toBeUndefined(); // sanity: normal path has no error
+		const bad = await searchFiles({
+			root: path.join(root, "src"),
+			allow: () => true,
+			pattern: "(?<=a",
+		});
+		expect(formatSearch(bad)).toContain("Search refused");
+	});
+
+	test("works inside a bun --compile binary (embedded worker)", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-compile-"));
+		try {
+			fs.mkdirSync(path.join(d, "tree"));
+			fs.writeFileSync(path.join(d, "tree", "f.txt"), "hello compiled needle\n");
+			const entry = path.join(d, "entry.ts");
+			const mod = path
+				.join(import.meta.dir, "..", "inproc-search.ts")
+				.split(path.sep)
+				.join("/");
+			fs.writeFileSync(
+				entry,
+				`import { searchFiles } from ${JSON.stringify(mod)};\nconst r = await searchFiles({ root: process.argv[2], allow: () => true, pattern: "needle" });\nconsole.log(JSON.stringify({ hits: r.hits, error: r.error }));\n`,
+			);
+			const exe = path.join(d, process.platform === "win32" ? "e.exe" : "e");
+			const build = Bun.spawnSync(
+				[process.execPath, "build", "--compile", entry, "--outfile", exe],
+				{ cwd: d },
+			);
+			expect(build.exitCode).toBe(0);
+			const run = Bun.spawnSync([exe, path.join(d, "tree")]);
+			expect(JSON.parse(run.stdout.toString().trim().split("\n").pop() as string)).toEqual({
+				hits: [{ file: "f.txt", line: 1, text: "hello compiled needle" }],
+			});
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	}, 120000);
 
 	test("spawns nothing", async () => {
 		const src = fs.readFileSync(path.join(import.meta.dir, "..", "inproc-search.ts"), "utf8");
