@@ -4,6 +4,7 @@ import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { nodeTooOld, tooOldMessage } from "./node-version.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const cli = join(__dirname, "..", "dist", "cli.js");
@@ -60,6 +61,10 @@ let result = wantNode
 if (result.error && result.error.code === "ENOENT") {
 	if (!existsSync(nodeCli)) {
 		console.error(NO_BUN);
+		process.exit(1);
+	}
+	if (nodeTooOld(process.versions.node)) {
+		console.error(tooOldMessage(process.versions.node));
 		process.exit(1);
 	}
 	result = spawnSync(

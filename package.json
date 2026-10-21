@@ -2,6 +2,9 @@
   "name": "@8gi-foundation/8gent-code",
   "version": "0.20.7",
   "private": false,
+  "engines": {
+    "node": ">=22.5"
+  },
   "description": "Autonomous coding agent. Runs locally on Ollama. Zero API cost. Your code stays on your machine. Open source.",
   "type": "module",
   "bin": {
@@ -19,6 +22,7 @@
     "dist/skills",
     "dist/sounds",
     "bin/8gent-run.js",
+    "bin/node-version.js",
     "bin/bunfig.empty.toml",
     "scripts/postinstall.js",
     "README.md",
@@ -117,7 +121,6 @@
     "@types/pdf-parse": "^1.1.5",
     "@types/react": "^19.2.14",
     "ai": "^6.0.116",
-    "better-sqlite3": "^12.8.0",
     "cheerio": "^1.2.0",
     "glob": "^13.0.6",
     "ink": "^6.8.0",
@@ -139,6 +142,7 @@
     "zod": "^4.3.6"
   },
   "optionalDependencies": {
+    "better-sqlite3": "^12.8.0",
     "node-pty": "^1.1.0",
     "tree-sitter": "^0.21.0",
     "tree-sitter-go": "^0.21.0",
