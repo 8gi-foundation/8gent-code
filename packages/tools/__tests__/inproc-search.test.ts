@@ -350,7 +350,154 @@ describe("inproc-search", () => {
 			});
 			expect(performance.now() - t0).toBeLessThan(3000);
 			expect(r.truncated).toBe(true);
-			expect(r.truncatedReason).toContain("rule checks");
+			expect(r.rulesIncomplete).toBeDefined();
+			expect(formatSearch(r)).toContain("[ignore rules incomplete:");
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+
+	const base = { hits: [], files: [], filesScanned: 0, truncated: true };
+	const NOTE = {
+		capped: "[truncated: showing first 2 matches. Narrow the pattern or glob to see the rest.]",
+		rules:
+			"[ignore rules incomplete: .gitignore filtering stopped after 7 files, so results may include ignored files such as build output or dependencies. Add a glob to narrow the search.]",
+		deadline:
+			"[stopped after 2s: searched 5 of 9 files. Results so far are shown. Narrow the pattern or glob to search the rest.]",
+		deadlineNoTotal:
+			"[stopped after 2s: searched 5 files. Results so far are shown. Narrow the pattern or glob to search the rest.]",
+		parse: "[.gitignore has more than 10000 rules; only the first 10000 were applied]",
+	};
+	const hit = { file: "a.ts", line: 1, text: "x" };
+
+	test("formatSearch prints each state exactly, one line per state", () => {
+		const two = [hit, { ...hit, line: 2 }];
+		expect(formatSearch({ ...base, hits: two, capped: true })).toBe(
+			`a.ts:1:x\na.ts:2:x\n${NOTE.capped}`,
+		);
+		expect(formatSearch({ ...base, hits: [hit], rulesIncomplete: { filesWalked: 7 } })).toBe(
+			`a.ts:1:x\n${NOTE.rules}`,
+		);
+		expect(
+			formatSearch({ ...base, hits: [hit], deadline: { searched: 5, total: 9, seconds: 2 } }),
+		).toBe(`a.ts:1:x\n${NOTE.deadline}`);
+		expect(formatSearch({ ...base, hits: [hit], deadline: { searched: 5, seconds: 2 } })).toBe(
+			`a.ts:1:x\n${NOTE.deadlineNoTotal}`,
+		);
+		expect(formatSearch({ ...base, hits: [hit], ruleCapDropped: true })).toBe(
+			`a.ts:1:x\n${NOTE.parse}`,
+		);
+		expect(
+			formatSearch({
+				...base,
+				hits: [hit],
+				rulesIncomplete: { filesWalked: 7 },
+				deadline: { searched: 5, seconds: 2 },
+				ruleCapDropped: true,
+			}).split("\n"),
+		).toEqual(["a.ts:1:x", NOTE.rules, NOTE.deadlineNoTotal, NOTE.parse]);
+	});
+
+	test("a zero-hit partial search never prints a bare No matches.", () => {
+		const states = [
+			{ rulesIncomplete: { filesWalked: 7 } },
+			{ deadline: { searched: 5, total: 9, seconds: 2 } },
+			{ ruleCapDropped: true },
+			{ entryCap: 200000 },
+		];
+		for (const st of states) {
+			const out = formatSearch({ ...base, ...st });
+			expect(out.split("\n")[0]).toBe("No matches in the part searched.");
+			expect(out.split("\n").at(-1)).toBe(
+				"This does not mean the pattern is absent from the repo.",
+			);
+			expect(out).not.toMatch(/^No matches\.$/m);
+			expect(out).not.toContain("cap reached");
+		}
+		expect(formatSearch({ ...base, truncated: false })).toBe("No matches.");
+	});
+
+	test("10k ** rules over a wide tree: bounded time, never unfiltered, says so", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-deep-"));
+		try {
+			fs.writeFileSync(
+				path.join(d, ".gitignore"),
+				`${Array.from({ length: MAX_GITIGNORE_RULES }, (_, i) => `**/a${i}/**/b?x`).join("\n")}\n`,
+			);
+			for (let k = 0; k < 20; k++) {
+				fs.mkdirSync(path.join(d, `d${k}`));
+				for (let i = 0; i < 300; i++)
+					fs.writeFileSync(path.join(d, `d${k}`, `f${i}.txt`), "needle\n");
+			}
+			const t0 = performance.now();
+			const r = await searchFiles({
+				root: d,
+				allow: () => true,
+				pattern: "needle",
+				maxResults: 100000,
+			});
+			expect(performance.now() - t0).toBeLessThanOrEqual(2500);
+			const out = formatSearch(r);
+			expect(r.rulesIncomplete || r.deadline).toBeTruthy();
+			expect(out).toMatch(/\[(ignore rules incomplete|stopped after 2s)/);
+			expect(out).not.toContain("cap reached");
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+
+	test("rule budget spent: the walk stops, no hit without the incomplete line", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-budget-"));
+		try {
+			fs.writeFileSync(
+				path.join(d, ".gitignore"),
+				`${Array.from({ length: MAX_GITIGNORE_RULES }, (_, i) => `*${i}[a-z]*[!q]?x`).join("\n")}\n`,
+			);
+			for (let i = 0; i < 2000; i++) fs.writeFileSync(path.join(d, `f${i}.txt`), "needle\n");
+			const r = await searchFiles({
+				root: d,
+				allow: () => true,
+				pattern: "needle",
+				maxResults: 100000,
+				deadlineMs: 60000,
+			});
+			expect(r.rulesIncomplete).toBeDefined();
+			expect(r.hits.length).toBeGreaterThan(0);
+			expect(r.hits.length).toBeLessThan(2000); // the walk stopped, it did not go on unfiltered
+			expect(formatSearch(r)).toContain(
+				"[ignore rules incomplete: .gitignore filtering stopped after",
+			);
+			const none = await searchFiles({
+				root: d,
+				allow: () => true,
+				pattern: "zzqq",
+				maxResults: 100000,
+				deadlineMs: 60000,
+			});
+			expect(formatSearch(none).startsWith("No matches in the part searched.")).toBe(true);
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+
+	test("a tiny deadline returns partial results with the deadline line", async () => {
+		const r = await searchFiles({ root, allow: () => true, pattern: "needle", deadlineMs: 0 });
+		expect(r.deadline).toBeDefined();
+		expect(formatSearch(r)).toContain("[stopped after 0s: searched 0 files");
+	});
+
+	test("more rules than the budget is reported", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-over-"));
+		try {
+			fs.writeFileSync(
+				path.join(d, ".gitignore"),
+				`${Array.from({ length: MAX_GITIGNORE_RULES + 5 }, (_, i) => `r${i}.tmp`).join("\n")}\n`,
+			);
+			fs.writeFileSync(path.join(d, "a.txt"), "needle\n");
+			const out = formatSearch(
+				await searchFiles({ root: d, allow: () => true, pattern: "needle" }),
+			);
+			expect(out).toContain(NOTE.parse);
 		} finally {
 			fs.rmSync(d, { recursive: true, force: true });
 		}
