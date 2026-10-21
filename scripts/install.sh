@@ -198,6 +198,103 @@ installed_version() {
 	run_version "$1" | sed -n 's/.*8gent Code v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1
 }
 
+# The dynamic loader a Linux ELF asks for (e.g. /lib/ld-linux-aarch64.so.1),
+# read from its first 4 KiB with no tools beyond head, tr and grep. Empty when
+# there is none (static binary, macOS Mach-O, unreadable).
+elf_interpreter() {
+	head -c 4096 "$1" 2>/dev/null | LC_ALL=C tr -c '[:print:]' '\n' |
+		grep -m 1 -E '^/(lib|lib64|system/bin)/[A-Za-z0-9._/+-]*(ld-|linker)[A-Za-z0-9._+-]*$' || true
+}
+
+# --- Termux (Android) -------------------------------------------------------
+# The release binary is a glibc build and Android's own libc (bionic) cannot
+# start it. Install it under $PREFIX/opt/8gent and put a launcher at
+# $PREFIX/bin/8gent that runs it through glibc-runner (`grun`), or, if grun
+# cannot run it, inside proot-distro ubuntu. The launcher honours EIGHT_BIN
+# (run that file instead) so `8gent update` can check a new binary before it
+# replaces the old one, and exports EIGHT_REAL_BINARY / EIGHT_WRAPPER for it.
+
+termux_probe() { # mode file -> "X.Y.Z" or nothing
+	_d="$(dirname "$2")"
+	_t=""
+	command -v timeout >/dev/null 2>&1 && _t="timeout 60"
+	case "$1" in
+		grun) $_t grun "$2" --version </dev/null 2>/dev/null ;;
+		proot) $_t proot-distro login ubuntu --shared-tmp --bind "${_d}:${_d}" -- "$2" --version </dev/null 2>/dev/null ;;
+	esac | sed -n 's/.*8gent Code v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1
+}
+
+termux_setup_grun() {
+	if ! command -v grun >/dev/null 2>&1; then
+		say "Setting up glibc-runner (a few minutes the first time)..."
+		{ pkg install -y glibc-repo && pkg install -y glibc-runner; } >&2 || return 1
+	fi
+	command -v grun >/dev/null 2>&1
+}
+
+termux_setup_proot() {
+	if ! command -v proot-distro >/dev/null 2>&1; then
+		say "Setting up proot-distro..."
+		pkg install -y proot-distro >&2 || return 1
+	fi
+	if [ ! -d "${PREFIX}/var/lib/proot-distro/installed-rootfs/ubuntu" ]; then
+		say "Installing the ubuntu userland (a few minutes the first time)..."
+		proot-distro install ubuntu >&2 || return 1
+	fi
+	return 0
+}
+
+termux_write_launcher() { # mode real dest
+	_sh="$(command -v sh)"
+	_d="$(dirname "$2")"
+	{
+		printf '#!%s\n' "$_sh"
+		printf '# 8gent launcher for Termux, written by the 8gent installer (mode: %s).\n' "$1"
+		case "$1" in
+			grun)
+				printf 'EIGHT_REAL_BINARY=%s\nEIGHT_WRAPPER=%s\nexport EIGHT_REAL_BINARY EIGHT_WRAPPER\n' "'$2'" "'${TARGET}'"
+				printf 'exec grun "${EIGHT_BIN:-$EIGHT_REAL_BINARY}" "$@"\n'
+				;;
+			proot)
+				printf 'REAL=%s\n' "'$2'"
+				printf 'exec proot-distro login ubuntu --shared-tmp --termux-home --bind %s -- env EIGHT_REAL_BINARY="$REAL" "${EIGHT_BIN:-$REAL}" "$@"\n' "'${_d}:${_d}'"
+				;;
+		esac
+	} >"$3"
+}
+
+termux_install() {
+	OPT="${PREFIX}/opt/8gent"
+	REAL="${OPT}/8gent"
+	mkdir -p "$OPT" "$INSTALL_DIR"
+	STAGE="${OPT}/.8gent.new"
+	cp "$TMP/$ASSET" "$STAGE"
+	chmod 755 "$STAGE"
+	mode=""
+	if termux_setup_grun; then
+		[ "$(termux_probe grun "$STAGE")" = "$VERSION" ] && mode=grun
+	fi
+	if [ -z "$mode" ]; then
+		say "glibc-runner could not run the 8gent binary here; trying proot-distro ubuntu instead."
+		if termux_setup_proot; then
+			[ "$(termux_probe proot "$STAGE")" = "$VERSION" ] && mode=proot
+		fi
+	fi
+	if [ -z "$mode" ]; then
+		interp="$(elf_interpreter "$STAGE")"
+		rm -f "$STAGE"
+		die "the downloaded binary did not report v${VERSION} through glibc-runner or proot-distro (ELF interpreter: ${interp:-unknown}); nothing installed. To report this, run with EIGHT_INSTALL_DEBUG=1 and paste the output"
+	fi
+	mv -f "$STAGE" "$REAL"
+	lt="$(mktemp "${INSTALL_DIR}/.8gent.XXXXXX")"
+	termux_write_launcher "$mode" "$REAL" "$lt"
+	chmod 755 "$lt"
+	mv -f "$lt" "$TARGET"
+	got="$(installed_version "$TARGET")"
+	[ "$got" = "$VERSION" ] || die "installed the launcher at ${TARGET} ($mode) but it did not report v${VERSION} (got '${got}'); run ${TARGET} --version to see why"
+	say "Android (Termux): running 8gent through ${mode}. The binary is ${REAL}; \`8gent update\` keeps this working."
+}
+
 # From a GitHub releases JSON (a list or one release): "X.Y.Z URL" for each
 # download URL of ASSET on a published, non-prerelease vX.Y.Z release. Reads
 # the keys in document order (GitHub puts tag_name, draft and prerelease
@@ -341,25 +438,16 @@ main() {
 		say "  releases url    : $(printf '%s' "$RELEASES_URL" | sed -E 's#^([a-zA-Z]+://)[^/@]*@#\1#; s#\?.*$#?...#')"
 	fi
 
+	termux=0
 	if [ "$libc" = bionic ] && [ "${EIGHT_ANDROID_FORCE:-}" = 1 ]; then
-		warn "EIGHT_ANDROID_FORCE=1: continuing on Android; the install will fail unless this box runs glibc binaries."
+		warn "EIGHT_ANDROID_FORCE=1: installing the plain binary on Android; it will fail unless this box runs glibc binaries."
+	elif [ "$libc" = bionic ]; then
+		termux=1
 	fi
 	if [ "$DRY_RUN" = 1 ]; then
-		if [ "$libc" = bionic ] && [ "${EIGHT_ANDROID_FORCE:-}" != 1 ]; then say "  result          : a real run would stop here (Android, glibc binary cannot start)"; fi
+		if [ "$termux" = 1 ]; then say "  result          : a real run would set up glibc-runner (grun), falling back to proot-distro ubuntu, and install a launcher at ${INSTALL_DIR}/8gent"; fi
 		say "Dry run: nothing downloaded or installed."
 		exit 0
-	fi
-	if [ "$libc" = bionic ] && [ "${EIGHT_ANDROID_FORCE:-}" != 1 ]; then
-		{
-			say "8gent install: this is Android (Termux). The 8gent binary is a glibc Linux build and cannot start on Android's own C library (bionic). Nothing was installed."
-			say "Use a glibc userland inside Termux, then run this installer there:"
-			say "  pkg install proot-distro && proot-distro install debian && proot-distro login debian"
-			say "  apt update && apt install -y curl ca-certificates"
-			say "  then run the install command again"
-			say "To report this, run the installer with --dry-run (sh -s -- --dry-run) and paste what it prints."
-			say "On a setup that does run glibc binaries, set EIGHT_ANDROID_FORCE=1 to skip this check."
-		} >&2
-		exit 1
 	fi
 	[ "$libc" != musl ] || die "the Linux binaries need glibc; this looks like musl (Alpine)"
 
@@ -448,17 +536,31 @@ main() {
 		say "GitHub build attestation: verified."
 	fi
 
-	chmod 755 "$TMP/$ASSET"
-	got="$(installed_version "$TMP/$ASSET")"
-	[ "$got" = "$VERSION" ] || die "the downloaded binary did not report v${VERSION} (got '${got}'); nothing installed"
+	if [ "$termux" = 1 ]; then
+		termux_install
+	else
+		chmod 755 "$TMP/$ASSET"
+		got="$(installed_version "$TMP/$ASSET")"
+		if [ "$got" != "$VERSION" ]; then
+			# Say why, not just "got ''": a binary that cannot start prints nothing.
+			interp="$(elf_interpreter "$TMP/$ASSET")"
+			err="$("$TMP/$ASSET" --version 2>&1 </dev/null | head -c 300 | tr '\n' ' ')" || true
+			hint="this machine may not be able to run glibc Linux binaries"
+			if [ -n "$interp" ] && [ ! -e "$interp" ]; then
+				hint="the binary needs the loader ${interp}, which this machine does not have (it is not a glibc Linux userland); on Android use Termux's proot-distro: pkg install proot-distro && proot-distro install ubuntu && proot-distro login ubuntu"
+			fi
+			die "the downloaded binary did not report v${VERSION} (got '${got}'; ELF interpreter: ${interp:-unknown}; it said: ${err:-nothing}); ${hint}; nothing installed. To report this, run with EIGHT_INSTALL_DEBUG=1 and paste the output"
+		fi
 
-	mkdir -p "$INSTALL_DIR"
-	# A uniquely named file beside the target, then a rename over it: atomic,
-	# and a running 8gent keeps its old file.
-	staged="$(mktemp "${INSTALL_DIR}/.8gent.XXXXXX")"
-	cp "$TMP/$ASSET" "$staged"
-	chmod 755 "$staged"
-	mv -f "$staged" "$TARGET"
+		mkdir -p "$INSTALL_DIR"
+		# A uniquely named file beside the target, then a rename over it: atomic,
+		# and a running 8gent keeps its old file.
+		staged="$(mktemp "${INSTALL_DIR}/.8gent.XXXXXX")"
+		cp "$TMP/$ASSET" "$staged"
+		chmod 755 "$staged"
+		mv -f "$staged" "$TARGET"
+
+	fi
 
 	say "Installed 8gent v${VERSION} to ${TARGET}"
 	case ":${PATH}:" in

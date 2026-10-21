@@ -584,6 +584,75 @@ describe("binary channel", () => {
 		});
 	const leftovers = () => readdirSync(dir).filter((n) => n.endsWith(".new"));
 
+	test("Termux: updates the real binary behind the wrapper and verifies through the wrapper", async () => {
+		const real = join(dir, "8gent");
+		writeFileSync(real, "OLD-8GENT-0.19.0");
+		const wrapper = join(dir, "wrapper");
+		// Stand-in for the glibc-runner/proot wrapper: runs "its" binary, or EIGHT_BIN when set.
+		writeFileSync(
+			wrapper,
+			`#!/bin/sh\ngrep -q 0.20.0 "\${EIGHT_BIN:-${real}}" && echo "8gent Code v0.20.0"\n`,
+			{ mode: 0o755 },
+		);
+		const saved = { r: process.env.EIGHT_REAL_BINARY, w: process.env.EIGHT_WRAPPER };
+		process.env.EIGHT_REAL_BINARY = real;
+		process.env.EIGHT_WRAPPER = wrapper;
+		try {
+			const r = await runSelfUpdate({
+				currentVersion: "0.19.0",
+				channel: "binary",
+				execPath: join(dir, "ld-linux-aarch64.so.1-decoy"),
+				platform: "linux",
+				arch: "x64",
+				releasesUrl: RELEASES,
+				fetchImpl: fakeFetch(routes()),
+				log: () => {},
+				signingKey: "",
+			});
+			expect(r.status).toBe("updated");
+			expect(readFileSync(real, "utf8")).toBe("NEW-8GENT-0.20.0");
+			expect(leftovers()).toEqual([]);
+		} finally {
+			for (const [k, v] of [
+				["EIGHT_REAL_BINARY", saved.r],
+				["EIGHT_WRAPPER", saved.w],
+			] as const) {
+				if (v === undefined) delete process.env[k];
+				else process.env[k] = v;
+			}
+		}
+	});
+
+	test("Termux: a new binary the wrapper cannot start leaves the old one in place", async () => {
+		const real = join(dir, "8gent");
+		writeFileSync(real, "OLD-8GENT-0.19.0");
+		const wrapper = join(dir, "wrapper");
+		writeFileSync(wrapper, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+		const saved = { r: process.env.EIGHT_REAL_BINARY, w: process.env.EIGHT_WRAPPER };
+		process.env.EIGHT_REAL_BINARY = real;
+		process.env.EIGHT_WRAPPER = wrapper;
+		try {
+			const r = await runSelfUpdate({
+				currentVersion: "0.19.0",
+				channel: "binary",
+				execPath: "/unused",
+				platform: "linux",
+				arch: "x64",
+				releasesUrl: RELEASES,
+				fetchImpl: fakeFetch(routes()),
+				log: () => {},
+				signingKey: "",
+			});
+			expect(r.status).toBe("failed");
+			expect(readFileSync(real, "utf8")).toBe("OLD-8GENT-0.19.0");
+		} finally {
+			if (saved.r === undefined) delete process.env.EIGHT_REAL_BINARY;
+			else process.env.EIGHT_REAL_BINARY = saved.r;
+			if (saved.w === undefined) delete process.env.EIGHT_WRAPPER;
+			else process.env.EIGHT_WRAPPER = saved.w;
+		}
+	});
+
 	test("picks the newest published, non-prerelease release that carries the binary", async () => {
 		const rel = await latestBinaryRelease(fakeFetch(routes()), asset, RELEASES);
 		expect(rel?.version).toBe("0.20.0");
