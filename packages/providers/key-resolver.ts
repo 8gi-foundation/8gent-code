@@ -67,7 +67,7 @@ export function missingKeyMessage(name: string, host?: string): string {
 	}
 	return (
 		`No API key for ${name}${host ? `, so nothing was sent to ${host}` : ""}. ` +
-		`Add your key with \`8gent keys\` (${providerKeyEnvName(name)}), or pick a local provider.${extra}`
+		`Add your key with \`8gent keys set ${name}\` (${providerKeyEnvName(name)}), or edit the file with \`8gent keys\`, or pick a local provider.${extra}`
 	);
 }
 

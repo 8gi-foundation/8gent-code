@@ -10,8 +10,8 @@ exports[`no-model card in the chat area (T5) providers 0/3: the card shows both 
 │    ollama pull qwen3.5   # about 7 GB                                        │
 │    In 8gent: /provider ollama                                                │
 │ 2  Use a free hosted model, key from https://openrouter.ai/keys              │
-│    8gent keys   # opens ~/.8gent/keys.env                                    │
-│    Set OPENROUTER_API_KEY=<your key>, save, restart 8gent                    │
+│    8gent keys set openrouter   # hidden prompt, then restart                 │
+│    Or edit ~/.8gent/keys.env with 8gent keys                                 │
 │    In 8gent: /provider openrouter, then /model auto:free                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯"
 `;
@@ -26,8 +26,8 @@ exports[`no-model card in the chat area (T5) carries agent init's reason line in
 │    ollama pull qwen3.5   # about 7 GB                                        │
 │    In 8gent: /provider ollama                                                │
 │ 2  Use a free hosted model, key from https://openrouter.ai/keys              │
-│    8gent keys   # opens ~/.8gent/keys.env                                    │
-│    Set OPENROUTER_API_KEY=<your key>, save, restart 8gent                    │
+│    8gent keys set openrouter   # hidden prompt, then restart                 │
+│    Or edit ~/.8gent/keys.env with 8gent keys                                 │
 │    In 8gent: /provider openrouter, then /model auto:free                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯"
 `;
@@ -36,7 +36,7 @@ exports[`no-model card in the chat area (T5) short terminal (80x24): compact for
 "╭──────────────────────────────────────────────────────────────────────────╮
 │ NO MODEL Ollama at 127.0.0.1:11434 did not answer.                       │
 │ 1  Install Ollama (ollama.com), ollama pull qwen3.5, /provider ollama    │
-│ 2  8gent keys, set OPENROUTER_API_KEY=<your key>, restart 8gent          │
+│ 2  8gent keys set openrouter, restart 8gent                              │
 │    /provider openrouter, then /model auto:free                           │
 ╰──────────────────────────────────────────────────────────────────────────╯"
 `;

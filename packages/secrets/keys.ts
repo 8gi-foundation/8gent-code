@@ -359,7 +359,7 @@ export function redactAndWarn(text: string): string {
 		_warnedProviders.add(p);
 		try {
 			console.warn(
-				`[secrets] Possible ${p} credential detected in agent output and redacted before display. Move it to ~/.8gent/keys.env via \`8gent keys\` instead.`,
+				`[secrets] Possible ${p} credential detected in agent output and redacted before display. Move it to ~/.8gent/keys.env via \`8gent keys set <provider>\` instead.`,
 			);
 		} catch {
 			/* console may be patched */

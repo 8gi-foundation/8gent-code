@@ -10,7 +10,9 @@ const base = {
 describe("noModelMessage", () => {
 	test("no key names the key and the fix, not the model list", () => {
 		const m = noModelMessage({ ...base, key: null });
-		expect(m).toBe("No MiniMax key found. Run `8gent keys` to add MINIMAX_API_KEY.");
+		expect(m).toBe(
+			"No MiniMax key found. Run `8gent keys set minimax` to add MINIMAX_API_KEY, or `8gent keys` to edit the file.",
+		);
 		expect(m).not.toContain("list");
 	});
 	test("a one-character key is unusable and is never printed", () => {

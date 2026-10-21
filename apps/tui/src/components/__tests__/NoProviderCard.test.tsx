@@ -83,8 +83,8 @@ describe("no-model card in the chat area (T5)", () => {
 		expect(out).toContain("ollama pull qwen3.5   # about 7 GB");
 		// The documented key flow (8gent.dev models/hosted): keys.env via
 		// `8gent keys`, then /provider openrouter and /model auto:free.
-		expect(out).toContain("8gent keys   # opens ~/.8gent/keys.env");
-		expect(out).toContain("OPENROUTER_API_KEY=<your key>");
+		expect(out).toContain("8gent keys set openrouter");
+		expect(out).toContain("edit ~/.8gent/keys.env with 8gent keys");
 		expect(out).toContain("/provider openrouter, then /model auto:free");
 		expect(out).not.toContain("~/.8gent/.env");
 		expect(out).not.toContain("openrouter-free");
@@ -131,7 +131,7 @@ describe("no-model card in the chat area (T5)", () => {
 		);
 		// After onboarding nothing else says why, so the compact form keeps it.
 		expect(out).toMatch(/│ NO MODEL Ollama at 127\.0\.0\.1:11434 did not answer\./);
-		expect(out).toMatch(/│ 2\s+8gent keys, set OPENROUTER_API_KEY=<your key>, restart 8gent/);
+		expect(out).toMatch(/│ 2\s+8gent keys set openrouter, restart 8gent/);
 		expect(out).toMatch(/│\s{4}\/provider openrouter, then \/model auto:free/);
 		expect(out).toMatchSnapshot();
 	});
