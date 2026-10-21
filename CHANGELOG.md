@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.7] - 2026-10-21
+
+### Added
+- masked /consult, one stateless cloud question with secrets and personal data masked ([#4619](https://github.com/8gi-foundation/8gent-code/pull/4619))
+
+### Fixed
+- voice: /voice chat uses the shared whisper model resolver and reports failures ([#4628](https://github.com/8gi-foundation/8gent-code/pull/4628))
+- one registry-driven provider key resolver for every path (#4622) ([#4623](https://github.com/8gi-foundation/8gent-code/pull/4623))
+
 ## [0.20.6] - 2026-10-21
 
 ### Added
