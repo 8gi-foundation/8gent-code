@@ -716,7 +716,9 @@ describe("install.sh: Android / Termux", () => {
 		expect(r.code).toBe(0);
 		expect(r.out).toContain("Installed 8gent v0.20.0");
 		expect(r.out).toContain("8gent is ready");
-		expect(calls()).toMatch(/^npm i -g .*8gi-foundation-8gent-code-0\.20\.0\.tgz$/m);
+		expect(calls()).toMatch(
+			/^npm i -g --ignore-scripts .*8gi-foundation-8gent-code-0\.20\.0\.tgz$/m,
+		);
 		expect(calls()).not.toContain("pkg");
 		expect(installed()).toBeNull();
 	});
@@ -726,7 +728,7 @@ describe("install.sh: Android / Termux", () => {
 		const calls = termuxTools();
 		const r = await install(termuxRelease(), termuxEnv);
 		expect(r.code).toBe(0);
-		expect(calls()).toMatch(/^pkg install -y nodejs\nnpm i -g .*\.tgz$/m);
+		expect(calls()).toMatch(/^pkg install -y nodejs\nnpm i -g --ignore-scripts .*\.tgz$/m);
 	});
 
 	test("Termux with node older than 22.5 gets nodejs from pkg", async () => {
@@ -789,9 +791,10 @@ describe("install.sh: Android / Termux", () => {
 		const r = await install(termuxRelease(), termuxEnv, [], root);
 		expect(r.code).toBe(0);
 		expect(calls()).toMatch(
-			/^npm i -g \/.*\/rel\.[0-9]+\/8gi-foundation-8gent-code-0\.20\.0\.tgz$/m,
+			/^npm i -g --ignore-scripts \/.*\/rel\.[0-9]+\/8gi-foundation-8gent-code-0\.20\.0\.tgz$/m,
 		);
 		expect(r.out).toContain("dependencies come from the npm registry");
+		expect(r.out).toContain("no install scripts are run");
 	});
 
 	test("Termux without a signing key says no attestation covers the package", async () => {

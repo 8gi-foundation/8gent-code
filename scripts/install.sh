@@ -32,7 +32,9 @@
 #
 # On Android (Termux) the binary cannot run (bionic, not glibc), so the release's
 # npm package is installed instead: nodejs via pkg when missing or older than
-# 22.5, then npm i -g on the .tgz, after the same SHA256SUMS (and signature) check.
+# 22.5, then npm i -g --ignore-scripts on the .tgz, after the same SHA256SUMS (and
+# signature) check. No install scripts run: dependency scripts (sharp and others)
+# fail on bionic and are not covered by the checksum.
 #   --dry-run               argument: print the detection and stop before any download
 #
 # It never replaces a newer 8gent with an older one unless EIGHT_VERSION asks
@@ -461,8 +463,8 @@ main() {
 
 	if [ "$NPM_PATH" = 1 ]; then
 		ensure_node
-		say "Installing 8gent v${VERSION} with npm (its dependencies come from the npm registry, as with npm install -g)..."
-		npm i -g "$TMP/$ASSET" || die "npm could not install ${ASSET}; nothing else was changed"
+		say "Installing 8gent v${VERSION} with npm (its dependencies come from the npm registry, as with npm install -g; no install scripts are run)..."
+		npm i -g --ignore-scripts "$TMP/$ASSET" || die "npm could not install ${ASSET}; nothing else was changed"
 		say "Installed 8gent v${VERSION} (npm package, Termux). 8gent is ready. Run: 8gent"
 		return 0
 	fi
