@@ -19,7 +19,7 @@ import { spawn } from "node:child_process";
 import { createHash, createPublicKey, verify as cryptoVerify, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const NPM_PACKAGE = "@8gi-foundation/8gent-code";
@@ -260,32 +260,100 @@ export function npmTarballName(version: string): string {
 	return `${NPM_PACKAGE.slice(1).replace("/", "-")}-${version}.tgz`;
 }
 
-/** What the npm channel installs: from npm, or the same tarball from the GitHub release. */
-export type NpmTarget = { version: string; release: ReleaseBinary | null };
+/** A release tag 8gent will install from: exactly vX.Y.Z. */
+export const RELEASE_TAG_RE = /^v[0-9]+\.[0-9]+\.[0-9]+$/;
 
 /**
- * The npm channel's newest version. npm's `latest` dist-tag, unless the newest
- * GitHub release carries a newer npm tarball: then that tarball (#3658). npm
- * latest sat at 0.17.0 from May to October while releases moved on, because
- * the publish needs a credential CI did not have; npm users must not depend on
- * it. Either source may be down; only both failing is an error.
+ * The newest release from the https://github.com/<repo>/releases/latest
+ * redirect, for when api.github.com refuses (anonymous rate limit, 403). The
+ * redirect is read, not followed: its location must be
+ * https://github.com/<repo>/releases/tag/vX.Y.Z. Asset URLs are built under
+ * github.com/<repo>/releases/download/<tag>/, the same prefix urlAllowed
+ * requires of every download.
+ */
+export async function latestReleaseFromRedirect(
+	fetchImpl: FetchLike,
+	assetFor: string | ((version: string) => string),
+	repo = GITHUB_REPO,
+): Promise<ReleaseBinary> {
+	const url = `https://github.com/${repo}/releases/latest`;
+	const res = await fetchImpl(url, {
+		headers: { "user-agent": "8gent-self-update" },
+		redirect: "manual",
+	});
+	if (res.status < 300 || res.status >= 400)
+		throw new Error(`${url} answered ${res.status}, not a redirect`);
+	const loc = res.headers.get("location");
+	if (!loc) throw new Error(`redirect without a location from ${url}`);
+	let next: URL;
+	try {
+		next = new URL(loc, url);
+	} catch {
+		throw new Error(`unreadable release redirect: ${loc}`);
+	}
+	const prefix = `/${repo}/releases/tag/`;
+	if (
+		next.protocol !== "https:" ||
+		next.hostname !== "github.com" ||
+		!next.pathname.startsWith(prefix)
+	)
+		throw new Error(`refusing a release redirect to ${next.href}`);
+	const tag = next.pathname.slice(prefix.length);
+	if (!RELEASE_TAG_RE.test(tag)) throw new Error(`refusing release tag "${tag}": not vX.Y.Z`);
+	const version = tag.slice(1);
+	const asset = typeof assetFor === "string" ? assetFor : assetFor(version);
+	const urls: Record<string, string> = {};
+	for (const name of [asset, "SHA256SUMS", "SHA256SUMS.minisig"])
+		urls[name] = `https://github.com/${repo}/releases/download/${tag}/${name}`;
+	return { version, urls, asset };
+}
+
+/** What the npm channel installs: the GitHub release package, or (GitHub unreachable) npm by name. */
+export type NpmTarget = {
+	version: string;
+	release: ReleaseBinary | null;
+	/** Where the version came from. */
+	source: "github-api" | "github-redirect" | "npm";
+};
+
+/**
+ * The npm channel's newest version. The GitHub release package first (#3658,
+ * #4698): npm latest sat at 0.17.0 from May to October while releases moved
+ * on, so npm users must not depend on it. The release list comes from
+ * api.github.com; on any error there (an anonymous 403 rate limit is common)
+ * the github.com releases/latest redirect names the tag instead. npm's
+ * registry decides only when GitHub has no release with the package or
+ * cannot be reached at all.
  */
 export async function latestForNpmChannel(
 	fetchImpl: FetchLike,
 	releasesUrl?: string,
 ): Promise<NpmTarget> {
-	const [npm, rel] = await Promise.allSettled([
-		latestFromNpm(fetchImpl),
-		latestBinaryRelease(fetchImpl, npmTarballName, releasesUrl),
-	]);
-	const fromRelease = rel.status === "fulfilled" ? rel.value : null;
-	if (npm.status === "rejected" && !fromRelease) throw npm.reason;
-	if (
-		npm.status === "fulfilled" &&
-		(!fromRelease || compareVersions(fromRelease.version, npm.value) <= 0)
-	)
-		return { version: npm.value, release: null };
-	return { version: (fromRelease as ReleaseBinary).version, release: fromRelease };
+	let apiProblem: unknown = null;
+	try {
+		const rel = await latestBinaryRelease(fetchImpl, npmTarballName, releasesUrl);
+		if (rel) return { version: rel.version, release: rel, source: "github-api" };
+	} catch (err) {
+		apiProblem = err;
+	}
+	let redirectProblem: unknown = null;
+	if (apiProblem) {
+		try {
+			const rel = await latestReleaseFromRedirect(fetchImpl, npmTarballName);
+			return { version: rel.version, release: rel, source: "github-redirect" };
+		} catch (err) {
+			redirectProblem = err;
+		}
+	}
+	try {
+		return { version: await latestFromNpm(fetchImpl), release: null, source: "npm" };
+	} catch (err) {
+		if (!apiProblem) throw err;
+		const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+		throw new Error(
+			`could not find the newest release: ${msg(apiProblem)}; ${msg(redirectProblem)}; ${msg(err)}`,
+		);
+	}
 }
 
 // ── Signature (minisign) ─────────────────────────────────────────────
@@ -385,7 +453,7 @@ export function npmPrefixFromModulePath(modulePath: string, platform: string): s
 
 /**
  * The npm command for an exact version, or for a verified release tarball on
- * disk, into `prefix` when known. --force only on the retry (`force`): it
+ * disk (with --ignore-scripts), into `prefix` when known. --force only on the retry (`force`): it
  * replaces stale `8` / `8gent` / `8gent-code` bin links (EEXIST), and must not
  * paper over anything else. Windows needs npm.cmd through a shell, so paths
  * are quoted there.
@@ -401,6 +469,8 @@ export function npmInstallCommand(
 	// Exact version, never a tag: what was checked is what gets installed.
 	const spec = tarball ? q(tarball) : `${NPM_PACKAGE}@${version}`;
 	const args = ["install", "-g", spec];
+	// A verified release package installs inert, as scripts/install.sh does on Termux.
+	if (tarball) args.push("--ignore-scripts");
 	if (opts.prefix) args.push("--prefix", q(opts.prefix));
 	if (opts.force) args.push("--force");
 	return { cmd: win ? "npm.cmd" : "npm", args, shell: win };
@@ -423,8 +493,8 @@ async function runNpmInstall(
 }
 
 /** The command a person can run by hand after a failed update. */
-function npmHint(spec: string, prefix?: string | null): string {
-	return `npm install -g ${spec}${prefix ? ` --prefix ${prefix}` : ""} --force`;
+function npmHint(spec: string, prefix?: string | null, ignoreScripts = false): string {
+	return `npm install -g ${spec}${ignoreScripts ? " --ignore-scripts" : ""}${prefix ? ` --prefix ${prefix}` : ""} --force`;
 }
 
 function defaultRun(cmd: string, args: string[], opts: { shell: boolean }): Promise<number> {
@@ -557,16 +627,23 @@ async function updateNpmFromRelease(
 	const expected = sumFor(checked.sums, name);
 	if (!expected)
 		return `SHA256SUMS for v${rel.version} does not list ${name}; refusing an unverified package`;
+	o.log(`Downloading ${name} from the v${rel.version} GitHub release...`);
 	const bytes = await download(o.fetchImpl, rel.urls[name]);
 	const actual = sha256Hex(bytes);
 	if (actual !== expected)
 		return `checksum mismatch for ${name} (expected ${expected}, got ${actual}); nothing changed`;
-	const dir = mkdtempSync(join(o.tmpDir ?? tmpdir(), "8gent-update-"));
+	o.log(`SHA256 matches SHA256SUMS: ${actual}`);
+	// A private (0700) directory under an absolute path: npm reads a relative
+	// "dir/x.tgz" as a package spec, not a file.
+	const dir = mkdtempSync(join(resolve(o.tmpDir ?? tmpdir()), "8gent-update-"));
 	try {
 		const file = join(dir, name);
-		writeFileSync(file, bytes, { flag: "wx" });
+		writeFileSync(file, bytes, { flag: "wx", mode: 0o600 });
+		o.log(`Installing with npm, package scripts off: npm install -g ${file} --ignore-scripts`);
 		const code = await runNpmInstall(o, rel.version, platform, file);
-		return code === 0 ? null : `npm exited ${code}. Try: ${npmHint(rel.urls[name], o.npmPrefix)}`;
+		return code === 0
+			? null
+			: `npm exited ${code}. Try: ${npmHint(rel.urls[name], o.npmPrefix, true)}`;
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -622,6 +699,13 @@ async function updateBinary(
 	return `${lastProblem}; nothing changed`;
 }
 
+const NPM_SOURCE_LABEL: Record<NpmTarget["source"], string> = {
+	"github-api": "GitHub release",
+	"github-redirect":
+		"GitHub release, found through github.com because the GitHub API did not answer",
+	npm: "npm registry, GitHub releases could not be reached",
+};
+
 export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdateResult> {
 	const o = {
 		...opts,
@@ -643,6 +727,7 @@ export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdate
 	try {
 		if (ch === "npm") {
 			const target = await latestForNpmChannel(o.fetchImpl, o.releasesUrl);
+			o.log(`Latest version: v${target.version} (${NPM_SOURCE_LABEL[target.source]}).`);
 			const d = decideUpdate(o.currentVersion, target.version);
 			if (d.action === "current") return { status: "current", version: d.version, channel: ch };
 			if (d.action === "refuse-downgrade")
@@ -670,6 +755,7 @@ export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdate
 		const rel = await latestBinaryRelease(o.fetchImpl, names[0], o.releasesUrl);
 		if (!rel)
 			return { status: "failed", channel: ch, message: `no release carries ${names[0]} yet` };
+		o.log(`Latest version: v${rel.version} (GitHub release).`);
 		const d = decideUpdate(o.currentVersion, rel.version);
 		if (d.action === "current") return { status: "current", version: d.version, channel: ch };
 		if (d.action === "refuse-downgrade")

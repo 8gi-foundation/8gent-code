@@ -210,7 +210,7 @@ export function describeCheck(r: UpdateCheck): string {
 
 function describeChannel(ch: InstallChannel): string {
 	if (ch === "binary") return "installed as a binary (updates from GitHub releases)";
-	if (ch === "npm") return "installed from npm (updates from the npm registry)";
+	if (ch === "npm") return "installed with npm (updates from the GitHub release package)";
 	return "running from a source checkout";
 }
 
@@ -302,6 +302,7 @@ export async function runUpdateCommand(args: string[], deps: UpdateCliDeps): Pro
 		npmPrefix: npmPrefixFromModulePath(deps.modulePath, platform),
 		log,
 	});
+	if (result.status === "current") log("Already up to date.");
 	log(describeResult(result));
 	if (result.status === "updated") {
 		log(`Updated to v${result.to}. Run 8gent, then /changelog to see what changed.`);
