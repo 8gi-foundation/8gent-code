@@ -15,6 +15,18 @@ export function keyLooksUsable(key: string | null | undefined): boolean {
 	return (key ?? "").trim().length >= MIN_KEY_CHARS;
 }
 
+/**
+ * The one place an upstream error's own text is shown. It can carry a URL with
+ * `user:pass@` in it (a declared baseUrl) or a server's echo of the key, so both
+ * are cut before display (8SO, #4681).
+ */
+function scrub(msg: string, key: string | null | undefined): string {
+	let out = msg.replace(/(\/\/)[^/\s@]+@/g, "$1");
+	const k = (key ?? "").trim();
+	if (k.length >= MIN_KEY_CHARS) out = out.split(k).join("[key]");
+	return out;
+}
+
 export function noModelMessage(opts: {
 	displayName: string;
 	keyEnv: string;
@@ -40,6 +52,6 @@ export function noModelMessage(opts: {
 	if (/timed out/i.test(msg))
 		return `No model chosen for ${displayName}: its model list request timed out. ${pickHint}`;
 	if (msg)
-		return `No model chosen for ${displayName}: could not reach its model list (${msg.slice(0, 120)}). ${pickHint}`;
+		return `No model chosen for ${displayName}: could not reach its model list (${scrub(msg, key).slice(0, 120)}). ${pickHint}`;
 	return `No model chosen for ${displayName}: its model list came back empty. ${pickHint}`;
 }

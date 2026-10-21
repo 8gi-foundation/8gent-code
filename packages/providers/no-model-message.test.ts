@@ -39,3 +39,21 @@ describe("noModelMessage", () => {
 		expect(m).toContain("Pass --model <name>.");
 	});
 });
+
+describe("noModelMessage scrubs upstream error text (8SO #4681)", () => {
+	test("a server echo of the key is cut", () => {
+		const key = "fake-key-0123456789abcdef";
+		const m = noModelMessage({ ...base, key, err: new Error(`bad key ${key} sent`) });
+		expect(m).not.toContain(key);
+		expect(m).toContain("[key]");
+	});
+	test("URL userinfo is cut", () => {
+		const m = noModelMessage({
+			...base,
+			key: "fake-key-0123456789",
+			err: new Error("fetch failed for https://bob:hunter2secret@llm.local/v1/models"),
+		});
+		expect(m).not.toContain("hunter2secret");
+		expect(m).toContain("https://llm.local/v1/models");
+	});
+});
