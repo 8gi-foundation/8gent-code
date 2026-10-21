@@ -3700,7 +3700,7 @@ export function App({
 					break;
 
 				case "bug":
-					addSystemMessage(runBugCommand(args).text);
+					addSystemMessage(runBugCommand(args, { version: pkgInfo.version }).text);
 					break;
 
 				case "copy":

@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BUG_SHARE_LINE, BUG_USAGE, runBugCommand } from "./bug-command.js";
@@ -20,6 +29,36 @@ function setup() {
 }
 
 describe("runBugCommand", () => {
+	test("the version passed in reaches report.json", () => {
+		const { env, session } = setup();
+		const dir = runBugCommand(["x"], { env, sessionFile: session, version: "4.5.6" }).text.split(
+			"\n",
+		)[0];
+		expect(JSON.parse(readFileSync(join(dir, "report.json"), "utf8")).version).toBe("4.5.6");
+	});
+	test("home is shortened on a segment boundary, through a symlinked home", () => {
+		const { home, env } = setup();
+		const link = `${home}-link`;
+		symlinkSync(home, link);
+		homes.push(link);
+		const logs = join(home, "l.log");
+		writeFileSync(logs, `a ${link}/proj b ${realpathSync(home)}/x c ${home}-other/y\n`);
+		const dir = runBugCommand(["x"], {
+			env: { EIGHT_HOME: link } as unknown as NodeJS.ProcessEnv,
+			logFiles: [logs],
+		}).text.split("\n")[0];
+		const t = readFileSync(join(dir, "log-tail.txt"), "utf8");
+		expect(t).toContain("a ~/proj b ~/x c ");
+		expect(t).toContain(`${home}-other/y`);
+		expect(t).not.toContain("/private~");
+	});
+	test("with EIGHT_HOME set the report lands there and the session is found there", () => {
+		const { home, env } = setup();
+		const sd = join(home, ".8gent", "sessions");
+		mkdirSync(sd, { recursive: true });
+		const r = runBugCommand(["x"], { env, cwd: home });
+		expect(r.text.startsWith(join(home, ".8gent", "bug-reports"))).toBe(true);
+	});
 	test("builds the folder and prints its path plus the share line", () => {
 		const { home, session, env } = setup();
 		const r = runBugCommand(["the", "tui", "froze"], {

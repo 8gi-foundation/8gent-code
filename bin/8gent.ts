@@ -613,7 +613,7 @@ async function main() {
 			// `8gent bug "<description>"`: one local, secret-free report folder. Uploads nothing,
 			// never starts a model loop (depth-exempt above).
 			const { runBugCommand } = await import("../packages/eight/bug-command.ts");
-			const r = runBugCommand(restArgs);
+			const r = runBugCommand(restArgs, { version: VERSION });
 			(r.code === 0 ? console.log : console.error)(r.text);
 			process.exitCode = r.code;
 			break;

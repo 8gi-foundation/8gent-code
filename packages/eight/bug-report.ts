@@ -35,10 +35,30 @@ export interface BugReportOptions {
 
 const MAX_SESSION_BYTES = 5 * 1024 * 1024;
 
+function homeForms(home: string): string[] {
+	const forms = new Set<string>();
+	if (home.length > 1) forms.add(home);
+	try {
+		const real = fs.realpathSync(home);
+		if (real.length > 1) forms.add(real);
+	} catch {}
+	// longest first so a real path is not half-replaced by its shorter symlink form
+	return [...forms].sort((a, b) => b.length - a.length);
+}
+
+/** Replace `home` with "~" only where it ends at a path-segment boundary. */
+function shortenHome(text: string, home: string): string {
+	let out = text;
+	for (const h of homeForms(home)) {
+		const esc = h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		out = out.replace(new RegExp(`${esc}(?![\\w.-])`, "g"), "~");
+	}
+	return out;
+}
+
 function redact(text: string, home: string): { text: string; redacted: number } {
 	const r = scrub(text);
-	const shortened = home.length > 1 ? r.scrubbed.split(home).join("~") : r.scrubbed;
-	return { text: shortened, redacted: r.redactedCount };
+	return { text: shortenHome(r.scrubbed, home), redacted: r.redactedCount };
 }
 
 function readTail(file: string, maxBytes: number): string {
