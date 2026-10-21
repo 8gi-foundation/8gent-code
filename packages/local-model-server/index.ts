@@ -28,3 +28,13 @@ export {
 	resolveLlamaServerUrl,
 	resolveLocalServerKind,
 } from "./select";
+export {
+	checkModel,
+	ledgerPath,
+	modelLedgerDoctorLines,
+	readLedger,
+	repinModel,
+	type CheckResult,
+	type Ledger,
+	type ModelPin,
+} from "./model-ledger";
