@@ -3,7 +3,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { validatePath } from "../../permissions/path-guard";
-import { formatSearch, globMatcher, searchFiles } from "../inproc-search";
+import {
+	MAX_GITIGNORE_RULES,
+	formatSearch,
+	globMatcher,
+	parseGitignore,
+	searchFiles,
+} from "../inproc-search";
 
 // A fixed fixture tree, built the same way on every host. CI runs this on
 // Linux and Windows (platforms.yml); the expected rows are literal, so any
@@ -246,6 +252,46 @@ describe("inproc-search", () => {
 				.sort();
 			const ours = (await searchFiles({ root: d, allow: () => true })).files.sort();
 			expect(ours).toEqual(gitSays);
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+
+	test("a 200 KB blank .gitignore line is dropped fast, not quadratic", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-gi-"));
+		try {
+			fs.writeFileSync(path.join(d, ".gitignore"), `${" ".repeat(200_000)}x\n`);
+			fs.writeFileSync(path.join(d, "f.txt"), "needle\n");
+			const t0 = performance.now();
+			const r = await searchFiles({ root: d, allow: () => true, pattern: "needle" });
+			expect(performance.now() - t0).toBeLessThan(100);
+			expect(r.hits.length).toBe(1);
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+
+	test("a huge .gitignore is read to 1 MB and keeps at most 10,000 rules", async () => {
+		const rules = parseGitignore(
+			`${Array.from({ length: 200_000 }, (_, i) => `r${i}.tmp`).join("\n")}\n`,
+		);
+		expect(rules.length).toBe(MAX_GITIGNORE_RULES);
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-gi2-"));
+		try {
+			fs.writeFileSync(
+				path.join(d, ".gitignore"),
+				`${Array.from({ length: 200_000 }, (_, i) => `r${i}.tmp`).join("\n")}\n`,
+			);
+			for (let i = 0; i < 300; i++) fs.writeFileSync(path.join(d, `f${i}.txt`), "needle\n");
+			const t0 = performance.now();
+			const r = await searchFiles({
+				root: d,
+				allow: () => true,
+				pattern: "needle",
+				maxResults: 1000,
+			});
+			expect(performance.now() - t0).toBeLessThan(3000);
+			expect(r.hits.length).toBe(300);
 		} finally {
 			fs.rmSync(d, { recursive: true, force: true });
 		}

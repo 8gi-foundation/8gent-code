@@ -167,23 +167,53 @@ interface Scope {
 	rules: IgnoreRule[];
 }
 
-/** Parse .gitignore text into rules relative to the directory holding it. */
+export const MAX_GITIGNORE_BYTES = 1_000_000;
+export const MAX_GITIGNORE_RULES = 10_000;
+/** Longest .gitignore line looked at: the glob cap plus room for "!", "/" and trailing blanks. */
+const MAX_LINE_CHARS = MAX_GLOB_CHARS + 16;
+
+/** Drop trailing spaces and tabs, but keep one that a backslash escapes. A backwards loop, no RegExp. */
+function trimTrailingBlanks(line: string): string {
+	let end = line.length;
+	while (end > 0 && (line[end - 1] === " " || line[end - 1] === "\t")) {
+		if (line[end - 1] === " " && end > 1 && line[end - 2] === "\\") break; // "\ " is a literal space
+		end--;
+	}
+	return line.slice(0, end);
+}
+
+/** Parse .gitignore text into rules relative to the directory holding it. No RegExp anywhere. */
 export function parseGitignore(text: string): IgnoreRule[] {
 	const rules: IgnoreRule[] = [];
-	for (let line of text.split(/\r?\n/)) {
-		line = line.replace(/(?<!\\) +$/, "").replace(/\t+$/, ""); // an escaped trailing space stays
-		if (!line || line.startsWith("#")) continue;
-		const negate = line.startsWith("!");
+	for (let line of text.split("\n")) {
+		if (rules.length >= MAX_GITIGNORE_RULES) break;
+		if (line.length > MAX_LINE_CHARS) continue; // a line over the cap is dropped before any work
+		if (line.endsWith("\r")) line = line.slice(0, -1);
+		line = trimTrailingBlanks(line);
+		if (!line || line[0] === "#") continue;
+		const negate = line[0] === "!";
 		if (negate) line = line.slice(1);
 		const dirOnly = line.endsWith("/");
 		if (dirOnly) line = line.slice(0, -1);
 		const anchored = line.includes("/");
-		line = line.replace(/^\//, "");
+		if (line[0] === "/") line = line.slice(1);
 		if (!line) continue;
 		const match = globMatcher(line, anchored);
 		if (match) rules.push({ match, negate, dirOnly }); // a rule over the caps is dropped
 	}
 	return rules;
+}
+
+/** Read at most MAX_GITIGNORE_BYTES of a .gitignore. */
+function readGitignore(file: string): string {
+	const fd = fs.openSync(file, "r");
+	try {
+		const buf = Buffer.alloc(MAX_GITIGNORE_BYTES);
+		const n = fs.readSync(fd, buf, 0, MAX_GITIGNORE_BYTES, 0);
+		return buf.toString("utf8", 0, n);
+	} finally {
+		fs.closeSync(fd);
+	}
 }
 
 function isIgnored(rel: string, isDir: boolean, scopes: Scope[]): boolean {
@@ -227,7 +257,7 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 		let scopes = inherited;
 		if (entries.some((e) => e.name === ".gitignore" && e.isFile())) {
 			try {
-				const rules = parseGitignore(fs.readFileSync(path.join(dir, ".gitignore"), "utf8"));
+				const rules = parseGitignore(readGitignore(path.join(dir, ".gitignore")));
 				scopes = [...inherited, { base: rel, rules }];
 			} catch {}
 		}

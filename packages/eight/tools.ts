@@ -1459,7 +1459,7 @@ export class ToolExecutor {
 					parameters: {
 						type: "object",
 						properties: {
-							pattern: { type: "string", description: "Text or regex to find" },
+							pattern: { type: "string", description: "Plain text to find (not a regex)" },
 							glob: { type: "string", description: "Only files matching this glob" },
 							path: { type: "string", description: "Directory to search (default: project root)" },
 							ignoreCase: {
