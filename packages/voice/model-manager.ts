@@ -6,9 +6,9 @@
  */
 
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { WHISPER_MODELS, type WhisperModelInfo, type WhisperModelName } from "./types.js";
 
 /**
@@ -55,21 +55,41 @@ export function resolveWhisperModel(
 		...(opts.extraDirs ?? []),
 	];
 	const english = !opts.language || opts.language === "en";
-	for (const m of WHISPER_MODEL_RANK) {
-		if (!english && m.filename.endsWith(".en.bin")) continue;
-		for (const dir of dirs) {
+	// The primary (data) directory wins: its best model is used even when an
+	// extra directory holds a larger one. Extras are a fallback only.
+	for (const dir of dirs) {
+		for (const m of WHISPER_MODEL_RANK) {
+			if (!english && m.filename.endsWith(".en.bin")) continue;
 			const path = join(dir, m.filename);
-			if (exists(path)) return { path, filename: m.filename, name: m.name };
+			if (!exists(path)) continue;
+			// A symlink that resolves outside its directory is not trusted as a model.
+			if (!opts.exists && !isInside(dir, path)) continue;
+			return { path, filename: m.filename, name: m.name };
 		}
 	}
 	return null;
+}
+
+function isInside(dir: string, file: string): boolean {
+	try {
+		const root = realpathSync(dir);
+		const real = realpathSync(file);
+		return real === root || real.startsWith(root.endsWith(sep) ? root : root + sep);
+	} catch {
+		return false;
+	}
+}
+
+/** Single-quote a string for a POSIX shell. */
+function shQuote(v: string): string {
+	return `'${v.replace(/'/g, `'\\''`)}'`;
 }
 
 /** Plain-language message for "no whisper model installed", with the one command that fixes it. */
 export function missingWhisperModelMessage(modelsDir = "~/.8gent/models/whisper"): string {
 	const dir = resolveModelsPath(modelsDir);
 	const tiny = WHISPER_MODELS.tiny;
-	return `No whisper model is installed in ${dir}. Fix: mkdir -p ${dir} && curl -L -o ${dir}/${tiny.filename} ${tiny.url}`;
+	return `No whisper model is installed in ${dir}. Fix: mkdir -p ${shQuote(dir)} && curl -L -o ${shQuote(`${dir}/${tiny.filename}`)} ${tiny.url}`;
 }
 
 export interface ModelManagerEvents {

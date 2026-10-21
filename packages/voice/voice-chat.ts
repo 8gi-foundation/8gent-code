@@ -86,6 +86,12 @@ export class VoiceChatLoop {
 	private ttsEngine: TTSEngine;
 	private heardOnly: boolean;
 	private interruptSeq = 0;
+	private errorGate = createErrorGate();
+
+	/** Report an error to the UI unless the same one was reported in the last 5 s. */
+	private reportError(msg: string): void {
+		if (this.errorGate(msg)) this.onError?.(msg);
+	}
 
 	constructor(config: VoiceChatConfig) {
 		this.engine = config.engine;
@@ -134,8 +140,10 @@ export class VoiceChatLoop {
 				await this.runOneTurn();
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				this.onError?.(msg);
-				this.emit("error", msg);
+				if (this.errorGate(msg)) {
+					this.onError?.(msg);
+					this.emit("error", msg);
+				}
 				if (err instanceof VoiceChatFatalError) this.running = false;
 				else if (this.running) await sleep(1000);
 			}
@@ -316,7 +324,7 @@ export class VoiceChatLoop {
 
 			// Check if file exists and has content
 			if (!existsSync(wavPath)) {
-				this.onError?.("No audio was recorded. Check that your microphone is the system input.");
+				this.reportError("No audio was recorded. Check that your microphone is the system input.");
 				return null;
 			}
 
@@ -331,7 +339,7 @@ export class VoiceChatLoop {
 			cleanupFile(wavPath);
 			if (err instanceof VoiceChatFatalError) throw err;
 			const msg = err instanceof Error ? err.message : String(err);
-			this.onError?.(`Recording error: ${msg}`);
+			this.reportError(`Recording error: ${msg}`);
 			return null;
 		}
 	}
@@ -359,7 +367,7 @@ export class VoiceChatLoop {
 						return result.text.trim() || null;
 					}
 				}
-				this.onError?.("No whisper binary found. Install: brew install whisper-cpp");
+				this.reportError("No whisper binary found. Install: brew install whisper-cpp");
 				return null;
 			}
 
@@ -380,7 +388,7 @@ export class VoiceChatLoop {
 			return null;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			this.onError?.(`Transcription error: ${msg}`);
+			this.reportError(`Transcription error: ${msg}`);
 			return null;
 		}
 	}
@@ -457,6 +465,25 @@ export class VoiceChatLoop {
 // ============================================
 // Utilities
 // ============================================
+
+/**
+ * Lets a message through unless the same text was let through within windowMs.
+ * A rec that exits instantly would otherwise add one message per loop turn.
+ */
+export function createErrorGate(
+	windowMs = 5000,
+	now: () => number = Date.now,
+): (msg: string) => boolean {
+	let last = "";
+	let lastAt = Number.NEGATIVE_INFINITY;
+	return (msg) => {
+		const t = now();
+		if (msg === last && t - lastAt < windowMs) return false;
+		last = msg;
+		lastAt = t;
+		return true;
+	};
+}
 
 /** A failure retrying cannot fix (mic blocked, sox broken). Ends the loop after reporting. */
 export class VoiceChatFatalError extends Error {}

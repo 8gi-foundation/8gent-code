@@ -7,13 +7,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VoiceEngine } from "./index";
 import { missingWhisperModelMessage, resolveWhisperModel } from "./model-manager";
 import { TTSEngine, type TTSProcess, setTTSEngine } from "./tts-engine";
-import { VoiceChatLoop, describeRecFailure } from "./voice-chat";
+import { VoiceChatLoop, createErrorGate, describeRecFailure } from "./voice-chat";
 
 describe("resolveWhisperModel", () => {
 	const only =
@@ -62,8 +62,50 @@ describe("resolveWhisperModel", () => {
 
 	test("the missing-model message names the one command that fixes it", () => {
 		const msg = missingWhisperModelMessage("/m");
-		expect(msg).toContain("curl -L -o /m/ggml-tiny.bin");
-		expect(msg).toContain("mkdir -p /m");
+		expect(msg).toContain("curl -L -o '/m/ggml-tiny.bin'");
+		expect(msg).toContain("mkdir -p '/m'");
+	});
+
+	test("the fix command single-quotes a directory with a space or a quote", () => {
+		const spaced = missingWhisperModelMessage("/my models/whisper");
+		expect(spaced).toContain("mkdir -p '/my models/whisper' &&");
+		expect(spaced).toContain("-o '/my models/whisper/ggml-tiny.bin'");
+		expect(missingWhisperModelMessage("/it's/m")).toContain(`'/it'\\''s/m'`);
+	});
+
+	test("the data dir wins: its tiny beats a larger model in the fallback dir", () => {
+		const m = resolveWhisperModel({
+			modelsDir: "/data",
+			extraDirs: ["/home/models"],
+			exists: only("/data/ggml-tiny.bin", "/home/models/ggml-small.bin"),
+		});
+		expect(m?.path).toBe("/data/ggml-tiny.bin");
+		const best = resolveWhisperModel({
+			modelsDir: "/data",
+			extraDirs: ["/home/models"],
+			exists: only("/data/ggml-tiny.bin", "/data/ggml-base.bin", "/home/models/ggml-small.bin"),
+		});
+		expect(best?.path).toBe("/data/ggml-base.bin");
+	});
+
+	test("a model symlinked to outside its directory is skipped", () => {
+		const root = mkdtempSync(join(tmpdir(), "wm-link-"));
+		try {
+			const data = join(root, "data");
+			const outside = join(root, "outside");
+			mkdirSync(data);
+			mkdirSync(outside);
+			writeFileSync(join(outside, "secret.bin"), "x");
+			symlinkSync(join(outside, "secret.bin"), join(data, "ggml-small.bin"));
+			writeFileSync(join(data, "ggml-tiny.bin"), "x");
+			const m = resolveWhisperModel({ modelsDir: data });
+			expect(m?.filename).toBe("ggml-tiny.bin");
+			// a symlink that stays inside the directory is fine
+			symlinkSync(join(data, "ggml-tiny.bin"), join(data, "ggml-base.bin"));
+			expect(resolveWhisperModel({ modelsDir: data })?.filename).toBe("ggml-base.bin");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -155,6 +197,32 @@ describe("VoiceChatLoop start path (sox and whisper faked)", () => {
 		expect(said).toEqual([]);
 		expect(heard[0]).toContain("heard via ggml-base.en.bin");
 		expect(tts.spoken[0]).toBe("Hello back.");
+	});
+
+	test("a rec that exits instantly does not flood onError", async () => {
+		script("rec", "exit 0"); // exits at once, writes no file: "No audio was recorded" every turn
+		const errors: string[] = [];
+		const loop = new VoiceChatLoop({
+			engine: new VoiceEngine({ modelsPath: join(dir, "models") }),
+			onMessage: async () => "never",
+			onError: (m) => errors.push(m),
+		});
+		await loop.start();
+		await new Promise((r) => setTimeout(r, 1500));
+		await loop.stop();
+		expect(errors.length).toBe(1);
+		expect(errors[0]).toContain("No audio was recorded");
+	});
+
+	test("createErrorGate passes a repeat only after the window", () => {
+		let t = 0;
+		const gate = createErrorGate(5000, () => t);
+		expect(gate("a")).toBe(true);
+		t = 50;
+		expect(gate("a")).toBe(false);
+		expect(gate("b")).toBe(true);
+		t = 6000;
+		expect(gate("b")).toBe(true);
 	});
 
 	test("describeRecFailure keeps the exit code and the first stderr line", () => {
