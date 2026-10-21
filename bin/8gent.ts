@@ -2,8 +2,7 @@
 /**
  * 8gent Code - Main CLI Entry Point
  *
- * The terminal-first agentic coding experience.
- * "Never hit usage caps again"
+ * The terminal-first coding experience.
  */
 
 import * as fs from "node:fs";
@@ -12,6 +11,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { childInvocation, materializeTui } from "../apps/tui/src/lib/embedded-bundle";
 import { safeBunFlags } from "../packages/core/bun-flags";
+import { petRequested } from "../packages/pet/opt-in";
 
 const VERSION = "0.20.8";
 const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts
@@ -73,22 +73,6 @@ function daemonProgram(): string[] {
 	return [process.execPath, ...self, "daemon", "run"];
 }
 
-const BANNER = `
-╔═══════════════════════════════════════════════════════════╗
-║                                                           ║
-║   █████╗  ██████╗ ███████╗███╗   ██╗████████╗             ║
-║  ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝             ║
-║  ╚█████╔╝██║  ███╗█████╗  ██╔██╗ ██║   ██║                ║
-║  ██╔══██╗██║   ██║██╔══╝  ██║╚██╗██║   ██║                ║
-║  ╚█████╔╝╚██████╔╝███████╗██║ ╚████║   ██║                ║
-║   ╚════╝  ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   CODE         ║
-║                                                           ║
-║   Never hit usage caps again™                             ║
-║   AST-first code exploration • 40%+ token savings         ║
-║                                                           ║
-╚═══════════════════════════════════════════════════════════╝
-`;
-
 const HELP = `
 8gent Code v${VERSION}
 
@@ -117,7 +101,7 @@ COMMANDS:
   install npm:<name>@<ver>    Install an npm package into ~/.8gent/packages, pinned by the
                               registry integrity. No scripts run, no dependencies installed.
   packages [list|remove|verify]  Installed packages: list them, remove one, re-check one
-  pet                         Launch Lil Eight dock companion only
+  pet                         Optional Lil Eight dock companion (off unless you run this)
   chat <message>              Send a message (non-interactive, pipe-friendly)
   agent <sub>                 Multi-agent orchestration
   session <sub>               Session history & resume
@@ -341,7 +325,6 @@ async function main() {
 	}
 
 	if (args.includes("-h") || args.includes("--help")) {
-		console.log(BANNER);
 		console.log(HELP);
 		return;
 	}
@@ -864,7 +847,6 @@ async function installCommand(args: string[]): Promise<void> {
 }
 
 async function initCommand(args: string[]) {
-	console.log(BANNER);
 	console.log("Initializing 8gent Code...\n");
 
 	const configPath = path.join(process.cwd(), ".8gent");
@@ -1295,17 +1277,15 @@ async function spawnPet(sessionId?: string) {
 }
 
 async function tuiCommand(args: string[]) {
-	console.log(BANNER);
-
 	// The pet is opt-in: `8gent --pet` (C2). --no-pet is still accepted and wins.
-	const wantPet = args.includes("--pet") && !args.includes("--no-pet");
+	const wantPet = petRequested(args);
 	const filteredArgs = args.filter((a) => a !== "--no-pet" && a !== "--pet");
 
 	if (wantPet) {
 		await spawnPet();
 	}
 
-	console.log("Launching TUI...\n");
+	console.log("Launching 8gent...\n");
 
 	const tuiPath = resolveTuiEntry();
 	if (!tuiPath) {
@@ -1593,7 +1573,6 @@ async function petCommand(args: string[]) {
 }
 
 async function infiniteCommand(args: string[]) {
-	console.log(BANNER);
 	console.log("🔄 INFINITE MODE - Autonomous execution until done\n");
 
 	if (args.length === 0) {

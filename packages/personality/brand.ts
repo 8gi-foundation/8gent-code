@@ -2,7 +2,7 @@
  * 8gent Code - Brand Identity
  *
  * The infinite gentleman agent coder.
- * Never hit usage caps again.
+ * Local-first coding.
  */
 
 // ============================================
@@ -14,7 +14,7 @@ export const BRAND = {
 	fullName: "8gent Code",
 	symbol: "\u221E", // Infinity symbol
 	tagline: "The Infinite Gentleman",
-	description: "Never hit usage caps again\u2122",
+	description: "Local-first coding",
 
 	// Color palette for TUI
 	colors: {
