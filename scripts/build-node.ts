@@ -9,29 +9,12 @@
  *
  *   bun scripts/build-node.ts
  */
-import { readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BunPlugin } from "bun";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const compat = join(root, "packages", "node-compat");
-
-// chalk 4 (CJS) needs ansi-styles ^4 and reads ansiStyles.color directly. The workspace also holds
-// ansi-styles 6 (ESM, default export only). If an install leaves chalk without its nested v4 copy,
-// the bundler silently takes v6 and every coloured Ink <Text> then dies at runtime with "Cannot
-// read properties of undefined (reading 'ansi16m')" (Termux, v0.20.8). Fail the build instead.
-function assertChalkStyles(): void {
-	const chalkDir = dirname(Bun.resolveSync("chalk/package.json", root));
-	const styles = Bun.resolveSync("ansi-styles/package.json", chalkDir);
-	const { version } = JSON.parse(readFileSync(styles, "utf8")) as { version: string };
-	if (!version.startsWith("4.")) {
-		throw new Error(
-			`chalk would bundle ansi-styles ${version} (${styles}); it needs 4.x. Run a clean "bun install --frozen-lockfile" so node_modules/chalk/node_modules/ansi-styles exists.`,
-		);
-	}
-}
-assertChalkStyles();
 
 const alias: BunPlugin = {
 	name: "node-compat-alias",

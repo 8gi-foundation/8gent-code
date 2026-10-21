@@ -42,6 +42,15 @@ function findNode22(): string | null {
 }
 const node = findNode22();
 
+// CI sets this after the build and a Node 22 setup: a missing bundle or Node must fail, not skip.
+test.skipIf(!process.env.EIGHT_REQUIRE_NODE_BUNDLE)(
+	"required in CI: the Node bundles are built and a real Node 22.5+ is available",
+	() => {
+		expect(built).toBe(true);
+		expect(node).not.toBeNull();
+	},
+);
+
 test.skipIf(!node)(
 	"sentinel: the binary the tests spawn is a real, absolute Node (not Bun)",
 	() => {
