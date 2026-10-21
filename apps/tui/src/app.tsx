@@ -168,6 +168,7 @@ const SETUP_PROVIDER_NAMES: Record<string, string> = {
 };
 import { findPlanFile } from "../../../packages/ai/plan-file.js";
 import { bunFlagsFor, safeBunFlags } from "../../../packages/core/bun-flags.js";
+import { runBugCommand } from "../../../packages/eight/bug-command.js";
 import {
 	dotenvKeyIsAllowed,
 	onRunCommandUnsandboxed,
@@ -3696,6 +3697,10 @@ export function App({
 
 				case "kanban":
 					setViewMode((prev) => (prev === "kanban" ? "chat" : "kanban"));
+					break;
+
+				case "bug":
+					addSystemMessage(runBugCommand(args, { version: pkgInfo.version }).text);
 					break;
 
 				case "copy":

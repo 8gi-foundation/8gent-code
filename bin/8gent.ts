@@ -277,6 +277,7 @@ const DEPTH_EXEMPT_COMMANDS = new Set([
 	"doctor",
 	"model-pin",
 	"deck",
+	"bug",
 ]);
 
 function depthExempt(args: string[]): boolean {
@@ -605,6 +606,16 @@ async function main() {
 			// Never starts a model loop (depth-exempt above).
 			const { runDeckCommand } = await import("../packages/eight/deck-cli.ts");
 			process.exitCode = await runDeckCommand(restArgs);
+			break;
+		}
+
+		case "bug": {
+			// `8gent bug "<description>"`: one local, secret-free report folder. Uploads nothing,
+			// never starts a model loop (depth-exempt above).
+			const { runBugCommand } = await import("../packages/eight/bug-command.ts");
+			const r = runBugCommand(restArgs, { version: VERSION });
+			(r.code === 0 ? console.log : console.error)(r.text);
+			process.exitCode = r.code;
 			break;
 		}
 
