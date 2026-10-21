@@ -315,3 +315,85 @@ export async function guardedFetch(
 	// Unreachable: the loop either returns or throws.
 	throw new BlockedDestinationError(`Refused: redirect limit reached for ${rawUrl}.`);
 }
+
+// ============================================
+// Configured search endpoint (#4613)
+// ============================================
+//
+// A self-hosted search box (SearXNG) normally lives on loopback or the LAN,
+// which the rules above refuse by design. The search call alone may reach ONE
+// operator-configured origin. This is a separate function, not a flag on
+// checkDestination, so web_fetch and every other caller of guardedFetch keep
+// the public-only rule with no way to switch it off.
+
+export const SEARCH_RESPONSE_MAX_BYTES = 1024 * 1024;
+export const SEARCH_TIMEOUT_MS = 10_000;
+
+/**
+ * Normalised origin (scheme, host, port) of a configured search URL, or null
+ * when it is not a plain http(s) URL. Default ports and host case collapse, so
+ * http://Host:80 and http://host compare equal. Credentials are refused.
+ */
+export function normalizeOrigin(raw: string): string | null {
+	let url: URL;
+	try {
+		url = new URL(raw);
+	} catch {
+		return null;
+	}
+	if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+	if (url.username || url.password) return null;
+	return url.origin;
+}
+
+/**
+ * GET `rawUrl`, which must sit on exactly `allowedOrigin`. No redirects are
+ * followed (a redirect is an error), the body is capped, and there is a timeout.
+ */
+export async function searchEndpointFetch(
+	rawUrl: string,
+	allowedOrigin: string,
+	deps: { fetchImpl?: FetchImpl } = {},
+): Promise<string> {
+	const want = normalizeOrigin(allowedOrigin);
+	const got = normalizeOrigin(rawUrl);
+	if (!want || !got || want !== got) {
+		throw new BlockedDestinationError(
+			`Refused ${got ?? "request"}: only the configured search endpoint ${want ?? "(invalid)"} is allowed here.`,
+		);
+	}
+	const doFetch: FetchImpl = deps.fetchImpl ?? ((input, init) => fetch(input, init));
+	const response = await doFetch(rawUrl, {
+		redirect: "manual",
+		headers: { Accept: "application/json" },
+		signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+	});
+	if (response.status >= 300 && response.status < 400) {
+		await response.body?.cancel().catch(() => {});
+		throw new Error(`Search endpoint answered with a redirect (${response.status}); not followed.`);
+	}
+	if (!response.ok) {
+		await response.body?.cancel().catch(() => {});
+		throw new Error(`Search endpoint answered ${response.status} ${response.statusText}`.trim());
+	}
+	const declared = Number(response.headers.get("content-length"));
+	if (Number.isFinite(declared) && declared > SEARCH_RESPONSE_MAX_BYTES) {
+		await response.body?.cancel().catch(() => {});
+		throw new Error("Search endpoint response is too large.");
+	}
+	const reader = response.body?.getReader();
+	if (!reader) return "";
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		total += value.byteLength;
+		if (total > SEARCH_RESPONSE_MAX_BYTES) {
+			await reader.cancel().catch(() => {});
+			throw new Error("Search endpoint response is too large.");
+		}
+		chunks.push(value);
+	}
+	return new TextDecoder().decode(Buffer.concat(chunks));
+}

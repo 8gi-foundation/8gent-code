@@ -186,3 +186,26 @@ describe("doctor flag on: tiered report", () => {
 		expect(lines.at(-1)).toBe("  All checks passed.\n");
 	});
 });
+
+describe("doctor: search endpoint note (#4613)", () => {
+	async function out(probeSearch: DoctorDeps["probeSearch"]): Promise<string> {
+		const lines: string[] = [];
+		const log = console.log;
+		console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+		try {
+			await doctor([], { ...depsFor("down", false), probeSearch });
+		} finally {
+			console.log = log;
+		}
+		return lines.join("\n");
+	}
+	it("prints one line when configured and reachable", async () => {
+		const text = await out(async () => ({ origin: "http://127.0.0.1:8888", ok: true }));
+		expect(text.split("\n").filter((l) => l.includes("Search endpoint"))).toEqual([
+			"  Search endpoint http://127.0.0.1:8888 reachable (EIGHT_SEARCH_URL).",
+		]);
+	});
+	it("prints nothing when unset", async () => {
+		expect(await out(async () => null)).not.toContain("Search endpoint");
+	});
+});
