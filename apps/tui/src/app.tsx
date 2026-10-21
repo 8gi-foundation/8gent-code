@@ -6058,7 +6058,10 @@ export function App({
 								if (command === ("route" as any)) {
 									addSystemMessage(m.routeCommand(args[0]));
 								} else {
-									addSystemMessage(m.privacyReport(m.readLedger(), m.readPolicy()));
+									const st = m.readPolicyState();
+									addSystemMessage(
+										m.privacyReport(m.readLedger(), st.policy, undefined, undefined, st.why),
+									);
 								}
 								setLocalChip(m.chipText(m.readLedger()));
 							})

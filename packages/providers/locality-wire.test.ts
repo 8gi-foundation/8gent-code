@@ -3,8 +3,16 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelFailover, NoAllowedProviderError } from "./failover";
-import { LEDGER_TAIL_BYTES, type RoutingPolicy, readLedger, recordCall } from "./locality";
-import { LocalOnlyRefusal, type WireDeps, guardFetch, usageFrom } from "./locality-wire";
+
+import {
+	LEDGER_TAIL_BYTES,
+	type PolicyState,
+	type RoutingPolicy,
+	readLedger,
+	recordCall,
+	updateCall,
+} from "./locality";
+import { LocalOnlyRefusal, type WireDeps, bodySize, guardFetch, usageFrom } from "./locality-wire";
 
 let dir: string;
 let ledger: string;
@@ -14,33 +22,39 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function rig(policy: RoutingPolicy) {
+type Handler = (url: string, init: any) => Response;
+
+function rig(
+	policy: RoutingPolicy,
+	opts: { localHosts?: string[]; why?: string; handler?: Handler } = {},
+) {
 	const notices: string[] = [];
-	const hits: string[] = [];
+	const hits: Array<{ url: string; method: string; redirect?: string }> = [];
 	const base = (async (input: any, init?: any) => {
 		const url = String(input);
-		hits.push(url);
+		hits.push({ url, method: String(init?.method ?? "GET"), redirect: init?.redirect });
+		if (opts.handler) return opts.handler(url, init);
 		const body = url.includes("minimax")
 			? JSON.stringify({ usage: { prompt_tokens: 500, completion_tokens: 50 }, choices: [] })
 			: 'data: {"x":1}\n\ndata: {"usage":{"prompt_tokens":100,"completion_tokens":20}}\n\ndata: [DONE]\n\n';
 		return new Response(body, { status: 200 });
 	}) as unknown as typeof fetch;
+	const state: PolicyState = { policy, localHosts: opts.localHosts ?? [], why: opts.why };
 	const deps: WireDeps = {
-		policy: () => policy,
+		state: () => state,
 		nameOf: (hp, local) => (hp.includes("minimax") ? "minimax" : local ? "ollama" : hp),
 		record: (c) => recordCall(c, ledger),
+		update: (id, u) => updateCall(id, u, ledger),
 		notify: (m) => notices.push(m),
 	};
 	return { f: guardFetch(base, deps), hits, notices };
 }
 
-const post = (f: typeof fetch, url: string, text = "hello") =>
-	f(url, { method: "POST", body: JSON.stringify({ messages: [{ content: text }] }) }).then((r) =>
-		r.text(),
-	);
+const post = (f: typeof fetch, url: string, text = "hello", method = "POST") =>
+	f(url, { method, body: JSON.stringify({ messages: [{ content: text }] }) }).then((r) => r.text());
 
 describe("local-only at the wire", () => {
-	test("a request to an off-box inference host is refused before it is sent", async () => {
+	test("a model request to an off-box host is refused before it is sent", async () => {
 		const { f, hits } = rig("local-only");
 		await expect(post(f, "https://api.minimax.io/v1/chat/completions")).rejects.toBeInstanceOf(
 			LocalOnlyRefusal,
@@ -49,43 +63,178 @@ describe("local-only at the wire", () => {
 		expect(readLedger(ledger)).toEqual([]);
 	});
 
-	test("the refusal reads as plain words", async () => {
+	test("the refusal states exactly what is covered", async () => {
 		const { f } = rig("local-only");
 		const e = await post(f, "https://api.minimax.io/v1/messages").catch((x) => x);
 		expect(e.message).toContain("local-only");
 		expect(e.message).toContain("minimax");
-		expect(e.message).toContain("Nothing left this machine");
+		expect(e.message).toContain("model and network requests sent through 8gent's own HTTP client");
 	});
 
-	test("loopback inference and non-inference calls still go through", async () => {
+	test("the gate is the method and the host, not the path", async () => {
 		const { f, hits } = rig("local-only");
-		await post(f, "http://127.0.0.1:11434/v1/chat/completions");
-		await f("https://example.com/page.html", { method: "POST", body: "x" }).then((r) => r.text());
-		await f("https://api.github.com/repos/x/issues", { method: "GET" }).then((r) => r.text());
-		expect(hits).toHaveLength(3);
+		const urls = [
+			"https://api.replicate.com/v1/predictions",
+			"https://api.minimax.io/v1/chat/completions;x=1",
+			"https://api.minimax.io/v1%2Fchat%2Fcompletions",
+			"https://api.minimax.io/v1/chat//completions",
+			"https://api.minimax.io/anything/at/all",
+			"https://evil.example/upload",
+		];
+		for (const u of urls) {
+			await expect(post(f, u)).rejects.toBeInstanceOf(LocalOnlyRefusal);
+		}
+		for (const m of ["PUT", "PATCH", "DELETE", "POST"]) {
+			await expect(post(f, "https://evil.example/x", "a", m)).rejects.toBeInstanceOf(
+				LocalOnlyRefusal,
+			);
+		}
+		expect(hits).toEqual([]);
+	});
+
+	test("GET and HEAD to any host still work", async () => {
+		const { f, hits } = rig("local-only");
+		await f("https://example.com/page.html").then((r) => r.text());
+		await f("https://example.com/page.html", { method: "HEAD" }).then((r) => r.text());
+		expect(hits).toHaveLength(2);
+	});
+
+	const loopbacks = [
+		"http://127.0.0.1:11434/v1/chat/completions",
+		"http://127.5.6.7:11434/api/chat",
+		"http://[::1]:11434/api/chat",
+		"http://[::ffff:127.0.0.1]:11434/api/chat",
+		"http://localhost:11434/api/chat",
+		"http://localhost.:11434/api/chat",
+		"http://ollama.localhost:11434/api/chat",
+		"http://2130706433:11434/api/chat",
+	];
+	for (const u of loopbacks) {
+		test(`loopback form is local: ${u}`, async () => {
+			const { f, hits } = rig("local-only");
+			await post(f, u);
+			expect(hits).toHaveLength(1);
+		});
+	}
+
+	test("look-alike hosts are not loopback", async () => {
+		const { f, hits } = rig("local-only");
+		for (const u of [
+			"http://127.0.0.1.evil.example/api/chat",
+			"http://localhost.evil.example/api/chat",
+			"http://128.0.0.1/api/chat",
+		]) {
+			await expect(post(f, u)).rejects.toBeInstanceOf(LocalOnlyRefusal);
+		}
+		expect(hits).toEqual([]);
+	});
+
+	test("a LAN host is refused until the user lists it in routing.localHosts", async () => {
+		const off = rig("local-only");
+		await expect(
+			post(off.f, "http://192.168.1.20:1234/v1/chat/completions"),
+		).rejects.toBeInstanceOf(LocalOnlyRefusal);
+		const on = rig("local-only", { localHosts: ["192.168.1.20"] });
+		await post(on.f, "http://192.168.1.20:1234/v1/chat/completions");
+		expect(on.hits).toHaveLength(1);
+		const withPort = rig("local-only", { localHosts: ["m5.local:1234"] });
+		await post(withPort.f, "http://m5.local:1234/v1/chat/completions");
+		await expect(
+			post(withPort.f, "http://m5.local:9999/v1/chat/completions"),
+		).rejects.toBeInstanceOf(LocalOnlyRefusal);
+	});
+
+	test("a redirect from a local host to an off-box host is refused, and not followed", async () => {
+		const { f, hits } = rig("local-only", {
+			handler: (url) =>
+				url.startsWith("http://127.0.0.1")
+					? new Response(null, { status: 307, headers: { location: "https://evil.example/steal" } })
+					: new Response("leaked"),
+		});
+		await expect(post(f, "http://127.0.0.1:11434/api/chat")).rejects.toBeInstanceOf(
+			LocalOnlyRefusal,
+		);
+		expect(hits.map((h) => h.url)).toEqual(["http://127.0.0.1:11434/api/chat"]);
+		expect(hits[0].redirect).toBe("manual");
+	});
+
+	test("a redirect between local hosts is followed", async () => {
+		const { f, hits } = rig("local-only", {
+			handler: (url) =>
+				url.endsWith("/old")
+					? new Response(null, { status: 307, headers: { location: "http://localhost:11434/new" } })
+					: new Response("ok"),
+		});
+		expect(await post(f, "http://127.0.0.1:11434/old")).toBe("ok");
+		expect(hits.map((h) => h.url)).toEqual([
+			"http://127.0.0.1:11434/old",
+			"http://localhost:11434/new",
+		]);
+	});
+
+	test("a POST redirected with 303 becomes a GET, which may leave; 307 may not", async () => {
+		const mk = (code: number) =>
+			rig("local-only", {
+				handler: (url) =>
+					url.startsWith("http://127.0.0.1")
+						? new Response(null, {
+								status: code,
+								headers: { location: "https://example.com/page" },
+							})
+						: new Response("page"),
+			});
+		expect(await post(mk(303).f, "http://127.0.0.1:1/x")).toBe("page");
+		await expect(post(mk(307).f, "http://127.0.0.1:1/x")).rejects.toBeInstanceOf(LocalOnlyRefusal);
+	});
+
+	test("a settings file that could not be read says so once, and the refusal carries the reason", async () => {
+		const why = "settings.json could not be parsed, so model calls are held to this machine.";
+		const { f, notices } = rig("local-only", { why });
+		const e = await post(f, "https://api.minimax.io/v1/messages").catch((x) => x);
+		await post(f, "https://api.minimax.io/v1/messages").catch(() => {});
+		expect(e.message).toContain(why);
+		expect(notices.filter((n) => n === why)).toHaveLength(1);
 	});
 });
 
 describe("ledger at the wire", () => {
-	test("a turn plus two helper calls writes exactly one line per provider call", async () => {
+	test("a turn plus two helper calls writes exactly one entry per provider call", async () => {
 		const { f, hits } = rig("local-first");
 		await post(f, "http://localhost:11434/v1/chat/completions"); // the turn (stream)
 		await post(f, "http://localhost:11434/api/chat"); // summary helper
 		await post(f, "https://api.minimax.io/v1/chat/completions"); // title helper on the cloud
-		await f("http://localhost:11434/api/tags", { method: "GET" }).then((r) => r.text()); // not inference
-		const lines = readFileSync(ledger, "utf8")
-			.trim()
-			.split("\n")
-			.map((l) => JSON.parse(l));
-		expect(hits.filter((u) => !u.endsWith("/api/tags"))).toHaveLength(3);
-		expect(lines).toHaveLength(3);
-		expect(lines.map((l) => [l.provider, l.local, l.tokensIn, l.tokensOut])).toEqual([
+		await f("http://localhost:11434/api/tags").then((r) => r.text()); // not a model call
+		const got = readLedger(ledger);
+		expect(hits).toHaveLength(4);
+		expect(got).toHaveLength(3);
+		expect(got.map((l) => [l.provider, l.local, l.tokensIn, l.tokensOut])).toEqual([
 			["ollama", true, 100, 20],
 			["ollama", true, 100, 20],
 			["minimax", false, 500, 50],
 		]);
-		expect(lines[2].bytesSent).toBeGreaterThan(0);
-		expect(lines[0].bytesSent).toBe(0);
+		expect(got[2].bytesSent).toBeGreaterThan(0);
+		expect(got[0].bytesSent).toBe(0);
+	});
+
+	test("the line exists at send time: a reply that is never read is still counted", async () => {
+		const { f } = rig("local-first");
+		await f("https://api.minimax.io/v1/chat/completions", {
+			method: "POST",
+			body: "x".repeat(400),
+		});
+		const [l] = readLedger(ledger);
+		expect(l.provider).toBe("minimax");
+		expect(l.bytesSent).toBe(400);
+		expect(l.est).toBe(true);
+		expect(l.tokensIn).toBe(100);
+	});
+
+	test("an off-box write that is not a model call is listed as other, never in the share", async () => {
+		const { f } = rig("local-first");
+		await post(f, "https://api.replicate.com/v1/files");
+		const [l] = readLedger(ledger);
+		expect(l.kind).toBe("other");
+		expect(l.local).toBe(false);
 	});
 
 	test("a secret in the request never reaches the ledger or the notice", async () => {
@@ -97,13 +246,7 @@ describe("ledger at the wire", () => {
 	});
 
 	test("no usage in the reply: tokens are estimated and marked", async () => {
-		const deps: WireDeps = {
-			policy: () => "local-first",
-			nameOf: () => "ollama",
-			record: (c) => recordCall(c, ledger),
-			notify: () => {},
-		};
-		const f = guardFetch((async () => new Response("plain text reply!!")) as any, deps);
+		const { f } = rig("local-first", { handler: () => new Response("plain text reply!!") });
 		await post(f, "http://127.0.0.1:11434/api/chat");
 		const [l] = readLedger(ledger);
 		expect(l.est).toBe(true);
@@ -123,6 +266,22 @@ describe("ledger at the wire", () => {
 		).toEqual({ in: 42, out: 9 });
 		expect(usageFrom("", '{"prompt_eval_count":5,"eval_count":11}')).toEqual({ in: 5, out: 11 });
 		expect(usageFrom("", "nothing")).toBeNull();
+	});
+
+	test("body sizes: string, typed array, Blob, URLSearchParams, FormData, Request, stream", async () => {
+		expect(await bodySize("héllo")).toEqual({ bytes: 6, known: true });
+		expect(await bodySize(new Uint8Array(10))).toEqual({ bytes: 10, known: true });
+		expect(await bodySize(new DataView(new ArrayBuffer(7)))).toEqual({ bytes: 7, known: true });
+		expect(await bodySize(new Blob(["abcd"]))).toEqual({ bytes: 4, known: true });
+		expect(await bodySize(new URLSearchParams({ a: "b" }))).toEqual({ bytes: 3, known: true });
+		const fd = new FormData();
+		fd.append("k", "vvv");
+		fd.append("file", new Blob(["12345"]), "f.txt");
+		expect((await bodySize(fd)).bytes).toBe(1 + 3 + 4 + 5);
+		const req = new Request("https://x.example/", { method: "POST", body: "abcdef" });
+		expect(await bodySize(undefined, req)).toEqual({ bytes: 6, known: true });
+		expect((await bodySize(new ReadableStream())).known).toBe(false);
+		expect(await bodySize(undefined)).toEqual({ bytes: 0, known: true });
 	});
 });
 

@@ -1,21 +1,31 @@
 /**
- * The wire point (#4607). Every model request in this process, whether it comes
- * from a turn, a failover, a summary, a judge, a title helper or a spawned
- * child, ends in a fetch. This wraps that fetch once, so one place:
- *   - refuses an inference request to an off-box host under local-only, before a
- *     byte is sent;
- *   - writes one ledger line per request (provider, local or cloud, tokens, exact
- *     bytes sent), never the text;
+ * The wire point (#4607). Model and network requests sent through 8gent's own
+ * HTTP client (the process fetch) pass here, whether they come from a turn, a
+ * failover, a summary, a judge, a title helper or an in-process child. One
+ * wrapper:
+ *   - under local-only refuses any request other than GET or HEAD to a host that
+ *     is not this machine (loopback, or routing.localHosts), whatever the path,
+ *     and refuses a redirect to such a host;
+ *   - writes one ledger line per off-box request and per local model call at send
+ *     time, then the real token counts when the reply finishes;
  *   - says once, on screen, when a request goes to the cloud and why.
- * An inference request is recognised by its path (chat/completions, messages,
- * api/chat ...), not by a provider list, so a new provider is covered the day it
- * is added. Loopback hosts are local; everything else is off this machine.
+ * It does NOT cover run_command tools such as curl, clients that do not use
+ * fetch, or child processes that do not load it (see LOCAL_ONLY_GAPS).
  */
-import { type CallInfo, type RoutingPolicy, decideRoute, readPolicy, recordCall } from "./locality";
+import {
+	type CallInfo,
+	type LedgerEntry,
+	type PolicyState,
+	decideRoute,
+	isLocalHost,
+	readPolicyState,
+	recordCall,
+	updateCall,
+} from "./locality";
 
+/** Labels a ledger line as a model call. It is not the gate: local-only refuses by method and host. */
 const INFERENCE_PATH =
-	/\/(chat\/completions|completions|messages|responses|embeddings|api\/(chat|generate|embed|embeddings))\/?$|:(stream)?generate(content|message)\b/i;
-const LOOPBACK = /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)$/i;
+	/\/(chat\/completions|completions|messages|responses|embeddings|predictions|api\/(chat|generate|embed|embeddings))\/?$|:(stream)?generate(content|message)\b/i;
 
 export class LocalOnlyRefusal extends Error {
 	constructor(message: string) {
@@ -25,10 +35,14 @@ export class LocalOnlyRefusal extends Error {
 }
 
 export interface WireDeps {
-	policy: () => RoutingPolicy;
+	state: () => PolicyState;
 	/** Provider name for a host:port; default is the host. */
 	nameOf: (hostPort: string, local: boolean) => string;
-	record: (c: CallInfo) => unknown;
+	record: (c: CallInfo) => LedgerEntry | null;
+	update: (
+		id: string | undefined,
+		usage: { tokensIn: number; tokensOut: number; est?: boolean },
+	) => void;
 	notify: (message: string) => void;
 }
 
@@ -48,9 +62,10 @@ export function onCloudNotice(fn: NoticeListener): () => void {
 
 export function defaultWireDeps(): WireDeps {
 	return {
-		policy: () => readPolicy(),
+		state: () => readPolicyState(),
 		nameOf: (hp, local) => namer(hp, local),
 		record: (c) => recordCall(c),
+		update: (id, u) => updateCall(id, u),
 		notify: (m) => {
 			for (const fn of noticeListeners) {
 				try {
@@ -63,12 +78,37 @@ export function defaultWireDeps(): WireDeps {
 	};
 }
 
-const bodyBytes = (body: unknown): number => {
-	if (typeof body === "string") return Buffer.byteLength(body);
-	if (body instanceof Uint8Array) return body.byteLength;
-	if (body instanceof ArrayBuffer) return body.byteLength;
-	return 0;
-};
+/** Request body size. known=false when it cannot be measured without reading a stream. */
+export async function bodySize(
+	body: unknown,
+	input?: unknown,
+): Promise<{ bytes: number; known: boolean }> {
+	if (body === undefined || body === null) {
+		if (typeof Request !== "undefined" && input instanceof Request && input.body) {
+			try {
+				return { bytes: (await input.clone().arrayBuffer()).byteLength, known: true };
+			} catch {
+				return { bytes: 0, known: false };
+			}
+		}
+		return { bytes: 0, known: true };
+	}
+	if (typeof body === "string") return { bytes: Buffer.byteLength(body), known: true };
+	if (ArrayBuffer.isView(body)) return { bytes: body.byteLength, known: true };
+	if (body instanceof ArrayBuffer) return { bytes: body.byteLength, known: true };
+	if (typeof Blob !== "undefined" && body instanceof Blob) return { bytes: body.size, known: true };
+	if (body instanceof URLSearchParams) {
+		return { bytes: Buffer.byteLength(body.toString()), known: true };
+	}
+	if (typeof FormData !== "undefined" && body instanceof FormData) {
+		let n = 0;
+		for (const [k, v] of body.entries() as Iterable<[string, string | Blob]>) {
+			n += Buffer.byteLength(k) + (typeof v === "string" ? Buffer.byteLength(v) : v.size);
+		}
+		return { bytes: n, known: true };
+	}
+	return { bytes: 0, known: false };
+}
 
 const lastInt = (text: string, key: string): number | null => {
 	const re = new RegExp(`"${key}"\\s*:\\s*(\\d+)`, "g");
@@ -97,8 +137,10 @@ export function usageFrom(head: string, tail: string): { in: number; out: number
 
 const HEAD = 16 * 1024;
 const TAIL = 64 * 1024;
+const MAX_HOPS = 5;
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 
-function notice(policy: RoutingPolicy, provider: string): string {
+function notice(policy: string, provider: string): string {
 	const why =
 		policy === "cloud-first"
 			? "policy is cloud-first"
@@ -108,6 +150,12 @@ function notice(policy: RoutingPolicy, provider: string): string {
 
 export function guardFetch(base: typeof fetch, deps: WireDeps): typeof fetch {
 	const told = new Set<string>();
+	const tell = (key: string, msg: string) => {
+		if (told.has(key)) return;
+		told.add(key);
+		deps.notify(msg);
+	};
+
 	const guarded = async (input: any, init?: any): Promise<Response> => {
 		let url: URL;
 		try {
@@ -115,48 +163,67 @@ export function guardFetch(base: typeof fetch, deps: WireDeps): typeof fetch {
 		} catch {
 			return base(input, init);
 		}
-		const method = String(init?.method ?? (typeof input === "object" && input.method) ?? "GET");
-		if (method.toUpperCase() !== "POST" || !INFERENCE_PATH.test(url.pathname)) {
-			return base(input, init);
-		}
-		const local = LOOPBACK.test(url.hostname);
+		if (url.protocol !== "http:" && url.protocol !== "https:") return base(input, init);
+		const reqMethod =
+			typeof input === "object" && input && "method" in input ? input.method : undefined;
+		const method = String(init?.method ?? reqMethod ?? "GET").toUpperCase();
+		const readonly = method === "GET" || method === "HEAD";
+		const st = deps.state();
+		const local = isLocalHost(url.hostname, url.port, st.localHosts);
 		const provider = deps.nameOf(url.host, local);
-		const policy = deps.policy();
-		if (!local) {
-			const d = decideRoute({ policy, provider, local: false, pickedForTab: true });
-			if (d.action === "refuse") throw new LocalOnlyRefusal(d.message);
-			const key = `${provider}|${policy}`;
-			if (!told.has(key)) {
-				told.add(key);
-				deps.notify(notice(policy, provider));
-			}
+		const label = INFERENCE_PATH.test(url.pathname);
+		if (st.why && !readonly) tell(`why|${st.why}`, st.why);
+
+		if (st.policy === "local-only" && !local && !readonly) {
+			const d = decideRoute({
+				policy: "local-only",
+				provider,
+				local: false,
+				pickedForTab: true,
+				why: st.why,
+			});
+			throw new LocalOnlyRefusal(d.action === "refuse" ? d.message : "refused");
 		}
-		const sent = bodyBytes(init?.body);
-		let done = false;
+		if (!local && label && st.policy !== "local-only") {
+			tell(`${provider}|${st.policy}`, notice(st.policy, provider));
+		}
+
+		// Count: every off-box write, and every local model call. Written now, so a reply
+		// that is never read is still counted; the real usage is appended when it ends.
+		let entry: LedgerEntry | null = null;
+		const counted = (!local && !readonly) || (local && label && !readonly);
+		const sent = counted ? await bodySize(init?.body, input) : { bytes: 0, known: true };
+		if (counted) {
+			entry = deps.record({
+				provider,
+				local,
+				tokensIn: Math.ceil(sent.bytes / 4),
+				tokensOut: 0,
+				bytesSent: sent.bytes,
+				est: true,
+				...(label ? {} : { kind: "other" as const }),
+			});
+		}
+		const modelCall = counted && label;
+
 		const finish = (head: string, tail: string, respBytes: number) => {
-			if (done) return;
-			done = true;
+			if (!entry || !modelCall) return;
 			const u = usageFrom(head, tail);
-			try {
-				deps.record(
-					u
-						? { provider, local, tokensIn: u.in, tokensOut: u.out, bytesSent: sent }
-						: {
-								provider,
-								local,
-								tokensIn: Math.ceil(sent / 4),
-								tokensOut: Math.ceil(respBytes / 4),
-								bytesSent: sent,
-								est: true,
-							},
-				);
-			} catch {
-				// the ledger must never break a call
-			}
+			deps.update(
+				entry.id,
+				u
+					? { tokensIn: u.in, tokensOut: u.out }
+					: { tokensIn: Math.ceil(sent.bytes / 4), tokensOut: Math.ceil(respBytes / 4), est: true },
+			);
+			entry = null;
 		};
+
 		let res: Response;
 		try {
-			res = await base(input, init);
+			res =
+				st.policy === "local-only"
+					? await followLocalOnly(base, input, init, url, method, st, deps, provider)
+					: await base(input, init);
 		} catch (e) {
 			finish("", "", 0);
 			throw e;
@@ -165,6 +232,7 @@ export function guardFetch(base: typeof fetch, deps: WireDeps): typeof fetch {
 			finish("", "", 0);
 			return res;
 		}
+		if (!modelCall) return res;
 		const reader = res.body.getReader();
 		const dec = new TextDecoder();
 		let head = "";
@@ -201,6 +269,58 @@ export function guardFetch(base: typeof fetch, deps: WireDeps): typeof fetch {
 		});
 	};
 	return guarded as unknown as typeof fetch;
+}
+
+/**
+ * local-only: redirects are followed here, by hand, so a redirect cannot carry a request
+ * (or a body) to a host that is not this machine. Reads stay free: a GET may go anywhere.
+ */
+async function followLocalOnly(
+	base: typeof fetch,
+	input: any,
+	init: any,
+	first: URL,
+	method0: string,
+	st: PolicyState,
+	deps: WireDeps,
+	provider: string,
+): Promise<Response> {
+	let cur = first;
+	let method = method0;
+	let curInit: any = { ...(init ?? {}), redirect: "manual" };
+	let curInput: any = input;
+	for (let hop = 0; hop <= MAX_HOPS; hop++) {
+		const res = await base(curInput, curInit);
+		const loc = res.headers.get("location");
+		if (!REDIRECTS.has(res.status) || !loc) return res;
+		let next: URL;
+		try {
+			next = new URL(loc, cur);
+		} catch {
+			return res;
+		}
+		const toGet =
+			res.status === 303 || ((res.status === 301 || res.status === 302) && method === "POST");
+		const nextMethod = toGet ? "GET" : method;
+		const nextReadonly = nextMethod === "GET" || nextMethod === "HEAD";
+		if (!isLocalHost(next.hostname, next.port, st.localHosts) && !nextReadonly) {
+			const d = decideRoute({
+				policy: "local-only",
+				provider: deps.nameOf(next.host, false) || provider,
+				local: false,
+				pickedForTab: true,
+				why: st.why,
+			});
+			throw new LocalOnlyRefusal(d.action === "refuse" ? d.message : "refused");
+		}
+		await res.body?.cancel().catch(() => {});
+		cur = next;
+		method = nextMethod;
+		curInput = next.href;
+		curInit = { ...curInit, method: nextMethod, redirect: "manual" };
+		if (toGet) curInit.body = undefined;
+	}
+	throw new Error("Too many redirects.");
 }
 
 const INSTALLED = Symbol.for("8gent.locality.guard");

@@ -76,7 +76,7 @@ import {
 	ModelFailover,
 	NoAllowedProviderError,
 } from "../providers/failover";
-import { decideRoute, readPolicy, recordCall } from "../providers/locality";
+import { decideRoute, readPolicyState, recordCall } from "../providers/locality";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
@@ -2077,9 +2077,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						u.promptTokens + u.completionTokens > 0 &&
 						(rt === "apple-foundation" || rt.startsWith("host-cli"))
 					) {
+						// apple-foundation runs on this machine; a host CLI talks to its own cloud.
 						recordCall({
 							provider: rt,
-							local: true,
+							local: rt === "apple-foundation",
 							tokensIn: u.promptTokens,
 							tokensOut: u.completionTokens,
 						});
@@ -2104,11 +2105,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	): Promise<string> {
 		// Routing policy (#4607): local-only refuses a cloud turn in plain words,
 		// before anything is sent. The runtime here is the one picked for this tab.
+		const policy = readPolicyState();
 		const route = decideRoute({
-			policy: readPolicy(),
+			policy: policy.policy,
 			provider: this.config.runtime as string,
 			local: runsOnBox(this.config.runtime as string, this.config.baseUrl),
 			pickedForTab: true,
+			why: policy.why,
 		});
 		if (route.action === "refuse") return Promise.resolve(route.message);
 		this.lastTurnFailure = null;

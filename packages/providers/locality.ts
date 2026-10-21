@@ -49,6 +49,8 @@ export interface RouteInput {
 	pickedForTab: boolean;
 	/** Whether a configured local provider answers right now. Unknown: leave undefined. */
 	localReachable?: boolean;
+	/** Why the policy is what it is, when it was forced (settings.json unreadable). */
+	why?: string;
 }
 
 export type RouteDecision =
@@ -63,7 +65,7 @@ export function decideRoute(i: RouteInput): RouteDecision {
 	if (i.policy === "local-only") {
 		return {
 			action: "refuse",
-			message: `Routing policy is local-only, so this was not sent to ${i.provider}. Nothing left this machine. Pick a local model with /model, or change the policy with /route local-first.`,
+			message: `Routing policy is local-only, so this was not sent to ${i.provider}. local-only covers model and network requests sent through 8gent's own HTTP client (see /privacy for what it does not yet cover). Pick a local model with /model, or change the policy with /route local-first.${i.why ? ` Note: ${i.why}` : ""}`,
 		};
 	}
 	if (i.policy === "cloud-first") {
@@ -93,28 +95,139 @@ const root = () => join(process.env.HOME || homedir(), ".8gent");
 export const settingsPath = () => join(root(), "settings.json");
 export const ledgerPath = () => join(root(), "locality.jsonl");
 
-function readSettings(file: string): Record<string, any> {
-	try {
-		const v = JSON.parse(readFileSync(file, "utf8"));
-		return v && typeof v === "object" && !Array.isArray(v) ? v : {};
-	} catch {
-		return {};
-	}
+export interface PolicyState {
+	policy: RoutingPolicy;
+	/** Plain reason, set only when the policy was forced to local-only by a bad settings file. */
+	why?: string;
+	/** routing.localHosts: extra hosts that count as this machine (a LAN box). */
+	localHosts: string[];
 }
 
-/** The saved policy; anything missing or unrecognised is the default. */
-export function readPolicy(file?: string): RoutingPolicy {
+const FORCED = (why: string): PolicyState => ({ policy: "local-only", why, localHosts: [] });
+
+/**
+ * The routing policy, failing closed. Only a settings.json that does not exist, or
+ * one that parses and has no routing.policy, gives the default (local-first).
+ * A file that exists but cannot be read, is empty, is truncated, is not an object,
+ * or names an unknown policy gives local-only plus a plain reason. A leading BOM
+ * is ignored; case and spaces in the value are ignored ("Local-Only" is local-only).
+ */
+export function readPolicyState(file?: string): PolicyState {
 	// Under `bun test` the real settings file is never read unless a test names one.
-	if (!file && process.env.NODE_ENV === "test") return DEFAULT_POLICY;
-	const p = readSettings(file ?? settingsPath()).routing?.policy;
-	return isRoutingPolicy(p) ? p : DEFAULT_POLICY;
+	if (!file && process.env.NODE_ENV === "test") return { policy: DEFAULT_POLICY, localHosts: [] };
+	const path = file ?? settingsPath();
+	let raw: string;
+	try {
+		raw = readFileSync(path, "utf8");
+	} catch (e: any) {
+		if (e?.code === "ENOENT") return { policy: DEFAULT_POLICY, localHosts: [] };
+		return FORCED(
+			`settings.json exists but could not be read (${e?.code ?? "error"}), so model calls are held to this machine.`,
+		);
+	}
+	if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+	if (raw.trim() === "") {
+		return FORCED("settings.json is empty, so model calls are held to this machine.");
+	}
+	let v: any;
+	try {
+		v = JSON.parse(raw);
+	} catch {
+		return FORCED("settings.json could not be parsed, so model calls are held to this machine.");
+	}
+	if (!v || typeof v !== "object" || Array.isArray(v)) {
+		return FORCED(
+			"settings.json is not a settings object, so model calls are held to this machine.",
+		);
+	}
+	const r = v.routing;
+	if (r === undefined) return { policy: DEFAULT_POLICY, localHosts: [] };
+	if (!r || typeof r !== "object" || Array.isArray(r)) {
+		return FORCED(
+			"settings.json routing is not an object, so model calls are held to this machine.",
+		);
+	}
+	const hosts = Array.isArray(r.localHosts)
+		? r.localHosts.filter((h: unknown) => typeof h === "string").map(normaliseHostEntry)
+		: [];
+	if (r.policy === undefined) return { policy: DEFAULT_POLICY, localHosts: hosts };
+	const want = typeof r.policy === "string" ? r.policy.trim().toLowerCase() : "";
+	if (!isRoutingPolicy(want)) {
+		return {
+			policy: "local-only",
+			why: `settings.json routing.policy is not one of ${ROUTING_POLICIES.join(", ")}, so model calls are held to this machine.`,
+			localHosts: hosts,
+		};
+	}
+	return { policy: want, localHosts: hosts };
 }
 
-/** Save the policy, keeping every other setting as it was. */
+/** The saved policy (see readPolicyState). */
+export function readPolicy(file?: string): RoutingPolicy {
+	return readPolicyState(file).policy;
+}
+
+// ---------- which hosts are this machine ----------
+
+/** Lower case, brackets and a trailing dot removed. */
+export function normaliseHost(h: string): string {
+	let x = h.trim().toLowerCase();
+	if (x.startsWith("[") && x.endsWith("]")) x = x.slice(1, -1);
+	while (x.endsWith(".")) x = x.slice(0, -1);
+	return x;
+}
+
+/** A routing.localHosts entry: "host" or "host:port", host normalised. */
+function normaliseHostEntry(e: string): string {
+	const t = e.trim().toLowerCase();
+	const m = /^(\[[^\]]+\]|[^:]+):(\d+)$/.exec(t);
+	return m ? `${normaliseHost(m[1])}:${m[2]}` : normaliseHost(t);
+}
+
+/** Loopback: 127.0.0.0/8, ::1, IPv4-mapped loopback, 0.0.0.0, localhost and *.localhost. */
+export function isLoopbackHost(host: string): boolean {
+	const h = normaliseHost(host);
+	if (h === "localhost" || h.endsWith(".localhost")) return true;
+	if (h === "0.0.0.0" || h === "::1" || h === "0:0:0:0:0:0:0:1") return true;
+	if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+	if (/^::ffff:127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+	// URL() writes the mapped form in hex: ::ffff:7f00:1
+	return /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(h);
+}
+
+/** True when `host` (with optional port) is this machine: loopback or on the user's localHosts list. */
+export function isLocalHost(host: string, port: string, localHosts: readonly string[]): boolean {
+	if (isLoopbackHost(host)) return true;
+	const h = normaliseHost(host);
+	return localHosts.includes(h) || (port !== "" && localHosts.includes(`${h}:${port}`));
+}
+
+/** Save the policy, keeping every other setting as it was. Refuses to overwrite a file it cannot parse. */
 export function writePolicy(policy: RoutingPolicy, file: string = settingsPath()): void {
-	const s = readSettings(file);
+	let s: Record<string, any> = {};
+	let raw: string | null = null;
+	try {
+		raw = readFileSync(file, "utf8");
+	} catch (e: any) {
+		if (e?.code !== "ENOENT")
+			throw new Error(`settings.json could not be read (${e?.code ?? "error"})`);
+	}
+	if (raw !== null) {
+		if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+		if (raw.trim() !== "") {
+			try {
+				const v = JSON.parse(raw);
+				if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("not an object");
+				s = v;
+			} catch {
+				throw new Error(
+					"settings.json could not be parsed, so it was left alone. Fix or remove it, then run /route again.",
+				);
+			}
+		}
+	}
 	s.routing = { ...(typeof s.routing === "object" && s.routing ? s.routing : {}), policy };
-	mkdirSync(dirname(file), { recursive: true });
+	mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
 	const tmp = `${file}.${process.pid}.tmp`;
 	writeFileSync(tmp, `${JSON.stringify(s, null, 2)}\n`);
 	renameSync(tmp, file);
@@ -124,18 +237,27 @@ export function writePolicy(policy: RoutingPolicy, file: string = settingsPath()
 export function routeCommand(arg: string | undefined, file: string = settingsPath()): string {
 	const want = (arg ?? "").trim().toLowerCase();
 	if (!want) {
-		return `Routing policy: ${readPolicy(file)}. Change with /route ${ROUTING_POLICIES.join(" | ")}.`;
+		const st = readPolicyState(file);
+		return `Routing policy: ${st.policy}.${st.why ? ` ${st.why}` : ""} Change with /route ${ROUTING_POLICIES.join(" | ")}.`;
 	}
 	if (!isRoutingPolicy(want)) {
 		return `Unknown policy "${want}". Choose one of: ${ROUTING_POLICIES.join(", ")}.`;
 	}
-	writePolicy(want, file);
+	try {
+		writePolicy(want, file);
+	} catch (e) {
+		return e instanceof Error ? e.message : String(e);
+	}
 	return `Routing policy set to ${want}.`;
 }
 
 // ---------- ledger ----------
 
 export interface LedgerEntry {
+	/** Joins the completion update (see updateCall) to this line. */
+	id?: string;
+	/** "other": an off-box request that is not a model call. Listed, never counted in the share. */
+	kind?: "other";
 	ts: string;
 	session: string;
 	provider: string;
@@ -163,11 +285,14 @@ export interface CallInfo {
 	/** Exact request body bytes when known; else prompt tokens x 4. */
 	bytesSent?: number;
 	est?: boolean;
+	kind?: "other";
 }
 
 export function makeEntry(call: CallInfo, now: Date = new Date()): LedgerEntry {
 	const tokensIn = num(call.tokensIn);
 	return {
+		id: randomUUID().slice(0, 8),
+		...(call.kind ? { kind: call.kind } : {}),
 		ts: now.toISOString(),
 		session: SESSION_ID,
 		provider: String(call.provider),
@@ -187,16 +312,20 @@ export function onLedgerEntry(fn: LedgerListener): () => void {
 	return () => ledgerListeners.delete(fn);
 }
 
-/** Append one call. Never throws: a full disk must not break a model turn. Calls with no tokens are skipped. */
+function appendPrivate(file: string, line: string): void {
+	// ~/.8gent is created 0700 and the ledger 0600: it says when and where you worked.
+	mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+	appendFileSync(file, line, { mode: 0o600 });
+}
+
+/** Append one call. Never throws: a full disk must not break a model turn. A call is logged even with zero counts. */
 export function recordCall(call: CallInfo, file?: string): LedgerEntry | null {
 	const e = makeEntry(call);
-	if (e.tokensIn + e.tokensOut === 0 && !e.bytesSent) return null;
 	// Under `bun test` the real ledger is never written unless a test names a file.
 	if (!file && process.env.NODE_ENV === "test") return null;
 	file = file ?? ledgerPath();
 	try {
-		mkdirSync(dirname(file), { recursive: true });
-		appendFileSync(file, `${JSON.stringify(e)}\n`);
+		appendPrivate(file, `${JSON.stringify(e)}\n`);
 		for (const fn of ledgerListeners) {
 			try {
 				fn(e);
@@ -207,6 +336,28 @@ export function recordCall(call: CallInfo, file?: string): LedgerEntry | null {
 		return e;
 	} catch {
 		return null;
+	}
+}
+
+/**
+ * The reply finished: append the real counts for a line written at send time.
+ * readLedger folds this onto its call, so a call is still one entry. A reply
+ * that is never read leaves the send-time line (estimated) standing.
+ */
+export function updateCall(
+	id: string | undefined,
+	usage: { tokensIn: number; tokensOut: number; est?: boolean },
+	file?: string,
+): void {
+	if (!id) return;
+	if (!file && process.env.NODE_ENV === "test") return;
+	try {
+		appendPrivate(
+			file ?? ledgerPath(),
+			`${JSON.stringify({ upd: id, tokensIn: num(usage.tokensIn), tokensOut: num(usage.tokensOut), ...(usage.est ? { est: true } : {}) })}\n`,
+		);
+	} catch {
+		// never break a call
 	}
 }
 
@@ -236,11 +387,23 @@ export function readLedger(
 		return [];
 	}
 	const out: LedgerEntry[] = [];
+	const byId = new Map<string, LedgerEntry>();
 	for (const line of raw.split("\n")) {
 		if (!line) continue;
 		try {
 			const e = JSON.parse(line);
-			if (e && typeof e.ts === "string" && typeof e.provider === "string") out.push(e);
+			if (e && typeof e.upd === "string") {
+				const t = byId.get(e.upd);
+				if (t) {
+					t.tokensIn = num(e.tokensIn);
+					t.tokensOut = num(e.tokensOut);
+					if (e.est) t.est = true;
+					else delete t.est;
+				}
+			} else if (e && typeof e.ts === "string" && typeof e.provider === "string") {
+				out.push(e);
+				if (typeof e.id === "string") byId.set(e.id, e);
+			}
 		} catch {
 			// a torn line is skipped, never fatal
 		}
@@ -257,6 +420,8 @@ export interface Meter {
 	/** Whole percent of tokens that stayed local; null when nothing was measured. */
 	localPct: number | null;
 	cloudCalls: LedgerEntry[];
+	/** Off-box requests that are not model calls: listed, not in the share. */
+	otherCalls: LedgerEntry[];
 }
 
 const tokensOf = (e: LedgerEntry) => num(e.tokensIn) + num(e.tokensOut);
@@ -265,8 +430,10 @@ export function meterOf(entries: LedgerEntry[]): Meter {
 	let localTokens = 0;
 	let cloudTokens = 0;
 	const cloudCalls: LedgerEntry[] = [];
+	const otherCalls: LedgerEntry[] = [];
 	for (const e of entries) {
-		if (e.local) localTokens += tokensOf(e);
+		if (e.kind === "other") otherCalls.push(e);
+		else if (e.local) localTokens += tokensOf(e);
 		else {
 			cloudTokens += tokensOf(e);
 			cloudCalls.push(e);
@@ -274,11 +441,12 @@ export function meterOf(entries: LedgerEntry[]): Meter {
 	}
 	const total = localTokens + cloudTokens;
 	return {
-		calls: entries.length,
+		calls: entries.length - otherCalls.length,
 		localTokens,
 		cloudTokens,
 		localPct: total === 0 ? null : Math.round((localTokens / total) * 100),
 		cloudCalls,
+		otherCalls,
 	};
 }
 
@@ -305,13 +473,16 @@ export function sessionEntries(
 /** The status-bar chip. Null until a call has been measured today. */
 export function chipText(entries: LedgerEntry[], now: Date = new Date()): string | null {
 	const m = meterOf(todayEntries(entries, now));
-	return m.localPct === null ? null : `${m.localPct}% local today`;
+	return m.localPct === null ? null : `${m.localPct}% of model tokens on this machine`;
 }
 
 const fmtBytes = (b: number) => (b >= 1024 ? `${(b / 1024).toFixed(1)} KB` : `${b} B`);
 
 function section(title: string, m: Meter): string[] {
-	const share = m.localPct === null ? "no measured calls yet" : `${m.localPct}% local by tokens`;
+	const share =
+		m.localPct === null
+			? "no measured calls yet"
+			: `${m.localPct}% of model tokens on this machine`;
 	const lines = [
 		`${title}: ${share} (${m.localTokens} local tokens, ${m.cloudTokens} cloud tokens, ${m.calls} calls)`,
 	];
@@ -322,8 +493,17 @@ function section(title: string, m: Meter): string[] {
 	}
 	if (m.cloudCalls.length > 10)
 		lines.push(`  (${m.cloudCalls.length - 10} earlier cloud calls not shown)`);
+	for (const c of m.otherCalls.slice(-5)) {
+		lines.push(
+			`  other  ${c.ts.slice(11, 19)}  ${c.provider}  about ${fmtBytes(c.bytesSent)} sent (not a model call)`,
+		);
+	}
 	return lines;
 }
+
+/** What local-only does not yet cover. Shown by /privacy so the promise is not larger than the guard. */
+export const LOCAL_ONLY_GAPS =
+	"local-only covers model and network requests sent through 8gent's own HTTP client. It does not yet cover run_command tools such as curl, clients that do not use that HTTP client, or child processes that do not load the guard.";
 
 /** /privacy. Sizes only; the ledger holds no text to show. */
 export function privacyReport(
@@ -331,10 +511,12 @@ export function privacyReport(
 	policy: RoutingPolicy,
 	now: Date = new Date(),
 	session: string = SESSION_ID,
+	why?: string,
 ): string {
 	return [
-		`Routing policy: ${policy} (change with /route)`,
+		`Routing policy: ${policy} (change with /route)${why ? ` - ${why}` : ""}`,
 		...section("Today", meterOf(todayEntries(entries, now))),
 		...section("This session", meterOf(sessionEntries(entries, session))),
+		LOCAL_ONLY_GAPS,
 	].join("\n");
 }

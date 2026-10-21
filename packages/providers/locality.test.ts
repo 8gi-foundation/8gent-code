@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -13,8 +13,10 @@ import {
 	privacyReport,
 	readLedger,
 	readPolicy,
+	readPolicyState,
 	recordCall,
 	routeCommand,
+	updateCall,
 } from "./locality";
 
 let dir: string;
@@ -69,18 +71,88 @@ describe("decideRoute table", () => {
 		if (d.action !== "refuse") throw new Error("expected refuse");
 		expect(d.message).toContain("local-only");
 		expect(d.message).toContain("minimax");
-		expect(d.message).toContain("Nothing left this machine");
+		expect(d.message).toContain("model and network requests sent through 8gent's own HTTP client");
+		expect(d.message).not.toContain("Nothing left this machine");
 		expect(d.message).toContain("/route local-first");
 		expect(d.message).not.toMatch(/agent/i);
 	});
 });
 
 describe("policy storage", () => {
-	test("default is local-first when the file is missing, empty or wrong", () => {
+	test("a missing settings.json is the documented default, local-first, with no complaint", () => {
+		const st = readPolicyState(join(dir, "nope.json"));
+		expect(st.policy).toBe("local-first");
+		expect(st.why).toBeUndefined();
+	});
+
+	test("a valid file with no routing key is also local-first", () => {
 		const f = join(dir, "settings.json");
-		expect(readPolicy(f)).toBe("local-first");
-		writeFileSync(f, JSON.stringify({ routing: { policy: "bogus" } }));
-		expect(readPolicy(f)).toBe("local-first");
+		writeFileSync(f, JSON.stringify({ voice: {} }));
+		expect(readPolicyState(f)).toMatchObject({ policy: "local-first" });
+	});
+
+	const failClosed: Array<[string, string | Buffer]> = [
+		["empty file", ""],
+		["whitespace only", "  \n "],
+		["truncated JSON", '{"routing":{"policy":"local-o'],
+		["not JSON", "policy=local-only"],
+		["JSON array", "[]"],
+		["JSON null", "null"],
+		["routing is a string", JSON.stringify({ routing: "local-only" })],
+		["unknown policy", JSON.stringify({ routing: { policy: "sometimes" } })],
+		["policy is a number", JSON.stringify({ routing: { policy: 1 } })],
+		["policy is empty", JSON.stringify({ routing: { policy: "" } })],
+	];
+	for (const [name, content] of failClosed) {
+		test(`fails closed: ${name} -> local-only with a plain reason`, () => {
+			const f = join(dir, "settings.json");
+			writeFileSync(f, content);
+			const st = readPolicyState(f);
+			expect(st.policy).toBe("local-only");
+			expect(st.why).toContain("held to this machine");
+		});
+	}
+
+	test("fails closed: a file that cannot be read (a directory)", () => {
+		const f = join(dir, "settings.json");
+		mkdirSync(f);
+		const st = readPolicyState(f);
+		expect(st.policy).toBe("local-only");
+		expect(st.why).toContain("could not be read");
+	});
+
+	test("a BOM-prefixed valid file is read, not dropped to the default", () => {
+		const f = join(dir, "settings.json");
+		writeFileSync(f, `\uFEFF${JSON.stringify({ routing: { policy: "local-only" } })}`);
+		expect(readPolicyState(f)).toMatchObject({ policy: "local-only" });
+		writeFileSync(f, `\uFEFF${JSON.stringify({ routing: { policy: "cloud-first" } })}`);
+		expect(readPolicy(f)).toBe("cloud-first");
+	});
+
+	test("case and spaces in the value are ignored", () => {
+		const f = join(dir, "settings.json");
+		for (const v of ["Local-Only", "LOCAL-ONLY", " local-only "]) {
+			writeFileSync(f, JSON.stringify({ routing: { policy: v } }));
+			expect(readPolicyState(f)).toMatchObject({ policy: "local-only" });
+			expect(readPolicyState(f).why).toBeUndefined();
+		}
+	});
+
+	test("routing.localHosts is read and normalised", () => {
+		const f = join(dir, "settings.json");
+		writeFileSync(
+			f,
+			JSON.stringify({ routing: { localHosts: ["M5.local.", "192.168.1.20:1234", 7] } }),
+		);
+		expect(readPolicyState(f).localHosts).toEqual(["m5.local", "192.168.1.20:1234"]);
+	});
+
+	test("/route will not overwrite a settings file it cannot parse", () => {
+		const f = join(dir, "settings.json");
+		writeFileSync(f, '{"voice": {"on": tr');
+		expect(routeCommand("local-first", f)).toContain("could not be parsed");
+		expect(readFileSync(f, "utf8")).toBe('{"voice": {"on": tr');
+		expect(routeCommand("", f)).toContain("held to this machine");
 	});
 
 	test("/route saves, keeps other settings, and rejects unknown values", () => {
@@ -106,7 +178,7 @@ describe("ledger", () => {
 		expect(lines).toHaveLength(2);
 		const [a, b] = lines.map((l) => JSON.parse(l));
 		expect(Object.keys(a).sort()).toEqual(
-			["bytesSent", "local", "provider", "session", "tokensIn", "tokensOut", "ts"].sort(),
+			["bytesSent", "id", "local", "provider", "session", "tokensIn", "tokensOut", "ts"].sort(),
 		);
 		expect(a).toMatchObject({
 			provider: "ollama",
@@ -142,15 +214,38 @@ describe("ledger", () => {
 		expect(raw).not.toContain("messages");
 	});
 
-	test("a call with no measured tokens writes nothing; a torn line is skipped on read", () => {
+	test("a call with zero counts is still logged; a torn line is skipped on read", () => {
 		const f = join(dir, "locality.jsonl");
 		expect(
 			recordCall({ provider: "ollama", local: true, tokensIn: 0, tokensOut: 0 }, f),
-		).toBeNull();
+		).not.toBeNull();
 		recordCall({ provider: "ollama", local: true, tokensIn: 3, tokensOut: 1 }, f);
 		writeFileSync(f, `${readFileSync(f, "utf8")}{"ts":"x","prov\n`);
-		expect(readLedger(f)).toHaveLength(1);
+		expect(readLedger(f)).toHaveLength(2);
 		expect(readLedger(join(dir, "missing.jsonl"))).toEqual([]);
+	});
+});
+
+describe("ledger file permissions", () => {
+	test("a new ledger is 0600 and a new ~/.8gent directory is 0700", () => {
+		const f = join(dir, "fresh", ".8gent", "locality.jsonl");
+		recordCall({ provider: "ollama", local: true, tokensIn: 1, tokensOut: 1 }, f);
+		expect(statSync(f).mode & 0o777).toBe(0o600);
+		expect(statSync(join(dir, "fresh", ".8gent")).mode & 0o777).toBe(0o700);
+	});
+
+	test("a completion update folds onto its line; the call stays one entry", () => {
+		const f = join(dir, "locality.jsonl");
+		const e = recordCall(
+			{ provider: "minimax", local: false, tokensIn: 10, tokensOut: 0, bytesSent: 40, est: true },
+			f,
+		);
+		updateCall(e?.id, { tokensIn: 123, tokensOut: 45 }, f);
+		expect(readFileSync(f, "utf8").trim().split("\n")).toHaveLength(2);
+		const got = readLedger(f);
+		expect(got).toHaveLength(1);
+		expect(got[0]).toMatchObject({ tokensIn: 123, tokensOut: 45, bytesSent: 40 });
+		expect(got[0].est).toBeUndefined();
 	});
 });
 
@@ -181,7 +276,7 @@ describe("meter maths", () => {
 			entry({ ts: today, local: false, tokensIn: 8 }),
 			entry({ ts: old, local: false, tokensIn: 10000 }),
 		];
-		expect(chipText(rows, now)).toBe("92% local today");
+		expect(chipText(rows, now)).toBe("92% of model tokens on this machine");
 		expect(chipText([entry({ ts: old, tokensIn: 5 })], now)).toBeNull();
 	});
 
@@ -203,9 +298,10 @@ describe("meter maths", () => {
 		];
 		const out = privacyReport(rows, "local-first", now, "mine");
 		expect(out).toContain("Routing policy: local-first");
-		expect(out).toContain("Today: 90% local by tokens");
-		expect(out).toContain("This session: 67% local by tokens");
+		expect(out).toContain("Today: 90% of model tokens on this machine");
+		expect(out).toContain("This session: 67% of model tokens on this machine");
 		expect(out).toContain("minimax");
+		expect(out).toContain("does not yet cover run_command tools such as curl");
 		expect(out).toContain("150 tokens");
 		expect(out).toContain("400 B");
 	});
