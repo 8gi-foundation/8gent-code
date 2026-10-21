@@ -99,9 +99,9 @@ export function isAudioCommand(command: string): boolean {
 	}
 	// Backstop: an audio program name as a bare word anywhere (eval, find -exec, here-strings,
 	// su -c, ssh, arch, caffeinate, a variable's value). Over-refusing is accepted; a plain
-	// echo/printf/grep/rg line that only mentions the name is left alone.
+	// echo/printf/grep line that only mentions the name is left alone.
 	for (const segment of command.split(/&&|\|\||[;|&\n`()]/)) {
-		if (/^\s*(echo|printf|grep|rg)\s/.test(segment)) continue;
+		if (/^\s*(echo|printf|grep)\s/.test(segment) && !/\s--pre(=|\s|$)/.test(segment)) continue;
 		if (BARE_NAME.test(segment)) return true;
 	}
 	return false;

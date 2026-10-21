@@ -84,6 +84,9 @@ describe("System One audio lane (#4713)", () => {
 			"caffeinate say hi",
 			"! say hi",
 			"while true; do say hi; done",
+			"rg --pre say x .",
+			"rg --pre=afplay x .",
+			"grep --pre=say x .",
 		];
 		for (const c of cases) expect([c, isAudioCommand(c)]).toEqual([c, true]);
 	});
