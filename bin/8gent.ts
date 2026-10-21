@@ -1339,6 +1339,13 @@ async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 	if (MODULE_IS_EMBEDDED) {
 		const inv = childInvocation(process.execPath, tuiPath, args, TUI_CACHE_DIR);
 		proc = spawn(inv.command, inv.args, { stdio: "inherit", env: { ...inv.env, ...launcherEnv } });
+	} else if (!(process.versions as Record<string, string | undefined>).bun) {
+		// Running on Node (dist/node/cli.js): the TUI is the sibling Node bundle, run by this same Node.
+		proc = spawn(
+			process.execPath,
+			["--experimental-sqlite", "--disable-warning=ExperimentalWarning", tuiPath, ...args],
+			{ stdio: "inherit", env: { ...process.env, ...launcherEnv } },
+		);
 	} else {
 		// Same as the compiled path: never the user's cwd bunfig.toml or .env (#4013).
 		proc = spawn("bun", [...safeBunFlags(), "run", tuiPath, ...args], {

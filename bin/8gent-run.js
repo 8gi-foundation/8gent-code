@@ -45,15 +45,33 @@ if (process.env.EIGHT_BOOT_TRACE !== "0") {
 	} catch {}
 }
 
-const result = spawnSync("bun", [...SAFE_BUN, cli, ...process.argv.slice(2)], {
-	stdio: "inherit",
-	env: process.env,
-});
+// Bun if it is installed (unchanged path); otherwise the Node build (dist/node/*),
+// which needs Node 22.5+ for node:sqlite. --experimental-sqlite is required before 22.13.
+const nodeCli = join(__dirname, "..", "dist", "node", "cli.js");
+const wantNode = process.env.EIGHT_RUNTIME === "node";
+let result = wantNode
+	? { error: { code: "ENOENT" } }
+	: spawnSync("bun", [...SAFE_BUN, cli, ...process.argv.slice(2)], {
+			stdio: "inherit",
+			env: process.env,
+		});
 
 // One spawn: a missing Bun shows up as ENOENT here, so no separate probe runs first (A4).
 if (result.error && result.error.code === "ENOENT") {
-	console.error(NO_BUN);
-	process.exit(1);
+	if (!existsSync(nodeCli)) {
+		console.error(NO_BUN);
+		process.exit(1);
+	}
+	result = spawnSync(
+		process.execPath,
+		[
+			"--experimental-sqlite",
+			"--disable-warning=ExperimentalWarning",
+			nodeCli,
+			...process.argv.slice(2),
+		],
+		{ stdio: "inherit", env: process.env },
+	);
 }
 
 process.exit(result.status ?? 0);
