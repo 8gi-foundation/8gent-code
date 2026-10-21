@@ -264,9 +264,12 @@ export function parseGitignoreInfo(
 
 /** Read a file only when it fits in max bytes: stat first, then read at most max+1. A larger file returns null. */
 async function readCapped(file: string, max: number): Promise<Buffer | null> {
-	const fh = await fs.promises.open(file, "r");
+	// O_NONBLOCK: opening a FIFO swapped in after the walk must not block. fstat on the fd, not the path.
+	const fh = await fs.promises.open(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
 	try {
-		const { size } = await fh.stat();
+		const st = await fh.stat();
+		if (!st.isFile()) return null; // not a regular file: skipped
+		const size = st.size;
 		if (size > max) return null; // too big: never read, skipped
 		const buf = Buffer.alloc(Math.min(size, max + 1));
 		const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
@@ -366,12 +369,25 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 	let filesWalked = 0;
 	let ruleBudget = MAX_GITIGNORE_RULES; // one budget per search, shared by every scope
 	const walk = (dir: string, rel: string, inherited: Scope[]): void => {
-		let entries: fs.Dirent[];
+		const entries: fs.Dirent[] = [];
 		try {
-			entries = fs.readdirSync(dir, { withFileTypes: true });
+			// opendir + readSync so the deadline is checked while a huge directory is listed.
+			const d = fs.opendirSync(dir);
+			try {
+				for (let ent = d.readSync(); ent; ent = d.readSync()) {
+					entries.push(ent);
+					if ((entries.length & 255) === 0 && Date.now() >= work.deadline) {
+						work.late = true;
+						break;
+					}
+				}
+			} finally {
+				d.closeSync();
+			}
 		} catch {
 			return;
 		}
+		if (work.late) return;
 		entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 		let scopes = inherited;
 		const hasIgnore = entries.some((e) => e.name === ".gitignore" && e.isFile());

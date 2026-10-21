@@ -586,6 +586,45 @@ describe("inproc-search", () => {
 		}
 	});
 
+	test("a file swapped for a FIFO after the walk is skipped, not blocked on", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-fifo-"));
+		try {
+			fs.writeFileSync(path.join(d, "a.txt"), "needle\n");
+			fs.writeFileSync(path.join(d, "b.txt"), "needle\n");
+			let swapped = false;
+			const t0 = performance.now();
+			const r = await searchFiles({
+				root: d,
+				pattern: "needle",
+				allow: (abs) => {
+					if (!swapped && abs.endsWith("a.txt")) {
+						swapped = true;
+						fs.rmSync(abs);
+						Bun.spawnSync(["mkfifo", abs]);
+					}
+					return true;
+				},
+			});
+			expect(swapped).toBe(true);
+			expect(performance.now() - t0).toBeLessThan(2000 + 1500);
+			expect(r.hits.map((h) => h.file)).toEqual(["b.txt"]);
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+
+	test("the deadline is checked while a big directory is listed", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-bigdir-"));
+		try {
+			for (let i = 0; i < 3000; i++) fs.writeFileSync(path.join(d, `f${i}.txt`), "x\n");
+			const r = await searchFiles({ root: d, allow: () => true, pattern: "x", deadlineMs: 0 });
+			expect(r.deadline).toBeDefined();
+			expect(r.hits.length).toBe(0); // stopped while listing, before any entry was judged
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+
 	test("spawns nothing", async () => {
 		const src = fs.readFileSync(path.join(import.meta.dir, "..", "inproc-search.ts"), "utf8");
 		expect(src).not.toMatch(/child_process|Worker|execSync|spawnSync|Bun\.spawn/);
