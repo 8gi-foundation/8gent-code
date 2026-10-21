@@ -264,6 +264,20 @@ export function parseGitignoreInfo(
 	return { rules, overCap };
 }
 
+/** Read a file only when it fits in max bytes: stat first, then read at most max+1. A larger file returns null. */
+async function readCapped(file: string, max: number): Promise<Buffer | null> {
+	const fh = await fs.promises.open(file, "r");
+	try {
+		const { size } = await fh.stat();
+		if (size > max) return null; // too big: never read, skipped
+		const buf = Buffer.alloc(Math.min(size, max + 1));
+		const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+		return buf.subarray(0, bytesRead);
+	} finally {
+		await fh.close();
+	}
+}
+
 /** Read at most MAX_GITIGNORE_BYTES of a .gitignore. */
 function readGitignore(file: string): string {
 	const fd = fs.openSync(file, "r");
@@ -317,11 +331,10 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 	const out: SearchResult = { hits: [], files: [], filesScanned: 0, truncated: false };
 	const deadlineMs = opts.deadlineMs ?? 2000;
 	let capHit = false;
-	const finish = (total?: number): SearchResult => {
+	const finish = (total?: number, searched = out.filesScanned): SearchResult => {
 		if (capHit) out.capped = true;
 		if (work.spent) out.rulesIncomplete = { filesWalked };
-		if (work.late)
-			out.deadline = { searched: out.filesScanned, total, seconds: Math.max(0, deadlineMs) / 1000 };
+		if (work.late) out.deadline = { searched, total, seconds: Math.max(0, deadlineMs) / 1000 };
 		out.truncated = !!(
 			out.capped ||
 			out.entryCap ||
@@ -361,13 +374,18 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 		entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 		let scopes = inherited;
 		const hasIgnore = entries.some((e) => e.name === ".gitignore" && e.isFile());
-		if (hasIgnore && ruleBudget <= 0)
-			out.ruleCapDropped = true; // not read: the budget is spent
-		else if (hasIgnore) {
+		if (hasIgnore && ruleBudget <= 0) {
+			work.spent = true; // a .gitignore that cannot be read: stop, never list what it would hide
+			return;
+		}
+		if (hasIgnore) {
 			try {
 				const info = parseGitignoreInfo(readGitignore(path.join(dir, ".gitignore")), ruleBudget);
 				const rules = info.rules;
-				if (info.overCap) out.ruleCapDropped = true;
+				if (info.overCap) {
+					work.spent = true; // rules were dropped: stop, never list what they would hide
+					return;
+				}
 				ruleBudget -= rules.length;
 				scopes = [...inherited, { base: rel, rules }];
 			} catch {}
@@ -402,7 +420,7 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 	if (!opts.pattern) {
 		if (candidates.length > maxResults) capHit = true;
 		out.files = candidates.slice(0, maxResults);
-		return finish(walkCut ? undefined : candidates.length);
+		return finish(walkCut ? undefined : candidates.length, entriesSeen);
 	}
 
 	// 2. Scan: read files in parallel batches, judge them in path order. indexOf is linear.
@@ -420,7 +438,7 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 		const batch = candidates.slice(i, i + 64);
 		const bufs = await Promise.all(
 			batch.map((rel) =>
-				fs.promises.readFile(path.join(root, ...rel.split("/"))).catch(() => null),
+				readCapped(path.join(root, ...rel.split("/")), maxBytes).catch(() => null),
 			),
 		);
 		for (let j = 0; j < batch.length && !capHit; j++) {
@@ -467,7 +485,7 @@ export function formatSearch(r: SearchResult): string {
 		);
 	if (r.rulesIncomplete)
 		notes.push(
-			`[ignore rules incomplete: .gitignore filtering stopped after ${r.rulesIncomplete.filesWalked} files, so results may include ignored files such as build output or dependencies. Add a glob to narrow the search.]`,
+			`[ignore rules incomplete: search stopped after ${r.rulesIncomplete.filesWalked} files because .gitignore rules exceeded the limit. Results so far are shown. Add a glob to narrow the search.]`,
 		);
 	if (r.deadline) {
 		const of = r.deadline.total === undefined ? "" : ` of ${r.deadline.total}`;
