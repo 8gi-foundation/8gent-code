@@ -21,7 +21,32 @@ bad() { echo "FAIL  $*"; fail=1; }
 
 echo "== userland: $(uname -srm), PREFIX=${PREFIX:-unset}"
 apt-get update -y >/dev/null 2>&1 || pkg update -y >/dev/null 2>&1 || true
-pkg install -y nodejs util-linux curl >/dev/null
+pkg install -y nodejs util-linux curl termux-exec >/dev/null
+
+# A real Termux shell always runs with LD_PRELOAD=$PREFIX/lib/libtermux-exec*.so
+# (termux-exec), which rewrites a /usr/bin/env shebang to $PREFIX/bin/env. A bare
+# `docker run ... bash script` does not get it, so npm's bin shims (#!/usr/bin/env
+# node) die with "bad interpreter" in the harness while working on a device.
+# Give this script the same environment, then re-run it once so every process it
+# starts (npm, 8gent, script) is a child of a shell that has the preload.
+PFX="${PREFIX:-/data/data/com.termux/files/usr}"
+if [ -z "${SMOKE_TERMUX_PRELOADED:-}" ]; then
+	preload=""
+	# Newest termux-exec first, then the classic name.
+	for f in "$PFX"/lib/libtermux-exec-ld-preload.so "$PFX"/lib/libtermux-exec-direct-ld-preload.so \
+		"$PFX"/lib/libtermux-exec.so "$PFX"/lib/libtermux-exec*.so; do
+		[ -e "$f" ] && { preload="$f"; break; }
+	done
+	if [ -z "$preload" ]; then
+		echo "FAIL  termux-exec installed no libtermux-exec*.so under $PFX/lib (cannot match a real Termux shell)"
+		ls -l "$PFX"/lib | grep -i termux || true
+		exit 1
+	fi
+	echo "== LD_PRELOAD=$preload (as a real Termux shell sets it)"
+	SMOKE_TERMUX_PRELOADED=1 LD_PRELOAD="$preload" exec bash "$0" "$@"
+fi
+echo "== active preload: ${LD_PRELOAD:-none}"
+case "${LD_PRELOAD:-}" in *libtermux-exec*) ;; *) echo "FAIL  LD_PRELOAD is not termux-exec"; exit 1 ;; esac
 node --version
 
 echo "== npm i -g (install scripts on)"
