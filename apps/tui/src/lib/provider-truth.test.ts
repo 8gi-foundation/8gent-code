@@ -4,10 +4,14 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { autoSelectModel } from "./model-selection";
 import {
+	MODEL_LIST_TIMEOUT_MS,
 	buildProviderOptions,
+	emptyModelIsFinal,
 	listBelongsToProvider,
 	listModelsWithReason,
+	loadModelListWithin,
 	modelAfterProviderSwitch,
 	modelListFailureNotice,
 	providerKeyNotice,
@@ -187,5 +191,68 @@ describe("registryKeyNotice", () => {
 	});
 	test("openrouter keeps its own notice", () => {
 		expect(registryKeyNotice("openrouter", reader({}))).toBeNull();
+	});
+});
+
+describe("after /provider to a hosted provider (#4682)", () => {
+	test("an empty model is not final while the new provider's list has not loaded", () => {
+		const at = (o: { loading: boolean; owner: string; listed: number }) =>
+			emptyModelIsFinal({ ...o, provider: "minimax" });
+		// The effect run that follows the switch still holds the old provider's list.
+		expect(at({ loading: false, owner: "ollama", listed: 3 })).toBeFalse();
+		expect(at({ loading: true, owner: "minimax", listed: 0 })).toBeFalse();
+		// Landed with models: the pick happens in the same render, not a failure.
+		expect(at({ loading: false, owner: "minimax", listed: 2 })).toBeFalse();
+		// Landed empty: now it is final, and the reason is shown.
+		expect(at({ loading: false, owner: "minimax", listed: 0 })).toBeTrue();
+	});
+
+	test("the live list, mocked, gives the empty model its pick", async () => {
+		const { models } = await listModelsWithReason(
+			{
+				isKnownProvider: () => true,
+				getProvider: () => ({ models: [] as string[] }),
+				discoverModels: async () => ["MiniMax-live-a", "MiniMax-live-b"],
+			} as never,
+			"minimax",
+		);
+		const from = modelAfterProviderSwitch("ollama", "minimax", "qwen3:1.7b");
+		expect(from).toBe("");
+		const next = autoSelectModel({
+			current: from,
+			currentProvider: "minimax",
+			available: models,
+			explicit: null,
+		});
+		expect(next).not.toBeNull();
+		expect(models).toContain(next as string);
+	});
+});
+
+describe("model list deadline (#4683)", () => {
+	test("a list request that never answers ends as timed out, with that reason shown", async () => {
+		const never = new Promise<never>(() => {});
+		let err: unknown;
+		try {
+			await loadModelListWithin(never, 20);
+		} catch (e) {
+			err = e;
+		}
+		expect(String(err)).toContain("timed out");
+		expect(modelListFailureNotice("MiniMax", err)).toBe(
+			"No model chosen for MiniMax: its model list request timed out. Pick a model with /model.",
+		);
+	});
+
+	test("a list that answers in time resolves; its own failure passes through", async () => {
+		await expect(loadModelListWithin(Promise.resolve(["m"]), 1000)).resolves.toBeUndefined();
+		await expect(loadModelListWithin(Promise.reject(new Error("HTTP: 503")), 1000)).rejects.toThrow(
+			"HTTP: 503",
+		);
+	});
+
+	test("the default bound is finite", () => {
+		expect(MODEL_LIST_TIMEOUT_MS).toBeGreaterThan(0);
+		expect(MODEL_LIST_TIMEOUT_MS).toBeLessThanOrEqual(30_000);
 	});
 });

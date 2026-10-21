@@ -263,6 +263,15 @@ export const OLLAMA_PROBE_TIMEOUT_MS = 2500;
 export const DETECT_COMMAND_TIMEOUT_MS = 5000;
 
 /**
+ * Whether launch detection starts python3 to look for KittenTTS. On Android
+ * (Termux) every process start at boot is a cost and a risk (#4682), so only
+ * when voice is on; elsewhere as before.
+ */
+export function voiceProbesWanted(platform: string, voiceEnabled: boolean | undefined): boolean {
+	return platform !== "android" || voiceEnabled === true;
+}
+
+/**
  * Result of one Ollama probe. `found` means the server answered (models may
  * be empty). `unreachable` means it did not, and says why, so the welcome can
  * say "could not be reached" instead of implying nothing is installed.
@@ -877,7 +886,9 @@ export class OnboardingManager {
 	 * Auto-detect user environment: git config, ollama models, gh auth.
 	 * Returns detected values so onboarding can skip questions.
 	 */
-	static async autoDetect(opts: { ollama?: Promise<OllamaCheck> } = {}): Promise<AutoDetected> {
+	static async autoDetect(
+		opts: { ollama?: Promise<OllamaCheck>; voiceProbes?: boolean } = {},
+	): Promise<AutoDetected> {
 		const detected: AutoDetected = {
 			name: null,
 			email: null,
@@ -913,14 +924,17 @@ export class OnboardingManager {
 				const match = stdout.match(/Logged in to github.com account (\S+)/);
 				detected.githubUsername = match?.[1] || null;
 			}),
-			// Python3 available
-			run("python3 --version 2>/dev/null").then(() => {
-				detected.hasPython = true;
-			}),
-			// KittenTTS already installed
-			run('python3 -c "import kittentts" 2>/dev/null').then(() => {
-				detected.hasKittenTTS = true;
-			}),
+			// Python3 and KittenTTS, only when voice wants them (see voiceProbesWanted).
+			...(opts.voiceProbes === false
+				? []
+				: [
+						run("python3 --version 2>/dev/null").then(() => {
+							detected.hasPython = true;
+						}),
+						run('python3 -c "import kittentts" 2>/dev/null').then(() => {
+							detected.hasKittenTTS = true;
+						}),
+					]),
 		]);
 
 		return detected;
@@ -948,7 +962,10 @@ export class OnboardingManager {
 			)
 			.catch((): FoundServer[] => []);
 		try {
-			const detected = await OnboardingManager.autoDetect({ ollama });
+			const detected = await OnboardingManager.autoDetect({
+				ollama,
+				voiceProbes: voiceProbesWanted(this.platform(), this.user.preferences.voice?.enabled),
+			});
 			this.applyAutoDetected(detected);
 			await this.detectIntegrations(ollama);
 		} catch {

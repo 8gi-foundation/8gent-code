@@ -10,6 +10,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { safeBunFlags } from "../packages/core/bun-flags";
 import { petRequested } from "../packages/pet/opt-in";
+import { nodeExecPath, tuiProcessEnv } from "./termux-exec.js";
 
 const VERSION = "0.20.8";
 const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts
@@ -1361,11 +1362,13 @@ async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
 			env: { ...process.env, ...launcherEnv, [COMPILED_TUI_ENV]: "1" },
 		});
 	} else if (!(process.versions as Record<string, string | undefined>).bun) {
-		// Running on Node (dist/node/cli.js): the TUI is the sibling Node bundle, run by this same Node.
+		// Running on Node (dist/node/cli.js): the TUI is the sibling Node bundle, run by this same
+		// Node, by absolute path. On Termux the TUI process starts without LD_PRELOAD and puts it
+		// back for its own children (bin/termux-exec.js, apps/tui/src/lib/termux-handoff.ts, #4682).
 		proc = spawn(
-			process.execPath,
+			nodeExecPath(),
 			["--experimental-sqlite", "--disable-warning=ExperimentalWarning", tuiPath, ...args],
-			{ stdio: "inherit", env: { ...process.env, ...launcherEnv } },
+			{ stdio: "inherit", env: tuiProcessEnv({ ...process.env, ...launcherEnv }) },
 		);
 	} else {
 		// Same as the compiled path: never the user's cwd bunfig.toml or .env (#4013).

@@ -253,6 +253,7 @@ import {
 } from "./lib/format.js";
 import { formatHotkeyRows, formatHotkeys } from "./lib/keybindings.js";
 import { computeProcessSidebarWidth, tuiChatContentWidth } from "./lib/layout-breakpoints.js";
+import { probeLocalEndpoints } from "./lib/local-probe.js";
 import { narratePlan, narrateStep, narrateToolEnd, narrateToolStart } from "./lib/narrator.js";
 import { guidanceText, providerKeyStatus, unreachableLine } from "./lib/no-provider-guidance.js";
 import {
@@ -280,8 +281,10 @@ import {
 } from "./lib/provider-readiness.js";
 import {
 	buildProviderOptions,
+	emptyModelIsFinal,
 	listBelongsToProvider,
 	listModelsWithReason,
+	loadModelListWithin,
 	modelAfterProviderSwitch,
 	modelListFailureNotice,
 	registryKeyNotice,
@@ -510,15 +513,14 @@ function loadProviderSettings(): { provider: string; model: string } {
  * Priority: LM Studio → Ollama → Apfel (Apple Intelligence) → empty
  * Embedding-only providers are skipped.
  */
-function detectBestLocalProvider(): { provider: string; model: string } {
+async function detectBestLocalProvider(): Promise<{ provider: string; model: string }> {
 	bootTrace("provider-probe-start");
-	const result = detectBestLocalProviderUntraced();
+	const result = await detectBestLocalProviderUntraced();
 	bootTrace("provider-probe-end", `provider=${result.provider} model=${result.model}`);
 	return result;
 }
 
-function detectBestLocalProviderUntraced(): { provider: string; model: string } {
-	const { execFileSync } = require("node:child_process");
+async function detectBestLocalProviderUntraced(): Promise<{ provider: string; model: string }> {
 	const isAppleSilicon = process.arch === "arm64" && process.platform === "darwin";
 	// With llama-server selected (#3149) Ollama is off: its slot probes llama-server instead.
 	const llamaServer = isLlamaServerSelected();
@@ -532,35 +534,11 @@ function detectBestLocalProviderUntraced(): { provider: string; model: string } 
 		...(isAppleSilicon ? ["http://localhost:11435/v1/models"] : []),
 	];
 
-	// Probe with the Bun runtime we are already running on, not curl: minimal
-	// Linux installs ship without curl, and then every local model silently
-	// went undetected. execFileSync keeps this synchronous and shell-free.
-	// One child probes every provider at once, each fetch bounded at 2 s, so a
-	// down OLLAMA_HOST costs 2 s before the first frame, not 2 s per provider
-	// in turn (up to 6 s, 9 s at the exec bound) as when they ran one by one (#3115).
-	const PROBE =
-		"const out = await Promise.all(process.argv.slice(1).map(async (u) => { try { const r = await fetch(u, { signal: AbortSignal.timeout(2000) }); return r.ok ? await r.json() : null; } catch { return null; } })); process.stdout.write(JSON.stringify(out));";
-	let answers: any[] = [];
-	try {
-		answers = JSON.parse(
-			// Runs in the user's cwd on every start: never its bunfig.toml or .env (#4013).
-			// In a compiled 8gent, process.execPath is the 8gent binary: BUN_BE_BUN makes it
-			// evaluate -e as Bun would, instead of starting another 8gent (#4671), and as a
-			// plain Bun it needs the safe flags too. The probe starts nothing, so the variable
-			// goes no further. Bun ignores it; Node ignores it and gets no Bun flags.
-			execFileSync(
-				process.execPath,
-				[...(process.versions.bun ? safeBunFlags() : []), "-e", PROBE, ...urls],
-				{
-					timeout: 3000,
-					stdio: ["ignore", "pipe", "ignore"],
-					env: { ...process.env, BUN_BE_BUN: "1" },
-				},
-			).toString(),
-		);
-	} catch {
-		answers = [];
-	}
+	// In this process, never a second runtime (#4682): process.execPath is 8gent in a
+	// compiled binary (#4671) and node running the TUI bundle on the Node build, and a
+	// synchronous child here froze the TUI. Every server is asked at once, each bounded
+	// at 2 s, so a down OLLAMA_HOST costs 2 s before the first frame (#3115).
+	const answers: any[] = await probeLocalEndpoints(urls);
 	function chatModels(data: any, extract: (data: any) => string[]): string[] {
 		if (!data) return [];
 		try {
@@ -606,13 +584,12 @@ function detectBestLocalProviderUntraced(): { provider: string; model: string } 
 
 loadEnvFile();
 const _savedProviderSettings = loadProviderSettings();
-// If no saved provider/model, auto-detect the best available local provider
-if (!_savedProviderSettings.model) {
-	const detected = detectBestLocalProvider();
-	if (detected.model) {
-		_savedProviderSettings.provider = detected.provider;
-		_savedProviderSettings.model = detected.model;
-	}
+// If no saved provider/model, auto-detect the best available local provider. Awaited
+// here, once, so the first frame still knows it; computeCliOverrides reuses the answer.
+const _startupDetected = _savedProviderSettings.model ? null : await detectBestLocalProvider();
+if (_startupDetected?.model) {
+	_savedProviderSettings.provider = _startupDetected.provider;
+	_savedProviderSettings.model = _startupDetected.model;
 }
 
 /** Merge saved ~/.8gent/providers.json with optional CLI --provider / --model. */
@@ -634,9 +611,10 @@ function computeCliOverrides(
 	// A --provider launch with no usable model is resolved from that provider's live
 	// model list once the TUI is up (never a model saved for another provider, never
 	// the OpenRouter alias). Only a launch with no explicit provider auto-detects.
+	// An empty model with no --provider means nothing was saved, so the startup probe
+	// above already ran: its answer is reused rather than probing again.
 	if (!model && !norm) {
-		const d = detectBestLocalProvider();
-		return { provider, model: d.model };
+		return { provider, model: _startupDetected?.model ?? "" };
 	}
 	return { provider, model };
 }
@@ -1725,6 +1703,16 @@ export function App({
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [modelsLoading, setModelsLoading] = useState(false);
+	// An empty model is final only once this provider's own list has loaded; until then
+	// the agent-init effect waits for autoSelectModel instead of saying "no models" (#4682).
+	const emptyModelFinal =
+		!currentModel.trim() &&
+		emptyModelIsFinal({
+			loading: modelsLoading,
+			owner: modelsOwner,
+			provider: currentProvider,
+			listed: availableModels.length,
+		});
 
 	// Auto-save session every 30 seconds when messages change
 	const lastSaveCount = useRef(0);
@@ -1754,7 +1742,9 @@ export function App({
 		let cancelled = false;
 		const fetchModels = async () => {
 			setModelsLoading(true);
-			try {
+			// Bounded as a whole (#4683): some branches below fetch without a signal, and a
+			// request that never answers left the list loading and the reason never shown.
+			const load = async () => {
 				if (listsInstalledOllamaModels(currentProvider)) {
 					// Fetch locally installed Ollama models - filter embedding models at source.
 					// The 8gent provider is this same Ollama, so it lists what is installed
@@ -1860,9 +1850,15 @@ export function App({
 						setAvailableModels(listed);
 					}
 				}
-			} catch {
-				// Provider not reachable — show fallback
-				if (!cancelled) setAvailableModels([]);
+			};
+			try {
+				await loadModelListWithin(load());
+			} catch (error) {
+				// Provider not reachable or too slow: show fallback, and say why.
+				if (!cancelled) {
+					modelListErrorRef.current = error;
+					setAvailableModels([]);
+				}
 			}
 			if (!cancelled) {
 				setModelsOwner(currentProvider);
@@ -3336,6 +3332,14 @@ export function App({
 				// auto:free names no real model: resolve it to a live ":free" id,
 				// and stop with the reason rather than run a paid one (#3289).
 				if (!currentModel.trim()) {
+					// Right after /provider the model is empty while that provider's live list
+					// is still loading: autoSelectModel fills it, and this effect runs again.
+					// Only a loaded, empty list is a reason to stop (#4682).
+					if (!emptyModelFinal) {
+						setAgent(null);
+						setAgentReady(false);
+						return;
+					}
 					// Key is present (checked above), so say why the list is empty (#4598).
 					const _cfg = getProviderManager().getProvider(currentProvider);
 					const _empty = modelListFailureNotice(
@@ -3437,7 +3441,7 @@ export function App({
 			cancelled = true;
 			clearTimeout(retryTimer);
 		};
-	}, [currentModel, currentProvider, activeTabId, buildEventsForTab, initRetry]);
+	}, [currentModel, currentProvider, activeTabId, buildEventsForTab, initRetry, emptyModelFinal]);
 
 	// When the active tab changes, surface its existing Agent (if any) into
 	// the foreground `agent` ref so ESC / voice-chat / status reads stay

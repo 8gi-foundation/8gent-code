@@ -77,6 +77,22 @@ export function listBelongsToProvider(owner: string, current: string): boolean {
 }
 
 /**
+ * Whether a provider with no model has really run out of models: only once its own
+ * list has loaded, empty. Right after /provider the list is still on its way; when it
+ * lands with models, autoSelectModel picks one in the same render, so an empty model
+ * then is not a failure either (#4682).
+ */
+export function emptyModelIsFinal(opts: {
+	loading: boolean;
+	owner: string;
+	provider: string;
+	/** How many models the loaded list holds. */
+	listed: number;
+}): boolean {
+	return !opts.loading && listBelongsToProvider(opts.owner, opts.provider) && opts.listed === 0;
+}
+
+/**
  * The model to hold after the provider changes: the same provider keeps its
  * model, a different one starts empty so its own live list (or the user's
  * saved choice for it) decides. A model never follows a provider switch.
@@ -148,6 +164,28 @@ export function modelListFailureNotice(displayName: string, err: unknown): strin
 }
 
 /** Like listProviderModels, but keeps the error so the caller can say why. */
+/** Longest the TUI waits for a provider's model list before treating it as failed (#4683). */
+export const MODEL_LIST_TIMEOUT_MS = 15_000;
+
+/**
+ * Wait for a model-list load, or reject with a "timed out" error after `ms`, so a
+ * request that never answers cannot leave the list loading forever (#4683). The
+ * message gives modelListFailureNotice its timed-out reason.
+ */
+export async function loadModelListWithin(
+	load: Promise<unknown>,
+	ms: number = MODEL_LIST_TIMEOUT_MS,
+): Promise<void> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const deadline = new Promise<"late">((resolve) => {
+		timer = setTimeout(() => resolve("late"), ms);
+	});
+	const done = await Promise.race([load.then(() => "done" as const), deadline]).finally(() =>
+		clearTimeout(timer),
+	);
+	if (done === "late") throw new Error(`model list request timed out after ${ms / 1000} s`);
+}
+
 export async function listModelsWithReason(
 	reader: LiveModelsReader,
 	provider: string,
