@@ -47,6 +47,7 @@ import type { HedgeCandidate } from "../kernel/hedge-executor";
 import { KernelManager } from "../kernel/manager";
 import { getLSPManager } from "../lsp";
 import { extractAutoMemories, getMemoryManager } from "../memory";
+import { meBlockForTurn } from "../memory/me.js";
 import {
 	generateSessionSummary,
 	recallGlobalMemoriesSync,
@@ -436,6 +437,8 @@ export class Agent {
 	private sessionMemoryContext = "";
 	private contextSent: SentSections = {};
 	private contextNoteMessages: Array<{ role: string; content: string }> = [];
+	/** #4708: last ME block sent, so an unchanged block is not repeated each turn. */
+	private lastMeBlock: string | null = null;
 	private hookManager: HookManager;
 	private sessionId: string;
 	/** Session-scoped failover, only built with cache affinity on (#4500); off: a fresh one per turn. */
@@ -2419,6 +2422,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 		// Changed session context goes in before the user's words (#3222).
 		this.appendContextNote();
+
+		// #4708: the owned profile folder, behind EIGHT_ME=1. A context note after the
+		// cached prefix, sent only when the block changed. Off: nothing runs.
+		if (!isVerbatimScope(this.config.agentScope)) {
+			const meBlock = meBlockForTurn(textForAgent);
+			if (meBlock && meBlock !== this.lastMeBlock) {
+				this.lastMeBlock = meBlock;
+				this.messageHistory.push({ role: "user", content: harnessNote(meBlock) });
+			}
+		}
 
 		if (needsPlanningGate) {
 			this.messageHistory.push({

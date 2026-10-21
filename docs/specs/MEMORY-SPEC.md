@@ -489,3 +489,25 @@ During consolidation, memories with high `contributedToSuccess` get priority ove
 - Not building cloud sync yet (local SQLite only for v1)
 - Not building a separate memory service (stays as a package)
 - Not implementing Honcho's "dialectic" multi-model reasoning yet (v2)
+
+## ME profile folder (slice 1 of #4708)
+
+Behind `EIGHT_ME=1`, default off. `~/.8gent/me/` (override with `EIGHT_ME_DIR`) is a
+folder of plain markdown files the person owns. It is the truth; nothing is
+read from it when the flag is off.
+
+- One fact per file. Frontmatter: `name`, `description`, `metadata.type`
+  (`user`, `feedback`, `project` or `reference`), then the body.
+- `ME.md` is the index, lines like `- [Title](file.md) - hook`.
+- Each turn, the harness sends a `## ME` note after the cached prefix: the
+  `ME.md` index verbatim plus the bodies of facts whose name, description or
+  body share words with the latest message. Token overlap, no embeddings;
+  ordered by score then name; trimmed to 1500 tokens. Sent only when it changes.
+- `/me` lists facts with type and description. `/me add <text>` writes
+  `<slug>.md` (type user) and appends the index line. `/me forget <name>`
+  removes that file and its index line, nothing else.
+- `8gent me import <dir>` copies `*.md` files that have the frontmatter shape
+  into the folder, skipping names that already exist, and copies `MEMORY.md`
+  as `ME.md` when `ME.md` is absent. It prints counts.
+
+Code: `packages/memory/me.ts`. Tests: `packages/memory/me.test.ts`.

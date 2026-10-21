@@ -625,6 +625,26 @@ async function main() {
 			await keysCommand(restArgs);
 			break;
 
+		case "me": {
+			// #4708: `8gent me import <dir>` copies a memory folder into ~/.8gent/me/.
+			const { importMe, meDir } = await import("../packages/memory/me.ts");
+			if (restArgs[0] !== "import" || !restArgs[1]) {
+				console.error("Usage: 8gent me import <dir>");
+				process.exitCode = 2;
+				break;
+			}
+			try {
+				const r = importMe(restArgs[1], meDir());
+				console.log(
+					`Imported ${r.imported}, skipped ${r.skipped} existing, ignored ${r.ignored} without frontmatter. Index: ${r.index}. Folder: ${meDir()}`,
+				);
+			} catch (e) {
+				console.error(`8gent me import failed: ${e instanceof Error ? e.message : String(e)}`);
+				process.exitCode = 1;
+			}
+			break;
+		}
+
 		case "install":
 			await installCommand(restArgs);
 			break;
