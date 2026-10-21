@@ -12,7 +12,7 @@ import { safeBunFlags } from "../packages/core/bun-flags";
 import { petRequested } from "../packages/pet/opt-in";
 import { nodeExecPath, tuiProcessEnv } from "./termux-exec.js";
 
-const VERSION = "0.20.8";
+const VERSION = "0.20.9";
 const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts
 
 // Two different "here" directories matter, and conflating them is what broke
