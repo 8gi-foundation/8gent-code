@@ -121,13 +121,10 @@
     "bmad-method": "^6.1.0",
     "cheerio": "^1.2.0",
     "glob": "^13.0.6",
-    "ink": "^6.8.0",
     "ink-big-text": "^2.0.0",
     "ink-gradient": "^4.0.0",
     "ink-select-input": "^6.2.0",
     "ink-spinner": "^5.0.0",
-    "jsdom": "^28.1.0",
-    "mermaid": "^11.16.1",
     "next": "^16.1.6",
     "next-themes": "^0.4.6",
     "pdf-parse": "^2.4.5",
@@ -138,6 +135,11 @@
     "typescript": "^5.0.0",
     "yaml": "^2.9.1",
     "zod": "^4.3.6"
+  },
+  "dependencies": {
+    "ink": "^6.8.0",
+    "jsdom": "^28.1.0",
+    "mermaid": "^11.16.1"
   },
   "optionalDependencies": {
     "sharp": "^0.34.5",

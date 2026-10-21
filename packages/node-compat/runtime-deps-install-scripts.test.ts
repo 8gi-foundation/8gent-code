@@ -79,3 +79,51 @@ test("the walker flags an install script and skips optional dependencies", () =>
 		"root > ok-parent > bad-transitive (install)",
 	]);
 });
+
+/**
+ * A package the bundles reach by FILE PATH (not by import) is not inlined, so a production
+ * install must still contain it. jsdom's sync-XHR worker and ink's instances.js were found
+ * this way after they were moved to devDependencies. Needs `bun run build`; skips otherwise.
+ */
+const bundles = ["cli.js", "tui.js", "node/cli.js", "node/tui.js"]
+	.map((f) => join(root, "dist", f))
+	.filter((f) => existsSync(f));
+
+function pathLookupTargets(src: string): Set<string> {
+	const out = new Set<string>();
+	const re = /\.resolve\(\s*\(?[^)\n]*?node_modules\/((?:@[^/"']+\/)?[^/"']+)\//g;
+	for (const m of src.matchAll(re)) out.add(m[1]);
+	return out;
+}
+
+test.skipIf(bundles.length === 0)(
+	"bundle path lookups into node_modules are runtime dependencies",
+	() => {
+		const rootPkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as Pkg & {
+			optionalDependencies?: Record<string, string>;
+		};
+		const runtime = new Set([
+			...Object.keys(rootPkg.dependencies ?? {}),
+			...Object.keys(rootPkg.optionalDependencies ?? {}),
+		]);
+		const missing: string[] = [];
+		for (const b of bundles)
+			for (const t of pathLookupTargets(readFileSync(b, "utf8")))
+				if (!runtime.has(t)) missing.push(`${b.replace(`${root}/`, "")} resolves ${t} by path`);
+		expect(missing).toEqual([]);
+		// the lookup is really detected (jsdom's worker), so an empty result is not a blind regex
+		expect(pathLookupTargets(readFileSync(bundles[0], "utf8")).has("jsdom")).toBe(true);
+	},
+);
+
+test("source-level resolve of a package file names a runtime dependency", () => {
+	const rootPkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as Pkg;
+	const deps = rootPkg.dependencies ?? {};
+	for (const [file, pkg] of [
+		["packages/daemon/live-anatomy.ts", "mermaid"],
+		["apps/tui/src/lib/mouse-wiring.ts", "ink"],
+	] as const) {
+		expect(readFileSync(join(root, file), "utf8")).toContain(pkg);
+		expect(deps[pkg]).toBeDefined();
+	}
+});
