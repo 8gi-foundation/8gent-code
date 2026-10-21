@@ -167,7 +167,6 @@ const SETUP_PROVIDER_NAMES: Record<string, string> = {
 	apfel: "apfel (Apple Foundation Model)",
 };
 import { findPlanFile } from "../../../packages/ai/plan-file.js";
-import { probeLocalEndpoints } from "./lib/local-probe.js";
 import { safeBunFlags } from "../../../packages/core/bun-flags.js";
 import { runBugCommand } from "../../../packages/eight/bug-command.js";
 import {
@@ -255,6 +254,7 @@ import {
 } from "./lib/format.js";
 import { formatHotkeyRows, formatHotkeys } from "./lib/keybindings.js";
 import { computeProcessSidebarWidth, tuiChatContentWidth } from "./lib/layout-breakpoints.js";
+import { probeLocalEndpoints } from "./lib/local-probe.js";
 import { narratePlan, narrateStep, narrateToolEnd, narrateToolStart } from "./lib/narrator.js";
 import {
 	COMPACT_BELOW_ROWS,
