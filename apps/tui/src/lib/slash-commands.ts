@@ -74,6 +74,7 @@ export type SlashCommand =
 	| "projects"
 	| "terminal"
 	| "copy"
+	| "bug"
 	| "tree"
 	| "import";
 
@@ -528,6 +529,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Copy the last answer to the clipboard (works over SSH)",
 		usage: "/copy",
+	},
+	{
+		name: "bug",
+		aliases: [],
+		description:
+			"Takes a description: saves one secret-free bug report folder on this machine to share with the team",
+		usage: "/bug <description>",
 	},
 ];
 

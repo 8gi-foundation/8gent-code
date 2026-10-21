@@ -6,12 +6,13 @@
  * with secrets redacted by secret-scanner's scrub and the home directory
  * shortened to "~". Nothing is uploaded or sent: the person looks at the
  * folder and shares it themselves. A folder, not a zip: no zip library is a
- * dependency of this repo. Wiring (/bug) is another lane.
+ * dependency of this repo. Wired to /bug (TUI) and `8gent bug` (CLI) by bug-command.ts.
  */
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolveHome } from "../core/home.js";
 import { scrub } from "./secret-scanner.js";
 import { listSessions } from "./session-store.js";
@@ -56,7 +57,7 @@ function readTail(file: string, maxBytes: number): string {
 }
 
 function packageVersion(): string {
-	let dir = import.meta.dir;
+	let dir = path.dirname(fileURLToPath(import.meta.url));
 	for (let i = 0; i < 6; i++) {
 		try {
 			const v = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")).version;
@@ -91,8 +92,11 @@ export function createBugReport(opts: BugReportOptions = {}): string {
 	if (!sessionFile) {
 		try {
 			const dataDir = env.EIGHT_DATA_DIR;
-			const sessionsDir = opts.sessionsDir ?? (dataDir ? path.join(dataDir, "sessions") : path.join(home, ".8gent", "sessions"));
-			sessionFile = listSessions({ cwd: opts.cwd ?? process.cwd(), limit: 1, sessionsDir })[0]?.file;
+			const sessionsDir =
+				opts.sessionsDir ??
+				(dataDir ? path.join(dataDir, "sessions") : path.join(home, ".8gent", "sessions"));
+			sessionFile = listSessions({ cwd: opts.cwd ?? process.cwd(), limit: 1, sessionsDir })[0]
+				?.file;
 		} catch {}
 	}
 	if (sessionFile) {
@@ -101,13 +105,20 @@ export function createBugReport(opts: BugReportOptions = {}): string {
 		} catch {}
 	}
 
-	const logFiles = opts.logFiles ?? ["tui.log", "debug.log", "daemon.log"].map((f) => path.join(home, ".8gent", f));
+	const logFiles =
+		opts.logFiles ??
+		["tui.log", "debug.log", "daemon.log"].map((f) => path.join(home, ".8gent", f));
 	const n = opts.logLines ?? 200;
 	const logParts: string[] = [];
 	for (const f of logFiles) {
 		try {
-			const lines = readTail(f, 256 * 1024).split(/\r?\n/).filter(Boolean).slice(-n);
-			logParts.push(`=== ${path.basename(f)} (last ${lines.length} lines) ===\n${lines.join("\n")}`);
+			const lines = readTail(f, 256 * 1024)
+				.split(/\r?\n/)
+				.filter(Boolean)
+				.slice(-n);
+			logParts.push(
+				`=== ${path.basename(f)} (last ${lines.length} lines) ===\n${lines.join("\n")}`,
+			);
 		} catch {}
 	}
 	if (logParts.length) put("log-tail.txt", logParts.join("\n\n") + "\n");
@@ -132,7 +143,8 @@ export function createBugReport(opts: BugReportOptions = {}): string {
 				files: files.filter((f) => f !== "report.json"),
 				redactedSecrets: redacted,
 				uploaded: false,
-				before_sharing: "Read every file in this folder before you share it. Secrets are redacted on a best-effort basis, so check for anything private.",
+				before_sharing:
+					"Read every file in this folder before you share it. Secrets are redacted on a best-effort basis, so check for anything private.",
 			},
 			null,
 			2,
