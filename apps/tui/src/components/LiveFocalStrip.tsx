@@ -19,15 +19,12 @@
  *   - the one-line default display ("Going. Sub-goal x of y...")
  *   - Ctrl+G chord to expand to the 3-line BRAND.md form
  *   - ADHD-mode override to stay on the one-liner
- *   - terminal-state KittenTTS fire-once via ~/.claude/bin/kittentts-say
+ *   - terminal-state speech fire-once through packages/voice, only when the audio lane allows it
  *
  * Splitting the wrapper from the pure strip keeps the existing unit
  * tests deterministic and makes the goal pathway opt-in per surface.
  */
 
-import { spawn } from "node:child_process";
-import { homedir } from "node:os";
-import { join as pathJoin } from "node:path";
 import { Box, Text, useInput } from "ink";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -37,6 +34,7 @@ import {
 	VERDICT_STUCK,
 	assembleVerdict,
 } from "../../../../packages/eight/go/index.js";
+import { speakIfAllowed } from "../../../../packages/voice/audio-gate.js";
 import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
 import type { GoalClient } from "../lib/goal-client.js";
 import { askedNote } from "../lib/model-truth.js";
@@ -404,9 +402,7 @@ interface LiveFocalStripWithGoalProps extends LiveFocalStripProps {
 	goalClient?: GoalClient | null;
 	/** ADHD-mode override: stay on the one-liner regardless of expansion. */
 	adhdMode?: boolean;
-	/** Path override for KittenTTS binary. Useful in tests. */
-	kittenTtsPath?: string;
-	/** Test seam: skip child_process spawn (KittenTTS) even on terminal events. */
+	/** Test seam: skip speech even on terminal events. */
 	disableTts?: boolean;
 	/** Test seam: inject initial goal state without driving event listeners. */
 	initialGoalState?: Partial<GoalStripState>;
@@ -422,7 +418,6 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 	const {
 		goalClient = null,
 		adhdMode = false,
-		kittenTtsPath,
 		disableTts = false,
 		initialGoalState,
 		...stripProps
@@ -534,21 +529,20 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 				}
 				setGoalState((prev) => ({ ...prev, terminal, verdictLine }));
 
-				// Terminal-state KittenTTS: fire exactly once per run. NEVER
-				// ElevenLabs (per project hard rule). KittenTTS is local,
-				// free, deterministic.
+				// Terminal-state speech: fire exactly once per run, through the
+				// voice package, only when the audio lane allows it.
 				if (disableTts) return;
 				const runId = goalState.runId ?? "current";
 				if (spokenForRunRef.current === runId) return;
 				spokenForRunRef.current = runId;
-				speakWithKittenTts(verdictLine, kittenTtsPath);
+				void speakVerdict(verdictLine);
 			},
 		});
 		return unsub;
 		// goalClient identity changes are the only meaningful resubscribe
 		// trigger; the listener closures intentionally read mutable refs.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [goalClient, adhdMode, disableTts, kittenTtsPath]);
+	}, [goalClient, adhdMode, disableTts]);
 
 	const goalLine = useMemo(() => buildGoalLine(goalState), [goalState]);
 	const showExpanded = expanded && !adhdMode && goalState.runId !== null;
@@ -582,25 +576,12 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 }
 
 /**
- * Fire-and-forget KittenTTS playback. Spawned detached so we never
- * block the TUI render. Failures are swallowed - terminal-state
- * verdicts are visual-primary, voice is the accessibility companion.
- *
- * Hard rule (feedback_kittentts_only 2026-04-20): KittenTTS only,
- * never ElevenLabs. Path is overridable for tests but defaults to the
- * canonical user-bin location.
+ * Fire-and-forget speech for a terminal verdict. Goes through packages/voice
+ * (KittenTTS via python3, else macOS say), gated by the audio lane. A machine
+ * with no engine, or with audio off, stays silent and the TUI stays up (#4721).
  */
-export function speakWithKittenTts(line: string, path?: string): void {
-	try {
-		const bin = path ?? pathJoin(homedir(), ".claude", "bin", "kittentts-say");
-		const child = spawn(bin, [line], {
-			detached: true,
-			stdio: "ignore",
-		});
-		child.unref();
-	} catch {
-		// Best-effort. Voice is the accessibility companion, not the path.
-	}
+export function speakVerdict(line: string): Promise<boolean> {
+	return speakIfAllowed(line);
 }
 
 export type { LiveFocalStripWithGoalProps };

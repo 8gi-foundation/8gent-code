@@ -67,6 +67,8 @@ interface CommandInputProps {
 	 *  this component (daemon RPC dispatched directly) instead of bubbling
 	 *  up to onSlashCommand. Keeps the goal protocol localized to one file. */
 	goalClient?: GoalClient | null;
+	/** Same readiness answer the chat uses. /goal start refuses before turn 1 unless it says ready. */
+	goalReadiness?: () => GoalReadiness | null;
 	/** Current session id, used for goal.start. Defaults to "tui" if absent. */
 	sessionId?: string;
 	/** Hook for surfacing system-line messages without coupling to app.tsx. */
@@ -155,6 +157,7 @@ export function CommandInput({
 	recentCommands = EMPTY_RECENT,
 	onSlashCommand,
 	goalClient = null,
+	goalReadiness,
 	sessionId = "tui",
 	onSystemMessage,
 	injectedText = null,
@@ -398,6 +401,7 @@ export function CommandInput({
 						goalClient,
 						sessionId,
 						onSystemMessage,
+						goalReadiness?.() ?? null,
 					);
 					setValue("");
 					return;
@@ -427,6 +431,7 @@ export function CommandInput({
 			slashRegistryEntries,
 			slashByToken,
 			goalClient,
+			goalReadiness,
 			sessionId,
 			onSystemMessage,
 		],
@@ -597,12 +602,18 @@ function emitSystem(onSystemMessage: ((line: string) => void) | undefined, line:
 	}
 }
 
+export interface GoalReadiness {
+	state: string;
+	reason?: string | null;
+}
+
 export function handleGoCommand(
 	commandName: "goal" | "subgoal",
 	args: readonly string[],
 	client: GoalClient,
 	sessionId: string,
 	onSystemMessage?: (line: string) => void,
+	readiness: GoalReadiness | null = null,
 ): void {
 	if (commandName === "subgoal") {
 		const text = args.join(" ").trim();
@@ -630,6 +641,15 @@ export function handleGoCommand(
 			return;
 		}
 		case "start": {
+			// Before turn 1: the chat's own readiness answer. No model means no
+			// run, and never a "Goal met" (#4721).
+			if (readiness && readiness.state !== "ready") {
+				emitSystem(
+					onSystemMessage,
+					`/goal: not started. ${readiness.reason || "No model is ready."}`,
+				);
+				return;
+			}
 			try {
 				client.start(sessionId, parsed.goal);
 				// Acknowledgement copy is intentionally minimal. The verdict

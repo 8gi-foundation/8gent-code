@@ -328,13 +328,18 @@ export class ADHDAudio {
 		const loop = () => {
 			if (!this._playingFile) return;
 
-			this.playerProcess = spawn(["afplay", filePath], {
-				stdout: "ignore",
-				stderr: "ignore",
-				onExit: () => {
-					if (this._playingFile) loop();
-				},
-			});
+			try {
+				this.playerProcess = spawn(["afplay", filePath], {
+					stdout: "ignore",
+					stderr: "ignore",
+					onExit: () => {
+						if (this._playingFile) loop();
+					},
+				});
+			} catch {
+				// No afplay on this machine (Termux, Linux): stop quietly (#4721).
+				this._playingFile = null;
+			}
 		};
 
 		loop();

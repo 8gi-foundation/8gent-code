@@ -23,7 +23,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 
-import { handleGoCommand } from "../command-input.js";
+import { assertNoBannedTokens } from "../../../../../packages/eight/go/index.js";
 import {
 	GO_HELP_LINES,
 	GoalClient,
@@ -31,12 +31,12 @@ import {
 	parseGoCommand,
 } from "../../lib/goal-client.js";
 import {
+	type GoalStripState,
 	LiveFocalStripWithGoal,
 	buildGoalLine,
 	formatElapsed,
-	type GoalStripState,
 } from "../LiveFocalStrip.js";
-import { assertNoBannedTokens } from "../../../../../packages/eight/go/index.js";
+import { handleGoCommand } from "../command-input.js";
 
 // ----- parseGoCommand --------------------------------------------------------
 
@@ -89,9 +89,7 @@ describe("handleGoCommand: /goal", () => {
 	test("/goal <goal> sends goal.start with the right shape", () => {
 		const { client, transport } = mkClient();
 		const sys: string[] = [];
-		handleGoCommand("goal", ["wire", "the", "tui"], client, "sess_1", (l) =>
-			sys.push(l),
-		);
+		handleGoCommand("goal", ["wire", "the", "tui"], client, "sess_1", (l) => sys.push(l));
 		expect(transport.sent).toHaveLength(1);
 		expect(transport.sent[0]).toEqual({
 			type: "goal.start",
@@ -99,6 +97,36 @@ describe("handleGoCommand: /goal", () => {
 			goal: "wire the tui",
 		});
 		expect(sys.join("\n")).toContain("Going.");
+	});
+
+	test("/goal with no model ready sends nothing and says why (#4721)", () => {
+		const { client, transport } = mkClient();
+		const sys: string[] = [];
+		handleGoCommand("goal", ["write", "notes"], client, "sess_1", (l) => sys.push(l), {
+			state: "none",
+			reason: "8gent needs Ollama, which is not answering.",
+		});
+		expect(transport.sent).toHaveLength(0);
+		const text = sys.join("\n");
+		expect(text).toContain("not started");
+		expect(text).toContain("not answering");
+		expect(text).not.toContain("Goal met");
+		expect(text).not.toContain("Going.");
+	});
+
+	test("/goal while still checking for a model does not start either", () => {
+		const { client, transport } = mkClient();
+		handleGoCommand("goal", ["x"], client, "s", () => {}, {
+			state: "checking",
+			reason: "looking for a model",
+		});
+		expect(transport.sent).toHaveLength(0);
+	});
+
+	test("/goal with a ready model starts as before", () => {
+		const { client, transport } = mkClient();
+		handleGoCommand("goal", ["x"], client, "s", () => {}, { state: "ready", reason: "" });
+		expect(transport.sent).toHaveLength(1);
 	});
 
 	test("/goal ? emits help with all subcommands", () => {
@@ -248,8 +276,7 @@ describe("goal line copy lint", () => {
 				subgoal: null,
 				elapsedMs: 0,
 				turns: 0,
-				verdictLine:
-					"Stuck. Needs you - last attempt failed three times the same way.",
+				verdictLine: "Stuck. Needs you - last attempt failed three times the same way.",
 			},
 		];
 

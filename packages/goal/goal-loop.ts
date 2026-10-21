@@ -147,7 +147,12 @@ export class GoalLoop {
 				}
 
 				// 2. Budget check BEFORE the executor is invoked.
-				const tripped = shouldStop(this.run.counters, this.run.budget, this.run.startedAt, this.now());
+				const tripped = shouldStop(
+					this.run.counters,
+					this.run.budget,
+					this.run.startedAt,
+					this.now(),
+				);
 				if (tripped) {
 					await this.emit("budget.tripped", { reason: tripped });
 					await this.terminate("stopped", tripped, this.run.finalVerdict);
@@ -231,6 +236,17 @@ export class GoalLoop {
 
 				// 6. Branch on verdict.
 				if (verdict.decision === "satisfied") {
+					// "Goal met" needs at least one completed model turn with a tool
+					// result or a reply. A judge cannot satisfy a goal nothing ran (#4721).
+					if (!this.run.history.some((h) => producedWork(h.executor))) {
+						await this.terminate(
+							"failed",
+							"executor_error",
+							null,
+							"no model turn completed: no tool result and no reply",
+						);
+						break;
+					}
 					await this.terminate("completed", "judge_satisfied", verdict);
 					break;
 				}
@@ -314,6 +330,13 @@ export class GoalLoop {
 			finalVerdict: finalVerdict ?? undefined,
 		});
 	}
+}
+
+/** A turn did real work when it ran a tool or the model answered. An "[Error]" line is not an answer. */
+export function producedWork(out: { summary: string; toolResults?: number }): boolean {
+	if ((out.toolResults ?? 0) > 0) return true;
+	const text = (out.summary ?? "").trim();
+	return text.length > 0 && !/^\[Error\]/.test(text);
 }
 
 function errMsg(err: unknown): string {

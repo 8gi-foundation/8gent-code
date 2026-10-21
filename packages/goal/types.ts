@@ -23,13 +23,7 @@
  *                      \-> failed              (executor threw)
  *                      \-> stopped             (budget exhausted | abort | judge dissent N times)
  */
-export type RunStatus =
-	| "pending"
-	| "running"
-	| "judging"
-	| "completed"
-	| "stopped"
-	| "failed";
+export type RunStatus = "pending" | "running" | "judging" | "completed" | "stopped" | "failed";
 
 /** Reason a run terminated. Surfaces in the receipt for postmortem. */
 export type StopReason =
@@ -141,6 +135,8 @@ export interface ExecutorTurnOutput {
 	tokensOut: number;
 	/** Optional richer artifact reference (file paths, diff handle, etc.). */
 	artifactRef?: string;
+	/** Tool calls that returned a result this turn. A turn with a tool result or a reply did real work. */
+	toolResults?: number;
 	/** Files the executor touched this turn (counts toward budget). */
 	filesChanged?: number;
 	/** Bytes sent over the network this turn (counts toward budget). */

@@ -150,7 +150,9 @@ describe("GoalLoop happy path", () => {
 			sessionId: "s1",
 			goal: "make tests pass",
 			executor: mockExecutor(),
-			judge: mockJudge({ verdicts: [{ decision: "continue" }, { decision: "satisfied", confidence: 0.9 }] }),
+			judge: mockJudge({
+				verdicts: [{ decision: "continue" }, { decision: "satisfied", confidence: 0.9 }],
+			}),
 			sink,
 			budget: { turns: 10 },
 		});
@@ -394,7 +396,10 @@ describe("GoalLoop receipt shape", () => {
 			sessionId: "sess-99",
 			goal: "do the thing",
 			executor: mockExecutor({ model: "executor-A", tokensPerTurn: 50 }),
-			judge: mockJudge({ model: "judge-B", verdicts: [{ decision: "satisfied", confidence: 0.9 }] }),
+			judge: mockJudge({
+				model: "judge-B",
+				verdicts: [{ decision: "satisfied", confidence: 0.9 }],
+			}),
 			sink,
 			budget: { turns: 3 },
 		});
@@ -405,5 +410,59 @@ describe("GoalLoop receipt shape", () => {
 		expect(receipt.totalTokens).toBe(100); // tokensIn 50 + tokensOut 50, 1 turn
 		expect(receipt.endedAt).toBeGreaterThanOrEqual(originalNow);
 		expect(receipt.durationMs).toBeGreaterThanOrEqual(0);
+	});
+});
+
+describe("Goal met needs a completed model turn (#4721)", () => {
+	const emptyExecutor = (): ExecutorHandle => ({
+		model: "executor-model",
+		async turn(): Promise<ExecutorTurnOutput> {
+			return { summary: "", tokensIn: 0, tokensOut: 0 };
+		},
+		abort() {},
+	});
+
+	it("a judge cannot satisfy a goal when no turn produced a reply or tool result", async () => {
+		const sink = new MemorySink();
+		const loop = new GoalLoop({
+			runId: "r",
+			sessionId: "s",
+			goal: "g",
+			executor: emptyExecutor(),
+			judge: mockJudge({ verdicts: [{ decision: "satisfied", confidence: 0.99 }] }),
+			sink,
+		});
+		const receipt = await loop.run_();
+		expect(receipt.status).toBe("failed");
+		expect(sink.kinds()).toContain("run.failed");
+		expect(sink.kinds()).not.toContain("run.completed");
+	});
+
+	it("an [Error] reply is not an answer", async () => {
+		const ex = emptyExecutor();
+		ex.turn = async () => ({ summary: "[Error] fetch failed", tokensIn: 0, tokensOut: 0 });
+		const loop = new GoalLoop({
+			runId: "r",
+			sessionId: "s",
+			goal: "g",
+			executor: ex,
+			judge: mockJudge({ verdicts: [{ decision: "satisfied", confidence: 0.99 }] }),
+			sink: new MemorySink(),
+		});
+		expect((await loop.run_()).status).toBe("failed");
+	});
+
+	it("a tool result alone counts", async () => {
+		const ex = emptyExecutor();
+		ex.turn = async () => ({ summary: "", tokensIn: 1, tokensOut: 1, toolResults: 1 });
+		const loop = new GoalLoop({
+			runId: "r",
+			sessionId: "s",
+			goal: "g",
+			executor: ex,
+			judge: mockJudge({ verdicts: [{ decision: "satisfied", confidence: 0.99 }] }),
+			sink: new MemorySink(),
+		});
+		expect((await loop.run_()).status).toBe("completed");
 	});
 });

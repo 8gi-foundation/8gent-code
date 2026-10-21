@@ -170,6 +170,7 @@ const SETUP_PROVIDER_NAMES: Record<string, string> = {
 import { findPlanFile } from "../../../packages/ai/plan-file.js";
 import { safeBunFlags } from "../../../packages/core/bun-flags.js";
 import { runBugCommand } from "../../../packages/eight/bug-command.js";
+import { safeSpawn } from "../../../packages/eight/safe-spawn.js";
 import {
 	dotenvKeyIsAllowed,
 	onRunCommandUnsandboxed,
@@ -2057,11 +2058,11 @@ export function App({
 		// Chime: play macOS Glass sound as a non-intrusive "done" ping
 		if (soundEnabled) {
 			try {
-				const { spawn: sp } = require("node:child_process");
-				sp("afplay", ["/System/Library/Sounds/Glass.aiff"], {
+				const played = safeSpawn("afplay", ["/System/Library/Sounds/Glass.aiff"], {
 					stdio: "ignore",
 					detached: true,
-				}).unref();
+				});
+				if (played.ok) played.child.unref();
 			} catch {}
 		}
 	}, [isProcessing, soundEnabled]);
@@ -5060,13 +5061,18 @@ export function App({
 													// Play via afplay loop
 													const { spawn } = await import("bun");
 													const loopPlay = () => {
-														const proc = spawn(["afplay", cachePath], {
-															stdout: "ignore",
-															stderr: "ignore",
-															onExit: () => {
-																if (musicAudio.isPlaying) loopPlay();
-															},
-														});
+														// A machine with no afplay: stop looping, stay up (#4721).
+														try {
+															spawn(["afplay", cachePath], {
+																stdout: "ignore",
+																stderr: "ignore",
+																onExit: () => {
+																	if (musicAudio.isPlaying) loopPlay();
+																},
+															});
+														} catch {
+															// no player here; the track stays cached
+														}
 													};
 													loopPlay();
 													return;
@@ -7810,6 +7816,7 @@ export function App({
 								display={paletteOpen || PICKER_VIEWS.has(viewMode) || tabBody ? "none" : "flex"}
 							>
 								<CommandInput
+									goalReadiness={() => readinessRef.current}
 									cwd={projectCwd}
 									onSlashMenuChange={setSlashMenuOpen}
 									onSubmit={handleSubmit}
