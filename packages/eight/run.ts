@@ -601,7 +601,14 @@ export async function noModelNotice(provider: string, error?: unknown): Promise<
 	} catch {
 		/* unknown provider: fall through to the list wording */
 	}
-	return noModelMessage({ displayName, keyEnv, key, err: error, pickHint: "Pass --model <name>." });
+	return noModelMessage({
+		displayName,
+		provider,
+		keyEnv,
+		key,
+		err: error,
+		pickHint: "Pass --model <name>.",
+	});
 }
 
 /** Probe localhost:11434 once to see if ollama is actually running. */

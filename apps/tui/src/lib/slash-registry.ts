@@ -111,6 +111,22 @@ export function mergeSlashEntries(
 }
 
 /**
+ * The collision line as the first screen may show it: developer noise, so only
+ * with DEBUG=1 (the same switch packages/eight uses). /help still lists them.
+ */
+export function slashCollisionNotice(
+	collisions: SlashCollision[],
+	env: Record<string, string | undefined> = process.env,
+): string | null {
+	return env.DEBUG === "1" ? formatSlashCollisionLine(collisions) : null;
+}
+
+/** True for a bare "/" (or "/" plus only whitespace): the user wants the command list. */
+export function isBareSlash(input: string): boolean {
+	return /^\s*\/\s*$/.test(input);
+}
+
+/**
  * One line naming every skill trigger that lost to a builtin, or null when
  * there is nothing to say. Shown once at startup so the user learns why
  * `/voice` runs the builtin and not their skill.
@@ -285,6 +301,7 @@ export async function unknownSlashAnswer(
 ): Promise<string | null> {
 	const trimmed = input.trim();
 	if (!trimmed.startsWith("/")) return null;
+	if (isBareSlash(trimmed)) return null;
 	const name = trimmed.split(/\s+/)[0];
 	if (resolveSlashInput(trimmed, registry)) return null;
 	if (resolveSlashInput(trimmed, mergeSlashEntries(buildBuiltInEntries(), [], []))) return null;

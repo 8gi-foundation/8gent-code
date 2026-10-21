@@ -10,6 +10,7 @@ import {
 	SETUP_WELCOME_ID,
 	SETUP_WELCOME_PROMPT,
 	answerFromInput,
+	isSetupAnswer,
 	placeholderFor,
 	providerCheckLine,
 	questionForChat,
@@ -227,5 +228,17 @@ describe("defaults are kept, and said (#4219)", () => {
 		expect(line).not.toMatch(/\d+%/);
 		expect(line).not.toContain("understand you");
 		expect(line).not.toContain("\u2014");
+	});
+});
+
+describe("isSetupAnswer", () => {
+	test("at a secret step a line that begins with / is still the answer", () => {
+		expect(isSetupAnswer({ kind: "secret" }, "/abc0123456789abcdef")).toBe(true);
+		expect(isSetupAnswer({ kind: "secret" }, "  /help")).toBe(true);
+	});
+	test("at any other step a / line is a command, other lines are answers", () => {
+		expect(isSetupAnswer({ kind: "text" }, "/help")).toBe(false);
+		expect(isSetupAnswer(null, "/help")).toBe(false);
+		expect(isSetupAnswer({ kind: "text" }, "Ada")).toBe(true);
 	});
 });

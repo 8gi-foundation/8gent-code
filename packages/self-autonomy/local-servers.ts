@@ -210,7 +210,7 @@ export function serverModelsLine(server: FoundServer): string {
 
 /** The one step that gives OpenRouter a key: the keys file, then a fresh launch. */
 const OPENROUTER_KEY_STEP =
-	"run `8gent keys`, add OPENROUTER_API_KEY=your-key from openrouter.ai, save, then run 8gent again";
+	"run `8gent keys set openrouter` and paste your key from openrouter.ai (or `8gent keys` to edit the file), then run 8gent again";
 
 /**
  * Plain next step when nothing is running: one install link for this OS.
@@ -254,6 +254,11 @@ const OPENROUTER_CHOICE = {
 	// Short enough for one row beside the label at 120 columns (#4220).
 	description: `Needs a free openrouter.ai key in ${KEYS_FILE_DISPLAY}`,
 };
+const MINIMAX_CHOICE = {
+	label: "MiniMax",
+	value: "minimax",
+	description: `Needs a MiniMax key in ${KEYS_FILE_DISPLAY}`,
+};
 const LATER_CHOICE = {
 	label: "Decide later",
 	value: "later",
@@ -280,26 +285,53 @@ export function providerChoiceScreen(
 		return {
 			question: noServerGuidance(platform, openRouterKey),
 			choices: openRouterKey
-				? [OPENROUTER_CHOICE, LATER_CHOICE]
-				: [LATER_CHOICE, OPENROUTER_CHOICE],
+				? [OPENROUTER_CHOICE, MINIMAX_CHOICE, LATER_CHOICE]
+				: [LATER_CHOICE, OPENROUTER_CHOICE, MINIMAX_CHOICE],
 		};
 	}
 	const question =
 		found.length === 1
 			? `I found ${found[0].label} running on this machine. Shall I use it?`
 			: `I found ${found.length} local model servers on this machine. Which should I use?`;
-	return { question, choices: [...local, OPENROUTER_CHOICE, LATER_CHOICE] };
+	return { question, choices: [...local, OPENROUTER_CHOICE, MINIMAX_CHOICE, LATER_CHOICE] };
 }
 
 export interface ProviderChoice {
-	provider: LocalServerId | "openrouter";
+	provider: LocalServerId | HostedKeyProvider;
+	/** "" for a hosted provider whose model comes from its live list after the key is saved. */
 	model: string;
+}
+
+export type HostedKeyProvider = "openrouter" | "minimax";
+
+/** The hosted providers the first-run screen offers by name, and the key each one reads. */
+export const HOSTED_KEY_PROVIDERS: Record<
+	HostedKeyProvider,
+	{ label: string; env: string; keyUrl: string }
+> = {
+	openrouter: {
+		label: "OpenRouter",
+		env: "OPENROUTER_API_KEY",
+		keyUrl: "https://openrouter.ai/keys",
+	},
+	minimax: { label: "MiniMax", env: "MINIMAX_API_KEY", keyUrl: "https://www.minimax.io" },
+};
+
+/** The hosted provider a choice needs a key for, or null when it has one (or needs none). */
+export function hostedKeyNeeded(
+	provider: string,
+	env: Env = process.env,
+): (typeof HOSTED_KEY_PROVIDERS)[HostedKeyProvider] | null {
+	const h = HOSTED_KEY_PROVIDERS[provider as HostedKeyProvider];
+	if (!h) return null;
+	return (env[h.env] ?? "").trim() ? null : h;
 }
 
 /** Map an answer on the choice screen to what gets saved. Null for "later" or unknown. */
 export function resolveProviderChoice(answer: string, found: FoundServer[]): ProviderChoice | null {
 	const value = answer.trim().toLowerCase();
 	if (value === "openrouter") return { provider: "openrouter", model: "auto:free" };
+	if (value === "minimax") return { provider: "minimax", model: "" };
 	const server = found.find((s) => s.id === value);
 	return server ? { provider: server.id, model: preferredModel(server) } : null;
 }
@@ -316,5 +348,5 @@ export function saveProviderChoice(
 ): void {
 	if (choice.provider === "llama-server") manager.enableProvider("llama-server");
 	manager.setActiveProvider(choice.provider);
-	manager.setActiveModel(choice.model);
+	if (choice.model) manager.setActiveModel(choice.model);
 }

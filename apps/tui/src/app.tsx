@@ -140,6 +140,7 @@ import {
 	SETUP_SKIP_HINT,
 	SETUP_WELCOME_ID,
 	answerFromInput,
+	isSetupAnswer,
 	placeholderFor,
 	providerCheckLine,
 	questionForChat,
@@ -2181,6 +2182,8 @@ export function App({
 	// on empty Enter. The actual input still goes through CommandInput.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [onboardingAgentDefault, setOnboardingAgentDefault] = useState<string | null>(null);
+	// kind === "secret": the input shows nothing of what is typed (a pasted key).
+	const [onboardingSecret, setOnboardingSecret] = useState(false);
 	// Live total step count - set on first onboarding render so the
 	// "Step X of N" indicator reflects whatever the question list is.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -2196,13 +2199,14 @@ export function App({
 	const applyOnboardingQuestion = useCallback(
 		(q: {
 			question: string;
-			kind?: "text" | "select" | "providerCheck" | "agentName";
+			kind?: "text" | "select" | "providerCheck" | "agentName" | "secret";
 			choices?: Array<{ label: string; value: string; description?: string }>;
 			provider?: "ollama" | "lmstudio" | "apfel";
 			installHint?: string;
 			default?: string;
 			placeholder?: string;
 		}) => {
+			setOnboardingSecret(q.kind === "secret");
 			setCurrentOnboardingQuestion(q.question);
 			setOnboardingPlaceholder(placeholderFor(q));
 			setOnboardingSelectChoices(q.kind === "select" && q.choices ? q.choices : null);
@@ -6417,8 +6421,9 @@ export function App({
 			}
 		}
 
-		// Handle onboarding answers first
-		if (showOnboarding && !afterPaths.trim().startsWith("/")) {
+		// Handle onboarding answers first. At a secret step every line is the
+		// answer, even one that begins with "/", so a key never reaches the chat.
+		if (showOnboarding && isSetupAnswer(onboardingManager.getNextQuestion(), afterPaths)) {
 			// The answer as the step reads it (a number picks a choice, an
 			// empty Enter takes the default) and as the chat shows it.
 			const currentQ = onboardingManager.getNextQuestion();
@@ -6438,7 +6443,7 @@ export function App({
 				if (activeIdx >= 0) {
 					updated[activeIdx] = {
 						...updated[activeIdx],
-						answer: input,
+						answer: currentQ?.kind === "secret" ? undefined : input,
 						status: "done" as const,
 					};
 				}
@@ -6446,7 +6451,7 @@ export function App({
 			});
 
 			// Telegram token feedback
-			if (/^\d+:/.test(input.trim())) {
+			if (currentQ?.kind !== "secret" && /^\d+:/.test(input.trim())) {
 				addSystemMessage("Telegram token received. Your bot will activate on next launch.");
 				// Speak confirmation (gated by voice.outputEnabled)
 				speakOnboardingLine(
@@ -6456,6 +6461,20 @@ export function App({
 			}
 
 			const result = onboardingManager.processAnswer(answer.value);
+			const keyError = onboardingManager.takeKeyError();
+			if (keyError) addSystemMessage(keyError);
+			// A key was saved: carry on with that provider and its model in this
+			// session, no restart (the key is already in this process's env).
+			const picked = result.success ? await onboardingManager.pickModelAfterKey() : null;
+			if (picked) {
+				setCurrentProvider(picked.provider);
+				if (picked.model) setCurrentModel(picked.model);
+				addSystemMessage(
+					picked.model
+						? `Key saved. Using ${picked.provider}, model ${picked.model}.`
+						: `Key saved, but ${picked.provider} listed no models. Pick one with /model.`,
+				);
+			}
 			if (result.success) {
 				// Steps the setup can check by itself (is Ollama running?) are
 				// answered here, with one line each, instead of asked.
@@ -6482,6 +6501,7 @@ export function App({
 					setOnboardingSelectChoices(null);
 					setOnboardingProviderCheck(null);
 					setOnboardingAgentDefault(null);
+					setOnboardingSecret(false);
 					setViewMode("chat");
 					setMessages((prev) => settleSetupTranscript(prev));
 					const user = onboardingManager.getUser();
@@ -7785,6 +7805,7 @@ export function App({
 									onSlashCommand={handleSlashCommand}
 									injectedText={voiceTranscript}
 									transformInputValue={transformChatInput}
+									maskInput={showOnboarding && onboardingSecret}
 									allowEmptySubmit={!!imageInput.currentImage || showOnboarding}
 									goalClient={goalClient}
 									sessionId="tui"

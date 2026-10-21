@@ -99,7 +99,7 @@ export const COMPACT_BELOW_ROWS = 30;
  * (8gent.dev models/ollama and models/hosted): the Ollama install script and
  * library tag were checked against ollama.com, and the model and size come
  * from model-recipes.ts, shared with setup's provider check (#4220). Keys go in ~/.8gent/keys.env
- * via `8gent keys` (the file `8gent keys status` reads and bin/8gent.ts loads).
+ * via `8gent keys set <provider>` or `8gent keys` (the file `8gent keys status` reads and bin/8gent.ts loads).
  * Shell lines are pasteable as they stand: notes ride in `#` comments.
  */
 export function guidanceCopy(platform: NodeJS.Platform = process.platform): GuidanceCopy {
@@ -124,18 +124,15 @@ export function guidanceCopy(platform: NodeJS.Platform = process.platform): Guid
 				n: "2",
 				title: "Use a free hosted model, key from https://openrouter.ai/keys",
 				steps: [
-					`8gent keys   # opens ${KEYS_FILE_DISPLAY}`,
-					"Set OPENROUTER_API_KEY=<your key>, save, restart 8gent",
+					"8gent keys set openrouter   # hidden prompt, then restart",
+					`Or edit ${KEYS_FILE_DISPLAY} with 8gent keys`,
 					"In 8gent: /provider openrouter, then /model auto:free",
 				],
 			},
 		],
 		compact: [
 			[`Install Ollama (ollama.com), ollama pull ${OLLAMA_RECOMMENDED.pull}, /provider ollama`],
-			[
-				"8gent keys, set OPENROUTER_API_KEY=<your key>, restart 8gent",
-				"/provider openrouter, then /model auto:free",
-			],
+			["8gent keys set openrouter, restart 8gent", "/provider openrouter, then /model auto:free"],
 		],
 	};
 }

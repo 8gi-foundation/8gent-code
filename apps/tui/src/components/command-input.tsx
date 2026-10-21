@@ -22,10 +22,11 @@ import { GO_HELP_LINES, type GoalClient, parseGoCommand } from "../lib/goal-clie
 import { type SlashCommand, isCoreSlashCommand } from "../lib/slash-commands.js";
 import {
 	type SlashRegistryEntry,
-	formatSlashCollisionLine,
 	getBuiltInSlashCommands,
 	getSlashRegistry,
+	isBareSlash,
 	resolveSlashInput,
+	slashCollisionNotice,
 	toGhostSuggestions,
 	unknownSlashAnswer,
 } from "../lib/slash-registry.js";
@@ -81,6 +82,8 @@ interface CommandInputProps {
 	typingPaused?: boolean;
 	/** Rewrite the input on each change (e.g. consume a lone pasted file path into an attachment) */
 	transformInputValue?: (value: string) => string;
+	/** Show nothing of what is typed, only the placeholder (a key being pasted). */
+	maskInput?: boolean;
 	/** When true, Enter with an empty line still calls onSubmit (for empty send) */
 	allowEmptySubmit?: boolean;
 	/** An approval card is pending: the status line says the turn waits on the
@@ -139,6 +142,7 @@ export function CommandInput({
 	onSubmit,
 	isProcessing,
 	placeholder,
+	maskInput = false,
 	processingStage = "planning",
 	showAnimations = true,
 	activeTool = null,
@@ -206,7 +210,7 @@ export function CommandInput({
 				setSlashByToken(registry.byToken);
 				// Once per process: name any skill trigger that lost to a
 				// builtin so the user learns why /voice is not their skill (#2932).
-				const collisionLine = formatSlashCollisionLine(registry.collisions);
+				const collisionLine = slashCollisionNotice(registry.collisions);
 				if (collisionLine && !collisionLineShown) {
 					collisionLineShown = true;
 					onSystemMessage?.(collisionLine);
@@ -227,7 +231,8 @@ export function CommandInput({
 	// of the input. Each time a mention opens, the list reloads in the
 	// background from the project folder (the old list shows meanwhile), so
 	// new files appear and typing never waits on git.
-	const mention = useMemo(() => mentionAtEnd(value), [value]);
+	// A masked value (a key) never opens the file list: its text stays unread.
+	const mention = useMemo(() => (maskInput ? null : mentionAtEnd(value)), [value, maskInput]);
 	const mentionActive = mention !== null;
 	const [projectFiles, setProjectFiles] = useState<{ cwd: string; files: string[] } | null>(null);
 	const [mentionIndex, setMentionIndex] = useState(0);
@@ -264,13 +269,13 @@ export function CommandInput({
 	});
 	// Never offer a shell line: Tab would complete a command nobody typed
 	// (#3918 D5, 8SO).
-	const isVisible = ghostShown && !isShellSuggestion(value, suggestion?.text);
+	const isVisible = !maskInput && ghostShown && !isShellSuggestion(value, suggestion?.text);
 
 	// Slash palette: show while typing the command token (no space yet) so long names like /billiondollarboardroom work
 	useEffect(() => {
 		const t = value.trimStart();
-		setShowSlashHelp(t.startsWith("/") && !t.slice(1).includes(" "));
-	}, [value]);
+		setShowSlashHelp(!maskInput && t.startsWith("/") && !t.slice(1).includes(" "));
+	}, [value, maskInput]);
 
 	// The menu's rows, how many fit this terminal, and the picked one.
 	// Up/Down scroll through every row; Tab puts the picked command in.
@@ -370,8 +375,8 @@ export function CommandInput({
 			setHistoryIndex(-1);
 			draftRef.current = "";
 
-			// Check for slash command
-			if (trimmed.startsWith("/")) {
+			// Check for slash command. A masked value (a key) is never one.
+			if (!maskInput && trimmed.startsWith("/")) {
 				const registry = {
 					entries: slashRegistryEntries,
 					byToken: slashByToken,
@@ -418,6 +423,7 @@ export function CommandInput({
 			onSubmit,
 			onSlashCommand,
 			allowEmptySubmit,
+			maskInput,
 			slashRegistryEntries,
 			slashByToken,
 			goalClient,
@@ -431,7 +437,11 @@ export function CommandInput({
 	// when nothing claims it is it answered here and never submitted.
 	const handleSubmit = useCallback(
 		(input: string) => {
+			// A key being pasted is an answer, never a slash line or a command.
+			if (maskInput) return submitNow(input);
 			const trimmed = input.trim();
+			// A bare "/" opens the same thing /help does, never an error.
+			if (isBareSlash(input)) return submitNow("/help");
 			if (!trimmed.startsWith("/")) return submitNow(input);
 			const registry = { entries: slashRegistryEntries, byToken: slashByToken, collisions: [] };
 			if (resolveSlashInput(input, registry)) return submitNow(input);
@@ -441,7 +451,7 @@ export function CommandInput({
 				emitSystem(onSystemMessage, unknown);
 			});
 		},
-		[submitNow, slashRegistryEntries, slashByToken, onSystemMessage],
+		[submitNow, slashRegistryEntries, slashByToken, onSystemMessage, maskInput],
 	);
 
 	// Get current step index
@@ -511,6 +521,7 @@ export function CommandInput({
 				<Box>
 					<BufferedTextInput
 						focus={!typingPaused}
+						mask={maskInput}
 						value={value}
 						onChange={(v) => {
 							// Any manual edit exits history navigation and updates the draft

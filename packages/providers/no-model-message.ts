@@ -29,6 +29,8 @@ function scrub(msg: string, key: string | null | undefined): string {
 
 export function noModelMessage(opts: {
 	displayName: string;
+	/** Provider id for `8gent keys set <id>`; defaults to the lowercased display name. */
+	provider?: string;
 	keyEnv: string;
 	key: string | null | undefined;
 	err?: unknown;
@@ -36,16 +38,18 @@ export function noModelMessage(opts: {
 	pickHint: string;
 }): string {
 	const { displayName, keyEnv, key, err, pickHint } = opts;
+	const id = opts.provider || displayName.toLowerCase().replace(/\s+/g, "");
 	if (keyEnv) {
 		const n = (key ?? "").trim().length;
-		if (n === 0) return `No ${displayName} key found. Run \`8gent keys\` to add ${keyEnv}.`;
+		if (n === 0)
+			return `No ${displayName} key found. Run \`8gent keys set ${id}\` to add ${keyEnv}, or \`8gent keys\` to edit the file.`;
 		if (n < MIN_KEY_CHARS)
-			return `The ${keyEnv} value is only ${n} character${n === 1 ? "" : "s"}, too short to be a real key. Run \`8gent keys\` to replace it.`;
+			return `The ${keyEnv} value is only ${n} character${n === 1 ? "" : "s"}, too short to be a real key. Run \`8gent keys set ${id}\` to replace it.`;
 	}
 	const msg = err instanceof Error ? err.message : err ? String(err) : "";
 	const status = /: (\d{3})\b/.exec(msg)?.[1];
 	if (status === "401" || status === "403") {
-		return `${displayName} rejected the key (HTTP ${status}). Run \`8gent keys\` to replace ${keyEnv || "it"}.`;
+		return `${displayName} rejected the key (HTTP ${status}). Run \`8gent keys set ${id}\` to replace ${keyEnv || "it"}.`;
 	}
 	if (status)
 		return `No model chosen for ${displayName}: its model list request failed with HTTP ${status}. ${pickHint}`;

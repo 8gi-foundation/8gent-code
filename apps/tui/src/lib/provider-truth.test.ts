@@ -104,7 +104,7 @@ describe("a model is only shown with the provider that owns it", () => {
 describe("providerKeyNotice (missing key says which key)", () => {
 	test("names the env var and 8gent keys", () => {
 		expect(providerKeyNotice({ displayName: "MiniMax", apiKeyEnv: "MINIMAX_API_KEY" }, false)).toBe(
-			"MiniMax needs MINIMAX_API_KEY. Add it with `8gent keys`.",
+			"MiniMax needs MINIMAX_API_KEY. Run `8gent keys set minimax` to add it, or `8gent keys` to edit the file.",
 		);
 	});
 	test("null when the key is present or none is needed", () => {
@@ -178,7 +178,7 @@ describe("registryKeyNotice", () => {
 	});
 	test("minimax with no key", () => {
 		expect(registryKeyNotice("minimax", reader({}))).toBe(
-			"MiniMax needs MINIMAX_API_KEY. Add it with `8gent keys`.",
+			"MiniMax needs MINIMAX_API_KEY. Run `8gent keys set minimax` to add it, or `8gent keys` to edit the file.",
 		);
 	});
 	test("minimax with a key, a local provider and an unknown name are all null", () => {

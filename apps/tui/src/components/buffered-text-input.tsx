@@ -23,6 +23,8 @@ export interface BufferedTextInputProps {
 	onSubmit?: (value: string) => void;
 	placeholder?: string;
 	focus?: boolean;
+	/** Render nothing of the value, only the placeholder (a key being typed). */
+	mask?: boolean;
 }
 
 export function BufferedTextInput({
@@ -31,6 +33,7 @@ export function BufferedTextInput({
 	onSubmit,
 	placeholder = "",
 	focus = true,
+	mask = false,
 }: BufferedTextInputProps) {
 	const valueRef = useRef(value);
 	const cursorRef = useRef(value.length);
@@ -87,7 +90,7 @@ export function BufferedTextInput({
 		{ isActive: focus },
 	);
 
-	if (!value) {
+	if (!value || mask) {
 		if (!focus) return <Text dimColor>{placeholder}</Text>;
 		return (
 			<Text>

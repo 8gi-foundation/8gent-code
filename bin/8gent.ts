@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { safeBunFlags } from "../packages/core/bun-flags";
+import { normalizeSubcommand, unknownSubcommandLines } from "../packages/eight/subcommand-match.ts";
 import { petRequested } from "../packages/pet/opt-in";
 import { nodeExecPath, tuiProcessEnv } from "./termux-exec.js";
 
@@ -100,6 +101,7 @@ COMMANDS:
                               or npm); never installs a lower version. --check only reports.
   permissions                 Diagnose macOS Accessibility + Screen Recording grants for your terminal
                               Use --open to auto-launch System Settings panes for missing grants
+  keys set <provider>         Save an API key from a hidden prompt (works over SSH and on a phone)
   keys [reload|status|open]   Open ~/.8gent/keys.env in your editor for API keys
                               "keys reload" re-reads the file into the running env (default action)
                               "keys status" lists which provider keys are present (no values shown)
@@ -458,7 +460,7 @@ async function main() {
 		args = ["tui", ...args];
 	}
 
-	const command = args[0];
+	const command = normalizeSubcommand(args[0]);
 	const restArgs = args.slice(1);
 
 	switch (command) {
@@ -640,8 +642,11 @@ async function main() {
 			break;
 
 		default:
-			console.error(`Unknown command: ${command}`);
-			console.log(`Run '8 --help' for usage information.`);
+			{
+				const [first, ...more] = unknownSubcommandLines(String(args[0]));
+				console.error(first);
+				for (const line of more) console.log(line);
+			}
 			process.exit(1);
 	}
 }
@@ -755,7 +760,9 @@ async function keysCommand(args: string[]): Promise<void> {
 		const keys = readKeysFile();
 		const names = Object.keys(keys).sort();
 		if (names.length === 0) {
-			console.log(`No keys set in ${KEYS_PATH}. Run \`8gent keys\` to open the file.`);
+			console.log(
+				`No keys set in ${KEYS_PATH}. Run \`8gent keys set <provider>\` to add one, or \`8gent keys\` to open the file.`,
+			);
 			return;
 		}
 		console.log(`Keys present in ${KEYS_PATH}:`);

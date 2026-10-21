@@ -5,9 +5,11 @@ import {
 	getBuiltInSlashCommands,
 	getSkillSummary,
 	getSlashRegistry,
+	isBareSlash,
 	mergeSlashEntries,
 	namespacedSkillToken,
 	resolveSlashInput,
+	slashCollisionNotice,
 	unknownSlashAnswer,
 } from "./slash-registry.js";
 
@@ -71,6 +73,15 @@ describe("slash registry", () => {
 			},
 		]);
 		expect(formatSlashCollisionLine(merged.collisions)).toBe(
+			"Slash command collision: /voice is the builtin; skill voice-chat-mode is /skill:voice.",
+		);
+	});
+
+	test("the collision line stays off the first screen unless DEBUG=1 (#4703)", () => {
+		const merged = mergeSlashEntries([builtInVoice], [skillVoice]);
+		expect(slashCollisionNotice(merged.collisions, {})).toBeNull();
+		expect(slashCollisionNotice(merged.collisions, { DEBUG: "0" })).toBeNull();
+		expect(slashCollisionNotice(merged.collisions, { DEBUG: "1" })).toBe(
 			"Slash command collision: /voice is the builtin; skill voice-chat-mode is /skill:voice.",
 		);
 	});
@@ -187,7 +198,16 @@ describe("unknownSlashAnswer (#4530)", () => {
 		expect(await unknownSlashAnswer("  /nope with args", loaded, none)).toBe(
 			"Unknown command /nope. Type /help.",
 		);
-		expect(await unknownSlashAnswer("/", loaded, none)).toBe("Unknown command /. Type /help.");
+	});
+
+	test("a bare slash is never an error: it is the help request (#4703)", async () => {
+		for (const bare of ["/", "  /", "/  ", " / \t"]) {
+			expect(isBareSlash(bare)).toBeTrue();
+			expect(await unknownSlashAnswer(bare, loaded, none)).toBeNull();
+		}
+		expect(isBareSlash("/help")).toBeFalse();
+		expect(isBareSlash("//")).toBeFalse();
+		expect(isBareSlash("/ x")).toBeFalse();
 	});
 
 	test("a path-like line gets the local answer", async () => {

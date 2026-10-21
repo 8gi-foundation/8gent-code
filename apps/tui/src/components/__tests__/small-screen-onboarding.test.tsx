@@ -125,6 +125,6 @@ describe("onboarding on a small terminal", () => {
 		expect(NO_MODEL_HINT).toBe("No model yet. Type /provider to choose one.");
 		const guide = guidanceText(undefined, "Ollama at localhost:11434 did not answer.");
 		expect(guide).toContain("/provider ollama");
-		expect(guide).toContain("OPENROUTER_API_KEY");
+		expect(guide).toContain("8gent keys set openrouter");
 	});
 });

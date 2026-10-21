@@ -15,12 +15,15 @@ import { promisify } from "node:util";
 import { resolveOllamaBaseUrl } from "../ai/text-tool-endpoint";
 import { LocalServerHttpError, createOllamaServer, isOllamaEnabled } from "../local-model-server";
 import type { ProviderManager } from "../providers/index";
-import { getVault, getVaultOrNull } from "../secrets";
+import { getVault, getVaultOrNull, setKeyInFile } from "../secrets";
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings/index.js";
 import { type CommunicationStyle, isCommunicationStyle } from "./communication-style";
 import {
 	type FoundServer,
+	HOSTED_KEY_PROVIDERS,
+	type HostedKeyProvider,
 	detectLocalServers,
+	hostedKeyNeeded,
 	providerChoiceScreen,
 	resolveProviderChoice,
 	saveProviderChoice,
@@ -69,6 +72,7 @@ export interface UserConfig {
 				| "openai"
 				| "anthropic"
 				| "openrouter"
+				| "minimax"
 				| null;
 			fallbacks: string[];
 			preferLocal: boolean;
@@ -125,6 +129,7 @@ export type OnboardingStep =
 	| "provider-check-lmstudio"
 	| "provider-check-apfel"
 	| "provider-choice"
+	| "provider-key"
 	| "agent-name-orchestrator"
 	| "agent-name-engineer"
 	| "agent-name-qa"
@@ -192,10 +197,11 @@ export interface OnboardingQuestion {
 	 *   "select"               — scrollable arrow-key list + digit shortcut.
 	 *   "providerCheck"        — probes a local inference engine and shows a
 	 *                            status row. Carries `provider` + `installHint`.
+	 *   "secret"               - a key typed with nothing echoed (provider-key).
 	 *   "agentName"            — renames an agent role. Carries `roleKey` so
 	 *                            the renderer can show the current default.
 	 */
-	kind?: "text" | "select" | "providerCheck" | "agentName";
+	kind?: "text" | "select" | "providerCheck" | "agentName" | "secret";
 	/**
 	 * What the input shows while this question waits for a typed answer, so
 	 * the box says what to type ("Your name"), not "ask a question".
@@ -615,6 +621,19 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
 			completedSteps: [...user.completedSteps, "provider-choice"],
 		}),
 	},
+	// ── Provider key ─────────────────────────────────────────
+	// Asked only after a hosted provider was picked with no key (the manager
+	// builds the real question, providerKeyQuestion). Masked input, saved to
+	// keys.env by the same setKeyInFile `8gent keys set` uses.
+	{
+		step: "provider-key",
+		question: "Paste your key",
+		kind: "secret",
+		processor: (_answer, user) => ({
+			...user,
+			completedSteps: [...user.completedSteps, "provider-key"],
+		}),
+	},
 	// ── 9-11. Agent naming ───────────────────────────────────
 	// Persist user-chosen display names to settings.agents.names.{role}. The
 	// TabBar (useWorkspaceTabs) and role-registry system prompt builder both
@@ -989,9 +1008,88 @@ export class OnboardingManager {
 	}
 
 	/** The questions this machine is asked: the apfel check only on Apple Silicon. */
+	/** The hosted provider picked with no key yet; the provider-key question is asked while set. */
+	private pendingKey: HostedKeyProvider | null = null;
+	private keyError: string | null = null;
+	private keyProvider: HostedKeyProvider | null = null;
+
+	/** Why the last pasted key was refused, once; the question is asked again. */
+	takeKeyError(): string | null {
+		const e = this.keyError;
+		this.keyError = null;
+		return e;
+	}
+
+	/**
+	 * After a key was saved: the provider that is now usable and the model it
+	 * auto-picks, from its live list when it has no built-in name. Null when no
+	 * key was saved in this setup. Never returns or logs the key.
+	 */
+	async pickModelAfterKey(
+		discover?: (p: string) => Promise<string[]>,
+	): Promise<{ provider: string; model: string; error?: unknown } | null> {
+		const provider = this.keyProvider;
+		if (!provider) return null;
+		this.keyProvider = null;
+		const { modelForOneShotWithReason } = await import("../eight/run");
+		const { model, error } = await modelForOneShotWithReason(provider, undefined, discover);
+		if (model) {
+			try {
+				(
+					this.host.providerManager?.() ?? (await import("../providers/index")).getProviderManager()
+				).setActiveModel(model);
+			} catch {
+				// /model can set it again.
+			}
+			this.user = {
+				...this.user,
+				preferences: {
+					...this.user.preferences,
+					model: { ...this.user.preferences.model, default: model },
+				},
+			};
+			this.saveUserConfig();
+		}
+		return { provider, model, error };
+	}
+
+	private providerKeyQuestion(question: OnboardingQuestion): OnboardingQuestion {
+		const pending = this.pendingKey;
+		const h = pending ? HOSTED_KEY_PROVIDERS[pending] : null;
+		if (!pending || !h) return question;
+		const host = this.host;
+		return {
+			...question,
+			question: `Paste your ${h.label} key (from ${h.keyUrl}). Nothing you type is shown, and it is saved to your keys file with private permissions. Press Enter to skip.`,
+			placeholder: `${h.label} key (hidden)`,
+			processor: (answer, user) => {
+				const value = answer.trim();
+				const finish: UserConfig = {
+					...user,
+					completedSteps: [...user.completedSteps, "provider-key"],
+				};
+				if (!value) {
+					this.pendingKey = null;
+					return finish;
+				}
+				const err = (host.saveKey ?? setKeyInFile)(h.env, value);
+				if (err) {
+					this.keyError = err;
+					return user;
+				}
+				(host.env ?? process.env)[h.env] = value;
+				this.pendingKey = null;
+				this.keyProvider = pending;
+				return finish;
+			},
+		};
+	}
+
 	private questionsHere(): OnboardingQuestion[] {
-		return ONBOARDING_QUESTIONS.filter((q) =>
-			stepAppliesHere(q.step, this.platform(), this.arch()),
+		return ONBOARDING_QUESTIONS.filter(
+			(q) =>
+				stepAppliesHere(q.step, this.platform(), this.arch()) &&
+				(q.step !== "provider-key" || this.pendingKey !== null),
 		);
 	}
 
@@ -1403,6 +1501,7 @@ export class OnboardingManager {
 			};
 		}
 		if (question.step === "provider-choice") return this.providerChoiceQuestion(question);
+		if (question.step === "provider-key") return this.providerKeyQuestion(question);
 		return { ...question, question: text };
 	}
 
@@ -1432,6 +1531,9 @@ export class OnboardingManager {
 				} catch {
 					// The profile still records it; /provider can save it again.
 				}
+				this.pendingKey = hostedKeyNeeded(choice.provider, host.env ?? process.env)
+					? (choice.provider as HostedKeyProvider)
+					: null;
 				return {
 					...done,
 					preferences: {
@@ -1439,8 +1541,8 @@ export class OnboardingManager {
 						model: {
 							...done.preferences.model,
 							provider: choice.provider,
-							default: choice.model,
-							preferLocal: choice.provider !== "openrouter",
+							default: choice.model || null,
+							preferLocal: choice.provider !== "openrouter" && choice.provider !== "minimax",
 						},
 					},
 				};
@@ -1462,6 +1564,8 @@ export interface OnboardingHost {
 	ollama?: Promise<OllamaCheck>;
 	/** Where the provider choice is saved. Defaults to the shared manager. */
 	providerManager?: () => ProviderManager;
+	/** Writes a key to the keys file; defaults to setKeyInFile. Returns an error sentence or null. */
+	saveKey?: (name: string, value: string) => string | null;
 }
 
 // ============================================

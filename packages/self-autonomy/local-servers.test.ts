@@ -236,7 +236,7 @@ describe("choice screen", () => {
 			expect(screen.question).toContain("No local model server is running");
 			expect(screen.question).toContain(`docs/install/${page}.md`);
 			expect(screen.question).toContain("docs/install/providers.md");
-			expect(screen.choices.map((c) => c.value)).toEqual(["openrouter", "later"]);
+			expect(screen.choices.map((c) => c.value)).toEqual(["openrouter", "minimax", "later"]);
 		}
 		expect(installGuideUrl("freebsd")).toContain("linux.md");
 	});
@@ -245,10 +245,10 @@ describe("choice screen", () => {
 	// then said "wait a moment" forever. With no key, Enter saves nothing.
 	test("none found, no OpenRouter key: Enter is Decide later, and the key step is named", () => {
 		const screen = providerChoiceScreen([], "darwin", { openRouterKey: false });
-		expect(screen.choices.map((c) => c.value)).toEqual(["later", "openrouter"]);
+		expect(screen.choices.map((c) => c.value)).toEqual(["later", "openrouter", "minimax"]);
 		expect(screen.question).toContain("No local model server is running");
 		expect(screen.question).toContain("8gent keys");
-		expect(screen.question).toContain("OPENROUTER_API_KEY");
+		expect(screen.question).toContain("8gent keys set openrouter");
 		expect(screen.question).not.toContain("Until then I can use free cloud models");
 		const cloud = screen.choices.find((c) => c.value === "openrouter");
 		expect(cloud?.description).toContain("keys.env");
@@ -257,8 +257,10 @@ describe("choice screen", () => {
 
 	test("missing key notice: OpenRouter without a key names the cause and the fix, never wait", () => {
 		const notice = missingKeyNotice("openrouter", false);
-		expect(notice).toContain("OPENROUTER_API_KEY");
-		expect(notice).toContain("8gent keys");
+		expect(notice).toContain("8gent keys set openrouter");
+		// The editor route stays as the alternative, second.
+		expect(notice).toContain("(or `8gent keys` to edit the file)");
+		expect(notice).not.toContain("OPENROUTER_API_KEY=");
 		expect(notice).toContain("free");
 		expect(notice).toContain("/provider");
 		expect(notice?.toLowerCase()).not.toContain("wait");
@@ -294,6 +296,7 @@ describe("choice screen", () => {
 			"ollama",
 			"llama-server",
 			"openrouter",
+			"minimax",
 			"later",
 		]);
 	});

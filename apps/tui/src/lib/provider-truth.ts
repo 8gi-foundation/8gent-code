@@ -105,11 +105,13 @@ export function modelAfterProviderSwitch(from: string, to: string, model: string
 export function providerKeyNotice(
 	p: { displayName: string; apiKeyEnv: string; apiKeyRef?: string },
 	hasKey: boolean,
+	name?: string,
 ): string | null {
 	if (hasKey) return null;
 	const env = p.apiKeyEnv || p.apiKeyRef;
 	if (!env) return null;
-	return `${p.displayName} needs ${env}. Add it with \`8gent keys\`.`;
+	const id = name || p.displayName.toLowerCase().replace(/\s+/g, "");
+	return `${p.displayName} needs ${env}. Run \`8gent keys set ${id}\` to add it, or \`8gent keys\` to edit the file.`;
 }
 
 /**
@@ -132,6 +134,7 @@ export function registryKeyNotice(
 		return providerKeyNotice(
 			reader.getProvider(provider),
 			keyLooksUsable(reader.getApiKey(provider)),
+			provider,
 		);
 	} catch {
 		return null;
