@@ -564,17 +564,44 @@ export async function modelForOneShot(
 	chosen: string | undefined,
 	discover?: (p: string) => Promise<string[]>,
 ): Promise<string> {
-	if (chosen?.trim()) return chosen.trim();
-	if (BUILTIN_DEFAULT_PROVIDERS.has(provider)) return defaultModelFor(provider);
+	return (await modelForOneShotWithReason(provider, chosen, discover)).model;
+}
+
+/** Same pick, but keeps why the list failed so the caller can say it in words. */
+export async function modelForOneShotWithReason(
+	provider: string,
+	chosen: string | undefined,
+	discover?: (p: string) => Promise<string[]>,
+): Promise<{ model: string; error?: unknown }> {
+	if (chosen?.trim()) return { model: chosen.trim() };
+	if (BUILTIN_DEFAULT_PROVIDERS.has(provider)) return { model: defaultModelFor(provider) };
 	try {
 		const ask =
 			discover ??
 			(async (p: string) => (await import("../providers")).getProviderManager().discoverModels(p));
 		const first = (await ask(provider)).map((m) => String(m).trim()).find((m) => m.length > 0);
-		return first ?? "";
-	} catch {
-		return "";
+		return { model: first ?? "" };
+	} catch (error) {
+		return { model: "", error };
 	}
+}
+
+/** The plain sentence for "no model could be chosen" (key missing, key rejected, or list down). */
+export async function noModelNotice(provider: string, error?: unknown): Promise<string> {
+	const { noModelMessage } = await import("../providers/no-model-message");
+	let displayName = provider;
+	let keyEnv = "";
+	let key: string | null = null;
+	try {
+		const pm = (await import("../providers")).getProviderManager();
+		const cfg = pm.getProvider(provider);
+		displayName = cfg.displayName || provider;
+		keyEnv = cfg.apiKeyEnv || cfg.apiKeyRef || "";
+		key = pm.getApiKey(provider);
+	} catch {
+		/* unknown provider: fall through to the list wording */
+	}
+	return noModelMessage({ displayName, keyEnv, key, err: error, pickHint: "Pass --model <name>." });
 }
 
 /** Probe localhost:11434 once to see if ollama is actually running. */
@@ -873,9 +900,9 @@ export async function runRunCommand(
 			);
 		}
 	}
-	const model = await modelForOneShot(provider, choice.model);
+	const { model, error: modelError } = await modelForOneShotWithReason(provider, choice.model);
 	if (!model) {
-		const msg = `No model chosen for ${provider}: its model list could not be fetched. Pass --model <name>.`;
+		const msg = await noModelNotice(provider, modelError);
 		if (opts.outputFormat === "stream-json")
 			emit({ type: "error", subtype: "usage", message: msg });
 		else process.stderr.write(`${msg}\n`);

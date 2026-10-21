@@ -26,7 +26,23 @@
  */
 
 import { execSync, spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+	closeSync,
+	copyFileSync,
+	existsSync,
+	fchmodSync,
+	constants as fsConstants,
+	fsyncSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+	writeSync,
+} from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -118,6 +134,102 @@ export function readKeysFile(path: string = KEYS_PATH): Record<string, string> {
 		if (key && value) out[key] = value;
 	}
 	return out;
+}
+
+/** A pasted value shorter than this is not a real provider key. */
+export const MIN_SET_KEY_CHARS = 20;
+
+/**
+ * Names `setKeyInFile` may write. Only credential-shaped names: the keys file is
+ * merged into the environment and its endpoint overrides (MINIMAX_BASE_URL and
+ * friends) are honoured, so a providers.json entry whose `apiKeyEnv` named a
+ * URL, PATH, NODE_OPTIONS or an EIGHT_ switch must not turn a pasted value into
+ * that variable (8SO, #4681).
+ */
+const SETTABLE_KEY_NAME = /^[A-Z][A-Z0-9_]*_(API_KEY|API_TOKEN|KEY|TOKEN)$/;
+
+/**
+ * A provider key is one token of printable ASCII. No whitespace or control
+ * bytes (a pasted escape sequence or line break could start a second line),
+ * and none of the characters a shell would expand if the file were ever
+ * sourced: quotes, backtick, dollar, backslash.
+ */
+const SETTABLE_KEY_VALUE = /^[\x21-\x7e]+$/;
+const SHELL_ACTIVE = /["'`$\\]/;
+
+/** Read a file without following a symlink at its final component. "" when absent. */
+function readNoFollow(path: string): string {
+	let fd: number;
+	try {
+		fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") return "";
+		throw e;
+	}
+	try {
+		return readFileSync(fd, "utf-8");
+	} finally {
+		closeSync(fd);
+	}
+}
+
+/**
+ * Set one `NAME=value` line in the keys file (replacing any earlier line for
+ * NAME). Returns an error string and writes nothing when the name is not a
+ * credential name, the value is too short or not a single printable token, or
+ * the keys file is a symlink or not a regular file. Never echoes the value.
+ *
+ * The write is atomic and never at wider permissions: a sibling temp file is
+ * created O_EXCL at 0600 (so it cannot be a planted link), fsynced, then
+ * renamed over the keys file. A crash leaves the old file whole.
+ */
+export function setKeyInFile(name: string, value: string, path: string = KEYS_PATH): string | null {
+	const v = value.trim();
+	if (!SETTABLE_KEY_NAME.test(name) || name.startsWith("EIGHT_"))
+		return `${name} is not a key name 8gent will write.`;
+	if (v.length < MIN_SET_KEY_CHARS)
+		return `That value is ${v.length} characters, too short to be a real key (need ${MIN_SET_KEY_CHARS} or more). Nothing was saved.`;
+	if (!SETTABLE_KEY_VALUE.test(v) || SHELL_ACTIVE.test(v))
+		return "That value has spaces, line breaks, quotes or other characters a key never has. Nothing was saved.";
+
+	const dir = dirname(path);
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	try {
+		const st = lstatSync(path);
+		if (st.isSymbolicLink() || !st.isFile())
+			return `${path} is a link or not a regular file. Nothing was saved.`;
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+	}
+	let old: string;
+	try {
+		old = readNoFollow(path);
+	} catch {
+		return `${path} could not be read safely. Nothing was saved.`;
+	}
+	const kept = old.split(/\r?\n/).filter((l) => !new RegExp(`^\\s*${name}\\s*=`).test(l));
+	while (kept.length && kept[kept.length - 1] === "") kept.pop();
+	const body = `${[...kept, `${name}=${v}`].join("\n")}\n`;
+
+	const tmp = join(dir, `.keys.env.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
+	const fd = openSync(tmp, "wx", 0o600);
+	try {
+		fchmodSync(fd, 0o600);
+		writeSync(fd, body);
+		fsyncSync(fd);
+	} catch (e) {
+		closeSync(fd);
+		rmSync(tmp, { force: true });
+		throw e;
+	}
+	closeSync(fd);
+	try {
+		renameSync(tmp, path);
+	} catch (e) {
+		rmSync(tmp, { force: true });
+		throw e;
+	}
+	return null;
 }
 
 /**
