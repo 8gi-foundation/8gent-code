@@ -585,7 +585,6 @@ async function grepLiteral(
 			const r = await searchFiles({
 				root,
 				pattern: p,
-				literal: true,
 				ignoreCase: ignoreCase || undefined,
 				maxResults: 5000,
 				allow: readAllowed(root),

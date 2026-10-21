@@ -1,14 +1,15 @@
 /**
- * In-process file search (#4633): a directory walk plus a line regex, in plain
- * node:fs and node:path. It never spawns a process, so it behaves the same on
- * macOS, Linux, Windows PowerShell and Termux, and no shell string can carry
- * injection. Respects .gitignore (root and nested), skips binary and oversize
- * files, caps results, and returns hits in sorted path order so the same tree
- * gives the same answer on every host. Paths in results are always "/".
+ * In-process file search (#4633): a directory walk plus a fixed-string line match, in
+ * plain node:fs and node:path. It spawns no process and starts no worker, so it behaves
+ * the same on macOS, Linux, Windows PowerShell and Termux, and no shell string can carry
+ * injection. The pattern is LITERAL: there is no model-supplied regex, so a catastrophic
+ * pattern cannot exist (indexOf is linear). Globs and .gitignore rules use a linear
+ * matcher, not RegExp. Respects .gitignore (root and nested), skips binary and oversize
+ * files, caps results and walk size, and returns hits in sorted path order so the same
+ * tree gives the same answer on every host. Paths in results are always "/".
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { WORKER_SOURCE } from "./inproc-search-worker-source";
 
 export interface SearchHit {
 	file: string;
@@ -18,21 +19,17 @@ export interface SearchHit {
 
 export interface SearchOptions {
 	root: string;
-	/** Content to find. Omit to list files only. */
+	/** Required: veto an absolute path (the permissions path-guard). A denied directory is not entered, a denied file is not read; both are skipped silently. */
+	allow: (absPath: string) => boolean;
+	/** Plain text to find. Omit to list files only. */
 	pattern?: string;
-	/** Treat `pattern` as plain text instead of a regex. */
-	literal?: boolean;
-	/** Case-insensitive; default is smart case (insensitive unless the pattern has a capital). */
+	/** Default is smart case: insensitive unless the pattern has a capital. */
 	ignoreCase?: boolean;
-	/** Only files whose relative path matches this glob (for example "*.ts" or "src/**" plus "/*.tsx"). */
+	/** Only files whose relative path matches this glob (for example "*.ts"). */
 	glob?: string;
 	maxResults?: number;
 	maxPerFile?: number;
 	maxFileBytes?: number;
-	/** Required: veto an absolute path (the permissions path-guard). A denied directory is not entered, a denied file is not read; both are skipped silently. */
-	allow: (absPath: string) => boolean;
-	/** Wall-clock limit for the content scan; the worker is terminated at it. Default 5000. */
-	deadlineMs?: number;
 	/** Walk entry cap. Default 200000. */
 	maxEntries?: number;
 }
@@ -42,30 +39,77 @@ export interface SearchResult {
 	files: string[];
 	filesScanned: number;
 	truncated: boolean;
-	/** The scan hit its deadline; hits are partial. */
-	timedOut?: boolean;
-	/** The pattern was refused (too long or not a valid regex). */
+	/** The request was refused (for example a glob over the caps). */
 	error?: string;
 }
 
 const ALWAYS_SKIP = new Set(["node_modules", "dist", ".git"]);
-export const MAX_PATTERN_CHARS = 512;
 const SKIP_FILE = /\.(lock|min\.js|map)$/;
-
 export const MAX_GLOB_CHARS = 256;
 const MAX_WILDCARDS = 8;
 
-/** One path segment against one glob segment: `*` and `?`, linear two-pointer, no regex backtracking. */
-function segMatch(p: string, s: string): boolean {
+type Tok =
+	| { k: "lit"; c: string }
+	| { k: "any" }
+	| { k: "star" }
+	| { k: "class"; set: string; neg: boolean };
+
+/** Parse one glob segment: * ? [class] \escape. Unclosed "[" is a literal. */
+function tokenize(seg: string): Tok[] {
+	const out: Tok[] = [];
+	for (let i = 0; i < seg.length; i++) {
+		const c = seg[i];
+		if (c === "\\" && i + 1 < seg.length) out.push({ k: "lit", c: seg[++i] });
+		else if (c === "*") {
+			if (out[out.length - 1]?.k !== "star") out.push({ k: "star" });
+		} else if (c === "?") out.push({ k: "any" });
+		else if (c === "[") {
+			let j = i + 1;
+			const neg = seg[j] === "!" || seg[j] === "^";
+			if (neg) j++;
+			const from = j;
+			if (seg[j] === "]") j++; // a leading "]" is a member
+			while (j < seg.length && seg[j] !== "]") j++;
+			if (j >= seg.length) out.push({ k: "lit", c });
+			else {
+				out.push({ k: "class", set: seg.slice(from, j), neg });
+				i = j;
+			}
+		} else out.push({ k: "lit", c });
+	}
+	return out;
+}
+
+function inClass(set: string, ch: string): boolean {
+	for (let i = 0; i < set.length; i++) {
+		if (set[i + 1] === "-" && i + 2 < set.length) {
+			if (ch >= set[i] && ch <= set[i + 2]) return true;
+			i += 2;
+		} else if (set[i] === ch) return true;
+	}
+	return false;
+}
+
+const tokMatch = (t: Tok, ch: string): boolean =>
+	t.k === "lit"
+		? t.c === ch
+		: t.k === "any"
+			? true
+			: t.k === "class"
+				? inClass(t.set, ch) !== t.neg
+				: false;
+
+/** One path segment against its tokens: two-pointer with star backtracking, no RegExp. */
+function segMatch(p: Tok[], s: string): boolean {
 	let pi = 0;
 	let si = 0;
 	let star = -1;
 	let mark = 0;
 	while (si < s.length) {
-		if (pi < p.length && (p[pi] === "?" || p[pi] === s[si])) {
+		if (pi < p.length && p[pi].k !== "star" && tokMatch(p[pi], s[si])) {
 			pi++;
 			si++;
-		} else if (pi < p.length && p[pi] === "*") {
+		} else if (pi < p.length && p[pi].k === "star") {
 			star = pi++;
 			mark = si;
 		} else if (star >= 0) {
@@ -73,45 +117,40 @@ function segMatch(p: string, s: string): boolean {
 			si = ++mark;
 		} else return false;
 	}
-	while (pi < p.length && p[pi] === "*") pi++;
+	while (pi < p.length && p[pi].k === "star") pi++;
 	return pi === p.length;
 }
 
 /**
  * Compile a glob to a matcher over a "/"-separated relative path, or null when it is too
- * long or has too many wildcards. No RegExp: a hostile glob or .gitignore line cannot
- * hang the walk. A "**" segment spans any number of directories; anchored=false matches
- * the pattern against the tail of the path (gitignore rules without a slash).
+ * long or has too many wildcards. A "**" segment spans any number of directories;
+ * anchored=false matches the pattern against the tail of the path (gitignore rules
+ * without a slash). Backtracking is bounded by memoised segment positions.
  */
 export function globMatcher(glob: string, anchored = true): ((rel: string) => boolean) | null {
-	const collapsed = glob.replace(/\*{2,}/g, (m, off: number, all: string) =>
-		(off === 0 || all[off - 1] === "/") &&
-		(off + m.length === all.length || all[off + m.length] === "/")
-			? "**"
-			: "*",
+	if (glob.length > MAX_GLOB_CHARS) return null;
+	const segs = glob.split("/").map((g) => (g === "**" ? "**" : tokenize(g)));
+	const wild = segs.reduce<number>(
+		(n, g) => n + (g === "**" ? 1 : g.filter((t) => t.k !== "lit").length),
+		0,
 	);
-	if (
-		collapsed.length > MAX_GLOB_CHARS ||
-		(collapsed.match(/[*?]/g)?.length ?? 0) > MAX_WILDCARDS
-	) {
-		return null;
-	}
-	const pat = collapsed.split("/");
+	if (wild > MAX_WILDCARDS) return null;
 	return (rel: string) => {
-		const segs = rel.split("/");
+		const parts = rel.split("/");
 		const starts = anchored
 			? [0]
-			: segs.map((_, i) => i).filter((i) => segs.length - i === pat.length);
+			: parts.map((_, i) => i).filter((i) => parts.length - i === segs.length);
 		const memo = new Map<number, boolean>();
 		const go = (pi: number, si: number): boolean => {
-			const k = pi * 100003 + si;
-			const hit = memo.get(k);
+			const key = pi * 100003 + si;
+			const hit = memo.get(key);
 			if (hit !== undefined) return hit;
+			const g = segs[pi];
 			let r: boolean;
-			if (pi === pat.length) r = si === segs.length;
-			else if (pat[pi] === "**") r = go(pi + 1, si) || (si < segs.length && go(pi, si + 1));
-			else r = si < segs.length && segMatch(pat[pi], segs[si]) && go(pi + 1, si + 1);
-			memo.set(k, r);
+			if (pi === segs.length) r = si === parts.length;
+			else if (g === "**") r = go(pi + 1, si) || (si < parts.length && go(pi, si + 1));
+			else r = si < parts.length && segMatch(g, parts[si]) && go(pi + 1, si + 1);
+			memo.set(key, r);
 			return r;
 		};
 		return starts.some((st) => go(0, st));
@@ -132,7 +171,7 @@ interface Scope {
 export function parseGitignore(text: string): IgnoreRule[] {
 	const rules: IgnoreRule[] = [];
 	for (let line of text.split(/\r?\n/)) {
-		line = line.replace(/\s+$/, "");
+		line = line.replace(/(?<!\\) +$/, "").replace(/\t+$/, ""); // an escaped trailing space stays
 		if (!line || line.startsWith("#")) continue;
 		const negate = line.startsWith("!");
 		if (negate) line = line.slice(1);
@@ -162,30 +201,21 @@ function isIgnored(rel: string, isDir: boolean, scopes: Scope[]): boolean {
 export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 	const root = path.resolve(opts.root);
 	const maxResults = opts.maxResults ?? 200;
-	const allow = opts.allow;
-	const fileGlob = opts.glob ? globMatcher(opts.glob, opts.glob.includes("/")) : null;
+	const maxPerFile = opts.maxPerFile ?? 20;
+	const maxBytes = opts.maxFileBytes ?? 1_000_000;
+	const maxEntries = opts.maxEntries ?? 200_000;
 	const out: SearchResult = { hits: [], files: [], filesScanned: 0, truncated: false };
+	const fileGlob = opts.glob ? globMatcher(opts.glob, opts.glob.includes("/")) : null;
 	if (opts.glob && !fileGlob) {
 		return {
 			...out,
 			error: `glob longer than ${MAX_GLOB_CHARS} characters or with more than ${MAX_WILDCARDS} wildcards`,
 		};
 	}
-	if (opts.pattern) {
-		if (opts.pattern.length > MAX_PATTERN_CHARS) {
-			return { ...out, error: `pattern longer than ${MAX_PATTERN_CHARS} characters` };
-		}
-		try {
-			new RegExp(opts.pattern);
-		} catch (e) {
-			return { ...out, error: `invalid regex: ${(e as Error).message}` };
-		}
-	}
 
 	// 1. Walk: sorted, ignore-aware, guard-filtered list of candidate files.
 	const candidates: string[] = [];
 	let entriesSeen = 0;
-	const maxEntries = opts.maxEntries ?? 200_000;
 	const walk = (dir: string, rel: string, inherited: Scope[]): void => {
 		let entries: fs.Dirent[];
 		try {
@@ -213,7 +243,7 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 			if (isDir ? ALWAYS_SKIP.has(e.name) : SKIP_FILE.test(e.name)) continue;
 			if (isIgnored(childRel, isDir, scopes)) continue;
 			const abs = path.join(dir, e.name);
-			if (!allow(abs)) continue; // path-guard denied: never entered, never read, never listed
+			if (!opts.allow(abs)) continue; // path-guard denied: never entered, never read, never listed
 			if (isDir) walk(abs, childRel, scopes);
 			else if (!fileGlob || fileGlob(childRel)) candidates.push(childRel);
 		}
@@ -226,67 +256,51 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 		return out;
 	}
 
-	// 2. Scan in a worker with a hard deadline: a catastrophic regex cannot hang this thread.
-	const job = {
-		root,
-		candidates,
-		pattern: opts.pattern,
-		literal: opts.literal === true,
-		ignoreCase: opts.ignoreCase,
-		maxResults,
-		maxPerFile: opts.maxPerFile ?? 20,
-		maxBytes: opts.maxFileBytes ?? 1_000_000,
-	};
-	const deadlineMs = opts.deadlineMs ?? 5000;
-	return new Promise<SearchResult>((resolve) => {
-		let done = false;
-		let worker: Worker | undefined;
-		let blobUrl: string | undefined;
-		const finish = (extra: Partial<SearchResult> = {}) => {
-			if (done) return;
-			done = true;
-			clearTimeout(timer);
-			void worker?.terminate();
-			if (blobUrl) URL.revokeObjectURL(blobUrl);
-			resolve({ ...out, ...extra });
-		};
-		const timer = setTimeout(() => finish({ timedOut: true }), deadlineMs);
-		const fail = (why: string) => finish({ error: `search worker failed: ${why}` });
-		try {
-			// The worker source is embedded (a blob), so it exists inside a bun --compile binary too.
-			blobUrl = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
-			worker = new Worker(blobUrl);
-		} catch (e) {
-			fail((e as Error).message);
-			return;
+	// 2. Scan: read files in parallel batches, judge them in path order. indexOf is linear.
+	const insensitive = opts.ignoreCase ?? !/[A-Z]/.test(opts.pattern);
+	const needle = insensitive ? opts.pattern.toLowerCase() : opts.pattern;
+	const fold = (s: string) => (insensitive ? s.toLowerCase() : s);
+	// An ASCII needle is tested against the raw bytes (memmem, or a latin1 1:1 decode when
+	// folding case); only a candidate file is decoded as utf8.
+	const ascii = /^[\x20-\x7e]*$/.test(needle);
+	for (let i = 0; i < candidates.length && !out.truncated; i += 64) {
+		const batch = candidates.slice(i, i + 64);
+		const bufs = await Promise.all(
+			batch.map((rel) =>
+				fs.promises.readFile(path.join(root, ...rel.split("/"))).catch(() => null),
+			),
+		);
+		for (let j = 0; j < batch.length && !out.truncated; j++) {
+			const buf = bufs[j];
+			if (!buf || buf.length > maxBytes || buf.subarray(0, 8192).includes(0)) continue; // unreadable, big or binary
+			out.filesScanned++;
+			if (
+				ascii &&
+				!(insensitive
+					? buf.toString("latin1").toLowerCase().includes(needle)
+					: buf.includes(needle))
+			) {
+				continue;
+			}
+			const lines = buf.toString("utf8").split(/\r?\n/);
+			let perFile = 0;
+			for (let n = 0; n < lines.length; n++) {
+				if (!fold(lines[n]).includes(needle)) continue;
+				out.hits.push({ file: batch[j], line: n + 1, text: lines[n].slice(0, 300) });
+				if (out.hits.length >= maxResults) out.truncated = true;
+				if (out.truncated || ++perFile >= maxPerFile) break;
+			}
 		}
-		worker.onmessage = (ev: MessageEvent) => {
-			const m = ev.data as {
-				hits: SearchHit[];
-				scanned: number;
-				truncated?: boolean;
-				done?: boolean;
-				error?: string;
-			};
-			if (m.error) return fail(m.error);
-			out.hits.push(...m.hits);
-			out.filesScanned = Math.max(out.filesScanned, m.scanned);
-			if (m.truncated) out.truncated = true;
-			if (m.done) finish();
-		};
-		worker.onerror = (e: ErrorEvent) => fail(e.message || "worker error");
-		worker.postMessage(job);
-	});
+	}
+	return out;
 }
 
-/** Render a result as "file:line:text" rows (or file names), with cap, timeout and refusal notes. */
+/** Render a result as "file:line:text" rows (or file names), with a cap note. */
 export function formatSearch(r: SearchResult): string {
 	if (r.error) return `Search refused: ${r.error}.`;
 	const rows = r.hits.length > 0 ? r.hits.map((h) => `${h.file}:${h.line}:${h.text}`) : r.files;
-	const notes = [
-		r.timedOut ? "[search timed out: results are partial, use a simpler pattern]" : "",
-		r.truncated ? "[truncated: result cap reached, narrow the pattern or glob]" : "",
-	].filter(Boolean);
-	if (rows.length === 0 && notes.length === 0) return "No matches.";
-	return [...rows, ...notes].join("\n");
+	if (rows.length === 0 && !r.truncated) return "No matches.";
+	return (
+		rows.join("\n") + (r.truncated ? "\n[truncated: cap reached, narrow the pattern or glob]" : "")
+	);
 }

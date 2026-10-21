@@ -1455,14 +1455,17 @@ export class ToolExecutor {
 				function: {
 					name: "search_files",
 					description:
-						"[FILE] Pass pattern (text or regex); returns up to 200 file:line:text rows. Optional glob (for example '*.ts'), literal=true for plain text. Respects .gitignore and path-guard, skips binaries, runs in-process with a 5 s limit. Use instead of grep.",
+						"[FILE] Pass pattern (plain text, not a regex); returns up to 200 file:line:text rows. Optional glob (for example '*.ts'), ignoreCase. Respects .gitignore and path-guard, skips binaries, no shell. For a regex, use run_command with rg.",
 					parameters: {
 						type: "object",
 						properties: {
 							pattern: { type: "string", description: "Text or regex to find" },
 							glob: { type: "string", description: "Only files matching this glob" },
 							path: { type: "string", description: "Directory to search (default: project root)" },
-							literal: { type: "boolean", description: "Treat pattern as plain text" },
+							ignoreCase: {
+								type: "boolean",
+								description: "Ignore case (default: only when pattern has no capitals)",
+							},
 						},
 						required: ["pattern"],
 					},
@@ -2737,7 +2740,7 @@ export class ToolExecutor {
 						root: safeDir,
 						pattern: String(args.pattern ?? ""),
 						glob: args.glob as string | undefined,
-						literal: args.literal === true,
+						ignoreCase: typeof args.ignoreCase === "boolean" ? args.ignoreCase : undefined,
 						// Same read guard as read_file: credential files and dirs are never walked.
 						allow: (abs) => guardPath(abs, this.workingDirectory, {}, "read").ok,
 					}),

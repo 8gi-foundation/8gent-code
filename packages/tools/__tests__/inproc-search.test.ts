@@ -1,9 +1,9 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { validatePath } from "../../permissions/path-guard";
-import { MAX_PATTERN_CHARS, formatSearch, globMatcher, searchFiles } from "../inproc-search";
+import { formatSearch, globMatcher, searchFiles } from "../inproc-search";
 
 // A fixed fixture tree, built the same way on every host. CI runs this on
 // Linux and Windows (platforms.yml); the expected rows are literal, so any
@@ -38,7 +38,7 @@ afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
 describe("inproc-search", () => {
 	test("literal grep: exact rows, sorted, posix paths, ignore rules, binary skipped", async () => {
-		const r = await searchFiles({ root, allow: guard, pattern: "needle", literal: true });
+		const r = await searchFiles({ root, allow: guard, pattern: "needle" });
 		expect(formatSearch(r).split("\n")).toEqual([
 			"keep.log:1:needle kept",
 			"src/a.ts:1:export const needle = 1;",
@@ -49,14 +49,15 @@ describe("inproc-search", () => {
 	});
 
 	test("smart case: a capital makes it case-sensitive", async () => {
-		const r = await searchFiles({ root, allow: guard, pattern: "Needle", literal: true });
+		const r = await searchFiles({ root, allow: guard, pattern: "Needle" });
 		expect(r.hits.map((h) => `${h.file}:${h.line}`)).toEqual(["src/a.ts:3"]);
 	});
 
-	test("regex and glob filter", async () => {
-		const r = await searchFiles({ root, allow: guard, pattern: "const \\w+ = \\d", glob: "*.ts" });
+	test("the pattern is plain text: regex characters match themselves; glob filter; CRLF stripped", async () => {
+		expect((await searchFiles({ root, allow: guard, pattern: "const \\w+" })).hits).toEqual([]);
+		const r = await searchFiles({ root, allow: guard, pattern: "const ", glob: "*.ts" });
 		expect(r.hits.map((h) => `${h.file}:${h.line}`)).toEqual(["src/a.ts:1", "src/a.ts:2"]);
-		expect(r.hits[1].text).toBe("const other = 2;"); // CRLF stripped
+		expect(r.hits[1].text).toBe("const other = 2;");
 	});
 
 	test("file listing respects ignores", async () => {
@@ -135,46 +136,9 @@ describe("inproc-search", () => {
 		const list = await searchFiles({ root, allow: guard });
 		expect(list.files.join(" ")).not.toMatch(/credentials|id_rsa|secrets/);
 		// the guard is what hides them: the same walk without it finds all three
-		const open = await searchFiles({ root, allow: () => true, pattern: "needle", literal: true });
+		const open = await searchFiles({ root, allow: () => true, pattern: "needle" });
 		expect(open.hits.map((h) => h.file)).toEqual(
 			expect.arrayContaining(["credentials", ".ssh/id_rsa", ".8gent/secrets/x"]),
-		);
-	});
-
-	test("ReDoS pattern times out with a note, process stays responsive", async () => {
-		const evil = path.join(root, "evil");
-		fs.mkdirSync(evil);
-		fs.writeFileSync(path.join(evil, "a.txt"), `${"a".repeat(60)}!\n`);
-		let ticks = 0;
-		const iv = setInterval(() => ticks++, 50);
-		const t0 = Date.now();
-		// The engine in use may bail out of this pattern by itself (about 450 ms); the 100 ms
-		// deadline proves the worker is killed on time either way.
-		const r = await searchFiles({
-			root: evil,
-			pattern: "^(a|aa)+$",
-			allow: guard,
-			deadlineMs: 100,
-		});
-		clearInterval(iv);
-		expect(Date.now() - t0).toBeLessThan(6000);
-		expect(r.timedOut).toBe(true);
-		expect(formatSearch(r)).toContain("search timed out");
-		expect(ticks).toBeGreaterThan(0); // main thread kept turning during the scan
-		const dflt = Date.now();
-		await searchFiles({ root: evil, pattern: "^(a|aa)+$", allow: guard });
-		expect(Date.now() - dflt).toBeLessThan(6000); // default 5 s deadline
-	}, 10000);
-
-	test("pattern length cap and invalid regex are refused", async () => {
-		const long = await searchFiles({
-			root,
-			allow: () => true,
-			pattern: "a".repeat(MAX_PATTERN_CHARS + 1),
-		});
-		expect(formatSearch(long)).toContain("Search refused");
-		expect(formatSearch(await searchFiles({ root, allow: () => true, pattern: "(" }))).toContain(
-			"invalid regex",
 		);
 	});
 
@@ -183,18 +147,7 @@ describe("inproc-search", () => {
 		expect(r.truncated).toBe(true);
 	});
 
-	test("a refused pattern is an error, never 'No matches.'", async () => {
-		const r = await searchFiles({ root, allow: guard, pattern: "needle", maxFileBytes: -1 });
-		expect(r.error).toBeUndefined(); // sanity: normal path has no error
-		const bad = await searchFiles({
-			root: path.join(root, "src"),
-			allow: () => true,
-			pattern: "(?<=a",
-		});
-		expect(formatSearch(bad)).toContain("Search refused");
-	});
-
-	test("works inside a bun --compile binary (embedded worker)", async () => {
+	test("works inside a bun --compile binary (no worker)", async () => {
 		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-compile-"));
 		try {
 			fs.mkdirSync(path.join(d, "tree"));
@@ -223,8 +176,83 @@ describe("inproc-search", () => {
 		}
 	}, 120000);
 
+	test("searchFiles starts no Worker and no child process", async () => {
+		const g = globalThis as unknown as { Worker: unknown };
+		const realWorker = g.Worker;
+		let made = 0;
+		g.Worker = class {
+			constructor() {
+				made++;
+			}
+		};
+		const cp = await import("node:child_process");
+		const spawnSpy = spyOn(cp, "spawn");
+		try {
+			await searchFiles({ root, allow: guard, pattern: "needle" });
+		} finally {
+			g.Worker = realWorker;
+		}
+		expect(made).toBe(0);
+		expect(spawnSpy).not.toHaveBeenCalled();
+		spawnSpy.mockRestore();
+	});
+
+	test("gitignore matcher agrees with git on classes, escapes and anchors", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-git-"));
+		try {
+			const git = (...a: string[]) => Bun.spawnSync(["git", ...a], { cwd: d }).stdout.toString();
+			git("init", "-q");
+			const rules = [
+				"[ab].txt",
+				"\\#hash",
+				"sp\\ ace",
+				"!keep.tmp",
+				"*.tmp",
+				"/top.md",
+				"doc/**/x.md",
+				"[!c]d.log",
+				"build/",
+				"?q",
+			];
+			fs.writeFileSync(path.join(d, ".gitignore"), `${rules.join("\n")}\n`);
+			const names = [
+				"a.txt",
+				"b.txt",
+				"c.txt",
+				"#hash",
+				"sp ace",
+				"keep.tmp",
+				"z.tmp",
+				"top.md",
+				"sub/top.md",
+				"doc/x.md",
+				"doc/a/b/x.md",
+				"doc/y.md",
+				"ad.log",
+				"cd.log",
+				"zq",
+				"zzq",
+				"build/o.js",
+				"src/build/o.js",
+				"plain.ts",
+			];
+			for (const n of names) {
+				fs.mkdirSync(path.dirname(path.join(d, n)), { recursive: true });
+				fs.writeFileSync(path.join(d, n), "x\n");
+			}
+			const gitSays = git("ls-files", "--others", "--exclude-standard")
+				.split("\n")
+				.filter(Boolean)
+				.sort();
+			const ours = (await searchFiles({ root: d, allow: () => true })).files.sort();
+			expect(ours).toEqual(gitSays);
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+
 	test("spawns nothing", async () => {
 		const src = fs.readFileSync(path.join(import.meta.dir, "..", "inproc-search.ts"), "utf8");
-		expect(src).not.toMatch(/from "node:child_process"|require\(|execSync|spawnSync|Bun\.spawn/);
+		expect(src).not.toMatch(/child_process|Worker|execSync|spawnSync|Bun\.spawn/);
 	});
 });
