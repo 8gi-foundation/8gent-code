@@ -199,5 +199,9 @@ describe("npm tarball paths (#4700)", () => {
 		const run = steps.map((s) => s.run ?? "").join("\n");
 		expect(run).toContain("sha256sum -c want");
 		expect(run).toContain('npm publish "$DIR/$NAME"');
+		// 8SO: an unreadable dist-tag latest must stop the run, never skip the
+		// "do not move latest backwards" check.
+		expect(run).toContain("could not read npm dist-tag latest");
+		expect(run).not.toContain('if [ -n "$LATEST" ] &&');
 	});
 });

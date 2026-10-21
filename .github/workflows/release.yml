@@ -322,8 +322,13 @@ jobs:
             echo "${PKG}@${VERSION} is already on npm; nothing to do"; exit 0
           fi
           # Publishing an older version would move dist-tag latest backwards.
+          # An empty answer is a registry error, not "no latest": the package
+          # exists, so fail closed rather than skip the backwards check.
           LATEST="$(npm view "$PKG" dist-tags.latest 2>/dev/null || true)"
-          if [ -n "$LATEST" ] && [ "$(printf '%s\n%s\n' "$LATEST" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
+          if ! [[ "$LATEST" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::could not read npm dist-tag latest for ${PKG} (got '${LATEST}'); not publishing"; exit 1
+          fi
+          if [ "$(printf '%s\n%s\n' "$LATEST" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
             echo "::error::npm latest is ${LATEST}, newer than ${VERSION}; not publishing over it"; exit 1
           fi
           DIR="${RUNNER_TEMP}/npm-from-release"
