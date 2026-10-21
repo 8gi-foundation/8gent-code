@@ -112,13 +112,15 @@ export function createMasker(opts: MaskOptions = {}): Masker {
 	const termRes = [...new Set(terms.map((t) => t.toLowerCase()))]
 		.sort((a, b) => b.length - a.length)
 		.map(
-			(t) => new RegExp(`(?<![A-Za-z0-9_])${escapeRe(t).replace(/\s+/g, "\\s+")}(?![A-Za-z0-9_])`, "gi"),
+			(t) =>
+				new RegExp(`(?<![A-Za-z0-9_])${escapeRe(t).replace(/\s+/g, "\\s+")}(?![A-Za-z0-9_])`, "gi"),
 		);
 	const homeRes: RegExp[] = [];
 	if (opts.hostIdentity !== false) {
 		try {
 			const h = homedir();
-			if (h && h.length > 4) homeRes.push(new RegExp(`${escapeRe(h)}(?:/[^\\s"'\`)\\]}<>:,;]*)?`, "g"));
+			if (h && h.length > 4)
+				homeRes.push(new RegExp(`${escapeRe(h)}(?:/[^\\s"'\`)\\]}<>:,;]*)?`, "g"));
 		} catch {
 			// no home: nothing to add
 		}

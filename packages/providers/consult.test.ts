@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { type ConsultDeps, consult, providerSend, readConsultSettings } from "./consult";
 import { ProviderManager } from "./index";
 import { type PolicyState, decideRoute, readLedger, recordCall, updateCall } from "./locality";
 import { guardFetch } from "./locality-wire";
-import { type ConsultDeps, consult, providerSend, readConsultSettings } from "./consult";
 
 const SK = `sk-${"a1B2c3D4e5F6g7H8i9J0"}kLmN`;
 const EMAIL = "sarah.connor@cyberdyne-systems.com";
@@ -93,7 +93,8 @@ describe("/consult", () => {
 		expect((rows[0] as any).masked).toBe(true);
 		expect(rows[0].tokensIn).toBe(40);
 		const raw = fs.readFileSync(ledger, "utf8");
-		for (const v of [...ORIGINALS, "{{EMAIL_1}}", "Check the account"]) expect(raw).not.toContain(v);
+		for (const v of [...ORIGINALS, "{{EMAIL_1}}", "Check the account"])
+			expect(raw).not.toContain(v);
 	});
 
 	test("no file written during a consult holds an original or a placeholder map", async () => {
@@ -119,7 +120,11 @@ describe("/consult", () => {
 	});
 
 	test("a forced local-only (bad settings file) also refuses", async () => {
-		const { deps, bodies } = rig({ policy: "local-only", why: "settings.json is empty", localHosts: [] });
+		const { deps, bodies } = rig({
+			policy: "local-only",
+			why: "settings.json is empty",
+			localHosts: [],
+		});
 		const out = await consult(QUESTION, deps);
 		expect(out).toContain("local-only");
 		expect(out).toContain("settings.json is empty");
@@ -161,8 +166,14 @@ describe("readConsultSettings", () => {
 		expect(readConsultSettings(path.join(dir, "missing.json"))).toEqual({ mask: true, terms: [] });
 	});
 	test("reads mask, terms and provider", () => {
-		const f = write({ routing: { mask: false, maskTerms: ["Acme", 3, "Falcon"], consultProvider: " x " } });
-		expect(readConsultSettings(f)).toEqual({ mask: false, terms: ["Acme", "Falcon"], provider: "x" });
+		const f = write({
+			routing: { mask: false, maskTerms: ["Acme", 3, "Falcon"], consultProvider: " x " },
+		});
+		expect(readConsultSettings(f)).toEqual({
+			mask: false,
+			terms: ["Acme", "Falcon"],
+			provider: "x",
+		});
 	});
 	test("an unreadable file keeps masking on", () => {
 		expect(readConsultSettings(write("{nope")).mask).toBe(true);

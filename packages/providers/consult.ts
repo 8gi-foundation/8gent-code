@@ -12,13 +12,18 @@
  */
 import { readFileSync } from "node:fs";
 import {
+	type ProviderManager,
+	type ProviderName,
+	getProviderManager,
+	isCloudProvider,
+} from "./index";
+import {
 	type PolicyState,
 	decideRoute,
 	maskedScope,
 	readPolicyState,
 	settingsPath,
 } from "./locality";
-import { type ProviderManager, type ProviderName, getProviderManager, isCloudProvider } from "./index";
 import { createMasker, describeCounts } from "./mask";
 
 export interface ConsultSettings {
@@ -53,7 +58,8 @@ export function readConsultSettings(file?: string): ConsultSettings {
 		terms: Array.isArray(r.maskTerms)
 			? r.maskTerms.filter((t: unknown): t is string => typeof t === "string")
 			: [],
-		provider: typeof r.consultProvider === "string" ? r.consultProvider.trim() || undefined : undefined,
+		provider:
+			typeof r.consultProvider === "string" ? r.consultProvider.trim() || undefined : undefined,
 	};
 }
 
@@ -76,7 +82,8 @@ export interface ConsultDeps {
 const SYSTEM =
 	"You are an outside consultant. Reply with advice as plain text only; you cannot run tools or see any files. Tokens written like {{EMAIL_1}} or {{TERM_2}} stand for private values that were hidden from you: keep them exactly as written and never guess what they are.";
 
-export const CONSULT_USAGE = "Usage: /consult <question>. One stateless question to your cloud model, with secrets and personal data masked first.";
+export const CONSULT_USAGE =
+	"Usage: /consult <question>. One stateless question to your cloud model, with secrets and personal data masked first.";
 
 /** The /consult command. Returns the text to show; never throws. */
 export async function consult(question: string, deps: ConsultDeps): Promise<string> {
@@ -143,14 +150,13 @@ export async function consult(question: string, deps: ConsultDeps): Promise<stri
  */
 export function pickConsultProvider(mgr: ProviderManager, want?: string): ProviderName {
 	if (want) {
-		if (!mgr.isKnownProvider(want)) throw new Error(`routing.consultProvider "${want}" is not a known provider.`);
+		if (!mgr.isKnownProvider(want))
+			throw new Error(`routing.consultProvider "${want}" is not a known provider.`);
 		return want;
 	}
 	const active = mgr.getActiveProvider();
 	if (isCloudProvider(active)) return active.name;
-	const other = mgr
-		.listEnabledProviders()
-		.find((p) => isCloudProvider(p) && mgr.getApiKey(p.name));
+	const other = mgr.listEnabledProviders().find((p) => isCloudProvider(p) && mgr.getApiKey(p.name));
 	if (!other) {
 		throw new Error(
 			"No cloud provider is configured. Add a key with /provider, or set routing.consultProvider.",

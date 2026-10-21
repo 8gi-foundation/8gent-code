@@ -14,6 +14,7 @@ export type SlashCommand =
 	| "llama"
 	| "route"
 	| "privacy"
+	| "consult"
 	| "models"
 	| "voice"
 	| "theme"

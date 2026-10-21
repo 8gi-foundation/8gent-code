@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { describeCounts, createMasker } from "./mask";
+import { createMasker, describeCounts } from "./mask";
 
 // Built from pieces so no secret scanner mistakes a fixture for a real key.
 const SK = `sk-${"a1B2c3D4e5F6g7H8i9J0"}kLmN`;
@@ -20,7 +20,11 @@ describe("masker: each type is replaced and restored", () => {
 		["secret (github token)", `token ${GH}`, GH],
 		["secret (aws access key)", `aws ${AWS}`, AWS],
 		["secret (jwt)", `jwt ${JWT}`, JWT],
-		["secret (private key block)", "-----BEGIN RSA PRIVATE KEY-----\nMIIEabc\n-----END RSA PRIVATE KEY-----", "MIIEabc"],
+		[
+			"secret (private key block)",
+			"-----BEGIN RSA PRIVATE KEY-----\nMIIEabc\n-----END RSA PRIVATE KEY-----",
+			"MIIEabc",
+		],
 		["secret (key=value)", "DB_PASSWORD=hunter2hunter2", "hunter2hunter2"],
 		["secret (bearer)", "Authorization: Bearer abcdef0123456789abcdef", "abcdef0123456789abcdef"],
 		["email", `mail ${EMAIL} now`, EMAIL],
