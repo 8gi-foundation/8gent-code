@@ -1162,6 +1162,7 @@ export function App({
 	// Heard-only memory (#3428): only amend the reply this voice turn produced.
 	const voiceReplyRef = useRef(new VoiceReplyTracker());
 	const voiceChat = useVoiceChat({
+		onError: (msg) => addSystemMessage(`Voice chat: ${msg}`),
 		onAgentMessage: async (transcript) => {
 			voiceReplyRef.current.begin(agent && agentReady ? agent : null);
 			if (!agent || !agentReady) return "8gent not ready.";
@@ -7410,6 +7411,7 @@ export function App({
 													? "Thinking..."
 													: "Ready"}
 								</AppText>
+								{voiceChat.error ? <AppText color="red">{voiceChat.error}</AppText> : null}
 								{voiceMessages.map((m) => (
 									<Box key={m.id} flexDirection="column">
 										<MutedText>{m.role === "user" ? "You:" : "8gent:"}</MutedText>

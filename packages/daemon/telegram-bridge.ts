@@ -70,6 +70,7 @@ import {
 	sendVoiceNote,
 	writeVoiceState,
 } from "../telegram-bot/voice-mode";
+import { missingWhisperModelMessage, resolveWhisperModel } from "../voice/model-manager";
 import { type SpokenModel, capAtSentence, makeSpokenDraft } from "../voice/spoken-draft";
 import { recordTelegramPoll, registerTelegramBridge } from "./bridge-health";
 import { approvalTtlMs, bridgeSecret } from "./channel-approvals";
@@ -322,17 +323,16 @@ export async function tgSend(
 }
 
 /**
- * Local whisper.cpp model, largest first. `base.en` transcribes a short voice
- * note in well under a second on Apple Silicon, which is faster than the round
- * trip to any hosted Whisper would be.
+ * Directories searched for a local whisper.cpp model. Which file is used is
+ * decided by the shared resolver (largest installed first), the same one Ctrl+R
+ * and /voice chat use, so no file name is hardcoded here.
  */
-export function whisperModelPaths(): string[] {
-	return [
-		join(getDataDir(), "models", "whisper", "ggml-base.en.bin"),
-		join(getDataDir(), "models", "whisper", "ggml-tiny.bin"),
+export function whisperModelDirs(): { modelsDir: string; extraDirs: string[] } {
+	return {
+		modelsDir: join(getDataDir(), "models", "whisper"),
 		// Outside .8gent: the user's own ~/models folder, via the shared home resolver (#4111).
-		join(resolveHome(), "models", "ggml-base.en.bin"),
-	];
+		extraDirs: [join(resolveHome(), "models")],
+	};
 }
 
 /** Working directory for the bridge's delegation pool, under the data dir (was /app with no HOME; #4111). */
@@ -341,10 +341,7 @@ export function cosPoolWorkspace(): string {
 }
 
 function localWhisperModel(): string | null {
-	for (const m of whisperModelPaths()) {
-		if (existsSync(m)) return m;
-	}
-	return null;
+	return resolveWhisperModel(whisperModelDirs())?.path ?? null;
 }
 
 /** Per-stream output cap for runAsync, in bytes. Output past it is dropped and flagged. */
@@ -426,13 +423,16 @@ export function transcriptionLogLine(transcript: string, ms: number): string {
 	return `[telegram-bridge] voice transcription: chars=${transcript.length} ms=${ms}`;
 }
 
+/** Returned when no whisper model is installed; the fix command goes to the log. */
+export const VOICE_NO_MODEL = "[no local whisper model found - install one: see the bridge log]";
+
 /**
  * Bridge-authored status strings returned in place of a transcript. Anything
  * else that starts with "[" is model output (whisper tags such as "[Music]"
  * can be followed by real speech) and is never sent back into a chat.
  */
 const VOICE_SENTINELS = new Set([
-	"[no local whisper model found - expected ~/.8gent/models/whisper/ggml-base.en.bin]",
+	VOICE_NO_MODEL,
 	"[could not download voice message]",
 	"[voice message received - could not decode the audio]",
 	"[voice message received - transcription failed, please send as text]",
@@ -454,7 +454,8 @@ const VOICE_UNPROCESSED = "[voice message received - could not be processed, ple
 export async function transcribeVoice(token: string, fileId: string): Promise<string> {
 	const model = localWhisperModel();
 	if (!model) {
-		return "[no local whisper model found - expected ~/.8gent/models/whisper/ggml-base.en.bin]";
+		console.error(`[telegram-bridge] ${missingWhisperModelMessage(whisperModelDirs().modelsDir)}`);
+		return VOICE_NO_MODEL;
 	}
 
 	const fileRes = await fetch(`${TELEGRAM_API}${token}/getFile`, {

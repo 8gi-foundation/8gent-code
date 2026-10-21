@@ -24,7 +24,11 @@
 
 import { EventEmitter } from "node:events";
 import { getApiKey, isCloudAvailable, transcribeCloud } from "./cloud-transcriber.js";
-import { WhisperModelManager } from "./model-manager.js";
+import {
+	WhisperModelManager,
+	missingWhisperModelMessage,
+	resolveWhisperModel,
+} from "./model-manager.js";
 import { MicRecorder, checkSoxInstalled } from "./recorder.js";
 import { findWhisperBinary, transcribeLocal } from "./transcriber.js";
 import {
@@ -41,7 +45,13 @@ import { VoiceActivityDetector } from "./vad.js";
 
 // Re-export types and utilities
 export * from "./types.js";
-export { WhisperModelManager } from "./model-manager.js";
+export {
+	WhisperModelManager,
+	resolveWhisperModel,
+	missingWhisperModelMessage,
+	WHISPER_MODEL_RANK,
+	type ResolvedWhisperModel,
+} from "./model-manager.js";
 export { MicRecorder, checkSoxInstalled } from "./recorder.js";
 export { findWhisperBinary, transcribeLocal } from "./transcriber.js";
 export { transcribeCloud, isCloudAvailable } from "./cloud-transcriber.js";
@@ -397,6 +407,27 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 		return this.transcribeLocal(wavPath);
 	}
 
+	/**
+	 * Path of the whisper model to use: whichever is installed, largest first
+	 * (shared with /voice chat and the Telegram bridge). If none is installed,
+	 * downloads the configured one. Throws a plain message with the fix on failure.
+	 */
+	async ensureModelPath(): Promise<string> {
+		const found = resolveWhisperModel({
+			modelsDir: this.config.modelsPath,
+			language: this.config.language,
+		});
+		if (found) return found.path;
+		try {
+			return await this.modelManager.downloadModel(this.config.model);
+		} catch (err) {
+			const why = err instanceof Error ? err.message : "download failed";
+			throw new Error(
+				`${missingWhisperModelMessage(this.config.modelsPath)} (download said: ${why})`,
+			);
+		}
+	}
+
 	private async transcribeLocal(wavPath: string): Promise<TranscriptEvent | null> {
 		// Ensure we have the whisper binary
 		if (!this.whisperBinaryPath) {
@@ -411,17 +442,13 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 			return null;
 		}
 
-		// Ensure we have the model
-		const modelPath = this.modelManager.getModelPath(this.config.model);
-		if (!this.modelManager.isModelDownloaded(this.config.model)) {
-			// Auto-download the model
-			try {
-				await this.modelManager.downloadModel(this.config.model);
-			} catch (err) {
-				const message = err instanceof Error ? err.message : "Model download failed";
-				this.emitError("MODEL_NOT_DOWNLOADED", message);
-				return null;
-			}
+		let modelPath: string;
+		try {
+			modelPath = await this.ensureModelPath();
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Model download failed";
+			this.emitError("MODEL_NOT_DOWNLOADED", message);
+			return null;
 		}
 
 		return transcribeLocal(wavPath, {

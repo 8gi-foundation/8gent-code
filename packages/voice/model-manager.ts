@@ -6,10 +6,91 @@
  */
 
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { WHISPER_MODELS, type WhisperModelInfo, type WhisperModelName } from "./types.js";
+
+/**
+ * Whisper model files we will use, best first: larger beats smaller, and the
+ * English-only build beats the multilingual one at the same size.
+ */
+export const WHISPER_MODEL_RANK: ReadonlyArray<{ filename: string; name: WhisperModelName }> = [
+	{ filename: "ggml-small.en.bin", name: "small" },
+	{ filename: "ggml-small.bin", name: "small" },
+	{ filename: "ggml-base.en.bin", name: "base" },
+	{ filename: "ggml-base.bin", name: "base" },
+	{ filename: "ggml-tiny.en.bin", name: "tiny" },
+	{ filename: "ggml-tiny.bin", name: "tiny" },
+];
+
+export interface ResolvedWhisperModel {
+	path: string;
+	filename: string;
+	name: WhisperModelName;
+}
+
+export interface ResolveWhisperModelOptions {
+	/** Primary models directory (default ~/.8gent/models/whisper) */
+	modelsDir?: string;
+	/** Further directories to look in after the primary one */
+	extraDirs?: string[];
+	/** Transcription language; English-only (.en) models are skipped for any other */
+	language?: string;
+	/** Test seam */
+	exists?: (path: string) => boolean;
+}
+
+/**
+ * The single answer to "which whisper model do we use": whichever is installed,
+ * largest first. Ctrl+R dictation, /voice chat and the Telegram bridge all call
+ * this, so no surface depends on one hardcoded file name. Null when none exist.
+ */
+export function resolveWhisperModel(
+	opts: ResolveWhisperModelOptions = {},
+): ResolvedWhisperModel | null {
+	const exists = opts.exists ?? existsSync;
+	const dirs = [
+		resolveModelsPath(opts.modelsDir ?? "~/.8gent/models/whisper"),
+		...(opts.extraDirs ?? []),
+	];
+	const english = !opts.language || opts.language === "en";
+	// The primary (data) directory wins: its best model is used even when an
+	// extra directory holds a larger one. Extras are a fallback only.
+	for (const dir of dirs) {
+		for (const m of WHISPER_MODEL_RANK) {
+			if (!english && m.filename.endsWith(".en.bin")) continue;
+			const path = join(dir, m.filename);
+			if (!exists(path)) continue;
+			// A symlink that resolves outside its directory is not trusted as a model.
+			if (!opts.exists && !isInside(dir, path)) continue;
+			return { path, filename: m.filename, name: m.name };
+		}
+	}
+	return null;
+}
+
+function isInside(dir: string, file: string): boolean {
+	try {
+		const root = realpathSync(dir);
+		const real = realpathSync(file);
+		return real === root || real.startsWith(root.endsWith(sep) ? root : root + sep);
+	} catch {
+		return false;
+	}
+}
+
+/** Single-quote a string for a POSIX shell. */
+function shQuote(v: string): string {
+	return `'${v.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Plain-language message for "no whisper model installed", with the one command that fixes it. */
+export function missingWhisperModelMessage(modelsDir = "~/.8gent/models/whisper"): string {
+	const dir = resolveModelsPath(modelsDir);
+	const tiny = WHISPER_MODELS.tiny;
+	return `No whisper model is installed in ${dir}. Fix: mkdir -p ${shQuote(dir)} && curl -L -o ${shQuote(`${dir}/${tiny.filename}`)} ${tiny.url}`;
+}
 
 export interface ModelManagerEvents {
 	"download-start": [{ model: WhisperModelName; size: number }];

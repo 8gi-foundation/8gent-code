@@ -37,7 +37,7 @@ export async function findWhisperBinary(): Promise<string | null> {
 	const names = ["whisper-cpp", "whisper-cli", "whisper", "main"];
 	for (const name of names) {
 		try {
-			const proc = spawn(["which", name], { stdout: "pipe", stderr: "pipe" });
+			const proc = spawn(["which", name], { stdout: "pipe", stderr: "pipe", env: process.env });
 			const output = await new Response(proc.stdout).text();
 			const exitCode = await proc.exited;
 			if (exitCode === 0 && output.trim()) {
@@ -139,8 +139,6 @@ export async function transcribeLocal(
 		language, // language
 		"--no-timestamps", // no timestamps in output
 		"-nt", // no token timestamps
-		"--print-special",
-		"false",
 	];
 
 	if (threads) {
@@ -156,6 +154,7 @@ export async function transcribeLocal(
 	const proc = spawn([binaryPath, ...args], {
 		stdout: "pipe",
 		stderr: "pipe",
+		env: process.env,
 	});
 
 	// Race between process completion and timeout
