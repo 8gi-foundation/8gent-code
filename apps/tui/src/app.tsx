@@ -2564,6 +2564,17 @@ export function App({
 		]);
 	}, []);
 
+	// A cloud call is never silent (#4607): one line naming the provider and why.
+	useEffect(() => {
+		let off = () => {};
+		import("../../../packages/providers/locality-wire.js")
+			.then((m) => {
+				off = m.onCloudNotice((msg) => addSystemMessage(msg));
+			})
+			.catch(() => {});
+		return () => off();
+	}, [addSystemMessage]);
+
 	// Shared sessions (#3929). While linked, chat goes to a daemon session that
 	// the 8gent Browser panel (or another TUI) can sit on too, and this TUI shows
 	// what they send. Unlinked, the TUI runs its own in-process 8gent as before.

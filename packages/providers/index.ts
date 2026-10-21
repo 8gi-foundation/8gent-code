@@ -31,6 +31,7 @@ import {
 } from "./declared";
 import { type EffortTaskKind, applyEffortPolicy } from "./effort-policy";
 import { ModelFailover } from "./failover";
+import { installLocalityGuard, setProviderNamer } from "./locality-wire";
 import {
 	type ThinkingResolution,
 	resolveThinkingForRouting,
@@ -1666,6 +1667,20 @@ export {
 	type HostCliBinarySpec,
 	type HostCliAvailability,
 } from "./host-cli";
+
+// Sovereign meter (#4607): the one place every model request is checked and counted.
+setProviderNamer((hostPort, local) => {
+	try {
+		for (const p of getProviderManager().listProviders()) {
+			if (!p.baseUrl) continue;
+			if (new URL(p.baseUrl).host === hostPort) return p.name;
+		}
+	} catch {
+		// fall through to the host
+	}
+	return local ? `local:${hostPort}` : hostPort;
+});
+installLocalityGuard();
 
 export default {
 	getProviderManager,

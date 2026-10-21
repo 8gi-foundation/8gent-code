@@ -14,7 +14,17 @@
  * local-providers.ts. Nothing here names a model.
  */
 import { randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	closeSync,
+	fstatSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	readSync,
+	renameSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -132,8 +142,10 @@ export interface LedgerEntry {
 	local: boolean;
 	tokensIn: number;
 	tokensOut: number;
-	/** Approximate: prompt tokens x 4. The exact request size is not exposed by every endpoint. */
+	/** Request body size on the wire; 0 for local calls. */
 	bytesSent: number;
+	/** True when the endpoint sent no usage and the tokens are bytes / 4. */
+	est?: boolean;
 }
 
 /** One id per process, so /privacy can split "this session" from "today". */
@@ -143,10 +155,17 @@ const num = (n: unknown) =>
 	typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
 
 /** Build a line from numbers and a provider name only. There is no field for text. */
-export function makeEntry(
-	call: { provider: string; local: boolean; tokensIn: number; tokensOut: number },
-	now: Date = new Date(),
-): LedgerEntry {
+export interface CallInfo {
+	provider: string;
+	local: boolean;
+	tokensIn: number;
+	tokensOut: number;
+	/** Exact request body bytes when known; else prompt tokens x 4. */
+	bytesSent?: number;
+	est?: boolean;
+}
+
+export function makeEntry(call: CallInfo, now: Date = new Date()): LedgerEntry {
 	const tokensIn = num(call.tokensIn);
 	return {
 		ts: now.toISOString(),
@@ -155,33 +174,64 @@ export function makeEntry(
 		local: call.local === true,
 		tokensIn,
 		tokensOut: num(call.tokensOut),
-		bytesSent: call.local ? 0 : tokensIn * 4,
+		bytesSent: call.local ? 0 : call.bytesSent !== undefined ? num(call.bytesSent) : tokensIn * 4,
+		...(call.est ? { est: true } : {}),
 	};
 }
 
+type LedgerListener = (e: LedgerEntry) => void;
+const ledgerListeners = new Set<LedgerListener>();
+/** The TUI hears every recorded call here, so the chip needs no file read per step. */
+export function onLedgerEntry(fn: LedgerListener): () => void {
+	ledgerListeners.add(fn);
+	return () => ledgerListeners.delete(fn);
+}
+
 /** Append one call. Never throws: a full disk must not break a model turn. Calls with no tokens are skipped. */
-export function recordCall(
-	call: { provider: string; local: boolean; tokensIn: number; tokensOut: number },
-	file?: string,
-): LedgerEntry | null {
+export function recordCall(call: CallInfo, file?: string): LedgerEntry | null {
 	const e = makeEntry(call);
-	if (e.tokensIn + e.tokensOut === 0) return null;
+	if (e.tokensIn + e.tokensOut === 0 && !e.bytesSent) return null;
 	// Under `bun test` the real ledger is never written unless a test names a file.
 	if (!file && process.env.NODE_ENV === "test") return null;
 	file = file ?? ledgerPath();
 	try {
 		mkdirSync(dirname(file), { recursive: true });
 		appendFileSync(file, `${JSON.stringify(e)}\n`);
+		for (const fn of ledgerListeners) {
+			try {
+				fn(e);
+			} catch {
+				// a listener must never break a call
+			}
+		}
 		return e;
 	} catch {
 		return null;
 	}
 }
 
-export function readLedger(file: string = ledgerPath()): LedgerEntry[] {
+/** Most the meter reads from the end of the ledger: a day of calls is far smaller. */
+export const LEDGER_TAIL_BYTES = 1024 * 1024;
+
+/** The last `maxBytes` of the ledger, whole lines only. Never reads the whole file. */
+export function readLedger(
+	file: string = ledgerPath(),
+	maxBytes: number = LEDGER_TAIL_BYTES,
+): LedgerEntry[] {
 	let raw = "";
 	try {
-		raw = readFileSync(file, "utf8");
+		const fd = openSync(file, "r");
+		try {
+			const size = fstatSync(fd).size;
+			const start = Math.max(0, size - maxBytes);
+			const buf = Buffer.alloc(size - start);
+			readSync(fd, buf, 0, buf.length, start);
+			raw = buf.toString("utf8");
+			// a cut start leaves a partial first line: drop it
+			if (start > 0) raw = raw.slice(raw.indexOf("\n") + 1);
+		} finally {
+			closeSync(fd);
+		}
 	} catch {
 		return [];
 	}

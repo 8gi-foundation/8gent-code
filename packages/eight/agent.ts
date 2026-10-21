@@ -2059,9 +2059,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
-	 * Sovereign meter (#4607): every model call, native or text-tool, ends in one
-	 * onStepFinish carrying real usage. Wrapping it here is the single place a call
-	 * is written to ~/.8gent/locality.jsonl (numbers and provider only, no text).
+	 * Sovereign meter (#4607): fetch-based calls are counted at the wire
+	 * (packages/providers/locality-wire.ts). Providers that never touch the
+	 * network (the Apple on-device model, host CLIs) are on this machine and have
+	 * no wire, so their steps are counted here from the usage they report.
 	 */
 	private withLocalityLedger(events: AgentEventCallbacks): AgentEventCallbacks {
 		const inner = events.onStepFinish;
@@ -2070,10 +2071,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			onStepFinish: (event) => {
 				try {
 					const u = event.usage;
-					if (u && u.promptTokens + u.completionTokens > 0) {
+					const rt = this.config.runtime as string;
+					if (
+						u &&
+						u.promptTokens + u.completionTokens > 0 &&
+						(rt === "apple-foundation" || rt.startsWith("host-cli"))
+					) {
 						recordCall({
-							provider: this.config.runtime as string,
-							local: runsOnBox(this.config.runtime as string, this.config.baseUrl),
+							provider: rt,
+							local: true,
 							tokensIn: u.promptTokens,
 							tokensOut: u.completionTokens,
 						});
