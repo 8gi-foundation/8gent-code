@@ -169,6 +169,7 @@ const SETUP_PROVIDER_NAMES: Record<string, string> = {
 import { findPlanFile } from "../../../packages/ai/plan-file.js";
 import { bunFlagsFor, safeBunFlags } from "../../../packages/core/bun-flags.js";
 import {
+	dotenvKeyIsBlocked,
 	onRunCommandUnsandboxed,
 	runCommandSandboxStatus,
 	sandboxFooterReason,
