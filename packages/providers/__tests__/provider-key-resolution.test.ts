@@ -222,23 +222,174 @@ describe("a cloned repo's .env cannot redirect a key (8SO, #4622)", () => {
 		expect(new URL(seen[0][0]).host).toBe("api.minimax.io");
 	});
 
-	test("the .env loader skips EIGHT_*, *_BASE_URL and security keys", async () => {
-		const { dotenvKeyIsBlocked } = await import("../../permissions/run-command-sandbox");
+	test("the .env loader is an allowlist: only provider key variables pass", async () => {
+		const { dotenvKeyIsAllowed } = await import("../../permissions/run-command-sandbox");
+		const names = new Set(allKeyEnvs());
+		for (const k of ["MINIMAX_API_KEY", "OPENROUTER_API_KEY", "SOMETHING_NEW_API_KEY"])
+			expect(dotenvKeyIsAllowed(k, names), k).toBe(true);
 		for (const k of [
+			"HTTPS_PROXY",
+			"https_proxy",
+			"HTTP_PROXY",
+			"ALL_PROXY",
+			"NODE_TLS_REJECT_UNAUTHORIZED",
+			"NODE_EXTRA_CA_CERTS",
 			"EIGHT_DATA_DIR",
 			"EIGHT_PROVIDERS_SETTINGS_PATH",
-			"EIGHT_ANYTHING",
 			"MINIMAX_BASE_URL",
 			"LMSTUDIO_BASE_URL",
 			"APFEL_BASE_URL",
 			"HOME",
+			"eight_data_dir",
+			"minimax_api_key",
 		])
-			expect(dotenvKeyIsBlocked(k), k).toBe(true);
-		expect(dotenvKeyIsBlocked("MINIMAX_API_KEY")).toBe(false);
+			expect(dotenvKeyIsAllowed(k, names), k).toBe(false);
+	});
+
+	test("security keys are matched case-insensitively (Windows env names)", async () => {
+		const { snapshotSecurityEnv } = await import("../../permissions/run-command-sandbox");
+		const snap = snapshotSecurityEnv({ EIGHT_DATA_DIR: "/x" }, new Set(["eight_data_dir"]));
+		expect(snap.values.EIGHT_DATA_DIR).toBeUndefined();
+		expect(snap.ignored).toContain("EIGHT_DATA_DIR");
+	});
+
+	test("a hostile .env with a proxy and TLS-off never routes the key: dropped at load, local proxy gets no connection", async () => {
+		const net = await import("node:net");
+		let connections = 0;
+		const srv = net.createServer((sock) => {
+			connections++;
+			sock.destroy();
+		});
+		await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+		const port = (srv.address() as { port: number }).port;
+		const repo = path.join(home, "hostile");
+		fs.mkdirSync(repo);
+		fs.writeFileSync(
+			path.join(repo, ".env"),
+			`HTTPS_PROXY=http://127.0.0.1:${port}\nHTTP_PROXY=http://127.0.0.1:${port}\nhttps_proxy=http://127.0.0.1:${port}\nNODE_TLS_REJECT_UNAUTHORIZED=0\n`,
+		);
+		const root = path.resolve(import.meta.dir, "../../..");
+		const script = `
+			import { droppedNetworkEnv } from ${JSON.stringify(path.join(root, "packages/permissions/run-command-sandbox"))};
+			import { guardedKeyedFetch } from ${JSON.stringify(path.join(root, "packages/ai/providers"))};
+			const f = guardedKeyedFetch(fetch, "fake-key-not-real");
+			try { await f("http://127.0.0.1:1/v1/x", { headers: { authorization: "Bearer fake-key-not-real" }, signal: AbortSignal.timeout(2000) }); } catch (e) {}
+			console.log(JSON.stringify({ dropped: droppedNetworkEnv, left: [process.env.HTTPS_PROXY, process.env.HTTP_PROXY, process.env.https_proxy, process.env.NODE_TLS_REJECT_UNAUTHORIZED] }));
+		`;
+		const r = Bun.spawnSync(["bun", "-e", script], {
+			cwd: repo,
+			env: {
+				PATH: process.env.PATH ?? "",
+				HOME: path.join(home, "h2"),
+				TMPDIR: process.env.TMPDIR ?? "",
+				NODE_ENV: "production",
+			},
+		});
+		srv.close();
+		const out = JSON.parse(r.stdout.toString().trim().split("\n").pop() ?? "{}") as {
+			dropped: string[];
+			left: unknown[];
+		};
+		expect(out.dropped.sort()).toEqual(
+			["HTTPS_PROXY", "HTTP_PROXY", "NODE_TLS_REJECT_UNAUTHORIZED", "https_proxy"].sort(),
+		);
+		expect(out.left).toEqual([null, null, null, null]);
+		expect(connections).toBe(0);
+	});
+
+	test("an endpoint override the user wrote in ~/.8gent/keys.env is honoured; a project .env one is dropped", async () => {
+		const { trustedEnvValue, userDotenvCandidates, projectDotenvCandidates } = await import(
+			"../../permissions/run-command-sandbox"
+		);
+		const env = { MINIMAX_BASE_URL: "https://api.minimaxi.com/v1" };
+		expect(trustedEnvValue("MINIMAX_BASE_URL", env, new Set())).toBe("https://api.minimaxi.com/v1");
+		expect(trustedEnvValue("MINIMAX_BASE_URL", env, new Set(["MINIMAX_BASE_URL"]))).toBeUndefined();
+		expect(trustedEnvValue("MINIMAX_BASE_URL", env, new Set(["minimax_base_url"]))).toBeUndefined();
+		expect(userDotenvCandidates("/h").some((f) => f.endsWith("keys.env"))).toBe(true);
+		expect(projectDotenvCandidates("/p").some((f) => f.endsWith("keys.env"))).toBe(false);
+	});
+});
+
+describe("settings trust is a real condition (#4622)", () => {
+	test("settingsFileIsTrusted: real file in the user dir yes; symlink out, outside dir no; explicit or shell env yes", async () => {
+		const { settingsFileIsTrusted } = await import("../index");
+		const userDir = path.join(home, "u");
+		const other = path.join(home, "other");
+		fs.mkdirSync(userDir);
+		fs.mkdirSync(other);
+		const real = path.join(userDir, "providers.json");
+		fs.writeFileSync(real, "{}");
+		const outside = path.join(other, "providers.json");
+		fs.writeFileSync(outside, "{}");
+		const link = path.join(userDir, "linked.json");
+		fs.symlinkSync(outside, link);
+		const o = { explicit: false, fromTrustedEnv: false, userDirs: [userDir] };
+		expect(settingsFileIsTrusted(real, o)).toBe(true);
+		expect(settingsFileIsTrusted(path.join(userDir, "missing.json"), o)).toBe(true);
+		expect(settingsFileIsTrusted(link, o)).toBe(false);
+		expect(settingsFileIsTrusted(outside, o)).toBe(false);
+		expect(settingsFileIsTrusted(outside, { ...o, explicit: true })).toBe(true);
+		expect(settingsFileIsTrusted(outside, { ...o, fromTrustedEnv: true })).toBe(true);
+	});
+
+	test("an untrusted providers.json moving minimax gets no key; the origin (not just host) is compared", () => {
+		const other = path.join(home, "elsewhere");
+		fs.mkdirSync(other);
+		const target = path.join(other, "providers.json");
+		fs.writeFileSync(
+			target,
+			JSON.stringify({ providers: { minimax: { baseUrl: "http://api.minimax.io/v1" } } }),
+		);
+		fs.symlinkSync(target, path.join(home, "providers.json"));
+		resetProviderManager();
+		process.env.MINIMAX_API_KEY = "fake-minimax-key-not-real";
+		const pm = getProviderManager();
+		expect(pm.settingsTrusted).toBe(false);
+		// same host, different scheme: an origin mismatch
+		expect(pm.keyWithheldReason("minimax")).toContain("not its default endpoint");
+		expect(resolveProviderKey("minimax")).toBeUndefined();
+	});
+
+	test("a session baseURL on another origin never receives the registry key", async () => {
+		process.env.MINIMAX_API_KEY = "fake-minimax-key-not-real";
+		const seen: Seen[] = [];
+		mockFetch(seen);
+		const model = createModel({
+			name: "minimax",
+			model: "m",
+			baseURL: "https://other.example/v1",
+		}) as unknown as {
+			doGenerate: (o: unknown) => Promise<unknown>;
+		};
+		await expect(
+			model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }] }),
+		).rejects.toThrow("No API key for minimax");
+		expect(seen.length).toBe(0);
 	});
 });
 
 describe("hardening", () => {
+	test("a 401 that echoes the key is scrubbed at the SDK error boundary", async () => {
+		process.env.MINIMAX_API_KEY = "fake-minimax-key-not-real";
+		globalThis.fetch = (async () =>
+			new Response(
+				JSON.stringify({
+					error: "bad key fake-minimax-key-not-real; Bearer fake-minimax-key-not-real",
+				}),
+				{
+					status: 401,
+					headers: { "content-type": "application/json" },
+				},
+			)) as unknown as typeof fetch;
+		const e = (await call("minimax").then(
+			() => null,
+			(x) => x,
+		)) as (Error & { responseBody?: string }) | null;
+		expect(e).not.toBeNull();
+		const all = `${e?.message} ${e?.responseBody ?? ""} ${e?.stack ?? ""}`;
+		expect(all).not.toContain("fake-minimax-key-not-real");
+	});
+
 	test("Bearer tokens and the key value are scrubbed from errors", async () => {
 		globalThis.fetch = (async () => {
 			throw new Error(

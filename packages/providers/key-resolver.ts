@@ -13,51 +13,19 @@
  */
 import { getProviderManager } from "./index";
 import { isLocalProvider } from "./local-providers";
-import { emitNotice } from "./locality-wire";
 
-function hostOf(url: string | undefined): string {
-	try {
-		return new URL(url ?? "").host;
-	} catch {
-		return "";
-	}
-}
-
-/**
- * Why this provider's key is not released, or undefined when it is. The key goes
- * only to the provider's compiled-in host, unless the user's own data dir moved
- * it (a custom endpoint they wrote). A providers.json from anywhere else, such
- * as one a cloned repo's .env pointed us at, never gets a key (#4622).
- */
+/** Why this provider's key is withheld, or undefined (the manager decides, on every key read). */
 export function keyWithheldReason(name: string): string | undefined {
 	try {
-		const pm = getProviderManager();
-		const compiled = pm.compiledBaseUrl(name);
-		const effective = hostOf(pm.getProvider(name).baseUrl);
-		if (pm.settingsTrusted) return undefined;
-		if (compiled && hostOf(compiled) === effective) return undefined;
-		if (!compiled && !effective) return undefined;
-		return `${name} points at ${effective || "an unknown host"}, which is not its default host${
-			compiled ? ` (${hostOf(compiled)})` : ""
-		}, and that setting did not come from your own ~/.8gent folder`;
+		return getProviderManager().keyWithheldReason(name);
 	} catch {
 		return undefined;
 	}
 }
 
-const noticed = new Set<string>();
-
 /** This provider's key, or undefined. Reads only this provider's own entry. */
 export function resolveProviderKey(name: string): string | undefined {
 	try {
-		const why = keyWithheldReason(name);
-		if (why) {
-			if (!noticed.has(why)) {
-				noticed.add(why);
-				emitNotice(`Key for ${name} not sent: ${why}.`);
-			}
-			return undefined;
-		}
 		return getProviderManager().getApiKey(name)?.trim() || undefined;
 	} catch {
 		return undefined;

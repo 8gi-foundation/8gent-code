@@ -8,7 +8,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
-import { trustedEnvValue } from "../permissions/run-command-sandbox";
+import { trustedEnvValue, trustedProxyFor } from "../permissions/run-command-sandbox";
 import {
 	missingKeyMessage,
 	resolveProviderBaseUrl,
@@ -84,7 +84,11 @@ export function createModel(config: ProviderConfig): LanguageModel {
 		);
 	}
 	const baseURL = config.baseURL || defaultBaseUrl(config.name);
-	const apiKey = config.apiKey || getApiKeyFromEnv(config.name);
+	// The registry's key goes only to the registry's own origin: a session
+	// baseURL elsewhere never receives it (#4622). A key the host passed in
+	// explicitly (config.apiKey) is that session's own and is used as given.
+	const resolved = config.apiKey ? undefined : getApiKeyFromEnv(config.name);
+	const apiKey = config.apiKey || (registryKeyMayGo(config.name, baseURL) ? resolved : undefined);
 
 	const provider = createOpenAICompatible({
 		name: config.name,
@@ -128,7 +132,63 @@ export function createModel(config: ProviderConfig): LanguageModel {
 			: {}),
 	});
 
-	return provider(config.model);
+	return scrubModelErrors(provider(config.model), apiKey);
+}
+
+function originOf(url: string | undefined): string {
+	try {
+		return new URL(url ?? "").origin;
+	} catch {
+		return "";
+	}
+}
+
+/** True when `baseURL` is the origin the registry names for this provider. */
+function registryKeyMayGo(name: string, baseURL: string | undefined): boolean {
+	if (KEYLESS_PROVIDERS.has(name)) return true; // placeholder values, not secrets
+	const registry = originOf(resolveProviderBaseUrl(name) ?? defaultBaseUrl(name));
+	return registry !== "" && originOf(baseURL) === registry;
+}
+
+/** Scrub the key from every string an SDK error carries (message, response body, stack). */
+function scrubErrorFields(err: unknown, apiKey: string | undefined): void {
+	if (!(err instanceof Error)) return;
+	const e = err as unknown as Record<string, unknown>;
+	for (const f of ["message", "stack", "responseBody", "url"]) {
+		if (typeof e[f] === "string") {
+			try {
+				e[f] = scrubKey(e[f] as string, apiKey);
+			} catch {
+				/* read-only field: leave it */
+			}
+		}
+	}
+	if (err.cause) scrubErrorFields(err.cause, apiKey);
+}
+
+/**
+ * The SDK builds its error (with the response body) after our fetch returns, and
+ * a provider may echo the key in a 401 body. Errors from a call are scrubbed at
+ * this boundary too (#4622).
+ */
+function scrubModelErrors(model: LanguageModel, apiKey: string | undefined): LanguageModel {
+	if (!apiKey || typeof model !== "object" || model === null) return model;
+	return new Proxy(model as object, {
+		get(target, prop) {
+			const v = Reflect.get(target, prop, target);
+			if ((prop === "doGenerate" || prop === "doStream") && typeof v === "function") {
+				return async (...a: unknown[]) => {
+					try {
+						return await (v as (...x: unknown[]) => unknown).apply(target, a);
+					} catch (err) {
+						scrubErrorFields(err, apiKey);
+						throw err;
+					}
+				};
+			}
+			return typeof v === "function" ? (v as (...x: unknown[]) => unknown).bind(target) : v;
+		},
+	}) as LanguageModel;
 }
 
 const REDIRECT_CODES = new Set([301, 302, 303, 307, 308]);
@@ -140,6 +200,23 @@ export function scrubKey(text: string, apiKey?: string): string {
 	const k = apiKey?.trim();
 	if (k) out = out.split(k).join("[REDACTED]");
 	return out;
+}
+
+/** A failed reply's body with the key (and any Bearer token) removed, for providers that echo it. */
+async function scrubErrorBody(res: Response, apiKey: string | undefined): Promise<Response> {
+	if (res.ok || !apiKey) return res;
+	try {
+		const text = await res.clone().text();
+		const clean = scrubKey(text, apiKey);
+		if (clean === text) return res;
+		return new Response(clean, {
+			status: res.status,
+			statusText: res.statusText,
+			headers: res.headers,
+		});
+	} catch {
+		return res;
+	}
 }
 
 /**
@@ -154,11 +231,19 @@ export function guardedKeyedFetch(base: typeof fetch, apiKey: string | undefined
 		try {
 			let url = input instanceof Request ? input.url : String(input);
 			const origin = new URL(url).origin;
-			let cur: RequestInit = { ...(init ?? {}), redirect: "manual" };
+			// TLS is always verified and the proxy is the load-time one: a .env that
+			// set NODE_TLS_REJECT_UNAUTHORIZED or HTTPS_PROXY cannot route the key (#4622).
+			const proxy = trustedProxyFor(url);
+			let cur: RequestInit = {
+				...(init ?? {}),
+				redirect: "manual",
+				tls: { rejectUnauthorized: true },
+				...(proxy ? { proxy } : {}),
+			} as RequestInit;
 			for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
 				const res = await base(hop === 0 ? input : url, cur);
 				const loc = res.headers.get("location");
-				if (!REDIRECT_CODES.has(res.status) || !loc) return res;
+				if (!REDIRECT_CODES.has(res.status) || !loc) return await scrubErrorBody(res, apiKey);
 				const next = new URL(loc, url);
 				if (next.origin !== origin) {
 					throw new Error(

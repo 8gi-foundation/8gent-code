@@ -132,21 +132,32 @@ export interface SecurityEnv {
 	ignored: SecurityKey[];
 }
 
+/**
+ * The .env files that belong to a PROJECT: Bun's cwd files and the repo root's.
+ * A cloned repo controls these, so nothing in them is the user's choice (#4622).
+ */
+export function projectDotenvCandidates(cwd: string = process.cwd()): string[] {
+	const names = [".env", ".env.local"];
+	for (const mode of ["development", "production", "test"])
+		names.push(`.env.${mode}`, `.env.${mode}.local`);
+	return [...names.map((n) => path.join(cwd, n)), path.resolve(import.meta.dirname, "../../.env")];
+}
+
+/** The user's own shell-style env files under ~/.8gent. */
+export function userDotenvCandidates(home: string = os.homedir()): string[] {
+	return [
+		path.join(home, ".8gent", ".env"),
+		// The keys file is shell-style too: an EIGHT_DATA_DIR in it is not trusted env (#4132, 8SO).
+		path.join(home, ".8gent", "keys.env"),
+	];
+}
+
 /** The .env files Bun (cwd, by NODE_ENV) or the TUI loader could have read. */
 export function dotenvCandidates(
 	cwd: string = process.cwd(),
 	home: string = os.homedir(),
 ): string[] {
-	const names = [".env", ".env.local"];
-	for (const mode of ["development", "production", "test"])
-		names.push(`.env.${mode}`, `.env.${mode}.local`);
-	return [
-		...names.map((n) => path.join(cwd, n)),
-		path.resolve(import.meta.dirname, "../../.env"),
-		path.join(home, ".8gent", ".env"),
-		// The keys file is shell-style too: an EIGHT_DATA_DIR in it is not trusted env (#4132, 8SO).
-		path.join(home, ".8gent", "keys.env"),
-	];
+	return [...projectDotenvCandidates(cwd), ...userDotenvCandidates(home)];
 }
 
 /** Keys declared (KEY=..., export KEY=..., any value form) in the given dotenv files. */
@@ -176,10 +187,12 @@ export function snapshotSecurityEnv(
 ): SecurityEnv {
 	const values: SecurityEnv["values"] = {};
 	const ignored: SecurityKey[] = [];
+	// Env names are case-insensitive on Windows: compare upper-cased (#4622).
+	const upper = new Set([...declared].map((d) => d.toUpperCase()));
 	for (const k of SECURITY_ENV_KEYS) {
 		const v = env[k];
 		if (v === undefined || v === "") continue;
-		if (declared.has(k) && !(k === "EIGHT_SEATBELT" && v === "require")) ignored.push(k);
+		if (upper.has(k) && !(k === "EIGHT_SEATBELT" && v === "require")) ignored.push(k);
 		else values[k] = v;
 	}
 	return { values, ignored };
@@ -194,33 +207,91 @@ function takeSnapshot(): SecurityEnv {
 let securityEnv: SecurityEnv = takeSnapshot();
 // Every key any .env file declares, read once at load for the same reason (#4622).
 let dotenvDeclaredAtLoad: Set<string> = dotenvDeclaredKeys(dotenvCandidates());
+// Only the project's files (cwd, repo root): the user's ~/.8gent/keys.env is theirs.
+let projectDeclaredAtLoad: Set<string> = dotenvDeclaredKeys(projectDotenvCandidates());
 
 /**
- * Keys the TUI's .env loader must never copy into process.env: anything in the
- * EIGHT_ namespace, any endpoint override (_BASE_URL) and every security key. A
- * cloned repo's .env could otherwise move where a provider key is sent (#4622).
+ * The names the TUI's project .env loader may copy into process.env: a provider
+ * key variable (a registry entry's apiKeyEnv, or any NAME_API_KEY). Everything
+ * else is dropped. A denylist missed HTTPS_PROXY and NODE_TLS_REJECT_UNAUTHORIZED,
+ * which let a cloned repo's .env route the Bearer key through its own proxy (#4622).
  */
-export function dotenvKeyIsBlocked(key: string): boolean {
-	return (
-		/^EIGHT_/i.test(key) ||
-		/_BASE_URL$/i.test(key) ||
-		(SECURITY_ENV_KEYS as readonly string[]).includes(key)
-	);
+export function dotenvKeyIsAllowed(key: string, registryKeyEnvs: ReadonlySet<string>): boolean {
+	return registryKeyEnvs.has(key) || /^[A-Z0-9_]+_API_KEY$/.test(key);
+}
+
+/** Variables that decide where a request goes or whether its TLS is checked. */
+const NETWORK_ENV_KEYS = [
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"ALL_PROXY",
+	"NO_PROXY",
+	"NODE_TLS_REJECT_UNAUTHORIZED",
+	"NODE_EXTRA_CA_CERTS",
+	"SSL_CERT_FILE",
+	"SSL_CERT_DIR",
+] as const;
+
+/**
+ * Pure: the process.env names to delete because a PROJECT .env declared them.
+ * Bun loads the cwd .env before any code runs and its fetch reads these at call
+ * time, so they are removed here, once, at load (#4622). Case-insensitive.
+ */
+export function hostileNetworkEnvNames(
+	envNames: Iterable<string>,
+	projectDeclared: ReadonlySet<string>,
+): string[] {
+	const declared = new Set([...projectDeclared].map((k) => k.toUpperCase()));
+	const out: string[] = [];
+	for (const name of envNames) {
+		const up = name.toUpperCase();
+		if ((NETWORK_ENV_KEYS as readonly string[]).includes(up) && declared.has(up)) out.push(name);
+	}
+	return out;
+}
+
+function dropHostileNetworkEnv(): string[] {
+	const names = hostileNetworkEnvNames(Object.keys(process.env), projectDeclaredAtLoad);
+	for (const n of names) Reflect.deleteProperty(process.env, n);
+	return names;
+}
+/** Names removed from process.env at load because a project .env set them. */
+export const droppedNetworkEnv: string[] = dropHostileNetworkEnv();
+
+/** The proxy for a URL as it stood after that load-time cleanup, or undefined. */
+const loadTimeProxy: Record<"http:" | "https:", string | undefined> = {
+	"http:": process.env.HTTP_PROXY || process.env.http_proxy || process.env.ALL_PROXY,
+	"https:":
+		process.env.HTTPS_PROXY ||
+		process.env.https_proxy ||
+		process.env.ALL_PROXY ||
+		process.env.all_proxy,
+};
+export function trustedProxyFor(url: string): string | undefined {
+	try {
+		const proto = new URL(url).protocol;
+		return proto === "https:" || proto === "http:" ? loadTimeProxy[proto] : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /**
- * An endpoint override from the environment, dropped when any .env file declares
+ * An endpoint override from the environment, dropped when a PROJECT .env declares
  * it (same rule as the security keys, #4615): a value a repo's .env could have
- * set is not the user's choice. Used for MINIMAX_BASE_URL, LMSTUDIO_BASE_URL and
- * APFEL_BASE_URL.
+ * set is not the user's choice. One the user wrote in their own ~/.8gent/keys.env
+ * is honoured. Used for MINIMAX_BASE_URL, LMSTUDIO_BASE_URL and APFEL_BASE_URL.
  */
 export function trustedEnvValue(
 	key: string,
 	env: Readonly<Record<string, string | undefined>> = process.env,
+	projectDeclared: ReadonlySet<string> = projectDeclaredAtLoad,
 ): string | undefined {
 	const v = env[key];
 	if (!v) return undefined;
-	return dotenvDeclaredAtLoad.has(key) ? undefined : v;
+	const up = key.toUpperCase();
+	for (const d of projectDeclared) if (d.toUpperCase() === up) return undefined;
+	return v;
 }
 
 /**
@@ -250,6 +321,7 @@ export function refreshSecurityEnvForTests(): void {
 	if (inTestMode()) {
 		securityEnv = takeSnapshot();
 		dotenvDeclaredAtLoad = dotenvDeclaredKeys(dotenvCandidates());
+		projectDeclaredAtLoad = dotenvDeclaredKeys(projectDotenvCandidates());
 	}
 }
 

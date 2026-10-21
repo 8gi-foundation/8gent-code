@@ -32,7 +32,7 @@ import {
 } from "./declared";
 import { type EffortTaskKind, applyEffortPolicy } from "./effort-policy";
 import { ModelFailover } from "./failover";
-import { installLocalityGuard, setProviderNamer } from "./locality-wire";
+import { emitNotice, installLocalityGuard, setProviderNamer } from "./locality-wire";
 import {
 	type ThinkingResolution,
 	resolveThinkingForRouting,
@@ -584,6 +584,38 @@ function builtinDefaults(name: ProviderName): ProviderConfig | undefined {
 	return PROVIDER_DEFAULTS[name as BuiltinProviderName];
 }
 
+/**
+ * Whether a providers.json may decide where a key is sent (#4622). Named by code
+ * or by a shell-set EIGHT_PROVIDERS_SETTINGS_PATH (never a .env: the snapshot
+ * drops those) it is the user's choice. Found under the user's own ~/.8gent or
+ * data dir it is trusted only if it is a real file that stays inside that
+ * directory once symlinks are resolved: a link planted there to somewhere else
+ * is not.
+ */
+export function settingsFileIsTrusted(
+	file: string,
+	o: { explicit: boolean; fromTrustedEnv: boolean; userDirs: string[] },
+): boolean {
+	if (o.explicit || o.fromTrustedEnv) return true;
+	try {
+		const target = fs.existsSync(file) ? fs.realpathSync(file) : null;
+		if (target && fs.lstatSync(file).isSymbolicLink()) return false;
+		const inside = (p: string, d: string) => {
+			let root: string;
+			try {
+				root = fs.realpathSync(d);
+			} catch {
+				return false;
+			}
+			return p === root || p.startsWith(root + path.sep);
+		};
+		const where = target ?? path.join(fs.realpathSync(path.dirname(file)), path.basename(file));
+		return o.userDirs.some((d) => inside(where, d));
+	} catch {
+		return false;
+	}
+}
+
 // ============================================
 // Provider Manager
 // ============================================
@@ -618,12 +650,11 @@ export class ProviderManager {
 			settingsPath ||
 			envPath ||
 			path.join(dataDir || path.join(os.homedir(), ".8gent"), "providers.json");
-		const userDirs = [path.join(os.homedir(), ".8gent"), dataDir].filter(Boolean) as string[];
-		const resolved = path.resolve(this.settingsPath);
-		this.settingsTrusted =
-			Boolean(settingsPath) ||
-			resolved === (envPath ? path.resolve(envPath) : "") ||
-			userDirs.some((d) => resolved.startsWith(path.resolve(d) + path.sep));
+		this.settingsTrusted = settingsFileIsTrusted(this.settingsPath, {
+			explicit: Boolean(settingsPath),
+			fromTrustedEnv: Boolean(envPath) && this.settingsPath === envPath,
+			userDirs: [path.join(os.homedir(), ".8gent"), dataDir].filter(Boolean) as string[],
+		});
 		this.settings = this.loadSettings();
 		// Declarations are parsed into a SEPARATE map and never written back over
 		// the user's entry. `settings.providers[name]` stays exactly as the user
@@ -776,7 +807,40 @@ export class ProviderManager {
 		delete entry.apiKey;
 	}
 
+	/**
+	 * Why this provider's key is held back, or undefined. The key goes only to
+	 * the provider's compiled-in ORIGIN, unless providers.json came from the
+	 * user's own data dir (a custom endpoint they wrote). Every key read passes
+	 * here, so no caller can skip it (#4622).
+	 */
+	keyWithheldReason(name: ProviderName): string | undefined {
+		if (this.settingsTrusted) return undefined;
+		const originOf = (u: string | undefined): string => {
+			try {
+				return new URL(u ?? "").origin;
+			} catch {
+				return "";
+			}
+		};
+		const compiled = this.compiledBaseUrl(name);
+		const effective = originOf(this.getProvider(name).baseUrl);
+		if (compiled && originOf(compiled) === effective) return undefined;
+		return `${name} points at ${effective || "an unknown host"}, which is not its default endpoint${
+			compiled ? ` (${originOf(compiled)})` : ""
+		}, and that setting did not come from your own ~/.8gent folder`;
+	}
+
+	private noticedWithheld = new Set<string>();
+
 	getApiKey(name: ProviderName): string | null {
+		const withheld = this.keyWithheldReason(name);
+		if (withheld) {
+			if (!this.noticedWithheld.has(withheld)) {
+				this.noticedWithheld.add(withheld);
+				emitNotice(`Key for ${name} not sent: ${withheld}.`);
+			}
+			return null;
+		}
 		// Try rotated profiles first (round-robin with cooldown awareness)
 		const rotated = this.authRotator.getKey(name);
 		if (rotated) return rotated;
