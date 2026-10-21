@@ -45,3 +45,33 @@ describe("createClient dispatch parity", () => {
 		expect(client).not.toBeInstanceOf(AnthropicClient);
 	});
 });
+
+describe("a hosted registry runtime (#4682)", () => {
+	test("minimax builds the OpenAI-compatible client, not an Ollama one", () => {
+		const client = createClient({ runtime: "minimax" as never, model: "m", apiKey: "k" });
+		expect(client).toBeInstanceOf(OpenRouterClient);
+	});
+
+	test("its readiness asks the provider's own endpoint with its key", async () => {
+		const seen: string[] = [];
+		const server = Bun.serve({
+			port: 0,
+			fetch(req) {
+				seen.push(`${new URL(req.url).pathname} ${req.headers.get("authorization")}`);
+				return Response.json({ data: [{ id: "m" }] });
+			},
+		});
+		try {
+			const client = createClient({
+				runtime: "minimax" as never,
+				model: "m",
+				apiKey: "placeholder-not-a-key",
+				baseUrl: `http://127.0.0.1:${server.port}/v1`,
+			});
+			expect(await client.readiness?.()).toEqual({ ok: true });
+			expect(seen).toEqual(["/v1/models Bearer placeholder-not-a-key"]);
+		} finally {
+			server.stop(true);
+		}
+	});
+});

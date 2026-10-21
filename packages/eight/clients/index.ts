@@ -2,19 +2,20 @@
  * LLM Client Factory & Exports
  */
 
+import { resolveLlamaServerUrl } from "../../local-model-server/select";
 import {
 	type RoleModelAssignment,
 	type RoleName,
 	loadRoleConfig,
 } from "../../orchestration/role-config";
 import { type ProviderCompat, type ProviderName, getProviderManager } from "../../providers";
+import { isHostedChatProvider } from "../../providers/key-resolver";
 import type { AgentConfig, LLMClient } from "../types";
 import { AnthropicClient } from "./anthropic";
 import { ApfelClient } from "./apfel";
 import { AppleFoundationClient } from "./apple-foundation";
 import { DeepSeekClient } from "./deepseek";
 import { LMStudioClient } from "./lmstudio";
-import { resolveLlamaServerUrl } from "../../local-model-server/select";
 import { OllamaClient } from "./ollama";
 import { OpenRouterClient } from "./openrouter";
 
@@ -141,6 +142,19 @@ export function createClient(config: AgentConfig): LLMClient {
 	if (config.runtime === "deepseek") {
 		const apiKey = config.apiKey || process.env.DEEPSEEK_API_KEY || "";
 		return new DeepSeekClient(config.model, apiKey);
+	}
+	// A hosted registry provider (minimax, ...) keeps its own name as its runtime (#4622).
+	// Its turns go through the AI-SDK path; this client answers readiness, which asked
+	// the local Ollama instead, so a working key read as "did not report ready" (#4682).
+	// Same endpoint and key as model discovery: the provider's registry entry.
+	if (isHostedChatProvider(config.runtime)) {
+		const pm = getProviderManager();
+		const apiKey = config.apiKey || pm.getApiKey(config.runtime as ProviderName) || "";
+		return new OpenRouterClient(
+			config.model,
+			apiKey,
+			config.baseUrl ?? pm.getProvider(config.runtime as ProviderName).baseUrl,
+		);
 	}
 	return new OllamaClient(config.model, config.baseUrl);
 }

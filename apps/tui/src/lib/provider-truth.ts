@@ -76,6 +76,22 @@ export function listBelongsToProvider(owner: string, current: string): boolean {
 }
 
 /**
+ * Whether a provider with no model has really run out of models: only once its own
+ * list has loaded, empty. Right after /provider the list is still on its way; when it
+ * lands with models, autoSelectModel picks one in the same render, so an empty model
+ * then is not a failure either (#4682).
+ */
+export function emptyModelIsFinal(opts: {
+	loading: boolean;
+	owner: string;
+	provider: string;
+	/** How many models the loaded list holds. */
+	listed: number;
+}): boolean {
+	return !opts.loading && listBelongsToProvider(opts.owner, opts.provider) && opts.listed === 0;
+}
+
+/**
  * The model to hold after the provider changes: the same provider keeps its
  * model, a different one starts empty so its own live list (or the user's
  * saved choice for it) decides. A model never follows a provider switch.
