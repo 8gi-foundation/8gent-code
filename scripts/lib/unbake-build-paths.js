@@ -29,9 +29,16 @@ function escapeRegExp(s) {
  * @param {string} source  bundle text
  * @param {string[]} roots absolute build roots to strip (checkout root, and the
  *                         real directory node_modules resolves into, if different)
+ * @param {{ meta?: string, up?: string }} [opts]
+ *   meta: the import.meta property holding the bundle's own directory ("dir" under Bun,
+ *         "dirname" on Node, where import.meta.dir is undefined).
+ *   up:   hops from the bundle's directory to the package root (dist/*.js is one,
+ *         dist/node/*.js is two).
  * @returns {{ code: string, replaced: number }}
  */
-export function unbakeBuildPaths(source, roots) {
+export function unbakeBuildPaths(source, roots, opts = {}) {
+	const meta = opts.meta ?? "dir";
+	const up = opts.up ?? "/..";
 	let code = source;
 	let replaced = 0;
 	// Longest root first so a nested root is never half-matched by its parent.
@@ -43,7 +50,7 @@ export function unbakeBuildPaths(source, roots) {
 		code = code.replace(re, (_m, rest = "") => {
 			replaced++;
 			const tail = rest.replace(/\\\\/g, "/");
-			return `(import.meta.dir + ${JSON.stringify(`/..${tail}`)})`;
+			return `(import.meta.${meta} + ${JSON.stringify(`${up}${tail}`)})`;
 		});
 	}
 	return { code, replaced };

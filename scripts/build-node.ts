@@ -9,7 +9,7 @@
  *
  *   bun scripts/build-node.ts
  */
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BunPlugin } from "bun";
 
@@ -34,15 +34,20 @@ const alias: BunPlugin = {
 		});
 		build.onResolve({ filter: /^bun$/ }, () => ({ path: join(compat, "bun-shim.ts") }));
 		build.onResolve({ filter: /^bun:sqlite$/ }, () => ({ path: join(compat, "bun-sqlite.ts") }));
-		// import.meta.dir / .path are Bun-only; Node's equivalents are dirname / filename.
-		// In a bundle both resolve to the bundle's own location, the same as a Bun bundle's unbaked paths.
+		// import.meta.dir / .path are Bun-only (undefined on Node, so a join() would silently
+		// resolve against the working directory). Each use is replaced with the value Bun gives
+		// the same file: its source folder, expressed from the bundle's own location. The bundle
+		// is dist/node/<name>.js, so the package root is import.meta.dirname + "/../..".
 		build.onLoad({ filter: /\.(ts|tsx)$/ }, async (args) => {
 			if (args.path.includes("/node_modules/")) return undefined;
 			const src = await Bun.file(args.path).text();
 			if (!/import\.meta\.(dir|path)\b/.test(src)) return undefined;
+			const rel = (p: string) => relative(root, p).split(sep).join("/");
+			const here = (p: string) =>
+				`(import.meta.dirname + ${JSON.stringify(`/../..${p ? `/${p}` : ""}`)})`;
 			const contents = src
-				.replace(/import\.meta\.dir\b(?!name)/g, "import.meta.dirname")
-				.replace(/import\.meta\.path\b/g, "import.meta.filename");
+				.replace(/import\.meta\.dir\b(?!name)/g, here(rel(dirname(args.path))))
+				.replace(/import\.meta\.path\b/g, here(rel(args.path)));
 			return { contents, loader: args.path.endsWith("x") ? "tsx" : "ts" };
 		});
 		build.onResolve({ filter: /^react-devtools-core$/ }, () => ({

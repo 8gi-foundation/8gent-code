@@ -32,7 +32,24 @@ try {
 for (const name of ["cli.js", "tui.js", "node/cli.js", "node/tui.js"]) {
 	const file = join(ROOT, "dist", name);
 	if (!existsSync(file)) continue;
-	const { code, replaced } = unbakeBuildPaths(readFileSync(file, "utf-8"), buildRoots);
+	const isNode = name.startsWith("node/");
+	// Node has no import.meta.dir; its bundles sit one level deeper (dist/node/).
+	const { code, replaced } = unbakeBuildPaths(
+		readFileSync(file, "utf-8"),
+		buildRoots,
+		isNode ? { meta: "dirname", up: "/../.." } : {},
+	);
+	if (isNode) {
+		// Bun-only import.meta.dir/.path are undefined on Node and silently resolve against the
+		// working directory (a hostile repo can plant files there). Never ship them.
+		const bad = code.match(/import\.meta\.(dir(?!name)|path)\b/);
+		if (bad) {
+			console.error(
+				`[build-finalize] dist/${name} still uses ${bad[0]}, which is undefined on Node`,
+			);
+			process.exit(1);
+		}
+	}
 	const left = findBakedRoots(code, buildRoots, [homedir()]);
 	if (left.length > 0) {
 		console.error(

@@ -11,10 +11,10 @@ import {
 	spawnSync as nodeSpawnSync,
 } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { accessSync, existsSync, constants as fsConstants, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
@@ -28,7 +28,40 @@ interface SpawnOpts {
 	stdin?: Stdio | Blob | string | Uint8Array;
 	stdout?: Stdio;
 	stderr?: Stdio;
+	timeout?: number;
+	killSignal?: NodeJS.Signals | number;
+	windowsHide?: boolean;
+	windowsVerbatimArguments?: boolean;
 	onExit?: (proc: unknown, code: number | null, signal: string | null) => void;
+}
+
+/** The options handed to node:child_process, kept pure so a test can assert the pass-through. */
+export function buildSpawnOptions(o: SpawnOpts, stdio: unknown[]) {
+	return {
+		cwd: o.cwd,
+		env: (o.env as NodeJS.ProcessEnv) ?? process.env,
+		stdio: stdio as Loose,
+		timeout: o.timeout,
+		killSignal: o.killSignal,
+		windowsHide: o.windowsHide,
+		windowsVerbatimArguments: o.windowsVerbatimArguments,
+	};
+}
+
+/** Bun throws when the executable is not found; Node would emit an async error. Match Bun. */
+function assertExecutable(argv: string[], o: SpawnOpts): void {
+	const bin = argv[0];
+	if (!bin) throw new TypeError("spawn: empty command");
+	const env = (o.env as NodeJS.ProcessEnv) ?? process.env;
+	const hasSep = bin.includes("/") || bin.includes("\\");
+	const found = hasSep
+		? isExecutableFile(resolvePath(o.cwd ?? process.cwd(), bin))
+		: which(bin, { PATH: env.PATH });
+	if (!found) {
+		const err = new Error(`Executable not found in $PATH: "${bin}"`) as NodeJS.ErrnoException;
+		err.code = "ENOENT";
+		throw err;
+	}
 }
 
 function stdioOf(v: Stdio | Blob | string | Uint8Array, dflt: "pipe" | "ignore" | "inherit") {
@@ -109,15 +142,16 @@ export function spawn(
 	opts?: SpawnOpts,
 ): NodeSubprocess {
 	const { argv, o } = normSpawn(cmd, opts);
-	const child = nodeSpawn(argv[0], argv.slice(1), {
-		cwd: o.cwd,
-		env: (o.env as NodeJS.ProcessEnv) ?? process.env,
-		stdio: [
+	assertExecutable(argv, o);
+	const child = nodeSpawn(
+		argv[0],
+		argv.slice(1),
+		buildSpawnOptions(o, [
 			stdioOf(o.stdin, "ignore"),
 			stdioOf(o.stdout, "pipe"),
 			stdioOf(o.stderr, "inherit"),
-		] as Loose,
-	});
+		]),
+	);
 	const input =
 		typeof o.stdin === "object" || typeof o.stdin === "string" ? (o.stdin as Loose) : undefined;
 	const proc = new NodeSubprocess(child, o.stdin === "pipe" ? undefined : input);
@@ -127,14 +161,13 @@ export function spawn(
 
 export function spawnSync(cmd: string[] | ({ cmd: string[] } & SpawnOpts), opts?: SpawnOpts) {
 	const { argv, o } = normSpawn(cmd, opts);
+	assertExecutable(argv, o);
 	const r = nodeSpawnSync(argv[0], argv.slice(1), {
-		cwd: o.cwd,
-		env: (o.env as NodeJS.ProcessEnv) ?? process.env,
-		stdio: [
+		...buildSpawnOptions(o, [
 			stdioOf(o.stdin, "ignore"),
 			stdioOf(o.stdout, "pipe"),
 			stdioOf(o.stderr, "pipe"),
-		] as Loose,
+		]),
 		input: typeof o.stdin === "string" || o.stdin instanceof Uint8Array ? o.stdin : undefined,
 	});
 	return {
@@ -196,15 +229,25 @@ async function write(dest: string | NodeFile, data: unknown): Promise<number> {
 	return buf.byteLength;
 }
 
-function which(bin: string, o: { PATH?: string } = {}): string | null {
+function isExecutableFile(p: string): boolean {
+	try {
+		if (!statSync(p).isFile()) return false;
+		accessSync(p, fsConstants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** First executable match on PATH. Empty or relative PATH entries are skipped: they mean "the cwd". */
+export function which(bin: string, o: { PATH?: string } = {}): string | null {
 	const exts =
 		process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";") : [""];
 	for (const dir of (o.PATH ?? process.env.PATH ?? "").split(delimiter)) {
+		if (!dir || !isAbsolute(dir)) continue;
 		for (const e of exts) {
 			const p = join(dir, bin + e);
-			try {
-				if (statSync(p).isFile()) return p;
-			} catch {}
+			if (isExecutableFile(p)) return p;
 		}
 	}
 	return null;
@@ -229,7 +272,24 @@ export function randomUUIDv7(): string {
 	return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
+const stdinShim = {
+	stream: () => Readable.toWeb(process.stdin) as unknown as ReadableStream<Uint8Array>,
+	async arrayBuffer(): Promise<ArrayBuffer> {
+		const chunks: Buffer[] = [];
+		for await (const c of process.stdin) chunks.push(Buffer.from(c));
+		const b = Buffer.concat(chunks);
+		return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+	},
+	async text(): Promise<string> {
+		return Buffer.from(await this.arrayBuffer()).toString("utf8");
+	},
+	async json(): Promise<Loose> {
+		return JSON.parse(await this.text());
+	},
+};
+
 export const BunShim = {
+	stdin: stdinShim,
 	version: "node-compat",
 	argv: process.argv,
 	env: process.env,

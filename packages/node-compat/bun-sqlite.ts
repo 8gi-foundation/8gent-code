@@ -49,8 +49,46 @@ function bind(args: unknown[]): { named?: Record<string, Bindable>; positional: 
 	return { positional: args.map(norm) };
 }
 
+/** True when `sql` holds more than one statement (a `;` followed by more SQL, outside strings/comments). */
+export function hasSeveralStatements(sql: string): boolean {
+	let i = 0;
+	let sawEnd = false;
+	while (i < sql.length) {
+		const c = sql[i];
+		const two = sql.slice(i, i + 2);
+		if (two === "--") {
+			const n = sql.indexOf("\n", i);
+			i = n === -1 ? sql.length : n + 1;
+		} else if (two === "/*") {
+			const n = sql.indexOf("*/", i + 2);
+			i = n === -1 ? sql.length : n + 2;
+		} else if (c === "'" || c === '"' || c === "`") {
+			let j = i + 1;
+			while (j < sql.length && !(sql[j] === c && sql[j + 1] !== c)) j += sql[j] === c ? 2 : 1;
+			if (sawEnd) return true;
+			i = j + 1;
+		} else if (c === "[") {
+			const n = sql.indexOf("]", i);
+			if (sawEnd) return true;
+			i = n === -1 ? sql.length : n + 1;
+		} else if (c === ";") {
+			sawEnd = true;
+			i++;
+		} else if (/\s/.test(c)) {
+			i++;
+		} else {
+			if (sawEnd) return true;
+			i++;
+		}
+	}
+	return false;
+}
+
 export class Statement<R = Loose> {
-	constructor(private readonly stmt: Loose) {}
+	private readonly stmt: Loose;
+	constructor(stmt: Loose) {
+		this.stmt = stmt;
+	}
 	private call(method: "get" | "all" | "run", args: unknown[]): Loose {
 		const { named, positional } = bind(args);
 		return named ? this.stmt[method](named, ...positional) : this.stmt[method](...positional);
@@ -97,21 +135,36 @@ export class Database {
 		this.db.exec(sql);
 	}
 	run(sql: string, ...args: unknown[]) {
+		if (hasSeveralStatements(sql)) {
+			// bun:sqlite runs every statement here; prepare() would silently run only the first.
+			if (args.length > 0)
+				throw new Error("db.run: bound parameters cannot be used with several statements");
+			this.db.exec(sql);
+			const r = this.db.prepare("SELECT changes() AS changes, last_insert_rowid() AS id").get();
+			return { changes: Number(r.changes), lastInsertRowid: r.id };
+		}
 		return this.prepare(sql).run(...args);
 	}
+	private depth = 0;
 	transaction<F extends (...a: Loose[]) => Loose>(
 		fn: F,
 	): F & { deferred: F; immediate: F; exclusive: F } {
+		// Like Bun: the outermost call is BEGIN/COMMIT, a nested call is a SAVEPOINT.
 		const wrap = (begin: string) =>
 			((...a: unknown[]) => {
-				this.db.exec(begin);
+				const nested = this.depth > 0;
+				const sp = `sp_${this.depth}`;
+				this.db.exec(nested ? `SAVEPOINT ${sp}` : begin);
+				this.depth++;
 				try {
 					const r = fn(...a);
-					this.db.exec("COMMIT");
+					this.depth--;
+					this.db.exec(nested ? `RELEASE ${sp}` : "COMMIT");
 					return r;
 				} catch (e) {
+					this.depth--;
 					try {
-						this.db.exec("ROLLBACK");
+						this.db.exec(nested ? `ROLLBACK TO ${sp}; RELEASE ${sp}` : "ROLLBACK");
 					} catch {}
 					throw e;
 				}
