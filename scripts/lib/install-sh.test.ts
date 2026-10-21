@@ -122,8 +122,14 @@ function tool(name: string, script: string) {
 	chmodSync(join(fakeBin, name), 0o755);
 }
 
-async function install(releasesUrl: string, env: Record<string, string> = {}, args: string[] = []) {
+async function install(
+	releasesUrl: string,
+	env: Record<string, string> = {},
+	args: string[] = [],
+	cwd?: string,
+) {
 	const p = Bun.spawn(["sh", SCRIPT, ...args], {
+		cwd,
 		stdout: "pipe",
 		stderr: "pipe",
 		env: {
@@ -684,23 +690,135 @@ describe("install.sh: Android / Termux", () => {
 		);
 	const termuxEnv = { PREFIX: "/data/data/com.termux/files/usr", TERMUX_VERSION: "0.118" };
 
-	test("names Android, stops before any download, and says what to do", async () => {
+	const TGZ = (v: string) => `8gi-foundation-8gent-code-${v}.tgz`;
+	const termuxRelease = (v = "0.20.0") =>
+		publish([
+			{ tag: `v${v}`, assets: { "8gent-linux-arm64": fakeBinary(v), [TGZ(v)]: `package ${v}` } },
+		]);
+	/** node, pkg and npm stubs that log to calls.log; node reports `nodeVersion` (none = no node). */
+	const termuxTools = (nodeVersion?: string) => {
+		const log = join(root, "calls.log");
+		const nodeBody = (v: string) => `echo ${v}`;
+		if (nodeVersion) tool("node", nodeBody(nodeVersion));
+		// pkg "installs" node 26 into the stub dir, as Termux's pkg would
+		tool(
+			"pkg",
+			`echo "pkg $*" >> "${log}"\nprintf '#!/bin/sh\\necho 26.0.0\\n' > "${fakeBin}/node"\nchmod 755 "${fakeBin}/node"\nprintf '#!/bin/sh\\necho "npm $*" >> "${log}"\\n' > "${fakeBin}/npm"\nchmod 755 "${fakeBin}/npm"`,
+		);
+		if (nodeVersion) tool("npm", `echo "npm $*" >> "${log}"`);
+		return () => (existsSync(log) ? readFileSync(log, "utf8") : "");
+	};
+
+	test("Termux with node present installs the release package with npm, no pkg, no binary", async () => {
 		termuxUname();
-		const url = one("0.20.0");
-		hits = 0;
-		const r = await install(url, termuxEnv);
-		expect(r.code).toBe(1);
-		expect(r.out).toContain("Android (Termux)");
-		expect(r.out).toContain("proot-distro");
-		expect(r.out).toContain("Nothing was installed");
+		const calls = termuxTools("26.0.0");
+		const r = await install(termuxRelease(), termuxEnv);
+		expect(r.code).toBe(0);
+		expect(r.out).toContain("Installed 8gent v0.20.0");
+		expect(r.out).toContain("8gent is ready");
+		expect(calls()).toMatch(/^npm i -g .*8gi-foundation-8gent-code-0\.20\.0\.tgz$/m);
+		expect(calls()).not.toContain("pkg");
 		expect(installed()).toBeNull();
 	});
 
-	test("--dry-run prints the decisions: android, bionic, linux-arm64, Termux prefix, no sudo", async () => {
+	test("Termux with no node installs nodejs with pkg first, then the package", async () => {
+		termuxUname();
+		const calls = termuxTools();
+		const r = await install(termuxRelease(), termuxEnv);
+		expect(r.code).toBe(0);
+		expect(calls()).toMatch(/^pkg install -y nodejs\nnpm i -g .*\.tgz$/m);
+	});
+
+	test("Termux with node older than 22.5 gets nodejs from pkg", async () => {
+		termuxUname();
+		const calls = termuxTools("20.11.0");
+		const r = await install(termuxRelease(), termuxEnv);
+		expect(r.code).toBe(0);
+		expect(calls()).toContain("pkg install -y nodejs");
+	});
+
+	test("Termux node 22.5.0 exactly is enough", async () => {
+		termuxUname();
+		const calls = termuxTools("22.5.0");
+		const r = await install(termuxRelease(), termuxEnv);
+		expect(r.code).toBe(0);
+		expect(calls()).not.toContain("pkg");
+	});
+
+	test("Termux resolves the newest release, or EIGHT_VERSION, never a hardcoded one", async () => {
+		termuxUname();
+		const calls = termuxTools("26.0.0");
+		const url = publish([
+			{
+				tag: "v0.21.0",
+				assets: { "8gent-linux-arm64": fakeBinary("0.21.0"), [TGZ("0.21.0")]: "b" },
+			},
+			{
+				tag: "v0.20.0",
+				assets: { "8gent-linux-arm64": fakeBinary("0.20.0"), [TGZ("0.20.0")]: "a" },
+			},
+		]);
+		expect((await install(url, termuxEnv)).code).toBe(0);
+		expect(calls()).toContain("8gi-foundation-8gent-code-0.21.0.tgz");
+		const pinned = await install(url, { ...termuxEnv, EIGHT_VERSION: "0.20.0" });
+		expect(pinned.code).toBe(0);
+		expect(calls()).toContain("8gi-foundation-8gent-code-0.20.0.tgz");
+	});
+
+	test("Termux refuses a package whose checksum does not match, and never runs npm", async () => {
+		termuxUname();
+		const calls = termuxTools("26.0.0");
+		const url = termuxRelease();
+		routes.set("/releases/download/v0.20.0/SHA256SUMS", {
+			body: `${"0".repeat(64)}  ${TGZ("0.20.0")}\n`,
+		});
+		const r = await install(url, termuxEnv);
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("checksum mismatch");
+		expect(calls()).toBe("");
+	});
+
+	test("Termux hands npm an absolute path to the verified package even when mktemp gives a relative one", async () => {
+		termuxUname();
+		const calls = termuxTools("26.0.0");
+		// GNU mktemp honours a relative TMPDIR; npm would read "dir/x.tgz" as a package spec.
+		tool(
+			"mktemp",
+			`if [ "$1" = -d ]; then d="rel.$$"; mkdir "$d"; echo "$d"; else exec /usr/bin/mktemp "$@"; fi`,
+		);
+		const r = await install(termuxRelease(), termuxEnv, [], root);
+		expect(r.code).toBe(0);
+		expect(calls()).toMatch(
+			/^npm i -g \/.*\/rel\.[0-9]+\/8gi-foundation-8gent-code-0\.20\.0\.tgz$/m,
+		);
+		expect(r.out).toContain("dependencies come from the npm registry");
+	});
+
+	test("Termux without a signing key says no attestation covers the package", async () => {
+		termuxUname();
+		termuxTools("26.0.0");
+		const r = await install(termuxRelease(), termuxEnv);
+		expect(r.code).toBe(0);
+		expect(r.out).toContain("no GitHub attestation covers the npm package");
+		expect(r.out).not.toContain("if gh is signed in");
+	});
+
+	test("Termux dies clearly when the release has no package", async () => {
+		termuxUname();
+		termuxTools("26.0.0");
+		const r = await install(
+			one("0.20.0", { assets: { "8gent-linux-arm64": fakeBinary("0.20.0") } }),
+			termuxEnv,
+		);
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("has no 8gi-foundation-8gent-code-0.20.0.tgz");
+	});
+
+	test("--dry-run prints the decisions: android, bionic, linux-arm64, Termux prefix, npm method", async () => {
 		termuxUname();
 		const r = await install(one("0.20.0"), { ...termuxEnv, EIGHT_INSTALL_DIR: "" }, ["--dry-run"]);
 		expect(r.code).toBe(0);
-		expect(r.out).toContain("a real run would stop here");
+		expect(r.out).toContain("method          : npm package (Termux");
 		expect(r.out).toContain("uname -s/-m/-o : Linux / aarch64 / Android");
 		expect(r.out).toContain("android         : yes");
 		expect(r.out).toContain("libc            : bionic");
