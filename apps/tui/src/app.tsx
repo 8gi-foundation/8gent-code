@@ -1197,6 +1197,7 @@ export function App({
 
 			try {
 				// Run D critic loop: Gemma 4 generates, qwen3:32b critiques, one retry if rejected
+				agent.allowReadsFromPerson(clean);
 				let response = await agent.chat(clean);
 				const { approved, feedback } = await critiqueResponse(clean, response || "");
 				if (!approved && feedback) {
@@ -3799,7 +3800,9 @@ export function App({
 					break;
 
 				case "allow-read":
-					addSystemMessage(runAllowReadCommand(args, process.cwd()));
+					addSystemMessage(
+						runAllowReadCommand(args, process.cwd(), (d) => agent?.allowReadDir(d) ?? null),
+					);
 					break;
 
 				case "copy":
@@ -6950,6 +6953,8 @@ export function App({
 					const modePrefix = agentMode !== "Planning" ? `[Mode: ${agentMode}] ` : "";
 					const img = imageInput.getAttachedImage();
 					setVerificationByTab((v) => ({ ...v, [tabId]: undefined }));
+					// The person's own typed line only (not a skill or shell expansion): its paths are readable this turn (#4715).
+					targetAgent?.allowReadsFromPerson(message);
 					const chatPromise = targetAgent.chat(
 						modePrefix + messageForAgent.trim(),
 						img?.base64,

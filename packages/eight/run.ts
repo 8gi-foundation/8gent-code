@@ -25,7 +25,6 @@ import { homedir } from "node:os";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
 import { resolveOllamaBaseUrl } from "../local-model-server/ollama-host";
-import { addReadAllowDir, resetReadAllow } from "../permissions/read-allow";
 import { readableModelName } from "../providers/model-reroute";
 import { autoSwitchLine, soleRunnableProvider } from "../providers/only-runnable";
 import type { TurnStop } from "./agent";
@@ -1077,10 +1076,6 @@ export async function runRunCommand(
 	const workspaceRoot = runWorkspaceRoot(opts);
 	const priorWorkspaceRoot = process.env.EIGHT_WORKSPACE_ROOT;
 	if (workspaceRoot) process.env.EIGHT_WORKSPACE_ROOT = workspaceRoot;
-	// Reads outside the working directory: only what --allow-read names; the prompt's own
-	// paths are added when the turn starts (Agent.chat). Per run, so cleared in `finally` (#4715).
-	resetReadAllow();
-	for (const d of opts.allowRead ?? []) addReadAllowDir(d, workspaceRoot ?? process.cwd());
 
 	let exitCode = 0;
 	// Read in the catch below: a native turn the watchdog aborts throws, and the
@@ -1156,6 +1151,9 @@ export async function runRunCommand(
 		// The check runs repo code, so it needs --yes until run_command is sandboxed (#3612).
 		const baseline = await baselineCheck({ cwd: workDir, run, consent: opts.yes });
 		const before = projectFingerprint(workDir);
+		// Reads outside the working directory: --allow-read folders, and the paths this prompt names (#4715).
+		for (const d of opts.allowRead ?? []) agent.allowReadDir(d);
+		agent.allowReadsFromPerson(opts.prompt);
 		const answer = await agent.chat(opts.prompt, image?.base64, image?.mimeType, image?.original);
 		// A turn the breaker or the watchdog cut off is not finished (#4172).
 		const firstStop = agent.getTurnStop();
@@ -1273,7 +1271,6 @@ export async function runRunCommand(
 			process.stderr.write(`Error: ${msg}\n`);
 		}
 	} finally {
-		resetReadAllow();
 		if (isStreamJson) {
 			console.log = originalConsoleLog;
 			console.info = originalConsoleInfo;

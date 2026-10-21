@@ -10,29 +10,67 @@
  * that path, and a second block on the same path ends the turn.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { validatePath } from "./path-guard";
 
-const entries = new Set<string>();
-const blocks = new Map<string, number>();
+/**
+ * One session's allowlist. It lives on the session's own object, so it ends with the session,
+ * and a turn runs inside it through runInReadScope. `prompt` is rebuilt every turn from that
+ * turn's own user message; `manual` holds --allow-read and /allow-read for the session.
+ */
+export class ReadScope {
+	prompt = new Set<string>();
+	manual = new Set<string>();
+	blocks = new Map<string, number>();
+	stop: string | null = null;
+	all(): Set<string> {
+		return new Set([...this.prompt, ...this.manual]);
+	}
+}
+
+const scopeStore = new AsyncLocalStorage<ReadScope>();
+/** Used when no session scope is active (tests, a bare executor). */
+const fallbackScope = new ReadScope();
+const cur = (): ReadScope => scopeStore.getStore() ?? fallbackScope;
+
+/** Run `fn` (a turn) with `scope` as the active allowlist. */
+export function runInReadScope<T>(scope: ReadScope, fn: () => T): T {
+	return scopeStore.run(scope, fn);
+}
 
 /** The sentence a boundary block hands the model. Exact text is part of the contract. */
 export const CANNOT_READ_TEXT = "This path cannot be read in this run. Tell the person and stop.";
 
-export function resetReadAllow(): void {
-	entries.clear();
-	blocks.clear();
+export function resetReadAllow(scope: ReadScope = cur()): void {
+	scope.prompt.clear();
+	scope.manual.clear();
+	scope.blocks.clear();
+	scope.stop = null;
 }
 
 export function readAllowEntries(): string[] {
-	return [...entries];
+	return [...cur().all()];
 }
 
-/** Credential-looking paths are never allowed, even inside a folder the person named. */
-const SECRET_PATH =
-	/(^|[\\/])(secrets?|\.ssh|\.aws|\.gnupg|\.env[^\\/]*|keys\.env|credentials[^\\/]*|id_(rsa|ed25519|ecdsa)[^\\/]*)([\\/]|$)/i;
+/**
+ * Credential-looking paths are never allowed, even inside a folder the person named: keys,
+ * tokens, env files, shell and cloud credentials, browser profiles, keychains, mail and
+ * messages, and the 8gent state that holds sessions and bot keys.
+ */
+const SECRET_PATH = new RegExp(
+	[
+		String.raw`(^|[\\/])(secrets?|\.ssh|\.aws|\.gnupg|\.netrc|\.npmrc|\.git-credentials|\.kube|\.docker|keychains|master\.passwd)([\\/]|$)`,
+		String.raw`(^|[\\/])(\.env[^\\/]*|[^\\/]*\.env|credentials[^\\/]*|id_(rsa|ed25519|ecdsa)[^\\/]*|ssh_host_[^\\/]*|[^\\/]*\.(pem|key|p12|binarycookies)|chat\.db[^\\/]*)([\\/]|$)`,
+		String.raw`\.config[\\/]gh([\\/]|$)`,
+		String.raw`\.8gent[\\/](telegram[^\\/]*|sessions|[^\\/]*token[^\\/]*)([\\/]|$)`,
+		String.raw`Application Support[\\/](Google|Chromium|BraveSoftware|Firefox|Microsoft Edge)([\\/]|$)`,
+		String.raw`Library[\\/](Cookies|Messages|Mail|Safari)([\\/]|$)`,
+	].join("|"),
+	"i",
+);
 
 /** True when `text` (a path or a command line) names a credential-looking path. */
 export function namesSecret(text: string): boolean {
@@ -45,9 +83,25 @@ function expand(p: string, home: string, cwd: string): string {
 	return isAbsolute(p) ? resolve(p) : resolve(cwd, p);
 }
 
-/** "/", home, or any folder above home: too wide to hand over for one named file. */
+/** System folders where a directory entry needs two more segments below the root to be allowed. */
+const SYSTEM_ROOTS = new Set(["etc", "var", "private", "Library", "System", "usr", "bin", "sbin"]);
+
+function segmentsBelow(dir: string, base: string): number {
+	return dir.slice(base.length).split(sep).filter(Boolean).length;
+}
+
+/**
+ * Too wide to hand over as a directory: "/", home and above, anything under home with fewer
+ * than 2 segments (so ~/.8gent, ~/Library, ~/Documents are out, ~/.8gent/inbox is in), another
+ * user's top folders, and the system roots. The caller falls back to the exact file.
+ */
 function tooBroad(dir: string, home: string): boolean {
-	return dir === sep || dir === home || home.startsWith(dir + sep);
+	if (dir === sep || home.startsWith(dir + sep) || dir === home) return true;
+	if (dir.startsWith(home + sep)) return segmentsBelow(dir, home) < 2;
+	const parts = dir.split(sep).filter(Boolean);
+	if (parts[0] === "Users") return parts.length < 4; // /Users/<other> and its direct children
+	if (SYSTEM_ROOTS.has(parts[0] ?? "")) return parts.length < 3;
+	return false;
 }
 
 /** Allow reads under `dir` (a --allow-read or /allow-read value). Returns the entry, or null when refused. */
@@ -59,7 +113,7 @@ export function addReadAllowDir(
 	const abs = expand(dir.trim(), home, cwd);
 	if (!abs || tooBroad(abs, home) || SECRET_PATH.test(abs)) return null;
 	if (!validatePath(abs, cwd, {}, "read").ok) return null;
-	entries.add(abs);
+	cur().manual.add(abs);
 	return abs;
 }
 
@@ -77,14 +131,18 @@ export function extractPromptPaths(text: string, home = homedir()): string[] {
 }
 
 /**
- * Add the folder of every path named in `text` (the file itself when its folder
- * is home or wider). Only text the person typed belongs here, never tool output.
+ * Rebuild this turn's allowlist from `text`: the folder of every path named (the file itself
+ * when its folder is too wide). The previous turn's prompt entries are dropped first. Only text
+ * the person typed belongs here, never tool output or text a model wrote.
  */
 export function allowReadsFromPrompt(
 	text: string,
 	cwd: string = process.cwd(),
 	home = homedir(),
 ): string[] {
+	const scope = cur();
+	scope.prompt.clear();
+	scope.blocks.clear();
 	const added: string[] = [];
 	for (const p of extractPromptPaths(text, home)) {
 		if (SECRET_PATH.test(p) || !validatePath(p, cwd, {}, "read").ok) continue;
@@ -95,7 +153,7 @@ export function allowReadsFromPrompt(
 		const base = isDir ? p : dirname(p);
 		const entry = tooBroad(base, home) ? (isDir ? null : p) : base;
 		if (entry) {
-			entries.add(entry);
+			scope.prompt.add(entry);
 			added.push(entry);
 		}
 	}
@@ -108,10 +166,10 @@ function under(abs: string, entry: string): boolean {
 
 /** True when `abs` (and its real path, so a link cannot lead out) lies under an allowed entry. */
 export function isReadAllowed(abs: string): boolean {
-	if (entries.size === 0) return false;
+	const list = [...cur().all()];
+	if (list.length === 0) return false;
 	const target = resolve(abs);
 	if (SECRET_PATH.test(target)) return false;
-	const list = [...entries];
 	if (!list.some((e) => under(target, e))) return false;
 	let real = target;
 	try {
@@ -119,6 +177,7 @@ export function isReadAllowed(abs: string): boolean {
 	} catch {
 		return true; // does not exist: the read itself reports that
 	}
+	if (SECRET_PATH.test(real)) return false;
 	return list.some((e) => {
 		try {
 			return under(real, realpathSync(e));
@@ -134,7 +193,7 @@ export function isReadAllowed(abs: string): boolean {
  */
 export function readAllowPrefixes(): string[] {
 	const out = new Set<string>();
-	for (const e of entries) {
+	for (const e of cur().all()) {
 		out.add(e);
 		try {
 			out.add(realpathSync(e));
@@ -149,6 +208,7 @@ export function readAllowPrefixes(): string[] {
  */
 export function noteBoundaryBlock(path: string): { text: string; end?: string } {
 	const key = resolve(path);
+	const blocks = cur().blocks;
 	const n = (blocks.get(key) ?? 0) + 1;
 	blocks.set(key, n);
 	const dir = dirname(key);
@@ -161,12 +221,10 @@ export function noteBoundaryBlock(path: string): { text: string; end?: string } 
 	};
 }
 
-let pendingStop: string | null = null;
-
 /** The plain reply a second boundary block set, once. The turn loop ends the turn with it. */
-export function takeBoundaryStop(): string | null {
-	const s = pendingStop;
-	pendingStop = null;
+export function takeBoundaryStop(scope: ReadScope = cur()): string | null {
+	const s = scope.stop;
+	scope.stop = null;
 	return s;
 }
 
@@ -182,20 +240,21 @@ export function terminalBoundaryText(text: unknown, cwd: string, home = homedir(
 		) ?? /^\[TOOLG8 BLOCKED\][^\n]*\[workspace-boundary\][^\n]*? -> (\S+)/.exec(text);
 	if (!m) return null;
 	const r = noteBoundaryBlock(expand(m[1], home, cwd));
-	if (r.end && pendingStop === null) pendingStop = r.end;
+	if (r.end && cur().stop === null) cur().stop = r.end;
 	return r.text;
 }
 
 /** The `/allow-read <dir>` TUI command. Returns the line to show. */
-export function runAllowReadCommand(args: string[], cwd: string = process.cwd()): string {
+export function runAllowReadCommand(
+	args: string[],
+	cwd: string = process.cwd(),
+	add: (dir: string) => string | null = (d) => addReadAllowDir(d, cwd),
+): string {
 	const dir = args.join(" ").trim();
 	if (!dir) {
-		const now = readAllowEntries();
-		return now.length
-			? `Readable outside this folder: ${now.join(", ")}. Usage: /allow-read <dir>`
-			: "Usage: /allow-read <dir>. Lets 8gent read files in that folder this session. Writes stay inside the working folder.";
+		return "Usage: /allow-read <dir>. Lets 8gent read files in that folder this session. Writes stay inside the working folder.";
 	}
-	const added = addReadAllowDir(dir, cwd);
+	const added = add(dir);
 	return added
 		? `Reading allowed under ${added} for this session. Writes stay inside the working folder.`
 		: `Not allowed: ${dir} is too wide, a protected path, or not a path.`;

@@ -217,6 +217,7 @@ Type your request, or:
 
 			// Regular chat
 			try {
+				agent.allowReadsFromPerson(trimmed);
 				const response = await agent.chat(trimmed);
 				console.log(`\n\x1b[32m${response}\x1b[0m`);
 			} catch (err) {

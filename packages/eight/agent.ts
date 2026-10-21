@@ -68,7 +68,13 @@ import {
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { effectivePermissionMode, systemOneEnvFor } from "../permissions/permission-mode";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
-import { allowReadsFromPrompt, takeBoundaryStop } from "../permissions/read-allow";
+import {
+	ReadScope,
+	addReadAllowDir,
+	allowReadsFromPrompt,
+	runInReadScope,
+	takeBoundaryStop,
+} from "../permissions/read-allow";
 import { startSystemOneWarmup } from "../permissions/system-one-gate";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { type ProviderName as ProviderRegistryName, getProviderManager } from "../providers";
@@ -448,6 +454,8 @@ export class Agent {
 	/** $TMPDIR/8gent-<session id>/ (#4711): created at start, removed in cleanup() and at process exit. */
 	private sessionScratchDir: string | null = null;
 	private scratchNoteSent = false;
+	/** This session's read allowlist; it ends with the session (#4715). */
+	private readScope = new ReadScope();
 	/** Session-scoped failover, only built with cache affinity on (#4500); off: a fresh one per turn. */
 	private affinityFailover: ModelFailover | null = null;
 	/** Entries the affinity failover marked down last turn; revived next turn so a blip is not sticky. */
@@ -1482,7 +1490,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					this.abort(presendStop);
 				}
 				// A second boundary block on one path ends the turn with a plain reply (#4715).
-				const boundaryStop = takeBoundaryStop();
+				const boundaryStop = takeBoundaryStop(this.readScope);
 				if (boundaryStop) {
 					if (breakerStop === null) breakerStop = boundaryStop;
 					this.abort({ kind: "circuit_breaker", reason: boundaryStop });
@@ -2138,40 +2146,58 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (route.action === "refuse") return Promise.resolve(route.message);
 		this.lastTurnFailure = null;
 		this.honestyFired = false;
-		// A path the person writes in the ask is readable this run (#4715). Their text only,
-		// never a Table officer's channel scope.
-		if (!isVerbatimScope(this.config.agentScope) && !isNoToolScope(this.config.agentScope))
-			allowReadsFromPrompt(userMessage, this.config.workingDirectory ?? process.cwd());
 		this.friction.prompt(userMessage);
-		return withFriction(this.friction, () =>
-			runAsParentSession(
-				() => ({
-					runtime: this.config.runtime,
-					model: this.config.model,
-					baseUrl: this.config.baseUrl,
-				}),
-				async () => {
-					// A new turn: steers left from an earlier turn are stale and are
-					// dropped, never delivered into this one (the caller had its chance
-					// to take them with takeQueuedSteers).
-					const turn = ++this.turnCounter;
-					this.steerQueue = [];
-					this.activeTurn = turn;
-					try {
-						const reply = await this.runTurn(
-							userMessage,
-							imageBase64,
-							imageMimeType,
-							imageOriginal,
-						);
-						this.reviewFinishedTurn(userMessage, reply);
-						return reply;
-					} finally {
-						this.friction.turnEnd();
-						if (this.activeTurn === turn) this.activeTurn = null;
-					}
-				},
+		// The turn runs inside this session's read allowlist (#4715).
+		return runInReadScope(this.readScope, () =>
+			withFriction(this.friction, () =>
+				runAsParentSession(
+					() => ({
+						runtime: this.config.runtime,
+						model: this.config.model,
+						baseUrl: this.config.baseUrl,
+					}),
+					async () => {
+						// A new turn: steers left from an earlier turn are stale and are
+						// dropped, never delivered into this one (the caller had its chance
+						// to take them with takeQueuedSteers).
+						const turn = ++this.turnCounter;
+						this.steerQueue = [];
+						this.activeTurn = turn;
+						try {
+							const reply = await this.runTurn(
+								userMessage,
+								imageBase64,
+								imageMimeType,
+								imageOriginal,
+							);
+							this.reviewFinishedTurn(userMessage, reply);
+							return reply;
+						} finally {
+							this.friction.turnEnd();
+							if (this.activeTurn === turn) this.activeTurn = null;
+						}
+					},
+				),
 			),
+		);
+	}
+
+	/**
+	 * Read access for this session (#4715). Called only by a front door with the person's own
+	 * typed text (`8gent run`, the TUI, the REPL), never with text a model wrote. It rebuilds
+	 * the prompt-named entries for this turn; the previous turn's are dropped.
+	 */
+	allowReadsFromPerson(text: string): void {
+		if (isVerbatimScope(this.config.agentScope) || isNoToolScope(this.config.agentScope)) return;
+		runInReadScope(this.readScope, () =>
+			allowReadsFromPrompt(text, this.config.workingDirectory ?? process.cwd()),
+		);
+	}
+
+	/** `--allow-read <dir>` and `/allow-read <dir>`: kept for this session. Null when refused. */
+	allowReadDir(dir: string): string | null {
+		return runInReadScope(this.readScope, () =>
+			addReadAllowDir(dir, this.config.workingDirectory ?? process.cwd()),
 		);
 	}
 
@@ -2914,7 +2940,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// A second post_message draft that broke a task rule stops the turn (#4191).
 				const presendStop = this.executor.takePresendStop();
 				if (presendStop) this.abort(presendStop);
-				const boundaryStop = takeBoundaryStop();
+				const boundaryStop = takeBoundaryStop(this.readScope);
 				if (boundaryStop) this.abort({ kind: "circuit_breaker", reason: boundaryStop });
 
 				if (event.success) {

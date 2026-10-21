@@ -31,12 +31,13 @@ export function preSpawnRefusal(command: string, cwd: string = process.cwd()): s
 }
 
 /**
- * `8gent chat`, `8gent run` or `8gent mcp-server` (also `bun bin/8gent.ts ...`) at the start of
+ * `8gent chat`, `8gent run` or `8gent mcp-server` (also `bun bin/8gent.ts ...`, `node dist/cli.js ...`,
+ * `npx @8gi-foundation/8gent-code ...`) at the start of
  * a command part. A run that spawns itself nests a second 8gent inside the first (#4715).
  * Anchored to a command position, so `grep "8gent chat"` and `echo 8gent run` are not matched.
  */
 const SELF_SPAWN =
-	/(?:^|[;&|(\n])\s*(?:\w+=\S*\s+)*(?:(?:bun|bunx|node|npx|tsx)(?:\s+-\S+)*(?:\s+run)?\s+)?(?:\S*\/)?(?:8gent(?:\.ts)?)(?:\s+-\S+)*\s+(?:chat|run|mcp-server)(?![\w-])/;
+	/(?:^|[;&|(\n])\s*(?:\w+=\S*\s+)*(?:(?:(?:bun|bunx|node|npx|tsx)(?:\s+-\S+)*(?:\s+run)?\s+)?(?:\S*\/)?8gent(?:-code|-run)?(?:\.[tj]s)?|(?:bun|node|tsx)(?:\s+-\S+)*\s+(?:\S*\/)?cli\.js)(?:\s+-\S+)*\s+(?:chat|run|mcp-server)(?![\w-])/;
 
 export function spawnsSelf(command: string): boolean {
 	return SELF_SPAWN.test(command);

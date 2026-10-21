@@ -19,12 +19,16 @@ import { agentTools, setToolContext } from "../ai/tools";
 import { spawnsSelf } from "../permissions/pre-spawn-backstops";
 import {
 	CANNOT_READ_TEXT,
+	ReadScope,
 	addReadAllowDir,
 	allowReadsFromPrompt,
 	extractPromptPaths,
+	isReadAllowed,
+	namesSecret,
 	readAllowEntries,
 	resetReadAllow,
 	runAllowReadCommand,
+	runInReadScope,
 	takeBoundaryStop,
 } from "../permissions/read-allow";
 import { CreatedFiles } from "../permissions/s1-created-files";
@@ -182,7 +186,7 @@ describe("point 1: paths in the ask are readable", () => {
 		expect(runAllowReadCommand([outside], cwd)).toContain(`allowed under ${outside}`);
 		expect(readAllowEntries()).toEqual([outside]);
 		expect(runAllowReadCommand(["/"], cwd)).toContain("Not allowed");
-		expect(runAllowReadCommand([], cwd)).toContain(outside);
+		expect(runAllowReadCommand([], cwd)).toContain("Usage: /allow-read <dir>");
 	});
 
 	test("the native read_file honours the same list", async () => {
@@ -266,6 +270,11 @@ describe("point 4: a run cannot spawn itself", () => {
 		"FOO=1 8gent run x",
 		"echo hi; 8gent mcp-server",
 		"./node_modules/.bin/8gent chat x",
+		"node dist/cli.js chat hi",
+		"node /x/cli.js run do-it",
+		"npx @8gi-foundation/8gent-code run hi",
+		"npx -y @8gi-foundation/8gent-code mcp-server",
+		"bun dist/cli.js mcp-server",
 	])("refuses %s", async (cmd) => {
 		expect(spawnsSelf(cmd)).toBe(true);
 	});
@@ -277,6 +286,8 @@ describe("point 4: a run cannot spawn itself", () => {
 		'grep -r "8gent run" .',
 		"git commit -m '8gent chat fix'",
 		"ls 8gent-code",
+		"node server.js run",
+		"npx @8gi-foundation/8gent-code --version",
 	])("allows %s", (cmd) => {
 		expect(spawnsSelf(cmd)).toBe(false);
 	});
@@ -354,5 +365,156 @@ describe("point 5: read-only chaining", () => {
 		).execute({ command: "ls; echo ---" }, {});
 		expect(out).toContain("---");
 		expect(out).not.toContain("BLOCKED");
+	});
+});
+
+describe("8SO read on #4722: siblings, depth floor, real paths, session scope", () => {
+	const HOME = "/home/u";
+	const entriesFor = (ask: string) => {
+		resetReadAllow();
+		allowReadsFromPrompt(ask, cwd, HOME);
+		return readAllowEntries();
+	};
+
+	test.each([
+		["~/.8gent/foo.json", ["/home/u/.8gent/telegram.env", "/home/u/.8gent/sessions/x.json"]],
+		[
+			"~/Library/foo",
+			[
+				"/home/u/Library/Application Support/Google/Chrome/Default/Cookies",
+				"/home/u/Library/Keychains/login.keychain-db",
+				"/home/u/Library/Cookies/Cookies.binarycookies",
+				"/home/u/Library/Messages/chat.db",
+			],
+		],
+		["~/.config/gh/hosts.yml", ["/home/u/.config/gh/hosts.yml"]],
+		["~/.docker/config.json", ["/home/u/.docker/config.json"]],
+		["~/.git-credentials", ["/home/u/.git-credentials"]],
+		["/etc/hosts", ["/etc/master.passwd", "/etc/ssh/ssh_host_ed25519_key", "/etc/passwd"]],
+	])("a named file %s never exposes its siblings", (ask, probes) => {
+		const got = entriesFor(`Read ${ask}`);
+		for (const probe of probes) expect([probe, isReadAllowed(probe)]).toEqual([probe, false]);
+		// at most the exact file, never a folder
+		for (const e of got) expect(e).not.toMatch(/\/$/);
+	});
+
+	test.each([
+		".netrc",
+		".npmrc",
+		".git-credentials",
+		".config/gh/hosts.yml",
+		".docker/config.json",
+		".kube/config",
+		".8gent/telegram.env",
+		".8gent/bot.env",
+		".8gent/api-token.txt",
+		"Library/Keychains/login.keychain-db",
+		"Library/Application Support/Google/Chrome/Default/Cookies",
+		"Library/Application Support/Firefox/Profiles/a.default/cookies.sqlite",
+		"Library/Application Support/Microsoft Edge/Default/History",
+		"Library/Application Support/BraveSoftware/x",
+		"Library/Application Support/Chromium/x",
+		"Library/Cookies/Cookies.binarycookies",
+		"Library/Messages/chat.db",
+		"Library/Mail/V10/x",
+		"Library/Safari/History.db",
+		"etc/master.passwd",
+		"etc/ssh/ssh_host_rsa_key",
+		"keys/server.pem",
+		"keys/server.key",
+		"keys/bundle.p12",
+		"x/.env.local",
+		"x/prod.env",
+	])("%s is a secret path inside a named folder", (rel) => {
+		const dir = join(HOME, "data", "stuff");
+		resetReadAllow();
+		allowReadsFromPrompt(`Read ${join(dir, "a.txt")}`, cwd, HOME);
+		expect(isReadAllowed(join(dir, "a.txt"))).toBe(true);
+		expect(namesSecret(`/${rel}`)).toBe(true);
+		expect([rel, isReadAllowed(join(dir, rel))]).toEqual([rel, false]);
+	});
+
+	test("the real path is checked too: a harmless-looking link to a secret is refused", () => {
+		symlinkSync(join(secretDir, "token.txt"), join(outside, "benign.txt"));
+		addReadAllowDir(outside, cwd);
+		expect(isReadAllowed(join(outside, "other.txt"))).toBe(true);
+		expect(isReadAllowed(join(outside, "benign.txt"))).toBe(false);
+	});
+
+	test("depth floor: a folder under home needs 2 segments, so ~/.8gent and ~/Library fall back to the file", () => {
+		expect(entriesFor("Read ~/.8gent/foo.json")).toEqual(["/home/u/.8gent/foo.json"]);
+		expect(entriesFor("Read ~/Library/foo")).toEqual(["/home/u/Library/foo"]);
+		expect(entriesFor("Read ~/Documents/a.txt")).toEqual(["/home/u/Documents/a.txt"]);
+		expect(entriesFor("Read ~/.8gent/inbox/group-inbox.jsonl")).toEqual(["/home/u/.8gent/inbox"]);
+		expect(entriesFor("Read ~/work/proj/a.txt")).toEqual(["/home/u/work/proj"]);
+	});
+
+	test.each([
+		"/etc",
+		"/etc/ssh",
+		"/var",
+		"/var/log",
+		"/private",
+		"/private/etc",
+		"/Library",
+		"/System",
+		"/usr",
+		"/usr/lib",
+		"/Users",
+		"/Users/other",
+		"/Users/other/Documents",
+		"/",
+	])("%s is never handed over as a directory", (dir) => {
+		resetReadAllow();
+		expect(addReadAllowDir(dir, cwd, HOME)).toBeNull();
+	});
+
+	test.each([
+		["/etc/hosts", "/etc/hosts"],
+		["/var/log/system.log", "/var/log/system.log"],
+		["/Users/other/notes.txt", "/Users/other/notes.txt"],
+		["/Users/other/Documents/notes.txt", "/Users/other/Documents/notes.txt"],
+		["/usr/lib/x.txt", "/usr/lib/x.txt"],
+	])("a file in a broad system folder, %s, allows only itself", (file, entry) => {
+		expect(entriesFor(`Read ${file}`)).toEqual([entry]);
+	});
+
+	test("a deep folder outside home and the system roots is still allowed", () => {
+		expect(entriesFor("Read /srv/data/in/a.txt")).toEqual(["/srv/data/in"]);
+		expect(entriesFor("Read /Users/other/work/proj/a.txt")).toEqual(["/Users/other/work/proj"]);
+	});
+
+	test("each session has its own allowlist; another session never sees it", () => {
+		const a = new ReadScope();
+		const b = new ReadScope();
+		runInReadScope(a, () => allowReadsFromPrompt(`Read ${join(outside, "inbox.jsonl")}`, cwd));
+		expect(runInReadScope(a, () => isReadAllowed(join(outside, "other.txt")))).toBe(true);
+		expect(runInReadScope(b, () => isReadAllowed(join(outside, "other.txt")))).toBe(false);
+		expect(isReadAllowed(join(outside, "other.txt"))).toBe(false); // no scope: the fallback is empty
+	});
+
+	test("prompt entries are rebuilt each turn from that turn's message; manual entries stay for the session", () => {
+		const s = new ReadScope();
+		const other = realpathSync(tempDir("read-allow-turn2-"));
+		writeFileSync(join(other, "n.txt"), "n");
+		runInReadScope(s, () => {
+			addReadAllowDir(outside, cwd);
+			allowReadsFromPrompt(`Read ${join(other, "n.txt")}`, cwd);
+			expect(isReadAllowed(join(other, "n.txt"))).toBe(true);
+			// next turn names nothing: the first turn's prompt entry is gone
+			allowReadsFromPrompt("Just say hello", cwd);
+			expect(isReadAllowed(join(other, "n.txt"))).toBe(false);
+			expect(isReadAllowed(join(outside, "other.txt"))).toBe(true);
+		});
+	});
+
+	test("block counts and the stop live in the session scope", async () => {
+		const s = new ReadScope();
+		await runInReadScope(s, async () => {
+			await read(join(outside, "inbox.jsonl"));
+			await read(join(outside, "inbox.jsonl"));
+		});
+		expect(takeBoundaryStop()).toBeNull(); // the fallback scope saw nothing
+		expect(takeBoundaryStop(s)).toContain(join(outside, "inbox.jsonl"));
 	});
 });
