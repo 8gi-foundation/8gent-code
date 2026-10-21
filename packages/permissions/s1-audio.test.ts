@@ -19,7 +19,7 @@ describe("System One audio lane (#4713)", () => {
 		]) {
 			expect(isAudioCommand(c)).toBe(true);
 		}
-		for (const c of ["ls", "osascript -e 'tell app \"Finder\" to activate'"]) {
+		for (const c of ["ls", "git status"]) {
 			expect(isAudioCommand(c)).toBe(false);
 		}
 	});
@@ -89,6 +89,38 @@ describe("System One audio lane (#4713)", () => {
 			"grep --pre=say x .",
 		];
 		for (const c of cases) expect([c, isAudioCommand(c)]).toEqual([c, true]);
+	});
+
+	test("ordinary commands with pipes and anchors pass", () => {
+		for (const c of [
+			'grep -n "smoke\\|test" package.json',
+			"sed -i '' 's|^X=a$|X=b|' f",
+			"osascript -e 'tell application \"Finder\" to get name of startup disk'",
+			"open notes.pdf",
+		]) {
+			expect([c, isAudioCommand(c)]).toEqual([c, false]);
+		}
+	});
+
+	test("more players, loud osascript, open on audio, shell pipes and bell are refused", () => {
+		for (const c of [
+			"spd-say hi",
+			"aplay a.wav",
+			"ffplay a.mp3",
+			"mpg123 a.mp3",
+			"pw-play a.wav",
+			"notify-send hi",
+			"terminal-notifier -message hi",
+			"osascript -e 'beep'",
+			"osascript x.scpt",
+			"osascript -l JavaScript -e 'app.displayNotification(\"x\")'",
+			"open a.aiff",
+			"open song.MP3",
+			"echo say hi | sh",
+			"tput bel",
+		]) {
+			expect([c, isAudioCommand(c)]).toEqual([c, true]);
+		}
 	});
 
 	test("a plain echo that only names the word is left alone", () => {

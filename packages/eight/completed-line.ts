@@ -12,7 +12,8 @@
 export const COMPLETED_STATES = ["pushed", "deployed", "blocked", "failed", "done"] as const;
 const STATE = COMPLETED_STATES.join("|");
 const MAX_WORDS = 24;
-const LINE = /^([ \t]*(?:[>*-][ \t]*)*(?:🎯\s*)?(?:\*\*|__)?COMPLETED:(?:\*\*|__)?)[ \t]*(.*)$/m;
+const LINE =
+	/^([ \t]*(?:[\p{S}\p{P}\p{Extended_Pictographic}\uFE0F\u200D][ \t]*)*COMPLETED:(?:\*\*|__)?)[ \t]*(.*)$/imu;
 const FIXED = new RegExp(`^[^.!?]+\\.\\s+(?:${STATE})\\.$`, "i");
 const HAS_QUOTE = /["\u201C\u201D]/;
 const QUOTES = /["“”]/g;
@@ -33,7 +34,10 @@ export function fixCompletedLine(reply: string): CompletedFix {
 	}
 	const body = rawBody.replace(QUOTES, "").trim();
 	const sentences = body.split(/(?<=[.!?])\s+/).filter((s) => s.trim() !== "");
-	let first = (sentences[0] ?? "").replace(/[.!?]+$/, "").trim();
+	let first = (sentences[0] ?? "")
+		.normalize("NFKC")
+		.replace(/[.!?]+$/, "")
+		.trim();
 	let state: string | undefined;
 	for (const s of sentences.slice(1)) {
 		const w = s
@@ -53,7 +57,7 @@ export function fixCompletedLine(reply: string): CompletedFix {
 		}
 	}
 	// A block or failure keeps its reason: two sentences, and the state word is never "done".
-	const lead = first.toLowerCase();
+	const lead = first.normalize("NFKC").toLowerCase();
 	if (lead === "blocked" || lead === "failed") {
 		const reason = (sentences[1] ?? "").replace(/[.!?]+$/, "").trim();
 		const isState = (COMPLETED_STATES as readonly string[]).includes(reason.toLowerCase());
@@ -65,7 +69,7 @@ export function fixCompletedLine(reply: string): CompletedFix {
 		.split(/\s+/)
 		.slice(0, MAX_WORDS - 1)
 		.join(" ");
-	const line = `${head} ${kept}. ${state}.`;
+	const line = kept.toLowerCase() === state ? `${head} ${kept}.` : `${head} ${kept}. ${state}.`;
 	console.debug(
 		`[completed-gate] trimmed COMPLETED line from ${words(rawBody)} to ${words(`${kept} ${state}`)} words`,
 	);

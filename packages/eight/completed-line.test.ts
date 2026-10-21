@@ -52,4 +52,19 @@ describe("COMPLETED line gate (#4713)", () => {
 			"**COMPLETED:** Draft written. pushed.",
 		);
 	});
+
+	test("case, leading symbols and fullwidth letters", () => {
+		expect(fixCompletedLine("✅ 🎯 Completed: Draft written. pushed. Ha ha.").text).toBe(
+			"✅ 🎯 Completed: Draft written. pushed.",
+		);
+		expect(fixCompletedLine("COMPLETED: \uFF22locked. Deploy failing. Sorry.").text).toBe(
+			"COMPLETED: Blocked. Deploy failing. blocked.",
+		);
+	});
+
+	test("a bare state word is not repeated", () => {
+		expect(fixCompletedLine("COMPLETED: blocked.\nNext: ask.").text).toBe(
+			"COMPLETED: blocked.\nNext: ask.",
+		);
+	});
 });

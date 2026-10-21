@@ -18,7 +18,20 @@ const AUDIO_PROGRAMS = new Set([
 	"espeak",
 	"espeak-ng",
 	"paplay",
+	"spd-say",
+	"aplay",
+	"ffplay",
+	"mpg123",
+	"pw-play",
+	"notify-send",
+	"terminal-notifier",
 ]);
+
+const AUDIO_FILE = /\.(aiff|wav|mp3|m4a|ogg|flac)\b/i;
+/** An osascript is plainly read-only only when it is a `-e` get/return with none of these. */
+const OSA_LOUD =
+	/beep|say\b|speak|notification|play|sound|do shell|run script|activate|keystroke|click|\bset\b|make\b|delete|quit|launch|open/i;
+const SHELL_WORD = /(^|[|;&]\s*)(sudo\s+)?(sh|bash|zsh|dash|ksh|eval|source|\.)(\s|$)/;
 
 const BARE_NAME = new RegExp(
 	`(?<![A-Za-z0-9_.-])(?:${[...AUDIO_PROGRAMS].sort((a, b) => b.length - a.length).join("|")})(?![A-Za-z0-9_.-])`,
@@ -68,11 +81,19 @@ function segmentIsAudio(segment: string, command: string): boolean {
 			else break;
 		}
 	}
-	// A program word built from a variable, a backslash or empty quotes hides its name.
-	if (/[$\\]|''|""/.test(words[i] ?? "")) return true;
+	// A command word built from a variable, a backslash or empty quotes hides its name. Only a
+	// word that starts like a name is judged, so the pieces of a quote-blind split are left alone.
+	if (/^(\\|\$)[A-Za-z_{(]|^[A-Za-z0-9_-]+(''|""|\$[A-Za-z_{(]|\\[A-Za-z])/.test(words[i] ?? ""))
+		return true;
 	const prog = base(words[i] ?? "");
 	if (AUDIO_PROGRAMS.has(prog)) return true;
-	if (prog === "osascript" && /display\s+notification/i.test(command)) return true;
+	if (prog === "osascript") {
+		const plainlyReadOnly =
+			/\s-e\s/.test(command) && /\b(get|return)\b/i.test(command) && !OSA_LOUD.test(command);
+		if (!plainlyReadOnly) return true;
+	}
+	if ((prog === "open" || prog === "xdg-open") && AUDIO_FILE.test(segment)) return true;
+	if (prog === "tput" && /\bbel\b/.test(segment)) return true;
 	if (SHELLS.has(prog)) {
 		for (let j = i + 1; j < words.length; j++) {
 			if (/^-[A-Za-z]*c[A-Za-z]*$/.test(words[j] ?? "")) {
@@ -97,6 +118,8 @@ export function isAudioCommand(command: string): boolean {
 	for (const segment of command.split(/&&|\|\||[;|&\n`()]/)) {
 		if (segmentIsAudio(segment, command)) return true;
 	}
+	// A line that names an audio program and hands text to a shell (`echo say hi | sh`).
+	if (BARE_NAME.test(command) && SHELL_WORD.test(command)) return true;
 	// Backstop: an audio program name as a bare word anywhere (eval, find -exec, here-strings,
 	// su -c, ssh, arch, caffeinate, a variable's value). Over-refusing is accepted; a plain
 	// echo/printf/grep line that only mentions the name is left alone.
