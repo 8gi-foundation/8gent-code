@@ -12,7 +12,7 @@
 export const COMPLETED_STATES = ["pushed", "deployed", "blocked", "failed", "done"] as const;
 const STATE = COMPLETED_STATES.join("|");
 const MAX_WORDS = 24;
-const LINE = /^(\s*(?:🎯\s*)?COMPLETED:)[ \t]*(.*)$/m;
+const LINE = /^([ \t]*(?:[>*-][ \t]*)*(?:🎯\s*)?COMPLETED:)[ \t]*(.*)$/m;
 const FIXED = new RegExp(`^[^.!?]+\\.\\s+(?:${STATE})\\.$`, "i");
 const HAS_QUOTE = /["\u201C\u201D]/;
 const QUOTES = /["“”]/g;
@@ -51,6 +51,14 @@ export function fixCompletedLine(reply: string): CompletedFix {
 			first = tail[1];
 			state = tail[2].toLowerCase();
 		}
+	}
+	// A block or failure keeps its reason: two sentences, and the state word is never "done".
+	const lead = first.toLowerCase();
+	if (lead === "blocked" || lead === "failed") {
+		const reason = (sentences[1] ?? "").replace(/[.!?]+$/, "").trim();
+		const isState = (COMPLETED_STATES as readonly string[]).includes(reason.toLowerCase());
+		first = reason && !isState ? `${first}. ${reason}` : first;
+		state = lead;
 	}
 	state ??= "done";
 	const kept = first

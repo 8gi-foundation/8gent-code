@@ -33,4 +33,17 @@ describe("COMPLETED line gate (#4713)", () => {
 	test("a reply with no COMPLETED line is returned as is", () => {
 		expect(fixCompletedLine("All good.")).toEqual({ text: "All good.", trimmed: false });
 	});
+
+	test("a blockquote COMPLETED line is gated too", () => {
+		const out = fixCompletedLine("> COMPLETED: Draft written. pushed. Ha ha.");
+		expect(out.text).toBe("> COMPLETED: Draft written. pushed.");
+	});
+
+	test("a block keeps its reason and is never turned into done", () => {
+		const out = fixCompletedLine("COMPLETED: Blocked. Deploy failing on key. Needs you.");
+		expect(out.text).toBe("COMPLETED: Blocked. Deploy failing on key. blocked.");
+		expect(fixCompletedLine("COMPLETED: Failed. Suite red on three tests. Sorry.").text).toBe(
+			"COMPLETED: Failed. Suite red on three tests. failed.",
+		);
+	});
 });

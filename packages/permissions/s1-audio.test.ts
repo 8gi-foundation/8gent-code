@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { AUDIO_REFUSAL, audioRefusal, isAudioCommand } from "./s1-audio";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AUDIO_REFUSAL, audioRefusal, isAudioCommand, voiceIsOn } from "./s1-audio";
 import { systemOneGate } from "./system-one-gate";
 
 describe("System One audio lane (#4713)", () => {
@@ -35,5 +38,44 @@ describe("System One audio lane (#4713)", () => {
 		const r = await systemOneGate('say "hi"', { EIGHT_SYSTEM_ONE: "1", EIGHT_VOICE: "1" });
 		expect(r.run).toBe(false);
 		expect(r.message).toContain(AUDIO_REFUSAL);
+	});
+
+	test("wrapped audio commands are caught", () => {
+		const wrapped = [
+			'sh -c "say hi"',
+			"bash -c 'say hi'",
+			'zsh -c "say hi"',
+			'bash -lc "say hi"',
+			"env say hi",
+			"env FOO=1 say hi",
+			"/usr/bin/env say hi",
+			"nohup say hi &",
+			"command say hi",
+			"time say hi",
+			"sudo say hi",
+			"sudo -u root say hi",
+			"exec say hi",
+			"echo hi | xargs say",
+			"busybox say hi",
+			"echo $(say hi)",
+			"echo `say hi`",
+			"(say hi)",
+			'sh -c "ls; say hi"',
+		];
+		for (const c of wrapped) expect([c, isAudioCommand(c)]).toEqual([c, true]);
+	});
+
+	test("voice is off with no settings file and no env", async () => {
+		const prev = process.env.EIGHT_HOME;
+		const dir = mkdtempSync(join(tmpdir(), "s1audio-"));
+		process.env.EIGHT_HOME = dir;
+		try {
+			expect(await voiceIsOn({})).toBe(false);
+			expect(await voiceIsOn({ EIGHT_VOICE: "1" })).toBe(true);
+		} finally {
+			if (prev === undefined) delete process.env.EIGHT_HOME;
+			else process.env.EIGHT_HOME = prev;
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
