@@ -136,3 +136,68 @@ describe("all release workflows", () => {
 		expect(step?.run).toContain('"release.yml npm channel"');
 	});
 });
+
+// #4700: `npm publish release-assets/x.tgz` made npm run git ls-remote on
+// github.com/release-assets/x.tgz.git, and v0.20.10 never reached npm. A tarball
+// or folder argument with a slash must be absolute or start with ./ or ../.
+describe("npm tarball paths (#4700)", () => {
+	const bareShorthand = (line: string) => {
+		const m = line.match(/\bnpm\s+(?:publish|i|install)\b(.*)$/);
+		if (!m) return false;
+		return m[1]
+			.trim()
+			.split(/\s+/)
+			.filter((a) => a && !a.startsWith("-"))
+			.map((a) => a.replace(/^["']|["']$/g, ""))
+			.some(
+				(a) => /^[A-Za-z0-9_.-]+\/[^\s]*$/.test(a) && !a.startsWith("@") && !/^\.\.?\//.test(a),
+			);
+	};
+
+	test("the shorthand check catches the v0.20.10 line and passes the fixed forms", () => {
+		expect(bareShorthand("npm publish release-assets/*.tgz --access public --provenance")).toBe(
+			true,
+		);
+		expect(bareShorthand('npm publish "$TGZ" --access public --provenance')).toBe(false);
+		expect(bareShorthand("npm publish ./release-assets/x.tgz")).toBe(false);
+		expect(bareShorthand('npm i -g --prefix "$X" @8gi-foundation/8gent-code@1.0.0')).toBe(false);
+	});
+
+	test("no workflow passes a bare dir/file argument to npm publish or install", () => {
+		const bad: string[] = [];
+		for (const f of readdirSync(WF).filter((n) => /\.ya?ml$/.test(n))) {
+			readFileSync(join(WF, f), "utf8")
+				.split("\n")
+				.forEach((line, i) => {
+					if (!line.trim().startsWith("#") && bareShorthand(line))
+						bad.push(`${f}:${i + 1}: ${line.trim()}`);
+				});
+		}
+		expect(bad).toEqual([]);
+	});
+
+	test("release.yml: a failed npm publish with auth fails the run; no auth stays green", () => {
+		const steps = (load("release.yml").jobs.release.steps ?? []) as (Step & {
+			if?: string;
+			name?: string;
+		})[];
+		const fail = steps.at(-1);
+		expect(fail?.if).toBe("steps.npm.outputs.npm == 'failed'");
+		expect(fail?.run).toContain("exit 1");
+		expect(steps.find((s) => (s as { id?: string }).id === "npm_publish")?.run).toContain(
+			'npm publish "$TGZ"',
+		);
+	});
+
+	test("release.yml: npm-from-release runs from main only and runs no repository code", () => {
+		const job = load("release.yml").jobs["npm-from-release"] as Job & { if?: string };
+		expect(job.if).toContain("github.ref == 'refs/heads/main'");
+		expect(job.if).toContain("inputs.npm_only_tag != ''");
+		expect(job.permissions).toEqual({ contents: "read", "id-token": "write" });
+		const steps = job.steps ?? [];
+		expect(steps.some((s) => (s.uses ?? "").startsWith("actions/checkout"))).toBe(false);
+		const run = steps.map((s) => s.run ?? "").join("\n");
+		expect(run).toContain("sha256sum -c want");
+		expect(run).toContain('npm publish "$DIR/$NAME"');
+	});
+});
