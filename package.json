@@ -47,7 +47,7 @@
     "build:eyes-bridge": "bash packages/eyes/native/build.sh",
     "cli": "bun --config=bin/bunfig.empty.toml run bin/8gent.ts",
     "dev": "next dev",
-    "build": "bun --config=bin/bunfig.empty.toml scripts/build-bundles.ts && bun --config=bin/bunfig.empty.toml scripts/build-node.ts && node scripts/build-finalize.js",
+    "build": "bun --config=bin/bunfig.empty.toml scripts/build-bundles.ts && bun --config=bin/bunfig.empty.toml scripts/build-node.ts && node scripts/build-finalize.js && bun --config=bin/bunfig.empty.toml scripts/check-bundle-versions.ts",
     "build:tui": "bun --config=bin/bunfig.empty.toml scripts/build-bundles.ts --tui && node scripts/build-finalize.js",
     "build:binaries": "bun --config=bin/bunfig.empty.toml run scripts/build-binaries.ts",
     "build:binaries:host": "bun --config=bin/bunfig.empty.toml run scripts/build-binaries.ts --host",
