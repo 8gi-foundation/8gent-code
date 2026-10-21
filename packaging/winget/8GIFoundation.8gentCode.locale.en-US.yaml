@@ -8,7 +8,7 @@ PackageName: 8gent Code
 PackageUrl: https://8gent.dev
 License: Apache-2.0
 LicenseUrl: https://github.com/8gi-foundation/8gent-code/blob/main/LICENSE
-ShortDescription: Open source autonomous coding agent. Runs locally. No API keys, no usage caps.
+ShortDescription: Open source autonomous coding agent. Runs locally. No API keys.
 Description: >-
   8gent Code is the open source kernel of the 8gent ecosystem - a terminal-first
   autonomous coding agent powered by local LLMs or free cloud models. Adaptive

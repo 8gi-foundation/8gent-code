@@ -309,7 +309,7 @@ async function main(): Promise<void> {
 		"TUI entry not found",
 		"posix_spawn",
 	].find((m) => text.includes(m));
-	check(text.includes("Launching TUI"), "8gent tui reached the TUI launcher");
+	check(text.includes("Launching 8gent"), "8gent tui reached the TUI launcher");
 	check(!crash, "TUI start shows no load error", crash ? `saw "${crash}"` : "");
 	check(FIRST_SCREEN.test(text), `TUI rendered its first screen within ${TUI_SECONDS}s`);
 	check(

@@ -91,7 +91,7 @@ export function Header({
 
 // Brand identity
 const BRAND_TAGLINE = "The Infinite Gentleman";
-const BRAND_DESCRIPTION = "Never hit usage caps again";
+const BRAND_DESCRIPTION = "Local-first coding";
 
 // Animated tagline component
 interface TaglineTextProps {

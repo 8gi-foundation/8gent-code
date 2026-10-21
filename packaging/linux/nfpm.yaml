@@ -32,7 +32,7 @@ priority: optional
 maintainer: 8GI Foundation <hello@8gent.dev>
 description: |
   Open source autonomous coding agent. Runs locally on local LLMs or free
-  cloud models. No API keys, no usage caps, no cloud dependency required.
+  cloud models. No API keys, no cloud dependency required.
   This package ships a self-contained binary that embeds the Bun runtime.
 vendor: 8GI Foundation
 homepage: https://8gent.dev
