@@ -9,6 +9,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.8] - 2026-10-21
+
+### Added
+- run 8gent on plain Node 22.5+ with no Bun installed ([#4652](https://github.com/8gi-foundation/8gent-code/pull/4652))
+- tools: in-process file search, no shell spawn (#4633) ([#4634](https://github.com/8gi-foundation/8gent-code/pull/4634))
+
 ## [0.20.7] - 2026-10-21
 
 ### Added
