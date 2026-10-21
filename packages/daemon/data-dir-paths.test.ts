@@ -17,7 +17,7 @@ import { cronPath } from "./cron";
 import { inboxPath, taskQueuePath } from "./heartbeat";
 import { claimRoots, creativeDir } from "./huddle-stage";
 import { tasksPath } from "./task-registry";
-import { cosPoolWorkspace, sessionStorePath, whisperModelPaths } from "./telegram-bridge";
+import { cosPoolWorkspace, sessionStorePath, whisperModelDirs } from "./telegram-bridge";
 
 const KEYS = ["HOME", "EIGHT_HOME", "EIGHT_DATA_DIR", "USERPROFILE", "EIGHT_TG_SESSIONS"] as const;
 
@@ -56,13 +56,8 @@ describe("daemon paths without HOME land under <profile>/.8gent (#4111)", () => 
 		],
 		[
 			"telegram-bridge.ts sessions, whisper models, pool workspace",
-			() => [sessionStorePath(), ...whisperModelPaths().slice(0, 2), cosPoolWorkspace()],
-			[
-				"telegram-sessions.json",
-				join("models", "whisper", "ggml-base.en.bin"),
-				join("models", "whisper", "ggml-tiny.bin"),
-				"workspace",
-			],
+			() => [sessionStorePath(), whisperModelDirs().modelsDir, cosPoolWorkspace()],
+			["telegram-sessions.json", join("models", "whisper"), "workspace"],
 		],
 		["task-registry.ts tasks.json", () => [tasksPath()], ["tasks.json"]],
 		[
@@ -85,7 +80,7 @@ describe("daemon paths without HOME land under <profile>/.8gent (#4111)", () => 
 	}
 
 	test("paths outside .8gent use the profile, never / or the working directory", () => {
-		expect(whisperModelPaths()[2]).toBe(join(profile, "models", "ggml-base.en.bin"));
+		expect(whisperModelDirs().extraDirs).toEqual([join(profile, "models")]);
 		expect(claimRoots()).toEqual([
 			join(profile, "8gent-code"),
 			join(profile, "8gi-governance"),
@@ -120,13 +115,10 @@ describe("daemon paths without HOME land under <profile>/.8gent (#4111)", () => 
 		expect(cosWorkspace()).toBe(join(h, ".8gent", "workspace"));
 		expect(sessionStorePath()).toBe(`${h}/.8gent/telegram-sessions.json`.split("/").join(sep));
 		expect(cosPoolWorkspace()).toBe(`${h}/.8gent/workspace`.split("/").join(sep));
-		expect(whisperModelPaths()).toEqual(
-			[
-				`${h}/.8gent/models/whisper/ggml-base.en.bin`,
-				`${h}/.8gent/models/whisper/ggml-tiny.bin`,
-				`${h}/models/ggml-base.en.bin`,
-			].map((p) => p.split("/").join(sep)),
-		);
+		expect(whisperModelDirs()).toEqual({
+			modelsDir: `${h}/.8gent/models/whisper`.split("/").join(sep),
+			extraDirs: [`${h}/models`.split("/").join(sep)],
+		});
 		expect(claimRoots()).toEqual([
 			join(h, "8gent-code"),
 			join(h, "8gi-governance"),

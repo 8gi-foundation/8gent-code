@@ -29,6 +29,8 @@ export interface UseVoiceChatOptions {
 	onActiveChange?: (active: boolean) => void;
 	/** Heard-only mode (EIGHT_VOICE_HEARD_ONLY=1): a reply was cut off, this is what was played */
 	onAgentHeard?: (heard: string) => void;
+	/** Called with a plain-language message whenever voice chat cannot start or fails */
+	onError?: (message: string) => void;
 }
 
 export interface UseVoiceChatReturn {
@@ -91,7 +93,11 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatReturn {
 		const engine = engineRef.current;
 		const available = await engine.isAvailable();
 		if (!available) {
-			setError("Voice not available. Install sox and whisper.cpp: brew install sox whisper-cpp");
+			const status = await engine.getSetupStatus();
+			const msg =
+				`Voice chat needs ${status.missing.join(" and ") || "sox and whisper.cpp"}. ${status.hints.join(" ")}`.trim();
+			setError(msg);
+			options.onError?.(msg);
 			return;
 		}
 
@@ -109,12 +115,16 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatReturn {
 				setState(newState);
 			},
 			onError: (msg) => {
+				// Stays on screen until the next successful turn: a vanishing error is how this failed silently.
 				setError(msg);
-				setTimeout(() => setError(null), 5000);
+				options.onError?.(msg);
 			},
 		});
 
-		loop.on("user-said", (text) => setLastUserSaid(text));
+		loop.on("user-said", (text) => {
+			setLastUserSaid(text);
+			setError(null);
+		});
 		loop.on("agent-said", (text) => setLastAgentSaid(text));
 		loop.on("agent-heard", (text) => {
 			try {
@@ -136,6 +146,7 @@ export function useVoiceChat(options: UseVoiceChatOptions): UseVoiceChatReturn {
 		// Start the loop (runs in background)
 		loop.start().catch((err) => {
 			setError(err.message);
+			options.onError?.(err.message);
 			setIsActive(false);
 		});
 	}, [isActive, options]);

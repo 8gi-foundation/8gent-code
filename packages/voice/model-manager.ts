@@ -11,6 +11,67 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { WHISPER_MODELS, type WhisperModelInfo, type WhisperModelName } from "./types.js";
 
+/**
+ * Whisper model files we will use, best first: larger beats smaller, and the
+ * English-only build beats the multilingual one at the same size.
+ */
+export const WHISPER_MODEL_RANK: ReadonlyArray<{ filename: string; name: WhisperModelName }> = [
+	{ filename: "ggml-small.en.bin", name: "small" },
+	{ filename: "ggml-small.bin", name: "small" },
+	{ filename: "ggml-base.en.bin", name: "base" },
+	{ filename: "ggml-base.bin", name: "base" },
+	{ filename: "ggml-tiny.en.bin", name: "tiny" },
+	{ filename: "ggml-tiny.bin", name: "tiny" },
+];
+
+export interface ResolvedWhisperModel {
+	path: string;
+	filename: string;
+	name: WhisperModelName;
+}
+
+export interface ResolveWhisperModelOptions {
+	/** Primary models directory (default ~/.8gent/models/whisper) */
+	modelsDir?: string;
+	/** Further directories to look in after the primary one */
+	extraDirs?: string[];
+	/** Transcription language; English-only (.en) models are skipped for any other */
+	language?: string;
+	/** Test seam */
+	exists?: (path: string) => boolean;
+}
+
+/**
+ * The single answer to "which whisper model do we use": whichever is installed,
+ * largest first. Ctrl+R dictation, /voice chat and the Telegram bridge all call
+ * this, so no surface depends on one hardcoded file name. Null when none exist.
+ */
+export function resolveWhisperModel(
+	opts: ResolveWhisperModelOptions = {},
+): ResolvedWhisperModel | null {
+	const exists = opts.exists ?? existsSync;
+	const dirs = [
+		resolveModelsPath(opts.modelsDir ?? "~/.8gent/models/whisper"),
+		...(opts.extraDirs ?? []),
+	];
+	const english = !opts.language || opts.language === "en";
+	for (const m of WHISPER_MODEL_RANK) {
+		if (!english && m.filename.endsWith(".en.bin")) continue;
+		for (const dir of dirs) {
+			const path = join(dir, m.filename);
+			if (exists(path)) return { path, filename: m.filename, name: m.name };
+		}
+	}
+	return null;
+}
+
+/** Plain-language message for "no whisper model installed", with the one command that fixes it. */
+export function missingWhisperModelMessage(modelsDir = "~/.8gent/models/whisper"): string {
+	const dir = resolveModelsPath(modelsDir);
+	const tiny = WHISPER_MODELS.tiny;
+	return `No whisper model is installed in ${dir}. Fix: mkdir -p ${dir} && curl -L -o ${dir}/${tiny.filename} ${tiny.url}`;
+}
+
 export interface ModelManagerEvents {
 	"download-start": [{ model: WhisperModelName; size: number }];
 	"download-progress": [
