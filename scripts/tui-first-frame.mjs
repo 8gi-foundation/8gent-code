@@ -3,14 +3,18 @@
 // Windows) from a hostile working directory, and assert two things (#2975, #3894):
 //   1. the first frame renders (a known TUI string appears), and
 //   2. the cwd bunfig.toml preload never ran.
-// Used by windows-smoke.yml; scripts/smoke-compiled.sh does the same with a
+// Used by windows-smoke.yml and release-binaries.yml; scripts/smoke-compiled.sh does the same with a
 // python pty on POSIX. Needs node-pty (an optionalDependency, installed by `bun install`).
 //
-//   node scripts/tui-first-frame.mjs <path-to-binary> [seconds]
-import { mkdirSync, mkdtempSync, existsSync, rmSync, writeFileSync } from "node:fs";
+//   node scripts/tui-first-frame.mjs <path-to-binary-or-8gent-run.js> [seconds]
+//
+// A .js argument is the npm package's bin (bin/8gent-run.js): it is started with
+// the current Node, with no Bun anywhere on PATH, to check the Node build (#4666).
+// node-pty is found through NODE_PATH when it is not installed beside this script.
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const bin = resolve(process.argv[2] ?? "");
 const seconds = Number(process.argv[3]) || 90;
@@ -27,15 +31,19 @@ const hostile = join(root, "hostile");
 mkdirSync(home);
 mkdirSync(hostile);
 const marker = join(root, "PWNED");
-writeFileSync(join(hostile, "evil.js"), `require("fs").writeFileSync(${JSON.stringify(marker)}, "x");\n`);
+writeFileSync(
+	join(hostile, "evil.js"),
+	`require("fs").writeFileSync(${JSON.stringify(marker)}, "x");\n`,
+);
 writeFileSync(join(hostile, "bunfig.toml"), 'preload = ["./evil.js"]\n');
 writeFileSync(join(hostile, ".env"), "HOSTILE=from-dotenv\n");
 
 // Allowlist, no CI variables (Ink suppresses rendering under CI), no Bun on PATH.
 const sys = process.env.SystemRoot ?? "C:\\Windows";
+const viaNode = bin.endsWith(".js");
 const env = {
 	SystemRoot: sys,
-	PATH: `${sys}\\System32;${sys}`,
+	PATH: `${sys}\\System32;${sys}${viaNode ? `;${dirname(process.execPath)}` : ""}`,
 	USERPROFILE: home,
 	HOME: home,
 	TEMP: root,
@@ -45,7 +53,11 @@ const env = {
 
 const FIRST = /I'm 8gent|8GENT FM/;
 const strip = (s) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "");
-const term = pty.spawn(bin, ["tui", "--no-pet"], { name: "xterm-256color", cols: 120, rows: 40, cwd: hostile, env });
+const term = pty.spawn(
+	viaNode ? process.execPath : bin,
+	[...(viaNode ? [bin] : []), "tui", "--no-pet"],
+	{ name: "xterm-256color", cols: 120, rows: 40, cwd: hostile, env },
+);
 let buf = "";
 let exited = null;
 term.onExit((e) => (exited = e.exitCode));

@@ -27,6 +27,15 @@
 # binaries failed, merge the fix and cut the next patch release from main
 # (v0.20.1 therefore ships as v0.20.2).
 #
+# DEVICE SMOKE (#4666): the release is also started where Artale runs it. On
+# the tag only (never on a pull request): smoke-termux installs the npm tarball
+# in Termux's own bionic arm64 userland and draws the TUI; smoke-windows also
+# installs the tarball on Node with no Bun and draws the TUI under ConPTY;
+# smoke-linux-arm64 starts the arm64 binary on arm64. A red device smoke keeps
+# the release a draft. The compiled-binary TUI checks (exe on Windows, arm64
+# binary on Linux) are EXPECTED-FAIL until the open P0 "TUI not embedded in
+# compiled binaries" is fixed (related #4635, #4540); they report, never gate.
+#
 # SIGNING: opt-in and skip-if-absent. With no secrets set, unsigned artifacts
 # are produced (they run, but trigger OS trust prompts). macOS codesigning with
 # EIGHT_MAC_SIGN_IDENTITY needs that identity in the runner's keychain, which a
@@ -216,6 +225,41 @@ jobs:
           path: dist/installers/*
           if-no-files-found: error
 
+  # The npm tarball, built the way release.yml builds it (bundle only, no
+  # dependency install scripts run here), for the device smokes to install.
+  pack-npm:
+    name: Pack the npm tarball
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Build and pack
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun run build
+          mkdir -p tgz
+          npm pack --pack-destination tgz --silent
+          ls -la tgz
+      - name: Upload tarball
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: 8gent-npm-tgz
+          path: tgz/*.tgz
+          if-no-files-found: error
+
   # GitHub build provenance for every built file, signed in a job that runs no
   # repository or dependency code: it only downloads the build's artifact and
   # calls the pinned attest action, so nothing a dependency's install script
@@ -248,14 +292,24 @@ jobs:
   # a first Windows release is not held back by a memory-store bug.
   smoke-windows:
     name: Start the Windows exe on Windows
-    needs: build
+    needs: [build, pack-npm]
     runs-on: windows-latest
     steps:
+      - name: Checkout (tui-first-frame.mjs)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
       - name: Download artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: 8gent-binaries
           path: bins
+      - name: Download the npm tarball
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: 8gent-npm-tgz
+          path: tgz
       - name: --version, then a memory round trip
         timeout-minutes: 10
         shell: pwsh
@@ -281,6 +335,62 @@ jobs:
             Write-Host "${name} PASS"
           }
 
+      # #4666: the TUI under a real ConPTY, started from a hostile cwd. Node
+      # 22 and node-pty only drive the check; the product under test is the
+      # exe (first) and the npm tarball on Node (second). No Bun on this runner.
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Install node-pty (drives the ConPTY check)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = node -p "require('./package.json').optionalDependencies['node-pty']"
+          npm i --no-save --prefix "$env:RUNNER_TEMP\ptydeps" "node-pty@$ver"
+          "NODE_PATH=$env:RUNNER_TEMP\ptydeps\node_modules" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      # EXPECTED-FAIL until the open P0 "TUI not embedded in compiled
+      # binaries" is fixed (related #4540). Reports, never gates. When this
+      # goes green the notice below says so: delete continue-on-error then.
+      - name: Windows exe draws the TUI first frame (expected-fail)
+        id: exe_tui
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: pwsh
+        run: node scripts/tui-first-frame.mjs (Join-Path (Resolve-Path bins) '8gent-windows-x64.exe') 90
+      - name: Report the expected-fail result
+        if: always()
+        shell: pwsh
+        env:
+          OUTCOME: ${{ steps.exe_tui.outcome }}
+        run: |
+          if ($env:OUTCOME -eq 'success') { Write-Host '::notice::the Windows exe now draws the TUI: remove continue-on-error from the exe_tui step' }
+          else { Write-Host '::warning::EXPECTED-FAIL: the Windows exe did not draw the TUI (compiled-binary TUI embed P0, #4540)' }
+
+      # The Node build on Windows has never run. npm install with install
+      # scripts ON, as a user does it, then --version and the TUI on Node.
+      - name: npm i -g the tarball on Node, then --version and the TUI
+        timeout-minutes: 10
+        shell: pwsh
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-Command bun -ErrorAction SilentlyContinue) { throw 'bun is on PATH: this check must run without Bun' }
+          $home8 = Join-Path $env:RUNNER_TEMP 'home-npm'
+          New-Item -ItemType Directory -Force -Path $home8 | Out-Null
+          $env:USERPROFILE = $home8
+          $env:HOME = $home8
+          $tgz = (Get-ChildItem tgz -Filter *.tgz | Select-Object -First 1).FullName
+          npm i -g --prefix "$env:RUNNER_TEMP\npmg" $tgz
+          if ($LASTEXITCODE -ne 0) { throw 'npm i -g failed on Windows' }
+          $env:PATH = "$env:RUNNER_TEMP\npmg;$env:PATH"
+          $v = & 8gent --version | Out-String
+          Write-Host "8gent --version -> $v"
+          if ($LASTEXITCODE -ne 0 -or $v -notmatch [regex]::Escape("8gent Code $env:TAG")) { throw "npm build reports '$v', not $env:TAG" }
+          node scripts/tui-first-frame.mjs "$env:RUNNER_TEMP\npmg\node_modules\@8gi-foundation\8gent-code\bin\8gent-run.js" 90
+
   smoke-linux:
     name: Start the Linux binary on Linux
     needs: build
@@ -302,9 +412,82 @@ jobs:
           chmod +x bins/8gent-linux-x64
           bash scripts/smoke-compiled.sh bins/8gent-linux-x64
 
+  # The tarball in Termux's own userland (bionic libc, arm64): what `npm i -g`
+  # hands a phone. Install scripts run, so a dependency that cannot install on
+  # Android (#4658) or a render crash (#4660) is red here, before publication.
+  # ubuntu-24.04-arm is GitHub-hosted arm64, free on public repositories.
+  smoke-termux:
+    name: Install and start the tarball in Termux (arm64)
+    needs: pack-npm
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (smoke-termux.sh, install.sh)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - name: Download the npm tarball
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: 8gent-npm-tgz
+          path: tgz
+      - name: Run scripts/smoke-termux.sh in termux-docker
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          # termux/termux-docker:aarch64, pinned by digest (21 Oct 2026).
+          TERMUX_IMAGE: termux/termux-docker@sha256:3a0a340fca9947f7139a0d695f1234edf0172daed6a2f1e0b1413ef91453c9ce
+        run: |
+          chmod -R a+rX . tgz
+          tgz="$(ls tgz/*.tgz | head -1)"
+          docker run --rm -v "$PWD:/w:ro" "$TERMUX_IMAGE" \
+            bash /w/scripts/smoke-termux.sh "/w/$tgz" "$TAG"
+
+  # The standalone arm64 Linux binary, started on arm64 (it was built, attested
+  # and attached but never run, #4635). EXPECTED-FAIL until the open P0
+  # "TUI not embedded in compiled binaries" is fixed: smoke-compiled.sh includes
+  # the TUI first frame. Reports, never gates; remove continue-on-error when
+  # the notice says it passes.
+  smoke-linux-arm64:
+    name: Start the Linux arm64 binary on arm64 (expected-fail)
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (smoke-compiled.sh)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: 8gent-binaries
+          path: bins
+      - name: Smoke-test the arm64 binary
+        id: arm64
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          chmod +x bins/8gent-linux-arm64
+          bash scripts/smoke-compiled.sh bins/8gent-linux-arm64
+      - name: Report the expected-fail result
+        if: always()
+        env:
+          OUTCOME: ${{ steps.arm64.outcome }}
+        run: |
+          if [ "$OUTCOME" = success ]; then
+            echo "::notice::the arm64 binary now passes: remove continue-on-error from the arm64 step"
+          else
+            echo "::warning::EXPECTED-FAIL: the arm64 binary did not pass smoke-compiled.sh (compiled-binary TUI embed P0, #4635)"
+          fi
+
   release:
     name: Attach to GitHub Release
-    needs: [build, attest, smoke-windows, smoke-linux]
+    needs: [build, attest, pack-npm, smoke-windows, smoke-linux, smoke-termux, smoke-linux-arm64]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -417,7 +600,7 @@ jobs:
   # above opens (or comments on) one P0 issue, so it lands where people look.
   alarm:
     name: Open an issue when the release fails
-    needs: [build, attest, smoke-windows, smoke-linux, release, install-smoke]
+    needs: [build, attest, pack-npm, smoke-windows, smoke-linux, smoke-termux, smoke-linux-arm64, release, install-smoke]
     # Only a release tag raises the alarm; a dispatched dry run on a branch
     # reports its failure in the run itself.
     if: failure() && startsWith(github.ref, 'refs/tags/v')
