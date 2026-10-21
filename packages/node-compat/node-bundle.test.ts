@@ -17,27 +17,47 @@ const cli = join(root, "dist", "node", "cli.js");
 const tui = join(root, "dist", "node", "tui.js");
 const built = existsSync(cli) && existsSync(tui);
 
-/** An ABSOLUTE path to Node 22.5+ (the children below run with a stripped PATH), or null. */
+/**
+ * An ABSOLUTE path to a REAL Node 22.5+ (the children below run with a stripped PATH), or null.
+ * Under `bun test`, process.execPath is Bun and Bun reports a Node version too, so it is never a
+ * candidate and any binary that says it is Bun is rejected.
+ */
 function findNode22(): string | null {
 	const candidates = [
-		process.execPath, // Node itself when run under node; under Bun it is bun and fails the version probe
 		Bun.which("node"),
 		"/opt/homebrew/opt/node@22/bin/node",
 		"/usr/local/opt/node@22/bin/node",
 	];
 	for (const n of candidates) {
 		if (!n || !isAbsolute(n)) continue;
-		const r = spawnSync(n, ["-p", "process.versions.node"], { encoding: "utf8" });
-		const [maj, min] = (r.stdout ?? "").trim().split(".").map(Number);
-		if (r.status === 0 && (maj > 22 || (maj === 22 && min >= 5))) return n;
+		const r = spawnSync(n, ["-p", "process.versions.bun ? 'BUN' : process.versions.node"], {
+			encoding: "utf8",
+		});
+		const out = (r.stdout ?? "").trim();
+		if (r.status !== 0 || out === "BUN") continue;
+		const [maj, min] = out.split(".").map(Number);
+		if (maj > 22 || (maj === 22 && min >= 5)) return n;
 	}
 	return null;
 }
 const node = findNode22();
 
-test.skipIf(!node)("the Node used by the tests is an absolute path", () => {
-	expect(isAbsolute(node as string)).toBe(true);
-});
+test.skipIf(!node)(
+	"sentinel: the binary the tests spawn is a real, absolute Node (not Bun)",
+	() => {
+		expect(isAbsolute(node as string)).toBe(true);
+		const r = spawnSync(
+			node as string,
+			["-p", "JSON.stringify({ bun: process.versions.bun ?? null, node: process.versions.node })"],
+			{ encoding: "utf8" },
+		);
+		const v = JSON.parse(r.stdout);
+		expect(v.bun).toBeNull();
+		expect(Number(v.node.split(".")[0])).toBeGreaterThanOrEqual(22);
+		if (process.env.EIGHT_TEST_LOG_NODE)
+			console.log(`[node-bundle.test] node binary: ${node} (v${v.node}, bun=${v.bun})`);
+	},
+);
 
 describe.skipIf(!built)("dist/node bundles", () => {
 	test("(a) no Bun-only import.meta.dir or import.meta.path survives", () => {
@@ -120,6 +140,8 @@ for (const k of ["existsSync", "readFileSync", "statSync", "accessSync"]) {
 				},
 			);
 			const out = `${r.stdout}${r.stderr}`;
+			// A crashed bundle proves nothing: the policy check must really have run.
+			expect(out).toContain("NemoClaw verified");
 			expect(out).not.toContain("PLANTED_RULE");
 			expect(out).not.toContain("Refusing to start");
 			const touched = existsSync(log) ? readFileSync(log, "utf8") : "";
