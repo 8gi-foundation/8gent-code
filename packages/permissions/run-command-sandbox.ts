@@ -232,27 +232,65 @@ const NETWORK_ENV_KEYS = [
 	"SSL_CERT_DIR",
 ] as const;
 
+/** Also hostile when a project .env sets them: they change how bun or node starts and runs. */
+const isHostileNetworkName = (up: string): boolean =>
+	(NETWORK_ENV_KEYS as readonly string[]).includes(up) ||
+	up === "NODE_OPTIONS" ||
+	up.startsWith("BUN_");
+
+/** Upper-cased KEY -> the values the given dotenv files declare for it (quotes stripped). */
+export function dotenvDeclaredValues(files: string[]): Map<string, Set<string>> {
+	const out = new Map<string, Set<string>>();
+	for (const f of files) {
+		let text: string;
+		try {
+			text = fs.readFileSync(f, "utf8").replace(/^\uFEFF/, "");
+		} catch {
+			continue;
+		}
+		for (const m of text.matchAll(
+			/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*[=:][ \t]*(.*?)[ \t]*$/gm,
+		)) {
+			const key = (m[1] as string).toUpperCase();
+			const val = (m[2] as string).replace(/^(["'])(.*)\1$/, "$2");
+			if (!out.has(key)) out.set(key, new Set());
+			out.get(key)?.add(val);
+		}
+	}
+	return out;
+}
+
 /**
  * Pure: the process.env names to delete because a PROJECT .env declared them.
  * Bun loads the cwd .env before any code runs and its fetch reads these at call
- * time, so they are removed here, once, at load (#4622). Case-insensitive.
+ * time, so they are removed here, once, at load (#4622). Case-insensitive. A
+ * variable is removed only when its current value IS the value the project file
+ * declares: the user's own shell value (a different one) is kept.
  */
 export function hostileNetworkEnvNames(
-	envNames: Iterable<string>,
-	projectDeclared: ReadonlySet<string>,
+	env: Readonly<Record<string, string | undefined>>,
+	declared: ReadonlyMap<string, ReadonlySet<string>>,
 ): string[] {
-	const declared = new Set([...projectDeclared].map((k) => k.toUpperCase()));
 	const out: string[] = [];
-	for (const name of envNames) {
+	for (const [name, value] of Object.entries(env)) {
 		const up = name.toUpperCase();
-		if ((NETWORK_ENV_KEYS as readonly string[]).includes(up) && declared.has(up)) out.push(name);
+		if (value === undefined || !isHostileNetworkName(up)) continue;
+		if (declared.get(up)?.has(value)) out.push(name);
 	}
 	return out;
 }
 
 function dropHostileNetworkEnv(): string[] {
-	const names = hostileNetworkEnvNames(Object.keys(process.env), projectDeclaredAtLoad);
+	const names = hostileNetworkEnvNames(
+		process.env,
+		dotenvDeclaredValues(projectDotenvCandidates()),
+	);
 	for (const n of names) Reflect.deleteProperty(process.env, n);
+	// Names only, never values.
+	if (names.length > 0)
+		process.stderr.write(
+			`8gent: ignored ${names.join(", ")} from this folder's .env file (it can change where requests go). Set them in your shell if you want them.\n`,
+		);
 	return names;
 }
 /** Names removed from process.env at load because a project .env set them. */

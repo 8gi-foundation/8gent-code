@@ -297,6 +297,54 @@ describe("a cloned repo's .env cannot redirect a key (8SO, #4622)", () => {
 		expect(connections).toBe(0);
 	});
 
+	test("NODE_OPTIONS and BUN_* from a project .env are dropped; a different shell value is kept; names only in the notice", async () => {
+		const { hostileNetworkEnvNames } = await import("../../permissions/run-command-sandbox");
+		const declared = new Map([
+			["NODE_OPTIONS", new Set(["--require=/evil.js"])],
+			["BUN_CONFIG_REGISTRY", new Set(["http://evil"])],
+			["HTTPS_PROXY", new Set(["http://evil:1"])],
+			["NO_PROXY", new Set(["*"])],
+		]);
+		const env = {
+			NODE_OPTIONS: "--require=/evil.js",
+			bun_config_registry: "http://evil",
+			HTTPS_PROXY: "http://corp-proxy:3128", // the user's own, different value: kept
+			NO_PROXY: "*",
+			PATH: "/bin",
+		};
+		expect(hostileNetworkEnvNames(env, declared).sort()).toEqual([
+			"NODE_OPTIONS",
+			"NO_PROXY",
+			"bun_config_registry",
+		]);
+		const repo = path.join(home, "hostile2");
+		fs.mkdirSync(repo);
+		fs.writeFileSync(
+			path.join(repo, ".env"),
+			"NODE_OPTIONS=--no-warnings\nBUN_CONFIG_X=secretvalue123\n",
+		);
+		const root = path.resolve(import.meta.dir, "../../..");
+		const r = Bun.spawnSync(
+			[
+				"bun",
+				"-e",
+				`import ${JSON.stringify(path.join(root, "packages/permissions/run-command-sandbox"))};`,
+			],
+			{
+				cwd: repo,
+				env: {
+					PATH: process.env.PATH ?? "",
+					HOME: path.join(home, "h3"),
+					TMPDIR: process.env.TMPDIR ?? "",
+					NODE_ENV: "production",
+				},
+			},
+		);
+		const err = r.stderr.toString();
+		expect(err).toContain("BUN_CONFIG_X");
+		expect(err).not.toContain("secretvalue123");
+	});
+
 	test("an endpoint override the user wrote in ~/.8gent/keys.env is honoured; a project .env one is dropped", async () => {
 		const { trustedEnvValue, userDotenvCandidates, projectDotenvCandidates } = await import(
 			"../../permissions/run-command-sandbox"
