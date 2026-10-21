@@ -25,6 +25,7 @@ import {
 	hopAllowed,
 	latestBinaryRelease,
 	latestForNpmChannel,
+	latestReleaseFromRedirect,
 	npmInstallCommand,
 	npmPrefixFromModulePath,
 	npmTarballName,
@@ -389,19 +390,21 @@ describe("npm channel from the GitHub release (#3658)", () => {
 		expect(runs[0].args[0]).toBe("install");
 		expect(runs[0].args[1]).toBe("-g");
 		expect(runs[0].args[2].endsWith(`/${tgz}`)).toBe(true);
-		expect(runs[0].args).toHaveLength(3);
+		expect(runs[0].args[3]).toBe("--ignore-scripts");
+		expect(runs[0].args).toHaveLength(4);
 		// npm installed exactly the verified bytes, and nothing is left behind.
 		expect(runs[0].staged).toBe("NPM-TARBALL-0.20.0");
 		expect(readdirSync(dir)).toEqual([]);
 	});
 
-	test("npm wins when it is as new as the release: installed by name, nothing downloaded", async () => {
+	test("the release package wins even when npm is as new: the registry is not asked (#4698)", async () => {
 		const runs: { args: string[]; staged: string }[] = [];
 		const f = fakeFetch(routes(npmLatest("0.20.0")));
 		const r = await update(f, runs);
 		expect(r.status).toBe("updated");
-		expect(runs[0].args).toEqual(["install", "-g", "@8gi-foundation/8gent-code@0.20.0"]);
-		expect(f.calls.some((u) => u.endsWith(".tgz"))).toBe(false);
+		expect(runs[0].args.slice(3)).toEqual(["--ignore-scripts"]);
+		expect(runs[0].staged).toBe("NPM-TARBALL-0.20.0");
+		expect(f.calls).not.toContain(NPM_URL);
 	});
 
 	test("a checksum mismatch refuses the tarball and npm never runs", async () => {
@@ -431,10 +434,13 @@ describe("npm channel from the GitHub release (#3658)", () => {
 
 	test("GitHub down: npm alone decides, as before", async () => {
 		const target = await latestForNpmChannel(fakeFetch(npmLatest("0.17.0")), RELEASES);
-		expect(target).toEqual({ version: "0.17.0", release: null });
+		expect(target).toEqual({ version: "0.17.0", release: null, source: "npm" });
 	});
 
 	test("both down is a failure, not a crash", async () => {
+		await expect(latestForNpmChannel(fakeFetch({}), RELEASES)).rejects.toThrow(
+			"GitHub releases answered 404",
+		);
 		await expect(latestForNpmChannel(fakeFetch({}), RELEASES)).rejects.toThrow(
 			"npm registry answered 404",
 		);
@@ -456,9 +462,13 @@ describe("npm channel from the GitHub release (#3658)", () => {
 		expect(runs).toEqual([]);
 	});
 
-	test("GitHub rate-limited (403): npm alone decides, a lower npm is refused, nothing installs", async () => {
+	test("GitHub API and the latest redirect both refused: npm alone decides, a lower npm is refused", async () => {
 		const runs: { args: string[]; staged: string }[] = [];
-		const f = fakeFetch({ ...npmLatest("0.17.0"), [RELEASES]: { status: 403, body: {} } });
+		const f = fakeFetch({
+			...npmLatest("0.17.0"),
+			[RELEASES]: { status: 403, body: {} },
+			[LATEST]: { status: 429, body: "" },
+		});
 		const r = await update(f, runs);
 		expect(r.status).toBe("refused-downgrade");
 		expect(runs).toEqual([]);
@@ -524,6 +534,162 @@ describe("npm channel from the GitHub release (#3658)", () => {
 			'"C:\\Users\\A B\\x.tgz"',
 		);
 		expect(npmInstallCommand("0.20.0", "linux", "/tmp/x.tgz").args[2]).toBe("/tmp/x.tgz");
+	});
+});
+
+// #4698, 21 Oct 2026: Termux installs the release npm package; api.github.com
+// answered 403 to anonymous calls that day, and npm latest was still 0.17.0.
+const LATEST = "https://github.com/8gi-foundation/8gent-code/releases/latest";
+const TAG_URL = "https://github.com/8gi-foundation/8gent-code/releases/tag";
+const DLR = "https://github.com/8gi-foundation/8gent-code/releases/download";
+
+describe("release found without api.github.com (#4698)", () => {
+	let dir: string;
+	beforeEach(() => {
+		dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "self-update-redirect-"));
+	});
+	afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+	const tgz = npmTarballName("0.20.10");
+	const bytes = new TextEncoder().encode("NPM-TARBALL-0.20.10");
+	const sum = createHash("sha256").update(bytes).digest("hex");
+	const API = "https://api.github.com/repos/8gi-foundation/8gent-code/releases?per_page=100";
+	const PREFIX = "/data/data/com.termux/files/usr";
+	// The real Termux shape: API 403, redirect to the tag, assets on github.com.
+	const termux = (o: { sums?: string; location?: string; npm?: Routes } = {}): Routes => ({
+		...(o.npm ?? npmLatest("0.17.0")),
+		[API]: { status: 403, body: { message: "API rate limit exceeded" } },
+		[LATEST]: { status: 302, body: "", location: o.location ?? `${TAG_URL}/v0.20.10` },
+		[`${DLR}/v0.20.10/${tgz}`]: {
+			status: 302,
+			body: "",
+			location: "https://release-assets.githubusercontent.com/x/tgz",
+		},
+		"https://release-assets.githubusercontent.com/x/tgz": { body: bytes },
+		[`${DLR}/v0.20.10/SHA256SUMS`]: { body: o.sums ?? `${sum}  ${tgz}\n` },
+	});
+	const termuxUpdate = async (
+		f: FetchLike,
+		currentVersion = "0.20.4",
+	): Promise<{
+		code: number;
+		lines: string[];
+		runs: { cmd: string; args: string[]; staged: string }[];
+	}> => {
+		const lines: string[] = [];
+		const runs: { cmd: string; args: string[]; staged: string }[] = [];
+		const code = await runUpdateCommand([], {
+			currentVersion,
+			modulePath: `file://${PREFIX}/lib/node_modules/@8gi-foundation/8gent-code/bin/8gent.ts`,
+			embedded: false,
+			execPath: `${PREFIX}/bin/node`,
+			platform: "android",
+			arch: "arm64",
+			fetchImpl: f,
+			env: { PREFIX, TERMUX_VERSION: "0.118.1" },
+			interactive: true,
+			log: (l) => lines.push(l),
+			selfUpdate: (o) => runSelfUpdate({ ...o, tmpDir: dir, signingKey: "" }),
+			run: async (cmd, args) => {
+				const file = args[2];
+				runs.push({ cmd, args, staged: file.startsWith("/") ? readFileSync(file, "utf8") : "" });
+				return 0;
+			},
+		});
+		return { code, lines, runs };
+	};
+
+	test("Termux: API 403 falls back to the redirect; the verified tgz installs with --ignore-scripts", async () => {
+		const f = fakeFetch(termux());
+		const { code, lines, runs } = await termuxUpdate(f);
+		expect(code).toBe(0);
+		expect(runs).toHaveLength(1);
+		expect(runs[0].cmd).toBe("npm");
+		const [install, g, file, ...rest] = runs[0].args;
+		expect([install, g]).toEqual(["install", "-g"]);
+		expect(file.startsWith(`${dir}/8gent-update-`)).toBe(true);
+		expect(file.endsWith(`/${tgz}`)).toBe(true);
+		expect(rest).toEqual(["--ignore-scripts", "--prefix", PREFIX]);
+		expect(runs[0].staged).toBe("NPM-TARBALL-0.20.10");
+		// The stale registry is never asked, and the private temp dir is gone.
+		expect(f.calls).not.toContain(NPM_URL);
+		expect(readdirSync(dir)).toEqual([]);
+		const text = lines.join("\n");
+		expect(lines[0]).toBe(
+			"8gent v0.20.4, installed with npm (updates from the GitHub release package).",
+		);
+		expect(text).toContain("Latest version: v0.20.10 (GitHub release, found through github.com");
+		expect(text).toContain(`SHA256 matches SHA256SUMS: ${sum}`);
+		expect(text).toContain("Updated 8gent v0.20.4 -> v0.20.10.");
+	});
+
+	test("a checksum mismatch aborts before npm runs", async () => {
+		const { code, lines, runs } = await termuxUpdate(
+			fakeFetch(termux({ sums: `${"0".repeat(64)}  ${tgz}\n` })),
+		);
+		expect(code).toBe(1);
+		expect(runs).toEqual([]);
+		expect(lines.join("\n")).toContain("checksum mismatch");
+		expect(readdirSync(dir)).toEqual([]);
+	});
+
+	test("up to date is a no-op: nothing downloaded, npm never runs", async () => {
+		const f = fakeFetch(termux());
+		const { code, lines, runs } = await termuxUpdate(f, "0.20.10");
+		expect(code).toBe(0);
+		expect(runs).toEqual([]);
+		expect(f.calls.some((u) => u.includes("/releases/download/"))).toBe(false);
+		expect(lines.slice(-2)).toEqual([
+			"Already up to date.",
+			"8gent v0.20.10 is the newest release.",
+		]);
+	});
+
+	for (const [label, location] of [
+		["a prerelease suffix", `${TAG_URL}/v0.20.11-rc.1`],
+		["a non-version tag", `${TAG_URL}/desktop-v0.1.0`],
+		["an encoded path climb", `${TAG_URL}/..%2F..%2Fevil`],
+		["another host", "https://evil.example/8gi-foundation/8gent-code/releases/tag/v9.9.9"],
+		["another repo", "https://github.com/evil/repo/releases/tag/v9.9.9"],
+		["plain http", "http://github.com/8gi-foundation/8gent-code/releases/tag/v9.9.9"],
+	] as const) {
+		test(`a redirect to ${label} is rejected; nothing installs`, async () => {
+			await expect(
+				latestReleaseFromRedirect(fakeFetch(termux({ location })), npmTarballName),
+			).rejects.toThrow("refusing");
+			const { code, runs } = await termuxUpdate(fakeFetch(termux({ location, npm: {} })));
+			expect(code).toBe(1);
+			expect(runs).toEqual([]);
+		});
+	}
+
+	test("the redirect builds asset URLs only under the repo's releases/download/<tag>/", async () => {
+		const rel = await latestReleaseFromRedirect(fakeFetch(termux()), npmTarballName);
+		expect(rel.version).toBe("0.20.10");
+		expect(rel.asset).toBe(tgz);
+		for (const u of Object.values(rel.urls)) {
+			expect(u.startsWith(`${DLR}/v0.20.10/`)).toBe(true);
+			expect(urlAllowed(u, "asset")).toBe(true);
+		}
+	});
+
+	test("a 200 from releases/latest (no redirect) is an error, not a guess", async () => {
+		await expect(
+			latestReleaseFromRedirect(fakeFetch({ [LATEST]: { body: "<html>" } }), npmTarballName),
+		).rejects.toThrow("not a redirect");
+	});
+
+	test("--check on Termux reports the release through the redirect", async () => {
+		const r = await checkUpdate({
+			currentVersion: "0.20.4",
+			channel: "npm",
+			fetchImpl: fakeFetch(termux()),
+			platform: "android",
+			arch: "arm64",
+		});
+		expect(describeCheck(r)).toBe(
+			"v0.20.10 is available (this is v0.20.4, npm channel). Run: 8gent update",
+		);
 	});
 });
 
