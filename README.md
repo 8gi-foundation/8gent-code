@@ -5,7 +5,7 @@
 <p align="center">
   <strong>The kernel of the <a href="https://8gent.world">8gent ecosystem</a>.</strong><br />
   Open source autonomous coding agent powered by local LLMs or free cloud models, for developers who want an agent that runs on their own machine.<br />
-  No API keys. No usage caps. No cloud dependency.<br />
+  No API keys. No cloud dependency.<br />
   Install: <code>curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.sh | sh</code> (macOS, Linux), or see <a href="#install">Install</a> for Windows. Then run <code>8gent</code>.
 </p>
 
@@ -258,7 +258,7 @@ If no local model is available, 8gent will guide you through interactive onboard
 Token vendors control access to intelligence through pricing tiers, rate limits, and API keys.
 That is a business model, not a law of nature. It is also not the only option.
 
-8gent runs locally, privately, and for free. No credit card. No usage cap. No cloud dependency required.
+8gent runs locally, privately, and for free. No credit card. No cloud dependency required.
 
 Every policy that governs what the agent can do is a YAML file you can read, edit, and override.
 Every memory the agent stores is a SQLite database on your own disk. Nothing phones home.

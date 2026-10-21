@@ -15,7 +15,7 @@ const DEMO_FILE =
 
 console.log("╔══════════════════════════════════════════════════════════════╗");
 console.log("║  8gent Code - Token Savings Demo                             ║");
-console.log('║  "Never hit usage caps again"                                ║');
+console.log("║                                                              ║");
 console.log("╚══════════════════════════════════════════════════════════════╝\n");
 
 // Get file info
@@ -105,5 +105,5 @@ if (targetSymbol) {
 	}
 
 	console.log("\n🚀 Scale this across a full development session and the savings are massive.");
-	console.log("   This is why 8gent Code users never hit usage caps.\n");
+	console.log("   Savings compound across a session.\n");
 }

@@ -182,9 +182,12 @@ describe("registryKeyNotice", () => {
 		);
 	});
 	test("minimax with a key, a local provider and an unknown name are all null", () => {
-		expect(registryKeyNotice("minimax", reader({ minimax: "k" }))).toBeNull();
+		expect(registryKeyNotice("minimax", reader({ minimax: "fake-key-0123456789" }))).toBeNull();
 		expect(registryKeyNotice("ollama", reader({}))).toBeNull();
 		expect(registryKeyNotice("nope", reader({}))).toBeNull();
+	});
+	test("a one-character key counts as missing", () => {
+		expect(registryKeyNotice("minimax", reader({ minimax: "Z" }))).toContain("MINIMAX_API_KEY");
 	});
 	test("openrouter keeps its own notice", () => {
 		expect(registryKeyNotice("openrouter", reader({}))).toBeNull();

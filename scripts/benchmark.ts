@@ -215,7 +215,7 @@ async function runFullBenchmark(): Promise<BenchmarkSuite> {
 	}
 
 	log("\n🚀 These savings compound across every codebase interaction.", colors.bright);
-	log("   This is why 8gent Code users never hit usage caps.\n");
+	log("   Savings compound across a session.\n");
 
 	// Save results to file
 	const resultsPath = path.join(process.cwd(), "benchmark-results.json");

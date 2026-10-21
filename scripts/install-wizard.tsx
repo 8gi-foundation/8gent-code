@@ -202,7 +202,6 @@ const Logo = () => (
 		<Gradient name="vice">
 			<BigText text="8gent" font="chrome" />
 		</Gradient>
-		<Text dimColor>Never hit usage caps again™</Text>
 	</Box>
 );
 

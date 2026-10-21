@@ -139,3 +139,18 @@ export function guidanceCopy(platform: NodeJS.Platform = process.platform): Guid
 		],
 	};
 }
+
+/**
+ * The full "no model" guide as plain text, for the /provider command. It is
+ * shown on request only, never as a standing card, so it cannot crowd the
+ * onboarding conversation on a phone-sized terminal.
+ */
+export function guidanceText(copy: GuidanceCopy = guidanceCopy(), reason?: string | null): string {
+	const lines = [`${copy.label}: ${copy.lead}`];
+	if (reason) lines.push(reason);
+	for (const path of copy.paths) {
+		lines.push(`${path.n}. ${path.title}`);
+		for (const step of path.steps) lines.push(`   ${step}`);
+	}
+	return lines.join("\n");
+}

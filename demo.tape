@@ -26,7 +26,7 @@ Type "# ════════════════════════
 Enter
 Type "#  8gent Code - The Infinite Gentleman"
 Enter
-Type "#  Autonomous agentic coding. Never hit usage caps again."
+Type "#  Autonomous coding, on your machine."
 Enter
 Type "# ═══════════════════════════════════════════════════════"
 Enter
