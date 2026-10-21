@@ -160,10 +160,21 @@ describe("shouldShowRouteNotice", () => {
 
 describe("resolveChatChoice", () => {
 	test("a saved provider chat cannot run falls back to the router with the reason", async () => {
-		const c = await resolveChatChoice({}, deps({ saved: { provider: "groq", model: "llama" } }));
+		// anthropic speaks its own wire shape, so it still has no chat runtime here.
+		const c = await resolveChatChoice(
+			{},
+			deps({ saved: { provider: "anthropic", model: "claude" } }),
+		);
 		expect(c.provider).toBe("ollama");
 		expect(c.source).toBe("router");
-		expect(c.notice).toBe("groq is not a chat provider, using Ollama 8gate:latest");
+		expect(c.notice).toBe("anthropic is not a chat provider, using Ollama 8gate:latest");
+	});
+
+	test("a keyed hosted provider such as groq is a chat runtime and is honoured (#4622)", async () => {
+		const c = await resolveChatChoice({}, deps({ saved: { provider: "groq", model: "llama" } }));
+		expect(c.provider).toBe("groq");
+		expect(c.source).toBe("saved");
+		expect(c.notice).toBeUndefined();
 	});
 
 	test("a saved chat runtime is honoured, and an unreachable one keeps its own notice", async () => {
