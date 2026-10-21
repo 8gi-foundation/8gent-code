@@ -75,9 +75,10 @@ export function parseFact(file: string, text: string): MeFact | null {
 	return { name, description, type: type as MeType, body: m[2].trim(), file };
 }
 
+/** Regular files only: lstat, so a symlink is never followed. */
 function readIfFile(p: string): string | null {
 	try {
-		return fs.statSync(p).isFile() ? fs.readFileSync(p, "utf8") : null;
+		return fs.lstatSync(p).isFile() ? fs.readFileSync(p, "utf8") : null;
 	} catch {
 		return null;
 	}
@@ -199,6 +200,9 @@ function oneLine(s: string): string {
 
 function appendIndexLine(dir: string, line: string): void {
 	const p = path.join(dir, INDEX_FILE);
+	if (fs.lstatSync(p, { throwIfNoEntry: false })?.isSymbolicLink()) {
+		throw new Error(`${INDEX_FILE} is a symlink; not writing through it.`);
+	}
 	const cur = readIfFile(p) ?? "";
 	const sep = cur === "" || cur.endsWith("\n") ? "" : "\n";
 	fs.writeFileSync(p, `${cur}${sep}${line}\n`);
@@ -244,6 +248,17 @@ export interface ImportResult {
 	index: "copied" | "kept" | "none";
 }
 
+/** Create-only write: false when anything (even a dangling symlink) is already there. */
+function writeNew(target: string, text: string): boolean {
+	try {
+		fs.writeFileSync(target, text, { flag: "wx" });
+		return true;
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+		throw e;
+	}
+}
+
 /**
  * Copy fact files with the frontmatter shape from `src` into `dest`, skipping
  * names that already exist. MEMORY.md becomes ME.md when ME.md is absent.
@@ -257,11 +272,7 @@ export function importMe(src: string, dest: string): ImportResult {
 		if (text === null) continue;
 		if (f === CLAUDE_INDEX_FILE || f === INDEX_FILE) {
 			const target = path.join(dest, INDEX_FILE);
-			if (fs.existsSync(target)) res.index = "kept";
-			else {
-				fs.writeFileSync(target, text);
-				res.index = "copied";
-			}
+			res.index = writeNew(target, text) ? "copied" : "kept";
 			continue;
 		}
 		if (!parseFact(f, text)) {
@@ -269,11 +280,8 @@ export function importMe(src: string, dest: string): ImportResult {
 			continue;
 		}
 		const target = path.join(dest, f);
-		if (fs.existsSync(target)) res.skipped++;
-		else {
-			fs.writeFileSync(target, text);
-			res.imported++;
-		}
+		if (writeNew(target, text)) res.imported++;
+		else res.skipped++;
 	}
 	return res;
 }

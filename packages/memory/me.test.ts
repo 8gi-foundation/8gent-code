@@ -138,3 +138,50 @@ describe("meBlockForTurn (the assembled block per turn)", () => {
 		expect(b).toContain("GitHub is a mirror.");
 	});
 });
+
+describe("symlinks are never followed", () => {
+	test("import skips a symlink in src that points outside src", () => {
+		const outside = fs.mkdtempSync(path.join(os.tmpdir(), "me-out-"));
+		const src = fs.mkdtempSync(path.join(os.tmpdir(), "me-src-"));
+		const dest = fs.mkdtempSync(path.join(os.tmpdir(), "me-dest-"));
+		try {
+			fs.writeFileSync(path.join(outside, "secret.md"), fact("secret", "d", "user", "S"));
+			fs.symlinkSync(path.join(outside, "secret.md"), path.join(src, "s.md"));
+			fs.symlinkSync(path.join(outside, "secret.md"), path.join(src, "MEMORY.md"));
+			fs.writeFileSync(path.join(src, "ok.md"), fact("ok", "d", "user", "O"));
+			expect(importMe(src, dest)).toEqual({ imported: 1, skipped: 0, ignored: 0, index: "none" });
+			expect(fs.existsSync(path.join(dest, "s.md"))).toBe(false);
+			expect(fs.existsSync(path.join(dest, "ME.md"))).toBe(false);
+		} finally {
+			for (const d of [outside, src, dest]) fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+	test("a dangling symlink in dest is not written through", () => {
+		const src = fs.mkdtempSync(path.join(os.tmpdir(), "me-src-"));
+		const dest = fs.mkdtempSync(path.join(os.tmpdir(), "me-dest-"));
+		const target = path.join(os.tmpdir(), `me-dangling-${process.pid}.md`);
+		try {
+			fs.writeFileSync(path.join(src, "a.md"), fact("a", "d", "user", "A"));
+			fs.symlinkSync(target, path.join(dest, "a.md"));
+			expect(importMe(src, dest).skipped).toBe(1);
+			expect(fs.existsSync(target)).toBe(false);
+		} finally {
+			for (const d of [src, dest]) fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+	test("a symlinked fact or index in the me dir is ignored on load", () => {
+		const outside = fs.mkdtempSync(path.join(os.tmpdir(), "me-out-"));
+		try {
+			fs.writeFileSync(path.join(outside, "x.md"), fact("x", "d", "user", "X"));
+			fs.symlinkSync(path.join(outside, "x.md"), path.join(dir, "x.md"));
+			fs.rmSync(path.join(dir, "ME.md"));
+			fs.symlinkSync(path.join(outside, "x.md"), path.join(dir, "ME.md"));
+			const me = loadMe(dir);
+			expect(me.facts.map((f) => f.name)).not.toContain("x");
+			expect(me.index).toBe("");
+			expect(() => addFact(dir, "note")).toThrow();
+		} finally {
+			fs.rmSync(outside, { recursive: true, force: true });
+		}
+	});
+});
