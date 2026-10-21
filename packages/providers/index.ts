@@ -872,6 +872,9 @@ export class ProviderManager {
 		// flag is exactly "1" and the caller left `thinking` empty. Otherwise
 		// returns the caller's object untouched.
 		const request = applyEffortPolicy(callerRequest);
+		if (request.providerName && !this.isKnownProvider(request.providerName)) {
+			throw new Error(`Unknown provider: ${request.providerName}`);
+		}
 		const provider = request.providerName
 			? this.getProvider(request.providerName)
 			: this.getActiveProvider();

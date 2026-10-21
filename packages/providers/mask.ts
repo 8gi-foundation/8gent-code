@@ -15,8 +15,16 @@
  */
 import { homedir, userInfo } from "node:os";
 
-export type MaskType = "secret" | "email" | "phone" | "ip" | "path" | "term";
-export const MASK_TYPES: readonly MaskType[] = ["secret", "email", "phone", "ip", "path", "term"];
+export type MaskType = "secret" | "email" | "phone" | "ip" | "path" | "card" | "term";
+export const MASK_TYPES: readonly MaskType[] = [
+	"secret",
+	"email",
+	"phone",
+	"ip",
+	"path",
+	"card",
+	"term",
+];
 
 export type MaskCounts = Record<MaskType, number>;
 
@@ -36,48 +44,116 @@ export interface Masker {
 	unmask(text: string): string;
 	/** Distinct values hidden so far, by type. Numbers only. */
 	counts(): MaskCounts;
-	/** True when `text` still holds something the masker would hide. */
+	/**
+	 * True when `text` still holds something this masker would hide. A regression
+	 * guard only: it reuses the masker's own patterns, so it cannot catch a shape
+	 * the masker does not know. coarseLeaks() is the independent check.
+	 */
 	leaks(text: string): boolean;
 }
 
-const emptyCounts = (): MaskCounts => ({ secret: 0, email: 0, phone: 0, ip: 0, path: 0, term: 0 });
+const emptyCounts = (): MaskCounts => ({
+	secret: 0,
+	email: 0,
+	phone: 0,
+	ip: 0,
+	path: 0,
+	card: 0,
+	term: 0,
+});
 
 const PLACEHOLDER = /\{\{[A-Z]+_\d+\}\}/g;
+/** Splits around our own placeholders, keeping them (odd indexes). */
+const OURS_SPLIT = /(\{\{[A-Z]+_\d+\}\})/;
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
+// Every quantifier below is bounded or anchored to a run start, so hostile input
+// cannot make it quadratic. consult.ts also caps the input size before masking.
+
+const PEM =
+	/-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]{0,40}PRIVATE KEY-----|$)/g;
 
 const KEY_SHAPES: RegExp[] = [
 	/\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}/g,
+	/\b(?:sk|pk|rk|whsec)_[A-Za-z0-9_]{16,}/g,
 	/\bgh[pousr]_[A-Za-z0-9]{30,}/g,
 	/\bgithub_pat_[A-Za-z0-9_]{30,}/g,
+	/\bnpm_[A-Za-z0-9]{20,}/g,
 	/\bxox[abprs]-[A-Za-z0-9-]{10,}/g,
 	/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
 	/\bAIza[0-9A-Za-z_-]{30,}/g,
 	/\bhf_[A-Za-z0-9]{30,}/g,
 	/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+	/\b(?:ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-nistp\d{3})[ \t]+[A-Za-z0-9+/=]{20,}(?:[ \t]+\S{1,100})?/g,
 ];
 
-const BEARER = /\b(Bearer|Basic)(\s+)([A-Za-z0-9._~+/=-]{16,})/g;
+const BEARER = /\b(Bearer|Basic|Token|ApiKey)(\s{1,4})([A-Za-z0-9._~+/=-]{16,})/g;
+const AUTH_HEADER =
+	/\b(authorization\s{0,4}[:=：＝]\s{0,4}(?:[A-Za-z]{2,20}\s{1,4})?)([^\s"',;]{6,})/gi;
 
-const ASSIGNMENT =
-	/\b([A-Za-z0-9_.-]*(?:api[_-]?key|secret|token|passw(?:or)?d|pwd|credential)[A-Za-z0-9_.-]*)(\s*[:=]\s*)(["']?)([^\s"',;]{6,})/gi;
+const NAME_KW = "api[_-]?key|secret|token|passw(?:or)?d|pwd|credential|private|auth|dsn|key";
+const ASSIGN_QUOTED = new RegExp(
+	`\\b([A-Za-z0-9_.-]{0,64}(?:${NAME_KW})[A-Za-z0-9_.-]{0,32})(\\s{0,4}[:=：＝]\\s{0,4})(["'])([^"'\\n]{4,200})\\3`,
+	"gi",
+);
+const ASSIGN_BARE = new RegExp(
+	`\\b([A-Za-z0-9_.-]{0,64}(?:${NAME_KW})[A-Za-z0-9_.-]{0,32})(\\s{0,4}[:=：＝]\\s{0,4})([^\\s"',;]{6,})`,
+	"gi",
+);
+/** A .env line: UPPER_CASE_NAME=value with a value of 8 or more characters. */
+const ENV_QUOTED =
+	/^([ \t]{0,20}(?:export[ \t]+)?[A-Z][A-Z0-9_]{2,63}[ \t]{0,4}=[ \t]{0,4})(["'])([^"'\n]{8,200})\2/gm;
+const ENV_BARE =
+	/^([ \t]{0,20}(?:export[ \t]+)?[A-Z][A-Z0-9_]{2,63}[ \t]{0,4}=[ \t]{0,4})([^\s"']{8,})/gm;
+
+/** scheme://user:pass@host and scheme://token@host. */
+const URL_USERINFO = /\b([A-Za-z][A-Za-z0-9+.-]{1,20}:\/\/)([^\s/@?#]{1,128})@/g;
+/** curl -u user:pass, --user user:pass. */
+const CURL_USER = /(^|\s)(-u|--user)([ \t]+|=)(["']?)([^\s"']{1,200}:[^\s"']{1,200})\4/g;
 
 /** A long run of key characters that mixes letters and digits: a hash, a token, a base64 blob. */
 const LONG_TOKEN = /(?<![A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{40,}={0,2}(?![A-Za-z0-9+/_-])/g;
 
-const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
+const EMAIL =
+	/[\p{L}\p{N}._%+-]{1,64}@[\p{L}\p{N}-]{1,63}(?:\.[\p{L}\p{N}-]{1,63}){0,8}\.\p{L}{2,24}/gu;
 
 const IPV4 = /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/g;
-const IPV6 = /(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}(?![0-9A-Fa-f:])/g;
+/** Candidate IPv6, full or compressed; validated by isIPv6. */
+const IPV6 = /(?<![0-9A-Za-z:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Za-z:])/g;
 
-const PHONE = /(?<![\w.])\+?\(?\d[\d\s().-]{6,}\d(?!\w)/g;
+const CARD = /(?<![\d.-])\d(?:[ -]?\d){12,18}(?!\d)/g;
+const PHONE = /(?<![\w.])\+?\(?\d[\d\s().-]{6,30}\d(?!\w)/g;
 
 const POSIX_HOME = /\/(?:Users|home)\/[^/\s"'`)\]}<>]+(?:\/[^\s"'`)\]}<>:,;]*)?/g;
 const WIN_HOME = /\b[A-Za-z]:\\Users\\[^\\\s"'`)<>]+(?:\\[^\s"'`)<>]*)?/g;
 
 const isLoopback = (ip: string) => ip.startsWith("127.") || ip === "0.0.0.0";
+
+function isIPv6(s: string): boolean {
+	if (s === "::" || s === "::1") return false;
+	const dbl = s.indexOf("::");
+	if (dbl !== s.lastIndexOf("::")) return false;
+	const groups = s.split(":");
+	if (dbl === -1) return groups.length === 8 && groups.every((g) => /^[0-9A-Fa-f]{1,4}$/.test(g));
+	const nonEmpty = groups.filter((g) => g !== "");
+	return nonEmpty.length <= 7 && nonEmpty.every((g) => /^[0-9A-Fa-f]{1,4}$/.test(g));
+}
+
+function luhn(digits: string): boolean {
+	let sum = 0;
+	let dbl = false;
+	for (let i = digits.length - 1; i >= 0; i--) {
+		let d = digits.charCodeAt(i) - 48;
+		if (dbl) {
+			d *= 2;
+			if (d > 9) d -= 9;
+		}
+		sum += d;
+		dbl = !dbl;
+	}
+	return sum % 10 === 0;
+}
 
 function looksLikePhone(s: string): boolean {
 	const digits = s.replace(/\D/g, "").length;
@@ -91,6 +167,25 @@ const mixed = (s: string) => /[A-Za-z]/.test(s) && /\d{3}/.test(s);
 function splitTail(s: string): [string, string] {
 	const m = /[.,;:!?]+$/.exec(s);
 	return m ? [s.slice(0, m.index), m[0]] : [s, ""];
+}
+
+/**
+ * A coarse second check, deliberately NOT built from the masker's patterns: it
+ * looks at what is about to leave. True when the text, with our own placeholders
+ * removed, still holds credentials in a URL, an = followed by 20 or more
+ * mixed-case characters, or a run of 40 or more token characters. It over-refuses
+ * on purpose: a long kebab-case name will trip it, and the person can reword.
+ */
+export function coarseLeaks(text: string): boolean {
+	const t = text.replace(PLACEHOLDER, " ");
+	if (/:\/\/[^\s/@]{1,200}:[^\s/@]{1,200}@/.test(t)) return true;
+	if (
+		/[=：＝]\s{0,4}["']?(?=[A-Za-z0-9+/_-]{0,200}[a-z])(?=[A-Za-z0-9+/_-]{0,200}[A-Z])[A-Za-z0-9+/_-]{20,}/.test(
+			t,
+		)
+	)
+		return true;
+	return /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{40,}/.test(t);
 }
 
 export function createMasker(opts: MaskOptions = {}): Masker {
@@ -142,19 +237,32 @@ export function createMasker(opts: MaskOptions = {}): Masker {
 		return ph;
 	};
 
-	const skip = (s: string) => s.includes("{{");
+	/** Hide `s` except for our own placeholders inside it, so a stray "{{" cannot shield a secret. */
+	const hide = (type: MaskType, s: string): string =>
+		s
+			.split(OURS_SPLIT)
+			.map((seg, i) => (i % 2 === 1 || seg === "" ? seg : place(type, seg)))
+			.join("");
 
 	function run(text: string): string {
 		let t = text;
-		t = t.replace(PEM, (m) => place("secret", m));
-		for (const re of KEY_SHAPES) t = t.replace(re, (m) => (skip(m) ? m : place("secret", m)));
-		t = t.replace(BEARER, (_m, scheme, sp, tok) =>
-			skip(tok) ? _m : `${scheme}${sp}${place("secret", tok)}`,
+		t = t.replace(PEM, (m) => hide("secret", m));
+		for (const re of KEY_SHAPES) t = t.replace(re, (m) => hide("secret", m));
+		t = t.replace(URL_USERINFO, (_m, scheme, user) => `${scheme}${hide("secret", user)}@`);
+		t = t.replace(
+			CURL_USER,
+			(_m, lead, flag, sep, q, val) => `${lead}${flag}${sep}${q}${hide("secret", val)}${q}`,
 		);
-		t = t.replace(ASSIGNMENT, (m, name, sep, q, val) =>
-			skip(val) ? m : `${name}${sep}${q}${place("secret", val)}`,
+		t = t.replace(AUTH_HEADER, (_m, head, val) => `${head}${hide("secret", val)}`);
+		t = t.replace(BEARER, (_m, scheme, sp, tok) => `${scheme}${sp}${hide("secret", tok)}`);
+		t = t.replace(
+			ASSIGN_QUOTED,
+			(_m, name, sep, q, val) => `${name}${sep}${q}${hide("secret", val)}${q}`,
 		);
-		t = t.replace(LONG_TOKEN, (m) => (skip(m) || !mixed(m) ? m : place("secret", m)));
+		t = t.replace(ASSIGN_BARE, (_m, name, sep, val) => `${name}${sep}${hide("secret", val)}`);
+		t = t.replace(ENV_QUOTED, (_m, head, q, val) => `${head}${q}${hide("secret", val)}${q}`);
+		t = t.replace(ENV_BARE, (_m, head, val) => `${head}${hide("secret", val)}`);
+		t = t.replace(LONG_TOKEN, (m) => (mixed(m) ? hide("secret", m) : m));
 		for (const re of homeRes) {
 			t = t.replace(re, (m) => {
 				const [body, tail] = splitTail(m);
@@ -171,7 +279,11 @@ export function createMasker(opts: MaskOptions = {}): Masker {
 		});
 		t = t.replace(EMAIL, (m) => place("email", m));
 		t = t.replace(IPV4, (m) => (isLoopback(m) ? m : place("ip", m)));
-		t = t.replace(IPV6, (m) => place("ip", m));
+		t = t.replace(IPV6, (m) => (isIPv6(m) ? place("ip", m) : m));
+		t = t.replace(CARD, (m) => {
+			const d = m.replace(/\D/g, "");
+			return d.length >= 13 && d.length <= 19 && luhn(d) ? place("card", m) : m;
+		});
 		t = t.replace(PHONE, (m) => (looksLikePhone(m) ? place("phone", m) : m));
 		for (const re of termRes) t = t.replace(re, (m) => place("term", m));
 		return t;
@@ -210,6 +322,7 @@ export function describeCounts(c: MaskCounts): string | null {
 		phone: ["phone number", "phone numbers"],
 		ip: ["IP address", "IP addresses"],
 		path: ["home path", "home paths"],
+		card: ["card number", "card numbers"],
 		term: ["listed term", "listed terms"],
 	};
 	const parts = MASK_TYPES.filter((k) => c[k] > 0).map(

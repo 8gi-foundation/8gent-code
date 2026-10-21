@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createMasker, describeCounts } from "./mask";
+import { coarseLeaks, createMasker, describeCounts } from "./mask";
 
 // Built from pieces so no secret scanner mistakes a fixture for a real key.
 const SK = `sk-${"a1B2c3D4e5F6g7H8i9J0"}kLmN`;
@@ -97,7 +97,7 @@ describe("masker: what is left alone and what is reported", () => {
 		const m = fresh(["Falcon"]);
 		m.mask(`${EMAIL} ${EMAIL} ${IP} ${SK} Falcon`);
 		const c = m.counts();
-		expect(c).toEqual({ secret: 1, email: 1, phone: 0, ip: 1, path: 0, term: 1 });
+		expect(c).toEqual({ secret: 1, email: 1, phone: 0, ip: 1, path: 0, card: 0, term: 1 });
 		const d = describeCounts(c) as string;
 		expect(d).toBe("1 secret, 1 email, 1 IP address, 1 listed term");
 		for (const v of [EMAIL, IP, SK, "Falcon"]) expect(d).not.toContain(v);
@@ -125,5 +125,145 @@ describe("masker: the map has no way out", () => {
 		const dumped = JSON.stringify(m) + String(m.counts());
 		expect(dumped).not.toContain(EMAIL);
 		expect(dumped).not.toContain(SK);
+	});
+});
+
+describe("masker: a stray brace cannot shield a secret", () => {
+	const cases: [string, string][] = [
+		["password=hunter2secret{{x}}tail", "hunter2secret"],
+		["API_KEY=abc123def456{{ ghi789", "abc123def456"],
+		["token={{x}}realsecretvalue99", "realsecretvalue99"],
+		["secret={{EMAIL_1}}extrasecretbits", "extrasecretbits"],
+	];
+	for (const [input, needle] of cases) {
+		test(input, () => {
+			const m = fresh();
+			const out = m.mask(input);
+			expect(out).not.toContain(needle);
+			expect(m.unmask(out)).toBe(input);
+		});
+	}
+
+	test("a value that is exactly one of our own placeholders is left as is", () => {
+		const m = fresh();
+		const once = m.mask(`${EMAIL} and secret=abcdefghij`);
+		expect(m.mask(once)).toBe(once);
+	});
+});
+
+describe("masker: more shapes", () => {
+	const FW = "\uFF1A"; // full-width colon
+	const cases: [string, string, string][] = [
+		["stripe live key", `use sk_live_${"51HabcDEF123456789xyz"} now`, "51HabcDEF123456789xyz"],
+		["stripe publishable", `pk_test_${"TYooMQauvdEDq54NiTphI7jx"}`, "TYooMQauvdEDq54NiTphI7jx"],
+		["stripe restricted", `rk_live_${"abcdefghijklmnop1234"}`, "abcdefghijklmnop1234"],
+		["PRIVATE_KEY name", "PRIVATE_KEY=abcd1234wxyz", "abcd1234wxyz"],
+		["STRIPE_KEY name", "STRIPE_KEY=zzzzzzzz1111", "zzzzzzzz1111"],
+		["AWS_ACCESS_KEY_ID name", "AWS_ACCESS_KEY_ID=wxyzwxyz1234", "wxyzwxyz1234"],
+		["auth name", "auth=letmein123", "letmein123"],
+		["dsn name", "SENTRY_DSN=https-ish-value-123", "https-ish-value-123"],
+		["quoted password with spaces", 'password = "my long pass phrase"', "my long pass phrase"],
+		[".env line", "DATABASE_HOST=db-internal-7", "db-internal-7"],
+		[".env export line", "export CLIENT_NAME='Zenith Bank Ltd'", "Zenith Bank Ltd"],
+		["url userinfo with password", "postgres://admin:s3cretpw@db.internal:5432/app", "s3cretpw"],
+		["url userinfo, user only", "mongodb://deploytoken123@localhost/app", "deploytoken123"],
+		["https token userinfo", "https://abc123tokenvalue@github.com/org/repo", "abc123tokenvalue"],
+		["Authorization: Token", "Authorization: Token abc123xyz789", "abc123xyz789"],
+		["Authorization: bare", "authorization=rawcredential99", "rawcredential99"],
+		["curl -u", "curl -u alice:wonderland99 https://x.test", "wonderland99"],
+		["curl --user", "curl --user bob:builder123 https://x.test", "builder123"],
+		["card number (luhn ok)", "card 4111 1111 1111 1111 exp", "4111 1111 1111 1111"],
+		["card number dashes", "4111-1111-1111-1111", "4111-1111-1111-1111"],
+		["amex 15 digits", "378282246310005", "378282246310005"],
+		[
+			"ssh-ed25519 line",
+			`ssh-ed25519 ${"AAAAC3NzaC1lZDI1NTE5AAAAIabcdefgh12345"} me@laptop`,
+			"AAAAC3NzaC1lZDI1NTE5",
+		],
+		["ssh-rsa line", `ssh-rsa ${"AAAAB3NzaC1yc2EAAAADAQABAAABgQDabc123"}`, "AAAAB3NzaC1yc2E"],
+		[
+			"npm token",
+			`npm_${"abcdefghijklmnopqrstuvwxyz0123456789"}`,
+			"abcdefghijklmnopqrstuvwxyz0123456789",
+		],
+		["full-width colon", `password${FW}hunter2secret`, "hunter2secret"],
+		["non-ASCII email local part", "write to jos\u00e9.mu\u00f1oz@empresa.es today", "mu\u00f1oz"],
+		[
+			"cyrillic email",
+			"\u0438\u0432\u0430\u043d@\u043f\u043e\u0447\u0442\u0430.\u0440\u0444",
+			"\u0438\u0432\u0430\u043d",
+		],
+		["compressed ipv6", "host 2001:db8::1 is up", "2001:db8::1"],
+		["compressed ipv6 long", "fe80::1ff:fe23:4567:890a", "fe80::1ff:fe23:4567:890a"],
+		["full ipv6", "2001:0db8:85a3:0000:0000:8a2e:0370:7334", "8a2e:0370"],
+	];
+	for (const [name, input, needle] of cases) {
+		test(name, () => {
+			const m = fresh();
+			const out = m.mask(input);
+			expect(out).not.toContain(needle);
+			expect(out).toContain("{{");
+			expect(m.unmask(out)).toBe(input);
+		});
+	}
+
+	test("a 16 digit number that fails Luhn is not a card", () => {
+		expect(fresh().mask("order 1234567812345678 shipped")).toBe("order 1234567812345678 shipped");
+	});
+	test("::1, a time and a C++ scope are not IPv6", () => {
+		const s = "loopback ::1 at 12:30:45 calls std::string::size";
+		expect(fresh().mask(s)).toBe(s);
+	});
+	test("a plain git remote and a plain 'key' word survive", () => {
+		const s = "press any key to continue";
+		expect(fresh().mask(s)).toBe(s);
+	});
+});
+
+describe("masker: hostile input stays fast", () => {
+	const N = 16 * 1024;
+	const hostile: [string, string][] = [
+		["long run", "a1".repeat(N / 2)],
+		["many at-signs", "a@".repeat(N / 2)],
+		["dotted labels", `x@${"a.".repeat(N / 2)}`],
+		["digits and spaces", "1 ".repeat(N / 2)],
+		["equals run", `key${"=".repeat(N)}`],
+		["keyword repeats", "key=".repeat(N / 4)],
+		["braces", "{{".repeat(N / 2)],
+		["home paths", "/Users/a".repeat(N / 8)],
+		["colons", ":".repeat(N)],
+		["hex colons", "a:".repeat(N / 2)],
+		["dash digits", "1-".repeat(N / 2)],
+		["unclosed pem", `-----BEGIN PRIVATE KEY-----${"x".repeat(N)}`],
+		["url schemes", "a://".repeat(N / 4)],
+		["upper env", "AAA=".repeat(N / 4)],
+	];
+	for (const [name, text] of hostile) {
+		test(`${name}: mask and coarse check under 250 ms`, () => {
+			const m = fresh(["Falcon"]);
+			const t0 = performance.now();
+			const out = m.mask(text);
+			m.leaks(out);
+			coarseLeaks(out);
+			expect(performance.now() - t0).toBeLessThan(250);
+		});
+	}
+});
+
+describe("coarseLeaks: an independent last check", () => {
+	test("flags credentials in a URL, a mixed-case value after =, and a 40+ char token", () => {
+		expect(coarseLeaks("postgres://u:p@host/db")).toBe(true);
+		expect(coarseLeaks("thing=AbCdEfGhIjKlMnOpQrStUv")).toBe(true);
+		expect(coarseLeaks(`x ${"k".repeat(40)} y`)).toBe(true);
+	});
+	test("passes ordinary text and masked text", () => {
+		expect(coarseLeaks("why does the loop at line 40 return 404?")).toBe(false);
+		expect(coarseLeaks("secret={{SECRET_1}} mail {{EMAIL_1}}")).toBe(false);
+	});
+	test("catches a shape the masker does not know", () => {
+		const m = fresh();
+		const unknown = `vendor-ref: ${"Zq".repeat(25)}`;
+		expect(m.leaks(m.mask(unknown))).toBe(false);
+		expect(coarseLeaks(m.mask(unknown))).toBe(true);
 	});
 });

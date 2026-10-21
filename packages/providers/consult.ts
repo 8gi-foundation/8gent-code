@@ -24,7 +24,7 @@ import {
 	readPolicyState,
 	settingsPath,
 } from "./locality";
-import { createMasker, describeCounts } from "./mask";
+import { coarseLeaks, createMasker, describeCounts } from "./mask";
 
 export interface ConsultSettings {
 	/** routing.mask: default true. */
@@ -85,10 +85,36 @@ const SYSTEM =
 export const CONSULT_USAGE =
 	"Usage: /consult <question>. One stateless question to your cloud model, with secrets and personal data masked first.";
 
+/** Most bytes /consult takes. Over it, nothing is masked or sent. */
+export const MAX_CONSULT_BYTES = 16 * 1024;
+
+let warnedMaskOff = false;
+/** Tests only: forget that the masking-off warning was shown. */
+export function resetMaskOffWarning(): void {
+	warnedMaskOff = false;
+}
+
+/** The reply is untrusted text from a remote model: no escape sequences or control characters reach the screen. */
+export function stripControl(text: string): string {
+	return (
+		text
+			// OSC (title, hyperlink) up to BEL or ST, then CSI and other two-byte escapes
+			.replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g, "")
+			.replace(/\u001b\[[0-?]*[ -/]*[@-~]?/g, "")
+			.replace(/\u001b[@-Z\\-_]?/g, "")
+			// remaining C0 (keep tab and newline), DEL, C1
+			.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")
+	);
+}
+
 /** The /consult command. Returns the text to show; never throws. */
 export async function consult(question: string, deps: ConsultDeps): Promise<string> {
 	const q = question.trim();
 	if (!q) return CONSULT_USAGE;
+
+	if (Buffer.byteLength(q) > MAX_CONSULT_BYTES) {
+		return `Nothing was sent: the question is over ${MAX_CONSULT_BYTES / 1024} KB. Cut it down to the part you need advice on.`;
+	}
 
 	const st = deps.state();
 	const route = decideRoute({
@@ -103,7 +129,7 @@ export async function consult(question: string, deps: ConsultDeps): Promise<stri
 	const settings = deps.settings();
 	const masker = createMasker({ terms: settings.terms });
 	const masked = settings.mask ? masker.mask(q) : q;
-	if (settings.mask && masker.leaks(masked)) {
+	if (settings.mask && (masker.leaks(masked) || coarseLeaks(masked))) {
 		return "Nothing was sent: the masked text still looks like it holds a secret or personal detail. Rewrite the question without it.";
 	}
 
@@ -132,11 +158,17 @@ export async function consult(question: string, deps: ConsultDeps): Promise<stri
 			masked,
 		);
 	} else {
-		lines.push("Masking is off (routing.mask is false). Your question was sent as typed.");
+		lines.push(
+			warnedMaskOff
+				? "Masking is off (routing.mask is false). Your question was sent as typed."
+				: "WARNING: masking is off (routing.mask is false). Your question was sent as typed, secrets and personal data included. Set routing.mask to true to mask it.",
+		);
+		warnedMaskOff = true;
 	}
+	const advice = stripControl(reply.text);
 	lines.push(
-		`Advice from ${reply.provider} (${reply.model}), placeholders filled in locally:`,
-		settings.mask ? masker.unmask(reply.text) : reply.text,
+		`Advice from ${stripControl(reply.provider)} (${stripControl(reply.model)}), placeholders filled in locally:`,
+		settings.mask ? masker.unmask(advice) : advice,
 	);
 	return lines.join("\n");
 }

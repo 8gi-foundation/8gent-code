@@ -2,7 +2,15 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type ConsultDeps, consult, providerSend, readConsultSettings } from "./consult";
+import {
+	type ConsultDeps,
+	MAX_CONSULT_BYTES,
+	consult,
+	providerSend,
+	readConsultSettings,
+	resetMaskOffWarning,
+	stripControl,
+} from "./consult";
 import { ProviderManager } from "./index";
 import { type PolicyState, decideRoute, readLedger, recordCall, updateCall } from "./locality";
 import { guardFetch } from "./locality-wire";
@@ -134,7 +142,7 @@ describe("/consult", () => {
 	test("routing.mask false sends as typed and the ledger line is not marked masked", async () => {
 		const { deps } = rig(policy("local-first"), false);
 		const out = await consult("plain question about sorting", deps);
-		expect(out).toContain("Masking is off");
+		expect(out).toMatch(/masking is off/i);
 		const rows = readLedger(ledger);
 		expect((rows[0] as any).masked).toBeUndefined();
 	});
@@ -177,5 +185,86 @@ describe("readConsultSettings", () => {
 	});
 	test("an unreadable file keeps masking on", () => {
 		expect(readConsultSettings(write("{nope")).mask).toBe(true);
+	});
+});
+
+describe("/consult hardening", () => {
+	const never: ConsultDeps = {
+		state: () => policy("local-first"),
+		settings: () => ({ mask: true, terms: [] }),
+		send: async () => {
+			throw new Error("must not send");
+		},
+	};
+
+	test("input over the cap is refused fast and never sent", async () => {
+		const hostile = `${"a@".repeat(50_000)}key=${"=".repeat(50_000)}`;
+		expect(Buffer.byteLength(hostile)).toBeGreaterThan(MAX_CONSULT_BYTES);
+		const t0 = performance.now();
+		const out = await consult(hostile, never);
+		expect(performance.now() - t0).toBeLessThan(250);
+		expect(out).toContain("Nothing was sent");
+		expect(out).toContain("16 KB");
+	});
+
+	test("input just under the cap goes through the masker", async () => {
+		let sent = "";
+		const deps: ConsultDeps = {
+			...never,
+			send: async (m) => {
+				sent = m[1].content;
+				return { text: "ok", provider: "p", model: "m" };
+			},
+		};
+		await consult(`${"word ".repeat(3000)}me@example.org`, deps);
+		expect(sent).not.toContain("me@example.org");
+	});
+
+	test("a secret the masker does not know but the coarse check does is not sent", async () => {
+		const out = await consult(`vendor-ref: ${"Zq".repeat(25)}`, never);
+		expect(out).toContain("Nothing was sent");
+	});
+
+	test("escape sequences and control characters in the reply never reach the screen", async () => {
+		const deps: ConsultDeps = {
+			...never,
+			send: async () => ({
+				text: "fine\u001b[2J\u001b]0;pwned\u0007 text\u0000\u0085 done\nnext\ttab",
+				provider: "p\u001b[31m",
+				model: "m",
+			}),
+		};
+		const out = await consult("a plain question here", deps);
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: this is the assertion
+		expect(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(out.replace(/\n/g, ""))).toBe(false);
+		expect(out).toContain("fine text done");
+		expect(out).toContain("next\ttab");
+	});
+
+	test("stripControl removes CSI, OSC and C1 and keeps plain text", () => {
+		expect(stripControl("a\u001b[1;31mb\u001b[0m c\u001b]8;;http://x\u0007d")).toBe("ab cd");
+	});
+
+	test("masking off warns once, loudly, then short", async () => {
+		resetMaskOffWarning();
+		const deps: ConsultDeps = {
+			...never,
+			settings: () => ({ mask: false, terms: [] }),
+			send: async () => ({ text: "ok", provider: "p", model: "m" }),
+		};
+		const first = await consult("one question", deps);
+		const second = await consult("another question", deps);
+		expect(first).toContain("WARNING: masking is off");
+		expect(second).not.toContain("WARNING");
+		expect(second).toContain("Masking is off");
+	});
+
+	test("ProviderManager.chat throws on an unknown providerName", async () => {
+		const settings = path.join(dir, "providers.json");
+		fs.writeFileSync(settings, JSON.stringify({ activeProvider: "openrouter", providers: {} }));
+		const mgr = new ProviderManager(settings);
+		await expect(
+			mgr.chat({ messages: [{ role: "user", content: "hi" }], providerName: "no-such-provider" }),
+		).rejects.toThrow("Unknown provider");
 	});
 });
