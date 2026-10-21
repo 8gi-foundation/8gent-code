@@ -83,7 +83,8 @@ function tokenize(seg: string): Tok[] {
 function inClass(set: string, ch: string): boolean {
 	for (let i = 0; i < set.length; i++) {
 		if (set[i + 1] === "-" && i + 2 < set.length) {
-			if (ch >= set[i] && ch <= set[i + 2]) return true;
+			// the start of a range always matches itself, so a reversed [z-a] matches "z" as in git
+			if (ch === set[i] || (ch >= set[i] && ch <= set[i + 2])) return true;
 			i += 2;
 		} else if (set[i] === ch) return true;
 	}
@@ -135,6 +136,19 @@ export function globMatcher(glob: string, anchored = true): ((rel: string) => bo
 		0,
 	);
 	if (wild > MAX_WILDCARDS) return null;
+	if (wild === 0 && !segs.some((g) => g === "**")) {
+		// Literal rule: plain string compare, no split and no memo (the hot path for big .gitignore files).
+		const lit = (segs as Tok[][])
+			.map((g) => g.map((t) => (t.k === "lit" ? t.c : "")).join(""))
+			.join("/");
+		return anchored
+			? (rel: string) => rel === lit
+			: (rel: string) =>
+					rel === lit ||
+					(rel.length > lit.length &&
+						rel.endsWith(lit) &&
+						rel[rel.length - lit.length - 1] === "/");
+	}
 	return (rel: string) => {
 		const parts = rel.split("/");
 		const starts = anchored
@@ -183,10 +197,10 @@ function trimTrailingBlanks(line: string): string {
 }
 
 /** Parse .gitignore text into rules relative to the directory holding it. No RegExp anywhere. */
-export function parseGitignore(text: string): IgnoreRule[] {
+export function parseGitignore(text: string, limit = MAX_GITIGNORE_RULES): IgnoreRule[] {
 	const rules: IgnoreRule[] = [];
 	for (let line of text.split("\n")) {
-		if (rules.length >= MAX_GITIGNORE_RULES) break;
+		if (rules.length >= limit) break;
 		if (line.length > MAX_LINE_CHARS) continue; // a line over the cap is dropped before any work
 		if (line.endsWith("\r")) line = line.slice(0, -1);
 		line = trimTrailingBlanks(line);
@@ -246,6 +260,7 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 	// 1. Walk: sorted, ignore-aware, guard-filtered list of candidate files.
 	const candidates: string[] = [];
 	let entriesSeen = 0;
+	let ruleBudget = MAX_GITIGNORE_RULES; // one budget per search, shared by every scope
 	const walk = (dir: string, rel: string, inherited: Scope[]): void => {
 		let entries: fs.Dirent[];
 		try {
@@ -255,9 +270,10 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 		}
 		entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 		let scopes = inherited;
-		if (entries.some((e) => e.name === ".gitignore" && e.isFile())) {
+		if (ruleBudget > 0 && entries.some((e) => e.name === ".gitignore" && e.isFile())) {
 			try {
-				const rules = parseGitignore(readGitignore(path.join(dir, ".gitignore")));
+				const rules = parseGitignore(readGitignore(path.join(dir, ".gitignore")), ruleBudget);
+				ruleBudget -= rules.length;
 				scopes = [...inherited, { base: rel, rules }];
 			} catch {}
 		}

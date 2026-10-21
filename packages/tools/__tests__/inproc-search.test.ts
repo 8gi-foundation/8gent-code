@@ -297,6 +297,38 @@ describe("inproc-search", () => {
 		}
 	});
 
+	test("rule budget is per search, not per .gitignore", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-nest-"));
+		try {
+			const rules = `${Array.from({ length: MAX_GITIGNORE_RULES }, (_, i) => `r${i}.tmp`).join("\n")}\n`;
+			let dir = d;
+			for (let i = 0; i < 60; i++) {
+				fs.writeFileSync(path.join(dir, ".gitignore"), rules);
+				dir = path.join(dir, `n${i}`);
+				fs.mkdirSync(dir);
+			}
+			for (let i = 0; i < 300; i++) fs.writeFileSync(path.join(dir, `f${i}.txt`), "needle\n");
+			const t0 = performance.now();
+			const r = await searchFiles({
+				root: d,
+				allow: () => true,
+				pattern: "needle",
+				maxResults: 1000,
+			});
+			expect(performance.now() - t0).toBeLessThan(1000);
+			expect(r.hits.length).toBe(300);
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+
+	test("reversed class range [z-a] matches its start char, as in git", () => {
+		const m = globMatcher("[z-a].txt", false);
+		expect(m?.("z.txt")).toBe(true);
+		expect(m?.("m.txt")).toBe(false);
+		expect(m?.("a.txt")).toBe(false);
+	});
+
 	test("spawns nothing", async () => {
 		const src = fs.readFileSync(path.join(import.meta.dir, "..", "inproc-search.ts"), "utf8");
 		expect(src).not.toMatch(/child_process|Worker|execSync|spawnSync|Bun\.spawn/);
