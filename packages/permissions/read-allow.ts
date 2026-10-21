@@ -163,7 +163,7 @@ export function noteBoundaryBlock(path: string): { text: string; end?: string } 
 
 let pendingStop: string | null = null;
 
-/** The plain reply a second boundary block set, once. The agent loop ends the turn with it. */
+/** The plain reply a second boundary block set, once. The turn loop ends the turn with it. */
 export function takeBoundaryStop(): string | null {
 	const s = pendingStop;
 	pendingStop = null;
