@@ -35,7 +35,8 @@ export function noModelMessage(opts: {
 	if (status === "401" || status === "403") {
 		return `${displayName} rejected the key (HTTP ${status}). Run \`8gent keys\` to replace ${keyEnv || "it"}.`;
 	}
-	if (status) return `No model chosen for ${displayName}: its model list request failed with HTTP ${status}. ${pickHint}`;
+	if (status)
+		return `No model chosen for ${displayName}: its model list request failed with HTTP ${status}. ${pickHint}`;
 	if (/timed out/i.test(msg))
 		return `No model chosen for ${displayName}: its model list request timed out. ${pickHint}`;
 	if (msg)

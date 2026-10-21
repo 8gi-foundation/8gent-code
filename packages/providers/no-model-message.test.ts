@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { keyLooksUsable, noModelMessage } from "./no-model-message";
 
-const base = { displayName: "MiniMax", keyEnv: "MINIMAX_API_KEY", pickHint: "Pass --model <name>." };
+const base = {
+	displayName: "MiniMax",
+	keyEnv: "MINIMAX_API_KEY",
+	pickHint: "Pass --model <name>.",
+};
 
 describe("noModelMessage", () => {
 	test("no key names the key and the fix, not the model list", () => {
@@ -26,7 +30,11 @@ describe("noModelMessage", () => {
 		expect(m).toContain("rejected the key (HTTP 401)");
 	});
 	test("a network failure keeps the list wording and the pick hint", () => {
-		const m = noModelMessage({ ...base, key: "fake-key-0123456789", err: new Error("fetch failed") });
+		const m = noModelMessage({
+			...base,
+			key: "fake-key-0123456789",
+			err: new Error("fetch failed"),
+		});
 		expect(m).toContain("could not reach its model list");
 		expect(m).toContain("Pass --model <name>.");
 	});

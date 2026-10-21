@@ -135,11 +135,7 @@ export const MIN_SET_KEY_CHARS = 20;
  * NAME), mode 0600. Returns an error string and writes nothing when the value
  * is too short or the name is not an env-var name. Never echoes the value.
  */
-export function setKeyInFile(
-	name: string,
-	value: string,
-	path: string = KEYS_PATH,
-): string | null {
+export function setKeyInFile(name: string, value: string, path: string = KEYS_PATH): string | null {
 	const v = value.trim();
 	if (!/^[A-Z][A-Z0-9_]*$/.test(name)) return `${name} is not a valid key name.`;
 	if (v.length < MIN_SET_KEY_CHARS)
@@ -147,9 +143,7 @@ export function setKeyInFile(
 	if (/[\r\n"']/.test(v)) return "That value has quotes or line breaks in it. Nothing was saved.";
 	mkdirSync(dirname(path), { recursive: true });
 	const old = existsSync(path) ? readFileSync(path, "utf-8") : "";
-	const kept = old
-		.split(/\r?\n/)
-		.filter((l) => !new RegExp(`^\\s*${name}\\s*=`).test(l));
+	const kept = old.split(/\r?\n/).filter((l) => !new RegExp(`^\\s*${name}\\s*=`).test(l));
 	while (kept.length && kept[kept.length - 1] === "") kept.pop();
 	writeFileSync(path, `${[...kept, `${name}=${v}`].join("\n")}\n`, { mode: 0o600 });
 	chmodSync(path, 0o600);

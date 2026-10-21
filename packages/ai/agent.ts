@@ -282,7 +282,8 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		...(config.topP !== undefined ? { topP: config.topP } : {}),
 		// topK is only supported by Anthropic/Google. Every other provider (OpenAI-compatible
 		// ones like minimax) rejects it with an "AI SDK Warning", so it is sent to those two only.
-		...(config.topK !== undefined && ["anthropic", "google", "gemini"].includes(config.provider.name)
+		...(config.topK !== undefined &&
+		["anthropic", "google", "gemini"].includes(config.provider.name)
 			? { topK: config.topK }
 			: {}),
 		...(config.frequencyPenalty !== undefined ? { frequencyPenalty: config.frequencyPenalty } : {}),

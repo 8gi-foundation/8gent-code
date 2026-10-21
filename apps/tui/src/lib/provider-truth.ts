@@ -11,9 +11,9 @@
  * No model names live here.
  */
 
+import { keyLooksUsable, noModelMessage } from "../../../../packages/providers/no-model-message.js";
 import type { ProviderOption } from "../components/select-input";
 import type { LiveModelsReader } from "./model-selection";
-import { keyLooksUsable, noModelMessage } from "../../../../packages/providers/no-model-message.js";
 import { declaredModels } from "./model-selection";
 
 /** The slice of ProviderManager the picker needs. */

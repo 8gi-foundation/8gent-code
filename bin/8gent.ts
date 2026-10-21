@@ -1986,9 +1986,7 @@ async function chatCommand(args: string[]) {
 	// else the router (#4362). A saved provider that does not answer falls back
 	// with a stated reason on stderr.
 	const { resolveChatChoice, liveProviderChoiceDeps, modelForOneShotWithReason, noModelNotice } =
-		await import(
-		"../packages/eight/run.ts"
-	);
+		await import("../packages/eight/run.ts");
 	const choice = await resolveChatChoice({ provider, model }, liveProviderChoiceDeps());
 	if (choice.notice) console.error(choice.notice);
 	let resolvedModel = choice.model;

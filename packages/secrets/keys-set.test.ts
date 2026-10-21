@@ -15,7 +15,9 @@ describe("setKeyInFile", () => {
 		const p = f();
 		writeFileSync(p, "OTHER=keepme\nMINIMAX_API_KEY=Z\n");
 		expect(setKeyInFile("MINIMAX_API_KEY", "fake-key-0123456789abcd", p)).toBeNull();
-		expect(readFileSync(p, "utf-8")).toBe("OTHER=keepme\nMINIMAX_API_KEY=fake-key-0123456789abcd\n");
+		expect(readFileSync(p, "utf-8")).toBe(
+			"OTHER=keepme\nMINIMAX_API_KEY=fake-key-0123456789abcd\n",
+		);
 		expect(statSync(p).mode & 0o777).toBe(0o600);
 	});
 });
