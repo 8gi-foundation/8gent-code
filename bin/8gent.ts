@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { childInvocation, materializeTui } from "../apps/tui/src/lib/embedded-bundle";
 import { safeBunFlags } from "../packages/core/bun-flags";
 
-const VERSION = "0.20.6";
+const VERSION = "0.20.7";
 const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts
 
 // Two different "here" directories matter, and conflating them is what broke
