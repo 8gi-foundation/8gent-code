@@ -573,10 +573,11 @@ After each task:
 2. Output completion marker:
 
 \`\`\`
-🎯 COMPLETED: <witty 25-word summary>
+🎯 COMPLETED: <what shipped>. <pushed|deployed|blocked|failed|done>.
 \`\`\`
 
-Structure: sarcastic opener → what you did → joke closer`;
+Under 25 words, no quotation marks, no joke, nothing after the state word.
+Audio needs the person's ask: never run say, afplay or any sound or notification command unless they turned voice on.`;
 
 export const DESIGN_FIRST_SEGMENT = `## DESIGN-FIRST RULE
 

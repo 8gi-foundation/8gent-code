@@ -557,6 +557,24 @@ export async function systemOneGate(
 ): Promise<SystemOneGateResult> {
 	const mode = systemOneMode(env);
 	if (mode === "off") return { run: true };
+	// Audio and notifications need the person's voice setting, never headless (#4713).
+	{
+		const { isAudioCommand, audioRefusal, voiceIsOn } = await import("./s1-audio");
+		if (isAudioCommand(command)) {
+			const tui = hasTuiApprovalHandler();
+			const refuse = audioRefusal(command, { tui, voiceOn: tui && (await voiceIsOn(env)) });
+			if (refuse) {
+				const guard: BashGuardResult = {
+					verdict: "block",
+					pYes: Number.NaN,
+					backend: "allowlist",
+					model: "allowlist",
+					reason: refuse,
+				};
+				return { run: false, guard, message: blockMessage(guard, "unknown", refuse, command) };
+			}
+		}
+	}
 	const allow = systemOneAllowlist(env);
 	/** Plain words for the block message when the single-file rule nearly matched (#3669). */
 	let hint: string | undefined;
