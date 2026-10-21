@@ -25,6 +25,7 @@ import { homedir } from "node:os";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
 import { resolveOllamaBaseUrl } from "../local-model-server/ollama-host";
+import { addReadAllowDir, resetReadAllow } from "../permissions/read-allow";
 import { readableModelName } from "../providers/model-reroute";
 import { autoSwitchLine, soleRunnableProvider } from "../providers/only-runnable";
 import type { TurnStop } from "./agent";
@@ -62,6 +63,8 @@ export interface RunOptions {
 	noSession: boolean;
 	/** `--session-dir <dir>`: where sessions are read and written. */
 	sessionDir?: string;
+	/** `--allow-read <dir>` (repeatable): folders the run may read outside its working directory (#4715). */
+	allowRead?: string[];
 }
 
 /**
@@ -77,6 +80,8 @@ export interface RunOptions {
  *   --max-turns <n>              or --max-turns=<n>
  *   --image <path>               or --image=<path>   (png, jpg, gif, webp; max 20 MB;
  *                                downscaled to fit 2560x2560; inside the working directory)
+ *   --allow-read <dir>           (repeatable) let the run read files under <dir>; writes stay in the
+ *                                working directory. Paths written in the prompt are allowed already.
  *   --no-workspace-boundary      do not set the workspace root (EIGHT_WORKSPACE_ROOT) for this run
  *                                (by default run mode sets it to the working directory; native
  *                                write_file and edit_file stay confined to the working directory either way)
@@ -106,6 +111,7 @@ export function parseRunArgs(argv: string[]): RunOptions {
 	let session: string | undefined;
 	let noSession = false;
 	let sessionDir: string | undefined;
+	const allowRead: string[] = [];
 	const positional: string[] = [];
 
 	for (let i = 0; i < argv.length; i++) {
@@ -188,6 +194,11 @@ export function parseRunArgs(argv: string[]): RunOptions {
 			image = a.slice("--image=".length);
 			continue;
 		}
+		if (a === "--allow-read" || a.startsWith("--allow-read=")) {
+			const v = a === "--allow-read" ? argv[++i] : a.slice("--allow-read=".length);
+			if (v) allowRead.push(v);
+			continue;
+		}
 		if (a === "--no-workspace-boundary") {
 			workspaceBoundary = false;
 			continue;
@@ -250,6 +261,7 @@ export function parseRunArgs(argv: string[]): RunOptions {
 		session,
 		noSession,
 		sessionDir,
+		...(allowRead.length ? { allowRead } : {}),
 	};
 }
 
@@ -1065,6 +1077,10 @@ export async function runRunCommand(
 	const workspaceRoot = runWorkspaceRoot(opts);
 	const priorWorkspaceRoot = process.env.EIGHT_WORKSPACE_ROOT;
 	if (workspaceRoot) process.env.EIGHT_WORKSPACE_ROOT = workspaceRoot;
+	// Reads outside the working directory: only what --allow-read names; the prompt's own
+	// paths are added when the turn starts (Agent.chat). Per run, so cleared in `finally` (#4715).
+	resetReadAllow();
+	for (const d of opts.allowRead ?? []) addReadAllowDir(d, workspaceRoot ?? process.cwd());
 
 	let exitCode = 0;
 	// Read in the catch below: a native turn the watchdog aborts throws, and the
@@ -1257,6 +1273,7 @@ export async function runRunCommand(
 			process.stderr.write(`Error: ${msg}\n`);
 		}
 	} finally {
+		resetReadAllow();
 		if (isStreamJson) {
 			console.log = originalConsoleLog;
 			console.info = originalConsoleInfo;

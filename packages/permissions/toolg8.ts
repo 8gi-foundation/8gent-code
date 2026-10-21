@@ -45,7 +45,12 @@ export interface BashGateAudit {
 	parserError?: string;
 }
 
-type BashGateFn = (command: string, agentId?: string, cwd?: string) => BashGateResult;
+type BashGateFn = (
+	command: string,
+	agentId?: string,
+	cwd?: string,
+	readPrefixes?: string[],
+) => BashGateResult;
 
 /** Cap the number of capabilities written per audit entry to keep JSONL lean. */
 const AUDIT_MAX_CAPABILITIES = 50;
@@ -126,6 +131,9 @@ export class ToolG8 {
 				context.command,
 				agentId,
 				typeof context.cwd === "string" ? context.cwd : undefined,
+				Array.isArray(context.allowedAbsolutePrefixes)
+					? (context.allowedAbsolutePrefixes as string[])
+					: undefined,
 			);
 		}
 
@@ -144,9 +152,13 @@ export class ToolG8 {
 			// replacements") is misleading for a secrets block: the problem is
 			// the content, not the write method, and the rule's own message
 			// already says what to do (.env + process.env).
-			result.alternative = result.reason?.includes("[no-secrets-in-files]")
-				? undefined
-				: this.suggestAlternative(action);
+			// A boundary block names no alternative: the one it used to give was the command
+			// class just blocked (#4715), and the tool result says what to do instead.
+			result.alternative =
+				result.reason?.includes("[no-secrets-in-files]") ||
+				result.reason?.includes("[workspace-boundary]")
+					? undefined
+					: this.suggestAlternative(action);
 		}
 
 		// Audit log (fire-and-forget, never blocks)
@@ -164,9 +176,14 @@ export class ToolG8 {
 	 * never grant MORE access than the legacy check, and it is never silent
 	 * (the parserError lands in the audit JSONL).
 	 */
-	private gateBashSegments(command: string, agentId: string, cwd?: string): BashGateAudit {
+	private gateBashSegments(
+		command: string,
+		agentId: string,
+		cwd?: string,
+		readPrefixes?: string[],
+	): BashGateAudit {
 		try {
-			const { decision, capabilities } = this.bashGateFn(command, agentId, cwd);
+			const { decision, capabilities } = this.bashGateFn(command, agentId, cwd, readPrefixes);
 			return {
 				denied: !decision.allowed,
 				reason: !decision.allowed && "reason" in decision ? decision.reason : undefined,
@@ -208,7 +225,8 @@ export class ToolG8 {
 			case "write_file":
 				return "Use edit_file with targeted replacements instead of full file writes.";
 			case "run_command":
-				return "Try a read-only command (git status, ls, cat) or request approval.";
+				// Never "request approval": a headless run has no approval path (#4715).
+				return "Use read_file, list_files or search_files for reading, or tell the person what is blocked.";
 			case "git_push":
 				return "Push to a feature branch instead of a protected branch.";
 			case "network_request":
@@ -216,7 +234,7 @@ export class ToolG8 {
 			case "secret_write":
 				return "Use environment variables via .env files, not direct secret writes.";
 			case "delete_file":
-				return "Archive the file instead of deleting, or request approval.";
+				return "Archive the file instead of deleting it.";
 			default:
 				return undefined;
 		}

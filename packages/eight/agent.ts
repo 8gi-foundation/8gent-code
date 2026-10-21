@@ -68,6 +68,7 @@ import {
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { effectivePermissionMode, systemOneEnvFor } from "../permissions/permission-mode";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
+import { allowReadsFromPrompt, takeBoundaryStop } from "../permissions/read-allow";
 import { startSystemOneWarmup } from "../permissions/system-one-gate";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { type ProviderName as ProviderRegistryName, getProviderManager } from "../providers";
@@ -1480,6 +1481,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					if (breakerStop === null) breakerStop = presendStop.reason;
 					this.abort(presendStop);
 				}
+				// A second boundary block on one path ends the turn with a plain reply (#4715).
+				const boundaryStop = takeBoundaryStop();
+				if (boundaryStop) {
+					if (breakerStop === null) breakerStop = boundaryStop;
+					this.abort({ kind: "circuit_breaker", reason: boundaryStop });
+				}
 
 				if (success) {
 					this.sessionWriter.writeToolResult(
@@ -2131,6 +2138,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (route.action === "refuse") return Promise.resolve(route.message);
 		this.lastTurnFailure = null;
 		this.honestyFired = false;
+		// A path the person writes in the ask is readable this run (#4715). Their text only,
+		// never a Table officer's channel scope.
+		if (!isVerbatimScope(this.config.agentScope) && !isNoToolScope(this.config.agentScope))
+			allowReadsFromPrompt(userMessage, this.config.workingDirectory ?? process.cwd());
 		this.friction.prompt(userMessage);
 		return withFriction(this.friction, () =>
 			runAsParentSession(
@@ -2903,6 +2914,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// A second post_message draft that broke a task rule stops the turn (#4191).
 				const presendStop = this.executor.takePresendStop();
 				if (presendStop) this.abort(presendStop);
+				const boundaryStop = takeBoundaryStop();
+				if (boundaryStop) this.abort({ kind: "circuit_breaker", reason: boundaryStop });
 
 				if (event.success) {
 					this.sessionWriter.writeToolResult(

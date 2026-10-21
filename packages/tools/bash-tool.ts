@@ -11,9 +11,9 @@
  * module exposes only the gate.
  */
 
-import { parseBash, toCapabilities, type BashCapability } from "./bash-parser";
 import { evaluateCapabilities } from "../permissions/policy-engine";
 import type { PolicyDecision } from "../permissions/types";
+import { type BashCapability, parseBash, toCapabilities } from "./bash-parser";
 
 export interface BashGateResult {
 	decision: PolicyDecision;
@@ -26,7 +26,12 @@ export interface BashGateResult {
  * Returns the decision and the capabilities that were evaluated, so callers
  * can log or display the per-segment trace alongside the deny reason.
  */
-export function gateBashCommand(command: string, agentId?: string, cwd?: string): BashGateResult {
+export function gateBashCommand(
+	command: string,
+	agentId?: string,
+	cwd?: string,
+	readPrefixes?: string[],
+): BashGateResult {
 	const parsed = parseBash(command);
 	const capabilities = toCapabilities(parsed);
 
@@ -35,7 +40,7 @@ export function gateBashCommand(command: string, agentId?: string, cwd?: string)
 		return { decision: { allowed: true }, capabilities };
 	}
 
-	const decision = evaluateCapabilities(capabilities, agentId, cwd);
+	const decision = evaluateCapabilities(capabilities, agentId, cwd, readPrefixes);
 	return { decision, capabilities };
 }
 

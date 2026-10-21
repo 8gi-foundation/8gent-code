@@ -914,12 +914,16 @@ export function evaluateCapabilities(
 	caps: BashCapabilityLike[],
 	agentId?: string,
 	cwd?: string,
+	readPrefixes?: string[],
 ): PolicyDecision {
 	for (const cap of caps) {
 		// cwd: what a redirect's relative path resolves against (#3474).
 		const ctx: PolicyContext = cwd ? { agentId, cwd } : { agentId };
 		if (cap.command !== undefined) ctx.command = cap.command;
 		if (cap.path !== undefined) ctx.path = cap.path;
+		// Folders the person named: readable by a read or a command, never by a write (#4715).
+		if (readPrefixes && (cap.kind === "run_command" || cap.kind === "read_file"))
+			ctx.allowedAbsolutePrefixes = readPrefixes;
 		const decision = evaluatePolicy(cap.kind, ctx);
 		if (!decision.allowed) return decision;
 	}

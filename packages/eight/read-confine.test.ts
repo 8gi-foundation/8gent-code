@@ -17,7 +17,10 @@ afterEach(() => setToolContext(priorContext));
 
 type Exec = (args: Record<string, unknown>, opts: unknown) => Promise<string>;
 const nativeRead = (args: Record<string, unknown>) =>
-	(agentTools.read_file as unknown as { execute: Exec }).execute(args, { toolCallId: "t", messages: [] });
+	(agentTools.read_file as unknown as { execute: Exec }).execute(args, {
+		toolCallId: "t",
+		messages: [],
+	});
 
 function setup(): { ws: string; outside: string } {
 	const ws = tempDir("readconfine-ws-");
@@ -32,8 +35,7 @@ describe("native read_file confinement (#3759)", () => {
 		const target = path.join(outside, "secret.txt");
 		fs.writeFileSync(target, "TOP-SECRET-CONTENT");
 		const out = await nativeRead({ path: target });
-		expect(out).toContain("outside");
-		expect(out).toContain("Nothing was read");
+		expect(out).toContain("This path cannot be read in this run");
 		expect(out).not.toContain("TOP-SECRET-CONTENT");
 	});
 
@@ -44,7 +46,7 @@ describe("native read_file confinement (#3759)", () => {
 		fs.writeFileSync(sibling, "CLIMBED-CONTENT");
 		try {
 			const out = await nativeRead({ path: `../${name}` });
-			expect(out).toContain("Nothing was read");
+			expect(out).toContain("This path cannot be read in this run");
 			expect(out).not.toContain("CLIMBED-CONTENT");
 		} finally {
 			fs.rmSync(sibling, { force: true });

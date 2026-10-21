@@ -114,9 +114,11 @@ describe("screen_locate tool wiring", () => {
 		const ex = new ToolExecutor(dir);
 		for (const image of ["~/.ssh/id_rsa", "/etc/passwd", "../../../.env"]) {
 			// Same refusal read_file gives: the guard throws before any model call.
-			await expect(ex.execute("screen_locate", { image, target: "x" })).rejects.toThrow(
-				/blocked|outside/i,
-			);
+			// A boundary block comes back as the terminal text (#4715); the credential guard throws.
+			const out = await ex
+				.execute("screen_locate", { image, target: "x" })
+				.catch((e: Error) => e.message);
+			expect(out).toMatch(/blocked|outside|cannot be read/i);
 		}
 	});
 });

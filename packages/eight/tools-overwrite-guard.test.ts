@@ -17,7 +17,9 @@ function setup() {
 
 /** The run-014230 shape: a chained probe the sanitizer refuses. */
 const probe = (ex: ToolExecutor) =>
-	ex.execute("run_command", { command: 'ls count.ts 2>/dev/null; echo "exit:$?"' });
+	ex.execute("run_command", {
+		command: 'ls count.ts 2>/dev/null; touch probe-marker; echo "exit:$?"',
+	});
 
 describe("write_file overwrite guard", () => {
 	test("refuses to replace an unread existing file and leaves it intact", async () => {
@@ -66,7 +68,7 @@ describe("write_file overwrite guard", () => {
 describe("refusal lead (#4238)", () => {
 	test("a chained command opens with the fixed not-run sentence, then the reason", async () => {
 		const { ex } = setup();
-		const out = await ex.execute("run_command", { command: "ls a; ls b" });
+		const out = await ex.execute("run_command", { command: "ls a; touch b" });
 		expect(out).toStartWith(CHAIN_LEAD);
 		expect(out).toContain("Semicolon command chaining is not allowed");
 		expect(out).toContain("Send each command as its own run_command call.");

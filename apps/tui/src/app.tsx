@@ -396,6 +396,7 @@ import {
 	setHolderMode,
 	systemOneEnvFor,
 } from "../../../packages/permissions/permission-mode.js";
+import { runAllowReadCommand } from "../../../packages/permissions/read-allow.js";
 import { usePermToast } from "./hooks/usePermToast.js";
 import {
 	type PermView,
@@ -3795,6 +3796,10 @@ export function App({
 
 				case "bug":
 					addSystemMessage(runBugCommand(args, { version: pkgInfo.version }).text);
+					break;
+
+				case "allow-read":
+					addSystemMessage(runAllowReadCommand(args, process.cwd()));
 					break;
 
 				case "copy":

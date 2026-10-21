@@ -75,6 +75,7 @@ export type SlashCommand =
 	| "projects"
 	| "terminal"
 	| "copy"
+	| "allow-read"
 	| "bug"
 	| "tree"
 	| "import";
@@ -536,6 +537,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Copy the last answer to the clipboard (works over SSH)",
 		usage: "/copy",
+	},
+	{
+		name: "allow-read",
+		aliases: [],
+		description:
+			"Takes a folder: let 8gent read files there this session (writes stay in the working folder)",
+		usage: "/allow-read <dir>",
 	},
 	{
 		name: "bug",

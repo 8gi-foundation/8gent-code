@@ -30,7 +30,21 @@ export function preSpawnRefusal(command: string, cwd: string = process.cwd()): s
 	return refusal === null ? null : refusalLead(refusal);
 }
 
+/**
+ * `8gent chat`, `8gent run` or `8gent mcp-server` (also `bun bin/8gent.ts ...`) at the start of
+ * a command part. A run that spawns itself nests a second 8gent inside the first (#4715).
+ * Anchored to a command position, so `grep "8gent chat"` and `echo 8gent run` are not matched.
+ */
+const SELF_SPAWN =
+	/(?:^|[;&|(\n])\s*(?:\w+=\S*\s+)*(?:(?:bun|bunx|node|npx|tsx)(?:\s+-\S+)*(?:\s+run)?\s+)?(?:\S*\/)?(?:8gent(?:\.ts)?)(?:\s+-\S+)*\s+(?:chat|run|mcp-server)(?![\w-])/;
+
+export function spawnsSelf(command: string): boolean {
+	return SELF_SPAWN.test(command);
+}
+
 function backstopRefusal(command: string, cwd: string): string | null {
+	if (spawnsSelf(command))
+		return "[BLOCKED] You are already 8gent; use your tools. A run cannot start `8gent chat`, `8gent run` or `8gent mcp-server` from inside itself.";
 	// #3595: the file that lists post_message recipients is not for the shell. A minimum,
 	// not a parser: the allowlist is also frozen at process start.
 	if (
