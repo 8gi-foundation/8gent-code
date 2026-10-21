@@ -17,12 +17,16 @@ const cli = join(root, "dist", "node", "cli.js");
 const tui = join(root, "dist", "node", "tui.js");
 const built = existsSync(cli) && existsSync(tui);
 
+/** An ABSOLUTE path to Node 22.5+ (the children below run with a stripped PATH), or null. */
 function findNode22(): string | null {
-	for (const n of [
-		"node",
+	const candidates = [
+		process.execPath, // Node itself when run under node; under Bun it is bun and fails the version probe
+		Bun.which("node"),
 		"/opt/homebrew/opt/node@22/bin/node",
 		"/usr/local/opt/node@22/bin/node",
-	]) {
+	];
+	for (const n of candidates) {
+		if (!n || !isAbsolute(n)) continue;
 		const r = spawnSync(n, ["-p", "process.versions.node"], { encoding: "utf8" });
 		const [maj, min] = (r.stdout ?? "").trim().split(".").map(Number);
 		if (r.status === 0 && (maj > 22 || (maj === 22 && min >= 5))) return n;
@@ -30,6 +34,10 @@ function findNode22(): string | null {
 	return null;
 }
 const node = findNode22();
+
+test.skipIf(!node)("the Node used by the tests is an absolute path", () => {
+	expect(isAbsolute(node as string)).toBe(true);
+});
 
 describe.skipIf(!built)("dist/node bundles", () => {
 	test("(a) no Bun-only import.meta.dir or import.meta.path survives", () => {
