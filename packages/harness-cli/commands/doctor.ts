@@ -13,6 +13,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { modelLedgerDoctorLines } from "../../local-model-server/model-ledger.js";
 
 export type CheckName =
 	| "Sessions directory"
@@ -241,6 +242,7 @@ export async function doctor(_args: string[], deps: DoctorDeps = {}): Promise<vo
 	if (tiers) {
 		printTiered(checks);
 		if (searchNote) console.log(searchNote);
+		printPinnedModels(deps.home);
 		return;
 	}
 
@@ -259,6 +261,13 @@ export async function doctor(_args: string[], deps: DoctorDeps = {}): Promise<vo
 	} else {
 		console.log("  \x1b[33mSome checks failed — 8gent may not work fully.\x1b[0m\n");
 	}
+	printPinnedModels(deps.home);
+}
+
+/** Pinned local models (#4609). Prints nothing until a session has pinned one. */
+function printPinnedModels(home?: string): void {
+	const lines = modelLedgerDoctorLines(home);
+	if (lines.length > 0) console.log(`${lines.map((l) => `  ${l}`).join("\n")}\n`);
 }
 
 /** Tiered report: groups critical first, the layer on each line, the fix under each failure. */

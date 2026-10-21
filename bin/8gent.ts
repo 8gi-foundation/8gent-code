@@ -101,6 +101,7 @@ COMMANDS:
                               --image <path> attaches one png/jpg/gif/webp: max 20 MB, downscaled to fit 2560x2560,
                               must be inside the working directory (local vision model, text-tool path only)
   doctor                      Check system health (Ollama, models, tools, config)
+  model-pin [model]           Accept the current digest and quantisation of a pinned local model
   deck render <spec.json> [out.mp4]  Render a JSON deck spec into an mp4: the same deterministic
                               renderer as the render_video_deck tool, paths inside the current directory
   update [--check]            Update 8gent through the channel it was installed from (binary release
@@ -269,7 +270,14 @@ Learn more: https://github.com/8gi-foundation/8gent-code
  * TUI launch, so a command carrying them is not exempt either.
  */
 const DEPTH_EXEMPT_FLAGS = ["-h", "--help", "-v", "--version"];
-const DEPTH_EXEMPT_COMMANDS = new Set(["outline", "symbol", "search", "doctor", "deck"]);
+const DEPTH_EXEMPT_COMMANDS = new Set([
+	"outline",
+	"symbol",
+	"search",
+	"doctor",
+	"model-pin",
+	"deck",
+]);
 
 function depthExempt(args: string[]): boolean {
 	if (args.includes("--rpc") || args.includes("--cli")) return false;
@@ -586,6 +594,10 @@ async function main() {
 
 		case "doctor":
 			await doctorCommand();
+			break;
+
+		case "model-pin":
+			await modelPinCommand(restArgs);
 			break;
 
 		case "deck": {
@@ -2872,6 +2884,27 @@ async function publishCommand(args: string[]) {
 	process.exit(result.exitCode);
 }
 
+/** `8gent model-pin [model] [--provider <p>]`: accept the live identity of a pinned local model (#4609). */
+async function modelPinCommand(args: string[]) {
+	const { readLedger, repinModel } = await import("../packages/local-model-server/model-ledger.ts");
+	const pi = args.indexOf("--provider");
+	const provider = pi >= 0 ? args[pi + 1] : undefined;
+	const model = args.find((a, i) => !a.startsWith("--") && i !== pi + 1);
+	const pins = Object.values(readLedger().pins).filter(
+		(p) => !p.cloud && (!model || p.model === model) && (!provider || p.provider === provider),
+	);
+	if (pins.length === 0) {
+		console.log(
+			model
+				? `No pinned local model named ${model}.`
+				: "No pinned local models yet. Start a session first.",
+		);
+		return;
+	}
+	for (const p of pins)
+		for (const l of (await repinModel(p.provider, p.model)).lines) console.log(l);
+}
+
 async function doctorCommand() {
 	const { execSync } = require("node:child_process");
 	const green = (s: string) => `\x1b[32m\u2713 ${s}\x1b[0m`;
@@ -2957,6 +2990,13 @@ async function doctorCommand() {
 			issues++;
 		}
 	} else console.log(dim("  No MCP servers (~/.8gent/mcp.json)"));
+	{
+		const { modelLedgerDoctorLines } = await import(
+			"../packages/local-model-server/model-ledger.ts"
+		);
+		const pinned = modelLedgerDoctorLines();
+		if (pinned.length > 0) console.log(`\n${pinned.join("\n")}`);
+	}
 	{
 		const { readBootTraceTail, bootTracePath } = await import("../apps/tui/src/lib/boot-trace.ts");
 		console.log("\nBoot trace");
