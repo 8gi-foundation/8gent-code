@@ -12,6 +12,8 @@ export type SlashCommand =
 	| "provider"
 	| "apikeys"
 	| "llama"
+	| "route"
+	| "privacy"
 	| "models"
 	| "voice"
 	| "theme"
@@ -132,6 +134,18 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		description:
 			"Takes status, load <id> or unload <id>: local llama-server health, loaded models, metrics",
 		usage: "/llama [status|load <id>|unload <id>]",
+	},
+	{
+		name: "route",
+		aliases: [],
+		description: "Takes local-only, local-first or cloud-first: where model calls may go",
+		usage: "/route [local-only|local-first|cloud-first]",
+	},
+	{
+		name: "privacy",
+		aliases: [],
+		description: "How much stayed on this machine today and this session, and each cloud call",
+		usage: "/privacy",
 	},
 	{
 		name: "models",

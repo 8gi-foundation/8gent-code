@@ -50,6 +50,8 @@ interface BottomBarProps {
 	/** Smoothed output tokens-per-second from the most recent agent step.
 	 *  0/undefined hides the indicator. */
 	tokensPerSecond?: number;
+	/** "92% local today"; absent until a call has been measured (#4607). */
+	localChip?: string | null;
 	/** System One judge warm-up; undefined when System One is off. */
 	judge?: JudgeState;
 	/** Why run_command runs without its OS sandbox; undefined when it has one (#4013). */
@@ -87,6 +89,7 @@ export function BottomBar(props: BottomBarProps) {
 						data={{
 							mode: props.mode,
 							tokensPerSecond: props.tokensPerSecond,
+							localChip: props.localChip ?? undefined,
 							sessionTime: props.sessionTime,
 							permissions: props.permissions,
 							permHeld: props.permHeld,

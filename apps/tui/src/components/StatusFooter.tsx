@@ -71,6 +71,8 @@ export type JudgeState = "loading" | "ready" | "failed";
 export interface FooterData {
 	mode: string;
 	tokensPerSecond?: number;
+	/** "92% local today" from the locality ledger (#4607). Absent: nothing measured yet. */
+	localChip?: string;
 	sessionTime?: string;
 	/**
 	 * The focused tab's permission mode (#3170): plan, ask, guarded or
@@ -138,6 +140,9 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 	}
 	if (d.tokensPerSecond && d.tokensPerSecond > 0) {
 		out.push({ key: "rate", value: formatTps(d.tokensPerSecond), color: ui.teal, priority: 6 });
+	}
+	if (d.localChip) {
+		out.push({ key: "local", value: d.localChip, color: ui.teal, priority: 2 });
 	}
 	if (!perm && known(d.permissions) && d.permissions !== "ask") {
 		const infinite = d.permissions === "infinite";

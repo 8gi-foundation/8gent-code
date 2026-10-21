@@ -76,6 +76,7 @@ import {
 	ModelFailover,
 	NoAllowedProviderError,
 } from "../providers/failover";
+import { decideRoute, readPolicy, recordCall } from "../providers/locality";
 import { callLocalModelWithReroute, resolveToolCapableModel } from "../providers/model-reroute";
 import { extractBranchName, extractCommitHash } from "../reporting";
 import { type RunLogEntry, appendRun } from "../reporting/runlog";
@@ -572,7 +573,7 @@ export class Agent {
 		const depthRefusal = processAgentDepthRefusal();
 		if (depthRefusal) throw new AgentDepthError(depthRefusal);
 		this.config = config;
-		this.events = config.events || {};
+		this.events = this.withLocalityLedger(config.events || {});
 		this.executor = new ToolExecutor(
 			config.workingDirectory || process.cwd(),
 			config.agentScope ?? "primary",
@@ -2058,6 +2059,34 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Sovereign meter (#4607): every model call, native or text-tool, ends in one
+	 * onStepFinish carrying real usage. Wrapping it here is the single place a call
+	 * is written to ~/.8gent/locality.jsonl (numbers and provider only, no text).
+	 */
+	private withLocalityLedger(events: AgentEventCallbacks): AgentEventCallbacks {
+		const inner = events.onStepFinish;
+		return {
+			...events,
+			onStepFinish: (event) => {
+				try {
+					const u = event.usage;
+					if (u && u.promptTokens + u.completionTokens > 0) {
+						recordCall({
+							provider: this.config.runtime as string,
+							local: runsOnBox(this.config.runtime as string, this.config.baseUrl),
+							tokensIn: u.promptTokens,
+							tokensOut: u.completionTokens,
+						});
+					}
+				} catch {
+					// the ledger must never break a turn
+				}
+				inner?.(event);
+			},
+		};
+	}
+
+	/**
 	 * One turn. Children this turn spawns inherit this agent's provider, model
 	 * and baseUrl as they are when the child starts (#3710).
 	 */
@@ -2067,6 +2096,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		imageMimeType?: string,
 		imageOriginal?: { width: number; height: number },
 	): Promise<string> {
+		// Routing policy (#4607): local-only refuses a cloud turn in plain words,
+		// before anything is sent. The runtime here is the one picked for this tab.
+		const route = decideRoute({
+			policy: readPolicy(),
+			provider: this.config.runtime as string,
+			local: runsOnBox(this.config.runtime as string, this.config.baseUrl),
+			pickedForTab: true,
+		});
+		if (route.action === "refuse") return Promise.resolve(route.message);
 		this.lastTurnFailure = null;
 		this.honestyFired = false;
 		this.friction.prompt(userMessage);
