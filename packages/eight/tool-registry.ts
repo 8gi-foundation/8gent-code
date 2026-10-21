@@ -24,6 +24,7 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 		"edit_file",
 		"run_command",
 		"list_files",
+		"search_files",
 		"get_outline",
 		"get_symbol",
 		"search_symbols",
@@ -127,6 +128,7 @@ const CATEGORY_NAMES = Object.keys(TOOL_CATEGORIES);
 const READONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
 	"read_file",
 	"list_files",
+	"search_files",
 	"get_outline",
 	"get_symbol",
 	"search_symbols",

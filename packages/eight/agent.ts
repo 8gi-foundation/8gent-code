@@ -2488,6 +2488,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"write_file",
 			"edit_file",
 			"list_files",
+			"search_files",
 			"run_command",
 			"get_outline",
 			"get_symbol",

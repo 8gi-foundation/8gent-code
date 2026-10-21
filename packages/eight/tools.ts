@@ -226,6 +226,7 @@ import {
 } from "../tools/edit-anchor";
 import { createEightBrowser, isolatedBrowser } from "../tools/eight-browser";
 import { describeImage, readImage, resizeImage } from "../tools/image";
+import { formatSearch, searchFiles } from "../tools/inproc-search";
 import { deleteCell, editCell, insertCell, readNotebook } from "../tools/notebook";
 import { DocxSpecSchema } from "../tools/office/docx";
 import { PptxSpecSchema } from "../tools/office/pptx";
@@ -1452,9 +1453,30 @@ export class ToolExecutor {
 			{
 				type: "function",
 				function: {
+					name: "search_files",
+					description:
+						"[FILE] Pass pattern (plain text, not a regex); returns up to 200 file:line:text rows. Optional glob (for example '*.ts'), ignoreCase. Respects .gitignore and path-guard, skips binaries, no shell. For a regex, use run_command with rg.",
+					parameters: {
+						type: "object",
+						properties: {
+							pattern: { type: "string", description: "Plain text to find (not a regex)" },
+							glob: { type: "string", description: "Only files matching this glob" },
+							path: { type: "string", description: "Directory to search (default: project root)" },
+							ignoreCase: {
+								type: "boolean",
+								description: "Ignore case (default: only when pattern has no capitals)",
+							},
+						},
+						required: ["pattern"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
 					name: "list_files",
 					description:
-						"[FILE] Returns a list of filenames and directories at the given path, optionally filtered by glob pattern. Use this to explore project structure or find files by name pattern. For finding files by content, use search_symbols or run_command with grep instead.",
+						"[FILE] Returns a list of filenames and directories at the given path, optionally filtered by glob pattern. Use this to explore project structure or find files by name pattern. For finding files by content, use search_files or search_symbols.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -2709,6 +2731,19 @@ export class ToolExecutor {
 					args.oldText as string,
 					args.newText as string,
 					typeof args.startLine === "number" ? args.startLine : undefined,
+				);
+			}
+			case "search_files": {
+				const safeDir = safePath((args.path as string) || ".", this.workingDirectory, "read");
+				return formatSearch(
+					await searchFiles({
+						root: safeDir,
+						pattern: String(args.pattern ?? ""),
+						glob: args.glob as string | undefined,
+						ignoreCase: typeof args.ignoreCase === "boolean" ? args.ignoreCase : undefined,
+						// Same read guard as read_file: credential files and dirs are never walked.
+						allow: (abs) => guardPath(abs, this.workingDirectory, {}, "read").ok,
+					}),
 				);
 			}
 			case "list_files": {

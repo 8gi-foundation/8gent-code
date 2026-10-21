@@ -31,6 +31,8 @@
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { validatePath } from "../permissions/path-guard";
+import { searchFiles } from "../tools/inproc-search";
 import type { Symbol } from "../types";
 import {
 	getFileOutline,
@@ -519,6 +521,14 @@ export function runRg(
 	});
 }
 
+/**
+ * The read guard read_file uses (credential basenames, .ssh, .8gent/secrets ...). A path it
+ * denies is never listed or shown by locate either, rg or in-process (8SO, #4634).
+ */
+function readAllowed(root: string): (abs: string) => boolean {
+	return (abs) => validatePath(abs, root, {}, "read").ok;
+}
+
 /** Per-call state: which rg to run, and whether it turned out missing or slow. */
 interface RunState {
 	bin?: string;
@@ -567,13 +577,31 @@ async function grepLiteral(
 		"./",
 	];
 	let out = await rg(state, root, args);
+	// No rg on PATH (Windows, Termux): the in-process walk answers instead (#4633).
+	if (out.missing) {
+		state.rgMissing = false;
+		const hits: GrepHit[] = [];
+		for (const p of patterns) {
+			const r = await searchFiles({
+				root,
+				pattern: p,
+				ignoreCase: ignoreCase || undefined,
+				maxResults: 5000,
+				allow: readAllowed(root),
+			});
+			// A failed search must read as "search unavailable", never as "no matches".
+			if (r.error) state.rgMissing = true;
+			hits.push(...r.hits.map((h) => ({ file: h.file, line: h.line, text: h.text })));
+		}
+		return hits;
+	}
 	// Hits are ranked after a complete read, so walk order does not matter.
 	// When the safety cap cut the output, re-run in path order so the cut
 	// (and so the answer) is the same on every run. Not after a timeout:
 	// --sort path is single-threaded, so it would only be slower; the time
 	// limit is reported instead (LocateResult.incomplete).
 	if (out.truncated && !out.timedOut) out = await rg(state, root, ["--sort", "path", ...args]);
-	return parseRgLines(out.text);
+	return parseRgLines(out.text).filter((h) => readAllowed(root)(path.resolve(root, h.file)));
 }
 
 /**
@@ -590,10 +618,27 @@ async function listFiles(ctx: RunCtx): Promise<string[]> {
 		["--files", "--null", "--", "./"],
 		Number.POSITIVE_INFINITY,
 	);
-	const files = out.text.split("\0").filter(Boolean).map(normalizeRelPath);
+	if (out.missing) {
+		ctx.state.rgMissing = false;
+		const r = await searchFiles({
+			root: ctx.root,
+			maxResults: 1_000_000,
+			allow: readAllowed(ctx.root),
+		});
+		if (r.error) ctx.state.rgMissing = true;
+		return r.files;
+	}
+	const allowed = readAllowed(ctx.root);
+	const files = out.text
+		.split("\0")
+		.filter(Boolean)
+		.map(normalizeRelPath)
+		.filter((f) => allowed(path.resolve(ctx.root, f)));
 	if ((out.timedOut || files.length === 0) && ctx.repoId) {
 		const seen = new Set(files);
-		for (const f of getFileTree(ctx.repoId).map(toPosix)) if (!seen.has(f)) files.push(f);
+		for (const f of getFileTree(ctx.repoId).map(toPosix)) {
+			if (!seen.has(f) && allowed(path.resolve(ctx.root, f))) files.push(f);
+		}
 	}
 	return files;
 }

@@ -515,25 +515,45 @@ describe("a repo larger than one rg output chunk", () => {
 	);
 });
 
+describe("path-guard on locate (#4634)", () => {
+	test("credential files are not shown with rg or without it", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "locate-guard-"));
+		try {
+			fs.mkdirSync(path.join(d, ".ssh"));
+			fs.writeFileSync(path.join(d, ".ssh", "id_rsa"), "zebrafish_token\n");
+			fs.writeFileSync(path.join(d, "credentials"), "zebrafish_token\n");
+			fs.writeFileSync(path.join(d, "ok.ts"), "const zebrafish_token = 1;\n");
+			for (const rgBin of [undefined, path.join(d, "no-such", "rg")]) {
+				const r = await locate('"zebrafish_token"', { root: d, repoId: null, rg: rgBin });
+				const files = r.rows.map((x) => x.file);
+				expect(files).toContain("ok.ts");
+				expect(files.join(" ")).not.toMatch(/id_rsa|credentials/);
+			}
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("ripgrep missing", () => {
-	test("the answer says rg is unavailable instead of 'no matches'", async () => {
+	test("without rg the in-process search answers, no 'rg missing' note (#4633)", async () => {
 		const r = await locate('"Rate limit exceeded for tool"', {
 			root,
 			repoId,
 			rg: path.join(parent, "no-such-dir", "rg"),
 		});
-		expect(r.rgMissing).toBe(true);
+		expect(r.rgMissing).toBeUndefined();
 		const out = formatLocate(r);
-		expect(out).toContain("ripgrep (rg) was not found");
-		expect(out).not.toContain("no matches");
+		expect(out).not.toContain("ripgrep (rg) was not found");
+		expect(out).toContain("src/limits/rate-limiter.ts:3");
 	});
 
-	test("with PATH that has no rg, the same note appears", async () => {
+	test("with PATH that has no rg, the same hit is found", async () => {
 		const saved = process.env.PATH;
 		process.env.PATH = path.join(parent, "no-such-dir");
 		try {
 			const r = await locate('"Rate limit exceeded for tool"', { root, repoId });
-			expect(formatLocate(r)).toContain("ripgrep (rg) was not found");
+			expect(formatLocate(r)).toContain("src/limits/rate-limiter.ts:3");
 		} finally {
 			process.env.PATH = saved;
 		}
