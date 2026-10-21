@@ -186,3 +186,48 @@ describe("doctor flag on: tiered report", () => {
 		expect(lines.at(-1)).toBe("  All checks passed.\n");
 	});
 });
+
+describe("doctor: search endpoint note (#4613)", () => {
+	async function out(
+		probeSearch: DoctorDeps["probeSearch"],
+		searchStatus?: DoctorDeps["searchStatus"],
+	): Promise<string> {
+		const lines: string[] = [];
+		const log = console.log;
+		console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+		try {
+			await doctor([], { ...depsFor("down", false), probeSearch, searchStatus });
+		} finally {
+			console.log = log;
+		}
+		return lines.join("\n");
+	}
+	it("prints one line when configured and reachable", async () => {
+		const text = await out(async () => ({ origin: "http://127.0.0.1:8888", ok: true }));
+		expect(text.split("\n").filter((l) => l.includes("Search endpoint"))).toEqual([
+			"  Search endpoint http://127.0.0.1:8888 reachable (EIGHT_SEARCH_URL).",
+		]);
+	});
+	it("prints nothing when unset", async () => {
+		expect(await out(async () => null)).not.toContain("Search endpoint");
+	});
+	it("says so when a .env declared EIGHT_SEARCH_URL and it was ignored", async () => {
+		const text = await out(
+			async () => null,
+			async () => ({ ignored: true, recent: {} }),
+		);
+		expect(text).toContain(
+			"EIGHT_SEARCH_URL ignored: declared in a .env file. Set it in your shell profile.",
+		);
+	});
+	it("shows recent search origins", async () => {
+		const text = await out(
+			async () => null,
+			async () => ({
+				ignored: false,
+				recent: { duckduckgo: 3, "http://127.0.0.1:8888": 2 },
+			}),
+		);
+		expect(text).toContain("Recent searches went to: duckduckgo x3, http://127.0.0.1:8888 x2");
+	});
+});
