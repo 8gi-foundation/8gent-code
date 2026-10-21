@@ -1,0 +1,6 @@
+{
+	"name": "fx",
+	"version": "1.0.0",
+	"dependencies": { "bad-direct": "1", "ok-parent": "1", "fine": "1" },
+	"optionalDependencies": { "optional-native": "1" }
+}
