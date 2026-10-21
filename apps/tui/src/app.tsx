@@ -629,7 +629,7 @@ import {
 	formatMicLabel,
 	resolveInputDevice,
 } from "../../../packages/voice/input-device.js";
-import { describeTermuxVoice, isAndroidHost } from "../../../packages/voice/termux.js";
+import { ANDROID_DICTATION_LINE, isAndroidHost } from "../../../packages/voice/termux.js";
 import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
 import { VoiceReplyTracker } from "../../../packages/voice/voice-chat.js";
 import {
@@ -5558,6 +5558,16 @@ export function App({
 
 				case "voice":
 					// Enhanced voice command — toggle STT recording or voice chat
+					// Android (#4706): the phone keyboard already dictates; no recorder or whisper here.
+					if (
+						isAndroidHost() &&
+						["chat", "conversation", "talk", "record", "listen", "stt", "status"].includes(
+							args[0] ?? "",
+						)
+					) {
+						addSystemMessage(ANDROID_DICTATION_LINE);
+						break;
+					}
 					if (args[0] === "chat" || args[0] === "conversation" || args[0] === "talk") {
 						if (voiceChat.isActive) {
 							voiceChat.stop();
@@ -5606,15 +5616,14 @@ export function App({
 							addSystemMessage(
 								[
 									status,
-									...(isAndroidHost() ? [describeTermuxVoice()] : [formatMicLabel(dev)]),
+									formatMicLabel(dev),
 									describeTranscriberBackend({
 										whisperBinaryPath: deps.whisperBinaryPath,
 										downloadedModels: deps.downloadedModels,
 										model: voice.engine.getConfig().model,
 										mode: voice.engine.getConfig().mode,
-										cloudAvailable: Boolean(process.env.OPENAI_API_KEY),
 									}),
-									...(isAndroidHost() ? [] : missing),
+									...missing,
 								].join("\n"),
 							);
 						})().catch(() => addSystemMessage(status));

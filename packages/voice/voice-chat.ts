@@ -17,8 +17,6 @@ import { existsSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { VoiceEngine } from "./index.js";
-import { MicRecorder } from "./recorder.js";
-import { isAndroidHost, transcriberMissingMessage } from "./termux.js";
 import { type TTSEngine, getTTSEngine } from "./tts-engine.js";
 import type { TTSProcess } from "./tts-engine.js";
 import type { TranscriptEvent } from "./types.js";
@@ -263,15 +261,6 @@ export class VoiceChatLoop {
 		const silenceSec = (this.silenceMs / 1000).toFixed(1);
 
 		try {
-			// Termux (#4706): sox has no mic there. Record a fixed window through
-			// Termux:API (no silence detection), then transcribe the same way.
-			if (isAndroidHost()) {
-				if (!(await this.recordTermuxWindow(wavPath))) return null;
-				this.setState("transcribing");
-				const heard = await this.transcribeFile(wavPath);
-				cleanupFile(wavPath);
-				return heard;
-			}
 			// Use sox rec with silence detection:
 			//   silence 1 0.1 3%  → wait for speech to begin (above 3% for 0.1s)
 			//   1 <silenceSec> 3% → stop after <silenceSec> seconds of silence
@@ -356,41 +345,6 @@ export class VoiceChatLoop {
 	}
 
 	/**
-	 * Termux: record TERMUX_CHAT_WINDOW_S seconds via MicRecorder's Termux backend.
-	 * Returns false when cancelled. Missing tools end the loop with the exact fix.
-	 */
-	private async recordTermuxWindow(wavPath: string): Promise<boolean> {
-		const rec = new MicRecorder({ maxDurationSeconds: TERMUX_CHAT_WINDOW_S, outputPath: wavPath });
-		rec.on("error", () => {}); // surfaced through the thrown error below
-		try {
-			await rec.start();
-		} catch (err) {
-			throw new VoiceChatFatalError(err instanceof Error ? err.message : String(err));
-		}
-		let wake = () => {};
-		const waited = new Promise<void>((resolve) => {
-			const t = setTimeout(resolve, TERMUX_CHAT_WINDOW_S * 1000);
-			wake = () => {
-				clearTimeout(t);
-				resolve();
-			};
-		});
-		this.recProcess = { kill: () => wake(), exited: waited.then(() => 0) };
-		await waited;
-		this.recProcess = null;
-		try {
-			await rec.stop();
-		} catch (err) {
-			throw new VoiceChatFatalError(err instanceof Error ? err.message : String(err));
-		}
-		if (!this.running) {
-			cleanupFile(wavPath);
-			return false;
-		}
-		return true;
-	}
-
-	/**
 	 * Transcribe a WAV file using the VoiceEngine's transcription pipeline.
 	 * Tries local whisper.cpp first, falls back to cloud.
 	 */
@@ -413,11 +367,7 @@ export class VoiceChatLoop {
 						return result.text.trim() || null;
 					}
 				}
-				this.reportError(
-					isAndroidHost()
-						? transcriberMissingMessage()
-						: "No whisper binary found. Install: brew install whisper-cpp",
-				);
+				this.reportError("No whisper binary found. Install: brew install whisper-cpp");
 				return null;
 			}
 
@@ -534,9 +484,6 @@ export function createErrorGate(
 		return true;
 	};
 }
-
-/** Seconds of speech captured per voice-chat turn on Termux (no silence detection there). */
-export const TERMUX_CHAT_WINDOW_S = 8;
 
 /** A failure retrying cannot fix (mic blocked, sox broken). Ends the loop after reporting. */
 export class VoiceChatFatalError extends Error {}

@@ -11,16 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Subprocess, spawn } from "bun";
 import { type InputDevice, resolveInputDevice } from "./input-device.js";
-import {
-	TERMUX_FFMPEG_MISSING,
-	TERMUX_MIC_MISSING,
-	TERMUX_STOP_ARGS,
-	convertToWav,
-	findOnPath,
-	isAndroidHost,
-	runToExit,
-	termuxRecordArgs,
-} from "./termux.js";
+import { ANDROID_DICTATION_LINE, isAndroidHost } from "./termux.js";
 
 export interface RecorderOptions {
 	/** Sample rate in Hz (default: 16000 for Whisper) */
@@ -42,16 +33,6 @@ export interface RecorderDeps {
 	spawnRec?: (args: string[]) => Subprocess;
 	/** Wait this long after SIGTERM before escalating to SIGKILL (default 1500) */
 	killGraceMs?: number;
-	/** Force or deny the Termux backend (default: isAndroidHost()). */
-	android?: boolean;
-	/** Env for PATH lookups on Termux (default: process.env). */
-	env?: Record<string, string | undefined>;
-	/** Runs a command to exit on Termux (default: Bun.spawn). */
-	run?: (cmd: string[]) => Promise<number>;
-	/** Converts the Termux recording to WAV (default: ffmpeg). */
-	convert?: (src: string, dst: string) => Promise<void>;
-	/** Wait after `termux-microphone-record -q` for the file to finalize (default 400). */
-	finalizeMs?: number;
 }
 
 export interface RecorderEvents {
@@ -99,7 +80,7 @@ export async function checkSoxInstalled(): Promise<{
 			process.platform === "darwin"
 				? "Install with: brew install sox"
 				: isAndroidHost()
-					? TERMUX_MIC_MISSING
+					? ANDROID_DICTATION_LINE
 					: process.platform === "linux"
 						? "Install with: sudo apt install sox (Debian/Ubuntu) or sudo dnf install sox (Fedora)"
 						: "Install SoX from https://sox.sourceforge.net/",
@@ -166,8 +147,6 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 	private options: Required<RecorderOptions>;
 	private device: InputDevice | null = null;
 	private deps: RecorderDeps;
-	/** Termux: the raw aac recording, converted to outputPath on stop. */
-	private termuxSrc: string | null = null;
 
 	constructor(opts: RecorderOptions = {}, deps: RecorderDeps = {}) {
 		super();
@@ -190,8 +169,6 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 		if (this.isRecording) {
 			throw new Error("Already recording");
 		}
-
-		if (this.deps.android ?? isAndroidHost()) return this.startTermux();
 
 		const soxCheck = await (this.deps.checkSox ?? checkSoxInstalled)();
 		if (!soxCheck.installed) {
@@ -280,74 +257,9 @@ export class MicRecorder extends EventEmitter<RecorderEvents> {
 	}
 
 	/**
-	 * Termux backend: `termux-microphone-record` hands the recording to the
-	 * Termux:API service and returns at once; `-q` stops it. The file is aac,
-	 * so stop() converts it to the 16 kHz mono WAV the transcribers take.
-	 */
-	private async startTermux(): Promise<string> {
-		const env = this.deps.env ?? process.env;
-		const fail = (message: string): never => {
-			this.emit("error", { message });
-			throw new Error(message);
-		};
-		const bin = findOnPath("termux-microphone-record", env);
-		if (!bin) fail(TERMUX_MIC_MISSING);
-		if (!findOnPath("ffmpeg", env)) fail(TERMUX_FFMPEG_MISSING);
-
-		this.outputPath = this.options.outputPath.includes("8gent-voice-")
-			? join(tmpdir(), `8gent-voice-${Date.now()}.wav`)
-			: this.options.outputPath;
-		this.termuxSrc = this.outputPath.replace(/\.wav$/i, "") + ".m4a";
-
-		const run = this.deps.run ?? ((cmd: string[]) => runToExit(cmd, env));
-		const code = await run([
-			bin as string,
-			...termuxRecordArgs(this.termuxSrc, this.options.maxDurationSeconds),
-		]);
-		if (code !== 0) {
-			fail(
-				`termux-microphone-record exited with code ${code}. Open the Termux:API app once and allow the microphone, then try again.`,
-			);
-		}
-		this.isRecording = true;
-		this.startTime = Date.now();
-		this.emit("start");
-		this.maxDurationTimer = setTimeout(() => {
-			if (this.isRecording) this.stop().catch(() => {});
-		}, this.options.maxDurationSeconds * 1000);
-		return this.outputPath;
-	}
-
-	private async stopTermux(): Promise<{ path: string; durationMs: number }> {
-		const env = this.deps.env ?? process.env;
-		const durationMs = Date.now() - this.startTime;
-		const run = this.deps.run ?? ((cmd: string[]) => runToExit(cmd, env));
-		const src = this.termuxSrc as string;
-		this.isRecording = false;
-		this.cleanup();
-		const bin = findOnPath("termux-microphone-record", env) ?? "termux-microphone-record";
-		await run([bin, ...TERMUX_STOP_ARGS]);
-		await new Promise((r) => setTimeout(r, this.deps.finalizeMs ?? 400));
-		try {
-			await (this.deps.convert ?? ((a, b) => convertToWav(a, b, env)))(src, this.outputPath);
-		} catch (err) {
-			const message = err instanceof Error ? err.message : "Could not convert the recording";
-			this.emit("error", { message });
-			throw err;
-		} finally {
-			MicRecorder.cleanupFile(src);
-			this.termuxSrc = null;
-		}
-		const result = { path: this.outputPath, durationMs };
-		this.emit("stop", result);
-		return result;
-	}
-
-	/**
 	 * Stop recording and return the WAV file path with duration.
 	 */
 	async stop(): Promise<{ path: string; durationMs: number }> {
-		if (this.isRecording && this.termuxSrc) return this.stopTermux();
 		if (!this.isRecording || !this.process) {
 			throw new Error("Not recording");
 		}

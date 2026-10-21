@@ -30,13 +30,6 @@ import {
 	resolveWhisperModel,
 } from "./model-manager.js";
 import { MicRecorder, checkSoxInstalled } from "./recorder.js";
-import {
-	TERMUX_FIX,
-	TERMUX_MIC_MISSING,
-	isAndroidHost,
-	termuxVoiceState,
-	transcriberMissingMessage,
-} from "./termux.js";
 import { findWhisperBinary, transcribeLocal } from "./transcriber.js";
 import {
 	DEFAULT_VOICE_CONFIG,
@@ -183,18 +176,7 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 	async checkDependencies(): Promise<DependencyCheckResult> {
 		if (this.dependencyCache) return this.dependencyCache;
 
-		const android = isAndroidHost();
-		// On Termux the recorder is termux-microphone-record + ffmpeg, not sox.
-		const soxCheck = android
-			? (() => {
-					const t = termuxVoiceState();
-					return {
-						installed: t.mic && t.ffmpeg,
-						path: t.mic ? "termux-microphone-record" : null,
-						installHint: TERMUX_MIC_MISSING,
-					};
-				})()
-			: await checkSoxInstalled();
+		const soxCheck = await checkSoxInstalled();
 		const whisperBinary = await findWhisperBinary();
 		const downloadedModels = this.modelManager.getDownloadedModels();
 
@@ -228,11 +210,6 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 			return isCloudAvailable(this.config.openaiApiKey);
 		}
 
-		// Termux: whisper-cpp is not in the Termux repo, so a cloud key also counts.
-		if (isAndroidHost() && deps.whisperBinaryPath === null) {
-			return isCloudAvailable(this.config.openaiApiKey);
-		}
-
 		// Local mode: need whisper binary (models auto-download on first use)
 		return deps.whisperBinaryPath !== null;
 	}
@@ -249,35 +226,16 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 		const missing: string[] = [];
 		const hints: string[] = [];
 
-		const android = isAndroidHost();
 		if (!deps.soxInstalled) {
-			if (android) {
-				const t = termuxVoiceState();
-				if (!t.mic) {
-					missing.push("termux-microphone-record (audio recorder)");
-					hints.push(TERMUX_FIX.mic);
-				}
-				if (!t.ffmpeg) {
-					missing.push("ffmpeg (converts the recording to WAV)");
-					hints.push(TERMUX_FIX.ffmpeg);
-				}
-			} else {
-				missing.push("sox (audio recorder)");
-				hints.push(
-					process.platform === "darwin"
-						? "Install with: brew install sox"
-						: "Install with: sudo apt install sox",
-				);
-			}
+			missing.push("sox (audio recorder)");
+			hints.push(
+				process.platform === "darwin"
+					? "Install with: brew install sox"
+					: "Install with: sudo apt install sox",
+			);
 		}
 
-		if (android && this.config.mode === "local" && !deps.whisperBinaryPath) {
-			// Local whisper is optional on Termux; the cloud key is the supported path.
-			if (!isCloudAvailable(this.config.openaiApiKey)) {
-				missing.push("a transcriber (whisper-cli or OpenAI key)");
-				hints.push(transcriberMissingMessage());
-			}
-		} else if (this.config.mode === "local") {
+		if (this.config.mode === "local") {
 			if (!deps.whisperBinaryPath) {
 				missing.push("whisper.cpp binary");
 				hints.push(
@@ -325,13 +283,11 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 			throw new Error(`Cannot start recording in state: ${this.state}`);
 		}
 
-		// Check sox (on Termux the recorder checks termux-microphone-record + ffmpeg in start())
-		if (!isAndroidHost()) {
-			const soxCheck = await checkSoxInstalled();
-			if (!soxCheck.installed) {
-				this.emitError("SOX_NOT_INSTALLED", `sox not found. ${soxCheck.installHint}`);
-				return;
-			}
+		// Check sox
+		const soxCheck = await checkSoxInstalled();
+		if (!soxCheck.installed) {
+			this.emitError("SOX_NOT_INSTALLED", `sox not found. ${soxCheck.installHint}`);
+			return;
 		}
 
 		this.recorder = new MicRecorder({
@@ -476,13 +432,6 @@ export class VoiceEngine extends EventEmitter<VoiceEventMap> {
 		// Ensure we have the whisper binary
 		if (!this.whisperBinaryPath) {
 			this.whisperBinaryPath = await findWhisperBinary();
-		}
-
-		if (!this.whisperBinaryPath && isAndroidHost()) {
-			// Termux has no whisper-cpp package: fall back to cloud when a key exists.
-			if (isCloudAvailable(this.config.openaiApiKey)) return this.transcribeCloud(wavPath);
-			this.emitError("NO_TRANSCRIBER", transcriberMissingMessage());
-			return null;
 		}
 
 		if (!this.whisperBinaryPath) {

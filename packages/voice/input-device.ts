@@ -8,7 +8,6 @@
  */
 
 import { spawn } from "bun";
-import { describeTermuxVoice, isAndroidHost, termuxVoiceState } from "./termux.js";
 
 export interface InputDevice {
 	/** Human-readable device name, or null when it could not be determined */
@@ -133,12 +132,6 @@ export interface VoiceSetupInputs {
 /** One clear line per missing piece. Empty array means everything is in place. */
 export function describeMissingVoiceSetup(i: VoiceSetupInputs): string[] {
 	const platform = i.platform ?? process.platform;
-	// Termux (#4706): the pieces are termux-microphone-record, ffmpeg and a transcriber
-	// (whisper-cpp is not in the Termux repo), not sox and brew.
-	if (isAndroidHost(platform)) {
-		const t = termuxVoiceState();
-		return t.mic && t.ffmpeg && (t.whisper || t.cloudKey) ? [] : [describeTermuxVoice()];
-	}
 	const lines: string[] = [];
 	if (!i.soxPath) {
 		const hint =
@@ -171,8 +164,7 @@ export function describeTranscriberBackend(i: {
 	mode?: "local" | "cloud";
 }): string {
 	const localReady = !!i.whisperBinaryPath && i.downloadedModels.length > 0;
-	if (i.mode === "cloud" || (!localReady && i.cloudAvailable))
-		return "Transcriber: OpenAI Whisper (cloud)";
+	if (i.mode === "cloud" || (!localReady && i.cloudAvailable)) return "Transcriber: OpenAI Whisper (cloud)";
 	if (localReady) {
 		const model = i.model && i.downloadedModels.includes(i.model) ? i.model : i.downloadedModels[0];
 		return `Transcriber: whisper.cpp local (${model})`;
