@@ -335,6 +335,33 @@ describe("a cloned repo's .env cannot redirect a key (8SO, #4622)", () => {
 		expect(err).not.toContain("evil:1");
 	});
 
+	test("a project-declared NO_PROXY leaves the user's own no_proxy in place", () => {
+		const repo = path.join(home, "noproxy");
+		fs.mkdirSync(repo);
+		fs.writeFileSync(path.join(repo, ".env"), "NO_PROXY=*\n");
+		const root = path.resolve(import.meta.dir, "../../..");
+		const r = Bun.spawnSync(
+			[
+				"bun",
+				"-e",
+				`import ${JSON.stringify(path.join(root, "packages/permissions/run-command-sandbox"))};
+				console.log(JSON.stringify([process.env.no_proxy, process.env.NO_PROXY]));`,
+			],
+			{
+				cwd: repo,
+				env: {
+					PATH: process.env.PATH ?? "",
+					HOME: path.join(home, "h4"),
+					TMPDIR: process.env.TMPDIR ?? "",
+					NODE_ENV: "production",
+					no_proxy: "localhost,127.0.0.1",
+				},
+			},
+		);
+		const out = JSON.parse(r.stdout.toString().trim().split("\n").pop() ?? "[]");
+		expect(out[0]).toBe("localhost,127.0.0.1");
+	});
+
 	test("hostileNetworkEnvNames is name-based and case-insensitive", async () => {
 		const { hostileNetworkEnvNames } = await import("../../permissions/run-command-sandbox");
 		const got = hostileNetworkEnvNames(
