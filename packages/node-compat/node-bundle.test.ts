@@ -7,7 +7,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 setDefaultTimeout(60000); // spawning the 24 MB bundle is slow
@@ -145,4 +145,20 @@ for (const k of ["existsSync", "readFileSync", "statSync", "accessSync"]) {
 		},
 		60000,
 	);
+
+	test("runtime assets the bundles resolve are in the npm tarball", () => {
+		const r = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+			cwd: root,
+			encoding: "utf8",
+		});
+		const files: string[] = JSON.parse(r.stdout)[0].files.map((f: { path: string }) => f.path);
+		// packages/decide/calibration: loadCalibration() (missing = silently uncalibrated)
+		expect(
+			files.some((f) => f.startsWith("packages/decide/calibration/") && f.endsWith(".json")),
+		).toBe(true);
+		// packages/daemon/VESSEL-CONTEXT.md: daemon self-awareness (missing = silently skipped)
+		expect(files).toContain("packages/daemon/VESSEL-CONTEXT.md");
+		expect(files).toContain("dist/node/cli.js");
+		expect(files).toContain("dist/node/tui.js");
+	});
 });

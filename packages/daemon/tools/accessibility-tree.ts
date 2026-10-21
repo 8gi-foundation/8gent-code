@@ -62,22 +62,8 @@ const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 const CANDIDATE_PATHS = [
 	process.env.EIGHT_AX_CLI,
 	join(homedir(), ".8gent", "bin", "accessibility-tree-cli"),
-	join(
-		REPO_ROOT,
-		"apps",
-		"8gent-computer",
-		".build",
-		"release",
-		"accessibility-tree-cli",
-	),
-	join(
-		REPO_ROOT,
-		"apps",
-		"8gent-computer",
-		".build",
-		"debug",
-		"accessibility-tree-cli",
-	),
+	join(REPO_ROOT, "apps", "8gent-computer", ".build", "release", "accessibility-tree-cli"),
+	join(REPO_ROOT, "apps", "8gent-computer", ".build", "debug", "accessibility-tree-cli"),
 ].filter(Boolean) as string[];
 
 function locateBinary(): string | undefined {
@@ -104,9 +90,7 @@ interface RawCliOutput {
 	error?: string;
 }
 
-async function runCli(
-	args: string[],
-): Promise<{ stdout: string; code: number; stderr: string }> {
+async function runCli(args: string[]): Promise<{ stdout: string; code: number; stderr: string }> {
 	const binary = locateBinary();
 	if (!binary) {
 		return { stdout: "", code: -1, stderr: "binary not found" };
@@ -160,8 +144,8 @@ export async function queryAccessibilityTree(
 		return {
 			ok: false,
 			error:
-				"accessibility-tree-cli not built. Run `cd apps/8gent-computer && swift build -c release` " +
-				"or set EIGHT_AX_CLI to an absolute path.",
+				"accessibility-tree-cli not found (macOS helper, not part of the npm package). " +
+				"Set EIGHT_AX_CLI to its absolute path, or build it in a source checkout: `cd apps/8gent-computer && swift build -c release`.",
 			source: "unavailable",
 		};
 	}
@@ -213,9 +197,7 @@ export async function queryAccessibilityTree(
  * The dispatcher still wraps this in NemoClaw policy via the existing
  * `evaluatePolicy("desktop_use", ...)` call.
  */
-export async function dispatchAccessibilityTree(
-	input: Record<string, unknown>,
-): Promise<unknown> {
+export async function dispatchAccessibilityTree(input: Record<string, unknown>): Promise<unknown> {
 	const pid = input.pid !== undefined ? Number(input.pid) : undefined;
 	const out = await queryAccessibilityTree({ pid });
 	return out;

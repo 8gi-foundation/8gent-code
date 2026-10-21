@@ -23,6 +23,8 @@
     "dist/sounds",
     "bin/8gent-run.js",
     "bin/node-version.js",
+    "packages/decide/calibration",
+    "packages/daemon/VESSEL-CONTEXT.md",
     "bin/bunfig.empty.toml",
     "scripts/postinstall.js",
     "README.md",
