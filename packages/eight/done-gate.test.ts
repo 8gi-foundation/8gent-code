@@ -15,6 +15,7 @@ import {
 	projectFingerprint,
 	ranEquivalentCheck,
 	readCheck,
+	recordRanCommand,
 	scrubbedEnv,
 	verdictNotice,
 } from "./done-gate";
@@ -499,5 +500,18 @@ describe("ranEquivalentCheck: the model already ran the project's check (#4712)"
 		};
 		expect(verdictNotice(v, ["bun test"], d)).toBeNull();
 		expect(verdictNotice(v, [], d)).toContain("`bun run test` was not run");
+	});
+});
+
+describe("recordRanCommand caps what the done gate remembers", () => {
+	test("250 pushes leave the newest 200, and a long command is truncated", () => {
+		const list: string[] = [];
+		for (let i = 0; i < 250; i++) recordRanCommand(list, `cmd ${i}`);
+		expect(list).toHaveLength(200);
+		expect(list[0]).toBe("cmd 50");
+		expect(list[199]).toBe("cmd 249");
+		recordRanCommand(list, "x".repeat(5000));
+		expect(list[list.length - 1]).toHaveLength(2000);
+		expect(list).toHaveLength(200);
 	});
 });

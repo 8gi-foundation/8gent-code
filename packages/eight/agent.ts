@@ -113,6 +113,7 @@ import {
 	estimateMessageTokens,
 } from "./compaction";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
+import { recordRanCommand } from "./done-gate";
 import { continueEmptyTurn } from "./empty-turn-continue";
 import { Friction, withFriction } from "./friction";
 import { readGitBranch } from "./git-branch";
@@ -2938,7 +2939,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 				// What the model ran itself, so the done gate can tell it ran the check (#4712).
 				if (event.toolName === "run_command" && typeof event.args.command === "string")
-					this.ranCommands.push(event.args.command);
+					recordRanCommand(this.ranCommands, event.args.command);
 
 				// Track git operations
 				if (event.toolName === "git_commit" && resultStr.includes("[")) {

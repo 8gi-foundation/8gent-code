@@ -266,6 +266,15 @@ function simpleCommands(command: string): string[] {
 	return out;
 }
 
+export const MAX_RAN_COMMANDS = 200;
+export const MAX_RAN_COMMAND_CHARS = 2000;
+
+/** Remember a command the model ran: newest 200 kept, each cut to 2000 characters. */
+export function recordRanCommand(list: string[], command: string): void {
+	list.push(command.slice(0, MAX_RAN_COMMAND_CHARS));
+	if (list.length > MAX_RAN_COMMANDS) list.shift();
+}
+
 const PM_TEST = /^(bun run|npm|npm run|pnpm|pnpm run|yarn|yarn run) test$|^npm t$/;
 
 /**
