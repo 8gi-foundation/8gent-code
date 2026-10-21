@@ -122,8 +122,14 @@ function tool(name: string, script: string) {
 	chmodSync(join(fakeBin, name), 0o755);
 }
 
-async function install(releasesUrl: string, env: Record<string, string> = {}, args: string[] = []) {
+async function install(
+	releasesUrl: string,
+	env: Record<string, string> = {},
+	args: string[] = [],
+	cwd?: string,
+) {
 	const p = Bun.spawn(["sh", SCRIPT, ...args], {
+		cwd,
 		stdout: "pipe",
 		stderr: "pipe",
 		env: {
@@ -770,6 +776,31 @@ describe("install.sh: Android / Termux", () => {
 		expect(r.code).toBe(1);
 		expect(r.out).toContain("checksum mismatch");
 		expect(calls()).toBe("");
+	});
+
+	test("Termux hands npm an absolute path to the verified package even when mktemp gives a relative one", async () => {
+		termuxUname();
+		const calls = termuxTools("26.0.0");
+		// GNU mktemp honours a relative TMPDIR; npm would read "dir/x.tgz" as a package spec.
+		tool(
+			"mktemp",
+			`if [ "$1" = -d ]; then d="rel.$$"; mkdir "$d"; echo "$d"; else exec /usr/bin/mktemp "$@"; fi`,
+		);
+		const r = await install(termuxRelease(), termuxEnv, [], root);
+		expect(r.code).toBe(0);
+		expect(calls()).toMatch(
+			/^npm i -g \/.*\/rel\.[0-9]+\/8gi-foundation-8gent-code-0\.20\.0\.tgz$/m,
+		);
+		expect(r.out).toContain("dependencies come from the npm registry");
+	});
+
+	test("Termux without a signing key says no attestation covers the package", async () => {
+		termuxUname();
+		termuxTools("26.0.0");
+		const r = await install(termuxRelease(), termuxEnv);
+		expect(r.code).toBe(0);
+		expect(r.out).toContain("no GitHub attestation covers the npm package");
+		expect(r.out).not.toContain("if gh is signed in");
 	});
 
 	test("Termux dies clearly when the release has no package", async () => {

@@ -383,6 +383,9 @@ main() {
 	[ "$libc" != musl ] || die "the Linux binaries need glibc; this looks like musl (Alpine)"
 
 	TMP="$(mktemp -d 2>/dev/null || mktemp -d -t 8gent-install)"
+	# A relative TMPDIR gives a relative path; npm reads "dir/x.tgz" as a
+	# package spec, not a file, so pin the verified file to an absolute path.
+	case "$TMP" in /*) ;; *) TMP="$(pwd)/$TMP" ;; esac
 	trap 'rm -rf "$TMP"' EXIT
 	trap 'exit 130' INT TERM
 
@@ -442,7 +445,11 @@ main() {
 			die "cannot check the release signature: install minisign (https://jedisct1.github.io/minisign/) and run this again, or set EIGHT_ALLOW_UNVERIFIED=1 to skip it"
 		fi
 	else
-		warn "this release has no signing key yet; only the SHA256 checksum (and the GitHub attestation, if gh is signed in) is checked."
+		if [ "$NPM_PATH" = 1 ]; then
+			warn "this release has no signing key yet; only the SHA256 checksum of the package is checked (no GitHub attestation covers the npm package)."
+		else
+			warn "this release has no signing key yet; only the SHA256 checksum (and the GitHub attestation, if gh is signed in) is checked."
+		fi
 	fi
 
 	say "Downloading 8gent v${VERSION} (${ASSET})..."
@@ -454,7 +461,7 @@ main() {
 
 	if [ "$NPM_PATH" = 1 ]; then
 		ensure_node
-		say "Installing 8gent v${VERSION} with npm..."
+		say "Installing 8gent v${VERSION} with npm (its dependencies come from the npm registry, as with npm install -g)..."
 		npm i -g "$TMP/$ASSET" || die "npm could not install ${ASSET}; nothing else was changed"
 		say "Installed 8gent v${VERSION} (npm package, Termux). 8gent is ready. Run: 8gent"
 		return 0
