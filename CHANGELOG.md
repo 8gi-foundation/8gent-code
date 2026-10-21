@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.6] - 2026-10-21
+
+### Added
+- sovereign meter, local-first policy, /route, /privacy and the locality ledger ([#4614](https://github.com/8gi-foundation/8gent-code/pull/4614))
+- tui: /telegram setup guides a new user to post to their own chat ([#4595](https://github.com/8gi-foundation/8gent-code/pull/4595))
+- local-model-server: model ledger pins the local model and warns when it changes (#4609) ([#4616](https://github.com/8gi-foundation/8gent-code/pull/4616))
+- tools: EIGHT_SEARCH_URL for a self-hosted search endpoint (#4613) ([#4615](https://github.com/8gi-foundation/8gent-code/pull/4615))
+- tui: drag to select and copy text, clicks keep working ([#4603](https://github.com/8gi-foundation/8gent-code/pull/4603))
+
 ## [0.20.5] - 2026-10-20
 
 ### Changed
