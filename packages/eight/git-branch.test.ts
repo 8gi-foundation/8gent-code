@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -56,5 +57,22 @@ describe("readGitBranch", () => {
 			Object.assign(cp, orig);
 		}
 		expect(calls).toEqual([]);
+	});
+
+	test("a FIFO or an oversized HEAD reads as no repository, without blocking", () => {
+		const root = mkdtempSync(join(tmpdir(), "git-branch-"));
+		dirs.push(root);
+		mkdirSync(join(root, ".git"));
+		execFileSync("mkfifo", [join(root, ".git", "HEAD")]);
+		expect(readGitBranch(root)).toBeNull();
+		const big = repo(`ref: refs/heads/${"a".repeat(8192)}\n`);
+		expect(readGitBranch(big)).toBeNull();
+	});
+
+	test("a .git file that is a FIFO reads as no repository", () => {
+		const root = mkdtempSync(join(tmpdir(), "git-branch-"));
+		dirs.push(root);
+		execFileSync("mkfifo", [join(root, ".git")]);
+		expect(readGitBranch(root)).toBeNull();
 	});
 });

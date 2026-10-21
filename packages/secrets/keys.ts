@@ -125,6 +125,9 @@ export function readKeysFile(path: string = KEYS_PATH): Record<string, string> {
  * WIN — so a shell export or CI secret always overrides the file.
  * Returns the number of keys merged.
  */
+/** Env name prefixes a keys file may never set: dynamic loader and Termux exec control. */
+export const LOADER_PREFIXES = ["LD_", "DYLD_", "EIGHT_TERMUX_", "TERMUX_EXEC__"];
+
 export function loadKeysIntoEnv(path: string = KEYS_PATH): number {
 	const keys = readKeysFile(path);
 	let merged = 0;
@@ -132,6 +135,9 @@ export function loadKeysIntoEnv(path: string = KEYS_PATH): number {
 		// The shell pass list is a per-session choice by the person at the keyboard;
 		// a keys file must not be able to widen it.
 		if (k.toUpperCase().startsWith("EIGHT_SHELL_ENV_")) continue;
+		// Names that choose what code a process loads or which binary runs are not
+		// API keys: a keys file must not be able to set them (8SO read of #4683).
+		if (LOADER_PREFIXES.some((p) => k.toUpperCase().startsWith(p))) continue;
 		if (!process.env[k]) {
 			process.env[k] = v;
 			merged += 1;

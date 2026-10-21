@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { patchChildProcess, wrapSyncSpawn } from "./termux-handoff";
+import { installTermuxHandoff, patchChildProcess, wrapSyncSpawn } from "./termux-handoff";
 
 // Off Termux the module is a no-op at import (no carry variable); these drive
 // the patch directly with a fake child_process, since /system/bin/sh exists
@@ -39,5 +39,17 @@ describe("termux handoff spawn patch", () => {
 		wrapped("sh", ["-c", "true"], { env: { PATH: "/bin" } });
 		expect(calls[0][0]).toBe("/system/bin/sh");
 		expect(calls[0][1]).toEqual(["-c", 'exec "$0" "$@"', "/bin/sh", "-c", "true"]);
+	});
+});
+
+describe("termux handoff gate", () => {
+	test("off Termux a carried value is dropped, never turned into LD_PRELOAD", () => {
+		const env = {
+			EIGHT_TERMUX_LD_PRELOAD: "/tmp/evil.so",
+			PREFIX: "/usr",
+		} as unknown as NodeJS.ProcessEnv;
+		expect(installTermuxHandoff(env, "linux")).toBe(false);
+		expect(env.LD_PRELOAD).toBeUndefined();
+		expect(env.EIGHT_TERMUX_LD_PRELOAD).toBeUndefined();
 	});
 });

@@ -14,7 +14,7 @@ export function readGitBranch(cwd: string): string | null {
 		if (head) {
 			let text: string;
 			try {
-				text = fs.readFileSync(head, "utf8").trim();
+				text = readSmallFile(head).trim();
 			} catch {
 				return null;
 			}
@@ -37,10 +37,19 @@ function headFile(dotGit: string): string | null {
 	}
 	if (stat.isDirectory()) return path.join(dotGit, "HEAD");
 	try {
-		const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, "utf8"));
+		const m = /^gitdir:\s*(.+)$/m.exec(readSmallFile(dotGit));
 		if (!m) return null;
 		return path.join(path.resolve(path.dirname(dotGit), m[1].trim()), "HEAD");
 	} catch {
 		return null;
 	}
+}
+
+/** HEAD and a `.git` file are a few bytes. A FIFO or device there would block
+ * this thread at boot, and a large file is not git's: both read as no repo. */
+const MAX_GIT_FILE = 4096;
+function readSmallFile(file: string): string {
+	const stat = fs.statSync(file);
+	if (!stat.isFile() || stat.size > MAX_GIT_FILE) throw new Error("not a git file");
+	return fs.readFileSync(file, "utf8");
 }

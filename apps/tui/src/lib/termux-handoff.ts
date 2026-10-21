@@ -7,7 +7,12 @@
 // whose exec does what termux-exec would have done (shebangs, system linker).
 import type * as ChildProcessModule from "node:child_process";
 import { createRequire, syncBuiltinESMExports } from "node:module";
-import { restorePreload, shellWrappedSpawn } from "../../../../bin/termux-exec.js";
+import {
+	PRELOAD_CARRY,
+	isTermux,
+	restorePreload,
+	shellWrappedSpawn,
+} from "../../../../bin/termux-exec.js";
 
 type CP = typeof ChildProcessModule;
 type SpawnOptions = { file: string; args: string[]; envPairs?: string[] };
@@ -60,7 +65,16 @@ export function patchChildProcess(cp: CP): void {
 }
 
 /** Restore LD_PRELOAD and route direct spawns through sh. Returns true if applied. */
-export function installTermuxHandoff(env: NodeJS.ProcessEnv = process.env): boolean {
+export function installTermuxHandoff(
+	env: NodeJS.ProcessEnv = process.env,
+	platform: NodeJS.Platform = process.platform,
+): boolean {
+	// Only on Termux. Anywhere else a carried value is dropped, never turned into
+	// LD_PRELOAD for this process's children (8SO read of #4683).
+	if (!isTermux(env, platform)) {
+		delete env[PRELOAD_CARRY];
+		return false;
+	}
 	if (!restorePreload(env)) return false;
 	try {
 		const cp = createRequire(import.meta.url)("node:child_process") as CP;
