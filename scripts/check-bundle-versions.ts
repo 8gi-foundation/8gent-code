@@ -18,7 +18,7 @@
  *
  *   bun scripts/check-bundle-versions.ts [bundle.js ...]
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,7 +37,9 @@ function readPkg(dir: string): Pkg | null {
 /** Package folders (root-relative, e.g. "node_modules/chalk") that a bundle contains. */
 export function bundledPackageDirs(source: string): Set<string> {
 	const dirs = new Set<string>();
-	for (const m of source.matchAll(/^\/\/ ((?:[^\s]*\/)?node_modules\/(?:@[^/\s]+\/)?[^/\s]+)\//gm)) {
+	for (const m of source.matchAll(
+		/^\/\/ ((?:[^\s]*\/)?node_modules\/(?:@[^/\s]+\/)?[^/\s]+)\//gm,
+	)) {
 		const full = m[1];
 		const at = full.lastIndexOf("node_modules/");
 		const rest = full.slice(at + "node_modules/".length);
