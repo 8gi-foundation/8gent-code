@@ -51,14 +51,18 @@ const hf = (extra: Record<string, unknown> = {}) => ({
 
 describe("resolution order", () => {
 	test("env beats vault beats plain file value", () => {
-		const pm = manager(hf({ apiKey: "plain-file-value" }));
-		storeVaultKey(ENV, "vault-value");
-		process.env[ENV] = "env-value";
-		expect(pm.getApiKey("hf")).toBe("env-value");
-		delete process.env[ENV];
-		expect(pm.getApiKey("hf")).toBe("vault-value");
+		// A built-in at its compiled endpoint: a plain key is still honoured last.
+		const pm = manager({ openrouter: { apiKey: "plain-file-value" } });
+		const name = pm.getProvider("openrouter").apiKeyEnv;
+		const saved = process.env[name];
+		storeVaultKey(name, "vault-value");
+		process.env[name] = "env-value";
+		expect(pm.getApiKey("openrouter")).toBe("env-value");
+		delete process.env[name];
+		expect(pm.getApiKey("openrouter")).toBe("vault-value");
 		resetKeyVault({ primary: new FileKeyBackend(path.join(home, "other.enc")) });
-		expect(pm.getApiKey("hf")).toBe("plain-file-value");
+		expect(pm.getApiKey("openrouter")).toBe("plain-file-value");
+		if (saved !== undefined) process.env[name] = saved;
 	});
 
 	test("a declared provider can name its vault entry with apiKeyRef", () => {
@@ -85,11 +89,29 @@ describe("resolution order", () => {
 	});
 
 	test("plain apiKey warns once, by provider name only", () => {
-		const pm = manager(hf({ apiKey: "plain-file-value" }));
-		pm.getApiKey("hf");
-		expect(pm.takePlainKeyWarnings()).toEqual(["hf"]);
-		pm.getApiKey("hf");
+		const pm = manager({ openrouter: { apiKey: "plain-file-value" } });
+		const name = pm.getProvider("openrouter").apiKeyEnv;
+		const saved = process.env[name];
+		delete process.env[name];
+		pm.getApiKey("openrouter");
+		expect(pm.takePlainKeyWarnings()).toEqual(["openrouter"]);
+		pm.getApiKey("openrouter");
 		expect(pm.takePlainKeyWarnings()).toEqual([]);
+		if (saved !== undefined) process.env[name] = saved;
+	});
+
+	test("a plain apiKey is refused for a custom endpoint (declared, or a built-in moved)", () => {
+		const declared = manager(hf({ apiKey: "plain-file-value" }));
+		expect(declared.getApiKey("hf")).toBeNull();
+		expect(declared.plainKeyRefused("hf")).toBe(true);
+		const moved = manager({
+			minimax: { baseUrl: "https://evil.example/v1", apiKey: "plain-file-value" },
+		});
+		const saved = process.env.MINIMAX_API_KEY;
+		delete process.env.MINIMAX_API_KEY;
+		expect(moved.getApiKey("minimax")).toBeNull();
+		expect(moved.plainKeyRefused("minimax")).toBe(true);
+		if (saved !== undefined) process.env.MINIMAX_API_KEY = saved;
 	});
 });
 

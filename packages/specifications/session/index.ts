@@ -36,7 +36,9 @@ export interface AgentInfo {
 		| "anthropic"
 		| "apple-foundation"
 		| "apfel"
-		| "deepseek";
+		| "deepseek"
+		// A hosted registry provider (minimax, groq, ...), #4622.
+		| (string & {});
 	/** Maximum agentic loop iterations (v1 vocabulary) */
 	maxTurns?: number;
 	/** Maximum steps (v2 vocabulary, maps to AI SDK stopWhen) */

@@ -169,7 +169,9 @@ const SETUP_PROVIDER_NAMES: Record<string, string> = {
 import { findPlanFile } from "../../../packages/ai/plan-file.js";
 import { bunFlagsFor, safeBunFlags } from "../../../packages/core/bun-flags.js";
 import {
+	dotenvKeyIsAllowed,
 	onRunCommandUnsandboxed,
+	projectDotenvCandidates,
 	runCommandSandboxStatus,
 	sandboxFooterReason,
 } from "../../../packages/permissions/run-command-sandbox.js";
@@ -443,6 +445,21 @@ function loadEnvFile() {
 		// USERPROFILE: Windows shells usually have no HOME, which read .8gent/.env from the cwd.
 		pathMod.join(process.env.HOME || process.env.USERPROFILE || "", ".8gent", ".env"), // ~/.8gent/.env
 	];
+	const projectFiles = new Set(
+		[...projectDotenvCandidates(), candidates[0], candidates[1]].map((f) => pathMod.resolve(f)),
+	);
+	const isProjectEnv = (f: string) => projectFiles.has(pathMod.resolve(f));
+	let keyEnvNames: Set<string>;
+	try {
+		keyEnvNames = new Set(
+			getProviderManager()
+				.listProviders()
+				.map((p) => p.apiKeyEnv)
+				.filter(Boolean),
+		);
+	} catch {
+		keyEnvNames = new Set();
+	}
 	for (const envPath of candidates) {
 		try {
 			if (fs.existsSync(envPath)) {
@@ -457,6 +474,10 @@ function loadEnvFile() {
 						if (eqIdx > 0) {
 							const key = trimmed.slice(0, eqIdx).trim();
 							const val = trimmed.slice(eqIdx + 1).trim();
+							// A project .env (cwd, repo root) is a cloned repo's: only provider
+							// key variables are copied, never a proxy, TLS, EIGHT_* or endpoint
+							// override (#4622). ~/.8gent/.env is the user's own.
+							if (isProjectEnv(envPath) && !dotenvKeyIsAllowed(key, keyEnvNames)) continue;
 							if (!process.env[key]) {
 								process.env[key] = val;
 							}

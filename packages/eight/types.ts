@@ -130,7 +130,9 @@ export interface AgentConfig {
 		| "anthropic"
 		| "apple-foundation"
 		| "apfel"
-		| "deepseek";
+		| "deepseek"
+		// Any hosted registry provider (minimax, groq, ...): endpoint and key come from its registry entry (#4622).
+		| (string & {});
 	/** Channel hint for failover routing. "computer" enables the computer-use chain. */
 	channel?: "text" | "computer";
 	/**

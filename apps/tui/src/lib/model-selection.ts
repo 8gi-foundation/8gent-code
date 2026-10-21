@@ -1,4 +1,5 @@
 import { getProviderManager, resolveModel } from "../../../../packages/providers/index.js";
+import { isHostedChatProvider } from "../../../../packages/providers/key-resolver.js";
 
 /**
  * Pick a sensible default chat model from provider lists (avoid embedding / rerank models).
@@ -141,7 +142,13 @@ export function pickBestChatModel(modelIds: string[], opts?: { preference?: stri
 }
 
 /** Runtime literal understood by the Agent's AgentConfig. */
-export type AgentRuntime = "ollama" | "lmstudio" | "llama-server" | "openrouter";
+export type AgentRuntime =
+	| "ollama"
+	| "lmstudio"
+	| "llama-server"
+	| "openrouter"
+	// A hosted registry provider (minimax, groq, ...) runs under its own name (#4622).
+	| (string & {});
 
 /**
  * Map a TUI provider id to the runtime literal the Agent understands.
@@ -162,6 +169,9 @@ export function providerToRuntime(provider?: string): AgentRuntime {
 	if (provider === "lmstudio") return "lmstudio";
 	if (provider === "llama-server") return "llama-server";
 	if (provider === "openrouter" || provider === "openrouter-free") return "openrouter";
+	// A hosted, keyed provider in the registry keeps its own name, so its model
+	// is never sent to Ollama ("MiniMax-M3.1-Flash is not installed", #4622).
+	if (provider && isHostedChatProvider(provider)) return provider;
 	// apfel / apple-foundation, ollama, undefined, and any unknown provider fall
 	// through to the ollama runtime (apfel is OpenAI-compatible and handled by the
 	// Agent's own adapter chain).

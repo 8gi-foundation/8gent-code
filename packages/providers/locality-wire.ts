@@ -60,6 +60,17 @@ export function onCloudNotice(fn: NoticeListener): () => void {
 	return () => noticeListeners.delete(fn);
 }
 
+/** One system line to the screen (the same channel as the cloud notice). */
+export function emitNotice(message: string): void {
+	for (const fn of noticeListeners) {
+		try {
+			fn(message);
+		} catch {
+			// a listener must never break a call
+		}
+	}
+}
+
 export function defaultWireDeps(): WireDeps {
 	return {
 		state: () => readPolicyState(),

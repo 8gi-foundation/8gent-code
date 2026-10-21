@@ -36,13 +36,13 @@ import { ROLE_REGISTRY } from "../../../../packages/orchestration/role-registry.
 import { loadSettings as loadAppSettings } from "../../../../packages/settings/index.js";
 import type { Settings } from "../../../../packages/settings/index.js";
 import { tabVoices } from "../../../../packages/tools/speak.js";
-import { providerToRuntime } from "../lib/model-selection.js";
+import { type AgentRuntime, providerToRuntime } from "../lib/model-selection.js";
 
 // ============================================
 // Types
 // ============================================
 
-export type TabAgentRuntime = "ollama" | "lmstudio" | "llama-server" | "openrouter";
+export type TabAgentRuntime = AgentRuntime;
 
 export interface TabAgentSpec {
 	/** Provider id as used by the TUI (e.g. "ollama", "lmstudio", "apfel", "openrouter-free"). */

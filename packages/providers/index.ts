@@ -20,6 +20,7 @@ import * as path from "node:path";
 import { modelFetch } from "../ai/model-fetch";
 import { isLlamaServerSelected, resolveLlamaServerUrl } from "../local-model-server/select";
 import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
+import { trustedEnvValue, trustedSecurityValue } from "../permissions/run-command-sandbox";
 import { readVaultKey, storeVaultKey } from "../secrets/key-vault";
 import type { ThinkingLevel } from "../types/index.js";
 import { AuthRotator } from "./auth-rotation";
@@ -31,7 +32,7 @@ import {
 } from "./declared";
 import { type EffortTaskKind, applyEffortPolicy } from "./effort-policy";
 import { ModelFailover } from "./failover";
-import { installLocalityGuard, setProviderNamer } from "./locality-wire";
+import { emitNotice, installLocalityGuard, setProviderNamer } from "./locality-wire";
 import {
 	type ThinkingResolution,
 	resolveThinkingForRouting,
@@ -305,7 +306,7 @@ const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
 		name: "lmstudio",
 		displayName: "LM Studio (Local)",
 		// LM Studio serves an OpenAI-compatible API. Default port 1234.
-		baseUrl: process.env.LMSTUDIO_BASE_URL || "http://localhost:1234/v1",
+		baseUrl: trustedEnvValue("LMSTUDIO_BASE_URL") || "http://localhost:1234/v1",
 		apiKeyEnv: "", // Local, no key — parallels ollama.
 		defaultModel: "google/gemma-4-26b-a4b",
 		models: ["google/gemma-4-26b-a4b"],
@@ -361,7 +362,7 @@ const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
 		// recommend an override rather than fix it. 11435 is where apfel actually
 		// listens (verified live against /v1/models, which returns
 		// apple-foundationmodel with a 4096 context window).
-		baseUrl: process.env.APFEL_BASE_URL || "http://127.0.0.1:11435/v1",
+		baseUrl: trustedEnvValue("APFEL_BASE_URL") || "http://127.0.0.1:11435/v1",
 		apiKeyEnv: "", // Local, no key
 		defaultModel: "apple-foundationmodel",
 		models: ["apple-foundationmodel"],
@@ -491,7 +492,7 @@ const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
 		name: "minimax",
 		displayName: "MiniMax",
 		// OpenAI-compatible. Override with MINIMAX_BASE_URL (China region: https://api.minimaxi.com/v1).
-		baseUrl: process.env.MINIMAX_BASE_URL || "https://api.minimax.io/v1",
+		baseUrl: trustedEnvValue("MINIMAX_BASE_URL") || "https://api.minimax.io/v1",
 		apiKeyEnv: "MINIMAX_API_KEY",
 		// No model name lives here. The endpoint is asked for its own list at startup
 		// and by `/provider models` (discoverModels), which records what it returns.
@@ -589,6 +590,38 @@ function builtinDefaults(name: ProviderName): ProviderConfig | undefined {
 	return PROVIDER_DEFAULTS[name as BuiltinProviderName];
 }
 
+/**
+ * Whether a providers.json may decide where a key is sent (#4622). Named by code
+ * or by a shell-set EIGHT_PROVIDERS_SETTINGS_PATH (never a .env: the snapshot
+ * drops those) it is the user's choice. Found under the user's own ~/.8gent or
+ * data dir it is trusted only if it is a real file that stays inside that
+ * directory once symlinks are resolved: a link planted there to somewhere else
+ * is not.
+ */
+export function settingsFileIsTrusted(
+	file: string,
+	o: { explicit: boolean; fromTrustedEnv: boolean; userDirs: string[] },
+): boolean {
+	if (o.explicit || o.fromTrustedEnv) return true;
+	try {
+		const target = fs.existsSync(file) ? fs.realpathSync(file) : null;
+		if (target && fs.lstatSync(file).isSymbolicLink()) return false;
+		const inside = (p: string, d: string) => {
+			let root: string;
+			try {
+				root = fs.realpathSync(d);
+			} catch {
+				return false;
+			}
+			return p === root || p.startsWith(root + path.sep);
+		};
+		const where = target ?? path.join(fs.realpathSync(path.dirname(file)), path.basename(file));
+		return o.userDirs.some((d) => inside(where, d));
+	} catch {
+		return false;
+	}
+}
+
 // ============================================
 // Provider Manager
 // ============================================
@@ -596,6 +629,10 @@ function builtinDefaults(name: ProviderName): ProviderConfig | undefined {
 export class ProviderManager {
 	private settings: ProviderSettings;
 	private settingsPath: string;
+	/** True when providers.json was read from the user's own data dir (or named by code), not steered by a .env (#4622). */
+	readonly settingsTrusted: boolean;
+	/** Providers whose plain providers.json key was refused since the last call (custom endpoint, #4622). */
+	private refusedPlainKeys = new Set<string>();
 	/** Providers declared in providers.json under a name we did not compile in. */
 	private declared: Record<string, ProviderConfig>;
 	private plainKeyProviders = new Set<string>();
@@ -610,10 +647,20 @@ export class ProviderManager {
 		// one file that keeps reading and writing the real $HOME when someone
 		// sandboxes a run. `EIGHT_PROVIDERS_SETTINGS_PATH` overrides just this
 		// file, for tests and for pointing one process at an alternate profile.
+		// Both come from the load-time security snapshot, which drops any value a
+		// .env file declares: a cloned repo must not be able to point this at its own
+		// providers.json and so choose where a provider key is sent (#4622).
+		const envPath = trustedSecurityValue("EIGHT_PROVIDERS_SETTINGS_PATH");
+		const dataDir = trustedSecurityValue("EIGHT_DATA_DIR");
 		this.settingsPath =
 			settingsPath ||
-			process.env.EIGHT_PROVIDERS_SETTINGS_PATH ||
-			path.join(process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent"), "providers.json");
+			envPath ||
+			path.join(dataDir || path.join(os.homedir(), ".8gent"), "providers.json");
+		this.settingsTrusted = settingsFileIsTrusted(this.settingsPath, {
+			explicit: Boolean(settingsPath),
+			fromTrustedEnv: Boolean(envPath) && this.settingsPath === envPath,
+			userDirs: [path.join(os.homedir(), ".8gent"), dataDir].filter(Boolean) as string[],
+		});
 		this.settings = this.loadSettings();
 		// Declarations are parsed into a SEPARATE map and never written back over
 		// the user's entry. `settings.providers[name]` stays exactly as the user
@@ -766,7 +813,40 @@ export class ProviderManager {
 		delete entry.apiKey;
 	}
 
+	/**
+	 * Why this provider's key is held back, or undefined. The key goes only to
+	 * the provider's compiled-in ORIGIN, unless providers.json came from the
+	 * user's own data dir (a custom endpoint they wrote). Every key read passes
+	 * here, so no caller can skip it (#4622).
+	 */
+	keyWithheldReason(name: ProviderName): string | undefined {
+		if (this.settingsTrusted) return undefined;
+		const originOf = (u: string | undefined): string => {
+			try {
+				return new URL(u ?? "").origin;
+			} catch {
+				return "";
+			}
+		};
+		const compiled = this.compiledBaseUrl(name);
+		const effective = originOf(this.getProvider(name).baseUrl);
+		if (compiled && originOf(compiled) === effective) return undefined;
+		return `${name} points at ${effective || "an unknown host"}, which is not its default endpoint${
+			compiled ? ` (${originOf(compiled)})` : ""
+		}, and that setting did not come from your own ~/.8gent folder`;
+	}
+
+	private noticedWithheld = new Set<string>();
+
 	getApiKey(name: ProviderName): string | null {
+		const withheld = this.keyWithheldReason(name);
+		if (withheld) {
+			if (!this.noticedWithheld.has(withheld)) {
+				this.noticedWithheld.add(withheld);
+				emitNotice(`Key for ${name} not sent: ${withheld}.`);
+			}
+			return null;
+		}
 		// Try rotated profiles first (round-robin with cooldown awareness)
 		const rotated = this.authRotator.getKey(name);
 		if (rotated) return rotated;
@@ -783,10 +863,33 @@ export class ProviderManager {
 			if (vaulted) return vaulted;
 		}
 		if (config.apiKey) {
+			// A plain key is only honoured at the endpoint compiled in for that
+			// provider. A providers.json that moves the endpoint (or declares a new
+			// provider) cannot spend a key written in clear next to it (#4622).
+			if (!this.atCompiledEndpoint(name)) {
+				this.refusedPlainKeys.add(String(name));
+				return null;
+			}
 			this.plainKeyProviders.add(String(name));
 			return config.apiKey;
 		}
 		return null;
+	}
+
+	/** The base URL compiled in for a built-in, or undefined for a declared provider. */
+	compiledBaseUrl(name: ProviderName): string | undefined {
+		return builtinDefaults(name)?.baseUrl;
+	}
+
+	private atCompiledEndpoint(name: ProviderName): boolean {
+		const compiled = this.compiledBaseUrl(name);
+		if (!compiled) return false;
+		return this.getProvider(name).baseUrl === compiled;
+	}
+
+	/** True when a plain providers.json key for this provider was refused (use /apikeys). */
+	plainKeyRefused(name: ProviderName): boolean {
+		return this.refusedPlainKeys.has(String(name));
 	}
 
 	/**

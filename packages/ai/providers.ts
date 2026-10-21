@@ -7,13 +7,26 @@
 
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
-import { modelFetchAsFetch } from "./model-fetch";
-import { loadSettings } from "../settings/store";
-import { resolveRetrySettings } from "../settings/retry";
-import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
+import { trustedEnvValue, trustedProxyFor } from "../permissions/run-command-sandbox";
+import {
+	missingKeyMessage,
+	resolveProviderBaseUrl,
+	resolveProviderKey,
+} from "../providers/key-resolver";
+import { resolveRetrySettings } from "../settings/retry";
+import { loadSettings } from "../settings/store";
+import { modelFetchAsFetch } from "./model-fetch";
+import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 
-export type ProviderName = "ollama" | "lmstudio" | "openrouter" | "apfel" | "llama-server";
+export type LocalOrBuiltinProviderName =
+	| "ollama"
+	| "lmstudio"
+	| "openrouter"
+	| "apfel"
+	| "llama-server";
+/** Any provider in the registry (built-in or declared); the registry supplies its endpoint and key (#4622). */
+export type ProviderName = LocalOrBuiltinProviderName | (string & {});
 
 export interface ProviderConfig {
 	name: ProviderName;
@@ -23,13 +36,16 @@ export interface ProviderConfig {
 	headers?: Record<string, string>;
 }
 
-const DEFAULT_URLS: Record<Exclude<ProviderName, "ollama" | "llama-server">, string> = {
+const DEFAULT_URLS: Record<
+	Exclude<LocalOrBuiltinProviderName, "ollama" | "llama-server">,
+	string
+> = {
 	lmstudio: "http://localhost:1234/v1",
 	openrouter: "https://openrouter.ai/api/v1",
 	// apfel (https://github.com/Arthur-Ficial/apfel) exposes Apple Foundation
 	// as an OpenAI-compatible HTTP server. Default port 11500 avoids the
 	// Ollama collision on 11434. Override via APFEL_BASE_URL.
-	apfel: process.env.APFEL_BASE_URL || "http://localhost:11500/v1",
+	apfel: trustedEnvValue("APFEL_BASE_URL") || "http://localhost:11500/v1",
 };
 
 /**
@@ -45,7 +61,11 @@ const DEFAULT_URLS: Record<Exclude<ProviderName, "ollama" | "llama-server">, str
 export function defaultBaseUrl(name: ProviderName): string {
 	if (name === "ollama") return `${resolveOllamaBaseUrl()}/v1`;
 	if (name === "llama-server") return `${resolveLlamaServerUrl()}/v1`;
-	return DEFAULT_URLS[name];
+	// A provider outside the four above (minimax, deepseek, a declared one) gets
+	// the endpoint its registry entry names, never an undefined base (#4622).
+	return (
+		(DEFAULT_URLS as Record<string, string | undefined>)[name] ?? resolveProviderBaseUrl(name) ?? ""
+	);
 }
 
 /**
@@ -64,8 +84,11 @@ export function createModel(config: ProviderConfig): LanguageModel {
 		);
 	}
 	const baseURL = config.baseURL || defaultBaseUrl(config.name);
-	const isFreeModel = config.model.includes(":free") || config.name === "openrouter";
-	const apiKey = config.apiKey || getApiKeyFromEnv(config.name);
+	// The registry's key goes only to the registry's own origin: a session
+	// baseURL elsewhere never receives it (#4622). A key the host passed in
+	// explicitly (config.apiKey) is that session's own and is used as given.
+	const resolved = config.apiKey ? undefined : getApiKeyFromEnv(config.name);
+	const apiKey = config.apiKey || (registryKeyMayGo(config.name, baseURL) ? resolved : undefined);
 
 	const provider = createOpenAICompatible({
 		name: config.name,
@@ -78,7 +101,7 @@ export function createModel(config: ProviderConfig): LanguageModel {
 		// provider's error and nothing leaves the machine.
 		fetch: hostedWithoutKey(config.name, baseURL, apiKey)
 			? refuseWithoutKey(config.name, baseURL)
-			: modelFetchAsFetch,
+			: guardedKeyedFetch(modelFetchAsFetch, apiKey),
 		headers: {
 			...config.headers,
 			...(config.name === "openrouter"
@@ -109,7 +132,142 @@ export function createModel(config: ProviderConfig): LanguageModel {
 			: {}),
 	});
 
-	return provider(config.model);
+	return scrubModelErrors(provider(config.model), apiKey);
+}
+
+function originOf(url: string | undefined): string {
+	try {
+		return new URL(url ?? "").origin;
+	} catch {
+		return "";
+	}
+}
+
+/** True when `baseURL` is the origin the registry names for this provider. */
+function registryKeyMayGo(name: string, baseURL: string | undefined): boolean {
+	if (KEYLESS_PROVIDERS.has(name)) return true; // placeholder values, not secrets
+	const registry = originOf(resolveProviderBaseUrl(name) ?? defaultBaseUrl(name));
+	return registry !== "" && originOf(baseURL) === registry;
+}
+
+/** Scrub the key from every string an SDK error carries (message, response body, stack). */
+function scrubErrorFields(err: unknown, apiKey: string | undefined): void {
+	if (!(err instanceof Error)) return;
+	const e = err as unknown as Record<string, unknown>;
+	for (const f of ["message", "stack", "responseBody", "url"]) {
+		if (typeof e[f] === "string") {
+			try {
+				e[f] = scrubKey(e[f] as string, apiKey);
+			} catch {
+				/* read-only field: leave it */
+			}
+		}
+	}
+	if (err.cause) scrubErrorFields(err.cause, apiKey);
+}
+
+/**
+ * The SDK builds its error (with the response body) after our fetch returns, and
+ * a provider may echo the key in a 401 body. Errors from a call are scrubbed at
+ * this boundary too (#4622).
+ */
+function scrubModelErrors(model: LanguageModel, apiKey: string | undefined): LanguageModel {
+	if (!apiKey || typeof model !== "object" || model === null) return model;
+	return new Proxy(model as object, {
+		get(target, prop) {
+			const v = Reflect.get(target, prop, target);
+			if ((prop === "doGenerate" || prop === "doStream") && typeof v === "function") {
+				return async (...a: unknown[]) => {
+					try {
+						return await (v as (...x: unknown[]) => unknown).apply(target, a);
+					} catch (err) {
+						scrubErrorFields(err, apiKey);
+						throw err;
+					}
+				};
+			}
+			return typeof v === "function" ? (v as (...x: unknown[]) => unknown).bind(target) : v;
+		},
+	}) as LanguageModel;
+}
+
+const REDIRECT_CODES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 5;
+
+/** Strip `Bearer <token>` and the resolved key itself from a message (#4622). */
+export function scrubKey(text: string, apiKey?: string): string {
+	let out = text.replace(/Bearer\s+[A-Za-z0-9._~+\/=-]+/gi, "Bearer [REDACTED]");
+	const k = apiKey?.trim();
+	if (k) out = out.split(k).join("[REDACTED]");
+	return out;
+}
+
+/** A failed reply's body with the key (and any Bearer token) removed, for providers that echo it. */
+async function scrubErrorBody(res: Response, apiKey: string | undefined): Promise<Response> {
+	if (res.ok || !apiKey) return res;
+	try {
+		const text = await res.clone().text();
+		const clean = scrubKey(text, apiKey);
+		if (clean === text) return res;
+		return new Response(clean, {
+			status: res.status,
+			statusText: res.statusText,
+			headers: res.headers,
+		});
+	} catch {
+		return res;
+	}
+}
+
+/**
+ * Wraps a fetch that carries a provider key:
+ *  - a redirect is followed by hand, only to the same origin. A redirect to
+ *    another origin is refused, so Authorization is never forwarded there;
+ *  - any thrown error has `Bearer <token>` and the key value scrubbed from its
+ *    message (and stack) before it can reach a log, a card or a transcript.
+ */
+export function guardedKeyedFetch(base: typeof fetch, apiKey: string | undefined): typeof fetch {
+	return (async (input: string | URL | Request, init?: RequestInit) => {
+		try {
+			let url = input instanceof Request ? input.url : String(input);
+			const origin = new URL(url).origin;
+			// TLS is always verified and the proxy is the load-time one: a .env that
+			// set NODE_TLS_REJECT_UNAUTHORIZED or HTTPS_PROXY cannot route the key (#4622).
+			const proxy = trustedProxyFor(url);
+			let cur: RequestInit = {
+				...(init ?? {}),
+				redirect: "manual",
+				tls: { rejectUnauthorized: true },
+				...(proxy ? { proxy } : {}),
+			} as RequestInit;
+			for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+				const res = await base(hop === 0 ? input : url, cur);
+				const loc = res.headers.get("location");
+				if (!REDIRECT_CODES.has(res.status) || !loc) return await scrubErrorBody(res, apiKey);
+				const next = new URL(loc, url);
+				if (next.origin !== origin) {
+					throw new Error(
+						`${new URL(url).host} redirected to ${next.host}; not followed, so the key is not sent there.`,
+					);
+				}
+				url = next.toString();
+				if (
+					res.status === 303 ||
+					((res.status === 301 || res.status === 302) && cur.method === "POST")
+				) {
+					const { body: _b, ...rest } = cur;
+					cur = { ...rest, method: "GET", redirect: "manual" };
+				}
+			}
+			throw new Error("Too many redirects.");
+		} catch (err) {
+			if (err instanceof Error) {
+				err.message = scrubKey(err.message, apiKey);
+				if (err.stack) err.stack = scrubKey(err.stack, apiKey);
+			}
+			throw err;
+		}
+	}) as unknown as typeof fetch;
 }
 
 /** Providers that run on the user's machine or LAN and take no key. */
@@ -120,7 +278,11 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
  * True when a request would go to a hosted endpoint with no API key (#3746).
  * Keyless local providers and loopback endpoints never count as hosted.
  */
-export function hostedWithoutKey(name: string, baseURL: string | undefined, apiKey: string | undefined): boolean {
+export function hostedWithoutKey(
+	name: string,
+	baseURL: string | undefined,
+	apiKey: string | undefined,
+): boolean {
 	if (apiKey?.trim()) return false;
 	if (KEYLESS_PROVIDERS.has(name)) return false;
 	let host: string;
@@ -132,18 +294,11 @@ export function hostedWithoutKey(name: string, baseURL: string | undefined, apiK
 	return !LOOPBACK_HOSTS.has(host);
 }
 
-/** The key's env var name, for the refusal message. */
-function keyEnvName(name: string): string {
-	return `${name.replace(/[^a-z0-9]/gi, "_").toUpperCase()}_API_KEY`;
-}
-
 /** A fetch that never sends: it rejects with a plain message naming the missing key (#3746). */
 function refuseWithoutKey(name: string, baseURL: string): typeof fetch {
 	const host = new URL(baseURL).hostname;
 	return (async () => {
-		throw new Error(
-			`No API key for ${name}, so nothing was sent to ${host}. Set ${keyEnvName(name)} to use it, or pick a local provider.`,
-		);
+		throw new Error(missingKeyMessage(name, host));
 	}) as unknown as typeof fetch;
 }
 
@@ -167,7 +322,7 @@ export function getRetryConfig(
 function getApiKeyFromEnv(name: ProviderName): string | undefined {
 	switch (name) {
 		case "openrouter":
-			return process.env.OPENROUTER_API_KEY;
+			return process.env.OPENROUTER_API_KEY || resolveProviderKey(name);
 		case "lmstudio":
 			return process.env.LM_STUDIO_API_KEY || "lm-studio";
 		case "ollama":
@@ -179,6 +334,9 @@ function getApiKeyFromEnv(name: ProviderName): string | undefined {
 			// llama-server is local and unauthenticated: the provider registry
 			// declares apiKeyEnv: "" for it, so send no key.
 			return undefined;
+		default:
+			// Every other provider: its own registry entry decides (#4622).
+			return resolveProviderKey(name);
 	}
 }
 
