@@ -8,6 +8,14 @@ import { lstatSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/** Every scratch dir this process made and has not removed; one exit handler walks it. */
+const live = new Set<string>();
+let exitHandlerSet = false;
+
+function removeAllAtExit(): void {
+	for (const dir of [...live]) removeSessionScratch(dir);
+}
+
 export function sessionScratchPath(sessionId: string): string {
 	return join(tmpdir(), `8gent-${sessionId}`);
 }
@@ -21,6 +29,11 @@ export function createSessionScratch(sessionId: string): string | null {
 	const dir = sessionScratchPath(sessionId);
 	try {
 		mkdirSync(dir, { mode: 0o700 });
+		live.add(dir);
+		if (!exitHandlerSet) {
+			exitHandlerSet = true;
+			process.once("exit", removeAllAtExit);
+		}
 		return dir;
 	} catch {
 		return null;
@@ -33,6 +46,7 @@ export function createSessionScratch(sessionId: string): string | null {
  */
 export function removeSessionScratch(dir: string | null): void {
 	if (!dir) return;
+	live.delete(dir);
 	try {
 		const st = lstatSync(dir);
 		if (!st.isDirectory() || st.isSymbolicLink()) return;

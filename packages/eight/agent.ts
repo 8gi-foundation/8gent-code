@@ -615,10 +615,6 @@ export class Agent {
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();
 		this.sessionScratchDir = createSessionScratch(this.sessionId);
-		{
-			const scratch = this.sessionScratchDir;
-			if (scratch) process.once("exit", () => removeSessionScratch(scratch));
-		}
 
 		// v0.12.0: lite mode is now the default. The agent boots fast and lean.
 		// Opt back into the heavy auxiliaries (kernel training, heartbeat agents,

@@ -54,4 +54,17 @@ describe("session scratch dir (#4711)", () => {
 		expect(existsSync(file)).toBe(true);
 		for (const p of [link, file, real]) rmSync(p, { recursive: true, force: true });
 	});
+
+	test("20 scratch dirs add exactly one exit listener", () => {
+		const before = process.listenerCount("exit");
+		const dirs = Array.from({ length: 20 }, (_, i) =>
+			createSessionScratch(`session_many_${i}_4711`),
+		);
+		expect(dirs.every(Boolean)).toBe(true);
+		expect(process.listenerCount("exit") - before).toBeLessThanOrEqual(1);
+		const mid = process.listenerCount("exit");
+		const more = createSessionScratch("session_many_extra_4711");
+		expect(process.listenerCount("exit")).toBe(mid);
+		for (const d of [...dirs, more]) removeSessionScratch(d);
+	});
 });

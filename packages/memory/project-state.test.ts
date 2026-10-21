@@ -39,18 +39,20 @@ afterEach(() => {
 
 describe("project state outside the repo (#4711)", () => {
 	test("state dir is projects/<12 hex of sha1(path)> under the data dir", () => {
-		const d = projectStateDir(repo);
+		const d = projectStateDir(repo) as string;
 		expect(path.dirname(d)).toBe(path.join(data, "projects"));
 		expect(path.basename(d)).toMatch(/^[0-9a-f]{12}$/);
-		expect(projectStateDir(repo)).toBe(d);
-		expect(projectStateDir(path.join(root, "other"))).not.toBe(d);
+		expect(projectStateDir(repo) as string).toBe(d);
+		expect(projectStateDir(path.join(root, "other")) as string).not.toBe(d);
 	});
 
 	test("opening the store leaves the repo untouched", async () => {
 		const m = new MemoryManager(repo);
 		await m.remember("a fact", "project");
 		expect(fs.readdirSync(repo)).toEqual([]);
-		expect(fs.existsSync(path.join(projectStateDir(repo), "memory", "memory.db"))).toBe(true);
+		expect(fs.existsSync(path.join(projectStateDir(repo) as string, "memory", "memory.db"))).toBe(
+			true,
+		);
 	});
 
 	test("opt-in keeps the old location and ignores .8gent/", async () => {
@@ -74,7 +76,7 @@ describe("project state outside the repo (#4711)", () => {
 		const old = path.join(repo, ".8gent", "memory");
 		fs.mkdirSync(old, { recursive: true });
 		fs.writeFileSync(path.join(old, "memory.db"), "OLD");
-		const dest = path.join(projectStateDir(repo), "memory");
+		const dest = path.join(projectStateDir(repo) as string, "memory");
 		expect(migrateRepoMemory(repo, dest)).toBe(true);
 		expect(fs.readFileSync(path.join(dest, "memory.db"), "utf8")).toBe("OLD");
 		fs.writeFileSync(path.join(dest, "memory.db"), "NEW");
@@ -89,7 +91,9 @@ describe("project state outside the repo (#4711)", () => {
 		process.env.EIGHT_DATA_DIR = global;
 		fs.mkdirSync(path.join(global, "memory"), { recursive: true });
 		fs.writeFileSync(path.join(global, "memory", "memory.db"), "GLOBAL");
-		expect(migrateRepoMemory(home, path.join(projectStateDir(home), "memory"))).toBe(false);
+		expect(migrateRepoMemory(home, path.join(projectStateDir(home) as string, "memory"))).toBe(
+			false,
+		);
 	});
 
 	test("a planted symlink memory.db is never followed", () => {
@@ -98,7 +102,7 @@ describe("project state outside the repo (#4711)", () => {
 		const old = path.join(repo, ".8gent", "memory");
 		fs.mkdirSync(old, { recursive: true });
 		fs.symlinkSync(secret, path.join(old, "memory.db"));
-		const dest = path.join(projectStateDir(repo), "memory");
+		const dest = path.join(projectStateDir(repo) as string, "memory");
 		expect(migrateRepoMemory(repo, dest)).toBe(false);
 		expect(fs.existsSync(path.join(dest, "memory.db"))).toBe(false);
 	});
@@ -109,7 +113,7 @@ describe("project state outside the repo (#4711)", () => {
 		fs.writeFileSync(path.join(old, "memory.db"), "OLD");
 		fs.writeFileSync(path.join(old, "memory.db-wal"), "OLDWAL");
 		fs.symlinkSync(path.join(root, "secret.db"), path.join(old, "memory.db-shm"));
-		const dest = path.join(projectStateDir(repo), "memory");
+		const dest = path.join(projectStateDir(repo) as string, "memory");
 		fs.mkdirSync(dest, { recursive: true });
 		fs.writeFileSync(path.join(dest, "memory.db-wal"), "KEEP");
 		expect(migrateRepoMemory(repo, dest)).toBe(true);
@@ -121,7 +125,7 @@ describe("project state outside the repo (#4711)", () => {
 		const old = path.join(repo, ".8gent", "memory");
 		fs.mkdirSync(old, { recursive: true });
 		fs.writeFileSync(path.join(old, "memory.db"), "OLD");
-		const dest = path.join(projectStateDir(repo), "memory");
+		const dest = path.join(projectStateDir(repo) as string, "memory");
 		fs.mkdirSync(dest, { recursive: true });
 		const target = path.join(root, "target.db");
 		fs.symlinkSync(target, path.join(dest, "memory.db"));
@@ -130,14 +134,26 @@ describe("project state outside the repo (#4711)", () => {
 	});
 
 	test("repo.path is written on create; a dir made for another path sends this repo to a longer hash", () => {
-		const first = prepareProjectMemoryDir(repo);
+		const first = prepareProjectMemoryDir(repo) as string;
 		const stateDir = path.dirname(first);
 		expect(fs.readFileSync(path.join(stateDir, "repo.path"), "utf8")).toBe(fs.realpathSync(repo));
 		expect(prepareProjectMemoryDir(repo)).toBe(first);
 		fs.writeFileSync(path.join(stateDir, "repo.path"), "/somewhere/else");
-		const second = prepareProjectMemoryDir(repo);
+		const second = prepareProjectMemoryDir(repo) as string;
 		expect(second).not.toBe(first);
 		expect(path.basename(path.dirname(second))).toHaveLength(24);
-		expect(projectStateDir(repo)).toBe(path.dirname(second));
+		expect(projectStateDir(repo) as string).toBe(path.dirname(second));
+	});
+
+	test("all three hash lengths taken by other repos: null, and the manager runs in memory", async () => {
+		for (let i = 0; i < 3; i++) {
+			const dir = prepareProjectMemoryDir(repo) as string;
+			fs.writeFileSync(path.join(path.dirname(dir), "repo.path"), `/other/${i}`);
+		}
+		expect(prepareProjectMemoryDir(repo)).toBeNull();
+		expect(projectStateDir(repo)).toBeNull();
+		const m = new MemoryManager(repo);
+		await m.remember("a fact", "project");
+		expect(fs.readdirSync(repo)).toEqual([]);
 	});
 });

@@ -51,11 +51,10 @@ function readMarker(dir: string): string | null {
  * The dir holds `repo.path` (the realpath it was made for); on a mismatch (a hash collision or a
  * planted dir) the next longer hash is used. `create` writes the marker and logs one line on a mismatch.
  */
-function resolveStateDir(repo: string, create: boolean): string {
+function resolveStateDir(repo: string, create: boolean): string | null {
 	const abs = absRepo(repo);
-	let dir = "";
 	for (const len of HASH_LENGTHS) {
-		dir = path.join(dataDir(), "projects", hashOf(repo, len));
+		const dir = path.join(dataDir(), "projects", hashOf(repo, len));
 		const marker = readMarker(dir);
 		if (marker === abs) return dir;
 		if (marker === null) {
@@ -72,18 +71,20 @@ function resolveStateDir(repo: string, create: boolean): string {
 		if (create)
 			console.error(`[memory] ${dir} belongs to ${marker}, not ${abs}: using a longer hash`);
 	}
-	return dir;
+	// Every hash length is taken by another path: no state dir for this repo.
+	return null;
 }
 
-export function projectStateDir(repo: string): string {
+/** Null when every hash length is taken by another repo's marker. */
+export function projectStateDir(repo: string): string | null {
 	return resolveStateDir(repo, false);
 }
 
-/** The directory holding this repo's project memory (memory.db, project.jsonl). */
-export function projectMemoryDir(repo: string): string {
-	return projectStateInRepo()
-		? path.join(repo, ".8gent", "memory")
-		: path.join(projectStateDir(repo), "memory");
+/** The directory holding this repo's project memory (memory.db, project.jsonl). Null: none is free (see projectStateDir). */
+export function projectMemoryDir(repo: string): string | null {
+	if (projectStateInRepo()) return path.join(repo, ".8gent", "memory");
+	const state = projectStateDir(repo);
+	return state ? path.join(state, "memory") : null;
 }
 
 /** Append `.8gent/` to the repo's .gitignore unless a line already covers it. Returns true when written. */
@@ -155,12 +156,19 @@ export function migrateRepoMemory(repo: string, destDir: string): boolean {
 }
 
 /** Resolve the project memory dir for a repo, doing the one-time migration or the opt-in ignore line. */
-export function prepareProjectMemoryDir(repo: string): string {
+export function prepareProjectMemoryDir(repo: string): string | null {
 	if (projectStateInRepo()) {
 		ensureEightIgnored(repo);
 		return projectMemoryDir(repo);
 	}
-	const dir = path.join(resolveStateDir(repo, true), "memory");
+	const state = resolveStateDir(repo, true);
+	if (!state) {
+		console.error(
+			`[memory] no free state dir for ${absRepo(repo)}: project memory is in-memory this session`,
+		);
+		return null;
+	}
+	const dir = path.join(state, "memory");
 	migrateRepoMemory(repo, dir);
 	return dir;
 }

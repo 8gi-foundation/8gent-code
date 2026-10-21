@@ -287,7 +287,11 @@ export class MemoryManager {
 	constructor(workingDirectory: string) {
 		this.workingDirectory = workingDirectory;
 		const globalDataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
-		this.projectJsonlPath = path.join(projectMemoryDir(workingDirectory), "project.jsonl");
+		// No free state dir: the v1 file goes to the temp dir, never into the repo.
+		this.projectJsonlPath = path.join(
+			projectMemoryDir(workingDirectory) ?? path.join(os.tmpdir(), `8gent-no-state-${process.pid}`),
+			"project.jsonl",
+		);
 		this.globalJsonlPath = path.join(globalDataDir, "memory", "global.jsonl");
 	}
 
@@ -312,8 +316,9 @@ export class MemoryManager {
 
 			// Create project store
 			const projectDbDir = prepareProjectMemoryDir(this.workingDirectory);
-			ensureDir(projectDbDir);
-			const projectDbPath = path.join(projectDbDir, "memory.db");
+			if (projectDbDir) ensureDir(projectDbDir);
+			// A null dir (every hash taken by another repo) falls back to an in-memory store.
+			const projectDbPath = projectDbDir ? path.join(projectDbDir, "memory.db") : ":memory:";
 			this.projectStore = new MemoryStore(projectDbPath, this.embeddingProvider);
 
 			// Create global store (EIGHT_DATA_DIR for cloud deployments)
@@ -324,7 +329,7 @@ export class MemoryManager {
 			// Run from HOME (or EIGHT_DATA_DIR's parent) and both paths name one
 			// file. Share the store so it has one SQLite handle and one count.
 			this.globalStore =
-				fs.realpathSync(projectDbDir) === fs.realpathSync(globalDbDir)
+				projectDbDir && fs.realpathSync(projectDbDir) === fs.realpathSync(globalDbDir)
 					? this.projectStore
 					: new MemoryStore(globalDbPath, this.embeddingProvider);
 
