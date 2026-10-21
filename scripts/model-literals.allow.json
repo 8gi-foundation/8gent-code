@@ -91,7 +91,7 @@
 			"qwen3:32b": 2
 		},
 		"packages/ai/providers.ts": {
-			":free": 2
+			":free": 1
 		},
 		"packages/ai/task-router.ts": {
 			"eight-1-q-14b:latest": 1,
