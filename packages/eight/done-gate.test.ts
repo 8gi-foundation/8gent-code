@@ -13,7 +13,9 @@ import {
 	finishWithProjectCheck,
 	newFailures,
 	projectFingerprint,
+	ranEquivalentCheck,
 	readCheck,
+	recordRanCommand,
 	scrubbedEnv,
 	verdictNotice,
 } from "./done-gate";
@@ -448,5 +450,68 @@ describe("gate hardening (8SO)", () => {
 		writeFileSync(join(outside, "f"), "changed outside");
 		writeFileSync(join(outside, "g"), "new outside");
 		expect(projectFingerprint(d)).toBe(a);
+	});
+});
+
+describe("ranEquivalentCheck: the model already ran the project's check (#4712)", () => {
+	const bunProject = () => {
+		const d = dir();
+		writeFileSync(join(d, "package.json"), JSON.stringify({ scripts: { test: "bun test" } }));
+		writeFileSync(join(d, "bun.lock"), "");
+		return d;
+	};
+	test("`bun test` is the same check as `bun run test` when the script is `bun test`", () => {
+		const d = bunProject();
+		expect(detectProjectCheck(d)).toBe("bun run test");
+		expect(ranEquivalentCheck(["bun test 2>&1"], "bun run test", d)).toBe(true);
+		expect(ranEquivalentCheck(["cd src && bun test 2>&1 | tail -5"], "bun run test", d)).toBe(true);
+		expect(ranEquivalentCheck(["npm test"], "bun run test", d)).toBe(true);
+		expect(ranEquivalentCheck(["pnpm run test"], "bun run test", d)).toBe(true);
+	});
+	test("a different command is not the check", () => {
+		const d = bunProject();
+		expect(ranEquivalentCheck(["bun run build", "ls"], "bun run test", d)).toBe(false);
+		expect(ranEquivalentCheck(["echo bun test"], "bun run test", d)).toBe(false);
+		expect(ranEquivalentCheck([], "bun run test", d)).toBe(false);
+	});
+	test("bare `bun test` is not the check when the script is something else", () => {
+		const d = dir();
+		writeFileSync(join(d, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));
+		writeFileSync(join(d, "bun.lock"), "");
+		expect(ranEquivalentCheck(["bun test"], "bun run test", d)).toBe(false);
+		expect(ranEquivalentCheck(["vitest run"], "bun run test", d)).toBe(true);
+	});
+	test("pytest, cargo test and go test count when they are the check or the script", () => {
+		const d = dir();
+		writeFileSync(join(d, "package.json"), JSON.stringify({ scripts: { test: "pytest" } }));
+		expect(ranEquivalentCheck(["pytest"], "npm test", d)).toBe(true);
+		expect(ranEquivalentCheck(["cargo test 2>&1"], "cargo test", d)).toBe(true);
+		expect(ranEquivalentCheck(["go test ./..."], "go test ./...", d)).toBe(true);
+		expect(ranEquivalentCheck(["go test ./pkg"], "go test ./...", d)).toBe(false);
+	});
+	test("a skipped gate is silent when the model ran the check, and says why otherwise", () => {
+		const d = bunProject();
+		const v = {
+			status: "skipped" as const,
+			command: "bun run test",
+			fixRounds: 0,
+			detail: "done gate skipped (needs --yes)",
+			finalText: "DONE",
+		};
+		expect(verdictNotice(v, ["bun test"], d)).toBeNull();
+		expect(verdictNotice(v, [], d)).toContain("`bun run test` was not run");
+	});
+});
+
+describe("recordRanCommand caps what the done gate remembers", () => {
+	test("250 pushes leave the newest 200, and a long command is truncated", () => {
+		const list: string[] = [];
+		for (let i = 0; i < 250; i++) recordRanCommand(list, `cmd ${i}`);
+		expect(list).toHaveLength(200);
+		expect(list[0]).toBe("cmd 50");
+		expect(list[199]).toBe("cmd 249");
+		recordRanCommand(list, "x".repeat(5000));
+		expect(list[list.length - 1]).toHaveLength(2000);
+		expect(list).toHaveLength(200);
 	});
 });

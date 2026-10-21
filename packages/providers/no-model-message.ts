@@ -27,6 +27,27 @@ function scrub(msg: string, key: string | null | undefined): string {
 	return out;
 }
 
+/**
+ * Did this 403 come from the provider? A provider answers 403 with a JSON error body
+ * (MiniMax: `base_resp` / `status_code`; OpenAI-shaped: `error`). A proxy, firewall or
+ * captive portal answers with HTML, plain text or nothing, and says nothing about the key
+ * (#4710). The body is capped upstream, so a truncated JSON object is judged by its keys.
+ */
+export function isProviderErrorBody(body: string): boolean {
+	const t = body.trim();
+	if (!t.startsWith("{")) return false;
+	try {
+		const j = JSON.parse(t) as Record<string, unknown>;
+		return (
+			j !== null &&
+			typeof j === "object" &&
+			("base_resp" in j || "status_code" in j || "error" in j || "status_msg" in j)
+		);
+	} catch {
+		return /"(base_resp|status_code|status_msg|error)"\s*:/.test(t);
+	}
+}
+
 export function noModelMessage(opts: {
 	displayName: string;
 	/** Provider id for `8gent keys set <id>`; defaults to the lowercased display name. */
@@ -48,6 +69,13 @@ export function noModelMessage(opts: {
 	}
 	const msg = err instanceof Error ? err.message : err ? String(err) : "";
 	const status = /: (\d{3})\b/.exec(msg)?.[1];
+	if (status === "403") {
+		const body = msg.slice(msg.indexOf(": 403") + 5);
+		if (!isProviderErrorBody(body)) {
+			const host = /\bfor https?:\/\/(?:[^/\s@]*@)?([^/\s:]+)/.exec(msg)?.[1] ?? displayName;
+			return `Could not reach ${host} (HTTP 403 from a proxy or firewall). Your key was not checked.`;
+		}
+	}
 	if (status === "401" || status === "403") {
 		return `${displayName} rejected the key (HTTP ${status}). Run \`8gent keys set ${id}\` to replace ${keyEnv || "it"}.`;
 	}

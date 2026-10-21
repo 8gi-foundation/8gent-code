@@ -178,13 +178,19 @@ async function headless(
 	start: string,
 	format: "stream-json" | "text" = "stream-json",
 	yes = true,
-): Promise<{ code: number; events: Event[]; stdout: string }> {
+): Promise<{ code: number; events: Event[]; stdout: string; stderr: string }> {
 	repo = mkdtempSync(join(tmpdir(), `donegate-${lang.name}-`));
 	lang.setup(repo, start);
 	bodies = [];
 	wrote = { first: false, fixed: false };
 	const { runRunCommand } = await import("./run");
 	const out: string[] = [];
+	const err: string[] = [];
+	const realErr = process.stderr.write.bind(process.stderr);
+	process.stderr.write = ((chunk: string | Uint8Array) => {
+		err.push(String(chunk));
+		return true;
+	}) as typeof process.stderr.write;
 	const realWrite = process.stdout.write.bind(process.stdout);
 	process.stdout.write = ((chunk: string | Uint8Array) => {
 		out.push(String(chunk));
@@ -208,13 +214,14 @@ async function headless(
 		]);
 	} finally {
 		process.stdout.write = realWrite;
+		process.stderr.write = realErr;
 	}
 	const stdout = out.join("");
 	const events = stdout
 		.split("\n")
 		.filter((l) => l.startsWith("{"))
 		.map((l) => JSON.parse(l) as Event);
-	return { code, events, stdout };
+	return { code, events, stdout, stderr: err.join("") };
 }
 
 const resultOf = (events: Event[]) => events.find((e) => e.type === "result");
@@ -366,5 +373,14 @@ describe("done gate, hardening", () => {
 		expect(result?.final_text).toContain("done gate skipped (needs --yes)");
 		expect(code).toBe(0);
 		expect(await Bun.file(out).exists()).toBe(false);
+	}, 180_000);
+
+	test("a skipped gate is printed once per run in text mode (#4712)", async () => {
+		const out = envOut();
+		lang = envLang(out);
+		plan = "break";
+		const { stdout, stderr } = await headless(lang.green, "text", false);
+		const all = `${stdout}\n${stderr}`;
+		expect(all.split("done gate skipped (needs --yes)").length - 1).toBe(1);
 	}, 180_000);
 });

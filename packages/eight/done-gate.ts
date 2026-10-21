@@ -29,7 +29,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import * as path from "node:path";
 import { firstFailure } from "../orchestration/verify-scope";
 import { detectTestCommand } from "./commit-gate";
@@ -245,6 +245,70 @@ async function runCheck(
 	return { read, signatures };
 }
 
+/** One shell command cut into the simple commands it runs: `cd x && bun test 2>&1 | tail` -> ["cd x", "bun test"]. */
+function simpleCommands(command: string): string[] {
+	const out: string[] = [];
+	for (const seg of command.split(/&&|\|\||;|\n/)) {
+		const tokens: string[] = [];
+		const words = (seg.split("|")[0] ?? "").trim().split(/\s+/).filter(Boolean);
+		for (let i = 0; i < words.length; i++) {
+			const w = words[i];
+			if (/^\d*>>?&\d+$/.test(w) || /^\d*>>?\S+$/.test(w)) continue; // 2>&1, >out
+			if (/^\d*>>?$/.test(w)) {
+				i++; // `2> file`: drop the target too
+				continue;
+			}
+			if (tokens.length === 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) continue; // FOO=1 bun test
+			tokens.push(w);
+		}
+		if (tokens.length) out.push(tokens.join(" "));
+	}
+	return out;
+}
+
+export const MAX_RAN_COMMANDS = 200;
+export const MAX_RAN_COMMAND_CHARS = 2000;
+
+/** Remember a command the model ran: newest 200 kept, each cut to 2000 characters. */
+export function recordRanCommand(list: string[], command: string): void {
+	list.push(command.slice(0, MAX_RAN_COMMAND_CHARS));
+	if (list.length > MAX_RAN_COMMANDS) list.shift();
+}
+
+const PM_TEST = /^(bun run|npm|npm run|pnpm|pnpm run|yarn|yarn run) test$|^npm t$/;
+
+/**
+ * True when `ran` (commands the model ran itself this run) includes this project's check
+ * under another spelling. `bun test`, `bun run test`, `npm test`, `pnpm test`, `yarn test`
+ * all run the package's test script, so they are the same check as each other; a bare
+ * runner (`bun test`, `pytest`, `cargo test`, `go test ./...`) is the same check when the
+ * script resolves to it (or, for cargo and go, when it is the check itself).
+ */
+export function ranEquivalentCheck(
+	ran: readonly string[],
+	checkCommand: string,
+	cwd: string,
+): boolean {
+	let script = "";
+	try {
+		const s = JSON.parse(readFileSync(path.join(cwd, "package.json"), "utf-8"))?.scripts?.test;
+		if (typeof s === "string") script = s.trim().replace(/\s+/g, " ");
+	} catch {
+		/* no package.json: only the literal forms below can match */
+	}
+	const wanted = new Set<string>([checkCommand.trim()]);
+	if (PM_TEST.test(checkCommand.trim())) {
+		if (script) wanted.add(script);
+	}
+	for (const cmd of ran) {
+		for (const seg of simpleCommands(cmd)) {
+			if (wanted.has(seg)) return true;
+			if (PM_TEST.test(seg) && PM_TEST.test(checkCommand.trim())) return true;
+		}
+	}
+	return false;
+}
+
 export const NEEDS_YES = "done gate skipped (needs --yes)";
 
 /**
@@ -367,8 +431,17 @@ export async function finishWithProjectCheck(opts: {
 	}
 }
 
-/** The line a reader sees under the final answer, or null when there is nothing to say. */
-export function verdictNotice(v: DoneVerdict): string | null {
+/**
+ * The line a reader sees under the final answer, or null when there is nothing to say.
+ * `ran` is what the model ran itself: a skipped gate stays silent when the model already
+ * ran the project's check under another spelling (#4712).
+ */
+export function verdictNotice(
+	v: DoneVerdict,
+	ran: readonly string[] = [],
+	cwd = process.cwd(),
+): string | null {
+	if (v.status === "skipped" && v.command && ranEquivalentCheck(ran, v.command, cwd)) return null;
 	switch (v.status) {
 		case "fail":
 			return `${DONE_GATE_TAG} FAILED: ${v.detail}. This run did not leave the project building and passing.`;

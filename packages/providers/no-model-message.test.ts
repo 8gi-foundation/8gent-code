@@ -31,6 +31,37 @@ describe("noModelMessage", () => {
 		});
 		expect(m).toContain("rejected the key (HTTP 401)");
 	});
+	test("a 403 with a MiniMax error body says the key was rejected (#4710)", () => {
+		const body = '{"base_resp":{"status_code":1004,"status_msg":"login fail"}}';
+		const m = noModelMessage({
+			...base,
+			key: "fake-key-0123456789",
+			err: new Error(`Model discovery failed for https://api.minimax.io/v1/models: 403 ${body}`),
+		});
+		expect(m).toContain("rejected the key (HTTP 403)");
+	});
+	test("a 403 with an HTML, text or empty body is a network block, not a bad key (#4710)", () => {
+		for (const body of ["<html><body>Blocked by policy</body></html>", "Forbidden", ""]) {
+			const m = noModelMessage({
+				...base,
+				key: "fake-key-0123456789",
+				err: new Error(`Model discovery failed for https://api.minimax.io/v1/models: 403 ${body}`),
+			});
+			expect(m).toBe(
+				"Could not reach api.minimax.io (HTTP 403 from a proxy or firewall). Your key was not checked.",
+			);
+			expect(m).not.toContain("rejected the key");
+			expect(m).not.toContain("8gent keys");
+		}
+	});
+	test("a 401 stays a key problem whatever the body", () => {
+		const m = noModelMessage({
+			...base,
+			key: "fake-key-0123456789",
+			err: new Error("Model discovery failed for https://api.minimax.io/v1/models: 401 <html>"),
+		});
+		expect(m).toContain("rejected the key (HTTP 401)");
+	});
 	test("a network failure keeps the list wording and the pick hint", () => {
 		const m = noModelMessage({
 			...base,
