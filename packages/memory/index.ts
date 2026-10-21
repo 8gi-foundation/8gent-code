@@ -30,6 +30,7 @@ import {
 } from "./extractor.js";
 import { type Entity, KnowledgeGraph, type Relationship, type SubgraphResult } from "./graph.js";
 import { type MigrationResult, migrateV1ToV2 } from "./migrate.js";
+import { prepareProjectMemoryDir, projectMemoryDir } from "./project-state.js";
 import {
 	PromotionManager,
 	type PromotionResult,
@@ -286,7 +287,7 @@ export class MemoryManager {
 	constructor(workingDirectory: string) {
 		this.workingDirectory = workingDirectory;
 		const globalDataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
-		this.projectJsonlPath = path.join(workingDirectory, ".8gent", "memory", "project.jsonl");
+		this.projectJsonlPath = path.join(projectMemoryDir(workingDirectory), "project.jsonl");
 		this.globalJsonlPath = path.join(globalDataDir, "memory", "global.jsonl");
 	}
 
@@ -310,7 +311,7 @@ export class MemoryManager {
 			this.embeddingProvider = await getEmbeddingProvider();
 
 			// Create project store
-			const projectDbDir = path.join(this.workingDirectory, ".8gent", "memory");
+			const projectDbDir = prepareProjectMemoryDir(this.workingDirectory);
 			ensureDir(projectDbDir);
 			const projectDbPath = path.join(projectDbDir, "memory.db");
 			this.projectStore = new MemoryStore(projectDbPath, this.embeddingProvider);

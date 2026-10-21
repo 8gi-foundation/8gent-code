@@ -18,9 +18,10 @@
  *     (at least one r or R), all before the first path; no `--`, no long
  *     option; 1 to 8 paths;
  *   - decideRules fires exactly rm_recursive, and no prompt-control text;
- *   - or (#4185) the command is `rmdir PATH...` with no flag at all, every
- *     PATH is `.tmp` or below it, and decideRules fires exactly
- *     rmdir_non_temp; every condition below applies to it the same way;
+ *   - or (#4185, widened by #4711) the command is `rmdir PATH...` with no flag
+ *     at all, and decideRules fires exactly rmdir_non_temp; every condition
+ *     below applies to it the same way, so it passes only for a directory this
+ *     session made (a model that made `tmp/` could not remove it, #4711);
  *   - each PATH is relative, has no `.`, `..` or empty segment (one trailing
  *     slash is fine; a leading `./` only before `.tmp`), no segment starting
  *     with `.` (dotfile, dot directory, .git) except a first segment that is
@@ -74,7 +75,7 @@ const MAX_ENTRIES = 2000;
 const NO: RmOwnDir = { ok: false };
 
 const WHAT_PASSES =
-	"A recursive delete runs without review only as `rm -rf DIR` (or `rmdir DIR` for .tmp) where DIR is a plain relative directory inside the workspace (no dot names other than a leading .tmp, no symlink on its path) that this session made with a run_command that was only `mkdir`, that git does not track, and that holds only files this session wrote and directories it made the same way.";
+	"A recursive delete runs without review only as `rm -rf DIR` (or `rmdir DIR`) where DIR is a plain relative directory inside the workspace (no dot names other than a leading .tmp, no symlink on its path) that this session made with a run_command that was only `mkdir`, that git does not track, and that holds only files this session wrote and directories it made the same way.";
 
 function hint(why: string): RmOwnDir {
 	return {
@@ -188,7 +189,6 @@ export function rmOwnDir(
 			if (p.startsWith("/") || segs.some((s) => s === "" || s === "." || s === ".."))
 				return hint(`\`${p}\` is not a plain relative path.`);
 			if (dotOutsideScratch(segs)) return hint(`\`${p}\` is or is inside a dot entry.`);
-			if (rmdir && segs[0] !== SCRATCH_DIR) return NO;
 			if (SECRET.test(rel) || protectedRel(rel)) return hint(`\`${p}\` is a protected path.`);
 			let cur = root;
 			for (const s of segs) {

@@ -167,6 +167,7 @@ import {
 	quickMessages,
 	runQuickAnswer,
 } from "./quick-answer";
+import { createSessionScratch, removeSessionScratch, sessionScratchNote } from "./session-scratch";
 import { SessionStore } from "./session-store";
 import { SessionSyncManager } from "./session-sync";
 import {
@@ -438,6 +439,8 @@ export class Agent {
 	private contextNoteMessages: Array<{ role: string; content: string }> = [];
 	private hookManager: HookManager;
 	private sessionId: string;
+	/** $TMPDIR/8gent-<session id>/ (#4711): created at start, removed in cleanup() and at process exit. */
+	private sessionScratchDir: string | null = null;
 	/** Session-scoped failover, only built with cache affinity on (#4500); off: a fresh one per turn. */
 	private affinityFailover: ModelFailover | null = null;
 	/** Entries the affinity failover marked down last turn; revived next turn so a blip is not sticky. */
@@ -611,6 +614,11 @@ export class Agent {
 		this.hookManager = getHookManager();
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();
+		this.sessionScratchDir = createSessionScratch(this.sessionId);
+		{
+			const scratch = this.sessionScratchDir;
+			if (scratch) process.once("exit", () => removeSessionScratch(scratch));
+		}
 
 		// v0.12.0: lite mode is now the default. The agent boots fast and lean.
 		// Opt back into the heavy auxiliaries (kernel training, heartbeat agents,
@@ -824,9 +832,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			: projectInstructionsSection(config.workingDirectory || process.cwd(), {
 					includeUserGlobal: onBox,
 				});
+		const scratchBlock = sessionScratchNote(this.sessionScratchDir);
 		const workingProject = isTableScope
 			? ""
-			: workingProjectNote(config.workingDirectory || process.cwd());
+			: workingProjectNote(config.workingDirectory || process.cwd()) + scratchBlock;
 		this.messageHistory.push({
 			role: "system",
 			content: isTableScope
@@ -861,6 +870,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				offBox ??=
 					compactLocalPrompt +
 					workingProjectNote(workingDirectory) +
+					scratchBlock +
 					projectInstructionsSection(workingDirectory, { includeUserGlobal: false }) +
 					userContextNoBoard;
 				return offBox;
@@ -4503,6 +4513,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	async cleanup(): Promise<void> {
 		this.affinityFailover?.forgetSession(this.sessionId);
+		removeSessionScratch(this.sessionScratchDir);
 		// Flush and end Convex session sync
 		await this.sessionSync.endSession().catch(() => {});
 		// Stop kernel pipeline

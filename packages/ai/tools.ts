@@ -61,6 +61,7 @@ import {
 } from "../permissions/run-command-sandbox";
 import {
 	type CreatedFiles,
+	mkdirRecorded,
 	pathAbsent,
 	watchRedirects,
 	watchWrite,
@@ -533,7 +534,11 @@ const writeFile = tool({
 		if ("refused" in target) return target.refused;
 		const absolutePath = target.path;
 		const dir = path.dirname(absolutePath);
-		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+		// Records the directories it makes, so the session can remove them again (#4711).
+		if (!fs.existsSync(dir)) {
+			const { createdFiles, workingDirectory } = getToolContext();
+			mkdirRecorded(dir, workingDirectory, createdFiles);
+		}
 		const wasNew = pathAbsent(absolutePath);
 		const recordWrite = watchWrite(absolutePath, getToolContext().createdFiles);
 		fs.writeFileSync(absolutePath, content);

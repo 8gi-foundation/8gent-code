@@ -313,7 +313,7 @@ export const CONCISE_WEB_NOTE =
 	"**Web, docs or URLs: `web_search`/`web_fetch`; you have internet.**";
 export const NARRATION_NOTE = "**Narration: `speak`, never espeak or say.**";
 export const SCRATCH_DIR_NOTE =
-	"**Scratch files: `.tmp/` in the project (git-ignored, never delete), never /tmp or ~.**";
+	"**Scratch files: the session scratch dir, never the repo, /tmp or ~.**";
 
 /** #4306: a pilot run made type folders in the wrong place, tried rmdir, and was blocked. */
 export const FOLDER_NOTE =

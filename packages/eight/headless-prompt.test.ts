@@ -178,7 +178,8 @@ describe("headless prompt diet", () => {
 		expect(headless.messages[0].content).toContain(SCRATCH_DIR_NOTE);
 		expect(headless.messages[0].content).toContain(FOLDER_NOTE);
 		expect(headless.messages[0].content).toContain(TICKET_FILE_NOTE);
-		expect(headless.messages[0].content).toContain("git-ignored, never delete");
+		expect(headless.messages[0].content).toContain("Scratch directory: `");
+		expect(headless.messages[0].content).toContain("Never create scratch files");
 		expect(headless.messages[0].content).not.toContain("mktemp");
 		expect(headless.messages[0].content).toContain(NARRATION_NOTE);
 	}, 60_000);

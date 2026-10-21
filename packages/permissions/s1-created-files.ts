@@ -535,7 +535,10 @@ export function watchRedirects(
 ): () => void {
 	if (!record) return () => {};
 	// A mkdir-only command records the directories it makes (#4105).
-	const watches: Array<() => void> = [watchMkdir(command, cwd, record)];
+	const watches: Array<() => void> = [
+		watchMkdir(command, cwd, record),
+		watchTouch(command, cwd, record),
+	];
 	try {
 		if (CHANGES_DIR.test(maskQuotes(command))) return () => {};
 		if (decideRules(command).rules.length > 0) return () => {};
@@ -557,6 +560,43 @@ export function watchRedirects(
 	return () => {
 		for (const w of watches) w();
 	};
+}
+
+/**
+ * Bracket a touch-only command (#4711): `touch PATH...`, no flags, 1 to 16 plain relative
+ * paths inside `cwd`. A path that was absent before and is a regular file after is recorded
+ * as the session's own, so `rm -f` of it needs no review. A path that existed is never
+ * recorded (touch only updates its time). Any other command records nothing. Never throws.
+ */
+export function watchTouch(command: string, cwd: string, record: CreatedFiles): () => void {
+	try {
+		const text = command.trim();
+		if (!PLAIN_PATH.test(text.replace(/ /g, "_"))) return () => {};
+		const [bin, ...paths] = text.split(/ +/);
+		if (bin !== "touch" || paths.length === 0 || paths.length > 16) return () => {};
+		const root = realpathSync(cwd);
+		const dones: Array<() => void> = [];
+		for (const p of paths) {
+			const segs = p.split("/");
+			if (
+				p.startsWith("-") ||
+				p.startsWith("/") ||
+				segs.some((x) => x === "" || x === "." || x === "..")
+			)
+				return () => {};
+			const abs = path.resolve(cwd, p);
+			const parent = path.dirname(abs);
+			const realParent = pathAbsent(parent) ? null : realpathSync(parent);
+			if (!realParent || (realParent !== root && !realParent.startsWith(`${root}${path.sep}`)))
+				return () => {};
+			dones.push(watchWrite(abs, record));
+		}
+		return () => {
+			for (const d of dones) d();
+		};
+	} catch {
+		return () => {};
+	}
 }
 
 /** `mkdir` with only -p / -v flags and 1 to 16 plain relative paths, nothing else on the line. */

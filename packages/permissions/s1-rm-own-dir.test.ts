@@ -233,6 +233,12 @@ describe.skipIf(process.platform === "win32")(
 				sh(PILOT_WRITE);
 				expect(ok(PILOT_RM)).toBe(true);
 			});
+			test("#4711: rmdir of an empty directory the session made, any name", () => {
+				sh("mkdir tmp");
+				expect(ok("rmdir tmp")).toBe(true);
+				execFileSync("sh", ["-c", "rmdir tmp"], { cwd: ws });
+				expect(existsSync(join(ws, "tmp"))).toBe(false);
+			});
 			test("the command then does what it says: build is gone, the rest stays", () => {
 				execFileSync("sh", ["-c", PILOT_RM], { cwd: ws });
 				expect(existsSync(join(ws, "build"))).toBe(false);
@@ -290,7 +296,10 @@ describe.skipIf(process.platform === "win32")(
 				["not recursive", "rm -f build"],
 				["a file, not a directory", "rm -rf build/todos.json"],
 				["missing", "rm -rf missing"],
-				["rmdir is not this lane", "rmdir build"],
+				["rmdir with a flag", "rmdir -p build"],
+				["rmdir of a directory that existed before the session", "rmdir old"],
+				["rmdir of a path outside the workspace", "rmdir OUTSIDE"],
+				["rmdir of the dot directory .git", "rmdir .git"],
 				["find delete", "find build -delete"],
 			];
 			for (const [why, cmd] of refused)
@@ -484,6 +493,16 @@ describe.skipIf(process.platform === "win32")(
 				expect(rec2.dirCount).toBe(2);
 				expect(rec2.createdDirBySession(join(ws, "old"))).toBe(false);
 				expect(rec2.createdDirBySession(join(ws, "old/n1/n2"))).toBe(true);
+			});
+			test("#4711 write_file into sub/, mv the file up, rmdir sub: not blocked, sub is gone", async () => {
+				const ex = new ToolExecutor(ws, "owndir4711");
+				await ex.execute("write_file", { path: "sub/notes.txt", content: "one line" });
+				const mv = await ex.execute("run_command", { command: "mv sub/notes.txt notes.txt" });
+				expect(mv).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
+				const out = await ex.execute("run_command", { command: "rmdir sub" });
+				expect(out).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
+				expect(existsSync(join(ws, "sub"))).toBe(false);
+				expect(existsSync(join(ws, "notes.txt"))).toBe(true);
 			});
 			test("a directory that was there before is not the lane's: blocked, with what would pass", async () => {
 				const ex = new ToolExecutor(ws, "owndir2");
