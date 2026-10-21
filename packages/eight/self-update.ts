@@ -19,7 +19,7 @@ import { spawn } from "node:child_process";
 import { createHash, createPublicKey, verify as cryptoVerify, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const NPM_PACKAGE = "@8gi-foundation/8gent-code";
@@ -441,6 +441,7 @@ export const PROBE_TIMEOUT_MS = 15_000;
 export function probeVersionWithTimeout(
 	file: string,
 	timeoutMs = PROBE_TIMEOUT_MS,
+	env?: NodeJS.ProcessEnv,
 ): Promise<string> {
 	return new Promise((resolve) => {
 		let out = "";
@@ -455,7 +456,10 @@ export function probeVersionWithTimeout(
 		};
 		let p: ReturnType<typeof spawn>;
 		try {
-			p = spawn(file, ["--version"], { stdio: ["ignore", "pipe", "ignore"] });
+			p = spawn(file, ["--version"], {
+				stdio: ["ignore", "pipe", "ignore"],
+				...(env ? { env } : {}),
+			});
 		} catch {
 			// Bun on Windows throws (EFTYPE, EACCES) for a file it cannot execute instead of emitting
 			// "error"; an unrunnable binary reads as "" either way.
@@ -622,12 +626,43 @@ async function updateBinary(
 	return `${lastProblem}; nothing changed`;
 }
 
+/**
+ * Termux (Android): the installer puts the glibc binary at EIGHT_REAL_BINARY
+ * and a wrapper script (EIGHT_WRAPPER) in $PREFIX/bin that runs it through
+ * glibc-runner or proot-distro. process.execPath is then the loader, not the
+ * binary, so an update must replace EIGHT_REAL_BINARY and check the new file
+ * by running the wrapper with EIGHT_BIN pointing at it (under proot only
+ * EIGHT_REAL_BINARY is set). Null elsewhere.
+ */
+export function wrapperOverrides(
+	env: NodeJS.ProcessEnv,
+): { execPath: string; probeVersion?: (file: string) => Promise<string> } | null {
+	const real = env.EIGHT_REAL_BINARY;
+	const wrapper = env.EIGHT_WRAPPER;
+	if (!real || !isAbsolute(real)) return null;
+	// Under proot we are already inside the glibc userland, so the plain probe works.
+	if (!wrapper || !isAbsolute(wrapper)) return { execPath: real };
+	return {
+		execPath: real,
+		probeVersion: (file) =>
+			probeVersionWithTimeout(wrapper, PROBE_TIMEOUT_MS, { ...env, EIGHT_BIN: file }),
+	};
+}
+
 export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdateResult> {
+	const wrap =
+		opts.channel === "binary" && !opts.probeVersion ? wrapperOverrides(process.env) : null;
 	const o = {
 		...opts,
 		fetchImpl: opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike),
 		probeVersion: opts.probeVersion ?? ((f: string) => probeVersionWithTimeout(f)),
 		log: opts.log ?? ((line: string) => console.log(line)),
+		...(wrap
+			? {
+					execPath: wrap.execPath,
+					...(wrap.probeVersion ? { probeVersion: wrap.probeVersion } : {}),
+				}
+			: {}),
 	};
 	const platform = o.platform ?? process.platform;
 	const arch = o.arch ?? process.arch;

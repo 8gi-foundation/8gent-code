@@ -72,7 +72,7 @@ let fakeBin: string;
 
 interface FakeRelease {
 	tag: string;
-	assets: Record<string, string>;
+	assets: Record<string, string | Uint8Array>;
 	sums?: boolean;
 	badSum?: boolean;
 	prerelease?: boolean;
@@ -684,23 +684,113 @@ describe("install.sh: Android / Termux", () => {
 		);
 	const termuxEnv = { PREFIX: "/data/data/com.termux/files/usr", TERMUX_VERSION: "0.118" };
 
-	test("names Android, stops before any download, and says what to do", async () => {
+	/** A glibc-only "binary": runs only when started through the fake grun. */
+	const glibcOnly = (v: string) =>
+		`#!/bin/sh\n[ -n "$FAKE_GRUN" ] || exit 127\necho "8gent Code v${v}"\n`;
+	const arm = (v: string, body = glibcOnly(v)) =>
+		publish([{ tag: `v${v}`, assets: { "8gent-linux-arm64": body } }]);
+	const prefixEnv = () => {
+		const prefix = join(root, "prefix");
+		mkdirSync(join(prefix, "bin"), { recursive: true });
+		return {
+			PREFIX: prefix,
+			TERMUX_VERSION: "0.118",
+			EIGHT_INSTALL_DIR: "",
+			PATH: `${join(prefix, "bin")}:${fakeBin}:/usr/bin:/bin`,
+		};
+	};
+	const fakeGrun = () => tool("grun", 'FAKE_GRUN=1 exec "$@"');
+	const fakePkg = () =>
+		tool(
+			"pkg",
+			`echo "pkg $*" >> "${root}/pkg.log"\ncase "$*" in *glibc-runner*) printf '#!/bin/sh\\nFAKE_GRUN=1 exec "$@"\\n' > "${fakeBin}/grun"; chmod 755 "${fakeBin}/grun";; esac`,
+		);
+	const pkgLog = () =>
+		existsSync(join(root, "pkg.log")) ? readFileSync(join(root, "pkg.log"), "utf8") : "";
+
+	test("installs through glibc-runner: sets it up itself, binary under opt, launcher in bin, checks the version through the launcher", async () => {
 		termuxUname();
-		const url = one("0.20.0");
-		hits = 0;
-		const r = await install(url, termuxEnv);
+		fakePkg();
+		const env = prefixEnv();
+		const r = await install(arm("0.20.0"), env);
+		expect(r.out).toContain("Setting up glibc-runner");
+		expect(r.code).toBe(0);
+		expect(pkgLog()).toContain("pkg install -y glibc-repo");
+		expect(pkgLog()).toContain("pkg install -y glibc-runner");
+		expect(existsSync(join(env.PREFIX, "opt", "8gent", "8gent"))).toBe(true);
+		const launcher = readFileSync(join(env.PREFIX, "bin", "8gent"), "utf8");
+		expect(launcher).toContain('exec grun "${EIGHT_BIN:-$EIGHT_REAL_BINARY}" "$@"');
+		expect(launcher).toContain(`EIGHT_REAL_BINARY='${join(env.PREFIX, "opt", "8gent", "8gent")}'`);
+		// The launcher runs (via grun) and reports the version; EIGHT_BIN is honoured.
+		const run = Bun.spawnSync([join(env.PREFIX, "bin", "8gent"), "--version"], {
+			env: { PATH: env.PATH, FAKE_GRUN: "" },
+		});
+		expect(run.stdout.toString().trim()).toBe("8gent Code v0.20.0");
+	});
+
+	test("skips pkg when grun is already installed", async () => {
+		termuxUname();
+		fakeGrun();
+		fakePkg();
+		const r = await install(arm("0.20.0"), prefixEnv());
+		expect(r.code).toBe(0);
+		expect(pkgLog()).toBe("");
+	});
+
+	test("falls back to proot-distro ubuntu when grun cannot run the binary", async () => {
+		termuxUname();
+		tool("grun", "exit 1");
+		tool("pkg", `echo "pkg $*" >> "${root}/pkg.log"`);
+		// proot-distro login ... -- <bin> ...: run the binary the way the guest would.
+		tool(
+			"proot-distro",
+			`echo "proot-distro $*" >> "${root}/pkg.log"\ncase "$1" in install) mkdir -p "$PREFIX/var/lib/proot-distro/installed-rootfs/ubuntu";; login) while [ "$1" != "--" ]; do shift; done; shift; case "$1" in env) shift; shift;; esac; FAKE_GRUN=1 exec "$@";; esac`,
+		);
+		const env = prefixEnv();
+		const r = await install(arm("0.20.0"), env);
+		expect(r.out).toContain("trying proot-distro ubuntu");
+		expect(r.code).toBe(0);
+		expect(pkgLog()).toContain("proot-distro install ubuntu");
+		const launcher = readFileSync(join(env.PREFIX, "bin", "8gent"), "utf8");
+		expect(launcher).toContain("proot-distro login ubuntu");
+		expect(launcher).toContain("--termux-home");
+	});
+
+	test("neither route can run it: exits nonzero, installs nothing, names the loader", async () => {
+		termuxUname();
+		tool("grun", "exit 1");
+		tool("pkg", "exit 0");
+		tool(
+			"proot-distro",
+			'case "$1" in install) mkdir -p "$PREFIX/var/lib/proot-distro/installed-rootfs/ubuntu";; *) exit 1;; esac',
+		);
+		const env = prefixEnv();
+		const r = await install(arm("0.20.0"), env);
 		expect(r.code).toBe(1);
-		expect(r.out).toContain("Android (Termux)");
-		expect(r.out).toContain("proot-distro");
-		expect(r.out).toContain("Nothing was installed");
-		expect(installed()).toBeNull();
+		expect(r.out).toContain("nothing installed");
+		expect(existsSync(join(env.PREFIX, "bin", "8gent"))).toBe(false);
+		expect(existsSync(join(env.PREFIX, "opt", "8gent", "8gent"))).toBe(false);
+	});
+
+	test("a bad checksum on Termux stops before pkg or any install", async () => {
+		termuxUname();
+		fakePkg();
+		const url = arm("0.20.0");
+		// The served file no longer matches the signed-off SHA256SUMS line.
+		routes.set("/releases/download/v0.20.0/8gent-linux-arm64", { body: glibcOnly("9.9.9") });
+		const env = prefixEnv();
+		const r = await install(url, env);
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("checksum mismatch");
+		expect(pkgLog()).toBe("");
+		expect(existsSync(join(env.PREFIX, "bin", "8gent"))).toBe(false);
 	});
 
 	test("--dry-run prints the decisions: android, bionic, linux-arm64, Termux prefix, no sudo", async () => {
 		termuxUname();
 		const r = await install(one("0.20.0"), { ...termuxEnv, EIGHT_INSTALL_DIR: "" }, ["--dry-run"]);
 		expect(r.code).toBe(0);
-		expect(r.out).toContain("a real run would stop here");
+		expect(r.out).toContain("a real run would set up glibc-runner");
 		expect(r.out).toContain("uname -s/-m/-o : Linux / aarch64 / Android");
 		expect(r.out).toContain("android         : yes");
 		expect(r.out).toContain("libc            : bionic");
@@ -780,12 +870,44 @@ describe("install.sh: Android / Termux", () => {
 	test("the force path warns it will fail without glibc", async () => {
 		unameFor("aarch64", "Android");
 		const r = await install(one("0.20.0"), { EIGHT_ANDROID_FORCE: "1" }, ["--dry-run"]);
-		expect(r.out).toContain("will fail unless this box runs glibc binaries");
+		expect(r.out).toContain("it will fail unless this box runs glibc binaries");
 	});
 
 	test("the debug echo hides the query string of the releases URL", async () => {
 		const r = await install("https://example.invalid/r.json?token=abc123", {}, ["--dry-run"]);
 		expect(r.out).toContain("r.json?...");
 		expect(r.out).not.toContain("abc123");
+	});
+});
+
+describe("install.sh: a downloaded binary that cannot start", () => {
+	// Not an executable, but carries a loader path that does not exist, like a
+	// glibc arm64 binary on a bionic or musl userland.
+	const noLoader = () =>
+		new Uint8Array(
+			Buffer.concat([
+				Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0]),
+				Buffer.from("/lib/ld-nonexistent-9.so.1"),
+				Buffer.from([0]),
+			]),
+		);
+
+	test("names the ELF interpreter and says nothing was installed, not just got ''", async () => {
+		const url = publish([{ tag: "v0.20.0", assets: { [ASSET]: noLoader() } }]);
+		const r = await install(url);
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("did not report v0.20.0");
+		expect(r.out).toContain("ELF interpreter: /lib/ld-nonexistent-9.so.1");
+		expect(r.out).toContain("proot-distro install ubuntu");
+		expect(r.out).toContain("nothing installed");
+		expect(installed()).toBeNull();
+	});
+
+	test("a binary with no loader path reports 'unknown' and installs nothing", async () => {
+		const url = publish([{ tag: "v0.20.0", assets: { [ASSET]: "#!/bin/sh\nexit 3\n" } }]);
+		const r = await install(url);
+		expect(r.code).toBe(1);
+		expect(r.out).toContain("ELF interpreter: unknown");
+		expect(installed()).toBeNull();
 	});
 });
