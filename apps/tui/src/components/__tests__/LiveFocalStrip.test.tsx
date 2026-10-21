@@ -138,11 +138,11 @@ describe("no ready model: the strip never says READY or names a model (#3290)", 
 			columns,
 		});
 
-	test("nothing can answer: NO MODEL with the reason, no READY, no model name", () => {
+	test("nothing can answer: NO MODEL with the /provider hint, no READY, no model name", () => {
 		for (const columns of [120, 80]) {
 			const out = draw({ readiness: { state: "none", reason, model: "" } }, columns);
 			expect(out).toContain("NO MODEL");
-			expect(out).toContain("Ollama at");
+			expect(out).toContain("Type /provider");
 			expect(out).not.toContain("READY");
 			expect(out).not.toContain("ornith");
 		}

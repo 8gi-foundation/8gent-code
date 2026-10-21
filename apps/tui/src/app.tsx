@@ -201,7 +201,6 @@ import { InlineApprovalPrompt } from "./components/InlineApprovalPrompt.js";
 import { LiveFocalStrip, LiveFocalStripWithGoal } from "./components/LiveFocalStrip.js";
 import { MessageBubbleStrip } from "./components/MessageBubbleStrip.js";
 import { MessageViewer } from "./components/MessageViewer.js";
-import { NoProviderNotice } from "./components/NoProviderCard.js";
 import { PlanEmpty, PlanPanel, planColumnOpen, usePlanPref } from "./components/PlanPanel.js";
 import { PlanRail, useManagerTasks } from "./components/PlanRail.js";
 import type { JudgeState } from "./components/StatusFooter.js";
@@ -255,11 +254,7 @@ import {
 import { formatHotkeyRows, formatHotkeys } from "./lib/keybindings.js";
 import { computeProcessSidebarWidth, tuiChatContentWidth } from "./lib/layout-breakpoints.js";
 import { narratePlan, narrateStep, narrateToolEnd, narrateToolStart } from "./lib/narrator.js";
-import {
-	COMPACT_BELOW_ROWS,
-	providerKeyStatus,
-	unreachableLine,
-} from "./lib/no-provider-guidance.js";
+import { guidanceText, providerKeyStatus, unreachableLine } from "./lib/no-provider-guidance.js";
 import {
 	type PlanFileTally,
 	type PlanStep,
@@ -3689,6 +3684,8 @@ export function App({
 		openSessionPicker();
 	}, [sessionResume, activeSessionId, openSessionPicker]);
 
+	// The latest readiness, read by the slash handler (declared after it).
+	const readinessRef = useRef<{ state: string; reason?: string | null } | null>(null);
 	const handleSlashCommand = useCallback(
 		async (command: SlashCommand, args: string[]) => {
 			switch (command) {
@@ -6165,6 +6162,12 @@ export function App({
 								);
 							}
 						} else {
+							// With no model yet, the full guide goes into the chat on request
+							// (it is no longer a standing card that crowds the conversation).
+							const ready = readinessRef.current;
+							if (ready?.state === "none") {
+								addSystemMessage(guidanceText(undefined, ready.reason));
+							}
 							// Show provider selector
 							setViewMode("provider-select");
 						}
@@ -7583,6 +7586,7 @@ export function App({
 		build: buildResultFor(buildFact, readinessBuildKey(activeTabId, currentProvider, currentModel)),
 		turnError,
 	});
+	readinessRef.current = readiness;
 	const providerRows = deriveProviders({
 		primary: currentModel
 			? { name: `${shownProvider}:${shownModel.ran}`, asked: shownModel.asked }
@@ -7691,13 +7695,6 @@ export function App({
 									animate={showAnimations}
 									width={chatWidth}
 									readiness={readiness}
-								/>
-							)}
-
-							{!tabBody && (
-								<NoProviderNotice
-									readiness={readiness}
-									compact={viewport.height < COMPACT_BELOW_ROWS}
 								/>
 							)}
 

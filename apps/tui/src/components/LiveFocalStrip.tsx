@@ -91,6 +91,9 @@ interface LiveFocalStripProps {
 	readiness?: Readiness;
 }
 
+/** The one line that says no model is set up; the full guide is behind /provider. */
+export const NO_MODEL_HINT = "No model yet. Type /provider to choose one.";
+
 /** Columns the NO MODEL label takes: "○ NO MODEL ". */
 export const NO_MODEL_LABEL_WIDTH = 11;
 
@@ -149,7 +152,9 @@ export function LiveFocalStrip({
 	const middle = showApprovalBorder
 		? WAITING_STEP
 		: blocked
-			? blocked.reason
+			? blocked.state === "none"
+				? NO_MODEL_HINT
+				: blocked.reason
 			: isProcessing
 				? activeStep
 				: finished
@@ -159,16 +164,20 @@ export function LiveFocalStrip({
 	// The state word ("finished", "waiting") is never cut; an active
 	// step may be, past its first 12 columns.
 	const middleMin =
-		(isProcessing && !showApprovalBorder) || blocked ? Math.min(12, middle.length) : middle.length;
+		blocked?.state === "none"
+			? middle.length
+			: (isProcessing && !showApprovalBorder) || blocked
+				? Math.min(12, middle.length)
+				: middle.length;
 	// No model can answer: the route slot names none (#3290).
 	const shownRoute = blocked ? "" : route;
 	const fit =
-		width === undefined
+		width === undefined || blocked?.state === "none"
 			? {
 					middle,
 					route: shownRoute === "-" ? "" : shownRoute,
 					asked: shownRoute && shownRoute !== "-" && routeAsked ? askedNote(routeAsked) : "",
-					meter: true,
+					meter: blocked?.state !== "none",
 				}
 			: fitNowStrip({
 					width,
@@ -207,10 +216,10 @@ export function LiveFocalStrip({
 			<Box
 				flexGrow={1}
 				flexShrink={1}
-				minWidth={Math.min(middleMin, fit.middle.length) + 2}
+				minWidth={blocked?.state === "none" ? 0 : Math.min(middleMin, fit.middle.length) + 2}
 				paddingX={1}
 			>
-				<Text color={t.textSecondary} wrap="truncate-end">
+				<Text color={t.textSecondary} wrap={blocked?.state === "none" ? "wrap" : "truncate-end"}>
 					{fit.middle}
 				</Text>
 			</Box>
@@ -224,7 +233,7 @@ export function LiveFocalStrip({
 						<Text color={t.steel}>{contextMeterText(contextPct, contextState)}</Text>
 					</>
 				) : null}
-				{tokens ? <Text color={t.textTertiary}> {tokens}</Text> : null}
+				{tokens && blocked?.state !== "none" ? <Text color={t.textTertiary}> {tokens}</Text> : null}
 			</Box>
 		</Box>
 	);
