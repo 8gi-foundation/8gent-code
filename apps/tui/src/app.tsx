@@ -169,6 +169,11 @@ const SETUP_PROVIDER_NAMES: Record<string, string> = {
 };
 import { findPlanFile } from "../../../packages/ai/plan-file.js";
 import { safeBunFlags } from "../../../packages/core/bun-flags.js";
+import {
+	autoSwitchTarget,
+	hostedKeyedProviders,
+	persistProviderChoice,
+} from "../../../packages/eight/auto-provider.js";
 import { runBugCommand } from "../../../packages/eight/bug-command.js";
 import {
 	dotenvKeyIsAllowed,
@@ -273,6 +278,7 @@ import {
 	installProgramStatusCleanup,
 } from "./lib/program-status.js";
 import { expandPromptSlashCommand } from "./lib/prompt-slash.js";
+import { orderProviders, statusFirstLine } from "./lib/provider-order.js";
 import {
 	PROBE_TIMEOUT_MS,
 	READINESS_RETRY_MS,
@@ -526,7 +532,8 @@ async function detectBestLocalProviderUntraced(): Promise<{ provider: string; mo
 	// With llama-server selected (#3149) Ollama is off: its slot probes llama-server instead.
 	const llamaServer = isLlamaServerSelected();
 	const urls = [
-		"http://localhost:1234/v1/models",
+		// The same host the readiness gate asks (LM_STUDIO_HOST), not a fixed port.
+		`${(process.env.LM_STUDIO_HOST || "http://localhost:1234").replace(/\/+$/, "")}/v1/models`,
 		// The configured ollama (OLLAMA_BASE_URL / OLLAMA_HOST), not a hardcoded localhost (#3080).
 		llamaServer
 			? createLlamaServer({ baseUrl: resolveLlamaServerUrl() }).modelsUrl
@@ -577,6 +584,11 @@ async function detectBestLocalProviderUntraced(): Promise<{ provider: string; mo
 		return { provider: "apfel", model: pickBestChatModel(apfelModels) };
 	}
 
+	// No local provider answered. With exactly one hosted key, that provider is the
+	// only choice (#4720); its model comes from its live list once the TUI is up.
+	const _onlyKeyed = hostedKeyedProviders();
+	if (_onlyKeyed.length === 1) return { provider: _onlyKeyed[0], model: "" };
+
 	// No local provider answered. Default to OpenRouter free tier so a fresh
 	// Windows / Linux install boots into a working state instead of pointing
 	// at an ollama that isn't there.
@@ -587,10 +599,19 @@ loadEnvFile();
 const _savedProviderSettings = loadProviderSettings();
 // If no saved provider/model, auto-detect the best available local provider. Awaited
 // here, once, so the first frame still knows it; computeCliOverrides reuses the answer.
-const _startupDetected = _savedProviderSettings.model ? null : await detectBestLocalProvider();
+// A saved HOSTED provider whose key is present wins over the local default, even
+// when no model was saved with it (#4720): its live list picks the model.
+const _savedHostedWithKey =
+	Boolean(_savedProviderSettings.provider) &&
+	hostedKeyedProviders().includes(_savedProviderSettings.provider);
+const _startupDetected =
+	_savedProviderSettings.model || _savedHostedWithKey ? null : await detectBestLocalProvider();
 if (_startupDetected?.model) {
 	_savedProviderSettings.provider = _startupDetected.provider;
 	_savedProviderSettings.model = _startupDetected.model;
+} else if (_startupDetected?.provider) {
+	// Nothing local answered and exactly one hosted provider has a key: that one, no model yet.
+	_savedProviderSettings.provider = _startupDetected.provider;
 }
 
 /** Merge saved ~/.8gent/providers.json with optional CLI --provider / --model. */
@@ -1526,8 +1547,13 @@ export function App({
 		// turn-serving agent is built with runtime=ollama even though the user asked
 		// for lmstudio. The pin remembers the launch spec so re-entering that tab
 		// restores it; returning early instead left the previous tab's model live.
+		// A saved hosted provider with its key present is pinned the same way (#4720):
+		// without this the role registry's default for the Orchestrator tab replaced
+		// the saved choice at every launch.
 		if (
-			(cliProviderRequestedRef.current || cliModelRequestedRef.current) &&
+			(cliProviderRequestedRef.current ||
+				cliModelRequestedRef.current ||
+				(_savedHostedWithKey && currentProvider === _savedProviderSettings.provider)) &&
 			cliPinRef.current === null
 		) {
 			cliPinRef.current = {
@@ -1663,6 +1689,24 @@ export function App({
 	const [currentModel, setCurrentModel] = useState(
 		() => computeCliOverrides(cliProvider, cliModel).model,
 	);
+	// A provider or model the person picked (or the one-choice rule made) is saved
+	// to providers.json once its model is known, so the next launch starts there
+	// (#4720). A fallback made for one session is never flagged, so never saved.
+	// Holds WHICH provider was chosen, so a change to some other provider in the same
+	// breath (the router's own model assignment) is never saved as the choice.
+	const userChoseRef = useRef<string | null>(null);
+	useEffect(() => {
+		if (userChoseRef.current !== currentProvider || !currentModel.trim()) return;
+		userChoseRef.current = null;
+		persistProviderChoice(currentProvider, currentModel);
+		// Coming back to the launch tab restores what was chosen, not the launch spec.
+		const pin = cliPinRef.current;
+		if (pin && pin.tabId === activeTabId)
+			cliPinRef.current = {
+				tabId: pin.tabId,
+				spec: { provider: currentProvider, model: currentModel },
+			};
+	}, [currentProvider, currentModel]);
 	useEffect(() => {
 		setWindowTarget((prev) =>
 			prev?.provider === currentProvider && prev.model === currentModel
@@ -1882,7 +1926,8 @@ export function App({
 		// An explicit --provider/--model launch choice is never swapped for the
 		// provider's declared default (#3084).
 		const explicit: ModelSpec | null =
-			cliPinRef.current?.spec ??
+			((cliProviderRequestedRef.current || cliModelRequestedRef.current) &&
+				cliPinRef.current?.spec) ||
 			(cliModelRequestedRef.current
 				? {
 						provider: cliProviderRequestedRef.current ?? currentProvider,
@@ -1915,6 +1960,10 @@ export function App({
 	// react-doctor-disable-next-line react-doctor/no-effect-chain
 	useEffect(() => {
 		if (modelsLoading) return;
+		// Right after a switch the list on hand is the PREVIOUS provider's (empty for a
+		// down Ollama). Reading it as "no chat model anywhere" reopened the picker the
+		// person had just closed (#4720).
+		if (!listBelongsToProvider(modelsOwner, currentProvider)) return;
 		if (currentModel && !isLikelyEmbeddingModelId(currentModel)) return;
 		// A --provider launch stays on its provider: planAgentBuild tells the user to
 		// pick a model with /model instead of this screen taking over.
@@ -1922,7 +1971,7 @@ export function App({
 		if (availableModels.some((m) => !isLikelyEmbeddingModelId(m))) return;
 		// No chat model anywhere — guide user to provider setup
 		if (viewMode === "chat") setViewMode("provider-select");
-	}, [modelsLoading, availableModels, currentModel, viewMode]);
+	}, [modelsLoading, availableModels, currentModel, viewMode, modelsOwner, currentProvider]);
 
 	// Built from the provider registry, so every registered provider shows and
 	// "key configured" is true only when its key is present (#4598).
@@ -3203,6 +3252,24 @@ export function App({
 				timestamp: new Date(),
 			});
 		};
+		// Local provider down, exactly one hosted key: use it, say so once, and let this
+		// effect re-run on it (#4720). Never for a --provider launch, never for a hosted
+		// active provider.
+		const switchToOnlyRunnable = async (tabId: string): Promise<boolean> => {
+			if (
+				cliProviderRequestedRef.current !== undefined &&
+				currentProvider === cliProviderRequestedRef.current
+			)
+				return false;
+			const target = await autoSwitchTarget(currentProvider);
+			if (!target || cancelled) return false;
+			userChoseRef.current = target.provider;
+			setUnreachableNote(null);
+			notify(tabId, target.line);
+			setCurrentProvider(target.provider);
+			setCurrentModel(target.model);
+			return true;
+		};
 		const initAgent = async () => {
 			// Same tab id as the render-side key, so the two always match.
 			const buildKey = readinessBuildKey(activeTabId, currentProvider, currentModel);
@@ -3256,6 +3323,7 @@ export function App({
 					return; // Re-triggers this effect on the healthy provider.
 				}
 				if (decision.kind === "none") {
+					if (await switchToOnlyRunnable(_gateTabId)) return;
 					setAgentReady(false);
 					const label =
 						localProviderEndpoints().find((e) => e.provider === decision.from)?.label ??
@@ -3426,6 +3494,7 @@ export function App({
 						}
 					} catch {}
 				} else {
+					if (await switchToOnlyRunnable(_initTabId)) return;
 					setAgent(null);
 					setAgentReady(false);
 					waiting(`${currentProvider} ${_check.reason ?? "did not report ready."}`);
@@ -3762,7 +3831,13 @@ export function App({
 					const mins = Math.floor(elapsed / 60);
 					const secs = elapsed % 60;
 					addSystemMessage(
-						`Session Status:\n  Duration: ${mins}:${secs.toString().padStart(2, "0")}\n  Tokens used: ${totalTokens.toLocaleString()}\n  Commands: ${recentCommands.length}\n  Branch: ${currentBranch || "N/A"}\n  Animations: ${showAnimations ? "on" : "off"}\n  Sound: ${soundEnabled ? "on" : "off"}`,
+						`${statusFirstLine({
+							provider: currentProvider,
+							label:
+								getProviderManager().getProvider(currentProvider)?.displayName || currentProvider,
+							model: currentModel,
+							readiness: readinessRef.current ?? { state: "checking", reason: "" },
+						})}\nSession Status:\n  Duration: ${mins}:${secs.toString().padStart(2, "0")}\n  Tokens used: ${totalTokens.toLocaleString()}\n  Commands: ${recentCommands.length}\n  Branch: ${currentBranch || "N/A"}\n  Animations: ${showAnimations ? "on" : "off"}\n  Sound: ${soundEnabled ? "on" : "off"}`,
 					);
 					break;
 				}
@@ -6086,6 +6161,7 @@ export function App({
 									addSystemMessage(verdict.message);
 									return;
 								}
+								userChoseRef.current = currentProvider;
 								setCurrentModel(newModel);
 								if (verdict.notice) addSystemMessage(verdict.notice);
 								addSystemMessage(`Model switched to: ${newModel}`);
@@ -6161,6 +6237,7 @@ export function App({
 							const newProvider = args[0].toLowerCase();
 							const provider = availableProviders.find((p) => p.name === newProvider);
 							if (provider) {
+								userChoseRef.current = newProvider;
 								setCurrentModel((m) => modelAfterProviderSwitch(currentProvider, newProvider, m));
 								setCurrentProvider(newProvider);
 								addSystemMessage(`Provider switched to: ${provider.displayName}`);
@@ -6173,8 +6250,24 @@ export function App({
 							// With no model yet, the full guide goes into the chat on request
 							// (it is no longer a standing card that crowds the conversation).
 							const ready = readinessRef.current;
+							const pinned =
+								cliProviderRequestedRef.current !== undefined &&
+								currentProvider === cliProviderRequestedRef.current;
 							if (ready?.state === "none") {
-								addSystemMessage(guidanceText(undefined, ready.reason));
+								const guide = () => addSystemMessage(guidanceText(undefined, ready.reason));
+								if (pinned) guide();
+								// Local provider down and one hosted key: switch, say so once, and
+								// still show the list so the person can change it (#4720).
+								else
+									autoSwitchTarget(currentProvider)
+										.then((target) => {
+											if (!target) return guide();
+											userChoseRef.current = target.provider;
+											addSystemMessage(target.line);
+											setCurrentProvider(target.provider);
+											setCurrentModel(target.model);
+										})
+										.catch(guide);
 							}
 							// Show provider selector
 							setViewMode("provider-select");
@@ -7205,6 +7298,7 @@ export function App({
 						models={availableModels}
 						currentModel={currentModel}
 						onSelect={(model) => {
+							userChoseRef.current = currentProvider;
 							setCurrentModel(model);
 							addSystemMessage(`Model switched to: ${model}`);
 							setViewMode("chat");
@@ -7307,14 +7401,18 @@ export function App({
 			case "provider-select":
 				return (
 					<ProviderSelector
-						providers={availableProviders}
+						providers={orderProviders(availableProviders, providerHealth.engines)}
 						currentProvider={currentProvider}
 						onSelect={(provider) => {
-							setCurrentModel((m) => modelAfterProviderSwitch(currentProvider, provider, m));
+							userChoseRef.current = provider;
+							const nextModel = modelAfterProviderSwitch(currentProvider, provider, currentModel);
+							setCurrentModel(nextModel);
 							setCurrentProvider(provider);
 							const p = availableProviders.find((pr) => pr.name === provider);
 							addSystemMessage(`Provider switched to: ${p?.displayName || provider}`);
-							setViewMode("chat");
+							// The picker closes. With no model pinned for the new provider, the
+							// model list opens once (it highlights the default its live list picked).
+							setViewMode(nextModel.trim() ? "chat" : "model-select");
 						}}
 						onCancel={() => setViewMode("chat")}
 					/>

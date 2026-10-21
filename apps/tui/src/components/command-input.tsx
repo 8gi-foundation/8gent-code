@@ -520,7 +520,7 @@ export function CommandInput({
 				{/* Text input with ghost overlay */}
 				<Box>
 					<BufferedTextInput
-						focus={!typingPaused}
+						focus={focused && !typingPaused}
 						mask={maskInput}
 						value={value}
 						onChange={(v) => {

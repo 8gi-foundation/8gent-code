@@ -24,7 +24,9 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
+import { resolveOllamaBaseUrl } from "../local-model-server/ollama-host";
 import { readableModelName } from "../providers/model-reroute";
+import { autoSwitchLine, soleRunnableProvider } from "../providers/only-runnable";
 import type { TurnStop } from "./agent";
 import type { RunEvent, RunStopInfo } from "./run-events";
 import { type RunSessionStore, defaultRunSessionStore } from "./run-session";
@@ -611,10 +613,10 @@ export async function noModelNotice(provider: string, error?: unknown): Promise<
 	});
 }
 
-/** Probe localhost:11434 once to see if ollama is actually running. */
+/** Probe the configured Ollama (OLLAMA_BASE_URL / OLLAMA_HOST, else localhost:11434) once. */
 async function isOllamaUp(): Promise<boolean> {
 	try {
-		const res = await fetch("http://localhost:11434/api/tags", {
+		const res = await fetch(`${resolveOllamaBaseUrl()}/api/tags`, {
 			signal: AbortSignal.timeout(1500),
 		});
 		return res.ok;
@@ -629,7 +631,7 @@ async function isOllamaUp(): Promise<boolean> {
  */
 async function autoDetectOllamaModel(): Promise<string | null> {
 	try {
-		const res = await fetch("http://localhost:11434/api/tags", {
+		const res = await fetch(`${resolveOllamaBaseUrl()}/api/tags`, {
 			signal: AbortSignal.timeout(2000),
 		});
 		if (!res.ok) return null;
@@ -725,6 +727,8 @@ export interface ProviderChoice {
 	source: "flag" | "saved" | "router";
 	/** Set when a saved choice was unreachable and another provider was used. */
 	notice?: string;
+	/** The local provider that was not answering when the only keyed one was chosen (#4720). */
+	switchedFrom?: string;
 }
 
 export interface ProviderChoiceDeps {
@@ -733,6 +737,8 @@ export interface ProviderChoiceDeps {
 	reachable: (provider: string) => Promise<boolean>;
 	ollamaUp: () => Promise<boolean>;
 	ollamaModel: () => Promise<string | null>;
+	/** Hosted providers with a usable key (#4720). Absent: the router fallback stands. */
+	hostedKeyed?: () => string[] | Promise<string[]>;
 }
 
 export async function resolveProviderChoice(
@@ -755,7 +761,20 @@ export async function resolveProviderChoice(
 			source: "saved",
 		};
 	}
-	const provider = (await deps.ollamaUp()) ? "ollama" : (req.routerFallback ?? "openrouter");
+	const ollamaUp = await deps.ollamaUp();
+	// Ollama is down and exactly one hosted provider has a key: that is the only
+	// choice, so it is taken, not asked about (#4720).
+	if (!ollamaUp && deps.hostedKeyed) {
+		const only = soleRunnableProvider("ollama", await deps.hostedKeyed());
+		if (only)
+			return {
+				provider: only,
+				model: await modelFor(only),
+				source: "router",
+				switchedFrom: "ollama",
+			};
+	}
+	const provider = ollamaUp ? "ollama" : (req.routerFallback ?? "openrouter");
 	const model = await modelFor(provider);
 	const notice = saved
 		? `${providerLabel(saved.provider)} not reachable, using ${providerLabel(provider)} ${
@@ -821,6 +840,7 @@ export function liveProviderChoiceDeps(): ProviderChoiceDeps {
 		reachable: providerReachable,
 		ollamaUp: isOllamaUp,
 		ollamaModel: autoDetectOllamaModel,
+		hostedKeyed: async () => (await import("./auto-provider")).hostedKeyedProviders(),
 	};
 }
 
@@ -908,6 +928,12 @@ export async function runRunCommand(
 		}
 	}
 	const { model, error: modelError } = await modelForOneShotWithReason(provider, choice.model);
+	if (model && choice.switchedFrom) {
+		// Said once, on stderr (stdout stays the answer or clean NDJSON).
+		const { getProviderManager } = await import("../providers");
+		const label = getProviderManager().getProvider(provider).displayName || provider;
+		process.stderr.write(`[run] ${autoSwitchLine(choice.switchedFrom, label, model)}\n`);
+	}
 	if (!model) {
 		const msg = await noModelNotice(provider, modelError);
 		if (opts.outputFormat === "stream-json")

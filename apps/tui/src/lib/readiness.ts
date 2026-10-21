@@ -74,7 +74,7 @@ export interface ReadinessInputs {
 export const CHECKING_REASON = "looking for a model";
 
 /** The probe's engine name for each local provider, and how to say it. */
-const ENGINE_FOR: Readonly<Record<string, { engine: string; label: string }>> = {
+export const ENGINE_FOR: Readonly<Record<string, { engine: string; label: string }>> = {
 	"8gent": { engine: "ollama", label: "Ollama" },
 	ollama: { engine: "ollama", label: "Ollama" },
 	lmstudio: { engine: "lmstudio", label: "LM Studio" },

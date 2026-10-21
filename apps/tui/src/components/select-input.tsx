@@ -17,6 +17,7 @@
 
 import { Box, type TextProps, useInput } from "ink";
 import React, { useState, useEffect, useMemo } from "react";
+import { providerRowNote } from "../lib/provider-order.js";
 import { AppText, Heading, Label, MutedText } from "./primitives/AppText.js";
 import { Card } from "./primitives/Card.js";
 import { Inline } from "./primitives/Inline.js";
@@ -39,6 +40,8 @@ export interface SelectOption<T = string> {
 	value: T;
 	description?: string;
 	disabled?: boolean;
+	/** Drawn muted but still selectable: a choice that is known not to answer right now. */
+	dim?: boolean;
 	icon?: string;
 	/** Hex colours drawn as a preview row before the label (theme picker). */
 	swatches?: string[];
@@ -212,7 +215,7 @@ export function SelectInput<T = string>({
 							{option.icon ? <AppText dimColor={isDisabled}>{option.icon} </AppText> : null}
 
 							{/* Label */}
-							{isDisabled ? (
+							{isDisabled || option.dim ? (
 								<MutedText>{option.label}</MutedText>
 							) : (
 								<AppText color={isSelected ? inkHighlight : undefined} bold={isSelected}>
@@ -469,6 +472,8 @@ export interface ProviderOption {
 	/** False for a provider that takes no key (local engines). Absent means it does. */
 	needsKey?: boolean;
 	enabled: boolean;
+	/** Set by orderProviders (lib/provider-order.ts): can it run right now? */
+	availability?: "runnable" | "not-reachable" | "unavailable";
 }
 
 export interface ProviderSelectorProps {
@@ -484,20 +489,18 @@ export function ProviderSelector({
 	onSelect,
 	onCancel,
 }: ProviderSelectorProps) {
-	const options: SelectOption<string>[] = providers.map((p) => ({
-		label: p.displayName,
-		value: p.name,
-		icon: p.name === currentProvider ? "\u2713" : p.hasApiKey ? "\u{1F511}" : undefined,
-		description:
-			p.name === currentProvider
-				? "Currently active"
-				: p.hasApiKey
-					? "API key configured"
-					: p.needsKey === false
-						? "No key needed"
-						: "No API key (requires setup)",
-		disabled: !p.enabled && p.name !== "ollama",
-	}));
+	const options: SelectOption<string>[] = providers.map((p) => {
+		const active = p.name === currentProvider;
+		const availability = p.availability ?? "runnable";
+		return {
+			label: p.displayName,
+			value: p.name,
+			icon: active ? "\u2713" : p.hasApiKey ? "\u{1F511}" : undefined,
+			description: providerRowNote({ ...p, availability }, active),
+			disabled: !p.enabled && p.name !== "ollama" && availability === "unavailable",
+			dim: availability !== "runnable",
+		};
+	});
 
 	const currentIndex = providers.findIndex((p) => p.name === currentProvider);
 

@@ -73,20 +73,28 @@ export interface DrivenApp {
 	exited: () => boolean;
 }
 
-export async function bootApp(cols = 160, rows = 44): Promise<DrivenApp> {
+export async function bootApp(
+	cols = 160,
+	rows = 44,
+	/** Launch flags. The default pins ollama, as most harnesses want; pass `{}` for a plain launch. */
+	cli: { provider?: string; model?: string } = { provider: "ollama", model: "none" },
+): Promise<DrivenApp> {
 	const { render } = await import("ink");
 	const { App } = await import("../app.js");
 	const stdin = new FakeStdin();
 	const stdout = makeStdout(cols, rows);
 	let exited = false;
-	const app = render(<App initialCommand="" args={[]} cliProvider="ollama" cliModel="none" />, {
-		stdin: stdin as unknown as NodeJS.ReadStream,
-		stdout: stdout as unknown as NodeJS.WriteStream,
-		stderr: makeStdout(cols, rows) as unknown as NodeJS.WriteStream,
-		debug: false,
-		exitOnCtrlC: true,
-		patchConsole: false,
-	});
+	const app = render(
+		<App initialCommand="" args={[]} cliProvider={cli.provider} cliModel={cli.model} />,
+		{
+			stdin: stdin as unknown as NodeJS.ReadStream,
+			stdout: stdout as unknown as NodeJS.WriteStream,
+			stderr: makeStdout(cols, rows) as unknown as NodeJS.WriteStream,
+			debug: false,
+			exitOnCtrlC: true,
+			patchConsole: false,
+		},
+	);
 	app.waitUntilExit().then(() => {
 		exited = true;
 	});
