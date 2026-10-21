@@ -18,7 +18,12 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { emptyBunfig } from "../core/bun-flags";
+import { BackgroundTaskManager } from "../tools/background";
 import {
+	PROTECTED_DATA_DIRS,
+	PROTECTED_DATA_FILES,
+	RunCommandSandboxRequired,
 	buildBwrapArgs,
 	buildRunCommandProfile,
 	canApplySeatbelt,
@@ -26,11 +31,8 @@ import {
 	dotenvDeclaredKeys,
 	isTestMode,
 	onRunCommandUnsandboxed,
-	PROTECTED_DATA_DIRS,
-	PROTECTED_DATA_FILES,
 	protectedRunCommandPaths,
 	refreshSecurityEnvForTests,
-	RunCommandSandboxRequired,
 	runCommandSandboxRefusal,
 	runCommandSandboxStatus,
 	sandboxFooterReason,
@@ -38,8 +40,6 @@ import {
 	wrapRunCommand,
 	wrapRunCommandArgv,
 } from "./run-command-sandbox";
-import { emptyBunfig } from "../core/bun-flags";
-import { BackgroundTaskManager } from "../tools/background";
 
 // Paths below are built with path.join so they match on Windows too, where
 // path.normalize spells "/nonexistent-h/.8gent" as "\\nonexistent-h\\.8gent".
@@ -68,52 +68,63 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
 
 describe("protected set", () => {
 	test("covers startup code, secrets, audit and session records under ~/.8gent", () => {
-		withEnv({ EIGHT_FAKE_HOME: "/nonexistent-h", EIGHT_DATA_DIR: undefined, EIGHT_HOME: undefined }, () => {
-			const p = protectedRunCommandPaths();
-			for (const f of [
-				"hooks.yaml",
-				"hooks.json",
-				"settings.json",
-				"browser-control.token",
-				"audit.jsonl",
-				"policies.yaml",
-				"mcp.json",
-				".env",
-				"keys.env",
-				"allow-loopback.json",
-			])
-				expect(p.files).toContain(path.join(H, f));
-			for (const d of [
-				"extensions",
-				"themes",
-				"prompts",
-				"packages",
-				"browser-profiles",
-				"audit",
-				"sessions",
-				"bin",
-				"policy-checksum",
-			])
-				expect(p.dirs).toContain(path.join(H, d));
-			if (process.platform === "win32") {
-				// Windows: resolveHome prefers USERPROFILE over HOME (packages/core/home.ts),
-				// so the real profile's .8gent is a second root, and realpath adds the
-				// drive-letter spelling of each. POSIX keeps the exact one-root check.
-				expect(p.roots).toContain(H);
-				expect(p.roots).toContain(path.join(process.env.USERPROFILE || os.homedir(), ".8gent"));
-			} else {
-				expect(p.roots).toEqual([H]);
-			}
-		});
+		withEnv(
+			{ EIGHT_FAKE_HOME: "/nonexistent-h", EIGHT_DATA_DIR: undefined, EIGHT_HOME: undefined },
+			() => {
+				const p = protectedRunCommandPaths();
+				for (const f of [
+					"hooks.yaml",
+					"hooks.json",
+					"settings.json",
+					"browser-control.token",
+					"audit.jsonl",
+					"policies.yaml",
+					"mcp.json",
+					".env",
+					"keys.env",
+					"allow-loopback.json",
+				])
+					expect(p.files).toContain(path.join(H, f));
+				for (const d of [
+					"extensions",
+					"themes",
+					"prompts",
+					"packages",
+					"browser-profiles",
+					"audit",
+					"sessions",
+					"bin",
+					"secrets",
+					"policy-checksum",
+				])
+					expect(p.dirs).toContain(path.join(H, d));
+				if (process.platform === "win32") {
+					// Windows: resolveHome prefers USERPROFILE over HOME (packages/core/home.ts),
+					// so the real profile's .8gent is a second root, and realpath adds the
+					// drive-letter spelling of each. POSIX keeps the exact one-root check.
+					expect(p.roots).toContain(H);
+					expect(p.roots).toContain(path.join(process.env.USERPROFILE || os.homedir(), ".8gent"));
+				} else {
+					expect(p.roots).toEqual([H]);
+				}
+			},
+		);
 	});
 
 	test("EIGHT_HOME (resolveHome) adds its .8gent as a root", () => {
-		withEnv({ EIGHT_FAKE_HOME: "/nonexistent-h", EIGHT_HOME: "/nonexistent-e", EIGHT_DATA_DIR: undefined }, () => {
-			const p = protectedRunCommandPaths();
-			expect(p.roots).toContain(H);
-			expect(p.roots).toContain(E);
-			expect(p.files).toContain(path.join(E, "hooks.yaml"));
-		});
+		withEnv(
+			{
+				EIGHT_FAKE_HOME: "/nonexistent-h",
+				EIGHT_HOME: "/nonexistent-e",
+				EIGHT_DATA_DIR: undefined,
+			},
+			() => {
+				const p = protectedRunCommandPaths();
+				expect(p.roots).toContain(H);
+				expect(p.roots).toContain(E);
+				expect(p.files).toContain(path.join(E, "hooks.yaml"));
+			},
+		);
 	});
 
 	test("EIGHT_DATA_DIR adds the same set under the data dir", () => {
@@ -176,11 +187,19 @@ describe("security env snapshot", () => {
 				fs.writeFileSync(file, `Z=0\n${line}\n`);
 				const env: NodeJS.ProcessEnv = { ...process.env, Z: "0" };
 				delete env.EIGHT_SEATBELT;
-				const r = spawnSync("bun", [`--config=${emptyBunfig()}`, "-e", "process.stdout.write(process.env.EIGHT_SEATBELT ?? '')"], {
-					cwd: dir,
-					env,
-					encoding: "utf8",
-				});
+				const r = spawnSync(
+					"bun",
+					[
+						`--config=${emptyBunfig()}`,
+						"-e",
+						"process.stdout.write(process.env.EIGHT_SEATBELT ?? '')",
+					],
+					{
+						cwd: dir,
+						env,
+						encoding: "utf8",
+					},
+				);
 				const live = r.stdout;
 				expect(live.length).toBeGreaterThan(0);
 				expect(live).not.toBe("require");
@@ -200,11 +219,19 @@ describe("security env snapshot", () => {
 			fs.writeFileSync(file, "\uFEFFEIGHT_SEATBELT=0\n");
 			const env = { ...process.env };
 			delete env.EIGHT_SEATBELT;
-			const r = spawnSync("bun", [`--config=${emptyBunfig()}`, "-e", "process.stdout.write(process.env.EIGHT_SEATBELT ?? '')"], {
-				cwd: dir,
-				env,
-				encoding: "utf8",
-			});
+			const r = spawnSync(
+				"bun",
+				[
+					`--config=${emptyBunfig()}`,
+					"-e",
+					"process.stdout.write(process.env.EIGHT_SEATBELT ?? '')",
+				],
+				{
+					cwd: dir,
+					env,
+					encoding: "utf8",
+				},
+			);
 			// Bun itself loads it, so the key reaches the environment.
 			expect(r.stdout).toBe("0");
 			expect(dotenvDeclaredKeys([file]).has("EIGHT_SEATBELT")).toBe(true);
@@ -219,7 +246,10 @@ describe("security env snapshot", () => {
 	test("dotenv keys are parsed, with and without export", () => {
 		const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-env-")));
 		try {
-			fs.writeFileSync(path.join(dir, ".env"), "# c\nEIGHT_SEATBELT=0\n export NODE_ENV=\"test\"\nX = 1\n");
+			fs.writeFileSync(
+				path.join(dir, ".env"),
+				'# c\nEIGHT_SEATBELT=0\n export NODE_ENV="test"\nX = 1\n',
+			);
 			const keys = dotenvDeclaredKeys([path.join(dir, ".env"), path.join(dir, "missing")]);
 			expect([...keys].sort()).toEqual(["EIGHT_SEATBELT", "NODE_ENV", "X"]);
 		} finally {
@@ -231,13 +261,20 @@ describe("security env snapshot", () => {
 		expect(isTestMode({ NODE_ENV: "test" })).toBe(true);
 		expect(isTestMode({ BUN_ENV: "test" })).toBe(true);
 		expect(isTestMode({ NODE_ENV: "production" })).toBe(false);
-		const fromDotenv = snapshotSecurityEnv({ NODE_ENV: "test", EIGHT_FAKE_HOME: "/x" }, new Set(["NODE_ENV"]));
+		const fromDotenv = snapshotSecurityEnv(
+			{ NODE_ENV: "test", EIGHT_FAKE_HOME: "/x" },
+			new Set(["NODE_ENV"]),
+		);
 		expect(isTestMode(fromDotenv.values)).toBe(false);
 	});
 });
 
 describe("seatbelt profile", () => {
-	const p = { roots: ["/h/.8gent"], files: ["/h/.8gent/hooks.yaml"], dirs: ["/h/.8gent/extensions"] };
+	const p = {
+		roots: ["/h/.8gent"],
+		files: ["/h/.8gent/hooks.yaml"],
+		dirs: ["/h/.8gent/extensions"],
+	};
 
 	test("allow-default with write, link and root denies; reads untouched", () => {
 		const profile = buildRunCommandProfile(p);
@@ -263,9 +300,13 @@ describe("seatbelt profile", () => {
 	});
 
 	test.if(fs.existsSync("/usr/bin/sandbox-exec"))("compiles under sandbox-exec", () => {
-		const r = spawnSync("/usr/bin/sandbox-exec", ["-p", buildRunCommandProfile(), "/usr/bin/true"], {
-			encoding: "utf8",
-		});
+		const r = spawnSync(
+			"/usr/bin/sandbox-exec",
+			["-p", buildRunCommandProfile(), "/usr/bin/true"],
+			{
+				encoding: "utf8",
+			},
+		);
 		// 0: applied. 71 with sandbox_apply: parsed, but the host already sandboxes us.
 		const parsed = r.status === 0 || (r.status === 71 && r.stderr.includes("sandbox_apply"));
 		if (!parsed) console.error(r.stderr);
@@ -277,7 +318,11 @@ describe("wrapping", () => {
 	test("EIGHT_SEATBELT=0 leaves the command unwrapped", () => {
 		withEnv({ EIGHT_SEATBELT: "0" }, () => {
 			expect(wrapRunCommand("echo hi")).toBe("echo hi");
-			expect(runCommandSandboxStatus()).toEqual({ applied: false, reason: "EIGHT_SEATBELT=0", required: false });
+			expect(runCommandSandboxStatus()).toEqual({
+				applied: false,
+				reason: "EIGHT_SEATBELT=0",
+				required: false,
+			});
 		});
 	});
 
@@ -300,15 +345,29 @@ describe("wrapping", () => {
 	test("an unwrapped run is reported: listener and audit line", () => {
 		const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-audit-")));
 		try {
-			withEnv({ EIGHT_FAKE_HOME: home, EIGHT_SEATBELT: "0", EIGHT_DATA_DIR: undefined, EIGHT_HOME: undefined }, () => {
-				const seen: string[] = [];
-				const off = onRunCommandUnsandboxed((s) => seen.push(s.reason));
-				wrapRunCommand("echo audited");
-				off();
-				expect(seen).toEqual(["EIGHT_SEATBELT=0"]);
-				const line = fs.readFileSync(path.join(home, ".8gent", "audit", "run-command-sandbox.jsonl"), "utf8");
-				expect(JSON.parse(line.trim())).toMatchObject({ event: "run_command_unsandboxed", command: "echo audited" });
-			});
+			withEnv(
+				{
+					EIGHT_FAKE_HOME: home,
+					EIGHT_SEATBELT: "0",
+					EIGHT_DATA_DIR: undefined,
+					EIGHT_HOME: undefined,
+				},
+				() => {
+					const seen: string[] = [];
+					const off = onRunCommandUnsandboxed((s) => seen.push(s.reason));
+					wrapRunCommand("echo audited");
+					off();
+					expect(seen).toEqual(["EIGHT_SEATBELT=0"]);
+					const line = fs.readFileSync(
+						path.join(home, ".8gent", "audit", "run-command-sandbox.jsonl"),
+						"utf8",
+					);
+					expect(JSON.parse(line.trim())).toMatchObject({
+						event: "run_command_unsandboxed",
+						command: "echo audited",
+					});
+				},
+			);
 		} finally {
 			fs.rmSync(home, { recursive: true, force: true });
 		}
@@ -326,7 +385,9 @@ describe("wrapping", () => {
 				expect(s.required).toBe(true);
 				expect(runCommandSandboxRefusal()).toContain("EIGHT_SEATBELT=require");
 				expect(() => wrapRunCommand("echo hi")).toThrow(RunCommandSandboxRequired);
-				expect(() => new BackgroundTaskManager(home).startTask("echo hi")).toThrow(RunCommandSandboxRequired);
+				expect(() => new BackgroundTaskManager(home).startTask("echo hi")).toThrow(
+					RunCommandSandboxRequired,
+				);
 			});
 		} finally {
 			fs.rmSync(home, { recursive: true, force: true });
@@ -336,18 +397,26 @@ describe("wrapping", () => {
 	test("argv form: no shell, wrapped exactly when a boundary applies (#3998 git/gh tools)", () => {
 		const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-argv-")));
 		try {
-			withEnv({ EIGHT_FAKE_HOME: home, EIGHT_SEATBELT: undefined, EIGHT_DATA_DIR: undefined, EIGHT_HOME: undefined }, () => {
-				const s = runCommandSandboxStatus();
-				const argv = wrapRunCommandArgv("git", ["status", "x; y"]);
-				expect(argv.slice(-3)).toEqual(["git", "status", "x; y"]);
-				expect(argv).not.toContain("/bin/sh");
-				expect(argv).not.toContain("-c");
-				if (!s.applied) expect(argv).toEqual(["git", "status", "x; y"]);
-				else if (s.mechanism === "seatbelt") {
-					expect(argv.slice(0, 2)).toEqual(["/usr/bin/sandbox-exec", "-p"]);
-					expect(argv[2]).toBe(buildRunCommandProfile());
-				} else expect(path.basename(argv[0] as string)).toBe("bwrap");
-			});
+			withEnv(
+				{
+					EIGHT_FAKE_HOME: home,
+					EIGHT_SEATBELT: undefined,
+					EIGHT_DATA_DIR: undefined,
+					EIGHT_HOME: undefined,
+				},
+				() => {
+					const s = runCommandSandboxStatus();
+					const argv = wrapRunCommandArgv("git", ["status", "x; y"]);
+					expect(argv.slice(-3)).toEqual(["git", "status", "x; y"]);
+					expect(argv).not.toContain("/bin/sh");
+					expect(argv).not.toContain("-c");
+					if (!s.applied) expect(argv).toEqual(["git", "status", "x; y"]);
+					else if (s.mechanism === "seatbelt") {
+						expect(argv.slice(0, 2)).toEqual(["/usr/bin/sandbox-exec", "-p"]);
+						expect(argv[2]).toBe(buildRunCommandProfile());
+					} else expect(path.basename(argv[0] as string)).toBe("bwrap");
+				},
+			);
 		} finally {
 			fs.rmSync(home, { recursive: true, force: true });
 		}
@@ -356,15 +425,29 @@ describe("wrapping", () => {
 	test("argv form: an unwrapped run is reported like the shell form", () => {
 		const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-argv-audit-")));
 		try {
-			withEnv({ EIGHT_FAKE_HOME: home, EIGHT_SEATBELT: "0", EIGHT_DATA_DIR: undefined, EIGHT_HOME: undefined }, () => {
-				const seen: string[] = [];
-				const off = onRunCommandUnsandboxed((s) => seen.push(s.reason));
-				expect(wrapRunCommandArgv("git", ["status"])).toEqual(["git", "status"]);
-				off();
-				expect(seen).toEqual(["EIGHT_SEATBELT=0"]);
-				const line = fs.readFileSync(path.join(home, ".8gent", "audit", "run-command-sandbox.jsonl"), "utf8");
-				expect(JSON.parse(line.trim())).toMatchObject({ event: "run_command_unsandboxed", command: "git status" });
-			});
+			withEnv(
+				{
+					EIGHT_FAKE_HOME: home,
+					EIGHT_SEATBELT: "0",
+					EIGHT_DATA_DIR: undefined,
+					EIGHT_HOME: undefined,
+				},
+				() => {
+					const seen: string[] = [];
+					const off = onRunCommandUnsandboxed((s) => seen.push(s.reason));
+					expect(wrapRunCommandArgv("git", ["status"])).toEqual(["git", "status"]);
+					off();
+					expect(seen).toEqual(["EIGHT_SEATBELT=0"]);
+					const line = fs.readFileSync(
+						path.join(home, ".8gent", "audit", "run-command-sandbox.jsonl"),
+						"utf8",
+					);
+					expect(JSON.parse(line.trim())).toMatchObject({
+						event: "run_command_unsandboxed",
+						command: "git status",
+					});
+				},
+			);
 		} finally {
 			fs.rmSync(home, { recursive: true, force: true });
 		}
@@ -386,19 +469,41 @@ describe("wrapping", () => {
 	});
 
 	test("the footer reason is a short code", () => {
-		expect(sandboxFooterReason("host already sandboxes this process (sandbox-exec cannot nest)")).toBe("nested");
+		expect(
+			sandboxFooterReason("host already sandboxes this process (sandbox-exec cannot nest)"),
+		).toBe("nested");
 		expect(sandboxFooterReason("EIGHT_SEATBELT=0")).toBe("turned off");
 		expect(sandboxFooterReason("bwrap not installed")).toBe("no bwrap");
 		expect(sandboxFooterReason("no OS sandbox on win32")).toBe("unsupported OS");
 		expect(sandboxFooterReason("something new and rather long").length).toBeLessThanOrEqual(16);
 	});
 
-		test("bwrap args bind only protected paths that exist, read-only", () => {
+	test("secrets/ is read-denied: seatbelt profile text and bwrap tmpfs (#4594)", () => {
+		const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-sec-")));
+		const sec = path.join(home, ".8gent", "secrets");
+		fs.mkdirSync(sec, { recursive: true });
+		try {
+			const paths = { roots: [], files: [], dirs: [sec] };
+			expect(buildRunCommandProfile(paths)).toContain(
+				`(deny file-read* (literal "${sec}") (subpath "${sec}")`,
+			);
+			const args = buildBwrapArgs(paths);
+			expect(args).toEqual(["--dev-bind", "/", "/", "--ro-bind", sec, sec, "--tmpfs", sec]);
+		} finally {
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("bwrap args bind only protected paths that exist, read-only", () => {
 		const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-bw-")));
 		fs.mkdirSync(path.join(home, ".8gent", "extensions"), { recursive: true });
 		try {
 			const ext = path.join(home, ".8gent", "extensions");
-			const args = buildBwrapArgs({ roots: [], files: [path.join(home, ".8gent", "hooks.yaml")], dirs: [ext] });
+			const args = buildBwrapArgs({
+				roots: [],
+				files: [path.join(home, ".8gent", "hooks.yaml")],
+				dirs: [ext],
+			});
 			expect(args).toEqual(["--dev-bind", "/", "/", "--ro-bind", ext, ext]);
 		} finally {
 			fs.rmSync(home, { recursive: true, force: true });
@@ -410,173 +515,182 @@ describe("wrapping", () => {
 // Live enforcement (macOS, outside any host sandbox)
 // ============================================
 
-describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())("run_command seatbelt, live", () => {
-	let home = "";
-	let dot = "";
-	let proj = "";
-	const saved = {
-		EIGHT_FAKE_HOME: process.env.EIGHT_FAKE_HOME,
-		EIGHT_DATA_DIR: process.env.EIGHT_DATA_DIR,
-		EIGHT_HOME: process.env.EIGHT_HOME,
-	};
-
-	/** Hash of every protected file and tree, plus the listing of the root. */
-	function snapshot(): string {
-		const h = crypto.createHash("sha256");
-		const walk = (p: string) => {
-			let st: fs.Stats;
-			try {
-				st = fs.lstatSync(p);
-			} catch {
-				h.update(`${p}:absent\n`);
-				return;
-			}
-			// mode, mtime, BSD flags (chflags) and xattrs, not just content.
-			const flags = spawnSync("stat", ["-f", "%f", p], { encoding: "utf8" }).stdout;
-			const xattrs = spawnSync("xattr", ["-l", "-s", p], { encoding: "utf8" }).stdout;
-			h.update(`${p}:${st.mode}:${st.mtimeMs}:${st.ino}:${st.nlink}:${flags}:${xattrs}:${st.isSymbolicLink() ? fs.readlinkSync(p) : ""}\n`);
-			if (st.isDirectory()) for (const e of fs.readdirSync(p).sort()) walk(path.join(p, e));
-			else if (st.isFile()) h.update(fs.readFileSync(p));
+describe.if(process.env.EIGHT_SEATBELT !== "0" && canApplySeatbelt())(
+	"run_command seatbelt, live",
+	() => {
+		let home = "";
+		let dot = "";
+		let proj = "";
+		const saved = {
+			EIGHT_FAKE_HOME: process.env.EIGHT_FAKE_HOME,
+			EIGHT_DATA_DIR: process.env.EIGHT_DATA_DIR,
+			EIGHT_HOME: process.env.EIGHT_HOME,
 		};
-		h.update(fs.readdirSync(dot).sort().join(","));
-		for (const f of PROTECTED_DATA_FILES) walk(path.join(dot, f));
-		for (const d of PROTECTED_DATA_DIRS) walk(path.join(dot, d));
-		return h.digest("hex");
-	}
 
-	beforeAll(() => {
-		home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-live-home-")));
-		dot = path.join(home, ".8gent");
-		proj = path.join(home, "proj");
-		process.env.EIGHT_FAKE_HOME = home;
-		Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
-		Reflect.deleteProperty(process.env, "EIGHT_HOME");
-		refreshSecurityEnvForTests();
-		fs.mkdirSync(proj, { recursive: true });
-		for (const d of PROTECTED_DATA_DIRS) fs.mkdirSync(path.join(dot, d), { recursive: true });
-		for (const f of PROTECTED_DATA_FILES) fs.writeFileSync(path.join(dot, f), `original ${f}\n`);
-		fs.writeFileSync(path.join(dot, "extensions", "real.ts"), "export {};\n");
-		// The extensions dir is a git repo with a dirty file, so `git checkout -- .` would write.
-		spawnSync("git", ["init", "-q"], { cwd: path.join(dot, "extensions") });
-		spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], { cwd: path.join(dot, "extensions") });
-		spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x"], {
-			cwd: path.join(dot, "extensions"),
-		});
-		fs.writeFileSync(path.join(dot, "extensions", "real.ts"), "export {}; // local\n");
-		// Workspace fixtures the PoC commands use.
-		fs.writeFileSync(path.join(proj, "x.ts"), "evil();\n");
-		fs.mkdirSync(path.join(proj, "payload", ".8gent", "extensions"), { recursive: true });
-		fs.writeFileSync(path.join(proj, "payload", ".8gent", "extensions", "evil.ts"), "evil();\n");
-		fs.writeFileSync(path.join(proj, "payload", ".8gent", "hooks.yaml"), "evil: true\n");
-		spawnSync("tar", ["-czf", "payload.tgz", "-C", "payload", ".8gent"], { cwd: proj });
-		fs.symlinkSync(dot, path.join(proj, "link8"));
-		fs.symlinkSync(path.join(dot, "extensions"), path.join(proj, "linkext"));
-		fs.mkdirSync(path.join(proj, "evil8gent", "extensions"), { recursive: true });
-		fs.writeFileSync(path.join(proj, "evil8gent", "hooks.yaml"), "evil: true\n");
-		fs.writeFileSync(path.join(proj, "step1.sh"), "echo x > ~/.8gent/hooks.yaml\n");
-		fs.writeFileSync(path.join(dot, "bin", "tool"), "#!/bin/sh\necho real\n");
-	});
-
-	afterAll(() => {
-		for (const [k, v] of Object.entries(saved)) {
-			if (v === undefined) Reflect.deleteProperty(process.env, k);
-			else process.env[k] = v;
+		/** Hash of every protected file and tree, plus the listing of the root. */
+		function snapshot(): string {
+			const h = crypto.createHash("sha256");
+			const walk = (p: string) => {
+				let st: fs.Stats;
+				try {
+					st = fs.lstatSync(p);
+				} catch {
+					h.update(`${p}:absent\n`);
+					return;
+				}
+				// mode, mtime, BSD flags (chflags) and xattrs, not just content.
+				const flags = spawnSync("stat", ["-f", "%f", p], { encoding: "utf8" }).stdout;
+				const xattrs = spawnSync("xattr", ["-l", "-s", p], { encoding: "utf8" }).stdout;
+				h.update(
+					`${p}:${st.mode}:${st.mtimeMs}:${st.ino}:${st.nlink}:${flags}:${xattrs}:${st.isSymbolicLink() ? fs.readlinkSync(p) : ""}\n`,
+				);
+				if (st.isDirectory()) for (const e of fs.readdirSync(p).sort()) walk(path.join(p, e));
+				else if (st.isFile()) h.update(fs.readFileSync(p));
+			};
+			h.update(fs.readdirSync(dot).sort().join(","));
+			for (const f of PROTECTED_DATA_FILES) walk(path.join(dot, f));
+			for (const d of PROTECTED_DATA_DIRS) walk(path.join(dot, d));
+			return h.digest("hex");
 		}
-		refreshSecurityEnvForTests();
-		if (home) {
-			// A chflags uchg that got through would make the cleanup fail too.
-			spawnSync("chflags", ["-R", "nouchg", home]);
-			fs.rmSync(home, { recursive: true, force: true });
+
+		beforeAll(() => {
+			home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rcs-live-home-")));
+			dot = path.join(home, ".8gent");
+			proj = path.join(home, "proj");
+			process.env.EIGHT_FAKE_HOME = home;
+			Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
+			Reflect.deleteProperty(process.env, "EIGHT_HOME");
+			refreshSecurityEnvForTests();
+			fs.mkdirSync(proj, { recursive: true });
+			for (const d of PROTECTED_DATA_DIRS) fs.mkdirSync(path.join(dot, d), { recursive: true });
+			for (const f of PROTECTED_DATA_FILES) fs.writeFileSync(path.join(dot, f), `original ${f}\n`);
+			fs.writeFileSync(path.join(dot, "extensions", "real.ts"), "export {};\n");
+			// The extensions dir is a git repo with a dirty file, so `git checkout -- .` would write.
+			spawnSync("git", ["init", "-q"], { cwd: path.join(dot, "extensions") });
+			spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], {
+				cwd: path.join(dot, "extensions"),
+			});
+			spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x"], {
+				cwd: path.join(dot, "extensions"),
+			});
+			fs.writeFileSync(path.join(dot, "extensions", "real.ts"), "export {}; // local\n");
+			// Workspace fixtures the PoC commands use.
+			fs.writeFileSync(path.join(proj, "x.ts"), "evil();\n");
+			fs.mkdirSync(path.join(proj, "payload", ".8gent", "extensions"), { recursive: true });
+			fs.writeFileSync(path.join(proj, "payload", ".8gent", "extensions", "evil.ts"), "evil();\n");
+			fs.writeFileSync(path.join(proj, "payload", ".8gent", "hooks.yaml"), "evil: true\n");
+			spawnSync("tar", ["-czf", "payload.tgz", "-C", "payload", ".8gent"], { cwd: proj });
+			fs.symlinkSync(dot, path.join(proj, "link8"));
+			fs.symlinkSync(path.join(dot, "extensions"), path.join(proj, "linkext"));
+			fs.mkdirSync(path.join(proj, "evil8gent", "extensions"), { recursive: true });
+			fs.writeFileSync(path.join(proj, "evil8gent", "hooks.yaml"), "evil: true\n");
+			fs.writeFileSync(path.join(proj, "step1.sh"), "echo x > ~/.8gent/hooks.yaml\n");
+			fs.writeFileSync(path.join(dot, "bin", "tool"), "#!/bin/sh\necho real\n");
+		});
+
+		afterAll(() => {
+			for (const [k, v] of Object.entries(saved)) {
+				if (v === undefined) Reflect.deleteProperty(process.env, k);
+				else process.env[k] = v;
+			}
+			refreshSecurityEnvForTests();
+			if (home) {
+				// A chflags uchg that got through would make the cleanup fail too.
+				spawnSync("chflags", ["-R", "nouchg", home]);
+				fs.rmSync(home, { recursive: true, force: true });
+			}
+		});
+
+		const run = (cmd: string) =>
+			spawnSync("/bin/sh", ["-c", wrapRunCommand(cmd)], {
+				cwd: proj,
+				encoding: "utf8",
+				input: "x\n",
+				env: { ...process.env, HOME: home, EIGHT_FAKE_HOME: home },
+				timeout: 20_000,
+			});
+
+		// The 12 bypass commands from the 8SO F2 PoC (poc-guard.ts), verbatim, then
+		// the suspected ones from the same file that run without a network.
+		const POC_12 = [
+			"cd ~/.8gent && cat > hooks.yaml",
+			"cat <<EOF > ~/.8gent/hooks.yaml\nx\nEOF",
+			"install -m 755 x.ts ~/.8gent/extensions/",
+			"rsync -a x.ts ~/.8gent/extensions/",
+			"git -C ~/.8gent/extensions checkout -- .",
+			"tar -xzf payload.tgz -C ~/.8gent/extensions",
+			`python3 -c "open('$HOME/.8gent/extensions/x.ts','w').write('x')"`,
+			`node -e "require('fs').writeFileSync(require('os').homedir()+'/.8gent/extensions/x.ts','x')"`,
+			"cat > link8/extensions/x.ts",
+			"echo x > linkext/x.ts",
+			"ln -s /tmp/evil ~/.8gent/extensions/x.ts",
+			"cd ~ && cd .8gent && cd extensions && touch x.ts",
+		];
+		const MORE = [
+			`python3 -c "import os;open(os.path.join(os.path.expanduser('~'),'.8gent','extensions','x.ts'),'w').write('x')"`,
+			"tar -xzf payload.tgz -C ~",
+			"cp -R payload/. ~/",
+			"mv ~/.8gent ~/.8gent.bak && mv ./evil8gent ~/.8gent",
+			"printf x > $(echo ~)/.8gent/hooks.yaml",
+			"D=.8; cat > ~/${D}gent/hooks.yaml",
+			"echo ZWNobyB4ID4gfi8uOGdlbnQvaG9va3MueWFtbA== | base64 -d | sh",
+			"sh ./step1.sh",
+			"echo x > ~/.8GENT/HOOKS.YAML",
+			"mkdir -p ~/.8gent/Prompts/new && echo x > ~/.8gent/Prompts/new/a.md",
+			"ln ~/.8gent/settings.json ./hard && echo x > ./hard",
+			"chmod 777 ~/.8gent/hooks.yaml",
+			"rm -rf ~/.8gent/sessions",
+			"echo x >> ~/.8gent/audit.jsonl",
+			"echo x > ~/.8gent/browser-profiles/work.token",
+			"mv ~/.8gent/extensions ~/.8gent/ext-old",
+			"echo x > ~/.8gent/bin/tool",
+			"echo x > ~/.8gent/bin/new-tool",
+			"echo EIGHT_SEATBELT=0 >> ~/.8gent/.env",
+			"echo x > ~/.8gent/keys.env",
+			'echo \'{"allow":["127.0.0.1:5173"]}\' > ~/.8gent/allow-loopback.json',
+			"echo '{}' > ~/.8gent/mcp.json",
+			"echo x > ~/.8gent/policies.yaml",
+			"echo x > ~/.8gent/policy-checksum",
+			`echo '{"retro":"${"0".repeat(64)}"}' > ~/.8gent/skills-trust.json`,
+		];
+		// Karen's (8SO) live probe on #4013: metadata, flags, replace-by-rename, forced link, clone, root move.
+		const KAREN = [
+			"xattr -w com.evil x ~/.8gent/hooks.yaml",
+			"touch -t 200001010000 ~/.8gent/hooks.yaml",
+			"chflags uchg ~/.8gent/hooks.yaml",
+			"echo evil > ./h && mv -f ./h ~/.8gent/hooks.yaml",
+			"ln -f ./x.ts ~/.8gent/hooks.yaml",
+			"cp -c ./x.ts ~/.8gent/hooks.yaml",
+			"cp -c ./x.ts ~/.8gent/extensions/clone.ts",
+			"mv ~/.8gent ./moved-8gent",
+		];
+
+		for (const cmd of [...POC_12, ...MORE, ...KAREN]) {
+			test(`denied: ${JSON.stringify(cmd).slice(0, 90)}`, () => {
+				const before = snapshot();
+				run(cmd);
+				expect(snapshot()).toBe(before);
+				expect(fs.existsSync(path.join(dot, "extensions", "x.ts"))).toBe(false);
+			});
 		}
-	});
 
-	const run = (cmd: string) =>
-		spawnSync("/bin/sh", ["-c", wrapRunCommand(cmd)], {
-			cwd: proj,
-			encoding: "utf8",
-			input: "x\n",
-			env: { ...process.env, HOME: home, EIGHT_FAKE_HOME: home },
-			timeout: 20_000,
+		test("allowed: workspace writes, reads of protected files, other ~/.8gent files", () => {
+			const r = run(
+				"echo ok > ./made.txt && cat ~/.8gent/hooks.yaml && echo ok > ~/.8gent/other.txt",
+			);
+			expect(r.status).toBe(0);
+			expect(r.stdout).toContain("original hooks.yaml");
+			expect(fs.readFileSync(path.join(proj, "made.txt"), "utf8")).toBe("ok\n");
+			expect(fs.readFileSync(path.join(dot, "other.txt"), "utf8")).toBe("ok\n");
 		});
 
-	// The 12 bypass commands from the 8SO F2 PoC (poc-guard.ts), verbatim, then
-	// the suspected ones from the same file that run without a network.
-	const POC_12 = [
-		"cd ~/.8gent && cat > hooks.yaml",
-		"cat <<EOF > ~/.8gent/hooks.yaml\nx\nEOF",
-		"install -m 755 x.ts ~/.8gent/extensions/",
-		"rsync -a x.ts ~/.8gent/extensions/",
-		"git -C ~/.8gent/extensions checkout -- .",
-		"tar -xzf payload.tgz -C ~/.8gent/extensions",
-		`python3 -c "open('$HOME/.8gent/extensions/x.ts','w').write('x')"`,
-		`node -e "require('fs').writeFileSync(require('os').homedir()+'/.8gent/extensions/x.ts','x')"`,
-		"cat > link8/extensions/x.ts",
-		"echo x > linkext/x.ts",
-		"ln -s /tmp/evil ~/.8gent/extensions/x.ts",
-		"cd ~ && cd .8gent && cd extensions && touch x.ts",
-	];
-	const MORE = [
-		`python3 -c "import os;open(os.path.join(os.path.expanduser('~'),'.8gent','extensions','x.ts'),'w').write('x')"`,
-		"tar -xzf payload.tgz -C ~",
-		"cp -R payload/. ~/",
-		"mv ~/.8gent ~/.8gent.bak && mv ./evil8gent ~/.8gent",
-		"printf x > $(echo ~)/.8gent/hooks.yaml",
-		"D=.8; cat > ~/${D}gent/hooks.yaml",
-		"echo ZWNobyB4ID4gfi8uOGdlbnQvaG9va3MueWFtbA== | base64 -d | sh",
-		"sh ./step1.sh",
-		"echo x > ~/.8GENT/HOOKS.YAML",
-		"mkdir -p ~/.8gent/Prompts/new && echo x > ~/.8gent/Prompts/new/a.md",
-		"ln ~/.8gent/settings.json ./hard && echo x > ./hard",
-		"chmod 777 ~/.8gent/hooks.yaml",
-		"rm -rf ~/.8gent/sessions",
-		"echo x >> ~/.8gent/audit.jsonl",
-		"echo x > ~/.8gent/browser-profiles/work.token",
-		"mv ~/.8gent/extensions ~/.8gent/ext-old",
-		"echo x > ~/.8gent/bin/tool",
-		"echo x > ~/.8gent/bin/new-tool",
-		"echo EIGHT_SEATBELT=0 >> ~/.8gent/.env",
-		"echo x > ~/.8gent/keys.env",
-		"echo '{\"allow\":[\"127.0.0.1:5173\"]}' > ~/.8gent/allow-loopback.json",
-		"echo '{}' > ~/.8gent/mcp.json",
-		"echo x > ~/.8gent/policies.yaml",
-		"echo x > ~/.8gent/policy-checksum",
-		`echo '{"retro":"${"0".repeat(64)}"}' > ~/.8gent/skills-trust.json`,
-	];
-	// Karen's (8SO) live probe on #4013: metadata, flags, replace-by-rename, forced link, clone, root move.
-	const KAREN = [
-		"xattr -w com.evil x ~/.8gent/hooks.yaml",
-		"touch -t 200001010000 ~/.8gent/hooks.yaml",
-		"chflags uchg ~/.8gent/hooks.yaml",
-		"echo evil > ./h && mv -f ./h ~/.8gent/hooks.yaml",
-		"ln -f ./x.ts ~/.8gent/hooks.yaml",
-		"cp -c ./x.ts ~/.8gent/hooks.yaml",
-		"cp -c ./x.ts ~/.8gent/extensions/clone.ts",
-		"mv ~/.8gent ./moved-8gent",
-	];
-
-	for (const cmd of [...POC_12, ...MORE, ...KAREN]) {
-		test(`denied: ${JSON.stringify(cmd).slice(0, 90)}`, () => {
-			const before = snapshot();
-			run(cmd);
-			expect(snapshot()).toBe(before);
-			expect(fs.existsSync(path.join(dot, "extensions", "x.ts"))).toBe(false);
+		test("~/.8gent/bin is NOT writable, but runs", () => {
+			const r = run("echo ok > ~/.8gent/bin/tool; sh ~/.8gent/bin/tool");
+			expect(r.stdout).toContain("real");
+			expect(fs.readFileSync(path.join(dot, "bin", "tool"), "utf8")).toBe("#!/bin/sh\necho real\n");
 		});
-	}
-
-	test("allowed: workspace writes, reads of protected files, other ~/.8gent files", () => {
-		const r = run("echo ok > ./made.txt && cat ~/.8gent/hooks.yaml && echo ok > ~/.8gent/other.txt");
-		expect(r.status).toBe(0);
-		expect(r.stdout).toContain("original hooks.yaml");
-		expect(fs.readFileSync(path.join(proj, "made.txt"), "utf8")).toBe("ok\n");
-		expect(fs.readFileSync(path.join(dot, "other.txt"), "utf8")).toBe("ok\n");
-	});
-
-	test("~/.8gent/bin is NOT writable, but runs", () => {
-		const r = run("echo ok > ~/.8gent/bin/tool; sh ~/.8gent/bin/tool");
-		expect(r.stdout).toContain("real");
-		expect(fs.readFileSync(path.join(dot, "bin", "tool"), "utf8")).toBe("#!/bin/sh\necho real\n");
-	});
-});
+	},
+);
 
 test("update-resume.json (the /update relaunch record) is a protected data file", () => {
 	expect(PROTECTED_DATA_FILES).toContain("update-resume.json");
@@ -584,10 +698,13 @@ test("update-resume.json (the /update relaunch record) is a protected data file"
 
 test("skills-trust.json (#4125 project skill pins) is protected and denied by the profile", () => {
 	expect(PROTECTED_DATA_FILES).toContain("skills-trust.json");
-	withEnv({ EIGHT_FAKE_HOME: "/nonexistent-h", EIGHT_DATA_DIR: undefined, EIGHT_HOME: undefined }, () => {
-		const p = protectedRunCommandPaths();
-		const file = path.join(H, "skills-trust.json");
-		expect(p.files).toContain(file);
-		expect(buildRunCommandProfile(p)).toContain(file);
-	});
+	withEnv(
+		{ EIGHT_FAKE_HOME: "/nonexistent-h", EIGHT_DATA_DIR: undefined, EIGHT_HOME: undefined },
+		() => {
+			const p = protectedRunCommandPaths();
+			const file = path.join(H, "skills-trust.json");
+			expect(p.files).toContain(file);
+			expect(buildRunCommandProfile(p)).toContain(file);
+		},
+	);
 });

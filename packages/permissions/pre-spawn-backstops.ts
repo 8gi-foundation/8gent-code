@@ -38,6 +38,12 @@ function backstopRefusal(command: string, cwd: string): string | null {
 		/\.8gent["']?\s*[/\\]["']?settings/i.test(command)
 	)
 		return `[PERMISSION DENIED] Command touches ~/.8gent/settings.json, which agent tools may not use: ${command}`;
+	// #4594: the default Telegram bot key file. Same minimum as settings: the sandbox is the boundary.
+	if (
+		/\.8gent\S*\s*[/\\]+\s*secrets\b/i.test(command) ||
+		/\.8gent["']?\s*[/\\]["']?secrets\b/i.test(command)
+	)
+		return `[PERMISSION DENIED] Command touches ~/.8gent/secrets, which agent tools may not use: ${command}`;
 	// #3735: agent audit files; same check as the policy gate.
 	if (commandTouchesAuditFiles(command))
 		return `[PERMISSION DENIED] Command touches agent audit files, which agent tools may not use: ${command}`;

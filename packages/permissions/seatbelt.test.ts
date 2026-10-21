@@ -90,8 +90,12 @@ describe("buildSeatbeltProfile", () => {
 			readPaths: ["/one/read"],
 			writePaths: ["/two/write"],
 		});
-		expect(profile).toContain(`(allow file-read* (subpath "${sbpl(path.normalize("/one/read"))}"))`);
-		expect(profile).toContain(`(allow file-read* file-write* (subpath "${sbpl(path.normalize("/two/write"))}"))`);
+		expect(profile).toContain(
+			`(allow file-read* (subpath "${sbpl(path.normalize("/one/read"))}"))`,
+		);
+		expect(profile).toContain(
+			`(allow file-read* file-write* (subpath "${sbpl(path.normalize("/two/write"))}"))`,
+		);
 	});
 
 	test("escapes quotes in paths so a crafted dir name cannot break the profile", () => {
@@ -114,6 +118,7 @@ describe("buildSeatbeltProfile", () => {
 			expect(paths).toContain(path.join(FAKE_HOME, ".ssh"));
 			expect(paths).toContain(path.join(FAKE_HOME, ".aws"));
 			expect(paths).toContain(path.join(FAKE_HOME, ".8gent", "keys"));
+			expect(paths).toContain(path.join(FAKE_HOME, ".8gent", "secrets"));
 			// 8gent Browser control tokens and named profiles (#3622, 8SO HIGH-2).
 			expect(paths).toContain(path.join(FAKE_HOME, ".8gent", "browser-control.token"));
 			expect(paths).toContain(path.join(FAKE_HOME, ".8gent", "browser-profiles"));

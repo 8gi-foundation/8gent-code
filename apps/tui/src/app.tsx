@@ -3714,26 +3714,13 @@ export function App({
 							}`,
 						);
 					} else if (sub === "setup") {
-						addSystemMessage(
-							"Telegram Bot Setup:\n\n" +
-								"1. Open Telegram and message @BotFather\n" +
-								"2. Send /newbot and follow the prompts\n" +
-								"3. Copy the bot token (looks like 123456:ABC-DEF...)\n" +
-								"4. Add it to your environment:\n\n" +
-								"   echo 'TELEGRAM_BOT_TOKEN=your_token_here' >> ~/.8gent/.env\n\n" +
-								"5. Optionally restrict to your chat:\n" +
-								"   - Message your bot, then check:\n" +
-								"     curl https://api.telegram.org/bot<TOKEN>/getUpdates\n" +
-								"   - Copy your chat_id and add:\n" +
-								"     echo 'TELEGRAM_CHAT_ID=your_id' >> ~/.8gent/.env\n\n" +
-								"6. Restart 8gent to activate the bot.\n\n" +
-								"Your bot becomes a mobile interface to 8gent.",
-						);
+						const { runTelegramSetup } = await import("./lib/telegram-setup.js");
+						addSystemMessage(await runTelegramSetup(args.slice(1)));
 					} else {
 						addSystemMessage(
 							"Telegram commands:\n" +
 								"  /telegram status  - Check connection\n" +
-								"  /telegram setup   - Setup instructions",
+								"  /telegram setup   - Connect your own bot (key stays in a file)",
 						);
 					}
 					break;

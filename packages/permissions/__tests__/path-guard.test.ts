@@ -320,3 +320,24 @@ describe("8gent Browser control tokens and profiles (#3622, 8SO HIGH-2)", () => 
 		);
 	});
 });
+
+describe("default Telegram bot key file (#4594, 8SO F1)", () => {
+	const home = "/Users/someone";
+	test("~/.8gent/secrets is refused for read and write before any settings exist", () => {
+		for (const raw of [
+			"~/.8gent/secrets/telegram-bot.env",
+			"/Users/someone/.8gent/secrets/telegram-bot.env",
+			".8gent/secrets",
+			"./x/../.8gent/secrets/other.env",
+		]) {
+			for (const access of ["read", "write"] as const) {
+				expect(validatePath(raw, home, { platform: "linux", home }, access).ok).toBe(false);
+			}
+		}
+	});
+	test("a neighbour is not caught", () => {
+		expect(validatePath(".8gent/secrets-notes.md", home, { platform: "linux", home }).ok).toBe(
+			true,
+		);
+	});
+});

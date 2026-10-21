@@ -45,6 +45,8 @@ const PROTECTED_DIRS = [
 	".8gent/audit",
 	// state-hmac.key signs /goal state, approval grants and the Table ledger: no read, no write (#4132, 8SO).
 	".8gent/keys",
+	// The default Telegram bot key file (/telegram setup, #4594): no read, no write, from the moment it is created.
+	".8gent/secrets",
 ];
 
 /**
