@@ -134,5 +134,31 @@ describe("CommandInput maskInput", () => {
 		await press("\r");
 		expect(submitted).toEqual(["/not-a-command-0123456789"]);
 		expect(frame()).not.toContain("Unknown command");
+		// No slash menu filters on the hidden text, so none of it is drawn.
+		expect(frame()).not.toContain("not-a-command");
+	});
+
+	test("a slash that names a real command is still submitted as the answer", async () => {
+		const sent: string[] = [];
+		const { submitted, press } = await mount({
+			maskInput: true,
+			placeholder: "Key (hidden)",
+			onSlashCommand: (name: string) => sent.push(name),
+		});
+		await press("/help");
+		await press("\r");
+		expect(sent).toEqual([]);
+		expect(submitted).toEqual(["/help"]);
+	});
+
+	test("an @ in the key opens no file list and draws nothing", async () => {
+		const { submitted, press, frame } = await mount({
+			maskInput: true,
+			placeholder: "Key (hidden)",
+		});
+		await press("sk-abc@pack");
+		expect(frame()).not.toContain("pack");
+		await press("\r");
+		expect(submitted).toEqual(["sk-abc@pack"]);
 	});
 });

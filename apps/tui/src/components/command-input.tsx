@@ -231,7 +231,8 @@ export function CommandInput({
 	// of the input. Each time a mention opens, the list reloads in the
 	// background from the project folder (the old list shows meanwhile), so
 	// new files appear and typing never waits on git.
-	const mention = useMemo(() => mentionAtEnd(value), [value]);
+	// A masked value (a key) never opens the file list: its text stays unread.
+	const mention = useMemo(() => (maskInput ? null : mentionAtEnd(value)), [value, maskInput]);
 	const mentionActive = mention !== null;
 	const [projectFiles, setProjectFiles] = useState<{ cwd: string; files: string[] } | null>(null);
 	const [mentionIndex, setMentionIndex] = useState(0);
@@ -273,8 +274,8 @@ export function CommandInput({
 	// Slash palette: show while typing the command token (no space yet) so long names like /billiondollarboardroom work
 	useEffect(() => {
 		const t = value.trimStart();
-		setShowSlashHelp(t.startsWith("/") && !t.slice(1).includes(" "));
-	}, [value]);
+		setShowSlashHelp(!maskInput && t.startsWith("/") && !t.slice(1).includes(" "));
+	}, [value, maskInput]);
 
 	// The menu's rows, how many fit this terminal, and the picked one.
 	// Up/Down scroll through every row; Tab puts the picked command in.
@@ -374,8 +375,8 @@ export function CommandInput({
 			setHistoryIndex(-1);
 			draftRef.current = "";
 
-			// Check for slash command
-			if (trimmed.startsWith("/")) {
+			// Check for slash command. A masked value (a key) is never one.
+			if (!maskInput && trimmed.startsWith("/")) {
 				const registry = {
 					entries: slashRegistryEntries,
 					byToken: slashByToken,
@@ -422,6 +423,7 @@ export function CommandInput({
 			onSubmit,
 			onSlashCommand,
 			allowEmptySubmit,
+			maskInput,
 			slashRegistryEntries,
 			slashByToken,
 			goalClient,

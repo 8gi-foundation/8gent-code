@@ -140,6 +140,7 @@ import {
 	SETUP_SKIP_HINT,
 	SETUP_WELCOME_ID,
 	answerFromInput,
+	isSetupAnswer,
 	placeholderFor,
 	providerCheckLine,
 	questionForChat,
@@ -6420,8 +6421,9 @@ export function App({
 			}
 		}
 
-		// Handle onboarding answers first
-		if (showOnboarding && !afterPaths.trim().startsWith("/")) {
+		// Handle onboarding answers first. At a secret step every line is the
+		// answer, even one that begins with "/", so a key never reaches the chat.
+		if (showOnboarding && isSetupAnswer(onboardingManager.getNextQuestion(), afterPaths)) {
 			// The answer as the step reads it (a number picks a choice, an
 			// empty Enter takes the default) and as the chat shows it.
 			const currentQ = onboardingManager.getNextQuestion();

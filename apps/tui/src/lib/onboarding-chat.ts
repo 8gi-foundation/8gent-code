@@ -54,6 +54,15 @@ export function placeholderFor(q: ChatQuestion): string {
  * empty Enter takes the first choice. Other steps pass the text through, and
  * their processors keep a default for an empty answer.
  */
+/**
+ * True when a line typed during setup is the answer to the open question.
+ * A "/" line is a command, except at a secret step: a key is always the
+ * answer, so it can never fall through to the chat or the model.
+ */
+export function isSetupAnswer(q: { kind?: string } | null | undefined, input: string): boolean {
+	return q?.kind === "secret" || !input.trim().startsWith("/");
+}
+
 export function answerFromInput(q: ChatQuestion, input: string): { value: string; echo: string } {
 	const text = input.trim();
 	// A key is never echoed into the transcript, not even masked.
