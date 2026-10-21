@@ -329,6 +329,33 @@ describe("inproc-search", () => {
 		expect(m?.("a.txt")).toBe(false);
 	});
 
+	test("matching work is capped per search: wide tree, 10k wildcard rules", async () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-wide-"));
+		try {
+			fs.writeFileSync(
+				path.join(d, ".gitignore"),
+				`${Array.from({ length: MAX_GITIGNORE_RULES }, (_, i) => `*${i}[a-z]*[!q]?x`).join("\n")}\n`,
+			);
+			for (let k = 0; k < 20; k++) {
+				fs.mkdirSync(path.join(d, `d${k}`));
+				for (let i = 0; i < 300; i++)
+					fs.writeFileSync(path.join(d, `d${k}`, `f${i}.txt`), "needle\n");
+			}
+			const t0 = performance.now();
+			const r = await searchFiles({
+				root: d,
+				allow: () => true,
+				pattern: "zzqq",
+				maxResults: 1000,
+			});
+			expect(performance.now() - t0).toBeLessThan(3000);
+			expect(r.truncated).toBe(true);
+			expect(r.truncatedReason).toContain("rule checks");
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+
 	test("spawns nothing", async () => {
 		const src = fs.readFileSync(path.join(import.meta.dir, "..", "inproc-search.ts"), "utf8");
 		expect(src).not.toMatch(/child_process|Worker|execSync|spawnSync|Bun\.spawn/);

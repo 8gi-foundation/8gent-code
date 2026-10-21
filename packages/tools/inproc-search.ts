@@ -39,6 +39,8 @@ export interface SearchResult {
 	files: string[];
 	filesScanned: number;
 	truncated: boolean;
+	/** Why truncated is set, when it is not simply a result cap. */
+	truncatedReason?: string;
 	/** The request was refused (for example a glob over the caps). */
 	error?: string;
 }
@@ -129,6 +131,14 @@ function segMatch(p: Tok[], s: string): boolean {
  * without a slash). Backtracking is bounded by memoised segment positions.
  */
 export function globMatcher(glob: string, anchored = true): ((rel: string) => boolean) | null {
+	const t = compileGlob(glob, anchored);
+	return t ? (rel: string) => t(rel, rel.split("/")) : null;
+}
+
+/** Segments precompiled once per glob; callers that already split the path pass the parts in. */
+type PartsMatcher = (rel: string, parts: string[]) => boolean;
+
+function compileGlob(glob: string, anchored: boolean): PartsMatcher | null {
 	if (glob.length > MAX_GLOB_CHARS) return null;
 	const segs = glob.split("/").map((g) => (g === "**" ? "**" : tokenize(g)));
 	const wild = segs.reduce<number>(
@@ -136,21 +146,32 @@ export function globMatcher(glob: string, anchored = true): ((rel: string) => bo
 		0,
 	);
 	if (wild > MAX_WILDCARDS) return null;
-	if (wild === 0 && !segs.some((g) => g === "**")) {
+	const hasDeep = segs.some((g) => g === "**");
+	if (wild === 0) {
 		// Literal rule: plain string compare, no split and no memo (the hot path for big .gitignore files).
 		const lit = (segs as Tok[][])
 			.map((g) => g.map((t) => (t.k === "lit" ? t.c : "")).join(""))
 			.join("/");
 		return anchored
-			? (rel: string) => rel === lit
-			: (rel: string) =>
+			? (rel) => rel === lit
+			: (rel) =>
 					rel === lit ||
 					(rel.length > lit.length &&
 						rel.endsWith(lit) &&
 						rel[rel.length - lit.length - 1] === "/");
 	}
-	return (rel: string) => {
-		const parts = rel.split("/");
+	if (!hasDeep) {
+		// No "**": segments pair one to one, so no recursion and no memo.
+		const toks = segs as Tok[][];
+		const n = toks.length;
+		return (_rel, parts) => {
+			const start = anchored ? 0 : parts.length - n;
+			if (anchored ? parts.length !== n : start < 0) return false;
+			for (let i = 0; i < n; i++) if (!segMatch(toks[i], parts[start + i])) return false;
+			return true;
+		};
+	}
+	return (_rel, parts) => {
 		const starts = anchored
 			? [0]
 			: parts.map((_, i) => i).filter((i) => parts.length - i === segs.length);
@@ -173,6 +194,7 @@ export function globMatcher(glob: string, anchored = true): ((rel: string) => bo
 
 interface IgnoreRule {
 	match: (rel: string) => boolean;
+	matchParts: PartsMatcher;
 	negate: boolean;
 	dirOnly: boolean;
 }
@@ -212,8 +234,9 @@ export function parseGitignore(text: string, limit = MAX_GITIGNORE_RULES): Ignor
 		const anchored = line.includes("/");
 		if (line[0] === "/") line = line.slice(1);
 		if (!line) continue;
-		const match = globMatcher(line, anchored);
-		if (match) rules.push({ match, negate, dirOnly }); // a rule over the caps is dropped
+		const matchParts = compileGlob(line, anchored);
+		if (matchParts)
+			rules.push({ match: (rel) => matchParts(rel, rel.split("/")), matchParts, negate, dirOnly }); // a rule over the caps is dropped
 	}
 	return rules;
 }
@@ -230,13 +253,26 @@ function readGitignore(file: string): string {
 	}
 }
 
-function isIgnored(rel: string, isDir: boolean, scopes: Scope[]): boolean {
+/** Rule checks allowed per search; sized so the worst case stays near 2 s. */
+export const MAX_RULE_CHECKS = 10_000_000;
+interface Work {
+	left: number;
+	spent: boolean;
+}
+
+function isIgnored(rel: string, isDir: boolean, scopes: Scope[], work: Work): boolean {
+	if (work.spent) return false;
 	let ignored = false;
 	for (const { base, rules } of scopes) {
 		const sub = base ? rel.slice(base.length + 1) : rel;
+		const parts = sub.split("/");
+		if ((work.left -= rules.length) < 0) {
+			work.spent = true; // matching work is over budget: stop applying ignore rules
+			return false;
+		}
 		for (const r of rules) {
 			if (r.dirOnly && !isDir) continue;
-			if (r.match(sub)) ignored = !r.negate;
+			if (r.matchParts(sub, parts)) ignored = !r.negate;
 		}
 	}
 	return ignored;
@@ -260,6 +296,7 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 	// 1. Walk: sorted, ignore-aware, guard-filtered list of candidate files.
 	const candidates: string[] = [];
 	let entriesSeen = 0;
+	const work: Work = { left: MAX_RULE_CHECKS, spent: false };
 	let ruleBudget = MAX_GITIGNORE_RULES; // one budget per search, shared by every scope
 	const walk = (dir: string, rel: string, inherited: Scope[]): void => {
 		let entries: fs.Dirent[];
@@ -287,7 +324,7 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 			const isDir = e.isDirectory();
 			if (!isDir && !e.isFile()) continue; // symlinks are not followed
 			if (isDir ? ALWAYS_SKIP.has(e.name) : SKIP_FILE.test(e.name)) continue;
-			if (isIgnored(childRel, isDir, scopes)) continue;
+			if (isIgnored(childRel, isDir, scopes, work)) continue;
 			const abs = path.join(dir, e.name);
 			if (!opts.allow(abs)) continue; // path-guard denied: never entered, never read, never listed
 			if (isDir) walk(abs, childRel, scopes);
@@ -295,10 +332,14 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 		}
 	};
 	walk(root, "", []);
+	if (work.spent) {
+		out.truncatedReason = `ignore rules stopped after ${MAX_RULE_CHECKS} rule checks; later entries were not filtered`;
+	}
 
 	if (!opts.pattern) {
 		if (candidates.length > maxResults) out.truncated = true;
 		out.files = candidates.slice(0, maxResults);
+		if (work.spent) out.truncated = true;
 		return out;
 	}
 
@@ -338,6 +379,7 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 			}
 		}
 	}
+	if (work.spent) out.truncated = true; // set after the scan, which stops on truncated
 	return out;
 }
 
