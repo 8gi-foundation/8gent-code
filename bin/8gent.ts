@@ -5,11 +5,11 @@
  * The terminal-first coding experience.
  */
 
-import { normalizeSubcommand, unknownSubcommandLines } from "../packages/eight/subcommand-match.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { safeBunFlags } from "../packages/core/bun-flags";
+import { normalizeSubcommand, unknownSubcommandLines } from "../packages/eight/subcommand-match.ts";
 import { petRequested } from "../packages/pet/opt-in";
 import { nodeExecPath, tuiProcessEnv } from "./termux-exec.js";
 
@@ -760,7 +760,9 @@ async function keysCommand(args: string[]): Promise<void> {
 		const keys = readKeysFile();
 		const names = Object.keys(keys).sort();
 		if (names.length === 0) {
-			console.log(`No keys set in ${KEYS_PATH}. Run \`8gent keys set <provider>\` to add one, or \`8gent keys\` to open the file.`);
+			console.log(
+				`No keys set in ${KEYS_PATH}. Run \`8gent keys set <provider>\` to add one, or \`8gent keys\` to open the file.`,
+			);
 			return;
 		}
 		console.log(`Keys present in ${KEYS_PATH}:`);

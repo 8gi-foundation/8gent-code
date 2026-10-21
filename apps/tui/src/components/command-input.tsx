@@ -22,11 +22,11 @@ import { GO_HELP_LINES, type GoalClient, parseGoCommand } from "../lib/goal-clie
 import { type SlashCommand, isCoreSlashCommand } from "../lib/slash-commands.js";
 import {
 	type SlashRegistryEntry,
-	isBareSlash,
-	slashCollisionNotice,
 	getBuiltInSlashCommands,
 	getSlashRegistry,
+	isBareSlash,
 	resolveSlashInput,
+	slashCollisionNotice,
 	toGhostSuggestions,
 	unknownSlashAnswer,
 } from "../lib/slash-registry.js";

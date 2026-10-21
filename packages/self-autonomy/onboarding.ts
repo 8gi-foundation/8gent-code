@@ -20,9 +20,9 @@ import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings/index.
 import { type CommunicationStyle, isCommunicationStyle } from "./communication-style";
 import {
 	type FoundServer,
-	detectLocalServers,
 	HOSTED_KEY_PROVIDERS,
 	type HostedKeyProvider,
+	detectLocalServers,
 	hostedKeyNeeded,
 	providerChoiceScreen,
 	resolveProviderChoice,
@@ -197,7 +197,7 @@ export interface OnboardingQuestion {
 	 *   "select"               — scrollable arrow-key list + digit shortcut.
 	 *   "providerCheck"        — probes a local inference engine and shows a
 	 *                            status row. Carries `provider` + `installHint`.
-	 *   "secret"               — a key typed with nothing echoed (provider-key).
+	 *   "secret"               - a key typed with nothing echoed (provider-key).
 	 *   "agentName"            — renames an agent role. Carries `roleKey` so
 	 *                            the renderer can show the current default.
 	 */

@@ -41,7 +41,8 @@ export function noModelMessage(opts: {
 	const id = opts.provider || displayName.toLowerCase().replace(/\s+/g, "");
 	if (keyEnv) {
 		const n = (key ?? "").trim().length;
-		if (n === 0) return `No ${displayName} key found. Run \`8gent keys set ${id}\` to add ${keyEnv}, or \`8gent keys\` to edit the file.`;
+		if (n === 0)
+			return `No ${displayName} key found. Run \`8gent keys set ${id}\` to add ${keyEnv}, or \`8gent keys\` to edit the file.`;
 		if (n < MIN_KEY_CHARS)
 			return `The ${keyEnv} value is only ${n} character${n === 1 ? "" : "s"}, too short to be a real key. Run \`8gent keys set ${id}\` to replace it.`;
 	}

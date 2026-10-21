@@ -2,14 +2,14 @@ import { describe, expect, test } from "bun:test";
 import {
 	type SlashRegistryEntry,
 	formatSlashCollisionLine,
-	isBareSlash,
-	slashCollisionNotice,
 	getBuiltInSlashCommands,
 	getSkillSummary,
 	getSlashRegistry,
+	isBareSlash,
 	mergeSlashEntries,
 	namespacedSkillToken,
 	resolveSlashInput,
+	slashCollisionNotice,
 	unknownSlashAnswer,
 } from "./slash-registry.js";
 
