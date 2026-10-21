@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { arch, homedir, platform } from "node:os";
 import { join } from "node:path";
 import { spawn } from "bun";
+import { findOnPath, isAndroidHost } from "./termux.js";
 import type { TranscriptEvent, WhisperModelName } from "./types.js";
 
 /** Where we store the whisper.cpp binary */
@@ -26,7 +27,20 @@ export function getWhisperBinaryPath(): string {
  * Check if the whisper.cpp binary is available.
  * First checks our managed binary, then checks system PATH.
  */
-export async function findWhisperBinary(): Promise<string | null> {
+export async function findWhisperBinary(
+	env: Record<string, string | undefined> = process.env,
+	android: boolean = isAndroidHost(),
+): Promise<string | null> {
+	// Termux (#4706): whisper-cpp is not in the Termux repo, so a binary is only
+	// here if the person built whisper.cpp themselves. Plain PATH scan, no `which`.
+	if (android) {
+		for (const name of ["whisper-cli", "whisper-cpp", "whisper"]) {
+			const found = findOnPath(name, env);
+			if (found) return found;
+		}
+		return null;
+	}
+
 	// Check our managed binary
 	const managedPath = getWhisperBinaryPath();
 	if (existsSync(managedPath)) {

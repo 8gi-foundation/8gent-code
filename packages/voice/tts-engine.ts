@@ -9,6 +9,8 @@
  * Uses Bun.spawn for non-blocking subprocess management.
  */
 
+import { findOnPath, isAndroidHost, voiceOutputOn } from "./termux.js";
+
 // ============================================
 // Types
 // ============================================
@@ -26,7 +28,7 @@ export interface TTSProcess {
 	exited: Promise<number>;
 }
 
-export type TTSProviderName = "macos" | "kitten" | "elevenlabs";
+export type TTSProviderName = "macos" | "kitten" | "elevenlabs" | "termux";
 
 export interface TTSProvider {
 	name: string;
@@ -91,6 +93,61 @@ export class MacOSTTSProvider implements TTSProvider {
 
 	voices(): string[] {
 		return ["Ava", "Daniel", "Moira", "Samantha", "Alex"];
+	}
+}
+
+// ============================================
+// Termux TTS Provider (Android, #4706)
+// ============================================
+
+/**
+ * Speaks with `termux-tts-speak` (Termux:API). Output is gated: nothing is
+ * spoken unless EIGHT_VOICE=1 or the raw settings file literally has
+ * voice.outputEnabled true. `env` and `spawn` are injectable for tests.
+ */
+export class TermuxTTSProvider implements TTSProvider {
+	readonly name = "termux";
+	private currentProcess: ReturnType<typeof Bun.spawn> | null = null;
+
+	constructor(
+		private readonly env: Record<string, string | undefined> = process.env,
+		private readonly outputOn: () => boolean = () => voiceOutputOn(env),
+		private readonly spawnFn: (cmd: string[]) => ReturnType<typeof Bun.spawn> = (cmd) =>
+			Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" }),
+	) {}
+
+	async speak(text: string, _options?: TTSSpeakOptions): Promise<TTSProcess> {
+		const bin = findOnPath("termux-tts-speak", this.env);
+		if (!this.outputOn() || !bin) return { kill: () => {}, exited: Promise.resolve(bin ? 0 : 127) };
+		const proc = this.spawnFn([bin, text.slice(0, 2000)]);
+		this.currentProcess = proc;
+		return {
+			kill: () => {
+				try {
+					proc.kill();
+				} catch {}
+				this.currentProcess = null;
+			},
+			exited: proc.exited.then((code) => {
+				if (this.currentProcess === proc) this.currentProcess = null;
+				return code;
+			}),
+		};
+	}
+
+	async interrupt(): Promise<void> {
+		try {
+			this.currentProcess?.kill();
+		} catch {}
+		this.currentProcess = null;
+	}
+
+	async isAvailable(): Promise<boolean> {
+		return findOnPath("termux-tts-speak", this.env) !== null;
+	}
+
+	voices(): string[] {
+		return ["default"];
 	}
 }
 
@@ -189,6 +246,7 @@ export class KittenTTSProvider implements TTSProvider {
 const PROVIDERS: Record<TTSProviderName, () => TTSProvider> = {
 	macos: () => new MacOSTTSProvider(),
 	kitten: () => new KittenTTSProvider(),
+	termux: () => new TermuxTTSProvider(),
 	elevenlabs: () => {
 		// Placeholder — not yet implemented
 		throw new Error("ElevenLabs TTS provider not yet implemented");
@@ -200,7 +258,7 @@ export class TTSEngine {
 	private providerCache: Map<TTSProviderName, TTSProvider> = new Map();
 	private resolvedProvider: TTSProvider | null = null;
 
-	constructor(preferred: TTSProviderName = "macos") {
+	constructor(preferred: TTSProviderName = isAndroidHost() ? "termux" : "macos") {
 		this.preferred = preferred;
 	}
 

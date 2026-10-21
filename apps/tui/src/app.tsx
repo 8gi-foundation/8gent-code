@@ -629,6 +629,7 @@ import {
 	formatMicLabel,
 	resolveInputDevice,
 } from "../../../packages/voice/input-device.js";
+import { describeTermuxVoice, isAndroidHost } from "../../../packages/voice/termux.js";
 import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
 import { VoiceReplyTracker } from "../../../packages/voice/voice-chat.js";
 import {
@@ -5605,14 +5606,15 @@ export function App({
 							addSystemMessage(
 								[
 									status,
-									formatMicLabel(dev),
+									...(isAndroidHost() ? [describeTermuxVoice()] : [formatMicLabel(dev)]),
 									describeTranscriberBackend({
 										whisperBinaryPath: deps.whisperBinaryPath,
 										downloadedModels: deps.downloadedModels,
 										model: voice.engine.getConfig().model,
 										mode: voice.engine.getConfig().mode,
+										cloudAvailable: Boolean(process.env.OPENAI_API_KEY),
 									}),
-									...missing,
+									...(isAndroidHost() ? [] : missing),
 								].join("\n"),
 							);
 						})().catch(() => addSystemMessage(status));

@@ -200,6 +200,7 @@ export function mpvIpcPath(
 /** The one-line install hint for the DJ's tools on this platform. */
 export function installHint(plat: NodeJS.Platform = PLATFORM): string {
 	if (plat === "win32") return "scoop bucket add extras; scoop install mpv yt-dlp ffmpeg sox";
+	if (plat === "android") return "pkg install mpv python-yt-dlp ffmpeg";
 	if (plat === "linux") return "sudo apt install mpv yt-dlp ffmpeg sox";
 	return "brew install mpv yt-dlp ffmpeg sox";
 }
