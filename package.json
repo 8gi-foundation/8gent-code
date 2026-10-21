@@ -23,6 +23,7 @@
     "dist/sounds",
     "bin/8gent-run.js",
     "bin/node-version.js",
+    "bin/termux-exec.js",
     "packages/decide/calibration",
     "packages/daemon/VESSEL-CONTEXT.md",
     "bin/bunfig.empty.toml",

@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nodeTooOld, tooOldMessage } from "./node-version.js";
+import { nodeExecPath } from "./termux-exec.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const cli = join(__dirname, "..", "dist", "cli.js");
@@ -67,8 +68,9 @@ if (result.error && result.error.code === "ENOENT") {
 		console.error(tooOldMessage(process.versions.node));
 		process.exit(1);
 	}
+	// Absolute node, never /system/bin/linker64 (Termux system linker exec, #4682).
 	result = spawnSync(
-		process.execPath,
+		nodeExecPath(),
 		[
 			"--experimental-sqlite",
 			"--disable-warning=ExperimentalWarning",

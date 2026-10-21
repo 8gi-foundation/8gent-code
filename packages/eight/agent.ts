@@ -115,6 +115,7 @@ import {
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { continueEmptyTurn } from "./empty-turn-continue";
 import { Friction, withFriction } from "./friction";
+import { readGitBranch } from "./git-branch";
 import {
 	type ToolLedgerEntry,
 	denialIsCause,
@@ -953,14 +954,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// (Singleton getter — cheap, no background loops kicked off here.)
 		this.orchestratorBus = getOrchestratorBus();
 
-		// Populate git info asynchronously
-		import("node:child_process")
-			.then(({ exec }) => {
-				exec("git rev-parse --abbrev-ref HEAD", { cwd, timeout: 2000 }, (err, stdout) => {
-					if (!err && stdout) env.gitBranch = stdout.trim();
-				});
-			})
-			.catch(() => {});
+		// Git branch from .git/HEAD: no process started at boot (#4682).
+		const branch = readGitBranch(cwd);
+		if (branch) env.gitBranch = branch;
 
 		// Execute onStart hooks
 		this.hookManager.executeHooks("onStart", {

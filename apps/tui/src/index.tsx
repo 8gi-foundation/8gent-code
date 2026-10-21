@@ -6,7 +6,10 @@
  * Built with Ink (React for CLI).
  */
 
-// Before anything else: BUN_BE_BUN must not reach this process's subprocesses.
+// Before anything else: on Termux, LD_PRELOAD comes back for child processes
+// and direct spawns run through sh, before any module can start one (#4682).
+import "./lib/termux-handoff.js";
+// Then: BUN_BE_BUN must not reach this process's subprocesses.
 import "./lib/strip-bun-be-bun.js";
 import { bootTrace } from "./lib/boot-trace.js";
 // First, before anything heavy loads: keys pressed before the first frame
