@@ -49,9 +49,7 @@ export interface SearchResult {
 	/** Rule-check budget spent: the walk stopped after this many files and was not continued unfiltered. */
 	rulesIncomplete?: { filesWalked: number; cause?: "cost" };
 	/** The wall-clock deadline passed; total is unknown when the walk itself was cut. */
-	deadline?: { searched: number; total?: number; seconds: number };
-	/** A .gitignore had more rules than the budget; the rest were not applied. */
-	ruleCapDropped?: boolean;
+	deadline?: { searched: number; total?: number; seconds: number; unit?: "entries" };
 	/** The request was refused (for example a glob over the caps). */
 	error?: string;
 }
@@ -333,17 +331,17 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 	const out: SearchResult = { hits: [], files: [], filesScanned: 0, truncated: false };
 	const deadlineMs = opts.deadlineMs ?? 2000;
 	let capHit = false;
-	const finish = (total?: number, searched = out.filesScanned): SearchResult => {
+	const finish = (total?: number, searched?: number): SearchResult => {
 		if (capHit) out.capped = true;
 		if (work.spent) out.rulesIncomplete = { filesWalked, cause: work.costly ? "cost" : undefined };
-		if (work.late) out.deadline = { searched, total, seconds: Math.max(0, deadlineMs) / 1000 };
-		out.truncated = !!(
-			out.capped ||
-			out.entryCap ||
-			out.rulesIncomplete ||
-			out.deadline ||
-			out.ruleCapDropped
-		);
+		if (work.late)
+			out.deadline = {
+				searched: searched ?? out.filesScanned,
+				total,
+				seconds: Math.max(0, deadlineMs) / 1000,
+				unit: searched === undefined ? undefined : "entries", // list mode counts entries, content mode files
+			};
+		out.truncated = !!(out.capped || out.entryCap || out.rulesIncomplete || out.deadline);
 		return out;
 	};
 	const fileGlob = opts.glob ? globMatcher(opts.glob, opts.glob.includes("/")) : null;
@@ -495,13 +493,9 @@ export function formatSearch(r: SearchResult): string {
 	if (r.deadline) {
 		const of = r.deadline.total === undefined ? "" : ` of ${r.deadline.total}`;
 		notes.push(
-			`[stopped after ${r.deadline.seconds}s: searched ${r.deadline.searched}${of} files. Results so far are shown. Narrow the pattern or glob to search the rest.]`,
+			`[stopped after ${r.deadline.seconds}s: searched ${r.deadline.searched}${of} ${r.deadline.unit ?? "files"}. Results so far are shown. Narrow the pattern or glob to search the rest.]`,
 		);
 	}
-	if (r.ruleCapDropped)
-		notes.push(
-			`[.gitignore has more than ${MAX_GITIGNORE_RULES} rules; only the first ${MAX_GITIGNORE_RULES} were applied]`,
-		);
 	if (rows.length === 0) {
 		if (notes.length === 0) return "No matches.";
 		return [

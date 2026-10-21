@@ -368,7 +368,6 @@ describe("inproc-search", () => {
 			"[stopped after 2s: searched 5 of 9 files. Results so far are shown. Narrow the pattern or glob to search the rest.]",
 		deadlineNoTotal:
 			"[stopped after 2s: searched 5 files. Results so far are shown. Narrow the pattern or glob to search the rest.]",
-		parse: "[.gitignore has more than 10000 rules; only the first 10000 were applied]",
 	};
 	const hit = { file: "a.ts", line: 1, text: "x" };
 
@@ -386,25 +385,20 @@ describe("inproc-search", () => {
 		expect(formatSearch({ ...base, hits: [hit], deadline: { searched: 5, seconds: 2 } })).toBe(
 			`a.ts:1:x\n${NOTE.deadlineNoTotal}`,
 		);
-		expect(formatSearch({ ...base, hits: [hit], ruleCapDropped: true })).toBe(
-			`a.ts:1:x\n${NOTE.parse}`,
-		);
 		expect(
 			formatSearch({
 				...base,
 				hits: [hit],
 				rulesIncomplete: { filesWalked: 7 },
 				deadline: { searched: 5, seconds: 2 },
-				ruleCapDropped: true,
 			}).split("\n"),
-		).toEqual(["a.ts:1:x", NOTE.rules, NOTE.deadlineNoTotal, NOTE.parse]);
+		).toEqual(["a.ts:1:x", NOTE.rules, NOTE.deadlineNoTotal]);
 	});
 
 	test("a zero-hit partial search never prints a bare No matches.", () => {
 		const states = [
 			{ rulesIncomplete: { filesWalked: 7 } },
 			{ deadline: { searched: 5, total: 9, seconds: 2 } },
-			{ ruleCapDropped: true },
 			{ entryCap: 200000 },
 		];
 		for (const st of states) {
@@ -550,6 +544,13 @@ describe("inproc-search", () => {
 				deadline: { searched: 12, seconds: 2 },
 			});
 			expect(list).toContain("searched 12 files.");
+			expect(
+				formatSearch({
+					...base,
+					files: ["a.txt"],
+					deadline: { searched: 12, seconds: 2, unit: "entries" },
+				}),
+			).toContain("searched 12 entries.");
 			expect(list).not.toContain("searched 0 files");
 			const c = await searchFiles({ root: d, allow: () => true, deadlineMs: 0 });
 			expect(c.deadline?.searched).toBeGreaterThanOrEqual(0);
