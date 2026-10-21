@@ -456,6 +456,8 @@ function loadEnvFile() {
 						if (eqIdx > 0) {
 							const key = trimmed.slice(0, eqIdx).trim();
 							const val = trimmed.slice(eqIdx + 1).trim();
+							// A repo's .env must not move the boundary or a provider endpoint (#4622).
+							if (dotenvKeyIsBlocked(key)) continue;
 							if (!process.env[key]) {
 								process.env[key] = val;
 							}

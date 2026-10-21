@@ -113,6 +113,8 @@ export const PROTECTED_DATA_DIRS = [
 export const SECURITY_ENV_KEYS = [
 	"EIGHT_SEATBELT",
 	"EIGHT_DATA_DIR",
+	// Where providers.json is read from (and so where a provider's key is sent, #4622).
+	"EIGHT_PROVIDERS_SETTINGS_PATH",
 	"EIGHT_HOME",
 	"EIGHT_FAKE_HOME",
 	"HOME",
@@ -190,6 +192,45 @@ function takeSnapshot(): SecurityEnv {
 // Taken at module load: before the TUI's loadEnvFile() runs (app.tsx imports
 // this module's importers first), so nothing it sets can steer the boundary.
 let securityEnv: SecurityEnv = takeSnapshot();
+// Every key any .env file declares, read once at load for the same reason (#4622).
+let dotenvDeclaredAtLoad: Set<string> = dotenvDeclaredKeys(dotenvCandidates());
+
+/**
+ * Keys the TUI's .env loader must never copy into process.env: anything in the
+ * EIGHT_ namespace, any endpoint override (_BASE_URL) and every security key. A
+ * cloned repo's .env could otherwise move where a provider key is sent (#4622).
+ */
+export function dotenvKeyIsBlocked(key: string): boolean {
+	return (
+		/^EIGHT_/i.test(key) ||
+		/_BASE_URL$/i.test(key) ||
+		(SECURITY_ENV_KEYS as readonly string[]).includes(key)
+	);
+}
+
+/**
+ * An endpoint override from the environment, dropped when any .env file declares
+ * it (same rule as the security keys, #4615): a value a repo's .env could have
+ * set is not the user's choice. Used for MINIMAX_BASE_URL, LMSTUDIO_BASE_URL and
+ * APFEL_BASE_URL.
+ */
+export function trustedEnvValue(
+	key: string,
+	env: Readonly<Record<string, string | undefined>> = process.env,
+): string | undefined {
+	const v = env[key];
+	if (!v) return undefined;
+	return dotenvDeclaredAtLoad.has(key) ? undefined : v;
+}
+
+/**
+ * A security key's value: the load-time snapshot (which drops .env-declared
+ * keys). In test mode the live env is read, as fakeHome() does.
+ */
+export function trustedSecurityValue(key: SecurityKey): string | undefined {
+	if (isTestMode(securityEnv.values)) return process.env[key] || undefined;
+	return securityEnv.values[key];
+}
 
 export function securityEnvSnapshot(): SecurityEnv {
 	return securityEnv;
@@ -206,7 +247,10 @@ function inTestMode(): boolean {
 
 /** Tests only: re-read the env after changing it. A no-op outside test mode. */
 export function refreshSecurityEnvForTests(): void {
-	if (inTestMode()) securityEnv = takeSnapshot();
+	if (inTestMode()) {
+		securityEnv = takeSnapshot();
+		dotenvDeclaredAtLoad = dotenvDeclaredKeys(dotenvCandidates());
+	}
 }
 
 /** EIGHT_FAKE_HOME is a test hook: honoured only in test mode, read live there. */

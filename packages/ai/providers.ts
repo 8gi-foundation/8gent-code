@@ -8,6 +8,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
+import { trustedEnvValue } from "../permissions/run-command-sandbox";
 import {
 	missingKeyMessage,
 	resolveProviderBaseUrl,
@@ -44,7 +45,7 @@ const DEFAULT_URLS: Record<
 	// apfel (https://github.com/Arthur-Ficial/apfel) exposes Apple Foundation
 	// as an OpenAI-compatible HTTP server. Default port 11500 avoids the
 	// Ollama collision on 11434. Override via APFEL_BASE_URL.
-	apfel: process.env.APFEL_BASE_URL || "http://localhost:11500/v1",
+	apfel: trustedEnvValue("APFEL_BASE_URL") || "http://localhost:11500/v1",
 };
 
 /**
@@ -96,7 +97,7 @@ export function createModel(config: ProviderConfig): LanguageModel {
 		// provider's error and nothing leaves the machine.
 		fetch: hostedWithoutKey(config.name, baseURL, apiKey)
 			? refuseWithoutKey(config.name, baseURL)
-			: modelFetchAsFetch,
+			: guardedKeyedFetch(modelFetchAsFetch, apiKey),
 		headers: {
 			...config.headers,
 			...(config.name === "openrouter"
@@ -128,6 +129,60 @@ export function createModel(config: ProviderConfig): LanguageModel {
 	});
 
 	return provider(config.model);
+}
+
+const REDIRECT_CODES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 5;
+
+/** Strip `Bearer <token>` and the resolved key itself from a message (#4622). */
+export function scrubKey(text: string, apiKey?: string): string {
+	let out = text.replace(/Bearer\s+[A-Za-z0-9._~+\/=-]+/gi, "Bearer [REDACTED]");
+	const k = apiKey?.trim();
+	if (k) out = out.split(k).join("[REDACTED]");
+	return out;
+}
+
+/**
+ * Wraps a fetch that carries a provider key:
+ *  - a redirect is followed by hand, only to the same origin. A redirect to
+ *    another origin is refused, so Authorization is never forwarded there;
+ *  - any thrown error has `Bearer <token>` and the key value scrubbed from its
+ *    message (and stack) before it can reach a log, a card or a transcript.
+ */
+export function guardedKeyedFetch(base: typeof fetch, apiKey: string | undefined): typeof fetch {
+	return (async (input: string | URL | Request, init?: RequestInit) => {
+		try {
+			let url = input instanceof Request ? input.url : String(input);
+			const origin = new URL(url).origin;
+			let cur: RequestInit = { ...(init ?? {}), redirect: "manual" };
+			for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+				const res = await base(hop === 0 ? input : url, cur);
+				const loc = res.headers.get("location");
+				if (!REDIRECT_CODES.has(res.status) || !loc) return res;
+				const next = new URL(loc, url);
+				if (next.origin !== origin) {
+					throw new Error(
+						`${new URL(url).host} redirected to ${next.host}; not followed, so the key is not sent there.`,
+					);
+				}
+				url = next.toString();
+				if (
+					res.status === 303 ||
+					((res.status === 301 || res.status === 302) && cur.method === "POST")
+				) {
+					const { body: _b, ...rest } = cur;
+					cur = { ...rest, method: "GET", redirect: "manual" };
+				}
+			}
+			throw new Error("Too many redirects.");
+		} catch (err) {
+			if (err instanceof Error) {
+				err.message = scrubKey(err.message, apiKey);
+				if (err.stack) err.stack = scrubKey(err.stack, apiKey);
+			}
+			throw err;
+		}
+	}) as unknown as typeof fetch;
 }
 
 /** Providers that run on the user's machine or LAN and take no key. */
