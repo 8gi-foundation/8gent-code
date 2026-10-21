@@ -28,7 +28,11 @@
 #   EIGHT_RELEASES_URL      the releases list (https, or http://127.0.0.1 for tests)
 #   EIGHT_ALLOW_UNVERIFIED  1 = continue when a release key exists but no minisign can run
 #   EIGHT_INSTALL_DEBUG     1 = print what was detected (OS, libc, asset, install dir) and carry on
-#   EIGHT_ANDROID_FORCE     1 = skip the Android/Termux stop (glibc-runner setups)
+#   EIGHT_ANDROID_FORCE     1 = on Android/Termux, use the glibc binary path instead of npm (glibc-runner setups)
+#
+# On Android (Termux) the binary cannot run (bionic, not glibc), so the release's
+# npm package is installed instead: nodejs via pkg when missing or older than
+# 22.5, then npm i -g on the .tgz, after the same SHA256SUMS (and signature) check.
 #   --dry-run               argument: print the detection and stop before any download
 #
 # It never replaces a newer 8gent with an older one unless EIGHT_VERSION asks
@@ -257,6 +261,28 @@ find_minisign() {
 	MS_BIN="$TMP/minisign/$inner"
 }
 
+NODE_MIN="22.5"
+
+# node_ok: node exists and is at least NODE_MIN (what package.json engines asks).
+node_ok() {
+	command -v node >/dev/null 2>&1 || return 1
+	nv="$(node -p 'process.versions.node' 2>/dev/null)" || return 1
+	nmaj="${nv%%.*}"; nrest="${nv#*.}"; nmin="${nrest%%.*}"
+	case "$nmaj$nmin" in '' | *[!0-9]*) return 1 ;; esac
+	wmaj="${NODE_MIN%%.*}"; wmin="${NODE_MIN#*.}"
+	[ "$nmaj" -gt "$wmaj" ] || { [ "$nmaj" -eq "$wmaj" ] && [ "$nmin" -ge "$wmin" ]; }
+}
+
+# ensure_node: on Termux, install nodejs (npm comes with it) when missing or too old.
+ensure_node() {
+	node_ok && return 0
+	command -v pkg >/dev/null 2>&1 || die "needs Node ${NODE_MIN} or newer and Termux's pkg is not available to install it"
+	say "Installing nodejs with pkg (needs ${NODE_MIN} or newer)..."
+	pkg install -y nodejs || die "pkg could not install nodejs; nothing installed"
+	node_ok || die "nodejs from pkg is still older than ${NODE_MIN}; nothing installed"
+	command -v npm >/dev/null 2>&1 || die "npm is missing after installing nodejs; nothing installed"
+}
+
 # url_for LIST_JSON TAG NAME: download URL of NAME on release TAG, or nothing.
 url_for() {
 	grep -oE '"browser_download_url"[ 	]*:[ 	]*"[^"]*"' "$1" |
@@ -325,6 +351,10 @@ main() {
 		libc=musl
 	fi
 	ASSET="8gent-${os}-${arch}"
+	# Bionic cannot run the glibc binary: Termux installs the release's npm package.
+	# (proot-distro userlands answer as glibc Linux and never reach this.)
+	NPM_PATH=0
+	if [ "$libc" = bionic ] && [ "${EIGHT_ANDROID_FORCE:-}" != 1 ]; then NPM_PATH=1; fi
 	# Termux has no /usr and no sudo; its bin directory is $PREFIX/bin, already on PATH.
 	if [ "$android" = 1 ] && [ -z "${EIGHT_INSTALL_DIR:-}" ] && [ -n "${PREFIX:-}" ]; then
 		INSTALL_DIR="${PREFIX}/bin"
@@ -336,6 +366,7 @@ main() {
 		say "  android         : $([ "$android" = 1 ] && echo yes || echo no) (TERMUX_VERSION=${TERMUX_VERSION:-unset} PREFIX=${PREFIX:-unset})"
 		say "  libc            : ${libc}"
 		say "  asset           : ${ASSET}"
+		say "  method          : $([ "$NPM_PATH" = 1 ] && echo "npm package (Termux, needs node >= ${NODE_MIN})" || echo "binary")"
 		say "  install dir     : ${INSTALL_DIR}"
 		say "  fetch tools     : curl=$(command -v curl >/dev/null 2>&1 && echo yes || echo no) wget=$(command -v wget >/dev/null 2>&1 && echo yes || echo no)"
 		say "  releases url    : $(printf '%s' "$RELEASES_URL" | sed -E 's#^([a-zA-Z]+://)[^/@]*@#\1#; s#\?.*$#?...#')"
@@ -345,21 +376,9 @@ main() {
 		warn "EIGHT_ANDROID_FORCE=1: continuing on Android; the install will fail unless this box runs glibc binaries."
 	fi
 	if [ "$DRY_RUN" = 1 ]; then
-		if [ "$libc" = bionic ] && [ "${EIGHT_ANDROID_FORCE:-}" != 1 ]; then say "  result          : a real run would stop here (Android, glibc binary cannot start)"; fi
+		if [ "$NPM_PATH" = 1 ]; then say "  result          : a real run would install nodejs with pkg if needed, then the release npm package"; fi
 		say "Dry run: nothing downloaded or installed."
 		exit 0
-	fi
-	if [ "$libc" = bionic ] && [ "${EIGHT_ANDROID_FORCE:-}" != 1 ]; then
-		{
-			say "8gent install: this is Android (Termux). The 8gent binary is a glibc Linux build and cannot start on Android's own C library (bionic). Nothing was installed."
-			say "Use a glibc userland inside Termux, then run this installer there:"
-			say "  pkg install proot-distro && proot-distro install debian && proot-distro login debian"
-			say "  apt update && apt install -y curl ca-certificates"
-			say "  then run the install command again"
-			say "To report this, run the installer with --dry-run (sh -s -- --dry-run) and paste what it prints."
-			say "On a setup that does run glibc binaries, set EIGHT_ANDROID_FORCE=1 to skip this check."
-		} >&2
-		exit 1
 	fi
 	[ "$libc" != musl ] || die "the Linux binaries need glibc; this looks like musl (Alpine)"
 
@@ -381,6 +400,14 @@ main() {
 	URL="${line#* }"
 	TAG="v${VERSION}"
 	url_allowed "$URL" asset || die "refusing a download URL outside ${REPO}'s releases: ${URL}"
+
+	if [ "$NPM_PATH" = 1 ]; then
+		# The binary asset only resolved the newest release; the package is what gets installed.
+		ASSET="8gi-foundation-8gent-code-${VERSION}.tgz"
+		URL="$(url_for "$TMP/releases.json" "$TAG" "$ASSET")"
+		[ -n "$URL" ] || die "release v${VERSION} has no ${ASSET} (see https://github.com/${REPO}/releases)"
+		url_allowed "$URL" asset || die "refusing a download URL outside ${REPO}'s releases: ${URL}"
+	fi
 
 	TARGET="${INSTALL_DIR}/8gent"
 	CURRENT="$(installed_version "$TARGET")"
@@ -424,6 +451,14 @@ main() {
 	[ -n "$expected" ] || die "SHA256SUMS for v${VERSION} does not list ${ASSET}; refusing an unverified binary"
 	actual="$(sha256_of "$TMP/$ASSET")"
 	[ "$expected" = "$actual" ] || die "checksum mismatch for ${ASSET} (expected ${expected}, got ${actual}); nothing installed"
+
+	if [ "$NPM_PATH" = 1 ]; then
+		ensure_node
+		say "Installing 8gent v${VERSION} with npm..."
+		npm i -g "$TMP/$ASSET" || die "npm could not install ${ASSET}; nothing else was changed"
+		say "Installed 8gent v${VERSION} (npm package, Termux). 8gent is ready. Run: 8gent"
+		return 0
+	fi
 
 	if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
 		# No --source-ref: gh before 2.64 does not have it. Ask for JSON and check
