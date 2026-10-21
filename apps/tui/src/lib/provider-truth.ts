@@ -151,6 +151,28 @@ export function modelListFailureNotice(displayName: string, err: unknown): strin
 }
 
 /** Like listProviderModels, but keeps the error so the caller can say why. */
+/** Longest the TUI waits for a provider's model list before treating it as failed (#4683). */
+export const MODEL_LIST_TIMEOUT_MS = 15_000;
+
+/**
+ * Wait for a model-list load, or reject with a "timed out" error after `ms`, so a
+ * request that never answers cannot leave the list loading forever (#4683). The
+ * message gives modelListFailureNotice its timed-out reason.
+ */
+export async function loadModelListWithin(
+	load: Promise<unknown>,
+	ms: number = MODEL_LIST_TIMEOUT_MS,
+): Promise<void> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const deadline = new Promise<"late">((resolve) => {
+		timer = setTimeout(() => resolve("late"), ms);
+	});
+	const done = await Promise.race([load.then(() => "done" as const), deadline]).finally(() =>
+		clearTimeout(timer),
+	);
+	if (done === "late") throw new Error(`model list request timed out after ${ms / 1000} s`);
+}
+
 export async function listModelsWithReason(
 	reader: LiveModelsReader,
 	provider: string,

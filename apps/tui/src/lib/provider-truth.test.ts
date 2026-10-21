@@ -6,10 +6,12 @@
 import { describe, expect, test } from "bun:test";
 import { autoSelectModel } from "./model-selection";
 import {
+	MODEL_LIST_TIMEOUT_MS,
 	buildProviderOptions,
 	emptyModelIsFinal,
 	listBelongsToProvider,
 	listModelsWithReason,
+	loadModelListWithin,
 	modelAfterProviderSwitch,
 	modelListFailureNotice,
 	providerKeyNotice,
@@ -221,5 +223,33 @@ describe("after /provider to a hosted provider (#4682)", () => {
 		});
 		expect(next).not.toBeNull();
 		expect(models).toContain(next as string);
+	});
+});
+
+describe("model list deadline (#4683)", () => {
+	test("a list request that never answers ends as timed out, with that reason shown", async () => {
+		const never = new Promise<never>(() => {});
+		let err: unknown;
+		try {
+			await loadModelListWithin(never, 20);
+		} catch (e) {
+			err = e;
+		}
+		expect(String(err)).toContain("timed out");
+		expect(modelListFailureNotice("MiniMax", err)).toBe(
+			"No model chosen for MiniMax: its model list request timed out. Pick a model with /model.",
+		);
+	});
+
+	test("a list that answers in time resolves; its own failure passes through", async () => {
+		await expect(loadModelListWithin(Promise.resolve(["m"]), 1000)).resolves.toBeUndefined();
+		await expect(loadModelListWithin(Promise.reject(new Error("HTTP: 503")), 1000)).rejects.toThrow(
+			"HTTP: 503",
+		);
+	});
+
+	test("the default bound is finite", () => {
+		expect(MODEL_LIST_TIMEOUT_MS).toBeGreaterThan(0);
+		expect(MODEL_LIST_TIMEOUT_MS).toBeLessThanOrEqual(30_000);
 	});
 });

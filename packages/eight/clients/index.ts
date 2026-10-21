@@ -147,14 +147,14 @@ export function createClient(config: AgentConfig): LLMClient {
 	// Its turns go through the AI-SDK path; this client answers readiness, which asked
 	// the local Ollama instead, so a working key read as "did not report ready" (#4682).
 	// Same endpoint and key as model discovery: the provider's registry entry.
+	// The base URL comes only from the provider manager, never the caller, so a key
+	// can only go where keyWithheldReason / atCompiledEndpoint already allowed; and
+	// no key at all when the manager is holding that provider's key back (#4683).
 	if (isHostedChatProvider(config.runtime)) {
 		const pm = getProviderManager();
-		const apiKey = config.apiKey || pm.getApiKey(config.runtime as ProviderName) || "";
-		return new OpenRouterClient(
-			config.model,
-			apiKey,
-			config.baseUrl ?? pm.getProvider(config.runtime as ProviderName).baseUrl,
-		);
+		const name = config.runtime as ProviderName;
+		const apiKey = pm.keyWithheldReason(name) ? "" : config.apiKey || pm.getApiKey(name) || "";
+		return new OpenRouterClient(config.model, apiKey, pm.getProvider(name).baseUrl);
 	}
 	return new OllamaClient(config.model, config.baseUrl);
 }

@@ -289,6 +289,7 @@ import {
 	emptyModelIsFinal,
 	listBelongsToProvider,
 	listModelsWithReason,
+	loadModelListWithin,
 	modelAfterProviderSwitch,
 	modelListFailureNotice,
 	registryKeyNotice,
@@ -1746,7 +1747,9 @@ export function App({
 		let cancelled = false;
 		const fetchModels = async () => {
 			setModelsLoading(true);
-			try {
+			// Bounded as a whole (#4683): some branches below fetch without a signal, and a
+			// request that never answers left the list loading and the reason never shown.
+			const load = async () => {
 				if (listsInstalledOllamaModels(currentProvider)) {
 					// Fetch locally installed Ollama models - filter embedding models at source.
 					// The 8gent provider is this same Ollama, so it lists what is installed
@@ -1852,9 +1855,15 @@ export function App({
 						setAvailableModels(listed);
 					}
 				}
-			} catch {
-				// Provider not reachable — show fallback
-				if (!cancelled) setAvailableModels([]);
+			};
+			try {
+				await loadModelListWithin(load());
+			} catch (error) {
+				// Provider not reachable or too slow: show fallback, and say why.
+				if (!cancelled) {
+					modelListErrorRef.current = error;
+					setAvailableModels([]);
+				}
 			}
 			if (!cancelled) {
 				setModelsOwner(currentProvider);
