@@ -47,7 +47,7 @@ export interface SearchResult {
 	/** The walk entry cap was reached. */
 	entryCap?: number;
 	/** Rule-check budget spent: the walk stopped after this many files and was not continued unfiltered. */
-	rulesIncomplete?: { filesWalked: number };
+	rulesIncomplete?: { filesWalked: number; cause?: "cost" };
 	/** The wall-clock deadline passed; total is unknown when the walk itself was cut. */
 	deadline?: { searched: number; total?: number; seconds: number };
 	/** A .gitignore had more rules than the budget; the rest were not applied. */
@@ -295,6 +295,7 @@ export const MAX_RULE_CHECKS = 10_000_000;
 interface Work {
 	left: number;
 	spent: boolean;
+	costly: boolean; // spent by the rule-check budget, not by the rule-count cap
 	deadline: number;
 	late: boolean;
 	tick: number;
@@ -308,6 +309,7 @@ function isIgnored(rel: string, isDir: boolean, scopes: Scope[], work: Work): bo
 		const parts = sub.split("/");
 		if ((work.left -= rules.length) < 0) {
 			work.spent = true;
+			work.costly = true;
 			return undefined;
 		}
 		for (const r of rules) {
@@ -333,7 +335,7 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 	let capHit = false;
 	const finish = (total?: number, searched = out.filesScanned): SearchResult => {
 		if (capHit) out.capped = true;
-		if (work.spent) out.rulesIncomplete = { filesWalked };
+		if (work.spent) out.rulesIncomplete = { filesWalked, cause: work.costly ? "cost" : undefined };
 		if (work.late) out.deadline = { searched, total, seconds: Math.max(0, deadlineMs) / 1000 };
 		out.truncated = !!(
 			out.capped ||
@@ -358,6 +360,7 @@ export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
 	const work: Work = {
 		left: MAX_RULE_CHECKS,
 		spent: false,
+		costly: false,
 		deadline: Date.now() + deadlineMs,
 		late: false,
 		tick: 0,
@@ -485,7 +488,9 @@ export function formatSearch(r: SearchResult): string {
 		);
 	if (r.rulesIncomplete)
 		notes.push(
-			`[ignore rules incomplete: search stopped after ${r.rulesIncomplete.filesWalked} files because .gitignore rules exceeded the limit. Results so far are shown. Add a glob to narrow the search.]`,
+			r.rulesIncomplete.cause === "cost"
+				? `[ignore rules incomplete: search stopped after ${r.rulesIncomplete.filesWalked} files because .gitignore rules were too costly to apply. Results so far are shown. Add a glob to narrow the search.]`
+				: `[ignore rules incomplete: search stopped after ${r.rulesIncomplete.filesWalked} files because .gitignore rules exceeded the limit. Results so far are shown. Add a glob to narrow the search.]`,
 		);
 	if (r.deadline) {
 		const of = r.deadline.total === undefined ? "" : ` of ${r.deadline.total}`;

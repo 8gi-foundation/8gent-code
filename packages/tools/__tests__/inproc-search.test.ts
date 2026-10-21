@@ -560,6 +560,31 @@ describe("inproc-search", () => {
 		}
 	});
 
+	test("rules-too-costly line is used when the rule-check budget is spent", async () => {
+		const out = formatSearch({ ...base, rulesIncomplete: { filesWalked: 7, cause: "cost" } });
+		expect(out).toContain(
+			"[ignore rules incomplete: search stopped after 7 files because .gitignore rules were too costly to apply. Results so far are shown. Add a glob to narrow the search.]",
+		);
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "inproc-cost-"));
+		try {
+			fs.writeFileSync(
+				path.join(d, ".gitignore"),
+				`${Array.from({ length: MAX_GITIGNORE_RULES }, (_, i) => `*${i}[a-z]*[!q]?x`).join("\n")}\n`,
+			);
+			for (let i = 0; i < 2000; i++) fs.writeFileSync(path.join(d, `f${i}.txt`), "needle\n");
+			const r = await searchFiles({
+				root: d,
+				allow: () => true,
+				pattern: "needle",
+				maxResults: 100000,
+				deadlineMs: 60000,
+			});
+			expect(formatSearch(r)).toContain("were too costly to apply");
+		} finally {
+			fs.rmSync(d, { recursive: true, force: true });
+		}
+	});
+
 	test("spawns nothing", async () => {
 		const src = fs.readFileSync(path.join(import.meta.dir, "..", "inproc-search.ts"), "utf8");
 		expect(src).not.toMatch(/child_process|Worker|execSync|spawnSync|Bun\.spawn/);
