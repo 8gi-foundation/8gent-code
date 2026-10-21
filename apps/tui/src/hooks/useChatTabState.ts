@@ -27,6 +27,7 @@ import type {
 } from "../../../../packages/eight/index.js";
 import { tabVoices } from "../../../../packages/tools/speak.js";
 import type { Message } from "../app.js";
+import { withoutConsultLines } from "../lib/consult-command.js";
 import { type AgentRuntime, providerToRuntime } from "../lib/model-selection.js";
 
 // ============================================
@@ -67,12 +68,13 @@ function ensureTabsDir() {
 	}
 }
 
-function persistMessages(tabId: string, messages: Message[]) {
+/** Written to ~/.8gent/tabs. /consult lines are never saved: their replies hold unmasked values. */
+export function persistMessages(tabId: string, messages: Message[]) {
 	try {
 		ensureTabsDir();
 		const filePath = path.join(TABS_DIR, `chat-${tabId}.json`);
 		// Serialize with date handling
-		const serializable = messages.map((m) => ({
+		const serializable = withoutConsultLines(messages).map((m) => ({
 			...m,
 			timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp,
 		}));

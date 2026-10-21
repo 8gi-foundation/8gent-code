@@ -234,6 +234,7 @@ import { detectBuildIntent } from "./lib/build-intent.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
 import { clearSelection, onCopied } from "./lib/click-targets.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
+import { runConsultCommand } from "./lib/consult-command.js";
 import {
 	type ContextWindow,
 	UNKNOWN_WINDOW,
@@ -6059,11 +6060,18 @@ export function App({
 							import("../../../packages/providers/consult.js"),
 							import("../../../packages/providers/locality.js"),
 						])
-							.then(async ([c, l]) => {
-								addSystemMessage("Consulting the cloud model with the question masked...");
-								addSystemMessage(await c.consult(args.join(" "), c.defaultConsultDeps()));
-								setLocalChip(l.chipText(l.readLedger()));
-							})
+							.then(([c, l]) =>
+								runConsultCommand(args.join(" "), {
+									// Saved nowhere: see lib/consult-command.ts (ids start with consult-).
+									add: ({ id, content }) =>
+										setMessages((prev) => [
+											...prev,
+											{ id, role: "system" as const, content, timestamp: new Date() },
+										]),
+									consult: (q) => c.consult(q, c.defaultConsultDeps()),
+									after: () => setLocalChip(l.chipText(l.readLedger())),
+								}),
+							)
 							.catch((e) =>
 								addSystemMessage(`consult: ${e instanceof Error ? e.message : String(e)}`),
 							);
