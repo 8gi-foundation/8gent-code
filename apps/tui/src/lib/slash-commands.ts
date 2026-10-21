@@ -27,6 +27,7 @@ export type SlashCommand =
 	| "adhd"
 	| "quarantine"
 	| "toolshed"
+	| "me"
 	| "skills"
 	| "design"
 	| "evidence"
@@ -300,6 +301,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["quar", "sandbox"],
 		description: "Manage skill quarantine (add, scan, release, reject)",
 		usage: "/quarantine [add|scan|list|release|reject] [args]",
+	},
+	{
+		name: "me",
+		aliases: [],
+		description: "Show, add to or forget what 8gent knows about you (needs EIGHT_ME=1)",
+		usage: "/me [add <text> | forget <name>]",
 	},
 	{
 		name: "toolshed",

@@ -6194,6 +6194,44 @@ export function App({
 					else if (command === ("vision" as any)) {
 						handleVisionCommand(args);
 					}
+					// Handle /me (#4708): list, add and forget facts in the owned profile folder.
+					else if ((command as string) === "me") {
+						import("../../../packages/memory/me.js")
+							.then(({ meEnabled, meDir, loadMe, addFact, forgetFact }) => {
+								if (!meEnabled()) {
+									addSystemMessage(
+										"/me is off. Start 8gent with EIGHT_ME=1 to use your profile folder.",
+									);
+									return;
+								}
+								const dir = meDir();
+								const sub = args[0];
+								if (sub === "add") {
+									const text = args.slice(1).join(" ");
+									if (!text.trim()) return addSystemMessage("Usage: /me add <text>");
+									const f = addFact(dir, text);
+									addSystemMessage(`Added ${f.name} to ${dir}`);
+								} else if (sub === "forget") {
+									const name = args[1];
+									if (!name) return addSystemMessage("Usage: /me forget <name>");
+									addSystemMessage(
+										forgetFact(dir, name) ? `Forgot ${name}.` : `No fact named ${name} in ${dir}.`,
+									);
+								} else {
+									const facts = loadMe(dir).facts;
+									addSystemMessage(
+										facts.length === 0
+											? `Nothing in ${dir} yet. Try /me add <text>, or 8gent me import <dir>.`
+											: `${facts.length} facts in ${dir}\n${facts
+													.map((f) => `${f.name} (${f.type}): ${f.description}`)
+													.join("\n")}`,
+									);
+								}
+							})
+							.catch((e) =>
+								addSystemMessage(`/me failed: ${e instanceof Error ? e.message : String(e)}`),
+							);
+					}
 					// Handle /toolshed command: skill registry list | search | stats
 					else if ((command as string) === "toolshed") {
 						const sub = args[0] || "stats";
