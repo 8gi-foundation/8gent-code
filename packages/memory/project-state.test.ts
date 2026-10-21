@@ -91,4 +91,53 @@ describe("project state outside the repo (#4711)", () => {
 		fs.writeFileSync(path.join(global, "memory", "memory.db"), "GLOBAL");
 		expect(migrateRepoMemory(home, path.join(projectStateDir(home), "memory"))).toBe(false);
 	});
+
+	test("a planted symlink memory.db is never followed", () => {
+		const secret = path.join(root, "secret.db");
+		fs.writeFileSync(secret, "SECRET");
+		const old = path.join(repo, ".8gent", "memory");
+		fs.mkdirSync(old, { recursive: true });
+		fs.symlinkSync(secret, path.join(old, "memory.db"));
+		const dest = path.join(projectStateDir(repo), "memory");
+		expect(migrateRepoMemory(repo, dest)).toBe(false);
+		expect(fs.existsSync(path.join(dest, "memory.db"))).toBe(false);
+	});
+
+	test("a symlinked sidecar is skipped and an existing destination file is not overwritten", () => {
+		const old = path.join(repo, ".8gent", "memory");
+		fs.mkdirSync(old, { recursive: true });
+		fs.writeFileSync(path.join(old, "memory.db"), "OLD");
+		fs.writeFileSync(path.join(old, "memory.db-wal"), "OLDWAL");
+		fs.symlinkSync(path.join(root, "secret.db"), path.join(old, "memory.db-shm"));
+		const dest = path.join(projectStateDir(repo), "memory");
+		fs.mkdirSync(dest, { recursive: true });
+		fs.writeFileSync(path.join(dest, "memory.db-wal"), "KEEP");
+		expect(migrateRepoMemory(repo, dest)).toBe(true);
+		expect(fs.readFileSync(path.join(dest, "memory.db-wal"), "utf8")).toBe("KEEP");
+		expect(fs.existsSync(path.join(dest, "memory.db-shm"))).toBe(false);
+	});
+
+	test("a symlink at the destination db is refused", () => {
+		const old = path.join(repo, ".8gent", "memory");
+		fs.mkdirSync(old, { recursive: true });
+		fs.writeFileSync(path.join(old, "memory.db"), "OLD");
+		const dest = path.join(projectStateDir(repo), "memory");
+		fs.mkdirSync(dest, { recursive: true });
+		const target = path.join(root, "target.db");
+		fs.symlinkSync(target, path.join(dest, "memory.db"));
+		expect(migrateRepoMemory(repo, dest)).toBe(false);
+		expect(fs.existsSync(target)).toBe(false);
+	});
+
+	test("repo.path is written on create; a dir made for another path sends this repo to a longer hash", () => {
+		const first = prepareProjectMemoryDir(repo);
+		const stateDir = path.dirname(first);
+		expect(fs.readFileSync(path.join(stateDir, "repo.path"), "utf8")).toBe(fs.realpathSync(repo));
+		expect(prepareProjectMemoryDir(repo)).toBe(first);
+		fs.writeFileSync(path.join(stateDir, "repo.path"), "/somewhere/else");
+		const second = prepareProjectMemoryDir(repo);
+		expect(second).not.toBe(first);
+		expect(path.basename(path.dirname(second))).toHaveLength(24);
+		expect(projectStateDir(repo)).toBe(path.dirname(second));
+	});
 });

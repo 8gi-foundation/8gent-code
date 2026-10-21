@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
-import { CreatedFiles, watchRedirects, watchWrite } from "./s1-created-files";
+import { CreatedFiles, MAX_CREATED_ENTRIES, watchRedirects, watchWrite } from "./s1-created-files";
 import { rmOfNothingOrOwn } from "./s1-rm-nothing";
 import { rmOwnDir } from "./s1-rm-own-dir";
 
@@ -72,5 +72,15 @@ describe("#4711 own paths", () => {
 		sh("mkdir work");
 		writeFileSync(join(ws, "work", "theirs.txt"), "x");
 		expect(rmOwnDir("rmdir work", ws, rec).ok).toBe(false);
+	});
+
+	test("the record is capped; the oldest entry is dropped first", () => {
+		for (let i = 0; i <= MAX_CREATED_ENTRIES; i++) {
+			writeFileSync(join(ws, `f${i}.txt`), "x");
+			rec.record(join(ws, `f${i}.txt`));
+		}
+		expect(rec.size).toBe(MAX_CREATED_ENTRIES);
+		expect(rec.createdBySession(join(ws, "f0.txt"))).toBe(false);
+		expect(rec.createdBySession(join(ws, `f${MAX_CREATED_ENTRIES}.txt`))).toBe(true);
 	});
 });

@@ -179,6 +179,17 @@ export function dirIdentity(abs: string): Identity | null {
 	}
 }
 
+/** Session-wide cap on each record map; past it the oldest entry is dropped. */
+export const MAX_CREATED_ENTRIES = 5000;
+
+function setCapped(map: Map<string, Identity>, key: string, id: Identity): void {
+	if (!map.has(key) && map.size >= MAX_CREATED_ENTRIES) {
+		const oldest = map.keys().next().value;
+		if (oldest !== undefined) map.delete(oldest);
+	}
+	map.set(key, id);
+}
+
 export class CreatedFiles {
 	private readonly files = new Map<string, Identity>();
 	private readonly dirs = new Map<string, Identity>();
@@ -187,7 +198,7 @@ export class CreatedFiles {
 	recordDir(abs: string): void {
 		const key = keyOf(abs);
 		const id = dirIdentity(abs);
-		if (key && id) this.dirs.set(key, id);
+		if (key && id) setCapped(this.dirs, key, id);
 	}
 
 	/** True when `abs` is a directory this session created, and still that same directory. */
@@ -206,7 +217,7 @@ export class CreatedFiles {
 	record(abs: string): void {
 		const key = keyOf(abs);
 		const id = regularFile(abs);
-		if (key && id) this.files.set(key, id);
+		if (key && id) setCapped(this.files, key, id);
 	}
 
 	/** The session wrote `abs` again: keep its entry pointing at the file as it now is. */

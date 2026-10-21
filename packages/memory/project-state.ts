@@ -31,10 +31,52 @@ function absRepo(repo: string): string {
 	}
 }
 
-/** `<data dir>/projects/<12 hex of sha1(abs repo path)>` */
+const HASH_LENGTHS = [12, 24, 40];
+const MARKER = "repo.path";
+
+function hashOf(repo: string, len: number): string {
+	return createHash("sha1").update(absRepo(repo)).digest("hex").slice(0, len);
+}
+
+function readMarker(dir: string): string | null {
+	try {
+		return fs.readFileSync(path.join(dir, MARKER), "utf8");
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * `<data dir>/projects/<hash>`, the hash being the first 12 hex chars of sha1(abs repo path).
+ * The dir holds `repo.path` (the realpath it was made for); on a mismatch (a hash collision or a
+ * planted dir) the next longer hash is used. `create` writes the marker and logs one line on a mismatch.
+ */
+function resolveStateDir(repo: string, create: boolean): string {
+	const abs = absRepo(repo);
+	let dir = "";
+	for (const len of HASH_LENGTHS) {
+		dir = path.join(dataDir(), "projects", hashOf(repo, len));
+		const marker = readMarker(dir);
+		if (marker === abs) return dir;
+		if (marker === null) {
+			if (create) {
+				try {
+					fs.mkdirSync(dir, { recursive: true });
+					fs.writeFileSync(path.join(dir, MARKER), abs, { flag: "wx" });
+				} catch {
+					// another process won the race: re-read on the next open
+				}
+			}
+			return dir;
+		}
+		if (create)
+			console.error(`[memory] ${dir} belongs to ${marker}, not ${abs}: using a longer hash`);
+	}
+	return dir;
+}
+
 export function projectStateDir(repo: string): string {
-	const hash = createHash("sha1").update(absRepo(repo)).digest("hex").slice(0, 12);
-	return path.join(dataDir(), "projects", hash);
+	return resolveStateDir(repo, false);
 }
 
 /** The directory holding this repo's project memory (memory.db, project.jsonl). */
@@ -58,28 +100,52 @@ export function ensureEightIgnored(repo: string): boolean {
 	}
 }
 
+function isRegular(file: string): boolean {
+	try {
+		const st = fs.lstatSync(file);
+		return st.isFile() && !st.isSymbolicLink();
+	} catch {
+		return false;
+	}
+}
+
+function isRealDir(dir: string): boolean {
+	try {
+		const st = fs.lstatSync(dir);
+		return st.isDirectory() && !st.isSymbolicLink();
+	} catch {
+		return false;
+	}
+}
+
 /**
- * Copy `<repo>/.8gent/memory/memory.db` (and its -wal/-shm) to `destDir` once: only when
- * the old one exists and the new one does not. Never deletes the old one. One log line.
+ * Copy `<repo>/.8gent/memory/memory.db` (and its -wal/-shm, project.jsonl) to `destDir` once: only
+ * when the old one is a regular file (a symlink planted in the repo is never followed) and the new
+ * one does not exist (never overwritten: COPYFILE_EXCL, and a symlink at the destination is refused).
+ * Never deletes the old one. One log line.
  */
 export function migrateRepoMemory(repo: string, destDir: string): boolean {
 	try {
 		const legacyDir = path.join(repo, ".8gent", "memory");
 		const legacy = path.join(legacyDir, "memory.db");
 		const dest = path.join(destDir, "memory.db");
-		if (!fs.existsSync(legacy) || fs.existsSync(dest)) return false;
+		if (!isRealDir(path.join(repo, ".8gent")) || !isRealDir(legacyDir) || !isRegular(legacy))
+			return false;
+		if (fs.lstatSync(dest, { throwIfNoEntry: false })) return false;
 		// Run from HOME: the legacy dir is the global store, which is not this repo's to copy.
 		const globalDir = path.join(dataDir(), "memory");
 		if (fs.existsSync(globalDir) && fs.realpathSync(globalDir) === fs.realpathSync(legacyDir))
 			return false;
 		fs.mkdirSync(destDir, { recursive: true });
-		for (const suffix of ["", "-wal", "-shm"]) {
-			if (fs.existsSync(legacy + suffix)) fs.copyFileSync(legacy + suffix, dest + suffix);
-		}
-		for (const f of ["project.jsonl"]) {
-			const src = path.join(legacyDir, f);
-			if (fs.existsSync(src) && !fs.existsSync(path.join(destDir, f)))
-				fs.copyFileSync(src, path.join(destDir, f));
+		for (const name of ["memory.db", "memory.db-wal", "memory.db-shm", "project.jsonl"]) {
+			const src = path.join(legacyDir, name);
+			const to = path.join(destDir, name);
+			if (!isRegular(src) || fs.lstatSync(to, { throwIfNoEntry: false })) continue;
+			try {
+				fs.copyFileSync(src, to, fs.constants.COPYFILE_EXCL);
+			} catch {
+				// exists or unreadable: leave it
+			}
 		}
 		console.error(`[memory] moved project memory from ${legacyDir} to ${destDir}`);
 		return true;
@@ -90,8 +156,11 @@ export function migrateRepoMemory(repo: string, destDir: string): boolean {
 
 /** Resolve the project memory dir for a repo, doing the one-time migration or the opt-in ignore line. */
 export function prepareProjectMemoryDir(repo: string): string {
-	const dir = projectMemoryDir(repo);
-	if (projectStateInRepo()) ensureEightIgnored(repo);
-	else migrateRepoMemory(repo, dir);
+	if (projectStateInRepo()) {
+		ensureEightIgnored(repo);
+		return projectMemoryDir(repo);
+	}
+	const dir = path.join(resolveStateDir(repo, true), "memory");
+	migrateRepoMemory(repo, dir);
 	return dir;
 }

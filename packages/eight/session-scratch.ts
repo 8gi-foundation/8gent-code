@@ -4,7 +4,7 @@
  * `$TMPDIR/8gent-<session id>/`: created at session start, removed at session end, named in
  * the system prompt so the model keeps scratch files there and not in the person's repo.
  */
-import { mkdirSync, rmSync } from "node:fs";
+import { lstatSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,21 +12,31 @@ export function sessionScratchPath(sessionId: string): string {
 	return join(tmpdir(), `8gent-${sessionId}`);
 }
 
-/** Creates the directory (mode 0700). Returns its path, or null when it could not be made. */
+/**
+ * Creates the directory (mode 0700), not recursive: an existing path (a guessable name on a
+ * shared temp dir) is EEXIST and gives null, so this session never owns, and never removes,
+ * a directory it did not make. Returns its path, or null when it could not be made.
+ */
 export function createSessionScratch(sessionId: string): string | null {
 	const dir = sessionScratchPath(sessionId);
 	try {
-		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		mkdirSync(dir, { mode: 0o700 });
 		return dir;
 	} catch {
 		return null;
 	}
 }
 
-/** Removes the directory and what is in it. Never throws; safe to call twice. */
+/**
+ * Removes the directory and what is in it, only when lstat shows a real directory (not a
+ * symlink) owned by this uid. Never throws; safe to call twice.
+ */
 export function removeSessionScratch(dir: string | null): void {
 	if (!dir) return;
 	try {
+		const st = lstatSync(dir);
+		if (!st.isDirectory() || st.isSymbolicLink()) return;
+		if (typeof process.getuid === "function" && st.uid !== process.getuid()) return;
 		rmSync(dir, { recursive: true, force: true });
 	} catch {
 		// best effort: it is under the temp dir
