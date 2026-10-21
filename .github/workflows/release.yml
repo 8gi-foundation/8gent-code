@@ -8,6 +8,15 @@ on:
   # that token does not fire the push trigger above, so it starts this
   # workflow on the tag with workflow_dispatch instead.
   workflow_dispatch:
+    inputs:
+      # #4700: repair the npm channel for a tag that already shipped on GitHub.
+      # Dispatch on main with this set and only the npm-from-release job runs:
+      # it publishes that release's own tarball after checking SHA256SUMS.
+      npm_only_tag:
+        description: 'existing vX.Y.Z tag whose GitHub Release tarball should be published to npm (run from main); empty = a normal release run on the dispatched tag'
+        required: false
+        type: string
+        default: ''
 
 # The primary install is our own: scripts/install.sh, scripts/install.ps1 and
 # the binaries on the GitHub Release. npm is an optional extra channel: when
@@ -18,6 +27,7 @@ permissions: {}
 jobs:
   release:
     name: Release to GitHub + npm
+    if: ${{ !inputs.npm_only_tag }}
     runs-on: ubuntu-latest
     # contents: write creates the draft release. id-token: write is only for
     # the optional npm publish (trusted publishing with provenance); this is
@@ -206,7 +216,11 @@ jobs:
           else
             # The exact tarball staged and checksummed above, so npm and the
             # GitHub Release carry the same bytes (no second prepublishOnly build).
-            npm publish release-assets/*.tgz --access public --provenance
+            # #4700: an absolute path. npm reads a bare `release-assets/<file>`
+            # as a GitHub owner/repo shorthand and runs git ls-remote on it.
+            TGZ="${GITHUB_WORKSPACE}/release-assets/8gi-foundation-8gent-code-${VERSION}.tgz"
+            test -f "$TGZ" || { echo "::error::staged tarball ${TGZ} is missing"; exit 1; }
+            npm publish "$TGZ" --access public --provenance
           fi
 
       # When npm was published, confirm its latest tag moved to this release.
@@ -256,6 +270,84 @@ jobs:
       - name: Leave the release as a draft for the installers
         run: echo "release stays a draft until release-binaries.yml attaches the installers and publishes it"
 
+      # #4700: npm auth was there and the publish still failed. That is a red
+      # run, not a green one with a notice. It comes after the draft release
+      # exists, so release-binaries.yml still attaches the installers. No auth
+      # at all stays "skipped" and green.
+      - name: Fail when npm had auth and did not publish
+        if: steps.npm.outputs.npm == 'failed'
+        run: |
+          echo "::error::npm publish failed with npm auth available. Fix it, then run release.yml from main with npm_only_tag=${GITHUB_REF_NAME} to publish this release's tarball."
+          exit 1
+
+  # #4700: publish an already-released tag's tarball to npm, without a new tag
+  # and without rebuilding. Dispatched from main only, so the reviewed workflow
+  # on main is what holds id-token. Runs no repository or dependency code: it
+  # downloads the GitHub Release's tarball and SHA256SUMS, checks both, and
+  # publishes those bytes, so npm carries exactly what the release carries.
+  npm-from-release:
+    name: Publish an existing release tarball to npm
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.npm_only_tag != '' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Setup Node (for npm publish)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: npm (pinned)
+        run: |
+          npm install -g npm@11.6.2
+          test "$(npm --version)" = "11.6.2"
+
+      - name: Download, verify and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.npm_only_tag }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::npm_only_tag must be vX.Y.Z, got '${TAG}'"; exit 1
+          fi
+          VERSION="${TAG#v}"
+          PKG="@8gi-foundation/8gent-code"
+          NAME="8gi-foundation-8gent-code-${VERSION}.tgz"
+          if [ "$(npm view "${PKG}@${VERSION}" version 2>/dev/null || true)" = "$VERSION" ]; then
+            echo "${PKG}@${VERSION} is already on npm; nothing to do"; exit 0
+          fi
+          # Publishing an older version would move dist-tag latest backwards.
+          # An empty answer is a registry error, not "no latest": the package
+          # exists, so fail closed rather than skip the backwards check.
+          LATEST="$(npm view "$PKG" dist-tags.latest 2>/dev/null || true)"
+          if ! [[ "$LATEST" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::could not read npm dist-tag latest for ${PKG} (got '${LATEST}'); not publishing"; exit 1
+          fi
+          if [ "$(printf '%s\n%s\n' "$LATEST" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
+            echo "::error::npm latest is ${LATEST}, newer than ${VERSION}; not publishing over it"; exit 1
+          fi
+          DIR="${RUNNER_TEMP}/npm-from-release"
+          mkdir -p "$DIR"
+          gh release download "$TAG" --repo "$REPO" --dir "$DIR" --pattern "$NAME" --pattern SHA256SUMS
+          # The release's SHA256SUMS line for this tarball, and nothing else.
+          awk -v n="$NAME" '$2 == n || $2 == "*" n' "$DIR/SHA256SUMS" > "$DIR/want"
+          test "$(wc -l < "$DIR/want")" = 1 || { echo "::error::SHA256SUMS on ${TAG} has no single line for ${NAME}"; exit 1; }
+          (cd "$DIR" && sha256sum -c want)
+          GOT="$(tar -xOzf "$DIR/$NAME" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s);process.stdout.write(p.name+"@"+p.version)})')"
+          test "$GOT" = "${PKG}@${VERSION}" || { echo "::error::tarball is ${GOT}, expected ${PKG}@${VERSION}"; exit 1; }
+          # Absolute path: a bare dir/file argument is a GitHub shorthand to npm.
+          npm publish "$DIR/$NAME" --access public --provenance
+          for i in $(seq 1 20); do
+            [ "$(npm view "$PKG" dist-tags.latest 2>/dev/null || true)" = "$VERSION" ] && { echo "npm latest is ${VERSION}"; exit 0; }
+            sleep 15
+          done
+          echo "::error::published ${VERSION} but npm dist-tag latest did not move to it"; exit 1
+
   # A failed release used to be invisible for a week (#3658). Any failure
   # above opens (or comments on) one P0 issue, so it lands where people look.
   # The same goes for the npm channel: npm latest sat at 0.17.0 from May to
@@ -286,9 +378,10 @@ jobs:
           RELEASE_RESULT: ${{ needs.release.result }}
           NPM: ${{ needs.release.outputs.npm }}
         run: |
-          if [ "$RELEASE_RESULT" = "failure" ]; then
+          # A failed npm channel now fails the job too (#4700); it keeps its own text.
+          if [ "$RELEASE_RESULT" = "failure" ] && [ "$NPM" != "failed" ]; then
             bash scripts/release-alarm.sh "release.yml" "$REF" "$RUN_URL"
           else
             bash scripts/release-alarm.sh "release.yml npm channel" "$REF" "$RUN_URL" \
-              "The GitHub Release and the installers shipped, but the npm publish was ${NPM}: npm dist-tag latest did not move to ${REF}, so \`npm install -g @8gi-foundation/8gent-code\` and \`8gent update\` on the npm channel keep serving the previous version. Fix the npm channel (a trusted publisher for release.yml on npmjs.com, or a working NPM_TOKEN secret) so the next release publishes; to publish ${REF} itself, download its .tgz asset from the GitHub Release and run \`npm publish <tgz> --access public\` as an npm maintainer, so npm carries the same bytes as the release."
+              "The GitHub Release and the installers shipped, but the npm publish was ${NPM}: npm dist-tag latest did not move to ${REF}, so \`npm install -g @8gi-foundation/8gent-code\` and \`8gent update\` on the npm channel keep serving the previous version. Fix the npm channel (a trusted publisher for release.yml on npmjs.com, or a working NPM_TOKEN secret) so the next release publishes; to publish ${REF} itself, run release.yml from main with npm_only_tag=${REF} (it publishes the GitHub Release's own tarball after checking SHA256SUMS), so npm carries the same bytes as the release."
           fi
