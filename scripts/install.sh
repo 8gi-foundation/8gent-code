@@ -7,6 +7,11 @@
 # GitHub release that carries it and installs it as `8gent`. No Bun, Node or
 # npm needed. The Windows counterpart is scripts/install.ps1.
 #
+# The release list comes from api.github.com. When that is rate limited (60
+# unauthenticated requests an hour per IP) or down, the installer reads the
+# newest published release from github.com/<repo>/releases/latest instead and
+# checks each file it needs exists there. EIGHT_VERSION skips the list entirely.
+#
 # Trust chain, in order; any failure stops the install with nothing changed:
 #   1. Only https, only github.com release downloads, and redirects only to
 #      GitHub's download hosts (curl: --proto =https, every hop checked).
@@ -22,7 +27,7 @@
 #      name the release, before it replaces anything.
 #
 # Settings (environment variables, all optional):
-#   EIGHT_VERSION           install this version (0.20.0 or v0.20.0) instead of the newest
+#   EIGHT_VERSION           install this version (0.20.0 or v0.20.0) instead of the newest; no API call
 #   EIGHT_INSTALL_DIR       where the binary goes (default: $HOME/.local/bin)
 #   EIGHT_REPO              GitHub owner/repo (default: 8gi-foundation/8gent-code)
 #   EIGHT_RELEASES_URL      the releases list (https, or http://127.0.0.1 for tests)
@@ -163,6 +168,101 @@ fetch_list() {
 		delay=$((delay * 2))
 	done
 	return 1
+}
+
+# head_once URL: one HEAD request, no redirects followed. Sets HEAD_CODE and
+# HEAD_NEXT (the absolute redirect target, or empty). The caller checks URLs.
+head_once() {
+	HEAD_CODE=""
+	HEAD_NEXT=""
+	if is_local_url "$1"; then hproto="=http,https"; else hproto="=https"; fi
+	if command -v curl >/dev/null 2>&1 && [ -z "${EIGHT_TEST_FORCE_WGET:-}" ]; then
+		hres="$(curl -sS -I --proto "$hproto" --max-redirs 0 -o /dev/null -w '%{http_code} %{redirect_url}' "$1")" || { HEAD_CODE="curl-error"; return 1; }
+		HEAD_CODE="${hres%% *}"
+		HEAD_NEXT="${hres#* }"
+	elif command -v wget >/dev/null 2>&1; then
+		if is_local_url "$1"; then https_only=""; else https_only="--https-only"; fi
+		# shellcheck disable=SC2086
+		hhdr="$(wget -S --spider --max-redirect=0 $https_only "$1" 2>&1 >/dev/null || true)"
+		HEAD_CODE="$(printf '%s\n' "$hhdr" | awk '/^  HTTP\//{c=$2} END{print c}')"
+		HEAD_NEXT="$(printf '%s\n' "$hhdr" | awk 'tolower($1)=="location:"{l=$2} END{print l}' | tr -d '\r')"
+		case "$HEAD_NEXT" in "" | http://* | https://*) ;; /*) HEAD_NEXT="$(printf '%s' "$1" | sed -E 's#^([a-z]+://[^/]+).*#\1#')${HEAD_NEXT}" ;; esac
+	else
+		die "needs curl or wget"
+	fi
+	[ -n "$HEAD_CODE" ] || HEAD_CODE="none"
+}
+
+# valid_semver X: X is exactly N.N.N (digits and dots only, so no newline can
+# slip a second line past grep).
+valid_semver() {
+	case "$1" in '' | *[!0-9.]*) return 1 ;; esac
+	printf '%s' "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+}
+
+# latest_from_site: the no-API way to find the newest published release.
+# GitHub answers SITE/latest with a redirect to SITE/tag/<tag>; that page
+# skips drafts and prereleases. Sets VERSION, or returns 1 with LATEST_WHY.
+latest_from_site() {
+	LATEST_WHY=""
+	lurl="${SITE}/latest"
+	url_allowed "$lurl" list || die "refusing to read ${lurl}"
+	head_once "$lurl" || { LATEST_WHY="${lurl} did not answer (${HEAD_CODE})"; return 1; }
+	case "$HEAD_CODE" in
+		301 | 302 | 303 | 307 | 308) ;;
+		*) LATEST_WHY="${lurl} answered ${HEAD_CODE}, not a redirect to a release"; return 1 ;;
+	esac
+	case "$HEAD_NEXT" in
+		"${SITE}/tag/"*) ltag="${HEAD_NEXT#"${SITE}/tag/"}" ;;
+		*) LATEST_WHY="${lurl} redirected outside ${SITE}/tag/: ${HEAD_NEXT}"; return 1 ;;
+	esac
+	case "$ltag" in
+		v*) lver="${ltag#v}" ;;
+		*) lver="" ;;
+	esac
+	valid_semver "$lver" || { LATEST_WHY="the newest release tag is not vX.Y.Z: $(printf '%s' "$ltag" | head -c 80)"; return 1; }
+	VERSION="$lver"
+}
+
+# probe URL: does this release download exist? HEAD the github.com download
+# URL: 200, or a redirect to an allowed download host, means yes. The CDN hop
+# is not requested: its signed URLs are made for GET. Every hop is checked.
+probe() {
+	purl="$1"
+	phops=0
+	while :; do
+		head_once "$purl" || return 1
+		case "$HEAD_CODE" in
+			200) return 0 ;;
+			301 | 302 | 303 | 307 | 308)
+				url_allowed "$HEAD_NEXT" hop || die "refusing a redirect to ${HEAD_NEXT}"
+				# A local test server has no CDN: keep following there.
+				is_local_url "$HEAD_NEXT" || return 0
+				phops=$((phops + 1))
+				[ "$phops" -le 5 ] || die "too many redirects for $1"
+				purl="$HEAD_NEXT"
+				;;
+			*) return 1 ;;
+		esac
+	done
+}
+
+# release_asset NAME: set AURL to NAME's download URL on release TAG, checked
+# against the allowed hosts. Returns 1 when the release does not carry it.
+# With the API list it comes from the list; without, it is built from the
+# releases page and its existence is checked with probe.
+release_asset() {
+	AURL=""
+	if [ "$NOAPI" = 1 ]; then
+		cand="${SITE}/download/${TAG}/$1"
+		url_allowed "$cand" asset || die "refusing a download URL outside ${REPO}'s releases: ${cand}"
+		probe "$cand" || return 1
+		AURL="$cand"
+	else
+		AURL="$(url_for "$TMP/releases.json" "$TAG" "$1")"
+		[ -n "$AURL" ] || return 1
+		url_allowed "$AURL" asset || die "refusing a download URL outside ${REPO}'s releases: ${AURL}"
+	fi
 }
 
 sha256_of() {
@@ -306,6 +406,12 @@ main() {
 		http://127.0.0.1:* | http://127.0.0.1/*) LOCAL=1 ;;
 		*) die "EIGHT_RELEASES_URL must be https (or http://127.0.0.1 for tests): $(printf '%s' "$RELEASES_URL" | sed -E 's#^([a-zA-Z]+://)[^/@]*@#\1#; s#\?.*$#?...#')" ;;
 	esac
+	# The releases page, used when the API list is unavailable or not needed.
+	if [ "$LOCAL" = 1 ]; then
+		SITE="$(printf '%s' "$RELEASES_URL" | sed -E 's#^(http://127\.0\.0\.1(:[0-9]+)?).*#\1#')/releases"
+	else
+		SITE="https://github.com/${REPO}/releases"
+	fi
 	# A local test server may supply its own key; a real install trusts only the embedded one.
 	KEY="$EIGHT_SIGNING_KEY"
 	if [ "$LOCAL" = 1 ] && [ -n "${EIGHT_TEST_SIGNING_KEY:-}" ]; then KEY="$EIGHT_TEST_SIGNING_KEY"; fi
@@ -391,28 +497,44 @@ main() {
 	trap 'rm -rf "$TMP"' EXIT
 	trap 'exit 130' INT TERM
 
-	fetch_list "$TMP/releases.json" || die "could not read the release list at ${RELEASES_URL} (last status: ${FETCH_STATUS:-none})"
-	release_candidates "$TMP/releases.json" "$ASSET" >"$TMP/candidates" || true
-
+	# Which release. EIGHT_VERSION needs no list at all. Otherwise the API list
+	# (newest vX.Y.Z carrying this asset); when the API is rate limited or down,
+	# the releases page names the newest published release instead.
+	NOAPI=0
 	if [ -n "$WANT" ]; then
-		line="$(awk -v v="$WANT" '$1 == v' "$TMP/candidates" | tail -n 1)"
-		[ -n "$line" ] || die "release v${WANT} has no ${ASSET} binary (see https://github.com/${REPO}/releases)"
-	else
+		valid_semver "$WANT" || die "EIGHT_VERSION must look like 0.20.0 or v0.20.0, got: $(printf '%s' "${EIGHT_VERSION}" | head -c 80)"
+		NOAPI=1
+		VERSION="$WANT"
+	elif fetch_list "$TMP/releases.json"; then
+		release_candidates "$TMP/releases.json" "$ASSET" >"$TMP/candidates" || true
 		line="$(tail -n 1 "$TMP/candidates")"
 		[ -n "$line" ] || die "no release carries a ${ASSET} binary yet (see https://github.com/${REPO}/releases)"
+		VERSION="${line%% *}"
+	else
+		list_status="${FETCH_STATUS:-none}"
+		case "$list_status" in
+			403 | 429) say "GitHub API rate limited; using the releases page (${SITE}/latest)." ;;
+			*) say "GitHub API did not answer (status ${list_status}); using the releases page (${SITE}/latest)." ;;
+		esac
+		latest_from_site || die "could not read the release list at ${RELEASES_URL} (last status: ${list_status}), and the releases page fallback failed: ${LATEST_WHY}. Set EIGHT_VERSION=X.Y.Z to install a release by name"
+		NOAPI=1
 	fi
-	VERSION="${line%% *}"
-	URL="${line#* }"
 	TAG="v${VERSION}"
-	url_allowed "$URL" asset || die "refusing a download URL outside ${REPO}'s releases: ${URL}"
 
 	if [ "$NPM_PATH" = 1 ]; then
-		# The binary asset only resolved the newest release; the package is what gets installed.
+		# Termux installs the release's npm package, not the binary.
 		ASSET="8gi-foundation-8gent-code-${VERSION}.tgz"
-		URL="$(url_for "$TMP/releases.json" "$TAG" "$ASSET")"
-		[ -n "$URL" ] || die "release v${VERSION} has no ${ASSET} (see https://github.com/${REPO}/releases)"
-		url_allowed "$URL" asset || die "refusing a download URL outside ${REPO}'s releases: ${URL}"
 	fi
+	if ! release_asset "$ASSET"; then
+		if [ -n "$WANT" ]; then
+			die "release v${WANT} has no ${ASSET} (see https://github.com/${REPO}/releases)"
+		elif [ "$NOAPI" = 1 ]; then
+			die "the newest release v${VERSION} has no ${ASSET}; set EIGHT_VERSION=X.Y.Z to install a release that has one (see https://github.com/${REPO}/releases)"
+		else
+			die "release v${VERSION} has no ${ASSET} (see https://github.com/${REPO}/releases)"
+		fi
+	fi
+	URL="$AURL"
 
 	TARGET="${INSTALL_DIR}/8gent"
 	CURRENT="$(installed_version "$TARGET")"
@@ -426,15 +548,13 @@ main() {
 		exit 0
 	fi
 
-	SUMS_URL="$(url_for "$TMP/releases.json" "$TAG" SHA256SUMS)"
-	[ -n "$SUMS_URL" ] || die "release v${VERSION} has no SHA256SUMS; refusing an unverified binary"
-	url_allowed "$SUMS_URL" asset || die "refusing a download URL outside ${REPO}'s releases: ${SUMS_URL}"
+	release_asset SHA256SUMS || die "release v${VERSION} has no SHA256SUMS; refusing an unverified binary"
+	SUMS_URL="$AURL"
 	fetch "$SUMS_URL" "$TMP/SHA256SUMS" asset || die "could not download SHA256SUMS for v${VERSION}"
 
 	if [ -n "$KEY" ]; then
-		SIG_URL="$(url_for "$TMP/releases.json" "$TAG" SHA256SUMS.minisig)"
-		[ -n "$SIG_URL" ] || die "release v${VERSION} has no SHA256SUMS.minisig; refusing unsigned checksums"
-		url_allowed "$SIG_URL" asset || die "refusing a download URL outside ${REPO}'s releases: ${SIG_URL}"
+		release_asset SHA256SUMS.minisig || die "release v${VERSION} has no SHA256SUMS.minisig; refusing unsigned checksums"
+		SIG_URL="$AURL"
 		fetch "$SIG_URL" "$TMP/SHA256SUMS.minisig" asset || die "could not download SHA256SUMS.minisig for v${VERSION}"
 		find_minisign
 		if [ -n "$MS_BIN" ]; then

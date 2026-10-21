@@ -264,6 +264,169 @@ describe("install.sh: release list retry (#4468)", () => {
 	});
 });
 
+describe("install.sh: no-API fallback when the API is rate limited", () => {
+	const fast = { EIGHT_TEST_RETRY_DELAY: "0" };
+	/** The releases page: /releases/latest redirects to /releases/tag/<tag>, as on github.com. */
+	const latest = (target: string) => routes.set("/releases/latest", { location: target });
+	const apiDown = () => {
+		routes.get("/releases.json")!.failTimes = 99;
+	};
+
+	test("API 403 falls back to the releases page and installs, verified as before", async () => {
+		const url = publish([
+			{ tag: "v0.21.0", assets: { [ASSET]: fakeBinary("0.21.0") } },
+			{ tag: "v0.20.0", assets: { [ASSET]: fakeBinary("0.20.0") } },
+		]);
+		apiDown();
+		latest(`${base}/releases/tag/v0.21.0`);
+		const r = await install(url, fast);
+		expect(r.out).toContain("GitHub API rate limited; using the releases page");
+		expect(r.out).toContain("Installed 8gent v0.21.0");
+		expect(r.code).toBe(0);
+		expect(installed()).toBe("8gent Code v0.21.0");
+	});
+
+	test("the fallback still refuses a checksum mismatch", async () => {
+		const url = one("0.20.0", { badSum: true });
+		apiDown();
+		latest(`${base}/releases/tag/v0.20.0`);
+		const r = await install(url, fast);
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("checksum mismatch");
+		expect(installed()).toBeNull();
+	});
+
+	test("the fallback still requires SHA256SUMS and, with a key, its signature", async () => {
+		let url = one("0.20.0", { sums: false });
+		apiDown();
+		latest(`${base}/releases/tag/v0.20.0`);
+		let r = await install(url, fast);
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("has no SHA256SUMS");
+
+		url = one("0.20.0");
+		apiDown();
+		latest(`${base}/releases/tag/v0.20.0`);
+		r = await install(url, { ...fast, EIGHT_TEST_SIGNING_KEY: "RWTESTKEY" });
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("has no SHA256SUMS.minisig");
+		expect(installed()).toBeNull();
+	});
+
+	test("the fallback checks every redirect hop of a download", async () => {
+		const url = one("0.20.0");
+		apiDown();
+		latest(`${base}/releases/tag/v0.20.0`);
+		routes.set(`/releases/download/v0.20.0/${ASSET}`, { location: "http://evil.example/blob" });
+		const r = await install(url, fast);
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain("refusing a redirect");
+		expect(installed()).toBeNull();
+	});
+
+	test("Termux on the fallback installs the npm package with --ignore-scripts", async () => {
+		tool(
+			"uname",
+			`case "$1" in -s) echo Linux;; -m) echo aarch64;; -o) echo Android;; *) echo Linux;; esac`,
+		);
+		const log = join(root, "calls.log");
+		tool("node", "echo 26.0.0");
+		tool("npm", `echo "npm $*" >> "${log}"`);
+		const url = publish([
+			{
+				tag: "v0.20.0",
+				assets: { "8gi-foundation-8gent-code-0.20.0.tgz": "package 0.20.0" },
+			},
+		]);
+		apiDown();
+		latest(`${base}/releases/tag/v0.20.0`);
+		const r = await install(url, {
+			...fast,
+			PREFIX: "/data/data/com.termux/files/usr",
+			TERMUX_VERSION: "0.118",
+		});
+		expect(r.out).toContain("GitHub API rate limited; using the releases page");
+		expect(r.code).toBe(0);
+		expect(readFileSync(log, "utf8")).toMatch(
+			/^npm i -g --ignore-scripts \/.*8gi-foundation-8gent-code-0\.20\.0\.tgz$/m,
+		);
+	});
+
+	test("EIGHT_VERSION skips the API list entirely", async () => {
+		const url = publish([
+			{ tag: "v0.20.0", assets: { [ASSET]: fakeBinary("0.20.0") } },
+			{ tag: "v0.19.2", assets: { [ASSET]: fakeBinary("0.19.2") } },
+		]);
+		apiDown();
+		seenAuth = [];
+		const r = await install(url, { ...fast, EIGHT_VERSION: "v0.19.2" });
+		expect(r.code).toBe(0);
+		expect(installed()).toBe("8gent Code v0.19.2");
+		expect(seenAuth.length).toBe(0);
+		expect(r.out).not.toContain("GitHub API");
+	});
+
+	test("EIGHT_VERSION must be X.Y.Z, and a missing pinned release fails clearly", async () => {
+		const url = one("0.20.0");
+		for (const bad of ["latest", "0.20", "0.20.0-rc1", "../0.20.0", "0.20.0\n0.1.0"]) {
+			const r = await install(url, { ...fast, EIGHT_VERSION: bad });
+			expect(r.code).not.toBe(0);
+			expect(r.out).toContain("EIGHT_VERSION must look like 0.20.0");
+		}
+		const r = await install(url, { ...fast, EIGHT_VERSION: "0.19.0" });
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain(`release v0.19.0 has no ${ASSET}`);
+		expect(installed()).toBeNull();
+	});
+
+	test("a bad tag, or a redirect off the releases page, from /releases/latest is rejected", async () => {
+		for (const target of [
+			`${base}/releases/tag/desktop-v9.0.0`,
+			`${base}/releases/tag/v1.2`,
+			`${base}/releases/tag/v1.2.3-rc1`,
+			`${base}/releases/tag/v1.2.3%0Aevil`,
+			`${base}/releases/tag/v1.2.3/../../x`,
+			`${base}/elsewhere/tag/v1.2.3`,
+			"https://evil.example/releases/tag/v1.2.3",
+		]) {
+			const url = one("1.2.3");
+			apiDown();
+			latest(target);
+			const r = await install(url, fast);
+			expect(r.code).not.toBe(0);
+			expect(r.out).toContain("releases page fallback failed");
+			expect(r.out).toContain("EIGHT_VERSION=X.Y.Z");
+			expect(installed()).toBeNull();
+		}
+	});
+
+	test("a newest release without this machine's asset names EIGHT_VERSION as the way out", async () => {
+		const url = publish([
+			{ tag: "v0.21.0", assets: {} },
+			{ tag: "v0.20.0", assets: { [ASSET]: fakeBinary("0.20.0") } },
+		]);
+		apiDown();
+		latest(`${base}/releases/tag/v0.21.0`);
+		const r = await install(url, fast);
+		expect(r.code).not.toBe(0);
+		expect(r.out).toContain(`the newest release v0.21.0 has no ${ASSET}`);
+		expect(r.out).toContain("EIGHT_VERSION=X.Y.Z");
+		expect(installed()).toBeNull();
+	});
+
+	const wget = Bun.which("wget");
+	test.skipIf(!wget)("the fallback works with wget too", async () => {
+		symlinkSync(wget as string, join(fakeBin, "wget"));
+		const url = one("0.20.0");
+		apiDown();
+		latest(`${base}/releases/tag/v0.20.0`);
+		const r = await install(url, { ...fast, EIGHT_TEST_FORCE_WGET: "1" });
+		expect(r.out).toContain("GitHub API rate limited; using the releases page");
+		expect(r.code).toBe(0);
+		expect(installed()).toBe("8gent Code v0.20.0");
+	});
+});
+
 describe("install.sh: transport", () => {
 	test("refuses a non-https releases URL other than 127.0.0.1", async () => {
 		for (const u of ["http://example.com/releases.json", "file:///tmp/releases.json"]) {
