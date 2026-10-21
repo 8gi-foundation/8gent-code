@@ -1142,7 +1142,7 @@ export async function runRunCommand(
 				process.stderr.write(`[run] warn: could not save the session: ${String(err)}\n`);
 			}
 		}
-		const notice = verdictNotice(check);
+		const notice = verdictNotice(check, agent.getRanCommands(), workDir);
 		const finalText = notice ? `${check.finalText}\n\n${notice}` : check.finalText;
 		const projectCheck = {
 			status: check.status,
@@ -1152,7 +1152,8 @@ export async function runRunCommand(
 			notice,
 		};
 		if (check.status === "fail") exitCode = 1;
-		if (notice) process.stderr.write(`${notice}\n`);
+		// Once per run: the plain-text paths already print finalText, which carries the notice.
+		if (notice && isStreamJson) process.stderr.write(`${notice}\n`);
 
 		// The harness sets this flag; model text cannot (#3899).
 		const turnFailure = agent.getLastTurnFailure();

@@ -465,6 +465,8 @@ export class Agent {
 	private events: AgentEventCallbacks;
 	private planner: ProactivePlanner;
 	private evidenceCollector: EvidenceCollector;
+	/** run_command inputs the model issued this session, oldest first. */
+	private ranCommands: string[] = [];
 	private sessionEvidence: Evidence[] = [];
 	private proactiveGatherer: ProactiveGatherer | null = null;
 	// workflowValidator: removed in v0.11.1. PlanValidateLoop was constructed in
@@ -2934,6 +2936,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					}
 				}
 
+				// What the model ran itself, so the done gate can tell it ran the check (#4712).
+				if (event.toolName === "run_command" && typeof event.args.command === "string")
+					this.ranCommands.push(event.args.command);
+
 				// Track git operations
 				if (event.toolName === "git_commit" && resultStr.includes("[")) {
 					const commitHash = extractCommitHash(resultStr);
@@ -4472,6 +4478,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	/**
 	 * Get current message history (for checkpointing).
 	 */
+	getRanCommands(): readonly string[] {
+		return this.ranCommands;
+	}
+
 	getMessageHistory(): Array<{ role: string; content: string }> {
 		return [...this.messageHistory];
 	}

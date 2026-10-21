@@ -626,6 +626,14 @@ export function settingsFileIsTrusted(
 // Provider Manager
 // ============================================
 
+const warnedIgnored = new Set<string>();
+/** Print a dropped-declaration line at most once per process. */
+function warnIgnoredOnce(message: string): void {
+	if (warnedIgnored.has(message)) return;
+	warnedIgnored.add(message);
+	console.warn(message);
+}
+
 export class ProviderManager {
 	private settings: ProviderSettings;
 	private settingsPath: string;
@@ -635,6 +643,8 @@ export class ProviderManager {
 	private refusedPlainKeys = new Set<string>();
 	/** Providers declared in providers.json under a name we did not compile in. */
 	private declared: Record<string, ProviderConfig>;
+	/** Declarations dropped at load, by name, with the sentence that says why (#4712). */
+	private ignoredDeclarations = new Map<string, string>();
 	private plainKeyProviders = new Set<string>();
 	private plainKeyWarned = new Set<string>();
 	readonly authRotator: AuthRotator;
@@ -667,7 +677,17 @@ export class ProviderManager {
 		// typed it, so a field we do not model (a note, a comment, a key a later
 		// version adds) survives every save. Validation happens on read instead,
 		// in getProvider().
-		this.declared = parseDeclaredProviders(this.settings.providers, BUILTIN_PROVIDER_NAMES);
+		// A dropped declaration is said once per process, and only when it matters: with
+		// DEBUG=1, or when that provider is selected. Seven stale entries used to print
+		// seven lines on every run, for providers nobody asked for.
+		this.declared = parseDeclaredProviders(
+			this.settings.providers,
+			BUILTIN_PROVIDER_NAMES,
+			(message, name) => {
+				this.ignoredDeclarations.set(name, message);
+				if (process.env.DEBUG === "1") warnIgnoredOnce(message);
+			},
+		);
 		this.authRotator = new AuthRotator();
 		this.failover = new ModelFailover();
 	}
@@ -744,7 +764,10 @@ export class ProviderManager {
 		const base = this.declared[name];
 		// Not a built-in and not a valid declaration: preserve the old behaviour
 		// of handing back whatever was there rather than throwing.
-		if (!base) return { ...overrides } as ProviderConfig;
+		if (!base) {
+			this.sayIgnored(name);
+			return { ...overrides } as ProviderConfig;
+		}
 
 		// Re-normalize on READ. The user's raw entry is never rewritten, so an
 		// invalid field still cannot override its own sanitized value, but a
@@ -760,7 +783,15 @@ export class ProviderManager {
 	 * issue #2882. A genuinely unknown name is still rejected.
 	 */
 	isKnownProvider(name: string): boolean {
-		return BUILTIN_PROVIDER_NAMES.has(name) || name in this.declared;
+		const known = BUILTIN_PROVIDER_NAMES.has(name) || name in this.declared;
+		if (!known) this.sayIgnored(name);
+		return known;
+	}
+
+	/** The selected provider was dropped at load: say why, once per process. */
+	private sayIgnored(name: string): void {
+		const message = this.ignoredDeclarations.get(name);
+		if (message) warnIgnoredOnce(message);
 	}
 
 	setActiveProvider(name: ProviderName): void {

@@ -95,7 +95,7 @@ export function normalizeDeclaredProvider(
 export function parseDeclaredProviders(
 	raw: Record<string, Partial<ProviderConfig>> | undefined,
 	builtinNames: ReadonlySet<string>,
-	warn: (message: string) => void = (m) => console.warn(m),
+	warn: (message: string, name: string) => void = (m) => console.warn(m),
 ): Record<string, ProviderConfig> {
 	const declared: Record<string, ProviderConfig> = {};
 	if (!raw || typeof raw !== "object") return declared;
@@ -113,6 +113,7 @@ export function parseDeclaredProviders(
 		warn(
 			`providers.json: ignoring "${name}" - a declared provider needs a valid ` +
 				`http(s) "baseUrl". Got: ${JSON.stringify(entry.baseUrl ?? null)}`,
+			name,
 		);
 	}
 	return declared;
