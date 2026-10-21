@@ -192,3 +192,26 @@ for (const k of ["existsSync", "readFileSync", "statSync", "accessSync"]) {
 		expect(files).toContain("dist/node/tui.js");
 	});
 });
+
+// Termux v0.20.8: the Node TUI died on its first coloured <Text> with "Cannot read properties of
+// undefined (reading 'ansi16m')" because chalk 4 had been bundled against ansi-styles 6. chalk only
+// touches that table when colour is on, so levels 1-3 crash and 0 does not. Run the real bundle at
+// every level (no pty needed: FORCE_COLOR makes chalk colour a pipe) and require no TypeError.
+describe.skipIf(!built || !node)("dist/node/tui.js colours", () => {
+	for (const level of ["0", "1", "2", "3"]) {
+		test(`FORCE_COLOR=${level}: first render does not throw`, () => {
+			const cwd = mkdtempSync(join(tmpdir(), "8gent-chalk-"));
+			const r = spawnSync(node as string, [tui], {
+				cwd,
+				encoding: "utf8",
+				timeout: 8000,
+				killSignal: "SIGKILL",
+				input: "",
+				env: { ...process.env, FORCE_COLOR: level, TERM: "xterm-256color", COLORTERM: "" },
+			});
+			const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+			expect(out).not.toMatch(/TypeError|ansi16m/);
+			expect(out.length).toBeGreaterThan(0);
+		});
+	}
+});
