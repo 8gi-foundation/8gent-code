@@ -115,6 +115,13 @@ jobs:
           head -1 dist/cli.js | grep -qxF "#!/usr/bin/env -S bun --no-env-file --config=/dev/null" || (echo "Safe shebang missing (#4013)" && exit 1)
           echo "Build OK"
 
+      # #4660: the Node TUI must render coloured text at every colour level. Runs after the build
+      # because it needs dist/node/tui.js; EIGHT_REQUIRE_NODE_BUNDLE makes a missing bundle or Node a failure.
+      - name: Node bundle colours (FORCE_COLOR 0-3)
+        env:
+          EIGHT_REQUIRE_NODE_BUNDLE: "1"
+        run: bun test packages/node-compat/node-bundle.test.ts
+
       # #3219: never publish a tarball that has not been installed and run
       # somewhere other than the build checkout.
       - name: npm pack-and-install smoke
