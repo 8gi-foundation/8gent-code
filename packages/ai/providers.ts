@@ -7,16 +7,16 @@
 
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
-import { modelFetchAsFetch } from "./model-fetch";
-import { loadSettings } from "../settings/store";
-import { resolveRetrySettings } from "../settings/retry";
-import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
 import {
 	missingKeyMessage,
 	resolveProviderBaseUrl,
 	resolveProviderKey,
 } from "../providers/key-resolver";
+import { resolveRetrySettings } from "../settings/retry";
+import { loadSettings } from "../settings/store";
+import { modelFetchAsFetch } from "./model-fetch";
+import { resolveOllamaBaseUrl } from "./text-tool-endpoint";
 
 export type LocalOrBuiltinProviderName =
 	| "ollama"
@@ -35,7 +35,10 @@ export interface ProviderConfig {
 	headers?: Record<string, string>;
 }
 
-const DEFAULT_URLS: Record<Exclude<LocalOrBuiltinProviderName, "ollama" | "llama-server">, string> = {
+const DEFAULT_URLS: Record<
+	Exclude<LocalOrBuiltinProviderName, "ollama" | "llama-server">,
+	string
+> = {
 	lmstudio: "http://localhost:1234/v1",
 	openrouter: "https://openrouter.ai/api/v1",
 	// apfel (https://github.com/Arthur-Ficial/apfel) exposes Apple Foundation
@@ -80,7 +83,6 @@ export function createModel(config: ProviderConfig): LanguageModel {
 		);
 	}
 	const baseURL = config.baseURL || defaultBaseUrl(config.name);
-	const isFreeModel = config.model.includes(":free") || config.name === "openrouter";
 	const apiKey = config.apiKey || getApiKeyFromEnv(config.name);
 
 	const provider = createOpenAICompatible({
@@ -136,7 +138,11 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
  * True when a request would go to a hosted endpoint with no API key (#3746).
  * Keyless local providers and loopback endpoints never count as hosted.
  */
-export function hostedWithoutKey(name: string, baseURL: string | undefined, apiKey: string | undefined): boolean {
+export function hostedWithoutKey(
+	name: string,
+	baseURL: string | undefined,
+	apiKey: string | undefined,
+): boolean {
 	if (apiKey?.trim()) return false;
 	if (KEYLESS_PROVIDERS.has(name)) return false;
 	let host: string;

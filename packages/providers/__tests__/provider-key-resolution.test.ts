@@ -33,18 +33,18 @@ beforeEach(() => {
 	resetKeyVault({ primary: file, file });
 	for (const k of ["EIGHT_DATA_DIR", "EIGHT_PROVIDERS_SETTINGS_PATH"]) savedEnv[k] = process.env[k];
 	process.env.EIGHT_DATA_DIR = home;
-	delete process.env.EIGHT_PROVIDERS_SETTINGS_PATH;
+	Reflect.deleteProperty(process.env, "EIGHT_PROVIDERS_SETTINGS_PATH");
 	resetProviderManager();
 	for (const k of allKeyEnvs()) {
 		savedEnv[k] = process.env[k];
-		delete process.env[k];
+		Reflect.deleteProperty(process.env, k);
 	}
 	savedFetch = globalThis.fetch;
 });
 
 afterEach(() => {
 	for (const [k, v] of Object.entries(savedEnv)) {
-		if (v === undefined) delete process.env[k];
+		if (v === undefined) Reflect.deleteProperty(process.env, k);
 		else process.env[k] = v;
 	}
 	globalThis.fetch = savedFetch;
@@ -65,7 +65,9 @@ function mockFetch(seen: Seen[]): void {
 		return new Response(
 			JSON.stringify({
 				id: "x",
-				choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+				choices: [
+					{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" },
+				],
 				usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
 			}),
 			{ status: 200, headers: { "content-type": "application/json" } },
@@ -100,7 +102,7 @@ describe("registry-driven key resolution", () => {
 			const seen: Seen[] = [];
 			mockFetch(seen);
 			await call(name);
-			delete process.env[cfg.apiKeyEnv];
+			Reflect.deleteProperty(process.env, cfg.apiKeyEnv);
 			expect(seen.length, name).toBe(1);
 			expect(seen[0].url.startsWith(cfg.baseUrl), `${name}: ${seen[0].url}`).toBe(true);
 			expect(seen[0].auth, name).toBe(`Bearer ${fake}`);

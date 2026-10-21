@@ -1201,7 +1201,8 @@ export async function runRunCommand(
 			console.info = originalConsoleInfo;
 		}
 		if (workspaceRoot) {
-			if (priorWorkspaceRoot === undefined) delete process.env.EIGHT_WORKSPACE_ROOT;
+			if (priorWorkspaceRoot === undefined)
+				Reflect.deleteProperty(process.env, "EIGHT_WORKSPACE_ROOT");
 			else process.env.EIGHT_WORKSPACE_ROOT = priorWorkspaceRoot;
 		}
 	}
