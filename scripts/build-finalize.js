@@ -2,16 +2,16 @@
 // Cross-platform replacement for: chmod +x && bash copy-bundled-skills.sh && bash copy-bundled-sounds.sh
 import {
 	chmodSync,
-	mkdirSync,
-	readdirSync,
 	copyFileSync,
 	existsSync,
+	mkdirSync,
 	readFileSync,
-	writeFileSync,
+	readdirSync,
 	realpathSync,
+	writeFileSync,
 } from "node:fs";
-import { join, dirname } from "node:path";
 import { homedir, platform } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findBakedRoots, unbakeBuildPaths } from "./lib/unbake-build-paths.js";
 
@@ -29,10 +29,27 @@ try {
 try {
 	buildRoots.push(dirname(realpathSync(join(ROOT, "node_modules"))));
 } catch {}
-for (const name of ["cli.js", "tui.js"]) {
+for (const name of ["cli.js", "tui.js", "node/cli.js", "node/tui.js"]) {
 	const file = join(ROOT, "dist", name);
 	if (!existsSync(file)) continue;
-	const { code, replaced } = unbakeBuildPaths(readFileSync(file, "utf-8"), buildRoots);
+	const isNode = name.startsWith("node/");
+	// Node has no import.meta.dir; its bundles sit one level deeper (dist/node/).
+	const { code, replaced } = unbakeBuildPaths(
+		readFileSync(file, "utf-8"),
+		buildRoots,
+		isNode ? { meta: "dirname", up: "/../.." } : {},
+	);
+	if (isNode) {
+		// Bun-only import.meta.dir/.path are undefined on Node and silently resolve against the
+		// working directory (a hostile repo can plant files there). Never ship them.
+		const bad = code.match(/import\.meta\.(dir(?!name)|path)\b/);
+		if (bad) {
+			console.error(
+				`[build-finalize] dist/${name} still uses ${bad[0]}, which is undefined on Node`,
+			);
+			process.exit(1);
+		}
+	}
 	const left = findBakedRoots(code, buildRoots, [homedir()]);
 	if (left.length > 0) {
 		console.error(
@@ -97,4 +114,7 @@ const bridgeSrc = join(ROOT, "packages", "terminal-tab", "pty-bridge.cjs");
 if (existsSync(bridgeSrc)) {
 	copyFileSync(bridgeSrc, join(ROOT, "dist", "pty-bridge.cjs"));
 	console.log("[copy-pty-bridge] copied pty-bridge.cjs to dist/");
+	// The Node build's TUI (dist/node/tui.js) looks beside itself too.
+	if (existsSync(join(ROOT, "dist", "node")))
+		copyFileSync(bridgeSrc, join(ROOT, "dist", "node", "pty-bridge.cjs"));
 }

@@ -2,6 +2,9 @@
   "name": "@8gi-foundation/8gent-code",
   "version": "0.20.7",
   "private": false,
+  "engines": {
+    "node": ">=22.5"
+  },
   "description": "Autonomous coding agent. Runs locally on Ollama. Zero API cost. Your code stays on your machine. Open source.",
   "type": "module",
   "bin": {
@@ -13,9 +16,15 @@
     "dist/cli.js",
     "dist/tui.js",
     "dist/pty-bridge.cjs",
+		"dist/node/cli.js",
+		"dist/node/tui.js",
+		"dist/node/pty-bridge.cjs",
     "dist/skills",
     "dist/sounds",
     "bin/8gent-run.js",
+    "bin/node-version.js",
+    "packages/decide/calibration",
+    "packages/daemon/VESSEL-CONTEXT.md",
     "bin/bunfig.empty.toml",
     "scripts/postinstall.js",
     "README.md",
@@ -38,7 +47,7 @@
     "build:eyes-bridge": "bash packages/eyes/native/build.sh",
     "cli": "bun --config=bin/bunfig.empty.toml run bin/8gent.ts",
     "dev": "next dev",
-    "build": "bun --config=bin/bunfig.empty.toml scripts/build-bundles.ts && node scripts/build-finalize.js",
+    "build": "bun --config=bin/bunfig.empty.toml scripts/build-bundles.ts && bun --config=bin/bunfig.empty.toml scripts/build-node.ts && node scripts/build-finalize.js",
     "build:tui": "bun --config=bin/bunfig.empty.toml scripts/build-bundles.ts --tui && node scripts/build-finalize.js",
     "build:binaries": "bun --config=bin/bunfig.empty.toml run scripts/build-binaries.ts",
     "build:binaries:host": "bun --config=bin/bunfig.empty.toml run scripts/build-binaries.ts --host",
@@ -114,7 +123,6 @@
     "@types/pdf-parse": "^1.1.5",
     "@types/react": "^19.2.14",
     "ai": "^6.0.116",
-    "better-sqlite3": "^12.8.0",
     "cheerio": "^1.2.0",
     "glob": "^13.0.6",
     "ink": "^6.8.0",
@@ -136,6 +144,7 @@
     "zod": "^4.3.6"
   },
   "optionalDependencies": {
+    "better-sqlite3": "^12.8.0",
     "node-pty": "^1.1.0",
     "tree-sitter": "^0.21.0",
     "tree-sitter-go": "^0.21.0",

@@ -11,7 +11,6 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { type DecisionGate, logToolDecision } from "@8gent/audit";
 import { parse as parseYaml } from "yaml";
 import { resolveHome } from "../core/home.js";
@@ -37,10 +36,35 @@ import type {
 // Constants
 // ============================================
 
-const DEFAULT_POLICY_PATH = path.join(
-	path.dirname(typeof __filename !== "undefined" ? __filename : fileURLToPath(import.meta.url)),
-	"default-policies.yaml",
-);
+// The shipped defaults are compiled INTO the module (text import), never read from a path:
+// a path can be planted (a hostile cwd) or absent (an npm install, a compiled binary), and a
+// missing defaults file must stop 8gent, not quietly run with no immutable rules.
+import DEFAULT_POLICY_TEXT from "./default-policies.yaml" with { type: "text" };
+
+const DEFAULT_POLICY_LABEL = "default-policies.yaml (built in)";
+
+/** Parse the built-in defaults. Throws, never returns empty: no defaults means no start. */
+export function parseDefaultPolicies(text: string): PolicyFile {
+	if (typeof text !== "string" || text.trim() === "") {
+		throw new Error(
+			`[policy-engine] ${DEFAULT_POLICY_LABEL} is missing or empty. Refusing to start without the default policies.`,
+		);
+	}
+	let file: PolicyFile | undefined;
+	try {
+		file = parseYaml(text) as PolicyFile;
+	} catch (err) {
+		throw new Error(
+			`[policy-engine] ${DEFAULT_POLICY_LABEL} is not valid YAML (${err}). Refusing to start without the default policies.`,
+		);
+	}
+	if (!file?.policies || !Array.isArray(file.policies) || file.policies.length === 0) {
+		throw new Error(
+			`[policy-engine] ${DEFAULT_POLICY_LABEL} has no policies. Refusing to start without the default policies.`,
+		);
+	}
+	return file;
+}
 
 const USER_POLICY_PATH = path.join(
 	process.env.EIGHT_DATA_DIR || path.join(resolveHome(), ".8gent"),
@@ -241,12 +265,11 @@ function verifyChecksum(yamlContent: string): string | null {
  * Default policy rules are marked immutable - they cannot be overridden by addPolicy().
  */
 export function loadPolicies(yamlPath?: string): PolicyRule[] {
-	const sources: { path: string; isDefault: boolean }[] = [];
+	const sources: { path: string; isDefault: boolean; text?: string }[] = [];
 
-	// 1. Ship defaults
-	if (fs.existsSync(DEFAULT_POLICY_PATH)) {
-		sources.push({ path: DEFAULT_POLICY_PATH, isDefault: true });
-	}
+	// 1. Ship defaults (built in; a failure here throws, see parseDefaultPolicies)
+	parseDefaultPolicies(DEFAULT_POLICY_TEXT);
+	sources.push({ path: DEFAULT_POLICY_LABEL, isDefault: true, text: DEFAULT_POLICY_TEXT });
 
 	// 2. User overrides
 	if (fs.existsSync(USER_POLICY_PATH)) {
@@ -267,7 +290,7 @@ export function loadPolicies(yamlPath?: string): PolicyRule[] {
 
 	for (const src of sources) {
 		try {
-			const raw = fs.readFileSync(src.path, "utf-8");
+			const raw = src.text ?? fs.readFileSync(src.path, "utf-8");
 			allYamlContent.push(raw);
 			const file = parseYaml(raw) as PolicyFile;
 			if (file?.policies && Array.isArray(file.policies)) {
@@ -277,6 +300,8 @@ export function loadPolicies(yamlPath?: string): PolicyRule[] {
 					try {
 						parsed.set(idx, parseCondition(rule.condition));
 					} catch (err) {
+						// A broken built-in rule is a broken build: never skip an immutable default.
+						if (src.isDefault) throw err;
 						console.warn(
 							`[policy-engine] Invalid condition in rule "${rule.name}" from ${src.path}: ${err}`,
 						);
@@ -291,6 +316,7 @@ export function loadPolicies(yamlPath?: string): PolicyRule[] {
 				}
 			}
 		} catch (err) {
+			if (src.isDefault) throw err;
 			console.warn(`[policy-engine] Failed to load ${src.path}: ${err}`);
 		}
 	}
