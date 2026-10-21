@@ -9,6 +9,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.10] - 2026-10-21
+
+### Fixed
+- release: run the Termux smoke under termux-exec LD_PRELOAD like a real shell (#4690) ([#4691](https://github.com/8gi-foundation/8gent-code/pull/4691))
+- install: Termux installs the release npm package instead of refusing ([#4686](https://github.com/8gi-foundation/8gent-code/pull/4686))
+
 ## [0.20.9] - 2026-10-21
 
 ### Added
