@@ -776,8 +776,29 @@ async function keysCommand(args: string[]): Promise<void> {
 		return;
 	}
 
+	if (sub === "set") {
+		const name = (args[1] || "").toLowerCase();
+		const { getProviderManager } = await import("../packages/providers/index.ts");
+		const pm = getProviderManager();
+		if (!name || !pm.isKnownProvider(name) || !pm.getProvider(name).apiKeyEnv) {
+			console.error("Usage: 8gent keys set <provider>   (e.g. 8gent keys set minimax)");
+			process.exit(1);
+		}
+		const cfg = pm.getProvider(name);
+		const { setKeyInFile } = await import("../packages/secrets/index.ts");
+		const { readHidden } = await import("../packages/secrets/read-hidden.ts");
+		const value = await readHidden(`Paste your ${cfg.displayName} key (hidden): `);
+		const err = setKeyInFile(cfg.apiKeyEnv, value);
+		if (err) {
+			console.error(err);
+			process.exit(1);
+		}
+		console.log(`Saved ${cfg.apiKeyEnv} to ${KEYS_PATH}.`);
+		return;
+	}
+
 	console.error(`Unknown subcommand: keys ${sub}`);
-	console.error(`Try: keys open | keys reload | keys status`);
+	console.error(`Try: keys open | keys reload | keys status | keys set <provider>`);
 	process.exit(1);
 }
 
@@ -1964,20 +1985,24 @@ async function chatCommand(args: string[]) {
 	// Provider + model: --provider/--model, else the choice saved by onboarding,
 	// else the router (#4362). A saved provider that does not answer falls back
 	// with a stated reason on stderr.
-	const { resolveChatChoice, liveProviderChoiceDeps, modelForOneShot } = await import(
+	const { resolveChatChoice, liveProviderChoiceDeps, modelForOneShotWithReason, noModelNotice } =
+		await import(
 		"../packages/eight/run.ts"
 	);
 	const choice = await resolveChatChoice({ provider, model }, liveProviderChoiceDeps());
 	if (choice.notice) console.error(choice.notice);
 	let resolvedModel = choice.model;
+	let modelError: unknown;
 	if (!resolvedModel && choice.provider !== "ollama") {
-		resolvedModel = await modelForOneShot(choice.provider, undefined);
+		const picked = await modelForOneShotWithReason(choice.provider, undefined);
+		resolvedModel = picked.model;
+		modelError = picked.error;
 	}
 	if (!resolvedModel) {
 		const errMsg =
 			choice.provider === "ollama"
 				? "No Ollama models available. Pull a model first: ollama pull qwen3:14b"
-				: `No model chosen for ${choice.provider}: its model list could not be fetched. Pass --model <name>.`;
+				: await noModelNotice(choice.provider, modelError);
 		if (isJson) {
 			jsonOut({ success: false, error: errMsg });
 		} else {

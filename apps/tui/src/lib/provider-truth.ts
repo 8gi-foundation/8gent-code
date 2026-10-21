@@ -13,6 +13,7 @@
 
 import type { ProviderOption } from "../components/select-input";
 import type { LiveModelsReader } from "./model-selection";
+import { keyLooksUsable, noModelMessage } from "../../../../packages/providers/no-model-message.js";
 import { declaredModels } from "./model-selection";
 
 /** The slice of ProviderManager the picker needs. */
@@ -112,7 +113,10 @@ export function registryKeyNotice(
 	if (provider === "openrouter" || provider === "openrouter-free") return null;
 	try {
 		if (!reader.isKnownProvider(provider)) return null;
-		return providerKeyNotice(reader.getProvider(provider), Boolean(reader.getApiKey(provider)));
+		return providerKeyNotice(
+			reader.getProvider(provider),
+			keyLooksUsable(reader.getApiKey(provider)),
+		);
 	} catch {
 		return null;
 	}
@@ -122,6 +126,15 @@ export function registryKeyNotice(
 export function modelListFailureNotice(displayName: string, err: unknown): string {
 	const msg = err instanceof Error ? err.message : err ? String(err) : "";
 	const status = /: (\d{3})\b/.exec(msg)?.[1];
+	if (status === "401" || status === "403") {
+		return noModelMessage({
+			displayName,
+			keyEnv: "",
+			key: null,
+			err,
+			pickHint: "Pick a model with /model.",
+		});
+	}
 	if (status) {
 		return `No model chosen for ${displayName}: its model list request failed with HTTP ${status}. Pick a model with /model.`;
 	}

@@ -290,7 +290,7 @@ export async function planAgentBuild(
 	if (!model.trim()) {
 		return {
 			kind: "wait",
-			notice: `No model chosen for ${provider}: its model list could not be fetched. Pick a model with /model.`,
+			notice: `No model chosen for ${provider} yet. Pick a model with /model.`,
 		};
 	}
 	const r = await resolveAgentModel(provider, model, resolve);

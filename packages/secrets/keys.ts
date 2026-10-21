@@ -26,7 +26,14 @@
  */
 
 import { execSync, spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -118,6 +125,35 @@ export function readKeysFile(path: string = KEYS_PATH): Record<string, string> {
 		if (key && value) out[key] = value;
 	}
 	return out;
+}
+
+/** A pasted value shorter than this is not a real provider key. */
+export const MIN_SET_KEY_CHARS = 20;
+
+/**
+ * Set one `NAME=value` line in the keys file (replacing any earlier line for
+ * NAME), mode 0600. Returns an error string and writes nothing when the value
+ * is too short or the name is not an env-var name. Never echoes the value.
+ */
+export function setKeyInFile(
+	name: string,
+	value: string,
+	path: string = KEYS_PATH,
+): string | null {
+	const v = value.trim();
+	if (!/^[A-Z][A-Z0-9_]*$/.test(name)) return `${name} is not a valid key name.`;
+	if (v.length < MIN_SET_KEY_CHARS)
+		return `That value is ${v.length} characters, too short to be a real key (need ${MIN_SET_KEY_CHARS} or more). Nothing was saved.`;
+	if (/[\r\n"']/.test(v)) return "That value has quotes or line breaks in it. Nothing was saved.";
+	mkdirSync(dirname(path), { recursive: true });
+	const old = existsSync(path) ? readFileSync(path, "utf-8") : "";
+	const kept = old
+		.split(/\r?\n/)
+		.filter((l) => !new RegExp(`^\\s*${name}\\s*=`).test(l));
+	while (kept.length && kept[kept.length - 1] === "") kept.pop();
+	writeFileSync(path, `${[...kept, `${name}=${v}`].join("\n")}\n`, { mode: 0o600 });
+	chmodSync(path, 0o600);
+	return null;
 }
 
 /**

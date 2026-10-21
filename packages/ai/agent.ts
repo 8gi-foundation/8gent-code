@@ -280,8 +280,9 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		// Generation params (tunable via self_tune)
 		...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
 		...(config.topP !== undefined ? { topP: config.topP } : {}),
-		// topK is only supported by Anthropic/Google — strip it for OpenAI-compat providers
-		...(config.topK !== undefined && !isLocalProvider && config.provider.name !== "openrouter"
+		// topK is only supported by Anthropic/Google. Every other provider (OpenAI-compatible
+		// ones like minimax) rejects it with an "AI SDK Warning", so it is sent to those two only.
+		...(config.topK !== undefined && ["anthropic", "google", "gemini"].includes(config.provider.name)
 			? { topK: config.topK }
 			: {}),
 		...(config.frequencyPenalty !== undefined ? { frequencyPenalty: config.frequencyPenalty } : {}),

@@ -314,5 +314,7 @@ export {
 	readKeysFile,
 	redactAndWarn,
 	redactKeys,
+	setKeyInFile,
+	MIN_SET_KEY_CHARS,
 } from "./keys";
 export type { RedactResult } from "./keys";
