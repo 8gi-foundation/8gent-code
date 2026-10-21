@@ -31,11 +31,7 @@ import type {
 	AgentStepEvent,
 	AgentToolEndEvent,
 } from "../eight/types";
-import type {
-	ExecutorHandle,
-	ExecutorTurnInput,
-	ExecutorTurnOutput,
-} from "./types";
+import type { ExecutorHandle, ExecutorTurnInput, ExecutorTurnOutput } from "./types";
 
 /**
  * Factory the executor uses to build an Agent. Defaulted to a dynamic import
@@ -134,6 +130,7 @@ export class EightExecutor implements ExecutorHandle {
 		let tokensIn = 0;
 		let tokensOut = 0;
 		const touchedFiles = new Set<string>();
+		let toolResults = 0;
 		let lastStepText = "";
 
 		const events: AgentEventCallbacks = {
@@ -143,6 +140,7 @@ export class EightExecutor implements ExecutorHandle {
 				if (e.text?.trim()) lastStepText = e.text;
 			},
 			onToolEnd: (e: AgentToolEndEvent) => {
+				toolResults += 1;
 				if (!TOUCH_TOOL_NAMES.has(e.toolName)) return;
 				// Best-effort: pull a "path"/"file_path" arg if present.
 				const args = e.args || {};
@@ -177,6 +175,7 @@ export class EightExecutor implements ExecutorHandle {
 				summary,
 				tokensIn,
 				tokensOut,
+				toolResults,
 				filesChanged: touchedFiles.size || undefined,
 			};
 		} finally {
