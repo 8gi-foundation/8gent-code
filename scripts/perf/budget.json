@@ -1,0 +1,17 @@
+{
+  "_doc": "Median budgets in ms per process.platform, from GitHub runner runs 38186651353 (linux) and 38188230921 (both), rounded up. CI fails a metric only when its median exceeds budget x 1.25. null = report-only. Provisional: 1-2 samples of 5 runs; re-fit after a few more CI runs.",
+  "linux": {
+    "version_ms": 45,
+    "headless_run.first_byte_ms": 90,
+    "headless_run.first_model_ms": 700,
+    "headless_run.exit_ms": 750,
+    "tui_fake_tty.ready_ms": 2200
+  },
+  "win32": {
+    "version_ms": 85,
+    "headless_run.first_byte_ms": 360,
+    "headless_run.first_model_ms": 1650,
+    "headless_run.exit_ms": 1720,
+    "tui_fake_tty.ready_ms": 2600
+  }
+}
