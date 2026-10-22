@@ -155,7 +155,12 @@ describe("resolveTermCommand — mode flags", () => {
 describe("resolveTermCommand - platform", () => {
 	for (const platform of ["linux", "android", "win32"]) {
 		it(`preferWindow preset opens in-tab on ${platform}`, () => {
-			const r = resolveTermCommand({ args: ["claude"], presets: PRESETS, shell: "/bin/sh", platform });
+			const r = resolveTermCommand({
+				args: ["claude"],
+				presets: PRESETS,
+				shell: "/bin/sh",
+				platform,
+			});
 			expect(r.source).toBe("preset");
 			expect(r.mode).toBe("in-tab");
 		});
@@ -168,14 +173,29 @@ describe("resolveTermCommand - platform", () => {
 				platform,
 			});
 			expect(r.mode).toBe("in-tab");
-			const raw = resolveTermCommand({ args: ["htop", "-w"], presets: PRESETS, shell: "/bin/sh", platform });
+			const raw = resolveTermCommand({
+				args: ["htop", "-w"],
+				presets: PRESETS,
+				shell: "/bin/sh",
+				platform,
+			});
 			expect(raw.mode).toBe("in-tab");
 		});
 	}
 
 	it("darwin keeps window mode for preferWindow presets and explicit --window", () => {
-		const a = resolveTermCommand({ args: ["claude"], presets: PRESETS, shell: "/bin/zsh", platform: "darwin" });
-		const b = resolveTermCommand({ args: ["claude", "--window"], presets: PRESETS, shell: "/bin/zsh", platform: "darwin" });
+		const a = resolveTermCommand({
+			args: ["claude"],
+			presets: PRESETS,
+			shell: "/bin/zsh",
+			platform: "darwin",
+		});
+		const b = resolveTermCommand({
+			args: ["claude", "--window"],
+			presets: PRESETS,
+			shell: "/bin/zsh",
+			platform: "darwin",
+		});
 		expect(a.mode).toBe("window");
 		expect(b.mode).toBe("window");
 	});
