@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Subprocess, spawn } from "bun";
 import { type InputDevice, resolveInputDevice } from "./input-device.js";
+import { ANDROID_DICTATION_LINE, isAndroidHost } from "./termux.js";
 
 export interface RecorderOptions {
 	/** Sample rate in Hz (default: 16000 for Whisper) */
@@ -78,9 +79,11 @@ export async function checkSoxInstalled(): Promise<{
 		installHint:
 			process.platform === "darwin"
 				? "Install with: brew install sox"
-				: process.platform === "linux"
-					? "Install with: sudo apt install sox (Debian/Ubuntu) or sudo dnf install sox (Fedora)"
-					: "Install SoX from https://sox.sourceforge.net/",
+				: isAndroidHost()
+					? ANDROID_DICTATION_LINE
+					: process.platform === "linux"
+						? "Install with: sudo apt install sox (Debian/Ubuntu) or sudo dnf install sox (Fedora)"
+						: "Install SoX from https://sox.sourceforge.net/",
 	};
 }
 

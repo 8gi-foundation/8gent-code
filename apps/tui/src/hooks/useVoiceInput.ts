@@ -15,6 +15,7 @@ import {
 } from "@8gent/voice";
 import { useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ANDROID_DICTATION_LINE, ctrlRAction } from "../../../../packages/voice/termux.js";
 
 export interface UseVoiceInputOptions {
 	/** Voice configuration overrides */
@@ -297,6 +298,11 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 	useInput(
 		(input, key) => {
 			if (key.ctrl && input === "r") {
+				if (ctrlRAction(key, input) === "android-line") {
+					// Android (#4706): the keyboard mic dictates; no recorder or whisper here.
+					setErrorMessage(ANDROID_DICTATION_LINE);
+					return;
+				}
 				if (!engine.isEnabled()) {
 					engine.enable();
 				}

@@ -9,6 +9,8 @@
  * Uses Bun.spawn for non-blocking subprocess management.
  */
 
+import { TERMUX_TTS_HINT, findOnPath, isAndroidHost, voiceOutputOn } from "./termux.js";
+
 // ============================================
 // Types
 // ============================================
@@ -26,7 +28,7 @@ export interface TTSProcess {
 	exited: Promise<number>;
 }
 
-export type TTSProviderName = "macos" | "kitten" | "elevenlabs";
+export type TTSProviderName = "macos" | "kitten" | "elevenlabs" | "termux";
 
 export interface TTSProvider {
 	name: string;
@@ -91,6 +93,81 @@ export class MacOSTTSProvider implements TTSProvider {
 
 	voices(): string[] {
 		return ["Ava", "Daniel", "Moira", "Samantha", "Alex"];
+	}
+}
+
+// ============================================
+// Termux TTS Provider (Android, #4706)
+// ============================================
+
+/**
+ * Speaks with `termux-tts-speak` (Termux:API). Output is gated: nothing is
+ * spoken unless EIGHT_VOICE=1 or the raw settings file literally has
+ * voice.outputEnabled true. `env` and `spawn` are injectable for tests.
+ */
+export class TermuxTTSProvider implements TTSProvider {
+	readonly name = "termux";
+	private currentProcess: ReturnType<typeof Bun.spawn> | null = null;
+
+	private hinted = false;
+
+	constructor(
+		private readonly env: Record<string, string | undefined> = process.env,
+		private readonly outputOn: () => boolean = () => voiceOutputOn(env),
+		private readonly spawnFn: (cmd: string[]) => ReturnType<typeof Bun.spawn> = (cmd) =>
+			Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" }),
+		/** Receives the one-line hint, once, when output is on but termux-tts-speak cannot run. Default: nowhere (stderr would garble Ink). */
+		private readonly onHint: (message: string) => void = () => {},
+	) {}
+
+	private hint(): TTSProcess {
+		if (!this.hinted) {
+			this.hinted = true;
+			try {
+				this.onHint(TERMUX_TTS_HINT);
+			} catch {}
+		}
+		return { kill: () => {}, exited: Promise.resolve(127) };
+	}
+
+	async speak(text: string, _options?: TTSSpeakOptions): Promise<TTSProcess> {
+		if (!this.outputOn()) return { kill: () => {}, exited: Promise.resolve(0) };
+		const bin = findOnPath("termux-tts-speak", this.env);
+		if (!bin) return this.hint();
+		let proc: ReturnType<typeof Bun.spawn>;
+		try {
+			proc = this.spawnFn([bin, text.slice(0, 2000)]);
+		} catch {
+			return this.hint();
+		}
+		this.currentProcess = proc;
+		return {
+			kill: () => {
+				try {
+					proc.kill();
+				} catch {}
+				this.currentProcess = null;
+			},
+			exited: proc.exited.then((code) => {
+				if (this.currentProcess === proc) this.currentProcess = null;
+				return code;
+			}),
+		};
+	}
+
+	async interrupt(): Promise<void> {
+		try {
+			this.currentProcess?.kill();
+		} catch {}
+		this.currentProcess = null;
+	}
+
+	async isAvailable(): Promise<boolean> {
+		return findOnPath("termux-tts-speak", this.env) !== null;
+	}
+
+	voices(): string[] {
+		return ["default"];
 	}
 }
 
@@ -189,6 +266,7 @@ export class KittenTTSProvider implements TTSProvider {
 const PROVIDERS: Record<TTSProviderName, () => TTSProvider> = {
 	macos: () => new MacOSTTSProvider(),
 	kitten: () => new KittenTTSProvider(),
+	termux: () => new TermuxTTSProvider(),
 	elevenlabs: () => {
 		// Placeholder — not yet implemented
 		throw new Error("ElevenLabs TTS provider not yet implemented");
@@ -200,7 +278,7 @@ export class TTSEngine {
 	private providerCache: Map<TTSProviderName, TTSProvider> = new Map();
 	private resolvedProvider: TTSProvider | null = null;
 
-	constructor(preferred: TTSProviderName = "macos") {
+	constructor(preferred: TTSProviderName = isAndroidHost() ? "termux" : "macos") {
 		this.preferred = preferred;
 	}
 
@@ -212,7 +290,8 @@ export class TTSEngine {
 
 		// Try preferred first
 		const pref = this.getOrCreateProvider(this.preferred);
-		if (pref && (await pref.isAvailable())) {
+		// Termux is never swapped for macOS `say`: if the tool is missing the provider says how to install it.
+		if (pref && (this.preferred === "termux" || (await pref.isAvailable()))) {
 			this.resolvedProvider = pref;
 			return pref;
 		}
@@ -230,6 +309,12 @@ export class TTSEngine {
 		const macos = this.getOrCreateProvider("macos");
 		this.resolvedProvider = macos;
 		return macos;
+	}
+
+	/** Install a ready-made provider (the TUI passes one whose hint goes to the chat). */
+	registerProvider(name: TTSProviderName, provider: TTSProvider): void {
+		this.providerCache.set(name, provider);
+		this.resolvedProvider = null;
 	}
 
 	private getOrCreateProvider(name: TTSProviderName): TTSProvider {
@@ -308,4 +393,15 @@ export function getTTSEngine(): TTSEngine {
  */
 export function setTTSEngine(engine: TTSEngine): void {
 	_engine = engine;
+}
+
+/**
+ * Android: make the global engine speak through termux-tts-speak and route the
+ * one-line "how to install it" hint to `onHint` (the TUI passes addSystemMessage).
+ */
+export function installTermuxTTSEngine(onHint: (message: string) => void): TTSEngine {
+	const engine = new TTSEngine("termux");
+	engine.registerProvider("termux", new TermuxTTSProvider(undefined, undefined, undefined, onHint));
+	setTTSEngine(engine);
+	return engine;
 }

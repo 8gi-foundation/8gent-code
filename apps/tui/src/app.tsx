@@ -630,7 +630,12 @@ import {
 	formatMicLabel,
 	resolveInputDevice,
 } from "../../../packages/voice/input-device.js";
-import { KittenTTSProvider } from "../../../packages/voice/tts-engine.js";
+import {
+	ANDROID_DICTATION_LINE,
+	ANDROID_VOICE_LINE_SUBS,
+	isAndroidHost,
+} from "../../../packages/voice/termux.js";
+import { KittenTTSProvider, installTermuxTTSEngine } from "../../../packages/voice/tts-engine.js";
 import { VoiceReplyTracker } from "../../../packages/voice/voice-chat.js";
 import {
 	FALLBACK_SYSTEM_VOICE,
@@ -2607,6 +2612,11 @@ export function App({
 			},
 		]);
 	}, []);
+
+	// Android (#4706): spoken replies via termux-tts-speak; a missing tool says so in the chat, not on stderr.
+	useEffect(() => {
+		if (isAndroidHost()) installTermuxTTSEngine(addSystemMessage);
+	}, [addSystemMessage]);
 
 	// A cloud call is never silent (#4607): one line naming the provider and why.
 	useEffect(() => {
@@ -5563,6 +5573,11 @@ export function App({
 
 				case "voice":
 					// Enhanced voice command — toggle STT recording or voice chat
+					// Android (#4706): the phone keyboard already dictates; no recorder or whisper here.
+					if (isAndroidHost() && ANDROID_VOICE_LINE_SUBS.includes(args[0] ?? "")) {
+						addSystemMessage(ANDROID_DICTATION_LINE);
+						break;
+					}
 					if (args[0] === "chat" || args[0] === "conversation" || args[0] === "talk") {
 						if (voiceChat.isActive) {
 							voiceChat.stop();
@@ -5644,6 +5659,7 @@ export function App({
 									? "TTS output enabled. 8gent replies will be spoken."
 									: "TTS output disabled. 8gent replies will be silent.",
 							);
+							if (isAndroidHost()) addSystemMessage(ANDROID_DICTATION_LINE);
 						})().catch((err) => {
 							addSystemMessage(
 								`Could not update voice setting: ${
@@ -5653,12 +5669,14 @@ export function App({
 						});
 					} else {
 						addSystemMessage(
-							"Voice commands:\n" +
-								"  /voice chat    Start/stop voice conversation mode\n" +
-								"  /voice record  Toggle STT recording (or press Ctrl+R)\n" +
-								"  /voice status  Check voice system status\n" +
-								"  /voice stop    Stop voice chat mode\n" +
-								"  /voice on|off  Toggle TTS output",
+							isAndroidHost()
+								? `${ANDROID_DICTATION_LINE}\n  /voice on|off  Toggle spoken replies`
+								: "Voice commands:\n" +
+										"  /voice chat    Start/stop voice conversation mode\n" +
+										"  /voice record  Toggle STT recording (or press Ctrl+R)\n" +
+										"  /voice status  Check voice system status\n" +
+										"  /voice stop    Stop voice chat mode\n" +
+										"  /voice on|off  Toggle TTS output",
 						);
 					}
 					break;
