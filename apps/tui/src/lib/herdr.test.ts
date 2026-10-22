@@ -10,7 +10,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseSnapshot, runHerdrCommand, stripTerminalText } from "./herdr";
+import { withoutBangLines } from "./bang-command";
+import { HERDR_ID_PREFIX, parseSnapshot, runHerdrCommand, stripTerminalText } from "./herdr";
 
 // The snapshot shape herdr 0.9.3 prints for `herdr api snapshot` (src/cli/api.rs, schema SessionSnapshot).
 const SNAPSHOT = JSON.stringify({
@@ -29,9 +30,9 @@ const SNAPSHOT = JSON.stringify({
 				{ tab_id: "t2", workspace_id: "w2", label: "main" },
 			],
 			panes: [
-				{ pane_id: "p_self", workspace_id: "w1", tab_id: "t1", agent: null, label: "8gent" },
+				{ pane_id: "w1:p1", workspace_id: "w1", tab_id: "t1", agent: null, label: "8gent" },
 				{
-					pane_id: "p_pi",
+					pane_id: "w1:p2",
 					workspace_id: "w1",
 					tab_id: "t1",
 					agent: "pi",
@@ -39,7 +40,7 @@ const SNAPSHOT = JSON.stringify({
 					label: null,
 					title: "pi \x1b]0;evil\x07",
 				},
-				{ pane_id: "p_sh", workspace_id: "w2", tab_id: "t2", agent: null, cwd: "/data/home" },
+				{ pane_id: "w2:p1", workspace_id: "w2", tab_id: "t2", agent: null, cwd: "/data/home" },
 			],
 			layouts: [],
 			agents: [],
@@ -55,7 +56,7 @@ let cwd: string;
 function env(extra: Record<string, string> = {}): Record<string, string> {
 	return {
 		HERDR_ENV: "1",
-		HERDR_PANE_ID: "p_self",
+		HERDR_PANE_ID: "w1:p1",
 		PATH: `${bin}:/usr/bin:/bin`,
 		HERDR_FAKE_LOG: log,
 		...extra,
@@ -95,27 +96,27 @@ describe("/herdr (read-only, #4773)", () => {
 	test("lists the panes beside this one with the tool herdr detected", async () => {
 		const out = await runHerdrCommand([], { env: env(), cwd });
 		expect(out).toContain("herdr panes beside this one (2):");
-		expect(out).toContain("p_pi  termiux/main  pi");
-		expect(out).toContain("p_sh  kali/main  shell  /data/home");
-		expect(out).not.toContain("p_self");
+		expect(out).toContain("w1:p2  termiux/main  pi");
+		expect(out).toContain("w2:p1  kali/main  shell  /data/home");
+		expect(out).not.toContain("w1:p1");
 		expect(out).not.toContain("\x1b");
 		expect(out).not.toContain("evil");
 		expect(calls().at(-1)).toBe("api|snapshot|");
 	});
 
 	test("shows a pane's recent output, escapes removed, labelled untrusted, lines capped", async () => {
-		const out = await runHerdrCommand(["p_pi", "9999"], { env: env(), cwd });
+		const out = await runHerdrCommand(["w1:p2", "9999"], { env: env(), cwd });
 		expect(out.split("\n")[0]).toStartWith(
-			"UNTRUSTED OUTPUT from herdr pane p_pi (last 200 lines)",
+			"UNTRUSTED OUTPUT from herdr pane w1:p2 (last 200 lines)",
 		);
 		expect(out).toContain("pi> ready\nkey: link done");
 		expect(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(out)).toBeFalse();
-		expect(calls().at(-1)).toBe("pane|read|p_pi|--source|recent|--lines|200|");
+		expect(calls().at(-1)).toBe("pane|read|w1:p2|--source|recent|--lines|200|");
 	});
 
 	test("never sends: no run, send-text or send-keys in any call", async () => {
 		await runHerdrCommand([], { env: env(), cwd });
-		await runHerdrCommand(["p_sh"], { env: env(), cwd });
+		await runHerdrCommand(["w2:p1"], { env: env(), cwd });
 		for (const c of calls()) expect(c).toMatch(/^(api\|snapshot|pane\|read)\|/);
 	});
 
@@ -127,7 +128,28 @@ describe("/herdr (read-only, #4773)", () => {
 		expect(await runHerdrCommand(["p1;rm -rf ~"], { env: env(), cwd })).toContain(
 			"is not a herdr pane id",
 		);
+		expect(await runHerdrCommand(["p_pi"], { env: env(), cwd })).toContain(
+			"is not a herdr pane id",
+		);
 		expect(calls().length).toBe(before);
+	});
+
+	test("a line count that is not a whole number is refused before herdr runs", async () => {
+		const before = calls().length;
+		for (const bad of ["12abc", "-5", "1e3", "0x10", "99999"])
+			expect(await runHerdrCommand(["w1:p2", bad], { env: env(), cwd })).toContain(
+				"is not a line count",
+			);
+		expect(calls().length).toBe(before);
+	});
+
+	test("a pane read is never saved with the session", () => {
+		const kept = withoutBangLines([
+			{ id: "user-1" },
+			{ id: `${HERDR_ID_PREFIX}1` },
+			{ id: "system-2" },
+		]);
+		expect(kept.map((m) => m.id)).toEqual(["user-1", "system-2"]);
 	});
 
 	test("herdr erroring is one plain line, never a throw", async () => {

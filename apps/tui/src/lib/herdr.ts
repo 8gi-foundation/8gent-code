@@ -25,7 +25,12 @@ const TIMEOUT_MS = 5000;
 const DEFAULT_LINES = 40;
 const MAX_LINES = 200;
 const MAX_CHARS = 16384;
-const PANE_ID = /^[A-Za-z0-9][A-Za-z0-9_:.-]{0,63}$/;
+// herdr 0.9.3 pane ids are workspace-qualified: `w1:p1`.
+const PANE_ID = /^w\d{1,9}:p\d{1,9}$/;
+const LINES = /^\d{1,4}$/;
+
+/** Message id prefix: herdr output is never saved with the session (pane scrollback can hold secrets). */
+export const HERDR_ID_PREFIX = "herdr-";
 
 // OSC and other string sequences, CSI, two-byte ESC sequences, then the remaining C0/C1 bytes except tab and newline.
 const OSC = /\x1b[\]PX^_][\s\S]*?(?:\x07|\x1b\\)/g;
@@ -186,8 +191,10 @@ export async function runHerdrCommand(
 
 	if (!PANE_ID.test(target))
 		return `"${oneLine(target, 40)}" is not a herdr pane id. Run /herdr to list them.`;
-	const asked = Number.parseInt(linesArg ?? "", 10);
-	const lines = Math.min(Math.max(Number.isFinite(asked) ? asked : DEFAULT_LINES, 1), MAX_LINES);
+	if (linesArg !== undefined && !LINES.test(linesArg))
+		return `"${oneLine(linesArg, 20)}" is not a line count. Use a whole number up to ${MAX_LINES}.`;
+	const asked = linesArg === undefined ? DEFAULT_LINES : Number(linesArg);
+	const lines = Math.min(Math.max(asked, 1), MAX_LINES);
 	const r = await runHerdr(
 		bin,
 		["pane", "read", target, "--source", "recent", "--lines", String(lines)],

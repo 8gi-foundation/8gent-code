@@ -407,7 +407,7 @@ import {
 } from "../../../packages/permissions/permission-mode.js";
 import { runAllowReadCommand } from "../../../packages/permissions/read-allow.js";
 import { usePermToast } from "./hooks/usePermToast.js";
-import { runHerdrCommand } from "./lib/herdr.js";
+import { HERDR_ID_PREFIX, runHerdrCommand } from "./lib/herdr.js";
 import {
 	type PermView,
 	isPermissionCycleKey,
@@ -3834,7 +3834,20 @@ export function App({
 					break;
 
 				case "herdr":
-					void runHerdrCommand(args).then(addSystemMessage);
+					// Shown to the person only: a herdr- id keeps it out of the saved session (withoutBangLines).
+					void runHerdrCommand(args)
+						.catch(() => "herdr failed.")
+						.then((content) =>
+							setMessages((prev) => [
+								...prev,
+								{
+									id: `${HERDR_ID_PREFIX}${Date.now()}`,
+									role: "system" as const,
+									content,
+									timestamp: new Date(),
+								},
+							]),
+						);
 					break;
 
 				case "predict":
