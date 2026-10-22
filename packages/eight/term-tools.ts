@@ -128,7 +128,7 @@ const PROMPT_TAIL = 4096;
 const tail = (t: string) => (t.length > PROMPT_TAIL ? `...${t.slice(-PROMPT_TAIL)}` : t);
 
 /** Null when the input may go ahead, else the refusal to hand back to the agent. */
-async function gateInput(tool: string, text: string): Promise<string | null> {
+export async function gateInput(tool: string, text: string): Promise<string | null> {
 	const pm = getPermissionManager();
 	const lines = text.split(/[\r\n]+/).filter((l) => l.trim() !== "");
 	const refuse = (why: string) => `[PERMISSION DENIED] ${tool}: ${why}. Nothing was sent.`;
@@ -175,6 +175,36 @@ async function gateInput(tool: string, text: string): Promise<string | null> {
 			if (!ok) return refuse(`user declined to run: ${line}`);
 		}
 	}
+	return null;
+}
+
+/** Terminal tabs a person has approved for typing this session. Memory only, never persisted. */
+const approvedTabs = new Set<string>();
+
+/** Test hook: forget every per-tab approval. */
+export function _resetApprovedTabs(): void {
+	approvedTabs.clear();
+}
+
+/**
+ * The gate for write_terminal. The text goes through the same command policy as
+ * term_send, then the first send to each tab asks a person, in every mode
+ * including Infinite (a tab can hold another program such as pi or Hermes, so
+ * typing into it is a different trust than running a command). Null means go ahead.
+ */
+export async function gateTabInput(tabId: string, text: string): Promise<string | null> {
+	const denied = await gateInput("write_terminal", text);
+	if (denied) return denied;
+	if (approvedTabs.has(tabId)) return null;
+	const ok = await getPermissionManager().askPerson(
+		"Type Into Terminal Tab",
+		`The assistant wants to type into terminal tab ${tabId}. Approving covers this tab until the session ends.`,
+		tail(text),
+	);
+	if (!ok) {
+		return `[PERMISSION DENIED] write_terminal: a person did not approve typing into tab ${tabId}. Nothing was sent.`;
+	}
+	approvedTabs.add(tabId);
 	return null;
 }
 
