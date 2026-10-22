@@ -297,13 +297,12 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 	// Always active (don't gate on isEnabled — pressing the key auto-enables)
 	useInput(
 		(input, key) => {
-			const act = ctrlRAction(key, input);
-			if (act === "android-line") {
-				// Android (#4706): the keyboard mic dictates; no recorder or whisper here.
-				setErrorMessage(ANDROID_DICTATION_LINE);
-				return;
-			}
-			if (act === "toggle") {
+			if (key.ctrl && input === "r") {
+				if (ctrlRAction(key, input) === "android-line") {
+					// Android (#4706): the keyboard mic dictates; no recorder or whisper here.
+					setErrorMessage(ANDROID_DICTATION_LINE);
+					return;
+				}
 				if (!engine.isEnabled()) {
 					engine.enable();
 				}
