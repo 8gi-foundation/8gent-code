@@ -5114,7 +5114,7 @@ export function formatStackReport(r: StackReport, width = 60): string {
 	const cost = (bytes: number, tokens: number) =>
 		`${sizeLabel(bytes).padStart(7)} ~${String(tokens).padStart(6)} tok`;
 	const out = [
-		`8gent stack: what the next turn sends`,
+		"8gent stack: what the next turn sends",
 		`${r.provider} / ${r.model}`.slice(0, width),
 		`${r.path} path, permission ${r.permission}, mode ${r.mode}`.slice(0, width),
 		"",
@@ -5129,11 +5129,11 @@ export function formatStackReport(r: StackReport, width = 60): string {
 	}
 	out.push(
 		"",
-		`skills: listed on demand by use_skill, 0B per turn`.slice(0, width),
+		"skills: listed on demand by use_skill, 0B per turn".slice(0, width),
 		`hooks: ${r.hooks}, run locally, 0B per turn`.slice(0, width),
 		"not shown: your message, and a clarify note if vague".slice(0, width),
 		"a greeting alone (hi) is sent with no tools".slice(0, width),
-		`tokens ~ bytes/4 (compaction's estimate)`.slice(0, width),
+		"tokens ~ bytes/4 (compaction's estimate)".slice(0, width),
 	);
 	return out.join("\n");
 }
