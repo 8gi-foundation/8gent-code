@@ -537,7 +537,7 @@ export async function runExternalAgent(
 		};
 	}
 	const executable = binary.ok ? binary.path : preset.command;
-	const env = presetEnv(process.cwd(), fullEnv);
+	const env = { ...fullEnv, PATH: presetPath(fullEnv.PATH, process.cwd()) };
 
 	return new Promise((resolve) => {
 		let stdout = "";
