@@ -190,4 +190,33 @@ describe("CommandInput Enter handling", () => {
 		expect(calls.map((c) => c[0])).toEqual(["help"]);
 		expect(submitted).toEqual([]);
 	});
+
+	// Termux (Artale, 0.20.12): the skill scan reads slowly from Android storage,
+	// so a command typed at once found an empty registry and went to the model.
+	test("a built-in slash command typed before the registry loads runs and is not sent as chat", async () => {
+		const calls: Array<[string, string[]]> = [];
+		const { submitted, press } = await mount({
+			onSlashCommand: (cmd, args) => calls.push([cmd, args]),
+		});
+		await press("/help\r"); // no wait for the registry
+		await waitFor(() => calls.length > 0 || submitted.length > 0, "slash or submit").catch(
+			() => {},
+		);
+		expect(calls.map((c) => c[0])).toEqual(["help"]);
+		expect(submitted).toEqual([]);
+	});
+
+	test("a keyboard that sends a bare LF for Enter runs the slash command", async () => {
+		const calls: Array<[string, string[]]> = [];
+		const { submitted, press } = await mount({
+			onSlashCommand: (cmd, args) => calls.push([cmd, args]),
+		});
+		await press("/help", "/help");
+		await press("\n");
+		await waitFor(() => calls.length > 0 || submitted.length > 0, "slash or submit").catch(
+			() => {},
+		);
+		expect(calls.map((c) => c[0])).toEqual(["help"]);
+		expect(submitted).toEqual([]);
+	});
 });

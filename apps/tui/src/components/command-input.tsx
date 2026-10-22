@@ -23,6 +23,7 @@ import { type SlashCommand, isCoreSlashCommand } from "../lib/slash-commands.js"
 import {
 	type SlashRegistryEntry,
 	getBuiltInSlashCommands,
+	getBuiltInSlashRegistry,
 	getSlashRegistry,
 	isBareSlash,
 	resolveSlashInput,
@@ -176,8 +177,15 @@ export function CommandInput({
 	const [historyIndex, setHistoryIndex] = useState(-1);
 	const draftRef = useRef("");
 	const [showSlashHelp, setShowSlashHelp] = useState(false);
-	const [slashRegistryEntries, setSlashRegistryEntries] = useState<SlashRegistryEntry[]>([]);
-	const [slashByToken, setSlashByToken] = useState<Map<string, SlashRegistryEntry>>(new Map());
+	// Built-ins are known at once: a command typed before the skill scan lands, or
+	// after it fails, must still run and never reach the model as chat.
+	const [initialRegistry] = useState(getBuiltInSlashRegistry);
+	const [slashRegistryEntries, setSlashRegistryEntries] = useState<SlashRegistryEntry[]>(
+		initialRegistry.entries,
+	);
+	const [slashByToken, setSlashByToken] = useState<Map<string, SlashRegistryEntry>>(
+		initialRegistry.byToken,
+	);
 
 	const builtInSlashGhosts = useMemo(() => buildBuiltInSlashGhostSuggestions(), []);
 	const extraSlashContext = useMemo(
@@ -220,8 +228,8 @@ export function CommandInput({
 				}
 			} catch {
 				if (!cancelled) {
-					setSlashRegistryEntries([]);
-					setSlashByToken(new Map());
+					setSlashRegistryEntries(initialRegistry.entries);
+					setSlashByToken(initialRegistry.byToken);
 				}
 			}
 		})();
