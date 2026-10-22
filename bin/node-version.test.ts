@@ -14,6 +14,8 @@ describe("node version gate", () => {
 		const [first, ...rest] = tooOldMessage("20.1.0").split("\n");
 		expect(first).toBe("8gent needs Node 22.5 or newer (found 20.1.0). Install Node 22 or Bun.");
 		expect(rest.join("\n")).toContain("deb.nodesource.com/setup_22.x");
+		expect(rest.join("\n")).toContain("-o /tmp/nodesource.sh && bash /tmp/nodesource.sh");
+		expect(tooOldMessage("20.1.0")).not.toContain("| bash");
 		expect(rest.join("\n")).toContain("pacman -Syu --noconfirm nodejs npm");
 		expect(rest.join("\n")).toContain("nvm install 22");
 	});
