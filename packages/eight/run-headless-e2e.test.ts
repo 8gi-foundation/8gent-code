@@ -164,7 +164,10 @@ describe("8gent -p", () => {
 		const other = mkdtempSync(join(tmpdir(), "headless-secret-"));
 		try {
 			const secret = "AKIAIOSFODNN7EXAMPLE";
-			const { code } = await headless(["--cwd", other, "summarise"], `# .env\nAWS_ACCESS_KEY_ID=${secret}\n`);
+			const { code } = await headless(
+				["--cwd", other, "summarise"],
+				`# .env\nAWS_ACCESS_KEY_ID=${secret}\n`,
+			);
 			expect(code).toBe(0);
 			const files = saved_().map((f) => readFileSync(join(treeDir(), f), "utf-8"));
 			expect(files.some((t) => t.includes("AWS_ACCESS_KEY_ID"))).toBe(true);
@@ -182,7 +185,16 @@ describe("8gent -p", () => {
 			const realWrite = process.stdout.write.bind(process.stdout);
 			process.stdout.write = (() => true) as typeof process.stdout.write;
 			try {
-				await runRunCommand(["--yes", "--provider", "ollama", "--model", "m", "--cwd", other, "hello"]);
+				await runRunCommand([
+					"--yes",
+					"--provider",
+					"ollama",
+					"--model",
+					"m",
+					"--cwd",
+					other,
+					"hello",
+				]);
 			} finally {
 				process.stdout.write = realWrite;
 			}
@@ -197,7 +209,12 @@ describe("8gent -p", () => {
 		const host = process.env.OLLAMA_HOST;
 		process.env.OLLAMA_HOST = "http://127.0.0.1:9";
 		try {
-			const { code, lines } = await headless(["--no-session", "--cwd", other, "hello"]);
+			const { code, lines } = await headless([
+				"--no-session",
+				"--cwd",
+				other,
+				"summarise this project",
+			]);
 			expect(code).toBe(1);
 			const result = lines.at(-1);
 			expect(result?.type).toBe("result");

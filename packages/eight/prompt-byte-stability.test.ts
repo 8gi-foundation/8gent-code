@@ -135,10 +135,10 @@ for (const [label, textTools] of [
 		});
 
 		test("two agent builds with the same config send byte-identical system + tools", async () => {
-			const a = await turn(build(), "hello there");
+			const a = await turn(build(), "summarise this project");
 			// A memory saved between sessions must not move the prefix.
 			remember(`SENTINEL_3222_memory_${label}`);
-			const b = await turn(build(), "hello there");
+			const b = await turn(build(), "summarise this project");
 			expect(system(b)).toBe(system(a));
 			expect(bytes(b.tools)).toBe(bytes(a.tools));
 			// The memories still reach the model, after the prefix.
