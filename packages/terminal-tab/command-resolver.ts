@@ -49,6 +49,9 @@ export interface ResolveOpts {
 	presets: readonly PresetEntry[];
 	/** Defaults to process.env.SHELL || "/bin/zsh". */
 	shell?: string;
+	/** Defaults to process.platform. Window mode needs osascript, so it only
+	 *  applies on "darwin"; elsewhere every command resolves to "in-tab". */
+	platform?: string;
 }
 
 const DEFAULT_SHELL = "/bin/zsh";
@@ -68,6 +71,9 @@ export function resolveTermCommand(opts: ResolveOpts): ResolvedTermCommand {
 		return true;
 	});
 	const shell = opts.shell ?? process.env.SHELL ?? DEFAULT_SHELL;
+	const windowSupported = (opts.platform ?? process.platform) === "darwin";
+	const pick = (preferred: "in-tab" | "window"): "in-tab" | "window" =>
+		windowSupported ? (mode ?? preferred) : "in-tab";
 
 	// /term  or  /term shell
 	if (args.length === 0 || args[0]?.toLowerCase() === "shell") {
@@ -76,7 +82,7 @@ export function resolveTermCommand(opts: ResolveOpts): ResolvedTermCommand {
 			args: ["-i"],
 			label: shellLabel(shell),
 			source: "shell",
-			mode: mode ?? "in-tab",
+			mode: pick("in-tab"),
 		};
 	}
 
@@ -91,7 +97,7 @@ export function resolveTermCommand(opts: ResolveOpts): ResolvedTermCommand {
 			args: [],
 			label: preset.label,
 			source: "preset",
-			mode: mode ?? (preset.preferWindow ? "window" : "in-tab"),
+			mode: pick(preset.preferWindow ? "window" : "in-tab"),
 		};
 	}
 
@@ -103,7 +109,7 @@ export function resolveTermCommand(opts: ResolveOpts): ResolvedTermCommand {
 		args: ["-c", joined],
 		label: truncateLabel(joined, 40),
 		source: "raw",
-		mode: mode ?? "in-tab",
+		mode: pick("in-tab"),
 	};
 }
 
