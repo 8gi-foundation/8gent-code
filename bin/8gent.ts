@@ -534,6 +534,10 @@ async function main() {
 			await preferencesCommand(restArgs);
 			break;
 
+		case "overlay":
+			await overlayCommand(restArgs);
+			break;
+
 		case "memory":
 			await memoryCommand(restArgs);
 			break;
@@ -2527,6 +2531,27 @@ async function preferencesCommand(args: string[]) {
 }
 
 // ── Memory Command ────────────────────────────────────────────────
+
+async function overlayCommand(args: string[]) {
+	const ov = await import("../packages/ai/harness-overlay");
+	const [sub, id, json] = args;
+	try {
+		if (sub === "write" && id && json)
+			console.log(ov.writeOverlay({ ...JSON.parse(json), task_id: id }));
+		else if (sub === "list") console.log(ov.listOverlays().join("\n"));
+		else if (sub === "show" && id) console.log(JSON.stringify(ov.loadOverlay(id), null, 2));
+		else if (sub === "drop" && id) console.log(ov.dropOverlay(id) ? "dropped" : "none");
+		else if (sub === "propose" && id)
+			console.log(ov.proposePromotion(id, json || "proposed from CLI"));
+		else
+			console.error(
+				"Usage: 8gent overlay write <task_id> <json> | list | show <id> | drop <id> | propose <id> [why]",
+			);
+	} catch (e) {
+		console.error(`overlay: ${(e as Error).message}`);
+		process.exit(1);
+	}
+}
 
 async function memoryCommand(args: string[]) {
 	const { flags, rest } = parseFlags(args);

@@ -181,3 +181,14 @@ HeartbeatAgents.prototype.betweenIterations(...): SessionReflection | null;
 ```
 
 No existing exports were renamed or removed.
+
+## Task-scoped harness overlay (#4502)
+
+Lineage: Google's Harness2 (arXiv 2610.14224) rewrites the harness around each task while the model stays fixed. We take that one concept, in `packages/ai/harness-overlay.ts`, behind `EIGHT_HARNESS_OVERLAY=1` (default off).
+
+- An overlay is `{task_id, created, expires_with: "task", guidance: {prompt_notes, tool_hints, step_budget?, nudge?}}` in `~/.8gent/harness/overlays/<task_id>.json`. The task id comes from `EIGHT_TASK_ID`.
+- It adds guidance text and can only tighten `maxSteps` and `nudgeFraction`, inside `HARNESS_BOUNDS`. It merges after the model profile (`harnessProfileFor` in the 8gent loop) and logs `[harness] overlay <id> applied: N notes, M hints`.
+- The schema rejects any key containing permission, allow, deny, policy, system_one or sandbox, at any depth, and any unknown key.
+- Lifecycle: `8gent overlay write|list|show|drop|propose`. `dropOverlay` runs when the task ends. `propose` writes `~/.8gent/harness/proposals/<id>.json` for the scorecard gate to judge; nothing promotes itself.
+
+Deliberately not taken: self-rewriting guardrails. Harness2 lets the harness edit its own guardrails; here permissions, allowlists, network rules and the judges are outside anything an overlay can name.
