@@ -2328,6 +2328,10 @@ const writeTerminalTool = tool({
 				};
 			resolvedId = open[0];
 		}
+		// Same command policy as term_send, plus a first-send ask per tab (even in Infinite mode).
+		const { gateTabInput } = await import("../eight/term-tools.js");
+		const denied = await gateTabInput(resolvedId, input);
+		if (denied) return { error: denied };
 		const result = writeToTerminal(resolvedId, input);
 		return { ok: true, tabId: resolvedId, result };
 	},

@@ -128,7 +128,7 @@ const PROMPT_TAIL = 4096;
 const tail = (t: string) => (t.length > PROMPT_TAIL ? `...${t.slice(-PROMPT_TAIL)}` : t);
 
 /** Null when the input may go ahead, else the refusal to hand back to the agent. */
-async function gateInput(tool: string, text: string): Promise<string | null> {
+export async function gateInput(tool: string, text: string): Promise<string | null> {
 	const pm = getPermissionManager();
 	const lines = text.split(/[\r\n]+/).filter((l) => l.trim() !== "");
 	const refuse = (why: string) => `[PERMISSION DENIED] ${tool}: ${why}. Nothing was sent.`;
@@ -175,6 +175,33 @@ async function gateInput(tool: string, text: string): Promise<string | null> {
 			if (!ok) return refuse(`user declined to run: ${line}`);
 		}
 	}
+	return null;
+}
+
+/**
+ * The gate for write_terminal. The text goes through the same command policy as
+ * term_send, then the first send to each tab asks a person, in every mode
+ * including Infinite (a tab can hold another program such as pi or Hermes, so
+ * typing into it is a different trust than running a command). The approval
+ * lives on the tab's registry entry, so it ends with the session and when the
+ * tab closes. Null means go ahead.
+ */
+export async function gateTabInput(tabId: string, text: string): Promise<string | null> {
+	const tabs = await import("../../apps/tui/src/hooks/useTerminal.js");
+	const label = tabs.describeTerminal(tabId);
+	if (label === null) return `No terminal open for tab ${tabId}. Nothing was sent.`;
+	const denied = await gateInput("write_terminal", text);
+	if (denied) return denied;
+	if (tabs.isTerminalApproved(tabId)) return null;
+	const ok = await getPermissionManager().askPerson(
+		"Type Into Terminal Tab",
+		`The assistant wants to type into terminal tab ${tabId} (running ${label}). Approving covers this tab until it closes.`,
+		tail(text),
+	);
+	if (!ok) {
+		return `[PERMISSION DENIED] write_terminal: a person did not approve typing into tab ${tabId}. Nothing was sent.`;
+	}
+	tabs.approveTerminal(tabId);
 	return null;
 }
 
