@@ -159,7 +159,7 @@ That's it. 8gent uses an adaptive provider router with 16 model providers (plus 
 
 **No model yet?** On a machine with no local model and no key, the chat area shows a short card with both ways to connect one: install Ollama and run `ollama pull qwen3.5`, or run `8gent keys` to add `OPENROUTER_API_KEY` to `~/.8gent/keys.env` and then use `/provider openrouter` with `/model auto:free`. `/provider` lists every option. The card goes away once a model is reachable.
 
-**Pick your platform:** [macOS](docs/install/macos.md), [Windows](docs/install/windows.md), [Linux](docs/install/linux.md). Every provider, flag and environment variable is in [docs/install/providers.md](docs/install/providers.md). One-line binary installers (no Bun or Node needed) are in [docs/user/install.md](docs/user/install.md).
+**Pick your platform:** [macOS](docs/install/macos.md), [Windows](docs/install/windows.md), [Linux](docs/install/linux.md), [Android (Termux, kali and arch proots)](docs/install/android-termux.md). Every provider, flag and environment variable is in [docs/install/providers.md](docs/install/providers.md). One-line binary installers (no Bun or Node needed) are in [docs/user/install.md](docs/user/install.md).
 
 **Ollama is optional.** To run on llama.cpp's `llama-server` instead, set `EIGHT_LOCAL_SERVER=llama-server` and start with `8gent --provider=llama-server`. 8gent then never contacts Ollama. See [docs/guides/llama-server.md](docs/guides/llama-server.md).
 
@@ -222,9 +222,9 @@ tar xzf 8gent-<version>-linux-amd64.tar.gz && sudo mv 8gent-*/bin/8gent /usr/loc
 
 > Binaries are code-signed only on releases where the maintainer's certificates are configured (see [SIGNING.md](SIGNING.md)). Unsigned downloads run fine but may prompt Gatekeeper (macOS) or SmartScreen (Windows) - allow them through, or build your own with `bun run build:binaries`.
 
-### npm (old build, 0.17.0)
+### npm
 
-The npm package is behind GitHub. `npm install -g @8gi-foundation/8gent-code` installs 0.17.0 (published 11 May 2026), not the current release, and it needs [Bun](https://bun.sh). Use a one-line installer above until npm is republished.
+The npm package tracks the GitHub release: `npm install -g @8gi-foundation/8gent-code` installs the current version. It runs on Bun, or on Node 22.5 or newer when Bun is not installed. On Android (Termux, kali or arch proot) follow [docs/install/android-termux.md](docs/install/android-termux.md).
 
 ### Build binaries from source
 

@@ -88,4 +88,11 @@ if (result.error && result.error.code === "ENOENT") {
 	);
 }
 
+// Killed by a signal (status null, e.g. SIGILL in a proot): say so and fail, never a silent 0.
+if (result.status === null && result.signal) {
+	console.error(
+		`8gent: the runtime was killed by ${result.signal}.${wantNode ? "" : " Try EIGHT_RUNTIME=node 8gent to use the Node build."}`,
+	);
+	process.exit(1);
+}
 process.exit(result.status ?? 0);

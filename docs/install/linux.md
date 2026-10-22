@@ -2,6 +2,8 @@
 
 x64 or arm64. Commands are for bash. All provider settings are listed in [providers.md](providers.md).
 
+On an Android phone (Termux, or a kali or arch proot), follow [android-termux.md](android-termux.md) instead: it covers the Node 22.5 requirement and the exact install lines.
+
 ## 1. Install 8gent
 
 ```bash
