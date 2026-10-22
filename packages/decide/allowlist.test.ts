@@ -403,7 +403,6 @@ describe("allowlist: what passes and what does not", () => {
 		"bun --version --verbose",
 		"shutdown -h",
 		"reboot --help",
-		"mytool --version",
 		"./node_modules/.bin/tsc --version",
 		"bun --version > version.txt",
 		"python3 -V -c 'print(1)'",
@@ -411,6 +410,32 @@ describe("allowlist: what passes and what does not", () => {
 	test("additive commands pass: mkdir inside the work dir, and --version/--help of known dev tools", () => {
 		for (const c of ADDITIVE_PASS)
 			expect({ c, v: readOnlyAllowlist(c).verdict }).toEqual({ c, v: "pass-without-model" });
+	});
+	test("a version probe of any bare binary name passes (#4756)", () => {
+		for (const c of [
+			"pi --version",
+			"mytool --version",
+			"pi -v",
+			"termux-info -v",
+			"node24 --version",
+		])
+			expect({ c, v: readOnlyAllowlist(c).verdict }).toEqual({ c, v: "pass-without-model" });
+	});
+	test("a version probe with anything else on it, or a shell or sudo -v, has no opinion", () => {
+		for (const c of [
+			"pi --version --verbose",
+			"pi -v foo",
+			"pi --version > out.txt",
+			"./pi --version",
+			"/usr/bin/pi --version",
+			"$BIN --version",
+			"pi --version; rm x",
+			"bash -v",
+			"sudo -v",
+			"python3 -v",
+			"-v",
+		])
+			expect({ c, v: readOnlyAllowlist(c).verdict }).toEqual({ c, v: "no-opinion" });
 	});
 	test("mkdir outside the work dir, code execution, unknown tools and file redirects still have no opinion", () => {
 		for (const c of ADDITIVE_NONE)

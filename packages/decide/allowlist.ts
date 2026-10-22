@@ -28,8 +28,10 @@
  *     only creates; on an existing directory it does nothing or fails.
  *   - `<tool> --version` or `<tool> --help`, alone, for a tool in
  *     VERSION_TOOLS, plus the short forms those tools define (`node -v`,
- *     `ffmpeg -version`). A known set, never "any binary": some system tools
- *     read -h or an unknown flag as an action (`shutdown -h`).
+ *     `ffmpeg -version`). Any other bare command name (no path, no variable)
+ *     may be probed with `--version` or `-v` alone (#4756), except `-v` on a
+ *     shell, python or sudo. `--help`, `-h` and unknown flags stay limited to
+ *     the known set: some system tools read them as an action (`shutdown -h`).
  * `bun run`, `node file.js` and any redirect into a file still go to the judge.
  *
  * `bun test` runs the repo's own test code, so it is behind its own option
@@ -177,9 +179,38 @@ const SHORT_VERSION: Record<string, string> = {
 	go: "version",
 };
 
+/** A bare command name: letters, digits and . _ + - only. No path, no variable, no glob. */
+const BARE_NAME = /^[A-Za-z][A-Za-z0-9._+-]*$/;
+/** Tools whose `-v` is not a version flag: shells and REPLs read a script or stdin, sudo asks for a password. */
+const NO_BARE_SHORT_V = new Set([
+	"sh",
+	"bash",
+	"zsh",
+	"dash",
+	"fish",
+	"ksh",
+	"csh",
+	"tcsh",
+	"python",
+	"python3",
+	"sudo",
+	"su",
+	"doas",
+]);
+
+/**
+ * A version probe: any bare command name with `--version` or `-v` as its only
+ * argument (#4756: `pi --version` and `node --version` were refused on a phone,
+ * and the fix is not to list every tool a person installs). VERSION_TOOLS keeps
+ * its `--help` and per-tool short forms.
+ */
 function versionOnly(b: string, args: string[]): boolean {
-	if (!VERSION_TOOLS.has(b) || args.length !== 1) return false;
-	return args[0] === "--version" || args[0] === "--help" || SHORT_VERSION[b] === args[0];
+	if (args.length !== 1) return false;
+	if (VERSION_TOOLS.has(b)) {
+		return args[0] === "--version" || args[0] === "--help" || SHORT_VERSION[b] === args[0];
+	}
+	if (!BARE_NAME.test(b)) return false;
+	return args[0] === "--version" || (args[0] === "-v" && !NO_BARE_SHORT_V.has(b));
 }
 
 /** `mkdir` that only creates directories inside the working directory. */
