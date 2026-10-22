@@ -414,6 +414,7 @@ import {
 	permView,
 } from "./lib/perm-modes-design.js";
 
+import { formatStackReport } from "../../../packages/eight/agent.js";
 // Import the actual Agent for real execution
 import { sessionApiKey } from "../../../packages/eight/failover-provider-config.js";
 import { Agent } from "../../../packages/eight/index.js";
@@ -4619,6 +4620,19 @@ export function App({
 					}
 					break;
 				}
+
+				case "stack":
+					// What the next turn sends, per source (#4779). Local, read-only.
+					if (!agent) {
+						addSystemMessage("No 8gent active.");
+						break;
+					}
+					try {
+						addSystemMessage(formatStackReport(await agent.stackReport()));
+					} catch (err) {
+						addSystemMessage(`/stack failed: ${err instanceof Error ? err.message : String(err)}`);
+					}
+					break;
 
 				case "compact":
 					// Summarize current conversation

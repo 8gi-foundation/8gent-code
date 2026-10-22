@@ -594,6 +594,10 @@ async function main() {
 			await doctorCommand();
 			break;
 
+		case "stack":
+			await stackCommand();
+			break;
+
 		case "model-pin":
 			await modelPinCommand(restArgs);
 			break;
@@ -2947,6 +2951,36 @@ async function modelPinCommand(args: string[]) {
 	}
 	for (const p of pins)
 		for (const l of (await repinModel(p.provider, p.model)).lines) console.log(l);
+}
+
+/**
+ * `8gent stack` (#4779): what the next turn would send, per source, sized from
+ * the same builders a turn uses. Provider and model are the saved choice, read
+ * from disk: no network, no model call.
+ */
+async function stackCommand(): Promise<void> {
+	const { Agent, formatStackReport } = await import("../packages/eight/agent.ts");
+	const { getProviderManager } = await import("../packages/providers/index.ts");
+	const pm = getProviderManager();
+	const active = pm.getActiveProvider();
+	// Agent setup logs to stdout; keep stdout for the report.
+	const log = console.log;
+	console.log = (...a: unknown[]) => process.stderr.write(`${a.map(String).join(" ")}\n`);
+	let agent: InstanceType<typeof Agent> | null = null;
+	let text = "";
+	try {
+		agent = new Agent({
+			model: pm.getActiveModel(),
+			runtime: active.name as "ollama",
+			baseUrl: active.declared ? active.baseUrl : undefined,
+			workingDirectory: process.cwd(),
+		});
+		text = formatStackReport(await agent.stackReport());
+	} finally {
+		console.log = log;
+		await agent?.cleanup().catch(() => {});
+	}
+	console.log(text);
 }
 
 async function doctorCommand() {
