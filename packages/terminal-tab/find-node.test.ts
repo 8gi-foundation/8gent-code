@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MANAGED_NODE_VERSION } from "../runtime/index.js";
@@ -18,7 +18,7 @@ let home: string;
 
 // os.homedir() is read once per process, so resolve in a child with HOME
 // pointed at the temp dir, the way pty-bridge-no-pty.test.ts overrides HOME.
-function resolveWith(env: Record<string, string>): string {
+function resolveWith(env: Record<string, string>, cwd?: string): string {
 	const mod = JSON.stringify(join(import.meta.dir, "find-node.ts"));
 	const r = spawnSync(
 		process.execPath,
@@ -31,6 +31,7 @@ function resolveWith(env: Record<string, string>): string {
 				...env,
 			} as unknown as NodeJS.ProcessEnv,
 			timeout: 15_000,
+			...(cwd ? { cwd } : {}),
 		},
 	);
 	if (r.status !== 0) throw new Error(`resolver child failed: ${r.stderr}`);
@@ -73,6 +74,33 @@ describe("findNodeBinary executable check", () => {
 		writeFileSync(bad, "");
 		chmodSync(bad, 0o644);
 		expect(resolveWith({ NODE_8GENT_BIN: bad })).toBe(bin);
+	});
+});
+
+describe("PATH fallback stays outside the folder (#4783)", () => {
+	it.if(posix)("a node planted in the project is never chosen; none outside gives null", () => {
+		// The child's process.cwd() is the realpath (/tmp is /private/tmp on macOS).
+		const project = join(realpathSync(home), "proj");
+		const bin = join(project, "node_modules", ".bin");
+		mkdirSync(bin, { recursive: true });
+		for (const d of [project, bin]) {
+			writeFileSync(join(d, "node"), "#!/bin/sh\ntouch PWNED\n");
+			chmodSync(join(d, "node"), 0o755);
+		}
+		const got = resolveWith({ PATH: `.:node_modules/.bin:${bin}` }, project);
+		expect(got).toBe("null");
+	});
+
+	it.if(posix)("a node outside the folder resolves to its absolute path", () => {
+		const project = join(realpathSync(home), "proj");
+		const outside = join(realpathSync(home), "tools");
+		mkdirSync(project, { recursive: true });
+		mkdirSync(outside, { recursive: true });
+		writeFileSync(join(outside, "node"), "#!/bin/sh\n");
+		chmodSync(join(outside, "node"), 0o755);
+		writeFileSync(join(project, "node"), "#!/bin/sh\n");
+		chmodSync(join(project, "node"), 0o755);
+		expect(resolveWith({ PATH: `.:${outside}` }, project)).toBe(join(outside, "node"));
 	});
 });
 

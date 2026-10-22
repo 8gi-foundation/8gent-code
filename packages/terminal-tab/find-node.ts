@@ -9,7 +9,10 @@
  *   2. Managed runtime under ~/.8gent/runtime/node-X.Y.Z/bin/node
  *   3. process.execPath if it points at node (e.g. when pty-session
  *      itself runs under Node — happens during unit tests)
- *   4. `node` on the user's PATH (resolved by spawning execvp)
+ *   4. `node` on the user's PATH, resolved here to an absolute path using
+ *      only entries outside `cwd` (pathOutsideFolder, #4783). A `node` the
+ *      project planted on "." or in node_modules/.bin is never run; with no
+ *      node outside the folder the result is null and the caller refuses.
  *
  * Steps 1 and 2 require an executable file (#4147): a managed node that
  * exists but lost its mode bit falls through instead of failing at execvp.
@@ -18,6 +21,8 @@
 import { constants, accessSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { pathOutsideFolder } from "../eight/welcome.js";
+import { findOnPath } from "../voice/termux.js";
 
 // Pinned to MANAGED_NODE_VERSION in packages/runtime/index.ts by find-node.test.ts.
 export const MANAGED_NODE_VERSIONS = ["22.14.0"];
@@ -31,7 +36,7 @@ function isExecutable(path: string): boolean {
 	}
 }
 
-export function findNodeBinary(): string | null {
+export function findNodeBinary(cwd: string = process.cwd()): string | null {
 	const fromEnv = process.env.NODE_8GENT_BIN;
 	if (fromEnv && isExecutable(fromEnv)) return fromEnv;
 
@@ -43,5 +48,5 @@ export function findNodeBinary(): string | null {
 	const exec = process.execPath;
 	if (exec && /\/node$/.test(exec)) return exec;
 
-	return "node"; // PATH lookup at spawn time
+	return findOnPath("node", { PATH: pathOutsideFolder(String(process.env.PATH ?? ""), cwd) });
 }

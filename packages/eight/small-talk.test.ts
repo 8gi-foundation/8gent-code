@@ -149,6 +149,36 @@ describe("welcome hardening (8SO)", () => {
 		}
 	});
 
+	test("launched from home, ~/.npm-global/bin presets are installed; '.' is still dropped (#4783)", async () => {
+		const home = mkdtempSync(join(tmpdir(), "welcome-home-"));
+		try {
+			const npmBin = join(home, ".npm-global", "bin");
+			mkdirSync(npmBin, { recursive: true });
+			writeFileSync(join(npmBin, "pi"), "#!/bin/sh\n");
+			chmodSync(join(npmBin, "pi"), 0o755);
+			writeFileSync(join(home, "claude"), "#!/bin/sh\n");
+			chmodSync(join(home, "claude"), 0o755);
+			const facts = await gatherWelcomeFacts({
+				model: "m1",
+				provider: "ollama",
+				cwd: home,
+				env: { PATH: [".", npmBin].join(":"), HOME: home },
+				platform: "android",
+				arch: "arm64",
+				presets: [
+					{ id: "pi", command: "pi" },
+					{ id: "claude", command: "claude" },
+				],
+			});
+			expect(facts.installed).toEqual(["pi"]);
+			expect(pathOutsideFolder(`.:bin:${npmBin}`, home, home)).toBe(npmBin);
+			expect(pathOutsideFolder(npmBin, join(home, "proj"), home)).toBe(npmBin);
+			expect(pathOutsideFolder(npmBin, join(home, ".npm-global"), home)).toBe("");
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
 	test("a model value with a URL or credentials is not echoed; home shows as ~", async () => {
 		expect(safeModelLabel("https://user:tok@host/v1")).toBe("a custom model");
 		expect(safeModelLabel("key@model")).toBe("a custom model");
