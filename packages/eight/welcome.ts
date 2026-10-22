@@ -14,7 +14,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import pkg from "../../package.json" with { type: "json" };
 import { findOnPath, isAndroidHost } from "../voice/termux";
 
@@ -37,6 +37,33 @@ export interface WelcomeFacts {
 	installed: string[];
 	folder: string;
 	gitRepo: boolean;
+}
+
+/**
+ * PATH with every entry that could hold a binary planted by the folder itself
+ * removed: relative entries ("." , "bin", "node_modules/.bin") and absolute ones
+ * inside `cwd`. The welcome never offers to run a program a cloned repo shipped.
+ */
+export function pathOutsideFolder(path: string, cwd: string): string {
+	const root = resolve(cwd);
+	return path
+		.split(delimiter)
+		.filter((dir) => {
+			if (!dir || !isAbsolute(dir)) return false;
+			const rel = relative(root, resolve(dir));
+			return rel.startsWith("..") || isAbsolute(rel);
+		})
+		.join(delimiter);
+}
+
+/**
+ * The model name as shown: a value that looks like a URL or carries credentials
+ * (`://`, `@`, `?`, whitespace) is never echoed into a transcript.
+ */
+export function safeModelLabel(model: string): string {
+	const m = model.trim();
+	if (!m || m.length > 80 || /:\/\/|[@?\s]/.test(m)) return "a custom model";
+	return m;
 }
 
 /** True when `dir` or a folder above it holds a `.git` entry. Existence only. */
@@ -87,17 +114,20 @@ export async function gatherWelcomeFacts(opts: {
 	const env = opts.env ?? process.env;
 	const android = isAndroidHost(opts.platform ?? process.platform, env);
 	// 8gent itself is a preset (8gent inside 8gent); offering it beside itself says nothing.
+	const cwd = resolve(opts.cwd);
+	const home = env.HOME ? resolve(env.HOME) : null;
+	const lookupEnv = { ...env, PATH: pathOutsideFolder(String(env.PATH ?? ""), cwd) };
 	const presets = (opts.presets ?? (await knownPresets())).filter((p) => p.id !== "8gent");
 	return {
 		version: String(pkg.version),
 		host: hostLabel(android, opts.platform ?? process.platform, opts.arch ?? process.arch),
 		android,
-		model: opts.model,
+		model: safeModelLabel(opts.model),
 		provider: opts.provider,
 		presetIds: presets.map((p) => p.id),
-		installed: presets.filter((p) => findOnPath(p.command, env) !== null).map((p) => p.id),
-		folder: opts.cwd === env.HOME ? "~" : basename(opts.cwd) || opts.cwd,
-		gitRepo: inGitRepo(opts.cwd),
+		installed: presets.filter((p) => findOnPath(p.command, lookupEnv) !== null).map((p) => p.id),
+		folder: cwd === home ? "~" : basename(cwd) || "/",
+		gitRepo: inGitRepo(cwd),
 	};
 }
 

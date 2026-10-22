@@ -10,7 +10,7 @@ import { join } from "node:path";
 import pkg from "../../package.json" with { type: "json" };
 import { isPlainHome, workingProjectNote } from "./prompts/system-prompt";
 import { isGreeting, isSmallTalk } from "./small-talk";
-import { buildWelcome, gatherWelcomeFacts } from "./welcome";
+import { buildWelcome, gatherWelcomeFacts, pathOutsideFolder, safeModelLabel } from "./welcome";
 
 describe("isSmallTalk", () => {
 	test("a greeting or pleasantry alone is small talk", () => {
@@ -53,6 +53,8 @@ describe("isSmallTalk", () => {
 			"great",
 			"nice",
 			"hi hi hi hi hi hi hi hi hi hi hi hi hi hi hi hi",
+			"was good",
+			"what good is this function",
 		])
 			expect({ t, v: isSmallTalk(t) }).toEqual({ t, v: false });
 	});
@@ -120,6 +122,47 @@ describe("greeting welcome (#4767)", () => {
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("welcome hardening (8SO)", () => {
+	test("a binary planted inside the folder is never offered", async () => {
+		const root = mkdtempSync(join(tmpdir(), "welcome-plant-"));
+		try {
+			const planted = join(root, "node_modules", ".bin");
+			mkdirSync(planted, { recursive: true });
+			writeFileSync(join(planted, "pi"), "#!/bin/sh\n");
+			chmodSync(join(planted, "pi"), 0o755);
+			const facts = await gatherWelcomeFacts({
+				model: "m1",
+				provider: "ollama",
+				cwd: root,
+				env: { PATH: [planted, "node_modules/.bin", "."].join(":") },
+				platform: "darwin",
+				arch: "arm64",
+				presets: [{ id: "pi", command: "pi" }],
+			});
+			expect(facts.installed).toEqual([]);
+			expect(pathOutsideFolder(`/usr/bin:.:bin:${planted}`, root)).toBe("/usr/bin");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("a model value with a URL or credentials is not echoed; home shows as ~", async () => {
+		expect(safeModelLabel("https://user:tok@host/v1")).toBe("a custom model");
+		expect(safeModelLabel("key@model")).toBe("a custom model");
+		expect(safeModelLabel("qwen3:14b")).toBe("qwen3:14b");
+		const facts = await gatherWelcomeFacts({
+			model: "m1",
+			provider: "ollama",
+			cwd: "/home/someone/",
+			env: { PATH: "", HOME: "/home/someone" },
+			platform: "linux",
+			arch: "x64",
+			presets: [],
+		});
+		expect(facts.folder).toBe("~");
 	});
 });
 

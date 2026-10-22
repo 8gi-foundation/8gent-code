@@ -26,7 +26,7 @@ const CORE = [
 	"sup",
 	"wa+s+s?u+p+",
 	"w?h?a+t?s? ?u+p+",
-	"wh?a+t?s? go+d+",
+	"wh?a+t+s? go+d+",
 	"good (?:morning|afternoon|evening|night)",
 	"gm",
 	"gn",
