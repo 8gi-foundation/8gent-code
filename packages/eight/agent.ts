@@ -136,6 +136,7 @@ import { projectInstructionsSection } from "./instruction-loader";
 import { getModeManager } from "./modes";
 import { needsPlanningGate as promptNeedsPlanningGate } from "./planning-gate";
 import { isLocalProvider } from "./registry";
+import { SMALL_TALK_NOTE, isSmallTalk } from "./small-talk";
 import { verifyNudgeFor } from "./verify-gate";
 
 import {
@@ -2350,6 +2351,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				? "The user attached an image with no text. Describe what you see and help with anything relevant in the image."
 				: userMessage);
 
+		// A greeting alone is answered with no tools offered (#4756): the cause of the
+		// folder tour was the act-first rules meeting a message that asked for nothing.
+		const smallTalkTurn =
+			isSmallTalk(textForAgent) && !imageBase64 && this.config.agentScope !== "__table__";
+		if (smallTalkTurn) {
+			this.messageHistory.push({ role: "user", content: harnessNote(SMALL_TALK_NOTE) });
+		}
+
 		// If image attached, fire off parallel vision interpretation (like /btw)
 		// The main agent stays on its text model — never switches.
 		// Vision result gets injected as a harness note when ready (#3260).
@@ -2456,6 +2465,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			needsClarification(textForAgent) &&
 			!imageBase64 &&
 			!quickPrompt &&
+			!smallTalkTurn &&
 			!isNoToolScope(this.config.agentScope)
 		) {
 			this.proactiveGatherer = createGatherer(textForAgent);
@@ -2492,7 +2502,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// gatherer already injected a clarifying question. Also skipped for a
 		// prompt the quick-answer lane takes (#3411, 8SO F1): its grep strategy
 		// runs run_command, outside the lane's read-only tools and budget.
-		if (!this.proactiveGatherer && !quickPrompt) {
+		if (!this.proactiveGatherer && !quickPrompt && !smallTalkTurn) {
 			await this.tryRunPreToolRouter(textForAgent);
 		}
 
@@ -2725,13 +2735,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			"search_symbols",
 			"recall",
 		]);
-		const scopedTools = isNoToolScope(this.config.agentScope)
-			? {}
-			: this.config.agentScope === "__table__"
-				? Object.fromEntries(
-						Object.entries(providerTools).filter(([k]) => TABLE_SESSION_TOOLS.has(k)),
-					)
-				: providerTools;
+		const scopedTools =
+			isNoToolScope(this.config.agentScope) || smallTalkTurn
+				? {}
+				: this.config.agentScope === "__table__"
+					? Object.fromEntries(
+							Object.entries(providerTools).filter(([k]) => TABLE_SESSION_TOOLS.has(k)),
+						)
+					: providerTools;
 		// Extension tools (G1): offered beside the built-ins, never in place of one.
 		const withExtensions: typeof scopedTools = { ...scopedTools };
 		if (this.extensionToolsAllowed()) {
@@ -2759,7 +2770,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// have executed them (ToolG8's __table__ rules were the only thing left
 		// standing). Officers "hallucinating tool names" were reading a catalog.
 		const textToolAllowlist = (
-			isNoToolScope(this.config.agentScope)
+			isNoToolScope(this.config.agentScope) || smallTalkTurn
 				? []
 				: this.config.agentScope === "__table__"
 					? [...TABLE_SESSION_TOOLS]

@@ -7,8 +7,8 @@
  * Identity and access control are composed via soul-layers.ts.
  */
 
-import { readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { resolveHome } from "../../core/home";
 import { type ResolvedShell, currentWindowsShell } from "../../core/shell";
 import { getRepoMapper } from "../../repo-context";
@@ -189,6 +189,15 @@ Models: base (qwen3) → Eight LoRA (our training) → Personal LoRA (your patte
 
 Own your architecture: "I found...", "My hooks...", "Looking at my core..."`;
 
+/** The person's home folder with no .git in it (#4756). */
+export function isPlainHome(dir: string, home: string = resolveHome()): boolean {
+	try {
+		return home !== "" && resolve(dir) === resolve(home) && !existsSync(join(dir, ".git"));
+	} catch {
+		return false;
+	}
+}
+
 /**
  * #4381: the prompt shows the model its own source tree, and a pilot run copied
  * that folder name into a checklist for a different project. This names the
@@ -196,6 +205,11 @@ Own your architecture: "I found...", "My hooks...", "Looking at my core..."`;
  */
 export function workingProjectNote(dir: string): string {
 	const name = basename(dir) || dir;
+	// The person's home folder that is not a repo is not a project (#4756): a phone
+	// session opened there swept it on "what upp". Nothing is listed unless asked.
+	if (isPlainHome(dir)) {
+		return `\n\n**Working folder: \`${dir}\` is the person's home folder, not a project. Do not list, search or summarise it unless they ask. Ask what they want to work on.**`;
+	}
 	// Working on the harness itself: its source tree IS the project, so the name is right.
 	if (name === "8gent-code") {
 		return `\n\n**Working project: \`8gent-code\` (${dir}). This is the same codebase as your own source tree.**`;
