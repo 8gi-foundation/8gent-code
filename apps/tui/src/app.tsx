@@ -328,6 +328,7 @@ import {
 	formatSlashHelp,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
+import { detectTermPresetIntent } from "./lib/term-intent.js";
 import { copiedNotice, notCopiedNotice } from "./lib/text-selection.js";
 import { truncate } from "./lib/text.js";
 import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
@@ -6766,6 +6767,31 @@ export function App({
 				);
 			}
 			return;
+		}
+
+		// "run pi" / "open hermes": open the preset through the exact /term
+		// path, before the model, at zero tokens (#4764). Narrow by design;
+		// anything with a task attached falls through to the model.
+		if (input && !attached) {
+			const termArgs = detectTermPresetIntent(input, listPresetIds());
+			if (termArgs) {
+				appendToTab(tabId, {
+					id: `user-${Date.now()}`,
+					role: "user" as const,
+					content: bubbleContent,
+					timestamp: new Date(),
+				});
+				setRecentCommands((prev) => [bubbleContent, ...prev].slice(0, 20));
+				// Plan mode runs nothing: same gate as `!cmd`.
+				const refused = planModeRefusal(permView(permHolderFor(tabId)).mode);
+				if (refused) {
+					addSystemMessage(refused);
+					return;
+				}
+				addSystemMessage(`Opening ${termArgs[0]} (same as /term ${termArgs.join(" ")}).`);
+				void handleSlashCommand("term" as SlashCommand, termArgs);
+				return;
+			}
 		}
 
 		// Build-intent auto-route: an imperative "build / create / scaffold ..."
