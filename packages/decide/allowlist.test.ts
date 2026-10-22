@@ -417,8 +417,6 @@ describe("allowlist: what passes and what does not", () => {
 			"bun",
 			"npm",
 			"npx",
-			"pnpm",
-			"yarn",
 			"deno",
 			"git",
 			"gh",
@@ -427,11 +425,7 @@ describe("allowlist: what passes and what does not", () => {
 			"rg",
 			"ffmpeg",
 			"docker",
-			"go",
-			"cargo",
-			"rustc",
 			"8gent",
-			"ollama",
 		])
 			expect({ t, v: readOnlyAllowlist(`${t} --version`).verdict }).toEqual({
 				t,
@@ -440,6 +434,12 @@ describe("allowlist: what passes and what does not", () => {
 	});
 	test("any other name, and every shell word or odd interpreter, is no-opinion with --version", () => {
 		for (const w of [
+			"pnpm",
+			"yarn",
+			"go",
+			"cargo",
+			"rustc",
+			"ollama",
 			"foo",
 			"mytool",
 			"pi",

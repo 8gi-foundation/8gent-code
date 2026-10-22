@@ -125,8 +125,6 @@ export const VERSION_TOOLS: ReadonlySet<string> = new Set([
 	"node",
 	"npm",
 	"npx",
-	"pnpm",
-	"yarn",
 	"deno",
 	"python",
 	"python3",
@@ -134,9 +132,6 @@ export const VERSION_TOOLS: ReadonlySet<string> = new Set([
 	"pip3",
 	"uv",
 	"git",
-	"go",
-	"cargo",
-	"rustc",
 	"tsc",
 	"gh",
 	"docker",
@@ -164,21 +159,17 @@ export const VERSION_TOOLS: ReadonlySet<string> = new Set([
 	"vite",
 	// Checked: prints one line and exits (macOS).
 	"8gent",
-	"ollama",
 ]);
 /** Short version flags, only for the tools that define them this way. */
 const SHORT_VERSION: Record<string, string> = {
 	node: "-v",
 	bun: "-v",
 	npm: "-v",
-	pnpm: "-v",
-	yarn: "-v",
 	deno: "-V",
 	python: "-V",
 	python3: "-V",
 	ffmpeg: "-version",
 	ffprobe: "-version",
-	go: "version",
 };
 
 /**
