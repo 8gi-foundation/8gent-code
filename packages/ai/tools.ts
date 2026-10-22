@@ -2356,7 +2356,7 @@ const readTerminalTool = tool({
 			if (open.length === 0) return { error: "No terminal tabs are open." };
 			resolvedId = open[0];
 		}
-		// A person approves each tab once before its output reaches the model (shared with write_terminal).
+		// A person approves each tab once before its output reaches the model (a write approval covers reads; a read approval never covers writes).
 		const { gateTabRead } = await import("../eight/term-tools.js");
 		const denied = await gateTabRead(resolvedId);
 		if (denied) return { error: denied };
