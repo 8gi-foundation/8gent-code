@@ -54,8 +54,9 @@ export const KEYBINDINGS: readonly KeyBinding[] = [
 /**
  * Termux and other phone terminals send Ctrl+digit as the bare digit, so the
  * tab shortcut types a number instead of switching (#4723). On those, the same
- * action is bound to Alt+digit (Esc then the digit, which Termux's extra-keys
- * row can send). Decided from the environment only, never a probe:
+ * action is bound to Alt+digit: on Termux tap the ALT key on the extra-keys
+ * row, then the digit; ESC then the digit is two keypresses and does not
+ * work. Decided from the environment only, never a probe:
  * TERMUX_VERSION, or EIGHT_ALT_DIGIT_KEYS=1 to force it on any terminal.
  */
 export function altDigitKeys(env: Record<string, string | undefined> = process.env): boolean {
