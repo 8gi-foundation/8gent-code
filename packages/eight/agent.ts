@@ -1374,6 +1374,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		localCoreTools: string[];
 		chatStartTime: number;
 		textForAgent: string;
+		/** A greeting alone: no tools, extension tools included (#4756). */
+		smallTalk?: boolean;
 	}): Promise<string> {
 		const {
 			providerName,
@@ -1382,6 +1384,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			localCoreTools,
 			chatStartTime,
 			textForAgent,
+			smallTalk = false,
 		} = opts;
 
 		// Live abort controller for THIS text-tool turn. The text-tool branch
@@ -1411,7 +1414,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// ("Let me stage and commit."), so the reply must say the turn was cut off.
 		let breakerStop = null as string | null;
 		// Extension tools (G1) join the offered set, unless the scope or the mode withholds them.
-		if (this.extensionToolsAllowed()) {
+		if (this.extensionToolsAllowed() && !smallTalk) {
 			for (const t of this.extensionHost.listTools()) {
 				if (this.modeAllows(t.name)) {
 					specs.push({ name: t.name, description: t.description, parameters: t.parameters });
@@ -2745,7 +2748,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					: providerTools;
 		// Extension tools (G1): offered beside the built-ins, never in place of one.
 		const withExtensions: typeof scopedTools = { ...scopedTools };
-		if (this.extensionToolsAllowed()) {
+		if (this.extensionToolsAllowed() && !smallTalkTurn) {
 			for (const t of this.extensionHost.listTools()) {
 				if (t.name in withExtensions) continue;
 				(withExtensions as Record<string, unknown>)[t.name] = sdkTool({
@@ -2829,6 +2832,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				localCoreTools: textToolAllowlist,
 				chatStartTime,
 				textForAgent,
+				smallTalk: smallTalkTurn,
 			});
 			await this.readServerContextWindow();
 			await this.compactIfNeeded(providerConfig);

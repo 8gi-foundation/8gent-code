@@ -8,6 +8,9 @@
  * by a pattern and not by a model call: a greeting or a pleasantry, alone, is
  * answered with no tools offered for the turn.
  *
+ * Acknowledgements that can approve a step (ok, okay, cool, great, nice) are NOT
+ * small talk: after a plan, "ok" means go, and the turn keeps its tools.
+ *
  * Deliberately narrow. The whole message must be the greeting (so "hi, run the
  * tests" and "what up with the build" are not small talk), at most one leading
  * greeting word and one trailing address word. Same input, same answer.
@@ -40,10 +43,6 @@ const CORE = [
 	"thx",
 	"ty",
 	"cheers",
-	"ok(?:ay)?",
-	"cool",
-	"nice",
-	"great",
 ].join("|");
 
 const GREETING = new RegExp(
