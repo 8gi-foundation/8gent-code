@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { getPreset, resolvePresetBinary, runExternalAgent } from "./external-agent-runner";
@@ -42,7 +50,10 @@ describe("resolvePresetBinary", () => {
 		plant(project, join(project, "ran"));
 		plant(outside, join(outside, "ran"));
 		const env = { PATH: [".", join(project, "bin"), outside].join(delimiter) };
-		expect(resolvePresetBinary("pi", project, env)).toEqual({ ok: true, path: join(outside, "pi") });
+		expect(resolvePresetBinary("pi", project, env)).toEqual({
+			ok: true,
+			path: join(outside, "pi"),
+		});
 	});
 
 	test("no pi anywhere is reported as missing, not inside", () => {

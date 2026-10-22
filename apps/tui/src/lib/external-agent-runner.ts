@@ -97,7 +97,9 @@ export interface ExternalAgentResult {
 
 const stripAnsi = (s: string): string =>
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI is exactly the point
-	s.replace(/\[[0-9;?]*[a-zA-Z]/g, "").replace(/\][^]*/g, "");
+	s
+		.replace(/\[[0-9;?]*[a-zA-Z]/g, "")
+		.replace(/\][^]*/g, "");
 
 const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 	claude: {
@@ -117,7 +119,7 @@ const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 			// the post-install note tells the user to add to PATH if needed.
 			command: "npm install -g --prefix=$HOME/.npm-global @anthropic-ai/claude-code",
 			notes:
-				"Binary at ~/.npm-global/bin/claude. If `claude` isn't on PATH after install, add `export PATH=\"$HOME/.npm-global/bin:$PATH\"` to your shell rc. Then run `claude` once outside the TUI to authenticate with Anthropic.",
+				'Binary at ~/.npm-global/bin/claude. If `claude` isn\'t on PATH after install, add `export PATH="$HOME/.npm-global/bin:$PATH"` to your shell rc. Then run `claude` once outside the TUI to authenticate with Anthropic.',
 		},
 	},
 	codex: {
@@ -224,8 +226,7 @@ const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		parseStdout: stripAnsi,
 		homepage: "https://8gent.dev",
 		install: {
-			command:
-				"npm install -g --prefix=$HOME/.npm-global @8gi-foundation/8gent-code --force",
+			command: "npm install -g --prefix=$HOME/.npm-global @8gi-foundation/8gent-code --force",
 			notes:
 				"Binary at ~/.npm-global/bin/8gent. --force overwrites stale `8` / `8gent` / `8gent-code` bin symlinks (npm 9+ EEXIST). Add `~/.npm-global/bin` to PATH if not already.",
 		},
@@ -260,9 +261,17 @@ export function resolvePresetBinary(
 		.map((dir) => resolvePath(cwd, dir))
 		.join(delimiter);
 	if (findOnPath(command, { PATH: everywhere })) {
-		return { ok: false, reason: "inside", message: `${command} found only inside this project; not running it` };
+		return {
+			ok: false,
+			reason: "inside",
+			message: `${command} found only inside this project; not running it`,
+		};
 	}
-	return { ok: false, reason: "missing", message: `${command}: not installed (no binary on $PATH)` };
+	return {
+		ok: false,
+		reason: "missing",
+		message: `${command}: not installed (no binary on $PATH)`,
+	};
 }
 
 export function listPresetIds(): string[] {
@@ -365,7 +374,10 @@ async function installAgent(
 				ok: code === 0,
 				stdout,
 				stderr,
-				error: code === 0 ? undefined : stderr.trim().slice(0, 800) || `installer exited with code ${code}`,
+				error:
+					code === 0
+						? undefined
+						: stderr.trim().slice(0, 800) || `installer exited with code ${code}`,
 			});
 		});
 
@@ -418,7 +430,10 @@ export async function ensureInstalled(
  * one-shot, so we re-send context each turn. v2 will use per-CLI session
  * resume flags.
  */
-export function composePrompt(history: Array<{ role: string; content: string }>, prompt: string): string {
+export function composePrompt(
+	history: Array<{ role: string; content: string }>,
+	prompt: string,
+): string {
 	const lines: string[] = [];
 	for (const m of history) {
 		const tag = m.role === "user" ? "User" : m.role === "assistant" ? "Assistant" : m.role;
@@ -525,7 +540,10 @@ export async function runExternalAgent(
 			finish({
 				ok: false,
 				text: "",
-				error: err.code === "ENOENT" ? `${preset.command}: not installed (no binary on $PATH)` : err.message,
+				error:
+					err.code === "ENOENT"
+						? `${preset.command}: not installed (no binary on $PATH)`
+						: err.message,
 				exitCode: null,
 			});
 		});
@@ -550,7 +568,12 @@ export async function runExternalAgent(
 				/* secrets package unavailable — leave text unmodified */
 			}
 			if (code === 0 || (code !== null && text.length > 0)) {
-				finish({ ok: code === 0, text, exitCode: code, error: code === 0 ? undefined : stderr.trim().slice(0, 400) });
+				finish({
+					ok: code === 0,
+					text,
+					exitCode: code,
+					error: code === 0 ? undefined : stderr.trim().slice(0, 400),
+				});
 			} else {
 				finish({
 					ok: false,
