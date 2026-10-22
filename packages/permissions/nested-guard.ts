@@ -5,9 +5,7 @@
  */
 
 export const NESTED_ENV = "EIGHT_PARENT_SESSION";
-export const NESTED_OVERRIDE = "EIGHT_ALLOW_NESTED";
-export const NESTED_MESSAGE =
-	"8gent: refusing to start inside an 8gent tool shell (set EIGHT_ALLOW_NESTED=1 to override)";
+export const NESTED_MESSAGE = "8gent: refusing to start inside an 8gent tool shell";
 
 /** The env a tool shell hands its child: the base env plus the nesting mark. */
 export function toolShellEnv(
@@ -16,9 +14,12 @@ export function toolShellEnv(
 	return { ...base, [NESTED_ENV]: String(process.pid) } as unknown as NodeJS.ProcessEnv;
 }
 
-/** True when this process was started by a tool shell and nothing overrides that. */
+/**
+ * True when this process was started by a tool shell. There is no override: a model can set any
+ * env var in its own shell, and a nested start is only legitimate outside a tool shell.
+ */
 export function isNestedStart(env: Record<string, string | undefined> = process.env): boolean {
-	return Boolean(env[NESTED_ENV]) && env[NESTED_OVERRIDE] !== "1";
+	return Boolean(env[NESTED_ENV]);
 }
 
 /** Entry points call this first: exit 2 with the message when nested. */

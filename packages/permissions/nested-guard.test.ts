@@ -7,7 +7,7 @@ import { NESTED_ENV, NESTED_MESSAGE, isNestedStart, toolShellEnv } from "./neste
 const ENTRY = join(import.meta.dir, "..", "..", "bin", "8gent.ts");
 const clean = (extra: Record<string, string> = {}) => {
 	const env = { ...process.env, ...extra } as Record<string, string | undefined>;
-	for (const k of [NESTED_ENV, "EIGHT_ALLOW_NESTED"]) if (!(k in extra)) delete env[k];
+	for (const k of [NESTED_ENV]) if (!(k in extra)) delete env[k];
 	return env as NodeJS.ProcessEnv;
 };
 const start = (env: NodeJS.ProcessEnv) =>
@@ -28,8 +28,8 @@ describe("nested start guard", () => {
 		expect(start(clean()).status).toBe(0);
 	});
 
-	test("EIGHT_ALLOW_NESTED=1 overrides", () => {
-		expect(start(clean({ [NESTED_ENV]: "123", EIGHT_ALLOW_NESTED: "1" })).status).toBe(0);
+	test("the mark cannot be overridden: EIGHT_ALLOW_NESTED=1 still exits 2", () => {
+		expect(start(clean({ [NESTED_ENV]: "123", EIGHT_ALLOW_NESTED: "1" })).status).toBe(2);
 	});
 
 	test("toolShellEnv marks the child and keeps the rest", () => {

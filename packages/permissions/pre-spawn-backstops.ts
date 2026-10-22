@@ -45,7 +45,7 @@ export function preSpawnRefusal(command: string, cwd: string = process.cwd()): s
  */
 const BIN_NAMES = new Set(["8", "8gent", "8gent-code", "8gent-run", "8gent-run.js", "8gent.ts"]);
 /** A path to the binary: `/x/8gent`, `bin/8gent-run.js`, `.bin/8gent`. A folder named 8gent-code is not one. */
-const BIN_PATH_ENDS = ["/8gent", "/8gent-run", "/8gent-run.js", "/8gent.ts"];
+const BIN_PATH_ENDS = ["/8", "/8gent", "/8gent-run", "/8gent-run.js", "/8gent.ts"];
 const PACKAGE = "@8gi-foundation/8gent-code";
 const SUBCOMMANDS = new Set(["chat", "run", "mcp-server"]);
 /** The only commands naming 8gent that are information, accepted only as the whole command. */
@@ -61,6 +61,21 @@ function commandTokens(command: string): string[] {
 export function spawnsSelf(command: string): boolean {
 	if (INFO_FORMS.has(command.trim().replace(/\s+/g, " "))) return false;
 	const tokens = commandTokens(command);
+	// Naming the guard's own variables, or clearing the environment, is an attempt to get around
+	// it. `env -i` plus indirection (`x=8g;y=ent; env -i $x$y chat`) is the residual a text rule
+	// cannot see by name; refusing env -i, --ignore-environment and unset closes it.
+	if (
+		tokens.some(
+			(t) =>
+				t.includes("EIGHT_PARENT_SESSION") ||
+				t.includes("ALLOW_NESTED") ||
+				t === "unset" ||
+				t === "--ignore-environment" ||
+				(t === "-i" && tokens[0] === "env") ||
+				(/^-[A-Za-z]*i[A-Za-z]*$/.test(t) && tokens.includes("env")),
+		)
+	)
+		return true;
 	const names8gent = (t: string) =>
 		BIN_NAMES.has(t) || BIN_PATH_ENDS.some((e) => t.endsWith(e)) || t.startsWith(PACKAGE);
 	if (tokens.some(names8gent)) return true;

@@ -30,6 +30,7 @@ import * as path from "node:path";
 import { killProcessTree, shellInvocation } from "../../../core/shell";
 import { getWorkspaceDb } from "../../../db/src/workspace-db";
 import { blockedReason, commandArgvs } from "../../../permissions/always-blocked";
+import { toolShellEnv } from "../../../permissions/nested-guard";
 import { evaluatePolicy } from "../../../permissions/policy-engine";
 import { preSpawnRefusal } from "../../../permissions/pre-spawn-backstops";
 import { refusalLead } from "../../../permissions/refusal-lead";
@@ -743,11 +744,12 @@ export const fsExec: JsonRpcHandler = async (raw, ctx: JsonRpcContext) => {
 	const sh = shellInvocation(params.command, { posix: ["/bin/sh", "-c"] });
 	const child = Bun.spawn([sh.file, ...sh.args], {
 		cwd: root,
-		env: {
+		// Restricted env plus the nesting mark: an 8gent started here refuses to run (#4715).
+		env: toolShellEnv({
 			PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
 			HOME: process.env.HOME ?? root,
 			LANG: process.env.LANG ?? "en_US.UTF-8",
-		},
+		}) as Record<string, string>,
 		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",

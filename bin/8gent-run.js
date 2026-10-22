@@ -9,10 +9,8 @@ import { nodeExecPath } from "./termux-exec.js";
 
 // An 8gent tool shell marks its child env (packages/permissions/nested-guard.ts); a second
 // 8gent inside it refuses to start (#4715). Kept inline: this file is plain JS, run before the build.
-if (process.env.EIGHT_PARENT_SESSION && process.env.EIGHT_ALLOW_NESTED !== "1") {
-	process.stderr.write(
-		"8gent: refusing to start inside an 8gent tool shell (set EIGHT_ALLOW_NESTED=1 to override)\n",
-	);
+if (process.env.EIGHT_PARENT_SESSION) {
+	process.stderr.write("8gent: refusing to start inside an 8gent tool shell\n");
 	process.exit(2);
 }
 
