@@ -239,6 +239,14 @@ export function getBuiltInSlashCommands(): BuiltInSlashCommandDef[] {
 	return BUILT_IN_SLASH_COMMANDS;
 }
 
+/**
+ * The built-ins alone, with no disk read. A line like /help must run before the
+ * skill scan finishes (slow on Android storage) and when that scan fails.
+ */
+export function getBuiltInSlashRegistry(): SlashRegistry {
+	return mergeSlashEntries(buildBuiltInEntries(), [], []);
+}
+
 export async function getSlashRegistry(): Promise<SlashRegistry> {
 	return mergeSlashEntries(buildBuiltInEntries(), await buildSkillEntries(), buildPromptEntries());
 }
