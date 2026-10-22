@@ -183,6 +183,45 @@ const SHORT_VERSION: Record<string, string> = {
 const BARE_NAME = /^[A-Za-z][A-Za-z0-9._+-]*$/;
 
 /**
+ * Words a shell reads itself, or that run another command or change state. With
+ * `--version` after them they run a file by that name (`source --version`,
+ * `command --version`, `time --version`), so they never count as a probe (#4757 review).
+ */
+const NEVER_A_PROBE = new Set([
+	"source",
+	"eval",
+	"exec",
+	"command",
+	"builtin",
+	"time",
+	"noglob",
+	"nocorrect",
+	"nohup",
+	"xargs",
+	"env",
+	"nice",
+	"timeout",
+	"sudo",
+	"doas",
+	"su",
+	"trap",
+	"set",
+	"alias",
+	"unalias",
+	"export",
+	"unset",
+	"readonly",
+	"typeset",
+	"declare",
+	"shutdown",
+	"reboot",
+	"halt",
+	"poweroff",
+	".",
+	":",
+]);
+
+/**
  * A version probe: any bare command name with `--version` as its only
  * argument (#4756: `pi --version` and `node --version` were refused on a phone,
  * and the fix is not to list every tool a person installs). VERSION_TOOLS keeps
@@ -193,7 +232,7 @@ function versionOnly(b: string, args: string[]): boolean {
 	if (VERSION_TOOLS.has(b)) {
 		return args[0] === "--version" || args[0] === "--help" || SHORT_VERSION[b] === args[0];
 	}
-	if (!BARE_NAME.test(b)) return false;
+	if (!BARE_NAME.test(b) || NEVER_A_PROBE.has(b)) return false;
 	return args[0] === "--version";
 }
 

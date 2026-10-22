@@ -420,6 +420,45 @@ describe("allowlist: what passes and what does not", () => {
 		])
 			expect({ c, v: readOnlyAllowlist(c).verdict }).toEqual({ c, v: "pass-without-model" });
 	});
+	test("shell builtins and precommand words are never a version probe", () => {
+		for (const w of [
+			"source",
+			"eval",
+			"exec",
+			"command",
+			"builtin",
+			"time",
+			"noglob",
+			"nocorrect",
+			"nohup",
+			"xargs",
+			"env",
+			"nice",
+			"timeout",
+			"sudo",
+			"doas",
+			"su",
+			"trap",
+			"set",
+			"alias",
+			"unalias",
+			"export",
+			"unset",
+			"readonly",
+			"typeset",
+			"declare",
+			"shutdown",
+			"reboot",
+			"halt",
+			"poweroff",
+			".",
+			":",
+		])
+			expect({ c: `${w} --version`, v: readOnlyAllowlist(`${w} --version`).verdict }).toEqual({
+				c: `${w} --version`,
+				v: "no-opinion",
+			});
+	});
 	test("a version probe with anything else on it, or a shell or sudo -v, has no opinion", () => {
 		for (const c of [
 			"pi --version --verbose",
