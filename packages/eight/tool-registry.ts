@@ -45,7 +45,7 @@ export const TOOL_CATEGORIES: Record<string, (keyof AgentTools | string)[]> = {
 	],
 	github: ["gh_pr_list", "gh_pr_create", "gh_pr_view", "gh_issue_list", "gh_issue_create"],
 	notes: ["write_notes"],
-	terminal: ["write_terminal"],
+	terminal: ["write_terminal", "read_terminal"],
 	web: ["web_search", "web_fetch"],
 	lsp: [
 		"lsp_goto_definition",

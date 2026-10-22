@@ -192,16 +192,38 @@ export async function gateTabInput(tabId: string, text: string): Promise<string 
 	if (label === null) return `No terminal open for tab ${tabId}. Nothing was sent.`;
 	const denied = await gateInput("write_terminal", text);
 	if (denied) return denied;
-	if (tabs.isTerminalApproved(tabId)) return null;
+	if (tabs.isTerminalWriteApproved(tabId)) return null;
 	const ok = await getPermissionManager().askPerson(
 		"Type Into Terminal Tab",
-		`The assistant wants to type into terminal tab ${tabId} (running ${label}). Approving covers this tab until it closes.`,
+		`The assistant wants to type into terminal tab ${tabId} (running ${label}), which also lets it read that tab. Approving covers this tab until it closes.`,
 		tail(text),
 	);
 	if (!ok) {
 		return `[PERMISSION DENIED] write_terminal: a person did not approve typing into tab ${tabId}. Nothing was sent.`;
 	}
-	tabs.approveTerminal(tabId);
+	tabs.approveTerminalWrite(tabId);
+	return null;
+}
+
+/**
+ * The gate for read_terminal. Output read from a tab goes into the model's
+ * context, so a read needs a first-time per-tab approval (Infinite mode
+ * included). That approval is read only: it never lets write_terminal type, while
+ * a write approval also covers reads. Null means go ahead.
+ */
+export async function gateTabRead(tabId: string): Promise<string | null> {
+	const tabs = await import("../../apps/tui/src/hooks/useTerminal.js");
+	const label = tabs.describeTerminal(tabId);
+	if (label === null) return `No terminal open for tab ${tabId}.`;
+	if (tabs.isTerminalReadApproved(tabId)) return null;
+	const ok = await getPermissionManager().askPerson(
+		"Read Terminal Tab",
+		`The assistant wants to read the output of terminal tab ${tabId} (running ${label}). This is read only: typing into the tab needs its own approval. Approving covers this tab until it closes.`,
+	);
+	if (!ok) {
+		return `[PERMISSION DENIED] read_terminal: a person did not approve reading tab ${tabId}. Nothing was read.`;
+	}
+	tabs.approveTerminalRead(tabId);
 	return null;
 }
 
