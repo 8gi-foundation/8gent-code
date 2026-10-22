@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.16] - 2026-10-22
+
+### Fixed
+- "run pi" opens the pi tab through /term, no model tokens (#4764) ([#4765](https://github.com/8gi-foundation/8gent-code/pull/4765))
+- a greeting alone gets no tools, and a plain home folder is not a project ([#4760](https://github.com/8gi-foundation/8gent-code/pull/4760))
+- decide: allow --version and -v probes for any bare binary name ([#4757](https://github.com/8gi-foundation/8gent-code/pull/4757))
+- an empty end after refused calls names what was refused and why ([#4759](https://github.com/8gi-foundation/8gent-code/pull/4759))
+- tui: a running turn's calls never read No reply. (#4756) ([#4758](https://github.com/8gi-foundation/8gent-code/pull/4758))
+
 ## [0.20.15] - 2026-10-22
 
 ### Added
