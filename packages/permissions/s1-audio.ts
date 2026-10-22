@@ -58,7 +58,7 @@ const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 /** Wrapper flags that take a value as the next word. */
 const FLAG_WITH_VALUE = new Set(["-u", "-g", "-h", "-p", "-C", "-I", "-n", "-P", "-s", "-S"]);
 
-const BELL = /\\(a|0?07|x0?7)/;
+const BELL = /\\(a|0?07|x0?7|u0{0,3}7|U0{0,7}7)/;
 
 /** Decode `$'\x73ay'` style quoting, then drop quotes and backslashes: what the shell would call. */
 function unquoteWord(w: string): string {
@@ -112,7 +112,8 @@ function segmentIsAudio(segment: string, command: string): boolean {
 	// The terminal bell by escape: printf '\a', echo -e '\a' (also \007, \x07).
 	if (
 		BELL.test(segment) &&
-		(prog === "printf" || (prog === "echo" && /\s-[a-zA-Z]*e/.test(segment)))
+		(prog === "printf" ||
+			(prog === "echo" && (/\s-[a-zA-Z]*e/.test(segment) || segment.includes("$'"))))
 	)
 		return true;
 	if (SHELLS.has(prog)) {

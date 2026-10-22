@@ -132,6 +132,11 @@ describe("System One audio lane (#4713)", () => {
 			"/usr/bin/s\\ay hi",
 			"printf '\\a'",
 			"echo -e '\\a'",
+			"echo $'\\a'",
+			"echo $'\\x07'",
+			"echo $'\\007'",
+			"printf '\\u0007'",
+			"printf '\\U00000007'",
 		]) {
 			expect([c, isAudioCommand(c)]).toEqual([c, true]);
 		}
