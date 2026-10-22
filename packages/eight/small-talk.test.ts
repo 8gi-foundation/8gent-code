@@ -116,6 +116,7 @@ describe("agent wiring: a small-talk turn is sent with no tools", () => {
 		({ Agent } = await import("./agent"));
 		(await import("../hooks")).resetHookManager();
 		server = Bun.serve({
+			hostname: "127.0.0.1",
 			port: 0,
 			async fetch(req) {
 				if (req.method !== "POST") return Response.json({ models: [], data: [] });
