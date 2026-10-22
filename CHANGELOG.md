@@ -9,6 +9,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.18] - 2026-10-22
+
+### Added
+- stack: /stack and 8gent stack show what each turn sends, per source ([#4780](https://github.com/8gi-foundation/8gent-code/pull/4780))
+- tui: /herdr lists the herdr panes beside 8gent and reads one, read-only (#4773) ([#4781](https://github.com/8gi-foundation/8gent-code/pull/4781))
+
+### Fixed
+- term: window folder quoted literally; window and bridge node use the outside-folder PATH (#4783) ([#4784](https://github.com/8gi-foundation/8gent-code/pull/4784))
+- tui: /term and run <preset> spawn the preset by absolute path from outside the project (#4769) ([#4782](https://github.com/8gi-foundation/8gent-code/pull/4782))
+
 ## [0.20.17] - 2026-10-22
 
 ### Added
