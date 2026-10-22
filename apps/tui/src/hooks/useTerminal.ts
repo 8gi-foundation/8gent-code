@@ -29,6 +29,10 @@ const MAX_LINES = 1000;
 
 interface PTYEntry {
 	session: PtySession;
+	/** What runs in the tab (command name), shown when a person is asked to approve typing into it. */
+	label: string;
+	/** A person approved typing into this tab. Lives on the entry, so it ends when the tab closes. */
+	approved: boolean;
 }
 
 const _registry = new Map<string, PTYEntry>();
@@ -39,6 +43,21 @@ export function writeToTerminal(tabId: string, input: string): string {
 	if (!entry) return `No terminal open for tab ${tabId}`;
 	entry.session.write(input.endsWith("\n") ? input : `${input}\n`);
 	return `Sent to terminal tab ${tabId}`;
+}
+
+/** The command running in a tab, or null when no terminal is open for it. */
+export function describeTerminal(tabId: string): string | null {
+	return _registry.get(tabId)?.label ?? null;
+}
+
+export function isTerminalApproved(tabId: string): boolean {
+	return _registry.get(tabId)?.approved === true;
+}
+
+/** Record a person's approval for this tab until it closes. No-op for an unknown tab. */
+export function approveTerminal(tabId: string): void {
+	const entry = _registry.get(tabId);
+	if (entry) entry.approved = true;
 }
 
 /**
@@ -126,7 +145,11 @@ export function useTerminal(tabId: string, cwdOrOpts?: string | TerminalSpawnOpt
 			setState({ lines: bufferRef.current.toArray(), isRunning: false, pid: null });
 		});
 
-		_registry.set(tabId, { session });
+		_registry.set(tabId, {
+			session,
+			label: (opts.command ?? SHELL).split("/").pop() || "shell",
+			approved: false,
+		});
 
 		session.ready.then(() => {
 			setState({ lines: [], isRunning: true, pid: session.pid });

@@ -178,33 +178,30 @@ export async function gateInput(tool: string, text: string): Promise<string | nu
 	return null;
 }
 
-/** Terminal tabs a person has approved for typing this session. Memory only, never persisted. */
-const approvedTabs = new Set<string>();
-
-/** Test hook: forget every per-tab approval. */
-export function _resetApprovedTabs(): void {
-	approvedTabs.clear();
-}
-
 /**
  * The gate for write_terminal. The text goes through the same command policy as
  * term_send, then the first send to each tab asks a person, in every mode
  * including Infinite (a tab can hold another program such as pi or Hermes, so
- * typing into it is a different trust than running a command). Null means go ahead.
+ * typing into it is a different trust than running a command). The approval
+ * lives on the tab's registry entry, so it ends with the session and when the
+ * tab closes. Null means go ahead.
  */
 export async function gateTabInput(tabId: string, text: string): Promise<string | null> {
+	const tabs = await import("../../apps/tui/src/hooks/useTerminal.js");
+	const label = tabs.describeTerminal(tabId);
+	if (label === null) return `No terminal open for tab ${tabId}. Nothing was sent.`;
 	const denied = await gateInput("write_terminal", text);
 	if (denied) return denied;
-	if (approvedTabs.has(tabId)) return null;
+	if (tabs.isTerminalApproved(tabId)) return null;
 	const ok = await getPermissionManager().askPerson(
 		"Type Into Terminal Tab",
-		`The assistant wants to type into terminal tab ${tabId}. Approving covers this tab until the session ends.`,
+		`The assistant wants to type into terminal tab ${tabId} (running ${label}). Approving covers this tab until it closes.`,
 		tail(text),
 	);
 	if (!ok) {
 		return `[PERMISSION DENIED] write_terminal: a person did not approve typing into tab ${tabId}. Nothing was sent.`;
 	}
-	approvedTabs.add(tabId);
+	tabs.approveTerminal(tabId);
 	return null;
 }
 

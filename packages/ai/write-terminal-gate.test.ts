@@ -13,16 +13,23 @@ afterAll(() => {
 });
 
 const sent: Array<[string, string]> = [];
+// Open tabs and their approval, as the registry entry holds them.
+const tabs = new Map<string, { label: string; approved: boolean }>();
 mock.module("../../apps/tui/src/hooks/useTerminal.js", () => ({
 	...realUseTerminal,
 	writeToTerminal: (tabId: string, input: string) => {
 		sent.push([tabId, input]);
 		return `Sent to terminal tab ${tabId}`;
 	},
-	listTerminals: () => ["t1", "t2"],
+	listTerminals: () => [...tabs.keys()],
+	describeTerminal: (id: string) => tabs.get(id)?.label ?? null,
+	isTerminalApproved: (id: string) => tabs.get(id)?.approved === true,
+	approveTerminal: (id: string) => {
+		const t = tabs.get(id);
+		if (t) t.approved = true;
+	},
 }));
 
-import { _resetApprovedTabs } from "../eight/term-tools";
 import { getPermissionManager } from "../permissions";
 import {
 	_resetTuiApprovalChannel,
@@ -50,7 +57,9 @@ function attachTerminal(answer: "approve" | "deny", asked: string[]) {
 
 beforeEach(() => {
 	sent.length = 0;
-	_resetApprovedTabs();
+	tabs.clear();
+	tabs.set("t1", { label: "pi", approved: false });
+	tabs.set("t2", { label: "hermes", approved: false });
 });
 
 afterEach(() => {
@@ -82,6 +91,26 @@ describe("write_terminal gate", () => {
 		expect(asked).toEqual(["echo hi"]);
 		expect(JSON.stringify(out)).toContain("[PERMISSION DENIED]");
 		expect(sent).toEqual([]);
+	});
+
+	test("a tab that does not exist is refused before anyone is asked", async () => {
+		getPermissionManager().enableInfiniteMode();
+		const asked: string[] = [];
+		attachTerminal("approve", asked);
+		const out = await write("nope", "echo hi");
+		expect(JSON.stringify(out)).toContain("No terminal open for tab nope");
+		expect(asked).toEqual([]);
+		expect(sent).toEqual([]);
+	});
+
+	test("closing a tab clears its approval; a new tab with the same id asks again", async () => {
+		const asked: string[] = [];
+		attachTerminal("approve", asked);
+		await write("t1", "echo a");
+		tabs.delete("t1");
+		tabs.set("t1", { label: "pi", approved: false });
+		await write("t1", "echo b");
+		expect(asked).toEqual(["echo a", "echo b"]);
 	});
 
 	test("with no terminal to ask, the first send is refused", async () => {
