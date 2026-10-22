@@ -222,9 +222,9 @@ tar xzf 8gent-<version>-linux-amd64.tar.gz && sudo mv 8gent-*/bin/8gent /usr/loc
 
 > Binaries are code-signed only on releases where the maintainer's certificates are configured (see [SIGNING.md](SIGNING.md)). Unsigned downloads run fine but may prompt Gatekeeper (macOS) or SmartScreen (Windows) - allow them through, or build your own with `bun run build:binaries`.
 
-### npm (old build, 0.17.0)
+### npm
 
-The npm package is behind GitHub. `npm install -g @8gi-foundation/8gent-code` installs 0.17.0 (published 11 May 2026), not the current release, and it needs [Bun](https://bun.sh). Use a one-line installer above until npm is republished.
+The npm package tracks the GitHub release: `npm install -g @8gi-foundation/8gent-code` installs the current version. It runs on Bun, or on Node 22.5 or newer when Bun is not installed. On Android (Termux, kali or arch proot) follow [docs/install/android-termux.md](docs/install/android-termux.md).
 
 ### Build binaries from source
 
