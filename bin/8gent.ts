@@ -10,8 +10,12 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { safeBunFlags } from "../packages/core/bun-flags";
 import { normalizeSubcommand, unknownSubcommandLines } from "../packages/eight/subcommand-match.ts";
+import { refuseIfNested } from "../packages/permissions/nested-guard";
 import { petRequested } from "../packages/pet/opt-in";
 import { nodeExecPath, tuiProcessEnv } from "./termux-exec.js";
+
+// An 8gent tool shell marks its child env; a second 8gent inside it refuses to start (#4715).
+refuseIfNested();
 
 const VERSION = "0.20.11";
 const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts

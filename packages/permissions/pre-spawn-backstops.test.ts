@@ -17,6 +17,26 @@ const SPAWNS = [
 	"npx -y @8gi-foundation/8gent-code mcp-server",
 	"bun dist/cli.js mcp-server",
 	"8gent-run x",
+	"{ 8gent chat; }",
+	"if true; then 8gent chat; fi",
+	"for x in 1; do 8gent chat; done",
+	"while true; do 8gent chat; done",
+	"! 8gent chat",
+	"`8gent chat`",
+	"eval 8gent chat",
+	"eval '8gent chat'",
+	"sudo -u root 8gent chat",
+	"env -u X 8gent chat",
+	"exec -a foo 8gent chat",
+	"doas 8gent chat",
+	"setsid 8gent chat",
+	"caffeinate 8gent chat",
+	"script -q /dev/null 8gent chat",
+	"node bin/8gent-run.js chat",
+	"bun x 8gent chat",
+	"8gent",
+	"8gent<in.txt",
+	"node bin/8gent.ts",
 	"8gent-run",
 	"8gent --model x chat",
 	"8gent --model x --yes run hi",
@@ -49,22 +69,32 @@ const SPAWNS = [
 
 const SAFE = [
 	"echo hi",
-	"grep '8gent chat' x",
-	'grep -r "8gent run" .',
-	"echo 8gent chat",
-	"8gent --version",
-	"8gent memory recall foo",
 	"cat 8/notes.md",
 	"8ball",
-	"git commit -m '8gent chat fix'",
-	"ls 8gent-code",
+	"cd ~/8gent-code && git status",
 	"node server.js run",
-	"npx @8gi-foundation/8gent-code --version",
 	"sudo ls",
 	"env FOO=1 ls",
 	"time ls",
 	"timeout 5 ls",
 	"nice -n 5 ls",
+	"which 8gent",
+	"command -v 8gent",
+	"8gent --version",
+	"8gent --help",
+];
+
+/** Refused by design: the rule is position-free, so a mention of the binary trips it. */
+const REFUSED_BY_DESIGN = [
+	"grep '8gent chat' x",
+	'grep -r "8gent run" .',
+	"echo 8gent chat",
+	"echo 8gent",
+	"ls 8gent-code",
+	"git commit -m '8gent chat fix'",
+	"8gent memory recall foo",
+	"npx @8gi-foundation/8gent-code --version",
+	"which 8gent; 8gent chat",
 ];
 
 describe("self-spawn backstop", () => {
@@ -74,6 +104,10 @@ describe("self-spawn backstop", () => {
 
 	test.each(SAFE)("allows %s", (cmd) => {
 		expect(spawnsSelf(cmd)).toBe(false);
+	});
+
+	test.each(REFUSED_BY_DESIGN)("refuses by design: %s", (cmd) => {
+		expect(spawnsSelf(cmd)).toBe(true);
 	});
 
 	test("preSpawnRefusal says you are already 8gent", () => {

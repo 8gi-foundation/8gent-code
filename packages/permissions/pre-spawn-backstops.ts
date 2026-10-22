@@ -31,22 +31,43 @@ export function preSpawnRefusal(command: string, cwd: string = process.cwd()): s
 }
 
 /**
- * `8gent chat`, `8gent run` or `8gent mcp-server` (also `bun bin/8gent.ts ...`, `node dist/cli.js ...`,
- * `npx @8gi-foundation/8gent-code ...`) at the start of
- * a command part. A run that spawns itself nests a second 8gent inside the first (#4715).
- * Anchored to a command position, so `grep "8gent chat"` and `echo 8gent run` are not matched.
+ * A run that starts another 8gent nests a second one inside the first (#4715). Rule: split the
+ * command on whitespace and shell operators, strip quotes and backslashes from every token (the
+ * shell does), and refuse if ANY token names the 8gent binary. Position does not matter, so
+ * wrappers (env, sudo, timeout, setsid, doas...), keywords (if, for, while, !), eval, backticks
+ * and `sh -c '...'` are covered by construction. The names are package.json "bin": `8`, `8gent`,
+ * `8gent-code`, all pointing at bin/8gent-run.js, plus bin/8gent.ts. `node dist/cli.js` is the
+ * built entry and counts when a chat, run or mcp-server word is also present.
+ *
+ * Refused by design: `grep '8gent chat' x` and `echo 8gent` also trip it. This is a backstop,
+ * not the boundary: the runtime guard (permissions/nested-guard.ts, EIGHT_PARENT_SESSION in the
+ * tool shell env, checked by bin/8gent-run.js and bin/8gent.ts) closes what text cannot see.
  */
-const SPAWN_START = String.raw`(?:^|[;&|(\n]|(?:ba|z)?sh\s+-\w*c\s+['"])\s*`;
-const SPAWN_WRAP = String.raw`(?:(?:(?:env|nohup|exec|time|command|sudo|xargs)\s+(?:-\S+\s+)*)|(?:timeout\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*\d\S*\s+)|(?:(?:nice|stdbuf)\s+(?:-\S+\s+(?:\d+\s+)?)*)|(?:\w+=\S*\s+))*`;
-const SPAWN_FLAGS = String.raw`(?:\s+-\S+(?:\s+[^-\s]\S*)?)*`;
-const SPAWN_BIN = String.raw`(?:(?:(?:bun|bunx|node|npx|tsx)(?:\s+-\S+)*(?:\s+run)?\s+)?(?:(?:\S*\/)?8(?:gent(?:-code)?)?(?:\.[tj]s)?|\$\(\s*which\s+8gent\s*\))|(?:bun|node|tsx)(?:\s+-\S+)*\s+(?:\S*\/)?cli\.js)`;
-const SELF_SPAWN = new RegExp(
-	`${SPAWN_START}${SPAWN_WRAP}(?:${SPAWN_BIN}${SPAWN_FLAGS}\\s+(?:chat|run|mcp-server)(?![\\w-])|(?:\\S*\\/)?8gent-run(?![\\w-]))`,
-);
+const BIN_NAMES = new Set(["8", "8gent", "8gent-code", "8gent-run", "8gent-run.js", "8gent.ts"]);
+/** A path to the binary: `/x/8gent`, `bin/8gent-run.js`, `.bin/8gent`. A folder named 8gent-code is not one. */
+const BIN_PATH_ENDS = ["/8gent", "/8gent-run", "/8gent-run.js", "/8gent.ts"];
+const PACKAGE = "@8gi-foundation/8gent-code";
+const SUBCOMMANDS = new Set(["chat", "run", "mcp-server"]);
+/** The only commands naming 8gent that are information, accepted only as the whole command. */
+const INFO_FORMS = new Set(["which 8gent", "command -v 8gent", "8gent --version", "8gent --help"]);
+
+function commandTokens(command: string): string[] {
+	return command
+		.replace(/['"\\]/g, "")
+		.split(/[\s;&|(){}`<>]+/)
+		.filter(Boolean);
+}
 
 export function spawnsSelf(command: string): boolean {
-	// The shell strips quotes and backslashes inside a word: '8gent', 8\gent and 8ge''nt are 8gent.
-	return SELF_SPAWN.test(command) || SELF_SPAWN.test(command.replace(/['"\\]/g, ""));
+	if (INFO_FORMS.has(command.trim().replace(/\s+/g, " "))) return false;
+	const tokens = commandTokens(command);
+	const names8gent = (t: string) =>
+		BIN_NAMES.has(t) || BIN_PATH_ENDS.some((e) => t.endsWith(e)) || t.startsWith(PACKAGE);
+	if (tokens.some(names8gent)) return true;
+	return (
+		tokens.some((t) => t === "cli.js" || t.endsWith("/cli.js")) &&
+		tokens.some((t) => SUBCOMMANDS.has(t))
+	);
 }
 
 function backstopRefusal(command: string, cwd: string): string | null {

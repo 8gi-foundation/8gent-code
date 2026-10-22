@@ -173,6 +173,7 @@ import {
 	askMcpStartApproval,
 	mcpPolicyContext,
 } from "../permissions/mcp-gate";
+import { toolShellEnv } from "../permissions/nested-guard";
 import { filterToolOutput } from "../permissions/output-filter";
 import { type PathAccess, validatePath as guardPath } from "../permissions/path-guard.js";
 import {
@@ -3969,11 +3970,11 @@ export class ToolExecutor {
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
 				windowsShell,
-				env: {
+				env: toolShellEnv({
 					// The done gate hands in an already scrubbed env; everything else gets the minimal one.
 					...((env as NodeJS.ProcessEnv | undefined) ?? (buildChildEnv() as NodeJS.ProcessEnv)),
 					...SPAWN_NON_INTERACTIVE_ENV,
-				},
+				}),
 			});
 
 			let stdout = "";

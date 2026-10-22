@@ -44,6 +44,7 @@ import {
 	emptyOldTextError,
 	normaliseAllowedPaths,
 } from "../permissions/edit-guards";
+import { toolShellEnv } from "../permissions/nested-guard";
 import { type PathAccess, validatePath } from "../permissions/path-guard";
 import {
 	type PermissionModeHolder,
@@ -1795,6 +1796,7 @@ async function runShellCommand(
 			cwd,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,
+			env: toolShellEnv(),
 		});
 
 		let stdout = "";
