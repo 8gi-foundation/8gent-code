@@ -9,6 +9,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.12] - 2026-10-22
+
+### Added
+- eight: required-output gate, the turn may not end while a named output file is missing (#4734) ([#4736](https://github.com/8gi-foundation/8gent-code/pull/4736))
+
+### Fixed
+- tui: number shortcuts that work in Termux, help shows only keys the terminal can send (#4723) ([#4738](https://github.com/8gi-foundation/8gent-code/pull/4738))
+- eight: a stalled turn says it is waiting and gives up after a bound (#4727) ([#4737](https://github.com/8gi-foundation/8gent-code/pull/4737))
+- permissions: a path the person names in the ask is readable; boundary blocks are terminal ([#4722](https://github.com/8gi-foundation/8gent-code/pull/4722))
+- provider: one keyed provider and no local runtime means no question, and the choice persists (#4720) ([#4728](https://github.com/8gi-foundation/8gent-code/pull/4728))
+- eight: no unprompted audio, COMPLETED line is a fixed form ([#4718](https://github.com/8gi-foundation/8gent-code/pull/4718))
+
 ## [0.20.11] - 2026-10-22
 
 ### Added
