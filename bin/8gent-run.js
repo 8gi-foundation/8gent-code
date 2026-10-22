@@ -7,6 +7,13 @@ import { fileURLToPath } from "node:url";
 import { nodeTooOld, tooOldMessage } from "./node-version.js";
 import { nodeExecPath } from "./termux-exec.js";
 
+// An 8gent tool shell marks its child env (packages/permissions/nested-guard.ts); a second
+// 8gent inside it refuses to start (#4715). Kept inline: this file is plain JS, run before the build.
+if (process.env.EIGHT_PARENT_SESSION !== undefined) {
+	process.stderr.write("8gent: refusing to start inside an 8gent tool shell\n");
+	process.exit(2);
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const cli = join(__dirname, "..", "dist", "cli.js");
 // Never let the user's cwd steer the runtime: a workspace bunfig.toml `preload`

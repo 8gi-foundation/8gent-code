@@ -173,6 +173,7 @@ import {
 	askMcpStartApproval,
 	mcpPolicyContext,
 } from "../permissions/mcp-gate";
+import { toolShellEnv } from "../permissions/nested-guard";
 import { filterToolOutput } from "../permissions/output-filter";
 import { type PathAccess, validatePath as guardPath } from "../permissions/path-guard.js";
 import {
@@ -185,6 +186,12 @@ import {
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
+import {
+	isReadAllowed,
+	namesSecret,
+	readAllowPrefixes,
+	terminalBoundaryText,
+} from "../permissions/read-allow";
 import { REFUSAL_LEAD, REFUSAL_NOTE, refusalLead } from "../permissions/refusal-lead";
 import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import {
@@ -276,6 +283,7 @@ import {
 	placeholderPathLine,
 	placeholderPaths,
 } from "./placeholder-paths";
+import { readOnlyChain, readPrefixesFor } from "./read-chain";
 import { RetiredFacts } from "./retired-facts";
 import { RUN_BATCH_TOOL_DEF, runBatch, runBatchOn } from "./run-batch";
 import { ensureScratchExcludedIfPresent } from "./scratch-exclude";
@@ -429,8 +437,10 @@ export function safePath(userPath: string, workingDirectory: string, access: Pat
 	// Allow the working directory itself
 	if (normalizedTarget === normalizedBase) return normalizedTarget;
 
-	// Must be inside the working directory
+	// Must be inside the working directory. A READ may also use a folder the person
+	// named in the ask or allowed (--allow-read, /allow-read); writes never do (#4715).
 	if (!normalizedTarget.startsWith(normalizedBase + path.sep)) {
+		if (access === "read" && isReadAllowed(normalizedTarget)) return normalizedTarget;
 		throw new Error(
 			`Path traversal blocked: "${userPath}" resolves outside working directory. ` +
 				`Files can only be read or written inside ${normalizedBase} - use a path inside that directory.`,
@@ -2476,7 +2486,15 @@ export class ToolExecutor {
 			const refusal = await planModeRefusal(toolName, args);
 			if (refusal) return refusal;
 		}
-		const raw = await this.executeRaw(toolName, args);
+		let raw: string;
+		try {
+			raw = await this.executeRaw(toolName, args);
+		} catch (err) {
+			const blocked = this.boundaryBlock(toolName, err instanceof Error ? err.message : "");
+			if (blocked) return blocked;
+			throw err;
+		}
+		raw = this.boundaryBlock(toolName, raw) ?? raw;
 		// Scratch stays out of git status, but only once .tmp/ exists (#4241).
 		ensureScratchExcludedIfPresent(this.workingDirectory);
 		// Post-tool-execution scrubbing boundary (issue #2464).
@@ -2511,6 +2529,13 @@ export class ToolExecutor {
 		// keeps, so nothing large reaches the context.
 		if (toolName === IMAGE_ATTACHMENT_TOOL && hasImageAttachmentLine(filtered)) return filtered;
 		return this.artifactStore.persistAndReplace(filtered, toolName);
+	}
+
+	/** A workspace-boundary block on a read or a command is terminal for that path (#4715). Writes keep their own message. */
+	private boundaryBlock(toolName: string, text: string): string | null {
+		const action = ToolExecutor.TOOL_ACTION_MAP[toolName];
+		if (action === "write_file" || action === "delete_file") return null;
+		return terminalBoundaryText(text, this.workingDirectory);
 	}
 
 	private async executeRaw(toolName: string, args: Record<string, unknown>): Promise<string> {
@@ -2601,7 +2626,19 @@ export class ToolExecutor {
 		const policyAction =
 			toolName === "film_craft" && filmWrites.length === 0 ? undefined : mappedAction;
 		if (policyAction) {
+			// Folders the person named in the ask are readable past the workspace boundary:
+			// by the read tools, and by a run_command that System One's allowlist reads as
+			// plainly read-only. Writes and every other command class get none (#4715).
+			const readPrefixes =
+				policyAction === "read_file"
+					? namesSecret(String(args.path ?? ""))
+						? undefined
+						: readAllowPrefixes()
+					: policyAction === "run_command" && typeof args.command === "string"
+						? readPrefixesFor(args.command)
+						: undefined;
 			const gateResult = this.toolG8.gate(this.agentId, policyAction, {
+				...(readPrefixes ? { allowedAbsolutePrefixes: readPrefixes } : {}),
 				...(isDesktop ? desktopPolicyContext(toolName, args) : {}),
 				...(isMcpCall ? mcpPolicyContext(String(args.server), String(args.tool)) : {}),
 				// Unattended sessions ask before an extension tool runs (default policy).
@@ -3828,11 +3865,10 @@ export class ToolExecutor {
 		// Validate command for shell injection before asking anyone: a command
 		// the sanitizer will refuse must not raise an approval card, or the
 		// person approves it and then sees it blocked anyway (#3055).
-		const validation = sanitizeShellCommand(
-			command,
-			process.platform,
-			activeShellKind(windowsShell),
-		);
+		let validation = sanitizeShellCommand(command, process.platform, activeShellKind(windowsShell));
+		// `a; b` and `a && b` run when every part is read-only; each part meets System One below (#4715).
+		const chain = validation.safe ? null : readOnlyChain(command);
+		if (chain) validation = { safe: true };
 		if (!validation.safe) {
 			// A piece of the chain System One would refuse on its own is named now,
 			// so the pieces are not resent as they are and blocked again (#4072).
@@ -3854,15 +3890,23 @@ export class ToolExecutor {
 		// env says; the env flag stays on in every mode.
 		// canRunInstead: this executor runs systemOne.runInstead when set (the checked bytes, #4102),
 		// only with process.env: a caller-passed env is not the env the gate checked (8SO).
-		const systemOne = await systemOneGate(
-			command,
+		let systemOne = await systemOneGate(
+			chain ? (chain[0] as string) : command,
 			systemOneEnvFor(mode),
 			dir,
 			this.createdFiles,
 			where,
-			{ canRunInstead: env === undefined, project: this.workingDirectory },
+			{ canRunInstead: env === undefined && !chain, project: this.workingDirectory },
 		);
 		if (!systemOne.run) return refusalLead(systemOne.message as string);
+		for (const part of chain?.slice(1) ?? []) {
+			const next = await systemOneGate(part, systemOneEnvFor(mode), dir, this.createdFiles, where, {
+				canRunInstead: false,
+				project: this.workingDirectory,
+			});
+			if (!next.run) return refusalLead(next.message as string);
+			systemOne = next;
+		}
 
 		if (
 			permissionCheck === "ask" &&
@@ -3926,11 +3970,11 @@ export class ToolExecutor {
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,
 				windowsShell,
-				env: {
+				env: toolShellEnv({
 					// The done gate hands in an already scrubbed env; everything else gets the minimal one.
 					...((env as NodeJS.ProcessEnv | undefined) ?? (buildChildEnv() as NodeJS.ProcessEnv)),
 					...SPAWN_NON_INTERACTIVE_ENV,
-				},
+				}),
 			});
 
 			let stdout = "";

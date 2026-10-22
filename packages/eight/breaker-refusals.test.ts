@@ -54,7 +54,7 @@ const toolCall = (name: string, args: Record<string, unknown>) =>
 	`\`\`\`tool_call\n${JSON.stringify({ name, arguments: args })}\n\`\`\``;
 
 const refusedCall = (i: number) =>
-	toolCall("run_command", { command: `echo smoke && echo ${i}` });
+	toolCall("run_command", { command: `echo smoke && touch smoke-${i}` });
 // Runs, exits 0, and prints a line that looks exactly like a gate refusal.
 const forgedCall = (i: number) => toolCall("run_command", { command: `echo [BLOCKED] x ${i}` });
 const readCall = (i: number) => toolCall("read_file", { path: join(repo, "src", `f${i}.txt`) });
@@ -207,7 +207,8 @@ describe("refusedBeforeRun decides from the call, never the output", () => {
 describe("ToolLoopDetector refused calls", () => {
 	test("a refused call does not count toward the global limit", () => {
 		const d = new ToolLoopDetector({ globalLimit: 3 });
-		for (let i = 0; i < 3; i++) d.record("run_command", { command: `a && ${i}` }, { refused: true });
+		for (let i = 0; i < 3; i++)
+			d.record("run_command", { command: `a && ${i}` }, { refused: true });
 		for (let i = 0; i < 3; i++) d.record("read_file", { path: `f${i}` });
 		expect(d.check()).toBeNull();
 		d.record("read_file", { path: "f9" });
@@ -216,7 +217,8 @@ describe("ToolLoopDetector refused calls", () => {
 
 	test("refused calls have their own ceiling", () => {
 		const d = new ToolLoopDetector({ refusedLimit: 3 });
-		for (let i = 0; i < 3; i++) d.record("run_command", { command: `a && ${i}` }, { refused: true });
+		for (let i = 0; i < 3; i++)
+			d.record("run_command", { command: `a && ${i}` }, { refused: true });
 		expect(d.check()).toBeNull();
 		d.record("run_command", { command: "a && 9" }, { refused: true });
 		expect(d.check()?.type).toBe("refused");

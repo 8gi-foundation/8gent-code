@@ -15,6 +15,7 @@ import type { ToolSet } from "ai";
 import { z } from "zod";
 import { activeShellKind, killProcessTree, spawnShell } from "../core/shell";
 import { deckVideoAfterWrite } from "../deck/auto";
+import { readOnlyChain, readPrefixesFor } from "../eight/read-chain";
 import {
 	OFFICE_TOOLS,
 	OFFICE_TOOL_DESCRIPTIONS,
@@ -43,6 +44,7 @@ import {
 	emptyOldTextError,
 	normaliseAllowedPaths,
 } from "../permissions/edit-guards";
+import { toolShellEnv } from "../permissions/nested-guard";
 import { type PathAccess, validatePath } from "../permissions/path-guard";
 import {
 	type PermissionModeHolder,
@@ -53,6 +55,7 @@ import {
 	systemOneEnvFor,
 } from "../permissions/permission-mode";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
+import { terminalBoundaryText } from "../permissions/read-allow";
 import {
 	RunCommandSandboxRequired,
 	runCommandSandboxRefusal,
@@ -146,6 +149,15 @@ function isToolContext(value: unknown): value is ToolContext {
  * that agent's permission mode (#3170): Plan refuses anything that is not a
  * read before the tool runs, and the permission layer below reads the mode.
  */
+const BOUNDARY_READ_TOOLS = new Set([
+	"read_file",
+	"list_files",
+	"search_files",
+	"run_command",
+	"read_image",
+	"describe_image",
+]);
+
 function bindToolContext<T extends ToolSet>(tools: T): T {
 	for (const [name, def] of Object.entries(tools)) {
 		const run = def.execute as ((input: unknown, options: unknown) => unknown) | undefined;
@@ -160,9 +172,16 @@ function bindToolContext<T extends ToolSet>(tools: T): T {
 		(def as { execute: unknown }).execute = (input: unknown, options: unknown) => {
 			const ctx = (options as { experimental_context?: unknown } | undefined)?.experimental_context;
 			const holder = (isToolContext(ctx) ? ctx : _ctx).permission;
-			const call = holder
+			const base = holder
 				? () => runWithPermissionHolder(holder, () => inMode(holder, input, options))
 				: () => run(input, options);
+			// A boundary block on a read or a command is terminal for that path (#4715).
+			const call = BOUNDARY_READ_TOOLS.has(name)
+				? async () => {
+						const out = await base();
+						return terminalBoundaryText(out, getToolContext().workingDirectory) ?? out;
+					}
+				: base;
 			return isToolContext(ctx) ? _callCtx.run(ctx, call) : call();
 		};
 	}
@@ -313,9 +332,11 @@ function confinedWritePath(p: string): { path: string } | { refused: string } {
  */
 function gateCommand(command: string): string | null {
 	const ctx = getToolContext();
+	const prefixes = readPrefixesFor(command);
 	const result = ToolG8.instance().gate(ctx.agentId ?? "primary", "run_command", {
 		command,
 		cwd: ctx.workingDirectory,
+		...(prefixes ? { allowedAbsolutePrefixes: prefixes } : {}),
 	});
 	if (result.allowed) return null;
 	return blockedToolMessage("run_command", false, undefined, result.reason, result.alternative);
@@ -849,7 +870,9 @@ const runCommand = tool({
 		const backstop = preSpawnRefusal(command, cwd);
 		if (backstop) return backstop;
 		const validation = sanitizeShellCommand(command);
-		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
+		// `a; b` and `a && b` run when every part is read-only (#4715).
+		if (!validation.safe && !readOnlyChain(command))
+			return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		const refused = gateCommand(command);
 		if (refused) return refused;
 		const startedAt = Date.now();
@@ -1773,6 +1796,7 @@ async function runShellCommand(
 			cwd,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,
+			env: toolShellEnv(),
 		});
 
 		let stdout = "";

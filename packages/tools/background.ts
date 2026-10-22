@@ -8,6 +8,7 @@ import type { ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { buildChildEnv } from "../eight/harness/child-env";
+import { toolShellEnv } from "../permissions/nested-guard";
 import { wrapRunCommand } from "../permissions/run-command-sandbox";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 
@@ -101,10 +102,10 @@ export class BackgroundTaskManager {
 		// EIGHT_SEATBELT=require when no boundary applies; callers report the error.
 		const proc = spawnShell(wrapRunCommand(command), {
 			cwd: workingDirectory,
-			env: {
+			env: toolShellEnv({
 				...(buildChildEnv() as NodeJS.ProcessEnv),
 				...options.env,
-			},
+			}),
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 

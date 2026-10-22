@@ -62,6 +62,8 @@ export interface RunOptions {
 	noSession: boolean;
 	/** `--session-dir <dir>`: where sessions are read and written. */
 	sessionDir?: string;
+	/** `--allow-read <dir>` (repeatable): folders the run may read outside its working directory (#4715). */
+	allowRead?: string[];
 }
 
 /**
@@ -77,6 +79,8 @@ export interface RunOptions {
  *   --max-turns <n>              or --max-turns=<n>
  *   --image <path>               or --image=<path>   (png, jpg, gif, webp; max 20 MB;
  *                                downscaled to fit 2560x2560; inside the working directory)
+ *   --allow-read <dir>           (repeatable) let the run read files under <dir>; writes stay in the
+ *                                working directory. Paths written in the prompt are allowed already.
  *   --no-workspace-boundary      do not set the workspace root (EIGHT_WORKSPACE_ROOT) for this run
  *                                (by default run mode sets it to the working directory; native
  *                                write_file and edit_file stay confined to the working directory either way)
@@ -106,6 +110,7 @@ export function parseRunArgs(argv: string[]): RunOptions {
 	let session: string | undefined;
 	let noSession = false;
 	let sessionDir: string | undefined;
+	const allowRead: string[] = [];
 	const positional: string[] = [];
 
 	for (let i = 0; i < argv.length; i++) {
@@ -188,6 +193,11 @@ export function parseRunArgs(argv: string[]): RunOptions {
 			image = a.slice("--image=".length);
 			continue;
 		}
+		if (a === "--allow-read" || a.startsWith("--allow-read=")) {
+			const v = a === "--allow-read" ? argv[++i] : a.slice("--allow-read=".length);
+			if (v) allowRead.push(v);
+			continue;
+		}
 		if (a === "--no-workspace-boundary") {
 			workspaceBoundary = false;
 			continue;
@@ -250,6 +260,7 @@ export function parseRunArgs(argv: string[]): RunOptions {
 		session,
 		noSession,
 		sessionDir,
+		...(allowRead.length ? { allowRead } : {}),
 	};
 }
 
@@ -1140,6 +1151,9 @@ export async function runRunCommand(
 		// The check runs repo code, so it needs --yes until run_command is sandboxed (#3612).
 		const baseline = await baselineCheck({ cwd: workDir, run, consent: opts.yes });
 		const before = projectFingerprint(workDir);
+		// Reads outside the working directory: --allow-read folders, and the paths this prompt names (#4715).
+		for (const d of opts.allowRead ?? []) agent.allowReadDir(d);
+		agent.allowReadsFromPerson(opts.prompt);
 		const answer = await agent.chat(opts.prompt, image?.base64, image?.mimeType, image?.original);
 		// A turn the breaker or the watchdog cut off is not finished (#4172).
 		const firstStop = agent.getTurnStop();

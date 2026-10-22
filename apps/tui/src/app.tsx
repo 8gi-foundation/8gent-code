@@ -396,6 +396,7 @@ import {
 	setHolderMode,
 	systemOneEnvFor,
 } from "../../../packages/permissions/permission-mode.js";
+import { runAllowReadCommand } from "../../../packages/permissions/read-allow.js";
 import { usePermToast } from "./hooks/usePermToast.js";
 import {
 	type PermView,
@@ -1196,6 +1197,7 @@ export function App({
 
 			try {
 				// Run D critic loop: Gemma 4 generates, qwen3:32b critiques, one retry if rejected
+				agent.allowReadsFromPerson(clean);
 				let response = await agent.chat(clean);
 				const { approved, feedback } = await critiqueResponse(clean, response || "");
 				if (!approved && feedback) {
@@ -3795,6 +3797,12 @@ export function App({
 
 				case "bug":
 					addSystemMessage(runBugCommand(args, { version: pkgInfo.version }).text);
+					break;
+
+				case "allow-read":
+					addSystemMessage(
+						runAllowReadCommand(args, process.cwd(), (d) => agent?.allowReadDir(d) ?? null),
+					);
 					break;
 
 				case "copy":
@@ -6945,6 +6953,8 @@ export function App({
 					const modePrefix = agentMode !== "Planning" ? `[Mode: ${agentMode}] ` : "";
 					const img = imageInput.getAttachedImage();
 					setVerificationByTab((v) => ({ ...v, [tabId]: undefined }));
+					// The person's own typed line only (not a skill or shell expansion): its paths are readable this turn (#4715).
+					targetAgent?.allowReadsFromPerson(message);
 					const chatPromise = targetAgent.chat(
 						modePrefix + messageForAgent.trim(),
 						img?.base64,

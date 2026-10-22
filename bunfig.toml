@@ -3,4 +3,4 @@
 # System One is on by default; the suite opts out so no test probes or loads this machine's judge.
 # Tests run against a temp $HOME, never the real one (#3240).
 # Temp files go to one run-scoped dir, removed after the run; fixed tests that leak fail it (#3285).
-preload = ["./tests/preload-temp-dirs.ts", "./tests/preload-temp-home.ts", "./tests/preload-ink-interactive.ts", "./tests/preload-system-one-off.ts"]
+preload = ["./tests/preload-temp-dirs.ts", "./tests/preload-temp-home.ts", "./tests/preload-ink-interactive.ts", "./tests/preload-system-one-off.ts", "./tests/preload-no-nested-mark.ts"]
