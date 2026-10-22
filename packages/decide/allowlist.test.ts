@@ -433,6 +433,11 @@ describe("allowlist: what passes and what does not", () => {
 			"bash -v",
 			"sudo -v",
 			"python3 -v",
+			"env -v",
+			"pytest -v",
+			"ninja -v",
+			"pi -v",
+			"pi --version && pytest -v",
 			"-v",
 		])
 			expect({ c, v: readOnlyAllowlist(c).verdict }).toEqual({ c, v: "no-opinion" });
