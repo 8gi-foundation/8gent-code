@@ -179,6 +179,17 @@ export function dirIdentity(abs: string): Identity | null {
 	}
 }
 
+/** Session-wide cap on each record map; past it the oldest entry is dropped. */
+export const MAX_CREATED_ENTRIES = 5000;
+
+function setCapped(map: Map<string, Identity>, key: string, id: Identity): void {
+	if (!map.has(key) && map.size >= MAX_CREATED_ENTRIES) {
+		const oldest = map.keys().next().value;
+		if (oldest !== undefined) map.delete(oldest);
+	}
+	map.set(key, id);
+}
+
 export class CreatedFiles {
 	private readonly files = new Map<string, Identity>();
 	private readonly dirs = new Map<string, Identity>();
@@ -187,7 +198,7 @@ export class CreatedFiles {
 	recordDir(abs: string): void {
 		const key = keyOf(abs);
 		const id = dirIdentity(abs);
-		if (key && id) this.dirs.set(key, id);
+		if (key && id) setCapped(this.dirs, key, id);
 	}
 
 	/** True when `abs` is a directory this session created, and still that same directory. */
@@ -206,7 +217,7 @@ export class CreatedFiles {
 	record(abs: string): void {
 		const key = keyOf(abs);
 		const id = regularFile(abs);
-		if (key && id) this.files.set(key, id);
+		if (key && id) setCapped(this.files, key, id);
 	}
 
 	/** The session wrote `abs` again: keep its entry pointing at the file as it now is. */
@@ -535,7 +546,10 @@ export function watchRedirects(
 ): () => void {
 	if (!record) return () => {};
 	// A mkdir-only command records the directories it makes (#4105).
-	const watches: Array<() => void> = [watchMkdir(command, cwd, record)];
+	const watches: Array<() => void> = [
+		watchMkdir(command, cwd, record),
+		watchTouch(command, cwd, record),
+	];
 	try {
 		if (CHANGES_DIR.test(maskQuotes(command))) return () => {};
 		if (decideRules(command).rules.length > 0) return () => {};
@@ -557,6 +571,43 @@ export function watchRedirects(
 	return () => {
 		for (const w of watches) w();
 	};
+}
+
+/**
+ * Bracket a touch-only command (#4711): `touch PATH...`, no flags, 1 to 16 plain relative
+ * paths inside `cwd`. A path that was absent before and is a regular file after is recorded
+ * as the session's own, so `rm -f` of it needs no review. A path that existed is never
+ * recorded (touch only updates its time). Any other command records nothing. Never throws.
+ */
+export function watchTouch(command: string, cwd: string, record: CreatedFiles): () => void {
+	try {
+		const text = command.trim();
+		if (!PLAIN_PATH.test(text.replace(/ /g, "_"))) return () => {};
+		const [bin, ...paths] = text.split(/ +/);
+		if (bin !== "touch" || paths.length === 0 || paths.length > 16) return () => {};
+		const root = realpathSync(cwd);
+		const dones: Array<() => void> = [];
+		for (const p of paths) {
+			const segs = p.split("/");
+			if (
+				p.startsWith("-") ||
+				p.startsWith("/") ||
+				segs.some((x) => x === "" || x === "." || x === "..")
+			)
+				return () => {};
+			const abs = path.resolve(cwd, p);
+			const parent = path.dirname(abs);
+			const realParent = pathAbsent(parent) ? null : realpathSync(parent);
+			if (!realParent || (realParent !== root && !realParent.startsWith(`${root}${path.sep}`)))
+				return () => {};
+			dones.push(watchWrite(abs, record));
+		}
+		return () => {
+			for (const d of dones) d();
+		};
+	} catch {
+		return () => {};
+	}
 }
 
 /** `mkdir` with only -p / -v flags and 1 to 16 plain relative paths, nothing else on the line. */

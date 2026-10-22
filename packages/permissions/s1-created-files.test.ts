@@ -16,6 +16,7 @@ import { execFileSync } from "node:child_process";
 import {
 	existsSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	symlinkSync,
 	unlinkSync,
@@ -29,6 +30,7 @@ import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../deci
 import { ToolExecutor } from "../eight/tools";
 import { CreatedFiles, redirectTargets, watchRedirects } from "./s1-created-files";
 import { rmOfNothingOrOwn } from "./s1-rm-nothing";
+import { rmOwnDir } from "./s1-rm-own-dir";
 import {
 	SYSTEM_ONE_ALLOWLIST_FLAG,
 	SYSTEM_ONE_BLOCK_MARKER,
@@ -210,18 +212,21 @@ describe("the pilot case, both tool paths", () => {
 		onlyPermissionCards("rm -f bunout.txt");
 	});
 
-	test.skipIf(WIN_CMD)("an ordinary redirect still counts: echo x > out.txt, then >>, then rm -f out.txt", async () => {
-		const ex = new ToolExecutor(ws, "own-a");
-		await run(ex, "echo x > out.txt");
-		await run(ex, "echo y >> out.txt");
-		expect(readFileSync(join(ws, "out.txt"), "utf8")).toBe("x\ny\n");
-		expect(ex.createdFiles.createdBySession(join(ws, "out.txt"))).toBe(true);
-		const out = await run(ex, "rm -f out.txt");
-		expect(out).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
-		expect(existsSync(join(ws, "out.txt"))).toBe(false);
-		expect(judge.rmAsks).toBe(0);
-		onlyPermissionCards("rm -f out.txt");
-	});
+	test.skipIf(WIN_CMD)(
+		"an ordinary redirect still counts: echo x > out.txt, then >>, then rm -f out.txt",
+		async () => {
+			const ex = new ToolExecutor(ws, "own-a");
+			await run(ex, "echo x > out.txt");
+			await run(ex, "echo y >> out.txt");
+			expect(readFileSync(join(ws, "out.txt"), "utf8")).toBe("x\ny\n");
+			expect(ex.createdFiles.createdBySession(join(ws, "out.txt"))).toBe(true);
+			const out = await run(ex, "rm -f out.txt");
+			expect(out).not.toContain(SYSTEM_ONE_BLOCK_MARKER);
+			expect(existsSync(join(ws, "out.txt"))).toBe(false);
+			expect(judge.rmAsks).toBe(0);
+			onlyPermissionCards("rm -f out.txt");
+		},
+	);
 
 	test("write_file creating a file counts too, on both paths, and mixes with absent paths", async () => {
 		const ex = new ToolExecutor(ws, "own-a");
@@ -324,61 +329,73 @@ describe("a redirect target that no longer holds the created file is not recorde
 	}
 	const userFile = () => writeFileSync(join(ws, "user.txt"), "the user's only copy");
 
-	test.skipIf(WIN_CMD)("a target replaced by a rename during the command is not recorded (ToolExecutor)", async () => {
-		userFile();
-		const ex = new ToolExecutor(ws, "own-a");
-		await run(ex, "mv user.txt out.txt > out.txt");
-		expect(existsSync(join(ws, "user.txt"))).toBe(false);
-		expect(readFileSync(join(ws, "out.txt"), "utf8")).toBe("the user's only copy");
-		expect(ex.createdFiles.size).toBe(0);
-		await judged((c) => run(ex, c), "rm -f out.txt", "out.txt");
-	});
+	test.skipIf(WIN_CMD)(
+		"a target replaced by a rename during the command is not recorded (ToolExecutor)",
+		async () => {
+			userFile();
+			const ex = new ToolExecutor(ws, "own-a");
+			await run(ex, "mv user.txt out.txt > out.txt");
+			expect(existsSync(join(ws, "user.txt"))).toBe(false);
+			expect(readFileSync(join(ws, "out.txt"), "utf8")).toBe("the user's only copy");
+			expect(ex.createdFiles.size).toBe(0);
+			await judged((c) => run(ex, c), "rm -f out.txt", "out.txt");
+		},
+	);
 
-	test.skipIf(WIN_CMD)("a target replaced by a rename is not recorded (native run_command)", async () => {
-		userFile();
-		const agent = nativeAgent(new CreatedFiles());
-		await agent.run("mv user.txt out.txt > out.txt");
-		expect(existsSync(join(ws, "user.txt"))).toBe(false);
-		await judged(agent.run, "rm -f out.txt", "out.txt");
-	});
+	test.skipIf(WIN_CMD)(
+		"a target replaced by a rename is not recorded (native run_command)",
+		async () => {
+			userFile();
+			const agent = nativeAgent(new CreatedFiles());
+			await agent.run("mv user.txt out.txt > out.txt");
+			expect(existsSync(join(ws, "user.txt"))).toBe(false);
+			await judged(agent.run, "rm -f out.txt", "out.txt");
+		},
+	);
 
-	test.skipIf(WIN_CMD)("a recorded target replaced by a later redirect command is forgotten", async () => {
-		userFile();
-		const ex = new ToolExecutor(ws, "own-a");
-		await run(ex, "echo x > out.txt");
-		expect(ex.createdFiles.createdBySession(join(ws, "out.txt"))).toBe(true);
-		await run(ex, "mv user.txt out.txt >> out.txt");
-		expect(readFileSync(join(ws, "out.txt"), "utf8")).toBe("the user's only copy");
-		expect(ex.createdFiles.size).toBe(0);
-		await judged((c) => run(ex, c), "rm -f out.txt", "out.txt");
-	});
+	test.skipIf(WIN_CMD)(
+		"a recorded target replaced by a later redirect command is forgotten",
+		async () => {
+			userFile();
+			const ex = new ToolExecutor(ws, "own-a");
+			await run(ex, "echo x > out.txt");
+			expect(ex.createdFiles.createdBySession(join(ws, "out.txt"))).toBe(true);
+			await run(ex, "mv user.txt out.txt >> out.txt");
+			expect(readFileSync(join(ws, "out.txt"), "utf8")).toBe("the user's only copy");
+			expect(ex.createdFiles.size).toBe(0);
+			await judged((c) => run(ex, c), "rm -f out.txt", "out.txt");
+		},
+	);
 
-	test.skipIf(WIN_CMD)("an archive command that removes its source escalates, and rm of its output is judged", async () => {
-		userFile();
-		const ex = new ToolExecutor(ws, "own-a");
-		// Unapproved, archive_removes_source escalates and the zip never runs.
-		expect(await run(ex, "zip -qm - user.txt > out.zip")).toContain(SYSTEM_ONE_BLOCK_MARKER);
-		expect(existsSync(join(ws, "user.txt"))).toBe(true);
-		// The worst case: a person approves it, so the zip runs.
-		const approved: string[] = [];
-		_setSystemOneOverridesForTests({
-			createDecider: () => createDecider({ backend: judge, cacheSize: 0 }),
-			askHuman: async (req) => {
-				if (req.command.startsWith("zip ")) {
-					approved.push(req.command);
-					return true;
-				}
-				return null;
-			},
-			calibrationDir: tempDir("s1-own-nocal-"),
-		});
-		await run(ex, "zip -qm - user.txt > out.zip");
-		expect(approved).toEqual(["zip -qm - user.txt > out.zip"]);
-		expect(existsSync(join(ws, "user.txt"))).toBe(false);
-		expect(existsSync(join(ws, "out.zip"))).toBe(true);
-		expect(ex.createdFiles.size).toBe(0);
-		await judged((c) => run(ex, c), "rm -f out.zip", "out.zip");
-	});
+	test.skipIf(WIN_CMD)(
+		"an archive command that removes its source escalates, and rm of its output is judged",
+		async () => {
+			userFile();
+			const ex = new ToolExecutor(ws, "own-a");
+			// Unapproved, archive_removes_source escalates and the zip never runs.
+			expect(await run(ex, "zip -qm - user.txt > out.zip")).toContain(SYSTEM_ONE_BLOCK_MARKER);
+			expect(existsSync(join(ws, "user.txt"))).toBe(true);
+			// The worst case: a person approves it, so the zip runs.
+			const approved: string[] = [];
+			_setSystemOneOverridesForTests({
+				createDecider: () => createDecider({ backend: judge, cacheSize: 0 }),
+				askHuman: async (req) => {
+					if (req.command.startsWith("zip ")) {
+						approved.push(req.command);
+						return true;
+					}
+					return null;
+				},
+				calibrationDir: tempDir("s1-own-nocal-"),
+			});
+			await run(ex, "zip -qm - user.txt > out.zip");
+			expect(approved).toEqual(["zip -qm - user.txt > out.zip"]);
+			expect(existsSync(join(ws, "user.txt"))).toBe(false);
+			expect(existsSync(join(ws, "out.zip"))).toBe(true);
+			expect(ex.createdFiles.size).toBe(0);
+			await judged((c) => run(ex, c), "rm -f out.zip", "out.zip");
+		},
+	);
 });
 
 describe("watchRedirects: pinning", () => {
@@ -468,5 +485,17 @@ describe("rmOfNothingOrOwn", () => {
 		expect(rmOfNothingOrOwn("rm -f made.txt gone.txt", ws, ex.createdFiles)).toBe("own-scratch");
 		expect(rmOfNothingOrOwn("rm -f made.txt", ws)).toBeNull();
 		expect(rmOfNothingOrOwn("rm -f made.txt", ws, new CreatedFiles())).toBeNull();
+	});
+});
+
+describe("#4711: the native tool path records the directories write_file makes", () => {
+	test("write_file sub/n.txt, mv it up: System One's own-directory lane takes rmdir sub", async () => {
+		const rec = new CreatedFiles();
+		const agent = nativeAgent(rec);
+		await agent.write("sub/n.txt");
+		expect(rec.dirCount).toBe(1);
+		await agent.run("mv sub/n.txt n.txt");
+		expect(rmOwnDir("rmdir sub", realpathSync(ws), rec).ok).toBe(true);
+		expect(rmOwnDir("rmdir sub", realpathSync(ws), new CreatedFiles()).ok).toBe(false);
 	});
 });

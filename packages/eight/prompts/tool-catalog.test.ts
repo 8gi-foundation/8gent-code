@@ -100,10 +100,10 @@ describe("buildToolCatalogSegment", () => {
 		expect(Buffer.byteLength(concise)).toBeLessThanOrEqual(CONCISE_CATALOG_MAX_BYTES);
 	});
 
-	it("tells the local model to keep scratch files inside the project (#3865)", () => {
+	it("tells the local model to keep scratch files in the session scratch dir, never the repo (#4711)", () => {
 		for (const text of [TOOL_CATALOG_SEGMENT, buildToolCatalogSegment({ concise: true })]) {
-			expect(text).toContain(".tmp/");
-			expect(text).toContain("never /tmp");
+			expect(text).toContain("session scratch dir");
+			expect(text).toContain("never the repo");
 		}
 	});
 });

@@ -169,6 +169,7 @@ import {
 	quickMessages,
 	runQuickAnswer,
 } from "./quick-answer";
+import { createSessionScratch, removeSessionScratch, sessionScratchNote } from "./session-scratch";
 import { SessionStore } from "./session-store";
 import { SessionSyncManager } from "./session-sync";
 import {
@@ -442,6 +443,9 @@ export class Agent {
 	private lastMeBlock: string | null = null;
 	private hookManager: HookManager;
 	private sessionId: string;
+	/** $TMPDIR/8gent-<session id>/ (#4711): created at start, removed in cleanup() and at process exit. */
+	private sessionScratchDir: string | null = null;
+	private scratchNoteSent = false;
 	/** Session-scoped failover, only built with cache affinity on (#4500); off: a fresh one per turn. */
 	private affinityFailover: ModelFailover | null = null;
 	/** Entries the affinity failover marked down last turn; revived next turn so a blip is not sticky. */
@@ -617,6 +621,7 @@ export class Agent {
 		this.hookManager = getHookManager();
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();
+		this.sessionScratchDir = createSessionScratch(this.sessionId);
 
 		// v0.12.0: lite mode is now the default. The agent boots fast and lean.
 		// Opt back into the heavy auxiliaries (kernel training, heartbeat agents,
@@ -2031,6 +2036,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		if (this.contextNoteMessages.some((m) => !this.messageHistory.includes(m))) {
 			this.contextSent = {};
 			this.contextNoteMessages = [];
+			this.scratchNoteSent = false;
 		}
 		const { note, sent } = contextNote(
 			{
@@ -2041,8 +2047,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			this.contextSent,
 		);
 		this.contextSent = sent;
-		if (!note) return;
-		const message = { role: "user", content: note };
+		// The per-session scratch dir path rides in the context note, never the system
+		// prompt, so the cached prefix stays byte-identical across sessions (#4711).
+		const scratch = this.scratchNoteSent ? "" : sessionScratchNote(this.sessionScratchDir).trim();
+		if (scratch) this.scratchNoteSent = true;
+		const text = [note, scratch].filter(Boolean).join("\n\n");
+		if (!text) return;
+		const message = { role: "user", content: text };
 		this.messageHistory.push(message);
 		this.contextNoteMessages.push(message);
 	}
@@ -4527,6 +4538,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	async cleanup(): Promise<void> {
 		this.affinityFailover?.forgetSession(this.sessionId);
+		removeSessionScratch(this.sessionScratchDir);
 		// Flush and end Convex session sync
 		await this.sessionSync.endSession().catch(() => {});
 		// Stop kernel pipeline
