@@ -5,5 +5,10 @@ export function nodeTooOld(version) {
 }
 
 export function tooOldMessage(version) {
-	return `8gent needs Node 22.5 or newer (found ${version}). Install Node 22 or Bun.`;
+	return [
+		`8gent needs Node 22.5 or newer (found ${version}). Install Node 22 or Bun.`,
+		"  Debian / Kali: curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs",
+		"  Arch:          pacman -Syu --noconfirm nodejs npm",
+		"  Any Linux:     install nvm (https://github.com/nvm-sh/nvm), then: nvm install 22",
+	].join("\n");
 }
