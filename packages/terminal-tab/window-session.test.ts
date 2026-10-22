@@ -96,6 +96,49 @@ describe("folder names are literal (#4783)", () => {
 		}
 	});
 
+	it("zsh, the usual Terminal login shell, also reads the names literally", () => {
+		if (!existsSync("/bin/zsh")) return;
+		for (const name of ["x$(touch PWNED)", "y`touch PWNED`", "z'$(touch PWNED)'"]) {
+			const cwd = join(dir, `zsh-${name}`);
+			mkdirSync(cwd);
+			const script = buildWrapperScript({
+				pidFile: join(dir, "w.pid"),
+				command: "/bin/pwd",
+				cwd,
+				path: "/usr/bin:/bin",
+			});
+			const r = spawnSync("/bin/zsh", ["-f", "-c", script], { cwd: dir, encoding: "utf-8" });
+			expect(r.status).toBe(0);
+			expect(r.stdout.trim().endsWith(`zsh-${name}`)).toBe(true);
+			expect(existsSync(join(dir, "PWNED"))).toBe(false);
+			expect(existsSync(join(cwd, "PWNED"))).toBe(false);
+		}
+	});
+
+	it.if(process.platform === "darwin")(
+		"the AppleScript string literal carries the script back byte for byte",
+		() => {
+			for (const name of [
+				'q"; do shell script "touch PWNED" --',
+				'b\\" & (do shell script "touch PWNED") & "',
+			]) {
+				const script = buildWrapperScript({
+					pidFile: join(dir, "w.pid"),
+					command: "claude",
+					cwd: join(dir, name),
+					path: "/usr/bin",
+				});
+				const literal = buildOsascript(script)
+					.split("\n")[1]
+					.replace(/^ {2}do script /, "");
+				const r = spawnSync("osascript", ["-e", `return ${literal}`], { encoding: "utf-8" });
+				expect(r.status).toBe(0);
+				expect(r.stdout.replace(/\n$/, "")).toBe(script);
+				expect(existsSync(join(dir, "PWNED"))).toBe(false);
+			}
+		},
+	);
+
 	it("the window runs with the filtered PATH, not the login shell's", () => {
 		const script = buildWrapperScript({
 			pidFile: join(dir, "w.pid"),

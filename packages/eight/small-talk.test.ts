@@ -4,7 +4,15 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pkg from "../../package.json" with { type: "json" };
@@ -176,6 +184,40 @@ describe("welcome hardening (8SO)", () => {
 			expect(pathOutsideFolder(npmBin, join(home, ".npm-global"), home)).toBe("");
 		} finally {
 			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("a symlinked project folder cannot slip an in-folder PATH entry past the check (#4783)", () => {
+		const base = mkdtempSync(join(tmpdir(), "welcome-link-"));
+		try {
+			const home = join(base, "home");
+			const real = join(base, "real", "proj");
+			mkdirSync(join(real, "bin"), { recursive: true });
+			mkdirSync(home);
+			const link = join(base, "link");
+			symlinkSync(real, link);
+			const planted = join(base, "planted");
+			symlinkSync(join(real, "bin"), planted);
+			// cwd is the link, the PATH entry names the real folder, and the reverse.
+			expect(pathOutsideFolder(join(real, "bin"), link, home)).toBe("");
+			expect(pathOutsideFolder(join(link, "bin"), real, home)).toBe("");
+			// A PATH entry that is itself a symlink into the folder.
+			expect(pathOutsideFolder(planted, real, home)).toBe("");
+			// /tmp vs /private/tmp style: the same folder spelled through a resolved parent.
+			expect(pathOutsideFolder(join(realpathSync(real), "bin"), real, home)).toBe("");
+			// A folder that does not exist yet resolves through its existing parent.
+			expect(pathOutsideFolder(join(real, "new", "bin"), join(link, "new"), home)).toBe("");
+			// A home reached through a symlink still counts as home.
+			const homeLink = join(base, "home-link");
+			symlinkSync(home, homeLink);
+			expect(pathOutsideFolder("/usr/bin", homeLink, home)).toBe("/usr/bin");
+			expect(pathOutsideFolder(`.:${join(real, "bin")}`, join(home, "proj"), homeLink)).toBe(
+				join(real, "bin"),
+			);
+			// Entries really outside the folder are kept.
+			expect(pathOutsideFolder(`/usr/bin:${join(real, "bin")}`, link, home)).toBe("/usr/bin");
+		} finally {
+			rmSync(base, { recursive: true, force: true });
 		}
 	});
 
