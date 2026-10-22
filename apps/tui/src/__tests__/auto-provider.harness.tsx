@@ -19,6 +19,15 @@ async function main() {
 		throw e;
 	});
 	await tick(2500);
+	// The card is judged on the LAST frame, once it has cleared: the output so far
+	// also holds the frames drawn before the switch, which showed it (#4720).
+	const lastFrame = () => {
+		const w = whole();
+		return w.slice(Math.max(0, w.lastIndexOf("8gent Code v")));
+	};
+	await waitFor(() => !lastFrame().includes("No model yet"), "NO MODEL card cleared", 30000).catch(
+		() => {},
+	);
 	const afterTask = app.since(m0);
 	const s = await app.submit("/status");
 	await tick(800);
@@ -36,7 +45,7 @@ async function main() {
 		line: /\S[^\n]* is not running; using MiniMax[^\n]*/.exec(afterTask)?.[0] ?? "",
 		pickerShown: afterTask.includes("Select Provider"),
 		notReady: afterTask.includes("8gent not ready"),
-		noModelCard: afterTask.includes("No model yet"),
+		noModelCard: lastFrame().includes("No model yet"),
 		model: want ? afterTask.includes(want) : null,
 		statusLine: /Provider: [^\n]*(\n[^\n]*)?/.exec(status.replace(/[│]/g, ""))?.[0] ?? "",
 		statusHasProvider: /MiniMax/.test(status),
