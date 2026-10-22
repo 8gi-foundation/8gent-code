@@ -7,8 +7,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isPlainHome, workingProjectNote } from "./prompts/system-prompt";
 import pkg from "../../package.json" with { type: "json" };
+import { isPlainHome, workingProjectNote } from "./prompts/system-prompt";
 import { isGreeting, isSmallTalk } from "./small-talk";
 import { buildWelcome, gatherWelcomeFacts } from "./welcome";
 

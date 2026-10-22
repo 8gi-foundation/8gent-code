@@ -137,8 +137,8 @@ import { getModeManager } from "./modes";
 import { needsPlanningGate as promptNeedsPlanningGate } from "./planning-gate";
 import { isLocalProvider } from "./registry";
 import { SMALL_TALK_NOTE, isGreeting, isSmallTalk } from "./small-talk";
-import { buildWelcome, gatherWelcomeFacts } from "./welcome";
 import { verifyNudgeFor } from "./verify-gate";
+import { buildWelcome, gatherWelcomeFacts } from "./welcome";
 
 import {
 	mayMoveToProvider,
