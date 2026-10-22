@@ -98,7 +98,14 @@ function segments(command: string): { tokens: string[]; position: boolean[] }[] 
 				position[i] = true;
 				const t = tokens[i];
 				// Skip over wrapper words, their flags and values, and VAR=x assignments.
-				if (WRAPPERS.has(t) || /^\w+=/.test(t) || t.startsWith("-") || /^\d/.test(t)) continue;
+				if (
+					WRAPPERS.has(t) ||
+					t.endsWith("/env") ||
+					/^\w+=/.test(t) ||
+					t.startsWith("-") ||
+					/^\d/.test(t)
+				)
+					continue;
 				// A flag value after a wrapper (sudo -u root, nice -n 5): keep scanning one more word.
 				if (i > 0 && tokens[i - 1].startsWith("-") && !tokens[i - 1].includes("=")) continue;
 				break;
@@ -108,7 +115,7 @@ function segments(command: string): { tokens: string[]; position: boolean[] }[] 
 }
 
 const ENV_BAD_FLAG =
-	/^(-[A-Za-z0-9]*[iSu][A-Za-z0-9]*|--ignore-environment|--split-string.*|--unset.*)$/;
+	/^(-|-[A-Za-z0-9]*[iSu][A-Za-z0-9]*|--ignore-environment|--split-string.*|--unset.*)$/;
 
 export function spawnsSelf(command: string): boolean {
 	if (INFO_FORMS.has(command.trim().replace(/\s+/g, " "))) return false;
@@ -128,7 +135,7 @@ export function spawnsSelf(command: string): boolean {
 	const segs = segments(command);
 	for (const { tokens: ts, position } of segs) {
 		for (let i = 0; i < ts.length; i++) {
-			if (ts[i] !== "env" || !position[i]) continue;
+			if (!(ts[i] === "env" || ts[i].endsWith("/env")) || !position[i]) continue;
 			for (let j = i + 1; j < ts.length && (ts[j].startsWith("-") || /^\w+=/.test(ts[j])); j++)
 				if (ENV_BAD_FLAG.test(ts[j])) return true;
 		}

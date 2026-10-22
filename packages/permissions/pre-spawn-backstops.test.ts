@@ -68,6 +68,9 @@ const SPAWNS = [
 ];
 
 const SPAWNS_3 = [
+	"/usr/bin/env -i sh",
+	"/usr/bin/env -u X sh -c 'echo'",
+	"env - sh",
 	"a=EIGHT_PARENT; b=_SESSION; env -u $a$b sh -c 'x=8g;y=ent;$x$y chat'",
 	"env --unset=$a$b sh",
 	"env -S 'x y' z",
