@@ -40,6 +40,7 @@ export type SlashCommand =
 	| "history"
 	| "continue"
 	| "compact"
+	| "stack"
 	| "update"
 	| "chat"
 	| "agent"
@@ -413,6 +414,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["compress", "summarize"],
 		description: "Summarize and compress current conversation",
 		usage: "/compact",
+	},
+	{
+		name: "stack",
+		aliases: [],
+		description: "Show what each turn sends and its token cost",
+		usage: "/stack",
 	},
 	{
 		name: "chat",

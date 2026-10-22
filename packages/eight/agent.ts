@@ -12,7 +12,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type ModelMessage, jsonSchema, tool as sdkTool } from "ai";
+import { type ModelMessage, asSchema, jsonSchema, tool as sdkTool } from "ai";
 import type { FormattingStop } from "../ai/draft-constraints";
 import {
 	type HarnessProfile,
@@ -22,7 +22,7 @@ import {
 } from "../ai/harness-profile";
 import { notePlanTask } from "../ai/plan-file";
 import { postMessageAvailable } from "../ai/post-message";
-import { modelSupportsVision, prefixMeterSink } from "../ai/text-tool-endpoint";
+import { modelSupportsVision, prefixMeterSink, shouldDeclareTools } from "../ai/text-tool-endpoint";
 import {
 	emptyReplyNote,
 	emptyReplyStall,
@@ -30,6 +30,7 @@ import {
 	splitToolImageAttachment,
 	stripDoneMarker,
 } from "../ai/text-tool-loop";
+import { type ToolSpec, buildToolSystemPrompt } from "../ai/text-tools";
 import { agentTools } from "../ai/tools";
 import { createBudgetDrain, resolveTurnBudgetMs } from "../ai/turn-budget";
 import { ensureIndexed as astEnsureIndexed } from "../ast-index";
@@ -476,6 +477,8 @@ export class Agent {
 	private messageHistory: Array<{ role: string; content: string }> = [];
 	/** #3487: the user's communication style, restated as the last message of every local text-tool request; null when no style is set. */
 	private styleReminder: string | null = null;
+	/** The system prompt's named parts, in order; their join is the prompt (#4779). */
+	private systemSegments: Array<[string, string]> = [];
 	/** #3487: the system prompt for a request rerouted to an off-box endpoint; null when the built prompt is already off-box safe. */
 	private offBoxSystemPrompt: (() => string) | null = null;
 	/** Models whose harness profile line this session already logged (#4439). */
@@ -644,9 +647,11 @@ export class Agent {
 		// process; allowlist on (the default) or System One off, it is a no-op.
 		// Guarded mode (#3170) turns System One on for this agent's calls, so
 		// it warms the judge too.
-		startSystemOneWarmup(
-			systemOneEnvFor(config.permission ? effectivePermissionMode(config.permission) : undefined),
-		)?.catch(() => {});
+		if (!config.inspectOnly) {
+			startSystemOneWarmup(
+				systemOneEnvFor(config.permission ? effectivePermissionMode(config.permission) : undefined),
+			)?.catch(() => {});
+		}
 		this.hookManager = getHookManager();
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();
@@ -664,11 +669,13 @@ export class Agent {
 		// the settings file is absent or malformed.
 		const autoTuneSettings = readSettingsFileSync();
 		const LITE =
-			autoTuneSettings !== null
-				? computeAutoTune(autoTuneSettings).liteMode
-				: process.env["8GENT_LITE"] === "0" || process.env["8GENT_FULL"] === "1"
-					? false
-					: true;
+			config.inspectOnly === true
+				? true
+				: autoTuneSettings !== null
+					? computeAutoTune(autoTuneSettings).liteMode
+					: process.env["8GENT_LITE"] === "0" || process.env["8GENT_FULL"] === "1"
+						? false
+						: true;
 
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
 		this.toolRegistry = new ToolRegistry(config.allTools ?? false, config.role);
@@ -725,7 +732,7 @@ export class Agent {
 		// Check if first run — if .8gent/user.json doesn't exist, flag for onboarding
 		// NOTE: Initialized here (before system prompt) so user context can be injected
 		this.onboarding = new OnboardingManager(config.workingDirectory || process.cwd());
-		if (this.onboarding.needsOnboarding()) {
+		if (!config.inspectOnly && this.onboarding.needsOnboarding()) {
 			// Detect integrations (Ollama, LM Studio, GitHub) in background
 			this.onboarding.detectIntegrations().catch(() => {});
 			// Gated behind DEBUG so stdout writes don't push the TUI header
@@ -867,27 +874,37 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const workingProject = isTableScope
 			? ""
 			: workingProjectNote(config.workingDirectory || process.cwd());
+		// Named segments, joined in order: /stack (#4779) reports each one, and the
+		// prompt is their join, so the report cannot drift from what is sent.
+		this.systemSegments = isTableScope
+			? [
+					["supplied prompt", basePrompt],
+					["language", languageInstruction],
+				]
+			: isLocalRuntime
+				? // #3487: the user context (style, name, role, language, board briefing)
+					// trails the project instructions so the cached prefix stays stable (#3222).
+					// The board briefing goes only to a model on this machine (#3236 rule).
+					[
+						["compact prompt + catalog", compactLocalPrompt],
+						["working project", workingProject],
+						["project instructions", projectInstructionsBlock],
+						["user context", onBox ? userContextBlock : userContextNoBoard],
+					]
+				: [
+						["base prompt", basePrompt],
+						["vessel context", vesselContext],
+						["user context", userContextBlock],
+						["personality", personalityBlock],
+						["orchestrator", orchestratorBlock],
+						["deferred tool list", deferredToolBlock],
+						["language", languageInstruction],
+						["working project", workingProject],
+						["project instructions", projectInstructionsBlock],
+					];
 		this.messageHistory.push({
 			role: "system",
-			content: isTableScope
-				? basePrompt + languageInstruction
-				: isLocalRuntime
-					? // #3487: the user context (style, name, role, language, board briefing)
-						// trails the project instructions so the cached prefix stays stable (#3222).
-						// The board briefing goes only to a model on this machine (#3236 rule).
-						compactLocalPrompt +
-						workingProject +
-						projectInstructionsBlock +
-						(onBox ? userContextBlock : userContextNoBoard)
-					: basePrompt +
-						vesselContext +
-						userContextBlock +
-						personalityBlock +
-						orchestratorBlock +
-						deferredToolBlock +
-						languageInstruction +
-						workingProject +
-						projectInstructionsBlock,
+			content: this.systemSegments.map(([, text]) => text).join(""),
 		});
 		// #3487: a turn can be rerouted to another local provider after this
 		// prompt is built (resolveToolCapableModel, callLocalModelWithReroute), and
@@ -913,7 +930,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			this.sessionId,
 			undefined,
 			undefined,
-			!isNoToolScope(config.agentScope),
+			!isNoToolScope(config.agentScope) && !config.inspectOnly,
 		);
 		// A Table officer is a colleague in a chat channel, not the orchestrator of a
 		// coding session. Appending the orchestrator/personality blocks told every
@@ -997,6 +1014,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Git branch from .git/HEAD: no process started at boot (#4682).
 		const branch = readGitBranch(cwd);
 		if (branch) env.gitBranch = branch;
+
+		// An inspect-only agent (`8gent stack`) runs no hooks and starts nothing (#4779).
+		if (config.inspectOnly) {
+			this.heartbeat = getHeartbeatAgents({
+				workingDirectory: config.workingDirectory || process.cwd(),
+				verbose: false,
+			});
+			this.extensionHost = new ExtensionHost("", () => this.builtInToolNames());
+			return;
+		}
 
 		// Execute onStart hooks
 		this.hookManager.executeHooks("onStart", {
@@ -1370,6 +1397,319 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		});
 	}
 
+	/**
+	 * The tools one turn offers, as chat() builds them: the native set and the
+	 * text-tool allowlist. Shared with stackReport (#4779) so the two never differ.
+	 */
+	private async turnToolSet(providerName: string, smallTalk: boolean) {
+		// Local providers have limited context, so cap at core tools to avoid "Context size exceeded".
+		// web_search/web_fetch included so local models can answer current-info questions.
+		const CORE_TOOLS = [
+			"read_file",
+			"write_file",
+			"edit_file",
+			"list_files",
+			"search_files",
+			"run_command",
+			"get_outline",
+			"get_symbol",
+			"search_symbols",
+			"locate",
+			// Sight (#3641): a model that can see gets the pixels through
+			// read_image; one that cannot gets a description through describe_image.
+			"read_image",
+			"describe_image",
+			"compare_layout",
+			// A spawned sub-agent has one task and no plan to report (#3583).
+			...localPlanTools(this.agentDepth),
+			"git_status",
+			"git_diff",
+			"git_add",
+			"git_commit",
+			"web_search",
+			"web_fetch",
+			"speak",
+			"render_video_deck",
+			// Skills (#3593): the tested recipe for a multi-step task, loaded by name.
+			"use_skill",
+			"make_docx",
+			"make_xlsx",
+			"make_pptx",
+			"suggest_design",
+			"query_design_system",
+			"deck_theme",
+			"film_craft",
+			"self_inspect",
+			"self_tune",
+			"self_append_context",
+			"remember",
+			"recall",
+		];
+		// Capability gate (SPEC-05 #108): a provider takes the restricted local-tool
+		// path when its tool-calling pathway is the text-tool protocol (or none),
+		// resolved from provider capability flags + the EIGHT_TEXT_TOOLS override -
+		// never a hardcoded provider-name list. Native tool-callers get all tools.
+		const providerCaps = getProviderManager().getProvider(providerName as ProviderRegistryName);
+		const isLocalProvider = capabilityToolMode(providerCaps) !== "native";
+		// Deferred registry only loads `core` upfront; make sure local providers
+		// get `web` (and git) before we filter, otherwise CORE_TOOLS entries like
+		// web_search won't exist to pass through.
+		// A local provider with no EIGHT_BROWSER_PROFILE gets its own isolated 8gent Browser profile,
+		// started on demand (#3785); a native tool-caller keeps today's rules (declared default cleared).
+		setDefaultLocalProfile(isLocalProvider ? LOCAL_BROWSER_PROFILE : null);
+		if (isLocalProvider) {
+			// A bad EIGHT_BROWSER_PROFILE leaves the session without browser tools; say so once (#3622).
+			const browserWarning = browserProfileWarning();
+			if (browserWarning && !browserProfileWarned) {
+				browserProfileWarned = true;
+				console.warn(`[8gent] ${browserWarning}`);
+			}
+			this.toolRegistry.loadCategory("web");
+			this.toolRegistry.loadCategory("git");
+			this.toolRegistry.loadCategory("design");
+			this.toolRegistry.loadCategory("self");
+			this.toolRegistry.loadCategory("memory");
+			// Only the Orchestrator delegates on the local path (#3095).
+			if (localDelegationTools(this.config.role).length > 0) {
+				this.toolRegistry.loadCategory("orchestration");
+			}
+		}
+		// Native providers cannot pick up discover_tools mid-turn (#3881).
+		if (!isLocalProvider) this.toolRegistry.preloadForNative(this.config.role);
+		// Load computer category when cua:setup has been run, regardless of provider.
+		const { existsSync } = await import("node:fs");
+		const { homedir } = await import("node:os");
+		const { join } = await import("node:path");
+		const cuaConfigured = existsSync(join(homedir(), ".8gent", "cua-configured"));
+		if (cuaConfigured) {
+			this.toolRegistry.loadCategory("computer");
+		}
+		const allTools = this.toolRegistry.getTools();
+		// When CUA is configured, give a LOCAL provider both the autonomous loop
+		// AND the granular desktop_* tools, so it can act directly (screenshot ->
+		// click -> type) with the local vision model instead of being stuck behind
+		// the cloud-dependent run_computer_task loop. Everything here runs on-device.
+		const DESKTOP_TOOLS = [
+			"run_computer_task",
+			"desktop_screenshot",
+			"desktop_click",
+			"desktop_type",
+			"desktop_press",
+			"desktop_scroll",
+			"desktop_drag",
+			"desktop_hover",
+			"desktop_windows",
+			"desktop_clipboard",
+			// Grounded, gated, verified act through the local grounder.
+			"desktop_act",
+		];
+		// The Orchestrator also gets spawn_agent / check_agent / list_agents;
+		// Engineer, QA, sub-agents and role-less agents keep the lean set (#3095).
+		const localCoreTools = [
+			...CORE_TOOLS,
+			...(cuaConfigured ? DESKTOP_TOOLS : []),
+			...localDelegationTools(this.config.role),
+			// Posting (#3595): offered only where the tg-group helper is installed.
+			...(postMessageAvailable() ? ["post_message"] : []),
+			// Mid-task note to the boardroom (#4344).
+			...(messageBoardroomOn() ? ["message_boardroom"] : []),
+			// Lean MCP access (#3474): search, schema on demand, trimmed results.
+			...(process.env.EIGHT_MCP_LEAN === "1" ? ["mcp_list_tools", "mcp_call_tool"] : []),
+			// Action chunks (#3502): one turn plans several tool calls.
+			...(process.env.EIGHT_RUN_BATCH === "1" ? ["run_batch"] : []),
+			// 8gent Browser (#3622, #3785): an isolated profile, named by EIGHT_BROWSER_PROFILE or the
+			// default "eight-local", never the person's logged-in profile. EIGHT_BROWSER_LOCAL=0 withholds them.
+			...localBrowserTools(),
+			// screen_locate (#4048) turns "the Sign in button" into a point; only useful with a screenshot source.
+			...(screenLocateOffered({
+				browserTools: localBrowserTools().length,
+				desktopTools: cuaConfigured,
+			})
+				? ["screen_locate"]
+				: []),
+		];
+		const providerTools = isLocalProvider
+			? Object.fromEntries(Object.entries(allTools).filter(([k]) => localCoreTools.includes(k)))
+			: allTools;
+
+		// F3 (positive scope, not a blocklist): a __table__ session only needs to
+		// COMPOSE a reply - the actual write goes through the gateway's gated
+		// post_to_channel path, not a model tool. So it gets an explicit read-only
+		// allowlist and never sees run_command / write / edit / git / term_* /
+		// desktop_* / network at all. ToolG8's __table__ block rules remain the
+		// enforcement backstop; this just stops the model from ever proposing them.
+		const TABLE_SESSION_TOOLS = new Set([
+			"read_file",
+			"list_files",
+			"get_outline",
+			"get_symbol",
+			"search_symbols",
+			"recall",
+		]);
+		const scopedTools =
+			isNoToolScope(this.config.agentScope) || smallTalk
+				? {}
+				: this.config.agentScope === "__table__"
+					? Object.fromEntries(
+							Object.entries(providerTools).filter(([k]) => TABLE_SESSION_TOOLS.has(k)),
+						)
+					: providerTools;
+		// Extension tools (G1): offered beside the built-ins, never in place of one.
+		const withExtensions: typeof scopedTools = { ...scopedTools };
+		if (this.extensionToolsAllowed() && !smallTalk) {
+			for (const t of this.extensionHost.listTools()) {
+				if (t.name in withExtensions) continue;
+				(withExtensions as Record<string, unknown>)[t.name] = sdkTool({
+					description: t.description,
+					inputSchema: jsonSchema<Record<string, unknown>>(
+						t.parameters as Parameters<typeof jsonSchema>[0],
+					),
+					// Through the executor, like every built-in tool.
+					execute: (args: Record<string, unknown>) => this.executor.execute(t.name, args),
+				});
+			}
+		}
+		// The active mode narrows what is offered (#3389).
+		const effectiveTools = this.modeFilter(withExtensions);
+
+		// The SAME positive scope, for the text-tool path. Every Table officer on
+		// lmstudio/ollama goes through runTextToolChat, which was handed the raw
+		// localCoreTools list - so F3 above was applied only to the native path
+		// and bypassed entirely on the one the officers actually use. Measured
+		// 2026-08-06: the system prompt an officer received listed write_file,
+		// run_command, git_commit and web_search as available, and the loop would
+		// have executed them (ToolG8's __table__ rules were the only thing left
+		// standing). Officers "hallucinating tool names" were reading a catalog.
+		const textToolAllowlist = (
+			isNoToolScope(this.config.agentScope) || smallTalk
+				? []
+				: this.config.agentScope === "__table__"
+					? [...TABLE_SESSION_TOOLS]
+					: localCoreTools
+		).filter((name) => getModeManager().isToolAllowed(name));
+		return { isLocalProvider, effectiveTools, textToolAllowlist };
+	}
+
+	/**
+	 * /stack (#4779): what the next turn would send, per source, from the same
+	 * builders chat() uses. Local, no network, no model call. Bytes are UTF-8;
+	 * tokens are bytes/4, the estimate compaction.ts uses.
+	 */
+	async stackReport(): Promise<StackReport> {
+		const providerName = this.config.runtime as string;
+		const { effectiveTools, textToolAllowlist } = await this.turnToolSet(providerName, false);
+		const system = this.messageHistory.find((m) => m.role === "system")?.content ?? "";
+		const rows: StackRow[] = [];
+		const add = (source: string, text: string) => rows.push(stackRow(source, text));
+		// The prompt is the join of its segments; if something replaced it since, report it whole.
+		if (this.systemSegments.map(([, t]) => t).join("") === system) {
+			for (const [name, text] of this.systemSegments) add(`system: ${name}`, text);
+		} else add("system prompt", system);
+		const textPath = shouldUseTextTools(providerName, (this.config.allowedPaths?.length ?? 0) > 0);
+		const tools: StackTool[] = [];
+		const kind = (name: string) =>
+			name.startsWith("mcp_")
+				? "mcp"
+				: this.extensionHost.listTools().some((t) => t.name === name)
+					? "extension"
+					: "built-in";
+		if (textPath) {
+			const specs = this.textToolSpecs(textToolAllowlist, false);
+			// withToolInstructions puts the protocol before the system prompt.
+			if (specs.length > 0)
+				add(`tool protocol (${specs.length})`, `${buildToolSystemPrompt(specs)}\n\n`);
+			if (!isVerbatimScope(this.config.agentScope)) {
+				const note = browserWithheldNote();
+				if (note && system) add("browser note", `\n\n${note}`);
+			}
+			if (shouldDeclareTools(providerName, specs)) {
+				for (const t of specs) {
+					const fn =
+						this.config.headless === true
+							? { name: t.name, parameters: t.parameters }
+							: { name: t.name, description: t.description, parameters: t.parameters };
+					tools.push({
+						name: t.name,
+						kind: kind(t.name),
+						bytes: utf8Bytes(JSON.stringify({ type: "function", function: fn })),
+					});
+				}
+			}
+			if (this.styleReminder) add("style reminder", this.styleReminder);
+		} else {
+			for (const [name, t] of Object.entries(effectiveTools)) {
+				const def = t as { description?: string; inputSchema?: Parameters<typeof asSchema>[0] };
+				const parameters = await asSchema(def.inputSchema).jsonSchema;
+				const fn = { name, description: def.description, parameters };
+				tools.push({
+					name,
+					kind: kind(name),
+					bytes: utf8Bytes(JSON.stringify({ type: "function", function: fn })),
+				});
+			}
+		}
+		for (const k of ["built-in", "extension", "mcp"] as const) {
+			const group = tools.filter((t) => t.kind === k);
+			if (group.length === 0) continue;
+			const bytes = group.reduce((n, t) => n + t.bytes, 0);
+			rows.push({ source: `tools: ${k} (${group.length})`, bytes, tokens: Math.ceil(bytes / 4) });
+		}
+		// The context note chat() appends next (memories, appended context, voice, scratch dir).
+		const { note } = contextNote(
+			{
+				memory: this.sessionMemoryContext,
+				appendedContext: this.runtimeParams.appendedContext,
+				voiceChatActive: getRuntimeParams().voiceChatActive,
+			},
+			this.contextSent,
+		);
+		const scratch = this.scratchNoteSent ? "" : sessionScratchNote(this.sessionScratchDir).trim();
+		add("memory + context note", [note, scratch].filter(Boolean).join("\n\n"));
+		const history = this.messageHistory.filter((m) => m.role !== "system");
+		add(
+			`conversation (${history.length} msgs)`,
+			history
+				.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+				.join(""),
+		);
+		rows.sort((a, b) => b.bytes - a.bytes);
+		const totalBytes = rows.reduce((n, r) => n + r.bytes, 0);
+		const holder = this.config.permission;
+		return {
+			provider: providerName,
+			model: this.config.model,
+			permission: holder ? effectivePermissionMode(holder) : "default",
+			mode: getModeManager().getActiveModeKey(),
+			path: textPath ? "text-tool" : "native",
+			rows,
+			tools: tools.sort((a, b) => b.bytes - a.bytes),
+			hooks: this.hookManager.getAllHooks().filter((h) => h.enabled !== false).length,
+			totalBytes,
+			totalTokens: Math.ceil(totalBytes / 4),
+		};
+	}
+
+	/** The text-tool specs one turn offers: built-ins in the allowlist, then extension tools (G1). */
+	private textToolSpecs(localCoreTools: string[], smallTalk: boolean): ToolSpec[] {
+		const allow = new Set(localCoreTools);
+		const specs = toolDefsToSpecs(
+			this.executor.getToolDefinitions() as Array<{
+				type?: string;
+				function?: { name?: unknown; description?: unknown; parameters?: unknown };
+			}>,
+			allow,
+		);
+		// Extension tools (G1) join the offered set, unless the scope or the mode withholds them.
+		if (this.extensionToolsAllowed() && !smallTalk) {
+			for (const t of this.extensionHost.listTools()) {
+				if (this.modeAllows(t.name)) {
+					specs.push({ name: t.name, description: t.description, parameters: t.parameters });
+				}
+			}
+		}
+		return specs;
+	}
+
 	private async runTextToolChat(opts: {
 		providerName: string;
 		providerModel: string;
@@ -1402,28 +1742,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// spec-only conversion, then wire each spec's run() to the REAL executor
 		// here so we can fire the tool lifecycle events both surfaces consume,
 		// plus minimal session + loop-detector bookkeeping, around each call.
-		const allow = new Set(localCoreTools);
-		const specs = toolDefsToSpecs(
-			this.executor.getToolDefinitions() as Array<{
-				type?: string;
-				function?: { name?: unknown; description?: unknown; parameters?: unknown };
-			}>,
-			allow,
-		);
+		const specs = this.textToolSpecs(localCoreTools, smallTalk);
 
 		let stepNumber = 0;
 		// Set when the circuit breaker stops this turn. The loop then returns the
 		// last round's prose, which is usually a step announced and never taken
 		// ("Let me stage and commit."), so the reply must say the turn was cut off.
 		let breakerStop = null as string | null;
-		// Extension tools (G1) join the offered set, unless the scope or the mode withholds them.
-		if (this.extensionToolsAllowed() && !smallTalk) {
-			for (const t of this.extensionHost.listTools()) {
-				if (this.modeAllows(t.name)) {
-					specs.push({ name: t.name, description: t.description, parameters: t.parameters });
-				}
-			}
-		}
 		const tools: TextTool[] = specs.map((spec) => ({
 			spec,
 			run: async (args: Record<string, unknown>) => {
@@ -2626,192 +2951,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const systemPrompt = this.messageHistory.find((m) => m.role === "system")?.content;
 
 		// Create the AI SDK agent with v2 session callbacks
-		// Local providers have limited context — cap at core tools to avoid "Context size exceeded".
-		// web_search/web_fetch included so local models can answer current-info questions.
-		const CORE_TOOLS = [
-			"read_file",
-			"write_file",
-			"edit_file",
-			"list_files",
-			"search_files",
-			"run_command",
-			"get_outline",
-			"get_symbol",
-			"search_symbols",
-			"locate",
-			// Sight (#3641): a model that can see gets the pixels through
-			// read_image; one that cannot gets a description through describe_image.
-			"read_image",
-			"describe_image",
-			"compare_layout",
-			// A spawned sub-agent has one task and no plan to report (#3583).
-			...localPlanTools(this.agentDepth),
-			"git_status",
-			"git_diff",
-			"git_add",
-			"git_commit",
-			"web_search",
-			"web_fetch",
-			"speak",
-			"render_video_deck",
-			// Skills (#3593): the tested recipe for a multi-step task, loaded by name.
-			"use_skill",
-			"make_docx",
-			"make_xlsx",
-			"make_pptx",
-			"suggest_design",
-			"query_design_system",
-			"deck_theme",
-			"film_craft",
-			"self_inspect",
-			"self_tune",
-			"self_append_context",
-			"remember",
-			"recall",
-		];
-		// Capability gate (SPEC-05 #108): a provider takes the restricted local-tool
-		// path when its tool-calling pathway is the text-tool protocol (or none),
-		// resolved from provider capability flags + the EIGHT_TEXT_TOOLS override -
-		// never a hardcoded provider-name list. Native tool-callers get all tools.
 		const providerName = providerConfig.name as string;
-		const providerCaps = getProviderManager().getProvider(providerName as ProviderRegistryName);
-		const isLocalProvider = capabilityToolMode(providerCaps) !== "native";
-		// Deferred registry only loads `core` upfront — make sure local providers
-		// get `web` (and git) before we filter, otherwise CORE_TOOLS entries like
-		// web_search won't exist to pass through.
-		// A local provider with no EIGHT_BROWSER_PROFILE gets its own isolated 8gent Browser profile,
-		// started on demand (#3785); a native tool-caller keeps today's rules (declared default cleared).
-		setDefaultLocalProfile(isLocalProvider ? LOCAL_BROWSER_PROFILE : null);
-		if (isLocalProvider) {
-			// A bad EIGHT_BROWSER_PROFILE leaves the session without browser tools; say so once (#3622).
-			const browserWarning = browserProfileWarning();
-			if (browserWarning && !browserProfileWarned) {
-				browserProfileWarned = true;
-				console.warn(`[8gent] ${browserWarning}`);
-			}
-			this.toolRegistry.loadCategory("web");
-			this.toolRegistry.loadCategory("git");
-			this.toolRegistry.loadCategory("design");
-			this.toolRegistry.loadCategory("self");
-			this.toolRegistry.loadCategory("memory");
-			// Only the Orchestrator delegates on the local path (#3095).
-			if (localDelegationTools(this.config.role).length > 0) {
-				this.toolRegistry.loadCategory("orchestration");
-			}
-		}
-		// Native providers cannot pick up discover_tools mid-turn (#3881).
-		if (!isLocalProvider) this.toolRegistry.preloadForNative(this.config.role);
-		// Load computer category when cua:setup has been run, regardless of provider.
-		const { existsSync } = await import("node:fs");
-		const { homedir } = await import("node:os");
-		const { join } = await import("node:path");
-		const cuaConfigured = existsSync(join(homedir(), ".8gent", "cua-configured"));
-		if (cuaConfigured) {
-			this.toolRegistry.loadCategory("computer");
-		}
-		const allTools = this.toolRegistry.getTools();
-		// When CUA is configured, give a LOCAL provider both the autonomous loop
-		// AND the granular desktop_* tools, so it can act directly (screenshot ->
-		// click -> type) with the local vision model instead of being stuck behind
-		// the cloud-dependent run_computer_task loop. Everything here runs on-device.
-		const DESKTOP_TOOLS = [
-			"run_computer_task",
-			"desktop_screenshot",
-			"desktop_click",
-			"desktop_type",
-			"desktop_press",
-			"desktop_scroll",
-			"desktop_drag",
-			"desktop_hover",
-			"desktop_windows",
-			"desktop_clipboard",
-			// Grounded, gated, verified act through the local grounder.
-			"desktop_act",
-		];
-		// The Orchestrator also gets spawn_agent / check_agent / list_agents;
-		// Engineer, QA, sub-agents and role-less agents keep the lean set (#3095).
-		const localCoreTools = [
-			...CORE_TOOLS,
-			...(cuaConfigured ? DESKTOP_TOOLS : []),
-			...localDelegationTools(this.config.role),
-			// Posting (#3595): offered only where the tg-group helper is installed.
-			...(postMessageAvailable() ? ["post_message"] : []),
-			// Mid-task note to the boardroom (#4344).
-			...(messageBoardroomOn() ? ["message_boardroom"] : []),
-			// Lean MCP access (#3474): search, schema on demand, trimmed results.
-			...(process.env.EIGHT_MCP_LEAN === "1" ? ["mcp_list_tools", "mcp_call_tool"] : []),
-			// Action chunks (#3502): one turn plans several tool calls.
-			...(process.env.EIGHT_RUN_BATCH === "1" ? ["run_batch"] : []),
-			// 8gent Browser (#3622, #3785): an isolated profile, named by EIGHT_BROWSER_PROFILE or the
-			// default "eight-local", never the person's logged-in profile. EIGHT_BROWSER_LOCAL=0 withholds them.
-			...localBrowserTools(),
-			// screen_locate (#4048) turns "the Sign in button" into a point; only useful with a screenshot source.
-			...(screenLocateOffered({
-				browserTools: localBrowserTools().length,
-				desktopTools: cuaConfigured,
-			})
-				? ["screen_locate"]
-				: []),
-		];
-		const providerTools = isLocalProvider
-			? Object.fromEntries(Object.entries(allTools).filter(([k]) => localCoreTools.includes(k)))
-			: allTools;
-
-		// F3 (positive scope, not a blocklist): a __table__ session only needs to
-		// COMPOSE a reply - the actual write goes through the gateway's gated
-		// post_to_channel path, not a model tool. So it gets an explicit read-only
-		// allowlist and never sees run_command / write / edit / git / term_* /
-		// desktop_* / network at all. ToolG8's __table__ block rules remain the
-		// enforcement backstop; this just stops the model from ever proposing them.
-		const TABLE_SESSION_TOOLS = new Set([
-			"read_file",
-			"list_files",
-			"get_outline",
-			"get_symbol",
-			"search_symbols",
-			"recall",
-		]);
-		const scopedTools =
-			isNoToolScope(this.config.agentScope) || smallTalkTurn
-				? {}
-				: this.config.agentScope === "__table__"
-					? Object.fromEntries(
-							Object.entries(providerTools).filter(([k]) => TABLE_SESSION_TOOLS.has(k)),
-						)
-					: providerTools;
-		// Extension tools (G1): offered beside the built-ins, never in place of one.
-		const withExtensions: typeof scopedTools = { ...scopedTools };
-		if (this.extensionToolsAllowed() && !smallTalkTurn) {
-			for (const t of this.extensionHost.listTools()) {
-				if (t.name in withExtensions) continue;
-				(withExtensions as Record<string, unknown>)[t.name] = sdkTool({
-					description: t.description,
-					inputSchema: jsonSchema<Record<string, unknown>>(
-						t.parameters as Parameters<typeof jsonSchema>[0],
-					),
-					// Through the executor, like every built-in tool.
-					execute: (args: Record<string, unknown>) => this.executor.execute(t.name, args),
-				});
-			}
-		}
-		// The active mode narrows what is offered (#3389).
-		const effectiveTools = this.modeFilter(withExtensions);
-
-		// The SAME positive scope, for the text-tool path. Every Table officer on
-		// lmstudio/ollama goes through runTextToolChat, which was handed the raw
-		// localCoreTools list - so F3 above was applied only to the native path
-		// and bypassed entirely on the one the officers actually use. Measured
-		// 2026-08-06: the system prompt an officer received listed write_file,
-		// run_command, git_commit and web_search as available, and the loop would
-		// have executed them (ToolG8's __table__ rules were the only thing left
-		// standing). Officers "hallucinating tool names" were reading a catalog.
-		const textToolAllowlist = (
-			isNoToolScope(this.config.agentScope) || smallTalkTurn
-				? []
-				: this.config.agentScope === "__table__"
-					? [...TABLE_SESSION_TOOLS]
-					: localCoreTools
-		).filter((name) => getModeManager().isToolAllowed(name));
+		const { isLocalProvider, effectiveTools, textToolAllowlist } = await this.turnToolSet(
+			providerName,
+			smallTalkTurn,
+		);
 
 		const harness = this.harnessProfileFor(providerConfig.model, isLocalProvider);
 		// ── Populate runtime params for self-awareness tools ──────────
@@ -4713,6 +4857,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	async cleanup(): Promise<void> {
 		this.affinityFailover?.forgetSession(this.sessionId);
 		removeSessionScratch(this.sessionScratchDir);
+		// Inspect-only (#4779): nothing was started, so nothing to stop or record.
+		if (this.config.inspectOnly) return;
 		// Flush and end Convex session sync
 		await this.sessionSync.endSession().catch(() => {});
 		// Stop kernel pipeline
@@ -4918,4 +5064,76 @@ export function runsOnBox(runtime: string, baseUrl?: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+// ── /stack (#4779) ───────────────────────────────────────────────────
+
+export interface StackRow {
+	source: string;
+	bytes: number;
+	tokens: number;
+}
+export interface StackTool {
+	name: string;
+	kind: "built-in" | "extension" | "mcp";
+	bytes: number;
+}
+export interface StackReport {
+	provider: string;
+	model: string;
+	permission: string;
+	mode: string;
+	path: "text-tool" | "native";
+	/** Largest first; their sum is totalBytes. */
+	rows: StackRow[];
+	tools: StackTool[];
+	/** Hooks run on this machine and add nothing to the prompt. */
+	hooks: number;
+	totalBytes: number;
+	totalTokens: number;
+}
+
+const utf8Bytes = (text: string) => Buffer.byteLength(text, "utf8");
+
+function stackRow(source: string, text: string): StackRow {
+	const bytes = utf8Bytes(text);
+	return { source, bytes, tokens: Math.ceil(bytes / 4) };
+}
+
+function sizeLabel(bytes: number): string {
+	return bytes >= 1024 ? `${(bytes / 1024).toFixed(1)}K` : `${bytes}B`;
+}
+
+/** The report as plain text, at most `width` columns (a phone is about 60). */
+export function formatStackReport(r: StackReport, width = 60): string {
+	const line = (left: string, right: string) => {
+		const room = Math.max(8, width - right.length - 1);
+		const l = left.length > room ? `${left.slice(0, room - 1)}~` : left;
+		return `${l.padEnd(room)} ${right}`;
+	};
+	const cost = (bytes: number, tokens: number) =>
+		`${sizeLabel(bytes).padStart(7)} ~${String(tokens).padStart(6)} tok`;
+	const out = [
+		"8gent stack: what the next turn sends",
+		`${r.provider} / ${r.model}`.slice(0, width),
+		`${r.path} path, permission ${r.permission}, mode ${r.mode}`.slice(0, width),
+		"",
+		...r.rows.filter((x) => x.bytes > 0).map((x) => line(x.source, cost(x.bytes, x.tokens))),
+		"-".repeat(width),
+		line("total", cost(r.totalBytes, r.totalTokens)),
+	];
+	const top = r.tools.slice(0, 5);
+	if (top.length > 0) {
+		out.push("", "largest tools:");
+		for (const t of top) out.push(line(`  ${t.name}`, cost(t.bytes, Math.ceil(t.bytes / 4))));
+	}
+	out.push(
+		"",
+		"skills: listed on demand by use_skill, 0B per turn".slice(0, width),
+		`hooks: ${r.hooks}, run locally, 0B per turn`.slice(0, width),
+		"not shown: your message, and a clarify note if vague".slice(0, width),
+		"a greeting alone (hi) is sent with no tools".slice(0, width),
+		"tokens ~ bytes/4 (compaction's estimate)".slice(0, width),
+	);
+	return out.join("\n");
 }
