@@ -9,6 +9,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.14] - 2026-10-22
+
+### Changed
+- Android Termux and proot install path, Node version commands, signal exit ([#4747](https://github.com/8gi-foundation/8gent-code/pull/4747))
+
+### Fixed
+- tui: built-in slash commands run before the skill scan loads and after it fails ([#4745](https://github.com/8gi-foundation/8gent-code/pull/4745))
+
 ## [0.20.13] - 2026-10-22
 
 ### Fixed
