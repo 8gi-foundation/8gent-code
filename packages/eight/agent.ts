@@ -113,6 +113,7 @@ import {
 	compactHistory,
 	estimateMessageTokens,
 } from "./compaction";
+import { fixCompletedLine } from "./completed-line";
 import { asksForCommit, completionSelfCheckNudge, gitSnapshot } from "./completion-selfcheck";
 import { recordRanCommand } from "./done-gate";
 import { continueEmptyTurn } from "./empty-turn-continue";
@@ -1953,14 +1954,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				...(agentResult.unverified.length > 0 ? { unverified: agentResult.unverified } : {}),
 			};
 		}
-		const flavoredContent =
+		const flavoredContent = fixCompletedLine(
 			gated.violated ||
-			breakerStop !== null ||
-			agentResult.unverified.length > 0 ||
-			isVerbatimScope(this.config.agentScope) ||
-			quickResult !== null
+				breakerStop !== null ||
+				agentResult.unverified.length > 0 ||
+				isVerbatimScope(this.config.agentScope) ||
+				quickResult !== null
 				? content
-				: flavorResponse(content, flavor);
+				: flavorResponse(content, flavor),
+		).text;
 		this.messageHistory.push({ role: "assistant", content: flavoredContent });
 		this.sessionWriter.writeAssistantContent(stepNumber, [{ type: "text", text: flavoredContent }]);
 
@@ -3719,10 +3721,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// Table replies are never flavored - see the same guard on the
 			// text-tool path above for why a random COMPLETION_PHRASE in a channel
 			// reads as a fabricated completion claim.
-			const flavoredContent =
+			const flavoredContent = fixCompletedLine(
 				gatedNative.violated || isVerbatimScope(this.config.agentScope)
 					? content
-					: flavorResponse(content, flavor);
+					: flavorResponse(content, flavor),
+			).text;
 
 			this.messageHistory.push({ role: "assistant", content: flavoredContent });
 

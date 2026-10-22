@@ -1,0 +1,200 @@
+/**
+ * System One audio lane (#4713): nothing speaks, plays a sound or pops a
+ * notification unless the person turned voice on.
+ *
+ * Headless `8gent run` has no person to ask, so these commands are always
+ * refused there. In the TUI they pass this lane only when voice is on: the
+ * existing `voice.outputEnabled` setting, or EIGHT_VOICE=1. Passing here is
+ * not an allow: the judge and the other lanes still decide.
+ */
+
+export const AUDIO_REFUSAL =
+	"Audio is off for this session; say nothing aloud unless the person turns voice on.";
+
+const AUDIO_PROGRAMS = new Set([
+	"say",
+	"afplay",
+	"termux-tts-speak",
+	"espeak",
+	"espeak-ng",
+	"paplay",
+	"spd-say",
+	"aplay",
+	"ffplay",
+	"mpg123",
+	"pw-play",
+	"notify-send",
+	"terminal-notifier",
+]);
+
+const AUDIO_FILE = /\.(aiff|wav|mp3|m4a|ogg|flac)\b/i;
+/** An osascript is plainly read-only only when it is a `-e` get/return with none of these. */
+const OSA_LOUD =
+	/beep|say\b|speak|notification|play|sound|do shell|run script|activate|keystroke|click|\bset\b|make\b|delete|quit|launch|open/i;
+const SHELL_WORD = /(^|[|;&]\s*)(sudo\s+)?(sh|bash|zsh|dash|ksh|eval|source|\.)(\s|$)/;
+
+const BARE_NAME = new RegExp(
+	`(?<![A-Za-z0-9_.-])(?:${[...AUDIO_PROGRAMS].sort((a, b) => b.length - a.length).join("|")})(?![A-Za-z0-9_.-])`,
+);
+
+const WRAPPERS = new Set([
+	"env",
+	"nohup",
+	"command",
+	"time",
+	"sudo",
+	"exec",
+	"xargs",
+	"busybox",
+	"nice",
+	"timeout",
+	"stdbuf",
+	"setsid",
+	"builtin",
+]);
+/** Shell keywords that start a command: `then say hi`, `do afplay x`, `{ say hi`, `! say`. */
+const KEYWORDS = new Set(["then", "do", "else", "elif", "if", "while", "until", "{", "!", "time"]);
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+/** Wrapper flags that take a value as the next word. */
+const FLAG_WITH_VALUE = new Set(["-u", "-g", "-h", "-p", "-C", "-I", "-n", "-P", "-s", "-S"]);
+
+/** A word that looks like a command name or path: the pieces of a quote-blind split do not. */
+const NAMEISH = /^[A-Za-z\/.~{[][A-Za-z0-9_.\/{}[\]*?,~-]*$/;
+
+const BELL = /\\(a|0?07|x0?7|u0{0,3}7|U0{0,7}7)/;
+
+/** Decode `$'\x73ay'` style quoting, then drop quotes and backslashes: what the shell would call. */
+function unquoteWord(w: string): string {
+	const decoded = w.replace(/\$'((?:[^'\\]|\\.)*)'/g, (_m, body: string) =>
+		body.replace(/\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|[0-7]{1,3}|.)/g, (_e, c: string) => {
+			if (c[0] === "x" && c.length > 1) return String.fromCharCode(Number.parseInt(c.slice(1), 16));
+			if (c[0] === "u" && c.length > 1) return String.fromCharCode(Number.parseInt(c.slice(1), 16));
+			if (/^[0-7]+$/.test(c)) return String.fromCharCode(Number.parseInt(c, 8));
+			return c;
+		}),
+	);
+	return decoded.replace(/["'\\]/g, "");
+}
+
+const bare = (w: string): string => w.replace(/^["'`$(]+|["'`)]+$/g, "");
+const base = (w: string): string => bare(w).replace(/^.*\//, "");
+
+/** True when this one simple command, after unwrapping env/sudo/xargs and the like, makes sound. */
+function segmentIsAudio(segment: string, command: string): boolean {
+	const words = segment.trim().split(/\s+/).filter(Boolean);
+	let i = 0;
+	for (;;) {
+		while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i] ?? "")) i++;
+		const w = base(words[i] ?? "");
+		if (KEYWORDS.has(w)) {
+			i++;
+			continue;
+		}
+		if (!WRAPPERS.has(w)) break;
+		i++;
+		while (i < words.length) {
+			const next = words[i] ?? "";
+			if (FLAG_WITH_VALUE.has(next)) i += 2;
+			else if (next.startsWith("-") || /^\d+[smhd]?$/.test(next)) i++;
+			else break;
+		}
+	}
+	// Judge the whole command word: quotes, backslashes and ANSI-C quoting are removed, then it
+	// must not be an audio program, and must not still build its name from a variable.
+	const word = unquoteWord(words[i] ?? "");
+	// A command word that is a glob, a brace expansion or the head of a $( ) cannot be read.
+	if (
+		word === "$" ||
+		/^[A-Za-z0-9_./-]+\$$/.test(word) ||
+		(word !== "[" &&
+			word !== "[[" &&
+			NAMEISH.test(word) &&
+			/[*?]|\[.+\]|\{[^}]*(,|\.\.)[^}]*\}/.test(word))
+	)
+		return true;
+	if (/\$[A-Za-z_{(]/.test(word)) return true;
+	const prog = base(word);
+	if (AUDIO_PROGRAMS.has(prog)) return true;
+	if (prog === "osascript") {
+		const plainlyReadOnly =
+			/\s-e\s/.test(command) && /\b(get|return)\b/i.test(command) && !OSA_LOUD.test(command);
+		if (!plainlyReadOnly) return true;
+	}
+	if ((prog === "open" || prog === "xdg-open") && AUDIO_FILE.test(segment)) return true;
+	if (prog === "tput" && /\bbel\b/.test(segment)) return true;
+	// The terminal bell by escape: printf '\a', echo -e '\a' (also \007, \x07).
+	if (
+		BELL.test(segment) &&
+		(prog === "printf" ||
+			(prog === "echo" && (/\s-[a-zA-Z]*e/.test(segment) || segment.includes("$'"))))
+	)
+		return true;
+	if (SHELLS.has(prog)) {
+		for (let j = i + 1; j < words.length; j++) {
+			if (/^-[A-Za-z]*c[A-Za-z]*$/.test(words[j] ?? "")) {
+				return isAudioCommand(
+					words
+						.slice(j + 1)
+						.join(" ")
+						.replace(/["']/g, ""),
+				);
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * True when any command in the line makes sound or shows a desktop notification, including
+ * one wrapped in env/nohup/sudo/xargs, run by `sh -c`, or inside $( ), backticks or ( ).
+ * The split is quote-blind on purpose: it can over-refuse, never under-refuse.
+ */
+export function isAudioCommand(command: string): boolean {
+	// Command substitution as a command word: its output is run, so its name cannot be read.
+	if (
+		/(^|[;&|\n]|\b(?:then|do|else|env|exec|command|builtin|nohup|sudo)\s)\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:\$\(|`)/.test(
+			command,
+		)
+	)
+		return true;
+	for (const segment of command.split(/&&|\|\||[;|&\n`()]/)) {
+		if (segmentIsAudio(segment, command)) return true;
+	}
+	// A line that names an audio program and hands text to a shell (`echo say hi | sh`).
+	if (BARE_NAME.test(command) && SHELL_WORD.test(command)) return true;
+	// Backstop: an audio program name as a bare word anywhere (eval, find -exec, here-strings,
+	// su -c, ssh, arch, caffeinate, a variable's value). Over-refusing is accepted; a plain
+	// echo/printf/grep line that only mentions the name is left alone.
+	for (const segment of command.split(/&&|\|\||[;|&\n`()]/)) {
+		if (/^\s*(echo|printf|grep)\s/.test(segment) && !/\s--pre(=|\s|$)/.test(segment)) continue;
+		if (BARE_NAME.test(segment)) return true;
+	}
+	return false;
+}
+
+/** The refusal for this command, or undefined when it is not audio or voice is on in the TUI. */
+export function audioRefusal(
+	command: string,
+	where: { tui: boolean; voiceOn: boolean },
+): string | undefined {
+	if (!isAudioCommand(command)) return undefined;
+	if (where.tui && where.voiceOn) return undefined;
+	return AUDIO_REFUSAL;
+}
+
+/**
+ * Voice is on only when EIGHT_VOICE=1 or the raw settings file literally has
+ * voice.outputEnabled true. The merged defaults (which say true) are never read, so a
+ * person who never touched voice gets silence.
+ */
+export async function voiceIsOn(env: Record<string, string | undefined>): Promise<boolean> {
+	if (env.EIGHT_VOICE === "1") return true;
+	try {
+		const { getSettingsFilePath } = await import("../settings/index.js");
+		const { readFileSync } = await import("node:fs");
+		const parsed = JSON.parse(readFileSync(getSettingsFilePath(), "utf8"));
+		return parsed?.voice?.outputEnabled === true;
+	} catch {
+		return false;
+	}
+}
