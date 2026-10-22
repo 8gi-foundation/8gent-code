@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { KEYBINDINGS, formatHotkeys } from "./keybindings.js";
+import {
+	KEYBINDINGS,
+	altDigitKeys,
+	bindingsFor,
+	formatHotkeyRows,
+	formatHotkeys,
+} from "./keybindings.js";
 
 const SRC = path.join(import.meta.dir, "..");
 const read = (f: string) => fs.readFileSync(path.join(SRC, f), "utf8");
@@ -97,3 +103,26 @@ test("every listed Ctrl key changes the screen in the real App", async () => {
 		expect({ key: b.keys, changed: changed.get(b.keys) }).toEqual({ key: b.keys, changed: true });
 	}
 }, 90000);
+
+describe("Alt+digit tab keys where Ctrl+digit cannot be sent (#4723)", () => {
+	const ctrlRow = (t: string) => t.includes("Ctrl+1-9");
+	test("flag off and no Termux: table and help are unchanged", () => {
+		expect(altDigitKeys({})).toBe(false);
+		expect(bindingsFor({})).toBe(KEYBINDINGS);
+		expect(ctrlRow(formatHotkeys(bindingsFor({})))).toBe(true);
+	});
+	test("TERMUX_VERSION turns it on; EIGHT_ALT_DIGIT_KEYS=1 forces it", () => {
+		expect(altDigitKeys({ TERMUX_VERSION: "0.118.3" })).toBe(true);
+		expect(altDigitKeys({ EIGHT_ALT_DIGIT_KEYS: "1" })).toBe(true);
+		expect(altDigitKeys({ EIGHT_ALT_DIGIT_KEYS: "0" })).toBe(false);
+	});
+	test("under the flag the table and help show Alt+1-9, never Ctrl+1-9", () => {
+		const rows = bindingsFor({ EIGHT_ALT_DIGIT_KEYS: "1" });
+		expect(rows.length).toBe(KEYBINDINGS.length);
+		expect(rows.find((b) => b.action === "Switch to tab by number")?.keys).toBe("Alt+1-9");
+		const text = formatHotkeys(rows);
+		expect(text).toContain("Alt+1-9");
+		expect(ctrlRow(text)).toBe(false);
+		expect(ctrlRow(formatHotkeyRows(rows))).toBe(false);
+	});
+});

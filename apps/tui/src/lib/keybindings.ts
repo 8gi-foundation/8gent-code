@@ -51,6 +51,25 @@ export const KEYBINDINGS: readonly KeyBinding[] = [
 	{ keys: "Ctrl+S", action: "Sound on or off", group: "extras" },
 ];
 
+/**
+ * Termux and other phone terminals send Ctrl+digit as the bare digit, so the
+ * tab shortcut types a number instead of switching (#4723). On those, the same
+ * action is bound to Alt+digit (Esc then the digit, which Termux's extra-keys
+ * row can send). Decided from the environment only, never a probe:
+ * TERMUX_VERSION, or EIGHT_ALT_DIGIT_KEYS=1 to force it on any terminal.
+ */
+export function altDigitKeys(env: Record<string, string | undefined> = process.env): boolean {
+	return env.EIGHT_ALT_DIGIT_KEYS === "1" || Boolean(env.TERMUX_VERSION);
+}
+
+/** The table with the tab-number row showing a key this terminal can send. */
+export function bindingsFor(
+	env: Record<string, string | undefined> = process.env,
+): readonly KeyBinding[] {
+	if (!altDigitKeys(env)) return KEYBINDINGS;
+	return KEYBINDINGS.map((b) => (b.keys === "Ctrl+1-9" ? { ...b, keys: "Alt+1-9" } : b));
+}
+
 const GROUP_TITLES: Record<KeyGroup, string> = {
 	core: "Core",
 	prompt: "Prompt",
@@ -60,12 +79,12 @@ const GROUP_TITLES: Record<KeyGroup, string> = {
 };
 
 /** The /hotkeys text: every binding, grouped, keys aligned. */
-export function formatHotkeys(bindings: readonly KeyBinding[] = KEYBINDINGS): string {
+export function formatHotkeys(bindings: readonly KeyBinding[] = bindingsFor()): string {
 	return `Keyboard shortcuts:\n${formatHotkeyRows(bindings)}`;
 }
 
 /** The grouped rows without the heading, for /help. */
-export function formatHotkeyRows(bindings: readonly KeyBinding[] = KEYBINDINGS): string {
+export function formatHotkeyRows(bindings: readonly KeyBinding[] = bindingsFor()): string {
 	const width = Math.max(...bindings.map((b) => b.keys.length));
 	const out: string[] = [];
 	for (const group of Object.keys(GROUP_TITLES) as KeyGroup[]) {
