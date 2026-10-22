@@ -196,6 +196,8 @@ export interface AgentConfig {
 	keepAnswerFirst?: boolean;
 	/** Done gate (#4505): refuse a tests-pass claim without a newer passing test run. Default off; EIGHT_TEST_CLAIM_GATE=1 also enables; the option wins. */
 	testClaimGate?: boolean;
+	/** Required-output gate (#4734): a turn may not end while an output path the ask names is missing. Default off; EIGHT_OUTPUT_GATE=1 also enables; the option wins. */
+	outputGate?: boolean;
 	/**
 	 * Headless run (`8gent run`, packages/eight/run.ts): one prompt, no person
 	 * at the keyboard, often a local model where every prompt token is prefill

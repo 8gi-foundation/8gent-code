@@ -147,6 +147,7 @@ import {
 	describeLocalTurnFailure,
 	failedTurnRunEntry,
 } from "./local-turn-error";
+import { OutputGate, isOutputGateEnabled } from "./output-gate";
 import { PreToolRouter, type RouterDecision, formatPreFetchedContext } from "./pre-tool-router";
 import { DEFAULT_SYSTEM_PROMPT } from "./prompt";
 import { ORCHESTRATOR_SEGMENT, buildOrchestratorContext } from "./prompts/orchestrator-prompt";
@@ -538,6 +539,8 @@ export class Agent {
 	private turnToolLedger: ToolLedgerEntry[] = [];
 	private turnTask = "";
 	private doneGateNudged = false;
+	/** Required-output gate (#4734), one per turn; inert unless EIGHT_OUTPUT_GATE=1 or config.outputGate. */
+	private outputGate = new OutputGate("", "", false);
 	private doneGate: string | null = null;
 	/** True when the honesty gate rewrote this turn's reply (#4510). */
 	private honestyFired = false;
@@ -1664,6 +1667,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Verify-before-done (#3550, EIGHT_VERIFY_GATE=1): a turn that
 				// changed files and checked nothing since gets one nudge.
 				finalCheck: (reply) => this.turnEndNudge(reply),
+				outputCheck: (reply) => this.outputGateNudge(reply),
 				// Answer-only after a useless streak (#3613, EIGHT_USELESS_STREAK,
 				// off by default): N empty or error results in a row and the next
 				// round gets no tools, only a note to answer with what it has.
@@ -1900,6 +1904,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			ledger: this.turnToolLedger,
 			workingDirectory: this.config.workingDirectory || process.cwd(),
 		});
+		gated.content = this.settleOutputGate(gated.content);
 		this.settleDoneGate(gated.content);
 		if (gated.violated) {
 			console.log(`[honesty] blocked fabricated completion: ${gated.reason}`);
@@ -2176,6 +2181,21 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return TEST_CLAIM_NUDGE;
 	}
 
+	/** Required-output gate (#4734): up to two nudges per turn; each is logged as an output_gate event. */
+	private outputGateNudge(reply: string): string | null {
+		const nudge = this.outputGate.check(reply);
+		if (nudge) console.log(`[output_gate] ${JSON.stringify(this.outputGate.events.at(-1))}`);
+		return nudge;
+	}
+
+	/** Final text with the still-missing outputs appended once the nudges ran out (#4734). */
+	private settleOutputGate(reply: string): string {
+		const out = this.outputGate.settle(reply);
+		if (out !== reply)
+			console.log(`[output_gate] ${JSON.stringify(this.outputGate.events.at(-1))}`);
+		return out;
+	}
+
 	/** Second violation after the nudge: the harness, not the model, ends the task as failed. */
 	private settleDoneGate(reply: string): void {
 		if (!this.doneGateNudged || !isDoneGateEnabled(process.env, this.config.testClaimGate)) return;
@@ -2260,6 +2280,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.recentFilePaths = [];
 		this.turnToolLedger = [];
 		this.doneGateNudged = false;
+		this.outputGate = new OutputGate(
+			userMessage,
+			this.config.workingDirectory || process.cwd(),
+			isOutputGateEnabled(process.env, this.config.outputGate),
+		);
 		this.doneGate = null;
 		this.turnTask = userMessage;
 		// A plan file the task names is update_plan's plan of record (#4161).
@@ -3645,6 +3670,47 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.abortController = null;
 			}
 
+			// Required output (#4734): the gate counts its own nudges (two per turn).
+			for (let out = result?.text ? this.outputGateNudge(result.text) : null; out; ) {
+				const outAgent = createEightAgent(agentConfig);
+				this.abortController = new AbortController();
+				const turnMsgs: any[] = Array.isArray(result.response?.messages)
+					? result.response.messages
+					: [{ role: "assistant" as const, content: result.text as string }];
+				let outTimedOut = false;
+				try {
+					const again = await withProgressTimeout(
+						(watch) => {
+							this.progressWatch = watch;
+							return outAgent.generate({
+								messages: [...messages, ...turnMsgs, { role: "user" as const, content: out }],
+								abortSignal: this.abortController?.signal,
+							});
+						},
+						{
+							idleMs: attemptIdleMs,
+							ceilingMs: attemptTimeoutMs,
+							onTimeout: () => {
+								outTimedOut = true;
+								this.abortController?.abort();
+							},
+							label: "output-gate",
+						},
+					).finally(() => {
+						this.progressWatch = null;
+					});
+					if (!again?.text?.trim()) break;
+					result = { ...again, text: stripDoneMarker(again.text) };
+				} catch (outErr: any) {
+					if (outErr?.name === "AbortError" && !outTimedOut) throw outErr;
+					console.log(`[output-gate] follow-up failed: ${outErr?.message}`);
+					break;
+				} finally {
+					this.abortController = null;
+				}
+				out = this.outputGateNudge(result.text);
+			}
+
 			// #4444: tool work, then no text at all, gets one more generate with a
 			// steer (never after a stop, never past the turn budget, never twice).
 			const resultBeforeContinue = result;
@@ -3699,6 +3765,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				ledger: this.turnToolLedger,
 				workingDirectory: this.config.workingDirectory || process.cwd(),
 			});
+			gatedNative.content = this.settleOutputGate(gatedNative.content);
 			this.settleDoneGate(gatedNative.content);
 			if (gatedNative.violated) {
 				console.log(`[honesty] blocked fabricated completion: ${gatedNative.reason}`);

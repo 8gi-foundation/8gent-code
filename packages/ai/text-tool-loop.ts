@@ -134,6 +134,11 @@ export interface TextToolAgentOptions {
 	 */
 	finalCheck?: (reply: string) => string | null;
 	/**
+	 * Required-output check (#4734). Unlike finalCheck it may fire more than once per
+	 * turn: the caller counts and stops returning messages. Null lets the answer through.
+	 */
+	outputCheck?: (reply: string) => string | null;
+	/**
 	 * Keep the reply a completion check was sent after in front of the "DONE:"
 	 * summary that answers it (#3638). Off by default: in the TUI the reply
 	 * before the check is usually already a summary, and the person would read
@@ -908,6 +913,22 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 						...messages,
 						{ role: "assistant", content: replyText },
 						{ role: "user", content: planCheckMessage(open) },
+					];
+					continue;
+				}
+			}
+			// Required output (#4734): the caller limits how often this fires.
+			if (opts.outputCheck && round < maxRounds && !isQuestionToUser(replyText)) {
+				const check = opts.outputCheck(answer);
+				if (check) {
+					awaitingCheckAnswer = false;
+					prevRoundHadSuccess = false;
+					prevRoundAllRefused = false;
+					if (answer.trim() !== "") preCheckContent = answer;
+					messages = [
+						...messages,
+						{ role: "assistant", content: replyText },
+						{ role: "user", content: check },
 					];
 					continue;
 				}
