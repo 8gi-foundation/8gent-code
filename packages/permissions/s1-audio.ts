@@ -58,6 +58,21 @@ const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 /** Wrapper flags that take a value as the next word. */
 const FLAG_WITH_VALUE = new Set(["-u", "-g", "-h", "-p", "-C", "-I", "-n", "-P", "-s", "-S"]);
 
+const BELL = /\\(a|0?07|x0?7)/;
+
+/** Decode `$'\x73ay'` style quoting, then drop quotes and backslashes: what the shell would call. */
+function unquoteWord(w: string): string {
+	const decoded = w.replace(/\$'((?:[^'\\]|\\.)*)'/g, (_m, body: string) =>
+		body.replace(/\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|[0-7]{1,3}|.)/g, (_e, c: string) => {
+			if (c[0] === "x" && c.length > 1) return String.fromCharCode(Number.parseInt(c.slice(1), 16));
+			if (c[0] === "u" && c.length > 1) return String.fromCharCode(Number.parseInt(c.slice(1), 16));
+			if (/^[0-7]+$/.test(c)) return String.fromCharCode(Number.parseInt(c, 8));
+			return c;
+		}),
+	);
+	return decoded.replace(/["'\\]/g, "");
+}
+
 const bare = (w: string): string => w.replace(/^["'`$(]+|["'`)]+$/g, "");
 const base = (w: string): string => bare(w).replace(/^.*\//, "");
 
@@ -81,11 +96,11 @@ function segmentIsAudio(segment: string, command: string): boolean {
 			else break;
 		}
 	}
-	// A command word built from a variable, a backslash or empty quotes hides its name. Only a
-	// word that starts like a name is judged, so the pieces of a quote-blind split are left alone.
-	if (/^(\\|\$)[A-Za-z_{(]|^[A-Za-z0-9_-]+(''|""|\$[A-Za-z_{(]|\\[A-Za-z])/.test(words[i] ?? ""))
-		return true;
-	const prog = base(words[i] ?? "");
+	// Judge the whole command word: quotes, backslashes and ANSI-C quoting are removed, then it
+	// must not be an audio program, and must not still build its name from a variable.
+	const word = unquoteWord(words[i] ?? "");
+	if (/\$[A-Za-z_{(]/.test(word)) return true;
+	const prog = base(word);
 	if (AUDIO_PROGRAMS.has(prog)) return true;
 	if (prog === "osascript") {
 		const plainlyReadOnly =
@@ -94,6 +109,12 @@ function segmentIsAudio(segment: string, command: string): boolean {
 	}
 	if ((prog === "open" || prog === "xdg-open") && AUDIO_FILE.test(segment)) return true;
 	if (prog === "tput" && /\bbel\b/.test(segment)) return true;
+	// The terminal bell by escape: printf '\a', echo -e '\a' (also \007, \x07).
+	if (
+		BELL.test(segment) &&
+		(prog === "printf" || (prog === "echo" && /\s-[a-zA-Z]*e/.test(segment)))
+	)
+		return true;
 	if (SHELLS.has(prog)) {
 		for (let j = i + 1; j < words.length; j++) {
 			if (/^-[A-Za-z]*c[A-Za-z]*$/.test(words[j] ?? "")) {

@@ -123,6 +123,20 @@ describe("System One audio lane (#4713)", () => {
 		}
 	});
 
+	test("quoted, escaped and bell forms are refused", () => {
+		for (const c of [
+			's"ay hi',
+			"'s'ay hi",
+			'"$X" hi',
+			"$'\\x73ay' hi",
+			"/usr/bin/s\\ay hi",
+			"printf '\\a'",
+			"echo -e '\\a'",
+		]) {
+			expect([c, isAudioCommand(c)]).toEqual([c, true]);
+		}
+	});
+
 	test("a plain echo that only names the word is left alone", () => {
 		expect(isAudioCommand("echo say hi")).toBe(false);
 		expect(isAudioCommand("grep say notes.md")).toBe(false);
