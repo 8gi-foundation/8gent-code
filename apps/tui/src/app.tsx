@@ -240,7 +240,7 @@ import {
 	bangRunningLine,
 	killBangsOnExit,
 	parseBang,
-	parseModeArg,
+	parseModeArgs,
 	planModeRefusal,
 	sendRefusal,
 	startBang,
@@ -4202,7 +4202,7 @@ export function App({
 				case "mode": {
 					// This tab's permission mode by name, for keyboards with no
 					// Shift+Tab (Termux). Same switch, line and toast as the key.
-					const next = parseModeArg(args[0]);
+					const next = parseModeArgs(args);
 					if (!next) {
 						addSystemMessage(`${permSwitchLine(activePermMode)}\n${MODE_USAGE}`);
 						break;

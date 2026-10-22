@@ -113,6 +113,14 @@ describe("runSlash", () => {
 		});
 	});
 
+	test("/mode never changes a permission mode from a channel: it is terminal only", async () => {
+		for (const channel of KNOWN_CHANNELS) {
+			const r = await runSlash("/mode infinite", { ...ctx, channel });
+			expect(r.handled).toBe(true);
+			expect(r.text).toContain("It runs in the 8gent terminal.");
+		}
+	});
+
 	test("status, model, provider, session read the context", async () => {
 		expect((await runSlash("/status", ctx)).text).toContain("3 messages");
 		expect((await runSlash("/model", ctx)).text).toContain("m-1");

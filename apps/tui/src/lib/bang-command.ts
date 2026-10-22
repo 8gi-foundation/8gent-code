@@ -78,9 +78,14 @@ export function planModeRefusal(mode: string): string | null {
 		: null;
 }
 
-/** `/mode <name>`: the permission mode asked for, or null with no or an unknown name. */
-export function parseModeArg(arg: string | undefined): PermissionMode | null {
-	const name = (arg ?? "").trim().toLowerCase();
+/**
+ * `/mode <name>`: the permission mode asked for. Null, so nothing changes,
+ * with no name, an unknown name, or anything after the name.
+ */
+export function parseModeArgs(args: readonly string[]): PermissionMode | null {
+	const words = args.flatMap((a) => a.trim().split(/\s+/)).filter(Boolean);
+	if (words.length !== 1) return null;
+	const name = words[0].toLowerCase();
 	return isPermissionMode(name) ? name : null;
 }
 

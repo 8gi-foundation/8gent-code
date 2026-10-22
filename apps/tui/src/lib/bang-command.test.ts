@@ -9,7 +9,7 @@ import {
 	fenceFor,
 	killBangsOnExit,
 	parseBang,
-	parseModeArg,
+	parseModeArgs,
 	planModeRefusal,
 	runBang,
 	sendRefusal,
@@ -157,12 +157,23 @@ describe("!cmd (#3918 D5)", () => {
 		expect(line).toContain("/mode ask");
 		expect(line).not.toContain("^Y");
 		expect(BUILT_IN_SLASH_COMMANDS.some((c) => c.name === "mode")).toBeTrue();
-		expect(parseModeArg("ask")).toBe("ask");
-		expect(parseModeArg(" Plan ")).toBe("plan");
-		expect(parseModeArg("guarded")).toBe("guarded");
-		expect(parseModeArg("infinite")).toBe("infinite");
-		expect(parseModeArg("planning")).toBeNull();
-		expect(parseModeArg(undefined)).toBeNull();
+		expect(parseModeArgs(["ask"])).toBe("ask");
+		expect(parseModeArgs([" Plan "])).toBe("plan");
+		expect(parseModeArgs(["guarded"])).toBe("guarded");
+		expect(parseModeArgs(["infinite"])).toBe("infinite");
+	});
+
+	test("/mode changes nothing unless it is exactly one known mode name", () => {
+		for (const args of [
+			[],
+			[""],
+			["planning"],
+			["ask", "infinite"],
+			["infinite", "now"],
+			["ask infinite"],
+			["--infinite"],
+		])
+			expect(parseModeArgs(args)).toBeNull();
 	});
 
 	test("chat line says where the output goes", () => {
