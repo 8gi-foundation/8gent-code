@@ -9,6 +9,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.13] - 2026-10-22
+
+### Fixed
+- tui: the prompt stays live in every view unless a picker owns the keyboard, and Esc always returns (0.20.12 regression) ([#4740](https://github.com/8gi-foundation/8gent-code/pull/4740))
+
 ## [0.20.12] - 2026-10-22
 
 ### Added
