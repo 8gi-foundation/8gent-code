@@ -38,7 +38,9 @@ function defaultSessionsDir(): string {
 
 export class SessionWriter {
 	private filePath: string;
-	private fd: number;
+	private fd = -1;
+	/** Inode of the file `fd` was opened on; a mismatch means the number now names another file. */
+	private ino = -1;
 	/** False for a session that must leave nothing on disk (classroom, #3939). */
 	private persist: boolean;
 	private seq = 0;
@@ -85,7 +87,27 @@ export class SessionWriter {
 		}
 
 		this.filePath = path.join(dir, `${sessionId}.jsonl`);
+		this.open();
+	}
+
+	private open(): void {
 		this.fd = fs.openSync(this.filePath, "a");
+		this.ino = fs.fstatSync(this.fd).ino;
+	}
+
+	/**
+	 * True while `fd` is still open on our session file. A long session can lose it
+	 * (closed under a multiplexer, or the number closed and reused by other code):
+	 * writing to it then threw EBADF out of every later turn (#4774), or landed
+	 * session lines in someone else's file.
+	 */
+	private fdIsOurs(): boolean {
+		if (this.fd < 0) return false;
+		try {
+			return fs.fstatSync(this.fd).ino === this.ino;
+		} catch {
+			return false;
+		}
 	}
 
 	// ============================================
@@ -95,8 +117,19 @@ export class SessionWriter {
 	private write(entry: SessionEntry): void {
 		if (!this.persist) return;
 		const line = `${JSON.stringify(entry)}\n`;
-		fs.writeSync(this.fd, line);
+		// The session log is a record, never a reason to fail a turn (#4774): a lost
+		// fd is reopened by path; if the file cannot be written at all, the line is skipped.
+		try {
+			if (!this.fdIsOurs()) this.open();
+			fs.writeSync(this.fd, line);
+		} catch (err) {
+			this.fd = -1;
+			this.lastWriteError = `session log not written: ${err instanceof Error ? err.message : String(err)}`;
+		}
 	}
+
+	/** The one-line note for the last session-log write that was skipped, or null. */
+	lastWriteError: string | null = null;
 
 	private nextSeq(): number {
 		return this.seq++;
@@ -398,7 +431,8 @@ export class SessionWriter {
 			},
 		});
 
-		if (this.persist) fs.closeSync(this.fd);
+		if (this.persist && this.fdIsOurs()) fs.closeSync(this.fd);
+		this.fd = -1;
 	}
 
 	// ============================================
