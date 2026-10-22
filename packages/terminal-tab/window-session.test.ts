@@ -105,7 +105,7 @@ describe("folder names are literal (#4783)", () => {
 			path: "/usr/bin:/bin",
 		});
 		const r = spawnSync("/bin/bash", ["-c", script], {
-			env: { PATH: `.:${dir}:/usr/bin:/bin` },
+			env: { PATH: `.:${dir}:/usr/bin:/bin` } as unknown as NodeJS.ProcessEnv,
 			encoding: "utf-8",
 		});
 		expect(r.stdout.split("\n").pop()).toBe("/usr/bin:/bin");

@@ -124,7 +124,10 @@ export async function gatherWelcomeFacts(opts: {
 	// 8gent itself is a preset (8gent inside 8gent); offering it beside itself says nothing.
 	const cwd = resolve(opts.cwd);
 	const home = env.HOME ? resolve(env.HOME) : null;
-	const lookupEnv = { ...env, PATH: pathOutsideFolder(String(env.PATH ?? ""), cwd, home ?? homedir()) };
+	const lookupEnv = {
+		...env,
+		PATH: pathOutsideFolder(String(env.PATH ?? ""), cwd, home ?? homedir()),
+	};
 	const presets = (opts.presets ?? (await knownPresets())).filter((p) => p.id !== "8gent");
 	return {
 		version: String(pkg.version),
