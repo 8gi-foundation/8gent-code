@@ -26,6 +26,7 @@ const CORE = [
 	"sup",
 	"wa+s+s?u+p+",
 	"w?h?a+t?s? ?u+p+",
+	"wh?a+t+s? go+d+",
 	"good (?:morning|afternoon|evening|night)",
 	"gm",
 	"gn",
@@ -49,16 +50,27 @@ const GREETING = new RegExp(
 	`^(?:(?:hi+|hey+|hello+|yo+|hiya|howdy) )?(?:${CORE})(?: (?:there|again|everyone|all|team|mate|man|bro|friend|8gent|eight))?$`,
 );
 
-/** True when the whole message is a greeting or pleasantry that asks for no work. */
-export function isSmallTalk(text: string): boolean {
-	const flat = text
+function flatten(text: string): string {
+	return text
 		.toLowerCase()
 		.replace(/^\[mode: [^\]]*\]\s*/, "")
 		.replace(/['’]/g, "")
 		.replace(/[^a-z0-9 ]+/g, " ")
 		.replace(/\s+/g, " ")
 		.trim();
+}
+
+/** True when the whole message is a greeting or pleasantry that asks for no work. */
+export function isSmallTalk(text: string): boolean {
+	const flat = flatten(text);
 	return flat.length > 0 && flat.length <= 40 && GREETING.test(flat);
+}
+
+const THANKS = /^(?:thanks|thank you|thx|ty|cheers)\b/;
+
+/** Small talk that opens a conversation (a hello), not a thank-you that closes one (#4767). */
+export function isGreeting(text: string): boolean {
+	return isSmallTalk(text) && !THANKS.test(flatten(text));
 }
 
 /** The harness note a small-talk turn carries, so the reply stays one line and no tour is announced. */

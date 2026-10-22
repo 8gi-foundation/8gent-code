@@ -4,11 +4,13 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import pkg from "../../package.json" with { type: "json" };
 import { isPlainHome, workingProjectNote } from "./prompts/system-prompt";
-import { isSmallTalk } from "./small-talk";
+import { isGreeting, isSmallTalk } from "./small-talk";
+import { buildWelcome, gatherWelcomeFacts, pathOutsideFolder, safeModelLabel } from "./welcome";
 
 describe("isSmallTalk", () => {
 	test("a greeting or pleasantry alone is small talk", () => {
@@ -29,6 +31,8 @@ describe("isSmallTalk", () => {
 			"how are you",
 			"thanks",
 			"[Mode: Implementing] hi",
+			"what good",
+			"what's good",
 		])
 			expect({ t, v: isSmallTalk(t) }).toEqual({ t, v: true });
 	});
@@ -49,8 +53,116 @@ describe("isSmallTalk", () => {
 			"great",
 			"nice",
 			"hi hi hi hi hi hi hi hi hi hi hi hi hi hi hi hi",
+			"was good",
+			"what good is this function",
 		])
 			expect({ t, v: isSmallTalk(t) }).toEqual({ t, v: false });
+	});
+});
+
+describe("greeting welcome (#4767)", () => {
+	test("a hello is a greeting; a thank-you is small talk but not a greeting", () => {
+		for (const t of ["what good", "hi", "yo", "what's up"])
+			expect({ t, v: isGreeting(t) }).toEqual({ t, v: true });
+		for (const t of ["thanks", "cheers", "hi, run the tests"])
+			expect({ t, v: isGreeting(t) }).toEqual({ t, v: false });
+	});
+
+	test("an installed preset is offered, a missing one never is; facts come from PATH and .git only", async () => {
+		const root = mkdtempSync(join(tmpdir(), "welcome-"));
+		try {
+			const bin = join(root, "bin");
+			const repo = join(root, "proj");
+			const plain = join(root, "notes");
+			mkdirSync(bin);
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			mkdirSync(plain);
+			writeFileSync(join(bin, "pi"), "#!/bin/sh\n");
+			chmodSync(join(bin, "pi"), 0o755);
+			const presets = [
+				{ id: "claude", command: "claude" },
+				{ id: "pi", command: "pi" },
+				{ id: "8gent", command: "8gent" },
+			];
+			const facts = await gatherWelcomeFacts({
+				model: "MiniMax-M3.1-Flash",
+				provider: "openrouter",
+				cwd: repo,
+				env: { PATH: bin, TERMUX_VERSION: "0.118" },
+				platform: "linux",
+				arch: "arm64",
+				presets,
+			});
+			expect(facts.installed).toEqual(["pi"]);
+			const block = buildWelcome(facts);
+			expect(block.split("\n")[0]).toBe(
+				`Hi, I'm 8gent v${pkg.version} on Android (Termux, arm64), using MiniMax-M3.1-Flash via openrouter.`,
+			);
+			expect(block).toContain('"run pi"');
+			expect(block).not.toContain("claude");
+			expect(block).not.toContain("run 8gent");
+			expect(block).toContain("(proj) is a git repo");
+			expect(block.split("\n").length).toBeLessThanOrEqual(8);
+
+			const bare = buildWelcome(
+				await gatherWelcomeFacts({
+					model: "m1",
+					provider: "ollama",
+					cwd: plain,
+					env: { PATH: "" },
+					platform: "darwin",
+					arch: "arm64",
+					presets,
+				}),
+			);
+			expect(bare).toContain("macOS arm64");
+			expect(bare).toContain("none installed");
+			expect(bare).not.toContain('"run ');
+			expect(bare).toContain("(notes) is not a git repo");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("welcome hardening (8SO)", () => {
+	test("a binary planted inside the folder is never offered", async () => {
+		const root = mkdtempSync(join(tmpdir(), "welcome-plant-"));
+		try {
+			const planted = join(root, "node_modules", ".bin");
+			mkdirSync(planted, { recursive: true });
+			writeFileSync(join(planted, "pi"), "#!/bin/sh\n");
+			chmodSync(join(planted, "pi"), 0o755);
+			const facts = await gatherWelcomeFacts({
+				model: "m1",
+				provider: "ollama",
+				cwd: root,
+				env: { PATH: [planted, "node_modules/.bin", "."].join(":") },
+				platform: "darwin",
+				arch: "arm64",
+				presets: [{ id: "pi", command: "pi" }],
+			});
+			expect(facts.installed).toEqual([]);
+			expect(pathOutsideFolder(`/usr/bin:.:bin:${planted}`, root)).toBe("/usr/bin");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("a model value with a URL or credentials is not echoed; home shows as ~", async () => {
+		expect(safeModelLabel("https://user:tok@host/v1")).toBe("a custom model");
+		expect(safeModelLabel("key@model")).toBe("a custom model");
+		expect(safeModelLabel("qwen3:14b")).toBe("qwen3:14b");
+		const facts = await gatherWelcomeFacts({
+			model: "m1",
+			provider: "ollama",
+			cwd: "/home/someone/",
+			env: { PATH: "", HOME: "/home/someone" },
+			platform: "linux",
+			arch: "x64",
+			presets: [],
+		});
+		expect(facts.folder).toBe("~");
 	});
 });
 
@@ -161,14 +273,38 @@ describe("agent wiring: a small-talk turn is sent with no tools", () => {
 			attended: true,
 		} as ConstructorParameters<typeof Agent>[0]);
 
+	for (const t of ["what good", "hi", "yo"]) {
+		test(`"${t}" is answered by the welcome block: no model call, no tools, version and model named`, async () => {
+			process.env.EIGHT_TEXT_TOOLS = "1";
+			bodies = [];
+			const reply = await build().chat(t);
+			expect(bodies).toEqual([]);
+			expect(reply).toContain(`8gent v${pkg.version}`);
+			expect(reply).toContain("using m via ollama");
+			expect(reply).toContain("Try:");
+		});
+	}
+
+	test('"hi, run the tests" is not a welcome: the model is called with tools', async () => {
+		process.env.EIGHT_TEXT_TOOLS = "0";
+		bodies = [];
+		const reply = await build().chat("hi, run the tests");
+		expect(reply).not.toContain("Try:");
+		expect(bodies.length).toBeGreaterThan(0);
+		expect(JSON.stringify(bodies[0])).toContain("shout");
+	});
+
 	for (const [label, textTools] of [
 		["text-tool", "1"],
 		["native-tool", "0"],
 	] as const) {
 		test(`${label} path: "what upp" offers no tools, "ok" and a task keep them`, async () => {
 			process.env.EIGHT_TEXT_TOOLS = textTools;
+			// The first hello is the welcome (#4767); a later one is the plain small-talk turn.
+			const agent = build();
+			await agent.chat("hi");
 			bodies = [];
-			await build().chat("what upp");
+			await agent.chat("what upp");
 			expect(bodies.length).toBeGreaterThan(0);
 			for (const b of bodies) {
 				expect(b.tools ?? []).toEqual([]);

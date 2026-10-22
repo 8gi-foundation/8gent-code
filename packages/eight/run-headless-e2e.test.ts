@@ -164,7 +164,10 @@ describe("8gent -p", () => {
 		const other = mkdtempSync(join(tmpdir(), "headless-secret-"));
 		try {
 			const secret = "AKIAIOSFODNN7EXAMPLE";
-			const { code } = await headless(["--cwd", other, "summarise"], `# .env\nAWS_ACCESS_KEY_ID=${secret}\n`);
+			const { code } = await headless(
+				["--cwd", other, "summarise"],
+				`# .env\nAWS_ACCESS_KEY_ID=${secret}\n`,
+			);
 			expect(code).toBe(0);
 			const files = saved_().map((f) => readFileSync(join(treeDir(), f), "utf-8"));
 			expect(files.some((t) => t.includes("AWS_ACCESS_KEY_ID"))).toBe(true);
@@ -182,7 +185,16 @@ describe("8gent -p", () => {
 			const realWrite = process.stdout.write.bind(process.stdout);
 			process.stdout.write = (() => true) as typeof process.stdout.write;
 			try {
-				await runRunCommand(["--yes", "--provider", "ollama", "--model", "m", "--cwd", other, "hello"]);
+				await runRunCommand([
+					"--yes",
+					"--provider",
+					"ollama",
+					"--model",
+					"m",
+					"--cwd",
+					other,
+					"hello",
+				]);
 			} finally {
 				process.stdout.write = realWrite;
 			}
@@ -190,6 +202,14 @@ describe("8gent -p", () => {
 		} finally {
 			removeTree(other);
 		}
+	}, 60_000);
+
+	test("a greeting still goes to the model: headless never answers with the welcome (#4767)", async () => {
+		bodies = [];
+		const { code, lines } = await headless(["--no-session", "hello"]);
+		expect(code).toBe(0);
+		expect(bodies.length).toBeGreaterThan(0);
+		expect(JSON.stringify(lines)).not.toContain("Try:");
 	}, 60_000);
 
 	test("an unreachable model endpoint is result error and exit 1", async () => {
