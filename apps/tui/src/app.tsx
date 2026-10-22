@@ -6782,6 +6782,12 @@ export function App({
 					timestamp: new Date(),
 				});
 				setRecentCommands((prev) => [bubbleContent, ...prev].slice(0, 20));
+				// Plan mode runs nothing: same gate as `!cmd`.
+				const refused = planModeRefusal(permView(permHolderFor(tabId)).mode);
+				if (refused) {
+					addSystemMessage(refused);
+					return;
+				}
 				addSystemMessage(`Opening ${termArgs[0]} (same as /term ${termArgs.join(" ")}).`);
 				void handleSlashCommand("term" as SlashCommand, termArgs);
 				return;
