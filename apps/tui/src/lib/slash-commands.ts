@@ -62,6 +62,7 @@ export type SlashCommand =
 	| "settings"
 	| "quiet"
 	| "term"
+	| "herdr"
 	| "create-app"
 	| "hands"
 	| "eyes"
@@ -462,6 +463,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		description:
 			"Open a new PTY terminal tab. Bare /term or /term shell launches your $SHELL; /term <preset> launches an interactive 8gent CLI (claude, codex, hermes, openclaw, pi, 8gent); anything else is run via the shell.",
 		usage: "/term [shell|<preset>|<command...>]",
+	},
+	{
+		name: "herdr",
+		aliases: [],
+		description:
+			"Inside herdr: list the panes beside this one (pi and other tools), or show a pane's recent output. Read-only.",
+		usage: "/herdr [pane] [lines]",
 	},
 	{
 		name: "create-app",
