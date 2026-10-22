@@ -9,6 +9,22 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.11] - 2026-10-22
+
+### Added
+- voice: Android uses the keyboard mic; termux-tts-speak output; Termux hints ([#4726](https://github.com/8gi-foundation/8gent-code/pull/4726))
+- memory: ME profile folder behind EIGHT_ME=1, /me and 8gent me import ([#4709](https://github.com/8gi-foundation/8gent-code/pull/4709))
+
+### Fixed
+- state: keep project memory and scratch out of the repo (#4711) ([#4719](https://github.com/8gi-foundation/8gent-code/pull/4719))
+- goal: no private paths, safeSpawn, ready check before turn 1 (#4721) ([#4725](https://github.com/8gi-foundation/8gent-code/pull/4725))
+- a proxy 403 is not a bad key; done gate sees `bun test`; ignored providers print once ([#4717](https://github.com/8gi-foundation/8gent-code/pull/4717))
+- first-run: ask for the key in the app, name `8gent keys set`, bare / opens help ([#4704](https://github.com/8gi-foundation/8gent-code/pull/4704))
+- release: publish the npm tarball by absolute path, fail loudly, add npm_only_tag repair (#4700) ([#4702](https://github.com/8gi-foundation/8gent-code/pull/4702))
+- update: find the release without api.github.com and install the verified package with --ignore-scripts (#4698) ([#4701](https://github.com/8gi-foundation/8gent-code/pull/4701))
+- install: fall back to the releases page when the GitHub API rate limits ([#4696](https://github.com/8gi-foundation/8gent-code/pull/4696))
+- install: Termux npm path installs with --ignore-scripts (#4693) ([#4694](https://github.com/8gi-foundation/8gent-code/pull/4694))
+
 ## [0.20.10] - 2026-10-21
 
 ### Fixed
