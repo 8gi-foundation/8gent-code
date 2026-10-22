@@ -573,7 +573,7 @@ export function isEmptyReplyStall(line: string): boolean {
 	return line.startsWith(EMPTY_REPLY_STALL_PREFIX);
 }
 
-/** Calls the harness refused (a gate or a declined card), as `tool "command": why`, at most `max`. */
+/** Calls the harness refused (a gate or a declined card), as `tool binary: class`, at most `max`. */
 export function refusedCalls(
 	log: ReadonlyArray<{ name: string; args?: unknown; result?: string }>,
 	max = 3,
@@ -587,9 +587,12 @@ export function refusedCalls(
 		if (!m) continue;
 		total++;
 		if (out.length >= max) continue;
+		// Never the arguments or the gate's own words: a command line can hold a secret.
 		const a = e.args as { command?: unknown } | null | undefined;
-		const what = typeof a?.command === "string" ? ` "${a.command.slice(0, 60)}"` : "";
-		out.push(`${e.name}${what}: ${m[1].replace(/\s+/g, " ").trim().slice(0, 100)}`);
+		const first = typeof a?.command === "string" ? (a.command.trim().split(/\s+/)[0] ?? "") : "";
+		const bin = /^[A-Za-z][\w.+-]{0,40}$/.test(first) ? ` ${first}` : "";
+		const why = /declin/i.test(m[1]) ? "declined" : "blocked by policy";
+		out.push(`${e.name}${bin}: ${why}`);
 	}
 	return { total, shown: out };
 }
