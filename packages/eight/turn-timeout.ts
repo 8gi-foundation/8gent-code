@@ -53,7 +53,7 @@ export const DEFAULT_TURN_TIMEOUT_MS = 300_000;
 const MIN_TURN_TIMEOUT_MS = 1_000;
 
 /** Which limit fired: the wall-clock ceiling, or a quiet gap with no output. */
-export type TurnTimeoutKind = "ceiling" | "idle";
+export type TurnTimeoutKind = "ceiling" | "idle" | "request";
 
 export class TurnTimeoutError extends Error {
 	readonly timeoutMs: number;
@@ -61,10 +61,16 @@ export class TurnTimeoutError extends Error {
 	constructor(timeoutMs: number, label?: string, kind: TurnTimeoutKind = "ceiling") {
 		// #3855: say plainly which limit stopped the turn and which knob moves it.
 		const why =
-			kind === "idle"
-				? `: no progress for ${Math.round(timeoutMs / 1000)}s (quiet gap; raise with EIGHT_STREAM_IDLE_MS)`
-				: `: turn budget of ${Math.round(timeoutMs / 1000)}s reached (raise with EIGHT_TURN_TIMEOUT_MS)`;
-		super(`Provider attempt timed out after ${timeoutMs}ms${label ? ` (${label})` : ""}${why}`);
+			kind === "request"
+				? `: no reply for ${Math.round(timeoutMs / 1000)}s, request stopped (raise with EIGHT_REQUEST_TIMEOUT_SECONDS)`
+				: kind === "idle"
+					? `: no progress for ${Math.round(timeoutMs / 1000)}s (quiet gap; raise with EIGHT_STREAM_IDLE_MS)`
+					: `: turn budget of ${Math.round(timeoutMs / 1000)}s reached (raise with EIGHT_TURN_TIMEOUT_MS)`;
+		super(
+			kind === "request"
+				? `No reply from ${label ?? "the provider"} after ${Math.round(timeoutMs / 1000)}s; the request was stopped (raise with EIGHT_REQUEST_TIMEOUT_SECONDS).`
+				: `Provider attempt timed out after ${timeoutMs}ms${label ? ` (${label})` : ""}${why}`,
+		);
 		this.name = "TurnTimeoutError";
 		this.timeoutMs = timeoutMs;
 		this.kind = kind;
@@ -96,6 +102,30 @@ export function resolveTurnTimeoutMs(
 	const parsed = Number(raw);
 	if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_TURN_TIMEOUT_MS;
 	return clampTimerMs(Math.max(MIN_TURN_TIMEOUT_MS, Math.floor(parsed)));
+}
+
+export const DEFAULT_STALL_SECONDS = 45;
+export const DEFAULT_REQUEST_TIMEOUT_SECONDS = 300;
+/** The stall notice repeats at this interval while the silence lasts (#4727). */
+export const STALL_REPEAT_MS = 15_000;
+
+function secondsEnv(raw: string | undefined, fallback: number): number {
+	const n = Number((raw ?? "").trim());
+	return raw && Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/** EIGHT_STALL_SECONDS: silence before the status line says it is still waiting (default 45). */
+export function resolveStallMs(env: Record<string, string | undefined> = process.env): number {
+	return clampTimerMs(secondsEnv(env.EIGHT_STALL_SECONDS, DEFAULT_STALL_SECONDS) * 1000);
+}
+
+/** EIGHT_REQUEST_TIMEOUT_SECONDS: silence after which the request is aborted (default 300). */
+export function resolveRequestTimeoutMs(
+	env: Record<string, string | undefined> = process.env,
+): number {
+	return clampTimerMs(
+		secondsEnv(env.EIGHT_REQUEST_TIMEOUT_SECONDS, DEFAULT_REQUEST_TIMEOUT_SECONDS) * 1000,
+	);
 }
 
 /**
@@ -294,6 +324,15 @@ export interface ProgressTimeoutOptions {
 	ceilingMs: number;
 	onTimeout?: () => void;
 	label?: string;
+	/** Human name (provider/model) used in the error message; label stays for logs. */
+	displayLabel?: string;
+	/** Hard no-reply bound (#4727): the gap used is min(idleMs, requestMs), kind "request" when it wins. */
+	requestMs?: number;
+	/** Silence before onStall first fires, then every STALL_REPEAT_MS; null seconds = reply arrived. */
+	stallMs?: number;
+	onStall?: (silentSeconds: number | null) => void;
+	/** Clock seams for tests. */
+	now?: () => number;
 }
 
 /**
@@ -315,17 +354,56 @@ export async function withProgressTimeout<T>(
 		} catch {
 			// Aborting must never mask the timeout rejection.
 		}
-		rejectFn(new TurnTimeoutError(ms, opts.label, kind));
+		if (stallShown) {
+			stallShown = false;
+			try {
+				opts.onStall?.(null);
+			} catch {
+				// display only
+			}
+		}
+		rejectFn(new TurnTimeoutError(ms, opts.displayLabel ?? opts.label, kind));
 	};
 	let closed = false;
+	let stallTimer: ReturnType<typeof setTimeout> | null = null;
+	let lastProgress = (opts.now ?? Date.now)();
+	let stallShown = false;
+	const armStall = (delay: number) => {
+		stallTimer = setTimeout(() => {
+			stallShown = true;
+			try {
+				opts.onStall?.(Math.round(((opts.now ?? Date.now)() - lastProgress) / 1000));
+			} catch {
+				// A display failure must never change the timeout outcome.
+			}
+			armStall(STALL_REPEAT_MS);
+		}, delay);
+	};
 	const rearm = () => {
 		// A late progress signal after settle must never re-arm a zombie timer
 		// that would abort the NEXT turn's shared controller.
 		if (closed) return;
 		if (idleTimer) clearTimeout(idleTimer);
-		idleTimer = null;
-		if (opts.idleMs === null || watch.isHeld) return;
-		idleTimer = setTimeout(() => fire(opts.idleMs as number, "idle"), opts.idleMs);
+		if (stallTimer) clearTimeout(stallTimer);
+		idleTimer = stallTimer = null;
+		lastProgress = (opts.now ?? Date.now)();
+		if (stallShown) {
+			stallShown = false;
+			try {
+				opts.onStall?.(null);
+			} catch {
+				// display only
+			}
+		}
+		if (watch.isHeld) return;
+		const req = opts.requestMs ?? null;
+		const gap =
+			opts.idleMs === null ? req : req === null ? opts.idleMs : Math.min(opts.idleMs, req);
+		if (opts.stallMs && opts.onStall && (gap === null || opts.stallMs < gap))
+			armStall(opts.stallMs);
+		if (gap === null) return;
+		const kind: TurnTimeoutKind = req !== null && req === gap ? "request" : "idle";
+		idleTimer = setTimeout(() => fire(gap, kind), gap);
 	};
 	const timeout = new Promise<never>((_, reject) => {
 		rejectFn = reject;
@@ -337,7 +415,16 @@ export async function withProgressTimeout<T>(
 		return await Promise.race([run(watch), timeout]);
 	} finally {
 		closed = true;
+		if (stallShown) {
+			stallShown = false;
+			try {
+				opts.onStall?.(null);
+			} catch {
+				// display only
+			}
+		}
 		if (idleTimer) clearTimeout(idleTimer);
+		if (stallTimer) clearTimeout(stallTimer);
 		if (ceilingTimer) clearTimeout(ceilingTimer);
 	}
 }

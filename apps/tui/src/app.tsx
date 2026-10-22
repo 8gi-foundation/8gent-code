@@ -3076,6 +3076,14 @@ export function App({
 					toolTrail: toTrailEntry(event),
 				});
 			},
+			onStall: ({ silentSeconds }) => {
+				if (tabId !== activeTabId) return;
+				setNarratorText(
+					silentSeconds === null
+						? ""
+						: `no reply for ${silentSeconds} s, still waiting (Esc to stop)`,
+				);
+			},
 			onStepStart: (event) => {
 				logStepStart(tabId, tabTitle, event.stepNumber, event.provider, event.model);
 			},
