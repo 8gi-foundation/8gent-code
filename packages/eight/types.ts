@@ -159,6 +159,12 @@ export interface AgentConfig {
 	attended?: boolean;
 	/** Where extensions load from when enabled. Default ~/.8gent/extensions (os.homedir()). */
 	extensionsDir?: string;
+	/**
+	 * Build the agent only to inspect it (`8gent stack`, #4779): no session file,
+	 * no onStart or SessionStart hooks, no Telegram, no onboarding probes, no
+	 * extension loading, no background services. cleanup() writes nothing.
+	 */
+	inspectOnly?: boolean;
 	systemPrompt?: string;
 	maxTurns?: number;
 	workingDirectory?: string;

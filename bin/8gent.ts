@@ -2974,6 +2974,8 @@ async function stackCommand(): Promise<void> {
 			runtime: active.name as "ollama",
 			baseUrl: active.declared ? active.baseUrl : undefined,
 			workingDirectory: process.cwd(),
+			// A report: no hooks, no session file, no Telegram, no probes.
+			inspectOnly: true,
 		});
 		text = formatStackReport(await agent.stackReport());
 	} finally {

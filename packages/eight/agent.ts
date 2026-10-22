@@ -647,9 +647,11 @@ export class Agent {
 		// process; allowlist on (the default) or System One off, it is a no-op.
 		// Guarded mode (#3170) turns System One on for this agent's calls, so
 		// it warms the judge too.
-		startSystemOneWarmup(
-			systemOneEnvFor(config.permission ? effectivePermissionMode(config.permission) : undefined),
-		)?.catch(() => {});
+		if (!config.inspectOnly) {
+			startSystemOneWarmup(
+				systemOneEnvFor(config.permission ? effectivePermissionMode(config.permission) : undefined),
+			)?.catch(() => {});
+		}
 		this.hookManager = getHookManager();
 		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();
@@ -667,11 +669,13 @@ export class Agent {
 		// the settings file is absent or malformed.
 		const autoTuneSettings = readSettingsFileSync();
 		const LITE =
-			autoTuneSettings !== null
-				? computeAutoTune(autoTuneSettings).liteMode
-				: process.env["8GENT_LITE"] === "0" || process.env["8GENT_FULL"] === "1"
-					? false
-					: true;
+			config.inspectOnly === true
+				? true
+				: autoTuneSettings !== null
+					? computeAutoTune(autoTuneSettings).liteMode
+					: process.env["8GENT_LITE"] === "0" || process.env["8GENT_FULL"] === "1"
+						? false
+						: true;
 
 		// Initialize deferred tool registry (allTools flag loads everything upfront)
 		this.toolRegistry = new ToolRegistry(config.allTools ?? false, config.role);
@@ -728,7 +732,7 @@ export class Agent {
 		// Check if first run — if .8gent/user.json doesn't exist, flag for onboarding
 		// NOTE: Initialized here (before system prompt) so user context can be injected
 		this.onboarding = new OnboardingManager(config.workingDirectory || process.cwd());
-		if (this.onboarding.needsOnboarding()) {
+		if (!config.inspectOnly && this.onboarding.needsOnboarding()) {
 			// Detect integrations (Ollama, LM Studio, GitHub) in background
 			this.onboarding.detectIntegrations().catch(() => {});
 			// Gated behind DEBUG so stdout writes don't push the TUI header
@@ -926,7 +930,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			this.sessionId,
 			undefined,
 			undefined,
-			!isNoToolScope(config.agentScope),
+			!isNoToolScope(config.agentScope) && !config.inspectOnly,
 		);
 		// A Table officer is a colleague in a chat channel, not the orchestrator of a
 		// coding session. Appending the orchestrator/personality blocks told every
@@ -1010,6 +1014,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Git branch from .git/HEAD: no process started at boot (#4682).
 		const branch = readGitBranch(cwd);
 		if (branch) env.gitBranch = branch;
+
+		// An inspect-only agent (`8gent stack`) runs no hooks and starts nothing (#4779).
+		if (config.inspectOnly) {
+			this.heartbeat = getHeartbeatAgents({
+				workingDirectory: config.workingDirectory || process.cwd(),
+				verbose: false,
+			});
+			this.extensionHost = new ExtensionHost("", () => this.builtInToolNames());
+			return;
+		}
 
 		// Execute onStart hooks
 		this.hookManager.executeHooks("onStart", {
@@ -4843,6 +4857,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	async cleanup(): Promise<void> {
 		this.affinityFailover?.forgetSession(this.sessionId);
 		removeSessionScratch(this.sessionScratchDir);
+		// Inspect-only (#4779): nothing was started, so nothing to stop or record.
+		if (this.config.inspectOnly) return;
 		// Flush and end Convex session sync
 		await this.sessionSync.endSession().catch(() => {});
 		// Stop kernel pipeline

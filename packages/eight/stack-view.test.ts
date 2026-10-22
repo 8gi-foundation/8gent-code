@@ -9,7 +9,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmRetry } from "../../tests/rm-retry";
@@ -128,3 +128,40 @@ for (const [label, textTools] of [
 		}, 60_000);
 	});
 }
+
+describe("8gent stack builds an inspect-only agent", () => {
+	test("no session file, no onStart or SessionStart hook, nothing on cleanup", async () => {
+		const { getHookManager } = await import("../hooks");
+		const hm = getHookManager();
+		const fired: string[] = [];
+		const exec = hm.executeHooks.bind(hm);
+		const fire = hm.fire.bind(hm);
+		hm.executeHooks = (async (type: string, ctx: unknown) => {
+			fired.push(type);
+			return exec(type as never, ctx as never);
+		}) as typeof hm.executeHooks;
+		hm.fire = (async (event: string, ctx: unknown) => {
+			fired.push(event);
+			return fire(event as never, ctx as never);
+		}) as typeof hm.fire;
+		const sessions = join(home, ".8gent", "sessions");
+		const list = () => (existsSync(sessions) ? readdirSync(sessions).sort() : []);
+		const before = list();
+		try {
+			const agent = new Agent({
+				model: "m",
+				runtime: "ollama",
+				workingDirectory: repo,
+				inspectOnly: true,
+			} as ConstructorParameters<typeof Agent>[0]);
+			const report = await agent.stackReport();
+			expect(report.totalBytes).toBeGreaterThan(0);
+			await agent.cleanup();
+		} finally {
+			hm.executeHooks = exec;
+			hm.fire = fire;
+		}
+		expect(fired).toEqual([]);
+		expect(list()).toEqual(before);
+	}, 60_000);
+});
