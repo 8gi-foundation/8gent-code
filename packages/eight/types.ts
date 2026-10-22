@@ -93,6 +93,8 @@ export interface AgentEventCallbacks {
 	onToolEnd?: (event: AgentToolEndEvent) => void;
 	onStepStart?: (event: AgentStepStartEvent) => void;
 	onStepFinish?: (event: AgentStepEvent) => void;
+	/** No token, step or tool for a while (#4727). null = the reply arrived. Display only. */
+	onStall?: (event: { silentSeconds: number | null; provider: string }) => void;
 	onEvidence?: (event: AgentEvidenceEvent) => void;
 	onEvidenceSummary?: (event: AgentEvidenceSummaryEvent) => void;
 	/**
