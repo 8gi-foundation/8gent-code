@@ -19,6 +19,10 @@ import {
 	commandMutatesSessionRecords,
 	commandTouchesAuditFiles,
 } from "../../../../packages/permissions/path-guard.js";
+import {
+	type PermissionMode,
+	isPermissionMode,
+} from "../../../../packages/permissions/permission-mode.js";
 import { touchesBrowserSecrets } from "../../../../packages/tools/eight-browser.js";
 import { CONSULT_ID_PREFIX } from "./consult-command.js";
 
@@ -62,12 +66,26 @@ export function sendRefusal(command: string): string | null {
 	return null;
 }
 
-/** Plan mode runs nothing, `!cmd` included. Null when the mode allows it. */
+/**
+ * Plan mode runs nothing, `!cmd` included. Null when the mode allows it.
+ * The way out leads with /mode ask: a phone keyboard (Termux) has no
+ * Shift+Tab, and the footer's ^Y is the work mode (Planning, Researching...),
+ * not the permission mode, so it never leaves Plan.
+ */
 export function planModeRefusal(mode: string): string | null {
 	return mode === "plan"
-		? "Plan mode runs nothing, shell lines included. Shift+Tab to change mode, then run it again."
+		? "Plan mode runs nothing, shell lines included. Type /mode ask (or press Shift+Tab) to change mode, then run it again."
 		: null;
 }
+
+/** `/mode <name>`: the permission mode asked for, or null with no or an unknown name. */
+export function parseModeArg(arg: string | undefined): PermissionMode | null {
+	const name = (arg ?? "").trim().toLowerCase();
+	return isPermissionMode(name) ? name : null;
+}
+
+export const MODE_USAGE =
+	"Usage: /mode plan | ask | guarded | infinite (this tab's permission mode).";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: removing control bytes is the point
 const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[ -/]*[0-~]/g;

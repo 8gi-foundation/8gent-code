@@ -9,6 +9,7 @@ import {
 	fenceFor,
 	killBangsOnExit,
 	parseBang,
+	parseModeArg,
 	planModeRefusal,
 	runBang,
 	sendRefusal,
@@ -16,6 +17,7 @@ import {
 	withShellContext,
 	withoutBangLines,
 } from "./bang-command.js";
+import { BUILT_IN_SLASH_COMMANDS } from "./slash-commands.js";
 
 const ok = (output: string, extra: Partial<BangResult> = {}): BangResult => ({
 	exitCode: 0,
@@ -147,6 +149,20 @@ describe("!cmd (#3918 D5)", () => {
 	test("Plan mode refuses shell lines", () => {
 		expect(planModeRefusal("plan")).toContain("Plan mode runs nothing");
 		for (const mode of ["ask", "guarded", "infinite"]) expect(planModeRefusal(mode)).toBeNull();
+	});
+
+	test("Plan refusal names a way out a phone keyboard can type, and /mode is registered", () => {
+		// Termux has no Shift+Tab, and the footer's ^Y cycles the work mode, not this one.
+		const line = planModeRefusal("plan") ?? "";
+		expect(line).toContain("/mode ask");
+		expect(line).not.toContain("^Y");
+		expect(BUILT_IN_SLASH_COMMANDS.some((c) => c.name === "mode")).toBeTrue();
+		expect(parseModeArg("ask")).toBe("ask");
+		expect(parseModeArg(" Plan ")).toBe("plan");
+		expect(parseModeArg("guarded")).toBe("guarded");
+		expect(parseModeArg("infinite")).toBe("infinite");
+		expect(parseModeArg("planning")).toBeNull();
+		expect(parseModeArg(undefined)).toBeNull();
 	});
 
 	test("chat line says where the output goes", () => {
