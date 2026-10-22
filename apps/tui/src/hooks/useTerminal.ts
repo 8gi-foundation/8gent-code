@@ -33,7 +33,23 @@ interface PTYEntry {
 	label: string;
 	/** A person approved typing into this tab. Lives on the entry, so it ends when the tab closes. */
 	approved: boolean;
+	/** Same buffer the tab renders from; read_terminal reads it back. */
+	buffer: RingBuffer;
 }
+
+/** Strip control sequences (keeping SGR) and split on newlines; the trailing partial line stays pending. */
+function splitOutput(pending: string, data: string): { lines: string[]; pending: string } {
+	const parts = stripControl(pending + data).split("\n");
+	const rest = parts.pop() ?? "";
+	return { lines: parts.filter((l) => l.length > 0), pending: rest };
+}
+
+// SGR colour codes survive stripControl for rendering; text handed to a model must not carry them.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ESC is the point
+// PTY lines end in CR LF, so a trailing CR and any other stray control byte go too.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control bytes is the point
+const CTRL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
+const SGR = /\x1b\[[0-9;:]*m/g;
 
 const _registry = new Map<string, PTYEntry>();
 
@@ -58,6 +74,34 @@ export function isTerminalApproved(tabId: string): boolean {
 export function approveTerminal(tabId: string): void {
 	const entry = _registry.get(tabId);
 	if (entry) entry.approved = true;
+}
+
+/**
+ * Last `lines` lines of a tab's output with every control sequence removed, or
+ * null when no terminal is open for the tab. Output is from another program and
+ * is untrusted; the caller labels it.
+ */
+export function readTerminal(tabId: string, lines: number): string[] | null {
+	const entry = _registry.get(tabId);
+	if (!entry) return null;
+	return entry.buffer.takeLast(lines).map((l) => l.replace(SGR, "").replace(CTRL, ""));
+}
+
+/** Test seam: register a session as a tab and feed its output into a buffer, as the hook does. */
+export function _registerTerminalForTest(tabId: string, session: PtySession): void {
+	const buffer = new RingBuffer(MAX_LINES);
+	let pending = "";
+	session.onData((data) => {
+		const r = splitOutput(pending, data);
+		pending = r.pending;
+		buffer.pushMany(r.lines);
+	});
+	_registry.set(tabId, { session, buffer, label: "test", approved: false });
+}
+
+/** Test seam: forget a tab. */
+export function _unregisterTerminalForTest(tabId: string): void {
+	_registry.delete(tabId);
 }
 
 /**
@@ -105,12 +149,10 @@ export function useTerminal(tabId: string, cwdOrOpts?: string | TerminalSpawnOpt
 
 	const appendOutput = useCallback(
 		(data: string) => {
-			// Strip control sequences (keeping SGR), then split on newlines.
-			const cleaned = stripControl(pendingRef.current + data);
-			const parts = cleaned.split("\n");
-			pendingRef.current = parts.pop() ?? "";
+			const split = splitOutput(pendingRef.current, data);
+			pendingRef.current = split.pending;
 
-			const newLines = parts.filter((l) => l.length > 0);
+			const newLines = split.lines;
 			if (newLines.length === 0) return;
 
 			bufferRef.current.pushMany(newLines);
@@ -149,6 +191,7 @@ export function useTerminal(tabId: string, cwdOrOpts?: string | TerminalSpawnOpt
 			session,
 			label: (opts.command ?? SHELL).split("/").pop() || "shell",
 			approved: false,
+			buffer: bufferRef.current,
 		});
 
 		session.ready.then(() => {
