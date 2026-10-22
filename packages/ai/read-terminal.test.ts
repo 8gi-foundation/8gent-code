@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import {
 	_registerTerminalForTest,
 	_unregisterTerminalForTest,
-	approveTerminal,
+	approveTerminalRead,
 	writeToTerminal,
 } from "../../apps/tui/src/hooks/useTerminal.js";
 import { getPermissionManager } from "../permissions";
@@ -51,7 +51,7 @@ function attachTerminal(answer: "approve" | "deny", asked: string[]) {
 
 beforeAll(() => {
 	_registerTerminalForTest("t1", fakeSession());
-	approveTerminal("t1");
+	approveTerminalRead("t1");
 });
 afterAll(() => _unregisterTerminalForTest("t1"));
 afterEach(() => {
@@ -110,7 +110,29 @@ describe("read_terminal approval and limits", () => {
 		}
 	});
 
-	test("approval is shared with write_terminal: one prompt covers both", async () => {
+	test("a read approval does not unlock typing: the next write_terminal still asks", async () => {
+		_registerTerminalForTest("t6", fakeSession());
+		try {
+			getPermissionManager().enableInfiniteMode();
+			const asked: string[] = [];
+			attachTerminal("approve", asked);
+			expect((await run("read_terminal", { tabId: "t6" })).ok).toBe(true);
+			expect((await run("write_terminal", { tabId: "t6", input: "echo typed" })).ok).toBe(true);
+			expect(asked).toEqual(["Read Terminal Tab", "Type Into Terminal Tab"]);
+			// And a declined write after a read approval sends nothing.
+			_registerTerminalForTest("t7", fakeSession());
+			approveTerminalRead("t7");
+			attachTerminal("deny", asked);
+			const out = await run("write_terminal", { tabId: "t7", input: "echo no" });
+			expect(out.error).toContain("[PERMISSION DENIED]");
+			expect((await run("read_terminal", { tabId: "t7" })).output).toBe("");
+		} finally {
+			_unregisterTerminalForTest("t6");
+			_unregisterTerminalForTest("t7");
+		}
+	});
+
+	test("a write approval covers reads: write_terminal then read_terminal asks once", async () => {
 		_registerTerminalForTest("t4", fakeSession());
 		try {
 			getPermissionManager().enableInfiniteMode();

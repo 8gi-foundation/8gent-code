@@ -31,8 +31,10 @@ interface PTYEntry {
 	session: PtySession;
 	/** What runs in the tab (command name), shown when a person is asked to approve typing into it. */
 	label: string;
-	/** A person approved typing into this tab. Lives on the entry, so it ends when the tab closes. */
-	approved: boolean;
+	/** A person approved reading this tab's output. Lives on the entry, so it ends when the tab closes. */
+	readApproved: boolean;
+	/** A person approved typing into this tab (this also allows reading). Ends when the tab closes. */
+	writeApproved: boolean;
 	/** Same buffer the tab renders from; read_terminal reads it back. */
 	buffer: RingBuffer;
 }
@@ -68,14 +70,27 @@ export function describeTerminal(tabId: string): string | null {
 	return _registry.get(tabId)?.label ?? null;
 }
 
-export function isTerminalApproved(tabId: string): boolean {
-	return _registry.get(tabId)?.approved === true;
+/** Reading is allowed once a person approved reading or typing; typing approval implies reading. */
+export function isTerminalReadApproved(tabId: string): boolean {
+	const e = _registry.get(tabId);
+	return e?.readApproved === true || e?.writeApproved === true;
 }
 
-/** Record a person's approval for this tab until it closes. No-op for an unknown tab. */
-export function approveTerminal(tabId: string): void {
+/** Typing is allowed only after a person approved typing; a read approval never counts. */
+export function isTerminalWriteApproved(tabId: string): boolean {
+	return _registry.get(tabId)?.writeApproved === true;
+}
+
+/** Record a person's read approval for this tab until it closes. No-op for an unknown tab. */
+export function approveTerminalRead(tabId: string): void {
 	const entry = _registry.get(tabId);
-	if (entry) entry.approved = true;
+	if (entry) entry.readApproved = true;
+}
+
+/** Record a person's approval to read and type for this tab until it closes. */
+export function approveTerminalWrite(tabId: string): void {
+	const entry = _registry.get(tabId);
+	if (entry) entry.writeApproved = true;
 }
 
 /**
@@ -100,7 +115,13 @@ export function _registerTerminalForTest(tabId: string, session: PtySession): vo
 		pending = r.pending;
 		buffer.pushMany(r.lines);
 	});
-	_registry.set(tabId, { session, buffer, label: "test", approved: false });
+	_registry.set(tabId, {
+		session,
+		buffer,
+		label: "test",
+		readApproved: false,
+		writeApproved: false,
+	});
 }
 
 /** Test seam: forget a tab. */
@@ -194,7 +215,8 @@ export function useTerminal(tabId: string, cwdOrOpts?: string | TerminalSpawnOpt
 		_registry.set(tabId, {
 			session,
 			label: (opts.command ?? SHELL).split("/").pop() || "shell",
-			approved: false,
+			readApproved: false,
+			writeApproved: false,
 			buffer: bufferRef.current,
 		});
 

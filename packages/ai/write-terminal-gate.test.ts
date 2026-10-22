@@ -14,7 +14,7 @@ afterAll(() => {
 
 const sent: Array<[string, string]> = [];
 // Open tabs and their approval, as the registry entry holds them.
-const tabs = new Map<string, { label: string; approved: boolean }>();
+const tabs = new Map<string, { label: string; readApproved: boolean; writeApproved: boolean }>();
 mock.module("../../apps/tui/src/hooks/useTerminal.js", () => ({
 	...realUseTerminal,
 	writeToTerminal: (tabId: string, input: string) => {
@@ -23,10 +23,16 @@ mock.module("../../apps/tui/src/hooks/useTerminal.js", () => ({
 	},
 	listTerminals: () => [...tabs.keys()],
 	describeTerminal: (id: string) => tabs.get(id)?.label ?? null,
-	isTerminalApproved: (id: string) => tabs.get(id)?.approved === true,
-	approveTerminal: (id: string) => {
+	isTerminalReadApproved: (id: string) =>
+		tabs.get(id)?.readApproved === true || tabs.get(id)?.writeApproved === true,
+	isTerminalWriteApproved: (id: string) => tabs.get(id)?.writeApproved === true,
+	approveTerminalRead: (id: string) => {
 		const t = tabs.get(id);
-		if (t) t.approved = true;
+		if (t) t.readApproved = true;
+	},
+	approveTerminalWrite: (id: string) => {
+		const t = tabs.get(id);
+		if (t) t.writeApproved = true;
 	},
 }));
 
@@ -58,8 +64,8 @@ function attachTerminal(answer: "approve" | "deny", asked: string[]) {
 beforeEach(() => {
 	sent.length = 0;
 	tabs.clear();
-	tabs.set("t1", { label: "pi", approved: false });
-	tabs.set("t2", { label: "hermes", approved: false });
+	tabs.set("t1", { label: "pi", readApproved: false, writeApproved: false });
+	tabs.set("t2", { label: "hermes", readApproved: false, writeApproved: false });
 });
 
 afterEach(() => {
@@ -108,7 +114,7 @@ describe("write_terminal gate", () => {
 		attachTerminal("approve", asked);
 		await write("t1", "echo a");
 		tabs.delete("t1");
-		tabs.set("t1", { label: "pi", approved: false });
+		tabs.set("t1", { label: "pi", readApproved: false, writeApproved: false });
 		await write("t1", "echo b");
 		expect(asked).toEqual(["echo a", "echo b"]);
 	});
