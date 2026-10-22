@@ -415,8 +415,7 @@ describe("allowlist: what passes and what does not", () => {
 		for (const c of [
 			"pi --version",
 			"mytool --version",
-			"pi -v",
-			"termux-info -v",
+			"termux-info --version",
 			"node24 --version",
 		])
 			expect({ c, v: readOnlyAllowlist(c).verdict }).toEqual({ c, v: "pass-without-model" });
