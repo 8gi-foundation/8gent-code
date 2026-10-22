@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.15] - 2026-10-22
+
+### Added
+- term: read_terminal and list_terminals for terminal tabs ([#4752](https://github.com/8gi-foundation/8gent-code/pull/4752))
+
+### Fixed
+- term: gate write_terminal like term_send, ask on first send per tab ([#4751](https://github.com/8gi-foundation/8gent-code/pull/4751))
+- term: window mode only on darwin, in-tab on Linux and Android ([#4750](https://github.com/8gi-foundation/8gent-code/pull/4750))
+
 ## [0.20.14] - 2026-10-22
 
 ### Changed
