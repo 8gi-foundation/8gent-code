@@ -10,7 +10,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { getPreset, resolvePresetBinary, runExternalAgent } from "./external-agent-runner";
+import {
+	getPreset,
+	presetEnv,
+	presetPath,
+	resolvePresetBinary,
+	runExternalAgent,
+} from "./external-agent-runner";
 
 // #4769: a repo must not get its own `pi` run by /term pi, "run pi" or /spawn.
 const made: string[] = [];
@@ -80,6 +86,77 @@ describe("runExternalAgent with a planted pi", () => {
 			expect(result.ok).toBe(false);
 			expect(result.error).toBe("pi found only inside this project; not running it");
 			expect(existsSync(marker)).toBe(false);
+		} finally {
+			process.chdir(savedCwd);
+			process.env.PATH = savedPath;
+		}
+	});
+});
+
+describe("presetPath / presetEnv", () => {
+	test("drops '.', relative and in-project entries; keeps absolute outside ones", () => {
+		const project = dir("term-proj-");
+		const outside = dir("term-outside-");
+		const home = dir("term-home-");
+		const path = [".", "bin", join(project, "node_modules", ".bin"), outside, "/usr/bin"].join(
+			delimiter,
+		);
+		expect(presetPath(path, project, home)).toBe([outside, "/usr/bin"].join(delimiter));
+		const env = presetEnv(project, { PATH: path, KEEP: "1", GONE: undefined }, home);
+		expect(env.PATH).toBe([outside, "/usr/bin"].join(delimiter));
+		expect(env.KEEP).toBe("1");
+		expect("GONE" in env).toBe(false);
+	});
+
+	test("launched from home, a real claude under ~/.npm-global/bin is not refused", () => {
+		const home = dir("term-home-");
+		plant(join(home, ".npm-global", "bin"), join(home, "ran"));
+		const env = { PATH: [".", join(home, ".npm-global", "bin"), "/usr/bin"].join(delimiter) };
+		expect(presetPath(env.PATH, home, home)).toBe(
+			[join(home, ".npm-global", "bin"), "/usr/bin"].join(delimiter),
+		);
+		expect(resolvePresetBinary("pi", home, env, home)).toEqual({
+			ok: true,
+			path: join(home, ".npm-global", "bin", "pi"),
+		});
+	});
+
+	test("launched from home, a pi planted only on '.' is still refused", () => {
+		const home = dir("term-home-");
+		plant(home, join(home, "ran"));
+		const result = resolvePresetBinary(
+			"pi",
+			home,
+			{ PATH: [".", "/usr/bin"].join(delimiter) },
+			home,
+		);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.reason).toBe("inside");
+	});
+});
+
+describe("runExternalAgent PATH hand-off", () => {
+	test("the preset runs with a PATH that has no '.' or in-project entry", async () => {
+		const project = dir("term-proj-");
+		const outside = dir("term-outside-");
+		mkdirSync(join(project, "bin"), { recursive: true });
+		const bin = join(outside, "pi");
+		writeFileSync(bin, '#!/bin/sh\nprintf "PATH=%s\\n" "$PATH"\n');
+		chmodSync(bin, 0o755);
+		const savedPath = process.env.PATH;
+		const savedCwd = process.cwd();
+		process.chdir(project);
+		process.env.PATH = [".", "bin", join(project, "bin"), outside, "/usr/bin", "/bin"].join(
+			delimiter,
+		);
+		try {
+			const result = await runExternalAgent(getPreset("pi")!, "hello");
+			const line = result.text.split("\n").find((l) => l.startsWith("PATH=")) ?? "";
+			const entries = line.slice("PATH=".length).split(delimiter);
+			expect(entries).toContain(outside);
+			expect(entries).not.toContain(".");
+			expect(entries).not.toContain("bin");
+			expect(entries).not.toContain(join(project, "bin"));
 		} finally {
 			process.chdir(savedCwd);
 			process.env.PATH = savedPath;

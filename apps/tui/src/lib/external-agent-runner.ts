@@ -14,7 +14,8 @@
  */
 
 import { execSync, spawn } from "node:child_process";
-import { delimiter, resolve as resolvePath } from "node:path";
+import { homedir } from "node:os";
+import { delimiter, isAbsolute, relative, resolve as resolvePath } from "node:path";
 import { spawnShell } from "../../../../packages/core/shell.js";
 import { pathOutsideFolder } from "../../../../packages/eight/welcome.js";
 import { findOnPath } from "../../../../packages/voice/termux.js";
@@ -242,6 +243,37 @@ export type PresetBinary =
 	| { ok: false; reason: "inside" | "missing"; message: string };
 
 /**
+ * The PATH a preset may be found on or run with: absolute entries outside `cwd`
+ * (#4769). When `cwd` is the home folder or above it there is no project tree to
+ * distrust, so only relative entries (".") are dropped; otherwise launching from
+ * ~ would hide ~/.npm-global/bin and refuse a real `claude`.
+ */
+export function presetPath(path: string, cwd: string, home: string = homedir()): string {
+	const rel = relative(resolvePath(cwd), resolvePath(home));
+	const coversHome = rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+	if (!coversHome) return pathOutsideFolder(path, cwd);
+	return path
+		.split(delimiter)
+		.filter((dir) => dir && isAbsolute(dir))
+		.join(delimiter);
+}
+
+/**
+ * The env a preset runs with: same PATH rule, so a `#!/usr/bin/env node` script
+ * the preset runs cannot pick up a `node` planted on "." or in the project.
+ */
+export function presetEnv(
+	cwd: string,
+	env: Record<string, string | undefined> = process.env,
+	home: string = homedir(),
+): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const [k, v] of Object.entries(env)) if (v !== undefined) out[k] = v;
+	out.PATH = presetPath(String(env.PATH ?? ""), cwd, home);
+	return out;
+}
+
+/**
  * Resolve a preset command to one absolute path, looking only at absolute PATH
  * entries outside `cwd` (#4769). A relative entry (".") or a folder inside the
  * project (node_modules/.bin, ./bin) could hold a binary the repo planted, so a
@@ -251,9 +283,10 @@ export function resolvePresetBinary(
 	command: string,
 	cwd: string = process.cwd(),
 	env: Record<string, string | undefined> = process.env,
+	home: string = homedir(),
 ): PresetBinary {
 	const path = String(env.PATH ?? "");
-	const outside = findOnPath(command, { PATH: pathOutsideFolder(path, cwd) });
+	const outside = findOnPath(command, { PATH: presetPath(path, cwd, home) });
 	if (outside) return { ok: true, path: outside };
 	const everywhere = path
 		.split(delimiter)
@@ -488,11 +521,11 @@ export async function runExternalAgent(
 		}
 	}
 
-	const env = {
+	const fullEnv = {
 		...process.env,
 		PATH: `${pathPrefix}${process.env.PATH ?? ""}`,
 	};
-	const binary = resolvePresetBinary(preset.command, process.cwd(), env);
+	const binary = resolvePresetBinary(preset.command, process.cwd(), fullEnv);
 	if (!binary.ok && binary.reason === "inside") {
 		return {
 			ok: false,
@@ -504,6 +537,7 @@ export async function runExternalAgent(
 		};
 	}
 	const executable = binary.ok ? binary.path : preset.command;
+	const env = presetEnv(process.cwd(), fullEnv);
 
 	return new Promise((resolve) => {
 		let stdout = "";
