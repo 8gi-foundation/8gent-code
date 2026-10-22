@@ -258,7 +258,7 @@ import {
 	hudTokens,
 	msUntilSessionTimeChanges,
 } from "./lib/format.js";
-import { formatHotkeyRows, formatHotkeys } from "./lib/keybindings.js";
+import { altDigitKeys, formatHotkeyRows, formatHotkeys } from "./lib/keybindings.js";
 import { computeProcessSidebarWidth, tuiChatContentWidth } from "./lib/layout-breakpoints.js";
 import { probeLocalEndpoints } from "./lib/local-probe.js";
 import { narratePlan, narrateStep, narrateToolEnd, narrateToolStart } from "./lib/narrator.js";
@@ -2579,8 +2579,9 @@ export function App({
 			}
 		}
 
-		// Ctrl+1-9: switch to tab by index
-		if (key.ctrl && input >= "1" && input <= "9") {
+		// Ctrl+1-9: switch to tab by index. Where the terminal cannot send
+		// Ctrl+digit (Termux, #4723) Alt+digit does the same.
+		if ((key.ctrl || (key.meta && altDigitKeys())) && input >= "1" && input <= "9") {
 			const idx = Number.parseInt(input, 10) - 1;
 			if (idx < workspaceTabs.tabs.length) {
 				workspaceTabs.switchToIndex(idx);
