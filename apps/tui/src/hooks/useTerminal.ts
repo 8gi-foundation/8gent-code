@@ -50,6 +50,8 @@ function splitOutput(pending: string, data: string): { lines: string[]; pending:
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control bytes is the point
 const CTRL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
 const SGR = /\x1b\[[0-9;:]*m/g;
+// The one-byte CSI (U+009B) introduces the same sequences as ESC [; remove the whole sequence.
+const C1_CSI = /\x9b[0-?]*[ -/]*[@-~]/g;
 
 const _registry = new Map<string, PTYEntry>();
 
@@ -84,7 +86,9 @@ export function approveTerminal(tabId: string): void {
 export function readTerminal(tabId: string, lines: number): string[] | null {
 	const entry = _registry.get(tabId);
 	if (!entry) return null;
-	return entry.buffer.takeLast(lines).map((l) => l.replace(SGR, "").replace(CTRL, ""));
+	return entry.buffer
+		.takeLast(lines)
+		.map((l) => l.replace(SGR, "").replace(C1_CSI, "").replace(CTRL, ""));
 }
 
 /** Test seam: register a session as a tab and feed its output into a buffer, as the hook does. */

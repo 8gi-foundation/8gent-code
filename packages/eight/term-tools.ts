@@ -205,6 +205,28 @@ export async function gateTabInput(tabId: string, text: string): Promise<string 
 	return null;
 }
 
+/**
+ * The gate for read_terminal. Output read from a tab goes into the model's
+ * context, so a read needs the same first-time per-tab approval as a write
+ * (Infinite mode included), and the approval is shared with write_terminal.
+ * Null means go ahead.
+ */
+export async function gateTabRead(tabId: string): Promise<string | null> {
+	const tabs = await import("../../apps/tui/src/hooks/useTerminal.js");
+	const label = tabs.describeTerminal(tabId);
+	if (label === null) return `No terminal open for tab ${tabId}.`;
+	if (tabs.isTerminalApproved(tabId)) return null;
+	const ok = await getPermissionManager().askPerson(
+		"Read Terminal Tab",
+		`The assistant wants to read the output of terminal tab ${tabId} (running ${label}). Approving covers this tab until it closes.`,
+	);
+	if (!ok) {
+		return `[PERMISSION DENIED] read_terminal: a person did not approve reading tab ${tabId}. Nothing was read.`;
+	}
+	tabs.approveTerminal(tabId);
+	return null;
+}
+
 // ---------------- Tool definitions ----------------
 
 export function getTermToolDefs(): object[] {
