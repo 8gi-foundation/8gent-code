@@ -475,8 +475,9 @@ export class Agent {
 	private progressWatch: ProgressWatch | null = null;
 
 	/** #4727: the no-reply notice and hard bound, shared by every progress watch. */
-	private stallOptions(provider: string) {
+	private stallOptions(provider: string, model: string) {
 		return {
+			displayLabel: `${provider}/${model}`,
 			requestMs: resolveRequestTimeoutMs(),
 			stallMs: resolveStallMs(),
 			onStall: (silentSeconds: number | null) => this.events.onStall?.({ silentSeconds, provider }),
@@ -3437,7 +3438,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							{
 								idleMs: attemptIdleMs,
 								ceilingMs: attemptTimeoutMs,
-								...this.stallOptions(currentEntry.provider),
+								...this.stallOptions(currentEntry.provider, currentEntry.model),
 								// Abort the shared signal so the stalled request tears down.
 								onTimeout: () => {
 									attemptTimedOut = true;
@@ -3604,7 +3605,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							{
 								idleMs: attemptIdleMs,
 								ceilingMs: attemptTimeoutMs,
-								...this.stallOptions(String(providerConfig.name)),
+								...this.stallOptions(String(providerConfig.name), String(providerConfig.model)),
 								onTimeout: () => {
 									retryTimedOut = true;
 									this.abortController?.abort();
@@ -3663,7 +3664,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						{
 							idleMs: attemptIdleMs,
 							ceilingMs: attemptTimeoutMs,
-							...this.stallOptions(String(providerConfig.name)),
+							...this.stallOptions(String(providerConfig.name), String(providerConfig.model)),
 							onTimeout: () => {
 								verifyTimedOut = true;
 								this.abortController?.abort();
@@ -3704,7 +3705,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						{
 							idleMs: attemptIdleMs,
 							ceilingMs: attemptTimeoutMs,
-							...this.stallOptions(String(providerConfig.name)),
+							...this.stallOptions(String(providerConfig.name), String(providerConfig.model)),
 							onTimeout: () => {
 								outTimedOut = true;
 								this.abortController?.abort();
@@ -3759,7 +3760,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							{
 								idleMs: attemptIdleMs,
 								ceilingMs: attemptTimeoutMs,
-								...this.stallOptions(String(providerConfig.name)),
+								...this.stallOptions(String(providerConfig.name), String(providerConfig.model)),
 								onTimeout: () => this.abortController?.abort(),
 								label: "empty-turn-continue",
 							},

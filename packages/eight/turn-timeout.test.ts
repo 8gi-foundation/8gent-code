@@ -204,4 +204,29 @@ describe("withProgressTimeout stall notice and request timeout (#4727)", () => {
 		expect(resolveRequestTimeoutMs({ EIGHT_REQUEST_TIMEOUT_SECONDS: "90" })).toBe(90_000);
 		expect(resolveRequestTimeoutMs({ EIGHT_REQUEST_TIMEOUT_SECONDS: "0" })).toBe(300_000);
 	});
+
+	it("emits null when the abort path settles and when a normal run ends after a notice", async () => {
+		const aborted: Array<number | null> = [];
+		await withProgressTimeout(() => new Promise<never>(() => {}), {
+			idleMs: null,
+			ceilingMs: 10_000,
+			requestMs: 80,
+			stallMs: 20,
+			onStall: (x) => aborted.push(x),
+			label: "verify-gate",
+			displayLabel: "minimax/m3",
+		}).catch((e) => expect(String(e.message)).toContain("minimax/m3"));
+		expect(aborted.at(-1)).toBeNull();
+
+		const done: Array<number | null> = [];
+		await withProgressTimeout(() => new Promise<string>((r) => setTimeout(() => r("ok"), 60)), {
+			idleMs: null,
+			ceilingMs: 10_000,
+			requestMs: 1000,
+			stallMs: 20,
+			onStall: (x) => done.push(x),
+		});
+		expect(done[0]).not.toBeNull();
+		expect(done.at(-1)).toBeNull();
+	});
 });

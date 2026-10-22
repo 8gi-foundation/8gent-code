@@ -324,6 +324,8 @@ export interface ProgressTimeoutOptions {
 	ceilingMs: number;
 	onTimeout?: () => void;
 	label?: string;
+	/** Human name (provider/model) used in the error message; label stays for logs. */
+	displayLabel?: string;
 	/** Hard no-reply bound (#4727): the gap used is min(idleMs, requestMs), kind "request" when it wins. */
 	requestMs?: number;
 	/** Silence before onStall first fires, then every STALL_REPEAT_MS; null seconds = reply arrived. */
@@ -352,7 +354,15 @@ export async function withProgressTimeout<T>(
 		} catch {
 			// Aborting must never mask the timeout rejection.
 		}
-		rejectFn(new TurnTimeoutError(ms, opts.label, kind));
+		if (stallShown) {
+			stallShown = false;
+			try {
+				opts.onStall?.(null);
+			} catch {
+				// display only
+			}
+		}
+		rejectFn(new TurnTimeoutError(ms, opts.displayLabel ?? opts.label, kind));
 	};
 	let closed = false;
 	let stallTimer: ReturnType<typeof setTimeout> | null = null;
@@ -405,6 +415,14 @@ export async function withProgressTimeout<T>(
 		return await Promise.race([run(watch), timeout]);
 	} finally {
 		closed = true;
+		if (stallShown) {
+			stallShown = false;
+			try {
+				opts.onStall?.(null);
+			} catch {
+				// display only
+			}
+		}
 		if (idleTimer) clearTimeout(idleTimer);
 		if (stallTimer) clearTimeout(stallTimer);
 		if (ceilingTimer) clearTimeout(ceilingTimer);
