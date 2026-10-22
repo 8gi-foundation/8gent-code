@@ -14,7 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type ModelMessage, jsonSchema, tool as sdkTool } from "ai";
 import type { FormattingStop } from "../ai/draft-constraints";
-import { applyOverlay, overlayNotes } from "../ai/harness-overlay";
+import { applyOverlay, dropOverlay, overlayNotes } from "../ai/harness-overlay";
 import {
 	type HarnessProfile,
 	harnessNoThink,
@@ -616,7 +616,10 @@ export class Agent {
 			systemOneEnvFor(config.permission ? effectivePermissionMode(config.permission) : undefined),
 		)?.catch(() => {});
 		this.hookManager = getHookManager();
-		this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+		// EIGHT_SESSION_ID lets the launcher that writes a task overlay name the session it belongs to (#4502).
+		this.sessionId =
+			process.env.EIGHT_SESSION_ID ||
+			`session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		this.sessionStartTime = Date.now();
 
 		// v0.12.0: lite mode is now the default. The agent boots fast and lean.
@@ -2036,9 +2039,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const { note, sent } = contextNote(
 			{
 				memory: this.sessionMemoryContext,
-				appendedContext: [...(this.runtimeParams.appendedContext ?? []), overlayNotes()].filter(
-					Boolean,
-				),
+				appendedContext: [
+					...(this.runtimeParams.appendedContext ?? []),
+					overlayNotes(process.env, this.sessionId),
+				].filter(Boolean),
 				voiceChatActive: getRuntimeParams().voiceChatActive,
 			},
 			this.contextSent,
@@ -4017,7 +4021,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			maxOutputTokens: isLocal ? 4096 : 8192,
 		});
 		// Task overlay (#4502): flag-gated, tightens only, merged after the profile.
-		const { profile, line } = applyOverlay(base, process.env.EIGHT_TASK_ID);
+		const { profile, line } = applyOverlay(base, process.env, this.sessionId);
 		if (!this.harnessProfileLogged.has(model)) {
 			this.harnessProfileLogged.add(model);
 			console.log(harnessProfileLine(model, profile));
@@ -4049,6 +4053,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * is not kept: a watchdog firing between calls is logged and the turn goes on.
 	 */
 	abort(stop?: TurnStop): void {
+		this.dropTaskOverlay();
 		if (!this.abortController) {
 			if (stop?.kind === "watchdog")
 				console.log(`\n[8gent] ${stop.reason} No model call in flight.`);
@@ -4129,7 +4134,17 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return { ok: await client.isAvailable() };
 	}
 
+	/** Task overlay expiry (#4502): abort, /clear and session end all end the task's overlay. */
+	private dropTaskOverlay(): void {
+		const id = process.env.EIGHT_TASK_ID;
+		if (!id) return;
+		try {
+			dropOverlay(id);
+		} catch {}
+	}
+
 	clearHistory(): void {
+		this.dropTaskOverlay();
 		const systemMsg = this.messageHistory[0];
 		this.messageHistory = systemMsg ? [systemMsg] : [];
 	}
@@ -4533,6 +4548,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	async cleanup(): Promise<void> {
 		this.affinityFailover?.forgetSession(this.sessionId);
+		this.dropTaskOverlay();
 		// Flush and end Convex session sync
 		await this.sessionSync.endSession().catch(() => {});
 		// Stop kernel pipeline

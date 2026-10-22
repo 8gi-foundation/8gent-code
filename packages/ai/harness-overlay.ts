@@ -18,6 +18,8 @@ import { HARNESS_BOUNDS, type HarnessProfile } from "./harness-profile";
 
 export interface HarnessOverlay {
 	task_id: string;
+	/** The session that created it; an overlay is ignored and deleted by any other session. */
+	session_id: string;
 	created: string;
 	expires_with: "task";
 	guidance: {
@@ -31,6 +33,12 @@ export interface HarnessOverlay {
 export const FORBIDDEN_KEYS = ["permission", "allow", "deny", "policy", "system_one", "sandbox"];
 const MAX_NOTES = 8;
 const MAX_TEXT = 400;
+const MAX_HINTS = 8;
+const MAX_HINT_KEY = 64;
+/** An overlay older than this is stale whatever else is true (crash, no end hook). */
+export const MAX_OVERLAY_AGE_MS = 6 * 60 * 60 * 1000;
+/** The tool-shell mark (packages/permissions/nested-guard.ts, #4715). A model can reach `8gent overlay write` only through a tool shell. */
+const TOOL_SHELL_MARK = "EIGHT_PARENT_SESSION";
 const ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 
 export function overlayEnabled(env: Record<string, string | undefined> = process.env): boolean {
@@ -59,11 +67,15 @@ export function validateOverlay(raw: unknown): HarnessOverlay {
 	if (bad) throw new Error(`overlay key "${bad}" is not allowed`);
 	const o = raw as Record<string, any>;
 	const extra = Object.keys(o).filter(
-		(k) => !["task_id", "created", "expires_with", "guidance"].includes(k),
+		(k) => !["task_id", "session_id", "created", "expires_with", "guidance"].includes(k),
 	);
 	if (extra.length) throw new Error(`unknown overlay key "${extra[0]}"`);
 	if (typeof o.task_id !== "string" || !ID_RE.test(o.task_id)) throw new Error("bad task_id");
-	if (typeof o.created !== "string") throw new Error("created must be a string");
+	if (typeof o.session_id !== "string" || !ID_RE.test(o.session_id))
+		throw new Error("bad session_id");
+	if (typeof o.created !== "string" || Number.isNaN(Date.parse(o.created))) {
+		throw new Error("created must be an ISO date string");
+	}
 	if (o.expires_with !== "task") throw new Error('expires_with must be "task"');
 	const g = o.guidance;
 	if (!g || typeof g !== "object") throw new Error("guidance missing");
@@ -83,6 +95,12 @@ export function validateOverlay(raw: unknown): HarnessOverlay {
 	if (typeof hints !== "object" || Array.isArray(hints) || !Object.values(hints).every(text)) {
 		throw new Error("tool_hints must map tool name to a short string");
 	}
+	if (Object.keys(hints).length > MAX_HINTS) {
+		throw new Error(`tool_hints must have at most ${MAX_HINTS} entries`);
+	}
+	if (Object.keys(hints).some((k) => k.length === 0 || k.length > MAX_HINT_KEY)) {
+		throw new Error(`tool_hints keys must be 1 to ${MAX_HINT_KEY} chars`);
+	}
 	for (const k of ["step_budget", "nudge"] as const) {
 		if (g[k] !== undefined && (typeof g[k] !== "number" || !Number.isFinite(g[k]))) {
 			throw new Error(`${k} must be a number`);
@@ -96,7 +114,14 @@ export function overlayPath(taskId: string): string {
 	return join(overlayDir(), `${taskId}.json`);
 }
 
-export function writeOverlay(raw: unknown): string {
+/** Refuses inside a tool shell: model output must not plant guidance for later turns. */
+export function writeOverlay(
+	raw: unknown,
+	env: Record<string, string | undefined> = process.env,
+): string {
+	if (env[TOOL_SHELL_MARK] !== undefined) {
+		throw new Error("refusing to write an overlay from inside an 8gent tool shell");
+	}
 	const o = validateOverlay(raw);
 	mkdirSync(overlayDir(), { recursive: true });
 	const path = overlayPath(o.task_id);
@@ -112,6 +137,32 @@ export function loadOverlay(taskId: string | undefined): HarnessOverlay | null {
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * The ONE expiry gate. The overlay for the current EIGHT_TASK_ID, or null. A file is
+ * deleted and ignored when its task id differs from the current one, when it was created
+ * by another session, or when it is older than MAX_OVERLAY_AGE_MS.
+ */
+export function loadLiveOverlay(
+	env: Record<string, string | undefined>,
+	sessionId: string | undefined,
+	now: number = Date.now(),
+): HarnessOverlay | null {
+	const taskId = env.EIGHT_TASK_ID;
+	const overlay = loadOverlay(taskId);
+	if (!overlay || !taskId) return null;
+	const age = now - Date.parse(overlay.created);
+	const live =
+		overlay.task_id === taskId &&
+		sessionId !== undefined &&
+		overlay.session_id === sessionId &&
+		age <= MAX_OVERLAY_AGE_MS;
+	if (live) return overlay;
+	try {
+		dropOverlay(taskId);
+	} catch {}
+	return null;
 }
 
 export function listOverlays(): string[] {
@@ -154,11 +205,11 @@ export function mergeOverlay(
 /** Overlay applied after the profile when the flag is on and the task has one. */
 export function applyOverlay(
 	profile: HarnessProfile,
-	taskId: string | undefined,
 	env: Record<string, string | undefined> = process.env,
+	sessionId?: string,
 ): { profile: HarnessProfile; overlay: HarnessOverlay | null; line: string | null } {
 	if (!overlayEnabled(env)) return { profile, overlay: null, line: null };
-	const overlay = loadOverlay(taskId);
+	const overlay = loadLiveOverlay(env, sessionId);
 	if (!overlay) return { profile, overlay: null, line: null };
 	const n = overlay.guidance.prompt_notes.length;
 	const m = Object.keys(overlay.guidance.tool_hints).length;
@@ -188,6 +239,9 @@ export function proposePromotion(taskId: string, why: string): string {
 }
 
 /** Guidance text for the current task (EIGHT_TASK_ID), "" when the flag is off or no overlay exists. */
-export function overlayNotes(env: Record<string, string | undefined> = process.env): string {
-	return overlayEnabled(env) ? overlayGuidanceText(loadOverlay(env.EIGHT_TASK_ID)) : "";
+export function overlayNotes(
+	env: Record<string, string | undefined> = process.env,
+	sessionId?: string,
+): string {
+	return overlayEnabled(env) ? overlayGuidanceText(loadLiveOverlay(env, sessionId)) : "";
 }

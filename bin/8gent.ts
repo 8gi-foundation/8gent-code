@@ -2537,7 +2537,14 @@ async function overlayCommand(args: string[]) {
 	const [sub, id, json] = args;
 	try {
 		if (sub === "write" && id && json)
-			console.log(ov.writeOverlay({ ...JSON.parse(json), task_id: id }));
+			console.log(
+				ov.writeOverlay({
+					...JSON.parse(json),
+					task_id: id,
+					session_id: process.env.EIGHT_SESSION_ID,
+					created: new Date().toISOString(),
+				}),
+			);
 		else if (sub === "list") console.log(ov.listOverlays().join("\n"));
 		else if (sub === "show" && id) console.log(JSON.stringify(ov.loadOverlay(id), null, 2));
 		else if (sub === "drop" && id) console.log(ov.dropOverlay(id) ? "dropped" : "none");
