@@ -148,7 +148,8 @@ for (const [label, textTools] of [
 
 		test("turn 2 extends turn 1: same system, same tools, history append-only", async () => {
 			const agent = build();
-			const t1 = await turn(agent, "hello there");
+			// Not a greeting: a small-talk turn offers no tools (#4756), so its prefix differs by design.
+			const t1 = await turn(agent, "summarise this project");
 			const t2 = await turn(agent, "and again");
 			expect(system(t2)).toBe(system(t1));
 			expect(bytes(t2.tools)).toBe(bytes(t1.tools));
@@ -157,7 +158,7 @@ for (const [label, textTools] of [
 
 		test("self-appended context and voice mode arrive as a trailing message, not a prompt rewrite", async () => {
 			const agent = build();
-			const t1 = await turn(agent, "hello there");
+			const t1 = await turn(agent, "summarise this project");
 			(
 				agent as unknown as { runtimeParams: { appendedContext: string[] } }
 			).runtimeParams.appendedContext.push("SENTINEL_3222_prefer_bun");
