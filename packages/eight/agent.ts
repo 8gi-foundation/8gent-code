@@ -136,7 +136,8 @@ import { projectInstructionsSection } from "./instruction-loader";
 import { getModeManager } from "./modes";
 import { needsPlanningGate as promptNeedsPlanningGate } from "./planning-gate";
 import { isLocalProvider } from "./registry";
-import { SMALL_TALK_NOTE, isSmallTalk } from "./small-talk";
+import { SMALL_TALK_NOTE, isGreeting, isSmallTalk } from "./small-talk";
+import { buildWelcome, gatherWelcomeFacts } from "./welcome";
 import { verifyNudgeFor } from "./verify-gate";
 
 import {
@@ -528,6 +529,8 @@ export class Agent {
 	/** Id of the turn running now, or null between turns. */
 	private activeTurn: number | null = null;
 	private turnCounter = 0;
+	/** The greeting welcome is shown once per session (#4767). */
+	private welcomed = false;
 	// A stop pressed in this turn (#3521). chat() awaits several pre-turn steps
 	// before a controller is armed, and the native loop re-arms after a 429
 	// backoff; without this latch an ESC in either window was dropped and the
@@ -2315,6 +2318,26 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		}
 	}
 
+	/**
+	 * The welcome block for the first greeting of a top-level session (#4767), or null:
+	 * not a greeting, already welcomed, a child session, or any fact failed to gather.
+	 * Null keeps the plain small-talk note; a welcome failure never fails the turn.
+	 */
+	private async greetingWelcome(text: string): Promise<string | null> {
+		if (this.welcomed || this.agentDepth > 0 || !isGreeting(text)) return null;
+		try {
+			const facts = await gatherWelcomeFacts({
+				model: String(this.config.model),
+				provider: String(this.config.runtime),
+				cwd: this.config.workingDirectory || process.cwd(),
+			});
+			this.welcomed = true;
+			return buildWelcome(facts);
+		} catch {
+			return null;
+		}
+	}
+
 	private async runTurn(
 		userMessage: string,
 		imageBase64?: string,
@@ -2359,6 +2382,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const smallTalkTurn =
 			isSmallTalk(textForAgent) && !imageBase64 && this.config.agentScope !== "__table__";
 		if (smallTalkTurn) {
+			// The first hello of a session is answered by code, at zero tokens (#4767).
+			const welcome = await this.greetingWelcome(textForAgent);
+			if (welcome) {
+				this.messageHistory.push({ role: "user", content: textForAgent });
+				this.messageHistory.push({ role: "assistant", content: welcome });
+				this.sessionWriter.writeUserMessage(textForAgent);
+				return welcome;
+			}
 			this.messageHistory.push({ role: "user", content: harnessNote(SMALL_TALK_NOTE) });
 		}
 
