@@ -13,7 +13,7 @@ import { normalizeSubcommand, unknownSubcommandLines } from "../packages/eight/s
 import { petRequested } from "../packages/pet/opt-in";
 import { nodeExecPath, tuiProcessEnv } from "./termux-exec.js";
 
-const VERSION = "0.20.10";
+const VERSION = "0.20.11";
 const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts
 
 // Two different "here" directories matter, and conflating them is what broke
