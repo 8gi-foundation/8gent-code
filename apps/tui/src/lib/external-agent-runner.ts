@@ -14,7 +14,10 @@
  */
 
 import { execSync, spawn } from "node:child_process";
+import { delimiter, resolve as resolvePath } from "node:path";
 import { spawnShell } from "../../../../packages/core/shell.js";
+import { pathOutsideFolder } from "../../../../packages/eight/welcome.js";
+import { findOnPath } from "../../../../packages/voice/termux.js";
 
 // ============================================================================
 // Public types
@@ -233,6 +236,35 @@ export function getPreset(id: string): ExternalAgentPreset | null {
 	return EXTERNAL_AGENT_PRESETS[id.toLowerCase()] ?? null;
 }
 
+export type PresetBinary =
+	| { ok: true; path: string }
+	| { ok: false; reason: "inside" | "missing"; message: string };
+
+/**
+ * Resolve a preset command to one absolute path, looking only at absolute PATH
+ * entries outside `cwd` (#4769). A relative entry (".") or a folder inside the
+ * project (node_modules/.bin, ./bin) could hold a binary the repo planted, so a
+ * match found only there is refused by name instead of run.
+ */
+export function resolvePresetBinary(
+	command: string,
+	cwd: string = process.cwd(),
+	env: Record<string, string | undefined> = process.env,
+): PresetBinary {
+	const path = String(env.PATH ?? "");
+	const outside = findOnPath(command, { PATH: pathOutsideFolder(path, cwd) });
+	if (outside) return { ok: true, path: outside };
+	const everywhere = path
+		.split(delimiter)
+		.filter(Boolean)
+		.map((dir) => resolvePath(cwd, dir))
+		.join(delimiter);
+	if (findOnPath(command, { PATH: everywhere })) {
+		return { ok: false, reason: "inside", message: `${command} found only inside this project; not running it` };
+	}
+	return { ok: false, reason: "missing", message: `${command}: not installed (no binary on $PATH)` };
+}
+
 export function listPresetIds(): string[] {
 	return Object.keys(EXTERNAL_AGENT_PRESETS);
 }
@@ -441,16 +473,32 @@ export async function runExternalAgent(
 		}
 	}
 
+	const env = {
+		...process.env,
+		PATH: `${pathPrefix}${process.env.PATH ?? ""}`,
+	};
+	const binary = resolvePresetBinary(preset.command, process.cwd(), env);
+	if (!binary.ok && binary.reason === "inside") {
+		return {
+			ok: false,
+			text: "",
+			durationMs: Math.round(performance.now() - start),
+			command: `${preset.command} ${argv.join(" ")}`,
+			error: binary.message,
+			exitCode: null,
+		};
+	}
+	const executable = binary.ok ? binary.path : preset.command;
+
 	return new Promise((resolve) => {
 		let stdout = "";
 		let stderr = "";
 		let exited = false;
 
-		const proc = spawn(preset.command, argv, {
+		const proc = spawn(executable, argv, {
 			stdio: ["pipe", "pipe", "pipe"],
 			env: {
-				...process.env,
-				PATH: `${pathPrefix}${process.env.PATH ?? ""}`,
+				...env,
 				NO_COLOR: "1",
 				FORCE_COLOR: "0",
 				// Skip the splash banner when 8gent is invoked nested

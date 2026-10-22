@@ -130,6 +130,7 @@ import {
 	getPreset,
 	isInstalled,
 	listPresetIds,
+	resolvePresetBinary,
 	runExternalAgent,
 } from "./lib/external-agent-runner.js";
 import { GoalClient } from "./lib/goal-client.js";
@@ -6479,6 +6480,16 @@ export function App({
 							args: (args as string[]) ?? [],
 							presets,
 						});
+						// Spawn the preset by absolute path from outside the project, never
+						// a binary the folder planted on a relative PATH entry (#4769).
+						if (resolved.source === "preset") {
+							const binary = resolvePresetBinary(resolved.command, projectCwd);
+							if (!binary.ok && binary.reason === "inside") {
+								addSystemMessage(binary.message);
+								break;
+							}
+							if (binary.ok) resolved.command = binary.path;
+						}
 
 						if (resolved.mode === "window") {
 							// Plan B: spawn a real Terminal.app window via osascript and
