@@ -67,4 +67,8 @@ describe("COMPLETED line gate (#4713)", () => {
 			"COMPLETED: blocked.\nNext: ask.",
 		);
 	});
+
+	test("a doubled state opener is normalised to one", () => {
+		expect(fixCompletedLine("COMPLETED: Failed. failed.").text).toBe("COMPLETED: Failed.");
+	});
 });

@@ -29,6 +29,14 @@ export function fixCompletedLine(reply: string): CompletedFix {
 	const m = LINE.exec(reply);
 	if (!m) return { text: reply, trimmed: false };
 	const [whole, head, rawBody = ""] = m;
+	const doubled = /^(blocked|failed)\.\s+\1\.?$/i.exec(rawBody.trim());
+	if (doubled?.[1]) {
+		const w = doubled[1];
+		return {
+			text: reply.replace(whole, `${head} ${w[0]?.toUpperCase()}${w.slice(1).toLowerCase()}.`),
+			trimmed: true,
+		};
+	}
 	if (words(rawBody) <= MAX_WORDS && !HAS_QUOTE.test(rawBody) && FIXED.test(rawBody.trim())) {
 		return { text: reply, trimmed: false };
 	}

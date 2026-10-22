@@ -58,6 +58,9 @@ const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 /** Wrapper flags that take a value as the next word. */
 const FLAG_WITH_VALUE = new Set(["-u", "-g", "-h", "-p", "-C", "-I", "-n", "-P", "-s", "-S"]);
 
+/** A word that looks like a command name or path: the pieces of a quote-blind split do not. */
+const NAMEISH = /^[A-Za-z\/.~{[][A-Za-z0-9_.\/{}[\]*?,~-]*$/;
+
 const BELL = /\\(a|0?07|x0?7|u0{0,3}7|U0{0,7}7)/;
 
 /** Decode `$'\x73ay'` style quoting, then drop quotes and backslashes: what the shell would call. */
@@ -99,6 +102,16 @@ function segmentIsAudio(segment: string, command: string): boolean {
 	// Judge the whole command word: quotes, backslashes and ANSI-C quoting are removed, then it
 	// must not be an audio program, and must not still build its name from a variable.
 	const word = unquoteWord(words[i] ?? "");
+	// A command word that is a glob, a brace expansion or the head of a $( ) cannot be read.
+	if (
+		word === "$" ||
+		/^[A-Za-z0-9_./-]+\$$/.test(word) ||
+		(word !== "[" &&
+			word !== "[[" &&
+			NAMEISH.test(word) &&
+			/[*?]|\[.+\]|\{[^}]*(,|\.\.)[^}]*\}/.test(word))
+	)
+		return true;
 	if (/\$[A-Za-z_{(]/.test(word)) return true;
 	const prog = base(word);
 	if (AUDIO_PROGRAMS.has(prog)) return true;
@@ -137,6 +150,13 @@ function segmentIsAudio(segment: string, command: string): boolean {
  * The split is quote-blind on purpose: it can over-refuse, never under-refuse.
  */
 export function isAudioCommand(command: string): boolean {
+	// Command substitution as a command word: its output is run, so its name cannot be read.
+	if (
+		/(^|[;&|\n]|\b(?:then|do|else|env|exec|command|builtin|nohup|sudo)\s)\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:\$\(|`)/.test(
+			command,
+		)
+	)
+		return true;
 	for (const segment of command.split(/&&|\|\||[;|&\n`()]/)) {
 		if (segmentIsAudio(segment, command)) return true;
 	}

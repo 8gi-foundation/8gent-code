@@ -142,6 +142,24 @@ describe("System One audio lane (#4713)", () => {
 		}
 	});
 
+	test("globs, brace expansion and command substitution as the command word are refused", () => {
+		for (const c of [
+			"{s,}ay hi",
+			"{sa,}y hi",
+			"/usr/bin/sa? hi",
+			"/usr/bin/s[a]y hi",
+			"/usr/bin/afpla* x.wav",
+			"$(printf say) hi",
+			"`echo say` hi",
+			"$(echo s)ay hi",
+		]) {
+			expect([c, isAudioCommand(c)]).toEqual([c, true]);
+		}
+		for (const c of ["ls *.md", "cat a?.txt", "[ -f x ] && echo ok", "echo $(date)"]) {
+			expect([c, isAudioCommand(c)]).toEqual([c, false]);
+		}
+	});
+
 	test("a plain echo that only names the word is left alone", () => {
 		expect(isAudioCommand("echo say hi")).toBe(false);
 		expect(isAudioCommand("grep say notes.md")).toBe(false);
