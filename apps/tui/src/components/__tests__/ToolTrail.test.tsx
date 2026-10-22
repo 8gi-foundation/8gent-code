@@ -185,6 +185,34 @@ describe("MessageList with a tool trail at 80 columns", () => {
 		expect(live).not.toContain("No reply.");
 	});
 
+	test("a queued follow-up under a running turn does not make its calls read No reply (#4756)", () => {
+		// Artale's phone: the turn was mid-flight (step 9, 18 tools) when his second
+		// message queued after the trail. The trail settled to a reply-less item.
+		const queued: Message[] = [
+			...pilotTurn.slice(0, 4),
+			{ id: "u2", role: "user", content: "what ar doing rn", timestamp: at },
+			{
+				id: "s1",
+				role: "system",
+				content: "Queued. It sends when the current task finishes.",
+				timestamp: at,
+			},
+		];
+		const props = {
+			messages: queued,
+			animateTyping: false,
+			showAnimations: false,
+			scrollEnabled: false,
+			contentWidth: 72,
+			rowBudget: 40,
+		};
+		const running = render80(<MessageList {...props} turnRunning />);
+		expect(running).toContain("✓ Wrote  deck/outline.md");
+		expect(running).not.toContain("No reply.");
+		// Once the turn is over, the same transcript says it.
+		expect(render80(<MessageList {...props} turnRunning={false} />)).toContain("No reply.");
+	});
+
 	test("a turn taller than the chat window caps its trail to fit", () => {
 		// Real layout while processing at 80x45: about 10 chat rows. The
 		// trail must not push the reply past the window, or Ink leaves stale

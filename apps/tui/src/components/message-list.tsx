@@ -29,22 +29,13 @@ import { Box, Text, useInput, useStdout } from "ink";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "../app.js";
-import { bubbleWidths } from "../lib/chat-layout.js";
-import { buildChatItems, type ChatItem, type ToolTrailEntry } from "../lib/tool-trail.js";
 import { useMouseScroll } from "../hooks/useMouseScroll.js";
-import { t } from "../theme.js";
-import { BionicText, useADHDMode } from "./bionic-text.js";
-import { FadeIn, GlowText, PopIn } from "./fade-transition.js";
-import { AppText, Label, MutedText } from "./primitives/AppText.js";
-import { Stack } from "./primitives/Stack.js";
-import { ToolTrail, toolTrailRows } from "./ToolTrail.js";
-import { TurnResults } from "./TurnResults.js";
-import { bubblePlan, hasTurnResults, turnResultRows } from "../lib/turn-results.js";
+import { bubbleWidths } from "../lib/chat-layout.js";
 import {
-	type MarkdownOptions,
-	type Span,
 	CODE_GUTTER,
 	INDENT_STEP,
+	type MarkdownOptions,
+	type Span,
 	blockRows,
 	blockWrapWidth,
 	hasMarkdown,
@@ -52,9 +43,18 @@ import {
 	markerWidth,
 	parseBlocks,
 } from "../lib/inline-markdown.js";
-import { holdLivingMark, type MarkStream } from "../lib/living-mark.js";
+import { type MarkStream, holdLivingMark } from "../lib/living-mark.js";
 import { motionEnabled } from "../lib/motion.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
+import { type ChatItem, type ToolTrailEntry, buildChatItems } from "../lib/tool-trail.js";
+import { bubblePlan, hasTurnResults, turnResultRows } from "../lib/turn-results.js";
+import { t } from "../theme.js";
+import { ToolTrail, toolTrailRows } from "./ToolTrail.js";
+import { TurnResults } from "./TurnResults.js";
+import { BionicText, useADHDMode } from "./bionic-text.js";
+import { FadeIn, GlowText, PopIn } from "./fade-transition.js";
+import { AppText, Label, MutedText } from "./primitives/AppText.js";
+import { Stack } from "./primitives/Stack.js";
 import { useCompletionSound } from "./sound-effects.js";
 import { TypingText, WordByWord } from "./typing-text.js";
 
@@ -456,6 +456,7 @@ export function MessageList({
 								showAnimations={showAnimations}
 								isLatestAssistant={message.id === lastAssistantId}
 								trail={trailById.get(message.id) ?? []}
+								turnRunning={turnRunning}
 								trailMaxRows={trailCaps.get(message.id)}
 								onAnimationStart={(id) => {
 									animatedIdsRef.current.add(id);
@@ -487,6 +488,8 @@ interface MessageItemProps {
 	isLatestAssistant?: boolean;
 	/** Tool calls of this turn (assistant), or of a turn with no reply yet (tool). */
 	trail?: ToolTrailEntry[];
+	/** A turn is still running: a reply-less trail is not yet a turn with no reply. */
+	turnRunning?: boolean;
 	/** Row ceiling for the trail when the turn would not fit the window. */
 	trailMaxRows?: number;
 	/** Fires once on first mount when isNew=true. Parent uses it to record
@@ -505,6 +508,7 @@ function MessageItem({
 	showAnimations,
 	isLatestAssistant = false,
 	trail = [],
+	turnRunning = false,
 	trailMaxRows,
 	onAnimationStart,
 }: MessageItemProps) {
@@ -685,8 +689,10 @@ function MessageItem({
 				</Box>
 			)}
 
-			{/* A turn that ended with calls and no words says so, quietly. */}
-			{!isUser && !message.content.trim() && trail.length > 0 ? (
+			{/* A turn that ended with calls and no words says so, quietly. Never while a
+			    turn still runs: a queued follow-up lands after the trail, which settles it
+			    to a reply-less item although its turn is mid-flight (#4756). */}
+			{!isUser && !turnRunning && !message.content.trim() && trail.length > 0 ? (
 				<MutedText>No reply.</MutedText>
 			) : null}
 
@@ -832,10 +838,12 @@ function MarkdownBody({
 				const w = blockWrapWidth(block, wrapWidth);
 				const text = (
 					<Box flexDirection="column" width={w}>
-						{layoutLines(block.spans, w, block.kind === "para" && block.keepSpaces).map((line, li) => (
-							// react-doctor-disable-next-line react-doctor/no-array-index-as-key
-							<InlineSpans key={li} spans={line} color={color} adhdMode={adhdMode} />
-						))}
+						{layoutLines(block.spans, w, block.kind === "para" && block.keepSpaces).map(
+							(line, li) => (
+								// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+								<InlineSpans key={li} spans={line} color={color} adhdMode={adhdMode} />
+							),
+						)}
 					</Box>
 				);
 				if (block.kind === "item") {
@@ -859,7 +867,11 @@ function MarkdownBody({
 	);
 }
 
-function InlineSpans({ spans, color, adhdMode }: { spans: Span[]; color: string; adhdMode: boolean }) {
+function InlineSpans({
+	spans,
+	color,
+	adhdMode,
+}: { spans: Span[]; color: string; adhdMode: boolean }) {
 	return (
 		<Text color={color} wrap="wrap">
 			{spans.length === 0 ? " " : null}
