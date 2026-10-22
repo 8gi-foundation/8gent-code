@@ -2320,11 +2320,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	/**
 	 * The welcome block for the first greeting of a top-level session (#4767), or null:
-	 * not a greeting, already welcomed, a child session, or any fact failed to gather.
+	 * not a greeting, already welcomed, headless, a child session, or any fact failed to gather.
 	 * Null keeps the plain small-talk note; a welcome failure never fails the turn.
 	 */
 	private async greetingWelcome(text: string): Promise<string | null> {
-		if (this.welcomed || this.agentDepth > 0 || !isGreeting(text)) return null;
+		// Headless `8gent -p hello` is a liveness probe: it must reach the model (#4767).
+		if (this.welcomed || this.config.headless || this.agentDepth > 0 || !isGreeting(text))
+			return null;
 		try {
 			const facts = await gatherWelcomeFacts({
 				model: String(this.config.model),

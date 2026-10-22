@@ -204,17 +204,20 @@ describe("8gent -p", () => {
 		}
 	}, 60_000);
 
+	test("a greeting still goes to the model: headless never answers with the welcome (#4767)", async () => {
+		bodies = [];
+		const { code, lines } = await headless(["--no-session", "hello"]);
+		expect(code).toBe(0);
+		expect(bodies.length).toBeGreaterThan(0);
+		expect(JSON.stringify(lines)).not.toContain("Try:");
+	}, 60_000);
+
 	test("an unreachable model endpoint is result error and exit 1", async () => {
 		const other = mkdtempSync(join(tmpdir(), "headless-down-"));
 		const host = process.env.OLLAMA_HOST;
 		process.env.OLLAMA_HOST = "http://127.0.0.1:9";
 		try {
-			const { code, lines } = await headless([
-				"--no-session",
-				"--cwd",
-				other,
-				"summarise this project",
-			]);
+			const { code, lines } = await headless(["--no-session", "--cwd", other, "hello"]);
 			expect(code).toBe(1);
 			const result = lines.at(-1);
 			expect(result?.type).toBe("result");
