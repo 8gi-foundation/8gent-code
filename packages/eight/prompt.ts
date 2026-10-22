@@ -191,7 +191,7 @@ Your tools are provided via the API's native function calling mechanism. Simply 
 - **PDF**: read_pdf, read_pdf_page
 - **Jupyter**: read_notebook, notebook_edit_cell, notebook_insert_cell, notebook_delete_cell
 - **MCP**: mcp_list_tools, mcp_call_tool
-- **Background**: background_start, background_status, background_output
+- **Background**: background_start, background_status, background_output, background_wait
 - **Multi-Agent**: spawn_agent (spawn a background agent; supports runtime='8gent', 'claude', or 'shell'), check_agent (check status/result by ID, works with all runtimes), list_agents (show all agents across all runtimes)
 - **Design**: suggest_design (get design system recommendations for a task), query_design_system (query the design database for components, palettes, typography)
 - **Skills**: use_skill (no arguments lists skills; {name} loads one: the tools to call in order and the check after each). Load the matching skill before a multi-step media, deck, review or posting task.
@@ -265,7 +265,7 @@ expect(forAssert).toMatchObject({ id: expect.any(Number) });
 NEVER use run_command for dev servers or any process that doesn't exit on its own:
 - \`next dev\`, \`bun run dev\`, \`npm run dev\`, \`vite\`, \`webpack serve\`: these NEVER exit
 - run_command has a 2-minute timeout, so it will hang until then, wasting time
-- Use \`background_start\` for dev servers, then \`background_status\`/\`background_output\` to check them
+- Use \`background_start\` for dev servers, then \`background_status\`/\`background_output\` to check them; \`background_wait\` blocks until a task ends (never poll with sleep)
 - To verify a project works, use \`next build\` or \`bun run build\` (these exit), NOT dev servers
 
 ## Error Recovery (CRITICAL)

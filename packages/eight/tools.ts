@@ -211,7 +211,12 @@ import {
 	writtenContentFor,
 } from "../permissions/write-content-gate.js";
 import { loadSettings } from "../settings/store";
-import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
+import {
+	formatTaskOutput,
+	formatTaskStatus,
+	getBackgroundTaskManager,
+	waitForBackgroundTask,
+} from "../tools/background";
 import { browserOpen, browserScreenshot, browserState, browserTask } from "../tools/browser-use";
 import {
 	ANCHORED_NEWTEXT_DESC,
@@ -3125,6 +3130,8 @@ export class ToolExecutor {
 				return this.handleBackgroundStatus(args.taskId as string);
 			case "background_output":
 				return this.handleBackgroundOutput(args.taskId as string, args.tail as number);
+			case "background_wait":
+				return this.handleBackgroundWait(args.taskId as string, args.timeout_s as number);
 
 			case "use_skill":
 				// Name lookup only (#3593): the model never passes a path, so nothing outside the skill folders is read.
@@ -4485,6 +4492,14 @@ export class ToolExecutor {
 			return formatTaskStatus(status);
 		} catch (err) {
 			return `Failed to get task status: ${err}`;
+		}
+	}
+
+	private async handleBackgroundWait(taskId: string, timeoutS?: number): Promise<string> {
+		try {
+			return await waitForBackgroundTask(getBackgroundTaskManager(), taskId, timeoutS);
+		} catch (err) {
+			return `Failed to wait for task: ${err}`;
 		}
 	}
 
