@@ -62,16 +62,16 @@ export function readAllowEntries(): string[] {
  */
 const SECRET_PATH = new RegExp(
 	[
-		String.raw`(^|[\\/])(secrets?|\.ssh|\.aws|\.gnupg|\.netrc|\.npmrc|\.git-credentials|\.kube|\.docker|keychains|master\.passwd)([\\/]|$)`,
-		String.raw`(^|[\\/])(\.env[^\\/]*|[^\\/]*\.env|credentials[^\\/]*|id_(rsa|ed25519|ecdsa)[^\\/]*|ssh_host_[^\\/]*|[^\\/]*\.(pem|key|p12|binarycookies)|chat\.db[^\\/]*)([\\/]|$)`,
-		String.raw`\.config[\\/]gh([\\/]|$)`,
-		String.raw`\.8gent[\\/](telegram[^\\/]*|sessions|[^\\/]*token[^\\/]*)([\\/]|$)`,
-		String.raw`Application Support[\\/](Google|Chromium|BraveSoftware|Firefox|Microsoft Edge)([\\/]|$)`,
-		String.raw`\.config[\\/](op|github-copilot|gcloud[\\/]legacy_credentials)([\\/]|$)`,
-		String.raw`(^|[\\/])(legacy_credentials|\.password-store|\.pgpass|\.vault-token|\.azure)([\\/]|$)`,
-		String.raw`\.local[\\/]share[\\/]keyrings([\\/]|$)`,
-		String.raw`Application Support[\\/](1Password|Arc)([\\/]|$)`,
-		String.raw`Library[\\/](Cookies|Messages|Mail|Safari)([\\/]|$)`,
+		String.raw`(^|[\\/{,])(secrets?|\.ssh|\.aws|\.gnupg|\.netrc|\.npmrc|\.git-credentials|\.kube|\.docker|keychains|master\.passwd)([\\/},]|$)`,
+		String.raw`(^|[\\/{,])(\.env[^\\/]*|[^\\/]*\.env|credentials[^\\/]*|id_(rsa|ed25519|ecdsa)[^\\/]*|ssh_host_[^\\/]*|[^\\/]*\.(pem|key|p12|binarycookies)|chat\.db[^\\/]*)([\\/},]|$)`,
+		String.raw`\.config[\\/]gh([\\/},]|$)`,
+		String.raw`\.8gent[\\/](telegram[^\\/]*|sessions|[^\\/]*token[^\\/]*)([\\/},]|$)`,
+		String.raw`Application Support[\\/](Google|Chromium|BraveSoftware|Firefox|Microsoft Edge)([\\/},]|$)`,
+		String.raw`\.config[\\/](op|github-copilot|gcloud[\\/]legacy_credentials)([\\/},]|$)`,
+		String.raw`(^|[\\/{,])(legacy_credentials|\.password-store|\.pgpass|\.vault-token|\.azure)([\\/},]|$)`,
+		String.raw`\.local[\\/]share[\\/]keyrings([\\/},]|$)`,
+		String.raw`Application Support[\\/](1Password|Arc)([\\/},]|$)`,
+		String.raw`Library[\\/](Cookies|Messages|Mail|Safari)([\\/},]|$)`,
 	].join("|"),
 	"i",
 );

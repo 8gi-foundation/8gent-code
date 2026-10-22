@@ -531,6 +531,7 @@ describe("Solomon second read on #4722", () => {
 		"rg SECRET DIR",
 		"du DIR",
 		"cat DIR/[.]env",
+		"cat DIR/{.env,notes.md}",
 	])("%s gets no read prefixes", (cmd) => {
 		const dir = join(outside, "box");
 		mkdirSync(dir, { recursive: true });
@@ -626,5 +627,13 @@ describe("Solomon second read on #4722", () => {
 		".local/share/keyrings/login.keyring",
 	])("%s is a secret path", (rel) => {
 		expect(namesSecret(`/home/u/${rel}`)).toBe(true);
+	});
+});
+
+describe("brace expansion (Karen, #4722)", () => {
+	test("namesSecret sees a secret name after { or ,", () => {
+		expect(namesSecret("/x/{.env,notes.md}")).toBe(true);
+		expect(namesSecret("/x/{notes.md,.env}")).toBe(true);
+		expect(namesSecret("/x/{a,b}")).toBe(false);
 	});
 });

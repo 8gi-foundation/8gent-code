@@ -66,7 +66,7 @@ function hasUnquotedGlob(command: string): boolean {
 		if (q) {
 			if (ch === q) q = null;
 		} else if (ch === "'" || ch === '"') q = ch;
-		else if (ch === "*" || ch === "?" || ch === "[") return true;
+		else if (ch === "*" || ch === "?" || ch === "[" || ch === "{") return true;
 	}
 	return false;
 }
