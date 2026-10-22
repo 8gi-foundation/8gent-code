@@ -434,6 +434,7 @@ import { providerRouteNotice, shouldShowRouteNotice } from "../../../packages/ei
 import * as fs from "node:fs";
 import * as pathMod from "node:path";
 import { bootTrace } from "./lib/boot-trace.js";
+import { createFallbackNoticeGate } from "./lib/fallback-notice-once.js";
 import {
 	type CliTabPin,
 	type ModelSpec,
@@ -1930,6 +1931,8 @@ export function App({
 		};
 	}, [currentProvider]);
 
+	// Each fallback line is said once per session, not once per turn (#4754).
+	const fallbackNoticeGateRef = useRef(createFallbackNoticeGate());
 	// After model list loads: ensure currentModel is valid for the active provider.
 	// If the model isn't in the fetched list (e.g. Ollama model on OpenRouter), auto-select.
 	// react-doctor-disable-next-line react-doctor/no-effect-chain
@@ -1965,7 +1968,8 @@ export function App({
 			// Setup has not asked which server to use yet (#4220).
 			duringSetup: onboardingManager.needsOnboarding(),
 		});
-		if (notice) addSystemMessage(notice);
+		if (notice && fallbackNoticeGateRef.current(`${currentProvider}:${currentModel}`, next))
+			addSystemMessage(notice);
 		setCurrentModel(next);
 	}, [modelsLoading, availableModels, modelsOwner, currentProvider, currentModel]);
 
@@ -3281,8 +3285,12 @@ export function App({
 			if (cancelled) return;
 			retryTimer = setTimeout(() => setInitRetry((n) => n + 1), READINESS_RETRY_MS);
 		};
-		const notify = (tabId: string, content: string) => {
-			if (lastReadinessNoticeRef.current === content) return;
+		// A fallback notice passes `fallback` and is gated per (from, to) for the
+		// session (#4754); other notices keep the last-line check.
+		const notify = (tabId: string, content: string, fallback?: { from: string; to: string }) => {
+			if (fallback) {
+				if (!fallbackNoticeGateRef.current(fallback.from, fallback.to)) return;
+			} else if (lastReadinessNoticeRef.current === content) return;
 			lastReadinessNoticeRef.current = content;
 			appendToTab(tabId, {
 				id: `provider-readiness-${Date.now()}`,
@@ -3304,7 +3312,10 @@ export function App({
 			if (!target || cancelled) return false;
 			userChoseRef.current = target.provider;
 			setUnreachableNote(null);
-			notify(tabId, target.line);
+			notify(tabId, target.line, {
+				from: currentProvider,
+				to: `${target.provider}/${target.model}`,
+			});
 			setCurrentProvider(target.provider);
 			setCurrentModel(target.model);
 			return true;
@@ -3356,7 +3367,10 @@ export function App({
 				if (cancelled) return;
 				if (decision.kind !== "none") setUnreachableNote(null);
 				if (decision.kind === "fallback") {
-					notify(_gateTabId, decision.notice);
+					notify(_gateTabId, decision.notice, {
+						from: currentProvider,
+						to: `${decision.provider}/${decision.model}`,
+					});
 					setCurrentProvider(decision.provider);
 					setCurrentModel(decision.model);
 					return; // Re-triggers this effect on the healthy provider.
