@@ -28,8 +28,9 @@
  *     only creates; on an existing directory it does nothing or fails.
  *   - `<tool> --version` or `<tool> --help`, alone, for a tool in
  *     VERSION_TOOLS, plus the short forms those tools define (`node -v`,
- *     `ffmpeg -version`). A known set, never "any binary": some system tools
- *     read -h or an unknown flag as an action (`shutdown -h`).
+ *     `ffmpeg -version`). A named set, never "any binary": a shell word or an
+ *     interpreter would run a file called --version, and some tools read -h or
+ *     an unknown flag as an action (`shutdown -h`).
  * `bun run`, `node file.js` and any redirect into a file still go to the judge.
  *
  * `bun test` runs the repo's own test code, so it is behind its own option
@@ -124,8 +125,6 @@ export const VERSION_TOOLS: ReadonlySet<string> = new Set([
 	"node",
 	"npm",
 	"npx",
-	"pnpm",
-	"yarn",
 	"deno",
 	"python",
 	"python3",
@@ -133,9 +132,6 @@ export const VERSION_TOOLS: ReadonlySet<string> = new Set([
 	"pip3",
 	"uv",
 	"git",
-	"go",
-	"cargo",
-	"rustc",
 	"tsc",
 	"gh",
 	"docker",
@@ -161,22 +157,28 @@ export const VERSION_TOOLS: ReadonlySet<string> = new Set([
 	"eslint",
 	"prettier",
 	"vite",
+	// Checked: prints one line and exits (macOS).
+	"8gent",
 ]);
 /** Short version flags, only for the tools that define them this way. */
 const SHORT_VERSION: Record<string, string> = {
 	node: "-v",
 	bun: "-v",
 	npm: "-v",
-	pnpm: "-v",
-	yarn: "-v",
 	deno: "-V",
 	python: "-V",
 	python3: "-V",
 	ffmpeg: "-version",
 	ffprobe: "-version",
-	go: "version",
 };
 
+/**
+ * A version probe: a tool in VERSION_TOOLS with `--version` (or `--help`, or its
+ * own short form) as its only argument. A named set and never "any bare name":
+ * `source`, `coproc`, `expect`, `yes`, `tclsh` and the like run a file called
+ * --version, loop or read stdin (#4757 review). Add a name only after checking
+ * that its --version prints and exits on macOS and GNU.
+ */
 function versionOnly(b: string, args: string[]): boolean {
 	if (!VERSION_TOOLS.has(b) || args.length !== 1) return false;
 	return args[0] === "--version" || args[0] === "--help" || SHORT_VERSION[b] === args[0];
