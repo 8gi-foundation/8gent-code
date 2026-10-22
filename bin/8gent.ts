@@ -2953,7 +2953,8 @@ async function doctorCommand() {
 	console.log(`\n8gent Doctor v${VERSION}\n`);
 	let issues = 0;
 	try {
-		const res = await fetch("http://localhost:11434/api/tags", {
+		const { resolveOllamaBaseUrl } = await import("../packages/local-model-server/ollama-host.ts");
+		const res = await fetch(`${resolveOllamaBaseUrl()}/api/tags`, {
 			signal: AbortSignal.timeout(3000),
 		});
 		const data = (await res.json()) as any;
@@ -2964,11 +2965,22 @@ async function doctorCommand() {
 		console.log(red("Ollama not reachable"));
 		issues++;
 	}
-	console.log(
-		process.env.OPENROUTER_API_KEY
-			? green("OpenRouter API key configured")
-			: dim("  OpenRouter not set (optional)"),
-	);
+	// Every hosted provider with a key, and whether it answered (#4720). Keys
+	// reach process.env from keys.env at start-up, so this sees what a run sees.
+	{
+		const { providerDoctorRows } = await import("../packages/eight/auto-provider.ts");
+		const rows = await providerDoctorRows();
+		if (rows.length === 0)
+			console.log(dim("  No hosted provider has a key (8gent keys set <provider>)"));
+		for (const r of rows) {
+			const text = `${r.label}: key set, ${r.detail}`;
+			if (r.state === "answered") console.log(green(text));
+			else {
+				console.log(red(text));
+				issues++;
+			}
+		}
+	}
 	for (const t of ["mpv", "yt-dlp", "rg"]) {
 		try {
 			execSync(`which ${t}`, { stdio: "ignore" });

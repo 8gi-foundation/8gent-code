@@ -183,3 +183,56 @@ describe("resolveChatChoice", () => {
 		expect(down.notice).toBe("LM Studio not reachable, using Ollama 8gate:latest");
 	});
 });
+
+describe("resolveProviderChoice: one hosted key, no local runtime (#4720)", () => {
+	const keyed = (names: string[]) => ({ hostedKeyed: async () => names });
+	test("Ollama down, nothing saved, one key: that provider, and where it came from", async () => {
+		const c = await resolveProviderChoice(
+			{},
+			deps({ saved: undefined, ollamaUp: async () => false, ...keyed(["minimax"]) }),
+		);
+		expect(c).toMatchObject({ provider: "minimax", source: "router", switchedFrom: "ollama" });
+	});
+	test("a saved local choice that is down gives way to the one keyed provider too", async () => {
+		const c = await resolveProviderChoice(
+			{},
+			deps({
+				saved: { provider: "ollama", model: "x" },
+				reachable: async () => false,
+				ollamaUp: async () => false,
+				...keyed(["minimax"]),
+			}),
+		);
+		expect(c).toMatchObject({ provider: "minimax", switchedFrom: "ollama" });
+	});
+	test("a saved hosted choice is kept over the local default", async () => {
+		const c = await resolveProviderChoice(
+			{},
+			deps({
+				saved: { provider: "minimax", model: "m" },
+				ollamaUp: async () => true,
+				...keyed(["minimax"]),
+			}),
+		);
+		expect(c).toMatchObject({ provider: "minimax", model: "m", source: "saved" });
+	});
+	test("two keys: no guess, the old router fallback stands", async () => {
+		const c = await resolveProviderChoice(
+			{},
+			deps({ saved: undefined, ollamaUp: async () => false, ...keyed(["minimax", "openrouter"]) }),
+		);
+		expect(c.switchedFrom).toBeUndefined();
+		expect(c.provider).toBe("openrouter");
+	});
+	test("--provider is never swapped", async () => {
+		const c = await resolveProviderChoice(
+			{ provider: "ollama" },
+			deps({ ollamaUp: async () => false, ...keyed(["minimax"]) }),
+		);
+		expect(c).toMatchObject({ provider: "ollama", source: "flag" });
+	});
+	test("Ollama up wins over a lone key when nothing is saved", async () => {
+		const c = await resolveProviderChoice({}, deps({ saved: undefined, ...keyed(["minimax"]) }));
+		expect(c.provider).toBe("ollama");
+	});
+});
