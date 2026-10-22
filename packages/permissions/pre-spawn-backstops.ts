@@ -43,7 +43,7 @@ export function preSpawnRefusal(command: string, cwd: string = process.cwd()): s
  * not the boundary: the runtime guard (permissions/nested-guard.ts, EIGHT_PARENT_SESSION in the
  * tool shell env, checked by bin/8gent-run.js and bin/8gent.ts) closes what text cannot see.
  */
-const BIN_NAMES = new Set(["8", "8gent", "8gent-code", "8gent-run", "8gent-run.js", "8gent.ts"]);
+const BIN_NAMES = new Set(["8gent", "8gent-code", "8gent-run", "8gent-run.js", "8gent.ts"]);
 /** A path to the binary: `/x/8gent`, `bin/8gent-run.js`, `.bin/8gent`. A folder named 8gent-code is not one. */
 const BIN_PATH_ENDS = ["/8gent", "/8gent-run", "/8gent-run.js", "/8gent.ts"];
 const PACKAGE = "@8gi-foundation/8gent-code";
@@ -140,10 +140,14 @@ export function spawnsSelf(command: string): boolean {
 				if (ENV_BAD_FLAG.test(ts[j])) return true;
 		}
 	}
-	// A path ending in /8 is the binary only as a command (`~/.bun/bin/8 chat`), not a file argument.
+	// `8` and a path ending in /8 are the binary only as a command (`8 chat`, `~/.bun/bin/8 run`), not an argument (`head -n 8`).
 	for (const { tokens: ts, position } of segs)
 		for (let i = 0; i < ts.length; i++)
-			if (ts[i].endsWith("/8") && (position[i] || SUBCOMMANDS.has(ts[i + 1] ?? ""))) return true;
+			if (
+				(ts[i] === "8" || ts[i].endsWith("/8")) &&
+				(position[i] || SUBCOMMANDS.has(ts[i + 1] ?? ""))
+			)
+				return true;
 	const names8gent = (t: string) =>
 		BIN_NAMES.has(t) || BIN_PATH_ENDS.some((e) => t.endsWith(e)) || t.startsWith(PACKAGE);
 	if (tokens.some(names8gent)) return true;

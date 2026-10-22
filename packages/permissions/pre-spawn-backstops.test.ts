@@ -95,6 +95,9 @@ const SPAWNS_2 = [
 ];
 
 const SAFE = [
+	"echo [BLOCKED] x 8",
+	"head -n 8 file.txt",
+	"sleep 8",
 	"grep -i env README.md",
 	"env --version",
 	"env -0",
