@@ -27,12 +27,10 @@ export interface PromptFocusState {
 	isBubbleNavMode: boolean;
 	paletteOpen: boolean;
 	djKeys: boolean;
-	onboardingSelectChoices: boolean;
 }
 
 export function promptIsLive(s: PromptFocusState): boolean {
 	if (KEYBOARD_VIEWS.has(s.viewMode)) return false;
-	if (s.viewMode === "onboarding" && s.onboardingSelectChoices) return false;
 	return !s.tabBodyShown && !s.isBubbleNavMode && !s.paletteOpen && !s.djKeys;
 }
 

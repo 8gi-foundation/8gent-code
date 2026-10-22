@@ -7983,7 +7983,6 @@ export function App({
 										isBubbleNavMode,
 										paletteOpen,
 										djKeys,
-										onboardingSelectChoices: !!onboardingSelectChoices,
 									})}
 									typingPaused={djKeys}
 									processingStage={processingStage}

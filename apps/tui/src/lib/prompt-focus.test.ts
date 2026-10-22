@@ -24,7 +24,6 @@ const idle: PromptFocusState = {
 	isBubbleNavMode: false,
 	paletteOpen: false,
 	djKeys: false,
-	onboardingSelectChoices: false,
 };
 
 describe("prompt focus fails open", () => {
@@ -54,14 +53,12 @@ describe("prompt focus fails open", () => {
 		for (const v of KEYBOARD_VIEWS) expect(VIEW_MODES).toContain(v);
 	});
 
-	test("palette, bubble nav, DJ keys, a drawn tab body and onboarding choices own the keys", () => {
+	test("palette, bubble nav, DJ keys and a drawn tab body own the keys", () => {
 		expect(promptIsLive({ ...idle, paletteOpen: true })).toBeFalse();
 		expect(promptIsLive({ ...idle, isBubbleNavMode: true })).toBeFalse();
 		expect(promptIsLive({ ...idle, djKeys: true })).toBeFalse();
 		expect(promptIsLive({ ...idle, tabBodyShown: true })).toBeFalse();
-		expect(
-			promptIsLive({ ...idle, viewMode: "onboarding", onboardingSelectChoices: true }),
-		).toBeFalse();
+		// Select steps are answered by typing into the prompt, so onboarding stays live.
 		expect(promptIsLive({ ...idle, viewMode: "onboarding" })).toBeTrue();
 	});
 
