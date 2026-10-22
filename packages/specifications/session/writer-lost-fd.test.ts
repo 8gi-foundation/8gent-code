@@ -42,4 +42,19 @@ describe("SessionWriter with a lost file descriptor (#4774)", () => {
 			fs.closeSync(otherFd);
 		}
 	});
+
+	test("a session path swapped for a symlink is not followed on reopen; the skip is counted", () => {
+		if (process.platform === "win32") return;
+		tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sw-ebadf-"));
+		const w = new SessionWriter("link", tmp);
+		const target = path.join(tmp, "secret.txt");
+		fs.writeFileSync(target, "");
+		fs.closeSync((w as unknown as { fd: number }).fd);
+		fs.rmSync(w.getFilePath());
+		fs.symlinkSync(target, w.getFilePath());
+		expect(() => w.writeUserMessage("must not land")).not.toThrow();
+		expect(fs.readFileSync(target, "utf8")).toBe("");
+		expect(w.skippedWrites).toBe(1);
+		expect(w.lastWriteError).not.toBeNull();
+	});
 });

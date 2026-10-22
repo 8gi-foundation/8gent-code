@@ -39,7 +39,8 @@ function defaultSessionsDir(): string {
 export class SessionWriter {
 	private filePath: string;
 	private fd = -1;
-	/** Inode of the file `fd` was opened on; a mismatch means the number now names another file. */
+	/** Device and inode of the file `fd` was opened on; a mismatch means the number now names another file. */
+	private dev = -1;
 	private ino = -1;
 	/** False for a session that must leave nothing on disk (classroom, #3939). */
 	private persist: boolean;
@@ -91,8 +92,22 @@ export class SessionWriter {
 	}
 
 	private open(): void {
-		this.fd = fs.openSync(this.filePath, "a");
-		this.ino = fs.fstatSync(this.fd).ino;
+		// O_NOFOLLOW: a session path swapped for a symlink must not redirect the log
+		// into another file (reopen happens mid-session, #4774). Absent on Windows.
+		const c = fs.constants;
+		const fd = fs.openSync(
+			this.filePath,
+			c.O_WRONLY | c.O_APPEND | c.O_CREAT | (c.O_NOFOLLOW ?? 0),
+			0o600,
+		);
+		const st = fs.fstatSync(fd);
+		if (!st.isFile()) {
+			fs.closeSync(fd);
+			throw new Error(`${this.filePath} is not a regular file`);
+		}
+		this.fd = fd;
+		this.dev = st.dev;
+		this.ino = st.ino;
 	}
 
 	/**
@@ -104,7 +119,8 @@ export class SessionWriter {
 	private fdIsOurs(): boolean {
 		if (this.fd < 0) return false;
 		try {
-			return fs.fstatSync(this.fd).ino === this.ino;
+			const st = fs.fstatSync(this.fd);
+			return st.dev === this.dev && st.ino === this.ino;
 		} catch {
 			return false;
 		}
@@ -124,12 +140,15 @@ export class SessionWriter {
 			fs.writeSync(this.fd, line);
 		} catch (err) {
 			this.fd = -1;
+			this.skippedWrites++;
 			this.lastWriteError = `session log not written: ${err instanceof Error ? err.message : String(err)}`;
 		}
 	}
 
 	/** The one-line note for the last session-log write that was skipped, or null. */
 	lastWriteError: string | null = null;
+	/** How many session-log lines were skipped, so a gap in the log is never silent. */
+	skippedWrites = 0;
 
 	private nextSeq(): number {
 		return this.seq++;
