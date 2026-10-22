@@ -17,7 +17,7 @@ import { nodeExecPath, tuiProcessEnv } from "./termux-exec.js";
 // An 8gent tool shell marks its child env; a second 8gent inside it refuses to start (#4715).
 refuseIfNested();
 
-const VERSION = "0.20.16";
+const VERSION = "0.20.17";
 const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts
 
 // Two different "here" directories matter, and conflating them is what broke

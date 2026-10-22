@@ -14,7 +14,11 @@
  */
 
 import { execSync, spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { delimiter, isAbsolute, relative, resolve as resolvePath } from "node:path";
 import { spawnShell } from "../../../../packages/core/shell.js";
+import { pathOutsideFolder } from "../../../../packages/eight/welcome.js";
+import { findOnPath } from "../../../../packages/voice/termux.js";
 
 // ============================================================================
 // Public types
@@ -94,7 +98,9 @@ export interface ExternalAgentResult {
 
 const stripAnsi = (s: string): string =>
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI is exactly the point
-	s.replace(/\[[0-9;?]*[a-zA-Z]/g, "").replace(/\][^]*/g, "");
+	s
+		.replace(/\[[0-9;?]*[a-zA-Z]/g, "")
+		.replace(/\][^]*/g, "");
 
 const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 	claude: {
@@ -114,7 +120,7 @@ const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 			// the post-install note tells the user to add to PATH if needed.
 			command: "npm install -g --prefix=$HOME/.npm-global @anthropic-ai/claude-code",
 			notes:
-				"Binary at ~/.npm-global/bin/claude. If `claude` isn't on PATH after install, add `export PATH=\"$HOME/.npm-global/bin:$PATH\"` to your shell rc. Then run `claude` once outside the TUI to authenticate with Anthropic.",
+				'Binary at ~/.npm-global/bin/claude. If `claude` isn\'t on PATH after install, add `export PATH="$HOME/.npm-global/bin:$PATH"` to your shell rc. Then run `claude` once outside the TUI to authenticate with Anthropic.',
 		},
 	},
 	codex: {
@@ -221,8 +227,7 @@ const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 		parseStdout: stripAnsi,
 		homepage: "https://8gent.dev",
 		install: {
-			command:
-				"npm install -g --prefix=$HOME/.npm-global @8gi-foundation/8gent-code --force",
+			command: "npm install -g --prefix=$HOME/.npm-global @8gi-foundation/8gent-code --force",
 			notes:
 				"Binary at ~/.npm-global/bin/8gent. --force overwrites stale `8` / `8gent` / `8gent-code` bin symlinks (npm 9+ EEXIST). Add `~/.npm-global/bin` to PATH if not already.",
 		},
@@ -231,6 +236,75 @@ const EXTERNAL_AGENT_PRESETS: Record<string, ExternalAgentPreset> = {
 
 export function getPreset(id: string): ExternalAgentPreset | null {
 	return EXTERNAL_AGENT_PRESETS[id.toLowerCase()] ?? null;
+}
+
+export type PresetBinary =
+	| { ok: true; path: string }
+	| { ok: false; reason: "inside" | "missing"; message: string };
+
+/**
+ * The PATH a preset may be found on or run with: absolute entries outside `cwd`
+ * (#4769). When `cwd` is the home folder or above it there is no project tree to
+ * distrust, so only relative entries (".") are dropped; otherwise launching from
+ * ~ would hide ~/.npm-global/bin and refuse a real `claude`.
+ */
+export function presetPath(path: string, cwd: string, home: string = homedir()): string {
+	const rel = relative(resolvePath(cwd), resolvePath(home));
+	const coversHome = rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+	if (!coversHome) return pathOutsideFolder(path, cwd);
+	return path
+		.split(delimiter)
+		.filter((dir) => dir && isAbsolute(dir))
+		.join(delimiter);
+}
+
+/**
+ * The env a preset runs with: same PATH rule, so a `#!/usr/bin/env node` script
+ * the preset runs cannot pick up a `node` planted on "." or in the project.
+ */
+export function presetEnv(
+	cwd: string,
+	env: Record<string, string | undefined> = process.env,
+	home: string = homedir(),
+): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const [k, v] of Object.entries(env)) if (v !== undefined) out[k] = v;
+	out.PATH = presetPath(String(env.PATH ?? ""), cwd, home);
+	return out;
+}
+
+/**
+ * Resolve a preset command to one absolute path, looking only at absolute PATH
+ * entries outside `cwd` (#4769). A relative entry (".") or a folder inside the
+ * project (node_modules/.bin, ./bin) could hold a binary the repo planted, so a
+ * match found only there is refused by name instead of run.
+ */
+export function resolvePresetBinary(
+	command: string,
+	cwd: string = process.cwd(),
+	env: Record<string, string | undefined> = process.env,
+	home: string = homedir(),
+): PresetBinary {
+	const path = String(env.PATH ?? "");
+	const outside = findOnPath(command, { PATH: presetPath(path, cwd, home) });
+	if (outside) return { ok: true, path: outside };
+	const everywhere = path
+		.split(delimiter)
+		.filter(Boolean)
+		.map((dir) => resolvePath(cwd, dir))
+		.join(delimiter);
+	if (findOnPath(command, { PATH: everywhere })) {
+		return {
+			ok: false,
+			reason: "inside",
+			message: `${command} found only inside this project; not running it`,
+		};
+	}
+	return {
+		ok: false,
+		reason: "missing",
+		message: `${command}: not installed (no binary on $PATH)`,
+	};
 }
 
 export function listPresetIds(): string[] {
@@ -333,7 +407,10 @@ async function installAgent(
 				ok: code === 0,
 				stdout,
 				stderr,
-				error: code === 0 ? undefined : stderr.trim().slice(0, 800) || `installer exited with code ${code}`,
+				error:
+					code === 0
+						? undefined
+						: stderr.trim().slice(0, 800) || `installer exited with code ${code}`,
 			});
 		});
 
@@ -386,7 +463,10 @@ export async function ensureInstalled(
  * one-shot, so we re-send context each turn. v2 will use per-CLI session
  * resume flags.
  */
-export function composePrompt(history: Array<{ role: string; content: string }>, prompt: string): string {
+export function composePrompt(
+	history: Array<{ role: string; content: string }>,
+	prompt: string,
+): string {
 	const lines: string[] = [];
 	for (const m of history) {
 		const tag = m.role === "user" ? "User" : m.role === "assistant" ? "Assistant" : m.role;
@@ -441,16 +521,33 @@ export async function runExternalAgent(
 		}
 	}
 
+	const fullEnv = {
+		...process.env,
+		PATH: `${pathPrefix}${process.env.PATH ?? ""}`,
+	};
+	const binary = resolvePresetBinary(preset.command, process.cwd(), fullEnv);
+	if (!binary.ok && binary.reason === "inside") {
+		return {
+			ok: false,
+			text: "",
+			durationMs: Math.round(performance.now() - start),
+			command: `${preset.command} ${argv.join(" ")}`,
+			error: binary.message,
+			exitCode: null,
+		};
+	}
+	const executable = binary.ok ? binary.path : preset.command;
+	const env = { ...fullEnv, PATH: presetPath(fullEnv.PATH, process.cwd()) };
+
 	return new Promise((resolve) => {
 		let stdout = "";
 		let stderr = "";
 		let exited = false;
 
-		const proc = spawn(preset.command, argv, {
+		const proc = spawn(executable, argv, {
 			stdio: ["pipe", "pipe", "pipe"],
 			env: {
-				...process.env,
-				PATH: `${pathPrefix}${process.env.PATH ?? ""}`,
+				...env,
 				NO_COLOR: "1",
 				FORCE_COLOR: "0",
 				// Skip the splash banner when 8gent is invoked nested
@@ -477,7 +574,10 @@ export async function runExternalAgent(
 			finish({
 				ok: false,
 				text: "",
-				error: err.code === "ENOENT" ? `${preset.command}: not installed (no binary on $PATH)` : err.message,
+				error:
+					err.code === "ENOENT"
+						? `${preset.command}: not installed (no binary on $PATH)`
+						: err.message,
 				exitCode: null,
 			});
 		});
@@ -502,7 +602,12 @@ export async function runExternalAgent(
 				/* secrets package unavailable — leave text unmodified */
 			}
 			if (code === 0 || (code !== null && text.length > 0)) {
-				finish({ ok: code === 0, text, exitCode: code, error: code === 0 ? undefined : stderr.trim().slice(0, 400) });
+				finish({
+					ok: code === 0,
+					text,
+					exitCode: code,
+					error: code === 0 ? undefined : stderr.trim().slice(0, 400),
+				});
 			} else {
 				finish({
 					ok: false,

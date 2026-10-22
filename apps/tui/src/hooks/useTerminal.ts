@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // bypass each package's documented API. Suppressed by design.
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { PtySession, RingBuffer, stripControl } from "../../../../packages/terminal-tab/index.js";
+import { presetEnv } from "../lib/external-agent-runner.js";
 
 const SHELL = process.env.SHELL || "/bin/zsh";
 const MAX_LINES = 1000;
@@ -193,10 +194,13 @@ export function useTerminal(tabId: string, cwdOrOpts?: string | TerminalSpawnOpt
 		const workDir = opts.cwd || process.cwd();
 		const command = opts.command ?? SHELL;
 		const args = opts.args ?? (opts.command ? [] : ["-i"]);
+		// A program tab (/term pi) gets a PATH without "." or in-project entries,
+		// so what it runs cannot find a binary the folder planted (#4769).
 		const session = new PtySession({
 			command,
 			args,
 			cwd: workDir,
+			...(opts.command ? { env: presetEnv(workDir) } : {}),
 			cols: 120,
 			rows: 30,
 		});

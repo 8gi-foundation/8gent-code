@@ -130,6 +130,7 @@ import {
 	getPreset,
 	isInstalled,
 	listPresetIds,
+	resolvePresetBinary,
 	runExternalAgent,
 } from "./lib/external-agent-runner.js";
 import { GoalClient } from "./lib/goal-client.js";
@@ -407,6 +408,7 @@ import {
 } from "../../../packages/permissions/permission-mode.js";
 import { runAllowReadCommand } from "../../../packages/permissions/read-allow.js";
 import { usePermToast } from "./hooks/usePermToast.js";
+import { HERDR_ID_PREFIX, runHerdrCommand } from "./lib/herdr.js";
 import {
 	type PermView,
 	isPermissionCycleKey,
@@ -3833,6 +3835,23 @@ export function App({
 					addSystemMessage(copyReply(messages, { write: (seq) => inkStdout.write(seq) }));
 					break;
 
+				case "herdr":
+					// Shown to the person only: a herdr- id keeps it out of the saved session (withoutBangLines).
+					void runHerdrCommand(args)
+						.catch(() => "herdr failed.")
+						.then((content) =>
+							setMessages((prev) => [
+								...prev,
+								{
+									id: `${HERDR_ID_PREFIX}${Date.now()}`,
+									role: "system" as const,
+									content,
+									timestamp: new Date(),
+								},
+							]),
+						);
+					break;
+
 				case "predict":
 					if (predictedSteps.length === 0) {
 						addSystemMessage(PLAN_EMPTY_LINE);
@@ -6493,6 +6512,16 @@ export function App({
 							args: (args as string[]) ?? [],
 							presets,
 						});
+						// Spawn the preset by absolute path from outside the project, never
+						// a binary the folder planted on a relative PATH entry (#4769).
+						if (resolved.source === "preset") {
+							const binary = resolvePresetBinary(resolved.command, projectCwd);
+							if (!binary.ok && binary.reason === "inside") {
+								addSystemMessage(binary.message);
+								break;
+							}
+							if (binary.ok) resolved.command = binary.path;
+						}
 
 						if (resolved.mode === "window") {
 							// Plan B: spawn a real Terminal.app window via osascript and

@@ -25,6 +25,7 @@ import {
 } from "../../../../packages/permissions/permission-mode.js";
 import { touchesBrowserSecrets } from "../../../../packages/tools/eight-browser.js";
 import { CONSULT_ID_PREFIX } from "./consult-command.js";
+import { HERDR_ID_PREFIX } from "./herdr.js";
 
 export interface BangCommand {
 	command: string;
@@ -282,10 +283,13 @@ export function killBangsOnExit(
 	};
 }
 
-/** Messages to save: everything except `!cmd` chat lines and /consult lines (their replies hold unmasked values). */
+/** Messages to save: everything except `!cmd` chat lines, /consult lines and /herdr pane reads (they hold unmasked values). */
 export function withoutBangLines<T extends { id?: string }>(messages: readonly T[]): T[] {
 	return messages.filter(
-		(m) => !m.id?.startsWith(BANG_ID_PREFIX) && !m.id?.startsWith(CONSULT_ID_PREFIX),
+		(m) =>
+			!m.id?.startsWith(BANG_ID_PREFIX) &&
+			!m.id?.startsWith(CONSULT_ID_PREFIX) &&
+			!m.id?.startsWith(HERDR_ID_PREFIX),
 	);
 }
 

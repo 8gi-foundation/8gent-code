@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.17] - 2026-10-22
+
+### Added
+- the first hello of a session gets a welcome built from local facts, zero tokens (#4767) ([#4768](https://github.com/8gi-foundation/8gent-code/pull/4768))
+
+### Fixed
+- session: a lost session-log fd is reopened, so EBADF never fails every turn ([#4776](https://github.com/8gi-foundation/8gent-code/pull/4776))
+- tui: Plan-mode refusal names /mode ask, a way out a phone keyboard can type ([#4771](https://github.com/8gi-foundation/8gent-code/pull/4771))
+
 ## [0.20.16] - 2026-10-22
 
 ### Fixed
