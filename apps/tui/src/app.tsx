@@ -234,11 +234,13 @@ import {
 	BANG_ID_PREFIX,
 	BANG_USAGE,
 	type BangRun,
+	MODE_USAGE,
 	bangChatLine,
 	bangContextBlock,
 	bangRunningLine,
 	killBangsOnExit,
 	parseBang,
+	parseModeArgs,
 	planModeRefusal,
 	sendRefusal,
 	startBang,
@@ -4196,6 +4198,21 @@ export function App({
 					if (agent) agent.cleanup().catch(() => {});
 					exit();
 					break;
+
+				case "mode": {
+					// This tab's permission mode by name, for keyboards with no
+					// Shift+Tab (Termux). Same switch, line and toast as the key.
+					const next = parseModeArgs(args);
+					if (!next) {
+						addSystemMessage(`${permSwitchLine(activePermMode)}\n${MODE_USAGE}`);
+						break;
+					}
+					setTabPermMode(activeTabId, next);
+					const shown = permView(permHolderFor(activeTabId));
+					addSystemMessage(permSwitchLine(shown.mode, shown.held));
+					showPermToast({ tabId: activeTabId, ...shown });
+					break;
+				}
 
 				case "infinite": {
 					// This tab's permission mode to Infinite, or back to Ask (#3170).

@@ -20,6 +20,7 @@ export type SlashCommand =
 	| "theme"
 	| "reload"
 	| "infinite"
+	| "mode"
 	| "onboarding"
 	| "preferences"
 	| "skip"
@@ -188,6 +189,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["inf", "∞"],
 		description: "Enable infinite mode (autonomous until done)",
 		usage: "/infinite [task]",
+	},
+	{
+		name: "mode",
+		aliases: [],
+		description:
+			"Set this tab's permission mode: plan, ask, guarded or infinite (same as Shift+Tab)",
+		usage: "/mode <plan|ask|guarded|infinite>",
 	},
 	{
 		name: "onboarding",
