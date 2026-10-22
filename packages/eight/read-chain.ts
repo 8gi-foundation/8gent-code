@@ -54,8 +54,35 @@ export function readOnlyChain(command: string): string[] | null {
 }
 
 /** Folders the person named, as extra readable prefixes for a command, only when it is plainly read-only. */
+/** An unquoted glob can reach a secret the prefix check never saw by name. */
+function hasUnquotedGlob(command: string): boolean {
+	let q: string | null = null;
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		if (ch === "\\" && q !== "'") {
+			i++;
+			continue;
+		}
+		if (q) {
+			if (ch === q) q = null;
+		} else if (ch === "'" || ch === '"') q = ch;
+		else if (ch === "*" || ch === "?" || ch === "[") return true;
+	}
+	return false;
+}
+
+const RECURSIVE_READ =
+	/(?:^|[\s;&|])(?:(?:\S*\/)?(?:find|rg|du|tree|ag|ack)|\S+\s+(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive))(?=\s|$)/;
+
 export function readPrefixesFor(command: string): string[] | undefined {
 	const prefixes = readAllowPrefixes();
 	if (prefixes.length === 0 || namesSecret(command)) return undefined;
+	// Globs and recursive reads can reach a sibling secret that was never named (#4715).
+	if (
+		hasUnquotedGlob(command) ||
+		RECURSIVE_READ.test(command) ||
+		/\s(-[A-Za-z]*[rR]\b|--recursive)/.test(command)
+	)
+		return undefined;
 	return readOnlyAllowlist(command).verdict === "pass-without-model" ? prefixes : undefined;
 }

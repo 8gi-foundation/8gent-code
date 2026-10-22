@@ -33,7 +33,7 @@ import {
 } from "../permissions/read-allow";
 import { CreatedFiles } from "../permissions/s1-created-files";
 import { _resetSystemOne, _setSystemOneOverridesForTests } from "../permissions/system-one-gate";
-import { splitChain } from "./read-chain";
+import { readPrefixesFor, splitChain } from "./read-chain";
 import { parseRunArgs } from "./run";
 import { ToolExecutor } from "./tools";
 
@@ -516,5 +516,115 @@ describe("8SO read on #4722: siblings, depth floor, real paths, session scope", 
 		});
 		expect(takeBoundaryStop()).toBeNull(); // the fallback scope saw nothing
 		expect(takeBoundaryStop(s)).toContain(join(outside, "inbox.jsonl"));
+	});
+});
+
+describe("Solomon second read on #4722", () => {
+	test.each([
+		"cat DIR/.en?",
+		"cat DIR/.e*",
+		"head DIR/*",
+		"grep -r SECRET DIR",
+		"grep -R SECRET DIR",
+		"grep --recursive SECRET DIR",
+		"find DIR -name x",
+		"rg SECRET DIR",
+		"du DIR",
+		"cat DIR/[.]env",
+	])("%s gets no read prefixes", (cmd) => {
+		const dir = join(outside, "box");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "notes.md"), "n");
+		writeFileSync(join(dir, ".env"), "SECRET=1");
+		allowReadsFromPrompt(`Read ${join(dir, "notes.md")}`, cwd);
+		expect(readPrefixesFor(cmd.replaceAll("DIR", dir))).toBeUndefined();
+		expect(readPrefixesFor(`cat ${join(dir, "notes.md")}`)).toBeDefined();
+	});
+
+	test("a glob in the shell cannot read the .env beside the named file", async () => {
+		const dir = join(outside, "box2");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "notes.md"), "n");
+		writeFileSync(join(dir, ".env"), "GLOBSECRET=1");
+		allowReadsFromPrompt(`Read ${join(dir, "notes.md")}`, cwd);
+		for (const c of [
+			`cat ${dir}/.en?`,
+			`cat ${dir}/.e*`,
+			`head ${dir}/*`,
+			`grep -r GLOBSECRET ${dir}`,
+		])
+			expect(await run(c)).not.toContain("GLOBSECRET");
+	});
+
+	test.each([
+		"8gent-run x",
+		"8gent-run",
+		"8gent --model x chat",
+		"8gent --model x --yes run hi",
+		"bash -c '8gent chat'",
+		'sh -c "8gent run hi"',
+		"zsh -c '8gent chat'",
+		"env 8gent chat",
+		"env -i FOO=1 8gent chat",
+		"nohup 8gent chat",
+		"exec 8gent run x",
+		"time 8gent chat",
+		"command 8gent chat",
+		"sudo 8gent chat",
+		"echo x | xargs 8gent run",
+		"$(which 8gent) chat",
+		"nohup env 8gent mcp-server",
+	])("self-spawn refused: %s", (cmd) => {
+		expect(spawnsSelf(cmd)).toBe(true);
+	});
+
+	test.each(["grep '8gent chat' f", 'echo "8gent run"', "sudo ls", "env FOO=1 ls", "time ls"])(
+		"not a self-spawn: %s",
+		(cmd) => {
+			expect(spawnsSelf(cmd)).toBe(false);
+		},
+	);
+
+	test.each([
+		"/private/var/db",
+		"/private/var",
+		"/var/db",
+		"/tmp",
+		"/private/tmp",
+		"/tmp/x",
+		"/Volumes",
+		"/Volumes/disk",
+		"/private/etc",
+	])("%s is never handed over as a folder", (dir) => {
+		resetReadAllow();
+		expect(addReadAllowDir(dir, cwd, "/home/u")).toBeNull();
+	});
+
+	test("a file in /private/var/db or /tmp allows only itself", () => {
+		for (const f of [
+			"/private/var/db/x.plist",
+			"/tmp/a.txt",
+			"/private/tmp/a.txt",
+			"/Volumes/disk/a.txt",
+		]) {
+			resetReadAllow();
+			allowReadsFromPrompt(`Read ${f}`, cwd, "/home/u");
+			expect(readAllowEntries()).toEqual([f]);
+		}
+	});
+
+	test.each([
+		".config/op/config",
+		".config/gcloud/legacy_credentials/a/adc.json",
+		".password-store/x.gpg",
+		".pgpass",
+		".vault-token",
+		".azure/accessTokens.json",
+		"Library/Application Support/1Password/x",
+		"Library/Application Support/Arc/User Data/Default/Cookies",
+		".config/github-copilot/hosts.json",
+		".local/share/keyrings/login.keyring",
+	])("%s is a secret path", (rel) => {
+		expect(namesSecret(`/home/u/${rel}`)).toBe(true);
 	});
 });

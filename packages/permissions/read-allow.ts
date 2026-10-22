@@ -67,6 +67,10 @@ const SECRET_PATH = new RegExp(
 		String.raw`\.config[\\/]gh([\\/]|$)`,
 		String.raw`\.8gent[\\/](telegram[^\\/]*|sessions|[^\\/]*token[^\\/]*)([\\/]|$)`,
 		String.raw`Application Support[\\/](Google|Chromium|BraveSoftware|Firefox|Microsoft Edge)([\\/]|$)`,
+		String.raw`\.config[\\/](op|github-copilot|gcloud[\\/]legacy_credentials)([\\/]|$)`,
+		String.raw`(^|[\\/])(legacy_credentials|\.password-store|\.pgpass|\.vault-token|\.azure)([\\/]|$)`,
+		String.raw`\.local[\\/]share[\\/]keyrings([\\/]|$)`,
+		String.raw`Application Support[\\/](1Password|Arc)([\\/]|$)`,
 		String.raw`Library[\\/](Cookies|Messages|Mail|Safari)([\\/]|$)`,
 	].join("|"),
 	"i",
@@ -84,7 +88,18 @@ function expand(p: string, home: string, cwd: string): string {
 }
 
 /** System folders where a directory entry needs two more segments below the root to be allowed. */
-const SYSTEM_ROOTS = new Set(["etc", "var", "private", "Library", "System", "usr", "bin", "sbin"]);
+const SYSTEM_ROOTS = new Set([
+	"etc",
+	"var",
+	"private",
+	"tmp",
+	"Volumes",
+	"Library",
+	"System",
+	"usr",
+	"bin",
+	"sbin",
+]);
 
 function segmentsBelow(dir: string, base: string): number {
 	return dir.slice(base.length).split(sep).filter(Boolean).length;
@@ -99,6 +114,8 @@ function tooBroad(dir: string, home: string): boolean {
 	if (dir === sep || home.startsWith(dir + sep) || dir === home) return true;
 	if (dir.startsWith(home + sep)) return segmentsBelow(dir, home) < 2;
 	const parts = dir.split(sep).filter(Boolean);
+	// macOS aliases /var, /tmp and /etc to /private/...: judge the alias the same as the name.
+	if (parts[0] === "private" && parts.length > 1) parts.shift();
 	if (parts[0] === "Users") return parts.length < 4; // /Users/<other> and its direct children
 	if (SYSTEM_ROOTS.has(parts[0] ?? "")) return parts.length < 3;
 	return false;

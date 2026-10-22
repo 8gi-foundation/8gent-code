@@ -36,8 +36,13 @@ export function preSpawnRefusal(command: string, cwd: string = process.cwd()): s
  * a command part. A run that spawns itself nests a second 8gent inside the first (#4715).
  * Anchored to a command position, so `grep "8gent chat"` and `echo 8gent run` are not matched.
  */
-const SELF_SPAWN =
-	/(?:^|[;&|(\n])\s*(?:\w+=\S*\s+)*(?:(?:(?:bun|bunx|node|npx|tsx)(?:\s+-\S+)*(?:\s+run)?\s+)?(?:\S*\/)?8gent(?:-code|-run)?(?:\.[tj]s)?|(?:bun|node|tsx)(?:\s+-\S+)*\s+(?:\S*\/)?cli\.js)(?:\s+-\S+)*\s+(?:chat|run|mcp-server)(?![\w-])/;
+const SPAWN_START = String.raw`(?:^|[;&|(\n]|(?:ba|z)?sh\s+-\w*c\s+['"])\s*`;
+const SPAWN_WRAP = String.raw`(?:(?:(?:env|nohup|exec|time|command|sudo|xargs)\s+(?:-\S+\s+)*)|(?:\w+=\S*\s+))*`;
+const SPAWN_FLAGS = String.raw`(?:\s+-\S+(?:\s+[^-\s]\S*)?)*`;
+const SPAWN_BIN = String.raw`(?:(?:(?:bun|bunx|node|npx|tsx)(?:\s+-\S+)*(?:\s+run)?\s+)?(?:(?:\S*\/)?8gent(?:-code)?(?:\.[tj]s)?|\$\(\s*which\s+8gent\s*\))|(?:bun|node|tsx)(?:\s+-\S+)*\s+(?:\S*\/)?cli\.js)`;
+const SELF_SPAWN = new RegExp(
+	`${SPAWN_START}${SPAWN_WRAP}(?:${SPAWN_BIN}${SPAWN_FLAGS}\\s+(?:chat|run|mcp-server)(?![\\w-])|(?:\\S*\\/)?8gent-run(?![\\w-]))`,
+);
 
 export function spawnsSelf(command: string): boolean {
 	return SELF_SPAWN.test(command);
