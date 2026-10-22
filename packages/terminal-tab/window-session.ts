@@ -25,6 +25,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { pathOutsideFolder } from "../eight/welcome.js";
 import { DEFAULT_DIR, type WindowSession, saveSession } from "./session-store.js";
 
 const execFileAsync = promisify(execFile);
@@ -64,6 +65,8 @@ export interface BuildWrapperArgs {
 	args?: string[];
 	cwd: string;
 	label?: string;
+	/** PATH the window runs with; already filtered by pathOutsideFolder. */
+	path?: string;
 }
 
 /** Single-quote a string for safe shell embedding: foo'bar → 'foo'\''bar' */
@@ -75,6 +78,10 @@ function shellSingleQuote(s: string): string {
  * Build the bash one-liner that the Terminal.app window will run.
  * It writes its PID, prints a banner, cd's to the working dir, then
  * exec's the command so the wrapper *becomes* the command (PID stable).
+ * Every interpolated value is single-quoted: a folder named `x$(touch y)`
+ * is a literal path, never a command (#4783). When `path` is given it
+ * replaces the login shell's PATH, so a `#!/usr/bin/env node` preset cannot
+ * pick up a `node` the project planted on ".".
  */
 export function buildWrapperScript(args: BuildWrapperArgs): string {
 	const { pidFile, command, cwd, label } = args;
@@ -88,7 +95,8 @@ export function buildWrapperScript(args: BuildWrapperArgs): string {
 	const lines = [
 		`echo $$ > ${shellSingleQuote(pidFile)}`,
 		banner,
-		`cd "${cwd.replace(/"/g, '\\"')}"`,
+		`cd ${shellSingleQuote(cwd)}`,
+		...(args.path !== undefined ? [`export PATH=${shellSingleQuote(args.path)}`] : []),
 		`exec ${quotedCommand}${quotedArgs ? ` ${quotedArgs}` : ""}`,
 	];
 	return lines.join("; ");
@@ -139,6 +147,7 @@ export async function spawnInWindow(opts: SpawnInWindowOpts): Promise<WindowSess
 		args: opts.args,
 		cwd,
 		label,
+		path: pathOutsideFolder(String(process.env.PATH ?? ""), cwd),
 	});
 	const osa = buildOsascript(wrapper);
 

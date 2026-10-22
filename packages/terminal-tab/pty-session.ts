@@ -147,7 +147,8 @@ export class PtySession {
 	readonly ready: Promise<void>;
 
 	constructor(opts: PtySessionOpts) {
-		const nodeBin = findNodeBinary() ?? "node";
+		const nodeBin = findNodeBinary(opts.cwd ?? process.cwd());
+		if (!nodeBin) throw new Error("node not found outside this folder; the terminal tab needs it");
 		const env: Record<string, string> = {
 			...((opts.env ?? (process.env as Record<string, string>)) as Record<string, string>),
 			PTY_CWD: opts.cwd ?? process.cwd(),

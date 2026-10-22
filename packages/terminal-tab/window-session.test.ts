@@ -8,7 +8,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isPidAlive } from "./session-store.js";
@@ -47,7 +48,7 @@ describe("buildWrapperScript", () => {
 		});
 		expect(script).toContain("echo $$ >");
 		expect(script).toContain("/tmp/foo.pid");
-		expect(script).toContain('cd "/Users/me/proj"');
+		expect(script).toContain("cd '/Users/me/proj'");
 		expect(script).toContain("exec 'claude'");
 	});
 
@@ -72,6 +73,85 @@ describe("buildWrapperScript", () => {
 		});
 		expect(script).toContain("8gent session");
 		expect(script).toContain("Claude Code");
+	});
+});
+
+describe("folder names are literal (#4783)", () => {
+	it("a folder named x$(touch PWNED) or with backticks runs nothing", () => {
+		for (const name of ["x$(touch PWNED)", "y`touch PWNED`", "z'$(touch PWNED)'"]) {
+			const cwd = join(dir, name);
+			mkdirSync(cwd);
+			const script = buildWrapperScript({
+				pidFile: join(dir, "w.pid"),
+				command: "/bin/pwd",
+				cwd,
+				path: "/usr/bin:/bin",
+			});
+			const r = spawnSync("/bin/bash", ["-c", script], { cwd: dir, encoding: "utf-8" });
+			expect(r.status).toBe(0);
+			expect(r.stdout.trim().endsWith(name)).toBe(true);
+			expect(existsSync(join(dir, "PWNED"))).toBe(false);
+			expect(existsSync(join(cwd, "PWNED"))).toBe(false);
+			expect(readdirSync(dir).some((f) => f === "PWNED")).toBe(false);
+		}
+	});
+
+	it("zsh, the usual Terminal login shell, also reads the names literally", () => {
+		if (!existsSync("/bin/zsh")) return;
+		for (const name of ["x$(touch PWNED)", "y`touch PWNED`", "z'$(touch PWNED)'"]) {
+			const cwd = join(dir, `zsh-${name}`);
+			mkdirSync(cwd);
+			const script = buildWrapperScript({
+				pidFile: join(dir, "w.pid"),
+				command: "/bin/pwd",
+				cwd,
+				path: "/usr/bin:/bin",
+			});
+			const r = spawnSync("/bin/zsh", ["-f", "-c", script], { cwd: dir, encoding: "utf-8" });
+			expect(r.status).toBe(0);
+			expect(r.stdout.trim().endsWith(`zsh-${name}`)).toBe(true);
+			expect(existsSync(join(dir, "PWNED"))).toBe(false);
+			expect(existsSync(join(cwd, "PWNED"))).toBe(false);
+		}
+	});
+
+	it.if(process.platform === "darwin")(
+		"the AppleScript string literal carries the script back byte for byte",
+		() => {
+			for (const name of [
+				'q"; do shell script "touch PWNED" --',
+				'b\\" & (do shell script "touch PWNED") & "',
+			]) {
+				const script = buildWrapperScript({
+					pidFile: join(dir, "w.pid"),
+					command: "claude",
+					cwd: join(dir, name),
+					path: "/usr/bin",
+				});
+				const literal = buildOsascript(script)
+					.split("\n")[1]
+					.replace(/^ {2}do script /, "");
+				const r = spawnSync("osascript", ["-e", `return ${literal}`], { encoding: "utf-8" });
+				expect(r.status).toBe(0);
+				expect(r.stdout.replace(/\n$/, "")).toBe(script);
+				expect(existsSync(join(dir, "PWNED"))).toBe(false);
+			}
+		},
+	);
+
+	it("the window runs with the filtered PATH, not the login shell's", () => {
+		const script = buildWrapperScript({
+			pidFile: join(dir, "w.pid"),
+			command: "/bin/sh",
+			args: ["-c", 'printf %s "$PATH"'],
+			cwd: dir,
+			path: "/usr/bin:/bin",
+		});
+		const r = spawnSync("/bin/bash", ["-c", script], {
+			env: { PATH: `.:${dir}:/usr/bin:/bin` } as unknown as NodeJS.ProcessEnv,
+			encoding: "utf-8",
+		});
+		expect(r.stdout.split("\n").pop()).toBe("/usr/bin:/bin");
 	});
 });
 

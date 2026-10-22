@@ -13,7 +13,8 @@
  * whose facts cannot be gathered, keeps the plain [SMALL TALK] note.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import pkg from "../../package.json" with { type: "json" };
 import { findOnPath, isAndroidHost } from "../voice/termux";
@@ -43,17 +44,41 @@ export interface WelcomeFacts {
  * PATH with every entry that could hold a binary planted by the folder itself
  * removed: relative entries ("." , "bin", "node_modules/.bin") and absolute ones
  * inside `cwd`. The welcome never offers to run a program a cloned repo shipped.
+ * When `cwd` is the home folder or above it there is no project tree to
+ * distrust, so only relative entries are dropped; otherwise launching from ~
+ * would hide ~/.npm-global/bin and read every preset as not installed (#4783).
+ * One rule for every spawn path: presets, /term windows, the pty bridge node.
+ * Paths are compared after resolving symlinks (realPath), so a symlinked
+ * project folder or /tmp vs /private/tmp cannot slip an in-folder entry past.
  */
-export function pathOutsideFolder(path: string, cwd: string): string {
-	const root = resolve(cwd);
+export function pathOutsideFolder(path: string, cwd: string, home: string = homedir()): string {
+	const root = realPath(cwd);
+	const toHome = relative(root, realPath(home));
+	const coversHome = toHome === "" || (!toHome.startsWith("..") && !isAbsolute(toHome));
 	return path
 		.split(delimiter)
 		.filter((dir) => {
 			if (!dir || !isAbsolute(dir)) return false;
-			const rel = relative(root, resolve(dir));
+			if (coversHome) return true;
+			const rel = relative(root, realPath(dir));
 			return rel.startsWith("..") || isAbsolute(rel);
 		})
 		.join(delimiter);
+}
+
+/**
+ * The path with symlinks resolved, so /tmp and /private/tmp, or a symlinked
+ * project and its target, compare as the same folder. A path that does not
+ * exist yet resolves its nearest existing parent and keeps the rest as text.
+ */
+function realPath(p: string): string {
+	const abs = resolve(p);
+	try {
+		return realpathSync(abs);
+	} catch {
+		const parent = dirname(abs);
+		return parent === abs ? abs : join(realPath(parent), basename(abs));
+	}
 }
 
 /**
@@ -116,7 +141,10 @@ export async function gatherWelcomeFacts(opts: {
 	// 8gent itself is a preset (8gent inside 8gent); offering it beside itself says nothing.
 	const cwd = resolve(opts.cwd);
 	const home = env.HOME ? resolve(env.HOME) : null;
-	const lookupEnv = { ...env, PATH: pathOutsideFolder(String(env.PATH ?? ""), cwd) };
+	const lookupEnv = {
+		...env,
+		PATH: pathOutsideFolder(String(env.PATH ?? ""), cwd, home ?? homedir()),
+	};
 	const presets = (opts.presets ?? (await knownPresets())).filter((p) => p.id !== "8gent");
 	return {
 		version: String(pkg.version),
