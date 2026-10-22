@@ -407,6 +407,7 @@ import {
 } from "../../../packages/permissions/permission-mode.js";
 import { runAllowReadCommand } from "../../../packages/permissions/read-allow.js";
 import { usePermToast } from "./hooks/usePermToast.js";
+import { runHerdrCommand } from "./lib/herdr.js";
 import {
 	type PermView,
 	isPermissionCycleKey,
@@ -3830,6 +3831,10 @@ export function App({
 
 				case "copy":
 					addSystemMessage(copyReply(messages, { write: (seq) => inkStdout.write(seq) }));
+					break;
+
+				case "herdr":
+					void runHerdrCommand(args).then(addSystemMessage);
 					break;
 
 				case "predict":
