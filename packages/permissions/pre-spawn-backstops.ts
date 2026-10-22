@@ -37,15 +37,16 @@ export function preSpawnRefusal(command: string, cwd: string = process.cwd()): s
  * Anchored to a command position, so `grep "8gent chat"` and `echo 8gent run` are not matched.
  */
 const SPAWN_START = String.raw`(?:^|[;&|(\n]|(?:ba|z)?sh\s+-\w*c\s+['"])\s*`;
-const SPAWN_WRAP = String.raw`(?:(?:(?:env|nohup|exec|time|command|sudo|xargs)\s+(?:-\S+\s+)*)|(?:\w+=\S*\s+))*`;
+const SPAWN_WRAP = String.raw`(?:(?:(?:env|nohup|exec|time|command|sudo|xargs)\s+(?:-\S+\s+)*)|(?:timeout\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*\d\S*\s+)|(?:(?:nice|stdbuf)\s+(?:-\S+\s+(?:\d+\s+)?)*)|(?:\w+=\S*\s+))*`;
 const SPAWN_FLAGS = String.raw`(?:\s+-\S+(?:\s+[^-\s]\S*)?)*`;
-const SPAWN_BIN = String.raw`(?:(?:(?:bun|bunx|node|npx|tsx)(?:\s+-\S+)*(?:\s+run)?\s+)?(?:(?:\S*\/)?8gent(?:-code)?(?:\.[tj]s)?|\$\(\s*which\s+8gent\s*\))|(?:bun|node|tsx)(?:\s+-\S+)*\s+(?:\S*\/)?cli\.js)`;
+const SPAWN_BIN = String.raw`(?:(?:(?:bun|bunx|node|npx|tsx)(?:\s+-\S+)*(?:\s+run)?\s+)?(?:(?:\S*\/)?8(?:gent(?:-code)?)?(?:\.[tj]s)?|\$\(\s*which\s+8gent\s*\))|(?:bun|node|tsx)(?:\s+-\S+)*\s+(?:\S*\/)?cli\.js)`;
 const SELF_SPAWN = new RegExp(
 	`${SPAWN_START}${SPAWN_WRAP}(?:${SPAWN_BIN}${SPAWN_FLAGS}\\s+(?:chat|run|mcp-server)(?![\\w-])|(?:\\S*\\/)?8gent-run(?![\\w-]))`,
 );
 
 export function spawnsSelf(command: string): boolean {
-	return SELF_SPAWN.test(command);
+	// The shell strips quotes and backslashes inside a word: '8gent', 8\gent and 8ge''nt are 8gent.
+	return SELF_SPAWN.test(command) || SELF_SPAWN.test(command.replace(/['"\\]/g, ""));
 }
 
 function backstopRefusal(command: string, cwd: string): string | null {
