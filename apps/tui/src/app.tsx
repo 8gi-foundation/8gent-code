@@ -147,6 +147,12 @@ import {
 	settleSetupTranscript,
 	setupDoneLine,
 } from "./lib/onboarding-chat.js";
+import {
+	ESC_RETURNS_LINE,
+	KEYBOARD_VIEWS,
+	mayAutoOpenProviderPicker,
+	promptIsLive,
+} from "./lib/prompt-focus.js";
 import { probeProviders } from "./lib/provider-health.js";
 import { isUserThemeId } from "./lib/user-themes.js";
 import {
@@ -847,13 +853,7 @@ const PLAN_COLUMN_WIDTH = 24;
 // Pickers drawn over the chat, above the input, as the palette is. Since #2350
 // no other viewMode is drawn, so /model, /provider, /theme, Ctrl+L and
 // Ctrl+Shift+M set a view nobody saw (#3918 D3).
-const PICKER_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>([
-	"model-select",
-	"provider-select",
-	"theme-select",
-	"session-picker",
-	"session-tree",
-]);
+const PICKER_VIEWS: ReadonlySet<ViewMode> = KEYBOARD_VIEWS as ReadonlySet<ViewMode>;
 // These two read their own keys (Ctrl+N, Ctrl+S, Ctrl+R, Ctrl+D, Tab, Esc),
 // so the App's global key handler stays out while they are open (#3918 E3, E4).
 const SESSION_VIEWS: ReadonlySet<ViewMode> = new Set<ViewMode>(["session-picker", "session-tree"]);
@@ -1963,6 +1963,7 @@ export function App({
 		setCurrentModel(next);
 	}, [modelsLoading, availableModels, modelsOwner, currentProvider, currentModel]);
 
+	const oneKeyNoModelNotedRef = useRef(false);
 	// If models have loaded and there's still no valid chat model, show provider selector
 	// so the user can pick a provider / download a model without the app crashing.
 	// react-doctor-disable-next-line react-doctor/no-effect-chain
@@ -1977,6 +1978,16 @@ export function App({
 		// pick a model with /model instead of this screen taking over.
 		if (!currentModel && cliProviderRequestedRef.current === currentProvider) return;
 		if (availableModels.some((m) => !isLikelyEmbeddingModelId(m))) return;
+		// One keyed provider is not a choice: no picker, one line saying what is wrong.
+		if (!mayAutoOpenProviderPicker(hostedKeyedProviders())) {
+			if (viewMode === "chat" && !oneKeyNoModelNotedRef.current) {
+				oneKeyNoModelNotedRef.current = true;
+				addSystemMessage(
+					`${currentProvider} listed no chat model. Check the key with /apikeys, or pick one with /provider.`,
+				);
+			}
+			return;
+		}
 		// No chat model anywhere — guide user to provider setup
 		if (viewMode === "chat") setViewMode("provider-select");
 	}, [modelsLoading, availableModels, currentModel, viewMode, modelsOwner, currentProvider]);
@@ -7935,7 +7946,10 @@ export function App({
 							)}
 
 							{PICKER_VIEWS.has(viewMode) && activeTabType === "chat" && (
-								<Box flexShrink={0}>{renderMainContent()}</Box>
+								<Box flexShrink={0} flexDirection="column">
+									{renderMainContent()}
+									<MutedText>{ESC_RETURNS_LINE}</MutedText>
+								</Box>
 							)}
 
 							{approvalPending && (
@@ -7963,13 +7977,14 @@ export function App({
 												? "Your name"
 												: undefined
 									}
-									focused={
-										((viewMode === "chat" && activeTabType === "chat") ||
-											viewMode === "onboarding") &&
-										!isBubbleNavMode &&
-										!paletteOpen &&
-										!djKeys
-									}
+									focused={promptIsLive({
+										viewMode,
+										tabBodyShown: tabBody != null,
+										isBubbleNavMode,
+										paletteOpen,
+										djKeys,
+										onboardingSelectChoices: !!onboardingSelectChoices,
+									})}
 									typingPaused={djKeys}
 									processingStage={processingStage}
 									showAnimations={showAnimations}
