@@ -28,10 +28,9 @@
  *     only creates; on an existing directory it does nothing or fails.
  *   - `<tool> --version` or `<tool> --help`, alone, for a tool in
  *     VERSION_TOOLS, plus the short forms those tools define (`node -v`,
- *     `ffmpeg -version`). Any other bare command name (no path, no variable)
- *     may be probed with `--version` alone (#4756); a bare `-v` is verbose or
- *     an action on many tools (`env -v` prints the environment), so it stays limited. `--help`, `-h` and unknown flags stay limited to
- *     the known set: some system tools read them as an action (`shutdown -h`).
+ *     `ffmpeg -version`). A named set, never "any binary": a shell word or an
+ *     interpreter would run a file called --version, and some tools read -h or
+ *     an unknown flag as an action (`shutdown -h`).
  * `bun run`, `node file.js` and any redirect into a file still go to the judge.
  *
  * `bun test` runs the repo's own test code, so it is behind its own option
@@ -163,6 +162,9 @@ export const VERSION_TOOLS: ReadonlySet<string> = new Set([
 	"eslint",
 	"prettier",
 	"vite",
+	// Checked: prints one line and exits (macOS).
+	"8gent",
+	"ollama",
 ]);
 /** Short version flags, only for the tools that define them this way. */
 const SHORT_VERSION: Record<string, string> = {
@@ -179,61 +181,16 @@ const SHORT_VERSION: Record<string, string> = {
 	go: "version",
 };
 
-/** A bare command name: letters, digits and . _ + - only. No path, no variable, no glob. */
-const BARE_NAME = /^[A-Za-z][A-Za-z0-9._+-]*$/;
-
 /**
- * Words a shell reads itself, or that run another command or change state. With
- * `--version` after them they run a file by that name (`source --version`,
- * `command --version`, `time --version`), so they never count as a probe (#4757 review).
- */
-const NEVER_A_PROBE = new Set([
-	"source",
-	"eval",
-	"exec",
-	"command",
-	"builtin",
-	"time",
-	"noglob",
-	"nocorrect",
-	"nohup",
-	"xargs",
-	"env",
-	"nice",
-	"timeout",
-	"sudo",
-	"doas",
-	"su",
-	"trap",
-	"set",
-	"alias",
-	"unalias",
-	"export",
-	"unset",
-	"readonly",
-	"typeset",
-	"declare",
-	"shutdown",
-	"reboot",
-	"halt",
-	"poweroff",
-	".",
-	":",
-]);
-
-/**
- * A version probe: any bare command name with `--version` as its only
- * argument (#4756: `pi --version` and `node --version` were refused on a phone,
- * and the fix is not to list every tool a person installs). VERSION_TOOLS keeps
- * its `--help` and per-tool short forms.
+ * A version probe: a tool in VERSION_TOOLS with `--version` (or `--help`, or its
+ * own short form) as its only argument. A named set and never "any bare name":
+ * `source`, `coproc`, `expect`, `yes`, `tclsh` and the like run a file called
+ * --version, loop or read stdin (#4757 review). Add a name only after checking
+ * that its --version prints and exits on macOS and GNU.
  */
 function versionOnly(b: string, args: string[]): boolean {
-	if (args.length !== 1) return false;
-	if (VERSION_TOOLS.has(b)) {
-		return args[0] === "--version" || args[0] === "--help" || SHORT_VERSION[b] === args[0];
-	}
-	if (!BARE_NAME.test(b) || NEVER_A_PROBE.has(b)) return false;
-	return args[0] === "--version";
+	if (!VERSION_TOOLS.has(b) || args.length !== 1) return false;
+	return args[0] === "--version" || args[0] === "--help" || SHORT_VERSION[b] === args[0];
 }
 
 /** `mkdir` that only creates directories inside the working directory. */

@@ -411,51 +411,58 @@ describe("allowlist: what passes and what does not", () => {
 		for (const c of ADDITIVE_PASS)
 			expect({ c, v: readOnlyAllowlist(c).verdict }).toEqual({ c, v: "pass-without-model" });
 	});
-	test("a version probe of any bare binary name passes (#4756)", () => {
-		for (const c of [
-			"pi --version",
-			"mytool --version",
-			"termux-info --version",
-			"node24 --version",
+	test("named probe-safe tools pass with --version alone (#4756)", () => {
+		for (const t of [
+			"node",
+			"bun",
+			"npm",
+			"npx",
+			"pnpm",
+			"yarn",
+			"deno",
+			"git",
+			"gh",
+			"curl",
+			"jq",
+			"rg",
+			"ffmpeg",
+			"docker",
+			"go",
+			"cargo",
+			"rustc",
+			"8gent",
+			"ollama",
 		])
-			expect({ c, v: readOnlyAllowlist(c).verdict }).toEqual({ c, v: "pass-without-model" });
+			expect({ t, v: readOnlyAllowlist(`${t} --version`).verdict }).toEqual({
+				t,
+				v: "pass-without-model",
+			});
 	});
-	test("shell builtins and precommand words are never a version probe", () => {
+	test("any other name, and every shell word or odd interpreter, is no-opinion with --version", () => {
 		for (const w of [
+			"foo",
+			"mytool",
+			"pi",
+			"expect",
+			"coproc",
+			"yes",
+			"tclsh",
+			"wish",
+			"jimsh",
+			"env",
 			"source",
 			"eval",
 			"exec",
 			"command",
-			"builtin",
 			"time",
 			"noglob",
-			"nocorrect",
-			"nohup",
 			"xargs",
-			"env",
-			"nice",
-			"timeout",
 			"sudo",
-			"doas",
-			"su",
-			"trap",
-			"set",
-			"alias",
-			"unalias",
-			"export",
-			"unset",
-			"readonly",
-			"typeset",
-			"declare",
-			"shutdown",
-			"reboot",
-			"halt",
-			"poweroff",
 			".",
 			":",
 		])
-			expect({ c: `${w} --version`, v: readOnlyAllowlist(`${w} --version`).verdict }).toEqual({
-				c: `${w} --version`,
+			expect({ w, v: readOnlyAllowlist(`${w} --version`).verdict }).toEqual({
+				w,
 				v: "no-opinion",
 			});
 	});
