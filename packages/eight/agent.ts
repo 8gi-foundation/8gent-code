@@ -14,6 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type ModelMessage, jsonSchema, tool as sdkTool } from "ai";
 import type { FormattingStop } from "../ai/draft-constraints";
+import { applyOverlay, overlayNotes } from "../ai/harness-overlay";
 import {
 	type HarnessProfile,
 	harnessNoThink,
@@ -2035,7 +2036,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const { note, sent } = contextNote(
 			{
 				memory: this.sessionMemoryContext,
-				appendedContext: this.runtimeParams.appendedContext,
+				appendedContext: [...(this.runtimeParams.appendedContext ?? []), overlayNotes()].filter(
+					Boolean,
+				),
 				voiceChatActive: getRuntimeParams().voiceChatActive,
 			},
 			this.contextSent,
@@ -4009,13 +4012,16 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * so a run can be explained by the knobs it ran under.
 	 */
 	private harnessProfileFor(model: string, isLocal: boolean): HarnessProfile {
-		const profile = resolveHarnessProfile(model, {
+		const base = resolveHarnessProfile(model, {
 			maxSteps: 30,
 			maxOutputTokens: isLocal ? 4096 : 8192,
 		});
+		// Task overlay (#4502): flag-gated, tightens only, merged after the profile.
+		const { profile, line } = applyOverlay(base, process.env.EIGHT_TASK_ID);
 		if (!this.harnessProfileLogged.has(model)) {
 			this.harnessProfileLogged.add(model);
 			console.log(harnessProfileLine(model, profile));
+			if (line) console.log(line);
 		}
 		return profile;
 	}
