@@ -573,9 +573,44 @@ export function isEmptyReplyStall(line: string): boolean {
 	return line.startsWith(EMPTY_REPLY_STALL_PREFIX);
 }
 
-/** The answer shown in place of an empty reply after tool work. */
-export function emptyReplyNote(toolCalls: number): string {
-	return `[harness] No reply: ${emptyReplyStall(toolCalls)}.`;
+/** Calls the harness refused (a gate or a declined card), as `tool binary: class`, at most `max`. */
+export function refusedCalls(
+	log: ReadonlyArray<{ name: string; args?: unknown; result?: string }>,
+	max = 3,
+): { total: number; shown: string[] } {
+	const out: string[] = [];
+	let total = 0;
+	for (const e of log) {
+		const m = /^\[[^\]]*\b(?:BLOCKED|DENIED)\b[^\]]*\]\s*([^\n]*)/.exec(
+			(e.result ?? "").trimStart(),
+		);
+		if (!m) continue;
+		total++;
+		if (out.length >= max) continue;
+		// Never the arguments or the gate's own words: a command line can hold a secret.
+		const a = e.args as { command?: unknown } | null | undefined;
+		const first = typeof a?.command === "string" ? (a.command.trim().split(/\s+/)[0] ?? "") : "";
+		const bin = /^[A-Za-z][\w.+-]{0,40}$/.test(first) ? ` ${first}` : "";
+		const why = /declin/i.test(m[1]) ? "declined" : "blocked by policy";
+		out.push(`${e.name}${bin}: ${why}`);
+	}
+	return { total, shown: out };
+}
+
+/**
+ * The answer shown in place of an empty reply after tool work. Given the calls,
+ * it also says what was refused and why, so a turn where every tool was
+ * refused still ends with words to the person (#4756).
+ */
+export function emptyReplyNote(
+	toolCalls: number,
+	log: ReadonlyArray<{ name: string; args?: unknown; result?: string }> = [],
+): string {
+	const base = `[harness] No reply: ${emptyReplyStall(toolCalls)}.`;
+	const { total, shown } = refusedCalls(log);
+	if (total === 0) return base;
+	const more = total > shown.length ? ` (and ${total - shown.length} more)` : "";
+	return `${base} ${total} of the calls were refused, so they did not run: ${shown.join("; ")}${more}.`;
 }
 
 /** True when a turn's reply is the no-reply note: the turn is not done (#3524). */
@@ -741,7 +776,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		];
 		if (unverified.length === 0) return { content, rounds, toolLog, unverified: [] };
 		const notes = [
-			empty ? emptyReplyNote(toolLog.length) : content.trimEnd(),
+			empty ? emptyReplyNote(toolLog.length, toolLog) : content.trimEnd(),
 			unfulfilled.length > 0 ? formatHarnessNote(unfulfilled) : "",
 		].filter((n) => n.trim() !== "");
 		return { content: notes.join("\n\n"), rounds, toolLog, unverified };

@@ -3835,7 +3835,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// #3524: a blank reply is a failed turn, never a finished one.
 			const blankNative = gatedNative.content.trim() === "";
 			const content = blankNative
-				? emptyReplyNote(this.turnToolLedger.length)
+				? emptyReplyNote(this.turnToolLedger.length, this.turnToolLedger)
 				: gatedNative.content;
 
 			// Apply personality voice flavoring to the response (never on a reply
