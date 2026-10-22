@@ -45,7 +45,7 @@ export function preSpawnRefusal(command: string, cwd: string = process.cwd()): s
  */
 const BIN_NAMES = new Set(["8", "8gent", "8gent-code", "8gent-run", "8gent-run.js", "8gent.ts"]);
 /** A path to the binary: `/x/8gent`, `bin/8gent-run.js`, `.bin/8gent`. A folder named 8gent-code is not one. */
-const BIN_PATH_ENDS = ["/8", "/8gent", "/8gent-run", "/8gent-run.js", "/8gent.ts"];
+const BIN_PATH_ENDS = ["/8gent", "/8gent-run", "/8gent-run.js", "/8gent.ts"];
 const PACKAGE = "@8gi-foundation/8gent-code";
 const SUBCOMMANDS = new Set(["chat", "run", "mcp-server"]);
 /** The only commands naming 8gent that are information, accepted only as the whole command. */
@@ -58,24 +58,85 @@ function commandTokens(command: string): string[] {
 		.filter(Boolean);
 }
 
+/** Words that run the next word as a command (or open a clause), so the next word is in command position. */
+const WRAPPERS = new Set([
+	"env",
+	"nohup",
+	"exec",
+	"time",
+	"command",
+	"sudo",
+	"doas",
+	"xargs",
+	"timeout",
+	"nice",
+	"stdbuf",
+	"setsid",
+	"caffeinate",
+	"eval",
+	"script",
+	"!",
+	"if",
+	"then",
+	"elif",
+	"else",
+	"do",
+	"while",
+	"until",
+]);
+
+/** Per segment (split on operators and newlines): the tokens, and which of them are in command position. */
+function segments(command: string): { tokens: string[]; position: boolean[] }[] {
+	return command
+		.replace(/['"\\]/g, "")
+		.split(/[;&|(){}`\n]+/)
+		.map((seg) => seg.split(/\s+|[<>]+/).filter(Boolean))
+		.filter((t) => t.length > 0)
+		.map((tokens) => {
+			const position = tokens.map(() => false);
+			for (let i = 0; i < tokens.length; i++) {
+				position[i] = true;
+				const t = tokens[i];
+				// Skip over wrapper words, their flags and values, and VAR=x assignments.
+				if (WRAPPERS.has(t) || /^\w+=/.test(t) || t.startsWith("-") || /^\d/.test(t)) continue;
+				// A flag value after a wrapper (sudo -u root, nice -n 5): keep scanning one more word.
+				if (i > 0 && tokens[i - 1].startsWith("-") && !tokens[i - 1].includes("=")) continue;
+				break;
+			}
+			return { tokens, position };
+		});
+}
+
+const ENV_BAD_FLAG =
+	/^(-[A-Za-z0-9]*[iSu][A-Za-z0-9]*|--ignore-environment|--split-string.*|--unset.*)$/;
+
 export function spawnsSelf(command: string): boolean {
 	if (INFO_FORMS.has(command.trim().replace(/\s+/g, " "))) return false;
 	const tokens = commandTokens(command);
 	// Naming the guard's own variables, or clearing the environment, is an attempt to get around
 	// it. `env -i` plus indirection (`x=8g;y=ent; env -i $x$y chat`) is the residual a text rule
-	// cannot see by name; refusing env -i, --ignore-environment and unset closes it.
+	// cannot see by name; refusing env -i, -S, -u, --unset, --ignore-environment and `unset` closes
+	// it, even when the variable name is built by indirection. Flags are judged only on an `env`
+	// in command position, so `grep -i env README.md` passes; `env --version`, `env -0` and
+	// `env VAR=x cmd` stay allowed.
 	if (
 		tokens.some(
-			(t) =>
-				t.includes("EIGHT_PARENT_SESSION") ||
-				t.includes("ALLOW_NESTED") ||
-				t === "unset" ||
-				t === "--ignore-environment" ||
-				(t === "-i" && tokens[0] === "env") ||
-				(/^-[A-Za-z]*i[A-Za-z]*$/.test(t) && tokens.includes("env")),
+			(t) => t.includes("EIGHT_PARENT_SESSION") || t.includes("ALLOW_NESTED") || t === "unset",
 		)
 	)
 		return true;
+	const segs = segments(command);
+	for (const { tokens: ts, position } of segs) {
+		for (let i = 0; i < ts.length; i++) {
+			if (ts[i] !== "env" || !position[i]) continue;
+			for (let j = i + 1; j < ts.length && (ts[j].startsWith("-") || /^\w+=/.test(ts[j])); j++)
+				if (ENV_BAD_FLAG.test(ts[j])) return true;
+		}
+	}
+	// A path ending in /8 is the binary only as a command (`~/.bun/bin/8 chat`), not a file argument.
+	for (const { tokens: ts, position } of segs)
+		for (let i = 0; i < ts.length; i++)
+			if (ts[i].endsWith("/8") && (position[i] || SUBCOMMANDS.has(ts[i + 1] ?? ""))) return true;
 	const names8gent = (t: string) =>
 		BIN_NAMES.has(t) || BIN_PATH_ENDS.some((e) => t.endsWith(e)) || t.startsWith(PACKAGE);
 	if (tokens.some(names8gent)) return true;

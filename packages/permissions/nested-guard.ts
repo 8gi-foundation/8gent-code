@@ -15,11 +15,11 @@ export function toolShellEnv(
 }
 
 /**
- * True when this process was started by a tool shell. There is no override: a model can set any
+ * True when this process was started by a tool shell (the mark is present, even if empty). There is no override: a model can set any
  * env var in its own shell, and a nested start is only legitimate outside a tool shell.
  */
 export function isNestedStart(env: Record<string, string | undefined> = process.env): boolean {
-	return Boolean(env[NESTED_ENV]);
+	return env[NESTED_ENV] !== undefined;
 }
 
 /** Entry points call this first: exit 2 with the message when nested. */

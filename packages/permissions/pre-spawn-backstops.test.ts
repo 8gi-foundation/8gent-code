@@ -67,6 +67,18 @@ const SPAWNS = [
 	"stdbuf -oL -eL 8gent run x",
 ];
 
+const SPAWNS_3 = [
+	"a=EIGHT_PARENT; b=_SESSION; env -u $a$b sh -c 'x=8g;y=ent;$x$y chat'",
+	"env --unset=$a$b sh",
+	"env -S 'x y' z",
+	"env -iu FOO sh",
+	"sudo env -i sh",
+	"echo hi; env -i sh",
+	"~/.bun/bin/8 chat",
+	"sudo -u root ~/.bun/bin/8 chat",
+	"/usr/local/bin/8 run x",
+];
+
 const SPAWNS_2 = [
 	"~/.bun/bin/8 chat",
 	"/usr/local/bin/8 run x",
@@ -80,6 +92,12 @@ const SPAWNS_2 = [
 ];
 
 const SAFE = [
+	"grep -i env README.md",
+	"env --version",
+	"env -0",
+	"env FOO=1 ls",
+	"cat notes/8",
+	"ls ~/wt/8",
 	"echo hi",
 	"cat 8/notes.md",
 	"8ball",
@@ -111,6 +129,10 @@ const REFUSED_BY_DESIGN = [
 
 describe("self-spawn backstop", () => {
 	test.each(SPAWNS)("refuses %s", (cmd) => {
+		expect(spawnsSelf(cmd)).toBe(true);
+	});
+
+	test.each(SPAWNS_3)("refuses %s", (cmd) => {
 		expect(spawnsSelf(cmd)).toBe(true);
 	});
 

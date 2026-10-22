@@ -32,6 +32,11 @@ describe("nested start guard", () => {
 		expect(start(clean({ [NESTED_ENV]: "123", EIGHT_ALLOW_NESTED: "1" })).status).toBe(2);
 	});
 
+	test("an empty mark still counts: exit 2", () => {
+		expect(start(clean({ [NESTED_ENV]: "" })).status).toBe(2);
+		expect(isNestedStart({ [NESTED_ENV]: "" })).toBe(true);
+	});
+
 	test("toolShellEnv marks the child and keeps the rest", () => {
 		const env = toolShellEnv({ A: "1" });
 		expect(env.A).toBe("1");
