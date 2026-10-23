@@ -210,6 +210,7 @@ export class JudgeScorer {
 			const res = await fetch(`${this.config.prmUrl}/models`, {
 				headers: { Authorization: `Bearer ${this.config.prmApiKey}` },
 				signal: AbortSignal.timeout(5000),
+				redirect: "error",
 			});
 			return res.ok;
 		} catch {
@@ -242,6 +243,7 @@ export class JudgeScorer {
 				temperature: 0.1,
 				max_tokens: 200,
 			}),
+			redirect: "error",
 		});
 
 		if (!response.ok) {

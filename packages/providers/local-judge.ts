@@ -248,6 +248,7 @@ export class SeleneJudge {
 					options: { temperature: 0 },
 				}),
 				signal: AbortSignal.timeout(this.timeoutMs),
+				redirect: "error",
 			});
 			if (!res.ok) {
 				return failClosed(`Judge endpoint error: ${res.status} ${res.statusText}`);
@@ -267,7 +268,9 @@ export class SeleneJudge {
 		if (decisionJudgeEnabled()) {
 			return new DecisionReadoutJudge(decisionConfigFromEnv()).isAvailable();
 		}
-		return createOllamaServer({ baseUrl: this.baseUrl }).isHealthy({ signal: AbortSignal.timeout(5000) });
+		return createOllamaServer({ baseUrl: this.baseUrl }).isHealthy({
+			signal: AbortSignal.timeout(5000),
+		});
 	}
 }
 
@@ -299,6 +302,7 @@ export class SkyworkScorer {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ model: this.model, input: output.slice(0, 6000) }),
 				signal: AbortSignal.timeout(this.timeoutMs),
+				redirect: "error",
 			});
 			if (!res.ok) return null;
 			raw = await res.text();

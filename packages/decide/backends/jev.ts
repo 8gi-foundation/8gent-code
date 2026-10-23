@@ -216,11 +216,16 @@ export class JevBackend implements DecideBackend {
 				headers: { "content-type": "application/json", authorization: `Bearer ${this.apiKey}` },
 				body: JSON.stringify(toJevBody(request)),
 				signal: AbortSignal.timeout(this.timeoutMs),
+				// The body carries the command and the header the key: never re-sent to a Location.
+				redirect: "error",
 			});
 		} catch (err) {
 			// A fetch error message can quote the URL, never the body or the key; the error name is enough.
 			throw new DecideUnavailableError(`jev unreachable: ${(err as Error)?.name ?? "error"}`);
 		}
+		// A fetch that was told not to follow can still hand back a 3xx (a stub, a proxy shim): unavailable.
+		if (res.status >= 300 && res.status < 400)
+			throw new DecideUnavailableError(`jev /v1/evaluate redirect ${res.status} refused`);
 		if (!res.ok) {
 			const text = await res.text().catch(() => "");
 			throw new DecideUnavailableError(`jev /v1/evaluate ${res.status} ${errorCode(text)}`);
