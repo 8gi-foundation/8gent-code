@@ -97,6 +97,11 @@ export interface FooterData {
 	durable?: boolean;
 	/** A gate flagged the last turn (#4510). Absent means nothing was flagged. */
 	verification?: "verified" | "unverified" | "tests_claimed_not_run";
+	/**
+	 * This tab is a session on the local daemon (#4829). Shown while it holds because
+	 * where tools run has changed; a TUI on its own shows nothing.
+	 */
+	daemonAttached?: boolean;
 }
 
 /** A value the app passes when it does not know the real one. */
@@ -165,6 +170,9 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			color: d.judge === "failed" ? ui.orange : ui.muted,
 			priority: 1,
 		});
+	}
+	if (d.daemonAttached) {
+		out.push({ key: "daemon", label: "daemon", value: "attached", color: ui.teal, priority: 1 });
 	}
 	if (d.sandboxOff) {
 		out.push({

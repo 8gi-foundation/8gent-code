@@ -119,6 +119,12 @@ import { useVoiceInput } from "./hooks/useVoiceInput.js";
 import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
 import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
 import {
+	autoAttachMode,
+	daemonHealthUrl,
+	hasTypedTurn,
+	probeDaemon,
+} from "./lib/daemon-autoattach.js";
+import {
 	DaemonSessionClient,
 	liveViewUrl,
 	openLiveView,
@@ -1371,6 +1377,11 @@ export function App({
 	}, []);
 	// The daemon session this TUI is linked to, if any (#3929, see linkDaemonSession).
 	const daemonLinkRef = useRef<{ client: DaemonSessionClient; off: () => void } | null>(null);
+	/** Mirrors daemonLinkRef for the footer chip (#4829). Set by link and unlink only. */
+	const [daemonAttached, setDaemonAttached] = useState(false);
+	/** The latest chat, for the auto-attach guard that must not replace a typed turn (#4829). */
+	const messagesLatest = useRef<Message[]>([]);
+	messagesLatest.current = messages;
 	/** Whether the history picker is showing daemon sessions (/sessions) or local ones. */
 	const historyPickDaemonRef = useRef(false);
 	const updateConfirmRef = useRef<((q: string) => Promise<boolean>) | null>(null);
@@ -2856,6 +2867,7 @@ export function App({
 			const link = daemonLinkRef.current;
 			if (!link) return null;
 			daemonLinkRef.current = null;
+			setDaemonAttached(false);
 			const sid = link.client.sessionId;
 			link.off();
 			await link.client.detach().catch(() => {});
@@ -2868,7 +2880,7 @@ export function App({
 
 	/** Join a daemon session (live, or past and restored), replacing the chat with its transcript. */
 	const linkDaemonSession = useCallback(
-		async (sessionId: string): Promise<boolean> => {
+		async (sessionId: string, auto = false): Promise<boolean> => {
 			let client = daemonLinkRef.current?.client;
 			try {
 				if (!client) client = await DaemonSessionClient.connect();
@@ -2899,7 +2911,16 @@ export function App({
 					});
 					daemonLinkRef.current = { client, off };
 				}
+				setDaemonAttached(true);
 				setActiveSessionId(attached.sessionId);
+				// Auto-attach on a fresh chat keeps what the person already sees (the welcome);
+				// a session that has history shows that history, as an explicit attach does.
+				if (auto && attached.transcript.length === 0) {
+					addSystemMessage(
+						"Attached to the 8gent daemon. /sessions detach goes back to this TUI's own 8gent.",
+					);
+					return true;
+				}
 				const restored = attached.transcript.map((m, i) => ({
 					id: `shared-restored-${i}`,
 					role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
@@ -2916,6 +2937,12 @@ export function App({
 				return true;
 			} catch (err) {
 				if (client && daemonLinkRef.current?.client !== client) client.close();
+				if (auto) {
+					addSystemMessage(
+						`Could not attach to the 8gent daemon: ${err instanceof Error ? err.message : String(err)}. Running on this TUI's own 8gent.`,
+					);
+					return false;
+				}
 				addSystemMessage(
 					`Could not open shared session ${sessionId}: ${err instanceof Error ? err.message : String(err)}.\nStart the daemon with \`8gent daemon\`, or use /resume for sessions on this machine.`,
 				);
@@ -2932,6 +2959,22 @@ export function App({
 		if (process.env.EIGHT_TUI_SHARE !== "1" || !activeSessionId || autoSharedRef.current) return;
 		autoSharedRef.current = true;
 		void linkDaemonSession(activeSessionId);
+	}, [activeSessionId, linkDaemonSession]);
+	// Auto-attach (#4829, epic #4792): when a local daemon answers, join it, once per run.
+	// The first screen is already drawn; the probe is bounded (PROBE_BUDGET_MS) and silent
+	// when nothing answers, so a TUI with no daemon behaves exactly as before. A detach
+	// is final for the run (autoSharedRef stays true), and EIGHT_TUI_DAEMON=off skips it.
+	useEffect(() => {
+		if (!activeSessionId || autoSharedRef.current) return;
+		if (process.env.EIGHT_TUI_SHARE === "1" || autoAttachMode() === "off") return;
+		autoSharedRef.current = true;
+		const sid = activeSessionId;
+		void (async () => {
+			if (!(await probeDaemon(daemonHealthUrl()))) return;
+			// Someone typed, or linked by hand, while the probe ran: do not replace their chat.
+			if (daemonLinkRef.current || hasTypedTurn(messagesLatest.current)) return;
+			await linkDaemonSession(sid, true);
+		})();
 	}, [activeSessionId, linkDaemonSession]);
 
 	// Warn once per run when a provider still carries a plain-text key in
@@ -8441,6 +8484,7 @@ export function App({
 					judge={judgeState}
 					sandboxOff={sandboxOff}
 					verification={verificationByTab[activeTabId]}
+					daemonAttached={daemonAttached}
 					djKeys={djKeys}
 					onDjKeysDone={endDjKeys}
 				/>
