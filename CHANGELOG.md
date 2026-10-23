@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.20] - 2026-10-23
+
+### Changed
+- pi-grade slash commands, Did you mean, phone-width /help ([#4799](https://github.com/8gi-foundation/8gent-code/pull/4799))
+
+### Fixed
+- questions about 8gent get no tool tour, home chat asks first, silent runs report ([#4795](https://github.com/8gi-foundation/8gent-code/pull/4795))
+- update reports npm ahead of the GitHub release, hosted providers never refuse a typed line, no repo wording outside a repo ([#4796](https://github.com/8gi-foundation/8gent-code/pull/4796))
+
 ## [0.20.19] - 2026-10-23
 
 ### Added
