@@ -62,6 +62,7 @@ import {
 	settleInterruptedToolCalls,
 } from "./session-journal";
 import type { DaemonChannel } from "./types";
+import { startWakeRouter } from "./wake-wiring";
 
 // EIGHT_DAEMON_PORT is a test-only override (default unchanged) so an
 // isolated instance can run alongside the shared production daemon without
@@ -137,6 +138,7 @@ const STATE_PATH = `${DATA_DIR}/daemon-state.json`;
 
 let server: ReturnType<typeof startGateway> | null = null;
 let pool: AgentPool | null = null;
+let stopWake: (() => void) | null = null;
 let mesh: VesselMesh | null = null;
 
 /** Save active session IDs to disk so they can be resumed after restart */
@@ -170,6 +172,8 @@ async function shutdown(signal: string): Promise<void> {
 		server.stop();
 		server = null;
 	}
+	stopWake?.();
+	stopWake = null;
 	pool?.shutdown(); // releases the work queue lock (#4254)
 	pool = null;
 	bus.clear();
@@ -430,6 +434,9 @@ export async function main(): Promise<void> {
 
 	// Start cron scheduler
 	await startCron();
+
+	// One wake queue and the speak-or-stay-quiet rule (#4868). Off unless EIGHT_WAKE_ROUTER=1.
+	if (process.env.EIGHT_WAKE_ROUTER === "1") stopWake = startWakeRouter();
 
 	// Auto-register daily CEO summary if not present
 	const existingJobs = getJobs();
