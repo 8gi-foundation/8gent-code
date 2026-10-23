@@ -696,16 +696,17 @@ async function updateCommand(args: string[]): Promise<void> {
 		execPath: process.execPath,
 	});
 	// A fresh version is the moment to offer the safety judge (#4811). Asks once, never blocks.
-	if (process.exitCode === 0 || process.exitCode === undefined) await offerSafetyJudge();
+	if (process.exitCode === 0 || process.exitCode === undefined) await offerSafetyJudge(true);
 }
 
 /** Offer the safety judge when none is reachable (#4811). Interactive only; any failure is swallowed. */
-async function offerSafetyJudge(): Promise<void> {
+async function offerSafetyJudge(afterUpdate = false): Promise<void> {
 	try {
 		const { isInteractiveTerminal } = await import("../packages/eight/cli-maintenance.ts");
 		if (!isInteractiveTerminal()) return;
 		const { offerJudge } = await import("../packages/eight/judge-install.ts");
-		await offerJudge("auto");
+		// After an update a stray Enter must not start a 4.9 GB download: default No.
+		await offerJudge("auto", { defaultYes: !afterUpdate });
 	} catch {}
 }
 

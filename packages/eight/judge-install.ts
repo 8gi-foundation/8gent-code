@@ -11,7 +11,17 @@
  * output) is injected, so tests stub the installer and never download.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { resolveHome } from "../core/home";
 import { detectBackend, resolveSharedJudgeHost } from "../decide/probe";
@@ -45,7 +55,9 @@ export interface JudgeDeps {
 	/** Pull the model, reporting percent (0-100) as it goes. Throws on failure. */
 	pull?: (model: string, onPercent: (pct: number) => void) => Promise<void>;
 	/** Ask one yes/no line; resolves null when nobody can answer. */
-	ask?: (line: string) => Promise<boolean | null>;
+	ask?: (line: string, defaultYes: boolean) => Promise<boolean | null>;
+	/** What a bare Enter answers. True on first launch, false after `8gent update` (a stray Enter must not start a download). */
+	defaultYes?: boolean;
 	/** A finished line. */
 	say?: (line: string) => void;
 	/** The single progress status line (rewritten in place on a terminal). */
@@ -55,7 +67,9 @@ export interface JudgeDeps {
 	writeChoice?: (c: JudgeChoice | null) => boolean;
 }
 
-export const JUDGE_ASK_LINE = `Install the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE})? It checks risky commands before they run. [Y/n]`;
+export const judgeAskLine = (defaultYes = true): string =>
+	`Install the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE})? It checks risky commands before they run. ${defaultYes ? "[Y/n]" : "[y/N]"}`;
+export const JUDGE_ASK_LINE = judgeAskLine(true);
 
 export const JUDGE_UNSUPPORTED_LINE =
 	"The safety judge needs Ollama, which is not available here, so risky commands are checked by the built-in safety rules only. " +
@@ -102,15 +116,35 @@ export function writeChoice(
 	}
 	if (c === null) delete cfg.judgeInstall;
 	else cfg.judgeInstall = { choice: c, at: now.toISOString() };
+	let tmp = "";
 	try {
-		mkdirSync(dirname(p), { recursive: true });
-		const tmp = `${p}.tmp-${process.pid}`;
-		writeFileSync(tmp, `${JSON.stringify(cfg, null, 2)}\n`);
-		renameSync(tmp, p);
+		// A symlinked config stays a symlink: write next to the real target and rename over that.
+		const target = existsSync(p) && lstatSync(p).isSymbolicLink() ? realpathSync(p) : p;
+		mkdirSync(dirname(target), { recursive: true });
+		// Keep the existing mode; a new file is private (it can hold keys).
+		const mode = existsSync(target) ? statSync(target).mode & 0o777 : 0o600;
+		tmp = `${target}.tmp-${process.pid}`;
+		writeFileSync(tmp, `${JSON.stringify(cfg, null, 2)}\n`, { mode });
+		renameSync(tmp, target);
 		return true;
 	} catch {
+		if (tmp) {
+			try {
+				unlinkSync(tmp);
+			} catch {}
+		}
 		return false;
 	}
+}
+
+/** Text from another process, safe to print: control characters (escape codes included) removed, capped. */
+export function cleanText(s: string, max = 200): string {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point
+	const t = s
+		.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+	return t.length > max ? `${t.slice(0, max - 3)}...` : t;
 }
 
 // ── real side effects (defaults) ─────────────────────────────────────────
@@ -124,56 +158,84 @@ async function defaultOllama(env: Env): Promise<"up" | "installed" | "none"> {
 	return findOnPath("ollama", env) ? "installed" : "none";
 }
 
-/** Ollama `/api/pull`, streamed NDJSON: {status, total, completed} lines, or {error}. */
-async function defaultPull(
-	env: Env,
+export const PULL_IDLE_MS = 60_000;
+
+/** Ollama `/api/pull`, streamed NDJSON: {status, total, completed} lines, or {error}. Fails cleanly after `idleMs` with no bytes. */
+export async function pullModel(
+	fetchImpl: (url: string, init?: RequestInit) => Promise<Response>,
+	host: string,
 	model: string,
 	onPercent: (pct: number) => void,
+	idleMs = PULL_IDLE_MS,
 ): Promise<void> {
-	const host = resolveSharedJudgeHost(env);
-	const res = await fetch(`${host}/api/pull`, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ model, stream: true }),
-	});
-	if (!res.ok || !res.body) throw new Error(`Ollama answered ${res.status} to the pull`);
-	const reader = res.body.getReader();
-	const dec = new TextDecoder();
-	let buf = "";
-	let done = false;
-	const handle = (line: string) => {
-		if (!line.trim()) return;
-		const j = JSON.parse(line) as {
-			error?: string;
-			status?: string;
-			total?: number;
-			completed?: number;
-		};
-		if (j.error) throw new Error(j.error);
-		if (j.status === "success") done = true;
-		if (j.total && j.completed !== undefined)
-			onPercent(Math.min(100, Math.floor((j.completed / j.total) * 100)));
+	const ctl = new AbortController();
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	let idled = false;
+	let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+	const arm = () => {
+		clearTimeout(timer);
+		timer = setTimeout(() => {
+			idled = true;
+			ctl.abort();
+			// A stalled body does not always react to the abort: end the read ourselves.
+			reader?.cancel().catch(() => {});
+		}, idleMs);
 	};
-	for (;;) {
-		const { value, done: end } = await reader.read();
-		if (end) break;
-		buf += dec.decode(value, { stream: true });
-		const lines = buf.split("\n");
-		buf = lines.pop() ?? "";
-		for (const l of lines) handle(l);
+	const idleError = () => new Error(`Ollama sent nothing for ${Math.round(idleMs / 1000)} s`);
+	arm();
+	try {
+		const res = await fetchImpl(`${host}/api/pull`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ model, stream: true }),
+			signal: ctl.signal,
+		});
+		if (!res.ok || !res.body) throw new Error(`Ollama answered ${res.status} to the pull`);
+		reader = res.body.getReader();
+		const dec = new TextDecoder();
+		let buf = "";
+		let done = false;
+		const handle = (line: string) => {
+			if (!line.trim()) return;
+			const j = JSON.parse(line) as {
+				error?: string;
+				status?: string;
+				total?: number;
+				completed?: number;
+			};
+			if (j.error) throw new Error(cleanText(String(j.error)));
+			if (j.status === "success") done = true;
+			if (j.total && j.completed !== undefined)
+				onPercent(Math.min(100, Math.floor((j.completed / j.total) * 100)));
+		};
+		for (;;) {
+			const { value, done: end } = await reader.read();
+			if (end) break;
+			arm();
+			buf += dec.decode(value, { stream: true });
+			const lines = buf.split("\n");
+			buf = lines.pop() ?? "";
+			for (const l of lines) handle(l);
+		}
+		handle(buf);
+		if (!done) throw new Error("the download ended before Ollama reported success");
+	} catch (err) {
+		if (idled) throw idleError();
+		throw err;
+	} finally {
+		clearTimeout(timer);
 	}
-	handle(buf);
-	if (!done) throw new Error("the download ended before Ollama reported success");
 }
 
-/** One-line y/n on stdin. Empty answer is yes. Null when stdin is not a terminal. */
-export async function askYesNoLine(line: string): Promise<boolean | null> {
+/** One-line y/n on stdin. An empty answer is `defaultYes`. Null when stdin is not a terminal. */
+export async function askYesNoLine(line: string, defaultYes = true): Promise<boolean | null> {
 	if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
 	const { createInterface } = await import("node:readline/promises");
 	const rl = createInterface({ input: process.stdin, output: process.stdout });
 	try {
 		const a = (await rl.question(`${line} `)).trim().toLowerCase();
-		return a === "" || a === "y" || a === "yes";
+		if (a === "") return defaultYes;
+		return a === "y" || a === "yes";
 	} finally {
 		rl.close();
 	}
@@ -203,7 +265,7 @@ async function install(d: InstallDeps, from: "auto" | "command"): Promise<JudgeO
 		d.writeChoice(null);
 		return "installed";
 	} catch (err) {
-		const why = err instanceof Error ? err.message : String(err);
+		const why = cleanText(err instanceof Error ? err.message : String(err));
 		d.say(
 			`Could not install the safety judge: ${why}. Risky commands are checked by the built-in safety rules only. Run /judge install to try again.`,
 		);
@@ -226,7 +288,10 @@ export async function offerJudge(
 	const d = {
 		probe: deps.probe ?? (() => detectBackend({ env })),
 		ollama: deps.ollama ?? (() => defaultOllama(env)),
-		pull: deps.pull ?? ((m: string, p: (n: number) => void) => defaultPull(env, m, p)),
+		pull:
+			deps.pull ??
+			((m: string, p: (n: number) => void) =>
+				pullModel((u, i) => fetch(u, i), resolveSharedJudgeHost(env), m, p)),
 		say,
 		progress: deps.progress ?? terminalProgress,
 		readChoice: deps.readChoice ?? (() => readChoice(env)),
@@ -257,7 +322,8 @@ export async function offerJudge(
 	}
 
 	if (mode === "auto") {
-		const yes = await (deps.ask ?? askYesNoLine)(JUDGE_ASK_LINE);
+		const defaultYes = deps.defaultYes ?? true;
+		const yes = await (deps.ask ?? askYesNoLine)(judgeAskLine(defaultYes), defaultYes);
 		if (yes === null) return "no-person";
 		if (!yes) {
 			d.writeChoice("declined");

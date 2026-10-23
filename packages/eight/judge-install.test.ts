@@ -1,5 +1,17 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,8 +21,11 @@ import {
 	JUDGE_UNSUPPORTED_LINE,
 	type JudgeChoice,
 	type JudgeDeps,
+	cleanText,
 	configPath,
+	judgeAskLine,
 	offerJudge,
+	pullModel,
 	readChoice,
 	writeChoice,
 } from "./judge-install";
@@ -209,5 +224,113 @@ describe("config record", () => {
 		expect(readFileSync(p, "utf-8")).toBe("{ not json");
 		expect(readChoice(env)).toBe("corrupt");
 		expect(existsSync(p)).toBe(true);
+	});
+});
+
+describe("config write safety", () => {
+	const dirs: string[] = [];
+	const home = () => {
+		const d = mkdtempSync(join(tmpdir(), "judge-sym-"));
+		dirs.push(d);
+		return d;
+	};
+	afterAll(() => {
+		for (const d of dirs) rmSync(d, { recursive: true, force: true });
+	});
+
+	test("a symlinked config stays a symlink and the real target is updated in place", () => {
+		const h = home();
+		const real = join(h, "dotfiles", "config.json");
+		mkdirSync(join(h, "dotfiles"));
+		writeFileSync(real, JSON.stringify({ key: "secret" }), { mode: 0o600 });
+		chmodSync(real, 0o600);
+		mkdirSync(join(h, ".8gent"));
+		symlinkSync(real, join(h, ".8gent", "config.json"));
+		const env = { EIGHT_HOME: h };
+		expect(writeChoice("declined", env)).toBe(true);
+		expect(lstatSync(configPath(env)).isSymbolicLink()).toBe(true);
+		const j = JSON.parse(readFileSync(real, "utf-8"));
+		expect(j.key).toBe("secret");
+		expect(j.judgeInstall.choice).toBe("declined");
+		expect(statSync(real).mode & 0o777).toBe(0o600);
+		expect(readdirSync(join(h, "dotfiles"))).toEqual(["config.json"]);
+	});
+
+	test("an existing mode is kept, a new file is 0600", () => {
+		const h = home();
+		const env = { EIGHT_HOME: h };
+		writeChoice("declined", env);
+		expect(statSync(configPath(env)).mode & 0o777).toBe(0o600);
+		chmodSync(configPath(env), 0o640);
+		writeChoice("failed", env);
+		expect(statSync(configPath(env)).mode & 0o777).toBe(0o640);
+	});
+});
+
+describe("cleanText", () => {
+	test("strips escape and control characters and caps length", () => {
+		expect(cleanText("bad\x1b[2J\x07 thing\r\nnext")).toBe("bad [2J thing next");
+		expect(cleanText("x".repeat(500)).length).toBe(200);
+	});
+});
+
+describe("pullModel", () => {
+	const enc = new TextEncoder();
+	const streamOf = (chunks: string[], stall = false) =>
+		new Response(
+			new ReadableStream({
+				start(c) {
+					for (const x of chunks) c.enqueue(enc.encode(x));
+					if (!stall) c.close();
+				},
+			}),
+		);
+
+	test("reports percent and succeeds on success", async () => {
+		const pct: number[] = [];
+		await pullModel(
+			async () => streamOf(['{"total":100,"completed":50}\n{"status":"success"}\n']),
+			"http://h",
+			"m",
+			(n) => pct.push(n),
+		);
+		expect(pct).toEqual([50]);
+	});
+
+	test("an error line is printed clean", async () => {
+		await expect(
+			pullModel(
+				async () => streamOf(['{"error":"boom\\u001b[31m red"}\n']),
+				"http://h",
+				"m",
+				() => {},
+			),
+		).rejects.toThrow("boom [31m red");
+	});
+
+	test("no bytes for the idle window fails cleanly", async () => {
+		const f = (_u: string, init?: RequestInit) => {
+			const res = streamOf(['{"total":100,"completed":1}\n'], true);
+			init?.signal?.addEventListener("abort", () => {});
+			return Promise.resolve(res);
+		};
+		await expect(pullModel(f, "http://h", "m", () => {}, 40)).rejects.toThrow("nothing for");
+	});
+});
+
+describe("update path default is No", () => {
+	test("defaultYes false shows [y/N] and passes it to the prompt", async () => {
+		const r = rig();
+		let seen = null as [string, boolean] | null;
+		r.deps.defaultYes = false;
+		r.deps.ask = async (l, d) => {
+			seen = [l, d];
+			return d; // a bare Enter answers the default
+		};
+		expect(await offerJudge("auto", r.deps)).toBe("declined");
+		expect(seen?.[0]).toEndWith("[y/N]");
+		expect(seen?.[1]).toBe(false);
+		expect(r.log.pulls).toEqual([]);
+		expect(judgeAskLine(true)).toEndWith("[Y/n]");
 	});
 });
