@@ -9,6 +9,27 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.25] - 2026-10-23
+
+### Added
+- daemon: hold urgent wake events through quiet hours, cap the wake payload files ([#4888](https://github.com/8gi-foundation/8gent-code/pull/4888))
+- daemon: wake router, one queue and a deterministic speak-or-stay-quiet rule ([#4874](https://github.com/8gi-foundation/8gent-code/pull/4874))
+- memory: 8gent memory serve, read-only memory over stdio ([#4879](https://github.com/8gi-foundation/8gent-code/pull/4879))
+- decide: 8J allow and block lines fitted on a held-out judge set (#4859) ([#4863](https://github.com/8gi-foundation/8gent-code/pull/4863))
+- decide: 8J judge backend with a loopback serve_8j.py, fail closed (#4858) ([#4861](https://github.com/8gi-foundation/8gent-code/pull/4861))
+
+### Changed
+- macOS launchd, every compiled target and the Swift apps get a real CI run (#4862 G03, G04, G05) ([#4885](https://github.com/8gi-foundation/8gent-code/pull/4885))
+- daemon: bridge flow tests no longer read the operator's real voice state (#4875) ([#4876](https://github.com/8gi-foundation/8gent-code/pull/4876))
+
+### Fixed
+- permissions: read boundary on by default for shell commands, confine every file read tool ([#4886](https://github.com/8gi-foundation/8gent-code/pull/4886))
+- daemon: run on Node and Termux, android service backend, daemon in the Termux smoke ([#4878](https://github.com/8gi-foundation/8gent-code/pull/4878))
+- a refused redirect tells the user which URL setting to change ([#4882](https://github.com/8gi-foundation/8gent-code/pull/4882))
+- decide: guard rules read a crafted command in linear time ([#4866](https://github.com/8gi-foundation/8gent-code/pull/4866))
+- judge and proxy fetches refuse a redirect ([#4873](https://github.com/8gi-foundation/8gent-code/pull/4873))
+- decide: guard rules for fork bomb, keychain dump, credential reads, shutdown, key export ([#4856](https://github.com/8gi-foundation/8gent-code/pull/4856))
+
 ## [0.20.24] - 2026-10-23
 
 ### Changed
