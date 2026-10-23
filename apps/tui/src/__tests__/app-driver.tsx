@@ -77,7 +77,10 @@ export async function bootApp(
 	cols = 160,
 	rows = 44,
 	/** Launch flags. The default pins ollama, as most harnesses want; pass `{}` for a plain launch. */
-	cli: { provider?: string; model?: string } = { provider: "ollama", model: "none" },
+	cli: { provider?: string; model?: string; resume?: string } = {
+		provider: "ollama",
+		model: "none",
+	},
 ): Promise<DrivenApp> {
 	const { render } = await import("ink");
 	const { App } = await import("../app.js");
@@ -85,7 +88,13 @@ export async function bootApp(
 	const stdout = makeStdout(cols, rows);
 	let exited = false;
 	const app = render(
-		<App initialCommand="" args={[]} cliProvider={cli.provider} cliModel={cli.model} />,
+		<App
+			initialCommand=""
+			args={[]}
+			cliProvider={cli.provider}
+			cliModel={cli.model}
+			sessionResume={cli.resume}
+		/>,
 		{
 			stdin: stdin as unknown as NodeJS.ReadStream,
 			stdout: stdout as unknown as NodeJS.WriteStream,

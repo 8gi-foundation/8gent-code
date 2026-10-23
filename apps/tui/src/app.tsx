@@ -136,6 +136,7 @@ import {
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
 import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gate.js";
+import { messageId } from "./lib/message-id.js";
 import { motionEnabled } from "./lib/motion.js";
 import {
 	SETUP_SKIP_HINT,
@@ -2381,7 +2382,7 @@ export function App({
 				setMessages((prev) => [
 					...prev,
 					{
-						id: `setup-check-${next?.provider}-${Date.now()}`,
+						id: messageId(`setup-check-${next?.provider}`),
 						role: "system" as const,
 						content: providerCheckLine(name, live, live ? undefined : next?.installHint),
 						timestamp: new Date(),
@@ -2729,7 +2730,7 @@ export function App({
 	const addSetupQuestion = useCallback((content: string) => {
 		setMessages((prev) => [
 			...prev,
-			{ id: `setup-q-${Date.now()}`, role: "assistant" as const, content, timestamp: new Date() },
+			{ id: messageId("setup-q"), role: "assistant" as const, content, timestamp: new Date() },
 		]);
 	}, []);
 
@@ -2737,7 +2738,7 @@ export function App({
 		setMessages((prev) => [
 			...prev,
 			{
-				id: `system-${Date.now()}`,
+				id: messageId("system"),
 				role: "system" as const,
 				content,
 				timestamp: new Date(),
@@ -3011,7 +3012,7 @@ export function App({
 					const key = `${event.requested}>${event.provider}:${event.used}|${event.reason ?? ""}`;
 					if (shouldShowRouteNotice(shown, key)) {
 						appendToTab(tabId, {
-							id: `model-routed-${Date.now()}`,
+							id: messageId("model-routed"),
 							role: "system" as const,
 							content: providerRouteNotice(
 								event.requested,
@@ -3233,7 +3234,7 @@ export function App({
 				if (event.text?.trim() && event.stepNumber === 0 && (event.toolCalls?.length ?? 0) > 0) {
 					const t = event.text.trim();
 					appendToTab(tabId, {
-						id: `system-step0-${Date.now()}`,
+						id: messageId("system-step0"),
 						role: "system" as const,
 						content: t.length > 720 ? `${t.slice(0, 717)}...` : t,
 						timestamp: new Date(),
@@ -3304,7 +3305,7 @@ export function App({
 				}
 				if (event.total > 0) {
 					appendToTab(tabId, {
-						id: `evidence-summary-${Date.now()}`,
+						id: messageId("evidence-summary"),
 						role: "system" as const,
 						content: `[Evidence: ${event.verified}/${event.total} verified]`,
 						timestamp: new Date(),
@@ -3370,7 +3371,7 @@ export function App({
 			} else if (lastReadinessNoticeRef.current === content) return;
 			lastReadinessNoticeRef.current = content;
 			appendToTab(tabId, {
-				id: `provider-readiness-${Date.now()}`,
+				id: messageId("provider-readiness"),
 				role: "system" as const,
 				content,
 				timestamp: new Date(),
@@ -3621,7 +3622,7 @@ export function App({
 							const cfg = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 							if (cfg.personal?.autoRetrain !== false) {
 								appendToTab(_initTabId, {
-									id: `personal-lora-${Date.now()}`,
+									id: messageId("personal-lora"),
 									role: "system" as const,
 									content: `Personal LoRA detected. Loaded on top of ${currentModel}.`,
 									timestamp: new Date(),
@@ -3738,7 +3739,7 @@ export function App({
 					setMessages((prev) => [
 						...prev,
 						{
-							id: `clarify-${Date.now()}`,
+							id: messageId("clarify"),
 							role: "system" as const,
 							content: `Quick question: ${clarification}`,
 							timestamp: new Date(),
@@ -4037,7 +4038,7 @@ export function App({
 					setContextUsed(0);
 					setMessages([
 						{
-							id: `cleared-${Date.now()}`,
+							id: messageId("cleared"),
 							role: "system",
 							content: "Screen cleared.",
 							timestamp: new Date(),
@@ -7196,7 +7197,7 @@ export function App({
 					}
 				} else {
 					appendToTab(tabId, {
-						id: `system-ext-${Date.now()}`,
+						id: messageId("system-ext"),
 						role: "system" as const,
 						content: `[${preset.label}] ${result.error || "no output"}\n\nCommand: ${result.command}\nDuration: ${result.durationMs}ms${
 							result.exitCode !== null && result.exitCode !== undefined
@@ -7236,7 +7237,7 @@ export function App({
 
 			if (!currentModel) {
 				appendToTab(tabId, {
-					id: `system-no-model-${Date.now()}`,
+					id: messageId("system-no-model"),
 					role: "system" as const,
 					content:
 						"[No model available] No Ollama models detected.\n" +
@@ -7408,7 +7409,7 @@ export function App({
 				// branch used to print a random canned "Task complete" with invented
 				// numbers (files analyzed, tokens saved), which reads as real work.
 				appendToTab(tabId, {
-					id: `system-agent-not-ready-${Date.now()}`,
+					id: messageId("system-agent-not-ready"),
 					role: "system" as const,
 					content: notReadyReasonRef.current
 						? `[8gent not ready] Nothing was run.\n${notReadyReasonRef.current}`
