@@ -404,11 +404,11 @@ describe("rules: nesting", () => {
 			["cat <<EOF > ~/.zshrc\nexport A=1\nEOF", "block", "truncate_sensitive_file"],
 		]));
 
-	it("nesting deeper than the limit escalates instead of passing", () => {
+	it("nesting deeper than the limit blocks instead of passing", () => {
 		let cmd = "ls";
 		for (let i = 0; i < 9; i++) cmd = `eval ${JSON.stringify(cmd)}`;
 		const r = decideRules(cmd);
-		expect(r.verdict).toBe("escalate");
+		expect(r.verdict).toBe("block");
 		expect(r.rules).toContain("nesting_too_deep");
 	});
 });
