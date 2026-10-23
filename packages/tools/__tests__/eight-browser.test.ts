@@ -2305,6 +2305,51 @@ describeNotWin(
 			expect(spawns).toBe(0);
 		});
 
+		test("under a host sandbox a profile the harness already started is attached, never spawned (#4305)", async () => {
+			const { server, tokens } = serveCall(nextSite().call, "run-tok");
+			try {
+				let spawns = 0;
+				_setSpawnForTest(() => {
+					spawns++;
+					return { exited: Promise.resolve("exited with SIGTRAP") };
+				});
+				_setHostSandboxedForTest(true);
+				_setProfileHomeForTest(profileHome("eight-local", { token: "run-tok", port: server.port }));
+				const env = {
+					EIGHT_BROWSER_PROFILE: "eight-local",
+					EIGHT_BROWSER_APP: "/fake/8gent Browser",
+				};
+				const call = wsTransport({ env });
+				expect(await call("tab.open", { url: "http://127.0.0.1:1/" })).toEqual({ id: "t9" });
+				expect(tokens).toEqual(["run-tok"]); // the profile's own token, nothing else
+				expect(spawns).toBe(0);
+			} finally {
+				server.stop(true);
+			}
+		});
+
+		test("under a host sandbox a profile that comes up after a failed first call is attached on the next call (#4305)", async () => {
+			const { server } = serveCall(nextSite().call, "run-tok");
+			try {
+				_setSpawnForTest(() => ({ exited: Promise.resolve("exited with SIGTRAP") }));
+				_setHostSandboxedForTest(true);
+				const home = profileHome("eight-local", {});
+				_setProfileHomeForTest(home);
+				const env = {
+					EIGHT_BROWSER_PROFILE: "eight-local",
+					EIGHT_BROWSER_APP: "/fake/8gent Browser",
+				};
+				const call = wsTransport({ env });
+				await expect(call("tabs.list")).rejects.toThrow(/inside a macOS sandbox/);
+				const dir = join(home, ".8gent", "browser-profiles", "eight-local");
+				writeFileSync(join(dir, "browser-control.token"), "run-tok\n");
+				writeFileSync(join(dir, "browser-control.port"), String(server.port));
+				expect(await call("tab.open", { url: "http://127.0.0.1:1/" })).toEqual({ id: "t9" });
+			} finally {
+				server.stop(true);
+			}
+		});
+
 		test("a child that crashes leaves its last stderr line in the reason and a launch log by the port file (#4099)", async () => {
 			const home = mkdtempSync(join(tmpdir(), "8b-launch-home-"));
 			const app = join(home, "fake-browser.sh");
