@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { scrub } from "../../eight/secret-scanner.js";
 import type { SessionEntry } from "./index.js";
 
 export type LedgerRecord =
@@ -65,8 +66,13 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0,
 /** Append one line and fsync it. Open per record: no long-lived fd to lose (#4774). */
 export function appendRecord(key: string, rec: LedgerRecord): void {
 	const file = ledgerPath(key);
-	fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-	const fd = fs.openSync(file, "a", 0o600);
+	const dir = path.dirname(file);
+	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	// The folder must be ours and private, whatever made it first.
+	if (!fs.lstatSync(dir).isDirectory()) throw new Error(`${dir} is not a directory`);
+	fs.chmodSync(dir, 0o700);
+	const c = fs.constants;
+	const fd = openOwnFile(file, c.O_WRONLY | c.O_APPEND | c.O_CREAT);
 	try {
 		fs.writeSync(fd, `${JSON.stringify(rec)}\n`);
 		fs.fsyncSync(fd);
@@ -75,9 +81,36 @@ export function appendRecord(key: string, rec: LedgerRecord): void {
 	}
 }
 
-function hintOf(args: Record<string, unknown> | undefined): string | undefined {
+/**
+ * Open the ledger the way SessionWriter opens its log (#4774, #4776): O_NOFOLLOW so
+ * a planted symlink cannot redirect it, a regular file only, and 0600 even on a
+ * file that existed before. Opened per record, so no inode check is needed.
+ */
+function openOwnFile(file: string, flags: number): number {
+	const fd = fs.openSync(file, flags | (fs.constants.O_NOFOLLOW ?? 0), 0o600);
+	try {
+		const st = fs.fstatSync(fd);
+		if (!st.isFile()) throw new Error(`${file} is not a regular file`);
+		if ((st.mode & 0o777) !== 0o600 && flags & fs.constants.O_WRONLY) fs.fchmodSync(fd, 0o600);
+		return fd;
+	} catch (err) {
+		fs.closeSync(fd);
+		throw err;
+	}
+}
+
+/**
+ * What the person sees to identify the call. Secrets are scrubbed with the tool
+ * runner's scanner, and query strings and URL credentials are dropped outright:
+ * the hint is shown on resume and sent to the model by /durable retry.
+ */
+export function hintOf(args: Record<string, unknown> | undefined): string | undefined {
 	const v = args?.path ?? args?.file_path ?? args?.command ?? args?.url;
-	return typeof v === "string" ? v.slice(0, 120) : undefined;
+	if (typeof v !== "string") return undefined;
+	return scrub(v)
+		.scrubbed.replace(/(\w+:\/\/)[^\s/@]+@/g, "$1")
+		.replace(/(\w+:\/\/[^\s?"']*)\?[^\s"']*/g, "$1?...")
+		.slice(0, 120);
 }
 
 /**
@@ -123,7 +156,12 @@ let warned = false;
 export function readLedger(key: string): LedgerRecord[] {
 	let text: string;
 	try {
-		text = fs.readFileSync(ledgerPath(key), "utf8");
+		const fd = openOwnFile(ledgerPath(key), fs.constants.O_RDONLY);
+		try {
+			text = fs.readFileSync(fd, "utf8");
+		} finally {
+			fs.closeSync(fd);
+		}
 	} catch {
 		return [];
 	}

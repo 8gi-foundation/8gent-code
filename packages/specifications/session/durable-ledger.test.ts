@@ -4,6 +4,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	appendRecord,
+	hintOf,
 	interruptedCalls,
 	ledgerPath,
 	planResume,
@@ -128,5 +130,52 @@ w.writeToolResult("c2", true, "ok", 3, "write_file");
 		setDurableSession(null);
 		w.writeToolCall(call("b", "write_file", { path: "b" }));
 		expect(fs.existsSync(path.join(home, ".8gent", "sessions", "durable"))).toBe(false);
+	});
+});
+
+describe("durable ledger hardening (#4805 review)", () => {
+	test("a Bearer header and a ?token= URL never reach the ledger or the retry prompt", () => {
+		setDurableEnabled(true);
+		setDurableSession("s6");
+		const w = new SessionWriter("eight-6", path.join(home, "sessions"));
+		const bearer = "abcdefghijklmnopqrstuvwxyz0123456789";
+		w.writeToolCall(
+			call("a", "run_command", {
+				command: `curl -H "Authorization: Bearer ${bearer}" https://api.x.dev/v1`,
+			}),
+		);
+		w.writeToolCall(
+			call("b", "web_fetch", { url: "https://u:pw123@api.x.dev/data?token=t0k3n&id=1" }),
+		);
+		const raw = fs.readFileSync(ledgerPath("s6"), "utf8");
+		const prompt = retryPrompt(planResume(interruptedCalls("s6"), isReadOnly));
+		for (const text of [raw, prompt]) {
+			expect(text).not.toContain(bearer);
+			expect(text).not.toContain("t0k3n");
+			expect(text).not.toContain("pw123");
+		}
+		expect(prompt).toContain("https://api.x.dev/data?...");
+		expect(hintOf({ path: "src/app.ts" })).toBe("src/app.ts");
+	});
+
+	test("a planted symlink is refused, not followed", () => {
+		const victim = path.join(home, "victim.txt");
+		fs.writeFileSync(victim, "keep\n");
+		fs.mkdirSync(path.dirname(ledgerPath("s7")), { recursive: true });
+		fs.symlinkSync(victim, ledgerPath("s7"));
+		expect(() => appendRecord("s7", { k: "turn", at: "now" })).toThrow();
+		expect(fs.readFileSync(victim, "utf8")).toBe("keep\n");
+		expect(interruptedCalls("s7")).toEqual([]);
+	});
+
+	test("an existing ledger and folder are made private", () => {
+		const file = ledgerPath("s8");
+		fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o755 });
+		fs.chmodSync(path.dirname(file), 0o755);
+		fs.writeFileSync(file, "", { mode: 0o644 });
+		fs.chmodSync(file, 0o644);
+		appendRecord("s8", { k: "turn", at: "now" });
+		expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+		expect(fs.statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
 	});
 });

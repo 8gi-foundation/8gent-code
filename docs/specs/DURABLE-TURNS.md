@@ -70,6 +70,15 @@ record means there is no long-lived descriptor to lose (the #4774 class of bug).
 fsync per tool boundary, milliseconds against tool calls that take seconds. A torn last line from
 a kill mid-write is skipped on read; every record before it stands.
 
+The file is opened like the session log (#4774, #4776): `O_NOFOLLOW`, regular file only, 0600 on
+the file and 0700 on the folder even when they existed before. Hints go through the tool runner's
+secret scanner (`packages/eight/secret-scanner.ts`), and URL query strings and credentials are
+removed, because a hint is shown on resume and sent to the model by `/durable retry`.
+
+Why not next to the session log: that file is keyed by the 8gent's own session id, which
+`--resume` never sees, and it is written without fsync. The ledger is keyed by the resume id so
+resume finds it with no index, and it stays small enough to read whole on a phone.
+
 ### Resume rules
 
 1. Open calls are intents with no effect and no resolve.
