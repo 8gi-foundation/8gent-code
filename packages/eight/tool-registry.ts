@@ -157,6 +157,11 @@ const READONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /** True when the named tool is safe to serve from ToolResultCache. */
+/** Every read-only tool name (durable retry offers only these plus the verifiable writes). */
+export function readOnlyToolNames(): ReadonlySet<string> {
+	return READONLY_TOOL_NAMES;
+}
+
 export function isReadOnlyTool(toolName: string): boolean {
 	return READONLY_TOOL_NAMES.has(toolName);
 }

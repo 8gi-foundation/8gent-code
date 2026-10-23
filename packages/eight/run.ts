@@ -62,6 +62,12 @@ export interface RunOptions {
 	noSession: boolean;
 	/** `--session-dir <dir>`: where sessions are read and written. */
 	sessionDir?: string;
+	/** `--durable`: write the intent/effect ledger (docs/specs/DURABLE-TURNS.md). */
+	durable?: boolean;
+	/** `--durable-retry`: on resume, 8gent checks and redoes what an interrupted turn left open. */
+	durableRetry?: boolean;
+	/** `--durable-skip`: on resume, leave an interrupted turn's open calls as they are. */
+	durableSkip?: boolean;
 	/** `--allow-read <dir>` (repeatable): folders the run may read outside its working directory (#4715). */
 	allowRead?: string[];
 }
@@ -110,6 +116,9 @@ export function parseRunArgs(argv: string[]): RunOptions {
 	let session: string | undefined;
 	let noSession = false;
 	let sessionDir: string | undefined;
+	let durable = false;
+	let durableRetry = false;
+	let durableSkip = false;
 	const allowRead: string[] = [];
 	const positional: string[] = [];
 
@@ -225,6 +234,26 @@ export function parseRunArgs(argv: string[]): RunOptions {
 			continueLatest = true;
 			continue;
 		}
+		if (a === "--durable") {
+			durable = true;
+			continue;
+		}
+		if (a === "--durable-retry") {
+			durableRetry = true;
+			continue;
+		}
+		if (a === "--durable-skip") {
+			durableSkip = true;
+			continue;
+		}
+		// `--resume <id>` names a session like --session; a bare `--resume` last on the line is --continue.
+		if (a === "--resume" || a.startsWith("--resume=")) {
+			const v = a === "--resume" ? argv[i + 1] : a.slice("--resume=".length);
+			if (a === "--resume" && v && !v.startsWith("-")) i++;
+			if (v && !v.startsWith("-")) session = v;
+			else continueLatest = true;
+			continue;
+		}
 		if (a === "--no-session") {
 			noSession = true;
 			continue;
@@ -260,6 +289,9 @@ export function parseRunArgs(argv: string[]): RunOptions {
 		session,
 		noSession,
 		sessionDir,
+		...(durable ? { durable } : {}),
+		...(durableRetry ? { durableRetry } : {}),
+		...(durableSkip ? { durableSkip } : {}),
 		...(allowRead.length ? { allowRead } : {}),
 	};
 }
@@ -855,6 +887,12 @@ export function liveProviderChoiceDeps(): ProviderChoiceDeps {
 	};
 }
 
+async function hasDurableLedger(id: string): Promise<boolean> {
+	const { readLedger } = await import("../specifications/session/durable-ledger.js");
+	return /^[A-Za-z0-9._-]+$/.test(id) && readLedger(id).length > 0;
+}
+const isStreamJsonOut = (o: RunOptions) => o.outputFormat === "stream-json";
+
 export async function runRunCommand(
 	argv: string[],
 	deps: { sessions?: RunSessionStore; stdin?: () => Promise<string> } = {},
@@ -885,6 +923,49 @@ export async function runRunCommand(
 		}
 		return 1;
 	}
+
+	// Durable turns, slice 3 (docs/specs/DURABLE-TURNS.md): a resumed run honours the
+	// ledger before any model is chosen. Headless never prompts: open calls stop the
+	// run unless --durable-retry or --durable-skip says what to do.
+	let durablePreamble: string | undefined;
+	{
+		const key =
+			opts.session ??
+			(opts.continueLatest && !opts.noSession
+				? (deps.sessions ?? defaultRunSessionStore(opts.sessionDir)).latestForCwd(
+						resolvePath(opts.cwd || process.cwd()),
+					)?.id
+				: undefined);
+		if (key) {
+			const { headlessDurableGate, setDurableRoot } = await import(
+				"../specifications/session/durable-verify.js"
+			);
+			setDurableRoot(resolvePath(opts.cwd || process.cwd()));
+			const { readOnlyToolNames } = await import("./tool-registry");
+			const gate = headlessDurableGate(
+				key,
+				{ retry: Boolean(opts.durableRetry), skip: Boolean(opts.durableSkip) },
+				readOnlyToolNames(),
+			);
+			for (const line of gate.text) process.stderr.write(`${line}\n`);
+			if (gate.exit !== undefined) {
+				if (opts.outputFormat === "stream-json")
+					emit({
+						type: "error",
+						subtype: "usage",
+						message: gate.text.join("\n"),
+					});
+				return gate.exit;
+			}
+			durablePreamble = gate.preamble;
+			if (gate.allow) {
+				// The same filter --tools uses: not offered, refused before it runs, run_batch items too.
+				const { getModeManager } = await import("./modes");
+				getModeManager().applyToolAllowlist(gate.allow, "Durable retry");
+			}
+		}
+	}
+	if (durablePreamble) opts.prompt = `${durablePreamble}\n\n${opts.prompt}`;
 
 	// --yes: auto-approve tool calls for the duration of this run.
 	// NemoClaw's PermissionManager.setAutoApprove(true) bypasses prompts for
@@ -983,7 +1064,7 @@ export async function runRunCommand(
 				})();
 		if (found) {
 			resumeFrom = { id: found.id, messages: found.messages };
-		} else if (opts.session) {
+		} else if (opts.session && !(await hasDurableLedger(opts.session))) {
 			const err = `Error: no session "${opts.session}" to continue.`;
 			if (opts.outputFormat === "stream-json")
 				emit({ type: "error", subtype: "usage", message: err });
@@ -993,7 +1074,20 @@ export async function runRunCommand(
 			process.stderr.write("[run] no earlier session in this folder; starting a new one.\n");
 		}
 	}
-	const sessionId = resumeFrom?.id ?? `run-${Date.now()}`;
+	// A run killed before it saved has only its durable ledger: it keeps that id.
+	const sessionId =
+		resumeFrom?.id ??
+		(opts.session && (await hasDurableLedger(opts.session)) ? opts.session : `run-${Date.now()}`);
+	{
+		const ledger = await import("../specifications/session/durable-ledger.js");
+		if (opts.durable) ledger.setDurableEnabled(true);
+		if (ledger.isDurableEnabled()) {
+			const { setDurableRoot } = await import("../specifications/session/durable-verify.js");
+			setDurableRoot(resolvePath(opts.cwd || process.cwd()));
+			ledger.setDurableSession(sessionId);
+			if (!isStreamJsonOut(opts)) process.stderr.write(`[durable] session ${sessionId}\n`);
+		}
+	}
 
 	const isStreamJson = opts.outputFormat === "stream-json";
 	const events: AgentEventCallbacks = isStreamJson

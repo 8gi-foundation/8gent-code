@@ -170,9 +170,24 @@ for calling it done on the phone.
    Limit: partial text mid-step exists only for streamed replies (the text-tool path, and any
    path with `EIGHT_STREAM_IDLE_MS`). The native AI SDK path receives each step whole, so a kill
    mid-step there keeps the finished steps and re-sends the request.
-3. Build signature in the ledger header; idempotency keys passed to tools that can honour them
-   (`git_commit` checks for the commit, `write_file` compares the content hash); headless
-   `8gent -p` resume.
+3. **Built** (`packages/specifications/session/durable-verify.ts`). Each intent carries `build`
+   (`EIGHT_BUILD_ID`, else package version plus git sha) and `check`, what resume verifies:
+   `write_file` the sha256 of the content; `edit_file` the sha256 of the file after an exact,
+   unique replacement (anchored or ambiguous edits carry none and are asked); `git_commit` HEAD,
+   a digest of the index (`ls-files -s`, read only, no tree object written) and the message,
+   done when HEAD is that commit on that parent and its tree (`ls-tree -r`) gives the same digest.
+   A path whose real path (symlinked folders and `../` resolved) is outside the working
+   directory carries no check and is never read. A verified call
+   is closed with `resolve how: "verified"` and named, not redone. Every other tool that is not
+   read-only (commands, terminals, MCP, the desktop, extensions) carries no check: always asked,
+   never redone. A call from another build is named before any retry is offered.
+   Headless `8gent -p --resume <id>` (or `--session`, `--continue`) never prompts: it prints the
+   open calls on stderr and exits 3, unless `--durable-retry` (open writes go to 8gent as a
+   check-then-redo preamble; the retry run is an allowlist, read-only tools plus `write_file`,
+   `edit_file` and `git_commit`, so every other tool is not offered and is refused before it
+   runs, `run_batch` included, and `--yes` cannot re-run a command) or `--durable-skip`. A `-p --durable` run
+   prints its session id, so a run killed before it saved can still be resumed by its ledger.
+   Test: `durable-verify.test.ts`.
 4. Default on: done in slice 2 for the TUI (Pi parity). Headless default stays off.
 
 ## Not doing
