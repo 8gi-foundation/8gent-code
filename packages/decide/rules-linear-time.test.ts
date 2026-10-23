@@ -24,7 +24,14 @@ afterAll(() => {
 
 const SIZE = 3_000_000;
 const CAP_MS = 4_000;
-const GATE_CAP_MS = 8_000;
+/**
+ * Measured locally through systemOneGate (the slowest input, "xargs chain"): 1 MB 1.8 s, 2 MB 3.6 s,
+ * 3 MB 5.3 s, so the gate is linear (about 1.8 s per MB, most of it past decideRules, which takes
+ * 1.1 s at 3 MB). The first cap of 8 s failed on a CI runner at 9.5 s, about 1.8x the local time.
+ * 20 s is 3x the local worst case plus a margin; the quadratic scans took minutes, so it still
+ * catches a regression. The cap is not a claim about speed.
+ */
+const GATE_CAP_MS = 20_000;
 /** `bash -c "bash -c \"...\""`, n deep. */
 function nestedBash(n: number): string {
 	let cmd = "echo hi";
