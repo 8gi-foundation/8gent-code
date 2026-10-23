@@ -4,6 +4,9 @@
  *   darwin  launchd agent   ~/Library/LaunchAgents/com.8gent.daemon.plist
  *   linux   systemd --user  ~/.config/systemd/user/com.8gent.daemon.service, plus linger
  *   win32   Scheduled Task  "com.8gent.daemon", at logon, no admin rights
+ *   android termux-services (runit): $PREFIX/var/service/com.8gent.daemon, driven by `sv`.
+ *           Without termux-services there is no background service on a phone, and
+ *           every operation says so and names the command that keeps it running.
  *
  * Every operation is a plan of steps built from a ServiceContext, so the exact
  * files and commands for each platform are data that tests assert without
@@ -11,15 +14,16 @@
  * service, uninstall on a clean machine succeeds.
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { isAndroidHost } from "../voice/termux";
 import { portVerdict, probePort } from "./port-probe";
 
 export const SERVICE_LABEL = "com.8gent.daemon";
 const DESCRIPTION = "Eight Agent Daemon - always-on AI agent process";
 
-export type ServicePlatform = "darwin" | "linux" | "win32";
+export type ServicePlatform = "darwin" | "linux" | "win32" | "android";
 export type ServiceOperation = "install" | "uninstall" | "start" | "stop";
 
 export interface ServiceContext {
@@ -31,11 +35,13 @@ export interface ServiceContext {
 	uid: number;
 	/** Login name for linger (linux), DOMAIN\user for the task principal (win32). */
 	user: string;
+	/** Termux $PREFIX (android only). */
+	prefix?: string;
 }
 
 export type Step =
 	| { kind: "mkdir"; path: string }
-	| { kind: "write"; path: string; contents: string }
+	| { kind: "write"; path: string; contents: string; mode?: number }
 	| { kind: "remove"; path: string }
 	| {
 			kind: "run";
@@ -68,6 +74,8 @@ interface Backend {
 	parseStatus(result: CommandResult, definitionExists: boolean): ServiceState;
 }
 
+export const DEFAULT_TERMUX_PREFIX = "/data/data/com.termux/files/usr";
+
 const run = (argv: string[], attempts?: number): Step =>
 	attempts
 		? { kind: "run", argv, onFailure: "abort", attempts }
@@ -84,6 +92,7 @@ function paths(ctx: ServiceContext) {
 		// The daemon appends to daemon.log itself, and on Windows the host's
 		// open handle would lock it out, so console output gets its own file.
 		consoleLog: p.join(logDir, "daemon-console.log"),
+		svDir: p.join(ctx.prefix ?? DEFAULT_TERMUX_PREFIX, "var", "service", SERVICE_LABEL),
 		plist: p.join(ctx.home, "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`),
 		unit: p.join(ctx.home, ".config", "systemd", "user", `${SERVICE_LABEL}.service`),
 	};
@@ -315,10 +324,101 @@ if ($t) { $t.State } else { 'NotInstalled' }
 	},
 };
 
+// ----- android (Termux) -----
+
+/** The exact command that keeps the daemon up when no supervisor is there to do it. */
+export const ANDROID_FOREGROUND_COMMAND = "8gent daemon run";
+
+/** POSIX single-quote, safe inside the runit `run` script. */
+const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/**
+ * HOME and PREFIX come from the environment and land in a file runit executes: the shebang line
+ * holds PREFIX unquoted, so a newline or a space in it would start a new line or a new
+ * argument of the script. Both must be plain absolute paths: no control character, and PREFIX
+ * (the interpreter) no whitespace either. Anything else is refused, never written.
+ */
+export function assertPlainServicePath(
+	what: string,
+	p: string,
+	opts: { noSpace?: boolean } = {},
+): void {
+	const bad = /[\u0000-\u001f\u007f]/.test(p) || (opts.noSpace === true && /\s/.test(p));
+	if (!p.startsWith("/") || bad) {
+		throw new ServiceError(
+			`${what} must be an absolute path with no control characters${opts.noSpace ? " or spaces" : ""}; refusing to write a service script from ${JSON.stringify(p).slice(0, 80)}`,
+		);
+	}
+}
+
+/**
+ * The runit `run` script. runit supervises it and restarts it when it exits.
+ * Console output goes to a log file because a service has no terminal.
+ */
+export function termuxRunScript(ctx: ServiceContext): string {
+	assertPlainServicePath("PREFIX", ctx.prefix ?? DEFAULT_TERMUX_PREFIX, { noSpace: true });
+	assertPlainServicePath("HOME", ctx.home);
+	const { consoleLog } = paths(ctx);
+	return `#!${path.posix.join(ctx.prefix ?? DEFAULT_TERMUX_PREFIX, "bin", "sh")}
+cd ${shQuote(ctx.home)} || exit 1
+exec ${ctx.program.map(shQuote).join(" ")} >>${shQuote(consoleLog)} 2>&1
+`;
+}
+
+const SV_NAME = SERVICE_LABEL;
+
+const termuxServices: Backend = {
+	definitionPath: (ctx) => path.posix.join(paths(ctx).svDir, "run"),
+	probe: {
+		argv: ["sh", "-c", "command -v sv"],
+		unavailable: `No background service here: termux-services is not installed, so nothing keeps the daemon running when you leave this session. To run it now, keep this session open and run: ${ANDROID_FOREGROUND_COMMAND}. For a real background service: pkg install termux-services, restart Termux, then run: 8gent daemon install`,
+	},
+	plans: {
+		install: (ctx) => [
+			{ kind: "mkdir", path: paths(ctx).svDir },
+			{ kind: "mkdir", path: paths(ctx).logDir },
+			{
+				kind: "write",
+				path: path.posix.join(paths(ctx).svDir, "run"),
+				contents: termuxRunScript(ctx),
+				mode: 0o755,
+			},
+			// A `down` file means "do not start at boot"; install wants it running.
+			{ kind: "remove", path: path.posix.join(paths(ctx).svDir, "down") },
+			// runsvdir adopts a new service directory within a few seconds, so ride that out.
+			{
+				kind: "run",
+				argv: ["sv", "up", SV_NAME],
+				attempts: 12,
+				onFailure: {
+					warn: `The service is installed but the Termux service supervisor is not running, so the daemon is NOT running yet. Restart Termux, or run: ${ANDROID_FOREGROUND_COMMAND}`,
+				},
+			},
+		],
+		uninstall: (ctx) => [
+			tolerate(["sv", "down", SV_NAME]),
+			{ kind: "remove", path: paths(ctx).svDir },
+		],
+		start: () => [run(["sv", "up", SV_NAME])],
+		stop: () => [run(["sv", "down", SV_NAME])],
+	},
+	statusQuery: () => ({ kind: "run", argv: ["sv", "status", SV_NAME], onFailure: "ignore" }),
+	// `sv status` prints "run: <dir>: (pid N) 12s" or "down: <dir>: 3s"; "fail:" means runsv is not up yet.
+	parseStatus: ({ stdout }, defined) => {
+		const line = stdout.trim();
+		if (/^run:/.test(line)) {
+			const pid = line.match(/\(pid (\d+)\)/);
+			return pid ? { state: "running", pid: Number(pid[1]) } : { state: "running" };
+		}
+		return defined ? { state: "stopped" } : { state: "not-installed" };
+	},
+};
+
 const BACKENDS: Record<ServicePlatform, Backend> = {
 	darwin: launchd,
 	linux: systemd,
 	win32: scheduledTask,
+	android: termuxServices,
 };
 
 export function planFor(op: ServiceOperation, ctx: ServiceContext): Step[] {
@@ -351,7 +451,13 @@ export function powershellArgv(script: string): string[] {
 
 async function exec(argv: string[]): Promise<CommandResult & { stderr: string }> {
 	try {
-		const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+		// env is explicit so a PATH changed after startup (a test's fake `sv`) is the one searched.
+		const proc = Bun.spawn(argv, {
+			stdout: "pipe",
+			stderr: "pipe",
+			stdin: "ignore",
+			env: process.env,
+		});
 		const [stdout, stderr, code] = await Promise.all([
 			new Response(proc.stdout).text(),
 			new Response(proc.stderr).text(),
@@ -372,10 +478,12 @@ async function execute(step: Step, log: (line: string) => void): Promise<void> {
 			mkdirSync(step.path, { recursive: true });
 			return;
 		case "write":
-			writeFileSync(step.path, step.contents);
+			writeFileSync(step.path, step.contents, step.mode ? { mode: step.mode } : undefined);
+			if (step.mode) chmodSync(step.path, step.mode);
 			return;
 		case "remove":
-			rmSync(step.path, { force: true });
+			// Only the service directory itself is removed recursively; every other path is one file.
+			rmSync(step.path, { force: true, recursive: path.basename(step.path) === SERVICE_LABEL });
 			return;
 		case "powershell": {
 			const res = await exec(powershellArgv(step.script));
@@ -446,12 +554,40 @@ export function describeState(s: ServiceState): string {
 	}
 }
 
+/** The platform the service backends are keyed on. Termux counts as android even where Node says linux. */
+export function servicePlatform(
+	platform: string = process.platform,
+	env: Record<string, string | undefined> = process.env,
+): ServicePlatform | null {
+	if (isAndroidHost(platform, env)) return "android";
+	return platform === "darwin" || platform === "linux" || platform === "win32" ? platform : null;
+}
+
 export function hostContext(program: string[]): ServiceContext {
-	const platform = process.platform;
-	if (platform !== "darwin" && platform !== "linux" && platform !== "win32") {
+	const platform = servicePlatform();
+	if (!platform) {
 		throw new ServiceError(
-			`A background service is not supported on ${platform}. Run: 8gent daemon run`,
+			`A background service is not supported on ${process.platform}. Run: 8gent daemon run`,
 		);
+	}
+	if (platform === "android") {
+		// Termux has no passwd entry for the app user: HOME and PREFIX are the truth there.
+		let user = process.env.USER ?? "termux";
+		try {
+			user = os.userInfo().username;
+		} catch {}
+		const home = process.env.HOME || os.homedir();
+		const prefix = process.env.PREFIX || DEFAULT_TERMUX_PREFIX;
+		assertPlainServicePath("HOME", home);
+		assertPlainServicePath("PREFIX", prefix, { noSpace: true });
+		return {
+			platform,
+			home,
+			program,
+			uid: process.getuid?.() ?? 0,
+			user,
+			prefix,
+		};
 	}
 	const account = os.userInfo();
 	return {
