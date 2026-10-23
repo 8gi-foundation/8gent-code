@@ -4,6 +4,7 @@ import {
 	lstatSync,
 	mkdtempSync,
 	readFileSync,
+	readdirSync,
 	rmSync,
 	statSync,
 	symlinkSync,
@@ -84,5 +85,27 @@ describe("autoApprove is per process (#4817)", () => {
 		writeFileSync(file, body);
 		new PermissionManager(file);
 		expect(readFileSync(file, "utf8")).toBe(body);
+	});
+
+	test("saveConfig keeps symlink and mode, leaves no temp file", () => {
+		const d = fresh();
+		const real = join(d, "real.json");
+		const link = join(d, "permissions.json");
+		writeFileSync(
+			real,
+			JSON.stringify({ allowedPatterns: [], deniedPatterns: ["z *"], autoApprove: false }),
+		);
+		chmodSync(real, 0o640);
+		symlinkSync(real, link);
+		const m = new PermissionManager(link);
+		m.setAutoApprove(true);
+		m.allowPattern("make *");
+		expect(lstatSync(link).isSymbolicLink()).toBe(true);
+		expect(statSync(real).mode & 0o777).toBe(0o640);
+		const disk = JSON.parse(readFileSync(real, "utf8"));
+		expect(disk.autoApprove).toBe(false);
+		expect(disk.deniedPatterns).toEqual(["z *"]);
+		expect(disk.allowedPatterns).toContain("make *");
+		expect(readdirSync(d).sort()).toEqual(["permissions.json", "real.json"]);
 	});
 });

@@ -774,21 +774,53 @@ export class PermissionManager {
 			fs.mkdirSync(dir, { recursive: true });
 		}
 		// Never persist the in-memory auto-approve switch (#4817).
-		fs.writeFileSync(
-			this.configPath,
-			JSON.stringify({ ...this.config, autoApprove: false }, null, 2),
-		);
+		this.writeAtomic({ ...this.config, autoApprove: false });
 	}
 
 	/**
-	 * Rewrite the existing file in place: writeFileSync on an existing path keeps
-	 * its mode and follows a symlink, so neither is disturbed. Best effort.
+	 * Replace the config file atomically: temp file in the target's own directory,
+	 * fsync, rename over the target. A crash or a concurrent reader never sees a
+	 * partial file. A symlink stays a link (the real target is replaced) and the
+	 * target's mode is kept.
 	 */
+	private writeAtomic(config: unknown): void {
+		let target = this.configPath;
+		let mode = 0o600;
+		try {
+			target = fs.realpathSync(this.configPath);
+			mode = fs.statSync(target).mode & 0o777;
+		} catch {
+			// New file: default mode, write at the configured path.
+		}
+		const tmp = path.join(
+			path.dirname(target),
+			`.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`,
+		);
+		const fd = fs.openSync(tmp, "wx", mode);
+		try {
+			fs.writeFileSync(fd, JSON.stringify(config, null, 2));
+			fs.fsyncSync(fd);
+		} catch (err) {
+			fs.closeSync(fd);
+			fs.rmSync(tmp, { force: true });
+			throw err;
+		}
+		fs.closeSync(fd);
+		try {
+			fs.chmodSync(tmp, mode);
+			fs.renameSync(tmp, target);
+		} catch (err) {
+			fs.rmSync(tmp, { force: true });
+			throw err;
+		}
+	}
+
+	/** Rewrite a leftover `autoApprove: true` once. Best effort. */
 	private rewriteInPlace(config: PermissionConfig): void {
 		try {
-			fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2));
+			this.writeAtomic(config);
 		} catch {
-			// Read-only file: the in-memory false still holds.
+			// Read-only location: the in-memory false still holds.
 		}
 	}
 

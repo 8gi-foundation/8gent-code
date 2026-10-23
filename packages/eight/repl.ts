@@ -1150,7 +1150,11 @@ function handlePermissionCommands(trimmed: string): boolean {
 		const permManager = getPermissionManager();
 		const current = permManager.getConfig().autoApprove;
 		permManager.setAutoApprove(!current);
-		console.log(`Auto-approve: ${!current ? "\x1b[32mON\x1b[0m" : "\x1b[33mOFF\x1b[0m"}`);
+		console.log(
+			!current
+				? "Auto-approve: \x1b[32mON\x1b[0m (this session only)"
+				: "Auto-approve: \x1b[33mOFF\x1b[0m",
+		);
 		return true;
 	}
 
