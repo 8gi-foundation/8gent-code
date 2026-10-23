@@ -79,15 +79,12 @@ describe("identify", () => {
 		});
 	});
 
-	it("proves for localhost and [::1] on its own port too", async () => {
-		for (const host of ["localhost", "[::1]"]) {
-			const { out, port } = await ask({ authToken: null, operatorToken: OP }, (p) =>
+	it("a gateway bound to 127.0.0.1 proves for 127.0.0.1 only: not localhost, not [::1] on the same port", async () => {
+		for (const host of ["localhost", "[::1]", "127.0.0.2"]) {
+			const { out } = await ask({ authToken: null, operatorToken: OP }, (p) =>
 				hello(p, { target: `${host}:${p}` }),
 			);
-			expect(out).toEqual({
-				type: "identify:ok",
-				proof: daemonProof(OP, NONCE, `${host}:${port}`),
-			});
+			expect(out).toEqual({ type: "error", message: "identify target is not this daemon" });
 		}
 	});
 
@@ -120,17 +117,42 @@ describe("identify", () => {
 });
 
 describe("identifyTargetOk and dialTarget", () => {
-	it("accepts loopback on the port, and the bound host; refuses wildcards and strangers", () => {
-		expect(identifyTargetOk("127.0.0.1:5", 5, "127.0.0.1")).toBe(true);
-		expect(identifyTargetOk("localhost:5", 5, "127.0.0.1")).toBe(true);
-		expect(identifyTargetOk("[::1]:5", 5, "127.0.0.1")).toBe(true);
-		expect(identifyTargetOk("10.0.0.7:5", 5, "10.0.0.7")).toBe(true);
-		expect(identifyTargetOk("10.0.0.8:5", 5, "10.0.0.7")).toBe(false);
-		expect(identifyTargetOk("10.0.0.7:5", 5, "0.0.0.0")).toBe(false);
-		expect(identifyTargetOk("127.0.0.1:6", 5, "127.0.0.1")).toBe(false);
-		expect(identifyTargetOk("127.0.0.1", 5, "127.0.0.1")).toBe(false);
-		expect(identifyTargetOk("127.0.0.1:5/../x", 5, "127.0.0.1")).toBe(false);
+	it("accepts the bound address exactly, and only on the daemon's own port", () => {
+		expect(identifyTargetOk("127.0.0.1:5", 5, "127.0.0.1", true)).toBe(true);
+		expect(identifyTargetOk("127.0.0.1:6", 5, "127.0.0.1", true)).toBe(false);
+		expect(identifyTargetOk("127.0.0.1", 5, "127.0.0.1", true)).toBe(false);
+		expect(identifyTargetOk("127.0.0.1:5/../x", 5, "127.0.0.1", true)).toBe(false);
 	});
+
+	it("refuses every other loopback alias: a squatter on [::1] or localhost cannot ride on 127.0.0.1", () => {
+		for (const t of ["localhost:5", "[::1]:5", "127.0.0.2:5", "LOCALHOST:5"]) {
+			expect(identifyTargetOk(t, 5, "127.0.0.1", true)).toBe(false);
+		}
+		// A daemon bound to ::1 is reached at [::1], and only there.
+		expect(identifyTargetOk("[::1]:5", 5, "::1", true)).toBe(true);
+		expect(identifyTargetOk("127.0.0.1:5", 5, "::1", true)).toBe(false);
+		// localhost is a name: a daemon bound to it is dialled at 127.0.0.1.
+		expect(identifyTargetOk("127.0.0.1:5", 5, "localhost", true)).toBe(true);
+		expect(identifyTargetOk("localhost:5", 5, "localhost", true)).toBe(false);
+	});
+
+	it("a wildcard bind is reached at 127.0.0.1 only (both loopbacks for the dual-stack ::)", () => {
+		expect(identifyTargetOk("127.0.0.1:5", 5, "0.0.0.0", true)).toBe(true);
+		expect(identifyTargetOk("[::1]:5", 5, "0.0.0.0", true)).toBe(false);
+		expect(identifyTargetOk("10.0.0.7:5", 5, "0.0.0.0", true)).toBe(false);
+		expect(identifyTargetOk("[::1]:5", 5, "::", true)).toBe(true);
+		expect(identifyTargetOk("127.0.0.1:5", 5, "::", true)).toBe(true);
+	});
+
+	it("a loopback target from a peer that is not on loopback is refused", () => {
+		expect(identifyTargetOk("127.0.0.1:5", 5, "127.0.0.1", false)).toBe(false);
+		expect(identifyTargetOk("127.0.0.1:5", 5, "0.0.0.0", false)).toBe(false);
+		expect(identifyTargetOk("[::1]:5", 5, "::", false)).toBe(false);
+		// A bound non-loopback address is the one thing a remote peer may have dialled.
+		expect(identifyTargetOk("10.0.0.7:5", 5, "10.0.0.7", false)).toBe(true);
+		expect(identifyTargetOk("10.0.0.8:5", 5, "10.0.0.7", false)).toBe(false);
+	});
+
 	it("names what a client dialled, default ports filled in", () => {
 		expect(dialTarget("ws://127.0.0.1:18790")).toBe("127.0.0.1:18790");
 		expect(dialTarget("ws://LOCALHOST")).toBe("localhost:80");

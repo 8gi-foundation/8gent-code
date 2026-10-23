@@ -132,6 +132,24 @@ export function resolveDaemonSecret(home = process.env.HOME || ""): string | nul
 	);
 }
 
+/**
+ * Dial a local daemon by literal address (#4829): `localhost` becomes 127.0.0.1. A name can
+ * resolve to ::1 as well, where something else may be listening on the same port, and the
+ * identity check names the exact address dialled. An explicit [::1] stays as the person
+ * wrote it: it works only if the daemon is bound there.
+ */
+export function literalLoopbackUrl(url: string): string {
+	try {
+		const u = new URL(url);
+		if (u.hostname.toLowerCase() !== "localhost") return url;
+		u.hostname = "127.0.0.1";
+		const out = u.toString();
+		return url.endsWith("/") || u.pathname !== "/" ? out : out.replace(/\/$/, "");
+	} catch {
+		return url;
+	}
+}
+
 /** The live anatomy page (#4190) on the daemon this TUI talks to. Never carries the token. */
 export function liveViewUrl(env: Record<string, string | undefined> = process.env): string {
 	const u = new URL(env.EIGHT_DAEMON_URL ?? DEFAULT_DAEMON_URL);
@@ -206,7 +224,7 @@ export class DaemonSessionClient {
 
 	/** Connect (and authenticate when a token is set). Rejects when the daemon is not reachable. */
 	static async connect(opts: ConnectOptions = {}): Promise<DaemonSessionClient> {
-		const url = opts.url ?? process.env.EIGHT_DAEMON_URL ?? DEFAULT_DAEMON_URL;
+		const url = literalLoopbackUrl(opts.url ?? process.env.EIGHT_DAEMON_URL ?? DEFAULT_DAEMON_URL);
 		const timeoutMs = opts.timeoutMs ?? 3000;
 		const ws = new WebSocket(url);
 		await new Promise<void>((resolve, reject) => {

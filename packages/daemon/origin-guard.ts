@@ -145,20 +145,42 @@ export function dialTarget(url: string): string {
 	return `${u.hostname.toLowerCase()}:${port}`;
 }
 
+const bare = (h: string) => h.toLowerCase().replace(/^\[|\]$/g, "");
+const LOOPBACK_LITERALS = new Set(["127.0.0.1", "::1"]);
+
 /**
- * Is `target` this daemon? Its own listening port, and a host that is loopback or the
- * address it is bound to. Anything else was dialled for someone else (#4829).
+ * The hosts a client may have dialled to reach a daemon bound to `bindHost`: the bound
+ * address exactly, never "any loopback alias" (a squatter on [::1]:P must not pass for a
+ * daemon on 127.0.0.1:P). `localhost` is a name, not an address, so a daemon bound to it is
+ * reached at 127.0.0.1, which clients dial by literal IP. A wildcard bind is reached at
+ * 127.0.0.1 (and ::1 only for the dual-stack `::`), and at no other host.
  */
-export function identifyTargetOk(target: unknown, ownPort: number, bindHost: string): boolean {
+function dialledHostsFor(bindHost: string): string[] {
+	const b = bare(bindHost);
+	if (b === "localhost" || b === "127.0.0.1") return ["127.0.0.1"];
+	if (b === "0.0.0.0") return ["127.0.0.1"];
+	if (b === "::") return ["127.0.0.1", "::1"];
+	return [b];
+}
+
+/**
+ * Is `target` this daemon? Its own listening port, and a host that is exactly the address it
+ * is bound to (see dialledHostsFor). A loopback target is honoured only when the peer is
+ * itself on loopback: a remote peer cannot be speaking to this daemon at 127.0.0.1 (#4829).
+ */
+export function identifyTargetOk(
+	target: unknown,
+	ownPort: number,
+	bindHost: string,
+	peerLoopback = false,
+): boolean {
 	if (typeof target !== "string" || target.length > 300) return false;
 	const m = /^(\[[0-9a-f:.]+\]|[a-z0-9.-]+):(\d{1,5})$/.exec(target);
 	if (!m) return false;
 	if (Number(m[2]) !== ownPort) return false;
-	const host = m[1];
-	if (["127.0.0.1", "localhost", "[::1]"].includes(host)) return true;
-	const bound = bindHost.toLowerCase().replace(/^\[|\]$/g, "");
-	const wild = bound === "0.0.0.0" || bound === "::";
-	return !wild && host.replace(/^\[|\]$/g, "") === bound;
+	const host = bare(m[1]);
+	if (LOOPBACK_LITERALS.has(host) && !peerLoopback) return false;
+	return dialledHostsFor(bindHost).includes(host);
 }
 
 export function sameToken(a: unknown, b: string): boolean {

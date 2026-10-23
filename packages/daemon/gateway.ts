@@ -327,6 +327,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 				msg.target,
 				ownEndpoints.get(config)?.port ?? -1,
 				ownEndpoints.get(config)?.host ?? "",
+				isLoopbackAddress(state.remoteAddress),
 			)
 		) {
 			// Dialled for another address: a relay, or a client that is talking to something else.

@@ -14,6 +14,7 @@ import { SessionManager } from "../../../../packages/eight/session-manager";
 import {
 	type DaemonChatEvent,
 	DaemonSessionClient,
+	literalLoopbackUrl,
 	resolveDaemonSecret,
 	toChatEvent,
 } from "./daemon-sessions";
@@ -289,6 +290,53 @@ describe("the daemon proves who it is before anything is sent (#4829)", () => {
 		}
 	});
 
+	it("a squatter on [::1] with the daemon on 127.0.0.1 gets no token, whichever alias the TUI dials", async () => {
+		const port = server.port as number;
+		const seen: string[] = [];
+		let squatter: ReturnType<typeof Bun.serve> | null = null;
+		try {
+			squatter = Bun.serve({
+				port,
+				hostname: "::1",
+				fetch(req, s) {
+					return s.upgrade(req, { data: undefined }) ? undefined : new Response("not a daemon");
+				},
+				websocket: {
+					message(ws, m) {
+						seen.push(String(m));
+						// Relay to the real daemon, as 8SO's probe does, and hand its answer back.
+						const real = new WebSocket(`ws://127.0.0.1:${port}`);
+						real.onopen = () => real.send(String(m));
+						real.onmessage = (e) => {
+							ws.send(String(e.data));
+							real.close();
+						};
+					},
+				},
+			});
+		} catch {
+			return; // no IPv6 loopback on this machine: nothing to squat
+		}
+		try {
+			// Dialling [::1] reaches the squatter: the daemon refuses the alias and the TUI refuses the answer.
+			await expect(
+				DaemonSessionClient.connect({ url: `ws://[::1]:${port}`, token: SECRET }),
+			).rejects.toThrow(/could not prove who it is|not your 8gent daemon/);
+			expect(JSON.stringify(seen)).not.toContain(SECRET);
+			expect(seen.map((f) => JSON.parse(f).type)).toEqual(["identify"]);
+			// localhost is dialled as 127.0.0.1, so it reaches the real daemon and never the squatter.
+			seen.length = 0;
+			const ok = await DaemonSessionClient.connect({
+				url: `ws://localhost:${port}`,
+				token: SECRET,
+			});
+			ok.close();
+			expect(seen).toEqual([]);
+		} finally {
+			squatter.stop(true);
+		}
+	});
+
 	it("a server that does not know the challenge (an old daemon, or another service) gets no token", async () => {
 		const fake = fakeDaemon((ws) =>
 			ws.send(JSON.stringify({ type: "error", message: "unknown message type" })),
@@ -355,5 +403,16 @@ describe("the daemon proves who it is before anything is sent (#4829)", () => {
 			}
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("literalLoopbackUrl", () => {
+	it("dials localhost by literal 127.0.0.1 and leaves everything else alone", () => {
+		expect(literalLoopbackUrl("ws://localhost:18789")).toBe("ws://127.0.0.1:18789");
+		expect(literalLoopbackUrl("ws://LOCALHOST:5/x?y=1")).toBe("ws://127.0.0.1:5/x?y=1");
+		expect(literalLoopbackUrl("ws://[::1]:5")).toBe("ws://[::1]:5");
+		expect(literalLoopbackUrl("ws://127.0.0.1:5")).toBe("ws://127.0.0.1:5");
+		expect(literalLoopbackUrl("ws://example.test:5")).toBe("ws://example.test:5");
+		expect(literalLoopbackUrl("not a url")).toBe("not a url");
 	});
 });
