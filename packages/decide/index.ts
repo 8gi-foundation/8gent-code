@@ -3,11 +3,18 @@
  *
  * A local decision engine. The harness asks typed questions about a
  * `state` string and gets calibrated probabilities back; calling code
- * owns every threshold. Backends: in-process llama.cpp (optional
+ * owns every threshold. Backends: 8J on its loopback server (EIGHT_8J_URL),
+ * in-process llama.cpp (optional
  * node-llama-cpp), a local laya-serve, Ollama via token logprobs, and a
  * deterministic mock for tests.
  */
 
+import {
+	EightJBackend,
+	eightJHealth,
+	resolveEightJTimeout,
+	resolveEightJUrl,
+} from "./backends/eightj";
 import { JevBackend, jevForbidden, resolveJevKey } from "./backends/jev";
 import { LayaBackend } from "./backends/laya";
 import {
@@ -38,6 +45,19 @@ import {
 } from "./types";
 
 export * from "./types";
+export {
+	EightJBackend,
+	EIGHTJ_BACKEND_NAME,
+	EIGHTJ_DEFAULT_TIMEOUT_MS,
+	EIGHTJ_TIMEOUT_ENV,
+	EIGHTJ_URL_ENV,
+	eightJHealth,
+	eightJSelected,
+	fromCardAnswer,
+	isLoopbackUrl,
+	resolveEightJUrl,
+	toCardBody,
+} from "./backends/eightj";
 export { LayaBackend, mapProbabilities, resolveLayaUrl } from "./backends/laya";
 export { MockBackend } from "./backends/mock";
 export {
@@ -89,7 +109,7 @@ export {
 } from "./guard";
 export { decideRules, BLOCK_RULES, type RuleResult, type RuleVerdict } from "./rules";
 
-export type BackendSelection = "auto" | "llamacpp" | "laya" | "ollama" | "mock" | "jev";
+export type BackendSelection = "auto" | "8j" | "llamacpp" | "laya" | "ollama" | "mock" | "jev";
 
 export interface DeciderOptions {
 	/**
@@ -155,6 +175,14 @@ async function buildBackend(opts: DeciderOptions, avoidShared = false): Promise<
 		);
 	}
 	if (sel === "laya") return local(new LayaBackend(common));
+	if (sel === "8j") {
+		const url = resolveEightJUrl(env);
+		const fetchImpl = opts.fetch ?? ((i: string, n?: RequestInit) => fetch(i, n));
+		const model = await eightJHealth(fetchImpl, url, opts.timeoutMs ?? resolveEightJTimeout(env));
+		return local(
+			new EightJBackend({ url, model, timeoutMs: opts.timeoutMs, fetch: opts.fetch, env }),
+		);
+	}
 	const model = opts.model ?? env.EIGHT_DECIDE_MODEL;
 	if (sel === "llamacpp") {
 		const loader = opts.llamacppLoader ?? defaultLlamaCppLoader;
@@ -197,6 +225,8 @@ async function buildBackend(opts: DeciderOptions, avoidShared = false): Promise<
 			}),
 		);
 	}
+	if (probe.backend === "8j" && probe.model && probe.url)
+		return local(new EightJBackend({ ...common, url: probe.url, model: probe.model }));
 	if (probe.backend === "laya")
 		return local(new LayaBackend({ ...common, url: probe.url ?? undefined }));
 	if (probe.backend === "ollama" && probe.model) {

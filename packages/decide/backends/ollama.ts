@@ -297,6 +297,8 @@ export class OllamaBackend implements DecideBackend {
 				top_logprobs: TOP_LOGPROBS,
 			}),
 			signal: AbortSignal.timeout(this.timeoutMs),
+			// Never follow a redirect: a 307/308 would re-send the prompt (the command) elsewhere.
+			redirect: "error",
 		});
 	}
 }

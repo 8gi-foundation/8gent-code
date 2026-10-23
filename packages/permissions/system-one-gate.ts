@@ -964,8 +964,11 @@ export async function systemOneGate(
 		// A script in play is never left to the rules alone when the judge was meant to answer
 		// and did not (a timeout, a crash): its body may be what slowed or broke the judge. Only
 		// a machine with no calibrated judge, where rules-only is the setup, keeps the fallback.
+		// A judge the person selected by name (8J, EIGHT_8J_URL) never falls back either: when it
+		// cannot answer, a person decides, as in strict mode.
 		if (
 			mode === "default" &&
+			!(await judgeSelectedByName(env)) &&
 			(script.body === undefined ||
 				err instanceof UncalibratedJudgeError ||
 				detail.includes(NO_BACKEND))
@@ -1005,7 +1008,9 @@ export async function systemOneGate(
 		// As above: with a script in play, a judge that failed is a person's call, unless no
 		// judge is installed at all.
 		const fallback =
-			mode === "default" && (script.body === undefined || reason.includes(NO_BACKEND));
+			mode === "default" &&
+			!(await judgeSelectedByName(env)) &&
+			(script.body === undefined || reason.includes(NO_BACKEND));
 		return decide(
 			command,
 			fallback
@@ -1108,6 +1113,16 @@ async function askInstead(
 		verdict: "escalate",
 		reason: `the safety checker is not available (${reason}), so a person decides`,
 	};
+}
+
+/**
+ * True when env names the judge (8J through EIGHT_8J_URL). Its failure is then never a
+ * rules-only allow: the person chose that judge, so without it a person decides. Imported only
+ * on the failure path, so the flag-off path still loads nothing from @8gent/decide.
+ */
+async function judgeSelectedByName(env: Record<string, string | undefined>): Promise<boolean> {
+	const { eightJSelected } = await import("../decide/backends/eightj");
+	return eightJSelected(env);
 }
 
 /** The decider's message when no judge is installed or reachable (decide/index.ts). */
