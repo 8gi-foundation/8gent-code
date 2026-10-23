@@ -544,6 +544,23 @@ describe("websocket: memory and CPU stay bounded", () => {
 		c.sock.destroy();
 	}, 30_000);
 
+	test("a peer that pings and never reads the pongs is cut off (1013), not queued for ever", async () => {
+		const { port, sockets } = start();
+		const c = await wsClient(port);
+		c.sock.pause();
+		await wait(() => sockets.length === 1);
+		const ws = sockets[0] as NodeWebSocket;
+		const batch = Buffer.concat(
+			Array.from({ length: 5000 }, () => clientFrame(0x9, Buffer.alloc(125, 1))),
+		);
+		// About 130 bytes of pong per ping: enough pings outrun the kernel buffers and the cap.
+		for (let i = 0; i < 150 && ws.readyState === 1 && !c.sock.destroyed; i++) {
+			if (!c.sock.write(batch)) await new Promise<void>((r) => c.sock.once("drain", r));
+		}
+		await wait(() => ws.readyState !== 1);
+		c.sock.destroy();
+	}, 60_000);
+
 	test("an idle peer that does not answer pings is dropped; one that does stays", async () => {
 		const { port, events } = start({
 			websocket: {

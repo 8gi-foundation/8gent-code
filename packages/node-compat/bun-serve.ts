@@ -197,8 +197,11 @@ class ServerWebSocket implements NodeWebSocket {
 			() => {
 				if (this.readyState === 3) return;
 				if (Date.now() - this.lastSeen > idleTimeoutMs) return void this.sock.destroy();
-				if (this.readyState === 1 && !this.sock.destroyed)
+				if (this.readyState === 1 && !this.sock.destroyed) {
+					// A peer that is not reading cannot be pinged without queueing: cut it off.
+					if (this.overBacklog()) return void this.fail(1013);
 					this.sock.write(encodeFrame(0x9, Buffer.alloc(0)));
+				}
 			},
 			Math.max(250, Math.floor(idleTimeoutMs / 2)),
 		);
@@ -264,6 +267,8 @@ class ServerWebSocket implements NodeWebSocket {
 				return false;
 			}
 			case 0x9:
+				// Pongs queue like any other write: a peer that pings and never reads is cut off too.
+				if (this.overBacklog()) return this.fail(1013);
 				this.sock.write(encodeFrame(0xa, f.payload));
 				return true;
 			case 0xa:
@@ -307,10 +312,15 @@ class ServerWebSocket implements NodeWebSocket {
 		}
 	}
 
+	/** True when the peer has left more than MAX_WS_BACKLOG bytes unread in our send queue. */
+	private overBacklog(): boolean {
+		return this.sock.writableLength > MAX_WS_BACKLOG;
+	}
+
 	send(data: string | Uint8Array | ArrayBuffer): number {
 		if (this.readyState !== 1) return 0;
 		// A peer that does not read cannot make this process queue without limit.
-		if (this.sock.writableLength > MAX_WS_BACKLOG) {
+		if (this.overBacklog()) {
 			this.close(1013, "backpressure");
 			return 0;
 		}
