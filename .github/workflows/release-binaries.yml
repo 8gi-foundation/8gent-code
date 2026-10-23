@@ -583,6 +583,21 @@ jobs:
           fi
           gh release upload "$TAG" upload/* --repo "$REPO" --clobber
 
+          # The release body must say the macOS app zips are unsigned (8SO review of #4885).
+          # Idempotent: the marker line is added once, and the rest of the body is kept.
+          if [ -f swift-apps/swift-apps.sha256 ]; then
+            MARK='<!-- unsigned-macos-apps -->'
+            gh release view "$TAG" --repo "$REPO" --json body --jq .body > "$RUNNER_TEMP/body.md"
+            if ! grep -qF "$MARK" "$RUNNER_TEMP/body.md"; then
+              {
+                cat "$RUNNER_TEMP/body.md"
+                printf '\n\n%s\n### macOS apps: unsigned\n\n' "$MARK"
+                printf 'The 8gent Computer and Lil Eight zips are **unsigned**: no Developer ID signature, no notarization, and no build provenance attestation. macOS will warn on first open. Check them against `SHA256SUMS` before opening.\n'
+              } > "$RUNNER_TEMP/body.new.md"
+              gh release edit "$TAG" --repo "$REPO" --notes-file "$RUNNER_TEMP/body.new.md"
+            fi
+          fi
+
           # Merge the installer checksums into the release's SHA256SUMS so one
           # file covers every attached asset. release.yml wrote the tarball line;
           # lines for names we are about to add are replaced, so a re-run is idempotent.

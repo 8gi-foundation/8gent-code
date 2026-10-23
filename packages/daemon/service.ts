@@ -107,8 +107,17 @@ function paths(ctx: ServiceContext) {
 
 /** The launchd label for this context: SERVICE_LABEL unless a per-run label was given. */
 export function launchdLabel(ctx: Pick<ServiceContext, "label">): string {
-	return ctx.label ?? SERVICE_LABEL;
+	if (ctx.label === undefined) return SERVICE_LABEL;
+	// A per-run label is only ever a test label under com.8gent.e2e. (anchored, no path
+	// characters): it can be neither the real label nor a way out of the LaunchAgents folder.
+	if (!PER_RUN_LABEL_RE.test(ctx.label))
+		throw new ServiceError(
+			`a launchd label other than ${SERVICE_LABEL} must match ${PER_RUN_LABEL_RE}; got ${JSON.stringify(ctx.label).slice(0, 60)}`,
+		);
+	return ctx.label;
 }
+
+export const PER_RUN_LABEL_RE = /^com\.8gent\.e2e\.[A-Za-z0-9.-]+$/;
 
 const xmlEscape = (s: string) =>
 	s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
