@@ -47,7 +47,8 @@ export interface RunOptions {
 	image?: string;
 	/**
 	 * Set EIGHT_WORKSPACE_ROOT to the run's working directory (#3747). On by
-	 * default; `--no-workspace-boundary` stops run mode setting it.
+	 * default; `--no-workspace-boundary` stops run mode setting it and turns off
+	 * the default read boundary for the run (EIGHT_WORKSPACE_BOUNDARY=off, #4880).
 	 */
 	workspaceBoundary: boolean;
 	/** `-p` / `--print`: the one-shot front door; also reads piped stdin. */
@@ -87,7 +88,7 @@ export interface RunOptions {
  *                                downscaled to fit 2560x2560; inside the working directory)
  *   --allow-read <dir>           (repeatable) let the run read files under <dir>; writes stay in the
  *                                working directory. Paths written in the prompt are allowed already.
- *   --no-workspace-boundary      do not set the workspace root (EIGHT_WORKSPACE_ROOT) for this run
+ *   --no-workspace-boundary      no workspace root and no read boundary for this run
  *                                (by default run mode sets it to the working directory; native
  *                                write_file and edit_file stay confined to the working directory either way)
  *   <prompt tokens...>           everything positional, joined with spaces
@@ -1189,6 +1190,9 @@ export async function runRunCommand(
 	const workspaceRoot = runWorkspaceRoot(opts);
 	const priorWorkspaceRoot = process.env.EIGHT_WORKSPACE_ROOT;
 	if (workspaceRoot) process.env.EIGHT_WORKSPACE_ROOT = workspaceRoot;
+	// --no-workspace-boundary also turns off the default read boundary (#4880), for the run only.
+	const priorReadBoundary = process.env.EIGHT_WORKSPACE_BOUNDARY;
+	if (!opts.workspaceBoundary) process.env.EIGHT_WORKSPACE_BOUNDARY = "off";
 
 	let exitCode = 0;
 	// Read in the catch below: a native turn the watchdog aborts throws, and the
@@ -1392,6 +1396,11 @@ export async function runRunCommand(
 			if (priorWorkspaceRoot === undefined)
 				Reflect.deleteProperty(process.env, "EIGHT_WORKSPACE_ROOT");
 			else process.env.EIGHT_WORKSPACE_ROOT = priorWorkspaceRoot;
+		}
+		if (!opts.workspaceBoundary) {
+			if (priorReadBoundary === undefined)
+				Reflect.deleteProperty(process.env, "EIGHT_WORKSPACE_BOUNDARY");
+			else process.env.EIGHT_WORKSPACE_BOUNDARY = priorReadBoundary;
 		}
 	}
 

@@ -185,7 +185,8 @@ export async function spawnAgentTool(
 				const validation = sanitizeShellCommand(task);
 				if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${task}`;
 				const { systemOneGate } = await import("../permissions/system-one-gate");
-				const systemOne = await systemOneGate(task);
+				// Judged where it runs, so the read boundary resolves its paths there (#4880).
+				const systemOne = await systemOneGate(task, process.env, workingDirectory);
 				if (!systemOne.run) return systemOne.message as string;
 			}
 			const { spawnCLIAgent } = await import("./index");

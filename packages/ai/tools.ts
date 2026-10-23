@@ -284,6 +284,8 @@ function gateWrite(toolName: string, args: Record<string, unknown>): string | nu
 /** Absolute path for a tool, refused by the path guard. The access mode is explicit on every call. */
 function resolvePath(p: string, access: PathAccess): string {
 	const wd = getToolContext().workingDirectory;
+	// A read stays inside the workspace, links followed (#4880), like read_file.
+	if (access === "read") return safePath(p, wd, "read");
 	const guard = validatePath(p, wd, {}, access);
 	if (!guard.ok) throw new Error(`Path blocked by path-guard: ${guard.reason} ("${p}")`);
 	return path.isAbsolute(p) ? p : path.join(wd, p);
@@ -895,7 +897,12 @@ const lspGotoDefinition = tool({
 	}),
 	execute: async ({ filePath, line, character }) => {
 		const { lspGoToDefinition } = await import("../lsp");
-		return lspGoToDefinition(filePath, line, character, getToolContext().workingDirectory);
+		return lspGoToDefinition(
+			resolvePath(filePath, "read"),
+			line,
+			character,
+			getToolContext().workingDirectory,
+		);
 	},
 });
 
@@ -908,7 +915,12 @@ const lspFindReferences = tool({
 	}),
 	execute: async ({ filePath, line, character }) => {
 		const { lspFindReferences } = await import("../lsp");
-		return lspFindReferences(filePath, line, character, getToolContext().workingDirectory);
+		return lspFindReferences(
+			resolvePath(filePath, "read"),
+			line,
+			character,
+			getToolContext().workingDirectory,
+		);
 	},
 });
 
@@ -922,7 +934,12 @@ const lspHover = tool({
 	}),
 	execute: async ({ filePath, line, character }) => {
 		const { lspHover } = await import("../lsp");
-		return lspHover(filePath, line, character, getToolContext().workingDirectory);
+		return lspHover(
+			resolvePath(filePath, "read"),
+			line,
+			character,
+			getToolContext().workingDirectory,
+		);
 	},
 });
 
@@ -933,7 +950,7 @@ const lspDocumentSymbols = tool({
 	}),
 	execute: async ({ filePath }) => {
 		const { lspDocumentSymbols } = await import("../lsp");
-		return lspDocumentSymbols(filePath, getToolContext().workingDirectory);
+		return lspDocumentSymbols(resolvePath(filePath, "read"), getToolContext().workingDirectory);
 	},
 });
 
@@ -944,7 +961,7 @@ const lspDiagnostics = tool({
 	}),
 	execute: async ({ filePath }) => {
 		const { lspDiagnostics } = await import("../lsp");
-		return lspDiagnostics(filePath, getToolContext().workingDirectory);
+		return lspDiagnostics(resolvePath(filePath, "read"), getToolContext().workingDirectory);
 	},
 });
 
@@ -1624,7 +1641,12 @@ const backgroundStart = tool({
 		const validation = sanitizeShellCommand(command);
 		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
 		const { systemOneGate } = await import("../permissions/system-one-gate");
-		const systemOne = await systemOneGate(command, systemOneEnvFor(currentPermissionMode()));
+		// Judged where it runs, so the read boundary resolves its paths there (#4880).
+		const systemOne = await systemOneGate(
+			command,
+			systemOneEnvFor(currentPermissionMode()),
+			getToolContext().workingDirectory,
+		);
 		if (!systemOne.run) return systemOne.message as string;
 		try {
 			const { getBackgroundTaskManager } = await import("../tools/background");

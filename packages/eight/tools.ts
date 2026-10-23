@@ -2724,29 +2724,29 @@ export class ToolExecutor {
 			// LSP tools
 			case "lsp_goto_definition":
 				return lspGoToDefinition(
-					args.filePath as string,
+					this.lspPath(args.filePath),
 					args.line as number,
 					args.character as number,
 					this.workingDirectory,
 				);
 			case "lsp_find_references":
 				return lspFindReferences(
-					args.filePath as string,
+					this.lspPath(args.filePath),
 					args.line as number,
 					args.character as number,
 					this.workingDirectory,
 				);
 			case "lsp_hover":
 				return lspHover(
-					args.filePath as string,
+					this.lspPath(args.filePath),
 					args.line as number,
 					args.character as number,
 					this.workingDirectory,
 				);
 			case "lsp_document_symbols":
-				return lspDocumentSymbols(args.filePath as string, this.workingDirectory);
+				return lspDocumentSymbols(this.lspPath(args.filePath), this.workingDirectory);
 			case "lsp_diagnostics":
-				return lspDiagnostics(args.filePath as string, this.workingDirectory);
+				return lspDiagnostics(this.lspPath(args.filePath), this.workingDirectory);
 
 			// File operations (with path traversal protection)
 			case "read_file": {
@@ -3299,10 +3299,14 @@ export class ToolExecutor {
 	// Code Exploration
 	// ============================================
 
+	/** A language-server file: inside the workspace, links followed (#4880). */
+	private lspPath(filePath: unknown): string {
+		return safePath(String(filePath ?? ""), this.workingDirectory, "read");
+	}
+
 	private async getOutline(filePath: string): Promise<string> {
-		const absolutePath = path.isAbsolute(filePath)
-			? filePath
-			: path.join(this.workingDirectory, filePath);
+		// Inside the workspace, links followed (#4880): the outline and symbol text are file content.
+		const absolutePath = safePath(filePath, this.workingDirectory, "read");
 
 		if (!fs.existsSync(absolutePath)) {
 			return `File not found: ${absolutePath}`;
@@ -3341,9 +3345,8 @@ export class ToolExecutor {
 		const filePath = symbolId.slice(0, separatorIndex);
 		const symbolName = symbolId.slice(separatorIndex + 2);
 
-		const absolutePath = path.isAbsolute(filePath)
-			? filePath
-			: path.join(this.workingDirectory, filePath);
+		// Inside the workspace, links followed (#4880): the outline and symbol text are file content.
+		const absolutePath = safePath(filePath, this.workingDirectory, "read");
 
 		if (!fs.existsSync(absolutePath)) {
 			return `File not found: ${absolutePath}`;
@@ -4205,9 +4208,8 @@ export class ToolExecutor {
 	// ============================================
 
 	private async handleReadPdf(pdfPath: string): Promise<string> {
-		const absolutePath = path.isAbsolute(pdfPath)
-			? pdfPath
-			: path.join(this.workingDirectory, pdfPath);
+		// Inside the workspace, links followed (#4880).
+		const absolutePath = safePath(pdfPath, this.workingDirectory, "read");
 
 		try {
 			const pdfInfo = await readPdf(absolutePath);
@@ -4234,9 +4236,8 @@ export class ToolExecutor {
 	}
 
 	private async handleReadPdfPage(pdfPath: string, pageNum: number): Promise<string> {
-		const absolutePath = path.isAbsolute(pdfPath)
-			? pdfPath
-			: path.join(this.workingDirectory, pdfPath);
+		// Inside the workspace, links followed (#4880).
+		const absolutePath = safePath(pdfPath, this.workingDirectory, "read");
 
 		try {
 			const pageContent = await readPdfPage(absolutePath, pageNum);
@@ -4260,9 +4261,8 @@ export class ToolExecutor {
 		query: string,
 		caseSensitive?: boolean,
 	): Promise<string> {
-		const absolutePath = path.isAbsolute(pdfPath)
-			? pdfPath
-			: path.join(this.workingDirectory, pdfPath);
+		// Inside the workspace, links followed (#4880).
+		const absolutePath = safePath(pdfPath, this.workingDirectory, "read");
 
 		try {
 			const results = await searchPdf(absolutePath, query, caseSensitive ?? false);
@@ -4316,6 +4316,8 @@ export class ToolExecutor {
 		const guard = guardPath(notebookPath, this.workingDirectory, {}, access);
 		if (!guard.ok)
 			throw new Error(`Path blocked by path-guard: ${guard.reason} ("${notebookPath}")`);
+		// A read stays inside the workspace, links followed (#4880); writes are confined where they run.
+		if (access === "read") return safePath(notebookPath, this.workingDirectory, "read");
 		return path.isAbsolute(notebookPath)
 			? notebookPath
 			: path.join(this.workingDirectory, notebookPath);
@@ -4506,7 +4508,12 @@ export class ToolExecutor {
 		// Same sanitizer as run_command, before anything asks a person (#3763).
 		const validation = sanitizeShellCommand(command);
 		if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
-		const systemOne = await systemOneGate(command, systemOneEnvFor(currentPermissionMode()));
+		// Judged where it runs, so the read boundary resolves its paths there (#4880).
+		const systemOne = await systemOneGate(
+			command,
+			systemOneEnvFor(currentPermissionMode()),
+			this.workingDirectory,
+		);
 		if (!systemOne.run) return systemOne.message as string;
 		try {
 			const taskManager = getBackgroundTaskManager(this.workingDirectory);
