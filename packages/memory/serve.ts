@@ -18,7 +18,8 @@ import { redact } from "./redact.js";
 
 const MAX_LIMIT = 20;
 const LOG_NAME = "memory-access.jsonl";
-const PRIVATE_TAGS = new Set(["secret", "private"]);
+const LOG_QUERY_MAX = 512;
+const PRIVATE_TAGS = new Set(["secret", "private", "sensitive", "confidential"]);
 
 interface Row {
 	id: string;
@@ -68,7 +69,17 @@ export class MemoryReader {
 	}
 
 	private log(tool: string, query: string, count: number): void {
-		const line = JSON.stringify({ ts: new Date().toISOString(), tool, query, count });
+		// A query can carry a pasted token: redact it, then cap it, so the log never holds a raw secret.
+		const safe = redact(query);
+		const truncated = safe.length > LOG_QUERY_MAX;
+		const entry: Record<string, unknown> = {
+			ts: new Date().toISOString(),
+			tool,
+			query: truncated ? safe.slice(0, LOG_QUERY_MAX) : safe,
+			count,
+		};
+		if (truncated) entry.truncated = true;
+		const line = JSON.stringify(entry);
 		try {
 			const fd = fs.openSync(this.logPath, "a", 0o600);
 			fs.fchmodSync(fd, 0o600);
@@ -201,6 +212,27 @@ export function handle(reader: MemoryReader, msg: Json): Json | null {
 	}
 }
 
+/** One input line to one output message: parse errors and store errors get generic answers. */
+export function respond(reader: MemoryReader, line: string): Json | null {
+	let msg: Json;
+	try {
+		const parsed = JSON.parse(line);
+		if (typeof parsed !== "object" || parsed === null) throw new Error("not an object");
+		msg = parsed as Json;
+	} catch {
+		return { jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } };
+	}
+	try {
+		return handle(reader, msg);
+	} catch {
+		// A store error says nothing about the data: generic answer, no detail.
+		const id = (msg.id ?? null) as string | number | null;
+		return msg.id === undefined
+			? null
+			: { jsonrpc: "2.0", id, error: { code: -32603, message: "internal error" } };
+	}
+}
+
 /** Serve stdio until stdin closes. Nothing but protocol goes to stdout. */
 export async function serveStdio(dbPath = defaultDbPath()): Promise<number> {
 	if (!fs.existsSync(dbPath)) {
@@ -220,12 +252,7 @@ export async function serveStdio(dbPath = defaultDbPath()): Promise<number> {
 			buf = buf.slice(nl + 1);
 			nl = buf.indexOf("\n");
 			if (!line) continue;
-			let out: Json | null;
-			try {
-				out = handle(reader, JSON.parse(line) as Json);
-			} catch {
-				out = { jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } };
-			}
+			const out = respond(reader, line);
 			if (out) process.stdout.write(`${JSON.stringify(out)}\n`);
 		}
 	}

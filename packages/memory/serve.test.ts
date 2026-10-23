@@ -3,10 +3,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MemoryReader, isPrivate } from "./serve.js";
+import { MemoryReader, isPrivate, respond } from "./serve.js";
 import { MemoryStore } from "./store.js";
 import type { Memory } from "./types.js";
 
+const TOKEN = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
 const ROOT = path.resolve(import.meta.dir, "../..");
 let dir: string;
 let dbPath: string;
@@ -44,6 +45,8 @@ beforeAll(() => {
 	store.write(core("pub1", "Rishi prefers pineapplewidget deployments on Fridays", ["ops"]));
 	store.write(core("priv-tag", "pineapplewidget home address is a tagged secret", ["Private"]));
 	store.write(core("priv-tag2", "pineapplewidget bank detail", ["secret"]));
+	store.write(core("priv-sens", "pineapplewidget medical note", ["Sensitive"]));
+	store.write(core("priv-conf", "pineapplewidget contract terms", ["#CONFIDENTIAL"]));
 	store.write(core("priv-mark", "pineapplewidget diary entry #PRIVATE do not share", []));
 	store.close();
 	// A legacy row written before the admission gate redacted secrets.
@@ -77,11 +80,34 @@ describe("filter and reader (real store)", () => {
 
 	test("get by id refuses every private row, same as missing", () => {
 		const r = new MemoryReader(dbPath);
-		for (const id of ["priv-tag", "priv-tag2", "priv-mark", "legacy-secret", "nope"]) {
+		for (const id of [
+			"priv-tag",
+			"priv-tag2",
+			"priv-sens",
+			"priv-conf",
+			"priv-mark",
+			"legacy-secret",
+			"nope",
+		]) {
 			expect(r.get(id)).toBeNull();
 		}
 		expect(r.get("pub1")?.text).toContain("pineapplewidget");
 		r.close();
+	});
+
+	test("a store error answers a generic internal error, not a parse error", () => {
+		const r = new MemoryReader(dbPath);
+		r.close();
+		const call = {
+			jsonrpc: "2.0",
+			id: 7,
+			method: "tools/call",
+			params: { name: "memory_get", arguments: { id: "pub1" } },
+		};
+		const out = respond(r, JSON.stringify(call)) as { error: { code: number; message: string } };
+		expect(out.error).toEqual({ code: -32603, message: "internal error" });
+		const bad = respond(r, "{nope") as { error: { code: number } };
+		expect(bad.error.code).toBe(-32700);
 	});
 
 	test("unreadable tags fail closed", () => {
@@ -134,13 +160,23 @@ describe("real stdio protocol", () => {
 			const hits = JSON.parse(found.result.content[0].text);
 			expect(hits.map((h: { id: string }) => h.id)).toEqual(["pub1"]);
 
-			for (const id of ["priv-tag", "priv-tag2", "priv-mark", "legacy-secret"]) {
+			for (const id of [
+				"priv-tag",
+				"priv-tag2",
+				"priv-sens",
+				"priv-conf",
+				"priv-mark",
+				"legacy-secret",
+			]) {
 				const got = await tool(4, "memory_get", { id });
 				expect(got.result.isError).toBe(true);
 				expect(got.result.content[0].text).toBe("not found");
 			}
 			const pub = await tool(5, "memory_get", { id: "pub1" });
 			expect(JSON.parse(pub.result.content[0].text).id).toBe("pub1");
+			await tool(6, "memory_search", { query: `pineapplewidget ${TOKEN}` });
+			await tool(7, "memory_get", { id: TOKEN });
+			await tool(8, "memory_search", { query: `pineapplewidget ${"x".repeat(2000)}` });
 		} finally {
 			proc.stdin.end();
 			await proc.exited;
@@ -152,8 +188,16 @@ describe("real stdio protocol", () => {
 			.split("\n")
 			.map((l) => JSON.parse(l));
 		expect(lines[0]).toMatchObject({ tool: "memory_search", query: "pineapplewidget", count: 1 });
-		expect(lines.length).toBe(1 + 4 + 1);
-		expect(fs.readFileSync(logPath, "utf8")).not.toContain("Fridays");
+		expect(lines.length).toBe(1 + 6 + 1 + 3);
+		const raw = fs.readFileSync(logPath, "utf8");
+		expect(raw).not.toContain("Fridays");
+		expect(raw).not.toContain(TOKEN);
+		expect(raw).not.toContain("ghp_abcdefghij");
+		expect(lines[8].query).toContain("[REDACTED_GITHUB_TOKEN]");
+		expect(lines[9].query).toContain("[REDACTED_GITHUB_TOKEN]");
+		expect(lines[10].query.length).toBe(512);
+		expect(lines[10].truncated).toBe(true);
+		expect(lines[0].truncated).toBeUndefined();
 		expect(fs.statSync(logPath).mode & 0o777).toBe(0o600);
 	}, 30000);
 });
