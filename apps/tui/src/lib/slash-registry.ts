@@ -293,6 +293,44 @@ const defaultLookups: SlashHandlerLookups = {
 	},
 };
 
+/** Edit distance with adjacent swaps counting as one edit (Damerau), small inputs only. */
+export function editDistance(a: string, b: string): number {
+	const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [
+		i,
+		...Array(b.length).fill(0),
+	]);
+	for (let j = 0; j <= b.length; j++) d[0][j] = j;
+	for (let i = 1; i <= a.length; i++) {
+		for (let j = 1; j <= b.length; j++) {
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+			if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1])
+				d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+		}
+	}
+	return d[a.length][b.length];
+}
+
+/**
+ * Nearest names to a typed one: prefix matches first, then substring matches,
+ * then names within a small edit distance. At most `limit`, no duplicates.
+ */
+export function nearestNames(typed: string, names: readonly string[], limit = 3): string[] {
+	const t = typed.toLowerCase().replace(/^\//, "");
+	if (!t) return [];
+	const uniq = [...new Set(names.map((n) => n.toLowerCase().replace(/^\//, "")))].filter(Boolean);
+	const prefix = uniq.filter((n) => n.startsWith(t));
+	const sub = uniq.filter((n) => !n.startsWith(t) && n.includes(t));
+	const maxDist = t.length <= 4 ? 1 : 2;
+	const fuzzy = uniq
+		.filter((n) => !n.startsWith(t) && !n.includes(t))
+		.map((n) => ({ n, d: editDistance(t, n) }))
+		.filter((x) => x.d <= maxDist)
+		.toSorted((a, b) => a.d - b.d)
+		.map((x) => x.n);
+	return [...prefix, ...sub, ...fuzzy].slice(0, limit);
+}
+
 /**
  * The local answer for a line that starts with "/" but nothing claims, or null
  * when something does. A line is unknown only if ALL fail: not in the registry
@@ -316,7 +354,13 @@ export async function unknownSlashAnswer(
 	if (/^\/skill:/.test(name)) return null;
 	if (await lookups.skillExists(name.slice(1))) return null;
 	if (lookups.templateMatches(trimmed)) return null;
-	return `Unknown command ${name}. Type /help.`;
+	const known = [
+		...registry.entries.map((e) => e.name),
+		...buildBuiltInEntries().map((e) => e.name),
+	];
+	const near = nearestNames(name, known);
+	const hint = near.length ? ` Did you mean ${near.map((n) => `/${n}`).join(", ")}?` : "";
+	return `Unknown command ${name}.${hint} Type /help.`;
 }
 
 export function toGhostSuggestions(registry: SlashRegistry): {

@@ -328,9 +328,11 @@ import {
 } from "./lib/session-logger.js";
 import { expandSkillSlashCommand } from "./lib/skill-slash.js";
 import {
+	NARROW_HELP_COLUMNS,
 	type SlashCommand,
 	builtInCommandsCoreFirst,
 	formatSlashHelp,
+	isAndroidEnv,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
 import { detectTermPresetIntent } from "./lib/term-intent.js";
@@ -3853,9 +3855,18 @@ export function App({
 			switch (command) {
 				case "help":
 					addSystemMessage(
-						`${formatSlashHelp(args[0]?.toLowerCase() === "all")}\n\n` +
-							"Keyboard shortcuts:\n" +
-							formatHotkeyRows(),
+						(() => {
+							const columns = inkStdout?.columns ?? 80;
+							const narrow = columns < NARROW_HELP_COLUMNS;
+							const text = formatSlashHelp(args[0]?.toLowerCase() === "all", {
+								columns,
+								android: isAndroidEnv(),
+								hasDebug: packageBinScript("debug.ts") !== null,
+							});
+							return narrow
+								? `${text}\n\nShortcuts: /hotkeys`
+								: `${text}\n\nKeyboard shortcuts:\n${formatHotkeyRows()}`;
+						})(),
 					);
 					break;
 
@@ -5144,7 +5155,7 @@ export function App({
 					const debugScript = packageBinScript("debug.ts");
 					if (!debugScript) {
 						addSystemMessage(
-							"/debug needs a source checkout of 8gent-code; bin/debug.ts is not in this install.",
+							"/debug is for source checkouts of 8gent-code. To report a problem from here, use /bug.",
 						);
 						break;
 					}
