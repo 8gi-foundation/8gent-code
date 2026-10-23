@@ -9,6 +9,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.21] - 2026-10-23
+
+### Fixed
+- ai: cap native tool results re-sent each step (Termux token blow-up) ([#4801](https://github.com/8gi-foundation/8gent-code/pull/4801))
+
 ## [0.20.20] - 2026-10-23
 
 ### Changed
