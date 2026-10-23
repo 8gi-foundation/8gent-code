@@ -25,6 +25,25 @@ export function telegramTabTitle(state: TelegramTabState): string {
 	return `Telegram ${state}`;
 }
 
+/**
+ * Text that came from Telegram, or from a model reading it, is drawn in a terminal:
+ * control characters could move the cursor, set the window title or run an OSC
+ * sequence, and format characters (bidi overrides, zero-width marks) can disguise a
+ * line. Strip C0 (keeping newline and tab), DEL, C1 and every Unicode format character.
+ * Removing the ESC leaves a sequence's tail as inert visible text.
+ */
+export function sanitizeForTerminal(text: string): string {
+	let out = "";
+	for (const ch of text) {
+		const c = ch.codePointAt(0) ?? 0;
+		if (c < 0x20 && c !== 0x09 && c !== 0x0a) continue;
+		if (c >= 0x7f && c <= 0x9f) continue;
+		if (/\p{Cf}/u.test(ch)) continue;
+		out += ch;
+	}
+	return out;
+}
+
 export interface TabMsg {
 	id: string;
 	role: "user" | "assistant" | "system";
@@ -74,7 +93,13 @@ export class TelegramTab {
 	}
 
 	private msg(role: TabMsg["role"], content: string): TabMsg {
-		return { id: `telegram-${Date.now()}-${this.seq++}`, role, content, timestamp: new Date() };
+		// Every line in this tab passes through here: names, text, replies, errors, tools, history.
+		return {
+			id: `telegram-${Date.now()}-${this.seq++}`,
+			role,
+			content: sanitizeForTerminal(content),
+			timestamp: new Date(),
+		};
 	}
 
 	private transcript(rows: Array<{ role: string; content: string }>): TabMsg[] {

@@ -18,6 +18,7 @@ import {
 	type TabMsg,
 	TelegramTab,
 	type TelegramTabHost,
+	sanitizeForTerminal,
 	telegramTabTitle,
 } from "./telegram-tab";
 
@@ -402,5 +403,43 @@ describe("the Telegram tab is never saved to disk", () => {
 			tab("b", { role: "qa" }),
 		];
 		expect(tabsToPersist(tabs).map((t) => t.id)).toEqual(["a", "b"]);
+	});
+});
+
+const ESC = String.fromCharCode(27);
+const BEL = String.fromCharCode(7);
+const NASTY = `${ESC}]0;pwned${BEL}hello ${ESC}[2J${ESC}[31mred\u202Eevil\u200Bzero\u0085c1\u009b${BEL}\u007f\nline two\tend`;
+
+describe("what Telegram sends is made safe for the terminal", () => {
+	it("strips control characters and format characters, keeps newline and tab", () => {
+		const clean = sanitizeForTerminal(NASTY);
+		expect(clean).not.toContain(ESC);
+		expect(clean).not.toContain(BEL);
+		for (const bad of ["\u202e", "\u200b", "\u0085", "\u009b", "\u007f"]) {
+			expect(clean).not.toContain(bad);
+		}
+		expect(clean).toContain("hello");
+		expect(clean).toContain("\nline two\tend");
+		expect(sanitizeForTerminal("plain text, accents e\u0301, 8gent: done")).toBe(
+			"plain text, accents e\u0301, 8gent: done",
+		);
+	});
+
+	it("every line the Telegram tab shows is clean: history, live text, replies, and the sender label", async () => {
+		const d = daemon(join(root, "d-clean"));
+		const br = await bridge(d.url);
+		d.pool.getAgent(br.sessionId)?.history.push({ role: "user", content: `old ${NASTY}` });
+		const host = new FakeTabs({ "tab-one": ["mine"] });
+		const c = controller(host, d);
+		await c.open();
+		const id = c.id as string;
+		br.ws.send(JSON.stringify({ type: "prompt", text: NASTY }));
+		await wait(() => (host.tabs.get(id)?.messages.length ?? 0) >= 4);
+		const all = (host.tabs.get(id)?.messages ?? []).map((m) => m.content).join("\n");
+		expect(all).toContain("old ");
+		expect(all).toContain("hello");
+		expect(all).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202e\u200b]/);
+		// The tab next to it was never part of any of this.
+		expect(host.tabs.get("tab-one")?.messages.map((m) => m.content)).toEqual(["mine"]);
 	});
 });

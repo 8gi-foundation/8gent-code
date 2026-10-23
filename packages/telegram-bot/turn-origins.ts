@@ -67,6 +67,9 @@ export class TurnOrigins {
 				TURN_OUTPUT.has(event) || (event === "session:end" && p.reason === "turn-complete");
 			return turnOutput ? p.origin === ownChannel : true;
 		}
+		// Untagged fallback: safe only because Telegram sessions are attachable solely on daemons that
+		// tag turn origin (the home session needs the operator token and `turn-origin`). Do not widen
+		// Telegram attach without making tagging mandatory.
 		switch (event) {
 			case "user:message":
 				if (p.channel !== ownChannel) this.queue.push("other");
