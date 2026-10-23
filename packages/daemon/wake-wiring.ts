@@ -9,7 +9,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getDataDir } from "./data-dir";
 import { bus } from "./events";
@@ -39,12 +39,39 @@ export function readWakeSettings(dir = getDataDir()): WakeSettings {
 	}
 }
 
+/** Remove payload files past the age limit, then the oldest beyond the count cap (#4877). */
+export function pruneWakeFiles(
+	d: string,
+	s: Pick<WakeSettings, "payloadMaxAgeDays" | "payloadMaxFiles">,
+	now = Date.now(),
+): number {
+	let files: { p: string; at: number }[];
+	try {
+		files = readdirSync(d)
+			.filter((f) => f.endsWith(".txt"))
+			.map((f) => ({ p: join(d, f), at: statSync(join(d, f)).mtimeMs }))
+			.sort((a, b) => a.at - b.at);
+	} catch {
+		return 0;
+	}
+	const cutoff = now - s.payloadMaxAgeDays * 86_400_000;
+	const excess = Math.max(0, files.length - s.payloadMaxFiles);
+	const doomed = files.filter((f, i) => f.at < cutoff || i < excess);
+	for (const f of doomed) {
+		try {
+			unlinkSync(f.p);
+		} catch {}
+	}
+	return doomed.length;
+}
+
 /** Untrusted text goes to a private file under the data dir; the event carries the path only. */
 function stash(text: string, dir = getDataDir()): string {
 	const d = join(dir, "wake");
 	mkdirSync(d, { recursive: true, mode: 0o700 });
 	const p = join(d, `${sha(text)}.txt`);
 	writeFileSync(p, text, { mode: 0o600 });
+	pruneWakeFiles(d, readWakeSettings(dir));
 	return p;
 }
 
@@ -104,13 +131,18 @@ export function threatFeedEvents(root: string, sinceMs: number, at = Date.now())
 	return out;
 }
 
-function cronEvent(priority: WakeEvent["priority"], key: string, text: string): WakeEvent {
+function cronEvent(
+	dir: string,
+	priority: WakeEvent["priority"],
+	key: string,
+	text: string,
+): WakeEvent {
 	return {
 		source: "cron",
 		priority,
 		dedupeKey: `cron:${key}`,
 		origin: "cron",
-		payloadPath: stash(text),
+		payloadPath: stash(text, dir),
 		at: Date.now(),
 	};
 }
@@ -127,18 +159,21 @@ async function announce(n: Notice): Promise<void> {
 export function startWakeRouter(
 	dir = getDataDir(),
 	speak: (n: Notice) => void | Promise<void> = announce,
+	now?: () => number,
 ): () => void {
 	router = new WakeRouter({
 		settings: () => readWakeSettings(dir),
 		digestDir: join(dir, "digest"),
+		heldPath: join(dir, "wake-held.json"),
 		speak,
+		now,
 	});
 	const r = router;
 	const subs = [
 		bus.on("tool:result", (p) => {
 			if (p.sessionId !== "cron" || !p.tool.startsWith("cron:") || p.tool === "cron:when") return;
 			const text = JSON.stringify(p.output) ?? "";
-			void r.submit(cronEvent("low", `${p.tool}:${sha(text)}`, text));
+			void r.submit(cronEvent(dir, "low", `${p.tool}:${sha(text)}`, text));
 			if (p.tool === "cron:shell") {
 				const root = join(dir, "security", "threat-feed");
 				for (const e of threatFeedEvents(root, Date.now() - p.durationMs - 60_000))
@@ -148,7 +183,7 @@ export function startWakeRouter(
 		// A failed job needs action; the same failure on a retry is one event.
 		bus.on("agent:error", (p) => {
 			if (p.sessionId === "cron")
-				void r.submit(cronEvent("urgent", `error:${sha(p.error)}`, p.error));
+				void r.submit(cronEvent(dir, "urgent", `error:${sha(p.error)}`, p.error));
 		}),
 	];
 	return () => {
