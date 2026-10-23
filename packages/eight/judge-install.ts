@@ -24,11 +24,12 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { resolveHome } from "../core/home";
+import { JUDGE_MODEL } from "../decide/judge-model";
 import { detectBackend, resolveSharedJudgeHost } from "../decide/probe";
 import { findOnPath } from "../voice/termux";
 
-/** The calibrated judge (packages/decide/README.md Results; probe.ts MODEL_PREFERENCE puts it first). */
-export const JUDGE_MODEL = "hf.co/AtlaAI/Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF:latest";
+/** The calibrated judge, fixed at build time (packages/decide/judge-model.ts), never from user config. */
+export { JUDGE_MODEL };
 /** `ollama list` reports 4.9 GB for this model. */
 export const JUDGE_SIZE = "4.9 GB";
 
