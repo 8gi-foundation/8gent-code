@@ -294,6 +294,8 @@ import {
 	READINESS_RETRY_MS,
 	createReadinessCache,
 	localProviderEndpoints,
+	shouldGateOnReadiness,
+	waitForTabAgent,
 	withTimeout,
 } from "./lib/provider-readiness.js";
 import {
@@ -3544,7 +3546,10 @@ export function App({
 				// Belt and braces: the client's own check has no bound, so cap it.
 				const _check = await withTimeout(newAgent.readiness(), PROBE_TIMEOUT_MS * 2, { ok: false });
 				if (cancelled) return;
-				if (_check.ok) {
+				// A slow probe of a hosted provider does not refuse the user's
+				// message: the real request has its own timeout and reports its
+				// own error. Local providers still gate.
+				if (_check.ok || !shouldGateOnReadiness(currentProvider)) {
 					perTabAgents.setAgent(_initTabId, newAgent);
 					setAgent(newAgent);
 					setAgentReady(true);
@@ -7082,8 +7087,22 @@ export function App({
 			// Look up this tab's Agent. For the active tab the cached `agent`
 			// state already mirrors it; for any other tab, fetch from the
 			// per-tab map.
-			const targetAgent = tabId === activeTabId ? agent : perTabAgents.getAgent(tabId);
-			const targetReady = tabId === activeTabId ? agentReady : Boolean(targetAgent);
+			let targetAgent = tabId === activeTabId ? agent : perTabAgents.getAgent(tabId);
+			let targetReady = tabId === activeTabId ? agentReady : Boolean(targetAgent);
+			// A hosted provider can be slow to answer its first probe on a phone
+			// over mobile data. The typed line is never refused for that: say we
+			// are waiting, then send it once the tab's 8gent is built.
+			if (
+				!(targetAgent && targetReady) &&
+				!isLocalProvider(currentProvider) &&
+				!notReadyReasonRef.current
+			) {
+				const _name =
+					getProviderManager().getProvider(currentProvider)?.displayName || currentProvider;
+				addSystemMessage(`Waiting for ${_name} to answer, then sending your message...`);
+				targetAgent = (await waitForTabAgent(() => perTabAgents.getAgent(tabId))) ?? null;
+				targetReady = Boolean(targetAgent);
+			}
 
 			if (targetAgent && targetReady) {
 				try {

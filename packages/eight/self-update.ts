@@ -317,6 +317,25 @@ export type NpmTarget = {
 };
 
 /**
+ * The npm registry version when it is newer than the GitHub release `version`,
+ * else null. npm publishes minutes before release-binaries.yml publishes the
+ * GitHub release, so for a short window the release list lags npm and a plain
+ * "Already up to date" is wrong. Best effort: a registry that cannot be
+ * reached means no claim either way.
+ */
+export async function npmVersionAhead(
+	fetchImpl: FetchLike,
+	releaseVersion: string,
+): Promise<string | null> {
+	try {
+		const latest = await latestFromNpm(fetchImpl);
+		return compareVersions(latest, releaseVersion) > 0 ? latest : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * The npm channel's newest version. The GitHub release package first (#3658,
  * #4698): npm latest sat at 0.17.0 from May to October while releases moved
  * on, so npm users must not depend on it. The release list comes from
@@ -706,6 +725,16 @@ const NPM_SOURCE_LABEL: Record<NpmTarget["source"], string> = {
 	npm: "npm registry, GitHub releases could not be reached",
 };
 
+/** Set when npm has a version newer than the GitHub release we just found. */
+async function lagMessage(
+	o: { fetchImpl: FetchLike; npmPrefix?: string | null },
+	releaseVersion: string,
+): Promise<string | null> {
+	const ahead = await npmVersionAhead(o.fetchImpl, releaseVersion);
+	if (!ahead) return null;
+	return `npm has ${ahead}, but its GitHub release is not published yet (v${releaseVersion} is the newest release). Try again in a few minutes, or run: ${npmHint(`${NPM_PACKAGE}@${ahead}`, o.npmPrefix)}`;
+}
+
 export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdateResult> {
 	const o = {
 		...opts,
@@ -729,7 +758,13 @@ export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdate
 			const target = await latestForNpmChannel(o.fetchImpl, o.releasesUrl);
 			o.log(`Latest version: v${target.version} (${NPM_SOURCE_LABEL[target.source]}).`);
 			const d = decideUpdate(o.currentVersion, target.version);
-			if (d.action === "current") return { status: "current", version: d.version, channel: ch };
+			if (d.action === "current") {
+				// The release package stays the install source (#4698), so a newer
+				// npm version is reported, never installed from the registry here.
+				const lag = target.release ? await lagMessage(o, target.version) : null;
+				if (lag) return { status: "failed", channel: ch, message: lag };
+				return { status: "current", version: d.version, channel: ch };
+			}
 			if (d.action === "refuse-downgrade")
 				return { status: "refused-downgrade", from: d.from, to: d.to, channel: ch };
 			if (target.release) {
@@ -757,7 +792,11 @@ export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdate
 			return { status: "failed", channel: ch, message: `no release carries ${names[0]} yet` };
 		o.log(`Latest version: v${rel.version} (GitHub release).`);
 		const d = decideUpdate(o.currentVersion, rel.version);
-		if (d.action === "current") return { status: "current", version: d.version, channel: ch };
+		if (d.action === "current") {
+			const lag = await lagMessage(o, rel.version);
+			if (lag) return { status: "failed", channel: ch, message: lag };
+			return { status: "current", version: d.version, channel: ch };
+		}
 		if (d.action === "refuse-downgrade")
 			return { status: "refused-downgrade", from: d.from, to: d.to, channel: ch };
 		o.log(`Updating 8gent v${d.from} -> v${d.to} (${names[0]})...`);

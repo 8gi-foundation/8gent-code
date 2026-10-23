@@ -407,6 +407,23 @@ describe("npm channel from the GitHub release (#3658)", () => {
 		expect(f.calls).not.toContain(NPM_URL);
 	});
 
+	test("npm ahead of the newest GitHub release is reported with the exact npm command, never 'up to date'", async () => {
+		const runs: { args: string[]; staged: string }[] = [];
+		const r = await update(fakeFetch(routes(npmLatest("0.20.1"))), runs, {
+			currentVersion: "0.20.0",
+		});
+		expect(runs).toEqual([]);
+		expect(r.status).toBe("failed");
+		const msg = r.status === "failed" ? r.message : "";
+		expect(msg).toContain("npm has 0.20.1");
+		expect(msg).toContain("npm install -g @8gi-foundation/8gent-code@0.20.1");
+	});
+
+	test("an unreachable registry is no claim: current stays current", async () => {
+		const r = await update(fakeFetch(routes({})), [], { currentVersion: "0.20.0" });
+		expect(r.status).toBe("current");
+	});
+
 	test("a checksum mismatch refuses the tarball and npm never runs", async () => {
 		const runs: { args: string[]; staged: string }[] = [];
 		const r = await update(
@@ -749,6 +766,18 @@ describe("binary channel", () => {
 			...extra,
 		});
 	const leftovers = () => readdirSync(dir).filter((n) => n.endsWith(".new"));
+
+	test("binary channel: npm ahead of the newest release says so instead of 'up to date'", async () => {
+		const exe = join(dir, "8gent");
+		writeFileSync(exe, "OLD");
+		const f = fakeFetch({ ...routes(), ...npmLatest("0.20.1") });
+		const r = await base(exe, f, { currentVersion: "0.20.0" });
+		expect(r.status).toBe("failed");
+		const msg = r.status === "failed" ? r.message : "";
+		expect(msg).toContain("npm has 0.20.1");
+		expect(msg).toContain("npm install -g @8gi-foundation/8gent-code@0.20.1");
+		expect(readFileSync(exe, "utf8")).toBe("OLD");
+	});
 
 	test("picks the newest published, non-prerelease release that carries the binary", async () => {
 		const rel = await latestBinaryRelease(fakeFetch(routes()), asset, RELEASES);

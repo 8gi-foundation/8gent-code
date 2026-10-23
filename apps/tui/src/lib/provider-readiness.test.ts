@@ -6,14 +6,16 @@
  * Before this gate the agent init awaited that forever.
  */
 
-import type { TCPSocketListener } from "bun";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import type { TCPSocketListener } from "bun";
 import {
-	createReadinessCache,
 	type LocalProviderEndpoint,
+	createReadinessCache,
 	localProviderEndpoints,
 	probeModels,
 	resolveReadyProvider,
+	shouldGateOnReadiness,
+	waitForTabAgent,
 	withTimeout,
 } from "./provider-readiness.js";
 
@@ -65,8 +67,18 @@ const lmExtract = (d: any) => (d?.data || []).map((m: any) => String(m?.id ?? ""
 
 function endpoints(lmBase: string, ollamaBase: string): LocalProviderEndpoint[] {
 	return [
-		{ provider: "lmstudio", label: "LM Studio", modelsUrl: `${lmBase}/v1/models`, extract: lmExtract },
-		{ provider: "ollama", label: "Ollama", modelsUrl: `${ollamaBase}/api/tags`, extract: ollamaExtract },
+		{
+			provider: "lmstudio",
+			label: "LM Studio",
+			modelsUrl: `${lmBase}/v1/models`,
+			extract: lmExtract,
+		},
+		{
+			provider: "ollama",
+			label: "Ollama",
+			modelsUrl: `${ollamaBase}/api/tags`,
+			extract: ollamaExtract,
+		},
 	];
 }
 
@@ -173,8 +185,18 @@ describe("resolveReadyProvider", () => {
 			{
 				timeoutMs: 1000,
 				endpoints: [
-					{ provider: "lmstudio", label: "LM Studio", modelsUrl: `${emptyUrl}/api/tags`, extract: ollamaExtract },
-					{ provider: "ollama", label: "Ollama", modelsUrl: `${healthyUrl}/api/tags`, extract: ollamaExtract },
+					{
+						provider: "lmstudio",
+						label: "LM Studio",
+						modelsUrl: `${emptyUrl}/api/tags`,
+						extract: ollamaExtract,
+					},
+					{
+						provider: "ollama",
+						label: "Ollama",
+						modelsUrl: `${healthyUrl}/api/tags`,
+						extract: ollamaExtract,
+					},
 				],
 			},
 		);
@@ -255,5 +277,28 @@ describe("localProviderEndpoints (#3115)", () => {
 
 	test("nothing set is localhost", () => {
 		expect(ollamaUrl({})).toBe("http://localhost:11434/api/tags");
+	});
+});
+
+describe("hosted providers never refuse a typed line on a slow probe", () => {
+	test("only on-box providers gate on readiness", () => {
+		for (const p of ["8gent", "ollama", "lmstudio", "llama-server"])
+			expect(shouldGateOnReadiness(p)).toBe(true);
+		for (const p of ["minimax", "openrouter", "anthropic", "groq"])
+			expect(shouldGateOnReadiness(p)).toBe(false);
+	});
+
+	test("waitForTabAgent returns the agent once it is built, within the wait", async () => {
+		let agent: { id: string } | undefined;
+		setTimeout(() => {
+			agent = { id: "built" };
+		}, 60);
+		expect(await waitForTabAgent(() => agent, 2000, 10)).toEqual({ id: "built" });
+	});
+
+	test("waitForTabAgent gives up with undefined, it does not hang", async () => {
+		const t0 = Date.now();
+		expect(await waitForTabAgent(() => undefined, 80, 10)).toBeUndefined();
+		expect(Date.now() - t0).toBeLessThan(1000);
 	});
 });
