@@ -21,15 +21,26 @@
  *   is the only way a batch reaches a model prompt: as a labelled list of paths.
  */
 
+import { randomBytes } from "node:crypto";
 import {
+	constants,
 	appendFileSync,
-	chmodSync,
+	closeSync,
+	lstatSync,
 	mkdirSync,
+	openSync,
 	readFileSync,
 	renameSync,
-	writeFileSync,
+	unlinkSync,
+	writeSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
+
+/** Distinct urgent events held through quiet hours; more are counted, not stored (8SO, #4888). */
+export const MAX_HELD = 200;
+/** A held file larger than this is not read. */
+const MAX_HELD_FILE_BYTES = 2 * 1024 * 1024;
+const SOURCES = new Set(["owner", "telegram-other", "cron", "threat-feed", "task"]);
 
 export type WakeSource = "owner" | "telegram-other" | "cron" | "threat-feed" | "task";
 export type WakePriority = "owner" | "urgent" | "normal" | "low";
@@ -135,16 +146,64 @@ export class WakeRouter {
 	private abort: AbortController | null = null;
 	private pumping: Promise<void> | null = null;
 	private held = new Map<string, Queued>();
+	/** Urgent events past MAX_HELD during quiet hours: only their number is kept. */
+	private overflow = 0;
 	private heldTimer: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(private readonly deps: WakeDeps) {
+		this.loadHeld();
+		void this.release();
+	}
+
+	/**
+	 * Read the held file back. It is a file in the data folder, so it is checked like input: a
+	 * regular file this user owns (never a link), under 2 MiB, and each entry must be a well-formed
+	 * urgent event whose payload path is a .txt under the wake folder next to it. A forged entry
+	 * cannot point the notice at some other file; anything malformed is skipped.
+	 */
+	private loadHeld(): void {
+		const path = this.deps.heldPath;
+		if (!path) return;
 		try {
-			const raw = deps.heldPath ? JSON.parse(readFileSync(deps.heldPath, "utf8")) : [];
-			for (const q of Array.isArray(raw) ? raw : []) this.held.set(q.event.dedupeKey, q);
+			const st = lstatSync(path);
+			if (!st.isFile() || st.size > MAX_HELD_FILE_BYTES) return;
+			if (typeof process.getuid === "function" && st.uid !== process.getuid()) return;
+			const raw = JSON.parse(readFileSync(path, "utf8"));
+			if (!Array.isArray(raw)) return;
+			const wakeDir = resolve(dirname(path), "wake") + sep;
+			for (const q of raw) {
+				if (this.held.size >= MAX_HELD) break;
+				if (typeof q?.overflow === "number" && Number.isInteger(q.overflow) && q.overflow > 0) {
+					this.overflow += Math.min(q.overflow, 1_000_000);
+					continue;
+				}
+				const e = q?.event;
+				const ok =
+					e &&
+					typeof e.dedupeKey === "string" &&
+					e.dedupeKey.length <= 256 &&
+					e.priority === "urgent" &&
+					SOURCES.has(e.source) &&
+					typeof e.origin === "string" &&
+					e.origin.length <= 64 &&
+					typeof e.at === "number" &&
+					Number.isFinite(e.at) &&
+					typeof e.payloadPath === "string" &&
+					resolve(e.payloadPath).startsWith(wakeDir) &&
+					e.payloadPath.endsWith(".txt") &&
+					Number.isInteger(q.count) &&
+					q.count >= 1 &&
+					q.count <= 1_000_000;
+				if (ok) this.held.set(e.dedupeKey, { event: e, count: q.count });
+			}
 		} catch {
 			// No held file, or one that does not parse: nothing was held.
 		}
-		void this.release();
+	}
+
+	/** Payload files of held events: the prune must not remove what a held event points at. */
+	heldPaths(): Set<string> {
+		return new Set([...this.held.values()].map((q) => resolve(q.event.payloadPath)));
 	}
 
 	private now(): number {
@@ -174,7 +233,7 @@ export class WakeRouter {
 			}
 			const held = this.held.get(ev.dedupeKey);
 			if (held) {
-				held.count++;
+				held.count = Math.min(held.count + 1, 1_000_000);
 				this.saveHeld();
 				return Promise.resolve();
 			}
@@ -209,7 +268,7 @@ export class WakeRouter {
 
 	/** Announce held urgent events once quiet hours have ended; otherwise wait for the end. */
 	async release(): Promise<void> {
-		if (this.held.size === 0) return;
+		if (this.held.size === 0 && this.overflow === 0) return;
 		const { quietHours } = this.deps.settings();
 		if (inQuietHours(this.now(), quietHours)) {
 			if (this.heldTimer || !quietHours) return;
@@ -224,19 +283,54 @@ export class WakeRouter {
 			return;
 		}
 		const out = [...this.held.values()];
+		const more = this.overflow;
 		this.held.clear();
+		this.overflow = 0;
 		this.saveHeld();
 		for (const q of out) await this.speakAction(q);
+		if (more > 0)
+			await this.deps.speak({
+				kind: "action",
+				count: more,
+				event: {
+					source: "task",
+					priority: "urgent",
+					dedupeKey: "held:overflow",
+					origin: "wake-router",
+					payloadPath: "",
+					at: this.now(),
+				},
+			});
 	}
 
 	private saveHeld(): void {
 		const path = this.deps.heldPath;
 		if (!path) return;
-		mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-		const tmp = `${path}.tmp`;
-		writeFileSync(tmp, JSON.stringify([...this.held.values()]), { mode: 0o600 });
-		chmodSync(tmp, 0o600);
-		renameSync(tmp, path);
+		// A temp name nobody can guess, opened O_EXCL | O_NOFOLLOW, then renamed over the real name:
+		// a link planted at either name is replaced, never written through. A write that fails
+		// (disk full) must not break the event that caused it: it stays held in memory.
+		const tmp = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+		try {
+			mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+			const rows: unknown[] = [...this.held.values()];
+			if (this.overflow > 0) rows.push({ overflow: this.overflow });
+			const fd = openSync(
+				tmp,
+				constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+				0o600,
+			);
+			try {
+				writeSync(fd, JSON.stringify(rows));
+			} finally {
+				closeSync(fd);
+			}
+			renameSync(tmp, path);
+		} catch (err) {
+			try {
+				unlinkSync(tmp);
+			} catch {}
+			console.error("[wake] could not write the held file:", (err as Error).message);
+		}
 	}
 
 	private pump(force = false): Promise<void> {
@@ -293,6 +387,7 @@ export class WakeRouter {
 	private hold(q: Queued): void {
 		const prior = this.held.get(q.event.dedupeKey);
 		if (prior) prior.count += q.count;
+		else if (this.held.size >= MAX_HELD) this.overflow += q.count;
 		else this.held.set(q.event.dedupeKey, q);
 		this.saveHeld();
 		void this.release(); // arms the end-of-quiet-hours timer

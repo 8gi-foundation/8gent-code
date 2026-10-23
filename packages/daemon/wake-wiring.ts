@@ -9,8 +9,19 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+	constants,
+	closeSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	readdirSync,
+	statSync,
+	unlinkSync,
+	writeSync,
+} from "node:fs";
+import { join, resolve } from "node:path";
 import { getDataDir } from "./data-dir";
 import { bus } from "./events";
 import { sendNativeNotification } from "./notifications";
@@ -33,7 +44,21 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0,
 export function readWakeSettings(dir = getDataDir()): WakeSettings {
 	try {
 		const w = JSON.parse(readFileSync(join(dir, "config.json"), "utf8")).wake ?? {};
-		return { ...DEFAULT_WAKE_SETTINGS, ...w };
+		const s = { ...DEFAULT_WAKE_SETTINGS, ...w };
+		// A prune limit that is not a positive number (0, negative, NaN, a string) would delete
+		// everything: it falls back to the default instead (8SO, #4888).
+		const positive = (v: unknown, fallback: number, max: number) =>
+			typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.min(v, max) : fallback;
+		s.payloadMaxAgeDays = positive(
+			s.payloadMaxAgeDays,
+			DEFAULT_WAKE_SETTINGS.payloadMaxAgeDays,
+			3650,
+		);
+		s.payloadMaxFiles = Math.floor(
+			positive(s.payloadMaxFiles, DEFAULT_WAKE_SETTINGS.payloadMaxFiles, 100_000),
+		);
+		if (s.payloadMaxFiles < 1) s.payloadMaxFiles = DEFAULT_WAKE_SETTINGS.payloadMaxFiles;
+		return s;
 	} catch {
 		return { ...DEFAULT_WAKE_SETTINGS };
 	}
@@ -44,19 +69,34 @@ export function pruneWakeFiles(
 	d: string,
 	s: Pick<WakeSettings, "payloadMaxAgeDays" | "payloadMaxFiles">,
 	now = Date.now(),
+	/** Paths never removed: the file just written, and what held events point at. */
+	keep: ReadonlySet<string> = new Set(),
 ): number {
+	// The limits are checked again here: this is exported, and 0, a negative or NaN would remove everything.
+	const days =
+		Number.isFinite(s.payloadMaxAgeDays) && s.payloadMaxAgeDays > 0
+			? s.payloadMaxAgeDays
+			: DEFAULT_WAKE_SETTINGS.payloadMaxAgeDays;
+	const cap =
+		Number.isFinite(s.payloadMaxFiles) && s.payloadMaxFiles >= 1
+			? Math.floor(s.payloadMaxFiles)
+			: DEFAULT_WAKE_SETTINGS.payloadMaxFiles;
 	let files: { p: string; at: number }[];
 	try {
+		// lstat: only regular files count; a link is never followed, so its target's age or
+		// existence cannot steer what gets removed.
 		files = readdirSync(d)
 			.filter((f) => f.endsWith(".txt"))
-			.map((f) => ({ p: join(d, f), at: statSync(join(d, f)).mtimeMs }))
+			.map((f) => ({ p: join(d, f), st: lstatSync(join(d, f)) }))
+			.filter((f) => f.st.isFile())
+			.map((f) => ({ p: f.p, at: f.st.mtimeMs }))
 			.sort((a, b) => a.at - b.at);
 	} catch {
 		return 0;
 	}
-	const cutoff = now - s.payloadMaxAgeDays * 86_400_000;
-	const excess = Math.max(0, files.length - s.payloadMaxFiles);
-	const doomed = files.filter((f, i) => f.at < cutoff || i < excess);
+	const cutoff = now - days * 86_400_000;
+	const excess = Math.max(0, files.length - cap);
+	const doomed = files.filter((f, i) => !keep.has(resolve(f.p)) && (f.at < cutoff || i < excess));
 	for (const f of doomed) {
 		try {
 			unlinkSync(f.p);
@@ -65,13 +105,32 @@ export function pruneWakeFiles(
 	return doomed.length;
 }
 
+/** Write a 0600 file without following a link at its name (a planted link is replaced, not written through). */
+function writeNoFollow(p: string, text: string): void {
+	const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW;
+	let fd: number;
+	try {
+		fd = openSync(p, flags, 0o600);
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "ELOOP") throw err;
+		unlinkSync(p);
+		fd = openSync(p, flags, 0o600);
+	}
+	try {
+		writeSync(fd, text);
+	} finally {
+		closeSync(fd);
+	}
+}
+
 /** Untrusted text goes to a private file under the data dir; the event carries the path only. */
 function stash(text: string, dir = getDataDir()): string {
 	const d = join(dir, "wake");
 	mkdirSync(d, { recursive: true, mode: 0o700 });
 	const p = join(d, `${sha(text)}.txt`);
-	writeFileSync(p, text, { mode: 0o600 });
-	pruneWakeFiles(d, readWakeSettings(dir));
+	writeNoFollow(p, text);
+	const keep = new Set([resolve(p), ...(router?.heldPaths() ?? [])]);
+	pruneWakeFiles(d, readWakeSettings(dir), Date.now(), keep);
 	return p;
 }
 
