@@ -17,6 +17,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { scrub } from "../../eight/secret-scanner.js";
+import { type EffectCheck, buildSignature, effectCheck } from "./durable-verify.js";
 import type { SessionEntry } from "./index.js";
 
 export type LedgerRecord =
@@ -35,10 +36,14 @@ export type LedgerRecord =
 			key: string;
 			/** Path or command, so the person can see what to check. */
 			hint?: string;
+			/** Slice 3: the 8gent build that started the call. */
+			build?: string;
+			/** Slice 3: what resume checks to know the call already landed. */
+			check?: EffectCheck;
 			at: string;
 	  }
 	| { k: "effect"; id: string; ok: boolean; digest: string; at: string }
-	| { k: "resolve"; id: string; how: "retry" | "skip"; at: string };
+	| { k: "resolve"; id: string; how: "retry" | "skip" | "verified"; at: string };
 
 export type IntentRecord = Extract<LedgerRecord, { k: "intent" }>;
 
@@ -162,6 +167,8 @@ export function observeSessionEntry(entry: SessionEntry): void {
 			argsHash: sha(JSON.stringify(tc.arguments ?? {})),
 			key: `${sessionKey}:${tc.toolCallId}`,
 			hint: hintOf(tc.arguments as Record<string, unknown>),
+			build: buildSignature(),
+			check: safeCheck(tc.name, tc.arguments as Record<string, unknown>),
 			at,
 		};
 	} else if (entry.type === "tool_result")
@@ -318,6 +325,15 @@ export function flushText(key: string | null = sessionKey): void {
 export function noteTurnEnd(): void {
 	if (!enabled || !sessionKey) return;
 	safeAppend({ k: "end", how: "done", at: new Date().toISOString() });
+}
+
+/** A check that cannot be computed leaves the call to the person; it never fails the turn. */
+function safeCheck(tool: string, args: Record<string, unknown>): EffectCheck | undefined {
+	try {
+		return effectCheck(tool, args);
+	} catch {
+		return undefined;
+	}
 }
 
 export function readLedger(key: string): LedgerRecord[] {

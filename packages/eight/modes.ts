@@ -198,9 +198,9 @@ export class ModeManager {
 	 * on a headless run, F5). Registers a one-off mode and makes it active, so
 	 * the same filter that offers tools and refuses withheld calls applies.
 	 */
-	applyToolAllowlist(names: string[]): void {
+	applyToolAllowlist(names: string[], label = "Tool allowlist"): void {
 		this.modes["tool-allowlist"] = {
-			name: "Tool allowlist",
+			name: label,
 			description: "Only the tools named on the command line",
 			systemPromptPrefix: "",
 			// Intersect with the mode already active: --tools can narrow, never widen.

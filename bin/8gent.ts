@@ -198,6 +198,8 @@ OPTIONS:
   --resume       Resume last session (or --resume=<name> for specific)
   --continue [id] Resume this folder's latest session (or the one named by id)
   --no-durable   Turn off durable turns (on by default in the TUI: a killed turn resumes where it stopped, no write redone)
+  --durable-retry With -p --resume <id>: check what an interrupted turn left open, redo only what is missing (read-only tools and verifiable writes only)
+  --durable-skip With -p --resume <id>: leave an interrupted turn's open calls as they are
   -p, --print    Run one prompt and exit; piped stdin is added (git diff | 8gent -p "review")
   --mode <m>     With -p: json (one event per line, docs/specs/JSON-EVENTS.md) or text; rpc = --rpc
   --tools a,b    With -p: allow only these tools

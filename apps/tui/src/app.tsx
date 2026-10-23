@@ -457,11 +457,14 @@ import {
 	noteTurnEnd,
 	planResume,
 	resolveInterrupted,
-	resumeNotice,
 	retryPrompt,
 	setDurableEnabled,
 	setDurableSession,
 } from "../../../packages/specifications/session/durable-ledger.js";
+import {
+	durableResumeNotice,
+	setDurableRoot,
+} from "../../../packages/specifications/session/durable-verify.js";
 
 // Load .env file if present
 import * as fs from "node:fs";
@@ -2743,12 +2746,15 @@ export function App({
 	const [durableOn, setDurableOn] = useState(isDurableEnabled);
 	useEffect(() => {
 		setDurableSession(activeSessionId);
+		// Checks resolve paths and run git where the session's 8gent works (its Agent uses process.cwd()).
+		setDurableRoot(process.cwd());
 		if (!durableOn || !activeSessionId) return;
 		// Slice 2: a turn cut off with no tool open (killed mid model call, 4G drop
 		// mid-stream) is offered "continue where it stopped", its partial text kept.
+		// Slice 3: calls already on disk are closed, a build change is said first.
 		const notice =
 			cutOffNotice(lastTurn(activeSessionId)) ??
-			resumeNotice(planResume(interruptedCalls(activeSessionId), isReadOnlyTool));
+			durableResumeNotice(activeSessionId, isReadOnlyTool);
 		if (notice) addSystemMessage(notice);
 	}, [activeSessionId, durableOn, addSystemMessage]);
 	const submitRef = useRef<((text: string) => Promise<void>) | null>(null);
