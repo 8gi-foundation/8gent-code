@@ -7,11 +7,7 @@
  * The model-proxy handles provider selection, rate limiting, and fallback.
  */
 
-import {
-	anonymizeMessages,
-	deanonymize,
-	verifyClean,
-} from "../permissions/pii-anonymizer";
+import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
 
 // Model proxy on Fly internal network, or Ollama fallback. Read at CALL time
 // (not module load) so the deploy/host config and the cloud-vs-local routing
@@ -120,6 +116,7 @@ export async function generateResponse(req: InferenceRequest): Promise<Inference
 				stream: false,
 				options: { num_predict: 500 },
 			}),
+			redirect: "error",
 		});
 		if (!res.ok) throw new Error(`Ollama returned ${res.status}: ${await res.text()}`);
 		const data = (await res.json()) as any;
@@ -136,6 +133,7 @@ export async function generateResponse(req: InferenceRequest): Promise<Inference
 				"X-Vessel-ID": vesselId,
 			},
 			body: JSON.stringify({ model, messages, max_tokens: 500 }),
+			redirect: "error",
 		});
 		if (!res.ok) throw new Error(`Model proxy returned ${res.status}: ${await res.text()}`);
 		const data = (await res.json()) as any;

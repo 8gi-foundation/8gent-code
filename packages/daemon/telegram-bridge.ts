@@ -878,6 +878,7 @@ export function localSpokenModel(
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ model, prompt, stream: false, ...(json ? { format: "json" } : {}) }),
 			signal,
+			redirect: "error",
 		});
 		const data = (await res.json()) as { response?: string };
 		return typeof data.response === "string" ? data.response : "";
