@@ -72,9 +72,14 @@ const SAFE_KEY = /^[A-Za-z0-9._-]+$/;
 
 const squash = (c: string) => c.toLowerCase().replace(/\s+/g, " ").trim();
 
-/** Strict: lowercased and whitespace collapsed, a cd prefix kept. Clearing a denial uses this. */
-export function strictFingerprint(command: string): string {
-	return createHash("sha256").update(squash(command)).digest("hex").slice(0, 32);
+/**
+ * Strict: the command as typed (trimmed, nothing else folded) plus the folder it ran
+ * in, mirroring sessionKey(command, where). Clearing a denial uses this, so a yes to
+ * another spelling, case, or folder clears nothing.
+ */
+export function strictFingerprint(command: string, where?: string): string {
+	const key = where ? `${command.trim()}\u0000in ${where}` : command.trim();
+	return createHash("sha256").update(key).digest("hex").slice(0, 32);
 }
 
 /** Loose, for matching: a leading cd prefix is dropped, so a spelling of a denied call still asks. */
@@ -103,17 +108,29 @@ export function denialPath(sessionKey: string, dir?: string): string | null {
 	return SAFE_KEY.test(sessionKey) ? path.join(denialDir(dir), `${sessionKey}.json`) : null;
 }
 
-/** The session's denials, or [] when none, unreadable, or the key is not a plain id. */
-export function readDenials(sessionKey: string, dir?: string): DeniedCall[] {
+export interface DenialFile {
+	rows: DeniedCall[];
+	/** The file exists but could not be read or parsed: callers fail closed. */
+	corrupt: boolean;
+}
+
+/** The session's denials. A missing file is empty; an unreadable or unparsable one is corrupt. */
+export function readDenialFile(sessionKey: string, dir?: string): DenialFile {
 	const file = denialPath(sessionKey, dir);
-	if (!file) return [];
+	if (!file) return { rows: [], corrupt: false };
+	let text: string;
 	try {
-		const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as { denied?: unknown };
-		if (!Array.isArray(parsed.denied)) return [];
+		text = fs.readFileSync(file, "utf8");
+	} catch (err) {
+		return { rows: [], corrupt: (err as NodeJS.ErrnoException)?.code !== "ENOENT" };
+	}
+	try {
+		const parsed = JSON.parse(text) as { denied?: unknown };
+		if (!Array.isArray(parsed?.denied)) return { rows: [], corrupt: true };
 		// A row with a fingerprint is never dropped: dropping it would let the call run.
 		// A missing strict fingerprint becomes one strictFingerprint cannot produce, so the
 		// row matches loosely, asks every time, and no yes can clear it.
-		return parsed.denied
+		const rows = parsed.denied
 			.filter((d): d is Partial<DeniedCall> & { fp: string } => typeof d?.fp === "string")
 			.map((d) => ({
 				fp: d.fp,
@@ -122,9 +139,15 @@ export function readDenials(sessionKey: string, dir?: string): DeniedCall[] {
 				at: typeof d.at === "string" ? d.at : "",
 			}))
 			.slice(-MAX_DENIALS_PER_SESSION);
+		return { rows, corrupt: false };
 	} catch {
-		return [];
+		return { rows: [], corrupt: true };
 	}
+}
+
+/** The session's denials, or [] when none or the key is not a plain id. */
+export function readDenials(sessionKey: string, dir?: string): DeniedCall[] {
+	return readDenialFile(sessionKey, dir).rows;
 }
 
 function save(sessionKey: string, denied: DeniedCall[], dir?: string): void {
@@ -154,8 +177,13 @@ function prune(d: string): void {
 }
 
 /** Record one denial. The same command twice is one row; the oldest rows fall off the cap. */
-export function recordDenial(sessionKey: string, command: string, dir?: string): void {
-	const sfp = strictFingerprint(command);
+export function recordDenial(
+	sessionKey: string,
+	command: string,
+	where?: string,
+	dir?: string,
+): void {
+	const sfp = strictFingerprint(command, where);
 	const rows = readDenials(sessionKey, dir).filter((d) => d.sfp !== sfp);
 	rows.push({
 		fp: denialFingerprint(command),
@@ -169,10 +197,15 @@ export function recordDenial(sessionKey: string, command: string, dir?: string):
 /**
  * A fresh decision approved this exact call: its denial is gone. Only a row with
  * the same strict fingerprint goes; a yes to a different call that matches loosely
- * (another cd folder, the bare command) clears nothing. Writes no approval.
+ * (another folder, case, spacing or the bare command) clears nothing. Writes no approval.
  */
-export function clearDenial(sessionKey: string, command: string, dir?: string): void {
-	const sfp = strictFingerprint(command);
+export function clearDenial(
+	sessionKey: string,
+	command: string,
+	where?: string,
+	dir?: string,
+): void {
+	const sfp = strictFingerprint(command, where);
 	const rows = readDenials(sessionKey, dir);
 	if (rows.some((d) => d.sfp === sfp))
 		save(
@@ -184,5 +217,9 @@ export function clearDenial(sessionKey: string, command: string, dir?: string): 
 
 /** The lines shown on resume for each denied call. */
 export function denialNotice(rows: readonly DeniedCall[]): string[] {
-	return rows.map((d) => `Denied before the crash, needs a fresh decision: ${d.hint}`);
+	return rows.map((d) => `Denied earlier in this session, needs a fresh decision: ${d.hint}`);
 }
+
+/** Shown once when a session's denial file exists but cannot be read. */
+export const UNREADABLE_DENIALS_NOTICE =
+	"This session's denial record could not be read, so every command asks until it is fixed.";

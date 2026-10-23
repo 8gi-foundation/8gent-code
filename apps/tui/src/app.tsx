@@ -419,6 +419,7 @@ import {
 } from "../../../packages/permissions/permission-mode.js";
 import { runAllowReadCommand } from "../../../packages/permissions/read-allow.js";
 import {
+	UNREADABLE_DENIALS_NOTICE,
 	denialNotice,
 	resumeLaunchMode,
 	resumeReturnQuestion,
@@ -1691,9 +1692,8 @@ export function App({
 	// back (#4821). Decided from the resolved session id, in the effect on
 	// activeSessionId, so every resume path (id, name, prefix, picker, /session
 	// resume, continue-last, import) goes through it.
-	const resumeAskRef = useRef(false);
-	const resumeYoloRef = useRef(false);
-	const resumeClampedRef = useRef<PermissionMode | null>(null);
+	// Bound to the tab that was clamped: only that tab is offered the way back.
+	const resumeAskRef = useRef<{ tab: string; mode: PermissionMode; yolo: boolean } | null>(null);
 	const permHoldersRef = useRef(new Map<string, PermissionModeHolder>());
 	const permHolderFor = useCallback(
 		(tabId: string): PermissionModeHolder => {
@@ -2156,15 +2156,21 @@ export function App({
 			},
 		},
 		{
-			question: resumeReturnQuestion(resumeYoloRef.current),
+			question: resumeReturnQuestion(resumeAskRef.current?.yolo ?? false),
 			// Not asked when the person already moved this tab off the clamped mode themselves.
-			needed: () =>
-				resumeAskRef.current &&
-				permHolderFor(activeTabIdRef.current).mode === resumeClampedRef.current,
+			needed: () => {
+				const ask = resumeAskRef.current;
+				return (
+					ask !== null &&
+					ask.tab === activeTabIdRef.current &&
+					permHolderFor(ask.tab).mode === ask.mode
+				);
+			},
 			// The saved yolo preference is never rewritten by this answer.
 			answer: (yes) => {
-				resumeAskRef.current = false;
-				if (yes) setTabPermMode(activeTabIdRef.current, "infinite", resumeYoloRef.current);
+				const ask = resumeAskRef.current;
+				resumeAskRef.current = null;
+				if (ask && yes) setTabPermMode(ask.tab, "infinite", ask.yolo);
 			},
 		},
 	);
@@ -2792,17 +2798,17 @@ export function App({
 	}, [activeSessionId, durableOn, addSystemMessage]);
 	// Denials from before a crash (#4821): shown as denied, asked again in every mode.
 	useEffect(() => {
-		const denied = getPermissionManager().setDenialSession(activeSessionId);
+		const pm = getPermissionManager();
+		const denied = pm.setDenialSession(activeSessionId);
 		if (denied.length > 0) addSystemMessage(denialNotice(denied).join("\n"));
+		if (pm.isDenialRecordUnreadable()) addSystemMessage(UNREADABLE_DENIALS_NOTICE);
 		// An interrupted turn: the active tab drops to the stricter of its mode and Ask.
 		if (!activeSessionId || !wasInterrupted(activeSessionId)) return;
 		const tab = activeTabIdRef.current;
 		const holder = permHolderFor(tab);
 		const start = resumeLaunchMode({ launch: holder.mode, interrupted: true });
 		if (!start.clamped) return;
-		resumeYoloRef.current = holder.persistent === true;
-		resumeClampedRef.current = start.mode;
-		resumeAskRef.current = true;
+		resumeAskRef.current = { tab, mode: start.mode, yolo: holder.persistent === true };
 		setTabPermMode(tab, start.mode);
 		addSystemMessage(
 			`The last turn in this session was cut off, so this tab resumed in ${permissionModeLabel(start.mode)}. You will be asked once to go back.`,

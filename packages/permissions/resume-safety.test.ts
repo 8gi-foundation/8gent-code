@@ -21,8 +21,10 @@ import {
 import {
 	MAX_DENIALS_PER_SESSION,
 	MAX_DENIAL_FILES,
+	UNREADABLE_DENIALS_NOTICE,
 	denialDir,
 	denialFingerprint,
+	denialNotice,
 	denialPath,
 	readDenials,
 	recordDenial,
@@ -247,14 +249,87 @@ describe("C3: a denied call is not re-run on resume without a fresh decision", (
 		expect(await replay.requestPermission("run", "x", 'cd "$(fetchtool x)" && ls')).toBe(false);
 	});
 
-	test("a yes to the same call with extra spaces still clears its denial", async () => {
+	test("only the exact same call clears its denial; case and spacing variants do not", async () => {
 		recordDenial("sess-same", "deploytool --apply");
 		const after = manager();
 		after.setDenialSession("sess-same");
 		after.enableInfiniteMode();
 		registerTuiApprovalHandler(async () => "approve");
-		expect(await after.requestPermission("run", "x", "deploytool   --apply")).toBe(true);
+		for (const variant of ["deploytool   --apply", "DeployTool --apply"]) {
+			expect(await after.requestPermission("run", "x", variant)).toBe(true);
+			expect(readDenials("sess-same")).toHaveLength(1);
+		}
+		expect(await after.requestPermission("run", "x", "deploytool --apply")).toBe(true);
 		expect(readDenials("sess-same")).toEqual([]);
+	});
+
+	test("quoted spacing and case are part of the call: a yes to another spelling clears nothing", async () => {
+		recordDenial("sess-quote", 'mytool "a  b"');
+		recordDenial("sess-quote", "mytool ./Build");
+		const after = manager();
+		after.setDenialSession("sess-quote");
+		after.enableInfiniteMode();
+		registerTuiApprovalHandler(async () => "approve");
+		await after.requestPermission("run", "x", 'mytool "a b"');
+		await after.requestPermission("run", "x", "mytool ./build");
+		expect(readDenials("sess-quote")).toHaveLength(2);
+	});
+
+	test("the production shape: a bare command with {where}. A yes in staging does not clear prod", async () => {
+		const before = manager();
+		before.setDenialSession("sess-where");
+		registerTuiApprovalHandler(async () => "deny");
+		await before.requestPermission("run", "x", "deploytool --apply", { where: "prod" });
+		registerTuiApprovalHandler(async () => "approve");
+		const after = manager();
+		after.setDenialSession("sess-where");
+		after.enableInfiniteMode();
+		expect(
+			await after.requestPermission("run", "x", "deploytool --apply", { where: "staging" }),
+		).toBe(true);
+		expect(readDenials("sess-where")).toHaveLength(1);
+		registerTuiApprovalHandler(null);
+		process.env.EIGHT_HEADLESS = "1";
+		const replay = manager();
+		replay.setDenialSession("sess-where");
+		replay.enableInfiniteMode();
+		expect(
+			await replay.requestPermission("run", "x", "deploytool --apply", { where: "prod" }),
+		).toBe(false);
+		// The same folder and command, said yes to, does clear it.
+		process.env.EIGHT_HEADLESS = "";
+		registerTuiApprovalHandler(async () => "approve");
+		const fix = manager();
+		fix.setDenialSession("sess-where");
+		fix.enableInfiniteMode();
+		await fix.requestPermission("run", "x", "deploytool --apply", { where: "prod" });
+		expect(readDenials("sess-where")).toEqual([]);
+	});
+
+	test("a corrupt denial file fails closed: every command asks, headless refuses, one notice flag", async () => {
+		const file = denialPath("sess-corrupt") as string;
+		mkdirSync(dirname(file), { recursive: true });
+		writeFileSync(file, "{ not json");
+		process.env.EIGHT_HEADLESS = "1";
+		const pm = manager();
+		expect(pm.setDenialSession("sess-corrupt")).toEqual([]);
+		expect(pm.isDenialRecordUnreadable()).toBe(true);
+		pm.enableInfiniteMode();
+		pm.setAutoApprove(true);
+		expect(await pm.requestPermission("run", "x", "ls")).toBe(false);
+		// A missing file is not corrupt.
+		expect(manager().setDenialSession("sess-none")).toEqual([]);
+		const clean = manager();
+		clean.setDenialSession("sess-none");
+		expect(clean.isDenialRecordUnreadable()).toBe(false);
+		expect(UNREADABLE_DENIALS_NOTICE).toContain("could not be read");
+	});
+
+	test("the notice says earlier in this session, not before the crash", () => {
+		recordDenial("sess-words", "deploytool --apply");
+		expect(denialNotice(readDenials("sess-words"))[0]).toStartWith(
+			"Denied earlier in this session",
+		);
 	});
 
 	test("a legacy row with no sfp loads, is refused on replay, and no yes clears it", async () => {

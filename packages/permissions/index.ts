@@ -28,7 +28,7 @@ import {
 	type DeniedCall,
 	clearDenial,
 	denialFingerprint,
-	readDenials,
+	readDenialFile,
 	recordDenial,
 	strictFingerprint,
 } from "./resume-safety";
@@ -597,6 +597,9 @@ export class PermissionManager {
 	private denialSession: string | null = null;
 	/** Fingerprints denied before a crash: asked again, in every mode, until a fresh yes (#4821). */
 	private resumedDenials: Map<string, Set<string>> = new Map();
+	/** The session's denial file exists but cannot be read: every command asks (#4821). */
+	private denialsUnreadable = false;
+	private warnedSave = false;
 	private infiniteMode = false;
 	private infiniteModeStartTime: number | null = null;
 	private infiniteModeAuditLog: InfiniteModeAuditEntry[] = [];
@@ -915,6 +918,8 @@ export class PermissionManager {
 	 * network command while a local provider is pinned.
 	 */
 	mustAskReason(command: string): string | null {
+		// An unreadable denial record fails closed: every command asks, none runs unasked (#4821).
+		if (this.denialsUnreadable) return "the denial record for this session could not be read";
 		// Denied before a crash: a person decides again, whatever the mode (#4821).
 		if (this.resumedDenials.size > 0 && this.resumedDenials.has(denialFingerprint(command)))
 			return "it was denied before the crash and needs a fresh decision";
@@ -936,7 +941,9 @@ export class PermissionManager {
 	 */
 	setDenialSession(key: string | null): DeniedCall[] {
 		this.denialSession = key;
-		const rows = key ? readDenials(key) : [];
+		const file = key ? readDenialFile(key) : { rows: [], corrupt: false };
+		const rows = file.rows;
+		this.denialsUnreadable = file.corrupt;
 		this.resumedDenials = new Map();
 		for (const d of rows) {
 			const strict = this.resumedDenials.get(d.fp) ?? new Set<string>();
@@ -944,6 +951,11 @@ export class PermissionManager {
 			this.resumedDenials.set(d.fp, strict);
 		}
 		return rows;
+	}
+
+	/** True when the session's denial file could not be read; the caller shows one notice. */
+	isDenialRecordUnreadable(): boolean {
+		return this.denialsUnreadable;
 	}
 
 	/** The user pinned a local provider (e.g. `--provider ollama`) (#3748). */
@@ -1162,15 +1174,15 @@ export class PermissionManager {
 				// A fresh yes ends an earlier denial. The yes itself stays in memory only.
 				const loose = denialFingerprint(command);
 				const strict = this.resumedDenials.get(loose);
-				strict?.delete(strictFingerprint(command));
+				strict?.delete(strictFingerprint(command, opts.where));
 				if (strict?.size === 0) this.resumedDenials.delete(loose);
-				this.persistDenial(() => clearDenial(this.denialSession as string, command));
+				this.persistDenial(() => clearDenial(this.denialSession as string, command, opts.where));
 			}
 		} else {
 			this.log.deniedCount++;
 			if (command) {
 				this.deniedCommands.add(sessionKey(command, opts.where));
-				this.persistDenial(() => recordDenial(this.denialSession as string, command));
+				this.persistDenial(() => recordDenial(this.denialSession as string, command, opts.where));
 			}
 		}
 
@@ -1182,8 +1194,12 @@ export class PermissionManager {
 		if (!this.denialSession) return;
 		try {
 			write();
-		} catch {
-			// The in-memory denial still holds for this process.
+		} catch (err) {
+			// The in-memory denial still holds for this process; a resume will not see it.
+			if (!this.warnedSave) {
+				this.warnedSave = true;
+				console.error(`[permissions] could not save a denial: ${(err as Error).message}`);
+			}
 		}
 	}
 
