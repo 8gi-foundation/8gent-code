@@ -37,7 +37,7 @@ async function main() {
 	const frame = frameOf(app);
 	app.emit({
 		phase: "voice-on",
-		hints: count(frame, "tap the microphone key"),
+		hints: count(frame, "press Ctrl+R (or /voice record) to speak"),
 		enabled: count(frame, "TTS output enabled"),
 	});
 	process.exit(0);
