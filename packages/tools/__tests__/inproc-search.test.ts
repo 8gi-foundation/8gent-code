@@ -349,8 +349,13 @@ describe("inproc-search", () => {
 				allow: () => true,
 				pattern: "zzqq",
 				maxResults: 1000,
+				// The rule budget is under test, not the clock: a slow CI runner hit the
+				// 2 s default deadline first and reported `deadline` instead (#4805).
+				deadlineMs: 30_000,
 			});
-			expect(performance.now() - t0).toBeLessThan(3000);
+			const ms = performance.now() - t0;
+			expect(ms).toBeLessThan(10_000);
+			expect(r.deadline).toBeUndefined();
 			expect(r.truncated).toBe(true);
 			expect(r.rulesIncomplete).toBeDefined();
 			expect(formatSearch(r)).toContain("[ignore rules incomplete:");

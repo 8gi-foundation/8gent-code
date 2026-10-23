@@ -52,6 +52,7 @@ export type SlashCommand =
 	| "export"
 	| "fork"
 	| "rewind"
+	| "durable"
 	| "branch"
 	| "cron"
 	| "deploy"
@@ -276,6 +277,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["rw"],
 		description: "Time-travel: rewind 8gent state to an earlier checkpoint",
 		usage: "/rewind [n|list]",
+	},
+	{
+		name: "durable",
+		aliases: [],
+		description: "Durable turns: a killed turn resumes without redoing a write",
+		usage: "/durable [on|off|retry|skip]",
 	},
 	{
 		name: "branch",

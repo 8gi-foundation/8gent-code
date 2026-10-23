@@ -197,6 +197,7 @@ OPTIONS:
   --fast         Start in fast mode (use fastest available model)
   --resume       Resume last session (or --resume=<name> for specific)
   --continue [id] Resume this folder's latest session (or the one named by id)
+  --durable      Record each tool call before and after it runs; a killed turn resumes without redoing a write
   -p, --print    Run one prompt and exit; piped stdin is added (git diff | 8gent -p "review")
   --mode <m>     With -p: json (one event per line, docs/specs/JSON-EVENTS.md) or text; rpc = --rpc
   --tools a,b    With -p: allow only these tools

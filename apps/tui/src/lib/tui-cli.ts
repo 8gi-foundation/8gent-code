@@ -12,6 +12,8 @@ export type ParsedTuiCli = {
 	model?: string;
 	yes: boolean;
 	infiniteFlag: boolean;
+	/** `--durable`: write the intent/effect ledger (docs/specs/DURABLE-TURNS.md). */
+	durable?: boolean;
 };
 
 function takeEqValue(arg: string, prefix: string): string | undefined {
@@ -29,6 +31,10 @@ export function parseTuiArgv(argv: string[]): ParsedTuiCli {
 		}
 		if (a === "--infinite" || a === "-infinite" || a === "-i") {
 			out.infiniteFlag = true;
+			continue;
+		}
+		if (a === "--durable") {
+			out.durable = true;
 			continue;
 		}
 		if (a === "--no-pet" || a === "--pet" || a === "-pet") {

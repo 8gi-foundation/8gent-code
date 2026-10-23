@@ -13,3 +13,13 @@ describe("--resume (#3918 E3)", () => {
 		expect(parseTuiArgv([]).sessionResume).toBeUndefined();
 	});
 });
+
+describe("--durable (docs/specs/DURABLE-TURNS.md)", () => {
+	test("turns durable turns on and is not a positional", () => {
+		const p = parseTuiArgv(["--durable", "--resume=abc123"]);
+		expect(p.durable).toBe(true);
+		expect(p.sessionResume).toBe("abc123");
+		expect(p.positional).toEqual([]);
+		expect(parseTuiArgv([]).durable).toBeUndefined();
+	});
+});

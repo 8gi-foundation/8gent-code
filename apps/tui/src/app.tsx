@@ -444,6 +444,17 @@ import type {
 	AgentToolStartEvent,
 } from "../../../packages/eight/index.js";
 import { providerRouteNotice, shouldShowRouteNotice } from "../../../packages/eight/run.js";
+import { isReadOnlyTool } from "../../../packages/eight/tool-registry.js";
+import {
+	interruptedCalls,
+	isDurableEnabled,
+	planResume,
+	resolveInterrupted,
+	resumeNotice,
+	retryPrompt,
+	setDurableEnabled,
+	setDurableSession,
+} from "../../../packages/specifications/session/durable-ledger.js";
 
 // Load .env file if present
 import * as fs from "node:fs";
@@ -2720,6 +2731,17 @@ export function App({
 		]);
 	}, []);
 
+	// Durable turns (docs/specs/DURABLE-TURNS.md): the ledger follows the session
+	// `8gent --resume` reopens, and a turn a kill cut off mid-tool is reported once.
+	const [durableOn, setDurableOn] = useState(isDurableEnabled);
+	useEffect(() => {
+		setDurableSession(activeSessionId);
+		if (!durableOn || !activeSessionId) return;
+		const notice = resumeNotice(planResume(interruptedCalls(activeSessionId), isReadOnlyTool));
+		if (notice) addSystemMessage(notice);
+	}, [activeSessionId, durableOn, addSystemMessage]);
+	const submitRef = useRef<((text: string) => Promise<void>) | null>(null);
+
 	// Android (#4706): spoken replies via termux-tts-speak; a missing tool says so in the chat, not on stderr.
 	useEffect(() => {
 		if (isAndroidHost()) installTermuxTTSEngine(addSystemMessage);
@@ -4119,6 +4141,37 @@ export function App({
 					} catch (e) {
 						addSystemMessage(`Fork failed: ${e instanceof Error ? e.message : String(e)}`);
 					}
+					break;
+				}
+
+				case "durable": {
+					const sub = (args[0] ?? "").toLowerCase();
+					if (sub === "on" || sub === "off" || sub === "") {
+						const on = sub === "" ? !isDurableEnabled() : sub === "on";
+						setDurableEnabled(on);
+						setDurableOn(on);
+						addSystemMessage(
+							on
+								? "Durable on: every tool call is written down before it runs and after it ends. A killed turn resumes with /durable retry or /durable skip."
+								: "Durable off.",
+						);
+						break;
+					}
+					if ((sub === "retry" || sub === "skip") && activeSessionId) {
+						const plan = planResume(interruptedCalls(activeSessionId), isReadOnlyTool);
+						const n = resolveInterrupted(activeSessionId, sub);
+						if (n === 0) {
+							addSystemMessage("Nothing was interrupted.");
+							break;
+						}
+						if (sub === "skip") {
+							addSystemMessage(`Left ${n} interrupted call${n === 1 ? "" : "s"} as they are.`);
+							break;
+						}
+						void submitRef.current?.(retryPrompt(plan));
+						break;
+					}
+					addSystemMessage("Usage: /durable [on|off|retry|skip]");
 					break;
 				}
 
@@ -7310,6 +7363,7 @@ export function App({
 
 		runAgent(input);
 	};
+	submitRef.current = handleSubmit;
 
 	// Helper to close tab-based views (switch back to first chat tab)
 	const closeTabView = () => {
@@ -8241,6 +8295,7 @@ export function App({
 					sessionTime={sessionTime}
 					mode={agentMode}
 					adhd={adhdMode}
+					durable={durableOn}
 					tokensPerSecond={tokensPerSecond}
 					localChip={localChip}
 					judge={judgeState}

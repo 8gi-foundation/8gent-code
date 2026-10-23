@@ -133,6 +133,11 @@ describe("BottomBar renders one footer row, hints included (#3130, #3238)", () =
 		expect((await frame(160, 48, { adhd: false }))[0]).not.toContain("adhd");
 	});
 
+	test("durable turns are a segment only while on", async () => {
+		expect((await frame(160, 48, { durable: true }))[0]).toContain("durable on");
+		expect((await frame(160, 48, { durable: false }))[0]).not.toContain("durable");
+	});
+
 	test("unknown values are not shown", async () => {
 		const row = (await frame(160, 48, { total: 0, ready: 0, sessionTime: "—" }))[0] ?? "";
 		expect(row).not.toContain("providers");

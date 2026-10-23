@@ -93,6 +93,8 @@ export interface FooterData {
 	sandboxOff?: string;
 	/** ADHD mode: a segment only while on (it had a rail row before #3238). */
 	adhd?: boolean;
+	/** Durable turns: the intent/effect ledger is on. */
+	durable?: boolean;
 	/** A gate flagged the last turn (#4510). Absent means nothing was flagged. */
 	verification?: "verified" | "unverified" | "tests_claimed_not_run";
 }
@@ -191,6 +193,9 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 	}
 	if (d.adhd) {
 		out.push({ key: "adhd", label: "adhd", value: "on", color: ui.teal, priority: 3 });
+	}
+	if (d.durable) {
+		out.push({ key: "durable", label: "durable", value: "on", color: ui.teal, priority: 3 });
 	}
 	if (known(d.user)) {
 		out.push({ key: "user", label: "user", value: d.user, color: ui.cream, priority: 7 });
