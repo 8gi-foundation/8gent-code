@@ -36,6 +36,7 @@ import {
 	createFlowModeController,
 } from "../flow/flow-mode";
 import { MEMORY_COMMANDS, TelegramMemory } from "../memory/telegram-memory";
+import { withRedirectHint } from "../providers/redirect-hint";
 import { DaemonClient, SessionStore, TelegramBridgeAdapter } from "../telegram-bot";
 import {
 	BOARD_ROSTER,
@@ -879,6 +880,8 @@ export function localSpokenModel(
 			body: JSON.stringify({ model, prompt, stream: false, ...(json ? { format: "json" } : {}) }),
 			signal,
 			redirect: "error",
+		}).catch((err) => {
+			throw withRedirectHint(err, url, "OLLAMA_HOST");
 		});
 		const data = (await res.json()) as { response?: string };
 		return typeof data.response === "string" ? data.response : "";

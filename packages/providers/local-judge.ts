@@ -32,6 +32,7 @@ import {
 	decisionConfigFromEnv,
 	decisionJudgeEnabled,
 } from "./decision-readout";
+import { failureMessage, redirectHint } from "./redirect-hint";
 
 /** Where a verdict came from, so callers can tell a real judgment from a fail-closed default. */
 export type VerdictSource = "selene" | "decision-readout" | "fail-closed";
@@ -256,7 +257,9 @@ export class SeleneJudge {
 			const data = (await res.json()) as { response?: string };
 			raw = data.response ?? "";
 		} catch (err) {
-			return failClosed(`Judge unreachable: ${err instanceof Error ? err.message : String(err)}`);
+			return failClosed(
+				`Judge unreachable: ${failureMessage(err, this.baseUrl, "the judge baseUrl option")}`,
+			);
 		}
 		return parseVerdict(raw);
 	}
@@ -283,6 +286,7 @@ export class SeleneJudge {
  * model therefore can never crown a winner.
  */
 export class SkyworkScorer {
+	private warnedRedirect = false;
 	private baseUrl: string;
 	private model: string;
 	private timeoutMs: number;
@@ -306,7 +310,12 @@ export class SkyworkScorer {
 			});
 			if (!res.ok) return null;
 			raw = await res.text();
-		} catch {
+		} catch (err) {
+			const hint = redirectHint(err, this.baseUrl, "the scorer baseUrl option");
+			if (hint && !this.warnedRedirect) {
+				this.warnedRedirect = true; // one line per scorer, not one per candidate
+				console.error(`Reward scorer unreachable: ${hint}`);
+			}
 			return null;
 		}
 		return parseScore(raw);
