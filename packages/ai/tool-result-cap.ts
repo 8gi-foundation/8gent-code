@@ -54,8 +54,9 @@ export function capBytes(text: string, maxBytes: number): string {
 	return `${buf.subarray(0, headEnd)}\n[truncated ${tailStart - headEnd} bytes; narrow the command (smaller range, grep -o, cut -c) to see them]\n${buf.subarray(tailStart)}`;
 }
 
+/** Scrub first, on every result, so no cut leaves part of a secret behind (8SO, #4801). */
 export function capToolText(text: string, maxBytes: number): string {
-	return capBytes(capLines(text), maxBytes);
+	return capBytes(capLines(scrub(text).scrubbed), maxBytes);
 }
 
 type Output = { type: string; value?: unknown };

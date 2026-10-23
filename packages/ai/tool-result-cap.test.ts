@@ -108,4 +108,18 @@ describe("tool result cap", () => {
 		expect(out.type).toBe("text");
 		expect(bytes(capToolResults(ms))).toBeLessThan(RESULT_MAX + 500);
 	});
+
+	it("scrubs a secret that the 2000-char line cut would split", () => {
+		const prefix = "x".repeat(LINE_MAX - 20);
+		const out = capToolText(`${prefix} key: AKIAIOSFODNN7EXAMPLE end`, RESULT_MAX);
+		expect(out).toContain("chars cut from this line");
+		expect(out).not.toContain("AKIAIOSFODNN7E");
+		expect(out).toContain("[REDACTED");
+	});
+
+	it("scrubs a secret in a result under every cap", () => {
+		const out = capToolText("key: AKIAIOSFODNN7EXAMPLE here", RESULT_MAX);
+		expect(out).not.toContain("AKIAIOSFODNN7EXAMPLE");
+		expect(out).toContain("[REDACTED");
+	});
 });
