@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.22] - 2026-10-23
+
+### Added
+- durable turns slice 2, a cut-off turn continues where it stopped (on by default in the TUI) ([#4809](https://github.com/8gi-foundation/8gent-code/pull/4809))
+- durable turns slice 1, intent and effect ledger with resume (8gent --durable) ([#4805](https://github.com/8gi-foundation/8gent-code/pull/4805))
+
+### Fixed
+- term: without node-pty, open the preset in a herdr pane or show the one-line fix ([#4803](https://github.com/8gi-foundation/8gent-code/pull/4803))
+
 ## [0.20.21] - 2026-10-23
 
 ### Fixed
