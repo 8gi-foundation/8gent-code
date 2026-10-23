@@ -3388,6 +3388,9 @@ export function App({
 					return;
 				}
 
+				// This provider checked healthy: a later fallback away from it is news again (#4787).
+				fallbackNoticeGateRef.current.clear(currentProvider);
+
 				// Auto-assign router slots from actually available models
 				if (currentProvider === "ollama") {
 					const router = getTaskRouter();

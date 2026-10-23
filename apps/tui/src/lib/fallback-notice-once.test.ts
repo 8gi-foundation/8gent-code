@@ -30,3 +30,32 @@ describe("fallback notice once per session (#4754)", () => {
 		expect(transcript([ollama, lms, ollama, lms, ollama, lms])).toHaveLength(2);
 	});
 });
+
+describe("fallback notice resets on recovery (#4787)", () => {
+	const to = "minimax/MiniMax-M3.1-Flash";
+
+	test("fall back, recover, fall back to the same target shows the notice twice", () => {
+		const gate = createFallbackNoticeGate();
+		const shown = [gate("ollama", to)];
+		gate.clear("ollama");
+		shown.push(gate("ollama", to));
+		expect(shown).toEqual([true, true]);
+	});
+
+	test("a repeat without recovery still shows once", () => {
+		const gate = createFallbackNoticeGate();
+		expect([gate("ollama", to), gate("ollama", to), gate("ollama", to)]).toEqual([
+			true,
+			false,
+			false,
+		]);
+	});
+
+	test("recovering one provider does not re-open another", () => {
+		const gate = createFallbackNoticeGate();
+		gate("ollama", to);
+		gate("lmstudio", to);
+		gate.clear("ollama");
+		expect(gate("lmstudio", to)).toBe(false);
+	});
+});
