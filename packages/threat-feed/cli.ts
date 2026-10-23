@@ -7,7 +7,7 @@ import type { Severity } from "./types";
 const USAGE = `usage: bun packages/threat-feed/cli.ts [--file-issues] [--min-severity LOW|MEDIUM|HIGH|CRITICAL]
   [--repo OWNER/NAME ...] [--manifest PATH] [--out DIR]
 Dry-run by default: reads lockfiles and feeds, writes report.json and summary.md only.
---file-issues opens one issue per repo per advisory through ~/.8gent/bin/gh-issue-file.`;
+--file-issues opens one issue per repo (a checklist of its advisories at or above --min-severity) through ~/.8gent/bin/gh-issue-file.`;
 
 const argv = process.argv.slice(2);
 const flag = (n: string) => argv.includes(n);
@@ -35,4 +35,7 @@ console.log(
 	`hits=${report.totals.hits} kev=${report.totals.kevHits} repos=${report.totals.repos} deps=${report.totals.deps}`,
 );
 console.log(`report: ${paths.json}\nsummary: ${paths.md}`);
-for (const l of issueLog) console.log(l.trim());
+for (const l of issueLog)
+	console.log(
+		`${l.action} ${l.repo}${l.number ? ` #${l.number}` : ""}${l.action === "failed" ? `: ${l.log}` : ""}`,
+	);

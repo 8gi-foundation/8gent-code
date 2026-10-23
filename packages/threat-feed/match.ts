@@ -82,8 +82,7 @@ export function severityOf(v: OsvVuln): { severity: Severity; cvss: number | nul
 	return { severity: "UNKNOWN", cvss: null };
 }
 
-/** Smallest fixed version above the current one, from OSV ranges of the matching package. */
-export function fixedVersionFor(v: OsvVuln, dep: Dep): string | null {
+function fixCandidates(v: OsvVuln, dep: Dep): string[] {
 	const fixes: string[] = [];
 	for (const af of v.affected ?? []) {
 		if (
@@ -96,14 +95,32 @@ export function fixedVersionFor(v: OsvVuln, dep: Dep): string | null {
 		for (const r of af.ranges ?? []) {
 			for (const e of r.events) {
 				const f = e.fixed;
-				if (f) fixes.push(f.replace(/^v/, ""));
+				if (typeof f === "string") fixes.push(f.replace(/^v/, ""));
 			}
 		}
 	}
-	const above = fixes.filter((f) => compareVersions(f, dep.version) > 0);
+	return fixes;
+}
+
+/** Smallest fixed version above the current one, from OSV ranges of the matching package. Values that fail the token check are never returned. */
+export function fixedVersionFor(v: OsvVuln, dep: Dep): string | null {
+	const above = fixCandidates(v, dep).filter(
+		(f) => isToken(f) && compareVersions(f, dep.version) > 0,
+	);
 	if (above.length) return above.sort(compareVersions).at(0) ?? null;
 	return null;
 }
+
+/** True when OSV listed a fix for this package that we refuse to print. */
+export const hasInvalidFix = (v: OsvVuln, dep: Dep): boolean =>
+	fixCandidates(v, dep).some((f) => !isToken(f));
+
+/** Strict token for anything a third party controls and we print: ids, aliases, CVEs, versions. */
+export const TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._:+-]{0,63}$/;
+/** Package names and lockfile paths need "/" and "@" (scoped npm, Go modules, nested paths). No whitespace, backticks or markup. */
+export const NAME_RE = /^[A-Za-z0-9@_.][A-Za-z0-9@_.\/:+~-]{0,199}$/;
+export const isToken = (s: unknown): s is string => typeof s === "string" && TOKEN_RE.test(s);
+export const isName = (s: unknown): s is string => typeof s === "string" && NAME_RE.test(s);
 
 export function advisoryUrl(id: string): string {
 	return `https://osv.dev/vulnerability/${id}`;
@@ -124,18 +141,23 @@ export const depKey = (d: Pick<Dep, "ecosystem" | "name" | "version">) =>
 export function matchRepo(input: MatchInput): Hit[] {
 	const hits: Hit[] = [];
 	for (const dep of input.deps) {
+		// A dep we cannot print safely is dropped, never rewritten.
+		if (!isName(dep.name) || !isToken(dep.version)) continue;
+		const files = dep.files.filter(isName);
 		for (const id of input.idsByDep.get(depKey(dep)) ?? []) {
 			const v = input.vulns.get(id);
-			if (!v) continue;
-			const aliases = v.aliases ?? [];
+			if (!v || !isToken(id)) continue;
+			const aliases = (v.aliases ?? []).filter(isToken);
 			const kevCves = [id, ...aliases].filter((x) => input.kev.has(x));
 			const sev = severityOf(v);
+			const fixed = fixedVersionFor(v, dep);
 			hits.push({
 				repo: input.repo,
 				package: dep.name,
 				ecosystem: dep.ecosystem,
 				currentVersion: dep.version,
-				fixedVersion: fixedVersionFor(v, dep),
+				fixedVersion: fixed,
+				fixedVersionInvalid: fixed === null && hasInvalidFix(v, dep),
 				severity: sev.severity,
 				cvss: sev.cvss,
 				onKev: kevCves.length > 0,
@@ -144,7 +166,7 @@ export function matchRepo(input: MatchInput): Hit[] {
 				aliases,
 				advisoryUrl: advisoryUrl(id),
 				summary: (v.summary ?? "").slice(0, 200),
-				files: dep.files,
+				files,
 				devOnly: dep.dev ?? null,
 			});
 		}

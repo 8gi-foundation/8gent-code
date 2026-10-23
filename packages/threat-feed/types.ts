@@ -46,6 +46,8 @@ export interface Hit {
 	ecosystem: Ecosystem;
 	currentVersion: string;
 	fixedVersion: string | null;
+	/** OSV listed a fix but it failed the token check, so it is not printed. */
+	fixedVersionInvalid: boolean;
 	severity: Severity;
 	cvss: number | null;
 	onKev: boolean;

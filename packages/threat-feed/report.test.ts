@@ -130,7 +130,7 @@ describe("end to end with fixture feeds, no network", () => {
 				now: NOW,
 				runner: (r) => {
 					calls.push(r);
-					return "ok";
+					return "FILED #1 t";
 				},
 			});
 			expect(calls).toEqual(["o/r"]);

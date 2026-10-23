@@ -4,7 +4,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type Fetch, fetchKev, fetchVulns, queryOsv } from "./feeds";
 import { type EcosystemManifest, inventoryRepo, repoList } from "./inventory";
-import { type Runner, buildDrafts, fileIssues, writeDrafts } from "./issues";
+import {
+	type Commenter,
+	type FileResult,
+	type Runner,
+	buildDrafts,
+	fileIssues,
+	writeDrafts,
+} from "./issues";
 import { matchRepo } from "./match";
 import { type Report, buildReport, writeReport } from "./report";
 import type { Severity } from "./types";
@@ -19,6 +26,7 @@ export interface RunOptions {
 	fetch?: Fetch;
 	now?: Date;
 	runner?: Runner;
+	commenter?: Commenter;
 	log?: (s: string) => void;
 }
 
@@ -53,10 +61,15 @@ export async function run(o: RunOptions) {
 	);
 	const outDir = path.join(o.outRoot, now.toISOString().slice(0, 10));
 	const paths = writeReport(report, outDir);
-	let issueLog: string[] = [];
+	let issueLog: FileResult[] = [];
 	if (o.fileIssues) {
 		const drafts = writeDrafts(buildDrafts(report.hits, o.minSeverity), outDir);
-		issueLog = fileIssues(drafts, o.runner);
+		issueLog = fileIssues(drafts, {
+			run: o.runner,
+			comment: o.commenter,
+			stateFile: path.join(o.outRoot, "issue-state.json"),
+			tmpDir: path.join(outDir, "issues"),
+		});
 	}
 	return { report, paths, issueLog };
 }
