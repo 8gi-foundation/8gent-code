@@ -109,7 +109,7 @@ function ownDataRoots(env: Record<string, string | undefined>): string[] {
 
 /** Runners that take a program as a string: its quoted and bare path literals are scanned. */
 const INTERPRETER =
-	/^(python[0-9.]*|node|bun|deno|ruby|perl|php|osascript|[gmn]?awk|tclsh[0-9.]*|wish[0-9.]*|expect|lua(jit|[0-9.]*)|Rscript|R)$/;
+	/^(python[0-9.]*|node|bun|deno|ruby|perl|php|osascript|[gmn]?awk|sed|tclsh[0-9.]*|wish[0-9.]*|expect|lua(jit|[0-9.]*)|Rscript|R)$/;
 const QUOTED_PATH = /(["'])((?:~\/|\.\.\/|\/)[^"'\n]*)\1/g;
 /** A bare path in program text, ending at code punctuation: `system("cat ../x")`, `[open ../x]`. */
 const CODE_PATH = /(?<![A-Za-z0-9_}.~\-/])((?:~\/|\.\.\/|\/)[^\s"'()`$;|&<>[\]{},]*)/g;
@@ -206,6 +206,63 @@ export function inlineCodePaths(command: string): string[] {
 		for (const m of t.matchAll(CODE_PATH)) if (m[1] !== "/") out.push(m[1] as string);
 	}
 	return [...new Set(out)];
+}
+
+/** A path danger anchor in decoded program text: `~/`, a `../` segment, or an absolute path. */
+const CODE_DANGER = /(?:~\/|\.\.(?=[/\\])|\/)[^\s"'`$;|&<>(){}\[\],=]*/g;
+
+const SIMPLE_ESCAPES: Record<string, string> = {
+	n: "\n",
+	t: "\t",
+	r: "\r",
+	f: "\f",
+	v: "\v",
+	b: "\b",
+	a: "\x07",
+};
+
+/** Decode C and awk string escapes, so `\.\./x`, `\x2e\x2e/x` and `\056\056/x` all read as `../x`. */
+function decodeStringEscapes(text: string): string {
+	return text.replace(/\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|[0-7]{1,3}|.)/gs, (_, e: string) => {
+		try {
+			if (e[0] === "x" || e[0] === "u")
+				return String.fromCodePoint(Number.parseInt(e.slice(1), 16));
+			if (/^[0-7]/.test(e)) return String.fromCharCode(Number.parseInt(e, 8) & 0xff);
+		} catch {
+			return e;
+		}
+		return SIMPLE_ESCAPES[e] ?? e; // unknown escape (\. \/) drops the backslash, keeps the char
+	});
+}
+
+/**
+ * The conservative, class-based scan of an inline program (awk, sed, python, node, ...): join
+ * adjacent string literals (drop " and `), decode the string escapes, expand $HOME, then flag
+ * every `~/`, `../` or absolute path that appears anywhere in the decoded text. It does not need a
+ * well-formed quoted path, so awk literal concatenation (`".."`"/x"`), awk escapes (`"\.\./x"`),
+ * and sed's r/R/w filename commands (`r ../x`, `R../x`, `w ../x`) are all seen. A few programs that
+ * merely mention `..` or an absolute path in a string are flagged too; that is the intended trade.
+ */
+export function interpreterProgramPaths(
+	command: string,
+	env: Record<string, string | undefined>,
+): string[] {
+	const tokens = tokenize(command);
+	if (!tokens.some((t) => INTERPRETER.test(path.basename(t)))) return [];
+	const home = env.HOME || os.homedir();
+	const out: string[] = [];
+	for (const t of tokens) {
+		const blob = decodeStringEscapes(t.replaceAll('"', "").replaceAll("`", "")).replace(
+			/\$\{?HOME\}?/g,
+			home,
+		);
+		for (const m of blob.matchAll(CODE_DANGER)) {
+			const p = m[0];
+			if (p === "/" || p === "~/") continue;
+			out.push(p.startsWith("~/") ? path.join(home, p.slice(2)) : p);
+		}
+	}
+	return out;
 }
 
 /**
@@ -357,7 +414,11 @@ export function outsideReads(
 	const quotedCwd = `'${cwd.replaceAll("'", "'\\''")}'`;
 	const checked = cwd === root ? command : `cd ${quotedCwd} && ${command}`;
 	const out = new Set<string>();
-	const literals = [...inlineCodePaths(command), ...substitutionPaths(command)];
+	const literals = [
+		...inlineCodePaths(command),
+		...interpreterProgramPaths(command, env),
+		...substitutionPaths(command),
+	];
 	for (const v of checkCommandBoundary(checked, root, prefixes).violations) {
 		// A word the shell builds at run time (${X:+y}, a glob) has no knowable path: no opinion.
 		// Literal paths inside a command substitution are checked above (substitutionPaths).

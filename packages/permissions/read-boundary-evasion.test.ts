@@ -41,6 +41,7 @@ beforeAll(() => {
 		path.join(home, ".8gent", "browser-profiles"),
 		path.join(home, ".config", "gh"),
 		path.join(home, ".docker"),
+		path.join(base, "outside"),
 	])
 		fs.mkdirSync(d, { recursive: true });
 	const files: [string, string][] = [
@@ -61,6 +62,8 @@ beforeAll(() => {
 		[path.join(home, ".8gent", "browser-profiles", "p"), "COOKIES"],
 		[path.join(home, ".8gent", "config.json"), "{}"],
 		[path.join(home, "notes.txt"), "notes"],
+		[path.join(base, "outside", "secret.txt"), "SECRET"],
+		[path.join(ws, "sedscript"), "r ../outside/secret.txt\n"],
 	];
 	for (const [p, c] of files) fs.writeFileSync(p, c);
 	fs.symlinkSync(path.join(base, "x"), path.join(ws, "link-out"));
@@ -318,12 +321,51 @@ describe("ordinary work in the working folder still runs with no card", () => {
 	}
 });
 
+describe("interpreter program text is scanned by class, not by well-formed quoted path", () => {
+	const REFUSED = [
+		// awk concatenates adjacent string literals at run time
+		`awk 'BEGIN{while((getline l<".."\x22/outside/secret.txt\x22)>0)print l}'`,
+		// awk string escapes: \. and \/ decode away before the path is seen
+		`awk 'BEGIN{while((getline l<"\\.\\./outside/secret.txt")>0)print l}'`,
+		`awk 'BEGIN{while((getline l<"\\x2e\\x2e/outside/secret.txt")>0)print l}'`,
+		// sed r/R/w filename commands, with and without a space
+		`sed -n 'r ../outside/secret.txt' package.json`,
+		`sed -e 'r ../outside/secret.txt'`,
+		`sed 'R../outside/secret.txt' package.json`,
+		`sed -n 'w ../outside/secret.txt' package.json`,
+	];
+	for (const command of REFUSED) {
+		test(`refused: ${command}`, async () => {
+			expect(await verdict(command)).toBe("refused");
+			expect(cards.length).toBeGreaterThan(0);
+		});
+	}
+
+	// Programs that merely mention a harmless pattern must still run with no card.
+	for (const command of [
+		"awk '{print $1}' inside.txt",
+		"awk -F, '{print $2}' src/a.ts",
+		"awk 'BEGIN{print 1/2}'",
+		"sed -n 1p inside.txt",
+		"sed 's/a/b/' inside.txt",
+		"sed -e 's/x/y/' inside.txt",
+		"git log",
+	]) {
+		test(`runs: ${command}`, async () => {
+			expect(await verdict(command)).toBe("ran");
+			expect(cards).toEqual([]);
+		});
+	}
+});
+
 describe("known gaps of a lexical check (a kernel read rule is the answer)", () => {
 	test("a path built at run time is not seen, and this test says so", async () => {
 		for (const command of [
 			`python3 -c "print(open('..'+'/x').read())"`,
 			"cat $OLDPWD/x",
 			'cat "$(echo .)./x"',
+			// a sed -f script file inside the root that itself names ../x: its body is not read here
+			"sed -f sedscript package.json",
 		])
 			expect({ command, v: await verdict(command) }).toEqual({ command, v: "ran" });
 	});
