@@ -30,7 +30,7 @@ export { isAcceptedSlashName };
  * claim must be true on every channel. The guard is capabilities.gateway.test.ts: for each
  * channel that advertises it, /status and an unknown slash never reach the pool's chat.
  */
-export const DAEMON_CAPABILITIES: readonly string[] = Object.freeze(["input-gate"]);
+export const DAEMON_CAPABILITIES: readonly string[] = Object.freeze(["input-gate", "turn-origin"]);
 
 export type GateContext = SlashContext;
 export type GateResult = SlashResult;

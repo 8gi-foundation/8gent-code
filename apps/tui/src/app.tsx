@@ -163,6 +163,7 @@ import {
 	promptIsLive,
 } from "./lib/prompt-focus.js";
 import { probeProviders } from "./lib/provider-health.js";
+import { TelegramTab, type TelegramTabHost } from "./lib/telegram-tab.js";
 import { isUserThemeId } from "./lib/user-themes.js";
 import {
 	type ThemeChoice,
@@ -1898,7 +1899,7 @@ export function App({
 		if (!activeSessionId) return;
 		const timer = setInterval(() => {
 			// A linked session is saved by the daemon after every turn (#3929).
-			if (daemonLinkRef.current) return;
+			if (daemonLinkRef.current || telegramTab.owns(activeTabIdRef.current)) return;
 			if (messages.length > lastSaveCount.current) {
 				lastSaveCount.current = messages.length;
 				const serializable = withoutBangLines(messages).map((m) => ({
@@ -2598,7 +2599,12 @@ export function App({
 		if (key.ctrl && input === "c") {
 			if (soundEnabled) playSound("notification");
 			// Save session and finalize before exiting
-			if (activeSessionId && messages.length > 0) {
+			if (
+				activeSessionId &&
+				messages.length > 0 &&
+				!daemonLinkRef.current &&
+				!telegramTab.owns(activeTabIdRef.current)
+			) {
 				const serializable = withoutBangLines(messages).map((m) => ({
 					role: m.role,
 					content: m.content,
@@ -2927,6 +2933,18 @@ export function App({
 			try {
 				if (!client) client = await DaemonSessionClient.connect();
 				const attached = await client.attach(sessionId, "tui");
+				// The Telegram home session has its own tab (and its own text sanitiser). A link that
+				// lands on it here, by any route, would replace this tab's chat with unsanitised
+				// Telegram text, so it is undone and sent to the Telegram tab (#4834).
+				if (attached.home) {
+					if (daemonLinkRef.current?.client === client) await unlinkDaemon();
+					else client.close();
+					addSystemMessage(
+						"That is your 8gent's Telegram conversation: opening it in its own tab.",
+					);
+					void telegramTab.open();
+					return false;
+				}
 				if (daemonLinkRef.current?.client !== client) {
 					const off = client.onEvent((e) => {
 						switch (e.kind) {
@@ -2941,6 +2959,23 @@ export function App({
 								break;
 							case "error":
 								pushShared("system", `8gent: ${e.text}`);
+								break;
+							case "reconnecting":
+								pushShared(
+									"system",
+									"Reconnecting to your 8gent... Sending is paused until it is back.",
+								);
+								break;
+							case "resynced":
+								setMessages(
+									e.transcript.map((m, i) => ({
+										id: `shared-resynced-${i}`,
+										role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+										content: m.content,
+										timestamp: new Date(),
+									})) as Message[],
+								);
+								pushShared("system", "Reconnected to your 8gent.");
 								break;
 							case "ended":
 								pushShared(
@@ -2994,6 +3029,29 @@ export function App({
 		[addSystemMessage, pushShared, setMessages, unlinkDaemon],
 	);
 	useEffect(() => () => void unlinkDaemon(false), [unlinkDaemon]);
+
+	// The Telegram tab (#4834): `/sessions attach home` opens one dedicated tab linked to
+	// the 8gent's Telegram conversation. Only that tab is linked; no other tab is touched.
+	// The host reads the latest tab functions through a ref, because the link outlives
+	// the render that opened it.
+	const telegramHostRef = useRef<TelegramTabHost | null>(null);
+	const telegramTab = React.useMemo(() => {
+		const host = (): TelegramTabHost => telegramHostRef.current as TelegramTabHost;
+		return new TelegramTab({
+			addTab: (title, data) => host().addTab(title, data),
+			hasTab: (id) => host().hasTab(id),
+			switchTab: (id) => host().switchTab(id),
+			renameTab: (id, title) => host().renameTab(id, title),
+			setMessages: (id, msgs) => host().setMessages(id, msgs),
+			append: (id, msg) => host().append(id, msg),
+			notify: (text) => host().notify(text),
+		});
+	}, []);
+	useEffect(() => () => telegramTab.dispose(), [telegramTab]);
+	// Closing the Telegram tab detaches it.
+	useEffect(() => {
+		telegramTab.tabsChanged();
+	}, [workspaceTabs.tabs, telegramTab]);
 	// EIGHT_TUI_SHARE=1: share this TUI's session through the daemon from the
 	// start, so the 8gent Browser panel can pick "the TUI session" right away.
 	const autoSharedRef = useRef(false);
@@ -3117,6 +3175,28 @@ export function App({
 	);
 
 	/** Replace one message's text in a tab, by id (the `!cmd` running line). */
+	const appendToTabLatest = useRef(appendToTab);
+	appendToTabLatest.current = appendToTab;
+	const tabsLatest = useRef(workspaceTabs);
+	tabsLatest.current = workspaceTabs;
+	telegramHostRef.current = {
+		addTab: (title, data) => {
+			const tab = tabsLatest.current.addTab("chat", title, data);
+			return tab ? { id: tab.id } : null;
+		},
+		hasTab: (id) => tabsLatest.current.tabs.some((t) => t.id === id),
+		switchTab: (id) => tabsLatest.current.switchTab(id),
+		renameTab: (id, title) => tabsLatest.current.renameTab(id, title),
+		// Only the named tab's messages are written. The active tab's state is set as well
+		// only when it is that tab; every other tab's buffer is never read or written here.
+		setMessages: (id, msgs) => {
+			tabMessagesRef.current.set(id, msgs as Message[]);
+			if (id === activeTabIdRef.current) setMessagesRaw(msgs as Message[]);
+		},
+		append: (id, msg) => appendToTabLatest.current(id, msg as Message),
+		notify: (text) => addSystemMessage(text),
+	};
+
 	const replaceInTab = useCallback((tabId: string, id: string, content: string) => {
 		const swap = (list: Message[]) =>
 			list.map((m) => (m.id === id ? { ...m, content, timestamp: new Date() } : m));
@@ -3979,7 +4059,11 @@ export function App({
 	 * caught (#3918 E1). Null when no session is active.
 	 */
 	const saveSessionNow = useCallback((): SessionStore | null => {
-		if (!activeSessionId) return null;
+		// A linked session's file belongs to the daemon, and the Telegram home session is
+		// never written to the store at all (#4834).
+		if (!activeSessionId || daemonLinkRef.current || telegramTab.owns(activeTabIdRef.current)) {
+			return null;
+		}
 		const serializable = withoutBangLines(messages).map((m) => ({
 			role: m.role,
 			content: m.content,
@@ -4490,7 +4574,12 @@ export function App({
 				}
 
 				case "quit":
-					if (activeSessionId && messages.length > 0) {
+					if (
+						activeSessionId &&
+						messages.length > 0 &&
+						!daemonLinkRef.current &&
+						!telegramTab.owns(activeTabIdRef.current)
+					) {
 						const serializable = withoutBangLines(messages).map((m) => ({
 							role: m.role,
 							content: m.content,
@@ -4718,6 +4807,14 @@ export function App({
 					// Shared sessions (#3929): live and past daemon sessions, shared with
 					// the 8gent Browser panel.
 					const sub = args[0]?.toLowerCase() ?? "list";
+					if (sub === "detach" && telegramTab.owns(activeTabIdRef.current)) {
+						addSystemMessage(
+							(await telegramTab.detach())
+								? "Left Telegram. This tab keeps its history; /sessions attach home links it again."
+								: "This tab is not linked to Telegram.",
+						);
+						break;
+					}
 					if (sub === "detach") {
 						const sid = await unlinkDaemon();
 						addSystemMessage(
@@ -4765,6 +4862,10 @@ export function App({
 							addSystemMessage("Usage: /sessions attach <id>");
 							break;
 						}
+						if (args[1] === "home") {
+							await telegramTab.open();
+							break;
+						}
 						await linkDaemonSession(args[1]);
 						break;
 					}
@@ -4774,6 +4875,7 @@ export function App({
 								"  /sessions              - Pick a live or past shared session\n" +
 								"  /sessions share        - Share this conversation (the 8gent Browser panel can join it)\n" +
 								"  /sessions attach <id>  - Join a shared session by id\n" +
+								"  /sessions attach home  - Join your 8gent's Telegram session\n" +
 								"  /sessions stop         - Stop the shared session's current turn\n" +
 								"  /sessions detach       - Leave it and go back to this TUI's own 8gent",
 						);
@@ -7198,6 +7300,23 @@ export function App({
 				shellContextRef.current.set(tabId, pending);
 			}
 			replaceInTab(tabId, running.id, bangChatLine(bang, result, withheld));
+			return;
+		}
+
+		// The Telegram tab (#4834): what is typed here goes to the 8gent's Telegram
+		// conversation, never to a local 8gent, and never to Telegram's chat.
+		if (input && !attached && telegramTab.owns(tabId)) {
+			appendToTab(tabId, {
+				id: `user-${Date.now()}`,
+				role: "user" as const,
+				content: bubbleContent,
+				timestamp: new Date(),
+			});
+			try {
+				telegramTab.send(input);
+			} catch (err) {
+				addSystemMessage(`Not sent: ${err instanceof Error ? err.message : String(err)}`);
+			}
 			return;
 		}
 

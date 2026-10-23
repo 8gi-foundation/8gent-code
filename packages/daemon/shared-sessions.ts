@@ -138,6 +138,8 @@ export type SharedSessionOutbound =
 			restored: boolean;
 			transcript: ChatMessage[];
 			truncated: boolean;
+			/** True for the Telegram home session (#4834). */
+			home?: boolean;
 	  }
 	| { type: "session:detached"; sessionId: string | null }
 	| { type: "session:aborted"; sessionId: string; aborted: boolean }
@@ -169,7 +171,14 @@ export interface SharedSessionDeps {
 	persistable: Set<string>;
 	/** Per-connection rate limit for restores from disk. False = refuse. */
 	allowRestore(): boolean;
+	/** The connection proved the operator token (#4834). Required for the home session. */
+	operator?: boolean;
+	/** The session bound to the Telegram bridge's socket, if one is connected (#4834). */
+	homeSessionId?: string | null;
 }
+
+/** The alias a client sends instead of the home session's id. */
+export const HOME_ALIAS = "home";
 
 export interface SharedSessionResult {
 	reply: SharedSessionOutbound;
@@ -239,14 +248,31 @@ function markShared(sessionId: string, deps: SharedSessionDeps): void {
 		deps.persistable.add(sessionId);
 }
 
-function attachLive(sessionId: string, deps: SharedSessionDeps): SharedSessionResult {
+function attachLive(
+	sessionId: string,
+	deps: SharedSessionDeps,
+	/** The client asked for "home" by its alias, never by the session's id. */
+	viaAlias = false,
+): SharedSessionResult {
 	const info = deps.pool.getSessionInfo(sessionId);
 	const agent = deps.pool.getAgent(sessionId);
 	if (!info || !agent) return { reply: { type: "error", message: "session not found" } };
-	if (!SHAREABLE_CHANNELS.has(info.channel)) {
+	// The one private session a surface may join: the Telegram home session, by an
+	// operator-token socket (#4834). It is never marked persistable, so the TUI can
+	// never cause it to be written under ~/.8gent/sessions.
+	const home = info.channel === "telegram" && sessionId === deps.homeSessionId;
+	// Only by the `home` alias, never by the raw id: the id can leak (a list, a log), and an id
+	// attach would bypass the Telegram tab and its sanitiser. The raw id looks like any private session.
+	if (home && !viaAlias) {
 		return { reply: { type: "error", message: "session cannot be shared" } };
 	}
-	markShared(sessionId, deps);
+	if (home && deps.operator !== true) {
+		return { reply: { type: "error", message: "operator token required" } };
+	}
+	if (!home && !SHAREABLE_CHANNELS.has(info.channel)) {
+		return { reply: { type: "error", message: "session cannot be shared" } };
+	}
+	if (!home) markShared(sessionId, deps);
 	return {
 		bind: sessionId,
 		reply: {
@@ -255,6 +281,7 @@ function attachLive(sessionId: string, deps: SharedSessionDeps): SharedSessionRe
 			channel: info.channel,
 			busy: info.busy,
 			restored: false,
+			...(home ? { home: true } : {}),
 			...capTranscript(chatMessages(agent.getMessageHistory())),
 		},
 	};
@@ -336,12 +363,23 @@ export function handleSharedSession(
 				return listSessions(msg, deps);
 
 			case "session:attach": {
-				if (!isSessionId(msg.sessionId)) {
+				let target = msg.sessionId;
+				const viaAlias = target === HOME_ALIAS;
+				if (viaAlias) {
+					if (deps.operator !== true) {
+						return { reply: { type: "error", message: "operator token required" } };
+					}
+					if (!deps.homeSessionId) {
+						return { reply: { type: "error", message: "no home session" } };
+					}
+					target = deps.homeSessionId;
+				}
+				if (!isSessionId(target)) {
 					return { reply: { type: "error", message: "invalid session id" } };
 				}
-				const result = deps.pool.hasSession(msg.sessionId)
-					? attachLive(msg.sessionId, deps)
-					: attachPast(msg.sessionId, deps);
+				const result = deps.pool.hasSession(target)
+					? attachLive(target, deps, viaAlias)
+					: attachPast(target, deps);
 				if (result.bind && typeof msg.channel === "string" && SHAREABLE_CHANNELS.has(msg.channel)) {
 					result.surface = msg.channel;
 				}

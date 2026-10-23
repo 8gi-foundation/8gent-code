@@ -202,7 +202,7 @@ Sent to every other client bound to the session when one sends `prompt`. The sen
   `"resumeSecret": "<32 hex>"`, one per session. A `session:resume` from a non-loopback peer
   of a live session must send it back as `"resumeSecret"`, otherwise
   `{ "type": "error", "message": "resume secret required" }`. Loopback clients may omit it.
-- Capabilities (v1.7): `session:created` and `session:resumed` carry `"capabilities": ["input-gate"]`,
+- Capabilities (v1.7): `session:created` and `session:resumed` carry `"capabilities": ["input-gate", "turn-origin"]`,
   and `/health` carries the same list as `capabilities`. The list comes from the exported
   `DAEMON_CAPABILITIES` constant beside the input gate (`packages/daemon/input-gate.ts`).
   Clients may gate slash sending on it: send `/` lines only when `input-gate` is present.
@@ -210,6 +210,30 @@ Sent to every other client bound to the session when one sends `prompt`. The sen
   and `/health` carries the same list as `commands`: every slash name the input gate accepts
   (canonical names and aliases, no leading slash, unique, sorted), from `daemonCommands()` in
   `packages/daemon/input-gate.ts`. Clients should prefer this list over any local copy.
+- Identity proof (v1.9): before sending a token or a session, a local client sends
+  `{ "type": "identify", "nonce": "<32 to 128 hex>", "target": "<host>:<port>" }`, answered
+  before auth with `{ "type": "identify:ok", "proof": "<hex>" }`, where proof is
+  HMAC-SHA256 keyed by the daemon's secret over `8gent-daemon-v2:<target>:<nonce>`. The secret
+  is `daemon.authToken`, else `<dataDir>/daemon.token` (0600, created at first start). The
+  client sends the address it dialled as `target` and checks the proof against that; the
+  daemon refuses (`identify target is not this daemon`) unless the port is its own and the
+  host is exactly the address it is bound to (a wildcard bind is reached at `127.0.0.1`;
+  `localhost` and `[::1]` are not accepted for a daemon on `127.0.0.1`), and a loopback target
+  only from a loopback peer, so a relay or an alias squatter gets nothing usable. `error` when the daemon
+  has no secret.
+- Operator token and the home session (v1.9): an `auth` frame carrying the operator token
+  marks the socket operator, also on a daemon with no gateway token. The Telegram bridge sends
+  `{ "type": "home:declare" }` (only honoured from the socket that registered with the bridge
+  secret) to name the session on its socket as the Telegram home session. `session:attach`
+  with `"sessionId": "home"` (or that session's id) joins it, for a loopback operator socket
+  only; it is never listed, persisted or restored. Without the token: `operator token required`.
+- Turn origin (v1.9, capability `turn-origin`): every event that is a turn's output (the
+  tool start and result, thinking, stream and error events, and `session:end` with reason
+  `turn-complete`) carries `"origin": "<channel that started the turn>"`, or `null` when it
+  cannot be told. A client that posts replies elsewhere (the Telegram bridge) delivers only
+  events whose origin is its own channel.
+- `<dataDir>/daemon.json` (v1.9): `{ "url", "pid", "dataDir" }`, mode 0600, no token, written
+  at start and removed at shutdown, for a local client to find the daemon.
 - `session:create` takes an optional `"persist": true` (shareable channels only): the session
   is saved after every turn from the start, so a chat only one surface ever had can be resumed
   later, also after a daemon restart. Without it (older clients) nothing changes.
@@ -938,6 +962,7 @@ goal package only emits in-memory `GoalEvent` records.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.9 | 2026-10-23 | Add the `identify` proof bound to the dialled address, the operator token and `home:declare`, the Telegram home session attach rule, the `turn-origin` capability and `origin` on turn-output events, and `daemon.json`. (#4829, #4834) |
 | 1.8 | 2026-10-23 | Add `commands` (accepted slash names) to `session:created`, `session:resumed` and `/health`. |
 | 1.7 | 2026-10-20 | Add `capabilities` (`["input-gate"]`) to `session:created`, `session:resumed` and `/health`. |
 | 1.6 | 2026-10-20 | Document the input gate on every channel (#4531, #4535), loopback bind by default and the connect-time token on every non-root path (#4532). |

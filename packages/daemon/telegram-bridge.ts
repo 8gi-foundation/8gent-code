@@ -59,6 +59,7 @@ import {
 	restoreCard,
 } from "../telegram-bot/flow-bot";
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
+import { TurnOrigins } from "../telegram-bot/turn-origins";
 import {
 	MAX_SPOKEN_CHARS,
 	R10_GROUP_NOTICE,
@@ -1027,6 +1028,8 @@ class TelegramDaemonBridge {
 	// Multi-step task runtime (issue #1906 / #1913).
 	private multiStepEnabled: boolean = MULTI_STEP_ENABLED;
 	private daemonClient: DaemonClient | null = null;
+	/** Whose turn each daemon event belongs to: a TUI turn on this session is never posted (#4834). */
+	private origins = new TurnOrigins();
 	private adapter: TelegramBridgeAdapter | null = null;
 	private sessionStore: SessionStore | null = null;
 
@@ -1109,6 +1112,8 @@ class TelegramDaemonBridge {
 					authToken: this.config.authToken,
 					channel: "telegram",
 					approvalSecret: bridgeSecret(),
+					// This socket's session carries the conversation: the one a TUI may join (#4834).
+					home: true,
 				});
 				await this.daemonClient.connect();
 				this.sessionStore = new SessionStore({ persistPath: sessionStorePath() });
@@ -1205,6 +1210,7 @@ class TelegramDaemonBridge {
 		}
 		// Cleared even when offline, so the next connect creates rather than resumes.
 		this.sessionId = null;
+		this.origins.reset();
 		// A new session is Act with nothing remembered, and every old card goes dead (C13, C23).
 		this.flowReal?.resetSession();
 		this.flowStore.clear();
@@ -1250,6 +1256,11 @@ class TelegramDaemonBridge {
 				// Resolve on session creation or resume
 				if (msg.type === "session:created" || msg.type === "session:resumed") {
 					this.sessionId = msg.sessionId;
+					this.origins.reset();
+					this.origins.setCapabilities(msg.capabilities);
+					// With the adapter running its own session, that one is home; this socket's is
+					// only home in legacy mode (#4834).
+					if (!this.daemonClient) this.ws?.send(JSON.stringify({ type: "home:declare" }));
 					console.log(`[telegram-bridge] session ${this.sessionId}`);
 					resolve();
 				}
@@ -1281,6 +1292,8 @@ class TelegramDaemonBridge {
 		// socket after sessionId was cleared; acting on it would mark the bridge
 		// idle and cancel the retry timer armed for the replacement session.
 		if (payload?.sessionId && payload.sessionId !== this.sessionId) return;
+		// A turn another surface (the TUI) started on this session is not posted to Telegram (#4834).
+		if (!this.origins.deliver(event, payload)) return;
 
 		switch (event) {
 			case "agent:stream":
@@ -2431,6 +2444,7 @@ class TelegramDaemonBridge {
 		}
 
 		this.agentBusy = true;
+		this.origins.own();
 		this.retryPrompt(text, 1);
 	}
 

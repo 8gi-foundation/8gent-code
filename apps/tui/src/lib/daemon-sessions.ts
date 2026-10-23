@@ -13,7 +13,7 @@ import { timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { dataDirPath } from "../../../../packages/daemon/data-dir";
-import { readTokenFile } from "../../../../packages/daemon/local-link";
+import { discoverDaemons, readTokenFile } from "../../../../packages/daemon/local-link";
 import { daemonProof, dialTarget } from "../../../../packages/daemon/origin-guard";
 
 export const DEFAULT_DAEMON_URL = "ws://127.0.0.1:18789";
@@ -46,6 +46,8 @@ export interface AttachedSession {
 	restored: boolean;
 	transcript: Array<{ role: string; content: string }>;
 	truncated: boolean;
+	/** True for the Telegram home session (#4834). */
+	home?: boolean;
 }
 
 /** What the chat shows for a daemon frame. */
@@ -54,7 +56,11 @@ export type DaemonChatEvent =
 	| { kind: "reply"; text: string }
 	| { kind: "tool"; tool: string }
 	| { kind: "error"; text: string }
-	| { kind: "ended"; reason: string };
+	| { kind: "ended"; reason: string }
+	/** The link dropped; the client is retrying and the session is still its own (#4834). */
+	| { kind: "reconnecting" }
+	/** The link is back: the transcript as the daemon has it now (#4834). */
+	| { kind: "resynced"; transcript: Array<{ role: string; content: string }>; truncated: boolean };
 
 /**
  * Map one daemon frame to a chat event, or null when the chat shows nothing
@@ -125,7 +131,14 @@ export function readDaemonToken(home = process.env.HOME || ""): string | null {
  * this machine's data directory. Null when there is none, and then nothing connects:
  * a daemon that cannot be verified is never sent a token or a session.
  */
-export function resolveDaemonSecret(home = process.env.HOME || ""): string | null {
+export function resolveDaemonSecret(
+	home = process.env.HOME || "",
+	/** The daemon's own data directory, when discovery found it (#4834). */
+	dir?: string,
+): string | null {
+	// A discovered daemon's own token file is the authority for that daemon; the generic
+	// env and config token come first only when no directory is known.
+	if (dir) return readTokenFile(dir) ?? readDaemonToken(home);
 	return (
 		readDaemonToken(home) ??
 		readTokenFile(process.env.EIGHT_DATA_DIR ? dataDirPath() : path.join(home, ".8gent"))
@@ -148,6 +161,26 @@ export function literalLoopbackUrl(url: string): string {
 	} catch {
 		return url;
 	}
+}
+
+/** A daemon this TUI may try, and where its token file lives. */
+export interface DaemonCandidate {
+	url: string;
+	dir?: string;
+}
+
+/**
+ * Daemons to try for the Telegram home session (#4834): EIGHT_DAEMON_URL when set (it
+ * names the one daemon), else the live daemons that wrote a daemon.json under ~/.8gent
+ * (a dead pid is ignored), else the default port.
+ */
+export function daemonCandidates(
+	env: Record<string, string | undefined> = process.env,
+	home = env.HOME || "",
+): DaemonCandidate[] {
+	if (env.EIGHT_DAEMON_URL) return [{ url: env.EIGHT_DAEMON_URL }];
+	const found = discoverDaemons(home).map((d) => ({ url: d.url, dir: d.dir }));
+	return found.length > 0 ? found : [{ url: DEFAULT_DAEMON_URL }];
 }
 
 /** The live anatomy page (#4190) on the daemon this TUI talks to. Never carries the token. */
@@ -180,7 +213,16 @@ export interface ConnectOptions {
 	url?: string;
 	token?: string | null;
 	timeoutMs?: number;
+	/** The daemon's data directory, to find its token file (#4834). */
+	dataDir?: string;
+	/** Keep the link across a dropped connection (default true). False: it ends, as before. */
+	reconnect?: boolean;
+	/** Backoff between reconnect tries; the last value repeats. Tests shorten it. */
+	retryDelaysMs?: number[];
 }
+
+/** Retry after a dropped link: 0.5 s, 1 s, 2 s, 4 s, 8 s, then every 10 s (#4834). */
+export const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000, 10_000];
 
 type Frame = Record<string, unknown> & { type?: string };
 
@@ -190,10 +232,21 @@ export class DaemonSessionClient {
 	private closedReason: string | null = null;
 	sessionId: string | null = null;
 
+	/** What a reconnect needs; the secret stays in memory only. */
+	private link: { url: string; secret: string; opts: ConnectOptions } | null = null;
+	/** What to re-attach to after a reconnect: "home" for the Telegram session, else the id. */
+	private target: string | null = null;
+	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private reconnecting = false;
+
 	private constructor(
 		private ws: WebSocket,
 		private timeoutMs: number,
 	) {
+		this.wire(ws);
+	}
+
+	private wire(ws: WebSocket): void {
 		ws.onmessage = (ev) => {
 			let frame: Frame;
 			try {
@@ -214,18 +267,124 @@ export class DaemonSessionClient {
 			for (const cb of this.listeners) cb(e);
 		};
 		ws.onclose = () => {
+			if (this.ws !== ws || this.closedReason === "closed") return;
 			this.closedReason = "the 8gent daemon closed the connection";
-			if (this.sessionId) {
-				this.sessionId = null;
-				for (const cb of this.listeners) cb({ kind: "ended", reason: "daemon-disconnect" });
+			if (!this.sessionId) return;
+			// A linked session stays linked: keep trying, never fall back to an in-process
+			// brain mid-conversation. close() or a detach ends the retry (#4834).
+			if (this.link && this.link.opts.reconnect !== false) {
+				this.startReconnect();
+				return;
+			}
+			this.sessionId = null;
+			for (const cb of this.listeners) cb({ kind: "ended", reason: "daemon-disconnect" });
+		};
+	}
+
+	private startReconnect(): void {
+		if (this.reconnecting) return;
+		this.reconnecting = true;
+		for (const cb of this.listeners) cb({ kind: "reconnecting" });
+		const delays = this.link?.opts.retryDelaysMs ?? RECONNECT_DELAYS_MS;
+		let attempt = 0;
+		const tryOnce = async (): Promise<void> => {
+			this.reconnectTimer = null;
+			if (!this.reconnecting || !this.link) return;
+			try {
+				// Same checks as the first connect: the daemon proves itself before anything is sent.
+				const fresh = await DaemonSessionClient.open(
+					this.link.url,
+					this.link.secret,
+					this.timeoutMs,
+				);
+				try {
+					const attached = await fresh.attach(this.target ?? this.sessionId ?? "home", "tui");
+					if (!this.reconnecting) {
+						fresh.close();
+						return;
+					}
+					fresh.listeners.clear();
+					this.ws = fresh.ws;
+					this.wire(this.ws);
+					this.closedReason = null;
+					this.sessionId = attached.sessionId;
+					this.reconnecting = false;
+					for (const cb of this.listeners) {
+						cb({
+							kind: "resynced",
+							transcript: attached.transcript,
+							truncated: attached.truncated,
+						});
+					}
+				} catch (err) {
+					fresh.close();
+					throw err;
+				}
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				// A daemon that is up but is not ours, or refuses us, is not a reason to keep knocking.
+				if (/not your 8gent daemon|could not prove|refused the token|operator token/.test(msg)) {
+					this.reconnecting = false;
+					this.sessionId = null;
+					for (const cb of this.listeners) cb({ kind: "ended", reason: msg });
+					return;
+				}
+				const wait = delays[Math.min(attempt, delays.length - 1)];
+				attempt++;
+				this.reconnectTimer = setTimeout(() => void tryOnce(), wait);
 			}
 		};
+		this.reconnectTimer = setTimeout(() => void tryOnce(), delays[0]);
+		attempt = 1;
 	}
 
 	/** Connect (and authenticate when a token is set). Rejects when the daemon is not reachable. */
 	static async connect(opts: ConnectOptions = {}): Promise<DaemonSessionClient> {
 		const url = literalLoopbackUrl(opts.url ?? process.env.EIGHT_DAEMON_URL ?? DEFAULT_DAEMON_URL);
 		const timeoutMs = opts.timeoutMs ?? 3000;
+		const secret =
+			opts.token === undefined ? resolveDaemonSecret(undefined, opts.dataDir) : opts.token;
+		if (!secret) {
+			throw new Error(
+				"no token to verify this daemon with. Start it once with `8gent daemon`, or set EIGHT_DAEMON_TOKEN",
+			);
+		}
+		const client = await DaemonSessionClient.open(url, secret, timeoutMs);
+		client.link = { url, secret, opts };
+		return client;
+	}
+
+	/**
+	 * Join the Telegram home session (#4834): try each local daemon in turn, attach
+	 * `home`, and keep the first that answers. A daemon that cannot prove itself, has no
+	 * home session, or refuses is skipped; the last reason is thrown when none works.
+	 */
+	static async connectHome(
+		opts: Omit<ConnectOptions, "url" | "dataDir" | "token"> = {},
+		candidates: DaemonCandidate[] = daemonCandidates(),
+	): Promise<{ client: DaemonSessionClient; attached: AttachedSession }> {
+		let last = new Error("no 8gent daemon found on this machine");
+		for (const c of candidates) {
+			let client: DaemonSessionClient | null = null;
+			try {
+				client = await DaemonSessionClient.connect({ ...opts, url: c.url, dataDir: c.dir });
+				const attached = await client.attach("home", "tui");
+				client.target = "home";
+				return { client, attached };
+			} catch (err) {
+				client?.close();
+				last = err instanceof Error ? err : new Error(String(err));
+			}
+		}
+		throw last;
+	}
+
+	/** Open, verify and authenticate one connection. Nothing is sent before the proof. */
+	private static async open(
+		url: string,
+		secret: string,
+		timeoutMs: number,
+	): Promise<DaemonSessionClient> {
 		const ws = new WebSocket(url);
 		await new Promise<void>((resolve, reject) => {
 			const timer = setTimeout(() => {
@@ -244,13 +403,7 @@ export class DaemonSessionClient {
 			};
 		});
 		const client = new DaemonSessionClient(ws, timeoutMs);
-		const secret = opts.token === undefined ? resolveDaemonSecret() : opts.token;
 		try {
-			if (!secret) {
-				throw new Error(
-					"no token to verify this daemon with. Start it once with `8gent daemon`, or set EIGHT_DAEMON_TOKEN",
-				);
-			}
 			// The daemon proves it holds the secret BEFORE this client sends the token or a
 			// session: whatever else answers on the port learns nothing.
 			await client.verifyDaemon(secret, dialTarget(url));
@@ -321,14 +474,25 @@ export class DaemonSessionClient {
 			"session:attached",
 		]);
 		this.sessionId = String(r.sessionId);
+		this.target = sessionId === "home" ? "home" : this.sessionId;
 		return r as unknown as AttachedSession;
 	}
 
 	/** Leave the session; it keeps running for everyone else. */
 	async detach(): Promise<void> {
+		const wasReconnecting = this.reconnecting;
+		this.stopReconnect();
 		if (!this.sessionId) return;
 		this.sessionId = null;
+		// Mid-reconnect there is no socket to tell; leaving is just stopping the retry.
+		if (wasReconnecting) return;
 		await this.request({ type: "session:detach" }, ["session:detached"]);
+	}
+
+	private stopReconnect(): void {
+		this.reconnecting = false;
+		if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+		this.reconnectTimer = null;
 	}
 
 	/** Stop the turn in flight. The session and its history stay. */
@@ -342,6 +506,8 @@ export class DaemonSessionClient {
 
 	prompt(text: string): void {
 		if (!this.sessionId) throw new Error("not attached to a session");
+		if (this.reconnecting)
+			throw new Error("reconnecting to your 8gent; send that again in a moment");
 		this.ws.send(JSON.stringify({ type: "prompt", text }));
 	}
 
@@ -351,6 +517,7 @@ export class DaemonSessionClient {
 	}
 
 	close(): void {
+		this.stopReconnect();
 		this.closedReason = "closed";
 		this.sessionId = null;
 		this.listeners.clear();

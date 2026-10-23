@@ -10,6 +10,8 @@
  * fake implementation by passing `socketFactory`.
  */
 
+import { TurnOrigins } from "./turn-origins";
+
 export type DaemonEventName =
 	| "tool:start"
 	| "tool:result"
@@ -37,6 +39,11 @@ export interface DaemonClientConfig {
 	socketFactory?: (url: string) => WebSocketLike;
 	/** Register this socket as the approval bridge (#3621). Never logged. */
 	approvalSecret?: string;
+	/**
+	 * This socket's session is where the Telegram conversation lives: tell the daemon so a TUI
+	 * with the operator token can join it (#4834). Only honoured from the registered bridge.
+	 */
+	home?: boolean;
 }
 
 export interface WebSocketLike {
@@ -75,6 +82,8 @@ export class DaemonClient {
 		DaemonClientConfig;
 	private ws: WebSocketLike | null = null;
 	private sessionId: string | null = null;
+	/** Whose turn each reply belongs to: replies to a TUI turn never reach the adapter (#4834). */
+	private origins = new TurnOrigins();
 	private pingTimer: ReturnType<typeof setInterval> | null = null;
 	private listeners = new Map<DaemonEventName, Set<Listener<DaemonEventName>>>();
 	private connectResolvers: Array<() => void> = [];
@@ -91,6 +100,7 @@ export class DaemonClient {
 			pingIntervalMs: config.pingIntervalMs ?? 10 * 60 * 1000,
 			socketFactory: config.socketFactory,
 			approvalSecret: config.approvalSecret,
+			home: config.home,
 		};
 	}
 
@@ -166,6 +176,9 @@ export class DaemonClient {
 			case "session:created":
 			case "session:resumed":
 				this.sessionId = String(msg.sessionId);
+				this.origins.reset();
+				this.origins.setCapabilities(msg.capabilities);
+				if (this.config.home) this.send({ type: "home:declare" });
 				this.connecting = false;
 				this.startPing();
 				this.resolveConnect();
@@ -178,6 +191,7 @@ export class DaemonClient {
 			case "event": {
 				const event = msg.event as DaemonEventName;
 				const payload = msg.payload as EventPayloads[DaemonEventName];
+				if (!this.origins.deliver(event, payload, this.config.channel ?? "telegram")) break;
 				this.dispatch(event, payload);
 				break;
 			}
@@ -194,6 +208,7 @@ export class DaemonClient {
 
 	/** Send a prompt to the current session. */
 	sendPrompt(text: string): void {
+		this.origins.own();
 		this.send({ type: "prompt", text, ...(this.turn ? { turn: this.turn } : {}) });
 	}
 
