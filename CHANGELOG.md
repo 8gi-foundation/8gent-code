@@ -9,6 +9,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.24] - 2026-10-23
+
+### Changed
+- termux: the smoke test answers the launch setup questions and asserts each appears once (#4849) ([#4850](https://github.com/8gi-foundation/8gent-code/pull/4850))
+
 ## [0.20.23] - 2026-10-23
 
 ### Added
