@@ -36,13 +36,17 @@ export class EffectLedger {
 			.get(key) as EffectRow | undefined;
 	}
 
-	/** Intent: written (and synced) before the effect runs. Idempotent. */
-	start(key: string, tool: string): void {
-		this.db
+	/**
+	 * Intent: written (and synced) before the effect runs. True only for the caller whose insert
+	 * created the row: two processes resuming the same run both reach this, and exactly one wins.
+	 */
+	start(key: string, tool: string): boolean {
+		const r = this.db
 			.prepare(
 				"INSERT OR IGNORE INTO eight_effects (key, tool, status, result, at) VALUES (?, ?, 'started', NULL, ?)",
 			)
 			.run(key, tool, Date.now());
+		return Number((r as { changes: number | bigint }).changes) === 1;
 	}
 
 	done(key: string, result: string): void {

@@ -11,16 +11,30 @@ import { SqliteStorage } from "@earendil-works/pi-durable/storage/sqlite";
 import type { SqliteDatabase } from "@earendil-works/pi-durable/storage/sqlite";
 import { openNodeSqliteDatabase } from "@earendil-works/pi-durable/storage/sqlite/node";
 
+/** A run id becomes a file name: letters, digits, `_` and `-` only, so it can never name another path. */
+export const RUN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
 export function defaultRunDb(runId: string): string {
+	if (!RUN_ID_RE.test(runId))
+		throw new Error(`not a valid run id: ${JSON.stringify(runId).slice(0, 60)}`);
 	const base = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
 	return path.join(base, "runs", `${runId}.sqlite`);
 }
 
-/** Create or tighten the file and its folder: 0700 folder, 0600 file, regular files only. */
+/**
+ * Create or tighten the file: 0600, regular files only, never through a link. A folder this
+ * creates is 0700. An existing folder is never re-moded (`8gent durable-run ~` must not chmod
+ * the home folder): it must be this user's and not writable by anyone else, or it is refused.
+ */
 export function preparePrivateFile(file: string): void {
 	const dir = path.dirname(file);
 	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-	fs.chmodSync(dir, 0o700);
+	const st = fs.statSync(dir);
+	if (!st.isDirectory()) throw new Error(`not a folder: ${dir}`);
+	if (typeof process.getuid === "function" && st.uid !== process.getuid())
+		throw new Error(`folder is not yours: ${dir}`);
+	if (st.mode & 0o022)
+		throw new Error(`folder is writable by others, refusing to keep a run in it: ${dir}`);
 	const fd = fs.openSync(
 		file,
 		fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW,

@@ -81,7 +81,15 @@ export function durableTool<P extends TSchema>(
 					true,
 				);
 			}
-			deps.ledger.start(key, spec.name);
+			// Atomic claim: when another process already holds the row (a second client resuming the
+			// same run), only a tool the target dedupes by key may run alongside it.
+			const claimed = deps.ledger.start(key, spec.name);
+			if (!claimed && !(replay === "once" && spec.idempotentByKey)) {
+				return text(
+					`${spec.name} is already being run by another process; it was not run again`,
+					true,
+				);
+			}
 			deps.checkpoint?.(`${spec.name}:after-intent`);
 			const result = await spec.run(args, { key });
 			deps.checkpoint?.(`${spec.name}:after-effect`);

@@ -599,7 +599,7 @@ async function main() {
 
 		case "durable-run": {
 			// Slice 1 of #4883, behind EIGHT_DURABLE_RUN=1: the scripted run the kill test drives.
-			const { durableRunEnabled } = await import("../packages/durable-run/run.ts");
+			const { durableRunEnabled } = await import("../packages/durable-run/flag.ts");
 			if (!durableRunEnabled()) {
 				console.error("durable-run is experimental: set EIGHT_DURABLE_RUN=1");
 				process.exit(1);

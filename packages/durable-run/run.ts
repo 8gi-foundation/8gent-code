@@ -32,9 +32,7 @@ export interface Run {
 	close(): Promise<void>;
 }
 
-export function durableRunEnabled(env: Record<string, string | undefined> = process.env): boolean {
-	return env.EIGHT_DURABLE_RUN === "1";
-}
+export { durableRunEnabled } from "./flag.js";
 
 export async function openRun(opts: OpenRunOptions): Promise<Run> {
 	const context = BACKGROUND_CONTEXT;

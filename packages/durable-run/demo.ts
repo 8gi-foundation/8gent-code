@@ -141,7 +141,10 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
 				replay: "once",
 				idempotentByKey: true, // a hash check: identical content is left alone
 				run: async (a) => {
-					const target = path.join(dir, "out", a.path);
+					const out = path.resolve(dir, "out");
+					const target = path.resolve(out, a.path);
+					// A model-chosen path never leaves the run's out folder.
+					if (!target.startsWith(out + path.sep)) throw new Error("path is outside the run folder");
 					tick("write:before");
 					if (fs.existsSync(target) && fs.readFileSync(target, "utf8") === a.content)
 						return "unchanged";
