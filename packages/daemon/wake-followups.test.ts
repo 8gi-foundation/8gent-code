@@ -106,23 +106,34 @@ test("wake payload files: older than the age limit go, then the oldest beyond th
 	make("fresh.txt", 1);
 	expect(pruneWakeFiles(d, { payloadMaxAgeDays: 7, payloadMaxFiles: 500 }, now)).toBe(2);
 	expect(readdirSync(d)).toEqual(["fresh.txt"]);
-	// The cap: 12 newer files and the 1-day one; keep 5, and they are the newest.
-	for (let i = 0; i < 12; i++) make(`n${String(i).padStart(2, "0")}.txt`, 6 - i / 4);
-	expect(pruneWakeFiles(d, { payloadMaxAgeDays: 7, payloadMaxFiles: 5 }, now)).toBe(8);
-	expect(readdirSync(d).sort()).toEqual(["fresh.txt", "n08.txt", "n09.txt", "n10.txt", "n11.txt"]);
+	// The cap: 60 newer files and the 1-day one; the cap is 50, so the 11 oldest go.
+	for (let i = 0; i < 60; i++) make(`n${String(i).padStart(2, "0")}.txt`, 6 - i / 10);
+	expect(pruneWakeFiles(d, { payloadMaxAgeDays: 7, payloadMaxFiles: 50 }, now)).toBe(11);
+	const left = readdirSync(d);
+	expect(left).toHaveLength(50);
+	expect(left).toContain("fresh.txt");
+	expect(left).toContain("n59.txt");
+	expect(left).not.toContain("n00.txt");
+	expect(left).not.toContain("n10.txt");
 });
 
-test("stashing a cron result prunes through the settings", () => {
-	config({ batchWindowMs: 3_600_000, payloadMaxFiles: 3 });
+test("stashing a cron result prunes through the settings", async () => {
+	config({ batchWindowMs: 3_600_000, payloadMaxFiles: 50 });
 	stop = startWakeRouter(dir, () => {});
-	for (let i = 0; i < 6; i++)
+	const emit = (i: number) =>
 		bus.emit("tool:result", {
 			sessionId: "cron",
 			tool: "cron:webhook",
 			output: { i },
 			durationMs: 1,
 		});
-	expect(readdirSync(join(dir, "wake"))).toHaveLength(3);
+	for (let i = 0; i < 60; i++) emit(i);
+	// Payloads of events still queued in the batch window are kept, so the cap is soft until
+	// they are decided; once the queue is flushed the next stash enforces it.
+	expect(readdirSync(join(dir, "wake"))).toHaveLength(60);
+	await router().flush();
+	emit(60);
+	expect(readdirSync(join(dir, "wake"))).toHaveLength(50);
 });
 
 // ── 8SO review of #4888 ──────────────────────────────────────────────────────
@@ -154,7 +165,7 @@ test("a prune limit of zero, a negative, NaN or a string never deletes everythin
 });
 
 test("a stashed payload survives its own prune, and a held event's payload is never removed", async () => {
-	config({ batchWindowMs: 3_600_000, payloadMaxFiles: 1, quietHours: quiet, digest: false });
+	config({ batchWindowMs: 3_600_000, payloadMaxFiles: 50, quietHours: quiet, digest: false });
 	const t = at(3);
 	stop = startWakeRouter(
 		dir,
@@ -165,7 +176,7 @@ test("a stashed payload survives its own prune, and a held event's payload is ne
 	await router().flush();
 	const held = JSON.parse(readFileSync(join(dir, "wake-held.json"), "utf8"));
 	const heldPayload = held[0].event.payloadPath as string;
-	for (let i = 0; i < 5; i++)
+	for (let i = 0; i < 70; i++)
 		bus.emit("tool:result", {
 			sessionId: "cron",
 			tool: "cron:webhook",
@@ -296,4 +307,121 @@ test("the held file is replaced through a link planted at its name, never writte
 	expect(readFileSync(victim, "utf8")).toBe("precious");
 	expect(lstatSync(join(dir, "wake-held.json")).isFile()).toBe(true);
 	expect(statSync(join(dir, "wake-held.json")).mode & 0o777).toBe(0o600);
+});
+
+// ── second read of #4888 ────────────────────────────────────────────────────
+
+import { noticeText } from "./wake-wiring";
+
+test("the limits have floors: 1e-9 days and a 1-file cap are raised, not honoured", () => {
+	config({ payloadMaxAgeDays: 1e-9, payloadMaxFiles: 1 });
+	const s = readWakeSettings(dir);
+	expect(s.payloadMaxAgeDays).toBe(1);
+	expect(s.payloadMaxFiles).toBe(50);
+	const d = join(dir, "wake");
+	mkdirSync(d, { recursive: true });
+	for (let i = 0; i < 10; i++) writeFileSync(join(d, `f${i}.txt`), "x");
+	expect(
+		pruneWakeFiles(d, { payloadMaxAgeDays: 1e-9, payloadMaxFiles: 1 }, Date.now() + 60_000),
+	).toBe(0);
+	expect(readdirSync(d)).toHaveLength(10);
+});
+
+test("the overflow count survives a restart when the held file is full", async () => {
+	config({ digest: false, quietHours: quiet, batchWindowMs: 3_600_000, payloadMaxFiles: 100_000 });
+	let t = at(3);
+	const spoken: Notice[] = [];
+	const start = () =>
+		startWakeRouter(
+			dir,
+			(n) => void spoken.push(n),
+			() => t,
+		);
+	stop = start();
+	for (let i = 0; i < MAX_HELD + 60; i++) fail(`distinct failure ${i}`);
+	await router().flush();
+	stop();
+	await Bun.sleep(5);
+	t = at(5); // still quiet
+	stop = start();
+	await router().flush();
+	expect(spoken).toHaveLength(0);
+	t = at(8);
+	await router().flush();
+	expect(spoken).toHaveLength(MAX_HELD + 1);
+	expect(spoken[spoken.length - 1]?.count).toBe(60);
+	expect(spoken[spoken.length - 1]?.event.dedupeKey).toBe("held:overflow");
+});
+
+test("a held file with more than the cap is read back with the surplus counted, not lost", async () => {
+	config({ digest: false, quietHours: quiet, batchWindowMs: 3_600_000 });
+	const wakeDir = join(dir, "wake");
+	mkdirSync(wakeDir, { recursive: true });
+	const row = (i: number) => ({
+		event: {
+			source: "cron",
+			priority: "urgent",
+			dedupeKey: `cron:k${i}`,
+			origin: "cron",
+			payloadPath: join(wakeDir, `${i}.txt`),
+			at: 1,
+		},
+		count: 2,
+	});
+	writeFileSync(
+		join(dir, "wake-held.json"),
+		JSON.stringify([...Array.from({ length: MAX_HELD + 5 }, (_, i) => row(i)), { overflow: 7 }]),
+	);
+	const spoken: Notice[] = [];
+	stop = startWakeRouter(
+		dir,
+		(n) => void spoken.push(n),
+		() => at(9),
+	);
+	// Quiet hours are over, so the router announces at construction; wait for it to finish.
+	for (let i = 0; i < 100 && spoken.length < MAX_HELD + 1; i++) await Bun.sleep(20);
+	expect(spoken).toHaveLength(MAX_HELD + 1);
+	expect(spoken[spoken.length - 1]?.count).toBe(5 * 2 + 7);
+});
+
+test("a payload still queued in the batch window is not pruned by later stashes", () => {
+	config({ batchWindowMs: 3_600_000, payloadMaxFiles: 50 });
+	stop = startWakeRouter(dir, () => {});
+	const first = JSON.stringify({ first: true });
+	bus.emit("tool:result", {
+		sessionId: "cron",
+		tool: "cron:webhook",
+		output: { first: true },
+		durationMs: 1,
+	});
+	const firstPath = join(dir, "wake", `${sha16(first)}.txt`);
+	expect(existsSync(firstPath)).toBe(true);
+	for (let i = 0; i < 70; i++)
+		bus.emit("tool:result", {
+			sessionId: "cron",
+			tool: "cron:webhook",
+			output: { i },
+			durationMs: 1,
+		});
+	expect(existsSync(firstPath)).toBe(true); // queued, not yet decided: still needed
+});
+
+test("the notification says how many, and the overflow notice has its own words", () => {
+	const ev = (dedupeKey: string, payloadPath: string) => ({
+		source: "cron" as const,
+		priority: "urgent" as const,
+		dedupeKey,
+		origin: "cron",
+		payloadPath,
+		at: 1,
+	});
+	expect(noticeText({ kind: "action", count: 1, event: ev("cron:a", "/x/y.txt") })).toBe(
+		"cron needs you, details at /x/y.txt",
+	);
+	expect(noticeText({ kind: "action", count: 3, event: ev("cron:a", "/x/y.txt") })).toContain(
+		"(x 3)",
+	);
+	const more = noticeText({ kind: "action", count: 60, event: ev("held:overflow", "") });
+	expect(more).toBe("and 60 more urgent events held overnight");
+	expect(more).not.toContain("details at");
 });

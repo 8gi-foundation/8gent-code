@@ -49,20 +49,24 @@ export function readWakeSettings(dir = getDataDir()): WakeSettings {
 		// everything: it falls back to the default instead (8SO, #4888).
 		const positive = (v: unknown, fallback: number, max: number) =>
 			typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.min(v, max) : fallback;
-		s.payloadMaxAgeDays = positive(
-			s.payloadMaxAgeDays,
-			DEFAULT_WAKE_SETTINGS.payloadMaxAgeDays,
-			3650,
+		// Floors as well: a limit of 1e-9 days or 1 file would empty the folder on every event.
+		s.payloadMaxAgeDays = Math.max(
+			MIN_PAYLOAD_DAYS,
+			positive(s.payloadMaxAgeDays, DEFAULT_WAKE_SETTINGS.payloadMaxAgeDays, 3650),
 		);
-		s.payloadMaxFiles = Math.floor(
-			positive(s.payloadMaxFiles, DEFAULT_WAKE_SETTINGS.payloadMaxFiles, 100_000),
+		s.payloadMaxFiles = Math.max(
+			MIN_PAYLOAD_FILES,
+			Math.floor(positive(s.payloadMaxFiles, DEFAULT_WAKE_SETTINGS.payloadMaxFiles, 100_000)),
 		);
-		if (s.payloadMaxFiles < 1) s.payloadMaxFiles = DEFAULT_WAKE_SETTINGS.payloadMaxFiles;
 		return s;
 	} catch {
 		return { ...DEFAULT_WAKE_SETTINGS };
 	}
 }
+
+/** Smallest prune limits honoured: below these a config value is raised to them. */
+export const MIN_PAYLOAD_DAYS = 1;
+export const MIN_PAYLOAD_FILES = 50;
 
 /** Remove payload files past the age limit, then the oldest beyond the count cap (#4877). */
 export function pruneWakeFiles(
@@ -73,14 +77,18 @@ export function pruneWakeFiles(
 	keep: ReadonlySet<string> = new Set(),
 ): number {
 	// The limits are checked again here: this is exported, and 0, a negative or NaN would remove everything.
-	const days =
+	const days = Math.max(
+		MIN_PAYLOAD_DAYS,
 		Number.isFinite(s.payloadMaxAgeDays) && s.payloadMaxAgeDays > 0
 			? s.payloadMaxAgeDays
-			: DEFAULT_WAKE_SETTINGS.payloadMaxAgeDays;
-	const cap =
+			: DEFAULT_WAKE_SETTINGS.payloadMaxAgeDays,
+	);
+	const cap = Math.max(
+		MIN_PAYLOAD_FILES,
 		Number.isFinite(s.payloadMaxFiles) && s.payloadMaxFiles >= 1
 			? Math.floor(s.payloadMaxFiles)
-			: DEFAULT_WAKE_SETTINGS.payloadMaxFiles;
+			: DEFAULT_WAKE_SETTINGS.payloadMaxFiles,
+	);
 	let files: { p: string; at: number }[];
 	try {
 		// lstat: only regular files count; a link is never followed, so its target's age or
@@ -206,12 +214,17 @@ function cronEvent(
 	};
 }
 
+/** What the notification says: fixed words, a count, and a path; never text written by someone else. */
+export function noticeText(n: Notice): string {
+	if (n.event.dedupeKey === "held:overflow")
+		return `and ${n.count} more urgent events held overnight`;
+	const times = n.count > 1 ? ` (x ${n.count})` : "";
+	return `${n.event.source} needs you${times}, details at ${n.event.payloadPath}`;
+}
+
 async function announce(n: Notice): Promise<void> {
 	if (n.kind === "reply") return; // the owner's reply is the stream they are already reading
-	await sendNativeNotification(
-		"8gent",
-		`${n.event.source} needs you, details at ${n.event.payloadPath}`,
-	);
+	await sendNativeNotification("8gent", noticeText(n));
 }
 
 /** Start the router and subscribe it to the bus. Returns a stop function. */

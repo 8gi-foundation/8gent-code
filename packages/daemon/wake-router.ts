@@ -148,6 +148,8 @@ export class WakeRouter {
 	private held = new Map<string, Queued>();
 	/** Urgent events past MAX_HELD during quiet hours: only their number is kept. */
 	private overflow = 0;
+	/** The batch handleBatch is working on: out of the queue, not yet held or spoken. */
+	private inflight: Queued[] = [];
 	private heldTimer: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(private readonly deps: WakeDeps) {
@@ -172,9 +174,8 @@ export class WakeRouter {
 			if (!Array.isArray(raw)) return;
 			const wakeDir = resolve(dirname(path), "wake") + sep;
 			for (const q of raw) {
-				if (this.held.size >= MAX_HELD) break;
 				if (typeof q?.overflow === "number" && Number.isInteger(q.overflow) && q.overflow > 0) {
-					this.overflow += Math.min(q.overflow, 1_000_000);
+					this.overflow = Math.min(this.overflow + q.overflow, 1_000_000);
 					continue;
 				}
 				const e = q?.event;
@@ -194,16 +195,25 @@ export class WakeRouter {
 					Number.isInteger(q.count) &&
 					q.count >= 1 &&
 					q.count <= 1_000_000;
-				if (ok) this.held.set(e.dedupeKey, { event: e, count: q.count });
+				if (!ok) continue;
+				// Past the cap an event is counted, not dropped: the file itself holds at most
+				// MAX_HELD events plus an overflow row, and both are read back.
+				if (this.held.size >= MAX_HELD && !this.held.has(e.dedupeKey))
+					this.overflow = Math.min(this.overflow + q.count, 1_000_000);
+				else this.held.set(e.dedupeKey, { event: e, count: q.count });
 			}
 		} catch {
 			// No held file, or one that does not parse: nothing was held.
 		}
 	}
 
-	/** Payload files of held events: the prune must not remove what a held event points at. */
+	/**
+	 * Payload files still needed: held events, events queued in the batch window, and the batch
+	 * being handled. The prune must not remove what any of them points at.
+	 */
 	heldPaths(): Set<string> {
-		return new Set([...this.held.values()].map((q) => resolve(q.event.payloadPath)));
+		const all = [...this.held.values(), ...this.queue, ...this.inflight];
+		return new Set(all.filter((q) => q.event.payloadPath).map((q) => resolve(q.event.payloadPath)));
 	}
 
 	private now(): number {
@@ -358,6 +368,7 @@ export class WakeRouter {
 		const window = this.deps.settings().batchWindowMs;
 		const batch = this.queue.filter((q) => q.event.at - first <= window);
 		this.queue = this.queue.filter((q) => !batch.includes(q));
+		this.inflight = batch;
 		if (this.deps.runTurn) {
 			const ctl = new AbortController();
 			this.abort = ctl;
@@ -382,11 +393,12 @@ export class WakeRouter {
 			const s = this.seen.get(q.event.dedupeKey);
 			if (s) s.queued = undefined;
 		}
+		this.inflight = [];
 	}
 
 	private hold(q: Queued): void {
 		const prior = this.held.get(q.event.dedupeKey);
-		if (prior) prior.count += q.count;
+		if (prior) prior.count = Math.min(prior.count + q.count, 1_000_000);
 		else if (this.held.size >= MAX_HELD) this.overflow += q.count;
 		else this.held.set(q.event.dedupeKey, q);
 		this.saveHeld();
