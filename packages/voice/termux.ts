@@ -77,6 +77,13 @@ export function ctrlRAction(
 	return android ? "android-listen" : "toggle";
 }
 
+/** The line /voice status and /voice mic print on Android: the consent state and the off switch. */
+export function androidMicStateLine(on: boolean): string {
+	return on
+		? "Voice input: on (the phone's speech service hears you; /voice mic off turns it off)."
+		: "Voice input: off. Ctrl+R asks before it turns on.";
+}
+
 /** /voice subcommands that print the Android line instead of the desktop text. record, listen and stt listen instead. */
 export const ANDROID_VOICE_LINE_SUBS = ["", "chat", "conversation", "talk", "status", "stop"];
 

@@ -4,9 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	type AndroidSetupDeps,
-	androidAskLine,
+	MIC_DISCLOSURE,
+	MIC_READY_LINE,
+	type SetupPatch,
+	type SetupState,
+	answerFromLine,
 	configPath,
-	missingPackages,
+	micAskLine,
+	missingMusic,
+	musicAskLine,
 	offerAndroidSetup,
 	readSetup,
 	writeSetup,
@@ -14,23 +20,30 @@ import {
 
 const ALL = ["mpv", "yt-dlp", "ffmpeg", "termux-speech-to-text"];
 
+/** Answers are consumed in order, one per question; a missing answer is a typed yes. */
 function rig(
-	o: { have?: string[]; answer?: boolean | null; installCode?: number; mic?: boolean } = {},
+	o: {
+		have?: string[];
+		answers?: (boolean | null)[];
+		installCode?: number;
+		state?: Partial<SetupState>;
+	} = {},
 ) {
 	const have = new Set(o.have ?? []);
+	const answers = [...(o.answers ?? [])];
 	const log = {
 		said: [] as string[],
-		asked: [] as string[],
+		asked: [] as { line: string; defaultYes: boolean }[],
 		runs: [] as string[][],
-		writes: [] as unknown[],
+		writes: [] as SetupPatch[],
 	};
-	let mic = o.mic ?? false;
+	const st: SetupState = { choice: null, mic: false, micDeclined: false, ...o.state };
 	const deps: AndroidSetupDeps = {
 		android: true,
 		has: (b) => have.has(b),
-		ask: async (line) => {
-			log.asked.push(line);
-			return o.answer === undefined ? true : o.answer;
+		ask: async (line, defaultYes) => {
+			log.asked.push({ line, defaultYes });
+			return answers.length ? (answers.shift() as boolean | null) : true;
 		},
 		run: async (cmd, args) => {
 			log.runs.push([cmd, ...args]);
@@ -39,122 +52,177 @@ function rig(
 		},
 		say: (l) => log.said.push(l),
 		progress: () => {},
-		readState: () => ({ choice: null, mic }),
-		writeState: (s) => {
-			log.writes.push(s);
-			if (s && "mic" in s && s.mic !== undefined) mic = s.mic;
+		readState: () => ({ ...st }),
+		writeState: (p) => {
+			log.writes.push(p);
+			Object.assign(st, p);
 			return true;
 		},
 	};
-	return { deps, log };
+	return { deps, log, st };
 }
 
-describe("missingPackages", () => {
-	test("maps tools to Termux packages: yt-dlp ships as python-yt-dlp, the mic is in termux-api", () => {
-		expect(missingPackages(() => false)).toEqual(["mpv", "python-yt-dlp", "ffmpeg", "termux-api"]);
-		expect(missingPackages((b) => b !== "mpv" && b !== "termux-speech-to-text")).toEqual([
-			"mpv",
-			"termux-api",
-		]);
-		expect(missingPackages(() => true)).toEqual([]);
+describe("lines", () => {
+	test("the disclosure is the agreed wording and names the off switch", () => {
+		expect(MIC_DISCLOSURE).toBe(
+			"Voice input uses your phone's speech service (often Google), which may send your audio off the phone. /voice mic off turns it off.",
+		);
+		expect(micAskLine(true)).toContain(MIC_DISCLOSURE);
+		expect(MIC_READY_LINE).toContain("/voice mic off");
+	});
+
+	test("the mic question is always [y/N]; music follows the launch default; no a-word", () => {
+		expect(micAskLine(false)).toEndWith("[y/N]");
+		expect(micAskLine(true)).toContain("installs termux-api");
+		expect(musicAskLine(["mpv"], true)).toEndWith("[Y/n]");
+		expect(musicAskLine(["mpv"], false)).toEndWith("[y/N]");
+		expect(musicAskLine(["mpv"]) + micAskLine(true)).not.toMatch(/agent/i);
+	});
+
+	test("the music question never mentions the mic or Google", () => {
+		expect(musicAskLine(["mpv", "ffmpeg"])).not.toMatch(/google|voice|termux-api/i);
+	});
+
+	test("yt-dlp ships as python-yt-dlp", () => {
+		expect(missingMusic(() => false)).toEqual(["mpv", "python-yt-dlp", "ffmpeg"]);
+		expect(missingMusic((b) => b === "mpv")).toEqual(["python-yt-dlp", "ffmpeg"]);
+		expect(missingMusic(() => true)).toEqual([]);
 	});
 });
 
-describe("offerAndroidSetup", () => {
-	test("not Android: nothing asked, nothing run (macOS and Linux unchanged)", async () => {
+describe("answerFromLine", () => {
+	test("an empty line takes the question's default; only y or yes is yes otherwise", () => {
+		expect(answerFromLine("", true)).toBe(true);
+		expect(answerFromLine("", false)).toBe(false);
+		expect(answerFromLine("  ", false)).toBe(false);
+		expect(answerFromLine("y", false)).toBe(true);
+		expect(answerFromLine("YES", false)).toBe(true);
+		expect(answerFromLine("yeah", true)).toBe(false);
+		expect(answerFromLine("n", true)).toBe(false);
+	});
+});
+
+describe("launch (auto)", () => {
+	test("not Android: nothing asked, nothing run", async () => {
 		const { deps, log } = rig();
 		expect(await offerAndroidSetup("auto", { ...deps, android: false })).toBe("not-android");
 		expect(log.asked).toEqual([]);
 		expect(log.runs).toEqual([]);
 	});
 
-	test("one question names every package, and discloses that audio may go to Google", async () => {
-		const { deps, log } = rig({ answer: false });
+	test("two separate questions, music first with the launch default, mic [y/N]", async () => {
+		const { deps, log } = rig({ answers: [false, false] });
 		await offerAndroidSetup("auto", deps);
-		expect(log.asked).toHaveLength(1);
-		expect(log.asked[0]).toContain("mpv, python-yt-dlp, ffmpeg, termux-api");
-		expect(log.asked[0]).toContain("Google");
-		expect(log.asked[0]).not.toMatch(/agent/i);
-		expect(log.asked[0].includes("\n")).toBe(false);
+		expect(log.asked).toHaveLength(2);
+		expect(log.asked[0].line).toContain("mpv, python-yt-dlp, ffmpeg");
+		expect(log.asked[0].defaultYes).toBe(true);
+		expect(log.asked[1].defaultYes).toBe(false);
+		expect(log.asked[1].line).toContain("Google");
 	});
 
-	test("no yes, no install, and the no is recorded so it is not asked again", async () => {
-		const { deps, log } = rig({ answer: false });
-		expect(await offerAndroidSetup("auto", deps)).toBe("declined");
+	test("yes to music, no to the mic: only music packages installed, mic never consented", async () => {
+		const { deps, log, st } = rig({ answers: [true, false] });
+		await offerAndroidSetup("auto", deps);
+		expect(log.runs).toEqual([["pkg", "install", "-y", "mpv", "python-yt-dlp", "ffmpeg"]]);
+		expect(st.mic).toBe(false);
+		expect(st.micDeclined).toBe(true);
+		expect(log.writes.some((w) => w.mic === true)).toBe(false);
+	});
+
+	test("no to music, yes to the mic: only termux-api installed", async () => {
+		const { deps, log, st } = rig({ answers: [false, true] });
+		await offerAndroidSetup("auto", deps);
+		expect(log.runs).toEqual([["pkg", "install", "-y", "termux-api"]]);
+		expect(st.choice).toBe("declined");
+		expect(st.mic).toBe(true);
+	});
+
+	test("yes to both: no sudo, ready line names /voice mic off, F-Droid app named once", async () => {
+		const { deps, log } = rig({ answers: [true, true] });
+		expect(await offerAndroidSetup("auto", deps)).toBe("installed");
+		expect(log.runs.flat()).not.toContain("sudo");
+		expect(log.said.filter((l) => l === MIC_READY_LINE)).toHaveLength(1);
+		expect(log.said.filter((l) => l.includes("F-Droid"))).toHaveLength(1);
+	});
+
+	test("nothing runs before a yes", async () => {
+		const { deps, log } = rig({ answers: [false, false] });
+		await offerAndroidSetup("auto", deps);
 		expect(log.runs).toEqual([]);
-		expect(log.writes).toContainEqual({ choice: "declined" });
-		expect(
-			await offerAndroidSetup("auto", {
-				...deps,
-				readState: () => ({ choice: "declined", mic: false }),
-			}),
-		).toBe("recorded");
-		expect(log.asked).toHaveLength(1);
 	});
 
-	test("nobody to ask (not a terminal): nothing runs, nothing recorded", async () => {
-		const { deps, log } = rig({ answer: null });
+	test("both asked once ever: recorded answers end the asking", async () => {
+		const { deps, log } = rig({ state: { choice: "declined", micDeclined: true } });
+		expect(await offerAndroidSetup("auto", deps)).toBe("recorded");
+		expect(log.asked).toEqual([]);
+	});
+
+	test("nobody to ask: nothing runs, nothing recorded", async () => {
+		const { deps, log } = rig({ answers: [null] });
 		expect(await offerAndroidSetup("auto", deps)).toBe("no-person");
 		expect(log.runs).toEqual([]);
 		expect(log.writes).toEqual([]);
 	});
 
-	test("yes: one pkg install, no sudo, consent recorded, F-Droid line said once", async () => {
-		const { deps, log } = rig({ answer: true });
-		expect(await offerAndroidSetup("auto", deps)).toBe("installed");
-		expect(log.runs).toEqual([
-			["pkg", "install", "-y", "mpv", "python-yt-dlp", "ffmpeg", "termux-api"],
-		]);
-		expect(log.runs.flat()).not.toContain("sudo");
-		expect(log.writes).toContainEqual({ mic: true });
-		expect(log.said.filter((l) => l.includes("F-Droid"))).toHaveLength(1);
-		expect(log.said.join(" ")).toContain("/dj");
-	});
-
-	test("only what is missing is installed", async () => {
-		const { deps, log } = rig({ have: ["mpv", "yt-dlp", "ffmpeg"], answer: true });
-		await offerAndroidSetup("auto", deps);
-		expect(log.runs).toEqual([["pkg", "install", "-y", "termux-api"]]);
-	});
-
-	test("install fails: says the exit code and the command to run by hand", async () => {
-		const { deps, log } = rig({ answer: true, installCode: 100 });
+	test("a failed music install is reported with the command and recorded; the mic is still asked", async () => {
+		const { deps, log, st } = rig({ answers: [true, false], installCode: 100 });
 		expect(await offerAndroidSetup("auto", deps)).toBe("failed");
-		expect(log.said.at(-1)).toContain("pkg install -y mpv python-yt-dlp ffmpeg termux-api");
-		expect(log.said.at(-1)).toContain("100");
+		expect(log.said.some((l) => l.includes("pkg install -y mpv python-yt-dlp ffmpeg"))).toBe(true);
+		expect(st.choice).toBe("failed");
+		expect(log.asked).toHaveLength(2);
 	});
+});
 
-	test("tools present and mic consent given: ready, silent", async () => {
-		const { deps, log } = rig({ have: ALL, mic: true });
+describe("the mic key (command)", () => {
+	test("consent on and termux-api present: ready, silent", async () => {
+		const { deps, log } = rig({ have: ALL, state: { mic: true } });
 		expect(await offerAndroidSetup("command", deps)).toBe("ready");
 		expect(log.asked).toEqual([]);
 		expect(log.said).toEqual([]);
 	});
 
-	test("tools present but no mic consent: asks only about voice input, installs nothing", async () => {
-		const { deps, log } = rig({ have: ALL, answer: true });
+	test("never asks about music", async () => {
+		const { deps, log } = rig({ answers: [true] });
+		await offerAndroidSetup("command", deps);
+		expect(log.asked).toHaveLength(1);
+		expect(log.asked[0].line).toContain("voice input");
+		expect(log.asked[0].defaultYes).toBe(false);
+	});
+
+	test("after /voice mic off the next press asks again, and a no means nothing listens", async () => {
+		const { deps, log, st } = rig({ have: ALL, state: { mic: true }, answers: [false] });
 		expect(await offerAndroidSetup("command", deps)).toBe("ready");
-		expect(log.asked[0]).toContain("Google");
-		expect(log.asked[0]).not.toContain("Installs");
+		expect(log.asked).toEqual([]);
+		// What /voice mic off does: writeSetup({ mic: false }).
+		deps.writeState?.({ mic: false });
+		const r = await offerAndroidSetup("command", deps);
+		expect(log.asked).toHaveLength(1);
+		expect(r).not.toBe("ready");
+		expect(r).not.toBe("installed");
+		expect(st.mic).toBe(false);
 		expect(log.runs).toEqual([]);
+	});
+
+	test("asks again even after a launch-time no (pressing the mic is intent)", async () => {
+		const { deps, log } = rig({ have: ALL, state: { micDeclined: true }, answers: [true] });
+		expect(await offerAndroidSetup("command", deps)).toBe("ready");
+		expect(log.asked).toHaveLength(1);
 		expect(log.writes).toContainEqual({ mic: true });
 	});
 
-	test("command mode asks again even after an earlier no (pressing the mic is intent)", async () => {
-		const { deps, log } = rig({ answer: true });
-		const d = { ...deps, readState: () => ({ choice: "declined" as const, mic: false }) };
-		expect(await offerAndroidSetup("command", d)).toBe("installed");
-		expect(log.asked).toHaveLength(1);
-	});
-
-	test("after an update a bare Enter is No", () => {
-		expect(androidAskLine(["mpv"], false)).toContain("[y/N]");
-		expect(androidAskLine(["mpv"], true)).toContain("[Y/n]");
+	test("consent without termux-api asks again and installs only termux-api", async () => {
+		const { deps, log } = rig({
+			have: ["mpv", "yt-dlp", "ffmpeg"],
+			state: { mic: true },
+			answers: [true],
+		});
+		expect(await offerAndroidSetup("command", deps)).toBe("installed");
+		expect(log.runs).toEqual([["pkg", "install", "-y", "termux-api"]]);
 	});
 });
 
 describe("config on disk", () => {
-	test("reads the recorded state and keeps unrelated keys", () => {
+	test("round trips, keeps unrelated keys, never overwrites a file it cannot parse", () => {
 		const home = mkdtempSync(join(tmpdir(), "andsetup-"));
 		const env = { HOME: home, EIGHT_HOME: home };
 		const p = configPath(env);
@@ -164,11 +232,12 @@ describe("config on disk", () => {
 				p,
 				JSON.stringify({ other: 1, androidSetup: { choice: "declined", mic: true } }),
 			);
-			expect(readSetup(env)).toEqual({ choice: "declined", mic: true });
+			expect(readSetup(env)).toEqual({ choice: "declined", mic: true, micDeclined: false });
 			expect(writeSetup({ choice: null }, env)).toBe(true);
-			expect(readSetup(env)).toEqual({ choice: null, mic: true });
-			expect(writeSetup({ choice: "failed" }, env)).toBe(true);
-			expect(readSetup(env).choice).toBe("failed");
+			expect(writeSetup({ mic: false }, env)).toBe(true);
+			expect(readSetup(env)).toEqual({ choice: null, mic: false, micDeclined: false });
+			expect(writeSetup({ micDeclined: true }, env)).toBe(true);
+			expect(readSetup(env).micDeclined).toBe(true);
 			expect(JSON.parse(readFileSync(p, "utf-8")).other).toBe(1);
 			writeFileSync(p, "{not json");
 			expect(writeSetup({ mic: true }, env)).toBe(false);

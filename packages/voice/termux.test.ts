@@ -9,6 +9,7 @@ import {
 	ANDROID_VOICE_LINE_SUBS,
 	ANDROID_VOICE_LISTEN_SUBS,
 	TERMUX_TTS_HINT,
+	androidMicStateLine,
 	ctrlRAction,
 	findOnPath,
 	isAndroidHost,
@@ -248,5 +249,13 @@ describe("hint routing (#4726)", () => {
 		await (await engine.speak("a")).exited;
 		await (await engine.speak("b")).exited;
 		expect(hints).toEqual([TERMUX_TTS_HINT]);
+	});
+});
+
+describe("androidMicStateLine (#4833)", () => {
+	test("on names the off switch; off says Ctrl+R asks first", () => {
+		expect(androidMicStateLine(true)).toContain("/voice mic off");
+		expect(androidMicStateLine(false)).toContain("off");
+		expect(androidMicStateLine(false)).toContain("asks");
 	});
 });

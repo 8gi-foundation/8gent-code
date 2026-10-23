@@ -33,10 +33,11 @@ export interface ListenDeps {
 	timeoutMs?: number;
 }
 
-/** Text from another process, safe for the prompt: control characters (escape codes included) removed. */
+/** Text from another process, safe for the prompt: control and Unicode format characters (escape codes, bidi overrides, zero-width) removed. */
 function clean(s: string): string {
 	return s
 		.replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+		.replace(/\p{Cf}/gu, "")
 		.replace(/\s+/g, " ")
 		.trim();
 }

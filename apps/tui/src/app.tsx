@@ -22,6 +22,7 @@ import {
 	getTaskRouter,
 } from "../../../packages/ai/task-router.js";
 import { resolveOllamaBaseUrl } from "../../../packages/ai/text-tool-endpoint.js";
+import { answerFromLine } from "../../../packages/eight/android-setup.js";
 import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
 import {
@@ -714,6 +715,7 @@ import {
 	ANDROID_DICTATION_LINE,
 	ANDROID_VOICE_LINE_SUBS,
 	ANDROID_VOICE_LISTEN_SUBS,
+	androidMicStateLine,
 	isAndroidHost,
 } from "../../../packages/voice/termux.js";
 import { KittenTTSProvider, installTermuxTTSEngine } from "../../../packages/voice/tts-engine.js";
@@ -1381,14 +1383,22 @@ export function App({
 	// Android (#4833): the mic key and /voice record. Setup is the same one-yes offer as first launch;
 	// pressing the key is the intent, so it asks only when something is missing. Then one listen.
 	const androidListeningRef = useRef(false);
+	// What an empty answer means for the pending question: true for /dj, false for the mic.
+	const djInstallDefaultRef = useRef(true);
 	async function androidListen(): Promise<void> {
 		if (androidListeningRef.current) return;
+		// A /dj question is waiting: never replace its resolver.
+		if (djInstallAnswerRef.current) {
+			addSystemMessage("Answer the pending question first.");
+			return;
+		}
 		androidListeningRef.current = true;
 		try {
 			const { offerAndroidSetup } = await import("../../../packages/eight/android-setup.js");
 			const outcome = await offerAndroidSetup("command", {
-				ask: (line) =>
+				ask: (line, defaultYes) =>
 					new Promise<boolean>((resolve) => {
+						djInstallDefaultRef.current = defaultYes;
 						djInstallAnswerRef.current = resolve;
 						addSystemMessage(line);
 					}),
@@ -6014,12 +6024,34 @@ export function App({
 				case "voice":
 					// Enhanced voice command — toggle STT recording or voice chat
 					// Android: no recorder or whisper. record/listen/stt listen once through Termux:API (#4833).
+					if (isAndroidHost() && args[0] === "mic") {
+						void (async () => {
+							const { readSetup, writeSetup } = await import(
+								"../../../packages/eight/android-setup.js"
+							);
+							if ((args[1] ?? "").toLowerCase() === "off") {
+								addSystemMessage(
+									writeSetup({ mic: false })
+										? "Voice input is off. Ctrl+R will ask before it listens again."
+										: "Could not update ~/.8gent/config.json, so voice input is unchanged.",
+								);
+							} else addSystemMessage(androidMicStateLine(readSetup().mic));
+						})();
+						break;
+					}
 					if (isAndroidHost() && ANDROID_VOICE_LISTEN_SUBS.includes(args[0] ?? "")) {
 						void androidListen();
 						break;
 					}
 					if (isAndroidHost() && ANDROID_VOICE_LINE_SUBS.includes(args[0] ?? "")) {
-						addSystemMessage(ANDROID_DICTATION_LINE);
+						void (async () => {
+							const { readSetup } = await import("../../../packages/eight/android-setup.js");
+							addSystemMessage(
+								args[0] === "status"
+									? `${androidMicStateLine(readSetup().mic)}\n${ANDROID_DICTATION_LINE}`
+									: ANDROID_DICTATION_LINE,
+							);
+						})();
 						break;
 					}
 					if (args[0] === "chat" || args[0] === "conversation" || args[0] === "talk") {
@@ -6939,7 +6971,10 @@ export function App({
 		if (djInstallAnswerRef.current) {
 			const answer = djInstallAnswerRef.current;
 			djInstallAnswerRef.current = null;
-			answer(/^(y|yes)?$/i.test(input));
+			// A question that defaults to No (the mic) treats an empty line as No.
+			const bare = djInstallDefaultRef.current;
+			djInstallDefaultRef.current = true;
+			answer(answerFromLine(input, bare));
 			return;
 		}
 

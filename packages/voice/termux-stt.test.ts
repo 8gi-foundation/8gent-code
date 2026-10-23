@@ -47,6 +47,14 @@ describe("listenOnce", () => {
 		expect(await r.run()).toEqual({ text: "run [31mls now" });
 	});
 
+	test("Unicode format characters (bidi override, zero-width, BOM) are stripped too", async () => {
+		const r = rig((c) => {
+			c.stdout.emit("data", Buffer.from("ls\u202e -a\u200b now\ufeff\n"));
+			c.emit("close", 0);
+		});
+		expect(await r.run()).toEqual({ text: "ls -a now" });
+	});
+
 	test("binary missing: says to install termux-api", async () => {
 		const r = rig((c) => c.emit("error", Object.assign(new Error("x"), { code: "ENOENT" })));
 		expect(await r.run()).toEqual({ error: missingAppLine });
