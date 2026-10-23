@@ -1,7 +1,8 @@
 name: Swift Nightly
 
 # macOS runners bill at 10x. Run the Swift build nightly + on demand only.
-# Triggered manually via workflow_dispatch, or by PRs that touch apps/8gent-computer.
+# Triggered manually via workflow_dispatch, or by PRs that touch apps/8gent-computer
+# or apps/lil-eight (#4862 G05: Lil Eight had no CI build at all).
 on:
   schedule:
     - cron: '0 7 * * *'
@@ -10,6 +11,7 @@ on:
     branches: [main]
     paths:
       - 'apps/8gent-computer/**'
+      - 'apps/lil-eight/**'
       - '.github/workflows/swift-nightly.yml'
 
 concurrency:
@@ -66,3 +68,28 @@ jobs:
           if [ -f /tmp/mock-daemon.pid ]; then
             kill "$(cat /tmp/mock-daemon.pid)" 2>/dev/null || true
           fi
+
+  # #4862 G05: Lil Eight, built the way apps/lil-eight/build.sh builds it (swiftc
+  # plus the .app bundle), on the same runner as 8gent Computer. It is a dock
+  # pet with no headless mode, so the check is that the bundle and its
+  # executable exist and the executable is a Mach-O for this machine.
+  lil-eight:
+    name: Lil Eight (Swift)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+      - name: Show Swift version
+        run: swift --version
+      - name: Build Lil Eight
+        run: bash apps/lil-eight/build.sh
+      - name: The bundle is complete
+        run: |
+          APP="apps/lil-eight/build/Lil Eight.app"
+          test -f "$APP/Contents/Info.plist"
+          test -f "$APP/Contents/Resources/sprites/manifest.json"
+          file "$APP/Contents/MacOS/LilEight" | tee /dev/stderr | grep -q "Mach-O 64-bit executable"
+          echo "Lil Eight build: PASS"

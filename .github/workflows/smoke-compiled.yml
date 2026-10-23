@@ -4,12 +4,21 @@ name: Compiled smoke
 # host-built binary on all three hosted OSes whenever the script or this workflow
 # changes. macOS is not in platforms.yml, and the first-frame check once hung
 # there for 30 minutes (#4011), so this is the PR-time proof.
+#
+# #4862 G04: every released target is smoked on its own kind of machine, the
+# three that had none included: darwin-x64 on macos-15-intel, linux-arm64 on
+# ubuntu-24.04-arm, and windows-x64-baseline on windows-latest. A release tag
+# runs the whole matrix; a pull request only when the build or smoke changes.
 
 on:
+  push:
+    tags:
+      - 'v*'
   pull_request:
     branches: [main]
     paths:
       - scripts/smoke-compiled.sh
+      - scripts/build-binaries.ts
       - .github/workflows/smoke-compiled.yml
   workflow_dispatch:
 
@@ -22,17 +31,32 @@ concurrency:
 
 jobs:
   smoke:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.binary }} on ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             binary: 8gent-linux-x64
+            build: --host
           - os: macos-latest
             binary: 8gent-darwin-arm64
+            build: --host
           - os: windows-latest
             binary: 8gent-windows-x64.exe
+            build: --host
+          # #4862 G04: the three released targets that had no smoke. darwin-x64
+          # runs on Intel: GitHub retired the macos-13 image in December 2025,
+          # and macos-15-intel is its x86_64 replacement.
+          - os: macos-15-intel
+            binary: 8gent-darwin-x64
+            build: --host
+          - os: ubuntu-24.04-arm
+            binary: 8gent-linux-arm64
+            build: --host
+          - os: windows-latest
+            binary: 8gent-windows-x64-baseline.exe
+            build: --only=bun-windows-x64-baseline
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     defaults:
@@ -52,8 +76,10 @@ jobs:
           node-version: '20'
       - name: Install dependencies
         run: bun install
-      - name: Compile host binary
-        run: bun run build:binaries:host
+      # --host builds the runner's own target; the baseline exe is named, since
+      # the host target on windows-latest is the AVX2 build.
+      - name: Compile ${{ matrix.binary }}
+        run: bun --config=bin/bunfig.empty.toml run scripts/build-binaries.ts ${{ matrix.build }}
       - name: Compiled binary smoke
         timeout-minutes: 5
         run: bash scripts/smoke-compiled.sh "dist/bin/${{ matrix.binary }}"

@@ -33,8 +33,10 @@
 # installs the tarball on Node with no Bun and draws the TUI under ConPTY;
 # smoke-linux-arm64 starts the arm64 binary on arm64. A red device smoke keeps
 # the release a draft. The compiled-binary TUI checks (exe on Windows, arm64
-# binary on Linux) are EXPECTED-FAIL until the open P0 "TUI not embedded in
-# compiled binaries" is fixed (related #4635, #4540); they report, never gate.
+# binary on Linux) gate like the rest: they were marked expected-fail for the
+# P0 "TUI not embedded in compiled binaries" (#4635, #4540), which #4675 fixed
+# (dist/compile-entry.ts puts the TUI in the binary's module graph). Both had
+# passed on every release since, v0.20.19 to v0.20.24 (#4862 G04).
 #
 # SIGNING: opt-in and skip-if-absent. With no secrets set, unsigned artifacts
 # are produced (they run, but trigger OS trust prompts). macOS codesigning with
@@ -350,23 +352,13 @@ jobs:
           npm i --no-save --prefix "$env:RUNNER_TEMP\ptydeps" "node-pty@$ver"
           "NODE_PATH=$env:RUNNER_TEMP\ptydeps\node_modules" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
-      # EXPECTED-FAIL until the open P0 "TUI not embedded in compiled
-      # binaries" is fixed (related #4540). Reports, never gates. When this
-      # goes green the notice below says so: delete continue-on-error then.
-      - name: Windows exe draws the TUI first frame (expected-fail)
+      # Gates since #4862 G04: the compiled-binary TUI embed P0 (#4540) was fixed
+      # by #4675, and this check passed on every release from v0.20.19 to v0.20.24.
+      - name: Windows exe draws the TUI first frame
         id: exe_tui
-        continue-on-error: true
         timeout-minutes: 5
         shell: pwsh
         run: node scripts/tui-first-frame.mjs (Join-Path (Resolve-Path bins) '8gent-windows-x64.exe') 90
-      - name: Report the expected-fail result
-        if: always()
-        shell: pwsh
-        env:
-          OUTCOME: ${{ steps.exe_tui.outcome }}
-        run: |
-          if ($env:OUTCOME -eq 'success') { Write-Host '::notice::the Windows exe now draws the TUI: remove continue-on-error from the exe_tui step' }
-          else { Write-Host '::warning::EXPECTED-FAIL: the Windows exe did not draw the TUI (compiled-binary TUI embed P0, #4540)' }
 
       # The Node build on Windows has never run. npm install with install
       # scripts ON, as a user does it, then --version and the TUI on Node.
@@ -446,12 +438,12 @@ jobs:
             bash /w/scripts/smoke-termux.sh "/w/$tgz" "$TAG"
 
   # The standalone arm64 Linux binary, started on arm64 (it was built, attested
-  # and attached but never run, #4635). EXPECTED-FAIL until the open P0
-  # "TUI not embedded in compiled binaries" is fixed: smoke-compiled.sh includes
-  # the TUI first frame. Reports, never gates; remove continue-on-error when
-  # the notice says it passes.
+  # and attached but never run, #4635). smoke-compiled.sh includes the TUI first
+  # frame. It was expected-fail for the compiled-binary TUI embed P0, fixed by
+  # #4675; it passed on every release from v0.20.19 to v0.20.24, so it gates
+  # now (#4862 G04).
   smoke-linux-arm64:
-    name: Start the Linux arm64 binary on arm64 (expected-fail)
+    name: Start the Linux arm64 binary on arm64
     needs: build
     runs-on: ubuntu-24.04-arm
     permissions:
@@ -469,27 +461,64 @@ jobs:
           path: bins
       - name: Smoke-test the arm64 binary
         id: arm64
-        continue-on-error: true
         timeout-minutes: 10
         run: |
           chmod +x bins/8gent-linux-arm64
           bash scripts/smoke-compiled.sh bins/8gent-linux-arm64
-      - name: Report the expected-fail result
-        if: always()
-        env:
-          OUTCOME: ${{ steps.arm64.outcome }}
+
+  # #4862 G05: the two macOS apps, built from the tag on macos-14 (as
+  # swift-nightly.yml builds 8gent Computer) and attached as UNSIGNED zips: no
+  # Developer ID signature, no notarization, only the ad-hoc signature each
+  # build.sh applies, so macOS will warn on first open. They are extras: a
+  # failed Swift build is reported (and raises the alarm) but does not hold the
+  # binaries back.
+  swift-apps:
+    name: Build the macOS apps (unsigned)
+    runs-on: macos-14
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - name: Show Swift version
+        run: swift --version
+      - name: Build 8gent Computer and Lil Eight
         run: |
-          if [ "$OUTCOME" = success ]; then
-            echo "::notice::the arm64 binary now passes: remove continue-on-error from the arm64 step"
-          else
-            echo "::warning::EXPECTED-FAIL: the arm64 binary did not pass smoke-compiled.sh (compiled-binary TUI embed P0, #4635)"
-          fi
+          bash apps/8gent-computer/build.sh
+          bash apps/lil-eight/build.sh
+      - name: Package as unsigned zips
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          mkdir -p swift-out
+          ditto -c -k --keepParent "apps/8gent-computer/build/8gent Computer.app" "swift-out/8gent-computer-${TAG}-macos-arm64-unsigned.zip"
+          ditto -c -k --keepParent "apps/lil-eight/build/Lil Eight.app" "swift-out/lil-eight-${TAG}-macos-arm64-unsigned.zip"
+          cd swift-out
+          shasum -a 256 *.zip | LC_ALL=C sort -k2 > swift-apps.sha256
+          cat swift-apps.sha256
+      - name: Upload artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: 8gent-swift-apps
+          path: swift-out/
+          if-no-files-found: error
 
   release:
     name: Attach to GitHub Release
-    needs: [build, attest, pack-npm, smoke-windows, smoke-linux, smoke-termux, smoke-linux-arm64]
+    needs: [build, attest, pack-npm, smoke-windows, smoke-linux, smoke-termux, smoke-linux-arm64, swift-apps]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Every gate above must pass; swift-apps is the one exception (#4862 G05): a
+    # failed Swift build ships the binaries without the macOS app zips.
+    if: >-
+      ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v')
+      && needs.build.result == 'success' && needs.attest.result == 'success'
+      && needs.pack-npm.result == 'success' && needs.smoke-windows.result == 'success'
+      && needs.smoke-linux.result == 'success' && needs.smoke-termux.result == 'success'
+      && needs.smoke-linux-arm64.result == 'success' }}
     permissions:
       contents: write
     steps:
@@ -513,6 +542,13 @@ jobs:
         with:
           name: 8gent-binaries
           path: upload
+
+      - name: Download the macOS apps (unsigned)
+        if: needs.swift-apps.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: 8gent-swift-apps
+          path: swift-apps
 
       # #3326: release.yml owns the release. It creates it as a draft with the
       # npm tarball and SHA256SUMS and publishes it only once those are on it.
@@ -538,6 +574,13 @@ jobs:
           bash scripts/release-require-draft.sh "$TAG"
           # installers.sha256 is a build-time input, not a release asset.
           mv upload/installers.sha256 "$RUNNER_TEMP/installers.sha256"
+          # #4862 G05: the unsigned macOS app zips ride along, with their sums.
+          if [ -f swift-apps/swift-apps.sha256 ]; then
+            cp swift-apps/*-unsigned.zip upload/
+            cat swift-apps/swift-apps.sha256 >> "$RUNNER_TEMP/installers.sha256"
+          else
+            echo "::warning::the macOS apps did not build; this release has no 8gent Computer or Lil Eight zip"
+          fi
           gh release upload "$TAG" upload/* --repo "$REPO" --clobber
 
           # Merge the installer checksums into the release's SHA256SUMS so one
@@ -600,7 +643,7 @@ jobs:
   # above opens (or comments on) one P0 issue, so it lands where people look.
   alarm:
     name: Open an issue when the release fails
-    needs: [build, attest, pack-npm, smoke-windows, smoke-linux, smoke-termux, smoke-linux-arm64, release, install-smoke]
+    needs: [build, attest, pack-npm, smoke-windows, smoke-linux, smoke-termux, smoke-linux-arm64, swift-apps, release, install-smoke]
     # Only a release tag raises the alarm; a dispatched dry run on a branch
     # reports its failure in the run itself.
     if: failure() && startsWith(github.ref, 'refs/tags/v')

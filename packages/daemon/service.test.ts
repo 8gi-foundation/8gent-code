@@ -163,6 +163,23 @@ describe("macOS launchd agent", () => {
 			state: "not-installed",
 		});
 	});
+
+	// #4862 G03: the macOS CI job installs under a per-run label, never com.8gent.daemon.
+	test("a per-run label names the plist, its Label key and every launchctl target", () => {
+		const ci: ServiceContext = { ...mac, home: "/tmp/run-home", label: "com.8gent.e2e.123-1" };
+		expect(launchdPlist(ci)).toContain("<string>com.8gent.e2e.123-1</string>");
+		expect(launchdPlist(ci)).not.toContain("com.8gent.daemon");
+		const steps = [
+			...planFor("install", ci),
+			...planFor("start", ci),
+			...planFor("stop", ci),
+			...planFor("uninstall", ci),
+		];
+		const text = JSON.stringify(steps);
+		expect(text).toContain("/tmp/run-home/Library/LaunchAgents/com.8gent.e2e.123-1.plist");
+		expect(text).toContain("gui/501/com.8gent.e2e.123-1");
+		expect(text).not.toContain("com.8gent.daemon");
+	});
 });
 
 describe("Linux systemd user unit", () => {
