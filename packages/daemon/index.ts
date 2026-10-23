@@ -253,6 +253,7 @@ export async function main(): Promise<void> {
 	// hands-free. Block-tier rules are unaffected: catastrophic bash (rm -rf /,
 	// etc.) and dangerous keys (cmd+q, logout) stay hard-denied. Opt-in only;
 	// unset the env to return to gated prompts. Mirrors `run.ts --yes`.
+	// In memory only, never saved to permissions.json (#4817).
 	if (process.env.EIGHT_AUTO_APPROVE === "1") {
 		try {
 			const perms = await import("../permissions");

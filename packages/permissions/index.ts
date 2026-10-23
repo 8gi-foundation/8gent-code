@@ -743,7 +743,15 @@ export class PermissionManager {
 		try {
 			if (fs.existsSync(this.configPath)) {
 				const data = fs.readFileSync(this.configPath, "utf-8");
-				return JSON.parse(data);
+				const parsed = JSON.parse(data) as PermissionConfig;
+				// autoApprove is a per-process switch (--yes, EIGHT_AUTO_APPROVE), never a
+				// saved preference (#4817). A file that says true is a leftover of the old
+				// bug: load it as false and rewrite it once, leaving every other key alone.
+				if (parsed && parsed.autoApprove) {
+					parsed.autoApprove = false;
+					this.rewriteInPlace(parsed);
+				}
+				return parsed;
 			}
 		} catch (err) {
 			console.warn(`Warning: Could not load permissions config: ${err}`);
@@ -765,7 +773,23 @@ export class PermissionManager {
 		if (!fs.existsSync(dir)) {
 			fs.mkdirSync(dir, { recursive: true });
 		}
-		fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2));
+		// Never persist the in-memory auto-approve switch (#4817).
+		fs.writeFileSync(
+			this.configPath,
+			JSON.stringify({ ...this.config, autoApprove: false }, null, 2),
+		);
+	}
+
+	/**
+	 * Rewrite the existing file in place: writeFileSync on an existing path keeps
+	 * its mode and follows a symlink, so neither is disturbed. Best effort.
+	 */
+	private rewriteInPlace(config: PermissionConfig): void {
+		try {
+			fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2));
+		} catch {
+			// Read-only file: the in-memory false still holds.
+		}
 	}
 
 	/**
@@ -1287,11 +1311,11 @@ export class PermissionManager {
 	}
 
 	/**
-	 * Set auto-approve mode
+	 * Set auto-approve mode for this process only. Never written to disk: a saved
+	 * true would approve every later session before it showed a card (#4817).
 	 */
 	setAutoApprove(enabled: boolean): void {
 		this.config.autoApprove = enabled;
-		this.saveConfig();
 	}
 
 	/**
