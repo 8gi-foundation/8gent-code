@@ -400,9 +400,7 @@ export function cutOffNotice(t: TurnState | null): string | null {
 	const lines = ["The last turn stopped before it finished."];
 	if (t.partial) lines.push(`What 8gent had written so far:\n${t.partial}`);
 	if (t.finished.length > 0)
-		lines.push(
-			`Finished, will not run again: ${t.finished.map((f) => label(f)).join(", ")}.`,
-		);
+		lines.push(`Finished, will not run again: ${t.finished.map((f) => label(f)).join(", ")}.`);
 	for (const c of t.open)
 		lines.push(`Started, no result: ${label(c)}. 8gent checks it before redoing it.`);
 	lines.push("/durable continue: continue where it stopped (the text above is kept).");
@@ -422,8 +420,7 @@ export function continuePrompt(t: TurnState, isReadOnly: (tool: string) => boole
 		out.push(`What you had written so far (keep it, do not start over):\n${t.partial}`);
 	if (t.finished.length > 0) {
 		out.push("These tool calls already finished. Do not run them again:");
-		for (const f of t.finished)
-			out.push(`- ${label(f)} (${f.ok ? "ok" : "failed"})`);
+		for (const f of t.finished) out.push(`- ${label(f)} (${f.ok ? "ok" : "failed"})`);
 	}
 	if (t.open.length > 0) {
 		out.push("These started but recorded no result:");
