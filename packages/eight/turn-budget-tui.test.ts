@@ -18,6 +18,8 @@ const ENV: Record<string, string> = {
 	EIGHT_TOOL_CAPABILITY_GATE: "0",
 	"8GENT_TWO_STAGE_COMPACT": "0",
 	EIGHT_TEXT_TOOLS: "1",
+	// These tests run long silent tool chains on purpose; the silent-call stop (#4794) is not under test.
+	EIGHT_SILENT_CALLS: "0",
 	EIGHT_TURN_BUDGET_MS: "2000",
 };
 let home: string;
