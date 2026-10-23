@@ -22,20 +22,27 @@ import {
 	leaveOneOut,
 	leaveOneOutRows,
 	loadCalibration,
-	newestPerBackendModel,
 	logit,
 	modelSlug,
+	newestPerBackendModel,
 	rawFromCalibrated,
 	sigmoid,
 	toRawGuardOptions,
 	verdictFor,
 } from "./calibrate";
+import { fitLines, roundDown, roundUp } from "./eval/judge-set/fit-8j";
 import { DecideError } from "./types";
 
 // Under-confident but perfectly separated, like llama3.2:3b in the 2026-09-28 eval.
 const underConfident: Sample[] = [
-	...[0.25, 0.28, 0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.42, 0.45].map((p) => ({ p, destructive: true })),
-	...[0.07, 0.1, 0.12, 0.14, 0.15, 0.16, 0.18, 0.2, 0.21, 0.22].map((p) => ({ p, destructive: false })),
+	...[0.25, 0.28, 0.3, 0.32, 0.34, 0.36, 0.38, 0.4, 0.42, 0.45].map((p) => ({
+		p,
+		destructive: true,
+	})),
+	...[0.07, 0.1, 0.12, 0.14, 0.15, 0.16, 0.18, 0.2, 0.21, 0.22].map((p) => ({
+		p,
+		destructive: false,
+	})),
 ];
 
 describe("logit / sigmoid", () => {
@@ -55,11 +62,19 @@ describe("logit / sigmoid", () => {
 
 describe("applyCalibration", () => {
 	it("is the identity at temperature 1, bias 0", () => {
-		for (const p of [0.01, 0.3, 0.7]) expect(applyCalibration(p, { temperature: 1, bias: 0 })).toBeCloseTo(p, 12);
+		for (const p of [0.01, 0.3, 0.7])
+			expect(applyCalibration(p, { temperature: 1, bias: 0 })).toBeCloseTo(p, 12);
 	});
 	it("passes NaN through so the guard fails closed", () => {
 		expect(Number.isNaN(applyCalibration(Number.NaN, { temperature: 1, bias: 0 }))).toBe(true);
-		expect(calibratedVerdict(Number.NaN, { temperature: 1, bias: 0, blockAbove: 0.5, escalateBand: [0.4, 0.5] })).toBe("block");
+		expect(
+			calibratedVerdict(Number.NaN, {
+				temperature: 1,
+				bias: 0,
+				blockAbove: 0.5,
+				escalateBand: [0.4, 0.5],
+			}),
+		).toBe("block");
 	});
 });
 
@@ -145,7 +160,8 @@ describe("verdictFor matches guard.ts semantics", () => {
 		expect(verdictFor(0.39, t)).toBe("allow");
 	});
 	it("fails closed on invalid probabilities", () => {
-		for (const q of [Number.NaN, -0.1, 1.1, Number.POSITIVE_INFINITY]) expect(verdictFor(q, t)).toBe("block");
+		for (const q of [Number.NaN, -0.1, 1.1, Number.POSITIVE_INFINITY])
+			expect(verdictFor(q, t)).toBe("block");
 	});
 });
 
@@ -156,14 +172,17 @@ describe("toRawGuardOptions", () => {
 		for (let i = 1; i < 1000; i++) {
 			const p = i / 1000;
 			// Skip points within float noise of a boundary.
-			const nearEdge = [raw.escalateBand[0], raw.escalateBand[1]].some((b) => Math.abs(p - b) < 1e-9);
+			const nearEdge = [raw.escalateBand[0], raw.escalateBand[1]].some(
+				(b) => Math.abs(p - b) < 1e-9,
+			);
 			if (nearEdge) continue;
 			expect(verdictFor(p, raw)).toBe(calibratedVerdict(p, fit));
 		}
 	});
 	it("rawFromCalibrated inverts applyCalibration", () => {
 		const s = { temperature: 0.3, bias: 4 };
-		for (const p of [0.01, 0.1, 0.25, 0.4]) expect(rawFromCalibrated(applyCalibration(p, s), s)).toBeCloseTo(p, 9);
+		for (const p of [0.01, 0.1, 0.25, 0.4])
+			expect(rawFromCalibrated(applyCalibration(p, s), s)).toBeCloseTo(p, 9);
 	});
 });
 
@@ -189,6 +208,46 @@ describe("leaveOneOut", () => {
 	});
 });
 
+/**
+ * 8J's lines are raw pYes fitted on a tune split (eval/judge-set/fit-8j.ts), not Platt-scaled:
+ * refit them from the results file's tune rows and check the held-out fields against its test split.
+ */
+function reproduces8j(cal: Calibration): void {
+	const results = JSON.parse(fs.readFileSync(path.join(import.meta.dir, cal.fittedOn), "utf8")) as {
+		summary: { model: string; backend: string };
+		rows: Array<{ risky: boolean; split: string; p: number; rules: string }>;
+		test: {
+			n: number;
+			risky: number;
+			safe: number;
+			bashGuard: {
+				falseAllows: number;
+				safeBlocked: number;
+				riskyEscalated: number;
+				safeAsked: number;
+			};
+		};
+	};
+	expect(results.summary).toMatchObject({ model: cal.model, backend: "8j" });
+	expect(cal.temperature).toBe(1);
+	expect(cal.bias).toBe(0);
+	const tune = results.rows.filter((r) => r.split === "tune");
+	expect(tune.length).toBe(cal.n);
+	const lines = fitLines(tune);
+	expect(cal.escalateBand).toEqual([
+		roundDown(lines.escalateBand[0]),
+		roundUp(lines.escalateBand[1]),
+	]);
+	expect(cal.blockAbove).toBe(roundUp(lines.blockAbove));
+	const t = results.test;
+	expect(cal.heldOut.recall).toBeCloseTo((t.risky - t.bashGuard.falseAllows) / t.risky, 12);
+	expect(cal.heldOut.falseBlock).toBeCloseTo(t.bashGuard.safeBlocked / t.safe, 12);
+	expect(cal.heldOut.escalate).toBeCloseTo(
+		(t.bashGuard.riskyEscalated + t.bashGuard.safeAsked) / t.n,
+		12,
+	);
+}
+
 describe("checked-in calibration files", () => {
 	const files = fs.readdirSync(CALIBRATION_DIR).filter((f) => f.endsWith(".json"));
 	it("exist", () => {
@@ -196,16 +255,23 @@ describe("checked-in calibration files", () => {
 	});
 	for (const name of files) {
 		it(`${name} reproduces from its eval results`, () => {
-			const cal = JSON.parse(fs.readFileSync(path.join(CALIBRATION_DIR, name), "utf8")) as Calibration;
-			expect(["ollama", "llamacpp", "laya"]).toContain(cal.backend);
+			const cal = JSON.parse(
+				fs.readFileSync(path.join(CALIBRATION_DIR, name), "utf8"),
+			) as Calibration;
+			expect(["ollama", "llamacpp", "laya", "8j"]).toContain(cal.backend);
 			expect(name).toBe(`${cal.backend}-${modelSlug(cal.model)}.json`);
 			expect(loadCalibration(cal.model, cal.backend)).toEqual(cal);
-			const fitted = JSON.parse(fs.readFileSync(path.join(import.meta.dir, cal.fittedOn), "utf8")) as {
+			if (cal.backend === "8j") return reproduces8j(cal);
+			const fitted = JSON.parse(
+				fs.readFileSync(path.join(import.meta.dir, cal.fittedOn), "utf8"),
+			) as {
 				summary: { model: string; backend?: string };
 			};
 			expect(fitted.summary.model).toBe(cal.model);
 			expect(fitted.summary.backend ?? "ollama").toBe(cal.backend);
-			const results = JSON.parse(fs.readFileSync(path.join(import.meta.dir, cal.fittedOn), "utf8")) as {
+			const results = JSON.parse(
+				fs.readFileSync(path.join(import.meta.dir, cal.fittedOn), "utf8"),
+			) as {
 				rows: Array<{ destructive: boolean; pYes: number | null }>;
 			};
 			const samples = results.rows
@@ -228,12 +294,19 @@ describe("checked-in calibration files", () => {
 		const selene = "hf.co/AtlaAI/Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF:latest";
 		const viaOllama = loadCalibration(selene, "ollama");
 		const viaLlamaCpp = loadCalibration(selene, "llamacpp");
-		expect(viaOllama?.fittedOn).toBe("eval/results/2026-09-28-hf.co_AtlaAI_Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF_latest.json");
-		expect(viaLlamaCpp?.fittedOn).toBe("eval/results/2026-09-28-llamacpp-hf.co_AtlaAI_Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF_latest.json");
+		expect(viaOllama?.fittedOn).toBe(
+			"eval/results/2026-09-28-hf.co_AtlaAI_Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF_latest.json",
+		);
+		expect(viaLlamaCpp?.fittedOn).toBe(
+			"eval/results/2026-09-28-llamacpp-hf.co_AtlaAI_Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF_latest.json",
+		);
 		expect(loadCalibration("llama3.2:3b", "llamacpp")).toBeNull();
 	});
 	it("newestPerBackendModel keys on (backend, model); results without a backend are ollama", () => {
-		const entry = (file: string, model: string, date: string, backend?: string) => ({ file, data: { summary: { model, date, backend } } });
+		const entry = (file: string, model: string, date: string, backend?: string) => ({
+			file,
+			data: { summary: { model, date, backend } },
+		});
 		const picked = newestPerBackendModel([
 			entry("a.json", "m", "2026-09-28T11:00:00Z"),
 			entry("b.json", "m", "2026-09-28T12:00:00Z", "llamacpp"),
@@ -267,10 +340,14 @@ describe("loadCalibration rejects malformed files (guard keeps safe defaults)", 
 		heldOut: { recall: 1, falseBlock: 0, accuracy: 1, escalate: 0.1, method: "leave-one-out" },
 	};
 	const load = (body: unknown) => {
-		fs.writeFileSync(path.join(dir, calibrationFileName(backend, model)), typeof body === "string" ? body : JSON.stringify(body));
+		fs.writeFileSync(
+			path.join(dir, calibrationFileName(backend, model)),
+			typeof body === "string" ? body : JSON.stringify(body),
+		);
 		return loadCalibration(model, backend, dir);
 	};
-	const without = (key: string) => Object.fromEntries(Object.entries(valid).filter(([k]) => k !== key));
+	const without = (key: string) =>
+		Object.fromEntries(Object.entries(valid).filter(([k]) => k !== key));
 
 	it("accepts the well-formed control", () => {
 		expect(load(valid)).toEqual(valid as Calibration);
@@ -290,7 +367,10 @@ describe("loadCalibration rejects malformed files (guard keeps safe defaults)", 
 		["blockAbove exactly 1 (never blocks)", { ...valid, blockAbove: 1 }],
 		["blockAbove 0", { ...valid, blockAbove: 0, escalateBand: [0, 0.7] }],
 		["blockAbove negative", { ...valid, blockAbove: -0.1 }],
-		["blockAbove below the escalate band (allow overlaps block)", { ...valid, blockAbove: 0.1, escalateBand: [0.2, 0.7] }],
+		[
+			"blockAbove below the escalate band (allow overlaps block)",
+			{ ...valid, blockAbove: 0.1, escalateBand: [0.2, 0.7] },
+		],
 		["missing blockAbove", without("blockAbove")],
 		["band low below 0", { ...valid, escalateBand: [-0.1, 0.7] }],
 		["band high above 1", { ...valid, escalateBand: [0.2, 1.2] }],

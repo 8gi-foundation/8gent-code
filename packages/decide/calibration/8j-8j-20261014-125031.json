@@ -10,7 +10,7 @@
 	"heldOut": {
 		"recall": 0.9874213836477987,
 		"falseBlock": 0.03571428571428571,
-		"accuracy": 0.5882352941176471,
+		"accuracyAtHalf": 0.5882352941176471,
 		"escalate": 0.20320855614973263,
 		"method": "held-out-split"
 	},

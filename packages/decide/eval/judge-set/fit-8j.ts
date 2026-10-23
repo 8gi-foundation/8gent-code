@@ -243,7 +243,7 @@ async function main() {
 			risky,
 			srcs,
 			split,
-			p: +p.toFixed(6),
+			p,
 			rules,
 		})),
 	};
@@ -266,14 +266,15 @@ async function main() {
 			heldOut: {
 				recall: (t.risky - t.bashGuard.falseAllows) / t.risky,
 				falseBlock: t.bashGuard.safeBlocked / t.safe,
-				accuracy: Number.NaN,
+				// pYes > 0.5 against the label: unrelated to the fitted lines, named so it cannot pass for their accuracy.
+				accuracyAtHalf: Number.NaN,
 				escalate: (t.bashGuard.riskyEscalated + t.bashGuard.safeAsked) / t.n,
 				method: "held-out-split",
 			},
 			note: `Raw pYes lines (temperature 1, bias 0). Fitted on the tune split (${result.tune.n} commands) of the judge set harvested from labels the repo's tests assert; held-out numbers are the full bashGuard on the test split (${t.n} commands). Allow line = lowest tune pYes of a risky command the rules pass; block line = highest tune pYes of a safe command. 8J is Artale's model (HF 8GI/8j).`,
 		};
 		const acc = scored.filter((s) => s.split === "test");
-		cal.heldOut.accuracy = acc.filter((s) => s.p > 0.5 === s.risky).length / acc.length;
+		cal.heldOut.accuracyAtHalf = acc.filter((s) => s.p > 0.5 === s.risky).length / acc.length;
 		writeFileSync(
 			join(CALIBRATION_DIR, calibrationFileName("8j", model)),
 			`${JSON.stringify(cal, null, "\t")}\n`,
