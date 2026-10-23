@@ -62,6 +62,7 @@ export const BLOCK_RULES: ReadonlySet<string> = new Set([
 	"truncate_sensitive_file",
 	"kill_all_or_launchd",
 	"kill_system_process",
+	"nesting_too_deep",
 	"keychain_delete",
 	"keychain_dump",
 	"fork_bomb",
@@ -95,17 +96,117 @@ const MANIFEST_RE =
  */
 const DOTFILE_EXTRA_RE =
 	/(^|\/)(\.zshenv|\.zlogin|\.bash_login|\.bash_logout|\.inputrc|\.vimrc|\.tmux\.conf|\.ssh\/config)$/;
-const NET_SINK =
-	/(?:^|[\s|;&(])(?:curl\b[^|;&\n]*(?:\s-d\b|\s--data|\s-F\b|\s--form|\s-T\b|\s--upload-file|\s-X\s*(?:POST|PUT|PATCH))|nc\b|ncat\b|netcat\b|scp\b|sftp\b|ftp\b|telnet\b|wget\b[^|;&\n]*--post|rsync\b[^|;&\n]*\S+:\S*)/;
-const SECRET_READ = new RegExp(
-	[
-		String.raw`(?:(?:cat|less|head|tail|base64|xxd|od|strings|tar|zip|gpg)\s+[^|;&\n]*(?:\.env\b|\.ssh/id_\w+(?!\w|\.pub)|id_rsa(?!\.pub)|id_ed25519(?!\.pub)|\.aws/credentials|\.netrc|\.git-credentials|\.npmrc|keychain-db))`,
-		String.raw`(?:^|[|;&\s(])(?:env|printenv|set)\s*(?:\||>)`,
-		String.raw`@[^\s"']*(?:\.env\b|\.ssh/|id_rsa|id_ed25519|credentials|\.netrc)`,
-		String.raw`(?:scp|rsync|sftp)\s+(?:-\w+\s+(?:\S+\s+)?)*[^\s|;&]*(?:\.env\b|\.ssh/id_\w+(?!\w|\.pub)|id_rsa(?!\.pub)|\.aws/credentials)\S*\s+\S+:`,
-		String.raw`security\s+find-(?:generic|internet)-password[^|;&\n]*-w[^\n]*\|\s*(?:curl|nc|ssh)`,
-	].join("|"),
-);
+/**
+ * The text scans below were one regex each with `[^|;&\n]*` after a keyword. Every keyword
+ * occurrence rescanned to the end of its segment, so `cat cat cat ...` took quadratic time
+ * (minutes on a few MB). Each is now: split into segments once, find the first keyword in a
+ * segment, test the tail of that segment once. Same verdicts: the tail of the first keyword
+ * holds every tail of a later keyword in the same segment.
+ */
+const SEG_SPLIT = /[|;&\n]/;
+const NET_SINK_SIMPLE = /(?:^|[\s|;&(])(?:nc|ncat|netcat|scp|sftp|ftp|telnet)\b/;
+const NET_CURL_START = /(?:^|[\s|;&(])curl\b/;
+const NET_CURL_TAIL =
+	/\s-d\b|\s--data|\s-F\b|\s--form|\s-T\b|\s--upload-file|\s-X\s*(?:POST|PUT|PATCH)/;
+const NET_WGET_START = /(?:^|[\s|;&(])wget\b/;
+const NET_RSYNC_START = /(?:^|[\s|;&(])rsync\b/;
+
+/** Same as the old NET_SINK regex, in linear time. */
+function hasNetSink(view: string): boolean {
+	if (NET_SINK_SIMPLE.test(view)) return true;
+	for (const seg of view.split(SEG_SPLIT)) {
+		const c = NET_CURL_START.exec(seg);
+		if (c && NET_CURL_TAIL.test(seg.slice(c.index + c[0].length))) return true;
+		const w = NET_WGET_START.exec(seg);
+		if (w && seg.indexOf("--post", w.index + w[0].length) >= 0) return true;
+		const r = NET_RSYNC_START.exec(seg);
+		if (r && /\S:/.test(seg.slice(r.index + r[0].length))) return true;
+	}
+	return false;
+}
+
+const SECRET_READER = /(?:cat|less|head|tail|base64|xxd|od|strings|tar|zip|gpg)\s/;
+const SECRET_FILE =
+	/\.env\b|\.ssh\/id_\w+(?!\w|\.pub)|id_rsa(?!\.pub)|id_ed25519(?!\.pub)|\.aws\/credentials|\.netrc|\.git-credentials|\.npmrc|keychain-db/;
+const SECRET_ENV_DUMP = /(?:^|[|;&\s(])(?:env|printenv|set)\s*(?:\||>)/;
+const SECRET_AT_FILE = /\.env\b|\.ssh\/|id_rsa|id_ed25519|credentials|\.netrc/;
+const SECRET_KEYCHAIN = /security\s+find-(?:generic|internet)-password/g;
+const SECRET_PIPE_NET = /\|\s*(?:curl|nc|ssh)/g;
+const SCP_WORD = /(?:scp|rsync|sftp)$/;
+const SCP_SECRET_WORD =
+	/^[^|;&]*?(?:\.env\b|\.ssh\/id_\w+(?!\w|\.pub)|id_rsa(?!\.pub)|\.aws\/credentials)/;
+/** How many words after scp, rsync or sftp the option parser reads. */
+const SCP_LOOKAHEAD = 64;
+
+/**
+ * `scp [-o [value]]... <path to a secret> <host:...>`: a secret named as the source of a copy to
+ * a remote end. An option may or may not take a value, so both readings are followed (the old
+ * regex backtracked over them, exponentially).
+ */
+function scpSecretToRemote(words: string[], k: number): boolean {
+	const reach = new Array<boolean>(SCP_LOOKAHEAD + 3).fill(false);
+	reach[0] = true;
+	for (let o = 0; o <= SCP_LOOKAHEAD; o++) {
+		const w = words[k + 1 + o];
+		if (!reach[o] || w === undefined) continue;
+		if (SCP_SECRET_WORD.test(w)) {
+			const next = words[k + 2 + o];
+			if (next !== undefined && next.indexOf(":", 1) > 0) return true;
+		}
+		if (/^-\w+$/.test(w)) {
+			reach[o + 1] = true;
+			reach[o + 2] = true;
+		}
+	}
+	// Still inside an option run past the lookahead: not read, so not trusted. Fail closed.
+	return reach[SCP_LOOKAHEAD + 1] === true || reach[SCP_LOOKAHEAD + 2] === true;
+}
+
+/** Same as the old SECRET_READ regex, in linear time. */
+function hasSecretRead(view: string): boolean {
+	if (SECRET_ENV_DUMP.test(view)) return true;
+	for (const seg of view.split(SEG_SPLIT)) {
+		const m = SECRET_READER.exec(seg);
+		if (m && SECRET_FILE.test(seg.slice(m.index + m[0].length))) return true;
+	}
+	// `@file` upload arguments: one run of non-space, non-quote characters at a time.
+	if (view.includes("@")) {
+		for (const run of view.split(/[\s"']+/)) {
+			const a = run.indexOf("@");
+			if (a >= 0 && SECRET_AT_FILE.test(run.slice(a + 1))) return true;
+		}
+	}
+	if (/scp|rsync|sftp/.test(view)) {
+		const words = view.split(/\s+/);
+		for (let k = 0; k < words.length - 1; k++)
+			if (SCP_WORD.test(words[k] as string) && scpSecretToRemote(words, k)) return true;
+	}
+	if (view.includes("security")) {
+		for (const line of view.split("\n")) {
+			if (!line.includes("security")) continue;
+			let lastPipe = -1;
+			for (const p of line.matchAll(SECRET_PIPE_NET)) lastPipe = p.index ?? -1;
+			if (lastPipe < 0) continue;
+			// Pointers only move forward, so a line full of matches is still one pass.
+			let nextW = -2;
+			let nextStop = -2;
+			for (const m of line.matchAll(SECRET_KEYCHAIN)) {
+				const tail = (m.index ?? 0) + m[0].length;
+				if (nextW < tail) {
+					nextW = line.indexOf("-w", tail);
+					if (nextW < 0) break;
+				}
+				if (nextStop < tail) {
+					const stop = /[|;&]/g;
+					stop.lastIndex = tail;
+					nextStop = stop.exec(line)?.index ?? Number.POSITIVE_INFINITY;
+				}
+				if (nextW < nextStop && lastPipe >= nextW + 2) return true;
+			}
+		}
+	}
+	return false;
+}
 const REMOTE_EXEC_RE =
 	/(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*["']?\$\((?:curl|wget)\b|<\((?:curl|wget)\b|\beval\s+["']?\$\((?:curl|wget)\b/;
 
@@ -511,6 +612,8 @@ const SQL_DESTRUCTIVE =
 const GH_DELETE =
 	/^(repo|release|issue|label|secret|variable|run|cache|gist|ssh-key|gpg-key|project|codespace|ruleset|extension)$/;
 const MAX_DEPTH = 6;
+/** `xargs xargs xargs ...` deeper than this is not a real command: it escalates. */
+const MAX_XARGS_CHAIN = 100;
 
 // ------------------------------------------------------------------ result
 
@@ -646,8 +749,9 @@ function assignedValues(name: string, value: string, r: Collector): string[] | n
 
 /** Record same-line assignments and `cd` targets, after the segment itself is analysed. */
 function trackShellState(tIn: string[], r: Collector): void {
-	let t = tIn;
-	while (t.length && CONTROL.has(t[0])) t = t.slice(1);
+	let skip = 0;
+	while (skip < tIn.length && CONTROL.has(tIn[skip] as string)) skip++;
+	const t = skip ? tIn.slice(skip) : tIn;
 	if (!t.length) return;
 	const declared = DECLARERS.has(t[0]);
 	const words = declared ? t.slice(1).filter((w) => !w.startsWith("-")) : t;
@@ -1099,13 +1203,13 @@ function ruleRm(b: string, args: string[], r: Collector): void {
 }
 
 function ruleGit(args: string[], r: Collector): void {
-	let a = [...args];
-	while (a.length && a[0].startsWith("-")) {
-		a =
-			["-C", "-c", "--git-dir", "--work-tree"].includes(a[0]) && a.length > 1
-				? a.slice(2)
-				: a.slice(1);
-	}
+	let k = 0;
+	while (k < args.length && (args[k] as string).startsWith("-"))
+		k +=
+			["-C", "-c", "--git-dir", "--work-tree"].includes(args[k] as string) && args.length - k > 1
+				? 2
+				: 1;
+	const a = args.slice(k);
 	if (!a.length) return;
 	const [sub, ...rest] = a;
 	if (sub === "push") {
@@ -1358,46 +1462,63 @@ function ruleRedirects(seg: string, r: Collector): void {
 }
 
 /** `wrappers` false: drop only leading assignments, control words and `(`/`{`, keep env, sudo, ... */
-function stripWrappers(t: string[], wrappers = true): string[] {
+function stripWrappers(tIn: string[], wrappers = true): string[] {
+	// An index into tIn, never a slice per word: a long run of control words or `(` stays linear.
+	let i = 0;
+	let head: string | null = null; // replaces tIn[i] after a leading `(` or `{` is removed
+	const len = () => tIn.length - i;
+	const at = () => head ?? (tIn[i] as string);
+	const drop = (n = 1) => {
+		i += n;
+		head = null;
+	};
+	const rest = () => {
+		const out = tIn.slice(i);
+		if (head !== null && out.length) out[0] = head;
+		return out;
+	};
 	let changed = true;
-	while (t.length && changed) {
+	while (len() > 0 && changed) {
 		changed = false;
-		while (t.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(t[0])) {
-			t = t.slice(1);
+		while (len() > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(at())) {
+			drop();
 			changed = true;
 		}
-		while (t.length && CONTROL.has(t[0])) {
-			if (t[0] === "for" || t[0] === "select" || t[0] === "case") return [];
-			t = t.slice(1);
+		while (len() > 0 && CONTROL.has(at())) {
+			if (at() === "for" || at() === "select" || at() === "case") return [];
+			drop();
 			changed = true;
 		}
-		if (t.length) {
-			const stripped = t[0].replace(/^[({]+/, "");
-			if (stripped !== t[0] && stripped) {
-				t = [stripped, ...t.slice(1)];
+		if (len() > 0) {
+			const stripped = at().replace(/^[({]+/, "");
+			if (stripped !== at() && stripped) {
+				head = stripped;
 				changed = true;
 			}
 		}
-		if (wrappers && t.length && WRAPPERS.has(t[0])) {
-			const w = t[0];
-			t = t.slice(1);
-			if (w === "command" && (t[0] === "-v" || t[0] === "-V")) return ["which", ...t.slice(1)];
-			if ((w === "timeout" || w === "gtimeout") && t.length) {
-				while (t.length && t[0].startsWith("-")) t = t.slice(1);
-				t = t.slice(1);
+		if (wrappers && len() > 0 && WRAPPERS.has(at())) {
+			const w = at();
+			drop();
+			if (w === "command" && (at() === "-v" || at() === "-V")) {
+				drop();
+				return ["which", ...rest()];
+			}
+			if ((w === "timeout" || w === "gtimeout") && len() > 0) {
+				while (len() > 0 && at().startsWith("-")) drop();
+				drop();
 			} else if (w === "nice") {
-				while (t.length && t[0].startsWith("-")) t = t.slice(t[0] === "-n" ? 2 : 1);
+				while (len() > 0 && at().startsWith("-")) drop(at() === "-n" ? 2 : 1);
 			} else if (w === "sudo" || w === "doas") {
-				while (t.length && t[0].startsWith("-"))
-					t = t.slice(["-u", "-g", "-C", "-p"].includes(t[0]) ? 2 : 1);
+				while (len() > 0 && at().startsWith("-"))
+					drop(["-u", "-g", "-C", "-p"].includes(at()) ? 2 : 1);
 			} else if (["env", "caffeinate", "arch", "stdbuf"].includes(w)) {
-				while (t.length && t[0].startsWith("-"))
-					t = t.slice(["-u", "-C", "-S", "-t", "-w"].includes(t[0]) ? 2 : 1);
+				while (len() > 0 && at().startsWith("-"))
+					drop(["-u", "-C", "-S", "-t", "-w"].includes(at()) ? 2 : 1);
 			}
 			changed = true;
 		}
 	}
-	return t;
+	return rest();
 }
 
 function analyseTokens(
@@ -1406,6 +1527,8 @@ function analyseTokens(
 	prevBin: string | null,
 	r: Collector,
 	depth: number,
+	/** Leading `xargs` words already unwrapped: a chain of them is bounded, not recursed without limit. */
+	xargsDepth = 0,
 ): string | null {
 	const t = stripWrappers(tIn);
 	if (!t.length) return null;
@@ -1414,10 +1537,15 @@ function analyseTokens(
 	if (b.startsWith("$") || b.startsWith("<")) return b;
 
 	if (b === "xargs") {
-		let a = [...args];
-		while (a.length && a[0].startsWith("-"))
-			a = a.slice(["-n", "-I", "-P", "-L", "-d", "-s", "-E", "-J"].includes(a[0]) ? 2 : 1);
-		return a.length ? analyseTokens(a, piped, prevBin, r, depth) : "xargs";
+		let k = 0;
+		while (k < args.length && (args[k] as string).startsWith("-"))
+			k += ["-n", "-I", "-P", "-L", "-d", "-s", "-E", "-J"].includes(args[k] as string) ? 2 : 1;
+		const a = args.slice(k);
+		if (a.length && xargsDepth >= MAX_XARGS_CHAIN) {
+			r.d("nesting_too_deep");
+			return b;
+		}
+		return a.length ? analyseTokens(a, piped, prevBin, r, depth, xargsDepth + 1) : "xargs";
 	}
 	if (SHELLS.has(b)) {
 		const idx = args.findIndex((a) => a === "-c" || /^-\w*c$/.test(a));
@@ -1431,15 +1559,16 @@ function analyseTokens(
 		return b;
 	}
 	if (b === "ssh" || b === "mosh") {
-		let a = [...args];
-		while (a.length) {
-			if (a[0].startsWith("-")) {
-				a = a.slice(/^-[bcDEeFIiJLlmOopQRSWw]$/.test(a[0]) ? 2 : 1);
+		let k = 0;
+		while (k < args.length) {
+			if ((args[k] as string).startsWith("-")) {
+				k += /^-[bcDEeFIiJLlmOopQRSWw]$/.test(args[k] as string) ? 2 : 1;
 				continue;
 			}
-			a = a.slice(1); // host
+			k++; // host
 			break;
 		}
+		const a = args.slice(k);
 		if (a.length) analyse(a.join(" "), r, depth + 1);
 		return b;
 	}
@@ -1518,7 +1647,8 @@ function analyseTokens(
 			const idx = args.findIndex((a) => a === "-exec" || a === "-execdir" || a === "-ok");
 			if (idx >= 0) {
 				const inner = args.slice(idx + 1).filter((a) => ![";", "+", "\\;", "{}"].includes(a));
-				analyseTokens(inner, false, null, r, depth + 1);
+				if (depth + 1 > MAX_DEPTH) r.d("nesting_too_deep");
+				else analyseTokens(inner, false, null, r, depth + 1);
 			}
 		}
 	} else if (["cp", "mv", "ditto", "install"].includes(b)) {
@@ -1638,8 +1768,8 @@ function analyse(text: string, r: Collector, depth = 0): void {
 	if (CONDITIONAL_RE.test(maskQuotes(body))) r.conditional = true;
 	if (REMOTE_EXEC_RE.test(view)) r.d("remote_code_substituted_into_shell");
 	if (hasForkBomb(view)) r.d("fork_bomb");
-	if (SECRET_READ.test(view)) r.secretRead = true;
-	if (NET_SINK.test(view) || PIPE_TO_SSH.test(view)) r.netSink = true;
+	if (hasSecretRead(view)) r.secretRead = true;
+	if (hasNetSink(view) || PIPE_TO_SSH.test(view)) r.netSink = true;
 
 	for (const { before, body: doc } of docs) {
 		const segs = splitSegments(before).segs;
