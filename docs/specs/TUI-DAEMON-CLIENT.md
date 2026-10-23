@@ -401,13 +401,15 @@ slice 3 lands, a command that needs a card is refused in a daemon-run turn
 ### Slice 2: the Telegram home session (decided 23 Oct 2026, 8EO relaying James)
 
 Pulled ahead of approvals: this is "open the TUI and your 8gents already have
-Telegram". About 300 lines of code plus tests. Every daemon change in it gets 8SO
-review, so it is built small and the PR carries a threat note.
+Telegram". About 1,400 lines with tests (PR #4838, stacked on #4830). Every daemon change in it
+gets 8SO review, so the PR carries a threat note.
 
 What it does:
-- **Home session.** The daemon treats the session bound to the Telegram bridge's
-  socket as home. `session:attach { sessionId: "home" }` (or its raw id) joins it.
-  It is never listed, never written to the session store, never restored from disk.
+- **Home session.** The Telegram bridge declares which of its sessions carries
+  the conversation (`home:declare`, honoured only from the socket that proved the bridge
+  secret; the bridge holds two Telegram sessions in its default mode and the adapter's is
+  the conversation). The latest declaration is home. `session:attach { sessionId: "home" }`
+  (or its raw id) joins it. It is never listed, never written to the session store, never restored from disk.
 - **Who may attach.** Loopback, and a socket that proved the operator token with an
   `auth` frame. Nothing else: not a non-loopback peer, not a loopback socket
   without the token, not by listing or guessing the id.
@@ -415,7 +417,7 @@ What it does:
   never in a log or a URL) when none is configured. It gates the home session. It
   does not gate the rest of the gateway by default, because the Mac app and other
   local clients connect without one today; `EIGHT_DAEMON_REQUIRE_TOKEN=1` makes it
-  gate everything. A configured `daemon.authToken` keeps its present meaning and is
+  gate everything (open question 4). A configured `daemon.authToken` keeps its present meaning and is
   also the operator token.
 - **Discovery.** The daemon writes `<dataDir>/daemon.json` (0600): url, pid, data
   dir, no token. The TUI scans `~/.8gent/daemon.json` and `~/.8gent/*/daemon.json`,
