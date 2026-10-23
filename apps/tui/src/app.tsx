@@ -413,6 +413,7 @@ import {
 	type PermissionModeHolder,
 	createPermissionHolder,
 	nextPermissionMode,
+	permissionModeLabel,
 	setHolderMode,
 	systemOneEnvFor,
 } from "../../../packages/permissions/permission-mode.js";
@@ -465,6 +466,7 @@ import {
 	retryPrompt,
 	setDurableEnabled,
 	setDurableSession,
+	wasInterrupted,
 } from "../../../packages/specifications/session/durable-ledger.js";
 import {
 	durableResumeNotice,
@@ -1682,19 +1684,16 @@ export function App({
 	// A saved yes to the one yolo question (yolo-pref.ts) also starts tabs in
 	// Infinite, held for the session. Read once; a change lives in this ref.
 	const yoloRef = useRef(readYoloChoice());
-	// A resume after an interrupted turn (a kill, a dropped connection) never
-	// returns to the mode the crash happened in: it starts in the stricter of that
-	// and Ask, and asks once to go back (#4821). A fresh start is unchanged.
-	const [resumeStart] = useState(() =>
-		resumeLaunchMode({
-			launch: isInfiniteMode() || yoloRef.current === "yes" ? "infinite" : "ask",
-			interrupted:
-				!!sessionResume &&
-				(lastTurn(sessionResume) !== null || interruptedCalls(sessionResume).length > 0),
-		}),
+	const [launchPermMode] = useState<PermissionMode>(() =>
+		isInfiniteMode() || yoloRef.current === "yes" ? "infinite" : "ask",
 	);
-	const launchPermMode: PermissionMode = resumeStart.mode;
-	const resumeAskRef = useRef(resumeStart.clamped);
+	// A resume after an interrupted turn drops the tab to Ask and asks once to go
+	// back (#4821). Decided from the resolved session id, in the effect on
+	// activeSessionId, so every resume path (id, name, prefix, picker, /session
+	// resume, continue-last, import) goes through it.
+	const resumeAskRef = useRef(false);
+	const resumeYoloRef = useRef(false);
+	const resumeClampedRef = useRef<PermissionMode | null>(null);
 	const permHoldersRef = useRef(new Map<string, PermissionModeHolder>());
 	const permHolderFor = useCallback(
 		(tabId: string): PermissionModeHolder => {
@@ -2157,14 +2156,15 @@ export function App({
 			},
 		},
 		{
-			question: resumeReturnQuestion(yoloRef.current === "yes"),
-			// Not asked when the person already moved this tab off Ask themselves.
+			question: resumeReturnQuestion(resumeYoloRef.current),
+			// Not asked when the person already moved this tab off the clamped mode themselves.
 			needed: () =>
-				resumeAskRef.current && permHolderFor(activeTabIdRef.current).mode === launchPermMode,
+				resumeAskRef.current &&
+				permHolderFor(activeTabIdRef.current).mode === resumeClampedRef.current,
 			// The saved yolo preference is never rewritten by this answer.
 			answer: (yes) => {
 				resumeAskRef.current = false;
-				if (yes) setTabPermMode(activeTabIdRef.current, "infinite", yoloRef.current === "yes");
+				if (yes) setTabPermMode(activeTabIdRef.current, "infinite", resumeYoloRef.current);
 			},
 		},
 	);
@@ -2794,7 +2794,20 @@ export function App({
 	useEffect(() => {
 		const denied = getPermissionManager().setDenialSession(activeSessionId);
 		if (denied.length > 0) addSystemMessage(denialNotice(denied).join("\n"));
-	}, [activeSessionId, addSystemMessage]);
+		// An interrupted turn: the active tab drops to the stricter of its mode and Ask.
+		if (!activeSessionId || !wasInterrupted(activeSessionId)) return;
+		const tab = activeTabIdRef.current;
+		const holder = permHolderFor(tab);
+		const start = resumeLaunchMode({ launch: holder.mode, interrupted: true });
+		if (!start.clamped) return;
+		resumeYoloRef.current = holder.persistent === true;
+		resumeClampedRef.current = start.mode;
+		resumeAskRef.current = true;
+		setTabPermMode(tab, start.mode);
+		addSystemMessage(
+			`The last turn in this session was cut off, so this tab resumed in ${permissionModeLabel(start.mode)}. You will be asked once to go back.`,
+		);
+	}, [activeSessionId, addSystemMessage, permHolderFor, setTabPermMode]);
 	const submitRef = useRef<((text: string) => Promise<void>) | null>(null);
 
 	// Android (#4706): spoken replies via termux-tts-speak; a missing tool says so in the chat, not on stderr.

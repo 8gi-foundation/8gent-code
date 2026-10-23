@@ -369,6 +369,11 @@ export function interruptedCalls(key: string): IntentRecord[] {
 	return recs.filter((r): r is IntentRecord => r.k === "intent" && !closed.has(r.id));
 }
 
+/** True when the session's last turn was cut off: no end record, or a call with no result (#4821). */
+export function wasInterrupted(key: string): boolean {
+	return lastTurn(key) !== null || interruptedCalls(key).length > 0;
+}
+
 export interface ResumePlan {
 	/** Read-only calls: safe to run again, nothing to ask. */
 	rerunSafe: IntentRecord[];

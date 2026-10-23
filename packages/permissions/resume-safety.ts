@@ -18,6 +18,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { scrub } from "../eight/secret-scanner";
 import { writeFileAtomic } from "./atomic-write";
+import { commandAfterCdPrefix } from "./cd-prefix";
 import { type PermissionMode, stricterMode } from "./permission-mode";
 
 // ── C2: the mode a resume starts in ──────────────────────────────────
@@ -54,7 +55,7 @@ export function resumeReturnQuestion(yolo: boolean): string {
 // ── C3: the denial ledger ────────────────────────────────────────────
 
 export interface DeniedCall {
-	/** sha256 of the lowercased, trimmed command. The command itself is never stored. */
+	/** sha256 of the command, lowercased, whitespace collapsed, a leading cd prefix dropped. The command itself is never stored. */
 	fp: string;
 	/** What the person sees: the command, scrubbed of URL credentials and queries, cut to 120. */
 	hint: string;
@@ -68,7 +69,11 @@ export const MAX_DENIAL_FILES = 100;
 const SAFE_KEY = /^[A-Za-z0-9._-]+$/;
 
 export function denialFingerprint(command: string): string {
-	return createHash("sha256").update(command.toLowerCase().trim()).digest("hex").slice(0, 32);
+	// The same call spelled with extra spaces or a leading `cd <dir> &&` is the same call.
+	let bare = commandAfterCdPrefix(command, "/");
+	bare = bare.replace(/^\s*cd[ \t]+[^;&\n]+?[ \t]*&&[ \t]*/, "");
+	const norm = bare.toLowerCase().replace(/\s+/g, " ").trim();
+	return createHash("sha256").update(norm).digest("hex").slice(0, 32);
 }
 
 export function denialHint(command: string): string {

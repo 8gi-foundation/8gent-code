@@ -2,7 +2,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendRecord, interruptedCalls, lastTurn } from "../specifications/session/durable-ledger";
+import { SessionManager } from "../eight/session-manager";
+import { appendRecord, wasInterrupted } from "../specifications/session/durable-ledger";
 import { PermissionManager } from "./index";
 import {
 	createPermissionHolder,
@@ -80,7 +81,7 @@ describe("C2: a resume after an interrupted turn starts in the stricter mode", (
 			key: "killed-1:c1",
 			at,
 		});
-		const interrupted = (key: string) => lastTurn(key) !== null || interruptedCalls(key).length > 0;
+		const interrupted = wasInterrupted;
 		expect(interrupted("killed-1")).toBe(true);
 		expect(
 			resumeLaunchMode({ launch: "infinite", interrupted: interrupted("killed-1") }).mode,
@@ -109,6 +110,39 @@ describe("C2: a resume after an interrupted turn starts in the stricter mode", (
 			mode: "ask",
 			clamped: true,
 		});
+	});
+});
+
+describe("C2 holds on every resume path, decided from the resolved session id", () => {
+	test("by name, by id prefix, by exact id and through openStoredSession all start in Ask", () => {
+		process.env.HOME = data;
+		const mgr = new SessionManager(join(data, "sessions"));
+		const info = mgr.create({ name: "nightly-deploy" });
+		const at = new Date().toISOString();
+		appendRecord(info.id, { k: "turn", at, msg: "go" });
+		appendRecord(info.id, {
+			k: "intent",
+			id: "c1",
+			tool: "run_command",
+			argsHash: "h",
+			key: `${info.id}:c1`,
+			at,
+		});
+		const resolved = [
+			mgr.resume("nightly")?.id, // by name prefix
+			mgr.resume(info.id.slice(0, 4))?.id, // by id prefix
+			mgr.resume(info.id)?.id, // by exact id
+			mgr.get(info.id)?.id, // openStoredSession: picker, import, history
+		];
+		for (const id of resolved) {
+			expect(id).toBe(info.id);
+			expect(
+				resumeLaunchMode({ launch: "infinite", interrupted: wasInterrupted(id as string) }),
+			).toEqual({
+				mode: "ask",
+				clamped: true,
+			});
+		}
 	});
 });
 
@@ -158,6 +192,25 @@ describe("C3: a denied call is not re-run on resume without a fresh decision", (
 			true,
 		);
 		expect(asked).toBe(1);
+	});
+
+	test("extra spaces and a leading cd do not slip past a denial", async () => {
+		const before = manager();
+		before.setDenialSession("sess-var");
+		registerTuiApprovalHandler(async () => "deny");
+		await before.requestPermission("run", "x", "deploytool --apply");
+		registerTuiApprovalHandler(null);
+		process.env.EIGHT_HEADLESS = "1";
+		const after = manager();
+		after.setDenialSession("sess-var");
+		after.enableInfiniteMode();
+		after.setAutoApprove(true);
+		for (const spelling of [
+			"deploytool  --apply",
+			"cd /tmp && deploytool --apply",
+			"DeployTool\t--apply",
+		])
+			expect(await after.requestPermission("run", "x", spelling)).toBe(false);
 	});
 
 	test("an unrelated command in the same resumed session is not affected", async () => {
