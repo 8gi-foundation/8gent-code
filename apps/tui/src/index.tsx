@@ -25,6 +25,7 @@ import React from "react";
 // bypass each package's documented API. Suppressed by design.
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { enableInfiniteMode } from "../../../packages/permissions/index.js";
+import { setDurableEnabled } from "../../../packages/specifications/session/durable-ledger.js";
 import { App } from "./app.js";
 import { startMouse } from "./lib/mouse-wiring.js";
 import { ensureTerminalSize } from "./lib/terminal-size.js";
@@ -46,6 +47,8 @@ if (hasInfiniteFlag) {
 	enableInfiniteMode();
 	console.log("\x1b[33m[∞] Infinite Loop mode enabled\x1b[0m\n");
 }
+
+if (parsed.durable) setDurableEnabled(true);
 
 const command = parsed.positional[0] || "repl";
 const passthroughArgs = parsed.positional.slice(1);

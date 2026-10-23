@@ -14,6 +14,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { observeSessionEntry } from "./durable-ledger.js";
 import type {
 	ContentPart,
 	DetailedTokenUsage,
@@ -132,6 +133,8 @@ export class SessionWriter {
 
 	private write(entry: SessionEntry): void {
 		if (!this.persist) return;
+		// Durable turns (docs/specs/DURABLE-TURNS.md): intent before a tool runs, effect after.
+		observeSessionEntry(entry);
 		const line = `${JSON.stringify(entry)}\n`;
 		// The session log is a record, never a reason to fail a turn (#4774): a lost
 		// fd is reopened by path; if the file cannot be written at all, the line is skipped.

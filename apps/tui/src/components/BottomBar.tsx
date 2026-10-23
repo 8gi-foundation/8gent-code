@@ -47,6 +47,8 @@ interface BottomBarProps {
 	mode: FooterMode;
 	/** ADHD mode is on: a footer segment (the context rail it lived in is gone, #3238). */
 	adhd?: boolean;
+	/** Durable turns are on: a footer segment (docs/specs/DURABLE-TURNS.md). */
+	durable?: boolean;
 	/** Smoothed output tokens-per-second from the most recent agent step.
 	 *  0/undefined hides the indicator. */
 	tokensPerSecond?: number;
@@ -100,6 +102,7 @@ export function BottomBar(props: BottomBarProps) {
 							judge: props.judge,
 							sandboxOff: props.sandboxOff,
 							adhd: props.adhd,
+							durable: props.durable,
 							verification: props.verification,
 						}}
 					/>
