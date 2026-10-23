@@ -13,6 +13,7 @@ import * as path from "node:path";
 import * as readline from "node:readline";
 import { activeShellKind } from "../core/shell";
 import { blockedReason, commandArgvs } from "./always-blocked";
+import { writeFileAtomic } from "./atomic-write";
 import { commandInFolder } from "./cd-prefix";
 import {
 	type GitState,
@@ -23,6 +24,14 @@ import {
 	repoGitState,
 } from "./command-policy";
 import { currentPermissionMode } from "./permission-mode.js";
+import {
+	type DeniedCall,
+	clearDenial,
+	denialFingerprint,
+	readDenialFile,
+	recordDenial,
+	strictFingerprint,
+} from "./resume-safety";
 import { readOnlyInlinePython } from "./s1-inline-python";
 import { type ActiveShellKind, posixRulesApply } from "./shell-tools";
 import { unresolvedDeleteReason } from "./structural-spellings";
@@ -584,6 +593,13 @@ export class PermissionManager {
 	private log: PermissionLog;
 	private approvedCommands: Set<string> = new Set();
 	private deniedCommands: Set<string> = new Set();
+	/** The session whose denials are kept on disk (#4821), or null: none are written or read. */
+	private denialSession: string | null = null;
+	/** Fingerprints denied before a crash: asked again, in every mode, until a fresh yes (#4821). */
+	private resumedDenials: Map<string, Set<string>> = new Map();
+	/** The session's denial file exists but cannot be read: every command asks (#4821). */
+	private denialsUnreadable = false;
+	private warnedSave = false;
 	private infiniteMode = false;
 	private infiniteModeStartTime: number | null = null;
 	private infiniteModeAuditLog: InfiniteModeAuditEntry[] = [];
@@ -784,35 +800,7 @@ export class PermissionManager {
 	 * target's mode is kept.
 	 */
 	private writeAtomic(config: unknown): void {
-		let target = this.configPath;
-		let mode = 0o600;
-		try {
-			target = fs.realpathSync(this.configPath);
-			mode = fs.statSync(target).mode & 0o777;
-		} catch {
-			// New file: default mode, write at the configured path.
-		}
-		const tmp = path.join(
-			path.dirname(target),
-			`.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`,
-		);
-		const fd = fs.openSync(tmp, "wx", mode);
-		try {
-			fs.writeFileSync(fd, JSON.stringify(config, null, 2));
-			fs.fsyncSync(fd);
-		} catch (err) {
-			fs.closeSync(fd);
-			fs.rmSync(tmp, { force: true });
-			throw err;
-		}
-		fs.closeSync(fd);
-		try {
-			fs.chmodSync(tmp, mode);
-			fs.renameSync(tmp, target);
-		} catch (err) {
-			fs.rmSync(tmp, { force: true });
-			throw err;
-		}
+		writeFileAtomic(this.configPath, JSON.stringify(config, null, 2));
 	}
 
 	/** Rewrite a leftover `autoApprove: true` once. Best effort. */
@@ -930,6 +918,11 @@ export class PermissionManager {
 	 * network command while a local provider is pinned.
 	 */
 	mustAskReason(command: string): string | null {
+		// An unreadable denial record fails closed: every command asks, none runs unasked (#4821).
+		if (this.denialsUnreadable) return "the denial record for this session could not be read";
+		// Denied before a crash: a person decides again, whatever the mode (#4821).
+		if (this.resumedDenials.size > 0 && this.resumedDenials.has(denialFingerprint(command)))
+			return "it was denied before the crash and needs a fresh decision";
 		// A recursive delete of a value the line does not show asks, even in Infinite mode (#4514).
 		const unresolved = unresolvedDeleteReason(command);
 		if (unresolved) return unresolved;
@@ -938,6 +931,31 @@ export class PermissionManager {
 			pinnedLocalProvider:
 				this.pinnedLocalProvider || allowListIsLocalOnly(process.env.EIGHT_PROVIDERS_ALLOW),
 		});
+	}
+
+	/**
+	 * Scope the denial ledger to one session (#4821). Calls denied earlier in
+	 * this session are loaded and returned so the caller can show them; each is
+	 * asked again, in every mode, and never run without a fresh yes. Later denials
+	 * in this session are written down; approvals never are. null turns it off.
+	 */
+	setDenialSession(key: string | null): DeniedCall[] {
+		this.denialSession = key;
+		const file = key ? readDenialFile(key) : { rows: [], corrupt: false };
+		const rows = file.rows;
+		this.denialsUnreadable = file.corrupt;
+		this.resumedDenials = new Map();
+		for (const d of rows) {
+			const strict = this.resumedDenials.get(d.fp) ?? new Set<string>();
+			strict.add(d.sfp);
+			this.resumedDenials.set(d.fp, strict);
+		}
+		return rows;
+	}
+
+	/** True when the session's denial file could not be read; the caller shows one notice. */
+	isDenialRecordUnreadable(): boolean {
+		return this.denialsUnreadable;
 	}
 
 	/** The user pinned a local provider (e.g. `--provider ollama`) (#3748). */
@@ -1153,15 +1171,36 @@ export class PermissionManager {
 			this.log.approvedCount++;
 			if (command) {
 				this.approvedCommands.add(sessionKey(command, opts.where));
+				// A fresh yes ends an earlier denial. The yes itself stays in memory only.
+				const loose = denialFingerprint(command);
+				const strict = this.resumedDenials.get(loose);
+				strict?.delete(strictFingerprint(command, opts.where));
+				if (strict?.size === 0) this.resumedDenials.delete(loose);
+				this.persistDenial(() => clearDenial(this.denialSession as string, command, opts.where));
 			}
 		} else {
 			this.log.deniedCount++;
 			if (command) {
 				this.deniedCommands.add(sessionKey(command, opts.where));
+				this.persistDenial(() => recordDenial(this.denialSession as string, command, opts.where));
 			}
 		}
 
 		return approved;
+	}
+
+	/** Write a denial change when a session is set. A disk failure never changes the answer. */
+	private persistDenial(write: () => void): void {
+		if (!this.denialSession) return;
+		try {
+			write();
+		} catch (err) {
+			// The in-memory denial still holds for this process; a resume will not see it.
+			if (!this.warnedSave) {
+				this.warnedSave = true;
+				console.error(`[permissions] could not save a denial: ${(err as Error).message}`);
+			}
+		}
 	}
 
 	/**

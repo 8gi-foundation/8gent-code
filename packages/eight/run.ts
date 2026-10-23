@@ -1089,6 +1089,24 @@ export async function runRunCommand(
 			if (!isStreamJsonOut(opts)) process.stderr.write(`[durable] session ${sessionId}\n`);
 		}
 	}
+	// Denials from before a crash (#4821): shown as denied, asked again in every mode,
+	// and with no terminal to ask (a --durable-retry run) refused. Approvals are never saved.
+	try {
+		const { denialNotice, UNREADABLE_DENIALS_NOTICE } = await import(
+			"../permissions/resume-safety.js"
+		);
+		const { getPermissionManager } = await import("../permissions");
+		const pm = getPermissionManager();
+		// --no-session keeps no session on disk, so its denials stay in memory too.
+		const denied = pm.setDenialSession(opts.noSession ? null : sessionId);
+		if (!isStreamJsonOut(opts)) {
+			for (const line of denialNotice(denied)) process.stderr.write(`[durable] ${line}\n`);
+			if (pm.isDenialRecordUnreadable())
+				process.stderr.write(`[durable] ${UNREADABLE_DENIALS_NOTICE}\n`);
+		}
+	} catch (err) {
+		process.stderr.write(`[run] warn: could not load earlier denials: ${String(err)}\n`);
+	}
 
 	const isStreamJson = opts.outputFormat === "stream-json";
 	const events: AgentEventCallbacks = isStreamJson
