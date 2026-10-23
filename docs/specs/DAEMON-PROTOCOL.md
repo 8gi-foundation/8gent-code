@@ -225,10 +225,10 @@ Sent to every other client bound to the session when one sends `prompt`. The sen
   secret) to name the session on its socket as the Telegram home session. `session:attach`
   with `"sessionId": "home"` (or that session's id) joins it, for a loopback operator socket
   only; it is never listed, persisted or restored. Without the token: `operator token required`.
-- Turn origin (v1.9, capability `turn-origin`): every turn-output event (`tool:start`,
-  `tool:result`, `agent:thinking`, `agent:stream`, `agent:error`, and `session:end` with
-  reason `turn-complete`) carries `"origin": "<channel that started the turn>"`, or `null` when
-  it cannot be told. A client that posts replies elsewhere (the Telegram bridge) delivers only
+- Turn origin (v1.9, capability `turn-origin`): every event that is a turn's output (the
+  tool start and result, thinking, stream and error events, and `session:end` with reason
+  `turn-complete`) carries `"origin": "<channel that started the turn>"`, or `null` when it
+  cannot be told. A client that posts replies elsewhere (the Telegram bridge) delivers only
   events whose origin is its own channel.
 - `<dataDir>/daemon.json` (v1.9): `{ "url", "pid", "dataDir" }`, mode 0600, no token, written
   at start and removed at shutdown, for a local client to find the daemon.
