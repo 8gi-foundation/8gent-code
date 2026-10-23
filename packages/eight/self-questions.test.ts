@@ -28,9 +28,9 @@ describe("isSelfQuestion", () => {
 		for (const t of [
 			"how do I turn on yolo mode?",
 			"what slash commands are there",
-			"how do I add an api key",
 			"where do I put my API keys?",
 			"what are the hotkeys",
+			"why the slash aint working",
 			"what is 8gent",
 			"is yolo off by default",
 		])
@@ -56,6 +56,14 @@ describe("isSelfQuestion", () => {
 			"how do I make a key in a map",
 			"run the tests for 8gent",
 			"hello",
+			"why is my API key not loading in this project",
+			"can you add slash command support to my discord bot",
+			"how do i add a slash route to my express app?",
+			"the slashes in my paths are wrong on windows, can you look?",
+			"how do I set my openai api key in .env for my app",
+			"how do I set up a slash menu",
+			"why does src/slash/index.ts crash on yolo",
+			"how do I make yolo mode",
 		])
 			expect({ t, v: isSelfQuestion(t) }).toEqual({ t, v: false });
 		expect(isSelfQuestion(`why is the slash ${"x ".repeat(120)}`)).toBe(false);
@@ -119,6 +127,11 @@ describe("isHomeChat", () => {
 			"open /etc/hosts",
 			"run the tests",
 			"what is in readme.md",
+			"make me a todo app",
+			"convert this video to mp4",
+			"summarise my notes",
+			"summarize this",
+			"update my resume",
 			"x ".repeat(100),
 		])
 			expect({ t, v: isHomeChat(t) }).toEqual({ t, v: false });

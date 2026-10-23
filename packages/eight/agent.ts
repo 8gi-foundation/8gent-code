@@ -67,6 +67,7 @@ import {
 	ollamaContextWindowLookup,
 } from "../orchestration/local-model-detect";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
+import { isInfiniteMode } from "../permissions/index";
 import { effectivePermissionMode, systemOneEnvFor } from "../permissions/permission-mode";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import {
@@ -293,7 +294,7 @@ import {
 	toOpenAiV1Base,
 	toolDefsToSpecs,
 } from "../ai";
-import { resolveSilentCalls } from "../ai/silent-calls";
+import { CARRY_ON_SILENT_CALLS, resolveSilentCalls } from "../ai/silent-calls";
 import { resolveUselessStreak } from "../ai/useless-streak";
 import { cdPrefixShape } from "../permissions/cd-prefix";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
@@ -2045,6 +2046,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				uselessStreak: resolveUselessStreak(),
 				// Report after a run of silent tool calls (#4791).
 				silentCalls: this.silentCallsLimit(),
+				silentProgress: this.silentProgressSink(),
 				// Steering (D1): delivered after the running tool calls; then the budget notice.
 				steer: () => [...this.drainSteers(), ...budgetDrain()],
 			});
@@ -2658,11 +2660,6 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
-	 * The welcome block for the first greeting of a top-level session (#4767), or null:
-	 * not a greeting, already welcomed, headless, a child session, or any fact failed to gather.
-	 * Null keeps the plain small-talk note; a welcome failure never fails the turn.
-	 */
-	/**
 	 * Silent tool calls before the turn stops to report (#4791). A person is
 	 * waiting on a top-level interactive turn; a headless run, a child 8gent and a
 	 * Table officer are driven by a task or a channel and run to the end.
@@ -2670,9 +2667,33 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	private silentCallsLimit(): number {
 		if (this.config.headless || this.agentDepth > 0 || this.config.agentScope === "__table__")
 			return 0;
-		return resolveSilentCalls();
+		const n = resolveSilentCalls();
+		// Yolo or Infinite already said keep going: a longer leash, and no question.
+		return n > 0 && this.silentCarryOn() ? Math.max(n, CARRY_ON_SILENT_CALLS) : n;
 	}
 
+	private silentCarryOn(): boolean {
+		return this.infiniteModeActive || isInfiniteMode();
+	}
+
+	/** The progress callback when this turn carries on, else undefined (stop and ask). */
+	private silentProgressSink(): ((line: string) => void) | undefined {
+		if (!this.silentCarryOn()) return undefined;
+		return (text) =>
+			this.config.events?.onStepFinish?.({
+				text,
+				stepNumber: 0,
+				toolCalls: [],
+				usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+				finishReason: "other",
+			});
+	}
+
+	/**
+	 * The welcome block for the first greeting of a top-level session (#4767), or null:
+	 * not a greeting, already welcomed, headless, a child session, or any fact failed to gather.
+	 * Null keeps the plain small-talk note; a welcome failure never fails the turn.
+	 */
 	private async greetingWelcome(text: string): Promise<string | null> {
 		// Headless `8gent -p hello` is a liveness probe: it must reach the model (#4767).
 		if (this.welcomed || this.config.headless || this.agentDepth > 0 || !isGreeting(text))
@@ -3122,6 +3143,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			maxOutputTokens: tunedParams.maxOutputTokens,
 			nudgeFraction: harness.nudgeFraction,
 			silentCalls: this.silentCallsLimit(),
+			silentProgress: this.silentProgressSink(),
 			temperature: tunedParams.temperature,
 			topP: tunedParams.topP,
 			topK: tunedParams.topK,

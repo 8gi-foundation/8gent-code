@@ -163,6 +163,12 @@ export interface TextToolAgentOptions {
 	 */
 	silentCalls?: number;
 	/**
+	 * With silentCalls: report instead of stopping. At the threshold this gets
+	 * one progress line and the turn carries on, tools on, no question. For a
+	 * person who already said keep going (yolo, Infinite).
+	 */
+	silentProgress?: (line: string) => void;
+	/**
 	 * Steering (D1). Drained before every model call after the first: each
 	 * string it returns joins the conversation as a user message, after the
 	 * results of the tool calls that were running when it was sent. The caller
@@ -1145,10 +1151,11 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		// emitted tool_call intent in its head via the result framing below.
 		if (cutOffNote) resultParts.push(cutOffNote);
 		silent.round(replyText, roundWorkCalls);
+		if (opts.silentProgress && silent.tripped()) opts.silentProgress(silent.takeProgress());
 		if (streak.tripped() && round < maxRounds) {
 			answerOnly = true;
 			answerOnlyNote = streak.note();
-		} else if (silent.tripped() && round < maxRounds) {
+		} else if (!opts.silentProgress && silent.tripped() && round < maxRounds) {
 			answerOnly = true;
 			answerOnlyNote = silent.note();
 		}

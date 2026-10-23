@@ -110,6 +110,27 @@ describe("text-tool loop", () => {
 		expect(result.content).toContain("all twelve finished");
 	});
 
+	it("carry-on (yolo, Infinite): a progress line at the threshold, tools stay on, no question", async () => {
+		let calls = 0;
+		const lines: string[] = [];
+		const result = await runTextToolAgent({
+			messages: [{ role: "user", content: "go" }],
+			tools: [probe],
+			maxRounds: 40,
+			silentCalls: 4,
+			silentProgress: (l) => lines.push(l),
+			call: async (msgs) => {
+				calls++;
+				expect(msgs[msgs.length - 1].content).not.toContain("tool calls in a row without telling");
+				return calls > 10 ? "DONE: ten silent calls ran" : CALL(calls);
+			},
+		});
+		expect(result.toolLog).toHaveLength(10);
+		expect(lines).toHaveLength(2);
+		expect(lines[0]).toContain("Still working: 4 steps so far (probe). Carrying on.");
+		expect(result.content).toContain("ten silent calls ran");
+	});
+
 	it("off (0) leaves a long silent run alone", async () => {
 		let calls = 0;
 		const result = await runTextToolAgent({
@@ -139,7 +160,7 @@ describe("native loop", () => {
 		}),
 	} as any;
 
-	function build(silentCalls: number | undefined) {
+	function build(silentCalls: number | undefined, silentProgress?: (l: string) => void) {
 		const choices: unknown[] = [];
 		let calls = 0;
 		const model = new MockLanguageModelV3({
@@ -177,6 +198,7 @@ describe("native loop", () => {
 			maxSteps: 30,
 			turnBudgetMs: 0,
 			silentCalls,
+			silentProgress,
 		});
 		return { agent, choices, calls: () => calls };
 	}
@@ -188,6 +210,17 @@ describe("native loop", () => {
 		expect(out.text).toContain("Keep going?");
 		expect(choices[4]).toEqual({ type: "none" });
 		expect(choices.slice(0, 4).every((c) => (c as any)?.type !== "none")).toBe(true);
+	});
+
+	it("carry-on: progress lines every 4 silent calls, tools never turned off, the run finishes itself", async () => {
+		const lines: string[] = [];
+		const { agent, choices, calls } = build(4, (l) => lines.push(l));
+		const out = await agent.generate({ prompt: "go" });
+		expect(out.text).toBe("finished");
+		expect(calls()).toBe(11);
+		expect(lines).toHaveLength(2);
+		expect(lines[0]).toContain("Still working: 4 steps so far (probe)");
+		expect(choices.some((c) => (c as any)?.type === "none")).toBe(false);
 	});
 
 	it("unset leaves the loop alone: ten calls then the model's own answer", async () => {

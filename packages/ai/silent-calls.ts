@@ -22,6 +22,8 @@
  */
 
 export const DEFAULT_SILENT_CALLS = 8;
+/** Threshold when the person has already said "keep going" (yolo or Infinite): report, never stop. */
+export const CARRY_ON_SILENT_CALLS = 24;
 export const MIN_PROSE_CHARS = 40;
 
 /** Threshold from EIGHT_SILENT_CALLS; 0 means off. */
@@ -39,6 +41,11 @@ export function silentCallsNote(count: number, tried: string[]): string {
 		`Tools used: ${tried.join(", ")}. Tools are not available for this reply.`,
 		"In two or three plain sentences say what you have found so far, then ask whether to keep going.",
 	].join("\n");
+}
+
+/** The one-line progress report for a run that carries on (no question, tools stay on). */
+export function silentProgressLine(count: number, tried: string[]): string {
+	return `Still working: ${count} steps so far (${tried.join(", ")}). Carrying on.`;
 }
 
 export class SilentCalls {
@@ -64,6 +71,14 @@ export class SilentCalls {
 	note(): string {
 		return silentCallsNote(this.count, this.tried);
 	}
+
+	/** The progress line for the run so far, and the count starts again. */
+	takeProgress(): string {
+		const line = silentProgressLine(this.count, this.tried);
+		this.count = 0;
+		this.tried = [];
+		return line;
+	}
 }
 
 /**
@@ -71,6 +86,20 @@ export class SilentCalls {
  * the note when the run so far is `threshold` or more tool calls with no prose
  * between them, else null.
  */
+export function silentCallsRunForSteps(
+	steps: ReadonlyArray<{ text?: string; toolCalls?: ReadonlyArray<{ toolName?: string }> }>,
+	threshold: number,
+): SilentCalls | null {
+	const silent = new SilentCalls(threshold);
+	for (const s of steps) {
+		silent.round(
+			s.text ?? "",
+			(s.toolCalls ?? []).map((c) => c.toolName ?? "tool"),
+		);
+	}
+	return silent.tripped() ? silent : null;
+}
+
 export function silentCallsNoteForSteps(
 	steps: ReadonlyArray<{ text?: string; toolCalls?: ReadonlyArray<{ toolName?: string }> }>,
 	threshold: number,

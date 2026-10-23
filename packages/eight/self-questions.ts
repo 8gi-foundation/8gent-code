@@ -119,6 +119,11 @@ const CUE = new Set([
 
 /** A work verb means a task, not a question: the turn keeps its tools. */
 const WORK = new Set([
+	"add",
+	"make",
+	"update",
+	"support",
+	"look",
 	"fix",
 	"implement",
 	"refactor",
@@ -138,6 +143,17 @@ const WORK = new Set([
 	"tests",
 	"investigate",
 ]);
+
+/** The person is talking about their own app, repo, file or .env: not about 8gent. */
+function namesOwnThing(text: string, flat: string): boolean {
+	return (
+		/\b(?:my|our|this) (?:app|project|repo|code|bot|cli|site|server)\b/.test(flat) ||
+		/\.env\b/i.test(text) ||
+		/[~.]?\/[\w.-]+\/[\w.-]+|\b[\w-]+\.(?:ts|tsx|js|jsx|py|json|md|yml|yaml|toml|txt|env)\b|\b[a-z]:\\/i.test(
+			text,
+		)
+	);
+}
 
 /** Slash command names mentioned as "/name" (case-folded), checked against the live registry. */
 function mentionedCommands(text: string, names: ReadonlySet<string>): string[] {
@@ -168,7 +184,8 @@ export function isSelfQuestion(
 	const flat = flatten(text);
 	if (flat === "" || flat.length > 200) return false;
 	const tokens = flat.split(" ");
-	if (tokens.some((t) => WORK.has(t))) return false;
+	if (tokens.some((t) => WORK.has(t)) || / set up\b/.test(` ${flat}`)) return false;
+	if (namesOwnThing(text, flat)) return false;
 	const strong =
 		tokens.some(
 			(t) => STRONG_EXACT.has(t) || STRONG_FUZZY.some((s) => t.length >= 4 && fuzzyHas(t, s)),
@@ -232,6 +249,13 @@ export function selfQuestionNote(
  */
 const TASK = new Set([
 	...WORK,
+	"convert",
+	"summarise",
+	"summarize",
+	"app",
+	"script",
+	"website",
+	"video",
 	"run",
 	"install",
 	"find",
