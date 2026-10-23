@@ -1,6 +1,6 @@
 {
   "lockfileVersion": 1,
-  "workspaces": { "": { "name": "demo", "dependencies": { "lodash": "^4.17.0" } } },
+  "workspaces": { "": { "name": "demo", "dependencies": { "lodash": "^4.17.0" }, "devDependencies": { "@scope/pkg": "^1.0.0" } } },
   "packages": {
     "lodash": ["lodash@4.17.15", "", {}, "sha512-aaa"],
     "@scope/pkg": ["@scope/pkg@1.2.3", "", { "dependencies": { "x": "^1" }, }, "sha512-bbb"],

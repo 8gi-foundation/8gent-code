@@ -6,6 +6,8 @@ export interface Dep {
 	version: string;
 	/** Lockfile paths inside the repo that pinned this version. */
 	files: string[];
+	/** true: only reached through devDependencies. false: reachable from production deps. undefined: lockfile cannot say. */
+	dev?: boolean;
 }
 
 export interface RepoInventory {
@@ -53,4 +55,6 @@ export interface Hit {
 	advisoryUrl: string;
 	summary: string;
 	files: string[];
+	/** true: dev-only dependency, false: production, null: lockfile cannot say. */
+	devOnly: boolean | null;
 }

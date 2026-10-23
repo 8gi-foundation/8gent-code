@@ -38,7 +38,7 @@ export function buildDrafts(hits: Hit[], min: Severity = "UNKNOWN"): IssueDraft[
 		);
 		const rows = g.map(
 			(h) =>
-				`- ${h.package} ${h.currentVersion} (${h.ecosystem}) in ${h.files.join(", ")}\n  Proposed bump: ${h.fixedVersion ? `${h.currentVersion} -> ${h.fixedVersion}` : "no fixed version listed upstream"}. No PR opened.`,
+				`- ${h.package} ${h.currentVersion} (${h.ecosystem}) in ${h.files.join(", ")}\n  Dev-only dependency: ${h.devOnly === null ? "unknown (lockfile does not say)" : h.devOnly ? "yes" : "no"}.\n  Proposed bump: ${h.fixedVersion ? `${h.currentVersion} -> ${h.fixedVersion}` : "no fixed version listed upstream"}. No PR opened.`,
 		);
 		const body = clean(
 			[

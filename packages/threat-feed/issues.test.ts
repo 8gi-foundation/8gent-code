@@ -21,6 +21,7 @@ const hit = (o: Partial<Hit> = {}): Hit => ({
 	advisoryUrl: "https://osv.dev/vulnerability/GHSA-1",
 	summary: `has an em dash ${EM} and a user-agent`,
 	files: ["bun.lock"],
+	devOnly: false,
 	...o,
 });
 
@@ -48,6 +49,11 @@ describe("buildDrafts", () => {
 		expect(b.body).not.toContain("user-agent");
 		expect(`${b.title}${b.body}`).not.toContain(EM);
 		expect(b.body.toLowerCase()).not.toMatch(/\bagent\b/);
+	});
+	test("body says whether the dependency is dev-only, and admits unknown", () => {
+		expect(buildDrafts([hit({ devOnly: true })])[0].body).toContain("Dev-only dependency: yes.");
+		expect(buildDrafts([hit({ devOnly: false })])[0].body).toContain("Dev-only dependency: no.");
+		expect(buildDrafts([hit({ devOnly: null })])[0].body).toContain("Dev-only dependency: unknown");
 	});
 	test("missing fix is stated, not invented", () => {
 		expect(buildDrafts([hit({ fixedVersion: null })])[0].body).toContain(

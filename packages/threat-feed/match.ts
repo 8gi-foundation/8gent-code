@@ -145,6 +145,7 @@ export function matchRepo(input: MatchInput): Hit[] {
 				advisoryUrl: advisoryUrl(id),
 				summary: (v.summary ?? "").slice(0, 200),
 				files: dep.files,
+				devOnly: dep.dev ?? null,
 			});
 		}
 	}

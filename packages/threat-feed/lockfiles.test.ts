@@ -43,6 +43,48 @@ describe("lockfile parsers", () => {
 	});
 });
 
+describe("dev-only detection", () => {
+	test("bun.lock: direct prod false, direct dev true", () => {
+		const m = Object.fromEntries(parse("bun.lock").map((d) => [d.name, d.dev]));
+		expect(m).toEqual({ lodash: false, "@scope/pkg": true });
+	});
+	test("package-lock.json uses the dev flag, absent means production", () => {
+		const m = Object.fromEntries(parse("package-lock.json").map((d) => [d.name, d.dev]));
+		expect(m).toEqual({ minimist: true, "@s/b": false });
+	});
+	test("formats that cannot say leave it unknown", () => {
+		expect(parse("go.sum")[0].dev).toBeUndefined();
+	});
+	test("merge: any production path wins, all-dev stays dev, mixed unknown stays unknown", () => {
+		const r = (dev?: boolean) => [
+			{
+				ecosystem: "npm" as const,
+				name: "a",
+				version: "1.0.0",
+				...(dev === undefined ? {} : { dev }),
+			},
+		];
+		expect(
+			mergeDeps([
+				{ path: "x", raws: r(true) },
+				{ path: "y", raws: r(false) },
+			])[0].dev,
+		).toBe(false);
+		expect(
+			mergeDeps([
+				{ path: "x", raws: r(true) },
+				{ path: "y", raws: r(true) },
+			])[0].dev,
+		).toBe(true);
+		expect(
+			mergeDeps([
+				{ path: "x", raws: r(true) },
+				{ path: "y", raws: r() },
+			])[0].dev,
+		).toBeUndefined();
+	});
+});
+
 describe("isLockfilePath", () => {
 	test("accepts nested lockfiles, rejects node_modules and fixtures", () => {
 		expect(isLockfilePath("apps/tui/bun.lock")).toBe(true);

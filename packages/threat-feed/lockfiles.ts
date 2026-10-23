@@ -1,6 +1,6 @@
 import type { Dep, Ecosystem } from "./types";
 
-type Raw = { ecosystem: Ecosystem; name: string; version: string };
+type Raw = { ecosystem: Ecosystem; name: string; version: string; dev?: boolean };
 
 /** Basenames we read. bun.lockb is binary and handled by the caller as a skip. */
 export const LOCKFILE_NAMES = [
@@ -51,20 +51,34 @@ export function parseBunLock(text: string): Raw[] {
 			if (text[j] !== "}" && text[j] !== "]") out += c;
 		} else out += c;
 	}
-	const doc = JSON.parse(out) as { packages?: Record<string, unknown[]> };
+	const doc = JSON.parse(out) as {
+		packages?: Record<string, unknown[]>;
+		workspaces?: Record<string, { dependencies?: object; devDependencies?: object }>;
+	};
+	// bun.lock only says dev-or-not for direct dependencies of a workspace. Transitive stay unknown.
+	const prod = new Set<string>();
+	const dev = new Set<string>();
+	for (const w of Object.values(doc.workspaces ?? {})) {
+		for (const n of Object.keys(w.dependencies ?? {})) prod.add(n);
+		for (const n of Object.keys(w.devDependencies ?? {})) dev.add(n);
+	}
 	const res: Raw[] = [];
 	for (const entry of Object.values(doc.packages ?? {})) {
 		const spec = typeof entry?.[0] === "string" ? (entry[0] as string) : "";
 		const nv = splitNameVersion(spec);
 		if (!nv || NON_REGISTRY.test(nv.version) || !/^\d/.test(nv.version)) continue;
-		res.push({ ecosystem: "npm", ...nv });
+		const d = prod.has(nv.name) ? false : dev.has(nv.name) ? true : undefined;
+		res.push({ ecosystem: "npm", ...nv, ...(d === undefined ? {} : { dev: d }) });
 	}
 	return res;
 }
 
 export function parsePackageLock(text: string): Raw[] {
 	const doc = JSON.parse(text) as {
-		packages?: Record<string, { version?: string; link?: boolean }>;
+		packages?: Record<
+			string,
+			{ version?: string; link?: boolean; dev?: boolean; devOptional?: boolean }
+		>;
 		dependencies?: Record<string, { version?: string; dependencies?: unknown }>;
 	};
 	const res: Raw[] = [];
@@ -76,6 +90,7 @@ export function parsePackageLock(text: string): Raw[] {
 				ecosystem: "npm",
 				name: path.slice(idx + "node_modules/".length),
 				version: p.version,
+				dev: p.dev === true,
 			});
 		}
 		return res;
@@ -181,13 +196,25 @@ export function parseLockfile(path: string, text: string): Raw[] | null {
 /** Merge raw entries from many lockfiles into unique deps, remembering which files pinned each. */
 export function mergeDeps(perFile: { path: string; raws: Raw[] }[]): Dep[] {
 	const map = new Map<string, Dep>();
+	const seen = new Map<string, (boolean | undefined)[]>();
 	for (const { path, raws } of perFile) {
 		for (const r of raws) {
 			const k = `${r.ecosystem}\0${r.name}\0${r.version}`;
-			const d = map.get(k) ?? { ...r, files: [] };
+			const d = map.get(k) ?? {
+				ecosystem: r.ecosystem,
+				name: r.name,
+				version: r.version,
+				files: [],
+			};
 			if (!d.files.includes(path)) d.files.push(path);
+			seen.set(k, [...(seen.get(k) ?? []), r.dev]);
 			map.set(k, d);
 		}
+	}
+	for (const [k, d] of map) {
+		const flags = seen.get(k) ?? [];
+		if (flags.includes(false)) d.dev = false;
+		else if (flags.length && flags.every((x) => x === true)) d.dev = true;
 	}
 	return [...map.values()].sort(
 		(a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version),
