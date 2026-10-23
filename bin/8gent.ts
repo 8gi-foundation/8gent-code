@@ -166,6 +166,7 @@ MEMORY COMMANDS:
   memory remember <fact>      Store a memory
   memory forget <id>          Delete a memory
   memory stats                Show memory statistics
+  memory serve                Serve memory read-only over stdio for other tools
 
 CRON COMMANDS:
   cron list                   List scheduled jobs
@@ -2568,6 +2569,12 @@ async function memoryCommand(args: string[]) {
 	const sub = rest[0] || "stats";
 	const cwd = (flags.cwd as string) || process.cwd();
 
+	// Before getMemoryManager: serving must never create or open a store for writing (#4867).
+	if (sub === "serve") {
+		const { serveStdio } = await import("../packages/memory/serve.ts");
+		process.exit(await serveStdio());
+	}
+
 	const { getMemoryManager } = await import("../packages/memory");
 	const memory = getMemoryManager(cwd);
 
@@ -2656,7 +2663,7 @@ async function memoryCommand(args: string[]) {
 
 		default:
 			console.error(`Unknown memory subcommand: ${sub}`);
-			console.log("Available: recall, remember, forget, stats");
+			console.log("Available: recall, remember, forget, stats, serve");
 			process.exit(1);
 	}
 }
