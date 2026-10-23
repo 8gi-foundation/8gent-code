@@ -1,0 +1,273 @@
+/**
+ * One-yes install of the System One safety judge (#4811).
+ *
+ * When no judge backend is reachable the gate runs on rules only
+ * (packages/permissions/system-one-gate.ts, NO_BACKEND). This asks once, on one
+ * line, whether to install the judge, installs it through the machine's local
+ * Ollama (`/api/pull`), and confirms it is reachable. No yes, no install. No
+ * sudo, ever: the only thing run is an HTTP pull against the local server.
+ *
+ * Self-contained on purpose: every side effect (probe, pull, prompt, state,
+ * output) is injected, so tests stub the installer and never download.
+ */
+
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { resolveHome } from "../core/home";
+import { detectBackend, resolveSharedJudgeHost } from "../decide/probe";
+import { findOnPath } from "../voice/termux";
+
+/** The calibrated judge (packages/decide/README.md Results; probe.ts MODEL_PREFERENCE puts it first). */
+export const JUDGE_MODEL = "hf.co/AtlaAI/Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF:latest";
+/** `ollama list` reports 4.9 GB for this model. */
+export const JUDGE_SIZE = "4.9 GB";
+
+export type JudgeChoice = "declined" | "unsupported" | "failed";
+
+export type JudgeOutcome =
+	| "present" //      a judge is already reachable
+	| "off" //          System One is switched off
+	| "recorded" //     an earlier choice is on file, nothing asked
+	| "no-person" //    nobody to ask; nothing recorded
+	| "declined"
+	| "unsupported"
+	| "installed"
+	| "failed";
+
+type Env = Record<string, string | undefined>;
+
+export interface JudgeDeps {
+	env?: Env;
+	/** Is a judge backend reachable right now? Default: decide's detectBackend. */
+	probe?: () => Promise<{ backend: string; model: string | null }>;
+	/** Can this machine run Ollama? "up" = server answering, "installed" = binary only, "none". */
+	ollama?: () => Promise<"up" | "installed" | "none">;
+	/** Pull the model, reporting percent (0-100) as it goes. Throws on failure. */
+	pull?: (model: string, onPercent: (pct: number) => void) => Promise<void>;
+	/** Ask one yes/no line; resolves null when nobody can answer. */
+	ask?: (line: string) => Promise<boolean | null>;
+	/** A finished line. */
+	say?: (line: string) => void;
+	/** The single progress status line (rewritten in place on a terminal). */
+	progress?: (line: string) => void;
+	readChoice?: () => JudgeChoice | null | undefined;
+	/** Pass null to clear. Returns false when the config could not be written. */
+	writeChoice?: (c: JudgeChoice | null) => boolean;
+}
+
+export const JUDGE_ASK_LINE = `Install the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE})? It checks risky commands before they run. [Y/n]`;
+
+export const JUDGE_UNSUPPORTED_LINE =
+	"The safety judge needs Ollama, which is not available here, so risky commands are checked by the built-in safety rules only. " +
+	"To enable the judge, install Ollama, start it, then run /judge install.";
+
+export const JUDGE_OLLAMA_DOWN_LINE =
+	"Ollama is installed but not running, so the safety judge cannot be installed yet. Start it (ollama serve), then run /judge install. " +
+	"Until then risky commands are checked by the built-in safety rules only.";
+
+// ── config (~/.8gent/config.json, key judgeInstall) ──────────────────────
+
+export function configPath(env: Env = process.env): string {
+	return join(resolveHome(env), ".8gent", "config.json");
+}
+
+/** The recorded choice, "corrupt" when the file cannot be parsed (never overwritten, never asked), else null. */
+export function readChoice(env: Env = process.env): JudgeChoice | "corrupt" | null {
+	const p = configPath(env);
+	if (!existsSync(p)) return null;
+	try {
+		const v = JSON.parse(readFileSync(p, "utf-8"))?.judgeInstall?.choice;
+		return v === "declined" || v === "unsupported" || v === "failed" ? v : null;
+	} catch {
+		return "corrupt";
+	}
+}
+
+/** Merge the choice into config.json, keeping every other key. Never overwrites a file it cannot parse. */
+export function writeChoice(
+	c: JudgeChoice | null,
+	env: Env = process.env,
+	now = new Date(),
+): boolean {
+	const p = configPath(env);
+	let cfg: Record<string, unknown> = {};
+	if (existsSync(p)) {
+		try {
+			const parsed = JSON.parse(readFileSync(p, "utf-8"));
+			if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+			cfg = parsed;
+		} catch {
+			return false;
+		}
+	}
+	if (c === null) delete cfg.judgeInstall;
+	else cfg.judgeInstall = { choice: c, at: now.toISOString() };
+	try {
+		mkdirSync(dirname(p), { recursive: true });
+		const tmp = `${p}.tmp-${process.pid}`;
+		writeFileSync(tmp, `${JSON.stringify(cfg, null, 2)}\n`);
+		renameSync(tmp, p);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+// ── real side effects (defaults) ─────────────────────────────────────────
+
+async function defaultOllama(env: Env): Promise<"up" | "installed" | "none"> {
+	const host = resolveSharedJudgeHost(env);
+	try {
+		const res = await fetch(`${host}/api/tags`, { signal: AbortSignal.timeout(1000) });
+		if (res.ok) return "up";
+	} catch {}
+	return findOnPath("ollama", env) ? "installed" : "none";
+}
+
+/** Ollama `/api/pull`, streamed NDJSON: {status, total, completed} lines, or {error}. */
+async function defaultPull(
+	env: Env,
+	model: string,
+	onPercent: (pct: number) => void,
+): Promise<void> {
+	const host = resolveSharedJudgeHost(env);
+	const res = await fetch(`${host}/api/pull`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ model, stream: true }),
+	});
+	if (!res.ok || !res.body) throw new Error(`Ollama answered ${res.status} to the pull`);
+	const reader = res.body.getReader();
+	const dec = new TextDecoder();
+	let buf = "";
+	let done = false;
+	const handle = (line: string) => {
+		if (!line.trim()) return;
+		const j = JSON.parse(line) as {
+			error?: string;
+			status?: string;
+			total?: number;
+			completed?: number;
+		};
+		if (j.error) throw new Error(j.error);
+		if (j.status === "success") done = true;
+		if (j.total && j.completed !== undefined)
+			onPercent(Math.min(100, Math.floor((j.completed / j.total) * 100)));
+	};
+	for (;;) {
+		const { value, done: end } = await reader.read();
+		if (end) break;
+		buf += dec.decode(value, { stream: true });
+		const lines = buf.split("\n");
+		buf = lines.pop() ?? "";
+		for (const l of lines) handle(l);
+	}
+	handle(buf);
+	if (!done) throw new Error("the download ended before Ollama reported success");
+}
+
+/** One-line y/n on stdin. Empty answer is yes. Null when stdin is not a terminal. */
+export async function askYesNoLine(line: string): Promise<boolean | null> {
+	if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
+	const { createInterface } = await import("node:readline/promises");
+	const rl = createInterface({ input: process.stdin, output: process.stdout });
+	try {
+		const a = (await rl.question(`${line} `)).trim().toLowerCase();
+		return a === "" || a === "y" || a === "yes";
+	} finally {
+		rl.close();
+	}
+}
+
+function terminalProgress(line: string): void {
+	if (process.stdout.isTTY) process.stdout.write(`\r\x1b[2K${line}`);
+}
+
+// ── the flow ─────────────────────────────────────────────────────────────
+
+type InstallDeps = Required<Pick<JudgeDeps, "probe" | "pull" | "say" | "progress" | "writeChoice">>;
+
+async function install(d: InstallDeps, from: "auto" | "command"): Promise<JudgeOutcome> {
+	let last = -1;
+	const status = (pct: number) => {
+		if (pct === last) return;
+		last = pct;
+		d.progress(`Installing the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE}): ${pct}%`);
+	};
+	d.progress(`Installing the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE}): 0%`);
+	try {
+		await d.pull(JUDGE_MODEL, status);
+		const after = await d.probe();
+		if (after.backend === "none") throw new Error("it downloaded, but no judge answers yet");
+		d.say(`Safety judge ready: ${after.model ?? after.backend} via ${after.backend}.`);
+		d.writeChoice(null);
+		return "installed";
+	} catch (err) {
+		const why = err instanceof Error ? err.message : String(err);
+		d.say(
+			`Could not install the safety judge: ${why}. Risky commands are checked by the built-in safety rules only. Run /judge install to try again.`,
+		);
+		if (from === "auto") d.writeChoice("failed");
+		return "failed";
+	}
+}
+
+/**
+ * `auto`: after an update and on first launch. Asks at most once ever: any
+ * recorded choice (declined, unsupported, failed) ends the asking.
+ * `command`: /judge install. Typing it is the yes; it ignores recorded choices.
+ */
+export async function offerJudge(
+	mode: "auto" | "command",
+	deps: JudgeDeps = {},
+): Promise<JudgeOutcome> {
+	const env = deps.env ?? process.env;
+	const say = deps.say ?? ((l: string) => console.log(l));
+	const d = {
+		probe: deps.probe ?? (() => detectBackend({ env })),
+		ollama: deps.ollama ?? (() => defaultOllama(env)),
+		pull: deps.pull ?? ((m: string, p: (n: number) => void) => defaultPull(env, m, p)),
+		say,
+		progress: deps.progress ?? terminalProgress,
+		readChoice: deps.readChoice ?? (() => readChoice(env)),
+		writeChoice: deps.writeChoice ?? ((c: JudgeChoice | null) => writeChoice(c, env)),
+	};
+
+	if (env.EIGHT_SYSTEM_ONE?.trim() === "0") return "off";
+
+	if (mode === "auto") {
+		if (d.readChoice()) return "recorded";
+	}
+	const now = await d.probe();
+	if (now.backend !== "none") {
+		if (mode === "command")
+			say(`The safety judge is already installed: ${now.model ?? now.backend} via ${now.backend}.`);
+		return "present";
+	}
+
+	const o = await d.ollama();
+	if (o !== "up") {
+		const line = o === "none" ? JUDGE_UNSUPPORTED_LINE : JUDGE_OLLAMA_DOWN_LINE;
+		if (mode === "auto") {
+			// Say it once, then never again; /judge install says it on request.
+			if (!d.writeChoice("unsupported")) return "no-person";
+			say(line);
+		} else say(line);
+		return "unsupported";
+	}
+
+	if (mode === "auto") {
+		const yes = await (deps.ask ?? askYesNoLine)(JUDGE_ASK_LINE);
+		if (yes === null) return "no-person";
+		if (!yes) {
+			d.writeChoice("declined");
+			say(
+				"OK. Risky commands are checked by the built-in safety rules only. Run /judge install if you change your mind.",
+			);
+			return "declined";
+		}
+	}
+	const out = await install(d, mode);
+	if (process.stdout.isTTY && !deps.progress) process.stdout.write("\n");
+	return out;
+}

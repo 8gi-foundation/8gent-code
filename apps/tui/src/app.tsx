@@ -4799,6 +4799,20 @@ export function App({
 					break;
 				}
 
+				case "judge": {
+					// One-yes install of the safety judge (#4811). Typing /judge install is the yes.
+					void (async () => {
+						const { offerJudge } = await import("../../../packages/eight/judge-install.js");
+						if ((args[0] ?? "install").toLowerCase() !== "install") {
+							addSystemMessage("Usage: /judge install");
+							return;
+						}
+						addSystemMessage("Installing the safety judge. This can take a few minutes.");
+						await offerJudge("command", { say: addSystemMessage, progress: () => {} });
+					})();
+					break;
+				}
+
 				case "stack":
 					// What the next turn sends, per source (#4779). Local, read-only.
 					if (!agent) {
