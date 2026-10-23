@@ -17,10 +17,43 @@
  */
 
 import { resolveOllamaBaseUrl } from "../../../../packages/ai/text-tool-endpoint.js";
-import { createLlamaServer, isLlamaServerSelected, resolveLlamaServerUrl } from "../../../../packages/local-model-server/index.js";
+import {
+	createLlamaServer,
+	isLlamaServerSelected,
+	resolveLlamaServerUrl,
+} from "../../../../packages/local-model-server/index.js";
+import { isLocalProvider } from "../../../../packages/providers/local-providers.js";
 import { pickBestChatModel } from "./model-selection.js";
 
 export const PROBE_TIMEOUT_MS = 3000;
+
+/**
+ * Only an on-box provider may refuse a turn on a slow readiness probe: a dead
+ * local socket is a real fault. A hosted provider's probe crosses the network
+ * (a phone on 4G can take over 6s), and the real request has its own timeout
+ * and error, so its probe never gates.
+ */
+export function shouldGateOnReadiness(provider: string): boolean {
+	return isLocalProvider(provider);
+}
+
+/** How long a typed line waits for a hosted provider's tab 8gent to be built. */
+export const HOSTED_AGENT_WAIT_MS = 20_000;
+
+/** Poll `get` until it returns something or `maxMs` passes. Never throws. */
+export async function waitForTabAgent<T>(
+	get: () => T | undefined | null,
+	maxMs: number = HOSTED_AGENT_WAIT_MS,
+	stepMs = 200,
+): Promise<T | undefined> {
+	const end = Date.now() + maxMs;
+	for (;;) {
+		const v = get();
+		if (v) return v;
+		if (Date.now() >= end) return undefined;
+		await new Promise((r) => setTimeout(r, stepMs));
+	}
+}
 
 export interface LocalProviderEndpoint {
 	provider: string;
@@ -37,12 +70,26 @@ export function localProviderEndpoints(
 	// The same resolution as the rest of the app (#3115): OLLAMA_BASE_URL, then
 	// OLLAMA_HOST, normalised. A bare "host:port" OLLAMA_HOST (what the ollama
 	// CLI accepts) used to become an invalid URL here and read as unreachable.
-	const openAiIds: LocalProviderEndpoint["extract"] = (d) => (d?.data || []).map((m: any) => String(m?.id ?? ""));
-	const lmStudio: LocalProviderEndpoint = { provider: "lmstudio", label: "LM Studio", modelsUrl: `${lm}/v1/models`, extract: openAiIds };
+	const openAiIds: LocalProviderEndpoint["extract"] = (d) =>
+		(d?.data || []).map((m: any) => String(m?.id ?? ""));
+	const lmStudio: LocalProviderEndpoint = {
+		provider: "lmstudio",
+		label: "LM Studio",
+		modelsUrl: `${lm}/v1/models`,
+		extract: openAiIds,
+	};
 	// With llama-server selected (#3149) Ollama is off and is never probed.
 	if (isLlamaServerSelected(env)) {
 		const llama = createLlamaServer({ baseUrl: resolveLlamaServerUrl(env) });
-		return [{ provider: "llama-server", label: "llama-server", modelsUrl: llama.modelsUrl, extract: openAiIds }, lmStudio];
+		return [
+			{
+				provider: "llama-server",
+				label: "llama-server",
+				modelsUrl: llama.modelsUrl,
+				extract: openAiIds,
+			},
+			lmStudio,
+		];
 	}
 	const ollama = resolveOllamaBaseUrl(env);
 	return [
