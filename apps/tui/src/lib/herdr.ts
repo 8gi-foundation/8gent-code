@@ -26,16 +26,20 @@ const DEFAULT_LINES = 40;
 const MAX_LINES = 200;
 const MAX_CHARS = 16384;
 // herdr 0.9.3 pane ids are workspace-qualified: `w1:p1`.
-const PANE_ID = /^w\d{1,9}:p\d{1,9}$/;
+export const PANE_ID = /^w\d{1,9}:p\d{1,9}$/;
 const LINES = /^\d{1,4}$/;
 
 /** Message id prefix: herdr output is never saved with the session (pane scrollback can hold secrets). */
 export const HERDR_ID_PREFIX = "herdr-";
 
 // OSC and other string sequences, CSI, two-byte ESC sequences, then the remaining C0/C1 bytes except tab and newline.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: this strips terminal control bytes on purpose
 const OSC = /\x1b[\]PX^_][\s\S]*?(?:\x07|\x1b\\)/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: this strips terminal control bytes on purpose
 const CSI = /(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: this strips terminal control bytes on purpose
 const ESC2 = /\x1b[ -/]*[0-~]?/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: this strips terminal control bytes on purpose
 const CTRL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
 
 /** Text from another program with every escape and control byte removed (tab and newline kept). */
@@ -68,10 +72,10 @@ export function resolveHerdr(path: string, cwd: string): string | null {
 	return null;
 }
 
-type Env = Record<string, string | undefined>;
-type RunResult = { ok: true; stdout: string } | { ok: false; line: string };
+export type Env = Record<string, string | undefined>;
+export type RunResult = { ok: true; stdout: string } | { ok: false; line: string };
 
-function runHerdr(bin: string, args: string[], env: Env): Promise<RunResult> {
+export function runHerdr(bin: string, args: string[], env: Env): Promise<RunResult> {
 	return new Promise((done) => {
 		execFile(
 			bin,

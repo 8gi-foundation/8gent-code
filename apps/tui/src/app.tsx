@@ -207,7 +207,12 @@ import { getTaskManager } from "../../../packages/tasks/index.js";
 // These are the canonical surface for inter-package use; deep imports would
 // bypass each package's documented API. Suppressed by design.
 // react-doctor-disable-next-line react-doctor/no-barrel-import
-import { resolveTermCommand, spawnInWindow } from "../../../packages/terminal-tab/index.js";
+import {
+	checkNodePty,
+	ptyFixLine,
+	resolveTermCommand,
+	spawnInWindow,
+} from "../../../packages/terminal-tab/index.js";
 import { ActivityRail } from "./components/ActivityRail.js";
 import { BottomBar } from "./components/BottomBar.js";
 import { djHasTrack, setDjDeckOpen } from "./components/DjDeck.js";
@@ -267,6 +272,7 @@ import {
 	hudTokens,
 	msUntilSessionTimeChanges,
 } from "./lib/format.js";
+import { openInHerdrPane } from "./lib/herdr-open.js";
 import { altDigitKeys, formatHotkeyRows, formatHotkeys } from "./lib/keybindings.js";
 import { computeProcessSidebarWidth, tuiChatContentWidth } from "./lib/layout-breakpoints.js";
 import { probeLocalEndpoints } from "./lib/local-probe.js";
@@ -6625,6 +6631,25 @@ export function App({
 										}`,
 									);
 								});
+						} else if (!checkNodePty(projectCwd).ok) {
+							// No node-pty (Termux installs skip it): a herdr pane needs none, so
+							// open the preset or shell beside 8gent; anything else gets the fix.
+							const fix = ptyFixLine();
+							if (resolved.source === "raw") {
+								addSystemMessage(`Cannot open a terminal tab here. ${fix}`);
+							} else {
+								openInHerdrPane(
+									resolved.label,
+									resolved.source === "preset" ? resolved.command : null,
+									{ cwd: projectCwd },
+								)
+									.then((r) =>
+										addSystemMessage(
+											r.ok ? r.message : `Cannot open a terminal tab here (${r.reason}). ${fix}`,
+										),
+									)
+									.catch(() => addSystemMessage(`Cannot open a terminal tab here. ${fix}`));
+							}
 						} else {
 							workspaceTabs.addTab("terminal", resolved.label, {
 								mode: "in-tab",
