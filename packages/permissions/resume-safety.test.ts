@@ -213,6 +213,40 @@ describe("C3: a denied call is not re-run on resume without a fresh decision", (
 			expect(await after.requestPermission("run", "x", spelling)).toBe(false);
 	});
 
+	test("a yes to a different call does not clear a denial (cd folder, bare command)", async () => {
+		recordDenial("sess-strict", "cd /prod && deploytool --apply");
+		recordDenial("sess-strict", 'cd "$(fetchtool x)" && ls');
+		const after = manager();
+		after.setDenialSession("sess-strict");
+		after.enableInfiniteMode();
+		registerTuiApprovalHandler(async () => "approve");
+		expect(await after.requestPermission("run", "x", "cd /staging && deploytool --apply")).toBe(
+			true,
+		);
+		expect(await after.requestPermission("run", "x", "ls")).toBe(true);
+		expect(readDenials("sess-strict")).toHaveLength(2);
+		// The replays of the denied calls are still refused with no one to ask.
+		registerTuiApprovalHandler(null);
+		process.env.EIGHT_HEADLESS = "1";
+		const replay = manager();
+		replay.setDenialSession("sess-strict");
+		replay.enableInfiniteMode();
+		expect(await replay.requestPermission("run", "x", "cd /prod && deploytool --apply")).toBe(
+			false,
+		);
+		expect(await replay.requestPermission("run", "x", 'cd "$(fetchtool x)" && ls')).toBe(false);
+	});
+
+	test("a yes to the same call with extra spaces still clears its denial", async () => {
+		recordDenial("sess-same", "deploytool --apply");
+		const after = manager();
+		after.setDenialSession("sess-same");
+		after.enableInfiniteMode();
+		registerTuiApprovalHandler(async () => "approve");
+		expect(await after.requestPermission("run", "x", "deploytool   --apply")).toBe(true);
+		expect(readDenials("sess-same")).toEqual([]);
+	});
+
 	test("an unrelated command in the same resumed session is not affected", async () => {
 		const before = manager();
 		before.setDenialSession("sess-3");

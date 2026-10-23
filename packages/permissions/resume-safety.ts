@@ -55,7 +55,9 @@ export function resumeReturnQuestion(yolo: boolean): string {
 // ── C3: the denial ledger ────────────────────────────────────────────
 
 export interface DeniedCall {
-	/** sha256 of the command, lowercased, whitespace collapsed, a leading cd prefix dropped. The command itself is never stored. */
+	/** The strict fingerprint: the same, but the cd prefix is kept. Only this one clears a denial. */
+	sfp: string;
+	/** Loose fingerprint, for matching: sha256 of the command, lowercased, whitespace collapsed, a leading cd prefix dropped. The command itself is never stored. */
 	fp: string;
 	/** What the person sees: the command, scrubbed of URL credentials and queries, cut to 120. */
 	hint: string;
@@ -68,12 +70,19 @@ export const MAX_DENIAL_FILES = 100;
 
 const SAFE_KEY = /^[A-Za-z0-9._-]+$/;
 
+const squash = (c: string) => c.toLowerCase().replace(/\s+/g, " ").trim();
+
+/** Strict: lowercased and whitespace collapsed, a cd prefix kept. Clearing a denial uses this. */
+export function strictFingerprint(command: string): string {
+	return createHash("sha256").update(squash(command)).digest("hex").slice(0, 32);
+}
+
+/** Loose, for matching: a leading cd prefix is dropped, so a spelling of a denied call still asks. */
 export function denialFingerprint(command: string): string {
 	// The same call spelled with extra spaces or a leading `cd <dir> &&` is the same call.
 	let bare = commandAfterCdPrefix(command, "/");
 	bare = bare.replace(/^\s*cd[ \t]+[^;&\n]+?[ \t]*&&[ \t]*/, "");
-	const norm = bare.toLowerCase().replace(/\s+/g, " ").trim();
-	return createHash("sha256").update(norm).digest("hex").slice(0, 32);
+	return createHash("sha256").update(squash(bare)).digest("hex").slice(0, 32);
 }
 
 export function denialHint(command: string): string {
@@ -104,7 +113,10 @@ export function readDenials(sessionKey: string, dir?: string): DeniedCall[] {
 		return parsed.denied
 			.filter(
 				(d): d is DeniedCall =>
-					typeof d?.fp === "string" && typeof d?.hint === "string" && typeof d?.at === "string",
+					typeof d?.fp === "string" &&
+					typeof d?.sfp === "string" &&
+					typeof d?.hint === "string" &&
+					typeof d?.at === "string",
 			)
 			.slice(-MAX_DENIALS_PER_SESSION);
 	} catch {
@@ -140,20 +152,29 @@ function prune(d: string): void {
 
 /** Record one denial. The same command twice is one row; the oldest rows fall off the cap. */
 export function recordDenial(sessionKey: string, command: string, dir?: string): void {
-	const fp = denialFingerprint(command);
-	const rows = readDenials(sessionKey, dir).filter((d) => d.fp !== fp);
-	rows.push({ fp, hint: denialHint(command), at: new Date().toISOString() });
+	const sfp = strictFingerprint(command);
+	const rows = readDenials(sessionKey, dir).filter((d) => d.sfp !== sfp);
+	rows.push({
+		fp: denialFingerprint(command),
+		sfp,
+		hint: denialHint(command),
+		at: new Date().toISOString(),
+	});
 	save(sessionKey, rows.slice(-MAX_DENIALS_PER_SESSION), dir);
 }
 
-/** A fresh decision approved this call: its denial is gone. Removes a row, writes no approval. */
+/**
+ * A fresh decision approved this exact call: its denial is gone. Only a row with
+ * the same strict fingerprint goes; a yes to a different call that matches loosely
+ * (another cd folder, the bare command) clears nothing. Writes no approval.
+ */
 export function clearDenial(sessionKey: string, command: string, dir?: string): void {
-	const fp = denialFingerprint(command);
+	const sfp = strictFingerprint(command);
 	const rows = readDenials(sessionKey, dir);
-	if (rows.some((d) => d.fp === fp))
+	if (rows.some((d) => d.sfp === sfp))
 		save(
 			sessionKey,
-			rows.filter((d) => d.fp !== fp),
+			rows.filter((d) => d.sfp !== sfp),
 			dir,
 		);
 }

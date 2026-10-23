@@ -30,6 +30,7 @@ import {
 	denialFingerprint,
 	readDenials,
 	recordDenial,
+	strictFingerprint,
 } from "./resume-safety";
 import { readOnlyInlinePython } from "./s1-inline-python";
 import { type ActiveShellKind, posixRulesApply } from "./shell-tools";
@@ -595,7 +596,7 @@ export class PermissionManager {
 	/** The session whose denials are kept on disk (#4821), or null: none are written or read. */
 	private denialSession: string | null = null;
 	/** Fingerprints denied before a crash: asked again, in every mode, until a fresh yes (#4821). */
-	private resumedDenials: Set<string> = new Set();
+	private resumedDenials: Map<string, Set<string>> = new Map();
 	private infiniteMode = false;
 	private infiniteModeStartTime: number | null = null;
 	private infiniteModeAuditLog: InfiniteModeAuditEntry[] = [];
@@ -936,7 +937,12 @@ export class PermissionManager {
 	setDenialSession(key: string | null): DeniedCall[] {
 		this.denialSession = key;
 		const rows = key ? readDenials(key) : [];
-		this.resumedDenials = new Set(rows.map((d) => d.fp));
+		this.resumedDenials = new Map();
+		for (const d of rows) {
+			const strict = this.resumedDenials.get(d.fp) ?? new Set<string>();
+			strict.add(d.sfp);
+			this.resumedDenials.set(d.fp, strict);
+		}
 		return rows;
 	}
 
@@ -1154,7 +1160,10 @@ export class PermissionManager {
 			if (command) {
 				this.approvedCommands.add(sessionKey(command, opts.where));
 				// A fresh yes ends an earlier denial. The yes itself stays in memory only.
-				this.resumedDenials.delete(denialFingerprint(command));
+				const loose = denialFingerprint(command);
+				const strict = this.resumedDenials.get(loose);
+				strict?.delete(strictFingerprint(command));
+				if (strict?.size === 0) this.resumedDenials.delete(loose);
 				this.persistDenial(() => clearDenial(this.denialSession as string, command));
 			}
 		} else {
