@@ -21,7 +21,15 @@ import { registerToolManifest } from "../permissions/capability-manifest.js";
 import { evaluateToolCall } from "../permissions/policy-engine.js";
 import { EffectLedger } from "./ledger.js";
 import { openRun } from "./run.js";
-import { openRunStorage } from "./storage.js";
+import {
+	appendFileNoFollow,
+	ensureRealSubfolder,
+	openRunStorage,
+	preparePrivateFolder,
+	readFileNoFollow,
+	resolveInside,
+	writeFileNoFollow,
+} from "./storage.js";
 import { type Gate, type Replay, durableTool } from "./tools.js";
 
 /** How the Telegram send declares itself: the three rows of the replay rule. */
@@ -47,7 +55,7 @@ const FILE = "notes.txt";
 const CONTENT = "release notes: durable runs\n";
 
 function append(file: string, row: Record<string, unknown>): void {
-	fs.appendFileSync(file, `${JSON.stringify(row)}\n`, { mode: 0o600 });
+	appendFileNoFollow(file, `${JSON.stringify(row)}\n`);
 }
 
 function wrapExecutor<T extends SqliteExecutor>(inner: T, tick: (l: string) => void): T {
@@ -78,11 +86,13 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
 	const { dir } = opts;
 	const variant = opts.variant ?? "key";
 	const client = opts.client ?? "tui";
-	fs.mkdirSync(path.join(dir, "out"), { recursive: true, mode: 0o700 });
-	fs.writeFileSync(
+	// The folder is checked before a single file is written into it, and every write below
+	// refuses a link at its name: a shared or hostile folder is refused, never written through.
+	preparePrivateFolder(dir);
+	const outDir = ensureRealSubfolder(dir, "out");
+	writeFileNoFollow(
 		path.join(dir, "corpus.txt"),
 		"durable runs resume after a crash\nunrelated line\n",
-		{ mode: 0o600 },
 	);
 	const effects = path.join(dir, "effects.log");
 	const gateLog = path.join(dir, "gate.log");
@@ -90,7 +100,7 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
 	let ticks = 0;
 	const tick = (label: string) => {
 		ticks++;
-		if (opts.tickLog) fs.appendFileSync(opts.tickLog, `${ticks} ${label}\n`);
+		if (opts.tickLog) appendFileNoFollow(opts.tickLog, `${ticks} ${label}\n`);
 		if (opts.killAt !== undefined && ticks === opts.killAt) process.kill(process.pid, "SIGKILL");
 	};
 
@@ -125,8 +135,7 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
 				parameters: Type.Object({ query: Type.String() }),
 				replay: "safe",
 				run: async (a) =>
-					fs
-						.readFileSync(path.join(dir, "corpus.txt"), "utf8")
+					readFileNoFollow(path.join(dir, "corpus.txt"))
 						.split("\n")
 						.filter((l) => l.includes(a.query))
 						.join("\n"),
@@ -141,14 +150,11 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
 				replay: "once",
 				idempotentByKey: true, // a hash check: identical content is left alone
 				run: async (a) => {
-					const out = path.resolve(dir, "out");
-					const target = path.resolve(out, a.path);
-					// A model-chosen path never leaves the run's out folder.
-					if (!target.startsWith(out + path.sep)) throw new Error("path is outside the run folder");
+					// A model-chosen path never leaves the run's out folder, by name or by link.
+					const target = resolveInside(outDir, a.path);
 					tick("write:before");
-					if (fs.existsSync(target) && fs.readFileSync(target, "utf8") === a.content)
-						return "unchanged";
-					fs.writeFileSync(`${target}.tmp`, a.content, { mode: 0o600 });
+					if (fs.existsSync(target) && readFileNoFollow(target) === a.content) return "unchanged";
+					writeFileNoFollow(`${target}.tmp`, a.content);
 					fs.renameSync(`${target}.tmp`, target);
 					append(effects, { ev: "write", path: a.path, client });
 					tick("write:after");
@@ -170,11 +176,10 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
 					tick("send:before");
 					append(effects, { ev: "attempt", client });
 					const sent = path.join(dir, "sent.jsonl");
-					const seen =
-						fs.existsSync(sent) && fs.readFileSync(sent, "utf8").includes(JSON.stringify(key));
+					const seen = fs.existsSync(sent) && readFileNoFollow(sent).includes(JSON.stringify(key));
 					if (!seen || variant !== "key")
 						append(effects, { ev: "send", key, client, text: a.text });
-					if (!seen) fs.appendFileSync(sent, `${JSON.stringify(key)}\n`, { mode: 0o600 });
+					if (!seen) appendFileNoFollow(sent, `${JSON.stringify(key)}\n`);
 					tick("send:after");
 					return "sent";
 				},

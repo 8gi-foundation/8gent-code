@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { EffectLedger } from "./ledger.js";
-import { RUN_ID_RE, defaultRunDb, preparePrivateFile } from "./storage.js";
+import { RUN_ID_RE, defaultRunDb, preparePrivateFile, resolveInside } from "./storage.js";
 import { type DurableDeps, durableTool } from "./tools.js";
 
 const ROOT = path.resolve(import.meta.dir, "../..");
@@ -183,5 +183,41 @@ describe("flag off loads nothing", () => {
 		expect(await proc.exited).toBe(1);
 		expect(err).toContain("EIGHT_DURABLE_RUN=1");
 		expect(fs.existsSync(dir)).toBe(false);
+	});
+});
+
+describe("write_file stays inside the run's out folder", () => {
+	test("resolveInside refuses a path above the folder, an absolute one, and one through a link", () => {
+		const base = fresh();
+		const out = path.join(base, "out");
+		fs.mkdirSync(path.join(out, "sub"), { recursive: true });
+		const elsewhere = path.join(base, "elsewhere");
+		fs.mkdirSync(elsewhere);
+		fs.symlinkSync(elsewhere, path.join(out, "linkdir"));
+		for (const bad of [
+			"../x",
+			"../../etc/passwd",
+			"sub/../../x",
+			"/etc/passwd",
+			path.join(base, "elsewhere", "x"),
+			"linkdir/x",
+			"linkdir/new/deeper/x",
+			"..",
+			"",
+		])
+			expect(() => resolveInside(out, bad), JSON.stringify(bad)).toThrow();
+		const real = fs.realpathSync(out);
+		expect(resolveInside(out, "notes.txt")).toBe(path.join(real, "notes.txt"));
+		expect(resolveInside(out, "sub/deeper/notes.txt")).toBe(
+			path.join(real, "sub", "deeper", "notes.txt"),
+		);
+	});
+
+	test("the demo's write_file resolves its path through it", () => {
+		const src = fs.readFileSync(path.join(import.meta.dir, "demo.ts"), "utf8");
+		const at = src.indexOf('name: "write_file"');
+		const block = src.slice(at, src.indexOf('name: "telegram_send"', at));
+		expect(block).toContain("resolveInside(outDir, a.path)");
+		expect(block).not.toMatch(/path\.join\(dir, "out", a\.path\)/);
 	});
 });

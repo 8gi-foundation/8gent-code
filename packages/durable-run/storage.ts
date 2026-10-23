@@ -22,12 +22,11 @@ export function defaultRunDb(runId: string): string {
 }
 
 /**
- * Create or tighten the file: 0600, regular files only, never through a link. A folder this
- * creates is 0700. An existing folder is never re-moded (`8gent durable-run ~` must not chmod
- * the home folder): it must be this user's and not writable by anyone else, or it is refused.
+ * Make a folder fit to hold a run, BEFORE anything is written into it. A folder this creates is
+ * 0700. An existing folder is never re-moded (`8gent durable-run ~` must not chmod the home
+ * folder): it must be this user's and not writable by anyone else, or it is refused.
  */
-export function preparePrivateFile(file: string): void {
-	const dir = path.dirname(file);
+export function preparePrivateFolder(dir: string): void {
 	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const st = fs.statSync(dir);
 	if (!st.isDirectory()) throw new Error(`not a folder: ${dir}`);
@@ -35,6 +34,75 @@ export function preparePrivateFile(file: string): void {
 		throw new Error(`folder is not yours: ${dir}`);
 	if (st.mode & 0o022)
 		throw new Error(`folder is writable by others, refusing to keep a run in it: ${dir}`);
+}
+
+const F = fs.constants;
+
+/** Write a 0600 file, never through a link at its name (O_NOFOLLOW). `exclusive`: it must be new. */
+export function writeFileNoFollow(
+	file: string,
+	data: string,
+	opts: { exclusive?: boolean } = {},
+): void {
+	const flags = F.O_WRONLY | F.O_CREAT | F.O_NOFOLLOW | (opts.exclusive ? F.O_EXCL : F.O_TRUNC);
+	const fd = fs.openSync(file, flags, 0o600);
+	try {
+		fs.writeSync(fd, data);
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+/** Append to a 0600 file, never through a link at its name. */
+export function appendFileNoFollow(file: string, data: string): void {
+	const fd = fs.openSync(file, F.O_WRONLY | F.O_APPEND | F.O_CREAT | F.O_NOFOLLOW, 0o600);
+	try {
+		fs.writeSync(fd, data);
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+/** Read a file, never through a link at its name. */
+export function readFileNoFollow(file: string): string {
+	const fd = fs.openSync(file, F.O_RDONLY | F.O_NOFOLLOW);
+	try {
+		return fs.readFileSync(fd, "utf8");
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+/** A subfolder of the run that is a real folder, not a link someone put in its place. */
+export function ensureRealSubfolder(parent: string, name: string): string {
+	const dir = path.join(parent, name);
+	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const st = fs.lstatSync(dir);
+	if (!st.isDirectory()) throw new Error(`${dir} is not a plain folder`);
+	return dir;
+}
+
+/** `rel` as a path under `root`: never above it, never through a link, however it is spelled. */
+export function resolveInside(root: string, rel: string): string {
+	const base = fs.realpathSync(root);
+	const target = path.resolve(base, rel);
+	if (!target.startsWith(base + path.sep)) throw new Error("path is outside the run folder");
+	// Every folder on the way must be real and inside: realpath the deepest one that exists.
+	let probe = path.dirname(target);
+	while (!fs.existsSync(probe) && probe !== base) probe = path.dirname(probe);
+	const real = fs.realpathSync(probe);
+	if (real !== base && !real.startsWith(base + path.sep))
+		throw new Error("path leaves the run folder through a link");
+	return target;
+}
+
+/**
+ * Create or tighten the file: 0600, regular files only, never through a link, in a folder that
+ * passed preparePrivateFolder.
+ */
+export function preparePrivateFile(file: string): void {
+	const dir = path.dirname(file);
+	preparePrivateFolder(dir);
 	const fd = fs.openSync(
 		file,
 		fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW,
