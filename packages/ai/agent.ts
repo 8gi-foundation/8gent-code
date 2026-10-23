@@ -15,6 +15,7 @@ import { resolveRetrySettings } from "../settings/retry";
 import { loadSettings } from "../settings/store";
 import { type ProviderConfig, createModel } from "./providers";
 import { silentCallsNoteForSteps, silentCallsRunForSteps } from "./silent-calls";
+import { capToolResults } from "./tool-result-cap";
 import {
 	type AgentTools,
 	type RuntimeParams,
@@ -308,55 +309,55 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		experimental_context: toolContext,
 		stopWhen: stepCountIs(config.maxSteps || 30),
 		// Fires before every model call. onStepStart is observation only and a
-		// throwing callback never breaks the loop. Steering (D1) is the one thing
-		// that changes the step: drained messages are spliced in, see steerMessages.
-		prepareStep:
-			config.onStepStart || config.steer || budgetMs > 0 || silentThreshold > 0
-				? async ({
-						stepNumber,
-						messages,
-						steps,
-					}: {
-						stepNumber: number;
-						messages: ModelMessage[];
-						steps?: ReadonlyArray<{
-							text?: string;
-							toolCalls?: ReadonlyArray<{ toolName?: string }>;
-						}>;
-					}) => {
-						try {
-							await config.onStepStart?.({ stepNumber });
-						} catch {
-							/* step-start logging is best-effort */
-						}
-						// Each generate() is a new turn: restart the budget clock.
-						if (stepNumber === 0) budgetDrain.reset();
-						if (stepNumber === 0) {
-							silentFired = false;
-							silentFrom = 0;
-						}
-						if (config.silentProgress && silentThreshold > 0 && stepNumber > 0) {
-							const run = silentCallsRunForSteps((steps ?? []).slice(silentFrom), silentThreshold);
-							if (run) {
-								silentFrom = steps?.length ?? 0;
-								config.silentProgress(run.takeProgress());
-							}
-						}
-						let silentStop = false;
-						if (!config.silentProgress && !silentFired && silentThreshold > 0 && stepNumber > 0) {
-							const note = silentCallsNoteForSteps(steps ?? [], silentThreshold);
-							if (note) {
-								silentFired = true;
-								silentStop = true;
-								silentPending.push(note);
-							}
-						}
-						const steered = steerMessages(steerLog, stepNumber, messages, steer);
-						if (silentStop)
-							return { ...(steered ? { messages: steered } : {}), toolChoice: "none" as const };
-						return steered ? { messages: steered } : undefined;
-					}
-				: undefined,
+		// throwing callback never breaks the loop. Two things change the step:
+		// steering (D1) splices drained messages in, see steerMessages,
+		// and every tool result is capped (tool-result-cap.ts).
+		prepareStep: async ({
+			stepNumber,
+			messages,
+			steps,
+		}: {
+			stepNumber: number;
+			messages: ModelMessage[];
+			steps?: ReadonlyArray<{
+				text?: string;
+				toolCalls?: ReadonlyArray<{ toolName?: string }>;
+			}>;
+		}) => {
+			try {
+				await config.onStepStart?.({ stepNumber });
+			} catch {
+				/* step-start logging is best-effort */
+			}
+			// Each generate() is a new turn: restart the budget clock.
+			if (stepNumber === 0) budgetDrain.reset();
+			if (stepNumber === 0) {
+				silentFired = false;
+				silentFrom = 0;
+			}
+			if (config.silentProgress && silentThreshold > 0 && stepNumber > 0) {
+				const run = silentCallsRunForSteps((steps ?? []).slice(silentFrom), silentThreshold);
+				if (run) {
+					silentFrom = steps?.length ?? 0;
+					config.silentProgress(run.takeProgress());
+				}
+			}
+			let silentStop = false;
+			if (!config.silentProgress && !silentFired && silentThreshold > 0 && stepNumber > 0) {
+				const note = silentCallsNoteForSteps(steps ?? [], silentThreshold);
+				if (note) {
+					silentFired = true;
+					silentStop = true;
+					silentPending.push(note);
+				}
+			}
+			const capped = capToolResults(messages);
+			const steered =
+				steerMessages(steerLog, stepNumber, capped, steer) ?? (capped !== messages ? capped : null);
+			if (silentStop)
+				return { ...(steered ? { messages: steered } : {}), toolChoice: "none" as const };
+			return steered ? { messages: steered } : undefined;
+		},
 
 		onStepFinish: config.onStepFinish
 			? (event: any) => {
