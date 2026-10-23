@@ -1,7 +1,15 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readdirSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { SessionManager } from "../eight/session-manager";
 import { appendRecord, wasInterrupted } from "../specifications/session/durable-ledger";
 import { PermissionManager } from "./index";
@@ -14,6 +22,8 @@ import {
 	MAX_DENIALS_PER_SESSION,
 	MAX_DENIAL_FILES,
 	denialDir,
+	denialFingerprint,
+	denialPath,
 	readDenials,
 	recordDenial,
 	resumeLaunchMode,
@@ -245,6 +255,41 @@ describe("C3: a denied call is not re-run on resume without a fresh decision", (
 		registerTuiApprovalHandler(async () => "approve");
 		expect(await after.requestPermission("run", "x", "deploytool   --apply")).toBe(true);
 		expect(readDenials("sess-same")).toEqual([]);
+	});
+
+	test("a legacy row with no sfp loads, is refused on replay, and no yes clears it", async () => {
+		const file = denialPath("sess-legacy");
+		mkdirSync(dirname(file as string), { recursive: true });
+		writeFileSync(
+			file as string,
+			JSON.stringify({ denied: [{ fp: denialFingerprint("deploytool --apply") }] }),
+		);
+		const rows = readDenials("sess-legacy");
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.hint).toBe("(an earlier denial)");
+		process.env.EIGHT_HEADLESS = "1";
+		const replay = manager();
+		replay.setDenialSession("sess-legacy");
+		replay.enableInfiniteMode();
+		replay.setAutoApprove(true);
+		expect(await replay.requestPermission("run", "x", "deploytool --apply")).toBe(false);
+		// Interactive yes to the /staging variant and to the same call: the row stays.
+		process.env.EIGHT_HEADLESS = "";
+		registerTuiApprovalHandler(async () => "approve");
+		const after = manager();
+		after.setDenialSession("sess-legacy");
+		after.enableInfiniteMode();
+		expect(await after.requestPermission("run", "x", "cd /staging && deploytool --apply")).toBe(
+			true,
+		);
+		expect(await after.requestPermission("run", "x", "deploytool --apply")).toBe(true);
+		expect(readDenials("sess-legacy")).toHaveLength(1);
+		registerTuiApprovalHandler(null);
+		process.env.EIGHT_HEADLESS = "1";
+		const again = manager();
+		again.setDenialSession("sess-legacy");
+		again.enableInfiniteMode();
+		expect(await again.requestPermission("run", "x", "deploytool --apply")).toBe(false);
 	});
 
 	test("an unrelated command in the same resumed session is not affected", async () => {

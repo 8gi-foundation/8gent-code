@@ -110,14 +110,17 @@ export function readDenials(sessionKey: string, dir?: string): DeniedCall[] {
 	try {
 		const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as { denied?: unknown };
 		if (!Array.isArray(parsed.denied)) return [];
+		// A row with a fingerprint is never dropped: dropping it would let the call run.
+		// A missing strict fingerprint becomes one strictFingerprint cannot produce, so the
+		// row matches loosely, asks every time, and no yes can clear it.
 		return parsed.denied
-			.filter(
-				(d): d is DeniedCall =>
-					typeof d?.fp === "string" &&
-					typeof d?.sfp === "string" &&
-					typeof d?.hint === "string" &&
-					typeof d?.at === "string",
-			)
+			.filter((d): d is Partial<DeniedCall> & { fp: string } => typeof d?.fp === "string")
+			.map((d) => ({
+				fp: d.fp,
+				sfp: typeof d.sfp === "string" ? d.sfp : `legacy:${d.fp}`,
+				hint: typeof d.hint === "string" ? d.hint : "(an earlier denial)",
+				at: typeof d.at === "string" ? d.at : "",
+			}))
 			.slice(-MAX_DENIALS_PER_SESSION);
 	} catch {
 		return [];
