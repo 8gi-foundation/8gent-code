@@ -37,6 +37,11 @@ export interface ServiceContext {
 	user: string;
 	/** Termux $PREFIX (android only). */
 	prefix?: string;
+	/**
+	 * launchd label (darwin only). Defaults to SERVICE_LABEL. The macOS CI job sets a per-run
+	 * label so a real launchd install never touches a person's own com.8gent.daemon (#4862 G03).
+	 */
+	label?: string;
 }
 
 export type Step =
@@ -93,12 +98,26 @@ function paths(ctx: ServiceContext) {
 		// open handle would lock it out, so console output gets its own file.
 		consoleLog: p.join(logDir, "daemon-console.log"),
 		svDir: p.join(ctx.prefix ?? DEFAULT_TERMUX_PREFIX, "var", "service", SERVICE_LABEL),
-		plist: p.join(ctx.home, "Library", "LaunchAgents", `${SERVICE_LABEL}.plist`),
+		plist: p.join(ctx.home, "Library", "LaunchAgents", `${launchdLabel(ctx)}.plist`),
 		unit: p.join(ctx.home, ".config", "systemd", "user", `${SERVICE_LABEL}.service`),
 	};
 }
 
 // ----- darwin -----
+
+/** The launchd label for this context: SERVICE_LABEL unless a per-run label was given. */
+export function launchdLabel(ctx: Pick<ServiceContext, "label">): string {
+	if (ctx.label === undefined) return SERVICE_LABEL;
+	// A per-run label is only ever a test label under com.8gent.e2e. (anchored, no path
+	// characters): it can be neither the real label nor a way out of the LaunchAgents folder.
+	if (!PER_RUN_LABEL_RE.test(ctx.label))
+		throw new ServiceError(
+			`a launchd label other than ${SERVICE_LABEL} must match ${PER_RUN_LABEL_RE}; got ${JSON.stringify(ctx.label).slice(0, 60)}`,
+		);
+	return ctx.label;
+}
+
+export const PER_RUN_LABEL_RE = /^com\.8gent\.e2e\.[A-Za-z0-9.-]+$/;
 
 const xmlEscape = (s: string) =>
 	s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -111,7 +130,7 @@ export function launchdPlist(ctx: ServiceContext): string {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${SERVICE_LABEL}</string>
+  <string>${xmlEscape(launchdLabel(ctx))}</string>
   <key>ProgramArguments</key>
   <array>
 ${args}
@@ -133,7 +152,7 @@ ${args}
 `;
 }
 
-const launchdTarget = (ctx: ServiceContext) => `gui/${ctx.uid}/${SERVICE_LABEL}`;
+const launchdTarget = (ctx: ServiceContext) => `gui/${ctx.uid}/${launchdLabel(ctx)}`;
 
 const launchd: Backend = {
 	definitionPath: (ctx) => paths(ctx).plist,

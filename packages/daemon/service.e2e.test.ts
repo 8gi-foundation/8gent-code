@@ -1,20 +1,37 @@
 /**
  * Installs the real login service on a throwaway CI runner and drives it end
  * to end. It never runs on a developer machine: it needs EIGHT_SERVICE_E2E set
- * by the Platforms workflow and a GitHub-hosted runner, and it refuses macOS,
- * whose runner is a real person's machine.
+ * by the Platforms workflow (Linux, Windows) or macos-service.yml (macOS) and a
+ * GitHub-hosted runner.
+ *
+ * macOS (#4862 G03) additionally needs CI=true and EIGHT_SERVICE_E2E_LABEL, a
+ * per-run launchd label under com.8gent.e2e., with the plist and its logs in a
+ * temp HOME, so the job can never load, replace or remove com.8gent.daemon.
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { type ServiceContext, hostContext, runOperation, serviceStatus } from "./service";
+import {
+	SERVICE_LABEL,
+	type ServiceContext,
+	hostContext,
+	runOperation,
+	serviceStatus,
+} from "./service";
 
 const expected = process.env.EIGHT_SERVICE_E2E;
+/** A per-run launchd label, required on macOS. Never the real one. */
+const macLabel = process.env.EIGHT_SERVICE_E2E_LABEL ?? "";
+const macOk =
+	process.env.CI === "true" &&
+	/^com\.8gent\.e2e\.[A-Za-z0-9.-]+$/.test(macLabel) &&
+	macLabel !== SERVICE_LABEL;
 const enabled =
 	(expected === "installed" || expected === "unavailable") &&
 	process.env.RUNNER_ENVIRONMENT === "github-hosted" &&
-	process.platform !== "darwin";
+	(process.platform !== "darwin" || macOk);
 
 const HEALTH = "http://127.0.0.1:18789/health";
 
@@ -48,7 +65,12 @@ describe.skipIf(!enabled)("real login service on this runner", () => {
 		"daemon",
 		"run",
 	];
-	const ctx = hostContext(program);
+	const host = hostContext(program);
+	// macOS: the per-run label, with the plist and launchd's log files in a temp HOME.
+	const ctx: ServiceContext =
+		enabled && host.platform === "darwin"
+			? { ...host, home: mkdtempSync(path.join(tmpdir(), "8gent-launchd-e2e-")), label: macLabel }
+			: host;
 	const quiet = () => {};
 
 	test.if(expected === "unavailable")(

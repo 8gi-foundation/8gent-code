@@ -1,0 +1,82 @@
+name: macOS launchd service
+
+# #4862 G03: platforms.yml installs the real login service on Linux and Windows,
+# but nothing installed the launchd service on a Mac. This job does, on a
+# GitHub-hosted macOS runner, under a per-run label (com.8gent.e2e.<run>) with
+# the plist and launchd's logs in a temp HOME, so it can never load, replace or
+# remove a person's com.8gent.daemon. macOS minutes bill at 10x, so it runs only
+# on a release tag, on demand, and on pull requests that touch the service code.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+    paths:
+      - packages/daemon/service.ts
+      - packages/daemon/service.e2e.test.ts
+      - .github/workflows/macos-service.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-service-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  launchd:
+    name: launchd install, status, uninstall (macos-latest)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      EIGHT_SERVICE_E2E: installed
+      EIGHT_SERVICE_E2E_LABEL: com.8gent.e2e.${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+
+      # macos-latest ships Node 24, whose headers better-sqlite3 cannot compile
+      # against; Node 20 (as smoke-compiled.yml) has prebuilt-compatible headers.
+      - name: Setup Node (native dependency builds)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: The real label is untouched before the run
+        run: |
+          if launchctl print "gui/$(id -u)/com.8gent.daemon" >/dev/null 2>&1; then
+            echo "::error::com.8gent.daemon is loaded on this runner; refusing to run next to it"
+            exit 1
+          fi
+          echo "per-run label: $EIGHT_SERVICE_E2E_LABEL"
+
+      # The test skips itself unless CI=true, a GitHub-hosted runner and the
+      # per-run label are all present, so the grep makes a silent skip fail.
+      - name: launchd service, real install, status, start, stop, uninstall
+        run: |
+          set -o pipefail
+          bun test packages/daemon/service.e2e.test.ts 2>&1 | tee service-e2e.log
+          grep -q " 1 pass" service-e2e.log
+
+      # Belt and braces: whatever the test did, the per-run job is gone at the end.
+      - name: Remove the per-run job
+        if: always()
+        run: |
+          launchctl bootout "gui/$(id -u)/$EIGHT_SERVICE_E2E_LABEL" 2>/dev/null || true
+          if launchctl print "gui/$(id -u)/$EIGHT_SERVICE_E2E_LABEL" >/dev/null 2>&1; then
+            echo "::error::$EIGHT_SERVICE_E2E_LABEL is still loaded"
+            exit 1
+          fi
+          echo "per-run job removed"
