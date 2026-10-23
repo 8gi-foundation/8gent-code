@@ -7,8 +7,8 @@
  * The model-proxy handles provider selection, rate limiting, and fallback.
  */
 
-import { withRedirectHint } from "../providers/redirect-hint";
 import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
+import { withRedirectHint } from "../providers/redirect-hint";
 
 // Model proxy on Fly internal network, or Ollama fallback. Read at CALL time
 // (not module load) so the deploy/host config and the cloud-vs-local routing

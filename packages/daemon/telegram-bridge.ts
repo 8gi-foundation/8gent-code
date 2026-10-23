@@ -36,6 +36,7 @@ import {
 	createFlowModeController,
 } from "../flow/flow-mode";
 import { MEMORY_COMMANDS, TelegramMemory } from "../memory/telegram-memory";
+import { withRedirectHint } from "../providers/redirect-hint";
 import { DaemonClient, SessionStore, TelegramBridgeAdapter } from "../telegram-bot";
 import {
 	BOARD_ROSTER,
@@ -79,7 +80,6 @@ import { getDataDir } from "./data-dir";
 import { classifyInput, gateInput } from "./input-gate";
 import { NO_LINK_PREVIEW } from "./notifications";
 import { VOICE_ACK, ackForTranscript } from "./voice-ack";
-import { withRedirectHint } from "../providers/redirect-hint";
 
 /**
  * Where messages from chats the bridge does not answer are recorded.

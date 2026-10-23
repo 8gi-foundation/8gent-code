@@ -27,12 +27,12 @@
  */
 
 import { createOllamaServer } from "../local-model-server";
-import { redirectHint } from "./redirect-hint";
 import {
 	DecisionReadoutJudge,
 	decisionConfigFromEnv,
 	decisionJudgeEnabled,
 } from "./decision-readout";
+import { redirectHint } from "./redirect-hint";
 
 /** Where a verdict came from, so callers can tell a real judgment from a fail-closed default. */
 export type VerdictSource = "selene" | "decision-readout" | "fail-closed";

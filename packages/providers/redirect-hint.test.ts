@@ -4,10 +4,10 @@
  * text appears, with the verdict still a failure (never an allow).
  */
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { generateResponse } from "../board-vessel/inference";
 import { localSpokenModel } from "../daemon/telegram-bridge";
 import { JudgeScorer } from "../kernel/judge";
-import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { SeleneJudge, SkyworkScorer } from "./local-judge";
 import { redirectHint } from "./redirect-hint";
 
@@ -23,7 +23,10 @@ beforeAll(() => {
 		hostname: "127.0.0.1",
 		fetch() {
 			hits++;
-			return new Response(null, { status: 308, headers: { Location: "https://example.invalid/x" } });
+			return new Response(null, {
+				status: 308,
+				headers: { Location: "https://example.invalid/x" },
+			});
 		},
 	});
 	url = `http://127.0.0.1:${stub.port}`;
@@ -41,9 +44,9 @@ const hint = (setting: string) => `the URL ${host} redirected; set the https URL
 describe("redirect hint, one stub per site", () => {
 	test("hint text and non-redirect errors", () => {
 		expect(redirectHint(new Error("boom"), url, "X")).toBe("");
-		expect(redirectHint(Object.assign(new TypeError("x"), { code: "UnexpectedRedirect" }), url, "X")).toBe(
-			hint("X"),
-		);
+		expect(
+			redirectHint(Object.assign(new TypeError("x"), { code: "UnexpectedRedirect" }), url, "X"),
+		).toBe(hint("X"));
 	});
 
 	test("board vessel, Ollama path names OLLAMA_HOST", async () => {
