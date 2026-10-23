@@ -63,6 +63,8 @@ export const BLOCK_RULES: ReadonlySet<string> = new Set([
 	"kill_all_or_launchd",
 	"kill_system_process",
 	"keychain_delete",
+	"keychain_dump",
+	"fork_bomb",
 	"csrutil_disable_or_clear",
 	"spctl_disable_or_clear",
 	"nvram_disable_or_clear",
@@ -97,15 +99,296 @@ const NET_SINK =
 	/(?:^|[\s|;&(])(?:curl\b[^|;&\n]*(?:\s-d\b|\s--data|\s-F\b|\s--form|\s-T\b|\s--upload-file|\s-X\s*(?:POST|PUT|PATCH))|nc\b|ncat\b|netcat\b|scp\b|sftp\b|ftp\b|telnet\b|wget\b[^|;&\n]*--post|rsync\b[^|;&\n]*\S+:\S*)/;
 const SECRET_READ = new RegExp(
 	[
-		String.raw`(?:(?:cat|less|head|tail|base64|xxd|od|strings|tar|zip|gpg)\s+[^|;&\n]*(?:\.env\b|\.ssh/id_\w+(?!\.pub)|id_rsa(?!\.pub)|id_ed25519(?!\.pub)|\.aws/credentials|\.netrc|\.git-credentials|\.npmrc|keychain-db))`,
+		String.raw`(?:(?:cat|less|head|tail|base64|xxd|od|strings|tar|zip|gpg)\s+[^|;&\n]*(?:\.env\b|\.ssh/id_\w+(?!\w|\.pub)|id_rsa(?!\.pub)|id_ed25519(?!\.pub)|\.aws/credentials|\.netrc|\.git-credentials|\.npmrc|keychain-db))`,
 		String.raw`(?:^|[|;&\s(])(?:env|printenv|set)\s*(?:\||>)`,
 		String.raw`@[^\s"']*(?:\.env\b|\.ssh/|id_rsa|id_ed25519|credentials|\.netrc)`,
-		String.raw`(?:scp|rsync|sftp)\s+(?:-\w+\s+(?:\S+\s+)?)*[^\s|;&]*(?:\.env\b|\.ssh/id_\w+(?!\.pub)|id_rsa(?!\.pub)|\.aws/credentials)\S*\s+\S+:`,
+		String.raw`(?:scp|rsync|sftp)\s+(?:-\w+\s+(?:\S+\s+)?)*[^\s|;&]*(?:\.env\b|\.ssh/id_\w+(?!\w|\.pub)|id_rsa(?!\.pub)|\.aws/credentials)\S*\s+\S+:`,
 		String.raw`security\s+find-(?:generic|internet)-password[^|;&\n]*-w[^\n]*\|\s*(?:curl|nc|ssh)`,
 	].join("|"),
 );
 const REMOTE_EXEC_RE =
 	/(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*["']?\$\((?:curl|wget)\b|<\((?:curl|wget)\b|\beval\s+["']?\$\((?:curl|wget)\b/;
+
+const SHUTDOWN_BINS = new Set(["shutdown", "reboot", "halt", "poweroff"]);
+/** Programs that print or copy a file's bytes into the transcript or elsewhere. */
+const CRED_READERS = new Set([
+	"cat",
+	"less",
+	"more",
+	"head",
+	"tail",
+	"bat",
+	"nl",
+	"tac",
+	"xxd",
+	"od",
+	"strings",
+	"base64",
+	"grep",
+	"egrep",
+	"fgrep",
+	"rg",
+	"ag",
+	"awk",
+	"gawk",
+	"sed",
+	"cp",
+	"vim",
+	"vi",
+	"view",
+	"nano",
+	"emacs",
+	"sort",
+	"cut",
+	"diff",
+	"paste",
+	"openssl",
+]);
+/** Readers that walk a directory, so a credential folder is a read of what is in it. */
+const DIR_READERS = new Set(["grep", "egrep", "fgrep", "rg", "ag", "cp"]);
+/** Programs that pack or copy a credential into something that can then be sent. */
+const PACKERS = new Set(["tar", "zip", "7z", "7za", "cpio", "gzip", "bzip2", "xz", "cp"]);
+/** Credential stores outside the project: reading one puts the secret in the model's context. */
+const CRED_FILES = [
+	".aws/credentials",
+	".ssh/id_rsa",
+	".ssh/id_ed25519",
+	".ssh/id_ecdsa",
+	".ssh/id_dsa",
+	".ssh/identity",
+	".netrc",
+	".git-credentials",
+	".gnupg/secring.gpg",
+	".gnupg/private-keys-v1.d/k",
+	".config/gh/hosts.yml",
+	".docker/config.json",
+	".kube/config",
+];
+const CRED_DIR_NAMES = [".aws", ".ssh", ".gnupg", ".kube", ".docker"];
+const CREDENTIAL_FILE_RE =
+	/(^|\/)(\.aws\/credentials|\.ssh\/(id_[\w.-]+|identity)|\.netrc|\.git-credentials|\.gnupg\/(secring\.gpg|private-keys-v1\.d(\/.*)?)|\.config\/gh\/hosts\.yml|\.docker\/config\.json|\.kube\/config)$/;
+const CRED_DIR_RE = /(^|\/)\.(aws|ssh|gnupg|kube|docker)$/;
+/** Folders where a bare `config` is a credential file (kubeconfig, docker config.json). */
+const CRED_CONFIG_DIR_RE = /(^|\/)\.(kube|docker)$/;
+/** A credential name on its own, for a `cat credentials` after a `cd` into the folder. */
+const CRED_NAME_RE =
+	/^(credentials|id_[\w.-]+|identity|\.netrc|\.git-credentials|hosts\.yml|secring\.gpg)$/;
+/** Credential paths named inside code text (python -c, a heredoc to an interpreter). */
+const CRED_TEXT_RE =
+	/\.aws\/credentials|\.ssh\/id_[A-Za-z0-9_]+(?!\w|\.pub)|\.netrc|\.git-credentials|\.gnupg\/(?:secring|private-keys)/;
+/** A credential folder named as text (an sftp `put -r .ssh`). */
+const CRED_DIR_TEXT_RE = /(?:^|[\s/'"~])\.(?:ssh|aws|gnupg)(?![\w.-])/;
+const PIPE_TO_SSH = /\|\s*(?:sudo\s+)?ssh\b/;
+
+/** `~`, `$HOME`, `/Users/x` to `~`; drop `//`, `/./`, trailing `/`; fold `..`. Linear. */
+function normPath(raw: string): string {
+	const p = raw.replace(/^(?:\$HOME|\$\{HOME\}|\/Users\/[^/]+|\/home\/[^/]+)(?=\/|$)/, "~");
+	const out: string[] = [];
+	const parts = p.split("/");
+	for (let i = 0; i < parts.length; i++) {
+		const seg = parts[i] as string;
+		if (i > 0 && (seg === "" || seg === ".")) continue;
+		const top = out[out.length - 1];
+		if (seg === ".." && top !== undefined && top !== ".." && top !== "~" && top !== "") {
+			out.pop();
+			continue;
+		}
+		out.push(seg);
+	}
+	return out.join("/");
+}
+
+/** One glob segment as a regex source. A leading `*` or `?` never matches a leading dot, as in the shell. */
+function globSegment(seg: string): string {
+	const body = seg
+		.replace(/\*+/g, "*")
+		.replace(/\[[^\]]*\]/g, "?")
+		.replace(/[.+^${}()|\\]/g, "\\$&")
+		.replace(/\*/g, "[^/]*")
+		.replace(/\?/g, "[^/]");
+	return (/^[*?[]/.test(seg) ? "(?!\\.)" : "") + body;
+}
+
+/** Folders whose names can make a relative glob a credential read (`.ssh/id_*`). */
+const CRED_GLOB_DIRS = new Set([".aws", ".ssh", ".gnupg", ".kube", ".docker", ".config", "gh"]);
+const CRED_BASENAMES = [
+	...new Set(
+		CRED_FILES.map((c) => c.slice(c.lastIndexOf("/") + 1)).concat(["config", "config.json"]),
+	),
+];
+
+/**
+ * Does this argument name a credential store? "file" for a key or credentials file, "dir" for a
+ * credential folder, null otherwise. Handles quotes, `--opt=PATH`, `//`, `/./`, `..` and globs.
+ * `inCredDir`: a `cd` on this line went into a credential folder, so a folderless glob (`*`,
+ * `cred*`) can name a credential there; anywhere else it does not (`cat *.json` is not one).
+ */
+function credKind(raw: string, inCredDir = false): "file" | "dir" | null {
+	let p = raw;
+	if (p.startsWith("-")) {
+		const eq = p.indexOf("=");
+		if (eq < 0) return null;
+		p = p.slice(eq + 1);
+	}
+	p = p.replace(/^['"]+|['"]+$/g, "");
+	if (!p || p.length > 4096) return null;
+	p = normPath(p);
+	if (inCredDir && (p === "." || p === "")) return "dir";
+	if (p.endsWith(".pub")) return null;
+	if (!/[*?[]/.test(p)) {
+		if (CREDENTIAL_FILE_RE.test(p)) return "file";
+		return CRED_DIR_RE.test(p) ? "dir" : null;
+	}
+	if (p.length > 256) return CRED_DIR_TEXT_RE.test(p) ? "file" : null;
+	const segs = p.split("/");
+	if (segs.length === 1) {
+		if (!inCredDir) return null;
+		const re = new RegExp(`^${globSegment(p)}$`);
+		return CRED_BASENAMES.some((c) => re.test(c)) ? "file" : null;
+	}
+	const body = segs.map(globSegment).join("/");
+	if (p.startsWith("~/")) {
+		const re = new RegExp(`^${body}$`);
+		if (CRED_FILES.some((c) => re.test(`~/${c}`))) return "file";
+		return CRED_DIR_NAMES.some((c) => re.test(`~/${c}`)) ? "dir" : null;
+	}
+	// Relative or absolute elsewhere: needs a literal credential folder in the path.
+	if (!segs.some((x) => CRED_GLOB_DIRS.has(x))) return null;
+	const re = new RegExp(`(?:^|/)${body}$`);
+	if (CRED_FILES.some((c) => re.test(`~/${c}`))) return "file";
+	return CRED_DIR_NAMES.some((c) => re.test(`~/${c}`)) ? "dir" : null;
+}
+
+/** `user@host:/path` or `host:path`: a remote end of scp, rsync or sftp. */
+function isRemoteSpec(a: string): boolean {
+	return !a.startsWith("-") && /^[^\s/:][^\s/:]*:/.test(a);
+}
+
+const FB_KEYWORDS = new Set(["then", "do", "else", "elif", "if", "while", "until", "!", "time"]);
+const FB_BOUNDARY = /[\s;&|(){}<>`"']/;
+const fbEdge = (c: string | undefined): boolean => c === undefined || FB_BOUNDARY.test(c);
+/** Total body text the fork-bomb check will read. Over this, a command is not judged: it is a bomb. */
+const FB_BUDGET = 12_000_000;
+const FB_MAX_DEFS = 64;
+
+/**
+ * The words of `body` that are in command position: the first word of a simple command, after
+ * `;`, `|`, `&`, `(`, `{` or a newline. `npm run build &` has the word `build` but it is an
+ * argument, not a call. One pass.
+ */
+function commandWords(body: string): string[] {
+	const out: string[] = [];
+	let cmdPos = true;
+	let i = 0;
+	while (i < body.length) {
+		const c = body[i] as string;
+		if (!FB_BOUNDARY.test(c)) {
+			let j = i + 1;
+			while (j < body.length && !FB_BOUNDARY.test(body[j] as string)) j++;
+			const word = body.slice(i, j);
+			if (cmdPos) out.push(word);
+			// `then f`, `do f`, `else f`: the word after a shell keyword is still a command.
+			cmdPos = cmdPos && FB_KEYWORDS.has(word);
+			i = j;
+			continue;
+		}
+		if (";|&({\n".includes(c)) cmdPos = true;
+		else if (!/\s/.test(c)) cmdPos = false;
+		i++;
+	}
+	return out;
+}
+
+/**
+ * A shell function that, directly or through other functions defined on the line, calls itself
+ * while backgrounding (`&`): `:(){ :|:& };:`, `.(){ .|.& };.`, `f(){ f & f & }; f`,
+ * `f(){ g|g& }; g(){ f|f& }`, `function f { f|f& }`. Any function name. Text only, linear:
+ * at most FB_MAX_DEFS definitions are read (more is treated as a bomb), each body once.
+ */
+function hasForkBomb(text: string): boolean {
+	if (!text.includes("&") || !text.includes("{")) return false;
+	const defs: { name: string; open: number }[] = [];
+	const ws = (c: string | undefined) => c !== undefined && /\s/.test(c);
+	// name(){  and  name () {
+	for (let i = text.indexOf("("); i >= 0; i = text.indexOf("(", i + 1)) {
+		let j = i + 1;
+		while (text[j] === " " || text[j] === "\t") j++;
+		if (text[j] !== ")") continue;
+		j++;
+		while (ws(text[j])) j++;
+		if (text[j] !== "{") continue;
+		let end = i;
+		while (end > 0 && i - end < 64 && ws(text[end - 1])) end--;
+		let st = end;
+		while (st > 0 && end - st < 64 && !fbEdge(text[st - 1])) st--;
+		if (st === end) continue;
+		defs.push({ name: text.slice(st, end), open: j });
+		if (defs.length > FB_MAX_DEFS) return true;
+	}
+	// function name {
+	for (let i = text.indexOf("function"); i >= 0; i = text.indexOf("function", i + 1)) {
+		if (!fbEdge(text[i - 1]) || !ws(text[i + 8])) continue;
+		let j = i + 8;
+		while (ws(text[j])) j++;
+		const st = j;
+		while (j < text.length && j - st < 64 && !fbEdge(text[j])) j++;
+		const name = text.slice(st, j);
+		while (ws(text[j])) j++;
+		if (text[j] === "(") {
+			j++;
+			while (ws(text[j])) j++;
+			if (text[j] !== ")") continue;
+			j++;
+			while (ws(text[j])) j++;
+		}
+		if (!name || text[j] !== "{") continue;
+		defs.push({ name, open: j });
+		if (defs.length > FB_MAX_DEFS) return true;
+	}
+	if (!defs.length) return false;
+	const amp = new Map<string, boolean>();
+	const calls = new Map<string, Set<string>>();
+	const names = new Set(defs.map((d) => d.name));
+	let read = 0;
+	for (const d of defs) {
+		let depth = 0;
+		let end = text.length;
+		for (let k = d.open; k < text.length; k++) {
+			const c = text[k];
+			if (c === "{") depth++;
+			else if (c === "}" && --depth === 0) {
+				end = k;
+				break;
+			}
+		}
+		read += end - d.open;
+		if (read > FB_BUDGET) return true;
+		const body = text.slice(d.open + 1, end);
+		let bg = amp.get(d.name) ?? false;
+		for (let k = body.indexOf("&"); k >= 0 && !bg; k = body.indexOf("&", k + 1)) {
+			const pv = body[k - 1];
+			const nx = body[k + 1];
+			if (pv !== "&" && nx !== "&" && pv !== ">" && nx !== ">" && pv !== "<") bg = true;
+		}
+		amp.set(d.name, bg);
+		const set = calls.get(d.name) ?? new Set<string>();
+		for (const w of commandWords(body)) if (names.has(w)) set.add(w);
+		calls.set(d.name, set);
+	}
+	for (const [f, bg] of amp) {
+		if (!bg) continue;
+		const seen = new Set<string>();
+		const stack = [...(calls.get(f) ?? [])];
+		while (stack.length) {
+			const n = stack.pop() as string;
+			if (n === f) return true;
+			if (seen.has(n)) continue;
+			seen.add(n);
+			stack.push(...(calls.get(n) ?? []));
+		}
+	}
+	return false;
+}
 
 const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish"]);
 const INTERPRETERS = new Set([
@@ -247,6 +530,10 @@ class Collector {
 	readonly vars = new Map<string, string[] | null>();
 	/** The working directory is home or a system path (from the caller, or a `cd` on this line). */
 	cwdDanger = false;
+	/** A `cd` on this line went into a credential folder (~/.aws, ~/.ssh ...). */
+	credCwd = false;
+	/** The `cd` went into ~/.kube or ~/.docker, where a bare `config` is a credential. */
+	credCwdConfig = false;
 	/** This line has `&&`, `||` or a compound command, so an assignment on it may not have run. */
 	conditional = false;
 	d(rule: string, block = BLOCK_RULES.has(rule)): void {
@@ -380,6 +667,9 @@ function trackShellState(tIn: string[], r: Collector): void {
 		r.cwdDanger = true; // a bare cd goes home
 		return;
 	}
+	const cdTarget = normPath(target.replace(/^['"]+|['"]+$/g, ""));
+	if (CRED_DIR_RE.test(cdTarget)) r.credCwd = true;
+	if (CRED_CONFIG_DIR_RE.test(cdTarget)) r.credCwdConfig = true;
 	// A relative cd, `cd -` or a cd that fails cannot be resolved from text
 	// (it may go up, through a symlink, or nowhere), so the state is kept.
 	if (!/^[/~$]/.test(target)) return;
@@ -772,6 +1062,7 @@ function stripRedirects(seg: string): string {
 
 function codeScan(code: string, r: Collector, tag: string): void {
 	if (CODE_DELETE.test(code)) r.d(`${tag}_code_deletes`);
+	if (CRED_TEXT_RE.test(code)) r.d("credential_file_read");
 }
 
 function sqlScan(sql: string, r: Collector): void {
@@ -1044,6 +1335,17 @@ function writesNothing(seg: string): boolean {
 }
 
 function ruleRedirects(seg: string, r: Collector): void {
+	if (seg.includes("<")) {
+		const m = maskQuotes(seg);
+		for (const mm of m.matchAll(/(?<!<)<(?![<(])\s*([^\s<>|;&]+)/g)) {
+			const len = (mm[1] as string).length;
+			const start = (mm.index ?? 0) + mm[0].length - len;
+			if (credKind(seg.slice(start, start + len), r.credCwd) === "file") {
+				r.d("credential_file_read");
+				r.secretRead = true;
+			}
+		}
+	}
 	let empty: boolean | null = null;
 	for (const { op, target } of redirects(seg)) {
 		if (isTemp(target) || op !== ">") continue;
@@ -1142,6 +1444,10 @@ function analyseTokens(
 		return b;
 	}
 	if (INTERPRETERS.has(b) && b !== "bun") {
+		if (args.some((a) => credKind(a, r.credCwd) === "file")) {
+			r.d("credential_file_read");
+			r.secretRead = true;
+		}
 		if (piped && prevBin && NET_FETCHERS.has(prevBin) && !positional(args).length) {
 			r.d("remote_code_piped_to_interpreter");
 			return b;
@@ -1156,6 +1462,22 @@ function analyseTokens(
 			}
 		}
 		return b;
+	}
+
+	if (
+		(b === "scp" || b === "rsync" || b === "sftp") &&
+		args.some(isRemoteSpec) &&
+		args.some((a) => credKind(a, r.credCwd) !== null)
+	)
+		r.d("secret_to_network");
+	if (PACKERS.has(b) && args.some((a) => credKind(a, r.credCwd) !== null)) r.secretRead = true;
+	if (b === "cp" && args.some((a) => credKind(a, r.credCwd) !== null)) r.d("credential_file_read");
+	if (
+		b === "dd" &&
+		args.some((a) => a.startsWith("if=") && credKind(a.slice(3), r.credCwd) === "file")
+	) {
+		r.d("credential_file_read");
+		r.secretRead = true;
 	}
 
 	if (b === "rm" || b === "rmdir") ruleRm(b, args, r);
@@ -1230,12 +1552,45 @@ function analyseTokens(
 	} else if (b === "launchctl") {
 		if (["bootout", "unload", "remove", "disable"].includes(positional(args)[0] ?? ""))
 			r.d("launchctl_bootout_unload");
+		if (["reboot", "halt", "shutdown"].includes(positional(args)[0] ?? ""))
+			r.d("system_shutdown_or_reboot");
+	} else if (b === "pmset") {
+		if (positional(args).includes("sleepnow")) r.d("system_shutdown_or_reboot");
 	} else if (b === "crontab") {
 		if (args.includes("-r")) r.d("crontab_remove");
 	} else if (b === "defaults") {
 		if (positional(args)[0] === "delete") r.d("defaults_delete");
 	} else if (b === "security") {
-		if ((positional(args)[0] ?? "").startsWith("delete")) r.d("keychain_delete");
+		const sub = positional(args)[0] ?? "";
+		if (sub.startsWith("delete")) r.d("keychain_delete");
+		else if (sub === "dump-keychain" || sub === "export") r.d("keychain_dump");
+		else if (/^find-(generic|internet)-password$/.test(sub) && hasFlag(args, "w", ["--w"]))
+			r.d("keychain_read_secret");
+		else if (/^find-(generic|internet)-password$/.test(sub) && hasFlag(args, "g", []))
+			r.d("keychain_read_secret");
+	} else if (SHUTDOWN_BINS.has(b)) {
+		r.d("system_shutdown_or_reboot");
+	} else if (b === "init" || b === "telinit") {
+		if (positional(args).some((a) => a === "0" || a === "6")) r.d("system_shutdown_or_reboot");
+	} else if (b === "systemctl") {
+		if (positional(args).some((a) => ["poweroff", "reboot", "halt", "kexec"].includes(a)))
+			r.d("system_shutdown_or_reboot");
+	} else if (b === "gpg" || b === "gpg2") {
+		if (args.some((a) => a.startsWith("--export-sec"))) r.d("gpg_export_secret_keys");
+	} else if (CRED_READERS.has(b)) {
+		const dirs = DIR_READERS.has(b);
+		const hit = args.some((a) => {
+			const k = credKind(a, r.credCwd);
+			return k === "file" || (k === "dir" && dirs);
+		});
+		const named = (a: string) => {
+			const n = a.replace(/^\.\//, "");
+			return CRED_NAME_RE.test(n) || (r.credCwdConfig && /^config(\.json)?$/.test(n));
+		};
+		if (hit || (r.credCwd && args.some(named))) {
+			r.d("credential_file_read");
+			r.secretRead = true;
+		}
 	} else if (b === "diskutil") {
 		const s = positional(args)[0] ?? "";
 		if (
@@ -1282,8 +1637,9 @@ function analyse(text: string, r: Collector, depth = 0): void {
 	const view = maskData(body);
 	if (CONDITIONAL_RE.test(maskQuotes(body))) r.conditional = true;
 	if (REMOTE_EXEC_RE.test(view)) r.d("remote_code_substituted_into_shell");
+	if (hasForkBomb(view)) r.d("fork_bomb");
 	if (SECRET_READ.test(view)) r.secretRead = true;
-	if (NET_SINK.test(view)) r.netSink = true;
+	if (NET_SINK.test(view) || PIPE_TO_SSH.test(view)) r.netSink = true;
 
 	for (const { before, body: doc } of docs) {
 		const segs = splitSegments(before).segs;
@@ -1293,6 +1649,9 @@ function analyse(text: string, r: Collector, depth = 0): void {
 		if (consumer && (SHELLS.has(consumer) || consumer === "ssh")) analyse(doc, r, depth + 1);
 		else if (consumer && INTERPRETERS.has(consumer)) codeScan(doc, r, "heredoc");
 		else if (consumer && DB_CLIENTS.has(consumer)) sqlScan(doc, r);
+		// An sftp script that puts a credential folder: its own check, not part of the chain above.
+		if (consumer === "sftp" && doc.includes("put") && CRED_DIR_TEXT_RE.test(doc))
+			r.d("secret_to_network");
 		// cat/tee/etc: the body is file content; the redirect on the line is checked below.
 	}
 	const { segs, subs } = splitSegments(body);
@@ -1300,6 +1659,10 @@ function analyse(text: string, r: Collector, depth = 0): void {
 	for (const { text: seg, piped } of segs) {
 		ruleRedirects(seg, r);
 		const t = tokens(stripRedirects(seg));
+		if (seg.includes("put") && seg.includes("sftp") && CRED_DIR_TEXT_RE.test(seg)) {
+			const w = stripWrappers(t);
+			if (w.length && basename(w[0]) === "sftp") r.d("secret_to_network");
+		}
 		prev = analyseTokens(t, piped, prev, r, depth);
 		trackShellState(t, r);
 	}
