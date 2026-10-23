@@ -12,10 +12,11 @@ Permissions are stored in `~/.8gent/permissions.json`:
 {
   "allowedPatterns": ["npm *", "bun *", "git *", "ls *", "cat *"],
   "deniedPatterns": ["rm -rf /", "sudo rm -rf"],
-  "autoApprove": false,
   "logPath": "~/.8gent/logs/permissions.log"
 }
 ```
+
+The `autoApprove` key is ignored on load and reset to `false`, and it is never saved. Auto-approve lasts one run: pass `--yes`, set `EIGHT_AUTO_APPROVE=1`, or use `/auto-approve` in the session. Other keys in the file are kept.
 
 ## CLI Commands
 
@@ -24,7 +25,7 @@ Permissions are stored in `~/.8gent/permissions.json`:
 | `/permissions` | Show current permission config and stats |
 | `/allow <pattern>` | Add pattern to allowed list |
 | `/deny <pattern>` | Add pattern to denied list |
-| `/auto-approve` | Toggle auto-approve mode |
+| `/auto-approve` | Toggle auto-approve for this session only |
 
 ## Dangerous Commands
 

@@ -967,7 +967,8 @@ export async function runRunCommand(
 	}
 	if (durablePreamble) opts.prompt = `${durablePreamble}\n\n${opts.prompt}`;
 
-	// --yes: auto-approve tool calls for the duration of this run.
+	// --yes: auto-approve tool calls for the duration of this run, in memory only
+	// (never saved to permissions.json, #4817).
 	// NemoClaw's PermissionManager.setAutoApprove(true) bypasses prompts for
 	// non-dangerous commands. Catastrophic commands (rm -rf /, push to main
 	// via its own guard, etc.) remain blocked.

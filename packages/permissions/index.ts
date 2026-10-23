@@ -743,7 +743,15 @@ export class PermissionManager {
 		try {
 			if (fs.existsSync(this.configPath)) {
 				const data = fs.readFileSync(this.configPath, "utf-8");
-				return JSON.parse(data);
+				const parsed = JSON.parse(data) as PermissionConfig;
+				// autoApprove is a per-process switch (--yes, EIGHT_AUTO_APPROVE), never a
+				// saved preference (#4817). A file that says true is a leftover of the old
+				// bug: load it as false and rewrite it once, leaving every other key alone.
+				if (parsed && parsed.autoApprove) {
+					parsed.autoApprove = false;
+					this.rewriteInPlace(parsed);
+				}
+				return parsed;
 			}
 		} catch (err) {
 			console.warn(`Warning: Could not load permissions config: ${err}`);
@@ -765,7 +773,55 @@ export class PermissionManager {
 		if (!fs.existsSync(dir)) {
 			fs.mkdirSync(dir, { recursive: true });
 		}
-		fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2));
+		// Never persist the in-memory auto-approve switch (#4817).
+		this.writeAtomic({ ...this.config, autoApprove: false });
+	}
+
+	/**
+	 * Replace the config file atomically: temp file in the target's own directory,
+	 * fsync, rename over the target. A crash or a concurrent reader never sees a
+	 * partial file. A symlink stays a link (the real target is replaced) and the
+	 * target's mode is kept.
+	 */
+	private writeAtomic(config: unknown): void {
+		let target = this.configPath;
+		let mode = 0o600;
+		try {
+			target = fs.realpathSync(this.configPath);
+			mode = fs.statSync(target).mode & 0o777;
+		} catch {
+			// New file: default mode, write at the configured path.
+		}
+		const tmp = path.join(
+			path.dirname(target),
+			`.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`,
+		);
+		const fd = fs.openSync(tmp, "wx", mode);
+		try {
+			fs.writeFileSync(fd, JSON.stringify(config, null, 2));
+			fs.fsyncSync(fd);
+		} catch (err) {
+			fs.closeSync(fd);
+			fs.rmSync(tmp, { force: true });
+			throw err;
+		}
+		fs.closeSync(fd);
+		try {
+			fs.chmodSync(tmp, mode);
+			fs.renameSync(tmp, target);
+		} catch (err) {
+			fs.rmSync(tmp, { force: true });
+			throw err;
+		}
+	}
+
+	/** Rewrite a leftover `autoApprove: true` once. Best effort. */
+	private rewriteInPlace(config: PermissionConfig): void {
+		try {
+			this.writeAtomic(config);
+		} catch {
+			// Read-only location: the in-memory false still holds.
+		}
 	}
 
 	/**
@@ -1287,11 +1343,11 @@ export class PermissionManager {
 	}
 
 	/**
-	 * Set auto-approve mode
+	 * Set auto-approve mode for this process only. Never written to disk: a saved
+	 * true would approve every later session before it showed a card (#4817).
 	 */
 	setAutoApprove(enabled: boolean): void {
 		this.config.autoApprove = enabled;
-		this.saveConfig();
 	}
 
 	/**
