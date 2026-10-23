@@ -382,3 +382,25 @@ describe("attach home opens a dedicated Telegram tab", () => {
 		expect(host.snapshot(id)).toBe(before);
 	});
 });
+
+describe("the Telegram tab is never saved to disk", () => {
+	it("tabsToPersist drops it and keeps every other tab as it was", async () => {
+		const { tabsToPersist } = await import("../hooks/useWorkspaceTabs");
+		const tab = (id: string, data: Record<string, unknown>) => ({
+			id,
+			type: "chat" as const,
+			title: id,
+			active: false,
+			createdAt: "x",
+			lastAccessedAt: "x",
+			pinned: false,
+			data,
+		});
+		const tabs = [
+			tab("a", {}),
+			tab("tg", { [TELEGRAM_TAB_DATA_KEY]: true }),
+			tab("b", { role: "qa" }),
+		];
+		expect(tabsToPersist(tabs).map((t) => t.id)).toEqual(["a", "b"]);
+	});
+});

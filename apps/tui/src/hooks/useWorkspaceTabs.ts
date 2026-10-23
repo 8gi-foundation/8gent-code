@@ -189,10 +189,15 @@ function loadState(): WorkspaceTab[] | null {
 	return null;
 }
 
+/** The Telegram tab is a live link, not a saved workspace: it is never written to disk (#4834). */
+export function tabsToPersist(tabs: WorkspaceTab[]): WorkspaceTab[] {
+	return tabs.filter((t) => !(t.data as { telegramHome?: unknown } | undefined)?.telegramHome);
+}
+
 function saveState(tabs: WorkspaceTab[]): void {
 	try {
 		ensureDir();
-		fs.writeFileSync(STATE_FILE, JSON.stringify(tabs, null, 2), "utf-8");
+		fs.writeFileSync(STATE_FILE, JSON.stringify(tabsToPersist(tabs), null, 2), "utf-8");
 	} catch {
 		// Best-effort persistence
 	}
