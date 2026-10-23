@@ -511,3 +511,7 @@ read from it when the flag is off.
   as `ME.md` when `ME.md` is absent. It prints counts.
 
 Code: `packages/memory/me.ts`. Tests: `packages/memory/me.test.ts`.
+
+## Reading your memory from another tool (`8gent memory serve`)
+
+Your memory is your own SQLite file, so any tool you run on your own machine can recall it. Run `8gent memory serve` and add it to that tool's MCP configuration as a stdio server with command `8gent` and arguments `memory serve` (set `EIGHT_DATA_DIR` in its environment only if you moved your data directory). It offers two tools, `memory_search` (query, limit up to 20) and `memory_get` (id), over the global store at `~/.8gent/memory/memory.db`. It opens the file read-only, listens on no port, and has no way to write. Memories tagged `secret` or `private`, marked `#PRIVATE`, or matching the secret detectors in `packages/memory/redact.ts` are never returned, by search or by id. Every call is appended to `memory-access.jsonl` beside the database (mode 0600: time, tool, query, result count, never the text), so you can see exactly what other tools asked for.
