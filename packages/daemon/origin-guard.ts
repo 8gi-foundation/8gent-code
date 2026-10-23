@@ -129,12 +129,36 @@ export function presentedToken(req: Request): string | null {
  * to fixed-length SHA-256 digests, then compare the digests in constant time.
  */
 /**
- * What a daemon answers to `identify` (#4829): HMAC-SHA256 of a fixed domain string
- * and the client's nonce, keyed by the daemon's secret. A client that holds the same
- * secret checks it before it sends a token or a session; a fake server cannot make it.
+ * What a daemon answers to `identify` (#4829): HMAC-SHA256 over a fixed domain string, the
+ * address the client dialled and the client's nonce, keyed by the daemon's secret. Binding
+ * the target stops a relay: a squatter that forwards the challenge to the real daemon gets
+ * a proof for another address, which the client rejects, or a refusal from the daemon.
  */
-export function daemonProof(secret: string, nonce: string): string {
-	return createHmac("sha256", secret).update(`8gent-daemon-v1:${nonce}`).digest("hex");
+export function daemonProof(secret: string, nonce: string, target: string): string {
+	return createHmac("sha256", secret).update(`8gent-daemon-v2:${target}:${nonce}`).digest("hex");
+}
+
+/** The `host:port` of a url a client dials, lower-cased, default ports filled in. */
+export function dialTarget(url: string): string {
+	const u = new URL(url);
+	const port = u.port || (u.protocol === "wss:" || u.protocol === "https:" ? "443" : "80");
+	return `${u.hostname.toLowerCase()}:${port}`;
+}
+
+/**
+ * Is `target` this daemon? Its own listening port, and a host that is loopback or the
+ * address it is bound to. Anything else was dialled for someone else (#4829).
+ */
+export function identifyTargetOk(target: unknown, ownPort: number, bindHost: string): boolean {
+	if (typeof target !== "string" || target.length > 300) return false;
+	const m = /^(\[[0-9a-f:.]+\]|[a-z0-9.-]+):(\d{1,5})$/.exec(target);
+	if (!m) return false;
+	if (Number(m[2]) !== ownPort) return false;
+	const host = m[1];
+	if (["127.0.0.1", "localhost", "[::1]"].includes(host)) return true;
+	const bound = bindHost.toLowerCase().replace(/^\[|\]$/g, "");
+	const wild = bound === "0.0.0.0" || bound === "::";
+	return !wild && host.replace(/^\[|\]$/g, "") === bound;
 }
 
 export function sameToken(a: unknown, b: string): boolean {

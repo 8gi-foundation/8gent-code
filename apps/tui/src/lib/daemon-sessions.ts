@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { dataDirPath } from "../../../../packages/daemon/data-dir";
 import { readTokenFile } from "../../../../packages/daemon/local-link";
-import { daemonProof } from "../../../../packages/daemon/origin-guard";
+import { daemonProof, dialTarget } from "../../../../packages/daemon/origin-guard";
 
 export const DEFAULT_DAEMON_URL = "ws://127.0.0.1:18789";
 
@@ -235,7 +235,7 @@ export class DaemonSessionClient {
 			}
 			// The daemon proves it holds the secret BEFORE this client sends the token or a
 			// session: whatever else answers on the port learns nothing.
-			await client.verifyDaemon(secret);
+			await client.verifyDaemon(secret, dialTarget(url));
 			const r = await client.request({ type: "auth", token: secret }, ["auth:ok", "auth:fail"]);
 			if (r.type !== "auth:ok") throw new Error("the 8gent daemon refused the token");
 		} catch (err) {
@@ -246,19 +246,20 @@ export class DaemonSessionClient {
 	}
 
 	/** Challenge the daemon: it must answer HMAC(secret, nonce). Throws unless it does. */
-	private async verifyDaemon(secret: string): Promise<void> {
+	/** `target` is the address this client dialled, not anything the peer reports. */
+	private async verifyDaemon(secret: string, target: string): Promise<void> {
 		const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
 			b.toString(16).padStart(2, "0"),
 		).join("");
 		let proof: unknown;
 		try {
-			proof = (await this.request({ type: "identify", nonce }, ["identify:ok"])).proof;
+			proof = (await this.request({ type: "identify", nonce, target }, ["identify:ok"])).proof;
 		} catch {
 			throw new Error(
 				"this daemon could not prove who it is. Restart it with the current 8gent, or check the port",
 			);
 		}
-		const want = Buffer.from(daemonProof(secret, nonce));
+		const want = Buffer.from(daemonProof(secret, nonce, target));
 		const got = Buffer.from(typeof proof === "string" ? proof : "");
 		if (got.length !== want.length || !timingSafeEqual(got, want)) {
 			throw new Error(

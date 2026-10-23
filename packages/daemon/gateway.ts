@@ -45,6 +45,7 @@ import {
 	assertSafeBind,
 	daemonProof,
 	guardRequest,
+	identifyTargetOk,
 	isLoopbackHost,
 	requireToken,
 	resolveBindHost,
@@ -137,7 +138,7 @@ interface ClientState {
 type InboundMessage =
 	| { type: "auth"; token: string; participantId?: string }
 	/** The daemon proves it holds the secret before a client sends its token (#4829). */
-	| { type: "identify"; nonce: string }
+	| { type: "identify"; nonce: string; target?: string }
 	/** persist: true saves the session after every turn (#3929), so it can be resumed later. */
 	| { type: "session:create"; channel: string; persist?: boolean }
 	| { type: "session:resume"; sessionId: string; channel?: string; resumeSecret?: string }
@@ -297,6 +298,9 @@ function broadcastToSession(sessionId: string, event: EventName, payload: unknow
 	}
 }
 
+/** Where each running gateway really listens, for the identity check (#4829). */
+const ownEndpoints = new WeakMap<GatewayConfig, { port: number; host: string }>();
+
 function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 	const state = clients.get(ws);
 	if (!state) return;
@@ -317,8 +321,21 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			send(ws, { type: "error", message: "this daemon has no identity secret" });
 		} else if (typeof msg.nonce !== "string" || !/^[0-9a-f]{32,128}$/.test(msg.nonce)) {
 			send(ws, { type: "error", message: "identify needs a hex nonce of 32 to 128 characters" });
+		} else if (
+			!ownEndpoints.has(config) ||
+			!identifyTargetOk(
+				msg.target,
+				ownEndpoints.get(config)?.port ?? -1,
+				ownEndpoints.get(config)?.host ?? "",
+			)
+		) {
+			// Dialled for another address: a relay, or a client that is talking to something else.
+			send(ws, { type: "error", message: "identify target is not this daemon" });
 		} else {
-			send(ws, { type: "identify:ok", proof: daemonProof(secret, msg.nonce) });
+			send(ws, {
+				type: "identify:ok",
+				proof: daemonProof(secret, msg.nonce, msg.target as string),
+			});
 		}
 		return;
 	}
@@ -1121,5 +1138,6 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 		console.log(`[gateway] dispatch protocol: ws://${hostname}:${config.port}/dispatch`);
 	}
 	console.log(`[gateway] store route: ws://${hostname}:${config.port}/store`);
+	ownEndpoints.set(config, { port: server.port as number, host: hostname });
 	return server;
 }

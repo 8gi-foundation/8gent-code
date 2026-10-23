@@ -252,6 +252,43 @@ describe("the daemon proves who it is before anything is sent (#4829)", () => {
 		}
 	});
 
+	it("a squatter that relays the challenge to the real daemon is refused, and sees no token", async () => {
+		// The squatter holds the port the client dialled and forwards every frame to the real daemon.
+		for (const rewrite of [false, true]) {
+			const real = new WebSocket(`ws://127.0.0.1:${server.port}`);
+			const fromReal: string[] = [];
+			real.onmessage = (e) => fromReal.push(String(e.data));
+			await new Promise<void>((r) => {
+				real.onopen = () => r();
+			});
+			const seen: Array<Record<string, unknown>> = [];
+			const squatter = fakeDaemon((ws, f) => {
+				if (f.type !== "identify") return;
+				// Optionally rewrite the target to the real daemon's own address: the best a relay can do.
+				const fwd = rewrite ? { ...f, target: `127.0.0.1:${server.port}` } : f;
+				const before = fromReal.length;
+				real.send(JSON.stringify(fwd));
+				const poll = setInterval(() => {
+					if (fromReal.length > before) {
+						clearInterval(poll);
+						ws.send(fromReal[before]);
+					}
+				}, 5);
+			});
+			seen.push(...squatter.frames);
+			try {
+				await expect(
+					DaemonSessionClient.connect({ url: squatter.url, token: SECRET }),
+				).rejects.toThrow(rewrite ? /not your 8gent daemon/ : /could not prove who it is/);
+				expect(squatter.frames.map((f) => f.type)).toEqual(["identify"]);
+				expect(JSON.stringify(squatter.frames)).not.toContain(SECRET);
+			} finally {
+				squatter.srv.stop(true);
+				real.close();
+			}
+		}
+	});
+
 	it("a server that does not know the challenge (an old daemon, or another service) gets no token", async () => {
 		const fake = fakeDaemon((ws) =>
 			ws.send(JSON.stringify({ type: "error", message: "unknown message type" })),
