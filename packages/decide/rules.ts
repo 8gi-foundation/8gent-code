@@ -63,6 +63,8 @@ export const BLOCK_RULES: ReadonlySet<string> = new Set([
 	"kill_all_or_launchd",
 	"kill_system_process",
 	"keychain_delete",
+	"keychain_dump",
+	"fork_bomb",
 	"csrutil_disable_or_clear",
 	"spctl_disable_or_clear",
 	"nvram_disable_or_clear",
@@ -95,17 +97,79 @@ const DOTFILE_EXTRA_RE =
 	/(^|\/)(\.zshenv|\.zlogin|\.bash_login|\.bash_logout|\.inputrc|\.vimrc|\.tmux\.conf|\.ssh\/config)$/;
 const NET_SINK =
 	/(?:^|[\s|;&(])(?:curl\b[^|;&\n]*(?:\s-d\b|\s--data|\s-F\b|\s--form|\s-T\b|\s--upload-file|\s-X\s*(?:POST|PUT|PATCH))|nc\b|ncat\b|netcat\b|scp\b|sftp\b|ftp\b|telnet\b|wget\b[^|;&\n]*--post|rsync\b[^|;&\n]*\S+:\S*)/;
+/**
+ * A copy of a whole credential directory (~/.ssh, ~/.aws, ~/.gnupg) to a remote host:
+ * the SECRET_READ forms above name one key file, this names the folder. A public key
+ * (`*.pub`) is not a secret.
+ */
+const CRED_DIR_TO_REMOTE = String.raw`(?:scp|rsync|sftp)\s+(?:-\w+\s+(?:\S+\s+)?)*[^\s|;&]*\.(?:ssh|aws|gnupg)(?:/(?![^\s|;&]*\.pub(?:\s|$))[^\s|;&]*)?(?=\s)[^|;&\n]*\s\S+:`;
 const SECRET_READ = new RegExp(
 	[
 		String.raw`(?:(?:cat|less|head|tail|base64|xxd|od|strings|tar|zip|gpg)\s+[^|;&\n]*(?:\.env\b|\.ssh/id_\w+(?!\.pub)|id_rsa(?!\.pub)|id_ed25519(?!\.pub)|\.aws/credentials|\.netrc|\.git-credentials|\.npmrc|keychain-db))`,
 		String.raw`(?:^|[|;&\s(])(?:env|printenv|set)\s*(?:\||>)`,
 		String.raw`@[^\s"']*(?:\.env\b|\.ssh/|id_rsa|id_ed25519|credentials|\.netrc)`,
 		String.raw`(?:scp|rsync|sftp)\s+(?:-\w+\s+(?:\S+\s+)?)*[^\s|;&]*(?:\.env\b|\.ssh/id_\w+(?!\.pub)|id_rsa(?!\.pub)|\.aws/credentials)\S*\s+\S+:`,
+		CRED_DIR_TO_REMOTE,
 		String.raw`security\s+find-(?:generic|internet)-password[^|;&\n]*-w[^\n]*\|\s*(?:curl|nc|ssh)`,
 	].join("|"),
 );
 const REMOTE_EXEC_RE =
 	/(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*["']?\$\((?:curl|wget)\b|<\((?:curl|wget)\b|\beval\s+["']?\$\((?:curl|wget)\b/;
+
+const SHUTDOWN_BINS = new Set(["shutdown", "reboot", "halt", "poweroff"]);
+/** Programs that print a file's bytes into the transcript. */
+const CAT_LIKE = new Set([
+	"cat",
+	"less",
+	"more",
+	"head",
+	"tail",
+	"bat",
+	"nl",
+	"tac",
+	"xxd",
+	"od",
+	"strings",
+	"base64",
+]);
+/** A credential store outside the project: reading it puts the secret in the model's context. */
+const CREDENTIAL_FILE_RE =
+	/(^|\/)(\.aws\/credentials|\.ssh\/(id_[\w.-]+|identity)|\.netrc|\.git-credentials|\.gnupg\/(secring\.gpg|private-keys-v1\.d(\/.*)?)|\.config\/gh\/hosts\.yml|\.docker\/config\.json|\.kube\/config)$/;
+function isCredentialFile(p: string): boolean {
+	return CREDENTIAL_FILE_RE.test(p) && !p.endsWith(".pub");
+}
+/**
+ * A shell function that calls itself twice in a pipe and is backgrounded:
+ * `:(){ :|:& };:`, `b(){ b|b& };b`, `function f { f|f& }`. Text only.
+ */
+function hasForkBomb(text: string): boolean {
+	// Linear scan, no backtracking regex over the whole text: a huge argument must not stall the gate.
+	if (!text.includes("|") || !text.includes("&")) return false;
+	let close = -1;
+	for (let open = text.indexOf("{"); open >= 0; open = text.indexOf("{", open + 1)) {
+		if (close < open) {
+			close = text.indexOf("}", open);
+			if (close < 0) return false;
+		}
+		const head = text
+			.slice(Math.max(0, open - 80), open)
+			.replace(/\s+$/, "")
+			.replace(/\(\s*\)$/, "")
+			.replace(/\s+$/, "");
+		const name = /[A-Za-z_:][\w:.-]*$/.exec(head)?.[0];
+		if (!name) continue;
+		const body = text.slice(open + 1, close);
+		if (body.length > 2000 || !body.includes("|") || !body.includes("&")) continue;
+		let calls = 0;
+		for (let at = body.indexOf(name); at >= 0; at = body.indexOf(name, at + 1)) {
+			const before = body[at - 1] ?? " ";
+			const after = body[at + name.length] ?? " ";
+			if (!/[\w:.-]/.test(before) && !/[\w.-]/.test(after)) calls++;
+		}
+		if (calls >= 2) return true;
+	}
+	return false;
+}
 
 const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish"]);
 const INTERPRETERS = new Set([
@@ -1235,7 +1299,24 @@ function analyseTokens(
 	} else if (b === "defaults") {
 		if (positional(args)[0] === "delete") r.d("defaults_delete");
 	} else if (b === "security") {
-		if ((positional(args)[0] ?? "").startsWith("delete")) r.d("keychain_delete");
+		const sub = positional(args)[0] ?? "";
+		if (sub.startsWith("delete")) r.d("keychain_delete");
+		else if (sub === "dump-keychain" || sub === "export") r.d("keychain_dump");
+		else if (/^find-(generic|internet)-password$/.test(sub) && hasFlag(args, "w", ["--w"]))
+			r.d("keychain_read_secret");
+		else if (/^find-(generic|internet)-password$/.test(sub) && hasFlag(args, "g", []))
+			r.d("keychain_read_secret");
+	} else if (SHUTDOWN_BINS.has(b)) {
+		r.d("system_shutdown_or_reboot");
+	} else if (b === "init" || b === "telinit") {
+		if (positional(args).some((a) => a === "0" || a === "6")) r.d("system_shutdown_or_reboot");
+	} else if (b === "systemctl") {
+		if (positional(args).some((a) => ["poweroff", "reboot", "halt", "kexec"].includes(a)))
+			r.d("system_shutdown_or_reboot");
+	} else if (b === "gpg" || b === "gpg2") {
+		if (args.some((a) => /^--export-secret-(keys|subkeys)$/.test(a))) r.d("gpg_export_secret_keys");
+	} else if (CAT_LIKE.has(b)) {
+		if (positional(args).some(isCredentialFile)) r.d("credential_file_read");
 	} else if (b === "diskutil") {
 		const s = positional(args)[0] ?? "";
 		if (
@@ -1282,6 +1363,7 @@ function analyse(text: string, r: Collector, depth = 0): void {
 	const view = maskData(body);
 	if (CONDITIONAL_RE.test(maskQuotes(body))) r.conditional = true;
 	if (REMOTE_EXEC_RE.test(view)) r.d("remote_code_substituted_into_shell");
+	if (hasForkBomb(view)) r.d("fork_bomb");
 	if (SECRET_READ.test(view)) r.secretRead = true;
 	if (NET_SINK.test(view)) r.netSink = true;
 
