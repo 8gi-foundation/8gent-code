@@ -7,6 +7,7 @@ import { checkSoxInstalled } from "./recorder.js";
 import {
 	ANDROID_DICTATION_LINE,
 	ANDROID_VOICE_LINE_SUBS,
+	ANDROID_VOICE_LISTEN_SUBS,
 	TERMUX_TTS_HINT,
 	ctrlRAction,
 	findOnPath,
@@ -127,7 +128,7 @@ test("findOnPath ignores non-executable files", () => {
 describe("android dictation line", () => {
 	test("is the one line, with no sox or whisper mention", () => {
 		expect(ANDROID_DICTATION_LINE).toBe(
-			"On Android, tap the microphone key on your keyboard; dictation lands in the prompt. Spoken replies: /voice on (needs termux-tts-speak: pkg install termux-api plus the Termux:API app).",
+			"On Android, press Ctrl+R (or /voice record) to speak; the text lands in the prompt. Spoken replies: /voice on (needs termux-tts-speak: pkg install termux-api plus the Termux:API app).",
 		);
 		expect(ANDROID_DICTATION_LINE).not.toMatch(/sox|whisper/i);
 	});
@@ -147,26 +148,20 @@ describe("android dictation line", () => {
 });
 
 describe("review fixes (#4726)", () => {
-	test("Ctrl+R on Android shows the line and never toggles recording; desktop toggles", () => {
-		expect(ctrlRAction({ ctrl: true }, "r", true)).toBe("android-line");
+	test("Ctrl+R on Android listens through Termux:API and never toggles recording; desktop toggles", () => {
+		expect(ctrlRAction({ ctrl: true }, "r", true)).toBe("android-listen");
 		expect(ctrlRAction({ ctrl: true }, "r", false)).toBe("toggle");
 		expect(ctrlRAction({ ctrl: false }, "r", true)).toBe("ignore");
 		expect(ctrlRAction({ ctrl: true }, "x", true)).toBe("ignore");
 	});
 
 	test("the Android /voice intercept covers bare, chat, record, status and stop but not on/off", () => {
-		for (const sub of [
-			"",
-			"chat",
-			"conversation",
-			"talk",
-			"record",
-			"listen",
-			"stt",
-			"status",
-			"stop",
-		]) {
+		for (const sub of ["", "chat", "conversation", "talk", "status", "stop"]) {
 			expect(ANDROID_VOICE_LINE_SUBS).toContain(sub);
+		}
+		for (const sub of ["record", "listen", "stt"]) {
+			expect(ANDROID_VOICE_LINE_SUBS).not.toContain(sub);
+			expect(ANDROID_VOICE_LISTEN_SUBS).toContain(sub);
 		}
 		expect(ANDROID_VOICE_LINE_SUBS).not.toContain("on");
 		expect(ANDROID_VOICE_LINE_SUBS).not.toContain("off");

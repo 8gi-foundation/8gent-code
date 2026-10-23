@@ -15,7 +15,7 @@ import {
 } from "@8gent/voice";
 import { useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ANDROID_DICTATION_LINE, ctrlRAction } from "../../../../packages/voice/termux.js";
+import { ctrlRAction } from "../../../../packages/voice/termux.js";
 
 export interface UseVoiceInputOptions {
 	/** Voice configuration overrides */
@@ -35,6 +35,8 @@ export interface UseVoiceInputOptions {
 	 * this callback the router is not installed and Whisper runs as before.
 	 */
 	onIntent?: (intent: { choice: string; confidence: number; backend: string }) => void;
+	/** Android (#4833): Ctrl+R listens once through Termux:API; the caller owns setup, listening and the prompt. */
+	onAndroidMic?: () => void;
 }
 
 export interface UseVoiceInputReturn {
@@ -108,6 +110,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 		onError,
 		onDownloadProgress,
 		onIntent,
+		onAndroidMic,
 	} = options;
 
 	// Create engine once, update config via ref
@@ -298,9 +301,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 	useInput(
 		(input, key) => {
 			if (key.ctrl && input === "r") {
-				if (ctrlRAction(key, input) === "android-line") {
-					// Android (#4706): the keyboard mic dictates; no recorder or whisper here.
-					setErrorMessage(ANDROID_DICTATION_LINE);
+				if (ctrlRAction(key, input) === "android-listen") {
+					// Android (#4833): no sox or whisper; one Termux:API listen.
+					onAndroidMic?.();
 					return;
 				}
 				if (!engine.isEnabled()) {

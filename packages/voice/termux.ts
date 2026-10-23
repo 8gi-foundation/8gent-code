@@ -1,9 +1,9 @@
 /**
  * @8gent/voice - Android / Termux helpers (#4706).
  *
- * Android phones already dictate through the keyboard's microphone key, so 8gent
- * records nothing and runs no whisper there. The only Android voice piece is
- * spoken replies through `termux-tts-speak` (Termux:API), behind the audio gate.
+ * No sox and no whisper there. Voice input is one `termux-speech-to-text` call
+ * (termux-stt.ts, #4833, opt-in through the Android setup offer). Spoken replies
+ * go through `termux-tts-speak` (Termux:API), behind the audio gate.
  *
  * Termux repo facts (termux-main aarch64, 21 Oct 2026): termux-api, mpv and
  * ffmpeg are packages; whisper-cpp is not; yt-dlp ships in `python-yt-dlp`.
@@ -16,7 +16,7 @@ type Env = Record<string, string | undefined>;
 
 /** The one line /voice status, /voice record and /voice chat print on Android. */
 export const ANDROID_DICTATION_LINE =
-	"On Android, tap the microphone key on your keyboard; dictation lands in the prompt. Spoken replies: /voice on (needs termux-tts-speak: pkg install termux-api plus the Termux:API app).";
+	"On Android, press Ctrl+R (or /voice record) to speak; the text lands in the prompt. Spoken replies: /voice on (needs termux-tts-speak: pkg install termux-api plus the Termux:API app).";
 
 /** True on Android under Termux: platform android, TERMUX_VERSION, or a com.termux PREFIX. */
 export function isAndroidHost(
@@ -67,25 +67,18 @@ export function voiceOutputOn(
 export const TERMUX_TTS_HINT =
 	"Spoken replies need termux-tts-speak: pkg install termux-api, plus the Termux:API app from F-Droid.";
 
-/** What Ctrl+R does: Android has no recorder (the keyboard dictates), elsewhere it toggles recording. */
+/** What Ctrl+R does: Android listens once through Termux:API, elsewhere it toggles recording. */
 export function ctrlRAction(
 	key: { ctrl?: boolean },
 	input: string,
 	android: boolean = isAndroidHost(),
-): "ignore" | "toggle" | "android-line" {
+): "ignore" | "toggle" | "android-listen" {
 	if (!key.ctrl || input !== "r") return "ignore";
-	return android ? "android-line" : "toggle";
+	return android ? "android-listen" : "toggle";
 }
 
-/** /voice subcommands that print the dictation line on Android instead of the desktop text. */
-export const ANDROID_VOICE_LINE_SUBS = [
-	"",
-	"chat",
-	"conversation",
-	"talk",
-	"record",
-	"listen",
-	"stt",
-	"status",
-	"stop",
-];
+/** /voice subcommands that print the Android line instead of the desktop text. record, listen and stt listen instead. */
+export const ANDROID_VOICE_LINE_SUBS = ["", "chat", "conversation", "talk", "status", "stop"];
+
+/** /voice subcommands that listen once on Android. */
+export const ANDROID_VOICE_LISTEN_SUBS = ["record", "listen", "stt"];

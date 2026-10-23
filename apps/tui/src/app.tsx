@@ -713,6 +713,7 @@ import {
 import {
 	ANDROID_DICTATION_LINE,
 	ANDROID_VOICE_LINE_SUBS,
+	ANDROID_VOICE_LISTEN_SUBS,
 	isAndroidHost,
 } from "../../../packages/voice/termux.js";
 import { KittenTTSProvider, installTermuxTTSEngine } from "../../../packages/voice/tts-engine.js";
@@ -1179,6 +1180,7 @@ export function App({
 	// Voice input — transcript goes to input field for review, NOT auto-send
 	const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
 	const voice = useVoiceInput({
+		onAndroidMic: () => void androidListen(),
 		onTranscript: (text) => {
 			setVoiceTranscript(text);
 			addSystemMessage(`Transcribed: "${text}". Edit it or press Enter to send.`);
@@ -1376,6 +1378,36 @@ export function App({
 	const updateConfirmRef = useRef<((q: string) => Promise<boolean>) | null>(null);
 	/** Set while /dj waits for the one yes to install a missing tool (#4810); the next line typed answers it. */
 	const djInstallAnswerRef = useRef<((yes: boolean) => void) | null>(null);
+	// Android (#4833): the mic key and /voice record. Setup is the same one-yes offer as first launch;
+	// pressing the key is the intent, so it asks only when something is missing. Then one listen.
+	const androidListeningRef = useRef(false);
+	async function androidListen(): Promise<void> {
+		if (androidListeningRef.current) return;
+		androidListeningRef.current = true;
+		try {
+			const { offerAndroidSetup } = await import("../../../packages/eight/android-setup.js");
+			const outcome = await offerAndroidSetup("command", {
+				ask: (line) =>
+					new Promise<boolean>((resolve) => {
+						djInstallAnswerRef.current = resolve;
+						addSystemMessage(line);
+					}),
+				say: addSystemMessage,
+			});
+			if (outcome !== "ready" && outcome !== "installed") return;
+			const { listenOnce } = await import("../../../packages/voice/termux-stt.js");
+			addSystemMessage("Listening. Speak now.");
+			const heard = await listenOnce();
+			if ("text" in heard) {
+				setVoiceTranscript(heard.text);
+				addSystemMessage(`Transcribed: "${heard.text}". Edit it or press Enter to send.`);
+			} else addSystemMessage(heard.error);
+		} catch (err) {
+			addSystemMessage(`Voice error: ${err instanceof Error ? err.message : String(err)}`);
+		} finally {
+			androidListeningRef.current = false;
+		}
+	}
 	/** One no per session: after it, /dj play stops asking and shows the command as before. */
 	const djInstallDeclinedRef = useRef(false);
 	const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -5981,7 +6013,11 @@ export function App({
 
 				case "voice":
 					// Enhanced voice command — toggle STT recording or voice chat
-					// Android (#4706): the phone keyboard already dictates; no recorder or whisper here.
+					// Android: no recorder or whisper. record/listen/stt listen once through Termux:API (#4833).
+					if (isAndroidHost() && ANDROID_VOICE_LISTEN_SUBS.includes(args[0] ?? "")) {
+						void androidListen();
+						break;
+					}
 					if (isAndroidHost() && ANDROID_VOICE_LINE_SUBS.includes(args[0] ?? "")) {
 						addSystemMessage(ANDROID_DICTATION_LINE);
 						break;

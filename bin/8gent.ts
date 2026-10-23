@@ -708,6 +708,13 @@ async function offerSafetyJudge(afterUpdate = false): Promise<void> {
 		// After an update a stray Enter must not start a 4.9 GB download: default No.
 		await offerJudge("auto", { defaultYes: !afterUpdate });
 	} catch {}
+	// Android (#4833): the same moment offers the DJ's tools and voice input, one yes. A no-op elsewhere.
+	try {
+		const { isInteractiveTerminal } = await import("../packages/eight/cli-maintenance.ts");
+		if (!isInteractiveTerminal()) return;
+		const { offerAndroidSetup } = await import("../packages/eight/android-setup.ts");
+		await offerAndroidSetup("auto", { defaultYes: !afterUpdate });
+	} catch {}
 }
 
 /**
