@@ -156,4 +156,33 @@ describe("yolo gate", () => {
 		expect(await second).toBe(false);
 		expect(answers).toEqual([yes]);
 	});
+
+	test.each([
+		["y", true],
+		["n", false],
+	])(
+		"two requests before the first answer: one gate card, one %s, both settle",
+		async (key, yes) => {
+			answers.length = 0;
+			asked = false;
+			const { stdin, frame, ask } = await mount();
+			const first = ask();
+			const second = ask();
+			await waitFor(() => frame().includes("Enable yolo mode?"), "gate shown");
+			await tick(CARD_MIN_SHOW_MS + 100);
+			stdin.feed(key);
+			await waitFor(() => frame().includes("[Y] approve"), "first real card");
+			expect(answers).toEqual([yes]);
+			await tick(20);
+			stdin.feed("y");
+			expect(await first).toBe(true);
+			// The second request gets its own real card; no second gate.
+			await waitFor(() => frame().includes("[Y] approve"), "second real card");
+			expect(frame()).not.toContain("Enable yolo mode?");
+			await tick(20);
+			stdin.feed("n");
+			expect(await second).toBe(false);
+			expect(answers).toEqual([yes]);
+		},
+	);
 });

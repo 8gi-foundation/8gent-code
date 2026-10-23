@@ -229,9 +229,24 @@ export function useApprovalCard(
 				active = card;
 				setPending(card);
 			});
-		const handler = async (request: TuiApprovalRequest): Promise<TuiApprovalDecision> => {
+		// One card at a time: a request that arrives while a card (the yolo
+		// question or a real one) is up waits its turn, so no card is ever
+		// overwritten and left hanging, and there is never a second yolo card.
+		// The first request into an idle queue raises its card synchronously.
+		let turn: Promise<unknown> | null = null;
+		const run = async (request: TuiApprovalRequest): Promise<TuiApprovalDecision> => {
 			if (yoloRef.current?.needed()) await askYolo();
 			return ask(request);
+		};
+		const handler = (request: TuiApprovalRequest): Promise<TuiApprovalDecision> => {
+			const mine = turn ? turn.then(() => run(request)) : run(request);
+			const tail: Promise<unknown> = mine
+				.catch(() => {})
+				.then(() => {
+					if (turn === tail) turn = null;
+				});
+			turn = tail;
+			return mine;
 		};
 		const ask = (request: TuiApprovalRequest): Promise<TuiApprovalDecision> =>
 			new Promise<TuiApprovalDecision>((resolvePromise) => {
