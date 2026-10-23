@@ -10,6 +10,8 @@ export { PtySession } from "./pty-session.js";
 export type { PtySessionOpts, DataHandler, ExitHandler } from "./pty-session.js";
 export { stripControl, hasAltScreenEnter, hasAltScreenExit } from "./ansi-strip.js";
 export { RingBuffer } from "./ring-buffer.js";
+export { checkNodePty, ptyFixLine, resetPtyCheck } from "./pty-available.js";
+export type { PtyCheck } from "./pty-available.js";
 export { findNodeBinary } from "./find-node.js";
 export { resolveTermCommand } from "./command-resolver.js";
 export type { ResolvedTermCommand, PresetEntry, ResolveOpts } from "./command-resolver.js";
