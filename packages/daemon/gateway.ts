@@ -32,7 +32,7 @@ import type {
 import { type EventName, bus } from "./events";
 import { type GoalManager, type GoalRpcOutbound, handleGoalRpc } from "./goal-rpc";
 import { handleStageHttp } from "./huddle-stage";
-import { DAEMON_CAPABILITIES, classifyInput, gateInput } from "./input-gate";
+import { DAEMON_CAPABILITIES, classifyInput, daemonCommands, gateInput } from "./input-gate";
 import {
 	handleLiveHttp,
 	installLiveAnatomy,
@@ -168,8 +168,10 @@ type OutboundMessage =
 			tools?: string[];
 			/** Daemon capabilities, e.g. "input-gate": clients may gate slash sending on it. */
 			capabilities?: string[];
+			/** Slash names the daemon's input gate accepts; prefer over any local copy. */
+			commands?: string[];
 	  }
-	| { type: "session:resumed"; sessionId: string; capabilities?: string[] }
+	| { type: "session:resumed"; sessionId: string; capabilities?: string[]; commands?: string[] }
 	| { type: "sessions:list"; sessions: unknown[] }
 	| { type: "cron:list"; jobs: unknown[] }
 	| { type: "cron:added"; jobId: string }
@@ -449,6 +451,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 				sessionId,
 				resumeSecret: resumeSecrets.issue(sessionId),
 				capabilities: [...DAEMON_CAPABILITIES],
+				commands: daemonCommands(),
 				...(state.channel === CLASSROOM_CHANNEL
 					? { scope: CLASSROOM_CHANNEL, tools: [] as string[] }
 					: {}),
@@ -495,6 +498,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 							...reply,
 							resumeSecret: resumeSecrets.issue(msg.sessionId),
 							capabilities: [...DAEMON_CAPABILITIES],
+							commands: daemonCommands(),
 						}
 					: reply,
 			);
@@ -930,6 +934,7 @@ export function startGateway(config: GatewayConfig): ReturnType<typeof Bun.serve
 					sessions: config.pool.size,
 					uptime: process.uptime(),
 					capabilities: [...DAEMON_CAPABILITIES],
+					commands: daemonCommands(),
 					...(telegram ? { telegram } : {}),
 				});
 			}

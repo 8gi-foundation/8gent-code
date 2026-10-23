@@ -66,6 +66,21 @@ function resolve(token: string): string | null {
 	return null;
 }
 
+/** Every name the gate accepts after the slash: canonical names and aliases, unique and sorted. One source for the `commands` field. */
+export function slashCommandNames(): string[] {
+	const names = new Set<string>();
+	for (const c of BUILT_IN_SLASH_COMMANDS) {
+		names.add(c.name);
+		for (const a of c.aliases) names.add(a);
+	}
+	return [...names].sort();
+}
+
+/** True when the gate accepts `/<token>` (name or alias), false for a made-up name. */
+export function isAcceptedSlashName(token: string): boolean {
+	return resolve(token) !== null;
+}
+
 function helpText(): string {
 	const lines = BUILT_IN_SLASH_COMMANDS.map((c) => {
 		const here = HEADLESS.has(c.name) ? "" : "  (terminal only)";
