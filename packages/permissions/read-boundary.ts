@@ -13,7 +13,7 @@
  *   --allow-read <dir>, /allow-read <dir>   read one more folder this session
  *
  * Allowed outside the root without asking (DEFAULT_READ_ALLOWANCES and readAllowances):
- * system binary and library folders, the null and random devices, the temp folders, and the
+ * system binary, header and library folders, the null and random devices, the temp folders, and the
  * tool's own ~/.8gent data except anything credential-shaped (namesSecret).
  *
  * This is a check on what a command says, not a kernel boundary: code that builds a path at
@@ -40,15 +40,18 @@ export function readBoundaryOn(env: Record<string, string | undefined> = process
 /** Fixed folders and devices a command may name outside the root. */
 export const DEFAULT_READ_ALLOWANCES = [
 	"/usr/bin",
+	"/usr/include",
 	"/usr/lib",
 	"/usr/libexec",
 	"/usr/share",
 	"/usr/local/bin",
+	"/usr/local/include",
 	"/usr/local/lib",
 	"/usr/local/share",
 	"/bin",
 	"/sbin",
 	"/opt/homebrew/bin",
+	"/opt/homebrew/include",
 	"/opt/homebrew/lib",
 	"/opt/homebrew/share",
 	"/opt/homebrew/opt",
@@ -298,6 +301,15 @@ function exists(p: string): boolean {
 }
 
 const SHELL = /^((ba|z|da|k|a|mk|ya|tc|c)?sh|fish)$/;
+/** The bare home folder as a word: `~`, `$HOME`, `${HOME}`. */
+const BARE_HOME = /^(~|\$\{?HOME\}?)\/?$/;
+/**
+ * One `echo` or `printf` and nothing else (no pipe, list, redirect or substitution): it prints its
+ * words and reads none, so `echo $HOME` names no file. Anything more (`grep -r x ~`, `cd ~ && ...`,
+ * `echo ~ | xargs ls`) is still checked.
+ */
+const PRINT_ONLY = /^\s*(echo|printf)(\s[^;|&<>`\n]*)?$/;
+const printsOnly = (command: string) => PRINT_ONLY.test(command) && !command.includes("$(");
 const MAX_NESTING = 3;
 const GLOB_CHAR = /[*?[{]/;
 
@@ -375,6 +387,8 @@ export function pathWords(
 				w = url[1] as string;
 			}
 		}
+		// `echo $HOME` prints the home folder's name; it reads nothing (PRINT_ONLY).
+		if (BARE_HOME.test(w) && printsOnly(command)) continue;
 		w = w
 			.replace(/^~(?=\/|$)/, home)
 			.replace(/^\$\{?HOME\}?(?=\/|$)/, home)
@@ -426,6 +440,7 @@ export function outsideReads(
 		// A word the shell builds at run time (${X:+y}, a glob) has no knowable path: no opinion.
 		// Literal paths inside a command substitution are checked above (substitutionPaths).
 		if (v.resolved === "<unresolved>") continue;
+		if (BARE_HOME.test(v.raw) && printsOnly(command)) continue;
 		if (exists(v.resolved) && !allowedOutside(v.resolved, env)) out.add(v.resolved);
 	}
 	const realRoot = resolveSafe(root, root);

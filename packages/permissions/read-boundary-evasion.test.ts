@@ -13,6 +13,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { resetReadAllow } from "./read-allow";
+import { DEFAULT_READ_ALLOWANCES } from "./read-boundary";
 import {
 	SYSTEM_ONE_FLAG,
 	_resetSystemOne,
@@ -378,6 +379,57 @@ describe("round 3: implicit literal joins and one-character separators", () => {
 		test(`runs: ${command}`, async () => {
 			expect(await verdict(command)).toBe("ran");
 			expect(cards).toEqual([]);
+		});
+	}
+});
+
+describe("CI round: the refusal's label, and printing the home folder", () => {
+	test("system headers are an allowance, so `cc -I/usr/include` runs where they exist (Linux)", () => {
+		for (const dir of ["/usr/include", "/usr/local/include", "/opt/homebrew/include"])
+			expect(DEFAULT_READ_ALLOWANCES).toContain(dir);
+	});
+	test("a boundary refusal is a rule, never the allowlist", async () => {
+		const r = await systemOneGate("cat ../x", env(), ws, undefined, undefined, { project: ws });
+		expect(r.run).toBe(false);
+		expect(r.guard?.backend).toBe("rule");
+		expect(r.guard?.model).toBe("workspace-boundary");
+	});
+	for (const command of [
+		"bash -c 'echo $HOME'",
+		"echo $HOME",
+		"echo ~",
+		'echo "${HOME}"',
+		'printf "%s\\n" $HOME',
+	]) {
+		test(`printing the home folder's name reads nothing: ${command}`, async () => {
+			expect(await verdict(command)).toBe("ran");
+			expect(cards).toEqual([]);
+		});
+	}
+	for (const command of [
+		"cat ~/*",
+		"cat $HOME/*",
+		"cat ~/.ssh/id_rsa",
+		"cat $HOME/notes.txt",
+		// the home folder as the base a relative read resolves against
+		"cd ~ && cat notes.txt",
+		"cd $HOME; cat .ssh/id_rsa",
+		"pushd ~ >/dev/null; cat notes.txt",
+		"tar -C ~ -c .ssh",
+		"tar -C $HOME -c .ssh",
+		"git -C ~ status",
+		"find ~ -name id_rsa",
+		"grep -r PRIVATE ~",
+		"rg PRIVATE $HOME",
+		"ls -la ~",
+		"cp -r ~ .tmp/h",
+		"echo ~ | xargs ls",
+		"echo $HOME; cat ~/notes.txt",
+		"echo $(cat ~/notes.txt)",
+	]) {
+		test(`a file in the home folder is still asked about: ${command}`, async () => {
+			expect(await verdict(command)).toBe("refused");
+			expect(cards.length).toBeGreaterThan(0);
 		});
 	}
 });

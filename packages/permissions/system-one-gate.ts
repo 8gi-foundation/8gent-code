@@ -573,11 +573,12 @@ export async function systemOneGate(
 	});
 	if (boundary === null) return result;
 	if (boundary.run) return { ...result, humanApproved: true };
+	// A deterministic rule, not the allowlist: the allowlist only ever passes read-only commands.
 	const guard: BashGuardResult = {
 		verdict: "escalate",
 		pYes: Number.NaN,
-		backend: "allowlist",
-		model: "allowlist",
+		backend: "rule",
+		model: "workspace-boundary",
 		reason: "names a path outside the working folder (workspace-boundary)",
 	};
 	return { run: false, guard, humanApproved: boundary.humanApproved, message: boundary.message };
