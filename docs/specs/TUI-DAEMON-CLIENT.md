@@ -420,11 +420,16 @@ What it does:
   gate everything (open question 4). A configured `daemon.authToken` keeps its present meaning and is
   also the operator token.
 - **Discovery.** The daemon writes `<dataDir>/daemon.json` (0600): url, pid, data
-  dir, no token. The TUI scans `~/.8gent/daemon.json` and `~/.8gent/*/daemon.json`,
+  dir, no token. The identity proof is bound to the address the client dialled, so a squatter
+  cannot relay it. The TUI scans `~/.8gent/daemon.json` and `~/.8gent/*/daemon.json`,
   ignores dead pids, reads the token from the same directory, and tries `home` on each.
-- **Telegram output rule (4.9).** The bridge posts a final reply only for a turn it
-  started. A TUI turn on the home session is shown in the TUI and never sent to
-  Telegram. The bridge learns the order of turns from the daemon's `user:message` echo.
+- **A dedicated tab.** `/sessions attach home` opens one tab, "Telegram", reused if open,
+  labelled linked, reconnecting or detached. Only that tab is linked; no other tab or its
+  messages is touched. Closing the tab detaches it, and it is never saved to disk.
+- **Telegram output rule (4.9).** The daemon tags every turn-output event with the channel
+  that started the turn (capability `turn-origin`); the bridge posts only events whose origin
+  is Telegram and drops untagged ones. A TUI turn on the home session is shown in the TUI
+  and never sent to Telegram, also across a bridge reconnect in the middle of it.
 - **Reconnect.** The client keeps the link, retries with backoff, re-attaches the same
   id, replaces the transcript, and shows "Reconnecting". It never silently switches to
   an in-process session. Detach stops the retry.
