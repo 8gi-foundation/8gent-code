@@ -695,6 +695,19 @@ async function updateCommand(args: string[]): Promise<void> {
 		embedded: MODULE_IS_EMBEDDED,
 		execPath: process.execPath,
 	});
+	// A fresh version is the moment to offer the safety judge (#4811). Asks once, never blocks.
+	if (process.exitCode === 0 || process.exitCode === undefined) await offerSafetyJudge(true);
+}
+
+/** Offer the safety judge when none is reachable (#4811). Interactive only; any failure is swallowed. */
+async function offerSafetyJudge(afterUpdate = false): Promise<void> {
+	try {
+		const { isInteractiveTerminal } = await import("../packages/eight/cli-maintenance.ts");
+		if (!isInteractiveTerminal()) return;
+		const { offerJudge } = await import("../packages/eight/judge-install.ts");
+		// After an update a stray Enter must not start a 4.9 GB download: default No.
+		await offerJudge("auto", { defaultYes: !afterUpdate });
+	} catch {}
 }
 
 /**
@@ -1351,6 +1364,9 @@ async function tuiCommand(args: string[]) {
 	if (wantPet) {
 		await spawnPet();
 	}
+
+	// First run on a fresh install: offer the safety judge once (#4811).
+	await offerSafetyJudge();
 
 	console.log("Launching 8gent...\n");
 

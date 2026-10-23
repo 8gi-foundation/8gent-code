@@ -42,6 +42,7 @@ export type SlashCommand =
 	| "compact"
 	| "stack"
 	| "update"
+	| "judge"
 	| "chat"
 	| "agent"
 	| "github"
@@ -415,6 +416,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["upgrade"],
 		description: "Update 8gent, then reopen this session on the new version",
 		usage: "/update [--force]",
+	},
+	{
+		name: "judge",
+		aliases: [],
+		description: "Install the safety judge that checks risky commands before they run",
+		usage: "/judge [install]",
 	},
 	{
 		name: "compact",
