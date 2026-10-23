@@ -32,7 +32,7 @@ import {
 	decisionConfigFromEnv,
 	decisionJudgeEnabled,
 } from "./decision-readout";
-import { redirectHint } from "./redirect-hint";
+import { failureMessage, redirectHint } from "./redirect-hint";
 
 /** Where a verdict came from, so callers can tell a real judgment from a fail-closed default. */
 export type VerdictSource = "selene" | "decision-readout" | "fail-closed";
@@ -257,9 +257,8 @@ export class SeleneJudge {
 			const data = (await res.json()) as { response?: string };
 			raw = data.response ?? "";
 		} catch (err) {
-			const hint = redirectHint(err, this.baseUrl, "the judge baseUrl option");
 			return failClosed(
-				`Judge unreachable: ${err instanceof Error ? err.message : String(err)}${hint ? ` (${hint})` : ""}`,
+				`Judge unreachable: ${failureMessage(err, this.baseUrl, "the judge baseUrl option")}`,
 			);
 		}
 		return parseVerdict(raw);

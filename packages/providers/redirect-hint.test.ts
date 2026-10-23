@@ -39,6 +39,16 @@ afterAll(() => {
 	cleanupTempDirs();
 });
 
+const PW = "s3cr3tpass";
+const TOK = "tok_ABC123";
+/** The stub URL as a user might configure it: password in userinfo, token in the query. */
+const secretUrl = () => `http://user:${PW}@127.0.0.1:${stub.port}`;
+const secretUrlQ = () => `${secretUrl()}/v1?token=${TOK}`;
+const clean = (text: string) => {
+	expect(text).not.toContain(PW);
+	expect(text).not.toContain(TOK);
+};
+
 const hint = (setting: string) => `the URL ${host} redirected; set the https URL in ${setting}`;
 
 describe("redirect hint, one stub per site", () => {
@@ -47,6 +57,14 @@ describe("redirect hint, one stub per site", () => {
 		expect(
 			redirectHint(Object.assign(new TypeError("x"), { code: "UnexpectedRedirect" }), url, "X"),
 		).toBe(hint("X"));
+	});
+
+	test("an unreadable URL is named generically, never echoed", () => {
+		const e = Object.assign(new TypeError("x"), { code: "UnexpectedRedirect" });
+		for (const bad of ["user:pw@host:11434", "not a url", ""]) {
+			const h = redirectHint(e, bad, "X");
+			expect(h).toBe("the configured URL redirected; set the https URL in X");
+		}
 	});
 
 	test("board vessel, Ollama path names OLLAMA_HOST", async () => {
@@ -96,7 +114,48 @@ describe("redirect hint, one stub per site", () => {
 		);
 	});
 
+	test("a password and a token in the configured URL reach no message, rationale or stderr line", async () => {
+		const err = spyOn(console, "error").mockImplementation(() => {});
+		const seen: string[] = [];
+		const grab = async (p: Promise<unknown>) => {
+			try {
+				await p;
+				seen.push("NO THROW");
+			} catch (e) {
+				seen.push((e as Error).message);
+			}
+		};
+		process.env.INFERENCE_MODE = "ollama";
+		process.env.OLLAMA_HOST = secretUrlQ();
+		const req = { systemPrompt: "s", contextMessages: [], userMessage: "hi" } as never;
+		await grab(generateResponse(req));
+		process.env.INFERENCE_MODE = "proxy";
+		process.env.MODEL_PROXY_URL = secretUrlQ();
+		await grab(generateResponse(req));
+		const ask = localSpokenModel({ OLLAMA_HOST: secretUrlQ() });
+		await grab((ask as NonNullable<typeof ask>)("hi"));
+		const v = await new SeleneJudge({ baseUrl: secretUrlQ() }).judge("out", "rubric");
+		expect(v.pass).toBe(false);
+		seen.push(v.rationale, v.raw);
+		const sky = new SkyworkScorer({ baseUrl: secretUrlQ() });
+		expect(await sky.scoreOne("a")).toBeNull();
+		const dir = tempDir("redirect-secret-");
+		await grab(
+			new JudgeScorer({
+				prmUrl: secretUrlQ(),
+				prmApiKey: "k",
+				historyPath: `${dir}/h.jsonl`,
+			}).score("s", 0, "m", "plain prompt", "plain reply"),
+		);
+		const stderr = err.mock.calls.map((c) => c.map(String).join(" "));
+		err.mockRestore();
+		expect(seen.length).toBe(6);
+		for (const text of [...seen, ...stderr]) clean(text);
+		expect(seen.filter((m) => m.includes("refused redirect: the URL 127.0.0.1:")).length).toBe(5);
+		expect(stderr.some((l) => l.includes("the URL 127.0.0.1:"))).toBe(true);
+	});
+
 	test("the stub saw every call and nothing followed the redirect", () => {
-		expect(hits).toBeGreaterThanOrEqual(7);
+		expect(hits).toBeGreaterThanOrEqual(13);
 	});
 });
