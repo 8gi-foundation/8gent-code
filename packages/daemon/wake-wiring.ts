@@ -9,8 +9,19 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+	constants,
+	closeSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	readdirSync,
+	statSync,
+	unlinkSync,
+	writeSync,
+} from "node:fs";
+import { join, resolve } from "node:path";
 import { getDataDir } from "./data-dir";
 import { bus } from "./events";
 import { sendNativeNotification } from "./notifications";
@@ -33,9 +44,90 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0,
 export function readWakeSettings(dir = getDataDir()): WakeSettings {
 	try {
 		const w = JSON.parse(readFileSync(join(dir, "config.json"), "utf8")).wake ?? {};
-		return { ...DEFAULT_WAKE_SETTINGS, ...w };
+		const s = { ...DEFAULT_WAKE_SETTINGS, ...w };
+		// A prune limit that is not a positive number (0, negative, NaN, a string) would delete
+		// everything: it falls back to the default instead (8SO, #4888).
+		const positive = (v: unknown, fallback: number, max: number) =>
+			typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.min(v, max) : fallback;
+		// Floors as well: a limit of 1e-9 days or 1 file would empty the folder on every event.
+		s.payloadMaxAgeDays = Math.max(
+			MIN_PAYLOAD_DAYS,
+			positive(s.payloadMaxAgeDays, DEFAULT_WAKE_SETTINGS.payloadMaxAgeDays, 3650),
+		);
+		s.payloadMaxFiles = Math.max(
+			MIN_PAYLOAD_FILES,
+			Math.floor(positive(s.payloadMaxFiles, DEFAULT_WAKE_SETTINGS.payloadMaxFiles, 100_000)),
+		);
+		return s;
 	} catch {
 		return { ...DEFAULT_WAKE_SETTINGS };
+	}
+}
+
+/** Smallest prune limits honoured: below these a config value is raised to them. */
+export const MIN_PAYLOAD_DAYS = 1;
+export const MIN_PAYLOAD_FILES = 50;
+
+/** Remove payload files past the age limit, then the oldest beyond the count cap (#4877). */
+export function pruneWakeFiles(
+	d: string,
+	s: Pick<WakeSettings, "payloadMaxAgeDays" | "payloadMaxFiles">,
+	now = Date.now(),
+	/** Paths never removed: the file just written, and what held events point at. */
+	keep: ReadonlySet<string> = new Set(),
+): number {
+	// The limits are checked again here: this is exported, and 0, a negative or NaN would remove everything.
+	const days = Math.max(
+		MIN_PAYLOAD_DAYS,
+		Number.isFinite(s.payloadMaxAgeDays) && s.payloadMaxAgeDays > 0
+			? s.payloadMaxAgeDays
+			: DEFAULT_WAKE_SETTINGS.payloadMaxAgeDays,
+	);
+	const cap = Math.max(
+		MIN_PAYLOAD_FILES,
+		Number.isFinite(s.payloadMaxFiles) && s.payloadMaxFiles >= 1
+			? Math.floor(s.payloadMaxFiles)
+			: DEFAULT_WAKE_SETTINGS.payloadMaxFiles,
+	);
+	let files: { p: string; at: number }[];
+	try {
+		// lstat: only regular files count; a link is never followed, so its target's age or
+		// existence cannot steer what gets removed.
+		files = readdirSync(d)
+			.filter((f) => f.endsWith(".txt"))
+			.map((f) => ({ p: join(d, f), st: lstatSync(join(d, f)) }))
+			.filter((f) => f.st.isFile())
+			.map((f) => ({ p: f.p, at: f.st.mtimeMs }))
+			.sort((a, b) => a.at - b.at);
+	} catch {
+		return 0;
+	}
+	const cutoff = now - days * 86_400_000;
+	const excess = Math.max(0, files.length - cap);
+	const doomed = files.filter((f, i) => !keep.has(resolve(f.p)) && (f.at < cutoff || i < excess));
+	for (const f of doomed) {
+		try {
+			unlinkSync(f.p);
+		} catch {}
+	}
+	return doomed.length;
+}
+
+/** Write a 0600 file without following a link at its name (a planted link is replaced, not written through). */
+function writeNoFollow(p: string, text: string): void {
+	const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW;
+	let fd: number;
+	try {
+		fd = openSync(p, flags, 0o600);
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "ELOOP") throw err;
+		unlinkSync(p);
+		fd = openSync(p, flags, 0o600);
+	}
+	try {
+		writeSync(fd, text);
+	} finally {
+		closeSync(fd);
 	}
 }
 
@@ -44,7 +136,9 @@ function stash(text: string, dir = getDataDir()): string {
 	const d = join(dir, "wake");
 	mkdirSync(d, { recursive: true, mode: 0o700 });
 	const p = join(d, `${sha(text)}.txt`);
-	writeFileSync(p, text, { mode: 0o600 });
+	writeNoFollow(p, text);
+	const keep = new Set([resolve(p), ...(router?.heldPaths() ?? [])]);
+	pruneWakeFiles(d, readWakeSettings(dir), Date.now(), keep);
 	return p;
 }
 
@@ -104,41 +198,54 @@ export function threatFeedEvents(root: string, sinceMs: number, at = Date.now())
 	return out;
 }
 
-function cronEvent(priority: WakeEvent["priority"], key: string, text: string): WakeEvent {
+function cronEvent(
+	dir: string,
+	priority: WakeEvent["priority"],
+	key: string,
+	text: string,
+): WakeEvent {
 	return {
 		source: "cron",
 		priority,
 		dedupeKey: `cron:${key}`,
 		origin: "cron",
-		payloadPath: stash(text),
+		payloadPath: stash(text, dir),
 		at: Date.now(),
 	};
 }
 
+/** What the notification says: fixed words, a count, and a path; never text written by someone else. */
+export function noticeText(n: Notice): string {
+	if (n.event.dedupeKey === "held:overflow")
+		return `and ${n.count} more urgent events held overnight`;
+	const times = n.count > 1 ? ` (x ${n.count})` : "";
+	return `${n.event.source} needs you${times}, details at ${n.event.payloadPath}`;
+}
+
 async function announce(n: Notice): Promise<void> {
 	if (n.kind === "reply") return; // the owner's reply is the stream they are already reading
-	await sendNativeNotification(
-		"8gent",
-		`${n.event.source} needs you, details at ${n.event.payloadPath}`,
-	);
+	await sendNativeNotification("8gent", noticeText(n));
 }
 
 /** Start the router and subscribe it to the bus. Returns a stop function. */
 export function startWakeRouter(
 	dir = getDataDir(),
 	speak: (n: Notice) => void | Promise<void> = announce,
+	now?: () => number,
 ): () => void {
 	router = new WakeRouter({
 		settings: () => readWakeSettings(dir),
 		digestDir: join(dir, "digest"),
+		heldPath: join(dir, "wake-held.json"),
 		speak,
+		now,
 	});
 	const r = router;
 	const subs = [
 		bus.on("tool:result", (p) => {
 			if (p.sessionId !== "cron" || !p.tool.startsWith("cron:") || p.tool === "cron:when") return;
 			const text = JSON.stringify(p.output) ?? "";
-			void r.submit(cronEvent("low", `${p.tool}:${sha(text)}`, text));
+			void r.submit(cronEvent(dir, "low", `${p.tool}:${sha(text)}`, text));
 			if (p.tool === "cron:shell") {
 				const root = join(dir, "security", "threat-feed");
 				for (const e of threatFeedEvents(root, Date.now() - p.durationMs - 60_000))
@@ -148,7 +255,7 @@ export function startWakeRouter(
 		// A failed job needs action; the same failure on a retry is one event.
 		bus.on("agent:error", (p) => {
 			if (p.sessionId === "cron")
-				void r.submit(cronEvent("urgent", `error:${sha(p.error)}`, p.error));
+				void r.submit(cronEvent(dir, "urgent", `error:${sha(p.error)}`, p.error));
 		}),
 	];
 	return () => {

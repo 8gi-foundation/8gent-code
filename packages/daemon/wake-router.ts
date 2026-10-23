@@ -15,12 +15,32 @@
  *     normal, low -> quiet, into today's digest file
  *   A key already spoken inside the dedupe window is a repeat and goes to the digest. Quiet
  *   hours hold everything but owner replies. Digest off drops quiet events (opt-in, #4844 A1).
+ *   An urgent event is never dropped: in quiet hours it waits in a held file (0600) that
+ *   survives a restart, and is announced once, with its count, when quiet hours end (#4877).
  * - Untrusted origins are data. Events carry a path, never the text, and renderUntrusted()
  *   is the only way a batch reaches a model prompt: as a labelled list of paths.
  */
 
-import { appendFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import {
+	constants,
+	appendFileSync,
+	closeSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeSync,
+} from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
+
+/** Distinct urgent events held through quiet hours; more are counted, not stored (8SO, #4888). */
+export const MAX_HELD = 200;
+/** A held file larger than this is not read. */
+const MAX_HELD_FILE_BYTES = 2 * 1024 * 1024;
+const SOURCES = new Set(["owner", "telegram-other", "cron", "threat-feed", "task"]);
 
 export type WakeSource = "owner" | "telegram-other" | "cron" | "threat-feed" | "task";
 export type WakePriority = "owner" | "urgent" | "normal" | "low";
@@ -44,6 +64,10 @@ export interface WakeSettings {
 	digest: boolean;
 	batchWindowMs: number;
 	dedupeWindowMs: number;
+	/** wake/*.txt payload files: older than this many days are removed (#4877). */
+	payloadMaxAgeDays: number;
+	/** wake/*.txt payload files: at most this many are kept, oldest removed first. */
+	payloadMaxFiles: number;
 }
 
 export const DEFAULT_WAKE_SETTINGS: WakeSettings = {
@@ -51,6 +75,8 @@ export const DEFAULT_WAKE_SETTINGS: WakeSettings = {
 	digest: false,
 	batchWindowMs: 5_000,
 	dedupeWindowMs: 10 * 60_000,
+	payloadMaxAgeDays: 7,
+	payloadMaxFiles: 500,
 };
 
 export interface Notice {
@@ -63,10 +89,20 @@ export interface WakeDeps {
 	settings: () => WakeSettings;
 	/** Directory for the daily digest files, `<dir>/YYYY-MM-DD.jsonl`. */
 	digestDir: string;
+	/** Held urgent events, as JSON. Absent: held in memory only. */
+	heldPath?: string;
 	speak: (n: Notice) => void | Promise<void>;
 	/** Optional background turn for a batch. None by default: no model spend (#4844). */
 	runTurn?: (batch: WakeEvent[], signal: AbortSignal) => Promise<void>;
 	now?: () => number;
+}
+
+/** The next time `q.end` falls after `at`. */
+export function nextQuietEnd(at: number, q: NonNullable<WakeSettings["quietHours"]>): number {
+	const d = new Date(at);
+	d.setHours(0, minutes(q.end), 0, 0);
+	if (d.getTime() <= at) d.setDate(d.getDate() + 1);
+	return d.getTime();
 }
 
 interface Queued {
@@ -109,8 +145,76 @@ export class WakeRouter {
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private abort: AbortController | null = null;
 	private pumping: Promise<void> | null = null;
+	private held = new Map<string, Queued>();
+	/** Urgent events past MAX_HELD during quiet hours: only their number is kept. */
+	private overflow = 0;
+	/** The batch handleBatch is working on: out of the queue, not yet held or spoken. */
+	private inflight: Queued[] = [];
+	private heldTimer: ReturnType<typeof setTimeout> | null = null;
 
-	constructor(private readonly deps: WakeDeps) {}
+	constructor(private readonly deps: WakeDeps) {
+		this.loadHeld();
+		void this.release();
+	}
+
+	/**
+	 * Read the held file back. It is a file in the data folder, so it is checked like input: a
+	 * regular file this user owns (never a link), under 2 MiB, and each entry must be a well-formed
+	 * urgent event whose payload path is a .txt under the wake folder next to it. A forged entry
+	 * cannot point the notice at some other file; anything malformed is skipped.
+	 */
+	private loadHeld(): void {
+		const path = this.deps.heldPath;
+		if (!path) return;
+		try {
+			const st = lstatSync(path);
+			if (!st.isFile() || st.size > MAX_HELD_FILE_BYTES) return;
+			if (typeof process.getuid === "function" && st.uid !== process.getuid()) return;
+			const raw = JSON.parse(readFileSync(path, "utf8"));
+			if (!Array.isArray(raw)) return;
+			const wakeDir = resolve(dirname(path), "wake") + sep;
+			for (const q of raw) {
+				if (typeof q?.overflow === "number" && Number.isInteger(q.overflow) && q.overflow > 0) {
+					this.overflow = Math.min(this.overflow + q.overflow, 1_000_000);
+					continue;
+				}
+				const e = q?.event;
+				const ok =
+					e &&
+					typeof e.dedupeKey === "string" &&
+					e.dedupeKey.length <= 256 &&
+					e.priority === "urgent" &&
+					SOURCES.has(e.source) &&
+					typeof e.origin === "string" &&
+					e.origin.length <= 64 &&
+					typeof e.at === "number" &&
+					Number.isFinite(e.at) &&
+					typeof e.payloadPath === "string" &&
+					resolve(e.payloadPath).startsWith(wakeDir) &&
+					e.payloadPath.endsWith(".txt") &&
+					Number.isInteger(q.count) &&
+					q.count >= 1 &&
+					q.count <= 1_000_000;
+				if (!ok) continue;
+				// Past the cap an event is counted, not dropped: the file itself holds at most
+				// MAX_HELD events plus an overflow row, and both are read back.
+				if (this.held.size >= MAX_HELD && !this.held.has(e.dedupeKey))
+					this.overflow = Math.min(this.overflow + q.count, 1_000_000);
+				else this.held.set(e.dedupeKey, { event: e, count: q.count });
+			}
+		} catch {
+			// No held file, or one that does not parse: nothing was held.
+		}
+	}
+
+	/**
+	 * Payload files still needed: held events, events queued in the batch window, and the batch
+	 * being handled. The prune must not remove what any of them points at.
+	 */
+	heldPaths(): Set<string> {
+		const all = [...this.held.values(), ...this.queue, ...this.inflight];
+		return new Set(all.filter((q) => q.event.payloadPath).map((q) => resolve(q.event.payloadPath)));
+	}
 
 	private now(): number {
 		return this.deps.now?.() ?? Date.now();
@@ -135,6 +239,12 @@ export class WakeRouter {
 		if (prior && ev.at - prior.at <= this.deps.settings().dedupeWindowMs) {
 			if (prior.queued) {
 				prior.queued.count++;
+				return Promise.resolve();
+			}
+			const held = this.held.get(ev.dedupeKey);
+			if (held) {
+				held.count = Math.min(held.count + 1, 1_000_000);
+				this.saveHeld();
 				return Promise.resolve();
 			}
 			// Already handled inside the window: a repeat, never spoken again.
@@ -163,6 +273,74 @@ export class WakeRouter {
 		if (this.timer) clearTimeout(this.timer);
 		this.timer = null;
 		await this.pump(true);
+		await this.release();
+	}
+
+	/** Announce held urgent events once quiet hours have ended; otherwise wait for the end. */
+	async release(): Promise<void> {
+		if (this.held.size === 0 && this.overflow === 0) return;
+		const { quietHours } = this.deps.settings();
+		if (inQuietHours(this.now(), quietHours)) {
+			if (this.heldTimer || !quietHours) return;
+			this.heldTimer = setTimeout(
+				() => {
+					this.heldTimer = null;
+					void this.release();
+				},
+				Math.max(1000, nextQuietEnd(this.now(), quietHours) - this.now()),
+			);
+			this.heldTimer.unref?.();
+			return;
+		}
+		const out = [...this.held.values()];
+		const more = this.overflow;
+		this.held.clear();
+		this.overflow = 0;
+		this.saveHeld();
+		for (const q of out) await this.speakAction(q);
+		if (more > 0)
+			await this.deps.speak({
+				kind: "action",
+				count: more,
+				event: {
+					source: "task",
+					priority: "urgent",
+					dedupeKey: "held:overflow",
+					origin: "wake-router",
+					payloadPath: "",
+					at: this.now(),
+				},
+			});
+	}
+
+	private saveHeld(): void {
+		const path = this.deps.heldPath;
+		if (!path) return;
+		// A temp name nobody can guess, opened O_EXCL | O_NOFOLLOW, then renamed over the real name:
+		// a link planted at either name is replaced, never written through. A write that fails
+		// (disk full) must not break the event that caused it: it stays held in memory.
+		const tmp = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+		try {
+			mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+			const rows: unknown[] = [...this.held.values()];
+			if (this.overflow > 0) rows.push({ overflow: this.overflow });
+			const fd = openSync(
+				tmp,
+				constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+				0o600,
+			);
+			try {
+				writeSync(fd, JSON.stringify(rows));
+			} finally {
+				closeSync(fd);
+			}
+			renameSync(tmp, path);
+		} catch (err) {
+			try {
+				unlinkSync(tmp);
+			} catch {}
+			console.error("[wake] could not write the held file:", (err as Error).message);
+		}
 	}
 
 	private pump(force = false): Promise<void> {
@@ -190,6 +368,7 @@ export class WakeRouter {
 		const window = this.deps.settings().batchWindowMs;
 		const batch = this.queue.filter((q) => q.event.at - first <= window);
 		this.queue = this.queue.filter((q) => !batch.includes(q));
+		this.inflight = batch;
 		if (this.deps.runTurn) {
 			const ctl = new AbortController();
 			this.abort = ctl;
@@ -208,12 +387,22 @@ export class WakeRouter {
 			}
 		}
 		for (const q of batch) {
-			q.event.priority === "urgent" && !inQuietHours(this.now(), this.deps.settings().quietHours)
-				? await this.speakAction(q)
-				: this.quiet(q.event, q.count, q.event.priority === "urgent" ? "quiet-hours" : "progress");
+			if (q.event.priority !== "urgent") this.quiet(q.event, q.count, "progress");
+			else if (inQuietHours(this.now(), this.deps.settings().quietHours)) this.hold(q);
+			else await this.speakAction(q);
 			const s = this.seen.get(q.event.dedupeKey);
 			if (s) s.queued = undefined;
 		}
+		this.inflight = [];
+	}
+
+	private hold(q: Queued): void {
+		const prior = this.held.get(q.event.dedupeKey);
+		if (prior) prior.count = Math.min(prior.count + q.count, 1_000_000);
+		else if (this.held.size >= MAX_HELD) this.overflow += q.count;
+		else this.held.set(q.event.dedupeKey, q);
+		this.saveHeld();
+		void this.release(); // arms the end-of-quiet-hours timer
 	}
 
 	private async speakAction(q: Queued): Promise<void> {

@@ -86,7 +86,14 @@ test("an owner message pre-empts a running batch turn and the batch is requeued"
 	const aborted: boolean[] = [];
 	let release: () => void = () => {};
 	const r = new WakeRouter({
-		settings: () => ({ quietHours: null, digest: false, batchWindowMs: 0, dedupeWindowMs: 60_000 }),
+		settings: () => ({
+			quietHours: null,
+			digest: false,
+			batchWindowMs: 0,
+			dedupeWindowMs: 60_000,
+			payloadMaxAgeDays: 7,
+			payloadMaxFiles: 500,
+		}),
 		digestDir: join(dir, "digest"),
 		speak: (n) => void spoken.push(n),
 		runTurn: (_b, signal) =>
@@ -122,7 +129,14 @@ test("dedupe: repeats inside the window collapse, outside it they are new", asyn
 	const spoken: Notice[] = [];
 	const t = 1_000_000;
 	const r = new WakeRouter({
-		settings: () => ({ quietHours: null, digest: false, batchWindowMs: 0, dedupeWindowMs: 1000 }),
+		settings: () => ({
+			quietHours: null,
+			digest: false,
+			batchWindowMs: 0,
+			dedupeWindowMs: 1000,
+			payloadMaxAgeDays: 7,
+			payloadMaxFiles: 500,
+		}),
 		digestDir: join(dir, "d"),
 		speak: (n) => void spoken.push(n),
 		now: () => t,
@@ -155,7 +169,14 @@ test("quiet hours hold actions but never an owner reply; digest off writes nothi
 	expect(inQuietHours(new Date(2026, 9, 23, 12, 0).getTime(), q)).toBe(false);
 	const mk = (digest: boolean) =>
 		new WakeRouter({
-			settings: () => ({ quietHours: q, digest, batchWindowMs: 0, dedupeWindowMs: 1000 }),
+			settings: () => ({
+				quietHours: q,
+				digest,
+				batchWindowMs: 0,
+				dedupeWindowMs: 1000,
+				payloadMaxAgeDays: 7,
+				payloadMaxFiles: 500,
+			}),
 			digestDir: join(dir, `d${digest}`),
 			speak: (n) => void spoken.push(n),
 			now: () => at,
@@ -166,7 +187,7 @@ test("quiet hours hold actions but never an owner reply; digest off writes nothi
 	await on.submit(ownerEvent("s", "tui", at));
 	await on.flush();
 	expect(spoken.map((n) => n.kind)).toEqual(["reply"]);
-	expect(readdirSync(join(dir, "dtrue"))).toHaveLength(1);
+	expect(() => readdirSync(join(dir, "dtrue"))).toThrow(); // held for later, not digested
 	const off = mk(false);
 	await off.submit({ ...urgent, dedupeKey: "other" });
 	await off.flush();
@@ -176,7 +197,14 @@ test("quiet hours hold actions but never an owner reply; digest off writes nothi
 test("untrusted origins cannot promote themselves and reach a prompt only as data references", async () => {
 	const spoken: Notice[] = [];
 	const r = new WakeRouter({
-		settings: () => ({ quietHours: null, digest: false, batchWindowMs: 0, dedupeWindowMs: 1000 }),
+		settings: () => ({
+			quietHours: null,
+			digest: false,
+			batchWindowMs: 0,
+			dedupeWindowMs: 1000,
+			payloadMaxAgeDays: 7,
+			payloadMaxFiles: 500,
+		}),
 		digestDir: join(dir, "d"),
 		speak: (n) => void spoken.push(n),
 	});
