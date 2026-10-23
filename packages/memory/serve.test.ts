@@ -1,11 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MemoryReader, isPrivate } from "./serve.ts";
-import { MemoryStore } from "./store.ts";
-import type { Memory } from "./types.ts";
+import { MemoryReader, isPrivate } from "./serve.js";
+import { MemoryStore } from "./store.js";
+import type { Memory } from "./types.js";
 
 const ROOT = path.resolve(import.meta.dir, "../..");
 let dir: string;
@@ -146,7 +146,11 @@ describe("real stdio protocol", () => {
 			await proc.exited;
 		}
 
-		const lines = fs.readFileSync(logPath, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+		const lines = fs
+			.readFileSync(logPath, "utf8")
+			.trim()
+			.split("\n")
+			.map((l) => JSON.parse(l));
 		expect(lines[0]).toMatchObject({ tool: "memory_search", query: "pineapplewidget", count: 1 });
 		expect(lines.length).toBe(1 + 4 + 1);
 		expect(fs.readFileSync(logPath, "utf8")).not.toContain("Fridays");

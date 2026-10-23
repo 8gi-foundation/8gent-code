@@ -80,7 +80,13 @@ export class MemoryReader {
 	}
 
 	private shape(r: Row) {
-		return { id: r.id, type: r.type, scope: r.scope, text: r.content_text, created_at: r.created_at };
+		return {
+			id: r.id,
+			type: r.type,
+			scope: r.scope,
+			text: r.content_text,
+			created_at: r.created_at,
+		};
 	}
 
 	search(query: string, limit: number) {
@@ -202,7 +208,9 @@ export async function serveStdio(dbPath = defaultDbPath()): Promise<number> {
 		return 1;
 	}
 	const reader = new MemoryReader(dbPath);
-	console.error(`8gent memory serve: read-only, ${dbPath}, log ${path.dirname(dbPath)}/${LOG_NAME}`);
+	console.error(
+		`8gent memory serve: read-only, ${dbPath}, log ${path.dirname(dbPath)}/${LOG_NAME}`,
+	);
 	let buf = "";
 	for await (const chunk of process.stdin as AsyncIterable<Buffer>) {
 		buf += chunk.toString("utf8");
