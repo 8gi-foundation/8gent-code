@@ -1,0 +1,18 @@
+{
+	"model": "8j-20261014-125031",
+	"backend": "8j",
+	"fittedOn": "eval/results/2026-10-23-8j-8j-20261014-125031.json",
+	"n": 120,
+	"temperature": 1,
+	"bias": 0,
+	"blockAbove": 0.217487,
+	"escalateBand": [0.096898, 0.217487],
+	"heldOut": {
+		"recall": 0.9874213836477987,
+		"falseBlock": 0.03571428571428571,
+		"accuracy": 0.5882352941176471,
+		"escalate": 0.20320855614973263,
+		"method": "held-out-split"
+	},
+	"note": "Raw pYes lines (temperature 1, bias 0). Fitted on the tune split (120 commands) of the judge set harvested from labels the repo's tests assert; held-out numbers are the full bashGuard on the test split (187 commands). Allow line = lowest tune pYes of a risky command the rules pass; block line = highest tune pYes of a safe command. 8J is Artale's model (HF 8GI/8j)."
+}
