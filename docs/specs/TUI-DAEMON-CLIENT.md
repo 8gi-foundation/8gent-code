@@ -337,8 +337,8 @@ operator's private DM is an opt-in for later (open question 3).
 
 Each slice is one PR, one issue, tests run one file at a time, and a live check on
 this Mac before the PR is called ready. A slice is not done until its live check
-has output behind it. Slices 1 and 2 are the two James named on 23 Oct; slice 3
-carries what was in the first draft of slices 1 and 3.
+has output behind it. Order, as amended on 23 Oct: slice 1 auto-attach, slice 2 the
+Telegram home session, slice 3 approvals.
 
 ### Slice 1: auto-attach (TUI side only, no daemon change)
 
@@ -379,17 +379,67 @@ Live check: with the daemon on `:18789` up, start the TUI and capture the chip; 
 capture that it starts with no chip and no error. Recorded, not described.
 
 What slice 1 does not do, stated so nobody assumes it: it does not link the Telegram
-session (slice 3), so a Telegram message is not yet visible in the TUI; and until
-slice 2 lands, a command that needs a card is refused in a daemon-run turn
-(section 4.3, today's headless rule). Slice 1 should not reach a release before slice 2.
+session (slice 2), so a Telegram message is not yet visible in the TUI; and until
+slice 3 lands, a command that needs a card is refused in a daemon-run turn
+(section 4.3, today's headless rule). Slice 1 should not reach a release before slice 3 (approvals).
 
-### Slice 2: approvals for daemon turns
+### Slice 2: the Telegram home session (decided 23 Oct 2026, 8EO relaying James)
 
-Decision 2. Proves success checks 2 and 3 for turns the TUI starts. About 250 lines.
+Pulled ahead of approvals: this is "open the TUI and your 8gents already have
+Telegram". About 300 lines of code plus tests. Every daemon change in it gets 8SO
+review, so it is built small and the PR carries a threat note.
+
+What it does:
+- **Home session.** The daemon treats the session bound to the Telegram bridge's
+  socket as home. `session:attach { sessionId: "home" }` (or its raw id) joins it.
+  It is never listed, never written to the session store, never restored from disk.
+- **Who may attach.** Loopback, and a socket that proved the operator token with an
+  `auth` frame. Nothing else: not a non-loopback peer, not a loopback socket
+  without the token, not by listing or guessing the id.
+- **Token.** On start the daemon creates `<dataDir>/daemon.token` (0600, random,
+  never in a log or a URL) when none is configured. It gates the home session. It
+  does not gate the rest of the gateway by default, because the Mac app and other
+  local clients connect without one today; `EIGHT_DAEMON_REQUIRE_TOKEN=1` makes it
+  gate everything. A configured `daemon.authToken` keeps its present meaning and is
+  also the operator token.
+- **Discovery.** The daemon writes `<dataDir>/daemon.json` (0600): url, pid, data
+  dir, no token. The TUI scans `~/.8gent/daemon.json` and `~/.8gent/*/daemon.json`,
+  ignores dead pids, reads the token from the same directory, and tries `home` on each.
+- **Telegram output rule (4.9).** The bridge posts a final reply only for a turn it
+  started. A TUI turn on the home session is shown in the TUI and never sent to
+  Telegram. The bridge learns the order of turns from the daemon's `user:message` echo.
+- **Reconnect.** The client keeps the link, retries with backoff, re-attaches the same
+  id, replaces the transcript, and shows "Reconnecting". It never silently switches to
+  an in-process session. Detach stops the retry.
 
 | File | Change |
 |---|---|
-| `packages/daemon/gateway.ts` | Build the `ApprovalTurn` for a loopback, authenticated `tui` prompt; accept `approval:response` from that socket. A `turn` field from a non-bridge socket stays ignored. |
+| `packages/daemon/local-link.ts` (new) | Token file and discovery file: create, read, refuse a symlink or a mode looser than 0600. |
+| `packages/daemon/index.ts` | Create the token, pass it to the gateway, write and remove `daemon.json`. |
+| `packages/daemon/gateway.ts` | `operatorToken`, an `operator` flag set by `auth`, the home session id, passed to the shared-session verbs. |
+| `packages/daemon/shared-sessions.ts` | `home` alias; the telegram attach rule; no persist mark for it. |
+| `packages/daemon/telegram-bridge.ts` | Post finals only for the bridge's own turns. |
+| `apps/tui/src/lib/daemon-sessions.ts` | Discovery, token from the discovered dir, `connectHome`, reconnect with backoff. |
+| `apps/tui/src/app.tsx` | `/sessions attach home`, and the reconnecting and resynced lines. |
+
+Tests: token and discovery file modes and refusals; the attach rule at unit level
+(operator, alias, never listed, never persisted); a real gateway with a bridge socket
+and a TUI socket (no token refused, wrong token refused, token attaches, echo carries
+`tui`, store never holds the telegram session); the bridge posts nothing for a TUI
+turn; client discovery order, dead pid ignored, reconnect after a daemon restart.
+Live check: the real bot daemon and bridge on this Mac, a recorded TUI attaching to
+`home`, one line typed each way.
+
+Auto-attach on launch (slice 1) then tries `home` first; that is one line once both
+are merged.
+
+### Slice 3: approvals for daemon turns
+
+Decision 2. Proves success checks 2 and 3. About 250 lines. Moved from slice 2.
+
+| File | Change |
+|---|---|
+| `packages/daemon/gateway.ts` | Build the `ApprovalTurn` for a loopback, operator `tui` prompt; accept `approval:response` from that socket. A `turn` field from a non-bridge socket stays ignored. |
 | `packages/daemon/channel-approvals.ts` | `approval:closed { outcome: "answered", approver }` on settle; origin on the turn. |
 | `apps/tui/src/lib/daemon-sessions.ts` | `approval` and `approval-closed` chat events; `respond(requestId, decision)`. |
 | `apps/tui/src/app.tsx` | Route daemon approval events into the existing approval card; yolo off while linked. |
@@ -400,32 +450,22 @@ gateway test that a Telegram `allow_chat` never auto-approves a TUI turn; gatewa
 test that a `tui` socket's supplied `turn` is ignored; TUI test that a linked session
 never reads `yolo.json`; a sandbox parity assertion for the daemon (section 4.3).
 
-Live check: in an attached TUI, ask for a command that needs a card; the card shows
-in the TUI; one yes runs it exactly once and the audit log has one decision line.
-Repeat with Telegram open on the same session where slice 3 allows it.
+Live check: on the home session, a Telegram-started turn raises a card; the TUI shows
+it; one yes in the TUI runs the command exactly once and the audit log has one decision
+line. Then the same from a TUI-started turn answered on Telegram.
 
-### Slice 3: the Telegram home session, reconnect, token by default
-
-Not yet scheduled. About 300 lines. It is what makes the headline of decision 2
-(approve a turn that started on Telegram) true, because the TUI cannot see a Telegram
-turn until the home session is attachable.
-
-- Home session attach rule, `home` alias, `turnOrigin` in the bridge (section 4.1, 4.9).
-- `daemon.json` discovery and `daemon.token` by default (section 4.5), so the TUI finds
-  the bot's daemon on `:18790` and the attach rule can require a token.
-- Reconnect with backoff, per-tab session ids, offline header, Termux backend.
-
-Tests and live proof as in the first draft: both transcripts and both echoes carry
-the right channel; the bridge posts nothing for a TUI turn; Artale on Termux, recorded.
+Also in this slice or after: per-tab session ids, the offline header and the Termux
+backend (sections 4.6 to 4.8).
 
 ## 7. Questions
 
 Decided (section 1.1): 1. attach on launch by default, yes. 2. the TUI may answer
-cards for Telegram turns, yes.
+cards for Telegram turns, yes. 5. Sequencing: the Telegram home session is slice 2,
+approvals slice 3 (8EO, 23 Oct 2026, on James's intent).
 
 Open, with the default that stands until James answers:
-3. TUI-started turns: never posted to Telegram. Default: never.
-4. Token by default changes how every existing local client connects (8gent Browser
-   panel, scripts on `:18789`). Default: slice 3, not before.
-5. Sequencing. Decision 2 reaches Telegram-started turns only at slice 3. Pull the
-   home-session attach ahead of slice 2, or keep the order above? Default: keep it.
+3. TUI-started turns: never posted to Telegram. Default: never (built that way in slice 2).
+4. Token by default. Slice 2 creates the token and gates only the home session; the
+   rest of the gateway stays open for existing local clients. Full enforcement is
+   `EIGHT_DAEMON_REQUIRE_TOKEN=1`. Default: opt-in until the Mac app and the other local
+   clients read the token.
