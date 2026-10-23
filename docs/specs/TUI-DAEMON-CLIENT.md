@@ -1,6 +1,6 @@
 # TUI as a Daemon Client: One Session, Many Surfaces
 
-Status: DESIGN (no code). Owner: 8TO Rishi. Security review: 8SO Karen.
+Status: DESIGN, DECIDED 23 Oct 2026 (section 1.1). Build plan in section 6. Owner: 8TO Rishi. Security review: 8SO Karen.
 Written 23 Oct 2026 against `origin/main` at `0b8a6f456` (#4790).
 Tracking issue: #4792.
 
@@ -36,6 +36,26 @@ session for another local user or a web page.
    "answered elsewhere", and the audit log has one decision line.
 3. A Telegram "allow in this chat" never auto-approves a TUI-started turn, and a
    command the TUI policy blocks is never offered on Telegram.
+
+### 1.1 Decided
+
+James decided in the 8gi group on 23 Oct 2026 at 18:26 (msgs 8408 and 8411), answering "1 yes auto attach" to the options on this design:
+
+1. **Auto-attach: yes.** The TUI becomes a daemon client (epic #4792). When the
+   daemon is running, the TUI attaches to it on its own, with no command. This
+   answers open question 1 (attach on launch by default).
+2. **Approvals from the TUI, same one-yes gate.** From the TUI a person can approve
+   actions in turns that started on Telegram, using the same one-yes gate. This
+   answers open question 2 (the TUI may answer cards raised by Telegram turns).
+
+What "same one-yes gate" means here: one card, one answer, once. The first answer
+from any surface settles it (section 4.4, "Once"), the TUI draws the card with the
+card UI it already has, and the permission rules are unchanged: always-blocked is
+never offered, must-ask stays refused, and `yolo.json` is never read across the link.
+Nothing in the decision widens what a surface may approve.
+
+Still open: questions 3 and 4 in section 7. Their defaults (TUI turns are never
+posted to Telegram; token by default lands in slice 3) stand until James says otherwise.
 
 ## 2. What exists today
 
@@ -313,72 +333,99 @@ operator's private DM is an opt-in for later (open question 3).
 4. Prompt tier tap on a card returns `not-operator` and leaves the request live.
 5. Two answers, one decision line.
 
-## 6. Slices
+## 6. Build plan
 
-### Slice 1: see the same session (read and type, no new approvals)
+Each slice is one PR, one issue, tests run one file at a time, and a live check on
+this Mac before the PR is called ready. A slice is not done until its live check
+has output behind it. Slices 1 and 2 are the two James named on 23 Oct; slice 3
+carries what was in the first draft of slices 1 and 3.
 
-Proves success check 1. About 220 lines including tests.
+### Slice 1: auto-attach (TUI side only, no daemon change)
 
-| File | Change |
-|---|---|
-| `packages/daemon/shared-sessions.ts` | `attachLive` allows the bridge's home session for an authenticated loopback socket; `home` alias. ~30 lines |
-| `packages/daemon/gateway.ts` | Pass `authenticated` and the home id into the shared-session deps. ~15 lines |
-| `packages/daemon/telegram-bridge.ts` | `turnOrigin`: post finals only for turns the bridge started; register its session as home. ~25 lines |
-| `packages/daemon/index.ts` | Write `daemon.json` discovery (0600). ~25 lines |
-| `apps/tui/src/lib/daemon-sessions.ts` | Discovery order, token read from the discovered dir. ~40 lines |
+Decision 1. About 150 lines of code plus tests, no change under `packages/daemon/`.
 
-Test: `packages/daemon/shared-sessions.gateway.test.ts` gains a case that starts a
-gateway with a token, simulates a bridge socket creating a telegram session,
-attaches from a second loopback socket, sends a prompt from each, and asserts
-both transcripts and both `user:message` echoes carry the right channel, and that
-the bridge did not send a Telegram message for the TUI turn (stubbed `tgSend`).
-Live proof: recorded TUI run on this Mac attaching to `:18790`, one line typed in
-the TUI, one sent from Telegram, both visible in both.
-
-Slice 1 leaves the TUI's default unchanged: attach is `/sessions attach home`.
-Dangerous commands in TUI-started turns are still denied headless, which is
-today's daemon behaviour and is safe.
-
-### Slice 2: one approval, two doorbells
-
-Proves success checks 2 and 3. About 250 lines.
+Behaviour:
+- On start, the TUI probes the local daemon: `EIGHT_DAEMON_URL` if set, else
+  `ws://127.0.0.1:18789`. The probe is `GET /health` with a 600 ms budget; the
+  answer must be the daemon's own `{"status":"ok"}` shape. The TUI never waits on a
+  slow daemon: the first screen is drawn before the probe returns.
+- If a daemon answers, the TUI attaches its own fresh session to it through the
+  existing `linkDaemonSession` path (#3929), so the chat is a daemon session.
+- A footer chip says so: `daemon attached`. The chip is a segment, not a toast, for
+  as long as the link holds, because where tools run has changed (section 4.3).
+- Detach is possible and sticky: `/sessions detach` (exists) returns to the in-process
+  session and the TUI does not re-attach for the rest of the run. `EIGHT_TUI_DAEMON=off`
+  turns auto-attach off for a person who never wants it.
+- If no daemon answers, or the attach fails, the TUI runs exactly as today: no chip,
+  no message on the quiet path, one plain system line only when an attach was tried
+  and failed.
 
 | File | Change |
 |---|---|
-| `packages/daemon/gateway.ts` | Build `ApprovalTurn` for a loopback `tui` prompt; accept `approval:response` from it |
-| `packages/daemon/channel-approvals.ts` | `approval:closed` with `answered` outcome and approver; origin on the turn |
-| `apps/tui/src/lib/daemon-sessions.ts` | `approval` and `approval-closed` chat events; `respond()` |
-| `apps/tui/src/app.tsx` | Route daemon approval events into `useApprovalCard`; yolo off while linked |
-| `packages/daemon/telegram-bridge.ts` | Close card on `answered`, show who answered |
+| `apps/tui/src/lib/daemon-autoattach.ts` (new) | `autoAttachMode(env)`, `probeDaemon(url, fetch, timeoutMs)`, `daemonChip(attached)`. Pure, injectable fetch. |
+| `apps/tui/src/app.tsx` | One effect that probes then calls `linkDaemonSession` once per run; a `daemonAttached` flag set by link and unlink, passed to the footer. |
+| `apps/tui/src/components/StatusFooter.tsx`, `BottomBar.tsx` | The `daemon attached` segment. |
 
-Tests: `channel-approvals` unit test for two responders, one settle, one audit
-line; gateway test that a Telegram `allow_chat` does not auto-approve a TUI turn;
-gateway test that a `tui` socket's supplied `turn` is ignored; TUI test that a
-linked session never reads `yolo.json`. Sandbox parity assertion (4.3).
+Tests (`bun test <file>`, one at a time):
+- `daemon-autoattach.test.ts`: off by env; probe true on a daemon-shaped `/health`;
+  false on a refused connection, a timeout, a non-JSON body and a wrong shape; the
+  600 ms budget is enforced with a fake clock.
+- `StatusFooter.test.tsx`: the chip shows when attached and is absent otherwise.
+- `daemon-sessions.test.ts` (extend): a real `Bun.serve` stand-in daemon, the TUI
+  client attaches, and `/sessions detach` leaves the session running.
 
-### Slice 3: linked by default, tabs, Termux, token by default
+Live check: with the daemon on `:18789` up, start the TUI and capture the chip; run
+`/sessions detach` and capture the chip gone; stop the daemon, start the TUI, and
+capture that it starts with no chip and no error. Recorded, not described.
 
-About 280 lines.
+What slice 1 does not do, stated so nobody assumes it: it does not link the Telegram
+session (slice 3), so a Telegram message is not yet visible in the TUI; and until
+slice 2 lands, a command that needs a card is refused in a daemon-run turn
+(section 4.3, today's headless rule). Slice 1 should not reach a release before slice 2.
+
+### Slice 2: approvals for daemon turns
+
+Decision 2. Proves success checks 2 and 3 for turns the TUI starts. About 250 lines.
 
 | File | Change |
 |---|---|
-| `apps/tui/src/app.tsx`, `apps/tui/src/hooks/useWorkspaceTabs.ts` | Attach home on launch when a bridge daemon is found; per-tab session id; reconnect loop; offline header |
-| `packages/daemon/index.ts`, `packages/daemon/origin-guard.ts` | Token file by default, refuse no-auth without explicit opt-out |
-| `packages/daemon/service.ts` | `termux` backend writing the Termux:Boot script |
-| `apps/tui/src/lib/daemon-sessions.ts` | Reconnect with backoff; spawn daemon on Termux when absent |
+| `packages/daemon/gateway.ts` | Build the `ApprovalTurn` for a loopback, authenticated `tui` prompt; accept `approval:response` from that socket. A `turn` field from a non-bridge socket stays ignored. |
+| `packages/daemon/channel-approvals.ts` | `approval:closed { outcome: "answered", approver }` on settle; origin on the turn. |
+| `apps/tui/src/lib/daemon-sessions.ts` | `approval` and `approval-closed` chat events; `respond(requestId, decision)`. |
+| `apps/tui/src/app.tsx` | Route daemon approval events into the existing approval card; yolo off while linked. |
+| `packages/daemon/telegram-bridge.ts` | Close its card on `answered` and say who answered. |
 
-Tests: `service.test.ts` asserts the Termux backend's script text and selection by
-`PREFIX`; a reconnect test that kills the gateway mid-turn and asserts re-attach
-and transcript replacement; a launch test that with no daemon the TUI header says
-"Local only". Live proof: Artale on Termux, recorded, one message each way.
+Tests: `channel-approvals` unit test for two responders, one settle, one audit line;
+gateway test that a Telegram `allow_chat` never auto-approves a TUI turn; gateway
+test that a `tui` socket's supplied `turn` is ignored; TUI test that a linked session
+never reads `yolo.json`; a sandbox parity assertion for the daemon (section 4.3).
 
-## 7. Open questions for James
+Live check: in an attached TUI, ask for a command that needs a card; the card shows
+in the TUI; one yes runs it exactly once and the audit log has one decision line.
+Repeat with Telegram open on the same session where slice 3 allows it.
 
-1. Should the TUI attach to the Telegram home on launch by default (slice 3), or
-   stay behind `/sessions attach home` until it has been used for a week?
-2. Telegram-started turns: may the TUI answer their approval cards, or only
-   Telegram?
-3. TUI-started turns: never posted to Telegram (this design), or mirrored to your
-   private DM?
-4. Token by default changes how every existing local client connects (8gent
-   Browser panel, scripts on `:18789`). Ship it in slice 1 instead of slice 3?
+### Slice 3: the Telegram home session, reconnect, token by default
+
+Not yet scheduled. About 300 lines. It is what makes the headline of decision 2
+(approve a turn that started on Telegram) true, because the TUI cannot see a Telegram
+turn until the home session is attachable.
+
+- Home session attach rule, `home` alias, `turnOrigin` in the bridge (section 4.1, 4.9).
+- `daemon.json` discovery and `daemon.token` by default (section 4.5), so the TUI finds
+  the bot's daemon on `:18790` and the attach rule can require a token.
+- Reconnect with backoff, per-tab session ids, offline header, Termux backend.
+
+Tests and live proof as in the first draft: both transcripts and both echoes carry
+the right channel; the bridge posts nothing for a TUI turn; Artale on Termux, recorded.
+
+## 7. Questions
+
+Decided (section 1.1): 1. attach on launch by default, yes. 2. the TUI may answer
+cards for Telegram turns, yes.
+
+Open, with the default that stands until James answers:
+3. TUI-started turns: never posted to Telegram. Default: never.
+4. Token by default changes how every existing local client connects (8gent Browser
+   panel, scripts on `:18789`). Default: slice 3, not before.
+5. Sequencing. Decision 2 reaches Telegram-started turns only at slice 3. Pull the
+   home-session attach ahead of slice 2, or keep the order above? Default: keep it.
