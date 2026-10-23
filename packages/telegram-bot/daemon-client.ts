@@ -177,6 +177,7 @@ export class DaemonClient {
 			case "session:resumed":
 				this.sessionId = String(msg.sessionId);
 				this.origins.reset();
+				this.origins.setCapabilities(msg.capabilities);
 				if (this.config.home) this.send({ type: "home:declare" });
 				this.connecting = false;
 				this.startPing();

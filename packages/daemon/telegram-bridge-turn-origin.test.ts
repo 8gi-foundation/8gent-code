@@ -125,4 +125,46 @@ describe("legacy bridge: whose reply is it", () => {
 			(globalThis as any).WebSocket = orig;
 		}
 	});
+
+	test("a reconnect in the middle of a TUI turn delivers nothing more of it, against a tagging daemon", async () => {
+		const { b } = make();
+		let handler: ((e: { data: string }) => void) | null = null;
+		const orig = globalThis.WebSocket;
+		(globalThis as any).WebSocket = class {
+			static OPEN = 1;
+			readyState = 1;
+			send(_d: string) {}
+			set onmessage(f: (e: { data: string }) => void) {
+				handler = f;
+			}
+			set onopen(_f: () => void) {}
+			set onerror(_f: () => void) {}
+			set onclose(_f: () => void) {}
+			close() {}
+		};
+		const caps = ["input-gate", "turn-origin"];
+		try {
+			void b.connectDaemon();
+			handler!({
+				data: JSON.stringify({ type: "session:created", sessionId: "s1", capabilities: caps }),
+			});
+			b.handleDaemonMessage(frame("tool:start", { tool: "read_file", origin: "tui" }));
+			// the socket drops and resumes while the TUI's turn is still running
+			handler!({
+				data: JSON.stringify({ type: "session:resumed", sessionId: "s1", capabilities: caps }),
+			});
+			b.handleDaemonMessage(
+				frame("agent:stream", { chunk: "rest of the tui turn", final: true, origin: "tui" }),
+			);
+			b.handleDaemonMessage(frame("session:end", { reason: "turn-complete", origin: "tui" }));
+			b.handleDaemonMessage(frame("agent:stream", { chunk: "untagged", final: true }));
+			b.handleDaemonMessage(
+				frame("agent:stream", { chunk: "telegram's own reply", final: true, origin: "telegram" }),
+			);
+		} finally {
+			(globalThis as any).WebSocket = orig;
+		}
+		await flush();
+		expect(sent).toEqual(["telegram's own reply"]);
+	});
 });

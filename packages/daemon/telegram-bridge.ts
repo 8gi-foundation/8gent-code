@@ -1257,6 +1257,7 @@ class TelegramDaemonBridge {
 				if (msg.type === "session:created" || msg.type === "session:resumed") {
 					this.sessionId = msg.sessionId;
 					this.origins.reset();
+					this.origins.setCapabilities(msg.capabilities);
 					// With the adapter running its own session, that one is home; this socket's is
 					// only home in legacy mode (#4834).
 					if (!this.daemonClient) this.ws?.send(JSON.stringify({ type: "home:declare" }));

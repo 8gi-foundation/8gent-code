@@ -222,4 +222,27 @@ describe("DaemonClient on a session the TUI can join (#4834)", () => {
 		expect(seen).toEqual(["reply to Telegram"]);
 		expect(ends).toEqual([1]);
 	});
+
+	it("a reconnect in the middle of a TUI turn delivers nothing more from that turn (tagging daemon)", async () => {
+		const sock = new FakeSocket();
+		const client = new DaemonClient({ url: "ws://test", socketFactory: () => sock, home: true });
+		const connecting = client.connect();
+		sock.open();
+		const caps = ["input-gate", "turn-origin"];
+		sock.receive({ type: "session:created", sessionId: "s", capabilities: caps });
+		await connecting;
+		const seen: string[] = [];
+		client.on("agent:stream", (p) => seen.push(p.chunk));
+		client.on("tool:start", (p) => seen.push(`tool:${p.tool}`));
+		const ev = (event: string, payload: Record<string, unknown>) =>
+			sock.receive({ type: "event", event, payload: { sessionId: "s", ...payload } });
+		ev("tool:start", { tool: "read_file", origin: "tui" });
+		// The bridge's socket drops and resumes while the TUI's turn is still running.
+		sock.receive({ type: "session:resumed", sessionId: "s", capabilities: caps });
+		ev("agent:stream", { chunk: "rest of the TUI turn", final: true, origin: "tui" });
+		ev("session:end", { reason: "turn-complete", origin: "tui" });
+		ev("agent:stream", { chunk: "untagged", final: true });
+		ev("agent:stream", { chunk: "telegram's own", final: true, origin: "telegram" });
+		expect(seen).toEqual(["telegram's own"]);
+	});
 });

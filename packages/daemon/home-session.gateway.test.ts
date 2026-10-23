@@ -77,6 +77,7 @@ class EchoPool {
 		return false;
 	}
 	async chat(sessionId: string, text: string): Promise<string> {
+		if (text.startsWith("slow:")) await new Promise((r) => setTimeout(r, 120));
 		const e = this.live.get(sessionId)!;
 		const reply = `echo: ${text}`;
 		e.agent.history.push({ role: "user", content: text }, { role: "assistant", content: reply });
@@ -366,5 +367,41 @@ describe("the Telegram home session", () => {
 		expect((await c2.next((f) => f.type === "session:attached")).sessionId).toBe(legacy.sessionId);
 		c2.close();
 		legacy.c.close();
+	});
+
+	it("tags every turn's events with the channel that started it, even when two turns overlap", async () => {
+		const b = await bridge();
+		const c = await tui(OPERATOR);
+		c.send({ type: "session:attach", sessionId: "home", channel: "tui" });
+		await c.next((f) => f.type === "session:attached");
+		// The daemon says it tags, so a bridge knows to rely on it.
+		expect(b.c.frames.find((f) => f.type === "session:created")?.capabilities).toContain(
+			"turn-origin",
+		);
+		b.c.frames.length = 0;
+		// A slow TUI turn is still running when Telegram's quick turn starts and finishes.
+		c.send({ type: "prompt", text: "slow: from the tui" });
+		await new Promise((r) => setTimeout(r, 20));
+		b.c.send({ type: "prompt", text: "quick from telegram" });
+		await b.c.next(
+			(f) =>
+				f.type === "event" &&
+				f.event === "agent:stream" &&
+				f.payload.chunk === "echo: slow: from the tui",
+			3000,
+		);
+		const stream = (chunk: string) =>
+			b.c.frames.find(
+				(f) => f.type === "event" && f.event === "agent:stream" && f.payload.chunk === chunk,
+			);
+		expect(stream("echo: quick from telegram")?.payload.origin).toBe("telegram");
+		expect(stream("echo: slow: from the tui")?.payload.origin).toBe("tui");
+		const ends = b.c.frames.filter(
+			(f) =>
+				f.type === "event" && f.event === "session:end" && f.payload.reason === "turn-complete",
+		);
+		expect(ends.map((f) => f.payload.origin).sort()).toEqual(["telegram", "tui"]);
+		c.close();
+		b.c.close();
 	});
 });

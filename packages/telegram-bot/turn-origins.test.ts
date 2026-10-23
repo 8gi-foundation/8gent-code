@@ -76,3 +76,56 @@ describe("TurnOrigins", () => {
 		expect(t.deliver("agent:stream", final)).toBe(true);
 	});
 });
+
+describe("TurnOrigins with a daemon that tags events", () => {
+	const tagged = () => {
+		const t = new TurnOrigins();
+		t.setCapabilities(["input-gate", "turn-origin"]);
+		return t;
+	};
+	const ev = (origin: unknown, extra: Record<string, unknown> = {}) => ({ origin, ...extra });
+
+	test("delivers only events whose origin is the bridge's own channel", () => {
+		const t = tagged();
+		expect(t.deliver("agent:stream", ev("telegram", final))).toBe(true);
+		expect(t.deliver("agent:stream", ev("tui", final))).toBe(false);
+		expect(t.deliver("tool:start", ev("tui"))).toBe(false);
+		expect(t.deliver("tool:result", ev("telegram"))).toBe(true);
+		expect(t.deliver("agent:error", ev("tui"))).toBe(false);
+		expect(t.deliver("session:end", ev("telegram", { reason: "turn-complete" }))).toBe(true);
+		expect(t.deliver("session:end", ev("tui", { reason: "turn-complete" }))).toBe(false);
+	});
+
+	test("drops untagged and ambiguous turn output: fail closed", () => {
+		const t = tagged();
+		expect(t.deliver("agent:stream", final)).toBe(false);
+		expect(t.deliver("agent:stream", ev(null, final))).toBe(false);
+		expect(t.deliver("agent:error", {})).toBe(false);
+		expect(t.deliver("session:end", { reason: "turn-complete" })).toBe(false);
+	});
+
+	test("events that are not a turn's output still pass, and user:message never does", () => {
+		const t = tagged();
+		expect(t.deliver("session:end", { reason: "idle-timeout" })).toBe(true);
+		expect(t.deliver("approval:required", {})).toBe(true);
+		expect(t.deliver("user:message", { channel: "tui" })).toBe(false);
+	});
+
+	test("a reset in the middle of someone else's turn changes nothing: the tags decide", () => {
+		const t = tagged();
+		t.deliver("tool:start", ev("tui"));
+		t.reset();
+		t.setCapabilities(["input-gate", "turn-origin"]);
+		expect(t.deliver("agent:stream", ev("tui", final))).toBe(false);
+		expect(t.deliver("session:end", ev("tui", { reason: "turn-complete" }))).toBe(false);
+		expect(t.deliver("agent:stream", ev("telegram", final))).toBe(true);
+	});
+
+	test("a daemon without the capability keeps the queue behaviour", () => {
+		const t = new TurnOrigins();
+		t.setCapabilities(["input-gate"]);
+		expect(t.deliver("agent:stream", final)).toBe(true);
+		t.deliver("user:message", tui);
+		expect(t.deliver("agent:stream", final)).toBe(false);
+	});
+});

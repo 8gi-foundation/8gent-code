@@ -5,6 +5,7 @@
  * Routes messages to the AgentPool, broadcasts agent events to clients.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
 import { SessionManager, defaultSessionsDir } from "../eight/session-manager";
@@ -306,7 +307,55 @@ function send(ws: any, msg: OutboundMessage): void {
 	}
 }
 
+/**
+ * Which channel started the turn an event belongs to (#4834). The Telegram session can be
+ * joined by the TUI, and the bridge must post only replies to Telegram's own turns, so every
+ * turn-output event carries `origin`. Taken from the turn's own async context; failing that,
+ * from the one turn in flight on the session; ambiguous means null, and the bridge drops it.
+ */
+const turnContext = new AsyncLocalStorage<{ origin: string }>();
+const inflightTurns = new Map<string, Map<number, string>>();
+let turnSeq = 0;
+
+function beginTurn(sessionId: string, origin: string): number {
+	const id = ++turnSeq;
+	const m = inflightTurns.get(sessionId) ?? new Map<number, string>();
+	m.set(id, origin);
+	inflightTurns.set(sessionId, m);
+	return id;
+}
+
+function endTurn(sessionId: string, id: number): void {
+	const m = inflightTurns.get(sessionId);
+	m?.delete(id);
+	if (m && m.size === 0) inflightTurns.delete(sessionId);
+}
+
+function turnOriginFor(sessionId: string): string | null {
+	const ctx = turnContext.getStore();
+	if (ctx) return ctx.origin;
+	const m = inflightTurns.get(sessionId);
+	return m && m.size === 1 ? ([...m.values()][0] ?? null) : null;
+}
+
+const TURN_OUTPUT_EVENTS = new Set<string>([
+	"tool:start",
+	"tool:result",
+	"agent:thinking",
+	"agent:stream",
+	"agent:error",
+]);
+
+function tagOrigin(sessionId: string, event: string, payload: unknown): unknown {
+	const p = payload as { reason?: unknown } | null;
+	const turnOutput =
+		TURN_OUTPUT_EVENTS.has(event) || (event === "session:end" && p?.reason === "turn-complete");
+	if (!turnOutput || !payload || typeof payload !== "object") return payload;
+	return { ...(payload as object), origin: turnOriginFor(sessionId) };
+}
+
 function broadcastToSession(sessionId: string, event: EventName, payload: unknown): void {
+	payload = tagOrigin(sessionId, event, payload);
 	for (const [ws, state] of clients) {
 		// Computer-route clients use the v1.1 protocol envelope; the legacy v1.0
 		// broadcast skips them so they only see the typed StreamEvent stream.
@@ -625,20 +674,26 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			// A turn for a TUI runs here with no card to show: anything that needs a yes is
 			// refused, never auto-approved (#4829). A bridge turn binds its own approver.
 			const noCard = state.channel === "tui" || pool.getSessionInfo(sid)?.channel === "tui";
+			const origin = state.channel;
+			const inTurn = <T>(fn: () => T): T => turnContext.run({ origin }, fn);
 			const runModelTurn = (): void => {
-				const run = () => pool.chat(sid, msg.text, turn);
+				const turnId = beginTurn(sid, origin);
+				const run = () => inTurn(() => pool.chat(sid, msg.text, turn));
 				(noCard ? runWithoutApprovalSurface(run) : run())
 					.then((response) => {
 						// Final response - signal session:end for this turn
-						bus.emit("session:end", { sessionId: sid, reason: "turn-complete" });
+						inTurn(() => bus.emit("session:end", { sessionId: sid, reason: "turn-complete" }));
 					})
 					.catch((err) => {
-						bus.emit("agent:error", {
-							sessionId: sid,
-							error: err instanceof Error ? err.message : String(err),
-						});
+						inTurn(() =>
+							bus.emit("agent:error", {
+								sessionId: sid,
+								error: err instanceof Error ? err.message : String(err),
+							}),
+						);
 					})
 					.finally(() => {
+						endTurn(sid, turnId);
 						// Shareable sessions are saved after every turn so the TUI and a
 						// later session:attach can resume them (#3929).
 						persistSession(pool as unknown as SharedPool, getSessionStore, sid, persistable);
@@ -661,8 +716,10 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 				busy: info?.busy,
 			}).then((r) => {
 				if (!r.handled) return runModelTurn();
-				bus.emit("agent:stream", { sessionId: sid, chunk: r.text ?? "", final: true });
-				bus.emit("session:end", { sessionId: sid, reason: "turn-complete" });
+				inTurn(() => {
+					bus.emit("agent:stream", { sessionId: sid, chunk: r.text ?? "", final: true });
+					bus.emit("session:end", { sessionId: sid, reason: "turn-complete" });
+				});
 			});
 			break;
 		}
