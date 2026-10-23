@@ -94,6 +94,19 @@ class LoopbackTest(unittest.TestCase):
         for h in ["0.0.0.0", "10.0.0.5", "::", "example.com", ""]:
             self.assertFalse(serve_8j.is_loopback(h), h)
 
+    def test_binds_ipv6_loopback(self):
+        try:
+            server = serve_8j.make_server("::1", 0, fake_answer, {"model": "m"})
+        except OSError as e:  # no IPv6 on this host
+            self.skipTest(f"no IPv6 loopback: {e}")
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with urllib.request.urlopen(f"http://[::1]:{server.server_address[1]}/health", timeout=5) as r:
+                self.assertEqual(json.loads(r.read())["model"], "m")
+        finally:
+            server.shutdown()
+            server.server_close()
+
     def test_refuses_to_bind_off_loopback(self):
         with self.assertRaises(ValueError):
             serve_8j.make_server("0.0.0.0", 0, fake_answer, {"model": "m"})

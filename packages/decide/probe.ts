@@ -134,7 +134,10 @@ async function layaUp(
 	timeoutMs: number,
 ): Promise<string | null> {
 	try {
-		const res = await fetchImpl(`${url}/health`, { signal: AbortSignal.timeout(timeoutMs) });
+		const res = await fetchImpl(`${url}/health`, {
+			signal: AbortSignal.timeout(timeoutMs),
+			redirect: "error",
+		});
 		if (res.ok) return null;
 		return `laya health ${res.status}`;
 	} catch (err) {

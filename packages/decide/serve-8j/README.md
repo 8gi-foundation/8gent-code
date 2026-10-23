@@ -11,7 +11,7 @@ rebuild of the 8GI/8j-eval Space's loading code.
 | File | What it is |
 |---|---|
 | `judge8j.py` | Inference only. The Space's prompt layout, position ids, attention mask and head, token for token. The LoRA adapter is merged into the backbone weights at load time (`W += alpha/r * B @ A`), so serving needs no PEFT. Every name and path comes from the checkpoint's `meta.json` and `adapter_config.json`. |
-| `serve_8j.py` | `POST /v1/systemone` and `GET /health`, stdlib `http.server`, one request at a time. Binds to a loopback address only and refuses anything else. Never logs a request. A model error is a 500 with no verdict. |
+| `serve_8j.py` | `POST /v1/systemone` and `GET /health`, stdlib `http.server`, one request at a time. Binds to a loopback address only (IPv4 `127.0.0.0/8`, IPv6 `::1`, or `localhost`) and refuses anything else. Never logs a request. A model error is a 500 with no verdict. |
 | `parity_check.py` | Proves `judge8j` matches the Space's own `answer()` on recorded commands. |
 | `test_serve_8j.py` | HTTP layer with a fake model: contract, validation, loopback-only, 500 on model error. Stdlib only. |
 
@@ -48,4 +48,4 @@ Probabilities only. Thresholds belong to the caller: `packages/decide/calibratio
 
 - Parity, 23 Oct 2026: 84 commands, rebuilt vs the Space's `answer()` on CPU fp32, largest
   `|p_yes difference|` 6.1e-6 (`parity_check.py --tol 1e-4` passes).
-- `python -m unittest test_serve_8j`: 9 tests.
+- `python -m unittest test_serve_8j`: 10 tests (the `::1` bind skips on a host with no IPv6).

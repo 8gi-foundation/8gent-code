@@ -47,7 +47,10 @@ what makes same input give same output: Ollama's float output drifts in the
   connection, 5xx or unusable answer throws, `bashGuard` makes that a block,
   and with 8J selected the System One gate sends the command to a person
   (headless: block) instead of the rules-only fallback, so it is never an
-  allow. Selected but down is "none", never a different judge. Thresholds
+  allow. Selected but down is "none", never a different judge. No judge
+  backend (8j, laya, ollama) follows an HTTP redirect (`redirect: "error"`):
+  the loopback check covers the first URL only, and a 307/308 would re-send
+  the not-yet-run command elsewhere. Thresholds
   come from `calibration/8j-<model>.json`; without one, default mode treats
   it as uncalibrated and a person decides every command the rules pass. See
   `serve-8j/README.md`.

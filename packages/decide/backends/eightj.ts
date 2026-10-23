@@ -88,7 +88,11 @@ export async function eightJHealth(
 ): Promise<string> {
 	let res: Response;
 	try {
-		res = await fetchImpl(`${url}/health`, { signal: AbortSignal.timeout(timeoutMs) });
+		// redirect "error": a loopback server must not hand the judge role to another host.
+		res = await fetchImpl(`${url}/health`, {
+			signal: AbortSignal.timeout(timeoutMs),
+			redirect: "error",
+		});
 	} catch (err) {
 		throw new DecideUnavailableError(
 			`8j unreachable at ${url}: ${(err as Error)?.name ?? "error"}`,
@@ -194,6 +198,9 @@ export class EightJBackend implements DecideBackend {
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify(toCardBody(request)),
 				signal: AbortSignal.timeout(this.timeoutMs),
+				// Never follow a redirect: the loopback check covers this URL only, and a 307/308
+				// would re-send the not-yet-run command to wherever the server points.
+				redirect: "error",
 			});
 			if (!res.ok) throw new DecideUnavailableError(`8j /v1/systemone ${res.status}`);
 			json = (await res.json().catch(() => null)) as Record<string, unknown> | null;

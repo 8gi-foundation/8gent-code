@@ -27,6 +27,7 @@ import argparse
 import ipaddress
 import json
 import os
+import socket
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -142,7 +143,11 @@ def make_server(host: str, port: int, answer: AnswerFn, info: dict) -> HTTPServe
             self._send(200, {"model": info.get("model"), "answers": answers,
                              "latency_ms": round((time.perf_counter() - t0) * 1000, 1)})
 
-    return HTTPServer((host, port), Handler)
+    class Server(HTTPServer):
+        # HTTPServer is IPv4 only; "::1" needs the IPv6 family or the bind fails.
+        address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
+
+    return Server((host, port), Handler)
 
 
 def main(argv: list[str] | None = None) -> int:

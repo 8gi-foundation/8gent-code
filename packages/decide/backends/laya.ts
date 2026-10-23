@@ -101,6 +101,8 @@ export class LayaBackend implements DecideBackend {
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify(request),
 				signal: AbortSignal.timeout(this.timeoutMs),
+				// Never follow a redirect: a 307/308 would re-send the state (the command) elsewhere.
+				redirect: "error",
 			});
 		} catch (err) {
 			throw new DecideUnavailableError(
