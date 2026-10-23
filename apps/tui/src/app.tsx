@@ -2933,6 +2933,18 @@ export function App({
 			try {
 				if (!client) client = await DaemonSessionClient.connect();
 				const attached = await client.attach(sessionId, "tui");
+				// The Telegram home session has its own tab (and its own text sanitiser). A link that
+				// lands on it here, by any route, would replace this tab's chat with unsanitised
+				// Telegram text, so it is undone and sent to the Telegram tab (#4834).
+				if (attached.home) {
+					if (daemonLinkRef.current?.client === client) await unlinkDaemon();
+					else client.close();
+					addSystemMessage(
+						"That is your 8gent's Telegram conversation: opening it in its own tab.",
+					);
+					void telegramTab.open();
+					return false;
+				}
 				if (daemonLinkRef.current?.client !== client) {
 					const off = client.onEvent((e) => {
 						switch (e.kind) {

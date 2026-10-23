@@ -637,6 +637,11 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 					send(ws, { type: "error", message: "can only end the session you are on" });
 					break;
 				}
+				// The Telegram home session is the bridge's to end: a TUI bound to it can only leave (#4834).
+				if (msg.sessionId === homeSessionId() && !state.approvalBridge) {
+					state.sessionId = null;
+					break;
+				}
 				// Others are still on it: this client leaves, the session goes on.
 				if (clientsOn(msg.sessionId, ws) > 0) {
 					state.sessionId = null;
@@ -728,7 +733,11 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			// Classroom sessions are private to their creator: not even listed (#3939).
 			send(ws, {
 				type: "sessions:list",
-				sessions: pool.getActiveSessions().filter((s) => s.channel !== CLASSROOM_CHANNEL),
+				// Neither classroom sessions (private to their creator) nor Telegram ones: the home
+				// session's id must not be handed to a socket that asks (#4834).
+				sessions: pool
+					.getActiveSessions()
+					.filter((s) => s.channel !== CLASSROOM_CHANNEL && s.channel !== "telegram"),
 			});
 			break;
 		}

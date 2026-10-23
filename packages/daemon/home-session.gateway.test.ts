@@ -185,7 +185,10 @@ describe("the Telegram home session", () => {
 				c.frames.length = 0;
 				c.send({ type: "session:attach", sessionId, channel: "tui" });
 				const f = await c.next((x) => x.type === "error" || x.type === "session:attached");
-				expect(f).toEqual({ type: "error", message: "operator token required" });
+				expect(f).toEqual({
+					type: "error",
+					message: sessionId === "home" ? "operator token required" : "session cannot be shared",
+				});
 			}
 			// Nor can it prompt into it: it never got bound.
 			c.send({ type: "prompt", text: "hello from nobody" });
@@ -401,6 +404,51 @@ describe("the Telegram home session", () => {
 				f.type === "event" && f.event === "session:end" && f.payload.reason === "turn-complete",
 		);
 		expect(ends.map((f) => f.payload.origin).sort()).toEqual(["telegram", "tui"]);
+		c.close();
+		b.c.close();
+	});
+
+	it("joining by the raw id is refused even for an operator, and the id is in no list", async () => {
+		const b = await bridge();
+		const c = await tui(OPERATOR);
+		// The raw id, with the operator token: refused, and nothing binds.
+		c.send({ type: "session:attach", sessionId: b.sessionId, channel: "tui" });
+		expect(await c.next((f) => f.type === "error" || f.type === "session:attached")).toEqual({
+			type: "error",
+			message: "session cannot be shared",
+		});
+		c.send({ type: "prompt", text: "no session bound" });
+		await settle();
+		expect(c.frames.some((f) => f.type === "event" && f.event === "agent:stream")).toBe(false);
+		// The legacy list, to a socket with no token and to an operator: the home session is not in it.
+		const nobody = await tui();
+		for (const asker of [nobody, c]) {
+			asker.frames.length = 0;
+			asker.send({ type: "sessions:list" });
+			const legacy = await asker.next((f) => f.type === "sessions:list");
+			expect(JSON.stringify(legacy)).not.toContain(b.sessionId);
+			asker.send({ type: "session:list", past: true });
+			const shared = await asker.next((f) => f.type === "session:list");
+			expect(JSON.stringify(shared)).not.toContain(b.sessionId);
+		}
+		// The alias still works, so the tab is the one way in.
+		c.send({ type: "session:attach", sessionId: "home", channel: "tui" });
+		expect((await c.next((f) => f.type === "session:attached")).sessionId).toBe(b.sessionId);
+		nobody.close();
+		c.close();
+		b.c.close();
+	});
+
+	it("a TUI bound to the home session can leave but cannot end it", async () => {
+		const b = await bridge();
+		const c = await tui(OPERATOR);
+		c.send({ type: "session:attach", sessionId: "home", channel: "tui" });
+		await c.next((f) => f.type === "session:attached");
+		b.c.frames.length = 0;
+		c.send({ type: "session:destroy", sessionId: b.sessionId });
+		await settle();
+		expect(pool.hasSession(b.sessionId)).toBe(true);
+		expect(b.c.frames.some((f) => f.type === "event" && f.event === "session:end")).toBe(false);
 		c.close();
 		b.c.close();
 	});

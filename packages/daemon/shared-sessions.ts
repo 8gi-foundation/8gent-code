@@ -248,7 +248,12 @@ function markShared(sessionId: string, deps: SharedSessionDeps): void {
 		deps.persistable.add(sessionId);
 }
 
-function attachLive(sessionId: string, deps: SharedSessionDeps): SharedSessionResult {
+function attachLive(
+	sessionId: string,
+	deps: SharedSessionDeps,
+	/** The client asked for "home" by its alias, never by the session's id. */
+	viaAlias = false,
+): SharedSessionResult {
 	const info = deps.pool.getSessionInfo(sessionId);
 	const agent = deps.pool.getAgent(sessionId);
 	if (!info || !agent) return { reply: { type: "error", message: "session not found" } };
@@ -256,6 +261,11 @@ function attachLive(sessionId: string, deps: SharedSessionDeps): SharedSessionRe
 	// operator-token socket (#4834). It is never marked persistable, so the TUI can
 	// never cause it to be written under ~/.8gent/sessions.
 	const home = info.channel === "telegram" && sessionId === deps.homeSessionId;
+	// Only by the `home` alias, never by the raw id: the id can leak (a list, a log), and an id
+	// attach would bypass the Telegram tab and its sanitiser. The raw id looks like any private session.
+	if (home && !viaAlias) {
+		return { reply: { type: "error", message: "session cannot be shared" } };
+	}
 	if (home && deps.operator !== true) {
 		return { reply: { type: "error", message: "operator token required" } };
 	}
@@ -354,7 +364,8 @@ export function handleSharedSession(
 
 			case "session:attach": {
 				let target = msg.sessionId;
-				if (target === HOME_ALIAS) {
+				const viaAlias = target === HOME_ALIAS;
+				if (viaAlias) {
 					if (deps.operator !== true) {
 						return { reply: { type: "error", message: "operator token required" } };
 					}
@@ -367,7 +378,7 @@ export function handleSharedSession(
 					return { reply: { type: "error", message: "invalid session id" } };
 				}
 				const result = deps.pool.hasSession(target)
-					? attachLive(target, deps)
+					? attachLive(target, deps, viaAlias)
 					: attachPast(target, deps);
 				if (result.bind && typeof msg.channel === "string" && SHAREABLE_CHANNELS.has(msg.channel)) {
 					result.surface = msg.channel;

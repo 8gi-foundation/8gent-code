@@ -46,6 +46,8 @@ export interface AttachedSession {
 	restored: boolean;
 	transcript: Array<{ role: string; content: string }>;
 	truncated: boolean;
+	/** True for the Telegram home session (#4834). */
+	home?: boolean;
 }
 
 /** What the chat shows for a daemon frame. */

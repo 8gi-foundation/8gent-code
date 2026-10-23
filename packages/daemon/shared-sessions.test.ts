@@ -228,26 +228,34 @@ describe("the Telegram home session (#4834)", () => {
 	const attach = (sessionId: string, d: SharedSessionDeps) =>
 		handleSharedSession({ type: "session:attach", sessionId, channel: "tui" }, d);
 
-	it("the alias and the raw id both attach it for an operator, and mark it home", () => {
+	it("the home alias attaches it for an operator and marks it home", () => {
 		const agent = pool.add("s_home", "telegram");
 		agent.history.push({ role: "user", content: "from telegram" });
-		for (const id of ["home", "s_home"]) {
-			const r = attach(id, homeDeps());
-			expect(r.bind).toBe("s_home");
-			if (r.reply.type !== "session:attached") throw new Error(JSON.stringify(r.reply));
-			expect(r.reply).toMatchObject({ channel: "telegram", home: true, restored: false });
-			expect(r.reply.transcript.map((m) => m.content)).toEqual(["from telegram"]);
-		}
+		const r = attach("home", homeDeps());
+		expect(r.bind).toBe("s_home");
+		if (r.reply.type !== "session:attached") throw new Error(JSON.stringify(r.reply));
+		expect(r.reply).toMatchObject({ channel: "telegram", home: true, restored: false });
+		expect(r.reply.transcript.map((m) => m.content)).toEqual(["from telegram"]);
 	});
 
-	it("is refused without the operator token, by alias and by id, and nothing binds", () => {
+	it("its raw id is refused, operator or not: only the alias joins it, and nothing binds", () => {
+		pool.add("s_home", "telegram");
+		for (const operator of [true, false, undefined]) {
+			const r = attach("s_home", homeDeps({ operator }));
+			expect(r.bind).toBeUndefined();
+			expect(r.reply).toEqual({ type: "error", message: "session cannot be shared" });
+		}
+		// The same answer as for any other private session: the id says nothing.
+		pool.add("s_other_tg", "telegram");
+		expect(attach("s_other_tg", homeDeps()).reply).toEqual(attach("s_home", homeDeps()).reply);
+	});
+
+	it("is refused without the operator token by alias and nothing binds", () => {
 		pool.add("s_home", "telegram");
 		for (const op of [false, undefined]) {
-			for (const id of ["home", "s_home"]) {
-				const r = attach(id, homeDeps({ operator: op }));
-				expect(r.bind).toBeUndefined();
-				expect(r.reply).toEqual({ type: "error", message: "operator token required" });
-			}
+			const r = attach("home", homeDeps({ operator: op }));
+			expect(r.bind).toBeUndefined();
+			expect(r.reply).toEqual({ type: "error", message: "operator token required" });
 		}
 	});
 
