@@ -50,6 +50,7 @@ import { bus } from "./events";
 import { startGateway } from "./gateway";
 import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
+import { ensureTokenFile } from "./local-link";
 import { resolveBestFreeModel } from "./model-resolver";
 import { resolveBindHost } from "./origin-guard";
 import {
@@ -375,10 +376,23 @@ export async function main(): Promise<void> {
 		},
 	});
 
+	// The secret this daemon proves its identity with (#4829): the configured token, else
+	// <dataDir>/daemon.token (0600), created on first start. If a file is in the way and
+	// unsafe, fail closed: no identity secret, so a TUI will not attach to this daemon.
+	let operatorToken: string | null = null;
+	if (!config.authToken) {
+		try {
+			operatorToken = ensureTokenFile(DATA_DIR);
+		} catch (err) {
+			console.error(`[daemon] no identity secret: ${(err as Error).message}`);
+		}
+	}
+
 	// Start WebSocket gateway with agent pool + dispatch + goal-loop
 	server = startGateway({
 		port: config.port,
 		authToken: config.authToken,
+		operatorToken,
 		pool,
 		dispatch: {
 			registry: dispatchRegistry,

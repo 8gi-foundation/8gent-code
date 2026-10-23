@@ -11,7 +11,13 @@ import type { AgentPool } from "../../../../packages/daemon/agent-pool";
 import { bus } from "../../../../packages/daemon/events";
 import { startGateway } from "../../../../packages/daemon/gateway";
 import { SessionManager } from "../../../../packages/eight/session-manager";
-import { type DaemonChatEvent, DaemonSessionClient, toChatEvent } from "./daemon-sessions";
+import {
+	type DaemonChatEvent,
+	DaemonSessionClient,
+	literalLoopbackUrl,
+	resolveDaemonSecret,
+	toChatEvent,
+} from "./daemon-sessions";
 
 describe("toChatEvent", () => {
 	it("shows prompts from other surfaces, final replies, tools and errors", () => {
@@ -112,6 +118,7 @@ class EchoPool {
 	}
 }
 
+const SECRET = "d".repeat(64);
 const pool = new EchoPool();
 let server: ReturnType<typeof Bun.serve>;
 let dataDir: string;
@@ -121,7 +128,12 @@ beforeAll(() => {
 	dataDir = mkdtempSync(join(tmpdir(), "tui-shared-"));
 	process.env.EIGHT_DATA_DIR = dataDir;
 	process.env.DAEMON_HOSTNAME = "127.0.0.1";
-	server = startGateway({ port: 0, authToken: null, pool: pool as unknown as AgentPool });
+	server = startGateway({
+		port: 0,
+		authToken: null,
+		operatorToken: SECRET,
+		pool: pool as unknown as AgentPool,
+	});
 });
 
 afterAll(() => {
@@ -157,8 +169,8 @@ describe("DaemonSessionClient", () => {
 		]);
 
 		const url = `ws://127.0.0.1:${server.port}`;
-		const tui = await DaemonSessionClient.connect({ url, token: null });
-		const panel = await DaemonSessionClient.connect({ url, token: null });
+		const tui = await DaemonSessionClient.connect({ url, token: SECRET });
+		const panel = await DaemonSessionClient.connect({ url, token: SECRET });
 
 		// /sessions share: the TUI's session moves into the daemon.
 		const shared = await tui.attach(mine.id, "tui");
@@ -198,7 +210,209 @@ describe("DaemonSessionClient", () => {
 
 	it("rejects when no daemon is listening", async () => {
 		await expect(
-			DaemonSessionClient.connect({ url: "ws://127.0.0.1:9", token: null, timeoutMs: 500 }),
+			DaemonSessionClient.connect({ url: "ws://127.0.0.1:9", token: SECRET, timeoutMs: 500 }),
 		).rejects.toThrow(/no 8gent daemon/);
+	});
+});
+
+/** A server that is not the daemon: records every frame it is sent. */
+function fakeDaemon(onFrame: (ws: { send(s: string): void }, f: Record<string, unknown>) => void) {
+	const frames: Array<Record<string, unknown>> = [];
+	const srv = Bun.serve({
+		port: 0,
+		hostname: "127.0.0.1",
+		fetch(req, s) {
+			return s.upgrade(req) ? undefined : new Response("not a daemon", { status: 404 });
+		},
+		websocket: {
+			message(ws, raw) {
+				const f = JSON.parse(String(raw));
+				frames.push(f);
+				onFrame(ws, f);
+			},
+		},
+	});
+	return { srv, frames, url: `ws://127.0.0.1:${srv.port}` };
+}
+
+describe("the daemon proves who it is before anything is sent (#4829)", () => {
+	it("a server that answers with a wrong proof gets the challenge and nothing else", async () => {
+		const fake = fakeDaemon((ws, f) => {
+			if (f.type === "identify")
+				ws.send(JSON.stringify({ type: "identify:ok", proof: "0".repeat(64) }));
+			if (f.type === "auth") ws.send(JSON.stringify({ type: "auth:ok" }));
+		});
+		try {
+			await expect(DaemonSessionClient.connect({ url: fake.url, token: SECRET })).rejects.toThrow(
+				/not your 8gent daemon/,
+			);
+			expect(fake.frames.map((f) => f.type)).toEqual(["identify"]);
+			expect(JSON.stringify(fake.frames)).not.toContain(SECRET);
+		} finally {
+			fake.srv.stop(true);
+		}
+	});
+
+	it("a squatter that relays the challenge to the real daemon is refused, and sees no token", async () => {
+		// The squatter holds the port the client dialled and forwards every frame to the real daemon.
+		for (const rewrite of [false, true]) {
+			const real = new WebSocket(`ws://127.0.0.1:${server.port}`);
+			const fromReal: string[] = [];
+			real.onmessage = (e) => fromReal.push(String(e.data));
+			await new Promise<void>((r) => {
+				real.onopen = () => r();
+			});
+			const seen: Array<Record<string, unknown>> = [];
+			const squatter = fakeDaemon((ws, f) => {
+				if (f.type !== "identify") return;
+				// Optionally rewrite the target to the real daemon's own address: the best a relay can do.
+				const fwd = rewrite ? { ...f, target: `127.0.0.1:${server.port}` } : f;
+				const before = fromReal.length;
+				real.send(JSON.stringify(fwd));
+				const poll = setInterval(() => {
+					if (fromReal.length > before) {
+						clearInterval(poll);
+						ws.send(fromReal[before]);
+					}
+				}, 5);
+			});
+			seen.push(...squatter.frames);
+			try {
+				await expect(
+					DaemonSessionClient.connect({ url: squatter.url, token: SECRET }),
+				).rejects.toThrow(rewrite ? /not your 8gent daemon/ : /could not prove who it is/);
+				expect(squatter.frames.map((f) => f.type)).toEqual(["identify"]);
+				expect(JSON.stringify(squatter.frames)).not.toContain(SECRET);
+			} finally {
+				squatter.srv.stop(true);
+				real.close();
+			}
+		}
+	});
+
+	it("a squatter on [::1] with the daemon on 127.0.0.1 gets no token, whichever alias the TUI dials", async () => {
+		const port = server.port as number;
+		const seen: string[] = [];
+		let squatter: ReturnType<typeof Bun.serve> | null = null;
+		try {
+			squatter = Bun.serve({
+				port,
+				hostname: "::1",
+				fetch(req, s) {
+					return s.upgrade(req, { data: undefined }) ? undefined : new Response("not a daemon");
+				},
+				websocket: {
+					message(ws, m) {
+						seen.push(String(m));
+						// Relay to the real daemon, as 8SO's probe does, and hand its answer back.
+						const real = new WebSocket(`ws://127.0.0.1:${port}`);
+						real.onopen = () => real.send(String(m));
+						real.onmessage = (e) => {
+							ws.send(String(e.data));
+							real.close();
+						};
+					},
+				},
+			});
+		} catch {
+			return; // no IPv6 loopback on this machine: nothing to squat
+		}
+		try {
+			// Dialling [::1] reaches the squatter: the daemon refuses the alias and the TUI refuses the answer.
+			await expect(
+				DaemonSessionClient.connect({ url: `ws://[::1]:${port}`, token: SECRET }),
+			).rejects.toThrow(/could not prove who it is|not your 8gent daemon/);
+			expect(JSON.stringify(seen)).not.toContain(SECRET);
+			expect(seen.map((f) => JSON.parse(f).type)).toEqual(["identify"]);
+			// localhost is dialled as 127.0.0.1, so it reaches the real daemon and never the squatter.
+			seen.length = 0;
+			const ok = await DaemonSessionClient.connect({
+				url: `ws://localhost:${port}`,
+				token: SECRET,
+			});
+			ok.close();
+			expect(seen).toEqual([]);
+		} finally {
+			squatter.stop(true);
+		}
+	});
+
+	it("a server that does not know the challenge (an old daemon, or another service) gets no token", async () => {
+		const fake = fakeDaemon((ws) =>
+			ws.send(JSON.stringify({ type: "error", message: "unknown message type" })),
+		);
+		try {
+			await expect(DaemonSessionClient.connect({ url: fake.url, token: SECRET })).rejects.toThrow(
+				/could not prove who it is/,
+			);
+			expect(fake.frames.map((f) => f.type)).toEqual(["identify"]);
+			expect(JSON.stringify(fake.frames)).not.toContain(SECRET);
+		} finally {
+			fake.srv.stop(true);
+		}
+	});
+
+	it("with no secret at all nothing is sent to anyone", async () => {
+		const fake = fakeDaemon(() => {});
+		try {
+			await expect(DaemonSessionClient.connect({ url: fake.url, token: null })).rejects.toThrow(
+				/no token to verify/,
+			);
+			expect(fake.frames).toEqual([]);
+		} finally {
+			fake.srv.stop(true);
+		}
+	});
+
+	it("a real daemon with a different secret is refused", async () => {
+		await expect(
+			DaemonSessionClient.connect({ url: `ws://127.0.0.1:${server.port}`, token: "e".repeat(64) }),
+		).rejects.toThrow(/not your 8gent daemon/);
+	});
+
+	it("a real daemon that has no identity secret is refused, and attach never happens", async () => {
+		const bare = startGateway({ port: 0, authToken: null, pool: pool as unknown as AgentPool });
+		try {
+			await expect(
+				DaemonSessionClient.connect({ url: `ws://127.0.0.1:${bare.port}`, token: SECRET }),
+			).rejects.toThrow(/could not prove who it is/);
+		} finally {
+			bare.stop(true);
+		}
+	});
+
+	it("the secret is found in the daemon's own token file when nothing is configured", async () => {
+		const { ensureTokenFile } = await import("../../../../packages/daemon/local-link");
+		const dir = mkdtempSync(join(tmpdir(), "tui-secret-"));
+		const saved = { d: process.env.EIGHT_DATA_DIR, t: process.env.EIGHT_DAEMON_TOKEN };
+		try {
+			process.env.EIGHT_DATA_DIR = dir;
+			delete process.env.EIGHT_DAEMON_TOKEN;
+			expect(resolveDaemonSecret(dir)).toBeNull();
+			const t = ensureTokenFile(dir);
+			expect(resolveDaemonSecret(dir)).toBe(t);
+			process.env.EIGHT_DAEMON_TOKEN = "f".repeat(64);
+			expect(resolveDaemonSecret(dir)).toBe("f".repeat(64));
+		} finally {
+			for (const [k, v] of [
+				["EIGHT_DATA_DIR", saved.d],
+				["EIGHT_DAEMON_TOKEN", saved.t],
+			] as const) {
+				if (v === undefined) delete process.env[k];
+				else process.env[k] = v;
+			}
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("literalLoopbackUrl", () => {
+	it("dials localhost by literal 127.0.0.1 and leaves everything else alone", () => {
+		expect(literalLoopbackUrl("ws://localhost:18789")).toBe("ws://127.0.0.1:18789");
+		expect(literalLoopbackUrl("ws://LOCALHOST:5/x?y=1")).toBe("ws://127.0.0.1:5/x?y=1");
+		expect(literalLoopbackUrl("ws://[::1]:5")).toBe("ws://[::1]:5");
+		expect(literalLoopbackUrl("ws://127.0.0.1:5")).toBe("ws://127.0.0.1:5");
+		expect(literalLoopbackUrl("ws://example.test:5")).toBe("ws://example.test:5");
+		expect(literalLoopbackUrl("not a url")).toBe("not a url");
 	});
 });

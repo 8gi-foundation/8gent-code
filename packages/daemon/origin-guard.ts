@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 /**
  * Who may talk to the daemon gateway, checked before any route runs.
@@ -128,6 +128,61 @@ export function presentedToken(req: Request): string | null {
  * Compare two tokens without leaking where or how long they differ: hash both
  * to fixed-length SHA-256 digests, then compare the digests in constant time.
  */
+/**
+ * What a daemon answers to `identify` (#4829): HMAC-SHA256 over a fixed domain string, the
+ * address the client dialled and the client's nonce, keyed by the daemon's secret. Binding
+ * the target stops a relay: a squatter that forwards the challenge to the real daemon gets
+ * a proof for another address, which the client rejects, or a refusal from the daemon.
+ */
+export function daemonProof(secret: string, nonce: string, target: string): string {
+	return createHmac("sha256", secret).update(`8gent-daemon-v2:${target}:${nonce}`).digest("hex");
+}
+
+/** The `host:port` of a url a client dials, lower-cased, default ports filled in. */
+export function dialTarget(url: string): string {
+	const u = new URL(url);
+	const port = u.port || (u.protocol === "wss:" || u.protocol === "https:" ? "443" : "80");
+	return `${u.hostname.toLowerCase()}:${port}`;
+}
+
+const bare = (h: string) => h.toLowerCase().replace(/^\[|\]$/g, "");
+const LOOPBACK_LITERALS = new Set(["127.0.0.1", "::1"]);
+
+/**
+ * The hosts a client may have dialled to reach a daemon bound to `bindHost`: the bound
+ * address exactly, never "any loopback alias" (a squatter on [::1]:P must not pass for a
+ * daemon on 127.0.0.1:P). `localhost` is a name, not an address, so a daemon bound to it is
+ * reached at 127.0.0.1, which clients dial by literal IP. A wildcard bind is reached at
+ * 127.0.0.1 (and ::1 only for the dual-stack `::`), and at no other host.
+ */
+function dialledHostsFor(bindHost: string): string[] {
+	const b = bare(bindHost);
+	if (b === "localhost" || b === "127.0.0.1") return ["127.0.0.1"];
+	if (b === "0.0.0.0") return ["127.0.0.1"];
+	if (b === "::") return ["127.0.0.1", "::1"];
+	return [b];
+}
+
+/**
+ * Is `target` this daemon? Its own listening port, and a host that is exactly the address it
+ * is bound to (see dialledHostsFor). A loopback target is honoured only when the peer is
+ * itself on loopback: a remote peer cannot be speaking to this daemon at 127.0.0.1 (#4829).
+ */
+export function identifyTargetOk(
+	target: unknown,
+	ownPort: number,
+	bindHost: string,
+	peerLoopback = false,
+): boolean {
+	if (typeof target !== "string" || target.length > 300) return false;
+	const m = /^(\[[0-9a-f:.]+\]|[a-z0-9.-]+):(\d{1,5})$/.exec(target);
+	if (!m) return false;
+	if (Number(m[2]) !== ownPort) return false;
+	const host = bare(m[1]);
+	if (LOOPBACK_LITERALS.has(host) && !peerLoopback) return false;
+	return dialledHostsFor(bindHost).includes(host);
+}
+
 export function sameToken(a: unknown, b: string): boolean {
 	if (typeof a !== "string") return false;
 	const x = createHash("sha256").update(a).digest();

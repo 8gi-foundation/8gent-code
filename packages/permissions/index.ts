@@ -80,6 +80,16 @@ export function channelDenialMessage(command: string): string | null {
 	return why && NOT_RUN[why] ? `[PERMISSION DENIED] ${NOT_RUN[why]}: ${command}` : null;
 }
 
+/**
+ * A turn that runs in the daemon for a TUI has no card to show (#4829). Inside this
+ * scope, with no channel approver bound, every request that reaches the prompt is
+ * refused, headless or not: nothing needing a yes runs without one.
+ */
+const _noCardSurface = new AsyncLocalStorage<true>();
+export function runWithoutApprovalSurface<T>(fn: () => T): T {
+	return _noCardSurface.run(true, fn);
+}
+
 /** Run fn so a dangerous shell command inside it asks `approver` instead of being denied. */
 export function runWithChannelApprover<T>(approver: ChannelApprover, fn: () => T): T {
 	return _channelApprover.run({ approver }, fn);
@@ -1222,6 +1232,11 @@ export class PermissionManager {
 		/** What the person is shown: `command`, naming its folder after a cd prefix (#3199). */
 		shown: string | undefined = command,
 	): Promise<boolean> {
+		// A daemon turn for a TUI has no card surface: refuse, never auto-approve (#4829).
+		if (_noCardSurface.getStore() && !_channelApprover.getStore()) {
+			console.log(`[permissions] DENIED (no card surface in this turn): ${command || action}`);
+			return false;
+		}
 		// Headless mode: no TTY available for interactive prompts
 		if (this.isHeadless()) {
 			// A person approves these every time; with no terminal there is no

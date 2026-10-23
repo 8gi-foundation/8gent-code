@@ -60,6 +60,8 @@ interface BottomBarProps {
 	sandboxOff?: string;
 	/** A gate flagged the last turn (#4510). */
 	verification?: FooterData["verification"];
+	/** The TUI is attached to the local daemon (#4829). */
+	daemonAttached?: boolean;
 }
 
 /** The signed-in display name (#2366). The OS login is not shown: it is the
@@ -104,6 +106,7 @@ export function BottomBar(props: BottomBarProps) {
 							adhd: props.adhd,
 							durable: props.durable,
 							verification: props.verification,
+							daemonAttached: props.daemonAttached,
 						}}
 					/>
 				)}

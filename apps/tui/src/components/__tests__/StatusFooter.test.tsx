@@ -416,3 +416,27 @@ describe("the word is held per tab (#4510)", () => {
 		expect(await row("B")).not.toContain("unverified");
 	});
 });
+
+describe("attached to the daemon is a footer chip while it holds (#4829)", () => {
+	test("no segment when the TUI runs on its own", () => {
+		expect(
+			buildFooterSegments({ mode: "Planning" }).find((s) => s.key === "daemon"),
+		).toBeUndefined();
+		expect(
+			buildFooterSegments({ mode: "Planning", daemonAttached: false }).find(
+				(s) => s.key === "daemon",
+			),
+		).toBeUndefined();
+	});
+
+	test("'daemon attached' when linked, and it outlasts the quiet segments", () => {
+		const segs = buildFooterSegments({ mode: "Planning", daemonAttached: true });
+		const seg = segs.find((s) => s.key === "daemon");
+		expect(seg?.label).toBe("daemon");
+		expect(seg?.value).toBe("attached");
+		expect(seg?.priority).toBeLessThan(
+			buildFooterSegments({ mode: "Planning", sessionTime: "1m" }).find((s) => s.key === "session")!
+				.priority,
+		);
+	});
+});
