@@ -179,9 +179,17 @@ export function useApprovalCard(
 	 * come up, never again.
 	 */
 	yolo?: { needed: () => boolean; answer: (yes: boolean) => void },
+	/**
+	 * After a resume that dropped the mode (#4821): the one question about going
+	 * back to Infinite or yolo. Asked before the first card, once; answering never
+	 * touches the saved yolo preference.
+	 */
+	resumeReturn?: { question: string; needed: () => boolean; answer: (yes: boolean) => void },
 ): PendingApproval | null {
 	const yoloRef = useRef(yolo);
 	yoloRef.current = yolo;
+	const resumeRef = useRef(resumeReturn);
+	resumeRef.current = resumeReturn;
 	const [pending, setPending] = useState<PendingApproval | null>(null);
 	const { stdout } = useStdout();
 	const [, setSize] = useState("");
@@ -209,16 +217,20 @@ export function useApprovalCard(
 		// The yolo question, as a card of its own. Y saves yes, N saves no; any
 		// other card key does nothing, and a card taken down unanswered (never
 		// laid out) asks again next time.
-		const askYolo = (): Promise<void> =>
+		const askOnce = (
+			target: string,
+			reason: string,
+			answer: (yes: boolean) => void,
+		): Promise<void> =>
 			new Promise<void>((done) => {
 				const card: PendingApproval = {
-					target: YOLO_QUESTION,
-					reason: "First time:",
+					target,
+					reason,
 					gate: true,
 					shownSince: Date.now(),
 					resolve: (decision) => {
 						if (decision !== "approve" && decision !== "deny") return;
-						yoloRef.current?.answer(decision === "approve");
+						answer(decision === "approve");
 						queueMicrotask(() => {
 							if (active === card) active = null;
 						});
@@ -235,7 +247,10 @@ export function useApprovalCard(
 		// The first request into an idle queue raises its card synchronously.
 		let turn: Promise<unknown> | null = null;
 		const run = async (request: TuiApprovalRequest): Promise<TuiApprovalDecision> => {
-			if (yoloRef.current?.needed()) await askYolo();
+			const back = resumeRef.current;
+			if (back?.needed()) await askOnce(back.question, "After a resume:", back.answer);
+			const y = yoloRef.current;
+			if (y?.needed()) await askOnce(YOLO_QUESTION, "First time:", y.answer);
 			return ask(request);
 		};
 		const handler = (request: TuiApprovalRequest): Promise<TuiApprovalDecision> => {

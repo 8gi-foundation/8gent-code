@@ -418,6 +418,11 @@ import {
 } from "../../../packages/permissions/permission-mode.js";
 import { runAllowReadCommand } from "../../../packages/permissions/read-allow.js";
 import {
+	denialNotice,
+	resumeLaunchMode,
+	resumeReturnQuestion,
+} from "../../../packages/permissions/resume-safety.js";
+import {
 	parseYoloArgs,
 	readYoloChoice,
 	writeYoloChoice,
@@ -1677,9 +1682,19 @@ export function App({
 	// A saved yes to the one yolo question (yolo-pref.ts) also starts tabs in
 	// Infinite, held for the session. Read once; a change lives in this ref.
 	const yoloRef = useRef(readYoloChoice());
-	const [launchPermMode] = useState<PermissionMode>(() =>
-		isInfiniteMode() || yoloRef.current === "yes" ? "infinite" : "ask",
+	// A resume after an interrupted turn (a kill, a dropped connection) never
+	// returns to the mode the crash happened in: it starts in the stricter of that
+	// and Ask, and asks once to go back (#4821). A fresh start is unchanged.
+	const [resumeStart] = useState(() =>
+		resumeLaunchMode({
+			launch: isInfiniteMode() || yoloRef.current === "yes" ? "infinite" : "ask",
+			interrupted:
+				!!sessionResume &&
+				(lastTurn(sessionResume) !== null || interruptedCalls(sessionResume).length > 0),
+		}),
 	);
+	const launchPermMode: PermissionMode = resumeStart.mode;
+	const resumeAskRef = useRef(resumeStart.clamped);
 	const permHoldersRef = useRef(new Map<string, PermissionModeHolder>());
 	const permHolderFor = useCallback(
 		(tabId: string): PermissionModeHolder => {
@@ -2131,14 +2146,28 @@ export function App({
 	// Headless callers see no handler and PermissionManager falls back to stdin.
 	const activeTabIdRef = useRef(activeTabId);
 	activeTabIdRef.current = activeTabId;
-	const approvalPending = useApprovalCard(undefined, {
-		needed: () => yoloRef.current === undefined && !isInfiniteMode(),
-		answer: (yes) => {
-			yoloRef.current = yes ? "yes" : "no";
-			writeYoloChoice(yoloRef.current);
-			if (yes) setTabPermMode(activeTabIdRef.current, "infinite", true);
+	const approvalPending = useApprovalCard(
+		undefined,
+		{
+			needed: () => yoloRef.current === undefined && !isInfiniteMode(),
+			answer: (yes) => {
+				yoloRef.current = yes ? "yes" : "no";
+				writeYoloChoice(yoloRef.current);
+				if (yes) setTabPermMode(activeTabIdRef.current, "infinite", true);
+			},
 		},
-	});
+		{
+			question: resumeReturnQuestion(yoloRef.current === "yes"),
+			// Not asked when the person already moved this tab off Ask themselves.
+			needed: () =>
+				resumeAskRef.current && permHolderFor(activeTabIdRef.current).mode === launchPermMode,
+			// The saved yolo preference is never rewritten by this answer.
+			answer: (yes) => {
+				resumeAskRef.current = false;
+				if (yes) setTabPermMode(activeTabIdRef.current, "infinite", yoloRef.current === "yes");
+			},
+		},
+	);
 
 	// A short confirmation in the footer's hint slot for 2 s: a mouse
 	// selection copied text (#3239), or a toggle that draws nothing else
@@ -2761,6 +2790,11 @@ export function App({
 			durableResumeNotice(activeSessionId, isReadOnlyTool);
 		if (notice) addSystemMessage(notice);
 	}, [activeSessionId, durableOn, addSystemMessage]);
+	// Denials from before a crash (#4821): shown as denied, asked again in every mode.
+	useEffect(() => {
+		const denied = getPermissionManager().setDenialSession(activeSessionId);
+		if (denied.length > 0) addSystemMessage(denialNotice(denied).join("\n"));
+	}, [activeSessionId, addSystemMessage]);
 	const submitRef = useRef<((text: string) => Promise<void>) | null>(null);
 
 	// Android (#4706): spoken replies via termux-tts-speak; a missing tool says so in the chat, not on stderr.
