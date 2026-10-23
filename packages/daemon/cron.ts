@@ -183,6 +183,13 @@ async function executeJob(job: CronJob): Promise<void> {
 				windowsVerbatimArguments: sh.windowsVerbatimArguments,
 			});
 			output = await new Response(proc.stdout).text();
+			// A non-zero exit is a failure someone must act on: say so on the bus (#4868).
+			const code = await proc.exited;
+			if (code !== 0)
+				bus.emit("agent:error", {
+					sessionId: "cron",
+					error: `cron job ${job.name} exited ${code}`,
+				});
 		} else if (job.type === "webhook") {
 			const res = await fetch(job.payload, { method: "POST" });
 			output = { status: res.status };

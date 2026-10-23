@@ -54,7 +54,9 @@ test("scripted day: 50 events through the real queue and the real bus", async ()
 
 	// Queued first, so "owner went first" is a real claim.
 	for (let i = 0; i < 30; i++) cron("cron:webhook", { step: `progress ${i}` });
-	for (let i = 0; i < 5; i++) cron("cron:shell", "ci: build red on main"); // one failure, five retries
+	// One failing check, five retries: the same error text, so one event.
+	for (let i = 0; i < 5; i++)
+		bus.emit("agent:error", { sessionId: "cron", error: "cron job ci exited 1" });
 	for (let i = 0; i < 5; i++)
 		bus.emit("agent:error", { sessionId: "cron", error: `deploy ${i} needs a key` });
 	expect(spoken).toHaveLength(0);
@@ -69,17 +71,15 @@ test("scripted day: 50 events through the real queue and the real bus", async ()
 
 	await router.flush();
 	expect(spoken.filter((n) => n.kind === "reply")).toHaveLength(10);
-	expect(spoken.filter((n) => n.kind === "action")).toHaveLength(5);
+	expect(spoken.filter((n) => n.kind === "action")).toHaveLength(6);
+	expect(spoken.filter((n) => n.count === 5)).toHaveLength(1); // the CI failure, once, counted
 	// Owner messages were handled before any queued event.
 	expect(order.slice(0, 10)).toEqual(Array(10).fill("owner"));
-	expect(order.slice(10)).toEqual(Array(5).fill("action"));
+	expect(order.slice(10)).toEqual(Array(6).fill("action"));
 
-	// One digest, for today: 30 progress plus the CI failure once, carrying its count of 5.
+	// One digest, for today: the 30 progress events only. Failures speak, they do not wait here.
 	expect(readdirSync(join(dir, "digest"))).toHaveLength(1);
-	const lines = digestLines();
-	expect(lines).toHaveLength(31);
-	expect(lines.find((l) => l.count === 5)?.origin).toBe("cron");
-	expect(lines.reduce((n, l) => n + l.count, 0)).toBe(35);
+	expect(digestLines()).toHaveLength(30);
 });
 
 test("an owner message pre-empts a running batch turn and the batch is requeued", async () => {
@@ -207,4 +207,50 @@ test("threat-feed CRITICAL hits become urgent events; lower ones do not", () => 
 	expect(evs).toHaveLength(1);
 	expect(evs[0]).toMatchObject({ source: "threat-feed", priority: "urgent" });
 	expect(threatFeedEvents(join(dir, "feed"), Date.now() + 60_000)).toHaveLength(0);
+});
+
+test("a sixth identical failure inside the window adds no second notice", async () => {
+	config({ digest: true, batchWindowMs: 3_600_000 });
+	const spoken: Notice[] = [];
+	stop = startWakeRouter(dir, (n) => void spoken.push(n));
+	const fail = () => bus.emit("agent:error", { sessionId: "cron", error: "cron job ci exited 1" });
+	for (let i = 0; i < 5; i++) fail();
+	const router = wakeRouter() as WakeRouter;
+	await router.flush();
+	expect(spoken.map((n) => [n.kind, n.count])).toEqual([["action", 5]]);
+	fail(); // the sixth, after the notice, still inside the dedupe window
+	await router.flush();
+	expect(spoken).toHaveLength(1);
+});
+
+test("a shell cron job that exits non-zero raises the failure the router speaks about", async () => {
+	process.env.EIGHT_DATA_DIR = dir;
+	try {
+		writeFileSync(
+			join(dir, "cron.json"),
+			JSON.stringify([
+				{
+					id: "j",
+					name: "ci",
+					expression: "*/1 * * * *",
+					type: "shell",
+					payload: "exit 3",
+					enabled: true,
+					lastRun: new Date(Date.now() - 3_600_000).toISOString(),
+					nextRun: null,
+					recurring: true,
+				},
+			]),
+		);
+		config({ batchWindowMs: 3_600_000 });
+		const spoken: Notice[] = [];
+		stop = startWakeRouter(dir, (n) => void spoken.push(n));
+		const { startCron, stopCron } = await import("./cron");
+		await startCron(); // catch-up runs the overdue job once, through the real executor
+		stopCron();
+		await (wakeRouter() as WakeRouter).flush();
+		expect(spoken.map((n) => n.kind)).toEqual(["action"]);
+	} finally {
+		Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
+	}
 });
