@@ -9,6 +9,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.23] - 2026-10-23
+
+### Added
+- threat-feed: slice 1, lockfile inventory matched against OSV and CISA KEV ([#4845](https://github.com/8gi-foundation/8gent-code/pull/4845))
+- daemon,tui: the Telegram home session, discovery, operator-token attach rule, reconnect (#4834) ([#4838](https://github.com/8gi-foundation/8gent-code/pull/4838))
+- tui: auto-attach to a running local daemon, with a footer chip (#4829) ([#4830](https://github.com/8gi-foundation/8gent-code/pull/4830))
+- threat-feed: slice 2 stub, ingest a MISP feed manifest and events read-only (#4840) ([#4846](https://github.com/8gi-foundation/8gent-code/pull/4846))
+- android: one-yes setup for DJ and voice input on Termux, mic key listens through Termux:API ([#4835](https://github.com/8gi-foundation/8gent-code/pull/4835))
+- daemon: advertise slash command names on session frames and /health ([#4548](https://github.com/8gi-foundation/8gent-code/pull/4548))
+- offer the safety judge once on first run and after update, /judge install later ([#4812](https://github.com/8gi-foundation/8gent-code/pull/4812))
+- dj: offer to install missing tools in place with one yes (#4810) ([#4813](https://github.com/8gi-foundation/8gent-code/pull/4813))
+- durable turns slice 3, verified effects and headless resume ([#4808](https://github.com/8gi-foundation/8gent-code/pull/4808))
+
+### Fixed
+- permissions: resume clamps the restored mode and keeps denials, never approvals ([#4824](https://github.com/8gi-foundation/8gent-code/pull/4824))
+- tui: each notice shows once, ids no longer collide in the same millisecond (#4822) ([#4823](https://github.com/8gi-foundation/8gent-code/pull/4823))
+- permissions: --yes stays in memory, a saved autoApprove loads false ([#4818](https://github.com/8gi-foundation/8gent-code/pull/4818))
+
 ## [0.20.22] - 2026-10-23
 
 ### Added
