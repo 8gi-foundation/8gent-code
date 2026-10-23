@@ -166,3 +166,60 @@ describe("DaemonClient session lifecycle (#3538)", () => {
 		client.close();
 	});
 });
+
+describe("DaemonClient on a session the TUI can join (#4834)", () => {
+	async function connected(config: { home?: boolean } = {}) {
+		const sock = new FakeSocket();
+		const client = new DaemonClient({ url: "ws://test", socketFactory: () => sock, ...config });
+		const connecting = client.connect();
+		sock.open();
+		sock.receive({ type: "session:created", sessionId: "s" });
+		await connecting;
+		return { sock, client };
+	}
+	const stream = (sock: FakeSocket, chunk: string) =>
+		sock.receive({
+			type: "event",
+			event: "agent:stream",
+			payload: { sessionId: "s", chunk, final: true },
+		});
+	const types = (sock: FakeSocket) => sock.sent.map((s) => JSON.parse(s).type);
+
+	it("declares its session home only when asked to, and only after the session exists", async () => {
+		const yes = await connected({ home: true });
+		expect(types(yes.sock)).toContain("home:declare");
+		expect(types(yes.sock).indexOf("home:declare")).toBeGreaterThan(
+			types(yes.sock).indexOf("session:create"),
+		);
+		const no = await connected();
+		expect(types(no.sock)).not.toContain("home:declare");
+	});
+
+	it("a TUI turn's reply never reaches the adapter, the bridge's own does", async () => {
+		const { sock, client } = await connected({ home: true });
+		const seen: string[] = [];
+		const ends: number[] = [];
+		client.on("agent:stream", (p) => seen.push(p.chunk));
+		client.on("session:end", () => ends.push(1));
+		sock.receive({
+			type: "event",
+			event: "user:message",
+			payload: { sessionId: "s", text: "typed in the TUI", channel: "tui" },
+		});
+		stream(sock, "reply to the TUI");
+		sock.receive({
+			type: "event",
+			event: "session:end",
+			payload: { sessionId: "s", reason: "turn-complete" },
+		});
+		client.sendPrompt("typed in Telegram");
+		stream(sock, "reply to Telegram");
+		sock.receive({
+			type: "event",
+			event: "session:end",
+			payload: { sessionId: "s", reason: "turn-complete" },
+		});
+		expect(seen).toEqual(["reply to Telegram"]);
+		expect(ends).toEqual([1]);
+	});
+});

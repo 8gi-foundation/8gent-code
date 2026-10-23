@@ -11,14 +11,14 @@ import { planningGateInstruction } from "../eight/local-tool-scope";
 import { SessionManager } from "../eight/session-manager";
 import {
 	type ChatMessage,
+	type ResumeDeps,
+	ResumeSecrets,
 	type SharedAgent,
 	type SharedPool,
 	type SharedSessionDeps,
 	type SharedStore,
 	TRANSCRIPT_MAX_CHARS,
 	TRANSCRIPT_MAX_MESSAGES,
-	type ResumeDeps,
-	ResumeSecrets,
 	capTranscript,
 	chatMessages,
 	handleResume,
@@ -218,6 +218,81 @@ describe("session:attach", () => {
 	});
 });
 
+describe("the Telegram home session (#4834)", () => {
+	const homeDeps = (over: Partial<SharedSessionDeps> = {}): SharedSessionDeps => ({
+		...deps(),
+		operator: true,
+		homeSessionId: "s_home",
+		...over,
+	});
+	const attach = (sessionId: string, d: SharedSessionDeps) =>
+		handleSharedSession({ type: "session:attach", sessionId, channel: "tui" }, d);
+
+	it("the alias and the raw id both attach it for an operator, and mark it home", () => {
+		const agent = pool.add("s_home", "telegram");
+		agent.history.push({ role: "user", content: "from telegram" });
+		for (const id of ["home", "s_home"]) {
+			const r = attach(id, homeDeps());
+			expect(r.bind).toBe("s_home");
+			if (r.reply.type !== "session:attached") throw new Error(JSON.stringify(r.reply));
+			expect(r.reply).toMatchObject({ channel: "telegram", home: true, restored: false });
+			expect(r.reply.transcript.map((m) => m.content)).toEqual(["from telegram"]);
+		}
+	});
+
+	it("is refused without the operator token, by alias and by id, and nothing binds", () => {
+		pool.add("s_home", "telegram");
+		for (const op of [false, undefined]) {
+			for (const id of ["home", "s_home"]) {
+				const r = attach(id, homeDeps({ operator: op }));
+				expect(r.bind).toBeUndefined();
+				expect(r.reply).toEqual({ type: "error", message: "operator token required" });
+			}
+		}
+	});
+
+	it("is refused when no bridge is connected, and for any other telegram session even with the token", () => {
+		pool.add("s_other_tg", "telegram");
+		expect(attach("home", homeDeps({ homeSessionId: null })).reply).toEqual({
+			type: "error",
+			message: "no home session",
+		});
+		expect(attach("s_other_tg", homeDeps()).reply).toEqual({
+			type: "error",
+			message: "session cannot be shared",
+		});
+	});
+
+	it("other private channels stay private for an operator, home pointing at them or not", () => {
+		pool.add("s_table", "table");
+		pool.add("s_comp", "computer");
+		expect(attach("s_table", homeDeps()).reply).toMatchObject({
+			message: "session cannot be shared",
+		});
+		expect(attach("s_comp", homeDeps({ homeSessionId: "s_comp" })).reply).toMatchObject({
+			message: "session cannot be shared",
+		});
+	});
+
+	it("is never listed, never marked persistable, and never written by persistSession", () => {
+		pool.add("s_home", "telegram");
+		attach("home", homeDeps());
+		expect(persistable.has("s_home")).toBe(false);
+		persistSession(pool, () => saveStore(), "s_home", persistable);
+		expect(store.get("s_home")).toBeNull();
+		const { reply } = handleSharedSession({ type: "session:list" }, homeDeps());
+		if (reply.type !== "session:list") throw new Error(reply.type);
+		expect(reply.live).toEqual([]);
+	});
+
+	it("a TUI session's attach is unchanged for everyone", () => {
+		pool.add("s_tui", "tui");
+		const r = attach("s_tui", deps());
+		expect(r.bind).toBe("s_tui");
+		expect(persistable.has("s_tui")).toBe(true);
+	});
+});
+
 describe("session:detach and session:abort", () => {
 	it("detach unbinds without touching the session", () => {
 		pool.add("s_a", "tui");
@@ -278,7 +353,10 @@ describe("persistSession", () => {
 		const persistable = new Set(["s_long"]);
 		expect(persistSession(pool, saveStore, "s_long", persistable)).toBe(true);
 		for (let t = 0; t < 3; t++) {
-			agent.history.push({ role: "user", content: `n${t}` }, { role: "assistant", content: `r${t}` });
+			agent.history.push(
+				{ role: "user", content: `n${t}` },
+				{ role: "assistant", content: `r${t}` },
+			);
 			expect(persistSession(pool, saveStore, "s_long", persistable)).toBe(true);
 		}
 		const tree = store.store("s_long")!;

@@ -2598,7 +2598,7 @@ export function App({
 		if (key.ctrl && input === "c") {
 			if (soundEnabled) playSound("notification");
 			// Save session and finalize before exiting
-			if (activeSessionId && messages.length > 0) {
+			if (activeSessionId && messages.length > 0 && !daemonLinkRef.current) {
 				const serializable = withoutBangLines(messages).map((m) => ({
 					role: m.role,
 					content: m.content,
@@ -2925,8 +2925,14 @@ export function App({
 		async (sessionId: string, auto = false): Promise<boolean> => {
 			let client = daemonLinkRef.current?.client;
 			try {
-				if (!client) client = await DaemonSessionClient.connect();
-				const attached = await client.attach(sessionId, "tui");
+				let attached: Awaited<ReturnType<DaemonSessionClient["attach"]>> | undefined;
+				if (!client && sessionId === "home") {
+					// The Telegram home session: find the local daemon that has it (#4834).
+					({ client, attached } = await DaemonSessionClient.connectHome());
+				} else if (!client) {
+					client = await DaemonSessionClient.connect();
+				}
+				attached ??= await client.attach(sessionId, "tui");
 				if (daemonLinkRef.current?.client !== client) {
 					const off = client.onEvent((e) => {
 						switch (e.kind) {
@@ -2941,6 +2947,23 @@ export function App({
 								break;
 							case "error":
 								pushShared("system", `8gent: ${e.text}`);
+								break;
+							case "reconnecting":
+								pushShared(
+									"system",
+									"Reconnecting to your 8gent... Sending is paused until it is back.",
+								);
+								break;
+							case "resynced":
+								setMessages(
+									e.transcript.map((m, i) => ({
+										id: `shared-resynced-${i}`,
+										role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+										content: m.content,
+										timestamp: new Date(),
+									})) as Message[],
+								);
+								pushShared("system", "Reconnected to your 8gent.");
 								break;
 							case "ended":
 								pushShared(
@@ -3979,7 +4002,9 @@ export function App({
 	 * caught (#3918 E1). Null when no session is active.
 	 */
 	const saveSessionNow = useCallback((): SessionStore | null => {
-		if (!activeSessionId) return null;
+		// A linked session's file belongs to the daemon, and the Telegram home session is
+		// never written to the store at all (#4834).
+		if (!activeSessionId || daemonLinkRef.current) return null;
 		const serializable = withoutBangLines(messages).map((m) => ({
 			role: m.role,
 			content: m.content,
@@ -4490,7 +4515,7 @@ export function App({
 				}
 
 				case "quit":
-					if (activeSessionId && messages.length > 0) {
+					if (activeSessionId && messages.length > 0 && !daemonLinkRef.current) {
 						const serializable = withoutBangLines(messages).map((m) => ({
 							role: m.role,
 							content: m.content,
@@ -4774,6 +4799,7 @@ export function App({
 								"  /sessions              - Pick a live or past shared session\n" +
 								"  /sessions share        - Share this conversation (the 8gent Browser panel can join it)\n" +
 								"  /sessions attach <id>  - Join a shared session by id\n" +
+								"  /sessions attach home  - Join your 8gent's Telegram session\n" +
 								"  /sessions stop         - Stop the shared session's current turn\n" +
 								"  /sessions detach       - Leave it and go back to this TUI's own 8gent",
 						);

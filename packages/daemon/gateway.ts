@@ -93,8 +93,9 @@ export interface GatewayConfig {
 	port: number;
 	authToken: string | null; // null = no auth required
 	/**
-	 * The secret the daemon proves its identity with (#4829) when authToken is not set:
-	 * the operator token from <dataDir>/daemon.token. Never sent, only used as an HMAC key.
+	 * The operator token from <dataDir>/daemon.token, used when authToken is not set. It is
+	 * the HMAC key for the identity proof (#4829) and proves a loopback socket may attach the
+	 * Telegram home session (#4834). When authToken is set it plays both roles instead.
 	 */
 	operatorToken?: string | null;
 	pool: AgentPool;
@@ -118,6 +119,10 @@ interface ClientState {
 	authenticated: boolean;
 	/** Proved it is the Telegram approval bridge (#3621): only it answers approvals. */
 	approvalBridge?: boolean;
+	/** Proved the operator token (#4834): may attach the Telegram home session. */
+	operator?: boolean;
+	/** When the bridge declared this socket's session the Telegram home session (#4834). */
+	homeAt?: number;
 	/** Marks a connection upgraded on the /computer route. */
 	isComputerRoute?: boolean;
 	/** Marks a connection upgraded on the /dispatch route. */
@@ -139,6 +144,8 @@ type InboundMessage =
 	| { type: "auth"; token: string; participantId?: string }
 	/** The daemon proves it holds the secret before a client sends its token (#4829). */
 	| { type: "identify"; nonce: string; target?: string }
+	/** The bridge says the session on this socket is where the Telegram conversation lives (#4834). */
+	| { type: "home:declare" }
 	/** persist: true saves the session after every turn (#3929), so it can be resumed later. */
 	| { type: "session:create"; channel: string; persist?: boolean }
 	| { type: "session:resume"; sessionId: string; channel?: string; resumeSecret?: string }
@@ -265,6 +272,20 @@ function clientsOn(sessionId: string, except?: unknown): number {
 	return n;
 }
 
+/**
+ * The Telegram home session (#4834): the session the proven approval bridge declared
+ * with `home:declare` (the bridge can hold two Telegram sessions: the adapter's carries
+ * the conversation). Never from any other client's claim. The latest declaration wins.
+ */
+function homeSessionId(): string | null {
+	let best: ClientState | null = null;
+	for (const s of clients.values()) {
+		if (!s.approvalBridge || s.channel !== "telegram" || !s.sessionId || !s.homeAt) continue;
+		if (!best || s.homeAt >= (best.homeAt ?? 0)) best = s;
+	}
+	return best?.sessionId ?? null;
+}
+
 /** Show the other clients on a session what this one sent (#3929). */
 function echoPrompt(from: unknown, sessionId: string, text: string, channel: string): void {
 	for (const [ws, s] of clients) {
@@ -357,6 +378,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 					}
 				}
 				state.authenticated = true;
+				state.operator = true; // the configured token is the operator token
 				send(ws, { type: "auth:ok" });
 			} else {
 				send(ws, { type: "auth:fail" });
@@ -425,6 +447,8 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			clientsOn: (id) => clientsOn(id),
 			persistable,
 			allowRestore: () => allowRestore(state),
+			operator: state.operator === true,
+			homeSessionId: homeSessionId(),
 		});
 		if (bind !== undefined) state.sessionId = bind;
 		if (surface) state.channel = surface;
@@ -456,6 +480,9 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 					return;
 				}
 			}
+			// No-auth mode answers auth:ok to anything (it always has); only the operator
+			// flag carries meaning, and only the exact operator token sets it (#4834).
+			if (config.operatorToken && sameToken(msg.token, config.operatorToken)) state.operator = true;
 			send(ws, { type: "auth:ok" });
 			break;
 		}
@@ -697,6 +724,19 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 				});
 			}
 			send(ws, out);
+			break;
+		}
+
+		case "home:declare": {
+			if (!state.approvalBridge) {
+				send(ws, { type: "error", message: "not-bridge" });
+				break;
+			}
+			if (!state.sessionId || state.channel !== "telegram") {
+				send(ws, { type: "error", message: "no telegram session on this socket" });
+				break;
+			}
+			state.homeAt = Date.now();
 			break;
 		}
 

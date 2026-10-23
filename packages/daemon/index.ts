@@ -50,7 +50,7 @@ import { bus } from "./events";
 import { startGateway } from "./gateway";
 import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
-import { ensureTokenFile } from "./local-link";
+import { ensureTokenFile, removeDiscovery, writeDiscovery } from "./local-link";
 import { resolveBestFreeModel } from "./model-resolver";
 import { resolveBindHost } from "./origin-guard";
 import {
@@ -165,6 +165,7 @@ async function shutdown(signal: string): Promise<void> {
 		await mesh.stop().catch(() => {});
 		mesh = null;
 	}
+	removeDiscovery(DATA_DIR);
 	if (server) {
 		server.stop();
 		server = null;
@@ -391,7 +392,12 @@ export async function main(): Promise<void> {
 	// Start WebSocket gateway with agent pool + dispatch + goal-loop
 	server = startGateway({
 		port: config.port,
-		authToken: config.authToken,
+		// EIGHT_DAEMON_REQUIRE_TOKEN=1 makes the operator token gate the whole gateway (#4834);
+		// by default it gates only the Telegram home session, so local clients that connect
+		// without a token keep working.
+		authToken:
+			config.authToken ??
+			(process.env.EIGHT_DAEMON_REQUIRE_TOKEN === "1" && operatorToken ? operatorToken : null),
 		operatorToken,
 		pool,
 		dispatch: {
@@ -404,6 +410,17 @@ export async function main(): Promise<void> {
 		},
 		goal: goalManager,
 	});
+
+	// Where this daemon listens, for the TUI to find (#4834). No token in it; a dead pid is ignored.
+	try {
+		writeDiscovery(DATA_DIR, {
+			url: `ws://127.0.0.1:${server.port}`,
+			pid: process.pid,
+			dataDir: DATA_DIR,
+		});
+	} catch (err) {
+		console.error(`[daemon] could not write ${DATA_DIR}/daemon.json: ${(err as Error).message}`);
+	}
 
 	// Start heartbeat
 	startHeartbeat({
