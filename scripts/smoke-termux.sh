@@ -8,7 +8,8 @@
 # Proves what a Termux user hits: the tarball installs with install scripts ON
 # (a dependency that fails its install script on bionic, #4658, is red here),
 # `8gent --version` names the tag, the TUI draws its first prompt (the
-# boot-trace marker, #4541; a render crash like #4660 never reaches it), and
+# boot-trace marker, #4541; a render crash like #4660 never reaches it; the
+# launch-time music and voice questions are answered and each seen once), and
 # scripts/install.sh decides about Android instead of crashing.
 set -eu
 
@@ -62,8 +63,26 @@ echo "== TUI first prompt (boot trace marker, ${SECONDS_TUI}s)"
 LOG="$HOME/.8gent/logs/tui-boot.log"
 rm -f "$LOG"
 OUT="$(mktemp)"
-# script gives the TUI a pty; the held-open pipe keeps stdin from closing.
-( sleep "$((SECONDS_TUI + 10))" | script -qec "8gent tui --no-pet" /dev/null >"$OUT" 2>&1 ) &
+# script gives the TUI a pty. On a fresh Termux the launch asks two setup questions
+# (music tools, then voice input, #4833) and waits for a line on stdin, so a held-open
+# silent pipe hangs here. Answer them the way a person would: type "n" once each question
+# is on screen. Declining installs nothing; the point is that the offer is made, once.
+Q_MUSIC="Set up this phone for music"
+Q_MIC="Turn on voice input"
+answer_setup() {
+	for q in "$Q_MUSIC" "$Q_MIC"; do
+		t=0
+		until grep -aqs "$q" "$OUT"; do
+			sleep 1; t=$((t + 1))
+			[ "$t" -gt "$SECONDS_TUI" ] && break
+		done
+		sleep 1
+		echo n
+	done
+	# Then hold stdin open so the TUI keeps running until we have looked.
+	sleep "$((SECONDS_TUI + 10))"
+}
+( answer_setup | script -qec "8gent tui --no-pet" /dev/null >"$OUT" 2>&1 ) &
 runner=$!
 i=0
 while [ "$i" -lt "$SECONDS_TUI" ]; do
@@ -78,6 +97,11 @@ else
 	echo "-- boot trace:"; cat "$LOG" 2>/dev/null || echo "(none)"
 	echo "-- last output:"; tail -c 1500 "$OUT" | sed 's/\x1b\[[0-9;?]*[ -\/]*[@-~]//g'
 fi
+# The one-yes setup is tested, not skipped: each launch question appeared exactly once.
+for q in "$Q_MUSIC" "$Q_MIC"; do
+	n="$(grep -ao "$q" "$OUT" | wc -l | tr -d ' ')"
+	if [ "$n" = "1" ]; then pass "launch asked \"$q\" once"; else bad "launch asked \"$q\" $n times (want 1)"; fi
+done
 pkill -P "$runner" 2>/dev/null || true
 pkill -f "8gent-run.js" 2>/dev/null || true
 kill "$runner" 2>/dev/null || true
