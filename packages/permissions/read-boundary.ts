@@ -94,7 +94,15 @@ function homeDirs(env: Record<string, string | undefined>): string[] {
 /** Signing keys under the data folder (kernel read-denied too, #4132). */
 const OWN_KEYS = /[\\/]\.8gent[\\/]keys([\\/]|$)/i;
 
-/** The tool's own data folder: allowed, except credential-shaped paths inside it. */
+/**
+ * Inside the tool's own data folder, what holds the person's memory, browser state, client data
+ * or logs is not for a model to read in a shell without a card: databases (memory.db, brain.db),
+ * browser profiles and history, client folders, audit logs, backups.
+ */
+const OWN_PRIVATE =
+	/[\\/]\.8gent[\\/](memory[^\\/]*|brain[^\\/]*|clients|browser-[^\\/]*|audit[^\\/]*|backups|app-backups|cron[^\\/]*)([\\/]|$)|\.(db|sqlite3?|db-wal|db-shm)$/i;
+
+/** The tool's own data folder: allowed, except credential-shaped and private paths inside it. */
 function ownDataRoots(env: Record<string, string | undefined>): string[] {
 	return homeDirs(env).map((h) => path.join(h, ".8gent"));
 }
@@ -133,7 +141,7 @@ export function inlineCodePaths(command: string): string[] {
 function allowedOutside(resolved: string, env: Record<string, string | undefined>): boolean {
 	const within = (p: string, root: string) => isPathWithin(p, root, process.platform);
 	if (ownDataRoots(env).some((r) => within(resolved, r)))
-		return !namesSecret(resolved) && !OWN_KEYS.test(resolved);
+		return !namesSecret(resolved) && !OWN_KEYS.test(resolved) && !OWN_PRIVATE.test(resolved);
 	if (homeDirs(env).some((h) => within(resolved, h))) return false;
 	return readAllowances(env).some((a) => within(resolved, a));
 }
@@ -155,10 +163,100 @@ function exists(p: string): boolean {
 	}
 }
 
+const SHELL = /^((ba|z|da|k)?sh|fish)$/;
+const MAX_NESTING = 3;
+const GLOB_CHAR = /[*?[{]/;
+
+/** Bodies of `$(...)`, `<(...)`, `>(...)` (balanced) and backtick pairs: commands inside a command. */
+export function substitutionBodies(command: string): string[] {
+	const out: string[] = [];
+	for (let i = 0; i < command.length; i++) {
+		const two = command.slice(i, i + 2);
+		if (two === "$(" || two === "<(" || two === ">(") {
+			let depth = 1;
+			let k = i + 2;
+			for (; k < command.length && depth > 0; k++) {
+				if (command[k] === "(") depth++;
+				else if (command[k] === ")") depth--;
+			}
+			out.push(command.slice(i + 2, depth === 0 ? k - 1 : k));
+		}
+	}
+	const ticks = [...command.matchAll(/`([^`]*)`/g)].map((m) => m[1] as string);
+	return [...out, ...ticks];
+}
+
+/** Commands passed as a string: `bash -c '...'`, `sh -c "..."`, `eval '...'`, plus substitution bodies. */
+export function nestedCommands(command: string): string[] {
+	const out: string[] = [];
+	const tokens = tokenize(command);
+	for (let i = 0; i < tokens.length; i++) {
+		const bin = path.basename(tokens[i] as string);
+		if (SHELL.test(bin)) {
+			const at = tokens.findIndex((t, k) => k > i && /^-[A-Za-z]*c$/.test(t));
+			if (at >= 0 && tokens[at + 1]) out.push(tokens[at + 1] as string);
+		} else if (bin === "eval") out.push(tokens.slice(i + 1).join(" "));
+	}
+	return [...out, ...substitutionBodies(command)];
+}
+
+/**
+ * Every word that can name a file, beyond what checkCommandBoundary looks at: an input redirect
+ * with no space (`<../x`), `@file` uploads, `--opt=path`, `file://` URLs, `$PWD`/`$HOME`, and
+ * globs and braces (reduced to the folder they search). A word built at run time is not here.
+ */
+export function pathWords(
+	command: string,
+	cwd: string,
+	env: Record<string, string | undefined>,
+): string[] {
+	const home = env.HOME || os.homedir();
+	const out: string[] = [];
+	for (const t of tokenize(command)) {
+		let w = t;
+		if (w.startsWith("<<")) continue;
+		w = w.replace(/^\d*<+/, "").replace(/^@/, "");
+		const opt = /^--?[A-Za-z][\w-]*=(.*)$/.exec(w);
+		if (opt) w = opt[1] as string;
+		const url = /^file:\/\/([^?#]*)/.exec(w);
+		if (url) {
+			try {
+				w = decodeURIComponent(url[1] as string);
+			} catch {
+				w = url[1] as string;
+			}
+		}
+		w = w
+			.replace(/^~(?=\/|$)/, home)
+			.replace(/^\$\{?HOME\}?(?=\/|$)/, home)
+			.replace(/^\$\{?PWD\}?(?=\/|$)/, cwd);
+		if (!w || w.startsWith("-") || /[$`()]/.test(w)) continue;
+		const g = w.search(GLOB_CHAR);
+		if (g >= 0) {
+			// A sed or awk script, a regex or a message with a `*` in it is not a path with a glob.
+			if (/[\s^$=;'"]/.test(w)) continue;
+			const pre = w.slice(0, g);
+			w = pre.endsWith("/") || /(^|\/)\.\.$/.test(pre) ? pre : path.dirname(pre);
+			if (!w) w = ".";
+		}
+		out.push(w);
+	}
+	return out;
+}
+
+function isLink(p: string): boolean {
+	try {
+		return fs.lstatSync(p).isSymbolicLink();
+	} catch {
+		return false;
+	}
+}
+
 /** Each existing path a command names outside the root that no allowance covers (resolved). */
 export function outsideReads(
 	command: string,
 	opts: { root: string; cwd?: string; env?: Record<string, string | undefined> },
+	depth = 0,
 ): string[] {
 	const env = opts.env ?? process.env;
 	const root = opts.root;
@@ -177,14 +275,40 @@ export function outsideReads(
 		if (exists(v.resolved) && !allowedOutside(v.resolved, env)) out.add(v.resolved);
 	}
 	const realRoot = resolveSafe(root, root);
+	const insideRoot = (p: string) =>
+		isPathWithin(p, realRoot, process.platform) ||
+		prefixes.some((x) => isPathWithin(p, path.resolve(x), process.platform));
 	for (const p of literals) {
 		const expanded = p.startsWith("~/") ? path.join(env.HOME || os.homedir(), p.slice(2)) : p;
 		const resolved = resolveSafe(expanded, cwd);
-		const inside =
-			isPathWithin(resolved, realRoot, process.platform) ||
-			prefixes.some((x) => isPathWithin(resolved, path.resolve(x), process.platform));
-		if (!inside && exists(resolved) && !allowedOutside(resolved, env)) out.add(resolved);
+		if (!insideRoot(resolved) && exists(resolved) && !allowedOutside(resolved, env))
+			out.add(resolved);
 	}
+	// Words the tokenizer pass does not see (see pathWords), each followed through links: a link
+	// inside the root to a file outside it is a read outside it. When the root is, or holds, the
+	// home folder, credentials and the tool's keys inside it still need a card.
+	const rootHoldsHome = homeDirs(env).some((h) => isPathWithin(h, realRoot, process.platform));
+	for (const w of pathWords(command, cwd, env)) {
+		// A bare name (no slash) is a read outside only through a link: `cat link-out`.
+		if (!w.includes("/") && w !== ".." && !isLink(path.resolve(cwd, w))) continue;
+		const resolved = resolveSafe(path.resolve(cwd, w), cwd);
+		if (!exists(resolved)) continue;
+		if (!insideRoot(resolved)) {
+			if (!allowedOutside(resolved, env)) out.add(resolved);
+		} else if (
+			rootHoldsHome &&
+			(namesSecret(resolved) ||
+				OWN_KEYS.test(resolved) ||
+				(ownDataRoots(env).some((r) => isPathWithin(resolved, r, process.platform)) &&
+					OWN_PRIVATE.test(resolved)))
+		) {
+			out.add(resolved);
+		}
+	}
+	// Commands inside the command: `bash -c '...'`, `eval '...'`, `$(...)`, backticks.
+	if (depth < MAX_NESTING)
+		for (const inner of nestedCommands(command))
+			for (const p of outsideReads(inner, { root, cwd, env }, depth + 1)) out.add(p);
 	return [...out];
 }
 
