@@ -1,7 +1,9 @@
 /**
  * Backend detection.
  *
- * Order: in-process llama.cpp (only when the optional node-llama-cpp
+ * 8J first when env EIGHT_8J_URL names its loopback server (backends/eightj.ts): naming it is
+ * an explicit choice, so when it does not answer /health the result is "none", never a
+ * different judge. Otherwise the order is: in-process llama.cpp (only when the optional node-llama-cpp
  * package loads AND a GGUF resolves, see backends/llamacpp.ts; an explicit
  * EIGHT_DECIDE_MODEL with no GGUF skips llamacpp rather than being
  * substituted by another model), then a
@@ -29,11 +31,22 @@
  * server again once it is back.
  */
 
-import { resolveLayaUrl } from "./backends/laya";
-import { type LlamaCppLoader, defaultLlamaCppLoader, llamaCppUnavailable, resolveGguf } from "./backends/llamacpp";
-import { JUDGE_NUM_CTX, resolveOllamaHost } from "./backends/ollama";
-import { LocalServerHttpError, LocalServerResponseError, createOllamaServer, isOllamaEnabled } from "../local-model-server";
+import {
+	LocalServerHttpError,
+	LocalServerResponseError,
+	createOllamaServer,
+	isOllamaEnabled,
+} from "../local-model-server";
 import { DEFAULT_OLLAMA_BASE_URL, normaliseOllamaHost } from "../local-model-server/ollama-host";
+import { eightJHealth, eightJSelected, resolveEightJUrl } from "./backends/eightj";
+import { resolveLayaUrl } from "./backends/laya";
+import {
+	type LlamaCppLoader,
+	defaultLlamaCppLoader,
+	llamaCppUnavailable,
+	resolveGguf,
+} from "./backends/llamacpp";
+import { JUDGE_NUM_CTX, resolveOllamaHost } from "./backends/ollama";
 import type { FetchLike } from "./types";
 
 /**
@@ -43,7 +56,18 @@ import type { FetchLike } from "./types";
  * Small instruct models that emit clean single-token answers come next,
  * ahead of large or reasoning ones.
  */
-export const MODEL_PREFERENCE = ["selene", "llama3.2", "llama3.1", "qwen2.5", "gemma", "phi", "minicpm", "mistral", "qwen3", "llama"];
+export const MODEL_PREFERENCE = [
+	"selene",
+	"llama3.2",
+	"llama3.1",
+	"qwen2.5",
+	"gemma",
+	"phi",
+	"minicpm",
+	"mistral",
+	"qwen3",
+	"llama",
+];
 
 /** Substrings that mark models unable to answer (embedding-only). */
 const EXCLUDE = ["embed"];
@@ -56,7 +80,7 @@ export interface InstalledModel {
 }
 
 export interface ProbeResult {
-	backend: "llamacpp" | "laya" | "ollama" | "none";
+	backend: "8j" | "llamacpp" | "laya" | "ollama" | "none";
 	model: string | null;
 	/** Base URL of the chosen backend, null when none or in-process. */
 	url: string | null;
@@ -86,13 +110,16 @@ export interface ProbeOptions {
 }
 
 export function pickModel(installed: InstalledModel[], override?: string): string | null {
-	const usable = installed.filter((m) => m?.name && !EXCLUDE.some((x) => m.name.toLowerCase().includes(x)));
+	const usable = installed.filter(
+		(m) => m?.name && !EXCLUDE.some((x) => m.name.toLowerCase().includes(x)),
+	);
 	if (override) {
 		const hit = usable.find((m) => m.name === override || m.name === `${override}:latest`);
 		if (hit) return hit.name;
 	}
 	const bySize = (a: InstalledModel, b: InstalledModel) =>
-		(a.size ?? Number.MAX_SAFE_INTEGER) - (b.size ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name);
+		(a.size ?? Number.MAX_SAFE_INTEGER) - (b.size ?? Number.MAX_SAFE_INTEGER) ||
+		a.name.localeCompare(b.name);
 	for (const pref of MODEL_PREFERENCE) {
 		const matches = usable.filter((m) => m.name.toLowerCase().includes(pref)).sort(bySize);
 		if (matches.length > 0) return matches[0].name;
@@ -101,7 +128,11 @@ export function pickModel(installed: InstalledModel[], override?: string): strin
 	return rest[0]?.name ?? null;
 }
 
-async function layaUp(fetchImpl: FetchLike, url: string, timeoutMs: number): Promise<string | null> {
+async function layaUp(
+	fetchImpl: FetchLike,
+	url: string,
+	timeoutMs: number,
+): Promise<string | null> {
 	try {
 		const res = await fetchImpl(`${url}/health`, { signal: AbortSignal.timeout(timeoutMs) });
 		if (res.ok) return null;
@@ -111,10 +142,16 @@ async function layaUp(fetchImpl: FetchLike, url: string, timeoutMs: number): Pro
 	}
 }
 
-export async function listOllamaModels(fetchImpl: FetchLike, host: string, timeoutMs: number): Promise<InstalledModel[]> {
+export async function listOllamaModels(
+	fetchImpl: FetchLike,
+	host: string,
+	timeoutMs: number,
+): Promise<InstalledModel[]> {
 	const server = createOllamaServer({ baseUrl: host, fetch: fetchImpl });
 	try {
-		return (await server.listModels({ signal: AbortSignal.timeout(timeoutMs) })) as InstalledModel[];
+		return (await server.listModels({
+			signal: AbortSignal.timeout(timeoutMs),
+		})) as InstalledModel[];
 	} catch (err) {
 		if (err instanceof LocalServerHttpError) throw new Error(`ollama /api/tags ${err.status}`);
 		if (err instanceof LocalServerResponseError) return [];
@@ -159,7 +196,8 @@ async function sharedJudge(
 ): Promise<{ model: string } | { note: string }> {
 	const server = createOllamaServer({ baseUrl: host, fetch: fetchImpl });
 	// The judge reads next-token logprobs from a raw prompt; a server without raw prompts cannot judge.
-	if (!server.capabilities.rawPrompt) return { note: `shared judge: ${server.kind} at ${host} has no raw prompt endpoint` };
+	if (!server.capabilities.rawPrompt)
+		return { note: `shared judge: ${server.kind} at ${host} has no raw prompt endpoint` };
 	let installed: InstalledModel[];
 	try {
 		installed = await listOllamaModels(fetchImpl, host, timeoutMs);
@@ -168,7 +206,9 @@ async function sharedJudge(
 	}
 	if (required) {
 		const hit = installed.find((m) => m?.name === required || m?.name === `${required}:latest`);
-		return hit ? { model: hit.name } : { note: `shared judge at ${host} does not serve ${required}` };
+		return hit
+			? { model: hit.name }
+			: { note: `shared judge at ${host} does not serve ${required}` };
 	}
 	const model = pickModel(installed, env.EIGHT_DECIDE_MODEL);
 	return model ? { model } : { note: `shared judge at ${host} has no usable models installed` };
@@ -181,6 +221,17 @@ export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResul
 	const base = { os: process.platform, arch: process.arch };
 	const notes: string[] = [];
 
+	if (eightJSelected(env)) {
+		try {
+			const url = resolveEightJUrl(env);
+			const model = await eightJHealth(fetchImpl, url, timeoutMs);
+			return { ...base, backend: "8j", model, url, notes };
+		} catch (err) {
+			notes.push(`${(err as Error).message}; 8j was selected, so no other judge is used`);
+			return { ...base, backend: "none", model: null, url: null, notes };
+		}
+	}
+
 	const loader = opts.llamacppLoader === undefined ? defaultLlamaCppLoader : opts.llamacppLoader;
 	// GGUF first: a cheap file check, so the package is only imported when there is a model to load.
 	const gguf = loader ? resolveGguf(env) : null;
@@ -189,7 +240,15 @@ export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResul
 		if (!loader || !gguf) return null;
 		if (gguf.path) {
 			const missing = await llamaCppUnavailable(loader);
-			if (missing === null) return { ...base, backend: "llamacpp", model: gguf.model, url: null, path: gguf.path, notes };
+			if (missing === null)
+				return {
+					...base,
+					backend: "llamacpp",
+					model: gguf.model,
+					url: null,
+					path: gguf.path,
+					notes,
+				};
 			notes.push(missing);
 		} else if (gguf.note) {
 			notes.push(`llamacpp: ${gguf.note}`);
@@ -208,8 +267,15 @@ export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResul
 	// The shared server is Ollama: with another local server selected (#3149), Ollama is off and not asked.
 	if (sharedJudgeEnabled(env) && isOllamaEnabled(env) && !env.EIGHT_DECIDE_GGUF?.trim()) {
 		const host = resolveSharedJudgeHost(env);
-		const shared = await sharedJudge(fetchImpl, host, env, gguf?.path ? gguf.model : null, timeoutMs);
-		if ("model" in shared) return { ...base, backend: "ollama", model: shared.model, url: host, shared: true, notes };
+		const shared = await sharedJudge(
+			fetchImpl,
+			host,
+			env,
+			gguf?.path ? gguf.model : null,
+			timeoutMs,
+		);
+		if ("model" in shared)
+			return { ...base, backend: "ollama", model: shared.model, url: host, shared: true, notes };
 		notes.push(shared.note);
 	}
 
@@ -225,7 +291,13 @@ export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResul
 	const layaUrl = resolveLayaUrl(env);
 	const layaNote = await layaUp(fetchImpl, layaUrl, timeoutMs);
 	if (layaNote === null) {
-		return { ...base, backend: "laya", model: env.EIGHT_DECIDE_MODEL || "laya", url: layaUrl, notes };
+		return {
+			...base,
+			backend: "laya",
+			model: env.EIGHT_DECIDE_MODEL || "laya",
+			url: layaUrl,
+			notes,
+		};
 	}
 	notes.push(layaNote);
 

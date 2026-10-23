@@ -22,7 +22,7 @@ response: { answers: Array<{ id, kind, probabilities, chosen?, confidence }>, ba
 ```ts
 import { createDecider, bashGuard } from "@8gent/decide";
 
-const decide = createDecider(); // auto: in-process llama.cpp, then laya, then Ollama
+const decide = createDecider(); // auto: 8J when EIGHT_8J_URL is set, else in-process llama.cpp, then laya, then Ollama
 const a = await decide.noul("3 of 10 tests pass", "Is the build healthy?");
 const c = await decide.choice(state, "What next?", ["deploy", "fix", "write docs"]);
 const s = await decide.score(state, "How risky?", ["none", "low", "high"]);
@@ -36,6 +36,21 @@ what makes same input give same output: Ollama's float output drifts in the
 
 ## Backends
 
+- **8j** (`backends/eightj.ts`) - 8J, Artale's System One decision model
+  (HF `8GI/8j`, credit to Artale), served on this machine by
+  `serve-8j/serve_8j.py` and spoken to over its model card's
+  `POST /v1/systemone` contract (`GET /health` names the model). Selected by
+  env `EIGHT_8J_URL` (a loopback URL, anything else is refused), which the
+  probe puts ahead of every other judge because naming it is an explicit
+  choice; or by `createDecider({ backend: "8j" })`. Per-question budget
+  `EIGHT_8J_TIMEOUT_MS`, default 5000. **Fails closed:** a timeout, refused
+  connection, 5xx or unusable answer throws, `bashGuard` makes that a block,
+  and with 8J selected the System One gate sends the command to a person
+  (headless: block) instead of the rules-only fallback, so it is never an
+  allow. Selected but down is "none", never a different judge. Thresholds
+  come from `calibration/8j-<model>.json`; without one, default mode treats
+  it as uncalibrated and a person decides every command the rules pass. See
+  `serve-8j/README.md`.
 - **llamacpp** (`backends/llamacpp.ts`) - in-process llama.cpp through
   `node-llama-cpp` 3.22.1, no server. It is an `optionalDependencies` entry,
   imported dynamically: without it installs still work and the probe skips
