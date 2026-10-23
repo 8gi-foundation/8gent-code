@@ -12,6 +12,7 @@ import type { AgentPool } from "../../../../packages/daemon/agent-pool";
 import { startGateway } from "../../../../packages/daemon/gateway";
 import {
 	PROBE_BUDGET_MS,
+	autoAttachAllowed,
 	autoAttachMode,
 	daemonHealthUrl,
 	hasTypedTurn,
@@ -19,13 +20,47 @@ import {
 } from "./daemon-autoattach";
 
 describe("autoAttachMode", () => {
-	it("is auto unless EIGHT_TUI_DAEMON turns it off", () => {
-		expect(autoAttachMode({})).toBe("auto");
-		expect(autoAttachMode({ EIGHT_TUI_DAEMON: "auto" })).toBe("auto");
-		for (const v of ["off", "OFF", "0", "false", "no", " off "]) {
+	it("is off unless EIGHT_TUI_DAEMON opts in", () => {
+		expect(autoAttachMode({})).toBe("off");
+		for (const v of ["auto", "AUTO", "on", "1", "true", "yes", " auto "]) {
+			expect(autoAttachMode({ EIGHT_TUI_DAEMON: v })).toBe("auto");
+		}
+		for (const v of ["off", "0", "false", "no", "nonsense", ""]) {
 			expect(autoAttachMode({ EIGHT_TUI_DAEMON: v })).toBe("off");
 		}
-		expect(autoAttachMode({ EIGHT_TUI_DAEMON: "nonsense" })).toBe("auto");
+	});
+});
+
+describe("auto-attach never leaves this machine (8SO, #4830)", () => {
+	const on = { EIGHT_TUI_DAEMON: "auto" };
+	it("allows the default and loopback urls only", () => {
+		expect(autoAttachAllowed(on)).toBe(true);
+		for (const u of [
+			"ws://127.0.0.1:18790",
+			"ws://localhost:1",
+			"ws://[::1]:18789",
+			"wss://127.0.0.1:2",
+		]) {
+			expect(autoAttachAllowed({ ...on, EIGHT_DAEMON_URL: u })).toBe(true);
+		}
+	});
+	it("refuses a remote host, a lookalike, credentials in the url, a non-socket url and garbage", () => {
+		for (const u of [
+			"ws://example.com:18789",
+			"ws://192.168.1.5:18789",
+			"ws://127.0.0.1.evil.example:18789",
+			"ws://evil.example/127.0.0.1",
+			"ws://user:pw@127.0.0.1:18789",
+			"http://127.0.0.1:18789",
+			"ws://0.0.0.0:18789",
+			"not a url",
+		]) {
+			expect(autoAttachAllowed({ ...on, EIGHT_DAEMON_URL: u })).toBe(false);
+		}
+	});
+	it("is off when not opted in, even for loopback", () => {
+		expect(autoAttachAllowed({})).toBe(false);
+		expect(autoAttachAllowed({ EIGHT_TUI_DAEMON: "off" })).toBe(false);
 	});
 });
 

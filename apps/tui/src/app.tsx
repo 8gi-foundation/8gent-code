@@ -119,7 +119,7 @@ import { useVoiceInput } from "./hooks/useVoiceInput.js";
 import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
 import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
 import {
-	autoAttachMode,
+	autoAttachAllowed,
 	daemonHealthUrl,
 	hasTypedTurn,
 	probeDaemon,
@@ -2963,10 +2963,11 @@ export function App({
 	// Auto-attach (#4829, epic #4792): when a local daemon answers, join it, once per run.
 	// The first screen is already drawn; the probe is bounded (PROBE_BUDGET_MS) and silent
 	// when nothing answers, so a TUI with no daemon behaves exactly as before. A detach
-	// is final for the run (autoSharedRef stays true), and EIGHT_TUI_DAEMON=off skips it.
+	// is final for the run (autoSharedRef stays true). Opt-in (EIGHT_TUI_DAEMON=auto) and
+	// this machine only (8SO, #4830): off by default until approvals for daemon turns land.
 	useEffect(() => {
 		if (!activeSessionId || autoSharedRef.current) return;
-		if (process.env.EIGHT_TUI_SHARE === "1" || autoAttachMode() === "off") return;
+		if (process.env.EIGHT_TUI_SHARE === "1" || !autoAttachAllowed()) return;
 		autoSharedRef.current = true;
 		const sid = activeSessionId;
 		void (async () => {

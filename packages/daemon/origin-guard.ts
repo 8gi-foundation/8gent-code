@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 /**
  * Who may talk to the daemon gateway, checked before any route runs.
@@ -128,6 +128,15 @@ export function presentedToken(req: Request): string | null {
  * Compare two tokens without leaking where or how long they differ: hash both
  * to fixed-length SHA-256 digests, then compare the digests in constant time.
  */
+/**
+ * What a daemon answers to `identify` (#4829): HMAC-SHA256 of a fixed domain string
+ * and the client's nonce, keyed by the daemon's secret. A client that holds the same
+ * secret checks it before it sends a token or a session; a fake server cannot make it.
+ */
+export function daemonProof(secret: string, nonce: string): string {
+	return createHmac("sha256", secret).update(`8gent-daemon-v1:${nonce}`).digest("hex");
+}
+
 export function sameToken(a: unknown, b: string): boolean {
 	if (typeof a !== "string") return false;
 	const x = createHash("sha256").update(a).digest();

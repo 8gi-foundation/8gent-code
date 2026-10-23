@@ -9,8 +9,12 @@
  * only ever sent in the auth frame.
  */
 
+import { timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { dataDirPath } from "../../../../packages/daemon/data-dir";
+import { readTokenFile } from "../../../../packages/daemon/local-link";
+import { daemonProof } from "../../../../packages/daemon/origin-guard";
 
 export const DEFAULT_DAEMON_URL = "ws://127.0.0.1:18789";
 
@@ -115,6 +119,19 @@ export function readDaemonToken(home = process.env.HOME || ""): string | null {
 	}
 }
 
+/**
+ * The secret a daemon proves its identity with, and that this TUI then sends as its token
+ * (#4829): EIGHT_DAEMON_TOKEN, the config token, or the daemon's own 0600 token file in
+ * this machine's data directory. Null when there is none, and then nothing connects:
+ * a daemon that cannot be verified is never sent a token or a session.
+ */
+export function resolveDaemonSecret(home = process.env.HOME || ""): string | null {
+	return (
+		readDaemonToken(home) ??
+		readTokenFile(process.env.EIGHT_DATA_DIR ? dataDirPath() : path.join(home, ".8gent"))
+	);
+}
+
 /** The live anatomy page (#4190) on the daemon this TUI talks to. Never carries the token. */
 export function liveViewUrl(env: Record<string, string | undefined> = process.env): string {
 	const u = new URL(env.EIGHT_DAEMON_URL ?? DEFAULT_DAEMON_URL);
@@ -209,15 +226,45 @@ export class DaemonSessionClient {
 			};
 		});
 		const client = new DaemonSessionClient(ws, timeoutMs);
-		const token = opts.token === undefined ? readDaemonToken() : opts.token;
-		if (token) {
-			const r = await client.request({ type: "auth", token }, ["auth:ok", "auth:fail"]);
-			if (r.type !== "auth:ok") {
-				client.close();
-				throw new Error("the 8gent daemon refused the token");
+		const secret = opts.token === undefined ? resolveDaemonSecret() : opts.token;
+		try {
+			if (!secret) {
+				throw new Error(
+					"no token to verify this daemon with. Start it once with `8gent daemon`, or set EIGHT_DAEMON_TOKEN",
+				);
 			}
+			// The daemon proves it holds the secret BEFORE this client sends the token or a
+			// session: whatever else answers on the port learns nothing.
+			await client.verifyDaemon(secret);
+			const r = await client.request({ type: "auth", token: secret }, ["auth:ok", "auth:fail"]);
+			if (r.type !== "auth:ok") throw new Error("the 8gent daemon refused the token");
+		} catch (err) {
+			client.close();
+			throw err;
 		}
 		return client;
+	}
+
+	/** Challenge the daemon: it must answer HMAC(secret, nonce). Throws unless it does. */
+	private async verifyDaemon(secret: string): Promise<void> {
+		const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+			b.toString(16).padStart(2, "0"),
+		).join("");
+		let proof: unknown;
+		try {
+			proof = (await this.request({ type: "identify", nonce }, ["identify:ok"])).proof;
+		} catch {
+			throw new Error(
+				"this daemon could not prove who it is. Restart it with the current 8gent, or check the port",
+			);
+		}
+		const want = Buffer.from(daemonProof(secret, nonce));
+		const got = Buffer.from(typeof proof === "string" ? proof : "");
+		if (got.length !== want.length || !timingSafeEqual(got, want)) {
+			throw new Error(
+				"this is not your 8gent daemon (its identity check failed); nothing was sent",
+			);
+		}
 	}
 
 	/** Send a frame and wait for the first reply of one of `types`, or an error frame. */

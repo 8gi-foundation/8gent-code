@@ -9,6 +9,7 @@ import { logAccess } from "../audit/index";
 import type { LogAccessInput } from "../audit/types";
 import { SessionManager, defaultSessionsDir } from "../eight/session-manager";
 import { handleHarnessRoute } from "../harness/http";
+import { runWithoutApprovalSurface } from "../permissions/index";
 import {
 	SPEAK_URL_RE,
 	TableStore,
@@ -42,6 +43,7 @@ import {
 } from "./live-anatomy";
 import {
 	assertSafeBind,
+	daemonProof,
 	guardRequest,
 	isLoopbackHost,
 	requireToken,
@@ -89,6 +91,11 @@ import {
 export interface GatewayConfig {
 	port: number;
 	authToken: string | null; // null = no auth required
+	/**
+	 * The secret the daemon proves its identity with (#4829) when authToken is not set:
+	 * the operator token from <dataDir>/daemon.token. Never sent, only used as an HMAC key.
+	 */
+	operatorToken?: string | null;
 	pool: AgentPool;
 	/** Optional dispatch deps. When omitted, /dispatch route returns 503. */
 	dispatch?: {
@@ -129,6 +136,8 @@ interface ClientState {
 
 type InboundMessage =
 	| { type: "auth"; token: string; participantId?: string }
+	/** The daemon proves it holds the secret before a client sends its token (#4829). */
+	| { type: "identify"; nonce: string }
 	/** persist: true saves the session after every turn (#3929), so it can be resumed later. */
 	| { type: "session:create"; channel: string; persist?: boolean }
 	| { type: "session:resume"; sessionId: string; channel?: string; resumeSecret?: string }
@@ -171,6 +180,7 @@ type OutboundMessage =
 			/** Slash names the daemon's input gate accepts; prefer over any local copy. */
 			commands?: string[];
 	  }
+	| { type: "identify:ok"; proof: string }
 	| { type: "session:resumed"; sessionId: string; capabilities?: string[]; commands?: string[] }
 	| { type: "sessions:list"; sessions: unknown[] }
 	| { type: "cron:list"; jobs: unknown[] }
@@ -296,6 +306,20 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 		msg = JSON.parse(raw);
 	} catch {
 		send(ws, { type: "error", message: "invalid JSON" });
+		return;
+	}
+
+	// Identity proof (#4829): answered before auth, because the client must see it
+	// before it sends a token. HMAC(secret, domain + nonce): reveals nothing of the secret.
+	if (msg.type === "identify") {
+		const secret = config.authToken ?? config.operatorToken ?? null;
+		if (!secret) {
+			send(ws, { type: "error", message: "this daemon has no identity secret" });
+		} else if (typeof msg.nonce !== "string" || !/^[0-9a-f]{32,128}$/.test(msg.nonce)) {
+			send(ws, { type: "error", message: "identify needs a hex nonce of 32 to 128 characters" });
+		} else {
+			send(ws, { type: "identify:ok", proof: daemonProof(secret, msg.nonce) });
+		}
 		return;
 	}
 
@@ -553,9 +577,12 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			// client that merely resumed the session cannot.
 			const turn = state.approvalBridge ? parseTurn(msg.turn) : undefined;
 			if (typeof msg.text === "string") echoPrompt(ws, sid, msg.text, state.channel);
+			// A turn for a TUI runs here with no card to show: anything that needs a yes is
+			// refused, never auto-approved (#4829). A bridge turn binds its own approver.
+			const noCard = state.channel === "tui" || pool.getSessionInfo(sid)?.channel === "tui";
 			const runModelTurn = (): void => {
-				pool
-					.chat(sid, msg.text, turn)
+				const run = () => pool.chat(sid, msg.text, turn);
+				(noCard ? runWithoutApprovalSurface(run) : run())
 					.then((response) => {
 						// Final response - signal session:end for this turn
 						bus.emit("session:end", { sessionId: sid, reason: "turn-complete" });

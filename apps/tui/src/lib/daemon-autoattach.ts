@@ -4,8 +4,12 @@
  * The decision and the probe live here, pure and injectable, so app.tsx only
  * wires them. Design: docs/specs/TUI-DAEMON-CLIENT.md section 6.
  *
- *   EIGHT_TUI_DAEMON=off   never auto-attach (anything else means auto)
- *   EIGHT_DAEMON_URL       which daemon to look for, default ws://127.0.0.1:18789
+ *   EIGHT_TUI_DAEMON=auto  opt in (auto, on, 1, true, yes). Off by default until approvals
+ *                          for daemon turns land (design slice 3): a daemon-run turn refuses
+ *                          any command that needs a card.
+ *   EIGHT_DAEMON_URL       which daemon to look for, default ws://127.0.0.1:18789. Auto-attach
+ *                          only ever goes to this machine (127.0.0.1, ::1, localhost); a
+ *                          remote daemon needs an explicit /sessions link.
  */
 
 import { DEFAULT_DAEMON_URL } from "./daemon-sessions";
@@ -19,7 +23,29 @@ export function autoAttachMode(
 	env: Record<string, string | undefined> = process.env,
 ): AutoAttachMode {
 	const v = (env.EIGHT_TUI_DAEMON ?? "").trim().toLowerCase();
-	return v === "off" || v === "0" || v === "false" || v === "no" ? "off" : "auto";
+	return ["auto", "on", "1", "true", "yes"].includes(v) ? "auto" : "off";
+}
+
+/** Is the daemon url this machine? Auto-attach never leaves it (8SO, #4830). */
+export function isLoopbackDaemonUrl(
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	try {
+		const u = new URL(env.EIGHT_DAEMON_URL ?? DEFAULT_DAEMON_URL);
+		return (
+			(u.protocol === "ws:" || u.protocol === "wss:") &&
+			["127.0.0.1", "localhost", "[::1]"].includes(u.hostname) &&
+			!u.username &&
+			!u.password
+		);
+	} catch {
+		return false;
+	}
+}
+
+/** Should the TUI try to attach on its own? Opted in, and the daemon is on this machine. */
+export function autoAttachAllowed(env: Record<string, string | undefined> = process.env): boolean {
+	return autoAttachMode(env) === "auto" && isLoopbackDaemonUrl(env);
 }
 
 /** The daemon's /health url, from its socket url. The token (query or fragment) is dropped. */
