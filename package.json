@@ -138,6 +138,9 @@
     "zod": "^4.3.6"
   },
   "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-durable": "1.4.0",
     "ink": "^6.8.0",
     "jsdom": "^28.1.0",
     "mermaid": "^11.16.1"
