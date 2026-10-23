@@ -9,6 +9,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.19] - 2026-10-23
+
+### Added
+- tui: one yes gate for yolo mode, remembered, no per-turn y ([#4790](https://github.com/8gi-foundation/8gent-code/pull/4790))
+
+### Fixed
+- tui: a recovered provider re-arms its fallback notice (#4787) ([#4789](https://github.com/8gi-foundation/8gent-code/pull/4789))
+- tui: say each fallback notice once per session, not every turn ([#4786](https://github.com/8gi-foundation/8gent-code/pull/4786))
+
 ## [0.20.18] - 2026-10-22
 
 ### Added
