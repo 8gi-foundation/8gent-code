@@ -62,6 +62,8 @@ const PROTECTED_HOME_FILES = [
 	// Agent audit files: the record of what agent tools did is not for agent tools to change (#3735).
 	[".8gent", "audit.jsonl"],
 	[".8gent", "permissions-audit.jsonl"],
+	// The saved yolo answer: a tool that could write it would turn off the cards for itself (8SO).
+	[".8gent", "yolo.json"],
 ];
 
 /**
@@ -84,7 +86,7 @@ const AUDIT_DATA_DIR_FILES = ["audit.jsonl", "permissions-audit.jsonl"];
  * installed package code. Tool calls may read these but never write, delete or move them.
  * EIGHT_HOOKS_YAML, when set, names the hooks file and is protected the same way.
  */
-export const STARTUP_CODE_FILES = ["hooks.yaml", "hooks.json"];
+export const STARTUP_CODE_FILES = ["hooks.yaml", "hooks.json", "yolo.json"];
 export const STARTUP_CODE_DIRS = ["extensions", "prompts", "packages"];
 
 /** Basenames that always indicate a credential file regardless of location. */

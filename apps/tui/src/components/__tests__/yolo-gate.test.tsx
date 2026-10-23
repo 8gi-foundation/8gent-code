@@ -14,6 +14,7 @@ import {
 	requestTuiApproval,
 } from "../../../../../packages/permissions/tui-approval-channel.js";
 import {
+	CARD_MIN_SHOW_MS,
 	_resetApprovalCard,
 	isApprovalKeyClaimed,
 	useApprovalCard,
@@ -133,7 +134,10 @@ describe("yolo gate", () => {
 		await waitFor(() => frame().includes("Enable yolo mode?"), "gate shown");
 		expect(frame()).toContain("[Y] yes");
 		expect(frame()).not.toContain("[E] edit");
-		await tick(20);
+		stdin.feed(key); // typed as the card appears: ignored
+		await tick(40);
+		expect(answers).toEqual([]);
+		await tick(CARD_MIN_SHOW_MS + 100);
 		stdin.feed("e"); // not a gate key: nothing answers
 		await tick(40);
 		expect(answers).toEqual([]);

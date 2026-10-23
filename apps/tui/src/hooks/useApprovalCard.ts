@@ -144,6 +144,16 @@ export function settleApprovalKey(input: string, key: KeyLike, screen?: Sized): 
 			return false;
 		}
 	}
+	// The yolo question takes no key until it has been up CARD_MIN_SHOW_MS: a y
+	// typed for the chat as it appeared must not turn yolo on. An early key is
+	// claimed and ignored, and restarts the wait.
+	if (card.gate) {
+		const now = Date.now();
+		if (now - (card.shownSince ?? 0) < CARD_MIN_SHOW_MS) {
+			card.shownSince = now;
+			return decision !== null;
+		}
+	}
 	if (!decision) return false;
 	card.resolve(decision);
 	return true;
@@ -205,6 +215,7 @@ export function useApprovalCard(
 					target: YOLO_QUESTION,
 					reason: "First time:",
 					gate: true,
+					shownSince: Date.now(),
 					resolve: (decision) => {
 						if (decision !== "approve" && decision !== "deny") return;
 						yoloRef.current?.answer(decision === "approve");
