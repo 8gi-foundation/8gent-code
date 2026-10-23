@@ -358,6 +358,30 @@ describe("interpreter program text is scanned by class, not by well-formed quote
 	}
 });
 
+describe("round 3: implicit literal joins and one-character separators", () => {
+	for (const command of [
+		`python3 -c "print(open('..' '/outside/secret.txt').read())"`,
+		`python3 -c "print(open('..''/outside/secret.txt').read())"`,
+	]) {
+		test(`refused: ${command}`, async () => {
+			expect(await verdict(command)).toBe("refused");
+			expect(cards.length).toBeGreaterThan(0);
+		});
+	}
+	for (const command of [
+		"cut -d/ -f2 inside.txt",
+		"sort -t/ -k2 inside.txt",
+		"tr -d/ < inside.txt",
+		"awk -F/ '{print $2}' inside.txt",
+		"awk -F'/' '{print $2}' inside.txt",
+	]) {
+		test(`runs: ${command}`, async () => {
+			expect(await verdict(command)).toBe("ran");
+			expect(cards).toEqual([]);
+		});
+	}
+});
+
 describe("known gaps of a lexical check (a kernel read rule is the answer)", () => {
 	test("a path built at run time is not seen, and this test says so", async () => {
 		for (const command of [

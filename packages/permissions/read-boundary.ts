@@ -252,10 +252,12 @@ export function interpreterProgramPaths(
 	const home = env.HOME || os.homedir();
 	const out: string[] = [];
 	for (const t of tokens) {
-		const blob = decodeStringEscapes(t.replaceAll('"', "").replaceAll("`", "")).replace(
-			/\$\{?HOME\}?/g,
-			home,
-		);
+		// Adjacent literals join (python and awk concatenate implicitly): `'..' '/x'`, `"..""/x"`.
+		const joined = t
+			.replace(/["']\s*["']/g, "")
+			.replaceAll('"', "")
+			.replaceAll("`", "");
+		const blob = decodeStringEscapes(joined).replace(/\$\{?HOME\}?/g, home);
 		for (const m of blob.matchAll(CODE_DANGER)) {
 			const p = m[0];
 			if (p === "/" || p === "~/") continue;
@@ -363,7 +365,8 @@ export function pathWords(
 		const opt = /^(?:--?[A-Za-z][\w-]*|[A-Za-z_]\w*)=(.*)$/.exec(w);
 		if (opt) w = opt[1] as string;
 		const glued = /^-[A-Za-z]((?:~\/|\.\.?\/|\/).*)$/.exec(w);
-		if (glued) w = glued[1] as string;
+		// A one-character remainder is a separator (`cut -d/`, `awk -F/`), not a path.
+		if (glued && (glued[1] as string).length > 1) w = glued[1] as string;
 		const url = /^file:\/\/([^?#]*)/.exec(w);
 		if (url) {
 			try {
