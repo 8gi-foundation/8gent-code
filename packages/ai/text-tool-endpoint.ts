@@ -31,6 +31,7 @@ import {
 	resolveOllamaBaseUrl,
 } from "../local-model-server/ollama-host";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
+import { noteStreamText } from "../specifications/session/durable-ledger";
 import { type ModelFetchTimers, modelFetch } from "./model-fetch";
 import { OutputCapError, type TextToolReply } from "./text-tool-client";
 import type { TextTool } from "./text-tool-loop";
@@ -686,7 +687,10 @@ export async function readStreamedChatCompletion(res: Response): Promise<{
 		if (!choice) continue;
 		if (choice.finish_reason != null) finishReason = choice.finish_reason;
 		const delta = choice.delta ?? {};
-		if (typeof delta.content === "string") content += delta.content;
+		if (typeof delta.content === "string") {
+			content += delta.content;
+			noteStreamText(delta.content); // durable turns slice 2: a kill mid-stream keeps this
+		}
 		if (!Array.isArray(delta.tool_calls)) continue;
 		for (const [n, raw] of (delta.tool_calls as Array<Record<string, unknown>>).entries()) {
 			const idx = raw?.index;
@@ -742,7 +746,10 @@ export async function readStreamedGenerate(res: Response): Promise<Record<string
 			continue;
 		}
 		if (obj?.error != null) throw new StreamedReplyError(obj.error);
-		if (typeof obj?.response === "string") response += obj.response;
+		if (typeof obj?.response === "string") {
+			response += obj.response;
+			noteStreamText(obj.response); // durable turns slice 2
+		}
 		last = obj;
 	}
 	if (last.done !== true) throw new StreamedReplyError("stream ended before a done: true line");

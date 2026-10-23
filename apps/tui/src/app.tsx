@@ -446,8 +446,15 @@ import type {
 import { providerRouteNotice, shouldShowRouteNotice } from "../../../packages/eight/run.js";
 import { isReadOnlyTool } from "../../../packages/eight/tool-registry.js";
 import {
+	closeTurn,
+	continuePrompt,
+	cutOffNotice,
+	flushText,
 	interruptedCalls,
+	isCutOffError,
 	isDurableEnabled,
+	lastTurn,
+	noteTurnEnd,
 	planResume,
 	resolveInterrupted,
 	resumeNotice,
@@ -2737,7 +2744,11 @@ export function App({
 	useEffect(() => {
 		setDurableSession(activeSessionId);
 		if (!durableOn || !activeSessionId) return;
-		const notice = resumeNotice(planResume(interruptedCalls(activeSessionId), isReadOnlyTool));
+		// Slice 2: a turn cut off with no tool open (killed mid model call, 4G drop
+		// mid-stream) is offered "continue where it stopped", its partial text kept.
+		const notice =
+			cutOffNotice(lastTurn(activeSessionId)) ??
+			resumeNotice(planResume(interruptedCalls(activeSessionId), isReadOnlyTool));
 		if (notice) addSystemMessage(notice);
 	}, [activeSessionId, durableOn, addSystemMessage]);
 	const submitRef = useRef<((text: string) => Promise<void>) | null>(null);
@@ -4157,9 +4168,17 @@ export function App({
 						);
 						break;
 					}
-					if ((sub === "retry" || sub === "skip") && activeSessionId) {
+					if ((sub === "continue" || sub === "retry" || sub === "skip") && activeSessionId) {
+						// Slice 2: an open turn continues from its ledger, finished calls not repeated.
+						const turn = lastTurn(activeSessionId);
+						if (turn) {
+							closeTurn(activeSessionId, sub === "skip" ? "skip" : "continue");
+							if (sub === "skip") addSystemMessage("Left the cut-off turn as it is.");
+							else void submitRef.current?.(continuePrompt(turn, isReadOnlyTool));
+							break;
+						}
 						const plan = planResume(interruptedCalls(activeSessionId), isReadOnlyTool);
-						const n = resolveInterrupted(activeSessionId, sub);
+						const n = resolveInterrupted(activeSessionId, sub === "skip" ? "skip" : "retry");
 						if (n === 0) {
 							addSystemMessage("Nothing was interrupted.");
 							break;
@@ -4171,7 +4190,7 @@ export function App({
 						void submitRef.current?.(retryPrompt(plan));
 						break;
 					}
-					addSystemMessage("Usage: /durable [on|off|retry|skip]");
+					addSystemMessage("Usage: /durable [on|off|continue|retry|skip]");
 					break;
 				}
 
@@ -7246,6 +7265,7 @@ export function App({
 						return;
 					}
 					perTabAgents.clearPromise(tabId);
+					noteTurnEnd(); // durable turns: the turn finished, nothing to continue
 					setVerificationByTab((v) => ({
 						...v,
 						[tabId]: targetAgent.getVerification() ?? undefined,
@@ -7308,12 +7328,19 @@ export function App({
 				} catch (err) {
 					const errorMsg = err instanceof Error ? err.message : String(err);
 					logError(tabId, tabTitle, errorMsg);
+					// Durable turns slice 2: a dropped connection leaves the turn open and
+					// offers to continue it; any other error ends it.
+					const cutOff = isDurableEnabled() && isCutOffError(err);
+					if (cutOff) flushText();
+					else noteTurnEnd();
 					appendToTab(tabId, {
 						id: `assistant-error-${Date.now()}`,
 						role: "assistant" as const,
 						content: `[Error] ${errorMsg}`,
 						timestamp: new Date(),
 					});
+					const cut = cutOff && activeSessionId ? cutOffNotice(lastTurn(activeSessionId)) : null;
+					if (cut) addSystemMessage(`Connection dropped.\n${cut}`);
 					if (tabId === activeTabId) {
 						setStatus("error");
 						setTimeout(() => setStatus("idle"), 3000);
