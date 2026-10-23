@@ -1,0 +1,11 @@
+{
+	"title": "CISA KEV",
+	"vulnerabilities": [
+		{
+			"cveID": "CVE-2020-8203",
+			"dateAdded": "2022-01-01",
+			"knownRansomwareCampaignUse": "Unknown"
+		},
+		{ "cveID": "CVE-2099-0001" }
+	]
+}

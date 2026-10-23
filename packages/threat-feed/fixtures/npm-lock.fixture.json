@@ -1,0 +1,10 @@
+{
+	"name": "d",
+	"lockfileVersion": 3,
+	"packages": {
+		"": { "name": "d" },
+		"node_modules/minimist": { "version": "1.2.5", "dev": true },
+		"node_modules/a/node_modules/@s/b": { "version": "2.0.0" },
+		"node_modules/linked": { "link": true, "resolved": "../x" }
+	}
+}

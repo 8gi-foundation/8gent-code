@@ -1,0 +1,11 @@
+[[package]]
+name = "Jinja2"
+version = "2.10"
+description = "x"
+
+[package.dependencies]
+MarkupSafe = ">=0.23"
+
+[[package]]
+name = "markupsafe"
+version = "1.0"
