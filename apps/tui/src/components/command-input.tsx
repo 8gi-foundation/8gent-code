@@ -26,6 +26,7 @@ import {
 	getBuiltInSlashRegistry,
 	getSlashRegistry,
 	isBareSlash,
+	nearestNames,
 	resolveSlashInput,
 	slashCollisionNotice,
 	toGhostSuggestions,
@@ -764,7 +765,18 @@ export function slashMenuRows(filter: string, entries: SlashRegistryEntry[]): Sl
 		return entries.filter(isCoreEntry).toSorted((a, b) => a.name.localeCompare(b.name));
 	}
 	const matches = entries.filter((entry) => entry.name.toLowerCase().startsWith(f));
-	return [...matches.filter(isCoreEntry), ...matches.filter((e) => !isCoreEntry(e))];
+	if (matches.length > 0) {
+		return [...matches.filter(isCoreEntry), ...matches.filter((e) => !isCoreEntry(e))];
+	}
+	// Nothing starts with it: show the closest instead of an empty menu.
+	const near = new Set(
+		nearestNames(
+			f,
+			entries.map((e) => e.name),
+			5,
+		),
+	);
+	return entries.filter((e) => near.has(e.name.toLowerCase()));
 }
 
 export const SLASH_MENU_ROWS = 14;

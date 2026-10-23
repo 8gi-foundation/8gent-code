@@ -302,6 +302,41 @@ const defaultLookups: SlashHandlerLookups = {
  * template matching, read fresh. A path-like line such as `/Users/x/file`
  * matches none of these and gets the local answer.
  */
+/** Edit distance (Levenshtein), small inputs only. */
+export function editDistance(a: string, b: string): number {
+	const prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+	for (let i = 1; i <= a.length; i++) {
+		let diag = prev[0];
+		prev[0] = i;
+		for (let j = 1; j <= b.length; j++) {
+			const up = prev[j];
+			prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+			diag = up;
+		}
+	}
+	return prev[b.length];
+}
+
+/**
+ * Nearest names to a typed one: prefix matches first, then substring matches,
+ * then names within a small edit distance. At most `limit`, no duplicates.
+ */
+export function nearestNames(typed: string, names: readonly string[], limit = 3): string[] {
+	const t = typed.toLowerCase().replace(/^\//, "");
+	if (!t) return [];
+	const uniq = [...new Set(names.map((n) => n.toLowerCase().replace(/^\//, "")))].filter(Boolean);
+	const prefix = uniq.filter((n) => n.startsWith(t));
+	const sub = uniq.filter((n) => !n.startsWith(t) && n.includes(t));
+	const maxDist = t.length <= 4 ? 1 : 2;
+	const fuzzy = uniq
+		.filter((n) => !n.startsWith(t) && !n.includes(t))
+		.map((n) => ({ n, d: editDistance(t, n) }))
+		.filter((x) => x.d <= maxDist)
+		.toSorted((a, b) => a.d - b.d)
+		.map((x) => x.n);
+	return [...prefix, ...sub, ...fuzzy].slice(0, limit);
+}
+
 export async function unknownSlashAnswer(
 	input: string,
 	registry: SlashRegistry,
@@ -316,7 +351,13 @@ export async function unknownSlashAnswer(
 	if (/^\/skill:/.test(name)) return null;
 	if (await lookups.skillExists(name.slice(1))) return null;
 	if (lookups.templateMatches(trimmed)) return null;
-	return `Unknown command ${name}. Type /help.`;
+	const known = [
+		...registry.entries.map((e) => e.name),
+		...buildBuiltInEntries().map((e) => e.name),
+	];
+	const near = nearestNames(name, known);
+	const hint = near.length ? ` Did you mean ${near.map((n) => `/${n}`).join(", ")}?` : "";
+	return `Unknown command ${name}.${hint} Type /help.`;
 }
 
 export function toGhostSuggestions(registry: SlashRegistry): {

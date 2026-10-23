@@ -192,12 +192,11 @@ describe("unknownSlashAnswer (#4530)", () => {
 	const empty = { entries: [], byToken: new Map(), collisions: [] };
 
 	test("an unknown slash line gets the local answer, leading whitespace included", async () => {
-		expect(await unknownSlashAnswer("/nope", loaded, none)).toBe(
-			"Unknown command /nope. Type /help.",
-		);
-		expect(await unknownSlashAnswer("  /nope with args", loaded, none)).toBe(
-			"Unknown command /nope. Type /help.",
-		);
+		for (const line of ["/nope", "  /nope with args"]) {
+			const out = (await unknownSlashAnswer(line, loaded, none)) ?? "";
+			expect(out.startsWith("Unknown command /nope.")).toBeTrue();
+			expect(out.endsWith("Type /help.")).toBeTrue();
+		}
 	});
 
 	test("a bare slash is never an error: it is the help request (#4703)", async () => {

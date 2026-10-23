@@ -623,15 +623,44 @@ export function builtInCommandsCoreFirst(
 export const MOUSE_HELP =
 	"Mouse: drag to select and copy, double click a word, triple click a line, Esc clears.\n  To use your terminal's own selection instead: Option-drag (iTerm2, Terminal.app), Shift-drag (most Linux terminals, Windows Terminal).";
 
+/** Short tip for touch screens: no desktop terminal names. */
+export const TOUCH_HELP = "Touch: long-press to select, Esc clears.";
+
+/** Below this many columns /help shows a short list. */
+export const NARROW_HELP_COLUMNS = 60;
+
+export interface HelpEnv {
+	columns?: number;
+	/** Android or Termux: drop desktop-only tips. */
+	android?: boolean;
+	/** False in installed builds, where /debug has no script to run. */
+	hasDebug?: boolean;
+}
+
+export function isAndroidEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+	return Boolean(env.TERMUX_VERSION) || process.platform === ("android" as string);
+}
+
 /** The /help text. Core commands by default; `all` lists every built-in. */
-export function formatSlashHelp(all: boolean): string {
+export function formatSlashHelp(all: boolean, env: HelpEnv = {}): string {
+	const narrow = (env.columns ?? 80) < NARROW_HELP_COLUMNS;
+	const pool =
+		env.hasDebug === false
+			? BUILT_IN_SLASH_COMMANDS.filter((c) => c.name !== "debug")
+			: BUILT_IN_SLASH_COMMANDS;
 	const rows = all
-		? builtInCommandsCoreFirst()
-		: BUILT_IN_SLASH_COMMANDS.filter((c) => isCoreSlashCommand(c.name));
-	const lines = rows.map((c) => `  ${c.usage ?? `/${c.name}`} - ${c.description}`);
-	const hidden = BUILT_IN_SLASH_COMMANDS.length - rows.length;
+		? builtInCommandsCoreFirst(pool)
+		: pool.filter((c) => isCoreSlashCommand(c.name));
+	const line = (c: BuiltInSlashCommandDef) =>
+		narrow ? `  /${c.name}` : `  ${c.usage ?? `/${c.name}`} - ${c.description}`;
+	const lines = narrow ? [`  ${rows.map((c) => `/${c.name}`).join(" ")}`] : rows.map(line);
+	const hidden = pool.length - rows.length;
 	const tail = all
-		? "  /<skill> ... - Any loaded skill name or alias expands to its prompt\n  /<template> ... - A Markdown file in ~/.8gent/prompts, sent with $1, $@ filled in"
+		? narrow
+			? "  /<skill> or /<template> also work"
+			: "  /<skill> ... - Any loaded skill name or alias expands to its prompt\n  /<template> ... - A Markdown file in ~/.8gent/prompts, sent with $1, $@ filled in"
 		: `  /help all - Show ${hidden} more commands`;
-	return `${all ? "All commands" : "Core commands"}:\n${lines.join("\n")}\n${tail}\n${MOUSE_HELP}`;
+	const tips = env.android ? TOUCH_HELP : narrow ? "" : MOUSE_HELP;
+	const body = `${all ? "All commands" : "Core commands"}:\n${lines.join("\n")}\n${tail}`;
+	return tips ? `${body}\n${tips}` : body;
 }
