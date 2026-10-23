@@ -407,6 +407,11 @@ import {
 	systemOneEnvFor,
 } from "../../../packages/permissions/permission-mode.js";
 import { runAllowReadCommand } from "../../../packages/permissions/read-allow.js";
+import {
+	parseYoloArgs,
+	readYoloChoice,
+	writeYoloChoice,
+} from "../../../packages/permissions/yolo-pref.js";
 import { usePermToast } from "./hooks/usePermToast.js";
 import { HERDR_ID_PREFIX, runHerdrCommand } from "./lib/herdr.js";
 import {
@@ -1634,13 +1639,23 @@ export function App({
 	// tab builds shares it, so Shift+Tab changes this tab's next tool call and
 	// never another tab's. Tabs start in the launch mode: Infinite when the
 	// CLI turned the process-wide flag on (--infinite), else Ask.
-	const [launchPermMode] = useState<PermissionMode>(() => (isInfiniteMode() ? "infinite" : "ask"));
+	// A saved yes to the one yolo question (yolo-pref.ts) also starts tabs in
+	// Infinite, held for the session. Read once; a change lives in this ref.
+	const yoloRef = useRef(readYoloChoice());
+	const [launchPermMode] = useState<PermissionMode>(() =>
+		isInfiniteMode() || yoloRef.current === "yes" ? "infinite" : "ask",
+	);
 	const permHoldersRef = useRef(new Map<string, PermissionModeHolder>());
 	const permHolderFor = useCallback(
 		(tabId: string): PermissionModeHolder => {
 			let holder = permHoldersRef.current.get(tabId);
 			if (!holder) {
-				holder = createPermissionHolder(launchPermMode);
+				holder = createPermissionHolder(
+					launchPermMode,
+					undefined,
+					Date.now(),
+					yoloRef.current === "yes",
+				);
 				permHoldersRef.current.set(tabId, holder);
 			}
 			return holder;
@@ -1649,8 +1664,8 @@ export function App({
 	);
 	const [, setPermTick] = useState(0);
 	const setTabPermMode = useCallback(
-		(tabId: string, mode: PermissionMode) => {
-			setHolderMode(permHolderFor(tabId), mode);
+		(tabId: string, mode: PermissionMode, yolo = false) => {
+			setHolderMode(permHolderFor(tabId), mode, Date.now(), yolo);
 			setPermTick((n) => n + 1);
 		},
 		[permHolderFor],
@@ -2079,7 +2094,16 @@ export function App({
 	// and lights the ASK chip in HeaderBar. The hook registers the approval
 	// handler and routes Y/N/E/S to the card, never to the chat input (#3055).
 	// Headless callers see no handler and PermissionManager falls back to stdin.
-	const approvalPending = useApprovalCard();
+	const activeTabIdRef = useRef(activeTabId);
+	activeTabIdRef.current = activeTabId;
+	const approvalPending = useApprovalCard(undefined, {
+		needed: () => yoloRef.current === undefined && !isInfiniteMode(),
+		answer: (yes) => {
+			yoloRef.current = yes ? "yes" : "no";
+			writeYoloChoice(yoloRef.current);
+			if (yes) setTabPermMode(activeTabIdRef.current, "infinite", true);
+		},
+	});
 
 	// A short confirmation in the footer's hint slot for 2 s: a mouse
 	// selection copied text (#3239), or a toggle that draws nothing else
@@ -4239,6 +4263,20 @@ export function App({
 				case "mode": {
 					// This tab's permission mode by name, for keyboards with no
 					// Shift+Tab (Termux). Same switch, line and toast as the key.
+					// `yolo` is Infinite held for the session and remembered; `yolo off`
+					// goes back to Ask and remembers that.
+					const yolo = parseYoloArgs(args);
+					if (yolo) {
+						yoloRef.current = yolo === "on" ? "yes" : "no";
+						writeYoloChoice(yoloRef.current);
+						setTabPermMode(activeTabId, yolo === "on" ? "infinite" : "ask", yolo === "on");
+						const shown = permView(permHolderFor(activeTabId));
+						addSystemMessage(
+							`${permSwitchLine(shown.mode, shown.held)}\nYolo ${yolo}. Saved; change with /mode yolo${yolo === "on" ? " off" : ""}.`,
+						);
+						showPermToast({ tabId: activeTabId, ...shown });
+						break;
+					}
 					const next = parseModeArgs(args);
 					if (!next) {
 						addSystemMessage(`${permSwitchLine(activePermMode)}\n${MODE_USAGE}`);
@@ -8060,6 +8098,7 @@ export function App({
 									target={approvalPending.target}
 									reason={approvalPending.reason}
 									full={approvalPending.full}
+									gate={approvalPending.gate}
 								/>
 							)}
 

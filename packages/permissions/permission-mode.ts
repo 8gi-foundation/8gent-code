@@ -82,6 +82,8 @@ export interface PermissionModeHolder {
 	mode: PermissionMode;
 	/** When this holder entered infinite; drives the 30 minute expiry. */
 	infiniteSince?: number;
+	/** Yolo (the user said yes once): infinite never expires. Cleared by any switch. */
+	persistent?: boolean;
 	/** A child's parent: the child is never more permissive than it. */
 	parent?: PermissionModeHolder;
 }
@@ -90,9 +92,13 @@ export function createPermissionHolder(
 	mode: PermissionMode,
 	parent?: PermissionModeHolder,
 	now: number = Date.now(),
+	persistent = false,
 ): PermissionModeHolder {
 	const holder: PermissionModeHolder = { mode, parent };
-	if (mode === "infinite") holder.infiniteSince = now;
+	if (mode === "infinite") {
+		holder.infiniteSince = now;
+		if (persistent) holder.persistent = true;
+	}
 	return holder;
 }
 
@@ -102,10 +108,12 @@ export function createChildHolder(
 	requested?: PermissionMode,
 	now: number = Date.now(),
 ): PermissionModeHolder {
+	const mode = clampChildMode(effectivePermissionMode(parent, now), requested);
 	return createPermissionHolder(
-		clampChildMode(effectivePermissionMode(parent, now), requested),
+		mode,
 		parent,
 		now,
+		mode === "infinite" && parent.persistent === true,
 	);
 }
 
@@ -113,9 +121,11 @@ export function setHolderMode(
 	holder: PermissionModeHolder,
 	mode: PermissionMode,
 	now: number = Date.now(),
+	persistent = false,
 ): void {
 	if (mode === "infinite" && holder.mode !== "infinite") holder.infiniteSince = now;
 	if (mode !== "infinite") holder.infiniteSince = undefined;
+	holder.persistent = mode === "infinite" && persistent ? true : undefined;
 	holder.mode = mode;
 }
 
@@ -130,6 +140,7 @@ export function effectivePermissionMode(
 	if (
 		holder.mode === "infinite" &&
 		holder.infiniteSince !== undefined &&
+		!holder.persistent &&
 		now - holder.infiniteSince > INFINITE_MODE_MAX_MS
 	) {
 		setHolderMode(holder, "ask", now);
@@ -235,7 +246,9 @@ export async function planModeRefusal(
 		const command = typeof args.command === "string" ? args.command : "";
 		try {
 			const { readOnlyAllowlist } = await import("../decide/allowlist");
-			const r = readOnlyAllowlist(command, { shell: toolName === "powershell" ? "powershell" : undefined });
+			const r = readOnlyAllowlist(command, {
+				shell: toolName === "powershell" ? "powershell" : undefined,
+			});
 			if (r.verdict !== "pass-without-model") {
 				return planRefusalMessage(toolName, `the command is not provably read-only: ${r.reason}`);
 			}

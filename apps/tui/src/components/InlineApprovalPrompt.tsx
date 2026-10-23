@@ -12,7 +12,15 @@ export const APPROVAL_KEYS: ReadonlyArray<readonly [string, string]> = [
 	["S", "skip"],
 ];
 
+/** The yolo question takes Y and N only. */
+export const YOLO_GATE_KEYS: ReadonlyArray<readonly [string, string]> = [
+	["Y", "yes"],
+	["N", "no"],
+];
+
 interface InlineApprovalPromptProps {
+	/** The one-time yolo question: Y yes, N no. */
+	gate?: boolean;
 	/** Plain-language description of the action awaiting approval. */
 	target: string;
 	/** Why this card came up, e.g. "risky step" in Guarded (#3174). */
@@ -30,7 +38,7 @@ interface InlineApprovalPromptProps {
  *
  * Keys offered: [Y] approve  [N] deny  [E] edit  [S] skip.
  */
-export function InlineApprovalPrompt({ target, reason, full }: InlineApprovalPromptProps) {
+export function InlineApprovalPrompt({ target, reason, full, gate }: InlineApprovalPromptProps) {
 	if (full) {
 		return (
 			<Box
@@ -57,7 +65,7 @@ export function InlineApprovalPrompt({ target, reason, full }: InlineApprovalPro
 				</Text>
 				<Box justifyContent="flex-end">
 					<KeyCapRow
-						caps={APPROVAL_KEYS.map(([cap, verb]) => ({ cap, verb }))}
+						caps={(gate ? YOLO_GATE_KEYS : APPROVAL_KEYS).map(([cap, verb]) => ({ cap, verb }))}
 						idPrefix="card"
 						z={10}
 					/>
@@ -94,7 +102,7 @@ export function InlineApprovalPrompt({ target, reason, full }: InlineApprovalPro
 			{/* sharedGap 0: the cells between caps hit nothing. A gap click must
 			    never approve; a miss here does nothing and the user aims again. */}
 			<KeyCapRow
-				caps={APPROVAL_KEYS.map(([cap, verb]) => ({ cap, verb }))}
+				caps={(gate ? YOLO_GATE_KEYS : APPROVAL_KEYS).map(([cap, verb]) => ({ cap, verb }))}
 				idPrefix="card"
 				z={10}
 				sharedGap={0}

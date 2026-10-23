@@ -197,7 +197,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description:
 			"Set this tab's permission mode: plan, ask, guarded or infinite (same as Shift+Tab)",
-		usage: "/mode <plan|ask|guarded|infinite>",
+		usage: "/mode <plan|ask|guarded|infinite|yolo [off]>",
 	},
 	{
 		name: "onboarding",
