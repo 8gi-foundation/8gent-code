@@ -164,13 +164,15 @@ const CRED_FILES = [
 	".docker/config.json",
 	".kube/config",
 ];
-const CRED_DIR_NAMES = [".aws", ".ssh", ".gnupg", ".kube"];
+const CRED_DIR_NAMES = [".aws", ".ssh", ".gnupg", ".kube", ".docker"];
 const CREDENTIAL_FILE_RE =
 	/(^|\/)(\.aws\/credentials|\.ssh\/(id_[\w.-]+|identity)|\.netrc|\.git-credentials|\.gnupg\/(secring\.gpg|private-keys-v1\.d(\/.*)?)|\.config\/gh\/hosts\.yml|\.docker\/config\.json|\.kube\/config)$/;
-const CRED_DIR_RE = /(^|\/)\.(aws|ssh|gnupg|kube)$/;
+const CRED_DIR_RE = /(^|\/)\.(aws|ssh|gnupg|kube|docker)$/;
+/** Folders where a bare `config` is a credential file (kubeconfig, docker config.json). */
+const CRED_CONFIG_DIR_RE = /(^|\/)\.(kube|docker)$/;
 /** A credential name on its own, for a `cat credentials` after a `cd` into the folder. */
 const CRED_NAME_RE =
-	/^(credentials|id_[\w.-]+|identity|\.netrc|\.git-credentials|hosts\.yml|secring\.gpg|config(\.json)?)$/;
+	/^(credentials|id_[\w.-]+|identity|\.netrc|\.git-credentials|hosts\.yml|secring\.gpg)$/;
 /** Credential paths named inside code text (python -c, a heredoc to an interpreter). */
 const CRED_TEXT_RE =
 	/\.aws\/credentials|\.ssh\/id_[A-Za-z0-9_]+(?!\w|\.pub)|\.netrc|\.git-credentials|\.gnupg\/(?:secring|private-keys)/;
@@ -231,6 +233,7 @@ function credKind(raw: string, inCredDir = false): "file" | "dir" | null {
 	p = p.replace(/^['"]+|['"]+$/g, "");
 	if (!p || p.length > 4096) return null;
 	p = normPath(p);
+	if (inCredDir && (p === "." || p === "")) return "dir";
 	if (p.endsWith(".pub")) return null;
 	if (!/[*?[]/.test(p)) {
 		if (CREDENTIAL_FILE_RE.test(p)) return "file";
@@ -261,6 +264,7 @@ function isRemoteSpec(a: string): boolean {
 	return !a.startsWith("-") && /^[^\s/:][^\s/:]*:/.test(a);
 }
 
+const FB_KEYWORDS = new Set(["then", "do", "else", "elif", "if", "while", "until", "!", "time"]);
 const FB_BOUNDARY = /[\s;&|(){}<>`"']/;
 const fbEdge = (c: string | undefined): boolean => c === undefined || FB_BOUNDARY.test(c);
 /** Total body text the fork-bomb check will read. Over this, a command is not judged: it is a bomb. */
@@ -281,8 +285,10 @@ function commandWords(body: string): string[] {
 		if (!FB_BOUNDARY.test(c)) {
 			let j = i + 1;
 			while (j < body.length && !FB_BOUNDARY.test(body[j] as string)) j++;
-			if (cmdPos) out.push(body.slice(i, j));
-			cmdPos = false;
+			const word = body.slice(i, j);
+			if (cmdPos) out.push(word);
+			// `then f`, `do f`, `else f`: the word after a shell keyword is still a command.
+			cmdPos = cmdPos && FB_KEYWORDS.has(word);
 			i = j;
 			continue;
 		}
@@ -526,6 +532,8 @@ class Collector {
 	cwdDanger = false;
 	/** A `cd` on this line went into a credential folder (~/.aws, ~/.ssh ...). */
 	credCwd = false;
+	/** The `cd` went into ~/.kube or ~/.docker, where a bare `config` is a credential. */
+	credCwdConfig = false;
 	/** This line has `&&`, `||` or a compound command, so an assignment on it may not have run. */
 	conditional = false;
 	d(rule: string, block = BLOCK_RULES.has(rule)): void {
@@ -659,7 +667,9 @@ function trackShellState(tIn: string[], r: Collector): void {
 		r.cwdDanger = true; // a bare cd goes home
 		return;
 	}
-	if (CRED_DIR_RE.test(normPath(target.replace(/^['"]+|['"]+$/g, "")))) r.credCwd = true;
+	const cdTarget = normPath(target.replace(/^['"]+|['"]+$/g, ""));
+	if (CRED_DIR_RE.test(cdTarget)) r.credCwd = true;
+	if (CRED_CONFIG_DIR_RE.test(cdTarget)) r.credCwdConfig = true;
 	// A relative cd, `cd -` or a cd that fails cannot be resolved from text
 	// (it may go up, through a symlink, or nowhere), so the state is kept.
 	if (!/^[/~$]/.test(target)) return;
@@ -1573,7 +1583,11 @@ function analyseTokens(
 			const k = credKind(a, r.credCwd);
 			return k === "file" || (k === "dir" && dirs);
 		});
-		if (hit || (r.credCwd && args.some((a) => CRED_NAME_RE.test(a.replace(/^\.\//, ""))))) {
+		const named = (a: string) => {
+			const n = a.replace(/^\.\//, "");
+			return CRED_NAME_RE.test(n) || (r.credCwdConfig && /^config(\.json)?$/.test(n));
+		};
+		if (hit || (r.credCwd && args.some(named))) {
 			r.d("credential_file_read");
 			r.secretRead = true;
 		}
