@@ -293,28 +293,22 @@ const defaultLookups: SlashHandlerLookups = {
 	},
 };
 
-/**
- * The local answer for a line that starts with "/" but nothing claims, or null
- * when something does. A line is unknown only if ALL fail: not in the registry
- * (which may be stale or still loading), not a built-in, not an explicit
- * `/skill:` form (resolveSkillSlash owns that and its "Unknown skill"
- * message), no skill of that name found by loading skills now, and no prompt
- * template matching, read fresh. A path-like line such as `/Users/x/file`
- * matches none of these and gets the local answer.
- */
-/** Edit distance (Levenshtein), small inputs only. */
+/** Edit distance with adjacent swaps counting as one edit (Damerau), small inputs only. */
 export function editDistance(a: string, b: string): number {
-	const prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+	const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [
+		i,
+		...Array(b.length).fill(0),
+	]);
+	for (let j = 0; j <= b.length; j++) d[0][j] = j;
 	for (let i = 1; i <= a.length; i++) {
-		let diag = prev[0];
-		prev[0] = i;
 		for (let j = 1; j <= b.length; j++) {
-			const up = prev[j];
-			prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
-			diag = up;
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+			if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1])
+				d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
 		}
 	}
-	return prev[b.length];
+	return d[a.length][b.length];
 }
 
 /**
@@ -337,6 +331,15 @@ export function nearestNames(typed: string, names: readonly string[], limit = 3)
 	return [...prefix, ...sub, ...fuzzy].slice(0, limit);
 }
 
+/**
+ * The local answer for a line that starts with "/" but nothing claims, or null
+ * when something does. A line is unknown only if ALL fail: not in the registry
+ * (which may be stale or still loading), not a built-in, not an explicit
+ * `/skill:` form (resolveSkillSlash owns that and its "Unknown skill"
+ * message), no skill of that name found by loading skills now, and no prompt
+ * template matching, read fresh. A path-like line such as `/Users/x/file`
+ * matches none of these and gets the local answer.
+ */
 export async function unknownSlashAnswer(
 	input: string,
 	registry: SlashRegistry,

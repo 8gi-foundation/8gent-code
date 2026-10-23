@@ -641,6 +641,21 @@ export function isAndroidEnv(env: NodeJS.ProcessEnv = process.env): boolean {
 	return Boolean(env.TERMUX_VERSION) || process.platform === ("android" as string);
 }
 
+/** Pack words onto indented lines no wider than `width`. */
+function wrapWords(words: string[], width: number): string[] {
+	const out: string[] = [];
+	let cur = "  ";
+	for (const w of words) {
+		if (cur.length > 2 && cur.length + 1 + w.length > width) {
+			out.push(cur);
+			cur = "  ";
+		}
+		cur += (cur.length > 2 ? " " : "") + w;
+	}
+	if (cur.length > 2) out.push(cur);
+	return out;
+}
+
 /** The /help text. Core commands by default; `all` lists every built-in. */
 export function formatSlashHelp(all: boolean, env: HelpEnv = {}): string {
 	const narrow = (env.columns ?? 80) < NARROW_HELP_COLUMNS;
@@ -651,9 +666,14 @@ export function formatSlashHelp(all: boolean, env: HelpEnv = {}): string {
 	const rows = all
 		? builtInCommandsCoreFirst(pool)
 		: pool.filter((c) => isCoreSlashCommand(c.name));
-	const line = (c: BuiltInSlashCommandDef) =>
-		narrow ? `  /${c.name}` : `  ${c.usage ?? `/${c.name}`} - ${c.description}`;
-	const lines = narrow ? [`  ${rows.map((c) => `/${c.name}`).join(" ")}`] : rows.map(line);
+	const line = (c: BuiltInSlashCommandDef) => `  ${c.usage ?? `/${c.name}`} - ${c.description}`;
+	const width = env.columns ?? 80;
+	const lines = narrow
+		? wrapWords(
+				rows.map((c) => `/${c.name}`),
+				width,
+			)
+		: rows.map(line);
 	const hidden = pool.length - rows.length;
 	const tail = all
 		? narrow

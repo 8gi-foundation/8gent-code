@@ -11,6 +11,11 @@ describe("nearestNames", () => {
 		expect(editDistance("kitten", "sitting")).toBe(3);
 		expect(editDistance("", "ab")).toBe(2);
 	});
+	test("adjacent swaps are one edit", () => {
+		expect(editDistance("hepl", "help")).toBe(1);
+		expect(nearestNames("hepl", ["help", "hotkeys"])).toContain("help");
+		expect(nearestNames("hlep", ["help", "hotkeys"])).toContain("help");
+	});
 	test("prefix, then substring, then typo", () => {
 		const names = ["model", "mode", "login", "compact", "clear"];
 		expect(nearestNames("mod", names)).toEqual(["model", "mode"]);
@@ -48,12 +53,13 @@ describe("/help on a phone", () => {
 		expect(text).not.toMatch(/iTerm2|Terminal\.app|triple click|DJ/);
 		expect(text).toContain("/help all");
 		expect(text).toContain("Touch:");
-		expect(text.split("\n").length).toBeLessThanOrEqual(6);
+		for (const l of text.split("\n")) expect(l.length).toBeLessThanOrEqual(45);
 	});
 	test("45 columns /help all drops /debug in installed builds", () => {
 		const text = formatSlashHelp(true, { columns: 45, hasDebug: false });
 		expect(text).not.toContain("/debug");
 		expect(text).toContain("/model");
+		for (const l of text.split("\n")) expect(l.length).toBeLessThanOrEqual(45);
 	});
 	test("wide desktop keeps mouse tips", () => {
 		expect(formatSlashHelp(false, { columns: 120 })).toContain("iTerm2");
