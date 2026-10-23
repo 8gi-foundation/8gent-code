@@ -217,7 +217,9 @@ Sent to every other client bound to the session when one sends `prompt`. The sen
   is `daemon.authToken`, else `<dataDir>/daemon.token` (0600, created at first start). The
   client sends the address it dialled as `target` and checks the proof against that; the
   daemon refuses (`identify target is not this daemon`) unless the port is its own and the
-  host is loopback or its bind address, so a relay gets nothing usable. `error` when the daemon
+  host is exactly the address it is bound to (a wildcard bind is reached at `127.0.0.1`;
+  `localhost` and `[::1]` are not accepted for a daemon on `127.0.0.1`), and a loopback target
+  only from a loopback peer, so a relay or an alias squatter gets nothing usable. `error` when the daemon
   has no secret.
 - Operator token and the home session (v1.9): an `auth` frame carrying the operator token
   marks the socket operator, also on a daemon with no gateway token. The Telegram bridge sends
