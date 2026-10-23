@@ -7,6 +7,7 @@
  * The model-proxy handles provider selection, rate limiting, and fallback.
  */
 
+import { withRedirectHint } from "../providers/redirect-hint";
 import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
 
 // Model proxy on Fly internal network, or Ollama fallback. Read at CALL time
@@ -117,6 +118,8 @@ export async function generateResponse(req: InferenceRequest): Promise<Inference
 				options: { num_predict: 500 },
 			}),
 			redirect: "error",
+		}).catch((err) => {
+			throw withRedirectHint(err, ollamaHost, "OLLAMA_HOST");
 		});
 		if (!res.ok) throw new Error(`Ollama returned ${res.status}: ${await res.text()}`);
 		const data = (await res.json()) as any;
@@ -134,6 +137,8 @@ export async function generateResponse(req: InferenceRequest): Promise<Inference
 			},
 			body: JSON.stringify({ model, messages, max_tokens: 500 }),
 			redirect: "error",
+		}).catch((err) => {
+			throw withRedirectHint(err, modelProxyUrl, "MODEL_PROXY_URL");
 		});
 		if (!res.ok) throw new Error(`Model proxy returned ${res.status}: ${await res.text()}`);
 		const data = (await res.json()) as any;

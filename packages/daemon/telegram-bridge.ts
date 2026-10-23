@@ -79,6 +79,7 @@ import { getDataDir } from "./data-dir";
 import { classifyInput, gateInput } from "./input-gate";
 import { NO_LINK_PREVIEW } from "./notifications";
 import { VOICE_ACK, ackForTranscript } from "./voice-ack";
+import { withRedirectHint } from "../providers/redirect-hint";
 
 /**
  * Where messages from chats the bridge does not answer are recorded.
@@ -879,6 +880,8 @@ export function localSpokenModel(
 			body: JSON.stringify({ model, prompt, stream: false, ...(json ? { format: "json" } : {}) }),
 			signal,
 			redirect: "error",
+		}).catch((err) => {
+			throw withRedirectHint(err, url, "OLLAMA_HOST");
 		});
 		const data = (await res.json()) as { response?: string };
 		return typeof data.response === "string" ? data.response : "";

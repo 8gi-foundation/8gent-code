@@ -14,6 +14,7 @@
 import { redact } from "../memory/redact";
 import { containsSecret } from "../permissions/goal-secret-scrub";
 import { anonymize, containsPii } from "../permissions/pii-anonymizer";
+import { withRedirectHint } from "../providers/redirect-hint";
 import {
 	DEFAULT_HISTORY_PATH,
 	type ScoreHistory,
@@ -244,6 +245,8 @@ export class JudgeScorer {
 				max_tokens: 200,
 			}),
 			redirect: "error",
+		}).catch((err) => {
+			throw withRedirectHint(err, this.config.prmUrl, "the prmUrl option");
 		});
 
 		if (!response.ok) {
