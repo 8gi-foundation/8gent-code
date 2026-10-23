@@ -10,7 +10,10 @@
 # `8gent --version` names the tag, the TUI draws its first prompt (the
 # boot-trace marker, #4541; a render crash like #4660 never reaches it; the
 # launch-time music and voice questions are answered and each seen once), and
-# scripts/install.sh decides about Android instead of crashing.
+# scripts/install.sh decides about Android instead of crashing. Then the daemon:
+# `8gent daemon run` from the installed package starts on Node, GET /health
+# answers on its loopback port, a client attaches over the WebSocket and gets the
+# session list, and the daemon stops on SIGTERM (#4852).
 set -eu
 
 TGZ="${1:?usage: smoke-termux.sh <package.tgz> <vX.Y.Z>}"
@@ -105,6 +108,49 @@ done
 pkill -P "$runner" 2>/dev/null || true
 pkill -f "8gent-run.js" 2>/dev/null || true
 kill "$runner" 2>/dev/null || true
+
+echo "== daemon from the installed package (Node, loopback)"
+DPORT="${DAEMON_SMOKE_PORT:-18790}"
+DLOG="$(mktemp)"
+# An answer on the port before we start means /health below would be someone else's daemon.
+if curl -fsS "http://127.0.0.1:$DPORT/health" >/dev/null 2>&1; then
+	echo "FAIL  something already answers on 127.0.0.1:$DPORT; the daemon check would prove nothing (set DAEMON_SMOKE_PORT)"
+	exit 1
+fi
+EIGHT_DAEMON_PORT="$DPORT" 8gent daemon run >"$DLOG" 2>&1 &
+dpid=$!
+up=0
+i=0
+while [ "$i" -lt "${DAEMON_SECONDS:-60}" ]; do
+	kill -0 "$dpid" 2>/dev/null || break
+	# Only our own process counts: a health answer with our pid gone is not a pass.
+	if curl -fsS "http://127.0.0.1:$DPORT/health" >/dev/null 2>&1 && kill -0 "$dpid" 2>/dev/null; then up=1; break; fi
+	sleep 1; i=$((i + 1))
+done
+if [ "$up" = "1" ]; then
+	pass "daemon answered GET /health on 127.0.0.1:$DPORT in ${i}s"
+	if node /w/scripts/daemon-attach-check.mjs "$DPORT"; then
+		pass "a client attached over the WebSocket and listed sessions"
+	else
+		bad "daemon is up but a client could not attach"
+	fi
+else
+	bad "daemon never answered GET /health on 127.0.0.1:$DPORT (process alive: $(kill -0 "$dpid" 2>/dev/null && echo yes || echo no))"
+fi
+if kill -0 "$dpid" 2>/dev/null; then
+	kill -TERM "$dpid" 2>/dev/null || true
+	j=0
+	while kill -0 "$dpid" 2>/dev/null && [ "$j" -lt 15 ]; do sleep 1; j=$((j + 1)); done
+	if kill -0 "$dpid" 2>/dev/null; then
+		kill -KILL "$dpid" 2>/dev/null || true
+		bad "daemon ignored SIGTERM for 15s and was killed"
+	else
+		pass "daemon stopped on SIGTERM in ${j}s"
+	fi
+elif [ "$up" = "1" ]; then
+	bad "daemon exited by itself while it was being checked"
+fi
+if [ "$fail" != "0" ]; then echo "-- daemon output:"; tail -c 2500 "$DLOG"; fi
 
 echo "== install.sh --dry-run on Android"
 d="$(sh /w/scripts/install.sh --dry-run 2>&1 || true)"

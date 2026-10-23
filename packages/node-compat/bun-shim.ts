@@ -17,6 +17,7 @@ import { createRequire } from "node:module";
 import { delimiter, dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { serve } from "./bun-serve";
 
 // biome-ignore lint/suspicious/noExplicitAny: the Node boundary mirrors Bun's loose shapes
 type Loose = any;
@@ -302,7 +303,7 @@ export const BunShim = {
 		new Promise<void>((r) => setTimeout(r, ms instanceof Date ? ms.getTime() - Date.now() : ms)),
 	nanoseconds: () => Number(process.hrtime.bigint()),
 	randomUUIDv7,
-	serve: unsupported("Bun.serve"),
+	serve,
 	connect: unsupported("Bun.connect"),
 	listen: unsupported("Bun.listen"),
 	Transpiler: unsupported("Bun.Transpiler"),
