@@ -26,7 +26,6 @@ beforeEach(() => {
 afterEach(() => {
 	stop?.();
 	stop = null;
-	bus.clear();
 	rmSync(dir, { recursive: true, force: true });
 });
 const config = (wake: object) => writeFileSync(join(dir, "config.json"), JSON.stringify({ wake }));
@@ -224,6 +223,7 @@ test("a sixth identical failure inside the window adds no second notice", async 
 });
 
 test("a shell cron job that exits non-zero raises the failure the router speaks about", async () => {
+	const saved = process.env.EIGHT_DATA_DIR;
 	process.env.EIGHT_DATA_DIR = dir;
 	try {
 		writeFileSync(
@@ -251,6 +251,7 @@ test("a shell cron job that exits non-zero raises the failure the router speaks 
 		await (wakeRouter() as WakeRouter).flush();
 		expect(spoken.map((n) => n.kind)).toEqual(["action"]);
 	} finally {
-		Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
+		if (saved === undefined) Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
+		else process.env.EIGHT_DATA_DIR = saved;
 	}
 });
