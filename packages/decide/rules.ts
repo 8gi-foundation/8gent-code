@@ -170,7 +170,7 @@ const CREDENTIAL_FILE_RE =
 const CRED_DIR_RE = /(^|\/)\.(aws|ssh|gnupg|kube)$/;
 /** A credential name on its own, for a `cat credentials` after a `cd` into the folder. */
 const CRED_NAME_RE =
-	/^(credentials|id_[\w.-]+|identity|\.netrc|\.git-credentials|hosts\.yml|secring\.gpg)$/;
+	/^(credentials|id_[\w.-]+|identity|\.netrc|\.git-credentials|hosts\.yml|secring\.gpg|config(\.json)?)$/;
 /** Credential paths named inside code text (python -c, a heredoc to an interpreter). */
 const CRED_TEXT_RE =
 	/\.aws\/credentials|\.ssh\/id_[A-Za-z0-9_]+(?!\w|\.pub)|\.netrc|\.git-credentials|\.gnupg\/(?:secring|private-keys)/;
@@ -196,21 +196,32 @@ function normPath(raw: string): string {
 	return out.join("/");
 }
 
-function globToRegExp(g: string): RegExp {
-	const body = g
+/** One glob segment as a regex source. A leading `*` or `?` never matches a leading dot, as in the shell. */
+function globSegment(seg: string): string {
+	const body = seg
 		.replace(/\*+/g, "*")
 		.replace(/\[[^\]]*\]/g, "?")
 		.replace(/[.+^${}()|\\]/g, "\\$&")
 		.replace(/\*/g, "[^/]*")
 		.replace(/\?/g, "[^/]");
-	return new RegExp(`(?:^|/)${body}$`);
+	return (/^[*?[]/.test(seg) ? "(?!\\.)" : "") + body;
 }
+
+/** Folders whose names can make a relative glob a credential read (`.ssh/id_*`). */
+const CRED_GLOB_DIRS = new Set([".aws", ".ssh", ".gnupg", ".kube", ".docker", ".config", "gh"]);
+const CRED_BASENAMES = [
+	...new Set(
+		CRED_FILES.map((c) => c.slice(c.lastIndexOf("/") + 1)).concat(["config", "config.json"]),
+	),
+];
 
 /**
  * Does this argument name a credential store? "file" for a key or credentials file, "dir" for a
  * credential folder, null otherwise. Handles quotes, `--opt=PATH`, `//`, `/./`, `..` and globs.
+ * `inCredDir`: a `cd` on this line went into a credential folder, so a folderless glob (`*`,
+ * `cred*`) can name a credential there; anywhere else it does not (`cat *.json` is not one).
  */
-function credKind(raw: string): "file" | "dir" | null {
+function credKind(raw: string, inCredDir = false): "file" | "dir" | null {
 	let p = raw;
 	if (p.startsWith("-")) {
 		const eq = p.indexOf("=");
@@ -226,10 +237,23 @@ function credKind(raw: string): "file" | "dir" | null {
 		return CRED_DIR_RE.test(p) ? "dir" : null;
 	}
 	if (p.length > 256) return CRED_DIR_TEXT_RE.test(p) ? "file" : null;
-	const re = globToRegExp(p);
+	const segs = p.split("/");
+	if (segs.length === 1) {
+		if (!inCredDir) return null;
+		const re = new RegExp(`^${globSegment(p)}$`);
+		return CRED_BASENAMES.some((c) => re.test(c)) ? "file" : null;
+	}
+	const body = segs.map(globSegment).join("/");
+	if (p.startsWith("~/")) {
+		const re = new RegExp(`^${body}$`);
+		if (CRED_FILES.some((c) => re.test(`~/${c}`))) return "file";
+		return CRED_DIR_NAMES.some((c) => re.test(`~/${c}`)) ? "dir" : null;
+	}
+	// Relative or absolute elsewhere: needs a literal credential folder in the path.
+	if (!segs.some((x) => CRED_GLOB_DIRS.has(x))) return null;
+	const re = new RegExp(`(?:^|/)${body}$`);
 	if (CRED_FILES.some((c) => re.test(`~/${c}`))) return "file";
-	if (CRED_DIR_NAMES.some((c) => re.test(`~/${c}`))) return "dir";
-	return null;
+	return CRED_DIR_NAMES.some((c) => re.test(`~/${c}`)) ? "dir" : null;
 }
 
 /** `user@host:/path` or `host:path`: a remote end of scp, rsync or sftp. */
@@ -242,6 +266,32 @@ const fbEdge = (c: string | undefined): boolean => c === undefined || FB_BOUNDAR
 /** Total body text the fork-bomb check will read. Over this, a command is not judged: it is a bomb. */
 const FB_BUDGET = 12_000_000;
 const FB_MAX_DEFS = 64;
+
+/**
+ * The words of `body` that are in command position: the first word of a simple command, after
+ * `;`, `|`, `&`, `(`, `{` or a newline. `npm run build &` has the word `build` but it is an
+ * argument, not a call. One pass.
+ */
+function commandWords(body: string): string[] {
+	const out: string[] = [];
+	let cmdPos = true;
+	let i = 0;
+	while (i < body.length) {
+		const c = body[i] as string;
+		if (!FB_BOUNDARY.test(c)) {
+			let j = i + 1;
+			while (j < body.length && !FB_BOUNDARY.test(body[j] as string)) j++;
+			if (cmdPos) out.push(body.slice(i, j));
+			cmdPos = false;
+			i = j;
+			continue;
+		}
+		if (";|&({\n".includes(c)) cmdPos = true;
+		else if (!/\s/.test(c)) cmdPos = false;
+		i++;
+	}
+	return out;
+}
 
 /**
  * A shell function that, directly or through other functions defined on the line, calls itself
@@ -261,10 +311,12 @@ function hasForkBomb(text: string): boolean {
 		j++;
 		while (ws(text[j])) j++;
 		if (text[j] !== "{") continue;
-		let st = i;
-		while (st > 0 && i - st < 64 && !fbEdge(text[st - 1])) st--;
-		if (st === i) continue;
-		defs.push({ name: text.slice(st, i), open: j });
+		let end = i;
+		while (end > 0 && i - end < 64 && ws(text[end - 1])) end--;
+		let st = end;
+		while (st > 0 && end - st < 64 && !fbEdge(text[st - 1])) st--;
+		if (st === end) continue;
+		defs.push({ name: text.slice(st, end), open: j });
 		if (defs.length > FB_MAX_DEFS) return true;
 	}
 	// function name {
@@ -314,7 +366,7 @@ function hasForkBomb(text: string): boolean {
 		}
 		amp.set(d.name, bg);
 		const set = calls.get(d.name) ?? new Set<string>();
-		for (const w of body.split(/[\s;&|(){}<>`"']+/)) if (names.has(w)) set.add(w);
+		for (const w of commandWords(body)) if (names.has(w)) set.add(w);
 		calls.set(d.name, set);
 	}
 	for (const [f, bg] of amp) {
@@ -1278,7 +1330,7 @@ function ruleRedirects(seg: string, r: Collector): void {
 		for (const mm of m.matchAll(/(?<!<)<(?![<(])\s*([^\s<>|;&]+)/g)) {
 			const len = (mm[1] as string).length;
 			const start = (mm.index ?? 0) + mm[0].length - len;
-			if (credKind(seg.slice(start, start + len)) === "file") {
+			if (credKind(seg.slice(start, start + len), r.credCwd) === "file") {
 				r.d("credential_file_read");
 				r.secretRead = true;
 			}
@@ -1382,6 +1434,10 @@ function analyseTokens(
 		return b;
 	}
 	if (INTERPRETERS.has(b) && b !== "bun") {
+		if (args.some((a) => credKind(a, r.credCwd) === "file")) {
+			r.d("credential_file_read");
+			r.secretRead = true;
+		}
 		if (piped && prevBin && NET_FETCHERS.has(prevBin) && !positional(args).length) {
 			r.d("remote_code_piped_to_interpreter");
 			return b;
@@ -1401,11 +1457,18 @@ function analyseTokens(
 	if (
 		(b === "scp" || b === "rsync" || b === "sftp") &&
 		args.some(isRemoteSpec) &&
-		args.some((a) => credKind(a) !== null)
+		args.some((a) => credKind(a, r.credCwd) !== null)
 	)
 		r.d("secret_to_network");
-	if (PACKERS.has(b) && args.some((a) => credKind(a) !== null)) r.secretRead = true;
-	if (b === "cp" && args.some((a) => credKind(a) !== null)) r.d("credential_file_read");
+	if (PACKERS.has(b) && args.some((a) => credKind(a, r.credCwd) !== null)) r.secretRead = true;
+	if (b === "cp" && args.some((a) => credKind(a, r.credCwd) !== null)) r.d("credential_file_read");
+	if (
+		b === "dd" &&
+		args.some((a) => a.startsWith("if=") && credKind(a.slice(3), r.credCwd) === "file")
+	) {
+		r.d("credential_file_read");
+		r.secretRead = true;
+	}
 
 	if (b === "rm" || b === "rmdir") ruleRm(b, args, r);
 	else if (b === "unlink") r.d("unlink");
@@ -1507,7 +1570,7 @@ function analyseTokens(
 	} else if (CRED_READERS.has(b)) {
 		const dirs = DIR_READERS.has(b);
 		const hit = args.some((a) => {
-			const k = credKind(a);
+			const k = credKind(a, r.credCwd);
 			return k === "file" || (k === "dir" && dirs);
 		});
 		if (hit || (r.credCwd && args.some((a) => CRED_NAME_RE.test(a.replace(/^\.\//, ""))))) {
@@ -1571,9 +1634,10 @@ function analyse(text: string, r: Collector, depth = 0): void {
 		const consumer = t.length ? basename(t[0]) : null;
 		if (consumer && (SHELLS.has(consumer) || consumer === "ssh")) analyse(doc, r, depth + 1);
 		else if (consumer && INTERPRETERS.has(consumer)) codeScan(doc, r, "heredoc");
+		else if (consumer && DB_CLIENTS.has(consumer)) sqlScan(doc, r);
+		// An sftp script that puts a credential folder: its own check, not part of the chain above.
 		if (consumer === "sftp" && doc.includes("put") && CRED_DIR_TEXT_RE.test(doc))
 			r.d("secret_to_network");
-		else if (consumer && DB_CLIENTS.has(consumer)) sqlScan(doc, r);
 		// cat/tee/etc: the body is file content; the redirect on the line is checked below.
 	}
 	const { segs, subs } = splitSegments(body);
