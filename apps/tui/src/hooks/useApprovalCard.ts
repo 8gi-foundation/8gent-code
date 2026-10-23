@@ -21,13 +21,14 @@
  */
 
 import { type DOMElement, useInput, useStdout } from "ink";
-import { createRef, useEffect, useLayoutEffect, useState } from "react";
+import { createRef, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { currentPermissionMode } from "../../../../packages/permissions/permission-mode.js";
 import {
-	registerTuiApprovalHandler,
 	type TuiApprovalDecision,
 	type TuiApprovalRequest,
+	registerTuiApprovalHandler,
 } from "../../../../packages/permissions/tui-approval-channel.js";
-import { currentPermissionMode } from "../../../../packages/permissions/permission-mode.js";
+import { YOLO_QUESTION } from "../../../../packages/permissions/yolo-pref.js";
 import { approvalReason } from "../lib/perm-modes-design.js";
 
 export interface PendingApproval {
@@ -36,6 +37,8 @@ export interface PendingApproval {
 	reason?: string;
 	/** Show the target in full, never cut (the request's `full`). */
 	full?: boolean;
+	/** The one-time yolo question: only Y and N answer it. */
+	gate?: boolean;
 	/** For a `full` card: the screen size it was last laid out whole at, and since when. */
 	shownWholeAt?: string;
 	shownSince?: number;
@@ -141,6 +144,16 @@ export function settleApprovalKey(input: string, key: KeyLike, screen?: Sized): 
 			return false;
 		}
 	}
+	// The yolo question takes no key until it has been up CARD_MIN_SHOW_MS: a y
+	// typed for the chat as it appeared must not turn yolo on. An early key is
+	// claimed and ignored, and restarts the wait.
+	if (card.gate) {
+		const now = Date.now();
+		if (now - (card.shownSince ?? 0) < CARD_MIN_SHOW_MS) {
+			card.shownSince = now;
+			return decision !== null;
+		}
+	}
 	if (!decision) return false;
 	card.resolve(decision);
 	return true;
@@ -158,7 +171,17 @@ export function _resetApprovalCard(): void {
  * down, never left up clipped. The hook re-renders on resize itself, so the
  * check does not depend on the caller also using useViewport.
  */
-export function useApprovalCard(onKey?: () => void): PendingApproval | null {
+export function useApprovalCard(
+	onKey?: () => void,
+	/**
+	 * The one yes gate for yolo. `needed` is true until the user has answered
+	 * once; `answer` saves it and applies it. Asked on the first card that would
+	 * come up, never again.
+	 */
+	yolo?: { needed: () => boolean; answer: (yes: boolean) => void },
+): PendingApproval | null {
+	const yoloRef = useRef(yolo);
+	yoloRef.current = yolo;
 	const [pending, setPending] = useState<PendingApproval | null>(null);
 	const { stdout } = useStdout();
 	const [, setSize] = useState("");
@@ -183,7 +206,49 @@ export function useApprovalCard(onKey?: () => void): PendingApproval | null {
 	});
 
 	useEffect(() => {
-		const handler = (request: TuiApprovalRequest): Promise<TuiApprovalDecision> =>
+		// The yolo question, as a card of its own. Y saves yes, N saves no; any
+		// other card key does nothing, and a card taken down unanswered (never
+		// laid out) asks again next time.
+		const askYolo = (): Promise<void> =>
+			new Promise<void>((done) => {
+				const card: PendingApproval = {
+					target: YOLO_QUESTION,
+					reason: "First time:",
+					gate: true,
+					shownSince: Date.now(),
+					resolve: (decision) => {
+						if (decision !== "approve" && decision !== "deny") return;
+						yoloRef.current?.answer(decision === "approve");
+						queueMicrotask(() => {
+							if (active === card) active = null;
+						});
+						setPending((cur) => (cur === card ? null : cur));
+						done();
+					},
+				};
+				active = card;
+				setPending(card);
+			});
+		// One card at a time: a request that arrives while a card (the yolo
+		// question or a real one) is up waits its turn, so no card is ever
+		// overwritten and left hanging, and there is never a second yolo card.
+		// The first request into an idle queue raises its card synchronously.
+		let turn: Promise<unknown> | null = null;
+		const run = async (request: TuiApprovalRequest): Promise<TuiApprovalDecision> => {
+			if (yoloRef.current?.needed()) await askYolo();
+			return ask(request);
+		};
+		const handler = (request: TuiApprovalRequest): Promise<TuiApprovalDecision> => {
+			const mine = turn ? turn.then(() => run(request)) : run(request);
+			const tail: Promise<unknown> = mine
+				.catch(() => {})
+				.then(() => {
+					if (turn === tail) turn = null;
+				});
+			turn = tail;
+			return mine;
+		};
+		const ask = (request: TuiApprovalRequest): Promise<TuiApprovalDecision> =>
 			new Promise<TuiApprovalDecision>((resolvePromise) => {
 				const target = request.command || request.action || "pending tool call";
 				let settled = false;

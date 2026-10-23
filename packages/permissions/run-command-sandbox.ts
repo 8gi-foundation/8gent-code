@@ -70,6 +70,7 @@ export const PROTECTED_DATA_FILES = [
 	"allow-loopback.json", // the browser's trusted loopback port list (#3785, 8SO)
 	"keybindings.json",
 	"update-resume.json",
+	"yolo.json", // the one yes to run tools without cards: a tool that wrote it would grant itself yolo (8SO)
 	"skills-trust.json", // sha256 pins that let a project skill replace a user/bundled one (#4125, 8SO)
 ] as const;
 

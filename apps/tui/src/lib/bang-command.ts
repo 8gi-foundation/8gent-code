@@ -91,7 +91,7 @@ export function parseModeArgs(args: readonly string[]): PermissionMode | null {
 }
 
 export const MODE_USAGE =
-	"Usage: /mode plan | ask | guarded | infinite (this tab's permission mode).";
+	"Usage: /mode plan | ask | guarded | infinite | yolo [off] (this tab's permission mode).";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: removing control bytes is the point
 const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[ -/]*[0-~]/g;
