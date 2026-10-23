@@ -105,3 +105,19 @@ Shift+Tab steps through the permission modes for the tab: Plan, Ask, Guarded, In
 | Infinite | Runs without asking, apart from the always-blocked list and pushes |
 
 On a card: `y` approve, `n` deny, `e` edit, `s` skip. Allow and deny patterns live in `~/.8gent/permissions.json`. More: [permission-modes](../guides/permission-modes.md), [permissions](../guides/permissions.md).
+
+## Reading outside the working folder
+
+8gent reads inside the folder it was started in. A file tool asked for a path outside it, or through a link that leads outside it, refuses. A shell command that names a path outside it (`cat ../other/file`, an absolute path, `~/...`, or a quoted path in inline `python3 -c` or `node -e` code) shows a card first. With nobody to ask (headless, CI) it is refused. In every mode, Infinite included.
+
+Allowed without a card: system folders such as /usr/bin, /bin and /opt/homebrew, /dev/null and the random devices, the temp folders (/tmp and `$TMPDIR`), and 8gent's own `~/.8gent` folder apart from keys, tokens and sessions. Git reading `~/.gitconfig` itself is fine: only paths a command names are checked, and only ones that exist.
+
+To widen it:
+
+| Setting | Effect |
+|---|---|
+| `/allow-read <dir>` or `--allow-read <dir>` | Read that folder too, this session |
+| `EIGHT_WORKSPACE_ROOT=<dir>` | Use a wider folder as the root |
+| `EIGHT_WORKSPACE_BOUNDARY=off` | Turn the shell check off |
+
+This checks what a command says. Code that builds a path while it runs is not seen by it.

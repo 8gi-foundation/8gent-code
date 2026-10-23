@@ -16,7 +16,8 @@ echo "Explain this code" | 8gent chat --stdin
 | `--cwd=<dir>` | Working directory |
 | `--max-turns=<n>` | Cap the turns |
 | `--image <path>` | Attach one image |
-| `--no-workspace-boundary` | Do not set the workspace root |
+| `--no-workspace-boundary` | No workspace root, and no read boundary for shell commands |
+| `--allow-read <dir>` | Also read that folder |
 
 Exit code is 0 on success, 1 on error.
 

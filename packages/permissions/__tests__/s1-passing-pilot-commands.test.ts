@@ -108,7 +108,9 @@ describe("System One keeps allowing the commands of passing pilot runs", () => {
 	});
 
 	test("the gate runs all of them with no judge", async () => {
-		const env = { EIGHT_SYSTEM_ONE: "", EIGHT_HEADLESS: "1" };
+		// The pilot ran in /workspace, not in `ws`: its absolute paths would read as outside this
+		// temp root. The read boundary (#4880) has its own tests; this guard is System One's.
+		const env = { EIGHT_SYSTEM_ONE: "", EIGHT_HEADLESS: "1", EIGHT_WORKSPACE_BOUNDARY: "off" };
 		const refused: string[] = [];
 		const asked: string[] = [];
 		for (const { command } of commands) {

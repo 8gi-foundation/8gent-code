@@ -555,6 +555,43 @@ export async function systemOneGate(
 	 */
 	opts: { canRunInstead?: boolean; project?: string } = {},
 ): Promise<SystemOneGateResult> {
+	const result = await systemOneGateChecks(command, env, cwd, created, where, opts);
+	// A command System One stops, or that a person already approved on its card, is decided.
+	if (!result.run || result.humanApproved === true) return result;
+	// The read boundary (#4880), in every mode, EIGHT_SYSTEM_ONE=0 included: a path outside the
+	// working folder is asked about, or refused when nobody can be asked. Never run silently.
+	const { readBoundaryGate } = await import("./read-boundary");
+	const boundary = await readBoundaryGate(command, {
+		env,
+		cwd,
+		project: opts.project,
+		ask: (request) =>
+			(overrides.askHuman ?? defaultAskHuman)({
+				...request,
+				command: commandInFolder(request.command, where),
+			}),
+	});
+	if (boundary === null) return result;
+	if (boundary.run) return { ...result, humanApproved: true };
+	// A deterministic rule, not the allowlist: the allowlist only ever passes read-only commands.
+	const guard: BashGuardResult = {
+		verdict: "escalate",
+		pYes: Number.NaN,
+		backend: "rule",
+		model: "workspace-boundary",
+		reason: "names a path outside the working folder (workspace-boundary)",
+	};
+	return { run: false, guard, humanApproved: boundary.humanApproved, message: boundary.message };
+}
+
+async function systemOneGateChecks(
+	command: string,
+	env: Record<string, string | undefined>,
+	cwd: string | undefined,
+	created: CreatedFiles | undefined,
+	where: string | undefined,
+	opts: { canRunInstead?: boolean; project?: string },
+): Promise<SystemOneGateResult> {
 	const mode = systemOneMode(env);
 	if (mode === "off") return { run: true };
 	// Audio and notifications need the person's voice setting, never headless (#4713).
