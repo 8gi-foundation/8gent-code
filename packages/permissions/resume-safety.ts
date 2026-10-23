@@ -184,7 +184,11 @@ export function recordDenial(
 	dir?: string,
 ): void {
 	const sfp = strictFingerprint(command, where);
-	const rows = readDenials(sessionKey, dir).filter((d) => d.sfp !== sfp);
+	const file = readDenialFile(sessionKey, dir);
+	// Never write over a file that could not be read: the denials it held would be lost and
+	// the session would fail open. It stays unreadable, so the session stays fail-closed.
+	if (file.corrupt) throw new Error("the denial record is unreadable and was left as it is");
+	const rows = file.rows.filter((d) => d.sfp !== sfp);
 	rows.push({
 		fp: denialFingerprint(command),
 		sfp,

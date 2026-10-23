@@ -325,6 +325,27 @@ describe("C3: a denied call is not re-run on resume without a fresh decision", (
 		expect(UNREADABLE_DENIALS_NOTICE).toContain("could not be read");
 	});
 
+	test("a corrupt file is never overwritten by a later denial: the session stays fail-closed", async () => {
+		const file = denialPath("sess-keep") as string;
+		mkdirSync(dirname(file), { recursive: true });
+		writeFileSync(file, "{ not json");
+		const live = manager();
+		live.setDenialSession("sess-keep");
+		registerTuiApprovalHandler(async () => "deny");
+		await live.requestPermission("run", "x", "othertool --go");
+		expect(readFileSync(file, "utf8")).toBe("{ not json");
+		// Resume: still unreadable, so the earlier command is refused with no one to ask.
+		registerTuiApprovalHandler(null);
+		process.env.EIGHT_HEADLESS = "1";
+		const resumed = manager();
+		resumed.setDenialSession("sess-keep");
+		expect(resumed.isDenialRecordUnreadable()).toBe(true);
+		resumed.enableInfiniteMode();
+		resumed.setAutoApprove(true);
+		expect(await resumed.requestPermission("run", "x", "deploytool --apply")).toBe(false);
+		expect(await resumed.requestPermission("run", "x", "othertool --go")).toBe(false);
+	});
+
 	test("the notice says earlier in this session, not before the crash", () => {
 		recordDenial("sess-words", "deploytool --apply");
 		expect(denialNotice(readDenials("sess-words"))[0]).toStartWith(

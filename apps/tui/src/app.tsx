@@ -2802,6 +2802,8 @@ export function App({
 		const denied = pm.setDenialSession(activeSessionId);
 		if (denied.length > 0) addSystemMessage(denialNotice(denied).join("\n"));
 		if (pm.isDenialRecordUnreadable()) addSystemMessage(UNREADABLE_DENIALS_NOTICE);
+		// A new session in this tab never inherits the previous session's go-back offer.
+		resumeAskRef.current = null;
 		// An interrupted turn: the active tab drops to the stricter of its mode and Ask.
 		if (!activeSessionId || !wasInterrupted(activeSessionId)) return;
 		const tab = activeTabIdRef.current;
