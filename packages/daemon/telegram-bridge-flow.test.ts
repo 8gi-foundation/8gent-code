@@ -74,6 +74,10 @@ function make(over: Record<string, unknown> = {}, transcript = CANARY, judgeRepl
 		},
 		...over,
 	}) as any;
+	// Hermetic: the constructor seeds voiceEnabled from the operator's real
+	// ~/.8gent/telegram-voice.json, so a machine with /voice on made every
+	// "does not speak" test fail (#4875). Each test starts with voice off.
+	b.voiceEnabled = false;
 	b.transcribe = async () => transcript;
 	b.dispatchTranscript = async (t: string) => void dispatched.push(t);
 	return {
