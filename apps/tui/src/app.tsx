@@ -1362,6 +1362,10 @@ export function App({
 	/** Whether the history picker is showing daemon sessions (/sessions) or local ones. */
 	const historyPickDaemonRef = useRef(false);
 	const updateConfirmRef = useRef<((q: string) => Promise<boolean>) | null>(null);
+	/** Set while /dj waits for the one yes to install a missing tool (#4810); the next line typed answers it. */
+	const djInstallAnswerRef = useRef<((yes: boolean) => void) | null>(null);
+	/** One no per session: after it, /dj play stops asking and shows the command as before. */
+	const djInstallDeclinedRef = useRef(false);
 	const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -5478,6 +5482,31 @@ export function App({
 							const { DJ } = await import("../../../packages/music/dj.js");
 							const dj = new DJ();
 							let result: string;
+							// A missing tool gets one offer to install it, one yes (#4810).
+							// doctor always offers; play, radio and resume stop asking after a no.
+							const wantsTools = ["play", "radio", "resume", "doctor", "status"].includes(djSub);
+							const isDoctor = djSub === "doctor" || djSub === "status";
+							if (wantsTools && (isDoctor || !djInstallDeclinedRef.current)) {
+								let lastProgress = 0;
+								const outcome = await dj.ensureTools({
+									ask: (question) =>
+										new Promise<boolean>((resolve) => {
+											djInstallAnswerRef.current = resolve;
+											addSystemMessage(question);
+										}),
+									say: (line) => {
+										// A refusal already shows the command through play/doctor below.
+										if (!/^Not installed\. Run:/.test(line)) addSystemMessage(line);
+									},
+									progress: (line) => {
+										// One status line, not a scroll: at most one update every 4 seconds.
+										if (Date.now() - lastProgress < 4000) return;
+										lastProgress = Date.now();
+										addSystemMessage(`Installing: ${line}`);
+									},
+								});
+								if (outcome === "declined") djInstallDeclinedRef.current = true;
+							}
 							switch (djSub) {
 								case "play": {
 									const query = djArgs.join(" ").trim();
@@ -6793,6 +6822,14 @@ export function App({
 		const { text: afterPaths, image: pastedNow } = imageInput.processInput(rawInput);
 		const attached = pastedNow ?? imageInput.getAttachedImage();
 		const input = afterPaths.trim();
+
+		// /dj is waiting on its one yes: y or an empty Enter installs, anything else declines (#4810).
+		if (djInstallAnswerRef.current) {
+			const answer = djInstallAnswerRef.current;
+			djInstallAnswerRef.current = null;
+			answer(/^(y|yes)?$/i.test(input));
+			return;
+		}
 
 		// During setup an empty Enter is an answer: it takes the default.
 		if (!input && !attached && !showOnboarding) return;

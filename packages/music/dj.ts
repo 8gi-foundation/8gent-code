@@ -205,6 +205,55 @@ export function installHint(plat: NodeJS.Platform = PLATFORM): string {
 	return "brew install mpv yt-dlp ffmpeg sox";
 }
 
+/** The tools /dj cannot play without, in the order they are installed. sox is optional. */
+export const REQUIRED_TOOLS = ["mpv", "yt-dlp", "ffmpeg"] as const;
+
+/** What the install runs: the command to show, and the one to spawn (null when 8gent must not run it). */
+export interface InstallPlan {
+	display: string;
+	run: { cmd: string; args: string[] } | null;
+}
+
+/** Termux ships yt-dlp as python-yt-dlp (it declares PROVIDES yt-dlp); elsewhere the name is the tool. */
+function packageFor(tool: string, plat: NodeJS.Platform): string {
+	return plat === "android" && tool === "yt-dlp" ? "python-yt-dlp" : tool;
+}
+
+/**
+ * The install for the missing tools. Termux and macOS (with brew on PATH) are
+ * run in place; Linux and Windows only show the command, because they need
+ * sudo or a bucket and 8gent never runs sudo.
+ */
+export function installPlan(
+	missing: readonly string[],
+	plat: NodeJS.Platform = PLATFORM,
+	hasBrew = true,
+): InstallPlan {
+	const pkgs = missing.map((t) => packageFor(t, plat));
+	if (plat === "android")
+		return {
+			display: `pkg install -y ${pkgs.join(" ")}`,
+			run: { cmd: "pkg", args: ["install", "-y", ...pkgs] },
+		};
+	if (plat === "linux") return { display: `sudo apt install ${pkgs.join(" ")}`, run: null };
+	if (plat === "win32") return { display: `scoop install ${pkgs.join(" ")}`, run: null };
+	return {
+		display: `brew install ${pkgs.join(" ")}`,
+		run: hasBrew ? { cmd: "brew", args: ["install", ...pkgs] } : null,
+	};
+}
+
+/** The last readable line of installer output, for the one status line. */
+export function lastProgressLine(chunk: string): string | null {
+	const clean = chunk.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, "\n");
+	const line = clean
+		.split("\n")
+		.map((l) => l.trim())
+		.filter(Boolean)
+		.pop();
+	return line ? line.slice(0, 100) : null;
+}
+
 /** How to look up a command on PATH without a POSIX shell: where.exe on Windows. */
 export function whichCommand(cmd: string, plat: NodeJS.Platform = PLATFORM): [string, string[]] {
 	return plat === "win32"
@@ -229,7 +278,16 @@ const MUSIC_DIR = join(HOME, "Music", "8gent");
 const RESUME_PATH = join(HOME, ".8gent", "dj-resume.json");
 
 // ---- Tool Detection ----
+type Which = (cmd: string) => string | null;
+let whichImpl: Which | null = null;
+
+/** Tests name where tools are found instead of looking on PATH; call with nothing to restore it. */
+export function setDjWhich(fn?: Which): void {
+	whichImpl = fn ?? null;
+}
+
 function which(cmd: string): string | null {
+	if (whichImpl) return whichImpl(cmd);
 	try {
 		const [bin, args] = whichCommand(cmd);
 		const out = execFileSync(bin, args, {
@@ -621,6 +679,79 @@ export class DJ {
 			sox: !!t.sox,
 			installCmd: installHint(),
 		};
+	}
+
+	/** The required tools that are not on PATH right now. */
+	missingTools(): string[] {
+		const t = detectTools();
+		const have: Record<string, string | null> = { mpv: t.mpv, "yt-dlp": t.ytdlp, ffmpeg: t.ffmpeg };
+		return REQUIRED_TOOLS.filter((n) => !have[n]);
+	}
+
+	/**
+	 * Offer to install what is missing, with one yes (#4810). Asks once; on yes
+	 * runs the platform install, reports its last line as progress, looks for the
+	 * tools again, and says whether the DJ can play. On no, or where 8gent must
+	 * not run the command, it shows the command and changes nothing. Nothing runs
+	 * without the yes.
+	 */
+	async ensureTools(io: {
+		ask: (question: string) => Promise<boolean>;
+		say: (line: string) => void;
+		progress?: (line: string) => void;
+		plat?: NodeJS.Platform;
+	}): Promise<"none" | "declined" | "manual" | "installed" | "failed"> {
+		const missing = this.missingTools();
+		if (missing.length === 0) return "none";
+		const plat = io.plat ?? PLATFORM;
+		const plan = installPlan(missing, plat, !!which("brew"));
+		if (!plan.run) {
+			io.say(`${missing.join(", ")} not installed. Run: ${plan.display}`);
+			return "manual";
+		}
+		const yes = await io.ask(
+			`${missing.join(", ")} not installed. Install now with \`${plan.display}\`? (y / Enter = yes, anything else = no)`,
+		);
+		if (!yes) {
+			io.say(`Not installed. Run: ${plan.display}`);
+			return "declined";
+		}
+		const code = await new Promise<number | null>((resolve) => {
+			let settled = false;
+			const done = (c: number | null) => {
+				if (!settled) {
+					settled = true;
+					resolve(c);
+				}
+			};
+			try {
+				const child = spawnImpl(plan.run!.cmd, plan.run!.args, {
+					stdio: ["ignore", "pipe", "pipe"],
+				});
+				const onData = (d: unknown) => {
+					const line = lastProgressLine(String(d));
+					if (line) io.progress?.(line);
+				};
+				child.stdout?.on("data", onData);
+				child.stderr?.on("data", onData);
+				child.on("error", () => done(null));
+				child.on("close", (c) => done(c));
+			} catch {
+				done(null);
+			}
+		});
+		tools = null; // look again: the install changed what is on PATH
+		const still = this.missingTools();
+		if (code === 0 && still.length === 0) {
+			io.say("Installed. mpv, yt-dlp and ffmpeg are ready.");
+			return "installed";
+		}
+		const why =
+			code === 0
+				? `still missing: ${still.join(", ")}`
+				: `install exited ${code ?? "without starting"}`;
+		io.say(`Install did not finish (${why}). Run it yourself: ${plan.display}`);
+		return "failed";
 	}
 
 	/** Play a YouTube video/song by query or URL */
