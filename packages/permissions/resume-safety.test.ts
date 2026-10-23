@@ -76,8 +76,10 @@ describe("C2: a resume after an interrupted turn starts in the stricter mode", (
 		expect(start).toEqual({ mode: "ask", clamped: true });
 		const holder = createPermissionHolder(start.mode);
 		expect(effectivePermissionMode(holder)).toBe("ask");
-		expect(resumeReturnQuestion(false)).toContain("Infinite");
-		expect(resumeReturnQuestion(true)).toContain("yolo");
+		expect(resumeReturnQuestion(false)).toStartWith("Go back to Infinite?");
+		expect(resumeReturnQuestion(true)).toStartWith("Go back to yolo?");
+		// The card shows about 41 characters: the whole question must be inside them.
+		expect(resumeReturnQuestion(false).indexOf("?")).toBeLessThan(41);
 	});
 
 	test("a real killed turn in the durable ledger is what clamps the resume", () => {

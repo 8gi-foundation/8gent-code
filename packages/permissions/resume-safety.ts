@@ -49,7 +49,8 @@ export function resumeLaunchMode(opts: {
 
 /** The one question after a clamped resume. `yolo` names the way back the person had chosen. */
 export function resumeReturnQuestion(yolo: boolean): string {
-	return `The last turn was cut off, so this session resumed in Ask. Go back to ${yolo ? "yolo" : "Infinite"}?`;
+	// The question leads: the approval card cuts long text at about 41 characters.
+	return `Go back to ${yolo ? "yolo" : "Infinite"}? Last turn was cut off, so this tab resumed in Ask.`;
 }
 
 // ── C3: the denial ledger ────────────────────────────────────────────
