@@ -148,7 +148,10 @@ function exists(p: string): boolean {
 		return true;
 	} catch (err) {
 		// Unreadable is not absent: a path the OS refuses to stat is still asked about.
-		return (err as NodeJS.ErrnoException).code !== "ENOENT" && (err as NodeJS.ErrnoException).code !== "ENOTDIR";
+		return (
+			(err as NodeJS.ErrnoException).code !== "ENOENT" &&
+			(err as NodeJS.ErrnoException).code !== "ENOTDIR"
+		);
 	}
 }
 
