@@ -67,6 +67,7 @@ import {
 	ollamaContextWindowLookup,
 } from "../orchestration/local-model-detect";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
+import { isInfiniteMode } from "../permissions/index";
 import { effectivePermissionMode, systemOneEnvFor } from "../permissions/permission-mode";
 import { forceLocalModel, privacyGate } from "../permissions/privacy-router";
 import {
@@ -137,6 +138,14 @@ import { projectInstructionsSection } from "./instruction-loader";
 import { getModeManager } from "./modes";
 import { needsPlanningGate as promptNeedsPlanningGate } from "./planning-gate";
 import { isLocalProvider } from "./registry";
+import {
+	HOME_CHAT_NOTE,
+	isHarnessSource,
+	isHomeChat,
+	isSelfQuestion,
+	loadSlashFacts,
+	selfQuestionNote,
+} from "./self-questions";
 import { SMALL_TALK_NOTE, isGreeting, isSmallTalk } from "./small-talk";
 import { verifyNudgeFor } from "./verify-gate";
 import { buildWelcome, gatherWelcomeFacts } from "./welcome";
@@ -171,6 +180,7 @@ import {
 	TICKET_FILE_NOTE,
 	buildToolCatalogSegment,
 	environmentNote,
+	isPlainHome,
 	workingProjectNote,
 } from "./prompts/system-prompt";
 import {
@@ -284,6 +294,7 @@ import {
 	toOpenAiV1Base,
 	toolDefsToSpecs,
 } from "../ai";
+import { CARRY_ON_SILENT_CALLS, resolveSilentCalls } from "../ai/silent-calls";
 import { resolveUselessStreak } from "../ai/useless-streak";
 import { cdPrefixShape } from "../permissions/cd-prefix";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
@@ -534,6 +545,8 @@ export class Agent {
 	private turnCounter = 0;
 	/** The greeting welcome is shown once per session (#4767). */
 	private welcomed = false;
+	/** Turns this session has started; the first one is told apart from the rest (#4791). */
+	private turnsSeen = 0;
 	// A stop pressed in this turn (#3521). chat() awaits several pre-turn steps
 	// before a controller is armed, and the native loop re-arms after a 429
 	// backoff; without this latch an ESC in either window was dropped and the
@@ -2031,6 +2044,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// off by default): N empty or error results in a row and the next
 				// round gets no tools, only a note to answer with what it has.
 				uselessStreak: resolveUselessStreak(),
+				// Report after a run of silent tool calls (#4791).
+				silentCalls: this.silentCallsLimit(),
+				silentProgress: this.silentProgressSink(),
 				// Steering (D1): delivered after the running tool calls; then the budget notice.
 				steer: () => [...this.drainSteers(), ...budgetDrain()],
 			});
@@ -2644,6 +2660,43 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	/**
+	 * Silent tool calls before the turn stops to report (#4791). A person is
+	 * waiting on a top-level interactive turn; a headless run, a child 8gent and a
+	 * Table officer are driven by a task or a channel and run to the end.
+	 */
+	/** @internal exposed for tests */
+	silentCallsLimit(): number {
+		if (this.config.headless || this.agentDepth > 0 || this.config.agentScope === "__table__")
+			return 0;
+		const n = resolveSilentCalls();
+		// Yolo or Infinite already said keep going: a longer leash, and no question.
+		return n > 0 && this.silentCarryOn() ? Math.max(n, CARRY_ON_SILENT_CALLS) : n;
+	}
+
+	private silentCarryOn(): boolean {
+		return (
+			this.infiniteModeActive ||
+			isInfiniteMode() ||
+			// The TUI's /mode yolo and Shift+Tab set the tab's permission holder.
+			(this.config.permission !== undefined &&
+				effectivePermissionMode(this.config.permission) === "infinite")
+		);
+	}
+
+	/** The progress callback when this turn carries on, else undefined (stop and ask). */
+	private silentProgressSink(): ((line: string) => void) | undefined {
+		if (!this.silentCarryOn()) return undefined;
+		return (text) =>
+			this.config.events?.onStepFinish?.({
+				text,
+				stepNumber: 0,
+				toolCalls: [],
+				usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+				finishReason: "other",
+			});
+	}
+
+	/**
 	 * The welcome block for the first greeting of a top-level session (#4767), or null:
 	 * not a greeting, already welcomed, headless, a child session, or any fact failed to gather.
 	 * Null keeps the plain small-talk note; a welcome failure never fails the turn.
@@ -2704,6 +2757,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				? "The user attached an image with no text. Describe what you see and help with anything relevant in the image."
 				: userMessage);
 
+		const firstTurn = this.turnsSeen++ === 0;
 		// A greeting alone is answered with no tools offered (#4756): the cause of the
 		// folder tour was the act-first rules meeting a message that asked for nothing.
 		const smallTalkTurn =
@@ -2719,6 +2773,33 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 			this.messageHistory.push({ role: "user", content: harnessNote(SMALL_TALK_NOTE) });
 		}
+
+		// A question about 8gent itself is answered from its own registry, and chat on
+		// the first turn in a plain home folder gets no repo tour (#4791). Both offer no
+		// tools, like small talk. Not for headless runs, child 8gents, Table, or images.
+		let lightNote: string | null = null;
+		if (
+			!smallTalkTurn &&
+			!imageBase64 &&
+			!this.config.headless &&
+			this.agentDepth === 0 &&
+			this.config.agentScope !== "__table__"
+		) {
+			const cwd = this.config.workingDirectory || process.cwd();
+			if (!isHarnessSource(cwd)) {
+				const facts = await loadSlashFacts();
+				if (isSelfQuestion(textForAgent, facts?.names)) {
+					lightNote = selfQuestionNote(textForAgent, facts);
+				}
+			}
+			if (lightNote === null && firstTurn && isPlainHome(cwd) && isHomeChat(textForAgent)) {
+				lightNote = HOME_CHAT_NOTE;
+			}
+			if (lightNote !== null) {
+				this.messageHistory.push({ role: "user", content: harnessNote(lightNote) });
+			}
+		}
+		const noToolsTurn = smallTalkTurn || lightNote !== null;
 
 		// If image attached, fire off parallel vision interpretation (like /btw)
 		// The main agent stays on its text model — never switches.
@@ -2826,7 +2907,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			needsClarification(textForAgent) &&
 			!imageBase64 &&
 			!quickPrompt &&
-			!smallTalkTurn &&
+			!noToolsTurn &&
 			!isNoToolScope(this.config.agentScope)
 		) {
 			this.proactiveGatherer = createGatherer(textForAgent);
@@ -2863,7 +2944,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// gatherer already injected a clarifying question. Also skipped for a
 		// prompt the quick-answer lane takes (#3411, 8SO F1): its grep strategy
 		// runs run_command, outside the lane's read-only tools and budget.
-		if (!this.proactiveGatherer && !quickPrompt && !smallTalkTurn) {
+		if (!this.proactiveGatherer && !quickPrompt && !noToolsTurn) {
 			await this.tryRunPreToolRouter(textForAgent);
 		}
 
@@ -2954,7 +3035,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		const providerName = providerConfig.name as string;
 		const { isLocalProvider, effectiveTools, textToolAllowlist } = await this.turnToolSet(
 			providerName,
-			smallTalkTurn,
+			noToolsTurn,
 		);
 
 		const harness = this.harnessProfileFor(providerConfig.model, isLocalProvider);
@@ -3009,7 +3090,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				localCoreTools: textToolAllowlist,
 				chatStartTime,
 				textForAgent,
-				smallTalk: smallTalkTurn,
+				smallTalk: noToolsTurn,
 			});
 			await this.readServerContextWindow();
 			await this.compactIfNeeded(providerConfig);
@@ -3068,6 +3149,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			maxSteps: tunedParams.maxSteps,
 			maxOutputTokens: tunedParams.maxOutputTokens,
 			nudgeFraction: harness.nudgeFraction,
+			silentCalls: this.silentCallsLimit(),
+			silentProgress: this.silentProgressSink(),
 			temperature: tunedParams.temperature,
 			topP: tunedParams.topP,
 			topK: tunedParams.topK,

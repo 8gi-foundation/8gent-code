@@ -90,6 +90,7 @@ import {
 	formatHarnessNote,
 	isRefusedToolResult,
 } from "./claim-check";
+import { SilentCalls } from "./silent-calls";
 import {
 	OutputCapError,
 	type TextToolCall,
@@ -154,6 +155,19 @@ export interface TextToolAgentOptions {
 	 * 0 or unset: off.
 	 */
 	uselessStreak?: number;
+	/**
+	 * Report after a run of silent tool calls (#4791, EIGHT_SILENT_CALLS). After
+	 * this many tool calls with no prose between them (see silent-calls.ts), the
+	 * next model turn gets a harness note and no tools: it says what it has and
+	 * asks whether to keep going. 0 or unset: off.
+	 */
+	silentCalls?: number;
+	/**
+	 * With silentCalls: report instead of stopping. At the threshold this gets
+	 * one progress line and the turn carries on, tools on, no question. For a
+	 * person who already said keep going (yolo, Infinite).
+	 */
+	silentProgress?: (line: string) => void;
 	/**
 	 * Steering (D1). Drained before every model call after the first: each
 	 * string it returns joins the conversation as a user message, after the
@@ -702,6 +716,9 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 	const streak = new UselessStreak(opts.uselessStreak ?? 0);
 	// Set once the streak trips: the next round runs with no tools and ends the turn.
 	let answerOnly = false;
+	const silent = new SilentCalls(opts.silentCalls ?? 0);
+	// Which guard ended tool use: its note goes with the answer-only round.
+	let answerOnlyNote = "";
 
 	// Local working copy of the conversation; runTextToolTurn never mutates it,
 	// so we own the growth here.
@@ -1027,6 +1044,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		// ran (8SO review of #3645). The plan check (#3098) still reads every
 		// update_plan call from the log.
 		let ranWork = false;
+		const roundWorkCalls: string[] = [];
 		let roundHadSuccess = false;
 		const roundBlockReasons: string[] = [];
 		const roundImages: string[] = [];
@@ -1063,6 +1081,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 			const isPlanUpdate = tc.name === PLAN_TOOL_NAME;
 			if (!isPlanUpdate) {
 				ranWork = true;
+				roundWorkCalls.push(tc.name);
 				streak.record(tc.name, tc.arguments, result);
 				// A gate block ("[TOOLG8 BLOCKED]", "[BLOCKED]") is a refusal, not
 				// progress, exactly like an "Error..." result.
@@ -1131,13 +1150,21 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		// stripped blocks) as the assistant message; the model still has its own
 		// emitted tool_call intent in its head via the result framing below.
 		if (cutOffNote) resultParts.push(cutOffNote);
-		if (streak.tripped() && round < maxRounds) answerOnly = true;
+		silent.round(replyText, roundWorkCalls);
+		if (opts.silentProgress && silent.tripped()) opts.silentProgress(silent.takeProgress());
+		if (streak.tripped() && round < maxRounds) {
+			answerOnly = true;
+			answerOnlyNote = streak.note();
+		} else if (!opts.silentProgress && silent.tripped() && round < maxRounds) {
+			answerOnly = true;
+			answerOnlyNote = silent.note();
+		}
 		messages = [
 			...messages,
 			{ role: "assistant", content: replyText },
 			{
 				role: "user",
-				content: [...resultParts, "", answerOnly ? streak.note() : FOLLOW_UP_INSTRUCTION].join(
+				content: [...resultParts, "", answerOnly ? answerOnlyNote : FOLLOW_UP_INSTRUCTION].join(
 					"\n",
 				),
 				...(roundImages.length > 0 ? { images: roundImages } : {}),

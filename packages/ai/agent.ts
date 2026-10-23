@@ -14,6 +14,7 @@ import type { GenerateTextResult, LanguageModel, ModelMessage, ToolSet } from "a
 import { resolveRetrySettings } from "../settings/retry";
 import { loadSettings } from "../settings/store";
 import { type ProviderConfig, createModel } from "./providers";
+import { silentCallsNoteForSteps, silentCallsRunForSteps } from "./silent-calls";
 import {
 	type AgentTools,
 	type RuntimeParams,
@@ -24,6 +25,10 @@ import {
 import { createBudgetDrain, resolveTurnBudgetMs } from "./turn-budget";
 
 export interface EightAgentConfig {
+	/** Tool calls with no prose between them before a step runs without tools and reports (#4791). 0 or unset: off. */
+	silentCalls?: number;
+	/** With silentCalls: one progress line at the threshold and the run carries on (#4794). */
+	silentProgress?: (line: string) => void;
 	/** Provider configuration */
 	provider: ProviderConfig;
 	/** System instructions */
@@ -261,7 +266,18 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		startedAt: config.turnStartedAt,
 		nudgeFraction: config.nudgeFraction,
 	});
-	const steer = (): string[] => [...(config.steer?.() ?? []), ...budgetDrain()];
+	// Silent tool calls (#4791): after N calls with no prose, one step runs with
+	// tool use off and a note asking for a progress line and whether to keep going.
+	const silentThreshold = config.silentCalls ?? 0;
+	const silentPending: string[] = [];
+	let silentFired = false;
+	// Carry-on mode: steps before this index were already reported.
+	let silentFrom = 0;
+	const steer = (): string[] => [
+		...(config.steer?.() ?? []),
+		...budgetDrain(),
+		...silentPending.splice(0),
+	];
 
 	// Retries per request: only when the user set settings.retry.maxRetries; otherwise the
 	// AI SDK's own default stays (C4).
@@ -295,8 +311,19 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		// throwing callback never breaks the loop. Steering (D1) is the one thing
 		// that changes the step: drained messages are spliced in, see steerMessages.
 		prepareStep:
-			config.onStepStart || config.steer || budgetMs > 0
-				? async ({ stepNumber, messages }: { stepNumber: number; messages: ModelMessage[] }) => {
+			config.onStepStart || config.steer || budgetMs > 0 || silentThreshold > 0
+				? async ({
+						stepNumber,
+						messages,
+						steps,
+					}: {
+						stepNumber: number;
+						messages: ModelMessage[];
+						steps?: ReadonlyArray<{
+							text?: string;
+							toolCalls?: ReadonlyArray<{ toolName?: string }>;
+						}>;
+					}) => {
 						try {
 							await config.onStepStart?.({ stepNumber });
 						} catch {
@@ -304,7 +331,29 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 						}
 						// Each generate() is a new turn: restart the budget clock.
 						if (stepNumber === 0) budgetDrain.reset();
+						if (stepNumber === 0) {
+							silentFired = false;
+							silentFrom = 0;
+						}
+						if (config.silentProgress && silentThreshold > 0 && stepNumber > 0) {
+							const run = silentCallsRunForSteps((steps ?? []).slice(silentFrom), silentThreshold);
+							if (run) {
+								silentFrom = steps?.length ?? 0;
+								config.silentProgress(run.takeProgress());
+							}
+						}
+						let silentStop = false;
+						if (!config.silentProgress && !silentFired && silentThreshold > 0 && stepNumber > 0) {
+							const note = silentCallsNoteForSteps(steps ?? [], silentThreshold);
+							if (note) {
+								silentFired = true;
+								silentStop = true;
+								silentPending.push(note);
+							}
+						}
 						const steered = steerMessages(steerLog, stepNumber, messages, steer);
+						if (silentStop)
+							return { ...(steered ? { messages: steered } : {}), toolChoice: "none" as const };
 						return steered ? { messages: steered } : undefined;
 					}
 				: undefined,
