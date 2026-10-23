@@ -7,7 +7,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createHash, randomBytes } from "node:crypto";
 import { connect } from "node:net";
 import {
+	MAX_WS_FRAGMENTS,
 	MAX_WS_MESSAGE,
+	MAX_WS_TOTAL_BUFFERED,
 	type NodeServer,
 	type NodeWebSocket,
 	decodeFrame,
@@ -332,4 +334,238 @@ describe("websocket", () => {
 		expect(reply).toBe("echo:ping-from-client");
 		ws.close();
 	});
+});
+
+// ── abuse: the cases 8SO fuzzed against the built daemon ─────────────────────
+
+/** The close code of the first close frame a client has received, or null. */
+const closeCodeOf = (c: Awaited<ReturnType<typeof wsClient>>): number | null => {
+	const f = c.frames().find((x) => x.opcode === 0x8);
+	return f ? (f.payload.length >= 2 ? f.payload.readUInt16BE(0) : 0) : null;
+};
+
+async function rawHttp(port: number, text: string): Promise<string> {
+	const sock = connect(port, "127.0.0.1");
+	let out = "";
+	sock.on("data", (d) => void (out += d.toString("latin1")));
+	sock.on("error", () => {});
+	sock.write(text);
+	await Bun.sleep(200);
+	sock.destroy();
+	return out;
+}
+
+describe("a request the Fetch API refuses is a 400, never a crash", () => {
+	test("bad Host headers and targets, plain and upgrade, leave the server serving", async () => {
+		const { port } = start();
+		const hosts = ["a b", "a<b>", "u:p@h", "h:99999"];
+		for (const host of hosts) {
+			const plain = await rawHttp(
+				port,
+				`GET /echo HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`,
+			);
+			expect(
+				plain.startsWith("HTTP/1.1 400") ||
+					plain.startsWith("HTTP/1.1 404") ||
+					plain.startsWith("HTTP/1.1 200"),
+			).toBe(true);
+			// Bun's own Request is more lenient than Node's, so whether these 400 depends on the
+			// runtime (node-daemon.test.ts pins the Node answer); here the server must just survive.
+			await rawHttp(
+				port,
+				`GET /ws HTTP/1.1\r\nHost: ${host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+			);
+		}
+		for (const target of ["*", "http://evil.example/echo", "//x"])
+			await rawHttp(port, `GET ${target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n`);
+		const res = await fetch(`http://127.0.0.1:${port}/echo`, { method: "POST", body: "still-up" });
+		expect(await res.text()).toBe("POST:still-up");
+	});
+});
+
+describe("websocket: control frames and close handshake follow RFC 6455", () => {
+	test("a ping over 125 bytes, or a fragmented control frame, closes with 1002 and is not echoed", async () => {
+		const { port } = start();
+		const a = await wsClient(port);
+		a.sock.write(clientFrame(0x9, Buffer.alloc(126, 65)));
+		await wait(() => closeCodeOf(a) !== null);
+		expect(closeCodeOf(a)).toBe(1002);
+		expect(a.frames().some((f) => f.opcode === 0xa)).toBe(false);
+		const b = await wsClient(port);
+		b.sock.write(clientFrame(0x9, Buffer.from("hi"), false));
+		await wait(() => closeCodeOf(b) !== null);
+		expect(closeCodeOf(b)).toBe(1002);
+		expect(b.frames().some((f) => f.opcode === 0xa)).toBe(false);
+	});
+
+	test("a 125-byte ping is still answered", async () => {
+		const { port } = start();
+		const c = await wsClient(port);
+		c.sock.write(clientFrame(0x9, Buffer.alloc(125, 66)));
+		await wait(() => c.frames().some((f) => f.opcode === 0xa));
+		expect(c.frames().find((f) => f.opcode === 0xa)?.payload.length).toBe(125);
+	});
+
+	test("a close frame with one payload byte, a reserved code or a bad reason is refused", async () => {
+		const code = (n: number) => {
+			const b = Buffer.alloc(2);
+			b.writeUInt16BE(n);
+			return b;
+		};
+		const { port } = start();
+		const cases: [Buffer, number][] = [
+			[Buffer.from([0x03]), 1002],
+			[code(0), 1002],
+			[code(999), 1002],
+			[code(1004), 1002],
+			[code(1005), 1002],
+			[code(1006), 1002],
+			[code(1015), 1002],
+			[code(2999), 1002],
+			[code(5000), 1002],
+			[Buffer.concat([code(1000), Buffer.from([0xff, 0xfe])]), 1007],
+		];
+		for (const [payload, expected] of cases) {
+			const c = await wsClient(port);
+			c.sock.write(clientFrame(0x8, payload));
+			await wait(() => closeCodeOf(c) !== null);
+			expect({ payload: payload.toString("hex"), got: closeCodeOf(c) }).toEqual({
+				payload: payload.toString("hex"),
+				got: expected,
+			});
+		}
+	});
+
+	test("an empty close and the valid codes (1000, 1001, 3000, 4999) are echoed", async () => {
+		const code = (n: number) => {
+			const b = Buffer.alloc(2);
+			b.writeUInt16BE(n);
+			return b;
+		};
+		const { port, events } = start();
+		for (const n of [1000, 1001, 3000, 4999]) {
+			const c = await wsClient(port);
+			c.sock.write(clientFrame(0x8, code(n)));
+			await wait(() => closeCodeOf(c) === n);
+			await wait(() => events.includes(`close:${n}`));
+		}
+		const e = await wsClient(port);
+		e.sock.write(clientFrame(0x8, Buffer.alloc(0)));
+		await wait(() => closeCodeOf(e) === 1000);
+	});
+});
+
+describe("websocket: text must be UTF-8", () => {
+	test("invalid UTF-8 in a text message closes with 1007 and never reaches the handler", async () => {
+		const { port, events } = start();
+		const c = await wsClient(port);
+		c.sock.write(clientFrame(0x1, Buffer.from([0xff, 0xfe, 0xfd])));
+		await wait(() => closeCodeOf(c) !== null);
+		expect(closeCodeOf(c)).toBe(1007);
+		expect(events.some((e) => e.startsWith("s:"))).toBe(false);
+	});
+
+	test("a multibyte character split across fragments is one valid message", async () => {
+		const { port, events } = start();
+		const c = await wsClient(port);
+		const bytes = Buffer.from("€", "utf8"); // 3 bytes
+		c.sock.write(clientFrame(0x1, bytes.subarray(0, 1), false));
+		c.sock.write(clientFrame(0x0, bytes.subarray(1), true));
+		await wait(() => events.includes("s:€"));
+	});
+});
+
+describe("websocket: memory and CPU stay bounded", () => {
+	test("more fragments than MAX_WS_FRAGMENTS closes with 1009", async () => {
+		const { port, events } = start();
+		const c = await wsClient(port);
+		const one = clientFrame(0x0, Buffer.from("a"), false);
+		c.sock.write(clientFrame(0x1, Buffer.from("a"), false));
+		c.sock.write(Buffer.concat(Array.from({ length: MAX_WS_FRAGMENTS + 10 }, () => one)));
+		await wait(() => closeCodeOf(c) !== null);
+		expect(closeCodeOf(c)).toBe(1009);
+		expect(events.some((e) => e.startsWith("s:") || e.startsWith("b:"))).toBe(false);
+	});
+
+	test("after a protocol error nothing the peer sends is handled", async () => {
+		const { port, events } = start();
+		const c = await wsClient(port);
+		c.sock.write(Buffer.from([0x81, 0x01, 0x61])); // unmasked
+		await wait(() => closeCodeOf(c) === 1002);
+		for (let i = 0; i < 20; i++) c.sock.write(clientFrame(0x1, Buffer.from("late")));
+		await Bun.sleep(150);
+		expect(events.some((e) => e === "s:late")).toBe(false);
+	});
+
+	test("a big frame dripped in small writes is not re-copied per chunk (linear CPU)", async () => {
+		const { port, events } = start();
+		const c = await wsClient(port);
+		const size = 4 * 1024 * 1024;
+		const frame = clientFrame(0x2, Buffer.alloc(size, 7));
+		const before = process.cpuUsage();
+		for (let at = 0; at < frame.length; at += 256) {
+			c.sock.write(frame.subarray(at, at + 256));
+			await new Promise((r) => setImmediate(r));
+		}
+		await wait(() => events.includes(`b:${size}`));
+		const used = process.cpuUsage(before);
+		// The client's own work is in this number too; the old per-chunk copy cost many seconds.
+		expect((used.user + used.system) / 1e6).toBeLessThan(6);
+	}, 60_000);
+
+	test("partial frames held by all connections together are capped (1013)", async () => {
+		const { port } = start();
+		const clients: Awaited<ReturnType<typeof wsClient>>[] = [];
+		const frameHead = Buffer.alloc(14);
+		frameHead[0] = 0x82;
+		frameHead[1] = 0xff;
+		frameHead.writeBigUInt64BE(BigInt(MAX_WS_MESSAGE), 2);
+		const chunk = Buffer.alloc(MAX_WS_MESSAGE - 1, 1);
+		const n = Math.ceil(MAX_WS_TOTAL_BUFFERED / MAX_WS_MESSAGE) + 3;
+		for (let i = 0; i < n; i++) {
+			const c = await wsClient(port);
+			c.sock.write(frameHead);
+			c.sock.write(chunk);
+			clients.push(c);
+		}
+		await wait(() => clients.some((c) => closeCodeOf(c) === 1013));
+		for (const c of clients) c.sock.destroy();
+	}, 60_000);
+
+	test("a peer that never reads is cut off instead of queued for ever (1013)", async () => {
+		const { port, sockets } = start();
+		const c = await wsClient(port);
+		c.sock.pause();
+		await wait(() => sockets.length === 1);
+		const ws = sockets[0] as NodeWebSocket;
+		const mib = Buffer.alloc(1024 * 1024, 5);
+		for (let i = 0; i < 400 && ws.readyState === 1; i++) ws.send(mib);
+		expect(ws.readyState).not.toBe(1);
+		c.sock.destroy();
+	}, 30_000);
+
+	test("an idle peer that does not answer pings is dropped; one that does stays", async () => {
+		const { port, events } = start({
+			websocket: {
+				idleTimeout: 1,
+				open(ws) {
+					events.push(`open:${ws.remoteAddress}`);
+				},
+				close(_ws, code) {
+					events.push(`close:${code}`);
+				},
+			},
+		});
+		const silent = await wsClient(port);
+		const polite = await wsClient(port);
+		const iv = setInterval(() => {
+			if (polite.frames().some((f) => f.opcode === 0x9))
+				polite.sock.write(clientFrame(0xa, Buffer.alloc(0)));
+		}, 100);
+		await wait(() => silent.closed());
+		await Bun.sleep(300);
+		expect(polite.closed()).toBe(false);
+		clearInterval(iv);
+		polite.sock.destroy();
+	}, 30_000);
 });

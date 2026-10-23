@@ -333,10 +333,31 @@ export const ANDROID_FOREGROUND_COMMAND = "8gent daemon run";
 const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /**
+ * HOME and PREFIX come from the environment and land in a file runit executes: the shebang line
+ * holds PREFIX unquoted, so a newline or a space in it would start a new line or a new
+ * argument of the script. Both must be plain absolute paths: no control character, and PREFIX
+ * (the interpreter) no whitespace either. Anything else is refused, never written.
+ */
+export function assertPlainServicePath(
+	what: string,
+	p: string,
+	opts: { noSpace?: boolean } = {},
+): void {
+	const bad = /[\u0000-\u001f\u007f]/.test(p) || (opts.noSpace === true && /\s/.test(p));
+	if (!p.startsWith("/") || bad) {
+		throw new ServiceError(
+			`${what} must be an absolute path with no control characters${opts.noSpace ? " or spaces" : ""}; refusing to write a service script from ${JSON.stringify(p).slice(0, 80)}`,
+		);
+	}
+}
+
+/**
  * The runit `run` script. runit supervises it and restarts it when it exits.
  * Console output goes to a log file because a service has no terminal.
  */
 export function termuxRunScript(ctx: ServiceContext): string {
+	assertPlainServicePath("PREFIX", ctx.prefix ?? DEFAULT_TERMUX_PREFIX, { noSpace: true });
+	assertPlainServicePath("HOME", ctx.home);
 	const { consoleLog } = paths(ctx);
 	return `#!${path.posix.join(ctx.prefix ?? DEFAULT_TERMUX_PREFIX, "bin", "sh")}
 cd ${shQuote(ctx.home)} || exit 1
@@ -461,7 +482,8 @@ async function execute(step: Step, log: (line: string) => void): Promise<void> {
 			if (step.mode) chmodSync(step.path, step.mode);
 			return;
 		case "remove":
-			rmSync(step.path, { force: true, recursive: true });
+			// Only the service directory itself is removed recursively; every other path is one file.
+			rmSync(step.path, { force: true, recursive: path.basename(step.path) === SERVICE_LABEL });
 			return;
 		case "powershell": {
 			const res = await exec(powershellArgv(step.script));
@@ -554,13 +576,17 @@ export function hostContext(program: string[]): ServiceContext {
 		try {
 			user = os.userInfo().username;
 		} catch {}
+		const home = process.env.HOME || os.homedir();
+		const prefix = process.env.PREFIX || DEFAULT_TERMUX_PREFIX;
+		assertPlainServicePath("HOME", home);
+		assertPlainServicePath("PREFIX", prefix, { noSpace: true });
 		return {
 			platform,
-			home: process.env.HOME || os.homedir(),
+			home,
 			program,
 			uid: process.getuid?.() ?? 0,
 			user,
-			prefix: process.env.PREFIX || DEFAULT_TERMUX_PREFIX,
+			prefix,
 		};
 	}
 	const account = os.userInfo();

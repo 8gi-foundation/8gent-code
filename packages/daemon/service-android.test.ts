@@ -260,3 +260,98 @@ exit 0
 		await expect(runOperation("stop", ctx, () => {})).rejects.toThrow("8gent daemon install");
 	});
 });
+
+describe("the environment cannot steer the run script or the uninstall (8SO review)", () => {
+	const envKeys = ["TERMUX_VERSION", "PREFIX", "HOME"] as const;
+	const saved: Record<string, string | undefined> = {};
+	beforeEach(() => {
+		for (const k of envKeys) saved[k] = process.env[k];
+	});
+	afterEach(() => {
+		for (const k of envKeys) {
+			if (saved[k] === undefined) delete process.env[k];
+			else process.env[k] = saved[k];
+		}
+	});
+
+	test("a PREFIX or HOME that would start a new script line or argument is refused, never written", () => {
+		const bad: Partial<ServiceContext>[] = [
+			{ prefix: `${PREFIX}\ntouch /tmp/pwned` },
+			{ prefix: `${PREFIX}\rx` },
+			{ prefix: `${PREFIX} -x` },
+			{ prefix: `${PREFIX}\u0000x` },
+			{ prefix: "relative/usr" },
+			{ home: `${termux.home}\nid` },
+			{ home: "relative/home" },
+		];
+		for (const b of bad) {
+			expect(() => termuxRunScript({ ...termux, ...b }), JSON.stringify(b)).toThrow(
+				/absolute path/,
+			);
+		}
+		// A space in HOME is fine: it is single-quoted, not a shebang.
+		expect(termuxRunScript({ ...termux, home: "/data/with space/home" })).toContain(
+			"cd '/data/with space/home'",
+		);
+		// The shebang and the cd line are the only ones that carry the paths.
+		expect(termuxRunScript(termux).split("\n").length).toBe(4);
+	});
+
+	test("hostContext refuses the same values from the environment", () => {
+		process.env.TERMUX_VERSION = "0.118.3";
+		process.env.HOME = "/data/data/com.termux/files/home";
+		process.env.PREFIX = `${PREFIX}\ntouch /tmp/pwned`;
+		expect(() => hostContext(["node", "cli.js", "daemon", "run"])).toThrow(/PREFIX/);
+		process.env.PREFIX = PREFIX;
+		process.env.HOME = "data/home";
+		expect(() => hostContext(["node", "cli.js", "daemon", "run"])).toThrow(/HOME/);
+	});
+
+	describe("uninstall removes the service directory and nothing else", () => {
+		let root: string;
+		beforeEach(() => {
+			root = mkdtempSync(path.join(tmpdir(), "termux-rm-"));
+		});
+		afterEach(() => rmSync(root, { recursive: true, force: true }));
+		const ctxFor = (prefix: string): ServiceContext => ({ ...termux, home: root, prefix });
+
+		test("a service directory that is a symlink is unlinked; its target and contents stay", async () => {
+			const prefix = path.join(root, "usr");
+			const elsewhere = path.join(root, "elsewhere");
+			mkdirSync(path.join(prefix, "var", "service"), { recursive: true });
+			mkdirSync(elsewhere, { recursive: true });
+			writeFileSync(path.join(elsewhere, "keep.txt"), "keep");
+			const { symlinkSync } = await import("node:fs");
+			symlinkSync(elsewhere, path.join(prefix, "var", "service", "com.8gent.daemon"));
+			await runOperation("uninstall", ctxFor(prefix), () => {});
+			expect(existsSync(path.join(prefix, "var", "service", "com.8gent.daemon"))).toBe(false);
+			expect(readFileSync(path.join(elsewhere, "keep.txt"), "utf8")).toBe("keep");
+		});
+
+		test("only the com.8gent.daemon directory goes; its siblings and parents stay", async () => {
+			const prefix = path.join(root, "usr");
+			const svc = path.join(prefix, "var", "service");
+			mkdirSync(path.join(svc, "com.8gent.daemon", "log"), { recursive: true });
+			writeFileSync(path.join(svc, "com.8gent.daemon", "run"), "x");
+			mkdirSync(path.join(svc, "other-service"), { recursive: true });
+			writeFileSync(path.join(svc, "other-service", "run"), "y");
+			await runOperation("uninstall", ctxFor(prefix), () => {});
+			expect(existsSync(path.join(svc, "com.8gent.daemon"))).toBe(false);
+			expect(readFileSync(path.join(svc, "other-service", "run"), "utf8")).toBe("y");
+		});
+
+		test("every remove step in every platform plan ends in the service name, or is a single file", () => {
+			for (const platform of ["darwin", "linux", "win32", "android"] as const) {
+				const ctx = { ...termux, platform, home: "/h", prefix: "/p" };
+				for (const step of planFor("uninstall", ctx).concat(planFor("install", ctx))) {
+					if (step.kind !== "remove") continue;
+					const base = path.posix.basename(step.path.replace(/\\/g, "/"));
+					expect(
+						["com.8gent.daemon", "down"].includes(base) || /\.(plist|service)$/.test(base),
+						`${platform}: ${step.path}`,
+					).toBe(true);
+				}
+			}
+		});
+	});
+});
