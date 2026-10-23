@@ -24,8 +24,6 @@ export type LedgerRecord =
 	| { k: "turn"; at: string; msg?: string }
 	/** A finished model step's text. Supersedes the `text` pieces streamed before it. */
 	| { k: "step"; text: string; at: string }
-	/** Streamed reply text not yet in a finished step (slice 2): what a kill mid-stream keeps. */
-	| { k: "text"; d: string; at: string }
 	/** The turn finished (`done`), or the person closed it on resume (`skip`, `continue`). */
 	| { k: "end"; how: "done" | "skip" | "continue"; at: string }
 	| {
@@ -143,19 +141,18 @@ export function observeSessionEntry(entry: SessionEntry): void {
 	const at = entry.timestamp;
 	let rec: LedgerRecord | null = null;
 	if (entry.type === "user_message") {
-		pending = "";
 		rec = {
 			k: "turn",
 			at,
 			msg: scrub(String(entry.message?.content ?? "")).scrubbed.slice(0, MSG_CAP),
 		};
 	} else if (entry.type === "assistant_content") {
-		pending = "";
 		const text = (entry.parts ?? [])
 			.map((p) => (p.type === "text" ? (p as { text: string }).text : ""))
 			.join("");
 		if (!text) return;
-		rec = { k: "step", text: text.slice(0, TEXT_CAP), at };
+		// Model text can echo a key it read: scrubbed whole, before it reaches disk.
+		rec = { k: "step", text: scrub(text).scrubbed.slice(0, TEXT_CAP), at };
 	} else if (entry.type === "tool_call") {
 		const tc = entry.toolCall;
 		rec = {
@@ -185,8 +182,7 @@ let warned = false;
 function safeAppend(rec: LedgerRecord): void {
 	if (!sessionKey) return;
 	try {
-		appendRecord(sessionKey, rec);
-		if (rec.k !== "intent" && rec.k !== "text") writeTurnSummary(sessionKey);
+		record(sessionKey, rec);
 	} catch (err) {
 		if (!warned) console.error(`[durable] ledger not written: ${(err as Error).message}`);
 		warned = true;
@@ -198,37 +194,128 @@ const MSG_CAP = 4000;
 const TEXT_CAP = 16000;
 /** Streamed text is written at most this often, so a kill loses at most this window. */
 export const TEXT_FLUSH_MS = 250;
-let pending = "";
-let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** The current turn folded from its records: what resume and the summary need. */
+interface Fold {
+	msg: string;
+	at: string;
+	partial: string;
+	finished: TurnState["finished"];
+	intents: Map<string, IntentRecord>;
+	closed: Set<string>;
+}
+
+const join = (a: string, b: string) => (a && b ? `${a}\n\n${b}` : a || b);
+
+function fold(f: Fold | null, r: LedgerRecord): Fold | null {
+	if (r.k === "turn")
+		return {
+			msg: r.msg ?? "",
+			at: r.at,
+			partial: "",
+			finished: [],
+			intents: new Map(),
+			closed: new Set(),
+		};
+	if (r.k === "end" || !f) return r.k === "end" ? null : f;
+	if (r.k === "step") f.partial = join(f.partial, r.text).slice(-TEXT_CAP);
+	else if (r.k === "intent") f.intents.set(r.id, r);
+	else if (r.k === "effect") {
+		f.closed.add(r.id);
+		const i = f.intents.get(r.id);
+		if (i) f.finished.push({ tool: i.tool, hint: i.hint, ok: r.ok });
+	} else if (r.k === "resolve") f.closed.add(r.id);
+	return f;
+}
+
+function toState(f: Fold, streamed: string): TurnState {
+	return {
+		msg: f.msg,
+		partial: join(f.partial, streamed).slice(-TEXT_CAP),
+		finished: [...f.finished],
+		open: [...f.intents.values()].filter((i) => !f.closed.has(i.id)),
+		at: f.at,
+	};
+}
+
+function foldLedger(key: string): Fold | null {
+	let f: Fold | null = null;
+	for (const r of readLedger(key)) f = fold(f, r);
+	return f;
+}
+
+/**
+ * Per-session running state, so a boundary writes the summary from memory instead
+ * of re-reading a ledger that grows with the session. Keyed by session, so two
+ * tabs never share a stream buffer. Seeded from the ledger once per process.
+ */
+interface Live {
+	turn: Fold | null;
+	/** Raw streamed text of the step in flight. Scrubbed whole when written, never in pieces. */
+	streamed: string;
+	timer: ReturnType<typeof setTimeout> | null;
+}
+const live = new Map<string, Live>();
+
+function liveFor(key: string): Live {
+	let l = live.get(key);
+	if (!l) {
+		l = { turn: foldLedger(key), streamed: "", timer: null };
+		live.set(key, l);
+	}
+	return l;
+}
+
+/** Append a record, fold it into the running turn, and rewrite the summary at a boundary. */
+function record(key: string, rec: LedgerRecord): void {
+	appendRecord(key, rec);
+	const l = liveFor(key);
+	l.turn = fold(l.turn, rec);
+	if (rec.k === "turn" || rec.k === "step" || rec.k === "end") clearStream(l);
+	if (rec.k !== "intent") writeTurnSummary(key);
+}
+
+function clearStream(l: Live): void {
+	l.streamed = "";
+	if (l.timer) clearTimeout(l.timer);
+	l.timer = null;
+}
 
 /**
  * A piece of streamed reply text (slice 2). Called by the streamed-reply readers
- * in packages/ai/text-tool-endpoint.ts. Buffered and flushed every TEXT_FLUSH_MS:
- * one fsync per window, not per token, which matters on phone flash.
+ * in packages/ai/text-tool-endpoint.ts. Held in memory and written to the turn
+ * summary (temp-then-rename) every TEXT_FLUSH_MS, scrubbed as one string so a key
+ * split across chunks is still caught. Not appended to the ledger: the summary is
+ * overwritten, so a long stream does not grow the ledger.
  */
 export function noteStreamText(delta: string): void {
 	if (!enabled || !sessionKey || !delta) return;
-	pending += delta;
-	if (flushTimer) return;
-	flushTimer = setTimeout(flushText, TEXT_FLUSH_MS);
-	(flushTimer as { unref?: () => void }).unref?.();
+	const key = sessionKey;
+	const l = liveFor(key);
+	l.streamed = (l.streamed + delta).slice(-2 * TEXT_CAP);
+	if (l.timer) return;
+	l.timer = setTimeout(() => flushText(key), TEXT_FLUSH_MS);
+	(l.timer as { unref?: () => void }).unref?.();
 }
 
-/** Write buffered streamed text now (a network error, a session switch, a test). */
-export function flushText(): void {
-	if (flushTimer) clearTimeout(flushTimer);
-	flushTimer = null;
-	if (!pending || !enabled || !sessionKey) return;
-	const d = pending;
-	pending = "";
-	safeAppend({ k: "text", d, at: new Date().toISOString() });
+/** Write the streamed text now (a network error, a session switch, a test). */
+export function flushText(key: string | null = sessionKey): void {
+	if (!key) return;
+	const l = live.get(key);
+	if (!l) return;
+	if (l.timer) clearTimeout(l.timer);
+	l.timer = null;
+	if (!l.streamed || !enabled) return;
+	try {
+		writeTurnSummary(key);
+	} catch (err) {
+		if (!warned) console.error(`[durable] summary not written: ${(err as Error).message}`);
+		warned = true;
+	}
 }
 
 /** The turn finished. Called when the turn loop returns a reply or the person stopped it. */
 export function noteTurnEnd(): void {
-	pending = "";
-	if (flushTimer) clearTimeout(flushTimer);
-	flushTimer = null;
 	if (!enabled || !sessionKey) return;
 	safeAppend({ k: "end", how: "done", at: new Date().toISOString() });
 }
@@ -335,38 +422,18 @@ export interface TurnState {
  * killed while waiting on the model, a 4G drop mid-stream, the phone sleeping.
  */
 export function lastTurn(key: string): TurnState | null {
-	const recs = readLedger(key);
-	let start = -1;
-	for (let i = recs.length - 1; i >= 0; i--) {
-		if (recs[i].k === "turn") {
-			start = i;
-			break;
-		}
-	}
-	if (start < 0) return null;
-	const turn = recs.slice(start);
-	if (turn.some((r) => r.k === "end")) return null;
-	const head = recs[start] as Extract<LedgerRecord, { k: "turn" }>;
-	let partial = "";
+	const f = foldLedger(key);
+	if (!f) return null;
+	// Text streamed after the last finished step lives only in the summary.
 	let streamed = "";
-	const intents = new Map<string, IntentRecord>();
-	const finished: TurnState["finished"] = [];
-	const closed = new Set<string>();
-	for (const r of turn) {
-		if (r.k === "step") {
-			partial += (partial ? "\n\n" : "") + r.text;
-			streamed = "";
-		} else if (r.k === "text") streamed += r.d;
-		else if (r.k === "intent") intents.set(r.id, r);
-		else if (r.k === "effect") {
-			closed.add(r.id);
-			const i = intents.get(r.id);
-			if (i) finished.push({ tool: i.tool, hint: i.hint, ok: r.ok });
-		} else if (r.k === "resolve") closed.add(r.id);
+	try {
+		const sum = JSON.parse(fs.readFileSync(turnSummaryPath(key), "utf8"));
+		if (sum?.open && sum.turn?.at === f.at && typeof sum.streamed === "string")
+			streamed = sum.streamed;
+	} catch {
+		// No summary, or one from before this turn: the ledger alone stands.
 	}
-	if (streamed) partial += (partial ? "\n\n" : "") + streamed;
-	const open = [...intents.values()].filter((i) => !closed.has(i.id));
-	return { msg: head.msg ?? "", partial: partial.slice(-TEXT_CAP), finished, open, at: head.at };
+	return toState(f, streamed);
 }
 
 export function turnSummaryPath(key: string): string {
@@ -376,17 +443,20 @@ export function turnSummaryPath(key: string): string {
 /**
  * The turn summary: the last turn's state as one JSON file, written to a temp
  * file and renamed over the target, so a kill mid-write leaves the old summary
- * or the new one, never half of either. Rewritten at every step, effect and end.
+ * or the new one, never half of either. Rewritten at every step, effect and end,
+ * and every TEXT_FLUSH_MS while a reply streams. Built from memory, not the ledger.
  */
 export function writeTurnSummary(key: string): void {
 	const file = turnSummaryPath(key);
 	ownDir(path.dirname(file));
-	const state = lastTurn(key);
+	const l = liveFor(key);
+	const streamed = l.turn && l.streamed ? scrub(l.streamed).scrubbed.slice(-TEXT_CAP) : "";
+	const state = l.turn ? toState(l.turn, streamed) : null;
 	const tmp = `${file}.${process.pid}.tmp`;
 	const c = fs.constants;
 	const fd = fs.openSync(tmp, c.O_WRONLY | c.O_CREAT | c.O_TRUNC | (c.O_NOFOLLOW ?? 0), 0o600);
 	try {
-		fs.writeSync(fd, JSON.stringify({ open: state !== null, turn: state }));
+		fs.writeSync(fd, JSON.stringify({ open: state !== null, turn: state, streamed }));
 		fs.fsyncSync(fd);
 	} finally {
 		fs.closeSync(fd);
@@ -436,8 +506,7 @@ export function continuePrompt(t: TurnState, isReadOnly: (tool: string) => boole
 /** Close the cut-off turn and its open calls, so the next resume asks nothing. */
 export function closeTurn(key: string, how: "skip" | "continue"): void {
 	resolveInterrupted(key, how === "skip" ? "skip" : "retry");
-	appendRecord(key, { k: "end", how, at: new Date().toISOString() });
-	writeTurnSummary(key);
+	record(key, { k: "end", how, at: new Date().toISOString() });
 }
 
 /**

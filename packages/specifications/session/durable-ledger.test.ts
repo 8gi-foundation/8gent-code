@@ -8,11 +8,13 @@ import {
 	closeTurn,
 	continuePrompt,
 	cutOffNotice,
+	flushText,
 	hintOf,
 	interruptedCalls,
 	isCutOffError,
 	lastTurn,
 	ledgerPath,
+	noteStreamText,
 	noteTurnEnd,
 	planResume,
 	resolveInterrupted,
@@ -289,6 +291,30 @@ await readStreamedChatCompletion(new Response(body));
 		fs.symlinkSync(elsewhere, path.join(home, ".8gent", "sessions"));
 		expect(() => appendRecord("s5", { k: "turn", at: "now" })).toThrow(/symlink refused/);
 		expect(fs.readdirSync(elsewhere)).toEqual([]);
+	});
+
+	test("a Bearer token streamed in two pieces never reaches disk or the continue prompt", () => {
+		setDurableEnabled(true);
+		setDurableSession("s6");
+		const w = new SessionWriter("eight-6", path.join(home, "sessions"));
+		const tok = "abcdefghijklmnop0123456789qrstuv";
+		w.writeUserMessage("call the api");
+		w.writeAssistantContent(0, [{ type: "text", text: `Using Authorization: Bearer ${tok} now.` }]);
+		noteStreamText("Retrying with Bearer abcdefghij");
+		noteStreamText("klmnop0123456789qrstuv and waiting.");
+		flushText();
+		const dir = path.dirname(ledgerPath("s6"));
+		for (const f of fs.readdirSync(dir)) {
+			const text = fs.readFileSync(path.join(dir, f), "utf8");
+			expect(text).not.toContain(tok);
+			expect(text).not.toContain("klmnop0123456789qrstuv");
+			expect(text).not.toContain("Bearer abcdefghij");
+		}
+		const turn = lastTurn("s6");
+		expect(turn?.partial).toContain("and waiting.");
+		const prompt = continuePrompt(turn!, isReadOnly);
+		expect(prompt).not.toContain(tok);
+		expect(prompt).not.toContain("klmnop0123456789qrstuv");
 	});
 
 	test("dropped connections cut a turn off; a stop by the person ends it", () => {
