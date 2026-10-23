@@ -29,7 +29,7 @@ import { setDurableEnabled } from "../../../packages/specifications/session/dura
 import { App } from "./app.js";
 import { startMouse } from "./lib/mouse-wiring.js";
 import { ensureTerminalSize } from "./lib/terminal-size.js";
-import { parseTuiArgv } from "./lib/tui-cli.js";
+import { durableDefault, parseTuiArgv } from "./lib/tui-cli.js";
 import { applyTerminalBackground } from "./theme.js";
 import { probeTerminalBackground } from "./theme/terminal-probe.js";
 
@@ -48,7 +48,10 @@ if (hasInfiniteFlag) {
 	console.log("\x1b[33m[∞] Infinite Loop mode enabled\x1b[0m\n");
 }
 
-if (parsed.durable) setDurableEnabled(true);
+// Durable turns are on by default in an interactive session, as in Pi Durable
+// (docs/specs/DURABLE-TURNS.md, parity). `--no-durable` or EIGHT_DURABLE=0 opts
+// out. Headless `-p` never reaches this file and keeps its own default (off).
+setDurableEnabled(durableDefault(parsed.durable, process.env.EIGHT_DURABLE));
 
 const command = parsed.positional[0] || "repl";
 const passthroughArgs = parsed.positional.slice(1);

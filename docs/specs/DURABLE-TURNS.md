@@ -1,6 +1,7 @@
 # Durable turns
 
-Status: slice 1 built (intent and effect ledger, resume report, retry or skip). Owner: 8TO.
+Status: slice 1 built (intent and effect ledger, resume report, retry or skip). Slice 2 built (a turn
+cut off with no tool running continues where it stopped; on by default in the TUI). Owner: 8TO.
 
 ## Who and the job
 
@@ -45,6 +46,31 @@ signature (slice 3 stamps each ledger with the 8gent version and refuses a silen
 a tool-schema change) and atomic temp-then-rename for any state file that is rewritten rather
 than appended (the slice 2 turn summary). The ledger itself is append-only, so it needs no rename.
 
+## Parity with Pi Durable
+
+Checked on 23 Oct 2026 against the public source: `earendil-works/pi`
+`packages/durable/README.md` and `CHANGELOG.md`, and `earendil-works/pi-durable-cloudflare`.
+Concepts only, no code taken. Status: **#4805** = slice 1, **slice 2** = this change,
+**slice 3** = the parallel build (verified effects, build signature, headless `-p` resume).
+
+| Pi Durable does | Ours | Where |
+| --- | --- | --- |
+| Commits the tool call's intent before `execute()` runs | Intent record, fsynced, before the tool runs | #4805 |
+| Commits the tool result; a call with a result is done and never rerun | Effect record; a closed call never comes back | #4805 |
+| A tool cut off mid-call reruns only if declared `replay: "safe"`; otherwise the model gets an `interrupted` result | Read-only tools are listed as safe to rerun; anything else goes to the person (`/durable retry` or `skip`), never replayed. Stricter than Pi: a person decides, not the model | #4805 |
+| Partial answers committed every 100 ms; a crash loses at most that window | Streamed text written to the turn summary every 250 ms, finished step text as `step`, both scrubbed. Kept and shown on resume | slice 2 |
+| A generation phase cut off reruns from its top on reopen; the run continues where it stopped | A turn with no `end` record is offered "Continue where it stopped": the request is re-sent with the text so far and the finished tool calls named as not to repeat | slice 2 |
+| Survives process death: conversation, model turns, tool calls, own state | Ledger plus the session tree. Model turns and the reply so far now survive too | #4805 + slice 2 |
+| Atomic commits (all or nothing) | Ledger is append-only with fsync, torn last line skipped; the turn summary is written temp-then-rename | #4805 + slice 2 |
+| Storage error or network failure: reopen and resume, nothing lost | A dropped connection (fetch failed, ECONNRESET, idle stream) leaves the turn open and offers continue at once; any other error ends the turn | slice 2 |
+| Idempotent submit: a retried `requestId` returns the same submission | Idempotency key `<session>:<call id>` on every intent. Tools honouring it (`git_commit`, `write_file` hash check) | key: #4805, honoured: slice 3 |
+| Resume is driven by the host calling `resume()`; tasks found pending continue without asking | The person drives it on the next launch (`--resume`), Termux has no supervisor. Continue is one command, not automatic | #4805 + slice 2 |
+| On by default: durability is the harness itself, there is no off switch | On by default in the interactive TUI. `--no-durable` or `EIGHT_DURABLE=0` opts out | slice 2 |
+| Crash-loop guard: a task cut off `restartLimit` times (default 5) is parked | Not built. A turn is only continued when the person asks, so it cannot loop on its own | not needed yet |
+| Stored work outlives code: a task blocks if its definition is missing or unmigratable | Build signature in the ledger header; refuse a silent resume across a tool-schema change | slice 3 |
+| Headless hosts (Cloudflare Durable Object) resume on wake | Headless `8gent -p` resume | slice 3 |
+| Code mode scripts journal nested call results and resume mid-script | Not doing: we have no deterministic sandbox for model-written scripts | not doing |
+
 ## Design
 
 ### The ledger
@@ -54,7 +80,15 @@ the same id `8gent --resume` takes (the tree store id). Records:
 
 | `k` | Written | Fields |
 | --- | --- | --- |
-| `turn` | A person's message starts a turn | `at` |
+| `turn` | A person's message starts a turn | `at`, `msg` (their text, secret-scrubbed, 4000 chars) |
+| `step` | A model step finished with text | `text` (secret-scrubbed, 16000 chars) |
+| `end` | The turn returned, or the person closed it on resume | `how` (`done`, `skip`, `continue`) |
+
+Streamed text of the step in flight is not appended to the ledger. It is kept in memory per
+session and written into the turn summary (`<id>.turn.json`, temp-then-rename) every 250 ms,
+scrubbed as one string so a key split across stream chunks is still caught, and so a long
+stream does not grow the ledger. A kill loses at most 250 ms of text. The summary is built from
+running state in memory (seeded from the ledger once per process), never by re-reading the ledger.
 | `intent` | After the permission gate, before the tool runs | `id` (tool call id), `tool`, `argsHash` (sha256 of the logged args, 16 hex), `key` (idempotency key `<session>:<call id>`), `hint` (path, command or url, 120 chars), `at` |
 | `effect` | The tool returned or failed | `id`, `ok`, `digest` (sha256 of the result, 16 hex), `at` |
 | `resolve` | The person chose on resume | `id`, `how` (`retry` or `skip`), `at` |
@@ -100,17 +134,18 @@ slow to fsync, so the ledger holds hashes and hints, not payloads.
 
 ## Durable as a named mode of 8gent-code
 
-Durable is a mode of the same 8gent-code, not a fork. Off by default in slice 1.
+Durable is a mode of the same 8gent-code, not a fork.
 
-- `8gent --durable` (and `8gent --durable --resume`) turns it on for the run.
-- `EIGHT_DURABLE=1` is the persistent setting.
+- **On by default in the interactive TUI since slice 2**, because Pi Durable is durable by
+  default (see the parity table). `8gent --no-durable` or `EIGHT_DURABLE=0` opts out.
+- Headless runs (`8gent -p`, `--rpc`) never load the TUI entry and stay off unless
+  `EIGHT_DURABLE=1`. Headless resume is slice 3.
 - `/durable` toggles it; `/durable on|off` sets it.
 - The footer shows `durable on` while it is on.
 
-**How it becomes the default.** When slices 1 to 3 have each passed three recorded runs on
-Artale's Android (kill mid-write, kill mid-model-call, 4G drop mid-stream), the default flips to
-on with `EIGHT_DURABLE=0` as the opt-out, in a release whose notes name the change. The gate is
-those recordings, not a date.
+The release that ships slice 2 names the default change in its notes. Artale's three recorded runs
+on Android (kill mid-write, kill mid-model-call, 4G drop mid-stream) remain the acceptance gate
+for calling it done on the phone.
 
 ## Slices
 
@@ -119,13 +154,26 @@ those recordings, not a date.
    `--durable` flag, the footer segment. Test: `durable-ledger.test.ts` SIGKILLs a real child
    process between a write's intent and its effect, then resumes and asserts the write happened
    once and the person is asked.
-2. A turn cut off with no tool open (killed while waiting on the model, or a 4G drop
-   mid-stream): `turn_end` records, and resume offers to resend the person's last message. A turn
-   summary file written temp-then-rename, so the model resumes from the summary.
+2. **Built.** A turn cut off with no tool open (killed while waiting on the model, a 4G drop
+   mid-stream, the phone sleeping). The ledger records the person's message (`turn`), each
+   finished step's text (`step`), and `end` when the turn returns; streamed text (tapped in the
+   streamed-reply readers in `packages/ai/text-tool-endpoint.ts`) goes to the turn summary every
+   250 ms. All model text is secret-scrubbed before it reaches disk. A turn with no
+   `end` is shown on `--resume`, or at once after a dropped connection, with its text so far and
+   the tool calls that finished. `/durable continue` (alias `retry`) re-sends the request with that
+   text kept and the finished calls named as not to run again; `/durable skip` closes it. The turn
+   summary `~/.8gent/sessions/durable/<id>.turn.json` is rewritten temp-then-rename at every step,
+   effect and end. A symlinked `~/.8gent/sessions` or `durable` folder is refused before anything
+   is created in it. Test: `durable-ledger.test.ts` SIGKILLs a real child mid-SSE-stream after a
+   finished write, then asserts the partial text is kept, the write is named as finished and not
+   open, and the file was written once.
+   Limit: partial text mid-step exists only for streamed replies (the text-tool path, and any
+   path with `EIGHT_STREAM_IDLE_MS`). The native AI SDK path receives each step whole, so a kill
+   mid-step there keeps the finished steps and re-sends the request.
 3. Build signature in the ledger header; idempotency keys passed to tools that can honour them
    (`git_commit` checks for the commit, `write_file` compares the content hash); headless
    `8gent -p` resume.
-4. Default on, per the gate above.
+4. Default on: done in slice 2 for the TUI (Pi parity). Headless default stays off.
 
 ## Not doing
 

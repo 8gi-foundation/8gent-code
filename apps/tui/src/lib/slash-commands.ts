@@ -281,8 +281,8 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "durable",
 		aliases: [],
-		description: "Durable turns: a killed turn resumes without redoing a write",
-		usage: "/durable [on|off|retry|skip]",
+		description: "Durable turns: a cut-off turn continues where it stopped, no write redone",
+		usage: "/durable [on|off|continue|retry|skip]",
 	},
 	{
 		name: "branch",

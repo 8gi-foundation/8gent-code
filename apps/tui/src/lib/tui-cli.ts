@@ -12,7 +12,7 @@ export type ParsedTuiCli = {
 	model?: string;
 	yes: boolean;
 	infiniteFlag: boolean;
-	/** `--durable`: write the intent/effect ledger (docs/specs/DURABLE-TURNS.md). */
+	/** `--durable` (true) or `--no-durable` (false): the turn ledger (docs/specs/DURABLE-TURNS.md). */
 	durable?: boolean;
 };
 
@@ -33,8 +33,8 @@ export function parseTuiArgv(argv: string[]): ParsedTuiCli {
 			out.infiniteFlag = true;
 			continue;
 		}
-		if (a === "--durable") {
-			out.durable = true;
+		if (a === "--durable" || a === "--no-durable") {
+			out.durable = a === "--durable";
 			continue;
 		}
 		if (a === "--no-pet" || a === "--pet" || a === "-pet") {
@@ -90,4 +90,10 @@ export function parseTuiArgv(argv: string[]): ParsedTuiCli {
 		out.positional.push(a);
 	}
 	return out;
+}
+
+/** Interactive default: on, unless `--no-durable` or EIGHT_DURABLE=0. The flag wins. */
+export function durableDefault(flag: boolean | undefined, env: string | undefined): boolean {
+	if (flag !== undefined) return flag;
+	return env !== "0";
 }
