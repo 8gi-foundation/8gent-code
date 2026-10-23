@@ -340,9 +340,24 @@ this Mac before the PR is called ready. A slice is not done until its live check
 has output behind it. Order, as amended on 23 Oct: slice 1 auto-attach, slice 2 the
 Telegram home session, slice 3 approvals.
 
-### Slice 1: auto-attach (TUI side only, no daemon change)
+### Slice 1: auto-attach (revised after the 8SO block on #4830)
 
-Decision 1. About 150 lines of code plus tests, no change under `packages/daemon/`.
+Decision 1. 8SO blocked the first build (23 Oct, #4830) on three findings; the slice now
+carries their fixes, so it is no longer TUI-only and about 400 lines with tests.
+
+- **Opt in, this machine only.** `EIGHT_TUI_DAEMON=auto` turns auto-attach on, and it
+  only ever goes to 127.0.0.1, ::1 or localhost. It becomes the default when slice 3
+  (approvals) lands.
+- **The daemon proves who it is first.** An `identify` challenge, answered with
+  HMAC(secret, nonce) before auth; the client checks it before it sends a token or a
+  session, for every link including explicit ones. The secret is `daemon.authToken`, or
+  `<dataDir>/daemon.token` (0600) created at first start. No secret, no attach.
+- **A daemon-run TUI turn never auto-approves.** With no approver bound, every request
+  that reaches the prompt is refused. Approval cards for these turns are slice 3.
+- Existing exposure on the explicit paths: #4836.
+
+The behaviour below describes the original slice and still holds, apart from the
+default being off.
 
 Behaviour:
 - On start, the TUI probes the local daemon: `EIGHT_DAEMON_URL` if set, else
