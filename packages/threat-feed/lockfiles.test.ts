@@ -4,7 +4,9 @@ import * as path from "node:path";
 import { isLockfilePath, mergeDeps, parseLockfile } from "./lockfiles";
 
 const fx = (n: string) => fs.readFileSync(path.join(import.meta.dir, "fixtures", n), "utf8");
-const parse = (n: string) => parseLockfile(n, fx(n)) ?? [];
+// package-lock.json is gitignored repo-wide, so its fixture is stored under another name and parsed as if it had the real one.
+const FIXTURE_FILE: Record<string, string> = { "package-lock.json": "npm-lock.fixture.json" };
+const parse = (n: string) => parseLockfile(n, fx(FIXTURE_FILE[n] ?? n)) ?? [];
 const names = (n: string) => parse(n).map((d) => `${d.name}@${d.version}`);
 
 describe("lockfile parsers", () => {
