@@ -107,8 +107,76 @@ function ownDataRoots(env: Record<string, string | undefined>): string[] {
 	return homeDirs(env).map((h) => path.join(h, ".8gent"));
 }
 
-const INTERPRETER = /^(python[0-9.]*|node|bun|deno|ruby|perl|php|osascript)$/;
+/** Runners that take a program as a string: its quoted and bare path literals are scanned. */
+const INTERPRETER =
+	/^(python[0-9.]*|node|bun|deno|ruby|perl|php|osascript|[gmn]?awk|tclsh[0-9.]*|wish[0-9.]*|expect|lua(jit|[0-9.]*)|Rscript|R)$/;
 const QUOTED_PATH = /(["'])((?:~\/|\.\.\/|\/)[^"'\n]*)\1/g;
+/** A bare path in program text, ending at code punctuation: `system("cat ../x")`, `[open ../x]`. */
+const CODE_PATH = /(?<![A-Za-z0-9_}.~\-/])((?:~\/|\.\.\/|\/)[^\s"'()`$;|&<>[\]{},]*)/g;
+
+const ANSI_C_ESCAPES: Record<string, string> = {
+	a: "\x07",
+	b: "\b",
+	e: "\x1b",
+	E: "\x1b",
+	f: "\f",
+	n: "\n",
+	r: "\r",
+	t: "\t",
+	v: "\v",
+	"\\": "\\",
+	"'": "'",
+	'"': '"',
+	"?": "?",
+};
+
+/** The text of a `$'...'` body with its escapes decoded (\xHH, \NNN, \uHHHH, \n ...). */
+function decodeAnsiC(body: string): string {
+	return body.replace(
+		/\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8}|[0-7]{1,3}|c.|.)/g,
+		(_, e: string) => {
+			if (/^[xuU]/.test(e)) return String.fromCodePoint(Number.parseInt(e.slice(1), 16));
+			if (/^[0-7]/.test(e)) return String.fromCharCode(Number.parseInt(e, 8) & 0xff);
+			if (e[0] === "c") return String.fromCharCode((e.charCodeAt(1) ?? 0) & 0x1f);
+			return ANSI_C_ESCAPES[e] ?? `\\${e}`;
+		},
+	);
+}
+
+/**
+ * Rewrite `$'...'` (ANSI-C quoting) as the plain single-quoted string the shell passes on, and
+ * `$"..."` (locale quoting) as `"..."`, so `cat $'..\x2fx'` is checked as `cat '../x'`. Text
+ * inside ordinary quotes is left alone; an unterminated `$'` is left as written.
+ */
+export function unwrapAnsiC(command: string): string {
+	let out = "";
+	let inSingle = false;
+	let inDouble = false;
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i] as string;
+		if (ch === "\\" && !inSingle) {
+			out += command.slice(i, i + 2);
+			i++;
+			continue;
+		}
+		if (!inSingle && !inDouble && ch === "$" && command[i + 1] === "'") {
+			let k = i + 2;
+			for (; k < command.length && command[k] !== "'"; k++) if (command[k] === "\\") k++;
+			if (k >= command.length) {
+				out += command.slice(i);
+				break;
+			}
+			out += `'${decodeAnsiC(command.slice(i + 2, k)).replaceAll("'", "'\\''")}'`;
+			i = k;
+			continue;
+		}
+		if (!inSingle && !inDouble && ch === "$" && command[i + 1] === '"') continue;
+		if (ch === "'" && !inDouble) inSingle = !inSingle;
+		else if (ch === '"' && !inSingle) inDouble = !inDouble;
+		out += ch;
+	}
+	return out;
+}
 
 /** Literal paths written inside a word, not right after a variable (`${D}/x` names no knowable path). */
 const LITERAL_PATH = /(?<![A-Za-z0-9_}.~\-/])((?:~\/|\.\.\/|\/)[^\s"'()`$;|&<>]*)/g;
@@ -124,13 +192,20 @@ export function substitutionPaths(command: string): string[] {
 		.flatMap(literalPaths);
 }
 
-/** Quoted path literals inside inline interpreter code: `python3 -c "open('/x')"` names /x. */
+/**
+ * Path literals inside inline program text when a script runner is in the command:
+ * `python3 -c "open('/x')"`, `awk 'BEGIN{getline l<"../x"}'`, `awk '{system("cat ../x")}'`,
+ * `echo 'puts [read [open ../x]]' | tclsh`. Quoted paths may hold spaces; bare ones may not.
+ */
 export function inlineCodePaths(command: string): string[] {
 	const tokens = tokenize(command);
 	if (!tokens.some((t) => INTERPRETER.test(path.basename(t)))) return [];
 	const out: string[] = [];
-	for (const t of tokens) for (const m of t.matchAll(QUOTED_PATH)) out.push(m[2]);
-	return out;
+	for (const t of tokens) {
+		for (const m of t.matchAll(QUOTED_PATH)) out.push(m[2] as string);
+		for (const m of t.matchAll(CODE_PATH)) if (m[1] !== "/") out.push(m[1] as string);
+	}
+	return [...new Set(out)];
 }
 
 /**
@@ -163,7 +238,7 @@ function exists(p: string): boolean {
 	}
 }
 
-const SHELL = /^((ba|z|da|k)?sh|fish)$/;
+const SHELL = /^((ba|z|da|k|a|mk|ya|tc|c)?sh|fish)$/;
 const MAX_NESTING = 3;
 const GLOB_CHAR = /[*?[{]/;
 
@@ -196,6 +271,17 @@ export function nestedCommands(command: string): string[] {
 			const at = tokens.findIndex((t, k) => k > i && /^-[A-Za-z]*c$/.test(t));
 			if (at >= 0 && tokens[at + 1]) out.push(tokens[at + 1] as string);
 		} else if (bin === "eval") out.push(tokens.slice(i + 1).join(" "));
+		else if (bin === "env") {
+			// `env -S 'cat ../x'`, `env -S"cat ../x"`, `env --split-string=...`: a string run as a command.
+			for (let k = i + 1; k < tokens.length; k++) {
+				const t = tokens[k] as string;
+				const split = /^(?:-S|--split-string=?)(.*)$/s.exec(t);
+				if (!split) continue;
+				const body = split[1] || tokens[k + 1];
+				if (body) out.push(body);
+				break;
+			}
+		}
 	}
 	return [...out, ...substitutionBodies(command)];
 }
@@ -216,8 +302,11 @@ export function pathWords(
 		let w = t;
 		if (w.startsWith("<<")) continue;
 		w = w.replace(/^\d*<+/, "").replace(/^@/, "");
-		const opt = /^--?[A-Za-z][\w-]*=(.*)$/.exec(w);
+		// `--opt=path`, `-v name=path` (awk), and a one-letter flag glued to a path (`-f../x`).
+		const opt = /^(?:--?[A-Za-z][\w-]*|[A-Za-z_]\w*)=(.*)$/.exec(w);
 		if (opt) w = opt[1] as string;
+		const glued = /^-[A-Za-z]((?:~\/|\.\.?\/|\/).*)$/.exec(w);
+		if (glued) w = glued[1] as string;
 		const url = /^file:\/\/([^?#]*)/.exec(w);
 		if (url) {
 			try {
@@ -261,6 +350,7 @@ export function outsideReads(
 	const env = opts.env ?? process.env;
 	const root = opts.root;
 	const cwd = opts.cwd ?? root;
+	command = unwrapAnsiC(command);
 	// Folders the person allowed (--allow-read, /allow-read, named in the ask), for plain reads only.
 	const prefixes = readPrefixesFor(command) ?? [];
 	// Relative paths resolve where the command runs: a cd prefix chose `cwd` inside the root.
@@ -278,32 +368,29 @@ export function outsideReads(
 	const insideRoot = (p: string) =>
 		isPathWithin(p, realRoot, process.platform) ||
 		prefixes.some((x) => isPathWithin(p, path.resolve(x), process.platform));
+	// When the root is, or holds, the home folder, credentials and the tool's keys and private
+	// data inside it still need a card.
+	const rootHoldsHome = homeDirs(env).some((h) => isPathWithin(h, realRoot, process.platform));
+	const needsCard = (resolved: string) =>
+		insideRoot(resolved)
+			? rootHoldsHome &&
+				(namesSecret(resolved) ||
+					OWN_KEYS.test(resolved) ||
+					(ownDataRoots(env).some((r) => isPathWithin(resolved, r, process.platform)) &&
+						OWN_PRIVATE.test(resolved)))
+			: !allowedOutside(resolved, env);
 	for (const p of literals) {
 		const expanded = p.startsWith("~/") ? path.join(env.HOME || os.homedir(), p.slice(2)) : p;
 		const resolved = resolveSafe(expanded, cwd);
-		if (!insideRoot(resolved) && exists(resolved) && !allowedOutside(resolved, env))
-			out.add(resolved);
+		if (exists(resolved) && needsCard(resolved)) out.add(resolved);
 	}
 	// Words the tokenizer pass does not see (see pathWords), each followed through links: a link
-	// inside the root to a file outside it is a read outside it. When the root is, or holds, the
-	// home folder, credentials and the tool's keys inside it still need a card.
-	const rootHoldsHome = homeDirs(env).some((h) => isPathWithin(h, realRoot, process.platform));
+	// inside the root to a file outside it is a read outside it.
 	for (const w of pathWords(command, cwd, env)) {
 		// A bare name (no slash) is a read outside only through a link: `cat link-out`.
 		if (!w.includes("/") && w !== ".." && !isLink(path.resolve(cwd, w))) continue;
 		const resolved = resolveSafe(path.resolve(cwd, w), cwd);
-		if (!exists(resolved)) continue;
-		if (!insideRoot(resolved)) {
-			if (!allowedOutside(resolved, env)) out.add(resolved);
-		} else if (
-			rootHoldsHome &&
-			(namesSecret(resolved) ||
-				OWN_KEYS.test(resolved) ||
-				(ownDataRoots(env).some((r) => isPathWithin(resolved, r, process.platform)) &&
-					OWN_PRIVATE.test(resolved)))
-		) {
-			out.add(resolved);
-		}
+		if (exists(resolved) && needsCard(resolved)) out.add(resolved);
 	}
 	// Commands inside the command: `bash -c '...'`, `eval '...'`, `$(...)`, backticks.
 	if (depth < MAX_NESTING)

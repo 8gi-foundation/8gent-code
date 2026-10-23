@@ -48,6 +48,7 @@ beforeAll(() => {
 		[path.join(base, "y"), "OUTSIDE-Y"],
 		[path.join(base, "x.sh"), "echo hi"],
 		[path.join(ws, "inside.txt"), "inside"],
+		[path.join(ws, "package.json"), "{}"],
 		[path.join(ws, "src", "a.ts"), "export {}"],
 		[path.join(home, ".ssh", "id_rsa"), "PRIVATE"],
 		[path.join(home, ".aws", "credentials"), "AWS"],
@@ -165,6 +166,94 @@ describe("lexical evasions of the workspace root are refused", () => {
 		test(`refused: ${command}`, async () => {
 			expect(await verdict(command)).toBe("refused");
 			expect(cards.length).toBeGreaterThan(0);
+		});
+	}
+});
+
+describe("second-read holes: ANSI-C quoting, awk and the other script runners", () => {
+	const REFUSED = [
+		// $'...' and $"..." quoting, decoded before the scan
+		"cat $'../x'",
+		"cat $'..\\x2fx'",
+		"cat $'\\x2e\\x2e/x'",
+		"cat $'\\056\\056/x'",
+		'cat $"../x"',
+		"bash -c $'cat ../x'",
+		"cat <$'../x'",
+		// awk family: the program string, its getline and output redirects, -f, -v, file operands
+		`awk 'BEGIN{while((getline l<"../x")>0)print l}'`,
+		`gawk 'BEGIN{while((getline l<"../x")>0)print l}'`,
+		`mawk 'BEGIN{while((getline l<"../x")>0)print l}'`,
+		`nawk 'BEGIN{while((getline l<"../x")>0)print l}'`,
+		`awk 'BEGIN{"cat ../x" | getline l; print l}'`,
+		`awk 'BEGIN{system("cat ../x")}'`,
+		`awk 'BEGIN{print "data" > "../y"}'`,
+		"awk -f ../x.sh",
+		"awk -f../x.sh",
+		"awk '{print}' ../x",
+		"awk -v f=../x 'BEGIN{while((getline l<f)>0)print l}'",
+		// jq and sed file operands
+		"jq . ../x",
+		"jq -n --rawfile a ../x '$a'",
+		"jq -n --slurpfile a ../x '$a'",
+		"sed -f ../x.sh inside.txt",
+		"sed -f../x.sh inside.txt",
+		"sed -n p ../x",
+		// env -S runs a string as a command
+		"env -S 'cat ../x'",
+		'env -S"cat ../x"',
+		"env --split-string='cat ../x'",
+		// busybox applets
+		"busybox cat ../x",
+		"busybox awk '{print}' ../x",
+		"busybox sh -c 'cat ../x'",
+		"busybox ash -c 'cat ../x'",
+		// tclsh, lua, R
+		"echo 'puts [read [open ../x]]' | tclsh",
+		"tclsh <<< 'puts [read [open ../x]]'",
+		`lua -e 'print(io.open("../x"):read("a"))'`,
+		`Rscript -e 'cat(readLines("../x"))'`,
+	];
+	for (const command of REFUSED) {
+		test(`refused: ${command}`, async () => {
+			expect(await verdict(command)).toBe("refused");
+			expect(cards.length).toBeGreaterThan(0);
+		});
+	}
+
+	test("awk getline of the memory database is refused in a home-rooted session", async () => {
+		const db = path.join(home, ".8gent", "memory.db");
+		const command = `awk 'BEGIN{while((getline l<"${db}")>0)print l}'`;
+		expect(await verdict(command, home, home, home)).toBe("refused");
+		expect(cards.length).toBeGreaterThan(0);
+	});
+
+	test("inline python reading the memory database is refused in a home-rooted session", async () => {
+		const db = path.join(home, ".8gent", "memory.db");
+		expect(await verdict(`python3 -c "open('${db}').read()"`, home, home, home)).toBe("refused");
+	});
+
+	for (const command of [
+		"awk '{print $1}' inside.txt",
+		"awk -F, '{print $2}' src/a.ts",
+		"awk '/^export/ {print}' src/a.ts",
+		"awk 'BEGIN{print 1/2}'",
+		"awk -f ./src/a.ts inside.txt",
+		"git log",
+		"rg export",
+		"cat *.json",
+		"jq . package.json",
+		"sed -n 1p inside.txt",
+		"cat $'inside.txt'",
+		"env -S 'echo hi'",
+		"busybox ls",
+		"lua -e 'print(1)'",
+		"Rscript -e 'print(1)'",
+		"cc -I/usr/include -o/dev/null x.c",
+	]) {
+		test(`runs: ${command}`, async () => {
+			expect(await verdict(command)).toBe("ran");
+			expect(cards).toEqual([]);
 		});
 	}
 });
