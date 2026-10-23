@@ -2664,7 +2664,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 * waiting on a top-level interactive turn; a headless run, a child 8gent and a
 	 * Table officer are driven by a task or a channel and run to the end.
 	 */
-	private silentCallsLimit(): number {
+	/** @internal exposed for tests */
+	silentCallsLimit(): number {
 		if (this.config.headless || this.agentDepth > 0 || this.config.agentScope === "__table__")
 			return 0;
 		const n = resolveSilentCalls();
@@ -2673,7 +2674,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	}
 
 	private silentCarryOn(): boolean {
-		return this.infiniteModeActive || isInfiniteMode();
+		return (
+			this.infiniteModeActive ||
+			isInfiniteMode() ||
+			// The TUI's /mode yolo and Shift+Tab set the tab's permission holder.
+			(this.config.permission !== undefined &&
+				effectivePermissionMode(this.config.permission) === "infinite")
+		);
 	}
 
 	/** The progress callback when this turn carries on, else undefined (stop and ask). */

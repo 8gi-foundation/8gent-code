@@ -64,6 +64,8 @@ describe("isSelfQuestion", () => {
 			"how do I set up a slash menu",
 			"why does src/slash/index.ts crash on yolo",
 			"how do I make yolo mode",
+			"why is the slash not working in my discord bot?",
+			"why is yolo not working in my express app",
 		])
 			expect({ t, v: isSelfQuestion(t) }).toEqual({ t, v: false });
 		expect(isSelfQuestion(`why is the slash ${"x ".repeat(120)}`)).toBe(false);
@@ -274,6 +276,28 @@ describe("agent wiring: no tools for a self question or first-turn home chat", (
 			});
 		});
 	}
+
+	test("silent-call limit: 8 and stop by default, 24 and carry on when the tab permission is infinite", async () => {
+		const { createPermissionHolder, setHolderMode } = await import(
+			"../permissions/permission-mode"
+		);
+		const ask = createPermissionHolder("ask");
+		const yolo = createPermissionHolder("ask");
+		setHolderMode(yolo, "infinite", Date.now());
+		const mk = (permission: unknown) =>
+			new Agent({
+				model: "m",
+				runtime: "ollama",
+				workingDirectory: project,
+				permission,
+			} as ConstructorParameters<typeof Agent>[0]);
+		const a = mk(ask);
+		expect(a.silentCallsLimit()).toBe(8);
+		expect((a as any).silentProgressSink()).toBeUndefined();
+		const y = mk(yolo);
+		expect(y.silentCallsLimit()).toBe(24);
+		expect(typeof (y as any).silentProgressSink()).toBe("function");
+	});
 
 	test("the home chat note asks what to work on and forbids the repo tour", () => {
 		expect(HOME_CHAT_NOTE).toContain("ask what they want to work on");

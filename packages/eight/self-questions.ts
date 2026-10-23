@@ -147,7 +147,7 @@ const WORK = new Set([
 /** The person is talking about their own app, repo, file or .env: not about 8gent. */
 function namesOwnThing(text: string, flat: string): boolean {
 	return (
-		/\b(?:my|our|this) (?:app|project|repo|code|bot|cli|site|server)\b/.test(flat) ||
+		/\b(?:my|our|this) (?:\w+ )?(?:app|project|repo|code|bot|cli|site|server)\b/.test(flat) ||
 		/\.env\b/i.test(text) ||
 		/[~.]?\/[\w.-]+\/[\w.-]+|\b[\w-]+\.(?:ts|tsx|js|jsx|py|json|md|yml|yaml|toml|txt|env)\b|\b[a-z]:\\/i.test(
 			text,
