@@ -9,7 +9,7 @@
  *            only the deterministic rules can stop the command
  */
 
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { createDecider } from "../decide/index";
 import type { DecideBackend, SystemOneRequest, SystemOneResponse } from "../decide/types";
@@ -20,7 +20,20 @@ import {
 	systemOneGate,
 } from "./system-one-gate";
 
+// A home of the suite's own, with no ~/.ssh in it. The rules under test read command text only,
+// but the read boundary runs too (as in production) and would card a read of a real key file on a
+// developer machine. The boundary is exercised separately in read-boundary-evasion.test.ts.
+const savedHome = process.env.HOME;
+beforeAll(() => {
+	const home = tempDir("guard-gaps-home-");
+	process.env.HOME = home;
+	DEFAULT.HOME = home;
+	STRICT.HOME = home;
+});
+
 afterAll(() => {
+	if (savedHome === undefined) Reflect.deleteProperty(process.env, "HOME");
+	else process.env.HOME = savedHome;
 	_resetSystemOne();
 	cleanupTempDirs();
 });
@@ -65,8 +78,9 @@ beforeEach(() => {
 	});
 });
 
-const DEFAULT = {};
-const STRICT = { [SYSTEM_ONE_FLAG]: "1" };
+// HOME is filled in by beforeAll: the gate is handed an environment, as production hands it process.env.
+const DEFAULT: Record<string, string> = {};
+const STRICT: Record<string, string> = { [SYSTEM_ONE_FLAG]: "1" };
 
 const BLOCKED: [command: string, rule: string][] = [
 	[":(){ :|:& };:", "fork_bomb"],
