@@ -80,6 +80,7 @@ import { getDataDir } from "./data-dir";
 import { classifyInput, gateInput } from "./input-gate";
 import { NO_LINK_PREVIEW } from "./notifications";
 import { VOICE_ACK, ackForTranscript } from "./voice-ack";
+import { telegramOtherEvent, wakeRouter } from "./wake-wiring";
 
 /**
  * Where messages from chats the bridge does not answer are recorded.
@@ -143,6 +144,8 @@ export function observeUnauthorized(update: unknown): void {
 			})}\n`,
 			"utf8",
 		);
+		// Queued as data for the wake router (#4868): quiet by default, never an instruction.
+		void wakeRouter()?.submit(telegramOtherEvent(m.chat?.id, OBSERVED_LOG));
 	} catch {
 		// Never let observation break the bridge.
 	}

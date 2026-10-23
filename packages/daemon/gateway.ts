@@ -89,6 +89,7 @@ import {
 	type TimeTravelOutbound,
 	handleTimeTravel,
 } from "./timetravel-verbs";
+import { ownerEvent, wakeRouter } from "./wake-wiring";
 
 export interface GatewayConfig {
 	port: number;
@@ -676,6 +677,9 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 			// client that merely resumed the session cannot.
 			const turn = state.approvalBridge ? parseTurn(msg.turn) : undefined;
 			if (typeof msg.text === "string") echoPrompt(ws, sid, msg.text, state.channel);
+			// The owner's prompt wakes the router first: a background turn yields to it (#4868).
+			if (state.channel === "tui" || state.channel === "telegram")
+				void wakeRouter()?.submit(ownerEvent(sid, state.channel));
 			// A turn for a TUI runs here with no card to show: anything that needs a yes is
 			// refused, never auto-approved (#4829). A bridge turn binds its own approver.
 			const noCard = state.channel === "tui" || pool.getSessionInfo(sid)?.channel === "tui";
@@ -685,7 +689,7 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 				const turnId = beginTurn(sid, origin);
 				const run = () => inTurn(() => pool.chat(sid, msg.text, turn));
 				(noCard ? runWithoutApprovalSurface(run) : run())
-					.then((response) => {
+					.then((_response) => {
 						// Final response - signal session:end for this turn
 						inTurn(() => bus.emit("session:end", { sessionId: sid, reason: "turn-complete" }));
 					})
