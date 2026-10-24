@@ -3,7 +3,8 @@
  *
  * 8J first when env EIGHT_8J_URL names its loopback server (backends/eightj.ts): naming it is
  * an explicit choice, so when it does not answer /health the result is "none", never a
- * different judge. Otherwise the order is: in-process llama.cpp (only when the optional node-llama-cpp
+ * different judge. Next, the llama-server 8gent started itself for the judge (#4906, only when its record in
+ * ~/.8gent/state says so and /health answers). Otherwise the order is: in-process llama.cpp (only when the optional node-llama-cpp
  * package loads AND a GGUF resolves, see backends/llamacpp.ts; an explicit
  * EIGHT_DECIDE_MODEL with no GGUF skips llamacpp rather than being
  * substituted by another model), then a
@@ -47,7 +48,9 @@ import {
 	llamaCppUnavailable,
 	resolveGguf,
 } from "./backends/llamacpp";
+import { LLAMA_URL, llamaServerDown, readLlamaRecord } from "./backends/llamaserver";
 import { JUDGE_NUM_CTX, resolveOllamaHost } from "./backends/ollama";
+import { JUDGE_MODEL } from "./judge-model";
 import type { FetchLike } from "./types";
 
 /**
@@ -236,6 +239,14 @@ export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResul
 			notes.push(`${(err as Error).message}; 8j was selected, so no other judge is used`);
 			return { ...base, backend: "none", model: null, url: null, notes };
 		}
+	}
+
+	// The llama-server 8gent started for the judge (#4906): only when its own record says so, and it must answer.
+	if (readLlamaRecord(env)) {
+		const down = await llamaServerDown(fetchImpl, timeoutMs);
+		if (down === null)
+			return { ...base, backend: "llamacpp", model: JUDGE_MODEL, url: LLAMA_URL, notes };
+		notes.push(`llamacpp: ${down}`);
 	}
 
 	const loader = opts.llamacppLoader === undefined ? defaultLlamaCppLoader : opts.llamacppLoader;

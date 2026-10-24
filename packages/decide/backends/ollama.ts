@@ -191,12 +191,12 @@ export function hasLabelMass(kind: Question["kind"], labels: string[], top: TopL
 export const JUDGE_NUM_CTX = 4096;
 
 export class OllamaBackend implements DecideBackend {
-	readonly name = "ollama";
+	readonly name: string = "ollama";
 	readonly model: string;
-	private readonly host: string;
-	private readonly timeoutMs: number;
+	protected readonly host: string;
+	protected readonly timeoutMs: number;
 	private readonly numCtx: number | undefined;
-	private readonly fetchImpl: FetchLike;
+	protected readonly fetchImpl: FetchLike;
 
 	/** The server the state goes to. */
 	get endpoint(): string {
@@ -253,7 +253,7 @@ export class OllamaBackend implements DecideBackend {
 	 * judge (#3162 bar 4). An answer the model gave but we cannot read stays a
 	 * plain DecideError: another backend would not fix it.
 	 */
-	private async topLogprobs(prompt: string): Promise<TopLogprob[]> {
+	protected async topLogprobs(prompt: string): Promise<TopLogprob[]> {
 		const res = await this.post(prompt).catch((err: Error) => {
 			throw new DecideUnavailableError(
 				`ollama unreachable at ${this.host}: ${err?.message ?? String(err)}`,

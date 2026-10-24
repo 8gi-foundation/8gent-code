@@ -24,6 +24,7 @@ import {
 	llamaCppUnavailable,
 	resolveGguf,
 } from "./backends/llamacpp";
+import { LlamaServerBackend, readLlamaKey, readLlamaRecord } from "./backends/llamaserver";
 import { MockBackend } from "./backends/mock";
 import { OllamaBackend, resolveOllamaHost } from "./backends/ollama";
 import {
@@ -216,6 +217,14 @@ async function buildBackend(opts: DeciderOptions, avoidShared = false): Promise<
 		llamacppLoader: opts.llamacppLoader,
 		avoidShared,
 	});
+	if (probe.backend === "llamacpp" && probe.url && !probe.path)
+		return local(
+			new LlamaServerBackend({
+				timeoutMs: opts.timeoutMs,
+				fetch: opts.fetch,
+				apiKey: readLlamaKey(readLlamaRecord(env)),
+			}),
+		);
 	if (probe.backend === "llamacpp" && probe.model && probe.path) {
 		return local(
 			new LlamaCppBackend({

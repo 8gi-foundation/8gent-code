@@ -5106,6 +5106,19 @@ export function App({
 					break;
 				}
 
+				case "local": {
+					// Stops only the local model servers 8gent started (#4906): the recorded pid, never a name match.
+					void (async () => {
+						if ((args[0] ?? "").toLowerCase() !== "stop") {
+							addSystemMessage("Usage: /local stop");
+							return;
+						}
+						const { stopLocal } = await import("../../../packages/eight/local-runtime.js");
+						addSystemMessage(stopLocal().join("\n"));
+					})();
+					break;
+				}
+
 				case "stack":
 					// What the next turn sends, per source (#4779). Local, read-only.
 					if (!agent) {
