@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { killProcessTree, shellInvocation, spawnShell } from "../core/shell";
 import { getDataDir } from "./data-dir";
 import { bus } from "./events";
+import { tickRoutines } from "./routines-tick";
 
 export type JobType = "shell" | "agent-prompt" | "webhook";
 
@@ -215,6 +216,8 @@ async function executeJob(job: CronJob): Promise<void> {
 
 function tick(): void {
 	const now = new Date();
+	// Saved routines (scouts by default): RoutineManager.tick had no caller before #4926.
+	void tickRoutines({ now });
 	for (const job of jobs) {
 		if (!job.enabled) continue;
 		if (matchesCron(job.expression, now)) {
