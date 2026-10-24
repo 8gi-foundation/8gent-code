@@ -22,6 +22,7 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
+import { totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveHome } from "../core/home";
 import { JUDGE_MODEL } from "../decide/judge-model";
@@ -37,9 +38,11 @@ import {
 import {
 	type LlamaServerResult,
 	type ModelResult,
+	type Pin,
 	ensureLlamaServer,
 	fetchJudgeModel,
 	findLlamaServer,
+	judgeModelFor,
 	judgeModelPath,
 	judgeModelPresent,
 } from "./runtime-fetch";
@@ -78,7 +81,7 @@ export interface JudgeDeps {
 	startOllama?: () => Promise<StartResult>;
 	/** The llama.cpp path (#4906): default on Android, EIGHT_JUDGE_RUNTIME=llama-server elsewhere. */
 	llama?: LlamaDeps;
-	/** What a bare Enter answers. True on first launch, false after `8gent update` (a stray Enter must not start a download). */
+	/** What a bare Enter answers. No by default, everywhere: a stray Enter never starts a download or a server. */
 	defaultYes?: boolean;
 	/** A finished line. */
 	say?: (line: string) => void;
@@ -89,7 +92,12 @@ export interface JudgeDeps {
 	writeChoice?: (c: JudgeChoice | null) => boolean;
 }
 
+export const NO_DEVICE_MODEL_LINE =
+	"No judge model sized for this device yet; the safety check asks you instead.";
+
 export interface LlamaDeps {
+	/** Total RAM of this device in bytes. Default: os.totalmem(). Picks the judge model (runtime-fetch JUDGE_MODELS). */
+	totalRamBytes?: () => number;
 	/** Force the path on or off. Default: Android, or EIGHT_JUDGE_RUNTIME=llama-server; never with =ollama. */
 	enabled?: boolean;
 	/** A llama-server and the verified model already on disk (set up before): start it, ask nothing. */
@@ -97,16 +105,16 @@ export interface LlamaDeps {
 	/** 8gent's own llama-server for this version; a system one only as a fallback. */
 	ensureBinary?: () => Promise<LlamaServerResult>;
 	/** The pinned judge model, verified. */
-	ensureModel?: (onPercent: (pct: number) => void) => Promise<ModelResult>;
+	ensureModel?: (onPercent: (pct: number) => void, pin: Pin) => Promise<ModelResult>;
 	start?: (bin: string, gguf: string) => Promise<StartResult>;
 }
 
-export const llamaAskLine = (defaultYes = true): string =>
+export const llamaAskLine = (defaultYes = false): string =>
 	`Set up the safety judge on this device? It downloads llama.cpp from 8gent's release and the judge model (~${JUDGE_SIZE}, from Hugging Face), then checks risky commands before they run. ${defaultYes ? "[Y/n]" : "[y/N]"}`;
 
-export const judgeAskLine = (defaultYes = true): string =>
+export const judgeAskLine = (defaultYes = false): string =>
 	`Install the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE})? It checks risky commands before they run. ${defaultYes ? "[Y/n]" : "[y/N]"}`;
-export const JUDGE_ASK_LINE = judgeAskLine(true);
+export const JUDGE_ASK_LINE = judgeAskLine(false);
 
 export const JUDGE_UNSUPPORTED_LINE =
 	"The safety judge needs Ollama, which is not available here, so risky commands are checked by the built-in safety rules only. " +
@@ -265,8 +273,22 @@ export async function pullModel(
 	}
 }
 
+/** CI, EIGHT_UNATTENDED, or no terminal: nobody can answer, so nothing is asked and nothing is installed. */
+export function unattended(env: Env = process.env): boolean {
+	const set = (v: string | undefined) => !!v && v !== "0" && v.toLowerCase() !== "false";
+	return set(env.CI) || set(env.EIGHT_UNATTENDED) || !process.stdin.isTTY || !process.stdout.isTTY;
+}
+
+function askerFor(deps: JudgeDeps, env: Env): NonNullable<JudgeDeps["ask"]> {
+	return (
+		deps.ask ??
+		((line, defaultYes) =>
+			unattended(env) ? Promise.resolve(null) : askYesNoLine(line, defaultYes))
+	);
+}
+
 /** One-line y/n on stdin. An empty answer is `defaultYes`. Null when stdin is not a terminal. */
-export async function askYesNoLine(line: string, defaultYes = true): Promise<boolean | null> {
+export async function askYesNoLine(line: string, defaultYes = false): Promise<boolean | null> {
 	if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
 	const { createInterface } = await import("node:readline/promises");
 	const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -338,6 +360,7 @@ async function llamaJudge(
 	env: Env,
 ): Promise<JudgeOutcome | "fallback"> {
 	const L = deps.llama ?? {};
+	const ask = askerFor(deps, env);
 	const start =
 		L.start ?? ((bin: string, gguf: string) => startLlamaServer(bin, gguf, JUDGE_MODEL, { env }));
 	const existing =
@@ -370,9 +393,17 @@ async function llamaJudge(
 		return finish(have.bin, have.gguf, "started");
 	}
 
+	// Nothing is asked or downloaded for a device no judge model is sized for.
+	const pin = judgeModelFor((L.totalRamBytes ?? totalmem)());
+	if (!pin) {
+		if (mode === "auto" && !d.writeChoice("unsupported")) return "no-person";
+		d.say(NO_DEVICE_MODEL_LINE);
+		return "unsupported";
+	}
+
 	if (mode === "auto") {
-		const defaultYes = deps.defaultYes ?? true;
-		const yes = await (deps.ask ?? askYesNoLine)(llamaAskLine(defaultYes), defaultYes);
+		const defaultYes = deps.defaultYes ?? false;
+		const yes = await ask(llamaAskLine(defaultYes), defaultYes);
 		if (yes === null) return "no-person";
 		if (!yes) {
 			d.writeChoice("declined");
@@ -400,12 +431,13 @@ async function llamaJudge(
 
 	let last = -1;
 	const model = await (
-		L.ensureModel ?? ((p: (n: number) => void) => fetchJudgeModel({ env, onPercent: p }))
+		L.ensureModel ??
+		((p: (n: number) => void, pn: Pin) => fetchJudgeModel({ env, onPercent: p, pin: pn }))
 	)((pct) => {
 		if (pct === last) return;
 		last = pct;
 		d.progress(`Downloading the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE}): ${pct}%`);
-	});
+	}, pin);
 	if (!model.ok) return fail(model.why);
 	return finish(bin.bin, model.path, "installed");
 }
@@ -420,6 +452,7 @@ export async function offerJudge(
 	deps: JudgeDeps = {},
 ): Promise<JudgeOutcome> {
 	const env = deps.env ?? process.env;
+	const ask = askerFor(deps, env);
 	const say = deps.say ?? ((l: string) => console.log(l));
 	const d = {
 		probe: deps.probe ?? (() => detectBackend({ env })),
@@ -461,10 +494,9 @@ export async function offerJudge(
 	// `ollama serve` (#4906). Auto asks once (a no falls through to the recorded choice below, so it is
 	// never asked again, and a bare Enter after an update is a no); /judge install is itself the yes.
 	if (o === "installed" && isLocalDefaultHost(resolveSharedJudgeHost(env))) {
-		const defaultYes = deps.defaultYes ?? true;
+		const defaultYes = deps.defaultYes ?? false;
 		let go = mode === "command";
-		if (!go)
-			go = (await (deps.ask ?? askYesNoLine)(ollamaStartAsk(defaultYes), defaultYes)) === true;
+		if (!go) go = (await ask(ollamaStartAsk(defaultYes), defaultYes)) === true;
 		if (go) {
 			say("Starting Ollama in the background.");
 			// local-first-gate: fallback Ollama autostart, for a person who already has Ollama installed
@@ -484,8 +516,8 @@ export async function offerJudge(
 	}
 
 	if (mode === "auto") {
-		const defaultYes = deps.defaultYes ?? true;
-		const yes = await (deps.ask ?? askYesNoLine)(judgeAskLine(defaultYes), defaultYes);
+		const defaultYes = deps.defaultYes ?? false;
+		const yes = await ask(judgeAskLine(defaultYes), defaultYes);
 		if (yes === null) return "no-person";
 		if (!yes) {
 			d.writeChoice("declined");

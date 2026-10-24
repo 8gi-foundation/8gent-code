@@ -195,6 +195,24 @@ export const JUDGE_GGUF = {
 	bytes: 4_920_739_424,
 } as const;
 
+/**
+ * Judge models by device, largest first: the first row whose minimum RAM the device has. Selene is
+ * 4.9 GB and loaded with a 4096 context, so it is only for a device with 12 GB or more. A smaller
+ * device gets no download yet: the safety check asks the person instead.
+ *
+ * SLOT for a phone-sized pin: a row with a smaller minRamBytes goes here once 8gent has its own
+ * small judge (candidate: 8J, waiting on a yes). No third-party small model is a default.
+ */
+export const JUDGE_MODELS: readonly { minRamBytes: number; pin: Pin }[] = [
+	{ minRamBytes: 12 * 2 ** 30, pin: JUDGE_GGUF },
+];
+
+/** The pin for a device with this much total RAM, or null when no judge model is sized for it. */
+export function judgeModelFor(totalRamBytes: number): Pin | null {
+	if (!Number.isFinite(totalRamBytes)) return null;
+	return JUDGE_MODELS.find((m) => totalRamBytes >= m.minRamBytes)?.pin ?? null;
+}
+
 /** "hf.co/<owner>/<repo>:<tag>" (the calibrated model name) to "<owner>/<repo>"; null for anything else. */
 export function judgeRepo(model: string = JUDGE_MODEL): string | null {
 	const m = /^hf\.co\/([^/:]+\/[^/:]+)(?::.+)?$/.exec(model);

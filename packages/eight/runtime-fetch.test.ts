@@ -17,11 +17,13 @@ import { JUDGE_MODEL } from "../decide/judge-model";
 import { managedLlamaServer } from "./local-runtime";
 import {
 	JUDGE_GGUF,
+	JUDGE_MODELS,
 	assetName,
 	ensureLlamaServer,
 	fetchJudgeModel,
 	fetchLlamaServer,
 	findLlamaServer,
+	judgeModelFor,
 	judgeModelPath,
 	judgeModelPresent,
 	judgeRepo,
@@ -430,5 +432,24 @@ describe("judge model: pinned, streamed, verified", () => {
 		expect(JUDGE_GGUF.sha256).toMatch(/^[0-9a-f]{64}$/);
 		expect(JUDGE_GGUF.bytes).toBe(4_920_739_424);
 		expect(judgeRepo("llama3.2:3b")).toBeNull();
+	});
+});
+
+describe("the judge model is a table keyed by device RAM", () => {
+	const GiB = 2 ** 30;
+	test("Selene only from 12 GB; below that no pin, so no download", () => {
+		expect(judgeModelFor(12 * GiB)).toBe(JUDGE_GGUF);
+		expect(judgeModelFor(64 * GiB)).toBe(JUDGE_GGUF);
+		expect(judgeModelFor(11.9 * GiB)).toBeNull();
+		expect(judgeModelFor(8 * GiB)).toBeNull();
+		expect(judgeModelFor(0)).toBeNull();
+		expect(judgeModelFor(Number.NaN)).toBeNull();
+	});
+
+	test("the table is ordered, every pin is a full sha256, and there is no third-party small model", () => {
+		const mins = JUDGE_MODELS.map((m) => m.minRamBytes);
+		expect(mins).toEqual([...mins].sort((a, b) => b - a));
+		for (const m of JUDGE_MODELS) expect(m.pin.sha256).toMatch(/^[0-9a-f]{64}$/);
+		expect(JUDGE_MODELS.map((m) => m.pin.sha256)).toEqual([JUDGE_GGUF.sha256]);
 	});
 });

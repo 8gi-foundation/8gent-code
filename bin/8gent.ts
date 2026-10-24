@@ -706,8 +706,8 @@ async function offerSafetyJudge(afterUpdate = false): Promise<void> {
 		const { isInteractiveTerminal } = await import("../packages/eight/cli-maintenance.ts");
 		if (!isInteractiveTerminal()) return;
 		const { offerJudge } = await import("../packages/eight/judge-install.ts");
-		// After an update a stray Enter must not start a 4.9 GB download: default No.
-		await offerJudge("auto", { defaultYes: !afterUpdate });
+		// Every judge question defaults to No: a stray Enter never starts a download (#4906).
+		await offerJudge("auto");
 	} catch {}
 	// Android (#4833): the same moment offers the DJ's tools and voice input, one yes. A no-op elsewhere.
 	try {
