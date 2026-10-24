@@ -31,6 +31,7 @@
  * server again once it is back.
  */
 
+import { dropOllamaCloud } from "../core/ollama-cloud";
 import {
 	LocalServerHttpError,
 	LocalServerResponseError,
@@ -110,8 +111,10 @@ export interface ProbeOptions {
 }
 
 export function pickModel(installed: InstalledModel[], override?: string): string | null {
-	const usable = installed.filter(
-		(m) => m?.name && !EXCLUDE.some((x) => m.name.toLowerCase().includes(x)),
+	// The judge reads every risky command: never a cloud tag (tiny size sorts it first).
+	const usable = dropOllamaCloud(
+		installed.filter((m) => m?.name && !EXCLUDE.some((x) => m.name.toLowerCase().includes(x))),
+		(m) => m.name,
 	);
 	if (override) {
 		const hit = usable.find((m) => m.name === override || m.name === `${override}:latest`);

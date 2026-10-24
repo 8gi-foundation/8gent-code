@@ -8,6 +8,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type SharpFn from "sharp";
+import { dropOllamaCloud } from "../core/ollama-cloud";
 
 // Loaded on first use, not at import: sharp's native addon is not embedded by
 // `bun build --compile`, and a top-level import crashed every compiled command
@@ -297,7 +298,9 @@ export async function isVisionModelAvailable(model = "llava"): Promise<boolean> 
 		const data = (await response.json()) as {
 			models: Array<{ name: string }>;
 		};
-		return data.models.some((m) => m.name === model || m.name.startsWith(`${model}:`));
+		return dropOllamaCloud(data.models, (m) => m.name).some(
+			(m) => m.name === model || m.name.startsWith(`${model}:`),
+		);
 	} catch {
 		return false;
 	}

@@ -68,6 +68,11 @@ jobs:
           fi
           echo "Conflict marker check: PASS"
 
+      # Principle 2: nothing that sends user data off the device is a default.
+      # The list is scripts/local-first-sinks.ts; the audit is docs/security/off-device-data.md.
+      - name: "Local-first gate (no default sends user data off the device)"
+        run: bun scripts/local-first-gate.ts
+
       - name: Type check
         run: bun run typecheck
 
