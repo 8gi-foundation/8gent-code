@@ -4,7 +4,11 @@ FROM oven/bun:1 AS deps
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json bun.lock* ./
-RUN bun install --production || bun install
+# The workspace packages are copied first so bun links them (@8gent/*), and the install runs with
+# --ignore-scripts: the root postinstall (scripts/postinstall.js) is for a person's install, is not in
+# this image, and made this build fail (#4937).
+COPY packages/ packages/
+RUN bun install --production --ignore-scripts || bun install --ignore-scripts
 
 FROM oven/bun:1-slim AS base
 WORKDIR /app
