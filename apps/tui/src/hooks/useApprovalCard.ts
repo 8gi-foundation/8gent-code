@@ -193,6 +193,22 @@ export function useCardView(target: string): CardView {
 /** The box InlineApprovalPrompt draws a `full` card in. */
 export const fullCardBox = createRef<DOMElement>();
 
+/** The box InlineApprovalPrompt draws the one-row card in: its width is what the target must fit. */
+export const compactCardBox = createRef<DOMElement>();
+
+/**
+ * A one-row card whose own box (narrower than the screen beside the activity
+ * rail or plan) cannot hold the target whole becomes the full card. True when
+ * it was upgraded now.
+ */
+function upgradeIfCut(card: PendingApproval, screen: Sized): boolean {
+	if (card.full) return false;
+	const w = compactCardBox.current?.yogaNode?.getComputedWidth() || screen.columns;
+	if (w === undefined || fitsCompact(card.target, card.reason, w)) return false;
+	Object.assign(card, { full: true, auto: true });
+	return true;
+}
+
 /**
  * True when the card's own box has a size and lies inside every ancestor's box
  * and the screen (#3474). A 0-sized box (a `display: none` ancestor) is not shown.
@@ -286,6 +302,11 @@ export function settleApprovalKey(input: string, key: KeyLike, screen?: Sized): 
 	const card = active;
 	if (!card) return false;
 	const decision = approvalDecisionForKey(input, key);
+	// Backstop: a yes never lands on a one-row card whose text is cut.
+	if (screen && upgradeIfCut(card, screen)) {
+		card.shownSince = Date.now();
+		return false;
+	}
 	if (card.full) {
 		if (card.shownWholeAt === undefined || !screen) return false;
 		if (!cardShowsAll(fullCardBox.current, screen)) {
@@ -361,6 +382,7 @@ export function useApprovalCard(
 	const [pending, setPending] = useState<PendingApproval | null>(null);
 	const { stdout } = useStdout();
 	const [, setSize] = useState("");
+	const [, setUpgrades] = useState(0);
 	useEffect(() => {
 		const onResize = () => {
 			// A narrower screen can turn a compact card into one that cuts: show it full.
@@ -377,6 +399,10 @@ export function useApprovalCard(
 	// Every commit, after Ink has laid out.
 	useLayoutEffect(() => {
 		const card = active;
+		if (card && card === pending && upgradeIfCut(card, stdout)) {
+			setUpgrades((n) => n + 1);
+			return;
+		}
 		if (!card?.full || card !== pending) return;
 		if (!cardShowsAll(fullCardBox.current, stdout)) return card.resolve("unfit");
 		const size = sizeOf(stdout);
@@ -481,7 +507,10 @@ export function useApprovalCard(
 
 	useInput((input, key) => {
 		if (scrollApprovalCard(key, stdout)) return;
-		if (settleApprovalKey(input, key, stdout)) onKey?.();
+		const was = active?.full;
+		const settled = settleApprovalKey(input, key, stdout);
+		if (active && active.full !== was) setUpgrades((n) => n + 1);
+		if (settled) onKey?.();
 	});
 
 	return pending;

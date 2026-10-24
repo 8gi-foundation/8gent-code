@@ -1,6 +1,6 @@
 import { Box, Text } from "ink";
 import React from "react";
-import { fullCardBox, useCardView } from "../hooks/useApprovalCard.js";
+import { compactCardBox, fullCardBox, useCardView } from "../hooks/useApprovalCard.js";
 import { t } from "../theme.js";
 import { KeyCapRow } from "./KeyCap.js";
 
@@ -102,6 +102,7 @@ export function InlineApprovalPrompt({ target, reason, full, gate }: InlineAppro
 	}
 	return (
 		<Box
+			ref={compactCardBox}
 			borderStyle="round"
 			borderColor={t.orange}
 			paddingX={1}

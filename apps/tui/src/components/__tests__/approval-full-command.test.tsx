@@ -209,3 +209,34 @@ describe("approval card in a column narrower than the screen (beside the rail or
 		expect(frame()).not.toContain("…");
 	});
 });
+
+describe("compact card in a column narrower than the screen (second read of #4929)", () => {
+	const CMD = "rm -rf ./build && echo SECRET_TAIL_VISIBLE";
+
+	test("a one-row command that does not fit its own column is shown whole, never cut", async () => {
+		const { frame, ask } = await mount(120, 40, 70);
+		void ask(CMD);
+		await waitFor(() => frame().includes("[Y] approve"), "card shown");
+		await tick(150);
+		expect(body(frame())).toContain(squash(CMD));
+		expect(frame()).not.toContain("…");
+	});
+
+	test("and a yes while any of it is cut does nothing", async () => {
+		const { stdin, frame, ask } = await mount(120, 40, 70);
+		let decided = null as boolean | null;
+		void ask(CMD).then((d) => {
+			decided = d;
+		});
+		await waitFor(() => frame().includes("[Y] approve"), "card shown");
+		// Early: inside the wait nothing is taken either way.
+		stdin.feed("y");
+		await tick(100);
+		expect(decided).toBeNull();
+		await tick(CARD_MIN_SHOW_MS + 100);
+		expect(body(frame())).toContain(squash(CMD));
+		stdin.feed("y");
+		await waitFor(() => decided !== null, "decision");
+		expect(decided).toBe(true);
+	});
+});
