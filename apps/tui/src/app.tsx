@@ -267,6 +267,14 @@ import { detectBuildIntent } from "./lib/build-intent.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
 import { clearSelection, onCopied } from "./lib/click-targets.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
+import {
+	COMPACT_NOTHING,
+	COMPACT_USAGE,
+	type CompactionNote,
+	UNDO_NOTHING,
+	compactReport,
+	undoReport,
+} from "./lib/compaction-view.js";
 import { runConsultCommand } from "./lib/consult-command.js";
 import { classifyContext, formatContextReport } from "./lib/context-view.js";
 import {
@@ -892,6 +900,8 @@ export interface Message {
 	/** For a turn's reply: the plan the PLAN column held when it landed, settled.
 	 *  The DONE block reads its steps from here, so the two never disagree. */
 	plan?: PlanStep[];
+	/** A compaction row (#4958): what was kept and how big it got. Role is "system". */
+	compaction?: CompactionNote;
 }
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
@@ -3249,6 +3259,34 @@ export function App({
 		notify: (text) => addSystemMessage(text),
 	};
 
+	/**
+	 * Open or fold a compaction row's summary: by id (a tap), or the newest one
+	 * (/compact show). False when the tab has no compaction row (#4958).
+	 */
+	const toggleCompaction = useCallback((id: string | null): boolean => {
+		const tabId = activeTabIdRef.current;
+		const list = tabMessagesRef.current.get(tabId) ?? [];
+		let target = id;
+		if (target === null) {
+			for (let i = list.length - 1; i >= 0; i--) {
+				if (list[i]?.compaction) {
+					target = list[i]?.id ?? null;
+					break;
+				}
+			}
+		}
+		if (target === null) return false;
+		const flip = (msgs: Message[]) =>
+			msgs.map((m) =>
+				m.id === target && m.compaction
+					? { ...m, compaction: { ...m.compaction, expanded: !m.compaction.expanded } }
+					: m,
+			);
+		if (list.length > 0) tabMessagesRef.current.set(tabId, flip(list));
+		setMessagesRaw((prev) => flip(prev));
+		return true;
+	}, []);
+
 	const replaceInTab = useCallback((tabId: string, id: string, content: string) => {
 		const swap = (list: Message[]) =>
 			list.map((m) => (m.id === id ? { ...m, content, timestamp: new Date() } : m));
@@ -3460,8 +3498,25 @@ export function App({
 			onStepStart: (event) => {
 				logStepStart(tabId, tabTitle, event.stepNumber, event.provider, event.model);
 			},
-			onCompaction: () => {
+			onCompaction: (r) => {
+				// The row lands in the tab that compacted, in turn order; the meter
+				// blanks only for the tab in front (#4956, #4958).
 				if (tabId === activeTabId) setContextStale(true);
+				appendToTabLatest.current(tabId, {
+					id: messageId("compaction"),
+					role: "system",
+					content: compactReport(r),
+					timestamp: new Date(),
+					compaction: {
+						tokensBefore: r.tokensBefore,
+						tokensAfter: r.tokensAfter,
+						messagesRemoved: r.messagesRemoved,
+						summary: r.summary,
+						filesRead: r.filesRead,
+						filesModified: r.filesModified,
+						expanded: false,
+					},
+				});
 			},
 			onStepFinish: (event: AgentStepEvent) => {
 				const isActive = tabId === activeTabId;
@@ -5160,30 +5215,45 @@ export function App({
 					}
 					break;
 
-				case "compact":
-					// Summarize current conversation
+				case "compact": {
+					// The real compaction engine, with numbers and a way back (#4958).
 					if (!agent) {
 						addSystemMessage("No 8gent active.");
 						break;
 					}
-					addSystemMessage("Compacting conversation history...");
-					{
-						const history = agent.getMessageHistory();
-						const userMsgs = history.filter((m) => m.role === "user").length;
-						const assistantMsgs = history.filter((m) => m.role === "assistant").length;
-						// Keep system prompt + last 4 messages
-						if (history.length > 5) {
-							const systemMsg = history[0];
-							const recentMsgs = history.slice(-4);
-							agent.restoreFromCheckpoint([systemMsg, ...recentMsgs]);
-							addSystemMessage(
-								`Compacted: ${userMsgs} user + ${assistantMsgs} assistant messages -> kept last 4.\nContext trimmed. Older messages removed from active memory.`,
-							);
-						} else {
-							addSystemMessage("Conversation too short to compact.");
-						}
+					const sub = (args[0] ?? "").toLowerCase();
+					if (sub === "show") {
+						if (!toggleCompaction(null)) addSystemMessage("No compaction in this tab yet.");
+						break;
 					}
+					if (sub !== "" && sub !== "undo") {
+						addSystemMessage(COMPACT_USAGE);
+						break;
+					}
+					if (perTabAgents.isTabProcessing(activeTabIdRef.current)) {
+						addSystemMessage("A turn is running. Wait for it to finish, then /compact.");
+						break;
+					}
+					if (sub === "undo") {
+						const back = agent.undoCompaction();
+						if (back) setContextStale(true);
+						addSystemMessage(back ? undoReport(back.tokens) : UNDO_NOTHING);
+						break;
+					}
+					addSystemMessage("Compacting conversation history...");
+					void (async () => {
+						try {
+							// The chat row and the meter come from the agent's onCompaction event.
+							const r = await agent.compactNow();
+							if (!r) addSystemMessage(COMPACT_NOTHING);
+						} catch (err) {
+							addSystemMessage(
+								`/compact failed: ${err instanceof Error ? err.message : String(err)}`,
+							);
+						}
+					})();
 					break;
+				}
 
 				case "chat":
 					if (orchestration.chatMode) {
@@ -8668,6 +8738,7 @@ export function App({
 										turnRunning={isProcessing}
 										rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
 										contentWidth={chatWidth}
+										onToggleCompaction={toggleCompaction}
 									/>
 								)}
 							</Box>

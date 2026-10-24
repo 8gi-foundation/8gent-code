@@ -119,7 +119,7 @@ describe("wiring (#4956)", () => {
 	const { join } = require("node:path") as typeof import("node:path");
 	const app = readFileSync(join(import.meta.dir, "..", "app.tsx"), "utf8");
 	test("the app listens for compaction and blanks the meter until the next measured turn", () => {
-		expect(app).toContain("onCompaction: () => {");
+		expect(app).toContain("onCompaction: (r) => {");
 		expect(app).toContain("setContextStale(true)");
 		expect(app).toContain("setContextStale(false)");
 	});

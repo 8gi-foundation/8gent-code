@@ -31,6 +31,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "../app.js";
 import { useMouseScroll } from "../hooks/useMouseScroll.js";
 import { bubbleWidths } from "../lib/chat-layout.js";
+import { compactionRows } from "../lib/compaction-view.js";
 import {
 	CODE_GUTTER,
 	INDENT_STEP,
@@ -49,6 +50,7 @@ import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { type ChatItem, type ToolTrailEntry, buildChatItems } from "../lib/tool-trail.js";
 import { bubblePlan, hasTurnResults, turnResultRows } from "../lib/turn-results.js";
 import { t } from "../theme.js";
+import { CompactionRow } from "./CompactionRow.js";
 import { ToolTrail, toolTrailRows } from "./ToolTrail.js";
 import { TurnResults } from "./TurnResults.js";
 import { BionicText, useADHDMode } from "./bionic-text.js";
@@ -150,6 +152,8 @@ interface MessageListProps {
 	showAnimations?: boolean;
 	/** Disable mouse-wheel + keyboard scroll capture (e.g. another modal owns input). */
 	scrollEnabled?: boolean;
+	/** A tap on a compaction row opens or folds its summary (#4958). */
+	onToggleCompaction?: (messageId: string) => void;
 }
 
 /**
@@ -183,6 +187,7 @@ function estimateMessageRows(
 	// A standalone trail (calls with no reply yet): its rows + marginBottom.
 	if (message.role === "tool") return trailRows > 0 ? trailRows + 1 : 0;
 	const w = Math.max(1, wrapWidth);
+	if (message.compaction) return compactionRows(message.compaction, w);
 	if (message.role === "system") {
 		const safe = breakLongTokens(message.content, w);
 		let rows = 0;
@@ -227,6 +232,7 @@ export function MessageList({
 	showAnimations = true,
 	scrollEnabled = true,
 	turnRunning = true,
+	onToggleCompaction,
 }: MessageListProps) {
 	const { stdout } = useStdout();
 	const resolvedContentWidth = contentWidthProp ?? Math.max(24, (stdout?.columns ?? 80) - 8);
@@ -458,6 +464,7 @@ export function MessageList({
 								trail={trailById.get(message.id) ?? []}
 								turnRunning={turnRunning}
 								trailMaxRows={trailCaps.get(message.id)}
+								onToggleCompaction={onToggleCompaction}
 								onAnimationStart={(id) => {
 									animatedIdsRef.current.add(id);
 								}}
@@ -492,6 +499,8 @@ interface MessageItemProps {
 	turnRunning?: boolean;
 	/** Row ceiling for the trail when the turn would not fit the window. */
 	trailMaxRows?: number;
+	/** A tap on a compaction row (#4958). */
+	onToggleCompaction?: (messageId: string) => void;
 	/** Fires once on first mount when isNew=true. Parent uses it to record
 	 *  that this message has begun its typing animation, so future remounts
 	 *  (from scroll) render the message statically. */
@@ -510,6 +519,7 @@ function MessageItem({
 	trail = [],
 	turnRunning = false,
 	trailMaxRows,
+	onToggleCompaction,
 	onAnimationStart,
 }: MessageItemProps) {
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
@@ -563,6 +573,18 @@ function MessageItem({
 					animate={showAnimations}
 				/>
 			</Box>
+		);
+	}
+
+	// A compaction renders as its own row, open or folded (#4958).
+	if (message.compaction) {
+		return (
+			<CompactionRow
+				id={message.id}
+				note={message.compaction}
+				width={textWrapWidth}
+				onToggle={onToggleCompaction}
+			/>
 		);
 	}
 

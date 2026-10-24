@@ -474,6 +474,24 @@ export class ProactiveCompression extends CompactionEngine {
 		};
 	}
 
+	/**
+	 * The summary stage on request (/compact, #4958): the same pass as the
+	 * automatic one, but run whatever the window holds. A history no longer than
+	 * the kept tail comes back unchanged with messagesRemoved 0.
+	 */
+	async compactSummarize(
+		messages: Message[],
+		model: LanguageModel,
+		contextWindow?: number,
+	): Promise<{ messages: Message[]; result: ProactiveResult }> {
+		const { messages: compacted, result } = await this.terminus2Compact(
+			messages,
+			model,
+			contextWindow,
+		);
+		return { messages: compacted, result: { ...result, stage: "summarize" } };
+	}
+
 	/** Stage 1: Drop tool_result messages from older portion, keep decisions. */
 	private stageUnwind(messages: Message[]): Message[] {
 		return messages.filter((m, i) => {
@@ -491,7 +509,6 @@ export class ProactiveCompression extends CompactionEngine {
 		return [systemMsg, ...lastTwo];
 	}
 }
-
 
 // ===========================================================================
 // The one compaction path (Pi parity row E5)
@@ -570,4 +587,55 @@ export async function compactHistory(opts: {
 		entryId = recorder.record(result, messages.slice(messages.length - result.kept));
 	}
 	return { messages, result, entryId };
+}
+
+/**
+ * A compaction on request (#4958). Like compactHistory, minus the threshold:
+ * the person asked. Returns null when there is nothing older than the kept
+ * tail to summarise, so the caller can say so instead of claiming a result.
+ */
+export async function compactHistoryNow(opts: {
+	engine: ProactiveCompression;
+	history: Message[];
+	model: LanguageModel;
+	recorder?: CompactionRecorder | null;
+}): Promise<CompactionPass | null> {
+	const { engine, history, model, recorder } = opts;
+	recorder?.sync(history);
+	const { messages, result } = await engine.compactSummarize(history, model);
+	if (result.messagesRemoved === 0) return null;
+	let entryId: string | null = null;
+	if (recorder && result.kept !== undefined) {
+		entryId = recorder.record(result, messages.slice(messages.length - result.kept));
+	}
+	return { messages, result, entryId };
+}
+
+/**
+ * One level of undo for the latest compaction, held in memory. The session
+ * file's own undo needs a store the TUI does not attach, so the history as it
+ * was is kept here; a newer compaction replaces it. Local, never persisted.
+ */
+export class CompactionUndo {
+	private before: Message[] | null = null;
+	private entryId: string | null = null;
+
+	/** Keep a copy of `history` as it is now, with the file entry that replaces it, if any. */
+	remember(history: Message[], entryId: string | null): void {
+		this.before = [...history];
+		this.entryId = entryId;
+	}
+
+	get available(): boolean {
+		return this.before !== null;
+	}
+
+	/** The remembered history, once. Null when there is nothing to undo. */
+	take(): { messages: Message[]; entryId: string | null } | null {
+		if (!this.before) return null;
+		const out = { messages: this.before, entryId: this.entryId };
+		this.before = null;
+		this.entryId = null;
+		return out;
+	}
 }
