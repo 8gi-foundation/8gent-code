@@ -55,7 +55,6 @@ The gate fails when:
 
 A waiver is a reference to an issue and an expiry date. After the date the gate fails, so a known item cannot go quiet.
 
-- Termux speech service asked on first launch (rule 1): #4903, until 2026-11-07.
 - `web_search` on by default (rule 1): #4912, until 2026-11-07.
 - Install text on default paths (rule 2): #4915, until 2026-11-07. The files are the `default` entries in `INSTALL_SITES`.
 

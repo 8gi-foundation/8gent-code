@@ -68,6 +68,12 @@ describe("local-first gate on this repo", () => {
 
 describe("the Termux speech default (v0.20.26)", () => {
 	const android = SINKS.find((s) => s.id === "android-speech-service") as Sink;
+	// The real sink no longer carries a waiver (the question is never asked on first launch),
+	// so the waiver mechanics are tested on a copy that does.
+	const waived: Sink = {
+		...android,
+		waiver: { ref: "#4903", expires: "2026-11-07", why: "test of the waiver mechanics" },
+	};
 
 	test("asking the off-device voice question on first launch fails the gate", () => {
 		const r = runGate(files({ "packages/eight/android-setup.ts": TERMUX_FIRST_RUN_ASKS }), {
@@ -80,18 +86,16 @@ describe("the Termux speech default (v0.20.26)", () => {
 
 	test("a waiver downgrades it to a known item, until it expires", () => {
 		const f = files({ "packages/eight/android-setup.ts": TERMUX_FIRST_RUN_ASKS });
-		const ok = runGate(f, { sinks: [android], today: TODAY });
+		const ok = runGate(f, { sinks: [waived], today: TODAY });
 		expect(ok.failures).toEqual([]);
 		expect(ok.waived).toHaveLength(1);
-		const late = runGate(f, { sinks: [android], today: "2099-01-01" });
+		const late = runGate(f, { sinks: [waived], today: "2099-01-01" });
 		expect(late.failures[0]?.rule).toBe("waiver");
 	});
 
 	test("--no-waivers ignores the waiver", () => {
 		const f = files({ "packages/eight/android-setup.ts": TERMUX_FIRST_RUN_ASKS });
-		expect(runGate(f, { sinks: [android], today: TODAY, noWaivers: true }).failures).toHaveLength(
-			1,
-		);
+		expect(runGate(f, { sinks: [waived], today: TODAY, noWaivers: true }).failures).toHaveLength(1);
 	});
 
 	test("reaching the question only on the command passes with no waiver", () => {
