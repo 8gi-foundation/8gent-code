@@ -18,10 +18,9 @@ User data here means audio, prompt text, tool results, files, images, keys, and 
 
 | Id | What leaves | Where | Why it is on | Status |
 | --- | --- | --- | --- | --- |
-| android-speech-service | Microphone audio on Android (Termux) | The phone's speech recogniser through `termux-speech-to-text`; Android's SpeechRecognizer is often Google's service | `packages/eight/android-setup.ts` asks the voice question on first launch (`offerAndroidSetup("auto")`, after `micAskLine`). The question carries a disclosure and answers no on a bare Enter, but it is an off-device offer on the first-run path. | Known item, waiver #4903, expires 2026-11-07. Ends when the voice path is on-device whisper.cpp (8TO's voice PR) or the question is only reached on the voice command. |
 | web-search | The search words the model writes | DuckDuckGo (`html.duckduckgo.com`) | `web_search` is in the default tool set and in the auto-allowed read-only set in `packages/permissions/permission-mode.ts`. The model can call it with no prompt to the person. | Known item, waiver #4912, expires 2026-11-07. Needs a decision: on by default, or behind a one-time yes that names DuckDuckGo. |
 
-Those two are the only entries the gate waives. Run `bun scripts/local-first-gate.ts --no-waivers` to see them fail.
+That one is the only entry the gate waives for user data. Run `bun scripts/local-first-gate.ts --no-waivers` to see it fail.
 
 ## Opt-in paths (user data can leave only after a yes)
 
@@ -35,6 +34,7 @@ Those two are the only entries the gate waives. Run `bun scripts/local-first-gat
 | chat-and-mail-bridges | Messages and replies | Telegram, Slack, Discord, Resend | That service's token. The default Telegram hook ships `enabled: false`. | `packages/hooks/defaults.ts` |
 | github-api | Issues, pull requests, searches | api.github.com | The person's GitHub token. The launch update check is `EIGHT_UPDATE_CHECK=1` only. | `packages/eight/update-notice.ts` |
 | vercel-and-travel-apis | Deploy and travel-search requests | api.vercel.com, api.letsfg.co | The person's key; LetsFG throws "LETSFG_API_KEY is required" | `packages/travel/letsfg-provider.ts` |
+| android-speech-service | Microphone audio, only if the person turns on the phone's speech service | The phone's speech recogniser through `termux-speech-to-text`; Android's SpeechRecognizer is often Google's service | The voice question is never asked on first launch, only after the person asks for voice; voice input is on-device whisper.cpp by default (#4910) | `packages/eight/android-setup.ts` (the question is reached only on the command) |
 | db-convex | Records | A Convex deployment | A configured `CONVEX_URL`; without it the client logs "Running in offline mode" | `packages/db/client.ts` |
 
 ## Command paths (user data can leave only when the person types the command)
