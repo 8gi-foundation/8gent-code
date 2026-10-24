@@ -1,0 +1,359 @@
+type	view	name	kind	source path
+box	01-system-map	npm package @8gi-foundation/8gent-code	entry	package.json
+box	01-system-map	bin/8gent-run.js launcher	entry	bin/8gent-run.js
+box	01-system-map	bin/8gent.ts (CLI source)	entry	bin/8gent.ts
+box	01-system-map	Compiled binaries (6 targets)  [G04]	entry	scripts/build-binaries.ts
+box	01-system-map	scripts/install.sh (macOS, Linux)	entry	scripts/install.sh
+box	01-system-map	scripts/install.ps1 (Windows)	entry	scripts/install.ps1
+box	01-system-map	OS packages	entry	packaging
+box	01-system-map	Termux path (Android)  [G01]	unv	scripts/install.sh; bin/termux-exec.js; scripts/smoke-termux.sh
+box	01-system-map	Release pipeline	entry	.github/workflows/release.yml; .github/workflows/release-binaries.yml
+box	01-system-map	Dockerfile and infra/hetzner	entry	Dockerfile; infra/hetzner/docker-compose.yml
+box	01-system-map	apps/tui (Ink)	app	apps/tui/src/index.tsx
+box	01-system-map	apps/8gent-computer (Swift, macOS)  [G05]	app	apps/8gent-computer/README.md
+box	01-system-map	apps/lil-eight (Swift pet, macOS)  [G05]	app	apps/lil-eight/build.sh
+box	01-system-map	apps/8gent-bot (Fly 8gi-orchestrator)  [G19]	app	apps/8gent-bot/fly.toml
+box	01-system-map	apps/linkedin-vessel (Fly)	app	apps/linkedin-vessel/fly.toml
+box	01-system-map	apps/8gent-eyes (CLI)	app	apps/8gent-eyes/package.json
+box	01-system-map	apps/8gent-flow	app	apps/8gent-flow/package.json
+box	01-system-map	apps/proxy	app	apps/proxy/README.md
+box	01-system-map	apps/debugger (Next.js)  [G18]	unv	apps/debugger/README.md
+box	01-system-map	apps/video (Remotion)	app	apps/video/package.json
+box	01-system-map	apps/convex  [G14]	gap	apps/convex/_generated/api.ts
+box	01-system-map	apps/clui, apps/dashboard  [G15]	gap	README.md:608-609
+box	01-system-map	gateway.ts	daemon	packages/daemon/gateway.ts:963-1106
+box	01-system-map	agent-pool.ts	daemon	packages/daemon/agent-pool.ts:95
+box	01-system-map	cron.ts  [G13]	daemon	packages/daemon/cron.ts:35
+box	01-system-map	heartbeat.ts	daemon	packages/daemon/heartbeat.ts
+box	01-system-map	session-journal.ts	daemon	packages/daemon/session-journal.ts
+box	01-system-map	telegram-bridge.ts  [G19]	daemon	packages/daemon/telegram-bridge.ts
+box	01-system-map	slack.ts	daemon	packages/daemon/slack.ts:138
+box	01-system-map	table-routes.ts	daemon	packages/daemon/table-routes.ts
+box	01-system-map	goal-rpc.ts	daemon	packages/daemon/goal-rpc.ts
+box	01-system-map	dispatch.ts	daemon	packages/daemon/dispatch.ts
+box	01-system-map	service.ts	daemon	packages/daemon/service.ts:1-12
+box	01-system-map	VesselMesh registration	daemon	packages/daemon/index.ts:477
+box	01-system-map	macOS: launchd service  [G03]	daemon	packages/daemon/service.ts:1-12
+box	01-system-map	Linux: systemd --user + linger	daemon	packages/daemon/service.ts:1-12; .github/workflows/platforms.yml:78-98
+box	01-system-map	Windows: Scheduled Task	daemon	packages/daemon/service.ts:1-12; .github/workflows/windows-task.yml
+box	01-system-map	Hetzner: system units + compose	daemon	infra/hetzner/systemd/eight-daemon.service
+box	01-system-map	Fly.io eight-vessel  [G02]	unv	fly.toml; scripts/board-vessel/entrypoint.sh
+box	01-system-map	Android / Termux: UNVERIFIED (#4852)  [G01]	unv	packages/daemon/service.ts:450-455
+box	01-system-map	G01 Android/Termux daemon unverified (#4852)	gap	packages/daemon/service.ts:450-455
+box	01-system-map	G02 Fly eight-vessel runs board-vessel, not the daemon	gap	fly.toml
+box	01-system-map	G03 macOS launchd service never exercised in CI	gap	packages/daemon/service.e2e.test.ts:14-17
+box	01-system-map	G04 Three compiled targets have no smoke test	gap	scripts/build-binaries.ts:66-72
+box	01-system-map	G05 Swift apps have no release job	gap	.github/workflows/swift-nightly.yml
+box	01-system-map	G06 Dead or stub packages	gap	packages/dreams
+box	01-system-map	G07 packages/tools: 62 of 96 modules have no importer	gap	packages/tools/crc32.ts
+box	01-system-map	G08 Orphan files inside packages/eight	gap	packages/eight/auto-commit.ts
+box	01-system-map	G09 Packages with source and zero tests	gap	packages/auth
+box	01-system-map	G10 threat-feed is manual and its report is read by nobody	gap	packages/threat-feed/cli.ts
+box	01-system-map	G13 Two cron schedulers share one cron.json	gap	packages/cron/index.ts:86
+box	01-system-map	G14 Convex backend is not in this repo	gap	apps/convex/_generated/api.ts
+box	01-system-map	G15 Docs name apps and counts the tree does not have	gap	README.md:608-609
+box	01-system-map	G16 g8way has no deploy unit in infra	gap	packages/g8way/README.md
+box	01-system-map	G18 Stub web apps: root src/ and apps/debugger	gap	src/Counter.tsx
+box	01-system-map	G19 Four Telegram code paths	gap	packages/daemon/telegram-bridge.ts
+box	01-system-map	packages/local-model-server	pkg	packages/local-model-server
+box	01-system-map	packages/decide	pkg	packages/decide
+box	01-system-map	packages/verify	pkg	packages/verify
+box	01-system-map	packages/providers	pkg	packages/providers
+box	01-system-map	packages/kernel	pkg	packages/kernel
+box	01-system-map	packages/g8way  [G16]	pkg	packages/g8way
+box	01-system-map	packages/qdrant-client  [G06]	gap	packages/qdrant-client
+box	01-system-map	packages/eight  [G08]	pkg	packages/eight
+box	01-system-map	packages/core	pkg	packages/core
+box	01-system-map	packages/types	pkg	packages/types
+box	01-system-map	packages/ai	pkg	packages/ai
+box	01-system-map	packages/goal	pkg	packages/goal
+box	01-system-map	packages/harness	pkg	packages/harness
+box	01-system-map	packages/harness-cli	pkg	packages/harness-cli
+box	01-system-map	packages/planning  [G09]	pkg	packages/planning
+box	01-system-map	packages/planner  [G06]	gap	packages/planner
+box	01-system-map	packages/executor  [G09]	pkg	packages/executor
+box	01-system-map	packages/tasks  [G09]	pkg	packages/tasks
+box	01-system-map	packages/proactive	pkg	packages/proactive
+box	01-system-map	packages/i18n  [G09]	pkg	packages/i18n
+box	01-system-map	packages/personality  [G09]	pkg	packages/personality
+box	01-system-map	packages/infinite	pkg	packages/infinite
+box	01-system-map	packages/workflow	pkg	packages/workflow
+box	01-system-map	packages/validation	pkg	packages/validation
+box	01-system-map	packages/settings	pkg	packages/settings
+box	01-system-map	packages/permissions	pkg	packages/permissions
+box	01-system-map	packages/secrets	pkg	packages/secrets
+box	01-system-map	packages/quarantine  [G09]	pkg	packages/quarantine
+box	01-system-map	packages/audit	pkg	packages/audit
+box	01-system-map	packages/auth  [G09]	pkg	packages/auth
+box	01-system-map	packages/threat-feed  [G10]	gap	packages/threat-feed
+box	01-system-map	packages/ci	pkg	packages/ci
+box	01-system-map	packages/memory	pkg	packages/memory
+box	01-system-map	packages/ast-index	pkg	packages/ast-index
+box	01-system-map	packages/repo-context  [G09]	pkg	packages/repo-context
+box	01-system-map	packages/lsp  [G09]	pkg	packages/lsp
+box	01-system-map	packages/db	pkg	packages/db
+box	01-system-map	packages/self-autonomy	pkg	packages/self-autonomy
+box	01-system-map	packages/specifications	pkg	packages/specifications
+box	01-system-map	packages/dreams  [G06]	gap	packages/dreams
+box	01-system-map	packages/tools  [G07]	gap	packages/tools
+box	01-system-map	packages/toolshed	pkg	packages/toolshed
+box	01-system-map	packages/skills	pkg	packages/skills
+box	01-system-map	packages/extensions	pkg	packages/extensions
+box	01-system-map	packages/mcp	pkg	packages/mcp
+box	01-system-map	packages/hooks	pkg	packages/hooks
+box	01-system-map	packages/marketplace	pkg	packages/marketplace
+box	01-system-map	packages/registry  [G09]	pkg	packages/registry
+box	01-system-map	packages/app-creator	pkg	packages/app-creator
+box	01-system-map	packages/orchestration	pkg	packages/orchestration
+box	01-system-map	packages/daemon	pkg	packages/daemon
+box	01-system-map	packages/cron  [G13]	pkg	packages/cron
+box	01-system-map	packages/board-plane	pkg	packages/board-plane
+box	01-system-map	packages/board-vessel	pkg	packages/board-vessel
+box	01-system-map	packages/control-plane  [G06]	gap	packages/control-plane
+box	01-system-map	packages/channels  [G06]	gap	packages/channels
+box	01-system-map	packages/table	pkg	packages/table
+box	01-system-map	packages/8dk  [G06]	gap	packages/8dk
+box	01-system-map	packages/telegram  [G19]	pkg	packages/telegram
+box	01-system-map	packages/telegram-bot  [G19]	pkg	packages/telegram-bot
+box	01-system-map	packages/flow	pkg	packages/flow
+box	01-system-map	packages/telemetry	pkg	packages/telemetry
+box	01-system-map	packages/reporting	pkg	packages/reporting
+box	01-system-map	packages/computer	pkg	packages/computer
+box	01-system-map	packages/hands  [G09]	pkg	packages/hands
+box	01-system-map	packages/eyes	pkg	packages/eyes
+box	01-system-map	packages/handeyes	pkg	packages/handeyes
+box	01-system-map	packages/voice	pkg	packages/voice
+box	01-system-map	packages/music	pkg	packages/music
+box	01-system-map	packages/terminal-tab	pkg	packages/terminal-tab
+box	01-system-map	packages/pet	pkg	packages/pet
+box	01-system-map	packages/render	pkg	packages/render
+box	01-system-map	packages/deck	pkg	packages/deck
+box	01-system-map	packages/film-craft	pkg	packages/film-craft
+box	01-system-map	packages/design-agent  [G09]	pkg	packages/design-agent
+box	01-system-map	packages/design-compose	pkg	packages/design-compose
+box	01-system-map	packages/design-systems	pkg	packages/design-systems
+box	01-system-map	packages/gamedev	pkg	packages/gamedev
+box	01-system-map	packages/travel	pkg	packages/travel
+box	01-system-map	packages/install-runner	pkg	packages/install-runner
+box	01-system-map	packages/node-compat	pkg	packages/node-compat
+box	01-system-map	packages/runtime	pkg	packages/runtime
+arrow	01-system-map	npm package @8gi-foundation/8gent-code -> bin/8gent-run.js launcher: bin entry	flow	package.json
+arrow	01-system-map	bin/8gent-run.js launcher -> bin/8gent.ts (CLI source): spawns dist/cli.js (bundle of bin/8gent.ts)	flow	bin/8gent-run.js
+arrow	01-system-map	Compiled binaries (6 targets)  [G04] -> bin/8gent.ts (CLI source): bun --compile of bin/8gent.ts	flow	scripts/build-binaries.ts
+arrow	01-system-map	scripts/install.sh (macOS, Linux) -> Compiled binaries (6 targets)  [G04]: downloads the release binary	flow	scripts/install.sh
+arrow	01-system-map	Release pipeline -> Compiled binaries (6 targets)  [G04]: builds, signs, attests	flow	.github/workflows/release-binaries.yml
+arrow	01-system-map	Termux path (Android)  [G01] -> bin/8gent-run.js launcher: npm .tgz, node runtime	flow	scripts/install.sh
+arrow	01-system-map	bin/8gent.ts (CLI source) -> apps/tui (Ink): `8gent tui`	flow	bin/8gent.ts
+arrow	01-system-map	bin/8gent.ts (CLI source) -> service.ts: `8gent daemon run|install|status`	flow	bin/8gent.ts:573-578
+arrow	01-system-map	apps/tui (Ink) -> gateway.ts: ws :18789, sessions and auto-attach	flow	apps/tui/src/lib/daemon-sessions.ts
+arrow	01-system-map	apps/8gent-computer (Swift, macOS)  [G05] -> gateway.ts: ws /computer	flow	apps/8gent-computer/README.md
+arrow	01-system-map	gateway.ts -> agent-pool.ts: session turns	flow	packages/daemon/agent-pool.ts
+arrow	01-system-map	agent-pool.ts -> packages/eight  [G08]: runs the 8gent loop	flow	packages/daemon/agent-pool.ts
+arrow	01-system-map	apps/tui (Ink) -> packages/eight  [G08]: in-process loop when no daemon	flow	apps/tui/src/app.tsx:25
+arrow	01-system-map	packages/eight  [G08] -> packages/providers: chat() through ProviderManager	flow	packages/eight/clients/index.ts
+arrow	01-system-map	service.ts -> macOS: launchd service  [G03]: writes plist, launchctl bootstrap	flow	packages/daemon/service.ts
+arrow	01-system-map	service.ts -> Linux: systemd --user + linger: writes user unit, enables linger	flow	packages/daemon/service.ts
+arrow	01-system-map	service.ts -> Windows: Scheduled Task: registers Scheduled Task	flow	packages/daemon/service.ts
+arrow	01-system-map	Hetzner: system units + compose -> gateway.ts: same daemon, system unit	flow	infra/hetzner/systemd/eight-daemon.service
+box	02-external-tools-and-services	8gent	app	packages/providers/index.ts:274-288
+box	02-external-tools-and-services	ollama	app	packages/providers/index.ts:289-304
+box	02-external-tools-and-services	lmstudio	app	packages/providers/index.ts:305-324
+box	02-external-tools-and-services	llama-server	optin	packages/providers/index.ts:325-339
+box	02-external-tools-and-services	apple-foundation	ext	packages/providers/index.ts:340-354
+box	02-external-tools-and-services	apfel	ext	packages/providers/index.ts:355-377
+box	02-external-tools-and-services	openrouter	optin	packages/providers/index.ts:391-411
+box	02-external-tools-and-services	deepseek	optin	packages/providers/index.ts:378-390
+box	02-external-tools-and-services	groq	optin	packages/providers/index.ts:412-429
+box	02-external-tools-and-services	grok	optin	packages/providers/index.ts:430-442
+box	02-external-tools-and-services	openai	optin	packages/providers/index.ts:443-457
+box	02-external-tools-and-services	anthropic	optin	packages/providers/index.ts:458-472
+box	02-external-tools-and-services	mistral	optin	packages/providers/index.ts:473-490
+box	02-external-tools-and-services	minimax	optin	packages/providers/index.ts:491-506
+box	02-external-tools-and-services	together	optin	packages/providers/index.ts:507-523
+box	02-external-tools-and-services	fireworks	optin	packages/providers/index.ts:524-539
+box	02-external-tools-and-services	replicate	optin	packages/providers/index.ts:540-552
+box	02-external-tools-and-services	host-cli-primary	optin	packages/providers/index.ts:553-567
+box	02-external-tools-and-services	host-cli-secondary	optin	packages/providers/index.ts:568-582
+box	02-external-tools-and-services	Selene-1-Mini (Atla) via Ollama: the shipped local judge	daemon	packages/providers/local-judge.ts:1-30
+box	02-external-tools-and-services	Ollama (localhost:11434)	daemon	packages/local-model-server/index.ts
+box	02-external-tools-and-services	llama.cpp in-process (node-llama-cpp, optional dependency)	daemon	packages/decide/README.md:31-36
+box	02-external-tools-and-services	laya backend	daemon	packages/decide/backends/laya.ts
+box	02-external-tools-and-services	8J on a Hugging Face Space (8GI/8j-eval, ZeroGPU)	optin	packages/g8way/README.md:50-75
+box	02-external-tools-and-services	g8way proxy (api.8gentos.com, Hetzner)  [G16]	unv	packages/g8way/README.md:1-12
+box	02-external-tools-and-services	'8gate' local judge name  [G17]	gap	packages/eight/provider-choice.test.ts
+box	02-external-tools-and-services	Skywork-Reward-V2 over a vLLM-style endpoint	optin	packages/providers/local-judge.ts:7-10
+box	02-external-tools-and-services	packages/daemon	daemon	packages/daemon/index.ts
+box	02-external-tools-and-services	packages/eight (the 8gent loop)	daemon	packages/eight/agent.ts
+box	02-external-tools-and-services	ProviderManager	daemon	packages/providers/index.ts:274-577
+box	02-external-tools-and-services	System One gate + permissions	daemon	packages/permissions/system-one-gate.ts
+box	02-external-tools-and-services	packages/decide (judge host)	daemon	packages/decide/README.md
+box	02-external-tools-and-services	packages/voice + tools/speak.ts	daemon	packages/voice/index.ts
+box	02-external-tools-and-services	packages/music (DJ)	daemon	packages/music/dj.ts
+box	02-external-tools-and-services	packages/deck, film-craft, table/bake	daemon	packages/deck/auto.ts
+box	02-external-tools-and-services	packages/threat-feed (manual CLI)  [G10]	gap	packages/threat-feed/cli.ts
+box	02-external-tools-and-services	board-plane + board-vessel (Fly)	daemon	packages/board-plane/control-plane.ts
+box	02-external-tools-and-services	apps/linkedin-vessel (Fly)	daemon	apps/linkedin-vessel/src/index.ts
+box	02-external-tools-and-services	packages/qdrant-client  [G06]	gap	packages/qdrant-client/README.md
+box	02-external-tools-and-services	packages/control-plane  [G06]	gap	packages/control-plane/index.ts
+box	02-external-tools-and-services	Telegram Bot API	ext	packages/daemon/telegram-bridge.ts
+box	02-external-tools-and-services	Slack	ext	packages/daemon/slack.ts:138
+box	02-external-tools-and-services	GitHub (api.github.com and gh)	ext	packages/toolshed/tools/github/github-tools.ts
+box	02-external-tools-and-services	npm registry	ext	packages/eight/self-update.ts:182
+box	02-external-tools-and-services	Vercel API	ext	packages/eight/tools.ts:2027
+box	02-external-tools-and-services	DuckDuckGo or SearXNG	ext	packages/tools/web.ts:4
+box	02-external-tools-and-services	LetsFG API	ext	packages/travel/letsfg-provider.ts:81
+box	02-external-tools-and-services	Clerk	ext	packages/auth/clerk.ts
+box	02-external-tools-and-services	Convex  [G14]	ext	packages/db/client.ts:63
+box	02-external-tools-and-services	OSV and CISA KEV	ext	packages/threat-feed/feeds.ts:6-9
+box	02-external-tools-and-services	OpenAI cloud transcription	optin	packages/voice/cloud-transcriber.ts
+box	02-external-tools-and-services	ElevenLabs	unv	packages/voice/tts-engine.ts:7
+box	02-external-tools-and-services	Discord REST	ext	packages/board-plane/discord-rest.ts:8
+box	02-external-tools-and-services	Board plane and model proxy (Fly)	ext	fly.toml
+box	02-external-tools-and-services	LinkedIn API	ext	apps/linkedin-vessel/src/linkedin-api.ts
+box	02-external-tools-and-services	Qdrant  [G06]	gap	packages/qdrant-client/README.md
+box	02-external-tools-and-services	Stripe  [G06]	gap	packages/control-plane/stripe-webhook.ts
+box	02-external-tools-and-services	Hugging Face	ext	packages/eight/judge-install.ts
+box	02-external-tools-and-services	whisper.cpp + sox	out	packages/voice/index.ts:1-4
+box	02-external-tools-and-services	say, KittenTTS (Python), Termux TTS, moshi-mlx	out	packages/voice/tts-engine.ts:31
+box	02-external-tools-and-services	mpv + yt-dlp	out	packages/music/dj.ts:5-8
+box	02-external-tools-and-services	ffmpeg	out	packages/tools/video-deck.ts
+box	02-external-tools-and-services	ImageMagick (magick)	out	packages/film-craft/index.ts:4
+box	02-external-tools-and-services	ripgrep	out	packages/ast-index/locate.ts:26
+box	02-external-tools-and-services	cliclick, osascript, screencapture	out	packages/hands/index.ts
+box	02-external-tools-and-services	Chrome	out	packages/render/chrome.ts
+box	02-external-tools-and-services	browser-use CLI (Python)	out	packages/tools/browser-use.ts:1-10
+box	02-external-tools-and-services	apple-foundation-bridge + 8gent-ax-bridge	out	scripts/install-apple-foundation.ts
+box	02-external-tools-and-services	G06 Dead or stub packages	gap	packages/dreams
+box	02-external-tools-and-services	G10 threat-feed is manual and its report is read by nobody	gap	packages/threat-feed/cli.ts
+box	02-external-tools-and-services	G14 Convex backend is not in this repo	gap	apps/convex/_generated/api.ts
+box	02-external-tools-and-services	G16 g8way has no deploy unit in infra	gap	packages/g8way/README.md
+box	02-external-tools-and-services	G17 '8gate' is not a module; 8J is opt-in behind g8way	gap	packages/eight/provider-choice.test.ts
+arrow	02-external-tools-and-services	ProviderManager -> ollama: chat, tool calls, stream; no key (same for 8gent, lmstudio, llama-server)	flow	packages/providers/index.ts:289-304
+arrow	02-external-tools-and-services	ProviderManager -> apple-foundation: prompt over IPC to the bridge binary	flow	packages/providers/index.ts:340-354
+arrow	02-external-tools-and-services	ProviderManager -> apfel: OpenAI-style chat on 127.0.0.1:11435	flow	packages/providers/index.ts:355-377
+arrow	02-external-tools-and-services	ProviderManager -> openrouter: failover: local -> OpenRouter :free	flow	packages/providers/failover.ts
+arrow	02-external-tools-and-services	ProviderManager -> anthropic: chat with key, after the PII egress gate	flow	packages/providers/index.ts:458-472
+arrow	02-external-tools-and-services	ProviderManager -> openai: chat with key (same shape for the other cloud entries)	flow	packages/providers/index.ts:443-457
+arrow	02-external-tools-and-services	ProviderManager -> host-cli-primary: spawns the host binary, text only	flow	packages/providers/host-cli.ts
+arrow	02-external-tools-and-services	apple-foundation -> apple-foundation-bridge + 8gent-ax-bridge: IPC socket to the Swift bridge	flow	scripts/install-apple-foundation.ts
+arrow	02-external-tools-and-services	packages/eight (the 8gent loop) -> ProviderManager: every model call	flow	packages/eight/clients/index.ts
+arrow	02-external-tools-and-services	System One gate + permissions -> packages/decide (judge host): bashGuard(command) asks, gets p(yes)	flow	packages/permissions/system-one-gate.ts
+arrow	02-external-tools-and-services	packages/decide (judge host) -> Selene-1-Mini (Atla) via Ollama: the shipped local judge: yes/no question + state, calibrated p(yes)	flow	packages/decide/judge-model.ts
+arrow	02-external-tools-and-services	packages/decide (judge host) -> llama.cpp in-process (node-llama-cpp, optional dependency): in-process, no server	flow	packages/decide/backends/llamacpp.ts
+arrow	02-external-tools-and-services	packages/decide (judge host) -> laya backend: fallback backend	flow	packages/decide/backends/laya.ts
+arrow	02-external-tools-and-services	Selene-1-Mini (Atla) via Ollama: the shipped local judge -> Ollama (localhost:11434): /api/generate verdict, /api/pull install	flow	packages/eight/judge-install.ts
+arrow	02-external-tools-and-services	Ollama (localhost:11434) -> Hugging Face: pulls hf.co GGUF (Selene)	flow	packages/eight/judge-install.ts
+arrow	02-external-tools-and-services	g8way proxy (api.8gentos.com, Hetzner)  [G16] -> 8J on a Hugging Face Space (8GI/8j-eval, ZeroGPU): model prefix 8j/ routed upstream	flow	packages/g8way/README.md:50-75
+arrow	02-external-tools-and-services	g8way proxy (api.8gentos.com, Hetzner)  [G16] -> openrouter: non-8j models to OpenRouter	flow	packages/g8way/README.md:1-12
+arrow	02-external-tools-and-services	8J on a Hugging Face Space (8GI/8j-eval, ZeroGPU) -> Hugging Face: HTTPS to the Space, read-only HF token	flow	packages/g8way/README.md:63-70
+arrow	02-external-tools-and-services	packages/daemon -> Telegram Bot API: updates in; text, voice, files out	flow	packages/daemon/telegram-bridge.ts
+arrow	02-external-tools-and-services	packages/daemon -> Slack: chat.postMessage	flow	packages/daemon/slack.ts:138
+arrow	02-external-tools-and-services	packages/eight (the 8gent loop) -> GitHub (api.github.com and gh): issues, PRs, repo reads via gh and REST	flow	packages/toolshed/tools/github/github-tools.ts
+arrow	02-external-tools-and-services	packages/eight (the 8gent loop) -> npm registry: version check, tarball for self-update	flow	packages/eight/self-update.ts:182
+arrow	02-external-tools-and-services	packages/eight (the 8gent loop) -> Vercel API: vercel_* tools: deploy, env, logs	flow	packages/eight/tools.ts:2027
+arrow	02-external-tools-and-services	packages/eight (the 8gent loop) -> DuckDuckGo or SearXNG: web_search query, results	flow	packages/tools/web.ts:4
+arrow	02-external-tools-and-services	packages/eight (the 8gent loop) -> LetsFG API: flight search request	flow	packages/travel/letsfg-provider.ts:81
+arrow	02-external-tools-and-services	packages/eight (the 8gent loop) -> Clerk: sign-in tokens	flow	packages/auth/clerk.ts
+arrow	02-external-tools-and-services	packages/eight (the 8gent loop) -> Convex  [G14]: preference, usage, session sync	flow	packages/db/client.ts:63
+arrow	02-external-tools-and-services	packages/threat-feed (manual CLI)  [G10] -> OSV and CISA KEV: querybatch, advisory records, KEV json	flow	packages/threat-feed/feeds.ts:6-9
+arrow	02-external-tools-and-services	packages/threat-feed (manual CLI)  [G10] -> GitHub (api.github.com and gh): lockfile reads; one issue per repo	flow	packages/threat-feed/issues.ts
+arrow	02-external-tools-and-services	board-plane + board-vessel (Fly) -> Discord REST: Discord messages	flow	packages/board-plane/discord-rest.ts:8
+arrow	02-external-tools-and-services	board-plane + board-vessel (Fly) -> Board plane and model proxy (Fly): wss control plane, model proxy	flow	fly.toml
+arrow	02-external-tools-and-services	apps/linkedin-vessel (Fly) -> LinkedIn API: campaign calls	flow	apps/linkedin-vessel/src/linkedin-api.ts
+arrow	02-external-tools-and-services	packages/control-plane  [G06] -> Stripe  [G06]: webhook events (no caller)	flow	packages/control-plane/stripe-webhook.ts
+arrow	02-external-tools-and-services	packages/qdrant-client  [G06] -> Qdrant  [G06]: stub only	flow	packages/qdrant-client/README.md
+arrow	02-external-tools-and-services	packages/voice + tools/speak.ts -> whisper.cpp + sox: mic audio to whisper.cpp	flow	packages/voice/index.ts:1-4
+arrow	02-external-tools-and-services	packages/voice + tools/speak.ts -> OpenAI cloud transcription: audio to transcript, cloud fallback	flow	packages/voice/cloud-transcriber.ts
+arrow	02-external-tools-and-services	packages/voice + tools/speak.ts -> say, KittenTTS (Python), Termux TTS, moshi-mlx: text to spoken audio	flow	packages/voice/tts-engine.ts:31
+arrow	02-external-tools-and-services	packages/voice + tools/speak.ts -> ElevenLabs: placeholder, not implemented	flow	packages/voice/tts-engine.ts:7
+arrow	02-external-tools-and-services	packages/music (DJ) -> mpv + yt-dlp: stream URL, IPC volume	flow	packages/music/dj.ts:5-8
+arrow	02-external-tools-and-services	packages/deck, film-craft, table/bake -> ffmpeg: frames and audio to mp4	flow	packages/tools/video-deck.ts
+arrow	02-external-tools-and-services	packages/deck, film-craft, table/bake -> ImageMagick (magick): title cards and grade	flow	packages/film-craft/index.ts:4
+arrow	02-external-tools-and-services	packages/eight (the 8gent loop) -> ripgrep: locate query	flow	packages/ast-index/locate.ts:26
+arrow	02-external-tools-and-services	packages/eight (the 8gent loop) -> cliclick, osascript, screencapture: click, type, screenshot	flow	packages/hands/index.ts
+arrow	02-external-tools-and-services	packages/eight (the 8gent loop) -> Chrome: layout_compare renders HTML	flow	packages/tools/layout-compare.ts
+arrow	02-external-tools-and-services	packages/eight (the 8gent loop) -> browser-use CLI (Python): browser_* tool calls	flow	packages/eight/tools.ts
+box	03-outputs	8gent runtime	daemon	packages/daemon/data-dir.ts:20
+box	03-outputs	sessions/<id>.jsonl	out	packages/specifications/session/writer.ts:37
+box	03-outputs	sessions/durable/<key>.jsonl	out	packages/specifications/session/durable-ledger.ts:65
+box	03-outputs	sessions/<id>/ (packed tool outputs)	out	packages/eight/agent.ts:4857
+box	03-outputs	turns/<session>/<n>.json  [G11]	gap	packages/eight/turn-journal.ts:59
+box	03-outputs	timetravel/blobs + sessions/<id>/checkpoints.jsonl	out	packages/eight/timetravel/checkpoint-store.ts:229
+box	03-outputs	daemon.log, tui.log, debug.log	out	packages/eight/bug-report.ts:130
+box	03-outputs	logs/tools.log	out	packages/core/shell.ts:176
+box	03-outputs	memory/memory.db	out	packages/memory/index.ts:321-328
+box	03-outputs	memory/shared-memory.db	out	packages/memory/bus.ts:359
+box	03-outputs	memory/memory.db.enc, telegram-sessions*.json	out	packages/memory/telegram-memory-vault.ts:99
+box	03-outputs	table/table.db	out	packages/table/store.ts:60
+box	03-outputs	cron.json  [G13]	gap	packages/daemon/cron.ts:35
+box	03-outputs	runs.jsonl	out	packages/reporting/runlog.ts:92
+box	03-outputs	permissions-audit.jsonl	out	packages/permissions/user-policy.ts:51
+box	03-outputs	approvals-audit.jsonl	out	packages/daemon/channel-approvals.ts:111
+box	03-outputs	settings.json	out	packages/settings/index.ts:4
+box	03-outputs	providers.json, user.json	out	packages/eight/agent.ts:431
+box	03-outputs	keys.env and secrets/	out	packages/self-autonomy/onboarding.ts:627
+box	03-outputs	mcp.json	out	packages/mcp/config.ts:57
+box	03-outputs	hooks.yaml, hooks.json	out	packages/hooks/index.ts:145
+box	03-outputs	extensions/, skills/, prompts/	out	packages/permissions/path-guard.ts:90
+box	03-outputs	tasks.json	out	packages/tasks/index.ts:5
+box	03-outputs	usage.json	out	packages/providers/usage-monitor.ts:33
+box	03-outputs	router.json	out	packages/ai/task-router.ts:65
+box	03-outputs	locality.jsonl	out	packages/providers/locality.ts:98
+box	03-outputs	update-check.json	out	packages/eight/update-notice.ts:111
+box	03-outputs	bug-reports/	out	packages/eight/bug-report.ts:97
+box	03-outputs	browser-shots/	out	packages/eight/tools.ts:5263
+box	03-outputs	creative/	out	packages/music/dj.ts:168
+box	03-outputs	daemon-state.json, sessions-journal.json	out	packages/daemon/session-journal.ts
+box	03-outputs	post-message.log	out	packages/ai/post-message.ts:221
+box	03-outputs	mesh/	out	packages/orchestration/agent-mesh.ts:112
+box	03-outputs	models/whisper/	out	packages/voice/model-manager.ts:5
+box	03-outputs	kernel/training/ (off by default)	out	packages/kernel/personal-collector.ts:49
+box	03-outputs	security/threat-feed/<date>/  [G10]	gap	packages/threat-feed/README.md
+box	03-outputs	evidence/  [G12]	gap	apps/tui/src/components/IntroBanner.tsx:2
+box	03-outputs	source files	app	packages/eight/tools.ts
+box	03-outputs	git commits	app	packages/eight/commit-gate.ts:8
+box	03-outputs	.gitignore line	app	packages/memory/project-state.ts:91
+box	03-outputs	.8gent/worktrees/	app	packages/orchestration/worktree-manager.ts:32
+box	03-outputs	.8gent/state.db	app	packages/db/src/workspace-db.ts:4
+box	03-outputs	decks, PDFs, game scaffolds	app	packages/deck/auto.ts
+box	03-outputs	Telegram messages	ext	packages/daemon/telegram-bridge.ts
+box	03-outputs	Slack and Discord posts	ext	packages/daemon/slack.ts:138
+box	03-outputs	GitHub issues and PRs	ext	packages/toolshed/tools/github/github-tools.ts
+box	03-outputs	Vercel deployments	ext	packages/eight/tools.ts:2027
+box	03-outputs	Convex sync	ext	packages/db/client.ts:63
+box	03-outputs	Hosted judge calls	optin	packages/g8way/README.md:63-70
+box	03-outputs	npm package	entry	.github/workflows/release.yml:29-37
+box	03-outputs	GitHub Release + binaries	entry	.github/workflows/release-binaries.yml
+box	03-outputs	deb, rpm, Windows installer	entry	packaging/linux/nfpm.yaml
+box	03-outputs	winget manifests	entry	packaging/winget/8GIFoundation.8gentCode.yaml
+box	03-outputs	spoken audio	daemon	packages/tools/speak.ts
+box	03-outputs	mp4 decks and films	daemon	packages/tools/video-deck.ts
+box	03-outputs	music playback	daemon	packages/music/dj.ts
+box	03-outputs	G10 threat-feed is manual and its report is read by nobody	gap	packages/threat-feed/cli.ts
+box	03-outputs	G11 Turn journal is written every turn, read only by a script	gap	packages/eight/turn-journal.ts:59
+box	03-outputs	G12 ~/.8gent/evidence has no writer in the repo	gap	apps/tui/src/components/IntroBanner.tsx:2
+box	03-outputs	G13 Two cron schedulers share one cron.json	gap	packages/cron/index.ts:86
+arrow	03-outputs	8gent runtime -> sessions/<id>.jsonl: appends and fsyncs; atomic writes for state files	flow	packages/specifications/session/writer.ts:37
+arrow	03-outputs	8gent runtime -> source files: tool calls after permission checks	flow	packages/eight/tools.ts
+arrow	03-outputs	8gent runtime -> Telegram messages: replies and notifications	flow	packages/daemon/telegram-bridge.ts
+arrow	03-outputs	8gent runtime -> npm package: tag push runs the release workflow	flow	.github/workflows/release.yml:29-37
+arrow	03-outputs	8gent runtime -> spoken audio: speak tool	flow	packages/tools/speak.ts
+box	04-gaps	G01 Android/Termux daemon unverified (#4852)	gap	packages/daemon/service.ts:450-455
+box	04-gaps	G02 Fly eight-vessel runs board-vessel, not the daemon	gap	fly.toml
+box	04-gaps	G03 macOS launchd service never exercised in CI	gap	packages/daemon/service.e2e.test.ts:14-17
+box	04-gaps	G04 Three compiled targets have no smoke test	gap	scripts/build-binaries.ts:66-72
+box	04-gaps	G05 Swift apps have no release job	gap	.github/workflows/swift-nightly.yml
+box	04-gaps	G16 g8way has no deploy unit in infra	gap	packages/g8way/README.md
+box	04-gaps	G06 Dead or stub packages	gap	packages/dreams
+box	04-gaps	G07 packages/tools: 62 of 96 modules have no importer	gap	packages/tools/crc32.ts
+box	04-gaps	G08 Orphan files inside packages/eight	gap	packages/eight/auto-commit.ts
+box	04-gaps	G09 Packages with source and zero tests	gap	packages/auth
+box	04-gaps	G10 threat-feed is manual and its report is read by nobody	gap	packages/threat-feed/cli.ts
+box	04-gaps	G11 Turn journal is written every turn, read only by a script	gap	packages/eight/turn-journal.ts:59
+box	04-gaps	G12 ~/.8gent/evidence has no writer in the repo	gap	apps/tui/src/components/IntroBanner.tsx:2
+box	04-gaps	G13 Two cron schedulers share one cron.json	gap	packages/cron/index.ts:86
+box	04-gaps	G19 Four Telegram code paths	gap	packages/daemon/telegram-bridge.ts
+box	04-gaps	G14 Convex backend is not in this repo	unv	apps/convex/_generated/api.ts
+box	04-gaps	G17 '8gate' is not a module; 8J is opt-in behind g8way	unv	packages/eight/provider-choice.test.ts
+box	04-gaps	G18 Stub web apps: root src/ and apps/debugger	unv	src/Counter.tsx
+box	04-gaps	G15 Docs name apps and counts the tree does not have	gap	README.md:608-609
