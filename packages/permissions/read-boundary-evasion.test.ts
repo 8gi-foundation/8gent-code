@@ -100,6 +100,15 @@ const verdict = async (command: string, root?: string, cwd = ws, project = ws) =
 	return r.run ? "ran" : "refused";
 };
 
+/**
+ * What the kernel never lets a read through (#4897): refused with no card, because a yes changes
+ * nothing. Every other outside path still gets its card.
+ */
+const NEVER_READ =
+	/\.ssh[/*]|\.netrc|\.docker\/config|\.config\/gh|\.8gent\/(memory|brain|browser|keys)/;
+const cardsFor = (command: string) =>
+	NEVER_READ.test(command) ? expect(cards.length).toBe(0) : expect(cards.length).toBeGreaterThan(0);
+
 describe("lexical evasions of the workspace root are refused", () => {
 	const REFUSED = [
 		// path spellings
@@ -169,7 +178,7 @@ describe("lexical evasions of the workspace root are refused", () => {
 	for (const command of REFUSED) {
 		test(`refused: ${command}`, async () => {
 			expect(await verdict(command)).toBe("refused");
-			expect(cards.length).toBeGreaterThan(0);
+			cardsFor(command);
 		});
 	}
 });
@@ -229,7 +238,7 @@ describe("second-read holes: ANSI-C quoting, awk and the other script runners", 
 		const db = path.join(home, ".8gent", "memory.db");
 		const command = `awk 'BEGIN{while((getline l<"${db}")>0)print l}'`;
 		expect(await verdict(command, home, home, home)).toBe("refused");
-		expect(cards.length).toBeGreaterThan(0);
+		expect(cards.length).toBe(0); // the private data set: never read, so no card (#4897)
 	});
 
 	test("inline python reading the memory database is refused in a home-rooted session", async () => {
@@ -429,7 +438,7 @@ describe("CI round: the refusal's label, and printing the home folder", () => {
 	]) {
 		test(`a file in the home folder is still asked about: ${command}`, async () => {
 			expect(await verdict(command)).toBe("refused");
-			expect(cards.length).toBeGreaterThan(0);
+			cardsFor(command);
 		});
 	}
 });

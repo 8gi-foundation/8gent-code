@@ -26,6 +26,14 @@ export class ReadScope {
 	manual = new Set<string>();
 	blocks = new Map<string, number>();
 	stop: string | null = null;
+	/**
+	 * Outside paths a person approved on a read card (#4897): a folder, or one file when its folder
+	 * is too broad. In memory only, ends with the session, never written to disk. Kept apart from
+	 * `manual` so the file tools do not widen: it feeds the shell's read boundary only.
+	 */
+	approvedReads = new Set<string>();
+	/** Read cards shown to a person this session (#4897), for the session log. */
+	cardsShown = 0;
 	all(): Set<string> {
 		return new Set([...this.prompt, ...this.manual]);
 	}
@@ -49,6 +57,8 @@ export function resetReadAllow(scope: ReadScope = cur()): void {
 	scope.manual.clear();
 	scope.blocks.clear();
 	scope.stop = null;
+	scope.approvedReads.clear();
+	scope.cardsShown = 0;
 }
 
 export function readAllowEntries(): string[] {
@@ -179,6 +189,47 @@ export function allowReadsFromPrompt(
 
 function under(abs: string, entry: string): boolean {
 	return abs === entry || abs.startsWith(entry + sep);
+}
+
+/**
+ * Remember a yes for outside reads (#4897): each path's own folder (the path itself when it is
+ * a folder), or just the file when its folder is too broad (home, ~/Documents, a system root).
+ * Everything under an entry is covered for the rest of the session. Only absolute paths count.
+ */
+export function rememberApprovedReads(
+	paths: string[],
+	homes: string[] = [homedir()],
+	scope: ReadScope = cur(),
+): void {
+	for (const p of paths) {
+		if (!isAbsolute(p)) continue;
+		let isDir = false;
+		try {
+			isDir = statSync(p).isDirectory();
+		} catch {}
+		const base = isDir ? p : dirname(p);
+		const broad = homes.some((h) => tooBroad(base, h));
+		scope.approvedReads.add(broad ? p : base);
+	}
+}
+
+/** True when `resolved` (absolute, links followed) lies under a path approved on a read card. */
+export function isApprovedRead(resolved: string, scope: ReadScope = cur()): boolean {
+	for (const e of scope.approvedReads) if (under(resolved, e)) return true;
+	return false;
+}
+
+export function approvedReadEntries(scope: ReadScope = cur()): string[] {
+	return [...scope.approvedReads];
+}
+
+/** One read card reached a person's screen (#4897). Returns the running count. */
+export function noteReadCardShown(scope: ReadScope = cur()): number {
+	return ++scope.cardsShown;
+}
+
+export function readCardsShown(scope: ReadScope = cur()): number {
+	return scope.cardsShown;
 }
 
 /** True when `abs` (and its real path, so a link cannot lead out) lies under an allowed entry. */

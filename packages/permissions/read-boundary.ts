@@ -28,8 +28,17 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { isPathWithin } from "../core/path-within";
 import { readPrefixesFor } from "../eight/read-chain";
-import { namesSecret, readAllowPrefixes } from "./read-allow";
-import { type OsReadSpec, osReadBoundaryOn } from "./run-command-sandbox";
+import { LINUX_HOME_NEVER_READ } from "./landlock";
+import {
+	approvedReadEntries,
+	isApprovedRead,
+	namesSecret,
+	noteReadCardShown,
+	readAllowPrefixes,
+	rememberApprovedReads,
+} from "./read-allow";
+import { HOME_NEVER_READ, type OsReadSpec, osReadBoundaryOn } from "./run-command-sandbox";
+import { sensitiveCredentialPaths } from "./seatbelt";
 import { checkCommandBoundary, resolveSafe, tokenize } from "./src/workspace-boundary";
 
 export const READ_BOUNDARY_FLAG = "EIGHT_WORKSPACE_BOUNDARY";
@@ -481,6 +490,35 @@ export function outsideReads(
 	return [...out];
 }
 
+/**
+ * The never-read set (#4897): what the kernel read rule refuses whatever a person answers
+ * (credential stores, browser and mail stores, the tool's keys and private data). Returns the
+ * plain name of the path class, or null. A card for these changes nothing, so none is shown.
+ */
+export function neverReadClass(
+	resolved: string,
+	env: Record<string, string | undefined> = process.env,
+): string | null {
+	const within = (p: string, root: string) => isPathWithin(p, root, process.platform);
+	for (const h of homeDirs(env)) {
+		if (sensitiveCredentialPaths(h).some((s) => within(resolved, s)))
+			return "credential files such as ~/.ssh";
+		if (
+			[...HOME_NEVER_READ, ...LINUX_HOME_NEVER_READ].some((rel) =>
+				within(resolved, path.join(h, rel)),
+			)
+		)
+			return "browser, mail and password stores";
+	}
+	for (const r of ownDataRoots(env)) {
+		if (!within(resolved, r)) continue;
+		if (OWN_KEYS.test(resolved)) return "8gent's own signing keys";
+		if (namesSecret(resolved) || OWN_PRIVATE.test(resolved))
+			return "8gent's private data in ~/.8gent";
+	}
+	return null;
+}
+
 export type AskPerson = (request: {
 	action: string;
 	details: string;
@@ -517,21 +555,40 @@ export async function readBoundaryGate(
 	} catch {
 		outside = ["<unparsed>"];
 	}
+	// A path never read, whatever the answer: refuse in one plain sentence, show no card (#4897).
+	for (const p of outside) {
+		const cls = neverReadClass(p, env);
+		if (cls)
+			return {
+				run: false,
+				humanApproved: null,
+				message:
+					`[BLOCKED] Not run: 8gent never reads ${cls}, so no approval was asked [workspace-boundary]. ` +
+					`Do not run it again. Tell the person. Command: ${command}`,
+			};
+	}
+	// A folder the person already approved this session is not asked about again.
+	outside = outside.filter((p) => !isApprovedRead(p));
 	if (outside.length === 0) return null;
-	const named = outside.slice(0, 3).join(", ") + (outside.length > 3 ? ", ..." : "");
+	// One card for the command, naming every outside path it reads.
+	const named = outside.join(", ");
 	const first = outside[0] ?? "";
 	const dir = path.isAbsolute(first) ? path.dirname(first) : "<folder>";
 	let answer: boolean | null;
 	try {
 		answer = await opts.ask({
 			action: "Read outside the working folder",
-			details: `This command names ${named}, outside the working folder ${root}. Approve only if you meant it. /allow-read ${dir} allows that folder for the session.`,
+			details: `This command names ${named}, outside the working folder ${root}. Approve only if you meant it. A yes covers these paths and everything under them for this session. /allow-read ${dir} allows that folder for the session.`,
 			command,
 		});
 	} catch {
 		answer = null;
 	}
-	if (answer === true) return { run: true, humanApproved: true };
+	if (answer !== null) noteReadCardShown();
+	if (answer === true) {
+		rememberApprovedReads(outside, homeDirs(env));
+		return { run: true, humanApproved: true };
+	}
 	const why =
 		answer === false ? "The person declined." : "Nobody can approve it in this session (headless).";
 	return {
@@ -570,7 +627,7 @@ export function osReadSpec(
 	}
 	return {
 		root,
-		reads: [...readAllowances(env), ...readAllowPrefixes(), ...approved],
+		reads: [...readAllowances(env), ...readAllowPrefixes(), ...approvedReadEntries(), ...approved],
 		dataRoots: ownDataRoots(env),
 		homes: homeDirs(env),
 	};
