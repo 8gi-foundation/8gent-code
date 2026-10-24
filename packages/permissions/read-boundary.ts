@@ -38,7 +38,13 @@ import {
 	readAllowPrefixes,
 	rememberApprovedReads,
 } from "./read-allow";
-import { HOME_NEVER_READ, type OsReadSpec, osReadBoundaryOn } from "./run-command-sandbox";
+import {
+	HOME_NEVER_READ,
+	type OsReadSpec,
+	READ_DENIED_DATA_DIRS,
+	osReadBoundaryOn,
+	protectedRunCommandPaths,
+} from "./run-command-sandbox";
 import { sensitiveCredentialPaths } from "./seatbelt";
 import { checkCommandBoundary, resolveSafe, tokenize } from "./src/workspace-boundary";
 
@@ -511,6 +517,15 @@ export function neverReadClass(
 		)
 			return "browser, mail and password stores";
 	}
+	// What the kernel read rule denies beyond the home set: POSIX shared memory, and keys/ and
+	// secrets/ under every protected data root (EIGHT_DATA_DIR, EIGHT_HOME).
+	if (within(resolved, "/dev/shm")) return "shared memory (/dev/shm)";
+	try {
+		const denied = protectedRunCommandPaths().dirs.filter((d) =>
+			(READ_DENIED_DATA_DIRS as readonly string[]).includes(path.basename(d)),
+		);
+		if (denied.some((d) => within(resolved, d))) return "8gent's own signing keys";
+	} catch {}
 	for (const r of ownDataRoots(env)) {
 		if (!within(resolved, r)) continue;
 		if (OWN_KEYS.test(resolved)) return "8gent's own signing keys";

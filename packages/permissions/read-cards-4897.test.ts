@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { readCardsShown, resetReadAllow } from "./read-allow";
-import { osReadSpec } from "./read-boundary";
+import { neverReadClass, osReadSpec } from "./read-boundary";
 import { SYSTEM_ONE_FLAG, _resetSystemOne, systemOneGate } from "./system-one-gate";
 import { registerTuiApprovalHandler } from "./tui-approval-channel";
 
@@ -205,6 +205,52 @@ describe("one card per file, one card per command", () => {
 	});
 });
 
+describe("a remembered folder is judged again at use time (8SO second read, #4900)", () => {
+	/** Yes to `ls <out>/proj`, then a credential-shaped name appears under the folder. */
+	async function grantThenPlant(): Promise<{ proj: string }> {
+		const out = outsideDir("out", []);
+		const proj = path.join(out, "proj");
+		fs.mkdirSync(path.join(proj, "sub"), { recursive: true });
+		fs.writeFileSync(path.join(proj, "readme"), "r");
+		responder("approve");
+		expect((await gate(`ls ${proj}`)).run).toBe(true);
+		expect(cards.length).toBe(1);
+		// Still remembered while clean: no second card.
+		expect((await gate(`cat ${path.join(proj, "readme")}`)).run).toBe(true);
+		expect(cards.length).toBe(1);
+		fs.writeFileSync(path.join(proj, ".env"), "SECRET=1");
+		fs.writeFileSync(path.join(proj, "sub", "id_rsa"), "k");
+		return { proj };
+	}
+
+	for (const cmd of [
+		(p: string) => `cat ${p}/.e*`,
+		(p: string) => `cat ${p}/.*`,
+		(p: string) => `grep -r SECRET ${p}`,
+		(p: string) => `cat ${p}/sub/*`,
+	]) {
+		test(`after a credential-shaped name appears, the card comes back: ${cmd("<out>/proj")}`, async () => {
+			const { proj } = await grantThenPlant();
+			responder("deny");
+			cards = [];
+			const r = await gate(cmd(proj));
+			expect(r.run).toBe(false);
+			expect(cards.length).toBe(1);
+		});
+	}
+
+	test("the kernel reads no longer include the folder once it holds a credential-shaped name", async () => {
+		const { proj } = await grantThenPlant();
+		process.env.EIGHT_OS_READ_BOUNDARY = "1";
+		try {
+			const spec = osReadSpec(`cat ${proj}/.e*`, { cwd: ws, project: ws });
+			expect(spec?.reads).not.toContain(proj);
+		} finally {
+			Reflect.deleteProperty(process.env, "EIGHT_OS_READ_BOUNDARY");
+		}
+	});
+});
+
 describe("never-read paths get no card", () => {
 	test("a credential path is refused in one plain sentence, zero cards", async () => {
 		const home = path.join(base, "home");
@@ -230,6 +276,53 @@ describe("never-read paths get no card", () => {
 		expect(r.run).toBe(false);
 		expect(r.message).toContain("8gent never reads 8gent's private data");
 		expect(cards.length).toBe(0);
+	});
+});
+
+describe("the rest of the kernel never-read set gets no card", () => {
+	test("keys/ and secrets/ under EIGHT_DATA_DIR are refused with no card", async () => {
+		const data = path.join(base, "data");
+		fs.mkdirSync(path.join(data, "keys"), { recursive: true });
+		fs.mkdirSync(path.join(data, "secrets"), { recursive: true });
+		fs.writeFileSync(path.join(data, "keys", "k"), "k");
+		fs.writeFileSync(path.join(data, "secrets", "s"), "s");
+		process.env.EIGHT_DATA_DIR = data;
+		try {
+			responder("approve");
+			for (const f of ["keys/k", "secrets/s"]) {
+				const r = await gate(`cat ${path.join(data, f)}`);
+				expect(r.run).toBe(false);
+				expect(r.message).toContain("8gent never reads");
+			}
+			expect(cards.length).toBe(0);
+		} finally {
+			Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
+		}
+	});
+
+	test("keys/ and secrets/ under EIGHT_HOME/.8gent are refused with no card", async () => {
+		const data = path.join(base, "eh", ".8gent");
+		fs.mkdirSync(path.join(data, "keys"), { recursive: true });
+		fs.mkdirSync(path.join(data, "secrets"), { recursive: true });
+		fs.writeFileSync(path.join(data, "keys", "k"), "k");
+		fs.writeFileSync(path.join(data, "secrets", "s"), "s");
+		process.env.EIGHT_HOME = path.join(base, "eh");
+		try {
+			responder("approve");
+			for (const f of ["keys/k", "secrets/s"]) {
+				const r = await gate(`cat ${path.join(data, f)}`);
+				expect(r.run).toBe(false);
+				expect(r.message).toContain("8gent never reads");
+			}
+			expect(cards.length).toBe(0);
+		} finally {
+			Reflect.deleteProperty(process.env, "EIGHT_HOME");
+		}
+	});
+
+	test("/dev/shm is named never-read", () => {
+		expect(neverReadClass("/dev/shm/x")).toContain("/dev/shm");
+		expect(neverReadClass(path.join(base, "plain"))).toBeNull();
 	});
 });
 

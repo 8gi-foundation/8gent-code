@@ -252,14 +252,31 @@ export function rememberApprovedReads(
 	for (const g of approvedGrants(paths, homes)) scope.approvedReads.add(g);
 }
 
+/**
+ * A remembered folder is judged again at use time (#4900 second read): a credential-shaped name
+ * created under it after the yes (`proj/.env`, `proj/sub/id_rsa`) takes the folder out of memory,
+ * for the gate and the kernel reads alike, so a glob or a recursive tool cannot reach it through
+ * the approved folder. Same depth and entry budget as at grant time; a scan that cannot finish
+ * counts as unsafe. A remembered file is exact and needs no scan.
+ */
+function stillSafe(entry: string): boolean {
+	try {
+		if (!statSync(entry).isDirectory()) return true;
+	} catch {
+		return true; // gone: nothing to read
+	}
+	return !holdsSecretShaped(entry);
+}
+
 /** True when `resolved` (absolute, links followed) lies under a path approved on a read card. */
 export function isApprovedRead(resolved: string, scope: ReadScope = cur()): boolean {
-	for (const e of scope.approvedReads) if (under(resolved, e)) return true;
+	for (const e of scope.approvedReads) if (under(resolved, e) && stillSafe(e)) return true;
 	return false;
 }
 
+/** The remembered entries that are still safe: what the kernel read rule may be given. */
 export function approvedReadEntries(scope: ReadScope = cur()): string[] {
-	return [...scope.approvedReads];
+	return [...scope.approvedReads].filter(stillSafe);
 }
 
 /** One read card reached a person's screen (#4897). Returns the running count. */
