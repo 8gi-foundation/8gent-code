@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setSystemTime, test } from "bun:test";
 import {
 	chmodSync,
 	existsSync,
@@ -170,5 +170,87 @@ describe("routines store: a corrupt file is never overwritten", () => {
 		new RoutineManager(undefined, env);
 		expect(readFileSync(storeOf(home), "utf-8")).toBe(before);
 		expect(corruptCopies(home)).toEqual([]);
+	});
+});
+
+describe("routines store: hardening from the second read", () => {
+	test("an existing 0755 data directory is tightened to 0700 on load, not only one the store creates", () => {
+		const home = dir();
+		mkdirSync(join(home, ".8gent"), { recursive: true });
+		chmodSync(join(home, ".8gent"), 0o755);
+		writeFileSync(storeOf(home), "[]");
+		new RoutineManager(undefined, { EIGHT_HOME: home });
+		expect(mode(join(home, ".8gent"))).toBe(0o700);
+	});
+
+	test("and on a store that does not exist yet, and again on save", () => {
+		const home = dir();
+		mkdirSync(join(home, ".8gent"), { recursive: true });
+		chmodSync(join(home, ".8gent"), 0o755);
+		const m = new RoutineManager(undefined, { EIGHT_HOME: home });
+		expect(mode(join(home, ".8gent"))).toBe(0o700);
+		chmodSync(join(home, ".8gent"), 0o755);
+		m.create(make);
+		expect(mode(join(home, ".8gent"))).toBe(0o700);
+	});
+
+	test("a directory the caller named with an explicit path is left as it is", () => {
+		const d = dir();
+		chmodSync(d, 0o755);
+		new RoutineManager(join(d, "r.json"), { EIGHT_HOME: "/elsewhere" }).create(make);
+		expect(mode(d)).toBe(0o755);
+	});
+
+	test("a move-aside never clobbers an earlier backup of the same name", () => {
+		const home = dir();
+		const env = { EIGHT_HOME: home };
+		const frozen = new Date("2026-10-24T10:30:00.000Z");
+		setSystemTime(frozen);
+		try {
+			mkdirSync(join(home, ".8gent"), { recursive: true });
+			const first = `${storeOf(home)}.corrupt-${frozen.toISOString().replace(/[:.]/g, "-")}`;
+			writeFileSync(first, "EARLIER BACKUP");
+			writeFileSync(storeOf(home), "{second corruption");
+			new RoutineManager(undefined, env);
+			const copies = readdirSync(join(home, ".8gent")).filter((n) => n.includes(".corrupt-"));
+			expect(copies.length).toBe(2);
+			expect(readFileSync(first, "utf-8")).toBe("EARLIER BACKUP");
+			const other = copies.find((n) => join(home, ".8gent", n) !== first) as string;
+			expect(readFileSync(join(home, ".8gent", other), "utf-8")).toBe("{second corruption");
+			expect(mode(join(home, ".8gent", other))).toBe(0o600);
+			expect(existsSync(storeOf(home))).toBe(false);
+		} finally {
+			setSystemTime();
+		}
+	});
+
+	test("many corruptions in the same instant keep every copy", () => {
+		const home = dir();
+		const env = { EIGHT_HOME: home };
+		setSystemTime(new Date("2026-10-24T10:31:00.000Z"));
+		try {
+			mkdirSync(join(home, ".8gent"), { recursive: true });
+			for (let i = 0; i < 4; i++) {
+				writeFileSync(storeOf(home), `{bad ${i}`);
+				new RoutineManager(undefined, env);
+			}
+			const bodies = readdirSync(join(home, ".8gent"))
+				.filter((n) => n.includes(".corrupt-"))
+				.map((n) => readFileSync(join(home, ".8gent", n), "utf-8"))
+				.sort();
+			expect(bodies).toEqual(["{bad 0", "{bad 1", "{bad 2", "{bad 3"]);
+		} finally {
+			setSystemTime();
+		}
+	});
+
+	test("a failed rename removes its temp file", () => {
+		const home = dir();
+		const m = new RoutineManager(undefined, { EIGHT_HOME: home });
+		// A non-empty directory where the store should be: renaming a file over it fails.
+		mkdirSync(storeOf(home), { recursive: true });
+		writeFileSync(join(storeOf(home), "x"), "x");
+		expect(() => m.create(make)).toThrow();
+		expect(readdirSync(join(home, ".8gent"))).toEqual(["routines.json"]);
 	});
 });

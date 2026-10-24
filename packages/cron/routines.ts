@@ -83,6 +83,8 @@ export interface RoutineRun {
 export class RoutineManager {
 	private filePath: string;
 	private routines: Routine[];
+	/** True when the path came from the home directory: only then is the directory ours to tighten. */
+	private ownsDir: boolean;
 
 	/** Where the store lives. */
 	get storePath(): string {
@@ -94,8 +96,21 @@ export class RoutineManager {
 	 * (EIGHT_HOME, then HOME or USERPROFILE, then the OS home), never a literal "~".
 	 */
 	constructor(dataPath?: string, env: Record<string, string | undefined> = process.env) {
+		this.ownsDir = !dataPath;
 		this.filePath = dataPath || path.join(resolveHome(env), ".8gent", "routines.json");
+		this.tightenDir();
 		this.routines = this.load();
+	}
+
+	/** The default data directory is 0700 even when something else created it wider. Never through a symlink. */
+	private tightenDir(): void {
+		if (!this.ownsDir) return;
+		const dir = path.dirname(this.filePath);
+		try {
+			const st = fs.lstatSync(dir);
+			// Take away group and other access; the owner's own bits are not ours to widen.
+			if (st.isDirectory() && (st.mode & 0o077) !== 0) fs.chmodSync(dir, st.mode & 0o700);
+		} catch {}
 	}
 
 	/**
@@ -124,25 +139,48 @@ export class RoutineManager {
 			} catch {}
 			return parsed as Routine[];
 		}
-		const aside = `${this.filePath}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-		try {
-			fs.renameSync(this.filePath, aside);
-			fs.chmodSync(aside, 0o600);
-		} catch (err) {
-			throw new Error(
-				`routines store ${this.filePath} is not valid and could not be moved aside (${(err as Error).message}); left untouched`,
-			);
-		}
+		const aside = this.moveAside();
 		console.warn(
 			`[routines] ${this.filePath} was not valid JSON; kept as ${aside} and started empty`,
 		);
 		return [];
 	}
 
+	/**
+	 * Keep the unreadable file under routines.json.corrupt-<time>[-n], never replacing an earlier
+	 * backup: the copy is created exclusively (a taken name moves to the next suffix), then the
+	 * original is removed. Throws, leaving the original in place, if no copy can be made.
+	 */
+	private moveAside(): string {
+		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+		const refuse = (why: string) =>
+			new Error(
+				`routines store ${this.filePath} is not valid and could not be moved aside (${why}); left untouched`,
+			);
+		for (let n = 0; n < 1000; n++) {
+			const aside = `${this.filePath}.corrupt-${stamp}${n ? `-${n}` : ""}`;
+			try {
+				fs.copyFileSync(this.filePath, aside, fs.constants.COPYFILE_EXCL);
+			} catch (err) {
+				if ((err as NodeJS.ErrnoException).code === "EEXIST") continue;
+				throw refuse((err as Error).message);
+			}
+			try {
+				fs.chmodSync(aside, 0o600);
+				fs.unlinkSync(this.filePath);
+			} catch (err) {
+				throw refuse((err as Error).message);
+			}
+			return aside;
+		}
+		throw refuse("too many backups exist");
+	}
+
 	/** Write a temp file (0600, never through a symlink) and rename it over the store: atomic. */
 	private save(): void {
 		const dir = path.dirname(this.filePath);
 		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+		this.tightenDir();
 		const tmp = `${this.filePath}.tmp-${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
 		const fd = fs.openSync(
 			tmp,
@@ -161,7 +199,12 @@ export class RoutineManager {
 			throw err;
 		}
 		fs.closeSync(fd);
-		fs.renameSync(tmp, this.filePath);
+		try {
+			fs.renameSync(tmp, this.filePath);
+		} catch (err) {
+			fs.rmSync(tmp, { force: true });
+			throw err;
+		}
 	}
 
 	/** Create a new routine */
