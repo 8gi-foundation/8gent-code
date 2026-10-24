@@ -598,6 +598,34 @@ async function main() {
 			await doctorCommand();
 			break;
 
+		case "durable-run": {
+			// Slice 1 of #4883, behind EIGHT_DURABLE_RUN=1: the scripted run the kill test drives.
+			const { durableRunEnabled } = await import("../packages/durable-run/flag.ts");
+			if (!durableRunEnabled()) {
+				console.error("durable-run is experimental: set EIGHT_DURABLE_RUN=1");
+				process.exit(1);
+			}
+			const { runDemo } = await import("../packages/durable-run/demo.ts");
+			const { flags, rest } = parseFlags(restArgs);
+			const dir = rest[0];
+			if (!dir) {
+				console.error(
+					"Usage: 8gent durable-run <dir> [--variant key|nokey|undeclared] [--kill-at n] [--client name]",
+				);
+				process.exit(1);
+			}
+			const result = await runDemo({
+				dir,
+				variant: (flags.variant as "key" | "nokey" | "undeclared" | undefined) ?? "key",
+				killAt: flags["kill-at"] ? Number(flags["kill-at"]) : undefined,
+				client: (flags.client as string | undefined) ?? "tui",
+				tickLog: flags["tick-log"] ? String(flags["tick-log"]) : undefined,
+			});
+			console.log(JSON.stringify(result));
+			process.exit(0);
+			break;
+		}
+
 		case "stack":
 			await stackCommand();
 			break;
