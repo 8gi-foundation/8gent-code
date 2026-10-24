@@ -19,14 +19,6 @@ export {
 	CodeTyping,
 } from "./typing-text.js";
 
-// Logo and branding animations
-export {
-	PulseLogo,
-	BigLogo,
-	SpinningRing,
-	AnimatedWordmark,
-} from "./pulse-logo.js";
-
 // Progress bars and visualizations
 export {
 	AnimatedProgressBar,
@@ -34,15 +26,6 @@ export {
 	Sparkline,
 	WaveProgress,
 } from "./progress-bar.js";
-
-// Border animations
-export {
-	RainbowBorder,
-	GradientBorder,
-	PulsingBorder,
-	DecoratedBox,
-	AnimatedSeparator,
-} from "./rainbow-border.js";
 
 // Fade and transition effects
 export {
@@ -67,7 +50,6 @@ export {
 } from "./sound-effects.js";
 
 // Core components
-export { Header, CompactHeader, FancyHeader } from "./header.js";
 export {
 	MessageList,
 	CompactMessageItem,
@@ -79,11 +61,6 @@ export {
 	MultiLineInput,
 	CommandPalette,
 } from "./command-input.js";
-export {
-	StatusBar,
-	CompactStatusBar,
-	DetailedStatusBar,
-} from "./status-bar.js";
 
 // Animated status verbs (personality)
 export {
@@ -115,9 +92,6 @@ export {
 	SuggestionPreview,
 	SourceIcon,
 } from "./ghost-suggestion.js";
-
-// Enhanced status bar
-export { EnhancedStatusBar } from "./status-bar.js";
 
 // Selection inputs and dialogs
 export {

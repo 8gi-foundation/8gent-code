@@ -10,10 +10,10 @@
  */
 
 import { Box, Text, useStdout } from "ink";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useSyncExternalStore } from "react";
 import type { TaskInfo, TaskOutput, TaskStatus } from "../../../../packages/tools/background.js";
-import { ThinkingVisualizer } from "./ThinkingVisualizer.js";
 import { t } from "../theme.js";
+import { ThinkingVisualizer } from "./ThinkingVisualizer.js";
 
 // ── Activity Types ──────────────────────────────────────────────────
 
@@ -144,7 +144,7 @@ interface ActivityMonitorProps {
 	processingStage: "planning" | "toolshed" | "executing" | "complete";
 	/** Max visible entries */
 	maxEntries?: number;
-	/** When false, skip scan-line and footer pulse (matches global ^A anim toggle) */
+	/** When false, draw plain markers and no thinking visualiser (matches global ^A anim toggle) */
 	showAnimations?: boolean;
 	/** Compact mode: strict fixed-height box for embedding in the chat view */
 	compact?: boolean;
@@ -156,6 +156,26 @@ interface ActivityMonitorProps {
 
 const activityLog: ActivityEntry[] = [];
 let logVersion = 0;
+
+// The monitor redraws when the log changes, never on a timer (#4976):
+// lib/motion.ts says nothing loops.
+const logListeners = new Set<() => void>();
+
+function logChanged(): void {
+	logVersion++;
+	for (const listener of logListeners) listener();
+}
+
+function subscribeToLog(listener: () => void): () => void {
+	logListeners.add(listener);
+	return () => {
+		logListeners.delete(listener);
+	};
+}
+
+function getLogVersion(): number {
+	return logVersion;
+}
 
 export function pushActivity(
 	toolName: string,
@@ -175,7 +195,7 @@ export function pushActivity(
 	});
 	// Keep max 50 entries
 	if (activityLog.length > 50) activityLog.shift();
-	logVersion++;
+	logChanged();
 }
 
 export function completeActivity(toolCallId: string, success: boolean, durationMs: number): void {
@@ -185,12 +205,12 @@ export function completeActivity(toolCallId: string, success: boolean, durationM
 		entry.durationMs = durationMs;
 		if (!success) entry.color = "red";
 	}
-	logVersion++;
+	logChanged();
 }
 
 export function clearActivity(): void {
 	activityLog.length = 0;
-	logVersion++;
+	logChanged();
 }
 
 const AGENT_TASK_PREFIX = "agent-op-";
@@ -257,10 +277,9 @@ export function ActivityMonitor({
 	contentWidth,
 }: ActivityMonitorProps) {
 	const { stdout } = useStdout();
-	const [tick, setTick] = useState(0);
 	const [startTime] = useState(() => Date.now());
-	const [elapsed, setElapsed] = useState(0);
-	const [, forceRender] = useState(0);
+	// Re-render when the activity log changes; the log itself is read below.
+	useSyncExternalStore(subscribeToLog, getLogVersion, getLogVersion);
 
 	const cols = stdout?.columns ?? 80;
 	// In compact mode, use the caller-supplied width so we never exceed the container.
@@ -269,28 +288,17 @@ export function ActivityMonitor({
 		? Math.max(16, (contentWidth ?? 40) - 4)
 		: Math.max(24, Math.min(cols - 10, 96));
 
-	// Animation tick (activity list still refreshes when animations off)
-	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
-	useEffect(() => {
-		const ms = showAnimations ? 300 : 800;
-		const interval = setInterval(() => {
-			setTick((t) => t + 1);
-			setElapsed(Date.now() - startTime);
-			forceRender((v) => v + 1); // Re-read activity log
-		}, ms);
-		return () => clearInterval(interval);
-	}, [startTime, showAnimations]);
-
 	const visibleEntries = activityLog.slice(-maxEntries);
-	const dots = showAnimations ? ".".repeat((tick % 3) + 1) : "";
+	// Still glyphs: the work shows through new rows landing, not through a
+	// cycling ellipsis or scan bar.
+	const dots = "…";
 
-	// Format elapsed
-	const secs = Math.floor(elapsed / 1000);
+	// Elapsed as of the last change (a tool landing or finishing), not a ticking clock.
+	const secs = Math.floor((Date.now() - startTime) / 1000);
 	const elapsedStr = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
 
-	// Scanning animation for the active entry
-	const scanChars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃", "▂"];
-	const scanBar = showAnimations ? scanChars[tick % scanChars.length] : "·";
+	// The running entry's marker
+	const scanBar = showAnimations ? "▸" : "·";
 
 	const stageLabel =
 		processingStage === "planning"
@@ -311,18 +319,24 @@ export function ActivityMonitor({
 				paddingX={1}
 				alignItems="center"
 			>
-				<Text color={t.orange} bold>{"8 "}</Text>
+				<Text color={t.orange} bold>
+					{"8 "}
+				</Text>
 				<Box flexGrow={1} flexDirection="column" overflow="hidden">
 					{visibleEntries.length === 0 ? (
 						<Box>
-							<Text color={t.orange} bold>{stageLabel}</Text>
+							<Text color={t.orange} bold>
+								{stageLabel}
+							</Text>
 							{showAnimations && <Text color={t.textDim}>{dots}</Text>}
 						</Box>
 					) : (
 						visibleEntries.slice(-2).map((entry) => (
 							<Box key={entry.id}>
 								<Text color={entry.done ? t.green : t.orange}>{entry.done ? "✓ " : "◦ "}</Text>
-								<Text color={entry.color} wrap="truncate-end">{entry.action}</Text>
+								<Text color={entry.color} wrap="truncate-end">
+									{entry.action}
+								</Text>
 								<Text color={t.textDim} wrap="truncate-end">{` ${entry.detail.slice(0, 50)}`}</Text>
 							</Box>
 						))
