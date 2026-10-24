@@ -427,6 +427,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "ink@6.8.0": "patches/ink@6.8.0.patch",
+  },
   "packages": {
     "@8gent/8dk": ["@8gent/8dk@workspace:packages/8dk"],
 

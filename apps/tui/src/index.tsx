@@ -28,6 +28,7 @@ import { enableInfiniteMode } from "../../../packages/permissions/index.js";
 import { setDurableEnabled } from "../../../packages/specifications/session/durable-ledger.js";
 import { App } from "./app.js";
 import { startMouse } from "./lib/mouse-wiring.js";
+import { tuiRenderOptions } from "./lib/render-options.js";
 import { ensureTerminalSize } from "./lib/terminal-size.js";
 import { durableDefault, parseTuiArgv } from "./lib/tui-cli.js";
 import { applyTerminalBackground } from "./theme.js";
@@ -90,6 +91,7 @@ render(
 		cliModel={parsed.model}
 		cliAutoApprove={parsed.yes}
 	/>,
+	tuiRenderOptions(),
 );
 // Runs when render() returns, before Ink's useEffect attaches stdin: a stall
 // inside Ink's own mount is not covered by the watchdog.

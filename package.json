@@ -166,5 +166,8 @@
   "homepage": "https://8gent.dev",
   "bugs": {
     "url": "https://github.com/8gi-foundation/8gent-code/issues"
+  },
+  "patchedDependencies": {
+    "ink@6.8.0": "patches/ink@6.8.0.patch"
   }
 }

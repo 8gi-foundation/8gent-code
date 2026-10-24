@@ -16,10 +16,15 @@
  * It does not care which packages exist: it checks what the bundle contains against what each
  * bundled package declared.
  *
+ * It also checks that every TUI bundle (any file named tui.js) carries the lines of
+ * patches/ink@6.8.0.patch (#4970). The TUI renders with Ink's incremental writer, which is wrong
+ * by one row without that patch. A bun patch keys on the exact Ink version, so an Ink bump drops
+ * it silently; this check makes that build fail instead of shipping a broken screen.
+ *
  *   bun scripts/check-bundle-versions.ts [bundle.js ...]
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -93,6 +98,21 @@ export function checkBundle(source: string): string[] {
 	return problems;
 }
 
+/** Lines from patches/ink@6.8.0.patch that every TUI bundle must contain (#4970). */
+export const INK_PATCH_MARKERS = [
+	"cursorUp(previousLines.length - 1)",
+	"i < previousVisible && nextLines[i] === previousLines[i]",
+];
+
+/** Missing Ink patch lines in a bundle; only TUI bundles (named tui.js) are checked. */
+export function checkInkPatch(file: string, source: string): string[] {
+	if (!/(^|[\\/])tui\.js$/.test(file)) return [];
+	return INK_PATCH_MARKERS.filter((m) => !source.includes(m)).map(
+		(m) =>
+			`Ink's incremental writer is unpatched: "${m}" is missing. patches/ink@6.8.0.patch did not apply (was Ink bumped?). Port the patch to the new version or drop incrementalRendering in apps/tui/src/lib/render-options.ts.`,
+	);
+}
+
 if (import.meta.main) {
 	const args = process.argv.slice(2);
 	const files = args.length
@@ -112,8 +132,9 @@ if (import.meta.main) {
 	}
 	let bad = 0;
 	for (const f of files) {
-		const problems = checkBundle(readFileSync(f, "utf8"));
-		const rel = f.slice(root.length + 1);
+		const source = readFileSync(f, "utf8");
+		const problems = [...checkBundle(source), ...checkInkPatch(f, source)];
+		const rel = relative(root, f);
 		if (problems.length === 0) console.log(`[check-bundle-versions] ${rel}: ok`);
 		for (const p of problems) {
 			bad++;
@@ -122,7 +143,7 @@ if (import.meta.main) {
 	}
 	if (bad > 0) {
 		console.error(
-			`[check-bundle-versions] ${bad} mismatch(es). Run a clean "bun install --frozen-lockfile" and rebuild.`,
+			`[check-bundle-versions] ${bad} problem(s). Run a clean "bun install --frozen-lockfile" and rebuild.`,
 		);
 		process.exit(1);
 	}

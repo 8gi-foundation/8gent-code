@@ -31,19 +31,33 @@ class FakeStdin extends EventEmitter {
 	}
 }
 
-type FakeStdout = Writable & { columns: number; rows: number; written: string };
+type FakeStdout = Writable & {
+	columns: number;
+	rows: number;
+	written: string;
+	isTTY?: boolean;
+	/** Every write with its time, so a test can count frames per second. */
+	writes: { at: number; text: string }[];
+};
 
-function makeStdout(cols: number, rows: number): FakeStdout {
+function makeStdout(cols: number, rows: number, tty = false): FakeStdout {
 	const out = new Writable({
 		write(chunk, _enc, cb) {
-			out.written += chunk.toString();
+			const text = chunk.toString();
+			out.writes.push({ at: Date.now(), text });
+			if (out.writes.length > 20_000) out.writes.splice(0, 10_000);
+			out.written += text;
 			if (out.written.length > 2_000_000) out.written = out.written.slice(-1_000_000);
 			cb();
 		},
 	}) as FakeStdout;
 	out.written = "";
+	out.writes = [];
 	out.columns = cols;
 	out.rows = rows;
+	// A real terminal is a TTY. Ink keys its fullscreen and synchronized-output
+	// paths off isTTY, so a test about what a phone sees opts in (#4938).
+	if (tty) out.isTTY = true;
 	return out;
 }
 
@@ -71,6 +85,10 @@ export interface DrivenApp {
 	raw: () => string;
 	emit: (o: Record<string, unknown>) => void;
 	exited: () => boolean;
+	/** Every stdout write since `sinceMs` (epoch ms), raw, with its time. */
+	writesSince: (sinceMs: number) => { at: number; text: string }[];
+	/** Change the terminal size, as Termux does when the keyboard opens. */
+	resize: (cols: number, rows: number) => void;
 }
 
 export async function bootApp(
@@ -81,11 +99,19 @@ export async function bootApp(
 		provider: "ollama",
 		model: "none",
 	},
+	/**
+	 * Behave as bin/8gent on a real terminal: stdout is a TTY and Ink gets the
+	 * TUI's own render options (#4938). Off by default, because incremental
+	 * rendering does not rewrite unchanged rows, and older harnesses look for
+	 * text in what was written after a mark.
+	 */
+	tty = false,
 ): Promise<DrivenApp> {
 	const { render } = await import("ink");
 	const { App } = await import("../app.js");
+	const { tuiRenderOptions } = await import("../lib/render-options.js");
 	const stdin = new FakeStdin();
-	const stdout = makeStdout(cols, rows);
+	const stdout = makeStdout(cols, rows, tty);
 	let exited = false;
 	const app = render(
 		<App
@@ -99,6 +125,7 @@ export async function bootApp(
 			stdin: stdin as unknown as NodeJS.ReadStream,
 			stdout: stdout as unknown as NodeJS.WriteStream,
 			stderr: makeStdout(cols, rows) as unknown as NodeJS.WriteStream,
+			...(tty ? tuiRenderOptions() : {}),
 			debug: false,
 			exitOnCtrlC: true,
 			patchConsole: false,
@@ -116,6 +143,12 @@ export async function bootApp(
 		raw: () => stdout.written,
 		emit: (o) => console.log(JSON.stringify(o)),
 		exited: () => exited,
+		writesSince: (sinceMs) => stdout.writes.filter((w) => w.at >= sinceMs),
+		resize: (c, r) => {
+			stdout.columns = c;
+			stdout.rows = r;
+			stdout.emit("resize");
+		},
 		submit: async (text) => {
 			const m = mark();
 			stdin.feed(text);
