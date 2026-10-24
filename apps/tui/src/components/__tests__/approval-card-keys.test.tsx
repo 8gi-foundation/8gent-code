@@ -24,12 +24,13 @@ import {
 	requestTuiApproval,
 } from "../../../../../packages/permissions/tui-approval-channel.js";
 import {
+	CARD_MIN_SHOW_MS,
 	_resetApprovalCard,
 	isApprovalKeyClaimed,
 	useApprovalCard,
 } from "../../hooks/useApprovalCard.js";
-import { CommandInput } from "../command-input.js";
 import { InlineApprovalPrompt } from "../InlineApprovalPrompt.js";
+import { CommandInput } from "../command-input.js";
 
 class FakeStdin extends EventEmitter {
 	isTTY = true;
@@ -131,7 +132,8 @@ async function mount() {
 	});
 	await waitFor(() => stripAnsi(stdout.written).includes("Type a command"), "first frame");
 	const frame = () => stripAnsi(stdout.last);
-	const ask = (command: string) => requestTuiApproval({ action: "Execute Shell Command", details: "", command });
+	const ask = (command: string) =>
+		requestTuiApproval({ action: "Execute Shell Command", details: "", command });
 	return { stdin, frame, ask, inputValues, appKeys };
 }
 
@@ -139,7 +141,8 @@ async function answerCard(keyPress: string) {
 	const { stdin, frame, ask, inputValues, appKeys } = await mount();
 	const decision = ask("printf ok > approved.txt");
 	await waitFor(() => frame().includes("[Y] approve"), "card shown");
-	await tick(20); // let the render's effects re-bind input handlers
+	// Drawn, measured and stood the minimum show time: only then does a yes or an edit count.
+	await tick(CARD_MIN_SHOW_MS + 60);
 	stdin.feed(keyPress);
 	const result = await decision;
 	await waitFor(() => !frame().includes("[Y] approve"), "card gone");
@@ -183,12 +186,22 @@ describe("approval card key routing", () => {
 		}
 	});
 
-	test("y pressed the instant the card is raised still approves (no stale closure)", async () => {
+	test("y typed ahead, in the tick the request arrives, is refused; y once drawn and shown approves", async () => {
 		const { stdin, frame, ask, inputValues } = await mount();
-		const decision = ask("printf ok > approved.txt");
-		// No render has happened yet: this is the pilot/tmux race.
+		let decided = null as boolean | null;
+		void ask("printf ok > approved.txt").then((d) => {
+			decided = d;
+		});
+		// No render has happened yet: this is the pilot/tmux race. It must not approve.
 		stdin.feed("y");
-		expect(await decision).toBe(true);
+		await tick(150);
+		expect(decided).toBeNull();
+		expect(inputValues).toEqual([]);
+		expect(frame()).toContain("[Y] approve");
+		await tick(CARD_MIN_SHOW_MS + 60);
+		stdin.feed("y");
+		await waitFor(() => decided !== null, "decision");
+		expect(decided).toBe(true);
 		await tick(60);
 		expect(inputValues).toEqual([]);
 		expect(frame()).not.toContain("[Y] approve");
@@ -198,6 +211,7 @@ describe("approval card key routing", () => {
 		const { stdin, frame, ask, inputValues } = await mount();
 		const decision = ask("printf ok > approved.txt");
 		await waitFor(() => frame().includes("[Y] approve"), "card shown");
+		await tick(CARD_MIN_SHOW_MS + 60);
 		stdin.feed("y");
 		expect(await decision).toBe(true);
 		await waitFor(() => !frame().includes("[Y] approve"), "card gone");
@@ -211,7 +225,7 @@ describe("approval card key routing", () => {
 		const { stdin, frame, ask, inputValues } = await mount();
 		const decision = ask("printf ok > approved.txt");
 		await waitFor(() => frame().includes("[Y] approve"), "card shown");
-		await tick(20);
+		await tick(CARD_MIN_SHOW_MS + 60);
 		stdin.feed("h");
 		await waitFor(() => inputValues.includes("h"), "h typed");
 		expect(frame()).toContain("[Y] approve");
@@ -251,4 +265,3 @@ describe("InlineApprovalPrompt label spacing", () => {
 		expect(f).not.toContain("ASKcd");
 	});
 });
-

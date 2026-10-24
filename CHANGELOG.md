@@ -9,6 +9,26 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.27] - 2026-10-24
+
+### Added
+- voice: Termux voice input transcribes on the phone by default (#4905) ([#4910](https://github.com/8gi-foundation/8gent-code/pull/4910))
+- permissions: read cards never ask what a yes cannot grant, and stop asking twice (#4897) ([#4900](https://github.com/8gi-foundation/8gent-code/pull/4900))
+- permissions: workspace read boundary in the kernel on Linux and Termux (#4890 slice 2) ([#4898](https://github.com/8gi-foundation/8gent-code/pull/4898))
+
+### Changed
+- principles and engineering primitives on one page ([#4925](https://github.com/8gi-foundation/8gent-code/pull/4925))
+- build 8gent's own llama-server and whisper-cli for five targets, attach to the release (#4906) ([#4916](https://github.com/8gi-foundation/8gent-code/pull/4916))
+
+### Fixed
+- ci: drop the stale #4903 waiver now #4910 landed ([#4932](https://github.com/8gi-foundation/8gent-code/pull/4932))
+- cron: routines store hardening (Refs #4926) ([#4927](https://github.com/8gi-foundation/8gent-code/pull/4927))
+- permissions: a Landlock helper that fails says why, and the read rule refuses or notices with the reason (#4920) ([#4921](https://github.com/8gi-foundation/8gent-code/pull/4921))
+- dj: Termux starts at unity gain, the deck fits a phone and follows the real player (#4907) ([#4911](https://github.com/8gi-foundation/8gent-code/pull/4911))
+
+### Security
+- security: local-first gate, off-device data audit, Ollama cloud tags off by default ([#4913](https://github.com/8gi-foundation/8gent-code/pull/4913))
+
 ## [0.20.26] - 2026-10-24
 
 ### Added

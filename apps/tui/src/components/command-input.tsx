@@ -17,8 +17,10 @@ import {
 	getSuggestionSourceLabel,
 	useGhostSuggestion,
 } from "../hooks/use-ghost-suggestion.js";
+import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
 import { applyMention, listProjectFiles, mentionAtEnd, rankFiles } from "../lib/file-mention.js";
 import { GO_HELP_LINES, type GoalClient, parseGoCommand } from "../lib/goal-client.js";
+import { cellWidth } from "../lib/header-layout.js";
 import { type SlashCommand, isCoreSlashCommand } from "../lib/slash-commands.js";
 import {
 	type SlashRegistryEntry,
@@ -105,7 +107,7 @@ export const WAITING_LINE = "Waiting for you. Nothing runs until you answer.";
 export const WAITING_PLACEHOLDER = "Answer the card above first";
 
 // Processing stages for multi-step indicator
-const PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
+const _PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
 
 function buildBuiltInSlashGhostSuggestions(): ContextSuggestion[] {
 	const out: ContextSuggestion[] = [];
@@ -300,13 +302,40 @@ export function CommandInput({
 		[showSlashHelp, slashFilter, slashRegistryEntries],
 	);
 	const [slashIndex, setSlashIndex] = useState(0);
-	useEffect(() => setSlashIndex(0), [slashFilter]);
+	// The person moved the pick with Up/Down: Enter then runs that row.
+	const slashMoved = useRef(false);
+	useEffect(() => {
+		setSlashIndex(0);
+		slashMoved.current = false;
+	}, [slashFilter]);
 	const slashOpen = !isProcessing && showSlashHelp && slashRows.length > 0;
 	useEffect(() => onSlashMenuChange?.(slashOpen), [slashOpen, onSlashMenuChange]);
 
+	// A tap on the grey suggestion's hint does what Tab does (#4934).
+	const acceptRef = useRef(null);
+	useClickSpans(
+		acceptRef,
+		!isProcessing && isVisible && suggestion
+			? [
+					{
+						id: "slash:accept",
+						dx: 0,
+						// "  [Tab] or tap to accept (label)" plus 3 cells; the rest of the line is not the button.
+						w:
+							2 +
+							cellWidth(`[Tab] or tap to accept (${getSuggestionSourceLabel(suggestion.source)})`) +
+							3,
+						action: () => setValue(accept()),
+					},
+				]
+			: [],
+		5,
+		0,
+	);
+
 	// Handle keyboard input
 	useInput(
-		(input, key) => {
+		(_input, key) => {
 			// An open @ file list takes Tab, Up and Down before anything else.
 			if (mentionOpen && mention) {
 				if (key.tab && !key.shift) {
@@ -327,10 +356,12 @@ export function CommandInput({
 			// An open / menu takes Up, Down and Tab.
 			if (slashOpen) {
 				if (key.upArrow) {
+					slashMoved.current = true;
 					setSlashIndex((i) => Math.max(0, i - 1));
 					return;
 				}
 				if (key.downArrow) {
+					slashMoved.current = true;
 					setSlashIndex((i) => Math.min(slashRows.length - 1, i + 1));
 					return;
 				}
@@ -454,6 +485,14 @@ export function CommandInput({
 			// A key being pasted is an answer, never a slash line or a command.
 			if (maskInput) return submitNow(input);
 			const trimmed = input.trim();
+			// Enter on a slash prefix completes it: one match runs, an ambiguous prefix keeps the list.
+			const act = slashEnterAction(
+				input,
+				slashRegistryEntries,
+				slashMoved.current ? (slashRows[Math.min(slashIndex, slashRows.length - 1)] ?? null) : null,
+			);
+			if (act.kind === "run") return submitNow(`/${act.name}`);
+			if (act.kind === "keep") return;
 			// A bare "/" opens the same thing /help does, never an error.
 			if (isBareSlash(input)) return submitNow("/help");
 			if (!trimmed.startsWith("/")) return submitNow(input);
@@ -465,11 +504,19 @@ export function CommandInput({
 				emitSystem(onSystemMessage, unknown);
 			});
 		},
-		[submitNow, slashRegistryEntries, slashByToken, onSystemMessage, maskInput],
+		[
+			submitNow,
+			slashRegistryEntries,
+			slashByToken,
+			onSystemMessage,
+			maskInput,
+			slashRows,
+			slashIndex,
+		],
 	);
 
 	// Get current step index
-	const getCurrentStep = (): number => {
+	const _getCurrentStep = (): number => {
 		switch (processingStage) {
 			case "planning":
 				return 0;
@@ -569,10 +616,10 @@ export function CommandInput({
 
 			{/* Ghost suggestion hint */}
 			{!isProcessing && isVisible && suggestion && (
-				<Box paddingLeft={2}>
+				<Box paddingLeft={2} ref={acceptRef}>
 					<ShortcutHint
 						keys="[Tab]"
-						description={`to accept (${getSuggestionSourceLabel(suggestion.source)})`}
+						description={`or tap to accept (${getSuggestionSourceLabel(suggestion.source)})`}
 					/>
 				</Box>
 			)}
@@ -589,6 +636,8 @@ export function CommandInput({
 					selected={slashIndex}
 					visible={slashVisible}
 					compact={slashMenuCompact(terminalRows)}
+					columns={stdout?.columns ?? 80}
+					onPick={(name) => submitNow(`/${name}`)}
 				/>
 			)}
 		</Box>
@@ -779,6 +828,48 @@ export function slashMenuRows(filter: string, entries: SlashRegistryEntry[]): Sl
 	return entries.filter((e) => near.has(e.name.toLowerCase()));
 }
 
+export type SlashEnter = { kind: "run"; name: string } | { kind: "keep" } | { kind: "pass" };
+
+/** Commands that end the session or discard work: never run from a prefix, only by full name or a picked row. */
+export const SLASH_NEVER_FROM_PREFIX: ReadonlySet<string> = new Set([
+	"quit",
+	"exit",
+	"export",
+	"clear",
+	"rewind",
+	"fork",
+]);
+
+/**
+ * What Enter does on a typed slash line (#4934). Only a bare command word that
+ * starts with "/" is ever completed; a message, or a command with arguments,
+ * passes through, and so does every exact name or alias: what is typed in full
+ * runs as typed. A prefix runs only when exactly one command in the whole
+ * registry (built-ins, skills, aliases) starts with it, and never for a command
+ * that ends the session or discards work. A row the person moved to with
+ * Up/Down is an explicit pick and runs. Anything else keeps the list and runs
+ * nothing.
+ */
+export function slashEnterAction(
+	input: string,
+	entries: SlashRegistryEntry[],
+	picked: SlashRegistryEntry | null,
+): SlashEnter {
+	const line = input.trim();
+	if (!line.startsWith("/") || line === "/" || /\s/.test(line)) return { kind: "pass" };
+	const word = line.slice(1).toLowerCase();
+	const matches = entries.filter((e) => e.name.toLowerCase().startsWith(word));
+	if (matches.length === 0) return { kind: "pass" };
+	if (matches.some((e) => e.name.toLowerCase() === word)) return { kind: "pass" };
+	if (picked && matches.includes(picked)) return { kind: "run", name: picked.name };
+	const target = (e: SlashRegistryEntry) => e.builtInName ?? e.token;
+	const distinct = [...new Map(matches.map((e) => [target(e), e])).values()];
+	const only = distinct[0] as SlashRegistryEntry;
+	if (distinct.length === 1 && !SLASH_NEVER_FROM_PREFIX.has(only.builtInName ?? only.name))
+		return { kind: "run", name: only.name };
+	return { kind: "keep" };
+}
+
 export const SLASH_MENU_ROWS = 14;
 /** Below this many terminal rows the menu drops its frame and the focal strip steps aside. */
 export const SLASH_MENU_COMPACT_BELOW = 30;
@@ -814,26 +905,58 @@ export function slashMenuWindow(
 	return { start, end: start + visible };
 }
 
+/** Below this many columns the rows show names only and the picked row's description sits under the list. */
+export const SLASH_NARROW_COLUMNS = 60;
+
+/** The picked row's description, in at most two lines of `width` cells, cut with an ellipsis only past that. */
+export function pickedDescription(text: string, width: number): string[] {
+	const w = Math.max(8, width);
+	const lines: string[] = [];
+	let rest = text.trim();
+	while (rest && lines.length < 2) {
+		if (rest.length <= w) {
+			lines.push(rest);
+			rest = "";
+			break;
+		}
+		const cut = rest.lastIndexOf(" ", w);
+		const at = cut > w / 2 ? cut : w;
+		lines.push(rest.slice(0, at).trimEnd());
+		rest = rest.slice(at).trimStart();
+	}
+	if (rest && lines.length)
+		lines[lines.length - 1] = `${(lines[lines.length - 1] ?? "").slice(0, w - 1)}…`;
+	return lines;
+}
+
 // Slash command help dropdown (built-ins + loaded skills)
 export function SlashCommandHelp({
 	rows,
 	selected,
 	visible,
 	compact = false,
+	columns = 80,
+	onPick,
 }: {
 	rows: SlashRegistryEntry[];
 	selected: number;
 	visible: number;
 	compact?: boolean;
+	columns?: number;
+	/** A tap on a row: run it, as Enter on it does (#4934). */
+	onPick?: (name: string) => void;
 }) {
 	if (rows.length === 0) return null;
 	const { start, end } = slashMenuWindow(rows.length, selected, visible);
-	const combined = rows.slice(start, end).map((entry, i) => ({
+	const narrow = columns < SLASH_NARROW_COLUMNS;
+	const shown = rows.slice(start, end);
+	const combined = shown.map((entry, i) => ({
 		key: `${entry.kind}:${entry.token}`,
 		label: entry.name,
 		description: entry.description,
 		picked: start + i === selected,
 	}));
+	const picked = rows[Math.min(selected, rows.length - 1)];
 
 	return (
 		<Box
@@ -849,21 +972,62 @@ export function SlashCommandHelp({
 					COMMANDS
 				</Text>
 			)}
+			<SlashRows rows={shown} combined={combined} narrow={narrow} onPick={onPick} />
+			{narrow && picked
+				? pickedDescription(picked.description ?? "", columns - 4).map((line, i) => (
+						<Text key={i} color={t.textTertiary}>
+							{line}
+						</Text>
+					))
+				: null}
+			{rows.length > end - start && (
+				<Text color={t.textTertiary} wrap="truncate-end">
+					{narrow
+						? `${start + 1}-${end} of ${rows.length}  tap or Enter`
+						: `${start + 1}-${end} of ${rows.length}, Up/Down to scroll, Tab to pick, Enter to run`}
+				</Text>
+			)}
+		</Box>
+	);
+}
+
+/** The rows, each a tap target that runs its command (#4934). A row is its whole line wide. */
+function SlashRows({
+	rows,
+	combined,
+	narrow,
+	onPick,
+}: {
+	rows: SlashRegistryEntry[];
+	combined: { key: string; label: string; description?: string; picked: boolean }[];
+	narrow: boolean;
+	onPick?: (name: string) => void;
+}) {
+	const ref = useRef(null);
+	const spans: ClickSpan[] = onPick
+		? rows.map((entry, i) => ({
+				id: `slash:${entry.name}`,
+				dx: 0,
+				dy: i,
+				// The row's visible text plus 3 cells: a thumb gets room, the empty line does not.
+				w: cellWidth(`  /${entry.name}${narrow ? "" : ` ${entry.description ?? ""}`}`) + 3,
+				action: () => onPick(entry.name),
+			}))
+		: [];
+	useClickSpans(ref, spans, 5, 0);
+	const pressed = usePressedIn("slash:");
+	return (
+		<Box ref={ref} flexDirection="column" flexShrink={0}>
 			{combined.map((row) => (
 				// One line per row, cut at the edge: a wrapped row would push the
 				// menu past the rows the terminal has.
-				<Text key={row.key} wrap="truncate-end">
+				<Text key={row.key} wrap="truncate-end" inverse={pressed === `slash:${row.label}`}>
 					<Text color={row.picked ? t.heading : t.textPrimary}>
 						{row.picked ? "> " : "  "}/{row.label}
 					</Text>
-					<Text color={t.textTertiary}> {row.description}</Text>
+					{narrow ? null : <Text color={t.textTertiary}> {row.description}</Text>}
 				</Text>
 			))}
-			{rows.length > end - start && (
-				<Text color={t.textTertiary}>
-					{`${start + 1}-${end} of ${rows.length}, Up/Down to scroll, Tab to pick`}
-				</Text>
-			)}
 		</Box>
 	);
 }
@@ -940,8 +1104,8 @@ interface MultiLineInputProps {
 }
 
 export function MultiLineInput({ onSubmit, isProcessing }: MultiLineInputProps) {
-	const [lines, setLines] = useState<string[]>([""]);
-	const [currentLine, setCurrentLine] = useState(0);
+	const [lines, _setLines] = useState<string[]>([""]);
+	const [currentLine, _setCurrentLine] = useState(0);
 
 	// Not fully implemented - placeholder for future
 	return (
@@ -976,7 +1140,7 @@ export function CommandPalette({ onSubmit, suggestions = EMPTY_SUGGESTIONS }: Co
 		s.toLowerCase().includes(value.toLowerCase()),
 	);
 
-	useInput((input, key) => {
+	useInput((_input, key) => {
 		if (key.downArrow) {
 			setSelectedIndex((prev) => Math.min(prev + 1, filteredSuggestions.length - 1));
 		} else if (key.upArrow) {

@@ -17,7 +17,7 @@ import { nodeExecPath, tuiProcessEnv } from "./termux-exec.js";
 // An 8gent tool shell marks its child env; a second 8gent inside it refuses to start (#4715).
 refuseIfNested();
 
-const VERSION = "0.20.26";
+const VERSION = "0.20.27";
 const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts
 
 // Two different "here" directories matter, and conflating them is what broke
@@ -578,6 +578,10 @@ async function main() {
 			break;
 		}
 
+		case "scout":
+			await scoutCommand(restArgs);
+			break;
+
 		case "daemon": {
 			const { daemonCommand } = await import("../packages/daemon/service.ts");
 			const code = await daemonCommand(restArgs, daemonProgram());
@@ -713,8 +717,8 @@ async function offerSafetyJudge(afterUpdate = false): Promise<void> {
 		const { isInteractiveTerminal } = await import("../packages/eight/cli-maintenance.ts");
 		if (!isInteractiveTerminal()) return;
 		const { offerJudge } = await import("../packages/eight/judge-install.ts");
-		// After an update a stray Enter must not start a 4.9 GB download: default No.
-		await offerJudge("auto", { defaultYes: !afterUpdate });
+		// Every judge question defaults to No: a stray Enter never starts a download (#4906).
+		await offerJudge("auto");
 	} catch {}
 	// Android (#4833): the same moment offers the DJ's tools and voice input, one yes. A no-op elsewhere.
 	try {
@@ -1910,6 +1914,14 @@ async function cronCommand(args: string[]) {
 		console.log("Available: list, add, remove, enable, disable");
 		process.exit(1);
 	}
+}
+
+// ── Scout Command (#4926) ─────────────────────────────────────────
+
+async function scoutCommand(args: string[]) {
+	const { getRoutineManager } = await import("../packages/cron/routines.ts");
+	const { runScoutCommand } = await import("../packages/cron/scout-cli.ts");
+	process.exitCode = await runScoutCommand(args, { manager: getRoutineManager() });
 }
 
 // ── Blueprint Command (trial, EIGHT_BLUEPRINTS=1 only, #3463) ─────

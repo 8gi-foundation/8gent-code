@@ -328,6 +328,7 @@ const SUBCOMMANDS = new Set([
 	"cron",
 	"blueprint",
 	"selfimprove",
+	"scout",
 	"daemon",
 	"rpc",
 	"mcp-server",

@@ -252,6 +252,27 @@ export const SINKS: Sink[] = [
 		files: ["packages/board-vessel/", "packages/orchestration/sequential-pipeline.ts"],
 	},
 
+	// --- scouts -------------------------------------------------------------
+	{
+		id: "scout-sources",
+		what: "A GET request, with no body, credentials or cookies, to each address the person listed for a scout (https only, never this machine or a private network). The request sends nothing of the person's; the site sees an IP address and a client string.",
+		mode: "optin",
+		patterns: [/8gent-scout/],
+		files: ["packages/cron/scout.ts"],
+		optIn: [
+			{
+				file: "packages/cron/routines.ts",
+				mustMatch: /consent\.hash === consentHash\(/,
+				how: "a scout runs only while the sources it carries match the hash of the sources the person said yes to; creating or enabling one asks, with every address shown, and answers no on a bare Enter or with nobody to ask",
+			},
+			{
+				file: "packages/cron/scout.ts",
+				mustMatch: /isInternalAddress\(x\.address\)/,
+				how: "before every request and redirect hop the name's resolved addresses are checked, and an internal one is refused",
+			},
+		],
+	},
+
 	// --- tools the model can call -----------------------------------------
 	{
 		id: "web-search",
@@ -420,6 +441,8 @@ export const OLLAMA_TAG_READERS_REVIEWED: Record<string, string> = {
 	"packages/board-vessel/vessel.ts": "waits for Ollama to answer",
 	"packages/decide/index.ts": "comment",
 	"packages/eight/judge-install.ts": "reachability probe; pulls a fixed judge model",
+	"packages/eight/local-runtime.ts":
+		"reachability probe of the Ollama it started itself (status only); lists no models",
 	"packages/eight/repl.ts": "fast-mode prefix match; /models listing",
 	"packages/harness-cli/commands/doctor.ts": "doctor listing",
 	"packages/kernel/proxy.ts": "health probe",
@@ -491,9 +514,9 @@ export const INSTALL_SITES: InstallSite[] = [
 	// --- default paths: waived, dated, linked ------------------------------
 	{
 		file: "packages/eight/judge-install.ts",
-		max: 2,
+		max: 1,
 		mode: "default",
-		why: "first launch asks, default yes, to pull the judge model through Ollama, and says to run ollama serve",
+		why: "when Ollama is installed but stopped and declined, the judge message says to run ollama serve",
 		waiver: INSTALL_WAIVER,
 	},
 	{

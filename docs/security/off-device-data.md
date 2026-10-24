@@ -36,6 +36,7 @@ That one is the only entry the gate waives for user data. Run `bun scripts/local
 | vercel-and-travel-apis | Deploy and travel-search requests | api.vercel.com, api.letsfg.co | The person's key; LetsFG throws "LETSFG_API_KEY is required" | `packages/travel/letsfg-provider.ts` |
 | android-speech-service | Microphone audio, only if the person turns on the phone's speech service | The phone's speech recogniser through `termux-speech-to-text`; Android's SpeechRecognizer is often Google's service | The voice question is never asked on first launch, only after the person asks for voice; voice input is on-device whisper.cpp by default (#4910) | `packages/eight/android-setup.ts` (the question is reached only on the command) |
 | db-convex | Records | A Convex deployment | A configured `CONVEX_URL`; without it the client logs "Running in offline mode" | `packages/db/client.ts` |
+| scout-sources | Nothing of the person's: a GET request (no body, credentials or cookies) to each address they listed | Those addresses only, https, never this machine or a private network; the site sees an IP address and a client string | `8gent scout add` or `enable`, which lists every address and answers no on a bare Enter or with nobody to ask (CI, EIGHT_UNATTENDED, no terminal) | The consent hash in `packages/cron/routines.ts` and the internal-address check in `packages/cron/scout.ts` |
 
 ## Command paths (user data can leave only when the person types the command)
 

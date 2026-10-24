@@ -30,6 +30,7 @@ export const KNOWN_SUBCOMMANDS = [
 	"cron",
 	"blueprint",
 	"selfimprove",
+	"scout",
 	"daemon",
 	"rpc",
 	"mcp-server",
