@@ -11,7 +11,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { validatePath } from "./path-guard";
@@ -192,25 +192,64 @@ function under(abs: string, entry: string): boolean {
 }
 
 /**
- * Remember a yes for outside reads (#4897): each path's own folder (the path itself when it is
- * a folder), or just the file when its folder is too broad (home, ~/Documents, a system root).
- * Everything under an entry is covered for the rest of the session. Only absolute paths count.
+ * Does the folder hold a credential-shaped name (SECRET_PATH: .env, .ssh, id_rsa, *.pem, ...)
+ * within a few levels? A scan that cannot finish counts as yes. Such a folder is never remembered
+ * whole: the kernel's never-read set names fixed places, not these.
  */
-export function rememberApprovedReads(
-	paths: string[],
-	homes: string[] = [homedir()],
-	scope: ReadScope = cur(),
-): void {
+function holdsSecretShaped(dir: string, maxEntries = 2000, maxDepth = 3): boolean {
+	let seen = 0;
+	const walk = (d: string, depth: number): boolean => {
+		let names: string[];
+		try {
+			names = readdirSync(d);
+		} catch {
+			return true;
+		}
+		for (const n of names) {
+			if (++seen > maxEntries) return true;
+			const p = join(d, n);
+			if (SECRET_PATH.test(p)) return true;
+			if (depth < maxDepth) {
+				let isDir = false;
+				try {
+					isDir = lstatSync(p).isDirectory();
+				} catch {}
+				if (isDir && walk(p, depth + 1)) return true;
+			}
+		}
+		return false;
+	};
+	return walk(dir, 1);
+}
+
+/**
+ * What a yes on a read card opens (#4897), the same list the card shows: each file the command
+ * named, exactly; each folder it named, with everything under it, unless that folder is too broad
+ * (home, ~/Documents, a system root) or holds a credential-shaped name. Those get no memory: the
+ * read runs once and the next one is asked again. Only absolute paths count. A file's folder is
+ * never granted: a yes to one note does not open its siblings (8SO review of #4900).
+ */
+export function approvedGrants(paths: string[], homes: string[] = [homedir()]): string[] {
+	const out: string[] = [];
 	for (const p of paths) {
 		if (!isAbsolute(p)) continue;
 		let isDir = false;
 		try {
 			isDir = statSync(p).isDirectory();
 		} catch {}
-		const base = isDir ? p : dirname(p);
-		const broad = homes.some((h) => tooBroad(base, h));
-		scope.approvedReads.add(broad ? p : base);
+		if (isDir && (homes.some((h) => tooBroad(p, h)) || holdsSecretShaped(p))) continue;
+		out.push(p);
 	}
+	return out;
+}
+
+/** Remember a yes for the rest of the session: the grants above, in memory only. */
+export function rememberApprovedReads(
+	paths: string[],
+	homes: string[] = [homedir()],
+	scope: ReadScope = cur(),
+): void {
+	for (const g of approvedGrants(paths, homes)) scope.approvedReads.add(g);
 }
 
 /** True when `resolved` (absolute, links followed) lies under a path approved on a read card. */

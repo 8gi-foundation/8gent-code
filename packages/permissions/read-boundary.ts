@@ -30,6 +30,7 @@ import { isPathWithin } from "../core/path-within";
 import { readPrefixesFor } from "../eight/read-chain";
 import { LINUX_HOME_NEVER_READ } from "./landlock";
 import {
+	approvedGrants,
 	approvedReadEntries,
 	isApprovedRead,
 	namesSecret,
@@ -568,17 +569,38 @@ export async function readBoundaryGate(
 			};
 	}
 	// A folder the person already approved this session is not asked about again.
-	outside = outside.filter((p) => !isApprovedRead(p));
+	// (A credential-shaped name created later inside an approved folder is still asked about.)
+	outside = outside.filter((p) => !isApprovedRead(p) || namesSecret(p));
 	if (outside.length === 0) return null;
 	// One card for the command, naming every outside path it reads.
 	const named = outside.join(", ");
 	const first = outside[0] ?? "";
 	const dir = path.isAbsolute(first) ? path.dirname(first) : "<folder>";
+	// The card says exactly what a yes opens: the files named, the folders named with all under
+	// them, and which paths get this one run only (too broad, or holding credential-shaped names).
+	const grants = new Set(approvedGrants(outside, homeDirs(env)));
+	const isFolder = (p: string) => {
+		try {
+			return fs.statSync(p).isDirectory();
+		} catch {
+			return false;
+		}
+	};
+	const opens = [...grants].map((g) =>
+		isFolder(g) ? `the folder ${g} and everything under it` : `the file ${g}`,
+	);
+	const once = outside.filter((p) => !grants.has(p));
+	const opensText = [
+		opens.length ? `A yes opens ${opens.join(", ")} for this session.` : "",
+		once.length ? `${once.join(", ")} is read this one time only and asked about again.` : "",
+	]
+		.filter(Boolean)
+		.join(" ");
 	let answer: boolean | null;
 	try {
 		answer = await opts.ask({
 			action: "Read outside the working folder",
-			details: `This command names ${named}, outside the working folder ${root}. Approve only if you meant it. A yes covers these paths and everything under them for this session. /allow-read ${dir} allows that folder for the session.`,
+			details: `This command names ${named}, outside the working folder ${root}. Approve only if you meant it. ${opensText} /allow-read ${dir} allows that whole folder for the session.`,
 			command,
 		});
 	} catch {

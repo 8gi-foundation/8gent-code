@@ -87,13 +87,77 @@ const gate = (command: string, env: Record<string, string | undefined> = {}) =>
 		},
 	);
 
-describe("one card per folder, one card per command", () => {
-	test("three reads from the same outside folder produce one card", async () => {
-		const d = outsideDir("docs", ["a", "b", "c"]);
+describe("one card per file, one card per command", () => {
+	test("three reads of the same outside file produce one card", async () => {
+		const d = outsideDir("docs", ["a"]);
 		responder("approve");
-		for (const f of ["a", "b", "c"]) expect((await gate(`cat ${path.join(d, f)}`)).run).toBe(true);
+		for (let i = 0; i < 3; i++) expect((await gate(`cat ${path.join(d, "a")}`)).run).toBe(true);
 		expect(cards.length).toBe(1);
 		expect(readCardsShown()).toBe(1);
+	});
+
+	test("a yes to one file does not open its siblings: they are asked about", async () => {
+		const d = outsideDir("docs", ["a", "b", ".env"]);
+		responder("approve");
+		await gate(`cat ${path.join(d, "a")}`);
+		expect(cards.length).toBe(1);
+		await gate(`cat ${path.join(d, "b")}`);
+		expect(cards.length).toBe(2);
+		await gate(`cat ${path.join(d, ".env")}`);
+		expect(cards.length).toBe(3);
+	});
+
+	test("the card names exactly what a yes opens", async () => {
+		const d = outsideDir("docs", ["a"]);
+		responder("approve");
+		await gate(`cat ${path.join(d, "a")}`);
+		expect(cards[0].details).toContain(
+			`A yes opens the file ${path.join(d, "a")} for this session.`,
+		);
+		expect(cards[0].details).not.toContain("everything under");
+	});
+
+	test("a folder the command names is remembered with everything under it, and the card says so", async () => {
+		const d = outsideDir("proj", ["a", "b"]);
+		responder("approve");
+		await gate(`ls ${d}`);
+		expect(cards[0].details).toContain(`the folder ${d} and everything under it`);
+		expect((await gate(`cat ${path.join(d, "b")}`)).run).toBe(true);
+		expect(cards.length).toBe(1);
+	});
+
+	test("a folder holding a credential-shaped name is read once, not remembered", async () => {
+		const d = outsideDir("withenv", ["a", ".env"]);
+		responder("approve");
+		await gate(`ls ${d}`);
+		expect(cards[0].details).toContain("this one time only");
+		await gate(`cat ${path.join(d, "a")}`);
+		expect(cards.length).toBe(2);
+	});
+
+	test("a yes to the home folder itself opens nothing for later", async () => {
+		const home = path.join(base, "home");
+		fs.mkdirSync(path.join(home, "Documents"), { recursive: true });
+		fs.writeFileSync(path.join(home, "Documents", "n.txt"), "x");
+		responder("approve");
+		await gate(`ls ${home}`, { HOME: home });
+		expect(cards[0].details).toContain("this one time only");
+		await gate(`cat ${path.join(home, "Documents", "n.txt")}`, { HOME: home });
+		expect(cards.length).toBe(2);
+	});
+
+	test("the file's remembered yes is the file, at the kernel rule too", async () => {
+		const d = outsideDir("kernel", ["a", "b"]);
+		responder("approve");
+		await gate(`cat ${path.join(d, "a")}`);
+		process.env.EIGHT_OS_READ_BOUNDARY = "1";
+		try {
+			const spec = osReadSpec(`cat ${path.join(d, "b")}`, { cwd: ws, project: ws });
+			expect(spec?.reads).toContain(path.join(d, "a"));
+			expect(spec?.reads).not.toContain(d);
+		} finally {
+			Reflect.deleteProperty(process.env, "EIGHT_OS_READ_BOUNDARY");
+		}
 	});
 
 	test("a command reading several outside paths shows exactly one card that lists them all", async () => {
@@ -128,13 +192,13 @@ describe("one card per folder, one card per command", () => {
 	});
 
 	test("the remembered yes reaches the kernel read rule for later commands", async () => {
-		const d = outsideDir("docs", ["a", "b"]);
+		const d = outsideDir("docs2", ["a"]);
 		responder("approve");
 		await gate(`cat ${path.join(d, "a")}`);
 		process.env.EIGHT_OS_READ_BOUNDARY = "1";
 		try {
-			const spec = osReadSpec(`cat ${path.join(d, "b")}`, { cwd: ws, project: ws });
-			expect(spec?.reads).toContain(d);
+			const spec = osReadSpec(`cat ${path.join(d, "a")}`, { cwd: ws, project: ws });
+			expect(spec?.reads).toContain(path.join(d, "a"));
 		} finally {
 			Reflect.deleteProperty(process.env, "EIGHT_OS_READ_BOUNDARY");
 		}
