@@ -131,6 +131,8 @@ const GAPS_IN_WS = [
 	"cat ${OLDPWD:-..}/x",
 	"awk 1 ${PWD%/*}/x",
 ];
+/** The signing key (#4132), reached by a path built at run time. */
+const SIGNING_KEY_GAP = `python3 -c "print(open('.8g'+'ent/k'+'eys/k').read())"`;
 /** Rooted at the home folder: the credential and private stores, reached by built paths. */
 const GAPS_IN_HOME = [
 	"cat ~/.s${x:-sh}/i${x:-d}_rsa",
@@ -370,6 +372,12 @@ describe.if(process.platform !== "win32")(
 			test(`rooted at home: ${command}`, async () => {
 				expect(await run(home, command)).toMatch(/PRIVATE-KEY|MEMORY-DB/);
 			});
+		// No text check stops it. Where Seatbelt applies, the #4132 rule already shuts the key.
+		test(`rooted at home: ${SIGNING_KEY_GAP}`, async () => {
+			const out = await run(home, SIGNING_KEY_GAP);
+			if (canApplySeatbelt()) expectKernelRefusal(out);
+			else expect(out).toContain("SIGNING-KEY");
+		});
 	},
 );
 
@@ -407,7 +415,7 @@ describe.if(live)("live: run_command under the kernel read rule (macOS)", () => 
 
 	test("flag on: the signing key stays shut (#4132)", async () => {
 		on();
-		const out = await run(home, "cat ${x:-.8gent}/k${x:-eys}/k");
+		const out = await run(home, SIGNING_KEY_GAP);
 		expect(out).not.toContain("SIGNING-KEY");
 		expectKernelRefusal(out);
 	});
