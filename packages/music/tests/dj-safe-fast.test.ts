@@ -58,7 +58,11 @@ function fakeChild(cmd: string, args: string[]): FakeChild {
 /** yt-dlp answers its search after `searchMs`; every other command just starts. */
 function stubSpawn(
 	searchMs = 0,
-	answer = "Fela Kuti - No Agreement\thttps://www.youtube.com/watch?v=abc",
+	answer = JSON.stringify({
+		title: "Fela Kuti - No Agreement",
+		url: "https://www.youtube.com/watch?v=abc",
+		duration: 200,
+	}),
 ): (cmd: string, args: string[]) => ChildProcess {
 	return (cmd: string, args: string[]) => {
 		const c = fakeChild(cmd, args);

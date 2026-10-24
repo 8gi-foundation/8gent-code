@@ -145,15 +145,50 @@ export interface SearchRow {
 	duration: number | null;
 }
 
-/** Rows of `title<TAB>url<TAB>duration`; a row without a real URL is dropped. Two columns still parse. */
+const YOUTUBE_HOSTS = new Set([
+	"youtube.com",
+	"www.youtube.com",
+	"m.youtube.com",
+	"music.youtube.com",
+	"youtu.be",
+]);
+
+/** A YouTube watch URL with no whitespace or control characters, or null. Strict on purpose. */
+export function safeYoutubeUrl(u: unknown): string | null {
+	if (typeof u !== "string" || /[\s\u0000-\u001f\u007f]/.test(u)) return null;
+	try {
+		const url = new URL(u);
+		if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+		return YOUTUBE_HOSTS.has(url.hostname) ? url.href : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * One JSON object per line (yt-dlp --dump-json). JSON escapes a tab or newline in a title,
+ * so a title can never end its own field and begin a URL of its own; the URL is read from
+ * the `url` field only (or built from the 11-character video id) and must be a YouTube URL.
+ * A line that is not a JSON object, or has no safe URL, is dropped.
+ */
 export function parseSearchRows(out: string): SearchRow[] {
 	const rows: SearchRow[] = [];
 	for (const line of out.split("\n")) {
-		const [title = "", url = "", dur = ""] = line.split("\t");
-		const u = url.trim();
-		if (!/^https?:\/\//.test(u)) continue;
-		const d = Number.parseFloat(dur);
-		rows.push({ title: title.trim(), url: u, duration: Number.isFinite(d) ? d : null });
+		if (!line.trim().startsWith("{")) continue;
+		let o: Record<string, unknown>;
+		try {
+			o = JSON.parse(line) as Record<string, unknown>;
+		} catch {
+			continue;
+		}
+		const id = typeof o.id === "string" && /^[\w-]{11}$/.test(o.id) ? o.id : null;
+		const url =
+			safeYoutubeUrl(o.url) ??
+			safeYoutubeUrl(o.webpage_url) ??
+			(id ? `https://www.youtube.com/watch?v=${id}` : null);
+		if (!url) continue;
+		const d = typeof o.duration === "number" && Number.isFinite(o.duration) ? o.duration : null;
+		rows.push({ title: typeof o.title === "string" ? o.title.trim() : "", url, duration: d });
 	}
 	return rows;
 }
@@ -200,8 +235,7 @@ export function ytSearch(
 					"--flat-playlist",
 					"--ignore-errors",
 					"--no-warnings",
-					"--print",
-					"%(title)s\t%(url)s\t%(duration)s",
+					"--dump-json",
 					`ytsearch${SEARCH_HITS}:${query}`,
 				],
 				{
@@ -571,12 +605,18 @@ const nap = (ms: number) =>
 async function waitForPlayer(child: ChildProcess, gen: number, maxMs = 1500): Promise<boolean> {
 	const t0 = Date.now();
 	ipcReady = true; // the socket is queried while it comes up; no answer is simply null
-	while (Date.now() - t0 < maxMs) {
-		if (gen !== playGen || exited.has(child)) return false;
-		if ((await mpvGet("mpv-version")) != null) return true;
-		await nap(100);
+	for (;;) {
+		const left = maxMs - (Date.now() - t0);
+		if (left <= 0 || gen !== playGen || exited.has(child)) return false;
+		// Each probe has its own 1.5 s socket timeout; the whole wait must not stretch to a
+		// multiple of it, so a probe is raced against the time that is left.
+		const answered = await Promise.race([
+			mpvGet("mpv-version").then((v) => v != null),
+			nap(left).then(() => false),
+		]);
+		if (answered) return true;
+		await nap(Math.min(100, Math.max(0, maxMs - (Date.now() - t0))));
 	}
-	return false;
 }
 
 /** Stamp the stages as mpv reaches them, in the background; ends when sound starts, 30 s pass, or the play ends. */

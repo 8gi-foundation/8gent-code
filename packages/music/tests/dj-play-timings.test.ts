@@ -97,7 +97,7 @@ function stubSpawn(cmd: string, args: string[]): ChildProcess {
 		setTimeout(() => {
 			(c as unknown as { stdout: EventEmitter }).stdout.emit(
 				"data",
-				"Last Last\thttps://www.youtube.com/watch?v=a\t170\n",
+				`${JSON.stringify({ title: "Last Last", url: "https://www.youtube.com/watch?v=a", duration: 170 })}\n`,
 			);
 			c.emit("close", 0);
 		}, 120);
@@ -149,6 +149,17 @@ describe("/dj play, measured", () => {
 		);
 		expect(l.split("\n")).toHaveLength(1);
 	});
+
+	test("a probe that stalls does not stretch the wait: play still returns by about 1.5 s", async () => {
+		// Every probe would take 10 s to give up; each used to add its own 1.5 s socket timeout.
+		setMpvTransport(() => new Promise((r) => setTimeout(() => r(null), 10_000)));
+		const dj = new DJ();
+		const t0 = Date.now();
+		await dj.play("https://example.invalid/track");
+		const took = Date.now() - t0;
+		expect(took).toBeGreaterThanOrEqual(1400);
+		expect(took).toBeLessThan(2000);
+	}, 8000);
 
 	test("a URL played directly has no search stage in the line", async () => {
 		timeline(200, 700, 1000);
