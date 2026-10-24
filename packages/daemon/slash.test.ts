@@ -152,7 +152,7 @@ describe("runSlash", () => {
 		const r = await runSlash("/dj play fela kuti no agreement", ctx);
 		expect(r.text).toStartWith("[youtube]");
 		expect(spawned.find((s) => s.cmd === "/usr/bin/yt-dlp")?.args).toContain(
-			"ytsearch1:fela kuti no agreement",
+			"ytsearch5:fela kuti no agreement",
 		);
 	});
 
