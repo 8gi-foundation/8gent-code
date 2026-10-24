@@ -25,6 +25,10 @@ export interface ToolTrailEntry {
 	reason?: string;
 	/** update_plan only: the steps and statuses the agent reported (lib/turn-results.ts). */
 	plan?: Array<{ step: string; status: string }>;
+	/** The call's number for this run of the TUI: what a tap, Ctrl+O and /out <n> refer to. */
+	seq?: number;
+	/** The result as the model saw it, capped (packages/eight/tool-output.ts). Shown on request. */
+	output?: string;
 }
 
 export interface ToolTrailRow extends ToolTrailEntry {
@@ -109,12 +113,15 @@ export function classifyToolResult(
 	return { status: "ok" };
 }
 
+let lastSeq = 0;
+
 /** Build a trail entry from an AgentToolEndEvent-shaped object. */
 export function toTrailEntry(event: {
 	toolName: string;
 	args?: Record<string, unknown>;
 	success: boolean;
 	resultPreview?: string;
+	resultFull?: string;
 }): ToolTrailEntry {
 	const { status, reason } = classifyToolResult(event.success !== false, event.resultPreview);
 	const entry: ToolTrailEntry = {
@@ -123,17 +130,48 @@ export function toTrailEntry(event: {
 		status,
 	};
 	if (reason) entry.reason = reason;
+	entry.seq = ++lastSeq;
+	const output = event.resultFull ?? event.resultPreview;
+	if (output) entry.output = output;
 	if (event.toolName === "update_plan") {
 		const items = (event.args as { plan?: unknown } | undefined)?.plan;
 		if (Array.isArray(items)) {
 			const plan = items
 				.map((i) => (i && typeof i === "object" ? (i as { step?: unknown; status?: unknown }) : {}))
-				.filter((i): i is { step: string; status: unknown } => typeof i.step === "string" && i.step.trim() !== "")
-				.map((i) => ({ step: i.step, status: typeof i.status === "string" ? i.status : "pending" }));
+				.filter(
+					(i): i is { step: string; status: unknown } =>
+						typeof i.step === "string" && i.step.trim() !== "",
+				)
+				.map((i) => ({
+					step: i.step,
+					status: typeof i.status === "string" ? i.status : "pending",
+				}));
 			if (plan.length > 0) entry.plan = plan;
 		}
 	}
 	return entry;
+}
+
+/** Messages that may carry a trail entry (app.tsx's Message satisfies it). */
+interface HasTrail {
+	toolTrail?: ToolTrailEntry;
+}
+
+/** The newest call that has output to show. */
+export function latestOutputEntry(messages: readonly HasTrail[]): ToolTrailEntry | undefined {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const e = messages[i].toolTrail;
+		if (e?.output && e.seq !== undefined) return e;
+	}
+	return undefined;
+}
+
+/** The call with this number, if it is still in the conversation. */
+export function entryBySeq(messages: readonly HasTrail[], seq: number): ToolTrailEntry | undefined {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (messages[i].toolTrail?.seq === seq) return messages[i].toolTrail;
+	}
+	return undefined;
 }
 
 function isReadTool(tool: string): boolean {

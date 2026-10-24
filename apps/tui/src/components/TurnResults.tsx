@@ -24,9 +24,11 @@ import { useEffect, useState } from "react";
 import { SETTLE_HOLD_MS, motionEnabled, staggerFor } from "../lib/motion.js";
 import type { PlanStep } from "../lib/plan-state.js";
 import { glyphs } from "../lib/term-caps.js";
+import { rowOutput } from "../lib/tool-output-state.js";
 import type { ToolTrailEntry } from "../lib/tool-trail.js";
 import { type ResultStatus, buildTurnResults, fitResultRow } from "../lib/turn-results.js";
 import { t } from "../theme.js";
+import { OutputRowShell } from "./ToolOutput.js";
 
 function iconFor(status: ResultStatus): { icon: string; color: string } {
 	const g = glyphs();
@@ -95,7 +97,7 @@ export function TurnResults({
 			{rows.map((row, i) => {
 				if (i >= visible) {
 					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
-					return <Box key={i} height={1} width={width} />;
+					return <Box key={i} height={1 + rowOutput(row, width).extraRows} width={width} />;
 				}
 				const { icon, color } = iconFor(row.status);
 				const fit = fitResultRow(row, width);
@@ -103,49 +105,51 @@ export function TurnResults({
 				return (
 					// Rows are positional within one finished turn and never reorder.
 					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
-					<Box key={i} width={width} height={1}>
-						<Text wrap="truncate-end">
-							<Text color={color}>{icon}</Text>
-							<Text> </Text>
-							<Text bold={!quiet} color={quiet ? t.muted : t.textPrimary}>
-								{fit.verb}
+					<OutputRowShell key={i} row={row} width={width}>
+						<Box width={width} height={1}>
+							<Text wrap="truncate-end">
+								<Text color={color}>{icon}</Text>
+								<Text> </Text>
+								<Text bold={!quiet} color={quiet ? t.muted : t.textPrimary}>
+									{fit.verb}
+								</Text>
+								{fit.spans ? (
+									<>
+										{fit.verb ? <Text> </Text> : null}
+										{/* spans are positional output of clipSpans; never reordered. */}
+										{fit.spans.map((s, j) =>
+											s.code ? (
+												// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+												<Text key={j} color={t.textPrimary} backgroundColor={t.border}>
+													{s.text}
+												</Text>
+											) : (
+												// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+												<Text key={j} color={quiet ? t.muted : t.textSecondary}>
+													{s.text}
+												</Text>
+											),
+										)}
+									</>
+								) : fit.text ? (
+									<Text color={quiet ? t.muted : t.textSecondary}>{` ${fit.text}`}</Text>
+								) : null}
+								{fit.chip ? (
+									<>
+										<Text> </Text>
+										<Text color={t.textPrimary} backgroundColor={t.border}>
+											{` ${fit.chip} `}
+										</Text>
+									</>
+								) : null}
+								{fit.note ? (
+									<Text
+										color={row.status === "fail" ? t.red : t.muted}
+									>{`${" ".repeat(fit.noteGap ?? 2)}${fit.note}`}</Text>
+								) : null}
 							</Text>
-							{fit.spans ? (
-								<>
-									{fit.verb ? <Text> </Text> : null}
-									{/* spans are positional output of clipSpans; never reordered. */}
-									{fit.spans.map((s, j) =>
-										s.code ? (
-											// react-doctor-disable-next-line react-doctor/no-array-index-as-key
-											<Text key={j} color={t.textPrimary} backgroundColor={t.border}>
-												{s.text}
-											</Text>
-										) : (
-											// react-doctor-disable-next-line react-doctor/no-array-index-as-key
-											<Text key={j} color={quiet ? t.muted : t.textSecondary}>
-												{s.text}
-											</Text>
-										),
-									)}
-								</>
-							) : fit.text ? (
-								<Text color={quiet ? t.muted : t.textSecondary}>{` ${fit.text}`}</Text>
-							) : null}
-							{fit.chip ? (
-								<>
-									<Text> </Text>
-									<Text color={t.textPrimary} backgroundColor={t.border}>
-										{` ${fit.chip} `}
-									</Text>
-								</>
-							) : null}
-							{fit.note ? (
-								<Text
-									color={row.status === "fail" ? t.red : t.muted}
-								>{`${" ".repeat(fit.noteGap ?? 2)}${fit.note}`}</Text>
-							) : null}
-						</Text>
-					</Box>
+						</Box>
+					</OutputRowShell>
 				);
 			})}
 		</Box>

@@ -27,6 +27,7 @@
 import { planStepsFromText } from "./activity-rail-derivation.js";
 import { type Span, clipSpans, parseInline, plainInline } from "./inline-markdown.js";
 import { type PlanStep, applyPlanUpdate, settlePlan } from "./plan-state.js";
+import { outputExtraRows } from "./tool-output-state.js";
 import type { ToolTrailEntry, TrailStatus } from "./tool-trail.js";
 
 export type ResultStatus = TrailStatus | "pending";
@@ -48,6 +49,9 @@ export interface ResultRow {
 	count: number;
 	/** Fold rows only: the plan steps folded into this row. */
 	steps?: number;
+	/** A single call's number and its output (lib/tool-output.ts shows it); unset when the row stands for several calls. */
+	seq?: number;
+	output?: string;
 }
 
 /** A turn's result block never grows past this many rows. */
@@ -104,6 +108,15 @@ function chipFor(entry: ToolTrailEntry): string | undefined {
 }
 
 function toolRow(entry: ToolTrailEntry): ResultRow {
+	const row = toolRowBase(entry);
+	if (entry.seq !== undefined && entry.output) {
+		row.seq = entry.seq;
+		row.output = entry.output;
+	}
+	return row;
+}
+
+function toolRowBase(entry: ToolTrailEntry): ResultRow {
 	const verbs = VERBS[entry.tool];
 	const chip = chipFor(entry);
 	if (entry.status === "blocked") {
@@ -204,6 +217,9 @@ function toolRows(trail: ToolTrailEntry[]): ResultRow[] {
 		) {
 			runs[out.length - 1].push(row.chip ?? "");
 			prev.count += 1;
+			// One row for several calls has no single output to open.
+			prev.seq = undefined;
+			prev.output = undefined;
 			continue;
 		}
 		// The same write, edit or command again: one row with a count.
@@ -213,6 +229,9 @@ function toolRows(trail: ToolTrailEntry[]): ResultRow[] {
 			);
 			if (same >= 0) {
 				out[same].count += 1;
+				// The newest run's output is the one worth opening.
+				out[same].seq = row.seq;
+				out[same].output = row.output;
 				continue;
 			}
 		}
@@ -439,6 +458,8 @@ export function turnResultRows(
 	trail: ToolTrailEntry[],
 	maxRows?: number,
 	plan?: ReadonlyArray<PlanStep>,
+	width = 80,
 ): number {
-	return buildTurnResults(trail, maxRows, plan).length;
+	const rows = buildTurnResults(trail, maxRows, plan);
+	return rows.length + outputExtraRows(rows, width);
 }

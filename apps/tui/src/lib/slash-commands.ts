@@ -81,6 +81,7 @@ export type SlashCommand =
 	| "projects"
 	| "terminal"
 	| "copy"
+	| "out"
 	| "allow-read"
 	| "bug"
 	| "tree"
@@ -581,6 +582,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Copy the last answer to the clipboard (works over SSH)",
 		usage: "/copy",
+	},
+	{
+		name: "out",
+		aliases: [],
+		description:
+			"Open or close the output of a tool call (the newest, or call n); same as ^O or a tap on the row",
+		usage: "/out [n]",
 	},
 	{
 		name: "allow-read",

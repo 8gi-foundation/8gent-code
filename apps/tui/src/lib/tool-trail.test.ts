@@ -12,7 +12,9 @@ import {
 	buildChatItems,
 	classifyToolResult,
 	collapseTrail,
+	entryBySeq,
 	formatTrailRow,
+	latestOutputEntry,
 	summarizeToolArgs,
 	toTrailEntry,
 } from "./tool-trail";
@@ -114,7 +116,13 @@ describe("toTrailEntry", () => {
 				success: true,
 				resultPreview: "deck.md\noutline.md",
 			}),
-		).toEqual({ tool: "run_command", summary: "ls deck", status: "ok" });
+		).toEqual({
+			tool: "run_command",
+			summary: "ls deck",
+			status: "ok",
+			seq: expect.any(Number),
+			output: "deck.md\noutline.md",
+		});
 	});
 });
 
@@ -330,5 +338,59 @@ describe("buildChatItems", () => {
 	test("system messages pass through in place", () => {
 		const items = buildChatItems<M>([msg("s1", "system"), msg("u1", "user")]);
 		expect(items.map((i) => i.message.id)).toEqual(["s1", "u1"]);
+	});
+});
+
+describe("tool output on the entry (#4954)", () => {
+	const ev = (over: Record<string, unknown> = {}) => ({
+		toolName: "run_command",
+		args: { command: "bun test" },
+		success: true,
+		resultPreview: "Exit code 1:\nfirst",
+		resultFull: "Exit code 1:\nfirst\nsecond\nthird",
+		...over,
+	});
+
+	test("carries the full output and a stable, increasing number", () => {
+		const a = toTrailEntry(ev());
+		const b = toTrailEntry(ev());
+		expect(a.output).toBe("Exit code 1:\nfirst\nsecond\nthird");
+		expect(typeof a.seq).toBe("number");
+		expect((b.seq as number) > (a.seq as number)).toBe(true);
+	});
+
+	test("falls back to the preview when the agent sent no full result", () => {
+		expect(toTrailEntry(ev({ resultFull: undefined })).output).toBe("Exit code 1:\nfirst");
+	});
+
+	test("no output at all leaves it unset", () => {
+		const e = toTrailEntry(ev({ resultFull: undefined, resultPreview: undefined }));
+		expect(e.output).toBeUndefined();
+	});
+
+	test("the failure reason is still the exit code, read from the start of the output", () => {
+		const e = toTrailEntry(ev({ resultPreview: "Exit code 2:\nx" }));
+		expect(e.status).toBe("fail");
+		expect(e.reason).toBe("exit 2");
+	});
+
+	const msg = (id: string, entry?: ToolTrailEntry) => ({
+		id,
+		role: "tool" as const,
+		content: "",
+		timestamp: new Date(),
+		toolTrail: entry,
+	});
+
+	test("latestOutputEntry is the newest call that has output; entryBySeq finds a number", () => {
+		const e1 = toTrailEntry(ev({ resultFull: "one" }));
+		const e2 = toTrailEntry(ev({ resultFull: undefined, resultPreview: undefined }));
+		const e3 = toTrailEntry(ev({ resultFull: "three" }));
+		const e4 = toTrailEntry(ev({ resultFull: undefined, resultPreview: undefined }));
+		const msgs = [msg("1", e1), msg("2", e2), msg("3", e3), msg("4", e4), msg("5")];
+		expect(latestOutputEntry(msgs)?.seq).toBe(e3.seq);
+		expect(entryBySeq(msgs, e1.seq as number)?.output).toBe("one");
+		expect(entryBySeq(msgs, 999999)).toBeUndefined();
+		expect(latestOutputEntry([])).toBeUndefined();
 	});
 });
