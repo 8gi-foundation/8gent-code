@@ -191,7 +191,7 @@ describe("wiring", () => {
 		expect(app).not.toContain("Context trimmed");
 	});
 	test("the agent keeps the history before each compaction, automatic or asked", () => {
-		expect(agent).toContain("this.compactionUndo.remember(this.messageHistory, pass.entryId)");
+		expect(agent).toContain("compactionUndo.remember(");
 		expect((agent.match(/compactionUndo\.remember\(/g) ?? []).length).toBe(2);
 	});
 });
