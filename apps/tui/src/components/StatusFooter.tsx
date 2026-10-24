@@ -17,6 +17,8 @@
  *   in the hint row. The hints fill the columns the status leaves, right-
  *   aligned, most used first; [^P] palette leads because the palette lists
  *   every command.
+ * - The unverified-turn flag shortens before anything else gives way, and
+ *   [^P] palette is never pushed out by it (#4962); see fitFooterRow.
  * - Orange means "look here": Infinite, a System One judge that failed
  *   to load (shell commands fail closed), and a shell with no OS sandbox.
  */
@@ -380,11 +382,11 @@ const unlabelled = (s: FooterSegment): FooterSegment =>
  * segment, so the [^P] palette cap and the sandbox state are both always
  * there.
  */
-export function fitFooterRow(
+function fitRow(
 	all: FooterSegment[],
 	width: number,
-	leading = false,
-	dj = false,
+	leading: boolean,
+	dj: boolean,
 ): { segments: FooterSegment[]; hints: string[] } {
 	const budget = Math.max(0, width - hintWidth(PALETTE_HINT) - HINTS_MARGIN);
 	const hintsFor = (segments: FooterSegment[]) =>
@@ -460,6 +462,74 @@ export function fitFooterRow(
 	);
 	const segments = kept.some((x) => x.key === "sandbox") ? kept : [...kept, last];
 	return { segments, hints: hintsFor(segments) };
+}
+
+/** The flag's forms, longest first (#4962): full, short (one word and a mark), glyph. */
+const FLAG_SHORT: Record<string, string> = {
+	unverified: "unver.",
+	"tests-claimed-not-run": "no tests run",
+};
+export const FLAG_GLYPH = "!";
+
+/** The mode segment without its "[^Y]" cap, and its word cut to `max` letters if given. */
+const modeBare = (s: FooterSegment, max?: number): FooterSegment =>
+	s.key === "mode" ? { ...s, hint: undefined, value: max ? s.value.slice(0, max) : s.value } : s;
+
+/**
+ * The footer row, with the unverified-turn flag (#4510, priority 0) fitted
+ * so it can never push [^P] palette out (#4962). Drop order, each step only
+ * when the row still does not hold the cap:
+ *
+ *   1. the flag shortens: "unverified" to "unver.", "tests-claimed-not-run"
+ *      to "no tests run";
+ *   2. the mode and perm labels go ("Planning [^Y]" for "mode Planning [^Y]");
+ *   3. the flag shrinks to one glyph, "!";
+ *   4. only below 60 columns, the perm segment yields (the tab tag and
+ *      Shift+Tab still show it);
+ *   5. last resorts: the mode loses its "[^Y]" cap, then its word is cut to
+ *      four letters. The mode itself and the sandbox state never leave.
+ *
+ * The sandbox state keeps its place throughout (#4953); fitRow decides how it
+ * shortens. Other segments give way only after the flag has used every step,
+ * and at 80 columns and above the flag reads in full whenever it fits.
+ */
+export function fitFooterRow(
+	all: FooterSegment[],
+	width: number,
+	leading = false,
+	dj = false,
+): { segments: FooterSegment[]; hints: string[] } {
+	const flag = all.find((s) => s.key === "verification");
+	const plain = fitRow(all, width, leading, dj);
+	if (!flag) return plain;
+	const budget = Math.max(0, width - hintWidth(PALETTE_HINT) - HINTS_MARGIN);
+	const holds = (r: { segments: FooterSegment[]; hints: string[] }) =>
+		r.hints[0] === PALETTE_HINT && segmentsWidth(r.segments, leading) <= budget;
+	if (holds(plain)) return plain;
+	const withFlag = (value: string) => all.map((s) => (s === flag ? { ...flag, value } : s));
+	const short = FLAG_SHORT[flag.value] ?? flag.value;
+	const dropPerm = (l: FooterSegment[]) =>
+		width >= FOOTER_NARROW_COLS ? l : l.filter((s) => s.key !== "perm");
+	const steps: FooterSegment[][] = [
+		withFlag(short),
+		withFlag(short).map(unlabelled),
+		withFlag(FLAG_GLYPH).map(unlabelled),
+		dropPerm(withFlag(FLAG_GLYPH).map(unlabelled)),
+		// The last resorts, on phones narrower than the mode, flag and sandbox together:
+		// the mode loses its key cap (the palette lists every command), then its word
+		// is cut to four letters. The mode itself never leaves the row.
+		dropPerm(withFlag(FLAG_GLYPH).map(unlabelled)).map(modeBare),
+		dropPerm(withFlag(FLAG_GLYPH).map(unlabelled)).map((x) => modeBare(x, 4)),
+	];
+	// Prefer the earliest step that holds the cap and loses no segment the
+	// last one keeps: shortening the flag comes before anything else gives way.
+	const rows = steps.map((list) => fitRow(list, width, leading, dj));
+	const glyph = rows[2] as { segments: FooterSegment[]; hints: string[] };
+	for (const r of rows.slice(0, 3)) {
+		if (holds(r) && r.segments.length >= glyph.segments.length) return r;
+	}
+	for (const r of rows.slice(3)) if (holds(r)) return r;
+	return rows[rows.length - 1] as { segments: FooterSegment[]; hints: string[] };
 }
 
 /** A permission switch the footer is announcing (#3174). */

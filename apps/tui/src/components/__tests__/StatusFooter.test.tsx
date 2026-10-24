@@ -678,3 +678,63 @@ describe("attached to the daemon is a footer chip while it holds (#4829)", () =>
 		);
 	});
 });
+
+describe("the unverified flag never pushes [^P] palette out at 48 columns and below (#4962)", () => {
+	const build = (v: "unverified" | "tests_claimed_not_run", sandbox: boolean, columns: number) =>
+		buildFooterSegments({
+			mode: "Planning",
+			permissions: "plan",
+			sessionTime: "2s",
+			providersLive: 2,
+			providersTotal: 3,
+			verification: v,
+			columns,
+			...(sandbox ? { sandboxOff: "nested" } : {}),
+		});
+
+	test("widths 38 to 220, flag on, sandbox on and off: the palette cap and a fitting row", () => {
+		for (const v of ["unverified", "tests_claimed_not_run"] as const) {
+			for (const sandbox of [false, true]) {
+				for (let w = 38; w <= 220; w++) {
+					const row = fitFooterRow(build(v, sandbox, w), w);
+					expect(row.hints[0], `cap at ${w} ${v} sandbox ${sandbox}`).toBe("^P palette");
+					expect(row.segments.some((s) => s.key === "verification")).toBe(true);
+					if (sandbox) expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
+					expect(segmentsWidth(row.segments) + hintWidth("^P palette") + 3).toBeLessThanOrEqual(w);
+				}
+			}
+		}
+	});
+
+	test("at 80 columns and above the flag still reads in full", () => {
+		for (let w = 80; w <= 220; w++) {
+			const a = fitFooterRow(build("unverified", false, w), w);
+			expect(a.segments.find((s) => s.key === "verification")?.value).toBe("unverified");
+			const b = fitFooterRow(build("tests_claimed_not_run", true, w), w);
+			expect(b.segments.find((s) => s.key === "verification")?.value).toBe("tests-claimed-not-run");
+		}
+	});
+
+	test("the flag shortens before the mode label goes, and the glyph is the last form", () => {
+		const flagAt = (w: number, v: "unverified" | "tests_claimed_not_run" = "unverified") =>
+			fitFooterRow(build(v, true, w), w).segments.find((s) => s.key === "verification")?.value;
+		expect(flagAt(48, "tests_claimed_not_run")).not.toBe("tests-claimed-not-run");
+		const forms = new Set<string | undefined>();
+		for (let w = 38; w < 80; w++) forms.add(flagAt(w));
+		for (const f of forms) expect(["unverified", "unver.", "!"]).toContain(String(f));
+	});
+
+	for (const cols of [48, 44, 40]) {
+		test(`the real frame at ${cols} columns holds the cap, the flag and the width`, async () => {
+			for (const verification of ["unverified", "tests_claimed_not_run"] as const) {
+				for (const sandboxOff of [undefined, "nested"]) {
+					const row = (await frame(cols, 30, { verification, sandboxOff }))[0] ?? "";
+					expect(row, `row at ${cols}`).toContain("[^P] palette");
+					expect(row.length).toBeLessThanOrEqual(cols);
+					expect(row, `flag at ${cols}`).toMatch(/unver|no tests run|!/);
+					if (sandboxOff) expect(row).toMatch(/(sandbox|sbx) off/);
+				}
+			}
+		});
+	}
+});
