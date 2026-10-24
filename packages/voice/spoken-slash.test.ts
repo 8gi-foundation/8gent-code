@@ -20,8 +20,13 @@ describe("slash at the start", () => {
 		expect(s("slash")).toBe("/");
 		expect(s("Slash.")).toBe("/");
 	});
-	test("an unknown word after slash still gets the slash (the menu filters it)", () => {
-		expect(s("slash banana split")).toBe("/banana split");
+	test("an unknown word after slash is prose: no slash is typed", () => {
+		expect(s("slash banana split")).toBe("slash banana split");
+		expect(s("Slash prices by ten percent.")).toBe("Slash prices by ten percent.");
+		expect(s("Slash, prices by ten percent")).toBe("Slash, prices by ten percent");
+	});
+	test("a command only counts when it is the word right after slash", () => {
+		expect(s("slash the dj budget")).toBe("slash the dj budget");
 	});
 });
 
@@ -33,9 +38,6 @@ describe("case", () => {
 	test("a known command name is lowercased", () => {
 		expect(s("Slash DJ play Lofi")).toBe("/dj play Lofi");
 		expect(s("slash Voice on")).toBe("/voice on");
-	});
-	test("an unknown first word keeps its case", () => {
-		expect(s("slash Banana split")).toBe("/Banana split");
 	});
 	test("the arguments are never touched", () => {
 		expect(s("slash goal Ship The Thing")).toBe("/goal Ship The Thing");
@@ -52,8 +54,8 @@ describe("punctuation from the transcriber", () => {
 		expect(s("Slash, help.")).toBe("/help");
 		expect(s("Slash dj play lofi.")).toBe("/dj play lofi");
 	});
-	test("a full stop after an unknown command line is left alone", () => {
-		expect(s("slash banana split.")).toBe("/banana split.");
+	test("a full stop after prose is left alone", () => {
+		expect(s("slash banana split.")).toBe("slash banana split.");
 	});
 	test("'slash' glued to punctuation inside a word is not a command", () => {
 		expect(s("slashing prices")).toBe("slashing prices");
@@ -92,11 +94,33 @@ describe("slash opening a new command mid-utterance", () => {
 	});
 });
 
-describe("when the whole thing is not a command", () => {
-	test("nothing known: start rule still applies, but no case change", () => {
-		expect(spokenSlash("slash Foo bar", new Set())).toBe("/Foo bar");
+describe("one-letter commands never trigger", () => {
+	// The caller leaves one-letter aliases out of the known set (voice-transcript.ts); the function
+	// itself also refuses them, so a caller that forgets cannot make "slash c is fine" run /c.
+	const withShort = new Set(["c", "h", "k", "dj", "clear"]);
+	test("start and mid-sentence", () => {
+		expect(spokenSlash("Slash c is fine", withShort)).toBe("Slash c is fine");
+		expect(spokenSlash("Fine. Slash c is fine", withShort)).toBe("Fine. Slash c is fine");
+		expect(spokenSlash("slash h", withShort)).toBe("slash h");
 	});
-	test("no known list at all is fine", () => {
-		expect(spokenSlash("slash dj play")).toBe("/dj play");
+	test("a longer command still works", () => {
+		expect(spokenSlash("slash clear", withShort)).toBe("/clear");
+	});
+});
+
+describe("when nothing is known", () => {
+	test("no known set: only a lone slash is typed", () => {
+		expect(spokenSlash("slash dj play")).toBe("slash dj play");
+		expect(spokenSlash("slash Foo bar", new Set())).toBe("slash Foo bar");
+		expect(spokenSlash("slash", new Set())).toBe("/");
+	});
+});
+
+describe("skills and user commands count as known", () => {
+	test("the caller's set decides", () => {
+		const k = new Set(["dj", "deploy-check", "skill:review"]);
+		expect(spokenSlash("slash deploy-check now", k)).toBe("/deploy-check now");
+		expect(spokenSlash("slash Review", new Set(["review"]))).toBe("/review");
+		expect(spokenSlash("slash review", k)).toBe("slash review");
 	});
 });

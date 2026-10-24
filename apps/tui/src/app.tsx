@@ -356,7 +356,7 @@ import { copiedNotice, notCopiedNotice } from "./lib/text-selection.js";
 import { truncate } from "./lib/text.js";
 import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
-import { voiceTranscriptText } from "./lib/voice-transcript.js";
+import { voiceTranscriptTextWithRegistry } from "./lib/voice-transcript.js";
 import { BTWView } from "./screens/BTWView.js";
 import { type ConversationEntry, HistoryScreen } from "./screens/HistoryScreen.js";
 import { IdeasView } from "./screens/IdeasView.js";
@@ -1197,9 +1197,10 @@ export function App({
 		onAndroidMic: () => void androidListen(),
 		onTranscript: (spoken) => {
 			// A spoken "slash" types "/" so slash commands can be voice typed (#4949).
-			const text = voiceTranscriptText(spoken);
-			setVoiceTranscript(text);
-			addSystemMessage(`Transcribed: "${text}". Edit it or press Enter to send.`);
+			void voiceTranscriptTextWithRegistry(spoken).then((text) => {
+				setVoiceTranscript(text);
+				addSystemMessage(`Transcribed: "${text}". Edit it or press Enter to send.`);
+			});
 		},
 	});
 
@@ -1471,7 +1472,7 @@ export function App({
 				}
 			}
 			if ("text" in heard) {
-				const text = voiceTranscriptText(heard.text);
+				const text = await voiceTranscriptTextWithRegistry(heard.text);
 				setVoiceTranscript(text);
 				addSystemMessage(`Transcribed: "${text}". Edit it or press Enter to send.`);
 			} else addSystemMessage(heard.error);
