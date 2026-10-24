@@ -205,7 +205,7 @@ function upgradeIfCut(card: PendingApproval, screen: Sized): boolean {
 	if (card.full) return false;
 	const w = compactCardBox.current?.yogaNode?.getComputedWidth() || screen.columns;
 	if (w === undefined || fitsCompact(card.target, card.reason, w)) return false;
-	Object.assign(card, { full: true, auto: true });
+	Object.assign(card, { full: true, auto: true, shownWholeAt: undefined, shownSince: Date.now() });
 	return true;
 }
 
@@ -307,6 +307,21 @@ export function settleApprovalKey(input: string, key: KeyLike, screen?: Sized): 
 		card.shownSince = Date.now();
 		return false;
 	}
+	// A one-row card takes a yes or an edit only once it has been drawn and measured
+	// and has stood CARD_MIN_SHOW_MS: a key typed ahead, in the tick the request
+	// arrived, answers nothing. No, and skip, are safe at any time.
+	if (!card.full && !card.gate && (decision === "approve" || decision === "edit")) {
+		const measured = !!compactCardBox.current?.yogaNode?.getComputedWidth();
+		const now = Date.now();
+		if (
+			!measured ||
+			card.shownWholeAt === undefined ||
+			now - (card.shownSince ?? Number.POSITIVE_INFINITY) < CARD_MIN_SHOW_MS
+		) {
+			card.shownSince = now;
+			return false;
+		}
+	}
 	if (card.full) {
 		if (card.shownWholeAt === undefined || !screen) return false;
 		if (!cardShowsAll(fullCardBox.current, screen)) {
@@ -387,7 +402,12 @@ export function useApprovalCard(
 		const onResize = () => {
 			// A narrower screen can turn a compact card into one that cuts: show it full.
 			if (active && !active.full && !fitsCompact(active.target, active.reason, stdout.columns))
-				Object.assign(active, { full: true, auto: true });
+				Object.assign(active, {
+					full: true,
+					auto: true,
+					shownWholeAt: undefined,
+					shownSince: Date.now(),
+				});
 			setSize(sizeOf(stdout));
 		};
 		stdout.on("resize", onResize);
@@ -401,6 +421,14 @@ export function useApprovalCard(
 		const card = active;
 		if (card && card === pending && upgradeIfCut(card, stdout)) {
 			setUpgrades((n) => n + 1);
+			return;
+		}
+		// A one-row card starts its minimum show time when it is first drawn and measured.
+		if (card && card === pending && !card.full && !card.gate) {
+			if (compactCardBox.current?.yogaNode?.getComputedWidth() && card.shownWholeAt === undefined) {
+				card.shownWholeAt = sizeOf(stdout);
+				card.shownSince = Date.now();
+			}
 			return;
 		}
 		if (!card?.full || card !== pending) return;
