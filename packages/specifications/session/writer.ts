@@ -431,7 +431,11 @@ export class SessionWriter {
 		this.write({ ...record, timestamp: this.now(), sequenceNumber: this.nextSeq() });
 	}
 
-	writeSessionEnd(exitReason: SessionSummary["exitReason"], reportId?: string | null): void {
+	writeSessionEnd(
+		exitReason: SessionSummary["exitReason"],
+		reportId?: string | null,
+		readCardsShown?: number,
+	): void {
 		this.write({
 			type: "session_end",
 			timestamp: this.now(),
@@ -450,6 +454,7 @@ export class SessionWriter {
 				gitCommits: this.gitCommits,
 				exitReason,
 				reportId: reportId ?? null,
+				...(readCardsShown === undefined ? {} : { read_cards_shown: readCardsShown }),
 			},
 		});
 

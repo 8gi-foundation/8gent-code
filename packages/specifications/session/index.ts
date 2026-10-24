@@ -280,6 +280,8 @@ export interface SessionSummary {
 	exitReason: "user_exit" | "max_turns" | "max_steps" | "error" | "idle_timeout" | "completed";
 	/** Link to the CompletionReport if one was generated */
 	reportId?: string | null;
+	/** Read-boundary cards shown to the person this session (#4897). */
+	read_cards_shown?: number;
 }
 
 // ============================================

@@ -1,0 +1,18 @@
+{
+	"llama": {
+		"tag": "b11146",
+		"commit": "7fe450e19305b828c199d602c23a8337aaa1f03b",
+		"url": "https://github.com/ggml-org/llama.cpp/archive/refs/tags/b11146.tar.gz",
+		"sha256": "25eb89e300a0600bfdfadaac2acc7ec3a93cd23b992b7eff3c0eeae7987e4474"
+	},
+	"whisper": {
+		"tag": "v1.9.5",
+		"url": "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.9.5.tar.gz",
+		"sha256": "ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720"
+	},
+	"targets": ["android-arm64", "linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64"],
+	"assets": {
+		"llama-server": "llama-server-{target}",
+		"whisper-cli": "whisper-cli-{target}"
+	}
+}
