@@ -192,6 +192,7 @@ import {
 	readAllowPrefixes,
 	terminalBoundaryText,
 } from "../permissions/read-allow";
+import { osReadSpec } from "../permissions/read-boundary";
 import { REFUSAL_LEAD, REFUSAL_NOTE, refusalLead } from "../permissions/refusal-lead";
 import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
 import {
@@ -3902,6 +3903,10 @@ export class ToolExecutor {
 			{ canRunInstead: env === undefined && !chain, project: this.workingDirectory },
 		);
 		if (!systemOne.run) return refusalLead(systemOne.message as string);
+		// A person's yes on the read card (or a System One card, which skips it): the OS read rule
+		// opens the outside paths that command names (#4890). The generic card below never asks
+		// about reads (the read card already did), and is auto-approved headless, so it does not count.
+		let approved = systemOne.humanApproved === true;
 		for (const part of chain?.slice(1) ?? []) {
 			const next = await systemOneGate(part, systemOneEnvFor(mode), dir, this.createdFiles, where, {
 				canRunInstead: false,
@@ -3909,6 +3914,7 @@ export class ToolExecutor {
 			});
 			if (!next.run) return refusalLead(next.message as string);
 			systemOne = next;
+			approved ||= next.humanApproved === true;
 		}
 
 		if (
@@ -3955,6 +3961,12 @@ export class ToolExecutor {
 
 		const sandboxRefusal = runCommandSandboxRefusal();
 		if (sandboxRefusal) return refusalLead(sandboxRefusal);
+		// The kernel read boundary (#4890, EIGHT_OS_READ_BOUNDARY=1): the root the read card judged.
+		const readScope = osReadSpec(finalCommand, {
+			cwd: dir,
+			project: this.workingDirectory,
+			approved,
+		});
 
 		return new Promise((resolve) => {
 			// Redirect targets this command creates are this agent's own files (#3177).
@@ -3968,7 +3980,7 @@ export class ToolExecutor {
 			};
 
 			// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
-			const proc = spawnShell(wrapRunCommand(finalCommand), {
+			const proc = spawnShell(wrapRunCommand(finalCommand, readScope), {
 				cwd: dir,
 				stdio: ["ignore", "pipe", "pipe"],
 				processGroup: true,

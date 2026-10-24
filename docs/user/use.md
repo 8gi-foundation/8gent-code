@@ -121,3 +121,5 @@ To widen it:
 | `EIGHT_WORKSPACE_BOUNDARY=off` | Turn the shell check off |
 
 This checks what a command says. Code that builds a path while it runs is not seen by it.
+
+On macOS, `EIGHT_OS_READ_BOUNDARY=1` adds the kernel's own rule behind that check: every shell command runs under a Seatbelt profile that refuses to read files outside the working folder and the allowances above, and never reads `~/.ssh`, `~/.aws`, the other credential folders, or the private parts of `~/.8gent` (memory, browser profiles, keys, logs), however the path was built. Off by default. A path you approve on the card is opened for that one command. Git over SSH from a shell command cannot read `~/.ssh` while it is on; the built-in git tool is not affected. Linux and Termux come later.

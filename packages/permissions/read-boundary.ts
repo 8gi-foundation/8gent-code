@@ -17,8 +17,10 @@
  * tool's own ~/.8gent data except anything credential-shaped (namesSecret).
  *
  * This is a check on what a command says, not a kernel boundary: code that builds a path at
- * run time (string joins, base64, a script file) is not seen here. Only a kernel read rule
- * (run-command-sandbox.ts, today signing keys only) can stop that.
+ * run time (string joins, base64, a script file) is not seen here. The kernel read rule
+ * (run-command-sandbox.ts, EIGHT_OS_READ_BOUNDARY=1 on macOS, #4890) is the backstop for that;
+ * osReadSpec() below hands it the same root and allowances, so the card explains and the
+ * kernel holds.
  */
 
 import * as fs from "node:fs";
@@ -26,7 +28,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { isPathWithin } from "../core/path-within";
 import { readPrefixesFor } from "../eight/read-chain";
-import { namesSecret } from "./read-allow";
+import { namesSecret, readAllowPrefixes } from "./read-allow";
+import { type OsReadSpec, osReadBoundaryOn } from "./run-command-sandbox";
 import { checkCommandBoundary, resolveSafe, tokenize } from "./src/workspace-boundary";
 
 export const READ_BOUNDARY_FLAG = "EIGHT_WORKSPACE_BOUNDARY";
@@ -538,5 +541,37 @@ export async function readBoundaryGate(
 			`[BLOCKED] Not run: this command names ${named}, outside the working folder ${root} [workspace-boundary]. ${why} ` +
 			`Do not run it again. Tell the person; to allow it they can run with --allow-read ${dir} (or /allow-read ${dir} in the TUI), ` +
 			`set ${"EIGHT_WORKSPACE_ROOT"} to a wider folder, or set ${READ_BOUNDARY_FLAG}=off. Command: ${command}`,
+	};
+}
+
+/**
+ * The kernel read rule's scope for one command (#4890), or undefined when EIGHT_OS_READ_BOUNDARY
+ * is not on. Same root as readBoundaryGate. `approved`: a person approved this command on a card,
+ * so the outside paths it names (the ones the card showed) are readable for this run. A path the
+ * command builds while it runs was never on the card, and stays refused by the kernel.
+ */
+export function osReadSpec(
+	command: string,
+	opts: {
+		cwd: string;
+		project?: string;
+		approved?: boolean;
+		env?: Record<string, string | undefined>;
+	},
+): OsReadSpec | undefined {
+	if (!osReadBoundaryOn()) return undefined;
+	const env = opts.env ?? process.env;
+	const root = path.resolve(env.EIGHT_WORKSPACE_ROOT || opts.project || opts.cwd);
+	let approved: string[] = [];
+	if (opts.approved) {
+		try {
+			approved = outsideReads(command, { root, cwd: opts.cwd, env });
+		} catch {}
+	}
+	return {
+		root,
+		reads: [...readAllowances(env), ...readAllowPrefixes(), ...approved],
+		dataRoots: ownDataRoots(env),
+		homes: homeDirs(env),
 	};
 }

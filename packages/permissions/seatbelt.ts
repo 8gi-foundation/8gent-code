@@ -71,8 +71,7 @@ function homeDir(): string {
  * regardless of what scopes a manifest granted. Each entry is emitted as
  * both (literal p) and (subpath p) so files and directories are covered.
  */
-export function sensitiveCredentialPaths(): string[] {
-	const home = homeDir();
+export function sensitiveCredentialPaths(home: string = homeDir()): string[] {
 	const dataDir = process.env.EIGHT_DATA_DIR || path.join(home, ".8gent");
 	return [
 		path.join(home, ".ssh"),

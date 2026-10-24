@@ -434,6 +434,8 @@ describe("CI round: the refusal's label, and printing the home folder", () => {
 	}
 });
 
+// The kernel rule that refuses these (EIGHT_OS_READ_BOUNDARY=1, macOS, #4890) is proven live in
+// os-read-boundary.test.ts, through run_command, on the macos-read-boundary workflow.
 describe("known gaps of a lexical check (a kernel read rule is the answer)", () => {
 	test("a path built at run time is not seen, and this test says so", async () => {
 		for (const command of [
