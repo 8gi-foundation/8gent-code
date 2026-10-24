@@ -193,8 +193,37 @@ export function djControl(
 	}
 }
 
+/**
+ * Below this many columns (a phone in Termux is about 52) the row drops the
+ * artist, the key, the total and the ^D cap so the title and the way to stop
+ * stay on screen (#4907). At 52 the full row left the title three letters.
+ */
+export const NARROW_DECK_COLUMNS = 70;
+
+/** The key caps that fit a phone: the four a listener reaches for. */
+const NARROW_KEYS = [DJ_KEYS[1], DJ_KEYS[2], DJ_KEYS[3], DJ_KEYS[7]];
+
 /** The second row, only while the deck has the keyboard. It sits under the track, past "DJ ▶ ". */
-export function DjKeysRow({ volume = null }: { volume?: number | null } = {}) {
+export function DjKeysRow({
+	volume = null,
+	narrow = false,
+}: { volume?: number | null; narrow?: boolean } = {}) {
+	if (narrow) {
+		return (
+			<Box
+				width="100%"
+				flexShrink={0}
+				height={1}
+				overflow="hidden"
+				aria-label={`DJ keys: ${NARROW_KEYS.map((k) => k.spoken).join(", ")}.`}
+			>
+				<KeyCapRow
+					idPrefix="djn"
+					caps={NARROW_KEYS.map((k, i) => ({ cap: k.cap, verb: "", gap: i === 0 ? 5 : 1 }))}
+				/>
+			</Box>
+		);
+	}
 	const groups = [DJ_KEYS.slice(0, 4), DJ_KEYS.slice(4, 6), DJ_KEYS.slice(6, 7), DJ_KEYS.slice(7)];
 	return (
 		<Box
@@ -238,7 +267,10 @@ export function DjRow(props: {
 	 * track, the artist and the key fit 80; the key-cap row shows it instead.
 	 */
 	showVolume?: boolean;
+	/** A phone-width row: the title, the state in words, the elapsed time, and how to stop. */
+	narrow?: boolean;
 }) {
+	if (props.narrow) return <DjRowNarrow {...props} />;
 	const showVolume = props.showVolume !== false;
 	const muted = props.volume === 0;
 	const vol = props.volume == null ? "vol --" : muted ? "muted" : `vol ${props.volume}%`;
@@ -281,6 +313,40 @@ export function DjRow(props: {
 						<KeyCapRow caps={[{ cap: "^D", verb: "keys" }]} idPrefix="djrow" />
 					</Box>
 				)}
+			</Box>
+		</Box>
+	);
+}
+
+/** The phone-width row: "DJ ▶ title  playing 0:12  /dj stop". Words carry the state, as everywhere. */
+function DjRowNarrow(props: {
+	paused: boolean;
+	track: string;
+	elapsed: string;
+	keysActive: boolean;
+}) {
+	const state = props.paused ? "paused" : "playing";
+	return (
+		<Box
+			width="100%"
+			flexShrink={0}
+			height={1}
+			aria-label={`DJ ${state}: ${props.track}, ${props.elapsed}. Stop with slash dj stop.`}
+		>
+			<Box flexShrink={0}>
+				<Text bold color={t.orange}>
+					DJ
+				</Text>
+				<Text color={props.paused ? t.textTertiary : t.teal}>{props.paused ? " ❚❚ " : " ▶ "}</Text>
+			</Box>
+			<Box flexGrow={1} flexShrink={1} minWidth={0}>
+				<Text wrap="truncate-end" color={t.textPrimary}>
+					{props.track}
+				</Text>
+			</Box>
+			<Box flexShrink={0}>
+				<Text color={t.textTertiary}>{`  ${state} ${props.elapsed}`}</Text>
+				{props.keysActive ? null : <Text color={t.textSecondary}>{"  /dj stop"}</Text>}
 			</Box>
 		</Box>
 	);
@@ -505,9 +571,13 @@ export function DjDeck({
 				volume={volume}
 				keysActive={keysActive}
 				showVolume={columns >= 110}
+				narrow={columns < NARROW_DECK_COLUMNS}
 			/>
 		) : null;
-	const keysRow = hasTrack && keysActive ? <DjKeysRow volume={volume} /> : null;
+	const keysRow =
+		hasTrack && keysActive ? (
+			<DjKeysRow volume={volume} narrow={columns < NARROW_DECK_COLUMNS} />
+		) : null;
 
 	// One home per fact (#3238): the DJ row names the track while it is open,
 	// so the footer carries the station only when a track is loaded and the
