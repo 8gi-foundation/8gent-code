@@ -9,6 +9,15 @@ For a phone running Termux, either in Termux itself or inside a proot distro (ka
 - **Node 22.5 or newer is required** (`bin/node-version.js:3`, `node:sqlite`). Kali's `apt` has shipped Node 20, so check first.
 - **You do not need Bun.** When Bun is not installed, 8gent runs its Node build.
 
+## Voice input
+
+Voice input stays on the phone. Ctrl+R (or `/voice record`) starts recording with `termux-microphone-record`, Ctrl+R again stops it (60 seconds at most). ffmpeg turns the recording into 16 kHz mono WAV, whisper.cpp turns it into text on the phone, and both audio files are deleted. The text lands in the prompt for you to edit or send (`packages/voice/termux-local-stt.ts`).
+
+- **First run asks once, [y/N].** A yes sets up what is missing: `termux-api` (it only opens the microphone), `ffmpeg`, whisper.cpp and a speech model. You also need the Termux:API app from F-Droid, opened once, with microphone permission.
+- **whisper.cpp is built on the phone.** Termux and TUR ship no whisper package, so 8gent installs `clang cmake make`, downloads the pinned whisper.cpp release, checks its sha256, builds a static `whisper-cli` into `~/.8gent/bin`, and deletes the source. This takes a few minutes. A `whisper-cli` or `whisper-cpp` already on `PATH` is used instead.
+- **Model.** You choose tiny.en (78 MB, the default) or base.en (148 MB, more accurate). It is downloaded from the whisper.cpp Hugging Face repo into `~/.8gent/models/whisper` and kept only if its sha256 matches.
+- **Android's speech service is opt-in.** `/voice mic cloud` asks a separate [y/N] question that says your audio leaves the phone (Android sends it to its speech service, often Google). `/voice mic local` switches back; `/voice mic off` turns voice input off; `/voice mic` shows which one is on.
+
 ## What `8gent update` does
 
 `8gent update` downloads the newest GitHub release tarball, checks it against the release signature, and installs it with `npm install -g <tarball> --ignore-scripts --prefix <your npm prefix>`. If npm fails it retries once with `--force`, then prints the exact command to run by hand. It installs from npm by name only when github.com cannot be reached (`packages/eight/self-update.ts`).

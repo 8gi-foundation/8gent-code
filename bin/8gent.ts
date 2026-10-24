@@ -714,7 +714,7 @@ async function offerSafetyJudge(afterUpdate = false): Promise<void> {
 		const { isInteractiveTerminal } = await import("../packages/eight/cli-maintenance.ts");
 		if (!isInteractiveTerminal()) return;
 		const { offerAndroidSetup } = await import("../packages/eight/android-setup.ts");
-		await offerAndroidSetup("auto", { defaultYes: !afterUpdate });
+		await offerAndroidSetup("auto");
 	} catch {}
 }
 

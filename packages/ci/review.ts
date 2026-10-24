@@ -1,6 +1,8 @@
 /**
  * 8gent CI Review - AI code review. Ollama local, OpenRouter fallback.
  */
+import { dropOllamaCloudNames } from "../core/ollama-cloud";
+
 const REVIEW_PROMPT = `You are a code reviewer. Analyze this diff for:
 1. Bugs or logic errors  2. Security issues  3. Style problems
 Output a flat list. Each item: [ERROR|WARNING|INFO] file:line - description
@@ -12,7 +14,7 @@ async function tryOllama(diff: string): Promise<string | null> {
 			signal: AbortSignal.timeout(2000),
 		});
 		const data = (await tags.json()) as any;
-		const models = (data.models || []).map((m: any) => m.name as string);
+		const models = dropOllamaCloudNames((data.models || []).map((m: any) => m.name as string));
 		const model =
 			models.find((m: string) => m.startsWith("eight")) ||
 			models.find((m: string) => !m.includes("embed")) ||

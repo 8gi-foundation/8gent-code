@@ -12,6 +12,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { dropOllamaCloud } from "../core/ollama-cloud";
 
 // Known vision-capable model families (Ollama) — general vision
 const OLLAMA_VISION_MODELS = [
@@ -166,7 +167,7 @@ async function checkOllamaModel(baseUrl: string, modelName: string): Promise<Vis
 		if (!res.ok) return null;
 
 		const data = await res.json();
-		const models = (data.models || []) as Array<{ name: string }>;
+		const models = dropOllamaCloud((data.models || []) as Array<{ name: string }>, (m) => m.name);
 		const baseName = squash(modelName.split(":")[0]);
 
 		const match = models.find((m) => {
@@ -201,7 +202,7 @@ async function checkOllamaVision(baseUrl = "http://localhost:11434"): Promise<Vi
 		if (!res.ok) return [];
 
 		const data = await res.json();
-		const models = (data.models || []) as Array<{ name: string }>;
+		const models = dropOllamaCloud((data.models || []) as Array<{ name: string }>, (m) => m.name);
 		const results: VisionModel[] = [];
 
 		for (const m of models) {
@@ -482,7 +483,16 @@ export function isKnownVisionModel(modelId: string): boolean {
 	// Local vision families
 	if (familyMatches(lower, [...OLLAMA_VISION_MODELS, ...OLLAMA_OCR_MODELS])) return true;
 	// Cloud vision families
-	const cloudMarkers = ["claude", "gpt-4o", "gpt-4.1", "gpt-5", "gemini", "pixtral", "llava", "vision"];
+	const cloudMarkers = [
+		"claude",
+		"gpt-4o",
+		"gpt-4.1",
+		"gpt-5",
+		"gemini",
+		"pixtral",
+		"llava",
+		"vision",
+	];
 	return cloudMarkers.some((m) => lower.includes(m));
 }
 

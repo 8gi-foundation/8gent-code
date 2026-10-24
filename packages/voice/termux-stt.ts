@@ -1,12 +1,13 @@
 /**
- * Voice input on Android (#4833): one `termux-speech-to-text` call.
+ * Cloud voice input on Android (#4833): one `termux-speech-to-text` call.
  *
  * That command (termux-api package plus the Termux:API app) starts Android's
  * SpeechRecognizer (termux-api SpeechToTextAPI.java: createSpeechRecognizer, no
  * offline preference), so the phone's own recogniser hears the audio, which can
- * be Google's service. The setup offer says so before anything is enabled.
- * termux-packages has no whisper-cpp package, so there is no on-device whisper
- * path to prefer. Spawn is injected; tests never touch a microphone.
+ * be Google's service. Since #4905 the default is on the phone
+ * (termux-local-stt.ts); this path runs only after /voice mic cloud and a typed
+ * yes to a question that says the audio leaves the phone. Spawn is injected;
+ * tests never touch a microphone.
  */
 
 import { spawn as nodeSpawn } from "node:child_process";
