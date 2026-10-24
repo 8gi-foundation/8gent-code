@@ -43,6 +43,7 @@ export type SlashCommand =
 	| "stack"
 	| "update"
 	| "judge"
+	| "ollama"
 	| "chat"
 	| "agent"
 	| "github"
@@ -422,6 +423,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Install the safety judge that checks risky commands before they run",
 		usage: "/judge [install]",
+	},
+	{
+		name: "ollama",
+		aliases: [],
+		description: "Stop the Ollama that 8gent started in the background",
+		usage: "/ollama stop",
 	},
 	{
 		name: "compact",

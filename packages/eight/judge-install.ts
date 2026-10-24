@@ -27,6 +27,12 @@ import { resolveHome } from "../core/home";
 import { JUDGE_MODEL } from "../decide/judge-model";
 import { detectBackend, resolveSharedJudgeHost } from "../decide/probe";
 import { findOnPath } from "../voice/termux";
+import {
+	OLLAMA_START_ASK,
+	type StartResult,
+	isLocalDefaultHost,
+	startOllama,
+} from "./ollama-autostart";
 
 /** The calibrated judge, fixed at build time (packages/decide/judge-model.ts), never from user config. */
 export { JUDGE_MODEL };
@@ -57,6 +63,8 @@ export interface JudgeDeps {
 	pull?: (model: string, onPercent: (pct: number) => void) => Promise<void>;
 	/** Ask one yes/no line; resolves null when nobody can answer. */
 	ask?: (line: string, defaultYes: boolean) => Promise<boolean | null>;
+	/** Start Ollama in the background (#4906). Default: ollama-autostart's startOllama. */
+	startOllama?: () => Promise<StartResult>;
 	/** What a bare Enter answers. True on first launch, false after `8gent update` (a stray Enter must not start a download). */
 	defaultYes?: boolean;
 	/** A finished line. */
@@ -311,9 +319,23 @@ export async function offerJudge(
 		return "present";
 	}
 
-	const o = await d.ollama();
+	let o = await d.ollama();
+	let downLine = o === "none" ? JUDGE_UNSUPPORTED_LINE : JUDGE_OLLAMA_DOWN_LINE;
+	// Installed but stopped: start it in the background instead of handing the person a blocking
+	// `ollama serve` (#4906). Auto asks once (a no falls through to the recorded choice below, so it is
+	// never asked again); /judge install is itself the yes.
+	if (o === "installed" && isLocalDefaultHost(resolveSharedJudgeHost(env))) {
+		let go = mode === "command";
+		if (!go) go = (await (deps.ask ?? askYesNoLine)(OLLAMA_START_ASK, true)) === true;
+		if (go) {
+			say("Starting Ollama in the background.");
+			const r = await (deps.startOllama ?? (() => startOllama({ env })))();
+			if (r.ok) o = "up";
+			else downLine = r.line;
+		}
+	}
 	if (o !== "up") {
-		const line = o === "none" ? JUDGE_UNSUPPORTED_LINE : JUDGE_OLLAMA_DOWN_LINE;
+		const line = downLine;
 		if (mode === "auto") {
 			// Say it once, then never again; /judge install says it on request.
 			if (!d.writeChoice("unsupported")) return "no-person";

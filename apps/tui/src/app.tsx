@@ -5057,6 +5057,19 @@ export function App({
 					break;
 				}
 
+				case "ollama": {
+					// Stops only the Ollama 8gent started (#4906): the recorded pid, never a name match.
+					void (async () => {
+						if ((args[0] ?? "").toLowerCase() !== "stop") {
+							addSystemMessage("Usage: /ollama stop");
+							return;
+						}
+						const { stopOllama } = await import("../../../packages/eight/ollama-autostart.js");
+						addSystemMessage(stopOllama());
+					})();
+					break;
+				}
+
 				case "stack":
 					// What the next turn sends, per source (#4779). Local, read-only.
 					if (!agent) {

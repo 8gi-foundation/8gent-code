@@ -35,25 +35,28 @@ type Opts = {
 	ollama?: "up" | "installed" | "none";
 	answer?: boolean | null;
 	pullFails?: boolean;
+	startFails?: boolean;
 } & Omit<Partial<JudgeDeps>, "ollama">;
 
 function rig(opts: Opts = {}) {
-	const { judge, ollama, answer, pullFails, ...extra } = opts;
-	const over = { judge, ollama, answer, pullFails };
+	const { judge, ollama, answer, pullFails, startFails, ...extra } = opts;
+	const over = { judge, ollama, answer, pullFails, startFails };
 	const log = {
 		said: [] as string[],
 		asked: [] as string[],
 		pulls: [] as string[],
+		starts: 0,
 		progress: [] as string[],
 		writes: [] as (JudgeChoice | null)[],
 	};
 	let installed = over.judge ?? false;
+	let ollamaUp = false;
 	let stored: JudgeChoice | null = null;
 	const deps: JudgeDeps = {
 		env: {},
 		probe: async () =>
 			installed ? { backend: "ollama", model: "selene" } : { backend: "none", model: null },
-		ollama: async () => over.ollama ?? "up",
+		ollama: async () => (ollamaUp ? "up" : (over.ollama ?? "up")),
 		pull: async (m, on) => {
 			log.pulls.push(m);
 			if (over.pullFails) throw new Error("disk full");
@@ -64,6 +67,13 @@ function rig(opts: Opts = {}) {
 		ask: async (l) => {
 			log.asked.push(l);
 			return over.answer === undefined ? true : over.answer;
+		},
+		// Never the real one: a test must not start a server on the machine running it.
+		startOllama: async () => {
+			log.starts++;
+			if (over.startFails) return { ok: false, line: "Ollama did not answer within 10 s." };
+			ollamaUp = true;
+			return { ok: true, how: "spawn" };
 		},
 		say: (l) => log.said.push(l),
 		progress: (l) => log.progress.push(l),
@@ -126,11 +136,54 @@ describe("offerJudge auto (after update, first run)", () => {
 		expect(r.log.said.length).toBe(1);
 	});
 
-	test("Ollama installed but not running: explains how to start it, no offer", async () => {
-		const r = rig({ ollama: "installed" });
+	test("Ollama installed but not running: asks once to start it, a no explains and never asks again", async () => {
+		const r = rig({ ollama: "installed", answer: false });
 		expect(await offerJudge("auto", r.deps)).toBe("unsupported");
+		expect(r.log.asked).toEqual(["Start Ollama in the background now? [Y/n]"]);
+		expect(r.log.starts).toBe(0);
 		expect(r.log.said).toEqual([JUDGE_OLLAMA_DOWN_LINE]);
 		expect(r.log.pulls).toEqual([]);
+		expect(await offerJudge("auto", r.deps)).toBe("recorded");
+		expect(r.log.asked.length).toBe(1);
+	});
+
+	test("Ollama installed but not running: yes starts it, then the judge question follows", async () => {
+		const r = rig({ ollama: "installed", answer: true });
+		expect(await offerJudge("auto", r.deps)).toBe("installed");
+		expect(r.log.starts).toBe(1);
+		expect(r.log.asked).toEqual(["Start Ollama in the background now? [Y/n]", judgeAskLine(true)]);
+		expect(r.log.said[0]).toBe("Starting Ollama in the background.");
+		expect(r.log.pulls).toEqual([JUDGE_MODEL]);
+	});
+
+	test("Ollama does not come up: one plain line, the down line is not repeated", async () => {
+		const r = rig({ ollama: "installed", answer: true, startFails: true });
+		expect(await offerJudge("auto", r.deps)).toBe("unsupported");
+		expect(r.log.said).toEqual([
+			"Starting Ollama in the background.",
+			"Ollama did not answer within 10 s.",
+		]);
+		expect(r.log.pulls).toEqual([]);
+	});
+
+	test("nobody to ask: Ollama is not started", async () => {
+		const r = rig({ ollama: "installed", answer: null });
+		expect(await offerJudge("auto", r.deps)).toBe("unsupported");
+		expect(r.log.starts).toBe(0);
+	});
+
+	test("a remote Ollama host is never replaced by a local start", async () => {
+		const r = rig({ ollama: "installed", env: { EIGHT_DECIDE_OLLAMA_HOST: "gpu-box:11434" } });
+		expect(await offerJudge("auto", r.deps)).toBe("unsupported");
+		expect(r.log.asked).toEqual([]);
+		expect(r.log.starts).toBe(0);
+	});
+
+	test("/judge install is the yes: starts Ollama without a second question", async () => {
+		const r = rig({ ollama: "installed" });
+		expect(await offerJudge("command", r.deps)).toBe("installed");
+		expect(r.log.asked).toEqual([]);
+		expect(r.log.starts).toBe(1);
 	});
 
 	test("install fails: says so, records failed, does not ask again", async () => {
