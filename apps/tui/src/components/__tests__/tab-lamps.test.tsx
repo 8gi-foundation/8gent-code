@@ -142,7 +142,7 @@ describe("tab lamps in the bar", () => {
 		await sleep(60);
 		expect(m.last()).toContain("Engineer ●");
 		await sleep(160);
-		expect(m.last()).toContain("Engineer ·");
+		expect(m.last()).toContain("2] Engineer   3] QA");
 		expect(_lampTimersLive()).toBe(0);
 	});
 
@@ -181,7 +181,13 @@ describe("tab lamps in the bar", () => {
 			},
 		});
 		const out = m.last();
-		for (const s of ["1] Orchestrator ◐", "2] Engineer ·", "3] QA ▲", "4] Notes ●", "5] Docs ✕"]) {
+		for (const s of [
+			"1] Orchestrator ◐",
+			"2] Engineer   3]",
+			"3] QA ▲",
+			"4] Notes ●",
+			"5] Docs ✕",
+		]) {
 			expect(out).toContain(s);
 		}
 	});
@@ -199,16 +205,14 @@ describe("tab lamps in the bar", () => {
 			},
 		});
 		const row = m.last().split("\n")[0] ?? "";
-		expect(row).toContain("[1 Orchestrator ◐] 2· 3▲ 4● 5✕");
+		expect(row).toContain("[1 Orchestrator ◐] 2 3▲ 4● 5✕");
 	});
 
 	test("40 columns: the active tab's title is never cut for another's lamp", () => {
 		const m = mount(40);
 		m.show(FIVE, { active: 2, animate: false });
 		const row = m.last().split("\n")[0] ?? "";
-		expect(row).toContain("[3 QA ·]");
-		expect(row).toContain("1·");
-		expect(row).toContain("5·");
+		expect(row).toContain("1 2 [3 QA] 4 5");
 	});
 
 	test("a screen reader gets each tab's state as words, not glyphs", () => {
@@ -236,6 +240,56 @@ describe("tab lamps in the bar", () => {
 			"Tabs: 1 Orchestrator working, 2 Engineer idle, 3 QA needs you, 4 Notes idle",
 		);
 		expect(out).not.toContain("▲");
+	});
+});
+
+describe("lamp beside the permission tag (#3174)", () => {
+	const permFor = (id: string) =>
+		id === "t0"
+			? { mode: "guarded" as const, held: false }
+			: id === "t2"
+				? { mode: "plan" as const, held: false }
+				: undefined;
+
+	function bar(cols: number, flags: Flags, busy: string[]) {
+		const stdout = fakeStdout(cols);
+		const app = render(
+			<TabBar
+				tabs={makeTabs(TITLES, 0)}
+				onSwitch={() => {}}
+				isTabProcessing={(id) => busy.includes(id)}
+				lampFor={(id) => flags[id]}
+				permFor={permFor}
+				animate={false}
+				width={cols}
+			/>,
+			{
+				stdout: stdout as unknown as NodeJS.WriteStream,
+				debug: true,
+				patchConsole: false,
+				exitOnCtrlC: false,
+			},
+		);
+		mounted.push(app);
+		return (stdout.frames.at(-1) ?? "").split("\n")[0] ?? "";
+	}
+
+	test("an idle tab is dark, so its tag keeps its one separator", () => {
+		const row = bar(120, {}, []);
+		expect(row).toContain("1] Orchestrator · Guarded   2] Engineer   3] QA · Plan");
+		expect(row).not.toContain("· ·");
+	});
+
+	test("the lamp follows the tag, never sits between title and tag", () => {
+		const row = bar(120, { t2: { needsYou: true, unread: null } }, ["t0"]);
+		expect(row).toContain("1] Orchestrator · Guarded ◐");
+		expect(row).toContain("3] QA · Plan ▲");
+	});
+
+	test("the tags stay readable at 80 columns, narrow glyph form", () => {
+		const row = bar(80, { t2: { needsYou: true, unread: null } }, []);
+		expect(row).toContain("3] QA P ▲");
+		expect(row).toContain("1] Orchestrator G");
 	});
 });
 

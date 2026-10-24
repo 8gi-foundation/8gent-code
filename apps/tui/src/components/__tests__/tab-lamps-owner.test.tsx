@@ -146,7 +146,7 @@ test("tabOfHolder is undefined for a call that is no tab's", () => {
 test("the yolo question lands on the focused tab even when another tab is running", async () => {
 	const { holders, row } = setup({ running: ["t1"], yolo: true });
 	await sleep(30);
-	expect(row()).toContain("Orchestrator ·");
+	expect(row()).toContain("1] Orchestrator   2] Engineer ◐");
 	runWithPermissionHolder(holders.get("t1"), () =>
 		requestTuiApproval({ action: "shell", details: "", command: "ls" }),
 	);

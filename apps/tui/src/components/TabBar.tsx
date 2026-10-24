@@ -10,12 +10,13 @@
  * the rule row. Orange has one other job on this bar: the lamp of a tab that
  * needs you.
  *
- * Tab lamps (#4928): one still mark after each title, from lib/tab-lamps.ts.
+ * Tab lamps (#4928): one still mark after each title (and after its permission
+ * tag), from lib/tab-lamps.ts. An idle tab is dark: no mark at rest.
  *
- *   1] Orchestrator ◐   2] Engineer ·   3] QA ▲   4] Notes ●
+ *   1] Orchestrator ◐   2] Engineer   3] QA · Plan ▲   4] Notes ●
  *
  * Below 60 columns the titles give way and the lamps never do; the active
- * tab keeps its title: "[1 Orchestrator ◐] 2· 3▲ 4●". Tabs that do not fit
+ * tab keeps its title: "[1 Orchestrator ◐] 2 3▲ 4●". Tabs that do not fit
  * collapse into "+2 ▲", carrying the most urgent hidden lamp. When the active tab changes, the bar sweeps from the old
  * title to the new one in four frames (lib/motion.ts). The labels never
  * move. With animations off (Ctrl+A) or reduced motion, the bar jumps.
@@ -163,7 +164,7 @@ export function cellSpans(cells: TabCell[], gap = GAP): Span[] {
 
 /** The lamp and the space before it (none when there is no title to space from). */
 function lampWidth(cell: TabCell): number {
-	return cell.lamp ? (cell.title ? 1 : 0) + cellWidth(cell.lamp) : 0;
+	return cell.lamp ? (cell.title || cell.tag ? 1 : 0) + cellWidth(cell.lamp) : 0;
 }
 
 /** Lay the cells out on one row. Pure, so the geometry can be tested. */
@@ -177,8 +178,8 @@ export function layoutTabs(cells: TabCell[], gap = GAP): TabLine {
 		// Cells, not code units: the underline sits under what is drawn.
 		spans.push({ x: cellWidth(text), width: cellWidth(cell.title) });
 		text += cell.title;
-		if (cell.lamp) text += (cell.title ? " " : "") + cell.lamp;
 		if (cell.tag) text += cell.tag;
+		if (cell.lamp) text += (cell.title || cell.tag ? " " : "") + cell.lamp;
 		if (cell.close) text += cell.close;
 		if (cell.grabbed) text += "]";
 	});
@@ -397,8 +398,11 @@ export function TabBar({
 			title: compact && !tab.active ? "" : `${sanitizeTabTitle(tab.title)}${badge}${grouped}`,
 			active: tab.active,
 			grabbed: dragging && grabbedTabId === tab.id,
-			lamp: lampGlyph(frame, ascii),
-			lampFrame: frame,
+			// An idle tab is dark: no glyph at rest. The lamp comes after the
+			// permission tag, so its mark never sits beside the tag's own " · ".
+			...(states[tab.id] === "idle" && frame.ms === 0
+				? {}
+				: { lamp: lampGlyph(frame, ascii), lampFrame: frame }),
 			...(perm && tag
 				? { tag, tagColor: permColour(perm.mode), tagBold: PERM_LOOK[perm.mode].bold }
 				: {}),
@@ -508,18 +512,18 @@ export function TabBar({
 											{cell.title}
 										</Text>
 									) : null}
+									{cell.tag ? (
+										<Text color={cell.tagColor} bold={cell.tagBold}>
+											{cell.tag}
+										</Text>
+									) : null}
 									{cell.lamp && lf ? (
 										<Text
 											color={TONE_COLOUR[lf.tone]}
 											bold={lf.bold}
 											inverse={lf.inverse || (!cell.title && pressed === `tab:${id}`)}
 										>
-											{(cell.title ? " " : "") + cell.lamp}
-										</Text>
-									) : null}
-									{cell.tag ? (
-										<Text color={cell.tagColor} bold={cell.tagBold}>
-											{cell.tag}
+											{(cell.title || cell.tag ? " " : "") + cell.lamp}
 										</Text>
 									) : null}
 									{cell.close ? <Text color={t.textTertiary}>{cell.close}</Text> : null}
