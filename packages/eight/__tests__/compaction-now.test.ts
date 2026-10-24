@@ -98,41 +98,61 @@ describe("compactHistoryNow", () => {
 });
 
 describe("CompactionUndo", () => {
-	const a = [
-		{ role: "system", content: "s" },
-		{ role: "user", content: "one" },
-	];
+	const m = (role: string, content: string) => ({ role, content });
+	const before = [m("system", "s"), m("user", "one"), m("assistant", "A1"), m("user", "two")];
+	// A compaction replaced the 3 messages after the prompt with one summary.
+	const after = [m("system", "s"), m("user", "SUMMARY"), m("user", "two")];
 
 	test("nothing to undo before a compaction", () => {
 		const u = new CompactionUndo();
 		expect(u.available).toBe(false);
-		expect(u.take()).toBeNull();
+		expect(u.take(after as never)).toBeNull();
 	});
 
-	test("gives back exactly the history that was remembered, once", () => {
+	test("undo straight after: exactly the history that was remembered, once", () => {
 		const u = new CompactionUndo();
-		u.remember(a as never, "e1");
+		u.remember(before as never, "e1", after.length);
 		expect(u.available).toBe(true);
-		const back = u.take();
-		expect(back?.messages).toEqual(a as never);
+		const back = u.take(after as never);
+		expect(back?.messages).toEqual(before as never);
 		expect(back?.entryId).toBe("e1");
 		expect(u.available).toBe(false);
-		expect(u.take()).toBeNull();
+		expect(u.take(after as never)).toBeNull();
+	});
+
+	test("turns added after the compaction survive the undo, in order", () => {
+		const u = new CompactionUndo();
+		u.remember(before as never, null, after.length);
+		const live = [...after, m("assistant", "A2"), m("user", "three"), m("assistant", "A3")];
+		const back = u.take(live as never);
+		expect(back?.messages).toEqual([
+			...before,
+			m("assistant", "A2"),
+			m("user", "three"),
+			m("assistant", "A3"),
+		] as never);
 	});
 
 	test("remembers a copy: later edits to the live array do not change what comes back", () => {
-		const live = [...a];
+		const live = [...before];
 		const u = new CompactionUndo();
-		u.remember(live as never, null);
-		live.push({ role: "user", content: "two" });
-		expect(u.take()?.messages.length).toBe(2);
+		u.remember(live as never, null, after.length);
+		live.push(m("user", "later"));
+		expect(u.take(after as never)?.messages.length).toBe(before.length);
+	});
+
+	test("a history cleared since the compaction is not merged: nothing to undo", () => {
+		const u = new CompactionUndo();
+		u.remember(before as never, "e1", after.length);
+		expect(u.take([m("system", "s")] as never)).toBeNull();
+		expect(u.available).toBe(false);
 	});
 
 	test("a newer compaction replaces the older one: one level", () => {
 		const u = new CompactionUndo();
-		u.remember(a as never, "e1");
-		u.remember([...a, { role: "assistant", content: "x" }] as never, "e2");
-		expect(u.take()?.entryId).toBe("e2");
-		expect(u.take()).toBeNull();
+		u.remember(before as never, "e1", after.length);
+		u.remember([...before, m("assistant", "x")] as never, "e2", after.length);
+		expect(u.take(after as never)?.entryId).toBe("e2");
+		expect(u.take(after as never)).toBeNull();
 	});
 });

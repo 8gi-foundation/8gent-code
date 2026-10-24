@@ -4648,7 +4648,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				recorder: this.compactionRecorder,
 			});
 			if (!pass) return;
-			this.compactionUndo.remember(this.messageHistory, pass.entryId);
+			this.compactionUndo.remember(this.messageHistory, pass.entryId, pass.messages.length);
 			this.messageHistory = pass.messages;
 			const r = pass.result;
 			console.log(
@@ -4680,19 +4680,20 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			recorder: this.compactionRecorder,
 		});
 		if (!pass) return null;
-		this.compactionUndo.remember(this.messageHistory, pass.entryId);
+		this.compactionUndo.remember(this.messageHistory, pass.entryId, pass.messages.length);
 		this.messageHistory = pass.messages;
 		this.events.onCompaction?.(pass.result);
 		return pass.result;
 	}
 
 	/**
-	 * Put the history back as it was before the latest compaction (/compact undo).
-	 * One level, in memory. Returns the restored size in tokens, or null when
-	 * there is nothing to undo.
+	 * Put the history back as it was before the latest compaction (/compact undo),
+	 * keeping every turn added since: the conversation does not rewind, only the
+	 * summary is swapped for the messages it replaced. One level, in memory.
+	 * Returns the restored size in tokens, or null when there is nothing to undo.
 	 */
 	undoCompaction(): { tokens: number } | null {
-		const back = this.compactionUndo.take();
+		const back = this.compactionUndo.take(this.messageHistory);
 		if (!back) return null;
 		this.messageHistory = back.messages;
 		try {

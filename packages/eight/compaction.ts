@@ -619,23 +619,38 @@ export async function compactHistoryNow(opts: {
 export class CompactionUndo {
 	private before: Message[] | null = null;
 	private entryId: string | null = null;
+	private afterLength = 0;
 
-	/** Keep a copy of `history` as it is now, with the file entry that replaces it, if any. */
-	remember(history: Message[], entryId: string | null): void {
+	/**
+	 * Keep a copy of `history` as it is now, with the file entry that replaces
+	 * it, if any, and how long the compacted history is that replaces it: what
+	 * is appended after that point is the conversation moving on, and undo must
+	 * not lose it.
+	 */
+	remember(history: Message[], entryId: string | null, afterLength: number): void {
 		this.before = [...history];
 		this.entryId = entryId;
+		this.afterLength = afterLength;
 	}
 
 	get available(): boolean {
 		return this.before !== null;
 	}
 
-	/** The remembered history, once. Null when there is nothing to undo. */
-	take(): { messages: Message[]; entryId: string | null } | null {
+	/**
+	 * The history as it was before the compaction, plus every message appended
+	 * since (`current` is the live history). Once. Null when there is nothing to
+	 * undo, or when the history is now shorter than the compacted one (it was
+	 * cleared or rewritten: merging would invent a conversation).
+	 */
+	take(current: Message[]): { messages: Message[]; entryId: string | null } | null {
 		if (!this.before) return null;
-		const out = { messages: this.before, entryId: this.entryId };
+		const before = this.before;
+		const entryId = this.entryId;
+		const afterLength = this.afterLength;
 		this.before = null;
 		this.entryId = null;
-		return out;
+		if (current.length < afterLength) return null;
+		return { messages: [...before, ...current.slice(afterLength)], entryId };
 	}
 }
