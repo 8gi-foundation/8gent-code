@@ -27,7 +27,7 @@ Each rule says what we do, then who set it and when.
 6. **Install prompts default to No.** Asking is allowed; assuming yes is not. Source: 24 Oct 2026 reviews.
 7. **No one at the keys means no.** With nobody to answer, nothing installs and nothing is sent. Source: 24 Oct 2026 reviews.
 8. **Fail closed, with a reason.** When a check cannot pass, stop and say why in plain words. Source: 24 Oct 2026 reviews.
-9. **Prohibitions hold everywhere.** No em dashes, no secrets in chat, no stat padding, no enthusiasm inflation, test before pushing. Source: [AGENTS.md](../AGENTS.md), "Prohibitions".
+9. **Prohibitions hold everywhere.** No em dashes, no secrets in chat, no stat padding, no enthusiasm inflation, no direct push to main. Source: [AGENTS.md](../AGENTS.md), "Absolute Prohibitions".
 
 ## Where it is enforced
 
