@@ -1,0 +1,104 @@
+name: Linux read boundary
+
+# #4890 slice 2: the workspace read boundary enforced by the Linux kernel (Landlock),
+# behind EIGHT_OS_READ_BOUNDARY=1. The live suite runs through the real run_command
+# path with planted outside secrets, twice: Landlock alone (no bwrap, the default on
+# ubuntu-latest), then Landlock under bwrap (the write boundary) to cover the
+# combined path. Any skip fails the job.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+    paths:
+      - packages/permissions/landlock.ts
+      - packages/permissions/run-command-sandbox.ts
+      - packages/permissions/read-boundary.ts
+      - packages/permissions/read-allow.ts
+      - packages/permissions/seatbelt.ts
+      - packages/permissions/os-read-boundary-linux.test.ts
+      - packages/permissions/os-read-boundary.test.ts
+      - packages/eight/tools.ts
+      - packages/ai/tools.ts
+      - packages/tools/background.ts
+      - .github/workflows/linux-read-boundary.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-read-boundary-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live:
+    name: kernel read boundary, live (ubuntu-latest, Landlock)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Makes a skipped live suite a failure, not a silent pass.
+      EIGHT_OS_READ_E2E_LINUX: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+
+      # Same pin as ci.yml (#4143): parallel native installs race on node-gyp.
+      - name: "Pin node-gyp for native builds"
+        run: npm install -g --no-fund --no-audit node-gyp@12.4.0 && node-gyp --version
+
+      - name: Install dependencies
+        run: bun install
+
+      # rg is part of the false-positive set; the test fails if it is missing here.
+      - name: ripgrep
+        run: command -v rg || (sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep)
+
+      - name: The kernel has Landlock
+        run: |
+          uname -r
+          cat /sys/kernel/security/lsm
+          grep -q landlock /sys/kernel/security/lsm
+          command -v bwrap && exit 1 || echo "no bwrap: the first run is Landlock alone"
+
+      # The grep makes a skip fail: every test in the file must run here.
+      - name: Live read boundary through run_command (Landlock alone)
+        run: |
+          set -o pipefail
+          bun test packages/permissions/os-read-boundary-linux.test.ts 2>&1 | tee linux-read.log
+          grep -q " 0 fail" linux-read.log
+          if grep -qE "^ *[0-9]+ skip" linux-read.log; then
+            echo "::error::a test skipped on the Linux runner"
+            exit 1
+          fi
+
+      # Slice 1's file runs here too: on Linux its wrap test must see the Landlock helper.
+      - name: Slice 1 suite on Linux
+        run: |
+          set -o pipefail
+          bun test packages/permissions/os-read-boundary.test.ts 2>&1 | tee slice1.log
+          grep -q " 0 fail" slice1.log
+
+      - name: Live read boundary through run_command (Landlock under bwrap)
+        env:
+          EIGHT_OS_READ_E2E_BWRAP: '1'
+        run: |
+          set -o pipefail
+          sudo apt-get install -y -qq bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bwrap --dev-bind / / /bin/true
+          bun test packages/permissions/os-read-boundary-linux.test.ts 2>&1 | tee linux-read-bwrap.log
+          grep -q " 0 fail" linux-read-bwrap.log
+          if grep -qE "^ *[0-9]+ skip" linux-read-bwrap.log; then
+            echo "::error::a test skipped on the Linux runner (bwrap)"
+            exit 1
+          fi

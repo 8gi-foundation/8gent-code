@@ -17,10 +17,12 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ToolExecutor } from "../eight/tools";
+import { landlockStatus } from "./landlock";
 import { namesSecret, resetReadAllow } from "./read-allow";
 import { osReadSpec } from "./read-boundary";
 import {
@@ -349,10 +351,59 @@ describe("generated profile", () => {
 		if (canApplySeatbelt()) {
 			expect(wrappedOn).toContain("(deny file-read-data)");
 			expect(wrappedOff).not.toContain("(deny file-read-data)");
+		} else if (process.platform === "linux" && landlockStatus().active) {
+			// Linux with Landlock (#4890 slice 2, os-read-boundary-linux.test.ts): the helper wraps it.
+			expect(wrappedOn).toContain("landlock_restrict_self");
+			expect(wrappedOff).not.toContain("landlock_restrict_self");
 		} else {
 			expect(wrappedOn).toBe("cat x");
 			expect(wrappedOff).toBe("cat x");
 		}
+	});
+});
+
+// Slice 2 (Linux, Landlock) must leave the macOS profile exactly as v0.20.26 built it. Fixed
+// inputs (nothing on this disk is read for them) and a hash of the whole profile text.
+describe.if(process.platform === "darwin")("the macOS profile is pinned byte for byte", () => {
+	test("fixed inputs give the v0.20.26 profile", () => {
+		const keep = { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR };
+		process.env.PATH = "/usr/bin:/bin:/nonexistent-8gent/home/.bun/bin";
+		process.env.TMPDIR = "/nonexistent-8gent/T";
+		try {
+			const P = "/nonexistent-8gent";
+			const text = buildRunCommandProfile(
+				{
+					roots: [`${P}/home/.8gent`],
+					files: [`${P}/home/.8gent/hooks.yaml`],
+					dirs: [`${P}/home/.8gent/keys`, `${P}/home/.8gent/bin`],
+				},
+				{
+					root: `${P}/ws`,
+					reads: ["/usr/bin", `${P}/T`],
+					dataRoots: [`${P}/home/.8gent`],
+					homes: [`${P}/home`],
+				},
+			);
+			expect(text.length).toBe(33695);
+			expect(createHash("sha256").update(text).digest("hex")).toBe(
+				"25959a01dcfc3f1d6dfd11f921961e0a9ce8283b87c4a8a6771bd32b8543e4bb",
+			);
+		} finally {
+			process.env.PATH = keep.PATH;
+			if (keep.TMPDIR === undefined) Reflect.deleteProperty(process.env, "TMPDIR");
+			else process.env.TMPDIR = keep.TMPDIR;
+		}
+	});
+
+	test("wrapRunCommand on macOS is sandbox-exec over that profile, never the Linux helper", () => {
+		const s = spec("cat x");
+		const out = wrapRunCommand("cat x", s);
+		expect(out).not.toContain("landlock");
+		if (canApplySeatbelt())
+			expect(out).toBe(
+				`/usr/bin/sandbox-exec -p '${buildRunCommandProfile(protectedRunCommandPaths(), s).replaceAll("'", `'\\''`)}' /bin/sh -c 'cat x'`,
+			);
+		else expect(out).toBe("cat x");
 	});
 });
 

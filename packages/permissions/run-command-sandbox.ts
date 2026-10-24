@@ -50,6 +50,15 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { resolveHome } from "../core/home";
 import { loadOrCreateKey } from "./goal-state-hmac";
+import {
+	LINUX_HOME_NEVER_READ,
+	LINUX_READ_SYSTEM_DIRS,
+	type LandlockStatus,
+	landlockArgv,
+	landlockPlan,
+	landlockShell,
+	landlockStatus,
+} from "./landlock";
 import { sensitiveCredentialPaths } from "./seatbelt";
 
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
@@ -718,6 +727,76 @@ export function osReadRules(
 }
 
 // ============================================
+// OS read boundary on Linux and Termux (#4890 slice 2, Landlock)
+// ============================================
+
+/**
+ * The same scope as osReadRules, in Landlock's allow-only form (landlock.ts): read starts
+ * (system, root, allowances, data roots, temp, PATH tool dirs, git config) and the never-read
+ * set (credential stores, HOME_NEVER_READ, the protected data roots' keys/ and secrets/).
+ */
+export function linuxReadPlan(
+	spec: OsReadSpec,
+	pathEnv: string = process.env.PATH ?? "",
+	alsoNever: readonly string[] = protectedRunCommandPaths().dirs.filter(isReadDenied),
+) {
+	const root = path.normalize(spec.root);
+	if (!path.isAbsolute(root))
+		throw new Error(`os read boundary: root must be absolute, got "${spec.root}"`);
+	const homes = withReal(spec.homes.filter((h) => path.isAbsolute(h)));
+	const starts = [
+		...LINUX_READ_SYSTEM_DIRS,
+		root,
+		...spec.reads.filter((r) => path.isAbsolute(r)),
+		...spec.dataRoots.filter((r) => path.isAbsolute(r)),
+		os.tmpdir(),
+		...toolDirs(pathEnv, homes),
+		// git reads these on every command; neither is a credential store.
+		...homes.flatMap((h) => [path.join(h, ".gitconfig"), path.join(h, ".config", "git")]),
+	];
+	const never = [
+		...homes.flatMap((h) => [
+			...sensitiveCredentialPaths(h),
+			...HOME_NEVER_READ.map((rel) => path.join(h, rel)),
+			...LINUX_HOME_NEVER_READ.map((rel) => path.join(h, rel)),
+		]),
+		...alsoNever,
+	];
+	return landlockPlan(starts, never, spec.dataRoots);
+}
+
+let readRuleWarned = false;
+
+/** Test hook: let the next unavailable status print its line again. */
+export function _resetReadRuleWarning(): void {
+	readRuleWarned = false;
+}
+
+/**
+ * The argv to put in front of `<shell> -c <command>` for the read rule on Linux and Termux, or
+ * undefined when the flag is off, no spec was given, or Landlock cannot be applied here. That
+ * last case prints one plain line per process: the command runs as before, the rule is not active.
+ */
+export function linuxReadPrefix(
+	read: OsReadSpec | undefined,
+	platform: string = process.platform,
+	probe: () => LandlockStatus = landlockStatus,
+): string[] | undefined {
+	if (!read || !osReadBoundaryOn() || platform === "darwin") return undefined;
+	const status = probe();
+	if (!status.active) {
+		if (!readRuleWarned) {
+			readRuleWarned = true;
+			process.stderr.write(
+				`[8gent] The OS read rule (${OS_READ_BOUNDARY_FLAG}=1) is not active here: ${status.reason}. Reads outside the workspace are stopped by text checks only.\n`,
+			);
+		}
+		return undefined;
+	}
+	return landlockArgv(status.python, linuxReadPlan(read));
+}
+
+// ============================================
 // Linux bubblewrap (pure argv)
 // ============================================
 
@@ -927,6 +1006,10 @@ export function wrapRunCommand(command: string, read?: OsReadSpec): string {
 	if (!status.applied) {
 		if (status.required) throw new RunCommandSandboxRequired(runCommandSandboxRefusal());
 		reportUnsandboxed(status, command);
+		// No write boundary here (no bwrap), but the read rule stands on its own (#4890 slice 2).
+		// EIGHT_SEATBELT=0 turns every OS rule off, as on macOS.
+		const readOnly = status.reason === "EIGHT_SEATBELT=0" ? undefined : linuxReadPrefix(read);
+		if (readOnly) return [...readOnly, landlockShell(), "-c", command].map(shellQuote).join(" ");
 		return command;
 	}
 	if (status.mechanism === "seatbelt") {
@@ -938,7 +1021,10 @@ export function wrapRunCommand(command: string, read?: OsReadSpec): string {
 		return `${SANDBOX_EXEC} -p ${shellQuote(profile)} /bin/sh -c ${shellQuote(command)}`;
 	}
 	const bwrap = findBwrap() as string;
-	return [bwrap, ...buildBwrapArgs(), "/bin/sh", "-c", command].map(shellQuote).join(" ");
+	const readRule = linuxReadPrefix(read) ?? [];
+	return [bwrap, ...buildBwrapArgs(), ...readRule, "/bin/sh", "-c", command]
+		.map(shellQuote)
+		.join(" ");
 }
 
 /**
