@@ -11,11 +11,14 @@
  *  - The token lives in ~/.8gent/flow-bridge.json (0600). It is never printed; only its last four
  *    characters are shown, so the person can match them against the sheet in Flow.
  *
- * Wire: GET /v1/ping, POST /v1/open {url, max_bytes} -> {ok, url, title, text, truncated}, both with
- * "Authorization: Bearer <token>". The server side is src-tauri/src/bridge.rs in 8gent-flow.
+ * Wire: GET /v1/ping?n=<nonce> with NO token, answered {ok, proof} where proof is
+ * HMAC-SHA256(token, "8gent-flow-bridge" + nonce) in hex; then POST /v1/open {url, max_bytes} ->
+ * {ok, url, title, text, truncated} with "Authorization: Bearer <token>". The proof is checked
+ * before the token or any URL is sent: another app that took the port after Flow quit cannot
+ * produce it, so it learns neither. The server side is src-tauri/src/bridge.rs in 8gent-flow.
  */
 
-import { randomBytes, randomInt } from "node:crypto";
+import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveHome } from "../core/home";
@@ -24,6 +27,7 @@ import { isAndroidHost } from "../voice/termux";
 
 export const PAIRING_FILE = "flow-bridge.json";
 const LOOPBACK = "127.0.0.1";
+const PROOF_LABEL = "8gent-flow-bridge";
 const TOKEN_RE = /^[A-Za-z0-9_-]{32,128}$/;
 
 type Env = Record<string, string | undefined>;
@@ -55,8 +59,11 @@ const onAndroid = (d: FlowDeps) =>
 
 // ── pairing file ─────────────────────────────────────────────────────────
 
+/** Pairing ports stay below Android's ephemeral range (32768-60999), which any app can be handed at random. */
+export const MAX_PORT = 32767;
+
 export function newPairing(): Pairing {
-	return { port: randomInt(20000, 60000), token: randomBytes(32).toString("base64url") };
+	return { port: randomInt(20000, 32000), token: randomBytes(32).toString("base64url") };
 }
 
 export function pairingLink(p: Pairing): string {
@@ -76,7 +83,8 @@ export function readPairing(dir: string): Pairing | null {
 		const v = JSON.parse(fs.readFileSync(path.join(dir, PAIRING_FILE), "utf8"));
 		if (!v || typeof v !== "object" || Array.isArray(v)) return null;
 		const { port, token } = v as Record<string, unknown>;
-		if (!Number.isInteger(port) || (port as number) < 1024 || (port as number) > 65535) return null;
+		if (!Number.isInteger(port) || (port as number) < 1024 || (port as number) > MAX_PORT)
+			return null;
 		if (typeof token !== "string" || !TOKEN_RE.test(token)) return null;
 		return { port: port as number, token };
 	} catch {
@@ -90,10 +98,11 @@ export function clearPairing(dir: string): void {
 
 // ── requests ─────────────────────────────────────────────────────────────
 
+/** `bearer` is false only for the liveness ping, which must not carry the token. */
 async function call(
 	p: Pairing,
 	route: string,
-	init: { method: "GET" | "POST"; body?: string },
+	init: { method: "GET" | "POST"; body?: string; bearer: boolean },
 	ms: number,
 	f: typeof fetch,
 ): Promise<Response | null> {
@@ -101,7 +110,7 @@ async function call(
 		return await f(`http://${LOOPBACK}:${p.port}${route}`, {
 			method: init.method,
 			headers: {
-				Authorization: `Bearer ${p.token}`,
+				...(init.bearer ? { Authorization: `Bearer ${p.token}` } : {}),
 				...(init.body ? { "Content-Type": "application/json" } : {}),
 			},
 			body: init.body,
@@ -113,11 +122,18 @@ async function call(
 	}
 }
 
+/** True only when whatever answers on the port holds the paired token. Sends no token. */
 async function ping(p: Pairing, ms: number, f: typeof fetch): Promise<boolean> {
-	const r = await call(p, "/v1/ping", { method: "GET" }, ms, f);
+	const nonce = randomBytes(16).toString("hex");
+	const r = await call(p, `/v1/ping?n=${nonce}`, { method: "GET", bearer: false }, ms, f);
 	if (!r || r.status !== 200) return false;
 	try {
-		return ((await r.json()) as { ok?: unknown }).ok === true;
+		const v = (await r.json()) as { ok?: unknown; proof?: unknown };
+		if (v.ok !== true || typeof v.proof !== "string") return false;
+		const want = createHmac("sha256", p.token).update(`${PROOF_LABEL}${nonce}`).digest("hex");
+		const got = Buffer.from(v.proof);
+		const exp = Buffer.from(want);
+		return got.length === exp.length && timingSafeEqual(got, exp);
 	} catch {
 		return false;
 	}
@@ -148,7 +164,7 @@ export async function bridgeFetch(
 	const r = await call(
 		p,
 		"/v1/open",
-		{ method: "POST", body: JSON.stringify({ url, max_bytes: maxLength }) },
+		{ method: "POST", body: JSON.stringify({ url, max_bytes: maxLength }), bearer: true },
 		deps.openTimeoutMs ?? 20000,
 		f,
 	);

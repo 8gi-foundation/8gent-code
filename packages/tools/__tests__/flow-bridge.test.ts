@@ -5,6 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createHmac } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -45,6 +46,25 @@ afterEach(() => {
 	fs.rmSync(dir, { recursive: true, force: true });
 });
 
+/** Pairing ports sit below Android's ephemeral range (32768+), so the fakes listen there too. */
+function listenLow(fetch: (req: Request) => Response | Promise<Response>, port?: number) {
+	for (let i = 0; i < 200; i++) {
+		try {
+			return Bun.serve({
+				hostname: "127.0.0.1",
+				port: port ?? 20000 + Math.floor(Math.random() * 12000),
+				fetch,
+			});
+		} catch (e) {
+			if (port !== undefined) throw e;
+		}
+	}
+	throw new Error("no free low port");
+}
+
+const proofFor = (token: string, nonce: string) =>
+	createHmac("sha256", token).update(`8gent-flow-bridge${nonce}`).digest("hex");
+
 /** A fake Flow app. `reply` decides the answer to /v1/open. */
 function fakeFlow(
 	token: string,
@@ -58,25 +78,27 @@ function fakeFlow(
 		}),
 ) {
 	const seen: Seen[] = [];
-	const server = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		async fetch(req) {
-			const url = new URL(req.url);
-			const raw = req.method === "POST" ? await req.text() : "";
-			seen.push({
-				method: req.method,
-				path: url.pathname,
-				auth: req.headers.get("authorization"),
-				host: req.headers.get("host"),
-				body: raw ? JSON.parse(raw) : null,
-			});
-			if (req.headers.get("authorization") !== `Bearer ${token}`)
-				return Response.json({ ok: false, error: "not_paired" }, { status: 401 });
-			if (url.pathname === "/v1/ping") return Response.json({ ok: true });
-			if (url.pathname === "/v1/open") return reply(JSON.parse(raw));
-			return Response.json({ ok: false, error: "not_found" }, { status: 404 });
-		},
+	const server = listenLow(async (req) => {
+		const url = new URL(req.url);
+		const raw = req.method === "POST" ? await req.text() : "";
+		seen.push({
+			method: req.method,
+			path: url.pathname,
+			auth: req.headers.get("authorization"),
+			host: req.headers.get("host"),
+			body: raw ? JSON.parse(raw) : null,
+		});
+		// The liveness proof: no token on the wire, an HMAC of the nonce under it.
+		if (url.pathname === "/v1/ping") {
+			const n = url.searchParams.get("n") ?? "";
+			return n.length >= 16
+				? Response.json({ ok: true, proof: proofFor(token, n) })
+				: Response.json({ ok: false, error: "bad_nonce" }, { status: 400 });
+		}
+		if (req.headers.get("authorization") !== `Bearer ${token}`)
+			return Response.json({ ok: false, error: "not_paired" }, { status: 401 });
+		if (url.pathname === "/v1/open") return reply(JSON.parse(raw));
+		return Response.json({ ok: false, error: "not_found" }, { status: 404 });
 	});
 	servers.push(server);
 	return { port: server.port as number, seen };
@@ -101,21 +123,22 @@ describe("pairing file", () => {
 		const p = newPairing();
 		expect(p.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
 		expect(p.port).toBeGreaterThanOrEqual(20000);
-		expect(p.port).toBeLessThan(60000);
+		expect(p.port).toBeLessThan(32768);
 		expect(newPairing().token).not.toBe(p.token);
 	});
 
 	test("the link has the shape the app parses", () => {
-		const p = { port: 41873, token: "a".repeat(43) };
-		expect(pairingLink(p)).toBe(`eightgent://bridge?p=41873&t=${"a".repeat(43)}`);
+		const p = { port: 31873, token: "a".repeat(43) };
+		expect(pairingLink(p)).toBe(`eightgent://bridge?p=31873&t=${"a".repeat(43)}`);
 	});
 
 	test.each([
 		["not json", "{{"],
 		["port below 1024", JSON.stringify({ port: 80, token: "a".repeat(43) })],
 		["port above 65535", JSON.stringify({ port: 70000, token: "a".repeat(43) })],
-		["short token", JSON.stringify({ port: 41000, token: "short" })],
-		["token with a space", JSON.stringify({ port: 41000, token: `${"a".repeat(42)} ` })],
+		["port in the ephemeral range", JSON.stringify({ port: 40000, token: "a".repeat(43) })],
+		["short token", JSON.stringify({ port: 31000, token: "short" })],
+		["token with a space", JSON.stringify({ port: 31000, token: `${"a".repeat(42)} ` })],
 		["extra shape", JSON.stringify([1, 2])],
 	])("a bad file is ignored: %s", (_n, content) => {
 		fs.writeFileSync(path.join(dir, PAIRING_FILE), content);
@@ -148,7 +171,7 @@ describe("bridgeFetch: when it must do nothing", () => {
 	});
 
 	test("Flow absent (nothing listening): null, fast, no throw", async () => {
-		const free = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("x") });
+		const free = listenLow(() => new Response("x"));
 		const port = free.port as number;
 		free.stop(true);
 		pairTo(port);
@@ -162,6 +185,7 @@ describe("bridgeFetch: when it must do nothing", () => {
 		pairTo(flow.port);
 		expect(await bridgeFetch("https://example.com", {}, deps())).toBeNull();
 		expect(flow.seen.every((s) => s.path === "/v1/ping")).toBe(true);
+		expect(flow.seen.every((s) => s.auth === null)).toBe(true);
 	});
 
 	test.each([
@@ -186,6 +210,120 @@ describe("bridgeFetch: when it must do nothing", () => {
 		const t0 = Date.now();
 		expect(await bridgeFetch("https://example.com", {}, deps({ openTimeoutMs: 300 }))).toBeNull();
 		expect(Date.now() - t0).toBeLessThan(2500);
+	});
+});
+
+/** Another app that bound the pairing port after Flow quit. It records everything it is sent. */
+function squatter(answer: (url: URL) => Response) {
+	const seen: Seen[] = [];
+	const server = listenLow(async (req) => {
+		const url = new URL(req.url);
+		const raw = req.method === "POST" ? await req.text() : "";
+		seen.push({
+			method: req.method,
+			path: url.pathname + url.search,
+			auth: req.headers.get("authorization"),
+			host: req.headers.get("host"),
+			body: raw || null,
+		});
+		return answer(url);
+	});
+	servers.push(server);
+	return { port: server.port as number, seen };
+}
+
+describe("a squatter on the port gets nothing", () => {
+	const TOKEN = "t".repeat(43);
+	const cases: [string, (u: URL) => Response][] = [
+		["says ok with no proof (the old ping)", () => Response.json({ ok: true })],
+		["answers with a wrong proof", () => Response.json({ ok: true, proof: "0".repeat(64) })],
+		[
+			"answers with the proof of a different nonce",
+			() => Response.json({ ok: true, proof: proofFor(TOKEN, "another-nonce-another-nonce") }),
+		],
+		["answers a proof that is not a string", () => Response.json({ ok: true, proof: 5 })],
+		["answers 200 with garbage", () => new Response("<html>")],
+		["answers 401", () => Response.json({ ok: false }, { status: 401 })],
+	];
+
+	test.each(cases)("%s: no token and no URL is ever sent", async (_n, answer) => {
+		const sq = squatter(answer);
+		pairTo(sq.port, TOKEN);
+		expect(await bridgeFetch("https://secret.example/private?x=1", {}, deps())).toBeNull();
+		expect(sq.seen.length).toBeGreaterThan(0);
+		for (const s of sq.seen) {
+			expect(s.auth).toBeNull();
+			expect(s.path).toMatch(/^\/v1\/ping\?n=[0-9a-f]{32}$/);
+			expect(s.method).toBe("GET");
+			expect(s.body).toBeNull();
+		}
+		expect(JSON.stringify(sq.seen)).not.toContain("secret.example");
+		expect(JSON.stringify(sq.seen)).not.toContain(TOKEN);
+	});
+
+	test("a replayed proof does not work: every ping uses a fresh nonce", async () => {
+		// A real proof, captured once from the real Flow for some earlier nonce, replayed forever.
+		const captured = proofFor(TOKEN, "0123456789abcdef0123456789abcdef");
+		const nonces: string[] = [];
+		const sq = squatter((u) => {
+			nonces.push(u.searchParams.get("n") ?? "");
+			return Response.json({ ok: true, proof: captured });
+		});
+		pairTo(sq.port, TOKEN);
+		expect(await bridgeFetch("https://example.com", {}, deps())).toBeNull();
+		expect(await bridgeFetch("https://example.com", {}, deps())).toBeNull();
+		expect(nonces.length).toBe(2);
+		expect(nonces[0]).not.toBe(nonces[1]);
+		expect(sq.seen.every((s) => s.auth === null)).toBe(true);
+	});
+
+	test("pairing is never confirmed by a squatter and the file is removed", async () => {
+		const say: string[] = [];
+		let sq: ReturnType<typeof squatter> | null = null;
+		const code = await pairFlow(
+			deps({
+				ask: async () => true,
+				say: (l) => say.push(l),
+				openLink: async (link) => {
+					const port = Number(new URL(link).searchParams.get("p"));
+					// Something else answers on the port the link names, with a plausible-looking pong.
+					const server = listenLow(() => Response.json({ ok: true, proof: "0".repeat(64) }), port);
+					servers.push(server);
+					sq = { port, seen: [] };
+				},
+				confirmTimeoutMs: 400,
+				pollMs: 50,
+			}),
+		);
+		expect(code).toBe(1);
+		expect(readPairing(dir)).toBeNull();
+		expect(say.join(" ")).toMatch(/did not confirm/i);
+		expect(sq).not.toBeNull();
+	});
+});
+
+describe("pairing port range", () => {
+	test("fresh pairings are below Android's ephemeral range", () => {
+		for (let i = 0; i < 300; i++) {
+			const p = newPairing();
+			expect(p.port).toBeGreaterThanOrEqual(1024);
+			expect(p.port).toBeLessThanOrEqual(32767);
+		}
+	});
+
+	test("a file with a port in the ephemeral range is ignored", () => {
+		for (const port of [32768, 40000, 60999, 65535]) {
+			fs.writeFileSync(
+				path.join(dir, PAIRING_FILE),
+				JSON.stringify({ port, token: "a".repeat(43) }),
+			);
+			expect(readPairing(dir)).toBeNull();
+		}
+		fs.writeFileSync(
+			path.join(dir, PAIRING_FILE),
+			JSON.stringify({ port: 32767, token: "a".repeat(43) }),
+		);
+		expect(readPairing(dir)).not.toBeNull();
 	});
 });
 
@@ -343,14 +481,10 @@ describe("pairing is a yes that defaults to No", () => {
 
 /** A fake Flow on a chosen port (the port the terminal put in the link). */
 function fakeFlowOn(port: number, token: string) {
-	const server = Bun.serve({
-		hostname: "127.0.0.1",
-		port,
-		fetch: (req) =>
-			req.headers.get("authorization") === `Bearer ${token}`
-				? Response.json({ ok: true })
-				: Response.json({ ok: false }, { status: 401 }),
-	});
+	const server = listenLow((req) => {
+		const n = new URL(req.url).searchParams.get("n") ?? "";
+		return Response.json({ ok: true, proof: proofFor(token, n) });
+	}, port);
 	servers.push(server);
 	return server;
 }
@@ -370,7 +504,7 @@ describe("8gent flow command", () => {
 	});
 
 	test("unpair removes the file", async () => {
-		pairTo(41000);
+		pairTo(31000);
 		await runFlowCommand(["unpair"], deps({ say: () => {} }));
 		expect(readPairing(dir)).toBeNull();
 	});
@@ -418,7 +552,7 @@ describe("web_fetch routing", () => {
 	test("Flow gone: web_fetch runs exactly as before", async () => {
 		const home = path.join(dir, "home");
 		fs.mkdirSync(path.join(home, ".8gent"), { recursive: true });
-		writePairing({ port: 41999, token: "t".repeat(43) }, path.join(home, ".8gent"));
+		writePairing({ port: 31999, token: "t".repeat(43) }, path.join(home, ".8gent"));
 		process.env.EIGHT_HOME = home;
 		process.env.TERMUX_VERSION = "0.118";
 		let direct = 0;
