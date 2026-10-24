@@ -119,7 +119,9 @@ export function preferredVolume(): number {
 
 /** Every argument mpv starts with: the volume first, then what the caller names. */
 export function mpvStartArgs(volume: number, args: string[]): string[] {
-	return [`--volume=${volume}`, ...args];
+	// Errors only, and no status line: what mpv says when it cannot load a track or
+	// open an audio device is read back for the deck and /dj doctor (#4907).
+	return [`--volume=${volume}`, "--msg-level=all=warn", "--term-status-msg=", ...args];
 }
 
 /**
@@ -350,9 +352,20 @@ function detectTools(): Tools {
 // ---- mpv IPC ----
 let ipcReady = false;
 
+/** A stand-in for the socket: gets the command line, returns mpv's raw reply text, or null for silence. */
+type MpvTransport = (line: string) => Promise<string | null>;
+let transportImpl: MpvTransport | null = null;
+
+/** Tests swap the socket for a fake mpv peer; call with nothing to restore it. */
+export function setMpvTransport(fn?: MpvTransport): void {
+	transportImpl = fn ?? null;
+}
+
 function mpvIpc(cmd: Record<string, any>): Promise<any> {
 	if (!ipcReady) return Promise.resolve(null);
 	const line = `${JSON.stringify(cmd)}\n`;
+	if (transportImpl)
+		return transportImpl(line).then((raw) => (raw == null ? null : parseMpvReply(raw).data));
 	return typeof Bun !== "undefined" ? mpvIpcBun(line) : mpvIpcNode(line);
 }
 
@@ -449,6 +462,111 @@ export function parseMpvReply(buf: string): { complete: boolean; data: any } {
 const mpvGet = (p: string) =>
 	mpvIpc({ command: ["get_property", p] }).then((v) => (v != null ? String(v) : null));
 const mpvSet = (p: string, v: any) => mpvIpc({ command: ["set_property", p, v] });
+
+// ---- What the real player says (#4907) ----
+const EMPTY_STATUS = {
+	ipc: false,
+	trouble: "",
+	playing: false,
+	paused: false,
+	looping: false,
+	title: "",
+	url: "",
+	position: null,
+	duration: null,
+	volume: null,
+	queueSize: 0,
+	name: "",
+	artists: [] as string[],
+	keyLabel: "",
+};
+
+/** The last few things mpv complained about (a failed load, no audio device), newest last. */
+let playerErrors: string[] = [];
+const ERROR_LINE =
+	/error|fail|could not|cannot|can't|unable|no such|not found|refus|denied|ytdl|yt-dlp|youtube-dl/i;
+
+/** Keep mpv's complaints; its chatter is dropped. */
+export function notePlayerOutput(chunk: unknown): void {
+	for (const raw of String(chunk).split(/[\r\n]+/)) {
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point
+		const line = raw.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim();
+		if (line && ERROR_LINE.test(line))
+			playerErrors = [...playerErrors, line.slice(0, 160)].slice(-4);
+	}
+}
+
+export interface AudioHealth {
+	/** mpv answered on its control socket. */
+	ipc: boolean;
+	/** mpv's audio output (opensles, coreaudio...), or null when it has none. */
+	ao: string | null;
+	/** mpv has nothing loaded: the track failed to load or has ended. */
+	idle: boolean;
+	/** Seconds into the track, or null before it starts. */
+	time: number | null;
+	volume: number | null;
+	mute: boolean | null;
+	paused: boolean | null;
+}
+
+/** Ask mpv, over its own socket, what it is doing. Every field is the player's answer, never ours. */
+export async function readAudioHealth(): Promise<AudioHealth> {
+	const [ver, idle, ao, time, vol, mute, pause] = await Promise.all([
+		mpvGet("mpv-version"),
+		mpvGet("idle-active"),
+		mpvGet("current-ao"),
+		mpvGet("playback-time"),
+		mpvGet("volume"),
+		mpvGet("mute"),
+		mpvGet("pause"),
+	]);
+	const t = time == null ? Number.NaN : Number.parseFloat(time);
+	const v = vol == null ? Number.NaN : Number.parseFloat(vol);
+	return {
+		ipc: ver != null,
+		ao,
+		idle: idle === "true",
+		time: Number.isFinite(t) ? t : null,
+		volume: Number.isFinite(v) ? v : null,
+		mute: mute == null ? null : mute === "true",
+		paused: pause == null ? null : pause === "true",
+	};
+}
+
+export type AudioVerdict =
+	| { ok: true }
+	| { ok: false; kind: "failed" | "ended" | "no-output"; reason: string };
+
+/** Startup grace: mpv is still loading the stream and opening the device. */
+let AUDIO_GRACE_MS = 3000;
+/** Tests shorten the grace; call with nothing to restore it. */
+export function setAudioGraceMs(ms?: number): void {
+	AUDIO_GRACE_MS = ms ?? 3000;
+}
+
+/**
+ * Whether sound can be coming out, from the player's own answers. If mpv does not
+ * answer at all this says ok: it cannot tell, and does not claim a fault it did not see.
+ */
+export function diagnoseAudio(
+	h: AudioHealth,
+	sinceStartMs: number,
+	lastError: string | undefined,
+): AudioVerdict {
+	if (!h.ipc || sinceStartMs < AUDIO_GRACE_MS) return { ok: true };
+	if (h.idle)
+		return lastError
+			? { ok: false, kind: "failed", reason: lastError }
+			: { ok: false, kind: "ended", reason: "the track ended" };
+	if (h.time != null && h.ao == null)
+		return {
+			ok: false,
+			kind: "no-output",
+			reason: lastError ?? "mpv found no audio output on this phone",
+		};
+	return { ok: true };
+}
 
 // ---- Playback State ----
 let mpvProcess: ChildProcess | null = null;
@@ -721,6 +839,32 @@ export class DJ {
 		};
 	}
 
+	/**
+	 * One line to paste when there is no sound: the audio output, volume, mute, whether
+	 * mpv answers on its control socket, and the last thing it complained about.
+	 */
+	async audioLine(): Promise<string> {
+		const host = isAndroidHost() ? "termux" : platform();
+		if (!isPlaying) {
+			return `Audio: nothing playing | host=${host} start-volume=${preferredVolume()} mpv=${detectTools().mpv ? "found" : "missing"}${playerErrors.length ? ` | last error: ${playerErrors.at(-1)}` : ""}`;
+		}
+		const h = await readAudioHealth();
+		const yn = (b: boolean | null) => (b == null ? "?" : b ? "yes" : "no");
+		const err = playerErrors.at(-1);
+		return (
+			[
+				`Audio: ao=${h.ao ?? "none"}`,
+				`volume=${h.volume ?? "?"}`,
+				`mute=${yn(h.mute)}`,
+				`paused=${yn(h.paused)}`,
+				`idle=${yn(h.ipc ? h.idle : null)}`,
+				`time=${h.time == null ? "?" : Math.round(h.time)}s`,
+				`ipc=${h.ipc ? "answers" : "silent"}`,
+				`host=${host}`,
+			].join(" ") + (err ? ` | last error: ${err}` : "")
+		);
+	}
+
 	/** The required tools that are not on PATH right now. */
 	missingTools(): string[] {
 		const t = detectTools();
@@ -961,7 +1105,11 @@ export class DJ {
 		rememberVolume(v);
 		if (!isPlaying) return `Volume: ${v}% (for the next track)`;
 		await mpvSet("volume", v);
-		return `Volume: ${v}%`;
+		// Say what mpv now has, not what we sent: with no answer the track is unchanged.
+		const got = await mpvGet("volume");
+		if (got == null)
+			return `Volume: ${v}% saved, but the player did not answer, so this track's volume is unchanged.`;
+		return `Volume: ${Math.round(Number.parseFloat(got))}%`;
 	}
 
 	/** The volume the next track starts at, for a deck that shows it before anything plays. */
@@ -1108,6 +1256,10 @@ export class DJ {
 	 * after a track change while mpv loads metadata.
 	 */
 	async status(): Promise<{
+		/** mpv answered on its control socket just now; false means volume and clock are not its words. */
+		ipc: boolean;
+		/** Why nothing is heard, in words, or "" when all is well. */
+		trouble: string;
 		playing: boolean;
 		paused: boolean;
 		looping: boolean;
@@ -1127,14 +1279,42 @@ export class DJ {
 		const [pos, dur, vol] = ipcReady
 			? await Promise.all([mpvGet("time-pos"), mpvGet("duration"), mpvGet("volume")])
 			: [null, null, null];
+		// Believe the player, not our own flag: a track that failed to load leaves mpv
+		// alive and idle (--idle=yes), and a phone with no audio device plays to nowhere.
+		let trouble = "";
+		let pausedNow = isPaused;
+		if (ipcReady && isPlaying) {
+			const health = await readAudioHealth();
+			// The player's pause flag is the truth; ours only stands in when it is silent.
+			if (health.ipc && health.paused != null) {
+				pausedNow = health.paused;
+				if (pausedNow !== isPaused) {
+					isPaused = pausedNow;
+					clockPause(isPaused);
+				}
+			}
+			const verdict = diagnoseAudio(health, Date.now() - clock.startedAt, playerErrors.at(-1));
+			if (!verdict.ok) {
+				if (verdict.kind === "ended") {
+					this.killMpv();
+					return { ...EMPTY_STATUS, ipc: true };
+				}
+				trouble =
+					verdict.kind === "no-output"
+						? `no sound output: ${verdict.reason}`
+						: `could not play: ${verdict.reason}`;
+			}
+		}
 		const durN = dur ? Number.parseFloat(dur) : null;
 		if (ipcReady && isPlaying) await refreshTrackInfo(durN, pos ? Number.parseFloat(pos) : null);
 		const playingInfo = isPlaying && infoSig !== "";
 		// mpv did not say where it is: count from the process we started.
 		const posN = pos ? Number.parseFloat(pos) : isPlaying ? clockSeconds() : null;
 		return {
+			ipc: ipcReady && vol != null,
+			trouble,
 			playing: isPlaying,
-			paused: isPaused,
+			paused: pausedNow,
 			looping: isLooping,
 			title: currentTrack.title,
 			url: currentTrack.url,
@@ -1151,11 +1331,14 @@ export class DJ {
 	// ---- Private ----
 	/** Start mpv at the remembered volume, as the DJ's own child. */
 	private spawnMpv(mpv: string, args: string[]): ChildProcess {
+		playerErrors = [];
 		const child = spawnImpl(mpv, mpvStartArgs(preferredVolume(), args), {
-			stdio: "ignore",
+			stdio: ["ignore", "pipe", "pipe"],
 			windowsHide: true,
 		});
 		child.unref?.();
+		child.stdout?.on?.("data", notePlayerOutput);
+		child.stderr?.on?.("data", notePlayerOutput);
 		// The process is the truth. If it ends (track over, killed by Android, no
 		// audio device), the deck must stop saying "playing" (#4907). A child we
 		// already replaced or stopped is no longer mpvProcess, so its exit changes nothing.

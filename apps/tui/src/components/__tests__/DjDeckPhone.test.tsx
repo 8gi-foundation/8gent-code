@@ -82,3 +82,20 @@ describe("the DJ row at 52 columns", () => {
 		expect(NARROW_DECK_COLUMNS).toBeLessThanOrEqual(80);
 	});
 });
+
+describe("the row when the player says nothing is heard (#4907)", () => {
+	const TROUBLE = "no sound output: [ao] Failed to initialize audio driver 'opensles'";
+	test("wide: no sound and the reason, never playing", () => {
+		const f = frame(<DjRow {...BASE} trouble={TROUBLE} />, 120);
+		expect(f).toContain("✕");
+		expect(f).toContain("no sound output");
+		expect(f).not.toContain("▶");
+	});
+	test("phone width: the reason replaces the title and fits 52 columns", () => {
+		const f = frame(<DjRow {...BASE} narrow trouble={TROUBLE} />, 52);
+		expect(stringWidth(f)).toBeLessThanOrEqual(52);
+		expect(f).toContain("✕");
+		expect(f).toContain("no sound output");
+		expect(f).not.toContain("playing");
+	});
+});

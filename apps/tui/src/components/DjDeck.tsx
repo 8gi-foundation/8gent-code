@@ -29,7 +29,8 @@
  */
 
 import { Box, Text, useInput } from "ink";
-import React, { useEffect, useRef, useState } from "react";
+import type React from "react";
+import { useEffect, useRef, useState } from "react";
 import { colourPolicy } from "../lib/colour-policy.js";
 import { keepIfSame } from "../lib/keep-if-same.js";
 import { reducedMotionFromEnv } from "../lib/motion.js";
@@ -79,6 +80,10 @@ export interface DjStatus {
 	name?: string;
 	artists?: string[];
 	keyLabel?: string;
+	/** mpv answered on its control socket just now. */
+	ipc?: boolean;
+	/** Why nothing is heard, from the player itself; "" when all is well (#4907). */
+	trouble?: string;
 }
 
 const EMPTY: DjStatus = {
@@ -269,12 +274,17 @@ export function DjRow(props: {
 	showVolume?: boolean;
 	/** A phone-width row: the title, the state in words, the elapsed time, and how to stop. */
 	narrow?: boolean;
+	/** The player says nothing is heard: shown in place of the clock, never "playing". */
+	trouble?: string;
+	/** Tap targets. With both set the row carries play/pause and stop; each cap names its key. */
+	onToggle?: () => void;
+	onStop?: () => void;
 }) {
 	if (props.narrow) return <DjRowNarrow {...props} />;
 	const showVolume = props.showVolume !== false;
 	const muted = props.volume === 0;
 	const vol = props.volume == null ? "vol --" : muted ? "muted" : `vol ${props.volume}%`;
-	const state = props.paused ? "paused" : "playing";
+	const state = props.trouble ? "no sound" : props.paused ? "paused" : "playing";
 	const spoken = [
 		`DJ ${state}: ${props.track}`,
 		props.artist ? `by ${props.artist}` : "",
@@ -291,7 +301,9 @@ export function DjRow(props: {
 				<Text bold color={t.orange}>
 					DJ
 				</Text>
-				<Text color={props.paused ? t.textTertiary : t.teal}>{props.paused ? " ❚❚ " : " ▶ "}</Text>
+				<Text color={props.trouble ? t.orange : props.paused ? t.textTertiary : t.teal}>
+					{props.trouble ? " ✕ " : props.paused ? " ❚❚ " : " ▶ "}
+				</Text>
 			</Box>
 			<Box flexGrow={1} flexShrink={1} minWidth={0}>
 				<Text wrap="truncate-end">
@@ -305,9 +317,16 @@ export function DjRow(props: {
 				</Box>
 			) : null}
 			<Box flexShrink={0}>
-				<Text color={t.textTertiary}>
-					{`  ${props.elapsed} / ${props.duration}${showVolume ? `  ${vol}` : ""}`}
+				<Text color={props.trouble ? t.orange : t.textTertiary}>
+					{props.trouble
+						? `  ${props.trouble.slice(0, 60)}`
+						: `  ${props.elapsed} / ${props.duration}${showVolume ? `  ${vol}` : ""}`}
 				</Text>
+				{props.onToggle && props.onStop ? (
+					<Box marginLeft={2}>
+						<DjButtons paused={props.paused} onToggle={props.onToggle} onStop={props.onStop} />
+					</Box>
+				) : null}
 				{props.keysActive ? null : (
 					<Box marginLeft={2}>
 						<KeyCapRow caps={[{ cap: "^D", verb: "keys" }]} idPrefix="djrow" />
@@ -318,14 +337,47 @@ export function DjRow(props: {
 	);
 }
 
+/**
+ * Play/pause and stop as tap targets (#3239 click-target pattern). The label is the
+ * action a tap does next: "pause" while playing, "play" while paused. Each cap shows
+ * its keyboard twin, which works while the deck has the keyboard (^D).
+ */
+export function DjButtons({
+	paused,
+	onToggle,
+	onStop,
+}: { paused: boolean; onToggle: () => void; onStop: () => void }) {
+	return (
+		<KeyCapRow
+			idPrefix="djbtn"
+			caps={[
+				{ cap: "Space", verb: paused ? "play" : "pause", action: onToggle },
+				{ cap: "S", verb: "stop", action: onStop },
+			]}
+		/>
+	);
+}
+
+/** The phone's own row for the buttons, under the title, indented past "DJ ▶ ". */
+export function DjButtonsRow(props: { paused: boolean; onToggle: () => void; onStop: () => void }) {
+	return (
+		<Box width="100%" flexShrink={0} height={1} overflow="hidden">
+			<Text>{"     "}</Text>
+			<DjButtons {...props} />
+		</Box>
+	);
+}
+
 /** The phone-width row: "DJ ▶ title  playing 0:12  /dj stop". Words carry the state, as everywhere. */
 function DjRowNarrow(props: {
 	paused: boolean;
 	track: string;
 	elapsed: string;
 	keysActive: boolean;
+	trouble?: string;
+	onToggle?: () => void;
 }) {
-	const state = props.paused ? "paused" : "playing";
+	const state = props.trouble ? "no sound" : props.paused ? "paused" : "playing";
 	return (
 		<Box
 			width="100%"
@@ -337,16 +389,20 @@ function DjRowNarrow(props: {
 				<Text bold color={t.orange}>
 					DJ
 				</Text>
-				<Text color={props.paused ? t.textTertiary : t.teal}>{props.paused ? " ❚❚ " : " ▶ "}</Text>
+				<Text color={props.trouble ? t.orange : props.paused ? t.textTertiary : t.teal}>
+					{props.trouble ? " ✕ " : props.paused ? " ❚❚ " : " ▶ "}
+				</Text>
 			</Box>
 			<Box flexGrow={1} flexShrink={1} minWidth={0}>
 				<Text wrap="truncate-end" color={t.textPrimary}>
-					{props.track}
+					{props.trouble ? props.trouble : props.track}
 				</Text>
 			</Box>
 			<Box flexShrink={0}>
-				<Text color={t.textTertiary}>{`  ${state} ${props.elapsed}`}</Text>
-				{props.keysActive ? null : <Text color={t.textSecondary}>{"  /dj stop"}</Text>}
+				<Text color={t.textTertiary}>{props.trouble ? "" : `  ${state} ${props.elapsed}`}</Text>
+				{props.keysActive || props.onToggle ? null : (
+					<Text color={t.textSecondary}>{"  /dj stop"}</Text>
+				)}
 			</Box>
 		</Box>
 	);
@@ -509,6 +565,29 @@ export function DjDeck({
 		}, 1000);
 	};
 
+	// One play/pause and one stop, for the keys and for the taps. The state shown after is
+	// read back from mpv (dj.status asks it), never flipped by guess (#4907).
+	const togglePause = async () => {
+		const dj = djRef.current.instance;
+		if (!dj) return;
+		try {
+			await dj.pause();
+			const real: DjStatus = deckView(await dj.status(), clockStep(deckStill()));
+			setStatus(keepIfSame(real));
+		} catch {
+			/* never crash the TUI */
+		}
+	};
+	const stopPlayback = () => {
+		const dj = djRef.current.instance;
+		if (!dj) return;
+		try {
+			dj.stop();
+		} catch {}
+		setStatus(EMPTY);
+		onKeysDone?.();
+	};
+
 	useInput(
 		async (input, key) => {
 			if (key.ctrl || key.meta) return;
@@ -517,8 +596,7 @@ export function DjDeck({
 			const c = djControl(input);
 			try {
 				if (c === "pause") {
-					await dj.pause();
-					setStatus((s) => ({ ...s, paused: !s.paused }));
+					await togglePause();
 				} else if (c === "next") {
 					await dj.skip();
 				} else if (c === "prev") {
@@ -526,9 +604,7 @@ export function DjDeck({
 					const prev = hist[hist.length - 2];
 					if (prev?.url) await dj.play(prev.url);
 				} else if (c === "stop") {
-					dj.stop();
-					setStatus(EMPTY);
-					onKeysDone?.();
+					stopPlayback();
 				} else if (c === "down") {
 					scrubVolume(-5);
 				} else if (c === "up") {
@@ -552,7 +628,10 @@ export function DjDeck({
 		{ isActive: keysActive && hasTrack },
 	);
 
-	const effectiveVolume = displayVolume ?? status.volume;
+	// While a track plays, only the player's own answer (or a change just made) is shown:
+	// with no answer it is "vol --", not the remembered number (#4907).
+	const playerSilent = hasTrack && status.ipc === false && pendingVolumeRef.current == null;
+	const effectiveVolume = playerSilent ? null : (displayVolume ?? status.volume);
 	const volume = effectiveVolume == null ? null : Math.round(effectiveVolume);
 	const playing = status.playing && !status.paused;
 	const track = hasTrack ? sanitizeTrack(status.name || status.title || "(loading)") : "";
@@ -572,6 +651,18 @@ export function DjDeck({
 				keysActive={keysActive}
 				showVolume={columns >= 110}
 				narrow={columns < NARROW_DECK_COLUMNS}
+				trouble={status.trouble ?? ""}
+				onToggle={() => void togglePause()}
+				onStop={stopPlayback}
+			/>
+		) : null;
+	// On a phone the buttons take their own row, under the title.
+	const buttonsRow =
+		hasTrack && open && columns < NARROW_DECK_COLUMNS && !keysActive ? (
+			<DjButtonsRow
+				paused={status.paused}
+				onToggle={() => void togglePause()}
+				onStop={stopPlayback}
 			/>
 		) : null;
 	const keysRow =
@@ -592,6 +683,7 @@ export function DjDeck({
 	return (
 		<Box width="100%" flexDirection="column" flexShrink={0}>
 			{row}
+			{buttonsRow}
 			{keysRow}
 			{footer === undefined && (row || keysRow) ? null : (
 				<Box width="100%" flexShrink={0} height={1}>

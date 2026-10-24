@@ -108,7 +108,13 @@ describe("the Termux player branch: arguments and volume", () => {
 	});
 
 	test("mpv is started with --volume first, then the caller's arguments", () => {
-		expect(mpvStartArgs(100, ["--no-video", "x"])).toEqual(["--volume=100", "--no-video", "x"]);
+		expect(mpvStartArgs(100, ["--no-video", "x"])).toEqual([
+			"--volume=100",
+			"--msg-level=all=warn",
+			"--term-status-msg=",
+			"--no-video",
+			"x",
+		]);
 	});
 
 	test("/dj play on Termux spawns mpv with the audio-only arguments at volume 100", async () => {

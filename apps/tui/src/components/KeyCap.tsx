@@ -54,6 +54,11 @@ export interface CapSpec {
 	verb?: string;
 	/** Cells before this cap; defaults to KEY_CAP_GAP for all but the first. */
 	gap?: number;
+	/**
+	 * What a tap does, when it is not "press the key" (a button that acts on the
+	 * player directly). The cap still names its keyboard twin.
+	 */
+	action?: () => void;
 }
 
 /**
@@ -72,7 +77,8 @@ export function keyCapSpans(
 		x += c.gap ?? (i > 0 ? KEY_CAP_GAP.length : 0);
 		const w = cellWidth(keyCapText(c.cap, c.verb));
 		const bytes = keyBytes(c.cap);
-		if (bytes) spans.push({ id: `${idPrefix}:${c.cap}`, dx: x, w, action: () => send(bytes) });
+		const action = c.action ?? (bytes ? () => send(bytes) : null);
+		if (action) spans.push({ id: `${idPrefix}:${c.cap}`, dx: x, w, action });
 		x += w;
 	});
 	return spans;
