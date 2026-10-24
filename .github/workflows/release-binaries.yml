@@ -466,6 +466,17 @@ jobs:
           chmod +x bins/8gent-linux-arm64
           bash scripts/smoke-compiled.sh bins/8gent-linux-arm64
 
+  # #4906: 8gent's own llama-server and whisper-cli for android-arm64, linux-x64,
+  # linux-arm64, darwin-arm64 and darwin-x64, attached with their SHA256SUMS lines.
+  # Like swift-apps this is an extra, not a gate, until it has shipped cleanly twice:
+  # a failed native build is reported (and raises the alarm) but does not hold the
+  # binaries back. 8gent falls back to a system llama-server when an asset is missing.
+  runtime-binaries:
+    name: Build llama-server and whisper-cli
+    uses: ./.github/workflows/runtime-binaries.yml
+    with:
+      ref: refs/tags/${{ inputs.tag || github.ref_name }}
+
   # #4862 G05: the two macOS apps, built from the tag on macos-14 (as
   # swift-nightly.yml builds 8gent Computer) and attached as UNSIGNED zips: no
   # Developer ID signature, no notarization, only the ad-hoc signature each
@@ -509,7 +520,7 @@ jobs:
 
   release:
     name: Attach to GitHub Release
-    needs: [build, attest, pack-npm, smoke-windows, smoke-linux, smoke-termux, smoke-linux-arm64, swift-apps]
+    needs: [build, attest, pack-npm, smoke-windows, smoke-linux, smoke-termux, smoke-linux-arm64, swift-apps, runtime-binaries]
     runs-on: ubuntu-latest
     # Every gate above must pass; swift-apps is the one exception (#4862 G05): a
     # failed Swift build ships the binaries without the macOS app zips.
@@ -550,6 +561,13 @@ jobs:
           name: 8gent-swift-apps
           path: swift-apps
 
+      - name: Download llama-server and whisper-cli
+        if: needs.runtime-binaries.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: 8gent-runtime-binaries
+          path: runtime
+
       # #3326: release.yml owns the release. It creates it as a draft with the
       # npm tarball and SHA256SUMS and publishes it only once those are on it.
       # This job only adds the installers to that release (draft or published),
@@ -580,6 +598,13 @@ jobs:
             cat swift-apps/swift-apps.sha256 >> "$RUNNER_TEMP/installers.sha256"
           else
             echo "::warning::the macOS apps did not build; this release has no 8gent Computer or Lil Eight zip"
+          fi
+          # #4906: llama-server and whisper-cli for every target ride along, with their sums.
+          if [ -f runtime/runtime.sha256 ]; then
+            for f in runtime/*; do [ "$(basename "$f")" = runtime.sha256 ] || cp "$f" upload/; done
+            cat runtime/runtime.sha256 >> "$RUNNER_TEMP/installers.sha256"
+          else
+            echo "::warning::llama-server and whisper-cli did not build; 8gent falls back to a system llama-server for this release"
           fi
           gh release upload "$TAG" upload/* --repo "$REPO" --clobber
 
@@ -658,7 +683,7 @@ jobs:
   # above opens (or comments on) one P0 issue, so it lands where people look.
   alarm:
     name: Open an issue when the release fails
-    needs: [build, attest, pack-npm, smoke-windows, smoke-linux, smoke-termux, smoke-linux-arm64, swift-apps, release, install-smoke]
+    needs: [build, attest, pack-npm, smoke-windows, smoke-linux, smoke-termux, smoke-linux-arm64, swift-apps, runtime-binaries, release, install-smoke]
     # Only a release tag raises the alarm; a dispatched dry run on a branch
     # reports its failure in the run itself.
     if: failure() && startsWith(github.ref, 'refs/tags/v')
