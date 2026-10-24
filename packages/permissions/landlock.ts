@@ -9,9 +9,10 @@
  * to be applied in the child, between fork and exec. Neither Bun nor Node gives a hook there,
  * and Termux runs the Node build (no bun:ffi). The helper is a short Python program run with
  * `python3 -I -S -c`: ctypes calls the three Landlock syscalls, then execv's the shell. Nothing
- * is installed or shipped as a file. No python3, or a kernel without Landlock: the command runs
- * as it does today and one plain line says the OS rule is not active. A helper that fails after
- * it started never runs the command unrestricted: it exits 126 with a message.
+ * is installed or shipped as a file. No python3, or a kernel without Landlock: with the flag at
+ * "1" the command is refused (osReadRefusal in run-command-sandbox.ts); at "auto" it runs and
+ * the first result of the session says the OS rule is not active. A helper that fails after it
+ * started never runs the command unrestricted: it exits 126 with a message.
  *
  * Landlock only allows. There is no deny that wins over an allow, so a folder that holds a
  * never-read path (a home with .ssh in it, ~/.8gent with memory.db in it) is never granted
@@ -41,7 +42,9 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 /**
@@ -160,37 +163,44 @@ export function landlockPlan(
 	never: readonly string[],
 	dataRoots: readonly string[],
 	budget = WALK_BUDGET,
+	opendir: (dir: string) => fs.Dir = (dir) => fs.opendirSync(dir),
 ): LandlockPlan {
 	const neverSet = bothSpellings(never);
 	const roots = bothSpellings(dataRoots);
 	let left = budget;
+	const insideDataRoot = (dir: string) => roots.some((r) => under(dir, r));
+	/** Listings, each read once. null: unreadable, or (inside a data root) past the budget. */
 	const listing = new Map<string, fs.Dirent[] | null>();
-	/** Sorted, so a budget cut always falls in the same place. null: unreadable. */
-	const read = (dir: string): fs.Dirent[] | null => {
-		let entries = listing.get(dir);
-		if (entries === undefined) {
-			try {
-				entries = fs
-					.readdirSync(dir, { withFileTypes: true })
-					.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-			} catch {
-				entries = null;
+	/**
+	 * One folder's entries. Inside a data root every entry read spends the budget, and the read
+	 * stops the moment it runs out: a folder of a million entries costs at most the budget, and
+	 * the folder is left shut. The folders above a never-read path (/, the home, ~/.config, the
+	 * data root itself) are listed whatever it costs, so a big ~/.8gent cannot shut them.
+	 */
+	const list = (dir: string): fs.Dirent[] | null => {
+		const cached = listing.get(dir);
+		if (cached !== undefined) return cached;
+		const budgeted = insideDataRoot(dir);
+		let entries: fs.Dirent[] | null = [];
+		let handle: fs.Dir | undefined;
+		try {
+			handle = opendir(dir);
+			for (let e = handle.readSync(); e; e = handle.readSync()) {
+				if (budgeted && --left < 0) {
+					entries = null;
+					break;
+				}
+				entries.push(e);
 			}
-			listing.set(dir, entries);
+		} catch {
+			entries = null;
+		} finally {
+			try {
+				handle?.closeSync();
+			} catch {}
 		}
+		listing.set(dir, entries);
 		return entries;
-	};
-	// Only the walk inside data roots spends the budget: the folders above a never-read path
-	// (/, the home, ~/.config) are listed whatever it costs, so a big ~/.8gent cannot shut them.
-	const walked = new Set<string>();
-	const walk = (dir: string): fs.Dirent[] | undefined => {
-		const entries = read(dir);
-		if (!entries) return undefined;
-		if (!walked.has(dir)) {
-			walked.add(dir);
-			left -= entries.length;
-		}
-		return left < 0 ? undefined : entries;
 	};
 	const isNever = (p: string) =>
 		neverSet.some((n) => p === n || under(p, n)) || inPrivateDataSet(p, roots);
@@ -199,7 +209,7 @@ export function landlockPlan(
 	const dirty = (dir: string): boolean | "unknown" => {
 		const memo = dirtyMemo.get(dir);
 		if (memo !== undefined) return memo;
-		const entries = walk(dir);
+		const entries = list(dir);
 		let result: boolean | "unknown" = false;
 		if (!entries) result = "unknown";
 		else
@@ -248,7 +258,7 @@ export function landlockPlan(
 			const mode = how(p);
 			if (mode === "open") out.add(p);
 			else if (mode === "split") {
-				const entries = read(p);
+				const entries = list(p);
 				if (!entries) return;
 				for (const e of entries) visit(path.join(p, e.name), false);
 			}
@@ -267,7 +277,11 @@ export function landlockPlan(
 // ============================================
 
 /**
- * argv after the source: `probe`, or `R <paths...> W <paths...> -- <program> <args...>`.
+ * argv after the source: `probe`, or `F <plan file> -- <program> <args...>`. The plan file holds
+ * `R`, the read grants, `W`, the remove grants, NUL-separated (one argv entry per path would hit
+ * E2BIG: a home with thousands of entries makes a command line past the kernel's 128 KiB limit).
+ * The helper opens it with O_NOFOLLOW, refuses anything but a regular 0600 file owned by this
+ * user, and unlinks it before the rule is applied.
  * Syscall numbers 444-446 are the same on every architecture (added together in Linux 5.13).
  * Exit 126 with a message on any failure after start: never exec without the rule.
  */
@@ -339,18 +353,42 @@ if a[:1] == ["probe"]:
         sys.exit(3)
     print(apply(["/"], []))
     sys.exit(0)
-reads, removes, cur, i = [], [], None, 0
-while i < len(a) and a[i] != "--":
-    if a[i] == "R":
+def load(f):
+    try:
+        fd = os.open(f, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as e:
+        die("plan file %s: %s" % (f, e))
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or (st.st_mode & 0o777) != 0o600:
+        os.close(fd)
+        die("plan file %s is not a 0600 file owned by this user" % f)
+    chunks = []
+    while True:
+        b = os.read(fd, 1 << 20)
+        if not b:
+            break
+        chunks.append(b)
+    os.close(fd)
+    try:
+        os.unlink(f)
+    except OSError:
+        pass
+    return b"".join(chunks).decode("utf-8", "surrogateescape").split("\\0")
+if len(a) < 3 or a[0] != "F" or a[2] != "--":
+    die("bad plan")
+reads, removes, cur = [], [], None
+for t in load(a[1]):
+    if t == "R":
         cur = reads
-    elif a[i] == "W":
+    elif t == "W":
         cur = removes
+    elif t == "":
+        continue
     elif cur is None:
         die("bad plan")
     else:
-        cur.append(a[i])
-    i += 1
-prog = a[i + 1:]
+        cur.append(t)
+prog = a[3:]
 if not prog:
     die("no command")
 apply(reads, removes)
@@ -465,7 +503,32 @@ function probeStatus(
 	return no("this kernel does not support Landlock");
 }
 
-/** argv to put in front of `<shell> -c <command>`: the helper with this command's grant lists. */
-export function landlockArgv(python: string, plan: LandlockPlan): string[] {
-	return [python, "-I", "-S", "-c", LANDLOCK_HELPER, "R", ...plan.read, "W", ...plan.remove, "--"];
+let planDir: string | undefined;
+
+/** A 0700 folder for this process's plan files, removed when the process exits. */
+function planFolder(): string {
+	if (planDir && fs.existsSync(planDir)) return planDir;
+	planDir = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-landlock-"));
+	fs.chmodSync(planDir, 0o700);
+	const dir = planDir;
+	process.once("exit", () => {
+		try {
+			fs.rmSync(dir, { recursive: true, force: true });
+		} catch {}
+	});
+	return dir;
+}
+
+/** Write one command's grant lists to a new 0600 file (the helper unlinks it once read). */
+export function writePlanFile(plan: LandlockPlan): string {
+	const file = path.join(planFolder(), `${randomUUID()}.plan`);
+	const body = ["R", ...plan.read, "W", ...plan.remove].join("\0");
+	fs.writeFileSync(file, body, { mode: 0o600, flag: "wx" });
+	fs.chmodSync(file, 0o600); // a umask can only take bits away; make it exactly 0600
+	return file;
+}
+
+/** argv to put in front of `<shell> -c <command>`: the helper and this command's plan file. */
+export function landlockArgv(python: string, planFile: string): string[] {
+	return [python, "-I", "-S", "-c", LANDLOCK_HELPER, "F", planFile, "--"];
 }

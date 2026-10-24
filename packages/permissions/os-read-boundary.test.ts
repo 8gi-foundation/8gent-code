@@ -344,10 +344,15 @@ describe("generated profile", () => {
 
 	test("wrapRunCommand carries the rule only when the flag is on", () => {
 		const s = spec("cat x");
+		const ruleApplies =
+			canApplySeatbelt() || (process.platform === "linux" && landlockStatus().active);
+		// Where no OS rule applies, "1" refuses (fail closed) and "auto" runs the bare command.
+		if (!ruleApplies)
+			expect(() => wrapRunCommand("cat x", s)).toThrow(/EIGHT_OS_READ_BOUNDARY=auto/);
+		if (!ruleApplies) process.env[OS_READ_BOUNDARY_FLAG] = "auto";
 		const wrappedOn = wrapRunCommand("cat x", s);
 		Reflect.deleteProperty(process.env, OS_READ_BOUNDARY_FLAG);
 		const wrappedOff = wrapRunCommand("cat x", s);
-		// Here sandbox-exec may not apply (nested host): then both are the bare command.
 		if (canApplySeatbelt()) {
 			expect(wrappedOn).toContain("(deny file-read-data)");
 			expect(wrappedOff).not.toContain("(deny file-read-data)");
@@ -397,13 +402,21 @@ describe.if(process.platform === "darwin")("the macOS profile is pinned byte for
 
 	test("wrapRunCommand on macOS is sandbox-exec over that profile, never the Linux helper", () => {
 		const s = spec("cat x");
+		if (!canApplySeatbelt()) {
+			// Nested host: "1" refuses rather than run without the rule; "auto" runs it bare.
+			expect(() => wrapRunCommand("cat x", s)).toThrow(/cannot be applied here/);
+			process.env[OS_READ_BOUNDARY_FLAG] = "auto";
+			expect(wrapRunCommand("cat x", s)).toBe("cat x");
+			return;
+		}
 		const out = wrapRunCommand("cat x", s);
 		expect(out).not.toContain("landlock");
-		if (canApplySeatbelt())
-			expect(out).toBe(
-				`/usr/bin/sandbox-exec -p '${buildRunCommandProfile(protectedRunCommandPaths(), s).replaceAll("'", `'\\''`)}' /bin/sh -c 'cat x'`,
-			);
-		else expect(out).toBe("cat x");
+		expect(out).toBe(
+			`/usr/bin/sandbox-exec -p '${buildRunCommandProfile(protectedRunCommandPaths(), s).replaceAll("'", `'\\''`)}' /bin/sh -c 'cat x'`,
+		);
+		// "auto" builds the very same profile where Seatbelt applies.
+		process.env[OS_READ_BOUNDARY_FLAG] = "auto";
+		expect(wrapRunCommand("cat x", s)).toBe(out);
 	});
 });
 

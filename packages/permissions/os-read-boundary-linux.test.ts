@@ -34,10 +34,18 @@ import { osReadSpec } from "./read-boundary";
 import {
 	OS_READ_BOUNDARY_FLAG,
 	type OsReadSpec,
+	_resetReadNotice,
 	_resetReadRuleWarning,
 	linuxReadPlan,
 	linuxReadPrefix,
+	onRunCommandUnsandboxed,
+	osReadBoundaryMode,
+	osReadNotice,
+	osReadRefusal,
+	osReadRuleStatus,
 	ownPrivateFilters,
+	refreshSecurityEnvForTests,
+	sandboxFooterReason,
 	wrapRunCommand,
 } from "./run-command-sandbox";
 import {
@@ -419,18 +427,26 @@ describe("the honest line when the rule cannot be applied", () => {
 		]);
 	});
 
-	test("active: the helper and the grant lists go in front of the shell", () => {
+	test("active: the helper and a 0600 plan file go in front of the shell, not the grants", () => {
 		const s = spec("cat x");
 		const argv = linuxReadPrefix(s, "linux", () => ({
 			active: true,
 			python: "/usr/bin/python3",
 			abi: 4,
 		}));
-		expect(argv?.slice(0, 5)).toEqual(["/usr/bin/python3", "-I", "-S", "-c", LANDLOCK_HELPER]);
-		expect(argv?.[5]).toBe("R");
+		expect(argv?.slice(0, 6)).toEqual(["/usr/bin/python3", "-I", "-S", "-c", LANDLOCK_HELPER, "F"]);
+		expect(argv?.length).toBe(8);
 		expect(argv?.at(-1)).toBe("--");
-		expect(argv).toContain(ws);
-		expect(argv).toContain("W");
+		const file = argv?.[6] as string;
+		const st = fs.statSync(file);
+		expect(st.mode & 0o777).toBe(0o600);
+		expect(st.uid).toBe(process.getuid?.() ?? st.uid);
+		expect(fs.statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+		const tokens = fs.readFileSync(file, "utf8").split("\0");
+		expect(tokens[0]).toBe("R");
+		expect(tokens).toContain(ws);
+		expect(tokens).toContain("W");
+		fs.unlinkSync(file);
 	});
 
 	test("not Linux: the probe says so without running anything", () => {
@@ -468,11 +484,44 @@ describe.if(hasPython)("the helper (Python)", () => {
 	});
 
 	test("a plan with no command never runs anything: exit 126 with a message", () => {
-		const r = spawnSync("python3", ["-I", "-S", "-c", LANDLOCK_HELPER, "R", "/tmp"], {
+		const r = spawnSync("python3", ["-I", "-S", "-c", LANDLOCK_HELPER, "F", "/tmp"], {
 			encoding: "utf8",
 		});
 		expect(r.status).toBe(126);
-		expect(r.stderr).toContain("could not be applied, so the command did not run: no command");
+		expect(r.stderr).toContain("could not be applied, so the command did not run: bad plan");
+	});
+
+	// The file checks run before any syscall, so these are safe on every host.
+	const helperOn = (file: string) =>
+		spawnSync("python3", ["-I", "-S", "-c", LANDLOCK_HELPER, "F", file, "--", "/bin/echo", "RAN"], {
+			encoding: "utf8",
+		});
+
+	test("a plan file that is not 0600 is refused, and nothing runs", () => {
+		const f = path.join(base, "plan-0644");
+		fs.writeFileSync(f, `R\0${ws}\0W\0`, { mode: 0o644 });
+		fs.chmodSync(f, 0o644);
+		const r = helperOn(f);
+		expect(r.status).toBe(126);
+		expect(r.stderr).toContain("is not a 0600 file owned by this user");
+		expect(r.stdout).not.toContain("RAN");
+	});
+
+	test("a plan file reached through a symlink is refused (O_NOFOLLOW)", () => {
+		const real = path.join(base, "plan-real");
+		fs.writeFileSync(real, `R\0${ws}\0W\0`, { mode: 0o600 });
+		const link = path.join(base, "plan-link");
+		fs.symlinkSync(real, link);
+		const r = helperOn(link);
+		expect(r.status).toBe(126);
+		expect(r.stderr).toMatch(/plan file .*plan-link/);
+		expect(r.stdout).not.toContain("RAN");
+	});
+
+	test("a missing plan file is refused", () => {
+		const r = helperOn(path.join(base, "no-such-plan"));
+		expect(r.status).toBe(126);
+		expect(r.stdout).not.toContain("RAN");
 	});
 
 	test("a malformed plan never runs anything", () => {
@@ -770,4 +819,239 @@ describe.if(live)("live: run_command under the Landlock read rule", () => {
 			expect(await run(ws, `python3 -c "print(open('inside.txt').read())"`)).toContain("INSIDE-OK");
 		});
 	});
+});
+
+// ============================================
+// 3. Fail closed, "auto", E2BIG, and the budgeted walk (#4898 round 2)
+// ============================================
+
+describe.if(process.platform !== "win32")(
+	"fail closed: EIGHT_OS_READ_BOUNDARY=1 never runs without the rule",
+	() => {
+		const marker = () => path.join(ws, "ran-marker");
+		let footer: string[] = [];
+		let off: () => void = () => {};
+		beforeAll(() => {
+			off = onRunCommandUnsandboxed((s) => footer.push(sandboxFooterReason(s.reason)));
+		});
+		beforeEach(() => {
+			footer = [];
+			_resetReadNotice();
+			fs.rmSync(marker(), { force: true });
+		});
+		afterAll(() => {
+			off();
+			Reflect.deleteProperty(process.env, "EIGHT_SEATBELT");
+			refreshSecurityEnvForTests();
+			_resetLandlockStatus();
+			_resetReadNotice();
+		});
+
+		test("the mode: 1 is on, auto is auto, anything else is off", () => {
+			for (const [v, mode] of [
+				["1", "on"],
+				["auto", "auto"],
+				["yes", "off"],
+				["0", "off"],
+			] as const) {
+				process.env[OS_READ_BOUNDARY_FLAG] = v;
+				expect({ v, mode: osReadBoundaryMode() }).toEqual({ v, mode });
+			}
+		});
+
+		test("pure: 1 and no rule gives a refusal that names both ways out; auto gives none", () => {
+			const no = () =>
+				({ active: false, reason: "this kernel does not support Landlock" }) as const;
+			on();
+			const msg = osReadRefusal(no) ?? "";
+			expect(msg).toContain("[PERMISSION DENIED] Not run");
+			expect(msg).toContain("this kernel does not support Landlock");
+			expect(msg).toContain(`unset ${OS_READ_BOUNDARY_FLAG}`);
+			expect(msg).toContain(`${OS_READ_BOUNDARY_FLAG}=auto`);
+			expect(osReadRefusal(() => ({ active: true }))).toBe(undefined);
+			process.env[OS_READ_BOUNDARY_FLAG] = "auto";
+			expect(osReadRefusal(no)).toBe(undefined);
+		});
+
+		test("pure: auto and no rule gives one notice per session, and the footer hears it", () => {
+			const no = () => ({ active: false, reason: "no OS read rule on testos" }) as const;
+			process.env[OS_READ_BOUNDARY_FLAG] = "auto";
+			expect(osReadNotice(no)).toContain("not active here (no OS read rule on testos)");
+			expect(osReadNotice(no)).toBe(undefined);
+			expect(footer).toEqual(["no read rule"]);
+			on();
+			_resetReadNotice();
+			expect(osReadNotice(no)).toBe(undefined); // "1" refuses instead of noticing
+		});
+
+		test("not Linux and not macOS: there is no OS read rule", () => {
+			expect(osReadRuleStatus("win32")).toEqual({
+				active: false,
+				reason: "no OS read rule on win32",
+			});
+		});
+
+		/** EIGHT_SEATBELT=0 turns every OS rule off, on macOS and Linux alike: a real unavailable host. */
+		const seatbeltOff = () => {
+			process.env.EIGHT_SEATBELT = "0";
+			refreshSecurityEnvForTests();
+		};
+
+		test("run_command, 1, rule unavailable (EIGHT_SEATBELT=0): refused in the tool result, nothing ran", async () => {
+			seatbeltOff();
+			on();
+			const out = await run(ws, "touch ran-marker");
+			expect(out).toContain("Not run");
+			expect(out).toContain(`${OS_READ_BOUNDARY_FLAG}=auto`);
+			expect(fs.existsSync(marker())).toBe(false);
+			expect(footer).toContain("no read rule");
+		});
+
+		test("run_command, auto, rule unavailable: it runs, the first result says so, the second does not", async () => {
+			seatbeltOff();
+			process.env[OS_READ_BOUNDARY_FLAG] = "auto";
+			const first = await run(ws, "touch ran-marker");
+			expect(first).toContain("[notice] The OS read rule is not active here");
+			expect(first).not.toContain("Not run");
+			expect(fs.existsSync(marker())).toBe(true);
+			const second = await run(ws, "echo SECOND");
+			expect(second).toContain("SECOND");
+			expect(second).not.toContain("[notice]");
+		});
+
+		test("background_start, 1, rule unavailable: the backstop refuses it too", () => {
+			seatbeltOff();
+			on();
+			expect(() => wrapRunCommand("touch ran-marker", spec("touch ran-marker"))).toThrow(
+				/cannot be applied here/,
+			);
+		});
+
+		test.if(process.platform === "linux")(
+			"run_command on Linux, 1, a kernel without Landlock: refused, nothing ran",
+			async () => {
+				Reflect.deleteProperty(process.env, "EIGHT_SEATBELT");
+				refreshSecurityEnvForTests();
+				// Seed the probe with the answer such a kernel gives (exit 3): kept for the process.
+				_resetLandlockStatus();
+				landlockStatus("linux", () => ({ status: 3, stdout: "", signal: null }));
+				on();
+				const out = await run(ws, "touch ran-marker");
+				expect(out).toContain("this kernel does not support Landlock");
+				expect(out).toContain("Not run");
+				expect(fs.existsSync(marker())).toBe(false);
+				process.env[OS_READ_BOUNDARY_FLAG] = "auto";
+				const ran = await run(ws, "touch ran-marker");
+				expect(ran).toContain("[notice]");
+				expect(fs.existsSync(marker())).toBe(true);
+				_resetLandlockStatus();
+			},
+		);
+	},
+);
+
+describe.if(process.platform !== "win32")("E2BIG: a home with 5000 top-level folders", () => {
+	let big: string;
+	beforeAll(() => {
+		big = path.join(base, "bighome");
+		fs.mkdirSync(path.join(big, ".ssh"), { recursive: true });
+		fs.writeFileSync(path.join(big, ".ssh", "id_rsa"), "BIG-PRIVATE");
+		fs.writeFileSync(path.join(big, "notes.txt"), "BIG-NOTES");
+		for (let i = 0; i < 5000; i++)
+			fs.mkdirSync(path.join(big, `folder-${String(i).padStart(4, "0")}`));
+	});
+	afterAll(() => {
+		Reflect.deleteProperty(process.env, "EIGHT_SEATBELT");
+		refreshSecurityEnvForTests();
+	});
+
+	test("the grants go to a file: the command line stays small though the grants pass 128 KiB", () => {
+		process.env.HOME = big;
+		const argv =
+			linuxReadPrefix(spec("cat notes.txt", big), "linux", () => ({
+				active: true,
+				python: "/usr/bin/python3",
+				abi: 4,
+			})) ?? [];
+		const file = argv[6] as string;
+		const grants = fs.readFileSync(file, "utf8");
+		fs.unlinkSync(file);
+		// One argv entry per path would have been past MAX_ARG_STRLEN (131072) as one shell string.
+		expect(grants.length).toBeGreaterThan(131072);
+		expect(
+			grants.split("\0").filter((t) => t.includes(`${path.sep}folder-`)).length,
+		).toBeGreaterThanOrEqual(5000);
+		const line = argv.join(" ").length;
+		expect(line).toBeLessThan(LANDLOCK_HELPER.length + 1000);
+	});
+
+	test.if(live)(
+		"live: rooted at that home, run_command reads its notes and not its key",
+		async () => {
+			process.env.HOME = big;
+			on();
+			const ok = await run(big, "cat notes.txt");
+			expect(ok).toContain("BIG-NOTES");
+			expect(ok).not.toMatch(/Argument list too long|E2BIG|could not be applied/);
+			fs.writeFileSync(path.join(big, "folder-4999", "deep.txt"), "BIG-DEEP");
+			expect(await run(big, "cat folder-4999/deep.txt")).toContain("BIG-DEEP");
+			const shut = await run(big, "cat .s${x:-sh}/id_rsa");
+			expect(shut).not.toContain("BIG-PRIVATE");
+			expectKernelRefusal(shut);
+		},
+	);
+});
+
+describe("the walk inside a data root stops at the budget, however big the folder", () => {
+	test("a 20000-entry folder costs at most the budget in entries read", () => {
+		const dr = path.join(base, "walkroot", ".8gent");
+		const bigDir = path.join(dr, "huge");
+		fs.mkdirSync(bigDir, { recursive: true });
+		for (let i = 0; i < 20000; i++) fs.writeFileSync(path.join(bigDir, `f${i}`), "");
+		let readInHuge = 0;
+		const counting = (dir: string): fs.Dir => {
+			const d = fs.opendirSync(dir);
+			if (dir !== bigDir) return d;
+			const readSync = d.readSync.bind(d);
+			d.readSync = (() => {
+				const e = readSync();
+				if (e) readInHuge++;
+				return e;
+			}) as typeof d.readSync;
+			return d;
+		};
+		const t0 = performance.now();
+		const p = landlockPlan([dr], [], [dr], 500, counting);
+		const ms = performance.now() - t0;
+		expect(readInHuge).toBeLessThanOrEqual(501);
+		// Past the budget the folder is shut: neither readable nor removable.
+		expect(p.read.some((g) => g === bigDir || g.startsWith(`${bigDir}/`))).toBe(false);
+		expect(p.remove.some((g) => g === bigDir || g.startsWith(`${bigDir}/`))).toBe(false);
+		expect(ms).toBeLessThan(2000);
+	});
+
+	test("within the budget a clean folder still opens whole", () => {
+		const dr = path.join(base, "walkroot2", ".8gent");
+		fs.mkdirSync(path.join(dr, "small"), { recursive: true });
+		for (let i = 0; i < 10; i++) fs.writeFileSync(path.join(dr, "small", `f${i}`), "");
+		const p = landlockPlan([dr], [], [dr], 500);
+		expect(p.read).toContain(path.join(dr, "small"));
+	});
+});
+
+const canSudo = process.platform === "linux" && spawnSync("sudo", ["-n", "true"]).status === 0;
+
+test.if(canSudo)("a plan file owned by someone else is refused (the helper run as root)", () => {
+	const f = path.join(base, "plan-owner");
+	fs.writeFileSync(f, `R\0${ws}\0W\0`, { mode: 0o600 });
+	fs.chmodSync(f, 0o600);
+	const py = landlockPython() as string;
+	const r = spawnSync(
+		"sudo",
+		["-n", py, "-I", "-S", "-c", LANDLOCK_HELPER, "F", f, "--", "/bin/echo", "RAN"],
+		{ encoding: "utf8" },
+	);
+	expect(r.status).toBe(126);
+	expect(r.stderr).toContain("is not a 0600 file owned by this user");
+	expect(r.stdout).not.toContain("RAN");
 });

@@ -59,6 +59,8 @@ import { terminalBoundaryText } from "../permissions/read-allow";
 import { osReadSpec } from "../permissions/read-boundary";
 import {
 	RunCommandSandboxRequired,
+	osReadNotice,
+	osReadRefusal,
 	runCommandSandboxRefusal,
 	wrapRunCommand,
 	wrapRunCommandArgv,
@@ -1811,6 +1813,11 @@ async function runShellCommand(
 
 	const sandboxRefusal = runCommandSandboxRefusal();
 	if (sandboxRefusal) return sandboxRefusal;
+	// EIGHT_OS_READ_BOUNDARY=1 and the OS rule cannot be applied here: not run (#4890).
+	const readRefusal = osReadRefusal();
+	if (readRefusal) return readRefusal;
+	// "auto" where the rule cannot be applied: the first result of the session says so.
+	const readNotice = osReadNotice();
 	// The kernel read boundary (#4890, EIGHT_OS_READ_BOUNDARY=1): the root the read card judged.
 	const readScope = osReadSpec(finalCommand, {
 		cwd,
@@ -1823,7 +1830,7 @@ async function runShellCommand(
 		const recordRedirects = watchRedirects(finalCommand, cwd, ctx.createdFiles);
 		const resolve = (value: string) => {
 			recordRedirects();
-			settle(value);
+			settle(readNotice ? `${readNotice}\n${value}` : value);
 		};
 		// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
 		const proc = spawnShell(wrapRunCommand(finalCommand, readScope), {
