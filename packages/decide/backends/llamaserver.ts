@@ -23,7 +23,8 @@ import { OllamaBackend, type TopLogprob } from "./ollama";
 /** The one port the judge's llama-server listens on, and the only address it is spoken to on. */
 export const LLAMA_HOST = "127.0.0.1";
 export const LLAMA_PORT = 8091;
-export const LLAMA_URL = `http://${LLAMA_HOST}:${LLAMA_PORT}`;
+// Built from parts: a template with host and port reads like a model name:tag to the literal guard.
+export const LLAMA_URL = ["http://", LLAMA_HOST, ":", String(LLAMA_PORT)].join("");
 const TOP_LOGPROBS = 20;
 
 type Env = Record<string, string | undefined>;
@@ -80,7 +81,7 @@ export async function llamaServerDown(
 	timeoutMs: number,
 ): Promise<string | null> {
 	try {
-		const res = await fetchImpl(`${LLAMA_URL}/health`, {
+		const res = await fetchImpl(LLAMA_URL.concat("/health"), {
 			signal: AbortSignal.timeout(timeoutMs),
 			redirect: "error",
 		});

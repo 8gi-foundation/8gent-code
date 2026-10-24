@@ -425,6 +425,8 @@ export const OLLAMA_TAG_READERS_REVIEWED: Record<string, string> = {
 	"packages/board-vessel/vessel.ts": "waits for Ollama to answer",
 	"packages/decide/index.ts": "comment",
 	"packages/eight/judge-install.ts": "reachability probe; pulls a fixed judge model",
+	"packages/eight/local-runtime.ts":
+		"reachability probe of the Ollama it started itself (status only); lists no models",
 	"packages/eight/repl.ts": "fast-mode prefix match; /models listing",
 	"packages/harness-cli/commands/doctor.ts": "doctor listing",
 	"packages/kernel/proxy.ts": "health probe",
@@ -503,9 +505,9 @@ export const INSTALL_SITES: InstallSite[] = [
 	},
 	{
 		file: "packages/eight/judge-install.ts",
-		max: 2,
+		max: 1,
 		mode: "default",
-		why: "first launch asks, default yes, to pull the judge model through Ollama, and says to run ollama serve",
+		why: "when Ollama is installed but stopped and declined, the judge message says to run ollama serve",
 		waiver: INSTALL_WAIVER,
 	},
 	{

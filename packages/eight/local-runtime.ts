@@ -362,6 +362,7 @@ export async function startOllama(deps: StartDeps = {}): Promise<StartResult> {
 	const bin = (deps.find ?? ((n: string) => findOnPath(n, env)))("ollama");
 	const failed = (why: string): StartResult => ({
 		ok: false,
+		// local-first-gate: fallback tells a person who already has Ollama how to start it by hand
 		line: `${why} Start it yourself with: ollama serve`,
 	});
 	if (!bin) return failed("Ollama was not found on PATH.");
@@ -369,6 +370,7 @@ export async function startOllama(deps: StartDeps = {}): Promise<StartResult> {
 	return launch(deps, {
 		kind: "ollama",
 		bin,
+		// local-first-gate: fallback ollama serve, only for a person who already has Ollama installed
 		args: ["serve"],
 		probeUrl: `${deps.baseUrl ?? OLLAMA_PROBE_URL}/api/tags`,
 		waitMs: deps.waitMs ?? OLLAMA_WAIT_MS,
