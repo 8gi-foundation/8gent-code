@@ -208,6 +208,7 @@ import {
 	checkpointEveryFromEnv,
 } from "./timetravel/checkpoint-store";
 import { ToolLoopDetector, isQuietSuccess } from "./tool-loop-detector";
+import { keepToolOutput } from "./tool-output";
 import { ToolRegistry, getDeferredToolSegment } from "./tool-registry";
 import { ToolExecutor, messageBoardroomOn } from "./tools";
 import { TurnJournal } from "./turn-journal";
@@ -1313,6 +1314,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			success,
 			durationMs,
 			resultPreview: result.slice(0, 200),
+			resultFull: keepToolOutput(result),
 		});
 		await this.hookManager.executeHooks("afterTool", {
 			sessionId: this.sessionId,
@@ -1887,6 +1889,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					durationMs,
 					stepNumber: step,
 					resultPreview: shown.slice(0, 200),
+					resultFull: keepToolOutput(shown),
 				});
 
 				return result;
@@ -3289,6 +3292,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					durationMs: event.durationMs,
 					stepNumber: event.stepNumber,
 					resultPreview: resultStr.slice(0, 200),
+					resultFull: keepToolOutput(resultStr),
 				});
 
 				// Record tool call for Convex session sync

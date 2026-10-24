@@ -18,6 +18,7 @@ import { Box, Text } from "ink";
 import { useEffect, useRef, useState } from "react";
 import { motionEnabled, staggerFor } from "../lib/motion.js";
 import { glyphs } from "../lib/term-caps.js";
+import { outputExtraRows } from "../lib/tool-output-state.js";
 import {
 	type ToolTrailEntry,
 	type TrailStatus,
@@ -25,6 +26,7 @@ import {
 	formatTrailRow,
 } from "../lib/tool-trail.js";
 import { t } from "../theme.js";
+import { OutputRowShell } from "./ToolOutput.js";
 
 // Read at render time: `t` follows the live light/dark theme.
 function iconColor(status: TrailStatus): string {
@@ -98,12 +100,14 @@ export function ToolTrail({
 				return (
 					// Rows are positional within one turn and never reorder.
 					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
-					<Box key={i} width={width}>
-						<Text color={iconColor(row.status)}>{icon}</Text>
-						<Text color={row.status === "ok" ? t.muted : t.textPrimary} wrap="truncate-end">
-							{` ${text}`}
-						</Text>
-					</Box>
+					<OutputRowShell key={i} row={row} width={width}>
+						<Box width={width}>
+							<Text color={iconColor(row.status)}>{icon}</Text>
+							<Text color={row.status === "ok" ? t.muted : t.textPrimary} wrap="truncate-end">
+								{` ${text}`}
+							</Text>
+						</Box>
+					</OutputRowShell>
 				);
 			})}
 		</Box>
@@ -111,6 +115,8 @@ export function ToolTrail({
 }
 
 /** Rows a trail occupies, for MessageList's row-budget math. */
-export function toolTrailRows(entries: ToolTrailEntry[], maxRows?: number): number {
-	return entries.length === 0 ? 0 : collapseTrail(entries, maxRows).length;
+export function toolTrailRows(entries: ToolTrailEntry[], maxRows?: number, width = 80): number {
+	if (entries.length === 0) return 0;
+	const rows = collapseTrail(entries, maxRows);
+	return rows.length + outputExtraRows(rows, width);
 }

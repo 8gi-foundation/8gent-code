@@ -354,6 +354,7 @@ import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
 import { detectTermPresetIntent } from "./lib/term-intent.js";
 import { copiedNotice, notCopiedNotice } from "./lib/text-selection.js";
 import { truncate } from "./lib/text.js";
+import { outCommand, toggleLatestOutput } from "./lib/tool-output-state.js";
 import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
 import { BTWView } from "./screens/BTWView.js";
@@ -2705,6 +2706,8 @@ export function App({
 		// Toggle expanded view with Ctrl+O (familiar zoom shortcut from peer terminal agents)
 		if (key.ctrl && input === "o") {
 			setExpandedView((prev) => !prev);
+			// The newest tool call that has output opens or closes under its row (#4954).
+			toggleLatestOutput(messages);
 		}
 
 		// Ctrl+L: open the model picker overlay (#3918 D3). Ctrl+M stays bound,
@@ -4214,6 +4217,10 @@ export function App({
 
 				case "copy":
 					addSystemMessage(copyReply(messages, { write: (seq) => inkStdout.write(seq) }));
+					break;
+
+				case "out":
+					addSystemMessage(outCommand(args.join(" "), messages));
 					break;
 
 				case "herdr":

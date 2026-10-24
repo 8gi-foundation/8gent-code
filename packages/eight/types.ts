@@ -43,6 +43,8 @@ export interface AgentToolEndEvent {
 	stepNumber?: number;
 	/** First ~200 chars of the result for display */
 	resultPreview?: string;
+	/** The result as the model saw it, capped (tool-output.ts). Stays in this process; the TUI shows it on request. */
+	resultFull?: string;
 }
 
 /** Event emitted when a step finishes */

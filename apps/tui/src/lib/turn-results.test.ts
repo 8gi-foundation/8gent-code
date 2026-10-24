@@ -34,22 +34,43 @@ describe("buildTurnResults: tool rows", () => {
 	});
 
 	test("a command that exited non-zero ran, and says its exit code", () => {
-		const [row] = buildTurnResults([{ tool: "run_command", summary: "bun test", status: "fail", reason: "exit 1" }]);
+		const [row] = buildTurnResults([
+			{ tool: "run_command", summary: "bun test", status: "fail", reason: "exit 1" },
+		]);
 		expect(row).toMatchObject({ status: "fail", verb: "Ran", chip: "bun test", note: "exit 1" });
 	});
 
 	test("any other failure never claims the work happened", () => {
 		const [row] = buildTurnResults([
-			{ tool: "write_file", summary: "deck/outline.md", status: "fail", reason: "Unterminated string" },
+			{
+				tool: "write_file",
+				summary: "deck/outline.md",
+				status: "fail",
+				reason: "Unterminated string",
+			},
 		]);
-		expect(row).toMatchObject({ status: "fail", verb: "Write failed", note: "Unterminated string" });
+		expect(row).toMatchObject({
+			status: "fail",
+			verb: "Write failed",
+			note: "Unterminated string",
+		});
 	});
 
 	test("a blocked call names what was stopped and the rule", () => {
 		const [row] = buildTurnResults([
-			{ tool: "write_file", summary: ".env", status: "blocked", reason: "blocked: [no-secrets-in-files]" },
+			{
+				tool: "write_file",
+				summary: ".env",
+				status: "blocked",
+				reason: "blocked: [no-secrets-in-files]",
+			},
 		]);
-		expect(row).toMatchObject({ status: "blocked", verb: "Write blocked", chip: ".env", note: "[no-secrets-in-files]" });
+		expect(row).toMatchObject({
+			status: "blocked",
+			verb: "Write blocked",
+			chip: ".env",
+			note: "[no-secrets-in-files]",
+		});
 	});
 
 	test("an unknown tool shows its own name, never an invented verb", () => {
@@ -64,7 +85,12 @@ describe("buildTurnResults: tool rows", () => {
 			ok("read_file", "packages/decide/docs/ENGINE.md"),
 			ok("write_file", "deck/outline.md"),
 		]);
-		expect(rows[0]).toMatchObject({ verb: "Read", chip: "packages/decide/", note: "3 files", count: 3 });
+		expect(rows[0]).toMatchObject({
+			verb: "Read",
+			chip: "packages/decide/",
+			note: "3 files",
+			count: 3,
+		});
 		expect(rows[1]).toMatchObject({ verb: "Wrote", chip: "deck/outline.md" });
 	});
 
@@ -125,7 +151,12 @@ describe("buildTurnResults: the reported plan", () => {
 			]),
 			ok("edit_file", "src/paginate.ts"),
 		]);
-		expect(rows[0]).toMatchObject({ kind: "plan", status: "ok", verb: "Find", text: "the off-by-one" });
+		expect(rows[0]).toMatchObject({
+			kind: "plan",
+			status: "ok",
+			verb: "Find",
+			text: "the off-by-one",
+		});
 		expect(rows[1]).toMatchObject({ kind: "plan", status: "ok", verb: "Fix", text: "paginate" });
 		expect(rows[2]).toMatchObject({ kind: "tool", verb: "Edited" });
 	});
@@ -228,7 +259,10 @@ describe("buildTurnResults: the step count is the PLAN column's", () => {
 	});
 
 	test("a folded run of pending steps is not ticked", () => {
-		const plan = planOf(6).map((s, i) => ({ ...s, status: i === 0 ? ("done" as const) : ("pending" as const) }));
+		const plan = planOf(6).map((s, i) => ({
+			...s,
+			status: i === 0 ? ("done" as const) : ("pending" as const),
+		}));
 		const rows = buildTurnResults([], 3, plan);
 		const fold = rows.find((r) => r.kind === "fold");
 		expect(fold).toMatchObject({ status: "pending", verb: "4 more steps" });
@@ -237,7 +271,9 @@ describe("buildTurnResults: the step count is the PLAN column's", () => {
 
 	test("a plan written as PLAN: text, never reported by update_plan, still shows", () => {
 		// The PLAN column merges written plan text; the trail has no update_plan.
-		const column = settlePlan(mergePlanText([], ["Read the failing test", "Fix the slice", "Run bun test"]));
+		const column = settlePlan(
+			mergePlanText([], ["Read the failing test", "Fix the slice", "Run bun test"]),
+		);
 		const trail = [ok("edit_file", "src/paginate.ts"), ok("run_command", "bun test")];
 		expect(turnPlan(trail)).toEqual([]);
 		const rows = buildTurnResults(trail, MAX_RESULT_ROWS, column);
@@ -251,11 +287,23 @@ describe("buildTurnResults: the step count is the PLAN column's", () => {
 
 	test("the column's own reducer and the trail agree when update_plan is the source", () => {
 		const reports = [
-			[{ step: "Find the bug", status: "in_progress" }, { step: "Fix it", status: "pending" }],
-			[{ step: "Find the bug", status: "completed" }, { step: "Fix it", status: "in_progress" }],
+			[
+				{ step: "Find the bug", status: "in_progress" },
+				{ step: "Fix it", status: "pending" },
+			],
+			[
+				{ step: "Find the bug", status: "completed" },
+				{ step: "Fix it", status: "in_progress" },
+			],
 		];
-		const column = settlePlan(reports.reduce<PlanStep[]>((prev, items) => applyPlanUpdate(prev, items), []));
-		const trail = reports.map((items) => ({ tool: "update_plan", status: "ok" as const, plan: items }));
+		const column = settlePlan(
+			reports.reduce<PlanStep[]>((prev, items) => applyPlanUpdate(prev, items), []),
+		);
+		const trail = reports.map((items) => ({
+			tool: "update_plan",
+			status: "ok" as const,
+			plan: items,
+		}));
 		const fromColumn = buildTurnResults(trail as ToolTrailEntry[], MAX_RESULT_ROWS, column);
 		const fromTrail = buildTurnResults(trail as ToolTrailEntry[]);
 		expect(fromColumn).toEqual(fromTrail);
@@ -264,9 +312,20 @@ describe("buildTurnResults: the step count is the PLAN column's", () => {
 
 describe("fitResultRow", () => {
 	test("the chip is cut before the verb, and the whole row fits", () => {
-		const row = { kind: "tool" as const, status: "ok" as const, verb: "Ran", chip: "x".repeat(200), count: 1, note: "exit 1" };
+		const row = {
+			kind: "tool" as const,
+			status: "ok" as const,
+			verb: "Ran",
+			chip: "x".repeat(200),
+			count: 1,
+			note: "exit 1",
+		};
 		const fit = fitResultRow(row, 40);
-		const used = 2 + fit.verb.length + (fit.chip ? fit.chip.length + 3 : 0) + (fit.note ? fit.note.length + (fit.noteGap ?? 0) : 0);
+		const used =
+			2 +
+			fit.verb.length +
+			(fit.chip ? fit.chip.length + 3 : 0) +
+			(fit.note ? fit.note.length + (fit.noteGap ?? 0) : 0);
 		expect(fit.verb).toBe("Ran");
 		expect(fit.chip?.endsWith("…")).toBe(true);
 		expect(fit.note).toBe("exit 1");
@@ -274,7 +333,10 @@ describe("fitResultRow", () => {
 	});
 
 	test("a very narrow column keeps the verb", () => {
-		const fit = fitResultRow({ kind: "tool", status: "ok", verb: "Wrote", chip: "deck/outline.md", count: 1 }, 10);
+		const fit = fitResultRow(
+			{ kind: "tool", status: "ok", verb: "Wrote", chip: "deck/outline.md", count: 1 },
+			10,
+		);
 		expect(fit.verb).toBe("Wrote");
 	});
 });
@@ -315,10 +377,16 @@ describe("replyPlan", () => {
 });
 
 describe("plan steps with inline code (#3109)", () => {
-	const step = (text: string, status: PlanStep["status"] = "done"): PlanStep => ({ id: text, text, status });
+	const step = (text: string, status: PlanStep["status"] = "done"): PlanStep => ({
+		id: text,
+		text,
+		status,
+	});
 
 	test("code in a step is a chip span, never a literal backtick", () => {
-		const [row] = buildTurnResults([], MAX_RESULT_ROWS, [step("Read `packages/decide/index.ts` first")]);
+		const [row] = buildTurnResults([], MAX_RESULT_ROWS, [
+			step("Read `packages/decide/index.ts` first"),
+		]);
 		expect(row.verb).toBe("Read");
 		expect(row.text).toBe("packages/decide/index.ts first");
 		expect(row.spans?.map((s) => [s.text, Boolean(s.code)])).toEqual([
@@ -343,7 +411,9 @@ describe("plan steps with inline code (#3109)", () => {
 	});
 
 	test("fits 80 and 160 columns: icon plus row never passes the width", () => {
-		const long = step("Edit `apps/tui/src/components/very/deep/path/to/TurnResults.tsx` and `bun test apps/tui`");
+		const long = step(
+			"Edit `apps/tui/src/components/very/deep/path/to/TurnResults.tsx` and `bun test apps/tui`",
+		);
 		for (const width of [24, 40, 80, 160]) {
 			const [row] = buildTurnResults([], MAX_RESULT_ROWS, [long]);
 			const fit = fitResultRow(row, width);
@@ -351,5 +421,61 @@ describe("plan steps with inline code (#3109)", () => {
 			expect([...drawn].length).toBeLessThanOrEqual(width);
 			expect(drawn).not.toContain("`");
 		}
+	});
+});
+
+describe("buildTurnResults: output carried to the row (#4954)", () => {
+	const withOut = (tool: string, summary: string, seq: number, output?: string, over = {}) =>
+		({ tool, summary, status: "ok", seq, output, ...over }) as ToolTrailEntry;
+
+	test("a single call's row names its call number and carries its output", () => {
+		const rows = buildTurnResults([
+			withOut("run_command", "bun test", 41, "Exit code 1:\nboom", {
+				status: "fail",
+				reason: "exit 1",
+			}),
+		]);
+		expect(rows[0].seq).toBe(41);
+		expect(rows[0].output).toBe("Exit code 1:\nboom");
+		expect(rows[0].note).toBe("exit 1");
+	});
+
+	test("a blocked call carries its reason text too", () => {
+		const rows = buildTurnResults([
+			withOut("run_command", "git push --force", 42, "[BLOCKED] no", {
+				status: "blocked",
+				reason: "blocked",
+			}),
+		]);
+		expect(rows[0].seq).toBe(42);
+		expect(rows[0].output).toBe("[BLOCKED] no");
+	});
+
+	test("reads folded into one row stand for several calls, so the row has none", () => {
+		const rows = buildTurnResults([
+			withOut("read_file", "a/1.ts", 1, "x"),
+			withOut("read_file", "a/2.ts", 2, "y"),
+			withOut("read_file", "a/3.ts", 3, "z"),
+		]);
+		expect(rows).toHaveLength(1);
+		expect(rows[0].count).toBe(3);
+		expect(rows[0].seq).toBeUndefined();
+		expect(rows[0].output).toBeUndefined();
+	});
+
+	test("the same command run again keeps the newest call's output", () => {
+		const rows = buildTurnResults([
+			withOut("run_command", "bun test", 10, "first"),
+			withOut("run_command", "bun test", 11, "second"),
+		]);
+		expect(rows).toHaveLength(1);
+		expect(rows[0].note).toBe("×2");
+		expect(rows[0].seq).toBe(11);
+		expect(rows[0].output).toBe("second");
+	});
+
+	test("a call with no output carries no output", () => {
+		const rows = buildTurnResults([withOut("write_file", "a.md", 7)]);
+		expect(rows[0].output).toBeUndefined();
 	});
 });
