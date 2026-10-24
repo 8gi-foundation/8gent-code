@@ -135,10 +135,55 @@ function rememberVolume(v: number): void {
 	} catch {}
 }
 
+/** How many hits a search asks for: enough that one unplayable hit does not end it (#4963). */
+export const SEARCH_HITS = 5;
+
+export interface SearchRow {
+	title: string;
+	url: string;
+	/** Seconds, or null for a live stream or when yt-dlp did not say. */
+	duration: number | null;
+}
+
+/** Rows of `title<TAB>url<TAB>duration`; a row without a real URL is dropped. Two columns still parse. */
+export function parseSearchRows(out: string): SearchRow[] {
+	const rows: SearchRow[] = [];
+	for (const line of out.split("\n")) {
+		const [title = "", url = "", dur = ""] = line.split("\t");
+		const u = url.trim();
+		if (!/^https?:\/\//.test(u)) continue;
+		const d = Number.parseFloat(dur);
+		rows.push({ title: title.trim(), url: u, duration: Number.isFinite(d) ? d : null });
+	}
+	return rows;
+}
+
+/** A track, not a clip or a mix: 1 to 15 minutes. */
+const MUSIC_MIN_S = 60;
+const MUSIC_MAX_S = 15 * 60;
+
+/**
+ * The artist's top track among the hits, in YouTube's own order: the first of music
+ * length; else the first with a known length (not a live stream); else the first row.
+ * Something always plays when something was found.
+ */
+export function pickTrack(rows: SearchRow[]): SearchRow | null {
+	return (
+		rows.find(
+			(r) => r.duration != null && r.duration >= MUSIC_MIN_S && r.duration <= MUSIC_MAX_S,
+		) ??
+		rows.find((r) => r.duration != null) ??
+		rows[0] ??
+		null
+	);
+}
+
 /**
  * Search YouTube for one result, off the event loop (#3182). Resolves null
  * when nothing is found, yt-dlp fails, or the search runs past `timeoutMs`
- * (the child is then ended by its own handle).
+ * (the child is then ended by its own handle). It asks for several flat hits and
+ * ignores the ones yt-dlp cannot extract: an artist-only query used to say "No
+ * results" when its one hit was unavailable or live (#4963).
  */
 export function ytSearch(
 	ytdlp: string,
@@ -149,10 +194,21 @@ export function ytSearch(
 		let out = "";
 		let child: ChildProcess;
 		try {
-			child = spawnImpl(ytdlp, ["--print", "%(title)s\t%(webpage_url)s", `ytsearch1:${query}`], {
-				stdio: ["ignore", "pipe", "ignore"],
-				windowsHide: true,
-			});
+			child = spawnImpl(
+				ytdlp,
+				[
+					"--flat-playlist",
+					"--ignore-errors",
+					"--no-warnings",
+					"--print",
+					"%(title)s\t%(url)s\t%(duration)s",
+					`ytsearch${SEARCH_HITS}:${query}`,
+				],
+				{
+					stdio: ["ignore", "pipe", "ignore"],
+					windowsHide: true,
+				},
+			);
 		} catch {
 			resolve(null);
 			return;
@@ -174,9 +230,10 @@ export function ytSearch(
 			out += d;
 		});
 		child.on("error", () => finish(null));
-		child.on("close", (code) => {
-			const [title, url] = out.trim().split("\n")[0]?.split("\t") ?? [];
-			finish(code === 0 && url ? { title: title || query, url: url.trim() } : null);
+		// An error exit with rows printed still plays: yt-dlp exits 1 over one bad entry.
+		child.on("close", () => {
+			const pick = pickTrack(parseSearchRows(out));
+			finish(pick ? { title: pick.title || query, url: pick.url } : null);
 		});
 	});
 }

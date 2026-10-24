@@ -31,7 +31,8 @@ describe("ytSearch", () => {
 		});
 		await ytSearch("/usr/bin/yt-dlp", evil);
 		expect(seen!.cmd).toBe("/usr/bin/yt-dlp");
-		expect(seen!.args).toEqual(["--print", "%(title)s\t%(webpage_url)s", `ytsearch1:${evil}`]);
+		expect(seen!.args.at(-1)).toBe(`ytsearch5:${evil}`);
+		expect(seen!.args.filter((a) => a.includes(evil))).toHaveLength(1);
 		expect(existsSync("/tmp/pwned-4530")).toBe(false);
 	});
 });
