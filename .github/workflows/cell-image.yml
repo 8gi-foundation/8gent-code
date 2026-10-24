@@ -33,7 +33,7 @@ jobs:
       - name: Build the image
         run: |
           # The end of a failed build goes into annotations, where it can be read without the raw log.
-          docker build -t cell-image . > build.log 2>&1 || { tail -n 9 build.log | sed 's/^/::error::/'; exit 1; }
+          docker build -t cell-image . > build.log 2>&1 || { grep -v '^#[0-9]* \\(DONE\\|CACHED\\)' build.log | tail -n 45 | cut -c1-220 | paste -sd'|' - | fold -w 800 | sed 's/^/::error::/'; exit 1; }
           tail -n 3 build.log
       - name: The CLI is in the image
         run: docker run --rm cell-image sh -c 'test -f /app/bin/8gent.ts && git --version && bun --version'
