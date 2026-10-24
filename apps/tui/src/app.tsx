@@ -277,6 +277,13 @@ import {
 } from "./lib/context-window.js";
 import { copyReply } from "./lib/copy-answer.js";
 import {
+	type Notice,
+	errorNotice,
+	guardNoticeOf,
+	noticeText,
+	retryNoticeOf,
+} from "./lib/error-row.js";
+import {
 	formatSessionTime,
 	formatTokens,
 	hudTokens,
@@ -891,6 +898,8 @@ export interface Message {
 	/** For a turn's reply: the plan the PLAN column held when it landed, settled.
 	 *  The DONE block reads its steps from here, so the two never disagree. */
 	plan?: PlanStep[];
+	/** An error, a retry or a loop guard: drawn as its own row, not as a bubble or a grey card (lib/error-row.ts). */
+	notice?: Notice;
 }
 
 type ProcessingStage = "planning" | "toolshed" | "executing" | "complete";
@@ -3267,10 +3276,34 @@ export function App({
 	// by agent, so an agent rebuilt for another model starts clean.
 	const routedModelRef = useRef(new WeakMap<object, { model: string; provider: string }>());
 	const routeNoticesRef = useRef(new Map<string, Set<string>>());
+	// Retries made in each tab's current turn, so a final error can say how many (#4955).
+	const retriesByTabRef = useRef(new Map<string, number>());
 	const [, setRoutedTick] = useState(0);
 	const getTabAgent = perTabAgents.getAgent;
 	const buildEventsForTab = useCallback(
 		(tabId: string, tabTitle: string): AgentEventCallbacks => ({
+			onRetry: (event) => {
+				// A retry or failover, one line in turn order; counted so a final error can say how many (#4955).
+				retriesByTabRef.current.set(tabId, (retriesByTabRef.current.get(tabId) ?? 0) + 1);
+				const notice = retryNoticeOf(event);
+				appendToTab(tabId, {
+					id: messageId("retry"),
+					role: "system" as const,
+					content: noticeText(notice),
+					timestamp: new Date(),
+					notice,
+				});
+			},
+			onGuard: (event) => {
+				const notice = guardNoticeOf(event);
+				appendToTab(tabId, {
+					id: messageId("guard"),
+					role: "system" as const,
+					content: noticeText(notice),
+					timestamp: new Date(),
+					notice,
+				});
+			},
 			onModelRouted: (event) => {
 				const routedAgent = getTabAgent(tabId);
 				if (!routedAgent) return;
@@ -7514,6 +7547,7 @@ export function App({
 		// lookups, and event side-effects scope to `tabId` so concurrent
 		// submissions across tabs don't clobber each other.
 		const runAgent = async (message: string) => {
+			retriesByTabRef.current.set(tabId, 0);
 			setAgentRunningOnTab(tabId, true);
 			perTabAgents.setTabProcessing(tabId, true);
 			// Foreground-only resets - if the user submitted on the active tab,
@@ -7771,11 +7805,13 @@ export function App({
 					const cutOff = isDurableEnabled() && isCutOffError(err);
 					if (cutOff) flushText();
 					else noteTurnEnd();
+					const failedNotice = errorNotice(errorMsg, retriesByTabRef.current.get(tabId) ?? 0);
 					appendToTab(tabId, {
 						id: `assistant-error-${Date.now()}`,
 						role: "assistant" as const,
 						content: `[Error] ${errorMsg}`,
 						timestamp: new Date(),
+						notice: failedNotice,
 					});
 					const cut = cutOff && activeSessionId ? cutOffNotice(lastTurn(activeSessionId)) : null;
 					if (cut) addSystemMessage(`Connection dropped.\n${cut}`);
