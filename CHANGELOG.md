@@ -9,6 +9,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.26] - 2026-10-24
+
+### Added
+- permissions: workspace read boundary in the kernel on macOS (#4890 slice 1) ([#4892](https://github.com/8gi-foundation/8gent-code/pull/4892))
+
 ## [0.20.25] - 2026-10-23
 
 ### Added
