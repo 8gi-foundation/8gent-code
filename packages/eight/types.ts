@@ -45,6 +45,31 @@ export interface AgentToolEndEvent {
 	resultPreview?: string;
 }
 
+/** A retry or failover the agent is about to make (#4955). Display only: nothing here changes what runs. */
+export interface AgentRetryEvent {
+	/** rate_limit: same backend after a wait. transient: same backend once more. failover: moving to the next in the chain. */
+	kind: "rate_limit" | "transient" | "failover";
+	provider: string;
+	model: string;
+	/** Retry number and how many retries there are (failover: 1 of 1, not a counted retry). */
+	attempt: number;
+	max: number;
+	/** What the provider said, cut to 200 characters. */
+	cause: string;
+	delayMs?: number;
+	/** failover: "provider/model" it moves to. */
+	next?: string;
+}
+
+/** A loop guard fired (#4955): a warning to the model, a nudge, or the circuit breaker stopping the turn. */
+export interface AgentGuardEvent {
+	kind: "loop_warning" | "loop_nudge" | "circuit_breaker";
+	tool?: string;
+	count?: number;
+	/** The guard's own plain-language reason (the detector's userMessage). */
+	reason?: string;
+}
+
 /** Event emitted when a step finishes */
 export interface AgentStepEvent {
 	stepNumber: number;
@@ -94,6 +119,8 @@ export interface AgentEventCallbacks {
 	onStepStart?: (event: AgentStepStartEvent) => void;
 	onStepFinish?: (event: AgentStepEvent) => void;
 	/** No token, step or tool for a while (#4727). null = the reply arrived. Display only. */
+	onRetry?: (event: AgentRetryEvent) => void;
+	onGuard?: (event: AgentGuardEvent) => void;
 	onStall?: (event: { silentSeconds: number | null; provider: string }) => void;
 	onEvidence?: (event: AgentEvidenceEvent) => void;
 	onEvidenceSummary?: (event: AgentEvidenceSummaryEvent) => void;

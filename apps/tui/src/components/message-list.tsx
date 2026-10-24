@@ -31,6 +31,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "../app.js";
 import { useMouseScroll } from "../hooks/useMouseScroll.js";
 import { bubbleWidths } from "../lib/chat-layout.js";
+import { type Notice, noticeLines } from "../lib/error-row.js";
 import {
 	CODE_GUTTER,
 	INDENT_STEP,
@@ -179,6 +180,10 @@ function estimateMessageRows(
 	wrapWidth: number,
 	trail: ToolTrailEntry[] = [],
 ): number {
+	if (message.notice)
+		return (
+			noticeLines(message.notice, wrapWidth).length + (message.notice.tone === "error" ? 1 : 0)
+		);
 	const trailRows = callRows(message, trail);
 	// A standalone trail (calls with no reply yet): its rows + marginBottom.
 	if (message.role === "tool") return trailRows > 0 ? trailRows + 1 : 0;
@@ -498,6 +503,34 @@ interface MessageItemProps {
 	onAnimationStart?: (id: string) => void;
 }
 
+/** An error row (red, with its lines) or a one-line guard or retry notice (orange). */
+function NoticeView({ notice, width }: { notice: Notice; width: number }) {
+	const lines = noticeLines(notice, width);
+	const g = glyphs();
+	return (
+		<Box
+			flexDirection="column"
+			flexShrink={0}
+			marginBottom={notice.tone === "error" ? 1 : 0}
+			width={width}
+		>
+			{lines.map((line, i) => {
+				const text = line.startsWith("✗") ? `${g.fail}${line.slice(1)}` : line;
+				const color = notice.tone === "error" ? (i === 0 ? t.red : t.muted) : t.orange;
+				return (
+					// Lines are positional within one notice and never reorder.
+					// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+					<Box key={i} width={width} height={1}>
+						<Text color={color} wrap="truncate-end">
+							{text}
+						</Text>
+					</Box>
+				);
+			})}
+		</Box>
+	);
+}
+
 function MessageItem({
 	message,
 	isNew,
@@ -539,6 +572,11 @@ function MessageItem({
 			return () => clearTimeout(timeout);
 		}
 	}, [isNew, message.id, onAnimationStart]);
+
+	// An error, a retry or a loop guard is its own row, in turn order, never a bubble or a grey card.
+	if (message.notice) {
+		return <NoticeView notice={message.notice} width={innerContentWidth} />;
+	}
 
 	// A "tool" item here is a standalone trail: calls with no reply yet. Raw
 	// tool messages are dropped by buildChatItems and never reach this point.

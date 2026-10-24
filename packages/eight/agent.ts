@@ -221,7 +221,13 @@ import {
 	withProgressTimeout,
 	withTurnTimeout,
 } from "./turn-timeout";
-import type { AgentConfig, AgentEventCallbacks, ReadyCheck } from "./types";
+import type {
+	AgentConfig,
+	AgentEventCallbacks,
+	AgentGuardEvent,
+	AgentRetryEvent,
+	ReadyCheck,
+} from "./types";
 import { VisionInterpreter, oneLineError } from "./vision-interpreter";
 import { isKnownVisionModel } from "./vision-router";
 
@@ -1838,21 +1844,29 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				if (loopResult?.recoverable) {
 					// A repeat of calls that all worked: tell the model, keep the turn (#4301).
 					console.log(`\n[LOOP NUDGE] ${loopResult.message}`);
+					this.emitGuard({ kind: "loop_nudge", tool: toolName, reason: loopResult.userMessage });
 					result = `${result}\n\n[harness] ${loopResult.message}`;
 				} else if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
+					this.emitGuard({
+						kind: "circuit_breaker",
+						tool: toolName,
+						reason: loopResult.userMessage,
+					});
 					if (breakerStop === null) breakerStop = loopResult.userMessage;
 					this.abort({ kind: "circuit_breaker", reason: loopResult.message });
 				}
 				// A second post_message draft that broke a task rule stops the turn (#4191).
 				const presendStop = this.executor.takePresendStop();
 				if (presendStop) {
+					this.emitGuard({ kind: "circuit_breaker", reason: presendStop.reason });
 					if (breakerStop === null) breakerStop = presendStop.reason;
 					this.abort(presendStop);
 				}
 				// A second boundary block on one path ends the turn with a plain reply (#4715).
 				const boundaryStop = takeBoundaryStop(this.readScope);
 				if (boundaryStop) {
+					this.emitGuard({ kind: "circuit_breaker", reason: boundaryStop });
 					if (breakerStop === null) breakerStop = boundaryStop;
 					this.abort({ kind: "circuit_breaker", reason: boundaryStop });
 				}
@@ -3225,6 +3239,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						`\n⚠️  [LOOP DETECTED] Tool "${event.toolName}" has been called ${count} times with similar args and keeps failing.`,
 					);
 					console.log("   Injecting guidance to try a different approach.\n");
+					this.emitGuard({ kind: "loop_warning", tool: event.toolName, count });
 					// Inject a system-level nudge into the conversation
 					this.messageHistory.push({
 						role: "user",
@@ -3245,9 +3260,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				const loopResult = this.loopDetector.check();
 				if (loopResult?.recoverable) {
 					console.log(`\n[LOOP NUDGE] ${loopResult.message}`);
+					this.emitGuard({
+						kind: "loop_nudge",
+						tool: event.toolName,
+						reason: loopResult.userMessage,
+					});
 					this.messageHistory.push({ role: "user", content: `[harness] ${loopResult.message}` });
 				} else if (loopResult) {
 					console.log(`\n[CIRCUIT BREAKER] ${loopResult.message}`);
+					this.emitGuard({
+						kind: "circuit_breaker",
+						tool: event.toolName,
+						reason: loopResult.userMessage,
+					});
 					this.abort({ kind: "circuit_breaker", reason: loopResult.message });
 				}
 				// A second post_message draft that broke a task rule stops the turn (#4191).
@@ -3806,6 +3831,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							console.log(
 								`[agent] ${currentEntry.provider}/${currentEntry.model} rate limited, retry in ${delay / 1000}s (${attempt}/${RATE_LIMIT_ATTEMPTS})`,
 							);
+							this.emitRetry({
+								kind: "rate_limit",
+								provider: currentEntry.provider,
+								model: currentEntry.model,
+								attempt,
+								max: RATE_LIMIT_ATTEMPTS - 1,
+								cause: msg.slice(0, 200),
+								delayMs: delay,
+							});
 							await new Promise((r) => setTimeout(r, delay));
 							continue;
 						}
@@ -3823,6 +3857,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							console.log(
 								`[agent] ${currentEntry.provider}/${currentEntry.model} transient error, grace retry in ${AFFINITY_GRACE_MS / 1000}s (cache affinity)`,
 							);
+							this.emitRetry({
+								kind: "transient",
+								provider: currentEntry.provider,
+								model: currentEntry.model,
+								attempt: 1,
+								max: 1,
+								cause: msg.slice(0, 200),
+								delayMs: AFFINITY_GRACE_MS,
+							});
 							await new Promise((r) => setTimeout(r, AFFINITY_GRACE_MS));
 							continue;
 						}
@@ -3849,6 +3892,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 						) {
 							break outer;
 						}
+						this.emitRetry({
+							kind: "failover",
+							provider: currentEntry.provider,
+							model: currentEntry.model,
+							attempt: 1,
+							max: 1,
+							cause: msg.slice(0, 200),
+							next: `${next.provider}/${next.model}`,
+						});
 						this.announceFailover(askedEntry, next);
 						currentEntry = next;
 						break; // exit inner attempt loop, outer reuses new currentEntry
@@ -4681,6 +4733,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	private announceFailover(asked: FailoverEntry, next: FailoverEntry): void {
 		if (asked.model === next.model && asked.provider === next.provider) return;
 		this.emitModelRouted(asked.model, next.model, next.provider);
+	}
+
+	private emitRetry(e: AgentRetryEvent): void {
+		try {
+			this.events.onRetry?.(e);
+		} catch {
+			// Display only.
+		}
+	}
+
+	private emitGuard(e: AgentGuardEvent): void {
+		try {
+			this.events.onGuard?.(e);
+		} catch {
+			// Display only.
+		}
 	}
 
 	private emitModelRouted(
