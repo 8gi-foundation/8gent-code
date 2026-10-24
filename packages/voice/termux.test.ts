@@ -129,7 +129,7 @@ test("findOnPath ignores non-executable files", () => {
 describe("android dictation line", () => {
 	test("is the one line, with no sox or whisper mention", () => {
 		expect(ANDROID_DICTATION_LINE).toBe(
-			"On Android, press Ctrl+R (or /voice record) to speak; the text lands in the prompt. Spoken replies: /voice on (needs termux-tts-speak: pkg install termux-api plus the Termux:API app).",
+			"On Android, press Ctrl+R (or /voice record) to speak, and again to stop; the text lands in the prompt. Spoken replies: /voice on (needs termux-tts-speak: pkg install termux-api plus the Termux:API app).",
 		);
 		expect(ANDROID_DICTATION_LINE).not.toMatch(/sox|whisper/i);
 	});
@@ -257,5 +257,13 @@ describe("androidMicStateLine (#4833)", () => {
 		expect(androidMicStateLine(true)).toContain("/voice mic off");
 		expect(androidMicStateLine(false)).toContain("off");
 		expect(androidMicStateLine(false)).toContain("asks");
+	});
+
+	test("on means on the phone unless the person chose cloud, and cloud says the audio leaves (#4905)", () => {
+		expect(androidMicStateLine(true)).toContain("transcribed on this phone with whisper.cpp");
+		expect(androidMicStateLine(true)).toContain("/voice mic cloud");
+		expect(androidMicStateLine(true, true)).toContain("audio leaves the phone");
+		expect(androidMicStateLine(true, true)).toContain("/voice mic local");
+		expect(androidMicStateLine(false, true)).toBe(androidMicStateLine(false));
 	});
 });

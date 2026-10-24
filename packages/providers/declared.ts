@@ -18,6 +18,7 @@
  * stays what it always was: a partial override of that built-in's config.
  */
 
+import { dropOllamaCloudNames } from "../core/ollama-cloud";
 import { THINKING_LEVELS_ORDERED } from "../types/index.js";
 import type { ProviderConfig } from "./index";
 
@@ -181,5 +182,7 @@ export async function discoverModelsAt(
 		...(data.data ?? []).map((m) => m.id),
 		...(data.models ?? []).map((m) => m.name ?? m.model),
 	];
-	return ids.filter((id): id is string => typeof id === "string" && id.length > 0);
+	// An Ollama endpoint also lists its cloud tags; those leave the machine, so not offered.
+	const named = ids.filter((id): id is string => typeof id === "string" && id.length > 0);
+	return compat === "ollama" ? dropOllamaCloudNames(named) : named;
 }

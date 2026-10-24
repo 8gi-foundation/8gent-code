@@ -207,7 +207,8 @@ bun run benchmark
 3. Make your changes
 4. Run tests and benchmarks
 5. Commit with clear messages
-6. Submit a PR
+6. Run `bun scripts/local-first-gate.ts`: no default may send user data off the device or run or ask for a system install (see [docs/security/principles-gate.md](docs/security/principles-gate.md))
+7. Submit a PR
 
 ## Documentation
 

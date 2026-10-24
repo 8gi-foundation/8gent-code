@@ -75,7 +75,7 @@ Democratize infinite general intelligence for everyone. Free, local-first, priva
 **These are not features. They are defaults.**
 
 1. **Design first, not last.** Before writing code, think about the interaction. Friction is the enemy. The best interface is the minimum that serves the user.
-2. **Free and local by default.** No API keys to start. Local models first. Cloud is opt-in. Privacy is the foundation.
+2. **Free and local by default.** No API keys to start. Local models first. Cloud is opt-in. Privacy is the foundation. Core works after one install: no default path runs, or tells the person to run, a system package install. CI enforces both: [docs/security/principles-gate.md](docs/security/principles-gate.md).
 3. **Self-evolving.** Eight gets better every session. Lessons persist. Skills accumulate.
 4. **Hyper-personal.** Learn the user's patterns, preferences, codebase, style. Two users should have different experiences after a week.
 5. **Accessible.** Key docs have audio. Voice input works. Screen readers work. Adapt to the user, not the reverse.
@@ -155,6 +155,7 @@ benchmarks/           <- Execution-graded benchmarks + autoresearch harness.
 8. **No AI vendor names in any product surface.** No "Export for AI", "Send to Claude", etc. No customer-facing AI/tooling language.
 9. **No direct push to main.** Always feature branch + PR.
 10. **Bun, not Node**, for all 8GI runtimes. Test before pushing.
+11. **Pass the principles gate.** `bun scripts/local-first-gate.ts` must pass: no default sends user data off the device, and no default runs or asks for an install. See [docs/security/principles-gate.md](docs/security/principles-gate.md).
 
 ### Content / Copy
 

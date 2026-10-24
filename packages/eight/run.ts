@@ -24,6 +24,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { isEmptyReplyNote } from "../ai/text-tool-loop";
+import { dropOllamaCloudNames } from "../core/ollama-cloud";
 import { resolveOllamaBaseUrl } from "../local-model-server/ollama-host";
 import { readableModelName } from "../providers/model-reroute";
 import { autoSwitchLine, soleRunnableProvider } from "../providers/only-runnable";
@@ -680,7 +681,7 @@ async function autoDetectOllamaModel(): Promise<string | null> {
 		});
 		if (!res.ok) return null;
 		const data = (await res.json()) as { models?: Array<{ name: string }> };
-		const names = (data.models || []).map((m) => m.name);
+		const names = dropOllamaCloudNames((data.models || []).map((m) => m.name));
 		return (
 			names.find((n) => n.startsWith("eight")) || names.find((n) => !n.includes("embed")) || null
 		);

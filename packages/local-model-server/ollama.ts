@@ -6,6 +6,7 @@
  * its cheapest authenticated-free round trip, 8-17 ms locally).
  */
 
+import { dropOllamaCloud } from "../core/ollama-cloud";
 import {
 	type LocalFetch,
 	type LocalModelEntry,
@@ -23,7 +24,9 @@ import {
  * the main brain on the M5 today. LM Studio also runs MLX there; llama-server
  * does not. Everywhere else Ollama serves GGUF through its llama.cpp engine.
  */
-export function ollamaCapabilities(host: { platform: string; arch: string } = process): LocalServerCapabilities {
+export function ollamaCapabilities(
+	host: { platform: string; arch: string } = process,
+): LocalServerCapabilities {
 	return Object.freeze({
 		listModels: true,
 		pull: true,
@@ -56,11 +59,14 @@ export function createOllamaServer(opts: OllamaServerOptions): LocalModelServer 
 		const res = await getWithSignal(fetchImpl, modelsUrl, req);
 		if (!res.ok) throw new LocalServerHttpError(modelsUrl, res.status);
 		const data = (await res.json()) as unknown;
-		if (data === null || typeof data !== "object") throw new LocalServerResponseError(modelsUrl, "body is not an object");
+		if (data === null || typeof data !== "object")
+			throw new LocalServerResponseError(modelsUrl, "body is not an object");
 		const models = (data as { models?: unknown }).models;
 		if (models === undefined || models === null) return [];
-		if (!Array.isArray(models)) throw new LocalServerResponseError(modelsUrl, "`models` is not a list");
-		return models as LocalModelEntry[];
+		if (!Array.isArray(models))
+			throw new LocalServerResponseError(modelsUrl, "`models` is not a list");
+		// Cloud tags are forwarded to ollama.com by the daemon: not offered unless opted in.
+		return dropOllamaCloud(models as LocalModelEntry[], (m) => m?.name);
 	}
 
 	async function isHealthy(req?: LocalRequestOptions): Promise<boolean> {

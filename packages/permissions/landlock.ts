@@ -432,6 +432,8 @@ export interface ProbeRun {
 	stdout: string;
 	signal: string | null;
 	error?: Error;
+	/** What the helper wrote to stderr, for the reason when it exited abnormally. */
+	stderr?: string;
 }
 
 type CachedStatus = { status: LandlockStatus; until: number };
@@ -462,6 +464,13 @@ export function landlockStatus(
 	return status;
 }
 
+let pythonFinder: () => string | undefined = () => landlockPython();
+
+/** Test hook: the python3 the probe runs (undefined: none found). Pass nothing to restore. */
+export function _setLandlockPython(find?: () => string | undefined): void {
+	pythonFinder = find ?? (() => landlockPython());
+}
+
 /** Test hook: forget the probe result. */
 export function _resetLandlockStatus(): void {
 	statusCache = undefined;
@@ -472,7 +481,13 @@ function realProbe(python: string): ProbeRun {
 		encoding: "utf8",
 		timeout: 5000,
 	});
-	return { status: r.status, stdout: r.stdout ?? "", signal: r.signal, error: r.error };
+	return {
+		status: r.status,
+		stdout: r.stdout ?? "",
+		signal: r.signal,
+		error: r.error,
+		stderr: r.stderr ?? "",
+	};
 }
 
 function probeStatus(
@@ -484,7 +499,7 @@ function probeStatus(
 		transient,
 	});
 	if (platform !== "linux" && platform !== "android") return no(`no Landlock on ${platform}`);
-	const python = landlockPython();
+	const python = pythonFinder();
 	if (!python) return no("python3 not found (the Landlock helper needs it)");
 	let r: ProbeRun;
 	try {
@@ -500,7 +515,15 @@ function probeStatus(
 		const why = r.error ? r.error.message : `killed (${r.signal})`;
 		return no(`the Landlock probe did not finish (${why}); it will be tried again`, true);
 	}
-	return no("this kernel does not support Landlock");
+	// The helper exits 3 when the kernel says it has no Landlock. Any other exit is the helper
+	// failing, not the kernel answering: say so, with what it wrote, and try again later.
+	if (r.status === 3) return no("this kernel does not support Landlock");
+	const wrote = (r.stderr ?? "").trim().split("\n")[0]?.slice(0, 160);
+	const how = r.status === 0 ? "printed no Landlock version" : `exit ${r.status}`;
+	return no(
+		`the Landlock probe failed (${how}${wrote ? `: ${wrote}` : ""}); it will be tried again`,
+		true,
+	);
 }
 
 let planDir: string | undefined;

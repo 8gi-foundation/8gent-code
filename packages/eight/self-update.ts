@@ -513,6 +513,7 @@ async function runNpmInstall(
 
 /** The command a person can run by hand after a failed update. */
 function npmHint(spec: string, prefix?: string | null, ignoreScripts = false): string {
+	// local-first-gate: optin the 8gent update command installs 8gent itself
 	return `npm install -g ${spec}${ignoreScripts ? " --ignore-scripts" : ""}${prefix ? ` --prefix ${prefix}` : ""} --force`;
 }
 
@@ -658,6 +659,7 @@ async function updateNpmFromRelease(
 	try {
 		const file = join(dir, name);
 		writeFileSync(file, bytes, { flag: "wx", mode: 0o600 });
+		// local-first-gate: optin the 8gent update command installs 8gent itself
 		o.log(`Installing with npm, package scripts off: npm install -g ${file} --ignore-scripts`);
 		const code = await runNpmInstall(o, rel.version, platform, file);
 		return code === 0
