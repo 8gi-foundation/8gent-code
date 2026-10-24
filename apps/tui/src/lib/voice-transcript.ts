@@ -25,17 +25,52 @@ export function voiceTranscriptTextWith(text: string, extraTokens: Iterable<stri
 	return spokenSlash(text, knownSlashNames(extraTokens));
 }
 
-/** Built-ins only: no disk read. */
-export function voiceTranscriptText(text: string): string {
-	return voiceTranscriptTextWith(text, []);
+// The skill and prompt-command names live in a module cache. The transcript path only ever reads
+// it, so it is synchronous: no scan can hang a transcript or let an older one land after a newer.
+let cachedTokens: readonly string[] = [];
+let inflight: Promise<void> | null = null;
+
+async function loadRegistryTokens(): Promise<string[]> {
+	const { getSlashRegistry } = await import("./slash-registry.js");
+	return [...(await getSlashRegistry()).byToken.keys()];
 }
 
-/** With the skills and prompt commands the slash menu knows. Falls back to built-ins if the scan fails. */
-export async function voiceTranscriptTextWithRegistry(text: string): Promise<string> {
-	try {
-		const { getSlashRegistry } = await import("./slash-registry.js");
-		return voiceTranscriptTextWith(text, (await getSlashRegistry()).byToken.keys());
-	} catch {
-		return voiceTranscriptText(text);
-	}
+/**
+ * Refresh the cache in the background. One scan at a time; a failed scan keeps the old cache; a
+ * scan that hangs is abandoned after timeoutMs so the next call can try again. Never throws.
+ */
+export function refreshSlashNames(
+	load: () => Promise<string[]> = loadRegistryTokens,
+	timeoutMs = 10_000,
+): Promise<void> {
+	if (inflight) return inflight;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const run = (async () => {
+		try {
+			const tokens = await Promise.race([
+				load(),
+				new Promise<never>((_, rej) => {
+					timer = setTimeout(() => rej(new Error("slash scan timed out")), timeoutMs);
+				}),
+			]);
+			cachedTokens = tokens;
+		} catch {
+			// Keep what we had.
+		} finally {
+			clearTimeout(timer);
+			inflight = null;
+		}
+	})();
+	inflight = run;
+	return run;
+}
+
+export function resetSlashNamesForTests(): void {
+	cachedTokens = [];
+	inflight = null;
+}
+
+/** The transcript as the input receives it. Synchronous: built-ins plus the cached skills and prompt commands. */
+export function voiceTranscriptText(text: string): string {
+	return voiceTranscriptTextWith(text, cachedTokens);
 }
