@@ -9,6 +9,7 @@ import * as path from "node:path";
 import { killProcessTree, spawnShell } from "../core/shell";
 import { buildChildEnv } from "../eight/harness/child-env";
 import { toolShellEnv } from "../permissions/nested-guard";
+import { osReadSpec } from "../permissions/read-boundary";
 import { wrapRunCommand } from "../permissions/run-command-sandbox";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 
@@ -77,6 +78,8 @@ export class BackgroundTaskManager {
 			workingDirectory?: string;
 			env?: Record<string, string>;
 			timeout?: number;
+			/** A person said yes on a card for this command: the OS read rule opens what it named (#4890). */
+			approved?: boolean;
 		} = {},
 	): string {
 		// Same sanitizer as run_command: a background task is a shell command too (#3763).
@@ -100,7 +103,9 @@ export class BackgroundTaskManager {
 
 		// Spawn the process under the run_command OS boundary (#4009, #3612). Throws under
 		// EIGHT_SEATBELT=require when no boundary applies; callers report the error.
-		const proc = spawnShell(wrapRunCommand(command), {
+		// The kernel read boundary (#4890, EIGHT_OS_READ_BOUNDARY=1): rooted where the task runs.
+		const readScope = osReadSpec(command, { cwd: workingDirectory, approved: options.approved });
+		const proc = spawnShell(wrapRunCommand(command, readScope), {
 			cwd: workingDirectory,
 			env: toolShellEnv({
 				...(buildChildEnv() as NodeJS.ProcessEnv),

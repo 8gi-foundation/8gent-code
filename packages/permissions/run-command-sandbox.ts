@@ -50,6 +50,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { resolveHome } from "../core/home";
 import { loadOrCreateKey } from "./goal-state-hmac";
+import { sensitiveCredentialPaths } from "./seatbelt";
 
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 
@@ -113,6 +114,8 @@ export const PROTECTED_DATA_DIRS = [
 /** Env keys that decide whether and where the boundary applies. */
 export const SECURITY_ENV_KEYS = [
 	"EIGHT_SEATBELT",
+	// The OS read boundary (#4890): "1" turns it on. A .env may turn it on, never off.
+	"EIGHT_OS_READ_BOUNDARY",
 	"EIGHT_DATA_DIR",
 	// Where providers.json is read from (and so where a provider's key is sent, #4622).
 	"EIGHT_PROVIDERS_SETTINGS_PATH",
@@ -180,7 +183,8 @@ export function dotenvDeclaredKeys(files: string[]): Set<string> {
 
 /**
  * Pure: drop each security key any .env file declares, whatever the value.
- * EIGHT_SEATBELT=require is kept regardless: dropping it could only weaken.
+ * EIGHT_SEATBELT=require and EIGHT_OS_READ_BOUNDARY=1 are kept regardless:
+ * dropping either could only weaken.
  */
 export function snapshotSecurityEnv(
 	env: Readonly<Partial<Record<SecurityKey, string>>>,
@@ -193,7 +197,9 @@ export function snapshotSecurityEnv(
 	for (const k of SECURITY_ENV_KEYS) {
 		const v = env[k];
 		if (v === undefined || v === "") continue;
-		if (upper.has(k) && !(k === "EIGHT_SEATBELT" && v === "require")) ignored.push(k);
+		const stricter =
+			(k === "EIGHT_SEATBELT" && v === "require") || (k === "EIGHT_OS_READ_BOUNDARY" && v === "1");
+		if (upper.has(k) && !stricter) ignored.push(k);
 		else values[k] = v;
 	}
 	return { values, ignored };
@@ -448,7 +454,10 @@ export function caseInsensitivePathRegex(p: string, subtree: boolean): string | 
  * - data roots: file-write* on the directory itself, so it cannot be moved
  *   aside, removed, or created anew and filled.
  */
-export function buildRunCommandProfile(p: ProtectedPaths = protectedRunCommandPaths()): string {
+export function buildRunCommandProfile(
+	p: ProtectedPaths = protectedRunCommandPaths(),
+	read?: OsReadSpec,
+): string {
 	const fileFilters = p.files.flatMap((f) => {
 		const re = caseInsensitivePathRegex(f, false);
 		return [`(literal ${sbplString(f)})`, ...(re ? [`(regex ${re})`] : [])];
@@ -476,6 +485,7 @@ export function buildRunCommandProfile(p: ProtectedPaths = protectedRunCommandPa
 	return `${[
 		"(version 1)",
 		"(allow default)",
+		...(read ? osReadRules(read) : []),
 		...(readDenyFilters.length
 			? [
 					"; signing keys: no reads either (#4132)",
@@ -487,6 +497,172 @@ export function buildRunCommandProfile(p: ProtectedPaths = protectedRunCommandPa
 		"; the data roots themselves: no rename, remove or re-create",
 		`(deny file-write* ${rootFilters.join(" ")})`,
 	].join("\n")}\n`;
+}
+
+// ============================================
+// OS read boundary (#4890, macOS slice 1)
+// ============================================
+
+/** "1" puts every run_command under the kernel read rule below. Default off. */
+export const OS_READ_BOUNDARY_FLAG = "EIGHT_OS_READ_BOUNDARY";
+
+/** True when the person turned the OS read boundary on (a .env can turn it on, never off). */
+export function osReadBoundaryOn(): boolean {
+	return trustedSecurityValue(OS_READ_BOUNDARY_FLAG) === "1";
+}
+
+/**
+ * What one command may read. The lexical boundary (read-boundary.ts) builds it from the same
+ * root and allowances it judges against, so the kernel and the card agree.
+ */
+export interface OsReadSpec {
+	/** The workspace root: everything inside it is readable. */
+	root: string;
+	/** Also readable: the read allowances, /allow-read folders, paths a person approved on a card. */
+	reads: string[];
+	/** The tool's own data folders (~/.8gent): readable, except the private set. */
+	dataRoots: string[];
+	/** Home folders: their credential stores are never readable. */
+	homes: string[];
+}
+
+/**
+ * What any program needs to start on macOS: the OS, dyld's shared cache, system and
+ * Homebrew libraries, the Xcode command line tools. No person's files live here.
+ */
+export const OS_READ_SYSTEM_DIRS = [
+	"/usr",
+	"/bin",
+	"/sbin",
+	"/System",
+	"/Library",
+	"/opt",
+	"/private/etc",
+	"/private/var/db",
+	"/private/var/select",
+	"/private/var/run",
+	"/dev",
+] as const;
+
+/**
+ * Inside a data root, what holds the person's memory, browser state, client data, logs and
+ * backups (read-boundary.ts OWN_PRIVATE, as SBPL regexes). Never readable.
+ */
+const OWN_PRIVATE_NAMES = ciLetters(
+	"(memory[^/]*|brain[^/]*|clients|browser-[^/]*|audit[^/]*|backups|app-backups|cron[^/]*)",
+);
+
+/** Each ASCII letter of a regex written without letter classes becomes [xX]: APFS ignores case. */
+function ciLetters(re: string): string {
+	return re.replace(/[A-Za-z]/g, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`);
+}
+
+/** Credential-shaped names directly under a data root (SBPL ERE, matched case-insensitively). */
+const OWN_SECRET_NAMES = ciLetters(
+	"(keys|secrets|telegram[^/]*|sessions|[^/]*token[^/]*|\\.env[^/]*|[^/]*\\.env|credentials[^/]*)",
+);
+
+/** A path as a case-insensitive SBPL regex body (no anchors), or undefined when it has a quote. */
+function ciBody(p: string): string | undefined {
+	const re = caseInsensitivePathRegex(p, false);
+	return re?.slice(3, -2);
+}
+
+/** The private set under one data root, as SBPL regex filters. */
+export function ownPrivateFilters(dataRoot: string): string[] {
+	const body = ciBody(dataRoot);
+	if (!body) return [];
+	return [
+		`(regex #"^${body}/${OWN_PRIVATE_NAMES}(/.*)?$")`,
+		`(regex #"^${body}/.*\\.${ciLetters("(db|sqlite3?|db-wal|db-shm)")}$")`,
+		// Signing keys (#4132) and credential-shaped names (read-allow.ts SECRET_PATH): bot keys, tokens, env files.
+		`(regex #"^${body}/${OWN_SECRET_NAMES}(/.*)?$")`,
+		`(regex #"^${body}/.*\\.${ciLetters("(pem|key|p12)")}$")`,
+	];
+}
+
+/** A tool installed under a home: its bin dir on PATH, and the lib/libexec/share beside it. */
+function toolDirs(pathEnv: string, homes: string[]): string[] {
+	const out: string[] = [];
+	for (const dir of pathEnv.split(path.delimiter)) {
+		if (!dir || !path.isAbsolute(dir)) continue;
+		const d = path.normalize(dir);
+		// A PATH entry that is a home, or contains one, would open the whole home.
+		if (d === "/" || homes.some((h) => h === d || h.startsWith(`${d}/`))) continue;
+		out.push(d);
+		if (path.basename(d) === "bin" && homes.some((h) => d.startsWith(`${h}/`))) {
+			const parent = path.dirname(d);
+			if (!homes.includes(parent))
+				for (const sib of ["lib", "libexec", "share"]) out.push(path.join(parent, sib));
+		}
+	}
+	return out;
+}
+
+/** Each folder above the root, and "/": their names can be listed, not their files read. */
+function ancestors(root: string): string[] {
+	const out: string[] = [];
+	let cur = path.dirname(root);
+	for (;;) {
+		out.push(cur);
+		const up = path.dirname(cur);
+		if (up === cur) return out;
+		cur = up;
+	}
+}
+
+/**
+ * The SBPL rules of the read boundary, emitted right after (allow default). Last match wins:
+ * deny every file read, allow the root and the allowances back, then deny the credential
+ * stores and the private data set again so no allowance can reopen them.
+ *
+ * file-read-data only: stat and path lookups (file-read-metadata) stay allowed, so programs can
+ * resolve their own paths and the parents of the root; reading a file or listing a folder
+ * outside the allowances is refused with EPERM.
+ */
+export function osReadRules(spec: OsReadSpec, pathEnv: string = process.env.PATH ?? ""): string[] {
+	const root = path.normalize(spec.root);
+	if (!path.isAbsolute(root))
+		throw new Error(`os read boundary: root must be absolute, got "${spec.root}"`);
+	const homes = withReal(spec.homes.filter((h) => path.isAbsolute(h)));
+	const tmp = withReal([os.tmpdir()]);
+	// The per-user folder above the temp dir (/private/var/folders/xx/yyy): caches beside T/.
+	const userVar = tmp
+		.filter((t) => t.startsWith("/private/var/folders/") && path.basename(t) === "T")
+		.map((t) => path.dirname(t));
+	const readable = withReal([
+		...OS_READ_SYSTEM_DIRS,
+		root,
+		...spec.reads.filter((r) => path.isAbsolute(r)),
+		...spec.dataRoots.filter((r) => path.isAbsolute(r)),
+		...tmp,
+		...userVar,
+		...toolDirs(pathEnv, homes),
+		// git reads these on every command; neither is a credential store.
+		...homes.flatMap((h) => [path.join(h, ".gitconfig"), path.join(h, ".config", "git")]),
+	]);
+	const listable = [...new Set([root, realpathLoose(root)].flatMap(ancestors))];
+	const xcode = '(regex #"^/Applications/Xcode[^/]*\\.app(/.*)?$")';
+	const secrets = withReal(homes.flatMap((h) => sensitiveCredentialPaths(h)));
+	const secretFilters = secrets.flatMap((s) => {
+		const re = caseInsensitivePathRegex(s, true);
+		return [
+			`(literal ${sbplString(s)})`,
+			`(subpath ${sbplString(s)})`,
+			...(re ? [`(regex ${re})`] : []),
+		];
+	});
+	const privateFilters = withReal(spec.dataRoots.filter((r) => path.isAbsolute(r))).flatMap(
+		ownPrivateFilters,
+	);
+	return [
+		"; workspace read boundary (#4890): no file is read outside the root and the allowances",
+		"(deny file-read-data)",
+		`(allow file-read-data ${readable.map((r) => `(subpath ${sbplString(r)})`).join(" ")} ${xcode})`,
+		`(allow file-read-data ${listable.map((a) => `(literal ${sbplString(a)})`).join(" ")})`,
+		"; credential stores and the private data set: never read, whatever an allow above covers",
+		`(deny file-read* ${[...secretFilters, ...privateFilters].join(" ")})`,
+	];
 }
 
 // ============================================
@@ -693,7 +869,7 @@ function ensureSigningKey(): void {
  * command is returned unchanged and reported (stderr once, audit line,
  * listeners), or, under EIGHT_SEATBELT=require, refused with a throw.
  */
-export function wrapRunCommand(command: string): string {
+export function wrapRunCommand(command: string, read?: OsReadSpec): string {
 	ensureSigningKey();
 	const status = runCommandSandboxStatus();
 	if (!status.applied) {
@@ -702,7 +878,12 @@ export function wrapRunCommand(command: string): string {
 		return command;
 	}
 	if (status.mechanism === "seatbelt") {
-		return `${SANDBOX_EXEC} -p ${shellQuote(buildRunCommandProfile())} /bin/sh -c ${shellQuote(command)}`;
+		// The OS read boundary (#4890): only when the person turned it on and the caller said where.
+		const profile = buildRunCommandProfile(
+			protectedRunCommandPaths(),
+			read && osReadBoundaryOn() ? read : undefined,
+		);
+		return `${SANDBOX_EXEC} -p ${shellQuote(profile)} /bin/sh -c ${shellQuote(command)}`;
 	}
 	const bwrap = findBwrap() as string;
 	return [bwrap, ...buildBwrapArgs(), "/bin/sh", "-c", command].map(shellQuote).join(" ");

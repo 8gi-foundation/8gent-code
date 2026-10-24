@@ -18,9 +18,21 @@ A command never runs without the boundary silently:
 
 `EIGHT_SEATBELT=require` refuses to run a command that cannot be sandboxed.
 
+## The read boundary in the kernel (#4890, macOS slice 1)
+
+`EIGHT_OS_READ_BOUNDARY=1` (default off) adds read rules to the same profile, built by `osReadRules()` from the scope `osReadSpec()` in `read-boundary.ts` hands it, so the kernel and the read card judge the same root:
+
+1. `(deny file-read-data)`: no file is read and no folder listed.
+2. Allowed back: the workspace root (`EIGHT_WORKSPACE_ROOT`, else the project), the read allowances (system, include and temp folders), `/allow-read` folders, `~/.8gent`, the macOS system folders (`/usr`, `/System`, `/Library`, `/opt`, `/private/etc`, ...), the `PATH` folders (and `lib`, `libexec`, `share` beside a `bin` under a home), `~/.gitconfig` and `~/.config/git`. The folders above the root can be listed by name only.
+3. Denied again, last, so nothing above reopens them: the credential stores (`seatbelt.ts` `sensitiveCredentialPaths()` for every home) and, under `~/.8gent`, memory and brain stores, clients, browser state, audit logs, backups, cron, keys, secrets, sessions, tokens, env files and any `.db`, `.pem` or `.key` file, case-insensitively.
+
+Metadata (`stat`, path lookup) stays allowed. When a person approves a command on a card, the outside paths the command names are added for that run; a path the command builds while it runs never is. The lexical boundary stays in front and explains the card.
+
+Not in this slice: the argv runner (`wrapRunCommandArgv`, the built-in git and gh tools), Linux (Landlock or bubblewrap) and Termux. The live proof runs in `.github/workflows/macos-read-boundary.yml`, because `sandbox-exec` cannot nest inside a sandboxed session.
+
 ## Security env
 
-`EIGHT_SEATBELT`, `EIGHT_DATA_DIR`, `EIGHT_HOME` and `HOME` are read once, when the module loads. A key that any `.env` file Bun or 8gent could load declares is ignored, whatever its value. The one exception is `EIGHT_SEATBELT=require`, which is always kept. `EIGHT_FAKE_HOME` only works under `NODE_ENV=test` or `BUN_ENV=test`, and those values must not come from a `.env` file.
+`EIGHT_SEATBELT`, `EIGHT_OS_READ_BOUNDARY`, `EIGHT_DATA_DIR`, `EIGHT_HOME` and `HOME` are read once, when the module loads. A key that any `.env` file Bun or 8gent could load declares is ignored, whatever its value. The exceptions are `EIGHT_SEATBELT=require` and `EIGHT_OS_READ_BOUNDARY=1`, which are always kept: each can only make the boundary stricter. `EIGHT_FAKE_HOME` only works under `NODE_ENV=test` or `BUN_ENV=test`, and those values must not come from a `.env` file.
 
 ## Bun never reads a cwd bunfig.toml or .env
 

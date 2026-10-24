@@ -56,6 +56,7 @@ import {
 } from "../permissions/permission-mode";
 import { preSpawnRefusal } from "../permissions/pre-spawn-backstops";
 import { terminalBoundaryText } from "../permissions/read-allow";
+import { osReadSpec } from "../permissions/read-boundary";
 import {
 	RunCommandSandboxRequired,
 	runCommandSandboxRefusal,
@@ -1651,7 +1652,10 @@ const backgroundStart = tool({
 		try {
 			const { getBackgroundTaskManager } = await import("../tools/background");
 			const taskManager = getBackgroundTaskManager(getToolContext().workingDirectory);
-			const taskId = taskManager.startTask(command, { timeout });
+			const taskId = taskManager.startTask(command, {
+				timeout,
+				approved: systemOne.humanApproved === true,
+			});
 			return `Background task started: ${taskId}\nCommand: ${command}\nUse background_status or background_output to check progress.`;
 		} catch (err) {
 			return `Failed to start background task: ${err}`;
@@ -1712,7 +1716,7 @@ const backgroundOutput = tool({
 async function commandRefusal(
 	command: string,
 	cwd: string = getToolContext().workingDirectory,
-	out?: { runInstead?: string },
+	out?: { runInstead?: string; approved?: boolean },
 ): Promise<string | null> {
 	// The text path's pre-spawn backstops (#3993): protected files such as
 	// ~/.8gent/settings.json and the browser control tokens, for shell and argv alike.
@@ -1749,6 +1753,8 @@ async function commandRefusal(
 	);
 	if (!systemOne.run) return systemOne.message as string;
 	if (out && systemOne.runInstead !== undefined) out.runInstead = systemOne.runInstead;
+	// A yes on a card: the OS read rule opens the paths that card showed (#4890).
+	if (out && systemOne.humanApproved === true) out.approved = true;
 
 	if (
 		permissionCheck === "ask" &&
@@ -1781,7 +1787,7 @@ async function runShellCommand(
 	const ctx = getToolContext();
 	const hookManager = getHookManager();
 
-	const checked: { runInstead?: string } = {};
+	const checked: { runInstead?: string; approved?: boolean } = {};
 	const refusal = await commandRefusal(command, cwd, checked);
 	if (refusal !== null) return refusal;
 
@@ -1805,6 +1811,12 @@ async function runShellCommand(
 
 	const sandboxRefusal = runCommandSandboxRefusal();
 	if (sandboxRefusal) return sandboxRefusal;
+	// The kernel read boundary (#4890, EIGHT_OS_READ_BOUNDARY=1): the root the read card judged.
+	const readScope = osReadSpec(finalCommand, {
+		cwd,
+		project: ctx.workingDirectory,
+		approved: checked.approved,
+	});
 
 	return new Promise((settle) => {
 		// Redirect targets this command creates are this agent's own files (#3177).
@@ -1814,7 +1826,7 @@ async function runShellCommand(
 			settle(value);
 		};
 		// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
-		const proc = spawnShell(wrapRunCommand(finalCommand), {
+		const proc = spawnShell(wrapRunCommand(finalCommand, readScope), {
 			cwd,
 			stdio: ["pipe", "pipe", "pipe"],
 			processGroup: true,
