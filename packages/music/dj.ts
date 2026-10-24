@@ -28,6 +28,7 @@ import * as net from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, posix, sep, win32 } from "node:path";
 import { getSettingsFilePath, loadSettings } from "../settings/store.js";
+import { isAndroidHost } from "../voice/termux.js";
 import { type KeyJob, detectKey } from "./key-detect.js";
 import { stopOwnPlayers } from "./player.js";
 import { type TrackInfo, trackInfoFromMetadata } from "./track-info.js";
@@ -49,6 +50,19 @@ export interface VolumeStore {
 
 /** The volume a first-ever track starts at: audible, well short of loud. */
 export const DEFAULT_VOLUME = 60;
+
+/**
+ * mpv's volume is a cubic gain: 60 is -13.3 dB, 100 is the track as it was
+ * mastered. A laptop has hardware headroom to give that back; a phone's media
+ * stream and speaker do not (#4907), so on Termux a first-ever track starts at
+ * unity. A volume the listener chose is theirs and wins on every platform.
+ */
+export const TERMUX_DEFAULT_VOLUME = 100;
+
+/** The volume a first-ever track starts at on this host. */
+export function defaultVolume(termux: boolean = isAndroidHost()): number {
+	return termux ? TERMUX_DEFAULT_VOLUME : DEFAULT_VOLUME;
+}
 
 const settingsVolumeStore: VolumeStore = {
 	load() {
@@ -95,11 +109,17 @@ export function clampVolume(v: unknown): number {
 
 /** The volume the next track starts at. */
 export function preferredVolume(): number {
+	const fallback = defaultVolume();
 	try {
-		return clampVolume(volumeStore.load() ?? DEFAULT_VOLUME);
+		return clampVolume(volumeStore.load() ?? fallback);
 	} catch {
-		return DEFAULT_VOLUME;
+		return fallback;
 	}
+}
+
+/** Every argument mpv starts with: the volume first, then what the caller names. */
+export function mpvStartArgs(volume: number, args: string[]): string[] {
+	return [`--volume=${volume}`, ...args];
 }
 
 /**
@@ -432,11 +452,31 @@ const mpvSet = (p: string, v: any) => mpvIpc({ command: ["set_property", p, v] }
 
 // ---- Playback State ----
 let mpvProcess: ChildProcess | null = null;
+/** mpv children that have ended, so a start can tell "never came up" from "still starting". */
+const exited = new WeakSet<ChildProcess>();
 /** Bumped by every play, radio and stop; a slower one that finds it moved on gives way. */
 let playGen = 0;
 let currentTrack = { title: "", url: "" };
 let isPlaying = false;
 let isPaused = false;
+/**
+ * The DJ's own stopwatch for the current track: when it started and how long it
+ * sat paused. The clock falls back to it when mpv's IPC does not answer (a
+ * Termux socket can fail), so the deck still moves, from the process we spawned (#4907).
+ */
+let clock = { startedAt: 0, pausedMs: 0, pausedAt: 0 };
+const startClock = () => {
+	clock = { startedAt: Date.now(), pausedMs: 0, pausedAt: 0 };
+};
+const clockPause = (paused: boolean) => {
+	if (paused && !clock.pausedAt) clock.pausedAt = Date.now();
+	if (!paused && clock.pausedAt) {
+		clock.pausedMs += Date.now() - clock.pausedAt;
+		clock.pausedAt = 0;
+	}
+};
+const clockSeconds = () =>
+	Math.max(0, ((clock.pausedAt || Date.now()) - clock.startedAt - clock.pausedMs) / 1000);
 let isLooping = false;
 let trackQueue: { title: string; url: string }[] = [];
 /** How the current source reaches mpv: through yt-dlp (a web page) or as a direct stream/file. */
@@ -782,23 +822,26 @@ export class DJ {
 
 		this.killMpv();
 
-		mpvProcess = this.spawnMpv(t.mpv, [
+		const child = this.spawnMpv(t.mpv, [
 			"--no-video",
 			"--idle=yes",
 			`--input-ipc-server=${IPC_PATH}`,
 			`--title=${title}`,
 			url,
 		]);
+		mpvProcess = child;
 
 		// Wait for IPC socket
 		await new Promise((r) => setTimeout(r, 1500));
 		if (gen !== playGen) return "Stopped.";
+		if (exited.has(child)) return `Could not play: mpv exited right away. Run /dj doctor.`;
 		ipcReady = true;
 
 		currentTrack = { title, url };
 		sourceKind = "ytdl";
 		isPlaying = true;
 		isPaused = false;
+		startClock();
 		history.push({ title, url, playedAt: Date.now() });
 
 		return `Now playing: ${title}`;
@@ -813,11 +856,14 @@ export class DJ {
 		if (query.startsWith("http")) {
 			this.killMpv();
 			const gen = ++playGen;
-			mpvProcess = this.spawnMpv(t.mpv, ["--no-video", `--input-ipc-server=${IPC_PATH}`, query]);
+			const child = this.spawnMpv(t.mpv, ["--no-video", `--input-ipc-server=${IPC_PATH}`, query]);
+			mpvProcess = child;
 			await new Promise((r) => setTimeout(r, 1500));
 			if (gen !== playGen) return "Stopped.";
+			if (exited.has(child)) return `Could not play: mpv exited right away. Run /dj doctor.`;
 			ipcReady = true;
 			isPlaying = true;
+			startClock();
 			sourceKind = "direct";
 			currentTrack = { title: `Radio: ${query}`, url: query };
 			return `Radio streaming: ${query}`;
@@ -840,16 +886,19 @@ export class DJ {
 			const streamUrl = station.url_resolved || station.url;
 
 			this.killMpv();
-			mpvProcess = this.spawnMpv(t.mpv, [
+			const child = this.spawnMpv(t.mpv, [
 				"--no-video",
 				`--input-ipc-server=${IPC_PATH}`,
 				`--title=${station.name}`,
 				streamUrl,
 			]);
+			mpvProcess = child;
 			await new Promise((r) => setTimeout(r, 1500));
 			if (gen !== playGen) return "Stopped.";
+			if (exited.has(child)) return `Could not play: mpv exited right away. Run /dj doctor.`;
 			ipcReady = true;
 			isPlaying = true;
+			startClock();
 			sourceKind = "direct";
 			currentTrack = { title: station.name, url: streamUrl };
 
@@ -867,7 +916,11 @@ export class DJ {
 	async pause(): Promise<string> {
 		if (!isPlaying) return "Nothing playing.";
 		await mpvIpc({ command: ["cycle", "pause"] });
-		isPaused = !isPaused;
+		// Believe the player over the toggle: if mpv answers, its pause flag is the
+		// state; if it does not (no IPC), the toggle is all there is.
+		const real = ipcReady ? await mpvGet("pause") : null;
+		isPaused = real == null ? !isPaused : real === "true";
+		clockPause(isPaused);
 		return isPaused ? "Paused." : "Resumed.";
 	}
 
@@ -1077,13 +1130,15 @@ export class DJ {
 		const durN = dur ? Number.parseFloat(dur) : null;
 		if (ipcReady && isPlaying) await refreshTrackInfo(durN, pos ? Number.parseFloat(pos) : null);
 		const playingInfo = isPlaying && infoSig !== "";
+		// mpv did not say where it is: count from the process we started.
+		const posN = pos ? Number.parseFloat(pos) : isPlaying ? clockSeconds() : null;
 		return {
 			playing: isPlaying,
 			paused: isPaused,
 			looping: isLooping,
 			title: currentTrack.title,
 			url: currentTrack.url,
-			position: pos ? Number.parseFloat(pos) : null,
+			position: posN,
 			duration: dur ? Number.parseFloat(dur) : null,
 			volume: vol ? Number.parseFloat(vol) : null,
 			queueSize: trackQueue.length,
@@ -1096,11 +1151,20 @@ export class DJ {
 	// ---- Private ----
 	/** Start mpv at the remembered volume, as the DJ's own child. */
 	private spawnMpv(mpv: string, args: string[]): ChildProcess {
-		const child = spawnImpl(mpv, [`--volume=${preferredVolume()}`, ...args], {
+		const child = spawnImpl(mpv, mpvStartArgs(preferredVolume(), args), {
 			stdio: "ignore",
 			windowsHide: true,
 		});
 		child.unref?.();
+		// The process is the truth. If it ends (track over, killed by Android, no
+		// audio device), the deck must stop saying "playing" (#4907). A child we
+		// already replaced or stopped is no longer mpvProcess, so its exit changes nothing.
+		const ended = () => {
+			exited.add(child);
+			if (mpvProcess === child) this.killMpv();
+		};
+		child.on?.("exit", ended);
+		child.on?.("error", ended);
 		return child;
 	}
 

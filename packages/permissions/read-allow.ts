@@ -11,7 +11,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { validatePath } from "./path-guard";
@@ -26,6 +26,14 @@ export class ReadScope {
 	manual = new Set<string>();
 	blocks = new Map<string, number>();
 	stop: string | null = null;
+	/**
+	 * Outside paths a person approved on a read card (#4897): a folder, or one file when its folder
+	 * is too broad. In memory only, ends with the session, never written to disk. Kept apart from
+	 * `manual` so the file tools do not widen: it feeds the shell's read boundary only.
+	 */
+	approvedReads = new Set<string>();
+	/** Read cards shown to a person this session (#4897), for the session log. */
+	cardsShown = 0;
 	all(): Set<string> {
 		return new Set([...this.prompt, ...this.manual]);
 	}
@@ -49,6 +57,8 @@ export function resetReadAllow(scope: ReadScope = cur()): void {
 	scope.manual.clear();
 	scope.blocks.clear();
 	scope.stop = null;
+	scope.approvedReads.clear();
+	scope.cardsShown = 0;
 }
 
 export function readAllowEntries(): string[] {
@@ -179,6 +189,103 @@ export function allowReadsFromPrompt(
 
 function under(abs: string, entry: string): boolean {
 	return abs === entry || abs.startsWith(entry + sep);
+}
+
+/**
+ * Does the folder hold a credential-shaped name (SECRET_PATH: .env, .ssh, id_rsa, *.pem, ...)
+ * within a few levels? A scan that cannot finish counts as yes. Such a folder is never remembered
+ * whole: the kernel's never-read set names fixed places, not these.
+ */
+function holdsSecretShaped(dir: string, maxEntries = 2000, maxDepth = 3): boolean {
+	let seen = 0;
+	const walk = (d: string, depth: number): boolean => {
+		let names: string[];
+		try {
+			names = readdirSync(d);
+		} catch {
+			return true;
+		}
+		for (const n of names) {
+			if (++seen > maxEntries) return true;
+			const p = join(d, n);
+			if (SECRET_PATH.test(p)) return true;
+			if (depth < maxDepth) {
+				let isDir = false;
+				try {
+					isDir = lstatSync(p).isDirectory();
+				} catch {}
+				if (isDir && walk(p, depth + 1)) return true;
+			}
+		}
+		return false;
+	};
+	return walk(dir, 1);
+}
+
+/**
+ * What a yes on a read card opens (#4897), the same list the card shows: each file the command
+ * named, exactly; each folder it named, with everything under it, unless that folder is too broad
+ * (home, ~/Documents, a system root) or holds a credential-shaped name. Those get no memory: the
+ * read runs once and the next one is asked again. Only absolute paths count. A file's folder is
+ * never granted: a yes to one note does not open its siblings (8SO review of #4900).
+ */
+export function approvedGrants(paths: string[], homes: string[] = [homedir()]): string[] {
+	const out: string[] = [];
+	for (const p of paths) {
+		if (!isAbsolute(p)) continue;
+		let isDir = false;
+		try {
+			isDir = statSync(p).isDirectory();
+		} catch {}
+		if (isDir && (homes.some((h) => tooBroad(p, h)) || holdsSecretShaped(p))) continue;
+		out.push(p);
+	}
+	return out;
+}
+
+/** Remember a yes for the rest of the session: the grants above, in memory only. */
+export function rememberApprovedReads(
+	paths: string[],
+	homes: string[] = [homedir()],
+	scope: ReadScope = cur(),
+): void {
+	for (const g of approvedGrants(paths, homes)) scope.approvedReads.add(g);
+}
+
+/**
+ * A remembered folder is judged again at use time (#4900 second read): a credential-shaped name
+ * created under it after the yes (`proj/.env`, `proj/sub/id_rsa`) takes the folder out of memory,
+ * for the gate and the kernel reads alike, so a glob or a recursive tool cannot reach it through
+ * the approved folder. Same depth and entry budget as at grant time; a scan that cannot finish
+ * counts as unsafe. A remembered file is exact and needs no scan.
+ */
+function stillSafe(entry: string): boolean {
+	try {
+		if (!statSync(entry).isDirectory()) return true;
+	} catch {
+		return true; // gone: nothing to read
+	}
+	return !holdsSecretShaped(entry);
+}
+
+/** True when `resolved` (absolute, links followed) lies under a path approved on a read card. */
+export function isApprovedRead(resolved: string, scope: ReadScope = cur()): boolean {
+	for (const e of scope.approvedReads) if (under(resolved, e) && stillSafe(e)) return true;
+	return false;
+}
+
+/** The remembered entries that are still safe: what the kernel read rule may be given. */
+export function approvedReadEntries(scope: ReadScope = cur()): string[] {
+	return [...scope.approvedReads].filter(stillSafe);
+}
+
+/** One read card reached a person's screen (#4897). Returns the running count. */
+export function noteReadCardShown(scope: ReadScope = cur()): number {
+	return ++scope.cardsShown;
+}
+
+export function readCardsShown(scope: ReadScope = cur()): number {
+	return scope.cardsShown;
 }
 
 /** True when `abs` (and its real path, so a link cannot lead out) lies under an allowed entry. */
