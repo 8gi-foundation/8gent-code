@@ -475,14 +475,29 @@ describe.if(live)("live: run_command under the kernel read rule (macOS)", () => 
 		expectKernelRefusal(out);
 	});
 
-	test("flag on: a credential cannot be moved into the root and read there (8SO probe)", async () => {
+	test("flag on: a credential cannot be moved into the root and read there (8SO probe)", () => {
 		on();
 		const key = path.join(home, ".ssh", "id_mv");
-		const cmd = `python3 -c "import os;os.rename('/'.join([os.path.expanduser('~'),'.ss'+'h','id_mv']),'moved');print(open('moved').read())"`;
-		const out = await run(ws, cmd);
+		// Straight to the kernel (wrapRunCommand, no text boundary): only the profile decides.
+		const command = `mv ${key} moved && cat moved`;
+		const r = spawnSync("/bin/sh", ["-c", wrapRunCommand(command, spec(command, ws))], {
+			cwd: ws,
+			encoding: "utf8",
+		});
+		const out = `${r.stdout}${r.stderr}`;
 		expect(out).not.toContain("PRIVATE-MV");
+		expect(out).toMatch(/Operation not permitted/);
 		expect(fs.existsSync(key)).toBe(true); // the rename itself was refused, nothing left home
 		expect(fs.existsSync(path.join(ws, "moved"))).toBe(false);
+		// the same command on a non-credential file shows the kernel really runs it (control)
+		const outside = path.join(base, "y");
+		const c2 = `mv ${outside} moved-y && cat moved-y`;
+		const r2 = spawnSync("/bin/sh", ["-c", wrapRunCommand(c2, spec(c2, ws))], {
+			cwd: ws,
+			encoding: "utf8",
+		});
+		expect(r2.stdout).toContain("OUTSIDE-Y");
+		fs.renameSync(path.join(ws, "moved-y"), outside); // put it back for the gap test below
 	});
 
 	test("known gap: a non-credential outside file can still be moved into the root and read", async () => {
