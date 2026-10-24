@@ -520,6 +520,99 @@ const mpvGet = (p: string) =>
 	mpvIpc({ command: ["get_property", p] }).then((v) => (v != null ? String(v) : null));
 const mpvSet = (p: string, v: any) => mpvIpc({ command: ["set_property", p, v] });
 
+// ---- Where the time goes in /dj play (#4907) ----
+
+/** Wall-clock stamps of the last play, each null until reached. */
+export interface PlayTimings {
+	/** The yt-dlp search; null when a URL was played directly. */
+	searchMs: number | null;
+	/** mpv spawned until it answers on its socket. */
+	spawnAt: number;
+	ipcAt: number | null;
+	/** mpv knows the track's length: its own yt-dlp resolve is done. */
+	loadedAt: number | null;
+	/** playback-time went above zero: the first sound. */
+	soundAt: number | null;
+}
+
+let lastPlay: PlayTimings | null = null;
+
+const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+
+/**
+ * One line: "Last play: search 2.1s, mpv 0.6s, resolve 3.4s, first sound 1.2s". A stage not
+ * reached yet says "pending". Resolve is mpv's own yt-dlp call, from its socket answering to
+ * the track's length being known; first sound is from there to playback-time above zero.
+ */
+export function formatPlayTimings(t: PlayTimings | null): string {
+	if (!t) return "Last play: none yet";
+	const parts: string[] = [];
+	if (t.searchMs != null) parts.push(`search ${secs(t.searchMs)}`);
+	parts.push(t.ipcAt ? `mpv ${secs(t.ipcAt - t.spawnAt)}` : "mpv pending");
+	parts.push(t.loadedAt && t.ipcAt ? `resolve ${secs(t.loadedAt - t.ipcAt)}` : "resolve pending");
+	parts.push(
+		t.soundAt && t.loadedAt ? `first sound ${secs(t.soundAt - t.loadedAt)}` : "first sound pending",
+	);
+	return `Last play: ${parts.join(", ")}`;
+}
+
+/** Unref'd, so a watcher never keeps 8gent alive. */
+const nap = (ms: number) =>
+	new Promise<void>((r) => {
+		const h = setTimeout(r, ms);
+		(h as { unref?: () => void }).unref?.();
+	});
+
+/**
+ * Wait for mpv's socket to answer, up to `maxMs`, instead of a fixed 1.5 s: a phone whose
+ * mpv is up in 0.3 s no longer waits 1.2 s for nothing. Returns when it answers, the player
+ * is gone, or a newer play took over.
+ */
+async function waitForPlayer(child: ChildProcess, gen: number, maxMs = 1500): Promise<boolean> {
+	const t0 = Date.now();
+	ipcReady = true; // the socket is queried while it comes up; no answer is simply null
+	while (Date.now() - t0 < maxMs) {
+		if (gen !== playGen || exited.has(child)) return false;
+		if ((await mpvGet("mpv-version")) != null) return true;
+		await nap(100);
+	}
+	return false;
+}
+
+/** Stamp the stages as mpv reaches them, in the background; ends when sound starts, 30 s pass, or the play ends. */
+async function watchStages(child: ChildProcess, gen: number, rec: PlayTimings): Promise<void> {
+	const until = Date.now() + 30_000;
+	while (Date.now() < until && gen === playGen && mpvProcess === child && !rec.soundAt) {
+		const [dur, time] = await Promise.all([
+			rec.loadedAt ? null : mpvGet("duration"),
+			mpvGet("playback-time"),
+		]);
+		const now = Date.now();
+		if (rec.ipcAt == null && (dur != null || time != null)) rec.ipcAt = now;
+		if (!rec.loadedAt && dur != null) rec.loadedAt = now;
+		if (time != null && Number.parseFloat(time) > 0) {
+			rec.loadedAt ??= now;
+			rec.soundAt = now;
+			return;
+		}
+		await nap(250);
+	}
+}
+
+/** Begin the record for a play that has just spawned mpv, and watch it from the background. */
+function beginTimings(child: ChildProcess, gen: number, searchMs: number | null): PlayTimings {
+	const rec: PlayTimings = {
+		searchMs,
+		spawnAt: Date.now(),
+		ipcAt: null,
+		loadedAt: null,
+		soundAt: null,
+	};
+	lastPlay = rec;
+	void watchStages(child, gen, rec);
+	return rec;
+}
+
 // ---- What the real player says (#4907) ----
 const EMPTY_STATUS = {
 	ipc: false,
@@ -930,6 +1023,11 @@ export class DJ {
 		);
 	}
 
+	/** The last play's stage timings, as one line for /dj doctor. */
+	timingLine(): string {
+		return formatPlayTimings(lastPlay);
+	}
+
 	/** The required tools that are not on PATH right now. */
 	missingTools(): string[] {
 		const t = detectTools();
@@ -1021,8 +1119,11 @@ export class DJ {
 		const gen = ++playGen;
 
 		// If not a URL, search YouTube, off the event loop so the TUI keeps drawing.
+		let searchMs: number | null = null;
 		if (!direct) {
+			const t0 = Date.now();
 			const found = await ytSearch(t.ytdlp!, queryOrUrl);
+			searchMs = Date.now() - t0;
 			if (gen !== playGen) return "Stopped.";
 			if (!found) return `No results found for: ${queryOrUrl}`;
 			title = found.title;
@@ -1034,14 +1135,18 @@ export class DJ {
 		const child = this.spawnMpv(t.mpv, [
 			"--no-video",
 			"--idle=yes",
+			// Audio only: ask yt-dlp for the audio stream, not the video+audio pair it
+			// would otherwise probe and resolve (a phone does not need either).
+			"--ytdl-format=bestaudio/best",
 			`--input-ipc-server=${IPC_PATH}`,
 			`--title=${title}`,
 			url,
 		]);
 		mpvProcess = child;
+		const rec = beginTimings(child, gen, searchMs);
 
-		// Wait for IPC socket
-		await new Promise((r) => setTimeout(r, 1500));
+		// Wait for the IPC socket to answer (up to 1.5 s)
+		if (await waitForPlayer(child, gen)) rec.ipcAt ??= Date.now();
 		if (gen !== playGen) return "Stopped.";
 		if (exited.has(child)) return `Could not play: mpv exited right away. Run /dj doctor.`;
 		ipcReady = true;
@@ -1067,7 +1172,8 @@ export class DJ {
 			const gen = ++playGen;
 			const child = this.spawnMpv(t.mpv, ["--no-video", `--input-ipc-server=${IPC_PATH}`, query]);
 			mpvProcess = child;
-			await new Promise((r) => setTimeout(r, 1500));
+			beginTimings(child, gen, null);
+			await waitForPlayer(child, gen);
 			if (gen !== playGen) return "Stopped.";
 			if (exited.has(child)) return `Could not play: mpv exited right away. Run /dj doctor.`;
 			ipcReady = true;
@@ -1102,7 +1208,8 @@ export class DJ {
 				streamUrl,
 			]);
 			mpvProcess = child;
-			await new Promise((r) => setTimeout(r, 1500));
+			beginTimings(child, gen, null);
+			await waitForPlayer(child, gen);
 			if (gen !== playGen) return "Stopped.";
 			if (exited.has(child)) return `Could not play: mpv exited right away. Run /dj doctor.`;
 			ipcReady = true;

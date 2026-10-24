@@ -5900,6 +5900,7 @@ export function App({
 									const d = dj.doctor();
 									result = `mpv:${d.mpv ? "OK" : "X"} yt-dlp:${d.ytdlp ? "OK" : "X"} ffmpeg:${d.ffmpeg ? "OK" : "X"} sox:${d.sox ? "OK" : "X"}`;
 									result += `\n${await dj.audioLine()}`;
+									result += `\n${dj.timingLine()}`;
 									break;
 								}
 								case "produce":
