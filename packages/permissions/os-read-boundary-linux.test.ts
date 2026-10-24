@@ -21,6 +21,7 @@ import * as path from "node:path";
 import { ToolExecutor } from "../eight/tools";
 import {
 	LANDLOCK_HELPER,
+	TRANSIENT_RETRY_MS,
 	_resetLandlockStatus,
 	inPrivateDataSet,
 	landlockPlan,
@@ -293,6 +294,95 @@ describe("grant lists", () => {
 	});
 });
 
+describe("the probe: a slow start is not a permanent answer", () => {
+	const ok = { status: 0, stdout: "4\n", signal: null } as const;
+	const timedOut = {
+		status: null,
+		stdout: "",
+		signal: "SIGTERM",
+		error: new Error("spawnSync python3 ETIMEDOUT"),
+	} as const;
+	const hasPy = landlockPython() !== undefined;
+	test.if(hasPy)("a probe that timed out is tried again, and the rule comes back", () => {
+		_resetLandlockStatus();
+		let t = 1_000;
+		let runs = 0;
+		const script = [timedOut, ok];
+		const run = () => script[runs++] as never;
+		const first = landlockStatus("linux", run, () => t);
+		expect(first.active).toBe(false);
+		expect(landlockStatus("linux", run, () => t)).toBe(first); // inside the retry window
+		expect(runs).toBe(1);
+		t += TRANSIENT_RETRY_MS + 1;
+		const again = landlockStatus("linux", run, () => t);
+		expect(again.active).toBe(true);
+		expect(runs).toBe(2);
+		t += 10 * TRANSIENT_RETRY_MS;
+		landlockStatus("linux", run, () => t);
+		expect(runs).toBe(2); // a working probe is kept for the life of the process
+		_resetLandlockStatus();
+	});
+
+	test.if(hasPy)("an answer that will not change is kept: no Landlock, SIGSYS", () => {
+		for (const [run, why] of [
+			[() => ({ status: 3, stdout: "", signal: null }), /does not support/],
+			[() => ({ status: null, stdout: "", signal: "SIGSYS" }), /seccomp/],
+		] as const) {
+			_resetLandlockStatus();
+			let runs = 0;
+			const s = landlockStatus(
+				"linux",
+				() => {
+					runs++;
+					return run();
+				},
+				() => 5,
+			);
+			expect(s.active).toBe(false);
+			expect((s as { reason: string }).reason).toMatch(why);
+			landlockStatus(
+				"linux",
+				() => ok as never,
+				() => 5 + 10 * TRANSIENT_RETRY_MS,
+			);
+			expect(runs).toBe(1);
+		}
+		_resetLandlockStatus();
+	});
+
+	test.if(hasPy)("a probe that throws is transient too", () => {
+		_resetLandlockStatus();
+		let t = 0;
+		const s = landlockStatus(
+			"linux",
+			() => {
+				throw new Error("EAGAIN");
+			},
+			() => t,
+		);
+		expect(s.active).toBe(false);
+		t += TRANSIENT_RETRY_MS + 1;
+		expect(
+			landlockStatus(
+				"linux",
+				() => ok as never,
+				() => t,
+			).active,
+		).toBe(true);
+		_resetLandlockStatus();
+	});
+});
+
+describe("/dev/shm is never granted, and the devices still open one by one", () => {
+	test("the plan holds no whole /dev and no /dev/shm", () => {
+		const plan = linuxReadPlan(spec("cat x"));
+		expect(plan.read).not.toContain("/dev");
+		expect(plan.read.some((p) => p === "/dev/shm" || p.startsWith("/dev/shm/"))).toBe(false);
+		expect(plan.read).toContain("/dev/null");
+		expect(plan.remove.some((p) => p === "/dev" || p.startsWith("/dev/shm"))).toBe(false);
+	});
+});
+
 describe("the honest line when the rule cannot be applied", () => {
 	test("flag off or no spec: nothing, no line", () => {
 		expect(linuxReadPrefix(undefined, "linux", () => ({ active: false, reason: "x" }))).toBe(
@@ -442,6 +532,24 @@ const expectKeyRefusal = (out: string) => {
 };
 
 describe.if(live)("live: run_command under the Landlock read rule", () => {
+	test("a file in /dev/shm (shared memory, readable by every process of the user) is refused", () => {
+		on();
+		const shm = `/dev/shm/8gent-probe-${process.pid}`;
+		fs.writeFileSync(shm, "SHM-SECRET");
+		try {
+			const out = direct(ws, `cat ${shm}`);
+			expect(out).not.toContain("SHM-SECRET");
+			expectKernelRefusal(out);
+			// the devices a command needs still work
+			expect(
+				direct(ws, "head -c 4 /dev/urandom | wc -c; echo ok > /dev/null; echo done"),
+			).toContain("done");
+			expect(direct(ws, "cat inside.txt")).toContain("INSIDE-OK");
+		} finally {
+			fs.rmSync(shm, { force: true });
+		}
+	});
+
 	test("the command runs under the helper (and under bwrap where the job installed it)", () => {
 		on();
 		const w = wrapRunCommand("true", spec("true"));

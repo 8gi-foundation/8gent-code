@@ -761,6 +761,9 @@ export function linuxReadPlan(
 			...LINUX_HOME_NEVER_READ.map((rel) => path.join(h, rel)),
 		]),
 		...alsoNever,
+		// POSIX shared memory: other programs' files, readable by every process of this user.
+		// Naming it makes /dev a split folder, so the devices open one by one and /dev/shm does not.
+		"/dev/shm",
 	];
 	return landlockPlan(starts, never, spec.dataRoots);
 }

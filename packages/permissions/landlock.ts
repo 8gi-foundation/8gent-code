@@ -388,17 +388,40 @@ export type LandlockStatus =
 	| { active: true; python: string; abi: number }
 	| { active: false; reason: string };
 
-let statusCache: LandlockStatus | undefined;
+/** What one run of the probe said. `transient`: it timed out or was killed for a reason that may pass. */
+export interface ProbeRun {
+	status: number | null;
+	stdout: string;
+	signal: string | null;
+	error?: Error;
+}
+
+type CachedStatus = { status: LandlockStatus; until: number };
+let statusCache: CachedStatus | undefined;
+
+/** A transient failure is remembered this long, then probed again. */
+export const TRANSIENT_RETRY_MS = 30_000;
 
 /**
- * Whether the rule can be applied on this host, decided once per process by running the helper
- * in probe mode: it creates a ruleset and restricts itself. A seccomp filter that kills the probe
- * (older Android) or a kernel without Landlock both read as "not active".
+ * Whether the rule can be applied on this host, by running the helper in probe mode: it creates a
+ * ruleset and restricts itself. An answer that will not change (it works; there is no Landlock;
+ * a seccomp filter kills the call with SIGSYS, as on older Android; there is no python3) is kept
+ * for the life of the process. A probe that merely timed out or was killed by something else
+ * (a loaded phone, an out-of-memory kill) is not: it is retried after TRANSIENT_RETRY_MS, so one
+ * slow start cannot leave the whole session without the rule (8SO, #4898).
  */
-export function landlockStatus(platform: string = process.platform): LandlockStatus {
-	if (statusCache) return statusCache;
-	statusCache = probeStatus(platform);
-	return statusCache;
+export function landlockStatus(
+	platform: string = process.platform,
+	run: (python: string) => ProbeRun = realProbe,
+	now: () => number = Date.now,
+): LandlockStatus {
+	if (statusCache && statusCache.until > now()) return statusCache.status;
+	const { status, transient } = probeStatus(platform, run);
+	statusCache = {
+		status,
+		until: transient ? now() + TRANSIENT_RETRY_MS : Number.POSITIVE_INFINITY,
+	};
+	return status;
 }
 
 /** Test hook: forget the probe result. */
@@ -406,23 +429,40 @@ export function _resetLandlockStatus(): void {
 	statusCache = undefined;
 }
 
-function probeStatus(platform: string): LandlockStatus {
-	if (platform !== "linux" && platform !== "android")
-		return { active: false, reason: `no Landlock on ${platform}` };
+function realProbe(python: string): ProbeRun {
+	const r = spawnSync(python, ["-I", "-S", "-c", LANDLOCK_HELPER, "probe"], {
+		encoding: "utf8",
+		timeout: 5000,
+	});
+	return { status: r.status, stdout: r.stdout ?? "", signal: r.signal, error: r.error };
+}
+
+function probeStatus(
+	platform: string,
+	run: (python: string) => ProbeRun,
+): { status: LandlockStatus; transient: boolean } {
+	const no = (reason: string, transient = false) => ({
+		status: { active: false, reason } as LandlockStatus,
+		transient,
+	});
+	if (platform !== "linux" && platform !== "android") return no(`no Landlock on ${platform}`);
 	const python = landlockPython();
-	if (!python) return { active: false, reason: "python3 not found (the Landlock helper needs it)" };
+	if (!python) return no("python3 not found (the Landlock helper needs it)");
+	let r: ProbeRun;
 	try {
-		const r = spawnSync(python, ["-I", "-S", "-c", LANDLOCK_HELPER, "probe"], {
-			encoding: "utf8",
-			timeout: 5000,
-		});
-		const abi = Number.parseInt((r.stdout ?? "").trim(), 10);
-		if (r.status === 0 && abi >= 1) return { active: true, python, abi };
-		if (r.signal) return { active: false, reason: `the Landlock probe was killed (${r.signal})` };
-		return { active: false, reason: "this kernel does not support Landlock" };
+		r = run(python);
 	} catch (e) {
-		return { active: false, reason: `the Landlock probe failed: ${(e as Error).message}` };
+		return no(`the Landlock probe failed: ${(e as Error).message}`, true);
 	}
+	const abi = Number.parseInt((r.stdout ?? "").trim(), 10);
+	if (r.status === 0 && abi >= 1)
+		return { status: { active: true, python, abi }, transient: false };
+	if (r.signal === "SIGSYS") return no("a seccomp filter blocks Landlock here (SIGSYS)");
+	if (r.error || r.signal) {
+		const why = r.error ? r.error.message : `killed (${r.signal})`;
+		return no(`the Landlock probe did not finish (${why}); it will be tried again`, true);
+	}
+	return no("this kernel does not support Landlock");
 }
 
 /** argv to put in front of `<shell> -c <command>`: the helper with this command's grant lists. */
