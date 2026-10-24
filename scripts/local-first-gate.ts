@@ -108,14 +108,39 @@ export function hostsIn(text: string): string[] {
 	return [...out];
 }
 
-/** Install text lines with no opt-in or fallback marker on the line or the 8 above it. */
+/**
+ * Install text lines with no opt-in or fallback marker on the same line or the
+ * line directly above. Real comments (`//`, and text inside a block comment) are
+ * skipped; a star-prefixed line inside a string or template literal is code.
+ */
 export function installLines(text: string): { n: number; line: string }[] {
 	const lines = text.split("\n");
 	const out: { n: number; line: string }[] = [];
+	let inBlock = false;
 	lines.forEach((line, i) => {
-		if (/^\s*(\/\/|\*|\/\*)/.test(line) || INSTALL_OWN.test(line)) return;
-		if (!INSTALL_PATTERNS.some((p) => p.test(line))) return;
-		if (lines.slice(Math.max(0, i - 8), i + 1).some((l) => INSTALL_MARKER.test(l))) return;
+		let code = line;
+		if (inBlock) {
+			const end = line.indexOf("*/");
+			if (end < 0) return;
+			inBlock = false;
+			code = line.slice(end + 2);
+		} else {
+			const t = line.trimStart();
+			if (t.startsWith("//")) return;
+			if (t.startsWith("/*")) {
+				const end = t.indexOf("*/", 2);
+				if (end < 0) {
+					inBlock = true;
+					return;
+				}
+				code = t.slice(end + 2);
+			}
+		}
+		if (INSTALL_OWN.test(code)) return;
+		if (!INSTALL_PATTERNS.some((p) => p.test(code))) return;
+		const above = (lines[i - 1] ?? "").trimStart();
+		const markedAbove = /^(\/\/|\/\*|\*)/.test(above) && INSTALL_MARKER.test(above);
+		if (markedAbove || INSTALL_MARKER.test(line)) return;
 		out.push({ n: i + 1, line: line.trim().slice(0, 100) });
 	});
 	return out;
@@ -246,21 +271,35 @@ export function runGate(files: Map<string, string>, opts: GateOptions = {}): Gat
 		if (INSTALL_EXCLUDED_PATH.test(file)) continue;
 		const unmarked = installLines(text);
 		const site = installSites.find((x) => x.file === file);
-		if (unmarked.length === 0) {
-			if (site)
-				warnings.push(
-					`${file}: listed in INSTALL_SITES (${site.mode}) but no unmarked install text is left; remove the entry`,
-				);
+		if (site && unmarked.length === 0) {
+			warnings.push(
+				`${file}: listed in INSTALL_SITES (${site.mode}, max ${site.max}) but no unmarked install text is left; remove the entry`,
+			);
 			continue;
 		}
+		if (unmarked.length === 0) continue;
 		const first = `line ${unmarked[0].n}: ${unmarked[0].line}`;
 		if (!site) {
 			failures.push({
 				rule: "new-install",
 				file,
-				detail: `${first}. A default path must not run or tell the person to run an install. Put it behind an opt-in or fallback and mark it with "local-first-gate: optin|fallback <why>", or list the file in INSTALL_SITES.`,
+				detail: `${first}. A default path must not run or tell the person to run an install. Put it behind an opt-in or fallback and mark it with "local-first-gate: optin|fallback <why>" on the line or the line above, or list the file in INSTALL_SITES.`,
 			});
-		} else if (site.mode === "default") {
+			continue;
+		}
+		if (unmarked.length > site.max) {
+			const extra = unmarked[site.max];
+			failures.push({
+				rule: "new-install",
+				file,
+				detail: `${unmarked.length} unmarked install lines, but INSTALL_SITES pins ${site.max} for this ${site.mode} file. New one at line ${extra.n}: ${extra.line}. Mark it, or review it and raise max.`,
+			});
+		} else if (unmarked.length < site.max) {
+			warnings.push(
+				`${file}: ${unmarked.length} unmarked install lines, below max ${site.max}; lower max`,
+			);
+		}
+		if (site.mode === "default") {
 			settle(
 				{ id: `install:${file}`, waiver: site.waiver },
 				{ rule: "default-install", file, detail: `${site.why} (${first})` },

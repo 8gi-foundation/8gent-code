@@ -35,7 +35,7 @@ Allowed in two cases only:
 - **Opt-in**: it runs only after an explicit command or a typed yes that names what is installed.
 - **Fallback**: it is text shown after the person asked for a feature that is missing something. Nothing runs, and it is not on the first-run path.
 
-Mark the code, on the line or in the 8 lines above it:
+Mark the code, on the same line or the line directly above it (a comment-only line):
 
 ```ts
 // local-first-gate: optin only after the person typed /dj and said yes

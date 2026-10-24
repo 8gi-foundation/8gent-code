@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { runGate, shippedFiles } from "../../scripts/local-first-gate";
-import { SINKS, type Sink } from "../../scripts/local-first-sinks";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { installLines, runGate, shippedFiles } from "../../scripts/local-first-gate";
+import { INSTALL_SITES, SINKS, type Sink } from "../../scripts/local-first-sinks";
 
 const TODAY = "2026-10-24";
 
@@ -288,23 +290,15 @@ describe("one install, zero deps", () => {
 
 	test("the same text passes once it sits behind an opt-in or fallback marker", () => {
 		const marked = (body: string, kind: string) =>
-			`// local-first-gate: ${kind} only after the person typed /judge install\n${body}`;
+			body
+				.split("\n")
+				.map((l) => `// local-first-gate: ${kind} only after the person typed /judge install\n${l}`)
+				.join("\n");
 		const r = run({
 			"packages/eight/judge-install.ts": marked(JUDGE_OFFER, "fallback"),
 			"packages/eight/android-setup.ts": marked(TERMUX_PROMPT, "optin"),
 		});
 		expect(r.failures).toEqual([]);
-	});
-
-	test("a marker covers the eight lines below it and no more", () => {
-		const gap = (n: number) =>
-			"// local-first-gate: fallback x\n" +
-			"const a = 1;\n".repeat(n) +
-			'const s = "brew install tmux";';
-		expect(run({ "packages/x/a.ts": gap(7) }).failures).toEqual([]);
-		expect(run({ "packages/x/a.ts": gap(12) }).failures.map((f) => f.rule)).toEqual([
-			"new-install",
-		]);
 	});
 
 	test("each install family is seen", () => {
@@ -344,6 +338,7 @@ describe("one install, zero deps", () => {
 	test("a default file fails without its waiver, is known with it, fails after it expires", () => {
 		const site = {
 			file: "packages/eight/judge-install.ts",
+			max: 1,
 			mode: "default" as const,
 			why: "asks to pull",
 			waiver: { ref: "#4915", expires: "2026-11-07", why: "x" },
@@ -366,6 +361,7 @@ describe("one install, zero deps", () => {
 	test("a default file passes once its install text is gone, and says to drop the entry", () => {
 		const site = {
 			file: "packages/eight/judge-install.ts",
+			max: 1,
 			mode: "default" as const,
 			why: "asks to pull",
 		};
@@ -381,10 +377,11 @@ describe("one install, zero deps", () => {
 		const sites = [
 			{
 				file: "packages/voice/recorder.ts",
+				max: 1,
 				mode: "fallback" as const,
 				why: "recording was requested",
 			},
-			{ file: "packages/music/dj.ts", mode: "optin" as const, why: "/dj and a yes" },
+			{ file: "packages/music/dj.ts", max: 1, mode: "optin" as const, why: "/dj and a yes" },
 		];
 		expect(
 			run(
@@ -403,5 +400,112 @@ describe("one install, zero deps", () => {
 		expect(r.waived.some((w) => w.rule === "default-install")).toBe(true);
 		const strict = runGate(shippedFiles(), { today: TODAY, noWaivers: true });
 		expect(strict.failures.filter((f) => f.rule === "default-install").length).toBeGreaterThan(0);
+	});
+});
+
+describe("install gate: second-read holes", () => {
+	const run = (f: Record<string, string>, over: Partial<Parameters<typeof runGate>[1]> = {}) =>
+		runGate(files(f), {
+			sinks: [],
+			reviewedTagReaders: {},
+			installSites: [],
+			today: TODAY,
+			...over,
+		});
+	const rules = (r: ReturnType<typeof runGate>) => r.failures.map((f) => f.rule);
+
+	test("1. only the 8gent package is exempt, not any line that mentions 8gent-code, ${file} or ${spec}", () => {
+		expect(
+			rules(
+				run({
+					"packages/x/a.ts": 'const a = "npm install -g @8gi-foundation/8gent-code --force";',
+				}),
+			),
+		).toEqual([]);
+		for (const line of [
+			"const a = `pip install ${file}`; // 8gent-code",
+			"const a = `npm install -g ${spec}`;",
+			"const a = `brew install ${file}`;",
+			'const a = "pkg install 8gent-code-helper";',
+			'const a = "npm install -g @evil/8gent-code";',
+		])
+			expect(rules(run({ "packages/x/a.ts": line }))).toContain("new-install");
+	});
+
+	test("1b. self-update installs 8gent itself behind markers, so the real file is clean", () => {
+		const text = readFileSync(join(import.meta.dir, "../eight/self-update.ts"), "utf8");
+		expect(installLines(text)).toEqual([]);
+	});
+
+	test("2. a listed file may not grow: a new unmarked install line fails, fewer warns", () => {
+		const site = {
+			file: "packages/voice/termux.ts",
+			max: 1,
+			mode: "fallback" as const,
+			why: "recording requested",
+		};
+		const one = 'const a = "pkg install termux-api";';
+		expect(rules(run({ "packages/voice/termux.ts": one }, { installSites: [site] }))).toEqual([]);
+		const two = `${one}\nconst b = "pkg install ffmpeg";`;
+		const grown = run({ "packages/voice/termux.ts": two }, { installSites: [site] });
+		expect(rules(grown)).toEqual(["new-install"]);
+		expect(grown.failures[0]?.detail).toContain("2");
+		const none = run({ "packages/voice/termux.ts": "const a = 1;" }, { installSites: [site] });
+		expect(none.warnings.join(" ")).toContain("max");
+	});
+
+	test("2b. a marked line does not count against the pin", () => {
+		const site = { file: "packages/voice/termux.ts", mode: "fallback" as const, max: 1, why: "x" };
+		const text =
+			'const a = "pkg install termux-api";\n// local-first-gate: fallback x\nconst b = "pkg install ffmpeg";';
+		expect(rules(run({ "packages/voice/termux.ts": text }, { installSites: [site] }))).toEqual([]);
+	});
+
+	test("3. a star-prefixed line inside a string is code; a real comment is not", () => {
+		const inString = "const help = `\n * brew install ollama\n`;";
+		expect(rules(run({ "packages/x/a.ts": inString }))).toEqual(["new-install"]);
+		expect(
+			rules(run({ "packages/x/b.ts": "/**\n * brew install tmux\n */\nconst a = 1;" })),
+		).toEqual([]);
+		expect(
+			rules(run({ "packages/x/c.ts": "// brew install tmux\n/* pip install x */\nconst a = 1;" })),
+		).toEqual([]);
+		expect(
+			rules(run({ "packages/x/d.ts": "/*\n pkg install a\n*/ const b = 'pkg install c';" })),
+		).toEqual(["new-install"]);
+	});
+
+	test("4. a marker reaches its own line and the line directly below only", () => {
+		const m = "// local-first-gate: fallback x\n";
+		expect(rules(run({ "packages/x/a.ts": `${m}const s = "brew install tmux";` }))).toEqual([]);
+		expect(
+			rules(
+				run({
+					"packages/x/a.ts": `const s = "brew install tmux"; // local-first-gate: fallback x`,
+				}),
+			),
+		).toEqual([]);
+		expect(
+			rules(run({ "packages/x/a.ts": `${m}const a = 1;\nconst s = "brew install tmux";` })),
+		).toEqual(["new-install"]);
+		expect(
+			rules(
+				run({ "packages/x/a.ts": `${m}const s = "brew install a";\nconst t = "brew install b";` }),
+			),
+		).toEqual(["new-install"]);
+	});
+
+	test("5. only the repo-root scripts/ is skipped, not packages/*/scripts/", () => {
+		expect(rules(run({ "scripts/setup.ts": 'const s = "brew install cliclick";' }))).toEqual([]);
+		expect(
+			rules(run({ "packages/eight/scripts/setup.ts": 'const s = "brew install cliclick";' })),
+		).toEqual(["new-install"]);
+		expect(
+			rules(run({ "apps/tui/scripts/setup.ts": 'const s = "brew install cliclick";' })),
+		).toEqual(["new-install"]);
+	});
+
+	test("every install site pins a count", () => {
+		for (const x of INSTALL_SITES) expect(Number.isInteger(x.max) && x.max > 0).toBe(true);
 	});
 });

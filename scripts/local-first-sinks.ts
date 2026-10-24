@@ -449,7 +449,7 @@ export const OLLAMA_TAG_READERS_REVIEWED: Record<string, string> = {
 // after the person asked for a feature that needs it.
 //
 // A line that matches INSTALL_PATTERNS must be in one of three states:
-//   - marked: the line, or one of the 8 lines above it, carries
+//   - marked: the line, or the line directly above it, carries
 //     `local-first-gate: optin <why>` or `local-first-gate: fallback <why>`;
 //   - in a file listed below as optin or fallback (reviewed, nothing on a default path);
 //   - in a file listed below as default, with a waiver. Always a failure otherwise.
@@ -464,10 +464,10 @@ export const INSTALL_PATTERNS: RegExp[] = [
 	/\bcmake\s+(?:-|\.)|\bmake\s+(?:-j\d*|install)\b|xcode-select\s+--install/,
 	/\binstallPkgs\(|\["install",\s*"-y"/,
 ];
-/** Installing 8gent itself is the one install. */
-export const INSTALL_OWN = /8gent-code|\$\{spec\}|\$\{file\}/;
-/** Run by a person's own command, not part of a default path. */
-export const INSTALL_EXCLUDED_PATH = /(^|\/)scripts\//;
+/** Installing 8gent itself is the one install: only its scoped package name. */
+export const INSTALL_OWN = /@8gi-foundation\/8gent-code\b/;
+/** The repo-root scripts/ directory: run by a person's own command, not part of a default path. */
+export const INSTALL_EXCLUDED_PATH = /^scripts\//;
 export const INSTALL_MARKER = /local-first-gate:\s*(?:optin|fallback)\b/;
 
 export type InstallMode = "optin" | "fallback" | "default";
@@ -480,6 +480,8 @@ export interface InstallSite {
 	 * default: on a path nobody asked for. Needs a waiver.
 	 */
 	mode: InstallMode;
+	/** Unmarked install lines expected in the file. More fails; a new line needs a marker or a reviewed raise. */
+	max: number;
 	why: string;
 	waiver?: Waiver;
 }
@@ -494,54 +496,63 @@ export const INSTALL_SITES: InstallSite[] = [
 	// --- default paths: waived, dated, linked ------------------------------
 	{
 		file: "packages/eight/android-setup.ts",
+		max: 6,
 		mode: "default",
 		why: "first launch asks, default yes, to run pkg install for music, and the voice question installs termux-api",
 		waiver: INSTALL_WAIVER,
 	},
 	{
 		file: "packages/eight/judge-install.ts",
+		max: 2,
 		mode: "default",
 		why: "first launch asks, default yes, to pull the judge model through Ollama, and says to run ollama serve",
 		waiver: INSTALL_WAIVER,
 	},
 	{
 		file: "apps/tui/src/lib/no-provider-guidance.ts",
+		max: 2,
 		mode: "default",
 		why: "the no-provider screen tells the person to install Ollama and run ollama pull",
 		waiver: INSTALL_WAIVER,
 	},
 	{
 		file: "apps/tui/src/app.tsx",
+		max: 4,
 		mode: "default",
 		why: "the no-model message tells the person to run ollama pull",
 		waiver: INSTALL_WAIVER,
 	},
 	{
 		file: "bin/8gent.ts",
+		max: 1,
 		mode: "default",
 		why: "the no-model error tells the person to run ollama pull",
 		waiver: INSTALL_WAIVER,
 	},
 	{
 		file: "packages/eight/index.ts",
+		max: 1,
 		mode: "default",
 		why: "the runtime-unreachable error tells the person to run ollama serve",
 		waiver: INSTALL_WAIVER,
 	},
 	{
 		file: "packages/eight/repl.ts",
+		max: 3,
 		mode: "default",
 		why: "the Ollama-not-running warning tells the person to run ollama serve",
 		waiver: INSTALL_WAIVER,
 	},
 	{
 		file: "packages/providers/model-reroute.ts",
+		max: 2,
 		mode: "default",
 		why: "the no-local-model error tells the person to run ollama pull",
 		waiver: INSTALL_WAIVER,
 	},
 	{
 		file: "packages/self-autonomy/onboarding.ts",
+		max: 4,
 		mode: "default",
 		why: "onboarding tells the person to brew install ollama and ollama pull",
 		waiver: INSTALL_WAIVER,
@@ -550,113 +561,147 @@ export const INSTALL_SITES: InstallSite[] = [
 	// --- explicit command or typed yes -------------------------------------
 	{
 		file: "apps/tui/src/lib/external-agent-runner.ts",
+		max: 5,
 		mode: "optin",
 		why: "installs another company's command-line tool, only when the person picks that tool",
 	},
 	{
 		file: "packages/music/dj.ts",
+		max: 9,
 		mode: "optin",
 		why: "/dj offers the player install and runs it only after the person says yes",
 	},
 
 	// --- fallback text, nothing runs ---------------------------------------
 	{
+		file: "packages/eight/scripts/cua-setup.ts",
+		max: 1,
+		mode: "fallback",
+		why: "a setup script a person runs by command; names what the computer-use tool needs",
+	},
+	{
+		file: "packages/eight/scripts/smoke-qwen36.ts",
+		max: 2,
+		mode: "fallback",
+		why: "a smoke script a person runs by command; says what to pull when the backend is missing",
+	},
+	{
 		file: "bin/node-version.js",
+		max: 1,
 		mode: "fallback",
 		why: "Node is missing, before 8gent starts at all",
 	},
 	{
 		file: "packages/ai/eyes-vision-provider.ts",
+		max: 1,
 		mode: "fallback",
 		why: "vision was requested and no model is available",
 	},
 	{
 		file: "packages/ai/tools.ts",
+		max: 1,
 		mode: "fallback",
 		why: "the hands tool was called and cliclick is missing",
 	},
 	{
 		file: "packages/daemon/service.ts",
+		max: 1,
 		mode: "fallback",
 		why: "the person asked for a background service and termux-services is missing",
 	},
 	{
 		file: "packages/deck/reference-breakdown.ts",
+		max: 1,
 		mode: "fallback",
 		why: "the deck command needs ffmpeg",
 	},
 	{
 		file: "packages/eight/term-tools.ts",
+		max: 1,
 		mode: "fallback",
 		why: "a tmux tool was called and tmux is missing",
 	},
 	{
 		file: "packages/eight/tools.ts",
+		max: 1,
 		mode: "fallback",
 		why: "a vision tool was called and no local vision model is present",
 	},
 	{
 		file: "packages/eight/vision-router.ts",
+		max: 2,
 		mode: "fallback",
 		why: "vision was requested and no model was found",
 	},
 	{
 		file: "packages/hands/index.ts",
+		max: 4,
 		mode: "fallback",
 		why: "a click or drag was requested and cliclick is missing",
 	},
 	{
 		file: "packages/harness-cli/commands/doctor.ts",
+		max: 1,
 		mode: "fallback",
 		why: "the doctor command names the fix for a service it found down",
 	},
 	{
 		file: "packages/kernel/local-trainer.ts",
+		max: 3,
 		mode: "fallback",
 		why: "the training pipeline is off by default; this lists what it lacks when run",
 	},
 	{
 		file: "packages/lsp/index.ts",
+		max: 2,
 		mode: "fallback",
 		why: "a language server was requested and is missing",
 	},
 	{
 		file: "packages/terminal-tab/pty-bridge.cjs",
+		max: 1,
 		mode: "fallback",
 		why: "the native terminal bridge failed to build",
 	},
 	{
 		file: "packages/voice/backends/moshi-mlx.ts",
+		max: 2,
 		mode: "fallback",
 		why: "the Moshi backend was chosen and is missing",
 	},
 	{
 		file: "packages/voice/index.ts",
+		max: 4,
 		mode: "fallback",
 		why: "voice input was requested and sox or whisper is missing",
 	},
 	{
 		file: "packages/voice/input-device.ts",
+		max: 3,
 		mode: "fallback",
 		why: "voice input was requested and sox or whisper is missing",
 	},
 	{
 		file: "packages/voice/recorder.ts",
+		max: 2,
 		mode: "fallback",
 		why: "recording was requested and sox is missing",
 	},
 	{
 		file: "packages/voice/termux-stt.ts",
+		max: 1,
 		mode: "fallback",
 		why: "voice input was requested and termux-api is missing",
 	},
 	{
 		file: "packages/voice/termux.ts",
+		max: 2,
 		mode: "fallback",
 		why: "spoken replies were requested and termux-api is missing",
 	},
 	{
 		file: "packages/voice/voice-chat.ts",
+		max: 1,
 		mode: "fallback",
 		why: "voice chat was requested and whisper is missing",
 	},
