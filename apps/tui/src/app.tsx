@@ -22,6 +22,7 @@ import {
 	getTaskRouter,
 } from "../../../packages/ai/task-router.js";
 import { resolveOllamaBaseUrl } from "../../../packages/ai/text-tool-endpoint.js";
+import { dropOllamaCloudNames } from "../../../packages/core/ollama-cloud.js";
 import { answerFromLine } from "../../../packages/eight/android-setup.js";
 import { sanitizeForDisplay } from "../../../packages/eight/changelog-view.js";
 import { SessionManager } from "../../../packages/eight/session-manager.js";
@@ -643,7 +644,10 @@ async function detectBestLocalProviderUntraced(): Promise<{ provider: string; mo
 	}
 	const ollamaModels = llamaServer
 		? []
-		: chatModels(answers[1], (d) => (d.models || []).map((m: any) => String(m.name ?? "")));
+		: chatModels(answers[1], (d) =>
+				// Cloud tags are forwarded to ollama.com: never the startup default.
+				dropOllamaCloudNames((d.models || []).map((m: any) => String(m.name ?? ""))),
+			);
 	if (ollamaModels.length > 0) {
 		return { provider: "ollama", model: pickBestChatModel(ollamaModels) };
 	}
@@ -1936,10 +1940,12 @@ export function App({
 					});
 					if (res.ok) {
 						const data = await res.json();
-						const allModels = (data.models || []).flatMap((m: any) => {
-							const id = String(m.name ?? "").trim();
-							return id.length > 0 ? [id] : [];
-						});
+						const allModels = dropOllamaCloudNames(
+							(data.models || []).flatMap((m: any) => {
+								const id = String(m.name ?? "").trim();
+								return id.length > 0 ? [id] : [];
+							}),
+						);
 						// What each model reports it can do decides first, so decision-only
 						// models are never offered for chat; the name filter is the fallback (#3548).
 						const chatModels = await filterChatCapable(ollamaRoot, allModels);

@@ -2,10 +2,11 @@
  * Ollama LLM Client
  */
 
-import type { LLMClient, LLMResponse, Message, MessageContentPart } from "../types";
 import { modelFetch } from "../../ai/model-fetch";
 import { resolveOllamaBaseUrl } from "../../ai/text-tool-endpoint";
+import { assertOllamaLocal } from "../../core/ollama-cloud";
 import { createOllamaServer } from "../../local-model-server";
+import type { LLMClient, LLMResponse, Message, MessageContentPart } from "../types";
 
 /**
  * Resolve the Ollama base URL, checking for training proxy override.
@@ -74,6 +75,7 @@ export class OllamaClient implements LLMClient {
 	}
 
 	async chat(messages: Message[], tools?: object[]): Promise<LLMResponse> {
+		assertOllamaLocal(this.model);
 		const ac = new AbortController();
 		const timer = setTimeout(() => ac.abort(), 60_000); // 60s hard cap
 
@@ -116,6 +118,7 @@ export class OllamaClient implements LLMClient {
 	}
 
 	async generate(prompt: string): Promise<string> {
+		assertOllamaLocal(this.model);
 		// modelFetch: no hidden Bun 300 s cap; EIGHT_TURN_TIMEOUT_MS bounds the step.
 		const response = await modelFetch(`${this.baseUrl}/api/generate`, {
 			method: "POST",

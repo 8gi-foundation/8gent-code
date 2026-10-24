@@ -36,6 +36,7 @@
 - [ ] I have updated the documentation if needed
 - [ ] My changes generate no new warnings
 - [ ] I have tested on macOS / Linux
+- [ ] No default sends user data off the device (or it is a known item in `scripts/local-first-sinks.ts`); `bun scripts/local-first-gate.ts` passes
 
 ## Screenshots (if applicable)
 
