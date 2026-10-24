@@ -4,7 +4,7 @@ The 8 principles we build by, and the engineering rules that follow from them. O
 
 ## The 8 principles
 
-Verbatim from [AGENTS.md](../AGENTS.md), "First Principles". Principle 6 uses "sub-8gents" where the source has an older spelling.
+Verbatim from `AGENTS.md`, "First Principles". Principle 6 uses "sub-8gents" where the source has an older spelling.
 
 1. **Design first, not last.** Before writing code, think about the interaction. Friction is the enemy. The best interface is the minimum that serves the user.
 2. **Free and local by default.** No API keys to start. Local models first. Cloud is opt-in. Privacy is the foundation.
@@ -27,7 +27,7 @@ Each rule says what we do, then who set it and when.
 6. **Install prompts default to No.** Asking is allowed; assuming yes is not. Source: 24 Oct 2026 reviews.
 7. **No one at the keys means no.** With nobody to answer, nothing installs and nothing is sent. Source: 24 Oct 2026 reviews.
 8. **Fail closed, with a reason.** When a check cannot pass, stop and say why in plain words. Source: 24 Oct 2026 reviews.
-9. **Prohibitions hold everywhere.** No em dashes, no secrets in chat, no stat padding, no enthusiasm inflation, no direct push to main. Source: [AGENTS.md](../AGENTS.md), "Absolute Prohibitions".
+9. **Prohibitions hold everywhere.** No em dashes, no secrets in chat, no stat padding, no enthusiasm inflation, no direct push to main. Source: `AGENTS.md`, "Absolute Prohibitions".
 
 ## Where it is enforced
 
