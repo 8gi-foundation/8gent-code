@@ -15,6 +15,7 @@ import {
 	setDjSpawn,
 	setDjTools,
 	setMpvTransport,
+	setPlayConfirmMs,
 	setVolumeStore,
 } from "../dj";
 
@@ -134,8 +135,9 @@ describe("/dj play, measured", () => {
 		const t0 = Date.now();
 		await dj.play("burna boy");
 		const took = Date.now() - t0;
-		// 120 ms search + about 200 ms for mpv; the old fixed wait made this at least 1620 ms.
-		expect(took).toBeLessThan(1000);
+		// 120 ms search + mpv loading the track at 700 ms (play now waits for that, #4981);
+		// the old fixed 1.5 s wait on top made this at least 1620 ms.
+		expect(took).toBeLessThan(1400);
 	});
 
 	test("each stage is stamped from what mpv reports, and printed as one line", async () => {
@@ -170,12 +172,17 @@ describe("/dj play, measured", () => {
 		expect(dj.timingLine()).not.toContain("search");
 	});
 
-	test("while mpv is still resolving the line says so", async () => {
+	test("a track mpv never loads fails after the wait, and the line says resolve pending (#4981)", async () => {
 		timeline(100, 60_000, 60_001);
-		const dj = new DJ();
-		await dj.play("https://example.invalid/track");
-		await new Promise((r) => setTimeout(r, 400));
-		expect(dj.timingLine()).toContain("resolve pending");
+		setPlayConfirmMs(500);
+		try {
+			const dj = new DJ();
+			const result = await dj.play("https://example.invalid/track");
+			expect(result).toMatch(/^Could not play: /);
+			expect(dj.timingLine()).toContain("resolve pending");
+		} finally {
+			setPlayConfirmMs();
+		}
 	});
 
 	test("mpv is asked for the audio stream only, not the video+audio pair", async () => {

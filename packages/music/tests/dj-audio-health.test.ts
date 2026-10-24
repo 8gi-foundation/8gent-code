@@ -126,7 +126,7 @@ describe("the deck follows the real player", () => {
 		expect(s).toMatchObject({ playing: true, trouble: "", ipc: true, volume: 100 });
 	});
 
-	test("a track that failed to load leaves mpv idle: reported with mpv's own reason, not 'playing'", async () => {
+	test("a track that failed to load is reported as one plain line, never 'Now playing' (#4981)", async () => {
 		await startPeer({
 			...healthy(),
 			"idle-active": true,
@@ -137,11 +137,10 @@ describe("the deck follows the real player", () => {
 		const started = dj.play("https://example.invalid/track");
 		// mpv complains while it loads.
 		player?.stderr.emit("data", "[ytdl_hook] ERROR: youtube-dl failed: unable to download\n");
-		await started;
-		const s = await dj.status();
-		expect(s.trouble).toBe(
-			"could not play: [ytdl_hook] ERROR: youtube-dl failed: unable to download",
-		);
+		const result = await started;
+		expect(result).toMatch(/^Could not play: the stream would not open\./);
+		expect(result).not.toMatch(/Now playing|ytdl_hook/);
+		expect((await dj.status()).playing).toBe(false);
 	});
 
 	test("a track that simply ended (mpv idle, no complaint) clears the deck", async () => {
@@ -286,10 +285,10 @@ describe("the verdict and the player's output", () => {
 			"AO: [opensles] 44100Hz stereo 2ch float\nA: 00:00:03 / 00:03:20\n",
 		);
 		player?.stderr.emit("data", "[cplayer] Failed to open https://example.invalid/track.\n");
-		await started;
-		expect((await dj.status()).trouble).toBe(
-			"could not play: [cplayer] Failed to open https://example.invalid/track.",
-		);
+		const result = await started;
+		// The complaint is kept and mapped; the chatter is dropped and never shown.
+		expect(result).toMatch(/^Could not play: the stream would not open\./);
+		expect(result).not.toMatch(/AO:|opensles|cplayer/);
 	});
 
 	test("mpv's output pipes are unref'd so they cannot keep the process alive", async () => {

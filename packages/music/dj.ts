@@ -311,7 +311,9 @@ export function mpvIpcPath(
 }
 
 /** The one-line install hint for the DJ's tools on this platform. */
-export function installHint(plat: NodeJS.Platform = PLATFORM): string {
+export function installHint(
+	plat: NodeJS.Platform = isAndroidHost() ? "android" : PLATFORM,
+): string {
 	if (plat === "win32") return "scoop bucket add extras; scoop install mpv yt-dlp ffmpeg sox";
 	if (plat === "android") return "pkg install mpv python-yt-dlp ffmpeg";
 	if (plat === "linux") return "sudo apt install mpv yt-dlp ffmpeg sox";
@@ -766,6 +768,48 @@ export function diagnoseAudio(
 	return { ok: true };
 }
 
+/** What mpv prints when it cannot turn a YouTube page into a stream (its ytdl hook is missing or broken). */
+const STREAM_ERROR =
+	/EDL|ytdl|youtube-dl|yt-dlp|could not open source|failed to open|unrecognized file format|failed to recognize file format/i;
+
+/** The one plain line for a play that never started; the player's raw EDL text is never shown. */
+export function plainPlayFailure(errors: string[], plat: NodeJS.Platform = PLATFORM): string {
+	if (errors.some((e) => STREAM_ERROR.test(e)))
+		return `Could not play: the stream would not open. Update yt-dlp, then try again: ${installHint(plat)}`;
+	return "Could not play: mpv did not start the track. Run /dj doctor.";
+}
+
+/** How long a play waits for mpv to say it is playing; tests shorten it. */
+let CONFIRM_MS = 20000;
+export function setPlayConfirmMs(ms?: number): void {
+	CONFIRM_MS = ms ?? 20000;
+}
+
+/**
+ * Whether mpv really started the track: its own answer (the track's length is known or
+ * playback-time is above zero), never the spawn. With no socket, a player that is still up
+ * and has not complained counts. An exit, a stream error line or the time running out is a
+ * failure, with mpv's complaints for the caller.
+ */
+async function confirmPlayback(
+	child: ChildProcess,
+	gen: number,
+	socketUp: boolean,
+): Promise<{ ok: true } | { ok: false; stale?: boolean; errors: string[] }> {
+	const t0 = Date.now();
+	for (;;) {
+		if (gen !== playGen) return { ok: false, stale: true, errors: [] };
+		if (exited.has(child) || playerErrors.some((e) => STREAM_ERROR.test(e)))
+			return { ok: false, errors: playerErrors };
+		// No socket (a Termux one can fail): the process is the truth, and it is up and quiet.
+		if (!socketUp) return { ok: true };
+		const [dur, time] = await Promise.all([mpvGet("duration"), mpvGet("playback-time")]);
+		if (dur != null || (time != null && Number.parseFloat(time) > 0)) return { ok: true };
+		if (Date.now() - t0 >= CONFIRM_MS) return { ok: false, errors: playerErrors };
+		await nap(150);
+	}
+}
+
 // ---- Playback State ----
 let mpvProcess: ChildProcess | null = null;
 /** mpv children that have ended, so a start can tell "never came up" from "still starting". */
@@ -828,37 +872,68 @@ let keyPending = "";
 /** Bumped whenever estimates are abandoned; a finishing estimate from an older generation is dropped. */
 let keyGen = 0;
 
-/** yt-dlp resolves a page to a direct audio URL, off the event loop. */
-function resolveAudioUrl(ytdlp: string, url: string): Promise<string | null> {
+/** What resolving a page to a direct audio URL gave: the URL, or why not. */
+export type StreamResolve = { ok: true; url: string } | { ok: false; reason: string };
+
+/**
+ * yt-dlp resolves a page to a direct audio URL, off the event loop. This is the same yt-dlp
+ * the search runs, so mpv never needs its own ytdl hook (#4981). Goes through the swappable
+ * spawner so tests never touch the network.
+ */
+export function resolveStream(
+	ytdlp: string,
+	url: string,
+	timeoutMs = 20000,
+): Promise<StreamResolve> {
 	return new Promise((resolve) => {
 		let out = "";
+		let err = "";
 		let child: ChildProcess;
 		try {
-			child = spawn(ytdlp, ["-f", "bestaudio", "-g", "--no-playlist", url], {
-				stdio: ["ignore", "pipe", "ignore"],
+			child = spawnImpl(ytdlp, ["-f", "bestaudio/best", "-g", "--no-playlist", url], {
+				stdio: ["ignore", "pipe", "pipe"],
 				windowsHide: true,
 			});
-		} catch {
-			resolve(null);
+		} catch (e) {
+			resolve({ ok: false, reason: (e as Error).message });
 			return;
 		}
 		const timer = setTimeout(() => {
 			try {
 				child.kill("SIGTERM");
 			} catch {}
-		}, 20000);
-		child.stdout?.on("data", (d) => {
+		}, timeoutMs);
+		(timer as { unref?: () => void }).unref?.();
+		child.stdout?.on?.("data", (d) => {
 			out += d;
 		});
-		child.on("error", () => {
-			clearTimeout(timer);
-			resolve(null);
+		child.stderr?.on?.("data", (d) => {
+			err += d;
 		});
-		child.on("close", () => {
+		child.on?.("error", (e: Error) => {
 			clearTimeout(timer);
-			resolve(out.split(/\r?\n/).find((l) => l.startsWith("http")) ?? null);
+			resolve({ ok: false, reason: e.message });
+		});
+		child.on?.("close", () => {
+			clearTimeout(timer);
+			const found = out.split(/\r?\n/).find((l) => l.startsWith("http"));
+			if (found) resolve({ ok: true, url: found });
+			else {
+				const last =
+					err
+						.split(/\r?\n/)
+						.filter((l) => l.trim())
+						.pop() ?? "";
+				resolve({ ok: false, reason: last.slice(0, 160) || "yt-dlp gave no stream" });
+			}
 		});
 	});
+}
+
+/** The key estimate's resolve: the URL or null. */
+async function resolveAudioUrl(ytdlp: string, url: string): Promise<string | null> {
+	const r = await resolveStream(ytdlp, url);
+	return r.ok ? r.url : null;
 }
 
 /** Stop the running estimate and forget unfinished ones, so a cut-short sample never names a key. */
@@ -1170,26 +1245,57 @@ export class DJ {
 			url = found.url;
 		}
 
-		this.killMpv();
+		// A YouTube page needs yt-dlp. On a phone we resolve it ourselves and hand mpv the
+		// media URL, so it never depends on its own ytdl hook (#4981); elsewhere mpv's hook
+		// goes first and we resolve only if it turns out to be missing or broken.
+		const isPage = safeYoutubeUrl(url) !== null;
+		if (isPage && !t.ytdlp) return `yt-dlp not installed. Run: ${installHint()}`;
+		let resolved = false;
+		let errors: string[] = [];
+		for (let attempt = 0; attempt < 2; attempt++) {
+			let source = url;
+			if (isPage && !resolved && (isAndroidHost() || attempt === 1)) {
+				const r = await resolveStream(t.ytdlp!, url);
+				if (gen !== playGen) return "Stopped.";
+				if (!r.ok)
+					return `Could not play: yt-dlp could not get the stream. Update it, then try again: ${installHint()}`;
+				source = r.url;
+				resolved = true;
+			}
 
-		const child = this.spawnMpv(t.mpv, [
-			"--no-video",
-			"--idle=yes",
-			// Audio only: ask yt-dlp for the audio stream, not the video+audio pair it
-			// would otherwise probe and resolve (a phone does not need either).
-			"--ytdl-format=bestaudio/best",
-			`--input-ipc-server=${IPC_PATH}`,
-			`--title=${title}`,
-			url,
-		]);
-		mpvProcess = child;
-		const rec = beginTimings(child, gen, searchMs);
+			this.killMpv();
+			const child = this.spawnMpv(t.mpv, [
+				"--no-video",
+				"--idle=yes",
+				// Audio only: ask yt-dlp for the audio stream, not the video+audio pair it
+				// would otherwise probe and resolve (a phone does not need either).
+				"--ytdl-format=bestaudio/best",
+				// A media URL we resolved is already direct: mpv's hook has nothing to do.
+				...(resolved ? ["--ytdl=no"] : []),
+				`--input-ipc-server=${IPC_PATH}`,
+				`--title=${title}`,
+				source,
+			]);
+			mpvProcess = child;
+			const rec = beginTimings(child, gen, searchMs);
 
-		// Wait for the IPC socket to answer (up to 1.5 s)
-		if (await waitForPlayer(child, gen)) rec.ipcAt ??= Date.now();
-		if (gen !== playGen) return "Stopped.";
-		if (exited.has(child)) return `Could not play: mpv exited right away. Run /dj doctor.`;
-		ipcReady = true;
+			// Wait for the IPC socket to answer (up to 1.5 s)
+			const socketUp = await waitForPlayer(child, gen);
+			if (socketUp) rec.ipcAt ??= Date.now();
+			if (gen !== playGen) return "Stopped.";
+			if (exited.has(child) && !playerErrors.length)
+				return `Could not play: mpv exited right away. Run /dj doctor.`;
+			ipcReady = true;
+
+			// "Now playing" is mpv's word, not the spawn's (#4981).
+			const verdict = await confirmPlayback(child, gen, socketUp);
+			if (verdict.ok) break;
+			if (verdict.stale || gen !== playGen) return "Stopped.";
+			errors = verdict.errors;
+			const hookBroken = errors.some((e) => STREAM_ERROR.test(e));
+			if (mpvProcess === child) this.killMpv();
+			if (!(isPage && !resolved && hookBroken)) return plainPlayFailure(errors);
+		}
 
 		currentTrack = { title, url };
 		sourceKind = "ytdl";

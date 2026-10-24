@@ -45,7 +45,7 @@ That one is the only entry the gate waives for user data. Run `bun scripts/local
 | --- | --- | --- | --- |
 | threat-feed | Package names and versions from lockfiles | api.osv.dev, plus CISA and CIRCL feed reads | The threat-feed command. No other code calls it; the daemon only reads the reports a run leaves behind. |
 | dj-radio-search | The station word typed into `/dj` | Radio Browser directory | `/dj` |
-| dj-youtube-search | The artist or song words typed into `/dj play`, used by yt-dlp to search YouTube; the track then streams from YouTube, which also sees the IP address | YouTube (`www.youtube.com`) | `/dj play <words>`. It never runs on startup, on resume (which replays a saved URL) or on its own; a URL or a bed name sends no search words. To avoid it, play a bed or a local-network URL, or do not use `/dj play`. |
+| dj-youtube-search | The artist or song words typed into `/dj play`, used by yt-dlp to search YouTube; the track then streams from YouTube, which also sees the IP address | YouTube (`www.youtube.com`) | `/dj play <words>`, or `/dj skip` onto a track queued by words. It never runs on startup, on resume (which replays a saved URL) or on its own; a URL or a bed name sends no search words. To avoid it, play a bed or a local-network URL, or do not use `/dj play`. |
 | fleet-internal | Model requests inside the fleet | `*.internal` private network names | Runs in fleet vessels. The names do not resolve from a person's machine. |
 
 ## Pulls and links (no user content)
