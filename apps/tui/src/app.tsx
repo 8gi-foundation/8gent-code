@@ -1395,9 +1395,15 @@ export function App({
 	// Android (#4833): the mic key and /voice record. Setup is the same one-yes offer as first launch;
 	// pressing the key is the intent, so it asks only when something is missing. Then one listen.
 	const androidListeningRef = useRef(false);
+	// On-phone recording in progress (#4905): the next Ctrl+R stops it.
+	const androidRecordingRef = useRef<{ stop(): void } | null>(null);
 	// What an empty answer means for the pending question: true for /dj, false for the mic.
 	const djInstallDefaultRef = useRef(true);
 	async function androidListen(): Promise<void> {
+		if (androidRecordingRef.current) {
+			androidRecordingRef.current.stop();
+			return;
+		}
 		if (androidListeningRef.current) return;
 		// A /dj question is waiting: never replace its resolver.
 		if (djInstallAnswerRef.current) {
@@ -1417,9 +1423,39 @@ export function App({
 				say: addSystemMessage,
 			});
 			if (outcome !== "ready" && outcome !== "installed") return;
-			const { listenOnce } = await import("../../../packages/voice/termux-stt.js");
-			addSystemMessage("Listening. Speak now.");
-			const heard = await listenOnce();
+			const { readSetup, voiceEngine } = await import("../../../packages/eight/android-setup.js");
+			let heard: { text: string } | { error: string };
+			if (voiceEngine(readSetup()) === "cloud") {
+				const { listenOnce } = await import("../../../packages/voice/termux-stt.js");
+				addSystemMessage("Listening through Android's speech service. Speak now.");
+				heard = await listenOnce();
+			} else {
+				const local = await import("../../../packages/voice/termux-local-stt.js");
+				const whisperBin = local.findWhisperBin();
+				const modelPath = local.findPhoneModel();
+				if (!whisperBin || !modelPath) {
+					addSystemMessage(
+						"whisper.cpp or its speech model is missing. Press Ctrl+R to set it up.",
+					);
+					return;
+				}
+				const rec = await local.startRecording({ whisperBin, modelPath });
+				if ("error" in rec) {
+					addSystemMessage(rec.error);
+					return;
+				}
+				androidRecordingRef.current = rec;
+				addSystemMessage(
+					`Recording on this phone. Press Ctrl+R again to stop (${local.RECORD_LIMIT_S} s max).`,
+				);
+				// Released before the wait, so the next Ctrl+R reaches the stop above.
+				androidListeningRef.current = false;
+				try {
+					heard = await rec.done;
+				} finally {
+					androidRecordingRef.current = null;
+				}
+			}
 			if ("text" in heard) {
 				setVoiceTranscript(heard.text);
 				addSystemMessage(`Transcribed: "${heard.text}". Edit it or press Enter to send.`);
@@ -6175,13 +6211,40 @@ export function App({
 							const { readSetup, writeSetup } = await import(
 								"../../../packages/eight/android-setup.js"
 							);
-							if ((args[1] ?? "").toLowerCase() === "off") {
+							const sub = (args[1] ?? "").toLowerCase();
+							if (sub === "off") {
 								addSystemMessage(
-									writeSetup({ mic: false })
+									writeSetup({ mic: false, cloud: false })
 										? "Voice input is off. Ctrl+R will ask before it listens again."
 										: "Could not update ~/.8gent/config.json, so voice input is unchanged.",
 								);
-							} else addSystemMessage(androidMicStateLine(readSetup().mic));
+							} else if (sub === "local") {
+								addSystemMessage(
+									writeSetup({ cloud: false })
+										? "Voice input stays on this phone. Ctrl+R records; whisper.cpp transcribes here."
+										: "Could not update ~/.8gent/config.json, so voice input is unchanged.",
+								);
+							} else if (sub === "cloud") {
+								if (djInstallAnswerRef.current) {
+									addSystemMessage("Answer the pending question first.");
+									return;
+								}
+								const { offerCloudVoice } = await import(
+									"../../../packages/eight/android-setup.js"
+								);
+								await offerCloudVoice({
+									ask: (line, defaultYes) =>
+										new Promise<boolean>((resolve) => {
+											djInstallDefaultRef.current = defaultYes;
+											djInstallAnswerRef.current = resolve;
+											addSystemMessage(line);
+										}),
+									say: addSystemMessage,
+								});
+							} else {
+								const st = readSetup();
+								addSystemMessage(androidMicStateLine(st.mic, st.cloud));
+							}
 						})();
 						break;
 					}
@@ -6192,9 +6255,10 @@ export function App({
 					if (isAndroidHost() && ANDROID_VOICE_LINE_SUBS.includes(args[0] ?? "")) {
 						void (async () => {
 							const { readSetup } = await import("../../../packages/eight/android-setup.js");
+							const st = readSetup();
 							addSystemMessage(
 								args[0] === "status"
-									? `${androidMicStateLine(readSetup().mic)}\n${ANDROID_DICTATION_LINE}`
+									? `${androidMicStateLine(st.mic, st.cloud)}\n${ANDROID_DICTATION_LINE}`
 									: ANDROID_DICTATION_LINE,
 							);
 						})();
