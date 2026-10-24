@@ -19,7 +19,7 @@ import {
 } from "../../../../../packages/permissions/tui-approval-channel.js";
 import { _resetApprovalCard, useApprovalCard } from "../../hooks/useApprovalCard.js";
 import type { WorkspaceTab } from "../../hooks/useWorkspaceTabs.js";
-import { approvalOwner, tabOfHolder } from "../../lib/tab-lamps.js";
+import { approvalTab, tabOfHolder } from "../../lib/tab-lamps.js";
 import { TabBar } from "../TabBar.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -54,17 +54,18 @@ afterEach(() => {
 	_resetApprovalCard();
 });
 
-function setup() {
+function setup(opts: { running?: string[]; yolo?: boolean } = {}) {
 	const holders = new Map<string, PermissionModeHolder>(
 		tabs.map((tb) => [tb.id, createPermissionHolder("ask")]),
 	);
-	const running = ["t0", "t1"];
+	const running = opts.running ?? ["t0", "t1"];
 	function Bar() {
-		const pending = useApprovalCard();
-		const owner =
-			pending === null
-				? null
-				: (tabOfHolder(pending.holder, holders) ?? approvalOwner("t0", running));
+		const pending = useApprovalCard(
+			undefined,
+			opts.yolo ? { needed: () => true, answer: () => {} } : undefined,
+		);
+		// Focused tab is t0, as in app.tsx's noHolderTab.
+		const owner = pending === null ? null : (approvalTab(pending.holder, holders, "t0") ?? null);
 		return (
 			<TabBar
 				tabs={tabs}
@@ -100,7 +101,11 @@ function setup() {
 		exitOnCtrlC: false,
 	});
 	unmount = () => app.unmount();
-	return { holders, row: () => out.last.split("\n")[0] ?? "" };
+	return {
+		holders,
+		strangerHolder: createPermissionHolder("ask"),
+		row: () => out.last.split("\n")[0] ?? "",
+	};
 }
 
 test("two running tabs, the background one asks: ▲ lands only on it", async () => {
@@ -136,4 +141,28 @@ test("tabOfHolder is undefined for a call that is no tab's", () => {
 	expect(tabOfHolder(createPermissionHolder("ask"), new Map([["t0", a]]))).toBeUndefined();
 	expect(tabOfHolder(undefined, new Map([["t0", a]]))).toBeUndefined();
 	expect(tabOfHolder(a, new Map([["t0", a]]))).toBe("t0");
+});
+
+test("the yolo question lands on the focused tab even when another tab is running", async () => {
+	const { holders, row } = setup({ running: ["t1"], yolo: true });
+	await sleep(30);
+	expect(row()).toContain("Orchestrator ·");
+	runWithPermissionHolder(holders.get("t1"), () =>
+		requestTuiApproval({ action: "shell", details: "", command: "ls" }),
+	);
+	await sleep(60);
+	expect(row()).toContain("Orchestrator ▲");
+	expect(row()).not.toContain("Engineer ▲");
+	expect(row().split("▲").length - 1).toBe(1);
+});
+
+test("a holder that belongs to no tab lights nothing", async () => {
+	const { strangerHolder, row } = setup();
+	await sleep(30);
+	runWithPermissionHolder(strangerHolder, () =>
+		requestTuiApproval({ action: "shell", details: "", command: "ls" }),
+	);
+	await sleep(60);
+	expect(row()).not.toContain("▲");
+	expect(row()).toContain("Orchestrator ◐");
 });

@@ -351,7 +351,7 @@ import {
 	isAndroidEnv,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
-import { approvalOwner, nextUnread, tabOfHolder } from "./lib/tab-lamps.js";
+import { approvalTab, nextUnread } from "./lib/tab-lamps.js";
 import { detectTermPresetIntent } from "./lib/term-intent.js";
 import { copiedNotice, notCopiedNotice } from "./lib/text-selection.js";
 import { truncate } from "./lib/text.js";
@@ -2305,8 +2305,12 @@ export function App({
 	}, [processingKey, activeTabId]);
 	const approvalTabId =
 		approvalPending !== null
-			? (tabOfHolder(approvalPending.holder, permHoldersRef.current) ??
-				approvalOwner(activeTabId, processingTabIds))
+			? (approvalTab(
+					approvalPending.holder,
+					permHoldersRef.current,
+					// The resume question is about the tab that was clamped; the yolo question, the focused one.
+					resumeAskRef.current?.tab ?? activeTabId,
+				) ?? null)
 			: null;
 	const tabLampFor = useCallback(
 		(tabId: string) => ({ needsYou: tabId === approvalTabId, unread: unreadTabs[tabId] ?? null }),

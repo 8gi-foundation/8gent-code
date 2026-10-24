@@ -162,17 +162,6 @@ export function barAriaLabel(
 }
 
 /**
- * Which tab an approval card belongs to. The card is one global surface and
- * does not name its asker, so the owner is the focused tab when it is running
- * a turn, else the first tab that is. With no turn running (the one-time
- * yolo and resume questions) it is the focused tab.
- */
-export function approvalOwner(activeId: string, processing: readonly string[]): string {
-	if (processing.includes(activeId)) return activeId;
-	return processing[0] ?? activeId;
-}
-
-/**
  * The tab an asking call belongs to: the tab whose permission holder is the
  * call's holder or one of its ancestors (a child run by a tab's turn chains to
  * it). Undefined when the call is no tab's, so the caller falls back.
@@ -185,6 +174,21 @@ export function tabOfHolder<H extends { parent?: H }>(
 		for (const [id, held] of holders) if (held === h) return id;
 	}
 	return undefined;
+}
+
+/**
+ * Which tab an approval card lights. A card from a tab's call carries its
+ * holder: the tab that holder (or an ancestor) belongs to, and no tab at all
+ * when it belongs to none. A card with no holder is a one-time question (yolo,
+ * or the way back after a resume): it belongs to `noHolderTab`, the tab the
+ * question is about. Nothing is ever guessed from which tabs are running.
+ */
+export function approvalTab<H extends { parent?: H }>(
+	holder: H | undefined,
+	holders: ReadonlyMap<string, H>,
+	noHolderTab: string,
+): string | undefined {
+	return holder ? tabOfHolder(holder, holders) : noHolderTab;
 }
 
 /**

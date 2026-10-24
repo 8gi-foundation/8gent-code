@@ -10,7 +10,7 @@ import {
 	type LampInput,
 	type LampState,
 	VISIT_HOLD_MS,
-	approvalOwner,
+	approvalTab,
 	barAriaLabel,
 	deriveLamp,
 	lampGlyph,
@@ -162,10 +162,16 @@ describe("screen reader text", () => {
 });
 
 describe("who an approval belongs to", () => {
-	test("the focused tab when it is running, else the first running tab, else the focused tab", () => {
-		expect(approvalOwner("a", ["b", "a"])).toBe("a");
-		expect(approvalOwner("a", ["b", "c"])).toBe("b");
-		expect(approvalOwner("a", [])).toBe("a");
+	type H = { parent?: H };
+	const a: H = {};
+	const holders = new Map([["t0", a]]);
+	test("a card with a holder lights that holder's tab, or no tab when it has none", () => {
+		expect(approvalTab(a, holders, "t9")).toBe("t0");
+		expect(approvalTab({ parent: a }, holders, "t9")).toBe("t0");
+		expect(approvalTab({}, holders, "t9")).toBeUndefined();
+	});
+	test("a card with no holder belongs to the tab its question is about", () => {
+		expect(approvalTab(undefined, holders, "t9")).toBe("t9");
 	});
 });
 
