@@ -13,6 +13,7 @@ import { BottomBar } from "../BottomBar.js";
 import {
 	FOOTER_HINTS,
 	FOOTER_SEPARATOR,
+	type FooterSegment,
 	buildFooterSegments,
 	fitFooterHints,
 	fitFooterRow,
@@ -538,6 +539,66 @@ describe("the sandbox state is never dropped, at any width (#4953, 8SO ruling)",
 		expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
 		expect(row.hints).toContain("^P palette");
 		expect(row.hints).toContain("^C quit");
+	});
+
+	test("the meter outlives the low-priority segments: present at every width where it fits after shedding", () => {
+		for (const used of [31200, 100000, 120000]) {
+			const full = (w: number) =>
+				buildFooterSegments({
+					mode: "Planning",
+					permissions: "ask",
+					sessionTime: "8m 12s",
+					providersLive: 1,
+					providersTotal: 2,
+					user: "someone",
+					tokensPerSecond: 30,
+					sandboxOff: "nested",
+					columns: w + 1,
+					ctx: { used, window: 128000, stale: false },
+				});
+			for (let w = 80; w <= 220; w++) {
+				const all = full(w);
+				const need = ["mode", "sandbox", "ctx"].map(
+					(k) => all.find((x) => x.key === k) as FooterSegment,
+				);
+				// Mode, the sandbox in its full form, the meter, and the cap: the least a wide row holds.
+				const minimal = segmentsWidth(need) + 3 + 15;
+				const row = fitFooterRow(all, w);
+				if (w >= minimal) {
+					expect(
+						row.segments.some((x) => x.key === "ctx"),
+						`meter at ${w}, used ${used}`,
+					).toBe(true);
+				}
+				expect(row.segments.some((x) => x.key === "sandbox")).toBe(true);
+				expect(row.hints[0]).toBe("^P palette");
+			}
+		}
+	});
+
+	test("90 percent at 120 to 160 columns: rate, providers, user and session never outlast the meter", () => {
+		for (let w = 120; w <= 160; w++) {
+			const all = buildFooterSegments({
+				mode: "Planning",
+				permissions: "ask",
+				sessionTime: "8m 12s",
+				providersLive: 1,
+				providersTotal: 2,
+				user: "someone",
+				tokensPerSecond: 30,
+				sandboxOff: "nested",
+				columns: w + 1,
+				ctx: { used: 120000, window: 128000, stale: false },
+			});
+			const row = fitFooterRow(all, w);
+			const keys = row.segments.map((x) => x.key);
+			if (!keys.includes("ctx")) {
+				for (const low of ["rate", "providers", "user", "session"]) {
+					expect(keys, `${low} kept without the meter at ${w}`).not.toContain(low);
+				}
+			}
+			expect(keys, `meter at ${w}`).toContain("ctx");
+		}
 	});
 
 	test("the sandbox shrinks to 'sbx off' when it must, never to nothing", () => {

@@ -424,12 +424,18 @@ export function fitFooterRow(
 	// stays while it can; when it cannot, it goes before the sandbox does. From
 	// 60 columns up a form that would cost a hint is passed over for a shorter
 	// one; low-priority segments (session, providers) then give way too.
+	// Lower-priority segments (rate, user, providers, session) give way before the
+	// meter does: keep priority up to 9, then 5, 4, 3, 2 (the meter), and only then
+	// lose the meter itself, then everything above the sandbox.
+	const keepUpTo = (p: number) => (l: FooterSegment[]) => l.filter((x) => x.priority <= p);
 	const sheds: Array<(list: FooterSegment[]) => FooterSegment[]> = [
-		(l) => l,
+		...[9, 5, 4, 3, 2].map(keepUpTo),
 		(l) => l.filter((x) => x.key !== "ctx"),
 		(l) => l.filter((x) => x.key !== "ctx" && x.priority <= 1),
 	];
-	for (const shed of meter ? sheds : sheds.slice(1)) {
+	const meterSheds = 5;
+	for (const [shedIndex, shed] of sheds.entries()) {
+		if (!meter && shedIndex < meterSheds) continue;
 		for (const shape of shapes) {
 			for (const seg of forms) {
 				const candidate = shape(shed(all.map((x) => (x === sandbox ? seg : x))));
@@ -437,7 +443,7 @@ export function fitFooterRow(
 				const segments = fit(candidate);
 				if (!kept || !segments.includes(kept)) continue;
 				// The first pass is the one that keeps the meter: a form that loses it yields to the next.
-				if (meter && shed === sheds[0] && !segments.some((x) => x.key === "ctx")) continue;
+				if (meter && shedIndex < meterSheds && !segments.some((x) => x.key === "ctx")) continue;
 				const hints = hintsFor(segments);
 				if (width >= FOOTER_NARROW_COLS && hints.length < plainHints.length) continue;
 				return { segments, hints };
