@@ -287,6 +287,22 @@ export const SINKS: Sink[] = [
 		},
 	},
 
+	// --- the Flow app on this phone ----------------------------------------
+	{
+		id: "flow-bridge",
+		what: "On Android, a page address web_fetch is asked to read goes to the 8gent Flow app on the same phone (127.0.0.1 only), whose Browser tab loads the page. The address reaches the page's own site, as it does for a direct web_fetch; nothing goes to any other service.",
+		mode: "optin",
+		patterns: [/eightgent:\/\/bridge/],
+		files: ["packages/tools/flow-bridge.ts"],
+		optIn: [
+			{
+				file: "packages/tools/flow-bridge.ts",
+				mustMatch: /ask\(PAIR_QUESTION, false\)[\s\S]{0,80}yes !== true/,
+				how: "pairing asks once, a bare Enter is No, and unattended (no answer) is No; with no pairing file bridgeFetch returns null",
+			},
+		],
+	},
+
 	// --- messaging and services, each behind a token ----------------------
 	{
 		id: "chat-and-mail-bridges",
