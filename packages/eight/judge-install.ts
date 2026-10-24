@@ -68,6 +68,7 @@ export type JudgeOutcome =
 	| "unsupported"
 	| "installed"
 	| "started" //     the judge was set up before; its server was just not running
+	| "deferred" //    launch mode, llama path, nothing on disk: the question waits for the running TUI
 	| "failed";
 
 type Env = Record<string, string | undefined>;
@@ -388,6 +389,11 @@ async function install(d: InstallDeps, from: "auto" | "command"): Promise<JudgeO
 	}
 }
 
+/** Is llama.cpp this device's default judge runtime (a phone, or EIGHT_JUDGE_RUNTIME=llama-server)? */
+export function judgeUsesLlama(env: Env = process.env): boolean {
+	return llamaPathApplies(env, {});
+}
+
 function llamaPathApplies(env: Env, deps: JudgeDeps): boolean {
 	if (deps.llama?.enabled !== undefined) return deps.llama.enabled;
 	const pick = env.EIGHT_JUDGE_RUNTIME?.trim().toLowerCase();
@@ -403,6 +409,7 @@ function llamaPathApplies(env: Env, deps: JudgeDeps): boolean {
  */
 async function llamaJudge(
 	mode: "auto" | "command",
+	deferFirstOffer: boolean,
 	deps: JudgeDeps,
 	d: {
 		probe: () => Promise<{ backend: string; model: string | null }>;
@@ -458,6 +465,10 @@ async function llamaJudge(
 		d.say("Starting the safety judge in the background.");
 		return finish(have.bin, have.gguf, have.model, "started");
 	}
+
+	// Before the TUI has drawn (launch mode) nothing first-time is asked: a 4.9 GB question is never
+	// the first thing a phone shows. The running TUI makes the offer once (judgeUsesLlama + "auto").
+	if (deferFirstOffer) return "deferred";
 
 	// Nothing is asked or downloaded for a device no calibrated judge model is sized for.
 	const entry = judgeEntryFor((L.totalRamBytes ?? totalmem)(), catalogue, hasProfile);
@@ -516,12 +527,18 @@ async function llamaJudge(
 /**
  * `auto`: after an update and on first launch. Asks at most once ever: any
  * recorded choice (declined, unsupported, failed) ends the asking.
+ * `launch`: `auto` before the first render; on the llama path (a phone) it never asks, it only
+ * starts a judge that is already on disk and returns "deferred" otherwise.
  * `command`: /judge install. Typing it is the yes; it ignores recorded choices.
  */
 export async function offerJudge(
-	mode: "auto" | "command",
+	launchOrMode: "launch" | "auto" | "command",
 	deps: JudgeDeps = {},
 ): Promise<JudgeOutcome> {
+	// `launch`: `auto` run before the TUI has drawn. Same recorded-choice rules; on the llama path
+	// it only starts an already installed judge and defers the first-time offer to the TUI.
+	const mode: "auto" | "command" = launchOrMode === "launch" ? "auto" : launchOrMode;
+	const deferFirstOffer = launchOrMode === "launch";
 	const env = deps.env ?? process.env;
 	const ask = askerFor(deps, env);
 	const say = deps.say ?? ((l: string) => console.log(l));
@@ -565,7 +582,7 @@ export async function offerJudge(
 	// llama.cpp is the default local runtime on a phone (#4906): 8gent's own llama-server and the
 	// pinned judge model. "fallback" means it could not be had and Ollama is there instead.
 	if (llamaPathApplies(env, deps)) {
-		const r = await llamaJudge(mode, deps, d, env);
+		const r = await llamaJudge(mode, deferFirstOffer, deps, d, env);
 		if (process.stdout.isTTY && !deps.progress) process.stdout.write("\n");
 		if (r !== "fallback") return r;
 	}

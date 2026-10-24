@@ -581,6 +581,110 @@ describe("the llama.cpp path (#4906)", () => {
 	});
 });
 
+describe("first launch defers the judge question to the running TUI (#4909 regression)", () => {
+	function phone(over: Omit<Partial<JudgeDeps>, "ollama"> = {}) {
+		const asks: string[] = [];
+		const writes: (string | null)[] = [];
+		let stored: "declined" | "unsupported" | "failed" | null = null;
+		const started: string[] = [];
+		const r = rig({
+			ollama: "none",
+			ask: async (line) => {
+				asks.push(line);
+				return false;
+			},
+			llama: {
+				enabled: true,
+				existing: () => null,
+				ensureBinary: async () => {
+					throw new Error("launch must not fetch llama-server");
+				},
+				ensureModel: async () => {
+					throw new Error("launch must not fetch the model");
+				},
+				start: async (bin) => {
+					started.push(bin);
+					return { ok: true };
+				},
+			},
+			readChoice: () => stored,
+			writeChoice: (c) => {
+				writes.push(c);
+				stored = c as typeof stored;
+				return true;
+			},
+			...over,
+		});
+		return { ...r, asks, writes, started };
+	}
+
+	test("launch, no install on disk: asks nothing, records nothing, returns at once", async () => {
+		const r = phone();
+		const t0 = Date.now();
+		expect(await offerJudge("launch", r.deps)).toBe("deferred");
+		expect(Date.now() - t0).toBeLessThan(500);
+		expect(r.asks).toEqual([]);
+		expect(r.writes).toEqual([]);
+		expect(r.log.said).toEqual([]);
+	});
+
+	test("launch with a verified llama-server and model on disk starts it and asks nothing", async () => {
+		let up = false;
+		const r = phone({
+			probe: async () =>
+				up ? { backend: "llamacpp", model: JUDGE_MODEL } : { backend: "none", model: null },
+			llama: {
+				enabled: true,
+				existing: () => ({ bin: "/b/llama-server", gguf: "/m/j.gguf", model: JUDGE_MODEL }),
+				hasProfile: () => true,
+				start: async () => {
+					up = true;
+					return { ok: true };
+				},
+			},
+		});
+		expect(await offerJudge("launch", r.deps)).toBe("started");
+		expect(r.asks).toEqual([]);
+	});
+
+	test("after first render the TUI's auto offer asks once, defaults to No, and a no is recorded", async () => {
+		const r = phone();
+		expect(await offerJudge("launch", r.deps)).toBe("deferred");
+		expect(await offerJudge("auto", r.deps)).toBe("declined");
+		expect(r.asks).toEqual([llamaAskLine(false)]);
+		expect(r.writes).toEqual(["declined"]);
+		// Next launch (pre-TUI) and the next TUI offer: the recorded no ends the asking.
+		expect(await offerJudge("launch", r.deps)).toBe("recorded");
+		expect(await offerJudge("auto", r.deps)).toBe("recorded");
+		expect(r.asks.length).toBe(1);
+	});
+
+	test("/judge install still works after a recorded no", async () => {
+		const r = phone();
+		await offerJudge("auto", r.deps);
+		const cmd = phone({
+			readChoice: () => "declined",
+			llama: {
+				enabled: true,
+				existing: () => null,
+				ensureBinary: async () => ({ ok: true, bin: "/b/llama-server", source: "fetched" }),
+				ensureModel: async () => ({ ok: true, path: "/m/j.gguf" }),
+				start: async () => ({ ok: true }),
+				catalogue: undefined,
+			},
+			probe: (() => {
+				let n = 0;
+				return async () =>
+					n++ === 0
+						? { backend: "none", model: null }
+						: { backend: "llamacpp", model: JUDGE_MODEL };
+			})(),
+		});
+		expect(await offerJudge("command", cmd.deps)).toBe("installed");
+		expect(cmd.asks).toEqual([]);
+	});
+});
+
 describe("no default yes, unattended, and device size (#4906)", () => {
 	const GiB = 2 ** 30;
 	const llamaFakes = (ram: number) => {

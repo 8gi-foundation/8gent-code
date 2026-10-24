@@ -72,18 +72,27 @@ OUT="$(mktemp)"
 # is on screen. Declining installs nothing; the point is that the offer is made, once.
 Q_MUSIC="Set up this phone for music"
 Q_MIC="Turn on voice input"
+Q_JUDGE="Set up the safety judge on this device"
+# One feeder answers every question it sees, each occurrence once, "n" each time: the music and
+# voice questions are expected before the TUI draws; the judge question is asked after the first
+# render (a 4.9 GB download is never the first thing a phone shows), and if it ever appears it is
+# declined and counted below instead of hanging the run.
 answer_setup() {
-	for q in "$Q_MUSIC" "$Q_MIC"; do
-		t=0
-		until grep -aqs "$q" "$OUT"; do
-			sleep 1; t=$((t + 1))
-			[ "$t" -gt "$SECONDS_TUI" ] && break
+	a_music=0; a_mic=0; a_judge=0; t=0
+	while [ "$t" -lt "$((SECONDS_TUI + 20))" ]; do
+		for k in music mic judge; do
+			case "$k" in music) q="$Q_MUSIC"; a="$a_music" ;; mic) q="$Q_MIC"; a="$a_mic" ;; *) q="$Q_JUDGE"; a="$a_judge" ;; esac
+			n="$(grep -ao "$q" "$OUT" 2>/dev/null | wc -l | tr -d ' ')"
+			if [ "$n" -gt "$a" ]; then
+				sleep 1
+				echo n
+				case "$k" in music) a_music=$((a_music + 1)) ;; mic) a_mic=$((a_mic + 1)) ;; *) a_judge=$((a_judge + 1)) ;; esac
+			fi
 		done
-		sleep 1
-		echo n
+		sleep 1; t=$((t + 1))
 	done
 	# Then hold stdin open so the TUI keeps running until we have looked.
-	sleep "$((SECONDS_TUI + 10))"
+	sleep 10
 }
 ( answer_setup | script -qec "8gent tui --no-pet" /dev/null >"$OUT" 2>&1 ) &
 runner=$!
@@ -105,6 +114,10 @@ for q in "$Q_MUSIC" "$Q_MIC"; do
 	n="$(grep -ao "$q" "$OUT" | wc -l | tr -d ' ')"
 	if [ "$n" = "1" ]; then pass "launch asked \"$q\" once"; else bad "launch asked \"$q\" $n times (want 1)"; fi
 done
+# The judge question may appear (in the running TUI, after first render) but never before it;
+# a count here is reported, not fatal: it was declined and the run went on.
+nj="$(grep -ao "$Q_JUDGE" "$OUT" | wc -l | tr -d ' ')"
+if [ "$nj" = "0" ]; then pass "judge question not asked before the smoke finished"; else pass "judge question asked $nj time(s) after the TUI drew; declined with n"; fi
 pkill -P "$runner" 2>/dev/null || true
 pkill -f "8gent-run.js" 2>/dev/null || true
 kill "$runner" 2>/dev/null || true

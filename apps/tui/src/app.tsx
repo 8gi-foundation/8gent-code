@@ -2468,6 +2468,57 @@ export function App({
 	// Onboarding system
 	const [onboardingManager] = useState(() => new OnboardingManager(process.cwd()));
 	const [showOnboarding, setShowOnboarding] = useState(false);
+	// Phone first launch: the safety judge download question is asked here, once, after the shell has
+	// drawn and the launch music and voice questions are done, never before the first render. A
+	// recorded choice (declined included) ends the asking; /judge install always works.
+	const judgeOfferedRef = useRef(false); // latched only once the question is actually posted
+	const judgeInFlightRef = useRef(false);
+	const introVisibleRef = useRef(introVisible);
+	introVisibleRef.current = introVisible;
+	const showOnboardingRef = useRef(showOnboarding);
+	showOnboardingRef.current = showOnboarding;
+	useEffect(() => {
+		// Why each guard: showOnboarding is still false on the first commit and flips later in the
+		// mount flush, so the onboarding manager itself is asked; a pending answer ref belongs to
+		// another question (/dj, mic, /voice cloud) and must not be replaced; no TTY or an
+		// auto-approve run has no person to ask (the same guard as bin/8gent.ts).
+		const busy = () =>
+			introVisibleRef.current ||
+			showOnboardingRef.current ||
+			onboardingManager.needsOnboarding() ||
+			djInstallAnswerRef.current !== null;
+		if (judgeOfferedRef.current || judgeInFlightRef.current || busy()) return;
+		if (cliAutoApprove || !process.stdin.isTTY || !process.stdout.isTTY) return;
+		judgeInFlightRef.current = true;
+		void (async () => {
+			try {
+				const { offerJudge, judgeUsesLlama } = await import(
+					"../../../packages/eight/judge-install.js"
+				);
+				if (!judgeUsesLlama()) {
+					judgeOfferedRef.current = true;
+					return;
+				}
+				await offerJudge("auto", {
+					ask: (line, defaultYes) => {
+						// Re-checked after the awaits: onboarding may have started while we loaded.
+						if (busy()) return Promise.resolve(null);
+						judgeOfferedRef.current = true;
+						return new Promise<boolean>((resolve) => {
+							djInstallDefaultRef.current = defaultYes;
+							djInstallAnswerRef.current = resolve;
+							addSystemMessage(line);
+						});
+					},
+					say: addSystemMessage,
+					progress: () => {},
+				});
+			} catch {
+			} finally {
+				judgeInFlightRef.current = false;
+			}
+		})();
+	}, [introVisible, showOnboarding]);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [currentOnboardingQuestion, setCurrentOnboardingQuestion] = useState<string | null>(null);

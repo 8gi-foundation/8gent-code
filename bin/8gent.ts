@@ -731,7 +731,9 @@ async function offerSafetyJudge(afterUpdate = false): Promise<void> {
 		if (!isInteractiveTerminal()) return;
 		const { offerJudge } = await import("../packages/eight/judge-install.ts");
 		// Every judge question defaults to No: a stray Enter never starts a download (#4906).
-		await offerJudge("auto");
+		// "launch": before the TUI draws, a phone never gets the download question; it only restarts
+		// an installed judge. The running TUI asks the first-time question once (apps/tui/src/app.tsx).
+		await offerJudge("launch");
 	} catch {}
 	// Android (#4833): the same moment offers the DJ's tools and voice input, one yes. A no-op elsewhere.
 	try {
