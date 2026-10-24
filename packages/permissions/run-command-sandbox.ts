@@ -485,7 +485,9 @@ export function buildRunCommandProfile(
 	return `${[
 		"(version 1)",
 		"(allow default)",
-		...(read ? osReadRules(read) : []),
+		// The #4132 key and secrets dirs of every protected data root join the never-read set:
+		// a filtered allow (root, temp) must not reopen an EIGHT_DATA_DIR placed inside it.
+		...(read ? osReadRules(read, undefined, readDenyFilters) : []),
 		...(readDenyFilters.length
 			? [
 					"; signing keys: no reads either (#4132)",
@@ -621,7 +623,12 @@ function ancestors(root: string): string[] {
  * resolve their own paths and the parents of the root; reading a file or listing a folder
  * outside the allowances is refused with EPERM.
  */
-export function osReadRules(spec: OsReadSpec, pathEnv: string = process.env.PATH ?? ""): string[] {
+export function osReadRules(
+	spec: OsReadSpec,
+	pathEnv: string = process.env.PATH ?? "",
+	/** More SBPL filters that are never readable (the protected data roots' keys/ and secrets/). */
+	alsoNever: readonly string[] = [],
+): string[] {
 	const root = path.normalize(spec.root);
 	if (!path.isAbsolute(root))
 		throw new Error(`os read boundary: root must be absolute, got "${spec.root}"`);
@@ -656,7 +663,7 @@ export function osReadRules(spec: OsReadSpec, pathEnv: string = process.env.PATH
 	const privateFilters = withReal(spec.dataRoots.filter((r) => path.isAbsolute(r))).flatMap(
 		ownPrivateFilters,
 	);
-	const never = [...secretFilters, ...privateFilters].join(" ");
+	const never = [...secretFilters, ...privateFilters, ...alsoNever].join(" ");
 	const allowed = `${readable.map((r) => `(subpath ${sbplString(r)})`).join(" ")} ${xcode}`;
 	return [
 		"; workspace read boundary (#4890): no file is read outside the root and the allowances",

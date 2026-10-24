@@ -52,6 +52,8 @@ const KEYS = [
 	OS_READ_BOUNDARY_FLAG,
 	SYSTEM_ONE_FLAG,
 	"EIGHT_WORKSPACE_ROOT",
+	"EIGHT_DATA_DIR",
+	"EIGHT_HOME",
 ];
 let cards: string[] = [];
 let answer: boolean | null = null;
@@ -65,6 +67,8 @@ beforeAll(() => {
 	home = path.join(base, "home");
 	for (const d of [
 		path.join(ws, "src"),
+		path.join(ws, ".data", "keys"),
+		path.join(ws, ".eh", ".8gent", "keys"),
 		path.join(home, ".ssh"),
 		path.join(home, ".8gent", "keys"),
 	])
@@ -83,6 +87,10 @@ beforeAll(() => {
 		[path.join(home, ".8gent", "config.json"), "OWN-CONFIG"],
 		[path.join(home, ".8gent", "keys", "k"), "SIGNING-KEY"],
 		[path.join(home, "notes.txt"), "HOME-NOTES"],
+		// An EIGHT_DATA_DIR inside the workspace root: its keys/ must stay shut (#4132, #4890).
+		[path.join(ws, ".data", "keys", "k"), "DATA-DIR-KEY"],
+		// EIGHT_HOME inside the root: sensitiveCredentialPaths() does not cover its .8gent/keys.
+		[path.join(ws, ".eh", ".8gent", "keys", "k"), "EIGHT-HOME-KEY"],
 	];
 	for (const [p, c] of files) fs.writeFileSync(p, c);
 	// The protected data roots (signing keys, #4132) follow the fake home in test mode.
@@ -104,6 +112,8 @@ beforeEach(() => {
 	answer = null;
 	Reflect.deleteProperty(process.env, OS_READ_BOUNDARY_FLAG);
 	Reflect.deleteProperty(process.env, "EIGHT_WORKSPACE_ROOT");
+	Reflect.deleteProperty(process.env, "EIGHT_DATA_DIR");
+	Reflect.deleteProperty(process.env, "EIGHT_HOME");
 	process.env.HOME = home;
 	process.env[SYSTEM_ONE_FLAG] = "0"; // System One off: the read boundaries alone decide
 	_setSystemOneOverridesForTests({
@@ -259,6 +269,27 @@ describe("generated profile", () => {
 			expect({ p, denied: denied(p) }).toEqual({ p, denied: true });
 		for (const p of ["config.json", "settings.json", "skills/a/SKILL.md", "themes/dark.json"])
 			expect({ p, denied: denied(p) }).toEqual({ p, denied: false });
+	});
+
+	test("an EIGHT_DATA_DIR inside the root: its keys/ and secrets/ are excluded inside the allow", () => {
+		const dataDir = path.join(ws, ".data");
+		process.env.EIGHT_DATA_DIR = dataDir;
+		const lines = profile(spec("cat x")).split("\n");
+		const allow = lines.find((l) => l.startsWith("(allow file-read-data (require-all")) as string;
+		const never = allow.slice(allow.indexOf("(require-not"));
+		// The root allow covers the data dir; the exclusion inside the same rule shuts its key dirs.
+		expect(allow.slice(0, allow.indexOf("(require-not"))).toContain(`(subpath "${ws}")`);
+		expect(never).toContain(`(subpath "${path.join(dataDir, "keys")}")`);
+		expect(never).toContain(`(subpath "${path.join(dataDir, "secrets")}")`);
+	});
+
+	test("an EIGHT_HOME inside the root: its .8gent/keys/ is excluded inside the allow", () => {
+		process.env.EIGHT_HOME = path.join(ws, ".eh");
+		const lines = profile(spec("cat x")).split("\n");
+		const allow = lines.find((l) => l.startsWith("(allow file-read-data (require-all")) as string;
+		const never = allow.slice(allow.indexOf("(require-not"));
+		expect(never).toContain(`(subpath "${path.join(ws, ".eh", ".8gent", "keys")}")`);
+		expect(never).toContain(`(subpath "${path.join(ws, ".eh", ".8gent", "secrets")}")`);
 	});
 
 	test("osReadRules refuses a relative root", () => {
@@ -417,6 +448,24 @@ describe.if(live)("live: run_command under the kernel read rule (macOS)", () => 
 		on();
 		const out = await run(home, SIGNING_KEY_GAP);
 		expect(out).not.toContain("SIGNING-KEY");
+		expectKernelRefusal(out);
+	});
+
+	test("flag on: an EIGHT_DATA_DIR inside the root keeps its keys/ shut", async () => {
+		on();
+		process.env.EIGHT_DATA_DIR = path.join(ws, ".data");
+		const out = await run(ws, `python3 -c "print(open('.da'+'ta/ke'+'ys/k').read())"`);
+		expect(out).not.toContain("DATA-DIR-KEY");
+		expectKernelRefusal(out);
+		// A positive control in the same data dir: the root is readable, only the key dir is not.
+		expect(await run(ws, "cat inside.txt")).toContain("INSIDE-OK");
+	});
+
+	test("flag on: an EIGHT_HOME inside the root keeps its .8gent/keys/ shut", async () => {
+		on();
+		process.env.EIGHT_HOME = path.join(ws, ".eh");
+		const out = await run(ws, `python3 -c "print(open('.e'+'h/.8g'+'ent/ke'+'ys/k').read())"`);
+		expect(out).not.toContain("EIGHT-HOME-KEY");
 		expectKernelRefusal(out);
 	});
 
