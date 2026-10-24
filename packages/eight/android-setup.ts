@@ -43,6 +43,7 @@ import {
 	runCommand,
 } from "../voice/termux-local-stt";
 import { askYesNoLine, configPath } from "./judge-install";
+import { type BinaryResult, fetchWhisperCli } from "./runtime-fetch";
 
 export { configPath };
 
@@ -98,6 +99,9 @@ export interface AndroidSetupDeps {
 	findWhisper?: () => string | null;
 	/** An installed whisper model, or null. */
 	findModel?: () => string | null;
+	/** Download and verify 8gent's own whisper-cli for this version. Default: runtime-fetch. */
+	fetchWhisper?: () => Promise<BinaryResult>;
+	/** The explicit fallback only (8gent voice build-whisper). */
 	buildWhisper?: (
 		run: LocalRun,
 		progress: (l: string) => void,
@@ -134,15 +138,20 @@ export function localInstallText(n: LocalVoiceNeeds): string {
 	if (n.pkgs.includes("termux-api"))
 		parts.push("termux-api (it only opens the microphone; the audio stays here)");
 	if (n.pkgs.includes("ffmpeg")) parts.push("ffmpeg");
-	// The build is the biggest thing the yes starts, so the yes names its tools.
+	// 8gent's own prebuilt binary: a download, checked against the release's SHA256SUMS before it runs.
 	if (n.whisper)
-		parts.push(`the build tools ${BUILD_PKGS.slice(0, -1).join(", ")} and ${BUILD_PKGS.at(-1)}`);
-	if (n.whisper) parts.push("the whisper.cpp build (on the phone, a few minutes)");
+		parts.push(
+			"8gent's own speech engine (a small download from 8gent's release, checked before it runs)",
+		);
 	if (n.model) parts.push("a speech model");
 	if (!parts.length) return "";
 	const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
 	return `Sets up ${list}. `;
 }
+
+/** Said when the prebuilt download is not available. The build is only ever started by this typed command. */
+export const BUILD_FALLBACK_LINE =
+	"To build it on this phone instead (installs clang, cmake and make, takes a few minutes), run: 8gent voice build-whisper";
 
 /** Always [y/N]: only a typed y or yes turns the mic on. Names the local default and the cloud option. */
 export function micAskLine(n: LocalVoiceNeeds): string {
@@ -276,6 +285,7 @@ interface Resolved {
 	write: (p: SetupPatch) => boolean;
 	needs: () => LocalVoiceNeeds;
 	build: NonNullable<AndroidSetupDeps["buildWhisper"]>;
+	fetchWhisper: NonNullable<AndroidSetupDeps["fetchWhisper"]>;
 	installModel: NonNullable<AndroidSetupDeps["installModel"]>;
 }
 
@@ -310,27 +320,29 @@ function resolveDeps(deps: AndroidSetupDeps): Resolved {
 		state: (deps.readState ?? (() => readSetup(env)))(),
 		write: deps.writeState ?? ((p: SetupPatch) => writeSetup(p, env)),
 		needs: () => localVoiceNeeds(has, findWhisper(), findModel()),
+		fetchWhisper: deps.fetchWhisper ?? (() => fetchWhisperCli({ env })),
 		build: deps.buildWhisper ?? ((run, progress) => defaultBuildWhisper(run, progress, env)),
 		installModel: deps.installModel ?? ((model, run) => defaultInstallModel(model, run, env)),
 	};
 }
 
-/** After the yes: pick the model (if none), then install packages, build whisper.cpp, fetch the model. */
+/** After the yes: pick the model (if none), install packages, download whisper-cli, fetch the model. */
 async function installLocalVoice(r: Resolved): Promise<boolean> {
 	const first = r.needs();
 	let model: PhoneModel = "tiny";
 	if (first.model) model = (await r.ask(modelAskLine(), false)) === true ? "base" : "tiny";
 	if (
 		first.pkgs.length &&
-		// local-first-gate: optin the mic question, [y/N], named termux-api and ffmpeg and the build tools before this runs
+		// local-first-gate: optin the mic question, [y/N], named termux-api and ffmpeg and the speech engine download before this runs
 		!(await installPkgs(first.pkgs, r.run, r.say, r.progress, () => r.needs().pkgs))
 	)
 		return false;
 	if (first.whisper) {
-		r.say("Building whisper.cpp on this phone. This takes a few minutes.");
-		const built = await r.build(r.run, r.progress);
-		if ("error" in built) {
-			r.say(built.error);
+		r.say("Downloading 8gent's speech engine (about 2 MB)...");
+		const got = await r.fetchWhisper();
+		if (!got.ok) {
+			// Nothing was built or installed. The build is a typed command, never a default.
+			r.say(`${got.why}. Nothing was built or installed. ${BUILD_FALLBACK_LINE}`);
 			return false;
 		}
 	}
@@ -446,4 +458,41 @@ export async function offerCloudVoice(deps: AndroidSetupDeps = {}): Promise<Andr
 /** Which engine Ctrl+R uses. Local unless the person said yes to the cloud question. */
 export function voiceEngine(state: SetupState): "local" | "cloud" {
 	return state.cloud ? "cloud" : "local";
+}
+
+/** The one question of the explicit fallback. Always [y/N]. */
+export const buildAskLine = `Build whisper.cpp on this phone instead of downloading it? Installs ${BUILD_PKGS.slice(0, -1).join(", ")} and ${BUILD_PKGS.at(-1)} and takes a few minutes. [y/N]`;
+
+/**
+ * 8gent voice build-whisper: the source build, only when the person types it (the prebuilt
+ * download was missing). A bare Enter and an unattended run are No; only the missing build
+ * tools are installed.
+ */
+export async function offerWhisperBuild(deps: AndroidSetupDeps = {}): Promise<AndroidSetupOutcome> {
+	const env = deps.env ?? process.env;
+	if (!(deps.android ?? isAndroidHost(process.platform, env))) return "not-android";
+	const r = resolveDeps(deps);
+	const yes = await r.ask(buildAskLine, false);
+	if (yes === null) return "no-person";
+	if (!yes) {
+		r.say("OK. Nothing installed or built.");
+		return "declined";
+	}
+	const missing = BUILD_PKGS.filter((b) => !r.has(b));
+	if (
+		missing.length &&
+		// local-first-gate: optin the build question, [y/N], named these tools before this runs
+		!(await installPkgs([...missing], r.run, r.say, r.progress, () =>
+			BUILD_PKGS.filter((b) => !r.has(b)),
+		))
+	)
+		return "failed";
+	r.say("Building whisper.cpp on this phone. This takes a few minutes.");
+	const built = await r.build(r.run, r.progress);
+	if ("error" in built) {
+		r.say(built.error);
+		return "failed";
+	}
+	r.say("whisper.cpp is built.");
+	return "installed";
 }

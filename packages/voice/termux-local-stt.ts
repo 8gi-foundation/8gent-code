@@ -64,7 +64,7 @@ export const WHISPER_SOURCE = {
 /** Termux packages the local path needs, by the command that proves each is there. */
 export const RECORD_TOOL = { bin: "termux-microphone-record", pkg: "termux-api" } as const;
 export const CONVERT_TOOL = { bin: "ffmpeg", pkg: "ffmpeg" } as const;
-/** What building whisper.cpp needs. curl and tar are in every Termux install. */
+/** What the explicit fallback build (8gent voice build-whisper) needs. Never installed on the default path. */
 export const BUILD_PKGS = ["clang", "cmake", "make"] as const;
 
 /** Longest single recording. The recorder gets the same limit, so the mic is never left on. */
@@ -86,7 +86,7 @@ export function phoneModelsDir(env: Env = process.env): string {
 	return join(eightDir(env), "models", "whisper");
 }
 
-/** Where the on-phone build puts whisper-cli. */
+/** Where whisper-cli lives: 8gent's downloaded release binary, or the one the explicit fallback built. */
 export function managedWhisperBin(env: Env = process.env): string {
 	return join(eightDir(env), "bin", "whisper-cli");
 }
@@ -119,13 +119,13 @@ export function findPhoneModel(
 export interface LocalVoiceNeeds {
 	/** Termux packages to pkg install. */
 	pkgs: string[];
-	/** whisper.cpp must be built. */
+	/** whisper-cli must be downloaded. */
 	whisper: boolean;
 	/** No model is installed. */
 	model: boolean;
 }
 
-/** What is missing for on-phone voice input. Build tools are only listed when whisper.cpp must be built. */
+/** What is missing for on-phone voice input. */
 export function localVoiceNeeds(
 	has: (bin: string) => boolean,
 	whisperBin: string | null,
@@ -134,8 +134,8 @@ export function localVoiceNeeds(
 	const pkgs: string[] = [];
 	if (!has(RECORD_TOOL.bin)) pkgs.push(RECORD_TOOL.pkg);
 	if (!has(CONVERT_TOOL.bin)) pkgs.push(CONVERT_TOOL.pkg);
+	// A missing whisper-cli is downloaded (eight/runtime-fetch.ts), never built: no compiler is a need.
 	const whisper = !whisperBin;
-	if (whisper) for (const p of BUILD_PKGS) if (!has(p)) pkgs.push(p);
 	return { pkgs, whisper, model: !modelPath };
 }
 

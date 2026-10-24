@@ -20,6 +20,7 @@ import {
 	musicAskLine,
 	offerAndroidSetup,
 	offerCloudVoice,
+	offerWhisperBuild,
 	readSetup,
 	unattended,
 	voiceEngine,
@@ -52,6 +53,7 @@ function rig(
 		whisper?: boolean;
 		model?: boolean;
 		buildFails?: boolean;
+		fetchFails?: boolean;
 		modelFails?: boolean;
 	} = {},
 ) {
@@ -65,6 +67,7 @@ function rig(
 		runs: [] as string[][],
 		writes: [] as SetupPatch[],
 		builds: 0,
+		fetches: 0,
 		models: [] as PhoneModel[],
 	};
 	const st: SetupState = {
@@ -88,6 +91,13 @@ function rig(
 		},
 		findWhisper: () => (whisper ? "/fake/whisper-cli" : null),
 		findModel: () => (model ? "/fake/ggml-tiny.en.bin" : null),
+		fetchWhisper: async () => {
+			log.fetches++;
+			if (o.fetchFails)
+				return { ok: false, why: "v0.20.27 has no whisper-cli-android-arm64 in its SHA256SUMS" };
+			whisper = true;
+			return { ok: true, bin: "/fake/whisper-cli" };
+		},
 		buildWhisper: async () => {
 			log.builds++;
 			if (o.buildFails)
@@ -129,17 +139,19 @@ describe("lines", () => {
 		expect(line).toEndWith("[y/N]");
 	});
 
-	test("the mic question names what it installs: clang, cmake and make, plus the whisper.cpp build", () => {
+	test("the mic question names a download, never a build", () => {
 		const line = micAskLine({ pkgs: [], whisper: true, model: false });
-		expect(line).toContain("the build tools clang, cmake and make");
-		expect(line).toContain("the whisper.cpp build");
-		// Nothing to build, nothing named.
-		expect(micAskLine({ pkgs: [], whisper: false, model: true })).not.toContain("clang");
+		expect(line).toContain("8gent's own speech engine");
+		expect(line).toContain("checked before it runs");
+		for (const w of ["clang", "cmake", "make", "build", "Build", "compile"])
+			expect(micAskLine(EVERYTHING)).not.toContain(w);
+		// Nothing missing, nothing named.
+		expect(micAskLine({ pkgs: [], whisper: false, model: true })).not.toContain("speech engine");
 	});
 
 	test("the mic question says termux-api is for the microphone and the audio still stays local", () => {
 		expect(micAskLine(EVERYTHING)).toContain(
-			"Sets up termux-api (it only opens the microphone; the audio stays here), ffmpeg, the build tools clang, cmake and make, the whisper.cpp build (on the phone, a few minutes) and a speech model. ",
+			"Sets up termux-api (it only opens the microphone; the audio stays here), ffmpeg, 8gent's own speech engine (a small download from 8gent's release, checked before it runs) and a speech model. ",
 		);
 		expect(micAskLine(NOTHING)).not.toContain("Sets up");
 		expect(micAskLine({ pkgs: [], whisper: false, model: true })).toContain(
@@ -263,16 +275,16 @@ describe("launch (auto)", () => {
 		expect(log.models).toEqual([]);
 	});
 
-	test("yes to the mic on a bare phone: one install step, whisper.cpp built, tiny chosen by default", async () => {
+	test("yes to the mic on a bare phone: one pkg step, whisper-cli downloaded not built, tiny chosen by default", async () => {
 		// music no, mic yes, model question: bare Enter (false)
 		const { deps, log, st } = rig({ answers: [false, true, false] });
 		expect(await offerAndroidSetup("auto", deps)).toBe("installed");
 		expect(log.asked.map((a) => a.line)).toContain(modelAskLine());
 		expect(log.asked.find((a) => a.line === modelAskLine())?.defaultYes).toBe(false);
-		expect(log.runs).toEqual([
-			["pkg", "install", "-y", "termux-api", "ffmpeg", "clang", "cmake", "make"],
-		]);
-		expect(log.builds).toBe(1);
+		expect(log.runs).toEqual([["pkg", "install", "-y", "termux-api", "ffmpeg"]]);
+		expect(log.builds).toBe(0);
+		expect(log.fetches).toBe(1);
+		expect(log.said.join("\n")).not.toMatch(/Building|clang|cmake/);
 		expect(log.models).toEqual(["tiny"]);
 		expect(st.mic).toBe(true);
 		expect(st.cloud).toBe(false);
@@ -331,12 +343,25 @@ describe("launch (auto)", () => {
 		expect(log.asked).toHaveLength(2);
 	});
 
-	test("a failed whisper.cpp build is said and stops before the model download", async () => {
-		const { deps, log } = rig({ have: NO_WHISPER, answers: [true, false], buildFails: true });
+	test("a failed whisper-cli download says why, builds nothing, installs nothing, and names the typed fallback", async () => {
+		const { deps, log } = rig({ have: NO_WHISPER, answers: [true, false], fetchFails: true });
 		expect(await offerAndroidSetup("command", deps)).toBe("failed");
-		expect(log.said.some((l) => l.startsWith("Building whisper.cpp"))).toBe(true);
+		const said = log.said.join("\n");
+		expect(said).toContain("no whisper-cli-android-arm64");
+		expect(said).toContain("8gent voice build-whisper");
+		expect(log.builds).toBe(0);
+		expect(log.runs).toEqual([]);
 		expect(log.models).toEqual([]);
 		expect(log.said).not.toContain(MIC_READY_LINE);
+	});
+
+	test("the default path never installs a compiler or builds, whatever happens", async () => {
+		for (const fetchFails of [false, true]) {
+			const { deps, log } = rig({ answers: [false, true, false], fetchFails });
+			await offerAndroidSetup("auto", deps);
+			expect(ran(log).join(" ")).not.toMatch(/clang|cmake|make/);
+			expect(log.builds).toBe(0);
+		}
 	});
 
 	test("a model that fails its checksum is reported and voice input is not called ready", async () => {
@@ -487,5 +512,49 @@ describe("config on disk", () => {
 		} finally {
 			rmSync(home, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("8gent voice build-whisper: the explicit fallback", () => {
+	test("a bare Enter is No: nothing installed, nothing built", async () => {
+		const { deps, log } = rig({ answers: [false] });
+		expect(await offerWhisperBuild(deps)).toBe("declined");
+		expect(log.asked).toHaveLength(1);
+		expect(log.asked[0].defaultYes).toBe(false);
+		expect(log.asked[0].line).toMatch(/\[y\/N\]$/);
+		expect(log.asked[0].line).toContain("clang, cmake and make");
+		expect(log.runs).toEqual([]);
+		expect(log.builds).toBe(0);
+	});
+
+	test("unattended is No", async () => {
+		const { deps, log } = rig({ answers: [null] });
+		expect(await offerWhisperBuild(deps)).toBe("no-person");
+		expect(log.runs).toEqual([]);
+		expect(log.builds).toBe(0);
+	});
+
+	test("a typed yes installs only the missing build tools, then builds", async () => {
+		const { deps, log } = rig({ have: ["clang"], answers: [true] });
+		expect(await offerWhisperBuild(deps)).toBe("installed");
+		expect(log.runs).toEqual([["pkg", "install", "-y", "cmake", "make"]]);
+		expect(log.builds).toBe(1);
+		expect(log.fetches).toBe(0);
+	});
+
+	test("not on Android: nothing", async () => {
+		const { deps, log } = rig({ answers: [true] });
+		expect(await offerWhisperBuild({ ...deps, android: false })).toBe("not-android");
+		expect(log.asked).toEqual([]);
+	});
+
+	test("a failed build is said, not hidden", async () => {
+		const { deps, log } = rig({
+			have: ["clang", "cmake", "make"],
+			answers: [true],
+			buildFails: true,
+		});
+		expect(await offerWhisperBuild(deps)).toBe("failed");
+		expect(log.said.join(" ")).toContain("did not finish");
 	});
 });

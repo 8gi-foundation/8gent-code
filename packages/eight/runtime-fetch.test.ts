@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { JUDGE_MODEL } from "../decide/judge-model";
+import { managedWhisperBin } from "../voice/termux-local-stt";
 import { managedLlamaServer } from "./local-runtime";
 import {
 	JUDGE_GGUF,
@@ -22,6 +23,7 @@ import {
 	ensureLlamaServer,
 	fetchJudgeModel,
 	fetchLlamaServer,
+	fetchWhisperCli,
 	findLlamaServer,
 	judgeModelFor,
 	judgeModelPath,
@@ -451,5 +453,137 @@ describe("the judge model is a table keyed by device RAM", () => {
 		expect(mins).toEqual([...mins].sort((a, b) => b - a));
 		for (const m of JUDGE_MODELS) expect(m.pin.sha256).toMatch(/^[0-9a-f]{64}$/);
 		expect(JUDGE_MODELS.map((m) => m.pin.sha256)).toEqual([JUDGE_GGUF.sha256]);
+	});
+});
+
+/** The android-arm64 release the phone fetches from: SHA256SUMS plus whisper-cli-android-arm64. */
+function whisperRelease(
+	over: { sums?: string | null; serveBytes?: string; status?: number; bytes?: string } = {},
+) {
+	// A real script, so the default smoke check (whisper-cli -h, exit 0) is what runs.
+	const good = over.bytes ?? '#!/bin/sh\n[ "$1" = "-h" ] && exit 0\nexit 1\n';
+	const asset = "whisper-cli-android-arm64";
+	const sums = over.sums === undefined ? `${sha(good)}  ${asset}\n` : over.sums;
+	const urls: string[] = [];
+	const fetchImpl: FetchLike = async (url) => {
+		urls.push(url);
+		const mk = (body: string, status = 200) => ({
+			ok: status === 200,
+			status,
+			headers: { get: () => null },
+			json: async () => ({}),
+			text: async () => body,
+			arrayBuffer: async () => new TextEncoder().encode(body).buffer as ArrayBuffer,
+		});
+		if (url.endsWith("/SHA256SUMS")) return sums === null ? mk("", 404) : mk(sums);
+		if (url.endsWith(`/${asset}`)) return mk(over.serveBytes ?? good, over.status ?? 200);
+		return mk("", 404);
+	};
+	return { fetchImpl, urls, good };
+}
+
+describe("fetchWhisperCli: the phone gets 8gent's own whisper-cli, no build", () => {
+	const base = (h: string) => ({
+		env: { EIGHT_HOME: h } as Record<string, string>,
+		platform: "android",
+		arch: "arm64",
+		version: "0.20.27",
+	});
+
+	test("downloads whisper-cli-android-arm64 from the running version's release, verifies it, runs -h, installs 0755 in ~/.8gent/bin", async () => {
+		const h = home();
+		const rel = whisperRelease();
+		const r = await fetchWhisperCli({ ...base(h), fetchImpl: rel.fetchImpl });
+		const dest = managedWhisperBin(base(h).env);
+		expect(r).toEqual({ ok: true, bin: dest });
+		expect(dest).toBe(join(h, ".8gent", "bin", "whisper-cli"));
+		expect(readFileSync(dest, "utf-8")).toBe(rel.good);
+		expect(statSync(dest).mode & 0o777).toBe(0o755);
+		expect(readdirSync(dirname(dest))).toEqual(["whisper-cli"]);
+		expect(rel.urls).toEqual([
+			"https://github.com/8gi-foundation/8gent-code/releases/download/v0.20.27/SHA256SUMS",
+			"https://github.com/8gi-foundation/8gent-code/releases/download/v0.20.27/whisper-cli-android-arm64",
+		]);
+	});
+
+	test("a tampered binary is refused before it is ever run", async () => {
+		const h = home();
+		let ranIt = false;
+		const rel = whisperRelease({ serveBytes: "#!/bin/sh\necho evil\n" });
+		const r = await fetchWhisperCli({
+			...base(h),
+			fetchImpl: rel.fetchImpl,
+			runs: () => {
+				ranIt = true;
+				return true;
+			},
+		});
+		expect(r.ok).toBe(false);
+		if (!r.ok) expect(r.why).toContain("does not match");
+		expect(ranIt).toBe(false);
+		const dest = managedWhisperBin(base(h).env);
+		expect(existsSync(dest)).toBe(false);
+		expect(existsSync(dirname(dest)) ? readdirSync(dirname(dest)) : []).toEqual([]);
+	});
+
+	test("a tampered binary never replaces a working install", async () => {
+		const h = home();
+		const dest = managedWhisperBin(base(h).env);
+		mkdirSync(dirname(dest), { recursive: true });
+		writeFileSync(dest, "GOOD");
+		chmodSync(dest, 0o755);
+		const r = await fetchWhisperCli({
+			...base(h),
+			fetchImpl: whisperRelease({ serveBytes: "evil" }).fetchImpl,
+		});
+		expect(r.ok).toBe(false);
+		expect(readFileSync(dest, "utf-8")).toBe("GOOD");
+		expect(readdirSync(dirname(dest))).toEqual(["whisper-cli"]);
+	});
+
+	test("a release without the asset (no line, no SHA256SUMS, 404) or a binary that will not run: not installed, reason given", async () => {
+		for (const over of [
+			{ sums: `${"0".repeat(64)}  llama-server-android-arm64\n` },
+			{ sums: null },
+			{ status: 404 },
+			{ bytes: "#!/bin/sh\nexit 1\n" },
+		]) {
+			const h = home();
+			const r = await fetchWhisperCli({ ...base(h), fetchImpl: whisperRelease(over).fetchImpl });
+			expect(r.ok).toBe(false);
+			if (!r.ok) expect(r.why.length).toBeGreaterThan(10);
+			expect(existsSync(managedWhisperBin(base(h).env))).toBe(false);
+		}
+	});
+
+	test("a release signing key means an unsigned SHA256SUMS is refused", async () => {
+		const h = home();
+		const r = await fetchWhisperCli({
+			...base(h),
+			fetchImpl: whisperRelease().fetchImpl,
+			signingKey: "RWQfake",
+		});
+		expect(r.ok).toBe(false);
+		expect(existsSync(managedWhisperBin(base(h).env))).toBe(false);
+	});
+
+	test("a platform with no build says so and fetches nothing", async () => {
+		const h = home();
+		const rel = whisperRelease();
+		const r = await fetchWhisperCli({
+			...base(h),
+			platform: "win32",
+			arch: "x64",
+			fetchImpl: rel.fetchImpl,
+			env: { EIGHT_HOME: h },
+		});
+		expect(r.ok).toBe(false);
+		expect(rel.urls).toEqual([]);
+	});
+
+	test("fetching whisper-cli leaves llama-server alone", async () => {
+		const h = home();
+		await fetchWhisperCli({ ...base(h), fetchImpl: whisperRelease().fetchImpl });
+		expect(existsSync(managedLlamaServer(base(h).env))).toBe(false);
 	});
 });

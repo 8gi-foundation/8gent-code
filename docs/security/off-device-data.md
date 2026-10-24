@@ -48,7 +48,7 @@ That one is the only entry the gate waives for user data. Run `bun scripts/local
 
 ## Pulls and links (no user content)
 
-- `pull`: bun.sh, deb.nodesource.com, nodejs.org (runtime installers), huggingface.co (whisper model weights), registry.npmjs.org (self-update, marketplace installs), raw.githubusercontent.com and github.com (update check when opted in, repository fetches), fonts.googleapis.com. The last one is also in the HTML a session export writes: the page asks Google Fonts for a font when the exported file is opened, so the viewer's address reaches Google. No session content does.
+- `pull`: bun.sh, deb.nodesource.com, nodejs.org (runtime installers), huggingface.co (whisper model weights), github.com release downloads (8gent's own llama-server and whisper-cli, checked against the release SHA256SUMS before they run; on a phone the voice yes fetches whisper-cli this way and builds nothing), registry.npmjs.org (self-update, marketplace installs), raw.githubusercontent.com and github.com (update check when opted in, repository fetches), fonts.googleapis.com. The last one is also in the HTML a session export writes: the page asks Google Fonts for a font when the exported file is opened, so the viewer's address reaches Google. No session content does.
 - `inert`: documentation links, XML namespaces, brand URLs. The code mentions them and never requests them.
 
 ## Reach with no hostname in the source
