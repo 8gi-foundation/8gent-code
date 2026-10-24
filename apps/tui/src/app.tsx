@@ -351,6 +351,7 @@ import {
 	isAndroidEnv,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
+import { approvalOwner, nextUnread } from "./lib/tab-lamps.js";
 import { detectTermPresetIntent } from "./lib/term-intent.js";
 import { copiedNotice, notCopiedNotice } from "./lib/text-selection.js";
 import { truncate } from "./lib/text.js";
@@ -2277,6 +2278,36 @@ export function App({
 				if (ask && yes) setTabPermMode(ask.tab, "infinite", ask.yolo);
 			},
 		},
+	);
+
+	// Tab lamps (#4928). The approval card is one global surface, so the bar is
+	// told which tab it belongs to; a turn that ends on a background tab leaves
+	// it done or failed until the tab is opened.
+	const processingTabIds = workspaceTabs.tabs
+		.filter((tb) => perTabAgents.isTabProcessing(tb.id))
+		.map((tb) => tb.id);
+	const processingKey = processingTabIds.join(",");
+	const [unreadTabs, setUnreadTabs] = useState<Record<string, "done" | "failed">>({});
+	const lastProcessingRef = useRef<ReadonlySet<string>>(new Set());
+	useEffect(() => {
+		const now = new Set(processingTabIds);
+		const before = lastProcessingRef.current;
+		lastProcessingRef.current = now;
+		setUnreadTabs((prev) => {
+			const next = nextUnread(prev, before, now, activeTabId, (id) =>
+				turnEndedInError(tabMessagesRef.current.get(id) ?? []),
+			);
+			const same =
+				Object.keys(next).length === Object.keys(prev).length &&
+				Object.entries(next).every(([k, v]) => prev[k] === v);
+			return same ? prev : next;
+		});
+	}, [processingKey, activeTabId]);
+	const approvalTabId =
+		approvalPending !== null ? approvalOwner(activeTabId, processingTabIds) : null;
+	const tabLampFor = useCallback(
+		(tabId: string) => ({ needsYou: tabId === approvalTabId, unread: unreadTabs[tabId] ?? null }),
+		[approvalTabId, unreadTabs],
 	);
 
 	// A short confirmation in the footer's hint slot for 2 s: a mouse
@@ -8569,6 +8600,7 @@ export function App({
 						tabs={workspaceTabs.tabs}
 						onSwitch={workspaceTabs.switchTab}
 						isTabProcessing={perTabAgents.isTabProcessing}
+						lampFor={tabLampFor}
 						animate={showAnimations}
 						permFor={tabPermView}
 					/>

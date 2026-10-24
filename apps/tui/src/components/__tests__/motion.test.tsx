@@ -21,7 +21,7 @@ import {
 	staggerFor,
 	sweepFrames,
 } from "../../lib/motion.js";
-import { isTurnDone, TurnStateLabel } from "../LiveFocalStrip.js";
+import { TurnStateLabel, isTurnDone } from "../LiveFocalStrip.js";
 import { TabBar, layoutTabs, ruleRow } from "../TabBar.js";
 import { useLandingRows } from "../ToolTrail.js";
 
@@ -135,7 +135,7 @@ describe("tab bar", () => {
 		await sleep(400);
 		app.unmount();
 		const starts = [...new Set(stdout.frames.filter((f) => f.includes("━")).map(barStart))];
-		const qa = "1] Orchestrator   2] Engineer   3] ".length;
+		const qa = "1] Orchestrator ·   2] Engineer ·   3] ".length;
 		expect(starts[0]).toBe(3);
 		expect(starts.at(-1)).toBe(qa);
 		// At least two in-between positions: a sweep, not a jump.
@@ -149,7 +149,7 @@ describe("tab bar", () => {
 		await sleep(300);
 		app.unmount();
 		const starts = [...new Set(stdout.frames.filter((f) => f.includes("━")).map(barStart))];
-		expect(starts).toEqual([3, "1] Orchestrator   2] Engineer   3] ".length]);
+		expect(starts).toEqual([3, "1] Orchestrator ·   2] Engineer ·   3] ".length]);
 	});
 });
 
@@ -182,7 +182,13 @@ describe("turn settles into DONE", () => {
 		const { stdout, app } = mount(<Turn animate />);
 		await sleep(60 + SETTLE_HOLD_MS + 150);
 		app.unmount();
-		const seq = stdout.frames.map((f) => (f.includes("DONE") ? "done" : f.includes(FIGURE_EIGHT_STILL) && f.includes("NOW") ? "still" : "now"));
+		const seq = stdout.frames.map((f) =>
+			f.includes("DONE")
+				? "done"
+				: f.includes(FIGURE_EIGHT_STILL) && f.includes("NOW")
+					? "still"
+					: "now",
+		);
 		const firstDone = seq.indexOf("done");
 		expect(firstDone).toBeGreaterThan(0);
 		expect(seq.slice(0, firstDone)).toContain("still");
