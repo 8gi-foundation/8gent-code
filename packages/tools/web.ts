@@ -11,6 +11,7 @@ import * as path from "node:path";
 import { Readability } from "@mozilla/readability";
 import * as cheerio from "cheerio";
 import { dotenvCandidates, dotenvDeclaredKeys } from "../permissions/run-command-sandbox";
+import { bridgeFetch } from "./flow-bridge";
 import {
 	type FetchImpl,
 	type NetDeps,
@@ -325,6 +326,12 @@ export async function webFetch(
 		if (!normalizedUrl.startsWith("http://") && !normalizedUrl.startsWith("https://")) {
 			normalizedUrl = `https://${normalizedUrl}`;
 		}
+
+		// Paired with the 8gent Flow app on this phone: its Browser tab reads the page (#4944).
+		// Null for every other case (not Android, not paired, Flow not answering), and then the
+		// path below runs exactly as before.
+		const viaFlow = await bridgeFetch(normalizedUrl, { maxLength });
+		if (viaFlow) return viaFlow;
 
 		// guardedFetch refuses loopback, private, link-local and metadata
 		// destinations, pins the connection to the checked address, and re-checks

@@ -575,6 +575,12 @@ async function main() {
 			await scoutCommand(restArgs);
 			break;
 
+		case "flow": {
+			const { runFlowCommand } = await import("../packages/tools/flow-bridge.ts");
+			process.exitCode = await runFlowCommand(restArgs);
+			break;
+		}
+
 		case "daemon": {
 			const { daemonCommand } = await import("../packages/daemon/service.ts");
 			const code = await daemonCommand(restArgs, daemonProgram());
