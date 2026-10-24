@@ -74,6 +74,7 @@ import {
 	ReadScope,
 	addReadAllowDir,
 	allowReadsFromPrompt,
+	readCardsShown,
 	runInReadScope,
 	takeBoundaryStop,
 } from "../permissions/read-allow";
@@ -4969,7 +4970,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				this.frictionWritten = true;
 				this.sessionWriter.writeFriction(this.friction.record());
 			}
-			this.sessionWriter.writeSessionEnd("user_exit", null);
+			this.sessionWriter.writeSessionEnd("user_exit", null, readCardsShown(this.readScope));
 		} catch {
 			// Session writer may already be closed
 		}
