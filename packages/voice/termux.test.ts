@@ -129,7 +129,7 @@ test("findOnPath ignores non-executable files", () => {
 describe("android dictation line", () => {
 	test("is the one line, with no sox or whisper mention", () => {
 		expect(ANDROID_DICTATION_LINE).toBe(
-			"On Android, press Ctrl+R (or /voice record) to start recording and again to stop; the text lands in the prompt. Spoken replies: /voice on (needs termux-tts-speak: pkg install termux-api plus the Termux:API app).",
+			"On Android, press Ctrl+R (or /voice record) to speak, and again to stop; the text lands in the prompt. Spoken replies: /voice on (needs termux-tts-speak: pkg install termux-api plus the Termux:API app).",
 		);
 		expect(ANDROID_DICTATION_LINE).not.toMatch(/sox|whisper/i);
 	});

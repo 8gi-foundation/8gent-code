@@ -124,7 +124,7 @@ export const LOCAL_DISCLOSURE =
 export const CLOUD_DISCLOSURE =
 	"Your audio leaves this phone: Android sends it to its speech service, often Google.";
 
-export function musicAskLine(pkgs: readonly string[], defaultYes = true): string {
+export function musicAskLine(pkgs: readonly string[], defaultYes = false): string {
 	return `Set up this phone for music? Installs ${pkgs.join(", ")}. ${defaultYes ? "[Y/n]" : "[y/N]"}`;
 }
 
@@ -239,6 +239,7 @@ const defaultRun: LocalRun = runCommand;
 
 type Run = NonNullable<AndroidSetupDeps["run"]>;
 
+// local-first-gate: optin runs only after a typed y (the music or mic question; a bare Enter is No)
 async function installPkgs(
 	pkgs: string[],
 	run: Run,
@@ -248,6 +249,7 @@ async function installPkgs(
 ): Promise<boolean> {
 	say(`Installing ${pkgs.join(", ")}...`);
 	let last = 0;
+	// local-first-gate: optin the one pkg install, reached only through installPkgs after a typed y
 	const code = await run("pkg", ["install", "-y", ...pkgs], (l) => {
 		// One status line, not a scroll.
 		if (Date.now() - last < 4000) return;
@@ -257,6 +259,7 @@ async function installPkgs(
 	const still = check();
 	if (code === 0 && still.length === 0) return true;
 	say(
+		// local-first-gate: optin names the command for the person to run themselves after a failed install they said yes to
 		`Install did not finish (${code === 0 ? `still missing: ${still.join(", ")}` : `exit ${code ?? "not started"}`}). Run it yourself: pkg install -y ${pkgs.join(" ")}`,
 	);
 	return false;
@@ -276,6 +279,22 @@ interface Resolved {
 	installModel: NonNullable<AndroidSetupDeps["installModel"]>;
 }
 
+/**
+ * True when nobody can answer: CI, EIGHT_UNATTENDED, or no terminal on stdin or
+ * stdout (a pipe, a test harness feeding keys). Install questions then resolve at
+ * once to "no person": nothing installs, nothing is recorded as declined, and the
+ * person is asked next time they are there.
+ */
+export function unattended(env: Env = process.env): boolean {
+	const set = (v: string | undefined) => !!v && v !== "0" && v.toLowerCase() !== "false";
+	return set(env.CI) || set(env.EIGHT_UNATTENDED) || !process.stdin.isTTY || !process.stdout.isTTY;
+}
+
+function askPerson(line: string, defaultYes: boolean, env: Env): Promise<boolean | null> {
+	if (unattended(env)) return Promise.resolve(null);
+	return askYesNoLine(line, defaultYes);
+}
+
 function resolveDeps(deps: AndroidSetupDeps): Resolved {
 	const env = deps.env ?? process.env;
 	const has = deps.has ?? ((b: string) => findOnPath(b, env) !== null);
@@ -285,7 +304,7 @@ function resolveDeps(deps: AndroidSetupDeps): Resolved {
 		env,
 		say: deps.say ?? ((l: string) => console.log(l)),
 		progress: deps.progress ?? (() => {}),
-		ask: deps.ask ?? askYesNoLine,
+		ask: deps.ask ?? ((line, defaultYes) => askPerson(line, defaultYes, env)),
 		run: deps.run ?? defaultRun,
 		has,
 		state: (deps.readState ?? (() => readSetup(env)))(),
@@ -303,6 +322,7 @@ async function installLocalVoice(r: Resolved): Promise<boolean> {
 	if (first.model) model = (await r.ask(modelAskLine(), false)) === true ? "base" : "tiny";
 	if (
 		first.pkgs.length &&
+		// local-first-gate: optin the mic question, [y/N], named termux-api and ffmpeg and the build tools before this runs
 		!(await installPkgs(first.pkgs, r.run, r.say, r.progress, () => r.needs().pkgs))
 	)
 		return false;
@@ -326,8 +346,8 @@ async function installLocalVoice(r: Resolved): Promise<boolean> {
 }
 
 /**
- * Two separate questions. Music (mpv, yt-dlp, ffmpeg) keeps the judge's
- * default. Voice input is its own question, always [y/N], and only a typed y or
+ * Two separate questions, both [y/N]: nothing installs on a bare Enter. Music
+ * (mpv, yt-dlp, ffmpeg) is the first. Voice input is its own question, always [y/N], and only a typed y or
  * yes records mic consent; someone who only wants /dj never has to accept it.
  * Voice input is on-phone unless the person chose /voice mic cloud.
  *
@@ -349,13 +369,16 @@ export async function offerAndroidSetup(
 	if (mode === "auto") {
 		const missing = missingMusic(has);
 		if (missing.length && !state.choice) {
-			const defaultYes = deps.defaultYes ?? true;
+			// Nothing installs unless the person types y: a bare Enter is No (principle 2).
+			const defaultYes = deps.defaultYes ?? false;
 			const yes = await ask(musicAskLine(missing, defaultYes), defaultYes);
 			if (yes === null) return "no-person";
 			if (!yes) {
 				write({ choice: "declined" });
+				// local-first-gate: optin the person answered No to the music question; this is the command they can run themselves
 				say(`OK. Nothing installed. Run it yourself: pkg install -y ${missing.join(" ")}`);
 				music = "declined";
+				// local-first-gate: optin the music question is [y/N]; only a typed y gets here
 			} else if (await installPkgs(missing, run, say, progress, () => missingMusic(has))) {
 				say("Music is ready: /dj plays.");
 				music = "installed";
@@ -403,6 +426,7 @@ async function askCloud(r: Resolved): Promise<AndroidSetupOutcome> {
 	r.write({ mic: true, cloud: true });
 	if (
 		needsPkg &&
+		// local-first-gate: optin termux-api for Android's speech service, asked only after /voice mic cloud and a typed y
 		!(await installPkgs([CLOUD_TOOL.pkg], r.run, r.say, r.progress, () =>
 			r.has(CLOUD_TOOL.bin) ? [] : [CLOUD_TOOL.pkg],
 		))

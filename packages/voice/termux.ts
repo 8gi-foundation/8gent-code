@@ -18,7 +18,7 @@ type Env = Record<string, string | undefined>;
 
 /** The one line /voice status, /voice record and /voice chat print on Android. */
 export const ANDROID_DICTATION_LINE =
-	"On Android, press Ctrl+R (or /voice record) to start recording and again to stop; the text lands in the prompt. Spoken replies: /voice on (needs termux-tts-speak: pkg install termux-api plus the Termux:API app).";
+	"On Android, press Ctrl+R (or /voice record) to speak, and again to stop; the text lands in the prompt. Spoken replies: /voice on (needs termux-tts-speak: pkg install termux-api plus the Termux:API app).";
 
 /** True on Android under Termux: platform android, TERMUX_VERSION, or a com.termux PREFIX. */
 export function isAndroidHost(

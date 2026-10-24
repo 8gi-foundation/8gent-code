@@ -21,6 +21,7 @@ import {
 	offerAndroidSetup,
 	offerCloudVoice,
 	readSetup,
+	unattended,
 	voiceEngine,
 	writeSetup,
 } from "./android-setup";
@@ -216,14 +217,40 @@ describe("launch (auto)", () => {
 		expect(log.runs).toEqual([]);
 	});
 
-	test("two separate questions, music first with the launch default, mic [y/N] naming the local path", async () => {
+	test("two separate questions, both [y/N]: a bare Enter installs nothing, mic names the local path", async () => {
 		const { deps, log } = rig({ answers: [false, false] });
 		await offerAndroidSetup("auto", deps);
 		expect(log.asked).toHaveLength(2);
 		expect(log.asked[0].line).toContain("mpv, python-yt-dlp, ffmpeg");
-		expect(log.asked[0].defaultYes).toBe(true);
+		expect(log.asked[0].defaultYes).toBe(false);
+		expect(log.asked[0].line).toContain("[y/N]");
 		expect(log.asked[1].defaultYes).toBe(false);
 		expect(log.asked[1].line).toContain("whisper.cpp");
+	});
+
+	test("unattended (CI, EIGHT_UNATTENDED, no terminal): the real prompt resolves to no person at once, nothing installs or is recorded", async () => {
+		for (const env of [{ CI: "1" }, { EIGHT_UNATTENDED: "1" }, {}]) {
+			// The default ask, not the rig's: bun test has no TTY on stdin either.
+			const { deps, log } = rig({});
+			const t0 = performance.now();
+			const out = await offerAndroidSetup("auto", {
+				...deps,
+				ask: undefined,
+				env: { TERMUX_VERSION: "0.118", ...env },
+			});
+			expect(out).toBe("no-person");
+			expect(performance.now() - t0).toBeLessThan(500);
+			expect(log.runs).toEqual([]);
+			expect(log.writes).toEqual([]);
+		}
+	});
+
+	test("unattended is true for CI or EIGHT_UNATTENDED, and not for 0 or false", () => {
+		expect(unattended({ CI: "true" })).toBe(true);
+		expect(unattended({ EIGHT_UNATTENDED: "1" })).toBe(true);
+		// With a terminal these would be false; the flags alone must not turn it on.
+		const tty = process.stdin.isTTY && process.stdout.isTTY;
+		if (tty) expect(unattended({ CI: "0", EIGHT_UNATTENDED: "false" })).toBe(false);
 	});
 
 	test("yes to music, no to the mic: only music packages installed, mic never consented", async () => {
