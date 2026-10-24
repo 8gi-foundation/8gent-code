@@ -108,7 +108,13 @@ describe("the Termux player branch: arguments and volume", () => {
 	});
 
 	test("mpv is started with --volume first, then the caller's arguments", () => {
-		expect(mpvStartArgs(100, ["--no-video", "x"])).toEqual(["--volume=100", "--no-video", "x"]);
+		expect(mpvStartArgs(100, ["--no-video", "x"])).toEqual([
+			"--volume=100",
+			"--msg-level=all=warn",
+			"--term-status-msg=",
+			"--no-video",
+			"x",
+		]);
 	});
 
 	test("/dj play on Termux spawns mpv with the audio-only arguments at volume 100", async () => {
@@ -130,12 +136,14 @@ describe("the Termux player branch: arguments and volume", () => {
 });
 
 describe("the Termux player branch: state from the process we spawned", () => {
-	test("while mpv runs the status says playing and the clock moves with no IPC", async () => {
+	test("while mpv runs but does not answer the status is 'starting', and the clock moves from our own stopwatch", async () => {
 		const dj = new DJ();
 		await dj.play("https://example.invalid/track");
 		const s = await dj.status();
+		// A track is loaded, but nothing has said it is playing yet.
 		expect(s.playing).toBe(true);
-		expect(s.paused).toBe(false);
+		expect(s.starting).toBe(true);
+		expect(s.pauseKnown).toBe(false);
 		// No mpv socket exists in the test, so this position is the DJ's own stopwatch.
 		expect(typeof s.position).toBe("number");
 		expect(s.position as number).toBeGreaterThanOrEqual(0);
@@ -175,13 +183,13 @@ describe("the Termux player branch: state from the process we spawned", () => {
 		expect((await dj.status()).playing).toBe(false);
 	});
 
-	test("pause with no IPC still flips the state, and resume flips it back", async () => {
+	test("pause with no IPC does not guess: the state stays unknown", async () => {
 		const dj = new DJ();
 		await dj.play("https://example.invalid/track");
-		await dj.pause();
-		expect((await dj.status()).paused).toBe(true);
-		await dj.pause();
-		expect((await dj.status()).paused).toBe(false);
+		expect(await dj.pause()).toContain("state is unknown");
+		const s = await dj.status();
+		expect(s.pauseKnown).toBe(false);
+		expect(s.paused).toBe(false);
 	});
 });
 

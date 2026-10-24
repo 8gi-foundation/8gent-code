@@ -7,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { Box, renderToString } from "ink";
 import type React from "react";
 import stringWidth from "string-width";
-import { DjKeysRow, DjRow, NARROW_DECK_COLUMNS } from "../DjDeck";
+import { DjButtons, DjKeysRow, DjRow, NARROW_DECK_COLUMNS } from "../DjDeck";
 
 const SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 function frame(node: React.ReactElement, width: number): string {
@@ -80,5 +80,49 @@ describe("the DJ row at 52 columns", () => {
 	test("the phone threshold sits below the 80-column layout", () => {
 		expect(NARROW_DECK_COLUMNS).toBeGreaterThan(52);
 		expect(NARROW_DECK_COLUMNS).toBeLessThanOrEqual(80);
+	});
+});
+
+describe("the row when the player says nothing is heard (#4907)", () => {
+	const TROUBLE = "no sound output: [ao] Failed to initialize audio driver 'opensles'";
+	test("wide: no sound and the reason, never playing", () => {
+		const f = frame(<DjRow {...BASE} trouble={TROUBLE} />, 120);
+		expect(f).toContain("✕");
+		expect(f).toContain("no sound output");
+		expect(f).not.toContain("▶");
+	});
+	test("phone width: the reason replaces the title and fits 52 columns", () => {
+		const f = frame(<DjRow {...BASE} narrow trouble={TROUBLE} />, 52);
+		expect(stringWidth(f)).toBeLessThanOrEqual(52);
+		expect(f).toContain("✕");
+		expect(f).toContain("no sound output");
+		expect(f).not.toContain("playing");
+	});
+});
+
+describe("the row without an answer from mpv (#4907)", () => {
+	test("starting: the word and glyph say so, never playing", () => {
+		for (const [narrow, w] of [
+			[false, 120],
+			[true, 52],
+		] as const) {
+			const f = frame(<DjRow {...BASE} narrow={narrow} starting />, w);
+			expect(f).toContain("starting");
+			expect(f).toContain("…");
+			expect(f).not.toContain("playing");
+			expect(f).not.toContain("▶");
+		}
+	});
+
+	test("the buttons name no action when the pause state is unknown", () => {
+		const f = frame(
+			<DjButtons paused={false} pauseKnown={false} onToggle={() => {}} onStop={() => {}} />,
+			52,
+		);
+		expect(f).toContain("[Space] no reply");
+		expect(f).not.toContain("pause");
+		expect(f).toContain("[S] stop");
+		const known = frame(<DjButtons paused={false} onToggle={() => {}} onStop={() => {}} />, 52);
+		expect(known).toContain("[Space] pause");
 	});
 });
