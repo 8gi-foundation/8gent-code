@@ -12,15 +12,17 @@
  * are sha256-checked too. Every side effect is injected; tests never touch a mic.
  */
 
-import { spawn as nodeSpawn } from "node:child_process";
+import { spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	copyFileSync,
 	createReadStream,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	renameSync,
 	rmSync,
 	statSync,
@@ -171,6 +173,27 @@ async function curlDownload(url: string, path: string, run: Run): Promise<boolea
 	return (await run("curl", ["-fsSL", "--retry", "2", "-o", path, url], () => {})) === 0;
 }
 
+/**
+ * Put an executable at `to` so it is either the old file or the whole new one,
+ * never half a binary: copy to a temp name beside it, then rename into place.
+ * An interrupted copy leaves `to` untouched and removes the temp file.
+ */
+export function installExecutable(
+	from: string,
+	to: string,
+	io: { copy?: (a: string, b: string) => void; rename?: (a: string, b: string) => void } = {},
+): void {
+	const tmp = `${to}.${process.pid}.tmp`;
+	try {
+		(io.copy ?? copyFileSync)(from, tmp);
+		chmodSync(tmp, 0o755);
+		(io.rename ?? renameSync)(tmp, to);
+	} catch (err) {
+		rmQuiet(tmp);
+		throw err;
+	}
+}
+
 function rmQuiet(p: string): void {
 	try {
 		rmSync(p, { recursive: true, force: true });
@@ -233,12 +256,7 @@ export async function buildWhisper(
 	const download = deps.download ?? curlDownload;
 	const hash = deps.hash ?? sha256File;
 	const exists = deps.exists ?? existsSync;
-	const copy =
-		deps.copy ??
-		((from: string, to: string) => {
-			copyFileSync(from, to);
-			chmodSync(to, 0o755);
-		});
+	const copy = deps.copy ?? installExecutable;
 	const work = deps.workDir ?? mkdtempSync(join(tmpdir(), "8gent-whisper-"));
 	const jobs = String(deps.jobs ?? Math.max(1, Math.min(4, availableParallelism())));
 	const tarball = join(work, "whisper.tar.gz");
@@ -287,6 +305,54 @@ export async function buildWhisper(
 	}
 }
 
+// ── leftover recordings ──────────────────────────────────────────────────
+
+const VOICE_DIR_PREFIX = "8gent-voice-";
+/** A live recording is at most the limit plus the longest transcription; nothing newer is a leftover. */
+export const VOICE_DIR_GRACE_MS = RECORD_LIMIT_S * 1000 + TRANSCRIBE_TIMEOUT_MS + 30_000;
+
+export interface SweepDeps {
+	tmp?: string;
+	/** The owner a directory must have; null skips the owner check (no uid on this platform). */
+	uid?: number | null;
+	now?: number;
+	/** Only directories last touched before now minus this are removed. */
+	graceMs?: number;
+	remove?: (p: string) => void;
+}
+
+/**
+ * Remove `8gent-voice-*` directories an earlier run left behind (killed, crashed,
+ * or exited mid-recording). Only real directories (never a symlink) owned by this
+ * user, and only ones too old to be a recording still in progress in another
+ * session. Returns the paths removed. Never throws.
+ */
+export function sweepVoiceDirs(deps: SweepDeps = {}): string[] {
+	const tmp = deps.tmp ?? tmpdir();
+	const uid = deps.uid === undefined ? (process.getuid?.() ?? null) : deps.uid;
+	const cutoff = (deps.now ?? Date.now()) - (deps.graceMs ?? VOICE_DIR_GRACE_MS);
+	const remove = deps.remove ?? rmQuiet;
+	const removed: string[] = [];
+	let names: string[] = [];
+	try {
+		names = readdirSync(tmp).filter((n) => n.startsWith(VOICE_DIR_PREFIX));
+	} catch {
+		return removed;
+	}
+	for (const n of names) {
+		const p = join(tmp, n);
+		try {
+			const st = lstatSync(p);
+			if (!st.isDirectory() || st.isSymbolicLink()) continue;
+			if (uid !== null && st.uid !== uid) continue;
+			if (st.mtimeMs >= cutoff) continue;
+			remove(p);
+			removed.push(p);
+		} catch {}
+	}
+	return removed;
+}
+
 // ── record, convert, transcribe ──────────────────────────────────────────
 
 export type ListenResult = { text: string } | { error: string };
@@ -309,11 +375,17 @@ export interface RecordDeps {
 	modelPath: string;
 	limitS?: number;
 	threads?: number;
+	/** Sweep old 8gent-voice-* directories before recording. Tests pass a recorder or turn it off. */
+	sweep?: () => void;
+	/** Stop the recorder without waiting, for the exit path where nothing async can run. */
+	quitSync?: () => void;
 }
 
 export interface Recording {
 	/** Stop recording and transcribe. Safe to call more than once. */
 	stop(): void;
+	/** Throw the recording away: stop the mic, delete the audio, transcribe nothing. For unmount and exit. */
+	abort(): void;
 	/** Resolves once the recording is stopped (by stop() or the limit) and transcribed. */
 	done: Promise<ListenResult>;
 }
@@ -477,6 +549,9 @@ export async function startRecording(deps: RecordDeps): Promise<Recording | { er
 	const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 	const limitS = deps.limitS ?? RECORD_LIMIT_S;
 
+	try {
+		(deps.sweep ?? (() => void sweepVoiceDirs()))();
+	} catch {}
 	const dir = makeDir();
 	const recorded = join(dir, "voice.m4a");
 	const wav = join(dir, "voice.wav");
@@ -496,10 +571,48 @@ export async function startRecording(deps: RecordDeps): Promise<Recording | { er
 	});
 	const timer = setTimeout(() => stopRequested(), limitS * 1000);
 
+	// If 8gent ends mid-recording (Ctrl+C, /exit, a crash that still runs 'exit',
+	// SIGTERM from Termux) nothing async runs, so stop the mic and delete the
+	// audio synchronously. SIGKILL cannot be caught: the recorder's own limit ends
+	// the mic and the next start's sweep removes the directory.
+	const quitSync =
+		deps.quitSync ??
+		(() => {
+			try {
+				spawnSync(RECORD_TOOL.bin, ["-q"], { stdio: "ignore", timeout: 3000 });
+			} catch {}
+		});
+	const exitCleanup = () => {
+		try {
+			quitSync();
+		} catch {}
+		try {
+			removeDir(dir);
+		} catch {}
+	};
+	const onSignal = (sig: NodeJS.Signals) => {
+		exitCleanup();
+		unregister();
+		// Keep the signal's meaning: with no other handler, end the process as it would have ended.
+		if (process.listenerCount(sig) === 0) process.kill(process.pid, sig);
+	};
+	const onInt = () => onSignal("SIGINT");
+	const onTerm = () => onSignal("SIGTERM");
+	function unregister(): void {
+		process.off("exit", exitCleanup);
+		process.off("SIGINT", onInt);
+		process.off("SIGTERM", onTerm);
+	}
+	process.on("exit", exitCleanup);
+	process.on("SIGINT", onInt);
+	process.on("SIGTERM", onTerm);
+
+	let aborted = false;
 	const done = (async (): Promise<ListenResult> => {
 		await stopped;
 		clearTimeout(timer);
 		try {
+			if (aborted) return { error: "Recording cancelled." };
 			// Harmless when the limit already ended it.
 			await run(RECORD_TOOL.bin, ["-q"], () => {});
 			// The Termux:API app finishes writing after -q returns: wait for the size to settle.
@@ -516,8 +629,17 @@ export async function startRecording(deps: RecordDeps): Promise<Recording | { er
 			return { error: `Voice error: ${err instanceof Error ? err.message : String(err)}` };
 		} finally {
 			removeDir(dir);
+			unregister();
 		}
 	})();
 
-	return { stop: () => stopRequested(), done };
+	return {
+		stop: () => stopRequested(),
+		abort: () => {
+			aborted = true;
+			exitCleanup();
+			stopRequested();
+		},
+		done,
+	};
 }

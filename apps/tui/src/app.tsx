@@ -1396,7 +1396,14 @@ export function App({
 	// pressing the key is the intent, so it asks only when something is missing. Then one listen.
 	const androidListeningRef = useRef(false);
 	// On-phone recording in progress (#4905): the next Ctrl+R stops it.
-	const androidRecordingRef = useRef<{ stop(): void } | null>(null);
+	const androidRecordingRef = useRef<{ stop(): void; abort(): void } | null>(null);
+	// Leftover recordings from a run that was killed, swept once at startup; and if this
+	// screen unmounts mid-recording, the mic is stopped and the audio deleted (#4910).
+	useEffect(() => {
+		if (!isAndroidHost()) return;
+		void import("../../../packages/voice/termux-local-stt.js").then((m) => m.sweepVoiceDirs());
+		return () => androidRecordingRef.current?.abort();
+	}, []);
 	// What an empty answer means for the pending question: true for /dj, false for the mic.
 	const djInstallDefaultRef = useRef(true);
 	async function androidListen(): Promise<void> {

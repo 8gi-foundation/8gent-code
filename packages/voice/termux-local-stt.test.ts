@@ -335,6 +335,8 @@ describe("record, transcribe, delete", () => {
 				return dir;
 			},
 			sleep: async () => {},
+			sweep: () => {},
+			quitSync: () => {},
 			run: async (cmd, args) => {
 				runs.push([cmd, ...args]);
 				if (args[0] === "-f" && (o.startCode ?? 0) === 0)

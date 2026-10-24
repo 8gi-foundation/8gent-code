@@ -128,9 +128,17 @@ describe("lines", () => {
 		expect(line).toEndWith("[y/N]");
 	});
 
+	test("the mic question names what it installs: clang, cmake and make, plus the whisper.cpp build", () => {
+		const line = micAskLine({ pkgs: [], whisper: true, model: false });
+		expect(line).toContain("the build tools clang, cmake and make");
+		expect(line).toContain("the whisper.cpp build");
+		// Nothing to build, nothing named.
+		expect(micAskLine({ pkgs: [], whisper: false, model: true })).not.toContain("clang");
+	});
+
 	test("the mic question says termux-api is for the microphone and the audio still stays local", () => {
 		expect(micAskLine(EVERYTHING)).toContain(
-			"Sets up termux-api (it only opens the microphone; the audio stays here), ffmpeg, whisper.cpp (built on the phone, a few minutes) and a speech model. ",
+			"Sets up termux-api (it only opens the microphone; the audio stays here), ffmpeg, the build tools clang, cmake and make, the whisper.cpp build (on the phone, a few minutes) and a speech model. ",
 		);
 		expect(micAskLine(NOTHING)).not.toContain("Sets up");
 		expect(micAskLine({ pkgs: [], whisper: false, model: true })).toContain(

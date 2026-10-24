@@ -29,6 +29,7 @@ import {
 import { dirname } from "node:path";
 import { findOnPath, isAndroidHost } from "../voice/termux";
 import {
+	BUILD_PKGS,
 	type Run as LocalRun,
 	type LocalVoiceNeeds,
 	PHONE_MODELS,
@@ -133,7 +134,10 @@ export function localInstallText(n: LocalVoiceNeeds): string {
 	if (n.pkgs.includes("termux-api"))
 		parts.push("termux-api (it only opens the microphone; the audio stays here)");
 	if (n.pkgs.includes("ffmpeg")) parts.push("ffmpeg");
-	if (n.whisper) parts.push("whisper.cpp (built on the phone, a few minutes)");
+	// The build is the biggest thing the yes starts, so the yes names its tools.
+	if (n.whisper)
+		parts.push(`the build tools ${BUILD_PKGS.slice(0, -1).join(", ")} and ${BUILD_PKGS.at(-1)}`);
+	if (n.whisper) parts.push("the whisper.cpp build (on the phone, a few minutes)");
 	if (n.model) parts.push("a speech model");
 	if (!parts.length) return "";
 	const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
