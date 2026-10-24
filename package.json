@@ -1,6 +1,6 @@
 {
   "name": "@8gi-foundation/8gent-code",
-  "version": "0.20.26",
+  "version": "0.20.27",
   "private": false,
   "engines": {
     "node": ">=22.5"
