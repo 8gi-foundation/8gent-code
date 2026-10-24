@@ -97,6 +97,12 @@ export interface UISettings {
 	 * Fire-and-forget; never blocks the banner reveal.
 	 */
 	introSound: string;
+	/**
+	 * A short vibrate on tap, when the phone already has termux-vibrate
+	 * (Termux:API, installed by the person for their own reasons). Never
+	 * installed or prompted for. On by default; false silences it.
+	 */
+	tapHaptics: boolean;
 }
 
 export interface AgentNames {

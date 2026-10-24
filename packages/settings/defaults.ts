@@ -68,6 +68,8 @@ export const DEFAULT_SETTINGS: Settings = {
 		// and set this path via /settings or by editing ~/.8gent/settings.json
 		// to play a heavenly swell on TUI launch. macOS afplay handles it.
 		introSound: "",
+		// Buzz on tap only if termux-vibrate is already on the phone; false turns it off.
+		tapHaptics: true,
 	},
 	agents: {
 		// Default names match the canonical role-registry roles. Users can
