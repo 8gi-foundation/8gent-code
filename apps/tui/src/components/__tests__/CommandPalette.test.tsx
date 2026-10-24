@@ -19,8 +19,8 @@ import { join } from "node:path";
 import React from "react";
 import {
 	CommandPalette,
-	CommandPaletteView,
 	type CommandPaletteCommand,
+	CommandPaletteView,
 	type CommandPaletteViewProps,
 	computeWindow,
 	filterAndSortCommands,
@@ -35,9 +35,7 @@ const COMMANDS: CommandPaletteCommand[] = [
 ];
 
 function invokeView(props: CommandPaletteViewProps): React.ReactElement {
-	return (CommandPaletteView as (
-		p: CommandPaletteViewProps,
-	) => React.ReactElement)(props);
+	return (CommandPaletteView as (p: CommandPaletteViewProps) => React.ReactElement)(props);
 }
 
 describe("CommandPalette wrapper", () => {
@@ -74,7 +72,8 @@ describe("CommandPaletteView", () => {
 		};
 		expect(props.borderStyle).toBe("round");
 		expect(props.flexDirection).toBe("column");
-		expect(props.width).toBe(50);
+		// Fits the screen now (#4951): the screen less two, never past 64.
+		expect(props.width).toBe(64);
 		expect(props.flexShrink).toBe(0);
 	});
 
@@ -131,13 +130,7 @@ describe("CommandPaletteView", () => {
 describe("filterAndSortCommands", () => {
 	test("empty query returns input order untouched", () => {
 		const out = filterAndSortCommands(COMMANDS, "");
-		expect(out.map((c) => c.name)).toEqual([
-			"voice",
-			"kanban",
-			"predict",
-			"voiceprint",
-			"model",
-		]);
+		expect(out.map((c) => c.name)).toEqual(["voice", "kanban", "predict", "voiceprint", "model"]);
 	});
 
 	test("matches name and description case-insensitively", () => {
@@ -167,13 +160,8 @@ describe("Enter dispatch order (issue #2388)", () => {
 	// useInput unmounts before any sub-flow's useInput (e.g. /resume,
 	// /voice menu) mounts. Otherwise both handlers race on the next key.
 	test("Enter handler calls onClose before onExecute", () => {
-		const src = readFileSync(
-			join(__dirname, "..", "CommandPalette.tsx"),
-			"utf8",
-		);
-		const enterBlock = src
-			.split("if (key.return) {")[1]
-			?.split("return;")[0];
+		const src = readFileSync(join(__dirname, "..", "CommandPalette.tsx"), "utf8");
+		const enterBlock = src.split("if (key.return) {")[1]?.split("return;")[0];
 		expect(enterBlock).toBeDefined();
 		const closeIdx = enterBlock!.indexOf("onClose()");
 		const execIdx = enterBlock!.indexOf("onExecute(");

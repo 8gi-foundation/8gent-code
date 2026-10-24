@@ -58,6 +58,8 @@ interface BottomBarProps {
 	judge?: JudgeState;
 	/** Why run_command runs without its OS sandbox; undefined when it has one (#4013). */
 	sandboxOff?: string;
+	/** Context window fill for the footer meter (#4956). */
+	ctx?: FooterData["ctx"];
 	/** A gate flagged the last turn (#4510). */
 	verification?: FooterData["verification"];
 	/** The TUI is attached to the local daemon (#4829). */
@@ -103,6 +105,7 @@ export function BottomBar(props: BottomBarProps) {
 							user: resolveUser(props.user),
 							judge: props.judge,
 							sandboxOff: props.sandboxOff,
+							ctx: props.ctx,
 							adhd: props.adhd,
 							durable: props.durable,
 							verification: props.verification,

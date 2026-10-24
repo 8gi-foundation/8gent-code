@@ -116,11 +116,13 @@ import { type Settings, computeAutoTune } from "./auto-tune";
 import { createClient } from "./clients";
 import {
 	CompactionRecorder,
+	CompactionUndo,
 	type CompressionStage,
 	DEFAULT_PROACTIVE_CONFIG,
 	ProactiveCompression,
 	type ProactiveResult,
 	compactHistory,
+	compactHistoryNow,
 	estimateMessageTokens,
 } from "./compaction";
 import { fixCompletedLine } from "./completed-line";
@@ -559,6 +561,8 @@ export class Agent {
 	private compaction: ProactiveCompression;
 	/** Where compactions are recorded (originals stay, undo works); null = not persisted. */
 	private compactionRecorder: CompactionRecorder | null = null;
+	/** The history as it was before the latest compaction, for /compact undo (#4958). */
+	private compactionUndo = new CompactionUndo();
 	/** The active provider's known context window (SPEC-05), shared by both compactors (#3237). */
 	private compactionContextWindow: number;
 	/** #3643: pending one-shot read of the Ollama server's real context window. */
@@ -4644,6 +4648,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				recorder: this.compactionRecorder,
 			});
 			if (!pass) return;
+			this.compactionUndo.remember(this.messageHistory, pass.entryId, pass.messages.length);
 			this.messageHistory = pass.messages;
 			const r = pass.result;
 			console.log(
@@ -4653,6 +4658,50 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		} catch (err) {
 			console.error("  [COMPRESSION] Failed:", (err as Error).message);
 		}
+	}
+
+	/**
+	 * Compact now, because the person asked (/compact, #4958): the same summary
+	 * pass as the automatic one, whatever the window holds. Null when nothing is
+	 * older than the kept tail. Fires onCompaction like the automatic path, so
+	 * the chat row and the context meter react the same way.
+	 */
+	async compactNow(): Promise<ProactiveResult | null> {
+		const providerConfig: ProviderConfig = {
+			name: this.config.runtime as ProviderName,
+			model: this.config.model,
+			apiKey: this.config.apiKey,
+			baseURL: this.config.baseUrl ? toOpenAiV1Base(this.config.baseUrl) : undefined,
+		};
+		const pass = await compactHistoryNow({
+			engine: this.compaction,
+			history: this.messageHistory,
+			model: createModel(providerConfig),
+			recorder: this.compactionRecorder,
+		});
+		if (!pass) return null;
+		this.compactionUndo.remember(this.messageHistory, pass.entryId, pass.messages.length);
+		this.messageHistory = pass.messages;
+		this.events.onCompaction?.(pass.result);
+		return pass.result;
+	}
+
+	/**
+	 * Put the history back as it was before the latest compaction (/compact undo),
+	 * keeping every turn added since: the conversation does not rewind, only the
+	 * summary is swapped for the messages it replaced. One level, in memory.
+	 * Returns the restored size in tokens, or null when there is nothing to undo.
+	 */
+	undoCompaction(): { tokens: number } | null {
+		const back = this.compactionUndo.take(this.messageHistory);
+		if (!back) return null;
+		this.messageHistory = back.messages;
+		try {
+			if (back.entryId) this.compactionRecorder?.store.undoCompaction(back.entryId);
+		} catch {
+			// The file's record is a courtesy; the in-memory history is what the next turn reads.
+		}
+		return { tokens: estimateMessageTokens(back.messages) };
 	}
 
 	/** Record this agent's compactions in `store` (a host that owns the session file). */

@@ -28,6 +28,7 @@ import {
 	isPermissionMode,
 } from "../../../../packages/permissions/permission-mode.js";
 import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
+import { ctxText } from "../lib/context-view.js";
 import { keyBytes } from "../lib/key-bytes.js";
 import { injectKeys } from "../lib/mouse-input.js";
 import {
@@ -91,6 +92,12 @@ export interface FooterData {
 	judge?: JudgeState;
 	/** Why run_command runs without its OS sandbox; undefined when it has one (#4013). */
 	sandboxOff?: string;
+	/**
+	 * How full the context window is (#4956). `used` is null until a turn has
+	 * measured; `stale` is true right after a compaction until the next
+	 * measured turn, so the old number never reads as a measurement.
+	 */
+	ctx?: { used: number | null; window: number | null; stale: boolean };
 	/** ADHD mode: a segment only while on (it had a rail row before #3238). */
 	adhd?: boolean;
 	/** Durable turns: the intent/effect ledger is on. */
@@ -143,6 +150,23 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			bold: PERM_LOOK[perm].bold,
 			color: permColour(perm),
 			priority: 0,
+		});
+	}
+	const ctx = d.ctx ? ctxText({ ...d.ctx, columns: d.columns ?? 160 }) : null;
+	if (ctx) {
+		out.push({
+			key: "ctx",
+			label: "ctx",
+			value: ctx.value,
+			// Calm, then warm at 70 percent, then red at 90 (and a "!" in the text).
+			color:
+				ctx.level === "danger"
+					? theme.color.red
+					: ctx.level === "warn"
+						? theme.color.orangeAlt
+						: ui.muted,
+			bold: ctx.level === "danger",
+			priority: 2,
 		});
 	}
 	if (d.tokensPerSecond && d.tokensPerSecond > 0) {
@@ -326,13 +350,35 @@ export function fitFooterHints(width: number, permShown = false, djTrack = false
 	return out;
 }
 
+/** Below this many columns the row is the phone's: caps first, labels shortened. */
+export const FOOTER_NARROW_COLS = 60;
+
+/** The cap that opens the palette: the only way into about 80 commands on a phone. */
+const PALETTE_HINT = "^P palette";
+
+/** A segment with its label dropped: "Planning [^Y]" for "mode Planning [^Y]". */
+const unlabelled = (s: FooterSegment): FooterSegment =>
+	s.key === "mode" || s.key === "perm" ? { ...s, label: undefined } : s;
+
 /**
  * The footer row: segments plus the hints the columns they leave can hold.
- * The "sandbox off" segment (#4013) may push lower segments out, but never
- * a hint: [^C] quit must not leave the row because the shell is unsandboxed
- * (on Windows it never is). When the full segment would cost a hint it
- * drops its reason ("sandbox off"), then, only if that still costs one, the
- * row is exactly what it would be without it.
+ *
+ * [^P] palette is reserved first: segments are fitted into what is left, so
+ * the low-priority ones (session time, providers) give way before the cap,
+ * at every width. Before, they filled the row and the cap got the leftovers:
+ * at 52 columns an idle row read "mode Planning [^Y] | sandbox off nested"
+ * with no way into the palette.
+ *
+ * The "sandbox off" segment (#4013) is a state a person must not miss.
+ * From 60 columns up it may push lower segments out but never a hint:
+ * [^C] quit must not leave the row because the shell is unsandboxed (on
+ * Windows it never is). When the full segment would cost a hint it drops
+ * its reason ("sandbox off"), then, only if that still costs one, the row is
+ * exactly what it would be without it. Below 60 columns security wins the
+ * other way: the segment is never dropped. It sheds its reason, then its
+ * word ("sbx off"), then the mode and perm labels, and only then the perm
+ * segment, so the [^P] palette cap and the sandbox state are both always
+ * there.
  */
 export function fitFooterRow(
 	all: FooterSegment[],
@@ -340,24 +386,80 @@ export function fitFooterRow(
 	leading = false,
 	dj = false,
 ): { segments: FooterSegment[]; hints: string[] } {
+	const budget = Math.max(0, width - hintWidth(PALETTE_HINT) - HINTS_MARGIN);
 	const hintsFor = (segments: FooterSegment[]) =>
 		fitFooterHints(
 			Math.max(0, width - segmentsWidth(segments, leading) - HINTS_MARGIN),
 			segments.some((s) => s.key === "perm"),
 			dj,
 		);
+	const fit = (list: FooterSegment[]) => fitFooterSegments(list, budget, leading);
 	const sandbox = all.find((s) => s.key === "sandbox");
 	const without = sandbox ? all.filter((s) => s !== sandbox) : all;
-	const base = fitFooterSegments(without, width, leading);
+	let base = fit(without);
+	// Phone: when the meter does not fit under "mode Planning", drop that label before the meter.
+	if (width < FOOTER_NARROW_COLS && without.some((s) => s.key === "ctx")) {
+		if (!base.some((s) => s.key === "ctx")) {
+			const short = fit(without.map(unlabelled));
+			if (short.some((s) => s.key === "ctx")) base = short;
+		}
+	}
 	const baseHints = hintsFor(base);
 	if (!sandbox) return { segments: base, hints: baseHints };
-	for (const seg of [sandbox, { ...sandbox, note: undefined }]) {
-		const candidate = all.map((s) => (s === sandbox ? seg : s));
-		const segments = fitFooterSegments(candidate, width, leading);
-		const hints = hintsFor(segments);
-		if (segments.includes(seg) && hints.length >= baseHints.length) return { segments, hints };
+	const forms: FooterSegment[] = [
+		sandbox,
+		{ ...sandbox, note: undefined },
+		{ ...sandbox, note: undefined, label: "sbx" },
+	];
+	const shapes: Array<(list: FooterSegment[]) => FooterSegment[]> = [
+		(l) => l,
+		(l) => l.map(unlabelled),
+	];
+	// What the row would hold with neither the sandbox nor the meter: from 60
+	// columns up the sandbox never costs a hint against it (#4013).
+	const meter = all.find((s) => s.key === "ctx");
+	const plainHints = hintsFor(fit(without.filter((s) => s.key !== "ctx")));
+	// The sandbox state is never dropped, at any width (8SO, #4953). It sheds its
+	// reason, then its word ("sbx off"), before anything else gives. The meter
+	// stays while it can; when it cannot, it goes before the sandbox does. From
+	// 60 columns up a form that would cost a hint is passed over for a shorter
+	// one; low-priority segments (session, providers) then give way too.
+	// Lower-priority segments (rate, user, providers, session) give way before the
+	// meter does: keep priority up to 9, then 5, 4, 3, 2 (the meter), and only then
+	// lose the meter itself, then everything above the sandbox.
+	const keepUpTo = (p: number) => (l: FooterSegment[]) => l.filter((x) => x.priority <= p);
+	const sheds: Array<(list: FooterSegment[]) => FooterSegment[]> = [
+		...[9, 5, 4, 3, 2].map(keepUpTo),
+		(l) => l.filter((x) => x.key !== "ctx"),
+		(l) => l.filter((x) => x.key !== "ctx" && x.priority <= 1),
+	];
+	const meterSheds = 5;
+	for (const [shedIndex, shed] of sheds.entries()) {
+		if (!meter && shedIndex < meterSheds) continue;
+		for (const shape of shapes) {
+			for (const seg of forms) {
+				const candidate = shape(shed(all.map((x) => (x === sandbox ? seg : x))));
+				const kept = candidate.find((x) => x.key === "sandbox");
+				const segments = fit(candidate);
+				if (!kept || !segments.includes(kept)) continue;
+				// The first pass is the one that keeps the meter: a form that loses it yields to the next.
+				if (meter && shedIndex < meterSheds && !segments.some((x) => x.key === "ctx")) continue;
+				const hints = hintsFor(segments);
+				if (width >= FOOTER_NARROW_COLS && hints.length < plainHints.length) continue;
+				return { segments, hints };
+			}
+		}
 	}
-	return { segments: base, hints: baseHints };
+	// Still no room: the sandbox keeps its place in its shortest form. Narrow, the
+	// perm segment yields too (the tab tag and Shift+Tab still show it).
+	const last = forms[2] as FooterSegment;
+	const kept = fit(
+		all
+			.filter((x) => x.key !== "ctx" && (width >= FOOTER_NARROW_COLS || x.key !== "perm"))
+			.map((x) => (x === sandbox ? last : unlabelled(x))),
+	);
+	const segments = kept.some((x) => x.key === "sandbox") ? kept : [...kept, last];
+	return { segments, hints: hintsFor(segments) };
 }
 
 /** A permission switch the footer is announcing (#3174). */

@@ -41,6 +41,7 @@ export type SlashCommand =
 	| "continue"
 	| "compact"
 	| "stack"
+	| "context"
 	| "update"
 	| "judge"
 	| "local"
@@ -433,8 +434,14 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "compact",
 		aliases: ["compress", "summarize"],
-		description: "Summarize and compress current conversation",
-		usage: "/compact",
+		description: "Summarize older messages to free context; show, undo",
+		usage: "/compact [show|undo]",
+	},
+	{
+		name: "context",
+		aliases: ["ctx"],
+		description: "Show what fills the context window, by kind",
+		usage: "/context",
 	},
 	{
 		name: "stack",

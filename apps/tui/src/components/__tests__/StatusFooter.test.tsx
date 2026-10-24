@@ -13,6 +13,7 @@ import { BottomBar } from "../BottomBar.js";
 import {
 	FOOTER_HINTS,
 	FOOTER_SEPARATOR,
+	type FooterSegment,
 	buildFooterSegments,
 	fitFooterHints,
 	fitFooterRow,
@@ -62,12 +63,14 @@ async function frame(cols: number, rows: number, props: Partial<Props> = {}): Pr
 	});
 	await new Promise((r) => setTimeout(r, 30));
 	app.unmount();
-	const last = stdout.frames.filter((f) => f.includes("mode ")).at(-1) ?? "";
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI
-	return last
-		.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
-		.replace(/\n+$/, "")
-		.split("\n");
+	const last = stdout.frames.filter((f) => f.includes("mode ") || f.includes("[^P]")).at(-1) ?? "";
+	return (
+		last
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI
+			.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
+			.replace(/\n+$/, "")
+			.split("\n")
+	);
 }
 
 describe("BottomBar renders one footer row, hints included (#3130, #3238)", () => {
@@ -352,13 +355,13 @@ describe("the sandbox segment never costs a hint (#4013, Windows parity)", () =>
 		}
 	});
 
-	test("wide: the full reason; tighter: 'sandbox off' alone; tightest: dropped", () => {
+	test("wide: the full reason; tighter: 'sandbox off' alone; tightest: 'sbx off', never dropped", () => {
 		const shapes = new Set<string>();
 		for (let w = 40; w <= 400; w++) {
 			const seg = fitFooterRow(all, w).segments.find((s) => s.key === "sandbox");
-			shapes.add(seg ? (seg.note ? "full" : "short") : "none");
+			shapes.add(seg ? (seg.note ? "full" : seg.label === "sbx" ? "sbx" : "short") : "none");
 		}
-		expect([...shapes].sort()).toEqual(["full", "none", "short"]);
+		expect([...shapes].sort()).toEqual(["full", "sbx", "short"]);
 		const wide = fitFooterRow(all, 400).segments.find((s) => s.key === "sandbox");
 		expect(wide?.note).toBe("unsupported OS");
 		expect(wide?.value).toBe("off");
@@ -370,6 +373,241 @@ describe("the sandbox segment never costs a hint (#4013, Windows parity)", () =>
 			expect(row.segments).toEqual(fitFooterSegments(withoutSandbox, w));
 			expect(row.hints).toEqual(plain(w));
 		}
+	});
+});
+
+describe("the palette cap is reserved at every width, the sandbox state below 60 (#4951)", () => {
+	// The idle row on a phone: session time and providers used to fill the row
+	// and leave the cap nothing, so it read "mode Planning [^Y] | sandbox off nested".
+	const phone = (extra: Partial<Parameters<typeof buildFooterSegments>[0]> = {}) =>
+		buildFooterSegments({
+			mode: "Planning",
+			permissions: "ask",
+			sessionTime: "2s",
+			providersLive: 2,
+			providersTotal: 3,
+			sandboxOff: "nested",
+			...extra,
+		});
+
+	test("[^P] palette is in the row at every width from 38, with or without a sandbox segment", () => {
+		const withSb = phone();
+		const noSb = phone({ sandboxOff: undefined });
+		for (let w = 38; w <= 220; w++) {
+			expect(fitFooterRow(withSb, w).hints[0]).toBe("^P palette");
+			expect(fitFooterRow(noSb, w).hints[0]).toBe("^P palette");
+		}
+	});
+
+	test("below 60 columns the sandbox state is never dropped, only shortened", () => {
+		const all = phone();
+		for (let w = 38; w < 60; w++) {
+			const seg = fitFooterRow(all, w).segments.find((s) => s.key === "sandbox");
+			expect(seg, `sandbox at ${w}`).toBeDefined();
+			expect(seg?.value).toBe("off");
+		}
+		expect(fitFooterRow(all, 50).segments.find((s) => s.key === "sandbox")?.note).toBeUndefined();
+		expect(fitFooterRow(all, 39).segments.find((s) => s.key === "sandbox")?.label).toBe("sbx");
+	});
+
+	test("with a permission mode set, both survive a 51 column row", () => {
+		const row = fitFooterRow(phone({ permissions: "plan" }), 51);
+		expect(row.hints[0]).toBe("^P palette");
+		expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
+	});
+
+	test("the real idle frame at 52 and 40 columns keeps the cap and the sandbox word", async () => {
+		for (const cols of [52, 40]) {
+			const row = (await frame(cols, 30, { sandboxOff: "nested", sessionTime: "2s" }))[0] ?? "";
+			expect(row, `row at ${cols}`).toContain("[^P] palette");
+			expect(row, `row at ${cols}`).toMatch(/(sandbox|sbx) off/);
+			expect(row.length).toBeLessThanOrEqual(cols);
+		}
+	});
+});
+
+describe("the context meter segment (#4956)", () => {
+	const ctx = { used: 31200, window: 128000, stale: false };
+	const segs = (extra: Partial<Parameters<typeof buildFooterSegments>[0]> = {}) =>
+		buildFooterSegments({ mode: "Planning", permissions: "ask", columns: 100, ctx, ...extra });
+
+	test("percent, then used of window, in the muted colour while calm", () => {
+		const seg = segs().find((s) => s.key === "ctx");
+		expect(seg?.label).toBe("ctx");
+		expect(seg?.value).toBe("24% 31.2k/128k");
+		expect(seg?.bold).toBeFalsy();
+	});
+
+	test("warm at 70 percent, red and bold at 90, and they differ from calm", () => {
+		const at = (used: number) => segs({ ctx: { ...ctx, used } }).find((s) => s.key === "ctx");
+		const calm = at(31200)?.color;
+		const warn = at(100000)?.color;
+		const danger = at(120000);
+		expect(warn).not.toBe(calm);
+		expect(danger?.color).not.toBe(warn);
+		expect(danger?.bold).toBe(true);
+		expect(danger?.value).toContain("!");
+	});
+
+	test("right after a compaction it reads ? and never the old number", () => {
+		const seg = segs({ ctx: { ...ctx, stale: true } }).find((s) => s.key === "ctx");
+		expect(seg?.value).toBe("?/128k");
+		expect(seg?.value).not.toContain("24");
+	});
+
+	test("no measurement yet: no segment", () => {
+		expect(segs({ ctx: { ...ctx, used: null } }).some((s) => s.key === "ctx")).toBe(false);
+		expect(segs({ ctx: undefined }).some((s) => s.key === "ctx")).toBe(false);
+	});
+
+	test("with the sandbox off and a palette cap, the meter shortens before anything vital goes (52 columns)", () => {
+		const all = segs({ columns: 52, sandboxOff: "nested", sessionTime: "2s" });
+		const row = fitFooterRow(all, 51);
+		expect(row.hints[0]).toBe("^P palette");
+		expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
+		expect(row.segments.find((s) => s.key === "ctx")?.value).toBe("24%");
+	});
+
+	test("at 40 columns without a sandbox segment the meter and the cap both fit", () => {
+		const row = fitFooterRow(segs({ columns: 40 }), 39);
+		expect(row.hints[0]).toBe("^P palette");
+		expect(row.segments.some((s) => s.key === "ctx")).toBe(true);
+	});
+
+	test("at every width from 38 the cap stays, and below 60 the sandbox stays", () => {
+		for (const sandboxOff of [undefined, "nested"]) {
+			for (let w = 38; w <= 220; w++) {
+				const all = segs({
+					columns: w + 1,
+					sandboxOff,
+					sessionTime: "2s",
+					providersLive: 1,
+					providersTotal: 2,
+				});
+				const row = fitFooterRow(all, w);
+				expect(row.hints[0], `cap at ${w}`).toBe("^P palette");
+				if (sandboxOff && w < 60) expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
+			}
+		}
+	});
+
+	test("rendered at 100x32: the footer row reads the meter after the mode", async () => {
+		const row = (await frame(100, 32, { ctx }))[0] ?? "";
+		expect(row).toContain("ctx 24% 31.2k/128k");
+		expect(row).toContain("[^P] palette");
+	});
+
+	test("rendered at 52 and 40 columns with the sandbox off: cap and sandbox word stay", async () => {
+		for (const cols of [52, 40]) {
+			const row = (await frame(cols, 30, { ctx, sandboxOff: "nested" }))[0] ?? "";
+			expect(row, `row at ${cols}`).toContain("[^P] palette");
+			expect(row, `row at ${cols}`).toMatch(/(sandbox|sbx) off/);
+			expect(row.length).toBeLessThanOrEqual(cols);
+		}
+		const row52 = (await frame(52, 30, { ctx, sandboxOff: "nested" }))[0] ?? "";
+		expect(row52).toContain("ctx 24%");
+	});
+});
+
+describe("the sandbox state is never dropped, at any width (#4953, 8SO ruling)", () => {
+	const build = (meter: boolean, columns: number) =>
+		buildFooterSegments({
+			mode: "Planning",
+			permissions: "ask",
+			sessionTime: "2s",
+			providersLive: 2,
+			providersTotal: 3,
+			sandboxOff: "nested",
+			columns,
+			...(meter ? { ctx: { used: 31200, window: 128000, stale: false } } : {}),
+		});
+
+	test("widths 38 to 220, meter on and off: the sandbox word and [^P] palette stay", () => {
+		for (const meter of [false, true]) {
+			for (let w = 38; w <= 220; w++) {
+				const row = fitFooterRow(build(meter, w + 1), w);
+				const sb = row.segments.find((s) => s.key === "sandbox");
+				expect(sb, `sandbox at ${w}, meter ${meter}`).toBeDefined();
+				expect(sb?.value).toBe("off");
+				expect(row.hints[0], `cap at ${w}, meter ${meter}`).toBe("^P palette");
+			}
+		}
+	});
+
+	test("160 columns with the meter: the sandbox word and every hint the row had without the sandbox stay", () => {
+		const row = fitFooterRow(build(true, 160), 159);
+		expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
+		expect(row.hints).toContain("^P palette");
+		expect(row.hints).toContain("^C quit");
+	});
+
+	test("the meter outlives the low-priority segments: present at every width where it fits after shedding", () => {
+		for (const used of [31200, 100000, 120000]) {
+			const full = (w: number) =>
+				buildFooterSegments({
+					mode: "Planning",
+					permissions: "ask",
+					sessionTime: "8m 12s",
+					providersLive: 1,
+					providersTotal: 2,
+					user: "someone",
+					tokensPerSecond: 30,
+					sandboxOff: "nested",
+					columns: w + 1,
+					ctx: { used, window: 128000, stale: false },
+				});
+			for (let w = 80; w <= 220; w++) {
+				const all = full(w);
+				const need = ["mode", "sandbox", "ctx"].map(
+					(k) => all.find((x) => x.key === k) as FooterSegment,
+				);
+				// Mode, the sandbox in its full form, the meter, and the cap: the least a wide row holds.
+				const minimal = segmentsWidth(need) + 3 + 15;
+				const row = fitFooterRow(all, w);
+				if (w >= minimal) {
+					expect(
+						row.segments.some((x) => x.key === "ctx"),
+						`meter at ${w}, used ${used}`,
+					).toBe(true);
+				}
+				expect(row.segments.some((x) => x.key === "sandbox")).toBe(true);
+				expect(row.hints[0]).toBe("^P palette");
+			}
+		}
+	});
+
+	test("90 percent at 120 to 160 columns: rate, providers, user and session never outlast the meter", () => {
+		for (let w = 120; w <= 160; w++) {
+			const all = buildFooterSegments({
+				mode: "Planning",
+				permissions: "ask",
+				sessionTime: "8m 12s",
+				providersLive: 1,
+				providersTotal: 2,
+				user: "someone",
+				tokensPerSecond: 30,
+				sandboxOff: "nested",
+				columns: w + 1,
+				ctx: { used: 120000, window: 128000, stale: false },
+			});
+			const row = fitFooterRow(all, w);
+			const keys = row.segments.map((x) => x.key);
+			if (!keys.includes("ctx")) {
+				for (const low of ["rate", "providers", "user", "session"]) {
+					expect(keys, `${low} kept without the meter at ${w}`).not.toContain(low);
+				}
+			}
+			expect(keys, `meter at ${w}`).toContain("ctx");
+		}
+	});
+
+	test("the sandbox shrinks to 'sbx off' when it must, never to nothing", () => {
+		const shapes = new Set<string>();
+		for (let w = 38; w <= 400; w++) {
+			const seg = fitFooterRow(build(true, w + 1), w).segments.find((s) => s.key === "sandbox");
+			shapes.add(seg ? (seg.note ? "full" : seg.label === "sbx" ? "sbx" : "short") : "none");
+		}
+		expect([...shapes].sort()).toEqual(["full", "sbx", "short"]);
 	});
 });
 
