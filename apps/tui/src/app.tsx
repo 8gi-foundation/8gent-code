@@ -356,6 +356,7 @@ import { copiedNotice, notCopiedNotice } from "./lib/text-selection.js";
 import { truncate } from "./lib/text.js";
 import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
+import { voiceTranscriptText } from "./lib/voice-transcript.js";
 import { BTWView } from "./screens/BTWView.js";
 import { type ConversationEntry, HistoryScreen } from "./screens/HistoryScreen.js";
 import { IdeasView } from "./screens/IdeasView.js";
@@ -1194,7 +1195,9 @@ export function App({
 	const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
 	const voice = useVoiceInput({
 		onAndroidMic: () => void androidListen(),
-		onTranscript: (text) => {
+		onTranscript: (spoken) => {
+			// A spoken "slash" types "/" so slash commands can be voice typed (#4949).
+			const text = voiceTranscriptText(spoken);
 			setVoiceTranscript(text);
 			addSystemMessage(`Transcribed: "${text}". Edit it or press Enter to send.`);
 		},
@@ -1468,8 +1471,9 @@ export function App({
 				}
 			}
 			if ("text" in heard) {
-				setVoiceTranscript(heard.text);
-				addSystemMessage(`Transcribed: "${heard.text}". Edit it or press Enter to send.`);
+				const text = voiceTranscriptText(heard.text);
+				setVoiceTranscript(text);
+				addSystemMessage(`Transcribed: "${text}". Edit it or press Enter to send.`);
 			} else addSystemMessage(heard.error);
 		} catch (err) {
 			addSystemMessage(`Voice error: ${err instanceof Error ? err.message : String(err)}`);
