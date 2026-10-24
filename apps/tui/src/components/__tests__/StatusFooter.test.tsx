@@ -354,13 +354,13 @@ describe("the sandbox segment never costs a hint (#4013, Windows parity)", () =>
 		}
 	});
 
-	test("wide: the full reason; tighter: 'sandbox off' alone; tightest: dropped", () => {
+	test("wide: the full reason; tighter: 'sandbox off' alone; tightest: 'sbx off', never dropped", () => {
 		const shapes = new Set<string>();
 		for (let w = 40; w <= 400; w++) {
 			const seg = fitFooterRow(all, w).segments.find((s) => s.key === "sandbox");
-			shapes.add(seg ? (seg.note ? "full" : "short") : "none");
+			shapes.add(seg ? (seg.note ? "full" : seg.label === "sbx" ? "sbx" : "short") : "none");
 		}
-		expect([...shapes].sort()).toEqual(["full", "none", "short"]);
+		expect([...shapes].sort()).toEqual(["full", "sbx", "short"]);
 		const wide = fitFooterRow(all, 400).segments.find((s) => s.key === "sandbox");
 		expect(wide?.note).toBe("unsupported OS");
 		expect(wide?.value).toBe("off");
@@ -505,6 +505,48 @@ describe("the context meter segment (#4956)", () => {
 		}
 		const row52 = (await frame(52, 30, { ctx, sandboxOff: "nested" }))[0] ?? "";
 		expect(row52).toContain("ctx 24%");
+	});
+});
+
+describe("the sandbox state is never dropped, at any width (#4953, 8SO ruling)", () => {
+	const build = (meter: boolean, columns: number) =>
+		buildFooterSegments({
+			mode: "Planning",
+			permissions: "ask",
+			sessionTime: "2s",
+			providersLive: 2,
+			providersTotal: 3,
+			sandboxOff: "nested",
+			columns,
+			...(meter ? { ctx: { used: 31200, window: 128000, stale: false } } : {}),
+		});
+
+	test("widths 38 to 220, meter on and off: the sandbox word and [^P] palette stay", () => {
+		for (const meter of [false, true]) {
+			for (let w = 38; w <= 220; w++) {
+				const row = fitFooterRow(build(meter, w + 1), w);
+				const sb = row.segments.find((s) => s.key === "sandbox");
+				expect(sb, `sandbox at ${w}, meter ${meter}`).toBeDefined();
+				expect(sb?.value).toBe("off");
+				expect(row.hints[0], `cap at ${w}, meter ${meter}`).toBe("^P palette");
+			}
+		}
+	});
+
+	test("160 columns with the meter: the sandbox word and every hint the row had without the sandbox stay", () => {
+		const row = fitFooterRow(build(true, 160), 159);
+		expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
+		expect(row.hints).toContain("^P palette");
+		expect(row.hints).toContain("^C quit");
+	});
+
+	test("the sandbox shrinks to 'sbx off' when it must, never to nothing", () => {
+		const shapes = new Set<string>();
+		for (let w = 38; w <= 400; w++) {
+			const seg = fitFooterRow(build(true, w + 1), w).segments.find((s) => s.key === "sandbox");
+			shapes.add(seg ? (seg.note ? "full" : seg.label === "sbx" ? "sbx" : "short") : "none");
+		}
+		expect([...shapes].sort()).toEqual(["full", "sbx", "short"]);
 	});
 });
 

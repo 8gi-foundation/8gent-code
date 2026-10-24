@@ -406,47 +406,53 @@ export function fitFooterRow(
 	}
 	const baseHints = hintsFor(base);
 	if (!sandbox) return { segments: base, hints: baseHints };
-	if (width >= FOOTER_NARROW_COLS) {
-		for (const seg of [sandbox, { ...sandbox, note: undefined }]) {
-			const candidate = all.map((s) => (s === sandbox ? seg : s));
-			const segments = fit(candidate);
-			const hints = hintsFor(segments);
-			if (segments.includes(seg) && hints.length >= baseHints.length) return { segments, hints };
-		}
-		return { segments: base, hints: baseHints };
-	}
 	const forms: FooterSegment[] = [
 		sandbox,
 		{ ...sandbox, note: undefined },
 		{ ...sandbox, note: undefined, label: "sbx" },
 	];
-	const attempts: Array<(list: FooterSegment[]) => FooterSegment[]> = [
+	const shapes: Array<(list: FooterSegment[]) => FooterSegment[]> = [
 		(l) => l,
 		(l) => l.map(unlabelled),
 	];
-	// The context meter outranks the sandbox's reason text: shorten the sandbox
-	// before giving up the meter. Only when nothing keeps both does the meter yield.
+	// What the row would hold with neither the sandbox nor the meter: from 60
+	// columns up the sandbox never costs a hint against it (#4013).
 	const meter = all.find((s) => s.key === "ctx");
-	for (const needMeter of meter ? [true, false] : [false]) {
-		for (const shape of attempts) {
+	const plainHints = hintsFor(fit(without.filter((s) => s.key !== "ctx")));
+	// The sandbox state is never dropped, at any width (8SO, #4953). It sheds its
+	// reason, then its word ("sbx off"), before anything else gives. The meter
+	// stays while it can; when it cannot, it goes before the sandbox does. From
+	// 60 columns up a form that would cost a hint is passed over for a shorter
+	// one; low-priority segments (session, providers) then give way too.
+	const sheds: Array<(list: FooterSegment[]) => FooterSegment[]> = [
+		(l) => l,
+		(l) => l.filter((x) => x.key !== "ctx"),
+		(l) => l.filter((x) => x.key !== "ctx" && x.priority <= 1),
+	];
+	for (const shed of meter ? sheds : sheds.slice(1)) {
+		for (const shape of shapes) {
 			for (const seg of forms) {
-				const candidate = shape(all.map((s) => (s === sandbox ? seg : s)));
-				const kept = candidate.find((s) => s.key === "sandbox");
-				const keptMeter = candidate.find((s) => s.key === "ctx");
+				const candidate = shape(shed(all.map((x) => (x === sandbox ? seg : x))));
+				const kept = candidate.find((x) => x.key === "sandbox");
 				const segments = fit(candidate);
 				if (!kept || !segments.includes(kept)) continue;
-				if (needMeter && keptMeter && !segments.includes(keptMeter)) continue;
-				return { segments, hints: hintsFor(segments) };
+				// The first pass is the one that keeps the meter: a form that loses it yields to the next.
+				if (meter && shed === sheds[0] && !segments.some((x) => x.key === "ctx")) continue;
+				const hints = hintsFor(segments);
+				if (width >= FOOTER_NARROW_COLS && hints.length < plainHints.length) continue;
+				return { segments, hints };
 			}
 		}
 	}
-	// Still no room: the perm segment yields (the tab tag and Shift+Tab still show it).
+	// Still no room: the sandbox keeps its place in its shortest form. Narrow, the
+	// perm segment yields too (the tab tag and Shift+Tab still show it).
 	const last = forms[2] as FooterSegment;
-	const squeezed = all
-		.filter((s) => s.key !== "perm")
-		.map((s) => (s === sandbox ? last : unlabelled(s)));
-	const kept = fit(squeezed);
-	const segments = kept.some((s) => s.key === "sandbox") ? kept : [...kept, last];
+	const kept = fit(
+		all
+			.filter((x) => x.key !== "ctx" && (width >= FOOTER_NARROW_COLS || x.key !== "perm"))
+			.map((x) => (x === sandbox ? last : unlabelled(x))),
+	);
+	const segments = kept.some((x) => x.key === "sandbox") ? kept : [...kept, last];
 	return { segments, hints: hintsFor(segments) };
 }
 
