@@ -24,6 +24,7 @@ import {
 	cleanText,
 	configPath,
 	judgeAskLine,
+	llamaAskLine,
 	offerJudge,
 	pullModel,
 	readChoice,
@@ -75,6 +76,7 @@ function rig(opts: Opts = {}) {
 			ollamaUp = true;
 			return { ok: true, how: "spawn" };
 		},
+		llama: { enabled: false },
 		say: (l) => log.said.push(l),
 		progress: (l) => log.progress.push(l),
 		readChoice: () => stored,
@@ -385,5 +387,184 @@ describe("update path default is No", () => {
 		expect(seen?.[1]).toBe(false);
 		expect(r.log.pulls).toEqual([]);
 		expect(judgeAskLine(true)).toEndWith("[Y/n]");
+	});
+});
+
+describe("the llama.cpp path (#4906)", () => {
+	type Calls = {
+		binary: number;
+		model: number;
+		started: [string, string][];
+		asks: [string, boolean][];
+	};
+	function llamaRig(
+		over: {
+			existing?: { bin: string; gguf: string } | null;
+			binary?: Awaited<ReturnType<NonNullable<NonNullable<JudgeDeps["llama"]>["ensureBinary"]>>>;
+			model?: Awaited<ReturnType<NonNullable<NonNullable<JudgeDeps["llama"]>["ensureModel"]>>>;
+			start?: Awaited<ReturnType<NonNullable<NonNullable<JudgeDeps["llama"]>["start"]>>>;
+			answer?: boolean | null;
+			enabled?: boolean;
+			ollama?: "up" | "installed" | "none";
+		} & Omit<Partial<JudgeDeps>, "ollama"> = {},
+	) {
+		const calls: Calls = { binary: 0, model: 0, started: [], asks: [] };
+		let up = false;
+		const { existing, binary, model, start, answer, enabled, ollama, ...extra } = over;
+		let pulled: () => boolean = () => false;
+		const r = rig({
+			ollama: ollama ?? "none",
+			probe: async () =>
+				up || pulled() ? { backend: "llamacpp", model: "judge" } : { backend: "none", model: null },
+			ask: async (line, defaultYes) => {
+				calls.asks.push([line, defaultYes]);
+				return answer === undefined ? true : answer;
+			},
+			llama: {
+				enabled: enabled ?? true,
+				existing: () => existing ?? null,
+				ensureBinary: async () => {
+					calls.binary++;
+					return binary ?? { ok: true, bin: "/h/.8gent/bin/llama-server", source: "fetched" };
+				},
+				ensureModel: async (pct) => {
+					calls.model++;
+					pct(50);
+					pct(100);
+					return model ?? { ok: true, path: "/h/.8gent/models/judge/m.gguf" };
+				},
+				start: async (bin, gguf) => {
+					calls.started.push([bin, gguf]);
+					const res = start ?? { ok: true };
+					if (res.ok) up = true;
+					return res;
+				},
+			},
+			...extra,
+		});
+		pulled = () => r.log.pulls.length > 0;
+		return { ...r, calls };
+	}
+
+	test("first launch: one yes fetches llama-server and the model, starts it, confirms the judge answers", async () => {
+		const r = llamaRig();
+		expect(await offerJudge("auto", r.deps)).toBe("installed");
+		expect(r.calls.asks).toEqual([[llamaAskLine(true), true]]);
+		expect(r.calls.binary).toBe(1);
+		expect(r.calls.model).toBe(1);
+		expect(r.calls.started).toEqual([
+			["/h/.8gent/bin/llama-server", "/h/.8gent/models/judge/m.gguf"],
+		]);
+		expect(r.log.pulls).toEqual([]); // nothing through Ollama
+		expect(r.log.said.at(-1)).toContain("Safety judge ready");
+		expect(r.log.progress.some((l) => l.includes("50%"))).toBe(true);
+		expect(r.stored()).toBeNull();
+	});
+
+	test("the question defaults to No after an update, so a stray Enter downloads nothing", async () => {
+		const r = llamaRig({ defaultYes: false, answer: false });
+		expect(await offerJudge("auto", r.deps)).toBe("declined");
+		expect(r.calls.asks).toEqual([[llamaAskLine(false), false]]);
+		expect(llamaAskLine(false)).toContain("[y/N]");
+		expect(r.calls.binary + r.calls.model + r.calls.started.length).toBe(0);
+		expect(r.stored()).toBe("declined");
+	});
+
+	test("nobody to ask: nothing downloaded, nothing recorded", async () => {
+		const r = llamaRig({ answer: null });
+		expect(await offerJudge("auto", r.deps)).toBe("no-person");
+		expect(r.calls.binary + r.calls.model).toBe(0);
+		expect(r.stored()).toBeNull();
+	});
+
+	test("set up before and not running: started with no question and no download", async () => {
+		const r = llamaRig({ existing: { bin: "/h/.8gent/bin/llama-server", gguf: "/h/m.gguf" } });
+		expect(await offerJudge("auto", r.deps)).toBe("started");
+		expect(r.calls.asks).toEqual([]);
+		expect(r.calls.binary + r.calls.model).toBe(0);
+		expect(r.calls.started).toEqual([["/h/.8gent/bin/llama-server", "/h/m.gguf"]]);
+		expect(r.log.said[0]).toBe("Starting the safety judge in the background.");
+	});
+
+	test("/judge install is the yes: no question", async () => {
+		const r = llamaRig();
+		expect(await offerJudge("command", r.deps)).toBe("installed");
+		expect(r.calls.asks).toEqual([]);
+	});
+
+	test("a system llama-server is a named fallback, never the default", async () => {
+		const r = llamaRig({
+			binary: { ok: true, bin: "/usr/bin/llama-server", source: "system", note: "offline" },
+		});
+		expect(await offerJudge("auto", r.deps)).toBe("installed");
+		expect(
+			r.log.said.some((l) => l.includes("/usr/bin/llama-server") && l.includes("offline")),
+		).toBe(true);
+	});
+
+	test("model fails: says so, records failed, starts nothing", async () => {
+		const r = llamaRig({ model: { ok: false, why: "does not match its pinned checksum" } });
+		expect(await offerJudge("auto", r.deps)).toBe("failed");
+		expect(r.log.said.at(-1)).toContain("pinned checksum");
+		expect(r.calls.started).toEqual([]);
+		expect(r.stored()).toBe("failed");
+	});
+
+	test("the server does not come up: one line, failed", async () => {
+		const r = llamaRig({ start: { ok: false, line: "llama-server did not answer within 120 s." } });
+		expect(await offerJudge("auto", r.deps)).toBe("failed");
+		expect(r.log.said.at(-1)).toContain("did not answer within 120 s");
+	});
+
+	test("no llama-server to be had and no Ollama: failed with the reason", async () => {
+		const r = llamaRig({
+			binary: { ok: false, why: "no llama-server build for this platform yet" },
+			ollama: "none",
+		});
+		expect(await offerJudge("auto", r.deps)).toBe("failed");
+		expect(r.log.said.at(-1)).toContain("no llama-server build");
+		expect(r.calls.model).toBe(0);
+	});
+
+	test("fallback: no llama-server but Ollama is installed, so Ollama is started and pulls the judge", async () => {
+		const r = llamaRig({
+			binary: { ok: false, why: "offline" },
+			ollama: "installed",
+			answer: true,
+		});
+		expect(await offerJudge("auto", r.deps)).toBe("installed");
+		expect(r.log.said.some((l) => l.includes("Using Ollama instead"))).toBe(true);
+		expect(r.log.starts).toBe(1); // the Ollama fallback was started
+		expect(r.log.pulls).toEqual([JUDGE_MODEL]);
+	});
+
+	test("the llama path is on for Android and for EIGHT_JUDGE_RUNTIME=llama-server, off for =ollama", async () => {
+		for (const [env, want] of [
+			[{ TERMUX_VERSION: "0.118" }, true],
+			[{ EIGHT_JUDGE_RUNTIME: "llama-server" }, true],
+			[{ TERMUX_VERSION: "0.118", EIGHT_JUDGE_RUNTIME: "ollama" }, false],
+			[{}, false],
+		] as const) {
+			const r = llamaRig({ env, enabled: undefined as unknown as boolean });
+			// enabled undefined: let the environment decide.
+			(r.deps.llama as { enabled?: boolean }).enabled = undefined;
+			await offerJudge("auto", r.deps);
+			expect(r.calls.binary > 0).toBe(want);
+		}
+	});
+
+	test("Ollama start question also defaults to No after an update", async () => {
+		const asks: [string, boolean][] = [];
+		const r = rig({
+			ollama: "installed",
+			defaultYes: false,
+			ask: async (l, d) => {
+				asks.push([l, d]);
+				return false;
+			},
+		});
+		await offerJudge("auto", r.deps);
+		expect(asks).toEqual([["Start Ollama in the background now? [y/N]", false]]);
+		expect(r.log.starts).toBe(0);
 	});
 });

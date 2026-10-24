@@ -43,7 +43,7 @@ export type SlashCommand =
 	| "stack"
 	| "update"
 	| "judge"
-	| "ollama"
+	| "local"
 	| "chat"
 	| "agent"
 	| "github"
@@ -425,10 +425,10 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		usage: "/judge [install]",
 	},
 	{
-		name: "ollama",
+		name: "local",
 		aliases: [],
-		description: "Stop the Ollama that 8gent started in the background",
-		usage: "/ollama stop",
+		description: "Stop the local model server 8gent started in the background",
+		usage: "/local stop",
 	},
 	{
 		name: "compact",

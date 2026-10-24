@@ -26,13 +26,23 @@ import { dirname, join } from "node:path";
 import { resolveHome } from "../core/home";
 import { JUDGE_MODEL } from "../decide/judge-model";
 import { detectBackend, resolveSharedJudgeHost } from "../decide/probe";
-import { findOnPath } from "../voice/termux";
+import { findOnPath, isAndroidHost } from "../voice/termux";
 import {
-	OLLAMA_START_ASK,
 	type StartResult,
 	isLocalDefaultHost,
+	ollamaStartAsk,
+	startLlamaServer,
 	startOllama,
-} from "./ollama-autostart";
+} from "./local-runtime";
+import {
+	type LlamaServerResult,
+	type ModelResult,
+	ensureLlamaServer,
+	fetchJudgeModel,
+	findLlamaServer,
+	judgeModelPath,
+	judgeModelPresent,
+} from "./runtime-fetch";
 
 /** The calibrated judge, fixed at build time (packages/decide/judge-model.ts), never from user config. */
 export { JUDGE_MODEL };
@@ -49,6 +59,7 @@ export type JudgeOutcome =
 	| "declined"
 	| "unsupported"
 	| "installed"
+	| "started" //     the judge was set up before; its server was just not running
 	| "failed";
 
 type Env = Record<string, string | undefined>;
@@ -63,8 +74,10 @@ export interface JudgeDeps {
 	pull?: (model: string, onPercent: (pct: number) => void) => Promise<void>;
 	/** Ask one yes/no line; resolves null when nobody can answer. */
 	ask?: (line: string, defaultYes: boolean) => Promise<boolean | null>;
-	/** Start Ollama in the background (#4906). Default: ollama-autostart's startOllama. */
+	/** Start Ollama in the background (#4906). Default: local-runtime's startOllama. */
 	startOllama?: () => Promise<StartResult>;
+	/** The llama.cpp path (#4906): default on Android, EIGHT_JUDGE_RUNTIME=llama-server elsewhere. */
+	llama?: LlamaDeps;
 	/** What a bare Enter answers. True on first launch, false after `8gent update` (a stray Enter must not start a download). */
 	defaultYes?: boolean;
 	/** A finished line. */
@@ -75,6 +88,21 @@ export interface JudgeDeps {
 	/** Pass null to clear. Returns false when the config could not be written. */
 	writeChoice?: (c: JudgeChoice | null) => boolean;
 }
+
+export interface LlamaDeps {
+	/** Force the path on or off. Default: Android, or EIGHT_JUDGE_RUNTIME=llama-server; never with =ollama. */
+	enabled?: boolean;
+	/** A llama-server and the verified model already on disk (set up before): start it, ask nothing. */
+	existing?: () => { bin: string; gguf: string } | null;
+	/** 8gent's own llama-server for this version; a system one only as a fallback. */
+	ensureBinary?: () => Promise<LlamaServerResult>;
+	/** The pinned judge model, verified. */
+	ensureModel?: (onPercent: (pct: number) => void) => Promise<ModelResult>;
+	start?: (bin: string, gguf: string) => Promise<StartResult>;
+}
+
+export const llamaAskLine = (defaultYes = true): string =>
+	`Set up the safety judge on this device? It downloads llama.cpp from 8gent's release and the judge model (~${JUDGE_SIZE}, from Hugging Face), then checks risky commands before they run. ${defaultYes ? "[Y/n]" : "[y/N]"}`;
 
 export const judgeAskLine = (defaultYes = true): string =>
 	`Install the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE})? It checks risky commands before they run. ${defaultYes ? "[Y/n]" : "[y/N]"}`;
@@ -193,6 +221,7 @@ export async function pullModel(
 	const idleError = () => new Error(`Ollama sent nothing for ${Math.round(idleMs / 1000)} s`);
 	arm();
 	try {
+		// local-first-gate: fallback Ollama pull, only for a person who already runs Ollama and has no llama-server path
 		const res = await fetchImpl(`${host}/api/pull`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
@@ -283,6 +312,104 @@ async function install(d: InstallDeps, from: "auto" | "command"): Promise<JudgeO
 	}
 }
 
+function llamaPathApplies(env: Env, deps: JudgeDeps): boolean {
+	if (deps.llama?.enabled !== undefined) return deps.llama.enabled;
+	const pick = env.EIGHT_JUDGE_RUNTIME?.trim().toLowerCase();
+	if (pick === "ollama") return false;
+	return pick === "llama-server" || isAndroidHost(process.platform, env);
+}
+
+/**
+ * Set up, or just start, the judge on llama.cpp. One yes covers the whole setup (8gent's
+ * llama-server from its release, the pinned model from Hugging Face, the background start).
+ * Nothing is installed through pkg, brew or Ollama. Returns "fallback" only when llama-server
+ * could not be had and Ollama is on this machine.
+ */
+async function llamaJudge(
+	mode: "auto" | "command",
+	deps: JudgeDeps,
+	d: {
+		probe: () => Promise<{ backend: string; model: string | null }>;
+		ollama: () => Promise<"up" | "installed" | "none">;
+		say: (l: string) => void;
+		progress: (l: string) => void;
+		writeChoice: (c: JudgeChoice | null) => boolean;
+	},
+	env: Env,
+): Promise<JudgeOutcome | "fallback"> {
+	const L = deps.llama ?? {};
+	const start =
+		L.start ?? ((bin: string, gguf: string) => startLlamaServer(bin, gguf, JUDGE_MODEL, { env }));
+	const existing =
+		L.existing ??
+		(() => {
+			const bin = findLlamaServer(env);
+			return bin && judgeModelPresent(env) ? { bin: bin.bin, gguf: judgeModelPath(env) } : null;
+		});
+	const fail = (why: string): JudgeOutcome => {
+		d.say(
+			`Could not set up the safety judge: ${cleanText(why, 300)}. Risky commands are checked by the built-in safety rules only. Run /judge install to try again.`,
+		);
+		if (mode === "auto") d.writeChoice("failed");
+		return "failed";
+	};
+	const finish = async (bin: string, gguf: string, how: JudgeOutcome): Promise<JudgeOutcome> => {
+		const r = await start(bin, gguf);
+		if (!r.ok) return fail(r.line);
+		const after = await d.probe();
+		if (after.backend === "none") return fail("the server started, but no judge answers yet");
+		d.say(`Safety judge ready: ${after.model ?? after.backend} via ${after.backend}.`);
+		d.writeChoice(null);
+		return how;
+	};
+
+	// Set up before and just not running (a reboot, a closed Termux): the person said yes once.
+	const have = existing();
+	if (have) {
+		d.say("Starting the safety judge in the background.");
+		return finish(have.bin, have.gguf, "started");
+	}
+
+	if (mode === "auto") {
+		const defaultYes = deps.defaultYes ?? true;
+		const yes = await (deps.ask ?? askYesNoLine)(llamaAskLine(defaultYes), defaultYes);
+		if (yes === null) return "no-person";
+		if (!yes) {
+			d.writeChoice("declined");
+			d.say(
+				"OK. Risky commands are checked by the built-in safety rules only. Run /judge install if you change your mind.",
+			);
+			return "declined";
+		}
+	}
+
+	d.progress("Getting llama-server for this device...");
+	const bin = await (L.ensureBinary ?? (() => ensureLlamaServer({ env })))();
+	if (!bin.ok) {
+		// Ollama stays as the fallback for a person who already has it.
+		if ((await d.ollama()) !== "none") {
+			d.say(`Could not get llama-server (${cleanText(bin.why)}). Using Ollama instead.`);
+			return "fallback";
+		}
+		return fail(bin.why);
+	}
+	if (bin.source === "system")
+		d.say(
+			`Using the llama-server on this machine (${bin.bin}): ${cleanText(bin.note ?? "8gent's own build was not available")}.`,
+		);
+
+	let last = -1;
+	const model = await (
+		L.ensureModel ?? ((p: (n: number) => void) => fetchJudgeModel({ env, onPercent: p }))
+	)((pct) => {
+		if (pct === last) return;
+		last = pct;
+		d.progress(`Downloading the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE}): ${pct}%`);
+	});
+	if (!model.ok) return fail(model.why);
+	return finish(bin.bin, model.path, "installed");
+}
+
 /**
  * `auto`: after an update and on first launch. Asks at most once ever: any
  * recorded choice (declined, unsupported, failed) ends the asking.
@@ -297,6 +424,7 @@ export async function offerJudge(
 	const d = {
 		probe: deps.probe ?? (() => detectBackend({ env })),
 		ollama: deps.ollama ?? (() => defaultOllama(env)),
+		// local-first-gate: fallback Ollama pull (pullModel), used only when the llama.cpp path does not apply
 		pull:
 			deps.pull ??
 			((m: string, p: (n: number) => void) =>
@@ -319,16 +447,27 @@ export async function offerJudge(
 		return "present";
 	}
 
+	// llama.cpp is the default local runtime on a phone (#4906): 8gent's own llama-server and the
+	// pinned judge model. "fallback" means it could not be had and Ollama is there instead.
+	if (llamaPathApplies(env, deps)) {
+		const r = await llamaJudge(mode, deps, d, env);
+		if (process.stdout.isTTY && !deps.progress) process.stdout.write("\n");
+		if (r !== "fallback") return r;
+	}
+
 	let o = await d.ollama();
 	let downLine = o === "none" ? JUDGE_UNSUPPORTED_LINE : JUDGE_OLLAMA_DOWN_LINE;
 	// Installed but stopped: start it in the background instead of handing the person a blocking
 	// `ollama serve` (#4906). Auto asks once (a no falls through to the recorded choice below, so it is
-	// never asked again); /judge install is itself the yes.
+	// never asked again, and a bare Enter after an update is a no); /judge install is itself the yes.
 	if (o === "installed" && isLocalDefaultHost(resolveSharedJudgeHost(env))) {
+		const defaultYes = deps.defaultYes ?? true;
 		let go = mode === "command";
-		if (!go) go = (await (deps.ask ?? askYesNoLine)(OLLAMA_START_ASK, true)) === true;
+		if (!go)
+			go = (await (deps.ask ?? askYesNoLine)(ollamaStartAsk(defaultYes), defaultYes)) === true;
 		if (go) {
 			say("Starting Ollama in the background.");
+			// local-first-gate: fallback Ollama autostart, for a person who already has Ollama installed
 			const r = await (deps.startOllama ?? (() => startOllama({ env })))();
 			if (r.ok) o = "up";
 			else downLine = r.line;

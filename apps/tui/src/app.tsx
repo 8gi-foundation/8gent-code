@@ -5057,15 +5057,15 @@ export function App({
 					break;
 				}
 
-				case "ollama": {
-					// Stops only the Ollama 8gent started (#4906): the recorded pid, never a name match.
+				case "local": {
+					// Stops only the local model servers 8gent started (#4906): the recorded pid, never a name match.
 					void (async () => {
 						if ((args[0] ?? "").toLowerCase() !== "stop") {
-							addSystemMessage("Usage: /ollama stop");
+							addSystemMessage("Usage: /local stop");
 							return;
 						}
-						const { stopOllama } = await import("../../../packages/eight/ollama-autostart.js");
-						addSystemMessage(stopOllama());
+						const { stopLocal } = await import("../../../packages/eight/local-runtime.js");
+						addSystemMessage(stopLocal().join("\n"));
 					})();
 					break;
 				}
