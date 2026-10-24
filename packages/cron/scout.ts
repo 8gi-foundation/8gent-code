@@ -7,11 +7,19 @@
  * is followed only to another host from the same list. Results are files under
  * <home>/.8gent/scouts/<routine id>/ (0600, in 0700 directories).
  *
+ * A listed address can never be this machine or a private network (SSRF): loopback, private,
+ * link-local, CGNAT, unique-local, IPv4-mapped IPv6, localhost, single-label names and
+ * .local/.internal-style names are refused when the URL is read and again, by resolved
+ * address, before every request and every redirect hop. Limit, stated plainly: the check
+ * resolves the name and then fetch resolves it again to connect, so a DNS answer that changes
+ * between the two (rebinding) is narrowed, not closed.
+ *
  * Consent is part of the data: a scout carries the hash of the sources the person said yes to,
  * and a scout whose sources were edited afterwards fetches nothing until they say yes again.
  */
 
 import { createHash } from "node:crypto";
+import * as dns from "node:dns";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveHome } from "../core/home";
@@ -39,7 +47,98 @@ function isObject(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** A listed URL: https, no userinfo, the default port. Throws ScoutError otherwise. */
+// ── internal addresses ───────────────────────────────────────────────────
+
+function parseV4(s: string): number[] | null {
+	const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+	if (!m) return null;
+	const o = m.slice(1).map(Number);
+	return o.every((n) => n <= 255) ? o : null;
+}
+
+function v4Internal([a, b, c]: number[]): boolean {
+	return (
+		a === 0 ||
+		a === 10 ||
+		a === 127 ||
+		(a === 100 && b >= 64 && b <= 127) || // CGNAT
+		(a === 169 && b === 254) || // link-local, cloud metadata
+		(a === 172 && b >= 16 && b <= 31) ||
+		(a === 192 && b === 168) ||
+		(a === 192 && b === 0 && c === 0) ||
+		(a === 198 && (b === 18 || b === 19)) ||
+		a >= 224 // multicast, reserved, broadcast
+	);
+}
+
+function parseV6(raw: string): number[] | null {
+	let h = raw.toLowerCase();
+	if (h.includes(".")) {
+		const i = h.lastIndexOf(":");
+		const v4 = parseV4(h.slice(i + 1));
+		if (!v4) return null;
+		h = `${h.slice(0, i + 1)}${((v4[0] << 8) | v4[1]).toString(16)}:${((v4[2] << 8) | v4[3]).toString(16)}`;
+	}
+	const parts = h.split("::");
+	if (parts.length > 2) return null;
+	const head = parts[0] ? parts[0].split(":") : [];
+	const tail = parts.length === 2 && parts[1] ? parts[1].split(":") : [];
+	let groups: string[];
+	if (parts.length === 1) {
+		if (head.length !== 8) return null;
+		groups = head;
+	} else {
+		const fill = 8 - head.length - tail.length;
+		if (fill < 1) return null;
+		groups = [...head, ...Array<string>(fill).fill("0"), ...tail];
+	}
+	if (!groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return null;
+	return groups.map((g) => Number.parseInt(g, 16));
+}
+
+function v6Internal(g: number[]): boolean {
+	const zeros = (from: number, to: number) => g.slice(from, to).every((x) => x === 0);
+	return zeros(0, 5) && (g[5] === 0xffff || g[5] === 0) // ::, ::1, IPv4-mapped and IPv4-compatible
+		? true
+		: (g[0] === 0x64 && g[1] === 0xff9b && zeros(2, 6)) || // NAT64
+				g[0] === 0x2002 || // 6to4
+				(g[0] === 0x2001 && (g[1] === 0 || g[1] === 0xdb8)) || // Teredo, documentation
+				(g[0] === 0x0100 && zeros(1, 4)) || // discard
+				(g[0] & 0xfe00) === 0xfc00 || // unique-local
+				(g[0] & 0xffc0) === 0xfe80 || // link-local
+				(g[0] & 0xffc0) === 0xfec0 || // site-local
+				(g[0] & 0xff00) === 0xff00; // multicast
+}
+
+/** True for an address that is this machine or a private network, and for anything that is not an address. */
+export function isInternalAddress(addr: string): boolean {
+	const a = addr
+		.trim()
+		.replace(/^\[|\]$/g, "")
+		.replace(/%.*$/, "");
+	const v4 = parseV4(a);
+	if (v4) return v4Internal(v4);
+	const v6 = parseV6(a);
+	return v6 ? v6Internal(v6) : true;
+}
+
+const INTERNAL_SUFFIXES = [".localhost", ".local", ".internal", ".localdomain", ".home.arpa"];
+
+const isIpLiteral = (host: string) => host.startsWith("[") || parseV4(host) !== null;
+
+/** Why a (WHATWG-normalised) hostname may not be a source, or null. Decimal, hex and octal IPv4 forms arrive here as dotted decimal. */
+export function internalHostReason(hostname: string): string | null {
+	const h = hostname.toLowerCase().replace(/\.$/, "");
+	if (isIpLiteral(h))
+		return isInternalAddress(h)
+			? `${h} is an internal address (this machine or a private network)`
+			: null;
+	if (!h.includes(".") || INTERNAL_SUFFIXES.some((x) => h.endsWith(x)))
+		return `${h} is an internal name (this machine or a private network)`;
+	return null;
+}
+
+/** A listed URL: https, no userinfo, the default port, not internal. Throws ScoutError otherwise. */
 export function checkUrl(raw: unknown): URL {
 	if (typeof raw !== "string" || raw.length === 0 || raw.length > 2048)
 		throw new ScoutError("a source needs a URL of at most 2048 characters");
@@ -55,6 +154,8 @@ export function checkUrl(raw: unknown): URL {
 		throw new ScoutError("a source URL may not carry a user name or password");
 	if (u.port) throw new ScoutError("a source URL may not name a port");
 	if (!u.hostname) throw new ScoutError("a source URL needs a host");
+	const internal = internalHostReason(u.hostname);
+	if (internal) throw new ScoutError(internal);
 	return u;
 }
 
@@ -141,6 +242,14 @@ export type ScoutFetch = (
 	},
 ) => Promise<Response>;
 
+/** Every address a name resolves to. Injected in tests. */
+export type Lookup = (host: string) => Promise<{ address: string }[]>;
+
+const defaultLookup: Lookup = async (host) => {
+	const r = await dns.promises.lookup(host, { all: true });
+	return r.map((x) => ({ address: x.address }));
+};
+
 export type SourceResult = { ok: true; text: string } | { ok: false; why: string };
 
 const MAX_HOPS = 3;
@@ -175,7 +284,7 @@ export async function fetchSource(
 	f: ScoutFetch,
 	url: string,
 	allow: ReadonlySet<string>,
-	opts: { timeoutMs?: number; maxBytes?: number } = {},
+	opts: { timeoutMs?: number; maxBytes?: number; lookup?: Lookup } = {},
 ): Promise<SourceResult> {
 	const timeoutMs = opts.timeoutMs ?? 15_000;
 	const maxBytes = opts.maxBytes ?? 1_000_000;
@@ -198,6 +307,22 @@ export async function fetchSource(
 			}
 			if (!allow.has(u.hostname))
 				return { ok: false, why: `${u.hostname} is not one of your listed sources` };
+			// Before every request, redirect hops included: a name that now points inside is refused.
+			if (!isIpLiteral(u.hostname)) {
+				let answers: { address: string }[];
+				try {
+					answers = await (opts.lookup ?? defaultLookup)(u.hostname);
+				} catch (err) {
+					return { ok: false, why: `could not resolve ${u.hostname}: ${(err as Error).message}` };
+				}
+				if (answers.length === 0) return { ok: false, why: `${u.hostname} did not resolve` };
+				const bad = answers.find((x) => isInternalAddress(x.address));
+				if (bad)
+					return {
+						ok: false,
+						why: `${u.hostname} resolves to an internal address (${bad.address}): this machine or a private network`,
+					};
+			}
 			const res = await f(u.href, {
 				method: "GET",
 				headers: {
@@ -318,6 +443,7 @@ export interface ScoutDeps {
 	now?: () => Date;
 	timeoutMs?: number;
 	maxBytes?: number;
+	lookup?: Lookup;
 }
 
 export interface ScoutOutcome {
@@ -351,6 +477,7 @@ export async function runScout(
 		const r = await fetchSource(f, s.url, allow, {
 			timeoutMs: deps.timeoutMs,
 			maxBytes: deps.maxBytes,
+			lookup: deps.lookup,
 		});
 		lines.push(`## ${s.id}`, "", s.url, "");
 		if (!r.ok) {

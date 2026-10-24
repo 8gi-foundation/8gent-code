@@ -19,6 +19,7 @@ function rig(answer: boolean | null = true) {
 	const asked: [string, boolean][] = [];
 	const urls: string[] = [];
 	const manager = new RoutineManager(undefined, env, {
+		lookup: async () => [{ address: "93.184.216.34" }],
 		fetchImpl: async (u) => {
 			urls.push(u);
 			return new Response("<p>AI in procurement.</p>", { status: 200 });

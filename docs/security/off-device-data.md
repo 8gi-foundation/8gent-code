@@ -36,6 +36,7 @@ Those two are the only entries the gate waives. Run `bun scripts/local-first-gat
 | github-api | Issues, pull requests, searches | api.github.com | The person's GitHub token. The launch update check is `EIGHT_UPDATE_CHECK=1` only. | `packages/eight/update-notice.ts` |
 | vercel-and-travel-apis | Deploy and travel-search requests | api.vercel.com, api.letsfg.co | The person's key; LetsFG throws "LETSFG_API_KEY is required" | `packages/travel/letsfg-provider.ts` |
 | db-convex | Records | A Convex deployment | A configured `CONVEX_URL`; without it the client logs "Running in offline mode" | `packages/db/client.ts` |
+| scout-sources | Nothing of the person's: a GET request (no body, credentials or cookies) to each address they listed | Those addresses only, https, never this machine or a private network; the site sees an IP address and a client string | `8gent scout add` or `enable`, which lists every address and answers no on a bare Enter or with nobody to ask (CI, EIGHT_UNATTENDED, no terminal) | The consent hash in `packages/cron/routines.ts` and the internal-address check in `packages/cron/scout.ts` |
 
 ## Command paths (user data can leave only when the person types the command)
 

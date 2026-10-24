@@ -257,6 +257,27 @@ export const SINKS: Sink[] = [
 		files: ["packages/board-vessel/", "packages/orchestration/sequential-pipeline.ts"],
 	},
 
+	// --- scouts -------------------------------------------------------------
+	{
+		id: "scout-sources",
+		what: "A GET request, with no body, credentials or cookies, to each address the person listed for a scout (https only, never this machine or a private network). The request sends nothing of the person's; the site sees an IP address and a client string.",
+		mode: "optin",
+		patterns: [/8gent-scout/],
+		files: ["packages/cron/scout.ts"],
+		optIn: [
+			{
+				file: "packages/cron/routines.ts",
+				mustMatch: /consent\.hash === consentHash\(/,
+				how: "a scout runs only while the sources it carries match the hash of the sources the person said yes to; creating or enabling one asks, with every address shown, and answers no on a bare Enter or with nobody to ask",
+			},
+			{
+				file: "packages/cron/scout.ts",
+				mustMatch: /isInternalAddress\(x\.address\)/,
+				how: "before every request and redirect hop the name's resolved addresses are checked, and an internal one is refused",
+			},
+		],
+	},
+
 	// --- tools the model can call -----------------------------------------
 	{
 		id: "web-search",

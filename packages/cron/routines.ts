@@ -20,6 +20,7 @@ import { resolveHome } from "../core/home";
 import { cronMatches, dueSince } from "./index";
 import {
 	type Ask,
+	type Lookup,
 	type ScoutFetch,
 	type ScoutSpec,
 	consentHash,
@@ -106,6 +107,7 @@ export class RoutineManager {
 	private ownsDir: boolean;
 	private env: Record<string, string | undefined>;
 	private fetchImpl?: ScoutFetch;
+	private lookup?: Lookup;
 
 	/** Where the store lives. */
 	get storePath(): string {
@@ -119,10 +121,11 @@ export class RoutineManager {
 	constructor(
 		dataPath?: string,
 		env: Record<string, string | undefined> = process.env,
-		deps: { fetchImpl?: ScoutFetch } = {},
+		deps: { fetchImpl?: ScoutFetch; lookup?: Lookup } = {},
 	) {
 		this.env = env;
 		this.fetchImpl = deps.fetchImpl;
+		this.lookup = deps.lookup;
 		this.ownsDir = !dataPath;
 		this.filePath = dataPath || path.join(resolveHome(env), ".8gent", "routines.json");
 		this.tightenDir();
@@ -490,7 +493,11 @@ export class RoutineManager {
 				"the sources changed since you agreed to them, or there was no yes; nothing was fetched. Turn it on again to agree";
 			return;
 		}
-		const r = await runScout(routine, { fetchImpl: this.fetchImpl, env: this.env });
+		const r = await runScout(routine, {
+			fetchImpl: this.fetchImpl,
+			lookup: this.lookup,
+			env: this.env,
+		});
 		run.status = r.status;
 		run.output = r.file;
 		if (r.error) run.error = r.error;
