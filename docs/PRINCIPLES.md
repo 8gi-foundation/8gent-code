@@ -4,7 +4,7 @@ The 8 principles we build by, and the engineering rules that follow from them. O
 
 ## The 8 principles
 
-Verbatim from [AGENTS.md](../AGENTS.md), "First Principles". One word differs: "sub-agents" is written "sub-8gents".
+Verbatim from [AGENTS.md](../AGENTS.md), "First Principles". Principle 6 uses "sub-8gents" where the source has an older spelling.
 
 1. **Design first, not last.** Before writing code, think about the interaction. Friction is the enemy. The best interface is the minimum that serves the user.
 2. **Free and local by default.** No API keys to start. Local models first. Cloud is opt-in. Privacy is the foundation.
