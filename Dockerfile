@@ -9,12 +9,19 @@ RUN bun install --production || bun install
 FROM oven/bun:1-slim AS base
 WORKDIR /app
 
+# git applies the patches a cell's /selfimprove round proposes (packages/self-autonomy/selfimprove.ts).
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+
 # Copy deps
 COPY --from=deps /app/node_modules ./node_modules
 
 # Copy all packages (agent loop needs most of them)
 COPY package.json tsconfig.json ./
 COPY packages/ packages/
+
+# The 8gent CLI (a cell runs `bun run /app/bin/8gent.ts selfimprove`) and the helpers the frozen checks import.
+COPY bin/ bin/
+COPY tests/ tests/
 
 # Copy harness scripts + benchmarks (kernel depends on model-router)
 COPY scripts/nightly-train.ts scripts/nightly-train.ts

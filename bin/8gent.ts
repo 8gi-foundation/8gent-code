@@ -571,6 +571,13 @@ async function main() {
 			await blueprintCommand(restArgs);
 			break;
 
+		case "selfimprove": {
+			// One self-improvement round on a vessel cell (#4937). Refuses outside a cell.
+			const { selfImproveCommand } = await import("../packages/self-autonomy/selfimprove.ts");
+			process.exitCode = await selfImproveCommand(restArgs);
+			break;
+		}
+
 		case "daemon": {
 			const { daemonCommand } = await import("../packages/daemon/service.ts");
 			const code = await daemonCommand(restArgs, daemonProgram());
