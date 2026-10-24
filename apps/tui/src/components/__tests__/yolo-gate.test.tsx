@@ -94,7 +94,12 @@ function Harness() {
 	return (
 		<Box flexDirection="column">
 			{pending && (
-				<InlineApprovalPrompt target={pending.target} reason={pending.reason} gate={pending.gate} />
+				<InlineApprovalPrompt
+					target={pending.target}
+					reason={pending.reason}
+					full={pending.full}
+					gate={pending.gate}
+				/>
 			)}
 		</Box>
 	);
@@ -144,7 +149,7 @@ describe("yolo gate", () => {
 		stdin.feed(key);
 		await waitFor(() => frame().includes("[Y] approve"), "real card after gate");
 		expect(answers).toEqual([yes]);
-		await tick(20);
+		await tick(CARD_MIN_SHOW_MS + 100); // a yes on a one-row card waits for it to have been shown
 		stdin.feed("y");
 		expect(await first).toBe(true);
 		// Second request: straight to the real card.
@@ -173,7 +178,7 @@ describe("yolo gate", () => {
 			stdin.feed(key);
 			await waitFor(() => frame().includes("[Y] approve"), "first real card");
 			expect(answers).toEqual([yes]);
-			await tick(20);
+			await tick(CARD_MIN_SHOW_MS + 100); // a yes on a one-row card waits for it to have been shown
 			stdin.feed("y");
 			expect(await first).toBe(true);
 			// The second request gets its own real card; no second gate.

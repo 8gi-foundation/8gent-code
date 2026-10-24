@@ -21,7 +21,14 @@
  */
 
 import { type DOMElement, useInput, useStdout } from "ink";
-import { createRef, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+	createRef,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react";
 import { currentPermissionMode } from "../../../../packages/permissions/permission-mode.js";
 import {
 	type TuiApprovalDecision,
@@ -29,6 +36,7 @@ import {
 	registerTuiApprovalHandler,
 } from "../../../../packages/permissions/tui-approval-channel.js";
 import { YOLO_QUESTION } from "../../../../packages/permissions/yolo-pref.js";
+import { cellWidth } from "../lib/header-layout.js";
 import { approvalReason } from "../lib/perm-modes-design.js";
 
 export interface PendingApproval {
@@ -42,6 +50,18 @@ export interface PendingApproval {
 	/** For a `full` card: the screen size it was last laid out whole at, and since when. */
 	shownWholeAt?: string;
 	shownSince?: number;
+	/**
+	 * The card is full only because the target does not fit one row (not asked
+	 * for by the request): it wraps by cells and scrolls when taller than the
+	 * screen. A request's own `full` card keeps its whole-or-refused contract.
+	 */
+	auto?: boolean;
+	/** First line of the target on screen, for a target taller than the screen. */
+	offset?: number;
+	/** The width the card's text was last wrapped at. */
+	drawnWidth?: number;
+	/** The screen size at which the last line of the target was on screen. */
+	endSeenAt?: string;
 	resolve: (decision: TuiApprovalDecision) => void;
 }
 
@@ -58,8 +78,136 @@ const sizeOf = (out: Sized) => `${out.columns}x${out.rows}`;
  */
 export const CARD_MIN_SHOW_MS = 500;
 
+/** Cells the compact card spends besides the target: border, padding, "ASK ", the four caps. */
+const COMPACT_CHROME = 2 + 2 + 4 + 41 + 1;
+
+/**
+ * Does the target fit the compact one-row card whole? If not the card is shown
+ * full: the whole target, wrapped. A consent card never cuts what it asks about.
+ */
+export function fitsCompact(target: string, reason: string | undefined, columns: number): boolean {
+	if (target.includes("\n")) return false;
+	const used = COMPACT_CHROME + (reason ? cellWidth(reason) + 1 : 0);
+	return cellWidth(target) <= columns - used;
+}
+
+/** Cut `text` into lines of at most `width` cells, every character kept, newlines honoured. */
+export function wrapCells(text: string, width: number): string[] {
+	const w = Math.max(1, width);
+	const lines: string[] = [];
+	for (const para of text.split("\n")) {
+		let line = "";
+		let used = 0;
+		for (const ch of para) {
+			const cw = cellWidth(ch);
+			if (used + cw > w && line !== "") {
+				lines.push(line);
+				line = "";
+				used = 0;
+			}
+			line += ch;
+			used += cw;
+		}
+		lines.push(line);
+	}
+	return lines;
+}
+
+/** Cells the full card spends beside the text: border and padding. */
+const FULL_SIDE = 4;
+/** Rows the full card spends beside the text, and the room the chat keeps. */
+const FULL_ROWS = 14;
+
+/**
+ * The screen as the card sees it: its columns are the card's real width, read
+ * from its laid-out box (the card sits in a column narrower than the screen
+ * beside the activity rail or the plan), the screen's until it has one.
+ */
+export function cardScreen(screen: { columns?: number; rows?: number }): {
+	columns?: number;
+	rows?: number;
+} {
+	const w = fullCardBox.current?.yogaNode?.getComputedWidth();
+	return { columns: w && w > FULL_SIDE ? w : screen.columns, rows: screen.rows };
+}
+
+export interface CardView {
+	lines: string[];
+	/** The window of `lines` on screen. */
+	shown: string[];
+	offset: number;
+	/** The target is taller than the window: it scrolls. */
+	paged: boolean;
+	/** This card wraps and scrolls itself (an auto-full card). */
+	auto: boolean;
+	/** The last line is in the window. */
+	atEnd: boolean;
+}
+
+/** What a full card draws, from the card's scroll offset and the screen. Pure. */
+export function cardView(
+	target: string,
+	offset: number,
+	screen: { columns?: number; rows?: number },
+	auto = true,
+): CardView {
+	const lines = wrapCells(target, (screen.columns || 80) - FULL_SIDE);
+	const room = Math.max(3, (screen.rows || 24) - FULL_ROWS);
+	const paged = auto && lines.length > room;
+	const start = paged ? Math.max(0, Math.min(offset, lines.length - room)) : 0;
+	const shown = paged ? lines.slice(start, start + room) : lines;
+	return {
+		lines,
+		shown,
+		offset: start,
+		paged,
+		auto,
+		atEnd: !paged || start + room >= lines.length,
+	};
+}
+
+const viewListeners = new Set<() => void>();
+let viewVersion = 0;
+function viewChanged(): void {
+	viewVersion++;
+	for (const l of [...viewListeners]) l();
+}
+
+/** The card's window onto its target, re-read when it scrolls. For InlineApprovalPrompt. */
+export function useCardView(target: string): CardView {
+	useSyncExternalStore(
+		(cb) => {
+			viewListeners.add(cb);
+			return () => {
+				viewListeners.delete(cb);
+			};
+		},
+		() => viewVersion,
+		() => 0,
+	);
+	const { stdout } = useStdout();
+	const mine = active?.target === target ? active : null;
+	return cardView(target, mine?.offset ?? 0, cardScreen(stdout), mine ? !!mine.auto : true);
+}
+
 /** The box InlineApprovalPrompt draws a `full` card in. */
 export const fullCardBox = createRef<DOMElement>();
+
+/** The box InlineApprovalPrompt draws the one-row card in: its width is what the target must fit. */
+export const compactCardBox = createRef<DOMElement>();
+
+/**
+ * A one-row card whose own box (narrower than the screen beside the activity
+ * rail or plan) cannot hold the target whole becomes the full card. True when
+ * it was upgraded now.
+ */
+function upgradeIfCut(card: PendingApproval, screen: Sized): boolean {
+	if (card.full) return false;
+	const w = compactCardBox.current?.yogaNode?.getComputedWidth() || screen.columns;
+	if (w === undefined || fitsCompact(card.target, card.reason, w)) return false;
+	Object.assign(card, { full: true, auto: true, shownWholeAt: undefined, shownSince: Date.now() });
+	return true;
+}
 
 /**
  * True when the card's own box has a size and lies inside every ancestor's box
@@ -92,6 +240,27 @@ export function cardShowsAll(card: DOMElement | null | undefined, screen: Sized)
 interface KeyLike {
 	ctrl?: boolean;
 	meta?: boolean;
+	upArrow?: boolean;
+	downArrow?: boolean;
+	pageUp?: boolean;
+	pageDown?: boolean;
+}
+
+const isScrollKey = (key: KeyLike) =>
+	!!(key.upArrow || key.downArrow || key.pageUp || key.pageDown);
+
+/** Scroll a taller-than-screen card. True when the key was a scroll key for a pending card. */
+export function scrollApprovalCard(key: KeyLike, screen: Sized): boolean {
+	const card = active;
+	if (!card?.full || !card.auto || !isScrollKey(key)) return false;
+	const view = cardView(card.target, card.offset ?? 0, cardScreen(screen));
+	if (!view.paged) return true;
+	const page = Math.max(1, view.shown.length - 1);
+	const delta = key.pageDown ? page : key.pageUp ? -page : key.downArrow ? 1 : -1;
+	card.offset = Math.max(0, Math.min(view.lines.length - view.shown.length, view.offset + delta));
+	if (cardView(card.target, card.offset, cardScreen(screen)).atEnd) card.endSeenAt = sizeOf(screen);
+	viewChanged();
+	return true;
 }
 
 const CARD_KEYS: Record<string, TuiApprovalDecision> = {
@@ -111,7 +280,11 @@ export function approvalDecisionForKey(input: string, key: KeyLike): TuiApproval
 
 /** True when a card is pending and this keypress is one of its keys. */
 export function isApprovalKeyClaimed(input: string, key: KeyLike): boolean {
-	return active !== null && approvalDecisionForKey(input, key) !== null;
+	if (active === null) return false;
+	return (
+		approvalDecisionForKey(input, key) !== null ||
+		(!!active.full && !!active.auto && isScrollKey(key))
+	);
 }
 
 /**
@@ -129,6 +302,26 @@ export function settleApprovalKey(input: string, key: KeyLike, screen?: Sized): 
 	const card = active;
 	if (!card) return false;
 	const decision = approvalDecisionForKey(input, key);
+	// Backstop: a yes never lands on a one-row card whose text is cut.
+	if (screen && upgradeIfCut(card, screen)) {
+		card.shownSince = Date.now();
+		return false;
+	}
+	// A one-row card takes a yes or an edit only once it has been drawn and measured
+	// and has stood CARD_MIN_SHOW_MS: a key typed ahead, in the tick the request
+	// arrived, answers nothing. No, and skip, are safe at any time.
+	if (!card.full && !card.gate && (decision === "approve" || decision === "edit")) {
+		const measured = !!compactCardBox.current?.yogaNode?.getComputedWidth();
+		const now = Date.now();
+		if (
+			!measured ||
+			card.shownWholeAt === undefined ||
+			now - (card.shownSince ?? Number.POSITIVE_INFINITY) < CARD_MIN_SHOW_MS
+		) {
+			card.shownSince = now;
+			return false;
+		}
+	}
 	if (card.full) {
 		if (card.shownWholeAt === undefined || !screen) return false;
 		if (!cardShowsAll(fullCardBox.current, screen)) {
@@ -140,6 +333,17 @@ export function settleApprovalKey(input: string, key: KeyLike, screen?: Sized): 
 			card.shownWholeAt === sizeOf(screen) &&
 			now - (card.shownSince ?? Number.POSITIVE_INFINITY) >= CARD_MIN_SHOW_MS;
 		if (!ready || !decision) {
+			card.shownSince = now;
+			return false;
+		}
+		// Taller than the screen: yes and edit wait until the last line has been shown.
+		const view = cardView(card.target, card.offset ?? 0, cardScreen(screen), !!card.auto);
+		if (view.atEnd) card.endSeenAt = sizeOf(screen);
+		if (
+			view.paged &&
+			card.endSeenAt !== sizeOf(screen) &&
+			(decision === "approve" || decision === "edit")
+		) {
 			card.shownSince = now;
 			return false;
 		}
@@ -193,8 +397,19 @@ export function useApprovalCard(
 	const [pending, setPending] = useState<PendingApproval | null>(null);
 	const { stdout } = useStdout();
 	const [, setSize] = useState("");
+	const [, setUpgrades] = useState(0);
 	useEffect(() => {
-		const onResize = () => setSize(sizeOf(stdout));
+		const onResize = () => {
+			// A narrower screen can turn a compact card into one that cuts: show it full.
+			if (active && !active.full && !fitsCompact(active.target, active.reason, stdout.columns))
+				Object.assign(active, {
+					full: true,
+					auto: true,
+					shownWholeAt: undefined,
+					shownSince: Date.now(),
+				});
+			setSize(sizeOf(stdout));
+		};
 		stdout.on("resize", onResize);
 		return () => {
 			stdout.off("resize", onResize);
@@ -204,12 +419,31 @@ export function useApprovalCard(
 	// Every commit, after Ink has laid out.
 	useLayoutEffect(() => {
 		const card = active;
+		if (card && card === pending && upgradeIfCut(card, stdout)) {
+			setUpgrades((n) => n + 1);
+			return;
+		}
+		// A one-row card starts its minimum show time when it is first drawn and measured.
+		if (card && card === pending && !card.full && !card.gate) {
+			if (compactCardBox.current?.yogaNode?.getComputedWidth() && card.shownWholeAt === undefined) {
+				card.shownWholeAt = sizeOf(stdout);
+				card.shownSince = Date.now();
+			}
+			return;
+		}
 		if (!card?.full || card !== pending) return;
 		if (!cardShowsAll(fullCardBox.current, stdout)) return card.resolve("unfit");
 		const size = sizeOf(stdout);
 		if (card.shownWholeAt !== size) {
 			card.shownWholeAt = size;
 			card.shownSince = Date.now();
+		}
+		// The card was drawn at the screen's width until its box was laid out; wrap again at its own.
+		const width = cardScreen(stdout).columns;
+		if (card.auto && card.drawnWidth !== width) {
+			const first = card.drawnWidth === undefined;
+			card.drawnWidth = width;
+			if (!first || width !== stdout.columns) viewChanged();
 		}
 	});
 
@@ -227,6 +461,7 @@ export function useApprovalCard(
 					target,
 					reason,
 					gate: true,
+					...(fitsCompact(target, reason, stdout.columns) ? {} : { full: true, auto: true }),
 					shownSince: Date.now(),
 					resolve: (decision) => {
 						if (decision !== "approve" && decision !== "deny") return;
@@ -270,10 +505,12 @@ export function useApprovalCard(
 				// The request arrives inside the asking tool call, so its
 				// permission mode is the call's own, not the focused tab's.
 				const reason = approvalReason(currentPermissionMode());
+				const full = request.full || !fitsCompact(target, reason, stdout.columns);
 				const card: PendingApproval = {
 					target,
 					...(reason ? { reason } : {}),
-					...(request.full ? { full: true } : {}),
+					...(full ? { full: true } : {}),
+					...(full && !request.full ? { auto: true } : {}),
 					resolve: (decision) => {
 						if (settled) return;
 						settled = true;
@@ -297,7 +534,11 @@ export function useApprovalCard(
 	}, []);
 
 	useInput((input, key) => {
-		if (settleApprovalKey(input, key, stdout)) onKey?.();
+		if (scrollApprovalCard(key, stdout)) return;
+		const was = active?.full;
+		const settled = settleApprovalKey(input, key, stdout);
+		if (active && active.full !== was) setUpgrades((n) => n + 1);
+		if (settled) onKey?.();
 	});
 
 	return pending;
