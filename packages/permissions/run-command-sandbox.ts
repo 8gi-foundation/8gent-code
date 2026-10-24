@@ -50,6 +50,16 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { resolveHome } from "../core/home";
 import { loadOrCreateKey } from "./goal-state-hmac";
+import {
+	LINUX_HOME_NEVER_READ,
+	LINUX_READ_SYSTEM_DIRS,
+	type LandlockStatus,
+	landlockArgv,
+	landlockPlan,
+	landlockShell,
+	landlockStatus,
+	writePlanFile,
+} from "./landlock";
 import { sensitiveCredentialPaths } from "./seatbelt";
 
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
@@ -505,12 +515,27 @@ export function buildRunCommandProfile(
 // OS read boundary (#4890, macOS slice 1)
 // ============================================
 
-/** "1" puts every run_command under the kernel read rule below. Default off. */
+/**
+ * "1" puts every run_command under the kernel read rule below and refuses a command when the
+ * rule cannot be applied. "auto" applies it where it can and otherwise runs the command with a
+ * notice. Default off.
+ */
 export const OS_READ_BOUNDARY_FLAG = "EIGHT_OS_READ_BOUNDARY";
 
-/** True when the person turned the OS read boundary on (a .env can turn it on, never off). */
+export type OsReadMode = "off" | "on" | "auto";
+
+/**
+ * The read boundary mode. A .env can turn it on ("1"), never off: snapshotSecurityEnv keeps only
+ * that value from a .env, so a .env-declared "auto" (weaker than "1") is ignored.
+ */
+export function osReadBoundaryMode(): OsReadMode {
+	const v = trustedSecurityValue(OS_READ_BOUNDARY_FLAG);
+	return v === "1" ? "on" : v === "auto" ? "auto" : "off";
+}
+
+/** True when the person asked for the OS read boundary, strictly ("1") or where possible ("auto"). */
 export function osReadBoundaryOn(): boolean {
-	return trustedSecurityValue(OS_READ_BOUNDARY_FLAG) === "1";
+	return osReadBoundaryMode() !== "off";
 }
 
 /**
@@ -718,6 +743,150 @@ export function osReadRules(
 }
 
 // ============================================
+// OS read boundary on Linux and Termux (#4890 slice 2, Landlock)
+// ============================================
+
+/**
+ * The same scope as osReadRules, in Landlock's allow-only form (landlock.ts): read starts
+ * (system, root, allowances, data roots, temp, PATH tool dirs, git config) and the never-read
+ * set (credential stores, HOME_NEVER_READ, the protected data roots' keys/ and secrets/).
+ */
+export function linuxReadPlan(
+	spec: OsReadSpec,
+	pathEnv: string = process.env.PATH ?? "",
+	alsoNever: readonly string[] = protectedRunCommandPaths().dirs.filter(isReadDenied),
+) {
+	const root = path.normalize(spec.root);
+	if (!path.isAbsolute(root))
+		throw new Error(`os read boundary: root must be absolute, got "${spec.root}"`);
+	const homes = withReal(spec.homes.filter((h) => path.isAbsolute(h)));
+	const starts = [
+		...LINUX_READ_SYSTEM_DIRS,
+		root,
+		...spec.reads.filter((r) => path.isAbsolute(r)),
+		...spec.dataRoots.filter((r) => path.isAbsolute(r)),
+		os.tmpdir(),
+		...toolDirs(pathEnv, homes),
+		// git reads these on every command; neither is a credential store.
+		...homes.flatMap((h) => [path.join(h, ".gitconfig"), path.join(h, ".config", "git")]),
+	];
+	const never = [
+		...homes.flatMap((h) => [
+			...sensitiveCredentialPaths(h),
+			...HOME_NEVER_READ.map((rel) => path.join(h, rel)),
+			...LINUX_HOME_NEVER_READ.map((rel) => path.join(h, rel)),
+		]),
+		...alsoNever,
+		// POSIX shared memory: other programs' files, readable by every process of this user.
+		// Naming it makes /dev a split folder, so the devices open one by one and /dev/shm does not.
+		"/dev/shm",
+	];
+	return landlockPlan(starts, never, spec.dataRoots);
+}
+
+let readRuleWarned = false;
+
+/** Test hook: let the next unavailable status print its line again. */
+export function _resetReadRuleWarning(): void {
+	readRuleWarned = false;
+}
+
+/**
+ * The argv to put in front of `<shell> -c <command>` for the read rule on Linux and Termux, or
+ * undefined when the flag is off, no spec was given, or Landlock cannot be applied here. Callers
+ * refuse (EIGHT_OS_READ_BOUNDARY=1) or add a notice ("auto") before they get here
+ * (osReadRefusal, osReadNotice); this line on stderr also covers background_start.
+ */
+export function linuxReadPrefix(
+	read: OsReadSpec | undefined,
+	platform: string = process.platform,
+	probe: () => LandlockStatus = landlockStatus,
+): string[] | undefined {
+	if (!read || !osReadBoundaryOn() || platform === "darwin") return undefined;
+	const status = probe();
+	if (!status.active) {
+		if (!readRuleWarned) {
+			readRuleWarned = true;
+			process.stderr.write(
+				`[8gent] The OS read rule (${OS_READ_BOUNDARY_FLAG}=${osReadBoundaryMode() === "auto" ? "auto" : "1"}) is not active here: ${status.reason}. Reads outside the workspace are stopped by text checks only.\n`,
+			);
+		}
+		return undefined;
+	}
+	return landlockArgv(status.python, writePlanFile(linuxReadPlan(read)));
+}
+
+/** Whether the OS read rule can be applied on this host, and why not when it cannot. */
+export type OsReadRuleStatus = { active: true } | { active: false; reason: string };
+
+/**
+ * macOS: Seatbelt must apply (not nested, sandbox-exec present, EIGHT_SEATBELT not 0).
+ * Linux and Termux: Landlock must pass its probe, and EIGHT_SEATBELT=0 turns it off too.
+ * Anything else has no OS read rule.
+ */
+export function osReadRuleStatus(platform: string = process.platform): OsReadRuleStatus {
+	if (platform === "darwin") {
+		const s = runCommandSandboxStatus();
+		return s.applied ? { active: true } : { active: false, reason: s.reason };
+	}
+	if (platform === "linux" || platform === "android") {
+		if (securityEnv.values.EIGHT_SEATBELT === "0")
+			return { active: false, reason: "EIGHT_SEATBELT=0 turns every OS rule off" };
+		const s = landlockStatus(platform);
+		return s.active ? { active: true } : { active: false, reason: s.reason };
+	}
+	return { active: false, reason: `no OS read rule on ${platform}` };
+}
+
+const READ_RULE_WAYS_OUT = `To run commands without it, unset ${OS_READ_BOUNDARY_FLAG}, or set ${OS_READ_BOUNDARY_FLAG}=auto to use the rule where it works and run with a notice where it does not (phones whose kernel lacks Landlock).`;
+
+/**
+ * EIGHT_OS_READ_BOUNDARY=1 asked for the OS rule: when it cannot be applied, the command is not
+ * run. The message goes into the tool result (and the TUI footer through the unsandboxed
+ * listeners), and says how to get out.
+ */
+export function osReadRefusal(
+	status: () => OsReadRuleStatus = () => osReadRuleStatus(),
+): string | undefined {
+	if (osReadBoundaryMode() !== "on") return undefined;
+	const s = status();
+	if (s.active) return undefined;
+	notifyReadRuleOff(s.reason, true);
+	return `[PERMISSION DENIED] Not run: ${OS_READ_BOUNDARY_FLAG}=1 asks for the OS read rule, and it cannot be applied here: ${s.reason}. ${READ_RULE_WAYS_OUT}`;
+}
+
+let readNoticeGiven = false;
+
+/** Test hook: let the next "auto" notice show again. */
+export function _resetReadNotice(): void {
+	readNoticeGiven = false;
+}
+
+/**
+ * EIGHT_OS_READ_BOUNDARY=auto on a host where the rule cannot be applied: the command runs, and
+ * the first tool result of the session says so. Undefined every other time.
+ */
+export function osReadNotice(
+	status: () => OsReadRuleStatus = () => osReadRuleStatus(),
+): string | undefined {
+	if (osReadBoundaryMode() !== "auto" || readNoticeGiven) return undefined;
+	const s = status();
+	if (s.active) return undefined;
+	readNoticeGiven = true;
+	notifyReadRuleOff(s.reason, false);
+	return `[notice] The OS read rule is not active here (${s.reason}), so commands run with the text checks only (${OS_READ_BOUNDARY_FLAG}=auto). This notice is shown once per session.`;
+}
+
+/** The TUI footer hears about it through the same listeners as an unsandboxed run. */
+function notifyReadRuleOff(reason: string, required: boolean): void {
+	for (const l of listeners) {
+		try {
+			l({ applied: false, reason: `OS read rule off: ${reason}`, required });
+		} catch {}
+	}
+}
+
+// ============================================
 // Linux bubblewrap (pure argv)
 // ============================================
 
@@ -881,6 +1050,7 @@ export function sandboxFooterReason(reason: string): string {
 		[/bwrap not installed/, "no bwrap"],
 		[/bwrap cannot/, "no namespaces"],
 		[/^no OS sandbox on /, "unsupported OS"],
+		[/^OS read rule off/, "no read rule"],
 	];
 	for (const [re, code] of CODES) if (re.test(reason)) return code;
 	const short = reason.split(" (")[0]?.trim() || reason;
@@ -923,10 +1093,18 @@ function ensureSigningKey(): void {
  */
 export function wrapRunCommand(command: string, read?: OsReadSpec): string {
 	ensureSigningKey();
+	// EIGHT_OS_READ_BOUNDARY=1 and the rule cannot be applied: never run (callers return the
+	// same message as the tool result first; this backstop covers background_start).
+	const readRefusal = read ? osReadRefusal() : undefined;
+	if (readRefusal) throw new RunCommandSandboxRequired(readRefusal);
 	const status = runCommandSandboxStatus();
 	if (!status.applied) {
 		if (status.required) throw new RunCommandSandboxRequired(runCommandSandboxRefusal());
 		reportUnsandboxed(status, command);
+		// No write boundary here (no bwrap), but the read rule stands on its own (#4890 slice 2).
+		// EIGHT_SEATBELT=0 turns every OS rule off, as on macOS.
+		const readOnly = status.reason === "EIGHT_SEATBELT=0" ? undefined : linuxReadPrefix(read);
+		if (readOnly) return [...readOnly, landlockShell(), "-c", command].map(shellQuote).join(" ");
 		return command;
 	}
 	if (status.mechanism === "seatbelt") {
@@ -938,7 +1116,10 @@ export function wrapRunCommand(command: string, read?: OsReadSpec): string {
 		return `${SANDBOX_EXEC} -p ${shellQuote(profile)} /bin/sh -c ${shellQuote(command)}`;
 	}
 	const bwrap = findBwrap() as string;
-	return [bwrap, ...buildBwrapArgs(), "/bin/sh", "-c", command].map(shellQuote).join(" ");
+	const readRule = linuxReadPrefix(read) ?? [];
+	return [bwrap, ...buildBwrapArgs(), ...readRule, "/bin/sh", "-c", command]
+		.map(shellQuote)
+		.join(" ");
 }
 
 /**

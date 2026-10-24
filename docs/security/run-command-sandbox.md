@@ -7,7 +7,7 @@
 | Platform | Mechanism | When it is off |
 |----------|-----------|----------------|
 | macOS | Seatbelt (`sandbox-exec`), on by default | `EIGHT_SEATBELT=0`, or the host already sandboxes the process |
-| Linux | bubblewrap read-only binds of the protected paths that exist | `bwrap` missing or unable to create a namespace |
+| Linux | bubblewrap read-only binds of the protected paths that exist (writes); Landlock for the read boundary when `EIGHT_OS_READ_BOUNDARY` is `1` or `auto` | `bwrap` missing or unable to create a namespace; Landlock missing from the kernel or no python3 |
 | Windows | none | always |
 
 A command never runs without the boundary silently:
@@ -28,7 +28,50 @@ A command never runs without the boundary silently:
 
 Metadata (`stat`, path lookup) stays allowed. When a person approves a command on a card, the outside paths the command names are added for that run; a path the command builds while it runs never is. The lexical boundary stays in front and explains the card.
 
-Not in this slice: the argv runner (`wrapRunCommandArgv`, the built-in git and gh tools), Linux (Landlock or bubblewrap) and Termux. The live proof runs in `.github/workflows/macos-read-boundary.yml`, because `sandbox-exec` cannot nest inside a sandboxed session.
+Not covered yet: the argv runner (`wrapRunCommandArgv`, the built-in git and gh tools). The live proof runs in `.github/workflows/macos-read-boundary.yml`, because `sandbox-exec` cannot nest inside a sandboxed session. That workflow also pins the macOS profile byte for byte, so the Linux slice cannot change it.
+
+## The read boundary on Linux and Termux (#4890 slice 2, Landlock)
+
+The same flag, `EIGHT_OS_READ_BOUNDARY=1`, uses Landlock on Linux (ABI v1 or later) and on Termux. `packages/permissions/landlock.ts` holds the rule; `linuxReadPlan()` in `run-command-sandbox.ts` builds it from the same `osReadSpec()` scope as on macOS.
+
+How it runs: a Landlock rule restricts the process that adds it and everything that process starts, so it has to be added in the child, before the shell starts. Bun and Node have no hook there, and Termux runs the Node build. Each command is started as `python3 -I -S -c <helper> F <plan file> -- /bin/sh -c <command>`. The grant lists go in the plan file, not on the command line: a home with thousands of entries would push one argv entry per path past the kernel's 128 KiB limit for a single argument (E2BIG). The plan file is written with mode 0600 in a 0700 folder that belongs to the process and is removed when it exits. The helper opens it with `O_NOFOLLOW`, refuses anything that is not a regular 0600 file owned by the same user, and unlinks it before it applies the rule. The helper calls the Landlock syscalls through ctypes, then `execv`s the shell. python3 is taken from a fixed place (`/usr/bin`, `/usr/local/bin`, `/bin`, Termux's prefix), never from `PATH`. If the helper fails after it starts, it exits 126 with a message and the command does not run. Under bwrap (the write boundary), the helper runs inside bwrap.
+
+What it grants:
+
+1. Read: the workspace root, the read allowances, `/allow-read` folders, the data roots, the temp folder, the `PATH` tool folders, `~/.gitconfig`, `~/.config/git`, and the system folders (`/usr`, `/bin`, `/lib*`, `/etc`, `/opt`, `/proc`, `/sys`, `/dev`, `/snap`, `/nix/store`, the resolver folders under `/run`, and on Android `/system`, `/apex`, `/vendor` and Termux's prefix). All of `/run` is not granted, because it can hold container secrets.
+2. Remove and rename: everywhere except the folders that hold a never-read path.
+3. From ABI v2, moves across folders (`REFER`) only between granted folders. Landlock refuses any move that would give a file read access it did not have.
+
+The never-read set is the macOS one: `sensitiveCredentialPaths()`, `HOME_NEVER_READ`, the Linux browser and mail stores (`~/.mozilla`, `~/.config/google-chrome`, ...), the protected data roots' `keys/` and `secrets/`, and under the data roots the memory, browser, client, audit, backup, cron, key, secret, session, token and env names plus any `.db`, `.sqlite`, `.pem`, `.key` or `.p12` file.
+
+Landlock only allows. It has no deny that beats an allow, so no folder that holds a never-read path is ever granted whole. Such a folder is granted entry by entry instead, without the never-read entries, and the same goes for any folder below it that holds one. A symlink in such a folder is never granted, because Landlock would grant its target. Inside a data root, a folder is granted whole only after a walk finds nothing private in it. The walk reads one entry at a time (`opendir`) and stops at 2000 entries per command, so a folder of a million entries costs no more than the budget. Any folder it cannot finish stays shut. A real `~/.8gent` can hold over a million entries, so under this rule its large folders cannot be read by commands, while its small ones (config, skills, bin) can.
+
+What this means for a session rooted at the home folder:
+
+- Every file and folder in the home can be read except the never-read set, the same as on macOS.
+- The home folder itself, and `~/.config`, `~/.local/share` and `~/.8gent`, cannot be listed: `ls ~` fails and `ls ~/project` works. A listing grant on the home would also reach the names inside `~/.ssh`.
+- A file a command creates at the top of the home cannot be read back by that same command. The next command can read it, because the lists are rebuilt for every command.
+- Files at the top of the home cannot be removed or renamed. `git config --global` rewrites `~/.gitconfig` by a rename, so it fails. A rename grant on the home would also let `.ssh` be renamed to a readable name.
+
+What it refuses that the macOS rule does not: moving any unreadable outside file into the root (#4894 item 3). `os.rename` fails with EXDEV, and `mv` falls back to a copy, which cannot read the file. Hard links are refused the same way.
+
+Not covered: `stat`. Landlock has no metadata right, so the size and dates of a never-read file stay visible. Nothing on Linux can be built from that alone: a hard link needs `REFER`, and reflink and `copy_file_range` need a file opened for reading.
+
+## When the rule cannot be applied: `1` refuses, `auto` runs with a notice
+
+`EIGHT_OS_READ_BOUNDARY=1` means the person asked for the OS rule, so when the rule cannot be applied, the boundary fails closed. `run_command` does not run the command. It returns `[PERMISSION DENIED] Not run: EIGHT_OS_READ_BOUNDARY=1 asks for the OS read rule, and it cannot be applied here: <reason>.`, followed by the two ways out: unset the flag, or set `EIGHT_OS_READ_BOUNDARY=auto`. That message is the tool result, and the TUI footer shows `sandbox off no read rule`. `background_start` is refused the same way, by a throw in `wrapRunCommand`.
+
+`EIGHT_OS_READ_BOUNDARY=auto` applies the rule wherever it can. Where it cannot, commands run with the text checks only, and the first `run_command` result of the session starts with one notice: `[notice] The OS read rule is not active here (<reason>), so commands run with the text checks only (EIGHT_OS_READ_BOUNDARY=auto).` The footer shows the same status. Where the rule applies, `auto` builds the same rule as `1`. On macOS the profile is byte-identical either way, and a test pins it.
+
+The reasons it cannot be applied:
+
+- macOS: the host already sandboxes the process (sandbox-exec cannot nest), `sandbox-exec` is missing, or `EIGHT_SEATBELT=0` is set.
+- Linux and Termux: a kernel without Landlock, python3 not found, a seccomp filter that kills the probe with SIGSYS (older Android does this), a probe that is still failing after its retry, or `EIGHT_SEATBELT=0`.
+- Windows: there is no OS read rule.
+
+The probe runs in its own child process, so a crash there never touches the TUI. A `.env` file can set the flag to `1` but not to `auto`: from a `.env`, only the stricter value counts.
+
+Termux: whether Landlock works depends on the device kernel and Android's seccomp filter. It is detected at runtime and never assumed. With `EIGHT_OS_READ_BOUNDARY=1`, a phone whose kernel lacks Landlock refuses every shell command, so on Termux use `EIGHT_OS_READ_BOUNDARY=auto` unless you know the kernel has Landlock. No Termux device has been proven in CI. The live proof for Linux is `.github/workflows/linux-read-boundary.yml` on ubuntu-latest, run once with Landlock alone and once under bwrap.
 
 ## Security env
 

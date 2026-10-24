@@ -194,7 +194,12 @@ import {
 } from "../permissions/read-allow";
 import { osReadSpec } from "../permissions/read-boundary";
 import { REFUSAL_LEAD, REFUSAL_NOTE, refusalLead } from "../permissions/refusal-lead";
-import { runCommandSandboxRefusal, wrapRunCommand } from "../permissions/run-command-sandbox";
+import {
+	osReadNotice,
+	osReadRefusal,
+	runCommandSandboxRefusal,
+	wrapRunCommand,
+} from "../permissions/run-command-sandbox";
 import {
 	CreatedFiles,
 	mkdirRecorded,
@@ -3961,6 +3966,11 @@ export class ToolExecutor {
 
 		const sandboxRefusal = runCommandSandboxRefusal();
 		if (sandboxRefusal) return refusalLead(sandboxRefusal);
+		// EIGHT_OS_READ_BOUNDARY=1 and the OS rule cannot be applied here: not run (#4890).
+		const readRefusal = osReadRefusal();
+		if (readRefusal) return refusalLead(readRefusal);
+		// "auto" where the rule cannot be applied: the first result of the session says so.
+		const readNotice = osReadNotice();
 		// The kernel read boundary (#4890, EIGHT_OS_READ_BOUNDARY=1): the root the read card judged.
 		const readScope = osReadSpec(finalCommand, {
 			cwd: dir,
@@ -3976,7 +3986,7 @@ export class ToolExecutor {
 				if (resolved) return;
 				resolved = true;
 				recordRedirects();
-				resolve(value);
+				resolve(readNotice ? `${readNotice}\n${value}` : value);
 			};
 
 			// The kernel boundary (#4009, #3612): no write to ~/.8gent startup code, secrets or records.
