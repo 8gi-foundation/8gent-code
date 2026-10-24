@@ -6,8 +6,18 @@
  *   1] Orchestrator   2] Engineer   3] QA   4] Notes
  *   ───━━━━━━━━━━━━──────────────────────────────────────
  *
- * The active title is orange and bold, and an orange bar sits under it on
- * the rule row. When the active tab changes, the bar sweeps from the old
+ * The active title is bold primary text, and an orange bar sits under it on
+ * the rule row. Orange has one other job on this bar: the lamp of a tab that
+ * needs you.
+ *
+ * Tab lamps (#4928): one still mark after each title (and after its permission
+ * tag), from lib/tab-lamps.ts. An idle tab is dark: no mark at rest.
+ *
+ *   1] Orchestrator ◐   2] Engineer   3] QA · Plan ▲   4] Notes ●
+ *
+ * Below 60 columns the titles give way and the lamps never do; the active
+ * tab keeps its title: "[1 Orchestrator ◐] 2 3▲ 4●". Tabs that do not fit
+ * collapse into "+2 ▲", carrying the most urgent hidden lamp. When the active tab changes, the bar sweeps from the old
  * title to the new one in four frames (lib/motion.ts). The labels never
  * move. With animations off (Ctrl+A) or reduced motion, the bar jumps.
  *
@@ -37,6 +47,18 @@ import {
 	permColour,
 	permTabTag,
 } from "../lib/perm-modes-design.js";
+import {
+	type LampFrame,
+	type LampInput,
+	type LampState,
+	type LampTone,
+	barAriaLabel,
+	deriveLamp,
+	lampGlyph,
+	lampTransition,
+	restFrame,
+	worstLamp,
+} from "../lib/tab-lamps.js";
 import { glyphs } from "../lib/term-caps.js";
 import { t } from "../theme.js";
 
@@ -54,11 +76,15 @@ interface TabBarProps {
 	onSwitch: (tabId: string) => void;
 	/**
 	 * Optional predicate. Returning true marks a tab as currently processing
-	 * (in-flight agent.chat call). The tab gets a small inline `*` so the
-	 * user can see at a glance which tabs are still working while they're
-	 * looking at a different one.
+	 * (in-flight chat call). The tab's lamp reads "working" so the user
+	 * can see at a glance which tabs are still busy while looking at another.
 	 */
 	isTabProcessing?: (tabId: string) => boolean;
+	/**
+	 * What a tab's lamp needs beyond "processing": an approval waiting on it,
+	 * and a turn that ended while it was in the background.
+	 */
+	lampFor?: (tabId: string) => Pick<LampInput, "needsYou" | "unread"> | undefined;
 	/** Pane groups for showing tab groupings */
 	groups?: PaneGroup[];
 	/** Currently grabbed tab (in drag mode). Omitted or null = not dragging. */
@@ -77,6 +103,18 @@ interface TabBarProps {
 
 export const GRAB_HINT = "[^G] drop on another tab to group  [Esc] cancel";
 const GAP = "   ";
+/** Below this many columns the titles give way and the lamps stay. */
+export const COMPACT_COLS = 60;
+const COMPACT_GAP = " ";
+
+/** Theme colour for each lamp tone. Orange is only ever the needs-you lamp. */
+const TONE_COLOUR: Record<LampTone, string> = {
+	dim: t.textTertiary,
+	secondary: t.textSecondary,
+	orange: t.orange,
+	green: t.green,
+	red: t.red,
+};
 
 export interface TabCell {
 	/** "1] " style prefix, drawn dim. */
@@ -88,6 +126,11 @@ export interface TabCell {
 	tag?: string;
 	tagColor?: string;
 	tagBold?: boolean;
+	/** The lamp glyph, drawn after the title. */
+	lamp?: string;
+	lampFrame?: LampFrame;
+	/** Closes a compact active tab: "[1 Title ◐]". */
+	close?: string;
 }
 
 export interface TabLine {
@@ -102,36 +145,196 @@ export interface TabLine {
  * brackets), for clicks (#3239). Measured in terminal cells, so a title
  * with wide characters keeps its clickable edge where it is drawn.
  */
-export function cellSpans(cells: TabCell[]): Span[] {
+export function cellSpans(cells: TabCell[], gap = GAP): Span[] {
 	let x = 0;
 	return cells.map((cell, i) => {
-		if (i > 0) x += GAP.length;
+		if (i > 0) x += gap.length;
 		const w =
 			(cell.grabbed ? 2 : 0) +
 			cellWidth(cell.num) +
 			cellWidth(cell.title) +
-			(cell.tag ? cellWidth(cell.tag) : 0);
+			lampWidth(cell) +
+			(cell.tag ? cellWidth(cell.tag) : 0) +
+			(cell.close ? cellWidth(cell.close) : 0);
 		const span = { x, width: w };
 		x += w;
 		return span;
 	});
 }
 
+/** The lamp and the space before it (none when there is no title to space from). */
+function lampWidth(cell: TabCell): number {
+	return cell.lamp ? (cell.title || cell.tag ? 1 : 0) + cellWidth(cell.lamp) : 0;
+}
+
 /** Lay the cells out on one row. Pure, so the geometry can be tested. */
-export function layoutTabs(cells: TabCell[]): TabLine {
+export function layoutTabs(cells: TabCell[], gap = GAP): TabLine {
 	let text = "";
 	const spans: Span[] = [];
 	cells.forEach((cell, i) => {
-		if (i > 0) text += GAP;
+		if (i > 0) text += gap;
 		if (cell.grabbed) text += "[";
 		text += cell.num;
 		// Cells, not code units: the underline sits under what is drawn.
 		spans.push({ x: cellWidth(text), width: cellWidth(cell.title) });
 		text += cell.title;
 		if (cell.tag) text += cell.tag;
+		if (cell.lamp) text += (cell.title || cell.tag ? " " : "") + cell.lamp;
+		if (cell.close) text += cell.close;
 		if (cell.grabbed) text += "]";
 	});
 	return { text, spans };
+}
+
+export interface FittedTabs {
+	/** Cells to draw, the overflow cell last when tabs were cut. */
+	cells: TabCell[];
+	/** Tab index (into the input) of each drawn cell; null for the overflow cell. */
+	index: (number | null)[];
+	/** Input indexes of the tabs that did not fit. */
+	hidden: number[];
+}
+
+/**
+ * Fit the cells into `width`. Tabs are cut from the far end, never the active
+ * one, and the cut tabs collapse into one "+N" cell that carries the most
+ * urgent hidden lamp, so an ask is never hidden.
+ */
+export function fitTabCells(
+	cells: TabCell[],
+	states: LampState[],
+	width: number,
+	gap = GAP,
+	ascii = false,
+): FittedTabs {
+	const all = cells.map((_, i) => i);
+	const measure = (list: TabCell[]) => {
+		const spans = cellSpans(list, gap);
+		const end = spans.at(-1);
+		return end ? end.x + end.width : 0;
+	};
+	if (measure(cells) <= width) return { cells, index: all, hidden: [] };
+	const cuttable = all.filter((i) => !cells[i]?.active).reverse();
+	let best: FittedTabs | null = null;
+	for (let k = 1; k <= cuttable.length; k++) {
+		const hidden = cuttable.slice(0, k).sort((a, b) => a - b);
+		const kept = all.filter((i) => !hidden.includes(i));
+		const worst = restFrame(worstLamp(hidden.map((i) => states[i] ?? "idle")));
+		const more: TabCell = {
+			num: `+${hidden.length}`,
+			title: "",
+			active: false,
+			lamp: lampGlyph(worst, ascii),
+			lampFrame: worst,
+		};
+		const out = [...kept.map((i) => cells[i] as TabCell), more];
+		best = { cells: out, index: [...kept, null], hidden };
+		if (measure(out) <= width) break;
+	}
+	return best ?? { cells, index: all, hidden: [] };
+}
+
+let liveLampTimers = 0;
+/** Timers the lamps hold right now. Test-only: it must return to zero. */
+export function _lampTimersLive(): number {
+	return liveLampTimers;
+}
+
+interface LampRun {
+	to: LampState;
+	frames: LampFrame[];
+	i: number;
+}
+
+/**
+ * The frame each tab's lamp draws. A change plays once (lib/tab-lamps.ts) and
+ * rests; nothing loops, and with motion off the final frame is drawn at once.
+ * The first render after a change already shows the new state's lead frame,
+ * so a change is never a render late.
+ */
+function useLampFrames(
+	states: Record<string, LampState>,
+	activeId: string | null,
+	animate: boolean,
+): Record<string, LampFrame> {
+	const [runs, setRuns] = useState<Record<string, LampRun>>({});
+	const seen = useRef<Record<string, LampState>>({});
+	const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+	const animateRef = useRef(animate);
+	animateRef.current = animate;
+	const activeRef = useRef(activeId);
+	activeRef.current = activeId;
+
+	const stateKey = Object.entries(states)
+		.map(([id, s]) => `${id}=${s}`)
+		.join(",");
+	useEffect(() => {
+		const clear = (id: string) => {
+			const h = timers.current.get(id);
+			if (h !== undefined) {
+				clearTimeout(h);
+				timers.current.delete(id);
+				liveLampTimers -= 1;
+			}
+		};
+		for (const [id, to] of Object.entries(states)) {
+			const from = seen.current[id];
+			seen.current[id] = to;
+			if (from === undefined || from === to) continue;
+			clear(id);
+			const frames = lampTransition(from, to, { visited: id === activeRef.current });
+			if (frames.length <= 1 || !motionEnabled(animateRef.current)) {
+				setRuns((r) => {
+					if (!(id in r)) return r;
+					const { [id]: _gone, ...rest } = r;
+					return rest;
+				});
+				continue;
+			}
+			const step = (i: number) => {
+				setRuns((r) => ({ ...r, [id]: { to, frames, i } }));
+				const f = frames[i];
+				if (!f || f.ms <= 0 || i >= frames.length - 1) return;
+				liveLampTimers += 1;
+				timers.current.set(
+					id,
+					setTimeout(() => {
+						liveLampTimers -= 1;
+						timers.current.delete(id);
+						step(i + 1);
+					}, f.ms),
+				);
+			};
+			step(0);
+		}
+	}, [stateKey]);
+
+	useEffect(
+		() => () => {
+			for (const h of timers.current.values()) {
+				clearTimeout(h);
+				liveLampTimers -= 1;
+			}
+			timers.current.clear();
+		},
+		[],
+	);
+
+	const out: Record<string, LampFrame> = {};
+	for (const [id, s] of Object.entries(states)) {
+		const active = id === activeId;
+		const run = runs[id];
+		const prev = seen.current[id];
+		if (run && run.to === s && run.i < run.frames.length - 1) {
+			out[id] = run.frames[run.i] ?? restFrame(s, active);
+		} else if (prev !== undefined && prev !== s && motionEnabled(animate)) {
+			// Changed this render; the effect has not started it yet.
+			out[id] = lampTransition(prev, s, { visited: active })[0] ?? restFrame(s, active);
+		} else {
+			out[id] = restFrame(s, active);
+		}
+	}
+	return out;
 }
 
 /** The rule row: dim rule with the bar at `bar`, exactly `width` columns. */
@@ -151,6 +354,7 @@ export function TabBar({
 	tabs,
 	onSwitch,
 	isTabProcessing,
+	lampFor,
 	groups = [],
 	grabbedTabId = null,
 	animate = true,
@@ -162,23 +366,67 @@ export function TabBar({
 	const visibleTabs = tabs.filter((tab) => tab.type !== "kanban" || tab.active);
 	const dragging = grabbedTabId !== null && grabbedTabId !== undefined;
 
-	const cells: TabCell[] = visibleTabs.map((tab, i) => {
+	const ascii = glyphs().rule === "-";
+	const compact = width < COMPACT_COLS;
+	const gap = compact ? COMPACT_GAP : GAP;
+	const states: Record<string, LampState> = {};
+	for (const tab of visibleTabs) {
+		const flags = lampFor?.(tab.id);
+		states[tab.id] = deriveLamp({
+			processing: Boolean(isTabProcessing?.(tab.id)),
+			needsYou: flags?.needsYou ?? false,
+			unread: flags?.unread ?? null,
+		});
+	}
+	const activeTab = visibleTabs.find((tab) => tab.active);
+	const lampFrames = useLampFrames(states, activeTab?.id ?? null, animate);
+
+	const fullCells: TabCell[] = visibleTabs.map((tab, i) => {
 		const badge = tab.badge && tab.badge > 0 ? ` (${tab.badge})` : "";
-		const busy = isTabProcessing?.(tab.id) ? " *" : "";
 		const grouped = groups.some((g) => g.tabIds.includes(tab.id)) ? " +" : "";
 		const perm = permFor?.(tab.id);
-		const tag = perm ? permTabTag(perm, width >= TAB_TAG_WIDE_COLS) : "";
+		const tag =
+			perm && (!compact || tab.active) ? permTabTag(perm, width >= TAB_TAG_WIDE_COLS) : "";
+		const frame = lampFrames[tab.id] ?? restFrame("idle");
+		const shape = compact
+			? tab.active
+				? { num: `[${i + 1} `, close: "]" }
+				: { num: `${i + 1}` }
+			: { num: `${i + 1}] ` };
 		return {
-			num: `${i + 1}] `,
-			title: `${sanitizeTabTitle(tab.title)}${badge}${busy}${grouped}`,
+			...shape,
+			title: compact && !tab.active ? "" : `${sanitizeTabTitle(tab.title)}${badge}${grouped}`,
 			active: tab.active,
 			grabbed: dragging && grabbedTabId === tab.id,
+			// An idle tab is dark: no glyph at rest. The lamp comes after the
+			// permission tag, so its mark never sits beside the tag's own " · ".
+			...(states[tab.id] === "idle" && frame.ms === 0
+				? {}
+				: { lamp: lampGlyph(frame, ascii), lampFrame: frame }),
 			...(perm && tag
 				? { tag, tagColor: permColour(perm.mode), tagBold: PERM_LOOK[perm.mode].bold }
 				: {}),
 		};
 	});
-	const line = layoutTabs(cells);
+	const fitted = fitTabCells(
+		fullCells,
+		visibleTabs.map((tab) => states[tab.id] ?? "idle"),
+		width,
+		gap,
+		ascii,
+	);
+	const cells = fitted.cells;
+	const idAt = (i: number): string | null => {
+		const k = fitted.index[i];
+		return k === null || k === undefined ? null : (visibleTabs[k]?.id ?? null);
+	};
+	const ariaLabel = barAriaLabel(
+		visibleTabs.map((tab) => ({
+			title: sanitizeTabTitle(tab.title),
+			state: states[tab.id] ?? "idle",
+		})),
+	);
+	const line = layoutTabs(cells, gap);
 	const activeIndex = cells.findIndex((c) => c.active);
 	const target = activeIndex >= 0 ? (line.spans[activeIndex] ?? null) : null;
 	const targetKey = target ? `${target.x}:${target.width}` : "none";
@@ -216,9 +464,23 @@ export function TabBar({
 	// A click on a tab switches to it, as its number key does (#3239). Two
 	// rows: the label and the underline under it are one target.
 	const labelRef = useRef(null);
-	const clickSpans: ClickSpan[] = cellSpans(cells).map((span, i) => {
-		const id = visibleTabs[i]?.id ?? String(i);
-		return { id: `tab:${id}`, dx: span.x, w: span.width, h: 2, action: () => onSwitch(id) };
+	// The "+N" cell jumps to the most urgent hidden tab, so a hidden ask is one tap away.
+	const hiddenTarget = (): string | null => {
+		const ids = fitted.hidden.map((k) => visibleTabs[k]?.id).filter((x): x is string => !!x);
+		return ids.find((id) => states[id] === "needs") ?? ids[0] ?? null;
+	};
+	const clickSpans: ClickSpan[] = cellSpans(cells, gap).map((span, i) => {
+		const id = idAt(i) ?? "more";
+		return {
+			id: `tab:${id}`,
+			dx: span.x,
+			w: span.width,
+			h: 2,
+			action: () => {
+				const to = idAt(i) ?? hiddenTarget();
+				if (to) onSwitch(to);
+			},
+		};
 	});
 	useClickSpans(labelRef, tabs.length <= 1 ? [] : clickSpans);
 	const pressed = usePressedIn("tab:");
@@ -232,27 +494,43 @@ export function TabBar({
 		<Box flexDirection="column" marginBottom={0} flexShrink={0}>
 			<Box>
 				<Box ref={labelRef} flexGrow={1} minWidth={0}>
-					<Text wrap="truncate-end">
-						{cells.map((cell, i) => (
-							<React.Fragment key={visibleTabs[i]?.id ?? i}>
-								{i > 0 ? GAP : ""}
-								{cell.grabbed ? <Text color={t.orange}>[</Text> : null}
-								<Text color={t.textTertiary}>{cell.num}</Text>
-								<Text
-									color={cell.active ? t.orange : t.muted}
-									bold={cell.active}
-									inverse={pressed === `tab:${visibleTabs[i]?.id ?? String(i)}`}
-								>
-									{cell.title}
-								</Text>
-								{cell.tag ? (
-									<Text color={cell.tagColor} bold={cell.tagBold}>
-										{cell.tag}
-									</Text>
-								) : null}
-								{cell.grabbed ? <Text color={t.orange}>]</Text> : null}
-							</React.Fragment>
-						))}
+					<Text wrap="truncate-end" aria-label={ariaLabel}>
+						{cells.map((cell, i) => {
+							const id = idAt(i) ?? "more";
+							const lf = cell.lampFrame;
+							return (
+								<React.Fragment key={id}>
+									{i > 0 ? gap : ""}
+									{cell.grabbed ? <Text color={t.orange}>[</Text> : null}
+									<Text color={t.textTertiary}>{cell.num}</Text>
+									{cell.title ? (
+										<Text
+											color={cell.active ? t.textPrimary : t.muted}
+											bold={cell.active}
+											inverse={pressed === `tab:${id}`}
+										>
+											{cell.title}
+										</Text>
+									) : null}
+									{cell.tag ? (
+										<Text color={cell.tagColor} bold={cell.tagBold}>
+											{cell.tag}
+										</Text>
+									) : null}
+									{cell.lamp && lf ? (
+										<Text
+											color={TONE_COLOUR[lf.tone]}
+											bold={lf.bold}
+											inverse={lf.inverse || (!cell.title && pressed === `tab:${id}`)}
+										>
+											{(cell.title || cell.tag ? " " : "") + cell.lamp}
+										</Text>
+									) : null}
+									{cell.close ? <Text color={t.textTertiary}>{cell.close}</Text> : null}
+									{cell.grabbed ? <Text color={t.orange}>]</Text> : null}
+								</React.Fragment>
+							);
+						})}
 					</Text>
 				</Box>
 				{hint ? <Text color={t.orange}>{hint}</Text> : null}
