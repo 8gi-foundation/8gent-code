@@ -102,6 +102,8 @@ export interface RoundDeps {
 	/** The cell's own state: ledger, kept patches. Default <home>/.8gent/cell. */
 	cellDir?: string;
 	checks?: CheckDef[];
+	/** Where the warning for an unsandboxed round goes. Default: stderr. */
+	warn?: (line: string) => void;
 	/** Replaces the sandboxed check runner (tests). */
 	runCheck?: (c: CheckDef, cwd: string) => Promise<CheckResult>;
 	complete?: Complete;
@@ -109,6 +111,9 @@ export interface RoundDeps {
 	sandbox?: Sandbox | "off";
 	fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>;
 }
+
+export const UNSANDBOXED_WARNING =
+	"selfimprove: UNSANDBOXED. Model-written code runs with this cell's own powers, so its key and its ledger are only as safe as the model.";
 
 export const DEFAULT_MIN_CALL_TOKENS = 1000;
 const MAX_COMPLETION = 4096;
@@ -326,7 +331,14 @@ function sandboxedRunCheck(wrap: (a: string[]) => string[]) {
  * root-only home, and its environment is in root-only /proc files, so that uid cannot read them. Needs
  * root with CAP_SYS_ADMIN (a Fly machine; a default Docker container has neither).
  */
-export function linuxSandbox(uid: number = Number(process.env.CELL_SANDBOX_UID ?? 1002)): Sandbox {
+export function linuxSandbox(
+	uid: number = Number(process.env.CELL_SANDBOX_UID ?? 1002),
+	opts: { keyFile?: string; platform?: string; run?: (argv: string[]) => number | null } = {},
+): Sandbox {
+	const run =
+		opts.run ??
+		((argv: string[]) =>
+			spawnSync(argv[0], argv.slice(1), { stdio: "ignore", timeout: 20_000 }).status);
 	if (!Number.isInteger(uid) || uid < 1) throw new Error("the sandbox needs an unprivileged uid");
 	const wrap = (argv: string[]) => [
 		"unshare",
@@ -355,7 +367,7 @@ export function linuxSandbox(uid: number = Number(process.env.CELL_SANDBOX_UID ?
 			fs.chmodSync(dir, 0o700);
 		},
 		async probe() {
-			if (process.platform !== "linux") return false;
+			if ((opts.platform ?? process.platform) !== "linux") return false;
 			// Right uid, only the loopback device, root's environment and root's home unreadable.
 			const script = [
 				`[ "$(id -u)" = "${uid}" ]`,
@@ -363,10 +375,25 @@ export function linuxSandbox(uid: number = Number(process.env.CELL_SANDBOX_UID ?
 				"! cat /proc/1/environ > /dev/null 2>&1",
 				"! ls /root > /dev/null 2>&1",
 			].join(" && ");
-			const argv = wrap(["sh", "-c", script]);
-			return spawnSync(argv[0], argv.slice(1), { stdio: "ignore", timeout: 20_000 }).status === 0;
+			if (run(wrap(["sh", "-c", script])) !== 0) return false;
+			// The configured key file must be out of the sandbox user's reach: if that uid can read it, there is no sandbox.
+			// The path is an argument, never part of the script text.
+			if (
+				opts.keyFile &&
+				run(wrap(["sh", "-c", '! cat "$1" > /dev/null 2>&1', "sh", opts.keyFile])) !== 0
+			)
+				return false;
+			return true;
 		},
 	};
+}
+
+/** The sandbox a cell uses: linuxSandbox, probing the configured key file as well. */
+export function defaultSandbox(env: Env, over: Parameters<typeof linuxSandbox>[1] = {}): Sandbox {
+	return linuxSandbox(undefined, {
+		keyFile: env.MINIMAX_API_KEY_FILE?.trim() || undefined,
+		...over,
+	});
 }
 
 function suiteHash(checks: CheckDef[]): string {
@@ -570,7 +597,7 @@ export async function runSelfImprove(deps: RoundDeps = {}): Promise<RoundResult>
 	// Model-written code runs in a sandbox, or not at all.
 	let sandbox: Sandbox | "off";
 	try {
-		sandbox = deps.sandbox ?? (env.SELFIMPROVE_UNSANDBOXED === "1" ? "off" : linuxSandbox());
+		sandbox = deps.sandbox ?? (env.SELFIMPROVE_UNSANDBOXED === "1" ? "off" : defaultSandbox(env));
 	} catch (err) {
 		return done("refused", `no sandbox: ${(err as Error).message}`);
 	}
@@ -579,6 +606,9 @@ export async function runSelfImprove(deps: RoundDeps = {}): Promise<RoundResult>
 			"refused",
 			"no working sandbox on this machine (it needs root, unshare and setpriv); nothing was run. SELFIMPROVE_UNSANDBOXED=1 runs without one, and then the key and the ledger are only as safe as the model",
 		);
+	// The escape is loud: a warning every round, and every ledger line says so.
+	const unsandboxed = sandbox === "off";
+	if (unsandboxed) (deps.warn ?? ((l: string) => console.error(l)))(UNSANDBOXED_WARNING);
 	const wrap = sandbox === "off" ? (a: string[]) => a : sandbox.wrap;
 	const runCheck = deps.runCheck ?? sandboxedRunCheck(wrap);
 	const give = (dir: string) => {
@@ -607,7 +637,14 @@ export async function runSelfImprove(deps: RoundDeps = {}): Promise<RoundResult>
 	const round = lines.length + 1;
 	const spent = spentToday(lines, t);
 	const log = (l: Omit<LedgerLine, "ts" | "cell" | "round" | "suite">) =>
-		appendLedger(cellDir, { ts: t.toISOString(), cell, round, suite, ...l });
+		appendLedger(cellDir, {
+			ts: t.toISOString(),
+			cell,
+			round,
+			suite,
+			...l,
+			...(unsandboxed ? { note: l.note ? `unsandboxed; ${l.note}` : "unsandboxed" } : {}),
+		});
 
 	if (spent >= cap) return dormant(lines, t, cellDir, log, `today's ${cap} tokens are spent`);
 

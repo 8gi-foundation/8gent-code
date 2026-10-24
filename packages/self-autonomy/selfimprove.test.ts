@@ -8,6 +8,8 @@ import {
 	type CheckDef,
 	DEFAULT_MIN_CALL_TOKENS,
 	type LedgerLine,
+	UNSANDBOXED_WARNING,
+	defaultSandbox,
 	linuxSandbox,
 	minimaxComplete,
 	readLedger,
@@ -972,5 +974,150 @@ describe("tokens are logged even when the call fails after spending", () => {
 		});
 		expect(r.verdict).toBe("dormant");
 		expect(m.calls).toEqual([]);
+	});
+});
+
+describe("the escape is loud, the key file is probed (8SO re-read)", () => {
+	const real = { probe: async () => true, prepare: () => {}, wrap: (a: string[]) => a };
+
+	test("SELFIMPROVE_UNSANDBOXED=1 warns every round and every ledger line says unsandboxed", async () => {
+		const c = cell();
+		const { sandbox: _s, ...rest } = c;
+		const warned: string[] = [];
+		const env = cellEnv({ SELFIMPROVE_UNSANDBOXED: "1" });
+		const common = { ...rest, env, now: () => NOON, warn: (l: string) => warned.push(l) };
+		await runSelfImprove({ ...common, complete: model(FIX).complete }); // kept
+		await runSelfImprove({ ...common, complete: model(FIX).complete }); // idle: v-is-two already passes
+		await runSelfImprove({
+			...common,
+			complete: model(NO_GAIN).complete,
+			env: cellEnv({ SELFIMPROVE_UNSANDBOXED: "1", DAILY_TOKEN_CAP: "1" }),
+		}); // dormant
+		expect(warned).toEqual([UNSANDBOXED_WARNING, UNSANDBOXED_WARNING, UNSANDBOXED_WARNING]);
+		expect(UNSANDBOXED_WARNING).toMatch(/only as safe as the model/);
+		const lines = readLedger(c.cellDir);
+		expect(lines.map((l) => l.verdict)).toEqual(["kept", "idle", "dormant"]);
+		for (const l of lines) expect(l.note?.startsWith("unsandboxed")).toBe(true);
+		expect(lines[0].note).toBe("unsandboxed");
+		expect(lines[1].note).toBe("unsandboxed; every check passes");
+	});
+
+	test("a refused or reverted unsandboxed round is marked too, and the explicit 'off' dependency is no quieter", async () => {
+		const c = cell();
+		const warned: string[] = [];
+		await runSelfImprove({
+			...c,
+			env: cellEnv(),
+			now: () => NOON,
+			warn: (l) => warned.push(l),
+			complete: model("no diff here", 700).complete,
+		});
+		await runSelfImprove({
+			...c,
+			env: cellEnv(),
+			now: () => NOON,
+			warn: (l) => warned.push(l),
+			complete: model(FIX_AND_BREAK).complete,
+		});
+		expect(warned.length).toBe(2);
+		for (const l of readLedger(c.cellDir)) expect(l.note?.startsWith("unsandboxed")).toBe(true);
+	});
+
+	test("a sandboxed round is silent and its ledger lines carry no unsandboxed note", async () => {
+		const c = cell();
+		const warned: string[] = [];
+		await runSelfImprove({
+			...c,
+			sandbox: real,
+			env: cellEnv(),
+			now: () => NOON,
+			warn: (l) => warned.push(l),
+			complete: model(FIX).complete,
+		});
+		expect(warned).toEqual([]);
+		for (const l of readLedger(c.cellDir)) expect(l.note ?? "").not.toMatch(/unsandboxed/);
+	});
+
+	test("the probe fails when the sandbox user can read the configured key file", async () => {
+		const calls: string[][] = [];
+		const run = (readable: boolean) => (argv: string[]) => {
+			calls.push(argv);
+			// The second probe is `! cat <keyfile>`: it exits 1 exactly when the file can be read.
+			return argv.includes("/etc/cell/key") ? (readable ? 1 : 0) : 0;
+		};
+		const mk = (readable: boolean, keyFile?: string) =>
+			linuxSandbox(1002, { platform: "linux", keyFile, run: run(readable) });
+		expect(await mk(true, "/etc/cell/key").probe()).toBe(false);
+		expect(await mk(false, "/etc/cell/key").probe()).toBe(true);
+		// The path is its own argument, never spliced into the script text.
+		const keyRun = calls.find((a) => a.includes("/etc/cell/key")) as string[];
+		expect(keyRun.slice(0, 8)).toEqual([
+			"unshare",
+			"-n",
+			"setpriv",
+			"--reuid=1002",
+			"--regid=1002",
+			"--clear-groups",
+			"--no-new-privs",
+			"--",
+		]);
+		expect(keyRun.filter((x) => x.includes("/etc/cell/key")).length).toBe(1);
+		expect(keyRun.some((x) => x.startsWith("!") && x.includes("/etc/cell/key"))).toBe(false);
+	});
+
+	test("a cell's own sandbox probes the key file named in MINIMAX_API_KEY_FILE, and none when it is unset", async () => {
+		const seen: string[][] = [];
+		const run = (argv: string[]) => {
+			seen.push(argv);
+			return 0;
+		};
+		await defaultSandbox(
+			{ MINIMAX_API_KEY_FILE: " /run/cell/key " },
+			{ platform: "linux", run },
+		).probe();
+		expect(seen.length).toBe(2);
+		expect(seen[1].includes("/run/cell/key")).toBe(true);
+		seen.length = 0;
+		await defaultSandbox({}, { platform: "linux", run }).probe();
+		expect(seen.length).toBe(1);
+	});
+
+	test("with no key file configured the probe asks once; a failing base probe never gets to the key check", async () => {
+		let n = 0;
+		expect(
+			await linuxSandbox(1002, {
+				platform: "linux",
+				run: () => {
+					n++;
+					return 0;
+				},
+			}).probe(),
+		).toBe(true);
+		expect(n).toBe(1);
+		let m = 0;
+		expect(
+			await linuxSandbox(1002, {
+				platform: "linux",
+				keyFile: "/k",
+				run: () => {
+					m++;
+					return 1;
+				},
+			}).probe(),
+		).toBe(false);
+		expect(m).toBe(1);
+		expect(await linuxSandbox(1002, { platform: "darwin", run: () => 0 }).probe()).toBe(false);
+	});
+
+	test("the image makes /tmp/8gent-work private, and the proof script checks it and the key-file probe", () => {
+		const docker = readFileSync(join(import.meta.dir, "..", "..", "Dockerfile"), "utf-8");
+		expect(docker).toMatch(/chmod 700 \/tmp\/8gent-work/);
+		const proof = readFileSync(
+			join(import.meta.dir, "..", "..", "scripts", "cell-sandbox-proof.sh"),
+			"utf-8",
+		);
+		expect(proof).toContain("/tmp/8gent-work");
+		expect(proof).toMatch(/probe\(\)/);
+		expect(proof).toMatch(/world-readable key file/);
 	});
 });

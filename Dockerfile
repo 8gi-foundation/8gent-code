@@ -34,7 +34,8 @@ COPY scripts/cell-sandbox-proof.sh scripts/cell-sandbox-proof.sh
 COPY benchmarks/ benchmarks/
 
 # Writable tmp for agent workdirs
-RUN mkdir -p /tmp/8gent-work /root/.8gent/sessions
+RUN mkdir -p /tmp/8gent-work /root/.8gent/sessions \
+ && chmod 700 /tmp/8gent-work
 
 # The user a /selfimprove round runs model-written code as (selfimprove.ts linuxSandbox): no home, no shell.
 # /root stays root-only so that user cannot reach the cell's state, key file or ledger, and the genome in

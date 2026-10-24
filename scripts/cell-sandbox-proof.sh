@@ -44,6 +44,18 @@ if command -v bun >/dev/null 2>&1; then
     && ok "bun cannot fetch from inside" || bad "bun fetched from inside"
   sb env HOME="$SCRATCH" bun -e 'process.exit(0)' >/dev/null 2>&1 && ok "bun runs as the sandbox user" || bad "bun does not run as the sandbox user"
 fi
+# Other workdirs are private: the image makes /tmp/8gent-work 0700.
+if [ -d /tmp/8gent-work ]; then
+  sb sh -c 'ls /tmp/8gent-work' >/dev/null 2>&1 && bad "lists /tmp/8gent-work" || ok "cannot list /tmp/8gent-work"
+fi
+# The probe in selfimprove.ts must refuse a key file the sandbox user can read, and accept one it cannot.
+if command -v bun >/dev/null 2>&1; then
+  LEAKY="$(mktemp /tmp/leaky-key-XXXXXX)"; echo "k" > "$LEAKY"; chmod 644 "$LEAKY"
+  probe() { CELL_SANDBOX_UID="$UID_SB" KEYF="$1" bun -e 'import { linuxSandbox } from "/app/packages/self-autonomy/selfimprove.ts"; process.exit((await linuxSandbox(Number(process.env.CELL_SANDBOX_UID), { keyFile: process.env.KEYF }).probe()) ? 0 : 1)' >/dev/null 2>&1; }
+  probe /root/.8gent/cell/key && ok "probe accepts a key file the sandbox user cannot read" || bad "probe refuses a safe key file"
+  probe "$LEAKY" && bad "probe accepts a world-readable key file" || ok "probe refuses a world-readable key file"
+  rm -f "$LEAKY"
+fi
 # The grandchildren inherit all of it.
 sb sh -c 'sh -c "ls /root"' >/dev/null 2>&1 && bad "a child lists /root" || ok "a child cannot list /root"
 
