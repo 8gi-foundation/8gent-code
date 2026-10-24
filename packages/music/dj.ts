@@ -466,6 +466,8 @@ const mpvSet = (p: string, v: any) => mpvIpc({ command: ["set_property", p, v] }
 // ---- What the real player says (#4907) ----
 const EMPTY_STATUS = {
 	ipc: false,
+	starting: false,
+	pauseKnown: false,
 	trouble: "",
 	playing: false,
 	paused: false,
@@ -536,7 +538,7 @@ export async function readAudioHealth(): Promise<AudioHealth> {
 
 export type AudioVerdict =
 	| { ok: true }
-	| { ok: false; kind: "failed" | "ended" | "no-output"; reason: string };
+	| { ok: false; kind: "starting" | "silent" | "failed" | "ended" | "no-output"; reason: string };
 
 /** Startup grace: mpv is still loading the stream and opening the device. */
 let AUDIO_GRACE_MS = 3000;
@@ -546,15 +548,21 @@ export function setAudioGraceMs(ms?: number): void {
 }
 
 /**
- * Whether sound can be coming out, from the player's own answers. If mpv does not
- * answer at all this says ok: it cannot tell, and does not claim a fault it did not see.
+ * Whether sound can be coming out, from the player's own answers. With no answer
+ * from mpv it never says ok: inside the startup grace it is "starting", after it
+ * the player "is not answering". The deck draws "playing" only on an answer.
  */
 export function diagnoseAudio(
 	h: AudioHealth,
 	sinceStartMs: number,
 	lastError: string | undefined,
 ): AudioVerdict {
-	if (!h.ipc || sinceStartMs < AUDIO_GRACE_MS) return { ok: true };
+	if (!h.ipc) {
+		return sinceStartMs < AUDIO_GRACE_MS
+			? { ok: false, kind: "starting", reason: "" }
+			: { ok: false, kind: "silent", reason: "the player is not answering" };
+	}
+	if (sinceStartMs < AUDIO_GRACE_MS) return { ok: true };
 	if (h.idle)
 		return lastError
 			? { ok: false, kind: "failed", reason: lastError }
@@ -1060,10 +1068,11 @@ export class DJ {
 	async pause(): Promise<string> {
 		if (!isPlaying) return "Nothing playing.";
 		await mpvIpc({ command: ["cycle", "pause"] });
-		// Believe the player over the toggle: if mpv answers, its pause flag is the
-		// state; if it does not (no IPC), the toggle is all there is.
+		// The player's pause flag is the state. If it does not answer, nothing is guessed:
+		// the state stays what it was and the deck shows it as unknown.
 		const real = ipcReady ? await mpvGet("pause") : null;
-		isPaused = real == null ? !isPaused : real === "true";
+		if (real == null) return "Pause sent, but the player did not answer, so its state is unknown.";
+		isPaused = real === "true";
 		clockPause(isPaused);
 		return isPaused ? "Paused." : "Resumed.";
 	}
@@ -1260,6 +1269,10 @@ export class DJ {
 		ipc: boolean;
 		/** Why nothing is heard, in words, or "" when all is well. */
 		trouble: string;
+		/** A track is loading and mpv has not answered yet: show "starting", never "playing". */
+		starting: boolean;
+		/** mpv told us its pause flag. False: the pause state is unknown, show no guess. */
+		pauseKnown: boolean;
 		playing: boolean;
 		paused: boolean;
 		looping: boolean;
@@ -1282,9 +1295,12 @@ export class DJ {
 		// Believe the player, not our own flag: a track that failed to load leaves mpv
 		// alive and idle (--idle=yes), and a phone with no audio device plays to nowhere.
 		let trouble = "";
+		let starting = false;
 		let pausedNow = isPaused;
-		if (ipcReady && isPlaying) {
+		let pauseKnown = false;
+		if (isPlaying) {
 			const health = await readAudioHealth();
+			pauseKnown = health.ipc && health.paused != null;
 			// The player's pause flag is the truth; ours only stands in when it is silent.
 			if (health.ipc && health.paused != null) {
 				pausedNow = health.paused;
@@ -1299,10 +1315,13 @@ export class DJ {
 					this.killMpv();
 					return { ...EMPTY_STATUS, ipc: true };
 				}
-				trouble =
-					verdict.kind === "no-output"
-						? `no sound output: ${verdict.reason}`
-						: `could not play: ${verdict.reason}`;
+				if (verdict.kind === "starting") starting = true;
+				else if (verdict.kind === "silent") trouble = verdict.reason;
+				else
+					trouble =
+						verdict.kind === "no-output"
+							? `no sound output: ${verdict.reason}`
+							: `could not play: ${verdict.reason}`;
 			}
 		}
 		const durN = dur ? Number.parseFloat(dur) : null;
@@ -1312,6 +1331,8 @@ export class DJ {
 		const posN = pos ? Number.parseFloat(pos) : isPlaying ? clockSeconds() : null;
 		return {
 			ipc: ipcReady && vol != null,
+			starting,
+			pauseKnown,
 			trouble,
 			playing: isPlaying,
 			paused: pausedNow,
@@ -1339,6 +1360,9 @@ export class DJ {
 		child.unref?.();
 		child.stdout?.on?.("data", notePlayerOutput);
 		child.stderr?.on?.("data", notePlayerOutput);
+		// The pipes are only listened to, never waited on: they must not keep 8gent alive.
+		(child.stdout as { unref?: () => void } | null | undefined)?.unref?.();
+		(child.stderr as { unref?: () => void } | null | undefined)?.unref?.();
 		// The process is the truth. If it ends (track over, killed by Android, no
 		// audio device), the deck must stop saying "playing" (#4907). A child we
 		// already replaced or stopped is no longer mpvProcess, so its exit changes nothing.

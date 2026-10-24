@@ -84,6 +84,10 @@ export interface DjStatus {
 	ipc?: boolean;
 	/** Why nothing is heard, from the player itself; "" when all is well (#4907). */
 	trouble?: string;
+	/** Loading, mpv has not answered: "starting", never "playing". */
+	starting?: boolean;
+	/** False: mpv did not report its pause flag, so no pause or play label is guessed. */
+	pauseKnown?: boolean;
 }
 
 const EMPTY: DjStatus = {
@@ -279,12 +283,16 @@ export function DjRow(props: {
 	/** Tap targets. With both set the row carries play/pause and stop; each cap names its key. */
 	onToggle?: () => void;
 	onStop?: () => void;
+	/** Loading, mpv has not answered: "starting", never "playing". */
+	starting?: boolean;
+	/** False: mpv did not report its pause flag; the button names no action it cannot know. */
+	pauseKnown?: boolean;
 }) {
 	if (props.narrow) return <DjRowNarrow {...props} />;
 	const showVolume = props.showVolume !== false;
 	const muted = props.volume === 0;
 	const vol = props.volume == null ? "vol --" : muted ? "muted" : `vol ${props.volume}%`;
-	const state = props.trouble ? "no sound" : props.paused ? "paused" : "playing";
+	const state = deckWord(props);
 	const spoken = [
 		`DJ ${state}: ${props.track}`,
 		props.artist ? `by ${props.artist}` : "",
@@ -301,8 +309,12 @@ export function DjRow(props: {
 				<Text bold color={t.orange}>
 					DJ
 				</Text>
-				<Text color={props.trouble ? t.orange : props.paused ? t.textTertiary : t.teal}>
-					{props.trouble ? " ✕ " : props.paused ? " ❚❚ " : " ▶ "}
+				<Text
+					color={
+						props.trouble ? t.orange : props.starting || props.paused ? t.textTertiary : t.teal
+					}
+				>
+					{deckGlyph(props)}
 				</Text>
 			</Box>
 			<Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -320,11 +332,18 @@ export function DjRow(props: {
 				<Text color={props.trouble ? t.orange : t.textTertiary}>
 					{props.trouble
 						? `  ${props.trouble.slice(0, 60)}`
-						: `  ${props.elapsed} / ${props.duration}${showVolume ? `  ${vol}` : ""}`}
+						: props.starting
+							? "  starting"
+							: `  ${props.elapsed} / ${props.duration}${showVolume ? `  ${vol}` : ""}`}
 				</Text>
 				{props.onToggle && props.onStop ? (
 					<Box marginLeft={2}>
-						<DjButtons paused={props.paused} onToggle={props.onToggle} onStop={props.onStop} />
+						<DjButtons
+							paused={props.paused}
+							pauseKnown={props.pauseKnown}
+							onToggle={props.onToggle}
+							onStop={props.onStop}
+						/>
 					</Box>
 				) : null}
 				{props.keysActive ? null : (
@@ -337,6 +356,14 @@ export function DjRow(props: {
 	);
 }
 
+/** What the row may say. "playing" and "paused" only come from an answer by mpv (#4907). */
+function deckWord(p: { trouble?: string; starting?: boolean; paused: boolean }): string {
+	return p.trouble ? "no sound" : p.starting ? "starting" : p.paused ? "paused" : "playing";
+}
+function deckGlyph(p: { trouble?: string; starting?: boolean; paused: boolean }): string {
+	return p.trouble ? " ✕ " : p.starting ? " … " : p.paused ? " ❚❚ " : " ▶ ";
+}
+
 /**
  * Play/pause and stop as tap targets (#3239 click-target pattern). The label is the
  * action a tap does next: "pause" while playing, "play" while paused. Each cap shows
@@ -344,14 +371,20 @@ export function DjRow(props: {
  */
 export function DjButtons({
 	paused,
+	pauseKnown = true,
 	onToggle,
 	onStop,
-}: { paused: boolean; onToggle: () => void; onStop: () => void }) {
+}: { paused: boolean; pauseKnown?: boolean; onToggle: () => void; onStop: () => void }) {
 	return (
 		<KeyCapRow
 			idPrefix="djbtn"
 			caps={[
-				{ cap: "Space", verb: paused ? "play" : "pause", action: onToggle },
+				// With no answer from mpv no action is named: a guess would be the bug.
+				{
+					cap: "Space",
+					verb: !pauseKnown ? "no reply" : paused ? "play" : "pause",
+					action: onToggle,
+				},
 				{ cap: "S", verb: "stop", action: onStop },
 			]}
 		/>
@@ -359,7 +392,12 @@ export function DjButtons({
 }
 
 /** The phone's own row for the buttons, under the title, indented past "DJ ▶ ". */
-export function DjButtonsRow(props: { paused: boolean; onToggle: () => void; onStop: () => void }) {
+export function DjButtonsRow(props: {
+	paused: boolean;
+	pauseKnown?: boolean;
+	onToggle: () => void;
+	onStop: () => void;
+}) {
 	return (
 		<Box width="100%" flexShrink={0} height={1} overflow="hidden">
 			<Text>{"     "}</Text>
@@ -375,9 +413,10 @@ function DjRowNarrow(props: {
 	elapsed: string;
 	keysActive: boolean;
 	trouble?: string;
+	starting?: boolean;
 	onToggle?: () => void;
 }) {
-	const state = props.trouble ? "no sound" : props.paused ? "paused" : "playing";
+	const state = deckWord(props);
 	return (
 		<Box
 			width="100%"
@@ -389,8 +428,12 @@ function DjRowNarrow(props: {
 				<Text bold color={t.orange}>
 					DJ
 				</Text>
-				<Text color={props.trouble ? t.orange : props.paused ? t.textTertiary : t.teal}>
-					{props.trouble ? " ✕ " : props.paused ? " ❚❚ " : " ▶ "}
+				<Text
+					color={
+						props.trouble ? t.orange : props.starting || props.paused ? t.textTertiary : t.teal
+					}
+				>
+					{deckGlyph(props)}
 				</Text>
 			</Box>
 			<Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -399,7 +442,9 @@ function DjRowNarrow(props: {
 				</Text>
 			</Box>
 			<Box flexShrink={0}>
-				<Text color={t.textTertiary}>{props.trouble ? "" : `  ${state} ${props.elapsed}`}</Text>
+				<Text color={t.textTertiary}>
+					{props.trouble ? "" : props.starting ? "  starting" : `  ${state} ${props.elapsed}`}
+				</Text>
 				{props.keysActive || props.onToggle ? null : (
 					<Text color={t.textSecondary}>{"  /dj stop"}</Text>
 				)}
@@ -417,8 +462,11 @@ export function FmFooterSegment(props: {
 	playing: boolean;
 	paused?: boolean;
 	track: string;
+	/** mpv has not answered (starting) or says nothing is heard (trouble): never the play glyph. */
+	unsure?: "starting" | "trouble";
 }) {
-	const glyph = props.paused ? "❚❚ " : "▶ ";
+	const glyph =
+		props.unsure === "trouble" ? "✕ " : props.unsure ? "… " : props.paused ? "❚❚ " : "▶ ";
 	const natural = glyph.length + 2 + (props.track ? props.track.length + 1 : 0);
 	return (
 		<Box width={Math.min(natural, props.width)} flexShrink={0} overflow="hidden">
@@ -633,7 +681,8 @@ export function DjDeck({
 	const playerSilent = hasTrack && status.ipc === false && pendingVolumeRef.current == null;
 	const effectiveVolume = playerSilent ? null : (displayVolume ?? status.volume);
 	const volume = effectiveVolume == null ? null : Math.round(effectiveVolume);
-	const playing = status.playing && !status.paused;
+	const unsure = status.trouble ? "trouble" : status.starting ? "starting" : undefined;
+	const playing = status.playing && !status.paused && !unsure;
 	const track = hasTrack ? sanitizeTrack(status.name || status.title || "(loading)") : "";
 	// Only what the source names (#3192); never a placeholder artist.
 	const artists = (status.artists ?? []).map(sanitizeTrack).filter(Boolean).join(", ");
@@ -652,6 +701,8 @@ export function DjDeck({
 				showVolume={columns >= 110}
 				narrow={columns < NARROW_DECK_COLUMNS}
 				trouble={status.trouble ?? ""}
+				starting={status.starting ?? false}
+				pauseKnown={status.pauseKnown !== false}
 				onToggle={() => void togglePause()}
 				onStop={stopPlayback}
 			/>
@@ -661,6 +712,7 @@ export function DjDeck({
 		hasTrack && open && columns < NARROW_DECK_COLUMNS && !keysActive ? (
 			<DjButtonsRow
 				paused={status.paused}
+				pauseKnown={status.pauseKnown !== false}
 				onToggle={() => void togglePause()}
 				onStop={stopPlayback}
 			/>
@@ -676,7 +728,13 @@ export function DjDeck({
 	// already says whether the agent is working, so no "idle" or "agent pulse".
 	const station = hasTrack && !open;
 	const segment = station ? (
-		<FmFooterSegment width={fmWidth} playing={playing} paused={status.paused} track={track} />
+		<FmFooterSegment
+			width={fmWidth}
+			playing={playing}
+			paused={status.paused}
+			track={track}
+			unsure={unsure}
+		/>
 	) : null;
 	const footerNode = typeof footer === "function" ? footer(station, hasTrack) : footer;
 

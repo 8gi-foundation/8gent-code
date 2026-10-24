@@ -59,6 +59,9 @@ function answer(line: string): string {
 		props[command[1]] = command[2];
 		sets.push([command[1], command[2]]);
 		reply = { error: "success" };
+	} else if (command[0] === "cycle" && command[1] === "pause") {
+		props.pause = !props.pause;
+		reply = { error: "success" };
 	} else reply = { error: "success" };
 	// mpv interleaves event lines with the reply.
 	return `${JSON.stringify({ event: "tick" })}\n${JSON.stringify(reply)}\n`;
@@ -165,11 +168,36 @@ describe("the deck follows the real player", () => {
 		expect(s.trouble).toContain("no audio output");
 	});
 
-	test("mpv that does not answer: no fault is invented, and ipc is reported false", async () => {
+	test("a silent socket after the grace is trouble, never playing", async () => {
 		setMpvTransport(async () => null);
 		const s = await (await playing()).status();
-		expect(s.ipc).toBe(false);
-		expect(s.trouble).toBe("");
+		expect(s).toMatchObject({ ipc: false, starting: false, pauseKnown: false });
+		expect(s.trouble).toBe("the player is not answering");
+	});
+
+	test("a silent socket inside the grace is 'starting', not playing and not yet a fault", async () => {
+		setAudioGraceMs(60_000);
+		setMpvTransport(async () => null);
+		const s = await (await playing()).status();
+		expect(s).toMatchObject({ ipc: false, starting: true, pauseKnown: false, trouble: "" });
+	});
+
+	test("pause with a silent socket guesses nothing: the state stays unknown", async () => {
+		setAudioGraceMs(60_000);
+		setMpvTransport(async () => null);
+		const dj = await playing();
+		expect(await dj.pause()).toContain("state is unknown");
+		const s = await dj.status();
+		expect(s.pauseKnown).toBe(false);
+		// Not flipped to paused by our own toggle.
+		expect(s.paused).toBe(false);
+	});
+
+	test("the player's pause flag is known once it answers", async () => {
+		await startPeer(healthy());
+		const dj = await playing();
+		expect(await dj.pause()).toBe("Paused.");
+		expect(await dj.status()).toMatchObject({ pauseKnown: true, paused: true });
 	});
 });
 
@@ -230,7 +258,13 @@ describe("the verdict and the player's output", () => {
 	test("table", () => {
 		setAudioGraceMs(3000);
 		expect(diagnoseAudio(h({}), 10_000, undefined)).toEqual({ ok: true });
-		expect(diagnoseAudio(h({ ipc: false }), 10_000, "x")).toEqual({ ok: true });
+		// No answer is never ok: starting inside the grace, then the player is not answering.
+		expect(diagnoseAudio(h({ ipc: false }), 1000, undefined)).toMatchObject({ kind: "starting" });
+		expect(diagnoseAudio(h({ ipc: false }), 10_000, "x")).toEqual({
+			ok: false,
+			kind: "silent",
+			reason: "the player is not answering",
+		});
 		expect(diagnoseAudio(h({ idle: true }), 1000, "x")).toEqual({ ok: true }); // still loading
 		expect(diagnoseAudio(h({ idle: true }), 10_000, "boom")).toEqual({
 			ok: false,
@@ -256,6 +290,19 @@ describe("the verdict and the player's output", () => {
 		expect((await dj.status()).trouble).toBe(
 			"could not play: [cplayer] Failed to open https://example.invalid/track.",
 		);
+	});
+
+	test("mpv's output pipes are unref'd so they cannot keep the process alive", async () => {
+		const calls: string[] = [];
+		setDjSpawn(() => {
+			const c = stubSpawn() as unknown as Fake;
+			(c.stdout as unknown as { unref: () => void }).unref = () => calls.push("stdout");
+			(c.stderr as unknown as { unref: () => void }).unref = () => calls.push("stderr");
+			return c as unknown as ChildProcess;
+		});
+		await startPeer(healthy());
+		await playing();
+		expect(calls.sort()).toEqual(["stderr", "stdout"]);
 	});
 
 	test("mpv is started with errors only and no status line", () => {

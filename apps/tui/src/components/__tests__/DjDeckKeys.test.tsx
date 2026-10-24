@@ -9,7 +9,13 @@ import { EventEmitter } from "node:events";
 import { Writable } from "node:stream";
 import { type Instance, Text, render } from "ink";
 import React from "react";
-import { DJ, setDjSpawn, setDjTools, setVolumeStore } from "../../../../../packages/music/dj";
+import {
+	DJ,
+	setDjSpawn,
+	setDjTools,
+	setMpvTransport,
+	setVolumeStore,
+} from "../../../../../packages/music/dj";
 import { DjDeck } from "../DjDeck";
 import { CommandInput } from "../command-input.js";
 
@@ -62,7 +68,33 @@ const children: Child[] = [];
 
 let instance: Instance | null = null;
 
+/**
+ * A fake mpv that answers. The deck draws "playing" and "paused" only from mpv's own
+ * answers (#4907), so a test of the keys needs a player that gives them.
+ */
+function fakeMpv() {
+	const props: Record<string, unknown> = {
+		"mpv-version": "mpv 0.40.0",
+		"idle-active": false,
+		"current-ao": "opensles",
+		"playback-time": 5,
+		"time-pos": 5,
+		duration: 200,
+		volume: 60,
+		mute: false,
+		pause: false,
+	};
+	setMpvTransport(async (line) => {
+		const { command } = JSON.parse(line) as { command: [string, string, unknown?] };
+		if (command[0] === "cycle" && command[1] === "pause") props.pause = !props.pause;
+		if (command[0] === "set_property") props[command[1]] = command[2];
+		const hit = command[0] === "get_property" && props[command[1]] != null;
+		return `${JSON.stringify(hit ? { data: props[command[1]], error: "success" } : { error: command[0] === "get_property" ? "property unavailable" : "success" })}\n`;
+	});
+}
+
 beforeEach(() => {
+	fakeMpv();
 	children.length = 0;
 	setDjTools({ mpv: "/stub/mpv", ytdlp: "/stub/yt-dlp" });
 	setVolumeStore({ load: () => 60, save: () => {} });
@@ -84,6 +116,7 @@ afterEach(() => {
 	instance?.unmount();
 	instance = null;
 	new DJ().stop();
+	setMpvTransport();
 	setDjSpawn();
 	setDjTools();
 	setVolumeStore();

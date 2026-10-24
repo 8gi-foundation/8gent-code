@@ -206,6 +206,24 @@ for (const columns of [120, 52]) {
 			expect(find("djbtn:S", columns)).toBeNull();
 		}, 15000);
 
+		test("a silent player: the deck never says playing and the button names no action", async () => {
+			setMpvTransport(async () => null);
+			setAudioGraceMs(0);
+			await mount(
+				<Held>
+					<DjDeck columns={columns} />
+				</Held>,
+				columns,
+			);
+			await tick(1300);
+			const f = plain(lastFrame);
+			expect(f).toContain("the player is not answering");
+			expect(f).not.toContain("playing");
+			expect(f).not.toContain("[Space] pause");
+			expect(f).not.toContain("[Space] play");
+			expect(f).toContain("[Space] no reply");
+		}, 15000);
+
 		test("a pause made outside the deck (the player paused itself) shows in the label", async () => {
 			await mount(
 				<Held>
