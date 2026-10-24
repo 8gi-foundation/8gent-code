@@ -62,12 +62,14 @@ async function frame(cols: number, rows: number, props: Partial<Props> = {}): Pr
 	});
 	await new Promise((r) => setTimeout(r, 30));
 	app.unmount();
-	const last = stdout.frames.filter((f) => f.includes("mode ")).at(-1) ?? "";
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI
-	return last
-		.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
-		.replace(/\n+$/, "")
-		.split("\n");
+	const last = stdout.frames.filter((f) => f.includes("mode ") || f.includes("[^P]")).at(-1) ?? "";
+	return (
+		last
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI
+			.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
+			.replace(/\n+$/, "")
+			.split("\n")
+	);
 }
 
 describe("BottomBar renders one footer row, hints included (#3130, #3238)", () => {
@@ -369,6 +371,56 @@ describe("the sandbox segment never costs a hint (#4013, Windows parity)", () =>
 			const row = fitFooterRow(withoutSandbox, w);
 			expect(row.segments).toEqual(fitFooterSegments(withoutSandbox, w));
 			expect(row.hints).toEqual(plain(w));
+		}
+	});
+});
+
+describe("the palette cap is reserved at every width, the sandbox state below 60 (#4951)", () => {
+	// The idle row on a phone: session time and providers used to fill the row
+	// and leave the cap nothing, so it read "mode Planning [^Y] | sandbox off nested".
+	const phone = (extra: Partial<Parameters<typeof buildFooterSegments>[0]> = {}) =>
+		buildFooterSegments({
+			mode: "Planning",
+			permissions: "ask",
+			sessionTime: "2s",
+			providersLive: 2,
+			providersTotal: 3,
+			sandboxOff: "nested",
+			...extra,
+		});
+
+	test("[^P] palette is in the row at every width from 38, with or without a sandbox segment", () => {
+		const withSb = phone();
+		const noSb = phone({ sandboxOff: undefined });
+		for (let w = 38; w <= 220; w++) {
+			expect(fitFooterRow(withSb, w).hints[0]).toBe("^P palette");
+			expect(fitFooterRow(noSb, w).hints[0]).toBe("^P palette");
+		}
+	});
+
+	test("below 60 columns the sandbox state is never dropped, only shortened", () => {
+		const all = phone();
+		for (let w = 38; w < 60; w++) {
+			const seg = fitFooterRow(all, w).segments.find((s) => s.key === "sandbox");
+			expect(seg, `sandbox at ${w}`).toBeDefined();
+			expect(seg?.value).toBe("off");
+		}
+		expect(fitFooterRow(all, 50).segments.find((s) => s.key === "sandbox")?.note).toBeUndefined();
+		expect(fitFooterRow(all, 39).segments.find((s) => s.key === "sandbox")?.label).toBe("sbx");
+	});
+
+	test("with a permission mode set, both survive a 51 column row", () => {
+		const row = fitFooterRow(phone({ permissions: "plan" }), 51);
+		expect(row.hints[0]).toBe("^P palette");
+		expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
+	});
+
+	test("the real idle frame at 52 and 40 columns keeps the cap and the sandbox word", async () => {
+		for (const cols of [52, 40]) {
+			const row = (await frame(cols, 30, { sandboxOff: "nested", sessionTime: "2s" }))[0] ?? "";
+			expect(row, `row at ${cols}`).toContain("[^P] palette");
+			expect(row, `row at ${cols}`).toMatch(/(sandbox|sbx) off/);
+			expect(row.length).toBeLessThanOrEqual(cols);
 		}
 	});
 });

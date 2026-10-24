@@ -326,13 +326,35 @@ export function fitFooterHints(width: number, permShown = false, djTrack = false
 	return out;
 }
 
+/** Below this many columns the row is the phone's: caps first, labels shortened. */
+export const FOOTER_NARROW_COLS = 60;
+
+/** The cap that opens the palette: the only way into about 80 commands on a phone. */
+const PALETTE_HINT = "^P palette";
+
+/** A segment with its label dropped: "Planning [^Y]" for "mode Planning [^Y]". */
+const unlabelled = (s: FooterSegment): FooterSegment =>
+	s.key === "mode" || s.key === "perm" ? { ...s, label: undefined } : s;
+
 /**
  * The footer row: segments plus the hints the columns they leave can hold.
- * The "sandbox off" segment (#4013) may push lower segments out, but never
- * a hint: [^C] quit must not leave the row because the shell is unsandboxed
- * (on Windows it never is). When the full segment would cost a hint it
- * drops its reason ("sandbox off"), then, only if that still costs one, the
- * row is exactly what it would be without it.
+ *
+ * [^P] palette is reserved first: segments are fitted into what is left, so
+ * the low-priority ones (session time, providers) give way before the cap,
+ * at every width. Before, they filled the row and the cap got the leftovers:
+ * at 52 columns an idle row read "mode Planning [^Y] | sandbox off nested"
+ * with no way into the palette.
+ *
+ * The "sandbox off" segment (#4013) is a state a person must not miss.
+ * From 60 columns up it may push lower segments out but never a hint:
+ * [^C] quit must not leave the row because the shell is unsandboxed (on
+ * Windows it never is). When the full segment would cost a hint it drops
+ * its reason ("sandbox off"), then, only if that still costs one, the row is
+ * exactly what it would be without it. Below 60 columns security wins the
+ * other way: the segment is never dropped. It sheds its reason, then its
+ * word ("sbx off"), then the mode and perm labels, and only then the perm
+ * segment, so the [^P] palette cap and the sandbox state are both always
+ * there.
  */
 export function fitFooterRow(
 	all: FooterSegment[],
@@ -340,24 +362,53 @@ export function fitFooterRow(
 	leading = false,
 	dj = false,
 ): { segments: FooterSegment[]; hints: string[] } {
+	const budget = Math.max(0, width - hintWidth(PALETTE_HINT) - HINTS_MARGIN);
 	const hintsFor = (segments: FooterSegment[]) =>
 		fitFooterHints(
 			Math.max(0, width - segmentsWidth(segments, leading) - HINTS_MARGIN),
 			segments.some((s) => s.key === "perm"),
 			dj,
 		);
+	const fit = (list: FooterSegment[]) => fitFooterSegments(list, budget, leading);
 	const sandbox = all.find((s) => s.key === "sandbox");
 	const without = sandbox ? all.filter((s) => s !== sandbox) : all;
-	const base = fitFooterSegments(without, width, leading);
+	const base = fit(without);
 	const baseHints = hintsFor(base);
 	if (!sandbox) return { segments: base, hints: baseHints };
-	for (const seg of [sandbox, { ...sandbox, note: undefined }]) {
-		const candidate = all.map((s) => (s === sandbox ? seg : s));
-		const segments = fitFooterSegments(candidate, width, leading);
-		const hints = hintsFor(segments);
-		if (segments.includes(seg) && hints.length >= baseHints.length) return { segments, hints };
+	if (width >= FOOTER_NARROW_COLS) {
+		for (const seg of [sandbox, { ...sandbox, note: undefined }]) {
+			const candidate = all.map((s) => (s === sandbox ? seg : s));
+			const segments = fit(candidate);
+			const hints = hintsFor(segments);
+			if (segments.includes(seg) && hints.length >= baseHints.length) return { segments, hints };
+		}
+		return { segments: base, hints: baseHints };
 	}
-	return { segments: base, hints: baseHints };
+	const forms: FooterSegment[] = [
+		sandbox,
+		{ ...sandbox, note: undefined },
+		{ ...sandbox, note: undefined, label: "sbx" },
+	];
+	const attempts: Array<(list: FooterSegment[]) => FooterSegment[]> = [
+		(l) => l,
+		(l) => l.map(unlabelled),
+	];
+	for (const shape of attempts) {
+		for (const seg of forms) {
+			const candidate = shape(all.map((s) => (s === sandbox ? seg : s)));
+			const kept = candidate.find((s) => s.key === "sandbox");
+			const segments = fit(candidate);
+			if (kept && segments.includes(kept)) return { segments, hints: hintsFor(segments) };
+		}
+	}
+	// Still no room: the perm segment yields (the tab tag and Shift+Tab still show it).
+	const last = forms[2] as FooterSegment;
+	const squeezed = all
+		.filter((s) => s.key !== "perm")
+		.map((s) => (s === sandbox ? last : unlabelled(s)));
+	const kept = fit(squeezed);
+	const segments = kept.some((s) => s.key === "sandbox") ? kept : [...kept, last];
+	return { segments, hints: hintsFor(segments) };
 }
 
 /** A permission switch the footer is announcing (#3174). */

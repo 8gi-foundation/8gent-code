@@ -8704,6 +8704,7 @@ export function App({
 								<Box justifyContent="center" flexShrink={0}>
 									<CommandPalette
 										isOpen={paletteOpen}
+										animate={showAnimations}
 										onClose={() => setPaletteOpen(false)}
 										onExecute={(name) => {
 											void handleSlashCommand(name as SlashCommand, []);
