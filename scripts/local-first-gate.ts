@@ -9,7 +9,10 @@
  *   3. an `optin` sink's guard no longer matches (the yes is gone);
  *   4. a `default` sink, or a failed guard, has no waiver, or its waiver expired;
  *   5. a file reads Ollama's /api/tags without the cloud-tag filter and is not reviewed;
- *   6. a file that starts `ollama serve` does not set OLLAMA_NO_CLOUD.
+ *   6. a file that starts `ollama serve` does not set OLLAMA_NO_CLOUD;
+ *   7. install text (pkg, apt, brew, pip, npm -g, ollama pull or serve, cmake) appears in a
+ *      file INSTALL_SITES does not list and without a `local-first-gate: optin|fallback` marker;
+ *   8. a file listed as `default` there has no waiver, or its waiver expired.
  *
  * Usage: bun scripts/local-first-gate.ts [--no-waivers] [--json] [--root <checkout>]
  *   --no-waivers  ignore every waiver: shows what main would fail on without the
@@ -29,6 +32,12 @@ import { fileURLToPath } from "node:url";
 import {
 	CODE_EXT,
 	EXCLUDED_PATH,
+	INSTALL_EXCLUDED_PATH,
+	INSTALL_MARKER,
+	INSTALL_OWN,
+	INSTALL_PATTERNS,
+	INSTALL_SITES,
+	type InstallSite,
 	LOCAL_HOST,
 	OLLAMA_TAG_READERS_REVIEWED,
 	SCOPE_DIRS,
@@ -46,7 +55,9 @@ export interface Finding {
 		| "default-sink"
 		| "waiver"
 		| "tags-reader"
-		| "serve-env";
+		| "serve-env"
+		| "new-install"
+		| "default-install";
 	sink?: string;
 	file?: string;
 	detail: string;
@@ -60,6 +71,7 @@ export interface GateResult {
 
 export interface GateOptions {
 	sinks?: Sink[];
+	installSites?: InstallSite[];
 	reviewedTagReaders?: Record<string, string>;
 	noWaivers?: boolean;
 	/** YYYY-MM-DD. */
@@ -96,17 +108,31 @@ export function hostsIn(text: string): string[] {
 	return [...out];
 }
 
+/** Install text lines with no opt-in or fallback marker on the line or the 8 above it. */
+export function installLines(text: string): { n: number; line: string }[] {
+	const lines = text.split("\n");
+	const out: { n: number; line: string }[] = [];
+	lines.forEach((line, i) => {
+		if (/^\s*(\/\/|\*|\/\*)/.test(line) || INSTALL_OWN.test(line)) return;
+		if (!INSTALL_PATTERNS.some((p) => p.test(line))) return;
+		if (lines.slice(Math.max(0, i - 8), i + 1).some((l) => INSTALL_MARKER.test(l))) return;
+		out.push({ n: i + 1, line: line.trim().slice(0, 100) });
+	});
+	return out;
+}
+
 /** Pure: `files` maps repo-relative path to text, already limited to shipped source. */
 export function runGate(files: Map<string, string>, opts: GateOptions = {}): GateResult {
 	const sinks = opts.sinks ?? SINKS;
 	const reviewed = opts.reviewedTagReaders ?? OLLAMA_TAG_READERS_REVIEWED;
+	const installSites = opts.installSites ?? INSTALL_SITES;
 	const today = opts.today ?? process.env.TODAY ?? new Date().toISOString().slice(0, 10);
 	const failures: Finding[] = [];
 	const waived: Finding[] = [];
 	const warnings: string[] = [];
 	const seenHosts = new Set<string>();
 
-	const settle = (sink: Sink | undefined, f: Finding) => {
+	const settle = (sink: { id: string; waiver?: Sink["waiver"] } | undefined, f: Finding) => {
 		const w = sink?.waiver;
 		if (!w || opts.noWaivers) return failures.push(f);
 		if (!/#\d+/.test(w.ref) || !/^\d{4}-\d{2}-\d{2}$/.test(w.expires)) {
@@ -212,6 +238,33 @@ export function runGate(files: Map<string, string>, opts: GateOptions = {}): Gat
 		for (const h of s.hosts ?? []) {
 			if (![...seenHosts].some((seen) => hostMatches(h, seen)))
 				warnings.push(`${s.id}: ${h} is listed but not in the source; trim the list`);
+		}
+	}
+
+	// 7 + 8: installs on a default path (one install, zero deps)
+	for (const [file, text] of files) {
+		if (INSTALL_EXCLUDED_PATH.test(file)) continue;
+		const unmarked = installLines(text);
+		const site = installSites.find((x) => x.file === file);
+		if (unmarked.length === 0) {
+			if (site)
+				warnings.push(
+					`${file}: listed in INSTALL_SITES (${site.mode}) but no unmarked install text is left; remove the entry`,
+				);
+			continue;
+		}
+		const first = `line ${unmarked[0].n}: ${unmarked[0].line}`;
+		if (!site) {
+			failures.push({
+				rule: "new-install",
+				file,
+				detail: `${first}. A default path must not run or tell the person to run an install. Put it behind an opt-in or fallback and mark it with "local-first-gate: optin|fallback <why>", or list the file in INSTALL_SITES.`,
+			});
+		} else if (site.mode === "default") {
+			settle(
+				{ id: `install:${file}`, waiver: site.waiver },
+				{ rule: "default-install", file, detail: `${site.why} (${first})` },
+			);
 		}
 	}
 

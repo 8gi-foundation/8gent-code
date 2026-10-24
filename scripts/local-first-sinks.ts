@@ -104,9 +104,11 @@ export const SINKS: Sink[] = [
 		optIn: [
 			{
 				file: "packages/eight/android-setup.ts",
-				// The mic question is reached only when the person typed the command
-				// (mode "command"). The first-launch pass (mode "auto") never asks it.
-				mustMatch: /mode\s*(?:!==|===)\s*"command"[\s\S]{0,400}?micAskLine\(/,
+				// Either the speech-service question is reached only when the person typed
+				// the command (mode "command"), or it is a separate cloud flag that
+				// starts false and is asked only outside the first-launch pass (askCloud).
+				mustMatch:
+					/(?:mode\s*(?:!==|===)\s*"command"[\s\S]{0,400}?micAskLine\(|const none: SetupState = \{[^}]*cloud: false[^}]*\}[\s\S]*?mode === "auto"\) return[\s\S]*?askCloud\()/,
 				how: "the off-device voice question is never asked on first launch, only after the person asks for voice",
 			},
 		],
@@ -436,3 +438,226 @@ export const OLLAMA_TAG_READERS_REVIEWED: Record<string, string> = {
 	"packages/table/discovery.ts": "lists a host's models for display",
 	"packages/telegram-bot/agent-mode.ts": "status listing",
 };
+
+// ---------------------------------------------------------------------------
+// Rule 2: one install, zero deps.
+//
+// Core works after one install. A default code path must never require or run a
+// system package install, and must never tell the person to run one: pkg, apt,
+// brew, pip install, npm i -g (other than ourselves), ollama pull or serve, a
+// cmake or make build. Allowed only behind an explicit opt-in or as a fallback
+// after the person asked for a feature that needs it.
+//
+// A line that matches INSTALL_PATTERNS must be in one of three states:
+//   - marked: the line, or one of the 8 lines above it, carries
+//     `local-first-gate: optin <why>` or `local-first-gate: fallback <why>`;
+//   - in a file listed below as optin or fallback (reviewed, nothing on a default path);
+//   - in a file listed below as default, with a waiver. Always a failure otherwise.
+// Anything else is a new install sink and fails the gate.
+// ---------------------------------------------------------------------------
+
+export const INSTALL_PATTERNS: RegExp[] = [
+	/\b(?:pkg|apt|apt-get|dnf|yum|pacman|apk|brew|choco|winget|scoop)\s+(?:install|i|add)\b/,
+	/\b(?:pip3?|pipx|cargo|gem)\s+install\b|-m\s+pip\s+install\b/,
+	/\bnpm\s+(?:i|install|add)\s+(?:-g|--global)\b|\bbun\s+(?:add|install)\s+-g\b/,
+	/\bollama\s+(?:pull|serve|run)\b|api\/pull\b|\[\s*"serve"\s*\]/,
+	/\bcmake\s+(?:-|\.)|\bmake\s+(?:-j\d*|install)\b|xcode-select\s+--install/,
+	/\binstallPkgs\(|\["install",\s*"-y"/,
+];
+/** Installing 8gent itself is the one install. */
+export const INSTALL_OWN = /8gent-code|\$\{spec\}|\$\{file\}/;
+/** Run by a person's own command, not part of a default path. */
+export const INSTALL_EXCLUDED_PATH = /(^|\/)scripts\//;
+export const INSTALL_MARKER = /local-first-gate:\s*(?:optin|fallback)\b/;
+
+export type InstallMode = "optin" | "fallback" | "default";
+
+export interface InstallSite {
+	file: string;
+	/**
+	 * optin: runs only after an explicit command or a typed yes.
+	 * fallback: text shown only after the person asked for a feature that is missing something; nothing runs.
+	 * default: on a path nobody asked for. Needs a waiver.
+	 */
+	mode: InstallMode;
+	why: string;
+	waiver?: Waiver;
+}
+
+const INSTALL_WAIVER: Waiver = {
+	ref: "#4915",
+	expires: "2026-11-07",
+	why: "Core must work after one install. Each entry goes when its install or install text is gone from the default path.",
+};
+
+export const INSTALL_SITES: InstallSite[] = [
+	// --- default paths: waived, dated, linked ------------------------------
+	{
+		file: "packages/eight/android-setup.ts",
+		mode: "default",
+		why: "first launch asks, default yes, to run pkg install for music, and the voice question installs termux-api",
+		waiver: INSTALL_WAIVER,
+	},
+	{
+		file: "packages/eight/judge-install.ts",
+		mode: "default",
+		why: "first launch asks, default yes, to pull the judge model through Ollama, and says to run ollama serve",
+		waiver: INSTALL_WAIVER,
+	},
+	{
+		file: "apps/tui/src/lib/no-provider-guidance.ts",
+		mode: "default",
+		why: "the no-provider screen tells the person to install Ollama and run ollama pull",
+		waiver: INSTALL_WAIVER,
+	},
+	{
+		file: "apps/tui/src/app.tsx",
+		mode: "default",
+		why: "the no-model message tells the person to run ollama pull",
+		waiver: INSTALL_WAIVER,
+	},
+	{
+		file: "bin/8gent.ts",
+		mode: "default",
+		why: "the no-model error tells the person to run ollama pull",
+		waiver: INSTALL_WAIVER,
+	},
+	{
+		file: "packages/eight/index.ts",
+		mode: "default",
+		why: "the runtime-unreachable error tells the person to run ollama serve",
+		waiver: INSTALL_WAIVER,
+	},
+	{
+		file: "packages/eight/repl.ts",
+		mode: "default",
+		why: "the Ollama-not-running warning tells the person to run ollama serve",
+		waiver: INSTALL_WAIVER,
+	},
+	{
+		file: "packages/providers/model-reroute.ts",
+		mode: "default",
+		why: "the no-local-model error tells the person to run ollama pull",
+		waiver: INSTALL_WAIVER,
+	},
+	{
+		file: "packages/self-autonomy/onboarding.ts",
+		mode: "default",
+		why: "onboarding tells the person to brew install ollama and ollama pull",
+		waiver: INSTALL_WAIVER,
+	},
+
+	// --- explicit command or typed yes -------------------------------------
+	{
+		file: "apps/tui/src/lib/external-agent-runner.ts",
+		mode: "optin",
+		why: "installs another company's command-line tool, only when the person picks that tool",
+	},
+	{
+		file: "packages/music/dj.ts",
+		mode: "optin",
+		why: "/dj offers the player install and runs it only after the person says yes",
+	},
+
+	// --- fallback text, nothing runs ---------------------------------------
+	{
+		file: "bin/node-version.js",
+		mode: "fallback",
+		why: "Node is missing, before 8gent starts at all",
+	},
+	{
+		file: "packages/ai/eyes-vision-provider.ts",
+		mode: "fallback",
+		why: "vision was requested and no model is available",
+	},
+	{
+		file: "packages/ai/tools.ts",
+		mode: "fallback",
+		why: "the hands tool was called and cliclick is missing",
+	},
+	{
+		file: "packages/daemon/service.ts",
+		mode: "fallback",
+		why: "the person asked for a background service and termux-services is missing",
+	},
+	{
+		file: "packages/deck/reference-breakdown.ts",
+		mode: "fallback",
+		why: "the deck command needs ffmpeg",
+	},
+	{
+		file: "packages/eight/term-tools.ts",
+		mode: "fallback",
+		why: "a tmux tool was called and tmux is missing",
+	},
+	{
+		file: "packages/eight/tools.ts",
+		mode: "fallback",
+		why: "a vision tool was called and no local vision model is present",
+	},
+	{
+		file: "packages/eight/vision-router.ts",
+		mode: "fallback",
+		why: "vision was requested and no model was found",
+	},
+	{
+		file: "packages/hands/index.ts",
+		mode: "fallback",
+		why: "a click or drag was requested and cliclick is missing",
+	},
+	{
+		file: "packages/harness-cli/commands/doctor.ts",
+		mode: "fallback",
+		why: "the doctor command names the fix for a service it found down",
+	},
+	{
+		file: "packages/kernel/local-trainer.ts",
+		mode: "fallback",
+		why: "the training pipeline is off by default; this lists what it lacks when run",
+	},
+	{
+		file: "packages/lsp/index.ts",
+		mode: "fallback",
+		why: "a language server was requested and is missing",
+	},
+	{
+		file: "packages/terminal-tab/pty-bridge.cjs",
+		mode: "fallback",
+		why: "the native terminal bridge failed to build",
+	},
+	{
+		file: "packages/voice/backends/moshi-mlx.ts",
+		mode: "fallback",
+		why: "the Moshi backend was chosen and is missing",
+	},
+	{
+		file: "packages/voice/index.ts",
+		mode: "fallback",
+		why: "voice input was requested and sox or whisper is missing",
+	},
+	{
+		file: "packages/voice/input-device.ts",
+		mode: "fallback",
+		why: "voice input was requested and sox or whisper is missing",
+	},
+	{
+		file: "packages/voice/recorder.ts",
+		mode: "fallback",
+		why: "recording was requested and sox is missing",
+	},
+	{
+		file: "packages/voice/termux-stt.ts",
+		mode: "fallback",
+		why: "voice input was requested and termux-api is missing",
+	},
+	{
+		file: "packages/voice/termux.ts",
+		mode: "fallback",
+		why: "spoken replies were requested and termux-api is missing",
+	},
+	{
+		file: "packages/voice/voice-chat.ts",
+		mode: "fallback",
+		why: "voice chat was requested and whisper is missing",
+	},
+];

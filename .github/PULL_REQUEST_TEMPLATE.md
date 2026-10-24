@@ -37,6 +37,7 @@
 - [ ] My changes generate no new warnings
 - [ ] I have tested on macOS / Linux
 - [ ] No default sends user data off the device (or it is a known item in `scripts/local-first-sinks.ts`); `bun scripts/local-first-gate.ts` passes
+- [ ] No default runs, or tells the person to run, a system install (pkg, apt, brew, pip, npm -g, ollama pull or serve) unless it is behind a marked opt-in or fallback
 
 ## Screenshots (if applicable)
 

@@ -93,6 +93,8 @@ It reads text. A host assembled from pieces, a URL held in an environment variab
 
 To add a sink, add one entry to `scripts/local-first-sinks.ts` in the same PR as the code, in the right mode, with a guard if user data can leave, and add its row here.
 
+The same gate also enforces the second principle, one install and zero deps, described in `docs/security/principles-gate.md`.
+
 ## Review question
 
 Every security review and every second read asks: **Does any default send user data off the device?** See `docs/security/review-checklist.md`.

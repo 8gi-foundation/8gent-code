@@ -244,17 +244,164 @@ describe("Ollama cloud models", () => {
 
 	test("starting ollama serve without OLLAMA_NO_CLOUD fails; with it passes", () => {
 		const bad = runGate(
-			files({ "packages/eight/auto.ts": 'spawn("ollama", ["serve"], { env })' }),
+			files({
+				"packages/eight/auto.ts": '// local-first-gate: optin\nspawn("ollama", ["serve"], { env })',
+			}),
 			{ sinks: [], reviewedTagReaders: {}, today: TODAY },
 		);
 		expect(bad.failures.map((f) => f.rule)).toEqual(["serve-env"]);
 		const ok = runGate(
 			files({
 				"packages/eight/auto.ts":
-					'spawn("ollama", ["serve"], { env: { ...env, OLLAMA_NO_CLOUD: "1" } })',
+					'// local-first-gate: optin\nspawn("ollama", ["serve"], { env: { ...env, OLLAMA_NO_CLOUD: "1" } })',
 			}),
 			{ sinks: [], reviewedTagReaders: {}, today: TODAY },
 		);
 		expect(ok.failures).toEqual([]);
+	});
+});
+
+describe("one install, zero deps", () => {
+	const JUDGE_OFFER =
+		'export const JUDGE_OLLAMA_DOWN_LINE = "Ollama is installed but not running. Start it (ollama serve), then run /judge install.";';
+	const TERMUX_PROMPT =
+		'const q = `Turn on voice input (installs termux-api)? [y/N]`;\nawait installPkgs(["termux-api"]);\nsay("Run it yourself: pkg install -y termux-api");';
+	const run = (f: Record<string, string>, over: Partial<Parameters<typeof runGate>[1]> = {}) =>
+		runGate(files(f), {
+			sinks: [],
+			reviewedTagReaders: {},
+			installSites: [],
+			today: TODAY,
+			...over,
+		});
+
+	test("the Ollama start-it text and the Termux pkg install prompt fail as new install text", () => {
+		const r = run({
+			"packages/eight/judge-install.ts": JUDGE_OFFER,
+			"packages/eight/android-setup.ts": TERMUX_PROMPT,
+		});
+		expect(r.failures.map((f) => [f.rule, f.file])).toEqual([
+			["new-install", "packages/eight/judge-install.ts"],
+			["new-install", "packages/eight/android-setup.ts"],
+		]);
+	});
+
+	test("the same text passes once it sits behind an opt-in or fallback marker", () => {
+		const marked = (body: string, kind: string) =>
+			`// local-first-gate: ${kind} only after the person typed /judge install\n${body}`;
+		const r = run({
+			"packages/eight/judge-install.ts": marked(JUDGE_OFFER, "fallback"),
+			"packages/eight/android-setup.ts": marked(TERMUX_PROMPT, "optin"),
+		});
+		expect(r.failures).toEqual([]);
+	});
+
+	test("a marker covers the eight lines below it and no more", () => {
+		const gap = (n: number) =>
+			"// local-first-gate: fallback x\n" +
+			"const a = 1;\n".repeat(n) +
+			'const s = "brew install tmux";';
+		expect(run({ "packages/x/a.ts": gap(7) }).failures).toEqual([]);
+		expect(run({ "packages/x/a.ts": gap(12) }).failures.map((f) => f.rule)).toEqual([
+			"new-install",
+		]);
+	});
+
+	test("each install family is seen", () => {
+		for (const line of [
+			'"pkg install mpv"',
+			'"sudo apt install sox"',
+			'"apt-get install -y nodejs"',
+			'"brew install whisper-cpp"',
+			'"pip install moshi"',
+			'"python3 -m pip install kittentts"',
+			'"npm install -g typescript-language-server"',
+			'"npm i -g foo"',
+			'"ollama pull qwen3:14b"',
+			'"Start it with: ollama serve"',
+			"fetch(`${host}/api/pull`)",
+			'spawn("ollama", ["serve"])',
+			'"cmake -B build"',
+			'"make -j4"',
+			'"xcode-select --install"',
+			"await installPkgs(missing)",
+		])
+			expect(
+				run({ "packages/x/a.ts": `const s = ${line};` }).failures.map((f) => f.rule),
+			).toContain("new-install");
+	});
+
+	test("installing 8gent itself, comments, scripts and tests are not sinks", () => {
+		expect(
+			run({
+				"packages/x/a.ts": 'const a = "npm install -g @8gi-foundation/8gent-code";',
+				"packages/x/b.ts": "// brew install tmux\n/** pip install x */",
+				"scripts/setup.ts": 'const s = "brew install cliclick";',
+			}).failures,
+		).toEqual([]);
+	});
+
+	test("a default file fails without its waiver, is known with it, fails after it expires", () => {
+		const site = {
+			file: "packages/eight/judge-install.ts",
+			mode: "default" as const,
+			why: "asks to pull",
+			waiver: { ref: "#4915", expires: "2026-11-07", why: "x" },
+		};
+		const f = { "packages/eight/judge-install.ts": JUDGE_OFFER };
+		expect(run(f, { installSites: [site], noWaivers: true }).failures.map((x) => x.rule)).toEqual([
+			"default-install",
+		]);
+		const known = run(f, { installSites: [site] });
+		expect(known.failures).toEqual([]);
+		expect(known.waived.map((x) => x.rule)).toEqual(["default-install"]);
+		expect(
+			run(f, { installSites: [site], today: "2099-01-01" }).failures.map((x) => x.rule),
+		).toEqual(["waiver"]);
+		expect(
+			run(f, { installSites: [{ ...site, waiver: undefined }] }).failures.map((x) => x.rule),
+		).toEqual(["default-install"]);
+	});
+
+	test("a default file passes once its install text is gone, and says to drop the entry", () => {
+		const site = {
+			file: "packages/eight/judge-install.ts",
+			mode: "default" as const,
+			why: "asks to pull",
+		};
+		const r = run(
+			{ "packages/eight/judge-install.ts": "export const x = 1;" },
+			{ installSites: [site] },
+		);
+		expect(r.failures).toEqual([]);
+		expect(r.warnings.join(" ")).toContain("remove the entry");
+	});
+
+	test("a reviewed fallback or opt-in file passes", () => {
+		const sites = [
+			{
+				file: "packages/voice/recorder.ts",
+				mode: "fallback" as const,
+				why: "recording was requested",
+			},
+			{ file: "packages/music/dj.ts", mode: "optin" as const, why: "/dj and a yes" },
+		];
+		expect(
+			run(
+				{
+					"packages/voice/recorder.ts": '"brew install sox"',
+					"packages/music/dj.ts": '"brew install mpv"',
+				},
+				{ installSites: sites },
+			).failures,
+		).toEqual([]);
+	});
+
+	test("on this tree every install-text file is accounted for, and the defaults are known items", () => {
+		const r = runGate(shippedFiles(), { today: TODAY });
+		expect(r.failures).toEqual([]);
+		expect(r.waived.some((w) => w.rule === "default-install")).toBe(true);
+		const strict = runGate(shippedFiles(), { today: TODAY, noWaivers: true });
+		expect(strict.failures.filter((f) => f.rule === "default-install").length).toBeGreaterThan(0);
 	});
 });
