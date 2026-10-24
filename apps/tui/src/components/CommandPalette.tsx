@@ -164,15 +164,40 @@ export function CommandPalette({
 		}
 	}, [filtered.length, activeIndex]);
 
+	// A tap holds its row for SETTLE_HOLD_MS (the same hold as a pressed key
+	// cap), then closes and runs in Enter's order. One timer at most. While it
+	// is pending, Enter runs the held command at once (exactly once) and Esc
+	// cancels it, so no key can run it twice or after a close. It is cleared
+	// when the sheet closes or unmounts; reduced motion runs at once.
+	const hold = useRef<{ timer: ReturnType<typeof setTimeout>; name: string } | null>(null);
+	const clearHold = () => {
+		if (hold.current) clearTimeout(hold.current.timer);
+		hold.current = null;
+		setPressedIndex(null);
+	};
+	useEffect(() => {
+		if (!isOpen) clearHold();
+	}, [isOpen]);
+	useEffect(
+		() => () => {
+			if (hold.current) clearTimeout(hold.current.timer);
+			hold.current = null;
+		},
+		[],
+	);
+
 	useInput(
 		(input, key) => {
 			if (key.escape) {
+				clearHold();
 				onClose();
 				return;
 			}
 			if (key.return) {
-				const active = filtered[activeIndex];
+				// A held tap wins: Enter during the hold runs that command now.
+				const active = hold.current ? { name: hold.current.name } : filtered[activeIndex];
 				if (active) {
+					clearHold();
 					// Close FIRST so this palette's useInput unmounts before
 					// any sub-flow (e.g. /resume, /voice, /model menus) mounts
 					// its own useInput. Otherwise both handlers race on the
@@ -202,30 +227,18 @@ export function CommandPalette({
 		{ isActive: isOpen },
 	);
 
-	// A tap on a row: the row holds its pressed look for SETTLE_HOLD_MS (the same
-	// hold as a pressed key cap), then closes and runs, in Enter's order. One
-	// timer at most, cleared when the sheet goes; reduced motion runs at once.
-	const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-	useEffect(
-		() => () => {
-			if (holdTimer.current) clearTimeout(holdTimer.current);
-			holdTimer.current = null;
-		},
-		[],
-	);
 	const tap = (index: number) => {
 		const cmd = filtered[index];
-		if (!cmd || holdTimer.current) return;
+		if (!cmd || hold.current) return;
 		const run = () => {
-			holdTimer.current = null;
-			setPressedIndex(null);
+			clearHold();
 			onClose();
 			onExecute(cmd.name);
 		};
 		setActiveIndex(index);
 		if (!motionEnabled(animate)) return run();
 		setPressedIndex(index);
-		holdTimer.current = setTimeout(run, SETTLE_HOLD_MS);
+		hold.current = { timer: setTimeout(run, SETTLE_HOLD_MS), name: cmd.name };
 	};
 	const sheetRef = useRef(null);
 	const spans: ClickSpan[] = isOpen

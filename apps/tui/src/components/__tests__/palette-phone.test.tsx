@@ -36,8 +36,13 @@ class FakeStdin extends EventEmitter {
 	setEncoding() {}
 	ref() {}
 	unref() {}
+	private queue: string[] = [];
 	read(): string | null {
-		return null;
+		return this.queue.shift() ?? null;
+	}
+	feed(...chunks: string[]) {
+		this.queue.push(...chunks);
+		this.emit("readable");
 	}
 }
 
@@ -50,7 +55,12 @@ afterEach(() => {
 function mount(
 	cols: number,
 	rows: number,
-	extra: { animate?: boolean; commands?: typeof COMMANDS } = {},
+	extra: {
+		animate?: boolean;
+		commands?: typeof COMMANDS;
+		stdin?: FakeStdin;
+		closeAfterTap?: boolean;
+	} = {},
 ) {
 	const out = new EventEmitter() as EventEmitter & {
 		columns: number;
@@ -69,25 +79,29 @@ function mount(
 		return true;
 	};
 	const calls: string[] = [];
-	const app = render(
+	const palette = (isOpen: boolean) => (
 		<CommandPalette
-			isOpen
+			isOpen={isOpen}
 			columns={cols}
 			animate={extra.animate ?? true}
 			onClose={() => calls.push("close")}
 			onExecute={(n) => calls.push(`run:${n}`)}
 			commands={extra.commands ?? COMMANDS}
-		/>,
-		{
-			stdout: out as unknown as NodeJS.WriteStream,
-			stdin: new FakeStdin() as unknown as NodeJS.ReadStream,
-			debug: true,
-			patchConsole: false,
-			exitOnCtrlC: false,
-		},
+		/>
 	);
+	const app = render(palette(true), {
+		stdout: out as unknown as NodeJS.WriteStream,
+		stdin: (extra.stdin ?? new FakeStdin()) as unknown as NodeJS.ReadStream,
+		debug: true,
+		patchConsole: false,
+		exitOnCtrlC: false,
+	});
 	mounted.push(() => app.unmount());
-	return { lines: () => out.last.replace(/\n+$/, "").split("\n"), calls };
+	return {
+		lines: () => out.last.replace(/\n+$/, "").split("\n"),
+		calls,
+		rerenderClosed: () => app.rerender(palette(false)),
+	};
 }
 
 describe("geometry", () => {
@@ -151,6 +165,47 @@ describe("renders inside the screen", () => {
 		expect(ls[0]).toMatch(/^╭─+╮$/);
 		expect([...(ls[0] as string)].length).toBe(50);
 		expect(ls.at(-1)).toMatch(/^╰─+╯$/);
+	});
+});
+
+describe("a key during the tap hold (#4952 second read)", () => {
+	function press(cols: number, key: "\r" | "\x1b") {
+		const stdin = new FakeStdin();
+		const m = mount(cols, 30, { stdin });
+		return { ...m, key: () => stdin.feed(key) };
+	}
+
+	test("Enter during the hold runs the held command exactly once", async () => {
+		const m = press(52, "\r");
+		await sleep(40);
+		const row = paletteRowSpans(52, COMMANDS.length, 0)[1]!;
+		hitTest(row.dx, row.dy)?.action();
+		await sleep(30);
+		m.key();
+		await sleep(SETTLE_HOLD_MS + 100);
+		expect(m.calls).toEqual(["close", "run:hotkeys"]);
+	});
+
+	test("Esc during the hold cancels it: the sheet closes and nothing runs", async () => {
+		const m = press(52, "\x1b");
+		await sleep(40);
+		const row = paletteRowSpans(52, COMMANDS.length, 0)[1]!;
+		hitTest(row.dx, row.dy)?.action();
+		await sleep(30);
+		m.key();
+		await sleep(SETTLE_HOLD_MS + 100);
+		expect(m.calls).toEqual(["close"]);
+	});
+
+	test("closing the sheet while a tap is held runs nothing", async () => {
+		const stdin = new FakeStdin();
+		const m = mount(52, 30, { stdin, closeAfterTap: true });
+		await sleep(40);
+		const row = paletteRowSpans(52, COMMANDS.length, 0)[1]!;
+		hitTest(row.dx, row.dy)?.action();
+		m.rerenderClosed();
+		await sleep(SETTLE_HOLD_MS + 100);
+		expect(m.calls.filter((c) => c.startsWith("run:"))).toEqual([]);
 	});
 });
 
