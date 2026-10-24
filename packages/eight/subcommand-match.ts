@@ -29,6 +29,7 @@ export const KNOWN_SUBCOMMANDS = [
 	"auth",
 	"cron",
 	"blueprint",
+	"scout",
 	"daemon",
 	"rpc",
 	"mcp-server",

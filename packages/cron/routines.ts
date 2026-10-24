@@ -18,6 +18,16 @@ import * as path from "node:path";
 import { eightCliPath, safeBunFlags } from "../core/bun-flags";
 import { resolveHome } from "../core/home";
 import { cronMatches, dueSince } from "./index";
+import {
+	type Ask,
+	type ScoutFetch,
+	type ScoutSpec,
+	consentHash,
+	consentLine,
+	defaultAsk,
+	runScout,
+	validateScout,
+} from "./scout";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -49,6 +59,15 @@ export interface Routine {
 
 	/** When the schedule last fired it (ISO). Persisted so a restart can catch up. */
 	lastRun?: string;
+
+	/**
+	 * "scout": reads the person's listed sources in this process and writes a local file
+	 * (packages/cron/scout.ts). Absent: an ordinary prompt routine run by a headless chat.
+	 */
+	kind?: "scout";
+
+	/** Scout only: the schema (sources, keywords) and the yes it is running under. */
+	scout?: ScoutSpec & { consent?: { at: string; hash: string } };
 
 	/** Triggers that can fire this routine outside the schedule */
 	triggers?: RoutineTrigger[];
@@ -85,6 +104,8 @@ export class RoutineManager {
 	private routines: Routine[];
 	/** True when the path came from the home directory: only then is the directory ours to tighten. */
 	private ownsDir: boolean;
+	private env: Record<string, string | undefined>;
+	private fetchImpl?: ScoutFetch;
 
 	/** Where the store lives. */
 	get storePath(): string {
@@ -95,7 +116,13 @@ export class RoutineManager {
 	 * `dataPath` wins when given. Otherwise <home>/.8gent/routines.json, home from resolveHome(env)
 	 * (EIGHT_HOME, then HOME or USERPROFILE, then the OS home), never a literal "~".
 	 */
-	constructor(dataPath?: string, env: Record<string, string | undefined> = process.env) {
+	constructor(
+		dataPath?: string,
+		env: Record<string, string | undefined> = process.env,
+		deps: { fetchImpl?: ScoutFetch } = {},
+	) {
+		this.env = env;
+		this.fetchImpl = deps.fetchImpl;
 		this.ownsDir = !dataPath;
 		this.filePath = dataPath || path.join(resolveHome(env), ".8gent", "routines.json");
 		this.tightenDir();
@@ -239,6 +266,60 @@ export class RoutineManager {
 		return routine;
 	}
 
+	/**
+	 * Create a scout, only after a yes. The question lists every address and defaults to No;
+	 * a no, or nobody to ask (CI, EIGHT_UNATTENDED, no terminal), saves nothing. Throws on a spec
+	 * outside the schema.
+	 */
+	async createScout(
+		opts: {
+			name: string;
+			schedule: string;
+			sources: { id: string; url: string }[];
+			keywords?: string[];
+			description?: string;
+			timeoutSeconds?: number;
+		},
+		ask: Ask = defaultAsk(this.env),
+	): Promise<Routine | null> {
+		const spec = validateScout({ sources: opts.sources, keywords: opts.keywords ?? [] });
+		if ((await ask(consentLine(opts.name, opts.schedule, spec), false)) !== true) return null;
+		const now = new Date().toISOString();
+		const routine: Routine = {
+			id: crypto.randomUUID().slice(0, 8),
+			name: opts.name,
+			description: opts.description,
+			prompt: "scout",
+			schedule: opts.schedule,
+			timeoutSeconds: opts.timeoutSeconds || 300,
+			enabled: true,
+			kind: "scout",
+			scout: { ...spec, consent: { at: now, hash: consentHash(spec) } },
+			history: [],
+			createdAt: now,
+			updatedAt: now,
+		};
+		this.routines.push(routine);
+		this.save();
+		return routine;
+	}
+
+	/** Turn a scout back on, asking again. True when it is now on. */
+	async enableScout(id: string, ask: Ask = defaultAsk(this.env)): Promise<boolean> {
+		const routine = this.routines.find((r) => r.id === id);
+		if (!routine || routine.kind !== "scout" || !routine.scout) return false;
+		const { consent: _c, ...raw } = routine.scout;
+		const spec = validateScout(raw);
+		if ((await ask(consentLine(routine.name, routine.schedule, spec), false)) !== true)
+			return false;
+		const now = new Date().toISOString();
+		routine.scout = { ...spec, consent: { at: now, hash: consentHash(spec) } };
+		routine.enabled = true;
+		routine.updatedAt = now;
+		this.save();
+		return true;
+	}
+
 	/** Delete a routine by ID */
 	delete(id: string): boolean {
 		const before = this.routines.length;
@@ -260,10 +341,10 @@ export class RoutineManager {
 		return this.routines.find((r) => r.id === id) || null;
 	}
 
-	/** Enable a routine */
+	/** Enable a routine. A scout is only ever enabled by a yes (createScout, enableScout). */
 	enable(id: string): void {
 		const routine = this.routines.find((r) => r.id === id);
-		if (routine) {
+		if (routine && routine.kind !== "scout") {
 			routine.enabled = true;
 			routine.updatedAt = new Date().toISOString();
 			this.save();
@@ -275,6 +356,8 @@ export class RoutineManager {
 		const routine = this.routines.find((r) => r.id === id);
 		if (routine) {
 			routine.enabled = false;
+			// Turning a scout back on asks again.
+			if (routine.kind === "scout" && routine.scout) routine.scout.consent = undefined;
 			routine.updatedAt = new Date().toISOString();
 			this.save();
 		}
@@ -284,11 +367,12 @@ export class RoutineManager {
 	 * Check all enabled routines and run any that are due.
 	 * Call this every minute from the daemon loop.
 	 */
-	async tick(now: Date = new Date()): Promise<RoutineRun[]> {
+	async tick(now: Date = new Date(), opts: { kinds?: string[] } = {}): Promise<RoutineRun[]> {
 		const runs: RoutineRun[] = [];
 
 		for (const routine of this.routines) {
 			if (!routine.enabled) continue;
+			if (opts.kinds && !opts.kinds.includes(routine.kind ?? "prompt")) continue;
 			// Baseline is createdAt so a new routine never replays slots from before it existed.
 			const lastRun = routine.catchUp === false ? undefined : routine.lastRun || routine.createdAt;
 			if (!dueSince(routine.schedule, lastRun, now)) continue;
@@ -329,6 +413,12 @@ export class RoutineManager {
 		};
 
 		try {
+			if (routine.kind === "scout") {
+				await this.executeScout(routine, run);
+				run.completedAt = new Date().toISOString();
+				this.finish(routine, run);
+				return run;
+			}
 			// 8gent's own CLI by absolute path, and no bunfig.toml or .env from routine.cwd (#4013).
 			const cli = eightCliPath();
 			if (!cli) throw new Error("8gent CLI entry not found for this install");
@@ -368,8 +458,12 @@ export class RoutineManager {
 		}
 
 		run.completedAt = new Date().toISOString();
+		this.finish(routine, run);
+		return run;
+	}
 
-		// Keep last 10 runs
+	/** Keep the last 10 runs and save. */
+	private finish(routine: Routine, run: RoutineRun): void {
 		if (!routine.history) routine.history = [];
 		routine.history.push(run);
 		if (routine.history.length > 10) {
@@ -377,8 +471,29 @@ export class RoutineManager {
 		}
 		routine.updatedAt = new Date().toISOString();
 		this.save();
+	}
 
-		return run;
+	/**
+	 * A scout runs in this process. It runs only under a yes that still covers its sources: if the
+	 * file was edited after the person agreed, it fetches nothing. History keeps the status and the
+	 * result file's path, not its content.
+	 */
+	private async executeScout(routine: Routine, run: RoutineRun): Promise<void> {
+		const { consent, ...raw } = routine.scout ?? ({} as NonNullable<Routine["scout"]>);
+		let covered = false;
+		try {
+			covered = !!consent && consent.hash === consentHash(validateScout(raw));
+		} catch {}
+		if (!covered) {
+			run.status = "failed";
+			run.error =
+				"the sources changed since you agreed to them, or there was no yes; nothing was fetched. Turn it on again to agree";
+			return;
+		}
+		const r = await runScout(routine, { fetchImpl: this.fetchImpl, env: this.env });
+		run.status = r.status;
+		run.output = r.file;
+		if (r.error) run.error = r.error;
 	}
 }
 

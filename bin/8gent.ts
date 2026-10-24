@@ -571,6 +571,10 @@ async function main() {
 			await blueprintCommand(restArgs);
 			break;
 
+		case "scout":
+			await scoutCommand(restArgs);
+			break;
+
 		case "daemon": {
 			const { daemonCommand } = await import("../packages/daemon/service.ts");
 			const code = await daemonCommand(restArgs, daemonProgram());
@@ -1903,6 +1907,14 @@ async function cronCommand(args: string[]) {
 		console.log("Available: list, add, remove, enable, disable");
 		process.exit(1);
 	}
+}
+
+// ── Scout Command (#4926) ─────────────────────────────────────────
+
+async function scoutCommand(args: string[]) {
+	const { getRoutineManager } = await import("../packages/cron/routines.ts");
+	const { runScoutCommand } = await import("../packages/cron/scout-cli.ts");
+	process.exitCode = await runScoutCommand(args, { manager: getRoutineManager() });
 }
 
 // ── Blueprint Command (trial, EIGHT_BLUEPRINTS=1 only, #3463) ─────
