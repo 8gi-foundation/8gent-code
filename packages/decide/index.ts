@@ -131,6 +131,8 @@ export interface DeciderOptions {
 	env?: Record<string, string | undefined>;
 	/** How to load the optional node-llama-cpp package; null disables llamacpp in auto. Tests inject a fake. */
 	llamacppLoader?: LlamaCppLoader | null;
+	/** Tests only: where the llama.cpp profiles are read from. Never from the environment. */
+	calibrationDir?: string;
 }
 
 export interface Decider {
@@ -216,13 +218,15 @@ async function buildBackend(opts: DeciderOptions, avoidShared = false): Promise<
 		env: model ? { ...env, EIGHT_DECIDE_MODEL: model } : env,
 		llamacppLoader: opts.llamacppLoader,
 		avoidShared,
+		calibrationDir: opts.calibrationDir,
 	});
-	if (probe.backend === "llamacpp" && probe.url && !probe.path)
+	if (probe.backend === "llamacpp" && probe.url && !probe.path && probe.model)
 		return local(
 			new LlamaServerBackend({
+				model: probe.model,
 				timeoutMs: opts.timeoutMs,
 				fetch: opts.fetch,
-				apiKey: readLlamaKey(readLlamaRecord(env)),
+				apiKey: readLlamaKey(readLlamaRecord(env, opts.calibrationDir)),
 			}),
 		);
 	if (probe.backend === "llamacpp" && probe.model && probe.path) {

@@ -33,6 +33,7 @@ import {
 import { dirname, join } from "node:path";
 import pkg from "../../package.json";
 import { resolveHome } from "../core/home";
+import { loadCalibration } from "../decide/calibrate";
 import { JUDGE_MODEL } from "../decide/judge-model";
 import { findOnPath, isAndroidHost } from "../voice/termux";
 import { managedWhisperBin } from "../voice/termux-local-stt";
@@ -219,23 +220,57 @@ export const JUDGE_GGUF = {
 	bytes: 4_920_739_424,
 } as const;
 
+/** One row of the judge catalogue: the model's name, the file that is that model, and the smallest device it is for. */
+export interface JudgeEntry {
+	/**
+	 * The calibrated model name. It is what the llama-server record, the probe and the backend
+	 * report, so it is the key the gate's thresholds are looked up by
+	 * (calibration/llamacpp-<model>.json). Never a name other than the file's own.
+	 */
+	model: string;
+	minRamBytes: number;
+	pin: Pin;
+}
+
 /**
  * Judge models by device, largest first: the first row whose minimum RAM the device has. Selene is
  * 4.9 GB and loaded with a 4096 context, so it is only for a device with 12 GB or more. A smaller
  * device gets no download yet: the safety check asks the person instead.
  *
  * SLOT for a phone-sized pin: a row with a smaller minRamBytes goes here once 8gent has its own
- * small judge (candidate: 8J, waiting on a yes). No third-party small model is a default.
+ * small judge (candidate: 8J, waiting on a yes). No third-party small model is a default. A row
+ * only counts once calibration/llamacpp-<its model>.json ships: without its own profile a model
+ * is never offered, started or asked (#4965).
  */
-export const JUDGE_MODELS: readonly { minRamBytes: number; pin: Pin }[] = [
-	{ minRamBytes: 12 * 2 ** 30, pin: JUDGE_GGUF },
+export const JUDGE_MODELS: readonly JudgeEntry[] = [
+	{ model: JUDGE_MODEL, minRamBytes: 12 * 2 ** 30, pin: JUDGE_GGUF },
 ];
+
+/** True when a llama.cpp profile fitted for exactly this model ships with 8gent. */
+export function hasLlamaProfile(model: string): boolean {
+	return loadCalibration(model, "llamacpp") !== null;
+}
+
+/**
+ * The catalogue row for a device with this much total RAM: the first that fits and has its own
+ * llama.cpp profile. null when none does, so no judge is set up (fail closed, #4965).
+ */
+export function judgeEntryFor(
+	totalRamBytes: number,
+	catalogue: readonly JudgeEntry[] = JUDGE_MODELS,
+	hasProfile: (model: string) => boolean = hasLlamaProfile,
+): JudgeEntry | null {
+	if (!Number.isFinite(totalRamBytes)) return null;
+	return catalogue.find((m) => totalRamBytes >= m.minRamBytes && hasProfile(m.model)) ?? null;
+}
 
 /** The pin for a device with this much total RAM, or null when no judge model is sized for it. */
 export function judgeModelFor(totalRamBytes: number): Pin | null {
-	if (!Number.isFinite(totalRamBytes)) return null;
-	return JUDGE_MODELS.find((m) => totalRamBytes >= m.minRamBytes)?.pin ?? null;
+	return judgeEntryFor(totalRamBytes)?.pin ?? null;
 }
+
+/** "4.9 GB" for a pin, the way `ollama list` and the questions say a size. */
+export const pinSize = (pin: Pin): string => `${(pin.bytes / 1e9).toFixed(1)} GB`;
 
 /** "hf.co/<owner>/<repo>:<tag>" (the calibrated model name) to "<owner>/<repo>"; null for anything else. */
 export function judgeRepo(model: string = JUDGE_MODEL): string | null {

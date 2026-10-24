@@ -11,6 +11,7 @@
  * output) is injected, so tests stub the installer and never download.
  */
 
+import { createHash } from "node:crypto";
 import {
 	existsSync,
 	lstatSync,
@@ -36,15 +37,19 @@ import {
 	startOllama,
 } from "./local-runtime";
 import {
+	JUDGE_MODELS,
+	type JudgeEntry,
 	type LlamaServerResult,
 	type ModelResult,
 	type Pin,
 	ensureLlamaServer,
 	fetchJudgeModel,
 	findLlamaServer,
-	judgeModelFor,
+	hasLlamaProfile,
+	judgeEntryFor,
 	judgeModelPath,
 	judgeModelPresent,
+	pinSize,
 } from "./runtime-fetch";
 
 /** The calibrated judge, fixed at build time (packages/decide/judge-model.ts), never from user config. */
@@ -88,8 +93,13 @@ export interface JudgeDeps {
 	/** The single progress status line (rewritten in place on a terminal). */
 	progress?: (line: string) => void;
 	readChoice?: () => JudgeChoice | null | undefined;
-	/** Pass null to clear. Returns false when the config could not be written. */
-	writeChoice?: (c: JudgeChoice | null) => boolean;
+	/**
+	 * Pass null to clear. Returns false when the config could not be written. `basis` comes with
+	 * "unsupported": the catalogue and device it was decided on (judgeBasis), so it can go stale.
+	 */
+	writeChoice?: (c: JudgeChoice | null, basis?: string) => boolean;
+	/** The basis stored with the recorded choice; null when none was stored (an older record). */
+	readBasis?: () => string | null;
 }
 
 export const NO_DEVICE_MODEL_LINE =
@@ -100,17 +110,42 @@ export interface LlamaDeps {
 	totalRamBytes?: () => number;
 	/** Force the path on or off. Default: Android, or EIGHT_JUDGE_RUNTIME=llama-server; never with =ollama. */
 	enabled?: boolean;
-	/** A llama-server and the verified model already on disk (set up before): start it, ask nothing. */
-	existing?: () => { bin: string; gguf: string } | null;
+	/**
+	 * A llama-server and a verified catalogue model already on disk (set up before): start it, ask
+	 * nothing. `model` is that file's catalogue name; it is what the server is started as.
+	 */
+	existing?: () => { bin: string; gguf: string; model: string } | null;
 	/** 8gent's own llama-server for this version; a system one only as a fallback. */
 	ensureBinary?: () => Promise<LlamaServerResult>;
-	/** The pinned judge model, verified. */
-	ensureModel?: (onPercent: (pct: number) => void, pin: Pin) => Promise<ModelResult>;
-	start?: (bin: string, gguf: string) => Promise<StartResult>;
+	/** The pinned judge model, verified. `model` names the repo it is fetched from. */
+	ensureModel?: (onPercent: (pct: number) => void, pin: Pin, model: string) => Promise<ModelResult>;
+	/** Start llama-server on `gguf`, recorded as `model` (the chosen catalogue entry's name). */
+	start?: (bin: string, gguf: string, model: string) => Promise<StartResult>;
+	/** The judge catalogue. Default: runtime-fetch JUDGE_MODELS. Tests pass their own rows. */
+	catalogue?: readonly JudgeEntry[];
+	/** Does a llama.cpp profile ship for exactly this model? Default: calibration/llamacpp-<model>.json. */
+	hasProfile?: (model: string) => boolean;
 }
 
-export const llamaAskLine = (defaultYes = false): string =>
-	`Set up the safety judge on this device? It downloads llama.cpp from 8gent's release and the judge model (~${JUDGE_SIZE}, from Hugging Face), then checks risky commands before they run. ${defaultYes ? "[Y/n]" : "[y/N]"}`;
+/**
+ * What an "unsupported" verdict was decided on: the catalogue rows that count (each one's name,
+ * pin, minimum RAM, and whether its profile ships) and this device's RAM. When either changes
+ * (an update adds a pin or a profile, or the device is different) the verdict is stale and
+ * is decided again (#4965).
+ */
+export function judgeBasis(
+	totalRamBytes: number,
+	catalogue: readonly JudgeEntry[] = JUDGE_MODELS,
+	hasProfile: (model: string) => boolean = hasLlamaProfile,
+): string {
+	const rows = catalogue.map((e) => [e.model, e.pin.sha256, e.minRamBytes, hasProfile(e.model)]);
+	const cat = createHash("sha256").update(JSON.stringify(rows)).digest("hex").slice(0, 16);
+	const ramMiB = Number.isFinite(totalRamBytes) ? Math.floor(totalRamBytes / 2 ** 20) : -1;
+	return `v1 catalogue=${cat} ramMiB=${ramMiB}`;
+}
+
+export const llamaAskLine = (defaultYes = false, size: string = JUDGE_SIZE): string =>
+	`Set up the safety judge on this device? It downloads llama.cpp from 8gent's release and the judge model (~${size}, from Hugging Face), then checks risky commands before they run. ${defaultYes ? "[Y/n]" : "[y/N]"}`;
 
 export const judgeAskLine = (defaultYes = false): string =>
 	`Install the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE})? It checks risky commands before they run. ${defaultYes ? "[Y/n]" : "[y/N]"}`;
@@ -119,6 +154,9 @@ export const JUDGE_ASK_LINE = judgeAskLine(false);
 export const JUDGE_UNSUPPORTED_LINE =
 	"The safety judge needs Ollama, which is not available here, so risky commands are checked by the built-in safety rules only. " +
 	"To enable the judge, install Ollama, start it, then run /judge install.";
+
+const JUDGE_DECLINED_LINE =
+	"OK. Risky commands are checked by the built-in safety rules only. Run /judge install if you change your mind.";
 
 export const JUDGE_OLLAMA_DOWN_LINE =
 	"Ollama is installed but not running, so the safety judge cannot be installed yet. Start it (ollama serve), then run /judge install. " +
@@ -142,11 +180,24 @@ export function readChoice(env: Env = process.env): JudgeChoice | "corrupt" | nu
 	}
 }
 
+/** The basis stored with the recorded choice (judgeBasis), or null when there is none. */
+export function readChoiceBasis(env: Env = process.env): string | null {
+	const p = configPath(env);
+	if (!existsSync(p)) return null;
+	try {
+		const v = JSON.parse(readFileSync(p, "utf-8"))?.judgeInstall?.basis;
+		return typeof v === "string" ? v : null;
+	} catch {
+		return null;
+	}
+}
+
 /** Merge the choice into config.json, keeping every other key. Never overwrites a file it cannot parse. */
 export function writeChoice(
 	c: JudgeChoice | null,
 	env: Env = process.env,
 	now = new Date(),
+	basis?: string,
 ): boolean {
 	const p = configPath(env);
 	let cfg: Record<string, unknown> = {};
@@ -160,7 +211,10 @@ export function writeChoice(
 		}
 	}
 	if (c === null) delete cfg.judgeInstall;
-	else cfg.judgeInstall = { choice: c, at: now.toISOString() };
+	else
+		cfg.judgeInstall = basis
+			? { choice: c, at: now.toISOString(), basis }
+			: { choice: c, at: now.toISOString() };
 	let tmp = "";
 	try {
 		// A symlinked config stays a symlink: write next to the real target and rename over that.
@@ -361,13 +415,19 @@ async function llamaJudge(
 ): Promise<JudgeOutcome | "fallback"> {
 	const L = deps.llama ?? {};
 	const ask = askerFor(deps, env);
+	const catalogue = L.catalogue ?? JUDGE_MODELS;
+	const hasProfile = L.hasProfile ?? hasLlamaProfile;
+	// The server is started as the chosen catalogue entry's own model, never a fixed name (#4965).
 	const start =
-		L.start ?? ((bin: string, gguf: string) => startLlamaServer(bin, gguf, JUDGE_MODEL, { env }));
+		L.start ??
+		((bin: string, gguf: string, model: string) => startLlamaServer(bin, gguf, model, { env }));
 	const existing =
 		L.existing ??
 		(() => {
 			const bin = findLlamaServer(env);
-			return bin && judgeModelPresent(env) ? { bin: bin.bin, gguf: judgeModelPath(env) } : null;
+			if (!bin) return null;
+			const e = catalogue.find((m) => hasProfile(m.model) && judgeModelPresent(env, m.pin));
+			return e ? { bin: bin.bin, gguf: judgeModelPath(env, e.pin), model: e.model } : null;
 		});
 	const fail = (why: string): JudgeOutcome => {
 		d.say(
@@ -376,8 +436,13 @@ async function llamaJudge(
 		if (mode === "auto") d.writeChoice("failed");
 		return "failed";
 	};
-	const finish = async (bin: string, gguf: string, how: JudgeOutcome): Promise<JudgeOutcome> => {
-		const r = await start(bin, gguf);
+	const finish = async (
+		bin: string,
+		gguf: string,
+		model: string,
+		how: JudgeOutcome,
+	): Promise<JudgeOutcome> => {
+		const r = await start(bin, gguf, model);
 		if (!r.ok) return fail(r.line);
 		const after = await d.probe();
 		if (after.backend === "none") return fail("the server started, but no judge answers yet");
@@ -387,15 +452,16 @@ async function llamaJudge(
 	};
 
 	// Set up before and just not running (a reboot, a closed Termux): the person said yes once.
+	// A model with no profile of its own is never started: it would judge at no one's thresholds.
 	const have = existing();
-	if (have) {
+	if (have && hasProfile(have.model)) {
 		d.say("Starting the safety judge in the background.");
-		return finish(have.bin, have.gguf, "started");
+		return finish(have.bin, have.gguf, have.model, "started");
 	}
 
-	// Nothing is asked or downloaded for a device no judge model is sized for.
-	const pin = judgeModelFor((L.totalRamBytes ?? totalmem)());
-	if (!pin) {
+	// Nothing is asked or downloaded for a device no calibrated judge model is sized for.
+	const entry = judgeEntryFor((L.totalRamBytes ?? totalmem)(), catalogue, hasProfile);
+	if (!entry) {
 		if (mode === "auto" && !d.writeChoice("unsupported")) return "no-person";
 		d.say(NO_DEVICE_MODEL_LINE);
 		return "unsupported";
@@ -403,7 +469,7 @@ async function llamaJudge(
 
 	if (mode === "auto") {
 		const defaultYes = deps.defaultYes ?? false;
-		const yes = await ask(llamaAskLine(defaultYes), defaultYes);
+		const yes = await ask(llamaAskLine(defaultYes, pinSize(entry.pin)), defaultYes);
 		if (yes === null) return "no-person";
 		if (!yes) {
 			d.writeChoice("declined");
@@ -432,14 +498,19 @@ async function llamaJudge(
 	let last = -1;
 	const model = await (
 		L.ensureModel ??
-		((p: (n: number) => void, pn: Pin) => fetchJudgeModel({ env, onPercent: p, pin: pn }))
-	)((pct) => {
-		if (pct === last) return;
-		last = pct;
-		d.progress(`Downloading the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE}): ${pct}%`);
-	}, pin);
+		((p: (n: number) => void, pn: Pin, m: string) =>
+			fetchJudgeModel({ env, onPercent: p, pin: pn, model: m }))
+	)(
+		(pct) => {
+			if (pct === last) return;
+			last = pct;
+			d.progress(`Downloading the safety judge (${entry.model}, ~${pinSize(entry.pin)}): ${pct}%`);
+		},
+		entry.pin,
+		entry.model,
+	);
 	if (!model.ok) return fail(model.why);
-	return finish(bin.bin, model.path, "installed");
+	return finish(bin.bin, model.path, entry.model, "installed");
 }
 
 /**
@@ -454,6 +525,11 @@ export async function offerJudge(
 	const env = deps.env ?? process.env;
 	const ask = askerFor(deps, env);
 	const say = deps.say ?? ((l: string) => console.log(l));
+	const L = deps.llama ?? {};
+	const basisNow = (): string =>
+		judgeBasis((L.totalRamBytes ?? totalmem)(), L.catalogue, L.hasProfile);
+	const write =
+		deps.writeChoice ?? ((c: JudgeChoice | null, b?: string) => writeChoice(c, env, new Date(), b));
 	const d = {
 		probe: deps.probe ?? (() => detectBackend({ env })),
 		ollama: deps.ollama ?? (() => defaultOllama(env)),
@@ -465,13 +541,19 @@ export async function offerJudge(
 		say,
 		progress: deps.progress ?? terminalProgress,
 		readChoice: deps.readChoice ?? (() => readChoice(env)),
-		writeChoice: deps.writeChoice ?? ((c: JudgeChoice | null) => writeChoice(c, env)),
+		// "unsupported" carries what it was decided on, so a later catalogue or device can undo it.
+		writeChoice: (c: JudgeChoice | null) => (c === "unsupported" ? write(c, basisNow()) : write(c)),
 	};
+	const readBasis = deps.readBasis ?? (() => readChoiceBasis(env));
 
 	if (env.EIGHT_SYSTEM_ONE?.trim() === "0") return "off";
 
 	if (mode === "auto") {
-		if (d.readChoice()) return "recorded";
+		const rec = d.readChoice();
+		// A person's no (declined), a failure and a corrupt file stay final. "unsupported" is a fact
+		// about the catalogue and this device, not a choice: decided again when either changed (or
+		// was never stored, an older record), never kept forever (#4965).
+		if (rec && !(rec === "unsupported" && readBasis() !== basisNow())) return "recorded";
 	}
 	const now = await d.probe();
 	if (now.backend !== "none") {
@@ -491,12 +573,21 @@ export async function offerJudge(
 	let o = await d.ollama();
 	let downLine = o === "none" ? JUDGE_UNSUPPORTED_LINE : JUDGE_OLLAMA_DOWN_LINE;
 	// Installed but stopped: start it in the background instead of handing the person a blocking
-	// `ollama serve` (#4906). Auto asks once (a no falls through to the recorded choice below, so it is
-	// never asked again, and a bare Enter after an update is a no); /judge install is itself the yes.
+	// `ollama serve` (#4906). Auto asks once; /judge install is itself the yes. A no (a bare Enter
+	// after an update is a no) is the person's choice, recorded as "declined" so no catalogue change
+	// ever asks again. "unsupported" stays for Ollama absent, not started, or nobody to ask.
 	if (o === "installed" && isLocalDefaultHost(resolveSharedJudgeHost(env))) {
 		const defaultYes = deps.defaultYes ?? false;
 		let go = mode === "command";
-		if (!go) go = (await ask(ollamaStartAsk(defaultYes), defaultYes)) === true;
+		if (!go) {
+			const yes = await ask(ollamaStartAsk(defaultYes), defaultYes);
+			if (yes === false) {
+				d.writeChoice("declined");
+				say(JUDGE_DECLINED_LINE);
+				return "declined";
+			}
+			go = yes === true;
+		}
 		if (go) {
 			say("Starting Ollama in the background.");
 			// local-first-gate: fallback Ollama autostart, for a person who already has Ollama installed
@@ -521,9 +612,7 @@ export async function offerJudge(
 		if (yes === null) return "no-person";
 		if (!yes) {
 			d.writeChoice("declined");
-			say(
-				"OK. Risky commands are checked by the built-in safety rules only. Run /judge install if you change your mind.",
-			);
+			say(JUDGE_DECLINED_LINE);
 			return "declined";
 		}
 	}

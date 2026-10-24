@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { loadCalibration } from "../calibrate";
+import { calibrationFileName, loadCalibration } from "../calibrate";
 import { createDecider } from "../index";
 import { JUDGE_MODEL } from "../judge-model";
 import { detectBackend } from "../probe";
@@ -112,7 +112,7 @@ describe("LlamaServerBackend", () => {
 		});
 
 	test("the calibrated judge on llama.cpp: name llamacpp, the judge's model name, and a calibration exists", () => {
-		const b = new LlamaServerBackend();
+		const b = new LlamaServerBackend({ model: JUDGE_MODEL });
 		expect(b.name).toBe("llamacpp");
 		expect(b.model).toBe(JUDGE_MODEL);
 		expect(loadCalibration(b.model, b.name)).not.toBeNull();
@@ -120,7 +120,7 @@ describe("LlamaServerBackend", () => {
 
 	test("POSTs a raw one-token prompt to the loopback /completion, never following a redirect", async () => {
 		const s = fakeServer();
-		const res = await ask(new LlamaServerBackend({ fetch: s.fetchImpl }));
+		const res = await ask(new LlamaServerBackend({ model: JUDGE_MODEL, fetch: s.fetchImpl }));
 		const c = s.calls.find((x) => x.url.endsWith("/completion")) as {
 			url: string;
 			init: RequestInit;
@@ -144,14 +144,14 @@ describe("LlamaServerBackend", () => {
 
 	test("the per-start key is sent as a bearer token; without one no header is sent", async () => {
 		const s = fakeServer();
-		await ask(new LlamaServerBackend({ fetch: s.fetchImpl, apiKey: "k-123" }));
+		await ask(new LlamaServerBackend({ model: JUDGE_MODEL, fetch: s.fetchImpl, apiKey: "k-123" }));
 		const h = s.calls.find((x) => x.url.endsWith("/completion"))?.init?.headers as Record<
 			string,
 			string
 		>;
 		expect(h.authorization).toBe("Bearer k-123");
 		const t = fakeServer();
-		await ask(new LlamaServerBackend({ fetch: t.fetchImpl }));
+		await ask(new LlamaServerBackend({ model: JUDGE_MODEL, fetch: t.fetchImpl }));
 		const h2 = t.calls.find((x) => x.url.endsWith("/completion"))?.init?.headers as Record<
 			string,
 			string
@@ -161,16 +161,19 @@ describe("LlamaServerBackend", () => {
 
 	test("a server that cannot answer is Unavailable; an answer with no probabilities is an error", async () => {
 		const down = new LlamaServerBackend({
+			model: JUDGE_MODEL,
 			fetch: async () => {
 				throw new Error("ECONNREFUSED");
 			},
 		});
 		await expect(ask(down)).rejects.toBeInstanceOf(DecideUnavailableError);
 		const e500 = new LlamaServerBackend({
+			model: JUDGE_MODEL,
 			fetch: fakeServer({ completion: () => new Response("x", { status: 500 }) }).fetchImpl,
 		});
 		await expect(ask(e500)).rejects.toBeInstanceOf(DecideUnavailableError);
 		const empty = new LlamaServerBackend({
+			model: JUDGE_MODEL,
 			fetch: fakeServer({ completion: () => Response.json({}) }).fetchImpl,
 		});
 		await expect(ask(empty)).rejects.toBeInstanceOf(DecideError);
@@ -250,5 +253,94 @@ describe("the judge points at llama-server, through the production entry points"
 		});
 		expect(probe.backend).not.toBe("llamacpp");
 		expect(probe.notes.some((n) => n.includes("llama-server health 503"))).toBe(true);
+	});
+});
+
+// #4965: the judge's name comes from the server 8gent started (its record, written from the chosen
+// catalogue entry), so thresholds are looked up for exactly that model. A test-only name: no model
+// is added to the catalogue here.
+describe("the model name is the record's own, and so are the thresholds (#4965)", () => {
+	const OTHER = "test-org/not-selene-judge:q4";
+	const profile = (over: Record<string, unknown> = {}) => ({
+		model: OTHER,
+		backend: "llamacpp",
+		fittedOn: "test",
+		n: 2,
+		temperature: 1,
+		bias: 0,
+		blockAbove: 0.91,
+		escalateBand: [0.12, 0.91],
+		heldOut: { recall: 1, falseBlock: 0, accuracy: 1, escalate: 0, method: "leave-one-out" },
+		...over,
+	});
+	function calDir(withOther: boolean) {
+		const d = home();
+		const selene = loadCalibration(JUDGE_MODEL, "llamacpp");
+		if (!selene) throw new Error("the shipped Selene llama.cpp profile is missing");
+		writeFileSync(join(d, calibrationFileName("llamacpp", JUDGE_MODEL)), JSON.stringify(selene));
+		if (withOther)
+			writeFileSync(join(d, calibrationFileName("llamacpp", OTHER)), JSON.stringify(profile()));
+		return d;
+	}
+
+	test("a non-Selene record with its own profile: probe, backend and verdicts carry its name, and its thresholds are its own", async () => {
+		const cal = calDir(true);
+		const env = envWith(record({ model: OTHER }));
+		const s = fakeServer();
+		const probe = await detectBackend({
+			env,
+			fetch: s.fetchImpl,
+			llamacppLoader: null,
+			calibrationDir: cal,
+		});
+		expect(probe).toMatchObject({ backend: "llamacpp", model: OTHER, url: LLAMA_URL });
+
+		const d = createDecider({ env, fetch: s.fetchImpl, llamacppLoader: null, calibrationDir: cal });
+		const b = await d.backend();
+		expect(b).toBeInstanceOf(LlamaServerBackend);
+		expect(b.model).toBe(OTHER);
+		const res = await d.ask({
+			state: "ls",
+			questions: [{ id: "n", kind: "noul", prompt: "Destructive?" }],
+		});
+		expect(res.model).toBe(OTHER);
+
+		// The gate keys thresholds on (backend.name, backend.model) (system-one-gate thresholdsFor).
+		const got = loadCalibration(b.model, b.name, cal);
+		const selene = loadCalibration(JUDGE_MODEL, "llamacpp", cal);
+		expect(got?.model).toBe(OTHER);
+		expect(got?.blockAbove).toBe(0.91);
+		expect(got?.blockAbove).not.toBe(selene?.blockAbove);
+		expect(got?.escalateBand).not.toEqual(selene?.escalateBand);
+	});
+
+	test("missing profile for that exact model: no judge at all, never Selene's thresholds", async () => {
+		const cal = calDir(false);
+		const env = { ...envWith(record({ model: OTHER })), EIGHT_S1_SHARED_JUDGE: "0" };
+		expect(readLlamaRecord(env, cal)).toBeNull();
+		const s = fakeServer();
+		const probe = await detectBackend({
+			env,
+			fetch: s.fetchImpl,
+			llamacppLoader: null,
+			calibrationDir: cal,
+		});
+		expect(probe.backend).not.toBe("llamacpp");
+		expect(probe.model).not.toBe(JUDGE_MODEL);
+		// The server on the port is not even asked: the record is not trusted.
+		expect(s.calls.some((c) => c.url.startsWith(LLAMA_URL))).toBe(false);
+	});
+
+	test("a profile filed under the right name but fitted for another model does not count", () => {
+		const cal = calDir(false);
+		writeFileSync(
+			join(cal, calibrationFileName("llamacpp", OTHER)),
+			JSON.stringify(profile({ model: JUDGE_MODEL })),
+		);
+		expect(readLlamaRecord(envWith(record({ model: OTHER })), cal)).toBeNull();
+	});
+
+	test("the shipped Selene record still reads, through the shipped profiles", () => {
+		expect(readLlamaRecord(envWith(record()))?.model).toBe(JUDGE_MODEL);
 	});
 });

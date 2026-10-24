@@ -50,7 +50,6 @@ import {
 } from "./backends/llamacpp";
 import { LLAMA_URL, llamaServerDown, readLlamaRecord } from "./backends/llamaserver";
 import { JUDGE_NUM_CTX, resolveOllamaHost } from "./backends/ollama";
-import { JUDGE_MODEL } from "./judge-model";
 import type { FetchLike } from "./types";
 
 /**
@@ -111,6 +110,8 @@ export interface ProbeOptions {
 	 * when no in-process judge loads (it may be back). Nothing else is tried.
 	 */
 	avoidShared?: boolean;
+	/** Tests only: where the llama.cpp profiles are read from. Never from the environment. */
+	calibrationDir?: string;
 }
 
 export function pickModel(installed: InstalledModel[], override?: string): string | null {
@@ -242,10 +243,13 @@ export async function detectBackend(opts: ProbeOptions = {}): Promise<ProbeResul
 	}
 
 	// The llama-server 8gent started for the judge (#4906): only when its own record says so, and it must answer.
-	if (readLlamaRecord(env)) {
+	// The model is the record's own, so the thresholds are that model's; a record for a model with
+	// no llama.cpp profile is not read at all (#4965).
+	const llamaRec = readLlamaRecord(env, opts.calibrationDir);
+	if (llamaRec) {
 		const down = await llamaServerDown(fetchImpl, timeoutMs);
 		if (down === null)
-			return { ...base, backend: "llamacpp", model: JUDGE_MODEL, url: LLAMA_URL, notes };
+			return { ...base, backend: "llamacpp", model: llamaRec.model, url: LLAMA_URL, notes };
 		notes.push(`llamacpp: ${down}`);
 	}
 

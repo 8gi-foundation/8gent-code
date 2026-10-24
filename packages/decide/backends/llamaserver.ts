@@ -6,8 +6,10 @@
  * the spellings of each answer label (OllamaBackend.answerOne). Only the transport
  * differs: llama-server's `POST /completion` with `n_probs`.
  *
- * It reports the backend name "llamacpp" and the calibrated judge model name, so the
- * calibration fitted for that exact model on llama.cpp applies (calibration/llamacpp-*.json).
+ * It reports the backend name "llamacpp" and the model named in 8gent's record of the
+ * server it started, so the calibration fitted for that exact model on llama.cpp applies
+ * (calibration/llamacpp-*.json). A record naming a model with no such profile is not
+ * trusted at all: no judge, never another model's thresholds (#4965).
  *
  * Trust: the server is only used when 8gent's own record says it started one
  * (~/.8gent/state/llama-server.pid, port fixed here), and it only ever talks to
@@ -16,7 +18,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { JUDGE_MODEL } from "../judge-model";
+import { CALIBRATION_DIR, loadCalibration } from "../calibrate";
 import { DecideError, DecideUnavailableError, type FetchLike } from "../types";
 import { OllamaBackend, type TopLogprob } from "./ollama";
 
@@ -55,8 +57,14 @@ export function readLlamaKey(rec: LlamaRecord | null): string | null {
 	}
 }
 
-/** The record of the server 8gent started, or null when absent, malformed, or not for this judge. */
-export function readLlamaRecord(env: Env): LlamaRecord | null {
+/**
+ * The record of the server 8gent started, or null when absent, malformed, or naming a model that
+ * has no llama.cpp profile of its own (then no judge at all; #4965). `calibrationDir` is for tests.
+ */
+export function readLlamaRecord(
+	env: Env,
+	calibrationDir: string = CALIBRATION_DIR,
+): LlamaRecord | null {
 	const p = llamaRecordPath(env);
 	if (!p || !existsSync(p)) return null;
 	try {
@@ -67,8 +75,10 @@ export function readLlamaRecord(env: Env): LlamaRecord | null {
 			typeof r.bin === "string" &&
 			Number.isFinite(r.startMs) &&
 			r.port === LLAMA_PORT &&
-			r.model === JUDGE_MODEL &&
-			typeof r.gguf === "string"
+			typeof r.model === "string" &&
+			r.model.trim() !== "" &&
+			typeof r.gguf === "string" &&
+			loadCalibration(r.model, "llamacpp", calibrationDir) !== null
 		)
 			return r as LlamaRecord;
 	} catch {}
@@ -131,8 +141,14 @@ export class LlamaServerBackend extends OllamaBackend {
 
 	private readonly apiKey: string | null;
 
-	constructor(opts: { timeoutMs?: number; fetch?: FetchLike; apiKey?: string | null } = {}) {
-		super({ model: JUDGE_MODEL, host: LLAMA_URL, timeoutMs: opts.timeoutMs, fetch: opts.fetch });
+	/** `model` is the one the server was started with (its record), never a fixed name. */
+	constructor(opts: {
+		model: string;
+		timeoutMs?: number;
+		fetch?: FetchLike;
+		apiKey?: string | null;
+	}) {
+		super({ model: opts.model, host: LLAMA_URL, timeoutMs: opts.timeoutMs, fetch: opts.fetch });
 		this.apiKey = opts.apiKey ?? null;
 	}
 

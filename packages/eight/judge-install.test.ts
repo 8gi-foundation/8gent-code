@@ -17,7 +17,6 @@ import { join } from "node:path";
 import {
 	JUDGE_ASK_LINE,
 	JUDGE_MODEL,
-	JUDGE_OLLAMA_DOWN_LINE,
 	JUDGE_UNSUPPORTED_LINE,
 	type JudgeChoice,
 	type JudgeDeps,
@@ -25,10 +24,12 @@ import {
 	cleanText,
 	configPath,
 	judgeAskLine,
+	judgeBasis,
 	llamaAskLine,
 	offerJudge,
 	pullModel,
 	readChoice,
+	readChoiceBasis,
 	unattended,
 	writeChoice,
 } from "./judge-install";
@@ -55,6 +56,7 @@ function rig(opts: Opts = {}) {
 	let installed = over.judge ?? false;
 	let ollamaUp = false;
 	let stored: JudgeChoice | null = null;
+	let storedBasis: string | null = null;
 	const deps: JudgeDeps = {
 		env: {},
 		probe: async () =>
@@ -82,11 +84,13 @@ function rig(opts: Opts = {}) {
 		say: (l) => log.said.push(l),
 		progress: (l) => log.progress.push(l),
 		readChoice: () => stored,
-		writeChoice: (c) => {
+		writeChoice: (c, basis) => {
 			log.writes.push(c);
 			stored = c;
+			storedBasis = basis ?? null;
 			return true;
 		},
+		readBasis: () => storedBasis,
 		...extra,
 	};
 	return { deps, log, stored: () => stored };
@@ -140,12 +144,15 @@ describe("offerJudge auto (after update, first run)", () => {
 		expect(r.log.said.length).toBe(1);
 	});
 
-	test("Ollama installed but not running: asks once to start it, a no explains and never asks again", async () => {
+	test("Ollama installed but not running: asks once to start it, a no is recorded as declined and never asks again", async () => {
 		const r = rig({ ollama: "installed", answer: false });
-		expect(await offerJudge("auto", r.deps)).toBe("unsupported");
+		expect(await offerJudge("auto", r.deps)).toBe("declined");
+		expect(r.stored()).toBe("declined");
 		expect(r.log.asked).toEqual(["Start Ollama in the background now? [y/N]"]);
 		expect(r.log.starts).toBe(0);
-		expect(r.log.said).toEqual([JUDGE_OLLAMA_DOWN_LINE]);
+		expect(r.log.said).toEqual([
+			"OK. Risky commands are checked by the built-in safety rules only. Run /judge install if you change your mind.",
+		]);
 		expect(r.log.pulls).toEqual([]);
 		expect(await offerJudge("auto", r.deps)).toBe("recorded");
 		expect(r.log.asked.length).toBe(1);
@@ -401,7 +408,7 @@ describe("the llama.cpp path (#4906)", () => {
 	};
 	function llamaRig(
 		over: {
-			existing?: { bin: string; gguf: string } | null;
+			existing?: { bin: string; gguf: string; model: string } | null;
 			binary?: Awaited<ReturnType<NonNullable<NonNullable<JudgeDeps["llama"]>["ensureBinary"]>>>;
 			model?: Awaited<ReturnType<NonNullable<NonNullable<JudgeDeps["llama"]>["ensureModel"]>>>;
 			start?: Awaited<ReturnType<NonNullable<NonNullable<JudgeDeps["llama"]>["start"]>>>;
@@ -435,8 +442,9 @@ describe("the llama.cpp path (#4906)", () => {
 					pct(100);
 					return model ?? { ok: true, path: "/h/.8gent/models/judge/m.gguf" };
 				},
-				start: async (bin, gguf) => {
+				start: async (bin, gguf, model) => {
 					calls.started.push([bin, gguf]);
+					expect(model).toBe(JUDGE_MODEL);
 					const res = start ?? { ok: true };
 					if (res.ok) up = true;
 					return res;
@@ -480,7 +488,9 @@ describe("the llama.cpp path (#4906)", () => {
 	});
 
 	test("set up before and not running: started with no question and no download", async () => {
-		const r = llamaRig({ existing: { bin: "/h/.8gent/bin/llama-server", gguf: "/h/m.gguf" } });
+		const r = llamaRig({
+			existing: { bin: "/h/.8gent/bin/llama-server", gguf: "/h/m.gguf", model: JUDGE_MODEL },
+		});
 		expect(await offerJudge("auto", r.deps)).toBe("started");
 		expect(r.calls.asks).toEqual([]);
 		expect(r.calls.binary + r.calls.model).toBe(0);
@@ -715,5 +725,223 @@ describe("no default yes, unattended, and device size (#4906)", () => {
 		});
 		expect(await offerJudge("auto", r.deps)).toBe("installed");
 		expect(f.calls.model).toBe(1);
+	});
+});
+
+// #4965: the judge is named by the catalogue entry that was chosen, a model with no profile of its
+// own is never set up, and "unsupported" is decided again when the catalogue or the device changes.
+// The rows below are test-only: nothing is added to the real catalogue.
+describe("the chosen catalogue entry names the judge; unsupported is not forever (#4965)", () => {
+	const GiB = 2 ** 30;
+	const OTHER = "test-org/not-selene-judge:q4";
+	const otherRow = {
+		model: OTHER,
+		minRamBytes: 2 * GiB,
+		pin: { sha256: "a".repeat(64), bytes: 1_250_000_000 },
+	};
+	const roots: string[] = [];
+	afterAll(() => {
+		for (const d of roots) rmSync(d, { recursive: true, force: true });
+	});
+
+	function fakes(opts: {
+		ram: number;
+		catalogue?: NonNullable<JudgeDeps["llama"]>["catalogue"];
+		hasProfile?: (m: string) => boolean;
+		existing?: { bin: string; gguf: string; model: string } | null;
+	}) {
+		const calls = {
+			started: [] as [string, string, string][],
+			fetched: [] as [string, string][],
+			binary: 0,
+		};
+		let up = false;
+		const llama: NonNullable<JudgeDeps["llama"]> = {
+			enabled: true,
+			totalRamBytes: () => opts.ram,
+			catalogue: opts.catalogue,
+			hasProfile: opts.hasProfile,
+			existing: () => opts.existing ?? null,
+			ensureBinary: async () => {
+				calls.binary++;
+				return { ok: true, bin: "/b/llama-server", source: "fetched" };
+			},
+			ensureModel: async (pct, pin, model) => {
+				calls.fetched.push([pin.sha256, model]);
+				pct(100);
+				return { ok: true, path: "/m/j.gguf" };
+			},
+			start: async (bin, gguf, model) => {
+				calls.started.push([bin, gguf, model]);
+				up = true;
+				return { ok: true };
+			},
+		};
+		const probe = async () =>
+			up
+				? { backend: "llamacpp", model: calls.started.at(-1)?.[2] ?? null }
+				: { backend: "none", model: null };
+		return { calls, llama, probe };
+	}
+
+	test("a non-Selene entry is downloaded, started and named as itself, never as Selene", async () => {
+		const f = fakes({ ram: 4 * GiB, catalogue: [otherRow], hasProfile: (m) => m === OTHER });
+		const r = rig({ llama: f.llama, probe: f.probe, answer: true });
+		expect(await offerJudge("auto", r.deps)).toBe("installed");
+		expect(f.calls.fetched).toEqual([[otherRow.pin.sha256, OTHER]]);
+		expect(f.calls.started).toEqual([["/b/llama-server", "/m/j.gguf", OTHER]]);
+		// The question and the progress name its size and its name, not Selene's.
+		expect(r.log.asked).toEqual([llamaAskLine(false, "1.3 GB")]);
+		expect(r.log.progress.some((l) => l.includes(OTHER))).toBe(true);
+		expect(r.log.progress.some((l) => l.includes(JUDGE_MODEL))).toBe(false);
+		expect(r.log.said.at(-1)).toBe(`Safety judge ready: ${OTHER} via llamacpp.`);
+	});
+
+	test("set up before: the file on disk is started under its own entry's name", async () => {
+		const f = fakes({
+			ram: 4 * GiB,
+			catalogue: [otherRow],
+			hasProfile: (m) => m === OTHER,
+			existing: { bin: "/b/llama-server", gguf: "/m/other.gguf", model: OTHER },
+		});
+		const r = rig({ llama: f.llama, probe: f.probe });
+		expect(await offerJudge("auto", r.deps)).toBe("started");
+		expect(f.calls.started).toEqual([["/b/llama-server", "/m/other.gguf", OTHER]]);
+	});
+
+	test("missing profile for that exact model: no judge, nothing asked, downloaded or started", async () => {
+		for (const existing of [
+			null,
+			{ bin: "/b/llama-server", gguf: "/m/other.gguf", model: OTHER },
+		]) {
+			const f = fakes({ ram: 64 * GiB, catalogue: [otherRow], hasProfile: () => false, existing });
+			const r = rig({ llama: f.llama, probe: f.probe, answer: true });
+			expect(await offerJudge("command", r.deps)).toBe("unsupported");
+			expect(r.log.asked).toEqual([]);
+			expect(f.calls).toEqual({ started: [], fetched: [], binary: 0 });
+			expect(r.log.said).toEqual([NO_DEVICE_MODEL_LINE]);
+		}
+	});
+
+	test("a profile-less row is skipped for the next row that has one", async () => {
+		const bigNoProfile = { ...otherRow, model: "test-org/uncalibrated:q8", minRamBytes: 1 * GiB };
+		const f = fakes({
+			ram: 8 * GiB,
+			catalogue: [bigNoProfile, otherRow],
+			hasProfile: (m) => m === OTHER,
+		});
+		const r = rig({ llama: f.llama, probe: f.probe, answer: true });
+		expect(await offerJudge("auto", r.deps)).toBe("installed");
+		expect(f.calls.started.map((c) => c[2])).toEqual([OTHER]);
+	});
+
+	function realStore() {
+		const h = mkdtempSync(join(tmpdir(), "judge-basis-"));
+		roots.push(h);
+		return { EIGHT_HOME: h };
+	}
+	const storeDeps = (env: Record<string, string>, f: ReturnType<typeof fakes>, answer: boolean) => {
+		const r = rig({ env, llama: f.llama, probe: f.probe, answer });
+		// The real config file, not the rig's memory: what a person's device keeps between launches.
+		for (const k of ["readChoice", "writeChoice", "readBasis"] as const)
+			(r.deps as Record<string, unknown>)[k] = undefined;
+		return r;
+	};
+
+	test("a stale unsupported verdict re-evaluates when the catalogue gains a calibrated row for this device", async () => {
+		const env = realStore();
+		// Today: no row fits a 6 GB phone.
+		const before = fakes({
+			ram: 6 * GiB,
+			catalogue: [{ ...otherRow, minRamBytes: 12 * GiB }],
+			hasProfile: () => true,
+		});
+		expect(await offerJudge("auto", storeDeps(env, before, true).deps)).toBe("unsupported");
+		expect(readChoice(env)).toBe("unsupported");
+		expect(readChoiceBasis(env)).toBe(judgeBasis(6 * GiB, before.llama.catalogue, () => true));
+		// Same catalogue, same device: nothing asked again.
+		const again = storeDeps(env, before, true);
+		expect(await offerJudge("auto", again.deps)).toBe("recorded");
+		expect(again.log.said).toEqual([]);
+
+		// An update ships a row this phone fits: decided again, the person is asked, the judge installs.
+		const after = fakes({ ram: 6 * GiB, catalogue: [otherRow], hasProfile: () => true });
+		const r = storeDeps(env, after, true);
+		expect(await offerJudge("auto", r.deps)).toBe("installed");
+		expect(r.log.asked).toEqual([llamaAskLine(false, "1.3 GB")]);
+		expect(after.calls.started.map((c) => c[2])).toEqual([OTHER]);
+		expect(readChoice(env)).toBeNull();
+	});
+
+	test("a stale unsupported verdict re-evaluates when a profile ships for a row already there", async () => {
+		const env = realStore();
+		const noProfile = fakes({ ram: 6 * GiB, catalogue: [otherRow], hasProfile: () => false });
+		expect(await offerJudge("auto", storeDeps(env, noProfile, true).deps)).toBe("unsupported");
+		const withProfile = fakes({ ram: 6 * GiB, catalogue: [otherRow], hasProfile: () => true });
+		expect(await offerJudge("auto", storeDeps(env, withProfile, false).deps)).toBe("declined");
+	});
+
+	test("a stale unsupported verdict re-evaluates when the hardware changes", async () => {
+		const env = realStore();
+		const small = fakes({
+			ram: 6 * GiB,
+			catalogue: [{ ...otherRow, minRamBytes: 12 * GiB }],
+			hasProfile: () => true,
+		});
+		expect(await offerJudge("auto", storeDeps(env, small, true).deps)).toBe("unsupported");
+		const big = fakes({
+			ram: 16 * GiB,
+			catalogue: [{ ...otherRow, minRamBytes: 12 * GiB }],
+			hasProfile: () => true,
+		});
+		expect(await offerJudge("auto", storeDeps(env, big, true).deps)).toBe("installed");
+	});
+
+	test("an older unsupported record with no basis is decided once more, then recorded with one", async () => {
+		const env = realStore();
+		expect(writeChoice("unsupported", env)).toBe(true);
+		expect(readChoiceBasis(env)).toBeNull();
+		const f = fakes({
+			ram: 6 * GiB,
+			catalogue: [{ ...otherRow, minRamBytes: 12 * GiB }],
+			hasProfile: () => true,
+		});
+		const r = storeDeps(env, f, true);
+		expect(await offerJudge("auto", r.deps)).toBe("unsupported");
+		expect(r.log.said).toEqual([NO_DEVICE_MODEL_LINE]);
+		expect(readChoiceBasis(env)).not.toBeNull();
+		expect(await offerJudge("auto", storeDeps(env, f, true).deps)).toBe("recorded");
+	});
+
+	test("a no to starting Ollama is a person's no: recorded as declined, never re-asked after a catalogue change", async () => {
+		const llama = (sha: string): NonNullable<JudgeDeps["llama"]> => ({
+			enabled: false,
+			totalRamBytes: () => 8 * GiB,
+			catalogue: [{ ...otherRow, pin: { ...otherRow.pin, sha256: sha } }],
+			hasProfile: () => true,
+		});
+		const r = rig({ ollama: "installed", answer: false, llama: llama("a".repeat(64)) });
+		expect(await offerJudge("auto", r.deps)).toBe("declined");
+		expect(r.stored()).toBe("declined");
+		expect(r.log.starts).toBe(0);
+		expect(r.log.said).toEqual([
+			"OK. Risky commands are checked by the built-in safety rules only. Run /judge install if you change your mind.",
+		]);
+		// An update ships a different catalogue: the stale-basis rule is for "unsupported" only.
+		r.deps.llama = llama("b".repeat(64));
+		expect(await offerJudge("auto", r.deps)).toBe("recorded");
+		expect(r.log.asked.length).toBe(1);
+	});
+
+	test("a person's no and a failure stay final whatever the catalogue does", async () => {
+		for (const c of ["declined", "failed"] as const) {
+			const env = realStore();
+			expect(writeChoice(c, env)).toBe(true);
+			const f = fakes({ ram: 64 * GiB, catalogue: [otherRow], hasProfile: () => true });
+			const r = storeDeps(env, f, true);
+			expect(await offerJudge("auto", r.deps)).toBe("recorded");
+			expect(r.log.asked).toEqual([]);
+			expect(f.calls.binary).toBe(0);
+		}
 	});
 });
