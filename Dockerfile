@@ -4,10 +4,17 @@ FROM oven/bun:1 AS deps
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json bun.lock* ./
-RUN bun install --production || bun install
+# The workspace packages are copied first so bun links them (@8gent/*), and the install runs with
+# --ignore-scripts: the root postinstall (scripts/postinstall.js) is for a person's install, is not in
+# this image, and made this build fail (#4937).
+COPY packages/ packages/
+RUN bun install --production --ignore-scripts || bun install --ignore-scripts
 
 FROM oven/bun:1-slim AS base
 WORKDIR /app
+
+# git applies the patches a cell's /selfimprove round proposes (packages/self-autonomy/selfimprove.ts).
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
 # Copy deps
 COPY --from=deps /app/node_modules ./node_modules
@@ -16,13 +23,26 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY packages/ packages/
 
+# The 8gent CLI (a cell runs `bun run /app/bin/8gent.ts selfimprove`) and the helpers the frozen checks import.
+COPY bin/ bin/
+COPY tests/ tests/
+
 # Copy harness scripts + benchmarks (kernel depends on model-router)
 COPY scripts/nightly-train.ts scripts/nightly-train.ts
 COPY scripts/board-vessel/ scripts/board-vessel/
+COPY scripts/cell-sandbox-proof.sh scripts/cell-sandbox-proof.sh
 COPY benchmarks/ benchmarks/
 
 # Writable tmp for agent workdirs
-RUN mkdir -p /tmp/8gent-work /root/.8gent/sessions
+RUN mkdir -p /tmp/8gent-work /root/.8gent/sessions \
+ && chmod 700 /tmp/8gent-work
+
+# The user a /selfimprove round runs model-written code as (selfimprove.ts linuxSandbox): no home, no shell.
+# /root stays root-only so that user cannot reach the cell's state, key file or ledger, and the genome in
+# /app is not writable by it. Proof: scripts/cell-sandbox-proof.sh (CI: .github/workflows/cell-image.yml).
+RUN useradd --uid 1002 --no-create-home --shell /usr/sbin/nologin cellrun \
+ && chmod 700 /root \
+ && chmod -R go-w /app
 
 EXPOSE 8080
 

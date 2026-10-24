@@ -327,6 +327,7 @@ const SUBCOMMANDS = new Set([
 	"auth",
 	"cron",
 	"blueprint",
+	"selfimprove",
 	"scout",
 	"daemon",
 	"rpc",

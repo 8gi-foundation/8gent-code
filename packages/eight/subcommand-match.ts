@@ -29,6 +29,7 @@ export const KNOWN_SUBCOMMANDS = [
 	"auth",
 	"cron",
 	"blueprint",
+	"selfimprove",
 	"scout",
 	"daemon",
 	"rpc",
