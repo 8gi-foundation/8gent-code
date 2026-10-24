@@ -91,13 +91,14 @@ describe("model detection", () => {
 });
 
 describe("what is missing", () => {
-	test("build tools are listed only when whisper.cpp must be built", () => {
+	test("a missing whisper-cli is downloaded, never built: no build tool is ever a need", () => {
 		const none = () => false;
 		expect(localVoiceNeeds(none, null, null)).toEqual({
-			pkgs: ["termux-api", "ffmpeg", ...BUILD_PKGS],
+			pkgs: ["termux-api", "ffmpeg"],
 			whisper: true,
 			model: true,
 		});
+		for (const p of BUILD_PKGS) expect(localVoiceNeeds(none, null, null).pkgs).not.toContain(p);
 		expect(localVoiceNeeds(none, "/x/whisper-cli", null).pkgs).toEqual(["termux-api", "ffmpeg"]);
 		const all = localVoiceNeeds(() => true, "/x/whisper-cli", "/x/m.bin");
 		expect(all).toEqual({ pkgs: [], whisper: false, model: false });

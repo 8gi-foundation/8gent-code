@@ -35,6 +35,7 @@ import pkg from "../../package.json";
 import { resolveHome } from "../core/home";
 import { JUDGE_MODEL } from "../decide/judge-model";
 import { findOnPath, isAndroidHost } from "../voice/termux";
+import { managedWhisperBin } from "../voice/termux-local-stt";
 import { managedLlamaServer, openPrivate } from "./local-runtime";
 import pins from "./runtime-pins.json";
 import {
@@ -91,8 +92,16 @@ export interface FetchDeps {
 
 export type BinaryResult = { ok: true; bin: string } | { ok: false; why: string };
 
-const defaultRuns = (bin: string) =>
-	spawnSync(bin, ["--version"], { stdio: "ignore", timeout: 15_000 }).status === 0;
+type Program = "llama-server" | "whisper-cli";
+
+/** The smoke check run on the staged file before it is renamed into place. */
+const SMOKE_ARGS: Record<Program, string[]> = {
+	"llama-server": ["--version"],
+	"whisper-cli": ["-h"],
+};
+
+const defaultRuns = (program: Program) => (bin: string) =>
+	spawnSync(bin, SMOKE_ARGS[program], { stdio: "ignore", timeout: 15_000 }).status === 0;
 
 async function body(f: FetchLike, url: string): Promise<Uint8Array> {
 	const res = await fetchChecked(f, url, "asset");
@@ -101,17 +110,22 @@ async function body(f: FetchLike, url: string): Promise<Uint8Array> {
 }
 
 /**
- * Download, verify and install llama-server for this machine and version. On any failure
- * nothing is left in ~/.8gent/bin and the reason is returned.
+ * Download, verify and install one of 8gent's own programs for this machine and version:
+ * SHA256SUMS (and its signature once a key is configured) first, the asset's hash checked
+ * before the file is ever executed, run once in its staging name, then renamed into place.
+ * On any failure nothing is left in ~/.8gent/bin and the reason is returned.
  */
-export async function fetchLlamaServer(deps: FetchDeps = {}): Promise<BinaryResult> {
+async function fetchRelease(
+	program: Program,
+	dest: string,
+	deps: FetchDeps,
+): Promise<BinaryResult> {
 	const env = deps.env ?? process.env;
 	const target = runtimeTarget(deps.platform, deps.arch, env);
-	if (!target) return { ok: false, why: "8gent has no llama-server build for this platform yet" };
+	if (!target) return { ok: false, why: `8gent has no ${program} build for this platform yet` };
 	const f: FetchLike = deps.fetchImpl ?? ((u, i) => fetch(u, i));
 	const version = deps.version ?? pkg.version;
-	const name = assetName("llama-server", target);
-	const dest = managedLlamaServer(env);
+	const name = assetName(program, target);
 	const part = `${dest}.part-${randomBytes(4).toString("hex")}`;
 	try {
 		const sumsBytes = await body(f, releaseUrl(version, "SHA256SUMS"));
@@ -134,7 +148,7 @@ export async function fetchLlamaServer(deps: FetchDeps = {}): Promise<BinaryResu
 		mkdirSync(dirname(dest), { recursive: true });
 		writeFileSync(part, bytes, { mode: 0o755, flag: "wx" });
 		chmodSync(part, 0o755);
-		if (!(deps.runs ?? defaultRuns)(part))
+		if (!(deps.runs ?? defaultRuns(program))(part))
 			return { ok: false, why: `${name} downloaded and verified but would not run on this device` };
 		renameSync(part, dest);
 		return { ok: true, bin: dest };
@@ -145,6 +159,16 @@ export async function fetchLlamaServer(deps: FetchDeps = {}): Promise<BinaryResu
 			unlinkSync(part);
 		} catch {}
 	}
+}
+
+/** llama-server for this machine and version, into ~/.8gent/bin. */
+export function fetchLlamaServer(deps: FetchDeps = {}): Promise<BinaryResult> {
+	return fetchRelease("llama-server", managedLlamaServer(deps.env ?? process.env), deps);
+}
+
+/** whisper-cli for this machine and version (the phone's voice input), into ~/.8gent/bin. No build. */
+export function fetchWhisperCli(deps: FetchDeps = {}): Promise<BinaryResult> {
+	return fetchRelease("whisper-cli", managedWhisperBin(deps.env ?? process.env), deps);
 }
 
 export type LlamaServerSource = "managed" | "fetched" | "system";

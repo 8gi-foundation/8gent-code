@@ -575,6 +575,19 @@ async function main() {
 			await scoutCommand(restArgs);
 			break;
 
+		case "voice": {
+			// Only the explicit fallback: build whisper.cpp on a phone when 8gent's prebuilt binary is missing.
+			if (restArgs[0] !== "build-whisper") {
+				console.error("Usage: 8gent voice build-whisper");
+				process.exitCode = 2;
+				break;
+			}
+			const { offerWhisperBuild } = await import("../packages/eight/android-setup.ts");
+			const out = await offerWhisperBuild();
+			process.exitCode = out === "installed" ? 0 : 1;
+			break;
+		}
+
 		case "daemon": {
 			const { daemonCommand } = await import("../packages/daemon/service.ts");
 			const code = await daemonCommand(restArgs, daemonProgram());
