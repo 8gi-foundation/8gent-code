@@ -189,7 +189,7 @@ describe("generated profile", () => {
 		const deny = lines.indexOf("(deny file-read-data)");
 		expect(lines.indexOf("(allow default)")).toBe(1);
 		expect(deny).toBe(3);
-		const allow = lines.findIndex((l) => l.startsWith("(allow file-read-data (subpath"));
+		const allow = lines.findIndex((l) => l.startsWith("(allow file-read-data (require-all"));
 		expect(allow).toBeGreaterThan(deny);
 		const rule = lines[allow] as string;
 		for (const dir of ["/usr", "/System", "/Library", "/private/etc", ws])
@@ -373,13 +373,19 @@ describe.if(process.platform !== "win32")(
 	},
 );
 
+/** The command ran (no text check stopped it) and the read was refused by the OS. */
+const expectKernelRefusal = (out: string) => {
+	expect(out).not.toContain("[BLOCKED]");
+	expect(out).toMatch(/Operation not permitted|PermissionError|can't open file/);
+};
+
 describe.if(live)("live: run_command under the kernel read rule (macOS)", () => {
 	for (const command of GAPS_IN_WS) {
 		test(`flag on: the kernel refuses it: ${command}`, async () => {
 			on();
 			const out = await run(ws, command);
 			expect(out).not.toContain("OUTSIDE-X");
-			expect(out).toMatch(/Operation not permitted|PermissionError/);
+			expectKernelRefusal(out);
 		});
 	}
 
@@ -388,7 +394,7 @@ describe.if(live)("live: run_command under the kernel read rule (macOS)", () => 
 			on();
 			const out = await run(home, command);
 			expect(out).not.toMatch(/PRIVATE-KEY|MEMORY-DB/);
-			expect(out).toMatch(/Operation not permitted|PermissionError/);
+			expectKernelRefusal(out);
 		});
 	}
 
@@ -401,7 +407,9 @@ describe.if(live)("live: run_command under the kernel read rule (macOS)", () => 
 
 	test("flag on: the signing key stays shut (#4132)", async () => {
 		on();
-		expect(await run(home, "d=.8gent; cat $d/keys/k")).not.toContain("SIGNING-KEY");
+		const out = await run(home, "cat ${x:-.8gent}/k${x:-eys}/k");
+		expect(out).not.toContain("SIGNING-KEY");
+		expectKernelRefusal(out);
 	});
 
 	test("flag on: a yes on the read card opens the path it named", async () => {
@@ -453,7 +461,7 @@ describe.if(live)("live: run_command under the kernel read rule (macOS)", () => 
 		test("bun test", async () => {
 			on();
 			realHome();
-			const out = await run(ws, `${process.execPath} test src/a.test.ts`);
+			const out = await run(ws, "bun test src/a.test.ts");
 			expect(out).toMatch(/1 pass/);
 			expect(out).not.toMatch(/Operation not permitted/);
 		});

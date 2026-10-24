@@ -612,9 +612,10 @@ function ancestors(root: string): string[] {
 }
 
 /**
- * The SBPL rules of the read boundary, emitted right after (allow default). Last match wins:
- * deny every file read, allow the root and the allowances back, then deny the credential
- * stores and the private data set again so no allowance can reopen them.
+ * The SBPL rules of the read boundary, emitted right after (allow default): deny every file
+ * read, allow the root and the allowances back except the credential stores and the private
+ * data set, then deny those again. The exclusion sits inside the allow because the kernel did
+ * not let a later deny override an earlier filtered allow (macOS runner, #4890).
  *
  * file-read-data only: stat and path lookups (file-read-metadata) stay allowed, so programs can
  * resolve their own paths and the parents of the root; reading a file or listing a folder
@@ -655,13 +656,19 @@ export function osReadRules(spec: OsReadSpec, pathEnv: string = process.env.PATH
 	const privateFilters = withReal(spec.dataRoots.filter((r) => path.isAbsolute(r))).flatMap(
 		ownPrivateFilters,
 	);
+	const never = [...secretFilters, ...privateFilters].join(" ");
+	const allowed = `${readable.map((r) => `(subpath ${sbplString(r)})`).join(" ")} ${xcode}`;
 	return [
 		"; workspace read boundary (#4890): no file is read outside the root and the allowances",
 		"(deny file-read-data)",
-		`(allow file-read-data ${readable.map((r) => `(subpath ${sbplString(r)})`).join(" ")} ${xcode})`,
+		// The allow itself excludes the never-read set: a later deny alone did not beat an earlier
+		// filtered allow on the macOS runner (#4890 CI), so precedence is not relied on here.
+		never
+			? `(allow file-read-data (require-all (require-any ${allowed}) (require-not (require-any ${never}))))`
+			: `(allow file-read-data ${allowed})`,
 		`(allow file-read-data ${listable.map((a) => `(literal ${sbplString(a)})`).join(" ")})`,
 		"; credential stores and the private data set: never read, whatever an allow above covers",
-		`(deny file-read* ${[...secretFilters, ...privateFilters].join(" ")})`,
+		...(never ? [`(deny file-read* ${never})`] : []),
 	];
 }
 
