@@ -112,11 +112,6 @@ export const SINKS: Sink[] = [
 				how: "the off-device voice question is never asked on first launch, only after the person asks for voice",
 			},
 		],
-		waiver: {
-			ref: "#4903",
-			expires: "2026-11-07",
-			why: "The voice path moves to on-device whisper.cpp in 8TO's voice PR; until it lands, first launch still asks this question.",
-		},
 	},
 	{
 		id: "cloud-transcription",
@@ -494,13 +489,6 @@ const INSTALL_WAIVER: Waiver = {
 
 export const INSTALL_SITES: InstallSite[] = [
 	// --- default paths: waived, dated, linked ------------------------------
-	{
-		file: "packages/eight/android-setup.ts",
-		max: 6,
-		mode: "default",
-		why: "first launch asks, default yes, to run pkg install for music, and the voice question installs termux-api",
-		waiver: INSTALL_WAIVER,
-	},
 	{
 		file: "packages/eight/judge-install.ts",
 		max: 2,
