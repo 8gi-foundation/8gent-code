@@ -58,12 +58,16 @@ function fakeChild(cmd: string, args: string[]): FakeChild {
 /** yt-dlp answers its search after `searchMs`; every other command just starts. */
 function stubSpawn(
 	searchMs = 0,
-	answer = "Fela Kuti - No Agreement\thttps://www.youtube.com/watch?v=abc",
+	answer = JSON.stringify({
+		title: "Fela Kuti - No Agreement",
+		url: "https://www.youtube.com/watch?v=abc",
+		duration: 200,
+	}),
 ): (cmd: string, args: string[]) => ChildProcess {
 	return (cmd: string, args: string[]) => {
 		const c = fakeChild(cmd, args);
 		spawned.push(c);
-		if (args.some((a) => a.startsWith("ytsearch1:"))) {
+		if (args.some((a) => a.startsWith("ytsearch5:"))) {
 			setTimeout(() => {
 				c.stdout.emit("data", `${answer}\n`);
 				c.emit("close", 0);
@@ -181,7 +185,7 @@ describe("/dj play searches off the event loop (#3182)", () => {
 		expect(result).toBe("Now playing: Fela Kuti - No Agreement");
 		// 400 ms search + 1500 ms IPC wait at a 10 ms beat: a blocked loop gets ~0 turns there.
 		expect(turns).toBeGreaterThan((performance.now() - t0) / 10 / 2);
-		const search = spawned.find((c) => c.args.includes("ytsearch1:Fela Kuti no agreement"));
+		const search = spawned.find((c) => c.args.includes("ytsearch5:Fela Kuti no agreement"));
 		expect(search?.cmd).toBe("/stub/yt-dlp");
 		expect(spawned.find((c) => c.cmd === "/stub/mpv")?.args).toContain(
 			"https://www.youtube.com/watch?v=abc",

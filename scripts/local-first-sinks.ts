@@ -360,6 +360,13 @@ export const SINKS: Sink[] = [
 		files: ["packages/music/dj.ts"],
 	},
 	{
+		id: "dj-youtube-search",
+		what: "The artist or song words typed into /dj play, handed to yt-dlp, which searches YouTube with them; the video then plays from YouTube. YouTube sees the words, an IP address and a client string. A URL or a bed name sends no search words.",
+		mode: "command",
+		hosts: ["www.youtube.com"],
+		files: ["packages/music/dj.ts"],
+	},
+	{
 		id: "db-convex",
 		what: "Records sent to a Convex deployment, only when a deployment URL is configured.",
 		mode: "optin",
