@@ -21,9 +21,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ToolExecutor } from "../eight/tools";
-import { resetReadAllow } from "./read-allow";
+import { namesSecret, resetReadAllow } from "./read-allow";
 import { osReadSpec } from "./read-boundary";
 import {
+	HOME_NEVER_READ,
 	OS_READ_BOUNDARY_FLAG,
 	type OsReadSpec,
 	buildRunCommandProfile,
@@ -87,6 +88,10 @@ beforeAll(() => {
 		[path.join(home, ".8gent", "config.json"), "OWN-CONFIG"],
 		[path.join(home, ".8gent", "keys", "k"), "SIGNING-KEY"],
 		[path.join(home, "notes.txt"), "HOME-NOTES"],
+		[path.join(home, ".git-credentials"), "GIT-CREDENTIALS"],
+		[path.join(home, ".8gent", "mv-key"), "unused"],
+		[path.join(home, ".ssh", "id_mv"), "PRIVATE-MV"],
+		[path.join(base, "y"), "OUTSIDE-Y"],
 		// An EIGHT_DATA_DIR inside the workspace root: its keys/ must stay shut (#4132, #4890).
 		[path.join(ws, ".data", "keys", "k"), "DATA-DIR-KEY"],
 		// EIGHT_HOME inside the root: sensitiveCredentialPaths() does not cover its .8gent/keys.
@@ -234,6 +239,32 @@ describe("generated profile", () => {
 			(l) => l.startsWith("(deny file-read*") && l.includes(`(subpath "${keyDir}")`),
 		);
 		expect(keys).toBeGreaterThan(lastAllow);
+	});
+
+	test("a rename out of the never-read set is denied too, after every allow", () => {
+		const lines = profile(spec("cat x", home)).split("\n");
+		const lastAllow = lines.findLastIndex((l) => l.startsWith("(allow file-read-data"));
+		const unlink = lines.findIndex((l) => l.startsWith("(deny file-write-unlink"));
+		expect(unlink).toBeGreaterThan(lastAllow);
+		const rule = lines[unlink] as string;
+		expect(rule).toContain(`(subpath "${path.join(home, ".ssh")}")`);
+		expect(rule).toContain(`(subpath "${path.join(home, ".8gent", "browser-profiles")}")`);
+		expect(rule).toContain("(regex #");
+	});
+
+	test("the never-read set holds every credential store the text boundary calls secret", () => {
+		const rule = profile(spec("cat x", home));
+		for (const rel of HOME_NEVER_READ)
+			expect(rule).toContain(`(subpath "${path.join(home, rel)}")`);
+		// and each of those the text boundary names as secret really is in the list
+		for (const rel of [
+			".git-credentials",
+			".config/op",
+			".azure",
+			".pgpass",
+			".local/share/keyrings",
+		])
+			expect(namesSecret(path.join(home, rel))).toBe(true);
 	});
 
 	test("the private data regexes match what OWN_PRIVATE names, in any case, and nothing else", () => {
@@ -436,6 +467,33 @@ describe.if(live)("live: run_command under the kernel read rule (macOS)", () => 
 			expectKernelRefusal(out);
 		});
 	}
+
+	test("flag on, rooted at home: credential stores the text boundary calls secret stay shut", async () => {
+		on();
+		const out = await run(home, `python3 -c "print(open('.git-cre'+'dentials').read())"`);
+		expect(out).not.toContain("GIT-CREDENTIALS");
+		expectKernelRefusal(out);
+	});
+
+	test("flag on: a credential cannot be moved into the root and read there (8SO probe)", async () => {
+		on();
+		const key = path.join(home, ".ssh", "id_mv");
+		const cmd = `python3 -c "import os;os.rename('/'.join([os.path.expanduser('~'),'.ss'+'h','id_mv']),'moved');print(open('moved').read())"`;
+		const out = await run(ws, cmd);
+		expect(out).not.toContain("PRIVATE-MV");
+		expect(fs.existsSync(key)).toBe(true); // the rename itself was refused, nothing left home
+		expect(fs.existsSync(path.join(ws, "moved"))).toBe(false);
+	});
+
+	test("known gap: a non-credential outside file can still be moved into the root and read", async () => {
+		on();
+		const out = await run(
+			ws,
+			`python3 -c "import os;os.rename(os.path.join('..','y'),'moved-y');print(open('moved-y').read())"`,
+		);
+		// Pinned so that closing the gap has to move this test: today the rename is allowed.
+		expect(out).toContain("OUTSIDE-Y");
+	});
 
 	test("flag on, rooted at home: ordinary home files and own config still read", async () => {
 		on();

@@ -583,6 +583,34 @@ export function ownPrivateFilters(dataRoot: string): string[] {
 	];
 }
 
+/**
+ * Credential stores under a home beyond sensitiveCredentialPaths(): the rest of what the text
+ * boundary calls secret (read-allow.ts SECRET_PATH). They matter when the root is, or holds, the
+ * home folder, and when a PATH tool dir's sibling (~/.local/share) is readable.
+ */
+export const HOME_NEVER_READ = [
+	".git-credentials",
+	".pgpass",
+	".vault-token",
+	".password-store",
+	".azure",
+	".config/op",
+	".config/gcloud",
+	".config/github-copilot",
+	".local/share/keyrings",
+	"Library/Cookies",
+	"Library/Messages",
+	"Library/Mail",
+	"Library/Safari",
+	"Library/Application Support/Google",
+	"Library/Application Support/Chromium",
+	"Library/Application Support/BraveSoftware",
+	"Library/Application Support/Firefox",
+	"Library/Application Support/Microsoft Edge",
+	"Library/Application Support/1Password",
+	"Library/Application Support/Arc",
+] as const;
+
 /** A tool installed under a home: its bin dir on PATH, and the lib/libexec/share beside it. */
 function toolDirs(pathEnv: string, homes: string[]): string[] {
 	const out: string[] = [];
@@ -651,7 +679,12 @@ export function osReadRules(
 	]);
 	const listable = [...new Set([root, realpathLoose(root)].flatMap(ancestors))];
 	const xcode = '(regex #"^/Applications/Xcode[^/]*\\.app(/.*)?$")';
-	const secrets = withReal(homes.flatMap((h) => sensitiveCredentialPaths(h)));
+	const secrets = withReal(
+		homes.flatMap((h) => [
+			...sensitiveCredentialPaths(h),
+			...HOME_NEVER_READ.map((rel) => path.join(h, rel)),
+		]),
+	);
 	const secretFilters = secrets.flatMap((s) => {
 		const re = caseInsensitivePathRegex(s, true);
 		return [
@@ -676,6 +709,11 @@ export function osReadRules(
 		`(allow file-read-data ${listable.map((a) => `(literal ${sbplString(a)})`).join(" ")})`,
 		"; credential stores and the private data set: never read, whatever an allow above covers",
 		...(never ? [`(deny file-read* ${never})`] : []),
+		// A file cannot be moved out of the never-read set into the root and read there: a rename
+		// is an unlink of the old name, and the macOS runner showed `mv ~/.ssh/id_rsa ./k && cat k`
+		// reading the key (8SO probe, #4892). Other outside files can still be moved (a gap; the
+		// text boundary names them, and unlinking everything unreadable would break package caches).
+		...(never ? [`(deny file-write-unlink ${never})`] : []),
 	];
 }
 
