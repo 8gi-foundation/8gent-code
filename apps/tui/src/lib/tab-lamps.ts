@@ -173,6 +173,21 @@ export function approvalOwner(activeId: string, processing: readonly string[]): 
 }
 
 /**
+ * The tab an asking call belongs to: the tab whose permission holder is the
+ * call's holder or one of its ancestors (a child run by a tab's turn chains to
+ * it). Undefined when the call is no tab's, so the caller falls back.
+ */
+export function tabOfHolder<H extends { parent?: H }>(
+	holder: H | undefined,
+	holders: ReadonlyMap<string, H>,
+): string | undefined {
+	for (let h = holder; h; h = h.parent) {
+		for (const [id, held] of holders) if (held === h) return id;
+	}
+	return undefined;
+}
+
+/**
  * The unread map after a render. A tab whose turn ended while it was in the
  * background becomes done, or failed when its last word was an error; opening
  * a tab clears it (the bar holds the lamp 120 ms for the tick-off).

@@ -351,7 +351,7 @@ import {
 	isAndroidEnv,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
-import { approvalOwner, nextUnread } from "./lib/tab-lamps.js";
+import { approvalOwner, nextUnread, tabOfHolder } from "./lib/tab-lamps.js";
 import { detectTermPresetIntent } from "./lib/term-intent.js";
 import { copiedNotice, notCopiedNotice } from "./lib/text-selection.js";
 import { truncate } from "./lib/text.js";
@@ -2304,7 +2304,10 @@ export function App({
 		});
 	}, [processingKey, activeTabId]);
 	const approvalTabId =
-		approvalPending !== null ? approvalOwner(activeTabId, processingTabIds) : null;
+		approvalPending !== null
+			? (tabOfHolder(approvalPending.holder, permHoldersRef.current) ??
+				approvalOwner(activeTabId, processingTabIds))
+			: null;
 	const tabLampFor = useCallback(
 		(tabId: string) => ({ needsYou: tabId === approvalTabId, unread: unreadTabs[tabId] ?? null }),
 		[approvalTabId, unreadTabs],

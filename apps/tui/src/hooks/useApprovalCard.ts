@@ -29,7 +29,11 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
-import { currentPermissionMode } from "../../../../packages/permissions/permission-mode.js";
+import {
+	type PermissionModeHolder,
+	currentPermissionHolder,
+	currentPermissionMode,
+} from "../../../../packages/permissions/permission-mode.js";
 import {
 	type TuiApprovalDecision,
 	type TuiApprovalRequest,
@@ -43,6 +47,12 @@ export interface PendingApproval {
 	target: string;
 	/** Why the card came up, from the asking call's own permission mode (#3174). */
 	reason?: string;
+	/**
+	 * The asking call's permission holder (child holders chain to the tab's), so
+	 * the tab bar can tell which tab is waiting on you (#4928). Absent for the
+	 * one-time questions, which belong to the focused tab.
+	 */
+	holder?: PermissionModeHolder;
 	/** Show the target in full, never cut (the request's `full`). */
 	full?: boolean;
 	/** The one-time yolo question: only Y and N answer it. */
@@ -505,9 +515,11 @@ export function useApprovalCard(
 				// The request arrives inside the asking tool call, so its
 				// permission mode is the call's own, not the focused tab's.
 				const reason = approvalReason(currentPermissionMode());
+				const holder = currentPermissionHolder();
 				const full = request.full || !fitsCompact(target, reason, stdout.columns);
 				const card: PendingApproval = {
 					target,
+					...(holder ? { holder } : {}),
 					...(reason ? { reason } : {}),
 					...(full ? { full: true } : {}),
 					...(full && !request.full ? { auto: true } : {}),
