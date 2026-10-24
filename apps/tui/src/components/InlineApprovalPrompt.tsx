@@ -1,6 +1,6 @@
 import { Box, Text } from "ink";
 import React from "react";
-import { fullCardBox } from "../hooks/useApprovalCard.js";
+import { fullCardBox, useCardView } from "../hooks/useApprovalCard.js";
 import { t } from "../theme.js";
 import { KeyCapRow } from "./KeyCap.js";
 
@@ -27,6 +27,35 @@ interface InlineApprovalPromptProps {
 	reason?: string;
 	/** Whole target, wrapped, keys below; never cut (MCP cards, #3474). */
 	full?: boolean;
+}
+
+/** The target of a full card: wrapped by us to the card's width, every character kept, scrolling when taller than the screen. */
+function FullTarget({ target }: { target: string }) {
+	const view = useCardView(target);
+	// A request's own full card (MCP) keeps the plain wrapped text and its whole-or-refused fit check.
+	if (!view.auto)
+		return (
+			<Text color={t.textSecondary} wrap="wrap">
+				{target}
+			</Text>
+		);
+	return (
+		<>
+			{/* Cut to the card's width by us, every character kept: the person reads the whole command. */}
+			<Box flexDirection="column">
+				{view.shown.map((line, i) => (
+					<Text key={`${view.offset + i}`} color={t.textSecondary} wrap="truncate">
+						{line === "" ? " " : line}
+					</Text>
+				))}
+			</Box>
+			{view.paged ? (
+				<Text color={t.muted}>
+					{`${view.offset + 1}-${view.offset + view.shown.length} of ${view.lines.length}  [↑↓] scroll${view.atEnd ? "  end shown" : "  [Y] after the end"}`}
+				</Text>
+			) : null}
+		</>
+	);
 }
 
 /**
@@ -60,9 +89,7 @@ export function InlineApprovalPrompt({ target, reason, full, gate }: InlineAppro
 						</Box>
 					) : null}
 				</Box>
-				<Text color={t.textSecondary} wrap="wrap">
-					{target}
-				</Text>
+				<FullTarget target={target} />
 				<Box justifyContent="flex-end">
 					<KeyCapRow
 						caps={(gate ? YOLO_GATE_KEYS : APPROVAL_KEYS).map(([cap, verb]) => ({ cap, verb }))}
