@@ -20,6 +20,7 @@ import {
 import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
 import { applyMention, listProjectFiles, mentionAtEnd, rankFiles } from "../lib/file-mention.js";
 import { GO_HELP_LINES, type GoalClient, parseGoCommand } from "../lib/goal-client.js";
+import { cellWidth } from "../lib/header-layout.js";
 import { type SlashCommand, isCoreSlashCommand } from "../lib/slash-commands.js";
 import {
 	type SlashRegistryEntry,
@@ -315,7 +316,18 @@ export function CommandInput({
 	useClickSpans(
 		acceptRef,
 		!isProcessing && isVisible && suggestion
-			? [{ id: "slash:accept", dx: 0, w: 400, action: () => setValue(accept()) }]
+			? [
+					{
+						id: "slash:accept",
+						dx: 0,
+						// "  [Tab] or tap to accept (label)" plus 3 cells; the rest of the line is not the button.
+						w:
+							2 +
+							cellWidth(`[Tab] or tap to accept (${getSuggestionSourceLabel(suggestion.source)})`) +
+							3,
+						action: () => setValue(accept()),
+					},
+				]
 			: [],
 		5,
 		0,
@@ -818,12 +830,25 @@ export function slashMenuRows(filter: string, entries: SlashRegistryEntry[]): Sl
 
 export type SlashEnter = { kind: "run"; name: string } | { kind: "keep" } | { kind: "pass" };
 
+/** Commands that end the session or discard work: never run from a prefix, only by full name or a picked row. */
+export const SLASH_NEVER_FROM_PREFIX: ReadonlySet<string> = new Set([
+	"quit",
+	"exit",
+	"export",
+	"clear",
+	"rewind",
+	"fork",
+]);
+
 /**
  * What Enter does on a typed slash line (#4934). Only a bare command word that
- * starts with "/" is ever completed; anything else is a message or a full
- * command and passes through. A prefix that names one command runs it (one core
- * command wins over skills and extras that share the prefix); a row the person
- * moved to with Up/Down runs; an ambiguous prefix keeps the list and runs nothing.
+ * starts with "/" is ever completed; a message, or a command with arguments,
+ * passes through, and so does every exact name or alias: what is typed in full
+ * runs as typed. A prefix runs only when exactly one command in the whole
+ * registry (built-ins, skills, aliases) starts with it, and never for a command
+ * that ends the session or discards work. A row the person moved to with
+ * Up/Down is an explicit pick and runs. Anything else keeps the list and runs
+ * nothing.
  */
 export function slashEnterAction(
 	input: string,
@@ -834,24 +859,14 @@ export function slashEnterAction(
 	if (!line.startsWith("/") || line === "/" || /\s/.test(line)) return { kind: "pass" };
 	const word = line.slice(1).toLowerCase();
 	const matches = entries.filter((e) => e.name.toLowerCase().startsWith(word));
-	// A full command name runs as typed. A short alias that is also the start of other
-	// commands ("/s") is a prefix, not a name: the list stays.
-	const exact = matches.filter((e) => e.name.toLowerCase() === word);
-	if (
-		exact.some((e) => e.name === e.canonicalName) ||
-		(exact.length > 0 && matches.length === exact.length)
-	)
-		return { kind: "pass" };
 	if (matches.length === 0) return { kind: "pass" };
+	if (matches.some((e) => e.name.toLowerCase() === word)) return { kind: "pass" };
 	if (picked && matches.includes(picked)) return { kind: "run", name: picked.name };
 	const target = (e: SlashRegistryEntry) => e.builtInName ?? e.token;
-	const distinct = (list: SlashRegistryEntry[]) => [
-		...new Map(list.map((e) => [target(e), e])).values(),
-	];
-	const all = distinct(matches);
-	if (all.length === 1) return { kind: "run", name: (all[0] as SlashRegistryEntry).name };
-	const core = distinct(matches.filter(isCoreEntry));
-	if (core.length === 1) return { kind: "run", name: (core[0] as SlashRegistryEntry).name };
+	const distinct = [...new Map(matches.map((e) => [target(e), e])).values()];
+	const only = distinct[0] as SlashRegistryEntry;
+	if (distinct.length === 1 && !SLASH_NEVER_FROM_PREFIX.has(only.builtInName ?? only.name))
+		return { kind: "run", name: only.name };
 	return { kind: "keep" };
 }
 
@@ -994,7 +1009,8 @@ function SlashRows({
 				id: `slash:${entry.name}`,
 				dx: 0,
 				dy: i,
-				w: 400,
+				// The row's visible text plus 3 cells: a thumb gets room, the empty line does not.
+				w: cellWidth(`  /${entry.name}${narrow ? "" : ` ${entry.description ?? ""}`}`) + 3,
 				action: () => onPick(entry.name),
 			}))
 		: [];
