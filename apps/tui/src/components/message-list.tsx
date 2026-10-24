@@ -46,6 +46,7 @@ import {
 import { type MarkStream, holdLivingMark } from "../lib/living-mark.js";
 import { motionEnabled } from "../lib/motion.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
+import { useToolOutputVersion } from "../lib/tool-output-state.js";
 import { type ChatItem, type ToolTrailEntry, buildChatItems } from "../lib/tool-trail.js";
 import { bubblePlan, hasTurnResults, turnResultRows } from "../lib/turn-results.js";
 import { t } from "../theme.js";
@@ -165,13 +166,13 @@ interface MessageListProps {
  * Rows a turn's calls take: the live trail while the turn runs (a "tool"
  * item), the results block once the reply has landed (an assistant item).
  */
-function callRows(message: Message, trail: ToolTrailEntry[], maxRows?: number): number {
+function callRows(message: Message, trail: ToolTrailEntry[], maxRows?: number, width = 80): number {
 	// Results carry one blank row between them and the reply (mockup A).
 	if (message.role === "assistant") {
 		const plan = bubblePlan(message.content, message.plan, trail);
-		return hasTurnResults(trail, plan) ? turnResultRows(trail, maxRows, plan) + 1 : 0;
+		return hasTurnResults(trail, plan) ? turnResultRows(trail, maxRows, plan, width) + 1 : 0;
 	}
-	return trail.length === 0 ? 0 : toolTrailRows(trail, maxRows);
+	return trail.length === 0 ? 0 : toolTrailRows(trail, maxRows, width);
 }
 
 function estimateMessageRows(
@@ -179,7 +180,7 @@ function estimateMessageRows(
 	wrapWidth: number,
 	trail: ToolTrailEntry[] = [],
 ): number {
-	const trailRows = callRows(message, trail);
+	const trailRows = callRows(message, trail, undefined, wrapWidth);
 	// A standalone trail (calls with no reply yet): its rows + marginBottom.
 	if (message.role === "tool") return trailRows > 0 ? trailRows + 1 : 0;
 	const w = Math.max(1, wrapWidth);
@@ -205,8 +206,11 @@ function estimateMessageRows(
 }
 
 /** The row estimate, exposed so tests can hold it to what Ink draws. */
-export const estimateMessageRowsForTest = (message: Message, wrapWidth: number): number =>
-	estimateMessageRows(message, wrapWidth);
+export const estimateMessageRowsForTest = (
+	message: Message,
+	wrapWidth: number,
+	trail: ToolTrailEntry[] = [],
+): number => estimateMessageRows(message, wrapWidth, trail);
 
 /** Rows a message body draws at wrap width `w`, laid out as MarkdownBody draws it. */
 function bodyRows(content: string, w: number): number {
@@ -229,6 +233,8 @@ export function MessageList({
 	turnRunning = true,
 }: MessageListProps) {
 	const { stdout } = useStdout();
+	// Opening or closing a tool output changes row heights: re-estimate.
+	useToolOutputVersion();
 	const resolvedContentWidth = contentWidthProp ?? Math.max(24, (stdout?.columns ?? 80) - 8);
 	// Width used to estimate wrapped line count: the same per-role math
 	// MessageItem uses for its body (bubbleWidths), so estimate and render agree.
@@ -264,19 +270,16 @@ export function MessageList({
 	// the container is what makes Ink leave stale characters behind.
 	const trailCaps = new Map<string, number>();
 	const rowEstimates = chatItems.map((i) => {
-		const full = estimateMessageRows(
-			i.message,
-			bubbleWidths(resolvedContentWidth, i.message.role).wrap,
-			i.trail,
-		);
-		const trailRows = callRows(i.message, i.trail);
+		const wrap = bubbleWidths(resolvedContentWidth, i.message.role).wrap;
+		const full = estimateMessageRows(i.message, wrap, i.trail);
+		const trailRows = callRows(i.message, i.trail, undefined, wrap);
 		if (trailRows === 0 || full <= resolvedRowBudget) return full;
 		const base = full - trailRows;
 		// The results' gap row is not a trail row: leave it out of the cap.
 		const gap = i.message.role === "assistant" ? 1 : 0;
 		const cap = Math.max(1, resolvedRowBudget - base - gap);
 		trailCaps.set(i.message.id, cap);
-		return base + callRows(i.message, i.trail, cap);
+		return base + callRows(i.message, i.trail, cap, wrap);
 	});
 
 	// --- Scroll state (web-style auto-pin + content-anchored offset) ---
