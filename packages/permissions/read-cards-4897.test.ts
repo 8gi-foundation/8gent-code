@@ -14,7 +14,16 @@ import { neverReadClass, osReadSpec } from "./read-boundary";
 import { SYSTEM_ONE_FLAG, _resetSystemOne, systemOneGate } from "./system-one-gate";
 import { registerTuiApprovalHandler } from "./tui-approval-channel";
 
-const KEYS = ["EIGHT_HEADLESS", "EIGHT_WORKSPACE_ROOT", "EIGHT_WORKSPACE_BOUNDARY"];
+// Every env variable this file writes. Bun runs all test files in one process, so each is saved
+// before the file and restored exactly after every test (deleted when it was unset).
+const KEYS = [
+	"EIGHT_HEADLESS",
+	"EIGHT_WORKSPACE_ROOT",
+	"EIGHT_WORKSPACE_BOUNDARY",
+	"EIGHT_HOME",
+	"EIGHT_DATA_DIR",
+	"EIGHT_OS_READ_BOUNDARY",
+];
 const saved: Record<string, string | undefined> = {};
 const repoTmp = path.resolve(import.meta.dir, "..", "..", ".tmp");
 let base: string;
@@ -52,7 +61,8 @@ beforeEach(() => {
 
 afterEach(() => {
 	registerTuiApprovalHandler(null);
-	Reflect.deleteProperty(process.env, "EIGHT_HEADLESS");
+	// Back to the file's own clean state; afterAll puts the originals back.
+	for (const k of KEYS) Reflect.deleteProperty(process.env, k);
 	fs.rmSync(base, { recursive: true, force: true });
 });
 
