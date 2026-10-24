@@ -26,10 +26,18 @@ COPY tests/ tests/
 # Copy harness scripts + benchmarks (kernel depends on model-router)
 COPY scripts/nightly-train.ts scripts/nightly-train.ts
 COPY scripts/board-vessel/ scripts/board-vessel/
+COPY scripts/cell-sandbox-proof.sh scripts/cell-sandbox-proof.sh
 COPY benchmarks/ benchmarks/
 
 # Writable tmp for agent workdirs
 RUN mkdir -p /tmp/8gent-work /root/.8gent/sessions
+
+# The user a /selfimprove round runs model-written code as (selfimprove.ts linuxSandbox): no home, no shell.
+# /root stays root-only so that user cannot reach the cell's state, key file or ledger, and the genome in
+# /app is not writable by it. Proof: scripts/cell-sandbox-proof.sh (CI: .github/workflows/cell-image.yml).
+RUN useradd --uid 1002 --no-create-home --shell /usr/sbin/nologin cellrun \
+ && chmod 700 /root \
+ && chmod -R go-w /app
 
 EXPOSE 8080
 

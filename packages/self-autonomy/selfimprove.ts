@@ -15,6 +15,14 @@
  * to every later scratch copy; the genome itself is never edited. Nothing is sent anywhere here:
  * no proposal goes out in this slice.
  *
+ * The model's code never runs with the cell's powers: the checks (and so any patched code) run in a
+ * sandbox (linuxSandbox: a network namespace, an unprivileged uid, no new privileges) in a scratch
+ * directory outside the cell state and the genome. The round is refused where no sandbox works, unless
+ * SELFIMPROVE_UNSANDBOXED=1, and then the key and the ledger are only as safe as the model. The model's
+ * key is taken out of the process environment at the start of the round and read again only for the call
+ * (MINIMAX_API_KEY_FILE is read at the call itself). Not yet proven in the Fly image: see
+ * scripts/cell-sandbox-proof.sh and .github/workflows/cell-image.yml.
+ *
  * Cells only: CELL_ID must be set and the provider must be minimax, our own fleet's explicit choice.
  * A person's install never uses a hosted model for this, and nothing here asks them to.
  */
@@ -22,6 +30,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { resolveHome } from "../core/home";
 
@@ -62,6 +71,29 @@ export type Complete = (
 	o: { maxTokens: number },
 ) => Promise<{ text: string; tokens: number | null }>;
 
+/** Where model-written code runs. */
+export interface Sandbox {
+	/** True only when the isolation really works on this machine. */
+	probe(): Promise<boolean>;
+	/** Give the scratch directory to the sandbox user. */
+	prepare(dir: string): void;
+	/** The argv that runs `argv` inside the sandbox. */
+	wrap(argv: string[]): string[];
+}
+
+/** Thrown by a model call that failed after it may have spent tokens: `tokens` is what to charge. */
+export class CallError extends Error {
+	constructor(
+		message: string,
+		readonly tokens: number,
+	) {
+		super(message);
+	}
+}
+
+/** Thrown before anything was sent: nothing is charged. */
+export class PreCallError extends Error {}
+
 export interface RoundDeps {
 	env?: Env;
 	now?: () => Date;
@@ -70,8 +102,12 @@ export interface RoundDeps {
 	/** The cell's own state: ledger, kept patches. Default <home>/.8gent/cell. */
 	cellDir?: string;
 	checks?: CheckDef[];
+	/** Replaces the sandboxed check runner (tests). */
 	runCheck?: (c: CheckDef, cwd: string) => Promise<CheckResult>;
 	complete?: Complete;
+	/** "off" runs checks directly (tests, or SELFIMPROVE_UNSANDBOXED=1). Default: linuxSandbox(). */
+	sandbox?: Sandbox | "off";
+	fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 export const DEFAULT_MIN_CALL_TOKENS = 1000;
@@ -142,55 +178,103 @@ function capFrom(env: Env): { cap: number } | { error: string } {
 
 // ── patches ──────────────────────────────────────────────────────────────
 
-const DENY: RegExp[] = [
-	/\.test\.tsx?$/,
-	/(^|\/)__tests__\//,
-	/cell-checks\.json$/,
-	/^packages\/permissions\//,
-	/^packages\/decide\/(guard|rules)/,
-	/^packages\/providers\//,
-	/^packages\/self-autonomy\/selfimprove/,
-	/(^|\/)\.env/,
-	/secret/i,
-	/node_modules/,
-	/(^|\/)\.git(\/|$)/,
-	/(^|\/)(Dockerfile|package\.json|bun\.lock)/,
+/** The only places a cell may edit: its skills, its prompts, its memory. */
+const ALLOW_DIRS = [
+	"packages/self-autonomy/skills/",
+	"packages/self-autonomy/prompts/",
+	"packages/self-autonomy/memory/",
 ];
+
+function pathProblem(p: string): string | null {
+	if (p.includes("\\") || p.includes("\0") || p.startsWith("/") || p.split("/").includes(".."))
+		return `path leaves the tree: ${p.slice(0, 60)}`;
+	if (!ALLOW_DIRS.some((d) => p.startsWith(d) && p.length > d.length))
+		return `${p.slice(0, 60)} is outside the places a cell may edit (skills, prompts, memory)`;
+	if (/\.test\.tsx?$/.test(p) || /(^|\/)\.env/.test(p) || /node_modules|(^|\/)\.git(\/|$)/.test(p))
+		return `${p.slice(0, 60)} is not for a cell to change`;
+	return null;
+}
 
 export type PatchCheck =
 	| { ok: true; files: string[]; changed: number }
 	| { ok: false; why: string };
 
-/** What a cell will apply: a few small source edits under packages/, never the checks, the guard, the keys or this loop. */
+/**
+ * What a cell will apply, read section by section so that nothing git would apply goes unchecked:
+ * every section opens with a `diff --git a/P b/P` header, its ---/+++ lines must name that same P (or
+ * /dev/null for an added or removed file), and its hunks are read by their counts. Any other line, before,
+ * between or after the sections, is a refusal. Only the allow-listed directories; at most 5 files and 200
+ * changed lines in all.
+ */
 export function validatePatch(text: string): PatchCheck {
-	if (!/^diff --git /m.test(text)) return { ok: false, why: "no diff in the answer" };
-	if (/^(GIT binary patch|Binary files )/m.test(text))
-		return { ok: false, why: "binary patches are refused" };
-	if (
-		/^(old mode|new mode|rename |copy |similarity |new file mode 120000|deleted file mode 120000)/m.test(
-			text,
-		)
-	)
-		return { ok: false, why: "modes, renames, copies and symlinks are refused" };
+	const lines = text.split("\n");
+	while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+	const no = (why: string): PatchCheck => ({ ok: false, why });
+	if (lines.length === 0) return no("no diff in the answer");
 	const files: string[] = [];
-	for (const m of text.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)) {
+	let changed = 0;
+	let i = 0;
+	while (i < lines.length) {
+		const m = /^diff --git a\/(.+) b\/(.+)$/.exec(lines[i]);
+		if (!m) return no(`line ${i + 1} is outside any diff section: ${lines[i].slice(0, 40)}`);
 		const [, a, b] = m;
-		if (a !== b) return { ok: false, why: "a rename is refused" };
-		if (b.startsWith("/") || b.includes("\\") || b.includes("\0") || b.split("/").includes(".."))
-			return { ok: false, why: `path leaves the tree: ${b.slice(0, 60)}` };
-		if (!b.startsWith("packages/"))
-			return { ok: false, why: `only packages/ may change: ${b.slice(0, 60)}` };
-		if (DENY.some((r) => r.test(b))) return { ok: false, why: `${b} is not for a cell to change` };
+		if (a !== b) return no("a rename is refused");
+		const problem = pathProblem(b);
+		if (problem) return no(problem);
+		i++;
+		let added = false;
+		let removed = false;
+		while (i < lines.length && !lines[i].startsWith("--- ")) {
+			const l = lines[i];
+			if (/^index [0-9a-f]+\.\.[0-9a-f]+( 100644)?$/.test(l)) {
+				// fine
+			} else if (l === "new file mode 100644") added = true;
+			else if (l === "deleted file mode 100644") removed = true;
+			else return no(`unsupported line in the header of ${b}: ${l.slice(0, 40)}`);
+			i++;
+		}
+		const minus = /^--- (?:a\/(.+)|(\/dev\/null))$/.exec(lines[i] ?? "");
+		const plus = /^\+\+\+ (?:b\/(.+)|(\/dev\/null))$/.exec(lines[i + 1] ?? "");
+		if (!minus || !plus) return no(`${b} has no ---/+++ lines`);
+		if (added ? !minus[2] : minus[1] !== b) return no(`the --- line of ${b} names another file`);
+		if (removed ? !plus[2] : plus[1] !== b) return no(`the +++ line of ${b} names another file`);
+		i += 2;
+		let hunks = 0;
+		while (i < lines.length && lines[i].startsWith("@@ ")) {
+			const h = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(lines[i]);
+			if (!h) return no(`bad hunk header in ${b}`);
+			let oldN = h[1] === undefined ? 1 : Number(h[1]);
+			let newN = h[2] === undefined ? 1 : Number(h[2]);
+			i++;
+			hunks++;
+			while (oldN > 0 || newN > 0) {
+				if (i >= lines.length) return no(`a hunk in ${b} is shorter than it says`);
+				const l = lines[i];
+				if (l.startsWith("\\")) {
+					i++;
+					continue;
+				}
+				const c = l === "" ? " " : l[0];
+				if (c === " ") {
+					oldN--;
+					newN--;
+				} else if (c === "-") {
+					oldN--;
+					changed++;
+				} else if (c === "+") {
+					newN--;
+					changed++;
+				} else return no(`bad line in a hunk of ${b}`);
+				if (oldN < 0 || newN < 0) return no(`a hunk in ${b} is longer than it says`);
+				i++;
+			}
+			while (i < lines.length && lines[i].startsWith("\\")) i++;
+		}
+		if (hunks === 0) return no(`${b} has no hunk`);
 		files.push(b);
 	}
-	if (files.length === 0) return { ok: false, why: "no files in the diff" };
-	if (files.length > MAX_FILES) return { ok: false, why: `more than ${MAX_FILES} files` };
-	let changed = 0;
-	for (const l of text.split("\n")) {
-		if (/^(\+\+\+ |--- )(a\/|b\/|\/dev\/null)/.test(l)) continue;
-		if (l.startsWith("+") || l.startsWith("-")) changed++;
-	}
-	if (changed > MAX_CHANGED) return { ok: false, why: `more than ${MAX_CHANGED} changed lines` };
+	if (files.length > MAX_FILES) return no(`more than ${MAX_FILES} files`);
+	if (changed > MAX_CHANGED) return no(`more than ${MAX_CHANGED} changed lines`);
 	return { ok: true, files, changed };
 }
 
@@ -220,17 +304,69 @@ function gitApply(cwd: string, patchFile: string, checkOnly: boolean): boolean {
 /** The only variables a check inherits. The model's key is not one of them. */
 const CHECK_ENV = ["PATH", "LANG", "LC_ALL", "TMPDIR", "TZ"] as const;
 
-async function defaultRunCheck(c: CheckDef, cwd: string): Promise<CheckResult> {
-	const env: Record<string, string> = { HOME: cwd };
-	for (const k of CHECK_ENV) if (process.env[k] !== undefined) env[k] = process.env[k] as string;
-	const r = spawnSync(c.cmd[0], c.cmd.slice(1), {
-		cwd,
-		env: env as NodeJS.ProcessEnv,
-		encoding: "utf-8",
-		timeout: 180_000,
-	});
-	const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
-	return { pass: r.status === 0, tail: out.slice(-4000) };
+function sandboxedRunCheck(wrap: (a: string[]) => string[]) {
+	return async (c: CheckDef, cwd: string): Promise<CheckResult> => {
+		const env: Record<string, string> = { HOME: cwd };
+		for (const k of CHECK_ENV) if (process.env[k] !== undefined) env[k] = process.env[k] as string;
+		const argv = wrap(c.cmd);
+		const r = spawnSync(argv[0], argv.slice(1), {
+			cwd,
+			env: env as NodeJS.ProcessEnv,
+			encoding: "utf-8",
+			timeout: 180_000,
+		});
+		const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+		return { pass: r.status === 0, tail: out.slice(-4000) };
+	};
+}
+
+/**
+ * Linux isolation for model-written code: a new network namespace (no network), then drop to an
+ * unprivileged uid with no new privileges. The cell's state, key file and ledger live under the
+ * root-only home, and its environment is in root-only /proc files, so that uid cannot read them. Needs
+ * root with CAP_SYS_ADMIN (a Fly machine; a default Docker container has neither).
+ */
+export function linuxSandbox(uid: number = Number(process.env.CELL_SANDBOX_UID ?? 1002)): Sandbox {
+	if (!Number.isInteger(uid) || uid < 1) throw new Error("the sandbox needs an unprivileged uid");
+	const wrap = (argv: string[]) => [
+		"unshare",
+		"-n",
+		"setpriv",
+		`--reuid=${uid}`,
+		`--regid=${uid}`,
+		"--clear-groups",
+		"--no-new-privs",
+		"--",
+		...argv,
+	];
+	return {
+		wrap,
+		prepare(dir: string) {
+			const walk = (d: string) => {
+				fs.chownSync(d, uid, uid);
+				for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+					const f = path.join(d, e.name);
+					if (e.isSymbolicLink()) fs.lchownSync(f, uid, uid);
+					else if (e.isDirectory()) walk(f);
+					else fs.chownSync(f, uid, uid);
+				}
+			};
+			walk(dir);
+			fs.chmodSync(dir, 0o700);
+		},
+		async probe() {
+			if (process.platform !== "linux") return false;
+			// Right uid, only the loopback device, root's environment and root's home unreadable.
+			const script = [
+				`[ "$(id -u)" = "${uid}" ]`,
+				`[ "$(tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d ' ')" = "lo" ]`,
+				"! cat /proc/1/environ > /dev/null 2>&1",
+				"! ls /root > /dev/null 2>&1",
+			].join(" && ");
+			const argv = wrap(["sh", "-c", script]);
+			return spawnSync(argv[0], argv.slice(1), { stdio: "ignore", timeout: 20_000 }).status === 0;
+		},
+	};
 }
 
 function suiteHash(checks: CheckDef[]): string {
@@ -247,9 +383,10 @@ export function loadChecks(workspace: string): CheckDef[] {
 
 // ── scratch ──────────────────────────────────────────────────────────────
 
-function makeScratch(workspace: string, cellDir: string): string {
-	const dir = path.join(cellDir, `scratch-${process.pid}-${Date.now()}`);
-	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+/** A scratch copy of the genome under the system temp directory: outside the cell's state and the genome. */
+function makeScratch(workspace: string): string {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cell-scratch-"));
+	fs.chmodSync(dir, 0o700);
 	for (const e of COPY) {
 		const src = path.join(workspace, e);
 		if (!fs.existsSync(src)) continue;
@@ -271,7 +408,8 @@ function applyKept(scratch: string, cellDir: string): void {
 		.filter((x) => x.endsWith(".patch"))
 		.sort()) {
 		const f = path.join(dir, n);
-		if (gitApply(scratch, f, true)) gitApply(scratch, f, false);
+		if (validatePatch(fs.readFileSync(f, "utf-8")).ok && gitApply(scratch, f, true))
+			gitApply(scratch, f, false);
 		else fs.renameSync(f, `${f}.stale`); // the genome moved on; this patch no longer applies
 	}
 }
@@ -313,48 +451,85 @@ export async function minimaxComplete(
 	o: { maxTokens: number },
 	m: MinimaxOpts,
 ): Promise<{ text: string; tokens: number | null }> {
-	if (!m.baseUrl.startsWith("https://")) throw new Error("the model endpoint must be https");
+	if (!m.baseUrl.startsWith("https://")) throw new PreCallError("the model endpoint must be https");
 	const f = m.fetchImpl ?? ((u, i) => fetch(u, i));
-	const res = await f(`${m.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-		method: "POST",
-		headers: { "content-type": "application/json", authorization: `Bearer ${m.key}` },
-		body: JSON.stringify({
-			model: m.model,
-			messages: [{ role: "user", content: prompt }],
-			max_tokens: o.maxTokens,
-			temperature: 0.2,
-		}),
-		redirect: "error",
-		signal: AbortSignal.timeout(180_000),
-	});
-	if (!res.ok) throw new Error(`the model endpoint answered ${res.status}`);
-	const j = (await res.json()) as {
-		choices?: Array<{ message?: { content?: string } }>;
-		usage?: { total_tokens?: number };
-	};
-	const text = j.choices?.[0]?.message?.content;
-	if (typeof text !== "string" || text === "") throw new Error("the model answered with no text");
+	// From here a request may have been charged: a failure costs the usage it reports, else max_tokens.
+	let res: Response;
+	try {
+		res = await f(`${m.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+			method: "POST",
+			headers: { "content-type": "application/json", authorization: `Bearer ${m.key}` },
+			body: JSON.stringify({
+				model: m.model,
+				messages: [{ role: "user", content: prompt }],
+				max_tokens: o.maxTokens,
+				temperature: 0.2,
+			}),
+			redirect: "error",
+			signal: AbortSignal.timeout(180_000),
+		});
+	} catch {
+		throw new CallError("the model call failed before an answer", o.maxTokens);
+	}
+	if (!res.ok) throw new CallError(`the model endpoint answered ${res.status}`, o.maxTokens);
+	let j: { choices?: Array<{ message?: { content?: string } }>; usage?: { total_tokens?: number } };
+	try {
+		j = (await res.json()) as typeof j;
+	} catch {
+		throw new CallError("the model answer was not JSON", o.maxTokens);
+	}
 	const t = j.usage?.total_tokens;
-	return { text, tokens: typeof t === "number" && Number.isFinite(t) ? t : null };
+	const usage = typeof t === "number" && Number.isFinite(t) ? t : null;
+	const text = j.choices?.[0]?.message?.content;
+	if (typeof text !== "string" || text === "")
+		throw new CallError("the model answered with no text", usage ?? o.maxTokens);
+	return { text, tokens: usage };
 }
 
-async function defaultComplete(env: Env): Promise<Complete> {
-	const { resolveProviderBaseUrl, resolveProviderKey } = await import("../providers/key-resolver");
-	const baseUrl = resolveProviderBaseUrl("minimax");
-	const key = resolveProviderKey("minimax");
-	if (!baseUrl || !key) throw new Error("no MiniMax key: set MINIMAX_API_KEY on this cell");
-	let model = env.SELFIMPROVE_MODEL?.trim();
-	if (!model) {
-		const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
-			headers: { authorization: `Bearer ${key}` },
-			redirect: "error",
-			signal: AbortSignal.timeout(30_000),
-		});
-		const list = (await res.json()) as { data?: Array<{ id?: string }> };
-		model = list.data?.find((x) => typeof x.id === "string")?.id;
-		if (!model) throw new Error("the model endpoint listed no models");
-	}
-	return (p, o) => minimaxComplete(p, o, { baseUrl, key, model: model as string });
+/** The key, kept out of the process environment. MINIMAX_API_KEY_FILE is read at the call; else the key taken from the environment. */
+function takeKey(env: Env): () => string | null {
+	const held = env.MINIMAX_API_KEY?.trim() || null;
+	Reflect.deleteProperty(env, "MINIMAX_API_KEY");
+	const file = env.MINIMAX_API_KEY_FILE?.trim();
+	return () => {
+		if (file) {
+			try {
+				const v = fs.readFileSync(file, "utf-8").trim();
+				if (v) return v;
+			} catch {}
+		}
+		return held;
+	};
+}
+
+async function defaultComplete(
+	env: Env,
+	getKey: () => string | null,
+	fetchImpl?: RoundDeps["fetchImpl"],
+): Promise<Complete> {
+	const { resolveProviderBaseUrl } = await import("../providers/key-resolver");
+	const f = fetchImpl ?? ((u: string, i?: RequestInit) => fetch(u, i));
+	return async (p, o) => {
+		// Resolved here, for this call only.
+		const key = getKey();
+		const baseUrl = resolveProviderBaseUrl("minimax");
+		if (!baseUrl || !key)
+			throw new PreCallError(
+				"no MiniMax key: MINIMAX_API_KEY or MINIMAX_API_KEY_FILE on this cell",
+			);
+		let model = env.SELFIMPROVE_MODEL?.trim();
+		if (!model) {
+			const res = await f(`${baseUrl.replace(/\/+$/, "")}/models`, {
+				headers: { authorization: `Bearer ${key}` },
+				redirect: "error",
+				signal: AbortSignal.timeout(30_000),
+			});
+			const list = (await res.json()) as { data?: Array<{ id?: string }> };
+			model = list.data?.find((x) => typeof x.id === "string")?.id;
+			if (!model) throw new PreCallError("the model endpoint listed no models");
+		}
+		return minimaxComplete(p, o, { baseUrl, key, model, fetchImpl: f });
+	};
 }
 
 // ── the round ────────────────────────────────────────────────────────────
@@ -389,11 +564,31 @@ export async function runSelfImprove(deps: RoundDeps = {}): Promise<RoundResult>
 	if ("error" in capped) return done("refused", capped.error);
 	const cap = capped.cap;
 
+	// The key leaves the process environment now; it is read again only for the model call.
+	const getKey = takeKey(env);
+
+	// Model-written code runs in a sandbox, or not at all.
+	let sandbox: Sandbox | "off";
+	try {
+		sandbox = deps.sandbox ?? (env.SELFIMPROVE_UNSANDBOXED === "1" ? "off" : linuxSandbox());
+	} catch (err) {
+		return done("refused", `no sandbox: ${(err as Error).message}`);
+	}
+	if (sandbox !== "off" && !(await sandbox.probe()))
+		return done(
+			"refused",
+			"no working sandbox on this machine (it needs root, unshare and setpriv); nothing was run. SELFIMPROVE_UNSANDBOXED=1 runs without one, and then the key and the ledger are only as safe as the model",
+		);
+	const wrap = sandbox === "off" ? (a: string[]) => a : sandbox.wrap;
+	const runCheck = deps.runCheck ?? sandboxedRunCheck(wrap);
+	const give = (dir: string) => {
+		if (sandbox !== "off") sandbox.prepare(dir);
+	};
+
 	const workspace = deps.workspace ?? path.resolve(import.meta.dir, "..", "..");
 	const cellDir = deps.cellDir ?? path.join(resolveHome(env), ".8gent", "cell");
 	const cell = env.CELL_ID.trim();
 	const checks = deps.checks ?? loadChecks(workspace);
-	const runCheck = deps.runCheck ?? defaultRunCheck;
 	const t = now();
 
 	// Frozen: the suite a cell started with is the suite it keeps.
@@ -416,10 +611,11 @@ export async function runSelfImprove(deps: RoundDeps = {}): Promise<RoundResult>
 
 	if (spent >= cap) return dormant(lines, t, cellDir, log, `today's ${cap} tokens are spent`);
 
-	const scratch = makeScratch(workspace, cellDir);
+	const scratch = makeScratch(workspace);
 	let tokens = 0;
 	try {
 		applyKept(scratch, cellDir);
+		give(scratch);
 		const base = new Map<string, CheckResult>();
 		for (const c of checks) base.set(c.name, await runCheck(c, scratch));
 		const failing = checks
@@ -441,8 +637,16 @@ export async function runSelfImprove(deps: RoundDeps = {}): Promise<RoundResult>
 				log,
 				`${remaining} tokens left today is not enough for a round`,
 			);
-		const complete = deps.complete ?? (await defaultComplete(env));
-		const reply = await complete(prompt, { maxTokens });
+		const complete = deps.complete ?? (await defaultComplete(env, getKey, deps.fetchImpl));
+		let reply: { text: string; tokens: number | null };
+		try {
+			reply = await complete(prompt, { maxTokens });
+		} catch (err) {
+			// A call that fails after it may have spent is charged: its usage if it says, else max_tokens.
+			if (!(err instanceof PreCallError))
+				tokens = err instanceof CallError ? err.tokens : maxTokens;
+			throw err;
+		}
 		tokens = reply.tokens ?? estimate(prompt) + estimate(reply.text);
 
 		const patch = extractDiff(reply.text);
@@ -463,6 +667,7 @@ export async function runSelfImprove(deps: RoundDeps = {}): Promise<RoundResult>
 			});
 			return done("reverted", "the change did not apply", { tokens });
 		}
+		give(scratch);
 		const improved: string[] = [];
 		const regressed: string[] = [];
 		for (const c of checks) {

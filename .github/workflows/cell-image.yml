@@ -1,0 +1,46 @@
+# cell-image.yml - proves, in the vessel image, that a /selfimprove round's sandbox isolates model-written
+# code (#4937): no network, no read of the cell's state, key file, ledger or environment, no write to the
+# genome. Builds the root Dockerfile and runs scripts/cell-sandbox-proof.sh in it.
+#
+# Limit, stated plainly: a GitHub runner's Docker is not a Fly machine. unshare -n needs CAP_SYS_ADMIN, which
+# a default container lacks, so this job grants it; a Fly machine's root has it. This proves the isolation
+# logic in the image. To prove it on Fly itself:
+#   fly machine run <image> -a <app> --rm -- sh /app/scripts/cell-sandbox-proof.sh
+name: Cell image
+
+on:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - 'bin/**'
+      - 'packages/self-autonomy/**'
+      - 'scripts/cell-sandbox-proof.sh'
+      - '.github/workflows/cell-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox-proof:
+    name: Build the vessel image and prove the sandbox
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Build the image
+        run: docker build -t cell-image .
+      - name: The CLI is in the image
+        run: docker run --rm cell-image sh -c 'test -f /app/bin/8gent.ts && git --version && bun --version'
+      - name: Prove the sandbox in the image
+        run: |
+          docker run --rm --cap-add SYS_ADMIN --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+            cell-image sh /app/scripts/cell-sandbox-proof.sh
+      - name: A round refuses without a sandbox, as a default container has none
+        run: |
+          out="$(docker run --rm -e CELL_ID=cell-ci -e SELFIMPROVE_PROVIDER=minimax -e DAILY_TOKEN_CAP=1000 \
+            cell-image bun run /app/bin/8gent.ts selfimprove || true)"
+          echo "$out"
+          echo "$out" | grep -q "no working sandbox"
