@@ -425,6 +425,89 @@ describe("the palette cap is reserved at every width, the sandbox state below 60
 	});
 });
 
+describe("the context meter segment (#4956)", () => {
+	const ctx = { used: 31200, window: 128000, stale: false };
+	const segs = (extra: Partial<Parameters<typeof buildFooterSegments>[0]> = {}) =>
+		buildFooterSegments({ mode: "Planning", permissions: "ask", columns: 100, ctx, ...extra });
+
+	test("percent, then used of window, in the muted colour while calm", () => {
+		const seg = segs().find((s) => s.key === "ctx");
+		expect(seg?.label).toBe("ctx");
+		expect(seg?.value).toBe("24% 31.2k/128k");
+		expect(seg?.bold).toBeFalsy();
+	});
+
+	test("warm at 70 percent, red and bold at 90, and they differ from calm", () => {
+		const at = (used: number) => segs({ ctx: { ...ctx, used } }).find((s) => s.key === "ctx");
+		const calm = at(31200)?.color;
+		const warn = at(100000)?.color;
+		const danger = at(120000);
+		expect(warn).not.toBe(calm);
+		expect(danger?.color).not.toBe(warn);
+		expect(danger?.bold).toBe(true);
+		expect(danger?.value).toContain("!");
+	});
+
+	test("right after a compaction it reads ? and never the old number", () => {
+		const seg = segs({ ctx: { ...ctx, stale: true } }).find((s) => s.key === "ctx");
+		expect(seg?.value).toBe("?/128k");
+		expect(seg?.value).not.toContain("24");
+	});
+
+	test("no measurement yet: no segment", () => {
+		expect(segs({ ctx: { ...ctx, used: null } }).some((s) => s.key === "ctx")).toBe(false);
+		expect(segs({ ctx: undefined }).some((s) => s.key === "ctx")).toBe(false);
+	});
+
+	test("with the sandbox off and a palette cap, the meter shortens before anything vital goes (52 columns)", () => {
+		const all = segs({ columns: 52, sandboxOff: "nested", sessionTime: "2s" });
+		const row = fitFooterRow(all, 51);
+		expect(row.hints[0]).toBe("^P palette");
+		expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
+		expect(row.segments.find((s) => s.key === "ctx")?.value).toBe("24%");
+	});
+
+	test("at 40 columns without a sandbox segment the meter and the cap both fit", () => {
+		const row = fitFooterRow(segs({ columns: 40 }), 39);
+		expect(row.hints[0]).toBe("^P palette");
+		expect(row.segments.some((s) => s.key === "ctx")).toBe(true);
+	});
+
+	test("at every width from 38 the cap stays, and below 60 the sandbox stays", () => {
+		for (const sandboxOff of [undefined, "nested"]) {
+			for (let w = 38; w <= 220; w++) {
+				const all = segs({
+					columns: w + 1,
+					sandboxOff,
+					sessionTime: "2s",
+					providersLive: 1,
+					providersTotal: 2,
+				});
+				const row = fitFooterRow(all, w);
+				expect(row.hints[0], `cap at ${w}`).toBe("^P palette");
+				if (sandboxOff && w < 60) expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
+			}
+		}
+	});
+
+	test("rendered at 100x32: the footer row reads the meter after the mode", async () => {
+		const row = (await frame(100, 32, { ctx }))[0] ?? "";
+		expect(row).toContain("ctx 24% 31.2k/128k");
+		expect(row).toContain("[^P] palette");
+	});
+
+	test("rendered at 52 and 40 columns with the sandbox off: cap and sandbox word stay", async () => {
+		for (const cols of [52, 40]) {
+			const row = (await frame(cols, 30, { ctx, sandboxOff: "nested" }))[0] ?? "";
+			expect(row, `row at ${cols}`).toContain("[^P] palette");
+			expect(row, `row at ${cols}`).toMatch(/(sandbox|sbx) off/);
+			expect(row.length).toBeLessThanOrEqual(cols);
+		}
+		const row52 = (await frame(52, 30, { ctx, sandboxOff: "nested" }))[0] ?? "";
+		expect(row52).toContain("ctx 24%");
+	});
+});
+
 describe("a gated turn shows one word at the right end of the bar (#4510)", () => {
 	test("unverified and tests-claimed-not-run render last, in the warning colour", async () => {
 		const warn = buildFooterSegments({ mode: "Planning", sandboxOff: "x" }).find(

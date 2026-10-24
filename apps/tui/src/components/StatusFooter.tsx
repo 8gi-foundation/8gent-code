@@ -28,6 +28,7 @@ import {
 	isPermissionMode,
 } from "../../../../packages/permissions/permission-mode.js";
 import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
+import { ctxText } from "../lib/context-view.js";
 import { keyBytes } from "../lib/key-bytes.js";
 import { injectKeys } from "../lib/mouse-input.js";
 import {
@@ -91,6 +92,12 @@ export interface FooterData {
 	judge?: JudgeState;
 	/** Why run_command runs without its OS sandbox; undefined when it has one (#4013). */
 	sandboxOff?: string;
+	/**
+	 * How full the context window is (#4956). `used` is null until a turn has
+	 * measured; `stale` is true right after a compaction until the next
+	 * measured turn, so the old number never reads as a measurement.
+	 */
+	ctx?: { used: number | null; window: number | null; stale: boolean };
 	/** ADHD mode: a segment only while on (it had a rail row before #3238). */
 	adhd?: boolean;
 	/** Durable turns: the intent/effect ledger is on. */
@@ -143,6 +150,23 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			bold: PERM_LOOK[perm].bold,
 			color: permColour(perm),
 			priority: 0,
+		});
+	}
+	const ctx = d.ctx ? ctxText({ ...d.ctx, columns: d.columns ?? 160 }) : null;
+	if (ctx) {
+		out.push({
+			key: "ctx",
+			label: "ctx",
+			value: ctx.value,
+			// Calm, then warm at 70 percent, then red at 90 (and a "!" in the text).
+			color:
+				ctx.level === "danger"
+					? theme.color.red
+					: ctx.level === "warn"
+						? theme.color.orangeAlt
+						: ui.muted,
+			bold: ctx.level === "danger",
+			priority: 2,
 		});
 	}
 	if (d.tokensPerSecond && d.tokensPerSecond > 0) {
@@ -372,7 +396,14 @@ export function fitFooterRow(
 	const fit = (list: FooterSegment[]) => fitFooterSegments(list, budget, leading);
 	const sandbox = all.find((s) => s.key === "sandbox");
 	const without = sandbox ? all.filter((s) => s !== sandbox) : all;
-	const base = fit(without);
+	let base = fit(without);
+	// Phone: when the meter does not fit under "mode Planning", drop that label before the meter.
+	if (width < FOOTER_NARROW_COLS && without.some((s) => s.key === "ctx")) {
+		if (!base.some((s) => s.key === "ctx")) {
+			const short = fit(without.map(unlabelled));
+			if (short.some((s) => s.key === "ctx")) base = short;
+		}
+	}
 	const baseHints = hintsFor(base);
 	if (!sandbox) return { segments: base, hints: baseHints };
 	if (width >= FOOTER_NARROW_COLS) {
@@ -393,12 +424,20 @@ export function fitFooterRow(
 		(l) => l,
 		(l) => l.map(unlabelled),
 	];
-	for (const shape of attempts) {
-		for (const seg of forms) {
-			const candidate = shape(all.map((s) => (s === sandbox ? seg : s)));
-			const kept = candidate.find((s) => s.key === "sandbox");
-			const segments = fit(candidate);
-			if (kept && segments.includes(kept)) return { segments, hints: hintsFor(segments) };
+	// The context meter outranks the sandbox's reason text: shorten the sandbox
+	// before giving up the meter. Only when nothing keeps both does the meter yield.
+	const meter = all.find((s) => s.key === "ctx");
+	for (const needMeter of meter ? [true, false] : [false]) {
+		for (const shape of attempts) {
+			for (const seg of forms) {
+				const candidate = shape(all.map((s) => (s === sandbox ? seg : s)));
+				const kept = candidate.find((s) => s.key === "sandbox");
+				const keptMeter = candidate.find((s) => s.key === "ctx");
+				const segments = fit(candidate);
+				if (!kept || !segments.includes(kept)) continue;
+				if (needMeter && keptMeter && !segments.includes(keptMeter)) continue;
+				return { segments, hints: hintsFor(segments) };
+			}
 		}
 	}
 	// Still no room: the perm segment yields (the tab tag and Shift+Tab still show it).

@@ -268,6 +268,7 @@ import { chatColumnWidth } from "./lib/chat-layout.js";
 import { clearSelection, onCopied } from "./lib/click-targets.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import { runConsultCommand } from "./lib/consult-command.js";
+import { classifyContext, formatContextReport } from "./lib/context-view.js";
 import {
 	type ContextWindow,
 	UNKNOWN_WINDOW,
@@ -1542,6 +1543,8 @@ export function App({
 
 	// Context window tracking
 	const [contextUsed, setContextUsed] = useState(0);
+	// A compaction just ran and no turn has measured since: the meter reads ? (#4956).
+	const [contextStale, setContextStale] = useState(false);
 	// Window of the model that ran the turn (#3321). Null until resolved; the
 	// HUD shows "unknown", never a guessed number.
 	// Null while the resolver runs: the slot shows "--", not "? unknown".
@@ -3457,6 +3460,9 @@ export function App({
 			onStepStart: (event) => {
 				logStepStart(tabId, tabTitle, event.stepNumber, event.provider, event.model);
 			},
+			onCompaction: () => {
+				if (tabId === activeTabId) setContextStale(true);
+			},
 			onStepFinish: (event: AgentStepEvent) => {
 				const isActive = tabId === activeTabId;
 				if (isActive) {
@@ -3466,7 +3472,10 @@ export function App({
 					// What the last request held, not a running sum. An all-zero
 					// synthetic event measured nothing: keep the last reading.
 					const measured = stepContextUsed(event.usage);
-					if (measured !== null) setContextUsed(measured);
+					if (measured !== null) {
+						setContextUsed(measured);
+						setContextStale(false);
+					}
 					if (event.tokensPerSecond && event.tokensPerSecond > 0) {
 						// Same EWMA shape as packages/ai/agent.ts so the TUI
 						// reading matches what self_inspect reports to the agent.
@@ -4310,6 +4319,7 @@ export function App({
 
 				case "clear":
 					setContextUsed(0);
+					setContextStale(false);
 					setMessages([
 						{
 							id: messageId("cleared"),
@@ -5118,6 +5128,24 @@ export function App({
 					})();
 					break;
 				}
+
+				case "context":
+					// What the window holds, by kind, on one phone-sized screen (#4956). Local, read-only.
+					if (!agent) {
+						addSystemMessage("No 8gent active.");
+						break;
+					}
+					addSystemMessage(
+						formatContextReport(
+							classifyContext(agent.getMessageHistory()),
+							contextWindow?.window ?? null,
+							{
+								measured: contextUsed > 0 ? contextUsed : null,
+								stale: contextStale,
+							},
+						),
+					);
+					break;
 
 				case "stack":
 					// What the next turn sends, per source (#4779). Local, read-only.
@@ -8751,6 +8779,11 @@ export function App({
 				</Box>
 
 				<BottomBar
+					ctx={{
+						used: contextUsed > 0 ? contextUsed : null,
+						window: contextWindow?.window ?? null,
+						stale: contextStale,
+					}}
 					ready={providerHealth.live}
 					total={providerHealth.total}
 					user={authUser?.displayName}
