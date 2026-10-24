@@ -14,7 +14,7 @@ exports[`CommandPaletteView snapshot matrix - empty query / filtered / no-match 
     ],
     "label": "open with empty query, first active",
     "query": "",
-    "width": 50,
+    "width": 64,
   },
   {
     "activeIndex": 0,
@@ -25,7 +25,7 @@ exports[`CommandPaletteView snapshot matrix - empty query / filtered / no-match 
     ],
     "label": "open filter voice (prefix wins)",
     "query": "voice",
-    "width": 50,
+    "width": 64,
   },
   {
     "activeIndex": 0,
@@ -33,7 +33,7 @@ exports[`CommandPaletteView snapshot matrix - empty query / filtered / no-match 
     "commandNames": [],
     "label": "open filter no match",
     "query": "zzz",
-    "width": 50,
+    "width": 64,
   },
   {
     "activeIndex": 1,
@@ -47,7 +47,7 @@ exports[`CommandPaletteView snapshot matrix - empty query / filtered / no-match 
     ],
     "label": "after arrow-down, second row active",
     "query": "",
-    "width": 50,
+    "width": 64,
   },
 ]
 `;
