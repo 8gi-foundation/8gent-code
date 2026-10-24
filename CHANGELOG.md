@@ -9,6 +9,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.28] - 2026-10-24
+
+### Added
+- tui: slash commands complete without Tab: Enter runs a unique prefix, tap a row (#4934) ([#4936](https://github.com/8gi-foundation/8gent-code/pull/4936))
+- cron: scouts slice 1, read-only sources to a local file, daemon runs saved routines (Refs #4926) ([#4931](https://github.com/8gi-foundation/8gent-code/pull/4931))
+- eight: llama.cpp local judge: own pinned llama-server, device-sized judge model, No by default, /local stop (#4906) ([#4909](https://github.com/8gi-foundation/8gent-code/pull/4909))
+
+### Fixed
+- dj: phone deck follows what mpv really does, tap play/pause and stop, /dj doctor audio line (Refs #4907) ([#4948](https://github.com/8gi-foundation/8gent-code/pull/4948))
+- voice: the phone downloads 8gent's own whisper-cli instead of building it (Refs #4939) ([#4947](https://github.com/8gi-foundation/8gent-code/pull/4947))
+- tui: the approval card shows the whole command before a yes (Refs #4928) ([#4929](https://github.com/8gi-foundation/8gent-code/pull/4929))
+
 ## [0.20.27] - 2026-10-24
 
 ### Added
