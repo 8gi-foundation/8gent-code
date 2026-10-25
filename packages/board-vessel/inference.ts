@@ -18,6 +18,93 @@ const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
 const MAX_RESPONSE_LENGTH = 1900;
 
 /**
+ * Direct providers an officer vessel may call, and nothing else (egress
+ * allowlist in code). Each is OpenAI-compatible. MiniMax is its own API with no
+ * middleman; OpenRouter stays for models MiniMax does not serve (Kimi).
+ */
+const DIRECT_PROVIDERS = {
+	minimax: {
+		label: "MiniMax",
+		keyEnv: "MINIMAX_API_KEY",
+		baseEnv: "MINIMAX_BASE_URL",
+		// International endpoint; China region is api.minimaxi.com. No other host.
+		defaultBase: "https://api.minimax.io/v1",
+		allowedHosts: ["api.minimax.io", "api.minimaxi.com"],
+	},
+	openrouter: {
+		label: "OpenRouter",
+		keyEnv: "OPENROUTER_API_KEY",
+		baseEnv: "",
+		defaultBase: "https://openrouter.ai/api/v1",
+		allowedHosts: ["openrouter.ai"],
+	},
+} as const;
+
+export type DirectProviderName = keyof typeof DIRECT_PROVIDERS;
+
+export interface DirectProvider {
+	name: DirectProviderName;
+	label: string;
+	base: string;
+	key: string;
+	keyEnv: string;
+}
+
+/**
+ * Resolve the vessel's direct provider from the environment. INFERENCE_MODE=direct
+ * reads VESSEL_PROVIDER; INFERENCE_MODE=openrouter is the same path pinned to
+ * OpenRouter. Fails closed on an unknown provider, an off-allowlist base URL, or
+ * a missing key.
+ */
+export function resolveDirectProvider(): DirectProvider {
+	const mode = process.env.INFERENCE_MODE || "";
+	const wanted = mode === "openrouter" ? "openrouter" : process.env.VESSEL_PROVIDER || "";
+	if (!(wanted in DIRECT_PROVIDERS)) {
+		throw new Error(
+			`VESSEL_PROVIDER must be one of ${Object.keys(DIRECT_PROVIDERS).join(", ")} (got "${wanted}")`,
+		);
+	}
+	const name = wanted as DirectProviderName;
+	const cfg = DIRECT_PROVIDERS[name];
+	const base = ((cfg.baseEnv && process.env[cfg.baseEnv]) || cfg.defaultBase).replace(/\/+$/, "");
+	let host = "";
+	try {
+		host = new URL(base).hostname;
+	} catch {
+		/* falls through to the refusal below */
+	}
+	if (!base.startsWith("https://") || !(cfg.allowedHosts as readonly string[]).includes(host)) {
+		throw new Error(`${cfg.label} base URL is not on the egress allowlist: ${host || base}`);
+	}
+	const key = process.env[cfg.keyEnv] || "";
+	if (!key) throw new Error(`${cfg.keyEnv} is not set for provider ${name}`);
+	return { name, label: cfg.label, base, key, keyEnv: cfg.keyEnv };
+}
+
+/**
+ * Check a model id against the provider's own live model list. Officer vessels
+ * pick their model per officer (VESSEL_MODEL), never from a literal in code, so
+ * the id is validated at boot. Any failure to read the list throws: the caller
+ * fails closed.
+ */
+export async function modelIsListed(
+	model: string,
+	provider = resolveDirectProvider(),
+): Promise<boolean> {
+	const res = await fetch(`${provider.base}/models`, {
+		headers: { Authorization: `Bearer ${provider.key}` },
+	});
+	if (!res.ok) throw new Error(`${provider.label} model list returned ${res.status}`);
+	const data = (await res.json()) as { data?: Array<{ id: string }> };
+	return (data.data ?? []).some((m) => m.id === model);
+}
+
+/** MiniMax M2.x put reasoning inline as <think>...</think>; the officer gets the answer only. */
+function stripThinking(text: string): string {
+	return text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+}
+
+/**
  * Hostnames considered on-device. A request to any of these never leaves the
  * machine, so the PII gate may bypass it.
  */
@@ -48,6 +135,7 @@ export interface InferenceRequest {
 	contextMessages: Array<{ role: string; content: string }>;
 	userMessage: string;
 	model?: string;
+	maxTokens?: number;
 }
 
 export interface InferenceResult {
@@ -67,10 +155,13 @@ export async function generateResponse(req: InferenceRequest): Promise<Inference
 
 	const modelProxyUrl = process.env.MODEL_PROXY_URL || DEFAULT_MODEL_PROXY_URL;
 	const ollamaHost = process.env.OLLAMA_HOST || DEFAULT_OLLAMA_HOST;
-	const inferenceMode = process.env.INFERENCE_MODE || "proxy"; // "proxy" | "ollama"
+	// "proxy" | "ollama" | "direct" (VESSEL_PROVIDER) | "openrouter" (direct, pinned)
+	const inferenceMode = process.env.INFERENCE_MODE || "proxy";
 
 	const useOllama = inferenceMode === "ollama";
-	const target = useOllama ? ollamaHost : modelProxyUrl;
+	const direct =
+		inferenceMode === "direct" || inferenceMode === "openrouter" ? resolveDirectProvider() : null;
+	const target = useOllama ? ollamaHost : direct ? direct.base : modelProxyUrl;
 
 	// ── PII gate (cloud-egress boundary) ────────────────────────────────────
 	// HARD RULE: no PII may reach a cloud target. The model proxy forwards to a
@@ -125,6 +216,29 @@ export async function generateResponse(req: InferenceRequest): Promise<Inference
 		const data = (await res.json()) as any;
 		reply = data.message?.content ?? "No response generated.";
 		tokensUsed = data.eval_count ?? undefined;
+	} else if (direct) {
+		// Officer vessel: straight to the provider with the vessel's own key. The
+		// model is the officer's setting (VESSEL_MODEL); there is no default.
+		if (!req.model) throw new Error("No model set: VESSEL_MODEL is required for a direct provider");
+		const headers: Record<string, string> = {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${direct.key}`,
+		};
+		if (direct.name === "openrouter") {
+			headers["X-Title"] =
+				`8gi-vessel-${(process.env.BOARD_MEMBER_CODE || "unknown").toLowerCase()}`;
+		}
+		const res = await fetch(`${direct.base}/chat/completions`, {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ model: req.model, messages, max_tokens: req.maxTokens ?? 500 }),
+		});
+		if (!res.ok) throw new Error(`${direct.label} returned ${res.status}`);
+		const data = (await res.json()) as any;
+		const content = data.choices?.[0]?.message?.content;
+		reply =
+			typeof content === "string" && content ? stripThinking(content) : "No response generated.";
+		tokensUsed = data.usage?.completion_tokens ?? undefined;
 	} else {
 		// Model proxy (OpenAI-compatible) - default for cloud vessels
 		const model = req.model ?? "auto:free";

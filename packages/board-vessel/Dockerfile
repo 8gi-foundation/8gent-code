@@ -11,10 +11,15 @@ COPY packages/board-vessel/ packages/board-vessel/
 # PII gate: inference.ts imports the local, dependency-free anonymizer so no
 # officer-chat payload reaches the cloud model proxy with real identity in it.
 COPY packages/permissions/pii-anonymizer.ts packages/permissions/pii-anonymizer.ts
+COPY packages/permissions/owner-identity.ts packages/permissions/owner-identity.ts
+# vessel-client.ts imports backoffDelay from here; without it the image fails at import.
+COPY packages/tools/error-recovery.ts packages/tools/error-recovery.ts
 
 # Create non-root user
-RUN addgroup --system --gid 1001 vessel && \
-    adduser --system --uid 1001 --gid 1001 vessel
+# Debian slim base: groupadd/useradd (passwd) ship in the image; addgroup/adduser do not.
+RUN groupadd --system --gid 1001 vessel && \
+    useradd --system --uid 1001 --gid 1001 --no-create-home --shell /usr/sbin/nologin vessel && \
+    mkdir -p /data && chown vessel:vessel /data
 
 USER vessel
 

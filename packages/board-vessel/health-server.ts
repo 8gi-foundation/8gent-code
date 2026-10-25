@@ -4,9 +4,7 @@
  * Returns vessel status as JSON on /health, 404 otherwise.
  */
 
-import type { VesselStatus } from "../board-plane/types";
-
-export function startHealthServer(port: number, getStatus: () => VesselStatus): void {
+export function startHealthServer(port: number, getStatus: () => Record<string, unknown>): void {
 	Bun.serve({
 		port,
 		hostname: "0.0.0.0",

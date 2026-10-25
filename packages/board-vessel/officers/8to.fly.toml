@@ -1,0 +1,47 @@
+# Officer vessel: 8TO (builder). One Fly app per officer, its own volume and secrets.
+# Deploy from the repo root:
+#   fly deploy -c packages/board-vessel/officers/8to.fly.toml --remote-only
+# Secret (stdin, never on the command line): MINIMAX_API_KEY
+#   fly secrets import -a 8gi-vessel-8to --stage < ~/.8gent/secrets/minimax.env
+# Provider and model are this officer's settings. MiniMax is called directly at
+# api.minimax.io, no middleman. For Kimi: VESSEL_PROVIDER = "openrouter",
+# VESSEL_MODEL = "moonshotai/kimi-k3", secret OPENROUTER_API_KEY.
+# The vessel refuses to start if the id is not on the provider's own live list.
+
+app = "8gi-vessel-8to"
+primary_region = "ams"
+
+[build]
+  dockerfile = "../Dockerfile"
+
+[env]
+  BOARD_MEMBER_CODE = "8TO"
+  INFERENCE_MODE = "direct"
+  VESSEL_PROVIDER = "minimax"
+  VESSEL_MODEL = "MiniMax-M3"
+  VESSEL_BOOT_PROBE = "1"
+  VESSEL_DATA_DIR = "/data"
+  HEALTH_PORT = "8080"
+
+[mounts]
+  source = "vessel_8to_data"
+  destination = "/data"
+  initial_size = "3gb"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "60s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

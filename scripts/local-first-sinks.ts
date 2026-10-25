@@ -159,6 +159,7 @@ export const SINKS: Sink[] = [
 		files: [
 			"apps/tui/src/",
 			"packages/ai/",
+			"packages/board-vessel/inference.ts",
 			"packages/ci/review.ts",
 			"packages/daemon/model-resolver.ts",
 			"packages/eight/",
@@ -186,6 +187,11 @@ export const SINKS: Sink[] = [
 				file: "packages/providers/index.ts",
 				mustMatch: /PROVIDERS_ALLOW_HOST_CLI !== "1"\) return false/,
 				how: "another company's command-line tool is never a provider unless PROVIDERS_ALLOW_HOST_CLI=1",
+			},
+			{
+				file: "packages/board-vessel/inference.ts",
+				mustMatch: /if \(!key\) throw new Error\(`\$\{cfg\.keyEnv\} is not set for provider/,
+				how: "an officer vessel calls MiniMax or OpenRouter only with INFERENCE_MODE=direct and that provider's key set",
 			},
 			{
 				file: "packages/kernel/local-scorer.ts",
