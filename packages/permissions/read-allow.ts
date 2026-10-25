@@ -198,10 +198,45 @@ function under(abs: string, entry: string): boolean {
  * Does the folder hold a credential-shaped name (SECRET_PATH: .env, .ssh, id_rsa, *.pem, ...)
  * within a few levels? A scan that cannot finish counts as yes. Such a folder is never remembered
  * whole: the kernel's never-read set names fixed places, not these.
+ *
+ * A symbolic link met during the scan is followed once with realpath (#4902): one that lands on
+ * a credential-shaped path or a never-read path is unsafe, an unresolvable one is unsafe, and a
+ * link to a folder is unsafe when that folder is too broad (home, a system root) or is itself
+ * scanned and holds a credential-shaped name, under the same entry budget. Each real folder is
+ * scanned once from each link, with the depth count restarting at the link target, so a link back
+ * up the tree cannot loop. Names are checked in every folder listed; folders below READ_SCAN_DEPTH
+ * levels are listed too, and any link in them is unsafe, since a recursive read would follow it.
  */
-function holdsSecretShaped(dir: string, maxEntries = 2000, maxDepth = 3): boolean {
+/** Levels of folders whose entries are checked for credential-shaped names. */
+export const READ_SCAN_DEPTH = 3;
+
+function holdsSecretShaped(dir: string, maxEntries = 2000, maxDepth = READ_SCAN_DEPTH): boolean {
 	let seen = 0;
+	// Shallowest depth each real folder was scanned at: a link that reaches it shallower rescans it.
+	const visited = new Map<string, number>([[dir, 1]]);
+	const home = homedir();
+	try {
+		visited.set(realpathSync(dir), 1);
+	} catch {}
+	const linkIsUnsafe = (p: string): boolean => {
+		let real: string;
+		try {
+			real = realpathSync(p);
+			if (SECRET_PATH.test(real) || !validatePath(real, "/", {}, "read").ok) return true;
+			if (!statSync(real).isDirectory()) return false;
+		} catch {
+			return true; // a link that cannot be resolved counts as unsafe
+		}
+		if (tooBroad(real, home)) return true;
+		// The count restarts at the target: a folder reached through a link gets every level.
+		const prev = visited.get(real);
+		if (prev !== undefined && prev <= 1) return false;
+		visited.set(real, 1);
+		return walk(real, 1);
+	};
+	// Past the cap every entry is still name-checked, and any link in it is unsafe: grep -R follows it.
 	const walk = (d: string, depth: number): boolean => {
+		const beyond = depth > maxDepth;
 		let names: string[];
 		try {
 			names = readdirSync(d);
@@ -212,13 +247,13 @@ function holdsSecretShaped(dir: string, maxEntries = 2000, maxDepth = 3): boolea
 			if (++seen > maxEntries) return true;
 			const p = join(d, n);
 			if (SECRET_PATH.test(p)) return true;
-			if (depth < maxDepth) {
-				let isDir = false;
-				try {
-					isDir = lstatSync(p).isDirectory();
-				} catch {}
-				if (isDir && walk(p, depth + 1)) return true;
-			}
+			let st: ReturnType<typeof lstatSync> | null = null;
+			try {
+				st = lstatSync(p);
+			} catch {}
+			if (st?.isSymbolicLink()) {
+				if (beyond || linkIsUnsafe(p)) return true;
+			} else if (st?.isDirectory() && walk(p, depth + 1)) return true;
 		}
 		return false;
 	};
@@ -264,6 +299,15 @@ export function rememberApprovedReads(
  */
 function stillSafe(entry: string): boolean {
 	try {
+		if (lstatSync(entry).isSymbolicLink()) {
+			let real: string;
+			try {
+				real = realpathSync(entry);
+			} catch {
+				return false; // a link that cannot be resolved counts as unsafe
+			}
+			if (SECRET_PATH.test(real) || !validatePath(real, "/", {}, "read").ok) return false;
+		}
 		if (!statSync(entry).isDirectory()) return true;
 	} catch {
 		return true; // gone: nothing to read

@@ -1,0 +1,5 @@
+# Read grants and links: the residual race
+
+When a person says yes to a folder on a read card, 8gent scans it once (`holdsSecretShaped` in `packages/permissions/read-allow.ts`). The scan lstats every entry, follows each link once with realpath, and checks credential-shaped names three levels down (`READ_SCAN_DEPTH`). Below that depth it still lists folders and treats any link as unsafe. The same scan runs again each time the remembered folder is used (`stillSafe`).
+
+Residual: a time-of-check to time-of-use race. A link created, or retargeted, inside the folder after the last scan and before the read that follows it is not seen until the next scan. The window is one read command. Mitigations in place: the scan reruns before every read that relies on the remembered yes, and the kernel read rule is built from the same check. Not closed: the read itself opens the path by name, not by a handle that was checked. Closing it needs an open-then-fstat read path in the kernel, tracked under #4902.

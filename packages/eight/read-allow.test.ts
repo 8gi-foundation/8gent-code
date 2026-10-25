@@ -8,11 +8,14 @@ import { afterAll, afterEach, beforeEach, test as bunTest, describe, expect } fr
 import {
 	existsSync,
 	mkdirSync,
+	mkdtempSync,
 	realpathSync,
+	rmSync,
 	symlinkSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { test } from "../../tests/scoped-test";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
@@ -23,15 +26,19 @@ import {
 	ReadScope,
 	addReadAllowDir,
 	allowReadsFromPrompt,
+	approvedGrants,
 	extractPromptPaths,
+	isApprovedRead,
 	isReadAllowed,
 	namesSecret,
 	readAllowEntries,
+	rememberApprovedReads,
 	resetReadAllow,
 	runAllowReadCommand,
 	runInReadScope,
 	takeBoundaryStop,
 } from "../permissions/read-allow";
+import { readBoundaryGate } from "../permissions/read-boundary";
 import { CreatedFiles } from "../permissions/s1-created-files";
 import { _resetSystemOne, _setSystemOneOverridesForTests } from "../permissions/system-one-gate";
 import { readPrefixesFor, splitChain } from "./read-chain";
@@ -650,5 +657,231 @@ describe("brace expansion (Karen, #4722)", () => {
 		expect(namesSecret("/x/{.env,notes.md}")).toBe(true);
 		expect(namesSecret("/x/{notes.md,.env}")).toBe(true);
 		expect(namesSecret("/x/{a,b}")).toBe(false);
+	});
+});
+
+describe("a link to a credential inside an approved folder (#4902)", () => {
+	test("the folder is refused when it holds a link to a credential", () => {
+		const outside = tempDir("ra-out-");
+		const folder = tempDir("ra-dir-");
+		writeFileSync(join(outside, "id_rsa"), "key");
+		writeFileSync(join(folder, "note.md"), "hi");
+		symlinkSync(join(outside, "id_rsa"), join(folder, "lnk"));
+		const scope = new ReadScope();
+		rememberApprovedReads([folder], [], scope);
+		expect(approvedGrants([folder], [])).toEqual([]);
+		expect(isApprovedRead(join(folder, "lnk"), scope)).toBe(false);
+		expect(isApprovedRead(join(folder, "lnk", "anything"), scope)).toBe(false);
+		expect(isApprovedRead(join(folder, "note.md"), scope)).toBe(false);
+	});
+
+	test("a plain folder is still approved, a plain file in it readable", () => {
+		const folder = tempDir("ra-ok-");
+		writeFileSync(join(folder, "note.md"), "hi");
+		const scope = new ReadScope();
+		rememberApprovedReads([folder], [], scope);
+		expect(isApprovedRead(join(folder, "note.md"), scope)).toBe(true);
+	});
+
+	test("a folder approved clean turns unsafe when a link to a credential appears", () => {
+		const outside = tempDir("ra-out2-");
+		const folder = tempDir("ra-late-");
+		writeFileSync(join(outside, "id_rsa"), "key");
+		writeFileSync(join(folder, "note.md"), "hi");
+		const scope = new ReadScope();
+		rememberApprovedReads([folder], [], scope);
+		expect(isApprovedRead(join(folder, "note.md"), scope)).toBe(true);
+		symlinkSync(join(outside, "id_rsa"), join(folder, "lnk"));
+		expect(isApprovedRead(join(folder, "lnk"), scope)).toBe(false);
+		expect(isApprovedRead(join(folder, "note.md"), scope)).toBe(false);
+	});
+
+	test("a remembered single file that is a link to a credential is unsafe", () => {
+		const outside = tempDir("ra-out3-");
+		const folder = tempDir("ra-file-");
+		writeFileSync(join(outside, "id_rsa"), "key");
+		symlinkSync(join(outside, "id_rsa"), join(folder, "lnk"));
+		const scope = new ReadScope();
+		scope.approvedReads.add(join(folder, "lnk"));
+		expect(isApprovedRead(join(folder, "lnk"), scope)).toBe(false);
+	});
+
+	test("a dangling link counts as unsafe", () => {
+		const folder = tempDir("ra-dang-");
+		symlinkSync(join(folder, "missing"), join(folder, "lnk"));
+		expect(approvedGrants([folder], [])).toEqual([]);
+	});
+
+	test("a link to a folder holding a credential is unsafe, and so is a link to home", () => {
+		const keys = tempDir("ra-keys-");
+		const folder = tempDir("ra-vend-");
+		writeFileSync(join(keys, "id_rsa"), "key");
+		writeFileSync(join(folder, "note.md"), "hi");
+		symlinkSync(keys, join(folder, "vendor"));
+		const scope = new ReadScope();
+		rememberApprovedReads([folder], [], scope);
+		expect(approvedGrants([folder], [])).toEqual([]);
+		expect(isApprovedRead(join(folder, "note.md"), scope)).toBe(false);
+
+		const homeLink = tempDir("ra-homelink-");
+		symlinkSync(homedir(), join(homeLink, "h"));
+		expect(approvedGrants([homeLink], [])).toEqual([]);
+	});
+
+	test("a link to a harmless folder, and a link back up the tree, keep the folder approved", () => {
+		const other = tempDir("ra-harmless-");
+		const folder = tempDir("ra-benign-");
+		writeFileSync(join(other, "a.txt"), "a");
+		writeFileSync(join(folder, "note.md"), "hi");
+		symlinkSync(other, join(folder, "docs"));
+		symlinkSync(folder, join(folder, "loop"));
+		const scope = new ReadScope();
+		rememberApprovedReads([folder], [], scope);
+		expect(isApprovedRead(join(folder, "note.md"), scope)).toBe(true);
+	});
+
+	describe("depth findings from the security read of #4999", () => {
+		const plant = (order: "deep-first" | "shallow-first") => {
+			const folder = tempDir("ra-depth-");
+			const x = tempDir("ra-depth-x-");
+			mkdirSync(join(x, "sub"));
+			writeFileSync(join(x, "sub", "id_rsa"), "key");
+			mkdirSync(join(folder, "z", "b"), { recursive: true });
+			const deep = () => symlinkSync(x, join(folder, "z", "b", "c"));
+			const shallow = () => symlinkSync(x, join(folder, "a"));
+			if (order === "deep-first") {
+				deep();
+				shallow();
+			} else {
+				shallow();
+				deep();
+			}
+			return folder;
+		};
+		for (const order of ["deep-first", "shallow-first"] as const) {
+			test(`a credential below a link target is seen when a shallow link follows a deep one (${order})`, () => {
+				expect(approvedGrants([plant(order)], [])).toEqual([]);
+			});
+		}
+
+		for (const [linkAt, rel] of [
+			[3, "id_rsa"],
+			[2, "p/id_rsa"],
+			[1, "p/q/id_rsa"],
+		] as const) {
+			test(`a link at depth ${linkAt} to a folder holding ${rel} is unsafe`, () => {
+				const folder = tempDir("ra-lk-");
+				const out = tempDir("ra-lk-out-");
+				mkdirSync(join(out, ...rel.split("/").slice(0, -1)), { recursive: true });
+				writeFileSync(join(out, ...rel.split("/")), "key");
+				const parent = join(folder, ...["x", "y"].slice(0, linkAt - 1));
+				mkdirSync(parent, { recursive: true });
+				symlinkSync(out, join(parent, "l"));
+				expect(approvedGrants([folder], [])).toEqual([]);
+			});
+		}
+
+		test("a link four levels down to a credential is unsafe, and grep -R shows the second card", async () => {
+			const root = tempDir("ra-d4-root-");
+			const base = join(homedir(), ".cache");
+			mkdirSync(base, { recursive: true });
+			const outside = mkdtempSync(join(base, "ra-d4-"));
+			const keys = mkdtempSync(join(base, "ra-d4-keys-"));
+			try {
+				writeFileSync(join(keys, "id_rsa"), "key");
+				mkdirSync(join(outside, "a", "b", "c"), { recursive: true });
+				symlinkSync(join(keys, "id_rsa"), join(outside, "a", "b", "c", "lnk"));
+				expect(approvedGrants([outside], [])).toEqual([]);
+				let cards = 0;
+				const ask = async () => {
+					cards++;
+					return true;
+				};
+				await runInReadScope(new ReadScope(), async () => {
+					const run = (command: string) =>
+						readBoundaryGate(command, {
+							env: { EIGHT_WORKSPACE_ROOT: root },
+							cwd: root,
+							project: root,
+							ask,
+						});
+					await run(`ls ${outside}`);
+					await run(`grep -R k ${outside}`);
+					expect(cards).toBe(2);
+				});
+			} finally {
+				rmSync(outside, { recursive: true, force: true });
+				rmSync(keys, { recursive: true, force: true });
+			}
+		});
+	});
+
+	describe("through readBoundaryGate, counting cards", () => {
+		// The OS temp folder is an allowance of the boundary, so the approved folder lives under home.
+		const homeDirs: string[] = [];
+		const homeTemp = (prefix: string): string => {
+			const base = join(homedir(), ".cache");
+			mkdirSync(base, { recursive: true });
+			const d = mkdtempSync(join(base, prefix));
+			homeDirs.push(d);
+			return d;
+		};
+		afterAll(() => {
+			for (const d of homeDirs) rmSync(d, { recursive: true, force: true });
+		});
+		const setup = (target: "file" | "folder") => {
+			const root = tempDir("ra-root-");
+			const outside = homeTemp("ra-gate-out-");
+			const target2 = homeTemp("ra-gate-tgt-");
+			writeFileSync(join(target2, "id_rsa"), "key");
+			writeFileSync(join(outside, "note.md"), "hi");
+			symlinkSync(target === "file" ? join(target2, "id_rsa") : target2, join(outside, "lnk"));
+			let cards = 0;
+			const ask = async () => {
+				cards++;
+				return true;
+			};
+			const env = { EIGHT_WORKSPACE_ROOT: root };
+			const run = (command: string) =>
+				readBoundaryGate(command, { env, cwd: root, project: root, ask });
+			return { outside, run, cards: () => cards };
+		};
+
+		for (const target of ["file", "folder"] as const) {
+			test(`cat lnk/* and grep -R show a card after a yes, link to a ${target}`, async () => {
+				const { outside, run, cards } = setup(target);
+				await runInReadScope(new ReadScope(), async () => {
+					await run(`ls ${outside}`);
+					expect(cards()).toBe(1);
+					await run(`cat ${outside}/lnk/*`);
+					expect(cards()).toBe(2);
+					await run(`grep -R k ${outside}`);
+					expect(cards()).toBe(3);
+				});
+			});
+		}
+
+		test("a folder with only plain files is asked once, then not again", async () => {
+			const root = tempDir("ra-root2-");
+			const outside = homeTemp("ra-plain-");
+			writeFileSync(join(outside, "note.md"), "hi");
+			let cards = 0;
+			const ask = async () => {
+				cards++;
+				return true;
+			};
+			const run = (command: string) =>
+				readBoundaryGate(command, {
+					env: { EIGHT_WORKSPACE_ROOT: root },
+					cwd: root,
+					project: root,
+					ask,
+				});
+			await runInReadScope(new ReadScope(), async () => {
+				await run(`ls ${outside}`);
+				await run(`grep -R k ${outside}`);
+				expect(cards).toBe(1);
+			});
+		});
 	});
 });

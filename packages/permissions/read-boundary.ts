@@ -30,6 +30,7 @@ import { isPathWithin } from "../core/path-within";
 import { readPrefixesFor } from "../eight/read-chain";
 import { LINUX_HOME_NEVER_READ } from "./landlock";
 import {
+	READ_SCAN_DEPTH,
 	approvedGrants,
 	approvedReadEntries,
 	isApprovedRead,
@@ -602,7 +603,9 @@ export async function readBoundaryGate(
 		}
 	};
 	const opens = [...grants].map((g) =>
-		isFolder(g) ? `the folder ${g} and everything under it` : `the file ${g}`,
+		isFolder(g)
+			? `the folder ${g} and everything under it (checked ${READ_SCAN_DEPTH} levels down for credentials and links)`
+			: `the file ${g}`,
 	);
 	const once = outside.filter((p) => !grants.has(p));
 	const opensText = [
