@@ -13,6 +13,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pruneDoneJobs, writeJobFile } from "../core/job-file";
 import type { AgentConfig as EightAgentConfig } from "../eight/types";
 import type { PermissionModeHolder } from "../permissions/permission-mode";
 import { hostedAllowed, isHostedProvider } from "../providers/failover";
@@ -251,6 +252,28 @@ export interface QueuedTask extends AgentTask {
 // Agent Pool
 // ============================================
 
+/** The Control-tab row for one background run, from its status now. */
+function reportHelperJob(a: SpawnedAgent): void {
+	const state =
+		a.status === "running"
+			? "running"
+			: a.status === "idle"
+				? "queued"
+				: a.status === "failed"
+					? "waiting-on-you"
+					: "done";
+	writeJobFile({
+		kind: "helper",
+		name: `helper-${a.id}`,
+		state,
+		stage: a.status === "idle" ? "waiting for a free slot" : a.status,
+		last: (a.completedAt ?? a.startedAt).toISOString(),
+		waitingOn:
+			a.status === "failed" ? `check ${a.id}: ${a.task.error ?? "run failed"}`.slice(0, 160) : null,
+		detail: a.task.description.slice(0, 80),
+	});
+}
+
 export class AgentPool extends EventEmitter {
 	private agents: Map<string, SpawnedAgent> = new Map();
 	private sharedContext: Map<string, SharedContext> = new Map();
@@ -261,6 +284,17 @@ export class AgentPool extends EventEmitter {
 	constructor(maxConcurrent = 4) {
 		super();
 		this.maxConcurrent = maxConcurrent;
+		// One Control-tab row per run (#5073), written on the events the pool
+		// already emits. Nothing here polls.
+		for (const ev of [
+			"agent:spawned",
+			"agent:started",
+			"agent:completed",
+			"agent:failed",
+			"agent:cancelled",
+		]) {
+			this.on(ev, (a: SpawnedAgent) => reportHelperJob(a));
+		}
 	}
 
 	/**
@@ -285,6 +319,8 @@ export class AgentPool extends EventEmitter {
 		const hosted = hostedChildRefusal(runtime, model);
 		if (hosted) throw new Error(hosted);
 		const baseUrl = config?.baseUrl ?? (sameRuntime ? parent.baseUrl : undefined);
+		// A new run is the moment to drop yesterday's finished rows (an event, not a timer).
+		pruneDoneJobs(24 * 60 * 60 * 1000);
 		const agentId = this.generateId("agent");
 		const taskId = this.generateId("task");
 

@@ -6,6 +6,7 @@
  */
 
 import { join } from "node:path";
+import { writeJobFile } from "../core/job-file";
 import { killProcessTree, shellInvocation, spawnShell } from "../core/shell";
 import { getDataDir } from "./data-dir";
 import { bus } from "./events";
@@ -173,6 +174,8 @@ async function executeJob(job: CronJob): Promise<void> {
 	});
 
 	const startMs = Date.now();
+	let failure: string | null = null;
+	reportCron(job, "running", { last: job.lastRun });
 	try {
 		let output: unknown;
 		if (job.type === "shell") {
@@ -186,6 +189,7 @@ async function executeJob(job: CronJob): Promise<void> {
 			output = await new Response(proc.stdout).text();
 			// A non-zero exit is a failure someone must act on: say so on the bus (#4868).
 			const code = await proc.exited;
+			if (code !== 0) failure = `exited ${code}`;
 			if (code !== 0)
 				bus.emit("agent:error", {
 					sessionId: "cron",
@@ -206,12 +210,41 @@ async function executeJob(job: CronJob): Promise<void> {
 			durationMs: Date.now() - startMs,
 		});
 	} catch (err) {
+		failure = String(err).slice(0, 120);
 		bus.emit("agent:error", { sessionId: "cron", error: String(err) });
 	}
 
 	job.lastRun = new Date().toISOString();
 	if (!job.recurring) job.enabled = false;
 	await saveJobs();
+	// A failed run stays visible until someone looks; a clean one moves to done.
+	if (failure) {
+		reportCron(job, "waiting-on-you", {
+			last: job.lastRun,
+			waitingOn: `check ${job.name}: ${failure}`,
+			stage: "failed",
+		});
+	} else {
+		reportCron(job, "done", { last: job.lastRun, stage: "finished" });
+	}
+}
+
+/** One Control-tab row per durable job (#5073). Written on start, on a failure, on finish. */
+function reportCron(
+	job: CronJob,
+	state: "running" | "done" | "waiting-on-you",
+	more: { last?: string | null; waitingOn?: string; stage?: string },
+): void {
+	writeJobFile({
+		kind: "cron",
+		name: `cron-${job.name}`,
+		state,
+		stage: more.stage ?? (state === "running" ? job.type : ""),
+		last: more.last ?? null,
+		next: job.nextRun,
+		waitingOn: more.waitingOn ?? null,
+		detail: "",
+	});
 }
 
 function tick(): void {

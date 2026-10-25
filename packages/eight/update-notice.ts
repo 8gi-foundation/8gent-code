@@ -9,6 +9,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeJobFile } from "../core/job-file";
 import { checkUpdate } from "./cli-maintenance";
 import { type FetchLike, detectChannel } from "./self-update";
 import {
@@ -62,6 +63,8 @@ export interface NoticeDeps {
 	/** The id (version or sha) this install is at now, to drop a stale cached notice. */
 	current: () => Promise<string | null>;
 	disabled: () => boolean;
+	/** Told when a real check starts and ends, for the Control tab. Never called for a cached answer. */
+	report?: (s: { state: "running" | "done"; detail: string; last: number }) => void;
 }
 
 /** The notice line to show, or null. Never throws. */
@@ -76,10 +79,20 @@ export async function maybeUpdateNotice(d: NoticeDeps): Promise<string | null> {
 		}
 		let found: { from: string; to: string } | null = null;
 		try {
+			d.report?.({ state: "running", detail: "", last: d.now() });
+		} catch {}
+		try {
 			found = await d.check();
 		} catch {
 			found = null;
 		}
+		try {
+			d.report?.({
+				state: "done",
+				detail: found ? noticeText(found.from, found.to) : "up to date",
+				last: d.now(),
+			});
+		} catch {}
 		const label = found ? noticeText(found.from, found.to) : undefined;
 		d.writeState({
 			checkedAt: d.now(),
@@ -113,6 +126,16 @@ export function realNoticeDeps(o: RealNoticeOptions): NoticeDeps {
 	const srcDeps = { modulePath: o.modulePath, env, platform, exec: o.exec };
 	return {
 		now: o.now ?? Date.now,
+		report: (s) =>
+			writeJobFile({
+				kind: "update",
+				name: "update-check",
+				state: s.state,
+				stage: s.state === "running" ? "checking for a new version" : "checked",
+				last: s.last,
+				next: s.state === "done" ? s.last + CHECK_INTERVAL_MS : null,
+				detail: s.detail,
+			}),
 		disabled: () => !isUpdateCheckEnabled(env) || updateCheckDisabled(env, o.settingsFile),
 		readState: () => {
 			try {
