@@ -97,9 +97,24 @@ interface CommandInputProps {
 	approvalPending?: boolean;
 	/** Project folder the `@` file list comes from. Defaults to process.cwd(). */
 	cwd?: string;
+	/**
+	 * Alt+Enter or Ctrl+Q: the text goes here instead of onSubmit, to be queued
+	 * for after the running task (#3918 D1). Without it both keys send as Enter.
+	 */
+	onFollowUp?: (input: string) => void;
+	/**
+	 * Text handed back to the input (Esc returned queued messages). A new `seq`
+	 * applies it once; it goes in front of whatever is being typed.
+	 */
+	restoreInput?: { text: string; seq: number } | null;
 	/** Told when the / menu opens or closes (a short terminal makes room for it). */
 	onSlashMenuChange?: (open: boolean) => void;
 }
+
+/** The input placeholder while a task runs: Enter steers, the other keys queue. */
+export const STEER_PLACEHOLDER = "Steer the task (Alt+Enter or Ctrl+Q queues it for after)...";
+/** Said when Ctrl+Q or Alt+Enter is pressed with nothing typed. */
+export const NOTHING_TO_QUEUE = "Nothing to queue: type a message first.";
 
 /** The status line while an approval card waits on the person (#3118). */
 export const WAITING_LINE = "Waiting for you. Nothing runs until you answer.";
@@ -171,6 +186,8 @@ export function CommandInput({
 	allowEmptySubmit = false,
 	approvalPending = false,
 	cwd = process.cwd(),
+	onFollowUp,
+	restoreInput = null,
 	onSlashMenuChange,
 	// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
 	// react-doctor-disable-next-line react-doctor/prefer-useReducer
@@ -202,6 +219,16 @@ export function CommandInput({
 		],
 		[builtInSlashGhosts, slashRegistryEntries, slashByToken],
 	);
+
+	// Text Esc handed back (queued messages the stopped task never took).
+	const lastRestoreSeq = useRef<number | null>(null);
+	useEffect(() => {
+		if (!restoreInput || restoreInput.seq === lastRestoreSeq.current) return;
+		lastRestoreSeq.current = restoreInput.seq;
+		const back = restoreInput.text;
+		if (!back) return;
+		setValue((prev) => (prev ? `${back}\n${prev}` : back));
+	}, [restoreInput]);
 
 	// Inject text from voice transcription (appends to current input)
 	const lastInjectedRef = useRef<string | null>(null);
@@ -409,6 +436,28 @@ export function CommandInput({
 		{ isActive: !isProcessing && focused },
 	);
 
+	// Alt+Enter and Ctrl+Q queue a follow-up for after the running task
+	// (#3918 D1). They work while a task runs, when the handler above is off.
+	// The text input ignores Alt+Enter and never types a Ctrl letter, so the
+	// value is intact here. On Windows Terminal Alt+Enter may not arrive;
+	// Ctrl+Q is the same thing there.
+	useInput(
+		(input, key) => {
+			const followUpKey = (key.return && key.meta) || (key.ctrl && input === "q");
+			if (!followUpKey) return;
+			if (!value.trim()) {
+				onSystemMessage?.(NOTHING_TO_QUEUE);
+				return;
+			}
+			setHistoryIndex(-1);
+			draftRef.current = "";
+			setValue("");
+			if (onFollowUp) onFollowUp(value);
+			else onSubmit(value);
+		},
+		{ isActive: focused && !typingPaused },
+	);
+
 	const submitNow = useCallback(
 		(input: string) => {
 			const trimmed = input.trim();
@@ -602,7 +651,7 @@ export function CommandInput({
 							approvalPending
 								? WAITING_PLACEHOLDER
 								: isProcessing
-									? "Queue a follow-up message..."
+									? STEER_PLACEHOLDER
 									: isVisible
 										? ""
 										: (placeholder ?? "Type a command or ask a question...")

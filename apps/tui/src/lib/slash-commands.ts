@@ -86,7 +86,9 @@ export type SlashCommand =
 	| "allow-read"
 	| "bug"
 	| "tree"
-	| "import";
+	| "import"
+	| "thinking"
+	| "scoped-models";
 
 export interface BuiltInSlashCommandDef {
 	name: SlashCommand;
@@ -610,6 +612,19 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		description:
 			"Takes a description: saves one secret-free bug report folder on this machine to share with the team",
 		usage: "/bug <description>",
+	},
+	{
+		name: "thinking",
+		aliases: ["think"],
+		description:
+			"Set the thinking level, or show / hide the model's thinking (Ctrl+Z cycles, Ctrl+V toggles)",
+		usage: "/thinking [off|low|medium|high|show|hide]",
+	},
+	{
+		name: "scoped-models",
+		aliases: ["scoped", "scope"],
+		description: "The few models Alt+M cycles between",
+		usage: "/scoped-models [model|part of a name ...|clear]",
 	},
 ];
 

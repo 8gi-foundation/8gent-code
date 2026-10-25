@@ -114,7 +114,7 @@ resume history continue compact chat agent github debug music dj pet export fork
 vercel telegram router rename spawn settings quiet term create-app hands eyes handeyes goal subgoal build
 notes ideas btw questions projects terminal reload exit
 copy out hotkeys tree import update route privacy consult bug me allow-read mode herdr
-stack judge local context ctx`.split(/\s+/),
+stack judge local context ctx thinking scoped-models think scoped scope`.split(/\s+/),
 );
 
 /** The default extensions folder: ~/.8gent/extensions. Throws without an absolute home directory. */

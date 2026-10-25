@@ -22,6 +22,8 @@ export const PROBES: Probe[] = [
 	{ key: "Ctrl+S", bytes: "\x13", undo: "\x13" },
 	{ key: "Ctrl+G", bytes: "\x07" },
 	{ key: "Ctrl+F", bytes: "\x06" },
+	{ key: "Ctrl+Z", bytes: "\x1a" },
+	{ key: "Ctrl+V", bytes: "\x16", undo: "\x16" },
 	{ key: "Ctrl+T", bytes: "\x14" },
 	{ key: "Ctrl+W", bytes: "\x17" },
 ];

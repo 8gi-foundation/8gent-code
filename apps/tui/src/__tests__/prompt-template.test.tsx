@@ -28,7 +28,7 @@ test("a ~/.8gent/prompts template is listed as /name and sends its text filled i
 		);
 		const frames = (events.find((e) => e.phase === "frames")?.frames ?? []) as Frame[];
 		const cast = castPath("pi-tui-g4-prompt-templates");
-		writeCast(cast, frames, 160, 50, "8gent Code: prompt templates as /name");
+		writeCast(cast, frames, 160, 62, "8gent Code: prompt templates as /name");
 		console.log(`[prompt-template.test] ${frames.length} frames -> ${cast}`);
 
 		expect(events.find((e) => e.phase === "error")).toBeUndefined();

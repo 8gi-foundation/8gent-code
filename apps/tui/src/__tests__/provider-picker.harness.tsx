@@ -16,7 +16,10 @@ async function main() {
 	// Filter to the one row, then Enter.
 	const f = app.mark();
 	app.feed("minimax");
-	await tick(1500);
+	// Enter only once the picker has drawn the filter. On a starved runner a fixed
+	// pause let Enter land on the unfiltered row the picker opened on, and the
+	// switch line named another provider.
+	await waitFor(() => app.since(f).includes("Search: minimax"), "filter drawn", 15000);
 	const sel = app.mark();
 	app.feed("\r");
 	await waitFor(
