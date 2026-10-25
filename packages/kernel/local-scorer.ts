@@ -222,8 +222,17 @@ export interface LocalFirstScorerConfig {
 	 * omitted, there is no cloud path at all.
 	 */
 	cloud?: TurnScorer;
-	/** Allow falling back to the cloud judge when the local judge is down. Default true until Step 5. */
+	/**
+	 * Allow falling back to the cloud judge when the local judge is down.
+	 * Default OFF: nothing leaves the device unless the person opts in with
+	 * EIGHT_CLOUD_JUDGE=1 (or passes true here). Issue #4933.
+	 */
 	allowCloudFallback?: boolean;
+}
+
+/** The one switch that lets judged content leave the device (to OpenRouter). */
+export function cloudJudgeOptedIn(env: NodeJS.ProcessEnv = process.env): boolean {
+	return env.EIGHT_CLOUD_JUDGE === "1";
 }
 
 /**
@@ -236,11 +245,18 @@ export class LocalFirstScorer implements TurnScorer {
 	private readonly local: TurnScorer;
 	private readonly cloud?: TurnScorer;
 	private readonly allowCloudFallback: boolean;
+	private decisionLogged = false;
 
 	constructor(config: LocalFirstScorerConfig) {
 		this.local = config.local;
 		this.cloud = config.cloud;
-		this.allowCloudFallback = config.allowCloudFallback ?? true;
+		this.allowCloudFallback = config.allowCloudFallback ?? cloudJudgeOptedIn();
+	}
+
+	private logDecisionOnce(message: string): void {
+		if (this.decisionLogged) return;
+		this.decisionLogged = true;
+		console.warn(`[kernel] ${message}`);
 	}
 
 	async score(
@@ -260,13 +276,16 @@ export class LocalFirstScorer implements TurnScorer {
 			}
 		}
 		if (this.cloud && this.allowCloudFallback) {
+			this.logDecisionOnce(
+				"local judge unavailable; using the cloud judge because EIGHT_CLOUD_JUDGE=1 was set",
+			);
 			return this.cloud.score(sessionId, turnIndex, model, prompt, response);
 		}
-		throw new LocalJudgeUnavailableError(
-			this.allowCloudFallback
-				? "no judge available: local judge down and no cloud fallback configured"
-				: "no judge available: local judge down and cloud fallback disabled",
-		);
+		const reason = this.allowCloudFallback
+			? "no judge available, treated as not verified: local judge down and no cloud judge configured"
+			: "no judge available, treated as not verified: local judge down and the cloud judge is off (set EIGHT_CLOUD_JUDGE=1 to opt in)";
+		this.logDecisionOnce(reason);
+		throw new LocalJudgeUnavailableError(reason);
 	}
 
 	async isAvailable(): Promise<boolean> {

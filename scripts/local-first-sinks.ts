@@ -187,6 +187,11 @@ export const SINKS: Sink[] = [
 				mustMatch: /PROVIDERS_ALLOW_HOST_CLI !== "1"\) return false/,
 				how: "another company's command-line tool is never a provider unless PROVIDERS_ALLOW_HOST_CLI=1",
 			},
+			{
+				file: "packages/kernel/local-scorer.ts",
+				mustMatch: /allowCloudFallback \?\? cloudJudgeOptedIn\(\)/,
+				how: "the kernel cloud judge is never a fallback unless EIGHT_CLOUD_JUDGE=1",
+			},
 		],
 	},
 	{

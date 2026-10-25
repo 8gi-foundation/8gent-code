@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JudgeVerdict } from "../eight/verdict";
+import { JudgeScorer } from "./judge";
 import {
 	CRITERIA_ORDER,
 	LocalFirstScorer,
@@ -242,7 +243,7 @@ describe("LocalFirstScorer", () => {
 	test("falls back to the cloud judge when the local judge is down", async () => {
 		const local = stubScorer({ available: false });
 		const cloud = stubScorer({ available: true, record: someRecord("cloud") });
-		const scorer = new LocalFirstScorer({ local, cloud });
+		const scorer = new LocalFirstScorer({ local, cloud, allowCloudFallback: true });
 
 		const record = await scorer.score("s1", 0, "m", "p", "r");
 		expect(record.judgeSource).toBe("cloud");
@@ -255,7 +256,7 @@ describe("LocalFirstScorer", () => {
 			throws: new LocalJudgeUnavailableError("all criteria fail-closed"),
 		});
 		const cloud = stubScorer({ available: true, record: someRecord("cloud") });
-		const scorer = new LocalFirstScorer({ local, cloud });
+		const scorer = new LocalFirstScorer({ local, cloud, allowCloudFallback: true });
 
 		const record = await scorer.score("s1", 0, "m", "p", "r");
 		expect(record.judgeSource).toBe("cloud");
@@ -285,9 +286,85 @@ describe("LocalFirstScorer", () => {
 	test("isAvailable is true when either backend can score", async () => {
 		const localDown = stubScorer({ available: false });
 		const cloudUp = stubScorer({ available: true, record: someRecord("cloud") });
-		expect(await new LocalFirstScorer({ local: localDown, cloud: cloudUp }).isAvailable()).toBe(
-			true,
-		);
+		expect(
+			await new LocalFirstScorer({
+				local: localDown,
+				cloud: cloudUp,
+				allowCloudFallback: true,
+			}).isAvailable(),
+		).toBe(true);
 		expect(await new LocalFirstScorer({ local: localDown }).isAvailable()).toBe(false);
+	});
+
+	test("cloud is off by default: local down yields not-verified, zero cloud calls", async () => {
+		const prev = process.env.EIGHT_CLOUD_JUDGE;
+		delete process.env.EIGHT_CLOUD_JUDGE;
+		const origFetch = globalThis.fetch;
+		const origWarn = console.warn;
+		const warnings: string[] = [];
+		let fetchCalls = 0;
+		// @ts-expect-error test stub: any call here is an off-device leak
+		globalThis.fetch = async () => {
+			fetchCalls += 1;
+			throw new Error("network must not be called");
+		};
+		console.warn = (m: string) => warnings.push(String(m));
+		try {
+			const historyPath = join(mkdtempSync(join(tmpdir(), "judge-off-")), "history.json");
+			const scorer = new LocalFirstScorer({
+				local: stubScorer({ available: false }),
+				cloud: new JudgeScorer({ historyPath, prmApiKey: "k" }),
+			});
+			for (let i = 0; i < 2; i++) {
+				await expect(scorer.score("s1", i, "m", "p", "r")).rejects.toThrow(
+					/no judge available, treated as not verified/,
+				);
+			}
+			expect(await scorer.isAvailable()).toBe(false);
+			expect(fetchCalls).toBe(0);
+			expect(warnings.length).toBe(1); // decision and reason logged once
+		} finally {
+			globalThis.fetch = origFetch;
+			console.warn = origWarn;
+			if (prev !== undefined) process.env.EIGHT_CLOUD_JUDGE = prev;
+		}
+	});
+
+	test("EIGHT_CLOUD_JUDGE=1 opts in: the cloud judge is called", async () => {
+		const prev = process.env.EIGHT_CLOUD_JUDGE;
+		process.env.EIGHT_CLOUD_JUDGE = "1";
+		const origFetch = globalThis.fetch;
+		let fetchCalls = 0;
+		// @ts-expect-error test stub
+		globalThis.fetch = async () => {
+			fetchCalls += 1;
+			return new Response(
+				JSON.stringify({
+					choices: [
+						{
+							message: {
+								content:
+									'{"executionSuccess":0.8,"codeQuality":0.8,"toolEfficiency":0.8,"directness":0.8}',
+							},
+						},
+					],
+				}),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			);
+		};
+		try {
+			const historyPath = join(mkdtempSync(join(tmpdir(), "judge-on-")), "history.json");
+			const scorer = new LocalFirstScorer({
+				local: stubScorer({ available: false }),
+				cloud: new JudgeScorer({ historyPath, prmApiKey: "k" }),
+			});
+			const record = await scorer.score("s1", 0, "m", "write a sort", "done");
+			expect(record.judgeSource).toBe("cloud");
+			expect(fetchCalls).toBe(1);
+		} finally {
+			globalThis.fetch = origFetch;
+			if (prev === undefined) delete process.env.EIGHT_CLOUD_JUDGE;
+			else process.env.EIGHT_CLOUD_JUDGE = prev;
+		}
 	});
 });
