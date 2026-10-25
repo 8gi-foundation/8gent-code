@@ -95,8 +95,8 @@ export function BufferedTextInput({
 		if (!focus) return <Text dimColor>{placeholder}</Text>;
 		return (
 			<Text>
-				<Text inverse>{placeholder[0] ?? " "}</Text>
-				<Text dimColor>{placeholder.slice(1)}</Text>
+				<Text inverse> </Text>
+				<Text dimColor>{placeholder}</Text>
 			</Text>
 		);
 	}

@@ -24,7 +24,7 @@ async function main() {
 	// Turn 1: the model's first reply is a tool call held open for a few
 	// seconds. The person types while it is in flight.
 	let m = await app.submit("read the colours file");
-	await waitFor(() => app.since(m).includes("Steer the task"), "running placeholder");
+	await waitFor(() => app.since(m).includes("Enter steers."), "running placeholder");
 	await tick(300);
 	rec.take("turn running: Enter steers");
 	m = await app.submit("STEER_NOW also count the lines");
@@ -71,7 +71,7 @@ async function main() {
 	// Turn 3: a steer the turn never takes (no tool call: the model is already
 	// answering) and an Alt+Enter follow-up, then Esc. Both come back.
 	m = await app.submit("second task");
-	await waitFor(() => app.since(m).includes("Steer the task"), "turn 3 running");
+	await waitFor(() => app.since(m).includes("Enter steers."), "turn 3 running");
 	await tick(200);
 	m = await app.submit("BRING_ME_BACK");
 	await waitFor(() => app.since(m).includes("Steering: it reaches the model"), "steer 2 line");

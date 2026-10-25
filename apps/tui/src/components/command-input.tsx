@@ -111,8 +111,16 @@ interface CommandInputProps {
 	onSlashMenuChange?: (open: boolean) => void;
 }
 
+/** Below this many columns the busy placeholder drops to its short form. */
+export const BUSY_PLACEHOLDER_NARROW_COLUMNS = 60;
 /** The input placeholder while a task runs: Enter steers, the other keys queue. */
-export const STEER_PLACEHOLDER = "Steer the task (Alt+Enter or Ctrl+Q queues it for after)...";
+export const STEER_PLACEHOLDER = "Enter steers. Alt+Enter queues a follow-up for after this task.";
+/** The same on a phone-width terminal. */
+export const STEER_PLACEHOLDER_NARROW = "Enter steers. Alt+Enter queues.";
+/** The busy placeholder that fits `columns`. */
+export function busyPlaceholder(columns: number): string {
+	return columns < BUSY_PLACEHOLDER_NARROW_COLUMNS ? STEER_PLACEHOLDER_NARROW : STEER_PLACEHOLDER;
+}
 /** Said when Ctrl+Q or Alt+Enter is pressed with nothing typed. */
 export const NOTHING_TO_QUEUE = "Nothing to queue: type a message first.";
 
@@ -651,7 +659,7 @@ export function CommandInput({
 							approvalPending
 								? WAITING_PLACEHOLDER
 								: isProcessing
-									? STEER_PLACEHOLDER
+									? busyPlaceholder(stdout?.columns ?? 80)
 									: isVisible
 										? ""
 										: (placeholder ?? "Type a command or ask a question...")
