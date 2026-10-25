@@ -9,6 +9,27 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.31] - 2026-10-25
+
+### Added
+- durable-run: a run through Pi Durable on SQLite with a per-tool replay rule (refs #4883) ([#4889](https://github.com/8gi-foundation/8gent-code/pull/4889))
+- tui: thumb-size tap targets, pressed hold and optional haptic tick (#4922) ([#4923](https://github.com/8gi-foundation/8gent-code/pull/4923))
+- decide: 8J ONNX export, weight-only int8, and a numpy phone runner (#4860) ([#4872](https://github.com/8gi-foundation/8gent-code/pull/4872))
+
+### Changed
+- Pin browser attach under a host sandbox: a profile the harness started is used, never spawned (#4305) ([#4411](https://github.com/8gi-foundation/8gent-code/pull/4411))
+- Fix the windows-latest failures on main (60 tests, 25 files) ([#4290](https://github.com/8gi-foundation/8gent-code/pull/4290))
+- background_wait: block until a background task ends ([#4285](https://github.com/8gi-foundation/8gent-code/pull/4285))
+- specs: TUI as a daemon client, one session across TUI and Telegram ([#4793](https://github.com/8gi-foundation/8gent-code/pull/4793))
+- system diagrams (system map, external services, outputs, gaps) ([#4862](https://github.com/8gi-foundation/8gent-code/pull/4862))
+
+### Fixed
+- system-one: close four allowlist write paths (#3306) ([#3308](https://github.com/8gi-foundation/8gent-code/pull/3308))
+- 8gent: sub-8gents inherit a pinned parent's explicit provider ([#3776](https://github.com/8gi-foundation/8gent-code/pull/3776))
+- npm: inline deck theme index, gate packed install on asset reads and a stub-model run ([#4361](https://github.com/8gi-foundation/8gent-code/pull/4361))
+- install: Termux runs the glibc binary through glibc-runner or proot when it cannot start plain, update-aware (#4635) ([#4636](https://github.com/8gi-foundation/8gent-code/pull/4636))
+- 8gent: empty-turn continue also fires on a length cut, with an act-now line (#4452) ([#4482](https://github.com/8gi-foundation/8gent-code/pull/4482))
+
 ## [0.20.30] - 2026-10-25
 
 ### Added
