@@ -21,9 +21,11 @@ import {
 	runFlowCommand,
 	writePairing,
 } from "../flow-bridge";
+import { checkDestination } from "../net-guard";
 import { webFetch } from "../web";
 
 const TERMUX = { TERMUX_VERSION: "0.118" } as Record<string, string | undefined>;
+const allow = async (): Promise<void> => {};
 const PLAIN = {} as Record<string, string | undefined>;
 
 interface Seen {
@@ -157,7 +159,7 @@ describe("pairing file", () => {
 describe("bridgeFetch: when it must do nothing", () => {
 	test("no pairing: null, and nobody is asked", async () => {
 		const flow = fakeFlow("t".repeat(43));
-		expect(await bridgeFetch("https://example.com", {}, deps())).toBeNull();
+		expect(await bridgeFetch("https://example.com", { guard: allow }, deps())).toBeNull();
 		expect(flow.seen).toHaveLength(0);
 	});
 
@@ -165,7 +167,11 @@ describe("bridgeFetch: when it must do nothing", () => {
 		const flow = fakeFlow("t".repeat(43));
 		pairTo(flow.port);
 		expect(
-			await bridgeFetch("https://example.com", {}, deps({ env: PLAIN, platform: "darwin" })),
+			await bridgeFetch(
+				"https://example.com",
+				{ guard: allow },
+				deps({ env: PLAIN, platform: "darwin" }),
+			),
 		).toBeNull();
 		expect(flow.seen).toHaveLength(0);
 	});
@@ -176,14 +182,14 @@ describe("bridgeFetch: when it must do nothing", () => {
 		free.stop(true);
 		pairTo(port);
 		const t0 = Date.now();
-		expect(await bridgeFetch("https://example.com", {}, deps())).toBeNull();
+		expect(await bridgeFetch("https://example.com", { guard: allow }, deps())).toBeNull();
 		expect(Date.now() - t0).toBeLessThan(1500);
 	});
 
 	test("Flow revoked the pairing (401): null", async () => {
 		const flow = fakeFlow("other-token-other-token-other-token-aa");
 		pairTo(flow.port);
-		expect(await bridgeFetch("https://example.com", {}, deps())).toBeNull();
+		expect(await bridgeFetch("https://example.com", { guard: allow }, deps())).toBeNull();
 		expect(flow.seen.every((s) => s.path === "/v1/ping")).toBe(true);
 		expect(flow.seen.every((s) => s.auth === null)).toBe(true);
 	});
@@ -201,14 +207,16 @@ describe("bridgeFetch: when it must do nothing", () => {
 	])("Flow says %s: null so the normal fetch runs", async (_n, reply) => {
 		const flow = fakeFlow("t".repeat(43), reply);
 		pairTo(flow.port);
-		expect(await bridgeFetch("https://example.com", {}, deps())).toBeNull();
+		expect(await bridgeFetch("https://example.com", { guard: allow }, deps())).toBeNull();
 	});
 
 	test("a slow Flow is abandoned at the timeout", async () => {
 		const flow = fakeFlow("t".repeat(43), () => new Response(new ReadableStream({ start() {} })));
 		pairTo(flow.port);
 		const t0 = Date.now();
-		expect(await bridgeFetch("https://example.com", {}, deps({ openTimeoutMs: 300 }))).toBeNull();
+		expect(
+			await bridgeFetch("https://example.com", { guard: allow }, deps({ openTimeoutMs: 300 })),
+		).toBeNull();
 		expect(Date.now() - t0).toBeLessThan(2500);
 	});
 });
@@ -249,7 +257,9 @@ describe("a squatter on the port gets nothing", () => {
 	test.each(cases)("%s: no token and no URL is ever sent", async (_n, answer) => {
 		const sq = squatter(answer);
 		pairTo(sq.port, TOKEN);
-		expect(await bridgeFetch("https://secret.example/private?x=1", {}, deps())).toBeNull();
+		expect(
+			await bridgeFetch("https://secret.example/private?x=1", { guard: allow }, deps()),
+		).toBeNull();
 		expect(sq.seen.length).toBeGreaterThan(0);
 		for (const s of sq.seen) {
 			expect(s.auth).toBeNull();
@@ -270,8 +280,8 @@ describe("a squatter on the port gets nothing", () => {
 			return Response.json({ ok: true, proof: captured });
 		});
 		pairTo(sq.port, TOKEN);
-		expect(await bridgeFetch("https://example.com", {}, deps())).toBeNull();
-		expect(await bridgeFetch("https://example.com", {}, deps())).toBeNull();
+		expect(await bridgeFetch("https://example.com", { guard: allow }, deps())).toBeNull();
+		expect(await bridgeFetch("https://example.com", { guard: allow }, deps())).toBeNull();
 		expect(nonces.length).toBe(2);
 		expect(nonces[0]).not.toBe(nonces[1]);
 		expect(sq.seen.every((s) => s.auth === null)).toBe(true);
@@ -331,7 +341,7 @@ describe("bridgeFetch: paired and Flow answers", () => {
 	test("returns the page text and sends exactly the request shape", async () => {
 		const flow = fakeFlow("t".repeat(43));
 		pairTo(flow.port);
-		const r = await bridgeFetch("https://example.com/a", { maxLength: 1234 }, deps());
+		const r = await bridgeFetch("https://example.com/a", { maxLength: 1234, guard: allow }, deps());
 		expect(r).toEqual({
 			title: "Fake page",
 			url: "https://example.com/a",
@@ -351,7 +361,7 @@ describe("bridgeFetch: paired and Flow answers", () => {
 			path.join(dir, PAIRING_FILE),
 			JSON.stringify({ port: flow.port, token: "t".repeat(43), host: "evil.example" }),
 		);
-		await bridgeFetch("https://example.com", {}, deps());
+		await bridgeFetch("https://example.com", { guard: allow }, deps());
 		expect(flow.seen.every((s) => s.host === `127.0.0.1:${flow.port}`)).toBe(true);
 	});
 
@@ -366,9 +376,29 @@ describe("bridgeFetch: paired and Flow answers", () => {
 			}),
 		);
 		pairTo(flow.port);
-		const r = await bridgeFetch("https://example.com", { maxLength: 100 }, deps());
+		const r = await bridgeFetch("https://example.com", { maxLength: 100, guard: allow }, deps());
 		expect(r?.content.length).toBe(100);
 		expect(r?.length).toBe(500);
+	});
+});
+
+describe("bridgeFetch: the destination guard is required", () => {
+	test("a refusing guard stops the call and Flow sees no /v1/open", async () => {
+		const flow = fakeFlow("t".repeat(43));
+		pairTo(flow.port);
+		for (const url of ["http://127.0.0.1/", "http://169.254.169.254/latest/meta-data/"]) {
+			await expect(
+				bridgeFetch(url, { guard: (u) => checkDestination(u).then(() => {}) }, deps()),
+			).rejects.toThrow(/^Refused/);
+		}
+		expect(flow.seen.some((s) => s.path === "/v1/open")).toBe(false);
+		expect(flow.seen).toHaveLength(0);
+	});
+
+	test("a call without a guard does not type-check", () => {
+		// @ts-expect-error guard is required (#4992)
+		const call = () => bridgeFetch("https://example.com", {}, deps());
+		expect(typeof call).toBe("function");
 	});
 });
 
@@ -545,6 +575,7 @@ describe("web_fetch routing", () => {
 		});
 		expect(r.content).toBe("Hello from Flow");
 		expect(r.title).toBe("Fake page");
+		expect(flow.seen.some((s) => s.path === "/v1/open")).toBe(true);
 	});
 
 	function pairedFlow() {

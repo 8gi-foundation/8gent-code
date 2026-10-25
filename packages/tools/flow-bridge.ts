@@ -152,14 +152,14 @@ export interface BridgeResult {
  */
 export async function bridgeFetch(
 	url: string,
-	opts: { maxLength?: number; guard?: (url: string) => Promise<void> },
+	opts: { maxLength?: number; guard: (url: string) => Promise<void> },
 	deps: FlowDeps = {},
 ): Promise<BridgeResult | null> {
 	if (!onAndroid(deps)) return null;
 	const p = readPairing(dirOf(deps));
 	if (!p) return null;
-	// The caller's destination guard throws to refuse; it runs before any byte goes to Flow (#4987).
-	await opts.guard?.(url);
+	// The caller's destination guard throws to refuse; it is required and runs before any byte goes to Flow (#4987).
+	await opts.guard(url);
 	const f = deps.fetchImpl ?? fetch;
 	if (!(await ping(p, deps.pingTimeoutMs ?? 300, f))) return null;
 	const maxLength = opts.maxLength ?? 50000;
