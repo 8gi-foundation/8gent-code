@@ -31,6 +31,11 @@ async function runHarness() {
 			{
 				env: {
 					...process.env,
+					// The harness plays a person at a terminal. The one-yes resolver refuses every prompt
+					// when CI, EIGHT_UNATTENDED or EIGHT_HEADLESS is set, and Validate runs with CI=1.
+					CI: "",
+					EIGHT_UNATTENDED: "",
+					EIGHT_HEADLESS: "",
 					HOME: home,
 					OLLAMA_HOST: base,
 					OLLAMA_BASE_URL: base,

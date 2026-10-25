@@ -873,6 +873,7 @@ function speakOnboardingLine(
 	})();
 }
 
+import { refuseIfUnattended } from "../../../packages/core/one-yes.js";
 // Import design agent
 import {
 	DesignAgent,
@@ -1458,11 +1459,13 @@ export function App({
 			const { offerAndroidSetup } = await import("../../../packages/eight/android-setup.js");
 			const outcome = await offerAndroidSetup("command", {
 				ask: (line, defaultYes) =>
-					new Promise<boolean>((resolve) => {
-						djInstallDefaultRef.current = defaultYes;
-						djInstallAnswerRef.current = resolve;
-						addSystemMessage(line);
-					}),
+					refuseIfUnattended("android-mic-setup")
+						? Promise.resolve(false)
+						: new Promise<boolean>((resolve) => {
+								djInstallDefaultRef.current = defaultYes;
+								djInstallAnswerRef.current = resolve;
+								addSystemMessage(line);
+							}),
 				say: addSystemMessage,
 			});
 			if (outcome !== "ready" && outcome !== "installed") return;
@@ -2528,6 +2531,7 @@ export function App({
 						// Re-checked after the awaits: onboarding may have started while we loaded.
 						if (busy()) return Promise.resolve(null);
 						judgeOfferedRef.current = true;
+						if (refuseIfUnattended("judge-install")) return Promise.resolve(null);
 						return new Promise<boolean>((resolve) => {
 							djInstallDefaultRef.current = defaultYes;
 							djInstallAnswerRef.current = resolve;
@@ -6059,10 +6063,12 @@ export function App({
 								let lastProgress = 0;
 								const outcome = await dj.ensureTools({
 									ask: (question) =>
-										new Promise<boolean>((resolve) => {
-											djInstallAnswerRef.current = resolve;
-											addSystemMessage(question);
-										}),
+										refuseIfUnattended("dj-install")
+											? Promise.resolve(false)
+											: new Promise<boolean>((resolve) => {
+													djInstallAnswerRef.current = resolve;
+													addSystemMessage(question);
+												}),
 									say: (line) => {
 										// A refusal already shows the command through play/doctor below.
 										if (!/^Not installed\. Run:/.test(line)) addSystemMessage(line);
@@ -6505,11 +6511,13 @@ export function App({
 								);
 								await offerCloudVoice({
 									ask: (line, defaultYes) =>
-										new Promise<boolean>((resolve) => {
-											djInstallDefaultRef.current = defaultYes;
-											djInstallAnswerRef.current = resolve;
-											addSystemMessage(line);
-										}),
+										refuseIfUnattended("cloud-voice")
+											? Promise.resolve(false)
+											: new Promise<boolean>((resolve) => {
+													djInstallDefaultRef.current = defaultYes;
+													djInstallAnswerRef.current = resolve;
+													addSystemMessage(line);
+												}),
 									say: addSystemMessage,
 								});
 							} else {

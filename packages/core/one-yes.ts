@@ -91,6 +91,32 @@ function defaultRecord(env: Env): (entry: Record<string, unknown>) => void {
 }
 
 /**
+ * For callers that show the question themselves (the TUI prints it in its message list and
+ * resolves on the next typed line). True means nobody is attending: the denial is logged and
+ * recorded exactly as askOneYesDetailed does, and the caller must not show or wait on the
+ * question. The env flags apply here because the TUI answers on the process terminal.
+ */
+export function refuseIfUnattended(
+	label: string,
+	opts: Pick<OneYesOptions, "env" | "input" | "output" | "log" | "record" | "now"> = {},
+): boolean {
+	const env = opts.env ?? process.env;
+	const input = opts.input ?? process.stdin;
+	const output = opts.output ?? process.stdout;
+	if (!unattended(env, input, output)) return false;
+	const reason: OneYesReason =
+		isSet(env.CI) || isSet(env.EIGHT_UNATTENDED) || isSet(env.EIGHT_HEADLESS)
+			? "unattended-env"
+			: "no-tty";
+	const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
+	const record = opts.record ?? defaultRecord(env);
+	const now = opts.now ?? (() => new Date());
+	log(`[one-yes] resolved to no (${reason}): nobody answered the ${label} prompt`);
+	record({ at: now().toISOString(), event: "one-yes-resolved-no", reason, label });
+	return true;
+}
+
+/**
  * Ask a one-yes question. Never throws, never waits past the bound, never answers yes
  * unless a person typed y or yes in time.
  */

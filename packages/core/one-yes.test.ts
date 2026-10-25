@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { askOneYes, askOneYesDetailed, unattended } from "./one-yes";
+import { askOneYes, askOneYesDetailed, refuseIfUnattended, unattended } from "./one-yes";
 
 function rig(over: { tty?: boolean } = {}) {
 	const input = Object.assign(new PassThrough(), { isTTY: over.tty ?? true });
@@ -200,4 +200,27 @@ describe("no prompt text reaches the log or the ledger (#4057, #4919)", () => {
 			expect(readFileSync(join(root, f), "utf8")).toContain(`label: "${label}"`);
 		}
 	});
+});
+
+describe("refuseIfUnattended, for prompts the TUI shows itself (#4919)", () => {
+	test("a person at a terminal is not refused and nothing is recorded", () => {
+		const r = rig();
+		expect(refuseIfUnattended("judge-install", r.opts)).toBe(false);
+		expect(r.logs).toEqual([]);
+		expect(r.ledger).toEqual([]);
+	});
+	for (const [name, env, tty] of [
+		["CI", { CI: "1" }, true],
+		["EIGHT_UNATTENDED", { EIGHT_UNATTENDED: "1" }, true],
+		["EIGHT_HEADLESS", { EIGHT_HEADLESS: "1" }, true],
+		["no terminal", {}, false],
+	] as const) {
+		test(`${name}: refused, one log line, label-only ledger row`, () => {
+			const r = rig({ tty });
+			expect(refuseIfUnattended("judge-install", { ...r.opts, env })).toBe(true);
+			expect(r.logs.length).toBe(1);
+			expect(r.ledger.length).toBe(1);
+			expect(r.ledger[0]).toMatchObject({ event: "one-yes-resolved-no", label: "judge-install" });
+		});
+	}
 });
