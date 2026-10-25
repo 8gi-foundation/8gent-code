@@ -38,6 +38,7 @@ import {
 	resolveThinkingForRouting,
 	resolveThinkingLevel,
 } from "./thinking-level";
+import { ANTHROPIC_THINKING_BUDGET, thinkingRequestFields } from "./thinking-request";
 
 // ============================================
 // Types
@@ -259,17 +260,6 @@ export function getHostCliBinary(slot: "primary" | "secondary"): string {
 	return process.env[key]?.trim() || "";
 }
 
-/**
- * Anthropic extended-thinking budget in output tokens, indexed by thinking
- * level. Conservative defaults; per-model tuning is a follow-up.
- */
-const ANTHROPIC_THINKING_BUDGET: Record<ThinkingLevel, number> = {
-	minimal: 1024,
-	low: 4096,
-	medium: 12288,
-	high: 32768,
-};
-
 const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
 	"8gent": {
 		name: "8gent",
@@ -282,9 +272,8 @@ const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: true,
-		// BDH thinking is not yet wired in the kernel. Empty until it lands;
-		// router will treat `thinking` requests as non-thinking.
-		supportedThinkingLevels: [],
+		// Served by the local Ollama: `think` on /api/chat (thinking-request.ts).
+		supportedThinkingLevels: ["low", "medium", "high"],
 	},
 	ollama: {
 		name: "ollama",
@@ -297,10 +286,9 @@ const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: true,
-		// Ollama silently strips `reasoning_effort` and has no native thinking
-		// API. Leave empty so the router never tries to forward a thinking
-		// payload that would be discarded.
-		supportedThinkingLevels: [],
+		// `think` on /api/chat: false for "low", true for "medium" and "high";
+		// gpt-oss takes the level itself (thinking-request.ts).
+		supportedThinkingLevels: ["low", "medium", "high"],
 	},
 	lmstudio: {
 		name: "lmstudio",
@@ -405,9 +393,9 @@ const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
 		supportsTools: true,
 		supportsStreaming: true,
 		supportsVision: true,
-		// Per-model. Conservative empty default; orchestration can override
-		// once we wire model-specific capability detection.
-		supportedThinkingLevels: [],
+		// OpenRouter's unified `reasoning: { effort }`. A model with no reasoning
+		// ignores it (OpenRouter drops unsupported parameters).
+		supportedThinkingLevels: ["low", "medium", "high"],
 	},
 	groq: {
 		name: "groq",
@@ -1219,6 +1207,15 @@ export class ProviderManager {
 		if (request.tools && request.tools.length > 0) {
 			body.tools = request.tools;
 		}
+		// `request.thinking` is already resolved against this provider's supported
+		// set by `chat()`. Ollama's own switch is `think` (thinking-request.ts).
+		if (request.thinking) {
+			Object.assign(
+				body,
+				thinkingRequestFields({ provider: "ollama", model, shape: "native" }, request.thinking)
+					.fields,
+			);
+		}
 
 		// modelFetch: no hidden Bun 300 s cap; EIGHT_TURN_TIMEOUT_MS bounds the step.
 		const response = await modelFetch(`${provider.baseUrl}/api/chat`, {
@@ -1311,8 +1308,14 @@ export class ProviderManager {
 		// `request.thinking` is already resolved against this provider's
 		// supported set by `chat()`. Forward it as `reasoning_effort` for
 		// OpenAI-compatible reasoning models; non-reasoning models ignore it.
+		// OpenRouter takes its own `reasoning: { effort }` instead.
 		if (request.thinking) {
-			body.reasoning_effort = request.thinking;
+			const wire = thinkingRequestFields(
+				{ provider: provider.name, model, shape: "openai", baseUrl: provider.baseUrl },
+				request.thinking,
+			);
+			if (wire.applied) Object.assign(body, wire.fields);
+			else body.reasoning_effort = request.thinking;
 		}
 
 		const response = await modelFetch(`${provider.baseUrl}/chat/completions`, {

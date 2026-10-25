@@ -29,6 +29,7 @@ export type {
 	AgentNames,
 	MusicSettings,
 	RetrySettings,
+	ThinkingModeSettings,
 } from "./schema.js";
 
 export { getVoiceForRole } from "./voice.js";

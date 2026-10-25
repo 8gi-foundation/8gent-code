@@ -93,6 +93,10 @@ export const DEFAULT_SETTINGS: Settings = {
 		maxDelayMs: 30000,
 		httpIdleTimeoutMs: null,
 	},
+	thinking: {
+		level: "auto",
+		cap: "high",
+	},
 	music: {
 		// Audible, well short of loud: a first-ever track never starts at 100% (#3190).
 		volume: 60,

@@ -97,6 +97,22 @@ export interface AgentStepStartEvent {
 	model: string;
 }
 
+/**
+ * The thinking level a turn used (#5040), for the status line. `applied` is
+ * true when the provider's own control carried it, false when the provider has
+ * none (or refused it) so nothing was sent, and null until the first request.
+ */
+export interface TurnThinking {
+	level: "off" | "low" | "medium" | "high" | "max";
+	/** "fixed" when the owner set it, "auto" when the decider picked it. */
+	source: "fixed" | "auto";
+	/** Signals that stepped the level up; empty for a fixed level. */
+	signals: string[];
+	/** True when the owner's cap held the level down. */
+	capped: boolean;
+	applied: boolean | null;
+}
+
 /** Event emitted when evidence is collected */
 export interface AgentEvidenceEvent {
 	type: string;
@@ -132,6 +148,8 @@ export interface AgentEventCallbacks {
 	 * Fires before config.model self-corrects, so a UI can name the model
 	 * that runs the turn while it runs. Display only (#3102).
 	 */
+	/** This turn's thinking level, and again when the provider took or refused it (#5040). Display only. */
+	onThinking?: (event: TurnThinking) => void;
 	onModelRouted?: (event: {
 		requested: string;
 		used: string;

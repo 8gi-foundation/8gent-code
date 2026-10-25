@@ -14,6 +14,7 @@ const CTRL: Record<string, string> = {
 	"^S": "\x13",
 	"^X": "\x18",
 	"^Y": "\x19",
+	"^Z": "\x1a",
 };
 
 const NAMED: Record<string, string> = {

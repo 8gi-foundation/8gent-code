@@ -352,7 +352,7 @@ describe("ProviderManager.chat with the effort policy, Ollama shape", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
-	test("flag on: taskKind and any thinking field stay off the wire; level dropped", async () => {
+	test("flag on: taskKind stays off the wire; the level goes as Ollama's own think field (#5040)", async () => {
 		process.env.EIGHT_EFFORT_POLICY = "1";
 		const res = await new ProviderManager(settingsPath).chat({
 			messages: [{ role: "user", content: "review this" }],
@@ -363,6 +363,7 @@ describe("ProviderManager.chat with the effort policy, Ollama shape", () => {
 		expect(wire).not.toContain("taskKind");
 		expect(wire).not.toContain("reasoning_effort");
 		expect(wire).not.toContain('"thinking"');
-		expect(res.thinking?.level).toBeNull();
+		expect(captured!.think).toBe(true);
+		expect(res.thinking?.level).toBe("high");
 	});
 });

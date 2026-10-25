@@ -626,7 +626,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: ["think"],
 		description:
 			"Set the thinking level, or show / hide the model's thinking (Ctrl+Z cycles, Ctrl+V toggles)",
-		usage: "/thinking [off|low|medium|high|show|hide]",
+		usage: "/thinking [auto|off|low|medium|high|max|show|hide]",
 	},
 	{
 		name: "scoped-models",

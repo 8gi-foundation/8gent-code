@@ -10,13 +10,39 @@ import {
 	resolveThinkingLevel,
 } from "../../../../packages/providers/thinking-level.js";
 
-/** What a person can ask for: off, or one of the router's levels. */
-export type ThinkingChoice = "off" | ThinkingLevel;
+/**
+ * What a person can ask for: "auto" (8gent picks each turn, fast by default,
+ * #5040), "off" (send no thinking control), or one of the router's levels.
+ * Any level but auto is a fixed level for every turn.
+ */
+export type ThinkingChoice = "auto" | "off" | ThinkingLevel | "max";
 
 /** The cycle key's order. "minimal" is accepted by name but skipped by the key. */
-export const THINKING_CYCLE: readonly ThinkingChoice[] = ["off", "low", "medium", "high"];
+export const THINKING_CYCLE: readonly ThinkingChoice[] = [
+	"auto",
+	"off",
+	"low",
+	"medium",
+	"high",
+	"max",
+];
 
-const CHOICES: ReadonlySet<string> = new Set(["off", "minimal", "low", "medium", "high"]);
+const CHOICES: ReadonlySet<string> = new Set([
+	"auto",
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"max",
+]);
+
+/** The level the session's thinking setter takes for a choice ("minimal" is the fast level, low). */
+export function sessionThinkingLevel(
+	choice: ThinkingChoice,
+): "auto" | "off" | "low" | "medium" | "high" | "max" {
+	return choice === "minimal" ? "low" : choice;
+}
 
 /** "/thinking HIGH" -> "high"; anything else -> null. */
 export function parseThinkingChoice(arg: string | undefined): ThinkingChoice | null {
@@ -39,34 +65,37 @@ export function effectiveThinking(
 	requested: ThinkingChoice,
 	supported: readonly ThinkingLevel[],
 ): ThinkingLevel | null {
-	if (requested === "off") return null;
-	return resolveThinkingLevel(requested, supported);
+	if (requested === "off" || requested === "auto") return null;
+	// No provider has a level above high: max is high, as far as it goes.
+	return resolveThinkingLevel(requested === "max" ? "high" : requested, supported);
 }
 
-/**
- * The turn loop does not send the level to the model yet (the Agent has no
- * setter), so every line that reports a level other than off says so.
- */
-export const THINKING_NOT_SENT = "It is recorded but not yet sent to the model.";
-
-/** One line for the chat: the request, what the provider does with it, and that it is not sent yet. */
+/** One line for the chat: the request, and what the provider does with it. */
 export function describeThinking(
 	requested: ThinkingChoice,
 	provider: string,
 	supported: readonly ThinkingLevel[],
 ): string {
-	if (requested === "off") return "Thinking: off.";
+	if (requested === "auto") {
+		return "Thinking: auto. Fast by default, one step up when a turn looks hard.";
+	}
+	if (requested === "off") {
+		return "Thinking: off. 8gent sends no thinking control; the model keeps its own default.";
+	}
 	const effective = effectiveThinking(requested, supported);
+	if (requested === "max" && effective === "high") {
+		return "Thinking: max. Sent as high: no provider has a level above it.";
+	}
 	if (effective === null) {
-		return `Thinking: ${requested} requested. ${provider} supports no thinking levels, so turns run without it until you switch provider. ${THINKING_NOT_SENT}`;
+		return `Thinking: ${requested} requested. ${provider} supports no thinking levels, so turns run without it until you switch provider.`;
 	}
 	if (effective !== requested) {
-		return `Thinking: ${requested} requested, clamped to ${effective} (the most ${provider} supports). ${THINKING_NOT_SENT}`;
+		return `Thinking: ${requested} requested, clamped to ${effective} (the most ${provider} supports).`;
 	}
-	return `Thinking: ${requested}. ${THINKING_NOT_SENT}`;
+	return `Thinking: ${requested}.`;
 }
 
-export const THINKING_USAGE = "/thinking off|low|medium|high, or /thinking show|hide";
+export const THINKING_USAGE = "/thinking auto|off|low|medium|high|max, or /thinking show|hide";
 
 /**
  * The chat bubbles that are the model's thinking: the prose it wrote while

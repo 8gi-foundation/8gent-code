@@ -143,6 +143,17 @@ export interface RetrySettings {
 	httpIdleTimeoutMs: number | null;
 }
 
+export interface ThinkingModeSettings {
+	/**
+	 * "auto" - the 8gent picks a level each turn: fast by default, one step up per
+	 * sign the turn is hard. "low" | "medium" | "high" | "max" - always that level (max is sent as high, the most any provider has).
+	 * "off" - send no thinking control; the model keeps its own default.
+	 */
+	level: "auto" | "off" | "low" | "medium" | "high" | "max";
+	/** In "auto", never go above this level. "high" = no cap. */
+	cap: "low" | "medium" | "high" | "max";
+}
+
 export interface MusicSettings {
 	/**
 	 * The DJ's volume (0-150, mpv's scale), remembered across tracks and
@@ -170,6 +181,7 @@ export interface Settings {
 	ui: UISettings;
 	agents: AgentsSettings;
 	retry: RetrySettings;
+	thinking: ThinkingModeSettings;
 	music: MusicSettings;
 	shell: ShellSettings;
 }

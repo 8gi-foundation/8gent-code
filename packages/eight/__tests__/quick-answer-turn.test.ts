@@ -3,7 +3,7 @@
  * text-tool path, with the model stubbed (fixtures/quick-answer-probe.ts).
  */
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanupTempDirs, tempDir } from "../../../tests/temp-dirs";
 import { QUICK_LABEL, QUICK_TOOLS } from "../quick-answer";
@@ -34,6 +34,7 @@ type Probe = {
 		};
 	}>;
 	executed: string[];
+	thinking: { level: string; source: string; applied: boolean | null } | null;
 };
 
 function probe(
@@ -41,9 +42,14 @@ function probe(
 	prompt: string,
 	flag: string | undefined,
 	extra: Record<string, string> = {},
+	settings?: Record<string, unknown>,
 ): Probe {
 	const root = tempDir("quick-answer-");
 	mkdirSync(join(root, "home"));
+	if (settings) {
+		mkdirSync(join(root, "home", ".8gent"));
+		writeFileSync(join(root, "home", ".8gent", "settings.json"), JSON.stringify(settings));
+	}
 	mkdirSync(join(root, "work"));
 	const {
 		EIGHT_QUICK_ANSWER: _flag,
@@ -54,6 +60,8 @@ function probe(
 	const env = {
 		...base,
 		HOME: join(root, "home"),
+		// The suite may point EIGHT_HOME elsewhere; the owner setting is read from here.
+		...(settings ? { EIGHT_HOME: join(root, "home") } : {}),
 		...(flag === undefined ? {} : { EIGHT_QUICK_ANSWER: flag }),
 		...extra,
 	};
@@ -165,7 +173,43 @@ describe("quick-answer lane in a real turn (#3411)", () => {
 		expect(quick.length).toBeGreaterThan(0);
 		expect(full.length).toBeGreaterThan(0);
 		for (const s of quick) expect(s.reasoningEffort).toBe("none");
+		// The default level is low (#5040): full-loop requests ask for no thinking too.
+		for (const s of full) expect(s.reasoningEffort).toBe("none");
+	}, 60_000);
+
+	test("thinking.level off: full-loop requests carry no thinking control", () => {
+		const p = probe("needs-deep", QUESTION, "1", {}, { thinking: { level: "off" } });
+		const full = p.seen.filter((s) => !s.quick && s.tools.includes("write_file"));
+		expect(full.length).toBeGreaterThan(0);
 		for (const s of full) expect(s.reasoningEffort).toBeNull();
+	}, 60_000);
+
+	test("fixed off: the lane sends no thinking field, and the turn says so", () => {
+		const p = probe("answer", QUESTION, "1", {}, { thinking: { level: "off" } });
+		const quick = p.seen.filter((s) => s.quick);
+		expect(quick.length).toBeGreaterThan(0);
+		for (const s of quick) expect(s.reasoningEffort).toBeNull();
+		expect(p.thinking).toMatchObject({ level: "off", source: "fixed" });
+	}, 60_000);
+
+	test("fixed high: the lane sends high, and the turn says high was sent", () => {
+		const p = probe("answer", QUESTION, "1", {}, { thinking: { level: "high" } });
+		const quick = p.seen.filter((s) => s.quick);
+		expect(quick.length).toBeGreaterThan(0);
+		for (const s of quick) expect(s.reasoningEffort).toBe("high");
+		expect(p.thinking).toMatchObject({ level: "high", source: "fixed", applied: true });
+	}, 60_000);
+
+	test("fixed low: the lane sends none, as the decider's lane does", () => {
+		const p = probe("answer", QUESTION, "1", {}, { thinking: { level: "low" } });
+		for (const s of p.seen.filter((x) => x.quick)) expect(s.reasoningEffort).toBe("none");
+		expect(p.thinking).toMatchObject({ level: "low", source: "fixed", applied: true });
+	}, 60_000);
+
+	test("auto: the lane keeps its own no-thinking switch and reports low", () => {
+		const p = probe("answer", QUESTION, "1");
+		for (const s of p.seen.filter((x) => x.quick)) expect(s.reasoningEffort).toBe("none");
+		expect(p.thinking).toMatchObject({ level: "low", source: "auto", applied: true });
 	}, 60_000);
 
 	test("a long lane failure reason is capped at 200 chars in the run log (8SO Q-R1)", () => {

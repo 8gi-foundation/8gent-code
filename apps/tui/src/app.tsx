@@ -377,12 +377,12 @@ import { detectTermPresetIntent } from "./lib/term-intent.js";
 import { copiedNotice, notCopiedNotice } from "./lib/text-selection.js";
 import { truncate } from "./lib/text.js";
 import {
-	THINKING_NOT_SENT,
 	THINKING_USAGE,
 	type ThinkingChoice,
 	describeThinking,
 	nextThinkingChoice,
 	parseThinkingChoice,
+	sessionThinkingLevel,
 	visibleMessages,
 } from "./lib/thinking.js";
 import { outCommand, toggleLatestOutput } from "./lib/tool-output-state.js";
@@ -494,6 +494,7 @@ import type {
 	AgentToolStartEvent,
 } from "../../../packages/eight/index.js";
 import { providerRouteNotice, shouldShowRouteNotice } from "../../../packages/eight/run.js";
+import { thinkingStatusLabel } from "../../../packages/eight/thinking-decider.js";
 import { isReadOnlyTool } from "../../../packages/eight/tool-registry.js";
 import {
 	closeTurn,
@@ -2031,10 +2032,10 @@ export function App({
 	// longer lists is skipped.
 	const liveModels = listBelongsToProvider(modelsOwner, currentProvider) ? availableModels : [];
 	const liveScope = scopedModels.filter((m) => liveModels.includes(m));
-	// The thinking level asked for (#3918 D4). The provider clamps it; see
-	// supportedThinking(). Not yet passed into the Agent (it has no setter), so
-	// describeThinking and /status say the level is recorded but not sent.
-	const [thinkingLevel, setThinkingLevel] = useState<ThinkingChoice>("off");
+	// The thinking level asked for (#3918 D4). "auto" lets the 8gent pick each
+	// turn; any other choice is the fixed level, handed to the session before
+	// every turn (#5040). The provider clamps what it can take; see supportedThinking().
+	const [thinkingLevel, setThinkingLevel] = useState<ThinkingChoice>("auto");
 	// Whether the model's intermediate thinking bubbles are drawn (#3918 D10).
 	const [showThinking, setShowThinking] = useState(true);
 	// Latest values for the key handler. Ink re-subscribes it after a render, so a
@@ -4735,7 +4736,10 @@ export function App({
 								getProviderManager().getProvider(currentProvider)?.displayName || currentProvider,
 							model: currentModel,
 							readiness: readinessRef.current ?? { state: "checking", reason: "" },
-						})}\nSession Status:\n  Duration: ${mins}:${secs.toString().padStart(2, "0")}\n  Tokens used: ${totalTokens.toLocaleString()}\n  Commands: ${recentCommands.length}\n  Branch: ${currentBranch || "N/A"}\n  Animations: ${showAnimations ? "on" : "off"}\n  Sound: ${soundEnabled ? "on" : "off"}\n  Thinking: ${thinkingLevel}${showThinking ? "" : " (hidden)"}${thinkingLevel === "off" ? "" : ` - ${THINKING_NOT_SENT}`}`,
+						})}\nSession Status:\n  Duration: ${mins}:${secs.toString().padStart(2, "0")}\n  Tokens used: ${totalTokens.toLocaleString()}\n  Commands: ${recentCommands.length}\n  Branch: ${currentBranch || "N/A"}\n  Animations: ${showAnimations ? "on" : "off"}\n  Sound: ${soundEnabled ? "on" : "off"}\n  Thinking: ${thinkingLevel}${showThinking ? "" : " (hidden)"}${(() => {
+							const used = getTabAgent(activeTabId)?.getLastThinking();
+							return used ? ` - last turn used ${thinkingStatusLabel(used)}` : "";
+						})()}`,
 					);
 					break;
 				}
@@ -8232,6 +8236,8 @@ export function App({
 					setVerificationByTab((v) => ({ ...v, [tabId]: undefined }));
 					// The person's own typed line only (not a skill or shell expansion): its paths are readable this turn (#4715).
 					targetAgent?.allowReadsFromPerson(message);
+					// The level asked for in /thinking reaches this turn; auto is the decider (#5040).
+					targetAgent?.setThinkingLevel(sessionThinkingLevel(thinkingKeyRef.current.level));
 					const chatPromise = targetAgent.chat(
 						modePrefix + messageForAgent.trim(),
 						img?.base64,
@@ -9397,6 +9403,7 @@ export function App({
 					sandboxOff={sandboxOff}
 					verification={verificationByTab[activeTabId]}
 					daemonAttached={daemonAttached}
+					thinking={thinkingLevel}
 					turnRunning={isProcessing}
 					turnCalls={toolCount}
 					djKeys={djKeys}

@@ -31,6 +31,11 @@ import {
 	resolveOllamaBaseUrl,
 } from "../local-model-server/ollama-host";
 import { resolveLlamaServerUrl } from "../local-model-server/select";
+import {
+	type ThinkingSetting,
+	isThinkingUnsupported,
+	thinkingRequestFields,
+} from "../providers/thinking-request";
 import { noteStreamText } from "../specifications/session/durable-ledger";
 import { type ModelFetchTimers, modelFetch } from "./model-fetch";
 import { OutputCapError, type TextToolReply } from "./text-tool-client";
@@ -854,6 +859,18 @@ export function buildTextToolCall(opts: {
 	 */
 	noThink?: boolean;
 	/**
+	 * Thinking level for this call (#5040). Sent as the provider's own control
+	 * only where one exists (see packages/providers/thinking-request.ts); other
+	 * providers get nothing. "off" or unset sends nothing. `noThink` wins.
+	 */
+	thinking?: ThinkingSetting;
+	/**
+	 * Fired once per call function, on its first request, with whether a thinking
+	 * field was sent. Fired again with false if the model refused the field and
+	 * the request went out without it.
+	 */
+	onThinkingApplied?: (applied: boolean) => void;
+	/**
 	 * Stream the reply and fail after this many ms with no output (#3553, on by
 	 * default since #3657). Default: resolveStreamIdleMs(), so
 	 * EIGHT_STREAM_IDLE_MS governs; null is off (wall time only).
@@ -889,9 +906,15 @@ export function buildTextToolCall(opts: {
 	const isJsonReply = (res: Response) =>
 		(res.headers.get("content-type") ?? "").toLowerCase().includes("application/json");
 	const label = `${opts.provider}/${opts.model}`;
+	// The level asked for this turn, as the provider's own field (or nothing).
+	let thinkingWire = thinkingRequestFields(
+		{ provider: opts.provider, model: opts.model, shape: "openai", baseUrl: endpoint },
+		opts.thinking ?? "off",
+	);
 	const noThink =
 		(opts.noThink === true && opts.provider === "ollama") ||
-		isOllamaNoThink(opts.provider, opts.model);
+		isOllamaNoThink(opts.provider, opts.model) ||
+		thinkingWire.fields.reasoning_effort === "none";
 	let declareTools = shouldDeclareTools(opts.provider, opts.tools);
 	const declared = (opts.tools ?? []).map((t) => ({
 		type: "function",
@@ -914,6 +937,7 @@ export function buildTextToolCall(opts: {
 					max_tokens: maxTokens,
 					stream: streamed,
 					...(streamed ? { stream_options: { include_usage: true } } : {}),
+					...thinkingWire.fields,
 					...(noThink ? { reasoning_effort: "none" } : {}),
 					...(withTools ? { tools: declared } : {}),
 				}),
@@ -922,6 +946,7 @@ export function buildTextToolCall(opts: {
 			{ ...limitsFor(charsOf(messages)), label },
 		);
 
+	let thinkingReported = false;
 	type Attempt =
 		| { ok: true; content: string; toolCalls: ParsedToolCall[]; completionTokens: number }
 		| { ok: false; status: number; body: string };
@@ -931,7 +956,26 @@ export function buildTextToolCall(opts: {
 	// to judge the reply.
 	const attempt = async (messages: ChatMessage[]): Promise<Attempt> => {
 		const t0 = performance.now();
+		if (!thinkingReported) {
+			thinkingReported = true;
+			opts.onThinkingApplied?.(thinkingWire.applied);
+		}
 		let res = await post(messages, declareTools);
+		if (!res.ok && thinkingWire.applied) {
+			// A model with no thinking control refuses the field: drop it, once, and
+			// say the level did not apply. Tools are judged on the retry.
+			const body = await res.text().catch(() => "");
+			if (isThinkingUnsupported(res.status, body)) {
+				thinkingWire = { applied: false, fields: {}, reason: "not-applicable" };
+				opts.onThinkingApplied?.(false);
+				res = await post(messages, declareTools);
+			} else if (!declareTools || !isToolsUnsupported(res.status, body)) {
+				return { ok: false, status: res.status, body };
+			} else {
+				declareTools = false;
+				res = await post(messages, false);
+			}
+		}
 		if (!res.ok && declareTools) {
 			const body = await res.text().catch(() => "");
 			if (!isToolsUnsupported(res.status, body)) return { ok: false, status: res.status, body };

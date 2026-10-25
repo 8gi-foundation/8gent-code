@@ -107,6 +107,8 @@ const runs = existsSync(runLog)
 			.filter(Boolean)
 			.map((l) => JSON.parse(l))
 	: [];
-process.stdout.write(`\n@@PROBE@@${JSON.stringify({ reply, seen, runs, executed })}\n`);
+process.stdout.write(
+	`\n@@PROBE@@${JSON.stringify({ reply, seen, runs, executed, thinking: agent.getLastThinking() })}\n`,
+);
 await agent.cleanup?.();
 process.exit(0);

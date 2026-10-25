@@ -19,29 +19,28 @@ async function main() {
 	const rec = recorder(app);
 
 	let m = await app.submit("/thinking");
-	await waitFor(() => app.since(m).includes("Thinking: off."), "/thinking");
+	await waitFor(() => app.since(m).includes("Thinking: auto."), "/thinking");
 	app.emit({ phase: "thinking-show", screen: app.since(m) });
 	rec.take("/thinking");
 
 	m = await app.submit("/thinking high");
-	await waitFor(() => app.since(m).includes("Thinking: high requested."), "/thinking high");
+	await waitFor(() => app.since(m).includes("Thinking: high."), "/thinking high");
 	app.emit({ phase: "thinking-high", screen: app.since(m) });
 	rec.take("/thinking high (clamped by the provider)");
 
-	m = await app.submit("/thinking max");
-	await waitFor(() => app.since(m).includes('Unknown thinking level "max"'), "/thinking max");
+	m = await app.submit("/thinking turbo");
+	await waitFor(() => app.since(m).includes('Unknown thinking level "turbo"'), "/thinking turbo");
 
-	// Ctrl+Z from high wraps to off, then low.
-	m = app.mark();
-	app.feed("\x1a");
-	await waitFor(() => app.since(m).includes("Thinking: off."), "Ctrl+Z to off");
-	// Ink re-subscribes its key handler after a render; let it before the next press.
-	await tick(300);
-	m = app.mark();
-	app.feed("\x1a");
-	await waitFor(() => app.since(m).includes("Thinking: low requested."), "Ctrl+Z to low");
+	// Ctrl+Z from high goes to max, auto, off, then low.
+	for (const want of ["max", "auto", "off", "low"]) {
+		m = app.mark();
+		app.feed("\x1a");
+		await waitFor(() => app.since(m).includes(`Thinking: ${want}.`), `Ctrl+Z to ${want}`);
+		// Ink re-subscribes its key handler after a render; let it before the next press.
+		await tick(300);
+	}
 	app.emit({ phase: "cycle", ok: true });
-	rec.take("Ctrl+Z cycled off, low");
+	rec.take("Ctrl+Z cycled max, auto, off, low");
 
 	m = await app.submit("/thinking hide");
 	await waitFor(() => app.since(m).includes("Thinking hidden. Ctrl+V shows it."), "/thinking hide");

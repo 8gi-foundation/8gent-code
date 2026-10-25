@@ -157,6 +157,7 @@ import { SMALL_TALK_NOTE, isGreeting, isSmallTalk } from "./small-talk";
 import { verifyNudgeFor } from "./verify-gate";
 import { buildWelcome, gatherWelcomeFacts } from "./welcome";
 
+import type { ThinkingSetting } from "../providers/thinking-request";
 import {
 	mayMoveToProvider,
 	pinnedProviderError,
@@ -208,6 +209,12 @@ import {
 	testClaimViolation,
 } from "./test-claim-gate";
 import {
+	type ThinkingDecision,
+	decideThinking,
+	filesNamedIn,
+	readOwnerThinkingSetting,
+} from "./thinking-decider";
+import {
 	type CheckpointMeta,
 	type RestoredCheckpoint,
 	TimeTravelStore,
@@ -234,6 +241,7 @@ import type {
 	AgentGuardEvent,
 	AgentRetryEvent,
 	ReadyCheck,
+	TurnThinking,
 } from "./types";
 import { VisionInterpreter, oneLineError } from "./vision-interpreter";
 import { isKnownVisionModel } from "./vision-router";
@@ -623,6 +631,75 @@ export class Agent {
 		message: string;
 		unverified?: string[];
 	} | null = null;
+	/**
+	 * Thinking (#5040). The session's own level, set by the owner (`/thinking`):
+	 * undefined = auto, so the owner's settings file and then the per-turn decider
+	 * choose. A level set here wins over the file.
+	 */
+	private thinkingFixed: ThinkingSetting | undefined;
+	private thinkingCap: ThinkingSetting | undefined;
+	/** Failed turns in a row this session; a clean turn resets it. Feeds the decider. */
+	private failedTurnsInRow = 0;
+	/** The level the last turn used, for the status line. Null before the first turn. */
+	private lastThinking: TurnThinking | null = null;
+
+	/**
+	 * Fix the thinking level for this session, or hand it back to the decider with
+	 * "auto". "off" sends no thinking control. The level is sent only to providers
+	 * that have one; the rest record that it did not apply.
+	 */
+	setThinkingLevel(level: ThinkingSetting | "auto"): void {
+		this.thinkingFixed = level === "auto" ? undefined : level;
+	}
+
+	/** In auto, the decider never goes above this level. undefined removes the cap. */
+	setThinkingCap(cap: ThinkingSetting | undefined): void {
+		this.thinkingCap = cap;
+	}
+
+	/** The fixed level for this session, or "auto". */
+	getThinkingLevel(): ThinkingSetting | "auto" {
+		return this.thinkingFixed ?? "auto";
+	}
+
+	/** What the last turn actually used; null before any turn. */
+	getLastThinking(): TurnThinking | null {
+		return this.lastThinking;
+	}
+
+	/** Decide this turn's level (no model call), record it, and tell the status line. */
+	private beginTurnThinking(prompt: string): ThinkingDecision {
+		const owner = readOwnerThinkingSetting();
+		const files = new Set(filesNamedIn(prompt));
+		for (const f of this.sessionWriter.getFilesCreated()) files.add(f);
+		for (const f of this.sessionWriter.getFilesModified()) files.add(f);
+		const decision = decideThinking({
+			prompt,
+			filesInPlay: files.size,
+			failedTurnsInRow: this.failedTurnsInRow,
+			fixed: this.thinkingFixed ?? owner.fixed,
+			cap: this.thinkingCap ?? owner.cap,
+		});
+		this.lastThinking = { ...decision, applied: null };
+		this.emitThinking();
+		return decision;
+	}
+
+	/** The provider took (true) or could not take (false) the level; null = no request yet. */
+	private noteThinkingApplied(applied: boolean): void {
+		if (!this.lastThinking || this.lastThinking.applied === applied) return;
+		this.lastThinking = { ...this.lastThinking, applied };
+		this.emitThinking();
+	}
+
+	private emitThinking(): void {
+		try {
+			if (this.lastThinking) this.events.onThinking?.(this.lastThinking);
+		} catch {
+			// Display only.
+		}
+	}
+
 	getLastTurnFailure(): {
 		reason: TurnFailureReason;
 		message: string;
@@ -1826,6 +1903,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		smallTalk?: boolean;
 		/** The message asked for no work: the first round offers no tools (#4982). */
 		chatOnly?: boolean;
+		/** This turn's thinking level (#5040). */
+		thinking?: ThinkingSetting;
 	}): Promise<string> {
 		const {
 			providerName,
@@ -2118,6 +2197,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// #4462: a profile with think false (local qwen3.8) answers without
 				// reasoning; buildTextToolCall sends the switch to Ollama only.
 				noThink: harnessNoThink(model),
+				// #5040: this turn's level, sent only where the provider has a control.
+				thinking: opts.thinking,
+				onThinkingApplied: (applied) => this.noteThinkingApplied(applied),
 			});
 			// One packer per attempt: it counts this attempt's model requests.
 			const packer = observations ? new ObservationPacker(observations) : null;
@@ -2260,6 +2342,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			});
 			const quickModel = pick.model;
 			const laneTokens: number[] = [];
+			// An owner's fixed level (session or settings) always wins: the lane follows it
+			// instead of its own no-thinking switch (#5040).
+			const laneFixed = this.lastThinking?.source === "fixed" ? this.lastThinking.level : undefined;
 			const quick = await runQuickAnswer({
 				// Its own small prompt and the user's message only (round 4): no agent
 				// system prompt, no history.
@@ -2279,8 +2364,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 							laneTokens.push(usage.promptTokens);
 							onUsage(usage);
 						},
-						// A thinking model spent the whole 15 s budget reasoning (A/B 215452, 215752).
-						noThink: true,
+						...(laneFixed !== undefined
+							? {
+									thinking: laneFixed,
+									onThinkingApplied: (applied: boolean) => this.noteThinkingApplied(applied),
+								}
+							: {
+									// A thinking model spent the whole 15 s budget reasoning (A/B 215452, 215752).
+									noThink: true,
+								}),
 					}),
 			});
 			quickRecord = {
@@ -2297,6 +2389,19 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			};
 			if (quick.ok) {
 				quickResult = quick.result;
+				// Under the decider the lane sends its own no-thinking switch, to Ollama only.
+				// A fixed level was sent as set, and noteThinkingApplied has recorded it.
+				if (this.lastThinking && laneFixed === undefined) {
+					this.lastThinking = {
+						...this.lastThinking,
+						level: "low",
+						source: "auto",
+						signals: [],
+						capped: false,
+						applied: effectiveProvider === "ollama",
+					};
+					this.emitThinking();
+				}
 			} else {
 				console.log(`[quick-answer] full loop after ${quick.ms} ms: ${quick.reason}`);
 			}
@@ -2646,6 +2751,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 									imageOriginal,
 								);
 								this.reviewFinishedTurn(userMessage, reply);
+								this.countTurnOutcome();
 								return reply;
 							} finally {
 								this.friction.turnEnd();
@@ -2655,6 +2761,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				),
 			),
 		);
+	}
+
+	/** Failed turns in a row, for the thinking decider. An unreachable provider says nothing about the task. */
+	private countTurnOutcome(): void {
+		const failure = this.lastTurnFailure;
+		if (failure === null) this.failedTurnsInRow = 0;
+		else if (failure.reason !== "unreachable") this.failedTurnsInRow++;
 	}
 
 	/**
@@ -3259,6 +3372,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// tool-incapable local providers (the provider registry's coarse
 		// supportsTools flag is true for them, but their GGUF templates reject a
 		// tools payload), overridable via EIGHT_TEXT_TOOLS=1|0.
+		// #5040: decide how hard to think, from the ask alone (no model call).
+		const turnThinking = this.beginTurnThinking(textForAgent);
 		if (shouldUseTextTools(providerName, (this.config.allowedPaths?.length ?? 0) > 0)) {
 			const textResult = await this.runTextToolChat({
 				providerName,
@@ -3272,6 +3387,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				textForAgent,
 				smallTalk: noToolsTurn,
 				chatOnly: chatOnlyTurn,
+				thinking: turnThinking.level,
 			});
 			await this.readServerContextWindow();
 			await this.compactIfNeeded(providerConfig);
@@ -3281,6 +3397,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 			return textResult;
 		}
+
+		// The native tool loop has no thinking control wired yet: say so, send nothing (#5040).
+		this.noteThinkingApplied(false);
 
 		// What an allowed native tool call starts with (see gateToolCall below).
 		const nativeToolSteps = new Map<string, number | undefined>();

@@ -111,6 +111,11 @@ export interface FooterData {
 	 * where tools run has changed; a TUI on its own shows nothing.
 	 */
 	daemonAttached?: boolean;
+	/**
+	 * The thinking level asked for ("auto", "off", "low" ... "max", #5040). Shown as
+	 * a chip; a tap or click does what Ctrl+Z does and moves it one step.
+	 */
+	thinking?: string;
 	/** A turn is running: the footer says how to stop it (#4982). */
 	turnRunning?: boolean;
 	/** Tool calls so far this turn. On a phone-width row the stop key shows only past STOP_HINT_CALLS. */
@@ -159,6 +164,17 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			bold: PERM_LOOK[perm].bold,
 			color: permColour(perm),
 			priority: 0,
+		});
+	}
+	if (d.thinking) {
+		out.push({
+			key: "think",
+			label: "think",
+			value: d.thinking,
+			// Ctrl+Z: the whole chip is the button, so a phone can step the level.
+			hint: "^Z",
+			color: ui.cream,
+			priority: 1,
 		});
 	}
 	const ctx = d.ctx ? ctxText({ ...d.ctx, columns: d.columns ?? 160 }) : null;
@@ -395,6 +411,26 @@ const unlabelled = (s: FooterSegment): FooterSegment =>
  * there.
  */
 function fitRow(
+	all: FooterSegment[],
+	width: number,
+	leading: boolean,
+	dj: boolean,
+): { segments: FooterSegment[]; hints: string[] } {
+	const withChip = fitRowMeter(all, width, leading, dj);
+	const chip = all.find((s) => s.key === "think");
+	if (!chip) return withChip;
+	// The thinking chip (#5040) never costs a key hint: when the row loses one with
+	// it, the row is exactly what it would be without it, as for the sandbox segment.
+	const plain = fitRowMeter(
+		all.filter((s) => s !== chip),
+		width,
+		leading,
+		dj,
+	);
+	return withChip.hints.length < plain.hints.length ? plain : withChip;
+}
+
+function fitRowMeter(
 	all: FooterSegment[],
 	width: number,
 	leading: boolean,

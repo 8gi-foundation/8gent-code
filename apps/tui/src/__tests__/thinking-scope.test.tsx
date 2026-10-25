@@ -8,7 +8,7 @@ import { runAppHarness } from "./app-driver.js";
 import { type Frame, castPath, writeCast } from "./cast.js";
 import { serveScriptedModel } from "./scripted-model.js";
 
-test("/thinking and Ctrl+Z set the level the provider clamps; /scoped-models and Alt+M cycle models", async () => {
+test("/thinking and Ctrl+Z set the level the session sends; /scoped-models and Alt+M cycle models", async () => {
 	const model = serveScriptedModel([{ reply: "unused" }], ["shell-test:1b", "shell-test:2b"]);
 	try {
 		const events = await runAppHarness(
@@ -24,7 +24,8 @@ test("/thinking and Ctrl+Z set the level the provider clamps; /scoped-models and
 		expect(events.find((e) => e.phase === "error")).toBeUndefined();
 		expect(frames.length).toBeGreaterThan(0);
 		const high = String(events.find((e) => e.phase === "thinking-high")?.screen ?? "");
-		expect(high).toContain("ollama supports no thinking levels, so turns run without it");
+		expect(high).toContain("Thinking: high.");
+		expect(high).not.toContain("not yet sent");
 		expect(events.find((e) => e.phase === "cycle")?.ok).toBeTrue();
 		expect(String(events.find((e) => e.phase === "status")?.screen ?? "")).toContain(
 			"Thinking: low (hidden)",

@@ -772,3 +772,45 @@ describe("the stop key while a turn runs (#4982)", () => {
 		);
 	});
 });
+
+describe("the thinking chip never costs a key hint (#5040)", () => {
+	const base = { mode: "Planning", sessionTime: "1:00", user: "jam" };
+	const states: Array<Record<string, unknown>> = [
+		{},
+		{ permissions: "infinite" },
+		{ permissions: "guarded", ctx: { used: 1200, window: 32000, stale: false } },
+		{ sandboxOff: "no sandbox here" },
+		{ turnRunning: true, turnCalls: 12, localChip: "92% local today" },
+		{ verification: "unverified", permissions: "plan" },
+	];
+	type Data = Parameters<typeof buildFooterSegments>[0];
+
+	test("at every width 38 to 220, with and without the chip, no hint is lost", () => {
+		let withChipShown = 0;
+		for (let w = 38; w <= 220; w++) {
+			for (const dj of [false, true]) {
+				for (const extra of states) {
+					const data = { ...base, columns: w, ...extra } as Data;
+					const plain = fitFooterRow(buildFooterSegments(data), w, false, dj);
+					const chip = fitFooterRow(
+						buildFooterSegments({ ...data, thinking: "auto" }),
+						w,
+						false,
+						dj,
+					);
+					// Every hint the row has without the chip is still there with it.
+					const lost = plain.hints.filter((h) => !chip.hints.includes(h));
+					expect({ w, dj, extra, lost }).toEqual({ w, dj, extra, lost: [] });
+					if (chip.segments.some((s) => s.key === "think")) withChipShown++;
+				}
+			}
+		}
+		expect(withChipShown).toBeGreaterThan(0);
+	});
+
+	test("a wide row carries the chip with the level", () => {
+		const data = { ...base, columns: 220, thinking: "max" } as Data;
+		const row = fitFooterRow(buildFooterSegments(data), 220);
+		expect(row.segments.find((s) => s.key === "think")?.value).toBe("max");
+	});
+});

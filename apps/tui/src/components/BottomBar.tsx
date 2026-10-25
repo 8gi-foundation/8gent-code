@@ -64,6 +64,8 @@ interface BottomBarProps {
 	verification?: FooterData["verification"];
 	/** The TUI is attached to the local daemon (#4829). */
 	daemonAttached?: boolean;
+	/** The thinking level asked for: the footer chip, one step per tap (#5040). */
+	thinking?: string;
 	/** A turn is running on the focused tab, and its tool calls so far (#4982). */
 	turnRunning?: boolean;
 	turnCalls?: number;
@@ -113,6 +115,7 @@ export function BottomBar(props: BottomBarProps) {
 							durable: props.durable,
 							verification: props.verification,
 							daemonAttached: props.daemonAttached,
+							thinking: props.thinking,
 							turnRunning: props.turnRunning,
 							turnCalls: props.turnCalls,
 						}}

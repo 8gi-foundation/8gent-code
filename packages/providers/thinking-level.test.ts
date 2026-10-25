@@ -1,9 +1,9 @@
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { ProviderManager } from "./index";
 import type { ThinkingLevel } from "../types/index.js";
+import { ProviderManager } from "./index";
 import {
 	THINKING_LEVELS_ORDERED,
 	resolveThinkingForRouting,
@@ -141,8 +141,14 @@ describe("ProviderManager.resolveThinking", () => {
 		expect(r.downgraded).toBe(false);
 	});
 
-	it("returns null when routing to Ollama (no thinking support)", () => {
+	it("honors high thinking on Ollama (its own think field, #5040)", () => {
 		const r = manager.resolveThinking("high", "ollama");
+		expect(r.level).toBe("high");
+		expect(r.downgraded).toBe(false);
+	});
+
+	it("returns null when routing to LM Studio (no thinking control)", () => {
+		const r = manager.resolveThinking("high", "lmstudio");
 		expect(r.level).toBeNull();
 		expect(r.downgraded).toBe(false);
 		expect(r.tokenMultiplier).toBe(1.0);

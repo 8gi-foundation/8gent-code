@@ -34,11 +34,14 @@
 | `/export` | Export as HTML |
 | `/sessions share` | Make the session joinable |
 | `/skills` | List skills |
+| `/thinking [auto\|off\|low\|medium\|high\|max]` | How long the model thinks. `auto` is fast by default and steps up for a hard turn; `max` is the most any provider offers (sent as high). Ctrl+Z, or a tap on the `think` chip in the footer, steps through auto, off, low, medium, high, max. `/status` shows the level the last turn used |
 | `/quit` | Exit |
 
 Typing `/` alone shows only the core commands. Every other command still runs when you type its name, and shows up as soon as you type its first letters. Every key is listed in [Keys](keys.md), or type `/hotkeys`.
 
 **A `/` line that is not a command.** A line that starts with `/` and matches no command is answered on the spot (`Unknown command /name. Type /help.`) and is never sent to the model. Before answering, the TUI checks the registry, the built-ins, an explicit `/skill:<name>`, the skills on disk and your prompt templates, all read when you press Enter, so a skill or template added a moment ago still works. A path such as `/Users/me/file` matches none of those and gets the same local answer. To send a path, put text in front of it or use `@` to mention a file (`apps/tui/src/lib/slash-registry.ts`, `unknownSlashAnswer`).
+
+**Thinking.** By default 8gent thinks fast: an ordinary ask runs with thinking turned down, and one step up is added for each sign the turn is hard (a plan or design ask, "think hard", the same task failing twice, many files, a very long paste). Set `thinking.level` in `~/.8gent/settings.json` to `"low"`, `"medium"`, `"high"` or `"max"` to fix the level, or `thinking.cap` to stop the automatic choice going above a level. `thinking.level: "off"` restores a local model's own default: 8gent sends no thinking control at all. A provider with no thinking control gets nothing sent.
 
 ## Files and shell lines
 

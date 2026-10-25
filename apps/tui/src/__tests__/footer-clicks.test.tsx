@@ -76,6 +76,7 @@ test("every footer item, clicked where it is drawn, does what its key does", asy
 			"[^A] anim",
 			"[^S] sound",
 			"[^C] quit",
+			"think auto [^Z]",
 		]) {
 			expect(row).toContain(cap);
 		}
@@ -86,9 +87,17 @@ test("every footer item, clicked where it is drawn, does what its key does", asy
 			.filter((e) => e.phase === "click")
 			.map((e) => ({ item: e.item, ok: e.ok }));
 		expect(clicks).toEqual(
-			["mode", "palette opens", "palette closes", "plan", "anim", "sound", "perm", "quit"].map(
-				(item) => ({ item, ok: true }),
-			),
+			[
+				"mode",
+				"palette opens",
+				"palette closes",
+				"plan",
+				"anim",
+				"sound",
+				"perm",
+				"think",
+				"quit",
+			].map((item) => ({ item, ok: true })),
 		);
 	} finally {
 		server.stop(true);

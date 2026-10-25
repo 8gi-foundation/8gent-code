@@ -99,7 +99,8 @@ async function main() {
 	const footer = () =>
 		screen()
 			.split("\n")
-			.filter((l) => l.startsWith("mode "))
+			// The labels ("mode", "perm") shorten when the row is full, so match the row by the mode key.
+			.filter((l) => l.includes("[^Y]"))
 			.at(-1) ?? "";
 	const emit = (o: Record<string, unknown>) => console.log(JSON.stringify(o));
 
@@ -159,7 +160,14 @@ async function main() {
 	await after("sound", () => footer().includes("sound on"));
 
 	await click("[⇧Tab] perm");
-	await after("perm", () => footer().includes("perm Guarded"));
+	await after("perm", () => footer().includes("Guarded [⇧Tab]"));
+
+	// The thinking chip: one tap steps the level, as Ctrl+Z does (#5040).
+	await click("think auto [^Z]");
+	await after("think", () => footer().includes("think off [^Z]"));
+	// Let the footer settle on the new level, every cap still drawn, before the next click.
+	await waitFor(() => footer().includes("[^C] quit"), "footer keeps quit after think", 6000);
+	await tick(300);
 
 	await click("[^C] quit");
 	await after("quit", () => exited);
