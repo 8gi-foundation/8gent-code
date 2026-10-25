@@ -9,6 +9,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.32] - 2026-10-25
+
+### Changed
+- [pi-tui] Steer a running turn from the TUI; /thinking, /scoped-models and their keys (D1 D3 D4 D10) ([#4060](https://github.com/8gi-foundation/8gent-code/pull/4060))
+
+### Fixed
+- system-one: shellWords starts a comment only at a word boundary (P0, #3303) ([#3304](https://github.com/8gi-foundation/8gent-code/pull/3304))
+
 ## [0.20.31] - 2026-10-25
 
 ### Added
