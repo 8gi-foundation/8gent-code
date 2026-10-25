@@ -80,6 +80,7 @@ export {
 
 import { getPermissionManager } from "../permissions";
 import { Agent } from "./agent";
+import { LOCAL_RUNTIME_UNREACHABLE } from "./local-runtime-hint";
 import { startREPL } from "./repl";
 import type { AgentConfig } from "./types";
 
@@ -109,9 +110,7 @@ if (import.meta.main) {
 			};
 			const agent = new Agent(config);
 			if (!(await agent.isReady())) {
-				console.error(
-					"Local runtime not reachable. Start ollama (`ollama serve`), or set a provider via `8gent run --provider openrouter ...`.",
-				);
+				console.error(LOCAL_RUNTIME_UNREACHABLE);
 				process.exit(1);
 			}
 			if (hasInfiniteFlag) {

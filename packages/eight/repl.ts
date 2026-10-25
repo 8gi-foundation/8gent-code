@@ -22,6 +22,7 @@ import { formatTask, getTaskManager, parseTaskCommand } from "../tasks";
 import { getActiveTelegramBot, startTelegramBot } from "../telegram";
 import { formatTaskOutput, formatTaskStatus, getBackgroundTaskManager } from "../tools/background";
 import { Agent } from "./agent";
+import { REPL_RUNTIME_DOWN_LINES } from "./local-runtime-hint";
 import type { AgentConfig } from "./types";
 
 export async function startREPL(config?: Partial<AgentConfig>) {
@@ -61,10 +62,9 @@ Type your request, or:
 
 	const agent = new Agent(finalConfig);
 
-	// Check if Ollama is running
+	// Check the local runtime is up
 	if (!(await agent.isReady())) {
-		console.log("⚠️  Ollama is not running. Start it with: ollama serve");
-		console.log("   Then run: npx 8gent-code");
+		for (const line of REPL_RUNTIME_DOWN_LINES) console.log(line);
 		process.exit(1);
 	}
 

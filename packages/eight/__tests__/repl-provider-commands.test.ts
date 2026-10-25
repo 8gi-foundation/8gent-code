@@ -18,6 +18,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { resetProviderManager } from "../../providers";
 import { resetKeyVault } from "../../secrets/key-vault";
+import { REPL_RUNTIME_DOWN_LINES } from "../local-runtime-hint";
 import { handleProviderCommands } from "../repl";
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "8gent-repl-"));
@@ -287,5 +288,21 @@ describe("PROVIDER_NAMES is the compiled list, never the validity check", () => 
 		walk(path.join(repoRoot, "apps"));
 
 		expect(offenders).toEqual([]);
+	});
+});
+
+describe("the REPL runtime-down warning (#4915)", () => {
+	const forbidden = [/ollama serve/i, /brew install/i];
+
+	test("the warning lines name no system install", () => {
+		const text = REPL_RUNTIME_DOWN_LINES.join("\n");
+		for (const re of forbidden) expect(text).not.toMatch(re);
+		expect(text).toContain("/provider llama-server");
+		expect(text).not.toContain("/judge install");
+	});
+
+	test("repl.ts itself prints no system-install hint", () => {
+		const src = fs.readFileSync(path.join(import.meta.dir, "../repl.ts"), "utf8");
+		for (const re of forbidden) expect(src).not.toMatch(re);
 	});
 });

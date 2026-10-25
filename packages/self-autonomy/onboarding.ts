@@ -145,7 +145,7 @@ const LMSTUDIO_LOAD = `load \`${LMSTUDIO_RECOMMENDED.model}\` (${LMSTUDIO_RECOMM
  * and size come from model-recipes.ts, so every screen names the same ones (#4220).
  */
 export const PROVIDER_INSTALL_HINTS: Record<ProviderCheckId, string> = {
-	ollama: `Install: ${OLLAMA_RECOMMENDED.site} (or \`brew install ollama && ollama serve\`). Then ${OLLAMA_PULL}.`,
+	ollama: `Ollama is optional: /provider llama-server uses a local llama.cpp server instead. Already use Ollama (${OLLAMA_RECOMMENDED.site})? Start it yourself, then ${OLLAMA_PULL}.`,
 	lmstudio: `Install: ${LMSTUDIO_RECOMMENDED.site}. Open it, ${LMSTUDIO_LOAD}, click Start Server (port 1234).`,
 	// 11435: where the health probe and the settings default look (provider-health.ts).
 	apfel: "Install: `brew install arthur-ficial/tap/apfel`. Run: `apfel --serve --port 11435`.",
