@@ -3138,8 +3138,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// layout hints are best-effort; the image itself is already attached
 			}
 		} else if (imageBase64) {
+			// The vision path sends its key to openrouter.ai, so only an openrouter
+			// session's own key may go there. Any other session's key (MiniMax, ...)
+			// stays home; the interpreter then uses OPENROUTER_API_KEY or none (#5100).
 			const interpreter = new VisionInterpreter({
-				apiKey: this.config.apiKey,
+				apiKey: this.config.runtime === "openrouter" ? this.config.apiKey : undefined,
 				onError: (_id, message) => {
 					visionFailed = true;
 					this.config.events?.onStepFinish?.({

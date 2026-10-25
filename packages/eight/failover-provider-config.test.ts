@@ -335,6 +335,19 @@ describe("sessionApiKey", () => {
 		expect(sessionApiKey("openrouter", {})).toBeUndefined();
 	});
 
+	test("a minimax runtime gets only the MiniMax env key", async () => {
+		const { sessionApiKey } = await import("./failover-provider-config");
+		const env = { MINIMAX_API_KEY: "mm-k", OPENROUTER_API_KEY: "or-k" };
+		expect(sessionApiKey("minimax", env)).toBe("mm-k");
+		// One provider's key never goes to another provider.
+		expect(sessionApiKey("minimax", { OPENROUTER_API_KEY: "or-k" })).toBeUndefined();
+		expect(sessionApiKey("openrouter", { MINIMAX_API_KEY: "mm-k" })).toBeUndefined();
+		for (const rt of ["ollama", "lmstudio", "apfel", "llama-server", "anthropic", "deepseek"]) {
+			expect(sessionApiKey(rt, env)).toBeUndefined();
+		}
+		expect(sessionApiKey("minimax", {})).toBeUndefined();
+	});
+
 	test("no source passes the OpenRouter env key as an apiKey whatever the runtime", async () => {
 		const { readFileSync } = await import("node:fs");
 		const root = join(import.meta.dir, "..", "..");

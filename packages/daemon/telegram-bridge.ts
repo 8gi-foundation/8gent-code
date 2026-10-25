@@ -1160,6 +1160,9 @@ class TelegramDaemonBridge {
 				// Only the runtime's own key (#3261).
 				apiKey: sessionApiKey(cosRuntime),
 			});
+			await cosPool.verifyRuntimeModel().catch((err) => {
+				console.error(`[telegram-bridge] ${err instanceof Error ? err.message : String(err)}`);
+			});
 
 			const notifications = new NotificationDispatcher(
 				this.config.telegramToken,
@@ -2627,7 +2630,7 @@ class TelegramDaemonBridge {
 	 * Attempt 4: Fallback - acknowledge the issue and ask for simpler request
 	 */
 	private retryPrompt(originalText: string, attempt: number): void {
-		const maxAttempts = 4;
+		const _maxAttempts = 4;
 		const timeouts = [120_000, 90_000, 60_000, 30_000];
 		const timeout = timeouts[attempt - 1] || 30_000;
 

@@ -56,14 +56,17 @@ export function pinnedProviderError(provider: string, model: string, error: stri
  * it to the session endpoint on every leg of that provider. Hosts used to pass
  * OPENROUTER_API_KEY whatever the runtime, so an ollama or lmstudio session
  * would have sent the OpenRouter key to the ollama or LM Studio host (which
- * can be remote). Only an openrouter session gets the OpenRouter key here;
- * every other runtime gets none, and each provider then resolves its own key
- * from its own env var (createModel, createClient, VisionInterpreter all
- * fall back to the env themselves).
+ * can be remote). Only an openrouter session gets the OpenRouter key here, and
+ * only a minimax session gets the MiniMax key: one provider's key never goes
+ * to another provider. Every other runtime gets none, and each provider then
+ * resolves its own key from its own env var (createModel, createClient,
+ * VisionInterpreter all fall back to the env themselves).
  */
 export function sessionApiKey(
 	runtime: string,
 	env: Record<string, string | undefined> = process.env,
 ): string | undefined {
-	return runtime === "openrouter" ? env.OPENROUTER_API_KEY || undefined : undefined;
+	if (runtime === "openrouter") return env.OPENROUTER_API_KEY || undefined;
+	if (runtime === "minimax") return env.MINIMAX_API_KEY || undefined;
+	return undefined;
 }

@@ -10,6 +10,8 @@ import { sessionApiKey } from "../eight/failover-provider-config";
 import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
 import { currentProviderPin } from "../orchestration/provider-pin";
+import { getProviderManager } from "../providers";
+import { discoverModelsAt } from "../providers/declared";
 import { getUsageMonitor } from "../providers/usage-monitor";
 import { type ApprovalTurn, withChannelApprovals } from "./channel-approvals";
 import {
@@ -30,10 +32,10 @@ export interface PoolConfig {
 	/** Default model to use (e.g. "qwen3.5:14b") */
 	model: string;
 	/** Runtime provider */
-	runtime: "ollama" | "lmstudio" | "openrouter";
+	runtime: "ollama" | "lmstudio" | "openrouter" | "minimax";
 	/** Working directory for agent file operations */
 	workingDirectory: string;
-	/** OpenRouter API key (if runtime is openrouter) */
+	/** The runtime's own provider key (OpenRouter key for openrouter, MiniMax key for minimax) */
 	apiKey?: string;
 	/** Max tool-call turns per chat() invocation */
 	maxTurns?: number;
@@ -98,6 +100,27 @@ export interface SessionOverrides {
 
 const DEFAULT_MODEL = process.env.EIGHGENT_MODEL || "eight:latest";
 const DEFAULT_RUNTIME = "ollama" as const;
+
+/**
+ * Runtimes whose model must be on the provider's live list before a session
+ * starts (#5100). Fail closed: no list, or no model on it, is an error and no
+ * other provider is tried. Other hosted runtimes keep their current behaviour.
+ */
+const LIVE_LIST_RUNTIMES: ReadonlySet<string> = new Set(["minimax"]);
+
+function isHostedRuntime(runtime: string): boolean {
+	return LIVE_LIST_RUNTIMES.has(runtime);
+}
+
+/**
+ * The live model list of a runtime (#5100): the provider's own endpoint,
+ * asked with the provider's own key. No model name is hardcoded anywhere.
+ */
+async function defaultListModels(runtime: string): Promise<string[]> {
+	const pm = getProviderManager();
+	const provider = pm.getProvider(runtime);
+	return discoverModelsAt(provider.baseUrl, "openai", pm.getApiKey(runtime) ?? undefined);
+}
 const MAX_SESSIONS = 10;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -176,13 +199,29 @@ export class AgentPool {
 	private inUse: (sessionId: string) => boolean = () => false;
 	/** Durable work queue (#4254). Null unless EIGHT_WORK_QUEUE=1 or a queue is passed in. */
 	private queue: WorkQueue | null;
+	/**
+	 * Lists the models a runtime actually serves (#5100). Injectable so tests
+	 * never touch the network; the default asks the provider itself.
+	 */
+	private listModels: (runtime: string) => Promise<string[]>;
+	/**
+	 * Live-list verification per runtime/model (#5100). "ok" means the model was
+	 * on the list the provider returned; an Error means it was not on the list,
+	 * or the list could not be fetched.
+	 */
+	private readonly modelVerification = new Map<string, "ok" | Error>();
 
 	constructor(
 		config: Partial<PoolConfig> = {},
-		options: { journal?: SessionJournal; queue?: WorkQueue } = {},
+		options: {
+			journal?: SessionJournal;
+			queue?: WorkQueue;
+			listModels?: (runtime: string) => Promise<string[]>;
+		} = {},
 	) {
 		this.journal = options.journal ?? null;
 		this.queue = options.queue ?? (workQueueEnabled() ? openWorkQueue() : null);
+		this.listModels = options.listModels ?? defaultListModels;
 		for (const id of this.queue?.unknownAfterRestart ?? []) {
 			console.warn(
 				`[agent-pool] work item ${id} was in flight at shutdown: status unknown, not resent`,
@@ -222,6 +261,39 @@ export class AgentPool {
 	/** Whether a session may be evicted to make room or for idleness. */
 	private evictable(id: string, entry: SessionEntry): boolean {
 		return !NEVER_EVICT.has(entry.channel) && !entry.busy && !this.inUse(id);
+	}
+
+	/**
+	 * Fail closed on a hosted runtime whose model is not on the provider's live
+	 * list (#5100). The list comes from the provider itself; a fetch failure,
+	 * or a model that is not on the list, is an error. No other provider is
+	 * tried, ever.
+	 */
+	async verifyRuntimeModel(
+		runtime: string = this.config.runtime,
+		model: string = this.config.model,
+	): Promise<void> {
+		const key = `${runtime}/${model}`;
+		if (!isHostedRuntime(runtime)) return;
+		let models: string[];
+		try {
+			models = await this.listModels(runtime);
+		} catch (err) {
+			const cause = err instanceof Error ? err.message : String(err);
+			const error = new Error(
+				`could not fetch the live model list of runtime "${runtime}" to check model "${model}": ${cause}; no other provider was tried`,
+			);
+			this.modelVerification.set(key, error);
+			throw error;
+		}
+		if (!models.includes(model)) {
+			const error = new Error(
+				`model "${model}" is not on the live model list of runtime "${runtime}"; no other provider was tried`,
+			);
+			this.modelVerification.set(key, error);
+			throw error;
+		}
+		this.modelVerification.set(key, "ok");
 	}
 
 	/**
@@ -426,6 +498,18 @@ export class AgentPool {
 		// local model / endpoint / persona; otherwise the pool defaults apply.
 		const onPin = pin !== undefined && runtime === pin.runtime;
 		const model = overrides?.model ?? (onPin ? pin.model : undefined) ?? this.config.model;
+
+		// Fail closed on a hosted runtime (#5100): the model must be on the live
+		// list of the provider this session names. No other provider is tried.
+		if (isHostedRuntime(runtime)) {
+			const verified = this.modelVerification.get(`${runtime}/${model}`);
+			if (verified === undefined) {
+				throw new Error(
+					`model not verified against the live list: ${runtime}/${model}; no other provider was tried`,
+				);
+			}
+			if (verified !== "ok") throw verified;
+		}
 
 		const agentConfig: AgentConfig = {
 			model,

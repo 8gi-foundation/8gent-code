@@ -293,6 +293,11 @@ export async function main(): Promise<void> {
 		? new SessionJournal(`${DATA_DIR}/sessions-journal.json`)
 		: null;
 	pool = new AgentPool(poolConfig, journal ? { journal } : {});
+	// A hosted runtime is checked against its live model list (#5100). On failure
+	// sessions refuse to start (fail closed); no other provider is tried.
+	await pool.verifyRuntimeModel().catch((err) => {
+		console.error(`[daemon] ${err instanceof Error ? err.message : String(err)}`);
+	});
 	if (journal) {
 		const t0 = Date.now();
 		const resumed = resumeJournaledSessions(journal, pool, new TimeTravelStore());
