@@ -3987,7 +3987,7 @@ export class ToolExecutor {
 
 		return new Promise((resolve) => {
 			// Redirect targets this command creates are this agent's own files (#3177).
-			const recordRedirects = watchRedirects(finalCommand, dir, this.createdFiles);
+			const recordRedirects = watchRedirects(finalCommand, dir, this.createdFiles, command);
 			let resolved = false;
 			const safeResolve = (value: string) => {
 				if (resolved) return;

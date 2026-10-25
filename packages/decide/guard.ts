@@ -208,7 +208,15 @@ export async function bashGuard(
  */
 export function withScriptRules(command: RuleResult, script?: string): RuleResult {
 	if (script === undefined) return command;
-	const body = decideRules(script);
+	// A script file is full of `#` lines (the shebang, every comment). The comment rule
+	// guards a command line, where a `#` can hide the next line from the splitter (#3303);
+	// on a script body it would escalate every script, so a body whose only hit is that
+	// rule counts as a pass.
+	const raw = decideRules(script);
+	const body: RuleResult =
+		raw.rules.length > 0 && raw.rules.every((r) => r === "shell_comment")
+			? { verdict: "pass", rules: [] }
+			: raw;
 	const rules = [...new Set([...command.rules, ...body.rules])];
 	if (command.verdict === "block") return { ...command, rules };
 	if (body.verdict === "block") return { verdict: "block", rule: body.rule, rules };

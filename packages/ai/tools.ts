@@ -1846,7 +1846,7 @@ async function runShellCommand(
 
 	return new Promise((settle) => {
 		// Redirect targets this command creates are this agent's own files (#3177).
-		const recordRedirects = watchRedirects(finalCommand, cwd, ctx.createdFiles);
+		const recordRedirects = watchRedirects(finalCommand, cwd, ctx.createdFiles, command);
 		const resolve = (value: string) => {
 			recordRedirects();
 			settle(readNotice ? `${readNotice}\n${value}` : value);

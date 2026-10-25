@@ -426,7 +426,11 @@ describe("rules: quoting", () => {
 			['gh pr create --title "Drop table" --body "DROP TABLE users; git clean -fdx"', "pass"],
 			["printf '%s\\n' 'chmod -R 777 /'", "pass"],
 			["echo a#b rm", "pass"],
-			["ls # rm -rf build", "pass"],
+			['grep -n "#" notes.md', "pass"],
+			["git commit -m 'Closes #12'", "pass"],
+			// A real comment now escalates (rule shell_comment, #3303): the parser
+			// does not model comments, so a quote inside one can hide the next line.
+			["ls # rm -rf build", "escalate"],
 		]));
 
 	it("the word parser removes quotes and applies escapes", () => {

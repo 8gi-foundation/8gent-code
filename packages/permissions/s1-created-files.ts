@@ -543,6 +543,14 @@ export function watchRedirects(
 	command: string,
 	cwd: string,
 	record: CreatedFiles | undefined,
+	/**
+	 * What the person or the model typed, when `command` is the checked copy System One
+	 * runs in its place (`bash -c '<body>' FILE`, #4102). The typed command is what the
+	 * rules gate below reads. The copy carries the script body, whose `#` lines (the
+	 * shebang, every comment) the comment rule (#3303) would otherwise read as a hidden
+	 * line; the body was already checked whole, so only that one rule is waived for it.
+	 */
+	typed?: string,
 ): () => void {
 	if (!record) return () => {};
 	// A mkdir-only command records the directories it makes (#4105).
@@ -552,7 +560,10 @@ export function watchRedirects(
 	];
 	try {
 		if (CHANGES_DIR.test(maskQuotes(command))) return () => {};
-		if (decideRules(command).rules.length > 0) return () => {};
+		const gate = typed ?? command;
+		if (decideRules(gate).rules.length > 0) return () => {};
+		if (gate !== command && decideRules(command).rules.some((r) => r !== "shell_comment"))
+			return () => {};
 		const root = realpathSync(cwd);
 		const seen = new Set<string>();
 		for (const t of redirectTargets(command)) {
