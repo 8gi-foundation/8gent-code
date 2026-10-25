@@ -15,7 +15,7 @@ Type `/hotkeys` (or `/keys`) in the interface for the same list. It is printed f
 | Shift+Tab | Permission mode: Plan, Ask, Guarded, Infinite |
 | Ctrl+L | Model picker |
 | Alt+M | Next model in the scoped list (/scoped-models) |
-| Ctrl+Z | Cycle the thinking level: auto, off, low, medium, high, max (/thinking). The `think` chip in the footer does the same on a tap |
+| Ctrl+Z | Cycle the thinking level (/thinking) |
 | /provider | Provider picker |
 | Ctrl+P | Command palette |
 | Ctrl+C | Save the session and quit |
