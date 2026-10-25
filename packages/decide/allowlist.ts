@@ -43,7 +43,7 @@
 
 import { existsSync, lstatSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { activeShellKind } from "../core/shell";
 import { type ActiveShellKind, posixRulesApply } from "../permissions/shell-tools";
 import { promptControlText } from "./guard";
@@ -105,12 +105,21 @@ export const READ_ONLY_BINS: ReadonlySet<string> = new Set([
 	"test",
 ]);
 
-/** Arguments that make an otherwise read-only binary write, delete or run something. */
+/**
+ * Arguments that make an otherwise read-only binary write, delete or run something (#3306).
+ * A single-dash cluster is refused when the writing letter comes before any letter that
+ * takes a value, so an attached value (`sort -oout.txt`, `-rout.txt`) is caught while the
+ * value of another flag (`date -Iseconds`) is not misread. A long name is refused with any
+ * getopt abbreviation (`sort --outp=x`), which GNU sort, tree, date and file accept.
+ */
 const WRITING_ARGS: Record<string, RegExp> = {
 	find: /^-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)$/,
-	sort: /^(-o|--output(=.*)?|-[a-zA-Z]*o)$/,
-	tree: /^(-o|-[a-zA-Z]*o)$/,
-	date: /^(-s|--set(=.*)?|-[a-zA-Z]*s)$/,
+	sort: /^(?:-[^-okStT]*o|--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(?:=.*)?$)/,
+	// -R re-runs tree in every directory with `-o 00Tree.html`.
+	tree: /^(?:-[^-LPIHToR]*[oR]|--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(?:=.*)?$)/,
+	date: /^(?:-[^-dfrIs]*s|--s(?:e(?:t)?)?(?:=.*)?$)/,
+	// -C compiles a magic file and writes <name>.mgc.
+	file: /^(?:-[^-mefFPC]*C|--c(?:o(?:m(?:p(?:i(?:l(?:e)?)?)?)?)?)?(?:=.*)?$)/,
 	rg: /^(--pre(=.*)?|--pre-glob(=.*)?)$/,
 };
 
@@ -203,7 +212,21 @@ const SECRET_ARG =
 
 /** Redirect in masked text: fd, operator, optional noclobber bar, target. */
 const REDIR_RE = /(?<![<>&\d])(\d?|&)(>>?|<)(\|?)\s*(&\d+|[^\s;|&<>()]+)/g;
-const OK_TARGET = /^(&\d|\/dev\/null$|\/tmp\/|\/private\/tmp\/)/;
+/**
+ * A redirect target the allowlist may write: an fd, /dev/null, or a path under /tmp or
+ * /private/tmp. The target is decoded as sh would (quotes, backslashes) and must be one
+ * word; a `..` segment, or anything that normalises outside the temp root, is refused
+ * (`/tmp/../x` was an arbitrary write, #3306).
+ */
+function okTarget(raw: string): boolean {
+	if (/^&\d+$/.test(raw)) return true;
+	const words = shellWords(raw);
+	if (!words || words.length !== 1) return false;
+	const t = words[0];
+	if (t === "/dev/null") return true;
+	if (t.split("/").includes("..")) return false;
+	return /^\/(private\/)?tmp\/[^/]/.test(posix.normalize(t));
+}
 
 const none = (reason: string): AllowlistResult => ({ verdict: "no-opinion", reason });
 
@@ -241,7 +264,7 @@ const FETCH_FLAGS = {
 };
 
 function fetchTargetOk(v: string): boolean {
-	return v === "-" || (OK_TARGET.test(v) && !/(^|\/)\.\.(\/|$)/.test(v));
+	return v === "-" || okTarget(v);
 }
 
 function fetchValueOk(bin: string, flag: string, v: string): string | null {
@@ -328,11 +351,12 @@ function segmentOk(text: string, opts: AllowlistOptions): string | null {
 	let last = 0;
 	for (const m of masked.matchAll(REDIR_RE)) {
 		const start = (m.index ?? 0) + m[0].length - m[4].length;
-		const target = text.slice(start, start + m[4].length).replace(/^['"]+|['"]+$/g, "");
+		const rawTarget = text.slice(start, start + m[4].length);
+		const target = rawTarget.replace(/^['"]+|['"]+$/g, "");
 		const op = m[2];
 		if (op === "<") {
 			if (SECRET_ARG.test(target)) return `reads a secret (${target})`;
-		} else if (!OK_TARGET.test(target)) return `writes to ${target}`;
+		} else if (!okTarget(rawTarget)) return `writes to ${target}`;
 		stripped += text.slice(last, m.index);
 		last = (m.index ?? 0) + m[0].length;
 	}
