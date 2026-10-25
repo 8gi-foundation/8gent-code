@@ -21,6 +21,7 @@ import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-target
 import { applyMention, listProjectFiles, mentionAtEnd, rankFiles } from "../lib/file-mention.js";
 import { GO_HELP_LINES, type GoalClient, parseGoCommand } from "../lib/goal-client.js";
 import { cellWidth } from "../lib/header-layout.js";
+import { setWheelInputEmpty } from "../lib/mouse-input.js";
 import { type SlashCommand, isCoreSlashCommand } from "../lib/slash-commands.js";
 import {
 	type SlashRegistryEntry,
@@ -204,6 +205,10 @@ export function CommandInput({
 	// History navigation: -1 = at draft (bottom), 0..N-1 = index into recentCommands
 	const [historyIndex, setHistoryIndex] = useState(-1);
 	const draftRef = useRef("");
+	// The mouse layer reads a burst of arrows as the wheel only while this is empty (#5094).
+	useEffect(() => {
+		setWheelInputEmpty(value === "");
+	}, [value]);
 	const [showSlashHelp, setShowSlashHelp] = useState(false);
 	// Built-ins are known at once: a command typed before the skill scan lands, or
 	// after it fails, must still run and never reach the model as chat.

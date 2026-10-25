@@ -21,6 +21,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 // bypass each package's documented API. Suppressed by design.
 // react-doctor-disable-next-line react-doctor/no-barrel-import
 import { type Settings, loadSettings, saveSettings } from "../../../../packages/settings/index.js";
+import { isAndroidHost } from "../../../../packages/voice/termux.js";
 import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
 import { Divider } from "../components/primitives/Divider.js";
 import { Stack } from "../components/primitives/Stack.js";
@@ -357,6 +358,15 @@ const CATEGORIES: Category[] = [
 				kind: "text",
 				get: (s) => s.ui.theme,
 				set: (s, v) => ({ ...s, ui: { ...s.ui, theme: String(v) } }),
+			},
+			{
+				id: "ui.mouseCapture",
+				label: "Mouse clicks",
+				description:
+					"On: click key caps and tabs, but the terminal stops selecting text. Off: select and copy with the mouse. Takes effect on restart.",
+				kind: "toggle",
+				get: (s) => s.ui.mouseCapture ?? isAndroidHost(),
+				set: (s, v) => ({ ...s, ui: { ...s.ui, mouseCapture: Boolean(v) } }),
 			},
 			{
 				id: "ui.thinkingVisualiser.enabled",

@@ -20,13 +20,25 @@
  * - hands parsed events to subscribers, and lets a click inject the bytes of
  *   the key it stands for, so a click does exactly what the key does.
  *
- * Opt out with EIGHT_MOUSE=0 or `"mouse": "off"` in ~/.8gent/config.json.
+ * Three modes (#5094). Reporting captures every drag, so the terminal's own
+ * select and copy never happen. The default is therefore "select": no
+ * reporting; the alternate screen plus alternate scroll mode (?1049 ?1007),
+ * so the wheel arrives as arrow keys and a burst of them scrolls the chat
+ * while the input is empty. "full" is the reporting layer above, for people
+ * who want the click targets (the default on Android/Termux, where a phone
+ * selects with a long press): EIGHT_MOUSE=1, `"mouse": "on"` in
+ * ~/.8gent/config.json, or ui.mouseCapture in Settings. "off" is
+ * EIGHT_MOUSE=0 or `"mouse": "off"`: nothing is written at all.
  * Off for non-TTY, TERM=dumb and INK_SCREEN_READER=true. NO_COLOR keeps the
  * mouse on: it is a colour preference, not an input one (James's open call;
  * flip MOUSE_UNDER_NO_COLOR to change it).
  */
 
 import { StringDecoder } from "node:string_decoder";
+import { loadSettings } from "../../../../packages/settings/index.js";
+// Cross-workspace import of a package's public entrypoint, as click-targets does.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
+import { isAndroidHost } from "../../../../packages/voice/termux.js";
 
 export type MouseKind = "press" | "release" | "drag" | "move" | "wheel";
 
@@ -44,6 +56,15 @@ export interface MouseEvent {
 
 export const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h";
 export const DISABLE_MOUSE = "\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l";
+/**
+ * Select mode: alternate screen (1049) with alternate scroll (1007), no
+ * reporting. 1007 only acts in the alternate screen, which is why the screen
+ * is entered too. The clear gives Ink a blank first frame at row 1.
+ */
+export const ENABLE_SELECT = "\x1b[?1049h\x1b[?1007h\x1b[2J\x1b[H";
+export const DISABLE_SELECT = "\x1b[?1007l\x1b[?1049l";
+
+export type MouseMode = "select" | "full" | "off";
 
 /** James's open call (#3239): the mouse stays on under NO_COLOR. */
 export const MOUSE_UNDER_NO_COLOR = true;
@@ -55,6 +76,45 @@ const PASTE_END = "\x1b[201~";
 /** A tail that could still become a mouse sequence: ESC, ESC [, ESC [ < digits;... */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: a held partial starts with ESC
 const PARTIAL_TAIL = /\x1b(?:\[(?:<[\d;]*)?)?$/;
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: arrow keys start with ESC
+const ARROW_RUN = /(?:\x1b[[O][AB]){2,}/g;
+
+let inputEmpty = true;
+/**
+ * The input field tells the layer whether it holds text. In select mode a
+ * burst of arrows is a wheel only while it is empty, so a draft's cursor
+ * keys and the history recall (one arrow at a time) are never taken.
+ */
+export function setWheelInputEmpty(empty: boolean): void {
+	inputEmpty = empty;
+}
+
+/**
+ * Select mode: the wheel arrives as arrows, and a wheel writes several at
+ * once while a key press (or its auto-repeat) is one per read. A run of two
+ * or more arrows in one read, input empty, becomes wheel events; a lone
+ * arrow stays a key, so history recall still works.
+ */
+export function arrowsToWheel(chunk: string): { pass: string; events: MouseEvent[] } {
+	if (!inputEmpty) return { pass: chunk, events: [] };
+	const events: MouseEvent[] = [];
+	const pass = chunk.replace(ARROW_RUN, (run) => {
+		for (let i = 0; i < run.length; i += 3) {
+			events.push({
+				kind: "wheel",
+				button: run[i + 2] === "A" ? 0 : 1,
+				x: 0,
+				y: 0,
+				shift: false,
+				alt: false,
+				ctrl: false,
+			});
+		}
+		return "";
+	});
+	return { pass, events };
+}
 
 /** Decode one SGR report. */
 export function parseSgr(code: number, col: number, row: number, final: "M" | "m"): MouseEvent {
@@ -137,20 +197,47 @@ export class MouseFilter {
 	}
 }
 
-/** Whether the mouse layer turns on for this process. */
+/** Which mouse mode this process runs, or "off" when the layer stays out. */
+export function mouseMode(
+	env: Record<string, string | undefined> = process.env,
+	isTTY: boolean = Boolean(process.stdin.isTTY && process.stdout.isTTY),
+	configMouse: string | null = readConfigMouse(),
+	settingCapture: boolean | undefined = readSettingCapture(),
+	android: boolean = isAndroidHost(process.platform, env),
+): MouseMode {
+	if (!isTTY) return "off";
+	const flag = (env.EIGHT_MOUSE ?? "").toLowerCase();
+	if (flag === "0" || flag === "off" || flag === "false" || flag === "no") return "off";
+	if (configMouse === "off") return "off";
+	if ((env.TERM ?? "") === "dumb") return "off";
+	if (env.INK_SCREEN_READER === "true") return "off";
+	if (env.NO_COLOR !== undefined && env.NO_COLOR !== "" && !MOUSE_UNDER_NO_COLOR) return "off";
+	if (["1", "on", "full", "true", "yes"].includes(flag)) return "full";
+	if (flag === "select") return "select";
+	if (configMouse === "on" || configMouse === "full") return "full";
+	if (configMouse === "select") return "select";
+	// No owner choice: Termux keeps its tap targets (a phone selects with a
+	// long press), every desktop terminal gets native select and copy.
+	if (settingCapture === undefined) return android ? "full" : "select";
+	return settingCapture ? "full" : "select";
+}
+
+/** Whether the mouse layer turns on, in either mode, for this process. */
 export function mouseEnabled(
 	env: Record<string, string | undefined> = process.env,
 	isTTY: boolean = Boolean(process.stdin.isTTY && process.stdout.isTTY),
 	configMouse: string | null = readConfigMouse(),
 ): boolean {
-	if (!isTTY) return false;
-	const flag = (env.EIGHT_MOUSE ?? "").toLowerCase();
-	if (flag === "0" || flag === "off" || flag === "false" || flag === "no") return false;
-	if (configMouse === "off") return false;
-	if ((env.TERM ?? "") === "dumb") return false;
-	if (env.INK_SCREEN_READER === "true") return false;
-	if (env.NO_COLOR !== undefined && env.NO_COLOR !== "" && !MOUSE_UNDER_NO_COLOR) return false;
-	return true;
+	return mouseMode(env, isTTY, configMouse, false, false) !== "off";
+}
+
+function readSettingCapture(): boolean | undefined {
+	try {
+		const v = loadSettings().ui.mouseCapture;
+		return typeof v === "boolean" ? v : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 function readConfigMouse(): string | null {
@@ -214,10 +301,13 @@ export const HOLD_MS = 25;
 export function installMouse(
 	stdin: NodeJS.ReadStream = process.stdin,
 	stdout: Writable = process.stdout,
-	opts: { enabled?: boolean; processHooks?: boolean } = {},
+	opts: { enabled?: boolean; mode?: MouseMode; processHooks?: boolean } = {},
 ): Installed | null {
 	if (installed) return installed;
-	if (!(opts.enabled ?? mouseEnabled())) return null;
+	const mode: MouseMode =
+		opts.mode ?? (opts.enabled === undefined ? mouseMode() : opts.enabled ? "full" : "off");
+	if (mode === "off") return null;
+	const full = mode === "full";
 	const s = stdin as PatchableStdin;
 	const filter = new MouseFilter();
 	const origEmit = s.emit.bind(s);
@@ -268,7 +358,14 @@ export function installMouse(
 				: Buffer.isBuffer(chunk)
 					? decoder.write(chunk)
 					: String(chunk);
-		const { pass, events } = filter.feed(str);
+		const fed = filter.feed(str);
+		let pass = fed.pass;
+		const events = fed.events;
+		if (!full) {
+			const w = arrowsToWheel(pass);
+			pass = w.pass;
+			events.push(...w.events);
+		}
 		armHold();
 		if (events.length) dispatch(events);
 		return pass;
@@ -310,7 +407,7 @@ export function installMouse(
 
 	const enable = () => {
 		try {
-			stdout.write(ENABLE_MOUSE);
+			stdout.write(full ? ENABLE_MOUSE : ENABLE_SELECT);
 		} catch {
 			/* stdout closed */
 		}
@@ -318,7 +415,8 @@ export function installMouse(
 	const disable = () => {
 		try {
 			// Twice over: a partial write must never leave the shell capturing.
-			stdout.write(DISABLE_MOUSE + DISABLE_MOUSE);
+			const off = full ? DISABLE_MOUSE : DISABLE_SELECT;
+			stdout.write(off + off);
 		} catch {
 			/* stdout closed during exit */
 		}
@@ -340,6 +438,8 @@ export function installMouse(
 		const onCont = () => {
 			if (wasRaw) tty.setRawMode?.(true);
 			enable();
+			// The alternate screen comes back blank: have Ink draw the whole frame.
+			if (!full) process.stdout.emit("resize");
 		};
 		// Best effort on a crash, without changing how the crash is handled (#8).
 		const onCrash = () => disable();
