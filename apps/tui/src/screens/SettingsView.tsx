@@ -24,6 +24,8 @@ import { type Settings, loadSettings, saveSettings } from "../../../../packages/
 import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
 import { Divider } from "../components/primitives/Divider.js";
 import { Stack } from "../components/primitives/Stack.js";
+import { fmtTokens } from "../lib/context-view.js";
+import { parseWindowInput } from "../lib/tab-context-window.js";
 import { KeyVaultScreen } from "./KeyVaultScreen.js";
 
 // ----------------------------------------------------------------------------
@@ -413,6 +415,12 @@ const CATEGORIES: Category[] = [
 		],
 	},
 	{
+		// Rendered from the contextRows prop, one row per open chat tab (#5035).
+		id: "context",
+		label: "Context windows",
+		fields: [],
+	},
+	{
 		// Rendered by KeyVaultScreen, not by the field list: provider keys are
 		// masked, stored in the OS keychain, and kept per signed-in user.
 		id: "keys",
@@ -440,9 +448,22 @@ function formatValue(field: Field, value: unknown): string {
 // Component
 // ----------------------------------------------------------------------------
 
+/** One open chat tab's window: what its provider reported, and what the owner set. */
+export interface ContextRow {
+	tabId: string;
+	title: string;
+	model: string | null;
+	detected: number | null;
+	override: number | null;
+	active: boolean;
+}
+
 interface SettingsViewProps {
 	visible: boolean;
 	onClose: () => void;
+	contextRows?: ContextRow[];
+	/** Set a tab's window (tokens) or clear it back to detected (null). */
+	onContextOverride?: (tabId: string, tokens: number | null) => void;
 }
 
 type Mode = "browse" | "edit" | "keys";
@@ -451,10 +472,16 @@ type Mode = "browse" | "edit" | "keys";
 // Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
 // react-doctor-disable-next-line react-doctor/no-giant-component
 // react-doctor-disable-next-line react-doctor/prefer-useReducer
-export function SettingsView({ visible, onClose }: SettingsViewProps) {
+export function SettingsView({
+	visible,
+	onClose,
+	contextRows = [],
+	onContextOverride,
+}: SettingsViewProps) {
 	const [settings, setSettings] = useState<Settings>(() => loadSettings());
 	const [categoryIndex, setCategoryIndex] = useState(0);
 	const [fieldIndex, setFieldIndex] = useState(0);
+	const [ctxRowIndex, setCtxRowIndex] = useState(0);
 	const [mode, setMode] = useState<Mode>("browse");
 	const [editBuffer, setEditBuffer] = useState("");
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
@@ -513,6 +540,24 @@ export function SettingsView({ visible, onClose }: SettingsViewProps) {
 	}, []);
 
 	const commitEdit = useCallback(() => {
+		if (category?.id === "context") {
+			const row = contextRows[ctxRowIndex];
+			if (!row) {
+				setMode("browse");
+				return;
+			}
+			if (editBuffer.trim() === "") {
+				onContextOverride?.(row.tabId, null);
+			} else {
+				const tokens = parseWindowInput(editBuffer);
+				// Not a size (try 128k or 200000): keep editing, change nothing.
+				if (tokens === null) return;
+				onContextOverride?.(row.tabId, tokens);
+			}
+			setMode("browse");
+			setEditBuffer("");
+			return;
+		}
 		if (!field) {
 			setMode("browse");
 			return;
@@ -527,7 +572,7 @@ export function SettingsView({ visible, onClose }: SettingsViewProps) {
 		}
 		setMode("browse");
 		setEditBuffer("");
-	}, [field, editBuffer, updateField]);
+	}, [field, editBuffer, updateField, category, contextRows, ctxRowIndex, onContextOverride]);
 
 	const cancelEdit = useCallback(() => {
 		setMode("browse");
@@ -583,6 +628,28 @@ export function SettingsView({ visible, onClose }: SettingsViewProps) {
 			if (key.rightArrow && !field) {
 				setCategoryIndex((prev) => Math.min(CATEGORIES.length - 1, prev + 1));
 				return;
+			}
+
+			// Context windows: rows are tabs, not fields.
+			if (category?.id === "context" && contextRows.length > 0) {
+				const row = contextRows[Math.min(ctxRowIndex, contextRows.length - 1)];
+				if (key.upArrow && ctxRowIndex > 0) {
+					setCtxRowIndex(ctxRowIndex - 1);
+					return;
+				}
+				if (key.downArrow && ctxRowIndex < contextRows.length - 1) {
+					setCtxRowIndex(ctxRowIndex + 1);
+					return;
+				}
+				if (row && (key.return || input === "e")) {
+					setEditBuffer(row.override !== null ? String(row.override) : "");
+					setMode("edit");
+					return;
+				}
+				if (row && input === "r") {
+					onContextOverride?.(row.tabId, null);
+					return;
+				}
 			}
 
 			// Up/down: walk fields within category
@@ -746,6 +813,54 @@ export function SettingsView({ visible, onClose }: SettingsViewProps) {
 						{category?.label || ""}
 					</Text>
 					<Box marginTop={1} flexDirection="column">
+						{category?.id === "context" ? (
+							contextRows.length === 0 ? (
+								<MutedText>No chat tab is open.</MutedText>
+							) : (
+								<Stack>
+									{contextRows.map((r, i) => {
+										const selected = i === ctxRowIndex;
+										const editing = mode === "edit" && selected;
+										const used = r.override ?? r.detected;
+										const detected = r.detected !== null ? fmtTokens(r.detected) : "unknown";
+										const shown = editing
+											? `${editBuffer}_`
+											: used !== null
+												? fmtTokens(used)
+												: "not set";
+										return (
+											<Box key={r.tabId} flexDirection="column" marginBottom={1}>
+												<Box>
+													<Text color={selected ? "yellow" : undefined}>
+														{selected ? ">" : " "}{" "}
+													</Text>
+													<AppText bold={selected}>
+														{r.title}
+														{r.active ? " (focused)" : ""}
+													</AppText>
+													<Box flexGrow={1} />
+													<Text color="cyan">{shown}</Text>
+												</Box>
+												<Box marginLeft={3}>
+													<MutedText>
+														{r.model ? `${r.model} - ` : ""}detected {detected}
+														{r.override !== null ? `, override ${fmtTokens(r.override)}` : ""}
+													</MutedText>
+												</Box>
+												{selected ? (
+													<Box marginLeft={3}>
+														<MutedText>
+															e = set this tab's window (128k, 200000), empty or r = back to
+															detected
+														</MutedText>
+													</Box>
+												) : null}
+											</Box>
+										);
+									})}
+								</Stack>
+							)
+						) : null}
 						{category?.id === "keys" ? (
 							<MutedText>Press Enter to add, replace or delete provider API keys.</MutedText>
 						) : null}

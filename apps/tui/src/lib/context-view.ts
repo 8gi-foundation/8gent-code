@@ -43,6 +43,9 @@ export interface CtxText {
  * The footer segment's value, or null when there is nothing honest to show
  * (no measurement yet and no compaction). Never a percent without a window.
  */
+/** The hint on an unknown-window segment; the footer drops it before any key hint. */
+export const SET_IN_SETTINGS = " (set in Settings)";
+
 export function ctxText(i: CtxInput): CtxText | null {
 	const narrow = i.columns < 60;
 	if (i.stale) {
@@ -51,14 +54,23 @@ export function ctxText(i: CtxInput): CtxText | null {
 			level: "stale",
 		};
 	}
-	if (i.used === null || i.used <= 0) return null;
-	if (i.window === null || i.window <= 0) return { value: fmtTokens(i.used), level: "ok" };
-	const pct = Math.min(100, Math.round((i.used / i.window) * 100));
+	const unknownWindow = i.window === null || i.window <= 0;
+	if (i.used === null || i.used <= 0) {
+		// Nothing measured yet: no segment, so an idle footer is what it always was.
+		return null;
+	}
+	if (unknownWindow) {
+		// #5035: no source answered, so say where to set it rather than a bare number.
+		const used = fmtTokens(i.used);
+		return { value: narrow ? `${used}/?` : `${used}/?${SET_IN_SETTINGS}`, level: "ok" };
+	}
+	const window = i.window as number;
+	const pct = Math.min(100, Math.round((i.used / window) * 100));
 	const level = ctxLevel(pct);
 	// The bang repeats the danger colour for a terminal with none.
 	const bang = level === "danger" ? "!" : "";
 	return {
-		value: narrow ? `${pct}%${bang}` : `${pct}%${bang} ${fmtTokens(i.used)}/${fmtTokens(i.window)}`,
+		value: narrow ? `${pct}%${bang}` : `${pct}%${bang} ${fmtTokens(i.used)}/${fmtTokens(window)}`,
 		level,
 	};
 }

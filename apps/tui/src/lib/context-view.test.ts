@@ -61,8 +61,13 @@ describe("footer text", () => {
 		expect(ctxText({ ...base, used: null })).toBeNull();
 		expect(ctxText({ ...base, used: 0 })).toBeNull();
 	});
-	test("no known window: tokens only, never a percent", () => {
-		expect(ctxText({ ...base, window: null })).toEqual({ value: "31.2k", level: "ok" });
+	test("no known window: used over a question mark, says where to set it, never a percent", () => {
+		expect(ctxText({ ...base, window: null })).toEqual({
+			value: "31.2k/? (set in Settings)",
+			level: "ok",
+		});
+		expect(ctxText({ ...base, window: null, columns: 40 })?.value).toBe("31.2k/?");
+		expect(ctxText({ ...base, window: null, used: null })).toBeNull();
 	});
 	test("a full window clamps at 100", () => {
 		expect(ctxText({ ...base, used: 999999 })?.value.startsWith("100%!")).toBe(true);

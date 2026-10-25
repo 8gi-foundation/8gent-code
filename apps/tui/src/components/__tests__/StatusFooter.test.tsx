@@ -468,6 +468,20 @@ describe("the context meter segment (#4956)", () => {
 		expect(row.segments.find((s) => s.key === "ctx")?.value).toBe("24%");
 	});
 
+	test("an unknown window: '(set in Settings)' never costs a key hint, at any width", () => {
+		const unknown = { used: 6600, window: null, stale: false };
+		for (const sandboxOff of [undefined, "nested"]) {
+			for (let w = 38; w <= 220; w++) {
+				const withWords = fitFooterRow(segs({ columns: w, sandboxOff, ctx: unknown }), w - 1);
+				const stripped = segs({ columns: w, sandboxOff, ctx: unknown }).map((x) =>
+					x.key === "ctx" ? { ...x, value: x.value.replace(" (set in Settings)", "") } : x,
+				);
+				const bare = fitFooterRow(stripped, w - 1);
+				expect(withWords.hints.length).toBeGreaterThanOrEqual(bare.hints.length);
+			}
+		}
+	});
+
 	test("at 40 columns without a sandbox segment the meter and the cap both fit", () => {
 		const row = fitFooterRow(segs({ columns: 40 }), 39);
 		expect(row.hints[0]).toBe("^P palette");

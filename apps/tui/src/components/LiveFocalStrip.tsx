@@ -69,7 +69,7 @@ interface LiveFocalStripProps {
 	 *  marks the bar with ~ (reported by the local server, not provider
 	 *  metadata); `unknown` shows "? unknown"; `fresh` shows "--" until the
 	 *  first reply is measured. */
-	contextState?: "provider" | "server" | "unknown" | "fresh";
+	contextState?: "provider" | "server" | "override" | "unknown" | "fresh";
 	approvalPending?: boolean;
 	/** The agent runs unattended (Infinite): no card can wait on the person,
 	 *  so the border never turns orange. The word is not repeated here: the
@@ -113,7 +113,7 @@ export function meter(percent: number, width = 10): string {
  *  Never a bar without a real window behind it (#3321). */
 export function contextMeterText(
 	pct: number | null,
-	state: "provider" | "server" | "unknown" | "fresh",
+	state: "provider" | "server" | "override" | "unknown" | "fresh",
 ): string {
 	if (state === "unknown") return "? unknown".padEnd(METER_CELLS);
 	if (state === "fresh" || pct === null) return "--".padEnd(METER_CELLS);

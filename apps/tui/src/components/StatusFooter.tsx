@@ -30,7 +30,7 @@ import {
 	isPermissionMode,
 } from "../../../../packages/permissions/permission-mode.js";
 import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
-import { ctxText } from "../lib/context-view.js";
+import { SET_IN_SETTINGS, ctxText } from "../lib/context-view.js";
 import { keyBytes } from "../lib/key-bytes.js";
 import { injectKeys } from "../lib/mouse-input.js";
 import {
@@ -395,6 +395,28 @@ const unlabelled = (s: FooterSegment): FooterSegment =>
  * there.
  */
 function fitRow(
+	all: FooterSegment[],
+	width: number,
+	leading: boolean,
+	dj: boolean,
+): { segments: FooterSegment[]; hints: string[] } {
+	const full = fitRowOnce(all, width, leading, dj);
+	const ctx = all.find((s) => s.key === "ctx");
+	if (!ctx || typeof ctx.value !== "string" || !ctx.value.endsWith(SET_IN_SETTINGS)) return full;
+	// The "(set in Settings)" hint never costs a key hint: when the row loses one with it,
+	// the segment drops the words and keeps used/?.
+	const short = fitRowOnce(
+		all.map((s) =>
+			s === ctx ? { ...s, value: (ctx.value as string).slice(0, -SET_IN_SETTINGS.length) } : s,
+		),
+		width,
+		leading,
+		dj,
+	);
+	return short.hints.length > full.hints.length ? short : full;
+}
+
+function fitRowOnce(
 	all: FooterSegment[],
 	width: number,
 	leading: boolean,

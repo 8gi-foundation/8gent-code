@@ -7,7 +7,7 @@
  * a state the bar shows as such.
  */
 
-export type ContextWindowSource = "provider" | "server" | "unknown";
+export type ContextWindowSource = "provider" | "server" | "override" | "unknown";
 
 export interface ContextWindow {
 	/** Tokens the model can hold, or null when nothing reported it. */
@@ -21,6 +21,10 @@ export interface ResolveContextWindowOptions {
 	fetchImpl?: typeof fetch;
 	ollamaBaseUrl?: string;
 	llamaServerUrl?: string;
+	/** The provider's own OpenAI-compatible base URL (e.g. MiniMax). Its models list is asked. */
+	baseUrl?: string;
+	/** The key the owner already configured for that provider, sent only to that baseUrl. */
+	apiKey?: string;
 	timeoutMs?: number;
 	/** Aborts in-flight requests, e.g. when the model changes or the HUD unmounts. */
 	signal?: AbortSignal;
@@ -61,24 +65,66 @@ async function getJson(
 	}
 }
 
-/** OpenRouter lists `context_length` per model. Exact id match only: a near
- *  miss must never lend another model's window. The catalogue is public, so
- *  no key is sent. The body is untrusted: validate its shape, never cast it
- *  (same guard as packages/providers/index.ts). */
-async function fromProviderMetadata(o: ResolveContextWindowOptions, f: typeof fetch, t: number) {
-	if (o.provider !== "openrouter") return null;
-	const json = (await getJson(f, "https://openrouter.ai/api/v1/models", {}, t, o.signal)) as {
-		data?: unknown;
-	} | null;
-	const list: unknown[] = Array.isArray(json?.data) ? json.data : [];
+/** The window fields that live providers' models lists really carry, in order:
+ *  `context_length` (OpenRouter, Together, Fireworks), `context_window` (Groq),
+ *  `max_context_length` (Mistral, LM Studio), `max_model_len` (vLLM). A list that
+ *  carries none of them is unknown, never a guess. */
+export const WINDOW_FIELDS = [
+	"context_length",
+	"context_window",
+	"max_context_length",
+	"max_model_len",
+] as const;
+
+/** Read the window out of one models-list entry, or null. */
+export function windowFromEntry(entry: unknown): number | null {
+	if (typeof entry !== "object" || entry === null) return null;
+	for (const f of WINDOW_FIELDS) {
+		const n = positive((entry as Record<string, unknown>)[f]);
+		if (n) return n;
+	}
+	return null;
+}
+
+/** Exact id match only: a near miss must never lend another model's window. The
+ *  body is untrusted: validate its shape, never cast it (same guard as
+ *  packages/providers/index.ts). */
+function windowFromList(json: unknown, model: string): number | null {
+	const data = (json as { data?: unknown } | null)?.data;
+	const list: unknown[] = Array.isArray(data) ? data : [];
 	const entry = list.find(
-		(m): m is { id: string; context_length?: unknown } =>
-			typeof m === "object" &&
-			m !== null &&
-			typeof (m as { id?: unknown }).id === "string" &&
-			(m as { id: string }).id === o.model,
+		(m) => typeof m === "object" && m !== null && (m as { id?: unknown }).id === model,
 	);
-	return positive(entry?.context_length);
+	return windowFromEntry(entry);
+}
+
+/** Providers whose window is the local server's answer, not a models list. */
+const LOCAL_PROVIDERS = new Set(["ollama", "8gent", "llama-server"]);
+
+/** OpenRouter's catalogue is public (no key sent). Any other hosted provider is
+ *  asked at its own baseUrl, with the key the owner already set for it. */
+async function fromProviderMetadata(o: ResolveContextWindowOptions, f: typeof fetch, t: number) {
+	if (o.provider === "openrouter") {
+		const json = await getJson(f, "https://openrouter.ai/api/v1/models", {}, t, o.signal);
+		return windowFromList(json, o.model);
+	}
+	if (LOCAL_PROVIDERS.has(o.provider) || !o.baseUrl) return null;
+	let url: string;
+	try {
+		const u = new URL(`${o.baseUrl.replace(/\/+$/, "")}/models`);
+		if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+		url = u.toString();
+	} catch {
+		return null;
+	}
+	const json = await getJson(
+		f,
+		url,
+		{ headers: o.apiKey ? { Authorization: `Bearer ${o.apiKey}` } : {} },
+		t,
+		o.signal,
+	);
+	return windowFromList(json, o.model);
 }
 
 /** Providers served by the local Ollama. `8gent` is the out-of-box default
@@ -124,6 +170,28 @@ async function fromLocalServer(o: ResolveContextWindowOptions, f: typeof fetch, 
 		return positive(json?.default_generation_settings?.n_ctx);
 	}
 	return null;
+}
+
+const windowCache = new Map<string, ContextWindow>();
+const cacheKey = (o: ResolveContextWindowOptions) =>
+	`${o.provider}\u0000${o.baseUrl ?? ""}\u0000${o.model}`;
+
+/** Test hook: forget what this session already learned. */
+export function clearWindowCache(): void {
+	windowCache.clear();
+}
+
+/** Resolved once per provider and model for the session. Only a real answer is
+ *  kept: an unknown is asked again, so a key added later is picked up. */
+export async function resolveContextWindowCached(
+	o: ResolveContextWindowOptions,
+): Promise<ContextWindow> {
+	const key = cacheKey(o);
+	const hit = windowCache.get(key);
+	if (hit) return hit;
+	const w = await resolveContextWindow(o);
+	if (w.window !== null) windowCache.set(key, w);
+	return w;
 }
 
 /** Never rejects: any failure, including a parser bug on a hostile body, is

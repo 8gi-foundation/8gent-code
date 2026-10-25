@@ -284,7 +284,6 @@ import {
 	type ContextWindow,
 	UNKNOWN_WINDOW,
 	contextMeter,
-	resolveContextWindow,
 	stepContextUsed,
 } from "./lib/context-window.js";
 import { copyReply } from "./lib/copy-answer.js";
@@ -371,7 +370,9 @@ import {
 	isAndroidEnv,
 } from "./lib/slash-commands.js";
 import { getSkillSummary, getSlashRegistry } from "./lib/slash-registry.js";
+import { effectiveWindow, loadOverrides, saveOverride } from "./lib/tab-context-window.js";
 import { approvalTab, nextUnread } from "./lib/tab-lamps.js";
+import { resolveTabWindow } from "./lib/tab-window-resolve.js";
 import { detectTermPresetIntent } from "./lib/term-intent.js";
 import { copiedNotice, notCopiedNotice } from "./lib/text-selection.js";
 import { truncate } from "./lib/text.js";
@@ -1600,6 +1601,12 @@ export function App({
 	const [windowTarget, setWindowTarget] = useState<{ provider: string; model: string } | null>(
 		null,
 	);
+	// #5035: each tab's own window. Overrides are the owner's, per tab id, kept on disk;
+	// tabDetected is what each chat tab's provider answered for that tab's model.
+	const [tabOverrides, setTabOverrides] = useState<Record<string, number>>(() => loadOverrides());
+	const [tabDetected, setTabDetected] = useState<
+		Record<string, { provider: string; model: string; window: ContextWindow }>
+	>({});
 
 	// Expanded view state (Ctrl+O)
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
@@ -1950,12 +1957,7 @@ export function App({
 		let cancelled = false;
 		const inFlight = new AbortController();
 		setContextWindow(null);
-		resolveContextWindow({
-			...windowTarget,
-			ollamaBaseUrl: resolveOllamaBaseUrl(),
-			llamaServerUrl: resolveLlamaServerUrl(),
-			signal: inFlight.signal,
-		})
+		resolveTabWindow(windowTarget.provider, windowTarget.model, inFlight.signal)
 			.then((w) => {
 				if (!cancelled) setContextWindow(w);
 			})
@@ -1967,6 +1969,54 @@ export function App({
 			inFlight.abort();
 		};
 	}, [windowTarget]);
+	// #5035: what the focused tab shows and compacts at: its override, else its detected window.
+	const shownWindow = effectiveWindow(contextWindow, tabOverrides[activeTabId]) ?? contextWindow;
+	// Every chat tab keeps its own detected window, resolved from that tab's own provider and
+	// model (the resolver caches per provider and model, so a repeat costs nothing). A model
+	// change on one tab changes that tab's entry only.
+	const chatTabsKey = workspaceTabs.tabs
+		.filter((t) => t.type === "chat")
+		.map((t) => t.id)
+		.join("|");
+	const tabDetectedRef = useRef(tabDetected);
+	tabDetectedRef.current = tabDetected;
+	useEffect(() => {
+		let cancelled = false;
+		const inFlight = new AbortController();
+		for (const tab of workspaceTabs.tabs) {
+			if (tab.type !== "chat") continue;
+			const prev = tabDetectedRef.current[tab.id];
+			const role = (tab.data as { role?: string } | undefined)?.role;
+			const target =
+				tab.id === activeTabId
+					? windowTarget
+					: prev
+						? { provider: prev.provider, model: prev.model }
+						: role
+							? resolveSpecForRole(role)
+							: null;
+			if (!target?.model) continue;
+			if (
+				prev &&
+				prev.provider === target.provider &&
+				prev.model === target.model &&
+				prev.window.window !== null
+			)
+				continue;
+			resolveTabWindow(target.provider, target.model, inFlight.signal).then((window) => {
+				if (cancelled) return;
+				setTabDetected((p) => ({
+					...p,
+					[tab.id]: { provider: target.provider, model: target.model, window },
+				}));
+			});
+		}
+		return () => {
+			cancelled = true;
+			inFlight.abort();
+		};
+		// biome-ignore lint/correctness/useExhaustiveDependencies: tabs are keyed by chatTabsKey
+	}, [chatTabsKey, activeTabId, windowTarget]);
 	const [availableModels, setAvailableModels] = useState<string[]>([]);
 	// Which provider availableModels was fetched for. A list from the previous
 	// provider must never be matched against the new one (#4598).
@@ -3906,6 +3956,20 @@ export function App({
 	// The model/runtime each tab agent was BUILT for (#3084). The agent's own
 	// config.model can self-correct after a reroute; reuse compares against this.
 	const builtSpecRef = useRef(new WeakMap<object, { model: string; runtime: string }>());
+	// Push the focused tab's window into that tab's 8gent so compaction uses it. The detected
+	// reading is pushed only while it belongs to the model this 8gent was built for.
+	useEffect(() => {
+		if (!agent || perTabAgents.getAgent(activeTabId) !== agent) return;
+		const spec = builtSpecRef.current.get(agent);
+		const detectedFits =
+			spec && windowTarget && contextWindow
+				? spec.model === windowTarget.model && spec.runtime === windowTarget.provider
+				: false;
+		agent.setContextWindow({
+			override: tabOverrides[activeTabId] ?? null,
+			...(detectedFits ? { detected: contextWindow?.window ?? null } : {}),
+		});
+	}, [agent, activeTabId, tabOverrides, windowTarget, contextWindow, perTabAgents]);
 	const lastReadinessNoticeRef = useRef("");
 	// Why the tab's 8gent cannot start, when init knows (#4218). The send path
 	// shows it instead of "wait a moment", which never fixes a missing key.
@@ -5487,7 +5551,7 @@ export function App({
 					addSystemMessage(
 						formatContextReport(
 							classifyContext(agent.getMessageHistory()),
-							contextWindow?.window ?? null,
+							shownWindow?.window ?? null,
 							{
 								measured: contextUsed > 0 ? contextUsed : null,
 								stale: contextStale,
@@ -8446,7 +8510,26 @@ export function App({
 					);
 				}
 				case "settings":
-					return <SettingsView visible={true} onClose={closeTabView} />;
+					return (
+						<SettingsView
+							visible={true}
+							onClose={closeTabView}
+							contextRows={workspaceTabs.tabs
+								.filter((t) => t.type === "chat")
+								.map((t) => ({
+									tabId: t.id,
+									title: t.title,
+									model: tabDetected[t.id]?.model ?? null,
+									detected: tabDetected[t.id]?.window.window ?? null,
+									override: tabOverrides[t.id] ?? null,
+									active: t.id === activeTabId,
+								}))}
+							onContextOverride={(tabId, tokens) => {
+								setTabOverrides(saveOverride(tabId, tokens));
+								perTabAgents.getAgent(tabId)?.setContextWindow({ override: tokens });
+							}}
+						/>
+					);
 			}
 		}
 
@@ -8922,8 +9005,8 @@ export function App({
 	const micOn =
 		Boolean(voice?.isAvailable) && (voice?.state === "recording" || voiceChat?.isActive);
 	const isApprovalPending = approvalPending !== null;
-	const ctxMeter = contextWindow
-		? contextMeter(contextUsed > 0 ? contextUsed : null, contextWindow)
+	const ctxMeter = shownWindow
+		? contextMeter(contextUsed > 0 ? contextUsed : null, shownWindow)
 		: ({ kind: "fresh" } as const);
 	const contextPct = ctxMeter.kind === "measured" ? ctxMeter.pct : null;
 	const contextState = ctxMeter.kind === "measured" ? ctxMeter.source : ctxMeter.kind;
@@ -9233,7 +9316,7 @@ export function App({
 				<BottomBar
 					ctx={{
 						used: contextUsed > 0 ? contextUsed : null,
-						window: contextWindow?.window ?? null,
+						window: shownWindow?.window ?? null,
 						stale: contextStale,
 					}}
 					ready={providerHealth.live}

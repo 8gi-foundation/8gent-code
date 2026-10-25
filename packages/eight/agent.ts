@@ -578,6 +578,11 @@ export class Agent {
 	private compactionUndo = new CompactionUndo();
 	/** The active provider's known context window (SPEC-05), shared by both compactors (#3237). */
 	private compactionContextWindow: number;
+	/** #5035: what the provider's models list said for this tab, and what the owner set. */
+	private detectedContextWindow: number | null = null;
+	private overrideContextWindow: number | null = null;
+	/** The window the constructor picked (provider table or floor), kept for a reset. */
+	private baseContextWindow = 0;
 	/** True once compactionContextWindow was read from the server, not the provider table (#4982). */
 	private contextWindowFromEndpoint = false;
 	/** The hosted provider's published window from the table, 0 when none is trusted (#4986). */
@@ -722,6 +727,7 @@ export class Agent {
 		const compactionContextWindow = knownContextWindow(activeProvider);
 		this.compaction = new ProactiveCompression({ contextWindow: compactionContextWindow });
 		this.compactionContextWindow = compactionContextWindow;
+		this.baseContextWindow = compactionContextWindow;
 		this.publishedWindow = publishedContextWindow(activeProvider);
 		// #3643: for an Ollama-served model the 32768 above is only a fallback.
 		// The real window is read from the server once, lazily, the first time
@@ -4756,6 +4762,36 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		this.compaction = new ProactiveCompression({ contextWindow: window });
 		this.compactionContextWindow = window;
 		this.contextWindowFromEndpoint = true;
+	}
+
+	/**
+	 * #5035: this tab's own context window, pushed in by the host. `override` is
+	 * what the owner set in Settings and beats `detected`, which is what the
+	 * provider's own models list answered. Both compactors are resized to the
+	 * winner; null for both keeps whatever the agent already had. The turn token
+	 * budget treats a pushed window like one the endpoint reported.
+	 */
+	setContextWindow(window: { detected?: number | null; override?: number | null }): void {
+		const ok = (n: number | null | undefined): n is number =>
+			typeof n === "number" && Number.isFinite(n) && n >= 1;
+		if (window.detected !== undefined) {
+			this.detectedContextWindow = ok(window.detected) ? Math.floor(window.detected) : null;
+		}
+		if (window.override !== undefined) {
+			this.overrideContextWindow = ok(window.override) ? Math.floor(window.override) : null;
+		}
+		const pushed = this.overrideContextWindow ?? this.detectedContextWindow;
+		const next = pushed ?? this.baseContextWindow;
+		if (next === this.compactionContextWindow) return;
+		this.serverContextWindow = null;
+		this.compaction = new ProactiveCompression({ contextWindow: next });
+		this.compactionContextWindow = next;
+		this.contextWindowFromEndpoint = pushed !== null;
+	}
+
+	/** The window compaction uses for this tab right now. */
+	getContextWindow(): number {
+		return this.compactionContextWindow;
 	}
 
 	/**
