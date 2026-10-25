@@ -519,6 +519,7 @@ import {
 
 // Load .env file if present
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as pathMod from "node:path";
 import { bootTrace } from "./lib/boot-trace.js";
 import { createFallbackNoticeGate } from "./lib/fallback-notice-once.js";
@@ -2637,6 +2638,42 @@ export function App({
 			} catch {
 			} finally {
 				judgeInFlightRef.current = false;
+			}
+		})();
+	}, [introVisible, showOnboarding]);
+	// First run: offer to bring setups from other tools home, once, after setup and the judge offer.
+	// No TTY or an auto-approve run has no person to ask, so it asks nothing (#5037).
+	const bringHomeOfferedRef = useRef(false);
+	useEffect(() => {
+		const busy = () =>
+			introVisibleRef.current ||
+			showOnboardingRef.current ||
+			onboardingManager.needsOnboarding() ||
+			djInstallAnswerRef.current !== null ||
+			judgeInFlightRef.current;
+		if (bringHomeOfferedRef.current || busy()) return;
+		if (cliAutoApprove || !process.stdin.isTTY || !process.stdout.isTTY) return;
+		bringHomeOfferedRef.current = true;
+		void (async () => {
+			try {
+				const { offerBringItHome } = await import("../../../packages/skills/import/ask.js");
+				const outcome = await offerBringItHome("first-run", {
+					home: os.homedir(),
+					ask: (line, defaultYes) => {
+						// Re-checked after the awaits: another question may have started while we loaded.
+						if (busy()) return Promise.resolve(null);
+						return new Promise<boolean>((resolve) => {
+							djInstallDefaultRef.current = defaultYes;
+							djInstallAnswerRef.current = resolve;
+							addSystemMessage(line);
+						});
+					},
+					say: addSystemMessage,
+				});
+				// Nobody answered (another question was open): try again on the next pass.
+				if (outcome === "unanswered") bringHomeOfferedRef.current = false;
+			} catch {
+				bringHomeOfferedRef.current = false;
 			}
 		})();
 	}, [introVisible, showOnboarding]);
@@ -5525,6 +5562,30 @@ export function App({
 						addSystemMessage(judgeInstallNotice(status));
 						if (status.backend !== "none") return;
 						await offerJudge("command", { say: addSystemMessage, progress: () => {} });
+					})();
+					break;
+				}
+
+				case "bring-it-home": {
+					// One y/N, default No, unattended is No (#5037). Scans read only; a yes copies into ~/.8gent/imported.
+					void (async () => {
+						if (djInstallAnswerRef.current) {
+							addSystemMessage("Answer the pending question first.");
+							return;
+						}
+						const { offerBringItHome } = await import("../../../packages/skills/import/ask.js");
+						await offerBringItHome("command", {
+							home: os.homedir(),
+							ask: (line, defaultYes) =>
+								refuseIfUnattended("bring-it-home")
+									? Promise.resolve(false)
+									: new Promise<boolean>((resolve) => {
+											djInstallDefaultRef.current = defaultYes;
+											djInstallAnswerRef.current = resolve;
+											addSystemMessage(line);
+										}),
+							say: addSystemMessage,
+						});
 					})();
 					break;
 				}

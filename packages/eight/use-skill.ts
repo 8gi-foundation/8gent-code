@@ -139,6 +139,13 @@ function notFound(manager: SkillManager, name: string): string {
 		const why = broken.map((e) => `${e.filePath}: ${e.error}`).join("; ");
 		return `Error: skill "${name}" is malformed and was not loaded (${why}). Fix its frontmatter (a --- block with name: and description:) or pick another skill.`;
 	}
+	const unavailable = manager.getUnavailable().find((u) => {
+		const dir = path.basename(path.dirname(u.filePath)).toLowerCase();
+		return dir === key || u.name.toLowerCase() === key;
+	});
+	if (unavailable) {
+		return `Error: skill "${name}" was brought home from another tool but is not available yet: ${unavailable.reason}. Edit ${unavailable.filePath} and remove the needs-edit line, or pick another skill.`;
+	}
 	const near = manager
 		.getAllSkills()
 		.map((s) => s.name)

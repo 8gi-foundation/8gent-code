@@ -44,6 +44,7 @@ export type SlashCommand =
 	| "context"
 	| "update"
 	| "judge"
+	| "bring-it-home"
 	| "local"
 	| "chat"
 	| "agent"
@@ -427,6 +428,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Install the safety judge that checks risky commands before they run",
 		usage: "/judge [install]",
+	},
+	{
+		name: "bring-it-home",
+		aliases: ["bringithome"],
+		description:
+			"Bring your setup from other tools (skills, instructions, memory) into 8gent, with your yes",
+		usage: "/bring-it-home",
 	},
 	{
 		name: "local",

@@ -2,7 +2,7 @@
 name: skill-creator
 description: Author a new bundled skill from a task description, success criteria, and example input/output pairs. Drafts the SKILL.md, runs deterministic validation, and persists to ~/.8gent/skills only after explicit approval. Use when the user says "create a skill", "teach yourself", "learn how to", or asks to bottle a workflow you just executed.
 trigger: /create-skill
-aliases: [/teach-yourself, /learn-how-to, /skill-create]
+aliases: [/createskill, /teach-yourself, /learn-how-to, /skill-create]
 tools: [read, write, edit]
 ---
 

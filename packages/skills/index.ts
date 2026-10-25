@@ -6,9 +6,15 @@
  *
  * Precedence (first one found wins; a name collision is recorded, see getCollisions()):
  * 1. Project: <cwd>/.agents/skills/<name>/SKILL.md, then <cwd>/.claude/skills/<name>/SKILL.md
- * 2. User: ~/.8gent/skills/*.md, then ~/.agents/skills/<name>/SKILL.md, then ~/.claude/skills/<name>/SKILL.md
- * 3. Bundled: packages/skills/<name>/SKILL.md (dev) and dist/skills/<name>/SKILL.md (published CLI)
- * 4. Learned: ~/.8gent/learned-skills/*.md
+ * 2. Owner: ~/.8gent/skills/*.md
+ * 3. Bundled core: packages/skills/<name>/SKILL.md (dev) and dist/skills/<name>/SKILL.md (published CLI)
+ * 4. Brought home: ~/.8gent/imported/<tool>/skills/<name>/SKILL.md (#5037)
+ * 5. Other tools, live: ~/.agents/skills/<name>/SKILL.md, then ~/.claude/skills/<name>/SKILL.md.
+ *    Read only until the owner has brought their setup home; after that 8gent stops reading them.
+ * 6. Learned: ~/.8gent/learned-skills/*.md
+ * A bundled core skill is never shadowed by a skill from 4 or 5 that has the same name, trigger
+ * or alias (#5037): that skill is skipped and the collision recorded. Imported skills marked
+ * `needs-edit: <reason>` are not loaded; getUnavailable() lists them with the reason.
  * Project beats user beats bundled. A collision between two project/user skills is reported
  * once per process (console.warn) and always available from getCollisions(). A user skill
  * shadowing a bundled or learned one is the expected override and is not reported.
@@ -42,6 +48,7 @@ import type { CapabilityRequest, EnforceOptions } from "../permissions/capabilit
 import { realpathLoose, securityEnvSnapshot } from "../permissions/run-command-sandbox.js";
 import type { PolicyDecision } from "../permissions/types.js";
 import { enforceSkillScope } from "./capability-scope.js";
+import { hasImported, importedRoot } from "./import/paths.js";
 import { validateSkillManifest } from "./manifest.js";
 
 // ============================================
@@ -281,11 +288,47 @@ function discoverBundledSkillMdFiles(): string[] {
 	return nested;
 }
 
+const normKey = (s: string) => s.replace(/^\//, "").toLowerCase();
+
+/** Lookup keys (name, trigger, aliases) a frontmatter answers to, as the manager indexes them. */
+function lookupKeys(fm: SkillFrontmatter): string[] {
+	const keys = [normKey(fm.name)];
+	if (typeof fm.trigger === "string") keys.push(normKey(fm.trigger));
+	if (Array.isArray(fm.aliases)) for (const a of fm.aliases) keys.push(normKey(String(a)));
+	return keys.filter((k) => k.length > 0);
+}
+
+/** Key -> bundled file for every name, trigger and alias a bundled core skill answers to. */
+function bundledKeyOwners(): Map<string, string> {
+	const out = new Map<string, string>();
+	for (const filePath of discoverBundledSkillMdFiles()) {
+		try {
+			const { frontmatter } = parseFrontmatter(fs.readFileSync(filePath, "utf-8"));
+			for (const k of lookupKeys(frontmatter)) if (!out.has(k)) out.set(k, filePath);
+		} catch {
+			// Reported when the bundled tier loads.
+		}
+	}
+	return out;
+}
+
+/** Names, slash triggers and aliases (lowercase, no slash) owned by bundled core skills (#5037). */
+export function coreSkillKeys(): Set<string> {
+	return new Set(bundledKeyOwners().keys());
+}
+
+/** An imported skill the loader refused to run, with why (#5037). */
+export interface UnavailableSkill {
+	name: string;
+	filePath: string;
+	reason: string;
+}
+
 // ============================================
 // Skill Manager
 // ============================================
 
-type SkillTier = "project" | "user" | "bundled" | "learned";
+type SkillTier = "project" | "user" | "bundled" | "imported" | "learned";
 
 export interface SkillManagerOptions {
 	/** Project root for .agents/skills and .claude/skills. Default process.cwd(). */
@@ -374,6 +417,10 @@ export class SkillManager {
 	private trust: Map<string, string> | undefined;
 	/** Files the last loadSkills() could not parse, with the reason (#3593: use_skill names them). */
 	private loadErrors: { filePath: string; error: string }[] = [];
+	/** Imported skills marked needs-edit, skipped with their reason (#5037). */
+	private unavailable: UnavailableSkill[] = [];
+	/** Bundled key -> file, so other tools' skills can never shadow a core skill (#5037). */
+	private coreOwners: Map<string, string> = new Map();
 
 	constructor(skillsDirectory?: string, options: SkillManagerOptions = {}) {
 		this.projectDir = options.projectDir;
@@ -385,6 +432,11 @@ export class SkillManager {
 	/** Skill files the last loadSkills() refused as malformed, with the parser's reason. */
 	getLoadErrors(): { filePath: string; error: string }[] {
 		return [...this.loadErrors];
+	}
+
+	/** Imported skills the last loadSkills() skipped because they need the owner's edit, with the reason. */
+	getUnavailable(): UnavailableSkill[] {
+		return [...this.unavailable];
 	}
 
 	/** Name collisions found by the last loadSkills(): winner kept, loser listed. */
@@ -406,6 +458,8 @@ export class SkillManager {
 		this.skillOrigin.clear();
 		this.collisions = [];
 		this.loadErrors = [];
+		this.unavailable = [];
+		this.coreOwners = bundledKeyOwners();
 		this.trust = undefined;
 
 		const home = this.homeDir ?? os.homedir();
@@ -418,11 +472,15 @@ export class SkillManager {
 			this.createExampleSkill();
 		}
 		const skillFiles = fs.readdirSync(this.skillsDirectory).filter((f) => f.endsWith(".md"));
+		// Once the owner has brought their setup home, ~/.claude and ~/.agents are no longer read live.
+		const imported = hasImported(home);
+		const importedFiles = imported ? this.importedSkillMdPaths(home) : [];
 		const userNames = skillNamesIn(
 			[
 				...skillFiles.map((f) => path.join(this.skillsDirectory, f)),
-				...collectNestedSkillMdPaths(path.join(home, ".agents", "skills")),
-				...collectNestedSkillMdPaths(path.join(home, ".claude", "skills")),
+				...importedFiles,
+				...(imported ? [] : collectNestedSkillMdPaths(path.join(home, ".agents", "skills"))),
+				...(imported ? [] : collectNestedSkillMdPaths(path.join(home, ".claude", "skills"))),
 			],
 			new Map(),
 		);
@@ -447,16 +505,21 @@ export class SkillManager {
 		ingestNested(path.join(project, ".agents", "skills"), "project");
 		ingestNested(path.join(project, ".claude", "skills"), "project");
 
-		// 2. User: ~/.8gent/skills flat .md, then ~/.agents/skills, then ~/.claude/skills.
+		// 2. Owner: ~/.8gent/skills flat .md.
 		for (const file of skillFiles) {
 			this.tryIngestSkillFile(path.join(this.skillsDirectory, file), "user");
 		}
-		ingestNested(path.join(home, ".agents", "skills"), "user");
-		ingestNested(path.join(home, ".claude", "skills"), "user");
 
-		// 3. Bundled
+		// 3. Bundled core. Ahead of other tools' folders so a core skill is never shadowed (#5037).
 		for (const filePath of discoverBundledSkillMdFiles()) {
 			this.tryIngestSkillFile(filePath, "bundled");
+		}
+
+		// 4. Brought home from other tools (#5037), then 5. those tools' folders live until the owner imports.
+		for (const filePath of importedFiles) this.tryIngestSkillFile(filePath, "imported");
+		if (!imported) {
+			ingestNested(path.join(home, ".agents", "skills"), "user");
+			ingestNested(path.join(home, ".claude", "skills"), "user");
 		}
 
 		// 4. Learned skills from skill compounding (~/.8gent/learned-skills/)
@@ -469,6 +532,17 @@ export class SkillManager {
 		}
 
 		return this.getAllSkills();
+	}
+
+	/** ~/.8gent/imported/<tool>/skills/<name>/SKILL.md for every tool, in a stable order. */
+	private importedSkillMdPaths(home: string): string[] {
+		const root = importedRoot(home);
+		if (!fs.existsSync(root)) return [];
+		const out: string[] = [];
+		for (const tool of fs.readdirSync(root).sort()) {
+			out.push(...collectNestedSkillMdPaths(path.join(root, tool, "skills")));
+		}
+		return out;
 	}
 
 	private registerLookupKeys(skillName: string, frontmatter: SkillFrontmatter): void {
@@ -545,10 +619,38 @@ export class SkillManager {
 		return file;
 	}
 
+	/** True for a flat file in ~/.8gent/skills, the owner's own folder. */
+	private isOwnerSkillFile(filePath: string): boolean {
+		return path.dirname(filePath) === this.skillsDirectory;
+	}
+
 	private tryIngestSkillFile(filePath: string, tier: SkillTier): void {
 		try {
 			const bytes = fs.readFileSync(filePath);
 			const { frontmatter, body } = parseFrontmatter(bytes.toString("utf-8"));
+			if (tier === "imported" || (tier === "user" && !this.isOwnerSkillFile(filePath))) {
+				// Another tool's skill never shadows a bundled core skill by name, trigger or alias (#5037).
+				const owner = lookupKeys(frontmatter)
+					.map((k) => this.coreOwners.get(k))
+					.find((f) => f !== undefined && f !== filePath);
+				if (owner) {
+					const c: SkillCollision = { name: frontmatter.name, kept: owner, ignored: filePath };
+					this.collisions.push(c);
+					warnCollisionOnce(
+						c,
+						`[skills] Skill ${JSON.stringify(c.name)} from ${JSON.stringify(filePath)} was skipped: ` +
+							`the bundled 8gent skill at ${JSON.stringify(owner)} owns that name or trigger.`,
+					);
+					return;
+				}
+			}
+			if (tier === "imported") {
+				const needsEdit = (frontmatter as unknown as Record<string, unknown>)["needs-edit"];
+				if (typeof needsEdit === "string" && needsEdit.trim() !== "") {
+					this.unavailable.push({ name: frontmatter.name, filePath, reason: needsEdit.trim() });
+					return;
+				}
+			}
 			const guarded = this.guardedByName.get(frontmatter.name);
 			if (
 				tier === "project" &&

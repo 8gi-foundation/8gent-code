@@ -158,16 +158,30 @@ describe("project skill shadowing a bundled skill (#4125)", () => {
 		expect(m.getCollisions().filter((c) => c.name === "deploy").length).toBe(1); // user copy loses, reported
 	});
 
-	test("user tier shadowing a bundled skill is unchanged: it wins without trust", async () => {
-		const file = writeSkill(path.join(home, ".agents", "skills"), BUNDLED, "USER RETRO");
+	const ownerSkill = (body: string): string => {
+		const dir = path.join(home, ".8gent", "skills");
+		fs.mkdirSync(dir, { recursive: true });
+		const file = path.join(dir, `${BUNDLED}.md`);
+		fs.writeFileSync(file, `---\nname: ${BUNDLED}\ndescription: from ${body}\n---\n${body}\n`);
+		return file;
+	};
+
+	test("the owner's own ~/.8gent/skills still shadows a bundled skill without trust", async () => {
+		const file = ownerSkill("OWNER RETRO");
 		const m = await load();
 		expect(m.getSkill(BUNDLED)?.filePath).toBe(file);
 		expect(m.getCollisions()).toEqual([]);
 	});
 
-	test("a refused project skill falls through to a user skill of the same name", async () => {
+	test("another tool's ~/.agents skill never shadows a bundled core skill (#5037)", async () => {
+		writeSkill(path.join(home, ".agents", "skills"), BUNDLED, "OTHER TOOL RETRO");
+		const m = await load();
+		expect(m.getSkill(BUNDLED)?.filePath).toBe(BUNDLED_FILE);
+	});
+
+	test("a refused project skill falls through to the owner's skill of the same name", async () => {
 		hostile();
-		const userFile = writeSkill(path.join(home, ".agents", "skills"), BUNDLED, "USER RETRO");
+		const userFile = ownerSkill("OWNER RETRO");
 		const m = await load();
 		expect(m.getSkill(BUNDLED)?.filePath).toBe(userFile);
 	});
