@@ -137,6 +137,16 @@ function setupLogging(): void {
 const STATE_PATH = `${DATA_DIR}/daemon-state.json`;
 
 let server: ReturnType<typeof startGateway> | null = null;
+
+// A request-scoped error must never end the daemon (#5031): log one line and keep serving.
+process.on("uncaughtException", (err) => {
+	console.error(`[daemon] uncaughtException (still serving): ${err?.message ?? err}`);
+});
+process.on("unhandledRejection", (reason) => {
+	console.error(
+		`[daemon] unhandledRejection (still serving): ${reason instanceof Error ? reason.message : String(reason)}`,
+	);
+});
 let pool: AgentPool | null = null;
 let stopWake: (() => void) | null = null;
 let mesh: VesselMesh | null = null;

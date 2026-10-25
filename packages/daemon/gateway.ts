@@ -372,7 +372,22 @@ function broadcastToSession(sessionId: string, event: EventName, payload: unknow
 /** Where each running gateway really listens, for the identity check (#4829). */
 const ownEndpoints = new WeakMap<GatewayConfig, { port: number; host: string }>();
 
+/** A request-scoped throw (#5031) is an error frame to that client, never the end of the daemon. */
 function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
+	try {
+		dispatchMessage(ws, config, raw);
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.warn(`[gateway] frame handler threw: ${message}`);
+		try {
+			send(ws, { type: "error", message });
+		} catch {
+			// client disconnected
+		}
+	}
+}
+
+function dispatchMessage(ws: any, config: GatewayConfig, raw: string): void {
 	const state = clients.get(ws);
 	if (!state) return;
 
@@ -381,6 +396,16 @@ function handleMessage(ws: any, config: GatewayConfig, raw: string): void {
 		msg = JSON.parse(raw);
 	} catch {
 		send(ws, { type: "error", message: "invalid JSON" });
+		return;
+	}
+	// Only a plain object with a string type is a frame; null, numbers, strings, arrays are not.
+	if (
+		typeof msg !== "object" ||
+		msg === null ||
+		Array.isArray(msg) ||
+		typeof (msg as { type?: unknown }).type !== "string"
+	) {
+		send(ws, { type: "error", message: "bad frame" });
 		return;
 	}
 
