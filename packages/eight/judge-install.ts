@@ -518,6 +518,17 @@ async function llamaJudge(
 }
 
 /**
+ * The one line /judge install prints before it does anything: the already-installed line when a
+ * judge answers, the Installing line otherwise. Never both, so a judge that is there is not
+ * announced as being installed.
+ */
+export function judgeInstallNotice(status: { backend: string; model: string | null }): string {
+	if (status.backend !== "none")
+		return `The safety judge is already installed: ${status.model ?? status.backend} via ${status.backend}.`;
+	return "Installing the safety judge. This can take a few minutes.";
+}
+
+/**
  * `auto`: after an update and on first launch. Asks at most once ever: any
  * recorded choice (declined, unsupported, failed) ends the asking.
  * `launch`: `auto` before the first render; on the llama path (a phone) it never asks, it only
@@ -567,8 +578,7 @@ export async function offerJudge(
 	}
 	const now = await d.probe();
 	if (now.backend !== "none") {
-		if (mode === "command")
-			say(`The safety judge is already installed: ${now.model ?? now.backend} via ${now.backend}.`);
+		if (mode === "command") say(judgeInstallNotice(now));
 		return "present";
 	}
 

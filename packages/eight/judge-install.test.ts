@@ -25,6 +25,7 @@ import {
 	configPath,
 	judgeAskLine,
 	judgeBasis,
+	judgeInstallNotice,
 	llamaAskLine,
 	offerJudge,
 	pullModel,
@@ -236,6 +237,22 @@ describe("offerJudge command (/judge install)", () => {
 		const r = rig({ judge: true });
 		expect(await offerJudge("command", r.deps)).toBe("present");
 		expect(r.log.said[0]).toContain("already installed");
+	});
+
+	test("notice: judge present is exactly one already-installed line, no Installing", async () => {
+		const r = rig({ judge: true });
+		const notice = judgeInstallNotice(await r.deps.probe!());
+		expect(notice.split("\n")).toHaveLength(1);
+		expect(notice).toBe("The safety judge is already installed: selene via ollama.");
+		await offerJudge("command", r.deps);
+		expect(r.log.said).toEqual([notice]);
+	});
+
+	test("notice: judge absent says Installing once", async () => {
+		const r = rig();
+		const notice = judgeInstallNotice(await r.deps.probe!());
+		expect(notice).toContain("Installing the safety judge");
+		expect(notice).not.toContain("already installed");
 	});
 
 	test("unsupported: says it every time it is asked", async () => {

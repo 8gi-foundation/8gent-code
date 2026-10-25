@@ -5306,7 +5306,11 @@ export function App({
 							addSystemMessage("Usage: /judge install");
 							return;
 						}
-						addSystemMessage("Installing the safety judge. This can take a few minutes.");
+						const { detectBackend } = await import("../../../packages/decide/probe.js");
+						const { judgeInstallNotice } = await import("../../../packages/eight/judge-install.js");
+						const status = await detectBackend({ env: process.env });
+						addSystemMessage(judgeInstallNotice(status));
+						if (status.backend !== "none") return;
 						await offerJudge("command", { say: addSystemMessage, progress: () => {} });
 					})();
 					break;
