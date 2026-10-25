@@ -11,7 +11,13 @@
  * affordance at rest.
  */
 
+import { spawn as nodeSpawn } from "node:child_process";
+import { constants, accessSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
+// Cross-workspace import of a package's public entrypoint, as SettingsView does.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
+import { loadSettings } from "../../../../packages/settings/index.js";
 import type { MouseEvent } from "./mouse-input.js";
 import { type SelRange, TextSelection, extractText } from "./text-selection.js";
 
@@ -26,9 +32,93 @@ export interface ClickTarget {
 	action: () => void;
 }
 
+/** A thumb needs at least this many cells under it (#4922). */
+export const MIN_TAP_CELLS = 3;
+/** The pressed look outlives the release by this long, so a quick tap is seen (#4922). */
+export const PRESS_HOLD_MS = 120;
+/** Length of the haptic tick, in ms. */
+export const VIBRATE_MS = 20;
+const VIBRATE_BIN = "termux-vibrate";
+
 const targets = new Map<string, ClickTarget>();
 let pressedId: string | null = null;
+/** The id still drawn pressed after its release, until the hold runs out. */
+let heldId: string | null = null;
+let heldTimer: ReturnType<typeof setTimeout> | null = null;
 const pressedListeners = new Set<() => void>();
+
+export interface HapticDeps {
+	/** Fire and forget; must not wait for the child. */
+	spawn: (cmd: string, args: string[]) => void;
+	/** Is termux-vibrate already on PATH? Asked once, then cached. Never installs anything. */
+	hasBinary: () => boolean;
+	/** The ui.tapHaptics setting. */
+	enabled: () => boolean;
+}
+
+function onPath(bin: string): boolean {
+	for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+		if (!dir) continue;
+		try {
+			accessSync(join(dir, bin), constants.X_OK);
+			return true;
+		} catch {}
+	}
+	return false;
+}
+
+const defaultHaptics: HapticDeps = {
+	spawn: (cmd, args) => {
+		const child = nodeSpawn(cmd, args, { detached: true, stdio: "ignore" });
+		child.on("error", () => {});
+		child.unref();
+	},
+	hasBinary: () => onPath(VIBRATE_BIN),
+	enabled: () => {
+		try {
+			return loadSettings().ui.tapHaptics !== false;
+		} catch {
+			return true;
+		}
+	},
+};
+
+let haptics: HapticDeps = defaultHaptics;
+let binaryCached: boolean | null = null;
+
+/** Tests inject a spawn and lookups; null restores the real ones. */
+export function setHapticDeps(d: Partial<HapticDeps> | null): void {
+	haptics = d ? { ...defaultHaptics, ...d } : defaultHaptics;
+	binaryCached = null;
+}
+
+/** A short tick under the thumb. Desktop has no termux-vibrate, so it is silent there. */
+function tick(): void {
+	try {
+		binaryCached ??= haptics.hasBinary();
+		if (!binaryCached || !haptics.enabled()) return;
+		haptics.spawn(VIBRATE_BIN, ["-d", String(VIBRATE_MS)]);
+	} catch {
+		// A failed buzz never costs the tap.
+	}
+}
+
+function clearHeld(): void {
+	if (heldTimer) clearTimeout(heldTimer);
+	heldTimer = null;
+	if (heldId !== null) {
+		heldId = null;
+		for (const l of [...pressedListeners]) l();
+	}
+}
+
+function holdPressed(id: string): void {
+	clearHeld();
+	heldId = id;
+	heldTimer = setTimeout(clearHeld, PRESS_HOLD_MS);
+	heldTimer.unref?.();
+	for (const l of [...pressedListeners]) l();
+}
 
 /** Reads the screen text for a copy; set by the app from Ink's last frame. */
 let screenReader: (() => string) | null = null;
@@ -71,11 +161,13 @@ export function setTarget(t: ClickTarget): void {
 export function removeTarget(id: string): void {
 	targets.delete(id);
 	if (pressedId === id) setPressed(null);
+	if (heldId === id) clearHeld();
 }
 
 export function clearTargets(): void {
 	targets.clear();
 	setPressed(null);
+	clearHeld();
 	selection.reset();
 	selectionChanged();
 }
@@ -97,8 +189,9 @@ function setPressed(id: string | null): void {
 	for (const l of [...pressedListeners]) l();
 }
 
+/** The id drawn pressed: the one under a finger, or the one just released. */
 export function currentPressed(): string | null {
-	return pressedId;
+	return pressedId ?? heldId;
 }
 
 /** Where the text for a copy comes from, and where it goes. */
@@ -118,8 +211,10 @@ export function handleMouse(e: MouseEvent): "click" | "press" | "cancel" | "copy
 	if (e.kind === "press" && e.button === 0) {
 		const t = hitTest(e.x, e.y);
 		if (t) {
+			clearHeld();
 			setPressed(t.id);
 			clearSelection();
+			tick();
 			return "press";
 		}
 		const had = selection.range !== null;
@@ -145,6 +240,7 @@ export function handleMouse(e: MouseEvent): "click" | "press" | "cancel" | "copy
 		if (id) {
 			const t = hitTest(e.x, e.y);
 			if (t && t.id === id) {
+				holdPressed(id);
 				t.action();
 				return "click";
 			}
@@ -174,7 +270,7 @@ export function usePressed(id: string): boolean {
 				pressedListeners.delete(cb);
 			};
 		},
-		() => pressedId === id,
+		() => currentPressed() === id,
 		() => false,
 	);
 }
@@ -188,7 +284,10 @@ export function usePressedIn(prefix: string): string | null {
 				pressedListeners.delete(cb);
 			};
 		},
-		() => (pressedId?.startsWith(prefix) ? pressedId : null),
+		() => {
+			const id = currentPressed();
+			return id?.startsWith(prefix) ? id : null;
+		},
 		() => null,
 	);
 }
@@ -273,6 +372,21 @@ export function closeGaps(spans: ClickSpan[], maxGap = MAX_SHARED_GAP): ClickSpa
 				a.w += left;
 				b.dx -= right;
 				b.w += right;
+			}
+		}
+		// A thumb needs room: grow a narrow span into free cells, right first, then left.
+		for (let i = 0; i < row.length; i++) {
+			const s = row[i] as ClickSpan;
+			if (s.w >= MIN_TAP_CELLS) continue;
+			const next = row[i + 1];
+			const prev = row[i - 1];
+			const right = next ? next.dx : Number.POSITIVE_INFINITY;
+			s.w = Math.min(MIN_TAP_CELLS, Math.max(s.w, right - s.dx));
+			if (s.w < MIN_TAP_CELLS) {
+				const floor = prev ? prev.dx + prev.w : 0;
+				const grow = Math.min(MIN_TAP_CELLS - s.w, Math.max(0, s.dx - floor));
+				s.dx -= grow;
+				s.w += grow;
 			}
 		}
 	}
