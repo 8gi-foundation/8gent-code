@@ -156,6 +156,13 @@ interface MessageListProps {
 	scrollEnabled?: boolean;
 	/** A tap on a compaction row opens or folds its summary (#4958). */
 	onToggleCompaction?: (messageId: string) => void;
+	/**
+	 * Keys-up layout (#4967): the scroll hints name PgUp and PgDn, keys a
+	 * phone keyboard has, instead of shift+arrows, which it does not.
+	 */
+	touchHints?: boolean;
+	/** An approval card is up: plain PgUp/PgDn page the card, not the chat. */
+	approvalPending?: boolean;
 }
 
 /**
@@ -242,6 +249,8 @@ export function MessageList({
 	scrollEnabled = true,
 	turnRunning = true,
 	onToggleCompaction,
+	touchHints = false,
+	approvalPending = false,
 }: MessageListProps) {
 	const { stdout } = useStdout();
 	// Opening or closing a tool output changes row heights: re-estimate.
@@ -364,7 +373,12 @@ export function MessageList({
 	// Keyboard: shift+arrows (plain arrows are owned by the input field).
 	useInput(
 		(_input, key) => {
-			if (key.shift && key.upArrow) scrollBy(+1);
+			// Unshifted PgUp/PgDn scroll the chat only in keys-up (a phone has no
+			// shift) and never while an approval card owns them.
+			const plainPaging = touchHints && !approvalPending;
+			if (key.pageUp && !key.shift && plainPaging) scrollBy(+5);
+			else if (key.pageDown && !key.shift && plainPaging) scrollBy(-5);
+			else if (key.shift && key.upArrow) scrollBy(+1);
 			else if (key.shift && key.downArrow) scrollBy(-1);
 			else if (key.shift && key.pageUp) scrollBy(+5);
 			else if (key.shift && key.pageDown) scrollBy(-5);
@@ -429,7 +443,9 @@ export function MessageList({
 			{hiddenAbove > 0 && (
 				<Box flexShrink={0}>
 					<Text color={t.muted} dimColor>
-						{`↑ ${hiddenAbove} earlier ${hiddenAbove === 1 ? "line" : "lines"}${canScrollUp ? "  shift+↑" : ""}`}
+						{touchHints
+							? `↑ ${hiddenAbove} earlier${canScrollUp ? "  [PgUp]" : ""}`
+							: `↑ ${hiddenAbove} earlier ${hiddenAbove === 1 ? "line" : "lines"}${canScrollUp ? "  shift+↑" : ""}`}
 					</Text>
 				</Box>
 			)}
@@ -484,7 +500,9 @@ export function MessageList({
 			{clampedOffset > 0 && (
 				<Box justifyContent="center" flexShrink={0}>
 					<Text color={t.muted} dimColor>
-						{`↓ ${clampedOffset} below  shift+↓ or scroll down to follow`}
+						{touchHints
+							? `↓ ${clampedOffset} below  [PgDn]`
+							: `↓ ${clampedOffset} below  shift+↓ or scroll down to follow`}
 					</Text>
 				</Box>
 			)}

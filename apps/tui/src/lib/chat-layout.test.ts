@@ -34,3 +34,11 @@ describe("bubbleWidths", () => {
 		expect(bubbleWidths(10, "user")).toEqual({ bubble: 16, wrap: 14 });
 	});
 });
+
+describe("chatColumnWidth without a frame (keys-up, #4967)", () => {
+	test("an unframed shell gives the chat the whole width", () => {
+		expect(chatColumnWidth(52, { activity: false, framed: false })).toBe(52);
+		expect(chatColumnWidth(52, { activity: false })).toBe(48);
+		expect(chatColumnWidth(52, { activity: false, framed: true })).toBe(48);
+	});
+});

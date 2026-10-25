@@ -20,11 +20,13 @@ export interface ShellColumns {
 	/** Width of the PLAN column when it is showing, else 0 / undefined. */
 	planWidth?: number;
 	activity: boolean;
+	/** False in the keys-up layout (#4967): no frame, so no border or padding to subtract. */
+	framed?: boolean;
 }
 
 /** Columns the chat column really gets, never below `min`. */
 export function chatColumnWidth(cols: number, shell: ShellColumns, min = 24): number {
-	let width = cols - SHELL_CHROME;
+	let width = cols - (shell.framed === false ? 0 : SHELL_CHROME);
 	if (shell.planWidth && shell.planWidth > 0) width -= shell.planWidth + COLUMN_GAP;
 	if (shell.activity) width -= ACTIVITY_RAIL_WIDTH + COLUMN_GAP;
 	return Math.max(min, width);

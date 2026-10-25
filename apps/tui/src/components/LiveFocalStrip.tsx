@@ -48,6 +48,11 @@ import { FigureEight } from "./figure-eight-spinner.js";
 type Mode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
 
 interface LiveFocalStripProps {
+	/**
+	 * Keys-up layout (#4967): one row, no border. The state word and glyph
+	 * carry running and waiting; the row never grows, so the answer keeps its rows.
+	 */
+	compact?: boolean;
 	/** The ^Y mode. Not drawn in the strip (#3123): the footer shows it with
 	 *  its key. Kept so callers and the goal wrapper need no change. */
 	mode: Mode;
@@ -130,6 +135,7 @@ export function LiveFocalStrip({
 	animate = true,
 	width,
 	readiness,
+	compact = false,
 }: LiveFocalStripProps) {
 	// The ^Y mode is not shown here: beside the state it read as a phase the
 	// model was in ("DONE Planning"). The footer carries it with its key
@@ -190,12 +196,12 @@ export function LiveFocalStrip({
 	return (
 		<Box
 			width="100%"
-			minHeight={isProcessing ? 3 : 1}
+			minHeight={isProcessing && !compact ? 3 : 1}
 			// One border style in every state (#3238): colour says running or
-			// waiting, the corners never change.
-			borderStyle="single"
+			// waiting, the corners never change. Keys-up draws none (#4967).
+			borderStyle={compact ? undefined : "single"}
 			borderColor={showApprovalBorder ? t.orange : isProcessing ? t.teal : t.frame}
-			paddingX={1}
+			paddingX={compact ? 0 : 1}
 			justifyContent="space-between"
 			flexShrink={0}
 			overflow="hidden"
@@ -555,7 +561,12 @@ export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
 
 	return (
 		<Box flexDirection="column" flexShrink={0}>
-			<Box borderStyle="single" borderColor={goalBorderColor} paddingX={1} flexDirection="column">
+			<Box
+				borderStyle={stripProps.compact ? undefined : "single"}
+				borderColor={goalBorderColor}
+				paddingX={stripProps.compact ? 0 : 1}
+				flexDirection="column"
+			>
 				<Text color={t.textPrimary} wrap="truncate-end">
 					{goalLine} <Text color={t.orange}>●</Text>
 				</Text>

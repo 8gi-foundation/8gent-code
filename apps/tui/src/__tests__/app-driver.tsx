@@ -35,6 +35,8 @@ type FakeStdout = Writable & {
 	columns: number;
 	rows: number;
 	written: string;
+	/** The last whole multi-row frame Ink drew, the screen as a person sees it. */
+	lastFrame: string;
 	isTTY?: boolean;
 	/** Every write with its time, so a test can count frames per second. */
 	writes: { at: number; text: string }[];
@@ -46,6 +48,8 @@ function makeStdout(cols: number, rows: number, tty = false): FakeStdout {
 			const text = chunk.toString();
 			out.writes.push({ at: Date.now(), text });
 			if (out.writes.length > 20_000) out.writes.splice(0, 10_000);
+			// Ink writes one whole frame per call; the last multi-row one is the screen.
+			if (text.split("\n").length >= 3) out.lastFrame = text;
 			out.written += text;
 			if (out.written.length > 2_000_000) out.written = out.written.slice(-1_000_000);
 			cb();
@@ -53,6 +57,7 @@ function makeStdout(cols: number, rows: number, tty = false): FakeStdout {
 	}) as FakeStdout;
 	out.written = "";
 	out.writes = [];
+	out.lastFrame = "";
 	out.columns = cols;
 	out.rows = rows;
 	// A real terminal is a TTY. Ink keys its fullscreen and synchronized-output
@@ -81,6 +86,8 @@ export interface DrivenApp {
 	mark: () => number;
 	/** Type text, wait for it to echo, then press Enter. */
 	submit: (text: string) => Promise<number>;
+	/** The screen as the last frame Ink drew it, ANSI stripped, one string per row. */
+	frame: () => string[];
 	/** Raw bytes written to stdout so far (OSC sequences included). */
 	raw: () => string;
 	emit: (o: Record<string, unknown>) => void;
@@ -141,6 +148,7 @@ export async function bootApp(
 		mark,
 		since,
 		raw: () => stdout.written,
+		frame: () => strip(stdout.lastFrame).split("\n"),
 		emit: (o) => console.log(JSON.stringify(o)),
 		exited: () => exited,
 		writesSince: (sinceMs) => stdout.writes.filter((w) => w.at >= sinceMs),

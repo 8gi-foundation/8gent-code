@@ -99,6 +99,11 @@ interface TabBarProps {
 	permFor?: (tabId: string) => PermView | undefined;
 	/** Columns to lay out in; defaults to the terminal's. */
 	width?: number;
+	/**
+	 * Keys-up layout (#4967): the label row only, no underline and no sweep,
+	 * so the bar costs one row.
+	 */
+	line?: boolean;
 }
 
 export const GRAB_HINT = "[^G] drop on another tab to group  [Esc] cancel";
@@ -360,6 +365,7 @@ export function TabBar({
 	animate = true,
 	permFor,
 	width: widthProp,
+	line: oneRow = false,
 }: TabBarProps) {
 	const { stdout } = useStdout();
 	const width = widthProp ?? stdout?.columns ?? 80;
@@ -436,7 +442,7 @@ export function TabBar({
 	const barRef = useRef<Span | null>(target);
 	barRef.current = bar;
 	const animateRef = useRef(animate);
-	animateRef.current = animate;
+	animateRef.current = animate && !oneRow;
 
 	// Keyed on targetKey (the value of target), so a re-render with the same tab never restarts a sweep.
 	useEffect(() => {
@@ -475,7 +481,7 @@ export function TabBar({
 			id: `tab:${id}`,
 			dx: span.x,
 			w: span.width,
-			h: 2,
+			h: oneRow ? 1 : 2,
 			action: () => {
 				const to = idAt(i) ?? hiddenTarget();
 				if (to) onSwitch(to);
@@ -535,11 +541,13 @@ export function TabBar({
 				</Box>
 				{hint ? <Text color={t.orange}>{hint}</Text> : null}
 			</Box>
-			<Text wrap="truncate-end">
-				<Text color={t.dim}>{rule.before}</Text>
-				<Text color={t.orange}>{rule.bar}</Text>
-				<Text color={t.dim}>{rule.after}</Text>
-			</Text>
+			{oneRow ? null : (
+				<Text wrap="truncate-end">
+					<Text color={t.dim}>{rule.before}</Text>
+					<Text color={t.orange}>{rule.bar}</Text>
+					<Text color={t.dim}>{rule.after}</Text>
+				</Text>
+			)}
 		</Box>
 	);
 }

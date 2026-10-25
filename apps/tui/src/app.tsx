@@ -51,6 +51,7 @@ import {
 import { CommandPalette } from "./components/CommandPalette.js";
 import { HeaderBar } from "./components/HeaderBar.js";
 import { IntroBanner, stopIntroMusic } from "./components/IntroBanner.js";
+import { KeysUpTitleRow } from "./components/KeysUpTitleRow.js";
 import { SessionPicker } from "./components/SessionPicker.js";
 import { SessionTree } from "./components/SessionTree.js";
 import { TabBar } from "./components/TabBar.js";
@@ -265,6 +266,7 @@ import {
 } from "./lib/bang-command.js";
 import { detectBuildIntent } from "./lib/build-intent.js";
 import { chatColumnWidth } from "./lib/chat-layout.js";
+import { chromeTier } from "./lib/chrome-tier.js";
 import { clearSelection, onCopied } from "./lib/click-targets.js";
 import { appendClosingQuestionIfNeeded } from "./lib/closing-prompt.js";
 import {
@@ -8702,10 +8704,15 @@ export function App({
 	const showPlanColumn =
 		wideShell && planColumnOpen(planPref, planSteps.length > 0 || savedTasks.length > 0);
 	const showActivityRail = cols >= 90 && !inSetup;
+	// Keys-up (#4967): a phone with the keyboard open folds the chrome so the
+	// answer keeps its rows. Recomputed from the live viewport on every resize,
+	// so closing the keyboard restores the full layout at once.
+	const keysUp = chromeTier(viewport.height, cols) === "keys-up";
 	// The chat column's real width: the NOW strip and every bubble size from it.
 	const chatWidth = chatColumnWidth(viewport.width, {
 		planWidth: showPlanColumn ? PLAN_COLUMN_WIDTH : 0,
 		activity: showActivityRail,
+		framed: !keysUp,
 	});
 	// Smart session timer (#2367). Resets on every TUI restart — startTime
 	// is held in useState (line 686) so the value is captured once at
@@ -8791,33 +8798,57 @@ export function App({
 	return (
 		<ADHDModeContext.Provider value={{ enabled: adhdMode, ratio: 0.5 }}>
 			<FixedFrame>
-				<Box flexShrink={0}>
-					<HeaderBar
-						updateAvailable={updateInfo}
-						version={pkgInfo.version}
-						workspacePath={process.cwd()}
-						branch={git.branch}
-						syncStatus={git.noRepo ? "no repo" : git.sync}
-						micOn={Boolean(micOn)}
-						approvalPending={isApprovalPending}
-						width={cols}
-						living={headerMarkLiving}
-						permMode={activePermMode}
-					/>
-				</Box>
+				{keysUp ? (
+					<Box flexShrink={0}>
+						<KeysUpTitleRow
+							tabs={workspaceTabs.tabs}
+							onSwitch={workspaceTabs.switchTab}
+							isTabProcessing={perTabAgents.isTabProcessing}
+							lampFor={tabLampFor}
+							permFor={tabPermView}
+							version={pkgInfo.version}
+							branch={git.noRepo ? "no repo" : git.branch}
+							approvalPending={isApprovalPending}
+							width={cols}
+						/>
+					</Box>
+				) : (
+					<>
+						<Box flexShrink={0}>
+							<HeaderBar
+								updateAvailable={updateInfo}
+								version={pkgInfo.version}
+								workspacePath={process.cwd()}
+								branch={git.branch}
+								syncStatus={git.noRepo ? "no repo" : git.sync}
+								micOn={Boolean(micOn)}
+								approvalPending={isApprovalPending}
+								width={cols}
+								living={headerMarkLiving}
+								permMode={activePermMode}
+							/>
+						</Box>
 
-				<Box flexShrink={0}>
-					<TabBar
-						tabs={workspaceTabs.tabs}
-						onSwitch={workspaceTabs.switchTab}
-						isTabProcessing={perTabAgents.isTabProcessing}
-						lampFor={tabLampFor}
-						animate={showAnimations}
-						permFor={tabPermView}
-					/>
-				</Box>
+						<Box flexShrink={0}>
+							<TabBar
+								tabs={workspaceTabs.tabs}
+								onSwitch={workspaceTabs.switchTab}
+								isTabProcessing={perTabAgents.isTabProcessing}
+								lampFor={tabLampFor}
+								animate={showAnimations}
+								permFor={tabPermView}
+							/>
+						</Box>
+					</>
+				)}
 
-				<Box borderStyle="single" borderColor={t.frame} paddingX={1} flexGrow={1} minHeight={0}>
+				<Box
+					borderStyle={keysUp ? undefined : "single"}
+					borderColor={t.frame}
+					paddingX={keysUp ? 0 : 1}
+					flexGrow={1}
+					minHeight={0}
+				>
 					<Box flexGrow={1} minHeight={0} gap={1}>
 						{showPlanColumn &&
 							(planSteps.length > 0 ? (
@@ -8866,6 +8897,7 @@ export function App({
 									animate={showAnimations}
 									width={chatWidth}
 									readiness={readiness}
+									compact={keysUp}
 								/>
 							)}
 
@@ -8883,6 +8915,8 @@ export function App({
 										rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
 										contentWidth={chatWidth}
 										onToggleCompaction={toggleCompaction}
+										touchHints={keysUp}
+										approvalPending={isApprovalPending}
 									/>
 								)}
 							</Box>

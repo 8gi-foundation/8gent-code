@@ -211,3 +211,42 @@ describe("no ready model: the strip never says READY or names a model (#3290)", 
 		expect(el.props.borderColor).toBe(t.frame);
 	});
 });
+
+describe("LiveFocalStrip keys-up (compact, #4967)", () => {
+	const base = {
+		mode: "Planning" as const,
+		activeStep: "reading files",
+		route: "auto",
+		tokens: "2.4k",
+		contextPct: 35,
+		width: 52,
+	};
+
+	test("it is one row with no border, running or not", () => {
+		for (const isProcessing of [false, true]) {
+			const element = LiveFocalStrip({ ...base, isProcessing, compact: true });
+			expect(element.props.borderStyle).toBeUndefined();
+			expect(element.props.minHeight).toBe(1);
+		}
+		// The default keeps its border and its running height.
+		const roomy = LiveFocalStrip({ ...base, isProcessing: true });
+		expect(roomy.props.borderStyle).toBe("single");
+		expect(roomy.props.minHeight).toBe(3);
+	});
+
+	test("a pending approval still says WAIT on the one row", () => {
+		const out = renderToString(<LiveFocalStrip {...base} approvalPending compact />, {
+			columns: 52,
+		});
+		expect(out).toContain("WAIT");
+		expect(out.split("\n").filter((l) => l.trim() !== "").length).toBe(1);
+	});
+
+	test("running says NOW and the step on one row", () => {
+		const out = renderToString(<LiveFocalStrip {...base} isProcessing compact animate={false} />, {
+			columns: 52,
+		});
+		expect(out).toContain("NOW");
+		expect(out.split("\n").filter((l) => l.trim() !== "").length).toBe(1);
+	});
+});
