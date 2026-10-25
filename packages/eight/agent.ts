@@ -5070,7 +5070,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// The same gate as a model's call: mode, PreToolUse, then (G1) extensions.
 		const refusal = await this.refuseToolCall(toolName, args);
 		if (refusal) return refusal;
-		return this.executor.execute(toolName, args);
+		// Outside a model turn, so it joins this session's read scope here (#4901).
+		return runInReadScope(this.readScope, () => this.executor.execute(toolName, args));
 	}
 
 	/** Crash resume (#3653): add a harness note the model sees next turn. */

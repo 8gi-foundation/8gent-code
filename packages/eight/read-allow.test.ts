@@ -4,7 +4,7 @@
  * Real ToolExecutor and native tools, System One with no judge (rules and allowlist only).
  */
 
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, test as bunTest, describe, expect } from "bun:test";
 import {
 	existsSync,
 	mkdirSync,
@@ -14,6 +14,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { test } from "../../tests/scoped-test";
 import { cleanupTempDirs, tempDir } from "../../tests/temp-dirs";
 import { agentTools, setToolContext } from "../ai/tools";
 import { spawnsSelf } from "../permissions/pre-spawn-backstops";
@@ -481,7 +482,6 @@ describe("8SO read on #4722: siblings, depth floor, real paths, session scope", 
 		runInReadScope(a, () => allowReadsFromPrompt(`Read ${join(outside, "inbox.jsonl")}`, cwd));
 		expect(runInReadScope(a, () => isReadAllowed(join(outside, "other.txt")))).toBe(true);
 		expect(runInReadScope(b, () => isReadAllowed(join(outside, "other.txt")))).toBe(false);
-		expect(isReadAllowed(join(outside, "other.txt"))).toBe(false); // no scope: the fallback is empty
 	});
 
 	test("prompt entries are rebuilt each turn from that turn's message; manual entries stay for the session", () => {
@@ -507,6 +507,33 @@ describe("8SO read on #4722: siblings, depth floor, real paths, session scope", 
 		});
 		expect(takeBoundaryStop()).toBeNull(); // the fallback scope saw nothing
 		expect(takeBoundaryStop(s)).toContain(join(outside, "inbox.jsonl"));
+	});
+});
+
+describe("no session scope remembers nothing (#4901)", () => {
+	const file = () => join(outside, "other.txt");
+
+	bunTest("a yes made with no scope is not visible to a later call with no scope", () => {
+		allowReadsFromPrompt(`Read ${file()}`, cwd);
+		addReadAllowDir(outside, cwd);
+		expect(isReadAllowed(file())).toBe(false);
+		expect(readAllowEntries()).toEqual([]);
+	});
+
+	bunTest("a no-scope call never sees approvals from a scoped session", () => {
+		const s = new ReadScope();
+		runInReadScope(s, () => {
+			allowReadsFromPrompt(`Read ${file()}`, cwd);
+			addReadAllowDir(outside, cwd);
+		});
+		expect(runInReadScope(s, () => isReadAllowed(file()))).toBe(true);
+		expect(isReadAllowed(file())).toBe(false);
+		expect(readAllowEntries()).toEqual([]);
+	});
+
+	bunTest("a no-scope yes does not leak into a scoped session", () => {
+		allowReadsFromPrompt(`Read ${file()}`, cwd);
+		expect(runInReadScope(new ReadScope(), () => isReadAllowed(file()))).toBe(false);
 	});
 });
 

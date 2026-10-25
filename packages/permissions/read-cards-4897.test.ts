@@ -6,9 +6,10 @@
  * boundary alone decides; it runs in every mode.
  */
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { test } from "../../tests/scoped-test";
 import { readCardsShown, resetReadAllow } from "./read-allow";
 import { neverReadClass, osReadSpec } from "./read-boundary";
 import { SYSTEM_ONE_FLAG, _resetSystemOne, systemOneGate } from "./system-one-gate";

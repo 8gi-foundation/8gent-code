@@ -40,9 +40,12 @@ export class ReadScope {
 }
 
 const scopeStore = new AsyncLocalStorage<ReadScope>();
-/** Used when no session scope is active (tests, a bare executor). */
-const fallbackScope = new ReadScope();
-const cur = (): ReadScope => scopeStore.getStore() ?? fallbackScope;
+/**
+ * With no session scope active (a bare executor, a call outside a turn) there is nothing to
+ * remember a yes in: each call gets a new empty scope, so a yes written there is thrown away
+ * and can never be read by another call or another session (#4901).
+ */
+const cur = (): ReadScope => scopeStore.getStore() ?? new ReadScope();
 
 /** Run `fn` (a turn) with `scope` as the active allowlist. */
 export function runInReadScope<T>(scope: ReadScope, fn: () => T): T {
