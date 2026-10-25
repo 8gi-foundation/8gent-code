@@ -691,6 +691,8 @@ export {
 	regressedChecks,
 	heldForRuns,
 } from "./vessel-proposal-held.js";
+export { mayOfferSend } from "./vessel-proposal-send-gate.js";
+export type { VesselProposalSendInput } from "./vessel-proposal-send-gate.js";
 
 export default {
 	SelfAutonomy,
