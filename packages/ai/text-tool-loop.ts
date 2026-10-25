@@ -98,6 +98,7 @@ import {
 	runTextToolTurn,
 } from "./text-tool-client";
 import type { ToolSpec } from "./text-tools";
+import { type GuardCall, TurnGuard, type TurnLimits, blockedReasonOf } from "./turn-guards";
 import { type PlanItem, parsePlan } from "./update-plan";
 import { UselessStreak } from "./useless-streak";
 
@@ -168,6 +169,14 @@ export interface TextToolAgentOptions {
 	 * person who already said keep going (yolo, Infinite).
 	 */
 	silentProgress?: (line: string) => void;
+	/**
+	 * Per-turn limits that hold in every mode (#4982): tool-call cap and refused
+	 * calls (this loop reports no token usage, so the token limit is not checked
+	 * here). When one trips the turn ends with one plain line. Unset: off.
+	 */
+	turnLimits?: TurnLimits;
+	/** The first round offers no tools: the message asked for no work (#4982). A reply that asks for a tool gets the round again with tools. */
+	chatOnlyFirstRound?: boolean;
 	/**
 	 * Steering (D1). Drained before every model call after the first: each
 	 * string it returns joins the conversation as a user message, after the
@@ -717,6 +726,8 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 	// Set once the streak trips: the next round runs with no tools and ends the turn.
 	let answerOnly = false;
 	const silent = new SilentCalls(opts.silentCalls ?? 0);
+	const turnGuard = opts.turnLimits ? new TurnGuard(opts.turnLimits) : null;
+	let chatOnlyRound = opts.chatOnlyFirstRound === true;
 	// Which guard ended tool use: its note goes with the answer-only round.
 	let answerOnlyNote = "";
 
@@ -817,7 +828,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		try {
 			turn = await runTextToolTurn({
 				messages,
-				tools: answerOnly ? [] : specs,
+				tools: answerOnly || chatOnlyRound ? [] : specs,
 				call: opts.call,
 				toolPrompt: opts.toolPrompt,
 			});
@@ -844,6 +855,15 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		const degen = cleanDegenerateReply(turn.content);
 		const replyText = degen.clean;
 		lastContent = replyText;
+		// Chat-only first round (#4982): a reply that asks for a tool gets this round
+		// again with the tools; any other reply is the answer.
+		if (chatOnlyRound) {
+			chatOnlyRound = false;
+			if (turn.toolCalls.length > 0 || turn.cutOffToolCall) {
+				round--;
+				continue;
+			}
+		}
 		// Answer-only turn (#3613): whatever it said is the answer. A tool call
 		// in it is not run; the tools were withheld on purpose.
 		if (answerOnly) return finish(finalContent(replyText), round);
@@ -1045,6 +1065,7 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		// update_plan call from the log.
 		let ranWork = false;
 		const roundWorkCalls: string[] = [];
+		const roundGuardCalls: GuardCall[] = [];
 		let roundHadSuccess = false;
 		const roundBlockReasons: string[] = [];
 		const roundImages: string[] = [];
@@ -1082,6 +1103,11 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 			if (!isPlanUpdate) {
 				ranWork = true;
 				roundWorkCalls.push(tc.name);
+				roundGuardCalls.push({
+					name: tc.name,
+					detail: String(tc.arguments?.command ?? tc.arguments?.path ?? tc.arguments?.url ?? ""),
+					blockedReason: blockedReasonOf(result),
+				});
 				streak.record(tc.name, tc.arguments, result);
 				// A gate block ("[TOOLG8 BLOCKED]", "[BLOCKED]") is a refusal, not
 				// progress, exactly like an "Error..." result.
@@ -1150,6 +1176,12 @@ export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<Text
 		// stripped blocks) as the assistant message; the model still has its own
 		// emitted tool_call intent in its head via the result framing below.
 		if (cutOffNote) resultParts.push(cutOffNote);
+		// Per-turn limits (#4982): in every mode, one plain line ends the turn.
+		if (turnGuard) {
+			turnGuard.round({ calls: roundGuardCalls });
+			const stopLine = turnGuard.stop();
+			if (stopLine) return finish(stopLine, round);
+		}
 		silent.round(replyText, roundWorkCalls);
 		if (opts.silentProgress && silent.tripped()) opts.silentProgress(silent.takeProgress());
 		if (streak.tripped() && round < maxRounds) {

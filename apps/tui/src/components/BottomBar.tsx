@@ -64,6 +64,9 @@ interface BottomBarProps {
 	verification?: FooterData["verification"];
 	/** The TUI is attached to the local daemon (#4829). */
 	daemonAttached?: boolean;
+	/** A turn is running on the focused tab, and its tool calls so far (#4982). */
+	turnRunning?: boolean;
+	turnCalls?: number;
 }
 
 /** The signed-in display name (#2366). The OS login is not shown: it is the
@@ -110,6 +113,8 @@ export function BottomBar(props: BottomBarProps) {
 							durable: props.durable,
 							verification: props.verification,
 							daemonAttached: props.daemonAttached,
+							turnRunning: props.turnRunning,
+							turnCalls: props.turnCalls,
 						}}
 					/>
 				)}

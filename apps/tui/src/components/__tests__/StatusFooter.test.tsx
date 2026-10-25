@@ -738,3 +738,23 @@ describe("the unverified flag never pushes [^P] palette out at 48 columns and be
 		});
 	}
 });
+
+describe("the stop key while a turn runs (#4982)", () => {
+	const stop = (d: Parameters<typeof buildFooterSegments>[0]) =>
+		buildFooterSegments(d).find((s) => s.key === "stop");
+
+	test("shown while a turn runs, absent when idle", () => {
+		expect(stop({ mode: "Planning", turnRunning: true, columns: 160 })?.value).toBe("Esc stop");
+		expect(stop({ mode: "Planning", turnRunning: false, columns: 160 })).toBeUndefined();
+		expect(stop({ mode: "Planning", columns: 160 })).toBeUndefined();
+	});
+
+	test("on a phone-width row only once the turn is past 8 tool calls", () => {
+		expect(
+			stop({ mode: "Planning", turnRunning: true, columns: 48, turnCalls: 8 }),
+		).toBeUndefined();
+		expect(stop({ mode: "Planning", turnRunning: true, columns: 48, turnCalls: 9 })?.value).toBe(
+			"Esc stop",
+		);
+	});
+});

@@ -38,6 +38,11 @@ const ENV: Record<string, string> = {
 	EIGHT_TEXT_TOOLS: "1",
 	// These tests run long silent tool chains on purpose; the silent-call stop (#4794) is not under test.
 	EIGHT_SILENT_CALLS: "0",
+	// These tests drive 51 to 101 calls to reach the breaker's own limits (50 global, 100 refused).
+	// The per-turn tool cap (#4982, default 48) would end the turn first and is not under test here.
+	// The refused-call stop (EIGHT_TURN_BLOCKS) stays at its default on purpose: chaining refusals
+	// and printed [BLOCKED] lines must not trip it.
+	EIGHT_TURN_TOOL_CAP: "0",
 };
 let home: string;
 let repo: string;

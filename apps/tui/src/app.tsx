@@ -9050,6 +9050,8 @@ export function App({
 					sandboxOff={sandboxOff}
 					verification={verificationByTab[activeTabId]}
 					daemonAttached={daemonAttached}
+					turnRunning={isProcessing}
+					turnCalls={toolCount}
 					djKeys={djKeys}
 					onDjKeysDone={endDjKeys}
 				/>

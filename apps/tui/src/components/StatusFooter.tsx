@@ -111,7 +111,14 @@ export interface FooterData {
 	 * where tools run has changed; a TUI on its own shows nothing.
 	 */
 	daemonAttached?: boolean;
+	/** A turn is running: the footer says how to stop it (#4982). */
+	turnRunning?: boolean;
+	/** Tool calls so far this turn. On a phone-width row the stop key shows only past STOP_HINT_CALLS. */
+	turnCalls?: number;
 }
+
+/** Tool calls after which the stop key shows even on a crowded phone-width row (#4982). */
+export const STOP_HINT_CALLS = 8;
 
 /** A value the app passes when it does not know the real one. */
 function known(value: string | undefined): value is string {
@@ -187,6 +194,11 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			// Running without asking is the state a person must not miss.
 			priority: infinite ? 1 : 5,
 		});
+	}
+	// While a turn runs, the key that stops it. On a crowded row (a phone) only once
+	// the turn has run long enough that a person is likely to want it (#4982).
+	if (d.turnRunning && ((d.columns ?? 160) >= 60 || (d.turnCalls ?? 0) > STOP_HINT_CALLS)) {
+		out.push({ key: "stop", value: "Esc stop", color: ui.orange, priority: 1 });
 	}
 	if (d.judge && d.judge !== "ready") {
 		out.push({

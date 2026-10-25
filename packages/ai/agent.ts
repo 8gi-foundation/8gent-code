@@ -24,8 +24,18 @@ import {
 	getRuntimeParams,
 } from "./tools";
 import { createBudgetDrain, resolveTurnBudgetMs } from "./turn-budget";
+import { type TurnLimits, turnStopForSteps } from "./turn-guards";
 
 export interface EightAgentConfig {
+	/**
+	 * Per-turn limits that hold in every mode (#4982): tool-call cap, refused calls,
+	 * context growth. Unset: off. The run ends when one trips and `turnStop.line`
+	 * holds the plain line that tells the person why.
+	 */
+	turnLimits?: TurnLimits;
+	turnStop?: { line: string | null };
+	/** The first step runs with no tools: the message asked for no work (#4982). */
+	chatOnlyFirstRound?: boolean;
 	/** Tool calls with no prose between them before a step runs without tools and reports (#4791). 0 or unset: off. */
 	silentCalls?: number;
 	/** With silentCalls: one progress line at the threshold and the run carries on (#4794). */
@@ -307,7 +317,15 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		...(config.presencePenalty !== undefined ? { presencePenalty: config.presencePenalty } : {}),
 		tools,
 		experimental_context: toolContext,
-		stopWhen: stepCountIs(config.maxSteps || 30),
+		stopWhen: [
+			stepCountIs(config.maxSteps || 30),
+			({ steps }: { steps: ReadonlyArray<any> }) => {
+				if (!config.turnLimits) return false;
+				const line = turnStopForSteps(steps, config.turnLimits);
+				if (line && config.turnStop) config.turnStop.line = line;
+				return line !== null;
+			},
+		],
 		// Fires before every model call. onStepStart is observation only and a
 		// throwing callback never breaks the loop. Two things change the step:
 		// steering (D1) splices drained messages in, see steerMessages,
@@ -334,6 +352,7 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 			if (stepNumber === 0) {
 				silentFired = false;
 				silentFrom = 0;
+				if (config.turnStop) config.turnStop.line = null;
 			}
 			if (config.silentProgress && silentThreshold > 0 && stepNumber > 0) {
 				const run = silentCallsRunForSteps((steps ?? []).slice(silentFrom), silentThreshold);
@@ -354,7 +373,8 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 			const capped = capToolResults(messages);
 			const steered =
 				steerMessages(steerLog, stepNumber, capped, steer) ?? (capped !== messages ? capped : null);
-			if (silentStop)
+			// A message that asked for no work gets its reply before any tool (#4982).
+			if (silentStop || (config.chatOnlyFirstRound && stepNumber === 0))
 				return { ...(steered ? { messages: steered } : {}), toolChoice: "none" as const };
 			return steered ? { messages: steered } : undefined;
 		},

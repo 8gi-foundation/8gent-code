@@ -304,11 +304,14 @@ import {
 	toOpenAiV1Base,
 	toolDefsToSpecs,
 } from "../ai";
+import { isChatOnly } from "../ai/chat-only";
 import { CARRY_ON_SILENT_CALLS, resolveSilentCalls } from "../ai/silent-calls";
+import { type TurnLimits, resolveTurnLimits } from "../ai/turn-guards";
 import { resolveUselessStreak } from "../ai/useless-streak";
 import { cdPrefixShape } from "../permissions/cd-prefix";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
 import { isShellToolName } from "../permissions/shell-tools";
+import { scrub } from "./secret-scanner";
 
 /** One warning per process for a bad EIGHT_BROWSER_PROFILE (#3622). */
 let browserProfileWarned = false;
@@ -572,6 +575,8 @@ export class Agent {
 	private compactionUndo = new CompactionUndo();
 	/** The active provider's known context window (SPEC-05), shared by both compactors (#3237). */
 	private compactionContextWindow: number;
+	/** True once compactionContextWindow was read from the server, not the provider table (#4982). */
+	private contextWindowFromEndpoint = false;
 	/** #3643: pending one-shot read of the Ollama server's real context window. */
 	private serverContextWindow: {
 		baseUrl: string;
@@ -1745,6 +1750,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		textForAgent: string;
 		/** A greeting alone: no tools, extension tools included (#4756). */
 		smallTalk?: boolean;
+		/** The message asked for no work: the first round offers no tools (#4982). */
+		chatOnly?: boolean;
 	}): Promise<string> {
 		const {
 			providerName,
@@ -1754,6 +1761,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			chatStartTime,
 			textForAgent,
 			smallTalk = false,
+			chatOnly = false,
 		} = opts;
 
 		// Live abort controller for THIS text-tool turn. The text-tool branch
@@ -2069,6 +2077,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				// Report after a run of silent tool calls (#4791).
 				silentCalls: this.silentCallsLimit(),
 				silentProgress: this.silentProgressSink(),
+				// Per-turn limits and the chat-only first round (#4982).
+				turnLimits: this.turnLimits(),
+				chatOnlyFirstRound: chatOnly,
 				// Steering (D1): delivered after the running tool calls; then the budget notice.
 				steer: () => [...this.drainSteers(), ...budgetDrain()],
 			});
@@ -2695,6 +2706,25 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		return n > 0 && this.silentCarryOn() ? Math.max(n, CARRY_ON_SILENT_CALLS) : n;
 	}
 
+	/**
+	 * Per-turn limits for a person's top-level turn (#4982): tool-call cap, refused
+	 * calls, context growth. They hold in every permission mode, Infinite included.
+	 * Headless runs, child 8gents and Table are driven by a task or a channel and
+	 * run to the end, as with silentCallsLimit.
+	 */
+	/** @internal exposed for tests */
+	turnLimits(): TurnLimits | undefined {
+		if (this.config.headless || this.agentDepth > 0 || this.config.agentScope === "__table__")
+			return undefined;
+		// The token budget defaults on only for a window the endpoint reported; the
+		// per-provider table value is a guess that would end a 128k model's turn at 16k.
+		return resolveTurnLimits(
+			this.contextWindowFromEndpoint ? this.compactionContextWindow : 0,
+			process.env,
+			(text) => scrub(text).scrubbed,
+		);
+	}
+
 	private silentCarryOn(): boolean {
 		return (
 			this.infiniteModeActive ||
@@ -2822,6 +2852,15 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 		}
 		const noToolsTurn = smallTalkTurn || lightNote !== null;
+		// A message that asks for no work gets its reply before any tool (#4982). A spoken
+		// utterance is marked by the voice path: voiceChatActive, set by the TUI's voice chat.
+		const chatOnlyTurn =
+			!noToolsTurn &&
+			!imageBase64 &&
+			!this.config.headless &&
+			this.agentDepth === 0 &&
+			this.config.agentScope !== "__table__" &&
+			isChatOnly(textForAgent, { spoken: getRuntimeParams().voiceChatActive === true });
 
 		// If image attached, fire off parallel vision interpretation (like /btw)
 		// The main agent stays on its text model — never switches.
@@ -3113,6 +3152,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				chatStartTime,
 				textForAgent,
 				smallTalk: noToolsTurn,
+				chatOnly: chatOnlyTurn,
 			});
 			await this.readServerContextWindow();
 			await this.compactIfNeeded(providerConfig);
@@ -3165,6 +3205,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			);
 		};
 
+		// The plain line that ended this turn, when a per-turn limit tripped (#4982).
+		const guardStop: { line: string | null } = { line: null };
 		let agentConfig: EightAgentConfig = {
 			provider: providerConfig,
 			instructions: effectiveInstructions,
@@ -3173,6 +3215,10 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			nudgeFraction: harness.nudgeFraction,
 			silentCalls: this.silentCallsLimit(),
 			silentProgress: this.silentProgressSink(),
+			// Per-turn limits and the chat-only first round (#4982).
+			turnLimits: this.turnLimits(),
+			turnStop: guardStop,
+			chatOnlyFirstRound: chatOnlyTurn,
 			temperature: tunedParams.temperature,
 			topP: tunedParams.topP,
 			topK: tunedParams.topK,
@@ -3929,6 +3975,14 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				);
 			}
 
+			// A per-turn limit tripped (#4982): its plain line is the reply, and no
+			// follow-up generate (verify, output gate, empty-turn) runs after it.
+			const limitLine: string | null = guardStop.line;
+			if (limitLine) {
+				console.log(`[turn-limit] ${limitLine}`);
+				result = { ...result, text: limitLine };
+			}
+
 			// Cache affinity: remember which backend now holds this session's prompt.
 			// The prompt size is the last step's real usage; the history estimate
 			// stands in when the endpoint reported none. agentConfig names the
@@ -4007,7 +4061,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// retired-fact nudge (#3811) rides this same branch even with the gate
 			// off: it costs one extra generate only when a retired token is left in
 			// a file that drew a warning. With the gate on and nudging, its nudge wins.
-			const verifyNudge = result?.text ? this.turnEndNudge(result.text) : null;
+			const verifyNudge = limitLine ? null : result?.text ? this.turnEndNudge(result.text) : null;
 			if (verifyNudge) {
 				console.log(
 					`[turn-end] nudge fired (${verifyNudge.startsWith("[SELF-CHECK]") ? "completion self-check" : "verify gate or retired fact"}) - one extra generate`,
@@ -4061,7 +4115,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			}
 
 			// Required output (#4734): the gate counts its own nudges (two per turn).
-			for (let out = result?.text ? this.outputGateNudge(result.text) : null; out; ) {
+			for (let out = result?.text && !limitLine ? this.outputGateNudge(result.text) : null; out; ) {
 				const outAgent = createEightAgent(agentConfig);
 				this.abortController = new AbortController();
 				const turnMsgs: any[] = Array.isArray(result.response?.messages)
@@ -4672,6 +4726,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		}
 		this.compaction = new ProactiveCompression({ contextWindow: window });
 		this.compactionContextWindow = window;
+		this.contextWindowFromEndpoint = true;
 	}
 
 	/**
