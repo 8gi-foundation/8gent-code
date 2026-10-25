@@ -16,7 +16,13 @@ import { resolveOllamaBaseUrl } from "../ai/text-tool-endpoint";
 import { LocalServerHttpError, createOllamaServer, isOllamaEnabled } from "../local-model-server";
 import type { ProviderManager } from "../providers/index";
 import { getVault, getVaultOrNull, setKeyInFile } from "../secrets";
-import { DEFAULT_SETTINGS, loadSettings, saveSettings } from "../settings/index.js";
+import {
+	DEFAULT_SETTINGS,
+	SECRET_NAME_REFUSAL,
+	loadSettings,
+	looksLikeSecret,
+	saveSettings,
+} from "../settings/index.js";
 import { type CommunicationStyle, isCommunicationStyle } from "./communication-style";
 import {
 	type FoundServer,
@@ -378,7 +384,7 @@ export function ollamaCheckLine(check: OllamaCheck | "pending" | null): string {
  */
 function persistAgentName(roleKey: "orchestrator" | "engineer" | "qa", name: string): void {
 	const trimmed = (name ?? "").trim();
-	if (!trimmed) return;
+	if (!trimmed || looksLikeSecret(trimmed)) return;
 	try {
 		const current = loadSettings();
 		const next = {
@@ -1013,6 +1019,26 @@ export class OnboardingManager {
 	private keyError: string | null = null;
 	private keyProvider: HostedKeyProvider | null = null;
 
+	/** Steps whose typed answer becomes a name someone reads (#5098). */
+	private static readonly NAME_STEPS = new Set([
+		"identity",
+		"agent-name-orchestrator",
+		"agent-name-engineer",
+		"agent-name-qa",
+		"voice",
+	]);
+
+	/**
+	 * The refusal line when the current step takes a name and the answer is
+	 * key-shaped, else null. Callers check this before echoing the answer, so
+	 * the value never reaches the chat. The question is asked again.
+	 */
+	refuseSecretName(answer: string): string | null {
+		const q = this.getNextQuestion();
+		if (!q || !OnboardingManager.NAME_STEPS.has(q.step)) return null;
+		return looksLikeSecret(answer) ? SECRET_NAME_REFUSAL : null;
+	}
+
 	/** Why the last pasted key was refused, once; the question is asked again. */
 	takeKeyError(): string | null {
 		const e = this.keyError;
@@ -1237,6 +1263,7 @@ export class OnboardingManager {
 	 * which then goes to the model as usual).
 	 */
 	answerNameClarification(answer: string): string | null {
+		if (looksLikeSecret(answer)) return null;
 		const name = asName(answer);
 		if (!name) return null;
 		this.user.identity.name = name;
@@ -1259,6 +1286,11 @@ export class OnboardingManager {
 		const currentQuestion = this.getNextQuestion();
 		if (!currentQuestion) {
 			return { success: false, nextQuestion: null };
+		}
+
+		// A key typed where a name goes is never saved (#5098).
+		if (this.refuseSecretName(answer)) {
+			return { success: false, nextQuestion: currentQuestion };
 		}
 
 		// Validate if validator exists

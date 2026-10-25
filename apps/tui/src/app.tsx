@@ -119,7 +119,7 @@ import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { useViewport } from "./hooks/useViewport.js";
 import { useVoiceChat } from "./hooks/useVoiceChat.js";
 import { useVoiceInput } from "./hooks/useVoiceInput.js";
-import { type TabType, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
+import { type TabType, takeNameScrubNotice, useWorkspaceTabs } from "./hooks/useWorkspaceTabs.js";
 import { type ADHDSoundscape, getADHDAudio } from "./lib/adhd-audio.js";
 import {
 	autoAttachAllowed,
@@ -211,8 +211,10 @@ import { getProviderManager } from "../../../packages/providers/index.js";
 import type { ThinkingLevel } from "../../../packages/providers/thinking-level.js";
 import { setKeyOwner } from "../../../packages/secrets/key-vault.js";
 import {
+	SECRET_NAME_REFUSAL,
 	getVoiceForRole,
 	loadSettings as loadAppSettings,
+	looksLikeSecret,
 } from "../../../packages/settings/index.js";
 import { getTaskManager } from "../../../packages/tasks/index.js";
 // Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
@@ -3207,6 +3209,12 @@ export function App({
 		]);
 	}, []);
 
+	// A saved name that looked like a key was reset at launch (#5098): say so once.
+	useEffect(() => {
+		const notice = takeNameScrubNotice();
+		if (notice) addSystemMessage(notice);
+	}, [addSystemMessage]);
+
 	// Durable turns (docs/specs/DURABLE-TURNS.md): the ledger follows the session
 	// `8gent --resume` reopens, and a turn a kill cut off mid-tool is reported once.
 	const [durableOn, setDurableOn] = useState(isDurableEnabled);
@@ -5977,6 +5985,8 @@ export function App({
 					const newName = args.join(" ").trim();
 					if (!newName) {
 						addSystemMessage("Usage: /rename My New Tab Name");
+					} else if (looksLikeSecret(newName)) {
+						addSystemMessage(SECRET_NAME_REFUSAL);
 					} else if (workspaceTabs.activeTab) {
 						workspaceTabs.renameTab(workspaceTabs.activeTab.id, newName);
 						addSystemMessage(`Tab renamed to "${newName}"`);
@@ -7785,6 +7795,11 @@ export function App({
 		// the question closes either way.
 		if (nameQuestionOpen && !showOnboarding) {
 			setNameQuestionOpen(false);
+			// A key typed as a name is neither saved nor sent to the model (#5098).
+			if (looksLikeSecret(input)) {
+				addSystemMessage(SECRET_NAME_REFUSAL);
+				return;
+			}
 			const name = input && !attached ? onboardingManager.answerNameClarification(input) : null;
 			if (name) {
 				appendToTab(tabId, {
@@ -7805,6 +7820,12 @@ export function App({
 			// empty Enter takes the default) and as the chat shows it.
 			const currentQ = onboardingManager.getNextQuestion();
 			const answer = currentQ ? answerFromInput(currentQ, input) : { value: input, echo: input };
+			// A key typed where a name goes: not echoed, not saved, asked again (#5098).
+			const secretNameRefusal = onboardingManager.refuseSecretName(answer.value);
+			if (secretNameRefusal) {
+				addSystemMessage(secretNameRefusal);
+				return;
+			}
 			if (answer.echo) {
 				appendToTab(tabId, {
 					id: `user-onboard-${Date.now()}`,

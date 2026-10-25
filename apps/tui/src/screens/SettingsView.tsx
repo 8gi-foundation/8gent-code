@@ -20,7 +20,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 // These are the canonical surface for inter-package use; deep imports would
 // bypass each package's documented API. Suppressed by design.
 // react-doctor-disable-next-line react-doctor/no-barrel-import
-import { type Settings, loadSettings, saveSettings } from "../../../../packages/settings/index.js";
+import {
+	SECRET_NAME_REFUSAL,
+	type Settings,
+	loadSettings,
+	looksLikeSecret,
+	saveSettings,
+} from "../../../../packages/settings/index.js";
 import { isAndroidHost } from "../../../../packages/voice/termux.js";
 import { AppText, Heading, MutedText } from "../components/primitives/AppText.js";
 import { Divider } from "../components/primitives/Divider.js";
@@ -494,6 +500,8 @@ export function SettingsView({
 	const [ctxRowIndex, setCtxRowIndex] = useState(0);
 	const [mode, setMode] = useState<Mode>("browse");
 	const [editBuffer, setEditBuffer] = useState("");
+	// Set when a typed value looked like a key and was refused (#5098). Never holds the value.
+	const [refusal, setRefusal] = useState<string | null>(null);
 	// State value is read in render or feeds a derived value used in render — useRef would break visible output.
 	// react-doctor-disable-next-line react-doctor/rerender-state-only-in-handlers
 	const [showHelp, setShowHelp] = useState(false);
@@ -577,7 +585,14 @@ export function SettingsView({
 			const parsed = Number.parseFloat(editBuffer);
 			const clamped = clampNumber(parsed, nf.min, nf.max);
 			updateField(field, clamped);
+		} else if (field.kind === "text" && looksLikeSecret(editBuffer)) {
+			// A key is not a name or a voice: refuse, clear, never echo.
+			setRefusal(SECRET_NAME_REFUSAL);
+			setMode("browse");
+			setEditBuffer("");
+			return;
 		} else {
+			setRefusal(null);
 			updateField(field, editBuffer);
 		}
 		setMode("browse");
@@ -908,6 +923,8 @@ export function SettingsView({
 				<MutedText>
 					Editing {field?.label || ""} - type to change, Enter to save, Esc to cancel
 				</MutedText>
+			) : refusal ? (
+				<MutedText>{refusal}</MutedText>
 			) : (
 				<MutedText>
 					arrows=navigate space=toggle/cycle e=edit ? =help q=close - current: {valueDisplay}

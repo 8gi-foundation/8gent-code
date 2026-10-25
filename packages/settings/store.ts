@@ -196,7 +196,10 @@ export function saveSettings(s: Settings): void {
 			}
 			out = clone as unknown as Settings;
 		}
-		fs.writeFileSync(settingsFile(), `${JSON.stringify(out, null, 2)}\n`, "utf-8");
+		const target = settingsFile();
+		const tmp = `${target}.${process.pid}.tmp`;
+		fs.writeFileSync(tmp, `${JSON.stringify(out, null, 2)}\n`, "utf-8");
+		fs.renameSync(tmp, target);
 	} catch {
 		// Best-effort persistence
 	}

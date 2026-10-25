@@ -20,7 +20,12 @@ import { getRunnerConfig } from "../../../../packages/orchestration/role-registr
 // These are the canonical surface for inter-package use; deep imports would
 // bypass each package's documented API. Suppressed by design.
 // react-doctor-disable-next-line react-doctor/no-barrel-import
-import { resolveRoleName } from "../../../../packages/settings/index.js";
+import {
+	SECRET_NAME_RESET_NOTICE,
+	looksLikeSecret,
+	resolveRoleName,
+	scrubSecretAgentNames,
+} from "../../../../packages/settings/index.js";
 import {
 	deleteSession as deleteWindowSession,
 	isPidAlive,
@@ -176,7 +181,54 @@ function pruneDeadWindowTabs(tabs: WorkspaceTab[]): WorkspaceTab[] {
 	});
 }
 
+let scrubNoticePending = false;
+
+/**
+ * On start: a saved agent name or tab title that looks like a key (#5098) is
+ * replaced with the role default in settings.json and tabs/state.json. A tab
+ * without a role gets "Untitled". The value is never printed or logged.
+ * Returns true when something was reset.
+ */
+export function scrubSecretNames(stateFile: string = STATE_FILE): boolean {
+	let hit = scrubSecretAgentNames();
+	try {
+		if (fs.existsSync(stateFile)) {
+			const data = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
+			if (Array.isArray(data)) {
+				let changed = false;
+				for (const t of data as Array<Record<string, unknown>>) {
+					if (!looksLikeSecret(t?.title)) continue;
+					const role = (t.data as { role?: string } | undefined)?.role;
+					t.title =
+						role === "orchestrator" || role === "engineer" || role === "qa"
+							? resolveRoleName(role)
+							: "Untitled";
+					changed = true;
+				}
+				if (changed) {
+					const tmp = `${stateFile}.${process.pid}.tmp`;
+					fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
+					fs.renameSync(tmp, stateFile);
+					hit = true;
+				}
+			}
+		}
+	} catch {
+		// Best-effort: a corrupt state file is reset elsewhere.
+	}
+	if (hit) scrubNoticePending = true;
+	return hit;
+}
+
+/** The one notice a scrub earns, once; null when nothing was reset. */
+export function takeNameScrubNotice(): string | null {
+	if (!scrubNoticePending) return null;
+	scrubNoticePending = false;
+	return SECRET_NAME_RESET_NOTICE;
+}
+
 function loadState(): WorkspaceTab[] | null {
+	scrubSecretNames();
 	try {
 		if (fs.existsSync(STATE_FILE)) {
 			const raw = fs.readFileSync(STATE_FILE, "utf-8");
@@ -485,6 +537,8 @@ export function useWorkspaceTabs() {
 	// renameTab
 	// ----------------------------------------
 	const renameTab = useCallback((tabId: string, title: string) => {
+		// A key is never a tab title: it would be saved in tabs/state.json (#5098).
+		if (looksLikeSecret(title)) return;
 		setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, title } : t)));
 	}, []);
 

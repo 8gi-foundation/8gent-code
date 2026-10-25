@@ -34,6 +34,8 @@ export type {
 
 export { getVoiceForRole } from "./voice.js";
 export { resolveRoleName } from "./agents.js";
+export { looksLikeSecret, SECRET_NAME_REFUSAL, SECRET_NAME_RESET_NOTICE } from "./secret-guard.js";
+export { scrubSecretAgentNames } from "./scrub-names.js";
 export type { AgentRoleKey } from "./agents.js";
 
 export { DEFAULT_SETTINGS } from "./defaults.js";
