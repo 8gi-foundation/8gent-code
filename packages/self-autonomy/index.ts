@@ -685,6 +685,13 @@ export type {
 	Measurement,
 } from "../skills/experiment.js";
 
+// Re-export proposal-held decision helpers (issue #4937)
+export {
+	fixedChecks,
+	regressedChecks,
+	heldForRuns,
+} from "./vessel-proposal-held.js";
+
 export default {
 	SelfAutonomy,
 	AutoGit,
