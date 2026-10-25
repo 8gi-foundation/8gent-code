@@ -9125,6 +9125,7 @@ export function App({
 								<Box justifyContent="center" flexShrink={0}>
 									<CommandPalette
 										isOpen={paletteOpen}
+										rows={viewport.height}
 										animate={showAnimations}
 										onClose={() => setPaletteOpen(false)}
 										onExecute={(name) => {

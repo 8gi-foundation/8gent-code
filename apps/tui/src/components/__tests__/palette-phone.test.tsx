@@ -138,7 +138,8 @@ describe("renders inside the screen", () => {
 			await sleep(40);
 			for (const l of lines()) expect([...l].length).toBeLessThanOrEqual(cols);
 			const rowsText = lines().filter((l) => /^│ [◆○] \//.test(l));
-			expect(rowsText.length).toBe(cols < 60 ? 5 : 7);
+			// 40x24 leaves 13 rows after the chrome: three two-line rows fit with the caps (#5034).
+			expect(rowsText.length).toBe(rows < 30 ? 3 : cols < 60 ? 5 : 7);
 			const nameCols = new Set(rowsText.map((l) => l.indexOf("/")));
 			expect(nameCols.size).toBe(1);
 		});

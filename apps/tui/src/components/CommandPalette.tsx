@@ -20,6 +20,7 @@
 import { Box, Text, useInput, useStdout } from "ink";
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { chromeRows } from "../lib/chat-layout.js";
 import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
 import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
 import { glyphs } from "../lib/term-caps.js";
@@ -35,6 +36,8 @@ export interface CommandPaletteProps {
 	isOpen: boolean;
 	/** Columns to fit the sheet into; defaults to the terminal's. */
 	columns?: number;
+	/** Rows on screen; the sheet fits the ones the shell's chrome leaves. Defaults to the terminal's. */
+	rows?: number;
 	/** False (Ctrl+A) skips the 120 ms press hold. */
 	animate?: boolean;
 	onClose: () => void;
@@ -48,6 +51,8 @@ export interface CommandPaletteViewProps {
 	commands: CommandPaletteCommand[];
 	/** Columns of the terminal. The sheet fits inside it; default 80. */
 	columns?: number;
+	/** Rows of the terminal; omitted, the sheet is not sized to the height. */
+	rows?: number;
 	/** A row held in its pressed look for the tap's 120 ms (index into `commands`). */
 	pressedIndex?: number | null;
 }
@@ -77,15 +82,36 @@ export interface PaletteGeometry {
 	visibleRows: number;
 }
 
-export function paletteGeometry(columns: number): PaletteGeometry {
+/** Most visible rows, fewest the sheet shrinks to. */
+const MIN_VISIBLE_ROWS = 2;
+
+/**
+ * Sheet lines that are not commands: two borders, query, key caps, both "n more"
+ * lines (counted always so the window never jumps), and from 60 columns the
+ * rule and the legend.
+ */
+const FIXED_SHEET_ROWS = 6;
+const WIDE_EXTRA_ROWS = 2;
+
+export function paletteGeometry(columns: number, rows?: number): PaletteGeometry {
 	const narrow = columns < PALETTE_NARROW_COLS;
 	const width = paletteWidth(columns);
+	const rowHeight = narrow ? 2 : 1;
+	const most = narrow ? NARROW_VISIBLE_ROWS : MAX_VISIBLE_ROWS;
+	// The sheet fits the rows the shell's chrome leaves, close key and count included (#5034).
+	const fit =
+		rows === undefined
+			? most
+			: Math.floor(
+					(rows - chromeRows(rows, columns) - FIXED_SHEET_ROWS - (narrow ? 0 : WIDE_EXTRA_ROWS)) /
+						rowHeight,
+				);
 	return {
 		width,
 		inner: width - CHROME_COLS,
 		narrow,
-		rowHeight: narrow ? 2 : 1,
-		visibleRows: narrow ? NARROW_VISIBLE_ROWS : MAX_VISIBLE_ROWS,
+		rowHeight,
+		visibleRows: Math.max(MIN_VISIBLE_ROWS, Math.min(most, fit)),
 	};
 }
 
@@ -99,8 +125,9 @@ export function paletteRowSpans(
 	columns: number,
 	total: number,
 	activeIndex: number,
+	rows?: number,
 ): Array<{ index: number; dx: number; dy: number; w: number; h: number }> {
-	const g = paletteGeometry(columns);
+	const g = paletteGeometry(columns, rows);
 	const { start, end } = computeWindow(total, activeIndex, g.visibleRows);
 	// Border, query line, and (from 60 columns) the rule; a phone has no rule: every line counts.
 	const top = (g.narrow ? 2 : 3) + (start > 0 ? 1 : 0);
@@ -137,6 +164,7 @@ export function CommandPalette({
 	onExecute,
 	commands,
 	columns: columnsProp,
+	rows: rowsProp,
 	animate = true,
 }: CommandPaletteProps): React.ReactElement | null {
 	const [query, setQuery] = useState("");
@@ -144,6 +172,7 @@ export function CommandPalette({
 	const [pressedIndex, setPressedIndex] = useState<number | null>(null);
 	const { stdout } = useStdout();
 	const columns = columnsProp ?? stdout?.columns ?? 80;
+	const rows = rowsProp ?? stdout?.rows;
 
 	// Reset state whenever the palette opens.
 	// react-doctor-disable-next-line react-doctor/no-effect-event-handler
@@ -242,7 +271,7 @@ export function CommandPalette({
 	};
 	const sheetRef = useRef(null);
 	const spans: ClickSpan[] = isOpen
-		? paletteRowSpans(columns, filtered.length, activeIndex).map((r) => ({
+		? paletteRowSpans(columns, filtered.length, activeIndex, rows).map((r) => ({
 				id: `palette:row:${r.index}`,
 				dx: r.dx,
 				dy: r.dy,
@@ -267,6 +296,7 @@ export function CommandPalette({
 				activeIndex={activeIndex}
 				commands={filtered}
 				columns={columns}
+				rows={rows}
 				pressedIndex={pressedIndex ?? pressedByMouse}
 			/>
 		</Box>
@@ -281,9 +311,10 @@ export function CommandPaletteView({
 	activeIndex,
 	commands,
 	columns = 80,
+	rows,
 	pressedIndex = null,
 }: CommandPaletteViewProps): React.ReactElement {
-	const g = paletteGeometry(columns);
+	const g = paletteGeometry(columns, rows);
 	const gl = glyphs();
 	const ascii = gl.rule === "-";
 	const arrowUp = ascii ? "^" : "↑";

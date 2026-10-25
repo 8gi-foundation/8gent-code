@@ -9,6 +9,8 @@
  * and wrapped a reply at 62 columns in a 92-column box (audit 2026-09-29, #5).
  */
 
+import { chromeTier } from "./chrome-tier.js";
+
 /** Outer shell: single border (2) plus paddingX={1} (2). */
 const SHELL_CHROME = 4;
 /** Ink `gap={1}` between neighbouring columns. */
@@ -30,6 +32,15 @@ export function chatColumnWidth(cols: number, shell: ShellColumns, min = 24): nu
 	if (shell.planWidth && shell.planWidth > 0) width -= shell.planWidth + COLUMN_GAP;
 	if (shell.activity) width -= ACTIVITY_RAIL_WIDTH + COLUMN_GAP;
 	return Math.max(min, width);
+}
+
+/**
+ * Rows the shell keeps for itself while an overlay sheet is open: tab row, status
+ * row and footer when the keyboard is up (keys-up, #4967), the roomy chrome
+ * otherwise. One place owns the number (#5034).
+ */
+export function chromeRows(rows: number, cols: number): number {
+	return chromeTier(rows, cols) === "keys-up" ? 3 : 11;
 }
 
 /** Share of the column a user bubble takes; the rest is the reply side's margin. */
