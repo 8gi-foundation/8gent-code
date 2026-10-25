@@ -112,10 +112,15 @@ export class QuarantineManager {
 	/**
 	 * Quarantine an external skill for review
 	 */
-	async quarantine(source: string, name?: string): Promise<QuarantineEntry> {
+	async quarantine(
+		source: string,
+		name?: string,
+		/** Set by a caller that knows the source, so a local folder never reaches the clone path. */
+		knownType?: QuarantineEntry["sourceType"],
+	): Promise<QuarantineEntry> {
 		const id = this.generateId();
 		const skillName = name || this.extractName(source);
-		const sourceType = this.detectSourceType(source);
+		const sourceType = knownType ?? this.detectSourceType(source);
 
 		const entry: QuarantineEntry = {
 			id,
@@ -372,7 +377,12 @@ export class QuarantineManager {
 		if (source.includes("github.com") || source.includes("gitlab.com")) {
 			return "github";
 		}
-		if (source.startsWith("/") || source.startsWith("~") || source.startsWith(".")) {
+		if (
+			path.isAbsolute(source) ||
+			source.startsWith("/") ||
+			source.startsWith("~") ||
+			source.startsWith(".")
+		) {
 			return "local";
 		}
 		if (source.includes("@") || /^[a-z0-9-]+$/.test(source)) {
@@ -397,10 +407,11 @@ export class QuarantineManager {
 				break;
 
 			case "local": {
-				// Copy local directory
-				const realSource = source.replace("~", os.homedir());
-				execSync(`cp -r "${realSource}" "${targetDir}/source"`, {
-					stdio: "pipe",
+				// Copy local directory. fs, not a shell: no quoting to escape and it runs on Windows too.
+				const realSource = source.startsWith("~") ? os.homedir() + source.slice(1) : source;
+				fs.cpSync(realSource, path.join(targetDir, "source"), {
+					recursive: true,
+					verbatimSymlinks: true,
 				});
 				break;
 			}

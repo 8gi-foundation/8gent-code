@@ -140,6 +140,7 @@ COMMANDS:
   mcp-server [--tools=safe]   Start MCP server (expose 8gent tools to external clients)
   publish <app-dir>           Build a .8gent-app.tar.gz archive for marketplace submission
                               Flags: --out=<path> --max-size=<mb> --allow-dangerous --strict-lint --json
+  passport <sub>              Your skills and plugs in one file you hold (export, import, show, delete)
 
 AGENT COMMANDS:
   agent list                  List active sub-agents
@@ -310,9 +311,12 @@ async function main() {
 	// Load API keys from ~/.8gent/keys.env into process.env BEFORE any
 	// subcommand reads provider config. Existing env vars win — a
 	// shell export or CI secret always overrides the file.
+	// The passport never holds keys: it does not load them either (#5086).
 	try {
-		const { loadKeysIntoEnv } = await import("../packages/secrets/keys.ts");
-		loadKeysIntoEnv();
+		if ((process.argv[2] ?? "").toLowerCase() !== "passport") {
+			const { loadKeysIntoEnv } = await import("../packages/secrets/keys.ts");
+			loadKeysIntoEnv();
+		}
 	} catch {
 		/* secrets package unavailable — proceed; subcommands handle their own env */
 	}
@@ -730,6 +734,13 @@ async function main() {
 		case "publish":
 			await publishCommand(restArgs);
 			break;
+
+		case "passport": {
+			// #5086: skills and plugs in one self-issued file the owner holds. Local only.
+			const { runPassport } = await import("../packages/eight/passport.ts");
+			process.exitCode = await runPassport(restArgs);
+			break;
+		}
 
 		default:
 			{

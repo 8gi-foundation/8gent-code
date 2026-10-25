@@ -77,6 +77,8 @@ export interface BuildArchiveOptions {
 	rootName: string;
 	/** Output path. Should end in `.8gent-app.tar.gz`. */
 	outPath: string;
+	/** Portable entries: no user or group names, no extended attributes (GNU tar and bsdtar take both flags). */
+	portable?: boolean;
 }
 
 /**
@@ -119,6 +121,7 @@ export function buildArchive(opts: BuildArchiveOptions): void {
 	// tarPathFrom), so every other path argument must be absolute.
 	const outDir = path.dirname(path.resolve(opts.outPath));
 	const args = [
+		...(opts.portable ? ["--numeric-owner", "--no-xattrs"] : []),
 		"-czf",
 		tarPathFrom(outDir, opts.outPath),
 		"-C",
@@ -127,7 +130,13 @@ export function buildArchive(opts: BuildArchiveOptions): void {
 		path.resolve(listFile),
 	];
 
-	const res = spawnSync("tar", args, { stdio: "inherit", cwd: outDir });
+	// macOS bsdtar would otherwise add AppleDouble "._name" files for extended attributes,
+	// which another platform's tar unpacks as real files.
+	const res = spawnSync("tar", args, {
+		stdio: "inherit",
+		cwd: outDir,
+		env: { ...process.env, COPYFILE_DISABLE: "1" },
+	});
 	fs.rmSync(listFile, { force: true });
 	if (res.status !== 0) {
 		throw new Error(`tar exited with code ${res.status}`);

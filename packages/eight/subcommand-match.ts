@@ -48,6 +48,7 @@ export const KNOWN_SUBCOMMANDS = [
 	"install",
 	"packages",
 	"publish",
+	"passport",
 ] as const;
 
 /** The subcommand word as typed, matched without regard to case. */
