@@ -699,3 +699,6 @@ export default {
 	SessionMemory,
 	createSelfAutonomy,
 };
+
+export { scrubProposalText } from "./vessel-proposal-scrub.js";
+export type { ProposalScrubResult } from "./vessel-proposal-scrub.js";
