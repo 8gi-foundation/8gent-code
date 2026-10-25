@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hslToHex } from "./db";
+import INDEX_JSON from "./deck-themes/index.json";
 import type { ParsedColors, ParsedTypography } from "./schema";
 
 export const THEMES_DIR = join(dirname(fileURLToPath(import.meta.url)), "deck-themes");
@@ -208,7 +209,13 @@ export async function generateAll(dbPath?: string, outDir: string = THEMES_DIR):
 
 // ---- tool operations (list / apply / mix) -----------------------------------
 
+/**
+ * The default index is inlined into the bundle: deck-themes/ sits beside the
+ * source, not beside dist/cli.js, so a disk read ENOENTs in an npm install.
+ * An explicit `dir` (tests, a generated copy) still reads from disk.
+ */
 export function loadIndex(dir: string = THEMES_DIR): DeckThemeEntry[] {
+	if (dir === THEMES_DIR) return INDEX_JSON as unknown as DeckThemeEntry[];
 	return JSON.parse(readFileSync(join(dir, "index.json"), "utf8"));
 }
 

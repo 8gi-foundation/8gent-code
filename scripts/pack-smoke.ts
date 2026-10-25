@@ -16,8 +16,12 @@
  *   4. npm install -g --prefix <tmp>     with an isolated HOME and a minimal PATH
  *   5. 8gent --version                   must print this package.json version
  *   6. 8gent tui --no-pet under a pty    must render its first screen (greeting or status bar)
- *   7. 8gent chat / 8gent run            must not die on a missing packaged file (#4355):
- *                                           a model error is fine, ENOENT / Cannot find is not
+ *   5b. literal asset reads in the bundles (new URL(rel, import.meta.url), join(__dirname, rel))
+ *                                        must all exist in the installed package
+ *   5c. 8gent chat / 8gent run           against a local stub model (scripts/lib/packed-install-probes.ts):
+ *                                           chat answers, run completes and its deck_theme tool
+ *                                           call returns themes, so a lazily read file that is not
+ *                                           packaged fails here
  *   (step 3 also fails any bundle that reads a .sql file from disk: SQL must be inlined)
  *
  * Exits non-zero if any check fails. Nothing is published.
@@ -55,6 +59,7 @@ import {
 	findOwnerIdentity,
 	maskIdentity,
 } from "./lib/owner-identity-scan";
+import { missingAssetReads, startStubModel } from "./lib/packed-install-probes";
 
 const ROOT = realpathSync(join(import.meta.dir, ".."));
 const args = process.argv.slice(2);
@@ -78,6 +83,12 @@ function run(cmd: string, argv: string[], opts: Parameters<typeof spawnSync>[2] 
 		stdout: `${r.stdout ?? ""}`,
 	};
 }
+
+// Bundled dependency reads whose file is not installed. Reachability is UNVERIFIED:
+// source-map's wasm is only read by SourceMapConsumer, which no shipped command
+// constructs as far as the checks here show. Each entry needs a reason; none is a
+// first-party file.
+const UNREACHED_DEP_ASSETS = ["node_modules/source-map/lib/mappings.wasm"];
 
 let tuiChild: ChildProcess | null = null;
 function stopTui(): void {
@@ -238,23 +249,78 @@ async function main(): Promise<void> {
 		ver.out.trim().split("\n").pop(),
 	);
 
-	// 5b. chat and run: the first prompt a newcomer types (#4355). No model is
-	// reachable here on purpose; the model error is expected, a missing packaged
-	// file is the failure. Each is given 40s, then stopped.
-	for (const cmd of ["chat", "run"]) {
-		const r = spawnSync(bin, [cmd, "Say hello in one short sentence."], {
-			cwd: WORK,
-			env: { ...env, EIGHT_DECIDE_OLLAMA_HOST: "http://127.0.0.1:9" },
-			encoding: "utf-8",
-			timeout: 40_000,
-			killSignal: "SIGKILL",
-		});
-		const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
-		const missing = ["ENOENT", "Cannot find module", "Cannot find package"].find((m) =>
-			out.includes(m),
+	// 5b. Every file the bundles read by a literal relative path must exist in the
+	// INSTALLED package (#4355 follow-up). Reads through a variable are covered by 5c.
+	const pkgRoot = join(PREFIX, "lib", "node_modules", "@8gi-foundation", "8gent-code");
+	for (const f of ["cli.js", "tui.js"]) {
+		const file = join(pkgRoot, "dist", f);
+		const gone = (
+			existsSync(file)
+				? missingAssetReads(readFileSync(file, "utf-8"), join(pkgRoot, "dist"), existsSync)
+				: []
+		).filter((r) => !UNREACHED_DEP_ASSETS.some((a) => r.target.endsWith(a)));
+		check(
+			gone.length === 0,
+			`dist/${f} asset reads all exist in the installed package`,
+			gone.map((r) => r.target.replace(pkgRoot, "<pkg>")).join(", "),
 		);
-		check(!missing, `8gent ${cmd} hits no missing packaged file`, missing ? out.slice(-400) : "");
 	}
+
+	// 5c. chat and run against a stub model: the first prompt a newcomer types
+	// (#4355). The stub gets `run` past "No Ollama models available" and has it call
+	// deck_theme, a tool reached lazily whose index file was missing from the
+	// package, so reads inside tools are exercised too. A failed tool call does not
+	// crash `run`; the stub records the tool result and that is what is checked.
+	const runCli = (argv: string[], stub: ReturnType<typeof startStubModel>) =>
+		new Promise<{ status: number | null; out: string }>((done) => {
+			const stubEnv = {
+				...env,
+				OLLAMA_BASE_URL: `http://127.0.0.1:${stub.port}`,
+				EIGHT_DECIDE_OLLAMA_HOST: `http://127.0.0.1:${stub.port}`,
+				NO_PROXY: "127.0.0.1,localhost",
+				no_proxy: "127.0.0.1,localhost",
+			};
+			const c = spawn(bin, argv, { cwd: WORK, env: stubEnv, stdio: ["ignore", "pipe", "pipe"] });
+			let out = "";
+			c.stdout?.on("data", (d) => {
+				out += d;
+			});
+			c.stderr?.on("data", (d) => {
+				out += d;
+			});
+			const t = setTimeout(() => c.kill("SIGKILL"), 60_000);
+			c.on("exit", (status) => {
+				clearTimeout(t);
+				done({ status, out });
+			});
+		});
+	const missingMarker = (out: string) =>
+		["ENOENT", "Cannot find module", "Cannot find package"].find((m) => out.includes(m));
+	const chatStub = startStubModel();
+	const chat = await runCli(
+		["chat", "--model", "stub:1b", "Say hello in one short sentence."],
+		chatStub,
+	);
+	chatStub.stop();
+	check(
+		chat.status === 0 && chat.out.includes("hello from stub") && !missingMarker(chat.out),
+		"8gent chat answers from the stub model",
+		chat.out.slice(-300),
+	);
+	const runStub = startStubModel();
+	const runRes = await runCli(["run", "List the deck themes."], runStub);
+	const toolResult = runStub.toolResults[0] ?? "";
+	runStub.stop();
+	check(
+		!missingMarker(runRes.out) && runRes.status === 0,
+		"8gent run completes against the stub model",
+		`exit ${runRes.status}: ${runRes.out.slice(-300)}`,
+	);
+	check(
+		toolResult.includes('"themes"') && !missingMarker(toolResult) && !/failed/i.test(toolResult),
+		"deck_theme list works from the installed package",
+		toolResult.slice(0, 300) || "the stub never saw a tool result",
+	);
 
 	// 6. TUI launch under a pseudo-terminal: it must render its first screen.
 	// The pty gets an explicit size: with no terminal on stdin it would be 0x0
