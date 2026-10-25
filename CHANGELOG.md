@@ -9,6 +9,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.35] - 2026-10-25
+
+### Added
+- passport: skills and plugs in one self-issued file you hold (slice 1 of #5086) ([#5090](https://github.com/8gi-foundation/8gent-code/pull/5090))
+- board-vessel: officer vessels on MiniMax direct, per-officer provider and model ([#5089](https://github.com/8gi-foundation/8gent-code/pull/5089))
+- control: every running loop writes one job file (#5073, slice 2 of #5067) ([#5081](https://github.com/8gi-foundation/8gent-code/pull/5081))
+- tui: read-only Control tab and LOOPS side-panel block (#5062, slice 1 of #5067) ([#5072](https://github.com/8gi-foundation/8gent-code/pull/5072))
+
+### Changed
+- keys page Ctrl+Z row matches KEYBINDINGS ([#5082](https://github.com/8gi-foundation/8gent-code/pull/5082))
+
+### Fixed
+- tui: busy input placeholder says what Enter and Alt+Enter do; cursor no longer covers its first letter ([#5075](https://github.com/8gi-foundation/8gent-code/pull/5075))
+
 ## [0.20.34] - 2026-10-25
 
 ### Added
