@@ -9,6 +9,32 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.29] - 2026-10-25
+
+### Added
+- tui: keys-up layout, the answer stays on screen with the phone keyboard open ([#4989](https://github.com/8gi-foundation/8gent-code/pull/4989))
+- tui: compaction made visible, /compact on the real engine, /compact undo (#4958) ([#4960](https://github.com/8gi-foundation/8gent-code/pull/4960))
+- tools: web_fetch reads pages through the Flow app on the phone when paired ([#4946](https://github.com/8gi-foundation/8gent-code/pull/4946))
+- tui: footer context meter and /context (#4956) ([#4957](https://github.com/8gi-foundation/8gent-code/pull/4957))
+- tui: errors drawn as errors; retries and loop guards shown when they fire (Closes #4955, Refs #4938) ([#4961](https://github.com/8gi-foundation/8gent-code/pull/4961))
+- tui: phone palette, a sheet that fits the screen and the palette cap kept at every width (#4951) ([#4952](https://github.com/8gi-foundation/8gent-code/pull/4952))
+- tui: tool output opens under its row (Ctrl+O, tap, /out); failures show their tail ([#4959](https://github.com/8gi-foundation/8gent-code/pull/4959))
+- cell: /selfimprove for a vessel cell with an in-process token cap, and the image carries the CLI (Refs #4937) ([#4943](https://github.com/8gi-foundation/8gent-code/pull/4943))
+- voice: a spoken slash types / so slash commands can be voice typed ([#4950](https://github.com/8gi-foundation/8gent-code/pull/4950))
+- tui: tab lamps, one still mark per tab (#4928) ([#4930](https://github.com/8gi-foundation/8gent-code/pull/4930))
+
+### Fixed
+- turn: token budget has a window at turn one (#4986) ([#4993](https://github.com/8gi-foundation/8gent-code/pull/4993))
+- turn: per-turn cap, refused-call stop, token budget and chat-only first round in every mode ([#4985](https://github.com/8gi-foundation/8gent-code/pull/4985))
+- web: run the destination guard before the Flow bridge (#4987) ([#4991](https://github.com/8gi-foundation/8gent-code/pull/4991))
+- tui: rewrite only changed rows, stop the per-frame full repaint ([#4971](https://github.com/8gi-foundation/8gent-code/pull/4971))
+- tui: the unverified flag shortens before the palette key leaves the footer (#4962) ([#4990](https://github.com/8gi-foundation/8gent-code/pull/4990))
+- dj: resolve the stream URL for mpv on Android; Now playing waits for mpv (Closes #4981) ([#4988](https://github.com/8gi-foundation/8gent-code/pull/4988))
+- android: ask the safety judge after the first render, not before ([#4983](https://github.com/8gi-foundation/8gent-code/pull/4983))
+- dj: artist-only search plays the top track; time each /dj play stage (Closes #4963, Refs #4907) ([#4964](https://github.com/8gi-foundation/8gent-code/pull/4964))
+- tui: ActivityMonitor redraws on activity, not on a 300 ms tick ([#4978](https://github.com/8gi-foundation/8gent-code/pull/4978))
+- judge: name the judge from the chosen catalogue entry; unsupported is decided again (Refs #4965) ([#4974](https://github.com/8gi-foundation/8gent-code/pull/4974))
+
 ## [0.20.28] - 2026-10-24
 
 ### Added
