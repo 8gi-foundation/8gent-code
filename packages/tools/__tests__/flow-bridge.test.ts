@@ -537,9 +537,7 @@ describe("web_fetch routing", () => {
 		process.env.TERMUX_VERSION = "0.118";
 		const r = await webFetch("https://example.com/a", {
 			net: {
-				resolve: async () => {
-					throw new Error("direct path must not run");
-				},
+				resolve: async () => [{ address: "93.184.216.34", family: 4 as const }],
 				fetchImpl: (async () => {
 					throw new Error("direct path must not run");
 				}) as never,
@@ -547,6 +545,51 @@ describe("web_fetch routing", () => {
 		});
 		expect(r.content).toBe("Hello from Flow");
 		expect(r.title).toBe("Fake page");
+	});
+
+	function pairedFlow() {
+		const flow = fakeFlow("t".repeat(43));
+		const home = path.join(dir, "home");
+		fs.mkdirSync(path.join(home, ".8gent"), { recursive: true });
+		writePairing({ port: flow.port, token: "t".repeat(43) }, path.join(home, ".8gent"));
+		process.env.EIGHT_HOME = home;
+		process.env.TERMUX_VERSION = "0.118";
+		return flow;
+	}
+
+	test("paired: blocked destinations are refused before any bridge call (#4987)", async () => {
+		const flow = pairedFlow();
+		const net = {
+			resolve: async (host: string) => {
+				if (host === "rebind.example") return [{ address: "192.168.1.1", family: 4 as const }];
+				return [{ address: "93.184.216.34", family: 4 as const }];
+			},
+			fetchImpl: (async () => {
+				throw new Error("direct path must not run");
+			}) as never,
+		};
+		for (const url of [
+			"http://127.0.0.1:8080/",
+			"http://localhost:8080/",
+			"http://169.254.169.254/latest/meta-data/",
+			"http://192.168.1.1/",
+			"http://10.0.0.1/",
+			"http://100.100.100.200/",
+			"http://metadata.google.internal/computeMetadata/v1/",
+			"http://rebind.example/",
+		]) {
+			await expect(webFetch(url, { net })).rejects.toThrow(/^Refused/);
+		}
+		expect(flow.seen).toHaveLength(0);
+	});
+
+	test("paired: the refusal line is identical to the unpaired path", async () => {
+		const net = { resolve: async () => [], fetchImpl: (async () => new Response("")) as never };
+		const unpaired = await webFetch("http://192.168.1.1/", { net }).catch((e) => e.message);
+		pairedFlow();
+		const paired = await webFetch("http://192.168.1.1/", { net }).catch((e) => e.message);
+		expect(paired).toBe(unpaired);
+		expect(paired).toMatch(/^Refused/);
 	});
 
 	test("Flow gone: web_fetch runs exactly as before", async () => {

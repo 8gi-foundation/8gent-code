@@ -15,6 +15,7 @@ import { bridgeFetch } from "./flow-bridge";
 import {
 	type FetchImpl,
 	type NetDeps,
+	checkDestination,
 	guardedFetch,
 	normalizeOrigin,
 	searchEndpointFetch,
@@ -330,7 +331,14 @@ export async function webFetch(
 		// Paired with the 8gent Flow app on this phone: its Browser tab reads the page (#4944).
 		// Null for every other case (not Android, not paired, Flow not answering), and then the
 		// path below runs exactly as before.
-		const viaFlow = await bridgeFetch(normalizedUrl, { maxLength });
+		// The destination guard runs inside bridgeFetch before anything is sent to Flow, so a
+		// blocked address is refused exactly as guardedFetch refuses it (#4987).
+		const viaFlow = await bridgeFetch(normalizedUrl, {
+			maxLength,
+			guard: async (u) => {
+				await checkDestination(u, options.net);
+			},
+		});
 		if (viaFlow) return viaFlow;
 
 		// guardedFetch refuses loopback, private, link-local and metadata
