@@ -62,9 +62,11 @@ import {
 	runAsParentSession,
 } from "../orchestration/index";
 import {
+	CONTEXT_WINDOW_FLOOR,
 	capabilityToolMode,
 	knownContextWindow,
 	ollamaContextWindowLookup,
+	publishedContextWindow,
 } from "../orchestration/local-model-detect";
 import { type OrchestratorBus, getOrchestratorBus } from "../orchestration/orchestrator-bus";
 import { isInfiniteMode } from "../permissions/index";
@@ -306,7 +308,7 @@ import {
 } from "../ai";
 import { isChatOnly } from "../ai/chat-only";
 import { CARRY_ON_SILENT_CALLS, resolveSilentCalls } from "../ai/silent-calls";
-import { type TurnLimits, resolveTurnLimits } from "../ai/turn-guards";
+import { type TurnLimits, resolveTurnLimits, resolveTurnTokens } from "../ai/turn-guards";
 import { resolveUselessStreak } from "../ai/useless-streak";
 import { cdPrefixShape } from "../permissions/cd-prefix";
 import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
@@ -577,6 +579,8 @@ export class Agent {
 	private compactionContextWindow: number;
 	/** True once compactionContextWindow was read from the server, not the provider table (#4982). */
 	private contextWindowFromEndpoint = false;
+	/** The hosted provider's published window from the table, 0 when none is trusted (#4986). */
+	private publishedWindow = 0;
 	/** #3643: pending one-shot read of the Ollama server's real context window. */
 	private serverContextWindow: {
 		baseUrl: string;
@@ -717,6 +721,7 @@ export class Agent {
 		const compactionContextWindow = knownContextWindow(activeProvider);
 		this.compaction = new ProactiveCompression({ contextWindow: compactionContextWindow });
 		this.compactionContextWindow = compactionContextWindow;
+		this.publishedWindow = publishedContextWindow(activeProvider);
 		// #3643: for an Ollama-served model the 32768 above is only a fallback.
 		// The real window is read from the server once, lazily, the first time
 		// the history nears the fallback's compaction line (see
@@ -2716,13 +2721,29 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	turnLimits(): TurnLimits | undefined {
 		if (this.config.headless || this.agentDepth > 0 || this.config.agentScope === "__table__")
 			return undefined;
-		// The token budget defaults on only for a window the endpoint reported; the
-		// per-provider table value is a guess that would end a 128k model's turn at 16k.
-		return resolveTurnLimits(
-			this.contextWindowFromEndpoint ? this.compactionContextWindow : 0,
+		// The token budget defaults on for a window the endpoint reported, or for a hosted
+		// provider whose published window the table holds (#4986). A local table value is a
+		// guess that would end a 128k model's turn at 16k, so a local model stays off until
+		// its lookup has answered.
+		const limits = resolveTurnLimits(
+			this.contextWindowFromEndpoint ? this.compactionContextWindow : this.publishedWindow,
 			process.env,
 			(text) => scrub(text).scrubbed,
 		);
+		// A local endpoint's window is read only once the turn has grown past what the
+		// smallest budget could allow, never ahead of the chat sequence, so a long turn
+		// gets its default budget without an extra request on a short one (#4986).
+		// EIGHT_TURN_TOKENS pins the budget and needs no lookup.
+		if (limits.tokens === 0 && this.serverContextWindow && !process.env.EIGHT_TURN_TOKENS?.trim()) {
+			limits.settle = async (grown) => {
+				if (grown < CONTEXT_WINDOW_FLOOR / 2) return;
+				await this.readServerContextWindow(true);
+				if (this.contextWindowFromEndpoint) {
+					limits.tokens = resolveTurnTokens(this.compactionContextWindow, process.env);
+				}
+			};
+		}
+		return limits;
 	}
 
 	private silentCarryOn(): boolean {
@@ -4699,20 +4720,24 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 
 	/**
 	 * #3643: the first time the history reaches the two-stage checkpoint line
-	 * (65 percent) of the 32768 fallback, read the Ollama server's real context
-	 * window once and resize both compactors to it, so a long document is not
+	 * (65 percent) of the 32768 fallback, or when the turn's token budget needs it
+	 * (atTurnStart, #4986: the first tool call is about to be counted), read
+	 * the Ollama server's real context window once and resize both compactors to it, so a long document is not
 	 * summarised away while the model still has room. Skipped when the
 	 * compactor was replaced after construction. Unreadable: keep the fallback.
 	 */
-	private async readServerContextWindow(): Promise<void> {
+	private async readServerContextWindow(atTurnStart = false): Promise<void> {
 		const pending = this.serverContextWindow;
 		if (!pending) return;
 		if (this.compaction !== pending.engine) {
 			this.serverContextWindow = null;
 			return;
 		}
-		const used = estimateMessageTokens(this.messageHistory);
-		if (used < this.compactionContextWindow * 0.65) return;
+		// The turn-start call (#4986) reads at once; the end-of-turn call waits for 65 percent.
+		if (!atTurnStart) {
+			const used = estimateMessageTokens(this.messageHistory);
+			if (used < this.compactionContextWindow * 0.65) return;
+		}
 		this.serverContextWindow = null;
 		const window = await this.contextWindowLookup({
 			baseUrl: pending.baseUrl,

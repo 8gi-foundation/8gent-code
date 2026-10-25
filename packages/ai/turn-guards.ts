@@ -32,6 +32,13 @@ export interface TurnLimits {
 	/** Tokens the turn may add to the context before it ends; 0 = off. */
 	tokens: number;
 	/**
+	 * Called with the tokens the turn has added so far, after a round that ran tools,
+	 * while the token budget is off for want of a window (#4986). It may set `tokens`,
+	 * and sends nothing until the growth could matter, so no request reaches the model
+	 * host ahead of the chat sequence. Idempotent; the caller awaits it.
+	 */
+	settle?: (grown: number) => Promise<void>;
+	/**
 	 * Redacts secrets from text that goes into the stop line (injected by the
 	 * caller, so this file imports nothing from eight/). Unset: text is kept.
 	 */
@@ -227,6 +234,14 @@ function detailOf(input: unknown): string | undefined {
  * step), or null. A call counts as refused when its tool threw ToolCallRefused
  * (the permission gate) or its result starts with a "[... BLOCKED]" gate prefix.
  */
+/** Tokens the steps have added to the context so far (0 while unknown). */
+export function turnGrowthForSteps(steps: ReadonlyArray<GuardStep>): number {
+	const first = steps[0]?.usage;
+	const start = first?.inputTokens || first?.promptTokens || 0;
+	const last = steps[steps.length - 1]?.usage?.totalTokens || 0;
+	return start && last ? Math.max(0, last - start) : 0;
+}
+
 export function turnStopForSteps(
 	steps: ReadonlyArray<GuardStep>,
 	limits: TurnLimits,

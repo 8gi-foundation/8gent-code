@@ -24,7 +24,7 @@ import {
 	getRuntimeParams,
 } from "./tools";
 import { createBudgetDrain, resolveTurnBudgetMs } from "./turn-budget";
-import { type TurnLimits, turnStopForSteps } from "./turn-guards";
+import { type TurnLimits, turnGrowthForSteps, turnStopForSteps } from "./turn-guards";
 
 export interface EightAgentConfig {
 	/**
@@ -319,8 +319,12 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 		experimental_context: toolContext,
 		stopWhen: [
 			stepCountIs(config.maxSteps || 30),
-			({ steps }: { steps: ReadonlyArray<any> }) => {
+			async ({ steps }: { steps: ReadonlyArray<any> }) => {
 				if (!config.turnLimits) return false;
+				// The window lookup waits until the turn has grown enough to need it (#4986).
+				if (config.turnLimits.settle && steps.some((s) => s.toolCalls?.length)) {
+					await config.turnLimits.settle(turnGrowthForSteps(steps)).catch(() => {});
+				}
 				const line = turnStopForSteps(steps, config.turnLimits);
 				if (line && config.turnStop) config.turnStop.line = line;
 				return line !== null;

@@ -19,7 +19,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveOllamaBaseUrl } from "../ai/text-tool-endpoint";
-import { type LocalModelEntry, LocalServerResponseError, createOllamaServer } from "../local-model-server";
+import {
+	type LocalModelEntry,
+	LocalServerResponseError,
+	createOllamaServer,
+} from "../local-model-server";
 import type { ProviderConfig, ProviderName } from "../providers";
 import type { RoleConfig, RoleModelAssignment } from "./role-config";
 
@@ -427,6 +431,25 @@ const KNOWN_CONTEXT: Partial<Record<ProviderName, number>> = {
 };
 
 /**
+ * Hosted APIs whose KNOWN_CONTEXT value is the vendor's published window, not a
+ * conservative guess. A per-turn budget may default on from these at turn one
+ * (#4986). Local endpoints are absent on purpose: their window is whatever the
+ * server loaded, and only the endpoint can say. openrouter, groq, mistral,
+ * together and fireworks hold a 32768 placeholder that varies per model.
+ */
+const PUBLISHED_WINDOW_PROVIDERS: ReadonlySet<string> = new Set([
+	"anthropic",
+	"openai",
+	"grok",
+	"deepseek",
+]);
+
+/** The published window for a hosted API provider, or 0 when none is trusted. */
+export function publishedContextWindow(cfg: Pick<ProviderConfig, "name">): number {
+	return PUBLISHED_WINDOW_PROVIDERS.has(cfg.name) ? (KNOWN_CONTEXT[cfg.name] ?? 0) : 0;
+}
+
+/**
  * One-shot native-tools probe. Returns true when the provider accepts a `tools`
  * payload (HTTP 200), false when it rejects it (HTTP 400 / any error). Injected
  * so tests never touch the network.
@@ -545,7 +568,11 @@ export const defaultNativeToolsProbe: NativeToolsProbe = async ({ baseUrl, model
 };
 
 /** Default context lookup: read `context_length` from the models endpoint. */
-export const defaultContextWindowLookup: ContextWindowLookup = async ({ baseUrl, model, apiKey }) => {
+export const defaultContextWindowLookup: ContextWindowLookup = async ({
+	baseUrl,
+	model,
+	apiKey,
+}) => {
 	if (!baseUrl) return null;
 	const json = (await (async () => {
 		try {
@@ -602,7 +629,9 @@ export async function ollamaContextWindowLookup(
 	const ps = (await getJson("/api/ps")) as {
 		models?: { name?: string; model?: string; context_length?: unknown }[];
 	} | null;
-	const loaded = ps?.models?.find((m) => m.name === args.model || m.model === args.model);
+	const loaded = (Array.isArray(ps?.models) ? ps.models : []).find(
+		(m) => m.name === args.model || m.model === args.model,
+	);
 	const loadedCtx = positive(loaded?.context_length);
 	if (loadedCtx) return loadedCtx;
 

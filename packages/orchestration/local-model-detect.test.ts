@@ -13,6 +13,7 @@ import {
 	knownContextWindow,
 	paramHint,
 	providerSupportsJsonMode,
+	publishedContextWindow,
 	recommendRoleConfig,
 	resolveCapabilities,
 } from "./local-model-detect";
@@ -113,7 +114,9 @@ describe("capabilityToolMode", () => {
 	test("no-tool providers resolve to none, even under override", () => {
 		expect(capabilityToolMode(cfg({ name: "apfel", supportsTools: false }), noEnv)).toBe("none");
 		expect(
-			capabilityToolMode(cfg({ name: "apple-foundation", supportsTools: false }), { EIGHT_TEXT_TOOLS: "1" }),
+			capabilityToolMode(cfg({ name: "apple-foundation", supportsTools: false }), {
+				EIGHT_TEXT_TOOLS: "1",
+			}),
 		).toBe("none");
 	});
 
@@ -189,6 +192,14 @@ describe("knownContextWindow / providerSupportsJsonMode", () => {
 		expect(knownContextWindow(cfg({ name: "anthropic" }))).toBe(200000);
 		expect(knownContextWindow(cfg({ name: "8gent" }))).toBe(32768);
 		expect(knownContextWindow(cfg({ name: "replicate" }))).toBe(CONTEXT_WINDOW_FLOOR);
+	});
+
+	test("only a hosted API's published window is trusted; local and placeholder windows are 0", () => {
+		expect(publishedContextWindow(cfg({ name: "anthropic" }))).toBe(200000);
+		expect(publishedContextWindow(cfg({ name: "openai" }))).toBe(128000);
+		for (const name of ["8gent", "ollama", "lmstudio", "llama-server", "openrouter", "minimax"]) {
+			expect(publishedContextWindow(cfg({ name }))).toBe(0);
+		}
 	});
 
 	test("json mode support tracks the structured-output provider set", () => {
@@ -287,7 +298,6 @@ describe("scoreForAgentic", () => {
 		).toBe(9);
 	});
 });
-
 
 /**
  * The Ollama host is resolved per call like the rest of the app
