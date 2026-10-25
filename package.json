@@ -78,6 +78,7 @@
     "check:biome": "biome check .",
     "check:biome:fix": "biome check --write .",
     "typecheck": "tsc --noEmit",
+    "judge:bakeoff": "bun --no-env-file --config=bin/bunfig.empty.toml run packages/decide/eval/judge-set/bakeoff.ts",
     "typecheck:tui": "tsc --noEmit -p apps/tui/tsconfig.json",
     "check:harness": "tsc --noEmit -p tsconfig.harness.json",
     "benchmark": "bun --config=bin/bunfig.empty.toml run scripts/benchmark.ts",
