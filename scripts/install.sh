@@ -33,7 +33,7 @@
 #   EIGHT_RELEASES_URL      the releases list (https, or http://127.0.0.1 for tests)
 #   EIGHT_ALLOW_UNVERIFIED  1 = continue when a release key exists but no minisign can run
 #   EIGHT_INSTALL_DEBUG     1 = print what was detected (OS, libc, asset, install dir) and carry on
-#   EIGHT_ANDROID_FORCE     1 = on Android/Termux, use the glibc binary path instead of npm (glibc-runner setups)
+#   EIGHT_ANDROID_FORCE     1 = on Android/Termux, use the glibc binary path instead of npm (glibc-runner setups). If the plain binary cannot start, it runs through glibc-runner (grun) when present, else proot-distro ubuntu (asks before installing it; default No, refused when unattended)
 #
 # On Android (Termux) the binary cannot run (bionic, not glibc), so the release's
 # npm package is installed instead: nodejs via pkg when missing or older than
@@ -304,6 +304,136 @@ installed_version() {
 	run_version "$1" | sed -n 's/.*8gent Code v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1
 }
 
+# The dynamic loader a Linux ELF asks for (e.g. /lib/ld-linux-aarch64.so.1),
+# read from its first 4 KiB with no tools beyond head, tr and grep. Empty when
+# there is none (static binary, macOS Mach-O, unreadable).
+elf_interpreter() {
+	head -c 4096 "$1" 2>/dev/null | LC_ALL=C tr -c '[:print:]' '\n' |
+		grep -m 1 -E '^/(lib|lib64|system/bin)/[A-Za-z0-9._/+-]*(ld-|linker)[A-Za-z0-9._+-]*$' || true
+}
+
+# --- Termux (Android) -------------------------------------------------------
+# The release binary is a glibc build and Android's own libc (bionic) cannot
+# start it. Install it under $PREFIX/opt/8gent and put a launcher at
+# $PREFIX/bin/8gent that runs it through glibc-runner (`grun`), or, if grun
+# cannot run it, inside proot-distro ubuntu. The launcher honours EIGHT_BIN
+# (run that file instead) so `8gent update` can check a new binary before it
+# replaces the old one, and exports EIGHT_REAL_BINARY / EIGHT_WRAPPER for it.
+
+termux_probe() { # mode file -> "X.Y.Z" or nothing
+	_d="$(dirname "$2")"
+	_t=""
+	command -v timeout >/dev/null 2>&1 && _t="timeout 60"
+	case "$1" in
+		grun) $_t grun "$2" --version </dev/null 2>/dev/null ;;
+		proot) $_t proot-distro login ubuntu --shared-tmp --bind "${_d}:${_d}" -- "$2" --version </dev/null 2>/dev/null ;;
+	esac | sed -n 's/.*8gent Code v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1
+}
+
+# One-yes question, the shell twin of packages/core/one-yes.ts (askOneYes /
+# refuseIfUnattended); the installer runs before any 8gent exists, so it cannot
+# import it. Same contract: nobody answers (CI, EIGHT_UNATTENDED, EIGHT_HEADLESS,
+# no terminal, no answer in 60 s, input ends, bare Enter) is a No, and so is anything
+# but a typed y or yes. The answer comes from the terminal, never from the curl
+# pipe. A No nobody chose is logged in one line and, best effort, written with its
+# label to ~/.8gent/one-yes-denials.jsonl. The question text is never recorded.
+one_yes_deny() { # label reason
+	printf '[one-yes] resolved to no (%s): nobody answered the %s prompt\n' "$2" "$1" >&2
+	_dd="${HOME:-}/.8gent"
+	{ mkdir -p "$_dd" && printf '{"at":"%s","event":"one-yes-resolved-no","reason":"%s","label":"%s"}\n' \
+		"$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$2" "$1" >>"$_dd/one-yes-denials.jsonl"; } 2>/dev/null || true
+	return 1
+}
+
+one_yes() { # label question -> 0 only for a typed y or yes
+	for _v in "${CI:-}" "${EIGHT_UNATTENDED:-}" "${EIGHT_HEADLESS:-}"; do
+		case "$_v" in '' | 0 | [Ff][Aa][Ll][Ss][Ee]) ;; *) one_yes_deny "$1" unattended-env; return 1 ;; esac
+	done
+	{ [ -t 2 ] && : </dev/tty; } 2>/dev/null || { one_yes_deny "$1" no-tty; return 1; }
+	printf '%s ' "$2" >&2
+	_t=""
+	command -v timeout >/dev/null 2>&1 && _t="timeout ${EIGHT_ONE_YES_TIMEOUT_SECS:-60}"
+	if ! _a="$($_t head -n 1 </dev/tty 2>/dev/null)"; then printf '\n' >&2; one_yes_deny "$1" timeout; return 1; fi
+	case "$_a" in
+		'') one_yes_deny "$1" empty-answer; return 1 ;;
+		[Yy] | [Yy][Ee][Ss]) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+# glibc-runner is never installed by default: use it only when the person already has it.
+termux_have_grun() { command -v grun >/dev/null 2>&1; }
+
+# proot-distro ubuntu: use it when it is there. When it is not, ask once (default No) before
+# installing it with pkg; unattended means no, and then the install stops with the command to run.
+termux_setup_proot() {
+	if ! command -v proot-distro >/dev/null 2>&1 ||
+		[ ! -d "${PREFIX}/var/lib/proot-distro/installed-rootfs/ubuntu" ]; then
+		one_yes termux-proot-setup "Set up proot-distro with an ubuntu userland to run 8gent? Installs proot-distro and ubuntu with pkg and takes a few minutes. [y/N]" || return 1
+		if ! command -v proot-distro >/dev/null 2>&1; then
+			say "Setting up proot-distro..."
+			# local-first-gate: optin, reached only after a typed y above
+			pkg install -y proot-distro >&2 || return 1
+		fi
+		if [ ! -d "${PREFIX}/var/lib/proot-distro/installed-rootfs/ubuntu" ]; then
+			say "Installing the ubuntu userland (a few minutes the first time)..."
+			proot-distro install ubuntu >&2 || return 1
+		fi
+	fi
+	return 0
+}
+
+termux_write_launcher() { # mode real dest
+	_sh="$(command -v sh)"
+	_d="$(dirname "$2")"
+	{
+		printf '#!%s\n' "$_sh"
+		printf '# 8gent launcher for Termux, written by the 8gent installer (mode: %s).\n' "$1"
+		case "$1" in
+			grun)
+				printf 'EIGHT_REAL_BINARY=%s\nEIGHT_WRAPPER=%s\nexport EIGHT_REAL_BINARY EIGHT_WRAPPER\n' "'$2'" "'${TARGET}'"
+				printf 'exec grun "${EIGHT_BIN:-$EIGHT_REAL_BINARY}" "$@"\n'
+				;;
+			proot)
+				printf 'REAL=%s\n' "'$2'"
+				printf 'exec proot-distro login ubuntu --shared-tmp --termux-home --bind %s -- env EIGHT_REAL_BINARY="$REAL" "${EIGHT_BIN:-$REAL}" "$@"\n' "'${_d}:${_d}'"
+				;;
+		esac
+	} >"$3"
+}
+
+termux_install() {
+	OPT="${PREFIX}/opt/8gent"
+	REAL="${OPT}/8gent"
+	mkdir -p "$OPT" "$INSTALL_DIR"
+	STAGE="${OPT}/.8gent.new"
+	cp "$TMP/$ASSET" "$STAGE"
+	chmod 755 "$STAGE"
+	mode=""
+	if termux_have_grun; then
+		[ "$(termux_probe grun "$STAGE")" = "$VERSION" ] && mode=grun
+	fi
+	if [ -z "$mode" ]; then
+		say "glibc-runner is not here or could not run the 8gent binary; trying proot-distro ubuntu instead."
+		if termux_setup_proot; then
+			[ "$(termux_probe proot "$STAGE")" = "$VERSION" ] && mode=proot
+		fi
+	fi
+	if [ -z "$mode" ]; then
+		interp="$(elf_interpreter "$STAGE")"
+		rm -f "$STAGE"
+		die "the downloaded binary did not report v${VERSION} through glibc-runner or proot-distro (ELF interpreter: ${interp:-unknown}); nothing installed. Without EIGHT_ANDROID_FORCE=1 the installer uses the npm package instead. To report this, run with EIGHT_INSTALL_DEBUG=1 and paste the output"
+	fi
+	mv -f "$STAGE" "$REAL"
+	lt="$(mktemp "${INSTALL_DIR}/.8gent.XXXXXX")"
+	termux_write_launcher "$mode" "$REAL" "$lt"
+	chmod 755 "$lt"
+	mv -f "$lt" "$TARGET"
+	got="$(installed_version "$TARGET")"
+	[ "$got" = "$VERSION" ] || die "installed the launcher at ${TARGET} ($mode) but it did not report v${VERSION} (got '${got}'); run ${TARGET} --version to see why"
+	say "Android (Termux): running 8gent through ${mode}. The binary is ${REAL}; \`8gent update\` keeps this working."
+}
+
 # From a GitHub releases JSON (a list or one release): "X.Y.Z URL" for each
 # download URL of ASSET on a published, non-prerelease vX.Y.Z release. Reads
 # the keys in document order (GitHub puts tag_name, draft and prerelease
@@ -480,11 +610,16 @@ main() {
 		say "  releases url    : $(printf '%s' "$RELEASES_URL" | sed -E 's#^([a-zA-Z]+://)[^/@]*@#\1#; s#\?.*$#?...#')"
 	fi
 
+	# Termux's default is the npm package. With EIGHT_ANDROID_FORCE=1 the plain binary is
+	# tried first; only if it cannot start does it run through a launcher (grun, then proot).
+	termux=0
 	if [ "$libc" = bionic ] && [ "${EIGHT_ANDROID_FORCE:-}" = 1 ]; then
 		warn "EIGHT_ANDROID_FORCE=1: continuing on Android; the install will fail unless this box runs glibc binaries."
+		termux=1
 	fi
 	if [ "$DRY_RUN" = 1 ]; then
 		if [ "$NPM_PATH" = 1 ]; then say "  result          : a real run would install nodejs with pkg if needed, then the release npm package"; fi
+		if [ "$termux" = 1 ]; then say "  result          : a real run would try the plain binary, then glibc-runner (grun) if present, then proot-distro ubuntu (asks before installing it, default No), through a launcher at ${INSTALL_DIR}/8gent"; fi
 		say "Dry run: nothing downloaded or installed."
 		exit 0
 	fi
@@ -614,15 +749,30 @@ main() {
 
 	chmod 755 "$TMP/$ASSET"
 	got="$(installed_version "$TMP/$ASSET")"
-	[ "$got" = "$VERSION" ] || die "the downloaded binary did not report v${VERSION} (got '${got}'); nothing installed"
+	if [ "$termux" = 1 ] && [ "$got" != "$VERSION" ]; then
+		# EIGHT_ANDROID_FORCE=1 and the plain binary cannot start here: run it through a launcher.
+		termux_install
+	else
+		if [ "$got" != "$VERSION" ]; then
+			# Say why, not just "got ''": a binary that cannot start prints nothing.
+			interp="$(elf_interpreter "$TMP/$ASSET")"
+			err="$("$TMP/$ASSET" --version 2>&1 </dev/null | head -c 300 | tr '\n' ' ')" || true
+			hint="this machine may not be able to run glibc Linux binaries"
+			if [ -n "$interp" ] && [ ! -e "$interp" ]; then
+				hint="the binary needs the loader ${interp}, which this machine does not have (it is not a glibc Linux userland); on Android use Termux's proot-distro: pkg install proot-distro && proot-distro install ubuntu && proot-distro login ubuntu"
+			fi
+			die "the downloaded binary did not report v${VERSION} (got '${got}'; ELF interpreter: ${interp:-unknown}; it said: ${err:-nothing}); ${hint}; nothing installed. To report this, run with EIGHT_INSTALL_DEBUG=1 and paste the output"
+		fi
 
-	mkdir -p "$INSTALL_DIR"
-	# A uniquely named file beside the target, then a rename over it: atomic,
-	# and a running 8gent keeps its old file.
-	staged="$(mktemp "${INSTALL_DIR}/.8gent.XXXXXX")"
-	cp "$TMP/$ASSET" "$staged"
-	chmod 755 "$staged"
-	mv -f "$staged" "$TARGET"
+		mkdir -p "$INSTALL_DIR"
+		# A uniquely named file beside the target, then a rename over it: atomic,
+		# and a running 8gent keeps its old file.
+		staged="$(mktemp "${INSTALL_DIR}/.8gent.XXXXXX")"
+		cp "$TMP/$ASSET" "$staged"
+		chmod 755 "$staged"
+		mv -f "$staged" "$TARGET"
+
+	fi
 
 	say "Installed 8gent v${VERSION} to ${TARGET}"
 	case ":${PATH}:" in
