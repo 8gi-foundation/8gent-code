@@ -13,3 +13,9 @@ dependencies = [
     "transformers>=5.17.0",
     "safetensors",
 ]
+
+[project.optional-dependencies]
+# export_onnx.py / onnx_check.py on a desktop
+export = ["onnx", "onnxruntime"]
+# run_onnx.py on the phone: no torch, no transformers
+phone = ["numpy", "onnxruntime"]
