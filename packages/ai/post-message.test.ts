@@ -6,6 +6,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
+import { basename } from "node:path";
 import {
 	_resetTuiApprovalChannel,
 	registerTuiApprovalHandler,
@@ -333,7 +334,7 @@ describe("post_message attachment transport (#4265)", () => {
 		expect(argv.slice(5)).toEqual(["--caption", "--chat -1 tricky"]);
 		// The helper uploads a private staged copy of the checked bytes, never the project path.
 		expect(argv[4]).not.toBe("/w/pilot.gif");
-		expect(argv[4]).toEndWith("/pilot.gif");
+		expect(basename(argv[4])).toBe("pilot.gif");
 		expect(existsSync(argv[4])).toBe(false); // removed after the send
 		expect(logged[0].attachment).toEqual({ kind: "gif", bytes: 9 });
 	});

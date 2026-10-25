@@ -52,6 +52,13 @@ describe("input validation", () => {
 	test("a URL is refused", async () => {
 		await expect(breakdown("https://example.com/clip.mp4", ON)).rejects.toThrow("Local files only");
 	});
+	test("a one-letter scheme `a:b` is still refused as a URL", async () => {
+		await expect(breakdown("a:b", ON)).rejects.toThrow("Local files only");
+	});
+	test("a Windows drive path passes the URL check", async () => {
+		await expect(breakdown("C:\\deck\\x.md", ON)).rejects.not.toThrow("Local files only");
+		await expect(breakdown("C:/deck/x.md", ON)).rejects.not.toThrow("Local files only");
+	});
 	test("a directory is refused", async () => {
 		await expect(breakdown(dir, ON)).rejects.toThrow("No such video file");
 	});

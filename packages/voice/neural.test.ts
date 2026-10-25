@@ -20,7 +20,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, delimiter, join, resolve } from "node:path";
 import {
 	NARRATOR,
 	NEURAL_VOICE,
@@ -41,6 +41,9 @@ import {
 } from "./neural";
 
 const HOME = "/Users/test";
+
+/** Where the code under test puts an output path: absolute, with the platform separator. */
+const abs = (p: string) => resolve(p);
 
 interface Call {
 	cmd: string;
@@ -227,25 +230,25 @@ describe("engine discovery", () => {
 		expect(supertonicCandidates(deps)).toEqual([
 			"/custom/supertonic",
 			"/on/path/supertonic",
-			`${HOME}/.pyenv/shims/supertonic`,
-			`${HOME}/.pyenv/versions/3.11.4/bin/supertonic`,
-			`${HOME}/.pyenv/versions/3.10.2/bin/supertonic`,
-			`${HOME}/.pyenv/versions/3.9.18/bin/supertonic`,
+			join(HOME, ".pyenv/shims/supertonic"),
+			join(HOME, ".pyenv/versions/3.11.4/bin/supertonic"),
+			join(HOME, ".pyenv/versions/3.10.2/bin/supertonic"),
+			join(HOME, ".pyenv/versions/3.9.18/bin/supertonic"),
 			"/opt/homebrew/bin/supertonic",
 			"/usr/local/bin/supertonic",
 		]);
 	});
 
 	test("finds Supertonic that lives only under ~/.pyenv/versions/*/bin (the huddle miss)", async () => {
-		const bin = `${HOME}/.pyenv/versions/3.11.4/bin/supertonic`;
+		const bin = join(HOME, ".pyenv/versions/3.11.4/bin/supertonic");
 		const deps = fakeDeps({ files: [bin], pyenvVersions: ["3.11.4"], supertonicWorks: true });
-		const r = await synthesize({ text: "hello", voice: "Rishi", outPath: "/out/a.wav" }, deps);
+		const r = await synthesize({ text: "hello", voice: "Rishi", outPath: abs("/out/a.wav") }, deps);
 		expect(r.ok).toBe(true);
 		expect(deps.calls[0].cmd).toBe(bin);
 		expect(deps.calls[0].args).toEqual([
 			"tts",
 			"-o",
-			"/out/a.wav",
+			abs("/out/a.wav"),
 			"--voice",
 			"M3",
 			"--steps",
@@ -256,7 +259,7 @@ describe("engine discovery", () => {
 	});
 
 	test("Kitten python order: env, python beside Supertonic, pyenv versions, pyenv shim, PATH", () => {
-		const stBin = `${HOME}/.pyenv/versions/3.11.4/bin/supertonic`;
+		const stBin = join(HOME, ".pyenv/versions/3.11.4/bin/supertonic");
 		const deps = fakeDeps({
 			files: [stBin],
 			env: { EIGHT_TTS_PYTHON: "/custom/python" },
@@ -265,16 +268,16 @@ describe("engine discovery", () => {
 		});
 		expect(kittenPythonCandidates(deps)).toEqual([
 			"/custom/python",
-			`${HOME}/.pyenv/versions/3.11.4/bin/python3`,
-			`${HOME}/.pyenv/versions/3.11.4/bin/python`,
-			`${HOME}/.pyenv/shims/python3`,
+			join(HOME, ".pyenv/versions/3.11.4/bin/python3"),
+			join(HOME, ".pyenv/versions/3.11.4/bin/python"),
+			join(HOME, ".pyenv/shims/python3"),
 			"/usr/bin/python3",
 		]);
 	});
 
 	test("no engine on the box is a typed no_engine error, and nothing is spawned", async () => {
 		const deps = fakeDeps({});
-		const r = await synthesize({ text: "hello", voice: "Rishi", outPath: "/out/a.wav" }, deps);
+		const r = await synthesize({ text: "hello", voice: "Rishi", outPath: abs("/out/a.wav") }, deps);
 		expect(r.ok).toBe(false);
 		if (!r.ok) expect(r.error.code).toBe("no_engine");
 		expect(deps.calls).toEqual([]);
@@ -284,7 +287,7 @@ describe("engine discovery", () => {
 describe("fallback order", () => {
 	test("a Supertonic voice uses Supertonic first and does not touch Kitten when it works", async () => {
 		const deps = both();
-		const r = await synthesize({ text: "hi", voice: "Moira", outPath: "/o/m.wav" }, deps);
+		const r = await synthesize({ text: "hi", voice: "Moira", outPath: abs("/o/m.wav") }, deps);
 		expect(r.ok && r.engine).toBe("supertonic");
 		expect(r.ok && r.fellBack).toBe(false);
 		expect(deps.calls.map((c) => basename(c.cmd))).toEqual(["supertonic"]);
@@ -292,13 +295,13 @@ describe("fallback order", () => {
 
 	test("a Kitten voice uses Kitten first with its pinned style", async () => {
 		const deps = both();
-		const r = await synthesize({ text: "hi", voice: "Ava", outPath: "/o/a.wav" }, deps);
+		const r = await synthesize({ text: "hi", voice: "Ava", outPath: abs("/o/a.wav") }, deps);
 		expect(r.ok && r.engine).toBe("kitten");
 		const runs = kittenRuns(deps.calls);
 		expect(runs).toHaveLength(1);
 		const job = JSON.parse(runs[0].input ?? "{}");
 		expect(job.model).toBe("KittenML/kitten-tts-nano-0.8");
-		expect(job.items).toEqual([{ text: "hi", out: "/o/a.wav", voice: "Bella" }]);
+		expect(job.items).toEqual([{ text: "hi", out: abs("/o/a.wav"), voice: "Bella" }]);
 	});
 
 	test("opted in: Supertonic failing falls back to Kitten with the canon fallback style", async () => {
@@ -308,7 +311,7 @@ describe("fallback order", () => {
 			kittenWorks: true,
 		});
 		const r = await synthesize(
-			{ text: "hi", voice: "Rishi", outPath: "/o/r.wav", allowFallback: true },
+			{ text: "hi", voice: "Rishi", outPath: abs("/o/r.wav"), allowFallback: true },
 			deps,
 		);
 		expect(r.ok).toBe(true);
@@ -330,7 +333,7 @@ describe("fallback order", () => {
 			supertonicWorks: true,
 		});
 		const r = await synthesize(
-			{ text: "hi", voice: "Fred", outPath: "/o/f.wav", allowFallback: true },
+			{ text: "hi", voice: "Fred", outPath: abs("/o/f.wav"), allowFallback: true },
 			deps,
 		);
 		expect(r.ok && r.engine).toBe("supertonic");
@@ -340,7 +343,7 @@ describe("fallback order", () => {
 	test("opted in: both engines failing is a typed all_engines_failed error naming every attempt", async () => {
 		const deps = fakeDeps({ files: [ST, PY], which: { supertonic: ST, python3: PY } });
 		const r = await synthesize(
-			{ text: "hi", voice: "Karen", outPath: "/o/k.wav", allowFallback: true },
+			{ text: "hi", voice: "Karen", outPath: abs("/o/k.wav"), allowFallback: true },
 			deps,
 		);
 		expect(r.ok).toBe(false);
@@ -355,12 +358,12 @@ describe("fallback order", () => {
 	});
 
 	test("exit 0 without a written file is a failure, and a stale file does not count", async () => {
-		const deps = fakeDeps({ files: [ST, "/o/stale.wav"], which: { supertonic: ST } });
+		const deps = fakeDeps({ files: [ST, abs("/o/stale.wav")], which: { supertonic: ST } });
 		deps.spawn = async (cmd, args, o) => {
 			deps.calls.push({ cmd, args, input: o.input });
 			return { status: 0, stderr: "" }; // claims success, writes nothing
 		};
-		const r = await synthesize({ text: "hi", voice: "Daniel", outPath: "/o/stale.wav" }, deps);
+		const r = await synthesize({ text: "hi", voice: "Daniel", outPath: abs("/o/stale.wav") }, deps);
 		expect(r.ok).toBe(false);
 	});
 
@@ -368,9 +371,9 @@ describe("fallback order", () => {
 		const deps = both();
 		const rs = await synthesizeBatch(
 			[
-				{ text: "one", voice: "Ava", outPath: "/o/1.wav" },
-				{ text: "two", voice: "Daniel", outPath: "/o/2.wav" },
-				{ text: "three", voice: "Kathy", outPath: "/o/3.wav" },
+				{ text: "one", voice: "Ava", outPath: abs("/o/1.wav") },
+				{ text: "two", voice: "Daniel", outPath: abs("/o/2.wav") },
+				{ text: "three", voice: "Kathy", outPath: abs("/o/3.wav") },
 			],
 			deps,
 		);
@@ -386,7 +389,7 @@ describe("fallback order", () => {
 			which: { supertonic: ST, python3: PY },
 			kittenWorks: true,
 		});
-		const r = await synthesize({ text: "hi", voice: "Rishi", outPath: "/o/r.wav" }, deps);
+		const r = await synthesize({ text: "hi", voice: "Rishi", outPath: abs("/o/r.wav") }, deps);
 		expect(r.ok).toBe(false);
 		if (!r.ok) {
 			expect(r.error).toBeInstanceOf(NeuralTtsError);
@@ -395,7 +398,7 @@ describe("fallback order", () => {
 		}
 		// Kitten worked, but it was never asked: Jasper is Alex's pinned voice.
 		expect(kittenRuns(deps.calls)).toEqual([]);
-		expect(deps.files.has("/o/r.wav")).toBe(false);
+		expect(deps.files.has(abs("/o/r.wav"))).toBe(false);
 	});
 
 	test("by default a failed Kitten voice does not borrow a Supertonic style", async () => {
@@ -404,7 +407,7 @@ describe("fallback order", () => {
 			which: { supertonic: ST, python3: PY },
 			supertonicWorks: true,
 		});
-		const r = await synthesize({ text: "hi", voice: "Victoria", outPath: "/o/v.wav" }, deps);
+		const r = await synthesize({ text: "hi", voice: "Victoria", outPath: abs("/o/v.wav") }, deps);
 		expect(!r.ok && r.error.code).toBe("engine_failed");
 		// F3 is Karen's pinned style; a degraded Victoria must not sound like 8SO.
 		expect(deps.calls.filter((c) => basename(c.cmd) === "supertonic")).toEqual([]);
@@ -412,7 +415,7 @@ describe("fallback order", () => {
 
 	test("a missing pinned engine is engine_failed by default even when the other is installed", async () => {
 		const deps = fakeDeps({ files: [PY], which: { python3: PY }, kittenWorks: true });
-		const r = await synthesize({ text: "hi", voice: "Karen", outPath: "/o/k.wav" }, deps);
+		const r = await synthesize({ text: "hi", voice: "Karen", outPath: abs("/o/k.wav") }, deps);
 		expect(!r.ok && r.error.code).toBe("engine_failed");
 		expect(!r.ok && r.error.attempts[0]?.reason).toBe("Supertonic not found");
 	});
@@ -428,14 +431,14 @@ describe("fallback order", () => {
 		};
 		const rs = await synthesizeBatch(
 			[
-				{ text: "one", voice: "Ava", outPath: "/o/1.wav" },
-				{ text: "two", voice: "Kathy", outPath: "/o/2.wav" },
+				{ text: "one", voice: "Ava", outPath: abs("/o/1.wav") },
+				{ text: "two", voice: "Kathy", outPath: abs("/o/2.wav") },
 			],
 			deps,
 		);
 		expect(rs.map((r) => r.ok)).toEqual([false, false]);
-		expect(deps.files.has("/o/1.wav")).toBe(false);
-		expect(deps.files.has("/o/2.wav")).toBe(false);
+		expect(deps.files.has(abs("/o/1.wav"))).toBe(false);
+		expect(deps.files.has(abs("/o/2.wav"))).toBe(false);
 	});
 
 	test("Kitten exiting non-zero is a failure even if the file is on disk", async () => {
@@ -443,12 +446,12 @@ describe("fallback order", () => {
 		deps.spawn = async (cmd, args, o) => {
 			deps.calls.push({ cmd, args, input: o.input, cwd: o.cwd });
 			if (args.at(-1) === "pass") return { status: 0, stderr: "" };
-			deps.files.add("/o/a.wav");
+			deps.files.add(abs("/o/a.wav"));
 			return { status: 1, stderr: "Traceback" };
 		};
-		const r = await synthesize({ text: "hi", voice: "Ava", outPath: "/o/a.wav" }, deps);
+		const r = await synthesize({ text: "hi", voice: "Ava", outPath: abs("/o/a.wav") }, deps);
 		expect(r.ok).toBe(false);
-		expect(deps.files.has("/o/a.wav")).toBe(false);
+		expect(deps.files.has(abs("/o/a.wav"))).toBe(false);
 	});
 
 	test("an empty output file is a failure for either engine, and it is removed", async () => {
@@ -457,12 +460,12 @@ describe("fallback order", () => {
 			const real = deps.spawn;
 			deps.spawn = async (cmd, args, o) => {
 				const r = await real(cmd, args, o);
-				for (const f of deps.files) if (f.startsWith("/o/")) deps.sizes.set(f, 0);
+				for (const f of deps.files) if (f.startsWith(abs("/o"))) deps.sizes.set(f, 0);
 				return r;
 			};
-			const r = await synthesize({ text: "hi", voice, outPath: "/o/z.wav" }, deps);
+			const r = await synthesize({ text: "hi", voice, outPath: abs("/o/z.wav") }, deps);
 			expect(r.ok).toBe(false);
-			expect(deps.files.has("/o/z.wav")).toBe(false);
+			expect(deps.files.has(abs("/o/z.wav"))).toBe(false);
 		}
 	});
 
@@ -473,27 +476,35 @@ describe("fallback order", () => {
 			deps.files.add(args[args.indexOf("-o") + 1]);
 			return { status: 1, stderr: "boom" };
 		};
-		const r = await synthesize({ text: "hi", voice: "Daniel", outPath: "/o/d.wav" }, deps);
+		const r = await synthesize({ text: "hi", voice: "Daniel", outPath: abs("/o/d.wav") }, deps);
 		expect(r.ok).toBe(false);
-		expect(deps.files.has("/o/d.wav")).toBe(false);
+		expect(deps.files.has(abs("/o/d.wav"))).toBe(false);
 	});
 
 	test("hostile lines go to Supertonic as text after --, never as options", async () => {
 		const hostile = ["--help", "-o/x", "--custom-style-path=/tmp/x.json", "--voice=M1 hi", "-"];
 		for (const text of hostile) {
 			const deps = both();
-			const r = await synthesize({ text, voice: "Rishi", outPath: "/o/h.wav" }, deps);
+			const r = await synthesize({ text, voice: "Rishi", outPath: abs("/o/h.wav") }, deps);
 			expect(r.ok).toBe(true);
 			const args = deps.calls[0].args;
 			expect(args.at(-1)).toBe(text);
 			expect(args.at(-2)).toBe("--");
 			expect(args.indexOf("--")).toBe(args.length - 2);
-			expect(args.slice(0, 7)).toEqual(["tts", "-o", "/o/h.wav", "--voice", "M3", "--steps", "8"]);
+			expect(args.slice(0, 7)).toEqual([
+				"tts",
+				"-o",
+				abs("/o/h.wav"),
+				"--voice",
+				"M3",
+				"--steps",
+				"8",
+			]);
 		}
 	});
 
 	test("empty text is a typed error, not a silent clip", async () => {
-		const r = await synthesize({ text: "   ", voice: "Daniel", outPath: "/o/e.wav" }, both());
+		const r = await synthesize({ text: "   ", voice: "Daniel", outPath: abs("/o/e.wav") }, both());
 		expect(!r.ok && r.error.code).toBe("empty_text");
 	});
 });
@@ -507,7 +518,7 @@ describe("macOS say is unreachable", () => {
 		];
 		for (const deps of scenarios) {
 			for (const voice of [...Object.keys(NEURAL_VOICE), ...Object.keys(OFFICERS)]) {
-				await synthesize({ text: "hi", voice, outPath: `/o/${voice}.wav` }, deps);
+				await synthesize({ text: "hi", voice, outPath: abs(`/o/${voice}.wav`) }, deps);
 			}
 			for (const c of deps.calls) expect(basename(c.cmd)).not.toBe("say");
 		}
@@ -518,7 +529,7 @@ describe("macOS say is unreachable", () => {
 			files: ["/usr/bin/say"],
 			env: { EIGHT_SUPERTONIC_BIN: "/usr/bin/say", EIGHT_TTS_PYTHON: "/usr/bin/say" },
 		});
-		const r = await synthesize({ text: "hi", voice: "Rishi", outPath: "/o/r.wav" }, deps);
+		const r = await synthesize({ text: "hi", voice: "Rishi", outPath: abs("/o/r.wav") }, deps);
 		expect(r.ok).toBe(false);
 		expect(deps.calls).toEqual([]);
 	});
@@ -532,7 +543,7 @@ describe("macOS say is unreachable", () => {
 			kittenWorks: true,
 		});
 		expect(findSupertonic(deps)).toBeNull();
-		const r = await synthesize({ text: "hi", voice: "Rishi", outPath: "/o/r.wav" }, deps);
+		const r = await synthesize({ text: "hi", voice: "Rishi", outPath: abs("/o/r.wav") }, deps);
 		expect(r.ok).toBe(false);
 		expect(deps.calls).toEqual([]);
 	});
@@ -591,8 +602,8 @@ describe("synthesis does not block the event loop", () => {
 		const stop = ticker(10);
 		const rs = await synthesizeBatch(
 			[
-				{ text: "one", voice: "Daniel", outPath: "/o/1.wav" },
-				{ text: "two", voice: "Ava", outPath: "/o/2.wav" },
+				{ text: "one", voice: "Daniel", outPath: abs("/o/1.wav") },
+				{ text: "two", voice: "Ava", outPath: abs("/o/2.wav") },
 			],
 			deps,
 		);
@@ -619,7 +630,7 @@ describe("synthesis does not block the event loop", () => {
 
 	test("defaultDeps().spawn is the async spawn, and synthesize returns a promise", () => {
 		expect(defaultDeps().spawn).toBe(spawnAsync);
-		const p = synthesize({ text: "hi", voice: "Bob", outPath: "/o/b.wav" }, both());
+		const p = synthesize({ text: "hi", voice: "Bob", outPath: abs("/o/b.wav") }, both());
 		expect(p).toBeInstanceOf(Promise);
 	});
 
@@ -661,7 +672,7 @@ describe("synthesis does not block the event loop", () => {
 describe("the Kitten interpreter cannot import from the caller's cwd (F1)", () => {
 	test("the batch runs in a fresh temp dir with -P, and the temp dir is removed", async () => {
 		const deps = both();
-		const r = await synthesize({ text: "hi", voice: "Ava", outPath: "/o/a.wav" }, deps);
+		const r = await synthesize({ text: "hi", voice: "Ava", outPath: abs("/o/a.wav") }, deps);
 		expect(r.ok).toBe(true);
 		const pyCalls = deps.calls.filter((c) => basename(c.cmd) !== "supertonic");
 		expect(pyCalls.length).toBe(2); // the -P probe, then the batch
@@ -679,7 +690,7 @@ describe("the Kitten interpreter cannot import from the caller's cwd (F1)", () =
 			kittenWorks: true,
 			pythonHasP: false,
 		});
-		const r = await synthesize({ text: "hi", voice: "Ava", outPath: "/o/a.wav" }, deps);
+		const r = await synthesize({ text: "hi", voice: "Ava", outPath: abs("/o/a.wav") }, deps);
 		expect(r.ok).toBe(true);
 		const [run] = kittenRuns(deps.calls);
 		expect(run.args[0]).toBe("-c");
@@ -767,10 +778,10 @@ describe("Supertonic argv takes hostile text as text (F2)", () => {
 		async () => {
 			for (const text of ["--help", "-o/x", "--custom-style-path=/tmp/x.json", "--voice=M1 hi"]) {
 				const deps = both();
-				await synthesize({ text, voice: "Rishi", outPath: "/o/h.wav" }, deps);
+				await synthesize({ text, voice: "Rishi", outPath: abs("/o/h.wav") }, deps);
 				const r = Bun.spawnSync([py as string, "-c", PARSER, ...deps.calls[0].args]);
 				expect(r.exitCode).toBe(0);
-				expect(JSON.parse(r.stdout.toString())).toEqual([text, "/o/h.wav", "M3"]);
+				expect(JSON.parse(r.stdout.toString())).toEqual([text, abs("/o/h.wav"), "M3"]);
 			}
 		},
 	);
@@ -791,7 +802,7 @@ describe("PATH lookup (L1)", () => {
 		const prev = process.cwd();
 		process.chdir(dir);
 		try {
-			expect(whichOnPath("supertonic", ["", ".", "bin", "./bin"].join(":"))).toBeNull();
+			expect(whichOnPath("supertonic", ["", ".", "bin", "./bin"].join(delimiter))).toBeNull();
 			process.chdir(exe);
 			expect(whichOnPath("supertonic", ".")).toBeNull();
 		} finally {
@@ -809,8 +820,13 @@ describe("PATH lookup (L1)", () => {
 			chmodSync(join(notExec, "supertonic"), 0o644);
 			const isDir = join(dir, "isdir");
 			mkdirSync(join(isDir, "supertonic"), { recursive: true });
-			expect(whichOnPath("supertonic", `${notExec}:${isDir}`)).toBeNull();
-			expect(whichOnPath("supertonic", `${notExec}:${isDir}:${exe}`)).toBe(join(exe, "supertonic"));
+			// Windows has no execute bit (access X_OK is true for any file), so only the
+			// directory half of "regular executable file" can be asserted there.
+			const noExec = process.platform === "win32" ? [] : [notExec];
+			expect(whichOnPath("supertonic", [...noExec, isDir].join(delimiter))).toBeNull();
+			expect(whichOnPath("supertonic", [...noExec, isDir, exe].join(delimiter))).toBe(
+				join(exe, "supertonic"),
+			);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -888,7 +904,7 @@ describe("output paths (N1, L3)", () => {
 			const [bad, good] = await synthesizeBatch(
 				[
 					{ text: "hi", voice: "Ava", outPath: dir },
-					{ text: "hi", voice: "Ava", outPath: "/o/good.wav" },
+					{ text: "hi", voice: "Ava", outPath: abs("/o/good.wav") },
 				],
 				deps,
 			);

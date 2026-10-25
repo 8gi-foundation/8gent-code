@@ -59,7 +59,8 @@ function resolveImport(
 	if (fs.existsSync(base) && fs.statSync(base).isFile()) return base;
 	for (const suffix of RESOLVE_EXTS) {
 		const candidate = base + suffix;
-		if (fs.existsSync(candidate)) return candidate;
+		// "/index.ts" joins with a slash; the graph keys use the platform separator.
+		if (fs.existsSync(candidate)) return path.normalize(candidate);
 	}
 	// TS ESM style: "./foo.js" names the source file "./foo.ts"
 	const jsMatch = base.match(/\.jsx?$/);

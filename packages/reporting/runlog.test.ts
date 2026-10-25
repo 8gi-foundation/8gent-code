@@ -49,11 +49,12 @@ describe("run log claims cap (#3411, 8SO L3)", () => {
 		const script = `const { appendRun } = await import(${JSON.stringify(join(import.meta.dir, "runlog.ts"))});
 appendRun(${JSON.stringify({ ...base, quick: { class: "quick", ran: true, ok: false, ms: 1, tools: 1, claims: [0, 1, 2, 3, 4, 5, 6].map(long) } })});`;
 		const r = Bun.spawnSync([process.execPath, "-e", script], {
-			env: { ...process.env, HOME: home },
+			// os.homedir() reads USERPROFILE on Windows, HOME elsewhere.
+			env: { ...process.env, HOME: home, USERPROFILE: home },
 			stdout: "pipe",
 			stderr: "pipe",
 		});
-		expect(r.exitCode).toBe(0);
+		expect(r.exitCode, r.stderr.toString()).toBe(0);
 		const line = JSON.parse(readFileSync(join(home, ".8gent", "runs.jsonl"), "utf8").trim());
 		expect(line.quick.claims).toHaveLength(CLAIMS_MAX);
 		for (const c of line.quick.claims) expect(c.length).toBeLessThanOrEqual(CLAIM_MAX_CHARS);
