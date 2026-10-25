@@ -66,6 +66,7 @@ export type SlashCommand =
 	| "rename"
 	| "spawn"
 	| "settings"
+	| "control"
 	| "quiet"
 	| "term"
 	| "herdr"
@@ -496,6 +497,12 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 		aliases: [],
 		description: "Open settings view (toggle voice, performance, providers, models)",
 		usage: "/settings",
+	},
+	{
+		name: "control",
+		aliases: ["loops"],
+		description: "Open the Control tab: every loop, what it is doing and what it waits on",
+		usage: "/control",
 	},
 	{
 		name: "quiet",

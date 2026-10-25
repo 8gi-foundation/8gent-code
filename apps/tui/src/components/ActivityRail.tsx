@@ -30,8 +30,10 @@
 import { Box, Text } from "ink";
 import React from "react";
 import { queuedToolCount } from "../lib/activity-rail-derivation.js";
-import { t } from "../theme.js";
+import type { LoopRow } from "../lib/control-state.js";
 import { askedNote } from "../lib/model-truth.js";
+import { t } from "../theme.js";
+import { LoopsBlock } from "./LoopsBlock.js";
 import { MetricRow, TruncatedValue } from "./RailRow.js";
 
 // RailSection wraps a heading and its rows in a discrete column block.
@@ -58,7 +60,9 @@ function RailSection({
 	return (
 		<Box flexDirection="column" marginTop={1} width="100%" flexShrink={0}>
 			<Box flexShrink={0}>
-				<Text color={t.heading} bold>{title}</Text>
+				<Text color={t.heading} bold>
+					{title}
+				</Text>
 			</Box>
 			<Box flexDirection="column" width="100%" flexShrink={0}>
 				{children}
@@ -167,6 +171,40 @@ interface ActivityRailProps {
 	 *  renders without the BODY section when undefined, preserving callers
 	 *  that have not yet wired the useBodyParts hook. */
 	bodyParts?: BodyPartsRow;
+	/** The terminal's row count. When given, the LOOPS block takes whatever
+	 *  rows the sections above leave free; absent means no LOOPS block. */
+	height?: number;
+	/** Test seam: loop rows to show instead of reading the Control store. */
+	loopRows?: ReadonlyArray<LoopRow>;
+}
+
+/** Rows of the screen the rail does not own: header, tab strip, shell frame, footer (measured at 100x32). */
+export const RAIL_CHROME_ROWS = 9;
+
+/** Free rows left in the rail for the LOOPS block at a given terminal height. */
+export function railSpareRows(
+	height: number,
+	p: Pick<ActivityRailProps, "tasks" | "providers" | "agents" | "memory" | "bodyParts">,
+): number {
+	const tasks =
+		p.tasks.length === 0
+			? 1
+			: p.tasks.reduce((n, x) => n + 1 + (typeof x.progress === "number" ? 1 : 0), 0);
+	const asked = p.providers.filter((x) => x.asked).length;
+	const memory = hasMemoryRows(p.memory)
+		? 2 +
+			[p.memory.hits, p.memory.misses, p.memory.cache].filter((v) => v !== undefined && v !== "")
+				.length
+		: 0;
+	const used =
+		2 + // top padding and heading
+		(2 + tasks) +
+		(2 + 3) +
+		(2 + p.providers.length + asked) +
+		memory +
+		(2 + p.agents.length) +
+		(p.bodyParts ? 2 + 3 : 0);
+	return height - RAIL_CHROME_ROWS - used;
 }
 
 /**
@@ -190,23 +228,23 @@ export function providerDisplay(value: string): string {
 }
 
 const TOOL_GLYPH: Record<ToolState, string> = {
-	idle:    "○",
+	idle: "○",
 	running: "◐",
-	ok:      "●",
-	fail:    "✕",
+	ok: "●",
+	fail: "✕",
 };
 
 const TOOL_COLOR: Record<ToolState, string> = {
-	idle:    t.muted,
+	idle: t.muted,
 	running: t.teal,
-	ok:      t.green,
-	fail:    t.red,
+	ok: t.green,
+	fail: t.red,
 };
 
 const PROVIDER_COLOR: Record<ProviderState, string> = {
-	primary:  t.green,
+	primary: t.green,
 	fallback: t.textSecondary,
-	offline:  t.red,
+	offline: t.red,
 };
 
 // The route in use is filled; a standby route is a hollow ring, and says
@@ -214,27 +252,27 @@ const PROVIDER_COLOR: Record<ProviderState, string> = {
 // (both can be the same provider, two lmstudio models say). A measured
 // latency takes the word's place.
 const PROVIDER_GLYPH: Record<ProviderState, string> = {
-	primary:  "●",
+	primary: "●",
 	fallback: "○",
-	offline:  "✕",
+	offline: "✕",
 };
 
 const PROVIDER_ROLE: Record<ProviderState, string | undefined> = {
-	primary:  undefined,
+	primary: undefined,
 	fallback: "fallback",
-	offline:  "offline",
+	offline: "offline",
 };
 
 // Each state has its own glyph, so the rows never differ by colour alone (#3238).
 const AGENT_GLYPH: Record<AgentState, string> = {
-	idle:    "○",
-	active:  "●",
+	idle: "○",
+	active: "●",
 	blocked: "■",
 };
 
 const AGENT_COLOR: Record<AgentState, string> = {
-	idle:    t.muted,
-	active:  t.green,
+	idle: t.muted,
+	active: t.green,
 	blocked: t.textPrimary,
 };
 
@@ -248,25 +286,27 @@ const AGENT_COLOR: Record<AgentState, string> = {
 //   inFlight - inverted/pulsed bullseye, teal accent (live tool call)
 const BODY_GLYPH: Record<BodyPartState, string> = {
 	disabled: "○",
-	idle:     "●",
+	idle: "●",
 	inFlight: "◉",
 };
 
 const BODY_COLOR: Record<BodyPartState, string> = {
 	disabled: t.muted,
-	idle:     t.green,
+	idle: t.green,
 	inFlight: t.teal,
 };
 
 const BODY_PART_LABELS: ReadonlyArray<{ key: keyof BodyPartsRow; label: string }> = [
-	{ key: "hands",    label: "hands" },
-	{ key: "eyes",     label: "eyes" },
+	{ key: "hands", label: "hands" },
+	{ key: "eyes", label: "eyes" },
 	{ key: "handeyes", label: "handeyes" },
 ];
 
 function hasMemoryRows(memory: MemoryStats | undefined): memory is MemoryStats {
 	if (!memory) return false;
-	return typeof memory.hits === "number" || typeof memory.misses === "number" || Boolean(memory.cache);
+	return (
+		typeof memory.hits === "number" || typeof memory.misses === "number" || Boolean(memory.cache)
+	);
 }
 
 function bar(percent: number, width = 12): string {
@@ -284,6 +324,8 @@ export function ActivityRail({
 	activeTool = null,
 	toolsCompleted,
 	bodyParts,
+	height,
+	loopRows,
 }: ActivityRailProps) {
 	return (
 		<Box
@@ -303,7 +345,9 @@ export function ActivityRail({
 			overflow="hidden"
 		>
 			<Box flexShrink={0}>
-				<Text color={t.heading} bold>8GENT ACTIVITY</Text>
+				<Text color={t.heading} bold>
+					8GENT ACTIVITY
+				</Text>
 			</Box>
 
 			<RailSection title="TASKS">
@@ -376,7 +420,9 @@ export function ActivityRail({
 							color={PROVIDER_COLOR[provider.state]}
 							trailing={provider.latency ?? PROVIDER_ROLE[provider.state]}
 						/>
-						{provider.asked ? <NamedRow name={`  ${askedNote(provider.asked)}`} color={t.textTertiary} /> : null}
+						{provider.asked ? (
+							<NamedRow name={`  ${askedNote(provider.asked)}`} color={t.textTertiary} />
+						) : null}
 					</React.Fragment>
 				))}
 			</RailSection>
@@ -418,6 +464,13 @@ export function ActivityRail({
 						);
 					})}
 				</RailSection>
+			) : null}
+
+			{height !== undefined ? (
+				<LoopsBlock
+					spare={railSpareRows(height, { tasks, providers, agents, memory, bodyParts })}
+					rows={loopRows}
+				/>
 			) : null}
 		</Box>
 	);

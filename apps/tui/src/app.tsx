@@ -390,6 +390,7 @@ import { type ToolTrailEntry, toTrailEntry } from "./lib/tool-trail.js";
 import { turnEndedInError } from "./lib/turn-outcome.js";
 import { refreshSlashNames, voiceTranscriptText } from "./lib/voice-transcript.js";
 import { BTWView } from "./screens/BTWView.js";
+import { ControlView } from "./screens/ControlView.js";
 import { type ConversationEntry, HistoryScreen } from "./screens/HistoryScreen.js";
 import { IdeasView } from "./screens/IdeasView.js";
 import { KeyVaultScreen } from "./screens/KeyVaultScreen.js";
@@ -5989,6 +5990,12 @@ export function App({
 					break;
 				}
 
+				case "control": {
+					// Open the Control tab (singleton - switches if it already exists).
+					workspaceTabs.addTab("control", "Control");
+					break;
+				}
+
 				case "hands":
 				case "eyes":
 				case "handeyes": {
@@ -8576,6 +8583,8 @@ export function App({
 						/>
 					);
 				}
+				case "control":
+					return <ControlView visible={true} onClose={closeTabView} />;
 				case "settings":
 					return (
 						<SettingsView
@@ -9375,6 +9384,7 @@ export function App({
 								activeTool={activeTool || (isProcessing ? "reasoning" : null)}
 								toolsCompleted={toolCount}
 								bodyParts={bodyParts.state}
+								height={viewport.height}
 							/>
 						)}
 					</Box>
