@@ -8,6 +8,7 @@
 import { EventEmitter } from "node:events";
 import type { ValidationReport } from "../validation/report";
 import type { Evidence, Step } from "../workflow/plan-validate";
+import { currentProviderPin } from "./provider-pin";
 
 // ============================================
 // Types
@@ -438,9 +439,12 @@ export class SubAgentManager extends EventEmitter {
 		// Import Agent to create a planning request
 		const { Agent } = await import("../eight");
 
+		// A pinned session's planner stays on its provider too (#3762).
+		const pin = currentProviderPin();
 		const plannerAgent = new Agent({
-			model: agent.config.model || "glm-4.7-flash:latest",
-			runtime: "ollama",
+			model: agent.config.model || pin?.model || "glm-4.7-flash:latest",
+			runtime: (pin?.runtime ?? "ollama") as "ollama",
+			...(pin ? { providerPinned: true } : {}),
 			workingDirectory: agent.config.workingDirectory || process.cwd(),
 			maxTurns: 5,
 		});

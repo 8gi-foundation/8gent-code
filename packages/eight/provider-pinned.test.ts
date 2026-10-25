@@ -44,7 +44,10 @@ let sessionPort = 0;
 let fetchSpy: { mockRestore: () => void } | undefined;
 let chainSpy: { mockRestore: () => void } | undefined;
 
-function fake(name: Seen["server"], fails: (model: string) => boolean): ReturnType<typeof Bun.serve> {
+function fake(
+	name: Seen["server"],
+	fails: (model: string) => boolean,
+): ReturnType<typeof Bun.serve> {
 	const s = Bun.serve({
 		port: 0,
 		async fetch(req) {
@@ -62,7 +65,9 @@ function fake(name: Seen["server"], fails: (model: string) => boolean): ReturnTy
 				object: "chat.completion",
 				created: 0,
 				model: body.model,
-				choices: [{ index: 0, message: { role: "assistant", content: "Done." }, finish_reason: "stop" }],
+				choices: [
+					{ index: 0, message: { role: "assistant", content: "Done." }, finish_reason: "stop" },
+				],
 				usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
 			});
 		},
@@ -82,7 +87,10 @@ beforeAll(async () => {
 	sessionPort = session.port ?? 0;
 
 	const realFetch = globalThis.fetch;
-	fetchSpy = spyOn(globalThis, "fetch").mockImplementation(((input: RequestInfo | URL, init?: RequestInit) => {
+	fetchSpy = spyOn(globalThis, "fetch").mockImplementation(((
+		input: RequestInfo | URL,
+		init?: RequestInit,
+	) => {
 		const url = new URL(input instanceof Request ? input.url : String(input));
 		if (url.hostname === "openrouter.ai") {
 			const path = url.pathname.replace(/^\/api/, "");
@@ -221,6 +229,23 @@ describe("a named provider never falls back to another provider (#3746)", () => 
 			process.env.OPENROUTER_API_KEY = prev;
 		}
 	}, 30000);
+
+	test("a pinned child built from inherited fields never reaches the hosted provider (#3762)", async () => {
+		const { inheritedProviderFields } = await import("../orchestration/provider-pin");
+		const inherited = inheritedProviderFields({ runtime: "ollama", model: "pin-a" });
+		const start = seen.length;
+		const child = new Agent({
+			model: inherited.model as string,
+			runtime: inherited.runtime as "ollama",
+			providerPinned: inherited.providerPinned,
+			workingDirectory: repo,
+			baseUrl: `http://127.0.0.1:${sessionPort}`,
+		} as ConstructorParameters<typeof import("./agent").Agent>[0]);
+		const out = String(await child.chat("say done").catch((e: Error) => e.message));
+		const reqs = seen.slice(start);
+		expect(reqs.filter((r) => r.server === "openrouter")).toEqual([]);
+		expect(out).toContain("no other provider was tried");
+	}, 30000);
 });
 
 describe("hosted providers need a key before any request (#3746)", () => {
@@ -239,7 +264,8 @@ describe("hosted providers need a key before any request (#3746)", () => {
 	test("createModel with no key sends nothing", async () => {
 		const prev = process.env.OPENROUTER_API_KEY;
 		delete process.env.OPENROUTER_API_KEY;
-		const before = (globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
+		const before = (globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls
+			.length;
 		try {
 			const { createModel } = await import("../ai/providers");
 			const model = createModel({ name: "openrouter", model: "m" }) as unknown as {
@@ -247,12 +273,15 @@ describe("hosted providers need a key before any request (#3746)", () => {
 			};
 			let msg = "";
 			try {
-				await model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }] });
+				await model.doGenerate({
+					prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+				});
 			} catch (e) {
 				msg = String((e as Error)?.message ?? e);
 			}
 			expect(msg).toContain("No API key for openrouter");
-			const after = (globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
+			const after = (globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls
+				.length;
 			expect(after).toBe(before);
 		} finally {
 			process.env.OPENROUTER_API_KEY = prev;
@@ -261,11 +290,14 @@ describe("hosted providers need a key before any request (#3746)", () => {
 
 	test("OpenRouterClient with no key sends nothing", async () => {
 		const { OpenRouterClient } = await import("./clients/openrouter");
-		const before = (globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
+		const before = (globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls
+			.length;
 		const client = new OpenRouterClient("m", "");
 		expect(await client.isAvailable()).toBe(false);
 		expect(await new OpenRouterClient("m", "  ").isAvailable()).toBe(false);
-		await expect(client.chat([{ role: "user", content: "hi" }])).rejects.toThrow("No API key for openrouter");
+		await expect(client.chat([{ role: "user", content: "hi" }])).rejects.toThrow(
+			"No API key for openrouter",
+		);
 		const after = (globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
 		expect(after).toBe(before);
 	});

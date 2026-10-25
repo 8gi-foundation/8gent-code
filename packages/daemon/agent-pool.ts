@@ -9,6 +9,7 @@ import { Agent } from "../eight/agent";
 import { sessionApiKey } from "../eight/failover-provider-config";
 import { LOCAL_PROVIDERS } from "../eight/registry";
 import type { AgentConfig, AgentEventCallbacks } from "../eight/types";
+import { currentProviderPin } from "../orchestration/provider-pin";
 import { getUsageMonitor } from "../providers/usage-monitor";
 import { type ApprovalTurn, withChannelApprovals } from "./channel-approvals";
 import {
@@ -88,6 +89,11 @@ export interface SessionOverrides {
 	 * the project it was started in (#3929). Defaults to the pool's.
 	 */
 	workingDirectory?: string;
+	/**
+	 * Set by the session journal for a session that was pinned to its parent's
+	 * provider, so a resumed session stays pinned (#3762). Pins only; never loosens.
+	 */
+	providerPinned?: boolean;
 }
 
 const DEFAULT_MODEL = process.env.EIGHGENT_MODEL || "eight:latest";
@@ -392,7 +398,17 @@ export class AgentPool {
 		// A per-session `overrides.runtime` (e.g. an officer's backend) takes
 		// precedence over the pool default before the gate is applied.
 		const isTableSession = channel === "table" || overrides?.agentScope === "__table__";
-		let runtime: AgentConfig["runtime"] = overrides?.runtime ?? this.config.runtime;
+		// A session started from inside a pinned agent's turn follows that agent's
+		// provider and model and stays pinned to it (#3762). An explicit
+		// `overrides.runtime` is a deliberate per-session choice and wins: it is
+		// pinned only when it names the same runtime. A Table session forced to
+		// local is not on the pin's runtime, so it is neither pinned nor given
+		// the pin's model.
+		const pin = currentProviderPin();
+		let runtime: AgentConfig["runtime"] =
+			overrides?.runtime ??
+			(pin?.runtime as AgentConfig["runtime"] | undefined) ??
+			this.config.runtime;
 		if (isTableSession && !LOCAL_PROVIDERS.has(runtime)) {
 			if (process.env.EIGHT_TABLE_CONSENT_CLOUD === "1") {
 				console.warn(
@@ -408,11 +424,13 @@ export class AgentPool {
 
 		// Per-session backend routing: an override pins this session to a specific
 		// local model / endpoint / persona; otherwise the pool defaults apply.
-		const model = overrides?.model ?? this.config.model;
+		const onPin = pin !== undefined && runtime === pin.runtime;
+		const model = overrides?.model ?? (onPin ? pin.model : undefined) ?? this.config.model;
 
 		const agentConfig: AgentConfig = {
 			model,
 			runtime,
+			...(onPin || overrides?.providerPinned ? { providerPinned: true } : {}),
 			// Optional explicit endpoint (e.g. an officer's local backend port).
 			// createClient() ignores it for clients that don't speak HTTP.
 			baseUrl: overrides?.baseUrl,
@@ -472,7 +490,13 @@ export class AgentPool {
 					channel,
 					ttSessionId: agent.getTimeTravelSessionId(),
 					createdAt: now,
-					...(overrides ? { overrides } : {}),
+					// A pinned session journals the pin's resolved runtime and model so a
+					// resume (no pin in scope) recreates it pinned (#3762).
+					...(onPin
+						? { overrides: { ...overrides, runtime, model, providerPinned: true } }
+						: overrides
+							? { overrides }
+							: {}),
 				});
 			} catch (err) {
 				console.error(`[agent-pool] session journal write failed for ${sessionId}: ${String(err)}`);
