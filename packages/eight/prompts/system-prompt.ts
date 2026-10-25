@@ -300,7 +300,7 @@ const TOOL_CATEGORY_DESCRIPTIONS: Record<string, string> = {
 	media: "Read and edit images, PDFs and Jupyter notebooks.",
 	orchestration:
 		"Spawn and coordinate sub-agents. Delegate, message, merge work. The `term_*` family lets you spawn external CLIs (claude, openclaw, pi…) in real Terminal.app windows via tmux, send them prompts, and read their replies. Use it to parallelise compute across whichever LLM CLIs the user has installed.",
-	background: "Start long-running background tasks and stream their output.",
+	background: "Start long-running tasks, stream or await their output.",
 	mcp: "List and call tools from connected MCP servers.",
 	computer:
 		"Control the desktop autonomously (8gent-hands). Use `run_computer_task` with a natural-language goal to drive the full vision-model CUA loop, for example 'use your hands to open X', 'click the button in Y', 'fill out the form at Z'. The low-level `desktop_*` tools (screenshot, click, type, press, scroll, drag, hover, windows, clipboard) are also available for fine-grained control. Requires `bun run cua:setup` once.",
@@ -326,12 +326,11 @@ export interface ToolCatalogOptions {
 export const CONCISE_WEB_NOTE =
 	"**Web, docs or URLs: `web_search`/`web_fetch`; you have internet.**";
 export const NARRATION_NOTE = "**Narration: `speak`, never espeak or say.**";
-export const SCRATCH_DIR_NOTE =
-	"**Scratch files: the session scratch dir, never the repo, /tmp or ~.**";
+export const SCRATCH_DIR_NOTE = "**Scratch: the session scratch dir, never the repo, /tmp or ~.**";
 
 /** #4306: a pilot run made type folders in the wrong place, tried rmdir, and was blocked. */
 export const FOLDER_NOTE =
-	"**Folders: `rmdir` is blocked, so name the full `mkdir` path first; fix with `mv`.**";
+	"**Folders: `rmdir` is blocked; name the full `mkdir` path first; fix with `mv`.**";
 
 /** #4316: a ticket asked for the source file most likely at fault; the model also named a neighbour. */
 export const TICKET_FILE_NOTE =
@@ -339,7 +338,7 @@ export const TICKET_FILE_NOTE =
 
 /** #4368: an unblock checklist ran 330-429 words and told the person to use options their setup lacks. */
 export const UNBLOCK_NOTE =
-	"**Unblocking someone: under 180 words, only steps their stated setup can run.**";
+	"**Unblocking: under 180 words, only steps their stated setup can run.**";
 
 export type EnvironmentNoteInput = {
 	platform?: NodeJS.Platform;

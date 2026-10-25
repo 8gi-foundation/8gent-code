@@ -214,6 +214,7 @@ export const PLAN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
 	"list_agents",
 	"background_status",
 	"background_output",
+	"background_wait",
 	"query_design_system",
 	"self_inspect",
 	"recall",
