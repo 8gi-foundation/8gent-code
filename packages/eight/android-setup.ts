@@ -27,6 +27,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
+import { type OneYesOptions, askOneYesDetailed, isUnattendedReason } from "../core/one-yes";
 import { findOnPath, isAndroidHost } from "../voice/termux";
 import {
 	BUILD_PKGS,
@@ -42,7 +43,7 @@ import {
 	localVoiceReady,
 	runCommand,
 } from "../voice/termux-local-stt";
-import { askYesNoLine, configPath } from "./judge-install";
+import { configPath } from "./judge-install";
 import { type BinaryResult, fetchWhisperCli } from "./runtime-fetch";
 
 export { configPath };
@@ -90,9 +91,10 @@ export interface AndroidSetupDeps {
 	android?: boolean;
 	/** Is this command on PATH? */
 	has?: (bin: string) => boolean;
-	ask?: (line: string, defaultYes: boolean) => Promise<boolean | null>;
-	/** A bare Enter: true on first launch, false after an update. */
-	defaultYes?: boolean;
+	/** The question, its default (always false), and the label the denial ledger records. */
+	ask?: (line: string, defaultYes: boolean, label: string) => Promise<boolean | null>;
+	/** Streams and sinks for the default asker. A supplied input is the answer channel and the env flags do not apply to it. */
+	oneYes?: OneYesIo;
 	/** Run a command, resolve its exit code (null when it could not start). */
 	run?: LocalRun;
 	/** whisper.cpp's CLI, or null. */
@@ -128,7 +130,8 @@ export const LOCAL_DISCLOSURE =
 export const CLOUD_DISCLOSURE =
 	"Your audio leaves this phone: Android sends it to its speech service, often Google.";
 
-export function musicAskLine(pkgs: readonly string[], _defaultYes = false): string {
+/** Always [y/N]: an install question never takes a bare Enter as yes. */
+export function musicAskLine(pkgs: readonly string[]): string {
 	return `Set up this phone for music? Installs ${pkgs.join(", ")}. [y/N]`;
 }
 
@@ -289,20 +292,25 @@ interface Resolved {
 	installModel: NonNullable<AndroidSetupDeps["installModel"]>;
 }
 
-/**
- * True when nobody can answer: CI, EIGHT_UNATTENDED, or no terminal on stdin or
- * stdout (a pipe, a test harness feeding keys). Install questions then resolve at
- * once to "no person": nothing installs, nothing is recorded as declined, and the
- * person is asked next time they are there.
- */
-export function unattended(env: Env = process.env): boolean {
-	const set = (v: string | undefined) => !!v && v !== "0" && v.toLowerCase() !== "false";
-	return set(env.CI) || set(env.EIGHT_UNATTENDED) || !process.stdin.isTTY || !process.stdout.isTTY;
-}
+/** CI, EIGHT_UNATTENDED, EIGHT_HEADLESS, or no terminal: the shared resolver's check, nothing here adds its own. */
+export { unattended } from "./judge-install";
 
-function askPerson(line: string, _defaultYes: boolean, env: Env): Promise<boolean | null> {
-	if (unattended(env)) return Promise.resolve(null);
-	return askYesNoLine(line);
+type OneYesIo = Pick<
+	OneYesOptions,
+	"input" | "output" | "record" | "log" | "timeoutMs" | "assumeAttended"
+>;
+
+/** Through the shared one-yes resolver: a bare Enter, a timeout, a closed input and an unattended run are all no. Null when nobody can answer. */
+async function askPerson(
+	line: string,
+	label: string,
+	env: Env,
+	io: OneYesIo = {},
+): Promise<boolean | null> {
+	// A stream handed in by the caller is the answer channel (a test, an embedded host).
+	const own = io.input !== undefined;
+	const r = await askOneYesDetailed(line, { assumeAttended: own, ...io, label, env });
+	return isUnattendedReason(r.reason) ? null : r.answer;
 }
 
 function resolveDeps(deps: AndroidSetupDeps): Resolved {
@@ -314,7 +322,7 @@ function resolveDeps(deps: AndroidSetupDeps): Resolved {
 		env,
 		say: deps.say ?? ((l: string) => console.log(l)),
 		progress: deps.progress ?? (() => {}),
-		ask: deps.ask ?? ((line, defaultYes) => askPerson(line, defaultYes, env)),
+		ask: deps.ask ?? ((line, _defaultYes, label) => askPerson(line, label, env, deps.oneYes)),
 		run: deps.run ?? defaultRun,
 		has,
 		state: (deps.readState ?? (() => readSetup(env)))(),
@@ -330,7 +338,8 @@ function resolveDeps(deps: AndroidSetupDeps): Resolved {
 async function installLocalVoice(r: Resolved): Promise<boolean> {
 	const first = r.needs();
 	let model: PhoneModel = "tiny";
-	if (first.model) model = (await r.ask(modelAskLine(), false)) === true ? "base" : "tiny";
+	if (first.model)
+		model = (await r.ask(modelAskLine(), false, "android-model")) === true ? "base" : "tiny";
 	if (
 		first.pkgs.length &&
 		// local-first-gate: optin the mic question, [y/N], named termux-api and ffmpeg and the speech engine download before this runs
@@ -382,8 +391,7 @@ export async function offerAndroidSetup(
 		const missing = missingMusic(has);
 		if (missing.length && !state.choice) {
 			// Nothing installs unless the person types y: a bare Enter is No (principle 2).
-			const defaultYes = deps.defaultYes ?? false;
-			const yes = await ask(musicAskLine(missing, defaultYes), defaultYes);
+			const yes = await ask(musicAskLine(missing), false, "android-music");
 			if (yes === null) return "no-person";
 			if (!yes) {
 				write({ choice: "declined" });
@@ -412,7 +420,7 @@ export async function offerAndroidSetup(
 	if (mode === "auto" && state.micDeclined && !state.mic) return music ?? "recorded";
 
 	// The mic question: [y/N], a bare Enter is No.
-	const yes = await ask(micAskLine(r.needs()), false);
+	const yes = await ask(micAskLine(r.needs()), false, "android-mic");
 	if (yes === null) return music ?? "no-person";
 	if (!yes) {
 		if (mode === "auto") write({ micDeclined: true });
@@ -428,7 +436,7 @@ export async function offerAndroidSetup(
 
 async function askCloud(r: Resolved): Promise<AndroidSetupOutcome> {
 	const needsPkg = !r.has(CLOUD_TOOL.bin);
-	const yes = await r.ask(cloudAskLine(needsPkg), false);
+	const yes = await r.ask(cloudAskLine(needsPkg), false, "android-cloud");
 	if (yes === null) return "no-person";
 	if (!yes) {
 		r.write({ cloud: false });
@@ -472,7 +480,7 @@ export async function offerWhisperBuild(deps: AndroidSetupDeps = {}): Promise<An
 	const env = deps.env ?? process.env;
 	if (!(deps.android ?? isAndroidHost(process.platform, env))) return "not-android";
 	const r = resolveDeps(deps);
-	const yes = await r.ask(buildAskLine, false);
+	const yes = await r.ask(buildAskLine, false, "android-build");
 	if (yes === null) return "no-person";
 	if (!yes) {
 		r.say("OK. Nothing installed or built.");

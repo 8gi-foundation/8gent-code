@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { PHONE_MODELS, type PhoneModel } from "../voice/termux-local-stt";
 import {
 	type AndroidSetupDeps,
@@ -124,6 +125,19 @@ function rig(
 	return { deps, log, st };
 }
 
+/** A person at a keyboard: each question printed on the output is answered with the next line, so no answer is buffered into a closed reader. */
+function person(answers: string[]) {
+	const input = new PassThrough();
+	const output = new PassThrough();
+	const shown: string[] = [];
+	const rest = [...answers];
+	output.on("data", (d) => {
+		shown.push(String(d));
+		if (String(d).includes("[y/N]")) input.write(`${rest.shift() ?? ""}\n`);
+	});
+	return { input, output, shown };
+}
+
 /** Every command the rig ran, flattened, for "did anything reach the network or the cloud" checks. */
 const ran = (log: { runs: string[][] }) => log.runs.map((r) => r.join(" "));
 
@@ -197,8 +211,9 @@ describe("lines", () => {
 
 	test("the music question never mentions the mic or Google", () => {
 		expect(musicAskLine(["mpv", "ffmpeg"])).not.toMatch(/google|voice|termux-api/i);
-		expect(musicAskLine(["mpv"], true)).toEndWith("[y/N]");
-		expect(musicAskLine(["mpv"], false)).toEndWith("[y/N]");
+		// Moved from [Y/n]: an install question is [y/N] everywhere, a bare Enter is No.
+		expect(musicAskLine(["mpv"])).toEndWith("[y/N]");
+		expect(musicAskLine(["mpv", "ffmpeg"])).toEndWith("[y/N]");
 	});
 
 	test("yt-dlp ships as python-yt-dlp", () => {
@@ -240,21 +255,69 @@ describe("launch (auto)", () => {
 		expect(log.asked[1].line).toContain("whisper.cpp");
 	});
 
-	test("unattended (CI, EIGHT_UNATTENDED, no terminal): the real prompt resolves to no person at once, nothing installs or is recorded", async () => {
-		for (const env of [{ CI: "1" }, { EIGHT_UNATTENDED: "1" }, {}]) {
-			// The default ask, not the rig's: bun test has no TTY on stdin either.
+	test("unattended on the default stdin (CI, EIGHT_UNATTENDED, EIGHT_HEADLESS, no terminal): nothing is asked, installed or recorded; only the label-only ledger line is written", async () => {
+		for (const env of [{ CI: "1" }, { EIGHT_UNATTENDED: "1" }, { EIGHT_HEADLESS: "1" }, {}]) {
+			// The real asker on process.stdin, not the rig's: the resolver answers before anyone is asked.
 			const { deps, log } = rig({});
+			const ledger: Record<string, unknown>[] = [];
 			const t0 = performance.now();
 			const out = await offerAndroidSetup("auto", {
 				...deps,
 				ask: undefined,
 				env: { TERMUX_VERSION: "0.118", ...env },
+				oneYes: { record: (e) => ledger.push(e), log: () => {}, timeoutMs: 50 },
 			});
 			expect(out).toBe("no-person");
 			expect(performance.now() - t0).toBeLessThan(500);
 			expect(log.runs).toEqual([]);
 			expect(log.writes).toEqual([]);
+			expect(ledger).toHaveLength(1);
+			expect(Object.keys(ledger[0]).sort()).toEqual(["at", "event", "label", "reason"]);
+			expect(ledger[0].label).toBe("android-music");
 		}
+	});
+
+	test("the real prompt on an explicit stream: the question shows [y/N], a bare Enter is No, even with CI=1", async () => {
+		const { deps, log } = rig({});
+		const { input, output, shown: lines } = person(["", ""]);
+		const ledger: Record<string, unknown>[] = [];
+		const res = await offerAndroidSetup("auto", {
+			...deps,
+			ask: undefined,
+			env: { TERMUX_VERSION: "0.118", CI: "1" },
+			oneYes: { input, output, record: (e) => ledger.push(e), log: () => {} },
+		});
+		const shown = lines.join("");
+		expect(shown).toContain("Set up this phone for music?");
+		expect(shown).toContain("[y/N]");
+		expect(res).toBe("declined");
+		expect(log.runs).toEqual([]);
+		expect(log.writes).toEqual([{ choice: "declined" }, { micDeclined: true }]);
+		expect(ledger.map((e) => e.label)).toEqual(["android-music", "android-mic"]);
+	});
+
+	test("a typed yes on an explicit stream installs the music packages; the mic no leaves it off", async () => {
+		const { deps, log, st } = rig({});
+		const { input, output } = person(["y", "n"]);
+		const res = await offerAndroidSetup("auto", {
+			...deps,
+			ask: undefined,
+			env: { TERMUX_VERSION: "0.118", CI: "1" },
+			oneYes: { input, output, record: () => {} },
+		});
+		expect(res).toBe("installed");
+		expect(log.runs).toEqual([["pkg", "install", "-y", "mpv", "python-yt-dlp", "ffmpeg"]]);
+		expect(st.mic).toBe(false);
+	});
+
+	test("a bare Enter on the music question is No", async () => {
+		expect(answerFromLine("", false)).toBe(false);
+		const { deps, log } = rig({ answers: [false, false] });
+		await offerAndroidSetup("auto", deps);
+		expect(log.asked[0].defaultYes).toBe(false);
+		expect(log.asked[0].line).toEndWith("[y/N]");
+		expect(log.runs).toEqual([]);
+		expect(log.writes[0]).toEqual({ choice: "declined" });
 	});
 
 	test("unattended is true for CI or EIGHT_UNATTENDED, and not for 0 or false", () => {
