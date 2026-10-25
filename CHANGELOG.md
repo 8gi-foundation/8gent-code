@@ -9,6 +9,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.36] - 2026-10-25
+
+### Added
+- daemon: MiniMax as a daemon runtime, fail closed on the live model list (Refs #5100) ([#5101](https://github.com/8gi-foundation/8gent-code/pull/5101))
+- dj: fetch pinned mpv, yt-dlp and ffmpeg on first use, one question, default No (Refs #5096, #4916, #4938) ([#5097](https://github.com/8gi-foundation/8gent-code/pull/5097))
+
+### Changed
+- select and copy text on macOS terminals, mouse reporting off by default ([#5095](https://github.com/8gi-foundation/8gent-code/pull/5095))
+
+### Fixed
+- onboarding: a key can no longer be saved as a name ([#5099](https://github.com/8gi-foundation/8gent-code/pull/5099))
+- tui: Control tab shows why a loop waits at 40 columns ([#5092](https://github.com/8gi-foundation/8gent-code/pull/5092))
+
 ## [0.20.35] - 2026-10-25
 
 ### Added
