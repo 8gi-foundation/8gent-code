@@ -29,6 +29,13 @@ import { homedir, platform, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, posix, sep, win32 } from "node:path";
 import { getSettingsFilePath, loadSettings } from "../settings/store.js";
 import { isAndroidHost } from "../voice/termux.js";
+import {
+	type DjFetchDeps,
+	type DjTool,
+	downloadPlan,
+	fetchDjTool,
+	findManagedDjTool,
+} from "./dj-tools.js";
 import { type KeyJob, detectKey } from "./key-detect.js";
 import { stopOwnPlayers } from "./player.js";
 import { type TrackInfo, trackInfoFromMetadata } from "./track-info.js";
@@ -401,7 +408,20 @@ export function setDjWhich(fn?: Which): void {
 	whichImpl = fn ?? null;
 }
 
+/** Tests aim the fetch-on-first-use path (pins, network, home) at a fixture; call with nothing to restore it. */
+let provision: DjFetchDeps | null = null;
+export function setDjProvision(d?: DjFetchDeps): void {
+	provision = d ?? null;
+	tools = null;
+}
+
 function which(cmd: string): string | null {
+	// 8gent's own fetched copy first, then PATH. A test that fakes PATH sees no managed copy
+	// unless it also set a provision, so a developer's real ~/.8gent/bin/dj never leaks in.
+	if (!whichImpl || provision) {
+		const own = findManagedDjTool(cmd as DjTool, provision?.env ?? process.env, PLATFORM);
+		if (own) return own;
+	}
 	if (whichImpl) return whichImpl(cmd);
 	try {
 		const [bin, args] = whichCommand(cmd);
@@ -1158,21 +1178,55 @@ export class DJ {
 	 * without the yes.
 	 */
 	async ensureTools(io: {
-		ask: (question: string) => Promise<boolean>;
+		ask: (question: string, defaultYes?: boolean) => Promise<boolean>;
 		say: (line: string) => void;
 		progress?: (line: string) => void;
 		plat?: NodeJS.Platform;
-	}): Promise<"none" | "declined" | "manual" | "installed" | "failed"> {
-		const missing = this.missingTools();
+	}): Promise<"none" | "declined" | "manual" | "installed" | "downloaded" | "failed"> {
+		let missing = this.missingTools();
 		if (missing.length === 0) return "none";
 		const plat = io.plat ?? PLATFORM;
+		// 8gent's own pinned copies first: one question, default No, and nothing leaves the
+		// device before the yes. What it has no build for falls through to the install command.
+		const dl = downloadPlan(missing, provision ?? {});
+		if (dl) {
+			const yes = await io.ask(
+				`${dl.tools.join(", ")} ${dl.tools.length === 1 ? "is" : "are"} not installed. Download 8gent's own ${dl.tools.length === 1 ? "copy" : "copies"} (about ${dl.mb} MB, checked against the release's checksums) into ~/.8gent/bin/dj? Nothing else is installed. (y = yes, Enter = no)`,
+				false,
+			);
+			if (!yes) {
+				io.say(`Not downloaded. Run: ${installPlan(missing, plat, !!which("brew")).display}`);
+				return "declined";
+			}
+			const failed: string[] = [];
+			for (const [i, tool] of dl.tools.entries()) {
+				io.progress?.(`Downloading ${tool} (${i + 1} of ${dl.tools.length})`);
+				const got = await fetchDjTool(tool, provision ?? {});
+				if (!got.ok) failed.push(`${tool}: ${got.why}`);
+			}
+			tools = null; // look again: the download changed what 8gent can find
+			missing = this.missingTools();
+			if (missing.length === 0) {
+				io.say("Downloaded. mpv, yt-dlp and ffmpeg are ready.");
+				return "downloaded";
+			}
+			if (failed.length > 0) {
+				io.say(
+					`Download did not finish (${failed.join("; ")}). Run it yourself: ${installPlan(missing, plat, !!which("brew")).display}`,
+				);
+				return "failed";
+			}
+			// A download that left tools missing without failing means some have no pinned build:
+			// those, and only those, take the install command below.
+		}
 		const plan = installPlan(missing, plat, !!which("brew"));
 		if (!plan.run) {
 			io.say(`${missing.join(", ")} not installed. Run: ${plan.display}`);
 			return "manual";
 		}
 		const yes = await io.ask(
-			`${missing.join(", ")} not installed. Install now with \`${plan.display}\`? (y / Enter = yes, anything else = no)`,
+			`${missing.join(", ")} not installed. Install now with \`${plan.display}\`? (y = yes, Enter = no)`,
+			false,
 		);
 		if (!yes) {
 			io.say(`Not installed. Run: ${plan.display}`);

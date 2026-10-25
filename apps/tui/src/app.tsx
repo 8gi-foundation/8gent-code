@@ -6343,10 +6343,11 @@ export function App({
 							if (wantsTools && (isDoctor || !djInstallDeclinedRef.current)) {
 								let lastProgress = 0;
 								const outcome = await dj.ensureTools({
-									ask: (question) =>
+									ask: (question, defaultYes) =>
 										refuseIfUnattended("dj-install")
 											? Promise.resolve(false)
 											: new Promise<boolean>((resolve) => {
+													djInstallDefaultRef.current = defaultYes ?? true;
 													djInstallAnswerRef.current = resolve;
 													addSystemMessage(question);
 												}),
@@ -6358,7 +6359,7 @@ export function App({
 										// One status line, not a scroll: at most one update every 4 seconds.
 										if (Date.now() - lastProgress < 4000) return;
 										lastProgress = Date.now();
-										addSystemMessage(`Installing: ${line}`);
+										addSystemMessage(/^Downloading /.test(line) ? line : `Installing: ${line}`);
 									},
 								});
 								if (outcome === "declined") djInstallDeclinedRef.current = true;
@@ -7747,7 +7748,7 @@ export function App({
 		const attached = pastedNow ?? imageInput.getAttachedImage();
 		const input = afterPaths.trim();
 
-		// /dj is waiting on its one yes: y or an empty Enter installs, anything else declines (#4810).
+		// /dj is waiting on its one yes: only y installs; an empty Enter declines (#4810).
 		if (djInstallAnswerRef.current) {
 			const answer = djInstallAnswerRef.current;
 			djInstallAnswerRef.current = null;

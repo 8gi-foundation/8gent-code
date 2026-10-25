@@ -124,9 +124,23 @@ async function fetchRelease(
 	const env = deps.env ?? process.env;
 	const target = runtimeTarget(deps.platform, deps.arch, env);
 	if (!target) return { ok: false, why: `8gent has no ${program} build for this platform yet` };
+	return fetchVerifiedAsset(assetName(program, target), dest, deps, defaultRuns(program));
+}
+
+/**
+ * The shared half of fetchRelease: one named asset of 8gent's own release for the running
+ * version, verified against that release's SHA256SUMS, smoke-run in its staging name by
+ * `smoke` (or deps.runs), then renamed to `dest`. The DJ's pinned tools
+ * (packages/music/dj-tools.ts) come through here too: one download-and-verify path, not two.
+ */
+export async function fetchVerifiedAsset(
+	name: string,
+	dest: string,
+	deps: FetchDeps,
+	smoke: (bin: string) => boolean,
+): Promise<BinaryResult> {
 	const f: FetchLike = deps.fetchImpl ?? ((u, i) => fetch(u, i));
 	const version = deps.version ?? pkg.version;
-	const name = assetName(program, target);
 	const part = `${dest}.part-${randomBytes(4).toString("hex")}`;
 	try {
 		const sumsBytes = await body(f, releaseUrl(version, "SHA256SUMS"));
@@ -149,7 +163,7 @@ async function fetchRelease(
 		mkdirSync(dirname(dest), { recursive: true });
 		writeFileSync(part, bytes, { mode: 0o755, flag: "wx" });
 		chmodSync(part, 0o755);
-		if (!(deps.runs ?? defaultRuns(program))(part))
+		if (!(deps.runs ?? smoke)(part))
 			return { ok: false, why: `${name} downloaded and verified but would not run on this device` };
 		renameSync(part, dest);
 		return { ok: true, bin: dest };
