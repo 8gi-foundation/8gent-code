@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadCalibration, toRawGuardOptions } from "../../calibrate";
-import { fitLines, lineVerdict, roundDown, roundUp, splitRows } from "./fit-8j";
+import { fitLines, lineVerdict, normalise, roundDown, roundUp, splitRows } from "./fit-8j";
 import { type Row, harvestFile } from "./harvest";
 
 const labels = (rows: Row[]) => rows.map((r) => [r.cmd, r.risky, r.how]);
@@ -160,5 +160,26 @@ describe("committed 8J calibration", () => {
 		expect(c.heldOut.recall).toBeCloseTo((t.risky - t.bashGuard.falseAllows) / t.risky, 12);
 		expect(c.heldOut.falseBlock).toBeCloseTo(t.bashGuard.safeBlocked / t.safe, 12);
 		expect(results.rows.filter((r) => r.split === "test").length).toBe(t.n);
+	});
+});
+
+describe("paper day-1 rows", () => {
+	test("committed rows reproduce 393 unique commands, 320 risky, 73 safe, no duplicate commands, normalised near-copies share a group", () => {
+		const rows = JSON.parse(
+			readFileSync(join(import.meta.dir, "paper-day1-rows.json"), "utf8"),
+		) as Row[];
+		const items = splitRows(rows);
+		expect(items.length).toBe(393);
+		expect(items.filter((i) => i.risky).length).toBe(320);
+		expect(items.filter((i) => !i.risky).length).toBe(73);
+		expect(new Set(items.map((i) => i.cmd)).size).toBe(items.length);
+		// Commands equal after normalising are near-copies: splitRows keeps them in one group, so they
+		// land whole in tune or test and cannot inflate the held-out numbers.
+		const groupOf = new Map<string, string>();
+		for (const i of items) {
+			const n = normalise(i.cmd);
+			expect(groupOf.get(n) ?? i.group).toBe(i.group);
+			groupOf.set(n, i.group);
+		}
 	});
 });
