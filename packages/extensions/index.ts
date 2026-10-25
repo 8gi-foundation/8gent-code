@@ -77,8 +77,19 @@ export {
 	type ExtensionLoadResult,
 	type ExtensionTool,
 	type ExtensionToolParameters,
+	type InputDecision,
+	type InputEvent,
+	type PlugContext,
+	type PlugEventName,
+	type PlugUI,
+	type PlugUIProvider,
+	type SessionStartEvent,
 	type ToolCallDecision,
 	type ToolCallEvent,
+	type ToolResultDecision,
+	type ToolResultEvent,
+	type TurnEndEvent,
+	type TurnStartEvent,
 } from "./host";
 
 export {

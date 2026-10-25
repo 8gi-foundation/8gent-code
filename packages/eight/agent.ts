@@ -82,6 +82,7 @@ import {
 	takeBoundaryStop,
 } from "../permissions/read-allow";
 import { startSystemOneWarmup } from "../permissions/system-one-gate";
+import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
 import { type ProactivePlanner, getProactivePlanner } from "../planning/proactive-planner";
 import { type ProviderName as ProviderRegistryName, getProviderManager } from "../providers";
 import {
@@ -1142,6 +1143,22 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 					cwd: this.config.workingDirectory || process.cwd(),
 				}),
 		});
+		// Plug hooks (#5055): the executor asks them after policy has allowed a call.
+		const plugCwd = () => this.plugCwd();
+		this.extensionHost.setUI({
+			// A person is answering only when this run is attended and the TUI can ask.
+			attended: () =>
+				config.unattended !== true &&
+				(config.attended ?? (Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY))) &&
+				hasTuiApprovalHandler(),
+			confirm: async (message, opts) =>
+				(await requestTuiApproval({ action: opts?.title ?? "plug", details: message })) === true,
+		});
+		this.executor.setPlugHooks({
+			toolCall: (name, args) => this.plugToolCall(name, args),
+			toolResult: (name, args, result) =>
+				this.extensionHost.runToolResult(name, args, result, plugCwd()),
+		});
 		if (this.extensionsEnabled()) this.extensionsReady = this.reloadExtensions().catch(() => []);
 
 		// ── Extensions: Load from ~/.8gent/extensions/ ──────────────────
@@ -1223,6 +1240,30 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	private async refuseToolCall(
 		toolName: string,
 		args: Record<string, unknown>,
+		/** The native gate only: its built-in tools do not pass the executor, so plugs are asked here. */
+		plugs?: { args?: Record<string, unknown> },
+	): Promise<string | null> {
+		const early = await this.refuseByModeAndHooks(toolName, args);
+		if (early) return early;
+		// Plug tool_call hooks (#5055). Every path that runs a tool through the
+		// executor asks them there, after the permission policy has allowed the
+		// call, and checks a changed call again. Native built-in tools do not
+		// pass the executor; they run their own policy inside execute, after this
+		// gate, so a plug asked here still cannot allow what that policy denies,
+		// and arguments it changes meet that policy too. An extension tool on
+		// that path does pass the executor, so it is not asked twice.
+		if (plugs && !this.extensionHost.getTool(toolName)) {
+			const hooked = await this.plugToolCall(toolName, args);
+			if ("blocked" in hooked) return hooked.blocked;
+			if (hooked.args) plugs.args = hooked.args;
+		}
+		return null;
+	}
+
+	/** The active mode's tool set, then YAML PreToolUse hooks. A string refuses the call. */
+	private async refuseByModeAndHooks(
+		toolName: string,
+		args: Record<string, unknown>,
 	): Promise<string | null> {
 		const modeRefusal = this.modeRefusal(toolName);
 		if (modeRefusal) return modeRefusal;
@@ -1237,8 +1278,29 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			console.log(`  [BLOCKED] ${toolName} - ${preResult.reason}`);
 			return `Hook blocked tool "${toolName}": ${preResult.reason}`;
 		}
-		// Extensions (G1) come last and can only add a refusal.
-		return this.extensionHost.checkToolCall(toolName, args);
+		return null;
+	}
+
+	/**
+	 * Ask the plugs' tool_call hooks about a call. Arguments a plug changes get
+	 * the mode check and the PreToolUse hooks again, so a plug cannot slip past a
+	 * user's hook by rewriting the call (the policy check follows in the tool).
+	 */
+	async plugToolCall(
+		toolName: string,
+		args: Record<string, unknown>,
+	): Promise<{ blocked: string } | { args?: Record<string, unknown> }> {
+		const hooked = await this.extensionHost.runToolCall(toolName, args, this.plugCwd());
+		if ("blocked" in hooked) return { blocked: `Error: ${hooked.blocked}; nothing was run.` };
+		if (hooked.args) {
+			const again = await this.refuseByModeAndHooks(toolName, hooked.args);
+			if (again) return { blocked: again };
+		}
+		return hooked;
+	}
+
+	private plugCwd(): string {
+		return this.config.workingDirectory || process.cwd();
 	}
 
 	/** The provider config of the turn in flight, so a batched item can switch it to local (#3502). */
@@ -2801,6 +2863,9 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		}
 	}
 
+	private plugSessionStarted = false;
+
+	/** One turn, with the plug events around it (#5055). A failing plug is skipped, never fatal. */
 	private async runTurn(
 		userMessage: string,
 		imageBase64?: string,
@@ -2809,6 +2874,29 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	): Promise<string> {
 		// The turn offers the extension tools that finished loading (G1, D12).
 		await this.extensionsReady;
+		const cwd = this.config.workingDirectory || process.cwd();
+		const host = this.extensionHost;
+		if (!this.plugSessionStarted) {
+			this.plugSessionStarted = true;
+			await host.fire("session_start", { cwd }, cwd);
+		}
+		const text = await host.runInput(userMessage, cwd);
+		await host.fire("turn_start", { text }, cwd);
+		let reply: string | undefined;
+		try {
+			reply = await this.runTurnCore(text, imageBase64, imageMimeType, imageOriginal);
+			return reply;
+		} finally {
+			await host.fire("turn_end", { text, ...(reply !== undefined ? { reply } : {}) }, cwd);
+		}
+	}
+
+	private async runTurnCore(
+		userMessage: string,
+		imageBase64?: string,
+		imageMimeType?: string,
+		imageOriginal?: { width: number; height: number },
+	): Promise<string> {
 		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
 		// A stop latched while idle belongs to no turn; it must not cancel this
@@ -3276,12 +3364,25 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 			// once it is allowed. onToolCallStart, which the SDK fires before
 			// execute, only remembers the step number for it.
 			gateToolCall: async (event) => {
-				const refusal = await this.refuseToolCall(event.toolName, event.args);
+				const plugged: { args?: Record<string, unknown> } = {};
+				const refusal = await this.refuseToolCall(event.toolName, event.args, plugged);
 				const stepNumber = nativeToolSteps.get(event.toolCallId);
 				nativeToolSteps.delete(event.toolCallId);
 				if (refusal) return refusal;
-				await startAllowedTool({ ...event, stepNumber });
-				return null;
+				await startAllowedTool({ ...event, args: plugged.args ?? event.args, stepNumber });
+				return plugged.args ? { args: plugged.args } : null;
+			},
+			// Plug tool_result hooks (#5055) for native built-in tools; an extension
+			// tool was already rewritten in the executor. A plug's text is scrubbed again.
+			rewriteToolResult: async (event, result) => {
+				if (this.extensionHost.getTool(event.toolName)) return result;
+				const out = await this.extensionHost.runToolResult(
+					event.toolName,
+					event.args,
+					result,
+					this.plugCwd(),
+				);
+				return out === result ? result : scrub(out).scrubbed;
 			},
 
 			onToolCallStart: (event) => {

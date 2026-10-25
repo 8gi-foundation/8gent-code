@@ -15,10 +15,20 @@
  *
  * The file needs no imports; the types below (ExtensionAPI) are for editors.
  *
- * Safety: a tool_call handler can only ADD a refusal. Nothing an extension
- * returns can allow a call the mode, a hook or the permission policy refused,
- * because the host is consulted only by the agent's refusal gate, after the
- * built-in checks, and the policy inside each built-in tool still runs. Each
+ * Plugs (the name for extensions here) can listen to six events, each handler
+ * called as (event, ctx) with ctx.cwd, ctx.hasUI and ctx.ui.confirm/select:
+ *   tool_call     { block, reason } refuses; { args } changes the arguments
+ *   tool_result   { result } rewrites what the model sees
+ *   input         { text } rewrites what the person typed
+ *   turn_start, turn_end, session_start   notifications
+ * Without a person at the keyboard, ctx.ui.confirm is No and ctx.ui.select is
+ * no choice. A handler on any event except tool_call that throws or is slow is
+ * skipped and logged; a tool_call handler that does refuses the call.
+ *
+ * Safety: a tool_call handler can only make a call stricter (refuse it, or
+ * change its arguments, which the policy checks again). Nothing a plug returns
+ * can allow a call the mode, a hook or the permission policy refused, because
+ * the executor asks the host only after the policy has allowed the call. Each
  * handler gets a frozen copy of the call; one that throws or takes longer
  * than HANDLER_TIMEOUT_MS refuses the call (fail closed). Extension tools run
  * through the agent's executor like built-ins and cannot take a built-in
@@ -65,15 +75,104 @@ export interface ToolCallEvent {
 	args: Record<string, unknown>;
 }
 
-/** Return { block: true } to refuse the call; anything else lets it through. */
-export type ToolCallDecision = { block: true; reason?: string } | undefined;
+/**
+ * Return { block: true } to refuse the call, or { args } to run it with other
+ * arguments (the changed call goes through the permission policy again).
+ * Anything else lets it through. Nothing here can allow what policy denied.
+ */
+export type ToolCallDecision =
+	| { block: true; reason?: string }
+	| { args: Record<string, unknown> }
+	| Nothing;
+
+/** A handler that returns nothing lets the event through. */
+// biome-ignore lint/suspicious/noConfusingVoidType: a plain `() => {}` handler must type-check
+type Nothing = undefined | void;
+
+export interface ToolResultEvent {
+	toolName: string;
+	args: Record<string, unknown>;
+	result: string;
+}
+
+/** Return { result } to replace what the model sees. */
+export type ToolResultDecision = { result: string } | Nothing;
+
+export interface InputEvent {
+	text: string;
+}
+
+/** Return { text } to replace what the person typed before the turn starts. */
+export type InputDecision = { text: string } | Nothing;
+
+export interface TurnStartEvent {
+	text: string;
+}
+
+export interface TurnEndEvent {
+	text: string;
+	reply?: string;
+}
+
+export interface SessionStartEvent {
+	cwd: string;
+}
+
+/** What a plug can ask the owner. Unattended, or without a UI, confirm is false and select is undefined. */
+export interface PlugUI {
+	confirm(message: string, opts?: { title?: string }): Promise<boolean>;
+	select(title: string, options: string[]): Promise<string | undefined>;
+}
+
+/** The person-facing channel behind PlugUI, supplied by the 8gent that owns the host. */
+export interface PlugUIProvider {
+	/** True only when a person is at the keyboard and can answer. */
+	attended(): boolean;
+	confirm?(message: string, opts?: { title?: string }): Promise<boolean>;
+	select?(title: string, options: string[]): Promise<string | undefined>;
+}
+
+export interface PlugContext extends ExtensionContext {
+	hasUI: boolean;
+	ui: PlugUI;
+}
+
+export type PlugEventName =
+	| "tool_call"
+	| "tool_result"
+	| "input"
+	| "turn_start"
+	| "turn_end"
+	| "session_start";
+
+const PLUG_EVENTS = new Set<string>([
+	"tool_call",
+	"tool_result",
+	"input",
+	"turn_start",
+	"turn_end",
+	"session_start",
+]);
+
+type Maybe<T> = T | Promise<T>;
 
 export interface ExtensionAPI {
 	registerTool(tool: ExtensionTool): void;
 	registerCommand(command: ExtensionCommand): void;
 	on(
 		event: "tool_call",
-		handler: (e: ToolCallEvent) => ToolCallDecision | Promise<ToolCallDecision>,
+		handler: (e: ToolCallEvent, ctx: PlugContext) => Maybe<ToolCallDecision>,
+	): void;
+	on(
+		event: "tool_result",
+		handler: (e: ToolResultEvent, ctx: PlugContext) => Maybe<ToolResultDecision>,
+	): void;
+	on(event: "input", handler: (e: InputEvent, ctx: PlugContext) => Maybe<InputDecision>): void;
+	on(event: "turn_start", handler: (e: TurnStartEvent, ctx: PlugContext) => Maybe<void>): void;
+	on(event: "turn_end", handler: (e: TurnEndEvent, ctx: PlugContext) => Maybe<void>): void;
+	on(
+		event: "session_start",
+		handler: (e: SessionStartEvent, ctx: PlugContext) => Maybe<void>,
 	): void;
 }
 
@@ -128,7 +227,12 @@ export function defaultExtensionsDir(): string {
 	return path.join(home, ".8gent", "extensions");
 }
 
-type Handler = (e: ToolCallEvent) => ToolCallDecision | Promise<ToolCallDecision>;
+type Handler = (e: never, ctx: PlugContext) => unknown;
+
+interface PlugHandler {
+	event: PlugEventName;
+	fn: Handler;
+}
 
 interface Registered<T> {
 	value: T;
@@ -139,7 +243,7 @@ interface Registered<T> {
 interface FileRegistration {
 	tools: ExtensionTool[];
 	commands: ExtensionCommand[];
-	handlers: Handler[];
+	handlers: PlugHandler[];
 }
 
 function deepFreeze<T>(value: T): T {
@@ -153,10 +257,13 @@ function deepFreeze<T>(value: T): T {
 export class ExtensionHost {
 	private tools = new Map<string, Registered<ExtensionTool>>();
 	private commands = new Map<string, Registered<ExtensionCommand>>();
-	private handlers: Array<Registered<Handler>> = [];
+	private handlers: Array<Registered<PlugHandler>> = [];
 	private results: ExtensionLoadResult[] = [];
 	/** The last good registration of each file, by real path. */
 	private byFile = new Map<string, FileRegistration>();
+	private uiProvider: PlugUIProvider | null = null;
+	private log: (line: string) => void = (line) => console.warn(line);
+	private skips: string[] = [];
 
 	/**
 	 * @param dir folder of one-file extensions
@@ -221,8 +328,9 @@ export class ExtensionHost {
 				// A broken edit keeps only the old tool_call handlers, which can
 				// only refuse; its old tools and commands are dropped.
 				const previous = this.byFile.get(real);
-				if (previous && previous.handlers.length > 0) {
-					next.set(real, { tools: [], commands: [], handlers: previous.handlers });
+				const kept = previous?.handlers.filter((h) => h.event === "tool_call") ?? [];
+				if (previous && kept.length > 0) {
+					next.set(real, { tools: [], commands: [], handlers: kept });
 					result.error = `${result.error}; kept previous version of ${path.basename(real)} (its tool_call checks only; its tools and commands are off until it loads)`;
 				}
 			}
@@ -231,7 +339,7 @@ export class ExtensionHost {
 		// One synchronous swap: nothing can observe a half-built set.
 		const tools = new Map<string, Registered<ExtensionTool>>();
 		const commands = new Map<string, Registered<ExtensionCommand>>();
-		const handlers: Array<Registered<Handler>> = [];
+		const handlers: Array<Registered<PlugHandler>> = [];
 		for (const [file, reg] of next) {
 			for (const t of reg.tools) tools.set(t.name, { value: t, file });
 			for (const c of reg.commands) commands.set(c.name, { value: c, file });
@@ -296,11 +404,11 @@ export class ExtensionHost {
 					if (typeof c.run !== "function") throw new Error(`command "${c.name}" has no run`);
 					reg.commands.push(c);
 				},
-				on: (event, handler) => {
-					if (event !== "tool_call") throw new Error(`unknown event "${event}"`);
-					if (typeof handler !== "function") throw new Error("tool_call handler is not a function");
-					reg.handlers.push(handler);
-				},
+				on: ((event: string, handler: unknown) => {
+					if (!PLUG_EVENTS.has(event)) throw new Error(`unknown event "${event}"`);
+					if (typeof handler !== "function") throw new Error(`${event} handler is not a function`);
+					reg.handlers.push({ event: event as PlugEventName, fn: handler as Handler });
+				}) as ExtensionAPI["on"],
 			};
 			await factory(api);
 		} catch (err) {
@@ -366,39 +474,257 @@ export class ExtensionHost {
 		}
 	}
 
+	/** Back ctx.ui with a person-facing channel. Without one, confirm is No and select is no choice. */
+	setUI(provider: PlugUIProvider | null): void {
+		this.uiProvider = provider;
+	}
+
+	/** Where skips and refusals are logged. Default: console.warn. */
+	setLog(log: (line: string) => void): void {
+		this.log = log;
+	}
+
+	/** Every skip and refusal since this host was made, oldest first. */
+	skipLog(): readonly string[] {
+		return this.skips;
+	}
+
+	private note(line: string): void {
+		const text = `[plug] ${line}`;
+		this.skips.push(text);
+		if (this.skips.length > 200) this.skips.shift();
+		try {
+			this.log(text);
+		} catch {
+			/* a broken logger never breaks a turn */
+		}
+	}
+
 	/**
-	 * Ask every tool_call handler about a call. The first block wins and its
-	 * reason is the refusal; a handler that throws refuses too (fail closed).
-	 * Null: no extension objects. This can only refuse, never allow.
+	 * Run one handler with its own frozen event and a context. The time a
+	 * handler spends waiting for the owner (ctx.ui) does not count toward the
+	 * timeout; everything else does. Never throws.
 	 */
-	async checkToolCall(toolName: string, args: Record<string, unknown>): Promise<string | null> {
-		for (const h of this.handlers) {
-			const where = path.basename(h.file);
-			// Each handler sees its own frozen copy: it can read the call, never change it.
-			let event: ToolCallEvent;
+	private async invoke(
+		h: Registered<PlugHandler>,
+		event: unknown,
+		cwd: string,
+	): Promise<{ ok: true; value: unknown } | { ok: false; timedOut: boolean; message: string }> {
+		const state = { waiting: 0 };
+		const provider = this.uiProvider;
+		const asking = async <T>(no: T, run: (() => Promise<T>) | undefined): Promise<T> => {
+			// No person to ask, or no way to ask: the answer is No.
+			if (!provider || !run || !provider.attended()) return no;
+			state.waiting++;
 			try {
-				event = deepFreeze({ toolName, args: structuredClone(args) });
+				return await run();
 			} catch {
-				return `Tool "${toolName}" arguments could not be copied for extension ${where}, so the call was refused`;
-			}
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			try {
-				const timeout = new Promise<"timeout">((resolve) => {
-					timer = setTimeout(() => resolve("timeout"), this.handlerTimeoutMs);
-				});
-				const d = await Promise.race([Promise.resolve().then(() => h.value(event)), timeout]);
-				if (d === "timeout") {
-					return `Extension ${where} did not answer within ${this.handlerTimeoutMs} ms about tool "${toolName}", so the call was refused`;
-				}
-				if (d && typeof d === "object" && d.block === true) {
-					return `Extension ${where} blocked tool "${toolName}"${d.reason ? `: ${d.reason}` : ""}`;
-				}
-			} catch (err) {
-				return `Extension ${where} failed while checking tool "${toolName}", so the call was refused: ${err instanceof Error ? err.message : String(err)}`;
+				return no;
 			} finally {
-				if (timer) clearTimeout(timer);
+				state.waiting--;
+			}
+		};
+		const ui: PlugUI = {
+			confirm: async (message, opts) => {
+				const out = await asking<boolean>(
+					false,
+					provider?.confirm && (() => provider.confirm!(message, opts)),
+				);
+				return out === true;
+			},
+			select: async (title, options) => {
+				const out = await asking<string | undefined>(
+					undefined,
+					provider?.select && (() => provider.select!(title, options)),
+				);
+				return typeof out === "string" && options.includes(out) ? out : undefined;
+			},
+		};
+		const ctx: PlugContext = { cwd, hasUI: provider?.attended() === true, ui };
+		let timer: ReturnType<typeof setInterval> | undefined;
+		try {
+			let spent = 0;
+			let last = Date.now();
+			const timeout = new Promise<"timeout">((resolve) => {
+				timer = setInterval(() => {
+					const now = Date.now();
+					if (state.waiting === 0) spent += now - last;
+					last = now;
+					if (spent >= this.handlerTimeoutMs) resolve("timeout");
+				}, 10);
+			});
+			const out = await Promise.race([
+				Promise.resolve().then(() =>
+					(h.value.fn as (e: unknown, c: PlugContext) => unknown)(event, ctx),
+				),
+				timeout,
+			]);
+			if (out === "timeout") {
+				return {
+					ok: false,
+					timedOut: true,
+					message: `did not answer within ${this.handlerTimeoutMs} ms`,
+				};
+			}
+			return { ok: true, value: out };
+		} catch (err) {
+			return {
+				ok: false,
+				timedOut: false,
+				message: err instanceof Error ? err.message : String(err),
+			};
+		} finally {
+			if (timer) clearInterval(timer);
+		}
+	}
+
+	private handlersFor(event: PlugEventName): Array<Registered<PlugHandler>> {
+		return this.handlers.filter((h) => h.value.event === event);
+	}
+
+	private freeze<T>(value: T): T | null {
+		try {
+			return deepFreeze(structuredClone(value));
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * Ask every tool_call handler about a call, in load order. The first block
+	 * wins; { args } replaces the arguments for the handlers after it and for
+	 * the call. A handler that throws, times out or returns unusable arguments
+	 * refuses the call (fail closed: a broken gate never opens it), and the
+	 * refusal is logged. This can only make a call stricter: the caller runs
+	 * the permission policy before this and again on any changed arguments.
+	 */
+	async runToolCall(
+		toolName: string,
+		args: Record<string, unknown>,
+		cwd = process.cwd(),
+	): Promise<{ blocked: string } | { args?: Record<string, unknown> }> {
+		let current = args;
+		let changed = false;
+		for (const h of this.handlersFor("tool_call")) {
+			const where = path.basename(h.file);
+			const event = this.freeze({ toolName, args: current });
+			if (!event) {
+				const msg = `Plug ${where} could not be shown the arguments of tool "${toolName}", so the call was refused`;
+				this.note(msg);
+				return { blocked: msg };
+			}
+			const r = await this.invoke(h, event, cwd);
+			if (!r.ok) {
+				const msg = r.timedOut
+					? `Plug ${where} did not answer within ${this.handlerTimeoutMs} ms about tool "${toolName}", so the call was refused`
+					: `Plug ${where} failed while checking tool "${toolName}", so the call was refused: ${r.message}`;
+				this.note(msg);
+				return { blocked: msg };
+			}
+			const d = r.value as { block?: unknown; reason?: unknown; args?: unknown } | undefined;
+			if (d && typeof d === "object" && d.block === true) {
+				return {
+					blocked: `Plug ${where} blocked tool "${toolName}"${typeof d.reason === "string" && d.reason ? `: ${d.reason}` : ""}`,
+				};
+			}
+			if (d && typeof d === "object" && d.args !== undefined) {
+				const next = d.args;
+				const ok = next !== null && typeof next === "object" && !Array.isArray(next);
+				let copy: Record<string, unknown> | null = null;
+				if (ok) {
+					try {
+						copy = structuredClone(next) as Record<string, unknown>;
+					} catch {
+						copy = null;
+					}
+				}
+				if (!copy) {
+					const msg = `Plug ${where} returned arguments for tool "${toolName}" that are not a plain object, so the call was refused`;
+					this.note(msg);
+					return { blocked: msg };
+				}
+				current = copy;
+				changed = true;
 			}
 		}
-		return null;
+		return changed ? { args: current } : {};
+	}
+
+	/** The refusal text for a call, or null. Arguments a plug changes are not applied here; use runToolCall. */
+	async checkToolCall(toolName: string, args: Record<string, unknown>): Promise<string | null> {
+		const r = await this.runToolCall(toolName, args);
+		return "blocked" in r ? r.blocked : null;
+	}
+
+	/**
+	 * Let tool_result handlers rewrite a result, in load order. A handler that
+	 * throws, times out or returns something other than { result: string } is
+	 * skipped and logged; the result so far goes on unchanged.
+	 */
+	async runToolResult(
+		toolName: string,
+		args: Record<string, unknown>,
+		result: string,
+		cwd = process.cwd(),
+	): Promise<string> {
+		let current = result;
+		for (const h of this.handlersFor("tool_result")) {
+			const where = path.basename(h.file);
+			const event = this.freeze({ toolName, args, result: current });
+			if (!event) {
+				this.note(
+					`skipped ${where} on tool_result for "${toolName}": arguments could not be copied`,
+				);
+				continue;
+			}
+			const r = await this.invoke(h, event, cwd);
+			if (!r.ok) {
+				this.note(`skipped ${where} on tool_result for "${toolName}": ${r.message}`);
+				continue;
+			}
+			const d = r.value as { result?: unknown } | undefined;
+			if (d && typeof d === "object" && d.result !== undefined) {
+				if (typeof d.result === "string") current = d.result;
+				else this.note(`skipped ${where} on tool_result for "${toolName}": result is not a string`);
+			}
+		}
+		return current;
+	}
+
+	/** Let input handlers rewrite what the person typed, in load order. A failing handler is skipped and logged. */
+	async runInput(text: string, cwd = process.cwd()): Promise<string> {
+		let current = text;
+		for (const h of this.handlersFor("input")) {
+			const where = path.basename(h.file);
+			const r = await this.invoke(h, deepFreeze({ text: current }), cwd);
+			if (!r.ok) {
+				this.note(`skipped ${where} on input: ${r.message}`);
+				continue;
+			}
+			const d = r.value as { text?: unknown } | undefined;
+			if (d && typeof d === "object" && d.text !== undefined) {
+				if (typeof d.text === "string") current = d.text;
+				else this.note(`skipped ${where} on input: text is not a string`);
+			}
+		}
+		return current;
+	}
+
+	/** Tell turn_start, turn_end and session_start handlers. A failing handler is skipped and logged. */
+	async fire(
+		event: "turn_start" | "turn_end" | "session_start",
+		payload: Record<string, unknown>,
+		cwd = process.cwd(),
+	): Promise<void> {
+		for (const h of this.handlersFor(event)) {
+			const frozen = this.freeze(payload);
+			const where = path.basename(h.file);
+			if (!frozen) {
+				this.note(`skipped ${where} on ${event}: payload could not be copied`);
+				continue;
+			}
+			const r = await this.invoke(h, frozen, cwd);
+			if (!r.ok) this.note(`skipped ${where} on ${event}: ${r.message}`);
+		}
 	}
 }

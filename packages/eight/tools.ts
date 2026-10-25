@@ -2431,6 +2431,23 @@ export class ToolExecutor {
 	}
 
 	/**
+	 * Plug hooks (#5055). toolCall runs after every gate below has allowed the
+	 * call and can only refuse it or hand back other arguments, which then go
+	 * through all the gates again. toolResult runs on the scrubbed result.
+	 */
+	private plugHooks: {
+		toolCall(
+			name: string,
+			args: Record<string, unknown>,
+		): Promise<{ blocked: string } | { args?: Record<string, unknown> }>;
+		toolResult(name: string, args: Record<string, unknown>, result: string): Promise<string>;
+	} | null = null;
+
+	setPlugHooks(hooks: ToolExecutor["plugHooks"]): void {
+		this.plugHooks = hooks;
+	}
+
+	/**
 	 * Map tool names to policy action types for ToolG8 gate evaluation.
 	 * Extension tools (G1) are not listed: their names are dynamic, so
 	 * executeRaw maps any tool the extension runner has to EXTENSION_POLICY_ACTION.
@@ -2532,7 +2549,13 @@ export class ToolExecutor {
 		// step; both can co-exist without touching each other.
 		// Tool-output injection filter (#3551), off unless EIGHT_OUTPUT_FILTER=1.
 		// Runs on the scrubbed text so no secret reaches the judge.
-		const filtered = await filterToolOutput(toolName, result.scrubbed);
+		let filtered = await filterToolOutput(toolName, result.scrubbed);
+		// Plug tool_result hook (#5055): a plug may rewrite the result. What it
+		// hands back is scrubbed again, so a plug cannot put a secret back.
+		if (this.plugHooks) {
+			const plugged = await this.plugHooks.toolResult(toolName, args, filtered);
+			if (plugged !== filtered) filtered = scrubSecrets(plugged).scrubbed;
+		}
 		// A read_image result that carries an image is never chipped: the chip keeps a 1KB
 		// preview, which cuts the base64 mid-stream, and the model endpoint then
 		// rejects the image with a 400 (pilot 2026-10-09_115409). The attachment
@@ -2549,7 +2572,12 @@ export class ToolExecutor {
 		return terminalBoundaryText(text, this.workingDirectory);
 	}
 
-	private async executeRaw(toolName: string, args: Record<string, unknown>): Promise<string> {
+	private async executeRaw(
+		toolName: string,
+		args: Record<string, unknown>,
+		/** True when a plug changed the arguments: every gate runs again, the plug hook does not. */
+		replay = false,
+	): Promise<string> {
 		// Maker-checker gate (safety-critical). This is the single chokepoint every
 		// tool call passes through, so it runs BEFORE the term-tool early return,
 		// the ToolG8 gate, and the switch. In an unattended/autonomous context a
@@ -2577,7 +2605,7 @@ export class ToolExecutor {
 		if (outOfScope) return outOfScope;
 
 		// Rate limit check - prevents LLM loops from exhausting resources
-		const rateLimitError = this.rateLimiter.check(toolName);
+		const rateLimitError = replay ? null : this.rateLimiter.check(toolName);
 		if (rateLimitError) return rateLimitError;
 
 		// ToolG8 gate - evaluate policy BEFORE any execution or delegation.
@@ -2693,6 +2721,21 @@ export class ToolExecutor {
 					gateResult.reason,
 					gateResult.alternative,
 				);
+			}
+		}
+
+		// Plug tool_call hook (#5055): only after policy allowed the call, so a plug
+		// can refuse it or change its arguments but never allow what policy denied.
+		// Changed arguments run the whole chain again, plan mode included.
+		if (this.plugHooks && !replay) {
+			const hooked = await this.plugHooks.toolCall(toolName, args);
+			if ("blocked" in hooked) return `Error: ${hooked.blocked}; nothing was run.`;
+			if (hooked.args) {
+				if (currentPermissionMode() === "plan") {
+					const planRefusal = await planModeRefusal(toolName, hooked.args);
+					if (planRefusal) return planRefusal;
+				}
+				return this.executeRaw(toolName, hooked.args, true);
 			}
 		}
 

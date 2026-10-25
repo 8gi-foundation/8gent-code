@@ -94,3 +94,48 @@ describe("gateTools", () => {
 		expect(tools.write.execute).toBe(original);
 	});
 });
+
+describe("plug hooks on native tools (#5055)", () => {
+	const make = () => {
+		const seen: unknown[] = [];
+		const tools = {
+			read: tool({
+				inputSchema: jsonSchema({ type: "object", properties: {} }),
+				execute: async (input: unknown) => {
+					seen.push(input);
+					return "customer Jane Doe";
+				},
+			}),
+		};
+		return { seen, tools };
+	};
+	const run = (t: unknown, input: unknown) =>
+		(t as { execute: (i: unknown, o: { toolCallId: string }) => Promise<unknown> }).execute(input, {
+			toolCallId: "c1",
+		});
+
+	test("a gate that hands back args runs the tool with them", async () => {
+		const { seen, tools } = make();
+		const gated = gateTools(tools, () => ({ args: { path: "changed" } }));
+		await run(gated.read, { path: "original" });
+		expect(seen).toEqual([{ path: "changed" }]);
+	});
+
+	test("rewriteToolResult changes a string result; a throw keeps the original", async () => {
+		const { tools } = make();
+		const rewritten = gateTools(
+			tools,
+			() => null,
+			(_e, r) => r.replace("Jane Doe", "[name removed]"),
+		);
+		expect(await run(rewritten.read, {})).toBe("customer [name removed]");
+		const broken = gateTools(
+			tools,
+			() => null,
+			() => {
+				throw new Error("boom");
+			},
+		);
+		expect(await run(broken.read, {})).toBe("customer Jane Doe");
+	});
+});

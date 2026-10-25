@@ -93,7 +93,13 @@ export interface EightAgentConfig {
 	 * that must stop a call: the SDK swallows anything thrown from
 	 * onToolCallStart, so a throw there never stopped a tool.
 	 */
-	gateToolCall?: (event: ToolCallStartEvent) => string | null | Promise<string | null>;
+	gateToolCall?: (event: ToolCallStartEvent) => GateDecision | Promise<GateDecision>;
+	/**
+	 * Rewrites a tool's string result before the model sees it (plug tool_result
+	 * hook, #5055). Only runs with gateToolCall; a result that is not a string
+	 * is left as it is, and a throw here keeps the original result.
+	 */
+	rewriteToolResult?: (event: ToolCallStartEvent, result: string) => string | Promise<string>;
 	/** Callback for tool call start (observation only: a throw here does not stop the call) */
 	onToolCallStart?: (event: ToolCallStartEvent) => void | Promise<void>;
 	/** Callback for tool call finish */
@@ -168,6 +174,9 @@ export interface StepFinishEvent {
 	/** Provider-specific pass-through metadata */
 	providerMetadata?: Record<string, unknown>;
 }
+
+/** A string refuses the call; { args } runs it with other arguments; null lets it run as it is. */
+export type GateDecision = string | null | { args: Record<string, unknown> };
 
 export interface ToolCallStartEvent {
 	toolCallId: string;
@@ -261,7 +270,9 @@ export function createEightAgent(config: EightAgentConfig): ToolLoopAgent<never,
 				) as AgentTools)
 			: agentTools;
 	const offered = (config.tools as AgentTools) || defaultTools;
-	const tools = config.gateToolCall ? gateTools(offered, config.gateToolCall) : offered;
+	const tools = config.gateToolCall
+		? gateTools(offered, config.gateToolCall, config.rewriteToolResult)
+		: offered;
 
 	const isLocalProvider = config.provider.name === "lmstudio" || config.provider.name === "ollama";
 
@@ -593,6 +604,7 @@ export class ToolCallRefused extends Error {
 export function gateTools<T extends ToolSet>(
 	tools: T,
 	gate: NonNullable<EightAgentConfig["gateToolCall"]>,
+	rewrite?: EightAgentConfig["rewriteToolResult"],
 ): T {
 	const out: Record<string, unknown> = {};
 	for (const [name, t] of Object.entries(tools)) {
@@ -603,13 +615,31 @@ export function gateTools<T extends ToolSet>(
 			out[name] = t;
 			continue;
 		}
+		// Returns the input the tool should run with: the model's, or the arguments a plug changed.
 		const check = async (input: unknown, options: { toolCallId: string }) => {
-			const refusal = await gate({
+			const decision = await gate({
 				toolCallId: options?.toolCallId ?? "",
 				toolName: name,
 				args: (input ?? {}) as Record<string, unknown>,
 			});
-			if (refusal) throw new ToolCallRefused(refusal);
+			if (typeof decision === "string" && decision) throw new ToolCallRefused(decision);
+			if (decision && typeof decision === "object") return decision.args;
+			return input;
+		};
+		const finish = async (input: unknown, options: { toolCallId: string }, result: unknown) => {
+			if (!rewrite || typeof result !== "string") return result;
+			try {
+				return await rewrite(
+					{
+						toolCallId: options?.toolCallId ?? "",
+						toolName: name,
+						args: (input ?? {}) as Record<string, unknown>,
+					},
+					result,
+				);
+			} catch {
+				return result;
+			}
 		};
 		// A streaming tool (async generator) stays a generator, so the SDK still
 		// sees its preliminary results; every other tool stays a plain promise.
@@ -618,12 +648,12 @@ export function gateTools<T extends ToolSet>(
 			...t,
 			execute: streaming
 				? async function* (input: unknown, options: { toolCallId: string }) {
-						await check(input, options);
-						yield* execute.call(t, input, options) as AsyncIterable<unknown>;
+						const next = await check(input, options);
+						yield* execute.call(t, next, options) as AsyncIterable<unknown>;
 					}
 				: async (input: unknown, options: { toolCallId: string }) => {
-						await check(input, options);
-						return execute.call(t, input, options);
+						const next = await check(input, options);
+						return finish(next, options, await execute.call(t, next, options));
 					},
 		};
 	}
