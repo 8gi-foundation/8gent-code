@@ -4,6 +4,7 @@
  * around the point. The card is shown to the person and nowhere else; what
  * gets logged is `desktopApprovalDetails`, which never carries typed text.
  */
+import { askOneYes } from "../core/one-yes";
 import type { DesktopActApproval } from "./desktop-act";
 
 /** Terminal escape sequences, 7-bit and C1: CSI, OSC/DCS/PM/APC strings, and two-byte ESC forms. */
@@ -229,16 +230,12 @@ export async function askOnTerminal(
 	input: NodeJS.ReadableStream = process.stdin,
 	output: NodeJS.WritableStream = process.stderr,
 ): Promise<boolean> {
-	const readline = await import("node:readline");
-	output.write(`\n\x1b[33m[DESKTOP CONTROL]\x1b[0m\n${card}\nAllow? [y/N]: `);
-	const rl = readline.createInterface({ input, output, terminal: false });
-	try {
-		const answer: string | null = await new Promise((resolve) => {
-			rl.once("line", resolve);
-			rl.once("close", () => resolve(null));
-		});
-		return answer !== null && /^\s*y(es)?\s*$/i.test(answer);
-	} finally {
-		rl.close();
-	}
+	return askOneYes(`\n\x1b[33m[DESKTOP CONTROL]\x1b[0m\n${card}\nAllow? [y/N]:`, {
+		label: "desktop-type",
+		input,
+		output,
+		// A caller-supplied stream is the answer channel (tests, a channel pipe); the real
+		// stdin must be an attended terminal or this is a no.
+		assumeAttended: input !== process.stdin,
+	});
 }

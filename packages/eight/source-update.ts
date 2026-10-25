@@ -23,6 +23,7 @@ import { existsSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import * as nodePath from "node:path";
 import { safeBunFlags } from "../core/bun-flags";
+import { askOneYes } from "../core/one-yes";
 import { sanitizeForDisplay } from "./changelog-view";
 
 export interface ExecResult {
@@ -152,17 +153,9 @@ export function originTrusted(
 	return false;
 }
 
-/** y/N on the terminal; anything but y/yes is no. No terminal means no. */
+/** y/N on the terminal; anything but y/yes is no. No terminal, no answer in time, or a closed input is no. */
 export async function defaultConfirm(question: string): Promise<boolean> {
-	if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
-	const { createInterface } = await import("node:readline");
-	const rl = createInterface({ input: process.stdin, output: process.stdout });
-	try {
-		const ans: string = await new Promise((res) => rl.question(`${question} [y/N] `, res));
-		return /^y(es)?$/i.test(ans.trim());
-	} finally {
-		rl.close();
-	}
+	return askOneYes(`${question} [y/N]`, { label: "source-update" });
 }
 
 /** Default exec: execFile, no shell, timeout, no console window on Windows. */

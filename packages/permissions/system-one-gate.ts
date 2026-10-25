@@ -82,7 +82,7 @@
  *                              spawn_agent (runtime "shell")
  */
 
-import * as readline from "node:readline";
+import { askOneYes } from "../core/one-yes";
 import { activeShellKind } from "../core/shell";
 import type { BashGuardOptions, BashGuardResult } from "../decide/guard";
 import type { Decider } from "../decide/index";
@@ -526,15 +526,10 @@ export const defaultAskHuman: AskHuman = async (request) => {
 	const tui = await requestTuiApproval(request);
 	if (tui !== null) return tui;
 	if (!process.stdin.isTTY || process.env.EIGHT_HEADLESS) return null;
-	return new Promise((resolve) => {
-		const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-		const prompt = `\n\x1b[33m[SYSTEM ONE ESCALATION]\x1b[0m\n${request.details}\nCommand: \x1b[36m${request.command}\x1b[0m\n\nRun it? [y/N]: `;
-		rl.question(prompt, (answer) => {
-			rl.close();
-			const a = answer.trim().toLowerCase();
-			resolve(a === "y" || a === "yes");
-		});
-	});
+	return askOneYes(
+		`\n\x1b[33m[SYSTEM ONE ESCALATION]\x1b[0m\n${request.details}\nCommand: \x1b[36m${request.command}\x1b[0m\n\nRun it? [y/N]:`,
+		{ label: "system-one-escalation" },
+	);
 };
 
 /**

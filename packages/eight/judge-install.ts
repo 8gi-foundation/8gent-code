@@ -26,6 +26,11 @@ import {
 import { totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveHome } from "../core/home";
+import {
+	askOneYesDetailed,
+	isUnattendedReason,
+	unattended as oneYesUnattended,
+} from "../core/one-yes";
 import { JUDGE_MODEL } from "../decide/judge-model";
 import { detectBackend, resolveSharedJudgeHost } from "../decide/probe";
 import { findOnPath, isAndroidHost } from "../voice/termux";
@@ -145,11 +150,11 @@ export function judgeBasis(
 	return `v1 catalogue=${cat} ramMiB=${ramMiB}`;
 }
 
-export const llamaAskLine = (defaultYes = false, size: string = JUDGE_SIZE): string =>
-	`Set up the safety judge on this device? It downloads llama.cpp from 8gent's release and the judge model (~${size}, from Hugging Face), then checks risky commands before they run. ${defaultYes ? "[Y/n]" : "[y/N]"}`;
+export const llamaAskLine = (_defaultYes = false, size: string = JUDGE_SIZE): string =>
+	`Set up the safety judge on this device? It downloads llama.cpp from 8gent's release and the judge model (~${size}, from Hugging Face), then checks risky commands before they run. [y/N]`;
 
-export const judgeAskLine = (defaultYes = false): string =>
-	`Install the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE})? It checks risky commands before they run. ${defaultYes ? "[Y/n]" : "[y/N]"}`;
+export const judgeAskLine = (_defaultYes = false): string =>
+	`Install the safety judge (${JUDGE_MODEL}, ~${JUDGE_SIZE})? It checks risky commands before they run. [y/N]`;
 export const JUDGE_ASK_LINE = judgeAskLine(false);
 
 export const JUDGE_UNSUPPORTED_LINE =
@@ -329,31 +334,19 @@ export async function pullModel(
 }
 
 /** CI, EIGHT_UNATTENDED, or no terminal: nobody can answer, so nothing is asked and nothing is installed. */
-export function unattended(env: Env = process.env): boolean {
-	const set = (v: string | undefined) => !!v && v !== "0" && v.toLowerCase() !== "false";
-	return set(env.CI) || set(env.EIGHT_UNATTENDED) || !process.stdin.isTTY || !process.stdout.isTTY;
-}
+export const unattended = (env: Env = process.env): boolean => oneYesUnattended(env);
 
 function askerFor(deps: JudgeDeps, env: Env): NonNullable<JudgeDeps["ask"]> {
 	return (
 		deps.ask ??
-		((line, defaultYes) =>
-			unattended(env) ? Promise.resolve(null) : askYesNoLine(line, defaultYes))
+		((line, defaultYes) => (unattended(env) ? Promise.resolve(null) : askYesNoLine(line)))
 	);
 }
 
-/** One-line y/n on stdin. An empty answer is `defaultYes`. Null when stdin is not a terminal. */
-export async function askYesNoLine(line: string, defaultYes = false): Promise<boolean | null> {
-	if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
-	const { createInterface } = await import("node:readline/promises");
-	const rl = createInterface({ input: process.stdin, output: process.stdout });
-	try {
-		const a = (await rl.question(`${line} `)).trim().toLowerCase();
-		if (a === "") return defaultYes;
-		return a === "y" || a === "yes";
-	} finally {
-		rl.close();
-	}
+/** One-line y/n on stdin through the shared one-yes resolver. Bare Enter, a timeout and a closed input are no. Null when nobody can answer. */
+export async function askYesNoLine(line: string): Promise<boolean | null> {
+	const r = await askOneYesDetailed(line, { label: "judge-install" });
+	return isUnattendedReason(r.reason) ? null : r.answer;
 }
 
 function terminalProgress(line: string): void {

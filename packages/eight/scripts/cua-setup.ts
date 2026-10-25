@@ -13,14 +13,12 @@
  * Run again at any time to re-diagnose a broken setup.
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
-import {
-	checkPermissions,
-	openPrivacyPane,
-} from "../../hands/index";
+import { askOneYes } from "../../core/one-yes";
+import { checkPermissions, openPrivacyPane } from "../../hands/index";
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
 
@@ -185,10 +183,13 @@ async function ensureScreenRecording(): Promise<void> {
 
 function saveMarker(): void {
 	if (!existsSync(MARKER_DIR)) mkdirSync(MARKER_DIR, { recursive: true });
-	writeFileSync(MARKER_PATH, JSON.stringify({
-		configuredAt: new Date().toISOString(),
-		version: 1,
-	}));
+	writeFileSync(
+		MARKER_PATH,
+		JSON.stringify({
+			configuredAt: new Date().toISOString(),
+			version: 1,
+		}),
+	);
 }
 
 // ── Final summary ─────────────────────────────────────────────────────────────
@@ -207,7 +208,7 @@ function finalSummary(): void {
 	if (perms.allGranted) {
 		saveMarker();
 		console.log("\n  Setup complete. Run a goal with:");
-		console.log("    bun run cua:run \"open TextEdit and type hello\"");
+		console.log('    bun run cua:run "open TextEdit and type hello"');
 		console.log("");
 	} else {
 		console.log("\n  Some permissions are missing. Fix them and run this wizard again:");
@@ -229,8 +230,7 @@ async function main(): Promise<void> {
 		} catch {
 			// ignore
 		}
-		const ans = await prompt("  Re-run full setup? [y/N] ");
-		if (ans.toLowerCase() !== "y") {
+		if (!(await askOneYes("  Re-run full setup? [y/N]", { label: "cua-setup" }))) {
 			finalSummary();
 			process.exit(0);
 		}

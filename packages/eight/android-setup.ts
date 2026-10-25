@@ -128,8 +128,8 @@ export const LOCAL_DISCLOSURE =
 export const CLOUD_DISCLOSURE =
 	"Your audio leaves this phone: Android sends it to its speech service, often Google.";
 
-export function musicAskLine(pkgs: readonly string[], defaultYes = false): string {
-	return `Set up this phone for music? Installs ${pkgs.join(", ")}. ${defaultYes ? "[Y/n]" : "[y/N]"}`;
+export function musicAskLine(pkgs: readonly string[], _defaultYes = false): string {
+	return `Set up this phone for music? Installs ${pkgs.join(", ")}. [y/N]`;
 }
 
 /** What the yes sets up, in plain words. Empty when nothing is missing. */
@@ -300,9 +300,9 @@ export function unattended(env: Env = process.env): boolean {
 	return set(env.CI) || set(env.EIGHT_UNATTENDED) || !process.stdin.isTTY || !process.stdout.isTTY;
 }
 
-function askPerson(line: string, defaultYes: boolean, env: Env): Promise<boolean | null> {
+function askPerson(line: string, _defaultYes: boolean, env: Env): Promise<boolean | null> {
 	if (unattended(env)) return Promise.resolve(null);
-	return askYesNoLine(line, defaultYes);
+	return askYesNoLine(line);
 }
 
 function resolveDeps(deps: AndroidSetupDeps): Resolved {

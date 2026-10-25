@@ -10,7 +10,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import * as readline from "node:readline";
+import { askOneYes } from "../core/one-yes";
 import { activeShellKind } from "../core/shell";
 import { blockedReason, commandArgvs } from "./always-blocked";
 import { writeFileAtomic } from "./atomic-write";
@@ -1275,12 +1275,7 @@ export class PermissionManager {
 			return tuiResult;
 		}
 
-		return new Promise((resolve) => {
-			const rl = readline.createInterface({
-				input: process.stdin,
-				output: process.stdout,
-			});
-
+		{
 			// Build prompt message
 			let prompt = "\n\x1b[33m[PERMISSION REQUIRED]\x1b[0m\n";
 			prompt += `Action: ${action}\n`;
@@ -1295,16 +1290,10 @@ export class PermissionManager {
 						"\x1b[31m[DANGEROUS]\x1b[0m This command may cause data loss or system changes.\n";
 				}
 			}
-			prompt += defaultNo ? "\nAllow? [y/N]: " : "\nAllow? [Y/n]: ";
-
-			rl.question(prompt, (answer) => {
-				rl.close();
-				const normalized = answer.trim().toLowerCase();
-				// Empty is Yes unless the caller asked for default No (MCP).
-				if (defaultNo) resolve(normalized === "y" || normalized === "yes");
-				else resolve(normalized !== "n" && normalized !== "no");
-			});
-		});
+			// One-yes: a bare Enter, a timeout and a closed input are all no (#4919).
+			prompt += "\nAllow? [y/N]:";
+			return askOneYes(prompt, { label: "permission" });
+		}
 	}
 
 	/**

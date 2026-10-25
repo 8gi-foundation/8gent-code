@@ -23,6 +23,7 @@ import * as dns from "node:dns";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { resolveHome } from "../core/home";
+import { askOneYesDetailed, isUnattendedReason } from "../core/one-yes";
 
 type Env = Record<string, string | undefined>;
 
@@ -214,18 +215,11 @@ export function unattended(env: Env = process.env): boolean {
 
 export type Ask = (line: string, defaultYes: boolean) => Promise<boolean | null>;
 
-/** y/N on the terminal: Enter is a no; null when unattended. */
+/** y/N on the terminal: Enter, a timeout and a closed input are a no; null when unattended. */
 export function defaultAsk(env: Env = process.env): Ask {
 	return async (line) => {
-		if (unattended(env)) return null;
-		const { createInterface } = await import("node:readline/promises");
-		const rl = createInterface({ input: process.stdin, output: process.stdout });
-		try {
-			const a = (await rl.question(`${line} `)).trim().toLowerCase();
-			return a === "y" || a === "yes";
-		} finally {
-			rl.close();
-		}
+		const r = await askOneYesDetailed(line, { env, label: "scout" });
+		return isUnattendedReason(r.reason) ? null : r.answer;
 	};
 }
 

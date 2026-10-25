@@ -197,7 +197,7 @@ describe("lines", () => {
 
 	test("the music question never mentions the mic or Google", () => {
 		expect(musicAskLine(["mpv", "ffmpeg"])).not.toMatch(/google|voice|termux-api/i);
-		expect(musicAskLine(["mpv"], true)).toEndWith("[Y/n]");
+		expect(musicAskLine(["mpv"], true)).toEndWith("[y/N]");
 		expect(musicAskLine(["mpv"], false)).toEndWith("[y/N]");
 	});
 

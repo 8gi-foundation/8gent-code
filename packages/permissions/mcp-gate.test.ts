@@ -104,7 +104,7 @@ process.exit(0);`;
 			stdin: new Blob([answerLine]),
 			stdout: "pipe",
 			stderr: "pipe",
-			env: { ...process.env, EIGHT_HEADLESS: "" },
+			env: { ...process.env, EIGHT_HEADLESS: "", CI: "", EIGHT_UNATTENDED: "" },
 		});
 		const out = await new Response(child.stdout).text();
 		await child.exited;

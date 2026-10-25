@@ -41,8 +41,8 @@ export const OLLAMA_PROBE_URL = `http://${OLLAMA_BIND}`;
 export const OLLAMA_WAIT_MS = 10_000;
 /** A 4.9 GB model loading from phone storage takes a while; /health answers 503 until it is in. */
 export const LLAMA_WAIT_MS = 120_000;
-export const ollamaStartAsk = (defaultYes = true): string =>
-	`Start Ollama in the background now? ${defaultYes ? "[Y/n]" : "[y/N]"}`;
+export const ollamaStartAsk = (_defaultYes = true): string =>
+	`Start Ollama in the background now? [y/N]`;
 
 export { LLAMA_HOST, LLAMA_PORT, LLAMA_URL };
 

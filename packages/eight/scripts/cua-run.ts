@@ -15,8 +15,9 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { runComputerUseLoop, type CuaLoopConfig, type HandsAdapter } from "../loops/computer-use";
+import { askOneYes } from "../../core/one-yes";
 import { ModelFailover } from "../../providers/failover";
+import { type CuaLoopConfig, type HandsAdapter, runComputerUseLoop } from "../loops/computer-use";
 import { loadVisionConfig, resolveComputerUseModel } from "../vision-router";
 
 const MARKER_PATH = join(homedir(), ".8gent", "cua-configured");
@@ -39,25 +40,7 @@ async function approveInteractive(req: {
 	console.log(`  Reason: ${req.reason}`);
 	console.log(`  Input:  ${preview}`);
 
-	process.stdout.write("  Allow? [y/N] ");
-	return new Promise((resolve) => {
-		let buf = "";
-		process.stdin.setRawMode?.(false);
-		process.stdin.resume();
-		process.stdin.setEncoding("utf8");
-		const onData = (chunk: string) => {
-			if (chunk === "\r" || chunk === "\n" || chunk.includes("\n")) {
-				process.stdin.pause();
-				process.stdin.removeListener("data", onData);
-				process.stdout.write("\n");
-				resolve(buf.trim().toLowerCase() === "y");
-			} else {
-				buf += chunk;
-				process.stdout.write(chunk);
-			}
-		};
-		process.stdin.on("data", onData);
-	});
+	return askOneYes("  Allow? [y/N]", { label: "cua-run" });
 }
 
 // ── Step printer ──────────────────────────────────────────────────────────────
@@ -71,9 +54,7 @@ function printStep(
 ): void {
 	const pct = Math.round((step / maxSteps) * 100);
 	const bar = "█".repeat(Math.round(pct / 5)) + "░".repeat(20 - Math.round(pct / 5));
-	console.log(
-		`\n  [${String(step).padStart(2, "0")}/${maxSteps}] ${bar} ${pct}%`,
-	);
+	console.log(`\n  [${String(step).padStart(2, "0")}/${maxSteps}] ${bar} ${pct}%`);
 	console.log(`  tool:    ${toolName}`);
 	console.log(`  result:  ${preview.slice(0, 140)}`);
 	console.log(`  elapsed: ${durationMs}ms`);
@@ -143,9 +124,7 @@ async function main(): Promise<void> {
 		visionCfg.computerUseModel,
 		{ openRouterApiKey: process.env.OPENROUTER_API_KEY },
 	);
-	const modelLabel = autoSelected
-		? `${pinnedModel} (auto-selected)`
-		: pinnedModel;
+	const modelLabel = autoSelected ? `${pinnedModel} (auto-selected)` : pinnedModel;
 
 	console.log("");
 	console.log("  ┌─────────────────────────────────────────────────────┐");
@@ -170,7 +149,8 @@ async function main(): Promise<void> {
 					windowTitle: "AX tree unavailable - call desktop_windows to list open windows",
 					root: {
 						role: "AXDesktop",
-						title: "Native accessibility tree not available. Call desktop_windows tool to enumerate open windows, then proceed with your goal.",
+						title:
+							"Native accessibility tree not available. Call desktop_windows tool to enumerate open windows, then proceed with your goal.",
 						children: [],
 					},
 				},

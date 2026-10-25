@@ -395,7 +395,7 @@ describe("update path default is No", () => {
 		expect(seen?.[0]).toEndWith("[y/N]");
 		expect(seen?.[1]).toBe(false);
 		expect(r.log.pulls).toEqual([]);
-		expect(judgeAskLine(true)).toEndWith("[Y/n]");
+		expect(judgeAskLine(true)).toEndWith("[y/N]");
 	});
 });
 
