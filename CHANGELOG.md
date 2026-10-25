@@ -9,6 +9,29 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.30] - 2026-10-25
+
+### Added
+- self-autonomy: opt-in send gate, default No, unattended never sends ([#5016](https://github.com/8gi-foundation/8gent-code/pull/5016))
+- decide: judge bake-off scoreboard from saved run records (#4924) ([#5018](https://github.com/8gi-foundation/8gent-code/pull/5018))
+- self-autonomy: scrub vessel proposal text before it can leave ([#5007](https://github.com/8gi-foundation/8gent-code/pull/5007))
+- self-autonomy: decide when a local change has held ([#5013](https://github.com/8gi-foundation/8gent-code/pull/5013))
+- scripts: factory yield report per merged PR ([#5015](https://github.com/8gi-foundation/8gent-code/pull/5015))
+
+### Changed
+- decide: commit the day-1 judge-set eval so the paper numbers reproduce (#4942) ([#5019](https://github.com/8gi-foundation/8gent-code/pull/5019))
+
+### Fixed
+- hints: point Ollama-missing hints at the built-in runtime ([#5002](https://github.com/8gi-foundation/8gent-code/pull/5002))
+- tui: in-TUI one-yes asks answer No when nobody is attending ([#5004](https://github.com/8gi-foundation/8gent-code/pull/5004))
+- android: music install prompt is [y/N] through the shared one-yes resolver ([#4998](https://github.com/8gi-foundation/8gent-code/pull/4998))
+- tools: the Flow bridge destination guard is required, not optional (#4992) ([#5017](https://github.com/8gi-foundation/8gent-code/pull/5017))
+- permissions: read cards refuse a link to a credential in an approved folder ([#4999](https://github.com/8gi-foundation/8gent-code/pull/4999))
+- /judge install prints one honest line when the judge is present ([#5005](https://github.com/8gi-foundation/8gent-code/pull/5005))
+- permissions: read approvals with no session scope remember nothing ([#5001](https://github.com/8gi-foundation/8gent-code/pull/5001))
+- prompts: one-yes prompts resolve to no when nobody answers (#4919) ([#4997](https://github.com/8gi-foundation/8gent-code/pull/4997))
+- judge: no cloud judge unless explicitly enabled (#4933) ([#4996](https://github.com/8gi-foundation/8gent-code/pull/4996))
+
 ## [0.20.29] - 2026-10-25
 
 ### Added
