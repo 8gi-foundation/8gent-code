@@ -9,6 +9,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.34] - 2026-10-25
+
+### Added
+- eight: think fast by default, step up only when the turn is hard (#5040, part 1) ([#5048](https://github.com/8gi-foundation/8gent-code/pull/5048))
+- plugs: tool_call and tool_result hooks, input and turn events, ask the owner (#5055, slice A) ([#5064](https://github.com/8gi-foundation/8gent-code/pull/5064))
+- skills: bring setups from other tools home with one yes (#5037 slice 1) ([#5047](https://github.com/8gi-foundation/8gent-code/pull/5047))
+
 ## [0.20.33] - 2026-10-25
 
 ### Fixed
