@@ -121,4 +121,32 @@ describe("Control tab", () => {
 			headerLine({ load: 1, freeDiskGB: null, diskFloorGB: null, helpers: 0, helperCap: null }),
 		).toBe("load 1  disk ?  helpers 0");
 	});
+
+	test("at 40 columns the reason a loop waits on is shown whole, on its own line", async () => {
+		const jobs = path.join(home, ".8gent", "jobs");
+		fs.mkdirSync(jobs, { recursive: true });
+		fs.writeFileSync(
+			path.join(jobs, "a.json"),
+			JSON.stringify({
+				name: "nightly-eval",
+				state: "waiting-on-you",
+				stage: "review gate",
+				last: "2h",
+				waitingOn: "James to approve the release",
+			}),
+		);
+		const { out, stdin, stdout } = fakeTty();
+		stdout.columns = 40;
+		const app = render(<ControlView visible={true} onClose={() => {}} />, {
+			stdout: stdout as unknown as NodeJS.WriteStream,
+			stdin,
+			patchConsole: false,
+		});
+		await tick(150);
+		const frame = strip(out.text).replace(/\s+/g, " ");
+		expect(frame).toContain("review gate");
+		expect(frame).toContain("waiting on James to approve the release");
+		expect(frame).not.toContain("…");
+		app.unmount();
+	});
 });

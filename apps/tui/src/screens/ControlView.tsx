@@ -5,7 +5,7 @@
  * Lazy by construction: the store is only subscribed while this view is
  * mounted, and the App mounts it only for the active Control tab. Closed, it
  * renders nothing and reads nothing. Enter opens a row's detail; p, r and t
- * only say the actions arrive in slice 2. No action is wired.
+ * only say the actions are not available yet. No action is wired.
  */
 import { Box, Text, useInput, useStdout } from "ink";
 import React, { useMemo, useState } from "react";
@@ -77,7 +77,8 @@ export function ControlView({ visible, onClose }: ControlViewProps) {
 			if (key.upArrow) setSel((i) => Math.max(0, i - 1));
 			else if (key.downArrow) setSel((i) => Math.min(Math.max(0, grouped.flat.length - 1), i + 1));
 			else if (key.return && selected) setOpen((o) => !o);
-			else if (input === "p" || input === "r" || input === "t") setNote("coming in slice 2");
+			else if (input === "p" || input === "r" || input === "t")
+				setNote("Pause, resume and try again are not available yet.");
 		},
 		{ isActive: visible },
 	);
@@ -86,7 +87,12 @@ export function ControlView({ visible, onClose }: ControlViewProps) {
 	if (!snap) return <Text color={t.textTertiary}>CONTROL reading...</Text>;
 
 	const nameW = Math.min(24, Math.max(12, Math.floor(cols / 4)));
-	const stageW = Math.min(18, Math.max(8, Math.floor(cols / 6)));
+	const narrow = cols < 60;
+	// Narrow: no next column; the reason moves to its own line so it is never cut away.
+	const stageW = narrow
+		? Math.max(8, cols - 2 - 2 - nameW - 1 - 1 - 6)
+		: Math.min(18, Math.max(8, Math.floor(cols / 6)));
+	const nextW = Math.min(12, Math.max(8, ...grouped.flat.map((r) => (r.next ?? "-").length)));
 	let index = -1;
 
 	return (
@@ -95,7 +101,11 @@ export function ControlView({ visible, onClose }: ControlViewProps) {
 				<Text color={t.heading} bold>
 					CONTROL
 				</Text>
-				<Text color={t.textTertiary}>{`   ${headerLine(snap.header)}`}</Text>
+				<Text color={t.textTertiary} wrap="truncate-end">
+					{narrow
+						? ` ${headerLine(snap.header).replace(/ {2,}/g, " ")}`
+						: `   ${headerLine(snap.header)}`}
+				</Text>
 			</Box>
 			{grouped.flat.length === 0 ? (
 				<Box marginTop={1} flexDirection="column">
@@ -115,11 +125,21 @@ export function ControlView({ visible, onClose }: ControlViewProps) {
 							index += 1;
 							const isSel = index === Math.min(sel, grouped.flat.length - 1);
 							const why = r.waitingOn ? `waiting on ${r.waitingOn}` : "";
+							const cells = narrow
+								? `${pad(r.name, nameW)} ${pad(r.stage, stageW)} ${pad(r.last ?? "-", 6)}`
+								: `${pad(r.name, nameW)} ${pad(r.stage, stageW)} ${pad(r.last ?? "-", 6)} ${pad(r.next ?? "-", nextW)}`;
+							// The reason is why a human is needed: it gets its own line, uncut, when it cannot fit beside the cells.
+							const inline = !why || (!narrow && 2 + cells.length + 1 + why.length <= cols - 2);
 							return (
 								<Box key={`${r.kind}:${r.name}`} flexDirection="column" flexShrink={0}>
 									<Text color={isSel ? t.textPrimary : t.textSecondary} wrap="truncate-end">
-										{`${isSel ? "▸" : " "} ${pad(r.name, nameW)} ${pad(r.stage, stageW)} ${pad(r.last ?? "-", 6)} ${pad(r.next ?? "-", 8)} ${why}`}
+										{`${isSel ? "▸" : " "} ${cells}${inline && why ? ` ${why}` : ""}`}
 									</Text>
+									{why && !inline ? (
+										<Box paddingLeft={4} flexShrink={0}>
+											<Text color={t.textSecondary}>{why}</Text>
+										</Box>
+									) : null}
 									{isSel && open ? (
 										<Box flexDirection="column" paddingLeft={4} flexShrink={0}>
 											<Text color={t.textTertiary}>{`kind ${r.kind}   state ${r.state}`}</Text>
@@ -149,9 +169,7 @@ export function ControlView({ visible, onClose }: ControlViewProps) {
 				</Box>
 			) : null}
 			<Box marginTop={1} flexShrink={0}>
-				<Text color={t.textTertiary}>
-					{note ?? "[enter] open  [p]ause [r]esume [t]ry again  [esc] close"}
-				</Text>
+				<Text color={t.textTertiary}>{note ?? "[enter] open  [esc] close"}</Text>
 			</Box>
 		</Box>
 	);
