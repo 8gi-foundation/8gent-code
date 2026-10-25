@@ -9,6 +9,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.33] - 2026-10-25
+
+### Fixed
+- tui: per-tab context window for every provider, adjustable in Settings (#5035) ([#5050](https://github.com/8gi-foundation/8gent-code/pull/5050))
+- tui: palette sheet fits the rows on screen, close key and count always draw (closes #5034) ([#5045](https://github.com/8gi-foundation/8gent-code/pull/5045))
+- daemon: a bad or throwing WebSocket frame never ends the process (#5031) ([#5041](https://github.com/8gi-foundation/8gent-code/pull/5041))
+
 ## [0.20.32] - 2026-10-25
 
 ### Changed
