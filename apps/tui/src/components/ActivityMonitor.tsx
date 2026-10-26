@@ -88,7 +88,7 @@ function toolToActivity(
 			};
 		}
 		case "run_command": {
-			const cmd = String(args.command || "").slice(0, 60);
+			const cmd = String(args.command || "");
 			return {
 				action: "RUN",
 				detail: cmd,
@@ -334,15 +334,27 @@ export function ActivityMonitor({
 						visibleEntries.slice(-2).map((entry) => (
 							<Box key={entry.id}>
 								<Text color={entry.done ? t.green : t.orange}>{entry.done ? "✓ " : "◦ "}</Text>
-								<Text color={entry.color} wrap="truncate-end">
-									{entry.action}
-								</Text>
-								<Text color={t.textDim} wrap="truncate-end">{` ${entry.detail.slice(0, 50)}`}</Text>
+								<Box flexShrink={0}>
+									<Text color={entry.color} wrap="truncate-end">
+										{entry.action}
+									</Text>
+								</Box>
+								<Box flexShrink={1} flexGrow={1}>
+									<Text color={t.textTertiary} wrap="truncate-end">{` ${entry.detail}`}</Text>
+								</Box>
 							</Box>
 						))
 					)}
 				</Box>
-				<Text color={t.textDim}>{stepCount > 0 ? `step ${stepCount}` : ""}</Text>
+				<Box flexShrink={0} marginLeft={1}>
+					<Text color={t.textTertiary} wrap="truncate-end">
+						{stepCount > 0
+							? (contentWidth ?? 80) < 60
+								? `#${stepCount}`
+								: `step ${stepCount}`
+							: ""}
+					</Text>
+				</Box>
 			</Box>
 		);
 	}
