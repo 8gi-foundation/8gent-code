@@ -442,7 +442,7 @@ describe("readiness wiring in app.tsx (#3290)", () => {
 	);
 
 	test("the engine probe re-runs when the nonce is bumped", () => {
-		expect(app).toMatch(/setInterval\(tick, 8000\);[\s\S]{0,160}?\}, \[probeNonce\]\);/);
+		expect(app).toMatch(/startProviderHealthPolling\(tick\);[\s\S]{0,160}?\}, \[probeNonce\]\);/);
 	});
 
 	test("a finished turn records its fact and acts on it", () => {

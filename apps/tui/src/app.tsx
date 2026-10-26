@@ -165,6 +165,7 @@ import {
 	mayAutoOpenProviderPicker,
 	promptIsLive,
 } from "./lib/prompt-focus.js";
+import { startProviderHealthPolling } from "./lib/provider-health-schedule.js";
 import { probeProviders } from "./lib/provider-health.js";
 import { TelegramTab, type TelegramTabHost } from "./lib/telegram-tab.js";
 import { isUserThemeId } from "./lib/user-themes.js";
@@ -1149,7 +1150,7 @@ export function App({
 		engines: {},
 	});
 	// Bumped when a turn fails to reach its engine, so the probe runs now
-	// rather than on its next 8 s tick (#3290).
+	// rather than on its next backed-off tick (#3290, #4904).
 	const [probeNonce, setProbeNonce] = useState(0);
 	const probeInFlightRef = useRef(false);
 	// Launch splash, about 1.5 s, skippable with any key. Shown on the first
@@ -1809,7 +1810,7 @@ export function App({
 			try {
 				const { live, total, statuses } = await probeProviders();
 				const engines = Object.fromEntries(statuses.map((s) => [s.name, s.live]));
-				// Same results keep the same object, so the 8 s probe only
+				// Same results keep the same object, so the probe only
 				// re-renders App when an engine actually comes or goes.
 				if (!cancelled)
 					setProviderHealth((prev) =>
@@ -1826,11 +1827,11 @@ export function App({
 				probeInFlightRef.current = false;
 			}
 		};
-		tick();
-		const id = setInterval(tick, 8000);
+		// Once now, then backing off (#4904): a phone idling on an 8 s poll woke Ollama constantly.
+		const stopPolling = startProviderHealthPolling(tick);
 		return () => {
 			cancelled = true;
-			clearInterval(id);
+			stopPolling();
 		};
 	}, [probeNonce]);
 

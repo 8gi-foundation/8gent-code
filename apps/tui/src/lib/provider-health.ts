@@ -54,8 +54,8 @@ async function probeUrl(url: string): Promise<boolean> {
  * "Stopping...". Both would show a green light here.
  *
  * That is fine for a status glyph and NOT fine for routing, so routing must
- * not read this. This stays cheap on purpose: it runs on an 8s poll, and
- * firing real inference at three providers every 8 seconds would pin models
+ * not read this. This stays cheap on purpose: it runs on a backed-off poll (provider-health-schedule.ts), and
+ * firing real inference at three providers on a timer would pin models
  * in memory to light up one character in the status bar.
  */
 export async function probeProviders(): Promise<{
@@ -84,8 +84,14 @@ export async function probeProviders(): Promise<{
 	// ollama CLI accepts, used to be an invalid URL here and read as down.
 	// With llama-server selected (#3149) Ollama is off: its slot reports llama-server.
 	const localServer = isLlamaServerSelected()
-		? { name: "llama-server" as const, url: createLlamaServer({ baseUrl: resolveLlamaServerUrl() }).healthUrl }
-		: { name: "ollama" as const, url: createOllamaServer({ baseUrl: resolveOllamaBaseUrl() }).healthUrl };
+		? {
+				name: "llama-server" as const,
+				url: createLlamaServer({ baseUrl: resolveLlamaServerUrl() }).healthUrl,
+			}
+		: {
+				name: "ollama" as const,
+				url: createOllamaServer({ baseUrl: resolveOllamaBaseUrl() }).healthUrl,
+			};
 	const localLive = await probeUrl(localServer.url);
 
 	const statuses: ProviderStatus[] = [
