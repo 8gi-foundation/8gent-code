@@ -9,6 +9,22 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.41] - 2026-10-26
+
+### Changed
+- no tool-trace card in group chats (EIGHT_TG_TRACE override) ([#5157](https://github.com/8gi-foundation/8gent-code/pull/5157))
+- fold a running turn's steps behind one status row (#5170) ([#5171](https://github.com/8gi-foundation/8gent-code/pull/5171))
+- activity rail task labels wrap to two rows instead of being cut ([#5167](https://github.com/8gi-foundation/8gent-code/pull/5167))
+- footer keeps the sandbox reason in full at 100 columns ([#5166](https://github.com/8gi-foundation/8gent-code/pull/5166))
+- palette more lines name PgUp and PgDn ([#5165](https://github.com/8gi-foundation/8gent-code/pull/5165))
+- EIGHT_TTS_VOICE pins the speak tool to the cell's Kitten voice; fix Boardroom officer voice map ([#5169](https://github.com/8gi-foundation/8gent-code/pull/5169))
+- wrapped notices drop their rule rows under 60 columns ([#5164](https://github.com/8gi-foundation/8gent-code/pull/5164))
+- settings field labels wrap whole under 60 columns ([#5163](https://github.com/8gi-foundation/8gent-code/pull/5163))
+- slash menu names a no-match word before Enter clears it ([#5161](https://github.com/8gi-foundation/8gent-code/pull/5161))
+- reply footer rides the sender row on narrow columns ([#5158](https://github.com/8gi-foundation/8gent-code/pull/5158))
+- plan rail shows the task in progress in full, up to three rows ([#5160](https://github.com/8gi-foundation/8gent-code/pull/5160))
+- telegram bridge: greet by identity, real command list, answer /start ([#5153](https://github.com/8gi-foundation/8gent-code/pull/5153))
+
 ## [0.20.40] - 2026-10-26
 
 ### Changed
