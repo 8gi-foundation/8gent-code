@@ -69,6 +69,8 @@ interface BottomBarProps {
 	/** A turn is running on the focused tab, and its tool calls so far (#4982). */
 	turnRunning?: boolean;
 	turnCalls?: number;
+	/** The folded trace's status row is up (#5170). */
+	traceHint?: "open" | "fold";
 }
 
 /** The signed-in display name (#2366). The OS login is not shown: it is the
@@ -118,6 +120,7 @@ export function BottomBar(props: BottomBarProps) {
 							thinking: props.thinking,
 							turnRunning: props.turnRunning,
 							turnCalls: props.turnCalls,
+							traceHint: props.traceHint,
 						}}
 					/>
 				)}

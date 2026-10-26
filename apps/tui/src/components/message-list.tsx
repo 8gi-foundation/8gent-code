@@ -33,6 +33,7 @@ import { useMouseScroll } from "../hooks/useMouseScroll.js";
 import { bubbleWidths, footerRidesSenderRow, replyFooter } from "../lib/chat-layout.js";
 import { compactionRows } from "../lib/compaction-view.js";
 import { type Notice, noticeLines } from "../lib/error-row.js";
+import { blockedSentence, showsBlockedSentence, wrapSentence } from "../lib/folded-trace.js";
 import {
 	CODE_GUTTER,
 	INDENT_STEP,
@@ -53,6 +54,7 @@ import { type ChatItem, type ToolTrailEntry, buildChatItems } from "../lib/tool-
 import { bubblePlan, hasTurnResults, turnResultRows } from "../lib/turn-results.js";
 import { t } from "../theme.js";
 import { CompactionRow } from "./CompactionRow.js";
+import { FoldedStatus } from "./FoldedStatus.js";
 import { ToolTrail, toolTrailRows } from "./ToolTrail.js";
 import { TurnResults } from "./TurnResults.js";
 import { BionicText, useADHDMode } from "./bionic-text.js";
@@ -163,6 +165,25 @@ interface MessageListProps {
 	touchHints?: boolean;
 	/** An approval card is up: plain PgUp/PgDn page the card, not the chat. */
 	approvalPending?: boolean;
+	/**
+	 * Fold the running turn's steps behind one status row (#5170). False (the
+	 * default) draws every step as a row, as before.
+	 */
+	foldTrace?: boolean;
+	/** Folded, and the person has opened the step list in place. */
+	traceOpen?: boolean;
+	/** Enter or a tap on the status row. */
+	onToggleTrace?: () => void;
+	/** The call running now, for the status row's words. */
+	liveTool?: string | null;
+}
+
+/** How the live trail is drawn: folded behind a status row, and whether it is open. */
+export interface TraceFold {
+	folded: boolean;
+	open: boolean;
+	/** This is the last item and no turn is running: the turn that just ended. */
+	justEnded?: boolean;
 }
 
 /**
@@ -178,25 +199,55 @@ interface MessageListProps {
  * Rows a turn's calls take: the live trail while the turn runs (a "tool"
  * item), the results block once the reply has landed (an assistant item).
  */
-function callRows(message: Message, trail: ToolTrailEntry[], maxRows?: number, width = 80): number {
+function callRows(
+	message: Message,
+	trail: ToolTrailEntry[],
+	maxRows?: number,
+	width = 80,
+	fold?: TraceFold,
+): number {
 	// Results carry one blank row between them and the reply (mockup A).
 	if (message.role === "assistant") {
 		const plan = bubblePlan(message.content, message.plan, trail);
 		return hasTurnResults(trail, plan) ? turnResultRows(trail, maxRows, plan, width) + 1 : 0;
 	}
-	return trail.length === 0 ? 0 : toolTrailRows(trail, maxRows, width);
+	if (trail.length === 0) return 0;
+	if (fold?.folded) {
+		// The status row, and under it the full list while it is open.
+		if (!fold.open) return 1;
+		return (
+			1 + toolTrailRows(trail, maxRows === undefined ? undefined : Math.max(1, maxRows - 1), width)
+		);
+	}
+	return toolTrailRows(trail, maxRows, width);
+}
+
+/** The sentence under a turn's results when a blocked step ended it (folded mode only). */
+function blockedLines(
+	message: Message,
+	trail: ToolTrailEntry[],
+	width: number,
+	fold?: TraceFold,
+): string[] {
+	if (!fold?.folded) return [];
+	// Only the turn that just ended, and only when the block is why it ended.
+	if (!showsBlockedSentence({ justEnded: fold.justEnded === true, reply: message.content }))
+		return [];
+	const sentence = blockedSentence(trail);
+	return sentence ? wrapSentence(sentence, width) : [];
 }
 
 function estimateMessageRows(
 	message: Message,
 	wrapWidth: number,
 	trail: ToolTrailEntry[] = [],
+	fold?: TraceFold,
 ): number {
 	if (message.notice)
 		return (
 			noticeLines(message.notice, wrapWidth).length + (message.notice.tone === "error" ? 1 : 0)
 		);
-	const trailRows = callRows(message, trail, undefined, wrapWidth);
+	const trailRows = callRows(message, trail, undefined, wrapWidth, fold);
 	// A standalone trail (calls with no reply yet): its rows + marginBottom.
 	if (message.role === "tool") return trailRows > 0 ? trailRows + 1 : 0;
 	const w = Math.max(1, wrapWidth);
@@ -221,7 +272,11 @@ function estimateMessageRows(
 		hasFooter && !footerRidesSenderRow(w, replyFooter(message.latencyMs ?? 0, message.tokens ?? 0))
 			? 3
 			: 2;
-	return rows + overhead + trailRows;
+	const blocked =
+		message.role === "assistant"
+			? blockedLines(message, trail, Math.max(1, wrapWidth), fold).length
+			: 0;
+	return rows + overhead + trailRows + blocked;
 }
 
 /** The row estimate, exposed so tests can hold it to what Ink draws. */
@@ -229,7 +284,8 @@ export const estimateMessageRowsForTest = (
 	message: Message,
 	wrapWidth: number,
 	trail: ToolTrailEntry[] = [],
-): number => estimateMessageRows(message, wrapWidth, trail);
+	fold?: TraceFold,
+): number => estimateMessageRows(message, wrapWidth, trail, fold);
 
 /** Rows a message body draws at wrap width `w`, laid out as MarkdownBody draws it. */
 function bodyRows(content: string, w: number): number {
@@ -253,6 +309,10 @@ export function MessageList({
 	onToggleCompaction,
 	touchHints = false,
 	approvalPending = false,
+	foldTrace = false,
+	traceOpen = false,
+	onToggleTrace,
+	liveTool = null,
 }: MessageListProps) {
 	const { stdout } = useStdout();
 	// Opening or closing a tool output changes row heights: re-estimate.
@@ -286,6 +346,25 @@ export function MessageList({
 	const chatMessages = chatItems.map((i) => i.message);
 	const trailById = new Map(chatItems.map((i) => [i.message.id, i.trail]));
 
+	// Folded mode (#5170): the live trail is one status row; every finished turn
+	// keeps its results, and a turn a blocked step ended gets one plain sentence.
+	const lastItemId = chatItems[chatItems.length - 1]?.message.id;
+	const foldFor = (m: Message): TraceFold | undefined =>
+		foldTrace
+			? {
+					folded: true,
+					open: traceOpen && m.role === "tool",
+					justEnded: !turnRunning && m.id === lastItemId,
+				}
+			: undefined;
+	// The turn began at the newest message from the person.
+	const turnStartedAt = (() => {
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i].role === "user") return messages[i].timestamp.getTime();
+		}
+		return Date.now();
+	})();
+
 	// Per-message estimated row counts. Cheap to compute; no memo needed.
 	// A turn whose trail would push it past the whole window gets its trail
 	// capped (oldest calls fold into one summary row): an item taller than
@@ -293,15 +372,16 @@ export function MessageList({
 	const trailCaps = new Map<string, number>();
 	const rowEstimates = chatItems.map((i) => {
 		const wrap = bubbleWidths(resolvedContentWidth, i.message.role).wrap;
-		const full = estimateMessageRows(i.message, wrap, i.trail);
-		const trailRows = callRows(i.message, i.trail, undefined, wrap);
+		const fold = foldFor(i.message);
+		const full = estimateMessageRows(i.message, wrap, i.trail, fold);
+		const trailRows = callRows(i.message, i.trail, undefined, wrap, fold);
 		if (trailRows === 0 || full <= resolvedRowBudget) return full;
 		const base = full - trailRows;
 		// The results' gap row is not a trail row: leave it out of the cap.
 		const gap = i.message.role === "assistant" ? 1 : 0;
 		const cap = Math.max(1, resolvedRowBudget - base - gap);
 		trailCaps.set(i.message.id, cap);
-		return base + callRows(i.message, i.trail, cap, wrap);
+		return base + callRows(i.message, i.trail, cap, wrap, fold);
 	});
 
 	// --- Scroll state (web-style auto-pin + content-anchored offset) ---
@@ -490,6 +570,10 @@ export function MessageList({
 								trail={trailById.get(message.id) ?? []}
 								turnRunning={turnRunning}
 								trailMaxRows={trailCaps.get(message.id)}
+								fold={foldFor(message)}
+								liveTool={liveTool}
+								turnStartedAt={turnStartedAt}
+								onToggleTrace={onToggleTrace}
 								onToggleCompaction={onToggleCompaction}
 								onAnimationStart={(id) => {
 									animatedIdsRef.current.add(id);
@@ -529,6 +613,11 @@ interface MessageItemProps {
 	trailMaxRows?: number;
 	/** A tap on a compaction row (#4958). */
 	onToggleCompaction?: (messageId: string) => void;
+	/** Folded trace (#5170): how the live trail and a blocked finish are drawn. */
+	fold?: TraceFold;
+	liveTool?: string | null;
+	turnStartedAt?: number;
+	onToggleTrace?: () => void;
 	/** Fires once on first mount when isNew=true. Parent uses it to record
 	 *  that this message has begun its typing animation, so future remounts
 	 *  (from scroll) render the message statically. */
@@ -575,6 +664,10 @@ function MessageItem({
 	trail = [],
 	turnRunning = false,
 	trailMaxRows,
+	fold,
+	liveTool = null,
+	turnStartedAt = 0,
+	onToggleTrace,
 	onToggleCompaction,
 	onAnimationStart,
 }: MessageItemProps) {
@@ -627,12 +720,28 @@ function MessageItem({
 				borderColor={t.muted}
 				paddingLeft={1}
 			>
-				<ToolTrail
-					entries={trail}
-					width={innerContentWidth}
-					maxRows={trailMaxRows}
-					animate={showAnimations}
-				/>
+				{fold?.folded ? (
+					<FoldedStatus
+						trail={trail}
+						liveTool={liveTool}
+						startedAt={turnStartedAt}
+						open={fold.open}
+						width={innerContentWidth}
+						onToggle={onToggleTrace}
+					/>
+				) : null}
+				{!fold?.folded || fold.open ? (
+					<ToolTrail
+						entries={trail}
+						width={innerContentWidth}
+						maxRows={
+							fold?.folded && trailMaxRows !== undefined
+								? Math.max(1, trailMaxRows - 1)
+								: trailMaxRows
+						}
+						animate={showAnimations}
+					/>
+				) : null}
 			</Box>
 		);
 	}
@@ -770,6 +879,17 @@ function MessageItem({
 					/>
 				</Box>
 			)}
+
+			{/* A blocked or refused step ended the turn: one plain sentence, never the raw reason (#5170). */}
+			{!isUser
+				? blockedLines(message, trail, textWrapWidth, fold).map((line, i) => (
+						// Lines are positional within one sentence.
+						// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+						<Text key={i} color={t.orange}>
+							{line}
+						</Text>
+					))
+				: null}
 
 			{/* A turn that ended with calls and no words says so, quietly. Never while a
 			    turn still runs: a queued follow-up lands after the trail, which settles it

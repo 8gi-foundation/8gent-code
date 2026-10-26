@@ -110,6 +110,13 @@ export interface UISettings {
 	 * native select and copy stop working (#5094). Read at start.
 	 */
 	mouseCapture?: boolean;
+	/**
+	 * Show every tool call, its output and the judge's lines as rows while a turn
+	 * works (#5170). Unset or false = one status row, "Working: reading files
+	 * (step 3, 12s)", and Enter opens the full list. EIGHT_TUI_TRACE=on/off
+	 * overrides it.
+	 */
+	showSteps?: boolean;
 }
 
 export interface AgentNames {

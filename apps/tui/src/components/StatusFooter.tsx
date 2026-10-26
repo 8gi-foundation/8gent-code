@@ -120,6 +120,11 @@ export interface FooterData {
 	turnRunning?: boolean;
 	/** Tool calls so far this turn. On a phone-width row the stop key shows only past STOP_HINT_CALLS. */
 	turnCalls?: number;
+	/**
+	 * The folded trace's status row is up (#5170): the footer names the key that opens
+	 * the step list, or folds it back.
+	 */
+	traceHint?: "open" | "fold";
 }
 
 /** Tool calls after which the stop key shows even on a crowded phone-width row (#4982). */
@@ -215,6 +220,14 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 	// the turn has run long enough that a person is likely to want it (#4982).
 	if (d.turnRunning && ((d.columns ?? 160) >= 60 || (d.turnCalls ?? 0) > STOP_HINT_CALLS)) {
 		out.push({ key: "stop", value: "Esc stop", color: ui.orange, priority: 1 });
+	}
+	if (d.traceHint) {
+		out.push({
+			key: "trace",
+			value: d.traceHint === "fold" ? "Enter folds steps" : "Enter shows steps",
+			color: ui.muted,
+			priority: 1,
+		});
 	}
 	if (d.judge && d.judge !== "ready") {
 		out.push({

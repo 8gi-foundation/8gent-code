@@ -93,6 +93,11 @@ interface CommandInputProps {
 	maskInput?: boolean;
 	/** When true, Enter with an empty line still calls onSubmit (for empty send) */
 	allowEmptySubmit?: boolean;
+	/**
+	 * Enter on an empty line, when nothing is sent: the folded trace's status row
+	 * opens and folds on it (#5170).
+	 */
+	onEmptyEnter?: () => void;
 	/** An approval card is pending: the status line says the turn waits on the
 	 *  person and stops spinning, and the placeholder points at the card (#3118). */
 	approvalPending?: boolean;
@@ -178,6 +183,7 @@ let collisionLineShown = false;
 
 export function CommandInput({
 	onSubmit,
+	onEmptyEnter,
 	isProcessing,
 	placeholder,
 	maskInput = false,
@@ -482,7 +488,10 @@ export function CommandInput({
 	const submitNow = useCallback(
 		(input: string) => {
 			const trimmed = input.trim();
-			if (!trimmed && !allowEmptySubmit) return;
+			if (!trimmed && !allowEmptySubmit) {
+				onEmptyEnter?.();
+				return;
+			}
 
 			// Reset history navigation on submit
 			setHistoryIndex(-1);
@@ -535,6 +544,7 @@ export function CommandInput({
 		},
 		[
 			onSubmit,
+			onEmptyEnter,
 			onSlashCommand,
 			allowEmptySubmit,
 			maskInput,

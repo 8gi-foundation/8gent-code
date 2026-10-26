@@ -14,7 +14,7 @@
  */
 
 import { Box, type DOMElement, useApp, useInput, useStdout } from "ink";
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import pkgInfo from "../../../package.json" with { type: "json" };
 import {
 	type TaskCategory,
@@ -298,6 +298,7 @@ import {
 	noticeText,
 	retryNoticeOf,
 } from "./lib/error-row.js";
+import { showStepsWhileWorking } from "./lib/folded-trace.js";
 import {
 	formatSessionTime,
 	formatTokens,
@@ -1699,6 +1700,27 @@ export function App({
 	// shows up in tabMessagesRef when their chat() resolves.
 	const perTabAgents = usePerTabAgents();
 	const isProcessing = perTabAgents.isTabProcessing(activeTabId);
+	// Folded trace (#5170): while a turn runs, its steps sit behind one status row.
+	// The setting is read when a turn starts or a view changes, not on every render.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: re-read on these triggers
+	const stepsShown = useMemo(
+		() => showStepsWhileWorking(),
+		[isProcessing, viewMode, activeTabType],
+	);
+	const [traceOpen, setTraceOpen] = useState(false);
+	// The status row is up: a turn runs, steps are folded, and a call has landed this turn.
+	const traceRowUp = (() => {
+		if (!isProcessing || stepsShown) return false;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const m = messages[i];
+			if (m.role === "user") return false;
+			if (m.role === "tool" && m.toolTrail) return true;
+		}
+		return false;
+	})();
+	useEffect(() => {
+		if (!isProcessing) setTraceOpen(false);
+	}, [isProcessing]);
 	const setIsProcessing = useCallback(
 		(val: boolean) => {
 			perTabAgents.setTabProcessing(activeTabId, val);
@@ -3144,6 +3166,11 @@ export function App({
 		if (key.escape) {
 			// A highlighted mouse selection goes first (#4602).
 			if (clearSelection()) return;
+			// An open step list folds before Esc stops the turn (#5170).
+			if (traceRowUp && traceOpen) {
+				setTraceOpen(false);
+				return;
+			}
 			const bangs = bangRunsRef.current.get(activeTabId);
 			if (bangs && bangs.size > 0) {
 				stopBangRuns(activeTabId);
@@ -9299,6 +9326,10 @@ export function App({
 									<MessageList
 										messages={visibleMessages(messages, showThinking)}
 										turnRunning={isProcessing}
+										foldTrace={!stepsShown}
+										traceOpen={traceOpen}
+										onToggleTrace={() => setTraceOpen((o) => !o)}
+										liveTool={activeTool}
 										rowBudget={chatRowBudget(chatBoxRows, viewport.height, isProcessing)}
 										contentWidth={chatWidth}
 										onToggleCompaction={toggleCompaction}
@@ -9351,6 +9382,7 @@ export function App({
 									cwd={projectCwd}
 									onSlashMenuChange={setSlashMenuOpen}
 									onSubmit={handleSubmit}
+									onEmptyEnter={traceRowUp ? () => setTraceOpen((o) => !o) : undefined}
 									isProcessing={isProcessing}
 									placeholder={
 										showOnboarding
@@ -9444,6 +9476,7 @@ export function App({
 					thinking={thinkingLevel}
 					turnRunning={isProcessing}
 					turnCalls={toolCount}
+					traceHint={traceRowUp ? (traceOpen ? "fold" : "open") : undefined}
 					djKeys={djKeys}
 					onDjKeysDone={endDjKeys}
 				/>

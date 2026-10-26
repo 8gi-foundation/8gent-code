@@ -375,6 +375,15 @@ const CATEGORIES: Category[] = [
 				set: (s, v) => ({ ...s, ui: { ...s.ui, mouseCapture: Boolean(v) } }),
 			},
 			{
+				id: "ui.showSteps",
+				label: "Show steps while working",
+				description:
+					"On: every step shows as its own row while 8gent works. Off: one status line, and Enter opens the full list. EIGHT_TUI_TRACE=on forces it on.",
+				kind: "toggle",
+				get: (s) => s.ui.showSteps ?? false,
+				set: (s, v) => ({ ...s, ui: { ...s.ui, showSteps: Boolean(v) } }),
+			},
+			{
 				id: "ui.thinkingVisualiser.enabled",
 				label: "Thinking Visualiser",
 				description: "Procedural canvas inside the Thinking box. Disable for plain text.",
