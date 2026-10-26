@@ -64,3 +64,33 @@ test("40 columns still shows every tab number and the active title", () => {
 	expect(row).toContain("9");
 	expect(row.length).toBeLessThanOrEqual(40);
 });
+
+test("40 columns: inactive tabs keep their first letters so they can be told apart", () => {
+	const out = strip(
+		renderToString(<TabBar width={40} tabs={tabs} onSwitch={() => {}} />, { columns: 40 }),
+	);
+	const row = out.split("\n")[0] ?? "";
+	expect(row).toContain("1Ch 2No 3Id 4Co 5Te 6Se");
+	expect(row.length).toBeLessThanOrEqual(40);
+});
+
+test("40 columns: an emoji title is kept whole or dropped, never split into a broken character", () => {
+	const many = [
+		"\u{1F600}Smile",
+		"Notes",
+		"\u{1F468}\u200D\u{1F469}\u200D\u{1F467} Family",
+		"\u00DCn\u00EF",
+		"Chat",
+		"Notes",
+		"Ideas",
+		"Control",
+		"Terminal",
+	].map((t, i) => mk(i, "chat", t, i === 7));
+	const emoji = many;
+	const out = strip(
+		renderToString(<TabBar width={40} tabs={emoji} onSwitch={() => {}} />, { columns: 40 }),
+	);
+	const row = out.split("\n")[0] ?? "";
+	expect(row.isWellFormed()).toBe(true);
+	expect(row).toContain("1\u{1F600}");
+});

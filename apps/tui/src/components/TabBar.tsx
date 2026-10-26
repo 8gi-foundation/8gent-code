@@ -71,6 +71,19 @@ function sanitizeTabTitle(title: string): string {
 	return title;
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** The first n user-perceived characters, so an emoji is never split in half. */
+function firstGraphemes(text: string, n: number): string {
+	let out = "";
+	let count = 0;
+	for (const { segment } of graphemes.segment(text)) {
+		if (count++ >= n) break;
+		out += segment;
+	}
+	return out;
+}
+
 /**
  * A trailing "(source)" tag such as "(pi-mono)". When several tabs share the
  * same title the tag repeats on each one and costs the bar room, and the tab
@@ -399,33 +412,53 @@ export function TabBar({
 	const lampFrames = useLampFrames(states, activeTab?.id ?? null, animate);
 
 	const shownTitles = dropRepeatedTag(visibleTabs.map((tab) => sanitizeTabTitle(tab.title)));
-	const fullCells: TabCell[] = visibleTabs.map((tab, i) => {
-		const badge = tab.badge && tab.badge > 0 ? ` (${tab.badge})` : "";
-		const grouped = groups.some((g) => g.tabIds.includes(tab.id)) ? " +" : "";
-		const perm = permFor?.(tab.id);
-		const tag =
-			perm && (!compact || tab.active) ? permTabTag(perm, width >= TAB_TAG_WIDE_COLS) : "";
-		const frame = lampFrames[tab.id] ?? restFrame("idle");
-		const shape = compact
-			? tab.active
-				? { num: `[${i + 1} `, close: "]" }
-				: { num: `${i + 1}` }
-			: { num: `${i + 1}] ` };
-		return {
-			...shape,
-			title: compact && !tab.active ? "" : `${shownTitles[i]}${badge}${grouped}`,
-			active: tab.active,
-			grabbed: dragging && grabbedTabId === tab.id,
-			// An idle tab is dark: no glyph at rest. The lamp comes after the
-			// permission tag, so its mark never sits beside the tag's own " · ".
-			...(states[tab.id] === "idle" && frame.ms === 0
-				? {}
-				: { lamp: lampGlyph(frame, ascii), lampFrame: frame }),
-			...(perm && tag
-				? { tag, tagColor: permColour(perm.mode), tagBold: PERM_LOOK[perm.mode].bold }
-				: {}),
+	const buildCells = (peek: number): TabCell[] =>
+		visibleTabs.map((tab, i) => {
+			const badge = tab.badge && tab.badge > 0 ? ` (${tab.badge})` : "";
+			const grouped = groups.some((g) => g.tabIds.includes(tab.id)) ? " +" : "";
+			const perm = permFor?.(tab.id);
+			const tag =
+				perm && (!compact || tab.active) ? permTabTag(perm, width >= TAB_TAG_WIDE_COLS) : "";
+			const frame = lampFrames[tab.id] ?? restFrame("idle");
+			const shape = compact
+				? tab.active
+					? { num: `[${i + 1} `, close: "]" }
+					: { num: `${i + 1}` }
+				: { num: `${i + 1}] ` };
+			return {
+				...shape,
+				title:
+					compact && !tab.active
+						? firstGraphemes(shownTitles[i] ?? "", peek)
+						: `${shownTitles[i]}${badge}${grouped}`,
+				active: tab.active,
+				grabbed: dragging && grabbedTabId === tab.id,
+				// An idle tab is dark: no glyph at rest. The lamp comes after the
+				// permission tag, so its mark never sits beside the tag's own " · ".
+				...(states[tab.id] === "idle" && frame.ms === 0
+					? {}
+					: { lamp: lampGlyph(frame, ascii), lampFrame: frame }),
+				...(perm && tag
+					? { tag, tagColor: permColour(perm.mode), tagBold: PERM_LOOK[perm.mode].bold }
+					: {}),
+			};
+		});
+	// Narrow bars: inactive tabs keep the first letters of their title, as many
+	// as fit (3 down to 0), so a number is not all that tells them apart.
+	let fullCells = buildCells(0);
+	if (compact) {
+		const end = (l: TabCell[]) => {
+			const e = cellSpans(l, gap).at(-1);
+			return e ? e.x + e.width : 0;
 		};
-	});
+		for (const peek of [3, 2, 1]) {
+			const tryCells = buildCells(peek);
+			if (end(tryCells) <= width) {
+				fullCells = tryCells;
+				break;
+			}
+		}
+	}
 	const fitted = fitTabCells(
 		fullCells,
 		visibleTabs.map((tab) => states[tab.id] ?? "idle"),

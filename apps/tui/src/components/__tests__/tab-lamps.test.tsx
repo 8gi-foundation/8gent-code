@@ -192,7 +192,7 @@ describe("tab lamps in the bar", () => {
 		}
 	});
 
-	test("40 columns: titles give way, lamps never do, the active tab keeps its title", () => {
+	test("40 columns: inactive titles shrink to first letters, lamps never do, the active tab keeps its title", () => {
 		const m = mount(40);
 		m.show(FIVE, {
 			active: 0,
@@ -205,14 +205,14 @@ describe("tab lamps in the bar", () => {
 			},
 		});
 		const row = m.last().split("\n")[0] ?? "";
-		expect(row).toContain("[1 Orchestrator ◐] 2 3▲ 4● 5✕");
+		expect(row).toContain("[1 Orchestrator ◐] 2En 3QA ▲ 4No ● 5Do ✕");
 	});
 
 	test("40 columns: the active tab's title is never cut for another's lamp", () => {
 		const m = mount(40);
 		m.show(FIVE, { active: 2, animate: false });
 		const row = m.last().split("\n")[0] ?? "";
-		expect(row).toContain("1 2 [3 QA] 4 5");
+		expect(row).toContain("1Orc 2Eng [3 QA] 4Not 5Doc");
 	});
 
 	test("a screen reader gets each tab's state as words, not glyphs", () => {
