@@ -30,7 +30,7 @@ import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "../app.js";
 import { useMouseScroll } from "../hooks/useMouseScroll.js";
-import { bubbleWidths } from "../lib/chat-layout.js";
+import { bubbleWidths, footerRidesSenderRow, replyFooter } from "../lib/chat-layout.js";
 import { compactionRows } from "../lib/compaction-view.js";
 import { type Notice, noticeLines } from "../lib/error-row.js";
 import {
@@ -213,10 +213,12 @@ function estimateMessageRows(
 	// The body as MarkdownBody draws it: same blocks, same widths.
 	const rows = message.content.trim() || trail.length === 0 ? bodyRows(message.content, w) : 1;
 	// 1 header + 1 marginBottom; assistant with metadata = 1 footer too.
-	const overhead =
+	const hasFooter =
 		message.role === "assistant" &&
 		typeof message.latencyMs === "number" &&
-		typeof message.tokens === "number"
+		typeof message.tokens === "number";
+	const overhead =
+		hasFooter && !footerRidesSenderRow(w, replyFooter(message.latencyMs ?? 0, message.tokens ?? 0))
 			? 3
 			: 2;
 	return rows + overhead + trailRows;
@@ -716,14 +718,8 @@ function MessageItem({
 	// is present — keeps this PR purely visual.
 	const showFooter =
 		!isUser && typeof message.latencyMs === "number" && typeof message.tokens === "number";
-	const footerLatency =
-		message.latencyMs && message.latencyMs >= 1000
-			? `${(message.latencyMs / 1000).toFixed(1)}s`
-			: `${message.latencyMs ?? 0}ms`;
-	const footerTokens =
-		(message.tokens ?? 0) >= 1000
-			? `${((message.tokens ?? 0) / 1000).toFixed((message.tokens ?? 0) >= 10000 ? 0 : 1)}k tok`
-			: `${message.tokens ?? 0} tok`;
+	const footerText = replyFooter(message.latencyMs ?? 0, message.tokens ?? 0);
+	const footerOnSenderRow = showFooter && footerRidesSenderRow(textWrapWidth, footerText);
 
 	const bubble = (
 		<Box
@@ -749,6 +745,7 @@ function MessageItem({
 					<>
 						<Label color={isLatestAssistant ? t.teal : t.muted}>{"\u25C6 8gent"}</Label>
 						<MutedText> {formatTime(message.timestamp)}</MutedText>
+						{footerOnSenderRow && <MutedText>{` · ${footerText}`}</MutedText>}
 					</>
 				)}
 			</Box>
@@ -793,9 +790,9 @@ function MessageItem({
 			) : null}
 
 			{/* Footer (assistant + metadata present): "Xs · N tok" */}
-			{showFooter && (
+			{showFooter && !footerOnSenderRow && (
 				<Box>
-					<MutedText>{`${footerLatency} · ${footerTokens}`}</MutedText>
+					<MutedText>{footerText}</MutedText>
 				</Box>
 			)}
 		</Box>

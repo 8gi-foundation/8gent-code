@@ -61,3 +61,21 @@ export function bubbleWidths(
 	const bubble = role === "user" ? Math.max(16, Math.floor(inner * USER_BUBBLE_SHARE)) : inner;
 	return { bubble, wrap: Math.max(8, bubble - 2) };
 }
+
+/** Under this wrap width a reply's "3.2s · 412 tok" joins the sender row instead of taking its own. */
+const INLINE_FOOTER_BELOW = 60;
+/** "◆ 8gent " plus "04:21 PM" plus " · ": what the sender row already holds. */
+const SENDER_ROW_CELLS = 8 + 8 + 3;
+
+/** True when the footer can ride the sender row: narrow column and the whole line fits. */
+export function footerRidesSenderRow(wrap: number, footer: string): boolean {
+	return wrap < INLINE_FOOTER_BELOW && SENDER_ROW_CELLS + footer.length <= wrap;
+}
+
+/** "3.2s · 412 tok", or "900ms · 88 tok". */
+export function replyFooter(latencyMs: number, tokens: number): string {
+	const latency = latencyMs >= 1000 ? `${(latencyMs / 1000).toFixed(1)}s` : `${latencyMs}ms`;
+	const tok =
+		tokens >= 1000 ? `${(tokens / 1000).toFixed(tokens >= 10000 ? 0 : 1)}k tok` : `${tokens} tok`;
+	return `${latency} · ${tok}`;
+}
