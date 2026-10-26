@@ -94,3 +94,20 @@ test("40 columns: an emoji title is kept whole or dropped, never split into a br
 	expect(row.isWellFormed()).toBe(true);
 	expect(row).toContain("1\u{1F600}");
 });
+
+test("40 columns: a long active title is cut with an ellipsis so every tab number stays", () => {
+	const long = [
+		"Chat 1",
+		"Fix flaky websocket reconnect test in daemon package",
+		"Notes",
+		"Ideas",
+	].map((t, i) => mk(i, "chat", t, i === 1));
+	const out = strip(
+		renderToString(<TabBar width={40} tabs={long} onSwitch={() => {}} />, { columns: 40 }),
+	);
+	const row = out.split("\n")[0] ?? "";
+	expect(row).toContain("[2 Fix");
+	expect(row).toContain("…]");
+	expect(row).toMatch(/1 .*\] 3 4$/);
+	expect(row.length).toBeLessThanOrEqual(40);
+});

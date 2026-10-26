@@ -38,7 +38,7 @@ import React, { useEffect, useRef, useState } from "react";
 import type { PaneGroup } from "../hooks/usePaneGroups.js";
 import type { WorkspaceTab } from "../hooks/useWorkspaceTabs.js";
 import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
-import { cellWidth } from "../lib/header-layout.js";
+import { cellWidth, truncateEnd } from "../lib/header-layout.js";
 import { SWEEP_FRAME_MS, type Span, motionEnabled, sweepFrames } from "../lib/motion.js";
 import {
 	PERM_LOOK,
@@ -135,6 +135,8 @@ const GAP = "   ";
 /** Below this many columns the titles give way and the lamps stay. */
 export const COMPACT_COLS = 60;
 const COMPACT_GAP = " ";
+/** Narrowest an active title is cut to on a compact bar. */
+const ACTIVE_TITLE_MIN = 8;
 
 /** Theme colour for each lamp tone. Orange is only ever the needs-you lamp. */
 const TONE_COLOUR: Record<LampTone, string> = {
@@ -412,7 +414,7 @@ export function TabBar({
 	const lampFrames = useLampFrames(states, activeTab?.id ?? null, animate);
 
 	const shownTitles = dropRepeatedTag(visibleTabs.map((tab) => sanitizeTabTitle(tab.title)));
-	const buildCells = (peek: number): TabCell[] =>
+	const buildCells = (peek: number, activeMax = Number.POSITIVE_INFINITY): TabCell[] =>
 		visibleTabs.map((tab, i) => {
 			const badge = tab.badge && tab.badge > 0 ? ` (${tab.badge})` : "";
 			const grouped = groups.some((g) => g.tabIds.includes(tab.id)) ? " +" : "";
@@ -430,7 +432,7 @@ export function TabBar({
 				title:
 					compact && !tab.active
 						? firstGraphemes(shownTitles[i] ?? "", peek)
-						: `${shownTitles[i]}${badge}${grouped}`,
+						: truncateEnd(`${shownTitles[i]}${badge}${grouped}`, activeMax),
 				active: tab.active,
 				grabbed: dragging && grabbedTabId === tab.id,
 				// An idle tab is dark: no glyph at rest. The lamp comes after the
@@ -456,6 +458,22 @@ export function TabBar({
 			if (end(tryCells) <= width) {
 				fullCells = tryCells;
 				break;
+			}
+		}
+	}
+	// A long active title must not push the other tabs, and their lamps, off a
+	// narrow bar: it gives up its tail (with an ellipsis) until every tab shows.
+	if (compact) {
+		const end = (l: TabCell[]) => {
+			const e = cellSpans(l, gap).at(-1);
+			return e ? e.x + e.width : 0;
+		};
+		if (end(fullCells) > width) {
+			const full = Math.max(0, ...fullCells.map((c) => (c.active ? cellWidth(c.title) : 0)));
+			for (let max = full - 1; max >= ACTIVE_TITLE_MIN; max--) {
+				const tryCells = buildCells(0, max);
+				fullCells = tryCells;
+				if (end(tryCells) <= width) break;
 			}
 		}
 	}
