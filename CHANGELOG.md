@@ -9,6 +9,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.40] - 2026-10-26
+
+### Changed
+- a long active tab title is cut with an ellipsis so every tab stays reachable at narrow widths ([#5152](https://github.com/8gi-foundation/8gent-code/pull/5152))
+- no-model card install command pastes as one command at narrow widths ([#5150](https://github.com/8gi-foundation/8gent-code/pull/5150))
+- no-model card keeps its notes whole at narrow widths ([#5148](https://github.com/8gi-foundation/8gent-code/pull/5148))
+
 ## [0.20.39] - 2026-10-26
 
 ### Changed
