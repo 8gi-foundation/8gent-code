@@ -11,8 +11,13 @@
 
 import { describe, expect, test } from "bun:test";
 import React from "react";
-import { InlineApprovalPrompt, type InlineApprovalPromptProps } from "../InlineApprovalPrompt";
 import { t } from "../../theme.js";
+import {
+	InlineApprovalPrompt,
+	type InlineApprovalPromptProps,
+	approvalCaps,
+} from "../InlineApprovalPrompt";
+import { keyCapText } from "../KeyCap";
 
 const SHORT_TARGET = "write foo.ts";
 const LONG_TARGET =
@@ -103,5 +108,25 @@ describe("InlineApprovalPrompt", () => {
 		};
 
 		expect([summarize(SHORT_TARGET), summarize(LONG_TARGET)]).toMatchSnapshot();
+	});
+});
+
+describe("approvalCaps", () => {
+	const text = (w: number, gate = false) =>
+		approvalCaps(w, gate)
+			.map((c, i) => " ".repeat(i > 0 ? (c.gap ?? 0) : 0) + keyCapText(c.cap, c.verb))
+			.join("");
+
+	test("keeps the full verbs when the row fits", () => {
+		expect(text(96)).toBe("[Y] approve  [N] deny  [E] edit  [S] skip");
+	});
+
+	test("never exceeds the width, down to a 36 cell card (40 columns)", () => {
+		for (const w of [41, 38, 36, 35, 32]) expect(text(w).length).toBeLessThanOrEqual(w);
+		expect(text(36)).toBe("[Y] yes  [N] no  [E] edit  [S] skip");
+	});
+
+	test("the yolo gate stays Y and N", () => {
+		expect(text(36, true)).toBe("[Y] yes  [N] no");
 	});
 });

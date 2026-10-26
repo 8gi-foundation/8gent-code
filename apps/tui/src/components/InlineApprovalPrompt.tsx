@@ -1,8 +1,9 @@
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import React from "react";
 import { compactCardBox, fullCardBox, useCardView } from "../hooks/useApprovalCard.js";
+import { cellWidth } from "../lib/header-layout.js";
 import { t } from "../theme.js";
-import { KeyCapRow } from "./KeyCap.js";
+import { type CapSpec, KEY_CAP_GAP, KeyCapRow, keyCapText } from "./KeyCap.js";
 
 /** The card's keys, as key caps (#3238): one format for every key in the HUD. */
 export const APPROVAL_KEYS: ReadonlyArray<readonly [string, string]> = [
@@ -17,6 +18,48 @@ export const YOLO_GATE_KEYS: ReadonlyArray<readonly [string, string]> = [
 	["Y", "yes"],
 	["N", "no"],
 ];
+
+/** The short verbs a narrow card falls back to; the keys stay the same. */
+const NARROW_VERBS: Record<string, string> = { Y: "yes", N: "no" };
+
+/** Cells a full card spends beside its keys: border and padding. */
+const CARD_CHROME = 4;
+
+/**
+ * The key row for a card `width` cells wide, always on ONE row (a wrapped row
+ * splits "[S]" from "skip" and breaks the click spans): full verbs with the
+ * usual gap, then a one cell gap, then yes / no. Pure.
+ */
+export function approvalCaps(width: number, gate = false): CapSpec[] {
+	const keys = gate ? YOLO_GATE_KEYS : APPROVAL_KEYS;
+	const build = (narrow: boolean, gap: number): CapSpec[] =>
+		keys.map(([cap, verb], i) => ({
+			cap,
+			verb: narrow ? (NARROW_VERBS[cap] ?? verb) : verb,
+			gap: i > 0 ? gap : 0,
+		}));
+	const span = (caps: CapSpec[]) =>
+		caps.reduce((n, c) => n + (c.gap ?? 0) + cellWidth(keyCapText(c.cap, c.verb)), 0);
+	const tiers = [
+		build(false, KEY_CAP_GAP.length),
+		build(false, 1),
+		build(true, KEY_CAP_GAP.length),
+		build(true, 1),
+	];
+	return tiers.find((c) => span(c) <= width) ?? tiers[tiers.length - 1];
+}
+
+/** The full card's key row, sized to the screen it is drawn on. */
+function FullKeys({ gate }: { gate?: boolean }) {
+	const { stdout } = useStdout();
+	return (
+		<KeyCapRow
+			caps={approvalCaps((stdout?.columns ?? 80) - CARD_CHROME, gate)}
+			idPrefix="card"
+			z={10}
+		/>
+	);
+}
 
 interface InlineApprovalPromptProps {
 	/** The one-time yolo question: Y yes, N no. */
@@ -91,11 +134,7 @@ export function InlineApprovalPrompt({ target, reason, full, gate }: InlineAppro
 				</Box>
 				<FullTarget target={target} />
 				<Box justifyContent="flex-end">
-					<KeyCapRow
-						caps={(gate ? YOLO_GATE_KEYS : APPROVAL_KEYS).map(([cap, verb]) => ({ cap, verb }))}
-						idPrefix="card"
-						z={10}
-					/>
+					<FullKeys gate={gate} />
 				</Box>
 			</Box>
 		);
