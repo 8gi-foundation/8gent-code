@@ -207,3 +207,15 @@ describe("no-model card contrast, both themes", () => {
 		});
 	}
 });
+
+describe("no-model card at 40 columns", () => {
+	test("the lead wraps under the label at full width, not in a label-wide column", async () => {
+		const f = await frame(bareMachine, 40);
+		const rows = f.split("\n");
+		expect(rows.some((r) => r.startsWith("│ answer. Pick one"))).toBe(true);
+	});
+	test("at 80 columns the label column stays", async () => {
+		const f = await frame(bareMachine, 80);
+		expect(f).toContain("NO MODEL 8gent needs a model to answer.");
+	});
+});

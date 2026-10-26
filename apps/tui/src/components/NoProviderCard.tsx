@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import React from "react";
 import { type GuidanceCopy, guidanceCopy } from "../lib/no-provider-guidance.js";
 import type { Readiness } from "../lib/readiness.js";
@@ -18,6 +18,9 @@ export const NO_PROVIDER_TONES = {
 	reason: "textSecondary",
 } as const;
 
+/** Under this many columns the label and its sentence share one Text, so the sentence wraps under the label at full width. */
+export const NARROW_BELOW_COLS = 60;
+
 /**
  * The first-run "no model" card (T5). Meaning never rests on colour: the
  * state is the word NO MODEL, paths are numbered in text, and commands sit on
@@ -29,6 +32,8 @@ export function NoProviderCard({
 	reason,
 	compact = false,
 }: { copy?: GuidanceCopy; reason?: string | null; compact?: boolean }) {
+	const columns = useStdout().stdout?.columns ?? 80;
+	const narrow = columns < NARROW_BELOW_COLS;
 	if (compact) {
 		// Short terminal: one header row (the reason when there is one, since
 		// the setup card's own line scrolls away), then each path's lines.
@@ -40,16 +45,25 @@ export function NoProviderCard({
 				flexDirection="column"
 				flexShrink={0}
 			>
-				<Box>
-					<Box flexShrink={0} marginRight={1}>
+				{narrow ? (
+					<Text color={t[reason ? NO_PROVIDER_TONES.reason : NO_PROVIDER_TONES.lead]}>
 						<Text color={t[NO_PROVIDER_TONES.label]} bold>
 							{copy.label}
-						</Text>
-					</Box>
-					<Text color={t[reason ? NO_PROVIDER_TONES.reason : NO_PROVIDER_TONES.lead]}>
+						</Text>{" "}
 						{reason ?? copy.lead}
 					</Text>
-				</Box>
+				) : (
+					<Box>
+						<Box flexShrink={0} marginRight={1}>
+							<Text color={t[NO_PROVIDER_TONES.label]} bold>
+								{copy.label}
+							</Text>
+						</Box>
+						<Text color={t[reason ? NO_PROVIDER_TONES.reason : NO_PROVIDER_TONES.lead]}>
+							{reason ?? copy.lead}
+						</Text>
+					</Box>
+				)}
 				{copy.compact.map((lines, i) => (
 					<Box key={copy.paths[i]?.n ?? String(i + 1)}>
 						<Box flexShrink={0} width={3}>
@@ -78,20 +92,34 @@ export function NoProviderCard({
 			flexDirection="column"
 			flexShrink={0}
 		>
-			<Box>
-				<Box flexShrink={0} marginRight={1}>
-					<Text color={t[NO_PROVIDER_TONES.label]} bold>
-						{copy.label}
+			{narrow ? (
+				<>
+					<Text color={t[NO_PROVIDER_TONES.lead]}>
+						<Text color={t[NO_PROVIDER_TONES.label]} bold>
+							{copy.label}
+						</Text>{" "}
+						{copy.lead}
 					</Text>
-				</Box>
-				<Text color={t[NO_PROVIDER_TONES.lead]}>{copy.lead}</Text>
-			</Box>
-			{reason ? (
-				// Aligned under the lead, so the label column stays clear.
-				<Box paddingLeft={copy.label.length + 1}>
-					<Text color={t[NO_PROVIDER_TONES.reason]}>{reason}</Text>
-				</Box>
-			) : null}
+					{reason ? <Text color={t[NO_PROVIDER_TONES.reason]}>{reason}</Text> : null}
+				</>
+			) : (
+				<>
+					<Box>
+						<Box flexShrink={0} marginRight={1}>
+							<Text color={t[NO_PROVIDER_TONES.label]} bold>
+								{copy.label}
+							</Text>
+						</Box>
+						<Text color={t[NO_PROVIDER_TONES.lead]}>{copy.lead}</Text>
+					</Box>
+					{reason ? (
+						// Aligned under the lead, so the label column stays clear.
+						<Box paddingLeft={copy.label.length + 1}>
+							<Text color={t[NO_PROVIDER_TONES.reason]}>{reason}</Text>
+						</Box>
+					) : null}
+				</>
+			)}
 			{copy.paths.map((path) => (
 				<Box key={path.n} flexDirection="column">
 					<Box>
