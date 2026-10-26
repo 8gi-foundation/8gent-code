@@ -814,3 +814,42 @@ describe("the thinking chip never costs a key hint (#5040)", () => {
 		expect(row.segments.find((s) => s.key === "think")?.value).toBe("max");
 	});
 });
+
+describe("the sandbox reason reads in full at 100 columns (design pass)", () => {
+	test("a long reason keeps its words at 100, the mode label stays, no hint is lost", () => {
+		for (const reason of ["nested", "unsupported OS", "EIGHT_SEATBELT=0"]) {
+			const all = buildFooterSegments({
+				mode: "Planning",
+				permissions: "ask",
+				sessionTime: "8m 12s",
+				providersLive: 2,
+				providersTotal: 3,
+				user: "james",
+				columns: 100,
+				sandboxOff: reason,
+			});
+			const row = fitFooterRow(all, 100);
+			const sb = row.segments.find((s) => s.key === "sandbox");
+			expect(sb?.note, reason).toBe(reason);
+			expect(row.segments.find((s) => s.key === "mode")?.label).toBe("mode");
+			expect(row.hints[0]).toBe("^P palette");
+			expect(row.hints.length).toBeGreaterThanOrEqual(2);
+		}
+	});
+
+	test("at 59 columns and below the row is as before: reason shed, never the state", () => {
+		for (let w = 38; w < 60; w++) {
+			const row = fitFooterRow(
+				buildFooterSegments({
+					mode: "Planning",
+					permissions: "ask",
+					columns: w,
+					sandboxOff: "unsupported OS",
+				}),
+				w,
+			);
+			expect(row.segments.some((s) => s.key === "sandbox")).toBe(true);
+			expect(row.segments.find((s) => s.key === "sandbox")?.note).toBeUndefined();
+		}
+	});
+});

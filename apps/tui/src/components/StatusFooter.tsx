@@ -506,6 +506,20 @@ function fitRowOnce(
 		(l) => l.filter((x) => x.key !== "ctx" && x.priority <= 1),
 	];
 	const meterSheds = 5;
+	// From 60 columns up the reason is worth more than the user name and the
+	// rate, then providers and session time: try the full reason with those given up
+	// before the reason is the thing that goes.
+	if (width >= FOOTER_NARROW_COLS && sandbox.note) {
+		for (const shed of sheds.slice(0, 4)) {
+			const candidate = shed(all);
+			const segments = fit(candidate);
+			if (!segments.includes(sandbox)) continue;
+			if (meter && !segments.some((x) => x.key === "ctx")) continue;
+			const hints = hintsFor(segments);
+			if (hints.length < plainHints.length) continue;
+			return { segments, hints };
+		}
+	}
 	for (const [shedIndex, shed] of sheds.entries()) {
 		if (!meter && shedIndex < meterSheds) continue;
 		for (const shape of shapes) {
