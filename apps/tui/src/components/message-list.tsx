@@ -685,13 +685,17 @@ function MessageItem({
 				</Box>,
 			);
 		}
+		// Under 60 columns a wrapped one-line notice drops its two rule rows: the
+		// dim text with no bubble header already reads as a notice, and every
+		// row counts when a notice stack scrolls the chat away.
+		const ruled = contentWidth >= 60;
 		return fadeWrap(
 			<Box flexDirection="column" marginBottom={1} paddingLeft={1}>
-				<Text dimColor>{"─".repeat(3)}</Text>
+				{ruled ? <Text dimColor>{"─".repeat(3)}</Text> : null}
 				<Box width={contentWidth - 2}>
 					<SystemMessageText content={message.content} />
 				</Box>
-				<Text dimColor>{"─".repeat(3)}</Text>
+				{ruled ? <Text dimColor>{"─".repeat(3)}</Text> : null}
 			</Box>,
 		);
 	}
