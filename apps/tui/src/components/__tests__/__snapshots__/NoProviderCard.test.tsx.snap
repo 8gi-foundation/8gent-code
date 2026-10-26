@@ -7,10 +7,10 @@ exports[`no-model card in the chat area (T5) providers 0/3: the card shows both 
 │          Ollama is not answering.                                            │
 │ 1  Run a model on this machine (free, stays local)                           │
 │    curl -fsSL https://ollama.com/install.sh | sh                             │
-│    ollama pull qwen3.5   # about 7 GB                                        │
+│    ollama pull qwen3.5   # about 7 GB                                        │
 │    In 8gent: /provider ollama                                                │
 │ 2  Use a free hosted model, key from https://openrouter.ai/keys              │
-│    8gent keys set openrouter   # hidden prompt, then restart                 │
+│    8gent keys set openrouter   # hidden prompt, then restart                 │
 │    Or edit ~/.8gent/keys.env with 8gent keys                                 │
 │    In 8gent: /provider openrouter, then /model auto:free                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯"
@@ -23,10 +23,10 @@ exports[`no-model card in the chat area (T5) carries agent init's reason line in
 │          LM Studio at localhost:1234 did not answer.                         │
 │ 1  Run a model on this machine (free, stays local)                           │
 │    curl -fsSL https://ollama.com/install.sh | sh                             │
-│    ollama pull qwen3.5   # about 7 GB                                        │
+│    ollama pull qwen3.5   # about 7 GB                                        │
 │    In 8gent: /provider ollama                                                │
 │ 2  Use a free hosted model, key from https://openrouter.ai/keys              │
-│    8gent keys set openrouter   # hidden prompt, then restart                 │
+│    8gent keys set openrouter   # hidden prompt, then restart                 │
 │    Or edit ~/.8gent/keys.env with 8gent keys                                 │
 │    In 8gent: /provider openrouter, then /model auto:free                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯"

@@ -95,6 +95,16 @@ export interface GuidanceCopy {
 export const COMPACT_BELOW_ROWS = 30;
 
 /**
+ * A shell line with a `#` note, the note's spaces made non-breaking so a
+ * narrow row moves the whole note down instead of splitting "7 GB" or
+ * "hidden prompt" across two rows. A `#` note is a comment, so the line
+ * still pastes and runs as it stands.
+ */
+function withNote(command: string, note: string): string {
+	return `${command}   #\u00a0${note.replace(/ /g, "\u00a0")}`;
+}
+
+/**
  * The card's words. Commands are the real ones and follow the published docs
  * (8gent.dev models/ollama and models/hosted): the Ollama install script and
  * library tag were checked against ollama.com, and the model and size come
@@ -116,7 +126,7 @@ export function guidanceCopy(platform: NodeJS.Platform = process.platform): Guid
 				title: "Run a model on this machine (free, stays local)",
 				steps: [
 					install,
-					`ollama pull ${OLLAMA_RECOMMENDED.pull}   # ${OLLAMA_RECOMMENDED.size}`,
+					withNote(`ollama pull ${OLLAMA_RECOMMENDED.pull}`, OLLAMA_RECOMMENDED.size),
 					"In 8gent: /provider ollama",
 				],
 			},
@@ -124,7 +134,7 @@ export function guidanceCopy(platform: NodeJS.Platform = process.platform): Guid
 				n: "2",
 				title: "Use a free hosted model, key from https://openrouter.ai/keys",
 				steps: [
-					"8gent keys set openrouter   # hidden prompt, then restart",
+					withNote("8gent keys set openrouter", "hidden prompt, then restart"),
 					`Or edit ${KEYS_FILE_DISPLAY} with 8gent keys`,
 					"In 8gent: /provider openrouter, then /model auto:free",
 				],

@@ -80,7 +80,7 @@ describe("no-model card in the chat area (T5)", () => {
 		const out = await frame(bareMachine);
 		expect(out).toContain("NO MODEL");
 		expect(out).toContain("curl -fsSL https://ollama.com/install.sh | sh");
-		expect(out).toContain("ollama pull qwen3.5   # about 7 GB");
+		expect(out.replace(/\u00a0/g, " ")).toContain("ollama pull qwen3.5   # about 7 GB");
 		// The documented key flow (8gent.dev models/hosted): keys.env via
 		// `8gent keys`, then /provider openrouter and /model auto:free.
 		expect(out).toContain("8gent keys set openrouter");
@@ -217,5 +217,14 @@ describe("no-model card at 40 columns", () => {
 	test("at 80 columns the label column stays", async () => {
 		const f = await frame(bareMachine, 80);
 		expect(f).toContain("NO MODEL 8gent needs a model to answer.");
+	});
+});
+
+describe("no-model card notes stay whole at 40 columns", () => {
+	test("'about 7 GB' and 'hidden prompt' never split across rows", async () => {
+		const f = (await frame(bareMachine, 40)).replace(/ /g, " ");
+		const rows = f.split("\n");
+		expect(rows.some((r) => r.includes("# about 7 GB"))).toBe(true);
+		expect(rows.some((r) => r.includes("# hidden prompt, then restart"))).toBe(true);
 	});
 });
