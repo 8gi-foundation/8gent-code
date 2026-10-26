@@ -127,7 +127,7 @@ async function mount(columns = 100, recent: string[] = []) {
 			patchConsole: false,
 		},
 	);
-	await waitFor(() => stripAnsi(stdout.written).includes("Type a command"), "first frame");
+	await waitFor(() => /Type a command|for commands/.test(stripAnsi(stdout.written)), "first frame");
 	const type = async (text: string) => {
 		stdin.feed(text);
 		await tick(80);

@@ -119,7 +119,10 @@ async function main() {
 	rec.take("/resume: three sessions");
 	m = app.mark();
 	app.feed("\x1b");
-	await waitFor(() => app.since(m).includes("Type a command or ask a question"), "picker closed");
+	await waitFor(
+		() => /Type a command or ask a question|Ask, or type \/ for commands/.test(app.since(m)),
+		"picker closed",
+	);
 	app.emit({ phase: "frames", frames: rec.frames });
 	process.exit(0);
 }

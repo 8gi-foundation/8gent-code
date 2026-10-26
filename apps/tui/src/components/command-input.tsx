@@ -122,6 +122,14 @@ export const STEER_PLACEHOLDER_NARROW = "Enter steers. Alt+Enter queues.";
 export function busyPlaceholder(columns: number): string {
 	return columns < BUSY_PLACEHOLDER_NARROW_COLUMNS ? STEER_PLACEHOLDER_NARROW : STEER_PLACEHOLDER;
 }
+/** The idle placeholder. */
+export const IDLE_PLACEHOLDER = "Type a command or ask a question...";
+/** The same on a phone-width terminal: one row, and it still says "/" opens commands. */
+export const IDLE_PLACEHOLDER_NARROW = "Ask, or type / for commands";
+/** The idle placeholder that fits `columns`. */
+export function idlePlaceholder(columns: number): string {
+	return columns < BUSY_PLACEHOLDER_NARROW_COLUMNS ? IDLE_PLACEHOLDER_NARROW : IDLE_PLACEHOLDER;
+}
 /** Said when Ctrl+Q or Alt+Enter is pressed with nothing typed. */
 export const NOTHING_TO_QUEUE = "Nothing to queue: type a message first.";
 
@@ -667,7 +675,7 @@ export function CommandInput({
 									? busyPlaceholder(stdout?.columns ?? 80)
 									: isVisible
 										? ""
-										: (placeholder ?? "Type a command or ask a question...")
+										: (placeholder ?? idlePlaceholder(stdout?.columns ?? 80))
 						}
 					/>
 

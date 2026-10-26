@@ -182,7 +182,10 @@ export async function bootApp(
 	};
 	await waitFor(() => strip(stdout.written).includes("Enter to begin"), "setup placeholder");
 	const m = await driven.submit("/skip all");
-	await waitFor(() => since(m).includes("Type a command or ask a question"), "normal input");
+	await waitFor(
+		() => /Type a command or ask a question|Ask, or type \/ for commands/.test(since(m)),
+		"normal input",
+	);
 	await tick(800);
 	return driven;
 }

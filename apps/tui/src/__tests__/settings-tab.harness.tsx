@@ -126,7 +126,7 @@ async function main() {
 			ok,
 			hasSettings: s.includes("Categories"),
 			hasChat: s.includes("Permission mode: Plan"),
-			hasInput: s.includes("Type a command or ask a question"),
+			hasInput: /Type a command or ask a question|Ask, or type \/ for commands/.test(s),
 		});
 	};
 	const showsSettings = () =>
@@ -136,7 +136,10 @@ async function main() {
 
 	await waitFor(() => strip(stdout.written).includes("Enter to begin"), "setup placeholder");
 	await typeAndEnter("/skip all");
-	await waitFor(() => screen().includes("Type a command or ask a question"), "normal input");
+	await waitFor(
+		() => /Type a command or ask a question|Ask, or type \/ for commands/.test(screen()),
+		"normal input",
+	);
 	await tick(1500);
 
 	// Chat content that must disappear when the Settings tab is the body.
