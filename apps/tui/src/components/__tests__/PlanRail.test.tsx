@@ -86,7 +86,11 @@ describe("PlanRail", () => {
 		const now = Date.now();
 		const tree = render({
 			tasks: [
-				mkTask({ subject: "finished thing", status: "completed", completedAt: new Date(now).toISOString() }),
+				mkTask({
+					subject: "finished thing",
+					status: "completed",
+					completedAt: new Date(now).toISOString(),
+				}),
 				mkTask({ subject: "waiting thing", status: "pending" }),
 				mkTask({ subject: "doing thing", status: "in_progress" }),
 			],
@@ -136,5 +140,20 @@ describe("PlanRail", () => {
 		});
 		const text = collectText(tree).join(" ");
 		expect(text).toContain("…");
+	});
+});
+
+describe("PlanRail counts", () => {
+	test("omits zero buckets and never splits a phrase across cells", () => {
+		const tree = render({
+			tasks: [
+				mkTask({ subject: "a", status: "in_progress" }),
+				mkTask({ subject: "b", status: "pending" }),
+			],
+		});
+		const text = collectText(tree).join(" ");
+		expect(text).not.toContain("0 blocked");
+		expect(text).not.toContain("0 done today");
+		expect(text).not.toContain("·");
 	});
 });

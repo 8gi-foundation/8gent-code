@@ -19,7 +19,8 @@
  */
 
 import { Box, Text } from "ink";
-import React, { useEffect, useState } from "react";
+import type React from "react";
+import { useEffect, useState } from "react";
 import type { Task, TaskManager } from "../../../../packages/tasks/index.js";
 import { t } from "../theme.js";
 
@@ -49,7 +50,7 @@ function statusColor(status: Task["status"]): string {
 		case "blocked":
 			return t.red;
 		case "cancelled":
-			return t.textDim;
+			return t.textTertiary;
 		default:
 			return t.textTertiary;
 	}
@@ -76,7 +77,8 @@ function isStaleCompleted(task: Task): boolean {
 	return ageMs > 24 * 60 * 60 * 1000;
 }
 
-function counts(tasks: ReadonlyArray<Task>): string {
+/** Non-zero status buckets, each a whole cell so a wrap never splits a phrase. */
+function countCells(tasks: ReadonlyArray<Task>): Array<[number, string]> {
 	let inProgress = 0;
 	let pending = 0;
 	let blocked = 0;
@@ -90,7 +92,13 @@ function counts(tasks: ReadonlyArray<Task>): string {
 			if (new Date(task.completedAt).getTime() >= dayAgo) completedToday += 1;
 		}
 	}
-	return `${inProgress} doing · ${pending} next · ${blocked} blocked · ${completedToday} done today`;
+	const cells: Array<[number, string]> = [
+		[inProgress, "doing"],
+		[pending, "next"],
+		[blocked, "blocked"],
+		[completedToday, "done today"],
+	];
+	return cells.filter(([n]) => n > 0);
 }
 
 export function PlanRail({
@@ -110,7 +118,7 @@ export function PlanRail({
 			</Text>
 			<Box marginTop={1} flexDirection="column">
 				{ranked.length === 0 ? (
-					<Text color={t.textDim}>(no tasks yet)</Text>
+					<Text color={t.textTertiary}>(no tasks yet)</Text>
 				) : (
 					ranked.map((task) => {
 						const icon = STATUS_ICON[task.status];
@@ -124,15 +132,19 @@ export function PlanRail({
 						return (
 							<Box key={task.id}>
 								<Text color={color}>{icon} </Text>
-								<Text color={dim ? t.textDim : t.textPrimary}>{subject}</Text>
+								<Text color={dim ? t.textTertiary : t.textPrimary}>{subject}</Text>
 							</Box>
 						);
 					})
 				)}
 			</Box>
 			{ranked.length > 0 ? (
-				<Box marginTop={1}>
-					<Text color={t.textDim}>{counts(tasks)}</Text>
+				<Box marginTop={1} flexWrap="wrap" columnGap={1}>
+					{countCells(tasks).map(([n, word]) => (
+						<Text key={word} color={t.textTertiary}>
+							<Text color={t.textPrimary}>{n}</Text> {word}
+						</Text>
+					))}
 				</Box>
 			) : null}
 		</Box>
