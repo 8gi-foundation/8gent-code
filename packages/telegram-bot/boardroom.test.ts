@@ -41,6 +41,21 @@ describe("roster", () => {
 		for (const o of BOARD_ROSTER) expect(VOICE_BY_OFFICER[o.name]).toBeTruthy();
 	});
 
+	test("voices follow the Boardroom map by officer code", () => {
+		const byCode: Record<string, string> = {
+			"8EO": "Jasper",
+			"8TO": "Bruno",
+			"8PO": "Bella",
+			"8DO": "Luna",
+			"8SO": "Rosie",
+			"8CO": "Hugo",
+			"8MO": "Kiki",
+			"8GO": "Leo",
+		};
+		for (const o of BOARD_ROSTER) expect(VOICE_BY_OFFICER[o.name]).toBe(byCode[o.code]);
+		expect(new Set(Object.values(VOICE_BY_OFFICER)).size).toBe(8);
+	});
+
 	test("officer codes are unique", () => {
 		expect(new Set(BOARD_ROSTER.map((o) => o.code)).size).toBe(8);
 	});

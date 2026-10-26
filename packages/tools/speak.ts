@@ -41,6 +41,21 @@ export const SPEAK_VOICES: Readonly<Record<string, { engine: Engine; id: string 
 };
 
 export const DEFAULT_VOICE = "Daniel";
+
+/** Voices shipped by KittenTTS (same list as packages/voice/voice-resolver.ts). */
+const KITTEN_NAMES = ["Bella", "Jasper", "Luna", "Bruno", "Rosie", "Hugo", "Kiki", "Leo"];
+
+/**
+ * A cell pins its officer voice with EIGHT_TTS_VOICE (a KittenTTS voice name).
+ * When set and valid it wins over any requested voice and there is no other-engine
+ * fallback, so an officer never speaks in someone else's voice. Unset or invalid: null.
+ */
+export function pinnedKittenVoice(
+	env: Record<string, string | undefined> = process.env,
+): string | null {
+	const v = env.EIGHT_TTS_VOICE?.trim();
+	return v && KITTEN_NAMES.includes(v) ? v : null;
+}
 export const MAX_SPEAK_CHARS = 2000;
 
 /**
@@ -288,8 +303,9 @@ export async function speak(input: SpeakInput): Promise<SpeakResult> {
 	if (text.length > MAX_SPEAK_CHARS) {
 		throw new Error(`text is ${text.length} chars; the cap is ${MAX_SPEAK_CHARS}`);
 	}
-	const voice = input.voice ?? DEFAULT_VOICE;
-	const pin = SPEAK_VOICES[voice];
+	const cellVoice = pinnedKittenVoice();
+	const voice = cellVoice ?? input.voice ?? DEFAULT_VOICE;
+	const pin = cellVoice ? { engine: "kitten" as Engine, id: cellVoice } : SPEAK_VOICES[voice];
 	if (!pin)
 		throw new Error(
 			`unknown voice "${voice}"; choose one of: ${Object.keys(SPEAK_VOICES).join(", ")}`,
@@ -301,8 +317,9 @@ export async function speak(input: SpeakInput): Promise<SpeakResult> {
 	fs.rmSync(out, { force: true });
 
 	// Preferred engine, then the other engine's default voice (as say-telegram does).
-	const ladder: Array<[Engine, string]> =
-		pin.engine === "supertonic"
+	const ladder: Array<[Engine, string]> = cellVoice
+		? [["kitten", cellVoice]]
+		: pin.engine === "supertonic"
 			? [
 					["supertonic", pin.id],
 					["kitten", "Jasper"],

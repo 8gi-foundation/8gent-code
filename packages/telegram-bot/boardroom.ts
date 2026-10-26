@@ -42,16 +42,16 @@ export const BOARD_ROSTER: Officer[] = [
 	{ code: "8GO", name: "Solomon", agent: "8go-solomon", remit: "policy and audit trail" },
 ];
 
-/** Officer name to KittenTTS voice. Mirrors the Voice Experience Contract map. */
+/** Officer name to KittenTTS voice: 8EO Jasper, 8TO Bruno, 8PO Bella, 8DO Luna, 8SO Rosie, 8CO Hugo, 8MO Kiki, 8GO Leo. */
 export const VOICE_BY_OFFICER: Record<string, string> = {
 	James: "Jasper",
-	Rishi: "Hugo",
+	Rishi: "Bruno",
 	Samantha: "Bella",
 	Moira: "Luna",
-	Karen: "Kiki",
-	Luis: "Leo",
-	Zara: "Rosie",
-	Solomon: "Bruno",
+	Karen: "Rosie",
+	Luis: "Hugo",
+	Zara: "Kiki",
+	Solomon: "Leo",
 };
 
 export type OfficerStatus = "pending" | "thinking" | "done" | "failed" | "timeout";
@@ -123,7 +123,11 @@ function elapsed(ms?: number): string {
 }
 
 function firstLine(text: string, max: number): string {
-	const line = text.trim().split("\n").find((l) => l.trim().length > 0) ?? "";
+	const line =
+		text
+			.trim()
+			.split("\n")
+			.find((l) => l.trim().length > 0) ?? "";
 	const clean = line.replace(/[*_`]/g, "").trim();
 	return clean.length > max ? `${clean.slice(0, max - 3)}...` : clean || "reported";
 }

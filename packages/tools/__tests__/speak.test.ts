@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { SPEAK_VOICES, speak, wavDurationSec } from "../speak";
+import { SPEAK_VOICES, pinnedKittenVoice, speak, wavDurationSec } from "../speak";
 
 let dir: string;
 const saved = { ...process.env };
@@ -56,10 +56,34 @@ describe("speak", () => {
 		expect(r.path.endsWith("k.wav")).toBe(true);
 	});
 
+	posixTest(
+		"EIGHT_TTS_VOICE pins a Kitten voice, ignores the requested voice, no Supertonic fallback",
+		async () => {
+			process.env.EIGHT_TTS_VOICE = "Kiki";
+			process.env.EIGHT_SUPERTONIC_BIN = stub("st");
+			process.env.EIGHT_KITTEN_PY = stub("py");
+			const r = await speak({ text: "hello", voice: "Zara", out: path.join(dir, "p.wav") });
+			expect(r.engine).toBe("kitten");
+			expect(r.voice).toBe("Kiki");
+			process.env.EIGHT_KITTEN_PY = "/nonexistent";
+			await expect(
+				speak({ text: "hello", voice: "Zara", out: path.join(dir, "q.wav") }),
+			).rejects.toThrow(/no local neural TTS/);
+		},
+	);
+
+	test("pinnedKittenVoice accepts only Kitten names", () => {
+		expect(pinnedKittenVoice({ EIGHT_TTS_VOICE: "Rosie" })).toBe("Rosie");
+		expect(pinnedKittenVoice({ EIGHT_TTS_VOICE: "Zara" })).toBeNull();
+		expect(pinnedKittenVoice({})).toBeNull();
+	});
+
 	test("fails loudly when neither engine is installed, writes nothing", async () => {
 		process.env.EIGHT_SUPERTONIC_BIN = "/nonexistent";
 		process.env.EIGHT_KITTEN_PY = "/nonexistent";
-		await expect(speak({ text: "hi", out: path.join(dir, "none.wav") })).rejects.toThrow(/no local neural TTS/);
+		await expect(speak({ text: "hi", out: path.join(dir, "none.wav") })).rejects.toThrow(
+			/no local neural TTS/,
+		);
 		expect(fs.existsSync(path.join(dir, "none.wav"))).toBe(false);
 	});
 
