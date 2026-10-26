@@ -14,7 +14,7 @@
  * Mirrors the NotesView "tab takeover" shape for consistency with other utility tabs.
  */
 
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdout } from "ink";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
 // These are the canonical surface for inter-package use; deep imports would
@@ -495,6 +495,9 @@ export function SettingsView({
 	onContextOverride,
 }: SettingsViewProps) {
 	const [settings, setSettings] = useState<Settings>(() => loadSettings());
+	const { stdout } = useStdout();
+	// Under 60 columns a long label wraps whole instead of ending in an ellipsis.
+	const narrow = (stdout?.columns ?? 100) < 60;
 	const [categoryIndex, setCategoryIndex] = useState(0);
 	const [fieldIndex, setFieldIndex] = useState(0);
 	const [ctxRowIndex, setCtxRowIndex] = useState(0);
@@ -899,7 +902,7 @@ export function SettingsView({
 										<Box>
 											<Text color={selected ? "yellow" : undefined}>{selected ? ">" : " "} </Text>
 											<Box flexShrink={1} minWidth={0}>
-												<AppText bold={selected} wrap="truncate-end">
+												<AppText bold={selected} wrap={narrow ? "wrap" : "truncate-end"}>
 													{f.label}
 												</AppText>
 											</Box>
