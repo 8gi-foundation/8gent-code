@@ -640,6 +640,26 @@ export function fitFooterToast(
 	return null;
 }
 
+/**
+ * A notice takes the hint slot for two seconds. What stays beside it is whole
+ * or absent: segments that fit in the room it leaves, else none, so the row
+ * never shows "mode Pl" cut under it. A notice wider than the row ends in an
+ * ellipsis instead of overflowing.
+ */
+export function fitFooterNotice(
+	all: FooterSegment[],
+	width: number,
+	notice: string,
+	leading = false,
+): { text: string; segments: FooterSegment[] } {
+	const text =
+		notice.length > width - 1 ? `${notice.slice(0, Math.max(0, width - 2))}\u2026` : notice;
+	const room = width - text.length - HINTS_MARGIN;
+	const fitted = room > 0 ? fitFooterSegments(all, room, leading) : [];
+	const segments = fitted.length > 0 && segmentsWidth(fitted, leading) <= room ? fitted : [];
+	return { text, segments };
+}
+
 /** Click spans for the footer row (#3239): the segment keys and the hint caps. */
 export function footerClickSpans(
 	segments: FooterSegment[],
@@ -699,11 +719,8 @@ export function StatusSegments({
 	const toastFit = toast ? fitFooterToast(all, width, toast, leading) : null;
 	const row = fitFooterRow(all, width, leading, dj);
 	// A notice takes the hint slot, so no hint is at stake: every segment that fits shows.
-	const segments = toastFit
-		? toastFit.segments
-		: notice
-			? fitFooterSegments(all, width, leading)
-			: row.segments;
+	const noticeFit = !toastFit && notice ? fitFooterNotice(all, width, notice, leading) : null;
+	const segments = toastFit ? toastFit.segments : noticeFit ? noticeFit.segments : row.segments;
 	const hints = toastFit || notice ? [] : row.hints;
 	const segRef = useRef(null);
 	const hintRef = useRef(null);
@@ -742,7 +759,7 @@ export function StatusSegments({
 				</Box>
 			) : notice ? (
 				<Box flexShrink={0}>
-					<Text color={theme.color.textSecondary}>{notice}</Text>
+					<Text color={theme.color.textSecondary}>{noticeFit?.text ?? notice}</Text>
 				</Box>
 			) : null}
 			{hints.length > 0 ? (
