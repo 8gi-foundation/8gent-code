@@ -7464,7 +7464,8 @@ export function App({
 								cliProviderRequestedRef.current !== undefined &&
 								currentProvider === cliProviderRequestedRef.current;
 							if (ready?.state === "none") {
-								const guide = () => addSystemMessage(guidanceText(undefined, ready.reason));
+								const guide = () =>
+									addSystemMessage(guidanceText(undefined, ready.reason, inkStdout?.columns));
 								if (pinned) guide();
 								// Local provider down and one hosted key: switch, say so once, and
 								// still show the list so the person can change it (#4720).

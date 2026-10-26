@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { providerKeyStatus, unreachableLine } from "./no-provider-guidance.js";
+import {
+	guidanceCopy,
+	guidanceText,
+	providerKeyStatus,
+	unreachableLine,
+} from "./no-provider-guidance.js";
 
 describe("providerKeyStatus", () => {
 	const lookup =
@@ -54,5 +59,24 @@ describe("unreachableLine", () => {
 		expect(unreachableLine("Ollama", "127.0.0.1:11434", "no models")).toBe(
 			"Ollama at 127.0.0.1:11434 has no models yet.",
 		);
+	});
+});
+
+describe("guidanceText at a narrow width", () => {
+	test("wrapped rows hang under their own line, none lands flush left", () => {
+		const text = guidanceText(
+			guidanceCopy("darwin"),
+			"Ollama at http://127.0.0.1:11434 did not answer.",
+			40,
+		);
+		for (const row of text.split("\n")) {
+			expect(row.length <= 40 || !row.includes(" ")).toBe(true);
+		}
+		const flush = text.split("\n").filter((r) => !/^( |NO MODEL|Ollama at|\d\. )/.test(r));
+		expect(flush).toEqual([]);
+	});
+	test("a wide terminal leaves the text as it was", () => {
+		const copy = guidanceCopy("darwin");
+		expect(guidanceText(copy, null, 200)).toBe(guidanceText(copy, null));
 	});
 });

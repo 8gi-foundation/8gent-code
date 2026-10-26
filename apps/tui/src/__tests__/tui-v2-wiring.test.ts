@@ -483,7 +483,7 @@ describe("readiness wiring in app.tsx (#3290)", () => {
 		expect(strip.slice(0, strip.indexOf("/>"))).toContain("readiness={readiness}");
 		// The full guide is behind /provider, never a standing card (small screens).
 		expect(app).not.toMatch(/<NoProviderNotice/);
-		expect(app).toContain("guidanceText(undefined, ready.reason)");
+		expect(app).toContain("guidanceText(undefined, ready.reason, inkStdout?.columns)");
 		expect(app).toContain('route={readiness.model || "-"}');
 	});
 });

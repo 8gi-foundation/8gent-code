@@ -142,12 +142,40 @@ export function guidanceCopy(platform: NodeJS.Platform = process.platform): Guid
  * shown on request only, never as a standing card, so it cannot crowd the
  * onboarding conversation on a phone-sized terminal.
  */
-export function guidanceText(copy: GuidanceCopy = guidanceCopy(), reason?: string | null): string {
+export function guidanceText(
+	copy: GuidanceCopy = guidanceCopy(),
+	reason?: string | null,
+	columns?: number,
+): string {
 	const lines = [`${copy.label}: ${copy.lead}`];
 	if (reason) lines.push(reason);
 	for (const path of copy.paths) {
 		lines.push(`${path.n}. ${path.title}`);
 		for (const step of path.steps) lines.push(`   ${step}`);
 	}
-	return lines.join("\n");
+	if (!columns) return lines.join("\n");
+	return lines.map((line) => hangWrap(line, columns)).join("\n");
+}
+
+/**
+ * Word-wrap one line to `columns`, indenting each continuation two cells past
+ * the line's own indent, so a wrapped step still reads as part of its step
+ * instead of landing at column 0 like a new item. Words longer than the row
+ * (a URL) stay whole; the terminal breaks them.
+ */
+export function hangWrap(line: string, columns: number): string {
+	if (line.length <= columns) return line;
+	const lead = /^ */.exec(line)?.[0] ?? "";
+	const hang = `${lead}  `;
+	const out: string[] = [];
+	let cur = lead;
+	for (const word of line.trimStart().split(" ")) {
+		const next = cur.trim() === "" ? cur + word : `${cur} ${word}`;
+		if (next.length > columns && cur.trim() !== "") {
+			out.push(cur);
+			cur = hang + word;
+		} else cur = next;
+	}
+	out.push(cur);
+	return out.join("\n");
 }
