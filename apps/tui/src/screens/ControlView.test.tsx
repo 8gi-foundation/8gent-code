@@ -149,4 +149,35 @@ describe("Control tab", () => {
 		expect(frame).not.toContain("…");
 		app.unmount();
 	});
+
+	test("long names and stages show whole at 100 columns; at 40 every cut ends in an ellipsis", async () => {
+		const jobs = path.join(home, ".8gent", "jobs");
+		fs.mkdirSync(jobs, { recursive: true });
+		fs.writeFileSync(
+			path.join(jobs, "a.json"),
+			JSON.stringify({
+				name: "nightly-eval-benchmark-loop",
+				state: "running",
+				stage: "awaiting second read",
+				last: "2h",
+			}),
+		);
+		for (const [cols, whole] of [
+			[100, true],
+			[40, false],
+		] as const) {
+			const { out, stdin, stdout } = fakeTty();
+			stdout.columns = cols;
+			const app = render(<ControlView visible={true} onClose={() => {}} />, {
+				stdout: stdout as unknown as NodeJS.WriteStream,
+				stdin,
+				patchConsole: false,
+			});
+			await tick(150);
+			const frame = strip(out.text);
+			expect(frame.includes("nightly-eval-benchmark-loop awaiting second read")).toBe(whole);
+			if (!whole) expect(frame).toContain("…");
+			app.unmount();
+		}
+	});
 });

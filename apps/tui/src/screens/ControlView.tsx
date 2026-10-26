@@ -54,7 +54,14 @@ export function groupRows(rows: readonly LoopRow[]): {
 }
 
 function pad(s: string, n: number): string {
-	return s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length);
+	if (s.length <= n) return s + " ".repeat(n - s.length);
+	// A cut is shown, never silent: the last cell is an ellipsis.
+	return n > 1 ? `${s.slice(0, n - 1)}…` : s.slice(0, n);
+}
+
+/** Widest value in a column, so a column only cuts when the row truly cannot fit it. */
+function widest(values: readonly string[]): number {
+	return values.reduce((m, v) => Math.max(m, v.length), 0);
 }
 
 export function ControlView({ visible, onClose }: ControlViewProps) {
@@ -86,13 +93,19 @@ export function ControlView({ visible, onClose }: ControlViewProps) {
 	if (!visible) return null;
 	if (!snap) return <Text color={t.textTertiary}>CONTROL reading...</Text>;
 
-	const nameW = Math.min(24, Math.max(12, Math.floor(cols / 4)));
 	const narrow = cols < 60;
-	// Narrow: no next column; the reason moves to its own line so it is never cut away.
-	const stageW = narrow
-		? Math.max(8, cols - 2 - 2 - nameW - 1 - 1 - 6)
-		: Math.min(18, Math.max(8, Math.floor(cols / 6)));
 	const nextW = Math.min(12, Math.max(8, ...grouped.flat.map((r) => (r.next ?? "-").length)));
+	// Rows: marker 2 + name + stage + last 6 (+ next) + gaps, inside 2 cells of padding.
+	const fixed = 2 + 2 + 6 + (narrow ? 2 : 3 + nextW);
+	const room = Math.max(20, cols - fixed);
+	const nameWant = widest(grouped.flat.map((r) => r.name));
+	const stageWant = widest(grouped.flat.map((r) => r.stage));
+	// Narrow: the name keeps 12 cells and the stage gets the rest, as before; the cut is now marked.
+	const nameW = narrow
+		? Math.min(nameWant, 12)
+		: Math.max(12, Math.min(nameWant, Math.floor(room * 0.55), 32));
+	// Narrow: no next column; the reason moves to its own line so it is never cut away.
+	const stageW = Math.max(8, Math.min(stageWant, room - nameW));
 	let index = -1;
 
 	return (
