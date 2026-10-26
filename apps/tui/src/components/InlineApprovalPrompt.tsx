@@ -25,6 +25,9 @@ const NARROW_VERBS: Record<string, string> = { Y: "yes", N: "no" };
 /** Cells a full card spends beside its keys: border and padding. */
 const CARD_CHROME = 4;
 
+const capsSpan = (caps: CapSpec[]) =>
+	caps.reduce((n, c) => n + (c.gap ?? 0) + cellWidth(keyCapText(c.cap, c.verb)), 0);
+
 /**
  * The key row for a card `width` cells wide, always on ONE row (a wrapped row
  * splits "[S]" from "skip" and breaks the click spans): full verbs with the
@@ -38,8 +41,7 @@ export function approvalCaps(width: number, gate = false): CapSpec[] {
 			verb: narrow ? (NARROW_VERBS[cap] ?? verb) : verb,
 			gap: i > 0 ? gap : 0,
 		}));
-	const span = (caps: CapSpec[]) =>
-		caps.reduce((n, c) => n + (c.gap ?? 0) + cellWidth(keyCapText(c.cap, c.verb)), 0);
+	const span = capsSpan;
 	const tiers = [
 		build(false, KEY_CAP_GAP.length),
 		build(false, 1),
@@ -47,6 +49,47 @@ export function approvalCaps(width: number, gate = false): CapSpec[] {
 		build(true, 1),
 	];
 	return tiers.find((c) => span(c) <= width) ?? tiers[tiers.length - 1];
+}
+
+/**
+ * The compact card's keys as rows of whole caps. One row when any tier of
+ * approvalCaps fits; below that (a 30 column phone) two rows, Y/N over E/S,
+ * so no cap is ever cut from its verb. Pure.
+ */
+export function approvalCapRows(width: number, gate = false): CapSpec[][] {
+	const one = approvalCaps(width, gate);
+	const span = capsSpan;
+	if (span(one) <= width || one.length < 3) return [one];
+	const rows = [one.slice(0, 2), one.slice(2)].map((r) =>
+		r.map((c, i) => ({ ...c, gap: i > 0 ? 2 : 0 })),
+	);
+	return rows;
+}
+
+/** Cells of command a compact card keeps beside its keys before they drop to their own row. */
+const COMPACT_MIN_TARGET = 12;
+
+/**
+ * The compact card's keys, right aligned. Beside the command when the command
+ * keeps a readable stretch of the row; otherwise on a row of their own
+ * (width 100% makes the row wrap), Y/N over E/S if even one row is too wide.
+ */
+function CompactKeys({ gate, reason }: { gate?: boolean; reason?: string }) {
+	const { stdout } = useStdout();
+	const inner = (stdout?.columns ?? 80) - CARD_CHROME;
+	const rows = approvalCapRows(inner, gate);
+	const keysWidth = Math.max(...rows.map((r) => capsSpan(r)));
+	const askWidth = 3 + 1 + (reason ? cellWidth(reason) + 1 : 0);
+	const ownRow = rows.length > 1 || keysWidth + 1 + askWidth + COMPACT_MIN_TARGET > inner;
+	return (
+		<Box flexDirection="column" alignItems="flex-end" width={ownRow ? "100%" : undefined}>
+			{rows.map((caps) => (
+				// sharedGap 0: the cells between caps hit nothing. A gap click must
+				// never approve; a miss here does nothing and the user aims again.
+				<KeyCapRow key={caps[0].cap} caps={caps} idPrefix="card" z={10} sharedGap={0} />
+			))}
+		</Box>
+	);
 }
 
 /** The full card's key row, sized to the screen it is drawn on. */
@@ -148,8 +191,11 @@ export function InlineApprovalPrompt({ target, reason, full, gate }: InlineAppro
 			marginTop={1}
 			flexShrink={0}
 			justifyContent="space-between"
+			flexWrap="wrap"
 		>
-			<Box minWidth={0}>
+			{/* marginRight: a cut command never touches the first key cap. The keys take
+			    100% width (their own row) when the command would be squeezed. */}
+			<Box minWidth={0} marginRight={1} flexGrow={1} flexBasis={0}>
 				{/* Margin, not a trailing space: Ink trims trailing whitespace when
 				    the truncated target squeezes the row, which rendered "ASKcd". */}
 				<Box flexShrink={0} marginRight={1}>
@@ -166,14 +212,7 @@ export function InlineApprovalPrompt({ target, reason, full, gate }: InlineAppro
 					{target}
 				</Text>
 			</Box>
-			{/* sharedGap 0: the cells between caps hit nothing. A gap click must
-			    never approve; a miss here does nothing and the user aims again. */}
-			<KeyCapRow
-				caps={(gate ? YOLO_GATE_KEYS : APPROVAL_KEYS).map(([cap, verb]) => ({ cap, verb }))}
-				idPrefix="card"
-				z={10}
-				sharedGap={0}
-			/>
+			<CompactKeys gate={gate} reason={reason} />
 		</Box>
 	);
 }
