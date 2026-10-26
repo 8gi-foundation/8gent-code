@@ -105,3 +105,20 @@ describe("redact: bounded time", () => {
 		expect(performance.now() - t0).toBeLessThan(500);
 	});
 });
+
+describe("bot tokens and env-style secrets", () => {
+	test("redacts a Telegram bot token, also inside a URL", () => {
+		const t = "123456789:AAEhBOweik6ad9r_QXv45nQSzIuPDwF9wQy";
+		expect(redact(`x ${t} y`)).not.toContain(t);
+		expect(redact(`https://api.telegram.org/bot${t}/getMe`)).not.toContain("AAEhBOwe");
+	});
+	test("redacts the value of a secret-named env line, keeps the name", () => {
+		const out = redact("DB_PASSWORD=p4ss\nMY_API_KEY: abc123");
+		expect(out).toContain("DB_PASSWORD=[REDACTED_SECRET]");
+		expect(out).not.toContain("p4ss");
+		expect(out).not.toContain("abc123");
+	});
+	test("leaves ordinary prose alone", () => {
+		expect(redact("the key idea: keep it simple")).toBe("the key idea: keep it simple");
+	});
+});

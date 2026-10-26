@@ -612,10 +612,11 @@ export {
 	taskFailedKeyboard,
 	approvalKeyboard,
 	confirmKeyboard,
+	runStatusKeyboard,
 	safeData,
 	parseCallbackData,
 	CB_PREFIX,
 } from "./keyboards";
 
-export { TelegramBridgeAdapter } from "./bridge-adapter";
+export { TelegramBridgeAdapter, traceVisibleFor } from "./bridge-adapter";
 export type { BridgeAdapterConfig } from "./bridge-adapter";

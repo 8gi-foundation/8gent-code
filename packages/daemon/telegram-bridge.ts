@@ -37,7 +37,12 @@ import {
 } from "../flow/flow-mode";
 import { MEMORY_COMMANDS, TelegramMemory } from "../memory/telegram-memory";
 import { withRedirectHint } from "../providers/redirect-hint";
-import { DaemonClient, SessionStore, TelegramBridgeAdapter } from "../telegram-bot";
+import {
+	DaemonClient,
+	SessionStore,
+	TelegramBridgeAdapter,
+	traceVisibleFor,
+} from "../telegram-bot";
 import {
 	BOARD_ROSTER,
 	VOICE_BY_OFFICER,
@@ -1129,6 +1134,7 @@ class TelegramDaemonBridge {
 					telegramToken: this.config.telegramToken,
 					resolveChatId: () => this.replyChat(),
 					resolveThreadId: () => this.boundThread(),
+					showTrace: () => traceVisibleFor(this.replyChat()),
 					onTurnEnd: () => this.endGroupVoiceTurn(),
 					daemon: this.daemonClient,
 					sessionStore: this.sessionStore,
@@ -2426,8 +2432,9 @@ class TelegramDaemonBridge {
 		// it as steps complete, and sends final files automatically.
 		if (this.multiStepEnabled && this.adapter) {
 			try {
-				if (memoryPrefix) await this.adapter.handleUserMessage(text, memoryPrefix);
-				else await this.adapter.handleUserMessage(text);
+				// The sender is the run's starter: only they may press its Cancel and Show steps.
+				const starter = { fromId: sender?.fromId, chatType: sender?.chatType };
+				await this.adapter.handleUserMessage(text, memoryPrefix || undefined, starter);
 			} catch (err) {
 				console.error(
 					"[telegram-bridge] adapter error, falling back to legacy:",
@@ -3000,6 +3007,30 @@ class TelegramDaemonBridge {
 		}
 
 		const data = query.data || "";
+		// Run status buttons (Cancel, Show steps) belong to whoever started the run, not to the
+		// operator role: the adapter checks the presser and answers anyone else privately.
+		if (this.adapter) {
+			const parsed = parseCallbackData(data);
+			if (parsed.prefix === CB_PREFIX.runCancel || parsed.prefix === CB_PREFIX.runSteps) {
+				const result = await this.adapter.handleRunCallback(parsed.prefix, parsed.payload, {
+					fromId: query.from?.id,
+					chatType: query.message?.chat?.type,
+					// Explicit operators only: the "no operators configured" fallback of isOperator is not a role.
+					operator:
+						typeof query.from?.id === "number" &&
+						(this.config.operatorUserIds ?? []).includes(String(query.from.id)),
+				});
+				await fetch(`${TELEGRAM_API}${this.config.telegramToken}/answerCallbackQuery`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						callback_query_id: query.id,
+						...(result.text ? { text: result.text, show_alert: result.alert === true } : {}),
+					}),
+				}).catch(() => {});
+				return;
+			}
+		}
 		// Consent is narrower than conversation: an allowlisted agent may be
 		// mid-exchange in this room and still have no business approving a
 		// tool call on the operator's machine.

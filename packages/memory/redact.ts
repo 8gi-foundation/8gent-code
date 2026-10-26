@@ -37,6 +37,13 @@ const PATTERNS: Array<[RegExp, string]> = [
 	[/(?<![A-Za-z0-9_])[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/g, "[REDACTED_STRIPE_KEY]"],
 	// Bearer tokens (an HTTP Authorization header pasted into text)
 	[/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi, "$1[REDACTED_BEARER_TOKEN]"],
+	// Telegram bot tokens: <digits>:<35-ish url-safe chars>, also inside a /bot<token>/ URL
+	[/\d+:[A-Za-z0-9_-]{30,}/g, "[REDACTED_BOT_TOKEN]"],
+	// .env style lines: a secret-like name (KEY, TOKEN, SECRET, PASSWORD...) with a value
+	[
+		/\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)[A-Za-z0-9_]*)(\s*[=:]\s*)(?!\[REDACTED)[^\s'"]+/g,
+		"$1$2[REDACTED_SECRET]",
+	],
 	// Credentials inside a URL: scheme://user:pass@host keeps scheme and host
 	[/(?<=:\/\/)[^\s/:@]{1,256}:[^\s/@]{1,256}(?=@)/g, "[REDACTED_URL_CREDENTIALS]"],
 ];

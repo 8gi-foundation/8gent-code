@@ -24,6 +24,10 @@ and code, and per-chat session continuity that survives bot restarts.
 | `packages/telegram-bot/bridge-adapter.ts` | The glue. Translates daemon events into TaskRunner state changes. |
 | `packages/daemon/telegram-bridge.ts` | Production bridge - wires the adapter into the long-poll loop. |
 
+## Trace on or off
+
+The task card (one line per tool call) shows in a private chat and is hidden in a group. `EIGHT_TG_TRACE=on|off` overrides either way. When hidden the room sees a typing indicator while the work runs, then the final text as a plain reply (an error is one plain line). Pure rule: `traceVisibleFor` in `packages/telegram-bot/bridge-adapter.ts`.
+
 ## Lifecycle (multi-step path)
 
 ```

@@ -14,6 +14,8 @@ export const CB_PREFIX = {
 	taskRetry: "tr",
 	taskNew: "tn",
 	taskFiles: "tf",
+	runCancel: "rc",
+	runSteps: "rs",
 	approve: "ok",
 	deny: "no",
 	confirm: "cf",
@@ -92,4 +94,19 @@ export function confirmKeyboard(token: string): InlineKeyboardMarkup {
 			],
 		],
 	};
+}
+
+/** Status-message buttons: Cancel while the run is live, Show steps while it is live or within its retention. */
+export function runStatusKeyboard(
+	runId: string,
+	opts: { cancel: boolean; steps: boolean },
+	/** Rows kept under the run row: Continue / New task / Resend files, or Retry / Drop. */
+	extraRows: InlineKeyboardMarkup["inline_keyboard"] = [],
+): InlineKeyboardMarkup {
+	const row: InlineKeyboardMarkup["inline_keyboard"][number] = [];
+	if (opts.cancel)
+		row.push({ text: "Cancel", callback_data: safeData(CB_PREFIX.runCancel, runId) });
+	if (opts.steps)
+		row.push({ text: "Show steps", callback_data: safeData(CB_PREFIX.runSteps, runId) });
+	return { inline_keyboard: [...(row.length ? [row] : []), ...extraRows] };
 }

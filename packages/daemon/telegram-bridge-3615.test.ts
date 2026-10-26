@@ -330,6 +330,51 @@ describe("F1: non-operator prompts never reach the operator's session", () => {
 		}
 		expect(hits).toEqual([]);
 	});
+
+	test("run status buttons go to the adapter with the presser's identity, before the operator gate", async () => {
+		const { a, hits } = spied();
+		const calls: unknown[] = [];
+		a.adapter.handleRunCallback = async (prefix: string, id: string, who: unknown) => {
+			calls.push([prefix, id, who]);
+			return { text: "Only the person who started this can stop it.", alert: true };
+		};
+		await a.handleCallbackQuery({
+			id: "c",
+			from: { id: ARTALE },
+			data: "rc:run1",
+			message: { message_id: 1, chat: { id: GROUP, type: "supergroup" } },
+		});
+		expect(calls).toEqual([
+			["rc", "run1", { fromId: ARTALE, chatType: "supergroup", operator: false }],
+		]);
+		// The old operator-only cancel path was not touched.
+		expect(hits).toEqual([]);
+	});
+
+	test("an operator pressing a run's Cancel is passed to the adapter as operator", async () => {
+		const { a } = spied();
+		const calls: unknown[] = [];
+		a.adapter.handleRunCallback = async (prefix: string, id: string, who: unknown) => {
+			calls.push([prefix, id, who]);
+			return {};
+		};
+		await a.handleCallbackQuery({
+			id: "c",
+			from: { id: JAMES },
+			data: "rc:run1",
+			message: { message_id: 1, chat: { id: GROUP, type: "supergroup" } },
+		});
+		expect(calls).toEqual([
+			["rc", "run1", { fromId: JAMES, chatType: "supergroup", operator: true }],
+		]);
+	});
+
+	test("/cancel and /unstick from the operator still call cancelCurrent", async () => {
+		const { a, hits } = spied();
+		await a.handleTelegramMessage("/cancel", GROUP, group(JAMES));
+		await a.handleTelegramMessage("/unstick", GROUP, group(JAMES));
+		expect(hits.filter((h) => h === "cancel").length).toBe(2);
+	});
 });
 
 describe("F3 F4 F5", () => {
