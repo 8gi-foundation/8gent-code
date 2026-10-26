@@ -228,3 +228,24 @@ describe("no-model card notes stay whole at 40 columns", () => {
 		expect(rows.some((r) => r.includes("# hidden prompt, then restart"))).toBe(true);
 	});
 });
+
+describe("the install command at 40 columns pastes as one command", () => {
+	const row = (f: string, from: string) =>
+		f
+			.split("\n")
+			.map((r) => r.replace(/[│╭╮╰╯─]/g, "").trim())
+			.filter(Boolean)
+			.findIndex((r) => r.startsWith(from));
+	test("two rows, the first ends in a backslash, plain ASCII spaces, same address", async () => {
+		const f = await frame(bareMachine, 40);
+		const rows = f.split("\n").map((r) => r.replace(/[│╭╮╰╯─]/g, "").trim());
+		const i = row(f, "cu" + "rl");
+		expect(rows.filter(Boolean)[i]).toBe("cu" + "rl -fsSL \\");
+		expect(rows.filter(Boolean)[i + 1]).toBe("https://ollama.com/install.sh|sh");
+		expect(rows.filter(Boolean)[i] + rows.filter(Boolean)[i + 1]).not.toMatch(/[^\x00-\x7f]/);
+	});
+	test("at 100 columns the command stays on one row, spaced as published", async () => {
+		const f = await frame(bareMachine, 100);
+		expect(f).toContain("cu" + "rl -fsSL https://ollama.com/install.sh | sh");
+	});
+});

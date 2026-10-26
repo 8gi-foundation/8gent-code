@@ -105,6 +105,23 @@ function withNote(command: string, note: string): string {
 }
 
 /**
+ * A fetch-and-run install line that no longer fits one row, broken where the
+ * shell allows it: the program and flags with a trailing backslash, then the
+ * address and the pipe. Every row is a complete fragment, so the rows paste as
+ * they stand and run as the one command. A soft wrap would cut it into three
+ * rows that paste as three broken commands. Plain ASCII spaces only. The pipe
+ * loses its spaces only when the second row would not fit with them. Anything
+ * else, or a line that fits, comes back as it was.
+ */
+export function fitInstallStep(step: string, room: number): string {
+	if (step.length <= room) return step;
+	const m = /^(curl (?:-\S+ )*)(\S+) \| (\S+)$/.exec(step);
+	if (!m) return step;
+	const spaced = `${m[2]} | ${m[3]}`;
+	return `${m[1]}\\\n${spaced.length <= room ? spaced : `${m[2]}|${m[3]}`}`;
+}
+
+/**
  * The card's words. Commands are the real ones and follow the published docs
  * (8gent.dev models/ollama and models/hosted): the Ollama install script and
  * library tag were checked against ollama.com, and the model and size come

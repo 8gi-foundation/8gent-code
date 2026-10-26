@@ -1,6 +1,6 @@
 import { Box, Text, useStdout } from "ink";
 import React from "react";
-import { type GuidanceCopy, guidanceCopy } from "../lib/no-provider-guidance.js";
+import { type GuidanceCopy, fitInstallStep, guidanceCopy } from "../lib/no-provider-guidance.js";
 import type { Readiness } from "../lib/readiness.js";
 import { t } from "../theme.js";
 
@@ -134,7 +134,9 @@ export function NoProviderCard({
 					</Box>
 					{path.steps.map((step) => (
 						<Box key={step} paddingLeft={3}>
-							<Text color={t[NO_PROVIDER_TONES.step]}>{step}</Text>
+							<Text color={t[NO_PROVIDER_TONES.step]}>
+								{narrow ? fitInstallStep(step, columns - 4 - 3) : step}
+							</Text>
 						</Box>
 					))}
 				</Box>
