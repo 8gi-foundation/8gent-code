@@ -71,6 +71,17 @@ function sanitizeTabTitle(title: string): string {
 	return title;
 }
 
+/**
+ * A trailing "(source)" tag such as "(pi-mono)". When several tabs share the
+ * same title the tag repeats on each one and costs the bar room, and the tab
+ * number already tells them apart, so the tag is dropped from the repeats.
+ */
+function dropRepeatedTag(titles: string[]): string[] {
+	const seen = new Map<string, number>();
+	for (const x of titles) seen.set(x, (seen.get(x) ?? 0) + 1);
+	return titles.map((x) => ((seen.get(x) ?? 0) > 1 ? x.replace(/\s*\([^)]*\)$/, "") || x : x));
+}
+
 interface TabBarProps {
 	tabs: WorkspaceTab[];
 	onSwitch: (tabId: string) => void;
@@ -387,6 +398,7 @@ export function TabBar({
 	const activeTab = visibleTabs.find((tab) => tab.active);
 	const lampFrames = useLampFrames(states, activeTab?.id ?? null, animate);
 
+	const shownTitles = dropRepeatedTag(visibleTabs.map((tab) => sanitizeTabTitle(tab.title)));
 	const fullCells: TabCell[] = visibleTabs.map((tab, i) => {
 		const badge = tab.badge && tab.badge > 0 ? ` (${tab.badge})` : "";
 		const grouped = groups.some((g) => g.tabIds.includes(tab.id)) ? " +" : "";
@@ -401,7 +413,7 @@ export function TabBar({
 			: { num: `${i + 1}] ` };
 		return {
 			...shape,
-			title: compact && !tab.active ? "" : `${sanitizeTabTitle(tab.title)}${badge}${grouped}`,
+			title: compact && !tab.active ? "" : `${shownTitles[i]}${badge}${grouped}`,
 			active: tab.active,
 			grabbed: dragging && grabbedTabId === tab.id,
 			// An idle tab is dark: no glyph at rest. The lamp comes after the
