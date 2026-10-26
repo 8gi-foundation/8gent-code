@@ -101,6 +101,30 @@ function countCells(tasks: ReadonlyArray<Task>): Array<[number, string]> {
 	return cells.filter(([n]) => n > 0);
 }
 
+/** Rows the task being worked on may take; the rest of the list keeps one row each. */
+const ACTIVE_ROWS = 3;
+
+/** Greedy word wrap to `width` cells, at most `rows` rows, the last ending in an ellipsis if cut. */
+export function wrapSubject(subject: string, width: number, rows: number): string[] {
+	const lines: string[] = [];
+	let line = "";
+	for (const word of subject.split(/\s+/).filter(Boolean)) {
+		const w = word.length > width ? `${word.slice(0, width - 1)}…` : word;
+		if (line && line.length + 1 + w.length > width) {
+			lines.push(line);
+			line = w;
+		} else {
+			line = line ? `${line} ${w}` : w;
+		}
+	}
+	if (line) lines.push(line);
+	if (lines.length <= rows) return lines;
+	const kept = lines.slice(0, rows);
+	const last = kept[rows - 1];
+	kept[rows - 1] = `${last.length >= width ? last.slice(0, width - 1) : last}…`;
+	return kept;
+}
+
 export function PlanRail({
 	tasks,
 	limit = 8,
@@ -129,6 +153,23 @@ export function PlanRail({
 								? `${task.subject.slice(0, subjectMax - 1)}…`
 								: task.subject;
 						const dim = isStaleCompleted(task);
+						if (task.status === "in_progress") {
+							const lines = wrapSubject(task.subject, subjectMax, ACTIVE_ROWS);
+							return (
+								<Box key={task.id} flexShrink={0}>
+									<Box width={2} flexShrink={0}>
+										<Text color={color}>{icon} </Text>
+									</Box>
+									<Box flexDirection="column">
+										{lines.map((l) => (
+											<Text key={l} color={t.textPrimary}>
+												{l}
+											</Text>
+										))}
+									</Box>
+								</Box>
+							);
+						}
 						return (
 							<Box key={task.id}>
 								<Text color={color}>{icon} </Text>

@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import type { Task } from "../../../../../packages/tasks/index.js";
-import { PlanRail, type PlanRailProps } from "../PlanRail.js";
+import { PlanRail, type PlanRailProps, wrapSubject } from "../PlanRail.js";
 
 function mkTask(overrides: Partial<Task> = {}): Task {
 	const now = new Date().toISOString();
@@ -155,5 +155,27 @@ describe("PlanRail counts", () => {
 		expect(text).not.toContain("0 blocked");
 		expect(text).not.toContain("0 done today");
 		expect(text).not.toContain("·");
+	});
+
+	test("the task being worked on wraps to three rows instead of being cut at one", () => {
+		const subject = "Wire the daemon reconnect backoff into the TUI";
+		const text = collectText(render({ tasks: [mkTask({ subject, status: "in_progress" })] }));
+		expect(text.join(" ")).toContain("reconnect backoff");
+		expect(text.join(" ")).toContain("into the TUI");
+		expect(wrapSubject(subject, 20, 3)).toEqual([
+			"Wire the daemon",
+			"reconnect backoff",
+			"into the TUI",
+		]);
+		expect(wrapSubject(subject, 14, 3).at(-1)?.endsWith("…")).toBe(true);
+	});
+
+	test("pending tasks stay on one row", () => {
+		const text = collectText(
+			render({
+				tasks: [mkTask({ subject: "Add a test for the stale session reaper", status: "pending" })],
+			}),
+		).join(" ");
+		expect(text).toContain("Add a test for the …");
 	});
 });
