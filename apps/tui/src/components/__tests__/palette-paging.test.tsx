@@ -79,3 +79,9 @@ test("PageDown stops on the last command", async () => {
 	const end = await press("\x1b[6~", 20);
 	expect(end).toContain("◆ /c39");
 });
+
+test("the more lines name the paging key, and the list stays the same height", async () => {
+	const mid = await press("\x1b[B", 14);
+	expect(mid).toContain("more · PgUp");
+	expect(mid).toContain("more · PgDn");
+});

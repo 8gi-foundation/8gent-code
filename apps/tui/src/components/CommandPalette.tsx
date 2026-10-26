@@ -364,7 +364,7 @@ export function CommandPaletteView({
 				<Box>
 					<Text color={t.textTertiary}>
 						{"  "}
-						{arrowUp} {hiddenAbove} more
+						{arrowUp} {hiddenAbove} more{" \u00b7 PgUp"}
 					</Text>
 				</Box>
 			) : null}
@@ -438,7 +438,7 @@ export function CommandPaletteView({
 				<Box>
 					<Text color={t.textTertiary}>
 						{"  "}
-						{arrowDown} {hiddenBelow} more
+						{arrowDown} {hiddenBelow} more{" \u00b7 PgDn"}
 					</Text>
 				</Box>
 			) : null}
