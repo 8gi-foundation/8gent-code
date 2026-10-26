@@ -700,6 +700,11 @@ export function CommandInput({
 			)}
 
 			{/* Slash command help */}
+			{!isProcessing && showSlashHelp && slashRows.length === 0 && slashFilter !== "" && (
+				<Text color={t.textTertiary} wrap="truncate-end">
+					{slashNoMatchLine(slashFilter)}
+				</Text>
+			)}
 			{!isProcessing && showSlashHelp && (
 				<SlashCommandHelp
 					rows={slashRows}
@@ -938,6 +943,12 @@ export function slashEnterAction(
 	if (distinct.length === 1 && !SLASH_NEVER_FROM_PREFIX.has(only.builtInName ?? only.name))
 		return { kind: "run", name: only.name };
 	return { kind: "keep" };
+}
+
+/** One quiet row when nothing in the registry is near what was typed, so the dead end is named before Enter clears the line. */
+export function slashNoMatchLine(filter: string): string {
+	const word = filter.length > 12 ? `${filter.slice(0, 11)}…` : filter;
+	return `No command /${word}. Try /help.`;
 }
 
 export const SLASH_MENU_ROWS = 14;

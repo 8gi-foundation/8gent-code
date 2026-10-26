@@ -164,3 +164,11 @@ describe("/ menu (#3918 D9)", () => {
 		expect(frame()).toContain("❯ /copy");
 	});
 });
+
+describe("no-match line", () => {
+	test("names the dead end in one row, cut short for long words", async () => {
+		const { slashNoMatchLine } = await import("../command-input.js");
+		expect(slashNoMatchLine("zzq")).toBe("No command /zzq. Try /help.");
+		expect(slashNoMatchLine("a".repeat(30)).length).toBeLessThan(38);
+	});
+});
