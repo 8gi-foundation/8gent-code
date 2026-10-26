@@ -898,11 +898,17 @@ export function SettingsView({
 									<Box key={f.id} flexDirection="column" marginBottom={1}>
 										<Box>
 											<Text color={selected ? "yellow" : undefined}>{selected ? ">" : " "} </Text>
-											<AppText bold={selected}>{f.label}</AppText>
-											<Box flexGrow={1} />
-											<Text color="cyan">
-												{f.kind === "toggle" ? (display === "on" ? "[x]" : "[ ]") : display}
-											</Text>
+											<Box flexShrink={1} minWidth={0}>
+												<AppText bold={selected} wrap="truncate-end">
+													{f.label}
+												</AppText>
+											</Box>
+											<Box flexGrow={1} minWidth={2} />
+											<Box flexShrink={0}>
+												<Text color="cyan" wrap="truncate-end">
+													{f.kind === "toggle" ? (display === "on" ? "[x]" : "[ ]") : display}
+												</Text>
+											</Box>
 										</Box>
 										{selected ? (
 											<Box marginLeft={3}>

@@ -7,5 +7,7 @@ export interface DividerProps {
 }
 
 export const Divider: React.FC<DividerProps> = ({ width = 60, character = "\u2500" }) => (
-	<Text dimColor>{character.repeat(width)}</Text>
+	<Text dimColor wrap="truncate-end">
+		{character.repeat(width)}
+	</Text>
 );
