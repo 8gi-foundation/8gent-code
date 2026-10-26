@@ -145,6 +145,7 @@ import {
 import { GoalClient } from "./lib/goal-client.js";
 import { InProcessGoalTransport } from "./lib/in-process-goal-transport.js";
 import { markIntroSeen, readSeenVersion, shouldShowIntro } from "./lib/intro-gate.js";
+import { useIntroWatchdog } from "./lib/intro-watchdog.js";
 import { messageId } from "./lib/message-id.js";
 import { motionEnabled } from "./lib/motion.js";
 import {
@@ -1172,6 +1173,9 @@ export function App({
 		if (show) markIntroSeen(pkgInfo.version);
 		return show;
 	});
+	// Hard stop for the splash, armed here and not inside it, so a splash that
+	// never mounts or never reads a key cannot hold startup (#4662).
+	useIntroWatchdog(introVisible, () => setIntroVisible(false));
 	// Legacy foreground refs migrated into perTabAgents.{trackPromise,
 	// getPromise, getLabel, clearPromise} - see Ctrl+G handler. Kept these
 	// names removed to make accidental cross-tab leaks compile-fail.
