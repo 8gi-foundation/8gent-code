@@ -58,7 +58,7 @@ export interface CommandPaletteViewProps {
 }
 
 /** The widest the sheet gets, however wide the screen. */
-export const PALETTE_MAX_WIDTH = 64;
+export const PALETTE_MAX_WIDTH = 84;
 /** Below this many columns a command is two lines and the sheet shows five. */
 export const PALETTE_NARROW_COLS = 60;
 const MAX_VISIBLE_ROWS = 10;
@@ -374,15 +374,24 @@ export function CommandPaletteView({
 							</Text>
 						</Box>
 					);
-					const name = (
+					const nameText = (
 						<Text
-							key="name"
+							key="nametext"
 							color={active ? t.orange : t.textPrimary}
 							bold={active}
 							wrap="truncate-end"
 						>
 							{g.narrow ? `/${cmd.name}` : padRight(`/${cmd.name}`, NAME_COL_WIDTH)}
 						</Text>
+					);
+					// Wide: a fixed-width name cell that never shrinks, so a long description
+					// cannot squeeze the name and pull its own column left.
+					const name = g.narrow ? (
+						<Box key="name">{nameText}</Box>
+					) : (
+						<Box key="name" width={NAME_COL_WIDTH} flexShrink={0}>
+							{nameText}
+						</Box>
 					);
 					const desc = (
 						<Text key="desc" color={active ? t.textPrimary : t.textSecondary} wrap="truncate-end">

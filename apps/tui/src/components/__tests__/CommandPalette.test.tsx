@@ -72,8 +72,8 @@ describe("CommandPaletteView", () => {
 		};
 		expect(props.borderStyle).toBe("round");
 		expect(props.flexDirection).toBe("column");
-		// Fits the screen now (#4951): the screen less two, never past 64.
-		expect(props.width).toBe(64);
+		// Fits the screen now (#4951): the screen less two, never past 84 (80 columns gives 78).
+		expect(props.width).toBe(78);
 		expect(props.flexShrink).toBe(0);
 	});
 
