@@ -244,6 +244,17 @@ export function CommandPalette({
 				setActiveIndex((i) => Math.min(Math.max(0, filtered.length - 1), i + 1));
 				return;
 			}
+			// A page is the rows on screen, so one press moves the whole window: with
+			// 90+ commands, Down alone is ~90 presses to the end.
+			if (key.pageUp || key.pageDown) {
+				const page = paletteGeometry(columns, rows).visibleRows;
+				setActiveIndex((i) =>
+					key.pageDown
+						? Math.min(Math.max(0, filtered.length - 1), i + page)
+						: Math.max(0, i - page),
+				);
+				return;
+			}
 			if (key.backspace || key.delete) {
 				setQuery((q) => q.slice(0, -1));
 				return;
