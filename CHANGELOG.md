@@ -9,6 +9,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.38] - 2026-10-26
+
+### Changed
+- command palette PageUp/PageDown move a screenful (87 presses to the end -> 9) ([#5140](https://github.com/8gi-foundation/8gent-code/pull/5140))
+- tab bar keeps the first letters of inactive tabs at narrow widths ([#5137](https://github.com/8gi-foundation/8gent-code/pull/5137))
+
+### Fixed
+- tui: compact approval card keeps its keys whole at phone widths (#5141) ([#5142](https://github.com/8gi-foundation/8gent-code/pull/5142))
+- tui: idle input placeholder fits one row at 40 columns ([#5136](https://github.com/8gi-foundation/8gent-code/pull/5136))
+- tui: approval card key row stays on one row at 40 columns (yes/no fallback) ([#5138](https://github.com/8gi-foundation/8gent-code/pull/5138))
+- tui: empty-state and orchestrator labels read at 5.15:1, not 2.92:1 ([#5134](https://github.com/8gi-foundation/8gent-code/pull/5134))
+
 ## [0.20.37] - 2026-10-26
 
 ### Changed
