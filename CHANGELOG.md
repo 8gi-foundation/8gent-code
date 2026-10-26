@@ -9,6 +9,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.39] - 2026-10-26
+
+### Changed
+- Factory loop slice 1: factory/v1 event log and cell heartbeat ([#5147](https://github.com/8gi-foundation/8gent-code/pull/5147))
+- no-model card wraps its lead under the label at narrow widths ([#5146](https://github.com/8gi-foundation/8gent-code/pull/5146))
+- Control rows size name and stage to content, mark every cut with an ellipsis ([#5144](https://github.com/8gi-foundation/8gent-code/pull/5144))
+- footer notice keeps the status whole or drops it (4 of 8 frames cut mid-word -> 0) ([#5143](https://github.com/8gi-foundation/8gent-code/pull/5143))
+
 ## [0.20.38] - 2026-10-26
 
 ### Changed
