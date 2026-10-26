@@ -79,6 +79,7 @@ import { approvalTtlMs, bridgeSecret } from "./channel-approvals";
 import { getDataDir } from "./data-dir";
 import { classifyInput, gateInput } from "./input-gate";
 import { NO_LINK_PREVIEW } from "./notifications";
+import { greetingText, vesselIdentity } from "./telegram-greeting";
 import { VOICE_ACK, ackForTranscript } from "./voice-ack";
 import { telegramOtherEvent, wakeRouter } from "./wake-wiring";
 
@@ -601,7 +602,7 @@ export const OPERATOR_COMMANDS = [
 ] as const;
 
 /** Commands anyone in the allowlist may use. Everything else starting with "/" is refused. */
-export const OPEN_COMMANDS = ["/status", "/help"] as const;
+export const OPEN_COMMANDS = ["/start", "/status", "/help"] as const;
 
 /**
  * Strip zero-width and other format characters (ZWSP, ZWJ, BOM, bidi marks...)
@@ -1178,11 +1179,8 @@ class TelegramDaemonBridge {
 
 		// Send startup message (direct to Telegram, not through agent)
 		const mode = this.multiStepEnabled ? "multi-step" : "legacy";
-		await tgSend(
-			this.config.telegramToken,
-			this.config.chatId,
-			`Eight is online (${mode} mode). Commands: /delegate, /status, /cancel, /review, /plan, /goals\n\nWhat do we work on next?`,
-		);
+		// Plain text: the vessel name and role come from env and must not be parsed as Markdown.
+		await tgSend(this.config.telegramToken, this.config.chatId, this.greeting(mode), "");
 
 		// Wait for agent to finish initializing (AST indexing takes ~5s)
 		console.log("[telegram-bridge] waiting for agent initialization...");
@@ -2180,12 +2178,18 @@ class TelegramDaemonBridge {
 		const cmd = plain ? null : commandOf(text, this.botUsername);
 		const fullTier = !!sender && senderTier(sender, gate) === "full";
 
-		// An authorised non-operator (prompt tier) may only reach /status and
-		// /help. They are answered straight to the chat they came from and never
+		// An authorised non-operator (prompt tier) may only reach /start, /status
+		// and /help, and /start lists only those. They are answered straight to the chat they came from and never
 		// touch originChatId, or they could redirect the operator's in-flight turn.
 		if (sender && !fullTier) {
 			let reply = "Operator only for now. Ask James for access.";
-			if (cmd === "/status") {
+			if (cmd === "/start") {
+				reply = greetingText({
+					identity: vesselIdentity(),
+					mode: this.multiStepEnabled ? "multi-step" : "legacy",
+					commands: OPEN_COMMANDS,
+				});
+			} else if (cmd === "/status") {
 				try {
 					const res = await fetch(
 						`${this.config.daemonUrl
@@ -2239,6 +2243,11 @@ class TelegramDaemonBridge {
 		}
 
 		// Handle built-in commands
+		if (cmd === "/start") {
+			await tgSend(this.config.telegramToken, this.replyChat(), this.greeting(), "");
+			return;
+		}
+
 		if (cmd === "/logs") {
 			try {
 				const { execSync } = await import("node:child_process");
@@ -2541,6 +2550,15 @@ class TelegramDaemonBridge {
 	 * machine's ceiling, and two overlapping runs would fight over the same
 	 * message shape with no way to tell them apart in the chat.
 	 */
+	/** Greeting by the vessel's own identity, listing the commands this bridge handles. */
+	private greeting(mode?: string): string {
+		return greetingText({
+			identity: vesselIdentity(),
+			mode: mode ?? (this.multiStepEnabled ? "multi-step" : "legacy"),
+			commands: [...OPEN_COMMANDS, ...OPERATOR_COMMANDS],
+		});
+	}
+
 	private async handleBoardroom(topic: string): Promise<void> {
 		const send = (msg: string) => tgSend(this.config.telegramToken, this.replyChat(), msg);
 		if (!topic) {
