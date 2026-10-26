@@ -9,6 +9,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.37] - 2026-10-26
+
+### Changed
+- settings: keep a gap between label and value ([#5132](https://github.com/8gi-foundation/8gent-code/pull/5132))
+- tui: command palette keeps one name column, sheet widens to 84 ([#5113](https://github.com/8gi-foundation/8gent-code/pull/5113))
+
+### Fixed
+- tui: plan rail counts drop zero buckets, wrap whole cells, and read at 5:1 contrast ([#5133](https://github.com/8gi-foundation/8gent-code/pull/5133))
+- tui: idle model-server probe backs off instead of polling every 8 s (#4904) ([#5130](https://github.com/8gi-foundation/8gent-code/pull/5130))
+- tui: /provider guide hangs wrapped rows under their step at narrow widths ([#5131](https://github.com/8gi-foundation/8gent-code/pull/5131))
+- tui: tab bar drops the repeated source tag so nine tabs fit 100 columns ([#5128](https://github.com/8gi-foundation/8gent-code/pull/5128))
+- tui: the launch splash can never hold startup, hard timeout and boot phases (#4662) ([#5115](https://github.com/8gi-foundation/8gent-code/pull/5115))
+
 ## [0.20.36] - 2026-10-25
 
 ### Added
