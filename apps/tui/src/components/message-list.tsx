@@ -458,10 +458,10 @@ export function MessageList({
 			>
 				{visibleMessages.length === 0 ? (
 					<Box flexGrow={1} alignItems="center" justifyContent="center">
-						<Text color={t.dim}>
+						<Text color={t.textTertiary}>
 							<Text color={t.orange}>8</Text>
 							<Text color={t.textPrimary}>▣ </Text>
-							<Text color={t.dim}>waiting with you</Text>
+							<Text color={t.textTertiary}>waiting with you</Text>
 						</Text>
 					</Box>
 				) : null}

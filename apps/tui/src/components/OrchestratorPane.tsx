@@ -82,7 +82,7 @@ function HeaderRow({ columns }: { columns: ColumnSpec[] }) {
 		<Box width="100%">
 			{columns.map((col) => (
 				<Cell key={col.key} width={col.width}>
-					<Text color={t.dim}>{col.label}</Text>
+					<Text color={t.textTertiary}>{col.label}</Text>
 				</Cell>
 			))}
 		</Box>
@@ -170,17 +170,17 @@ export function OrchestratorPane({ rows, width, maxRows }: OrchestratorPaneProps
 				<Text color={t.orange} bold>
 					ORCHESTRATOR
 				</Text>
-				{showActive ? <Text color={t.dim}>{activeLabel}</Text> : null}
+				{showActive ? <Text color={t.textTertiary}>{activeLabel}</Text> : null}
 			</Box>
 			{rows.length === 0 ? (
-				<Text color={t.dim}>no 8gents running</Text>
+				<Text color={t.textTertiary}>no 8gents running</Text>
 			) : (
 				<Box flexDirection="column" width="100%">
 					<HeaderRow columns={columns} />
 					{visible.map((row) => (
 						<TaskRow key={row.id} row={row} columns={columns} />
 					))}
-					{hidden > 0 ? <Text color={t.dim}>{`+${hidden} more`}</Text> : null}
+					{hidden > 0 ? <Text color={t.textTertiary}>{`+${hidden} more`}</Text> : null}
 				</Box>
 			)}
 		</Box>
