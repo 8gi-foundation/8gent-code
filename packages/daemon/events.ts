@@ -108,3 +108,6 @@ export class EventBus {
 
 /** Singleton bus for the daemon process */
 export const bus = new EventBus();
+
+/** Typed factory/v1 emitter, written to EIGHT_EVENTS_FILE (#5117). */
+export { factory } from "./factory-events";

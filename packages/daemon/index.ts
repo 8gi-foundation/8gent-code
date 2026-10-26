@@ -84,7 +84,10 @@ async function loadConfig(): Promise<DaemonConfig> {
 	const defaults: DaemonConfig = {
 		port: PORT,
 		authToken: null,
-		heartbeatIntervalMs: 30 * 60 * 1000,
+		// A cell (EIGHT_EVENTS_FILE set) beats every 5 minutes, not 30 (#5117).
+		heartbeatIntervalMs:
+			Number(process.env.EIGHT_HEARTBEAT_MS) ||
+			(process.env.EIGHT_EVENTS_FILE ? 5 * 60 * 1000 : 30 * 60 * 1000),
 		heartbeatEnabled: true,
 	};
 
@@ -327,7 +330,7 @@ export async function main(): Promise<void> {
 	}
 
 	const dispatchExecutor: DispatchExecutor = {
-		async executeOnChannel(targetChannel, intent, meta) {
+		async executeOnChannel(targetChannel, intent, _meta) {
 			const sessionId = `disp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 			pool!.createSession(sessionId, targetChannel as DaemonChannel);
 			pool!
@@ -515,7 +518,7 @@ export async function main(): Promise<void> {
 			maxSessions: 10,
 		});
 
-		mesh.onTask(async (task: TaskPayload, from: string): Promise<TaskResult> => {
+		mesh.onTask(async (task: TaskPayload, _from: string): Promise<TaskResult> => {
 			const start = Date.now();
 			if (!pool) {
 				return {

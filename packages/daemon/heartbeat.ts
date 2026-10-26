@@ -1,7 +1,9 @@
 /**
  * Heartbeat - Proactive wake system.
  *
- * Runs on a configurable interval (default 30 min). Performs cheap
+ * Runs on a configurable interval (default 30 min, 5 min for a cell with
+ * EIGHT_EVENTS_FILE set, see index.ts). Each run also appends a
+ * cell.heartbeat line to the factory/v1 log (#5117). Performs cheap
  * deterministic checks first, only escalating to LLM evaluation
  * when something actually needs attention.
  */
@@ -10,6 +12,7 @@ import { join } from "node:path";
 import { getNextDueJob } from "./cron";
 import { getDataDir } from "./data-dir";
 import { bus } from "./events";
+import { factory } from "./factory-events";
 
 export interface HeartbeatConfig {
 	intervalMs: number; // default 30 * 60 * 1000
@@ -84,6 +87,12 @@ async function runHeartbeat(config: HeartbeatConfig): Promise<HeartbeatResult> {
 	if (actionTriggered) {
 		bus.emit("agent:thinking", { sessionId: "heartbeat" });
 	}
+
+	factory.emit({
+		kind: "cell.heartbeat",
+		state: actionTriggered ? "working" : "idle",
+		detail: process.env.EIGHT_CELL_DETAIL ?? "",
+	});
 
 	return result;
 }
