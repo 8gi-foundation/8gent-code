@@ -8,21 +8,19 @@
 import { describe, expect, test } from "bun:test";
 import { Text } from "ink";
 import React from "react";
+import { getProviderManager } from "../../../../../packages/providers/index.js";
+import { bodyPartForToolName, detectDefaultBodyPartsState } from "../../hooks/useBodyParts.js";
+import { t } from "../../theme.js";
 import {
 	ActivityRail,
-	providerDisplay,
 	type ActivityRailProps,
-	type ToolState,
-	type ProviderState,
 	type AgentState,
 	type BodyPartState,
+	type ProviderState,
+	type ToolState,
+	providerDisplay,
+	taskLabelLines,
 } from "../ActivityRail";
-import { t } from "../../theme.js";
-import { getProviderManager } from "../../../../../packages/providers/index.js";
-import {
-	bodyPartForToolName,
-	detectDefaultBodyPartsState,
-} from "../../hooks/useBodyParts.js";
 
 const TOOL_STATES: ToolState[] = ["idle", "running", "ok", "fail"];
 const PROVIDER_STATES: ProviderState[] = ["primary", "fallback", "offline"];
@@ -190,10 +188,12 @@ describe("ActivityRail", () => {
 	});
 
 	test("rows never carry their own overflow clip (Ink honours only the innermost clip)", () => {
-		const top = expand(render({
-			...baseProps,
-			bodyParts: { hands: "idle", eyes: "inFlight", handeyes: "disabled" },
-		})) as AnyElement;
+		const top = expand(
+			render({
+				...baseProps,
+				bodyParts: { hands: "idle", eyes: "inFlight", handeyes: "disabled" },
+			}),
+		) as AnyElement;
 		const [root, ...rest] = flatten(top);
 		expect(root.props.overflow).toBe("hidden");
 		for (const el of rest) {
@@ -206,7 +206,9 @@ describe("ActivityRail", () => {
 		const blocks = railColumn({ ...baseProps, tasks: [] });
 		const tasks = blocks[1] as AnyElement;
 		expect(tasks.props.flexDirection).toBe("column");
-		const [heading, rows] = React.Children.toArray(tasks.props.children as React.ReactNode) as AnyElement[];
+		const [heading, rows] = React.Children.toArray(
+			tasks.props.children as React.ReactNode,
+		) as AnyElement[];
 		expect(heading.props.flexShrink).toBe(0);
 		expect(rows.props.flexShrink).toBe(0);
 		expect(rows.props.flexDirection).toBe("column");
@@ -233,8 +235,9 @@ describe("ActivityRail", () => {
 		const colourOf = (label: string, tone?: "waiting" | "quiet") =>
 			flatten(expand(render({ ...baseProps, tasks: [{ id: "x", label, tone }] })))
 				.filter((el) => el.type === Text)
-				.find((el) => React.Children.toArray(el.props.children as React.ReactNode).join("") === label)?.props
-				.color;
+				.find(
+					(el) => React.Children.toArray(el.props.children as React.ReactNode).join("") === label,
+				)?.props.color;
 		expect(colourOf("waiting for your answer", "waiting")).toBe(t.orange);
 		expect(colourOf("3 steps planned", "quiet")).toBe(t.textSecondary);
 		expect(colourOf("working, no plan yet")).toBe(t.teal);
@@ -365,5 +368,25 @@ describe("useBodyParts helpers", () => {
 			expect(state.hands).toBe("idle");
 			expect(state.eyes).toBe("idle");
 		}
+	});
+});
+
+describe("taskLabelLines", () => {
+	test("a label that fits stays one row", () => {
+		expect(taskLabelLines("Fix tab bar overflow")).toEqual(["Fix tab bar overflow"]);
+	});
+
+	test("a long label breaks at a space into two rows with nothing hidden", () => {
+		const label = "Wire the daemon reconnect backoff into the TUI";
+		const rows = taskLabelLines(label);
+		expect(rows).toEqual(["Wire the daemon reconnect", "backoff into the TUI"]);
+		expect(rows.join(" ")).toBe(label);
+	});
+
+	test("a label past two rows ends in an ellipsis and no row exceeds the width", () => {
+		const rows = taskLabelLines("word ".repeat(30));
+		expect(rows).toHaveLength(2);
+		expect(rows[1].endsWith("…")).toBe(true);
+		for (const r of rows) expect(r.length).toBeLessThanOrEqual(30);
 	});
 });

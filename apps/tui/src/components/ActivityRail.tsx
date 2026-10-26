@@ -189,7 +189,10 @@ export function railSpareRows(
 	const tasks =
 		p.tasks.length === 0
 			? 1
-			: p.tasks.reduce((n, x) => n + 1 + (typeof x.progress === "number" ? 1 : 0), 0);
+			: p.tasks.reduce(
+					(n, x) => n + taskLabelLines(x.label).length + (typeof x.progress === "number" ? 1 : 0),
+					0,
+				);
 	const asked = p.providers.filter((x) => x.asked).length;
 	const memory = hasMemoryRows(p.memory)
 		? 2 +
@@ -309,6 +312,26 @@ function hasMemoryRows(memory: MemoryStats | undefined): memory is MemoryStats {
 	);
 }
 
+/** Inner text width of the rail: 34 less the left rule and the two padding cells. */
+const RAIL_TEXT_WIDTH = 30;
+
+/**
+ * A task label in at most two rows, broken at a space, the second row cut
+ * with an ellipsis only if it still does not fit. Two rows keep the
+ * subject readable (the first half alone often hides the verb's object);
+ * more would push the rail's lower sections out of a short terminal.
+ */
+export function taskLabelLines(label: string, width = RAIL_TEXT_WIDTH): string[] {
+	const text = label.trim().replace(/\s+/g, " ");
+	if (text.length <= width) return [text];
+	let cut = text.lastIndexOf(" ", width);
+	if (cut < Math.floor(width / 2)) cut = width;
+	const first = text.slice(0, cut).trimEnd();
+	const rest = text.slice(cut).trimStart();
+	if (rest.length <= width) return [first, rest];
+	return [first, `${rest.slice(0, width - 1).trimEnd()}…`];
+}
+
 function bar(percent: number, width = 12): string {
 	const filled = Math.max(0, Math.min(width, Math.round((percent / 100) * width)));
 	return "█".repeat(filled) + "░".repeat(width - filled);
@@ -370,7 +393,7 @@ export function ActivityRail({
 								}
 								wrap="truncate-end"
 							>
-								{task.label}
+								{taskLabelLines(task.label).join("\n")}
 							</Text>
 							{typeof task.progress === "number" ? (
 								<Box width="100%" flexShrink={0} justifyContent="space-between">
