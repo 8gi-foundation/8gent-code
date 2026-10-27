@@ -111,3 +111,26 @@ test("40 columns: a long active title is cut with an ellipsis so every tab numbe
 	expect(row).toMatch(/1 .*\] 3 4$/);
 	expect(row.length).toBeLessThanOrEqual(40);
 });
+
+test("a grabbed tab keeps every tab on a narrow bar and the hint takes one row", () => {
+	const four = [
+		mk(0, "chat", "Orchestrator", true),
+		mk(1, "chat", "Engineer"),
+		mk(2, "chat", "QA"),
+		mk(3, "chat", "Notes"),
+	];
+	for (const w of [60, 40]) {
+		const out = strip(
+			renderToString(<TabBar width={w} tabs={four} onSwitch={() => {}} grabbedTabId="t1" />, {
+				columns: w,
+			}),
+		);
+		const rows = out.split("\n");
+		expect(rows.length).toBe(3);
+		expect(rows[0]).toMatch(/2/);
+		expect(rows[0]).toMatch(/3/);
+		expect(rows[0]).toMatch(/4/);
+		expect(rows[1]).toContain("[Esc] cancel");
+		for (const r of rows) expect(r.length).toBeLessThanOrEqual(w);
+	}
+});

@@ -131,6 +131,8 @@ interface TabBarProps {
 }
 
 export const GRAB_HINT = "[^G] drop on another tab to group  [Esc] cancel";
+/** The same hint, shorter, for a bar too narrow to carry it beside the tabs. */
+export const GRAB_HINT_SHORT = "[^G] drop to group  [Esc] cancel";
 const GAP = "   ";
 /** Below this many columns the titles give way and the lamps stay. */
 export const COMPACT_COLS = 60;
@@ -556,7 +558,12 @@ export function TabBar({
 
 	if (tabs.length <= 1) return null;
 
-	const hint = dragging ? ` ${GRAB_HINT}` : "";
+	// Beside the tabs when it fits whole; otherwise on its own row, so it never
+	// wraps and never squeezes the tabs out of the bar.
+	const labelEnd = cellWidth(line.text);
+	const hintBeside = dragging && labelEnd + 1 + cellWidth(GRAB_HINT) <= width;
+	const hint = hintBeside ? ` ${GRAB_HINT}` : "";
+	const hintBelow = dragging && !hintBeside ? GRAB_HINT_SHORT : "";
 	const rule = ruleRow(width, bar);
 
 	return (
@@ -604,6 +611,11 @@ export function TabBar({
 				</Box>
 				{hint ? <Text color={t.orange}>{hint}</Text> : null}
 			</Box>
+			{hintBelow ? (
+				<Text color={t.orange} wrap="truncate-end">
+					{hintBelow}
+				</Text>
+			) : null}
 			{oneRow ? null : (
 				<Text wrap="truncate-end">
 					<Text color={t.dim}>{rule.before}</Text>
