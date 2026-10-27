@@ -154,6 +154,7 @@ import {
 	selfQuestionNote,
 } from "./self-questions";
 import { SMALL_TALK_NOTE, isGreeting, isSmallTalk } from "./small-talk";
+import { replyIsTextToolCall } from "./text-call-fallback";
 import { verifyNudgeFor } from "./verify-gate";
 import { buildWelcome, gatherWelcomeFacts } from "./welcome";
 
@@ -614,6 +615,8 @@ export class Agent {
 	// state. The agentic-honesty gate (issue #2747) checks the final reply
 	// against this so the agent can never claim completion it did not earn.
 	private turnToolLedger: ToolLedgerEntry[] = [];
+	/** A native turn answered with its tool call as text (#4807): this session runs the text protocol from now on. */
+	private nativeWroteTextCall = false;
 	private turnTask = "";
 	private doneGateNudged = false;
 	/** Required-output gate (#4734), one per turn; inert unless EIGHT_OUTPUT_GATE=1 or config.outputGate. */
@@ -3377,7 +3380,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// tools payload), overridable via EIGHT_TEXT_TOOLS=1|0.
 		// #5040: decide how hard to think, from the ask alone (no model call).
 		const turnThinking = this.beginTurnThinking(textForAgent);
-		if (shouldUseTextTools(providerName, (this.config.allowedPaths?.length ?? 0) > 0)) {
+		const runTextTurn = async (): Promise<string> => {
 			const textResult = await this.runTextToolChat({
 				providerName,
 				providerModel: providerConfig.model,
@@ -3399,6 +3402,12 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				sessionWatchdog = null;
 			}
 			return textResult;
+		};
+		if (
+			this.nativeWroteTextCall ||
+			shouldUseTextTools(providerName, (this.config.allowedPaths?.length ?? 0) > 0)
+		) {
+			return runTextTurn();
 		}
 
 		// The native tool loop has no thinking control wired yet: say so, send nothing (#5040).
@@ -4308,6 +4317,18 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				}
 			}
 
+			// #4807: the model wrote its tool call as text (llama-server, a template with no
+			// tools). Nothing ran; hand the turn to the text protocol, which parses that shape.
+			if (
+				replyIsTextToolCall(result?.text, this.turnToolLedger.length, Object.keys(effectiveTools))
+			) {
+				console.log(
+					"[agent] native reply was a text tool call - running this turn on the text protocol",
+				);
+				this.nativeWroteTextCall = true;
+				return runTextTurn();
+			}
+
 			// ── Verify-before-done (issue #3550, EIGHT_VERIFY_GATE=1) ────────
 			// A turn that changed files and checked nothing since gets one more
 			// generate with a nudge to run the most targeted check first. Off by
@@ -4907,6 +4928,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	clearHistory(): void {
 		const systemMsg = this.messageHistory[0];
 		this.messageHistory = systemMsg ? [systemMsg] : [];
+		this.nativeWroteTextCall = false;
 	}
 
 	getModel(): string {
