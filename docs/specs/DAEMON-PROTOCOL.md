@@ -61,7 +61,9 @@ Client -> { "type": "session:create", "channel": "os" }
 Server -> { "type": "session:created", "sessionId": "s_abc123_xyz" }
 ```
 
-**Channels:** `"os"`, `"app"`, `"telegram"`, `"discord"`, `"api"`, `"delegation"`, `"computer"`, `"browser"`, `"classroom"`
+**Channels:** `"os"`, `"app"`, `"telegram"`, `"discord"`, `"api"`, `"delegation"`, `"computer"`, `"browser"`, `"classroom"`, `"day8"`
+
+`day8` is the Day8 world: a player in the office talking to this officer. It has exactly the scope of `api` (same tools, permission lane, dispatch capability ceiling, caps and idle timeout), and is not a shareable channel.
 
 The channel tag is metadata for routing, concurrency caps, and analytics.
 

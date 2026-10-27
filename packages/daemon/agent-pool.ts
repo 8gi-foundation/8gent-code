@@ -164,6 +164,9 @@ export const KNOWN_CHANNELS = [
 	"table",
 	"tui",
 	"classroom",
+	// The Day8 world: a player in the office talking to this officer. Same scope
+	// as "api": no row in CHANNEL_CAPS, CHANNEL_IDLE_TIMEOUTS or NEVER_EVICT, not shareable.
+	"day8",
 ] as const;
 export type Channel = (typeof KNOWN_CHANNELS)[number];
 

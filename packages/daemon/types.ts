@@ -19,7 +19,8 @@ export type DaemonChannel =
 	| "computer"
 	| "browser"
 	| "table"
-	| "classroom";
+	| "classroom"
+	| "day8";
 
 /** Streaming event taxonomy - what flows from daemon to client during a turn. */
 export type StreamEvent =

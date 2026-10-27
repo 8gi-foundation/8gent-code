@@ -92,6 +92,8 @@ export const CHANNEL_DEFAULT_CAPS: Record<DaemonChannel, DispatchCapability[]> =
 	table: [],
 	// Classroom runs untrusted web text with no tools; never a dispatch target.
 	classroom: [],
+	// Day8 world: the api row, no wider. Empty = caller controls scope per minted token.
+	day8: [],
 };
 
 /** Capabilities that require second-factor approval on the originator. */
