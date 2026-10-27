@@ -43,6 +43,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { spawnSync } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
+import { CLOUD_METADATA_REASON, findMetadataHost } from "./metadata-hosts";
 import { splitPipeline, tokenize } from "./src/workspace-boundary";
 
 /**
@@ -1443,6 +1444,9 @@ function writesGitConfig(argv: string[]): boolean {
 	return false;
 }
 
+/** The refusal text for a cloud metadata address; leads with the named reason. */
+export const CLOUD_METADATA_REFUSAL = `${CLOUD_METADATA_REASON}: it reaches a cloud metadata address, which hands out instance credentials`;
+
 /** Why one command (a single segment's words) must be approved, or null. */
 function argvReason(
 	raw: string[],
@@ -1475,6 +1479,11 @@ function argvReason(
 	}
 
 	const use = networkUse(argv);
+	// A cloud metadata address is never a fetch (#5198): refused first, by the
+	// literal host, whatever the method, scheme, pin or allow list.
+	if (use !== null || argv.some((t) => t.includes("://"))) {
+		if (findMetadataHost(argv.slice(1))) return CLOUD_METADATA_REFUSAL;
+	}
 	// Arguments the line does not show could carry a request body.
 	if (use === "send" || (use !== null && moreArgs)) return "it sends data over the network";
 	if (use === "fetch" && ctx.pinnedLocalProvider && !isLoopbackOnlyFetch(argv)) {

@@ -8,7 +8,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { findPayloads, stripPrefix } from "./command-policy";
+import { CLOUD_METADATA_REFUSAL, findPayloads, networkUse, stripPrefix } from "./command-policy";
+import { findMetadataHost } from "./metadata-hosts";
 import { tokenize } from "./src/workspace-boundary";
 import { resetStructuralBudget, structuralForms } from "./structural-spellings";
 
@@ -625,6 +626,16 @@ function findWipeReason(argv: string[]): string | null {
 /** Why this one command is always refused, or null. Exact targets only. */
 export function blockedReason(argv: string[]): string | null {
 	if (argv.length === 0) return null;
+	// Cloud metadata is never reached, in any mode (#5198): there is no legitimate use of an
+	// instance-credential endpoint. A network command's every word counts; any other command's
+	// words count only as a URL.
+	{
+		const words = argv.slice(1);
+		const isNet = networkUse(argv) !== null;
+		if (findMetadataHost(isNet ? words : words.filter((w) => w.includes("://")))) {
+			return CLOUD_METADATA_REFUSAL;
+		}
+	}
 	const name = path.basename(argv[0]).toLowerCase();
 	// A glob in command position (`r?`, `[!x]m`) may name a guarded command once the shell expands it.
 	if (/[*?[]/.test(name)) {

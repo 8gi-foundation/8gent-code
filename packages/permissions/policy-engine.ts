@@ -16,6 +16,7 @@ import { parse as parseYaml } from "yaml";
 import { resolveHome } from "../core/home.js";
 import { type CapabilityRequest, enforceCapability } from "./capability-manifest.js";
 import { scrubGoalText } from "./goal-secret-scrub.js";
+import { CLOUD_METADATA_REASON, isCloudMetadataHost } from "./metadata-hosts.js";
 import {
 	commandMutatesSessionRecords,
 	commandTouchesAuditFiles,
@@ -753,6 +754,18 @@ const ASK_BY_DEFAULT_ACTIONS = new Set<string>([
 	"mcp_call",
 ]);
 
+/** Network actions whose `url` is checked for a cloud metadata host (#5198). */
+const METADATA_GATED_ACTIONS = new Set<string>(["network_request", "web_fetch"]);
+
+function cloudMetadataGate(action: string, context: PolicyContext): PolicyDecision | null {
+	if (!METADATA_GATED_ACTIONS.has(action)) return null;
+	if (typeof context.url !== "string" || !isCloudMetadataHost(context.url)) return null;
+	return {
+		allowed: false,
+		reason: `[${CLOUD_METADATA_REASON}] Cloud metadata addresses hand out instance credentials and are never fetched.`,
+	};
+}
+
 /**
  * Shadow hard-deny gate. If the context agent is the shadow scope and the
  * action is side-effecting, deny unconditionally. Read/compute actions fall
@@ -797,6 +810,11 @@ export function evaluatePolicy(
 
 	const coppa = coppaGate(action, context);
 	if (coppa) return coppa;
+
+	// A cloud metadata address is never a fetch (#5198): a hard deny on the
+	// literal host, before any YAML rule or allow list is read.
+	const metadata = cloudMetadataGate(action, context);
+	if (metadata) return metadata;
 
 	const boundary = workspaceBoundaryGate(action, context);
 	if (boundary) return boundary;
