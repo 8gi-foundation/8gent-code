@@ -127,6 +127,18 @@ describe("CommandPaletteView", () => {
 	});
 });
 
+describe("filterAndSortCommands leading slash", () => {
+	test("a typed slash is not part of the name: /voice finds voice", () => {
+		expect(filterAndSortCommands(COMMANDS, "/voice").map((c) => c.name)).toEqual(
+			filterAndSortCommands(COMMANDS, "voice").map((c) => c.name),
+		);
+		expect(filterAndSortCommands(COMMANDS, "/voice").length).toBeGreaterThan(0);
+	});
+	test("a bare slash lists everything", () => {
+		expect(filterAndSortCommands(COMMANDS, "/")).toEqual(COMMANDS);
+	});
+});
+
 describe("filterAndSortCommands", () => {
 	test("empty query returns input order untouched", () => {
 		const out = filterAndSortCommands(COMMANDS, "");

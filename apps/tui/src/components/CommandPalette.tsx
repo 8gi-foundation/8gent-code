@@ -464,7 +464,8 @@ export function filterAndSortCommands(
 	commands: CommandPaletteCommand[],
 	query: string,
 ): CommandPaletteCommand[] {
-	const q = query.toLowerCase();
+	// Every row is shown as "/name", so people type the slash too: it is not part of the name.
+	const q = query.toLowerCase().replace(/^\/+/, "");
 	if (!q) return commands;
 	const matches = commands.filter((c) => `${c.name} ${c.description}`.toLowerCase().includes(q));
 	const prefix: CommandPaletteCommand[] = [];
