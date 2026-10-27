@@ -566,6 +566,11 @@ const FLAG_SHORT: Record<string, string> = {
 	unverified: "unver.",
 	"tests-claimed-not-run": "no tests run",
 };
+/** Shortest word forms, tried before the bare glyph: a mark alone says nothing a person can act on. */
+const FLAG_SHORTEST: Record<string, string> = {
+	unverified: "unver.",
+	"tests-claimed-not-run": "no tests",
+};
 export const FLAG_GLYPH = "!";
 
 /** The mode segment without its "[^Y]" cap, and its word cut to `max` letters if given. */
@@ -580,6 +585,7 @@ const modeBare = (s: FooterSegment, max?: number): FooterSegment =>
  *   1. the flag shortens: "unverified" to "unver.", "tests-claimed-not-run"
  *      to "no tests run";
  *   2. the mode and perm labels go ("Planning [^Y]" for "mode Planning [^Y]");
+ *   2b. the flag takes its shortest word ("no tests"), the perm yielding below 60;
  *   3. the flag shrinks to one glyph, "!";
  *   4. only below 60 columns, the perm segment yields (the tab tag and
  *      Shift+Tab still show it);
@@ -610,6 +616,7 @@ export function fitFooterRow(
 	const steps: FooterSegment[][] = [
 		withFlag(short),
 		withFlag(short).map(unlabelled),
+		dropPerm(withFlag(FLAG_SHORTEST[flag.value] ?? short).map(unlabelled)),
 		withFlag(FLAG_GLYPH).map(unlabelled),
 		dropPerm(withFlag(FLAG_GLYPH).map(unlabelled)),
 		// The last resorts, on phones narrower than the mode, flag and sandbox together:
@@ -621,11 +628,16 @@ export function fitFooterRow(
 	// Prefer the earliest step that holds the cap and loses no segment the
 	// last one keeps: shortening the flag comes before anything else gives way.
 	const rows = steps.map((list) => fitRow(list, width, leading, dj));
-	const glyph = rows[2] as { segments: FooterSegment[]; hints: string[] };
-	for (const r of rows.slice(0, 3)) {
-		if (holds(r) && r.segments.length >= glyph.segments.length) return r;
+	// The glyph row that holds the cap sets the bar: on a phone the perm yields, so the
+	// word forms are measured against that row, not against one that cannot hold.
+	const glyph = (rows.slice(3).find(holds) ?? rows[3]) as {
+		segments: FooterSegment[];
+		hints: string[];
+	};
+	for (const r of rows.slice(0, 4)) {
+		if (holds(r) && glyph.segments.every((g) => r.segments.some((x) => x.key === g.key))) return r;
 	}
-	for (const r of rows.slice(3)) if (holds(r)) return r;
+	for (const r of rows.slice(4)) if (holds(r)) return r;
 	return rows[rows.length - 1] as { segments: FooterSegment[]; hints: string[] };
 }
 

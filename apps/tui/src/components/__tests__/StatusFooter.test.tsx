@@ -738,6 +738,12 @@ describe("the unverified flag never pushes [^P] palette out at 48 columns and be
 		for (const f of forms) expect(["unverified", "unver.", "!"]).toContain(String(f));
 	});
 
+	test("at 40 columns the flag keeps a word beside the plan perm, and the cap holds", () => {
+		const row = fitFooterRow(build("tests_claimed_not_run", false, 40), 39);
+		expect(row.segments.find((s) => s.key === "verification")?.value).toBe("no tests");
+		expect(row.hints[0]).toBe("^P palette");
+	});
+
 	for (const cols of [48, 44, 40]) {
 		test(`the real frame at ${cols} columns holds the cap, the flag and the width`, async () => {
 			for (const verification of ["unverified", "tests_claimed_not_run"] as const) {
@@ -745,7 +751,7 @@ describe("the unverified flag never pushes [^P] palette out at 48 columns and be
 					const row = (await frame(cols, 30, { verification, sandboxOff }))[0] ?? "";
 					expect(row, `row at ${cols}`).toContain("[^P] palette");
 					expect(row.length).toBeLessThanOrEqual(cols);
-					expect(row, `flag at ${cols}`).toMatch(/unver|no tests run|!/);
+					expect(row, `flag at ${cols}`).toMatch(/unver|no tests|!/);
 					if (sandboxOff) expect(row).toMatch(/(sandbox|sbx) off/);
 				}
 			}
