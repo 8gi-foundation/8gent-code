@@ -142,6 +142,24 @@ describe("fs scoping", () => {
 		);
 	});
 
+	test("a dangling symlink is resolved to its target, not treated as a fresh file", () => {
+		if (!symlinksSupported) return;
+		const target = path.join(OUTSIDE, "not-yet.txt");
+		const link = path.join(WORKSPACE, "dangling-link");
+		fs.symlinkSync(target, link);
+		try {
+			expect(enforceCapability("edit_file", write(link), opts).allowed).toBe(false);
+			// A dangling link to a dangling link still lands outside.
+			const hop = path.join(WORKSPACE, "dangling-hop");
+			fs.symlinkSync(link, hop);
+			expect(enforceCapability("edit_file", write(hop), opts).allowed).toBe(false);
+			fs.rmSync(hop);
+			expect(fs.existsSync(target)).toBe(false);
+		} finally {
+			fs.rmSync(link);
+		}
+	});
+
 	test("write to a path that does not exist yet resolves through its ancestors", () => {
 		const nested = path.join(WORKSPACE, "a", "b", "c.txt");
 		expect(enforceCapability("write_file", write(nested), opts).allowed).toBe(true);

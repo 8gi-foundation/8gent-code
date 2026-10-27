@@ -1528,6 +1528,8 @@ export function isInfiniteMode(): boolean {
 // ============================================
 
 export { ToolG8 } from "./toolg8.js";
+export { classifyAction, FREE_ACTIONS, GATED_ACTIONS } from "./action-tiers.js";
+export type { ActionTier, TieredAction, TierDecision } from "./action-tiers.js";
 export {
 	enforceCapability,
 	getToolManifest,

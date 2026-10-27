@@ -169,26 +169,30 @@ function homeDir(): string {
  * Resolve a path to its canonical absolute form, collapsing symlinks so a
  * link inside an allowed scope cannot tunnel out. For paths that do not
  * exist yet (writes), the deepest existing ancestor is canonicalised and
- * the remaining segments re-joined.
+ * the remaining segments re-joined. A dangling symlink is followed by hand
+ * (readlink), because a write through it lands at its target: treating it
+ * as "does not exist yet" would place the write inside the scope on paper
+ * and outside it on disk.
  */
-function canonicalise(raw: string, cwd: string): string {
+function canonicalise(raw: string, cwd: string, hops = 0): string {
 	const absolute = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw);
 	const normalised = path.normalize(absolute);
 	try {
 		return fs.realpathSync(normalised);
 	} catch {
-		let cursor = normalised;
-		const tail: string[] = [];
-		while (cursor && cursor !== path.dirname(cursor)) {
-			try {
-				const real = fs.realpathSync(cursor);
-				return tail.length === 0 ? real : path.join(real, ...tail.reverse());
-			} catch {
-				tail.push(path.basename(cursor));
-				cursor = path.dirname(cursor);
-			}
+		// Past the kernel's own loop limit: return a path no scope contains.
+		if (hops > 40) return path.join(path.sep, "\0symlink-loop", normalised);
+		let st: fs.Stats | null = null;
+		try {
+			st = fs.lstatSync(normalised);
+		} catch {}
+		if (st?.isSymbolicLink()) {
+			const target = fs.readlinkSync(normalised);
+			return canonicalise(path.resolve(path.dirname(normalised), target), cwd, hops + 1);
 		}
-		return normalised;
+		const parent = path.dirname(normalised);
+		if (parent === normalised) return normalised;
+		return path.join(canonicalise(parent, cwd, hops + 1), path.basename(normalised));
 	}
 }
 

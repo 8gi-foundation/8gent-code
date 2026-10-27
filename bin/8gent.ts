@@ -586,6 +586,13 @@ async function main() {
 			await scoutCommand(restArgs);
 			break;
 
+		case "prepared": {
+			// Owned Duet (#5233): work prepared while idle, waiting for approve or reject.
+			const { preparedCommand } = await import("../packages/prepared/cli.ts");
+			process.exitCode = await preparedCommand(restArgs);
+			break;
+		}
+
 		case "voice": {
 			// Only the explicit fallback: build whisper.cpp on a phone when 8gent's prebuilt binary is missing.
 			if (restArgs[0] !== "build-whisper") {
