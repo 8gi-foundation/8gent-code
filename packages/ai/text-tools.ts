@@ -38,10 +38,7 @@ const TOOL_CALL_OPEN = /```tool_call[^\n]*\r?\n?/g;
  * escapes inside strings. Returns null if no `{` is found or the object never
  * closes.
  */
-function scanBalancedObject(
-	text: string,
-	start: number,
-): { open: number; end: number } | null {
+function scanBalancedObject(text: string, start: number): { open: number; end: number } | null {
 	let i = start;
 	while (i < text.length && text[i] !== "{") i++;
 	if (i >= text.length) return null;
@@ -136,9 +133,7 @@ function renderToolLine(t: ToolSpec): string {
 			const optional = required.has(name) ? "" : "?";
 			sigParts.push(`${name}${optional}: ${shortType(node)}`);
 			const enumVals =
-				node && typeof node === "object"
-					? (node as Record<string, unknown>).enum
-					: undefined;
+				node && typeof node === "object" ? (node as Record<string, unknown>).enum : undefined;
 			if (Array.isArray(enumVals) && enumVals.length > 0) {
 				enumNotes.push(`${name} is one of: ${enumVals.join(", ")}`);
 			}
@@ -161,8 +156,7 @@ function renderToolLine(t: ToolSpec): string {
 export function buildToolSystemPrompt(tools: ToolSpec[]): string {
 	const toolBlocks = tools.map(renderToolLine).join("\n");
 
-	const toolsSection =
-		tools.length > 0 ? toolBlocks : "(No tools are available right now.)";
+	const toolsSection = tools.length > 0 ? toolBlocks : "(No tools are available right now.)";
 
 	return [
 		"You can call tools to gather information or take actions.",
@@ -412,6 +406,29 @@ export function findUnterminatedToolCall(
 	return null;
 }
 
+// Remove a comma that sits directly before a closing } or ] (whitespace between
+// allowed), leaving string contents alone.
+function dropTrailingCommas(jsonText: string): string {
+	let out = "";
+	let inString = false;
+	for (let i = 0; i < jsonText.length; i++) {
+		const c = jsonText[i];
+		if (inString) {
+			out += c;
+			if (c === "\\") out += jsonText[++i] ?? "";
+			else if (c === '"') inString = false;
+		} else if (c === '"') {
+			inString = true;
+			out += c;
+		} else if (c === ",") {
+			let j = i + 1;
+			while (j < jsonText.length && /\s/.test(jsonText[j])) j++;
+			if (jsonText[j] !== "}" && jsonText[j] !== "]") out += c;
+		} else out += c;
+	}
+	return out;
+}
+
 // Parse a JSON object substring, tolerating raw control characters inside
 // string literals. Returns undefined when it is not valid JSON. Never throws.
 function parseJsonLoose(jsonText: string): unknown {
@@ -430,7 +447,17 @@ function parseJsonLoose(jsonText: string): unknown {
 			try {
 				return JSON.parse(escapeControlCharsInStrings(escapeInvalidBackslashesInStrings(jsonText)));
 			} catch {
-				return undefined;
+				// A trailing comma before } or ] ({"path": "a",}) is the usual slip of a
+				// small model; drop it and try once more.
+				try {
+					return JSON.parse(
+						dropTrailingCommas(
+							escapeControlCharsInStrings(escapeInvalidBackslashesInStrings(jsonText)),
+						),
+					);
+				} catch {
+					return undefined;
+				}
 			}
 		}
 	}
@@ -443,10 +470,21 @@ function toCall(parsed: unknown): ParsedToolCall | null {
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
 		return null;
 	}
-	const obj = parsed as Record<string, unknown>;
+	let obj = parsed as Record<string, unknown>;
+	// OpenAI shape: {"type": "function", "function": {"name": ..., "arguments": ...}}.
+	// llama.cpp and Qwen templates hand this back; the call is the inner object.
+	const inner = obj.function;
+	if (typeof obj.name !== "string" && typeof inner === "object" && inner !== null) {
+		obj = inner as Record<string, unknown>;
+	}
 	if (typeof obj.name !== "string") return null;
 
-	const rawArgs = obj.arguments ?? obj.parameters;
+	let rawArgs = obj.arguments ?? obj.parameters;
+	// OpenAI shape again: arguments is a JSON-encoded string. Reading it as "not an
+	// object" ran the tool with no arguments at all.
+	if (typeof rawArgs === "string") {
+		rawArgs = rawArgs.trim() === "" ? {} : parseJsonLoose(rawArgs.trim());
+	}
 	const args =
 		typeof rawArgs === "object" && rawArgs !== null && !Array.isArray(rawArgs)
 			? (rawArgs as Record<string, unknown>)
@@ -529,8 +567,7 @@ function locateBareCalls(text: string, known: Set<string>): LocatedBlock[] {
 					const p = parsed as Record<string, unknown>;
 					const argsObj = p.arguments ?? p.parameters;
 					const trailingFenceEnd = consumeTrailingFence(text, obj.end);
-					const standalone =
-						trailingFenceEnd > obj.end || restOfLineBlank(text, obj.end);
+					const standalone = trailingFenceEnd > obj.end || restOfLineBlank(text, obj.end);
 					if (
 						call &&
 						known.has(call.name) &&
@@ -542,9 +579,7 @@ function locateBareCalls(text: string, known: Set<string>): LocatedBlock[] {
 					) {
 						// Strip the plain fence that opens directly above the call.
 						const start =
-							fence !== null && text.slice(fenceBodyStart, j).trim() === ""
-								? fenceLineStart
-								: i;
+							fence !== null && text.slice(fenceBodyStart, j).trim() === "" ? fenceLineStart : i;
 						if (trailingFenceEnd > obj.end) fence = null;
 						blocks.push({ fenceStart: start, end: trailingFenceEnd, call });
 						i = trailingFenceEnd;
@@ -613,7 +648,13 @@ function locateNativeCalls(text: string, known: Set<string>): LocatedBlock[] {
 		const open = text.indexOf(NATIVE_TAG_OPEN, from);
 		if (open === -1) break;
 		const lineStart = text.lastIndexOf("\n", open - 1) + 1;
-		if (text.slice(lineStart, open).trim() !== "") {
+		const before = text.slice(lineStart, open);
+		// "Let me check. <tool_call>..." on one line is a call after a finished short
+		// lead-in sentence. A tag mid-sentence ("Qwen can emit <tool_call>...") is prose.
+		if (
+			before.trim() !== "" &&
+			(before.length > 120 || before.includes("`") || !/[.!?:]\s*$/.test(before))
+		) {
 			from = open + NATIVE_TAG_OPEN.length;
 			continue;
 		}
@@ -622,7 +663,11 @@ function locateNativeCalls(text: string, known: Set<string>): LocatedBlock[] {
 		const bodyEnd = close === -1 ? text.length : close;
 		const end = close === -1 ? text.length : close + NATIVE_TAG_CLOSE.length;
 		const call = parseNativeBody(text.slice(bodyStart, bodyEnd));
-		blocks.push({ fenceStart: lineStart, end, call: call && known.has(call.name) ? call : null });
+		blocks.push({
+			fenceStart: before.trim() === "" ? lineStart : open,
+			end,
+			call: call && known.has(call.name) ? call : null,
+		});
 		from = end;
 	}
 	return blocks;
