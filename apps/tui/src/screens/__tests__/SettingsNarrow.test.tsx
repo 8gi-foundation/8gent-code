@@ -8,12 +8,17 @@ import { SettingsView } from "../SettingsView.js";
 
 class In extends EventEmitter {
 	isTTY = true;
+	queue: string[] = [];
+	press(k: string) {
+		this.queue.push(k);
+		this.emit("readable");
+	}
 	setRawMode() {}
 	setEncoding() {}
 	ref() {}
 	unref() {}
 	read() {
-		return null;
+		return this.queue.shift() ?? null;
 	}
 }
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
@@ -56,4 +61,53 @@ test("100 columns: labels stay on one row", async () => {
 	const f = await frame(100);
 	expect(f).toContain("Silence threshold (ms)");
 	expect(f).toContain("TTS voice (fallback)");
+});
+
+test("40 columns: categories are one strip row, labels share a row with their value", async () => {
+	const f = await frame(40);
+	expect(f).toContain("Voice  1 of 7");
+	expect(f).not.toContain("Categories");
+	expect(f).toContain("Silence threshold (ms)");
+	expect(f).toContain("TTS voice (fallback)");
+});
+
+test("100 columns: the category list stays a column", async () => {
+	const f = await frame(100);
+	expect(f).toContain("Categories");
+	expect(f).not.toContain("1 of 7");
+});
+
+test("40 columns: Tab advances from categories that have no fields", async () => {
+	let last = "";
+	const out = new Writable({
+		write(c, _e, cb) {
+			const s = c.toString();
+			if (s.length > 20) last = s;
+			cb();
+		},
+	}) as Writable & { columns: number; rows: number; isTTY: boolean };
+	out.columns = 40;
+	out.rows = 40;
+	out.isTTY = true;
+	const stdin = new In();
+	const inst = render(<SettingsView visible={true} onClose={() => {}} />, {
+		stdin: stdin as unknown as NodeJS.ReadStream,
+		stdout: out as unknown as NodeJS.WriteStream,
+		stderr: out as unknown as NodeJS.WriteStream,
+		debug: true,
+		exitOnCtrlC: false,
+		patchConsole: false,
+	});
+	const tab = async () => {
+		stdin.press("\t");
+		await new Promise((r) => setTimeout(r, 60));
+	};
+	await new Promise((r) => setTimeout(r, 100));
+	for (let i = 0; i < 5; i++) await tab();
+	expect(strip(last)).toContain("Context windows  6 of 7");
+	await tab();
+	expect(strip(last)).toContain("Keys  7 of 7");
+	await tab();
+	expect(strip(last)).toContain("Voice  1 of 7");
+	inst.unmount();
 });

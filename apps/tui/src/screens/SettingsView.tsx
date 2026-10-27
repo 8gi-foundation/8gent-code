@@ -720,14 +720,14 @@ export function SettingsView({
 				return;
 			}
 
-			if (!field) return;
-
-			// Tab cycles categories
+			// Tab cycles categories, including the ones with no fields
 			if (key.tab) {
 				setCategoryIndex((prev) => (prev + 1) % CATEGORIES.length);
 				setFieldIndex(0);
 				return;
 			}
+
+			if (!field) return;
 
 			// Field interactions
 			if (field.kind === "toggle") {
@@ -827,28 +827,42 @@ export function SettingsView({
 			<Divider />
 
 			<Box flexDirection="row" paddingY={1}>
-				{/* Left column: categories */}
-				<Box flexDirection="column" width={20} marginRight={2}>
-					<Text bold color="yellow">
-						Categories
-					</Text>
-					<Box marginTop={1} flexDirection="column">
-						{CATEGORIES.map((c, i) => (
-							<Box key={c.id}>
-								<Text color={i === categoryIndex ? "yellow" : undefined}>
-									{i === categoryIndex ? ">" : " "}{" "}
-								</Text>
-								<AppText bold={i === categoryIndex}>{c.label}</AppText>
-							</Box>
-						))}
+				{/* Left column: categories (under 60 columns it becomes the one-row strip below) */}
+				{narrow ? null : (
+					<Box flexDirection="column" width={20} marginRight={2}>
+						<Text bold color="yellow">
+							Categories
+						</Text>
+						<Box marginTop={1} flexDirection="column">
+							{CATEGORIES.map((c, i) => (
+								<Box key={c.id}>
+									<Text color={i === categoryIndex ? "yellow" : undefined}>
+										{i === categoryIndex ? ">" : " "}{" "}
+									</Text>
+									<AppText bold={i === categoryIndex}>{c.label}</AppText>
+								</Box>
+							))}
+						</Box>
 					</Box>
-				</Box>
+				)}
 
 				{/* Right column: fields */}
 				<Box flexDirection="column" flexGrow={1}>
-					<Text bold color="yellow">
-						{category?.label || ""}
-					</Text>
+					{narrow ? (
+						<Text wrap="truncate-end">
+							<Text bold color="yellow">
+								{category?.label || ""}
+							</Text>
+							<Text dimColor>
+								{"  "}
+								{categoryIndex + 1} of {CATEGORIES.length}, Tab for next
+							</Text>
+						</Text>
+					) : (
+						<Text bold color="yellow">
+							{category?.label || ""}
+						</Text>
+					)}
 					<Box marginTop={1} flexDirection="column">
 						{category?.id === "context" ? (
 							contextRows.length === 0 ? (
