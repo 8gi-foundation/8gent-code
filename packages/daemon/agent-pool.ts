@@ -165,7 +165,7 @@ export const KNOWN_CHANNELS = [
 	"tui",
 	"classroom",
 	// The Day8 world: a player in the office talking to this officer. Same scope
-	// as "api": no row in CHANNEL_CAPS, CHANNEL_IDLE_TIMEOUTS or NEVER_EVICT, not shareable.
+	// as "api", plus a cap of 3 and a 10 minute idle timeout (#5203); not in NEVER_EVICT, not shareable.
 	"day8",
 ] as const;
 export type Channel = (typeof KNOWN_CHANNELS)[number];
@@ -174,6 +174,8 @@ export type Channel = (typeof KNOWN_CHANNELS)[number];
 const CHANNEL_CAPS: Partial<Record<Channel, number>> = {
 	computer: Number(process.env.MAX_COMPUTER_SESSIONS ?? 3),
 	classroom: CLASSROOM_SESSION_CAP,
+	// A Day8 player talks to an officer; three at once is the ceiling (#5203).
+	day8: 3,
 };
 
 /** Per-channel idle timeouts (ms). Falls back to IDLE_TIMEOUT_MS when unset. */
@@ -184,6 +186,7 @@ const CHANNEL_IDLE_TIMEOUTS: Partial<Record<Channel, number>> = {
 	table: 10 * 60 * 1000, // 10 minutes
 	// Classroom sessions are one-shot lesson generators; do not let them linger.
 	classroom: CLASSROOM_IDLE_MS,
+	day8: 10 * 60 * 1000, // 10 minutes
 };
 
 /** Channels that should never be evicted by the idle reaper. */

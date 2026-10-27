@@ -179,15 +179,15 @@ describe("day8 channel", () => {
 });
 
 describe("day8 scope equals api scope in the real pool", () => {
-	it("the same caps, idle timeout, eviction and agent tool set", async () => {
+	it("the same eviction and agent tool set; cap 3 and 10 minute idle are day8's own (#5203)", async () => {
 		const { AgentPool: Real } = await import("./agent-pool");
 		const p = new Real({ runtime: "ollama", model: "fake" });
 		p.createSession("scope-api", "api");
 		p.createSession("scope-day8", "day8");
 		// biome-ignore lint/suspicious/noExplicitAny: reads private scope helpers
 		const priv = p as any;
-		expect(priv.capFor("day8")).toBe(priv.capFor("api"));
-		expect(priv.idleTimeoutFor("day8")).toBe(priv.idleTimeoutFor("api"));
+		expect(priv.capFor("day8")).toBe(3);
+		expect(priv.idleTimeoutFor("day8")).toBe(10 * 60 * 1000);
 		const api = priv.sessions.get("scope-api");
 		const d8 = priv.sessions.get("scope-day8");
 		expect(priv.evictable("scope-day8", d8)).toBe(priv.evictable("scope-api", api));

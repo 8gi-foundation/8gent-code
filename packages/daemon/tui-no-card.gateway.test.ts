@@ -199,3 +199,24 @@ describe("a daemon turn on the TUI channel", () => {
 		expect(await turn("api")).toBe(true);
 	});
 });
+
+describe("a daemon turn on the day8 channel (#5203)", () => {
+	const savedTTY = process.stdin.isTTY;
+	afterAll(() => {
+		(process.stdin as { isTTY?: boolean }).isTTY = savedTTY;
+	});
+
+	it("refuses a card-gated command on a headless vessel", async () => {
+		expect(await turn("day8")).toBe(false);
+	});
+
+	it("refuses it with a terminal attached: no stdin question is opened", async () => {
+		delete process.env.EIGHT_HEADLESS;
+		(process.stdin as { isTTY?: boolean }).isTTY = true;
+		try {
+			expect(await turn("day8")).toBe(false);
+		} finally {
+			process.env.EIGHT_HEADLESS = "1";
+		}
+	});
+});

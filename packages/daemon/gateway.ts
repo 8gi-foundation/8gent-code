@@ -705,9 +705,13 @@ function dispatchMessage(ws: any, config: GatewayConfig, raw: string): void {
 			// The owner's prompt wakes the router first: a background turn yields to it (#4868).
 			if (state.channel === "tui" || state.channel === "telegram")
 				void wakeRouter()?.submit(ownerEvent(sid, state.channel));
-			// A turn for a TUI runs here with no card to show: anything that needs a yes is
-			// refused, never auto-approved (#4829). A bridge turn binds its own approver.
-			const noCard = state.channel === "tui" || pool.getSessionInfo(sid)?.channel === "tui";
+			// A turn for a TUI or a Day8 player runs here with no card to show: anything that
+			// needs a yes is refused, never auto-approved or sent to a terminal (#4829, #5203).
+			// A bridge turn binds its own approver.
+			const noCardChannels = ["tui", "day8"];
+			const noCard =
+				noCardChannels.includes(state.channel) ||
+				noCardChannels.includes(pool.getSessionInfo(sid)?.channel ?? "");
 			const origin = state.channel;
 			const inTurn = <T>(fn: () => T): T => turnContext.run({ origin }, fn);
 			const runModelTurn = (): void => {
