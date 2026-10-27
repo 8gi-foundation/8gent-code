@@ -180,4 +180,38 @@ describe("Control tab", () => {
 			app.unmount();
 		}
 	});
+
+	test("under 30 rows the groups sit flush and each header carries its count; at 32 rows the blank rows stay", async () => {
+		const jobs = path.join(home, ".8gent", "jobs");
+		fs.mkdirSync(jobs, { recursive: true });
+		fs.writeFileSync(
+			path.join(jobs, "a.json"),
+			JSON.stringify({ name: "autotune", state: "running", stage: "pilot" }),
+		);
+		fs.writeFileSync(
+			path.join(jobs, "b.json"),
+			JSON.stringify({ name: "retro", state: "running", stage: "draft" }),
+		);
+		fs.writeFileSync(
+			path.join(jobs, "c.json"),
+			JSON.stringify({ name: "release", state: "queued", stage: "gate" }),
+		);
+		for (const [rows, flush] of [
+			[24, true],
+			[32, false],
+		] as const) {
+			const { out, stdin, stdout } = fakeTty();
+			stdout.rows = rows;
+			const app = render(<ControlView visible={true} onClose={() => {}} />, {
+				stdout: stdout as unknown as NodeJS.WriteStream,
+				stdin,
+				patchConsole: false,
+			});
+			await tick(150);
+			const frame = strip(out.text);
+			expect(frame.includes("RUNNING  2")).toBe(flush);
+			expect(/draft[ -]*\n\n ◐/.test(frame)).toBe(!flush);
+			app.unmount();
+		}
+	});
 });

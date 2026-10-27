@@ -68,6 +68,8 @@ export function ControlView({ visible, onClose }: ControlViewProps) {
 	const snap = useControlSnapshot(visible, { header: true });
 	const { stdout } = useStdout();
 	const cols = stdout?.columns ?? 80;
+	// Short terminals: groups sit flush, each header carries its count (Linear's grouped list).
+	const short = (stdout?.rows ?? 40) < 30;
 	const [sel, setSel] = useState(0);
 	const [open, setOpen] = useState(false);
 	const [note, setNote] = useState<string | null>(null);
@@ -130,9 +132,9 @@ export function ControlView({ visible, onClose }: ControlViewProps) {
 				</Box>
 			) : (
 				grouped.groups.map((g) => (
-					<Box key={g.state} flexDirection="column" marginTop={1} flexShrink={0}>
+					<Box key={g.state} flexDirection="column" marginTop={short ? 0 : 1} flexShrink={0}>
 						<Text color={GROUP[g.state].color} bold>
-							{`${GROUP[g.state].glyph}  ${GROUP[g.state].title}`}
+							{`${GROUP[g.state].glyph}  ${GROUP[g.state].title}${short ? `  ${g.rows.length}` : ""}`}
 						</Text>
 						{g.rows.map((r) => {
 							index += 1;
