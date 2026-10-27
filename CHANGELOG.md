@@ -9,6 +9,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.42] - 2026-10-27
+
+### Changed
+- telegram bridge: strip reasoning, voice on request, group commands must name the bot, no startup card in a group (#5221) ([#5222](https://github.com/8gi-foundation/8gent-code/pull/5222))
+- approval card wraps a long command after a path mark, not mid-word ([#5218](https://github.com/8gi-foundation/8gent-code/pull/5218))
+- day8 turns refuse approval-needing calls, day8 session cap 3 and 10 minute idle (#5203) ([#5204](https://github.com/8gi-foundation/8gent-code/pull/5204))
+- no-model compact card breaks only after a comma at narrow widths ([#5211](https://github.com/8gi-foundation/8gent-code/pull/5211))
+- tab bar grab hint takes its own row on narrow bars so every tab stays visible ([#5212](https://github.com/8gi-foundation/8gent-code/pull/5212))
+- footer keeps a word for the unverified flag at 40 columns ([#5210](https://github.com/8gi-foundation/8gent-code/pull/5210))
+- Control tab groups sit flush under 30 rows, headers carry counts ([#5209](https://github.com/8gi-foundation/8gent-code/pull/5209))
+- cloud metadata hosts are never a fetch (#5198) ([#5200](https://github.com/8gi-foundation/8gent-code/pull/5200))
+- command palette ignores a typed leading slash (/mod finds 16 of 92, was 0) ([#5208](https://github.com/8gi-foundation/8gent-code/pull/5208))
+- settings categories become one strip row under 60 columns ([#5202](https://github.com/8gi-foundation/8gent-code/pull/5202))
+- accept the day8 channel with api scope ([#5195](https://github.com/8gi-foundation/8gent-code/pull/5195))
+- compact activity line keeps label, ellipsis and step count readable ([#5179](https://github.com/8gi-foundation/8gent-code/pull/5179))
+
+### Fixed
+- agent: a native reply that is a text tool call runs on the text protocol ([#5193](https://github.com/8gi-foundation/8gent-code/pull/5193))
+
 ## [0.20.41] - 2026-10-26
 
 ### Changed
