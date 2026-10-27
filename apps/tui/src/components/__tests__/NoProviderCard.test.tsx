@@ -163,6 +163,15 @@ describe("no-model card in the chat area (T5)", () => {
 		expect(out).toContain("NO MODEL Ollama is not answering.");
 	});
 
+	test("compact form at 40 columns never splits a command across rows", async () => {
+		const out = await frame({ ...bareMachine, compact: true }, 40);
+		const flat = out.split("\n").map((l) => l.replace(/^[│╭╰]\s?|\s*[│╮╯]$/g, "").trim());
+		for (const cmd of ["/provider ollama", "/model auto:free", "ollama pull qwen3.5"]) {
+			expect(flat.some((l) => l.includes(cmd))).toBe(true);
+		}
+		expect(out.split("\n").length).toBeLessThanOrEqual(11);
+	});
+
 	test("a built agent whose engine is lost mid-session: the card shows (#3290)", async () => {
 		const out = await frame({ ...ollamaUp, engines: { ...ollamaUp.engines, ollama: false } });
 		expect(out).toContain("NO MODEL");

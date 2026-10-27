@@ -122,6 +122,28 @@ export function fitInstallStep(step: string, room: number): string {
 }
 
 /**
+ * A compact line packed into rows of at most `room` cells, breaking only
+ * after a comma, so a command ("/provider ollama") never splits across two
+ * rows. Plain ASCII spaces, so the text still pastes as it stands. A piece
+ * longer than the room stays whole and the terminal wraps it. Rows come back
+ * joined by a newline.
+ */
+export function fitCompactLine(line: string, room: number): string {
+	if (line.length <= room) return line;
+	const pieces = line.split(/(?<=,) /);
+	const rows: string[] = [];
+	let cur = "";
+	for (const piece of pieces) {
+		if (cur !== "" && cur.length + 1 + piece.length > room) {
+			rows.push(cur);
+			cur = piece;
+		} else cur = cur === "" ? piece : `${cur} ${piece}`;
+	}
+	if (cur !== "") rows.push(cur);
+	return rows.join("\n");
+}
+
+/**
  * The card's words. Commands are the real ones and follow the published docs
  * (8gent.dev models/ollama and models/hosted): the Ollama install script and
  * library tag were checked against ollama.com, and the model and size come

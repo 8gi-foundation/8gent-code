@@ -1,6 +1,11 @@
 import { Box, Text, useStdout } from "ink";
 import React from "react";
-import { type GuidanceCopy, fitInstallStep, guidanceCopy } from "../lib/no-provider-guidance.js";
+import {
+	type GuidanceCopy,
+	fitCompactLine,
+	fitInstallStep,
+	guidanceCopy,
+} from "../lib/no-provider-guidance.js";
 import type { Readiness } from "../lib/readiness.js";
 import { t } from "../theme.js";
 
@@ -74,7 +79,7 @@ export function NoProviderCard({
 						<Box flexDirection="column">
 							{lines.map((line) => (
 								<Text key={line} color={t[NO_PROVIDER_TONES.step]}>
-									{line}
+									{narrow ? fitCompactLine(line, columns - 4 - 3) : line}
 								</Text>
 							))}
 						</Box>
