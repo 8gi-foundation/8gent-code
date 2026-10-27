@@ -566,6 +566,23 @@ describe("operator Cancel", () => {
 	});
 });
 
+describe("reasoning never reaches the chat (#5221)", () => {
+	it("a final reply with a think block posts only the answer, on every outbound body", async () => {
+		const a = await startRun();
+		fetchCalls.length = 0;
+		emit(a.sock, "agent:stream", {
+			sessionId: "sess_test",
+			chunk: "<think>SECRET-REASONING</think>The answer is 42.",
+			final: true,
+		});
+		await new Promise((r) => setTimeout(r, 20));
+		const all = JSON.stringify(fetchCalls.map((c) => c.body));
+		expect(all).not.toContain("SECRET-REASONING");
+		expect(all).toContain("The answer is 42.");
+		a.adapter.close();
+	});
+});
+
 describe("finished-message task buttons", () => {
 	it("done: Show steps plus Continue and New task, Resend files only when files were sent", async () => {
 		const a = await startRun();

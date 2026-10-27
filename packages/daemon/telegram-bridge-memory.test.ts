@@ -48,6 +48,7 @@ async function withBridge(
 		const b = bridge as any;
 		const prompts: Array<[string, string | undefined]> = [];
 		b.multiStepEnabled = true;
+		b.botUsername = "eightbot";
 		b.adapter = { handleUserMessage: async (t: string, p?: string) => void prompts.push([t, p]) };
 		b.memoryStore = new TelegramMemory({ dir, env, keyProvider: () => KEY, log: () => {} });
 		seedMatrix(dir, [String(OP)]);
@@ -115,7 +116,7 @@ test("/memoff, /memon and /memwipe are answered in the DM and never reach the ag
 
 test("memory commands in a group are refused", async () => {
 	await withBridge({ TELEGRAM_MEMORY_CHAT_IDS: String(OP) }, async ({ send, replies }) => {
-		await send("/memwipe", -1001, "supergroup");
+		await send("/memwipe@eightbot", -1001, "supergroup");
 		expect(replies.at(-1)).toMatch(/private chat only/);
 	});
 });

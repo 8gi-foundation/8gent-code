@@ -65,11 +65,14 @@ import {
 	restoreCard,
 } from "../telegram-bot/flow-bot";
 import { CB_PREFIX, parseCallbackData } from "../telegram-bot/keyboards";
+import { stripReasoning } from "../telegram-bot/strip-reasoning";
 import { TurnOrigins } from "../telegram-bot/turn-origins";
 import {
 	MAX_SPOKEN_CHARS,
 	R10_GROUP_NOTICE,
 	R10_TRANSIT_NOTICE,
+	VOICE_NOT_SET_UP,
+	asksForVoice,
 	decideVoice,
 	groupNoticeHash,
 	readVoiceState,
@@ -290,6 +293,9 @@ export async function tgSend(
 	text: string,
 	parseMode = "Markdown",
 ): Promise<void> {
+	// Reasoning never reaches a chat. Strip before splitting; nothing is logged.
+	text = stripReasoning(text);
+	if (text.trim() === "") return;
 	// Split long messages
 	const chunks: string[] = [];
 	let remaining = text;
@@ -650,7 +656,7 @@ export function groupAddressing(
 	rawText: string,
 	input: SenderCtx,
 	bot: { username?: string | null },
-	config: SenderConfig,
+	_config: SenderConfig,
 ): { addressed: boolean; text: string } {
 	const type = input.chatType ?? "private";
 	if (type === "private") return { addressed: true, text: cleanText(rawText) };
@@ -678,9 +684,10 @@ export function groupAddressing(
 	if (text.startsWith("/")) {
 		const cmd = commandOf(text, name);
 		if (!cmd) return { addressed: false, text }; // another bot's command, or unparseable
+		// In a group a command counts only when it names this bot: /start@<bot>. A bare
+		// /start or /status is for every bot in the room, so none of them answers (#5221).
 		if (/^\/[A-Za-z0-9_]+@/.test(text)) return { addressed: true, text }; // names us
-		const id = typeof input.fromId === "number" ? String(input.fromId) : null;
-		return { addressed: !!id && operatorsOf(config).includes(id), text };
+		return { addressed: false, text };
 	}
 	return { addressed: false, text };
 }
@@ -818,6 +825,12 @@ export const GROUP_VOICE_BUSY =
 const GROUP_VOICE_INFLIGHT_MS = 5 * 60_000;
 
 export { VOICE_ACK };
+
+/** Telegram group and supergroup ids are negative; a private chat id is positive. */
+export const isGroupChatId = (id: string | number | undefined): boolean =>
+	String(id ?? "")
+		.trim()
+		.startsWith("-");
 
 export const isGroupChatType = (type: string | undefined): boolean =>
 	type === "group" || type === "supergroup";
@@ -1085,6 +1098,8 @@ class TelegramDaemonBridge {
 	private voiceTurnAt = 0;
 	/** The chat that armed the spoken reply; only a reply to that chat may use it (S1). */
 	private voiceTurnChat: string | null = null;
+	/** The person asked in words for this reply in voice; a failed note then says so in text. */
+	private voiceAsked = false;
 	/**
 	 * The group voice turn in flight (C-G5): chat, topic and whether its spoken reply is used.
 	 * Bound per turn at admission, dropped on the terminal event or when any other turn starts.
@@ -1185,8 +1200,7 @@ class TelegramDaemonBridge {
 
 		// Send startup message (direct to Telegram, not through agent)
 		const mode = this.multiStepEnabled ? "multi-step" : "legacy";
-		// Plain text: the vessel name and role come from env and must not be parsed as Markdown.
-		await tgSend(this.config.telegramToken, this.config.chatId, this.greeting(mode), "");
+		await this.announceStartup(mode);
 
 		// Wait for agent to finish initializing (AST indexing takes ~5s)
 		console.log("[telegram-bridge] waiting for agent initialization...");
@@ -1317,8 +1331,9 @@ class TelegramDaemonBridge {
 						clearTimeout(this._retryTimer);
 						this._retryTimer = null;
 					}
-					tgSend(this.config.telegramToken, this.replyChat(), payload.chunk);
-					this.maybeSpeak(payload.chunk)
+					const answer = stripReasoning(payload.chunk);
+					tgSend(this.config.telegramToken, this.replyChat(), answer);
+					this.maybeSpeak(answer)
 						.catch(() => {})
 						.finally(() => this.endGroupVoiceTurn());
 				}
@@ -2182,6 +2197,8 @@ class TelegramDaemonBridge {
 		}
 		text = cleanText(text);
 		const cmd = plain ? null : commandOf(text, this.botUsername);
+		// /cmd@<this bot> is ours (commandOf checked); the handlers below take the bare form.
+		if (cmd) text = text.replace(/^(\s*\/[A-Za-z0-9_]+)@\w+/, "$1");
 		const fullTier = !!sender && senderTier(sender, gate) === "full";
 
 		// An authorised non-operator (prompt tier) may only reach /start, /status
@@ -2409,6 +2426,13 @@ class TelegramDaemonBridge {
 			}
 		}
 
+		// "in voice", "voice note", "say it": this reply goes out as a voice note (#5221).
+		if (!plain && fullTier && asksForVoice(text)) {
+			this.voiceTurnAt = Date.now();
+			this.voiceTurnChat = String(chatId);
+			this.voiceAsked = true;
+		}
+
 		// Operator memory: recall first (so a turn never recalls itself), then remember. Recalled
 		// text rides only in the prompt prefix, never in session history or the task card.
 		let memoryPrefix = "";
@@ -2503,7 +2527,7 @@ class TelegramDaemonBridge {
 	 * every path here is best-effort and silent on failure: a broken audio
 	 * stack must never cost him the answer.
 	 */
-	private async maybeSpeak(text: string, voice = VOICE_BY_OFFICER.James): Promise<void> {
+	private async maybeSpeak(text: string, voice = this.cellVoice()): Promise<void> {
 		// Only the chat that armed the arm may use or consume it: an overlapping group
 		// reply neither speaks in the DM's place nor wastes its arm.
 		// A group turn is judged against its own per-turn binding, not the sticky origin (C-G10).
@@ -2512,9 +2536,11 @@ class TelegramDaemonBridge {
 			? !gv.spoken && this.voiceTurnChat === gv.chatId && gv.chatId === this.replyChat()
 			: this.voiceTurnChat === this.replyChat();
 		const answersVoice = mine && Date.now() - this.voiceTurnAt < VOICE_TURN_WINDOW_MS;
+		const asked = mine && this.voiceAsked;
 		if (mine) {
 			this.voiceTurnAt = 0;
 			this.voiceTurnChat = null;
+			this.voiceAsked = false;
 			if (gv) gv.spoken = true;
 		}
 		if (!this.voiceEnabled && !answersVoice) return;
@@ -2537,14 +2563,32 @@ class TelegramDaemonBridge {
 			return;
 		}
 		this.gate.ttsStarted(decision.text);
+		const chat = this.replyChat();
+		// A group is addressed explicitly: the TTS env file's chat id is the operator's DM.
+		const thread = this.boundThread();
+		const dest = gv
+			? { explicitChat: gv.chatId, threadId: gv.threadId }
+			: isGroupChatId(chat)
+				? { explicitChat: chat, ...(thread !== undefined ? { threadId: thread } : {}) }
+				: {};
 		const result = await (this.config.sendVoiceNote ?? sendVoiceNote)({
 			text: decision.text,
 			voice,
-			expectedChatId: this.replyChat(),
-			...(gv ? { explicitChat: gv.chatId, threadId: gv.threadId } : {}),
+			expectedChatId: chat,
+			...dest,
 		});
 		this.gate.ttsEnded();
-		if (!result.sent) console.error(`[telegram-bridge] voice note failed: ${result.reason}`);
+		if (!result.sent) {
+			console.error(`[telegram-bridge] voice note failed: ${result.reason}`);
+			// Asked for voice and could not give it: say so once, in plain words, text only.
+			if (asked) await tgSend(this.config.telegramToken, chat, VOICE_NOT_SET_UP, "");
+		}
+	}
+
+	/** This cell's own local voice, from its configured identity. Never a hosted voice. */
+	private cellVoice(): string {
+		const who = vesselIdentity()?.name;
+		return (who && VOICE_BY_OFFICER[who]) || VOICE_BY_OFFICER.James;
 	}
 
 	// ── Boardroom ────────────────────────────────────────────────────
@@ -2557,6 +2601,19 @@ class TelegramDaemonBridge {
 	 * machine's ceiling, and two overlapping runs would fight over the same
 	 * message shape with no way to tell them apart in the chat.
 	 */
+	/**
+	 * The online card. Plain text: the vessel name and role come from env and must not be parsed
+	 * as Markdown. A group never gets it: eight cells restarting would post eight (#5221). In a
+	 * group it goes to the log; a private chat still gets it.
+	 */
+	private async announceStartup(mode: string): Promise<void> {
+		if (isGroupChatId(this.config.chatId)) {
+			console.log(`[telegram-bridge] ${this.greeting(mode).split("\n")[0]}`);
+			return;
+		}
+		await tgSend(this.config.telegramToken, this.config.chatId, this.greeting(mode), "");
+	}
+
 	/** Greeting by the vessel's own identity, listing the commands this bridge handles. */
 	private greeting(mode?: string): string {
 		return greetingText({

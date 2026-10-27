@@ -314,7 +314,7 @@ describe("F1: non-operator prompts never reach the operator's session", () => {
 
 	test("James's /goals routes through the cos router with cleaned text", async () => {
 		const { a, hits } = spied();
-		await a.handleTelegramMessage("/goals", GROUP, group(JAMES));
+		await a.handleTelegramMessage("/goals@eightbot", GROUP, group(JAMES));
 		expect(hits).toEqual(["cos:/goals"]);
 	});
 
@@ -371,8 +371,8 @@ describe("F1: non-operator prompts never reach the operator's session", () => {
 
 	test("/cancel and /unstick from the operator still call cancelCurrent", async () => {
 		const { a, hits } = spied();
-		await a.handleTelegramMessage("/cancel", GROUP, group(JAMES));
-		await a.handleTelegramMessage("/unstick", GROUP, group(JAMES));
+		await a.handleTelegramMessage("/cancel@eightbot", GROUP, group(JAMES));
+		await a.handleTelegramMessage("/unstick@eightbot", GROUP, group(JAMES));
 		expect(hits.filter((h) => h === "cancel").length).toBe(2);
 	});
 });
@@ -546,9 +546,12 @@ describe("groupAddressing", () => {
 	test("DMs are always addressed", () => {
 		expect(groupAddressing("hi", dm(JAMES), bot, cfg).addressed).toBe(true);
 	});
-	test("a bare command counts only from an operator", () => {
-		expect(groupAddressing("/status", group(JAMES), bot, cfg).addressed).toBe(true);
+	test("a bare command in a group counts for nobody, even an operator (#5221)", () => {
+		expect(groupAddressing("/status", group(JAMES), bot, cfg).addressed).toBe(false);
 		expect(groupAddressing("/status", group(ARTALE), bot, cfg).addressed).toBe(false);
+	});
+	test("a command naming this bot counts", () => {
+		expect(groupAddressing("/status@eightbot", group(JAMES), bot, cfg).addressed).toBe(true);
 	});
 	test("unknown bot username fails closed", () => {
 		expect(
@@ -599,7 +602,12 @@ describe("gate order and authority", () => {
 
 	test("F6: James can run /cancel /unstick /plan /review; Artale cannot", async () => {
 		const { a, hits } = mk();
-		for (const c of ["/cancel", "/unstick", "/plan x", "/review"]) {
+		for (const c of [
+			"/cancel@eightbot",
+			"/unstick@eightbot",
+			"/plan@eightbot x",
+			"/review@eightbot",
+		]) {
 			await a.handleTelegramMessage(c, GROUP, group(JAMES));
 		}
 		expect(hits).toContain("cancel");
@@ -716,7 +724,7 @@ describe("gate order and authority", () => {
 
 	test("N2: /status for the operator still routes to the task list", async () => {
 		const { a, hits } = mk();
-		await a.handleTelegramMessage("/status", GROUP, group(JAMES));
+		await a.handleTelegramMessage("/status@eightbot", GROUP, group(JAMES));
 		expect(hits).toEqual(["cos:/status"]);
 	});
 

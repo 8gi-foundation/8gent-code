@@ -43,7 +43,21 @@ export const VOICE_STATE_PATH =
 	process.env.EIGHT_TG_VOICE_STATE || join(homedir(), ".8gent", "telegram-voice.json");
 
 /** The outbound TTS bridge. Local KittenTTS, never a hosted voice API. */
-const KITTENTTS_BIN = join(homedir(), ".claude", "bin", "kittentts-telegram");
+const KITTENTTS_BIN =
+	process.env.EIGHT_TTS_BIN?.trim() || join(homedir(), ".claude", "bin", "kittentts-telegram");
+
+/**
+ * Does this message ask for the reply in voice? "in voice", "voice note", "say it",
+ * "reply by voice". Plain phrase match, no model: the same text always gives the same answer.
+ */
+export function asksForVoice(text: string): boolean {
+	return /\b(?:in (?:a )?voice|by voice|with (?:your )?voice|voice (?:note|message|reply)|say it|say that|speak it|read it (?:out|aloud))\b/i.test(
+		text,
+	);
+}
+
+/** Shown in place of a voice note when no local TTS is installed. Plain, no command named. */
+export const VOICE_NOT_SET_UP = "Voice is not set up on this cell yet, so this reply stays text.";
 
 /**
  * Longest reply we will speak, in characters. `kittentts-telegram` hard-trims

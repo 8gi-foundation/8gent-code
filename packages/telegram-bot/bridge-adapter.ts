@@ -52,6 +52,7 @@ import {
 	summariseStep,
 } from "./run-display";
 import { SessionStore } from "./session-store";
+import { stripReasoning } from "./strip-reasoning";
 import { type TaskAttachment, TaskRunner, type TaskRunnerEvents } from "./task-runner";
 import type { InlineKeyboardMarkup } from "./types";
 
@@ -372,7 +373,7 @@ export class TelegramBridgeAdapter {
 	private async onAgentStream(payload: EventPayloads["agent:stream"]): Promise<void> {
 		if (!this.current) return;
 		if (!payload.final) return;
-		const text = payload.chunk ?? "";
+		const text = stripReasoning(payload.chunk ?? "");
 		const trimmed = truncateForMobile(text);
 		const cur = this.current;
 		this.stopTyping(cur);
@@ -720,6 +721,8 @@ export class TelegramBridgeAdapter {
 	}
 
 	private async callTelegram(method: string, body: Record<string, unknown>): Promise<number> {
+		// Backstop: no outbound message or edit carries a reasoning block.
+		if (typeof body.text === "string") body = { ...body, text: stripReasoning(body.text) };
 		const thread = method === "sendMessage" ? this.resolveThread?.() : undefined;
 		if (thread !== undefined) body = { ...body, message_thread_id: thread };
 		const url = `${TELEGRAM_API}${this.telegramToken}/${method}`;

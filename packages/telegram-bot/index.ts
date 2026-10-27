@@ -12,6 +12,7 @@
  *   await bot.startPolling();
  */
 
+import { stripReasoning } from "./strip-reasoning";
 import type {
 	AlertSeverity,
 	BenchmarkReport,
@@ -168,7 +169,7 @@ export class TelegramBot {
 	 */
 	async sendMessage(text: string, options?: SendMessageOptions): Promise<number> {
 		const parseMode = options?.parseMode ?? "Markdown";
-		const chunks = splitMessage(text);
+		const chunks = splitMessage(stripReasoning(text));
 		let lastMessageId = 0;
 
 		for (let i = 0; i < chunks.length; i++) {
