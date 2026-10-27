@@ -101,7 +101,15 @@ export function fitsCompact(target: string, reason: string | undefined, columns:
 	return cellWidth(target) <= columns - used;
 }
 
-/** Cut `text` into lines of at most `width` cells, every character kept, newlines honoured. */
+/** Where a long command may break without cutting a word: after these. */
+const BREAK_AFTER = new Set([" ", "/", "-", ".", "_", "=", ",", ":"]);
+
+/**
+ * Cut `text` into lines of at most `width` cells, every character kept,
+ * newlines honoured. A line breaks after the last space or path mark in its
+ * back half when there is one, so "policy-engine" is not torn mid-word; a
+ * token longer than half a line is still cut hard. Joined, the lines are the text.
+ */
 export function wrapCells(text: string, width: number): string[] {
 	const w = Math.max(1, width);
 	const lines: string[] = [];
@@ -111,9 +119,22 @@ export function wrapCells(text: string, width: number): string[] {
 		for (const ch of para) {
 			const cw = cellWidth(ch);
 			if (used + cw > w && line !== "") {
-				lines.push(line);
-				line = "";
-				used = 0;
+				let at = -1;
+				let seen = 0;
+				const chars = [...line];
+				for (let i = 0; i < chars.length; i++) {
+					seen += cellWidth(chars[i]);
+					if (BREAK_AFTER.has(chars[i]) && seen * 2 >= w && i < chars.length - 1) at = i + 1;
+				}
+				if (at > 0) {
+					lines.push(chars.slice(0, at).join(""));
+					line = chars.slice(at).join("");
+					used = cellWidth(line);
+				} else {
+					lines.push(line);
+					line = "";
+					used = 0;
+				}
 			}
 			line += ch;
 			used += cw;
