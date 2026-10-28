@@ -755,7 +755,12 @@ function dispatchMessage(ws: any, config: GatewayConfig, raw: string): void {
 			}).then((r) => {
 				if (!r.handled) return runModelTurn();
 				inTurn(() => {
-					bus.emit("agent:stream", { sessionId: sid, chunk: r.text ?? "", final: true });
+					bus.emit("agent:stream", {
+						sessionId: sid,
+						chunk: r.text ?? "",
+						final: true,
+						...(r.audio ? { audio: r.audio } : {}),
+					});
 					bus.emit("session:end", { sessionId: sid, reason: "turn-complete" });
 				});
 			});

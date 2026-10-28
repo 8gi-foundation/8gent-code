@@ -18,7 +18,13 @@ export interface DaemonEvents {
 		success?: boolean;
 	};
 	"agent:thinking": { sessionId: string };
-	"agent:stream": { sessionId: string; chunk: string; final?: boolean };
+	"agent:stream": {
+		sessionId: string;
+		chunk: string;
+		final?: boolean;
+		/** The audio a handled slash line returns for a surface that cannot hear the host (#5245). */
+		audio?: { mime: string; base64: string };
+	};
 	"agent:error": { sessionId: string; error: string };
 	"memory:saved": { sessionId: string; key: string };
 	"approval:required": {

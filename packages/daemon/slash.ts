@@ -13,6 +13,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { BUILT_IN_SLASH_COMMANDS } from "../../apps/tui/src/lib/slash-commands";
 import { DJ, bedsDir } from "../music/dj";
+import { fetchDjAudio } from "../music/dj-fetch";
 import { getJobs } from "./cron";
 
 export interface SlashContext {
@@ -27,7 +28,12 @@ export interface SlashContext {
 export interface SlashResult {
 	handled: boolean;
 	text?: string;
+	/** A surface that cannot hear the host gets the audio itself (Day8, #5245). */
+	audio?: { mime: string; base64: string };
 }
+
+/** Channels whose /dj play returns the audio in the turn result instead of playing on the daemon's own speakers. */
+const AUDIO_RETURN_CHANNELS = new Set(["day8"]);
 
 /** Commands this module can run without a terminal. Everything else in the registry is TUI-only. */
 const HEADLESS = new Set([
@@ -163,6 +169,20 @@ export async function runSlash(
 		switch (name) {
 			case "dj":
 			case "music":
+				if (
+					name === "dj" &&
+					AUDIO_RETURN_CHANNELS.has(ctx.channel) &&
+					(args[0] ?? "").toLowerCase() === "play"
+				) {
+					const r = await fetchDjAudio(args.slice(1).join(" "));
+					return r.ok
+						? {
+								handled: true,
+								text: r.title,
+								audio: { mime: r.mime, base64: r.bytes.toString("base64") },
+							}
+						: { handled: true, text: r.reason };
+				}
 				return { handled: true, text: await runDj(name === "music" ? ["status"] : args) };
 			case "status":
 				return {

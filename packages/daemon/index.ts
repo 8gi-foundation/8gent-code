@@ -51,6 +51,7 @@ import { startGateway } from "./gateway";
 import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat";
 import { ensureTokenFile, removeDiscovery, writeDiscovery } from "./local-link";
+import { logLine } from "./log-line";
 import { resolveBestFreeModel } from "./model-resolver";
 import { resolveBindHost } from "./origin-guard";
 import {
@@ -127,7 +128,7 @@ function setupLogging(): void {
 
 	for (const event of events) {
 		bus.on(event, (payload: any) => {
-			const line = `${new Date().toISOString()} [${event}] ${JSON.stringify(payload)}\n`;
+			const line = logLine(event, payload);
 			try {
 				appendFileSync(LOG_PATH, line);
 			} catch {
