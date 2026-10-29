@@ -196,7 +196,8 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 						? theme.color.orangeAlt
 						: ui.muted,
 			bold: ctx.level === "danger",
-			priority: 2,
+			// A window that is nearly full outranks the standing facts beside it.
+			priority: ctx.level === "danger" || ctx.level === "warn" ? 1 : 2,
 		});
 	}
 	if (d.tokensPerSecond && d.tokensPerSecond > 0) {
@@ -226,7 +227,7 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 			key: "trace",
 			value: d.traceHint === "fold" ? "Enter folds steps" : "Enter shows steps",
 			color: ui.muted,
-			priority: 1,
+			priority: 2,
 		});
 	}
 	if (d.judge && d.judge !== "ready") {
@@ -239,7 +240,7 @@ export function buildFooterSegments(d: FooterData): FooterSegment[] {
 		});
 	}
 	if (d.daemonAttached) {
-		out.push({ key: "daemon", label: "daemon", value: "attached", color: ui.teal, priority: 1 });
+		out.push({ key: "daemon", label: "daemon", value: "attached", color: ui.teal, priority: 2 });
 	}
 	if (d.sandboxOff) {
 		out.push({
