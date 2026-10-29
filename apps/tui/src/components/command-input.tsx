@@ -181,6 +181,21 @@ export function splitTrailingEnter(value: string): { text: string; submit: boole
 // Module-level so remounts of the input (tab switches) do not repeat the line.
 let collisionLineShown = false;
 
+/** Rows the draft would take at this width (a long paste otherwise pushes the whole screen away). */
+export function draftRows(value: string, width: number): number {
+	const w = Math.max(8, width);
+	return value.split("\n").reduce((n, line) => n + Math.max(1, Math.ceil(line.length / w)), 0);
+}
+
+/** Above this many rows the draft folds to a summary plus its first line. */
+export const DRAFT_FOLD_ROWS = 8;
+
+export function draftSummary(value: string, narrow: boolean): string {
+	const lines = value.split("\n").length;
+	const what = lines > 1 ? `${lines} lines` : `${value.length} chars`;
+	return narrow ? `${what} - Enter sends` : `${what} - Enter sends, Backspace trims the end`;
+}
+
 export function CommandInput({
 	onSubmit,
 	onEmptyEnter,
@@ -349,6 +364,8 @@ export function CommandInput({
 	// Up/Down scroll through every row; Tab puts the picked command in.
 	const { stdout } = useStdout();
 	const terminalRows = stdout?.rows ?? 24;
+	const cols = stdout?.columns ?? 80;
+	const folded = !isProcessing && !maskInput && draftRows(value, cols - 4) > DRAFT_FOLD_ROWS;
 	const slashVisible = slashMenuVisibleRows(terminalRows);
 	const slashFilter = value.trimStart().slice(1);
 	const slashRows = useMemo(
@@ -658,8 +675,8 @@ export function CommandInput({
 				<PromptIndicator />
 				<Text> </Text>
 
-				{/* Text input with ghost overlay */}
-				<Box>
+				{/* Text input with ghost overlay; a long paste folds to its first row plus a summary */}
+				<Box height={folded ? 1 : undefined} overflowY={folded ? "hidden" : "visible"}>
 					<BufferedTextInput
 						focus={focused && !typingPaused}
 						mask={maskInput}
@@ -693,6 +710,12 @@ export function CommandInput({
 					{!isProcessing && isVisible && suggestion && <MutedText>{suggestion.text}</MutedText>}
 				</Box>
 			</Box>
+
+			{folded && (
+				<Box paddingLeft={2}>
+					<MutedText>{draftSummary(value, cols < 60)}</MutedText>
+				</Box>
+			)}
 
 			{/* Ghost suggestion hint */}
 			{!isProcessing && isVisible && suggestion && (
