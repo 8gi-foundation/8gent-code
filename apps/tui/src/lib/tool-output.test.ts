@@ -5,6 +5,7 @@ import {
 	EXPANDED_TAIL,
 	outputBody,
 	viewOutput,
+	wrapLine,
 } from "./tool-output";
 
 const lines = (n: number, p = "line") => Array.from({ length: n }, (_, i) => `${p} ${i + 1}`);
@@ -101,14 +102,38 @@ describe("expanded", () => {
 	});
 });
 
+describe("wrapLine", () => {
+	test("a line that fits is untouched", () => {
+		expect(wrapLine("short", 36)).toEqual(["short"]);
+	});
+	test("the end of a long line survives at 40 columns", () => {
+		const line = 'Received: {"provider":"ollama","model":"qwen3:14b","state":"loading"}';
+		const rows = wrapLine(line, 36);
+		expect(rows.length).toBeLessThanOrEqual(3);
+		expect(rows.join(" ")).toContain('"loading"}');
+		for (const r of rows) expect(r.length).toBeLessThanOrEqual(36);
+	});
+	test("a wrapped diff change keeps its marker, a file header does not", () => {
+		const rows = wrapLine("+\tconst model = breakModel(row.model, width, extra, more);", 30);
+		expect(rows[1].startsWith("+ ")).toBe(true);
+		expect(wrapLine(`+++ b/${"x".repeat(60)}`, 30)[1].startsWith("  ")).toBe(true);
+	});
+	test("a collapsed failure stays within its rows", () => {
+		const long = Array.from({ length: 12 }, () => "e".repeat(120));
+		const v = viewOutput(long, { status: "fail", expanded: false, width: 40, seq: 1 });
+		expect(v.lines.length).toBeLessThanOrEqual(18);
+	});
+});
+
 describe("fit", () => {
 	test("every line fits the width minus the gutter, ending in an ellipsis when cut", () => {
 		const long = "x".repeat(300);
 		for (const width of [40, 52, 100]) {
 			const v = viewOutput([long, "short"], { status: "fail", expanded: false, width, seq: 1 });
 			for (const l of v.lines) expect(l.length).toBeLessThanOrEqual(width - 4);
-			expect(v.lines[0].endsWith("…")).toBe(true);
-			expect(v.lines[1]).toBe("short");
+			// A cut line takes three rows, the last ending in an ellipsis, then the next line.
+			expect(v.lines[2].endsWith("…")).toBe(true);
+			expect(v.lines[3]).toBe("short");
 		}
 	});
 	test("a hint never exceeds the width either", () => {

@@ -37,6 +37,49 @@ function clip(s: string, width: number): string {
 	return s.length <= width ? s : `${s.slice(0, Math.max(0, width - 1))}…`;
 }
 
+/** Rows a collapsed failure may take, wrapped lines counted. */
+export const COLLAPSED_ROWS = 18;
+
+/** Rows one output line may take before it is cut. */
+export const LINE_ROWS = 3;
+
+/**
+ * One line as at most three rows. A line is cut only after the last row, so
+ * the cause at the end of "Expected ... Received ..." survives a 40 column
+ * screen. A break falls at a space or after - / : , when one sits in the back
+ * half of the row. Later rows are indented two cells, or carry the diff
+ * marker (+ or -) so a wrapped change still reads as one.
+ */
+export function wrapLine(s: string, room: number): string[] {
+	if (s.length <= room) return [s];
+	const marker = /^[+-](?![+-]{2})/.test(s) && room > 8 ? `${s[0]} ` : "  ";
+	const rows: string[] = [];
+	let rest = s;
+	let width = room;
+	while (rows.length < LINE_ROWS) {
+		const last = rows.length === LINE_ROWS - 1;
+		if (rest.length <= width) {
+			rows.push(rest);
+			break;
+		}
+		if (last) {
+			rows.push(`${rest.slice(0, Math.max(0, width - 1))}…`);
+			break;
+		}
+		let cut = width;
+		for (let i = width; i > Math.floor(width / 2); i--) {
+			if (rest[i] === " " || "/-:,".includes(rest[i - 1] ?? "")) {
+				cut = i;
+				break;
+			}
+		}
+		rows.push(rest.slice(0, cut).trimEnd());
+		rest = rest.slice(cut).trimStart();
+		width = Math.max(1, room - marker.length);
+	}
+	return rows.map((r, i) => (i === 0 ? r : marker + r));
+}
+
 /** Room a line has beside the row's two-cell gutter and indent. */
 export const GUTTER = 4;
 
@@ -46,16 +89,19 @@ export function viewOutput(
 ): OutputView {
 	const room = Math.max(1, opts.width - GUTTER);
 	const narrow = opts.width < 60;
-	const fit = (ls: string[]) => ls.map((l) => clip(l, room));
+	const fit = (ls: string[]) => ls.flatMap((l) => wrapLine(l, room));
 	if (body.length === 0) return { lines: [], hint: null };
 	if (!opts.expanded) {
 		if (opts.status === "ok") return { lines: [], hint: null };
 		if (body.length <= COLLAPSED_LINES) return { lines: fit(body), hint: null };
-		const hidden = body.length - COLLAPSED_LINES;
+		let tail = body.slice(-COLLAPSED_LINES);
+		// Wrapped rows count: drop the oldest lines until the tail fits its rows.
+		while (tail.length > 1 && fit(tail).length > COLLAPSED_ROWS) tail = tail.slice(1);
+		const hidden = body.length - tail.length;
 		const hint = narrow
 			? `${hidden} more  /out ${opts.seq}`
 			: `${hidden} more lines (^O or tap, /out ${opts.seq})`;
-		return { lines: fit(body.slice(-COLLAPSED_LINES)), hint: clip(hint, room) };
+		return { lines: fit(tail), hint: clip(hint, room) };
 	}
 	const close = narrow ? "tap to close" : "^O or tap to collapse";
 	if (body.length <= EXPANDED_HEAD + EXPANDED_TAIL) return { lines: fit(body), hint: close };
