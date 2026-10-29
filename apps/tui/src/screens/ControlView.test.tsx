@@ -214,4 +214,35 @@ describe("Control tab", () => {
 			app.unmount();
 		}
 	});
+	test("at 100 columns last and next times show whole; at 40 the last column stays 6 wide", async () => {
+		const jobs = path.join(home, ".8gent", "jobs");
+		fs.mkdirSync(jobs, { recursive: true });
+		fs.writeFileSync(
+			path.join(jobs, "a.json"),
+			JSON.stringify({
+				name: "autotune",
+				state: "running",
+				stage: "pilot",
+				last: "12 min ago",
+				next: "tonight 02:00",
+			}),
+		);
+		for (const [cols, whole] of [
+			[100, true],
+			[40, false],
+		] as const) {
+			const { out, stdin, stdout } = fakeTty();
+			stdout.columns = cols;
+			const app = render(<ControlView visible={true} onClose={() => {}} />, {
+				stdout: stdout as unknown as NodeJS.WriteStream,
+				stdin,
+				patchConsole: false,
+			});
+			await tick(150);
+			const frame = strip(out.text);
+			expect(frame.includes("12 min ago")).toBe(whole);
+			expect(frame.includes("tonight 02:00")).toBe(whole);
+			app.unmount();
+		}
+	});
 });

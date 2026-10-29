@@ -96,9 +96,14 @@ export function ControlView({ visible, onClose }: ControlViewProps) {
 	if (!snap) return <Text color={t.textTertiary}>CONTROL reading...</Text>;
 
 	const narrow = cols < 60;
-	const nextW = Math.min(12, Math.max(8, ...grouped.flat.map((r) => (r.next ?? "-").length)));
-	// Rows: marker 2 + name + stage + last 6 (+ next) + gaps, inside 2 cells of padding.
-	const fixed = 2 + 2 + 6 + (narrow ? 2 : 3 + nextW);
+	// Wide: last and next follow their longest value (a time is read whole, never "12 mi…").
+	// Narrow keeps last at 6 so the stage is not squeezed.
+	const nextW = Math.min(16, Math.max(8, ...grouped.flat.map((r) => (r.next ?? "-").length)));
+	const lastW = narrow
+		? 6
+		: Math.min(12, Math.max(6, ...grouped.flat.map((r) => (r.last ?? "-").length)));
+	// Rows: marker 2 + name + stage + last (+ next) + gaps, inside 2 cells of padding.
+	const fixed = 2 + 2 + lastW + (narrow ? 2 : 3 + nextW);
 	const room = Math.max(20, cols - fixed);
 	const nameWant = widest(grouped.flat.map((r) => r.name));
 	const stageWant = widest(grouped.flat.map((r) => r.stage));
@@ -141,8 +146,8 @@ export function ControlView({ visible, onClose }: ControlViewProps) {
 							const isSel = index === Math.min(sel, grouped.flat.length - 1);
 							const why = r.waitingOn ? `waiting on ${r.waitingOn}` : "";
 							const cells = narrow
-								? `${pad(r.name, nameW)} ${pad(r.stage, stageW)} ${pad(r.last ?? "-", 6)}`
-								: `${pad(r.name, nameW)} ${pad(r.stage, stageW)} ${pad(r.last ?? "-", 6)} ${pad(r.next ?? "-", nextW)}`;
+								? `${pad(r.name, nameW)} ${pad(r.stage, stageW)} ${pad(r.last ?? "-", lastW)}`
+								: `${pad(r.name, nameW)} ${pad(r.stage, stageW)} ${pad(r.last ?? "-", lastW)} ${pad(r.next ?? "-", nextW)}`;
 							// The reason is why a human is needed: it gets its own line, uncut, when it cannot fit beside the cells.
 							const inline = !why || (!narrow && 2 + cells.length + 1 + why.length <= cols - 2);
 							return (
