@@ -305,6 +305,36 @@ export function chunkWord(word: string, width: number): string[] {
 }
 
 /**
+ * Rows for one token wider than a row. A code chip holds a command: break it
+ * between its words (a flag like --port stays whole), keep the chip's padding
+ * on every row, and only cut inside a word that is wider than the row alone.
+ */
+function chipRows(text: string, w: number, chip: boolean): string[] {
+	const inner = chip ? text.slice(1, -1) : text;
+	if (!chip || !/\s/.test(inner) || w < 6) return chunkWord(text, w);
+	const room = w - 2;
+	const rows: string[] = [];
+	let cur = "";
+	const flush = () => {
+		if (cur) rows.push(` ${cur} `);
+		cur = "";
+	};
+	for (const word of inner.split(/\s+/).filter(Boolean)) {
+		if (stringWidth(word) > room) {
+			flush();
+			const parts = chunkWord(word, room);
+			for (const part of parts.slice(0, -1)) rows.push(` ${part} `);
+			cur = parts[parts.length - 1];
+			continue;
+		}
+		if (cur && stringWidth(cur) + 1 + stringWidth(word) > room) flush();
+		cur = cur ? `${cur} ${word}` : word;
+	}
+	flush();
+	return rows.length ? rows : chunkWord(text, w);
+}
+
+/**
  * Lay a run of spans out into rows no wider than `width`, the way the
  * reply is drawn. Words move to the next row whole; a code chip is one unit,
  * so it is never split across rows unless it is wider than a row itself; a
@@ -371,7 +401,7 @@ export function layoutLines(spans: Span[], width: number, keepSpaces = false): S
 			put(piece);
 			return;
 		}
-		chunkWord(tok.text, w).forEach((text, i) => {
+		chipRows(tok.text, w, Boolean(tok.code)).forEach((text, i) => {
 			if (i > 0) newline();
 			put({ ...piece, text });
 		});
