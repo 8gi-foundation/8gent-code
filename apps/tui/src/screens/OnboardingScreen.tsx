@@ -222,6 +222,9 @@ export function OnboardingScreen({
 	const { stdout } = useStdout();
 	const termWidth = stdout?.columns ?? 80;
 	const maxWidth = Math.min(termWidth - 4, 80);
+	// Phone and split-pane widths: one row per fact, no spacer rows, the
+	// description of a choice under its label instead of wrapped after it.
+	const narrow = termWidth < 60;
 
 	const isProviderCheck = !!providerCheck && !!onProviderResolve;
 	const isSelect = !isProviderCheck && !!selectChoices && selectChoices.length > 0 && !!onSelect;
@@ -323,15 +326,18 @@ export function OnboardingScreen({
 	// Build SelectInput items. Each row: "N. Label" + dim description rendered
 	// inline (SelectInput supports a custom itemComponent for richer rows).
 	const items = (selectChoices ?? []).map((c) => ({
-		label: `${c.value}. ${c.label}${c.description ? `  -  ${c.description}` : ""}`,
+		label: narrow
+			? `${c.value}. ${c.label}`
+			: `${c.value}. ${c.label}${c.description ? `  -  ${c.description}` : ""}`,
+		description: narrow ? c.description : undefined,
 		value: c.value,
 		key: c.value,
 	}));
 
 	return (
-		<Box flexDirection="column" paddingX={2} paddingY={1}>
+		<Box flexDirection="column" paddingX={narrow ? 1 : 2} paddingY={narrow ? 0 : 1}>
 			{/* Header */}
-			<Box marginBottom={1}>
+			<Box marginBottom={narrow ? 0 : 1}>
 				<Text color="cyan" bold>
 					{"  "}8gent Code
 				</Text>
@@ -342,9 +348,12 @@ export function OnboardingScreen({
 			</Box>
 
 			{/* Progress bar */}
-			<Box marginBottom={1}>
+			<Box marginBottom={narrow ? 0 : 1}>
 				<Text dimColor>
-					{"  "}Step {stepIndex + 1} of {totalSteps}{" "}
+					{narrow ? "" : "  "}
+					{narrow
+						? `${stepIndex + 1}/${totalSteps}`
+						: `Step ${stepIndex + 1} of ${totalSteps}`}{" "}
 				</Text>
 				{Array.from({ length: totalSteps }).map((_, i) => (
 					<Text
@@ -352,23 +361,35 @@ export function OnboardingScreen({
 						color={i < stepIndex ? "green" : i === stepIndex ? "cyan" : undefined}
 						dimColor={i > stepIndex}
 					>
-						{i < stepIndex ? " * " : i === stepIndex ? " > " : " - "}
+						{narrow
+							? i < stepIndex
+								? "*"
+								: i === stepIndex
+									? ">"
+									: "-"
+							: i < stepIndex
+								? " * "
+								: i === stepIndex
+									? " > "
+									: " - "}
 					</Text>
 				))}
 			</Box>
 
 			{/* Divider */}
-			<Box marginBottom={1}>
-				<Text color="cyan">
-					{"  "}
-					{"~".repeat(Math.min(50, maxWidth - 4))}
-				</Text>
-			</Box>
+			{!narrow && (
+				<Box marginBottom={1}>
+					<Text color="cyan">
+						{"  "}
+						{"~".repeat(Math.min(50, maxWidth - 4))}
+					</Text>
+				</Box>
+			)}
 
 			{/* Completed steps - compact */}
 			{/* Bounded onboarding steps (≤8 items); chained filter+map preserves filtered-index semantics for keys. */}
 			{/* react-doctor-disable-next-line react-doctor/js-combine-iterations */}
-			{steps
+			{(narrow ? [] : steps)
 				.filter((s) => s.status === "done")
 				.map((step) => (
 					<Box key={`done:${step.question}`} marginBottom={0} paddingLeft={2}>
@@ -386,7 +407,7 @@ export function OnboardingScreen({
 				))}
 
 			{/* Spacer between history and active question */}
-			{steps.some((s) => s.status === "done") && (
+			{!narrow && steps.some((s) => s.status === "done") && (
 				<Box marginY={1}>
 					<Text dimColor>
 						{"  "}
@@ -405,9 +426,9 @@ export function OnboardingScreen({
 				per row avoids the bug entirely. */}
 			<Box
 				flexDirection="column"
-				paddingX={2}
-				paddingY={1}
-				marginBottom={1}
+				paddingX={narrow ? 1 : 2}
+				paddingY={narrow ? 0 : 1}
+				marginBottom={narrow ? 0 : 1}
 				borderStyle="round"
 				borderColor="cyan"
 				width={maxWidth}
@@ -497,15 +518,28 @@ export function OnboardingScreen({
 								{isSelected ? ">" : " "}{" "}
 							</Text>
 						)}
-						itemComponent={({ isSelected, label }) => (
-							<Text color={isSelected ? "#E8610A" : undefined} bold={isSelected}>
-								{label}
-							</Text>
+						itemComponent={({
+							isSelected,
+							label,
+							description,
+						}: {
+							isSelected?: boolean;
+							label: string;
+							description?: string;
+						}) => (
+							<Box flexDirection="column">
+								<Text color={isSelected ? "#E8610A" : undefined} bold={isSelected}>
+									{label}
+								</Text>
+								{description ? <Text dimColor>{`   ${description}`}</Text> : null}
+							</Box>
 						)}
 					/>
-					<Box marginTop={1}>
+					<Box marginTop={narrow ? 0 : 1}>
 						<Text dimColor>
-							Arrow keys to navigate, Enter to select. Type a number then Enter for shortcut.
+							{narrow
+								? "Arrows, Enter. Or type a number."
+								: "Arrow keys to navigate, Enter to select. Type a number then Enter for shortcut."}
 							{digitBuffer ? `  (typed: ${digitBuffer})` : ""}
 						</Text>
 					</Box>
