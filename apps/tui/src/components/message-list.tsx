@@ -45,6 +45,7 @@ import {
 	layoutLines,
 	markerWidth,
 	parseBlocks,
+	tableLines,
 } from "../lib/inline-markdown.js";
 import { type MarkStream, holdLivingMark } from "../lib/living-mark.js";
 import { motionEnabled } from "../lib/motion.js";
@@ -1016,6 +1017,22 @@ function MarkdownBody({
 			{blocks.map((block, index) => {
 				const key = `${block.kind}-${index}`;
 				if (block.kind === "blank") return <Text key={key}> </Text>;
+				if (block.kind === "table") {
+					return (
+						<Box key={key} flexDirection="column" width={wrapWidth}>
+							{tableLines(block, wrapWidth).map((l, li) => (
+								// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+								<Text
+									key={li}
+									bold={l.tone === "head"}
+									color={l.tone === "body" || l.tone === "head" ? t.textPrimary : t.textTertiary}
+								>
+									{l.text || " "}
+								</Text>
+							))}
+						</Box>
+					);
+				}
 				if (block.kind === "code") {
 					const w = blockWrapWidth(block, wrapWidth);
 					return (

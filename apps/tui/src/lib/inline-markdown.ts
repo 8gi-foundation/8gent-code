@@ -33,6 +33,7 @@ export type Block =
 	| { kind: "para"; spans: Span[]; heading?: boolean; keepSpaces?: boolean }
 	| { kind: "item"; depth: number; marker: string; spans: Span[] }
 	| { kind: "code"; lang: string; lines: string[] }
+	| { kind: "table"; head: string[]; rows: string[][] }
 	| { kind: "blank" };
 
 export interface MarkdownOptions {
@@ -52,6 +53,14 @@ export const CODE_GUTTER = 2;
 const FENCE = /^\s*```\s*([\w+#.-]*)\s*$/;
 const ITEM = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/;
 const HEADING = /^#{1,6}\s+(.*)$/;
+const TABLE_SEP = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+const splitRow = (line: string): string[] =>
+	line
+		.trim()
+		.replace(/^\|/, "")
+		.replace(/\|$/, "")
+		.split("|")
+		.map((c) => plainInline(c.trim()));
 /** Two or more leading spaces (not a list item, not a fence): hand-aligned text. */
 const INDENTED = /^ {2,}\S/;
 // A code span, or a bold run. Code is matched first at any position, so a
@@ -185,6 +194,24 @@ export function parseBlocks(content: string, opts: MarkdownOptions = {}): Block[
 				i++;
 			}
 			blocks.push({ kind: "code", lang: fence[1] ?? "", lines: body.length ? body : [""] });
+			continue;
+		}
+		if (
+			line.includes("|") &&
+			i + 1 < lines.length &&
+			lines[i + 1].includes("-") &&
+			TABLE_SEP.test(lines[i + 1])
+		) {
+			closeItem();
+			const head = splitRow(line);
+			const rows: string[][] = [];
+			i += 2;
+			while (i < lines.length && lines[i].trim() && lines[i].includes("|")) {
+				rows.push(splitRow(lines[i]));
+				i++;
+			}
+			i--;
+			blocks.push({ kind: "table", head, rows });
 			continue;
 		}
 		if (!line.trim()) {
@@ -403,9 +430,67 @@ export function blockWrapWidth(block: Block, width: number): number {
 	return Math.max(1, width);
 }
 
+export interface TableLine {
+	text: string;
+	/** "head" bold, "rule" thin, "label" dim label with a value after it. */
+	tone: "head" | "rule" | "body" | "label" | "gap";
+}
+
+const GAP = "  ";
+
+/**
+ * A pipe table drawn whole. Wide enough: aligned columns under a rule.
+ * Too narrow: one record per row, each column a "label value" line; a value
+ * that does not fit beside its label goes on the next line, indented. No cell
+ * is cut and none is split unless a single word is wider than the column.
+ */
+export function tableLines(
+	block: { head: string[]; rows: string[][] },
+	width: number,
+): TableLine[] {
+	const n = block.head.length;
+	const cell = (r: string[], c: number) => r[c] ?? "";
+	const cw = block.head.map((h, c) =>
+		Math.max(stringWidth(h), ...block.rows.map((r) => stringWidth(cell(r, c)))),
+	);
+	const grid = cw.reduce((a, b) => a + b, 0) + GAP.length * (n - 1);
+	const pad = (t: string, w: number) => t + " ".repeat(Math.max(0, w - stringWidth(t)));
+	if (grid <= width) {
+		const line = (r: string[]) =>
+			cw
+				.map((w, c) => pad(cell(r, c), w))
+				.join(GAP)
+				.trimEnd();
+		return [
+			{ text: line(block.head), tone: "head" },
+			{ text: cw.map((w) => "\u2500".repeat(w)).join(GAP), tone: "rule" },
+			...block.rows.map((r) => ({ text: line(r), tone: "body" as const })),
+		];
+	}
+	const lw = Math.min(Math.max(...block.head.map((h) => stringWidth(h))), Math.floor(width / 3));
+	const out: TableLine[] = [];
+	block.rows.forEach((r, ri) => {
+		if (ri > 0) out.push({ text: "", tone: "gap" });
+		block.head.forEach((h, c) => {
+			const v = cell(r, c);
+			const room = width - lw - GAP.length;
+			if (stringWidth(v) <= room) {
+				out.push({ text: `${pad(h, lw)}${GAP}${v}`, tone: c === 0 ? "head" : "label" });
+			} else {
+				out.push({ text: h, tone: c === 0 ? "head" : "label" });
+				for (const part of chunkWord(v, Math.max(4, width - GAP.length)))
+					out.push({ text: GAP + part, tone: "body" });
+			}
+		});
+	});
+	return out;
+}
+
 /** Rows one block draws in a column `width` wide. */
 export function blockRows(block: Block, width: number): number {
 	switch (block.kind) {
+		case "table":
+			return tableLines(block, width).length;
 		case "blank":
 			return 1;
 		case "code": {
