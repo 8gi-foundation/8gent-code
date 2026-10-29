@@ -134,3 +134,24 @@ test("a grabbed tab keeps every tab on a narrow bar and the hint takes one row",
 		for (const r of rows) expect(r.length).toBeLessThanOrEqual(w);
 	}
 });
+
+test("a bar the full layout overflows goes compact, so no tab folds into +N at 60 to 100 columns", () => {
+	const eight = [
+		"Chat 1",
+		"Chat 2",
+		"Chat 3",
+		"Notes",
+		"Questions",
+		"Projects",
+		"Terminal",
+		"Settings",
+	].map((t, i) => mk(i, "notes", t, i === 2));
+	for (const w of [60, 80, 100]) {
+		const out = strip(
+			renderToString(<TabBar width={w} tabs={eight} onSwitch={() => {}} />, { columns: w }),
+		);
+		expect(out).not.toContain("+");
+		expect(out).toContain("8Sett");
+		expect(out.split("\n")[0]?.length).toBeLessThanOrEqual(w);
+	}
+});

@@ -137,6 +137,10 @@ const GAP = "   ";
 /** Below this many columns the titles give way and the lamps stay. */
 export const COMPACT_COLS = 60;
 const COMPACT_GAP = " ";
+/** Letters an inactive compact tab may keep of its title, most first. */
+const PEEKS = [10, 8, 6, 5, 4, 3, 2, 1];
+/** Under 60 columns the peek stays three letters at most (pinned by tab-lamps tests). */
+const NARROW_PEEKS = [3, 2, 1];
 /** Narrowest an active title is cut to on a compact bar. */
 const ACTIVE_TITLE_MIN = 8;
 
@@ -401,8 +405,11 @@ export function TabBar({
 	const dragging = grabbedTabId !== null && grabbedTabId !== undefined;
 
 	const ascii = glyphs().rule === "-";
-	const compact = width < COMPACT_COLS;
-	const gap = compact ? COMPACT_GAP : GAP;
+	// Compact below 60 columns, and also on any wider bar the full layout would
+	// overflow: then every tab stays on the bar with as much of its title as fits
+	// rather than the last ones folding into "+N".
+	let compact = width < COMPACT_COLS;
+	let gap = compact ? COMPACT_GAP : GAP;
 	const states: Record<string, LampState> = {};
 	for (const tab of visibleTabs) {
 		const flags = lampFor?.(tab.id);
@@ -447,15 +454,23 @@ export function TabBar({
 					: {}),
 			};
 		});
-	// Narrow bars: inactive tabs keep the first letters of their title, as many
-	// as fit (3 down to 0), so a number is not all that tells them apart.
+	const endOf = (l: TabCell[]) => {
+		const e = cellSpans(l, gap).at(-1);
+		return e ? e.x + e.width : 0;
+	};
+	if (!compact && endOf(buildCells(0)) > width) {
+		compact = true;
+		gap = COMPACT_GAP;
+	}
+	// Compact bars: inactive tabs keep the first letters of their title, as many
+	// as fit (PEEKS down to 0), so a number is not all that tells them apart.
 	let fullCells = buildCells(0);
 	if (compact) {
 		const end = (l: TabCell[]) => {
 			const e = cellSpans(l, gap).at(-1);
 			return e ? e.x + e.width : 0;
 		};
-		for (const peek of [3, 2, 1]) {
+		for (const peek of width < COMPACT_COLS ? NARROW_PEEKS : PEEKS) {
 			const tryCells = buildCells(peek);
 			if (end(tryCells) <= width) {
 				fullCells = tryCells;
