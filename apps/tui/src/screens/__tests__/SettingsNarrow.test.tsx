@@ -111,3 +111,11 @@ test("40 columns: Tab advances from categories that have no fields", async () =>
 	expect(strip(last)).toContain("Voice  1 of 7");
 	inst.unmount();
 });
+
+test("40 columns: fits 24 rows, heading on one line, rule not cut", async () => {
+	const f = await frame(40);
+	const rows = f.split("\n");
+	expect(rows.length).toBeLessThanOrEqual(24);
+	expect(rows.some((l) => l.includes("Settings") && l.includes("categories"))).toBe(true);
+	expect(rows.filter((l) => l.includes("───") && l.includes("…"))).toEqual([]);
+});

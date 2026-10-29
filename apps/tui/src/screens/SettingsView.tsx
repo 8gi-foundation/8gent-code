@@ -507,6 +507,8 @@ export function SettingsView({
 	const { stdout } = useStdout();
 	// Under 60 columns a long label wraps whole instead of ending in an ellipsis.
 	const narrow = (stdout?.columns ?? 100) < 60;
+	// The rule never outruns the row: 60 wide, or the screen minus the side padding.
+	const rule = Math.min(60, (stdout?.columns ?? 100) - 2);
 	const [categoryIndex, setCategoryIndex] = useState(0);
 	const [fieldIndex, setFieldIndex] = useState(0);
 	const [ctxRowIndex, setCtxRowIndex] = useState(0);
@@ -819,14 +821,16 @@ export function SettingsView({
 			<Box marginBottom={1}>
 				<Heading>Settings</Heading>
 				<MutedText>
-					{"  "}~/.8gent/settings.json - {CATEGORIES.length} categor
+					{"  "}
+					{narrow ? "" : "~/.8gent/settings.json - "}
+					{CATEGORIES.length} categor
 					{CATEGORIES.length === 1 ? "y" : "ies"}
 				</MutedText>
 			</Box>
 
-			<Divider />
+			<Divider width={rule} />
 
-			<Box flexDirection="row" paddingY={1}>
+			<Box flexDirection="row" paddingY={narrow ? 0 : 1}>
 				{/* Left column: categories (under 60 columns it becomes the one-row strip below) */}
 				{narrow ? null : (
 					<Box flexDirection="column" width={20} marginRight={2}>
@@ -921,7 +925,7 @@ export function SettingsView({
 								const display =
 									mode === "edit" && selected ? `${editBuffer}_` : formatValue(f, f.get(settings));
 								return (
-									<Box key={f.id} flexDirection="column" marginBottom={1}>
+									<Box key={f.id} flexDirection="column" marginBottom={narrow ? 0 : 1}>
 										<Box>
 											<Text color={selected ? "yellow" : undefined}>{selected ? ">" : " "} </Text>
 											<Box flexShrink={1} minWidth={0}>
@@ -949,7 +953,7 @@ export function SettingsView({
 				</Box>
 			</Box>
 
-			<Divider />
+			<Divider width={rule} />
 
 			{mode === "edit" ? (
 				<MutedText>
