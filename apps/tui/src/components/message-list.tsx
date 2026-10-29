@@ -49,6 +49,7 @@ import {
 } from "../lib/inline-markdown.js";
 import { type MarkStream, holdLivingMark } from "../lib/living-mark.js";
 import { motionEnabled } from "../lib/motion.js";
+import { wrapNotice } from "../lib/notice-wrap.js";
 import { drawsColour, glyphs } from "../lib/term-caps.js";
 import { useToolOutputVersion } from "../lib/tool-output-state.js";
 import { type ChatItem, type ToolTrailEntry, buildChatItems } from "../lib/tool-trail.js";
@@ -254,6 +255,9 @@ function estimateMessageRows(
 	const w = Math.max(1, wrapWidth);
 	if (message.compaction) return compactionRows(message.compaction, w);
 	if (message.role === "system") {
+		if (!message.content.includes("\n") && message.content.length > Math.max(20, wrapWidth - 10)) {
+			return wrapNotice(message.content, w - 2).length + (wrapWidth >= 60 ? 2 : 0) + 1;
+		}
 		const safe = breakLongTokens(message.content, w);
 		let rows = 0;
 		for (const line of safe.split("\n")) {
@@ -802,8 +806,10 @@ function MessageItem({
 		return fadeWrap(
 			<Box flexDirection="column" marginBottom={1} paddingLeft={1}>
 				{ruled ? <Text dimColor>{"─".repeat(3)}</Text> : null}
-				<Box width={contentWidth - 2}>
-					<SystemMessageText content={message.content} />
+				<Box width={contentWidth - 2} flexDirection="column">
+					{wrapNotice(message.content, contentWidth - 2).map((row, i) => (
+						<SystemMessageText key={i} content={row} />
+					))}
 				</Box>
 				{ruled ? <Text dimColor>{"─".repeat(3)}</Text> : null}
 			</Box>,
