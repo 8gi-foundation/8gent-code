@@ -77,10 +77,10 @@ describe("the sheet fits the rows on screen", () => {
 		expect(paletteGeometry(52, 30).visibleRows).toBe(5);
 	});
 
-	test("52x16 keys-up: three rows, the count, the close key and the bottom border all draw", () => {
+	test("52x16 keys-up: four rows, the place, the close key and the bottom border all draw", () => {
 		const ls = frame(view(52, 16), 52, 16);
 		expect(ls.length).toBeLessThanOrEqual(16 - 3);
-		expect(ls.some((l) => l.includes("↓ 37 more"))).toBe(true);
+		expect(ls.some((l) => l.includes("1-4/40"))).toBe(true);
 		expect(ls.some((l) => l.includes("[Esc] close"))).toBe(true);
 		expect(ls.at(-1)).toMatch(/^╰─+╯$/);
 		if (process.env.PALETTE_FRAMES) {
@@ -103,7 +103,7 @@ describe("the sheet fits the rows on screen", () => {
 
 	test("never fewer than two rows, and a tap lands on the row it shows", () => {
 		expect(paletteGeometry(52, 8).visibleRows).toBe(2);
-		expect(paletteRowSpans(52, 40, 0, 16).length).toBe(3);
+		expect(paletteRowSpans(52, 40, 0, 16).length).toBe(4);
 		expect(paletteRowSpans(52, 40, 0, 30).length).toBe(5);
 	});
 });

@@ -138,8 +138,8 @@ describe("renders inside the screen", () => {
 			await sleep(40);
 			for (const l of lines()) expect([...l].length).toBeLessThanOrEqual(cols);
 			const rowsText = lines().filter((l) => /^│ [◆○] \//.test(l));
-			// 40x24 leaves 13 rows after the chrome: three two-line rows fit with the caps (#5034).
-			expect(rowsText.length).toBe(rows < 30 ? 3 : cols < 60 ? 5 : 7);
+			// 40x24 leaves 13 rows after the chrome: four two-line rows fit with the caps and the place on the query line (#5034).
+			expect(rowsText.length).toBe(rows < 30 ? 4 : cols < 60 ? 5 : 7);
 			const nameCols = new Set(rowsText.map((l) => l.indexOf("/")));
 			expect(nameCols.size).toBe(1);
 		});
@@ -253,5 +253,15 @@ describe("tap", () => {
 		hitTest(spans[2]!.dx, spans[2]!.dy)?.action();
 		await sleep(SETTLE_HOLD_MS + 80);
 		expect(calls).toEqual(["close", "run:help"]);
+	});
+});
+
+describe("a phone shows its place on the query line", () => {
+	test("40x24: one count, no 'n more' lines, window moves with the cursor", async () => {
+		const { lines } = mount(40, 24);
+		await sleep(40);
+		const ls = lines();
+		expect(ls.some((l) => /» .*1-4\/7 │$/.test(l))).toBe(true);
+		expect(ls.some((l) => l.includes("more"))).toBe(false);
 	});
 });

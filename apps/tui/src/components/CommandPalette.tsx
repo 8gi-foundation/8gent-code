@@ -92,6 +92,8 @@ const MIN_VISIBLE_ROWS = 2;
  */
 const FIXED_SHEET_ROWS = 6;
 const WIDE_EXTRA_ROWS = 2;
+/** A phone shows its place ("1-4/92") on the query line, so the two "n more" lines are not reserved. */
+const NARROW_FIXED_SHEET_ROWS = 4;
 
 export function paletteGeometry(columns: number, rows?: number): PaletteGeometry {
 	const narrow = columns < PALETTE_NARROW_COLS;
@@ -103,7 +105,9 @@ export function paletteGeometry(columns: number, rows?: number): PaletteGeometry
 		rows === undefined
 			? most
 			: Math.floor(
-					(rows - chromeRows(rows, columns) - FIXED_SHEET_ROWS - (narrow ? 0 : WIDE_EXTRA_ROWS)) /
+					(rows -
+						chromeRows(rows, columns) -
+						(narrow ? NARROW_FIXED_SHEET_ROWS : FIXED_SHEET_ROWS + WIDE_EXTRA_ROWS)) /
 						rowHeight,
 				);
 	return {
@@ -130,7 +134,7 @@ export function paletteRowSpans(
 	const g = paletteGeometry(columns, rows);
 	const { start, end } = computeWindow(total, activeIndex, g.visibleRows);
 	// Border, query line, and (from 60 columns) the rule; a phone has no rule: every line counts.
-	const top = (g.narrow ? 2 : 3) + (start > 0 ? 1 : 0);
+	const top = g.narrow ? 2 : 3 + (start > 0 ? 1 : 0);
 	const out = [];
 	for (let i = start; i < end; i++) {
 		out.push({ index: i, dx: 2, dy: top + (i - start) * g.rowHeight, w: g.inner, h: g.rowHeight });
@@ -354,13 +358,19 @@ export function CommandPaletteView({
 				<Text color={t.orange}>» </Text>
 				<Text color={t.cream}>{query || ""}</Text>
 				<Text color={t.textTertiary}>{query ? "" : "type to filter…"}</Text>
+				{g.narrow && total > 0 ? (
+					<>
+						<Box flexGrow={1} />
+						<Text color={t.textTertiary}>{`${start + 1}-${end}/${total}`}</Text>
+					</>
+				) : null}
 			</Box>
 			{g.narrow ? null : (
 				<Box>
 					<Text color={t.border}>{gl.rule.repeat(g.inner)}</Text>
 				</Box>
 			)}
-			{hiddenAbove > 0 ? (
+			{hiddenAbove > 0 && !g.narrow ? (
 				<Box>
 					<Text color={t.textTertiary}>
 						{"  "}
@@ -434,7 +444,7 @@ export function CommandPaletteView({
 					);
 				})
 			)}
-			{hiddenBelow > 0 ? (
+			{hiddenBelow > 0 && !g.narrow ? (
 				<Box>
 					<Text color={t.textTertiary}>
 						{"  "}
