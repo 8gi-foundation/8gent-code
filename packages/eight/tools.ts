@@ -34,6 +34,7 @@ import {
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { writeScopeLine } from "../ai/write-scope";
 import { writeShapeLine } from "../ai/write-shape";
+import { ToolArgGuard } from "../schema/tool-args";
 import {
 	type FileOutline,
 	type RepoIndex,
@@ -2387,6 +2388,9 @@ export class ToolExecutor {
 
 	private rateLimiter = new RateLimiter();
 
+	/** Logs tool-call args that break the tool's declared schema; EIGHT_SCHEMA_CHECK=1 only, never blocks. */
+	private readonly argGuard = new ToolArgGuard(() => this.getToolDefinitions());
+
 	/** Is a person at the keyboard? Decides the extension_call default policy (G1). */
 	private readonly attended: boolean;
 
@@ -2514,6 +2518,7 @@ export class ToolExecutor {
 			const refusal = await planModeRefusal(toolName, args);
 			if (refusal) return refusal;
 		}
+		this.argGuard.observe(toolName, args);
 		let raw: string;
 		try {
 			raw = await this.executeRaw(toolName, args);
