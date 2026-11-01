@@ -135,13 +135,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "model",
 		aliases: ["m"],
-		description: "Select LLM model (↑↓ to scroll)",
+		description: "Choose the model",
 		usage: "/model [name]",
 	},
 	{
 		name: "provider",
 		aliases: ["pr"],
-		description: "Select LLM provider (↑↓ to scroll)",
+		description: "Choose the provider",
 		usage: "/provider [name]",
 	},
 	{
@@ -259,7 +259,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "export",
 		aliases: ["save"],
-		description: "Export the session: <file>.jsonl for the session file, else HTML",
+		description: "Save the session as HTML, or as .jsonl if you name it so",
 		usage: "/export [file.jsonl]",
 	},
 	{
@@ -277,13 +277,13 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "fork",
 		aliases: ["f"],
-		description: "Copy the conversation so far into a new session and continue there",
+		description: "Branch this conversation into a new session",
 		usage: "/fork [name]",
 	},
 	{
 		name: "rewind",
 		aliases: ["rw"],
-		description: "Time-travel: rewind 8gent state to an earlier checkpoint",
+		description: "Go back to an earlier checkpoint",
 		usage: "/rewind [n|list]",
 	},
 	{
@@ -391,7 +391,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "resume",
 		aliases: ["res"],
-		description: "Resume a session: searchable picker, or /resume <id or name>",
+		description: "Pick up an earlier session (or /resume <id or name>)",
 		usage: "/resume [id|name]",
 	},
 	{
@@ -495,7 +495,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "settings",
 		aliases: [],
-		description: "Open settings view (toggle voice, performance, providers, models)",
+		description: "Open settings (voice, performance, providers, models)",
 		usage: "/settings",
 	},
 	{

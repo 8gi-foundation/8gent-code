@@ -1,29 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { appendClosingQuestionIfNeeded } from "./closing-prompt.js";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
-const reply = [
-	{
-		role: "assistant",
-		content:
-			"Hi, I'm 8gent. This folder (~) is not a git repo. I won't look through it unless you ask.",
-	},
-];
-
-describe("closing question", () => {
-	test("in a git repo it still offers the repo wording", () => {
-		const out = appendClosingQuestionIfNeeded(reply, true);
-		expect(out[0].content).toContain("another part of the repo");
+// A reply ends where the model ended it. No canned follow-up line is appended
+// (8gent-code #5). Say "5 keep" to James's thread to restore it.
+describe("no canned closing line", () => {
+	test("the closing-prompt module is gone", () => {
+		expect(existsSync(join(import.meta.dir, "closing-prompt.ts"))).toBe(false);
 	});
 
-	test("outside a git repo it never mentions the repo", () => {
-		const out = appendClosingQuestionIfNeeded(reply, false);
-		expect(out[0].content).toContain("Where should we steer next");
-		expect(out[0].content).not.toContain("repo, or");
-		expect(out[0].content.endsWith("deeper here, or something new to build?")).toBe(true);
-	});
-
-	test("a reply that already asks is left alone", () => {
-		const asked = [{ role: "assistant", content: "x".repeat(60) + " Which file should I open?" }];
-		expect(appendClosingQuestionIfNeeded(asked, false)).toBe(asked);
+	test("app.tsx never appends a steering question", () => {
+		const src = readFileSync(join(import.meta.dir, "..", "app.tsx"), "utf8");
+		expect(src).not.toContain("appendClosingQuestionIfNeeded");
+		expect(src).not.toContain("Where should we steer next");
 	});
 });

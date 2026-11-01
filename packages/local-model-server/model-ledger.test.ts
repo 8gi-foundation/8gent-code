@@ -125,7 +125,7 @@ describe("model ledger", () => {
 			},
 		});
 		expect(r.status).toBe("unreachable");
-		expect(r.lines.join(" ")).toContain("could not be read");
+		expect(r.lines.join(" ")).toContain("Could not read which build");
 		expect(fs.existsSync(ledgerPath(h))).toBe(false);
 	});
 
