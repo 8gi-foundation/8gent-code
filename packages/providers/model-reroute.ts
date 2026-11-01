@@ -1,0 +1,401 @@
+/**
+ * 8gent Code - Local Model Auto-Reroute
+ *
+ * A local (Ollama / LM Studio) turn must never surface a raw provider
+ * "model not found" error to the user. The daemon can be pointed at a model
+ * that is not installed (a stale `~/.8gent/config.json` / `roles.json`, or a
+ * failover chain whose entries were never pulled). Historically that produced,
+ * verbatim on the iOS app, `ollama chat completions 404: model 'qwen3.6:27b'
+ * not found`.
+ *
+ * This module makes that path resilient: when a request fails because the model
+ * is not available, it queries the models that ARE installed, picks the best
+ * one, and retries the turn with it. Only when there is genuinely no usable
+ * model anywhere (nothing installed locally AND no cloud key configured) does it
+ * return a clean, human message - never a raw provider 404.
+ *
+ * Provider-agnostic: it keys off the error shape, not the provider, and reuses
+ * the installed-model probe in `orchestration/local-model-detect` (loaded lazily
+ * to keep the providers -> orchestration import graph acyclic).
+ */
+import { isLocalProvider } from "./local-providers";
+
+/** Minimal shape of a detected, installed local model (mirrors DetectedModel). */
+export interface InstalledModel {
+	provider: string;
+	model: string;
+	/** Heuristic capability score; higher = stronger. Embeddings score 0. */
+	score: number;
+	/**
+	 * Whether the model accepts a native `tools` payload. `false` = the tools
+	 * probe returned 400 (broken chat template); never reroute agentic work to
+	 * it (Law 2, issue #2747). Undefined = not probed.
+	 */
+	toolCapable?: boolean;
+}
+
+/**
+ * An Ollama entry listed by content hash instead of a name (llamacpp:<sha256>,
+ * or a bare 32+ hex digest). It tells a person nothing, so it is never chosen
+ * as a fallback.
+ */
+export function isHashNamedModel(model: string): boolean {
+	const m = model.trim().toLowerCase();
+	const tail = m.split(":").pop() ?? "";
+	return /^[0-9a-f]{32,}$/.test(tail) || /^[0-9a-f]{32,}$/.test(m);
+}
+
+/** A model name a person can read: a hash-only local model becomes "an unnamed local model (<short hash>)". */
+export function readableModelName(model: string): string {
+	if (!isHashNamedModel(model)) return model;
+	const tail = model.trim().toLowerCase().split(":").pop() ?? "";
+	return `an unnamed local model (${tail.slice(0, 12)})`;
+}
+
+/** Cloud providers whose presence means "a model is still reachable". */
+const CLOUD_KEY_ENV_VARS = [
+	"OPENROUTER_API_KEY",
+	"ANTHROPIC_API_KEY",
+	"OPENAI_API_KEY",
+	"GROQ_API_KEY",
+	"XAI_API_KEY",
+	"MISTRAL_API_KEY",
+	"TOGETHER_API_KEY",
+	"FIREWORKS_API_KEY",
+	"REPLICATE_API_TOKEN",
+	"DEEPSEEK_API_KEY",
+] as const;
+
+/** True when at least one cloud provider key is configured in the environment. */
+export function hasCloudModelKey(): boolean {
+	return CLOUD_KEY_ENV_VARS.some((k) => (process.env[k]?.trim().length ?? 0) > 0);
+}
+
+/**
+ * Detect whether an error means the requested model is not available on the
+ * local provider (as opposed to the server being down, a timeout, or an abort).
+ *
+ * Matches the two ways this shows up:
+ *   - Ollama/LM Studio HTTP layer: `... chat completions 404: ... not found`
+ *     (the exact string `text-tool-endpoint.ts` throws), any `404` + "model",
+ *   - Ollama native `/api/chat`: body text `model '<id>' not found` /
+ *     `model "<id>" not found` / `try pulling it first`.
+ *
+ * Deliberately does NOT match reachability failures (ECONNREFUSED, fetch failed,
+ * timeouts) - those keep the existing "is Ollama running?" handling.
+ */
+export function isModelNotFoundError(err: unknown): boolean {
+	const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
+	if (!msg) return false;
+	// Reachability failures are not model-not-found - let them fall through.
+	if (
+		/econnrefused|enotfound|eai_again|fetch failed|unable to connect|connection refused/.test(msg)
+	) {
+		return false;
+	}
+	if (/model .*not found/.test(msg)) return true;
+	if (/try pulling it first|pull the model|no such model/.test(msg)) return true;
+	// A 404 from a chat-completions call is, in practice, a missing model.
+	if (msg.includes("404") && (msg.includes("model") || msg.includes("chat completions"))) {
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Detect whether an error means the local provider itself is UNHEALTHY - the
+ * model is nominally "there" but the backend can't answer - so the turn should
+ * reroute to the best OTHER installed model rather than surface a dead brain.
+ *
+ * The load-bearing case: Apple Foundation is auto-selected on this host (the
+ * bridge binary is installed), but Apple Intelligence is toggled OFF in System
+ * Settings, so every call returns `"Apple Intelligence is not enabled"` (an
+ * error body, not a 404). That is not "model not found", so without this the
+ * agent kept the dead provider and stalled. We keep Apple Foundation ON (it is
+ * the best pick where Apple Intelligence IS enabled); we just fail OFF it here.
+ *
+ * Reachability failures (ECONNREFUSED, timeouts) stay the caller's to handle -
+ * those are "is the server up?", not "this provider can't answer right now".
+ */
+export function isProviderUnhealthyError(err: unknown): boolean {
+	const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
+	if (!msg) return false;
+	if (/econnrefused|enotfound|eai_again|fetch failed|connection refused/.test(msg)) {
+		return false;
+	}
+	return (
+		/apple intelligence is not enabled/.test(msg) ||
+		/apple intelligence.*(disabled|unavailable|not available)/.test(msg) ||
+		/foundation model.*(unavailable|not available|disabled)/.test(msg) ||
+		/model is not ready|assets? (are )?not (yet )?(available|downloaded)/.test(msg) ||
+		// Apple Intelligence just enabled but the model is still downloading/warming:
+		// the bridge returns "The model is not available. Try again later." Treat it
+		// as a health failure so we fail over while it finishes, then use it once ready.
+		/model (is )?not available|model unavailable|try again later/.test(msg)
+	);
+}
+
+/**
+ * Probe the locally-installed models across every local host (Ollama + LM
+ * Studio + Apple Foundation). Loaded lazily so `packages/providers` never takes
+ * a static dependency on `packages/orchestration` (which imports providers).
+ */
+async function defaultDetectInstalled(): Promise<InstalledModel[]> {
+	const { detectLocalModels } = await import("../orchestration/local-model-detect");
+	return detectLocalModels();
+}
+
+/**
+ * Choose the best installed model to reroute to.
+ *
+ * Preference order:
+ *   1. A model in `prefer` (e.g. the configured failover chain) that is
+ *      actually installed - honour the operator's intended ordering first.
+ *   2. Otherwise the highest-scoring installed model.
+ * The missing model is always excluded so we never reroute to the thing that
+ * just failed. Returns null when nothing usable is installed.
+ */
+export function chooseRerouteModel(
+	installed: InstalledModel[],
+	missingModel: string,
+	prefer: string[] = [],
+): InstalledModel | null {
+	const missing = missingModel.trim().toLowerCase();
+	// Law 2: a model KNOWN to reject a tools payload is never a reroute target
+	// for agentic work - it would fabricate instead of executing.
+	const usable = installed.filter(
+		(m) =>
+			m.score > 0 &&
+			m.toolCapable !== false &&
+			!isHashNamedModel(m.model) &&
+			m.model.trim().toLowerCase() !== missing,
+	);
+	if (usable.length === 0) return null;
+
+	for (const name of prefer) {
+		const wanted = name.trim().toLowerCase();
+		const hit = usable.find((m) => m.model.trim().toLowerCase() === wanted);
+		if (hit) return hit;
+	}
+
+	return [...usable].sort((a, b) => b.score - a.score)[0] ?? null;
+}
+
+/** Human-facing, provider-neutral message for the genuine no-model case. */
+export function noModelAvailableMessage(missingModel: string, hasCloudKey: boolean): string {
+	const head = `No model is available to answer this. The configured model "${missingModel}" is not installed`;
+	if (hasCloudKey) {
+		return `${head}, and no other local model is installed. Pull one with \`ollama pull <model>\`, or switch to a configured cloud model.`;
+	}
+	return `${head}. Pull one with \`ollama pull <model>\` (for example \`ollama pull llama3.2\`), or add a cloud provider key.`;
+}
+
+/** Result of resolving a tool-capable model for an agentic turn. */
+export interface AgenticModelResolution {
+	provider: string;
+	model: string;
+	/** True when the pinned model was swapped for a tool-capable one. */
+	switched: boolean;
+	reason?: string;
+}
+
+type ToolCapabilityProbe = (
+	provider: string,
+	model: string,
+) => Promise<"native" | "none" | "unknown">;
+
+async function defaultToolCapabilityProbe(
+	provider: string,
+	model: string,
+): Promise<"native" | "none" | "unknown"> {
+	const { getToolCapability } = await import("../orchestration/local-model-detect");
+	return getToolCapability(provider, model);
+}
+
+/**
+ * Law 2 (issue #2747): only tool-capable models do tool-work.
+ *
+ * Given the pinned provider/model for an agentic (tool-requiring) turn,
+ * verify the model actually accepts a `tools` payload (probed once, cached).
+ * If it does not (HTTP 400 - e.g. gemma's broken jinja template), pick the
+ * best OTHER installed model that does:
+ *   1. `prefer` entries first (the operator's pin, e.g. providers.json
+ *      activeModel), when installed and tool-capable.
+ *   2. Otherwise remaining installed models by score, probing each until one
+ *      accepts tools (at most `maxProbes` probes to bound latency).
+ * An "unknown" probe (endpoint unreachable) never demotes - the pinned model
+ * is kept and the existing reroute/failover machinery handles real failures.
+ * Disable entirely with EIGHT_TOOL_CAPABILITY_GATE=0.
+ */
+export async function resolveToolCapableModel(opts: {
+	provider: string;
+	model: string;
+	prefer?: string[];
+	probe?: ToolCapabilityProbe;
+	detect?: () => Promise<InstalledModel[]>;
+	maxProbes?: number;
+	onSwitch?: (from: string, chosen: InstalledModel) => void;
+}): Promise<AgenticModelResolution> {
+	const gate = (process.env.EIGHT_TOOL_CAPABILITY_GATE || "").trim().toLowerCase();
+	if (gate === "0" || gate === "false") {
+		return { provider: opts.provider, model: opts.model, switched: false };
+	}
+
+	const probe = opts.probe ?? defaultToolCapabilityProbe;
+	const detect = opts.detect ?? defaultDetectInstalled;
+
+	const pinned = await probe(opts.provider, opts.model).catch(() => "unknown" as const);
+	if (pinned !== "none") {
+		return { provider: opts.provider, model: opts.model, switched: false };
+	}
+
+	const installed = await detect().catch(() => [] as InstalledModel[]);
+	const missing = opts.model.trim().toLowerCase();
+	const candidates = installed.filter(
+		(m) =>
+			m.score > 0 &&
+			m.toolCapable !== false &&
+			!isHashNamedModel(m.model) &&
+			m.model.trim().toLowerCase() !== missing,
+	);
+
+	// Operator preference first, then strength order.
+	const preferSet = (opts.prefer ?? []).map((p) => p.trim().toLowerCase());
+	candidates.sort((a, b) => {
+		const ap = preferSet.indexOf(a.model.trim().toLowerCase());
+		const bp = preferSet.indexOf(b.model.trim().toLowerCase());
+		const aRank = ap === -1 ? Number.MAX_SAFE_INTEGER : ap;
+		const bRank = bp === -1 ? Number.MAX_SAFE_INTEGER : bp;
+		if (aRank !== bRank) return aRank - bRank;
+		return b.score - a.score;
+	});
+
+	const maxProbes = opts.maxProbes ?? 4;
+	let probes = 0;
+	for (const candidate of candidates) {
+		if (probes >= maxProbes) break;
+		probes++;
+		const cap =
+			candidate.toolCapable === true
+				? ("native" as const)
+				: await probe(candidate.provider, candidate.model).catch(() => "unknown" as const);
+		if (cap === "native") {
+			opts.onSwitch?.(opts.model, candidate);
+			return {
+				provider: candidate.provider,
+				model: candidate.model,
+				switched: true,
+				reason: `"${opts.model}" rejects a tools payload (HTTP 400); routing this agentic turn to "${candidate.model}" (${candidate.provider})`,
+			};
+		}
+	}
+
+	// Nothing verifiably tool-capable found: keep the pin; failover handles errors.
+	return { provider: opts.provider, model: opts.model, switched: false };
+}
+
+/** Outcome of a rerouted local call. */
+export type LocalRerouteOutcome<T> =
+	| { ok: true; value: T; usedProvider: string; usedModel: string; rerouted: boolean }
+	| { ok: false; message: string };
+
+/**
+ * Run a local model turn with automatic reroute on "model not found".
+ *
+ * `run(provider, model)` performs one turn and REJECTS on failure. This wrapper:
+ *   1. Runs it with the configured provider/model.
+ *   2. If that rejects with a not-found error, probes the installed models,
+ *      picks the best one, LOGS the reroute (via `onReroute`), and retries once.
+ *   3. If nothing is installed, resolves to a clean human message (never the
+ *      raw 404).
+ *   4. Any other error (reachability, timeout, abort) is rethrown unchanged so
+ *      the caller's existing handling still applies.
+ *
+ * `detect` and `hasCloudKey` are injectable purely so tests can drive the two
+ * branches without a live Ollama.
+ */
+export async function callLocalModelWithReroute<T>(opts: {
+	provider: string;
+	model: string;
+	run: (provider: string, model: string) => Promise<T>;
+	prefer?: string[];
+	detect?: () => Promise<InstalledModel[]>;
+	hasCloudKey?: () => boolean;
+	onReroute?: (missingModel: string, chosen: InstalledModel) => void;
+	/**
+	 * The user named this provider (#3746): only models on the same provider
+	 * are considered, and with none the turn ends with `pinnedMessage`.
+	 */
+	pinned?: boolean;
+	pinnedMessage?: (model: string, error: string) => string;
+	/**
+	 * The provider's own live model list, fetched now (never a literal or a
+	 * cache). Used only to tell a person what a cloud provider does serve when
+	 * it rejected the chosen model.
+	 */
+	liveModels?: (provider: string) => Promise<string[]>;
+}): Promise<LocalRerouteOutcome<T>> {
+	const detect = opts.detect ?? defaultDetectInstalled;
+	const cloudKey = opts.hasCloudKey ?? hasCloudModelKey;
+
+	let provider = opts.provider;
+	let model = opts.model;
+	let rerouted = false;
+
+	// At most two attempts: the original, then one reroute to an installed model.
+	for (;;) {
+		try {
+			const value = await opts.run(provider, model);
+			return { ok: true, value, usedProvider: provider, usedModel: model, rerouted };
+		} catch (err) {
+			// A not-found error OR an unhealthy local provider (e.g. Apple
+			// Foundation when Apple Intelligence is off) triggers ONE reroute to
+			// the best other installed model. Reachability failures, timeouts and
+			// aborts stay the caller's to handle.
+			if (rerouted || !(isModelNotFoundError(err) || isProviderUnhealthyError(err))) {
+				throw err;
+			}
+
+			// "Installed" is a local concept. A cloud provider's model is never
+			// looked up in Ollama's list and never called "missing": its own error
+			// is the answer, with its live list to choose from.
+			if (!isLocalProvider(provider)) {
+				const error = err instanceof Error ? err.message : String(err);
+				const live = await (opts.liveModels?.(provider) ?? Promise.resolve([])).catch(
+					() => [] as string[],
+				);
+				const list =
+					live.length > 0
+						? `\n${provider} serves right now: ${live.slice(0, 20).join(", ")}${live.length > 20 ? ", ..." : ""}. Pick one with /model.`
+						: "";
+				return {
+					ok: false,
+					message: `${provider} did not accept "${model}": ${error}${list}`,
+				};
+			}
+
+			const detected = await detect().catch(() => [] as InstalledModel[]);
+			// A pinned provider is never left for another one (#3746).
+			const installed = opts.pinned ? detected.filter((m) => m.provider === provider) : detected;
+			const chosen = chooseRerouteModel(installed, model, opts.prefer);
+			if (!chosen) {
+				if (opts.pinned) {
+					const error = err instanceof Error ? err.message : String(err);
+					return {
+						ok: false,
+						message: opts.pinnedMessage
+							? opts.pinnedMessage(model, error)
+							: `${provider}/${model} failed: ${error}\nThe provider was chosen explicitly, so no other provider was tried.`,
+					};
+				}
+				return { ok: false, message: noModelAvailableMessage(model, cloudKey()) };
+			}
+
+			opts.onReroute?.(model, chosen);
+			provider = chosen.provider;
+			model = chosen.model;
+			rerouted = true;
+			// Loop retries once with the rerouted provider/model.
+		}
+	}
+}

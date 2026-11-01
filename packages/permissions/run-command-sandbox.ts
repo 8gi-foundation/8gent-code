@@ -1,0 +1,1144 @@
+/**
+ * 8gent Code - OS sandbox for run_command (#4009, #3612)
+ *
+ * Text checks on a shell command can always be bypassed: a command can build
+ * a path at run time, decode it, or hand it to another interpreter. The
+ * boundary that holds is the kernel. Every run_command child (native and text
+ * tool paths) is wrapped so it cannot create, change, replace, rename, link or
+ * remove the files 8gent loads and runs at start, its secrets, or its records:
+ *
+ *   ~/.8gent/{hooks.yaml,hooks.json,settings.json,browser-control.token}
+ *   ~/.8gent/{extensions,prompts,packages,browser-profiles}/
+ *   ~/.8gent/{audit/,audit.jsonl,permissions-audit.jsonl}
+ *   ~/.8gent/{sessions,logs,checkpoints}/, daemon.log, approvals-audit.jsonl
+ *   ~/.8gent/{policies.yaml,policy-checksum,mcp.json,.env,keys.env,bin/}
+ *   ~/.8gent/skills-trust.json (which project skills may replace user/bundled ones)
+ *   ~/.8gent/keys/ (state-hmac.key, the /goal state and approval grant signing key)
+ *
+ * The same set is applied under EIGHT_HOME/.8gent and EIGHT_DATA_DIR when
+ * those are set, and each path
+ * is also denied by its realpath. Reads stay allowed. Everything else the
+ * command does (the workspace, the network, other ~/.8gent files) is
+ * unchanged: the profile is allow-default with targeted write denies.
+ *
+ *   macOS   Seatbelt (sandbox-exec). Default on. EIGHT_SEATBELT=0 turns it
+ *           off; EIGHT_SEATBELT=require refuses to run a command unwrapped.
+ *   Linux   bubblewrap read-only binds when bwrap is installed and works;
+ *           paths that do not exist yet cannot be bound (see the PR / docs).
+ *   Windows no OS boundary; the text backstops are all that stand.
+ *
+ * Not applied when the host already sandboxes this process (sandbox-exec
+ * cannot nest). runCommandSandboxStatus() says which case applies, and an
+ * unwrapped run is never silent: one stderr warning per process, an audit
+ * line, and onRunCommandUnsandboxed() listeners (the TUI status hook point).
+ *
+ * The env keys that steer this (EIGHT_SEATBELT, EIGHT_DATA_DIR, EIGHT_HOME,
+ * HOME) are snapshotted when this module loads, before the TUI's own .env
+ * loader runs. A key that any .env file 8gent or Bun would load declares is
+ * ignored, whatever its value: Bun's dotenv parser (comments, quotes, $VAR and
+ * ${VAR} expansion, backticks) differs from any we could write, so comparing
+ * values is bypassable. A command that writes `EIGHT_SEATBELT=0` into ./.env
+ * must not turn the boundary off for the next launch. The cost: a user who
+ * both exports a key and declares it in such a .env loses the export for this
+ * boundary. EIGHT_SEATBELT=require, the stricter setting, is always kept. EIGHT_FAKE_HOME is a test hook and is
+ * honoured only under NODE_ENV=test or BUN_ENV=test (themselves not from .env).
+ */
+
+import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { resolveHome } from "../core/home";
+import { loadOrCreateKey } from "./goal-state-hmac";
+import {
+	LINUX_HOME_NEVER_READ,
+	LINUX_READ_SYSTEM_DIRS,
+	type LandlockStatus,
+	landlockArgv,
+	landlockPlan,
+	landlockShell,
+	landlockStatus,
+	writePlanFile,
+} from "./landlock";
+import { sensitiveCredentialPaths } from "./seatbelt";
+
+const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
+
+/** Files 8gent runs, trusts or records, relative to a data dir. */
+export const PROTECTED_DATA_FILES = [
+	"hooks.yaml",
+	"hooks.json",
+	"settings.json",
+	"browser-control.token",
+	"audit.jsonl",
+	"permissions-audit.jsonl",
+	"daemon.log",
+	"approvals-audit.jsonl",
+	"policies.yaml",
+	"mcp.json",
+	".env",
+	"keys.env",
+	"allow-loopback.json", // the browser's trusted loopback port list (#3785, 8SO)
+	"keybindings.json",
+	"update-resume.json",
+	"yolo.json", // the one yes to run tools without cards: a tool that wrote it would grant itself yolo (8SO)
+	"skills-trust.json", // sha256 pins that let a project skill replace a user/bundled one (#4125, 8SO)
+] as const;
+
+/**
+ * Protected dirs that run_command may not even read (#4132, 8SO): keys/state-hmac.key
+ * signs /goal state, approval grants and the Table ledger, so reading it is forging them.
+ */
+// secrets/ holds the default Telegram bot key file (/telegram setup, #4594): no read, no write.
+export const READ_DENIED_DATA_DIRS = ["keys", "secrets"] as const;
+
+function isReadDenied(dir: string): boolean {
+	return (READ_DENIED_DATA_DIRS as readonly string[]).includes(path.basename(dir));
+}
+
+/** Directories whose whole tree is protected, relative to a data dir. */
+export const PROTECTED_DATA_DIRS = [
+	"extensions",
+	"themes",
+	"prompts",
+	"packages",
+	"browser-profiles",
+	"audit",
+	"sessions",
+	"logs",
+	"checkpoints",
+	"bin",
+	// keys/state-hmac.key signs /goal state and approval grants (#4132, 8SO). The whole dir,
+	// not just the file: a file rule alone lets the dir be renamed aside and a forged one moved in.
+	"keys",
+	// The default Telegram bot key file lives here (#4594); read-denied too.
+	"secrets",
+	// A file or a directory: a subpath rule covers both.
+	"policy-checksum",
+] as const;
+
+// ============================================
+// Security env snapshot
+// ============================================
+
+/** Env keys that decide whether and where the boundary applies. */
+export const SECURITY_ENV_KEYS = [
+	"EIGHT_SEATBELT",
+	// The OS read boundary (#4890): "1" turns it on. A .env may turn it on, never off.
+	"EIGHT_OS_READ_BOUNDARY",
+	"EIGHT_DATA_DIR",
+	// Where providers.json is read from (and so where a provider's key is sent, #4622).
+	"EIGHT_PROVIDERS_SETTINGS_PATH",
+	"EIGHT_HOME",
+	"EIGHT_FAKE_HOME",
+	"HOME",
+	"USERPROFILE",
+	"NODE_ENV",
+	"BUN_ENV",
+	// Where post_message and /telegram setup send the bot key (#4594): a .env must not move it.
+	"EIGHT_TG_API_BASE",
+] as const;
+type SecurityKey = (typeof SECURITY_ENV_KEYS)[number];
+
+export interface SecurityEnv {
+	values: Partial<Record<SecurityKey, string>>;
+	/** Keys declared in a .env file, so ignored. */
+	ignored: SecurityKey[];
+}
+
+/**
+ * The .env files that belong to a PROJECT: Bun's cwd files and the repo root's.
+ * A cloned repo controls these, so nothing in them is the user's choice (#4622).
+ */
+export function projectDotenvCandidates(cwd: string = process.cwd()): string[] {
+	const names = [".env", ".env.local"];
+	for (const mode of ["development", "production", "test"])
+		names.push(`.env.${mode}`, `.env.${mode}.local`);
+	return [...names.map((n) => path.join(cwd, n)), path.resolve(import.meta.dirname, "../../.env")];
+}
+
+/** The user's own shell-style env files under ~/.8gent. */
+export function userDotenvCandidates(home: string = os.homedir()): string[] {
+	return [
+		path.join(home, ".8gent", ".env"),
+		// The keys file is shell-style too: an EIGHT_DATA_DIR in it is not trusted env (#4132, 8SO).
+		path.join(home, ".8gent", "keys.env"),
+	];
+}
+
+/** The .env files Bun (cwd, by NODE_ENV) or the TUI loader could have read. */
+export function dotenvCandidates(
+	cwd: string = process.cwd(),
+	home: string = os.homedir(),
+): string[] {
+	return [...projectDotenvCandidates(cwd), ...userDotenvCandidates(home)];
+}
+
+/** Keys declared (KEY=..., export KEY=..., any value form) in the given dotenv files. */
+export function dotenvDeclaredKeys(files: string[]): Set<string> {
+	const keys = new Set<string>();
+	for (const f of files) {
+		let text: string;
+		try {
+			// A leading BOM would hide the first key from the match; Bun still loads it.
+			text = fs.readFileSync(f, "utf8").replace(/^\uFEFF/, "");
+		} catch {
+			continue;
+		}
+		for (const m of text.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*[=:]/gm))
+			keys.add(m[1] as string);
+	}
+	return keys;
+}
+
+/**
+ * Pure: drop each security key any .env file declares, whatever the value.
+ * EIGHT_SEATBELT=require and EIGHT_OS_READ_BOUNDARY=1 are kept regardless:
+ * dropping either could only weaken.
+ */
+export function snapshotSecurityEnv(
+	env: Readonly<Partial<Record<SecurityKey, string>>>,
+	declared: Set<string>,
+): SecurityEnv {
+	const values: SecurityEnv["values"] = {};
+	const ignored: SecurityKey[] = [];
+	// Env names are case-insensitive on Windows: compare upper-cased (#4622).
+	const upper = new Set([...declared].map((d) => d.toUpperCase()));
+	for (const k of SECURITY_ENV_KEYS) {
+		const v = env[k];
+		if (v === undefined || v === "") continue;
+		const stricter =
+			(k === "EIGHT_SEATBELT" && v === "require") || (k === "EIGHT_OS_READ_BOUNDARY" && v === "1");
+		if (upper.has(k) && !stricter) ignored.push(k);
+		else values[k] = v;
+	}
+	return { values, ignored };
+}
+
+function takeSnapshot(): SecurityEnv {
+	return snapshotSecurityEnv(process.env, dotenvDeclaredKeys(dotenvCandidates()));
+}
+
+// Taken at module load: before the TUI's loadEnvFile() runs (app.tsx imports
+// this module's importers first), so nothing it sets can steer the boundary.
+let securityEnv: SecurityEnv = takeSnapshot();
+// Every key any .env file declares, read once at load for the same reason (#4622).
+let dotenvDeclaredAtLoad: Set<string> = dotenvDeclaredKeys(dotenvCandidates());
+// Only the project's files (cwd, repo root): the user's ~/.8gent/keys.env is theirs.
+let projectDeclaredAtLoad: Set<string> = dotenvDeclaredKeys(projectDotenvCandidates());
+
+/**
+ * The names the TUI's project .env loader may copy into process.env: a provider
+ * key variable (a registry entry's apiKeyEnv, or any NAME_API_KEY). Everything
+ * else is dropped. A denylist missed HTTPS_PROXY and NODE_TLS_REJECT_UNAUTHORIZED,
+ * which let a cloned repo's .env route the Bearer key through its own proxy (#4622).
+ */
+export function dotenvKeyIsAllowed(key: string, registryKeyEnvs: ReadonlySet<string>): boolean {
+	return registryKeyEnvs.has(key) || /^[A-Z0-9_]+_API_KEY$/.test(key);
+}
+
+/** Variables that decide where a request goes or whether its TLS is checked. */
+const NETWORK_ENV_KEYS = [
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"ALL_PROXY",
+	"NODE_TLS_REJECT_UNAUTHORIZED",
+	"NODE_EXTRA_CA_CERTS",
+	"SSL_CERT_FILE",
+	"SSL_CERT_DIR",
+] as const;
+
+/** Also hostile when a project .env sets them: they change how bun or node starts and runs. */
+const isHostileNetworkName = (up: string): boolean =>
+	(NETWORK_ENV_KEYS as readonly string[]).includes(up) ||
+	up === "NODE_OPTIONS" ||
+	up.startsWith("BUN_");
+
+/**
+ * Pure: the process.env names to delete because a PROJECT .env declared them.
+ * Bun loads the cwd .env before any code runs and its fetch reads these at call
+ * time, so they are removed here, once, at load (#4622). By NAME, case-insensitive,
+ * whatever the value: Bun strips inline comments and expands $VAR, so no parse of
+ * the file's value can say what Bun actually set.
+ */
+export function hostileNetworkEnvNames(
+	envNames: Iterable<string>,
+	projectDeclared: ReadonlySet<string>,
+): string[] {
+	const declared = new Set([...projectDeclared].map((k) => k.toUpperCase()));
+	const out: string[] = [];
+	for (const name of envNames) {
+		const up = name.toUpperCase();
+		if (isHostileNetworkName(up) && declared.has(up)) out.push(name);
+	}
+	return out;
+}
+
+function dropHostileNetworkEnv(): string[] {
+	const names = hostileNetworkEnvNames(Object.keys(process.env), projectDeclaredAtLoad);
+	for (const n of names) Reflect.deleteProperty(process.env, n);
+	// Names only, never values.
+	if (names.length > 0)
+		process.stderr.write(
+			`8gent: ignored ${names.join(", ")} because this folder's .env file sets them (they can change where requests go). If you set one yourself, your own value was cleared too: fix the .env file and export it again.\n`,
+		);
+	return names;
+}
+/** Names removed from process.env at load because a project .env set them. */
+export const droppedNetworkEnv: string[] = dropHostileNetworkEnv();
+
+/** The proxy for a URL as it stood after that load-time cleanup, or undefined. */
+const loadTimeProxy: Record<"http:" | "https:", string | undefined> = {
+	"http:": process.env.HTTP_PROXY || process.env.http_proxy || process.env.ALL_PROXY,
+	"https:":
+		process.env.HTTPS_PROXY ||
+		process.env.https_proxy ||
+		process.env.ALL_PROXY ||
+		process.env.all_proxy,
+};
+export function trustedProxyFor(url: string): string | undefined {
+	try {
+		const proto = new URL(url).protocol;
+		return proto === "https:" || proto === "http:" ? loadTimeProxy[proto] : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * An endpoint override from the environment, dropped when a PROJECT .env declares
+ * it (same rule as the security keys, #4615): a value a repo's .env could have
+ * set is not the user's choice. One the user wrote in their own ~/.8gent/keys.env
+ * is honoured. Used for MINIMAX_BASE_URL, LMSTUDIO_BASE_URL and APFEL_BASE_URL.
+ */
+export function trustedEnvValue(
+	key: string,
+	env: Readonly<Record<string, string | undefined>> = process.env,
+	projectDeclared: ReadonlySet<string> = projectDeclaredAtLoad,
+): string | undefined {
+	const v = env[key];
+	if (!v) return undefined;
+	const up = key.toUpperCase();
+	for (const d of projectDeclared) if (d.toUpperCase() === up) return undefined;
+	return v;
+}
+
+/**
+ * A security key's value: the load-time snapshot (which drops .env-declared
+ * keys). In test mode the live env is read, as fakeHome() does.
+ */
+export function trustedSecurityValue(key: SecurityKey): string | undefined {
+	if (isTestMode(securityEnv.values)) return process.env[key] || undefined;
+	return securityEnv.values[key];
+}
+
+export function securityEnvSnapshot(): SecurityEnv {
+	return securityEnv;
+}
+
+/** Pure: test mode comes only from a NODE_ENV/BUN_ENV that a .env file did not set. */
+export function isTestMode(values: SecurityEnv["values"]): boolean {
+	return values.NODE_ENV === "test" || values.BUN_ENV === "test";
+}
+
+function inTestMode(): boolean {
+	return isTestMode(securityEnv.values);
+}
+
+/** Tests only: re-read the env after changing it. A no-op outside test mode. */
+export function refreshSecurityEnvForTests(): void {
+	if (inTestMode()) {
+		securityEnv = takeSnapshot();
+		dotenvDeclaredAtLoad = dotenvDeclaredKeys(dotenvCandidates());
+		projectDeclaredAtLoad = dotenvDeclaredKeys(projectDotenvCandidates());
+	}
+}
+
+/** EIGHT_FAKE_HOME is a test hook: honoured only in test mode, read live there. */
+function fakeHome(): string | undefined {
+	return inTestMode() ? process.env.EIGHT_FAKE_HOME || undefined : undefined;
+}
+
+/** ~/.8gent, resolveHome()/.8gent (EIGHT_HOME), and EIGHT_DATA_DIR, deduplicated. */
+export function protectedDataRoots(): string[] {
+	const v = securityEnv.values;
+	const fake = fakeHome();
+	const home = fake ?? os.homedir();
+	const roots = [
+		path.join(home, ".8gent"),
+		path.join(
+			resolveHome({ EIGHT_HOME: v.EIGHT_HOME, HOME: fake ?? v.HOME, USERPROFILE: v.USERPROFILE }),
+			".8gent",
+		),
+	];
+	// Path keys only ever ADD roots: a value from .env (ignored for trust) or set
+	// after the snapshot may still be where the harness reads from, so it is
+	// protected too. Nothing here can remove a root.
+	for (const dataDir of [v.EIGHT_DATA_DIR, process.env.EIGHT_DATA_DIR]) {
+		if (dataDir && path.isAbsolute(dataDir)) roots.push(dataDir);
+	}
+	const liveEightHome = process.env.EIGHT_HOME;
+	if (liveEightHome && path.isAbsolute(liveEightHome))
+		roots.push(path.join(liveEightHome, ".8gent"));
+	return [...new Set(roots.filter((r) => path.isAbsolute(r)).map((r) => path.normalize(r)))];
+}
+
+export interface ProtectedPaths {
+	/** The data roots themselves: may not be renamed, removed or replaced. */
+	roots: string[];
+	/** Single files. */
+	files: string[];
+	/** Whole trees. */
+	dirs: string[];
+}
+
+/**
+ * Resolve a path that may not exist yet: realpath the deepest existing
+ * ancestor and append the rest. The kernel matches real paths, so a symlinked
+ * HOME or ~/.8gent is only covered when its real spelling is denied too.
+ */
+export function realpathLoose(p: string): string {
+	const abs = path.resolve(p);
+	const tail: string[] = [];
+	let cur = abs;
+	for (;;) {
+		try {
+			const real = fs.realpathSync(cur);
+			return tail.length ? path.join(real, ...tail.reverse()) : real;
+		} catch {
+			const parent = path.dirname(cur);
+			if (parent === cur) return abs;
+			tail.push(path.basename(cur));
+			cur = parent;
+		}
+	}
+}
+
+function withReal(paths: string[]): string[] {
+	return [...new Set(paths.flatMap((p) => [path.normalize(p), realpathLoose(p)]))];
+}
+
+/** Every protected path, spelled as given and by realpath. */
+export function protectedRunCommandPaths(): ProtectedPaths {
+	const roots = protectedDataRoots();
+	return {
+		roots: withReal(roots),
+		files: withReal(roots.flatMap((r) => PROTECTED_DATA_FILES.map((f) => path.join(r, f)))),
+		dirs: withReal(roots.flatMap((r) => PROTECTED_DATA_DIRS.map((d) => path.join(r, d)))),
+	};
+}
+
+// ============================================
+// macOS Seatbelt profile (pure)
+// ============================================
+
+function sbplString(p: string): string {
+	return `"${p.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+/**
+ * A case-insensitive SBPL regex for a path. APFS is case-insensitive by
+ * default, so ~/.8gent/HOOKS.YAML is the same file the loader opens; a literal
+ * rule alone would let a new file be created under another case. Returns
+ * undefined for a path SBPL's #"..." form cannot carry (a double quote).
+ */
+export function caseInsensitivePathRegex(p: string, subtree: boolean): string | undefined {
+	if (p.includes('"')) return undefined;
+	let body = "";
+	for (const ch of p) {
+		const lo = ch.toLowerCase();
+		const up = ch.toUpperCase();
+		if (lo !== up && lo.length === 1 && up.length === 1) body += `[${lo}${up}]`;
+		else if (/[.^$|?*+()[\]{}\\]/.test(ch)) body += `\\${ch}`;
+		else body += ch;
+	}
+	return `#"^${body}${subtree ? "(/.*)?" : ""}$"`;
+}
+
+/**
+ * Allow-default profile denying every write-class operation on the protected
+ * set. SBPL: the last matching rule wins, so the denies follow (allow default).
+ *
+ * - files and trees: file-write* (create, data, unlink, rename, mode, owner,
+ *   xattr, times) and file-link (no hard link out of or into them).
+ * - data roots: file-write* on the directory itself, so it cannot be moved
+ *   aside, removed, or created anew and filled.
+ */
+export function buildRunCommandProfile(
+	p: ProtectedPaths = protectedRunCommandPaths(),
+	read?: OsReadSpec,
+): string {
+	const fileFilters = p.files.flatMap((f) => {
+		const re = caseInsensitivePathRegex(f, false);
+		return [`(literal ${sbplString(f)})`, ...(re ? [`(regex ${re})`] : [])];
+	});
+	const dirFilters = p.dirs.flatMap((d) => {
+		const re = caseInsensitivePathRegex(d, true);
+		return [
+			`(literal ${sbplString(d)})`,
+			`(subpath ${sbplString(d)})`,
+			...(re ? [`(regex ${re})`] : []),
+		];
+	});
+	const rootFilters = p.roots.flatMap((r) => {
+		const re = caseInsensitivePathRegex(r, false);
+		return [`(literal ${sbplString(r)})`, ...(re ? [`(regex ${re})`] : [])];
+	});
+	const readDenyFilters = p.dirs.filter(isReadDenied).flatMap((d) => {
+		const re = caseInsensitivePathRegex(d, true);
+		return [
+			`(literal ${sbplString(d)})`,
+			`(subpath ${sbplString(d)})`,
+			...(re ? [`(regex ${re})`] : []),
+		];
+	});
+	return `${[
+		"(version 1)",
+		"(allow default)",
+		// The #4132 key and secrets dirs of every protected data root join the never-read set:
+		// a filtered allow (root, temp) must not reopen an EIGHT_DATA_DIR placed inside it.
+		...(read ? osReadRules(read, undefined, readDenyFilters) : []),
+		...(readDenyFilters.length
+			? [
+					"; signing keys: no reads either (#4132)",
+					`(deny file-read* ${readDenyFilters.join(" ")})`,
+				]
+			: []),
+		"; 8gent startup code, secrets and records: no writes from run_command (#4009, #3612)",
+		`(deny file-write* file-link ${[...fileFilters, ...dirFilters].join(" ")})`,
+		"; the data roots themselves: no rename, remove or re-create",
+		`(deny file-write* ${rootFilters.join(" ")})`,
+	].join("\n")}\n`;
+}
+
+// ============================================
+// OS read boundary (#4890, macOS slice 1)
+// ============================================
+
+/**
+ * "1" puts every run_command under the kernel read rule below and refuses a command when the
+ * rule cannot be applied. "auto" applies it where it can and otherwise runs the command with a
+ * notice. Default off.
+ */
+export const OS_READ_BOUNDARY_FLAG = "EIGHT_OS_READ_BOUNDARY";
+
+export type OsReadMode = "off" | "on" | "auto";
+
+/**
+ * The read boundary mode. A .env can turn it on ("1"), never off: snapshotSecurityEnv keeps only
+ * that value from a .env, so a .env-declared "auto" (weaker than "1") is ignored.
+ */
+export function osReadBoundaryMode(): OsReadMode {
+	const v = trustedSecurityValue(OS_READ_BOUNDARY_FLAG);
+	return v === "1" ? "on" : v === "auto" ? "auto" : "off";
+}
+
+/** True when the person asked for the OS read boundary, strictly ("1") or where possible ("auto"). */
+export function osReadBoundaryOn(): boolean {
+	return osReadBoundaryMode() !== "off";
+}
+
+/**
+ * What one command may read. The lexical boundary (read-boundary.ts) builds it from the same
+ * root and allowances it judges against, so the kernel and the card agree.
+ */
+export interface OsReadSpec {
+	/** The workspace root: everything inside it is readable. */
+	root: string;
+	/** Also readable: the read allowances, /allow-read folders, paths a person approved on a card. */
+	reads: string[];
+	/** The tool's own data folders (~/.8gent): readable, except the private set. */
+	dataRoots: string[];
+	/** Home folders: their credential stores are never readable. */
+	homes: string[];
+}
+
+/**
+ * What any program needs to start on macOS: the OS, dyld's shared cache, system and
+ * Homebrew libraries, the Xcode command line tools. No person's files live here.
+ */
+export const OS_READ_SYSTEM_DIRS = [
+	"/usr",
+	"/bin",
+	"/sbin",
+	"/System",
+	"/Library",
+	"/opt",
+	"/private/etc",
+	"/private/var/db",
+	"/private/var/select",
+	"/private/var/run",
+	"/dev",
+] as const;
+
+/**
+ * Inside a data root, what holds the person's memory, browser state, client data, logs and
+ * backups (read-boundary.ts OWN_PRIVATE, as SBPL regexes). Never readable.
+ */
+const OWN_PRIVATE_NAMES = ciLetters(
+	"(memory[^/]*|brain[^/]*|clients|browser-[^/]*|audit[^/]*|backups|app-backups|cron[^/]*)",
+);
+
+/** Each ASCII letter of a regex written without letter classes becomes [xX]: APFS ignores case. */
+function ciLetters(re: string): string {
+	return re.replace(/[A-Za-z]/g, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`);
+}
+
+/** Credential-shaped names directly under a data root (SBPL ERE, matched case-insensitively). */
+const OWN_SECRET_NAMES = ciLetters(
+	"(keys|secrets|telegram[^/]*|sessions|[^/]*token[^/]*|\\.env[^/]*|[^/]*\\.env|credentials[^/]*)",
+);
+
+/** A path as a case-insensitive SBPL regex body (no anchors), or undefined when it has a quote. */
+function ciBody(p: string): string | undefined {
+	const re = caseInsensitivePathRegex(p, false);
+	return re?.slice(3, -2);
+}
+
+/** The private set under one data root, as SBPL regex filters. */
+export function ownPrivateFilters(dataRoot: string): string[] {
+	const body = ciBody(dataRoot);
+	if (!body) return [];
+	return [
+		`(regex #"^${body}/${OWN_PRIVATE_NAMES}(/.*)?$")`,
+		`(regex #"^${body}/.*\\.${ciLetters("(db|sqlite3?|db-wal|db-shm)")}$")`,
+		// Signing keys (#4132) and credential-shaped names (read-allow.ts SECRET_PATH): bot keys, tokens, env files.
+		`(regex #"^${body}/${OWN_SECRET_NAMES}(/.*)?$")`,
+		`(regex #"^${body}/.*\\.${ciLetters("(pem|key|p12)")}$")`,
+	];
+}
+
+/**
+ * Credential stores under a home beyond sensitiveCredentialPaths(): the rest of what the text
+ * boundary calls secret (read-allow.ts SECRET_PATH). They matter when the root is, or holds, the
+ * home folder, and when a PATH tool dir's sibling (~/.local/share) is readable.
+ */
+export const HOME_NEVER_READ = [
+	".git-credentials",
+	".pgpass",
+	".vault-token",
+	".password-store",
+	".azure",
+	".config/op",
+	".config/gcloud",
+	".config/github-copilot",
+	".local/share/keyrings",
+	"Library/Cookies",
+	"Library/Messages",
+	"Library/Mail",
+	"Library/Safari",
+	"Library/Application Support/Google",
+	"Library/Application Support/Chromium",
+	"Library/Application Support/BraveSoftware",
+	"Library/Application Support/Firefox",
+	"Library/Application Support/Microsoft Edge",
+	"Library/Application Support/1Password",
+	"Library/Application Support/Arc",
+] as const;
+
+/** A tool installed under a home: its bin dir on PATH, and the lib/libexec/share beside it. */
+function toolDirs(pathEnv: string, homes: string[]): string[] {
+	const out: string[] = [];
+	for (const dir of pathEnv.split(path.delimiter)) {
+		if (!dir || !path.isAbsolute(dir)) continue;
+		const d = path.normalize(dir);
+		// A PATH entry that is a home, or contains one, would open the whole home.
+		if (d === "/" || homes.some((h) => h === d || h.startsWith(`${d}/`))) continue;
+		out.push(d);
+		if (path.basename(d) === "bin" && homes.some((h) => d.startsWith(`${h}/`))) {
+			const parent = path.dirname(d);
+			if (!homes.includes(parent))
+				for (const sib of ["lib", "libexec", "share"]) out.push(path.join(parent, sib));
+		}
+	}
+	return out;
+}
+
+/** Each folder above the root, and "/": their names can be listed, not their files read. */
+function ancestors(root: string): string[] {
+	const out: string[] = [];
+	let cur = path.dirname(root);
+	for (;;) {
+		out.push(cur);
+		const up = path.dirname(cur);
+		if (up === cur) return out;
+		cur = up;
+	}
+}
+
+/**
+ * The SBPL rules of the read boundary, emitted right after (allow default): deny every file
+ * read, allow the root and the allowances back except the credential stores and the private
+ * data set, then deny those again. The exclusion sits inside the allow because the kernel did
+ * not let a later deny override an earlier filtered allow (macOS runner, #4890).
+ *
+ * file-read-data only: stat and path lookups (file-read-metadata) stay allowed, so programs can
+ * resolve their own paths and the parents of the root; reading a file or listing a folder
+ * outside the allowances is refused with EPERM.
+ */
+export function osReadRules(
+	spec: OsReadSpec,
+	pathEnv: string = process.env.PATH ?? "",
+	/** More SBPL filters that are never readable (the protected data roots' keys/ and secrets/). */
+	alsoNever: readonly string[] = [],
+): string[] {
+	const root = path.normalize(spec.root);
+	if (!path.isAbsolute(root))
+		throw new Error(`os read boundary: root must be absolute, got "${spec.root}"`);
+	const homes = withReal(spec.homes.filter((h) => path.isAbsolute(h)));
+	const tmp = withReal([os.tmpdir()]);
+	// The per-user folder above the temp dir (/private/var/folders/xx/yyy): caches beside T/.
+	const userVar = tmp
+		.filter((t) => t.startsWith("/private/var/folders/") && path.basename(t) === "T")
+		.map((t) => path.dirname(t));
+	const readable = withReal([
+		...OS_READ_SYSTEM_DIRS,
+		root,
+		...spec.reads.filter((r) => path.isAbsolute(r)),
+		...spec.dataRoots.filter((r) => path.isAbsolute(r)),
+		...tmp,
+		...userVar,
+		...toolDirs(pathEnv, homes),
+		// git reads these on every command; neither is a credential store.
+		...homes.flatMap((h) => [path.join(h, ".gitconfig"), path.join(h, ".config", "git")]),
+	]);
+	const listable = [...new Set([root, realpathLoose(root)].flatMap(ancestors))];
+	const xcode = '(regex #"^/Applications/Xcode[^/]*\\.app(/.*)?$")';
+	const secrets = withReal(
+		homes.flatMap((h) => [
+			...sensitiveCredentialPaths(h),
+			...HOME_NEVER_READ.map((rel) => path.join(h, rel)),
+		]),
+	);
+	const secretFilters = secrets.flatMap((s) => {
+		const re = caseInsensitivePathRegex(s, true);
+		return [
+			`(literal ${sbplString(s)})`,
+			`(subpath ${sbplString(s)})`,
+			...(re ? [`(regex ${re})`] : []),
+		];
+	});
+	const privateFilters = withReal(spec.dataRoots.filter((r) => path.isAbsolute(r))).flatMap(
+		ownPrivateFilters,
+	);
+	const never = [...secretFilters, ...privateFilters, ...alsoNever].join(" ");
+	const allowed = `${readable.map((r) => `(subpath ${sbplString(r)})`).join(" ")} ${xcode}`;
+	return [
+		"; workspace read boundary (#4890): no file is read outside the root and the allowances",
+		"(deny file-read-data)",
+		// The allow itself excludes the never-read set: a later deny alone did not beat an earlier
+		// filtered allow on the macOS runner (#4890 CI), so precedence is not relied on here.
+		never
+			? `(allow file-read-data (require-all (require-any ${allowed}) (require-not (require-any ${never}))))`
+			: `(allow file-read-data ${allowed})`,
+		`(allow file-read-data ${listable.map((a) => `(literal ${sbplString(a)})`).join(" ")})`,
+		"; credential stores and the private data set: never read, whatever an allow above covers",
+		...(never ? [`(deny file-read* ${never})`] : []),
+		// A file cannot be moved out of the never-read set into the root and read there: a rename
+		// is an unlink of the old name, and the macOS runner showed `mv ~/.ssh/id_rsa ./k && cat k`
+		// reading the key (8SO probe, #4892). Other outside files can still be moved (a gap; the
+		// text boundary names them, and unlinking everything unreadable would break package caches).
+		...(never ? [`(deny file-write-unlink ${never})`] : []),
+	];
+}
+
+// ============================================
+// OS read boundary on Linux and Termux (#4890 slice 2, Landlock)
+// ============================================
+
+/**
+ * The same scope as osReadRules, in Landlock's allow-only form (landlock.ts): read starts
+ * (system, root, allowances, data roots, temp, PATH tool dirs, git config) and the never-read
+ * set (credential stores, HOME_NEVER_READ, the protected data roots' keys/ and secrets/).
+ */
+export function linuxReadPlan(
+	spec: OsReadSpec,
+	pathEnv: string = process.env.PATH ?? "",
+	alsoNever: readonly string[] = protectedRunCommandPaths().dirs.filter(isReadDenied),
+) {
+	const root = path.normalize(spec.root);
+	if (!path.isAbsolute(root))
+		throw new Error(`os read boundary: root must be absolute, got "${spec.root}"`);
+	const homes = withReal(spec.homes.filter((h) => path.isAbsolute(h)));
+	const starts = [
+		...LINUX_READ_SYSTEM_DIRS,
+		root,
+		...spec.reads.filter((r) => path.isAbsolute(r)),
+		...spec.dataRoots.filter((r) => path.isAbsolute(r)),
+		os.tmpdir(),
+		...toolDirs(pathEnv, homes),
+		// git reads these on every command; neither is a credential store.
+		...homes.flatMap((h) => [path.join(h, ".gitconfig"), path.join(h, ".config", "git")]),
+	];
+	const never = [
+		...homes.flatMap((h) => [
+			...sensitiveCredentialPaths(h),
+			...HOME_NEVER_READ.map((rel) => path.join(h, rel)),
+			...LINUX_HOME_NEVER_READ.map((rel) => path.join(h, rel)),
+		]),
+		...alsoNever,
+		// POSIX shared memory: other programs' files, readable by every process of this user.
+		// Naming it makes /dev a split folder, so the devices open one by one and /dev/shm does not.
+		"/dev/shm",
+	];
+	return landlockPlan(starts, never, spec.dataRoots);
+}
+
+let readRuleWarned = false;
+
+/** Test hook: let the next unavailable status print its line again. */
+export function _resetReadRuleWarning(): void {
+	readRuleWarned = false;
+}
+
+/**
+ * The argv to put in front of `<shell> -c <command>` for the read rule on Linux and Termux, or
+ * undefined when the flag is off, no spec was given, or Landlock cannot be applied here. Callers
+ * refuse (EIGHT_OS_READ_BOUNDARY=1) or add a notice ("auto") before they get here
+ * (osReadRefusal, osReadNotice); this line on stderr also covers background_start.
+ */
+export function linuxReadPrefix(
+	read: OsReadSpec | undefined,
+	platform: string = process.platform,
+	probe: () => LandlockStatus = landlockStatus,
+): string[] | undefined {
+	if (!read || !osReadBoundaryOn() || platform === "darwin") return undefined;
+	const status = probe();
+	if (!status.active) {
+		if (!readRuleWarned) {
+			readRuleWarned = true;
+			process.stderr.write(
+				`[8gent] The OS read rule (${OS_READ_BOUNDARY_FLAG}=${osReadBoundaryMode() === "auto" ? "auto" : "1"}) is not active here: ${status.reason}. Reads outside the workspace are stopped by text checks only.\n`,
+			);
+		}
+		return undefined;
+	}
+	return landlockArgv(status.python, writePlanFile(linuxReadPlan(read)));
+}
+
+/** Whether the OS read rule can be applied on this host, and why not when it cannot. */
+export type OsReadRuleStatus = { active: true } | { active: false; reason: string };
+
+/**
+ * macOS: Seatbelt must apply (not nested, sandbox-exec present, EIGHT_SEATBELT not 0).
+ * Linux and Termux: Landlock must pass its probe, and EIGHT_SEATBELT=0 turns it off too.
+ * Anything else has no OS read rule.
+ */
+export function osReadRuleStatus(platform: string = process.platform): OsReadRuleStatus {
+	if (platform === "darwin") {
+		const s = runCommandSandboxStatus();
+		return s.applied ? { active: true } : { active: false, reason: s.reason };
+	}
+	if (platform === "linux" || platform === "android") {
+		if (securityEnv.values.EIGHT_SEATBELT === "0")
+			return { active: false, reason: "EIGHT_SEATBELT=0 turns every OS rule off" };
+		const s = landlockStatus(platform);
+		return s.active ? { active: true } : { active: false, reason: s.reason };
+	}
+	return { active: false, reason: `no OS read rule on ${platform}` };
+}
+
+const READ_RULE_WAYS_OUT = `To run commands without it, unset ${OS_READ_BOUNDARY_FLAG}, or set ${OS_READ_BOUNDARY_FLAG}=auto to use the rule where it works and run with a notice where it does not (phones whose kernel lacks Landlock).`;
+
+/**
+ * EIGHT_OS_READ_BOUNDARY=1 asked for the OS rule: when it cannot be applied, the command is not
+ * run. The message goes into the tool result (and the TUI footer through the unsandboxed
+ * listeners), and says how to get out.
+ */
+export function osReadRefusal(
+	status: () => OsReadRuleStatus = () => osReadRuleStatus(),
+): string | undefined {
+	if (osReadBoundaryMode() !== "on") return undefined;
+	const s = status();
+	if (s.active) return undefined;
+	notifyReadRuleOff(s.reason, true);
+	return `[PERMISSION DENIED] Not run: ${OS_READ_BOUNDARY_FLAG}=1 asks for the OS read rule, and it cannot be applied here: ${s.reason}. ${READ_RULE_WAYS_OUT}`;
+}
+
+let readNoticeGiven = false;
+
+/** Test hook: let the next "auto" notice show again. */
+export function _resetReadNotice(): void {
+	readNoticeGiven = false;
+}
+
+/**
+ * EIGHT_OS_READ_BOUNDARY=auto on a host where the rule cannot be applied: the command runs, and
+ * the first tool result of the session says so. Undefined every other time.
+ */
+export function osReadNotice(
+	status: () => OsReadRuleStatus = () => osReadRuleStatus(),
+): string | undefined {
+	if (osReadBoundaryMode() !== "auto" || readNoticeGiven) return undefined;
+	const s = status();
+	if (s.active) return undefined;
+	readNoticeGiven = true;
+	notifyReadRuleOff(s.reason, false);
+	return `[notice] The OS read rule is not active here (${s.reason}), so commands run with the text checks only (${OS_READ_BOUNDARY_FLAG}=auto). This notice is shown once per session.`;
+}
+
+/** The TUI footer hears about it through the same listeners as an unsandboxed run. */
+function notifyReadRuleOff(reason: string, required: boolean): void {
+	for (const l of listeners) {
+		try {
+			l({ applied: false, reason: `OS read rule off: ${reason}`, required });
+		} catch {}
+	}
+}
+
+// ============================================
+// Linux bubblewrap (pure argv)
+// ============================================
+
+/**
+ * bwrap argv that keeps the whole filesystem as it is and re-mounts each
+ * protected path that exists read-only. A path that does not exist yet cannot
+ * be bound, so it is not covered (documented gap), except the read-denied
+ * dirs (keys/): those are created (0700) first so they are always bound, and
+ * then covered by an empty tmpfs so the command cannot read the key (#4132).
+ */
+export function buildBwrapArgs(p: ProtectedPaths = protectedRunCommandPaths()): string[] {
+	for (const d of p.dirs.filter(isReadDenied)) {
+		try {
+			fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+		} catch {}
+	}
+	const args = ["--dev-bind", "/", "/"];
+	for (const target of [...p.files, ...p.dirs]) {
+		if (fs.existsSync(target)) args.push("--ro-bind", target, target);
+	}
+	for (const d of p.dirs.filter(isReadDenied)) {
+		if (fs.existsSync(d)) args.push("--tmpfs", d);
+	}
+	return args;
+}
+
+// ============================================
+// Wrapping
+// ============================================
+
+function shellQuote(s: string): string {
+	return `'${s.replaceAll("'", `'\\''`)}'`;
+}
+
+const probeCache = new Map<string, boolean>();
+function probe(file: string, args: string[]): boolean {
+	const key = [file, ...args].join("\0");
+	let ok = probeCache.get(key);
+	if (ok === undefined) {
+		try {
+			ok = spawnSync(file, args, { stdio: "ignore", timeout: 5000 }).status === 0;
+		} catch {
+			ok = false;
+		}
+		probeCache.set(key, ok);
+	}
+	return ok;
+}
+
+/** True when sandbox-exec can apply a profile here (false inside another sandbox). */
+export function canApplySeatbelt(): boolean {
+	return (
+		process.platform === "darwin" &&
+		fs.existsSync(SANDBOX_EXEC) &&
+		probe(SANDBOX_EXEC, ["-p", "(version 1)(allow default)", "/usr/bin/true"])
+	);
+}
+
+function findBwrap(): string | undefined {
+	for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
+		if (!dir) continue;
+		const candidate = path.join(dir, "bwrap");
+		if (fs.existsSync(candidate)) return candidate;
+	}
+	return undefined;
+}
+
+export type RunCommandSandbox =
+	| { applied: true; mechanism: "seatbelt" | "bwrap" }
+	| { applied: false; reason: string; required: boolean };
+
+/** Which OS boundary run_command gets on this host, and why not when none. */
+export function runCommandSandboxStatus(): RunCommandSandbox {
+	const status = sandboxStatusInner();
+	if (status.applied) return status;
+	return { ...status, required: securityEnv.values.EIGHT_SEATBELT === "require" };
+}
+
+function sandboxStatusInner(): RunCommandSandbox | { applied: false; reason: string } {
+	if (securityEnv.values.EIGHT_SEATBELT === "0")
+		return { applied: false, reason: "EIGHT_SEATBELT=0" };
+	if (process.platform === "darwin") {
+		if (!fs.existsSync(SANDBOX_EXEC)) return { applied: false, reason: "sandbox-exec missing" };
+		if (!canApplySeatbelt())
+			return {
+				applied: false,
+				reason: "host already sandboxes this process (sandbox-exec cannot nest)",
+			};
+		return { applied: true, mechanism: "seatbelt" };
+	}
+	if (process.platform === "linux") {
+		const bwrap = findBwrap();
+		if (!bwrap) return { applied: false, reason: "bwrap not installed" };
+		if (!probe(bwrap, ["--dev-bind", "/", "/", "/bin/true"]))
+			return { applied: false, reason: "bwrap cannot create a namespace here" };
+		return { applied: true, mechanism: "bwrap" };
+	}
+	return { applied: false, reason: `no OS sandbox on ${process.platform}` };
+}
+
+// ============================================
+// Unwrapped runs are never silent
+// ============================================
+
+type UnsandboxedListener = (status: Extract<RunCommandSandbox, { applied: false }>) => void;
+const listeners = new Set<UnsandboxedListener>();
+let warned = false;
+
+/** Hook point for the TUI status line: called on every unwrapped run. Returns an unsubscribe. */
+export function onRunCommandUnsandboxed(listener: UnsandboxedListener): () => void {
+	listeners.add(listener);
+	return () => listeners.delete(listener);
+}
+
+function auditPath(): string {
+	const roots = protectedDataRoots();
+	const root =
+		securityEnv.values.EIGHT_DATA_DIR && path.isAbsolute(securityEnv.values.EIGHT_DATA_DIR)
+			? securityEnv.values.EIGHT_DATA_DIR
+			: (roots[0] as string);
+	return path.join(root, "audit", "run-command-sandbox.jsonl");
+}
+
+function reportUnsandboxed(
+	status: Extract<RunCommandSandbox, { applied: false }>,
+	command: string,
+): void {
+	if (!warned) {
+		warned = true;
+		const ignored = securityEnv.ignored.length
+			? ` (ignored from .env: ${securityEnv.ignored.join(", ")})`
+			: "";
+		process.stderr.write(
+			`[8gent] WARNING: run_command is NOT OS-sandboxed: ${status.reason}${ignored}. ` +
+				"Writes to ~/.8gent startup code, secrets and records are stopped by text checks only. " +
+				"Set EIGHT_SEATBELT=require to refuse unsandboxed commands.\n",
+		);
+	}
+	try {
+		const file = auditPath();
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.appendFileSync(
+			file,
+			`${JSON.stringify({ ts: new Date().toISOString(), event: "run_command_unsandboxed", reason: status.reason, required: status.required, command: command.slice(0, 200) })}\n`,
+		);
+	} catch {}
+	for (const l of listeners) {
+		try {
+			l(status);
+		} catch {}
+	}
+}
+
+/** Short form of a status reason for the TUI footer: the part before any "(...)". */
+export function sandboxFooterReason(reason: string): string {
+	// A footer word, not a sentence: the hint caps share the row (footer-clicks test).
+	const CODES: [RegExp, string][] = [
+		[/^EIGHT_SEATBELT=0/, "turned off"],
+		[/sandbox-exec missing/, "no sandbox-exec"],
+		[/already sandboxes/, "nested"],
+		[/bwrap not installed/, "no bwrap"],
+		[/bwrap cannot/, "no namespaces"],
+		[/^no OS sandbox on /, "unsupported OS"],
+		[/^OS read rule off/, "no read rule"],
+	];
+	for (const [re, code] of CODES) if (re.test(reason)) return code;
+	const short = reason.split(" (")[0]?.trim() || reason;
+	return short.length > 16 ? `${short.slice(0, 15)}…` : short;
+}
+
+/**
+ * Callers check this before spawning: a refusal message when
+ * EIGHT_SEATBELT=require and no OS boundary can be applied, else undefined.
+ */
+export function runCommandSandboxRefusal(): string | undefined {
+	const status = runCommandSandboxStatus();
+	if (status.applied || !status.required) return undefined;
+	return `[PERMISSION DENIED] EIGHT_SEATBELT=require and run_command cannot be OS-sandboxed here: ${status.reason}`;
+}
+
+export class RunCommandSandboxRequired extends Error {}
+
+let signingKeyEnsured = false;
+
+/**
+ * Create <data dir>/keys (0700) and state-hmac.key before the first command is
+ * wrapped, so no command runs while the key is still absent and plantable
+ * (#4132, 8SO). Once per process. A failure (for example a key path refused
+ * as in-project) never blocks the command: signing reports it on use.
+ */
+function ensureSigningKey(): void {
+	if (signingKeyEnsured) return;
+	signingKeyEnsured = true;
+	try {
+		loadOrCreateKey();
+	} catch {}
+}
+
+/**
+ * Wrap a run_command so the kernel refuses writes to the protected set,
+ * whatever the command text says. When no OS boundary can be applied the
+ * command is returned unchanged and reported (stderr once, audit line,
+ * listeners), or, under EIGHT_SEATBELT=require, refused with a throw.
+ */
+export function wrapRunCommand(command: string, read?: OsReadSpec): string {
+	ensureSigningKey();
+	// EIGHT_OS_READ_BOUNDARY=1 and the rule cannot be applied: never run (callers return the
+	// same message as the tool result first; this backstop covers background_start).
+	const readRefusal = read ? osReadRefusal() : undefined;
+	if (readRefusal) throw new RunCommandSandboxRequired(readRefusal);
+	const status = runCommandSandboxStatus();
+	if (!status.applied) {
+		if (status.required) throw new RunCommandSandboxRequired(runCommandSandboxRefusal());
+		reportUnsandboxed(status, command);
+		// No write boundary here (no bwrap), but the read rule stands on its own (#4890 slice 2).
+		// EIGHT_SEATBELT=0 turns every OS rule off, as on macOS.
+		const readOnly = status.reason === "EIGHT_SEATBELT=0" ? undefined : linuxReadPrefix(read);
+		if (readOnly) return [...readOnly, landlockShell(), "-c", command].map(shellQuote).join(" ");
+		return command;
+	}
+	if (status.mechanism === "seatbelt") {
+		// The OS read boundary (#4890): only when the person turned it on and the caller said where.
+		const profile = buildRunCommandProfile(
+			protectedRunCommandPaths(),
+			read && osReadBoundaryOn() ? read : undefined,
+		);
+		return `${SANDBOX_EXEC} -p ${shellQuote(profile)} /bin/sh -c ${shellQuote(command)}`;
+	}
+	const bwrap = findBwrap() as string;
+	const readRule = linuxReadPrefix(read) ?? [];
+	return [bwrap, ...buildBwrapArgs(), ...readRule, "/bin/sh", "-c", command]
+		.map(shellQuote)
+		.join(" ");
+}
+
+/**
+ * The argv form of wrapRunCommand, for tools that spawn a binary with an args
+ * array and no shell (the native git and gh tools, #3998). Returns the full argv
+ * to spawn: sandbox-exec -p <profile> or bwrap <binds> in front of `bin args`,
+ * never a shell. Git runs repository config (fsmonitor, hooks, aliases,
+ * sshCommand), so the same kernel boundary applies. Same rules as
+ * wrapRunCommand when no boundary applies: report, or throw under require.
+ */
+export function wrapRunCommandArgv(bin: string, args: readonly string[]): string[] {
+	ensureSigningKey();
+	const status = runCommandSandboxStatus();
+	if (!status.applied) {
+		if (status.required) throw new RunCommandSandboxRequired(runCommandSandboxRefusal());
+		reportUnsandboxed(status, [bin, ...args].join(" "));
+		return [bin, ...args];
+	}
+	if (status.mechanism === "seatbelt")
+		return [SANDBOX_EXEC, "-p", buildRunCommandProfile(), bin, ...args];
+	return [findBwrap() as string, ...buildBwrapArgs(), bin, ...args];
+}

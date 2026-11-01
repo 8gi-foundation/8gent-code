@@ -1,0 +1,148 @@
+{
+  "version": "1.0.0",
+  "rung": 1,
+  "date": "2026-06-22",
+  "owner": "Karen (8SO)",
+  "wave": "#70",
+  "prerequisites": ["#78", "#77"],
+  "tiers": {
+    "0": { "label": "read-only", "description": "Queries only. No state changes." },
+    "1": { "label": "local-state", "description": "File writes, git commits, local mutations." },
+    "2": { "label": "remote-state", "description": "Network calls, external APIs, cross-system effects." },
+    "3": { "label": "destructive", "description": "Deletes, resets, credential access, irreversible actions." }
+  },
+  "officers": {
+    "8EO": {
+      "name": "AI James",
+      "domains": ["strategic", "mission", "goal-loop", "budget", "public-comms"],
+      "sensitive": ["budget", "hiring", "public-comms"],
+      "capabilities": [
+        { "action": "query-mission-state", "tier": 0, "permitted": true, "checker": null },
+        { "action": "read-brief", "tier": 0, "permitted": true, "checker": null },
+        { "action": "draft-internal-docs", "tier": 1, "permitted": true, "checker": null },
+        { "action": "create-github-issue", "tier": 1, "permitted": true, "checker": null },
+        { "action": "post-internal-channel", "tier": 1, "permitted": true, "checker": null },
+        { "action": "commit-to-repo", "tier": 1, "permitted": "conditional", "checker": "must-reference-active-wave" },
+        { "action": "public-comms", "tier": 2, "permitted": false, "checker": "human-approval-required" },
+        { "action": "spend-or-commit-budget", "tier": 3, "permitted": false, "checker": "board-vote-required" }
+      ]
+    },
+    "8TO": {
+      "name": "Rishi",
+      "domains": ["core-kernel", "architecture", "infra", "auth", "secrets", "vessel-spine"],
+      "sensitive": ["auth", "secrets", "vessel-spine"],
+      "capabilities": [
+        { "action": "read-codebase", "tier": 0, "permitted": true, "checker": null },
+        { "action": "run-tests", "tier": 0, "permitted": true, "checker": null },
+        { "action": "write-src", "tier": 1, "permitted": true, "checker": "must-reference-active-wave-issue" },
+        { "action": "commit-core-packages", "tier": 1, "permitted": "conditional", "checker": "must-pass-ci-plus-self-review" },
+        { "action": "modify-infra-configs", "tier": 2, "permitted": "conditional", "checker": "8GO-sign-off-required" },
+        { "action": "access-secrets-vault", "tier": 3, "permitted": false, "checker": "maker-checker-plus-8SO-witness" },
+        { "action": "delete-branch-or-repo", "tier": 3, "permitted": false, "checker": "board-vote-required" }
+      ]
+    },
+    "8PO": {
+      "name": "Samantha",
+      "domains": ["product", "app-store", "byos", "jr-children-data", "payment-flows"],
+      "sensitive": ["jr-children-data", "payment-flows"],
+      "jr-flag": true,
+      "capabilities": [
+        { "action": "read-app-store-guidelines", "tier": 0, "permitted": true, "checker": null },
+        { "action": "draft-jr-feature-spec", "tier": 1, "permitted": true, "checker": "8SO-coppa-review-required" },
+        { "action": "create-product-issue", "tier": 1, "permitted": true, "checker": null },
+        { "action": "update-jr-children-data-flows", "tier": 1, "permitted": false, "checker": "8SO-plus-8DO-cosign-required" },
+        { "action": "submit-to-app-store", "tier": 2, "permitted": false, "checker": "human-approval-required" },
+        { "action": "access-production-analytics", "tier": 2, "permitted": "conditional", "checker": "8SO-sign-off-required" }
+      ]
+    },
+    "8DO": {
+      "name": "Moira",
+      "domains": ["design", "brand", "ux", "accessibility", "jr-ux", "assistive-features"],
+      "sensitive": ["jr-ux", "assistive-features"],
+      "jr-flag": true,
+      "capabilities": [
+        { "action": "read-design-docs", "tier": 0, "permitted": true, "checker": null },
+        { "action": "audit-accessibility", "tier": 0, "permitted": true, "checker": null },
+        { "action": "update-brand-tokens", "tier": 1, "permitted": true, "checker": "8EO-awareness-notification" },
+        { "action": "modify-jr-ui-ux-specs", "tier": 1, "permitted": "conditional", "checker": "8SO-coppa-review" },
+        { "action": "commit-brand-assets", "tier": 1, "permitted": true, "checker": null },
+        { "action": "change-brand-colors-logo", "tier": 1, "permitted": "conditional", "checker": "8EO-notification" },
+        { "action": "publish-brand-publicly", "tier": 2, "permitted": false, "checker": "human-approval-required" }
+      ]
+    },
+    "8SO": {
+      "name": "Karen",
+      "domains": ["security", "compliance", "threat-model", "all-domains"],
+      "sensitive": ["all-domains"],
+      "self-approval-limit": 1,
+      "capabilities": [
+        { "action": "run-security-scans", "tier": 0, "permitted": true, "checker": null },
+        { "action": "read-audit-logs", "tier": 0, "permitted": true, "checker": null },
+        { "action": "flag-sec-issue", "tier": 1, "permitted": true, "checker": "auto-creates-issue-notifies-board" },
+        { "action": "patch-non-critical-sec-issue", "tier": 1, "permitted": true, "checker": "document-in-audit-trail" },
+        { "action": "access-prod-secrets-for-audit", "tier": 2, "permitted": "conditional", "checker": "must-be-witnessed-and-documented" },
+        { "action": "remediate-sec-critical-live", "tier": 2, "permitted": "conditional", "checker": "post-hoc-board-notification-within-24h" },
+        { "action": "commit-auth-security-critical-code", "tier": 1, "permitted": "conditional", "checker": "8TO-co-review-required" },
+        { "action": "patch-gdpr-childrens-data-flows", "tier": 1, "permitted": false, "checker": "8PO-plus-8DO-cosign-required" }
+      ]
+    },
+    "8CO": {
+      "name": "Luis",
+      "domains": ["ecosystem", "marketplace", "social-engine", "user-data", "community-content"],
+      "sensitive": ["user-data", "community-content"],
+      "capabilities": [
+        { "action": "read-marketplace-docs", "tier": 0, "permitted": true, "checker": null },
+        { "action": "draft-ecosystem-specs", "tier": 1, "permitted": true, "checker": null },
+        { "action": "update-social-engine-prompts", "tier": 1, "permitted": "conditional", "checker": "8SO-review-for-pii-risk" },
+        { "action": "commit-to-community-packages", "tier": 1, "permitted": true, "checker": "must-reference-active-wave" },
+        { "action": "access-user-content-data", "tier": 2, "permitted": false, "checker": "8SO-sign-off-required" },
+        { "action": "publish-to-marketplace", "tier": 2, "permitted": false, "checker": "human-approval-required" }
+      ]
+    },
+    "8MO": {
+      "name": "Zara",
+      "domains": ["narrative", "positioning", "launch", "external-comms", "press"],
+      "sensitive": ["external-comms", "press"],
+      "capabilities": [
+        { "action": "read-public-docs-competitor-intel", "tier": 0, "permitted": true, "checker": null },
+        { "action": "draft-launch-copy-narratives", "tier": 1, "permitted": true, "checker": "8EO-review-mission-alignment" },
+        { "action": "update-outbound-docs", "tier": 1, "permitted": true, "checker": null },
+        { "action": "post-to-social-draft", "tier": 1, "permitted": "conditional", "checker": "telegram-review-before-send" },
+        { "action": "publish-public-posts", "tier": 2, "permitted": false, "checker": "human-approval-required" },
+        { "action": "engage-press-or-media", "tier": 2, "permitted": false, "checker": "human-approval-required" }
+      ]
+    },
+    "8GO": {
+      "name": "Solomon",
+      "domains": ["governance", "policy", "reversibility", "board-decisions", "constitution"],
+      "sensitive": ["board-decisions", "constitution"],
+      "capabilities": [
+        { "action": "read-governance-docs", "tier": 0, "permitted": true, "checker": null },
+        { "action": "draft-policy-proposals", "tier": 1, "permitted": true, "checker": null },
+        { "action": "update-audit-trail-schema", "tier": 1, "permitted": "conditional", "checker": "8SO-review" },
+        { "action": "commit-governance-code", "tier": 1, "permitted": "conditional", "checker": "8TO-plus-8SO-coreview" },
+        { "action": "amend-constitution-or-precedent", "tier": 3, "permitted": false, "checker": "board-vote-required" },
+        { "action": "access-board-vote-records", "tier": 0, "permitted": true, "checker": null }
+      ]
+    }
+  },
+  "audit-trail": {
+    "schema": {
+      "officer_id": "string",
+      "action_tier": "number",
+      "domain": "string",
+      "action_type": "string",
+      "outcome": "string",
+      "timestamp": "string (ISO 8601)",
+      "checker_used": "string | null",
+      "jr_flag": "boolean"
+    },
+    "store": "TBD (Convex | git | append-only-store)"
+  },
+  "open-questions": [
+    "Who approves 8SO actions above Tier 1? (Karen cannot self-approve)",
+    "Audit trail storage: Convex, git, or separate append-only?",
+    "How are Jr domains identified? Need path/label convention.",
+    "Escalation path for unauthorized Tier 2 attempts?"
+  ]
+}

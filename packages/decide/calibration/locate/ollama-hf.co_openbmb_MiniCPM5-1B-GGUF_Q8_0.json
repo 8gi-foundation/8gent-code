@@ -1,0 +1,16 @@
+{
+	"kind": "locate-mode",
+	"model": "hf.co/openbmb/MiniCPM5-1B-GGUF:Q8_0",
+	"backend": "ollama",
+	"threshold": 0.4273,
+	"fittedOn": "eval/results/2026-09-28-locate-prose-hf.co_openbmb_MiniCPM5-1B-GGUF_Q8_0.json",
+	"n": 40,
+	"rawAccuracy": 0.25,
+	"heldOut": {
+		"accuracy": 0.225,
+		"coverage": 0.75,
+		"acceptedAccuracy": 0.3,
+		"method": "leave-one-out"
+	},
+	"note": "PROVISIONAL: fitted on 40 hand-labelled synthetic prose queries (one labeller). Keep the model's mode when its choice confidence >= threshold, else hybrid."
+}

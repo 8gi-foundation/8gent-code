@@ -1,0 +1,1672 @@
+/**
+ * 8gent Code - Permission System
+ *
+ * Security layer that controls what commands and actions the agent can execute.
+ * Implements dangerous command detection, deny-by-default policies, and
+ * interactive human-in-the-loop approval for scoped capabilities.
+ */
+
+import { AsyncLocalStorage } from "node:async_hooks";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { askOneYes } from "../core/one-yes";
+import { activeShellKind } from "../core/shell";
+import { blockedReason, commandArgvs } from "./always-blocked";
+import { writeFileAtomic } from "./atomic-write";
+import { commandInFolder } from "./cd-prefix";
+import {
+	type GitState,
+	allowListIsLocalOnly,
+	commandSegments,
+	everySegmentSafe,
+	mustAskReason,
+	repoGitState,
+} from "./command-policy";
+import { currentPermissionMode } from "./permission-mode.js";
+import {
+	type DeniedCall,
+	clearDenial,
+	denialFingerprint,
+	readDenialFile,
+	recordDenial,
+	strictFingerprint,
+} from "./resume-safety";
+import { readOnlyInlinePython } from "./s1-inline-python";
+import { type ActiveShellKind, posixRulesApply } from "./shell-tools";
+import { unresolvedDeleteReason } from "./structural-spellings";
+import { requestTuiApproval } from "./tui-approval-channel.js";
+
+/**
+ * A headless channel's way to ask its human (#3621). The daemon binds one per
+ * agent turn (a Telegram session's operator); with none bound, headless
+ * behaves exactly as before.
+ */
+export interface ChannelApprovalRequest {
+	action: string;
+	details: string;
+	command: string;
+}
+/** How a channel approval ended. Only "approved" lets the command run. */
+export type ChannelOutcome =
+	| "approved"
+	| "denied"
+	| "expired"
+	| "replaced"
+	| "undelivered"
+	| "unshowable";
+export type ChannelApprover = (req: ChannelApprovalRequest) => Promise<ChannelOutcome>;
+interface ChannelScope {
+	approver: ChannelApprover;
+	/** The last outcome in this turn, so the refusal can say what actually happened. */
+	last?: ChannelOutcome;
+}
+const _channelApprover = new AsyncLocalStorage<ChannelScope>();
+
+const NOT_RUN: Partial<Record<ChannelOutcome, string>> = {
+	expired: "Approval expired: nobody answered in time. Nothing ran",
+	replaced: "Approval replaced by a newer request before anyone answered. Nothing ran",
+	undelivered: "The approval card could not be shown to the person. Nothing ran",
+	unshowable:
+		"The command is too long to show the person in full, so it was not offered. Nothing ran",
+};
+
+/**
+ * The refusal to hand the model after a channel approval came back false, or
+ * null when the person actually declined (or no channel asked).
+ */
+export function channelDenialMessage(command: string): string | null {
+	const why = _channelApprover.getStore()?.last;
+	return why && NOT_RUN[why] ? `[PERMISSION DENIED] ${NOT_RUN[why]}: ${command}` : null;
+}
+
+/**
+ * A turn that runs in the daemon for a TUI has no card to show (#4829). Inside this
+ * scope, with no channel approver bound, every request that reaches the prompt is
+ * refused, headless or not: nothing needing a yes runs without one.
+ */
+const _noCardSurface = new AsyncLocalStorage<true>();
+export function runWithoutApprovalSurface<T>(fn: () => T): T {
+	return _noCardSurface.run(true, fn);
+}
+
+/** Run fn so a dangerous shell command inside it asks `approver` instead of being denied. */
+export function runWithChannelApprover<T>(approver: ChannelApprover, fn: () => T): T {
+	return _channelApprover.run({ approver }, fn);
+}
+
+/**
+ * The session's memory of an answer, per folder (#3199): a yes to `npm publish` in
+ * one folder is not a yes in another, or at the project root.
+ */
+function sessionKey(command: string, where?: string): string {
+	const key = command.toLowerCase().trim();
+	return where ? `${key}\u0000in ${where}` : key;
+}
+
+// ============================================
+// Types
+// ============================================
+
+export interface PermissionConfig {
+	allowedPatterns: string[];
+	deniedPatterns: string[];
+	autoApprove: boolean;
+	logPath?: string;
+	/** Infinite mode - bypass ALL permission checks (like --dangerously-skip-permissions) */
+	infiniteMode?: boolean;
+}
+
+export interface PermissionRequest {
+	id: string;
+	action: string;
+	details: string;
+	command?: string;
+	timestamp: Date;
+	approved?: boolean;
+	autoApproved?: boolean;
+}
+
+export interface PermissionLog {
+	requests: PermissionRequest[];
+	deniedCount: number;
+	approvedCount: number;
+	autoApprovedCount: number;
+}
+
+export interface InfiniteModeAuditEntry {
+	timestamp: Date;
+	command: string;
+	action: string;
+	details: string;
+	blocked: boolean;
+	reason?: string;
+	/** The mode the call ran in; absent means infinite. */
+	mode?: string;
+}
+
+// ============================================
+// Constants
+// ============================================
+
+/**
+ * Maximum duration for infinite mode in milliseconds (30 minutes).
+ */
+const INFINITE_MODE_MAX_DURATION_MS = 30 * 60 * 1000;
+
+/**
+ * Commands that are NEVER allowed, even in infinite mode.
+ * These are catastrophic system-level destructive operations.
+ */
+export const ALWAYS_BLOCKED_COMMANDS: Array<{
+	command: string;
+	args: string[];
+	description: string;
+}> = [
+	{
+		command: "rm",
+		args: ["-rf", "/"],
+		description: "recursive delete root filesystem",
+	},
+	{
+		command: "rm",
+		args: ["-rf", "/*"],
+		description: "recursive delete all root contents",
+	},
+	{
+		command: "rm",
+		args: ["-rf", "--no-preserve-root", "/"],
+		description: "force recursive delete root",
+	},
+	{
+		command: "chmod",
+		args: ["000", "/"],
+		description: "remove all permissions from root",
+	},
+	{
+		command: "chmod",
+		args: ["-R", "000", "/"],
+		description: "recursively remove all permissions from root",
+	},
+	{
+		command: "chown",
+		args: ["-R", "me:me", "/"],
+		description: "recursive ownership change of root",
+	},
+	{
+		command: "chown",
+		args: ["-R", "me:me", "/etc"],
+		description: "recursive ownership change of a system directory",
+	},
+	{
+		command: "dd",
+		args: ["of=/dev/sda"],
+		description: "overwrite primary disk",
+	},
+	{
+		command: "dd",
+		args: ["of=/dev/nvme0n1"],
+		description: "overwrite primary nvme",
+	},
+	{ command: "mkfs", args: ["/dev/sda"], description: "format primary disk" },
+	{ command: "mkfs.ext4", args: ["/dev/sda"], description: "format primary disk" },
+	{ command: ":(){ :|:& };:", args: [], description: "fork bomb" },
+];
+
+/**
+ * Dangerous command definitions using token-based matching.
+ * Each entry defines a command and optional argument patterns that make it dangerous.
+ */
+export const DANGEROUS_COMMAND_RULES: Array<{
+	command: string;
+	argPatterns?: string[][];
+	description: string;
+}> = [
+	// Destructive file operations
+	{
+		command: "rm",
+		argPatterns: [["-rf"], ["-r"], ["-f"]],
+		description: "file deletion",
+	},
+	{ command: "rmdir", description: "directory removal" },
+	{
+		command: "del",
+		argPatterns: [["/s"]],
+		description: "recursive delete (Windows)",
+	},
+	{ command: "deltree", description: "tree deletion (Windows)" },
+
+	// Privilege escalation
+	{ command: "sudo", description: "privilege escalation" },
+	{ command: "su", description: "switch user" },
+	{ command: "doas", description: "privilege escalation" },
+	{ command: "pkexec", description: "polkit privilege escalation" },
+
+	// Permission changes
+	{ command: "chmod", description: "permission change" },
+	{ command: "chown", description: "ownership change" },
+	{ command: "chgrp", description: "group change" },
+	{ command: "icacls", description: "Windows ACL change" },
+	{ command: "cacls", description: "Windows ACL change" },
+
+	// Disk operations
+	{ command: "dd", description: "disk copy" },
+	{ command: "mkfs", description: "filesystem creation" },
+	{ command: "fdisk", description: "disk partitioning" },
+	{ command: "parted", description: "disk partitioning" },
+	{
+		command: "diskutil",
+		argPatterns: [["eraseDisk"], ["erasevolume"]],
+		description: "disk utility",
+	},
+	{ command: "format", description: "disk format (Windows)" },
+
+	// System modification
+	{ command: "systemctl", description: "system service control" },
+	{ command: "service", description: "service control" },
+	{ command: "launchctl", description: "macOS service control" },
+	{ command: "reboot", description: "system reboot" },
+	{ command: "shutdown", description: "system shutdown" },
+	{ command: "init", description: "init level change" },
+
+	// Network exposure
+	{ command: "iptables", description: "firewall rule change" },
+	{ command: "ufw", description: "firewall control" },
+	{ command: "firewall-cmd", description: "firewall control" },
+	{ command: "netsh", description: "Windows network config" },
+
+	// Package removal
+	{
+		command: "apt",
+		argPatterns: [["remove"], ["purge"]],
+		description: "package removal",
+	},
+	{ command: "yum", argPatterns: [["remove"]], description: "package removal" },
+	{ command: "dnf", argPatterns: [["remove"]], description: "package removal" },
+	{
+		command: "brew",
+		argPatterns: [["uninstall"]],
+		description: "package removal",
+	},
+	{
+		command: "npm",
+		argPatterns: [["uninstall", "-g"]],
+		description: "global package removal",
+	},
+
+	// Dangerous git operations
+	{
+		command: "git",
+		argPatterns: [
+			["push", "--force"],
+			["reset", "--hard"],
+			["clean", "-fd"],
+			["clean", "-f"],
+		],
+		description: "destructive git operation",
+	},
+
+	// Environment manipulation
+	{
+		command: "export",
+		argPatterns: [["PATH="]],
+		description: "PATH modification",
+	},
+	{
+		command: "setx",
+		argPatterns: [["PATH"]],
+		description: "persistent PATH modification",
+	},
+];
+
+/**
+ * Patterns in piped commands that indicate code execution risk.
+ */
+const DANGEROUS_PIPE_PATTERNS = ["| sh", "| bash", "| zsh", "|sh", "|bash", "|zsh"];
+const DANGEROUS_PIPE_SOURCES = ["curl", "wget"];
+
+/**
+ * Commands that are considered safe for headless auto-approval.
+ * Only read-only operations that cannot modify state.
+ */
+export const HEADLESS_SAFE_COMMANDS: string[] = [
+	// Git read-only
+	"git status",
+	"git diff",
+	"git log",
+	"git show",
+	"git branch",
+	"git remote",
+	"git tag",
+	"git rev-parse",
+	"git describe",
+	"git ls-files",
+	"git ls-tree",
+	"git cat-file",
+
+	// File reading
+	"ls",
+	"cat",
+	"head",
+	"tail",
+	"find",
+	"grep",
+	"rg",
+	"tree",
+	"wc",
+	"file",
+	"stat",
+	"du",
+	"df",
+	"which",
+	"whereis",
+	"type",
+	"echo",
+	"printf",
+	"date",
+	"uname",
+	"whoami",
+	"pwd",
+	"env",
+	"printenv",
+
+	// Build/test (read or idempotent)
+	"tsc --noEmit",
+	"bun run typecheck",
+];
+
+/**
+ * Legacy list kept for backward compatibility in exports.
+ */
+export const DANGEROUS_COMMANDS = [
+	"rm -rf",
+	"rm -r",
+	"rmdir",
+	"del /s",
+	"deltree",
+	"sudo",
+	"su ",
+	"doas",
+	"pkexec",
+	"chmod",
+	"chown",
+	"chgrp",
+	"icacls",
+	"cacls",
+	"dd ",
+	"mkfs",
+	"fdisk",
+	"parted",
+	"diskutil eraseDisk",
+	"format ",
+	"systemctl",
+	"service ",
+	"launchctl",
+	"reboot",
+	"shutdown",
+	"init ",
+	"iptables",
+	"ufw ",
+	"firewall-cmd",
+	"netsh ",
+	"apt remove",
+	"apt purge",
+	"yum remove",
+	"dnf remove",
+	"brew uninstall",
+	"npm uninstall -g",
+	"git push --force",
+	"git reset --hard",
+	"git clean -fd",
+	"export PATH=",
+	"setx PATH",
+	"curl|",
+	"curl |",
+	"wget|",
+	"wget |",
+	"|sh",
+	"|bash",
+	"|zsh",
+];
+
+/**
+ * Patterns that are generally safe and can be auto-approved.
+ */
+export const SAFE_PATTERNS = [
+	// Package management (non-destructive)
+	"npm install",
+	"npm i ",
+	"npm run",
+	"npm test",
+	"npm start",
+	"npm build",
+	"bun install",
+	"bun run",
+	"bun test",
+	"yarn install",
+	"yarn add",
+	"yarn run",
+	"pnpm install",
+	"pnpm add",
+	"pnpm run",
+
+	// Git (non-destructive)
+	"git status",
+	"git log",
+	"git diff",
+	"git branch",
+	"git checkout",
+	"git add",
+	"git commit",
+	"git pull",
+	"git fetch",
+	"git stash",
+	"git show",
+
+	// Build tools
+	"tsc",
+	"esbuild",
+	"vite",
+	"webpack",
+	"rollup",
+	"turbo",
+
+	// Testing
+	"jest",
+	"vitest",
+	"mocha",
+	"pytest",
+	"cargo test",
+	"go test",
+
+	// Linting/formatting
+	"eslint",
+	"prettier",
+	"biome",
+	"rustfmt",
+	"gofmt",
+	"black",
+
+	// Development servers
+	"next dev",
+	"vite dev",
+	"npm run dev",
+	"bun run dev",
+
+	// File listing/reading (non-destructive)
+	"ls",
+	"dir",
+	"cat",
+	"head",
+	"tail",
+	"less",
+	"more",
+	"find",
+	"grep",
+	"tree",
+	"wc",
+
+	// File operations (needed for delegation)
+	"mkdir",
+	"touch",
+	"cp",
+
+	// Git write operations (push to main blocked separately by isHeadlessSafe)
+	"git push",
+	"git merge",
+
+	// GitHub CLI
+	"gh issue",
+	"gh pr",
+	"gh repo view",
+	"gh api",
+
+	// Misc tools
+	"curl",
+	"wget",
+	"jq",
+	"echo",
+];
+
+// ============================================
+// Command Parsing Utility
+// ============================================
+
+/**
+ * Parse a command string into a command name and arguments.
+ * Handles quoted strings and basic shell syntax.
+ */
+export function parseCommand(cmd: string): { command: string; args: string[] } {
+	const trimmed = cmd.trim();
+	if (!trimmed) return { command: "", args: [] };
+
+	const tokens: string[] = [];
+	let current = "";
+	let inSingleQuote = false;
+	let inDoubleQuote = false;
+	let escapeNext = false;
+
+	for (let i = 0; i < trimmed.length; i++) {
+		const char = trimmed[i];
+
+		if (escapeNext) {
+			current += char;
+			escapeNext = false;
+			continue;
+		}
+
+		if (char === "\\" && !inSingleQuote) {
+			escapeNext = true;
+			continue;
+		}
+
+		if (char === "'" && !inDoubleQuote) {
+			inSingleQuote = !inSingleQuote;
+			continue;
+		}
+
+		if (char === '"' && !inSingleQuote) {
+			inDoubleQuote = !inDoubleQuote;
+			continue;
+		}
+
+		if ((char === " " || char === "\t") && !inSingleQuote && !inDoubleQuote) {
+			if (current.length > 0) {
+				tokens.push(current);
+				current = "";
+			}
+			continue;
+		}
+
+		current += char;
+	}
+
+	if (current.length > 0) {
+		tokens.push(current);
+	}
+
+	if (tokens.length === 0) return { command: "", args: [] };
+
+	return {
+		command: tokens[0],
+		args: tokens.slice(1),
+	};
+}
+
+// ============================================
+// Permission Manager
+// ============================================
+
+export class PermissionManager {
+	private config: PermissionConfig;
+	private configPath: string;
+	private log: PermissionLog;
+	private approvedCommands: Set<string> = new Set();
+	private deniedCommands: Set<string> = new Set();
+	/** The session whose denials are kept on disk (#4821), or null: none are written or read. */
+	private denialSession: string | null = null;
+	/** Fingerprints denied before a crash: asked again, in every mode, until a fresh yes (#4821). */
+	private resumedDenials: Map<string, Set<string>> = new Map();
+	/** The session's denial file exists but cannot be read: every command asks (#4821). */
+	private denialsUnreadable = false;
+	private warnedSave = false;
+	private infiniteMode = false;
+	private infiniteModeStartTime: number | null = null;
+	private infiniteModeAuditLog: InfiniteModeAuditEntry[] = [];
+	/** The user pinned a local provider: every network command asks (#3748). */
+	private pinnedLocalProvider = false;
+	/** Where the default-branch push check reads branches from (#3748). */
+	private gitState: GitState = repoGitState();
+
+	constructor(configPath?: string) {
+		const dataDir = process.env.EIGHT_DATA_DIR || path.join(os.homedir(), ".8gent");
+		this.configPath = configPath || path.join(dataDir, "permissions.json");
+		this.config = this.loadConfig();
+		this.log = {
+			requests: [],
+			deniedCount: 0,
+			approvedCount: 0,
+			autoApprovedCount: 0,
+		};
+	}
+
+	/**
+	 * Enable infinite mode - bypasses most permission checks.
+	 * Expires after 30 minutes. Catastrophic commands are still blocked.
+	 */
+	enableInfiniteMode(): void {
+		this.infiniteMode = true;
+		this.infiniteModeStartTime = Date.now();
+		this.infiniteModeAuditLog = [];
+		console.log("\x1b[33m[INF] Infinite Loop mode enabled (expires in 30 minutes)\x1b[0m");
+	}
+
+	/**
+	 * Disable infinite mode - normal permission checks resume.
+	 */
+	disableInfiniteMode(): void {
+		this.infiniteMode = false;
+		this.infiniteModeStartTime = null;
+		console.log("\x1b[33m[INF] Infinite Loop mode disabled\x1b[0m");
+	}
+
+	/**
+	 * Check if infinite mode is active (accounts for expiry).
+	 */
+	isInfiniteMode(): boolean {
+		// A call made by an agent that holds a permission mode (#3170) answers
+		// from that mode, not from this process-wide flag: one tab in Infinite
+		// never makes another tab's call infinite, and the reverse. A call with
+		// no mode bound falls through to the flag, exactly as before.
+		const perCall = currentPermissionMode();
+		if (perCall !== undefined) return perCall === "infinite";
+		if (!this.infiniteMode) return false;
+
+		// Check time limit
+		if (this.infiniteModeStartTime !== null) {
+			const elapsed = Date.now() - this.infiniteModeStartTime;
+			if (elapsed >= INFINITE_MODE_MAX_DURATION_MS) {
+				console.log("\x1b[33m[INF] Infinite Loop mode expired after 30 minutes\x1b[0m");
+				this.infiniteMode = false;
+				this.infiniteModeStartTime = null;
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Get the audit log of all actions taken during infinite mode.
+	 */
+	getInfiniteModeAuditLog(): InfiniteModeAuditEntry[] {
+		return [...this.infiniteModeAuditLog];
+	}
+
+	/**
+	 * Get remaining time in infinite mode (in ms), or 0 if not active.
+	 */
+	getInfiniteModeRemainingMs(): number {
+		if (!this.infiniteMode || this.infiniteModeStartTime === null) return 0;
+		const elapsed = Date.now() - this.infiniteModeStartTime;
+		return Math.max(0, INFINITE_MODE_MAX_DURATION_MS - elapsed);
+	}
+
+	/**
+	 * Check if a command is catastrophic and should ALWAYS be blocked,
+	 * even in infinite mode.
+	 */
+	private isAlwaysBlocked(command: string): {
+		blocked: boolean;
+		reason?: string;
+	} {
+		// Fail-closed by design: no try/catch here, so any throw propagates and the command is refused.
+		// Every command on the line counts, not only the first (#3768): the
+		// same segment splitting and wrapper handling as the ask-every-time list.
+		for (const argv of commandArgvs(command)) {
+			const reason = blockedReason(argv);
+			if (reason) return { blocked: true, reason };
+		}
+
+		// Also block fork bombs by content
+		if (command.includes(":(){ :|:& };:")) {
+			return { blocked: true, reason: "fork bomb" };
+		}
+
+		return { blocked: false };
+	}
+
+	/** The mode label an always-blocked refusal is audited under outside Infinite. */
+	private refusalMode(): string {
+		const perCall = currentPermissionMode();
+		if (perCall) return perCall;
+		if (this.config.autoApprove) return "auto";
+		return process.env.EIGHT_HEADLESS ? "run" : "ask";
+	}
+
+	/**
+	 * Log an action during infinite mode, or an always-blocked refusal in any mode.
+	 */
+	private auditInfiniteMode(
+		command: string,
+		action: string,
+		details: string,
+		blocked: boolean,
+		reason?: string,
+		mode = "infinite",
+	): void {
+		const entry: InfiniteModeAuditEntry = {
+			timestamp: new Date(),
+			command,
+			action,
+			details,
+			blocked,
+			reason,
+			mode,
+		};
+		this.infiniteModeAuditLog.push(entry);
+
+		// Also write to log file if configured
+		if (this.config.logPath) {
+			const logLine = `${JSON.stringify({
+				...entry,
+				timestamp: entry.timestamp.toISOString(),
+				mode,
+			})}\n`;
+
+			try {
+				fs.appendFileSync(this.config.logPath, logLine);
+			} catch (err) {
+				// Silent - don't break the flow for audit logging
+			}
+		}
+	}
+
+	/**
+	 * Load configuration from disk
+	 */
+	private loadConfig(): PermissionConfig {
+		try {
+			if (fs.existsSync(this.configPath)) {
+				const data = fs.readFileSync(this.configPath, "utf-8");
+				const parsed = JSON.parse(data) as PermissionConfig;
+				// autoApprove is a per-process switch (--yes, EIGHT_AUTO_APPROVE), never a
+				// saved preference (#4817). A file that says true is a leftover of the old
+				// bug: load it as false and rewrite it once, leaving every other key alone.
+				if (parsed && parsed.autoApprove) {
+					parsed.autoApprove = false;
+					this.rewriteInPlace(parsed);
+				}
+				return parsed;
+			}
+		} catch (err) {
+			console.warn(`Warning: Could not load permissions config: ${err}`);
+		}
+
+		// Default config
+		return {
+			allowedPatterns: ["npm *", "bun *", "git *", "ls *", "cat *"],
+			deniedPatterns: ["rm -rf /", "sudo rm -rf", ":(){ :|:& };:"],
+			autoApprove: false,
+		};
+	}
+
+	/**
+	 * Save configuration to disk
+	 */
+	saveConfig(): void {
+		const dir = path.dirname(this.configPath);
+		if (!fs.existsSync(dir)) {
+			fs.mkdirSync(dir, { recursive: true });
+		}
+		// Never persist the in-memory auto-approve switch (#4817).
+		this.writeAtomic({ ...this.config, autoApprove: false });
+	}
+
+	/**
+	 * Replace the config file atomically: temp file in the target's own directory,
+	 * fsync, rename over the target. A crash or a concurrent reader never sees a
+	 * partial file. A symlink stays a link (the real target is replaced) and the
+	 * target's mode is kept.
+	 */
+	private writeAtomic(config: unknown): void {
+		writeFileAtomic(this.configPath, JSON.stringify(config, null, 2));
+	}
+
+	/** Rewrite a leftover `autoApprove: true` once. Best effort. */
+	private rewriteInPlace(config: PermissionConfig): void {
+		try {
+			this.writeAtomic(config);
+		} catch {
+			// Read-only location: the in-memory false still holds.
+		}
+	}
+
+	/**
+	 * Check if a command matches any dangerous patterns.
+	 * Uses token-based parsing instead of substring matching.
+	 */
+	isDangerous(command: string): boolean {
+		if (this.isDangerousSegment(command)) return true;
+		// Every segment of a chained line counts, not only the first word (#4485): the
+		// strictest verdict wins, so `echo hi; rm -rf x` is as dangerous as `rm -rf x`.
+		const segments = commandSegments(command);
+		if (segments.length <= 1) return false;
+		return segments.some((segment) => this.isDangerousSegment(segment));
+	}
+
+	private isDangerousSegment(command: string): boolean {
+		const normalizedCmd = command.trim();
+		const parsed = parseCommand(normalizedCmd);
+		const cmdLower = parsed.command.toLowerCase();
+		const argsLower = parsed.args.map((a) => a.toLowerCase());
+		const fullCmdLower = normalizedCmd.toLowerCase();
+
+		// Check for dangerous pipe patterns (curl/wget piped to shell)
+		for (const source of DANGEROUS_PIPE_SOURCES) {
+			if (cmdLower === source) {
+				for (const pipePattern of DANGEROUS_PIPE_PATTERNS) {
+					if (fullCmdLower.includes(pipePattern)) {
+						return true;
+					}
+				}
+			}
+		}
+
+		// Also check if a pipe to shell exists anywhere in the command
+		for (const pipePattern of DANGEROUS_PIPE_PATTERNS) {
+			if (fullCmdLower.includes(pipePattern)) {
+				// Only flag if the pipe target is a shell
+				return true;
+			}
+		}
+
+		// Token-based matching against dangerous command rules
+		for (const rule of DANGEROUS_COMMAND_RULES) {
+			// Check if the command (first token) matches the rule
+			if (cmdLower !== rule.command && !cmdLower.endsWith(`/${rule.command}`)) {
+				continue;
+			}
+
+			// If no specific arg patterns, the command itself is dangerous
+			if (!rule.argPatterns || rule.argPatterns.length === 0) {
+				return true;
+			}
+
+			// Check if any arg pattern matches
+			for (const argPattern of rule.argPatterns) {
+				const allArgsMatch = argPattern.every((requiredArg) => {
+					const reqLower = requiredArg.toLowerCase();
+					return argsLower.some((a) => a === reqLower || a.startsWith(reqLower));
+				});
+
+				if (allArgsMatch) {
+					return true;
+				}
+			}
+		}
+
+		// Check against user-defined denied patterns
+		for (const pattern of this.config.deniedPatterns) {
+			if (this.matchPattern(fullCmdLower, pattern)) {
+				return true;
+			}
+		}
+
+		// A person approves these every time (#3748): treating them as dangerous
+		// keeps them off the safe list, --yes and guarded mode's card skip, and
+		// refused when no terminal is attached.
+		if (this.mustAskReason(normalizedCmd)) return true;
+
+		return false;
+	}
+
+	/**
+	 * Why a command is refused in every mode, Infinite included, or null (#3767).
+	 * Public so tools that type into a terminal session can use the same list.
+	 */
+	alwaysBlockedReason(command: string): string | null {
+		const check = this.isAlwaysBlocked(command);
+		return check.blocked ? (check.reason ?? "always blocked") : null;
+	}
+
+	/**
+	 * Ask a person, whatever the mode, with No as the default (#3767). With no
+	 * terminal attached there is no one to ask, so the answer is no.
+	 */
+	async askPerson(action: string, details: string, command?: string): Promise<boolean> {
+		if (this.isHeadless()) {
+			console.log(`[permissions] DENIED (no terminal to ask): ${command || action}`);
+			return false;
+		}
+		return this.promptUser(action, details, command, true);
+	}
+
+	/**
+	 * Why a person must approve this command every time, or null (#3748): a
+	 * push to the default branch, a network command that sends data, or any
+	 * network command while a local provider is pinned.
+	 */
+	mustAskReason(command: string): string | null {
+		// An unreadable denial record fails closed: every command asks, none runs unasked (#4821).
+		if (this.denialsUnreadable) return "the denial record for this session could not be read";
+		// Denied before a crash: a person decides again, whatever the mode (#4821).
+		if (this.resumedDenials.size > 0 && this.resumedDenials.has(denialFingerprint(command)))
+			return "it was denied before the crash and needs a fresh decision";
+		// A recursive delete of a value the line does not show asks, even in Infinite mode (#4514).
+		const unresolved = unresolvedDeleteReason(command);
+		if (unresolved) return unresolved;
+		return mustAskReason(command, {
+			git: this.gitState,
+			pinnedLocalProvider:
+				this.pinnedLocalProvider || allowListIsLocalOnly(process.env.EIGHT_PROVIDERS_ALLOW),
+		});
+	}
+
+	/**
+	 * Scope the denial ledger to one session (#4821). Calls denied earlier in
+	 * this session are loaded and returned so the caller can show them; each is
+	 * asked again, in every mode, and never run without a fresh yes. Later denials
+	 * in this session are written down; approvals never are. null turns it off.
+	 */
+	setDenialSession(key: string | null): DeniedCall[] {
+		this.denialSession = key;
+		const file = key ? readDenialFile(key) : { rows: [], corrupt: false };
+		const rows = file.rows;
+		this.denialsUnreadable = file.corrupt;
+		this.resumedDenials = new Map();
+		for (const d of rows) {
+			const strict = this.resumedDenials.get(d.fp) ?? new Set<string>();
+			strict.add(d.sfp);
+			this.resumedDenials.set(d.fp, strict);
+		}
+		return rows;
+	}
+
+	/** True when the session's denial file could not be read; the caller shows one notice. */
+	isDenialRecordUnreadable(): boolean {
+		return this.denialsUnreadable;
+	}
+
+	/** The user pinned a local provider (e.g. `--provider ollama`) (#3748). */
+	setPinnedLocalProvider(pinned: boolean): void {
+		this.pinnedLocalProvider = pinned;
+	}
+
+	/** Replace where branch names are read from. For tests. */
+	setGitState(state: GitState): void {
+		this.gitState = state;
+	}
+
+	/**
+	 * Check if a command is pre-approved (safe or user-allowed)
+	 */
+	isAllowed(
+		command: string,
+		shell: ActiveShellKind = activeShellKind(),
+		where?: string,
+		/** Absolute folder the command runs in; the inline-python shadow check reads it. */
+		cwd?: string,
+	): boolean {
+		const normalizedCmd = command.toLowerCase().trim();
+		const remembered = sessionKey(command, where);
+
+		// Check if explicitly denied
+		if (this.deniedCommands.has(remembered)) {
+			return false;
+		}
+
+		// Check if explicitly approved in session
+		if (this.approvedCommands.has(remembered)) {
+			return true;
+		}
+
+		// The safe-prefix list reads POSIX quoting; under PowerShell, or a cmd.exe
+		// line with ^ or %, it cannot judge the line, so only a session approval counts.
+		// A read-only inline `python3 -c "..."` (load a file, print) raises no card (#4421). Judged
+		// before the line-break guard below: the script's line breaks sit inside one quoted word,
+		// and the module reads that quoting itself. Never under PowerShell or cmd.exe.
+		if (shell !== "powershell" && shell !== "cmd" && readOnlyInlinePython(command, cwd).ok)
+			return true;
+
+		if (!posixRulesApply(command, shell)) return false;
+
+		// Safe prefixes and the user's allowed patterns approve a line only when
+		// EVERY segment of it matches one (#3748): `cat x | <anything>` no longer
+		// rides on its first word, and a `cat *` pattern covers one command, not
+		// whatever is chained after it.
+		return everySegmentSafe(
+			normalizedCmd,
+			(segment) =>
+				SAFE_PATTERNS.some((safe) => segment.startsWith(safe.toLowerCase())) ||
+				this.config.allowedPatterns.some((pattern) => this.matchPattern(segment, pattern)),
+		);
+	}
+
+	/**
+	 * Match a command against a glob-like pattern
+	 */
+	private matchPattern(command: string, pattern: string): boolean {
+		// Convert glob pattern to regex
+		const regexPattern = pattern
+			.replace(/[.+^${}()|[\]\\]/g, "\\$&") // Escape special chars except * and ?
+			.replace(/\*/g, ".*") // * matches anything
+			.replace(/\?/g, "."); // ? matches single char
+
+		const regex = new RegExp(`^${regexPattern}$`, "i");
+		return regex.test(command);
+	}
+
+	/**
+	 * Check if a command is safe for headless auto-approval.
+	 * Uses the first token of the command for matching.
+	 */
+	private isHeadlessSafe(command: string): boolean {
+		const parsed = parseCommand(command);
+		const cmdLower = parsed.command.toLowerCase();
+		const fullCmdLower = command.toLowerCase().trim();
+
+		for (const safe of HEADLESS_SAFE_COMMANDS) {
+			const safeParts = safe.split(" ");
+			const safeCmd = safeParts[0].toLowerCase();
+
+			if (cmdLower === safeCmd) {
+				// If the safe entry has specific subcommands, check them
+				if (safeParts.length > 1) {
+					const safeSubCmd = safeParts.slice(1).join(" ").toLowerCase();
+					if (fullCmdLower.startsWith(safe.toLowerCase())) {
+						return true;
+					}
+				} else {
+					// Just the command name matches, no subcommand required
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Request permission from the user for a command/action
+	 */
+	async requestPermission(
+		action: string,
+		details: string,
+		command?: string,
+		opts: {
+			defaultNo?: boolean;
+			/**
+			 * The project folder the command runs in, after a leading `cd <folder> &&`
+			 * (#3199). The card names it, and the session remembers the answer for that
+			 * folder only. Policy still judges `command` alone.
+			 */
+			where?: string;
+			/** Absolute folder the command runs in (for the inline-python shadow check). */
+			cwd?: string;
+		} = {},
+	): Promise<boolean> {
+		// A refusal must never quote an earlier call's channel outcome.
+		const channel = _channelApprover.getStore();
+		if (channel) channel.last = undefined;
+		const request: PermissionRequest = {
+			id: `perm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+			action,
+			details,
+			command,
+			timestamp: new Date(),
+		};
+
+		// INFINITE MODE: Bypass most permission checks, but block catastrophic
+		// commands, and ask a person for the ask-every-time list (#3765).
+		// The always-blocked check runs first, so a line that is both always
+		// blocked and ask-every-time is refused here and never offered.
+		const infinite = this.isInfiniteMode();
+		if (command) {
+			// Refused in every mode (ask, auto, run, Infinite), never offered (#3768).
+			const blockCheck = this.isAlwaysBlocked(command);
+			if (blockCheck.blocked) {
+				this.auditInfiniteMode(
+					command,
+					action,
+					details,
+					true,
+					infinite
+						? `BLOCKED even in infinite mode: ${blockCheck.reason}`
+						: `BLOCKED in every mode: ${blockCheck.reason}`,
+					infinite ? "infinite" : this.refusalMode(),
+				);
+				request.approved = false;
+				this.log.requests.push(request);
+				this.log.deniedCount++;
+				console.log(`\x1b[31m[BLOCKED] ${command} - ${blockCheck.reason}\x1b[0m`);
+				return false;
+			}
+		}
+		const infiniteAsk = infinite && command ? this.mustAskReason(command) : null;
+		if (infinite && !infiniteAsk) {
+			// Audit and approve
+			this.auditInfiniteMode(command || "", action, details, false);
+			request.approved = true;
+			request.autoApproved = true;
+			this.log.requests.push(request);
+			this.log.autoApprovedCount++;
+			return true;
+		}
+
+		// Auto-approve if configured and not dangerous
+		if (this.config.autoApprove && command && !this.isDangerous(command)) {
+			request.approved = true;
+			request.autoApproved = true;
+			this.log.requests.push(request);
+			this.log.autoApprovedCount++;
+			return true;
+		}
+
+		// Check if already approved or safe
+		if (
+			command &&
+			this.isAllowed(command, undefined, opts.where, opts.cwd) &&
+			!this.isDangerous(command)
+		) {
+			request.approved = true;
+			request.autoApproved = true;
+			this.log.requests.push(request);
+			this.log.autoApprovedCount++;
+			return true;
+		}
+
+		// Interactive prompt. For a command a person approves every time, Enter
+		// means No (#3748).
+		const approved = await this.promptUser(
+			action,
+			details,
+			command,
+			opts.defaultNo || (command ? this.mustAskReason(command) !== null : false),
+			command ? commandInFolder(command, opts.where) : undefined,
+		);
+		request.approved = approved;
+		this.log.requests.push(request);
+		if (infiniteAsk) {
+			this.auditInfiniteMode(
+				command || "",
+				action,
+				details,
+				!approved,
+				approved ? `approved by a person: ${infiniteAsk}` : `refused: ${infiniteAsk}`,
+			);
+		}
+
+		if (approved) {
+			this.log.approvedCount++;
+			if (command) {
+				this.approvedCommands.add(sessionKey(command, opts.where));
+				// A fresh yes ends an earlier denial. The yes itself stays in memory only.
+				const loose = denialFingerprint(command);
+				const strict = this.resumedDenials.get(loose);
+				strict?.delete(strictFingerprint(command, opts.where));
+				if (strict?.size === 0) this.resumedDenials.delete(loose);
+				this.persistDenial(() => clearDenial(this.denialSession as string, command, opts.where));
+			}
+		} else {
+			this.log.deniedCount++;
+			if (command) {
+				this.deniedCommands.add(sessionKey(command, opts.where));
+				this.persistDenial(() => recordDenial(this.denialSession as string, command, opts.where));
+			}
+		}
+
+		return approved;
+	}
+
+	/** Write a denial change when a session is set. A disk failure never changes the answer. */
+	private persistDenial(write: () => void): void {
+		if (!this.denialSession) return;
+		try {
+			write();
+		} catch (err) {
+			// The in-memory denial still holds for this process; a resume will not see it.
+			if (!this.warnedSave) {
+				this.warnedSave = true;
+				console.error(`[permissions] could not save a denial: ${(err as Error).message}`);
+			}
+		}
+	}
+
+	/**
+	 * Detect if running in headless mode (no TTY, e.g. Docker container, daemon)
+	 */
+	private isHeadless(): boolean {
+		return !process.stdin.isTTY || !!process.env.EIGHT_HEADLESS;
+	}
+
+	/**
+	 * Prompt user for permission (Y/n)
+	 * In headless mode: auto-approve safe commands, deny dangerous ones
+	 */
+	private async promptUser(
+		action: string,
+		details: string,
+		command?: string,
+		defaultNo = false,
+		/** What the person is shown: `command`, naming its folder after a cd prefix (#3199). */
+		shown: string | undefined = command,
+	): Promise<boolean> {
+		// A daemon turn for a TUI has no card surface: refuse, never auto-approve (#4829).
+		if (_noCardSurface.getStore() && !_channelApprover.getStore()) {
+			console.log(`[permissions] DENIED (no card surface in this turn): ${command || action}`);
+			return false;
+		}
+		// Headless mode: no TTY available for interactive prompts
+		if (this.isHeadless()) {
+			// A person approves these every time; with no terminal there is no
+			// one to ask, so they are refused, never offered elsewhere (#3748).
+			const mustAsk = command ? this.mustAskReason(command) : null;
+			if (mustAsk) {
+				console.log(`[permissions] DENIED (no terminal to ask; ${mustAsk}): ${command}`);
+				return false;
+			}
+			if (defaultNo) return false;
+			if (command && this.isDangerous(command)) {
+				// A channel with a human behind it asks; push to main never gets this far.
+				const scope = _channelApprover.getStore();
+				if (scope && this.isAlwaysBlocked(command).blocked) {
+					console.log(`[permissions] DENIED (always blocked, never offered): ${command}`);
+					return false;
+				}
+				if (scope) {
+					scope.last = await scope.approver({ action, details, command: shown ?? command });
+					return scope.last === "approved";
+				}
+				console.log(`[permissions] DENIED (headless, dangerous): ${command}`);
+				return false;
+			}
+			// Auto-approve non-dangerous commands in headless mode
+			console.log(`[permissions] AUTO-APPROVED (headless): ${command || action}`);
+			return true;
+		}
+
+		// Interactive: prefer a registered TUI handler so we can render the
+		// inline approval card instead of dumping a readline prompt over the
+		// alternate-screen buffer. If no handler is registered (legacy chrome,
+		// non-TUI callers), fall back to the existing stdin flow.
+		const tuiResult = await requestTuiApproval({ action, details, command: shown });
+		if (tuiResult !== null) {
+			return tuiResult;
+		}
+
+		{
+			// Build prompt message
+			let prompt = "\n\x1b[33m[PERMISSION REQUIRED]\x1b[0m\n";
+			prompt += `Action: ${action}\n`;
+			prompt += `Details: ${details}\n`;
+			const mustAsk = command ? this.mustAskReason(command) : null;
+			if (command) {
+				prompt += `Command: \x1b[36m${shown}\x1b[0m\n`;
+				if (mustAsk) {
+					prompt += `\x1b[33m[ASKS EVERY TIME]\x1b[0m This command needs your approval because ${mustAsk}.\n`;
+				} else if (this.isDangerous(command)) {
+					prompt +=
+						"\x1b[31m[DANGEROUS]\x1b[0m This command may cause data loss or system changes.\n";
+				}
+			}
+			// One-yes: a bare Enter, a timeout and a closed input are all no (#4919).
+			prompt += "\nAllow? [y/N]:";
+			return askOneYes(prompt, { label: "permission" });
+		}
+	}
+
+	/**
+	 * Check permission for a command without prompting
+	 * Returns: "allowed" | "denied" | "ask"
+	 */
+	checkPermission(
+		command: string,
+		shell?: ActiveShellKind,
+		/** The project folder after a leading `cd <folder> &&` (#3199): session answers are per folder. */
+		where?: string,
+		/** Absolute folder the command runs in (for the inline-python shadow check). */
+		cwd?: string,
+	): "allowed" | "denied" | "ask" {
+		// INFINITE MODE: Allow everything except always-blocked commands, and
+		// ask for the ask-every-time list (#3765).
+		// An always-blocked command anywhere on the line is denied in every mode (#3768).
+		if (command && this.isAlwaysBlocked(command).blocked) return "denied";
+
+		if (this.isInfiniteMode()) {
+			if (command && this.mustAskReason(command)) return "ask";
+			return "allowed";
+		}
+
+		// A channel turn never offers an always-blocked command (#3621, 8SO M4).
+		if (_channelApprover.getStore() && this.isAlwaysBlocked(command).blocked) return "denied";
+
+		const normalizedCmd = command.toLowerCase().trim();
+
+		// Check explicit deny list
+		if (this.deniedCommands.has(sessionKey(command, where))) {
+			return "denied";
+		}
+
+		// Check if explicitly denied by pattern
+		for (const pattern of this.config.deniedPatterns) {
+			if (this.matchPattern(normalizedCmd, pattern)) {
+				return "denied";
+			}
+		}
+
+		// Check if dangerous (always ask)
+		if (this.isDangerous(command)) {
+			return "ask";
+		}
+
+		// Check if allowed
+		if (this.isAllowed(command, shell, where, cwd)) {
+			return "allowed";
+		}
+
+		// Unknown command - ask
+		return "ask";
+	}
+
+	/**
+	 * Add a pattern to the allowed list
+	 */
+	allowPattern(pattern: string): void {
+		if (!this.config.allowedPatterns.includes(pattern)) {
+			this.config.allowedPatterns.push(pattern);
+			this.saveConfig();
+		}
+	}
+
+	/**
+	 * Add a pattern to the denied list
+	 */
+	denyPattern(pattern: string): void {
+		if (!this.config.deniedPatterns.includes(pattern)) {
+			this.config.deniedPatterns.push(pattern);
+			this.saveConfig();
+		}
+	}
+
+	/**
+	 * Remove a pattern from the allowed list
+	 */
+	removeAllowedPattern(pattern: string): void {
+		this.config.allowedPatterns = this.config.allowedPatterns.filter((p) => p !== pattern);
+		this.saveConfig();
+	}
+
+	/**
+	 * Remove a pattern from the denied list
+	 */
+	removeDeniedPattern(pattern: string): void {
+		this.config.deniedPatterns = this.config.deniedPatterns.filter((p) => p !== pattern);
+		this.saveConfig();
+	}
+
+	/**
+	 * Set auto-approve mode for this process only. Never written to disk: a saved
+	 * true would approve every later session before it showed a card (#4817).
+	 */
+	setAutoApprove(enabled: boolean): void {
+		this.config.autoApprove = enabled;
+	}
+
+	/**
+	 * Get current configuration
+	 */
+	getConfig(): PermissionConfig {
+		return { ...this.config };
+	}
+
+	/**
+	 * Get permission log
+	 */
+	getLog(): PermissionLog {
+		return { ...this.log };
+	}
+
+	/**
+	 * Clear session approvals/denials (keeps config patterns)
+	 */
+	clearSession(): void {
+		this.approvedCommands.clear();
+		this.deniedCommands.clear();
+		this.log = {
+			requests: [],
+			deniedCount: 0,
+			approvedCount: 0,
+			autoApprovedCount: 0,
+		};
+	}
+
+	/**
+	 * Log a permission request (for audit trail)
+	 */
+	logRequest(request: PermissionRequest): void {
+		this.log.requests.push(request);
+
+		// Optionally write to log file
+		if (this.config.logPath) {
+			const logLine = `${JSON.stringify({
+				...request,
+				timestamp: request.timestamp.toISOString(),
+			})}\n`;
+
+			try {
+				fs.appendFileSync(this.config.logPath, logLine);
+			} catch (err) {
+				console.warn(`Warning: Could not write to permission log: ${err}`);
+			}
+		}
+	}
+}
+
+// ============================================
+// Singleton Instance
+// ============================================
+
+let permissionManagerInstance: PermissionManager | null = null;
+
+export function getPermissionManager(): PermissionManager {
+	if (!permissionManagerInstance) {
+		permissionManagerInstance = new PermissionManager();
+	}
+	return permissionManagerInstance;
+}
+
+export function resetPermissionManager(): void {
+	permissionManagerInstance?.clearSession();
+	permissionManagerInstance = null;
+}
+
+// ============================================
+// Utility Functions
+// ============================================
+
+/**
+ * Quick check if a command needs permission
+ */
+export function needsPermission(command: string): boolean {
+	const manager = getPermissionManager();
+	return manager.checkPermission(command) !== "allowed";
+}
+
+/**
+ * Request permission for a command (convenience function)
+ */
+export async function requestCommandPermission(command: string): Promise<boolean> {
+	const manager = getPermissionManager();
+	const check = manager.checkPermission(command);
+
+	if (check === "allowed") return true;
+	if (check === "denied") return false;
+
+	return manager.requestPermission(
+		"Execute Command",
+		"The agent wants to run a shell command.",
+		command,
+	);
+}
+
+/**
+ * Check if command is dangerous (convenience function)
+ */
+export function isCommandDangerous(command: string): boolean {
+	const manager = getPermissionManager();
+	return manager.isDangerous(command);
+}
+
+/**
+ * Enable infinite mode - bypasses most permission checks (30 min limit).
+ * Catastrophic commands are still blocked.
+ */
+export function enableInfiniteMode(): void {
+	const manager = getPermissionManager();
+	manager.enableInfiniteMode();
+}
+
+/**
+ * Disable infinite mode
+ */
+export function disableInfiniteMode(): void {
+	const manager = getPermissionManager();
+	manager.disableInfiniteMode();
+}
+
+/**
+ * Check if infinite mode is active
+ */
+export function isInfiniteMode(): boolean {
+	const manager = getPermissionManager();
+	return manager.isInfiniteMode();
+}
+
+// ============================================
+// Re-exports: ToolG8 + Policy Engine
+// ============================================
+
+export { ToolG8 } from "./toolg8.js";
+export { classifyAction, FREE_ACTIONS, GATED_ACTIONS } from "./action-tiers.js";
+export type { ActionTier, TieredAction, TierDecision } from "./action-tiers.js";
+export {
+	enforceCapability,
+	getToolManifest,
+	registerToolManifest,
+	resetToolManifests,
+	resolveManifestFsScopes,
+	DEFAULT_TOOL_MANIFESTS,
+} from "./capability-manifest.js";
+export {
+	buildSeatbeltProfile,
+	destroySessionScratch,
+	isSeatbeltAvailable,
+	seatbeltSpecForTool,
+	sensitiveCredentialPaths,
+	sessionScratchDir,
+} from "./seatbelt.js";
+export type { SeatbeltSpec } from "./seatbelt.js";
+// run_command OS boundary (#4009): status and the unsandboxed hook are for the TUI status line.
+export { onRunCommandUnsandboxed, runCommandSandboxStatus } from "./run-command-sandbox.js";
+export type { RunCommandSandbox } from "./run-command-sandbox.js";
+export { detectBestIsolation, runSandboxed } from "./sandbox.js";
+export type { IsolationLevel, SandboxOptions, SandboxResult } from "./sandbox-types.js";
+export type {
+	CapabilityRequest,
+	ExecCapability,
+	FsCapability,
+	NetworkCapability,
+	ToolCapabilityManifest,
+} from "./capability-manifest.js";
+export {
+	evaluateToolCall,
+	getAgentPolicy,
+	SPAWNED_AGENT_RESTRICTIONS,
+	SHADOW_AGENT_RESTRICTIONS,
+	SHADOW_AGENT_SCOPE,
+	evaluateBudget,
+	evaluateBudgetPolicy,
+	reconcileBudgetPolicy,
+	DEFAULT_TUI_BUDGET,
+	DEFAULT_COMPUTER_USE_BUDGET,
+	DEFAULT_BUDGET_POLICY,
+} from "./policy-engine.js";
+export type {
+	CapabilityBudget,
+	BudgetCounters,
+	BudgetEvalResult,
+	BudgetPolicy,
+	BudgetAtCapAction,
+	RollingBudgetCounters,
+	BudgetPolicyResult,
+} from "./policy-engine.js";
+export {
+	matchDenyList,
+	matchNeverAuto,
+	GO_DENY_LIST,
+	NEVER_AUTO_CLASSES,
+} from "./go-deny-list.js";
+export type {
+	DenyListPattern,
+	DenyListResult,
+	ToolCallLike,
+	NeverAutoContext,
+	NeverAutoResult,
+} from "./go-deny-list.js";
+export {
+	Rung,
+	DEFAULT_RUNG,
+	evaluateRung,
+	checkerPassed,
+	appendRungAudit,
+	signApprovalGrant,
+	getAuditLogPath as getRungAuditLogPath,
+} from "./autonomy-ladder.js";
+export type {
+	AutonomyDomain,
+	RungDecision,
+	RungEvalInput,
+	MakerCheckerContext,
+	RungAuditRecord,
+	ApprovalGrantPayload,
+} from "./autonomy-ladder.js";
+export {
+	scrubGoalText,
+	containsSecret,
+	SECRET_PATTERNS,
+} from "./goal-secret-scrub.js";
+export type {
+	SecretPattern,
+	ScrubResult,
+} from "./goal-secret-scrub.js";
+export {
+	sign as signGoalState,
+	verify as verifyGoalState,
+	verifyOrThrow as verifyGoalStateOrThrow,
+	loadOrCreateKey as loadGoalStateKey,
+	getKeyPath as getGoalStateKeyPath,
+} from "./goal-state-hmac.js";
+export type { SignedPayload as SignedGoalState } from "./goal-state-hmac.js";
+export { validatePath, isWindowsDeviceName } from "./path-guard.js";
+export type { ValidatePathResult } from "./path-guard.js";
+export {
+	checkCommandBoundary,
+	checkFilePathBoundary,
+	checkPath as checkWorkspacePath,
+	extractAndCheckPaths,
+	isWithinWorkspace,
+	resolveSafe,
+	splitPipeline,
+	tokenize,
+} from "./src/workspace-boundary.js";
+export type {
+	BoundaryCheckResult,
+	BoundaryViolation,
+	CommandSegment,
+	ExtractOptions,
+} from "./src/workspace-boundary.js";
+export {
+	privacyGate,
+	isSensitiveContext,
+	forceLocalModel,
+} from "./privacy-router.js";
+
+// ============================================
+// Re-exports: Turth (interactive scoped approval)
+// ============================================
+
+export {
+	requestApproval,
+	registerPromptSurface,
+	isInteractiveEnabled,
+} from "./turth.js";
+export type { TurthRequest, PromptSurface } from "./turth.js";
+export type { ApprovalScope } from "./user-policy.js";
+export {
+	checkCapability,
+	recordDecision,
+	clearSession as clearTurthSession,
+	getAuditLogPath as getTurthAuditLogPath,
+	getUserPolicyPath as getTurthUserPolicyPath,
+} from "./user-policy.js";

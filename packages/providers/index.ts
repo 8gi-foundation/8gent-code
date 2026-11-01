@@ -1,0 +1,1846 @@
+/**
+ * 8gent Code - LLM Provider Abstraction Layer
+ *
+ * Unified interface for multiple LLM providers:
+ * - Ollama (default, local)
+ * - OpenRouter (multi-model gateway)
+ * - Groq (fast inference)
+ * - Grok (xAI)
+ * - OpenAI
+ * - Anthropic
+ * - Mistral
+ * - Together AI
+ * - Fireworks AI
+ * - Replicate
+ */
+
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { modelFetch } from "../ai/model-fetch";
+import { isLlamaServerSelected, resolveLlamaServerUrl } from "../local-model-server/select";
+import { anonymizeMessages, deanonymize, verifyClean } from "../permissions/pii-anonymizer";
+import { trustedEnvValue, trustedSecurityValue } from "../permissions/run-command-sandbox";
+import { readVaultKey, storeVaultKey } from "../secrets/key-vault";
+import type { ThinkingLevel } from "../types/index.js";
+import { AuthRotator } from "./auth-rotation";
+import {
+	type ProviderCompat,
+	discoverModelsAt,
+	normalizeDeclaredProvider,
+	parseDeclaredProviders,
+} from "./declared";
+import { type EffortTaskKind, applyEffortPolicy } from "./effort-policy";
+import { ModelFailover } from "./failover";
+import { emitNotice, installLocalityGuard, setProviderNamer } from "./locality-wire";
+import {
+	type ThinkingResolution,
+	resolveThinkingForRouting,
+	resolveThinkingLevel,
+} from "./thinking-level";
+import { ANTHROPIC_THINKING_BUDGET, thinkingRequestFields } from "./thinking-request";
+
+// ============================================
+// Types
+// ============================================
+
+/** Providers compiled into the registry, with defaults in `PROVIDER_DEFAULTS`. */
+export type BuiltinProviderName =
+	| "8gent"
+	| "ollama"
+	| "lmstudio"
+	| "llama-server"
+	| "apple-foundation"
+	| "apfel"
+	| "deepseek"
+	| "openrouter"
+	| "groq"
+	| "grok"
+	| "openai"
+	| "anthropic"
+	| "mistral"
+	| "minimax"
+	| "together"
+	| "fireworks"
+	| "replicate"
+	| "host-cli-primary"
+	| "host-cli-secondary";
+
+/**
+ * Any provider the manager can route to. The built-in names keep their
+ * autocomplete; `(string & {})` admits a provider declared only in
+ * `~/.8gent/providers.json` (see `./declared`). This union is deliberately NOT
+ * the validity check - `ProviderManager.isKnownProvider()` is, because validity
+ * depends on what is loaded at runtime, not on what was compiled.
+ */
+export type ProviderName = BuiltinProviderName | (string & {});
+
+export interface ProviderConfig {
+	name: ProviderName;
+	displayName: string;
+	baseUrl: string;
+	apiKeyEnv: string;
+	/**
+	 * Vault entry name for this provider's key (see packages/secrets/key-vault).
+	 * Defaults to `apiKeyEnv`. A declared provider with no env var names its
+	 * vault entry here.
+	 */
+	apiKeyRef?: string;
+	/** Plain-text key from providers.json. Still read, but resolves last. */
+	apiKey?: string;
+	defaultModel: string;
+	models: string[];
+	enabled: boolean;
+	supportsTools: boolean;
+	supportsStreaming: boolean;
+	supportsVision: boolean;
+	/**
+	 * Thinking-budget levels this provider accepts. Empty array = no thinking
+	 * support (router silently drops `thinking` for this provider). The router
+	 * downgrades unsupported requests via `resolveThinkingLevel()` before
+	 * dispatching. See `packages/providers/thinking-level.ts`.
+	 */
+	supportedThinkingLevels: readonly ThinkingLevel[];
+	/**
+	 * Wire shape this provider's endpoint speaks. Absent on built-ins, whose
+	 * shape is fixed by name (`compatFor()`); set on every declared provider so
+	 * one user-supplied base URL can be an OpenAI-compatible server, an Ollama,
+	 * or an Anthropic-shaped proxy.
+	 */
+	compat?: ProviderCompat;
+	/** True when this config came from `providers.json`, not the compiled table. */
+	declared?: boolean;
+}
+
+export interface ChatMessage {
+	role: "system" | "user" | "assistant" | "tool";
+	content: string;
+	toolCalls?: ToolCall[];
+	toolCallId?: string;
+}
+
+export interface ToolCall {
+	id: string;
+	name: string;
+	arguments: Record<string, unknown>;
+}
+
+export interface ChatRequest {
+	messages: ChatMessage[];
+	model?: string;
+	tools?: ToolDefinition[];
+	temperature?: number;
+	maxTokens?: number;
+	stream?: boolean;
+	/**
+	 * Requested reasoning depth. The router resolves this against the active
+	 * provider's `supportedThinkingLevels` and downgrades silently when the
+	 * exact level is unsupported. Pass `undefined` for non-thinking calls.
+	 */
+	thinking?: ThinkingLevel;
+	/**
+	 * Kind of task: a `TaskCategory` label from packages/ai/task-router, or `review`.
+	 * Only read by the effort policy (EIGHT_EFFORT_POLICY=1, #3461) to fill
+	 * `thinking` when the caller left it empty. Never sent to a provider.
+	 */
+	taskKind?: EffortTaskKind;
+	/**
+	 * Cancels the model call when it fires (the proxy passes the client's
+	 * request signal, #3541). Forwarded to the HTTP fetch for the Ollama and
+	 * OpenAI-compatible paths. Never sent to a provider as a field.
+	 */
+	signal?: AbortSignal;
+	/**
+	 * Send to this provider instead of the active one, without changing the saved
+	 * active provider (/consult, #4608). The model is that provider's default
+	 * unless `model` is set. Never sent to a provider as a field.
+	 */
+	providerName?: ProviderName;
+}
+
+export interface ToolDefinition {
+	type: "function";
+	function: {
+		name: string;
+		description: string;
+		parameters: Record<string, unknown>;
+	};
+}
+
+export interface ChatResponse {
+	content: string;
+	toolCalls?: ToolCall[];
+	model: string;
+	provider: ProviderName;
+	usage?: {
+		promptTokens: number;
+		completionTokens: number;
+		totalTokens: number;
+	};
+	/**
+	 * Thinking-level routing outcome for this call. Present when the request
+	 * carried a `thinking` parameter so callers can detect downgrades.
+	 */
+	thinking?: ThinkingResolution;
+}
+
+export interface ProviderSettings {
+	activeProvider: ProviderName;
+	activeModel: string;
+	/**
+	 * Keyed by provider name. A key that matches a built-in is a partial
+	 * override of it; any other key is a declaration of a new provider and must
+	 * carry a `baseUrl` (see `./declared`).
+	 */
+	providers: Record<string, Partial<ProviderConfig>>;
+}
+
+// ============================================
+// Provider Definitions
+// ============================================
+
+/**
+ * Check if the Apple Foundation Model provider can run on this host.
+ * Requires macOS 26+ (Tahoe) on Apple Silicon with the bridge binary installed
+ * at `~/.8gent/bin/apple-foundation-bridge`. The installer task ships the
+ * compiled Swift bridge; until it runs, this returns false and the provider
+ * stays disabled in the registry.
+ */
+export function isAppleFoundationAvailable(): boolean {
+	if (process.platform !== "darwin") return false;
+	if (process.arch !== "arm64") return false;
+	// Darwin 25.x === macOS 26 Tahoe. Apple's `FoundationModels` framework
+	// is only available from macOS 26 onwards.
+	const major = Number.parseInt(os.release().split(".")[0] ?? "0", 10);
+	if (Number.isFinite(major) && major < 25) return false;
+	const bridgePath = path.join(os.homedir(), ".8gent", "bin", "apple-foundation-bridge");
+	return fs.existsSync(bridgePath);
+}
+
+/**
+ * Check if a host CLI binary is on PATH and the opt-in env var is set.
+ *
+ * Host-CLI delegation providers are always disabled by default. Enabling
+ * them means the agent will shell out to a user-chosen CLI on the host,
+ * reusing whatever session the user has already authenticated there.
+ * Opt-in only, never automatic.
+ */
+export function isHostCliAvailable(binary: string): boolean {
+	if (process.env.PROVIDERS_ALLOW_HOST_CLI !== "1") return false;
+	if (!binary) return false;
+	const paths = (process.env.PATH || "").split(path.delimiter);
+	for (const dir of paths) {
+		if (!dir) continue;
+		const candidate = path.join(dir, binary);
+		try {
+			if (fs.existsSync(candidate)) return true;
+		} catch {
+			/* ignore */
+		}
+	}
+	return false;
+}
+
+/**
+ * Resolve the host-CLI binary for a given slot from env. Users choose
+ * which CLI to bind by setting these env vars; no binary name is hardcoded
+ * in the registry.
+ *
+ *   PROVIDERS_HOST_CLI_PRIMARY_BINARY=<name-on-PATH-or-absolute-path>
+ *   PROVIDERS_HOST_CLI_SECONDARY_BINARY=<name-on-PATH-or-absolute-path>
+ *
+ * Returns an empty string when the slot is unbound. A slot with no binary
+ * stays disabled even when `PROVIDERS_ALLOW_HOST_CLI=1`.
+ */
+export function getHostCliBinary(slot: "primary" | "secondary"): string {
+	const key =
+		slot === "primary"
+			? "PROVIDERS_HOST_CLI_PRIMARY_BINARY"
+			: "PROVIDERS_HOST_CLI_SECONDARY_BINARY";
+	return process.env[key]?.trim() || "";
+}
+
+const PROVIDER_DEFAULTS: Record<BuiltinProviderName, ProviderConfig> = {
+	"8gent": {
+		name: "8gent",
+		displayName: "8gent (The Infinite Gentleman)",
+		baseUrl: "http://localhost:11434",
+		apiKeyEnv: "", // Local — no API key needed
+		defaultModel: "eight-1.0-q3:14b",
+		models: ["eight-1.0-q3:14b", "qwen3.6:27b", "qwen3:14b", "qwen3.5:latest", "devstral:latest"],
+		enabled: true,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: true,
+		// Served by the local Ollama: `think` on /api/chat (thinking-request.ts).
+		supportedThinkingLevels: ["low", "medium", "high"],
+	},
+	ollama: {
+		name: "ollama",
+		displayName: "Ollama (Local)",
+		baseUrl: "http://localhost:11434",
+		apiKeyEnv: "", // No API key needed
+		defaultModel: "qwen3.5:latest",
+		models: ["qwen3.6:27b", "qwen3.5:latest", "qwen3:14b", "devstral:latest", "eight:0.1"],
+		enabled: true,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: true,
+		// `think` on /api/chat: false for "low", true for "medium" and "high";
+		// gpt-oss takes the level itself (thinking-request.ts).
+		supportedThinkingLevels: ["low", "medium", "high"],
+	},
+	lmstudio: {
+		name: "lmstudio",
+		displayName: "LM Studio (Local)",
+		// LM Studio serves an OpenAI-compatible API. Default port 1234.
+		baseUrl: trustedEnvValue("LMSTUDIO_BASE_URL") || "http://localhost:1234/v1",
+		apiKeyEnv: "", // Local, no key — parallels ollama.
+		defaultModel: "google/gemma-4-26b-a4b",
+		models: ["google/gemma-4-26b-a4b"],
+		// Local provider with no API key, enabled by default like ollama.
+		// If the LM Studio server is not running, role calls fail over per
+		// the failover chain rather than blocking startup.
+		enabled: true,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	// llama.cpp's OpenAI-compatible server (#3149). On only when
+	// EIGHT_LOCAL_SERVER=llama-server, which also turns Ollama off for the
+	// process. LLAMA_SERVER_URL names the server root.
+	"llama-server": {
+		name: "llama-server",
+		displayName: "llama-server (Local)",
+		baseUrl: `${resolveLlamaServerUrl()}/v1`,
+		apiKeyEnv: "",
+		// A single-model llama-server answers whatever `model` says; the TUI
+		// replaces this with the id the server lists.
+		defaultModel: "default",
+		models: [],
+		enabled: isLlamaServerSelected(),
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	"apple-foundation": {
+		name: "apple-foundation",
+		displayName: "Apple Foundation Model (On-Device)",
+		baseUrl: "", // IPC, no URL
+		apiKeyEnv: "", // On-device, no key
+		defaultModel: "apple-foundationmodel",
+		models: ["apple-foundationmodel"],
+		// Auto-enabled only when host platform qualifies AND the bridge binary
+		// has been installed. Resolved at runtime via `isAppleFoundationAvailable()`.
+		enabled: isAppleFoundationAvailable(),
+		supportsTools: false, // v1 - Apple Transcript API not wired yet
+		supportsStreaming: false, // v1 - non-streaming only
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	apfel: {
+		name: "apfel",
+		displayName: "apfel (Apple Foundation HTTP)",
+		// 11434 is OLLAMA's port. Shipping it as apfel's default meant every
+		// unconfigured apfel request was answered by Ollama, which then failed on
+		// an unknown model - a confusing failure that looks like apfel being
+		// broken. The comment here used to acknowledge the collision and
+		// recommend an override rather than fix it. 11435 is where apfel actually
+		// listens (verified live against /v1/models, which returns
+		// apple-foundationmodel with a 4096 context window).
+		baseUrl: trustedEnvValue("APFEL_BASE_URL") || "http://127.0.0.1:11435/v1",
+		apiKeyEnv: "", // Local, no key
+		defaultModel: "apple-foundationmodel",
+		models: ["apple-foundationmodel"],
+		// Auto-enabled when the host qualifies. Apfel runs as a local HTTP service
+		// so the bridge binary check is not required, but Apple Silicon + macOS 26
+		// still gate it the same way.
+		enabled: isAppleFoundationAvailable(),
+		supportsTools: false,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	deepseek: {
+		name: "deepseek",
+		displayName: "DeepSeek (Cloud)",
+		baseUrl: "https://api.deepseek.com/v1",
+		apiKeyEnv: "DEEPSEEK_API_KEY",
+		defaultModel: "deepseek-flash",
+		models: ["deepseek-flash", "deepseek-v4-pro"],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	openrouter: {
+		name: "openrouter",
+		displayName: "OpenRouter",
+		baseUrl: "https://openrouter.ai/api/v1",
+		apiKeyEnv: "OPENROUTER_API_KEY",
+		defaultModel: "anthropic/claude-3.5-sonnet",
+		models: [
+			"anthropic/claude-3.5-sonnet",
+			"anthropic/claude-3-opus",
+			"openai/gpt-4-turbo",
+			"google/gemini-pro-1.5",
+			"meta-llama/llama-3-70b-instruct",
+		],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: true,
+		// OpenRouter's unified `reasoning: { effort }`. A model with no reasoning
+		// ignores it (OpenRouter drops unsupported parameters).
+		supportedThinkingLevels: ["low", "medium", "high"],
+	},
+	groq: {
+		name: "groq",
+		displayName: "Groq",
+		baseUrl: "https://api.groq.com/openai/v1",
+		apiKeyEnv: "GROQ_API_KEY",
+		defaultModel: "llama-3.1-70b-versatile",
+		models: [
+			"llama-3.1-70b-versatile",
+			"llama-3.1-8b-instant",
+			"mixtral-8x7b-32768",
+			"gemma2-9b-it",
+		],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	grok: {
+		name: "grok",
+		displayName: "Grok (xAI)",
+		baseUrl: "https://api.x.ai/v1",
+		apiKeyEnv: "XAI_API_KEY",
+		defaultModel: "grok-beta",
+		models: ["grok-beta", "grok-vision-beta"],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: true,
+		supportedThinkingLevels: [],
+	},
+	openai: {
+		name: "openai",
+		displayName: "OpenAI",
+		baseUrl: "https://api.openai.com/v1",
+		apiKeyEnv: "OPENAI_API_KEY",
+		defaultModel: "gpt-4-turbo",
+		models: ["gpt-4-turbo", "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: true,
+		// `reasoning_effort` accepts minimal/low/medium/high on o-series and
+		// gpt-5 reasoning models. Non-reasoning models silently ignore it.
+		supportedThinkingLevels: ["minimal", "low", "medium", "high"],
+	},
+	anthropic: {
+		name: "anthropic",
+		displayName: "Anthropic",
+		baseUrl: "https://api.anthropic.com/v1",
+		apiKeyEnv: "ANTHROPIC_API_KEY",
+		defaultModel: "claude-3-5-sonnet-20241022",
+		models: ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: true,
+		// Extended-thinking budgets map cleanly to the four levels for Claude
+		// 3.7+ thinking-capable models. Non-thinking models ignore the field.
+		supportedThinkingLevels: ["minimal", "low", "medium", "high"],
+	},
+	mistral: {
+		name: "mistral",
+		displayName: "Mistral AI",
+		baseUrl: "https://api.mistral.ai/v1",
+		apiKeyEnv: "MISTRAL_API_KEY",
+		defaultModel: "mistral-large-latest",
+		models: [
+			"mistral-large-latest",
+			"mistral-medium-latest",
+			"mistral-small-latest",
+			"codestral-latest",
+		],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	minimax: {
+		name: "minimax",
+		displayName: "MiniMax",
+		// OpenAI-compatible. Override with MINIMAX_BASE_URL (China region: https://api.minimaxi.com/v1).
+		baseUrl: trustedEnvValue("MINIMAX_BASE_URL") || "https://api.minimax.io/v1",
+		apiKeyEnv: "MINIMAX_API_KEY",
+		// No model name lives here. The endpoint is asked for its own list at startup
+		// and by `/provider models` (discoverModels), which records what it returns.
+		defaultModel: "",
+		models: [],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	together: {
+		name: "together",
+		displayName: "Together AI",
+		baseUrl: "https://api.together.xyz/v1",
+		apiKeyEnv: "TOGETHER_API_KEY",
+		defaultModel: "meta-llama/Llama-3-70b-chat-hf",
+		models: [
+			"meta-llama/Llama-3-70b-chat-hf",
+			"mistralai/Mixtral-8x22B-Instruct-v0.1",
+			"Qwen/Qwen2-72B-Instruct",
+		],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	fireworks: {
+		name: "fireworks",
+		displayName: "Fireworks AI",
+		baseUrl: "https://api.fireworks.ai/inference/v1",
+		apiKeyEnv: "FIREWORKS_API_KEY",
+		defaultModel: "accounts/fireworks/models/llama-v3p1-70b-instruct",
+		models: [
+			"accounts/fireworks/models/llama-v3p1-70b-instruct",
+			"accounts/fireworks/models/mixtral-8x22b-instruct",
+		],
+		enabled: false,
+		supportsTools: true,
+		supportsStreaming: true,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	replicate: {
+		name: "replicate",
+		displayName: "Replicate",
+		baseUrl: "https://api.replicate.com/v1",
+		apiKeyEnv: "REPLICATE_API_TOKEN",
+		defaultModel: "meta/llama-2-70b-chat",
+		models: ["meta/llama-2-70b-chat", "mistralai/mixtral-8x7b-instruct-v0.1"],
+		enabled: false,
+		supportsTools: false,
+		supportsStreaming: true,
+		supportsVision: true,
+		supportedThinkingLevels: [],
+	},
+	"host-cli-primary": {
+		name: "host-cli-primary",
+		displayName: "Host CLI (primary slot)",
+		baseUrl: "", // Subprocess, no URL
+		apiKeyEnv: "", // Reuses whatever session the user has on the host binary
+		defaultModel: "host-cli",
+		models: ["host-cli"],
+		// Opt-in: requires PROVIDERS_ALLOW_HOST_CLI=1, a binary bound via
+		// PROVIDERS_HOST_CLI_PRIMARY_BINARY, and that binary on PATH.
+		enabled: isHostCliAvailable(getHostCliBinary("primary")),
+		supportsTools: false, // v1 - text-only. Tool calls and thinking blocks TBD.
+		supportsStreaming: false, // v1 - single completion per invocation.
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+	"host-cli-secondary": {
+		name: "host-cli-secondary",
+		displayName: "Host CLI (secondary slot)",
+		baseUrl: "", // Subprocess, no URL
+		apiKeyEnv: "", // Reuses whatever session the user has on the host binary
+		defaultModel: "host-cli",
+		models: ["host-cli"],
+		// Opt-in: requires PROVIDERS_ALLOW_HOST_CLI=1, a binary bound via
+		// PROVIDERS_HOST_CLI_SECONDARY_BINARY, and that binary on PATH.
+		enabled: isHostCliAvailable(getHostCliBinary("secondary")),
+		supportsTools: false,
+		supportsStreaming: false,
+		supportsVision: false,
+		supportedThinkingLevels: [],
+	},
+};
+
+/** Names compiled into the registry. The declaration parser excludes these. */
+const BUILTIN_PROVIDER_NAMES: ReadonlySet<string> = new Set(Object.keys(PROVIDER_DEFAULTS));
+
+/** Compiled defaults for a name, or undefined when it is not a built-in. */
+function builtinDefaults(name: ProviderName): ProviderConfig | undefined {
+	return PROVIDER_DEFAULTS[name as BuiltinProviderName];
+}
+
+/**
+ * Whether a providers.json may decide where a key is sent (#4622). Named by code
+ * or by a shell-set EIGHT_PROVIDERS_SETTINGS_PATH (never a .env: the snapshot
+ * drops those) it is the user's choice. Found under the user's own ~/.8gent or
+ * data dir it is trusted only if it is a real file that stays inside that
+ * directory once symlinks are resolved: a link planted there to somewhere else
+ * is not.
+ */
+export function settingsFileIsTrusted(
+	file: string,
+	o: { explicit: boolean; fromTrustedEnv: boolean; userDirs: string[] },
+): boolean {
+	if (o.explicit || o.fromTrustedEnv) return true;
+	try {
+		const target = fs.existsSync(file) ? fs.realpathSync(file) : null;
+		if (target && fs.lstatSync(file).isSymbolicLink()) return false;
+		const inside = (p: string, d: string) => {
+			let root: string;
+			try {
+				root = fs.realpathSync(d);
+			} catch {
+				return false;
+			}
+			return p === root || p.startsWith(root + path.sep);
+		};
+		const where = target ?? path.join(fs.realpathSync(path.dirname(file)), path.basename(file));
+		return o.userDirs.some((d) => inside(where, d));
+	} catch {
+		return false;
+	}
+}
+
+// ============================================
+// Provider Manager
+// ============================================
+
+const warnedIgnored = new Set<string>();
+/** Print a dropped-declaration line at most once per process. */
+function warnIgnoredOnce(message: string): void {
+	if (warnedIgnored.has(message)) return;
+	warnedIgnored.add(message);
+	console.warn(message);
+}
+
+export class ProviderManager {
+	private settings: ProviderSettings;
+	private settingsPath: string;
+	/** True when providers.json was read from the user's own data dir (or named by code), not steered by a .env (#4622). */
+	readonly settingsTrusted: boolean;
+	/** Providers whose plain providers.json key was refused since the last call (custom endpoint, #4622). */
+	private refusedPlainKeys = new Set<string>();
+	/** Providers declared in providers.json under a name we did not compile in. */
+	private declared: Record<string, ProviderConfig>;
+	/** Declarations dropped at load, by name, with the sentence that says why (#4712). */
+	private ignoredDeclarations = new Map<string, string>();
+	private plainKeyProviders = new Set<string>();
+	private plainKeyWarned = new Set<string>();
+	readonly authRotator: AuthRotator;
+	readonly failover: ModelFailover;
+
+	constructor(settingsPath?: string) {
+		// `EIGHT_DATA_DIR` relocates the whole ~/.8gent directory and is already
+		// honoured by permissions, memory and the rest of the data layer. This
+		// file holds API keys, so it must move with them rather than become the
+		// one file that keeps reading and writing the real $HOME when someone
+		// sandboxes a run. `EIGHT_PROVIDERS_SETTINGS_PATH` overrides just this
+		// file, for tests and for pointing one process at an alternate profile.
+		// Both come from the load-time security snapshot, which drops any value a
+		// .env file declares: a cloned repo must not be able to point this at its own
+		// providers.json and so choose where a provider key is sent (#4622).
+		const envPath = trustedSecurityValue("EIGHT_PROVIDERS_SETTINGS_PATH");
+		const dataDir = trustedSecurityValue("EIGHT_DATA_DIR");
+		this.settingsPath =
+			settingsPath ||
+			envPath ||
+			path.join(dataDir || path.join(os.homedir(), ".8gent"), "providers.json");
+		this.settingsTrusted = settingsFileIsTrusted(this.settingsPath, {
+			explicit: Boolean(settingsPath),
+			fromTrustedEnv: Boolean(envPath) && this.settingsPath === envPath,
+			userDirs: [path.join(os.homedir(), ".8gent"), dataDir].filter(Boolean) as string[],
+		});
+		this.settings = this.loadSettings();
+		// Declarations are parsed into a SEPARATE map and never written back over
+		// the user's entry. `settings.providers[name]` stays exactly as the user
+		// typed it, so a field we do not model (a note, a comment, a key a later
+		// version adds) survives every save. Validation happens on read instead,
+		// in getProvider().
+		// A dropped declaration is said once per process, and only when it matters: with
+		// DEBUG=1, or when that provider is selected. Seven stale entries used to print
+		// seven lines on every run, for providers nobody asked for.
+		this.declared = parseDeclaredProviders(
+			this.settings.providers,
+			BUILTIN_PROVIDER_NAMES,
+			(message, name) => {
+				this.ignoredDeclarations.set(name, message);
+				if (process.env.DEBUG === "1") warnIgnoredOnce(message);
+			},
+		);
+		this.authRotator = new AuthRotator();
+		this.failover = new ModelFailover();
+	}
+
+	private loadSettings(): ProviderSettings {
+		try {
+			if (fs.existsSync(this.settingsPath)) {
+				const data = fs.readFileSync(this.settingsPath, "utf-8");
+				const saved = JSON.parse(data) as Partial<ProviderSettings>;
+				return {
+					activeProvider: saved.activeProvider || "8gent",
+					activeModel: saved.activeModel || "eight-1.0-q3:14b",
+					providers: { ...this.getDefaultProviders(), ...saved.providers },
+				};
+			}
+		} catch (err) {
+			console.warn(`Could not load provider settings: ${err}`);
+		}
+		return {
+			activeProvider: "8gent",
+			activeModel: "eight-1.0-q3:14b",
+			providers: this.getDefaultProviders(),
+		};
+	}
+
+	private getDefaultProviders(): Record<string, Partial<ProviderConfig>> {
+		const providers: Record<string, Partial<ProviderConfig>> = {};
+		for (const [name, config] of Object.entries(PROVIDER_DEFAULTS)) {
+			providers[name] = { enabled: config.enabled };
+		}
+		return providers;
+	}
+
+	/**
+	 * Where this manager reads and writes provider settings, including API keys.
+	 * Redirectable via `EIGHT_DATA_DIR` / `EIGHT_PROVIDERS_SETTINGS_PATH`, so no
+	 * caller should hardcode "~/.8gent/providers.json" when telling a user where
+	 * their key landed.
+	 */
+	getSettingsPath(): string {
+		return this.settingsPath;
+	}
+
+	saveSettings(): void {
+		const dir = path.dirname(this.settingsPath);
+		if (!fs.existsSync(dir)) {
+			fs.mkdirSync(dir, { recursive: true });
+		}
+		// 0600 on create AND on every write: writeFileSync's mode only applies to
+		// a new file, so an older, looser providers.json is tightened here.
+		fs.writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2), { mode: 0o600 });
+		fs.chmodSync(this.settingsPath, 0o600);
+	}
+
+	// ============================================
+	// Provider Management
+	// ============================================
+
+	getActiveProvider(): ProviderConfig {
+		return this.getProvider(this.settings.activeProvider);
+	}
+
+	getActiveModel(): string {
+		return this.settings.activeModel;
+	}
+
+	getProvider(name: ProviderName): ProviderConfig {
+		const overrides = this.settings.providers[name] || {};
+		// A built-in merges its compiled defaults with the user's overrides, as
+		// it always has.
+		const builtin = builtinDefaults(name);
+		if (builtin) return { ...builtin, ...overrides } as ProviderConfig;
+
+		const base = this.declared[name];
+		// Not a built-in and not a valid declaration: preserve the old behaviour
+		// of handing back whatever was there rather than throwing.
+		if (!base) {
+			this.sayIgnored(name);
+			return { ...overrides } as ProviderConfig;
+		}
+
+		// Re-normalize on READ. The user's raw entry is never rewritten, so an
+		// invalid field still cannot override its own sanitized value, but a
+		// field we do not model is left alone in the file instead of being
+		// silently deleted on the next save.
+		return normalizeDeclaredProvider(name, { ...base, ...overrides }) ?? base;
+	}
+
+	/**
+	 * Whether this name resolves to a provider we can route to. Validates
+	 * against the LOADED set - compiled built-ins plus anything declared in
+	 * providers.json - rather than a compiled union, which is the whole point of
+	 * issue #2882. A genuinely unknown name is still rejected.
+	 */
+	isKnownProvider(name: string): boolean {
+		const known = BUILTIN_PROVIDER_NAMES.has(name) || name in this.declared;
+		if (!known) this.sayIgnored(name);
+		return known;
+	}
+
+	/** The selected provider was dropped at load: say why, once per process. */
+	private sayIgnored(name: string): void {
+		const message = this.ignoredDeclarations.get(name);
+		if (message) warnIgnoredOnce(message);
+	}
+
+	setActiveProvider(name: ProviderName): void {
+		if (!this.isKnownProvider(name)) {
+			throw new Error(`Unknown provider: ${name}`);
+		}
+		this.settings.activeProvider = name;
+		this.settings.activeModel = this.getProvider(name).defaultModel;
+		this.saveSettings();
+	}
+
+	setActiveModel(model: string): void {
+		this.settings.activeModel = model;
+		this.saveSettings();
+	}
+
+	enableProvider(name: ProviderName, apiKey?: string): void {
+		if (!this.settings.providers[name]) {
+			this.settings.providers[name] = {};
+		}
+		this.settings.providers[name].enabled = true;
+		if (apiKey) this.vaultKey(name, apiKey);
+		this.saveSettings();
+	}
+
+	disableProvider(name: ProviderName): void {
+		if (this.settings.providers[name]) {
+			this.settings.providers[name].enabled = false;
+			this.saveSettings();
+		}
+	}
+
+	setApiKey(name: ProviderName, apiKey: string): void {
+		this.vaultKey(name, apiKey);
+		this.saveSettings();
+	}
+
+	/**
+	 * Store a key in the vault, never as `apiKey` text in providers.json. A
+	 * provider with no env var or ref gets a ref named after itself, so the
+	 * file only ever holds the ref name.
+	 */
+	private vaultKey(name: ProviderName, apiKey: string): void {
+		if (!this.settings.providers[name]) this.settings.providers[name] = {};
+		const entry = this.settings.providers[name];
+		const ref =
+			this.getProvider(name).apiKeyRef || this.getProvider(name).apiKeyEnv || `provider-${name}`;
+		storeVaultKey(ref, apiKey);
+		if (!this.getProvider(name).apiKeyEnv && !entry.apiKeyRef) entry.apiKeyRef = ref;
+		delete entry.apiKey;
+	}
+
+	/**
+	 * Why this provider's key is held back, or undefined. The key goes only to
+	 * the provider's compiled-in ORIGIN, unless providers.json came from the
+	 * user's own data dir (a custom endpoint they wrote). Every key read passes
+	 * here, so no caller can skip it (#4622).
+	 */
+	keyWithheldReason(name: ProviderName): string | undefined {
+		if (this.settingsTrusted) return undefined;
+		const originOf = (u: string | undefined): string => {
+			try {
+				return new URL(u ?? "").origin;
+			} catch {
+				return "";
+			}
+		};
+		const compiled = this.compiledBaseUrl(name);
+		const effective = originOf(this.getProvider(name).baseUrl);
+		if (compiled && originOf(compiled) === effective) return undefined;
+		return `${name} points at ${effective || "an unknown host"}, which is not its default endpoint${
+			compiled ? ` (${originOf(compiled)})` : ""
+		}, and that setting did not come from your own ~/.8gent folder`;
+	}
+
+	private noticedWithheld = new Set<string>();
+
+	getApiKey(name: ProviderName): string | null {
+		const withheld = this.keyWithheldReason(name);
+		if (withheld) {
+			if (!this.noticedWithheld.has(withheld)) {
+				this.noticedWithheld.add(withheld);
+				emitNotice(`Key for ${name} not sent: ${withheld}.`);
+			}
+			return null;
+		}
+		// Try rotated profiles first (round-robin with cooldown awareness)
+		const rotated = this.authRotator.getKey(name);
+		if (rotated) return rotated;
+
+		// Order: environment, then the key vault, then a plain `apiKey` value in
+		// providers.json (kept working, but flagged once so it can be moved).
+		const config = this.getProvider(name);
+		if (config.apiKeyEnv && process.env[config.apiKeyEnv]) {
+			return process.env[config.apiKeyEnv] || null;
+		}
+		const ref = config.apiKeyRef || config.apiKeyEnv;
+		if (ref) {
+			const vaulted = readVaultKey(ref);
+			if (vaulted) return vaulted;
+		}
+		if (config.apiKey) {
+			// A plain key is only honoured at the endpoint compiled in for that
+			// provider. A providers.json that moves the endpoint (or declares a new
+			// provider) cannot spend a key written in clear next to it (#4622).
+			if (!this.atCompiledEndpoint(name)) {
+				this.refusedPlainKeys.add(String(name));
+				return null;
+			}
+			this.plainKeyProviders.add(String(name));
+			return config.apiKey;
+		}
+		return null;
+	}
+
+	/** The base URL compiled in for a built-in, or undefined for a declared provider. */
+	compiledBaseUrl(name: ProviderName): string | undefined {
+		return builtinDefaults(name)?.baseUrl;
+	}
+
+	private atCompiledEndpoint(name: ProviderName): boolean {
+		const compiled = this.compiledBaseUrl(name);
+		if (!compiled) return false;
+		return this.getProvider(name).baseUrl === compiled;
+	}
+
+	/** True when a plain providers.json key for this provider was refused (use /apikeys). */
+	plainKeyRefused(name: ProviderName): boolean {
+		return this.refusedPlainKeys.has(String(name));
+	}
+
+	/**
+	 * Providers whose key came from plain text in providers.json since the last
+	 * call. Returned once, then cleared, so the TUI warns a single time.
+	 */
+	takePlainKeyWarnings(): string[] {
+		const fresh = [...this.plainKeyProviders].filter((n) => !this.plainKeyWarned.has(n));
+		for (const n of fresh) this.plainKeyWarned.add(n);
+		this.plainKeyProviders.clear();
+		return fresh;
+	}
+
+	listProviders(): ProviderConfig[] {
+		// Built-ins first, then declarations. Enumeration ADDS to the compiled
+		// table rather than replacing it, so every picker that reads this keeps
+		// showing the providers it always showed.
+		return [
+			...Object.values(PROVIDER_DEFAULTS).map((p) => this.getProvider(p.name)),
+			...Object.keys(this.declared).map((name) => this.getProvider(name)),
+		];
+	}
+
+	/**
+	 * Wire shape to speak to a provider. Declared providers carry it explicitly;
+	 * built-ins keep the shape their name has always implied, so this is a pure
+	 * restatement of the old dispatch switch and changes no existing route.
+	 */
+	compatFor(provider: ProviderConfig): ProviderCompat {
+		if (provider.compat) return provider.compat;
+		// Exactly the old `switch (dispatchProvider.name)`: only `ollama` and
+		// `anthropic` had native branches, everything else fell through to the
+		// OpenAI-compatible path. `8gent` is deliberately NOT native-Ollama here
+		// even though `runtimeForProvider()` maps it to the ollama runtime - the
+		// two stacks disagree today, and reconciling them is a separate defect,
+		// not something to smuggle into this change.
+		if (provider.name === "ollama") return "ollama";
+		if (provider.name === "anthropic") return "anthropic";
+		return "openai";
+	}
+
+	listEnabledProviders(): ProviderConfig[] {
+		return this.listProviders().filter((p) => p.enabled || this.getApiKey(p.name));
+	}
+
+	/**
+	 * Ask a provider's endpoint which models it serves, and record the answer.
+	 * This is how a declaration that named only a `baseUrl` becomes usable: the
+	 * discovered list is written to `providers.json`, and the first model
+	 * becomes the default when none was declared.
+	 */
+	async discoverModels(name: ProviderName): Promise<string[]> {
+		if (!this.isKnownProvider(name)) {
+			throw new Error(`Unknown provider: ${name}`);
+		}
+		const provider = this.getProvider(name);
+		if (!provider.baseUrl) {
+			throw new Error(`Provider ${name} has no baseUrl to discover models from`);
+		}
+		const models = await discoverModelsAt(
+			provider.baseUrl,
+			this.compatFor(provider),
+			this.getApiKey(name) || undefined,
+		);
+		if (models.length === 0) return models;
+
+		const entry = this.settings.providers[name] ?? {};
+		this.settings.providers[name] = entry;
+		entry.models = models;
+		if (!provider.defaultModel) {
+			entry.defaultModel = models[0];
+		}
+		this.saveSettings();
+		return models;
+	}
+
+	// ============================================
+	// Chat API
+	// ============================================
+
+	async chat(callerRequest: ChatRequest): Promise<ChatResponse> {
+		// Effort policy (#3461): fills `thinking` from `taskKind` only when the
+		// flag is exactly "1" and the caller left `thinking` empty. Otherwise
+		// returns the caller's object untouched.
+		const request = applyEffortPolicy(callerRequest);
+		if (request.providerName && !this.isKnownProvider(request.providerName)) {
+			throw new Error(`Unknown provider: ${request.providerName}`);
+		}
+		const provider = request.providerName
+			? this.getProvider(request.providerName)
+			: this.getActiveProvider();
+		const model =
+			request.model ||
+			(request.providerName && request.providerName !== this.settings.activeProvider
+				? provider.defaultModel
+				: this.settings.activeModel);
+
+		// Resolve the requested thinking level against this provider's
+		// capabilities. Downgrades silently when the exact level is unsupported;
+		// returns null when the provider has no thinking support at all.
+		const thinkingResolution = request.thinking
+			? resolveThinkingForRouting(request.thinking, provider.supportedThinkingLevels)
+			: undefined;
+		let resolvedRequest: ChatRequest = thinkingResolution
+			? {
+					...request,
+					thinking: thinkingResolution.level ?? undefined,
+				}
+			: request;
+
+		// ── PII anonymization gate (cloud-egress boundary) ──────────────────
+		// HARD RULE: no PII may reach a cloud provider. If this provider sends
+		// data off-machine, anonymize the outbound messages here; restore real
+		// values on the way back. Local providers bypass entirely - their data
+		// never leaves the device. If anonymization cannot be verified clean,
+		// we FAIL CLOSED (route to a local provider, or refuse).
+		let piiMap: Map<string, string> | null = null;
+		let dispatchProvider = provider;
+		let dispatchModel = model;
+
+		if (isCloudProvider(provider)) {
+			// Run anonymization + verification under a guard. ANY failure here
+			// (the anonymizer throwing, or PII still present in the verified
+			// output) means we must NOT send raw to the cloud: fail closed by
+			// routing to a local provider, or refuse if none exists.
+			let failClosed = false;
+			try {
+				// Tool-call arguments ride along as extra entries so they share the
+				// same pseudonym map as message text, then are put back (#3547).
+				// Each string or number LEAF is its own entry: anonymizing the
+				// stringified JSON would turn a bare number into an unquoted token
+				// and break JSON.parse, which tripped fail-closed on clean requests.
+				const msgs = resolvedRequest.messages;
+				const leaves: { role: string; content: string }[] = [];
+				const collect = (v: unknown): void => {
+					if (typeof v === "string" || typeof v === "number") {
+						leaves.push({ role: "tool-arg", content: String(v) });
+					} else if (Array.isArray(v)) {
+						for (const x of v) collect(x);
+					} else if (v && typeof v === "object") {
+						for (const x of Object.values(v)) collect(x);
+					}
+				};
+				for (const m of msgs) for (const tc of m.toolCalls ?? []) collect(tc.arguments ?? {});
+				const gated = anonymizeMessages<{ role: string; content: string }>([...msgs, ...leaves]);
+				const cleanLeaves = gated.messages.slice(msgs.length);
+				let next = 0;
+				const rebuild = (v: unknown): unknown => {
+					if (typeof v === "string") return cleanLeaves[next++].content;
+					if (typeof v === "number") {
+						const out = cleanLeaves[next++].content;
+						return out === String(v) ? v : out;
+					}
+					if (Array.isArray(v)) return v.map(rebuild);
+					if (v && typeof v === "object") {
+						return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, rebuild(x)]));
+					}
+					return v;
+				};
+				const cleanMsgs = (gated.messages.slice(0, msgs.length) as ChatMessage[]).map((m) =>
+					m.toolCalls
+						? {
+								...m,
+								toolCalls: m.toolCalls.map((tc) => ({
+									...tc,
+									arguments: rebuild(tc.arguments ?? {}) as Record<string, unknown>,
+								})),
+							}
+						: m,
+				);
+				// Verify every outbound field: message text, tool-call arguments
+				// (keys and values), tool-call ids and names, and tool reply ids.
+				// Ids and names are not anonymized, so PII there fails closed.
+				const outbound = [
+					...cleanMsgs.map((m) => m.content),
+					...cleanMsgs.flatMap((m) =>
+						(m.toolCalls ?? []).flatMap((tc) => [
+							JSON.stringify(tc.arguments),
+							tc.id ?? "",
+							tc.name ?? "",
+						]),
+					),
+					...cleanMsgs.map((m) => m.toolCallId ?? ""),
+				].join("\n");
+				if (verifyClean(outbound)) {
+					piiMap = gated.map;
+					resolvedRequest = { ...resolvedRequest, messages: cleanMsgs };
+				} else {
+					failClosed = true;
+				}
+			} catch {
+				// Anonymizer unavailable / errored - cannot prove the payload is
+				// clean, so treat as if PII survived.
+				failClosed = true;
+			}
+
+			if (failClosed) {
+				const local = this.resolveLocalFallback();
+				if (!local) {
+					throw new Error(
+						"PII gate fail-closed: could not produce a verified-clean payload and " +
+							"no local provider is available. Refusing to send to cloud.",
+					);
+				}
+				dispatchProvider = local.provider;
+				dispatchModel = local.model;
+				// Local path: send the ORIGINAL (un-anonymized) messages - data
+				// stays on-device, so the model should see real values.
+				resolvedRequest = { ...resolvedRequest };
+			}
+		}
+
+		// Dispatch on the wire SHAPE, not the provider name. For built-ins
+		// `compatFor()` returns exactly what the old name switch did; a declared
+		// provider picks its own shape in providers.json.
+		let response: ChatResponse;
+		switch (this.compatFor(dispatchProvider)) {
+			case "ollama":
+				response = await this.chatOllama(dispatchProvider, resolvedRequest, dispatchModel);
+				break;
+			case "anthropic":
+				response = await this.chatAnthropic(dispatchProvider, resolvedRequest, dispatchModel);
+				break;
+			default:
+				// OpenAI-compatible providers
+				response = await this.chatOpenAICompatible(
+					dispatchProvider,
+					resolvedRequest,
+					dispatchModel,
+				);
+		}
+
+		// De-anonymize the cloud response so the caller (officer/user) sees real
+		// values; the cloud only ever saw pseudonyms.
+		if (piiMap && piiMap.size > 0) {
+			response.content = deanonymize(response.content, piiMap);
+			if (response.toolCalls) {
+				response.toolCalls = response.toolCalls.map((tc) => ({
+					...tc,
+					arguments: deanonymizeArgs(tc.arguments, piiMap as Map<string, string>),
+				}));
+			}
+		}
+
+		if (thinkingResolution) {
+			response.thinking = thinkingResolution;
+		}
+		return response;
+	}
+
+	/**
+	 * Resolve a local provider to fall back to when the PII gate refuses a
+	 * cloud send. Prefers an enabled local provider (8gent, ollama, lmstudio,
+	 * apfel) that is reachable by configuration. Returns null when none exist.
+	 */
+	private resolveLocalFallback(): { provider: ProviderConfig; model: string } | null {
+		for (const name of LOCAL_FALLBACK_ORDER) {
+			const p = this.getProvider(name);
+			if (!p) continue;
+			if (p.enabled || this.getApiKey(name)) {
+				return { provider: p, model: p.defaultModel };
+			}
+		}
+		// 8gent / ollama share localhost:11434 and are on by default even if a
+		// settings file disabled the flag. Prefer ollama as the always-available
+		// local of last resort: it needs no API key and has a dedicated dispatch
+		// path, so the fail-closed reroute cannot itself error on a missing key.
+		const ollama = this.getProvider("ollama");
+		if (ollama) return { provider: ollama, model: ollama.defaultModel };
+		const eight = this.getProvider("8gent");
+		if (eight) return { provider: eight, model: eight.defaultModel };
+		return null;
+	}
+
+	/**
+	 * Resolve a thinking-level request against a provider without dispatching
+	 * a chat call. Orchestration uses this to forecast cost and pick a depth
+	 * before scheduling work. Defaults to the active provider.
+	 */
+	resolveThinking(level: ThinkingLevel, providerName?: ProviderName): ThinkingResolution {
+		const provider = providerName ? this.getProvider(providerName) : this.getActiveProvider();
+		return resolveThinkingForRouting(level, provider.supportedThinkingLevels);
+	}
+
+	private async chatOllama(
+		provider: ProviderConfig,
+		request: ChatRequest,
+		model: string,
+	): Promise<ChatResponse> {
+		const body: Record<string, unknown> = {
+			model,
+			messages: toOllamaMessages(request.messages),
+			stream: false,
+		};
+
+		if (request.tools && request.tools.length > 0) {
+			body.tools = request.tools;
+		}
+		// `request.thinking` is already resolved against this provider's supported
+		// set by `chat()`. Ollama's own switch is `think` (thinking-request.ts).
+		if (request.thinking) {
+			Object.assign(
+				body,
+				thinkingRequestFields({ provider: "ollama", model, shape: "native" }, request.thinking)
+					.fields,
+			);
+		}
+
+		// modelFetch: no hidden Bun 300 s cap; EIGHT_TURN_TIMEOUT_MS bounds the step.
+		const response = await modelFetch(`${provider.baseUrl}/api/chat`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(body),
+			signal: request.signal,
+		});
+
+		if (!response.ok) {
+			throw new Error(`Ollama error: ${response.status} ${await response.text()}`);
+		}
+
+		const data = await response.json();
+
+		let toolCalls: ToolCall[] | undefined;
+		if (data.message?.tool_calls) {
+			toolCalls = data.message.tool_calls.map((tc: any, i: number) => ({
+				id: `call_${i}`,
+				name: tc.function.name,
+				arguments:
+					typeof tc.function.arguments === "string"
+						? JSON.parse(tc.function.arguments)
+						: tc.function.arguments,
+			}));
+		}
+
+		return {
+			content: data.message?.content || "",
+			toolCalls,
+			model,
+			provider: provider.name,
+			usage: data.eval_count
+				? {
+						promptTokens: data.prompt_eval_count || 0,
+						completionTokens: data.eval_count || 0,
+						totalTokens: (data.prompt_eval_count || 0) + (data.eval_count || 0),
+					}
+				: undefined,
+		};
+	}
+
+	private async chatOpenAICompatible(
+		provider: ProviderConfig,
+		request: ChatRequest,
+		model: string,
+	): Promise<ChatResponse> {
+		const apiKey = this.getApiKey(provider.name);
+		// A keyless LOCAL provider is not a misconfiguration. apfel declares
+		// apiKeyEnv:"" because it is an on-device HTTP service with no auth, and
+		// this gate threw on it anyway - producing "No API key for apfel (Apple
+		// Foundation HTTP). Set  or use /settings", which names no env var
+		// because there is not one to name. That is why 8EO was dead on apfel.
+		// Only demand a key from a provider that actually declares one.
+		if (!apiKey && (provider.apiKeyEnv || provider.apiKeyRef)) {
+			throw new Error(
+				`No API key for ${provider.displayName}. Set ${provider.apiKeyEnv || provider.apiKeyRef} or use /apikeys`,
+			);
+		}
+
+		const headers: Record<string, string> = {
+			"Content-Type": "application/json",
+			// Omitted entirely when there is no key, rather than sent empty: some
+			// local servers reject a malformed Authorization header outright
+			// instead of ignoring it.
+			...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+		};
+
+		// OpenRouter needs extra headers
+		if (provider.name === "openrouter") {
+			headers["HTTP-Referer"] = "https://8gent.app";
+			headers["X-Title"] = "8gent Code";
+		}
+
+		const body: Record<string, unknown> = {
+			model,
+			messages: toOpenAIMessages(request.messages),
+			stream: false,
+		};
+
+		if (request.tools && request.tools.length > 0 && provider.supportsTools) {
+			body.tools = request.tools;
+		}
+		if (request.temperature !== undefined) {
+			body.temperature = request.temperature;
+		}
+		if (request.maxTokens !== undefined) {
+			body.max_tokens = request.maxTokens;
+		}
+		// `request.thinking` is already resolved against this provider's
+		// supported set by `chat()`. Forward it as `reasoning_effort` for
+		// OpenAI-compatible reasoning models; non-reasoning models ignore it.
+		// OpenRouter takes its own `reasoning: { effort }` instead.
+		if (request.thinking) {
+			const wire = thinkingRequestFields(
+				{ provider: provider.name, model, shape: "openai", baseUrl: provider.baseUrl },
+				request.thinking,
+			);
+			if (wire.applied) Object.assign(body, wire.fields);
+			else body.reasoning_effort = request.thinking;
+		}
+
+		const response = await modelFetch(`${provider.baseUrl}/chat/completions`, {
+			method: "POST",
+			headers,
+			body: JSON.stringify(body),
+			signal: request.signal,
+		});
+
+		if (response.status === 429) {
+			// Rate limited - mark profile and try failover
+			this.authRotator.markRateLimited(provider.name);
+			const fallback = this.failover.resolve(model);
+			if (fallback.model !== model || fallback.provider !== provider.name) {
+				const fallbackProvider = this.getProvider(fallback.provider as ProviderName);
+				return this.chatOpenAICompatible(fallbackProvider, request, fallback.model);
+			}
+			const errorText = await response.text();
+			throw new Error(`${provider.displayName} rate limited: 429 ${errorText}`);
+		}
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`${provider.displayName} error: ${response.status} ${errorText}`);
+		}
+
+		const data = await response.json();
+		const message = data.choices?.[0]?.message;
+
+		let toolCalls: ToolCall[] | undefined;
+		if (message?.tool_calls) {
+			toolCalls = message.tool_calls.map((tc: any) => ({
+				id: tc.id,
+				name: tc.function.name,
+				arguments:
+					typeof tc.function.arguments === "string"
+						? JSON.parse(tc.function.arguments)
+						: tc.function.arguments,
+			}));
+		}
+
+		return {
+			content: message?.content || "",
+			toolCalls,
+			model,
+			provider: provider.name,
+			usage: data.usage
+				? {
+						promptTokens: data.usage.prompt_tokens || 0,
+						completionTokens: data.usage.completion_tokens || 0,
+						totalTokens: data.usage.total_tokens || 0,
+					}
+				: undefined,
+		};
+	}
+
+	private async chatAnthropic(
+		provider: ProviderConfig,
+		request: ChatRequest,
+		model: string,
+	): Promise<ChatResponse> {
+		const apiKey = this.getApiKey(provider.name);
+		// A declared Anthropic-shaped endpoint may be a keyless local proxy, so
+		// only demand a key from a provider that declares an env var for one -
+		// the same rule the OpenAI-compatible path already applies.
+		if (!apiKey && (provider.apiKeyEnv || provider.apiKeyRef)) {
+			throw new Error(
+				`No API key for ${provider.displayName}. Set ${provider.apiKeyEnv || provider.apiKeyRef} or use /apikeys`,
+			);
+		}
+
+		// Convert messages to Anthropic format
+		const systemMessage = request.messages.find((m) => m.role === "system");
+		const otherMessages = request.messages.filter((m) => m.role !== "system");
+
+		const body: Record<string, unknown> = {
+			model,
+			max_tokens: request.maxTokens || 4096,
+			messages: toAnthropicMessages(otherMessages),
+		};
+
+		if (systemMessage) {
+			body.system = systemMessage.content;
+		}
+
+		if (request.tools && request.tools.length > 0) {
+			body.tools = request.tools.map((t) => ({
+				name: t.function.name,
+				description: t.function.description,
+				input_schema: t.function.parameters,
+			}));
+		}
+		// Map the resolved thinking level to an Anthropic extended-thinking
+		// budget. Numbers are conservative defaults; tune per-model later.
+		if (request.thinking) {
+			const budget = ANTHROPIC_THINKING_BUDGET[request.thinking];
+			body.thinking = { type: "enabled", budget_tokens: budget };
+			// The API rejects budget_tokens >= max_tokens (400). Keep a cap that is
+			// already above the budget; otherwise raise it to the budget plus 4096
+			// tokens for the answer. The no-thinking path above is unchanged.
+			const cap = request.maxTokens || 4096;
+			body.max_tokens = cap > budget ? cap : budget + 4096;
+		}
+
+		const response = await fetch(`${provider.baseUrl}/messages`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				// Omitted entirely when there is no key: a keyless local proxy can
+				// reject a malformed empty header rather than ignoring it.
+				...(apiKey ? { "x-api-key": apiKey } : {}),
+				"anthropic-version": "2023-06-01",
+			},
+			body: JSON.stringify(body),
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`Anthropic error: ${response.status} ${errorText}`);
+		}
+
+		const data = await response.json();
+
+		let content = "";
+		let toolCalls: ToolCall[] | undefined;
+
+		for (const block of data.content || []) {
+			if (block.type === "text") {
+				content += block.text;
+			} else if (block.type === "tool_use") {
+				if (!toolCalls) toolCalls = [];
+				toolCalls.push({
+					id: block.id,
+					name: block.name,
+					arguments: block.input,
+				});
+			}
+		}
+
+		return {
+			content,
+			toolCalls,
+			model,
+			provider: provider.name,
+			usage: data.usage
+				? {
+						promptTokens: data.usage.input_tokens || 0,
+						completionTokens: data.usage.output_tokens || 0,
+						totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0),
+					}
+				: undefined,
+		};
+	}
+}
+
+// ============================================
+// PII Egress Gate Helpers
+// ============================================
+
+/**
+ * Providers tried, in order, when the PII gate must fail closed off a cloud
+ * provider. All are on-device.
+ */
+const LOCAL_FALLBACK_ORDER: BuiltinProviderName[] = ["ollama", "8gent", "lmstudio", "apfel"];
+
+/**
+ * Hostnames considered on-device. A request to any of these never leaves the
+ * machine, so the PII gate bypasses it.
+ */
+const LOCAL_HOST_RE = /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)$/i;
+
+/**
+ * Decide whether a provider sends data off the local machine. Cloud = it has a
+ * public base URL whose host is not localhost. Providers with no base URL
+ * (IPC / subprocess: apple-foundation, host-cli-*) keep data local.
+ *
+ * NOTE: this is deliberately strict and base-URL driven rather than an
+ * allow-list of names - a new cloud provider added later is treated as cloud
+ * by default (fail-safe), and a provider repointed at localhost is treated as
+ * local.
+ */
+export function isCloudProvider(provider: Pick<ProviderConfig, "baseUrl">): boolean {
+	const url = (provider.baseUrl || "").trim();
+	if (!url) return false; // IPC / subprocess - on device
+	let host: string;
+	try {
+		host = new URL(url).hostname;
+	} catch {
+		// Unparseable base URL: treat as cloud (fail-safe - we cannot prove it
+		// is local, so we must anonymize).
+		return true;
+	}
+	if (LOCAL_HOST_RE.test(host)) return false;
+	// *.internal (Fly private network) is NOT proven local - the proxy behind it
+	// may forward to a public cloud provider. Treat as cloud (fail-safe).
+	return true;
+}
+
+// ============================================
+// Wire message shapes (#3547)
+// ============================================
+//
+// Each serialiser keeps the earlier tool calls and the reply ids, so step two
+// of a tool loop is accepted. A message with no tool fields serialises exactly
+// as { role, content }, as it always did.
+
+/** OpenAI-compatible: tool_calls on assistant turns, tool_call_id on replies. */
+export function toOpenAIMessages(messages: ChatMessage[]): Record<string, unknown>[] {
+	return messages.map((m) => {
+		if (m.role === "assistant" && m.toolCalls?.length) {
+			return {
+				role: m.role,
+				// Strict endpoints reject "" on a tool-only turn; null is the spec.
+				content: m.content || null,
+				tool_calls: m.toolCalls.map((tc) => ({
+					id: tc.id,
+					type: "function",
+					function: { name: tc.name, arguments: JSON.stringify(tc.arguments ?? {}) },
+				})),
+			};
+		}
+		if (m.role === "tool" && m.toolCallId) {
+			return { role: m.role, content: m.content, tool_call_id: m.toolCallId };
+		}
+		return { role: m.role, content: m.content };
+	});
+}
+
+/** Ollama /api/chat: object arguments, and a tool reply names its tool. */
+export function toOllamaMessages(messages: ChatMessage[]): Record<string, unknown>[] {
+	const nameById = new Map<string, string>();
+	return messages.map((m) => {
+		if (m.role === "assistant" && m.toolCalls?.length) {
+			for (const tc of m.toolCalls) nameById.set(tc.id, tc.name);
+			return {
+				role: m.role,
+				content: m.content,
+				tool_calls: m.toolCalls.map((tc) => ({
+					function: { name: tc.name, arguments: tc.arguments ?? {} },
+				})),
+			};
+		}
+		const toolName = m.role === "tool" && m.toolCallId ? nameById.get(m.toolCallId) : undefined;
+		if (toolName) return { role: m.role, content: m.content, tool_name: toolName };
+		return { role: m.role, content: m.content };
+	});
+}
+
+/**
+ * Anthropic Messages: tool_use blocks on assistant turns, tool_result blocks in
+ * a user turn. Consecutive tool replies share one user turn, as the API expects
+ * for parallel calls. System messages are handled by the caller.
+ */
+export function toAnthropicMessages(messages: ChatMessage[]): Record<string, unknown>[] {
+	const out: Array<{ role: string; content: unknown }> = [];
+	for (const m of messages) {
+		if (m.role === "assistant" && m.toolCalls?.length) {
+			out.push({
+				role: "assistant",
+				content: [
+					...(m.content ? [{ type: "text", text: m.content }] : []),
+					...m.toolCalls.map((tc) => ({
+						type: "tool_use",
+						id: tc.id,
+						name: tc.name,
+						input: tc.arguments ?? {},
+					})),
+				],
+			});
+			continue;
+		}
+		if (m.role === "tool" && m.toolCallId) {
+			const block = { type: "tool_result", tool_use_id: m.toolCallId, content: m.content };
+			const prev = out[out.length - 1];
+			const prevBlocks = prev?.role === "user" && Array.isArray(prev.content) ? prev.content : null;
+			if (prevBlocks?.every((b: { type?: string }) => b.type === "tool_result")) {
+				prevBlocks.push(block);
+			} else {
+				out.push({ role: "user", content: [block] });
+			}
+			continue;
+		}
+		out.push({ role: m.role === "assistant" ? "assistant" : "user", content: m.content });
+	}
+	return out;
+}
+
+/**
+ * De-anonymize string values inside tool-call arguments (the cloud model may
+ * echo a pseudonym back into a tool argument). Recurses through nested
+ * objects/arrays; leaves non-strings untouched.
+ */
+function deanonymizeArgs(
+	args: Record<string, unknown>,
+	map: Map<string, string>,
+): Record<string, unknown> {
+	const walk = (v: unknown): unknown => {
+		if (typeof v === "string") return deanonymize(v, map);
+		if (Array.isArray(v)) return v.map(walk);
+		if (v && typeof v === "object") {
+			const out: Record<string, unknown> = {};
+			for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = walk(val);
+			return out;
+		}
+		return v;
+	};
+	return walk(args) as Record<string, unknown>;
+}
+
+// ============================================
+// Dynamic Free Model Router
+// ============================================
+
+interface OpenRouterModel {
+	id: string;
+	name: string;
+	context_length?: number;
+	pricing?: {
+		prompt: string;
+		completion: string;
+	};
+}
+
+let cachedFreeModel: { model: string; timestamp: number } | null = null;
+const FREE_MODEL_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+/** Used only when the live list cannot be read and the caller is not strict. */
+const FREE_MODEL_FALLBACK = "meta-llama/llama-3-8b-instruct:free";
+/** The model-list request never holds the agent build longer than this. */
+const FREE_MODEL_FETCH_TIMEOUT_MS = 10_000;
+
+/**
+ * Ask OpenRouter for its live model list and pick the free model (`:free`
+ * suffix) with the largest context window. Returns the reason instead of a
+ * guess when the list cannot be read or holds no free model. Successful
+ * picks are cached for an hour; failures are never cached.
+ */
+export async function findBestFreeModel(
+	fetchImpl: typeof fetch = fetch,
+	timeoutMs: number = FREE_MODEL_FETCH_TIMEOUT_MS,
+): Promise<{ model: string } | { error: string }> {
+	if (cachedFreeModel && Date.now() - cachedFreeModel.timestamp < FREE_MODEL_CACHE_TTL) {
+		return { model: cachedFreeModel.model };
+	}
+
+	// The key comes from the environment only. A ./.env in whatever folder the
+	// agent runs in is project data, not the user's provider config (#3710).
+	const apiKey = process.env.OPENROUTER_API_KEY;
+
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+	if (apiKey) {
+		headers.Authorization = `Bearer ${apiKey}`;
+	}
+
+	try {
+		const response = await fetchImpl("https://openrouter.ai/api/v1/models", {
+			headers,
+			signal: AbortSignal.timeout(timeoutMs),
+		});
+		if (!response.ok) return { error: `OpenRouter model list answered http ${response.status}` };
+
+		let data: { data?: OpenRouterModel[] };
+		try {
+			data = (await response.json()) as { data?: OpenRouterModel[] };
+		} catch {
+			return { error: "OpenRouter model list was a bad response" };
+		}
+		const freeModels = (Array.isArray(data?.data) ? data.data : [])
+			.filter((m: OpenRouterModel) => typeof m?.id === "string" && m.id.endsWith(":free"))
+			.sort(
+				(a: OpenRouterModel, b: OpenRouterModel) =>
+					(b.context_length || 0) - (a.context_length || 0),
+			);
+		if (freeModels.length === 0) return { error: "OpenRouter lists no free models right now" };
+
+		// Pick the model with the largest context window (proxy for quality)
+		const best = freeModels[0].id;
+		cachedFreeModel = { model: best, timestamp: Date.now() };
+		return { model: best };
+	} catch (err) {
+		const timedOut = (err as { name?: string } | null)?.name === "TimeoutError";
+		return {
+			error: `could not reach OpenRouter to list its free models${timedOut ? " (timed out)" : ""}`,
+		};
+	}
+}
+
+/**
+ * Query OpenRouter API to find the best currently-available free model.
+ * Filters for models with `:free` suffix, sorts by context length.
+ * Results are cached for 1 hour. Falls back to a fixed free id when the list
+ * cannot be read; callers that must not guess use `resolveModel(m, { strict })`.
+ */
+export async function getBestFreeModel(): Promise<string> {
+	const found = await findBestFreeModel();
+	return "model" in found ? found.model : FREE_MODEL_FALLBACK;
+}
+
+/**
+ * Resolve a model string. If "auto:free", dynamically pick the best free model.
+ * With `strict`, an unresolvable "auto:free" throws with the reason instead of
+ * returning a fallback id, so a caller never runs on a model it did not choose.
+ */
+export async function resolveModel(
+	model: string,
+	opts: { strict?: boolean; fetchImpl?: typeof fetch } = {},
+): Promise<{ model: string; provider?: ProviderName }> {
+	if (model === "auto:free") {
+		if (opts.strict) {
+			const found = await findBestFreeModel(opts.fetchImpl);
+			if ("error" in found) throw new Error(found.error);
+			return { model: found.model, provider: "openrouter" };
+		}
+		const best = await getBestFreeModel();
+		return { model: best, provider: "openrouter" };
+	}
+	return { model };
+}
+
+/** Test hook: forget the cached free-model pick. */
+export function resetFreeModelCache(): void {
+	cachedFreeModel = null;
+}
+
+// ============================================
+// Singleton & Exports
+// ============================================
+
+let providerManagerInstance: ProviderManager | null = null;
+
+export function getProviderManager(): ProviderManager {
+	if (!providerManagerInstance) {
+		providerManagerInstance = new ProviderManager();
+	}
+	return providerManagerInstance;
+}
+
+export function resetProviderManager(): void {
+	providerManagerInstance = null;
+}
+
+// Export provider names for reference. This is the COMPILED list only - it is
+// not the validity check. Ask `ProviderManager.isKnownProvider()` or read
+// `listProviders()` to include providers declared in providers.json.
+export const PROVIDER_NAMES: BuiltinProviderName[] = [
+	"8gent",
+	"ollama",
+	"lmstudio",
+	"llama-server",
+	"openrouter",
+	"groq",
+	"grok",
+	"openai",
+	"anthropic",
+	"mistral",
+	"minimax",
+	"together",
+	"fireworks",
+	"replicate",
+	"host-cli-primary",
+	"host-cli-secondary",
+];
+
+export {
+	discoverModelsAt,
+	modelsUrlFor,
+	normalizeDeclaredProvider,
+	parseDeclaredProviders,
+	type ProviderCompat,
+} from "./declared";
+export { AuthRotator, type AuthProfile } from "./auth-rotation";
+export {
+	ModelFailover,
+	type FailoverChain,
+	type FailoverEntry,
+} from "./failover";
+export {
+	callLocalModelWithReroute,
+	chooseRerouteModel,
+	isModelNotFoundError,
+	hasCloudModelKey,
+	noModelAvailableMessage,
+	type InstalledModel,
+	type LocalRerouteOutcome,
+} from "./model-reroute";
+export {
+	resolveThinkingLevel,
+	resolveThinkingForRouting,
+	thinkingTokenMultiplier,
+	THINKING_LEVELS_ORDERED,
+	type ThinkingLevel,
+	type ThinkingResolution,
+} from "./thinking-level";
+export {
+	HostCliClient,
+	checkHostCliAvailability,
+	HostCliUnavailableError,
+	HostCliRateLimitError,
+	type HostCliClientOptions,
+	type HostCliBinarySpec,
+	type HostCliAvailability,
+} from "./host-cli";
+
+// Sovereign meter (#4607): the one place every model request is checked and counted.
+setProviderNamer((hostPort, local) => {
+	try {
+		for (const p of getProviderManager().listProviders()) {
+			if (!p.baseUrl) continue;
+			if (new URL(p.baseUrl).host === hostPort) return p.name;
+		}
+	} catch {
+		// fall through to the host
+	}
+	return local ? `local:${hostPort}` : hostPort;
+});
+installLocalityGuard();
+
+export default {
+	getProviderManager,
+	resetProviderManager,
+	getBestFreeModel,
+	resolveModel,
+	PROVIDER_NAMES,
+	PROVIDER_DEFAULTS,
+};
+
+export { UsageMonitor, getUsageMonitor } from "./usage-monitor";

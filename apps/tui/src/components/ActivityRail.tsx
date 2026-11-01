@@ -1,0 +1,514 @@
+/**
+ * ActivityRail - fixed-width right column for the three-zone TUI shell.
+ *
+ * Surfaces the agent's live ops in five stacked sections:
+ *   - 8GENT ACTIVITY heading
+ *   - Active Tasks with progress bars
+ *   - Tools status (read/patch/test/verify with state glyphs)
+ *   - Providers (the configured route, its real failover hop, and a
+ *     latency only when one was measured)
+ *   - Memory (hits/misses/cache, each row only when a source reports it;
+ *     the section is absent when none does)
+ *   - Agents row (Core/Research/Tester/Reviewer with LED dots)
+ *
+ * Pure presentational: caller owns every value, no internal state, no
+ * effects. Width pinned to 34 cols, single border. Theme tokens only.
+ *
+ * Section headings sit in a Box with marginTop instead of an empty Text
+ * spacer so Ink does not collapse the blank line in some renderers (which
+ * previously caused MEMORY/cache labels to collide with the preceding
+ * section's last data row).
+ *
+ * Data rows use the shared RailRow helper so labels and values can never
+ * fuse at narrow widths (the bug that produced `MEMORYrouter`).
+ *
+ * Every row and section is flexShrink=0 so a short terminal clips the
+ * rail at the bottom instead of stacking rows on top of each other (the
+ * bug that produced `idleS` at 100x30, #2921).
+ */
+
+import { Box, Text } from "ink";
+import React from "react";
+import { queuedToolCount } from "../lib/activity-rail-derivation.js";
+import type { LoopRow } from "../lib/control-state.js";
+import { askedNote } from "../lib/model-truth.js";
+import { t } from "../theme.js";
+import { LoopsBlock } from "./LoopsBlock.js";
+import { MetricRow, TruncatedValue } from "./RailRow.js";
+
+// RailSection wraps a heading and its rows in a discrete column block.
+// Without this, Ink can fuse the heading line with the next row at narrow
+// widths (the `hitsRY` bug, MEMORY heading running into a cache row tail).
+// Explicit column + marginTop + width=100% guarantees row separation.
+//
+// Every block is flexShrink=0. Ink boxes shrink by default, so when the
+// rail is taller than the shell (a 30-row terminal) yoga squeezed each
+// section to a fraction of a row and headings overprinted their values
+// (`idleS` at 100x30). With shrink off the rail keeps its natural height
+// and the outer overflow="hidden" clips whatever does not fit.
+//
+// Rows must NOT set overflow="hidden" of their own: Ink applies only the
+// innermost clip, so a row-level clip replaces the rail's clip and lets
+// the row paint straight through the rail border and the bars below it.
+function RailSection({
+	title,
+	children,
+}: {
+	title: string;
+	children: React.ReactNode;
+}) {
+	return (
+		<Box flexDirection="column" marginTop={1} width="100%" flexShrink={0}>
+			<Box flexShrink={0}>
+				<Text color={t.heading} bold>
+					{title}
+				</Text>
+			</Box>
+			<Box flexDirection="column" width="100%" flexShrink={0}>
+				{children}
+			</Box>
+		</Box>
+	);
+}
+
+// NamedRow renders a primary name on the left (truncate-middle so head and
+// tail are both visible — important for `lmstudio:google/gemma-4-26b-a4b`)
+// and an optional trailing value on the right (latency, count, etc).
+function NamedRow({
+	name,
+	color,
+	trailing,
+	trailingColor = t.textTertiary,
+}: {
+	name: string;
+	color: string;
+	trailing?: string;
+	trailingColor?: string;
+}) {
+	return (
+		<Box width="100%" flexShrink={0} justifyContent="space-between">
+			<Box flexGrow={1} minWidth={0}>
+				<TruncatedValue value={name} color={color} />
+			</Box>
+			{trailing ? (
+				<Box flexShrink={0} marginLeft={1}>
+					<Text color={trailingColor}>{trailing}</Text>
+				</Box>
+			) : null}
+		</Box>
+	);
+}
+
+type ToolState = "idle" | "running" | "ok" | "fail";
+type ProviderState = "primary" | "fallback" | "offline";
+type AgentState = "idle" | "active" | "blocked";
+type BodyPartState = "disabled" | "idle" | "inFlight";
+
+interface BodyPartsRow {
+	hands: BodyPartState;
+	eyes: BodyPartState;
+	handeyes: BodyPartState;
+}
+
+interface ActiveTask {
+	id: string;
+	label: string;
+	/** 0-100, the real share of plan steps done. No bar when absent. */
+	progress?: number;
+	/** Right-hand tally beside the bar, e.g. "2/5". Defaults to `${progress}%`. */
+	detail?: string;
+	/**
+	 * How the label reads when there is no bar: "waiting" is the approval
+	 * card's orange, "quiet" is a plan at rest. Omitted is live work (teal).
+	 */
+	tone?: "waiting" | "quiet";
+}
+
+interface ToolStatus {
+	name: string;
+	state: ToolState;
+}
+
+interface ProviderRow {
+	name: string;
+	state: ProviderState;
+	/** Measured round-trip latency, e.g. "42ms". Absent when unmeasured. */
+	latency?: string;
+	/** The configured model, when a reroute ran the turns on `name` instead.
+	 *  Drawn dim on the next line as "(asked ...)" (#3102). */
+	asked?: string;
+}
+
+/**
+ * Memory counters. Each field is present only when a real source reports
+ * it: a row is never drawn for a count nobody measured. The memory store
+ * (packages/memory/store.ts) exposes no hit/miss or cache counter yet, so
+ * the TUI passes nothing and the MEMORY section does not render.
+ */
+interface MemoryStats {
+	hits?: number;
+	misses?: number;
+	cache?: string;
+}
+
+interface AgentRow {
+	name: string;
+	state: AgentState;
+}
+
+interface ActivityRailProps {
+	tasks: ReadonlyArray<ActiveTask>;
+	tools: ReadonlyArray<ToolStatus>;
+	providers: ReadonlyArray<ProviderRow>;
+	memory?: MemoryStats;
+	agents: ReadonlyArray<AgentRow>;
+	/** Live turn signals - when set, the TOOLS section reflects the active
+	 *  turn (chat-truth) instead of the stale tools array. */
+	isProcessing?: boolean;
+	activeTool?: string | null;
+	toolsCompleted?: number;
+	/** Body-parts indicators: hands, eyes, handeyes. Optional - rail still
+	 *  renders without the BODY section when undefined, preserving callers
+	 *  that have not yet wired the useBodyParts hook. */
+	bodyParts?: BodyPartsRow;
+	/** The terminal's row count. When given, the LOOPS block takes whatever
+	 *  rows the sections above leave free; absent means no LOOPS block. */
+	height?: number;
+	/** Test seam: loop rows to show instead of reading the Control store. */
+	loopRows?: ReadonlyArray<LoopRow>;
+}
+
+/** Rows of the screen the rail does not own: header, tab strip, shell frame, footer (measured at 100x32). */
+export const RAIL_CHROME_ROWS = 9;
+
+/** Free rows left in the rail for the LOOPS block at a given terminal height. */
+export function railSpareRows(
+	height: number,
+	p: Pick<ActivityRailProps, "tasks" | "providers" | "agents" | "memory" | "bodyParts">,
+): number {
+	const tasks =
+		p.tasks.length === 0
+			? 1
+			: p.tasks.reduce(
+					(n, x) => n + taskLabelLines(x.label).length + (typeof x.progress === "number" ? 1 : 0),
+					0,
+				);
+	const asked = p.providers.filter((x) => x.asked).length;
+	const memory = hasMemoryRows(p.memory)
+		? 2 +
+			[p.memory.hits, p.memory.misses, p.memory.cache].filter((v) => v !== undefined && v !== "")
+				.length
+		: 0;
+	const used =
+		2 + // top padding and heading
+		(2 + tasks) +
+		(2 + 3) +
+		(2 + p.providers.length + asked) +
+		memory +
+		(2 + p.agents.length) +
+		(p.bodyParts ? 2 + 3 : 0);
+	return height - RAIL_CHROME_ROWS - used;
+}
+
+/**
+ * The route as the rail names it: the provider's registry id, then the
+ * model, e.g. `8gent eight-1.0-q3:14b` or `ollama qwen3.8:27b-mlx`.
+ *
+ * Rows arrive as `provider:model`. A registry id never contains a colon
+ * (pinned in the tests against `listProviders()`), so the first colon is
+ * the exact split and a model id's own colons stay with the model. The
+ * provider is shown as the registry names it, never translated into a
+ * tier word: a hand-kept keyword table is what drifted into `local` for
+ * every route and `route:available` for 8gent.
+ */
+export function providerDisplay(value: string): string {
+	const v = value.trim();
+	const cut = v.indexOf(":");
+	if (cut < 0) return v;
+	const provider = v.slice(0, cut);
+	const model = v.slice(cut + 1).trim();
+	return model ? `${provider} ${model}` : provider;
+}
+
+const TOOL_GLYPH: Record<ToolState, string> = {
+	idle: "○",
+	running: "◐",
+	ok: "●",
+	fail: "✕",
+};
+
+const TOOL_COLOR: Record<ToolState, string> = {
+	idle: t.muted,
+	running: t.teal,
+	ok: t.green,
+	fail: t.red,
+};
+
+const PROVIDER_COLOR: Record<ProviderState, string> = {
+	primary: t.green,
+	fallback: t.textSecondary,
+	offline: t.red,
+};
+
+// The route in use is filled; a standby route is a hollow ring, and says
+// what it is in words, so the two rows never differ by colour alone
+// (both can be the same provider, two lmstudio models say). A measured
+// latency takes the word's place.
+const PROVIDER_GLYPH: Record<ProviderState, string> = {
+	primary: "●",
+	fallback: "○",
+	offline: "✕",
+};
+
+const PROVIDER_ROLE: Record<ProviderState, string | undefined> = {
+	primary: undefined,
+	fallback: "fallback",
+	offline: "offline",
+};
+
+// Each state has its own glyph, so the rows never differ by colour alone (#3238).
+const AGENT_GLYPH: Record<AgentState, string> = {
+	idle: "○",
+	active: "●",
+	blocked: "■",
+};
+
+const AGENT_COLOR: Record<AgentState, string> = {
+	idle: t.muted,
+	active: t.green,
+	blocked: t.textPrimary,
+};
+
+// Body-parts taxonomy: hands (cliclick), eyes (AX bridge), handeyes
+// (engagement loop). Three observable states map to three glyphs in the
+// same visual family as the TOOLS section so a quick glance reads as a
+// uniform inspector, not a stylistic outlier.
+//
+//   disabled - outlined hollow ring, dim text
+//   idle     - filled bright ring, bright text (enabled, ready)
+//   inFlight - inverted/pulsed bullseye, teal accent (live tool call)
+const BODY_GLYPH: Record<BodyPartState, string> = {
+	disabled: "○",
+	idle: "●",
+	inFlight: "◉",
+};
+
+const BODY_COLOR: Record<BodyPartState, string> = {
+	disabled: t.muted,
+	idle: t.green,
+	inFlight: t.teal,
+};
+
+const BODY_PART_LABELS: ReadonlyArray<{ key: keyof BodyPartsRow; label: string }> = [
+	{ key: "hands", label: "hands" },
+	{ key: "eyes", label: "eyes" },
+	{ key: "handeyes", label: "handeyes" },
+];
+
+function hasMemoryRows(memory: MemoryStats | undefined): memory is MemoryStats {
+	if (!memory) return false;
+	return (
+		typeof memory.hits === "number" || typeof memory.misses === "number" || Boolean(memory.cache)
+	);
+}
+
+/** Inner text width of the rail: 34 less the left rule and the two padding cells. */
+const RAIL_TEXT_WIDTH = 30;
+
+/**
+ * A task label in at most two rows, broken at a space, the second row cut
+ * with an ellipsis only if it still does not fit. Two rows keep the
+ * subject readable (the first half alone often hides the verb's object);
+ * more would push the rail's lower sections out of a short terminal.
+ */
+export function taskLabelLines(label: string, width = RAIL_TEXT_WIDTH): string[] {
+	const text = label.trim().replace(/\s+/g, " ");
+	if (text.length <= width) return [text];
+	let cut = text.lastIndexOf(" ", width);
+	if (cut < Math.floor(width / 2)) cut = width;
+	const first = text.slice(0, cut).trimEnd();
+	const rest = text.slice(cut).trimStart();
+	if (rest.length <= width) return [first, rest];
+	return [first, `${rest.slice(0, width - 1).trimEnd()}…`];
+}
+
+function bar(percent: number, width = 12): string {
+	const filled = Math.max(0, Math.min(width, Math.round((percent / 100) * width)));
+	return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
+export function ActivityRail({
+	tasks,
+	tools,
+	providers,
+	memory,
+	agents,
+	isProcessing = false,
+	activeTool = null,
+	toolsCompleted,
+	bodyParts,
+	height,
+	loopRows,
+}: ActivityRailProps) {
+	return (
+		<Box
+			width={34}
+			flexShrink={0}
+			// One frame level (#3238): the shell is the box; the rail is set off
+			// by a single rule on its left, not a box inside the box.
+			borderStyle="single"
+			borderTop={false}
+			borderRight={false}
+			borderBottom={false}
+			borderColor={t.frame}
+			paddingX={1}
+			// The heading sits on the NOW strip's text row, not its top edge.
+			paddingTop={1}
+			flexDirection="column"
+			overflow="hidden"
+		>
+			<Box flexShrink={0}>
+				<Text color={t.heading} bold>
+					8GENT ACTIVITY
+				</Text>
+			</Box>
+
+			<RailSection title="TASKS">
+				{tasks.length === 0 ? (
+					<Box flexShrink={0}>
+						<Text color={t.muted}>no tasks</Text>
+					</Box>
+				) : (
+					tasks.map((task) => (
+						<Box key={task.id} flexDirection="column" flexShrink={0}>
+							<Text
+								color={
+									typeof task.progress === "number"
+										? t.textPrimary
+										: task.tone === "waiting"
+											? t.orange
+											: task.tone === "quiet"
+												? t.textSecondary
+												: t.teal
+								}
+								wrap="truncate-end"
+							>
+								{taskLabelLines(task.label).join("\n")}
+							</Text>
+							{typeof task.progress === "number" ? (
+								<Box width="100%" flexShrink={0} justifyContent="space-between">
+									<Text color={t.steel}>{bar(task.progress)}</Text>
+									<Text color={t.textSecondary}>{task.detail ?? `${task.progress}%`}</Text>
+								</Box>
+							) : null}
+						</Box>
+					))
+				)}
+			</RailSection>
+
+			<RailSection title="TOOLS">
+				{(() => {
+					// Live turn state (chat-truth) wins over the tools array: while
+					// a turn runs with no tool in flight the agent is reasoning,
+					// and once it ends nothing is active or queued.
+					const arrayActive = isProcessing
+						? (tools.find((tl) => tl.state === "running")?.name ?? null)
+						: null;
+					const active = isProcessing ? (activeTool ?? arrayActive ?? "reasoning") : null;
+					const done = toolsCompleted ?? tools.filter((tl) => tl.state === "ok").length;
+					const queued = queuedToolCount(tools, isProcessing);
+					return (
+						<>
+							<MetricRow
+								label="active"
+								value={active ?? "none"}
+								color={active ? t.teal : t.textTertiary}
+							/>
+							<MetricRow label="done" value={String(done)} color={t.textSecondary} />
+							<MetricRow
+								label="queued"
+								value={String(queued)}
+								color={queued > 0 ? t.textPrimary : t.textTertiary}
+							/>
+						</>
+					);
+				})()}
+			</RailSection>
+
+			<RailSection title="PROVIDERS">
+				{providers.map((provider) => (
+					<React.Fragment key={provider.name}>
+						<NamedRow
+							name={`${PROVIDER_GLYPH[provider.state]} ${providerDisplay(provider.name)}`}
+							color={PROVIDER_COLOR[provider.state]}
+							trailing={provider.latency ?? PROVIDER_ROLE[provider.state]}
+						/>
+						{provider.asked ? (
+							<NamedRow name={`  ${askedNote(provider.asked)}`} color={t.textTertiary} />
+						) : null}
+					</React.Fragment>
+				))}
+			</RailSection>
+
+			{hasMemoryRows(memory) ? (
+				<RailSection title="MEMORY">
+					{typeof memory.hits === "number" ? (
+						<MetricRow label="hits" value={String(memory.hits)} color={t.green} />
+					) : null}
+					{typeof memory.misses === "number" ? (
+						<MetricRow label="misses" value={String(memory.misses)} color={t.textSecondary} />
+					) : null}
+					{memory.cache ? (
+						<MetricRow label="cache" value={memory.cache} color={t.textSecondary} />
+					) : null}
+				</RailSection>
+			) : null}
+
+			<RailSection title="8GENTS">
+				{agents.map((agent) => (
+					<NamedRow
+						key={agent.name}
+						name={`${AGENT_GLYPH[agent.state]} ${agent.name}`}
+						color={AGENT_COLOR[agent.state]}
+					/>
+				))}
+			</RailSection>
+
+			{bodyParts ? (
+				<RailSection title="BODY">
+					{BODY_PART_LABELS.map(({ key, label }) => {
+						const state = bodyParts[key];
+						return (
+							<NamedRow
+								key={key}
+								name={`${BODY_GLYPH[state]} ${label}`}
+								color={BODY_COLOR[state]}
+							/>
+						);
+					})}
+				</RailSection>
+			) : null}
+
+			{height !== undefined ? (
+				<LoopsBlock
+					spare={railSpareRows(height, { tasks, providers, agents, memory, bodyParts })}
+					rows={loopRows}
+				/>
+			) : null}
+		</Box>
+	);
+}
+
+export type {
+	ActivityRailProps,
+	ActiveTask,
+	ToolStatus,
+	ToolState,
+	ProviderRow,
+	ProviderState,
+	MemoryStats,
+	AgentRow,
+	AgentState,
+	BodyPartState,
+	BodyPartsRow,
+};

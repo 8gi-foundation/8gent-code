@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>8gent — The Infinite Gentleman</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --text: #f5f5f5;
+      --accent: #2563eb;
+      --accent-glow: #3b82f6;
+      --muted: #6b7280;
+      --card: #141414;
+      --border: #262626;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+      height: 100vh;
+    }
+
+    .deck {
+      display: flex;
+      transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+      height: 100vh;
+    }
+
+    .slide {
+      min-width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 4rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .slide::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: radial-gradient(ellipse at 30% 20%, rgba(37, 99, 235, 0.08) 0%, transparent 50%),
+                  radial-gradient(ellipse at 70% 80%, rgba(59, 130, 246, 0.05) 0%, transparent 40%);
+      pointer-events: none;
+    }
+
+    .slide-content {
+      max-width: 1200px;
+      text-align: center;
+      z-index: 1;
+    }
+
+    h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: 5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 1rem;
+      background: linear-gradient(135deg, #fff 0%, #9ca3af 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    h2 {
+      font-family: 'Playfair Display', serif;
+      font-size: 3rem;
+      font-weight: 700;
+      margin-bottom: 2rem;
+    }
+
+    h3 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: var(--accent-glow);
+    }
+
+    p {
+      font-size: 1.25rem;
+      color: var(--muted);
+      line-height: 1.7;
+      max-width: 700px;
+      margin: 0 auto 2rem;
+    }
+
+    .tagline {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1rem;
+      color: var(--accent);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+    }
+
+    .highlight {
+      color: var(--accent-glow);
+      font-weight: 600;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2rem;
+      margin-top: 3rem;
+      max-width: 1000px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+      text-align: left;
+      transition: all 0.3s ease;
+    }
+
+    .card:hover {
+      border-color: var(--accent);
+      transform: translateY(-4px);
+      box-shadow: 0 20px 40px rgba(37, 99, 235, 0.1);
+    }
+
+    .card-icon {
+      font-size: 2rem;
+      margin-bottom: 1rem;
+    }
+
+    .card h4 {
+      font-size: 1.1rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .card p {
+      font-size: 0.9rem;
+      margin: 0;
+    }
+
+    .stats {
+      display: flex;
+      gap: 4rem;
+      margin-top: 3rem;
+    }
+
+    .stat {
+      text-align: center;
+    }
+
+    .stat-number {
+      font-family: 'Playfair Display', serif;
+      font-size: 4rem;
+      font-weight: 700;
+      color: var(--accent-glow);
+    }
+
+    .stat-label {
+      font-size: 0.9rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .code-block {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem 2rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      text-align: left;
+      margin: 1rem 0;
+      overflow-x: auto;
+    }
+
+    .code-block .keyword { color: #c792ea; }
+    .code-block .string { color: #c3e88d; }
+    .code-block .comment { color: #546e7a; }
+    .code-block .function { color: #82aaff; }
+
+    .nav {
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 0.5rem;
+      z-index: 100;
+    }
+
+    .nav-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .nav-dot.active {
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+    }
+
+    .progress {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 3px;
+      background: var(--accent);
+      transition: width 0.3s ease;
+      z-index: 100;
+    }
+
+    .logo {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      position: fixed;
+      top: 2rem;
+      left: 2rem;
+      z-index: 100;
+    }
+
+    .logo span {
+      color: var(--accent);
+    }
+
+    .cta {
+      display: inline-block;
+      background: var(--accent);
+      color: white;
+      padding: 1rem 2rem;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      margin-top: 1rem;
+      transition: all 0.3s ease;
+    }
+
+    .cta:hover {
+      background: var(--accent-glow);
+      box-shadow: 0 10px 30px rgba(37, 99, 235, 0.3);
+    }
+
+    .badge {
+      display: inline-block;
+      background: rgba(37, 99, 235, 0.1);
+      border: 1px solid var(--accent);
+      color: var(--accent-glow);
+      padding: 0.25rem 0.75rem;
+      border-radius: 100px;
+      font-size: 0.8rem;
+      margin: 0.25rem;
+    }
+
+    .badges {
+      margin-top: 1rem;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .slide-content > * {
+      animation: fadeIn 0.6s ease forwards;
+    }
+
+    .slide-content > *:nth-child(1) { animation-delay: 0.1s; }
+    .slide-content > *:nth-child(2) { animation-delay: 0.2s; }
+    .slide-content > *:nth-child(3) { animation-delay: 0.3s; }
+    .slide-content > *:nth-child(4) { animation-delay: 0.4s; }
+  </style>
+</head>
+<body>
+  <div class="progress" id="progress"></div>
+  <div class="logo">8<span>gent</span></div>
+  
+  <div class="deck" id="deck">
+    <!-- Slide 1: Title -->
+    <div class="slide">
+      <div class="slide-content">
+        <div class="tagline">Autonomous AI Coding Agent</div>
+        <h1>8gent</h1>
+        <p>The Infinite Gentleman — a sophisticated, local-first AI coding assistant that builds software autonomously</p>
+        <div class="badges">
+          <span class="badge">TypeScript</span>
+          <span class="badge">Local-First</span>
+          <span class="badge">42 Packages</span>
+          <span class="badge">Open Source</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 2: The Problem -->
+    <div class="slide">
+      <div class="slide-content">
+        <div class="tagline">The Challenge</div>
+        <h2>AI Dev Tools Are Broken</h2>
+        <div class="grid" style="grid-template-columns: repeat(2, 1fr); max-width: 800px;">
+          <div class="card">
+            <div class="card-icon">☁️</div>
+            <h4>Cloud Latency</h4>
+            <p>Every prompt → cloud → response = seconds of delay. Multiply by hundreds of iterations = hours wasted.</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">🔒</div>
+            <h4>Privacy Leakage</h4>
+            <p>Your proprietary code trains public models. Your secrets become training data.</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">💸</div>
+            <h4>Token Economics</h4>
+            <p>Open-ended agents burn cash. Every edit, every refactor, every test run = tokens.</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">📡</div>
+            <h4>Offline Impossible</h4>
+            <p>No internet? No coding. Air-gapped environments are non-starters.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 3: The Solution -->
+    <div class="slide">
+      <div class="slide-content">
+        <div class="tagline">The Answer</div>
+        <h2>Local-First Architecture</h2>
+        <p>8gent runs entirely on your machine. No cloud. No latency. No privacy fears.</p>
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-number">0ms</div>
+            <div class="stat-label">Latency</div>
+          </div>
+          <div class="stat">
+            <div class="stat-number">100%</div>
+            <div class="stat-label">Private</div>
+          </div>
+          <div class="stat">
+            <div class="stat-number">∞</div>
+            <div class="stat-label">Offline</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 4: Architecture -->
+    <div class="slide">
+      <div class="slide-content">
+        <div class="tagline">Under the Hood</div>
+        <h2>42 Packages. One Mission.</h2>
+        <div class="grid">
+          <div class="card">
+            <div class="card-icon">🧠</div>
+            <h4>Kernel + Orchestration</h4>
+            <p>Agent brain, task planning, multi-agent coordination</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">🔧</div>
+            <h4>Toolshed</h4>
+            <p>File ops, git, shell, LSP, web, media — 50+ tools</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">👁️</div>
+            <h4>Eyes + Hands</h4>
+            <p>Computer vision, desktop automation, screen perception</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">🎙️</div>
+            <h4>Voice</h4>
+            <p>TTS, STT, audio I/O for natural interaction</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">📡</div>
+            <h4>MCP Client</h4>
+            <p>Model Context Protocol for extensible integrations</p>
+          </div>
+          <div class="card">
+            <div class="card-icon">🛡️</div>
+            <h4>Permissions</h4>
+            <p>Granular security, auto-approval rules, audit logs</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 5: Code Example -->
+    <div class="slide">
+      <div class="slide-content">
+        <div class="tagline">How It Works</div>
+        <h2>Natural Language → Code</h2>
+        <div class="code-block">
+<span class="comment"># Tell 8gent what to build</span>
+<span class="keyword">$</span> 8gent: Build a REST API for a todo app
+
+<span class="comment"># 8gent autonomously:</span>
+<span class="function">→</span> Scaffolded project structure
+<span class="function">→</span> Wrote routes, models, validation
+<span class="function">→</span> Added tests & README
+<span class="function">→</span> Git commit with conventional messages
+
+<span class="string">✓ Done. 247 files changed in 4.2s</span>
+        </div>
+        <p style="margin-top: 2rem;">Zero boilerplate. Maximum velocity.</p>
+      </div>
+    </div>
+
+    <!-- Slide 6: Use Cases -->
+    <div class="slide">
+      <div class="slide-content">
+        <div class="tagline">What It Does</div>
+        <h2>Autonomous From Start to Finish</h2>
+        <div class="grid" style="grid-template-columns: repeat(2, 1fr); max-width: 800px;">
+          <div class="card">
+            <h4>🔨 Build Features</h4>
+            <p>Describe a feature in plain English. 8gent designs, implements, tests, and commits.</p>
+          </div>
+          <div class="card">
+            <h4>🐛 Debug Issues</h4>
+            <p>Paste an error. 8gent traces root cause, proposes fix, applies it.</p>
+          </div>
+          <div class="card">
+            <h4>📖 Write Docs</h4>
+            <p>Auto-generate READMEs, API docs, changelogs from code changes.</p>
+          </div>
+          <div class="card">
+            <h4>🚀 Deploy</h4>
+            <p>Build, test, containerize, and deploy to any cloud. Fully autonomous.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 7: CTA -->
+    <div class="slide">
+      <div class="slide-content">
+        <div class="tagline">Get Started</div>
+        <h1>Ship Faster.</h1>
+        <p>Local-first. Privacy-first. The infinite gentleman of coding agents.</p>
+        <a href="https://github.com/8gi-foundation/8gent-code" class="cta">View on GitHub →</a>
+        <p style="margin-top: 2rem; font-size: 0.9rem;">MIT Licensed · 100% Open Source</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="nav" id="nav"></div>
+
+  <script>
+    const deck = document.getElementById('deck');
+    const progress = document.getElementById('progress');
+    const nav = document.getElementById('nav');
+    const totalSlides = document.querySelectorAll('.slide').length;
+    let currentSlide = 0;
+
+    // Create nav dots
+    for (let i = 0; i < totalSlides; i++) {
+      const dot = document.createElement('div');
+      dot.className = 'nav-dot' + (i === 0 ? ' active' : '');
+      dot.onclick = () => goToSlide(i);
+      nav.appendChild(dot);
+    }
+
+    function updateSlide() {
+      deck.style.transform = `translateX(-${currentSlide * 100}vw)`;
+      progress.style.width = `${((currentSlide + 1) / totalSlides) * 100}%`;
+      document.querySelectorAll('.nav-dot').forEach((dot, i) => {
+        dot.classList.toggle('active', i === currentSlide);
+      });
+    }
+
+    function goToSlide(index) {
+      currentSlide = Math.max(0, Math.min(index, totalSlides - 1));
+      updateSlide();
+    }
+
+    function nextSlide() {
+      if (currentSlide < totalSlides - 1) {
+        currentSlide++;
+        updateSlide();
+      }
+    }
+
+    function prevSlide() {
+      if (currentSlide > 0) {
+        currentSlide--;
+        updateSlide();
+      }
+    }
+
+    // Keyboard navigation
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ') nextSlide();
+      if (e.key === 'ArrowLeft') prevSlide();
+    });
+
+    // Touch navigation
+    let touchStartX = 0;
+    document.addEventListener('touchstart', (e) => {
+      touchStartX = e.touches[0].clientX;
+    });
+    document.addEventListener('touchend', (e) => {
+      const diff = touchStartX - e.changedTouches[0].clientX;
+      if (Math.abs(diff) > 50) {
+        diff > 0 ? nextSlide() : prevSlide();
+      }
+    });
+  </script>
+</body>
+</html>

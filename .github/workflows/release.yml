@@ -1,0 +1,381 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      # #4700: repair the npm channel for a tag that already shipped on GitHub.
+      # Dispatch on main with this set and only the npm-from-release job runs:
+      # it publishes that release's own tarball after checking SHA256SUMS.
+      npm_only_tag:
+        description: 'existing vX.Y.Z tag whose GitHub Release tarball should be published to npm (run from main); empty = a normal release run on the dispatched tag'
+        required: false
+        type: string
+        default: ''
+
+# The primary install is our own: scripts/install.sh, scripts/install.ps1 and
+# the binaries on the GitHub Release. npm is an optional extra channel: when
+# npm auth works the package is published there too, and when it does not the
+# release still ships (#3981).
+permissions: {}
+
+jobs:
+  release:
+    name: Release to GitHub + npm
+    if: ${{ !inputs.npm_only_tag }}
+    runs-on: ubuntu-latest
+    # contents: write creates the draft release. id-token: write is only for
+    # the optional npm publish (trusted publishing with provenance); this is
+    # the only job that holds it.
+    permissions:
+      contents: write
+      id-token: write
+    outputs:
+      # skipped | published | failed; read by the alarm job below.
+      npm: ${{ steps.npm.outputs.npm }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+
+      - name: Setup Node (for npm publish)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing needs npm 11.5.1 or newer; pinned to one exact version.
+      - name: npm (pinned)
+        run: |
+          npm install -g npm@11.6.2
+          test "$(npm --version)" = "11.6.2"
+
+      # Fail before anything is built if the tag or version is wrong. Then
+      # decide whether the optional npm channel can publish: trusted publishing
+      # (npmjs.com lists release.yml as a trusted publisher; checked with the
+      # same OIDC exchange npm does, the short-lived token is discarded) or the
+      # NPM_TOKEN secret. If neither works the release goes ahead without npm.
+      - name: Preflight (tag ref, version, optional npm channel)
+        id: preflight
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACK_SMOKE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY }}
+        run: |
+          # PACK_SMOKE_OWNER_IDENTITY (#3283) adds identities to the pack smoke's
+          # scan. It is optional: the scan always covers every commit author in
+          # the full-depth checkout, which is where the v0.18.0 leak came from.
+          # The repository has no such secret today, and a hard failure here
+          # would stop the GitHub Release and the installers for nothing (#3658).
+          if [ -z "${PACK_SMOKE_OWNER_IDENTITY}" ]; then
+            echo "::warning::PACK_SMOKE_OWNER_IDENTITY is not set (Settings, Secrets and variables, Actions). The pack smoke scans the bundle for commit authors only; set the secret to add more names or emails."
+          fi
+          if ! [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release.yml publishes from a vX.Y.Z tag only, not ${GITHUB_REF}"
+            exit 1
+          fi
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "v${PKG}" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::package.json is ${PKG} but the tag is ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          OIDC=0
+          ID_TOKEN="$(curl -fsS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).value||"")}catch{}})' || true)"
+          if [ -n "$ID_TOKEN" ]; then
+            CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer ${ID_TOKEN}" \
+              "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@8gi-foundation%2f8gent-code" || true)"
+            if [ "${CODE:0:1}" = "2" ]; then OIDC=1; fi
+          fi
+          NPM=1
+          if [ "$OIDC" = 1 ]; then
+            echo "optional npm channel: publishes through trusted publishing (OIDC, with provenance)"
+          elif [ -n "${NODE_AUTH_TOKEN}" ] && NPM_USER="$(npm whoami 2>/dev/null)"; then
+            echo "optional npm channel: publishes as ${NPM_USER} (NPM_TOKEN)"
+          else
+            NPM=0
+            echo "::notice::npm channel skipped for ${GITHUB_REF_NAME}: no trusted publisher and no working NPM_TOKEN. The GitHub Release and the installers are unaffected."
+          fi
+          echo "npm=${NPM}" >> "$GITHUB_OUTPUT"
+
+      # The npm build only bundles JavaScript, so no dependency install script
+      # needs to run here.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Build
+        run: bun run build
+
+      - name: Verify build
+        run: |
+          test -f dist/cli.js || (echo "Build failed" && exit 1)
+          head -1 dist/cli.js | grep -qxF "#!/usr/bin/env -S bun --no-env-file --config=/dev/null" || (echo "Safe shebang missing (#4013)" && exit 1)
+          echo "Build OK"
+
+      # #4660: the Node TUI must render coloured text at every colour level. Runs after the build
+      # because it needs dist/node/tui.js; EIGHT_REQUIRE_NODE_BUNDLE makes a missing bundle or Node a failure.
+      - name: Node bundle colours (FORCE_COLOR 0-3)
+        env:
+          EIGHT_REQUIRE_NODE_BUNDLE: "1"
+        run: bun test packages/node-compat/node-bundle.test.ts
+
+      # #3219: never publish a tarball that has not been installed and run
+      # somewhere other than the build checkout.
+      - name: npm pack-and-install smoke
+        run: bun scripts/pack-smoke.ts --skip-build
+        env:
+          # Comma-separated owner names/emails the bundle must never contain,
+          # on top of every commit author. Held in a repository secret, never
+          # in the repo; required by the smoke only when it is set.
+          PACK_SMOKE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY }}
+          PACK_SMOKE_REQUIRE_OWNER_IDENTITY: ${{ secrets.PACK_SMOKE_OWNER_IDENTITY != '' && '1' || '0' }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      # #3575: the release notes are the CHANGELOG.md section built from the
+      # merged PR titles since the previous tag. PR titles are untrusted text:
+      # they only ever reach a file, never the shell source or a ${{ }} body.
+      - name: Generate release notes
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Notes are cosmetic: a failure here must never block the npm publish.
+          if ! bun scripts/changelog-release.ts --version "$VERSION" --to "$TAG" --out section.md; then
+            echo "::warning::changelog-release failed; the release body points at CHANGELOG.md only."
+            printf '## v%s\n\nSee CHANGELOG.md.\n' "$VERSION" > section.md
+          fi
+          if ! grep -qF "## [$VERSION]" CHANGELOG.md; then
+            echo "::warning::CHANGELOG.md on $TAG has no [$VERSION] section. Run 'bun scripts/changelog-release.ts --version $VERSION --write' in the release PR."
+          fi
+          {
+            printf '## 8gent Code v%s\n\n' "$VERSION"
+            printf 'Install on Windows (PowerShell): `irm https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.ps1 | iex`\n\n'
+            printf 'Install on macOS or Linux: `curl -fsSL https://raw.githubusercontent.com/8gi-foundation/8gent-code/main/scripts/install.sh | sh`\n\n'
+            printf 'Or with npm: `npm install -g @8gi-foundation/8gent-code`\n\n'
+            tail -n +3 section.md
+            printf '\n---\nFull changelog: [CHANGELOG.md](https://github.com/8gi-foundation/8gent-code/blob/main/CHANGELOG.md)\n'
+          } > release_notes.md
+          cat release_notes.md
+
+      # #3326: the release carries the npm tarball and SHA256SUMS, and stays a
+      # draft until npm has the package and release-guard has confirmed the
+      # assets are on GitHub. A draft is never "latest", so a failure anywhere
+      # below leaves nothing empty or half-shipped where installers look.
+      # CI runs the same `release-guard.sh pack` on every pull request.
+      - name: Stage release assets (npm tarball + SHA256SUMS)
+        run: |
+          bash scripts/release-guard.sh pack release-assets > release-asset-count
+          ls -la release-assets
+          cat release-assets/SHA256SUMS
+
+      - name: Create draft GitHub Release with assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # A re-run finds the draft from the failed run and replaces its files.
+          # A release that is already public is never touched (#3981).
+          bash scripts/release-require-draft.sh "$TAG" --allow-missing
+          if gh release view "$TAG" --json isDraft >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* --draft --verify-tag \
+              --title "$TAG" --notes-file release_notes.md
+          fi
+
+      - name: Publish to npm (optional channel)
+        id: npm_publish
+        if: steps.preflight.outputs.npm == '1'
+        # npm is a choice, not a requirement: a failure here is reported but
+        # never holds back the GitHub Release or the installers.
+        continue-on-error: true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # A re-run after a later step failed must not die on "cannot publish
+          # over the previously published version".
+          if [ "$(npm view "@8gi-foundation/8gent-code@${VERSION}" version 2>/dev/null)" = "$VERSION" ]; then
+            echo "@8gi-foundation/8gent-code@${VERSION} is already on npm; not publishing again"
+          else
+            # The exact tarball staged and checksummed above, so npm and the
+            # GitHub Release carry the same bytes (no second prepublishOnly build).
+            # #4700: an absolute path. npm reads a bare `release-assets/<file>`
+            # as a GitHub owner/repo shorthand and runs git ls-remote on it.
+            TGZ="${GITHUB_WORKSPACE}/release-assets/8gi-foundation-8gent-code-${VERSION}.tgz"
+            test -f "$TGZ" || { echo "::error::staged tarball ${TGZ} is missing"; exit 1; }
+            npm publish "$TGZ" --access public --provenance
+          fi
+
+      # When npm was published, confirm its latest tag moved to this release.
+      - name: npm latest is this version (optional channel)
+        id: npm_latest
+        if: steps.preflight.outputs.npm == '1'
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          LATEST=""
+          for i in $(seq 1 20); do
+            LATEST="$(npm view @8gi-foundation/8gent-code dist-tags.latest 2>/dev/null || true)"
+            if [ "$LATEST" = "$VERSION" ]; then echo "npm latest is ${VERSION}"; exit 0; fi
+            sleep 15
+          done
+          echo "::warning::npm dist-tag latest is '${LATEST}', not ${VERSION}"
+          exit 1
+
+      # The npm channel's result, for the alarm job: `8gent update` on the npm
+      # channel only ever sees dist-tag latest, so a skipped or failed publish
+      # leaves every npm user on the previous version. That must open an issue,
+      # not sit as a notice in a green run (#3658: silent for a week).
+      - name: npm channel outcome
+        id: npm
+        env:
+          PREFLIGHT: ${{ steps.preflight.outputs.npm }}
+          PUBLISH: ${{ steps.npm_publish.outcome }}
+          LATEST: ${{ steps.npm_latest.outcome }}
+        run: |
+          if [ "$PREFLIGHT" != "1" ]; then
+            RESULT=skipped
+          elif [ "$PUBLISH" = "success" ] && [ "$LATEST" = "success" ]; then
+            RESULT=published
+          else
+            RESULT=failed
+          fi
+          echo "npm=${RESULT}" >> "$GITHUB_OUTPUT"
+          echo "npm channel: ${RESULT}"
+
+      # #3803: this job no longer publishes the release. v0.18.1 and v0.19.0
+      # went public with only an npm tarball and no Windows .exe because
+      # publishing here did not wait for release-binaries.yml. The release
+      # stays a draft; the "Attach to GitHub Release" job in release-binaries.yml
+      # publishes it once the installers (including the Windows .exe) and this
+      # job's tarball are all on it.
+      - name: Leave the release as a draft for the installers
+        run: echo "release stays a draft until release-binaries.yml attaches the installers and publishes it"
+
+      # #4700: npm auth was there and the publish still failed. That is a red
+      # run, not a green one with a notice. It comes after the draft release
+      # exists, so release-binaries.yml still attaches the installers. No auth
+      # at all stays "skipped" and green.
+      - name: Fail when npm had auth and did not publish
+        if: steps.npm.outputs.npm == 'failed'
+        run: |
+          echo "::error::npm publish failed with npm auth available. Fix it, then run release.yml from main with npm_only_tag=${GITHUB_REF_NAME} to publish this release's tarball."
+          exit 1
+
+  # #4700: publish an already-released tag's tarball to npm, without a new tag
+  # and without rebuilding. Dispatched from main only, so the reviewed workflow
+  # on main is what holds id-token. Runs no repository or dependency code: it
+  # downloads the GitHub Release's tarball and SHA256SUMS, checks both, and
+  # publishes those bytes, so npm carries exactly what the release carries.
+  npm-from-release:
+    name: Publish an existing release tarball to npm
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.npm_only_tag != '' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Setup Node (for npm publish)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: npm (pinned)
+        run: |
+          npm install -g npm@11.6.2
+          test "$(npm --version)" = "11.6.2"
+
+      - name: Download, verify and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.npm_only_tag }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::npm_only_tag must be vX.Y.Z, got '${TAG}'"; exit 1
+          fi
+          VERSION="${TAG#v}"
+          PKG="@8gi-foundation/8gent-code"
+          NAME="8gi-foundation-8gent-code-${VERSION}.tgz"
+          if [ "$(npm view "${PKG}@${VERSION}" version 2>/dev/null || true)" = "$VERSION" ]; then
+            echo "${PKG}@${VERSION} is already on npm; nothing to do"; exit 0
+          fi
+          # Publishing an older version would move dist-tag latest backwards.
+          # An empty answer is a registry error, not "no latest": the package
+          # exists, so fail closed rather than skip the backwards check.
+          LATEST="$(npm view "$PKG" dist-tags.latest 2>/dev/null || true)"
+          if ! [[ "$LATEST" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::could not read npm dist-tag latest for ${PKG} (got '${LATEST}'); not publishing"; exit 1
+          fi
+          if [ "$(printf '%s\n%s\n' "$LATEST" "$VERSION" | sort -V | tail -1)" != "$VERSION" ]; then
+            echo "::error::npm latest is ${LATEST}, newer than ${VERSION}; not publishing over it"; exit 1
+          fi
+          DIR="${RUNNER_TEMP}/npm-from-release"
+          mkdir -p "$DIR"
+          gh release download "$TAG" --repo "$REPO" --dir "$DIR" --pattern "$NAME" --pattern SHA256SUMS
+          # The release's SHA256SUMS line for this tarball, and nothing else.
+          awk -v n="$NAME" '$2 == n || $2 == "*" n' "$DIR/SHA256SUMS" > "$DIR/want"
+          test "$(wc -l < "$DIR/want")" = 1 || { echo "::error::SHA256SUMS on ${TAG} has no single line for ${NAME}"; exit 1; }
+          (cd "$DIR" && sha256sum -c want)
+          GOT="$(tar -xOzf "$DIR/$NAME" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s);process.stdout.write(p.name+"@"+p.version)})')"
+          test "$GOT" = "${PKG}@${VERSION}" || { echo "::error::tarball is ${GOT}, expected ${PKG}@${VERSION}"; exit 1; }
+          # Absolute path: a bare dir/file argument is a GitHub shorthand to npm.
+          npm publish "$DIR/$NAME" --access public --provenance
+          for i in $(seq 1 20); do
+            [ "$(npm view "$PKG" dist-tags.latest 2>/dev/null || true)" = "$VERSION" ] && { echo "npm latest is ${VERSION}"; exit 0; }
+            sleep 15
+          done
+          echo "::error::published ${VERSION} but npm dist-tag latest did not move to it"; exit 1
+
+  # A failed release used to be invisible for a week (#3658). Any failure
+  # above opens (or comments on) one P0 issue, so it lands where people look.
+  # The same goes for the npm channel: npm latest sat at 0.17.0 from May to
+  # October while the GitHub side moved on, and `8gent update` on npm never
+  # saw a newer version. A release that ships without npm is a green run with
+  # an issue, never a green run and silence.
+  alarm:
+    name: Open an issue when the release fails
+    needs: release
+    if: >-
+      !cancelled() && startsWith(github.ref, 'refs/tags/v') &&
+      (needs.release.result == 'failure' ||
+       (needs.release.result == 'success' && needs.release.outputs.npm != 'published'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Open or update the release-failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+          NPM: ${{ needs.release.outputs.npm }}
+        run: |
+          # A failed npm channel now fails the job too (#4700); it keeps its own text.
+          if [ "$RELEASE_RESULT" = "failure" ] && [ "$NPM" != "failed" ]; then
+            bash scripts/release-alarm.sh "release.yml" "$REF" "$RUN_URL"
+          else
+            bash scripts/release-alarm.sh "release.yml npm channel" "$REF" "$RUN_URL" \
+              "The GitHub Release and the installers shipped, but the npm publish was ${NPM}: npm dist-tag latest did not move to ${REF}, so \`npm install -g @8gi-foundation/8gent-code\` and \`8gent update\` on the npm channel keep serving the previous version. Fix the npm channel (a trusted publisher for release.yml on npmjs.com, or a working NPM_TOKEN secret) so the next release publishes; to publish ${REF} itself, run release.yml from main with npm_only_tag=${REF} (it publishes the GitHub Release's own tarball after checking SHA256SUMS), so npm carries the same bytes as the release."
+          fi

@@ -1,0 +1,245 @@
+/**
+ * PlanRail - always-visible living plan in the right rail.
+ *
+ * Two exports:
+ *  - `PlanRail`     : pure presentation. Receives the task array as a prop.
+ *                     Matches ActivityRail pattern, fully unit
+ *                     testable by calling the component as a function.
+ *  - `LivePlanRail` : wrapper that subscribes to a TaskManager EventEmitter
+ *                     and re-renders on every task mutation. App-side mount
+ *                     uses this; tests target the pure component.
+ *
+ * Symmetry with /goal: the autonomous loop has its own state machine +
+ * ledger + LiveFocalStripWithGoal overlay. The conversational agent
+ * uses the task system + this rail. Same shape (a persistent journey
+ * with status), different surface.
+ *
+ * BRAND.md: orange for in-progress, teal for completed-today, muted for
+ * pending. Zero purple/pink/violet. No vendor-name copy.
+ */
+
+import { Box, Text } from "ink";
+import type React from "react";
+import { useEffect, useState } from "react";
+import type { Task, TaskManager } from "../../../../packages/tasks/index.js";
+import { t } from "../theme.js";
+
+// ─── Pure presentation ─────────────────────────────────────────────────────
+
+export interface PlanRailProps {
+	tasks: ReadonlyArray<Task>;
+	limit?: number;
+	compact?: boolean;
+	visible?: boolean;
+}
+
+const STATUS_ICON: Record<Task["status"], string> = {
+	pending: "○",
+	in_progress: "●",
+	completed: "✓",
+	blocked: "!",
+	cancelled: "✗",
+};
+
+function statusColor(status: Task["status"]): string {
+	switch (status) {
+		case "in_progress":
+			return t.orange;
+		case "completed":
+			return t.teal;
+		case "blocked":
+			return t.red;
+		case "cancelled":
+			return t.textTertiary;
+		default:
+			return t.textTertiary;
+	}
+}
+
+const STATUS_RANK: Record<Task["status"], number> = {
+	in_progress: 0,
+	pending: 1,
+	blocked: 2,
+	completed: 3,
+	cancelled: 4,
+};
+
+function planOrder(a: Task, b: Task): number {
+	const r = STATUS_RANK[a.status] - STATUS_RANK[b.status];
+	if (r !== 0) return r;
+	return b.updatedAt.localeCompare(a.updatedAt);
+}
+
+function isStaleCompleted(task: Task): boolean {
+	if (task.status !== "completed") return false;
+	if (!task.completedAt) return false;
+	const ageMs = Date.now() - new Date(task.completedAt).getTime();
+	return ageMs > 24 * 60 * 60 * 1000;
+}
+
+/** Non-zero status buckets, each a whole cell so a wrap never splits a phrase. */
+function countCells(tasks: ReadonlyArray<Task>): Array<[number, string]> {
+	let inProgress = 0;
+	let pending = 0;
+	let blocked = 0;
+	let completedToday = 0;
+	const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+	for (const task of tasks) {
+		if (task.status === "in_progress") inProgress += 1;
+		else if (task.status === "pending") pending += 1;
+		else if (task.status === "blocked") blocked += 1;
+		else if (task.status === "completed" && task.completedAt) {
+			if (new Date(task.completedAt).getTime() >= dayAgo) completedToday += 1;
+		}
+	}
+	const cells: Array<[number, string]> = [
+		[inProgress, "doing"],
+		[pending, "next"],
+		[blocked, "blocked"],
+		[completedToday, "done today"],
+	];
+	return cells.filter(([n]) => n > 0);
+}
+
+/** Rows the task being worked on may take; the rest of the list keeps one row each. */
+const ACTIVE_ROWS = 3;
+
+/** Greedy word wrap to `width` cells, at most `rows` rows, the last ending in an ellipsis if cut. */
+export function wrapSubject(subject: string, width: number, rows: number): string[] {
+	const lines: string[] = [];
+	let line = "";
+	for (const word of subject.split(/\s+/).filter(Boolean)) {
+		const w = word.length > width ? `${word.slice(0, width - 1)}…` : word;
+		if (line && line.length + 1 + w.length > width) {
+			lines.push(line);
+			line = w;
+		} else {
+			line = line ? `${line} ${w}` : w;
+		}
+	}
+	if (line) lines.push(line);
+	if (lines.length <= rows) return lines;
+	const kept = lines.slice(0, rows);
+	const last = kept[rows - 1];
+	kept[rows - 1] = `${last.length >= width ? last.slice(0, width - 1) : last}…`;
+	return kept;
+}
+
+export function PlanRail({
+	tasks,
+	limit = 8,
+	compact = false,
+	visible = true,
+}: PlanRailProps): React.ReactElement | null {
+	if (!visible) return null;
+
+	const ranked = [...tasks].sort(planOrder).slice(0, limit);
+
+	return (
+		<Box flexDirection="column" width={compact ? 18 : 24} flexShrink={0} paddingX={1}>
+			<Text color={t.heading} bold>
+				PLAN
+			</Text>
+			<Box marginTop={1} flexDirection="column">
+				{ranked.length === 0 ? (
+					<Text color={t.textTertiary}>(no tasks yet)</Text>
+				) : (
+					ranked.map((task) => {
+						const icon = STATUS_ICON[task.status];
+						const color = statusColor(task.status);
+						const subjectMax = compact ? 14 : 20;
+						const subject =
+							task.subject.length > subjectMax
+								? `${task.subject.slice(0, subjectMax - 1)}…`
+								: task.subject;
+						const dim = isStaleCompleted(task);
+						if (task.status === "in_progress") {
+							const lines = wrapSubject(task.subject, subjectMax, ACTIVE_ROWS);
+							return (
+								<Box key={task.id} flexShrink={0}>
+									<Box width={2} flexShrink={0}>
+										<Text color={color}>{icon} </Text>
+									</Box>
+									<Box flexDirection="column">
+										{lines.map((l) => (
+											<Text key={l} color={t.textPrimary}>
+												{l}
+											</Text>
+										))}
+									</Box>
+								</Box>
+							);
+						}
+						return (
+							<Box key={task.id}>
+								<Text color={color}>{icon} </Text>
+								<Text color={dim ? t.textTertiary : t.textPrimary}>{subject}</Text>
+							</Box>
+						);
+					})
+				)}
+			</Box>
+			{ranked.length > 0 ? (
+				<Box marginTop={1} flexWrap="wrap" columnGap={1}>
+					{countCells(tasks).map(([n, word]) => (
+						<Text key={word} color={t.textTertiary}>
+							<Text color={t.textPrimary}>{n}</Text> {word}
+						</Text>
+					))}
+				</Box>
+			) : null}
+		</Box>
+	);
+}
+
+// ─── Live wrapper (mount this from app.tsx) ────────────────────────────────
+
+export interface LivePlanRailProps {
+	manager: TaskManager;
+	limit?: number;
+	compact?: boolean;
+	visible?: boolean;
+}
+
+/** Tasks in a TaskManager, re-read on every task mutation. */
+export function useManagerTasks(manager: TaskManager): ReadonlyArray<Task> {
+	const [tasks, setTasks] = useState<ReadonlyArray<Task>>(() => snapshot(manager));
+
+	useEffect(() => {
+		const onChange = (): void => setTasks(snapshot(manager));
+		manager.on("task:created", onChange);
+		manager.on("task:updated", onChange);
+		manager.on("task:completed", onChange);
+		manager.on("task:blocked", onChange);
+		manager.on("task:unblocked", onChange);
+		manager.on("task:deleted", onChange);
+		return () => {
+			manager.off("task:created", onChange);
+			manager.off("task:updated", onChange);
+			manager.off("task:completed", onChange);
+			manager.off("task:blocked", onChange);
+			manager.off("task:unblocked", onChange);
+			manager.off("task:deleted", onChange);
+		};
+	}, [manager]);
+
+	return tasks;
+}
+
+export function LivePlanRail({
+	manager,
+	limit,
+	compact,
+	visible,
+}: LivePlanRailProps): React.ReactElement | null {
+	const tasks = useManagerTasks(manager);
+	return <PlanRail tasks={tasks} limit={limit} compact={compact} visible={visible} />;
+}
+
+function snapshot(manager: TaskManager): Task[] {
+	try {
+		return manager.listTasks();
+	} catch {
+		return [];
+	}
+}

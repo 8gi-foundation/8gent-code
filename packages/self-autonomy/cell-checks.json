@@ -1,0 +1,11 @@
+{
+	"_comment": "The frozen check suite of a vessel cell (selfimprove.ts). Each check is a name and a command run in a scratch copy of the genome; exit 0 passes. A cell records the hash of this list at its first round and refuses to run if it changes. Replace the cell to change it.",
+	"checks": [
+		{ "name": "decide-rules", "cmd": ["bun", "test", "packages/decide/rules.test.ts"] },
+		{ "name": "guard-bypass", "cmd": ["bun", "test", "packages/decide/guard-bypass.test.ts"] },
+		{ "name": "judge-calibration", "cmd": ["bun", "test", "packages/decide/calibrate.test.ts"] },
+		{ "name": "allowlist", "cmd": ["bun", "test", "packages/decide/allowlist.test.ts"] },
+		{ "name": "routines-catchup", "cmd": ["bun", "test", "packages/cron/catchup.test.ts"] },
+		{ "name": "routines-store", "cmd": ["bun", "test", "packages/cron/routines-store.test.ts"] }
+	]
+}

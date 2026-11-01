@@ -1,0 +1,130 @@
+name: Platforms
+
+# ci.yml gates Linux on every PR. This workflow proves the same repo installs,
+# tests, builds and runs on Windows too, and that the compiled binary for each
+# host actually starts. The repo is private, so it runs on GitHub-hosted
+# minutes: Windows bills at 2x, which is why macOS is left to the helm runner.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: platforms-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  platform:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary: 8gent-linux-x64
+          - os: windows-latest
+            binary: 8gent-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          # Pinned to what windows-task.yml uses; `latest` moved to 1.4.3, which segfaults mid-run
+          # on windows-latest (#3820). Sharding below is the mitigation, not a fix for the crash.
+          bun-version: 1.4.3
+
+      - name: Checkout has LF line endings
+        run: |
+          bad=$(git ls-files --eol | awk '$2 ~ /crlf/ {print $NF}')
+          if [ -n "$bad" ]; then echo "::error::CRLF in working tree:"; echo "$bad"; exit 1; fi
+          echo "LF OK"
+
+      # #4143: same node-gyp pin and node-pty preflight as ci.yml Validate, so the
+      # bunx node-gyp@latest race cannot turn this leg red on an unrelated PR.
+      - name: "Pin node-gyp for native builds"
+        if: runner.os == 'Linux'
+        run: npm install -g --no-fund --no-audit node-gyp@12.4.0 && node-gyp --version
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: "Preflight native deps (node-pty)"
+        if: runner.os == 'Linux'
+        run: bun run preflight:native
+
+      # The locate tool shells out to ripgrep, which neither hosted image ships (#3287).
+      - name: Install ripgrep
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then choco install ripgrep -y --no-progress; else sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep; fi
+          rg --version
+
+      # Windows runs the suite as four shorter processes: Bun 1.4.x segfaults about
+      # ten minutes into a single one and the rest of the results are lost (#3820).
+      - name: Test
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then bash scripts/test-sharded.sh 4; else bun run test; fi
+
+      # Installs the real login service (Scheduled Task on Windows, systemd
+      # --user on Linux), checks the daemon answers /health, then removes it.
+      # The test file skips itself anywhere but a GitHub-hosted runner, so the
+      # grep makes a silent skip fail the step.
+      - name: Daemon login service, real install
+        env:
+          EIGHT_SERVICE_E2E: installed
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo loginctl enable-linger "$USER"
+            export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+            for _ in $(seq 1 30); do systemctl --user show-environment >/dev/null 2>&1 && break; sleep 1; done
+          fi
+          bun test packages/daemon/service.e2e.test.ts 2>&1 | tee service-e2e.log
+          grep -q " 1 pass" service-e2e.log
+
+      - name: Daemon login service, no systemd user manager
+        if: runner.os == 'Linux'
+        env:
+          EIGHT_SERVICE_E2E: unavailable
+        run: |
+          XDG_RUNTIME_DIR=/nonexistent env -u DBUS_SESSION_BUS_ADDRESS bun test packages/daemon/service.e2e.test.ts 2>&1 | tee service-e2e.log
+          grep -q " 1 pass" service-e2e.log
+
+      - name: CLI runs from source
+        run: bun run bin/8gent.ts --version | grep "8gent Code v"
+
+      - name: Build bundled CLI
+        run: |
+          bun run build
+          bun dist/cli.js --version | grep "8gent Code v"
+
+      - name: Compile host binary
+        run: bun run build:binaries:host
+
+      - name: Compiled binary smoke
+        run: bash scripts/smoke-compiled.sh "dist/bin/${{ matrix.binary }}"
+
+      # PowerShell sets USERPROFILE but not HOME. Git Bash hides that, so run
+      # the binary the way a Windows user does and check where state lands.
+      - name: Compiled binary under PowerShell, no HOME
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Remove-Item Env:HOME -ErrorAction SilentlyContinue
+          $bin = Resolve-Path "dist/bin/${{ matrix.binary }}"
+          & $bin --version
+          if ($LASTEXITCODE -ne 0) { throw "--version exited $LASTEXITCODE" }
+          $out = & $bin memory remember "pwsh-smoke-marker" 2>&1 | Out-String
+          if ($out -notmatch "Remembered") { throw "memory remember failed: $out" }
+          $out = & $bin memory recall pwsh-smoke 2>&1 | Out-String
+          if ($out -notmatch "pwsh-smoke-marker") { throw "memory recall failed: $out" }
+          $state = Join-Path $env:USERPROFILE ".8gent"
+          if (-not (Test-Path $state)) { throw "state dir not under USERPROFILE: $state" }
+          if (Test-Path (Join-Path (Get-Location) "~")) { throw "state leaked into a literal ~ directory" }
+          Write-Host "state dir: $state"

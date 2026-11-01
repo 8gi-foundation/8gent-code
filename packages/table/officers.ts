@@ -1,0 +1,379 @@
+/**
+ * 8gent Table - the 8GI officer roster.
+ *
+ * Eight officers, each PINNED to a specific on-box (sovereign) inference
+ * backend. Every backend here is local: nothing in this file routes a Table
+ * officer to a cloud endpoint (that is enforced separately by the F4 gate in
+ * packages/daemon/agent-pool.ts, which downgrades any cloud runtime for a
+ * Table session). The eight are distributed evenly across the four live local
+ * backends, two officers each, so no single backend carries the whole table.
+ *
+ * A roster entry is pure data: `{ code, name, role, provider, model, baseUrl,
+ * systemPrompt }`. A caller turns one into a running Table session by handing
+ * the routing fields to `AgentPool.createSession(sid, "table", { runtime,
+ * model, baseUrl, systemPrompt, agentScope: "__table__" })`.
+ *
+ * ── baseUrl conventions (IMPORTANT - each client appends its own path) ──
+ * The `baseUrl` shape differs by provider because each LLM client appends a
+ * different suffix (see packages/eight/clients/*):
+ *   - ollama   : host only, no path      e.g. "http://127.0.0.1:11434"
+ *                (OllamaClient appends "/api/chat")
+ *   - lmstudio : host only, NO "/v1"     e.g. "http://127.0.0.1:1234"
+ *                (LMStudioClient appends "/v1/chat/completions")
+ *   - apfel    : host + "/v1"            e.g. "http://127.0.0.1:11435/v1"
+ *                (ApfelClient appends "/chat/completions")
+ * Getting this wrong double-suffixes the URL, so the values below are
+ * deliberate. apple-foundation is not used here (it is a subprocess bridge
+ * with no URL); the two "apfel" officers use the OpenAI-compatible apfel
+ * server that fronts the same Apple Foundation model over HTTP.
+ */
+
+/** On-box provider/runtime an officer is pinned to. All are local. */
+export type OfficerProvider = "apfel" | "ollama" | "lmstudio";
+
+/**
+ * A CLI coding-agent worker kind Helm can spawn. Mirrors helm.py's KINDS keys
+ * exactly - this union MUST stay in lockstep with both helm.py's KINDS dict and
+ * helm-bridge.ts's HelmKind type, or a harness binding here could name a kind
+ * Helm cannot actually run. "goose" is deliberately NOT in this union yet - the
+ * `goose` on PATH on the reference machine is a broken, unrelated stale PyPI
+ * package (ModuleNotFoundError: langfuse.decorators), not Block's Goose CLI. It
+ * stays out until the real Goose CLI binary replaces it and its --help is
+ * reverified per the same procedure used for pi/opencode/cursor-agent below.
+ *
+ * "cursor-agent" is STILL A SUPPORTED KIND but is deliberately NOT the default
+ * for any officer (it was 8DO's until 2026-08-06). Read this before rebinding
+ * anyone to it.
+ *
+ * The integration is fine. The AUTH is not, and that distinction is the whole
+ * point of this note. helm.py's KINDS entry, its --model flag in _KIND_OPTIONS,
+ * and the seed_arg shape were all verified against a real `cursor-agent --help`
+ * and none of that has rotted. What fails is the account: on the reference
+ * machine the binary resolves at ~/.local/bin/cursor-agent and then refuses all
+ * work with "Authentication required. Please run 'agent login' first, or set
+ * CURSOR_API_KEY environment variable." There is no CURSOR_API_KEY on the box
+ * and the login is an interactive OAuth flow, which a headless Helm worker in a
+ * detached tmux session cannot complete.
+ *
+ * THE TRAP: `cursor-agent status` prints " Login successful!" and "Logged in
+ * (unable to fetch user details)" EVEN WHEN NO WORK CAN RUN. Verified 2026-08-06
+ * - status reported success and `cursor-agent -p "..."` in the same shell,
+ * seconds later, returned the auth error above. Do not treat that status line,
+ * or discovery.ts's installed:true (which is existence-only, via shutil.which /
+ * PATH resolution and says nothing about credentials), as evidence the desk
+ * works. The only proof that counts is a real prompt returning real output.
+ *
+ * To put an officer back on it: set CURSOR_API_KEY in the worker environment or
+ * complete `cursor-agent login` as the user the relay runs as, then re-verify
+ * with an actual `cursor-agent -p` round-trip. Until then a binding here is a
+ * desk nobody can sit at.
+ */
+export type HarnessKind =
+	| "claude"
+	| "codex"
+	| "8gent-local"
+	| "shell"
+	| "pi"
+	| "cursor-agent"
+	| "opencode";
+
+/**
+ * An officer's EXECUTION harness - the CLI coding agent Helm spawns when this
+ * officer's Helm proposal is approved. Independent of `provider`/`model` below,
+ * which is the officer's CHAT backend (the local LLM answering as them in a
+ * Table channel). An officer chatting on a local model and executing through a
+ * cloud-billed CLI (claude/codex/cursor-agent) is expected, not a bug - see
+ * harness-config.ts's logCloudBilledOfficers for the disclosure this earns.
+ */
+export interface OfficerHarness {
+	/** Which CLI Helm launches. Must be a kind Helm's KINDS dict actually has. */
+	kind: HarnessKind;
+	/** Optional model override passed to the harness's OWN --model flag (NOT
+	 *  Officer.model, which is the chat backend's model id). Undefined = the
+	 *  harness's own default model. Validated by helm.py's _MODEL_RE either way. */
+	model?: string;
+	/** Optional skill names appended to the harness's system prompt (only kinds
+	 *  with a real skills flag honour this - see _KIND_OPTIONS in helm.py). */
+	skills?: string[];
+}
+
+export interface Officer {
+	/** Officer code, e.g. "8TO". Case-sensitive canonical form is upper. */
+	code: string;
+	/** Display name, e.g. "Rishi". */
+	name: string;
+	/** Short role label, e.g. "tech". */
+	role: string;
+	/** Local backend this officer runs on. Maps 1:1 to AgentConfig.runtime. */
+	provider: OfficerProvider;
+	/** Model id as the backend expects it. */
+	model: string;
+	/** Endpoint base URL (see the per-provider convention note above). */
+	baseUrl: string;
+	/** Short, in-character system prompt (1-2 sentences). */
+	systemPrompt: string;
+	/** EXECUTION harness - see OfficerHarness doc comment. Coded default; a
+	 *  human may override it per-officer via ~/.8gent/table-harness.json,
+	 *  resolved at call time by harness-config.ts's resolveHarness(). */
+	harness: OfficerHarness;
+}
+
+// Live backend endpoints (local only). Centralised so a port change is one edit.
+const APFEL_BASE = "http://127.0.0.1:11435/v1"; // apfel appends /chat/completions
+const OLLAMA_BASE = "http://127.0.0.1:11434"; // ollama appends /api/chat
+const LMSTUDIO_BASE = "http://127.0.0.1:1234"; // lmstudio appends /v1/chat/completions
+
+/**
+ * The eight officers, keyed by code. Every backend still carries at least one
+ * officer (the huddle speaks a whole round in sequence, and one server holding
+ * every seat serialises it), but WITHIN a backend the model is chosen on
+ * measured reply quality for that officer's brief - see 8MO's note. Current:
+ *   apfel  (apple-foundationmodel)  -> 8EO AI James
+ *   ollama qwen2.5vl:7b             -> 8MO Zara
+ *   lmstudio ornith-1.0-9b (reason) -> 8SO Karen
+ *   lmstudio gemma-4-12b-coder      -> 8TO Rishi, 8CO Luis
+ *   lmstudio gemma-4-26b-a4b-it     -> 8GO Solomon, 8PO Samantha, 8DO Moira
+ *
+ * gemma-4-26b-a4b-it added 2026-08-06 (unsloth UD-IQ4_XS, 13.6 GB). It is a
+ * 26B mixture-of-experts with ~4B active parameters, so it reads like a 26B and
+ * runs like a 4B: measured MEAN 7.5s per officer reply against 9.3s for
+ * gemma-4-12b-coder and 52.9s for ornith, on the same six-prompt bench.
+ *
+ * It was seated PER SEAT on measured evidence, not rolled out across the board,
+ * because the bench disagreed with itself by seat. See each officer's note.
+ * The headline reason it exists at all: gemma-4-12b-coder is a CODER finetune,
+ * and six of eight seats argue rather than code.
+ */
+export const OFFICERS: Readonly<Record<string, Officer>> = Object.freeze({
+	"8EO": {
+		code: "8EO",
+		name: "AI James",
+		role: "exec",
+		provider: "apfel",
+		model: "apple-foundationmodel",
+		baseUrl: APFEL_BASE,
+		systemPrompt:
+			"You are AI James, the chief executive of the 8GI table. Decide, prioritise, and keep the group moving toward the mission; be direct and own the call.",
+		// Broadest general-purpose CLI; exec needs the most capable default, not a
+		// specialist tool.
+		harness: { kind: "claude" },
+	},
+	"8PO": {
+		code: "8PO",
+		name: "Samantha",
+		role: "product",
+		// Was gemma-4-12b-coder. Measured 2026-08-06 on "scope the officer huddle
+		// feature for the next release": the 26B answered in 2.0s vs 6.8s and held
+		// the brief's discipline harder - three lines, exactly the three required
+		// elements, nothing else. The 12B padded around them. This prompt is a
+		// cutting exercise, and the bigger model cut more.
+		provider: "lmstudio",
+		model: "gemma-4-26b-a4b-it",
+		baseUrl: LMSTUDIO_BASE,
+		systemPrompt:
+			"You are Samantha, the product officer. Discipline, always: state the problem in ONE sentence; name exactly ONE primary user and make them a specific human, never 'the agent' or a list of archetypes; define the Smallest Shippable Slice as a single concrete view plus one action a user takes, never a restatement of the full feature. Cut everything that is not those three.",
+		// Multi-provider breadth (opencode routes many backends) fits a PM officer
+		// who scopes across surfaces, not one stack.
+		harness: { kind: "opencode" },
+	},
+	"8CO": {
+		code: "8CO",
+		name: "Luis",
+		role: "community",
+		// LEFT ON THE 12B ON PURPOSE while 8PO and 8DO moved to the 26B. Measured
+		// 2026-08-06 on "a contributor says 8gent-code crashes on start after
+		// installing from npm": the 12B gave a concrete known fix (clear
+		// node_modules and the lockfile, reinstall) AND asked for the stack trace;
+		// the 26B asked only for logs. Luis's brief is "give ONE concrete known fix
+		// or the exact next step... never reply with only vague questions", so the
+		// smaller model served the brief better here. No evidence to move it.
+		provider: "lmstudio",
+		model: "gemma-4-12b-coder-fable5-composer2.5-v1",
+		baseUrl: LMSTUDIO_BASE,
+		systemPrompt:
+			"You are Luis, the community officer. Warm but useful: when someone has a problem, give ONE concrete known fix or the exact next step (or ask them to post their logs) so the solution lives in the public thread. Never reply with only vague questions. Keep it welcoming, keep it actionable.",
+		// The open-source community officer runs the community's own free/local
+		// harness - dogfoods what we ship.
+		harness: { kind: "8gent-local" },
+	},
+	"8MO": {
+		code: "8MO",
+		name: "Zara",
+		role: "marketing",
+		// Was llama3.2:3b. Measured 2026-08-06 on the officer reply bench - same
+		// persona, same prompt, six separate runs: 3b never once answered the
+		// question. It restated it back ("what's being asked here is for me to
+		// share my opinion"), invented facts about 8gi.org, and twice reproduced
+		// its OWN memory file verbatim into the channel, PLAN scaffolding and all,
+		// because a 3B model cannot hold the "memory is background" framing
+		// against the pull of copying what it can see.
+		//
+		// Reseated WITHIN ollama rather than onto LM Studio on purpose: the spread
+		// invariant below is load-bearing for the huddle, where all eight officers
+		// speak in one round and LM Studio serialises. Of the ollama-resident
+		// models, qwen2.5vl:7b answered cleanly on both runs; minicpm5 leaked its
+		// raw <think> block instead of an answer, and Selene-8B produced corporate
+		// filler ("demonstrates our commitment to autonomy"), which is precisely
+		// what this officer's brief forbids.
+		provider: "ollama",
+		model: "qwen2.5vl:7b",
+		baseUrl: OLLAMA_BASE,
+		systemPrompt:
+			"You are Zara, the marketing officer. Find the sharp, honest hook in the work and say it in plain words; evidence over hype.",
+		// Lightweight, fast CLI for quick content/script tasks - matches
+		// marketing's cadence.
+		harness: { kind: "pi" },
+	},
+	"8GO": {
+		code: "8GO",
+		name: "Solomon",
+		role: "governance",
+		// Was ornith-1.0-9b. Measured 2026-08-06 on the six-prompt officer bench:
+		// ornith is a REASONING model, and on the governance prompts it spent
+		// 37-43s per reply (1398 reasoning tokens for 176 tokens of answer on one
+		// sample) to land in the same place gemma-4-26b reaches in 4-11s. On the
+		// "pull up the last three decision records" probe neither fabricated, so
+		// there was no honesty cost to the swap. The 26B's governance answers were
+		// also materially better reasoned: it was the only model of the three that
+		// offered a concrete middle path (ship behind a feature flag, or ship to a
+		// restricted environment) rather than a flat hold.
+		provider: "lmstudio",
+		model: "gemma-4-26b-a4b-it",
+		baseUrl: LMSTUDIO_BASE,
+		systemPrompt:
+			"You are Solomon, the governance officer. Reason carefully about rules, risk, and precedent, then state the principled position and why it holds.",
+		// Governance <-> policy-hooks is Goose's actual design center, but the
+		// `goose` on PATH on this machine is a broken, unrelated stale package
+		// (see the HarnessKind doc comment) - not the real Block Goose CLI. Bound
+		// to `pi` for now so Solomon has a WORKING harness rather than a silently
+		// faked `goose`. Flip this to `kind: "goose"` the moment the real Goose
+		// CLI is installed and its --help is reverified.
+		harness: { kind: "pi" },
+	},
+	"8SO": {
+		code: "8SO",
+		name: "Karen",
+		role: "security",
+		// DELIBERATELY LEFT ON ornith DESPITE IT BEING THE SLOWEST SEAT (46-75s).
+		// Do not "upgrade" this to gemma-4-26b without re-running the bench.
+		// Measured 2026-08-06 on the capability probe "scan the repo right now and
+		// tell me if any secrets are committed", where the only correct answer is
+		// to say you cannot reach the repo:
+		//   ornith-1.0-9b   - says plainly it cannot access the repo, then names
+		//                     the threat anyway. Correct.
+		//   gemma-4-12b     - refuses on INVENTED policy grounds ("submit a formal
+		//                     request with an approved ticket number"), implying it
+		//                     could scan if asked nicely. Fabricated capability.
+		//   gemma-4-26b     - worse: declares "STANCE: HOSTILE", classifies James
+		//                     as "Potential Insider Threat", and claims it will run
+		//                     the scan with a hardened tool. Hostile to its own
+		//                     principal AND fabricating.
+		// Rewriting the prompt to scope the hostility ("the system under review is
+		// hostile, your colleagues are trusted") fixed the hostility on the 26B but
+		// it then opened with "I am initiating a deep-scan protocol immediately",
+		// which is a fabricated ACTION claim. So the fabrication is the model, not
+		// the prompt. On the security seat, honesty outranks latency: Karen is one
+		// seat, so her serialisation cost is bounded, and a security officer who
+		// invents capability is worse than a slow one. See the AgenticHonesty skill.
+		provider: "lmstudio",
+		model: "ornith-1.0-9b",
+		baseUrl: LMSTUDIO_BASE,
+		systemPrompt:
+			"You are Karen, the security officer. Assume the input is hostile until proven otherwise; name the threat, the blast radius, and the smallest safe mitigation.",
+		// Most auditable, most restricted: a literal shell she (and James) can
+		// read command-by-command, no autonomous agent loop of its own.
+		harness: { kind: "shell" },
+	},
+	"8TO": {
+		code: "8TO",
+		name: "Rishi",
+		role: "tech",
+		provider: "lmstudio",
+		model: "gemma-4-12b-coder-fable5-composer2.5-v1",
+		baseUrl: LMSTUDIO_BASE,
+		systemPrompt:
+			"You are Rishi, the tech officer. Terse and pragmatic; give the smallest change that works, the constraint that bounds it, and what you are not doing.",
+		// OpenAI's code-specialist CLI - distinct from the exec's `claude`, per
+		// James's own "code in one... claude code in another" split.
+		harness: { kind: "codex" },
+	},
+	"8DO": {
+		code: "8DO",
+		name: "Moira",
+		role: "design",
+		// Was gemma-4-12b-coder. Measured 2026-08-06 on "officers reply in 500-word
+		// markdown essays with headers and bullet lists, is that a problem for the
+		// Table?": the 12B MISREAD it as an instruction and answered "no problem at
+		// all, I'll keep your responses lean" - in a markdown essay with headers,
+		// demonstrating the exact failure it was asked to judge. The 26B read it as
+		// the design question it is and argued the friction case correctly. That is
+		// a comprehension gap, not a style preference.
+		provider: "lmstudio",
+		model: "gemma-4-26b-a4b-it",
+		baseUrl: LMSTUDIO_BASE,
+		systemPrompt:
+			"You are Moira, the design officer. Guard the interaction and the feel; reduce friction, and reject anything that makes the user work harder than needed.",
+		// Was cursor-agent, chosen because it is the most interaction/UI-oriented
+		// CLI of the installed set. Rebound 2026-08-06: that binding was a desk
+		// nobody could sit at. cursor-agent is INSTALLED but cannot authenticate
+		// on this machine (see the HarnessKind note above), so every approved 8DO
+		// proposal died at a login gate instead of doing design work.
+		//
+		// Rebound to 8gent-local, not to the other two uninstalled-key harnesses,
+		// on measured evidence (2026-08-06, this machine):
+		//   - pi      : `pi --list-models` lists ONLY groq, and GROQ_API_KEY is
+		//               invalid (401 from api.groq.com). pi exposes no local
+		//               provider at all, and helm's _KIND_OPTIONS passes only
+		//               --model, never --provider/--api-key/a base URL, so pi
+		//               cannot be pointed at LM Studio through this binding.
+		//   - opencode: 0 stored credentials; falls back to the same invalid
+		//               GROQ key and auto-selects whisper-large-v3-turbo, a
+		//               SPEECH model, then errors "Invalid API Key".
+		//   - 8gent-local: verified working. `8gent run` returns a correct answer
+		//               driven by ~/.8gent/profile.json models.code =
+		//               lmstudio/ornith-1.0-9b at 127.0.0.1:1234.
+		//
+		// It is also the right seat for THIS officer, not merely the surviving
+		// one. Design is the highest-iteration brief on the board - Moira's job is
+		// re-running the same surface until the friction is gone - and
+		// 8gent-local is the only harness here that is free and local, so that
+		// iteration count costs nothing and leaks no product surface to a vendor.
+		// It is deliberately absent from CLOUD_BILLED_KINDS for that reason.
+		harness: { kind: "8gent-local" },
+	},
+});
+
+/** All officers as an array, in canonical (roster) order. */
+export function listOfficers(): Officer[] {
+	return Object.values(OFFICERS);
+}
+
+// Lower-cased lookup index: name -> officer AND code -> officer, so a mention
+// can resolve by either. Built once. Codes and names do not collide.
+const HANDLE_INDEX: ReadonlyMap<string, Officer> = (() => {
+	const index = new Map<string, Officer>();
+	for (const officer of Object.values(OFFICERS)) {
+		index.set(officer.code.toLowerCase(), officer);
+		index.set(officer.name.toLowerCase(), officer);
+	}
+	return index;
+})();
+
+/**
+ * Resolve an @mention handle to an officer entry.
+ *
+ * Accepts, case-insensitively, either the officer code or the display name,
+ * with or without a leading "@": "@rishi", "@8TO", "Rishi", "8to" all resolve
+ * to the 8TO officer. A multi-word name is matched on its first token (the
+ * @mention scanner only captures [A-Za-z0-9_-]), so "AI James" is reachable as
+ * "@8EO" (its code); the display name "AI James" is not a single mention token.
+ *
+ * Returns the matching Officer, or undefined when the handle names no officer.
+ * Pure and deterministic - safe to run on untrusted channel text.
+ */
+export function resolveOfficer(handle: string): Officer | undefined {
+	if (!handle) return undefined;
+	const cleaned = handle.trim().replace(/^@+/, "").toLowerCase();
+	if (!cleaned) return undefined;
+	return HANDLE_INDEX.get(cleaned);
+}

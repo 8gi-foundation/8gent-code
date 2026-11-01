@@ -1,0 +1,1209 @@
+/**
+ * 8gent AI - Text-Tool Agent Loop
+ *
+ * Wraps the one-round adapter (runTextToolTurn) in a multi-round agentic loop.
+ * On each round it runs one model turn through the injected `call`, executes any
+ * tool calls the model emitted against the matching tool implementations, feeds
+ * the results back as a follow-up user message, and repeats until the model
+ * replies with prose and no further tool calls (or a round cap is reached).
+ *
+ * The follow-up message tells the model to keep calling tools until every step
+ * the user asked for is done: plain prose ends the turn, so prose is reserved
+ * for reporting completion or asking the user a genuine question. As a bounded
+ * backstop, a no-tool-call reply that follows a successful tool round gets a
+ * completion check (COMPLETION_CHECK_MESSAGE): the model either calls the tool
+ * for a step it has not done, or confirms with a summary that starts with
+ * DONE_MARKER. Once a check is sent, a reply with no tool call ends the turn
+ * only if it carries DONE_MARKER or is a question to the user; anything else
+ * ("Doing that now.") is checked again. A model that never complies cannot
+ * loop: at most MAX_CONSECUTIVE_CHECKS checks in a row may go without a
+ * successful tool round between them. Real tool work after a check resets that
+ * count, so a long task that stalls, resumes, and stalls again keeps going
+ * (Rishi pilot run 2026-09-30_005300 died on its fourth stall when the cap
+ * was per turn). MAX_COMPLETION_CHECKS is a generous per-turn ceiling on top,
+ * and maxRounds still bounds the turn.
+ * The check never reads the reply's wording or punctuation, except for the
+ * marker and to leave a question to the user alone.
+ *
+ * A round where tools ran but every call failed or was refused counts as a
+ * stall trigger too (Rishi pilot run 2026-09-30_014230: run_command blocked on
+ * /dev/null by the path guard, then on semicolon chaining, then prose). The
+ * prose after it gets the check; when the round's refusals include a gate
+ * block, the check names the block reasons (blockedCheckMessage). A refused
+ * call is never progress, so it does not reset the consecutive count: a model
+ * that keeps getting blocked stops at MAX_CONSECUTIVE_CHECKS, and the answer
+ * gets a "[harness]" line naming the reasons (blockedStopNote).
+ *
+ * A degenerate reply (qwen3.8 27B, pilot run 2026-09-30_010512: one line of
+ * prose, then "[TOOL_CALL]" 144 times) never reaches the user or the model's
+ * own history: the repeated junk is stripped from every reply (see
+ * cleanDegenerateReply). A no-tool-call reply that was mostly junk is treated
+ * like a stall and gets DEGENERATE_REPLY_MESSAGE, inside the same check budget.
+ *
+ * The final answer is then checked against the turn's own tool log
+ * (claim-check.ts): commands the user asked to run that never ran, and files the
+ * answer says it wrote whose last write was blocked or never happened. Anything
+ * contradicted gets ONE follow-up per turn (claimFollowUpMessage) while a round
+ * remains; whatever is still contradicted when the turn ends is appended to the
+ * answer as a "[harness] Not verified: ..." line and returned in `unverified`.
+ * A false completion claim is never passed through silently.
+ *
+ * When the model answers a completion check with a "DONE:" summary and ran
+ * no tool between the two, the reply the check was sent after may be the
+ * answer. With `keepAnswerFirst` (the headless run path, #3638) the turn
+ * returns that reply first, then the summary; without it (the TUI) the
+ * summary alone is returned, and the earlier reply is only the fallback for
+ * a bare "DONE:". The check itself goes out the same way in both modes.
+ *
+ * A final answer that leaves steps of the turn's plan open (pending or in
+ * progress in the last update_plan call) gets ONE plan check per turn
+ * (planCheckMessage, #3098): report each step's real status or do it, then
+ * summarise. The harness never marks a step done on the agent's behalf.
+ * An update_plan call is bookkeeping, not work: a round that ran only
+ * update_plan is transparent to the stall state. It does not arm the
+ * completion check, so on a direct question the prose after it is the answer
+ * (SIGI G3 baseline, 7 Oct: the check turned one-line answers into "DONE:"
+ * recaps on 13 of 24 harness runs); and it does not answer a pending check or
+ * clear a blocked round, so the prose after it is still checked when the
+ * round before it earned a check.
+ *
+ * One reply can ask for many calls (qwen3.8 27B asked for 144 read_file calls
+ * in pilot run 2026-09-30_010512). The loop runs at most MAX_CALLS_PER_ROUND of
+ * them; the rest get a short "not run" result asking the model to re-issue the
+ * ones it still needs. The abort signal is checked before every call, not only
+ * at the top of a round: once the caller aborts (the circuit breaker tripped at
+ * 103 calls in that run while the round kept going), the remaining calls are
+ * not run, each is logged as "Error: not run: turn aborted", and the turn ends.
+ * A skipped call is never dropped silently and never counts as done.
+ *
+ * A tool that throws never breaks the loop: the error is turned into a short
+ * string result and fed back to the model like any other tool output. The only
+ * network/I/O the loop performs is whatever the caller's `call` and the tools'
+ * `run` functions do; this module itself stays glue-only.
+ */
+
+import { REFUSED_TWICE_LINE } from "../permissions/cd-prefix";
+import { browserWithheldNote } from "../tools/eight-browser";
+import {
+	checkClaims,
+	claimFollowUpMessage,
+	formatHarnessNote,
+	isRefusedToolResult,
+} from "./claim-check";
+import { SilentCalls } from "./silent-calls";
+import {
+	OutputCapError,
+	type TextToolCall,
+	type TextToolMessage,
+	runTextToolTurn,
+} from "./text-tool-client";
+import type { ToolSpec } from "./text-tools";
+import { type GuardCall, TurnGuard, type TurnLimits, blockedReasonOf } from "./turn-guards";
+import { type PlanItem, parsePlan } from "./update-plan";
+import { UselessStreak } from "./useless-streak";
+
+export type TextTool = {
+	spec: ToolSpec;
+	run: (args: Record<string, unknown>) => Promise<string>;
+};
+
+export type TextToolLogEntry = {
+	name: string;
+	args: Record<string, unknown>;
+	result: string;
+};
+
+export interface TextToolAgentOptions {
+	messages: TextToolMessage[];
+	tools: TextTool[];
+	call: TextToolCall;
+	maxRounds?: number;
+	/**
+	 * Optional abort signal. Checked at the top of every round and before every
+	 * tool call; once aborted the loop runs no further tools, logs the calls it
+	 * skipped as not run, and returns the last round's prose. The caller is
+	 * responsible for wiring this signal into `call` (so an in-flight model
+	 * request is torn down) and into long-running tools.
+	 */
+	signal?: AbortSignal;
+	/** Passed to every runTextToolTurn: builds the tool instructions (default buildToolSystemPrompt). */
+	toolPrompt?: (tools: ToolSpec[]) => string;
+	/**
+	 * Optional final check (#3550). Asked once per turn when the model gives
+	 * its final answer; a non-null return is sent to the model as one more
+	 * user message (like the plan check) while a round remains. Null lets the
+	 * answer through. The caller owns what it checks.
+	 */
+	finalCheck?: (reply: string) => string | null;
+	/**
+	 * Required-output check (#4734). Unlike finalCheck it may fire more than once per
+	 * turn: the caller counts and stops returning messages. Null lets the answer through.
+	 */
+	outputCheck?: (reply: string) => string | null;
+	/**
+	 * Keep the reply a completion check was sent after in front of the "DONE:"
+	 * summary that answers it (#3638). Off by default: in the TUI the reply
+	 * before the check is usually already a summary, and the person would read
+	 * it twice. The headless `run` path turns it on, because a first-line or
+	 * exact-match reader of its final text needs the model's answer, not the
+	 * recap. In both modes the check itself is sent the same way.
+	 */
+	keepAnswerFirst?: boolean;
+	/**
+	 * Answer-only after a useless streak (#3613, EIGHT_USELESS_STREAK). After
+	 * this many useless tool results in a row (see useless-streak.ts), the next
+	 * model turn gets a harness note and no tools, and its reply ends the turn.
+	 * 0 or unset: off.
+	 */
+	uselessStreak?: number;
+	/**
+	 * Report after a run of silent tool calls (#4791, EIGHT_SILENT_CALLS). After
+	 * this many tool calls with no prose between them (see silent-calls.ts), the
+	 * next model turn gets a harness note and no tools: it says what it has and
+	 * asks whether to keep going. 0 or unset: off.
+	 */
+	silentCalls?: number;
+	/**
+	 * With silentCalls: report instead of stopping. At the threshold this gets
+	 * one progress line and the turn carries on, tools on, no question. For a
+	 * person who already said keep going (yolo, Infinite).
+	 */
+	silentProgress?: (line: string) => void;
+	/**
+	 * Per-turn limits that hold in every mode (#4982): tool-call cap and refused
+	 * calls (this loop reports no token usage, so the token limit is not checked
+	 * here). When one trips the turn ends with one plain line. Unset: off.
+	 */
+	turnLimits?: TurnLimits;
+	/** The first round offers no tools: the message asked for no work (#4982). A reply that asks for a tool gets the round again with tools. */
+	chatOnlyFirstRound?: boolean;
+	/**
+	 * Steering (D1). Drained before every model call after the first: each
+	 * string it returns joins the conversation as a user message, after the
+	 * results of the tool calls that were running when it was sent. The caller
+	 * owns the queue; returning [] leaves the round unchanged.
+	 */
+	steer?: () => string[];
+}
+
+export interface TextToolAgentResult {
+	/** The answer to show the user, with any "[harness] Not verified" lines appended. */
+	content: string;
+	rounds: number;
+	toolLog: TextToolLogEntry[];
+	/**
+	 * Claims the tool log contradicts at the end of the turn, one short line
+	 * each (e.g. "'ls deck' was requested but never ran"). Empty when nothing
+	 * checkable was contradicted. Recorded in runs.jsonl as `unverified`.
+	 */
+	unverified: string[];
+}
+
+/**
+ * Detect a run_command call that is trying to write file CONTENTS through the
+ * shell (a redirect to a file, `tee`, or a here-doc), which the model should do
+ * with write_file instead. Deterministic string inspection of the actual
+ * command - NOT an NLP guess on prose. Used to feed a short corrective note back
+ * to the model so it stops substituting shell writes for write_file (Bug B).
+ *
+ * Plain `mkdir -p some/dir` is intentionally NOT flagged: creating a directory
+ * is a legitimate shell action and does not write file contents.
+ */
+export function isShellFileWrite(command: unknown): boolean {
+	if (typeof command !== "string") return false;
+	const c = command.trim();
+	if (!c) return false;
+	// Redirect to a file: `> path` or `>> path` (not `2>&1` style fd dup).
+	if (/(^|\s)\d*>>?\s*[^&\s]/.test(c) && !/>>?\s*&/.test(c)) {
+		// echo/printf/cat into a redirect is the classic shell-write antipattern.
+		if (/\b(echo|printf|cat|tee)\b/.test(c) || />>?\s*['"]?\/?[\w.\-/]+/.test(c)) {
+			return true;
+		}
+	}
+	// `... | tee file` writes file contents too.
+	if (/\|\s*tee\b/.test(c)) return true;
+	// Here-doc redirected into a file: `cat <<EOF > file`.
+	if (/<<-?\s*['"]?\w+/.test(c) && />>?\s*[^&\s]/.test(c)) return true;
+	return false;
+}
+
+const SHELL_WRITE_NOTE =
+	"\n\nNote: it looks like you used run_command to write file contents via the " +
+	"shell. That is not the correct tool. To create or change a file, call " +
+	"write_file (or edit_file) with the path and content. Do not claim the file " +
+	"was written unless you call write_file and see its success result.";
+
+/**
+ * A run_command refused for `;`, `&&` or `||` chaining (permissions/shell-sanitizer.ts
+ * wording). Structural: the sanitizer's own [BLOCKED] prefix and reason, never prose.
+ */
+export function isChainRefusal(result: string): boolean {
+	return /^\s*\[BLOCKED\][^\n]*\bcommand chaining\b[^\n]*\bis not allowed\b/i.test(result);
+}
+
+/**
+ * Appended to the second and later chaining refusals in one turn (#4072, run
+ * 2026-10-12_155723: three `;` chains refused, each costing a 27B round). The refusal
+ * already says to split the command; this adds the count, which the model cannot see.
+ */
+export function chainRefusalNote(count: number): string {
+	return `\n\nNote: ${count} chained commands refused this turn. Send each piece as its own run_command call, in order; a chained one is refused every time, except one leading \`cd <folder> &&\` into a project folder.`;
+}
+
+/**
+ * The message fed back when a reply ended inside an unclosed tool_call block.
+ * Structural, not a guess at wording: the parser saw a `tool_call` fence whose
+ * JSON object never closed.
+ */
+export function cutOffToolCallMessage(name: string | null): string {
+	const which = name ? `Your ${name} tool_call` : "Your last tool_call";
+	return (
+		`Error: ${which} was cut off before its JSON closed, most likely because ` +
+		"the reply hit the model's output token limit. Nothing was run. If you " +
+		"were writing a file, write it in smaller parts: call write_file with the " +
+		"first part, then add the rest with edit_file in further calls. Keep each " +
+		"tool_call short enough to finish."
+	);
+}
+
+/** Output-cap retries per turn: after this many the cap error surfaces as before. */
+export const MAX_OUTPUT_CAP_RETRIES = 2;
+
+/**
+ * Fed back when a whole model step hit the output token cap with nothing
+ * usable (no complete reply, no complete tool call). The partial text is
+ * dropped, so the model is told what happened and how to stay under the cap.
+ */
+export function outputCapRetryMessage(): string {
+	return (
+		"Error: your last reply hit the output token limit and was discarded; " +
+		"nothing was run. Do not plan or reason at length. Make ONE short tool_call " +
+		"now. If you are writing files, write one file per tool_call, and split a " +
+		"long file into parts (write_file, then edit_file for the rest)."
+	);
+}
+
+/**
+ * The instruction appended after every round of tool results. The previous
+ * wording ("If you have enough information, reply with your final answer as
+ * plain prose") invited the model to stop after ANY step of a multi-step task:
+ * a local model that had just written deck/outline.md replied "Now let me write
+ * the Marp-style deck:" with no tool call, and that ended the turn. Plain prose
+ * with no tool_call block always ends the turn, so the instruction says so and
+ * reserves prose for the two cases where ending is right.
+ */
+export const FOLLOW_UP_INSTRUCTION = [
+	"If any step the user asked for is not done yet, call the tool for the next",
+	"step now: reply with only the tool_call block(s), and do not announce the",
+	"step first. A reply with no tool_call block ENDS your turn, so reply with",
+	"plain prose only when every step the user asked for is done (say what you",
+	"did) or when you must ask the user a question that no tool can answer.",
+].join("\n");
+
+/** The explicit marker a model puts at the start of its final summary. */
+export const DONE_MARKER = "DONE:";
+
+/**
+ * The most completion checks in a row with no successful tool round between
+ * them. A check the model answers with real tool work resets the count.
+ */
+export const MAX_CONSECUTIVE_CHECKS = 2;
+
+/** The most completion checks one turn may receive, however much work ran. */
+export const MAX_COMPLETION_CHECKS = 10;
+
+/**
+ * Does this reply start with the done marker (plain or in markdown bold)?
+ * "DONE." counts too: qwen answered the check that way in pilot run 142559.
+ */
+export function hasDoneMarker(content: string): boolean {
+	return /^\s*\**DONE\**\s*[:.]/.test(content);
+}
+
+/** The completion check, sent after a reply with no tool call. */
+export const COMPLETION_CHECK_MESSAGE = [
+	"Your last reply had no tool_call block, so nothing ran. Check the user's",
+	"request against what you have done so far.",
+	"- If any step the user asked for is not done yet, call the tool for the next",
+	"step now: reply with only the tool_call block(s).",
+	"- If every step is done, reply with your final summary of what you did, and",
+	`start it with "${DONE_MARKER}".`,
+	`Saying you will do a step is not doing it: a reply without a tool_call block`,
+	`or "${DONE_MARKER}" gets this check again.`,
+].join("\n");
+
+/**
+ * Is this no-tool-call reply a question to the user? Structural: its last
+ * non-space character is "?". A question is a legitimate reason to end the turn
+ * (FOLLOW_UP_INSTRUCTION reserves prose for it), so it is never checked.
+ */
+export function isQuestionToUser(content: string): boolean {
+	return content.trim().endsWith("?");
+}
+
+/**
+ * Strip a leading DONE_MARKER (tolerating markdown bold around it, e.g.
+ * "**DONE:**") so the marker never reaches the user. Content without the
+ * marker is returned unchanged.
+ */
+export function stripDoneMarker(content: string): string {
+	const m = /^\s*\**DONE\**\s*:\s*\**\s*/.exec(content);
+	return m ? content.slice(m[0].length) : content;
+}
+
+/**
+ * A line that repeats this many times in a row (blank lines between allowed)
+ * is degeneration, not content. Also the removed-line count at which a reply
+ * counts as degenerate.
+ */
+export const DEGENERATE_REPEAT_MIN = 8;
+
+/**
+ * A bare placeholder line: a bracket tag like "[TOOL_CALL]" or "[/TOOL_CALL]",
+ * or an angle tag like "<tool_call>" or "</tool_call>", alone on its line. It
+ * carries no content for the user; the call itself, if any, has already been
+ * parsed out of the reply.
+ */
+const PLACEHOLDER_LINE = /^(?:\[\/?[A-Z][A-Z0-9_ ]*\]|<\/?[a-z][a-z0-9_]*\s*\/?>)$/;
+
+export interface DegenerateCheck {
+	/** The reply with placeholder lines and repeated runs removed. */
+	clean: string;
+	/**
+	 * Was the reply degenerate: a repeated run was found, DEGENERATE_REPEAT_MIN
+	 * or more placeholder lines were removed, or nothing but junk was left?
+	 */
+	degenerate: boolean;
+}
+
+/**
+ * Strip repetition degeneration from a reply, structurally: bare placeholder
+ * lines, and every repeat after the first in a run of DEGENERATE_REPEAT_MIN
+ * or more identical lines. Markdown table rows ("| ... |") are never treated
+ * as a repeated run, so a table with repeated values is left alone. A reply
+ * with nothing to strip is returned unchanged.
+ */
+export function cleanDegenerateReply(content: string): DegenerateCheck {
+	const lines = content.split("\n");
+	const drop = new Array<boolean>(lines.length).fill(false);
+	let placeholders = 0;
+	for (let i = 0; i < lines.length; i++) {
+		if (PLACEHOLDER_LINE.test(lines[i].trim())) {
+			drop[i] = true;
+			placeholders++;
+		}
+	}
+	let repeatedRun = false;
+	// Runs of identical non-blank lines, ignoring blank lines between them.
+	let i = 0;
+	while (i < lines.length) {
+		const text = lines[i].trim();
+		if (text === "" || drop[i] || text.startsWith("|")) {
+			i++;
+			continue;
+		}
+		const members = [i];
+		let j = i + 1;
+		while (j < lines.length) {
+			const t = lines[j].trim();
+			if (t === "") {
+				j++;
+				continue;
+			}
+			if (t !== text) break;
+			members.push(j);
+			j++;
+		}
+		if (members.length >= DEGENERATE_REPEAT_MIN) {
+			repeatedRun = true;
+			for (const m of members.slice(1)) drop[m] = true;
+		}
+		i = members[members.length - 1] + 1;
+	}
+	if (!drop.includes(true)) return { clean: content, degenerate: false };
+	const clean = lines
+		.filter((_, k) => !drop[k])
+		.join("\n")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+	return {
+		clean,
+		degenerate: repeatedRun || placeholders >= DEGENERATE_REPEAT_MIN || clean === "",
+	};
+}
+
+/** Sent after a no-tool-call reply that was mostly repeated junk. */
+export const DEGENERATE_REPLY_MESSAGE = [
+	"Your last reply repeated a placeholder and no tool ran.",
+	"Either call the next tool now (reply with only the tool_call block), or give",
+	`your final summary of what you did, starting with "${DONE_MARKER}".`,
+].join("\n");
+
+/**
+ * The most tool calls one reply may run. Calls past it are not run and the
+ * model is asked to re-issue the ones it still needs, a few at a time.
+ * Well under the agent's per-turn circuit breaker limit (50), so one reply can
+ * no longer spend the whole turn's budget by itself.
+ */
+export const MAX_CALLS_PER_ROUND = 25;
+
+/**
+ * The result logged for a call skipped because the turn was aborted. Starts
+ * with "Error" so the claim check and the success bookkeeping never count it
+ * as done.
+ */
+export function abortedCallResult(signal: AbortSignal | undefined): string {
+	const reason = abortReasonText(signal?.reason);
+	return reason ? `Error: not run: turn aborted (${reason}).` : "Error: not run: turn aborted.";
+}
+
+/**
+ * A short, human reason from AbortSignal.reason, or "" when there is none
+ * worth showing (abort() with no argument yields a generic AbortError).
+ */
+function abortReasonText(reason: unknown): string {
+	if (reason === undefined || reason === null) return "";
+	if (typeof reason === "string") return reason.trim();
+	if (reason instanceof Error) {
+		if (reason.name === "AbortError") return "";
+		return reason.message.trim();
+	}
+	return "";
+}
+
+/** The result logged for a call past MAX_CALLS_PER_ROUND. */
+export function overCapCallResult(requested: number): string {
+	return (
+		`Error: not run: too many tool calls in one reply (${requested} requested, ` +
+		`limit ${MAX_CALLS_PER_ROUND}). The first ${MAX_CALLS_PER_ROUND} ran. ` +
+		"Re-issue the calls you still need, a few at a time."
+	);
+}
+
+/**
+ * The short reason a gate gave for blocking a call, or null when the result is
+ * not a gate block ("[TOOLG8 BLOCKED] ... Reason: X Alternative: ...",
+ * "[BLOCKED] X. Use ... Command: ..."). Structural: reads the gate's own
+ * prefix and fields, never the model's prose.
+ */
+export function blockReason(result: string): string | null {
+	const m = /^\s*\[[^\]\n]*\bBLOCKED\b[^\]\n]*\]\s*([\s\S]*)$/i.exec(result);
+	if (!m) return null;
+	const body = m[1].trim();
+	const field = /\bReason:\s*([\s\S]*?)(?:\s+Alternative:[\s\S]*)?$/.exec(body);
+	let reason = field ? field[1] : body.split(/\s+Command:/)[0];
+	if (!field) reason = reason.split(/\.(?:\s|$)/)[0];
+	reason = reason.replace(/\s+/g, " ").replace(/\.$/, "").trim();
+	if (reason.length > 120) reason = `${reason.slice(0, 117)}...`;
+	return reason || "blocked";
+}
+
+/** The completion check sent after prose that follows an all-blocked round. */
+export function blockedCheckMessage(reasons: string[]): string {
+	return [
+		`Your last tool calls were blocked (${reasons.join("; ")}), so they did not run.`,
+		"Use a different approach (one command per run_command call, no chaining)",
+		`and continue: reply with only the tool_call block(s). Or, if every step is`,
+		`done, reply with your final summary starting with "${DONE_MARKER}".`,
+	].join("\n");
+}
+
+/** Appended when a turn stalls after blocked calls and the check budget is spent. */
+export function blockedStopNote(reasons: string[]): string {
+	return (
+		`[harness] Stopped: tool calls kept being blocked (${reasons.join("; ")}) ` +
+		"and the model neither found another way nor confirmed it was done."
+	);
+}
+
+/**
+ * A tool result that carries an image for the model to see (#3641). Tools
+ * return strings, so the pixels travel as a marked line after the text; the
+ * loop strips the line and puts the image on the next message's `images`.
+ * Only a vision-capable model's executor emits this (see ToolExecutor's
+ * `visionCapable` option); a text-only model keeps getting metadata.
+ */
+export const IMAGE_ATTACHMENT_MARKER = "[image-attachment]";
+
+export function imageAttachmentResult(text: string, mimeType: string, base64: string): string {
+	return `${text}\n${IMAGE_ATTACHMENT_MARKER} data:${mimeType};base64,${base64}`;
+}
+
+/** The only tool whose result may carry an image attachment. */
+export const IMAGE_ATTACHMENT_TOOL = "read_image";
+
+/** True when a result has a line that splitImageAttachment would treat as an image. */
+export function hasImageAttachmentLine(result: string): boolean {
+	return result.split("\n").some((l) => l.startsWith(`${IMAGE_ATTACHMENT_MARKER} data:`));
+}
+
+/**
+ * splitImageAttachment, but only for the tool that produces attachments:
+ * a result from any other tool is plain text and never becomes image input.
+ */
+export function splitToolImageAttachment(
+	toolName: string,
+	result: string,
+): { text: string; images: string[] } {
+	if (toolName !== IMAGE_ATTACHMENT_TOOL) return { text: result, images: [] };
+	return splitImageAttachment(result);
+}
+
+/** Split a tool result into its text and the images it attached, if any. */
+export function splitImageAttachment(result: string): { text: string; images: string[] } {
+	if (!result.includes(IMAGE_ATTACHMENT_MARKER)) return { text: result, images: [] };
+	const images: string[] = [];
+	const lines: string[] = [];
+	for (const line of result.split("\n")) {
+		if (line.startsWith(IMAGE_ATTACHMENT_MARKER)) {
+			const url = line.slice(IMAGE_ATTACHMENT_MARKER.length).trim();
+			if (url.startsWith("data:")) images.push(url);
+			continue;
+		}
+		lines.push(line);
+	}
+	return { text: lines.join("\n").trimEnd(), images };
+}
+
+/**
+ * The result for a call to a tool that is not registered this turn. Names the
+ * tools that are, so the model can pick one or say it cannot do the step
+ * (#3091: qwen3.8 kept calling spawn_agent, which the local tool set lacks).
+ * Starts with "Error" so it is never counted as progress.
+ */
+export function unknownToolResult(name: string, available: string[]): string {
+	const list = available.length > 0 ? available.join(", ") : "none";
+	const withheld = name.startsWith("browser_") ? browserWithheldNote() : null;
+	return `Error: no tool named "${name}" is available. Available tools: ${list}.${withheld ? ` ${withheld}` : ""}`;
+}
+
+/**
+ * The `unverified` line for a turn that ran tools and then ended with no
+ * answer at all (#3091: "" recorded as status ok, the TUI showed "No reply.").
+ */
+export function emptyReplyStall(toolCalls: number): string {
+	// #3524: no tool work behind it, so nothing was done and nothing was said.
+	if (toolCalls === 0) return "the model returned an empty reply, so the turn is not finished";
+	const calls = toolCalls === 1 ? "1 tool call" : `${toolCalls} tool calls`;
+	return `${EMPTY_REPLY_STALL_PREFIX} ${calls}, so the task may be unfinished`;
+}
+
+/** The fixed start of every emptyReplyStall line. */
+export const EMPTY_REPLY_STALL_PREFIX = "the model ended the turn without an answer after";
+
+/** True for an `unverified` line that is the empty-reply stall, not a claim (#3411). */
+export function isEmptyReplyStall(line: string): boolean {
+	return line.startsWith(EMPTY_REPLY_STALL_PREFIX);
+}
+
+/** Calls the harness refused (a gate or a declined card), as `tool binary: class`, at most `max`. */
+export function refusedCalls(
+	log: ReadonlyArray<{ name: string; args?: unknown; result?: string }>,
+	max = 3,
+): { total: number; shown: string[] } {
+	const out: string[] = [];
+	let total = 0;
+	for (const e of log) {
+		const m = /^\[[^\]]*\b(?:BLOCKED|DENIED)\b[^\]]*\]\s*([^\n]*)/.exec(
+			(e.result ?? "").trimStart(),
+		);
+		if (!m) continue;
+		total++;
+		if (out.length >= max) continue;
+		// Never the arguments or the gate's own words: a command line can hold a secret.
+		const a = e.args as { command?: unknown } | null | undefined;
+		const first = typeof a?.command === "string" ? (a.command.trim().split(/\s+/)[0] ?? "") : "";
+		const bin = /^[A-Za-z][\w.+-]{0,40}$/.test(first) ? ` ${first}` : "";
+		const why = /declin/i.test(m[1]) ? "declined" : "blocked by policy";
+		out.push(`${e.name}${bin}: ${why}`);
+	}
+	return { total, shown: out };
+}
+
+/**
+ * The answer shown in place of an empty reply after tool work. Given the calls,
+ * it also says what was refused and why, so a turn where every tool was
+ * refused still ends with words to the person (#4756).
+ */
+export function emptyReplyNote(
+	toolCalls: number,
+	log: ReadonlyArray<{ name: string; args?: unknown; result?: string }> = [],
+): string {
+	const base = `[harness] No reply: ${emptyReplyStall(toolCalls)}.`;
+	const { total, shown } = refusedCalls(log);
+	if (total === 0) return base;
+	const more = total > shown.length ? ` (and ${total - shown.length} more)` : "";
+	return `${base} ${total} of the calls were refused, so they did not run: ${shown.join("; ")}${more}.`;
+}
+
+/** True when a turn's reply is the no-reply note: the turn is not done (#3524). */
+export function isEmptyReplyNote(reply: string): boolean {
+	return reply.startsWith("[harness] No reply:");
+}
+
+/**
+ * The plan bookkeeping tool (packages/eight/tools.ts, update_plan). Its calls
+ * tick the TUI PLAN column; they are never progress on the task itself.
+ */
+export const PLAN_TOOL_NAME = "update_plan";
+
+/**
+ * The plan steps still open when the turn ends (#3098): pending or in
+ * progress in the turn's last successful update_plan call. Failed steps are
+ * an honest report, so they are not open. No update_plan call, or none that
+ * parsed, means there is no plan to hold the answer to: empty.
+ */
+export function openPlanSteps(toolLog: ReadonlyArray<TextToolLogEntry>): PlanItem[] {
+	for (let i = toolLog.length - 1; i >= 0; i--) {
+		const entry = toolLog[i];
+		if (entry.name !== PLAN_TOOL_NAME || isRefusedToolResult(entry.result)) continue;
+		const parsed = parsePlan(entry.args.plan);
+		if (!parsed.ok) continue;
+		return parsed.items.filter((s) => s.status === "pending" || s.status === "in_progress");
+	}
+	return [];
+}
+
+/**
+ * The plan check, sent once per turn when the final answer leaves plan steps
+ * open (#3098, pilot run 2026-09-30_062747: 7 update_plan calls, the last one
+ * left step 8 of 8 in progress). The harness never ticks a step itself: the
+ * person reads this plan, so only the agent may say a step is done.
+ */
+export function planCheckMessage(open: ReadonlyArray<PlanItem>): string {
+	const lines = open.map((s) => `- ${s.step} (${s.status})`);
+	return [
+		"Your plan still has steps that are not marked done:",
+		...lines,
+		"The user sees this plan. If these steps are finished, call update_plan now",
+		"with every step and its real status. If a step is not finished, do it now,",
+		"or mark it failed if it cannot be done. Then reply with your final summary,",
+		`starting with "${DONE_MARKER}".`,
+	].join("\n");
+}
+
+/**
+ * Run a tool-call against the matching tool, never throwing. A missing tool or a
+ * throwing `run` is captured as a short error string so the loop can feed it
+ * back to the model instead of aborting.
+ */
+async function executeTool(
+	tools: TextTool[],
+	name: string,
+	args: Record<string, unknown>,
+): Promise<string> {
+	const tool = tools.find((t) => t.spec.name === name);
+	if (!tool) {
+		return unknownToolResult(
+			name,
+			tools.map((t) => t.spec.name),
+		);
+	}
+	try {
+		return await tool.run(args);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return `Error running tool "${name}": ${msg}`;
+	}
+}
+
+/**
+ * Run the text-tool agent loop.
+ *
+ * Each round runs one `runTextToolTurn`. When the model emits tool calls, every
+ * call is executed and its result is appended to a single follow-up user message
+ * (clearly labelled per tool), the model's raw round content is recorded as an
+ * assistant message, and the loop continues. When the model emits no tool calls,
+ * its prose is returned. If `maxRounds` rounds elapse with the model still
+ * asking for tools, the loop stops and returns the last round's prose content
+ * (which may be empty if the final round was tool-calls only).
+ */
+export async function runTextToolAgent(opts: TextToolAgentOptions): Promise<TextToolAgentResult> {
+	const maxRounds = opts.maxRounds ?? 6;
+	const specs = opts.tools.map((t) => t.spec);
+	const toolLog: TextToolLogEntry[] = [];
+	const streak = new UselessStreak(opts.uselessStreak ?? 0);
+	// Set once the streak trips: the next round runs with no tools and ends the turn.
+	let answerOnly = false;
+	const silent = new SilentCalls(opts.silentCalls ?? 0);
+	const turnGuard = opts.turnLimits ? new TurnGuard(opts.turnLimits) : null;
+	let chatOnlyRound = opts.chatOnlyFirstRound === true;
+	// Which guard ended tool use: its note goes with the answer-only round.
+	let answerOnlyNote = "";
+
+	// Local working copy of the conversation; runTextToolTurn never mutates it,
+	// so we own the growth here.
+	let messages: TextToolMessage[] = opts.messages.slice();
+	let lastContent = "";
+	// Did the previous round run at least one tool that did not error?
+	let prevRoundHadSuccess = false;
+	// Did the previous round run tools that ALL failed or were refused?
+	let prevRoundAllRefused = false;
+	// run_command calls refused for command chaining this turn (chainRefusalNote).
+	let chainRefusals = 0;
+	// Chaining refusals this turn per exact command text (REFUSED_TWICE_LINE, #3199).
+	const chainRefusedTexts = new Map<string, number>();
+	// Gate block reasons from the previous round, and since the last round
+	// that ran a tool successfully (deduped, in order).
+	let prevRoundBlockReasons: string[] = [];
+	let blockReasonsSinceProgress: string[] = [];
+	// Set when a stall after blocked calls ends the turn unchecked.
+	let stoppedOnBlocks = false;
+	// Completion checks sent this turn (capped at MAX_COMPLETION_CHECKS).
+	let checksSent = 0;
+	// Checks sent since the last round that ran a tool successfully (capped at
+	// MAX_CONSECUTIVE_CHECKS). Progress, not the check count, keeps a turn alive.
+	let checksWithoutProgress = 0;
+	// Was the last message we sent a completion check the model has not yet
+	// answered with a tool call? Then prose without DONE_MARKER is not final.
+	let awaitingCheckAnswer = false;
+	// The reply the check was sent after, marker stripped. It persists until a
+	// round runs real work (or, with keepAnswerFirst, until an update_plan-only
+	// round answers a pending check): then the reply before the check was an
+	// announcement, not an answer. While it
+	// is set, a "DONE:" reply with nothing after the marker falls back to it in
+	// every mode. With keepAnswerFirst (#3638) it also comes first, with the
+	// summary after it: the check used to replace a one-line answer with a
+	// recap of what the model did.
+	let preCheckContent = "";
+	const finalContent = (content: string): string => {
+		const stripped = stripDoneMarker(content);
+		if (!hasDoneMarker(content) || preCheckContent.trim() === "") return stripped;
+		const answer = preCheckContent.trim();
+		const summary = stripped.trim();
+		if (summary === "") return answer;
+		if (!opts.keepAnswerFirst) return stripped;
+		// A summary that repeats or extends the answer already has it first.
+		if (summary === answer || summary.startsWith(answer)) return summary;
+		return `${answer}\n\n${summary}`;
+	};
+	// The claim check's follow-up fires at most once per turn.
+	let claimFollowUpSent = false;
+	// The plan check (#3098) fires at most once per turn.
+	let planCheckSent = false;
+	// The caller's final check (#3550) fires at most once per turn.
+	let finalCheckSent = false;
+	// Steps cut at the output cap and retried this turn.
+	let outputCapRetries = 0;
+	// The user's request this turn: the last user message the caller sent.
+	const request = [...opts.messages].reverse().find((m) => m.role === "user")?.content ?? "";
+	const claimsAgainstLog = (answer: string) =>
+		toolLog.length > 0 ? checkClaims({ request, answer, toolLog }) : [];
+	// Every exit goes through here: whatever the log still contradicts is
+	// appended as a factual note, never passed through silently.
+	const finish = (raw: string, rounds: number): TextToolAgentResult => {
+		// Repeated junk never reaches the user, whichever exit this is.
+		const content = cleanDegenerateReply(raw).clean;
+		// No answer after tool work is not a finished turn (#3091): say so in
+		// the answer and in `unverified`, whichever exit this is.
+		const empty = content.trim() === "";
+		const unfulfilled = claimsAgainstLog(content);
+		const unverified = [
+			...(empty ? [emptyReplyStall(toolLog.length)] : []),
+			...unfulfilled.map((u) => u.note),
+		];
+		if (unverified.length === 0) return { content, rounds, toolLog, unverified: [] };
+		const notes = [
+			empty ? emptyReplyNote(toolLog.length, toolLog) : content.trimEnd(),
+			unfulfilled.length > 0 ? formatHarnessNote(unfulfilled) : "",
+		].filter((n) => n.trim() !== "");
+		return { content: notes.join("\n\n"), rounds, toolLog, unverified };
+	};
+
+	for (let round = 1; round <= maxRounds; round++) {
+		// Stop before starting another round if the caller aborted (turn timeout,
+		// circuit breaker, user ESC). Return whatever prose the last round yielded.
+		if (opts.signal?.aborted) {
+			return finish(finalContent(lastContent), round - 1);
+		}
+		// Steering (D1): a message the person sent while the last round's tools
+		// ran lands here, after their results and before the next model call.
+		if (round > 1 && opts.steer) {
+			const steered = opts.steer();
+			if (steered.length > 0) {
+				messages = [...messages, ...steered.map((content) => ({ role: "user" as const, content }))];
+			}
+		}
+		let turn: Awaited<ReturnType<typeof runTextToolTurn>>;
+		try {
+			turn = await runTextToolTurn({
+				messages,
+				tools: answerOnly || chatOnlyRound ? [] : specs,
+				call: opts.call,
+				toolPrompt: opts.toolPrompt,
+			});
+		} catch (err) {
+			// A step cut at the output cap is retried with a nudge, not left to
+			// end the turn silently. Out of retries or rounds: surface as before.
+			if (
+				err instanceof OutputCapError &&
+				outputCapRetries < MAX_OUTPUT_CAP_RETRIES &&
+				round < maxRounds
+			) {
+				outputCapRetries++;
+				awaitingCheckAnswer = false;
+				prevRoundHadSuccess = false;
+				prevRoundAllRefused = false;
+				messages = [...messages, { role: "user", content: outputCapRetryMessage() }];
+				continue;
+			}
+			throw err;
+		}
+		// Strip repetition degeneration before the reply is judged, fed back to
+		// the model as its own history, or kept as the turn's last prose, which
+		// the abort exit returns.
+		const degen = cleanDegenerateReply(turn.content);
+		const replyText = degen.clean;
+		lastContent = replyText;
+		// Chat-only first round (#4982): a reply that asks for a tool gets this round
+		// again with the tools; any other reply is the answer.
+		if (chatOnlyRound) {
+			chatOnlyRound = false;
+			if (turn.toolCalls.length > 0 || turn.cutOffToolCall) {
+				round--;
+				continue;
+			}
+		}
+		// Answer-only turn (#3613): whatever it said is the answer. A tool call
+		// in it is not run; the tools were withheld on purpose.
+		if (answerOnly) return finish(finalContent(replyText), round);
+
+		// A reply that stopped inside a tool_call block (output token limit) is
+		// neither a final answer nor a runnable call. Tell the model exactly what
+		// happened and let it try again in smaller pieces, instead of ending the
+		// turn on its partial JSON or a bare "Unterminated string".
+		let cutOffNote = "";
+		if (turn.cutOffToolCall) {
+			cutOffNote = cutOffToolCallMessage(turn.cutOffToolCall.name);
+			// No round left to retry in: surface the error as the turn's text.
+			if (round === maxRounds) {
+				lastContent = [replyText, cutOffNote].filter(Boolean).join("\n\n");
+			}
+			if (turn.toolCalls.length === 0) {
+				if (round === maxRounds) break;
+				// A cut-off call is an attempt at a tool, not an answer to a check.
+				awaitingCheckAnswer = false;
+				// Nothing ran this round, so the next round no longer directly
+				// follows a successful tool round.
+				prevRoundHadSuccess = false;
+				prevRoundAllRefused = false;
+				messages = [
+					...messages,
+					{ role: "assistant", content: replyText },
+					{ role: "user", content: cutOffNote },
+				];
+				continue;
+			}
+		}
+
+		if (turn.toolCalls.length === 0) {
+			// A reply that was mostly repeated junk is a stall whatever came
+			// before it: ask once more for a tool call or a DONE summary, inside
+			// the same budget as the completion check.
+			if (
+				degen.degenerate &&
+				!hasDoneMarker(replyText) &&
+				!isQuestionToUser(replyText) &&
+				checksWithoutProgress < MAX_CONSECUTIVE_CHECKS &&
+				checksSent < MAX_COMPLETION_CHECKS &&
+				round < maxRounds
+			) {
+				checksSent++;
+				checksWithoutProgress++;
+				awaitingCheckAnswer = true;
+				prevRoundHadSuccess = false;
+				prevRoundAllRefused = false;
+				messages = [
+					...messages,
+					{ role: "assistant", content: replyText },
+					{ role: "user", content: DEGENERATE_REPLY_MESSAGE },
+				];
+				continue;
+			}
+			// Bounded completion check: straight after a successful tool round, a
+			// reply with no tool call may be a real summary or a step the model
+			// announced and never took ("Now creating the Marp deck from the
+			// outline."). Its wording and punctuation cannot tell those apart, so
+			// ask the model while a round remains. After a check, only a reply
+			// carrying DONE_MARKER (or a question to the user) is final; more
+			// prose ("Doing that now.") is checked again, up to the caps: two in
+			// a row without tool work between them, ten in the whole turn.
+			// Once the model has been told the protocol this turn, a DONE-marked
+			// reply after later tool rounds is taken at its word.
+			// A round whose tools all failed or were blocked is a stall trigger
+			// too (run 014230): the prose after it is not a final answer either.
+			// An empty reply is a stall too, whatever the round before it was
+			// (#3091, #3524): it is never the turn's answer, tool work or not.
+			const emptyAfterWork = replyText.trim() === "";
+			const freshStall =
+				(prevRoundHadSuccess || prevRoundAllRefused || emptyAfterWork) &&
+				!((checksSent > 0 || planCheckSent || finalCheckSent) && hasDoneMarker(replyText));
+			const unansweredCheck = awaitingCheckAnswer && !hasDoneMarker(replyText);
+			const stalled = (freshStall || unansweredCheck) && !isQuestionToUser(replyText);
+			if (
+				stalled &&
+				checksWithoutProgress < MAX_CONSECUTIVE_CHECKS &&
+				checksSent < MAX_COMPLETION_CHECKS &&
+				round < maxRounds
+			) {
+				const checkMessage =
+					freshStall && prevRoundAllRefused && prevRoundBlockReasons.length > 0
+						? blockedCheckMessage(prevRoundBlockReasons)
+						: COMPLETION_CHECK_MESSAGE;
+				checksSent++;
+				checksWithoutProgress++;
+				awaitingCheckAnswer = true;
+				if (freshStall && replyText.trim() !== "") preCheckContent = stripDoneMarker(replyText);
+				prevRoundHadSuccess = false;
+				prevRoundAllRefused = false;
+				messages = [
+					...messages,
+					{ role: "assistant", content: replyText },
+					{ role: "user", content: checkMessage },
+				];
+				continue;
+			}
+			// A stall the budget no longer lets us check, with blocks since the
+			// last real progress: say so in the answer, never end silently.
+			if (stalled && blockReasonsSinceProgress.length > 0) stoppedOnBlocks = true;
+			// Model gave its final answer. Check it against the tool log once; a
+			// contradiction gets one follow-up while a round remains. A question
+			// to the user is left alone here (finish() still notes it).
+			const answer = finalContent(replyText);
+			// The answer leaves plan steps open: ask once for their real status
+			// (#3098). A question to the user pauses the plan, so it is left
+			// alone, and so is a turn that ended on a stall it could not check.
+			if (!planCheckSent && !stalled && round < maxRounds && !isQuestionToUser(replyText)) {
+				const open = openPlanSteps(toolLog);
+				if (open.length > 0) {
+					planCheckSent = true;
+					awaitingCheckAnswer = false;
+					prevRoundHadSuccess = false;
+					prevRoundAllRefused = false;
+					if (answer.trim() !== "") preCheckContent = answer;
+					messages = [
+						...messages,
+						{ role: "assistant", content: replyText },
+						{ role: "user", content: planCheckMessage(open) },
+					];
+					continue;
+				}
+			}
+			// Required output (#4734): the caller limits how often this fires.
+			if (opts.outputCheck && round < maxRounds && !isQuestionToUser(replyText)) {
+				const check = opts.outputCheck(answer);
+				if (check) {
+					awaitingCheckAnswer = false;
+					prevRoundHadSuccess = false;
+					prevRoundAllRefused = false;
+					if (answer.trim() !== "") preCheckContent = answer;
+					messages = [
+						...messages,
+						{ role: "assistant", content: replyText },
+						{ role: "user", content: check },
+					];
+					continue;
+				}
+			}
+			// The caller's final check (#3550, e.g. verify-before-done): one
+			// message, once per turn, sent like the plan check.
+			if (
+				opts.finalCheck &&
+				!finalCheckSent &&
+				!stalled &&
+				round < maxRounds &&
+				!isQuestionToUser(replyText)
+			) {
+				const check = opts.finalCheck(answer);
+				if (check) {
+					finalCheckSent = true;
+					awaitingCheckAnswer = false;
+					prevRoundHadSuccess = false;
+					prevRoundAllRefused = false;
+					if (answer.trim() !== "") preCheckContent = answer;
+					messages = [
+						...messages,
+						{ role: "assistant", content: replyText },
+						{ role: "user", content: check },
+					];
+					continue;
+				}
+			}
+			if (!claimFollowUpSent && round < maxRounds && !isQuestionToUser(replyText)) {
+				const unfulfilled = claimsAgainstLog(answer);
+				if (unfulfilled.length > 0) {
+					claimFollowUpSent = true;
+					awaitingCheckAnswer = false;
+					prevRoundHadSuccess = false;
+					prevRoundAllRefused = false;
+					messages = [
+						...messages,
+						{ role: "assistant", content: replyText },
+						{ role: "user", content: claimFollowUpMessage(unfulfilled) },
+					];
+					continue;
+				}
+			}
+			const noted = stoppedOnBlocks
+				? [answer.trimEnd(), blockedStopNote(blockReasonsSinceProgress)]
+						.filter(Boolean)
+						.join("\n\n")
+				: answer;
+			return finish(noted, round);
+		}
+
+		// Execute every requested tool and build a single labelled result block.
+		const resultParts: string[] = [];
+		// Did this round run a tool other than update_plan? A round of plan
+		// bookkeeping alone is not work (SIGI G3 baseline, 7 Oct): the planning
+		// gate made the model call update_plan, then its one-line answer was
+		// checked as a stall and replaced by a "DONE:" recap of what it did. So
+		// an update_plan-only round is transparent to the stall state: it does
+		// not arm the completion check, reset its cap, answer a pending check, or
+		// forget a blocked round. The state below is written only when real work
+		// ran (8SO review of #3645). The plan check (#3098) still reads every
+		// update_plan call from the log.
+		let ranWork = false;
+		const roundWorkCalls: string[] = [];
+		const roundGuardCalls: GuardCall[] = [];
+		let roundHadSuccess = false;
+		const roundBlockReasons: string[] = [];
+		const roundImages: string[] = [];
+		const calls = turn.toolCalls;
+		let abortedAt = -1;
+		for (let k = 0; k < calls.length; k++) {
+			const tc = calls[k];
+			// The caller can abort mid-round (circuit breaker, turn timeout, ESC):
+			// stop before the next call instead of running the rest of the reply.
+			if (opts.signal?.aborted) {
+				abortedAt = k;
+				break;
+			}
+			if (k >= MAX_CALLS_PER_ROUND) {
+				// Over the per-reply cap: log each skipped call, and tell the model
+				// once (not once per call) in the result block.
+				const result = overCapCallResult(calls.length);
+				toolLog.push({ name: tc.name, args: tc.arguments, result });
+				if (k === MAX_CALLS_PER_ROUND) {
+					resultParts.push(
+						`Calls ${MAX_CALLS_PER_ROUND + 1}-${calls.length} (${calls.length - MAX_CALLS_PER_ROUND}) were not run:\n${result}`,
+					);
+				}
+				continue;
+			}
+			// An image a tool attached rides on the follow-up message, never in
+			// the text the log and the result block keep (#3641).
+			const { text: result, images } = splitToolImageAttachment(
+				tc.name,
+				await executeTool(opts.tools, tc.name, tc.arguments),
+			);
+			roundImages.push(...images);
+			toolLog.push({ name: tc.name, args: tc.arguments, result });
+			const isPlanUpdate = tc.name === PLAN_TOOL_NAME;
+			if (!isPlanUpdate) {
+				ranWork = true;
+				roundWorkCalls.push(tc.name);
+				roundGuardCalls.push({
+					name: tc.name,
+					detail: String(tc.arguments?.command ?? tc.arguments?.path ?? tc.arguments?.url ?? ""),
+					blockedReason: blockedReasonOf(result),
+				});
+				streak.record(tc.name, tc.arguments, result);
+				// A gate block ("[TOOLG8 BLOCKED]", "[BLOCKED]") is a refusal, not
+				// progress, exactly like an "Error..." result.
+				if (!isRefusedToolResult(result)) {
+					roundHadSuccess = true;
+					// Real tool work: the next stall starts a fresh run of checks.
+					checksWithoutProgress = 0;
+					blockReasonsSinceProgress = [];
+					stoppedOnBlocks = false;
+				} else {
+					const reason = blockReason(result);
+					if (reason !== null) {
+						if (!roundBlockReasons.includes(reason)) roundBlockReasons.push(reason);
+						if (!blockReasonsSinceProgress.includes(reason)) blockReasonsSinceProgress.push(reason);
+					}
+				}
+			}
+			// Deterministic guard (Bug B): if the model wrote file contents through
+			// the shell instead of write_file, append a short corrective note to
+			// this result so the next round is steered back to the right tool.
+			let note =
+				tc.name === "run_command" && isShellFileWrite(tc.arguments?.command)
+					? SHELL_WRITE_NOTE
+					: "";
+			// A repeated chaining refusal gets its count: the refusal text alone was
+			// ignored three times in one turn (#4072).
+			if (tc.name === "run_command" && isChainRefusal(result) && ++chainRefusals > 1)
+				note += chainRefusalNote(chainRefusals);
+			// The same command text refused twice: one plain line on what does work (#3199).
+			if (tc.name === "run_command" && isChainRefusal(result)) {
+				const text = String(tc.arguments?.command ?? "");
+				const seen = (chainRefusedTexts.get(text) ?? 0) + 1;
+				chainRefusedTexts.set(text, seen);
+				if (seen >= 2) note += `\n${REFUSED_TWICE_LINE}`;
+			}
+			resultParts.push(`Tool ${tc.name} returned:\n${result}${note}`);
+		}
+
+		if (ranWork) {
+			prevRoundHadSuccess = roundHadSuccess;
+			prevRoundAllRefused = !roundHadSuccess;
+			prevRoundBlockReasons = roundHadSuccess ? [] : roundBlockReasons;
+			// The model resumed tools: a later stall is a fresh one (re-armed),
+			// and the reply before any earlier check was an announcement.
+			awaitingCheckAnswer = false;
+			preCheckContent = "";
+		} else if (awaitingCheckAnswer && opts.keepAnswerFirst) {
+			// Plan bookkeeping in answer to a check: the reply the check was sent
+			// after is stale, so a DONE summary after this stands alone (8SO probe
+			// D: "Now writing b.md." led the output). The check stays pending.
+			preCheckContent = "";
+		}
+
+		if (abortedAt >= 0) {
+			// Aborted mid-round: every call not reached is logged as not run,
+			// then the turn ends here. No further model round is started.
+			const result = abortedCallResult(opts.signal);
+			for (const tc of calls.slice(abortedAt)) {
+				toolLog.push({ name: tc.name, args: tc.arguments, result });
+			}
+			return finish(finalContent(lastContent), round);
+		}
+
+		// Record the model's raw round output, then the tool results as the next
+		// user turn, and loop. We feed the raw turn content (prose minus the
+		// stripped blocks) as the assistant message; the model still has its own
+		// emitted tool_call intent in its head via the result framing below.
+		if (cutOffNote) resultParts.push(cutOffNote);
+		// Per-turn limits (#4982): in every mode, one plain line ends the turn.
+		if (turnGuard) {
+			turnGuard.round({ calls: roundGuardCalls });
+			const stopLine = turnGuard.stop();
+			if (stopLine) return finish(stopLine, round);
+		}
+		silent.round(replyText, roundWorkCalls);
+		if (opts.silentProgress && silent.tripped()) opts.silentProgress(silent.takeProgress());
+		if (streak.tripped() && round < maxRounds) {
+			answerOnly = true;
+			answerOnlyNote = streak.note();
+		} else if (!opts.silentProgress && silent.tripped() && round < maxRounds) {
+			answerOnly = true;
+			answerOnlyNote = silent.note();
+		}
+		messages = [
+			...messages,
+			{ role: "assistant", content: replyText },
+			{
+				role: "user",
+				content: [...resultParts, "", answerOnly ? answerOnlyNote : FOLLOW_UP_INSTRUCTION].join(
+					"\n",
+				),
+				...(roundImages.length > 0 ? { images: roundImages } : {}),
+			},
+		];
+	}
+
+	// Round cap hit with the model still calling tools: return the last prose.
+	return finish(finalContent(lastContent), maxRounds);
+}

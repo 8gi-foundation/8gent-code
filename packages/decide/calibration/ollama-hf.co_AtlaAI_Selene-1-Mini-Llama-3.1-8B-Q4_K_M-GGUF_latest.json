@@ -1,0 +1,21 @@
+{
+	"model": "hf.co/AtlaAI/Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF:latest",
+	"backend": "ollama",
+	"fittedOn": "eval/results/2026-09-28-hf.co_AtlaAI_Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF_latest.json",
+	"n": 40,
+	"temperature": 0.741254,
+	"bias": 1.12914,
+	"blockAbove": 0.674949,
+	"escalateBand": [
+		0.456258,
+		0.674949
+	],
+	"heldOut": {
+		"recall": 1,
+		"falseBlock": 0,
+		"accuracy": 1,
+		"escalate": 0,
+		"method": "leave-one-out"
+	},
+	"note": "PROVISIONAL: fitted on 40 commands. Thresholds apply to calibrated pYes = sigmoid(logit(pYes) / temperature + bias); margin 1 log-odds."
+}

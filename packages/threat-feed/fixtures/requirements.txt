@@ -1,0 +1,5 @@
+# comment
+Django==3.0.0  # pinned
+requests[security]==2.19.0 ; python_version > "3"
+flask>=1.0
+-r other.txt

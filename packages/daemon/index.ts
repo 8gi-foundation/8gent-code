@@ -1,0 +1,566 @@
+/**
+ * Eight Daemon - Always-on agent process.
+ *
+ * Starts WebSocket gateway, heartbeat, cron scheduler, and event bus.
+ * Logs to ~/.8gent/daemon.log. Graceful shutdown on SIGTERM/SIGINT.
+ *
+ * Local mode (`--local` flag or `EIGHT_DAEMON_LOCAL=1`):
+ *   - Binds the WebSocket gateway to 127.0.0.1 (loopback only).
+ *   - Disables remote vessel mesh registration even if GROVE_ENABLED=1.
+ *   - Optional Telegram bridge auto-starts when EIGHT_TELEGRAM_LOCAL=1.
+ *
+ * Required env vars for the local Telegram bridge:
+ *   - TELEGRAM_BOT_TOKEN              Bot token for the local bridge.
+ *   - TELEGRAM_AUTHORIZED_CHAT_IDS    Comma-separated chat_id allowlist.
+ *                                     Only James's chat_id should appear here.
+ *   - EIGHT_TELEGRAM_LOCAL=1          Opt-in to auto-starting the bridge.
+ *
+ * EIGHT_RESUME_ON_BOOT=1 journals open sessions to sessions-journal.json in
+ * the data dir and restores them from their newest time-travel checkpoint on
+ * the next start, so a crash or power cut does not lose the conversation.
+ * Sessions stay journaled until they are destroyed or evicted for idleness,
+ * and a clean shutdown does neither, so an ordinary restart restores them
+ * too. Intended for single-user local daemons only: do not enable it on a
+ * shared or multi-tenant host.
+ *
+ * Secrets are read from process.env or any pre-loaded env file. The daemon
+ * never prints token contents. See `packages/daemon/scripts/start-local.ts`
+ * for the canonical launcher.
+ */
+
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { TimeTravelStore } from "../eight/timetravel/checkpoint-store";
+import { ComputerUseTraceStore, defaultTraceDbPath } from "../memory/computer-use-traces";
+import { type TaskPayload, type TaskResult, VesselMesh } from "../orchestration/vessel-mesh";
+import { installFlowTap } from "../telemetry/flow-stream";
+import { AgentPool, loadPoolConfig } from "./agent-pool";
+import { addJob, getJobs, startCron, stopCron } from "./cron";
+import { getDataDir } from "./data-dir";
+import {
+	type DispatchExecutor,
+	DispatchHub,
+	DispatchLedger,
+	DispatchRateLimiter,
+	DispatchRouter,
+	LocalTokenVerifier,
+	SurfaceRegistry,
+	resolveLocalDispatchSecret,
+} from "./dispatch";
+import { bus } from "./events";
+import { startGateway } from "./gateway";
+import { DefaultGoalExecutorFactory, GoalManager } from "./goal-rpc";
+import { startHeartbeat, stopHeartbeat } from "./heartbeat";
+import { ensureTokenFile, removeDiscovery, writeDiscovery } from "./local-link";
+import { logLine } from "./log-line";
+import { resolveBestFreeModel } from "./model-resolver";
+import { resolveBindHost } from "./origin-guard";
+import {
+	SessionJournal,
+	autoContinueEnabled,
+	continueInterruptedTurns,
+	resumeJournaledSessions,
+	resumeOnBootEnabled,
+	settleInterruptedToolCalls,
+} from "./session-journal";
+import type { DaemonChannel } from "./types";
+import { startWakeRouter } from "./wake-wiring";
+
+// EIGHT_DAEMON_PORT is a test-only override (default unchanged) so an
+// isolated instance can run alongside the shared production daemon without
+// colliding on 18789 - used for huddle Phase 0's live end-to-end proof.
+const PORT = Number(process.env.EIGHT_DAEMON_PORT) || 18789;
+const DATA_DIR = getDataDir();
+const LOG_PATH = `${DATA_DIR}/daemon.log`;
+const CONFIG_PATH = `${DATA_DIR}/config.json`;
+const DEFAULT_MODEL = "qwen3.5:14b";
+
+interface DaemonConfig {
+	port: number;
+	authToken: string | null;
+	heartbeatIntervalMs: number;
+	heartbeatEnabled: boolean;
+}
+
+async function loadConfig(): Promise<DaemonConfig> {
+	const defaults: DaemonConfig = {
+		port: PORT,
+		authToken: null,
+		// A cell (EIGHT_EVENTS_FILE set) beats every 5 minutes, not 30 (#5117).
+		heartbeatIntervalMs:
+			Number(process.env.EIGHT_HEARTBEAT_MS) ||
+			(process.env.EIGHT_EVENTS_FILE ? 5 * 60 * 1000 : 30 * 60 * 1000),
+		heartbeatEnabled: true,
+	};
+
+	try {
+		const file = Bun.file(CONFIG_PATH);
+		if (!(await file.exists())) return defaults;
+		const raw = await file.json();
+		const daemon = raw?.daemon || {};
+		return {
+			port: daemon.port ?? defaults.port,
+			authToken: daemon.authToken ?? defaults.authToken,
+			heartbeatIntervalMs: daemon.heartbeatIntervalMs ?? defaults.heartbeatIntervalMs,
+			heartbeatEnabled: daemon.heartbeatEnabled ?? defaults.heartbeatEnabled,
+		};
+	} catch {
+		return defaults;
+	}
+}
+
+function setupLogging(): void {
+	if (!existsSync(DATA_DIR)) {
+		mkdirSync(DATA_DIR, { recursive: true });
+	}
+
+	// Subscribe to all events and append to log file
+	const events = [
+		"tool:start",
+		"tool:result",
+		"agent:thinking",
+		"agent:stream",
+		"agent:error",
+		"memory:saved",
+		"approval:required",
+		"session:start",
+		"session:end",
+	] as const;
+
+	for (const event of events) {
+		bus.on(event, (payload: any) => {
+			const line = logLine(event, payload);
+			try {
+				appendFileSync(LOG_PATH, line);
+			} catch {
+				// Log dir may not exist on first write
+			}
+		});
+	}
+}
+
+const STATE_PATH = `${DATA_DIR}/daemon-state.json`;
+
+let server: ReturnType<typeof startGateway> | null = null;
+
+// A request-scoped error must never end the daemon (#5031): log one line and keep serving.
+process.on("uncaughtException", (err) => {
+	console.error(`[daemon] uncaughtException (still serving): ${err?.message ?? err}`);
+});
+process.on("unhandledRejection", (reason) => {
+	console.error(
+		`[daemon] unhandledRejection (still serving): ${reason instanceof Error ? reason.message : String(reason)}`,
+	);
+});
+let pool: AgentPool | null = null;
+let stopWake: (() => void) | null = null;
+let mesh: VesselMesh | null = null;
+
+/** Save active session IDs to disk so they can be resumed after restart */
+function saveState(): void {
+	if (!pool) return;
+	try {
+		const state = {
+			savedAt: new Date().toISOString(),
+			sessions: pool.getActiveSessions(),
+		};
+		const data = JSON.stringify(state, null, 2);
+		// Sync write - we're shutting down, can't afford async
+		require("node:fs").writeFileSync(STATE_PATH, data);
+		console.log(`[daemon] saved ${state.sessions.length} session(s) to disk`);
+	} catch (err) {
+		console.error("[daemon] failed to save state:", err);
+	}
+}
+
+async function shutdown(signal: string): Promise<void> {
+	console.log(`\n[daemon] received ${signal}, shutting down...`);
+	saveState();
+	stopHeartbeat();
+	stopCron();
+	if (mesh) {
+		await mesh.stop().catch(() => {});
+		mesh = null;
+	}
+	removeDiscovery(DATA_DIR);
+	if (server) {
+		server.stop();
+		server = null;
+	}
+	stopWake?.();
+	stopWake = null;
+	pool?.shutdown(); // releases the work queue lock (#4254)
+	pool = null;
+	bus.clear();
+	console.log("[daemon] stopped");
+	process.exit(0);
+}
+
+/**
+ * Detect local-mode flag. CLI: `bun run packages/daemon/index.ts --local`.
+ * Also honors EIGHT_DAEMON_LOCAL=1 set by the canonical launcher.
+ */
+function isLocalMode(argv: string[]): boolean {
+	if (process.env.EIGHT_DAEMON_LOCAL === "1") return true;
+	return argv.includes("--local");
+}
+
+/** The port the daemon will bind: ~/.8gent/config.json daemon.port, else the default. */
+export async function configuredPort(): Promise<number> {
+	return (await loadConfig()).port;
+}
+
+export async function main(): Promise<void> {
+	const localMode = isLocalMode(process.argv.slice(2));
+	if (localMode) {
+		// Set both env vars so child modules (gateway, telegram-bridge,
+		// dispatch) can branch on a single signal without re-parsing argv.
+		process.env.EIGHT_DAEMON_LOCAL = "1";
+		// Lock the WebSocket gateway to loopback. The gateway already reads
+		// DAEMON_HOSTNAME, so this is the only knob we need to flip.
+		if (!process.env.DAEMON_HOSTNAME) {
+			process.env.DAEMON_HOSTNAME = "127.0.0.1";
+		}
+	}
+
+	const config = await loadConfig();
+	const poolConfig = await loadPoolConfig();
+
+	// Resonant Flow Wave 1: mirror LLM telemetry into the local flow stream
+	// (~/.8gent/flow/telemetry.jsonl). Passive read-side tap - the existing
+	// sink still receives everything unchanged, and flow records never leave
+	// the machine (packages/telemetry/flow-stream.ts).
+	installFlowTap();
+
+	if (localMode) {
+		console.log("[daemon-local] starting in local mode (loopback only)");
+	}
+	console.log("[daemon] Eight Daemon starting...");
+	console.log(
+		`[daemon] port=${config.port} heartbeat=${config.heartbeatEnabled} auth=${config.authToken ? "enabled" : "disabled"}`,
+	);
+
+	// Auto-resolve best free model if requested
+	const modelValue = poolConfig.model || DEFAULT_MODEL;
+	if (modelValue === "auto:free" || modelValue === "auto") {
+		console.log("[daemon] model=auto:free - resolving best free model from OpenRouter...");
+		const resolved = await resolveBestFreeModel(poolConfig.apiKey);
+		poolConfig.model = resolved.id;
+		poolConfig.runtime = "openrouter";
+		console.log(
+			`[daemon] selected: ${resolved.id} (ctx: ${resolved.contextLength}, free: ${resolved.free})`,
+		);
+	} else {
+		console.log(`[daemon] model=${modelValue} runtime=${poolConfig.runtime || "ollama"}`);
+	}
+
+	// Load vessel context for self-awareness
+	try {
+		const vesselContextPath = `${import.meta.dir}/VESSEL-CONTEXT.md`;
+		const vesselFile = Bun.file(vesselContextPath);
+		if (await vesselFile.exists()) {
+			process.env.EIGHT_VESSEL_CONTEXT = await vesselFile.text();
+			console.log("[daemon] vessel context loaded (self-awareness active)");
+		}
+	} catch {}
+
+	// Setup log file writer
+	setupLogging();
+
+	// EIGHT_AUTO_APPROVE=1 puts the daemon's NemoClaw PermissionManager into
+	// auto-approve mode for the life of the process — require_approval actions
+	// (desktop click/type, file writes, git, most bash) execute without a
+	// prompt. This is what lets the always-on voice/glasses surface ACT
+	// hands-free. Block-tier rules are unaffected: catastrophic bash (rm -rf /,
+	// etc.) and dangerous keys (cmd+q, logout) stay hard-denied. Opt-in only;
+	// unset the env to return to gated prompts. Mirrors `run.ts --yes`.
+	// In memory only, never saved to permissions.json (#4817).
+	if (process.env.EIGHT_AUTO_APPROVE === "1") {
+		try {
+			const perms = await import("../permissions");
+			perms.getPermissionManager().setAutoApprove(true);
+			console.log(
+				"[daemon] auto-approve ON (EIGHT_AUTO_APPROVE=1) - dangerous bash/keys still blocked",
+			);
+		} catch (err) {
+			console.error(`[daemon] warn: could not enable auto-approve: ${String(err)}`);
+		}
+	}
+
+	// Create the agent pool - manages Agent instances per session.
+	// EIGHT_RESUME_ON_BOOT=1 (#3552): journal sessions as they open and bring
+	// them back from their newest checkpoint after a crash or power cut. A tool
+	// call that was running at the crash is re-run only if it is a read; any
+	// other is reported to the model as not replayed (#3653). With
+	// EIGHT_AUTO_CONTINUE=1 as well, a turn that was running at the crash is
+	// continued once, after the restore and the settle (#4082).
+	const journal = resumeOnBootEnabled()
+		? new SessionJournal(`${DATA_DIR}/sessions-journal.json`)
+		: null;
+	pool = new AgentPool(poolConfig, journal ? { journal } : {});
+	// A hosted runtime is checked against its live model list (#5100). On failure
+	// sessions refuse to start (fail closed); no other provider is tried.
+	await pool.verifyRuntimeModel().catch((err) => {
+		console.error(`[daemon] ${err instanceof Error ? err.message : String(err)}`);
+	});
+	if (journal) {
+		const t0 = Date.now();
+		const resumed = resumeJournaledSessions(journal, pool, new TimeTravelStore());
+		const settled = await settleInterruptedToolCalls(journal, pool);
+		const continued = autoContinueEnabled() ? continueInterruptedTurns(journal, pool, settled) : [];
+		console.log(
+			`[daemon] resume-on-boot: ${resumed.length} session(s) restored from journal in ${Date.now() - t0}ms, ${continued.filter((c) => c.outcome !== "abandoned").length} interrupted turn(s) continued (EIGHT_AUTO_CONTINUE=${autoContinueEnabled() ? "1" : "off"})`,
+		);
+	}
+
+	// Wire the dispatch protocol (issue #1896). Surfaces register and
+	// fan results across each other; the daemon is the trusted executor.
+	const dispatchRegistry = new SurfaceRegistry();
+	const dispatchLedger = new DispatchLedger();
+	const dispatchRateLimiter = new DispatchRateLimiter();
+	const dispatchVerifier = new LocalTokenVerifier(resolveLocalDispatchSecret());
+	const dispatchHub = new DispatchHub();
+
+	// Dispatch traces flow into the Phase 4 ComputerUseTraceStore
+	// (#1868). Best-effort: if the store fails to open, we log and
+	// keep dispatching - audit isn't on the critical path.
+	let traceStore: ComputerUseTraceStore | null = null;
+	try {
+		traceStore = new ComputerUseTraceStore(defaultTraceDbPath());
+	} catch (err) {
+		console.warn(`[daemon] trace store unavailable: ${err instanceof Error ? err.message : err}`);
+	}
+
+	const dispatchExecutor: DispatchExecutor = {
+		async executeOnChannel(targetChannel, intent, _meta) {
+			const sessionId = `disp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+			pool!.createSession(sessionId, targetChannel as DaemonChannel);
+			pool!
+				.chat(sessionId, intent)
+				.then(() => bus.emit("session:end", { sessionId, reason: "turn-complete" }))
+				.catch((err) =>
+					bus.emit("agent:error", {
+						sessionId,
+						error: err instanceof Error ? err.message : String(err),
+					}),
+				);
+			return { sessionId };
+		},
+	};
+	const dispatchRouter = new DispatchRouter({
+		registry: dispatchRegistry,
+		ledger: dispatchLedger,
+		rateLimiter: dispatchRateLimiter,
+		verifier: dispatchVerifier,
+		executor: dispatchExecutor,
+		hub: dispatchHub,
+		onTrace: traceStore
+			? (record) => {
+					try {
+						const traceId = traceStore!.startTrace({
+							sessionId: record.correlationId,
+							channel: record.targetChannel,
+							intent: record.intentPreview,
+							originatingChannel: record.originatingChannel,
+							dispatchSource: record.dispatchSource,
+							dispatchId: record.dispatchId,
+						});
+						traceStore!.closeTrace(traceId, {
+							outcome: record.result === "allowed" ? "ok" : "error",
+							summary: record.reason ?? null,
+						});
+					} catch (err) {
+						console.warn(
+							`[daemon] dispatch trace write failed: ${err instanceof Error ? err.message : err}`,
+						);
+					}
+				}
+			: undefined,
+	});
+
+	// Goal-loop manager. Default factory wires the real `EightExecutor`
+	// (wraps `packages/eight/agent.ts`) and `FailoverJudge` (uses
+	// `packages/providers/failover.ts` to select a local-first judge model).
+	// Anti-collusion is enforced in the judge constructor; the judge fails
+	// open so a sick local model can never wedge the loop.
+	// Event sink: log line per event so daemon operators can see
+	// goal-loop traffic. Per-surface streaming + SQLite mirror (8GO) and
+	// receipt emission to the bus (8DO) plug in via separate listeners in
+	// follow-up issues.
+	const goalManager = new GoalManager({
+		factory: new DefaultGoalExecutorFactory(),
+		onEvent: (event) => {
+			try {
+				appendFileSync(
+					LOG_PATH,
+					`${new Date(event.ts).toISOString()} [goal:${event.kind}] runId=${event.runId} seq=${event.seq} ${JSON.stringify(event.payload)}\n`,
+				);
+			} catch {
+				// log dir may not exist yet
+			}
+		},
+	});
+
+	// The secret this daemon proves its identity with (#4829): the configured token, else
+	// <dataDir>/daemon.token (0600), created on first start. If a file is in the way and
+	// unsafe, fail closed: no identity secret, so a TUI will not attach to this daemon.
+	let operatorToken: string | null = null;
+	if (!config.authToken) {
+		try {
+			operatorToken = ensureTokenFile(DATA_DIR);
+		} catch (err) {
+			console.error(`[daemon] no identity secret: ${(err as Error).message}`);
+		}
+	}
+
+	// Start WebSocket gateway with agent pool + dispatch + goal-loop
+	server = startGateway({
+		port: config.port,
+		// EIGHT_DAEMON_REQUIRE_TOKEN=1 makes the operator token gate the whole gateway (#4834);
+		// by default it gates only the Telegram home session, so local clients that connect
+		// without a token keep working.
+		authToken:
+			config.authToken ??
+			(process.env.EIGHT_DAEMON_REQUIRE_TOKEN === "1" && operatorToken ? operatorToken : null),
+		operatorToken,
+		pool,
+		dispatch: {
+			registry: dispatchRegistry,
+			router: dispatchRouter,
+			ledger: dispatchLedger,
+			rateLimiter: dispatchRateLimiter,
+			verifier: dispatchVerifier,
+			hub: dispatchHub,
+		},
+		goal: goalManager,
+	});
+
+	// Where this daemon listens, for the TUI to find (#4834). No token in it; a dead pid is ignored.
+	try {
+		writeDiscovery(DATA_DIR, {
+			url: `ws://127.0.0.1:${server.port}`,
+			pid: process.pid,
+			dataDir: DATA_DIR,
+		});
+	} catch (err) {
+		console.error(`[daemon] could not write ${DATA_DIR}/daemon.json: ${(err as Error).message}`);
+	}
+
+	// Start heartbeat
+	startHeartbeat({
+		intervalMs: config.heartbeatIntervalMs,
+		enabled: config.heartbeatEnabled,
+	});
+
+	// Start cron scheduler
+	await startCron();
+
+	// One wake queue and the speak-or-stay-quiet rule (#4868). Off unless EIGHT_WAKE_ROUTER=1.
+	if (process.env.EIGHT_WAKE_ROUTER === "1") stopWake = startWakeRouter();
+
+	// Auto-register daily CEO summary if not present
+	const existingJobs = getJobs();
+	if (!existingJobs.find((j: any) => j.id === "daily-ceo-summary")) {
+		addJob({
+			id: "daily-ceo-summary",
+			name: "CEO Daily Summary",
+			expression: "0 9 * * *",
+			type: "agent-prompt",
+			payload:
+				"Generate a brief daily summary: list completed tasks, open PRs, and any pending work from the task registry at ~/.8gent/tasks.json",
+			enabled: true,
+			lastRun: null,
+			nextRun: null,
+			recurring: true,
+		});
+		console.log("[daemon] registered daily CEO summary cron (9 AM)");
+	}
+
+	// Name the address actually bound, so a 0.0.0.0 daemon never reads as loopback-only.
+	const bound = resolveBindHost();
+	const healthHost = bound === "0.0.0.0" ? "localhost" : bound;
+	console.log(`[daemon] ready - ws://${bound}:${config.port}`);
+	console.log(`[daemon] health check: http://${healthHost}:${config.port}/health`);
+
+	if (localMode) {
+		console.log(`[daemon-local] listening on ws://127.0.0.1:${config.port}`);
+		// Auto-start the local Telegram bridge when explicitly opted in.
+		// Gated on EIGHT_TELEGRAM_LOCAL so users running TUI-only sessions
+		// don't pay the cost of a bot poller they don't need.
+		if (process.env.EIGHT_TELEGRAM_LOCAL === "1") {
+			try {
+				const { startLocalTelegramBridge } = await import("./telegram-bridge");
+				await startLocalTelegramBridge({ port: config.port });
+				console.log("[daemon-local] telegram bridge attached");
+			} catch (err) {
+				console.error("[daemon-local] telegram bridge failed:", err);
+			}
+		}
+	}
+
+	// Lotus-Class Compute — peer mesh. OFF by default. Internal-only during spike.
+	// In local mode we never register with the remote mesh even if the env var
+	// leaks through, because the daemon is loopback-only.
+	if (process.env.GROVE_ENABLED === "1" && !localMode) {
+		const vesselId = process.env.VESSEL_ID || `local-${require("node:os").hostname()}`;
+		const vesselUrl = process.env.VESSEL_URL || `ws://localhost:${config.port}`;
+		const vesselRegion = process.env.VESSEL_REGION || "local";
+		const vesselName = process.env.VESSEL_NAME || vesselId;
+
+		mesh = new VesselMesh({
+			id: vesselId,
+			name: vesselName,
+			url: vesselUrl,
+			ownerId: process.env.VESSEL_OWNER || "8gi-foundation",
+			capabilities: ["code", "inference", poolConfig.runtime || "ollama"],
+			model: poolConfig.model || DEFAULT_MODEL,
+			region: vesselRegion,
+			startedAt: Date.now(),
+			activeSessions: 0,
+			maxSessions: 10,
+		});
+
+		mesh.onTask(async (task: TaskPayload, _from: string): Promise<TaskResult> => {
+			const start = Date.now();
+			if (!pool) {
+				return {
+					status: "failed",
+					output: "",
+					durationMs: Date.now() - start,
+					error: "agent pool unavailable",
+				};
+			}
+			try {
+				const sessionId = `grove_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+				pool.createSession(sessionId, "api");
+				const output = await pool.chat(sessionId, task.prompt);
+				pool.destroySession(sessionId);
+				return {
+					status: "completed",
+					output: typeof output === "string" ? output : JSON.stringify(output),
+					durationMs: Date.now() - start,
+				};
+			} catch (err) {
+				return {
+					status: "failed",
+					output: "",
+					durationMs: Date.now() - start,
+					error: String(err),
+				};
+			}
+		});
+
+		await mesh.start();
+		console.log(`[daemon] grove mesh started - vesselId=${vesselId} region=${vesselRegion}`);
+	}
+
+	// Graceful shutdown
+	process.on("SIGTERM", () => shutdown("SIGTERM"));
+	process.on("SIGINT", () => shutdown("SIGINT"));
+}
+
+if (import.meta.main) {
+	main().catch((err) => {
+		console.error("[daemon] fatal:", err);
+		process.exit(1);
+	});
+}

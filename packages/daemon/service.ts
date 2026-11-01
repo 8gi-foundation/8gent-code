@@ -1,0 +1,670 @@
+/**
+ * Runs the daemon as a per-user background service that starts at login.
+ *
+ *   darwin  launchd agent   ~/Library/LaunchAgents/com.8gent.daemon.plist
+ *   linux   systemd --user  ~/.config/systemd/user/com.8gent.daemon.service, plus linger
+ *   win32   Scheduled Task  "com.8gent.daemon", at logon, no admin rights
+ *   android termux-services (runit): $PREFIX/var/service/com.8gent.daemon, driven by `sv`.
+ *           Without termux-services there is no background service on a phone, and
+ *           every operation says so and names the command that keeps it running.
+ *
+ * Every operation is a plan of steps built from a ServiceContext, so the exact
+ * files and commands for each platform are data that tests assert without
+ * touching the machine. Plans converge: install twice leaves one running
+ * service, uninstall on a clean machine succeeds.
+ */
+
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { isAndroidHost } from "../voice/termux";
+import { portVerdict, probePort } from "./port-probe";
+
+export const SERVICE_LABEL = "com.8gent.daemon";
+const DESCRIPTION = "Eight Agent Daemon - always-on AI agent process";
+
+export type ServicePlatform = "darwin" | "linux" | "win32" | "android";
+export type ServiceOperation = "install" | "uninstall" | "start" | "stop";
+
+export interface ServiceContext {
+	platform: ServicePlatform;
+	home: string;
+	/** Absolute argv that runs the daemon in the foreground, e.g. [bun, cli.js, "daemon", "run"]. */
+	program: string[];
+	/** launchd domain target (darwin only). */
+	uid: number;
+	/** Login name for linger (linux), DOMAIN\user for the task principal (win32). */
+	user: string;
+	/** Termux $PREFIX (android only). */
+	prefix?: string;
+	/**
+	 * launchd label (darwin only). Defaults to SERVICE_LABEL. The macOS CI job sets a per-run
+	 * label so a real launchd install never touches a person's own com.8gent.daemon (#4862 G03).
+	 */
+	label?: string;
+}
+
+export type Step =
+	| { kind: "mkdir"; path: string }
+	| { kind: "write"; path: string; contents: string; mode?: number }
+	| { kind: "remove"; path: string }
+	| {
+			kind: "run";
+			argv: string[];
+			onFailure: "abort" | "ignore" | { warn: string };
+			attempts?: number;
+	  }
+	| { kind: "powershell"; script: string };
+
+type QueryStep = Extract<Step, { kind: "run" | "powershell" }>;
+
+export type ServiceState =
+	| { state: "not-installed" }
+	| { state: "stopped" }
+	| { state: "running"; pid?: number }
+	| { state: "unavailable"; reason: string };
+
+export interface CommandResult {
+	code: number;
+	stdout: string;
+}
+
+interface Backend {
+	/** Where the service definition lives on disk, or null when the OS stores it. */
+	definitionPath(ctx: ServiceContext): string | null;
+	/** Must succeed before install, start, stop or status mean anything on this host. */
+	probe?: { argv: string[]; unavailable: string };
+	plans: Record<ServiceOperation, (ctx: ServiceContext) => Step[]>;
+	statusQuery(ctx: ServiceContext): QueryStep;
+	parseStatus(result: CommandResult, definitionExists: boolean): ServiceState;
+}
+
+export const DEFAULT_TERMUX_PREFIX = "/data/data/com.termux/files/usr";
+
+const run = (argv: string[], attempts?: number): Step =>
+	attempts
+		? { kind: "run", argv, onFailure: "abort", attempts }
+		: { kind: "run", argv, onFailure: "abort" };
+const tolerate = (argv: string[]): Step => ({ kind: "run", argv, onFailure: "ignore" });
+
+function paths(ctx: ServiceContext) {
+	const p = ctx.platform === "win32" ? path.win32 : path.posix;
+	const logDir = p.join(ctx.home, ".8gent");
+	return {
+		logDir,
+		log: p.join(logDir, "daemon.log"),
+		errLog: p.join(logDir, "daemon-error.log"),
+		// The daemon appends to daemon.log itself, and on Windows the host's
+		// open handle would lock it out, so console output gets its own file.
+		consoleLog: p.join(logDir, "daemon-console.log"),
+		svDir: p.join(ctx.prefix ?? DEFAULT_TERMUX_PREFIX, "var", "service", SERVICE_LABEL),
+		plist: p.join(ctx.home, "Library", "LaunchAgents", `${launchdLabel(ctx)}.plist`),
+		unit: p.join(ctx.home, ".config", "systemd", "user", `${SERVICE_LABEL}.service`),
+	};
+}
+
+// ----- darwin -----
+
+/** The launchd label for this context: SERVICE_LABEL unless a per-run label was given. */
+export function launchdLabel(ctx: Pick<ServiceContext, "label">): string {
+	if (ctx.label === undefined) return SERVICE_LABEL;
+	// A per-run label is only ever a test label under com.8gent.e2e. (anchored, no path
+	// characters): it can be neither the real label nor a way out of the LaunchAgents folder.
+	if (!PER_RUN_LABEL_RE.test(ctx.label))
+		throw new ServiceError(
+			`a launchd label other than ${SERVICE_LABEL} must match ${PER_RUN_LABEL_RE}; got ${JSON.stringify(ctx.label).slice(0, 60)}`,
+		);
+	return ctx.label;
+}
+
+export const PER_RUN_LABEL_RE = /^com\.8gent\.e2e\.[A-Za-z0-9.-]+$/;
+
+const xmlEscape = (s: string) =>
+	s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+export function launchdPlist(ctx: ServiceContext): string {
+	const { log, errLog } = paths(ctx);
+	const args = ctx.program.map((a) => `    <string>${xmlEscape(a)}</string>`).join("\n");
+	return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${xmlEscape(launchdLabel(ctx))}</string>
+  <key>ProgramArguments</key>
+  <array>
+${args}
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>StandardOutPath</key>
+  <string>${xmlEscape(log)}</string>
+  <key>StandardErrorPath</key>
+  <string>${xmlEscape(errLog)}</string>
+  <key>WorkingDirectory</key>
+  <string>${xmlEscape(ctx.home)}</string>
+</dict>
+</plist>
+`;
+}
+
+const launchdTarget = (ctx: ServiceContext) => `gui/${ctx.uid}/${launchdLabel(ctx)}`;
+
+const launchd: Backend = {
+	definitionPath: (ctx) => paths(ctx).plist,
+	plans: {
+		install: (ctx) => [
+			{ kind: "mkdir", path: path.posix.dirname(paths(ctx).plist) },
+			{ kind: "mkdir", path: paths(ctx).logDir },
+			{ kind: "write", path: paths(ctx).plist, contents: launchdPlist(ctx) },
+			tolerate(["launchctl", "bootout", launchdTarget(ctx)]),
+			tolerate(["launchctl", "enable", launchdTarget(ctx)]),
+			// bootout returns before launchd finishes tearing the job down, so an
+			// immediate bootstrap can fail with EIO. Retrying rides that out.
+			run(["launchctl", "bootstrap", `gui/${ctx.uid}`, paths(ctx).plist], 5),
+		],
+		uninstall: (ctx) => [
+			tolerate(["launchctl", "bootout", launchdTarget(ctx)]),
+			{ kind: "remove", path: paths(ctx).plist },
+		],
+		start: (ctx) => [
+			tolerate(["launchctl", "bootstrap", `gui/${ctx.uid}`, paths(ctx).plist]),
+			run(["launchctl", "kickstart", launchdTarget(ctx)]),
+		],
+		// KeepAlive relaunches a killed job, so stopping means unloading it.
+		stop: (ctx) => [tolerate(["launchctl", "bootout", launchdTarget(ctx)])],
+	},
+	statusQuery: (ctx) => ({
+		kind: "run",
+		argv: ["launchctl", "print", launchdTarget(ctx)],
+		onFailure: "ignore",
+	}),
+	parseStatus: ({ code, stdout }, defined) => {
+		if (code === 0 && /^\s*state = running$/m.test(stdout)) {
+			const pid = stdout.match(/^\s*pid = (\d+)$/m);
+			return pid ? { state: "running", pid: Number(pid[1]) } : { state: "running" };
+		}
+		return defined ? { state: "stopped" } : { state: "not-installed" };
+	},
+};
+
+// ----- linux -----
+
+// Unit files expand %specifiers in every setting, and $VARS in ExecStart too.
+const systemdEscape = (s: string) => s.replace(/%/g, "%%");
+const systemdQuote = (raw: string) => {
+	const arg = systemdEscape(raw).replace(/\$/g, "$$$$");
+	return /[\s"'\\]/.test(arg) ? `"${arg.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : arg;
+};
+
+export function systemdUnit(ctx: ServiceContext): string {
+	const { log, errLog } = paths(ctx);
+	return `[Unit]
+Description=${DESCRIPTION}
+
+[Service]
+Type=simple
+ExecStart=${ctx.program.map(systemdQuote).join(" ")}
+Restart=always
+RestartSec=5
+WorkingDirectory=${systemdEscape(ctx.home)}
+StandardOutput=append:${systemdEscape(log)}
+StandardError=append:${systemdEscape(errLog)}
+
+[Install]
+WantedBy=default.target
+`;
+}
+
+const UNIT = `${SERVICE_LABEL}.service`;
+
+const systemd: Backend = {
+	definitionPath: (ctx) => paths(ctx).unit,
+	probe: {
+		argv: ["systemctl", "--user", "show-environment"],
+		unavailable:
+			"systemd user services are not available on this machine (common in WSL1 and containers). Run the daemon in the foreground instead: 8gent daemon run",
+	},
+	plans: {
+		install: (ctx) => [
+			{ kind: "mkdir", path: path.posix.dirname(paths(ctx).unit) },
+			{ kind: "mkdir", path: paths(ctx).logDir },
+			{ kind: "write", path: paths(ctx).unit, contents: systemdUnit(ctx) },
+			run(["systemctl", "--user", "daemon-reload"]),
+			run(["systemctl", "--user", "enable", UNIT]),
+			run(["systemctl", "--user", "restart", UNIT]),
+			// Without linger the user manager, and the daemon with it, exits at logout.
+			{
+				kind: "run",
+				argv: ["loginctl", "enable-linger", ctx.user],
+				onFailure: {
+					warn: `Could not enable linger, so the daemon stops when you log out. To keep it running: sudo loginctl enable-linger ${ctx.user}`,
+				},
+			},
+		],
+		uninstall: (ctx) => [
+			tolerate(["systemctl", "--user", "disable", "--now", UNIT]),
+			{ kind: "remove", path: paths(ctx).unit },
+			tolerate(["systemctl", "--user", "daemon-reload"]),
+		],
+		start: () => [run(["systemctl", "--user", "start", UNIT])],
+		stop: () => [run(["systemctl", "--user", "stop", UNIT])],
+	},
+	statusQuery: () => ({
+		kind: "run",
+		argv: ["systemctl", "--user", "is-active", UNIT],
+		onFailure: "ignore",
+	}),
+	parseStatus: ({ stdout }, defined) => {
+		if (stdout.trim() === "active") return { state: "running" };
+		return defined ? { state: "stopped" } : { state: "not-installed" };
+	},
+};
+
+// ----- win32 -----
+
+const psQuote = (s: string) => `'${s.replace(/'/g, "''")}'`;
+const TASK = psQuote(SERVICE_LABEL);
+
+/**
+ * The task runs a hidden PowerShell host that invokes the daemon: a console
+ * program started directly by an interactive task opens a window at every
+ * logon, and the host is also what writes the daemon's console output to a log.
+ */
+export function scheduledTaskScript(ctx: ServiceContext): string {
+	const daemon = `& ${ctx.program.map(psQuote).join(" ")} 2>&1 | ForEach-Object { $_.ToString() } | Out-File -FilePath ${psQuote(paths(ctx).consoleLog)} -Append -Encoding utf8 -Width 4096`;
+	// Task Scheduler only retries a task that fails to launch, so the host
+	// itself restarts a daemon that exits, like KeepAlive and Restart=always.
+	// Windows never stops the daemon cleanly (Stop-Process -Force, no SIGTERM),
+	// so the shutdown snapshot is never written and the session journal is the
+	// only thing that brings work back after a kill or reboot. Turn it on unless
+	// the user set EIGHT_RESUME_ON_BOOT themselves (#4107).
+	const resume = `if (-not $env:EIGHT_RESUME_ON_BOOT) { $env:EIGHT_RESUME_ON_BOOT = '1' }`;
+	const invoke = `${resume}; while ($true) { ${daemon}; Start-Sleep -Seconds 5 }`;
+	const argument = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command "${invoke}"`;
+	return `$ErrorActionPreference = 'Stop'
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ${psQuote(argument)} -WorkingDirectory ${psQuote(ctx.home)}
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User ${psQuote(ctx.user)}
+$principal = New-ScheduledTaskPrincipal -UserId ${psQuote(ctx.user)} -LogonType Interactive -RunLevel Limited
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName ${TASK} -Description ${psQuote(DESCRIPTION)} -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+`;
+}
+
+/**
+ * Ending a task stops only the host process it launched, so the daemon the
+ * host spawned is matched by its executable and trailing arguments and
+ * stopped as well. Only the tail is matched because PowerShell re-quotes the
+ * middle arguments when a path contains spaces.
+ */
+export function stopTaskScript(ctx: ServiceContext): string {
+	const exe = ctx.program[0] ?? "";
+	const tail = ctx.program.slice(-2).join(" ");
+	return `Stop-ScheduledTask -TaskName ${TASK} -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq ${psQuote(exe)} -and $_.CommandLine -like ${psQuote(`* ${tail}`)} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+exit 0
+`;
+}
+
+const scheduledTask: Backend = {
+	definitionPath: () => null,
+	plans: {
+		install: (ctx) => [
+			{ kind: "mkdir", path: paths(ctx).logDir },
+			{ kind: "powershell", script: stopTaskScript(ctx) },
+			{ kind: "powershell", script: scheduledTaskScript(ctx) },
+			{ kind: "powershell", script: `Start-ScheduledTask -TaskName ${TASK}\n` },
+		],
+		uninstall: (ctx) => [
+			{ kind: "powershell", script: stopTaskScript(ctx) },
+			{
+				kind: "powershell",
+				script: `Unregister-ScheduledTask -TaskName ${TASK} -Confirm:$false -ErrorAction SilentlyContinue\nexit 0\n`,
+			},
+		],
+		start: () => [{ kind: "powershell", script: `Start-ScheduledTask -TaskName ${TASK}\n` }],
+		stop: (ctx) => [{ kind: "powershell", script: stopTaskScript(ctx) }],
+	},
+	statusQuery: () => ({
+		kind: "powershell",
+		script: `$t = Get-ScheduledTask -TaskName ${TASK} -ErrorAction SilentlyContinue
+if ($t) { $t.State } else { 'NotInstalled' }
+`,
+	}),
+	parseStatus: ({ stdout }) => {
+		const state = stdout.trim();
+		if (state === "Running") return { state: "running" };
+		if (state === "NotInstalled" || state === "") return { state: "not-installed" };
+		return { state: "stopped" };
+	},
+};
+
+// ----- android (Termux) -----
+
+/** The exact command that keeps the daemon up when no supervisor is there to do it. */
+export const ANDROID_FOREGROUND_COMMAND = "8gent daemon run";
+
+/** POSIX single-quote, safe inside the runit `run` script. */
+const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/**
+ * HOME and PREFIX come from the environment and land in a file runit executes: the shebang line
+ * holds PREFIX unquoted, so a newline or a space in it would start a new line or a new
+ * argument of the script. Both must be plain absolute paths: no control character, and PREFIX
+ * (the interpreter) no whitespace either. Anything else is refused, never written.
+ */
+export function assertPlainServicePath(
+	what: string,
+	p: string,
+	opts: { noSpace?: boolean } = {},
+): void {
+	const bad = /[\u0000-\u001f\u007f]/.test(p) || (opts.noSpace === true && /\s/.test(p));
+	if (!p.startsWith("/") || bad) {
+		throw new ServiceError(
+			`${what} must be an absolute path with no control characters${opts.noSpace ? " or spaces" : ""}; refusing to write a service script from ${JSON.stringify(p).slice(0, 80)}`,
+		);
+	}
+}
+
+/**
+ * The runit `run` script. runit supervises it and restarts it when it exits.
+ * Console output goes to a log file because a service has no terminal.
+ */
+export function termuxRunScript(ctx: ServiceContext): string {
+	assertPlainServicePath("PREFIX", ctx.prefix ?? DEFAULT_TERMUX_PREFIX, { noSpace: true });
+	assertPlainServicePath("HOME", ctx.home);
+	const { consoleLog } = paths(ctx);
+	return `#!${path.posix.join(ctx.prefix ?? DEFAULT_TERMUX_PREFIX, "bin", "sh")}
+cd ${shQuote(ctx.home)} || exit 1
+exec ${ctx.program.map(shQuote).join(" ")} >>${shQuote(consoleLog)} 2>&1
+`;
+}
+
+const SV_NAME = SERVICE_LABEL;
+
+const termuxServices: Backend = {
+	definitionPath: (ctx) => path.posix.join(paths(ctx).svDir, "run"),
+	probe: {
+		argv: ["sh", "-c", "command -v sv"],
+		unavailable: `No background service here: termux-services is not installed, so nothing keeps the daemon running when you leave this session. To run it now, keep this session open and run: ${ANDROID_FOREGROUND_COMMAND}. For a real background service: pkg install termux-services, restart Termux, then run: 8gent daemon install`,
+	},
+	plans: {
+		install: (ctx) => [
+			{ kind: "mkdir", path: paths(ctx).svDir },
+			{ kind: "mkdir", path: paths(ctx).logDir },
+			{
+				kind: "write",
+				path: path.posix.join(paths(ctx).svDir, "run"),
+				contents: termuxRunScript(ctx),
+				mode: 0o755,
+			},
+			// A `down` file means "do not start at boot"; install wants it running.
+			{ kind: "remove", path: path.posix.join(paths(ctx).svDir, "down") },
+			// runsvdir adopts a new service directory within a few seconds, so ride that out.
+			{
+				kind: "run",
+				argv: ["sv", "up", SV_NAME],
+				attempts: 12,
+				onFailure: {
+					warn: `The service is installed but the Termux service supervisor is not running, so the daemon is NOT running yet. Restart Termux, or run: ${ANDROID_FOREGROUND_COMMAND}`,
+				},
+			},
+		],
+		uninstall: (ctx) => [
+			tolerate(["sv", "down", SV_NAME]),
+			{ kind: "remove", path: paths(ctx).svDir },
+		],
+		start: () => [run(["sv", "up", SV_NAME])],
+		stop: () => [run(["sv", "down", SV_NAME])],
+	},
+	statusQuery: () => ({ kind: "run", argv: ["sv", "status", SV_NAME], onFailure: "ignore" }),
+	// `sv status` prints "run: <dir>: (pid N) 12s" or "down: <dir>: 3s"; "fail:" means runsv is not up yet.
+	parseStatus: ({ stdout }, defined) => {
+		const line = stdout.trim();
+		if (/^run:/.test(line)) {
+			const pid = line.match(/\(pid (\d+)\)/);
+			return pid ? { state: "running", pid: Number(pid[1]) } : { state: "running" };
+		}
+		return defined ? { state: "stopped" } : { state: "not-installed" };
+	},
+};
+
+const BACKENDS: Record<ServicePlatform, Backend> = {
+	darwin: launchd,
+	linux: systemd,
+	win32: scheduledTask,
+	android: termuxServices,
+};
+
+export function planFor(op: ServiceOperation, ctx: ServiceContext): Step[] {
+	return BACKENDS[ctx.platform].plans[op](ctx);
+}
+
+export function parseStatus(
+	platform: ServicePlatform,
+	result: CommandResult,
+	definitionExists: boolean,
+): ServiceState {
+	return BACKENDS[platform].parseStatus(result, definitionExists);
+}
+
+export function powershellArgv(script: string): string[] {
+	// -EncodedCommand sidesteps Windows command-line quoting for multi-line scripts.
+	const encoded = Buffer.from(script, "utf16le").toString("base64");
+	return [
+		"powershell.exe",
+		"-NoProfile",
+		"-NonInteractive",
+		"-ExecutionPolicy",
+		"Bypass",
+		"-EncodedCommand",
+		encoded,
+	];
+}
+
+// ----- execution -----
+
+async function exec(argv: string[]): Promise<CommandResult & { stderr: string }> {
+	try {
+		// env is explicit so a PATH changed after startup (a test's fake `sv`) is the one searched.
+		const proc = Bun.spawn(argv, {
+			stdout: "pipe",
+			stderr: "pipe",
+			stdin: "ignore",
+			env: process.env,
+		});
+		const [stdout, stderr, code] = await Promise.all([
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+			proc.exited,
+		]);
+		return { code, stdout, stderr };
+	} catch (err) {
+		// Bun.spawn throws when the executable is missing, e.g. no systemctl.
+		return { code: 127, stdout: "", stderr: String(err) };
+	}
+}
+
+export class ServiceError extends Error {}
+
+async function execute(step: Step, log: (line: string) => void): Promise<void> {
+	switch (step.kind) {
+		case "mkdir":
+			mkdirSync(step.path, { recursive: true });
+			return;
+		case "write":
+			writeFileSync(step.path, step.contents, step.mode ? { mode: step.mode } : undefined);
+			if (step.mode) chmodSync(step.path, step.mode);
+			return;
+		case "remove":
+			// Only the service directory itself is removed recursively; every other path is one file.
+			rmSync(step.path, { force: true, recursive: path.basename(step.path) === SERVICE_LABEL });
+			return;
+		case "powershell": {
+			const res = await exec(powershellArgv(step.script));
+			if (res.code !== 0)
+				throw new ServiceError(`PowerShell failed (${res.code}): ${res.stderr.trim()}`);
+			return;
+		}
+		case "run": {
+			let res = await exec(step.argv);
+			for (let i = 1; res.code !== 0 && i < (step.attempts ?? 1); i++) {
+				await Bun.sleep(500);
+				res = await exec(step.argv);
+			}
+			if (res.code === 0 || step.onFailure === "ignore") return;
+			if (step.onFailure === "abort") {
+				throw new ServiceError(`${step.argv.join(" ")} failed (${res.code}): ${res.stderr.trim()}`);
+			}
+			log(`[service] warning: ${step.onFailure.warn}`);
+			return;
+		}
+	}
+}
+
+async function unavailableReason(ctx: ServiceContext): Promise<string | null> {
+	const probe = BACKENDS[ctx.platform].probe;
+	if (!probe) return null;
+	return (await exec(probe.argv)).code === 0 ? null : probe.unavailable;
+}
+
+export async function serviceStatus(ctx: ServiceContext): Promise<ServiceState> {
+	const reason = await unavailableReason(ctx);
+	if (reason) return { state: "unavailable", reason };
+	const backend = BACKENDS[ctx.platform];
+	const query = backend.statusQuery(ctx);
+	const res = await exec(query.kind === "powershell" ? powershellArgv(query.script) : query.argv);
+	const definition = backend.definitionPath(ctx);
+	return backend.parseStatus(res, definition !== null && existsSync(definition));
+}
+
+export async function runOperation(
+	op: ServiceOperation,
+	ctx: ServiceContext,
+	log: (line: string) => void = console.log,
+): Promise<void> {
+	if (op !== "uninstall") {
+		const reason = await unavailableReason(ctx);
+		if (reason) throw new ServiceError(reason);
+	}
+	if (op === "start" || op === "stop") {
+		const { state } = await serviceStatus(ctx);
+		if (state === "not-installed") {
+			throw new ServiceError("The daemon service is not installed. Run: 8gent daemon install");
+		}
+	}
+	for (const step of planFor(op, ctx)) await execute(step, log);
+}
+
+export function describeState(s: ServiceState): string {
+	switch (s.state) {
+		case "running":
+			return s.pid ? `running (pid ${s.pid})` : "running";
+		case "stopped":
+			return "installed, not running";
+		case "not-installed":
+			return "not installed";
+		case "unavailable":
+			return `unavailable. ${s.reason}`;
+	}
+}
+
+/** The platform the service backends are keyed on. Termux counts as android even where Node says linux. */
+export function servicePlatform(
+	platform: string = process.platform,
+	env: Record<string, string | undefined> = process.env,
+): ServicePlatform | null {
+	if (isAndroidHost(platform, env)) return "android";
+	return platform === "darwin" || platform === "linux" || platform === "win32" ? platform : null;
+}
+
+export function hostContext(program: string[]): ServiceContext {
+	const platform = servicePlatform();
+	if (!platform) {
+		throw new ServiceError(
+			`A background service is not supported on ${process.platform}. Run: 8gent daemon run`,
+		);
+	}
+	if (platform === "android") {
+		// Termux has no passwd entry for the app user: HOME and PREFIX are the truth there.
+		let user = process.env.USER ?? "termux";
+		try {
+			user = os.userInfo().username;
+		} catch {}
+		const home = process.env.HOME || os.homedir();
+		const prefix = process.env.PREFIX || DEFAULT_TERMUX_PREFIX;
+		assertPlainServicePath("HOME", home);
+		assertPlainServicePath("PREFIX", prefix, { noSpace: true });
+		return {
+			platform,
+			home,
+			program,
+			uid: process.getuid?.() ?? 0,
+			user,
+			prefix,
+		};
+	}
+	const account = os.userInfo();
+	return {
+		platform,
+		// The account's own home, not resolveHome(): launchd and systemd --user
+		// look for the definition under the home the OS has on record, whatever
+		// HOME or EIGHT_HOME say in this shell, and the daemon they launch runs
+		// with that home too (#3293).
+		home: account.homedir,
+		program,
+		uid: process.getuid?.() ?? 0,
+		user:
+			platform === "win32"
+				? `${process.env.USERDOMAIN ?? os.hostname()}\\${process.env.USERNAME ?? account.username}`
+				: account.username,
+	};
+}
+
+const SUBCOMMANDS = ["install", "uninstall", "start", "stop", "status"] as const;
+type Subcommand = (typeof SUBCOMMANDS)[number];
+const isSubcommand = (s: string | undefined): s is Subcommand =>
+	SUBCOMMANDS.includes(s as Subcommand);
+
+/**
+ * `8gent daemon <sub>`. `program` is the argv that runs `8gent daemon run` on
+ * this install. Resolves to an exit code, or null while the daemon runs in the
+ * foreground.
+ */
+export async function daemonCommand(args: string[], program: string[]): Promise<number | null> {
+	const sub = args[0];
+	if (sub === "run") {
+		const { main, configuredPort } = await import("./index");
+		// A taken port usually means a daemon is already up. Ask before starting,
+		// because main() builds the pool and cron before it reaches the bind.
+		const port = await configuredPort();
+		const verdict = portVerdict(port, await probePort(port));
+		if (verdict) {
+			(verdict.code === 0 ? console.log : console.error)(verdict.message);
+			return verdict.code;
+		}
+		await main();
+		return null;
+	}
+	if (!isSubcommand(sub)) {
+		console.log("Usage: 8gent daemon <run|install|uninstall|start|stop|status>");
+		return sub ? 1 : 0;
+	}
+	try {
+		const ctx = hostContext(program);
+		if (sub !== "status") {
+			await runOperation(sub, ctx);
+			console.log(`[service] ${sub} done`);
+		}
+		console.log(`[service] ${SERVICE_LABEL}: ${describeState(await serviceStatus(ctx))}`);
+		return 0;
+	} catch (err) {
+		if (!(err instanceof ServiceError)) throw err;
+		console.error(`[service] ${err.message}`);
+		return 1;
+	}
+}

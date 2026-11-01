@@ -1,0 +1,12 @@
+{
+	"id": "GHSA-4w2v-q235-vp99",
+	"aliases": ["CVE-2023-45857"],
+	"summary": "CSRF token leak",
+	"database_specific": { "severity": "MODERATE" },
+	"affected": [
+		{
+			"package": { "ecosystem": "npm", "name": "axios" },
+			"ranges": [{ "type": "SEMVER", "events": [{ "introduced": "0.8.1" }, { "fixed": "0.28.0" }] }]
+		}
+	]
+}

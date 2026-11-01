@@ -1,0 +1,119 @@
+/**
+ * Heartbeat - Proactive wake system.
+ *
+ * Runs on a configurable interval (default 30 min, 5 min for a cell with
+ * EIGHT_EVENTS_FILE set, see index.ts). Each run also appends a
+ * cell.heartbeat line to the factory/v1 log (#5117). Performs cheap
+ * deterministic checks first, only escalating to LLM evaluation
+ * when something actually needs attention.
+ */
+
+import { join } from "node:path";
+import { getNextDueJob } from "./cron";
+import { getDataDir } from "./data-dir";
+import { bus } from "./events";
+import { factory } from "./factory-events";
+
+export interface HeartbeatConfig {
+	intervalMs: number; // default 30 * 60 * 1000
+	taskQueuePath: string; // path to pending tasks file
+	enabled: boolean;
+}
+
+/** task-queue.json under the data dir (EIGHT_DATA_DIR, then os.homedir()/.8gent; #4111). */
+export function taskQueuePath(): string {
+	return join(getDataDir(), "task-queue.json");
+}
+
+/** inbox.json under the data dir (#4111). */
+export function inboxPath(): string {
+	return join(getDataDir(), "inbox.json");
+}
+
+function defaultConfig(): HeartbeatConfig {
+	return {
+		intervalMs: 30 * 60 * 1000,
+		taskQueuePath: taskQueuePath(),
+		enabled: true,
+	};
+}
+
+export interface HeartbeatResult {
+	timestamp: string;
+	checks: {
+		pendingTasks: number;
+		dueCronJobs: number;
+		unreadMessages: number;
+		actionTriggered: boolean;
+	};
+}
+
+async function checkTaskQueue(path: string): Promise<number> {
+	try {
+		const file = Bun.file(path);
+		if (!(await file.exists())) return 0;
+		const data = await file.json();
+		return Array.isArray(data) ? data.filter((t: any) => t.status === "pending").length : 0;
+	} catch {
+		return 0;
+	}
+}
+
+async function checkUnreadMessages(): Promise<number> {
+	// Check for unread messages across channels
+	try {
+		const file = Bun.file(inboxPath());
+		if (!(await file.exists())) return 0;
+		const msgs = await file.json();
+		return Array.isArray(msgs) ? msgs.filter((m: any) => !m.read).length : 0;
+	} catch {
+		return 0;
+	}
+}
+
+async function runHeartbeat(config: HeartbeatConfig): Promise<HeartbeatResult> {
+	const pendingTasks = await checkTaskQueue(config.taskQueuePath);
+	const nextCron = getNextDueJob();
+	const dueCronJobs = nextCron ? 1 : 0;
+	const unreadMessages = await checkUnreadMessages();
+
+	const actionTriggered = pendingTasks > 0 || dueCronJobs > 0 || unreadMessages > 0;
+
+	const result: HeartbeatResult = {
+		timestamp: new Date().toISOString(),
+		checks: { pendingTasks, dueCronJobs, unreadMessages, actionTriggered },
+	};
+
+	if (actionTriggered) {
+		bus.emit("agent:thinking", { sessionId: "heartbeat" });
+	}
+
+	factory.emit({
+		kind: "cell.heartbeat",
+		state: actionTriggered ? "working" : "idle",
+		detail: process.env.EIGHT_CELL_DETAIL ?? "",
+	});
+
+	return result;
+}
+
+let timer: ReturnType<typeof setInterval> | null = null;
+
+export function startHeartbeat(config: Partial<HeartbeatConfig> = {}): void {
+	const cfg = { ...defaultConfig(), ...config };
+	if (!cfg.enabled) return;
+
+	// Run immediately on start
+	runHeartbeat(cfg).catch((err) => console.error("[heartbeat] error:", err));
+
+	timer = setInterval(() => {
+		runHeartbeat(cfg).catch((err) => console.error("[heartbeat] error:", err));
+	}, cfg.intervalMs);
+}
+
+export function stopHeartbeat(): void {
+	if (timer) {
+		clearInterval(timer);
+		timer = null;
+	}
+}

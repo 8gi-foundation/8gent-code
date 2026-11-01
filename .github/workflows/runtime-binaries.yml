@@ -1,0 +1,177 @@
+# runtime-binaries.yml - Build 8gent's own llama-server and whisper-cli (#4906).
+#
+# 8gent downloads these on first need instead of asking a person to install llama.cpp
+# or whisper.cpp through pkg, brew or Ollama. Built from the llama.cpp and whisper.cpp
+# sources pinned (tag and sha256) in packages/eight/runtime-pins.json, so the bytes built
+# are the bytes reviewed. scripts/build-runtime.sh refuses a tarball that does not match.
+#
+# Targets: android-arm64, linux-x64, linux-arm64, darwin-arm64, darwin-x64.
+# Not built yet: Windows.
+#
+# Release use: release-binaries.yml calls this workflow (workflow_call), downloads the
+# `8gent-runtime-binaries` artifact and attaches the files with their lines in SHA256SUMS.
+# Asset names: llama-server-<target>, whisper-cli-<target>.
+#
+# What is proven here, per target (scripts/verify-runtime.sh):
+#   linux-x64, linux-arm64  static, and --version / -h run on a runner of that architecture
+#   darwin-arm64            --version / -h run on the runner
+#   android-arm64           aarch64 ELF, PIE, system libraries only; then smoke-android RUNS
+#                           --version / -h in Termux's own userland (termux-docker, bionic, arm64)
+#   darwin-x64              architecture checked; run under Rosetta if the runner has it, otherwise
+#                           reported UNPROVEN in the job log
+# Not proven by any job: the Alpine base image is pinned by tag, not digest.
+name: Runtime Binaries
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'git ref to build from (the release tag)'
+        required: false
+        type: string
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/runtime-binaries.yml'
+      - 'scripts/build-runtime.sh'
+      - 'scripts/verify-runtime.sh'
+      - 'packages/eight/runtime-pins.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-binaries-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-linux:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-latest
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Build in Alpine (musl, fully static)
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w alpine:3.20 sh -c \
+            'apk add --no-cache bash build-base cmake jq curl linux-headers git >/dev/null && bash scripts/build-runtime.sh ${{ matrix.target }} /w/out'
+      - name: Verify
+        run: bash scripts/verify-runtime.sh ${{ matrix.target }} out
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-${{ matrix.target }}
+          path: out/*
+          if-no-files-found: error
+
+  build-android:
+    name: Build android-arm64
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Build with the Android NDK
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          test -d "$ANDROID_NDK_HOME" || { echo "::error::no Android NDK on this runner"; exit 1; }
+          bash scripts/build-runtime.sh android-arm64 out
+      - name: Verify
+        run: bash scripts/verify-runtime.sh android-arm64 out
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-android-arm64
+          path: out/*
+          if-no-files-found: error
+
+  # The one place the Android build is run: Termux's own userland (bionic libc, arm64),
+  # the image smoke-termux uses, on a GitHub-hosted arm64 runner.
+  smoke-android:
+    name: Run the android-arm64 build in Termux
+    needs: build-android
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: runtime-android-arm64
+          path: bins
+      - name: Run --version and -h in termux-docker
+        env:
+          # termux/termux-docker:aarch64, pinned by digest (as in release-binaries.yml smoke-termux).
+          TERMUX_IMAGE: termux/termux-docker@sha256:3a0a340fca9947f7139a0d695f1234edf0172daed6a2f1e0b1413ef91453c9ce
+        run: |
+          chmod -R a+rX bins
+          docker run --rm -v "$PWD/bins:/b:ro" "$TERMUX_IMAGE" bash -c '
+            set -e
+            cp /b/llama-server-android-arm64 /b/whisper-cli-android-arm64 "$HOME/"
+            chmod +x "$HOME"/llama-server-android-arm64 "$HOME"/whisper-cli-android-arm64
+            "$HOME/llama-server-android-arm64" --version
+            "$HOME/whisper-cli-android-arm64" -h >/dev/null
+            echo "ran in Termux: llama-server --version, whisper-cli -h"'
+
+  build-macos:
+    name: Build ${{ matrix.target }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [darwin-arm64, darwin-x64]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Build
+        run: bash scripts/build-runtime.sh ${{ matrix.target }} out
+      - name: Verify
+        run: bash scripts/verify-runtime.sh ${{ matrix.target }} out
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-${{ matrix.target }}
+          path: out/*
+          if-no-files-found: error
+
+  collect:
+    name: Collect and checksum
+    needs: [build-linux, build-android, smoke-android, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: runtime-*
+          path: runtime
+          merge-multiple: true
+      - name: Expect every asset, checksum them
+        run: |
+          cd runtime
+          for t in android-arm64 linux-x64 linux-arm64 darwin-arm64 darwin-x64; do
+            for p in llama-server whisper-cli; do
+              test -s "$p-$t" || { echo "::error::missing $p-$t"; exit 1; }
+            done
+          done
+          # The release job merges these lines into the release's SHA256SUMS.
+          ls | grep -v '^runtime.sha256$' | xargs shasum -a 256 | LC_ALL=C sort -k2 > runtime.sha256
+          cat runtime.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: 8gent-runtime-binaries
+          path: runtime/*
+          if-no-files-found: error

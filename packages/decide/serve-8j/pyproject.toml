@@ -1,0 +1,21 @@
+[project]
+name = "serve-8j"
+version = "0.1.0"
+description = "Serves 8J (a contributor's System One decision model, HF 8GI/8j) on loopback for packages/decide."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+
+# Inference only. Opt-in: a fresh install of 8gent-code carries no Python. The LoRA adapter is
+# merged at load time, so PEFT is not needed. test_serve_8j.py needs none of these.
+dependencies = [
+    "torch>=2.4",
+    "transformers>=5.17.0",
+    "safetensors",
+]
+
+[project.optional-dependencies]
+# export_onnx.py / onnx_check.py on a desktop
+export = ["onnx", "onnxruntime"]
+# run_onnx.py on the phone: no torch, no transformers
+phone = ["numpy", "onnxruntime"]

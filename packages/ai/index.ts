@@ -1,0 +1,96 @@
+/**
+ * 8gent AI - Package Entry Point
+ *
+ * Wraps the Vercel AI SDK to provide the 8gent agent experience.
+ * This package replaces the manual LLM client/tool loop in packages/eight
+ * with the AI SDK's built-in agentic capabilities.
+ *
+ * Architecture:
+ *   providers.ts        — Model factory using @ai-sdk/openai-compatible
+ *   tools.ts            — All tools defined as AI SDK tool() objects
+ *   agent.ts            — ToolLoopAgent wrapper with 8gent hooks
+ *   toolshed-bridge.ts  — Registers AI SDK tools in the toolshed registry
+ */
+
+// Provider configuration
+export { createModel, isProviderAvailable } from "./providers";
+export type { ProviderName, ProviderConfig } from "./providers";
+
+// Tools
+export {
+	agentTools,
+	setToolContext,
+	getToolContext,
+	setRuntimeParams,
+	getRuntimeParams,
+	resetRuntimeParams,
+	createRuntimeParams,
+} from "./tools";
+export type { ToolContext, AgentTools, RuntimeParams } from "./tools";
+
+// Agent
+export { createEightAgent, runAgent } from "./agent";
+export type {
+	EightAgentConfig,
+	StepFinishEvent,
+	ToolCallStartEvent,
+	ToolCallFinishEvent,
+	FinishEvent,
+} from "./agent";
+
+// Task Router
+export {
+	TaskRouter,
+	getTaskRouter,
+	loadRouterConfig,
+	saveRouterConfig,
+	recordRouting,
+	getRouterStats,
+} from "./task-router";
+export type {
+	TaskCategory,
+	RouteDecision,
+	ModelSlot,
+	RouterConfig,
+} from "./task-router";
+
+// Toolshed bridge
+export { registerToolsInToolshed } from "./toolshed-bridge";
+
+// Text-tool calling - drive tool-incapable local models agentically.
+export {
+	needsTextTools,
+	type ToolSpec,
+} from "./text-tools";
+export {
+	runTextToolAgent,
+	type TextTool,
+	type TextToolLogEntry,
+	type TextToolAgentResult,
+} from "./text-tool-loop";
+export {
+	TEXT_TOOL_ENDPOINTS,
+	resolveTextToolEndpoint,
+	toChatCompletionsEndpoint,
+	toOpenAiV1Base,
+	buildTextToolCall,
+	extractUsage,
+	type TextToolUsage,
+	toolDefToSpec,
+	toolDefsToSpecs,
+	toolDefsToTextTools,
+} from "./text-tool-endpoint";
+
+// Edge Inference - local embedding + classification, no API key required
+export {
+	embed,
+	batchEmbed,
+	similarity,
+	classify,
+	isEdgeInferenceAvailable,
+} from "./edge-inference";
+export {
+	EmbeddingCache,
+	getEmbeddingCache,
+	cosineSimilarity,
+} from "./embedding-cache";

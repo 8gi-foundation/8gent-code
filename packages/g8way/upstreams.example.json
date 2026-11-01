@@ -1,0 +1,8 @@
+[
+	{
+		"name": "8j",
+		"baseUrl": "https://8gi-8j-eval.hf.space/v1",
+		"prefixes": ["8j/"],
+		"keysEnv": "G8WAY_8J_KEYS"
+	}
+]

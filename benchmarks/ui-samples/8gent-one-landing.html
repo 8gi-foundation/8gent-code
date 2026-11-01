@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>8gent One</title>
+  <style>
+    :root {
+      --bg-color: #f5f5f0;
+      --text-color: #1a1a1a;
+      --accent-color: #ff6600;
+      --font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: var(--font-family);
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      letter-spacing: -0.5px;
+      line-height: 1.4;
+      scroll-behavior: smooth;
+    }
+    a {
+      text-decoration: none;
+      color: inherit;
+    }
+    nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px;
+      border-bottom: 1px solid #ddd;
+    }
+    nav .logo {
+      font-size: 1.5rem;
+      letter-spacing: -1px;
+    }
+    nav ul {
+      display: flex;
+      list-style: none;
+    }
+    nav li {
+      margin-left: 20px;
+    }
+    .hero {
+      text-align: center;
+      padding: 40px 20px;
+    }
+    .hero h1 {
+      font-size: 3rem;
+      letter-spacing: -2px;
+    }
+    .hero p {
+      max-width: 600px;
+      margin: 20px auto;
+      font-size: 1.25rem;
+    }
+    .device-mockup {
+      position: relative;
+      width: 80%;
+      max-width: 400px;
+      height: 200px;
+      background: #ddd;
+      border-radius: 20px;
+      margin: 40px auto;
+    }
+    .device-mockup::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 80%;
+      height: 10%;
+      background: #fff;
+      border-radius: 10px;
+      transform: translate(-50%, -50%);
+    }
+    .device-mockup::after {
+      content: '';
+      position: absolute;
+      bottom: 20%;
+      left: 50%;
+      width: 10%;
+      height: 10%;
+      background: #ddd;
+      border-radius: 50%;
+      transform: translateX(-50%);
+    }
+    .specs-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      padding: 40px 20px;
+    }
+    .spec-card {
+      border: 1px solid #ddd;
+      padding: 20px;
+      text-align: center;
+    }
+    .philosophy,
+    .software,
+    .waitlist {
+      padding: 40px 20px;
+      text-align: center;
+    }
+    .philosophy h2,
+    .software h2 {
+      font-size: 1.5rem;
+      letter-spacing: -1px;
+      margin-bottom: 20px;
+    }
+    .terminal {
+      background: #1a1a1a;
+      color: #fff;
+      padding: 20px;
+      border-radius: 5px;
+      display: inline-block;
+      font-size: 0.875rem;
+    }
+    .waitlist form {
+      max-width: 400px;
+      margin: 0 auto;
+    }
+    .waitlist input[type="email"] {
+      width: calc(100% - 22px);
+      padding: 10px;
+      border: 1px solid #ddd;
+      font-family: var(--font-family);
+    }
+    .waitlist button {
+      background: var(--accent-color);
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      cursor: pointer;
+      font-family: var(--font-family);
+    }
+    footer {
+      text-align: center;
+      padding: 20px;
+      border-top: 1px solid #ddd;
+    }
+    @media (max-width: 768px) {
+      .specs-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">8gent</div>
+  <ul>
+    <li><a href="#specs">Specs</a></li>
+    <li><a href="#software">Software</a></li>
+    <li><a href="#waitlist">Waitlist</a></li>
+  </ul>
+</nav>
+
+<section class="hero">
+  <h1>ONE</h1>
+  <div class="device-mockup"></div>
+  <p>Your AI. In your hand. On your terms.</p>
+</section>
+
+<section id="specs" class="specs-grid">
+  <div class="spec-card"><strong>Processor:</strong> NPU</div>
+  <div class="spec-card"><strong>Display:</strong> E-ink</div>
+  <div class="spec-card"><strong>Battery:</strong> All-day</div>
+  <div class="spec-card"><strong>Connectivity:</strong> WiFi/BT</div>
+  <div class="spec-card"><strong>Storage:</strong> Local models</div>
+  <div class="spec-card"><strong>OS:</strong> Open source</div>
+</section>
+
+<section id="philosophy" class="philosophy">
+  <h2>No cloud. No subscription. No limits.</h2>
+  <p>Take control of your AI with local processing and open-source software.</p>
+  <p>Protect your privacy with no data sent to the cloud.</p>
+  <p>Own your device, hack it, and make it truly yours.</p>
+</section>
+
+<section id="software" class="software">
+  <h2>Runs 8gent Code</h2>
+  <div class="terminal">$ 8gent init<br>$ 8gent train --local<br>$ 8gent run</div>
+</section>
+
+<section id="waitlist" class="waitlist">
+  <form action="#">
+    <input type="email" placeholder="Enter your email" required>
+    <button type="submit">Join Waitlist</button>
+  </form>
+</section>
+
+<footer>
+  &copy; 2023 8gent. Designed in San Francisco.
+</footer>
+
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const sections = document.querySelectorAll('section');
+    const options = {
+      threshold: 0.1
+    };
+    let observer = new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.style.opacity = '1';
+        } else {
+          entry.target.style.opacity = '0';
+        }
+      });
+    }, options);
+    sections.forEach(section => {
+      section.style.opacity = '0';
+      observer.observe(section);
+    });
+  });
+</script>
+
+</body>
+</html>

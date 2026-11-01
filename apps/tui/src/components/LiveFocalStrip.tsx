@@ -1,0 +1,598 @@
+/**
+ * LiveFocalStrip - single horizontal strip above the message list that
+ * always answers "what is happening NOW?"
+ *
+ * One canonical pulse: state + active step on the left, route + context
+ * meter + token count on the right. Border is teal by default and flips
+ * to orange when an approval is pending so the eye lands on it without
+ * a second glance.
+ *
+ * Presentational: the strip itself holds no state. The one motion, the
+ * figure-8 settling into DONE, lives in TurnStateLabel so it re-renders
+ * only the label. Caller owns every value.
+ *
+ * Per TUI North Star v2 PRD snippet 1 (issue #2335).
+ *
+ * Goal-loop integration (issue #2608): the pure LiveFocalStrip stays
+ * untouched. A second component, LiveFocalStripWithGoal, wraps it and
+ * subscribes to /goal events from a GoalClient. It owns:
+ *   - the one-line default display ("Going. Sub-goal x of y...")
+ *   - Ctrl+G chord to expand to the 3-line BRAND.md form
+ *   - ADHD-mode override to stay on the one-liner
+ *   - terminal-state speech fire-once through packages/voice, only when the audio lane allows it
+ *
+ * Splitting the wrapper from the pure strip keeps the existing unit
+ * tests deterministic and makes the goal pathway opt-in per surface.
+ */
+
+import { Box, Text, useInput } from "ink";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+	VERDICT_DONE,
+	VERDICT_STILL_GOING,
+	VERDICT_STOPPED,
+	VERDICT_STUCK,
+	assembleVerdict,
+} from "../../../../packages/eight/go/index.js";
+import { speakIfAllowed } from "../../../../packages/voice/audio-gate.js";
+import { FIGURE_EIGHT_STILL } from "../lib/figure-eight.js";
+import type { GoalClient } from "../lib/goal-client.js";
+import { askedNote } from "../lib/model-truth.js";
+import { SETTLE_HOLD_MS, motionEnabled } from "../lib/motion.js";
+import { METER_CELLS, NOW_LABEL_WIDTH, fitNowStrip } from "../lib/now-strip-layout.js";
+import type { Readiness, ReadinessState } from "../lib/readiness.js";
+import { glyphs } from "../lib/term-caps.js";
+import { t } from "../theme.js";
+import { FigureEight } from "./figure-eight-spinner.js";
+
+type Mode = "Planning" | "Researching" | "Implementing" | "Testing" | "Debugging";
+
+interface LiveFocalStripProps {
+	/**
+	 * Keys-up layout (#4967): one row, no border. The state word and glyph
+	 * carry running and waiting; the row never grows, so the answer keeps its rows.
+	 */
+	compact?: boolean;
+	/** The ^Y mode. Not drawn in the strip (#3123): the footer shows it with
+	 *  its key. Kept so callers and the goal wrapper need no change. */
+	mode: Mode;
+	activeStep: string;
+	route: string;
+	/** The configured model when a reroute ran the turn on `route` instead.
+	 *  Shown dim after the route as "(asked ...)" (#3102). */
+	routeAsked?: string;
+	tokens: string;
+	/** Share of the model's real window in use. Null when there is no
+	 *  percent to show: see `contextState` (#3321). */
+	contextPct: number | null;
+	/** Why there is no percent, or where the window came from. `server`
+	 *  marks the bar with ~ (reported by the local server, not provider
+	 *  metadata); `unknown` shows "? unknown"; `fresh` shows "--" until the
+	 *  first reply is measured. */
+	contextState?: "provider" | "server" | "override" | "unknown" | "fresh";
+	approvalPending?: boolean;
+	/** The agent runs unattended (Infinite): no card can wait on the person,
+	 *  so the border never turns orange. The word is not repeated here: the
+	 *  header chip and the footer perm segment name it (#3238). */
+	autonomous?: boolean;
+	/** True when the agent is actively processing. Drives the NOW vs READY
+	 *  state label - we don't shout "NOW" at an idle TUI. */
+	isProcessing?: boolean;
+	/** When the last turn ended (epoch ms), and whether it ended cleanly.
+	 *  A clean end shows DONE until the next turn starts. */
+	lastTurnEndedAt?: number | null;
+	lastTurnSuccess?: boolean | null;
+	/** False (Ctrl+A) stills the spinner and skips the settle beat. */
+	animate?: boolean;
+	/** Columns the strip takes, borders included. When known, the route and
+	 *  meter give way before the state text is ever cut (audit #9). */
+	width?: number;
+	/** Can the active tab run a turn (lib/readiness.ts, #3290)? When not,
+	 *  the state word is NO MODEL (or CHECK while the first probe or build is
+	 *  out), the middle says why, and the route slot stays empty: no model is
+	 *  named as if it were live. Absent: treated as ready. */
+	readiness?: Readiness;
+}
+
+/** The one line that says no model is set up; the full guide is behind /provider. */
+export const NO_MODEL_HINT = "No model yet. Type /provider to choose one.";
+
+/** Columns the NO MODEL label takes: "○ NO MODEL ". */
+export const NO_MODEL_LABEL_WIDTH = 11;
+
+/**
+ * Render a fixed-width unicode meter from a percent value. Inputs over
+ * 100 or below 0 are clamped so the strip never overflows or underflows.
+ */
+export function meter(percent: number, width = 10): string {
+	const filled = Math.max(0, Math.min(width, Math.round((percent / 100) * width)));
+	return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
+/** The ctx slot, always METER_CELLS wide so the strip layout is unchanged.
+ *  Never a bar without a real window behind it (#3321). */
+export function contextMeterText(
+	pct: number | null,
+	state: "provider" | "server" | "override" | "unknown" | "fresh",
+): string {
+	if (state === "unknown") return "? unknown".padEnd(METER_CELLS);
+	if (state === "fresh" || pct === null) return "--".padEnd(METER_CELLS);
+	return state === "server" ? `${meter(pct, METER_CELLS - 1)}~` : meter(pct, METER_CELLS);
+}
+
+export function LiveFocalStrip({
+	activeStep,
+	route,
+	routeAsked,
+	tokens,
+	contextPct,
+	contextState = "provider",
+	approvalPending = false,
+	autonomous = false,
+	isProcessing = false,
+	lastTurnEndedAt = null,
+	lastTurnSuccess = null,
+	animate = true,
+	width,
+	readiness,
+	compact = false,
+}: LiveFocalStripProps) {
+	// The ^Y mode is not shown here: beside the state it read as a phase the
+	// model was in ("DONE Planning"). The footer carries it with its key
+	// (#3123). Infinite is not repeated here either (#3238): the header chip,
+	// the tab tag and the footer perm segment already name it.
+	const showApprovalBorder = approvalPending && !autonomous;
+	// A running turn or a waiting card outranks readiness: both mean an agent
+	// answered. Otherwise a not-ready agent is never shown as READY (#3290).
+	const blocked =
+		readiness && readiness.state !== "ready" && !isProcessing && !showApprovalBorder
+			? readiness
+			: null;
+	const labelWidth = blocked?.state === "none" ? NO_MODEL_LABEL_WIDTH : NOW_LABEL_WIDTH;
+	const done = isTurnDone(isProcessing, lastTurnEndedAt, lastTurnSuccess);
+	const finished = done && lastTurnEndedAt;
+	// A pending card stops the turn on the person: the strip holds still and
+	// says so, instead of naming the gated tool as if it were running (#3118).
+	const middle = showApprovalBorder
+		? WAITING_STEP
+		: blocked
+			? blocked.state === "none"
+				? NO_MODEL_HINT
+				: blocked.reason
+			: isProcessing
+				? activeStep
+				: finished
+					? `finished ${clock(lastTurnEndedAt)}`
+					: "";
+	// At rest READY says it all: no "idle" beside it (#3238).
+	// The state word ("finished", "waiting") is never cut; an active
+	// step may be, past its first 12 columns.
+	const middleMin =
+		blocked?.state === "none"
+			? middle.length
+			: (isProcessing && !showApprovalBorder) || blocked
+				? Math.min(12, middle.length)
+				: middle.length;
+	// No model can answer: the route slot names none (#3290).
+	const shownRoute = blocked ? "" : route;
+	const fit =
+		width === undefined || blocked?.state === "none"
+			? {
+					middle,
+					route: shownRoute === "-" ? "" : shownRoute,
+					asked: shownRoute && shownRoute !== "-" && routeAsked ? askedNote(routeAsked) : "",
+					meter: blocked?.state !== "none",
+				}
+			: fitNowStrip({
+					width,
+					labelWidth,
+					middle,
+					middleMin,
+					middleShort: showApprovalBorder ? "waiting" : finished ? "finished" : undefined,
+					route: shownRoute,
+					asked: routeAsked,
+					tokens,
+				});
+	return (
+		<Box
+			width="100%"
+			minHeight={isProcessing && !compact ? 3 : 1}
+			// One border style in every state (#3238): colour says running or
+			// waiting, the corners never change. Keys-up draws none (#4967).
+			borderStyle={compact ? undefined : "single"}
+			borderColor={showApprovalBorder ? t.orange : isProcessing ? t.teal : t.frame}
+			paddingX={compact ? 0 : 1}
+			justifyContent="space-between"
+			flexShrink={0}
+			overflow="hidden"
+		>
+			<Box width={labelWidth} flexShrink={0}>
+				<TurnStateLabel
+					waiting={showApprovalBorder}
+					isProcessing={isProcessing}
+					lastTurnEndedAt={lastTurnEndedAt}
+					done={done}
+					animate={animate}
+					notReady={blocked?.state}
+				/>
+			</Box>
+
+			<Box
+				flexGrow={1}
+				flexShrink={1}
+				minWidth={blocked?.state === "none" ? 0 : Math.min(middleMin, fit.middle.length) + 2}
+				paddingX={1}
+			>
+				<Text color={t.textSecondary} wrap={blocked?.state === "none" ? "wrap" : "truncate-end"}>
+					{fit.middle}
+				</Text>
+			</Box>
+
+			<Box flexShrink={0} justifyContent="flex-end">
+				{fit.route ? <Text color={t.steel}>{fit.route}</Text> : null}
+				{fit.asked ? <Text color={t.textTertiary}> {fit.asked}</Text> : null}
+				{fit.meter ? (
+					<>
+						<Text color={t.textTertiary}>{fit.route ? " ctx " : "ctx "}</Text>
+						<Text color={t.steel}>{contextMeterText(contextPct, contextState)}</Text>
+					</>
+				) : null}
+				{tokens && blocked?.state !== "none" ? <Text color={t.textTertiary}> {tokens}</Text> : null}
+			</Box>
+		</Box>
+	);
+}
+
+/** What the NOW strip says while an approval card waits on the person. */
+export const WAITING_STEP = "waiting for your answer";
+
+/** A turn is DONE when nothing runs and the last one ended cleanly. */
+export function isTurnDone(
+	isProcessing: boolean,
+	lastTurnEndedAt: number | null | undefined,
+	lastTurnSuccess: boolean | null | undefined,
+): boolean {
+	return !isProcessing && lastTurnSuccess === true && lastTurnEndedAt != null;
+}
+
+function clock(ms: number): string {
+	return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+/**
+ * The state label, and the one motion in the strip: while a turn runs the
+ * figure-8 spinner turns; when it ends cleanly the spinner holds still on its
+ * crossing frame for SETTLE_HOLD_MS, then resolves into DONE. The state lives
+ * here, not in the strip, so the settle re-renders only this label.
+ */
+export function TurnStateLabel({
+	waiting = false,
+	isProcessing,
+	lastTurnEndedAt,
+	done,
+	animate,
+	notReady,
+}: {
+	/** An approval card is pending: a still mark and WAIT, never the spinner. */
+	waiting?: boolean;
+	isProcessing: boolean;
+	lastTurnEndedAt: number | null;
+	done: boolean;
+	animate: boolean;
+	/** The agent cannot run a turn (#3290): NO MODEL, or CHECK while the
+	 *  first probe is out. Never READY, never the spinner. */
+	notReady?: ReadinessState;
+}) {
+	const moving = motionEnabled(animate);
+	const [settlingFor, setSettlingFor] = useState<number | null>(null);
+	const seenEndRef = useRef<number | null>(lastTurnEndedAt);
+
+	useEffect(() => {
+		if (!done || lastTurnEndedAt == null || lastTurnEndedAt === seenEndRef.current) return;
+		seenEndRef.current = lastTurnEndedAt;
+		if (!moving) return;
+		setSettlingFor(lastTurnEndedAt);
+		const id = setTimeout(() => setSettlingFor(null), SETTLE_HOLD_MS);
+		return () => clearTimeout(id);
+	}, [done, lastTurnEndedAt, moving]);
+
+	const g = glyphs();
+	// Without braille the figure-8 is a plain, still "8".
+	const eight = g.eight;
+	if (waiting) {
+		return (
+			<Text>
+				<Text color={t.orange}>{eight ?? FIGURE_EIGHT_STILL}</Text>
+				<Text color={t.orange} bold>
+					{" WAIT "}
+				</Text>
+			</Text>
+		);
+	}
+	if (isProcessing) {
+		return (
+			<Text>
+				{eight ? (
+					<Text color={t.orange}>{eight}</Text>
+				) : (
+					<FigureEight color={t.orange} animate={moving} />
+				)}
+				<Text color={t.teal}> NOW </Text>
+			</Text>
+		);
+	}
+	// A hollow ring, the glyph for "not there yet": the word carries the
+	// meaning, so NO_COLOR reads the same.
+	if (notReady === "none") {
+		return (
+			<Text color={t.orange} bold>
+				{g.pending} NO MODEL{" "}
+			</Text>
+		);
+	}
+	if (notReady === "checking") return <Text color={t.muted}>{g.pending} CHECK </Text>;
+	// The render that first sees a new clean end already shows the still
+	// frame, so DONE never flashes before the settle beat.
+	const unseen = lastTurnEndedAt !== seenEndRef.current;
+	if (done && moving && (unseen || settlingFor === lastTurnEndedAt)) {
+		return (
+			<Text>
+				<Text color={t.orange}>{eight ?? FIGURE_EIGHT_STILL}</Text>
+				<Text color={t.teal}> NOW </Text>
+			</Text>
+		);
+	}
+	if (done) return <Text color={t.green}>{g.dot} DONE </Text>;
+	return <Text color={t.muted}>{g.diamond} READY </Text>;
+}
+
+export type { LiveFocalStripProps };
+
+// ============================================
+// Goal-loop overlay (issue #2608)
+// ============================================
+
+/**
+ * In-memory snapshot of the goal-loop state the strip needs to render.
+ * Held outside React state until a goal event arrives so the strip
+ * stays at zero overhead in the dominant idle path.
+ */
+export interface GoalStripState {
+	runId: string | null;
+	/** Last terminal verdict, if the run finished. Null while running. */
+	terminal: "done" | "stopped" | "stuck" | null;
+	/** Current sub-goal counter (1-based). */
+	subgoal: { index: number; total: number; text: string } | null;
+	/** Elapsed millis since run started. */
+	elapsedMs: number;
+	/** Total turns observed so far. */
+	turns: number;
+	/** Verdict copy ready for display. */
+	verdictLine: string;
+}
+
+/**
+ * Format an elapsed-time duration as "12s" / "1m24s" / "1h02m".
+ * Compact because the focal strip has very little room.
+ */
+export function formatElapsed(ms: number): string {
+	if (!Number.isFinite(ms) || ms < 0) return "0s";
+	const secs = Math.floor(ms / 1000);
+	if (secs < 60) return `${secs}s`;
+	const mins = Math.floor(secs / 60);
+	const remSecs = secs % 60;
+	if (mins < 60) return `${mins}m${remSecs.toString().padStart(2, "0")}s`;
+	const hours = Math.floor(mins / 60);
+	const remMins = mins % 60;
+	return `${hours}h${remMins.toString().padStart(2, "0")}m`;
+}
+
+/**
+ * Build the single-line goal display per the BRAND.md one-liner spec:
+ *   "Going. Sub-goal x of y: {current}. {elapsed} ●"
+ * Falls back to a /go-aware "Ready." when no run is in flight.
+ */
+export function buildGoalLine(state: GoalStripState): string {
+	if (state.terminal) return state.verdictLine;
+	if (state.subgoal) {
+		return `Going. Sub-goal ${state.subgoal.index} of ${state.subgoal.total}: ${state.subgoal.text}. ${formatElapsed(state.elapsedMs)}`;
+	}
+	if (state.runId) {
+		return `Going. ${formatElapsed(state.elapsedMs)}`;
+	}
+	return "Ready.";
+}
+
+interface LiveFocalStripWithGoalProps extends LiveFocalStripProps {
+	/** Optional goal client to subscribe to. */
+	goalClient?: GoalClient | null;
+	/** ADHD-mode override: stay on the one-liner regardless of expansion. */
+	adhdMode?: boolean;
+	/** Test seam: skip speech even on terminal events. */
+	disableTts?: boolean;
+	/** Test seam: inject initial goal state without driving event listeners. */
+	initialGoalState?: Partial<GoalStripState>;
+}
+
+/**
+ * Goal-aware wrapper around the pure LiveFocalStrip. Subscribes to a
+ * GoalClient and reflects the loop state in a one-line overlay above
+ * the regular strip. Ctrl+G toggles the 3-line expansion; ADHD mode
+ * keeps it collapsed regardless.
+ */
+export function LiveFocalStripWithGoal(props: LiveFocalStripWithGoalProps) {
+	const {
+		goalClient = null,
+		adhdMode = false,
+		disableTts = false,
+		initialGoalState,
+		...stripProps
+	} = props;
+
+	const [expanded, setExpanded] = useState(false);
+	const [goalState, setGoalState] = useState<GoalStripState>(() => ({
+		runId: initialGoalState?.runId ?? null,
+		terminal: initialGoalState?.terminal ?? null,
+		subgoal: initialGoalState?.subgoal ?? null,
+		elapsedMs: initialGoalState?.elapsedMs ?? 0,
+		turns: initialGoalState?.turns ?? 0,
+		verdictLine: initialGoalState?.verdictLine ?? "",
+	}));
+	const startedAtRef = useRef<number | null>(null);
+	const spokenForRunRef = useRef<string | null>(null);
+
+	// Ctrl+G chord toggles the expanded form. Honour ADHD mode by
+	// short-circuiting back to collapsed.
+	useInput(
+		(_input, key) => {
+			if (key.ctrl && _input === "g") {
+				setExpanded((prev) => (adhdMode ? false : !prev));
+			}
+		},
+		{ isActive: true },
+	);
+
+	useEffect(() => {
+		if (adhdMode && expanded) setExpanded(false);
+	}, [adhdMode, expanded]);
+
+	// Subscribe to the goal client. Cleanup tears down listeners.
+	useEffect(() => {
+		if (!goalClient) return;
+		const unsub = goalClient.subscribe({
+			onStarted: (runId) => {
+				startedAtRef.current = Date.now();
+				spokenForRunRef.current = null;
+				setGoalState({
+					runId,
+					terminal: null,
+					subgoal: null,
+					elapsedMs: 0,
+					turns: 0,
+					verdictLine: "",
+				});
+			},
+			onTurn: (event) => {
+				setGoalState((prev) => ({
+					...prev,
+					turns: prev.turns + (event.kind === "turn.completed" ? 1 : 0),
+					elapsedMs: startedAtRef.current ? Date.now() - startedAtRef.current : prev.elapsedMs,
+				}));
+			},
+			onSubgoalEvent: (event) => {
+				const payload = (event.payload ?? {}) as {
+					index?: number;
+					total?: number;
+					text?: string;
+				};
+				const index = payload.index ?? 1;
+				const total = payload.total ?? Math.max(index, 1);
+				const text = payload.text ?? "...";
+				setGoalState((prev) => ({
+					...prev,
+					subgoal: { index, total, text },
+					verdictLine: assembleVerdict("still_going", {
+						kind: "still_going",
+						x: index,
+						y: total,
+					}),
+				}));
+				// Screen-reader-only announce. Ink doesn't emit ARIA, so this
+				// is logged on stderr where assistive readers running over a
+				// terminal multiplexer can be hooked. Voiced output is
+				// reserved for terminal state per accessibility rule.
+				if (!disableTts) {
+					process.stderr.write(`[1;90m[sr] sub-goal ${index} of ${total}: ${text}[0m\n`);
+				}
+			},
+			onDone: (event) => {
+				const kind = event.kind;
+				let terminal: GoalStripState["terminal"];
+				let verdictLine: string;
+				switch (kind) {
+					case "run.completed":
+						terminal = "done";
+						verdictLine = assembleVerdict("done", {
+							kind: "done",
+							n: (event.payload as { turn?: number })?.turn ?? 1,
+						});
+						break;
+					case "run.aborted": {
+						terminal = "stopped";
+						verdictLine = assembleVerdict("stopped", {
+							kind: "stopped",
+							reason: (event.payload as { reason?: string })?.reason ?? "aborted",
+						});
+						break;
+					}
+					case "run.failed": {
+						terminal = "stuck";
+						verdictLine = VERDICT_STUCK;
+						break;
+					}
+					default:
+						return;
+				}
+				setGoalState((prev) => ({ ...prev, terminal, verdictLine }));
+
+				// Terminal-state speech: fire exactly once per run, through the
+				// voice package, only when the audio lane allows it.
+				if (disableTts) return;
+				const runId = goalState.runId ?? "current";
+				if (spokenForRunRef.current === runId) return;
+				spokenForRunRef.current = runId;
+				void speakVerdict(verdictLine);
+			},
+		});
+		return unsub;
+		// goalClient identity changes are the only meaningful resubscribe
+		// trigger; the listener closures intentionally read mutable refs.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [goalClient, adhdMode, disableTts]);
+
+	const goalLine = useMemo(() => buildGoalLine(goalState), [goalState]);
+	const showExpanded = expanded && !adhdMode && goalState.runId !== null;
+	const goalBorderColor = goalState.terminal === "stuck" ? t.orange : t.teal;
+
+	if (!goalState.runId && !goalState.verdictLine) {
+		// No /goal traffic yet. Render only the canonical strip.
+		return <LiveFocalStrip {...stripProps} />;
+	}
+
+	return (
+		<Box flexDirection="column" flexShrink={0}>
+			<Box
+				borderStyle={stripProps.compact ? undefined : "single"}
+				borderColor={goalBorderColor}
+				paddingX={stripProps.compact ? 0 : 1}
+				flexDirection="column"
+			>
+				<Text color={t.textPrimary} wrap="truncate-end">
+					{goalLine} <Text color={t.orange}>●</Text>
+				</Text>
+				{showExpanded && (
+					<>
+						<Text color={t.muted} wrap="truncate-end">
+							turns: {goalState.turns} · elapsed: {formatElapsed(goalState.elapsedMs)}
+						</Text>
+						<Text color={t.muted} wrap="truncate-end">
+							Ctrl+G to collapse · /goal ? for help
+						</Text>
+					</>
+				)}
+			</Box>
+			<LiveFocalStrip {...stripProps} />
+		</Box>
+	);
+}
+
+/**
+ * Fire-and-forget speech for a terminal verdict. Goes through packages/voice
+ * (KittenTTS via python3, else macOS say), gated by the audio lane. A machine
+ * with no engine, or with audio off, stays silent and the TUI stays up (#4721).
+ */
+export function speakVerdict(line: string): Promise<boolean> {
+	return speakIfAllowed(line);
+}
+
+export type { LiveFocalStripWithGoalProps };

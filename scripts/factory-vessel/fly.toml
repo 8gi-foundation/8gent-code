@@ -1,0 +1,12 @@
+app = "eight-factory"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  OLLAMA_HOST = "0.0.0.0:11434"
+
+[[vm]]
+  size = "shared-cpu-4x"
+  memory = "8gb"

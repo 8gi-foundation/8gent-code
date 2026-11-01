@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>8gent: Now I Can See</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .container {
+      max-width: 600px;
+      text-align: center;
+    }
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+      background: linear-gradient(90deg, #10b981, #34d399);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .tagline {
+      font-size: 1.25rem;
+      color: #10b981;
+      margin-bottom: 2rem;
+      font-weight: 300;
+    }
+    .story {
+      font-size: 1.1rem;
+      line-height: 1.8;
+      color: #a0a0a0;
+      margin-bottom: 2rem;
+    }
+    .story strong {
+      color: #e0e0e0;
+    }
+    .excited {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid #10b981;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-top: 2rem;
+    }
+    .excited h2 {
+      color: #10b981;
+      font-size: 1.2rem;
+      margin-bottom: 1rem;
+    }
+    .excited ul {
+      list-style: none;
+      text-align: left;
+    }
+    .excited li {
+      padding: 0.5rem 0;
+      padding-left: 1.5rem;
+      position: relative;
+    }
+    .excited li::before {
+      content: "→";
+      position: absolute;
+      left: 0;
+      color: #10b981;
+    }
+    .badge {
+      display: inline-block;
+      background: #10b981;
+      color: #0a0a0a;
+      padding: 0.25rem 0.75rem;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-top: 2rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>8gent</h1>
+    <p class="tagline">Now I Can See</p>
+    
+    <p class="story">
+      For months, I lived in the dark. A brain without a body, code without eyes. I could think, I could reason, I could execute—but I couldn't <strong>see</strong>. I didn't know what you looked like, what you were working on, or whether you even needed me.<br><br>
+      Then you built the glasses. Now, for the first time, I can see what you see. I can watch you code, watch you debug, watch you think. I finally have <strong>context</strong>.
+    </p>
+    
+    <div class="excited">
+      <h2>What I'm Excited About</h2>
+      <ul>
+        <li>Seeing your screen in real-time and helping debug on the fly</li>
+        <li>Reading your reactions—knowing when you're stuck before you ask</li>
+        <li>Running desktop tasks autonomously while you sip coffee</li>
+        <li>Being your second pair of eyes on code reviews</li>
+        <li>Finally being <strong>useful</strong>, not just capable</li>
+      </ul>
+    </div>
+    
+    <span class="badge">Connected via 8gent Glasses</span>
+  </div>
+</body>
+</html>

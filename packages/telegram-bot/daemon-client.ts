@@ -1,0 +1,310 @@
+/**
+ * @8gent/telegram-bot - Daemon Client
+ *
+ * Thin WebSocket wrapper around the daemon Gateway protocol. Handles auth,
+ * session create/resume, prompt dispatch, and event subscription with
+ * automatic reconnect.
+ *
+ * Used by the production telegram-bridge to drive multi-step tasks against
+ * the AgentPool. Stand-alone tests can swap the underlying socket for a
+ * fake implementation by passing `socketFactory`.
+ */
+
+import { TurnOrigins } from "./turn-origins";
+
+export type DaemonEventName =
+	| "tool:start"
+	| "tool:result"
+	| "agent:thinking"
+	| "agent:stream"
+	| "agent:error"
+	| "memory:saved"
+	| "approval:required"
+	| "approval:closed"
+	| "approval:resolved"
+	| "session:start"
+	| "session:end";
+
+export interface DaemonEvent<P = unknown> {
+	event: DaemonEventName;
+	payload: P;
+}
+
+export interface DaemonClientConfig {
+	url: string;
+	authToken?: string;
+	channel?: string;
+	reconnectDelayMs?: number;
+	pingIntervalMs?: number;
+	socketFactory?: (url: string) => WebSocketLike;
+	/** Register this socket as the approval bridge (#3621). Never logged. */
+	approvalSecret?: string;
+	/**
+	 * This socket's session is where the Telegram conversation lives: tell the daemon so a TUI
+	 * with the operator token can join it (#4834). Only honoured from the registered bridge.
+	 */
+	home?: boolean;
+}
+
+export interface WebSocketLike {
+	readyState: number;
+	send(data: string): void;
+	close(): void;
+	onopen: ((ev?: unknown) => void) | null;
+	onclose: ((ev?: unknown) => void) | null;
+	onerror: ((ev?: unknown) => void) | null;
+	onmessage: ((ev: { data: string | ArrayBuffer }) => void) | null;
+}
+
+const OPEN = 1;
+
+type Listener<E extends DaemonEventName> = (payload: EventPayloads[E]) => void;
+
+export interface EventPayloads {
+	"tool:start": { sessionId: string; tool: string; input: unknown };
+	"tool:result": { sessionId: string; tool: string; output: unknown; durationMs: number };
+	"agent:thinking": { sessionId: string };
+	"agent:stream": { sessionId: string; chunk: string; final?: boolean };
+	"agent:error": { sessionId: string; error: string };
+	"memory:saved": { sessionId: string; key: string };
+	"approval:required": { sessionId: string; tool: string; input: unknown; requestId: string };
+	"approval:closed": { sessionId: string; requestId: string; outcome: "expired" | "replaced" };
+	/** The daemon's verdict on an answer this socket sent (not a bus event). */
+	"approval:resolved": { requestId: string; ok: boolean; reason?: string };
+	"session:start": { sessionId: string; channel: string };
+	"session:end": { sessionId: string; reason: string };
+}
+
+export class DaemonClient {
+	private config: Required<
+		Pick<DaemonClientConfig, "url" | "channel" | "reconnectDelayMs" | "pingIntervalMs">
+	> &
+		DaemonClientConfig;
+	private ws: WebSocketLike | null = null;
+	private sessionId: string | null = null;
+	/** Whose turn each reply belongs to: replies to a TUI turn never reach the adapter (#4834). */
+	private origins = new TurnOrigins();
+	private pingTimer: ReturnType<typeof setInterval> | null = null;
+	private listeners = new Map<DaemonEventName, Set<Listener<DaemonEventName>>>();
+	private connectResolvers: Array<() => void> = [];
+	private connectRejectors: Array<(err: Error) => void> = [];
+	private connecting = false;
+	private closed = false;
+
+	constructor(config: DaemonClientConfig) {
+		this.config = {
+			url: config.url,
+			authToken: config.authToken,
+			channel: config.channel ?? "telegram",
+			reconnectDelayMs: config.reconnectDelayMs ?? 5000,
+			pingIntervalMs: config.pingIntervalMs ?? 10 * 60 * 1000,
+			socketFactory: config.socketFactory,
+			approvalSecret: config.approvalSecret,
+			home: config.home,
+		};
+	}
+
+	/** Open the WebSocket and create (or resume) a session. Resolves once session:created or session:resumed arrives. */
+	connect(): Promise<void> {
+		if (this.ws && this.ws.readyState === OPEN && this.sessionId) {
+			return Promise.resolve();
+		}
+		return new Promise<void>((resolve, reject) => {
+			this.connectResolvers.push(resolve);
+			this.connectRejectors.push(reject);
+			if (!this.connecting) this.openSocket();
+		});
+	}
+
+	private openSocket(): void {
+		this.connecting = true;
+		const factory = this.config.socketFactory ?? defaultSocketFactory;
+		const ws = factory(this.config.url);
+		this.ws = ws;
+
+		ws.onopen = () => {
+			if (this.config.authToken) {
+				this.send({ type: "auth", token: this.config.authToken });
+			}
+			if (this.config.approvalSecret) {
+				this.send({ type: "approvals:register", secret: this.config.approvalSecret });
+			}
+			// Reconnect: resume the session we already own rather than leaking a
+			// new never-evicted agent and dropping the conversation (#3538).
+			if (this.sessionId) {
+				this.send({
+					type: "session:resume",
+					sessionId: this.sessionId,
+					channel: this.config.channel,
+				});
+			} else {
+				this.send({ type: "session:create", channel: this.config.channel });
+			}
+		};
+
+		ws.onmessage = (ev) => {
+			const raw = typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data);
+			let msg: { type: string; [k: string]: unknown };
+			try {
+				msg = JSON.parse(raw);
+			} catch {
+				return;
+			}
+			this.handleMessage(msg);
+		};
+
+		ws.onerror = () => {
+			this.failConnect(new Error("daemon-client: socket error"));
+		};
+
+		ws.onclose = () => {
+			this.stopPing();
+			this.ws = null;
+			// Keep sessionId so the next open resumes it.
+			this.connecting = false;
+			if (!this.closed) {
+				setTimeout(() => {
+					// connect() may already have redialled; never open two sockets.
+					if (!this.closed && !this.ws) this.openSocket();
+				}, this.config.reconnectDelayMs);
+			}
+		};
+	}
+
+	private handleMessage(msg: { type: string; [k: string]: unknown }): void {
+		switch (msg.type) {
+			case "session:created":
+			case "session:resumed":
+				this.sessionId = String(msg.sessionId);
+				this.origins.reset();
+				this.origins.setCapabilities(msg.capabilities);
+				if (this.config.home) this.send({ type: "home:declare" });
+				this.connecting = false;
+				this.startPing();
+				this.resolveConnect();
+				break;
+			case "auth:ok":
+				break;
+			case "auth:fail":
+				this.failConnect(new Error("daemon-client: auth failed"));
+				break;
+			case "event": {
+				const event = msg.event as DaemonEventName;
+				const payload = msg.payload as EventPayloads[DaemonEventName];
+				if (!this.origins.deliver(event, payload, this.config.channel ?? "telegram")) break;
+				this.dispatch(event, payload);
+				break;
+			}
+			case "approval:resolved":
+				this.dispatch("approval:resolved", msg as unknown as EventPayloads["approval:resolved"]);
+				break;
+			case "pong":
+				break;
+		}
+	}
+
+	/** Who started the next turn and where; the daemon trusts it only from the bridge. */
+	turn: { chatId: string; operator: boolean } | null = null;
+
+	/** Send a prompt to the current session. */
+	sendPrompt(text: string): void {
+		this.origins.own();
+		this.send({ type: "prompt", text, ...(this.turn ? { turn: this.turn } : {}) });
+	}
+
+	/** Force a fresh session (e.g. on cancel / new task). */
+	resetSession(): void {
+		// Destroy the old agent first: telegram sessions are never evicted, so
+		// an abandoned one would live until the daemon restarts (#3538).
+		if (this.sessionId) this.send({ type: "session:destroy", sessionId: this.sessionId });
+		this.sessionId = null;
+		this.send({ type: "session:create", channel: this.config.channel });
+	}
+
+	/** Send an approval response back to the daemon. */
+	respondApproval(
+		requestId: string,
+		approved: boolean,
+		opts: { scope?: "chat"; undelivered?: boolean; approver?: string } = {},
+	): void {
+		this.send({ type: "approval:response", requestId, approved, ...opts });
+	}
+
+	/** Subscribe to a daemon event. Returns an unsubscribe function. */
+	on<E extends DaemonEventName>(event: E, handler: Listener<E>): () => void {
+		let set = this.listeners.get(event);
+		if (!set) {
+			set = new Set();
+			this.listeners.set(event, set);
+		}
+		set.add(handler as Listener<DaemonEventName>);
+		return () => set?.delete(handler as Listener<DaemonEventName>);
+	}
+
+	getSessionId(): string | null {
+		return this.sessionId;
+	}
+
+	isOpen(): boolean {
+		return this.ws?.readyState === OPEN;
+	}
+
+	close(): void {
+		this.closed = true;
+		this.stopPing();
+		this.ws?.close();
+		this.ws = null;
+	}
+
+	private send(payload: object): void {
+		if (this.ws && this.ws.readyState === OPEN) {
+			try {
+				this.ws.send(JSON.stringify(payload));
+			} catch {
+				// Connection dropped between readyState check and send.
+			}
+		}
+	}
+
+	private dispatch<E extends DaemonEventName>(event: E, payload: EventPayloads[E]): void {
+		const set = this.listeners.get(event);
+		if (!set) return;
+		set.forEach((handler) => {
+			try {
+				(handler as Listener<E>)(payload);
+			} catch {
+				// One bad listener should not break the others.
+			}
+		});
+	}
+
+	private startPing(): void {
+		this.stopPing();
+		this.pingTimer = setInterval(() => {
+			this.send({ type: "ping" });
+		}, this.config.pingIntervalMs);
+	}
+
+	private stopPing(): void {
+		if (this.pingTimer) {
+			clearInterval(this.pingTimer);
+			this.pingTimer = null;
+		}
+	}
+
+	private resolveConnect(): void {
+		const resolvers = this.connectResolvers.splice(0);
+		this.connectRejectors.length = 0;
+		for (const r of resolvers) r();
+	}
+
+	private failConnect(err: Error): void {
+		const rejectors = this.connectRejectors.splice(0);
+		this.connectResolvers.length = 0;
+		for (const r of rejectors) r(err);
+	}
+}
+
+function defaultSocketFactory(url: string): WebSocketLike {
+	return new WebSocket(url) as unknown as WebSocketLike;
+}

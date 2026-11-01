@@ -1,0 +1,590 @@
+/**
+ * @8gent/voice — Voice Chat Loop
+ *
+ * Half-duplex voice conversation: Listen -> Transcribe -> Agent -> Speak -> Listen.
+ * Uses sox's built-in silence detection to auto-stop recording when you stop talking.
+ * Supports interrupt (kill TTS mid-speech via ESC).
+ *
+ * Usage:
+ * ```ts
+ * const chat = new VoiceChatLoop({ engine, onMessage, voice: "Daniel" });
+ * await chat.start();
+ * // ... runs until chat.stop() or error
+ * ```
+ */
+
+import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { VoiceEngine } from "./index.js";
+import { type TTSEngine, getTTSEngine } from "./tts-engine.js";
+import type { TTSProcess } from "./tts-engine.js";
+import type { TranscriptEvent } from "./types.js";
+
+// ============================================
+// Types
+// ============================================
+
+export type VoiceChatState =
+	| "idle"
+	| "listening"
+	| "transcribing"
+	| "thinking"
+	| "speaking"
+	| "stopping";
+
+export interface VoiceChatConfig {
+	/** VoiceEngine instance (STT) */
+	engine: VoiceEngine;
+	/** Callback when user transcript is ready — return agent response text */
+	onMessage: (transcript: string) => Promise<string>;
+	/** macOS voice name for TTS (default: Daniel) */
+	voice?: string;
+	/** Speech rate in words per minute (default: 200) */
+	rate?: number;
+	/** Silence duration before auto-stop recording (ms, default: 1500) */
+	silenceMs?: number;
+	/** Callback for state changes (for UI updates) */
+	onStateChange?: (state: VoiceChatState, detail?: string) => void;
+	/** Callback for errors */
+	onError?: (error: string) => void;
+	/** Max TTS text length (default: 500 chars) */
+	maxSpeakLength?: number;
+	/** Heard-only voice memory (#3428). Default: EIGHT_VOICE_HEARD_ONLY=1, off otherwise. */
+	heardOnly?: boolean;
+}
+
+export interface VoiceChatEvents {
+	"state-change": [VoiceChatState, string?];
+	"user-said": [string];
+	"agent-said": [string];
+	/** Heard-only mode: a reply was cut off; this is the part that was played, marked. */
+	"agent-heard": [string];
+	error: [string];
+	stopped: [];
+}
+
+// ============================================
+// Voice Chat Loop
+// ============================================
+
+export class VoiceChatLoop {
+	private engine: VoiceEngine;
+	private onMessage: (transcript: string) => Promise<string>;
+	private voice: string;
+	private rate: number;
+	private silenceMs: number;
+	private maxSpeakLength: number;
+	private onStateChange?: (state: VoiceChatState, detail?: string) => void;
+	private onError?: (error: string) => void;
+
+	private state: VoiceChatState = "idle";
+	private running = false;
+	private ttsProcess: TTSProcess | null = null;
+	private recProcess: { kill: () => void; exited: Promise<number> } | null = null;
+	private listeners: Map<string, Array<(...args: unknown[]) => void>> = new Map();
+	private ttsEngine: TTSEngine;
+	private heardOnly: boolean;
+	private interruptSeq = 0;
+	private errorGate = createErrorGate();
+
+	/** Report an error to the UI unless the same one was reported in the last 5 s. */
+	private reportError(msg: string): void {
+		if (this.errorGate(msg)) this.onError?.(msg);
+	}
+
+	constructor(config: VoiceChatConfig) {
+		this.engine = config.engine;
+		this.onMessage = config.onMessage;
+		this.voice = config.voice ?? "Daniel";
+		this.rate = config.rate ?? 200;
+		this.silenceMs = config.silenceMs ?? 1500;
+		this.maxSpeakLength = config.maxSpeakLength ?? 500;
+		this.onStateChange = config.onStateChange;
+		this.onError = config.onError;
+		this.ttsEngine = getTTSEngine();
+		this.heardOnly = config.heardOnly ?? isHeardOnlyEnabled();
+	}
+
+	// ---- Public API ----
+
+	getState(): VoiceChatState {
+		return this.state;
+	}
+
+	isRunning(): boolean {
+		return this.running;
+	}
+
+	/**
+	 * Start the voice chat loop. Runs until stop() is called.
+	 * Uses non-blocking scheduling to avoid starving the React event loop.
+	 */
+	async start(): Promise<void> {
+		if (this.running) return;
+		this.running = true;
+		this.setState("listening");
+
+		// We use sox's built-in silence detection instead of VAD
+		// (VoiceEngine's audio levels are simulated, not real)
+
+		// Non-blocking loop — yield to event loop between turns
+		const scheduleNextTurn = async () => {
+			if (!this.running) {
+				this.setState("idle");
+				this.emit("stopped");
+				return;
+			}
+
+			try {
+				await this.runOneTurn();
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				if (this.errorGate(msg)) {
+					this.onError?.(msg);
+					this.emit("error", msg);
+				}
+				if (err instanceof VoiceChatFatalError) this.running = false;
+				else if (this.running) await sleep(1000);
+			}
+
+			// Yield to event loop before scheduling next turn
+			if (this.running) {
+				setTimeout(scheduleNextTurn, 50);
+			} else {
+				this.setState("idle");
+				this.emit("stopped");
+			}
+		};
+
+		// Start first turn after yielding to let React finish rendering
+		setTimeout(scheduleNextTurn, 100);
+	}
+
+	/**
+	 * Stop the voice chat loop.
+	 */
+	async stop(): Promise<void> {
+		this.running = false;
+		this.setState("stopping");
+		try {
+			this.recProcess?.kill();
+		} catch {}
+
+		// Kill any in-flight TTS or recording
+		await this.killTTS();
+		this.killRecording();
+	}
+
+	private killRecording(): void {
+		if (this.recProcess) {
+			try {
+				this.recProcess.kill();
+			} catch {}
+			this.recProcess = null;
+		}
+	}
+
+	/**
+	 * Interrupt the agent mid-speech and go back to listening.
+	 */
+	async interrupt(): Promise<void> {
+		this.interruptSeq++;
+		await this.killTTS();
+		// Loop will continue to next turn (listening)
+	}
+
+	// ---- Event emitter (minimal) ----
+
+	on<K extends keyof VoiceChatEvents>(
+		event: K,
+		listener: (...args: VoiceChatEvents[K]) => void,
+	): this {
+		const existing = this.listeners.get(event) ?? [];
+		existing.push(listener as (...args: unknown[]) => void);
+		this.listeners.set(event, existing);
+		return this;
+	}
+
+	private emit<K extends keyof VoiceChatEvents>(event: K, ...args: VoiceChatEvents[K]): void {
+		const fns = this.listeners.get(event);
+		if (fns) for (const fn of fns) fn(...args);
+	}
+
+	// ---- Internal ----
+
+	private setState(state: VoiceChatState, detail?: string): void {
+		const prev = this.state;
+		this.state = state;
+		if (prev !== state) {
+			this.onStateChange?.(state, detail);
+			this.emit("state-change", state, detail);
+		}
+	}
+
+	/**
+	 * Run one turn of the voice conversation:
+	 * 1. Listen (record until VAD silence)
+	 * 2. Transcribe
+	 * 3. Send to agent
+	 * 4. Speak response
+	 */
+	private async runOneTurn(): Promise<void> {
+		if (!this.running) return;
+
+		// 1. LISTEN — start recording, wait for VAD to auto-stop
+		this.setState("listening");
+		const transcript = await this.listenForSpeech();
+		if (!transcript || !this.running) return;
+
+		this.emit("user-said", transcript);
+
+		// 2. THINK — send to agent, wait for response
+		this.setState("thinking", transcript);
+		const response = await this.onMessage(transcript);
+		if (!response || !this.running) return;
+
+		this.emit("agent-said", response);
+
+		// 3. SPEAK — play TTS, can be interrupted
+		this.setState("speaking");
+		await this.speakText(response);
+	}
+
+	/**
+	 * Record audio using sox with built-in silence detection, then transcribe.
+	 * Sox auto-stops when it detects silence after speech.
+	 * Returns transcript text, or null if empty/cancelled.
+	 */
+	private async listenForSpeech(): Promise<string | null> {
+		const wavPath = join(tmpdir(), `8gent-voicechat-${Date.now()}.wav`);
+		const silenceSec = (this.silenceMs / 1000).toFixed(1);
+
+		try {
+			// Use sox rec with silence detection:
+			//   silence 1 0.1 3%  → wait for speech to begin (above 3% for 0.1s)
+			//   1 <silenceSec> 3% → stop after <silenceSec> seconds of silence
+			const recProc = Bun.spawn(
+				[
+					"rec",
+					"-q",
+					"-r",
+					"16000",
+					"-c",
+					"1",
+					"-b",
+					"16",
+					"-t",
+					"wav",
+					wavPath,
+					"silence",
+					"1",
+					"0.1",
+					"3%",
+					"1",
+					silenceSec,
+					"3%",
+				],
+				{
+					stdout: "ignore",
+					stderr: "pipe",
+					env: process.env,
+				},
+			);
+			this.recProcess = recProc;
+			const recStderr = new Response(recProc.stderr as ReadableStream).text().catch(() => "");
+
+			// Wait for sox to finish (it auto-stops on silence) or timeout
+			const exitCode = await Promise.race([
+				this.recProcess.exited,
+				sleep(30_000).then(() => {
+					// Timeout — force stop
+					try {
+						this.recProcess?.kill();
+					} catch {}
+					return -1;
+				}),
+			]);
+
+			this.recProcess = null;
+
+			// Check if recording was cancelled
+			if (!this.running) {
+				cleanupFile(wavPath);
+				return null;
+			}
+
+			// sox failed outright (no mic permission, no input device): say so and stop,
+			// instead of retrying silently every second.
+			if (exitCode !== 0 && exitCode !== -1 && exitCode < 128) {
+				const why = (await recStderr).trim().split("\n")[0] ?? "";
+				cleanupFile(wavPath);
+				throw new VoiceChatFatalError(describeRecFailure(exitCode, why));
+			}
+
+			// Check if file exists and has content
+			if (!existsSync(wavPath)) {
+				this.reportError("No audio was recorded. Check that your microphone is the system input.");
+				return null;
+			}
+
+			// Transcribe the recorded audio
+			this.setState("transcribing");
+			const result = await this.transcribeFile(wavPath);
+			cleanupFile(wavPath);
+
+			return result;
+		} catch (err) {
+			this.recProcess = null;
+			cleanupFile(wavPath);
+			if (err instanceof VoiceChatFatalError) throw err;
+			const msg = err instanceof Error ? err.message : String(err);
+			this.reportError(`Recording error: ${msg}`);
+			return null;
+		}
+	}
+
+	/**
+	 * Transcribe a WAV file using the VoiceEngine's transcription pipeline.
+	 * Tries local whisper.cpp first, falls back to cloud.
+	 */
+	private async transcribeFile(wavPath: string): Promise<string | null> {
+		try {
+			// Import transcription functions directly
+			const { transcribeLocal, findWhisperBinary } = await import("./transcriber.js");
+
+			const binaryPath = await findWhisperBinary();
+			if (!binaryPath) {
+				// Try cloud fallback
+				const { transcribeCloud, isCloudAvailable } = await import("./cloud-transcriber.js");
+				if (isCloudAvailable()) {
+					const result = await transcribeCloud(wavPath, {
+						apiKey: process.env.OPENAI_API_KEY ?? "",
+						language: "en",
+					});
+					if (result?.text) {
+						this.engine.emit("final-transcript", result);
+						return result.text.trim() || null;
+					}
+				}
+				this.reportError("No whisper binary found. Install: brew install whisper-cpp");
+				return null;
+			}
+
+			// Same model resolution as Ctrl+R dictation: whichever is installed, largest first.
+			const modelPath = await this.engine.ensureModelPath();
+			const result = await transcribeLocal(wavPath, {
+				binaryPath,
+				modelPath,
+				language: "en",
+				timeoutMs: 30000,
+			});
+
+			if (result?.text) {
+				this.engine.emit("final-transcript", result);
+				return result.text.trim() || null;
+			}
+
+			return null;
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			this.reportError(`Transcription error: ${msg}`);
+			return null;
+		}
+	}
+
+	/**
+	 * Speak text using macOS `say` command (non-blocking, killable).
+	 * Splits long text into sentences for more natural delivery.
+	 */
+	private async speakText(text: string): Promise<void> {
+		// Clean and truncate
+		const clean = text
+			.replace(/\[_EOT_\]/g, "")
+			.replace(/<\|.*?\|>/g, "")
+			.replace(/```[\s\S]*?```/g, " code block ")
+			.replace(/[*_~`#]/g, "")
+			.replace(/\bhttps?:\/\/\S+/g, " link ")
+			.replace(/\n+/g, ". ")
+			.replace(/\s+/g, " ")
+			.trim()
+			.slice(0, this.maxSpeakLength);
+
+		if (!clean) return;
+
+		// Split into sentence chunks for more responsive delivery
+		const chunks = splitIntoSentences(clean);
+		const startSeq = this.interruptSeq;
+		let heard = 0;
+
+		for (const chunk of chunks) {
+			if (!this.running) break;
+			if (this.heardOnly && this.interruptSeq !== startSeq) break;
+			const seq = this.interruptSeq;
+
+			try {
+				this.ttsProcess = await this.ttsEngine.speak(chunk, {
+					voice: this.voice,
+					rate: this.rate,
+				});
+				await this.ttsProcess.exited;
+				this.ttsProcess = null;
+			} catch {
+				// Process was killed (interrupt) — that's fine
+				this.ttsProcess = null;
+				break;
+			}
+			// A chunk counts as heard only if it ended with no interrupt or stop in between.
+			if (this.interruptSeq === seq && this.running) heard++;
+		}
+
+		// Trim only when the user cut playback off (interrupt or stop), never on a TTS failure.
+		const cutOff = this.interruptSeq !== startSeq || !this.running;
+		if (this.heardOnly && cutOff) {
+			const kept = heardOnlyText(chunks, heard);
+			if (kept !== null) this.emit("agent-heard", kept);
+		}
+	}
+
+	/**
+	 * Kill any in-flight TTS process.
+	 */
+	private async killTTS(): Promise<void> {
+		if (this.ttsProcess) {
+			try {
+				this.ttsProcess.kill();
+				await this.ttsProcess.exited;
+			} catch {}
+			this.ttsProcess = null;
+		}
+		// Use engine-level interrupt to clean up provider-specific processes
+		await this.ttsEngine.interrupt();
+	}
+}
+
+// ============================================
+// Utilities
+// ============================================
+
+/**
+ * Lets a message through unless the same text was let through within windowMs.
+ * A rec that exits instantly would otherwise add one message per loop turn.
+ */
+export function createErrorGate(
+	windowMs = 5000,
+	now: () => number = Date.now,
+): (msg: string) => boolean {
+	let last = "";
+	let lastAt = Number.NEGATIVE_INFINITY;
+	return (msg) => {
+		const t = now();
+		if (msg === last && t - lastAt < windowMs) return false;
+		last = msg;
+		lastAt = t;
+		return true;
+	};
+}
+
+/** A failure retrying cannot fix (mic blocked, sox broken). Ends the loop after reporting. */
+export class VoiceChatFatalError extends Error {}
+
+/** Plain message for a failed `rec` run, with the one place to fix it. */
+export function describeRecFailure(exitCode: number, stderrLine: string): string {
+	const detail = stderrLine ? ` (${stderrLine})` : "";
+	return `Could not record from the microphone: sox exited with code ${exitCode}${detail}. Allow your terminal under System Settings > Privacy & Security > Microphone, then run /voice chat again.`;
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cleanupFile(path: string): void {
+	try {
+		if (existsSync(path)) unlinkSync(path);
+	} catch {}
+}
+
+/** Marker appended to a reply the user cut off (#3428). */
+export const HEARD_ONLY_MARK = "[interrupted]";
+
+/** EIGHT_VOICE_HEARD_ONLY=1 turns heard-only voice memory on. Anything else is off. */
+export function isHeardOnlyEnabled(env: Record<string, string | undefined> = process.env): boolean {
+	return env.EIGHT_VOICE_HEARD_ONLY === "1";
+}
+
+/**
+ * What history should keep after playback: the chunks that finished, plus the
+ * mark. Returns null when every chunk was played, meaning leave history alone.
+ * Granularity is the TTS sentence chunk; no word timing.
+ */
+export function heardOnlyText(chunks: string[], heardCount: number): string | null {
+	if (heardCount >= chunks.length) return null;
+	const said = chunks.slice(0, heardCount).join(" ");
+	return said ? `${said} ${HEARD_ONLY_MARK}` : HEARD_ONLY_MARK;
+}
+
+/** The agent surface heard-only memory needs. `Agent` in packages/eight satisfies it. */
+export interface HeardOnlyHistory {
+	getHistoryLength(): number;
+	getMessageHistory(): Array<{ role: string; content: string }>;
+	amendLastAssistantMessage(content: string, expectedOriginal: string): boolean;
+}
+
+/**
+ * Remembers the reply a voice turn added to history, so a cut-off amends that
+ * reply and nothing else (#3428). begin() before the agent call, commit() only
+ * after it succeeds, amend() on agent-heard. A failed, skipped or reply-less
+ * turn leaves nothing to amend.
+ */
+export class VoiceReplyTracker {
+	private produced: string | null = null;
+	private before = Number.POSITIVE_INFINITY;
+
+	begin(agent: HeardOnlyHistory | null): void {
+		this.produced = null;
+		this.before = agent ? agent.getHistoryLength() : Number.POSITIVE_INFINITY;
+	}
+
+	/**
+	 * `response` is what the final agent.chat() returned, byte-identical to the
+	 * reply it pushed. Record it only if it is still the newest assistant message
+	 * added since begin(), so a typed reply that landed meanwhile is never taken.
+	 */
+	commit(agent: HeardOnlyHistory, response: string): void {
+		if (!response) return;
+		const history = agent.getMessageHistory();
+		for (let i = history.length - 1; i >= this.before; i--) {
+			if (history[i]?.role === "assistant") {
+				if (history[i]?.content === response) this.produced = response;
+				return;
+			}
+		}
+	}
+
+	amend(agent: HeardOnlyHistory | null, heard: string): boolean {
+		const expected = this.produced;
+		this.produced = null;
+		if (!agent || expected === null) return false;
+		return agent.amendLastAssistantMessage(heard, expected);
+	}
+}
+
+/**
+ * Split text into sentence-like chunks for chunked TTS delivery.
+ */
+function splitIntoSentences(text: string): string[] {
+	const raw = text.split(/(?<=[.!?])\s+/);
+	const chunks: string[] = [];
+	let current = "";
+
+	for (const part of raw) {
+		if (`${current} ${part}`.length > 120 && current) {
+			chunks.push(current.trim());
+			current = part;
+		} else {
+			current += (current ? " " : "") + part;
+		}
+	}
+	if (current.trim()) chunks.push(current.trim());
+	return chunks.length ? chunks : [text];
+}

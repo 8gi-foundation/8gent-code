@@ -1,0 +1,8 @@
+{
+	"asset": "dj-{tool}-{target}{ext}",
+	"targets": {
+		"mpv": {},
+		"yt-dlp": {},
+		"ffmpeg": {}
+	}
+}

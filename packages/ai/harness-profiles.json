@@ -1,0 +1,19 @@
+{
+	"qwen3.8:27b-mlx": {
+		"maxSteps": 50,
+		"nudgeFraction": 0.6,
+		"maxOutputTokens": 4096,
+		"think": false,
+		"why": "think false (#4462): local run 2026-10-19_181205 sigi-dev-aider-py-a (main 06bbac38) FAIL 12/15 turn_timeout, one /v1 request ran 486 s (t=152 to 638) with no tool call, because requests set no effort and the Ollama qwen3.8 renderer defaults to xhigh; the reasoning is generated at local speed and discarded. Cloud qwen/qwen3.8-27b passed the same task 15/15 in 134 s. Local runs 19 Oct, main 390d63eb/fd3ddf28. sigi-dev-a11y-b (2026-10-19_141247) failed 15/17 turn_timeout: the judge gives the turn 1200 s and the default nudge fires at 0.8 x 1500 s = 1200 s, the same second; its slowest step was 123 s, so the wont-fit line (1425 s - 2 x 123 s) was also too late. At 0.6 the notice lands at 900 s with about two slow steps left. arc1-b/arc2-a steps run 256-464 s, where the wont-fit rule already fires before 0.6, so this entry does not change those runs. No run hit the step cap (most tool calls 29); 50 matches what the TUI already passes. 4096 is today's local cap."
+	},
+	"qwen/qwen3.8-27b": {
+		"maxSteps": 50,
+		"nudgeFraction": 0.6,
+		"maxOutputTokens": 8192,
+		"why": "Cloud rehearsal 18 Oct (state/cloud-night/matrix-20261018.tsv): sigi-dev-a11y-b qwen FAIL 15/17 turn_timeout where minimax passed 17/17. Same weights and same 1200 s judge window as the local entry, so the same earlier nudge. 8192 is today's cloud cap; 50 matches the TUI."
+	},
+	"minimax/minimax-m3": {
+		"maxOutputTokens": 16384,
+		"why": "Cloud runs 19 Oct, sigi-dev-arc2-a (runs-cloud 2026-10-19_152316, _153418, _153911): every turn that ended empty was a step with finishReason length at exactly 8192 completion tokens, 8191 of them reasoning in _153418 and _153911, so no text or tool call was left. The #4446 auto-continue re-asked under the same cap and hit it again. 32768 was tried (_154821): the native path is generateText, so one step sends no progress until it ends, and a single reasoning step hit the 300 s idle gap. The slowest cut step ran 8192 tokens in 81 s (about 100 tok/s), so 16384 fits in about 164 s. Steps and nudge stay at defaults."
+	}
+}

@@ -1,0 +1,1131 @@
+{
+	"anchor": "551ef3360acdb947cee54830af5a2e17257f8497",
+	"minedBy": "packages/decide/eval/locate-mine.ts",
+	"counts": {
+		"identifier": 70,
+		"path": 35,
+		"string": 35
+	},
+	"queries": [
+		{
+			"id": "identifier-001",
+			"class": "identifier",
+			"query": "SYSTEM_ONE_WARMUP_COMMAND",
+			"file": "packages/permissions/system-one-gate.ts",
+			"line": 194,
+			"commit": "4571a53a34504614752ad2eda977682424e747f4"
+		},
+		{
+			"id": "identifier-002",
+			"class": "identifier",
+			"query": "startSystemOneWarmup",
+			"file": "packages/permissions/system-one-gate.ts",
+			"line": 204,
+			"commit": "4571a53a34504614752ad2eda977682424e747f4"
+		},
+		{
+			"id": "identifier-003",
+			"class": "identifier",
+			"query": "BufferedTextInputProps",
+			"file": "apps/tui/src/components/buffered-text-input.tsx",
+			"line": 19,
+			"commit": "d92277883b0bea483a1f3837e2b6e96ccc41fb41"
+		},
+		{
+			"id": "identifier-004",
+			"class": "identifier",
+			"query": "BufferedTextInput",
+			"file": "apps/tui/src/components/buffered-text-input.tsx",
+			"line": 27,
+			"commit": "d92277883b0bea483a1f3837e2b6e96ccc41fb41"
+		},
+		{
+			"id": "identifier-005",
+			"class": "identifier",
+			"query": "PROBE_TIMEOUT_MS",
+			"file": "apps/tui/src/lib/provider-readiness.ts",
+			"line": 21,
+			"commit": "1e9a40c6288b5d37673dae9fd3577d4d2ca6694c"
+		},
+		{
+			"id": "identifier-006",
+			"class": "identifier",
+			"query": "LocalProviderEndpoint",
+			"file": "apps/tui/src/lib/provider-readiness.ts",
+			"line": 23,
+			"commit": "1e9a40c6288b5d37673dae9fd3577d4d2ca6694c"
+		},
+		{
+			"id": "string-001",
+			"class": "string",
+			"query": "model results have no row for an eval command; re-run eval/run.ts",
+			"file": "packages/decide/eval/rules-eval.ts",
+			"line": 96,
+			"commit": "0f4399108adde93def59499772421b35678b9b50"
+		},
+		{
+			"id": "identifier-007",
+			"class": "identifier",
+			"query": "stricterVerdict",
+			"file": "packages/decide/guard.ts",
+			"line": 145,
+			"commit": "0f4399108adde93def59499772421b35678b9b50"
+		},
+		{
+			"id": "identifier-008",
+			"class": "identifier",
+			"query": "modelGuard",
+			"file": "packages/decide/guard.ts",
+			"line": 205,
+			"commit": "0f4399108adde93def59499772421b35678b9b50"
+		},
+		{
+			"id": "identifier-009",
+			"class": "identifier",
+			"query": "pathFor",
+			"file": "packages/core/path-within.ts",
+			"line": 5,
+			"commit": "50a154121e8326a4e1f2c66978f626e9a5082659"
+		},
+		{
+			"id": "identifier-010",
+			"class": "identifier",
+			"query": "isPathWithin",
+			"file": "packages/core/path-within.ts",
+			"line": 18,
+			"commit": "50a154121e8326a4e1f2c66978f626e9a5082659"
+		},
+		{
+			"id": "identifier-011",
+			"class": "identifier",
+			"query": "PROMPT_CONTROL_PATTERNS",
+			"file": "packages/decide/guard.ts",
+			"line": 37,
+			"commit": "2d9e7f0e95b93e5d89b5bb164a8c9bf16b38d89b"
+		},
+		{
+			"id": "identifier-012",
+			"class": "identifier",
+			"query": "promptControlText",
+			"file": "packages/decide/guard.ts",
+			"line": 48,
+			"commit": "2d9e7f0e95b93e5d89b5bb164a8c9bf16b38d89b"
+		},
+		{
+			"id": "string-002",
+			"class": "string",
+			"query": "\"stub backend exploded\"",
+			"file": "packages/permissions/system-one-gate.test.ts",
+			"line": 55,
+			"commit": "2d9e7f0e95b93e5d89b5bb164a8c9bf16b38d89b"
+		},
+		{
+			"id": "string-003",
+			"class": "string",
+			"query": "test fixture: existing deny",
+			"file": "packages/permissions/system-one-gate.test.ts",
+			"line": 130,
+			"commit": "2d9e7f0e95b93e5d89b5bb164a8c9bf16b38d89b"
+		},
+		{
+			"id": "string-004",
+			"class": "string",
+			"query": "\"network disabled in security tests\"",
+			"file": "tests/security/decide-guard.test.ts",
+			"line": 37,
+			"commit": "24f8ed6f56d0370a0981d0c84c70056f70049988"
+		},
+		{
+			"id": "identifier-013",
+			"class": "identifier",
+			"query": "HOMEDIR_BASELINE",
+			"file": "tests/security/fixtures/homedir-baseline.ts",
+			"line": 15,
+			"commit": "24f8ed6f56d0370a0981d0c84c70056f70049988"
+		},
+		{
+			"id": "string-005",
+			"class": "string",
+			"query": "a healthy, empty store returns [] and does not throw",
+			"file": "tests/security/recall-fail-closed.test.ts",
+			"line": 48,
+			"commit": "24f8ed6f56d0370a0981d0c84c70056f70049988"
+		},
+		{
+			"id": "string-006",
+			"class": "string",
+			"query": "\"last input must request generateNext\"",
+			"file": "packages/decide/backends/llamacpp.test.ts",
+			"line": 102,
+			"commit": "432a872bd7811c413f41c67ea23cb53e1655a909"
+		},
+		{
+			"id": "identifier-014",
+			"class": "identifier",
+			"query": "LlamaSequenceLike",
+			"file": "packages/decide/backends/llamacpp.ts",
+			"line": 52,
+			"commit": "432a872bd7811c413f41c67ea23cb53e1655a909"
+		},
+		{
+			"id": "identifier-015",
+			"class": "identifier",
+			"query": "LlamaContextLike",
+			"file": "packages/decide/backends/llamacpp.ts",
+			"line": 59,
+			"commit": "432a872bd7811c413f41c67ea23cb53e1655a909"
+		},
+		{
+			"id": "string-007",
+			"class": "string",
+			"query": "llamacpp backend needs a modelPath",
+			"file": "packages/decide/backends/llamacpp.ts",
+			"line": 355,
+			"commit": "432a872bd7811c413f41c67ea23cb53e1655a909"
+		},
+		{
+			"id": "identifier-016",
+			"class": "identifier",
+			"query": "DEFAULT_LAYA_URL",
+			"file": "packages/decide/backends/laya.ts",
+			"line": 25,
+			"commit": "344fb238cd016167524f86ab139c4aa74ad8c431"
+		},
+		{
+			"id": "identifier-017",
+			"class": "identifier",
+			"query": "LayaBackendOptions",
+			"file": "packages/decide/backends/laya.ts",
+			"line": 28,
+			"commit": "344fb238cd016167524f86ab139c4aa74ad8c431"
+		},
+		{
+			"id": "string-008",
+			"class": "string",
+			"query": "\"laya: response has no answers array\"",
+			"file": "packages/decide/backends/laya.ts",
+			"line": 107,
+			"commit": "344fb238cd016167524f86ab139c4aa74ad8c431"
+		},
+		{
+			"id": "string-009",
+			"class": "string",
+			"query": "ollama backend needs a model",
+			"file": "packages/decide/backends/ollama.ts",
+			"line": 170,
+			"commit": "344fb238cd016167524f86ab139c4aa74ad8c431"
+		},
+		{
+			"id": "identifier-018",
+			"class": "identifier",
+			"query": "MemoryRecallError",
+			"file": "packages/memory/recall-error.ts",
+			"line": 12,
+			"commit": "c621f895debd8093c689069efa17433f0e055db7"
+		},
+		{
+			"id": "identifier-019",
+			"class": "identifier",
+			"query": "DEEPSEEK_FLASH",
+			"file": "packages/eight/clients/deepseek.ts",
+			"line": 19,
+			"commit": "fe97632939d753574854e859a3b1c23b1308195c"
+		},
+		{
+			"id": "identifier-020",
+			"class": "identifier",
+			"query": "buildFixture",
+			"file": "benchmarks/memory/fixture.ts",
+			"line": 84,
+			"commit": "9f8782854c63c088249fc6bd3a95d7c33b1e2651"
+		},
+		{
+			"id": "identifier-021",
+			"class": "identifier",
+			"query": "PROBE_TOKENS",
+			"file": "benchmarks/memory/fixture.ts",
+			"line": 176,
+			"commit": "9f8782854c63c088249fc6bd3a95d7c33b1e2651"
+		},
+		{
+			"id": "string-010",
+			"class": "string",
+			"query": "\"Q13 must declare expectedRankWithContext\"",
+			"file": "benchmarks/memory/recall-eval.test.ts",
+			"line": 316,
+			"commit": "9f8782854c63c088249fc6bd3a95d7c33b1e2651"
+		},
+		{
+			"id": "identifier-022",
+			"class": "identifier",
+			"query": "djKey",
+			"file": "apps/tui/src/components/DjDeck.tsx",
+			"line": 208,
+			"commit": "755a08e865cdaaf5f47dd7feb07e50f897fbf078"
+		},
+		{
+			"id": "identifier-023",
+			"class": "identifier",
+			"query": "mpvIpcPath",
+			"file": "packages/music/dj.ts",
+			"line": 33,
+			"commit": "38a999994b23f1e72af95c683a216299da2a342c"
+		},
+		{
+			"id": "identifier-024",
+			"class": "identifier",
+			"query": "installHint",
+			"file": "packages/music/dj.ts",
+			"line": 47,
+			"commit": "38a999994b23f1e72af95c683a216299da2a342c"
+		},
+		{
+			"id": "identifier-025",
+			"class": "identifier",
+			"query": "HomeEnv",
+			"file": "packages/core/home.ts",
+			"line": 36,
+			"commit": "9050b5d9b0ca70f7e9a27d81fb0cf88c657c4327"
+		},
+		{
+			"id": "identifier-026",
+			"class": "identifier",
+			"query": "resolveHome",
+			"file": "packages/core/home.ts",
+			"line": 47,
+			"commit": "e46ad475ab962f72a23903a7d5de8b5aa3c63ccc"
+		},
+		{
+			"id": "identifier-027",
+			"class": "identifier",
+			"query": "toLongPath",
+			"file": "packages/core/win-path.ts",
+			"line": 64,
+			"commit": "e4678bed3e426b70c1a667b27cb571d440e19235"
+		},
+		{
+			"id": "identifier-028",
+			"class": "identifier",
+			"query": "spawnSafe",
+			"file": "packages/core/win-path.ts",
+			"line": 100,
+			"commit": "e4678bed3e426b70c1a667b27cb571d440e19235"
+		},
+		{
+			"id": "string-011",
+			"class": "string",
+			"query": "BridgeAdapterConfig needs chatId or resolveChatId",
+			"file": "packages/telegram-bot/bridge-adapter.ts",
+			"line": 89,
+			"commit": "4b0aff7f989d7f573aafa13867129ff724dea4d8"
+		},
+		{
+			"id": "string-012",
+			"class": "string",
+			"query": "\"FileSenderConfig needs chatId or resolveChatId\"",
+			"file": "packages/telegram-bot/file-sender.ts",
+			"line": 39,
+			"commit": "4b0aff7f989d7f573aafa13867129ff724dea4d8"
+		},
+		{
+			"id": "identifier-029",
+			"class": "identifier",
+			"query": "isSenderAuthorized",
+			"file": "packages/daemon/telegram-bridge.ts",
+			"line": 339,
+			"commit": "01ec402dbca742d52dbd6a7b0e16e78b2516742d"
+		},
+		{
+			"id": "string-013",
+			"class": "string",
+			"query": "TELEGRAM_AUTHORIZED_CHAT_IDS must list at least one chat_id for local mode",
+			"file": "packages/daemon/telegram-bridge.ts",
+			"line": 1326,
+			"commit": "01ec402dbca742d52dbd6a7b0e16e78b2516742d"
+		},
+		{
+			"id": "identifier-030",
+			"class": "identifier",
+			"query": "NativeToolsProbe",
+			"file": "packages/orchestration/local-model-detect.ts",
+			"line": 416,
+			"commit": "474464c249a533af3170a66a65f0d9ce3ed1ddc0"
+		},
+		{
+			"id": "identifier-031",
+			"class": "identifier",
+			"query": "ContextWindowLookup",
+			"file": "packages/orchestration/local-model-detect.ts",
+			"line": 426,
+			"commit": "474464c249a533af3170a66a65f0d9ce3ed1ddc0"
+		},
+		{
+			"id": "identifier-032",
+			"class": "identifier",
+			"query": "OBSERVED_LOG",
+			"file": "packages/daemon/telegram-bridge.ts",
+			"line": 47,
+			"commit": "2333eb516f55ddc6e3885ea303f168a3ffd3db8f"
+		},
+		{
+			"id": "identifier-033",
+			"class": "identifier",
+			"query": "observeUnauthorized",
+			"file": "packages/daemon/telegram-bridge.ts",
+			"line": 64,
+			"commit": "2333eb516f55ddc6e3885ea303f168a3ffd3db8f"
+		},
+		{
+			"id": "identifier-034",
+			"class": "identifier",
+			"query": "runtimeForCompat",
+			"file": "packages/eight/clients/index.ts",
+			"line": 48,
+			"commit": "9e43b2ec76bfa7270633d1730e4a916f9d2d4b7a"
+		},
+		{
+			"id": "identifier-035",
+			"class": "identifier",
+			"query": "handleProviderCommands",
+			"file": "packages/eight/repl.ts",
+			"line": 527,
+			"commit": "9e43b2ec76bfa7270633d1730e4a916f9d2d4b7a"
+		},
+		{
+			"id": "identifier-036",
+			"class": "identifier",
+			"query": "isPostableBody",
+			"file": "packages/daemon/notifications.ts",
+			"line": 44,
+			"commit": "b1e978a66897ae70ba18a6a8931bd3bfa8972d30"
+		},
+		{
+			"id": "string-014",
+			"class": "string",
+			"query": "\"empty finding text; nothing to surface\"",
+			"file": "packages/proactive/surfacing-gate.ts",
+			"line": 261,
+			"commit": "b1e978a66897ae70ba18a6a8931bd3bfa8972d30"
+		},
+		{
+			"id": "identifier-037",
+			"class": "identifier",
+			"query": "messageAudioRoot",
+			"file": "packages/table/message-audio.ts",
+			"line": 27,
+			"commit": "2b208abff28f818f4559b9cab23a163d91282c3e"
+		},
+		{
+			"id": "identifier-038",
+			"class": "identifier",
+			"query": "messageAudioDir",
+			"file": "packages/table/message-audio.ts",
+			"line": 33,
+			"commit": "2b208abff28f818f4559b9cab23a163d91282c3e"
+		},
+		{
+			"id": "string-015",
+			"class": "string",
+			"query": "audioUrl must be non-empty",
+			"file": "packages/table/store.ts",
+			"line": 603,
+			"commit": "2b208abff28f818f4559b9cab23a163d91282c3e"
+		},
+		{
+			"id": "identifier-039",
+			"class": "identifier",
+			"query": "voiceForAuthor",
+			"file": "packages/table/message-speak.ts",
+			"line": 35,
+			"commit": "56285b404d074d16b1756dd15a74158a2adfed6c"
+		},
+		{
+			"id": "identifier-040",
+			"class": "identifier",
+			"query": "SpeakFailureReason",
+			"file": "packages/table/message-speak.ts",
+			"line": 42,
+			"commit": "56285b404d074d16b1756dd15a74158a2adfed6c"
+		},
+		{
+			"id": "string-016",
+			"class": "string",
+			"query": "\"memory db unavailable\"",
+			"file": "packages/proactive/surfacing-gate.test.ts",
+			"line": 87,
+			"commit": "d605cd186820dc25060803e93d4f18d7f5021055"
+		},
+		{
+			"id": "identifier-041",
+			"class": "identifier",
+			"query": "GateRule",
+			"file": "packages/proactive/surfacing-gate.ts",
+			"line": 38,
+			"commit": "d605cd186820dc25060803e93d4f18d7f5021055"
+		},
+		{
+			"id": "identifier-042",
+			"class": "identifier",
+			"query": "GateDecision",
+			"file": "packages/proactive/surfacing-gate.ts",
+			"line": 40,
+			"commit": "d605cd186820dc25060803e93d4f18d7f5021055"
+		},
+		{
+			"id": "string-017",
+			"class": "string",
+			"query": "model pass judged surfacing-worthy",
+			"file": "packages/proactive/surfacing-gate.ts",
+			"line": 185,
+			"commit": "d605cd186820dc25060803e93d4f18d7f5021055"
+		},
+		{
+			"id": "identifier-043",
+			"class": "identifier",
+			"query": "HuddleRecording",
+			"file": "packages/table/bake.ts",
+			"line": 88,
+			"commit": "6c7df1b0b1baa97b7f412a0e466eaca65b89c5a1"
+		},
+		{
+			"id": "identifier-044",
+			"class": "identifier",
+			"query": "sha256File",
+			"file": "packages/table/bake.ts",
+			"line": 286,
+			"commit": "6c7df1b0b1baa97b7f412a0e466eaca65b89c5a1"
+		},
+		{
+			"id": "identifier-045",
+			"class": "identifier",
+			"query": "FLOW_SCHEMA_VERSION",
+			"file": "packages/telemetry/flow-stream.ts",
+			"line": 26,
+			"commit": "86f97706584c820242138c8f82e80f20b3d0a53b"
+		},
+		{
+			"id": "identifier-046",
+			"class": "identifier",
+			"query": "FlowKind",
+			"file": "packages/telemetry/flow-stream.ts",
+			"line": 28,
+			"commit": "86f97706584c820242138c8f82e80f20b3d0a53b"
+		},
+		{
+			"id": "string-018",
+			"class": "string",
+			"query": "\"record is not an object\"",
+			"file": "packages/telemetry/flow-stream.ts",
+			"line": 123,
+			"commit": "86f97706584c820242138c8f82e80f20b3d0a53b"
+		},
+		{
+			"id": "identifier-047",
+			"class": "identifier",
+			"query": "MinutesParticipant",
+			"file": "packages/daemon/huddle-minutes.ts",
+			"line": 51,
+			"commit": "b1b9bfea60950fd1a3eab769613fb5718424e344"
+		},
+		{
+			"id": "identifier-048",
+			"class": "identifier",
+			"query": "MinutesDecision",
+			"file": "packages/daemon/huddle-minutes.ts",
+			"line": 58,
+			"commit": "b1b9bfea60950fd1a3eab769613fb5718424e344"
+		},
+		{
+			"id": "string-019",
+			"class": "string",
+			"query": "idle for an unknown agent or channel is a no-op, never a throw",
+			"file": "packages/daemon/__tests__/table-presence.test.ts",
+			"line": 119,
+			"commit": "2d98b8f88c1abcffdc01c0b4763ee06f0d275cb6"
+		},
+		{
+			"id": "identifier-049",
+			"class": "identifier",
+			"query": "ActivityState",
+			"file": "packages/daemon/table-presence.ts",
+			"line": 34,
+			"commit": "2d98b8f88c1abcffdc01c0b4763ee06f0d275cb6"
+		},
+		{
+			"id": "identifier-050",
+			"class": "identifier",
+			"query": "PRESENCE_STALE_MS",
+			"file": "packages/daemon/table-presence.ts",
+			"line": 37,
+			"commit": "2d98b8f88c1abcffdc01c0b4763ee06f0d275cb6"
+		},
+		{
+			"id": "identifier-051",
+			"class": "identifier",
+			"query": "isChatAuthorized",
+			"file": "packages/daemon/telegram-bridge.ts",
+			"line": 313,
+			"commit": "f647d684fe15f6f4c2f9244a461e74cd2451cf09"
+		},
+		{
+			"id": "string-020",
+			"class": "string",
+			"query": "\"expected this dispatch to be denied, but the policy allowed it\"",
+			"file": "packages/permissions/dispatch-policy.test.ts",
+			"line": 37,
+			"commit": "f647d684fe15f6f4c2f9244a461e74cd2451cf09"
+		},
+		{
+			"id": "identifier-052",
+			"class": "identifier",
+			"query": "SPEAK_BUDGET_MS",
+			"file": "packages/table/floor.ts",
+			"line": 83,
+			"commit": "a2fd70c052b22ffffc4eebfc088822bfe634f82b"
+		},
+		{
+			"id": "identifier-053",
+			"class": "identifier",
+			"query": "AUDIO_START_GRACE_MS",
+			"file": "packages/table/floor.ts",
+			"line": 95,
+			"commit": "a2fd70c052b22ffffc4eebfc088822bfe634f82b"
+		},
+		{
+			"id": "string-021",
+			"class": "string",
+			"query": "[telegram-bridge] boardroom failed:",
+			"file": "packages/daemon/telegram-bridge.ts",
+			"line": 972,
+			"commit": "084cfbfa51c53f1a023a785af665bb016207bce7"
+		},
+		{
+			"id": "string-022",
+			"class": "string",
+			"query": "\"[telegram-bridge] sendTracked failed:\"",
+			"file": "packages/daemon/telegram-bridge.ts",
+			"line": 995,
+			"commit": "084cfbfa51c53f1a023a785af665bb016207bce7"
+		},
+		{
+			"id": "identifier-054",
+			"class": "identifier",
+			"query": "BOARD_ROSTER",
+			"file": "packages/telegram-bot/boardroom.ts",
+			"line": 34,
+			"commit": "084cfbfa51c53f1a023a785af665bb016207bce7"
+		},
+		{
+			"id": "identifier-055",
+			"class": "identifier",
+			"query": "VOICE_BY_OFFICER",
+			"file": "packages/telegram-bot/boardroom.ts",
+			"line": 46,
+			"commit": "084cfbfa51c53f1a023a785af665bb016207bce7"
+		},
+		{
+			"id": "string-023",
+			"class": "string",
+			"query": "[telegram-bridge] ffmpeg failed:",
+			"file": "packages/daemon/telegram-bridge.ts",
+			"line": 266,
+			"commit": "03bc22357a405f9e53c064e1127a633f6240202f"
+		},
+		{
+			"id": "string-024",
+			"class": "string",
+			"query": "\"[telegram-bridge] whisper failed:\"",
+			"file": "packages/daemon/telegram-bridge.ts",
+			"line": 277,
+			"commit": "03bc22357a405f9e53c064e1127a633f6240202f"
+		},
+		{
+			"id": "identifier-056",
+			"class": "identifier",
+			"query": "TASKS_DIR",
+			"file": "packages/table/artifacts.ts",
+			"line": 40,
+			"commit": "544cda4dc46ffc6b343e82dae84e95f2aa214d86"
+		},
+		{
+			"id": "identifier-057",
+			"class": "identifier",
+			"query": "Artifact",
+			"file": "packages/table/artifacts.ts",
+			"line": 51,
+			"commit": "544cda4dc46ffc6b343e82dae84e95f2aa214d86"
+		},
+		{
+			"id": "identifier-058",
+			"class": "identifier",
+			"query": "normalisePunctuation",
+			"file": "packages/table/slide-spec.ts",
+			"line": 558,
+			"commit": "900c388c422333ced1066434b4e1e41988bd07b4"
+		},
+		{
+			"id": "identifier-059",
+			"class": "identifier",
+			"query": "THEME_VERSION",
+			"file": "packages/table/slide-render.ts",
+			"line": 40,
+			"commit": "30f007bd9ac2f6235af77f53ba5cdceeb2efb379"
+		},
+		{
+			"id": "identifier-060",
+			"class": "identifier",
+			"query": "CODE_MAX_LINES",
+			"file": "packages/table/slide-render.ts",
+			"line": 121,
+			"commit": "30f007bd9ac2f6235af77f53ba5cdceeb2efb379"
+		},
+		{
+			"id": "string-025",
+			"class": "string",
+			"query": "the composed spec carries no motion tokens",
+			"file": "packages/table/slide-theme.ts",
+			"line": 490,
+			"commit": "30f007bd9ac2f6235af77f53ba5cdceeb2efb379"
+		},
+		{
+			"id": "identifier-061",
+			"class": "identifier",
+			"query": "TYPE_RATIOS",
+			"file": "packages/design-compose/axes.ts",
+			"line": 35,
+			"commit": "ea9c8ae5683b365b6bbe71b45c84e1acf2eb869d"
+		},
+		{
+			"id": "identifier-062",
+			"class": "identifier",
+			"query": "TypeRatioName",
+			"file": "packages/design-compose/axes.ts",
+			"line": 47,
+			"commit": "ea9c8ae5683b365b6bbe71b45c84e1acf2eb869d"
+		},
+		{
+			"id": "identifier-063",
+			"class": "identifier",
+			"query": "setHuddleMedia",
+			"file": "packages/daemon/huddle-stage.ts",
+			"line": 77,
+			"commit": "f1a4f1f011eb4b1188fa3f53b02c34d978a171b5"
+		},
+		{
+			"id": "identifier-064",
+			"class": "identifier",
+			"query": "huddleMediaEnabled",
+			"file": "packages/daemon/huddle-stage.ts",
+			"line": 81,
+			"commit": "f1a4f1f011eb4b1188fa3f53b02c34d978a171b5"
+		},
+		{
+			"id": "string-026",
+			"class": "string",
+			"query": "\"spec must be a JSON object\"",
+			"file": "packages/table/slide-spec.ts",
+			"line": 424,
+			"commit": "f1a4f1f011eb4b1188fa3f53b02c34d978a171b5"
+		},
+		{
+			"id": "string-027",
+			"class": "string",
+			"query": "metric must be an object",
+			"file": "packages/table/slide-spec.ts",
+			"line": 448,
+			"commit": "f1a4f1f011eb4b1188fa3f53b02c34d978a171b5"
+		},
+		{
+			"id": "identifier-065",
+			"class": "identifier",
+			"query": "DeskPlan",
+			"file": "packages/table/officer-desks.ts",
+			"line": 48,
+			"commit": "fc583d5aeb7e5b4a602f4d4a8ce0b6632a5aac53"
+		},
+		{
+			"id": "identifier-066",
+			"class": "identifier",
+			"query": "DeskResult",
+			"file": "packages/table/officer-desks.ts",
+			"line": 54,
+			"commit": "fc583d5aeb7e5b4a602f4d4a8ce0b6632a5aac53"
+		},
+		{
+			"id": "string-028",
+			"class": "string",
+			"query": "\"simulated officer failure\"",
+			"file": "packages/daemon/__tests__/huddle-floor.test.ts",
+			"line": 387,
+			"commit": "0b29b128bdf40cf67cd8a2750ff0ff9a6bb9322b"
+		},
+		{
+			"id": "identifier-067",
+			"class": "identifier",
+			"query": "notifyHuddleMessagePosted",
+			"file": "packages/daemon/huddle-routes.ts",
+			"line": 130,
+			"commit": "0b29b128bdf40cf67cd8a2750ff0ff9a6bb9322b"
+		},
+		{
+			"id": "identifier-068",
+			"class": "identifier",
+			"query": "isHuddleFrame",
+			"file": "packages/daemon/huddle-routes.ts",
+			"line": 317,
+			"commit": "0b29b128bdf40cf67cd8a2750ff0ff9a6bb9322b"
+		},
+		{
+			"id": "string-029",
+			"class": "string",
+			"query": "does not throw for a prompt comfortably under budget",
+			"file": "packages/table/__tests__/floor.test.ts",
+			"line": 111,
+			"commit": "0b29b128bdf40cf67cd8a2750ff0ff9a6bb9322b"
+		},
+		{
+			"id": "identifier-069",
+			"class": "identifier",
+			"query": "tableSystemPrompt",
+			"file": "packages/daemon/table-routes.ts",
+			"line": 678,
+			"commit": "e0a32c42f650d551b10dde9dad67c4ef86987ed4"
+		},
+		{
+			"id": "identifier-070",
+			"class": "identifier",
+			"query": "buildTurnPrompt",
+			"file": "packages/daemon/table-routes.ts",
+			"line": 779,
+			"commit": "e0a32c42f650d551b10dde9dad67c4ef86987ed4"
+		},
+		{
+			"id": "string-030",
+			"class": "string",
+			"query": "\"id (agent ids are daemon-minted, not client-declared): got\"",
+			"file": "packages/daemon/table-routes.ts",
+			"line": 128,
+			"commit": "9869ed8cf122bc6a994ec02b78f436ef2a4ab32a"
+		},
+		{
+			"id": "string-031",
+			"class": "string",
+			"query": "Table is loopback-only; frame rejected from non-loopback peer",
+			"file": "packages/daemon/table-routes.ts",
+			"line": 196,
+			"commit": "9869ed8cf122bc6a994ec02b78f436ef2a4ab32a"
+		},
+		{
+			"id": "string-032",
+			"class": "string",
+			"query": "\"detached HEAD (no current branch)\"",
+			"file": "packages/verify/extractors.ts",
+			"line": 173,
+			"commit": "380420b013faca424d801bf8b38612d91e364909"
+		},
+		{
+			"id": "string-033",
+			"class": "string",
+			"query": "CliHarness requires a name",
+			"file": "packages/harness/adapters/cli.ts",
+			"line": 141,
+			"commit": "054d3f1ca490099f40d0293cd9cae73ec53a7547"
+		},
+		{
+			"id": "string-034",
+			"class": "string",
+			"query": "\"taskId and a non-empty input string are required\"",
+			"file": "packages/harness/http.ts",
+			"line": 70,
+			"commit": "054d3f1ca490099f40d0293cd9cae73ec53a7547"
+		},
+		{
+			"id": "string-035",
+			"class": "string",
+			"query": "prompt is required: refusing to dispatch an empty prompt (#2803)",
+			"file": "packages/harness/runner.ts",
+			"line": 50,
+			"commit": "4ce9774d304ace331949d68c13be8366f784fea9"
+		},
+		{
+			"id": "path-001",
+			"class": "path",
+			"query": "apps/tui/src/components/__tests__/command-input-enter.test.tsx",
+			"file": "apps/tui/src/components/__tests__/command-input-enter.test.tsx",
+			"line": 1,
+			"commit": "d92277883b0bea483a1f3837e2b6e96ccc41fb41"
+		},
+		{
+			"id": "path-002",
+			"class": "path",
+			"query": "components/buffered-text-input.tsx",
+			"file": "apps/tui/src/components/buffered-text-input.tsx",
+			"line": 1,
+			"commit": "d92277883b0bea483a1f3837e2b6e96ccc41fb41"
+		},
+		{
+			"id": "path-003",
+			"class": "path",
+			"query": "provider-readiness.test.ts",
+			"file": "apps/tui/src/lib/provider-readiness.test.ts",
+			"line": 1,
+			"commit": "1e9a40c6288b5d37673dae9fd3577d4d2ca6694c"
+		},
+		{
+			"id": "path-004",
+			"class": "path",
+			"query": "apps/tui/src/lib/provider-readiness.ts",
+			"file": "apps/tui/src/lib/provider-readiness.ts",
+			"line": 1,
+			"commit": "1e9a40c6288b5d37673dae9fd3577d4d2ca6694c"
+		},
+		{
+			"id": "path-005",
+			"class": "path",
+			"query": "eval/rules-eval.ts",
+			"file": "packages/decide/eval/rules-eval.ts",
+			"line": 1,
+			"commit": "0f4399108adde93def59499772421b35678b9b50"
+		},
+		{
+			"id": "path-006",
+			"class": "path",
+			"query": "rules.test.ts",
+			"file": "packages/decide/rules.test.ts",
+			"line": 1,
+			"commit": "0f4399108adde93def59499772421b35678b9b50"
+		},
+		{
+			"id": "path-007",
+			"class": "path",
+			"query": "packages/core/path-within.test.ts",
+			"file": "packages/core/path-within.test.ts",
+			"line": 1,
+			"commit": "50a154121e8326a4e1f2c66978f626e9a5082659"
+		},
+		{
+			"id": "path-008",
+			"class": "path",
+			"query": "core/path-within.ts",
+			"file": "packages/core/path-within.ts",
+			"line": 1,
+			"commit": "50a154121e8326a4e1f2c66978f626e9a5082659"
+		},
+		{
+			"id": "path-009",
+			"class": "path",
+			"query": "system-one-gate.test.ts",
+			"file": "packages/permissions/system-one-gate.test.ts",
+			"line": 1,
+			"commit": "2d9e7f0e95b93e5d89b5bb164a8c9bf16b38d89b"
+		},
+		{
+			"id": "path-010",
+			"class": "path",
+			"query": "packages/permissions/system-one-gate.ts",
+			"file": "packages/permissions/system-one-gate.ts",
+			"line": 1,
+			"commit": "2d9e7f0e95b93e5d89b5bb164a8c9bf16b38d89b"
+		},
+		{
+			"id": "path-011",
+			"class": "path",
+			"query": "security/README.md",
+			"file": "tests/security/README.md",
+			"line": 1,
+			"commit": "24f8ed6f56d0370a0981d0c84c70056f70049988"
+		},
+		{
+			"id": "path-012",
+			"class": "path",
+			"query": "decide-guard.test.ts",
+			"file": "tests/security/decide-guard.test.ts",
+			"line": 1,
+			"commit": "24f8ed6f56d0370a0981d0c84c70056f70049988"
+		},
+		{
+			"id": "path-013",
+			"class": "path",
+			"query": "packages/decide/backends/llamacpp.test.ts",
+			"file": "packages/decide/backends/llamacpp.test.ts",
+			"line": 1,
+			"commit": "432a872bd7811c413f41c67ea23cb53e1655a909"
+		},
+		{
+			"id": "path-014",
+			"class": "path",
+			"query": "backends/llamacpp.ts",
+			"file": "packages/decide/backends/llamacpp.ts",
+			"line": 1,
+			"commit": "432a872bd7811c413f41c67ea23cb53e1655a909"
+		},
+		{
+			"id": "path-015",
+			"class": "path",
+			"query": "ENGINE.md",
+			"file": "packages/decide/docs/ENGINE.md",
+			"line": 1,
+			"commit": "674f4bdcbdb779392794620ab9a434a3af6ab82c"
+		},
+		{
+			"id": "path-016",
+			"class": "path",
+			"query": "packages/decide/README.md",
+			"file": "packages/decide/README.md",
+			"line": 1,
+			"commit": "344fb238cd016167524f86ab139c4aa74ad8c431"
+		},
+		{
+			"id": "path-017",
+			"class": "path",
+			"query": "backends/laya.ts",
+			"file": "packages/decide/backends/laya.ts",
+			"line": 1,
+			"commit": "344fb238cd016167524f86ab139c4aa74ad8c431"
+		},
+		{
+			"id": "path-018",
+			"class": "path",
+			"query": "recall-error.ts",
+			"file": "packages/memory/recall-error.ts",
+			"line": 1,
+			"commit": "c621f895debd8093c689069efa17433f0e055db7"
+		},
+		{
+			"id": "path-019",
+			"class": "path",
+			"query": "benchmarks/memory/fixture.ts",
+			"file": "benchmarks/memory/fixture.ts",
+			"line": 1,
+			"commit": "9f8782854c63c088249fc6bd3a95d7c33b1e2651"
+		},
+		{
+			"id": "path-020",
+			"class": "path",
+			"query": "memory/recall-eval.test.ts",
+			"file": "benchmarks/memory/recall-eval.test.ts",
+			"line": 1,
+			"commit": "9f8782854c63c088249fc6bd3a95d7c33b1e2651"
+		},
+		{
+			"id": "path-021",
+			"class": "path",
+			"query": "dj-platform.test.ts",
+			"file": "packages/music/tests/dj-platform.test.ts",
+			"line": 1,
+			"commit": "38a999994b23f1e72af95c683a216299da2a342c"
+		},
+		{
+			"id": "path-022",
+			"class": "path",
+			"query": "packages/core/home.test.ts",
+			"file": "packages/core/home.test.ts",
+			"line": 1,
+			"commit": "e46ad475ab962f72a23903a7d5de8b5aa3c63ccc"
+		},
+		{
+			"id": "path-023",
+			"class": "path",
+			"query": "core/home.ts",
+			"file": "packages/core/home.ts",
+			"line": 1,
+			"commit": "e46ad475ab962f72a23903a7d5de8b5aa3c63ccc"
+		},
+		{
+			"id": "path-024",
+			"class": "path",
+			"query": "win-path.test.ts",
+			"file": "packages/core/win-path.test.ts",
+			"line": 1,
+			"commit": "e4678bed3e426b70c1a667b27cb571d440e19235"
+		},
+		{
+			"id": "path-025",
+			"class": "path",
+			"query": "packages/core/win-path.ts",
+			"file": "packages/core/win-path.ts",
+			"line": 1,
+			"commit": "e4678bed3e426b70c1a667b27cb571d440e19235"
+		},
+		{
+			"id": "path-026",
+			"class": "path",
+			"query": "memory/sql.d.ts",
+			"file": "packages/memory/sql.d.ts",
+			"line": 1,
+			"commit": "02619c828eafc0d49095c52ca87a0cc424485e25"
+		},
+		{
+			"id": "path-027",
+			"class": "path",
+			"query": "smoke-compiled.sh",
+			"file": "scripts/smoke-compiled.sh",
+			"line": 1,
+			"commit": "02619c828eafc0d49095c52ca87a0cc424485e25"
+		},
+		{
+			"id": "path-028",
+			"class": "path",
+			"query": "packages/daemon/telegram-bridge-routing.test.ts",
+			"file": "packages/daemon/telegram-bridge-routing.test.ts",
+			"line": 1,
+			"commit": "4b0aff7f989d7f573aafa13867129ff724dea4d8"
+		},
+		{
+			"id": "path-029",
+			"class": "path",
+			"query": "skills/retro.test.ts",
+			"file": "packages/skills/retro.test.ts",
+			"line": 1,
+			"commit": "01a64d2d18de26aa6ad5f0f54d6c4a36b7cb62ef"
+		},
+		{
+			"id": "path-030",
+			"class": "path",
+			"query": "retro/SKILL.md",
+			"file": "packages/skills/retro/SKILL.md",
+			"line": 1,
+			"commit": "01a64d2d18de26aa6ad5f0f54d6c4a36b7cb62ef"
+		},
+		{
+			"id": "path-031",
+			"class": "path",
+			"query": "packages/daemon/telegram-observe.test.ts",
+			"file": "packages/daemon/telegram-observe.test.ts",
+			"line": 1,
+			"commit": "2333eb516f55ddc6e3885ea303f168a3ffd3db8f"
+		},
+		{
+			"id": "path-032",
+			"class": "path",
+			"query": "__tests__/repl-provider-commands.test.ts",
+			"file": "packages/eight/__tests__/repl-provider-commands.test.ts",
+			"line": 1,
+			"commit": "9e43b2ec76bfa7270633d1730e4a916f9d2d4b7a"
+		},
+		{
+			"id": "path-033",
+			"class": "path",
+			"query": "declared-dispatch.test.ts",
+			"file": "packages/eight/clients/declared-dispatch.test.ts",
+			"line": 1,
+			"commit": "9e43b2ec76bfa7270633d1730e4a916f9d2d4b7a"
+		},
+		{
+			"id": "path-034",
+			"class": "path",
+			"query": "packages/daemon/notifications.test.ts",
+			"file": "packages/daemon/notifications.test.ts",
+			"line": 1,
+			"commit": "b1e978a66897ae70ba18a6a8931bd3bfa8972d30"
+		},
+		{
+			"id": "path-035",
+			"class": "path",
+			"query": "table/message-audio.ts",
+			"file": "packages/table/message-audio.ts",
+			"line": 1,
+			"commit": "2b208abff28f818f4559b9cab23a163d91282c3e"
+		}
+	]
+}

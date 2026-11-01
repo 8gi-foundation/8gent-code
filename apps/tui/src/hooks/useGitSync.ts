@@ -1,0 +1,233 @@
+/**
+ * useGitSync - poll `git rev-list` for ahead/behind counts vs upstream.
+ *
+ * Replaces the hardcoded "in sync" string in HeaderBar V2. Runs on a 30s
+ * interval and on first mount. Failures (no repo, no upstream, detached
+ * head) collapse to a sensible label so the chrome never throws.
+ *
+ * Pure async helper `computeGitSync` is exported separately so it can be
+ * unit tested without React + without spawning a real subprocess (caller
+ * injects a runner).
+ */
+
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { useEffect, useState } from "react";
+import { keepIfSame } from "../lib/keep-if-same.js";
+
+const execFileAsync = promisify(execFile);
+
+type GitSyncStatus =
+	| "up-to-date"
+	| "ahead"
+	| "behind"
+	| "diverged"
+	| "detached"
+	| "no-upstream"
+	| "no-repo"
+	/** Before the first check lands: nothing is known yet. */
+	| "unknown";
+
+export interface GitSyncResult {
+	status: GitSyncStatus;
+	ahead: number;
+	behind: number;
+	label: string;
+	/** Checked-out branch name; "HEAD" when detached, "" outside a repo or before the first check. */
+	branch: string;
+}
+
+export type GitRunner = (
+	args: string[],
+) => Promise<{ stdout: string; stderr: string; code: number }>;
+
+const defaultRunner: GitRunner = async (args) => {
+	try {
+		const out = await execFileAsync("git", args, { timeout: 5_000 });
+		return { stdout: out.stdout, stderr: out.stderr, code: 0 };
+	} catch (err: any) {
+		return {
+			stdout: err?.stdout ?? "",
+			stderr: err?.stderr ?? "",
+			code: typeof err?.code === "number" ? err.code : 1,
+		};
+	}
+};
+
+function buildLabel(branch: string, status: GitSyncStatus, ahead: number, behind: number): string {
+	const head = branch || "head";
+	switch (status) {
+		case "up-to-date":
+			return `${head}: up to date`;
+		case "ahead":
+			return `${head}: ${ahead} ahead`;
+		case "behind":
+			return `${head}: ${behind} behind`;
+		case "diverged":
+			return `${head}: diverged`;
+		case "detached":
+			return `${head}: detached`;
+		case "no-upstream":
+			return `${head}: no upstream`;
+		case "no-repo":
+			return "no repo";
+		case "unknown":
+			return "";
+	}
+}
+
+/**
+ * What the chrome shows for git, from one result, so the header, the
+ * WORKSPACE rail and the footer can never disagree (audit #10: the header
+ * said "⎇ - no repo" while the rail said "branch -").
+ *
+ * - In a repo: the branch, and a short sync note ("in sync", "3 ahead").
+ * - Outside one: no branch, and the one fact "no repo".
+ * - Before the first check: nothing at all. An unknown value is not shown.
+ */
+export interface GitView {
+	/** Branch name; "" when there is none or it is not known yet. */
+	branch: string;
+	/** Short sync note after the branch; "" when there is nothing to say. */
+	sync: string;
+	/** True only once a check has found no repository. */
+	noRepo: boolean;
+}
+
+export function gitView(r: Pick<GitSyncResult, "status" | "branch" | "ahead" | "behind">): GitView {
+	switch (r.status) {
+		case "unknown":
+			return { branch: "", sync: "", noRepo: false };
+		case "no-repo":
+			return { branch: "", sync: "", noRepo: true };
+		case "detached":
+			return { branch: "HEAD", sync: "detached", noRepo: false };
+		case "up-to-date":
+			return { branch: r.branch, sync: "in sync", noRepo: false };
+		case "ahead":
+			return { branch: r.branch, sync: `${r.ahead} ahead`, noRepo: false };
+		case "behind":
+			return { branch: r.branch, sync: `${r.behind} behind`, noRepo: false };
+		case "diverged":
+			return { branch: r.branch, sync: "diverged", noRepo: false };
+		case "no-upstream":
+			return { branch: r.branch, sync: "no upstream", noRepo: false };
+	}
+}
+
+export async function computeGitSync(
+	cwd: string,
+	runner: GitRunner = defaultRunner,
+): Promise<GitSyncResult> {
+	const cwdArgs = ["-C", cwd];
+
+	// Verify repo
+	const repoCheck = await runner([...cwdArgs, "rev-parse", "--is-inside-work-tree"]);
+	if (repoCheck.code !== 0 || repoCheck.stdout.trim() !== "true") {
+		return {
+			status: "no-repo",
+			ahead: 0,
+			behind: 0,
+			label: buildLabel("", "no-repo", 0, 0),
+			branch: "",
+		};
+	}
+
+	// Branch name
+	const branchOut = await runner([...cwdArgs, "rev-parse", "--abbrev-ref", "HEAD"]);
+	const branch = branchOut.stdout.trim();
+
+	if (branch === "HEAD") {
+		return {
+			status: "detached",
+			ahead: 0,
+			behind: 0,
+			label: buildLabel(branch, "detached", 0, 0),
+			branch,
+		};
+	}
+
+	// Counts. `git rev-list --left-right --count @{u}...HEAD` returns "behind\tahead".
+	// We use the explicit two-arg form for clarity even though it spawns twice.
+	const aheadOut = await runner([...cwdArgs, "rev-list", "--count", "@{u}..HEAD"]);
+	if (aheadOut.code !== 0) {
+		return {
+			status: "no-upstream",
+			ahead: 0,
+			behind: 0,
+			label: buildLabel(branch, "no-upstream", 0, 0),
+			branch,
+		};
+	}
+	const behindOut = await runner([...cwdArgs, "rev-list", "--count", "HEAD..@{u}"]);
+	if (behindOut.code !== 0) {
+		return {
+			status: "no-upstream",
+			ahead: 0,
+			behind: 0,
+			label: buildLabel(branch, "no-upstream", 0, 0),
+			branch,
+		};
+	}
+
+	const ahead = Number(aheadOut.stdout.trim()) || 0;
+	const behind = Number(behindOut.stdout.trim()) || 0;
+
+	let status: GitSyncStatus;
+	if (ahead === 0 && behind === 0) status = "up-to-date";
+	else if (ahead > 0 && behind === 0) status = "ahead";
+	else if (ahead === 0 && behind > 0) status = "behind";
+	else status = "diverged";
+
+	return { status, ahead, behind, label: buildLabel(branch, status, ahead, behind), branch };
+}
+
+/**
+ * One poll step per call. Once a check finds the folder is not a repository, that
+ * is a settled fact: later polls return it without spawning git again.
+ */
+export function createGitSyncPoller(
+	cwd: string,
+	runner: GitRunner = defaultRunner,
+): () => Promise<GitSyncResult> {
+	let noRepo: GitSyncResult | null = null;
+	return async () => {
+		if (noRepo) return noRepo;
+		const r = await computeGitSync(cwd, runner);
+		if (r.status === "no-repo") noRepo = r;
+		return r;
+	};
+}
+
+export function useGitSync(cwd: string, intervalMs = 30_000, enabled = true): GitSyncResult {
+	const [result, setResult] = useState<GitSyncResult>({
+		status: "unknown",
+		ahead: 0,
+		behind: 0,
+		label: "",
+		branch: "",
+	});
+
+	useEffect(() => {
+		if (!enabled) return;
+		let cancelled = false;
+		const poll = createGitSyncPoller(cwd);
+		const run = async () => {
+			try {
+				const r = await poll();
+				if (r.status === "no-repo") clearInterval(id);
+				if (!cancelled) setResult(keepIfSame(r));
+			} catch {
+				/* swallow - keep last good label */
+			}
+		};
+		void run();
+		const id = setInterval(run, intervalMs);
+		return () => {
+			cancelled = true;
+			clearInterval(id);
+		};
+	}, [cwd, intervalMs, enabled]);
+
+	return result;
+}

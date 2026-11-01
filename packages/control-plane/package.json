@@ -1,0 +1,10 @@
+{
+	"name": "@8gent/control-plane",
+	"version": "0.18.0",
+	"type": "module",
+	"main": "index.ts",
+	"dependencies": {
+		"@8gent/db": "0.18.0",
+		"stripe": "^17.7.0"
+	}
+}

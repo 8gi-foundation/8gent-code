@@ -1,0 +1,54 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"$id": "factory-events.schema.json",
+	"title": "factory/v1 event, one JSON line per event",
+	"type": "object",
+	"additionalProperties": false,
+	"required": [
+		"v",
+		"id",
+		"at",
+		"cell",
+		"kind",
+		"repo",
+		"number",
+		"title",
+		"sha",
+		"state",
+		"detail"
+	],
+	"properties": {
+		"v": { "type": "string", "const": "factory/v1" },
+		"id": { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$" },
+		"at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+		"cell": { "type": "string" },
+		"kind": {
+			"type": "string",
+			"enum": [
+				"item.picked",
+				"item.done",
+				"item.blocked",
+				"pr.opened",
+				"review.requested",
+				"review.approved",
+				"review.changes",
+				"checks.running",
+				"checks.green",
+				"checks.red",
+				"merge.done",
+				"pr.closed",
+				"cell.heartbeat",
+				"cell.paused",
+				"cell.resumed",
+				"budget.hit",
+				"gate.blocked"
+			]
+		},
+		"repo": { "type": "string" },
+		"number": { "type": "integer" },
+		"title": { "type": "string" },
+		"sha": { "type": "string" },
+		"state": { "type": "string", "enum": ["live", "working", "idle", "paused"] },
+		"detail": { "type": "string", "maxLength": 140 }
+	}
+}

@@ -1,0 +1,123 @@
+import { Box, useInput } from "ink";
+import React from "react";
+import type { TaskInfo, TaskStatus } from "../../../../../packages/tools/background.js";
+import { isAgentProcessTaskId } from "../ActivityMonitor.js";
+import { AppText, Heading, MutedText } from "../primitives/AppText.js";
+import { Badge } from "../primitives/Badge.js";
+import { Divider } from "../primitives/Divider.js";
+import { Inline } from "../primitives/Inline.js";
+import { ShortcutHint } from "../primitives/ShortcutHint.js";
+import { Spacer } from "../primitives/Spacer.js";
+import { Stack } from "../primitives/Stack.js";
+import { ProcessListItem } from "./ProcessListItem.js";
+
+interface ProcessSidebarProps {
+	tasks: TaskInfo[];
+	selectedIndex: number;
+	focused: boolean;
+	taskCounts: Record<TaskStatus, number>;
+	width: number;
+	onNext: () => void;
+	onPrev: () => void;
+	onOpen: (taskId: string) => void;
+	onKill: () => void;
+	onUnfocus: () => void;
+}
+
+export function ProcessSidebar({
+	tasks,
+	selectedIndex,
+	focused,
+	taskCounts,
+	width,
+	onNext,
+	onPrev,
+	onOpen,
+	onKill,
+	onUnfocus,
+}: ProcessSidebarProps) {
+	// Local input handling for sidebar-specific keys
+	useInput(
+		(input, key) => {
+			if (key.upArrow) {
+				onPrev();
+				return;
+			}
+			if (key.downArrow) {
+				onNext();
+				return;
+			}
+			if (key.return && tasks[selectedIndex]) {
+				onOpen(tasks[selectedIndex].id);
+				return;
+			}
+			if (key.escape) {
+				onUnfocus();
+				return;
+			}
+			if (
+				input === "k" &&
+				!key.ctrl &&
+				tasks[selectedIndex]?.status === "running" &&
+				!isAgentProcessTaskId(tasks[selectedIndex]?.id)
+			) {
+				onKill();
+				return;
+			}
+		},
+		{ isActive: focused },
+	);
+
+	const runningCount = taskCounts.running;
+
+	return (
+		<Box
+			flexDirection="column"
+			width={width}
+			borderStyle="round"
+			borderColor={focused ? "cyan" : "blue"}
+			flexShrink={0}
+		>
+			{/* Header */}
+			<Box paddingX={1} justifyContent="space-between">
+				<Heading>Processes</Heading>
+				{runningCount > 0 && <Badge label={`${runningCount} live`} color="green" />}
+			</Box>
+
+			<Divider width={width - 2} />
+
+			{/* Task list */}
+			<Box flexDirection="column" flexGrow={1} overflow="hidden">
+				{tasks.length === 0 ? (
+					<Box paddingX={1} paddingY={1}>
+						<MutedText>No shell jobs or tool trace yet</MutedText>
+					</Box>
+				) : (
+					tasks.map((task, i) => (
+						<ProcessListItem
+							key={task.id}
+							task={task}
+							selected={focused && i === selectedIndex}
+							maxWidth={width - 4}
+						/>
+					))
+				)}
+			</Box>
+
+			{/* Footer shortcuts */}
+			{focused && tasks.length > 0 && (
+				<>
+					<Divider width={width - 2} />
+					<Box paddingX={1} gap={1}>
+						<ShortcutHint keys="↑↓" description="nav" />
+						<ShortcutHint keys="⏎" description="view" />
+						{tasks[selectedIndex]?.status === "running" &&
+							!isAgentProcessTaskId(tasks[selectedIndex]?.id) && (
+								<ShortcutHint keys="k" description="kill" />
+							)}
+					</Box>
+				</>
+			)}
+		</Box>
+	);
+}

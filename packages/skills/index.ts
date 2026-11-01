@@ -1,0 +1,1202 @@
+/**
+ * 8gent Code - Skills System
+ *
+ * Skills are markdown files with frontmatter that define reusable workflows.
+ * They provide specialized prompts and tool configurations for common tasks.
+ *
+ * Precedence (first one found wins; a name collision is recorded, see getCollisions()):
+ * 1. Project: <cwd>/.agents/skills/<name>/SKILL.md, then <cwd>/.claude/skills/<name>/SKILL.md
+ * 2. Owner: ~/.8gent/skills/*.md
+ * 3. Bundled core: packages/skills/<name>/SKILL.md (dev) and dist/skills/<name>/SKILL.md (published CLI)
+ * 4. Brought home: ~/.8gent/imported/<tool>/skills/<name>/SKILL.md (#5037)
+ * 5. Other tools, live: ~/.agents/skills/<name>/SKILL.md, then ~/.claude/skills/<name>/SKILL.md.
+ *    Read only until the owner has brought their setup home; after that 8gent stops reading them.
+ * 6. Learned: ~/.8gent/learned-skills/*.md
+ * A bundled core skill is never shadowed by a skill from 4 or 5 that has the same name, trigger
+ * or alias (#5037): that skill is skipped and the collision recorded. Imported skills marked
+ * `needs-edit: <reason>` are not loaded; getUnavailable() lists them with the reason.
+ * Project beats user beats bundled. A collision between two project/user skills is reported
+ * once per process (console.warn) and always available from getCollisions(). A user skill
+ * shadowing a bundled or learned one is the expected override and is not reported.
+ *
+ * Exception (#4125): a project skill (from whatever repo is the cwd) may not replace a user or
+ * bundled skill unless the project file's sha256 is pinned in <data dir>/skills-trust.json as
+ * { "<name>": "<sha256>" }. Otherwise the project file is skipped, the user or bundled skill is
+ * kept, and the refusal is reported like any other collision. Editing a pinned file changes its
+ * hash, so it is refused again. The data dir is taken from the security env snapshot, never from
+ * a .env the project ships, and a trust file inside the project is never read.
+ *
+ * Skill format:
+ * ---
+ * name: commit
+ * description: Git commit workflow
+ * tools: [git_status, git_add, git_commit]
+ * ---
+ * # Instructions
+ * 1. Run git status
+ * 2. Stage changed files
+ * 3. Create commit message
+ */
+
+import { createHash } from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import type { ActorKind, CapabilityAuditStore, LogCapabilityInput } from "../audit/index.js";
+import type { CapabilityRequest, EnforceOptions } from "../permissions/capability-manifest.js";
+import { realpathLoose, securityEnvSnapshot } from "../permissions/run-command-sandbox.js";
+import type { PolicyDecision } from "../permissions/types.js";
+import { enforceSkillScope } from "./capability-scope.js";
+import { hasImported, importedRoot } from "./import/paths.js";
+import { validateSkillManifest } from "./manifest.js";
+
+// ============================================
+// Types
+// ============================================
+
+export interface Skill {
+	name: string;
+	description: string;
+	prompt: string;
+	tools: string[];
+	triggers?: string[];
+	examples?: string[];
+	filePath: string;
+	/**
+	 * Capabilities the skill needs to be active. Install fails if any are
+	 * missing from the active set. Empty by default for backward compatibility.
+	 */
+	requiredCapabilities: string[];
+	/**
+	 * Capabilities the skill widens the active set with on install. Reference
+	 * counted across skills, so the cap is only revoked when the last grantor
+	 * uninstalls. Empty by default for backward compatibility.
+	 */
+	grantedCapabilities: string[];
+	/** Semver of the skill (manifest, issue #2760). Undefined for unversioned skills. */
+	version?: string;
+	/** Models the skill declares it needs, e.g. "eight-1.0-q3:14b". Empty by default. */
+	modelsRequired: string[];
+	/** Slash commands / triggers that enter the skill, e.g. "/deploy". Empty by default. */
+	entryPoints: string[];
+	/** Publisher handle for registry attribution. */
+	author?: string;
+	/** SPDX license id, e.g. "Apache-2.0". */
+	license?: string;
+	/** Source or docs URL. */
+	homepage?: string;
+}
+
+export interface SkillFrontmatter {
+	name: string;
+	description?: string;
+	tools?: string[];
+	triggers?: string[];
+	/** Single primary slash trigger, e.g. /billiondollarboardroom */
+	trigger?: string;
+	/** Alternate slash commands, e.g. [/bdb, /billionboard] */
+	aliases?: string[];
+	examples?: string[];
+	/** Capabilities the skill requires; declared in YAML as `[a, b, c]`. */
+	requiredCapabilities?: string[];
+	/** Capabilities the skill grants; declared in YAML as `[a, b, c]`. */
+	grantedCapabilities?: string[];
+	/** Semver of the skill (manifest, issue #2760), e.g. "1.0.0". */
+	version?: string;
+	/** Models the skill needs; declared in YAML as `[eight-1.0-q3:14b]`. */
+	modelsRequired?: string[];
+	/** Slash commands / triggers that enter the skill; declared as `[/deploy]`. */
+	entryPoints?: string[];
+	/** Publisher handle. */
+	author?: string;
+	/** SPDX license id, e.g. "Apache-2.0". */
+	license?: string;
+	/** Source or docs URL. */
+	homepage?: string;
+}
+
+/** Outcome of installSkill / uninstallSkill. */
+export type CapabilityChangeResult =
+	| {
+			ok: true;
+			skill: string;
+			granted: string[];
+			revoked: string[];
+	  }
+	| {
+			ok: false;
+			skill: string;
+			missing: string[];
+			reason: string;
+	  };
+
+/** Optional audit hook injected at install time. */
+export interface CapabilityAuditOptions {
+	store?: CapabilityAuditStore;
+	actor?: string;
+	actorKind?: ActorKind;
+	sessionId?: string | null;
+	reason?: string;
+}
+
+export interface SkillInvocation {
+	skillName: string;
+	args: Record<string, unknown>;
+	startedAt: Date;
+	completedAt?: Date;
+	status: "pending" | "running" | "completed" | "failed";
+	result?: unknown;
+	error?: string;
+}
+
+// ============================================
+// Frontmatter Parser
+// ============================================
+
+function parseFrontmatter(content: string): {
+	frontmatter: SkillFrontmatter;
+	body: string;
+} {
+	const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/;
+	const match = content.match(frontmatterRegex);
+
+	if (!match) {
+		throw new Error("Invalid skill format: missing frontmatter");
+	}
+
+	const frontmatterText = match[1];
+	const body = match[2];
+
+	// Parse YAML-like frontmatter (simple key: value pairs)
+	const frontmatter: Record<string, unknown> = {};
+	const lines = frontmatterText.split("\n");
+
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) continue;
+
+		const colonIndex = trimmed.indexOf(":");
+		if (colonIndex === -1) continue;
+
+		const key = trimmed.slice(0, colonIndex).trim();
+		let value = trimmed.slice(colonIndex + 1).trim();
+
+		// Parse arrays: [item1, item2, item3]
+		if (value.startsWith("[") && value.endsWith("]")) {
+			const arrayContent = value.slice(1, -1);
+			frontmatter[key] = arrayContent
+				.split(",")
+				.map((item) => item.trim())
+				.filter((item) => item.length > 0);
+		} else {
+			// Remove surrounding quotes if present
+			if (
+				(value.startsWith('"') && value.endsWith('"')) ||
+				(value.startsWith("'") && value.endsWith("'"))
+			) {
+				value = value.slice(1, -1);
+			}
+			frontmatter[key] = value;
+		}
+	}
+
+	if (!frontmatter.name || typeof frontmatter.name !== "string") {
+		throw new Error("Skill must have a 'name' field");
+	}
+
+	return {
+		frontmatter: frontmatter as unknown as SkillFrontmatter,
+		body,
+	};
+}
+
+/**
+ * Coerce a capabilities frontmatter field to a clean string[]. Accepts undefined,
+ * a single string ("network"), or an array. Trims, dedupes, drops empties.
+ */
+function normalizeCapabilities(value: unknown): string[] {
+	if (value == null) return [];
+	const raw = Array.isArray(value) ? value : [value];
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const entry of raw) {
+		if (typeof entry !== "string") continue;
+		const cap = entry.trim();
+		if (!cap || seen.has(cap)) continue;
+		seen.add(cap);
+		out.push(cap);
+	}
+	return out;
+}
+
+/**
+ * Coerce an entry-points frontmatter field to a clean string[]. Same trim/dedupe
+ * discipline as capabilities, but leading slashes are preserved so "/deploy"
+ * stays a slash command in the manifest.
+ */
+function normalizeEntryPoints(value: unknown): string[] {
+	return normalizeCapabilities(value);
+}
+
+/**
+ * Write a capability event through the configured audit hook. No-op if no
+ * store is wired, so capability install/uninstall stays usable in unit tests
+ * and headless contexts without an audit DB.
+ */
+function writeCapabilityEvent(
+	audit: CapabilityAuditOptions | undefined,
+	operation: "grant" | "revoke",
+	skill: string,
+	capability: string,
+): void {
+	if (!audit?.store) return;
+	const input: LogCapabilityInput = {
+		actor: audit.actor ?? "system:skills",
+		actorKind: audit.actorKind ?? "system",
+		skill,
+		capability,
+		operation,
+		reason: audit.reason ?? `skill ${operation === "grant" ? "install" : "uninstall"}`,
+		sessionId: audit.sessionId ?? null,
+	};
+	try {
+		audit.store.logCapability(input);
+	} catch (err) {
+		console.warn(`[skills] capability audit write failed: ${(err as Error).message}`);
+	}
+}
+
+/** Each subfolder (or symlinked dir) may contain SKILL.md. */
+function collectNestedSkillMdPaths(skillsRoot: string): string[] {
+	if (!fs.existsSync(skillsRoot)) return [];
+	const out: string[] = [];
+	for (const name of fs.readdirSync(skillsRoot)) {
+		const skillMd = path.join(skillsRoot, name, "SKILL.md");
+		if (fs.existsSync(skillMd)) {
+			out.push(skillMd);
+		}
+	}
+	return out;
+}
+
+/** Skill markdown shipped with 8gent (source tree or copied next to dist/cli.js). */
+function discoverBundledSkillMdFiles(): string[] {
+	const entryDir = path.dirname(fileURLToPath(import.meta.url));
+	const nested = [...collectNestedSkillMdPaths(entryDir)];
+	nested.push(...collectNestedSkillMdPaths(path.join(entryDir, "skills")));
+	return nested;
+}
+
+const normKey = (s: string) => s.replace(/^\//, "").toLowerCase();
+
+/** Lookup keys (name, trigger, aliases) a frontmatter answers to, as the manager indexes them. */
+function lookupKeys(fm: SkillFrontmatter): string[] {
+	const keys = [normKey(fm.name)];
+	if (typeof fm.trigger === "string") keys.push(normKey(fm.trigger));
+	if (Array.isArray(fm.aliases)) for (const a of fm.aliases) keys.push(normKey(String(a)));
+	return keys.filter((k) => k.length > 0);
+}
+
+/** Key -> bundled file for every name, trigger and alias a bundled core skill answers to. */
+function bundledKeyOwners(): Map<string, string> {
+	const out = new Map<string, string>();
+	for (const filePath of discoverBundledSkillMdFiles()) {
+		try {
+			const { frontmatter } = parseFrontmatter(fs.readFileSync(filePath, "utf-8"));
+			for (const k of lookupKeys(frontmatter)) if (!out.has(k)) out.set(k, filePath);
+		} catch {
+			// Reported when the bundled tier loads.
+		}
+	}
+	return out;
+}
+
+/** Names, slash triggers and aliases (lowercase, no slash) owned by bundled core skills (#5037). */
+export function coreSkillKeys(): Set<string> {
+	return new Set(bundledKeyOwners().keys());
+}
+
+/** An imported skill the loader refused to run, with why (#5037). */
+export interface UnavailableSkill {
+	name: string;
+	filePath: string;
+	reason: string;
+}
+
+// ============================================
+// Skill Manager
+// ============================================
+
+type SkillTier = "project" | "user" | "bundled" | "imported" | "learned";
+
+export interface SkillManagerOptions {
+	/** Project root for .agents/skills and .claude/skills. Default process.cwd(). */
+	projectDir?: string;
+	/** Home dir for ~/.agents/skills, ~/.claude/skills, ~/.8gent/skills. Default os.homedir(). */
+	homeDir?: string;
+}
+
+export interface SkillCollision {
+	name: string;
+	/** File that won (higher precedence). */
+	kept: string;
+	/** File that was ignored. */
+	ignored: string;
+}
+
+const warnedCollisions = new Set<string>();
+function warnCollisionOnce(c: SkillCollision, message?: string): void {
+	const key = `${c.name}\0${c.kept}\0${c.ignored}`;
+	if (warnedCollisions.has(key)) return;
+	warnedCollisions.add(key);
+	console.warn(
+		message ?? `[skills] Skill "${c.name}" defined twice: using ${c.kept}, ignoring ${c.ignored}`,
+	);
+}
+
+const warnedLoadErrors = new Set<string>();
+
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+const SKILL_TRUST_FILE = "skills-trust.json";
+
+/**
+ * name -> sha256 pins from skills-trust.json. Missing or unreadable means no trust; only
+ * own keys whose value is a lowercase 64-hex sha256 count, everything else is ignored.
+ */
+function readSkillTrust(file: string | undefined): Map<string, string> {
+	const out = new Map<string, string>();
+	if (!file) return out;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+	} catch {
+		return out;
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out;
+	for (const name of Object.keys(parsed)) {
+		if (!Object.hasOwn(parsed, name)) continue;
+		const value = (parsed as Record<string, unknown>)[name];
+		if (typeof value === "string" && SHA256_HEX.test(value)) out.set(name, value);
+	}
+	return out;
+}
+
+/** Skill name -> first file defining it, so project skills can be checked before later tiers load. */
+function skillNamesIn(files: string[], into: Map<string, string>): Map<string, string> {
+	for (const filePath of files) {
+		try {
+			const { frontmatter } = parseFrontmatter(fs.readFileSync(filePath, "utf-8"));
+			if (!into.has(frontmatter.name)) into.set(frontmatter.name, filePath);
+		} catch {
+			// Unparseable files are reported when their own tier loads.
+		}
+	}
+	return into;
+}
+
+export class SkillManager {
+	private skills: Map<string, Skill> = new Map();
+	/** Normalized lookup key (no leading slash, lowercased) -> canonical skill name */
+	private aliasToCanonical: Map<string, string> = new Map();
+	private skillsDirectory: string;
+	private invocations: Map<string, SkillInvocation> = new Map();
+	/** Names of currently installed skills. Install != load: load discovers, install activates capabilities. */
+	private installedSkills: Set<string> = new Set();
+	/** Capability -> install ref count. Cap is active when count > 0. */
+	private capabilityRefs: Map<string, number> = new Map();
+	/** Default audit hook applied when installSkill is called without an override. */
+	private defaultAuditOptions: CapabilityAuditOptions | undefined;
+	private projectDir: string | undefined;
+	private homeDir: string | undefined;
+	/** Where each loaded skill came from, for collision reports. */
+	private skillOrigin: Map<string, { filePath: string; tier: SkillTier }> = new Map();
+	private collisions: SkillCollision[] = [];
+	/** User and bundled names a project skill may not replace unpinned (#4125), per loadSkills(). */
+	private guardedByName: Map<string, { filePath: string; tier: "user" | "bundled" }> = new Map();
+	private trust: Map<string, string> | undefined;
+	/** Files the last loadSkills() could not parse, with the reason (#3593: use_skill names them). */
+	private loadErrors: { filePath: string; error: string }[] = [];
+	/** Imported skills marked needs-edit, skipped with their reason (#5037). */
+	private unavailable: UnavailableSkill[] = [];
+	/** Bundled key -> file, so other tools' skills can never shadow a core skill (#5037). */
+	private coreOwners: Map<string, string> = new Map();
+
+	constructor(skillsDirectory?: string, options: SkillManagerOptions = {}) {
+		this.projectDir = options.projectDir;
+		this.homeDir = options.homeDir;
+		this.skillsDirectory =
+			skillsDirectory || path.join(this.homeDir ?? os.homedir(), ".8gent", "skills");
+	}
+
+	/** Skill files the last loadSkills() refused as malformed, with the parser's reason. */
+	getLoadErrors(): { filePath: string; error: string }[] {
+		return [...this.loadErrors];
+	}
+
+	/** Imported skills the last loadSkills() skipped because they need the owner's edit, with the reason. */
+	getUnavailable(): UnavailableSkill[] {
+		return [...this.unavailable];
+	}
+
+	/** Name collisions found by the last loadSkills(): winner kept, loser listed. */
+	getCollisions(): SkillCollision[] {
+		return [...this.collisions];
+	}
+
+	/** Set a default audit sink so install/uninstall write capability events automatically. */
+	setCapabilityAudit(options: CapabilityAuditOptions | undefined): void {
+		this.defaultAuditOptions = options;
+	}
+
+	/**
+	 * Load all skills from the skills directory
+	 */
+	async loadSkills(): Promise<Skill[]> {
+		this.skills.clear();
+		this.aliasToCanonical.clear();
+		this.skillOrigin.clear();
+		this.collisions = [];
+		this.loadErrors = [];
+		this.unavailable = [];
+		this.coreOwners = bundledKeyOwners();
+		this.trust = undefined;
+
+		const home = this.homeDir ?? os.homedir();
+		const project = this.projectDir ?? process.cwd();
+
+		// The user dir (and its example skill) exists before project skills are checked against it.
+		if (!fs.existsSync(this.skillsDirectory)) {
+			fs.mkdirSync(this.skillsDirectory, { recursive: true });
+			// Create example skill
+			this.createExampleSkill();
+		}
+		const skillFiles = fs.readdirSync(this.skillsDirectory).filter((f) => f.endsWith(".md"));
+		// Once the owner has brought their setup home, ~/.claude and ~/.agents are no longer read live.
+		const imported = hasImported(home);
+		const importedFiles = imported ? this.importedSkillMdPaths(home) : [];
+		const userNames = skillNamesIn(
+			[
+				...skillFiles.map((f) => path.join(this.skillsDirectory, f)),
+				...importedFiles,
+				...(imported ? [] : collectNestedSkillMdPaths(path.join(home, ".agents", "skills"))),
+				...(imported ? [] : collectNestedSkillMdPaths(path.join(home, ".claude", "skills"))),
+			],
+			new Map(),
+		);
+		const bundledNames = skillNamesIn(discoverBundledSkillMdFiles(), new Map());
+		this.guardedByName = new Map();
+		for (const [name, filePath] of bundledNames)
+			this.guardedByName.set(name, { filePath, tier: "bundled" });
+		for (const [name, filePath] of userNames)
+			this.guardedByName.set(name, { filePath, tier: "user" });
+
+		const seenSkillPaths = new Set<string>();
+		const ingestNested = (root: string, tier: SkillTier) => {
+			for (const filePath of collectNestedSkillMdPaths(root)) {
+				// De-duped so a project that equals home is not ingested twice.
+				if (seenSkillPaths.has(filePath)) continue;
+				seenSkillPaths.add(filePath);
+				this.tryIngestSkillFile(filePath, tier);
+			}
+		};
+
+		// 1. Project (repo-local). .agents/skills is the cross-tool convention, .claude/skills the Claude one.
+		ingestNested(path.join(project, ".agents", "skills"), "project");
+		ingestNested(path.join(project, ".claude", "skills"), "project");
+
+		// 2. Owner: ~/.8gent/skills flat .md.
+		for (const file of skillFiles) {
+			this.tryIngestSkillFile(path.join(this.skillsDirectory, file), "user");
+		}
+
+		// 3. Bundled core. Ahead of other tools' folders so a core skill is never shadowed (#5037).
+		for (const filePath of discoverBundledSkillMdFiles()) {
+			this.tryIngestSkillFile(filePath, "bundled");
+		}
+
+		// 4. Brought home from other tools (#5037), then 5. those tools' folders live until the owner imports.
+		for (const filePath of importedFiles) this.tryIngestSkillFile(filePath, "imported");
+		if (!imported) {
+			ingestNested(path.join(home, ".agents", "skills"), "user");
+			ingestNested(path.join(home, ".claude", "skills"), "user");
+		}
+
+		// 4. Learned skills from skill compounding (~/.8gent/learned-skills/)
+		const learnedDir = path.join(home, ".8gent", "learned-skills");
+		if (fs.existsSync(learnedDir)) {
+			const learnedFiles = fs.readdirSync(learnedDir).filter((f) => f.endsWith(".md"));
+			for (const file of learnedFiles) {
+				this.tryIngestSkillFile(path.join(learnedDir, file), "learned");
+			}
+		}
+
+		return this.getAllSkills();
+	}
+
+	/** ~/.8gent/imported/<tool>/skills/<name>/SKILL.md for every tool, in a stable order. */
+	private importedSkillMdPaths(home: string): string[] {
+		const root = importedRoot(home);
+		if (!fs.existsSync(root)) return [];
+		const out: string[] = [];
+		for (const tool of fs.readdirSync(root).sort()) {
+			out.push(...collectNestedSkillMdPaths(path.join(root, tool, "skills")));
+		}
+		return out;
+	}
+
+	private registerLookupKeys(skillName: string, frontmatter: SkillFrontmatter): void {
+		const norm = (s: string) => s.replace(/^\//, "").toLowerCase();
+		this.aliasToCanonical.set(norm(skillName), skillName);
+		if (typeof frontmatter.trigger === "string") {
+			const t = norm(frontmatter.trigger);
+			if (t) this.aliasToCanonical.set(t, skillName);
+		}
+		if (Array.isArray(frontmatter.aliases)) {
+			for (const a of frontmatter.aliases) {
+				const t = norm(String(a));
+				if (t) this.aliasToCanonical.set(t, skillName);
+			}
+		}
+	}
+
+	private buildSkillFromParsed(
+		filePath: string,
+		frontmatter: SkillFrontmatter,
+		body: string,
+	): Skill {
+		const triggerExtras: string[] = [];
+		if (typeof frontmatter.trigger === "string" && frontmatter.trigger.startsWith("/")) {
+			triggerExtras.push(frontmatter.trigger.slice(1));
+		}
+		return {
+			name: frontmatter.name,
+			description: frontmatter.description || "",
+			prompt: body.trim(),
+			tools: frontmatter.tools || [],
+			triggers: [...triggerExtras, ...(frontmatter.triggers || [])],
+			examples: frontmatter.examples || [],
+			filePath,
+			requiredCapabilities: normalizeCapabilities(frontmatter.requiredCapabilities),
+			grantedCapabilities: normalizeCapabilities(frontmatter.grantedCapabilities),
+			version:
+				typeof frontmatter.version === "string" && frontmatter.version.trim() !== ""
+					? frontmatter.version.trim()
+					: undefined,
+			modelsRequired: normalizeCapabilities(frontmatter.modelsRequired),
+			entryPoints: normalizeEntryPoints(frontmatter.entryPoints),
+			author:
+				typeof frontmatter.author === "string" && frontmatter.author.trim() !== ""
+					? frontmatter.author.trim()
+					: undefined,
+			license:
+				typeof frontmatter.license === "string" && frontmatter.license.trim() !== ""
+					? frontmatter.license.trim()
+					: undefined,
+			homepage:
+				typeof frontmatter.homepage === "string" && frontmatter.homepage.trim() !== ""
+					? frontmatter.homepage.trim()
+					: undefined,
+		};
+	}
+
+	/**
+	 * <data dir>/skills-trust.json, or undefined when no trustworthy location exists.
+	 * The data dir comes from the security env snapshot (taken before any .env is loaded, and
+	 * ignoring keys a .env declares), absolute only, else <home>/.8gent. A trust file whose real
+	 * path is inside the project is refused: the repo being loaded cannot vouch for itself.
+	 */
+	private skillTrustFile(): string | undefined {
+		const home = this.homeDir ?? os.homedir();
+		const dataDir = securityEnvSnapshot().values.EIGHT_DATA_DIR;
+		const root = dataDir && path.isAbsolute(dataDir) ? dataDir : path.join(home, ".8gent");
+		const file = path.join(root, SKILL_TRUST_FILE);
+		const project = realpathLoose(path.resolve(this.projectDir ?? process.cwd()));
+		const real = realpathLoose(file);
+		// Running from home itself is not a cloned repo; ~/.8gent is then the user's own.
+		if (project === realpathLoose(home)) return file;
+		if (real === project || real.startsWith(project + path.sep)) return undefined;
+		return file;
+	}
+
+	/** True for a flat file in ~/.8gent/skills, the owner's own folder. */
+	private isOwnerSkillFile(filePath: string): boolean {
+		return path.dirname(filePath) === this.skillsDirectory;
+	}
+
+	private tryIngestSkillFile(filePath: string, tier: SkillTier): void {
+		try {
+			const bytes = fs.readFileSync(filePath);
+			const { frontmatter, body } = parseFrontmatter(bytes.toString("utf-8"));
+			if (tier === "imported" || (tier === "user" && !this.isOwnerSkillFile(filePath))) {
+				// Another tool's skill never shadows a bundled core skill by name, trigger or alias (#5037).
+				const owner = lookupKeys(frontmatter)
+					.map((k) => this.coreOwners.get(k))
+					.find((f) => f !== undefined && f !== filePath);
+				if (owner) {
+					const c: SkillCollision = { name: frontmatter.name, kept: owner, ignored: filePath };
+					this.collisions.push(c);
+					warnCollisionOnce(
+						c,
+						`[skills] Skill ${JSON.stringify(c.name)} from ${JSON.stringify(filePath)} was skipped: ` +
+							`the bundled 8gent skill at ${JSON.stringify(owner)} owns that name or trigger.`,
+					);
+					return;
+				}
+			}
+			if (tier === "imported") {
+				const needsEdit = (frontmatter as unknown as Record<string, unknown>)["needs-edit"];
+				if (typeof needsEdit === "string" && needsEdit.trim() !== "") {
+					this.unavailable.push({ name: frontmatter.name, filePath, reason: needsEdit.trim() });
+					return;
+				}
+			}
+			const guarded = this.guardedByName.get(frontmatter.name);
+			if (
+				tier === "project" &&
+				guarded &&
+				guarded.filePath !== filePath &&
+				!this.skillOrigin.has(frontmatter.name)
+			) {
+				const trustFile = this.skillTrustFile();
+				this.trust ??= readSkillTrust(trustFile);
+				const hash = createHash("sha256").update(bytes).digest("hex");
+				if (this.trust.get(frontmatter.name) !== hash) {
+					const c: SkillCollision = {
+						name: frontmatter.name,
+						kept: guarded.filePath,
+						ignored: filePath,
+					};
+					this.collisions.push(c);
+					// Paths are JSON-quoted: a repo picks its folder names, which may hold newlines or escapes.
+					warnCollisionOnce(
+						c,
+						`[skills] Project skill ${JSON.stringify(c.name)} would replace the ${guarded.tier} one; ` +
+							`kept ${guarded.tier}. To trust ${JSON.stringify(filePath)}, add ` +
+							`${JSON.stringify(c.name)}: "${hash}" to ${JSON.stringify(trustFile ?? SKILL_TRUST_FILE)}`,
+					);
+					return;
+				}
+			}
+			const winner = this.skillOrigin.get(frontmatter.name);
+			if (winner) {
+				// Shadowing a bundled/learned skill is the expected override; two
+				// project/user skills with one name is a real collision: report it.
+				if (tier !== "bundled" && tier !== "learned") {
+					const c: SkillCollision = {
+						name: frontmatter.name,
+						kept: winner.filePath,
+						ignored: filePath,
+					};
+					this.collisions.push(c);
+					warnCollisionOnce(c);
+				}
+				return;
+			}
+			const skill = this.buildSkillFromParsed(filePath, frontmatter, body);
+			this.skills.set(skill.name, skill);
+			this.skillOrigin.set(skill.name, { filePath, tier });
+			this.registerLookupKeys(skill.name, frontmatter);
+		} catch (err) {
+			const error = err instanceof Error ? err.message : String(err);
+			this.loadErrors.push({ filePath, error });
+			// Once per file and reason: use_skill reloads on every call.
+			const key = `${filePath}\0${error}`;
+			if (!warnedLoadErrors.has(key)) {
+				warnedLoadErrors.add(key);
+				console.warn(`[skills] Failed to load ${filePath}: ${err}`);
+			}
+		}
+	}
+
+	/**
+	 * Create an example skill file
+	 */
+	private createExampleSkill(): void {
+		const exampleSkill = `---
+name: commit
+description: Smart git commit workflow with conventional commits
+tools: [git_status, git_diff, git_add, git_commit]
+triggers: [commit, save, checkpoint]
+examples:
+  - /commit "feat: add user authentication"
+  - /commit (auto-generates message)
+---
+# Git Commit Skill
+
+## Instructions
+
+1. Run git status to see current changes
+2. Run git diff to understand what changed
+3. Stage appropriate files with git add
+4. Generate a conventional commit message based on changes:
+   - feat: new feature
+   - fix: bug fix
+   - docs: documentation
+   - style: formatting
+   - refactor: code restructuring
+   - test: adding tests
+   - chore: maintenance
+5. Create the commit
+
+## Rules
+
+- Keep commit messages concise (50 chars or less for subject)
+- Use present tense ("add feature" not "added feature")
+- Don't commit node_modules, .env, or other sensitive files
+- Group related changes into single commits
+`;
+
+		const filePath = path.join(this.skillsDirectory, "commit.md");
+		fs.writeFileSync(filePath, exampleSkill);
+		console.log(`[skills] Created example skill: ${filePath}`);
+	}
+
+	/**
+	 * Get a skill by name
+	 */
+	getSkill(name: string): Skill | undefined {
+		const key = name.replace(/^\//, "").toLowerCase();
+		const canonical = this.aliasToCanonical.get(key);
+		if (canonical) {
+			const s = this.skills.get(canonical);
+			if (s) return s;
+		}
+		const direct = this.skills.get(name);
+		if (direct) return direct;
+		return [...this.skills.values()].find((s) => s.name.toLowerCase() === key);
+	}
+
+	/**
+	 * Get all loaded skills
+	 */
+	getAllSkills(): Skill[] {
+		return Array.from(this.skills.values());
+	}
+
+	/**
+	 * Every `/token` that resolves via getSkill (canonical name + alias keys). Longest first for completion UI.
+	 */
+	getSkillSlashTriggers(): string[] {
+		const prefixes = new Set<string>();
+		for (const skill of this.skills.values()) {
+			prefixes.add(`/${skill.name}`);
+		}
+		for (const key of this.aliasToCanonical.keys()) {
+			prefixes.add(`/${key}`);
+		}
+		return [...prefixes].sort((a, b) => b.length - a.length);
+	}
+
+	/**
+	 * Find skills matching a trigger
+	 */
+	findByTrigger(trigger: string): Skill[] {
+		const triggerLower = trigger.toLowerCase();
+		return this.getAllSkills().filter((skill) =>
+			skill.triggers?.some((t) => t.toLowerCase() === triggerLower),
+		);
+	}
+
+	/**
+	 * Search skills by name or description
+	 */
+	searchSkills(query: string): Skill[] {
+		const queryLower = query.toLowerCase();
+		return this.getAllSkills().filter(
+			(skill) =>
+				skill.name.toLowerCase().includes(queryLower) ||
+				skill.description.toLowerCase().includes(queryLower),
+		);
+	}
+
+	/**
+	 * Invoke a skill with arguments
+	 */
+	async invokeSkill(
+		name: string,
+		args: Record<string, unknown>,
+		executor: (prompt: string, tools: string[]) => Promise<unknown>,
+	): Promise<SkillInvocation> {
+		const skill = this.getSkill(name);
+		if (!skill) {
+			throw new Error(`Skill not found: ${name}`);
+		}
+
+		const invocationId = `${name}-${Date.now()}`;
+		const invocation: SkillInvocation = {
+			skillName: name,
+			args,
+			startedAt: new Date(),
+			status: "running",
+		};
+
+		this.invocations.set(invocationId, invocation);
+
+		try {
+			// Build the full prompt with skill instructions and args
+			let fullPrompt = skill.prompt;
+
+			// Append args as context
+			if (Object.keys(args).length > 0) {
+				fullPrompt += `\n\n## Context\n${JSON.stringify(args, null, 2)}`;
+			}
+
+			// Execute through the provided executor
+			const result = await executor(fullPrompt, skill.tools);
+
+			invocation.status = "completed";
+			invocation.completedAt = new Date();
+			invocation.result = result;
+		} catch (err) {
+			invocation.status = "failed";
+			invocation.completedAt = new Date();
+			invocation.error = err instanceof Error ? err.message : String(err);
+		}
+
+		return invocation;
+	}
+
+	/**
+	 * Add a skill programmatically
+	 */
+	addSkill(skill: Skill): void {
+		this.skills.set(skill.name, skill);
+	}
+
+	/**
+	 * Remove a skill. If the skill is currently installed, it is uninstalled
+	 * first so capability ref counts stay correct.
+	 */
+	removeSkill(name: string): boolean {
+		if (this.installedSkills.has(name)) {
+			this.uninstallSkill(name);
+		}
+		return this.skills.delete(name);
+	}
+
+	// ============================================
+	// Capability install / uninstall (issue #2091)
+	// ============================================
+
+	/**
+	 * Install a skill: validate required capabilities are already active, then
+	 * widen the active set with the skill's grantedCapabilities. Idempotent: a
+	 * second install of the same skill is a no-op (returns ok with empty
+	 * granted/revoked).
+	 *
+	 * Existing skills with no capability declarations install cleanly and grant
+	 * nothing, preserving backward compatibility.
+	 */
+	installSkill(
+		name: string,
+		audit: CapabilityAuditOptions | undefined = this.defaultAuditOptions,
+	): CapabilityChangeResult {
+		const skill = this.getSkill(name);
+		if (!skill) {
+			return {
+				ok: false,
+				skill: name,
+				missing: [],
+				reason: `skill not found: ${name}`,
+			};
+		}
+
+		const canonical = skill.name;
+		if (this.installedSkills.has(canonical)) {
+			return { ok: true, skill: canonical, granted: [], revoked: [] };
+		}
+
+		// Manifest gate (issue #2760): a malformed manifest blocks install before
+		// any capability is widened. Warnings never block - they are publishing
+		// recommendations. This is the "validated at install" step of the spec.
+		const validation = validateSkillManifest(skill);
+		if (!validation.ok) {
+			return {
+				ok: false,
+				skill: canonical,
+				missing: [],
+				reason: `invalid skill manifest: ${validation.errors.join("; ")}`,
+			};
+		}
+
+		const missing = skill.requiredCapabilities.filter((cap) => !this.hasCapability(cap));
+		if (missing.length > 0) {
+			return {
+				ok: false,
+				skill: canonical,
+				missing,
+				reason: `missing required capabilities: ${missing.join(", ")}`,
+			};
+		}
+
+		this.installedSkills.add(canonical);
+		const granted: string[] = [];
+		for (const cap of skill.grantedCapabilities) {
+			const next = (this.capabilityRefs.get(cap) ?? 0) + 1;
+			this.capabilityRefs.set(cap, next);
+			granted.push(cap);
+			writeCapabilityEvent(audit, "grant", canonical, cap);
+		}
+
+		return { ok: true, skill: canonical, granted, revoked: [] };
+	}
+
+	/**
+	 * Uninstall a skill: ref-count decrement each granted capability, audit a
+	 * revoke event per capability, and drop caps that hit zero from the active
+	 * set. No-op if the skill was never installed.
+	 */
+	uninstallSkill(
+		name: string,
+		audit: CapabilityAuditOptions | undefined = this.defaultAuditOptions,
+	): CapabilityChangeResult {
+		const skill = this.getSkill(name);
+		const canonical = skill?.name ?? name;
+
+		if (!this.installedSkills.has(canonical)) {
+			return { ok: true, skill: canonical, granted: [], revoked: [] };
+		}
+
+		this.installedSkills.delete(canonical);
+
+		const revoked: string[] = [];
+		const grantedCaps = skill?.grantedCapabilities ?? [];
+		for (const cap of grantedCaps) {
+			const current = this.capabilityRefs.get(cap) ?? 0;
+			const next = current - 1;
+			if (next <= 0) {
+				this.capabilityRefs.delete(cap);
+			} else {
+				this.capabilityRefs.set(cap, next);
+			}
+			revoked.push(cap);
+			writeCapabilityEvent(audit, "revoke", canonical, cap);
+		}
+
+		return { ok: true, skill: canonical, granted: [], revoked };
+	}
+
+	/** True if the named capability is currently active (any installed skill grants it). */
+	hasCapability(capability: string): boolean {
+		return (this.capabilityRefs.get(capability) ?? 0) > 0;
+	}
+
+	/** Snapshot of the active capability set. */
+	getActiveCapabilities(): string[] {
+		return Array.from(this.capabilityRefs.keys()).sort();
+	}
+
+	/** Internal ref count for a capability. Useful for tests and admin surfaces. */
+	getCapabilityRefCount(capability: string): number {
+		return this.capabilityRefs.get(capability) ?? 0;
+	}
+
+	/** Names of skills currently in the installed set. */
+	getInstalledSkills(): string[] {
+		return Array.from(this.installedSkills).sort();
+	}
+
+	/** True if the named skill (canonical name or alias) is currently installed. */
+	isInstalled(name: string): boolean {
+		const skill = this.getSkill(name);
+		const canonical = skill?.name ?? name;
+		return this.installedSkills.has(canonical);
+	}
+
+	/**
+	 * Enforce a skill's declared capability envelope over a tool call, then defer
+	 * to the policy engine's tool-manifest gate (issue #2760, Step 2). A skill
+	 * gets what it declares, nothing more. An unknown skill is denied outright; an
+	 * unscoped skill (no declarations) passes the envelope gate and is bounded only
+	 * by the tool manifest, preserving backward compatibility.
+	 */
+	enforceSkillCapability(
+		skillName: string,
+		toolName: string,
+		request: CapabilityRequest,
+		opts: EnforceOptions = {},
+	): PolicyDecision {
+		const skill = this.getSkill(skillName);
+		if (!skill) {
+			return {
+				allowed: false,
+				reason: `[skill-scope] unknown skill "${skillName}"; ${request.kind} denied by default`,
+			};
+		}
+		return enforceSkillScope(skill, toolName, request, opts);
+	}
+
+	/**
+	 * Save a skill to disk
+	 */
+	saveSkill(skill: Skill): void {
+		const content = `---
+name: ${skill.name}
+description: ${skill.description}
+tools: [${skill.tools.join(", ")}]
+${skill.triggers?.length ? `triggers: [${skill.triggers.join(", ")}]` : ""}
+${skill.examples?.length ? `examples:\n${skill.examples.map((e) => `  - ${e}`).join("\n")}` : ""}
+---
+${skill.prompt}
+`;
+
+		const fileName = `${skill.name.toLowerCase().replace(/\s+/g, "-")}.md`;
+		const filePath = path.join(this.skillsDirectory, fileName);
+		fs.writeFileSync(filePath, content);
+		skill.filePath = filePath;
+		this.skills.set(skill.name, skill);
+	}
+
+	/**
+	 * Get skill invocation history
+	 */
+	getInvocationHistory(): SkillInvocation[] {
+		return Array.from(this.invocations.values());
+	}
+
+	/**
+	 * Get skills directory path
+	 */
+	getSkillsDirectory(): string {
+		return this.skillsDirectory;
+	}
+
+	/**
+	 * Reload skills from disk
+	 */
+	async reloadSkills(): Promise<Skill[]> {
+		return this.loadSkills();
+	}
+
+	/**
+	 * Get skill count
+	 */
+	get size(): number {
+		return this.skills.size;
+	}
+}
+
+// ============================================
+// Singleton Instance
+// ============================================
+
+let skillManagerInstance: SkillManager | null = null;
+
+export function getSkillManager(skillsDirectory?: string): SkillManager {
+	if (!skillManagerInstance) {
+		skillManagerInstance = new SkillManager(skillsDirectory);
+	}
+	return skillManagerInstance;
+}
+
+export function resetSkillManager(): void {
+	skillManagerInstance = null;
+}
+
+// Re-export skill compounding and matching
+export {
+	compoundSkill,
+	compoundSkillWithExperiment,
+	listLearnedSkills,
+	LEARNED_SKILLS_DIR,
+} from "./compound.js";
+export type { CompoundInput } from "./compound.js";
+export { matchSkills, formatMatchedSkills } from "./matcher.js";
+export {
+	buildManifest,
+	validateManifest,
+	validateSkillManifest,
+	KNOWN_CAPABILITIES,
+} from "./manifest.js";
+export type { SkillManifest, ManifestValidationResult } from "./manifest.js";
+export {
+	enforceSkillScope,
+	skillEnvelope,
+	isSkillScoped,
+	capabilityForRequest,
+} from "./capability-scope.js";
+export {
+	runExperiment,
+	experimentsEnabled,
+	validateSpec,
+	getExperimentHistory,
+	setExperimentMemorySink,
+	EXPERIMENTS_DIR,
+} from "./experiment.js";
+export type {
+	ExperimentSpec,
+	ExperimentRecord,
+	Measurement,
+	MemorySink,
+} from "./experiment.js";
+export {
+	createSkill,
+	createSkillDraft,
+	slugify,
+	extractKeywords,
+	renderSkillMarkdown,
+	scoreCoverage,
+	validateSkillDraft,
+} from "./creator.js";
+export type {
+	CreateSkillInput,
+	CreateSkillResult,
+	SkillCreationValidation,
+	SkillDraft,
+	SkillExample,
+} from "./creator.js";
+
+// ============================================
+// Utility Functions
+// ============================================
+
+/**
+ * Parse skill command from user input
+ * e.g., "/commit -m 'feat: add feature'" -> { name: "commit", args: { m: "feat: add feature" } }
+ */
+export function parseSkillCommand(
+	input: string,
+): { name: string; args: Record<string, string> } | null {
+	if (!input.startsWith("/")) return null;
+
+	const parts = input.slice(1).split(/\s+/);
+	const name = parts[0];
+	const args: Record<string, string> = {};
+
+	let i = 1;
+	while (i < parts.length) {
+		const part = parts[i];
+
+		if (part.startsWith("-")) {
+			const key = part.replace(/^-+/, "");
+			// Check if next part is the value
+			if (i + 1 < parts.length && !parts[i + 1].startsWith("-")) {
+				// Handle quoted values
+				let value = parts[i + 1];
+				if (value.startsWith('"') || value.startsWith("'")) {
+					const quote = value[0];
+					const valueParts = [value.slice(1)];
+					i += 2;
+					while (i < parts.length && !parts[i - 1].endsWith(quote)) {
+						valueParts.push(parts[i]);
+						i++;
+					}
+					value = valueParts.join(" ").replace(/['"]$/, "");
+				} else {
+					i += 2;
+				}
+				args[key] = value;
+			} else {
+				args[key] = "true";
+				i++;
+			}
+		} else {
+			// Positional argument
+			args[`_${Object.keys(args).filter((k) => k.startsWith("_")).length}`] = part;
+			i++;
+		}
+	}
+
+	return { name, args };
+}

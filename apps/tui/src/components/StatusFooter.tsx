@@ -1,0 +1,822 @@
+/**
+ * StatusFooter - the one-row footer (HUD system, #3238):
+ *
+ *   mode Planning [^Y] │ perm Guarded [⇧Tab] │ session 8m 12s      [^P] palette  [^X] plan  ...
+ *
+ * Rules:
+ * - One home per fact. The footer holds what you set (the ^Y mode, the
+ *   permission mode) and the session. The model, tokens and context live in
+ *   the NOW strip; the branch lives in the header. None repeats here.
+ * - A quiet, expected state is not a segment (#3130): Ask shows no perm
+ *   segment, "judge ready" and "providers 3/3" show nothing, ADHD mode shows
+ *   only when on, and the DJ station shows only when a track is loaded and
+ *   its row is closed.
+ * - Segments drop by priority when the row is too narrow, never wrap. mode
+ *   and perm never drop: they are where ^Y and Shift+Tab are discoverable.
+ * - Every key is a key cap: "[^Y]" after the value it changes, "[^P] palette"
+ *   in the hint row. The hints fill the columns the status leaves, right-
+ *   aligned, most used first; [^P] palette leads because the palette lists
+ *   every command.
+ * - The unverified-turn flag shortens before anything else gives way, and
+ *   [^P] palette is never pushed out by it (#4962); see fitFooterRow.
+ * - Orange means "look here": Infinite, a System One judge that failed
+ *   to load (shell commands fail closed), and a shell with no OS sandbox.
+ */
+
+import { Box, Text } from "ink";
+import React, { useRef } from "react";
+import {
+	type PermissionMode,
+	isPermissionMode,
+} from "../../../../packages/permissions/permission-mode.js";
+import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
+import { SET_IN_SETTINGS, ctxText } from "../lib/context-view.js";
+import { keyBytes } from "../lib/key-bytes.js";
+import { injectKeys } from "../lib/mouse-input.js";
+import {
+	PERM_KEY,
+	PERM_LOOK,
+	permColour,
+	permHeldNote,
+	permToastForms,
+} from "../lib/perm-modes-design.js";
+import { theme } from "../theme.js";
+import { KEY_CAP_GAP, KeyCap, keyCapText, splitHint } from "./KeyCap.js";
+
+const ui = {
+	muted: theme.color.muted,
+	dim: theme.color.dim,
+	cream: theme.color.cream,
+	teal: theme.color.teal,
+	orange: theme.color.orange,
+} as const;
+
+export const FOOTER_SEPARATOR = " │ ";
+
+export interface FooterSegment {
+	key: string;
+	/** Dim lower-case label before the value, e.g. "model". */
+	label?: string;
+	value: string;
+	/** Optional dim suffix after the value, e.g. the "^Y" key hint. */
+	hint?: string;
+	/** Optional dim note between the value and the hint, e.g. "(held by parent)". */
+	note?: string;
+	bold?: boolean;
+	color: string;
+	/** 0 is kept longest. Higher numbers drop first when space runs out. */
+	priority: number;
+}
+
+/** The System One judge's warm-up. Undefined: System One is off. */
+export type JudgeState = "loading" | "ready" | "failed";
+
+export interface FooterData {
+	mode: string;
+	tokensPerSecond?: number;
+	/** "92% local today" from the locality ledger (#4607). Absent: nothing measured yet. */
+	localChip?: string;
+	sessionTime?: string;
+	/**
+	 * The focused tab's permission mode (#3170): plan, ask, guarded or
+	 * infinite shows as the perm segment; any other real string prints as an
+	 * "approval" segment, as before.
+	 */
+	permissions?: string;
+	/** True when a parent agent holds this one below the mode that was set (#3174). */
+	permHeld?: boolean;
+	/** Terminal columns, so the held note can shorten below 120. */
+	columns?: number;
+	/** Live providers out of configured providers. */
+	providersLive?: number;
+	providersTotal?: number;
+	user?: string;
+	judge?: JudgeState;
+	/** Why run_command runs without its OS sandbox; undefined when it has one (#4013). */
+	sandboxOff?: string;
+	/**
+	 * How full the context window is (#4956). `used` is null until a turn has
+	 * measured; `stale` is true right after a compaction until the next
+	 * measured turn, so the old number never reads as a measurement.
+	 */
+	ctx?: { used: number | null; window: number | null; stale: boolean };
+	/** ADHD mode: a segment only while on (it had a rail row before #3238). */
+	adhd?: boolean;
+	/** Durable turns: the intent/effect ledger is on. */
+	durable?: boolean;
+	/** A gate flagged the last turn (#4510). Absent means nothing was flagged. */
+	verification?: "verified" | "unverified" | "tests_claimed_not_run";
+	/**
+	 * This tab is a session on the local daemon (#4829). Shown while it holds because
+	 * where tools run has changed; a TUI on its own shows nothing.
+	 */
+	daemonAttached?: boolean;
+	/**
+	 * The thinking level asked for ("auto", "off", "low" ... "max", #5040). Shown as
+	 * a chip; a tap or click does what Ctrl+Z does and moves it one step.
+	 */
+	thinking?: string;
+	/** A turn is running: the footer says how to stop it (#4982). */
+	turnRunning?: boolean;
+	/** Tool calls so far this turn. On a phone-width row the stop key shows only past STOP_HINT_CALLS. */
+	turnCalls?: number;
+	/**
+	 * The folded trace's status row is up (#5170): the footer names the key that opens
+	 * the step list, or folds it back.
+	 */
+	traceHint?: "open" | "fold";
+}
+
+/** Tool calls after which the stop key shows even on a crowded phone-width row (#4982). */
+export const STOP_HINT_CALLS = 8;
+
+/** A value the app passes when it does not know the real one. */
+function known(value: string | undefined): value is string {
+	if (value == null) return false;
+	const v = value.trim();
+	return v.length > 0 && v !== "—" && v !== "-" && v !== "?";
+}
+
+export function segmentWidth(s: FooterSegment): number {
+	return (
+		(s.label ? s.label.length + 1 : 0) +
+		s.value.length +
+		(s.note ? s.note.length + 1 : 0) +
+		(s.hint ? keyCapText(s.hint).length + 1 : 0)
+	);
+}
+
+function formatTps(tps: number): string {
+	if (tps >= 100) return `${Math.round(tps)} t/s`;
+	if (tps >= 10) return `${tps.toFixed(0)} t/s`;
+	return `${tps.toFixed(1)} t/s`;
+}
+
+/** Build every segment we have real data for, in display order. */
+export function buildFooterSegments(d: FooterData): FooterSegment[] {
+	const out: FooterSegment[] = [
+		{ key: "mode", label: "mode", value: d.mode, hint: "^Y", color: ui.teal, priority: 0 },
+	];
+	const perm = isPermissionMode(d.permissions) ? d.permissions : undefined;
+	// Ask shows no segment, unless a parent holds the tab there: then it says so.
+	if (perm && (perm !== "ask" || d.permHeld)) {
+		out.push({
+			key: "perm",
+			label: "perm",
+			value: PERM_LOOK[perm].name,
+			note: d.permHeld ? permHeldNote(d.columns ?? 160) : undefined,
+			hint: PERM_KEY,
+			bold: PERM_LOOK[perm].bold,
+			color: permColour(perm),
+			priority: 0,
+		});
+	}
+	if (d.thinking) {
+		out.push({
+			key: "think",
+			label: "think",
+			value: d.thinking,
+			// Ctrl+Z: the whole chip is the button, so a phone can step the level.
+			hint: "^Z",
+			color: ui.cream,
+			priority: 1,
+		});
+	}
+	const ctx = d.ctx ? ctxText({ ...d.ctx, columns: d.columns ?? 160 }) : null;
+	if (ctx) {
+		out.push({
+			key: "ctx",
+			label: "ctx",
+			value: ctx.value,
+			// Calm, then warm at 70 percent, then red at 90 (and a "!" in the text).
+			color:
+				ctx.level === "danger"
+					? theme.color.red
+					: ctx.level === "warn"
+						? theme.color.orangeAlt
+						: ui.muted,
+			bold: ctx.level === "danger",
+			// A window that is nearly full outranks the standing facts beside it.
+			priority: ctx.level === "danger" || ctx.level === "warn" ? 1 : 2,
+		});
+	}
+	if (d.tokensPerSecond && d.tokensPerSecond > 0) {
+		out.push({ key: "rate", value: formatTps(d.tokensPerSecond), color: ui.teal, priority: 6 });
+	}
+	if (d.localChip) {
+		out.push({ key: "local", value: d.localChip, color: ui.teal, priority: 2 });
+	}
+	if (!perm && known(d.permissions) && d.permissions !== "ask") {
+		const infinite = d.permissions === "infinite";
+		out.push({
+			key: "approval",
+			label: "approval",
+			value: d.permissions,
+			color: infinite ? ui.orange : ui.cream,
+			// Running without asking is the state a person must not miss.
+			priority: infinite ? 1 : 5,
+		});
+	}
+	// While a turn runs, the key that stops it. On a crowded row (a phone) only once
+	// the turn has run long enough that a person is likely to want it (#4982).
+	if (d.turnRunning && ((d.columns ?? 160) >= 60 || (d.turnCalls ?? 0) > STOP_HINT_CALLS)) {
+		out.push({ key: "stop", value: "Esc stop", color: ui.orange, priority: 1 });
+	}
+	if (d.traceHint) {
+		out.push({
+			key: "trace",
+			value: d.traceHint === "fold" ? "Enter folds steps" : "Enter shows steps",
+			color: ui.muted,
+			priority: 2,
+		});
+	}
+	if (d.judge && d.judge !== "ready") {
+		out.push({
+			key: "judge",
+			label: "judge",
+			value: d.judge,
+			color: d.judge === "failed" ? ui.orange : ui.muted,
+			priority: 1,
+		});
+	}
+	if (d.daemonAttached) {
+		out.push({ key: "daemon", label: "daemon", value: "attached", color: ui.teal, priority: 2 });
+	}
+	if (d.sandboxOff) {
+		out.push({
+			key: "sandbox",
+			label: "sandbox",
+			value: "off",
+			note: d.sandboxOff,
+			// Shell commands can write 8gent's startup files: a state a person must not miss.
+			color: ui.orange,
+			priority: 1,
+		});
+	}
+	if (
+		d.providersTotal != null &&
+		d.providersTotal > 0 &&
+		d.providersLive != null &&
+		d.providersLive < d.providersTotal
+	) {
+		out.push({
+			key: "providers",
+			label: "providers",
+			value: `${d.providersLive}/${d.providersTotal}`,
+			color: ui.cream,
+			priority: 5,
+		});
+	}
+	if (d.adhd) {
+		out.push({ key: "adhd", label: "adhd", value: "on", color: ui.teal, priority: 3 });
+	}
+	if (d.durable) {
+		out.push({ key: "durable", label: "durable", value: "on", color: ui.teal, priority: 3 });
+	}
+	if (known(d.user)) {
+		out.push({ key: "user", label: "user", value: d.user, color: ui.cream, priority: 7 });
+	}
+	if (known(d.sessionTime)) {
+		out.push({
+			key: "session",
+			label: "session",
+			value: d.sessionTime,
+			color: ui.muted,
+			priority: 4,
+		});
+	}
+	// "verified" is never drawn: absence means nothing was flagged, not that it was checked.
+	if (d.verification && d.verification !== "verified") {
+		out.push({
+			key: "verification",
+			value: d.verification.replace(/_/g, "-"),
+			color: ui.orange,
+			priority: 0,
+		});
+	}
+	return out;
+}
+
+/**
+ * Columns a row of segments takes. Segments are joined by the separator;
+ * `leading` adds one before the first, for when the DJ station segment is
+ * drawn ahead of them.
+ */
+export function segmentsWidth(segments: FooterSegment[], leading = false): number {
+	if (segments.length === 0) return 0;
+	const seps = segments.length - 1 + (leading ? 1 : 0);
+	return segments.reduce((sum, s) => sum + segmentWidth(s), 0) + seps * FOOTER_SEPARATOR.length;
+}
+
+/**
+ * Keep as many segments as fit in `width` columns, dropping the highest
+ * priority number first. Display order is preserved. The priority-0
+ * segments are always kept, even if they alone overflow (Ink truncates the
+ * row).
+ */
+export function fitFooterSegments(
+	segments: FooterSegment[],
+	width: number,
+	leading = false,
+): FooterSegment[] {
+	const kept = [...segments];
+	while (segmentsWidth(kept, leading) > width) {
+		let dropAt = -1;
+		for (let i = 0; i < kept.length; i++) {
+			const s = kept[i];
+			if (s && s.priority > 0 && (dropAt < 0 || s.priority > (kept[dropAt]?.priority ?? -1)))
+				dropAt = i;
+		}
+		if (dropAt < 0) break;
+		kept.splice(dropAt, 1);
+	}
+	return kept;
+}
+
+/** Columns kept on the left for the DJ station segment, when DjDeck draws
+ *  one (a track is loaded and its row is closed). */
+export function fmSegmentWidth(columns: number): number {
+	return columns >= 120 ? 22 : 10;
+}
+
+/**
+ * The key hints, most used first; display order is the same. [^P] palette
+ * leads: the palette lists every command, so at 80 columns it is the one
+ * hint that stays. Ctrl+C quits (app.tsx), so it says quit, not clear.
+ *
+ * Only keys that visibly do something are taught here, because a key cap
+ * is also a button (#3239): a cap that does nothing reads as a broken click
+ * (James, 2026-10-02: "only plan from the buttons in the footer actually
+ * works"). ^O expand, ^K kanban and ^B processes left the row: their state
+ * changes, but nothing has drawn it since #2350. They come back when their
+ * views render again.
+ */
+export const FOOTER_HINTS = [
+	"^P palette",
+	"^X plan",
+	// Ask has no perm segment, so the switch key is taught here instead.
+	`${PERM_KEY} perm`,
+	"^A anim",
+	"^S sound",
+	"^C quit",
+];
+/**
+ * ^D hands the DJ deck the keyboard, and only while a track is loaded; with
+ * nothing loaded it does nothing, so the cap shows only then, after perm.
+ */
+/** The cap that quits; its gaps stay dead. */
+const QUIT_CAP = "^C";
+export const DJ_HINT = "^D DJ";
+/** Columns kept between the last status segment and the first hint. */
+const HINTS_MARGIN = 3;
+
+/** Columns one hint takes as a key cap: "[^X] plan". */
+export function hintWidth(hint: string): number {
+	const { cap, verb } = splitHint(hint);
+	return keyCapText(cap, verb).length;
+}
+
+/** The hints that fit in `width` columns, most used first, never cut. */
+export function fitFooterHints(width: number, permShown = false, djTrack = false): string[] {
+	const all = djTrack
+		? [...FOOTER_HINTS.slice(0, 3), DJ_HINT, ...FOOTER_HINTS.slice(3)]
+		: FOOTER_HINTS;
+	const out: string[] = [];
+	let used = 0;
+	for (const hint of all) {
+		// The perm segment already shows the key.
+		if (permShown && hint.endsWith(" perm")) continue;
+		const cost = hintWidth(hint) + (out.length > 0 ? KEY_CAP_GAP.length : 0);
+		if (used + cost > width) break;
+		out.push(hint);
+		used += cost;
+	}
+	return out;
+}
+
+/** Below this many columns the row is the phone's: caps first, labels shortened. */
+export const FOOTER_NARROW_COLS = 60;
+
+/** The cap that opens the palette: the only way into about 80 commands on a phone. */
+const PALETTE_HINT = "^P palette";
+
+/** A segment with its label dropped: "Planning [^Y]" for "mode Planning [^Y]". */
+const unlabelled = (s: FooterSegment): FooterSegment =>
+	s.key === "mode" || s.key === "perm" ? { ...s, label: undefined } : s;
+
+/**
+ * The footer row: segments plus the hints the columns they leave can hold.
+ *
+ * [^P] palette is reserved first: segments are fitted into what is left, so
+ * the low-priority ones (session time, providers) give way before the cap,
+ * at every width. Before, they filled the row and the cap got the leftovers:
+ * at 52 columns an idle row read "mode Planning [^Y] | sandbox off nested"
+ * with no way into the palette.
+ *
+ * The "sandbox off" segment (#4013) is a state a person must not miss.
+ * From 60 columns up it may push lower segments out but never a hint:
+ * [^C] quit must not leave the row because the shell is unsandboxed (on
+ * Windows it never is). When the full segment would cost a hint it drops
+ * its reason ("sandbox off"), then, only if that still costs one, the row is
+ * exactly what it would be without it. Below 60 columns security wins the
+ * other way: the segment is never dropped. It sheds its reason, then its
+ * word ("sbx off"), then the mode and perm labels, and only then the perm
+ * segment, so the [^P] palette cap and the sandbox state are both always
+ * there.
+ */
+function fitRow(
+	all: FooterSegment[],
+	width: number,
+	leading: boolean,
+	dj: boolean,
+): { segments: FooterSegment[]; hints: string[] } {
+	const withChip = fitRowMeter(all, width, leading, dj);
+	const chip = all.find((s) => s.key === "think");
+	if (!chip) return withChip;
+	// The thinking chip (#5040) never costs a key hint: when the row loses one with
+	// it, the row is exactly what it would be without it, as for the sandbox segment.
+	const plain = fitRowMeter(
+		all.filter((s) => s !== chip),
+		width,
+		leading,
+		dj,
+	);
+	return withChip.hints.length < plain.hints.length ? plain : withChip;
+}
+
+function fitRowMeter(
+	all: FooterSegment[],
+	width: number,
+	leading: boolean,
+	dj: boolean,
+): { segments: FooterSegment[]; hints: string[] } {
+	const full = fitRowOnce(all, width, leading, dj);
+	const ctx = all.find((s) => s.key === "ctx");
+	if (!ctx || typeof ctx.value !== "string" || !ctx.value.endsWith(SET_IN_SETTINGS)) return full;
+	// The "(set in Settings)" hint never costs a key hint: when the row loses one with it,
+	// the segment drops the words and keeps used/?.
+	const short = fitRowOnce(
+		all.map((s) =>
+			s === ctx ? { ...s, value: (ctx.value as string).slice(0, -SET_IN_SETTINGS.length) } : s,
+		),
+		width,
+		leading,
+		dj,
+	);
+	return short.hints.length > full.hints.length ? short : full;
+}
+
+function fitRowOnce(
+	all: FooterSegment[],
+	width: number,
+	leading: boolean,
+	dj: boolean,
+): { segments: FooterSegment[]; hints: string[] } {
+	const budget = Math.max(0, width - hintWidth(PALETTE_HINT) - HINTS_MARGIN);
+	const hintsFor = (segments: FooterSegment[]) =>
+		fitFooterHints(
+			Math.max(0, width - segmentsWidth(segments, leading) - HINTS_MARGIN),
+			segments.some((s) => s.key === "perm"),
+			dj,
+		);
+	const fit = (list: FooterSegment[]) => fitFooterSegments(list, budget, leading);
+	const sandbox = all.find((s) => s.key === "sandbox");
+	const without = sandbox ? all.filter((s) => s !== sandbox) : all;
+	let base = fit(without);
+	// Phone: when the meter does not fit under "mode Planning", drop that label before the meter.
+	if (width < FOOTER_NARROW_COLS && without.some((s) => s.key === "ctx")) {
+		if (!base.some((s) => s.key === "ctx")) {
+			const short = fit(without.map(unlabelled));
+			if (short.some((s) => s.key === "ctx")) base = short;
+		}
+	}
+	const baseHints = hintsFor(base);
+	if (!sandbox) return { segments: base, hints: baseHints };
+	const forms: FooterSegment[] = [
+		sandbox,
+		{ ...sandbox, note: undefined },
+		{ ...sandbox, note: undefined, label: "sbx" },
+	];
+	const shapes: Array<(list: FooterSegment[]) => FooterSegment[]> = [
+		(l) => l,
+		(l) => l.map(unlabelled),
+	];
+	// What the row would hold with neither the sandbox nor the meter: from 60
+	// columns up the sandbox never costs a hint against it (#4013).
+	const meter = all.find((s) => s.key === "ctx");
+	const plainHints = hintsFor(fit(without.filter((s) => s.key !== "ctx")));
+	// The sandbox state is never dropped, at any width (8SO, #4953). It sheds its
+	// reason, then its word ("sbx off"), before anything else gives. The meter
+	// stays while it can; when it cannot, it goes before the sandbox does. From
+	// 60 columns up a form that would cost a hint is passed over for a shorter
+	// one; low-priority segments (session, providers) then give way too.
+	// Lower-priority segments (rate, user, providers, session) give way before the
+	// meter does: keep priority up to 9, then 5, 4, 3, 2 (the meter), and only then
+	// lose the meter itself, then everything above the sandbox.
+	const keepUpTo = (p: number) => (l: FooterSegment[]) => l.filter((x) => x.priority <= p);
+	const sheds: Array<(list: FooterSegment[]) => FooterSegment[]> = [
+		...[9, 5, 4, 3, 2].map(keepUpTo),
+		(l) => l.filter((x) => x.key !== "ctx"),
+		(l) => l.filter((x) => x.key !== "ctx" && x.priority <= 1),
+	];
+	const meterSheds = 5;
+	// From 60 columns up the reason is worth more than the user name and the
+	// rate, then providers and session time: try the full reason with those given up
+	// before the reason is the thing that goes.
+	if (width >= FOOTER_NARROW_COLS && sandbox.note) {
+		for (const shed of sheds.slice(0, 4)) {
+			const candidate = shed(all);
+			const segments = fit(candidate);
+			if (!segments.includes(sandbox)) continue;
+			if (meter && !segments.some((x) => x.key === "ctx")) continue;
+			const hints = hintsFor(segments);
+			if (hints.length < plainHints.length) continue;
+			return { segments, hints };
+		}
+	}
+	for (const [shedIndex, shed] of sheds.entries()) {
+		if (!meter && shedIndex < meterSheds) continue;
+		for (const shape of shapes) {
+			for (const seg of forms) {
+				const candidate = shape(shed(all.map((x) => (x === sandbox ? seg : x))));
+				const kept = candidate.find((x) => x.key === "sandbox");
+				const segments = fit(candidate);
+				if (!kept || !segments.includes(kept)) continue;
+				// The first pass is the one that keeps the meter: a form that loses it yields to the next.
+				if (meter && shedIndex < meterSheds && !segments.some((x) => x.key === "ctx")) continue;
+				const hints = hintsFor(segments);
+				if (width >= FOOTER_NARROW_COLS && hints.length < plainHints.length) continue;
+				return { segments, hints };
+			}
+		}
+	}
+	// Still no room: the sandbox keeps its place in its shortest form. Narrow, the
+	// perm segment yields too (the tab tag and Shift+Tab still show it).
+	const last = forms[2] as FooterSegment;
+	const kept = fit(
+		all
+			.filter((x) => x.key !== "ctx" && (width >= FOOTER_NARROW_COLS || x.key !== "perm"))
+			.map((x) => (x === sandbox ? last : unlabelled(x))),
+	);
+	const segments = kept.some((x) => x.key === "sandbox") ? kept : [...kept, last];
+	return { segments, hints: hintsFor(segments) };
+}
+
+/** The flag's forms, longest first (#4962): full, short (one word and a mark), glyph. */
+const FLAG_SHORT: Record<string, string> = {
+	unverified: "unver.",
+	"tests-claimed-not-run": "no tests run",
+};
+/** Shortest word forms, tried before the bare glyph: a mark alone says nothing a person can act on. */
+const FLAG_SHORTEST: Record<string, string> = {
+	unverified: "unver.",
+	"tests-claimed-not-run": "no tests",
+};
+export const FLAG_GLYPH = "!";
+
+/** The mode segment without its "[^Y]" cap, and its word cut to `max` letters if given. */
+const modeBare = (s: FooterSegment, max?: number): FooterSegment =>
+	s.key === "mode" ? { ...s, hint: undefined, value: max ? s.value.slice(0, max) : s.value } : s;
+
+/**
+ * The footer row, with the unverified-turn flag (#4510, priority 0) fitted
+ * so it can never push [^P] palette out (#4962). Drop order, each step only
+ * when the row still does not hold the cap:
+ *
+ *   1. the flag shortens: "unverified" to "unver.", "tests-claimed-not-run"
+ *      to "no tests run";
+ *   2. the mode and perm labels go ("Planning [^Y]" for "mode Planning [^Y]");
+ *   2b. the flag takes its shortest word ("no tests"), the perm yielding below 60;
+ *   3. the flag shrinks to one glyph, "!";
+ *   4. only below 60 columns, the perm segment yields (the tab tag and
+ *      Shift+Tab still show it);
+ *   5. last resorts: the mode loses its "[^Y]" cap, then its word is cut to
+ *      four letters. The mode itself and the sandbox state never leave.
+ *
+ * The sandbox state keeps its place throughout (#4953); fitRow decides how it
+ * shortens. Other segments give way only after the flag has used every step,
+ * and at 80 columns and above the flag reads in full whenever it fits.
+ */
+export function fitFooterRow(
+	all: FooterSegment[],
+	width: number,
+	leading = false,
+	dj = false,
+): { segments: FooterSegment[]; hints: string[] } {
+	const flag = all.find((s) => s.key === "verification");
+	const plain = fitRow(all, width, leading, dj);
+	if (!flag) return plain;
+	const budget = Math.max(0, width - hintWidth(PALETTE_HINT) - HINTS_MARGIN);
+	const holds = (r: { segments: FooterSegment[]; hints: string[] }) =>
+		r.hints[0] === PALETTE_HINT && segmentsWidth(r.segments, leading) <= budget;
+	if (holds(plain)) return plain;
+	const withFlag = (value: string) => all.map((s) => (s === flag ? { ...flag, value } : s));
+	const short = FLAG_SHORT[flag.value] ?? flag.value;
+	const dropPerm = (l: FooterSegment[]) =>
+		width >= FOOTER_NARROW_COLS ? l : l.filter((s) => s.key !== "perm");
+	const steps: FooterSegment[][] = [
+		withFlag(short),
+		withFlag(short).map(unlabelled),
+		dropPerm(withFlag(FLAG_SHORTEST[flag.value] ?? short).map(unlabelled)),
+		withFlag(FLAG_GLYPH).map(unlabelled),
+		dropPerm(withFlag(FLAG_GLYPH).map(unlabelled)),
+		// The last resorts, on phones narrower than the mode, flag and sandbox together:
+		// the mode loses its key cap (the palette lists every command), then its word
+		// is cut to four letters. The mode itself never leaves the row.
+		dropPerm(withFlag(FLAG_GLYPH).map(unlabelled)).map(modeBare),
+		dropPerm(withFlag(FLAG_GLYPH).map(unlabelled)).map((x) => modeBare(x, 4)),
+	];
+	// Prefer the earliest step that holds the cap and loses no segment the
+	// last one keeps: shortening the flag comes before anything else gives way.
+	const rows = steps.map((list) => fitRow(list, width, leading, dj));
+	// The glyph row that holds the cap sets the bar: on a phone the perm yields, so the
+	// word forms are measured against that row, not against one that cannot hold.
+	const glyph = (rows.slice(3).find(holds) ?? rows[3]) as {
+		segments: FooterSegment[];
+		hints: string[];
+	};
+	for (const r of rows.slice(0, 4)) {
+		if (holds(r) && glyph.segments.every((g) => r.segments.some((x) => x.key === g.key))) return r;
+	}
+	for (const r of rows.slice(4)) if (holds(r)) return r;
+	return rows[rows.length - 1] as { segments: FooterSegment[]; hints: string[] };
+}
+
+/** A permission switch the footer is announcing (#3174). */
+export interface FooterToast {
+	mode: PermissionMode;
+	held: boolean;
+}
+
+/**
+ * Fit the toast into the hints slot: the longest of full / short / tiny that
+ * fits. Full and short keep every priority 0-1 segment that shows without
+ * the toast; tiny keeps priority 0 (mode and perm), which at 80 columns
+ * always leaves room for it. Lower segments step aside while it shows. Null
+ * when nothing fits: the perm segment already names the mode.
+ */
+export function fitFooterToast(
+	all: FooterSegment[],
+	width: number,
+	toast: FooterToast,
+	leading = false,
+): { text: string; segments: FooterSegment[] } | null {
+	const forms = permToastForms(toast.mode, toast.held);
+	const plain = fitFooterSegments(all, width, leading);
+	const mustKeep = (s: FooterSegment[], max: number) =>
+		plain.filter((p) => p.priority <= max).every((p) => s.includes(p));
+	for (const [text, keepUpTo] of [
+		[forms.full, 1],
+		[forms.short, 1],
+		[forms.tiny, 0],
+	] as const) {
+		const room = width - text.length - HINTS_MARGIN;
+		if (room <= 0) continue;
+		const fitted = fitFooterSegments(all, room, leading);
+		if (segmentsWidth(fitted, leading) <= room && mustKeep(fitted, keepUpTo)) {
+			return { text, segments: fitted };
+		}
+	}
+	return null;
+}
+
+/**
+ * A notice takes the hint slot for two seconds. What stays beside it is whole
+ * or absent: segments that fit in the room it leaves, else none, so the row
+ * never shows "mode Pl" cut under it. A notice wider than the row ends in an
+ * ellipsis instead of overflowing.
+ */
+export function fitFooterNotice(
+	all: FooterSegment[],
+	width: number,
+	notice: string,
+	leading = false,
+): { text: string; segments: FooterSegment[] } {
+	const text =
+		notice.length > width - 1 ? `${notice.slice(0, Math.max(0, width - 2))}\u2026` : notice;
+	const room = width - text.length - HINTS_MARGIN;
+	const fitted = room > 0 ? fitFooterSegments(all, room, leading) : [];
+	const segments = fitted.length > 0 && segmentsWidth(fitted, leading) <= room ? fitted : [];
+	return { text, segments };
+}
+
+/** Click spans for the footer row (#3239): the segment keys and the hint caps. */
+export function footerClickSpans(
+	segments: FooterSegment[],
+	hints: string[],
+	leading: boolean,
+): { segments: ClickSpan[]; hints: ClickSpan[] } {
+	const segSpans: ClickSpan[] = [];
+	let x = 0;
+	segments.forEach((s, i) => {
+		if (i > 0 || leading) x += FOOTER_SEPARATOR.length;
+		const w = segmentWidth(s);
+		const bytes = s.hint ? keyBytes(s.hint) : null;
+		// The whole segment is the target: "perm Infinite [⇧Tab]" cycles the mode.
+		if (bytes)
+			segSpans.push({ id: `footer:seg:${s.key}`, dx: x, w, action: () => injectKeys(bytes) });
+		x += w;
+	});
+	const hintSpans: ClickSpan[] = [];
+	let hx = 0;
+	hints.forEach((h, i) => {
+		if (i > 0) hx += KEY_CAP_GAP.length;
+		const w = hintWidth(h);
+		const bytes = keyBytes(splitHint(h).cap);
+		if (bytes)
+			hintSpans.push({
+				id: `footer:hint:${h}`,
+				dx: hx,
+				w,
+				// Quit exits with no confirm: a near-miss must never reach it.
+				tight: splitHint(h).cap === QUIT_CAP,
+				action: () => injectKeys(bytes),
+			});
+		hx += w;
+	});
+	return { segments: segSpans, hints: hintSpans };
+}
+
+export function StatusSegments({
+	data,
+	width,
+	toast,
+	leading = false,
+	notice,
+	dj = false,
+}: {
+	data: FooterData;
+	width: number;
+	toast?: FooterToast | null;
+	/** The DJ station segment is drawn before this row: start with a separator. */
+	leading?: boolean;
+	/** A short confirmation in the hint slot, e.g. "copied 22 chars" after a selection (#3239). */
+	notice?: string | null;
+	/** A DJ track is loaded, so ^D does something and its cap shows. */
+	dj?: boolean;
+}) {
+	const all = buildFooterSegments(data);
+	const toastFit = toast ? fitFooterToast(all, width, toast, leading) : null;
+	const row = fitFooterRow(all, width, leading, dj);
+	// A notice takes the hint slot, so no hint is at stake: every segment that fits shows.
+	const noticeFit = !toastFit && notice ? fitFooterNotice(all, width, notice, leading) : null;
+	const segments = toastFit ? toastFit.segments : noticeFit ? noticeFit.segments : row.segments;
+	const hints = toastFit || notice ? [] : row.hints;
+	const segRef = useRef(null);
+	const hintRef = useRef(null);
+	const spans = footerClickSpans(segments, hints, leading);
+	useClickSpans(segRef, spans.segments);
+	useClickSpans(hintRef, spans.hints);
+	const pressed = usePressedIn("footer:");
+	return (
+		// One column clear of the right edge, like the chips in the header (#3238).
+		<Box flexGrow={1} minWidth={0} overflow="hidden" justifyContent="space-between" marginRight={1}>
+			<Box ref={segRef} minWidth={0} flexShrink={1}>
+				<Text wrap="truncate-end">
+					{segments.map((s, i) => (
+						<React.Fragment key={s.key}>
+							{i > 0 || leading ? <Text color={ui.dim}>{FOOTER_SEPARATOR}</Text> : null}
+							{s.label ? <Text color={ui.muted}>{s.label} </Text> : null}
+							<Text color={s.color} bold={s.bold}>
+								{s.value}
+							</Text>
+							{s.note ? <Text color={ui.muted}> {s.note}</Text> : null}
+							{s.hint ? (
+								<Text>
+									{" "}
+									<KeyCap cap={s.hint} pressed={pressed === `footer:seg:${s.key}`} />
+								</Text>
+							) : null}
+						</React.Fragment>
+					))}
+				</Text>
+			</Box>
+			{toastFit && toast ? (
+				<Box flexShrink={0}>
+					<Text color={permColour(toast.mode)} bold={PERM_LOOK[toast.mode].bold}>
+						{toastFit.text}
+					</Text>
+				</Box>
+			) : notice ? (
+				<Box flexShrink={0}>
+					<Text color={theme.color.textSecondary}>{noticeFit?.text ?? notice}</Text>
+				</Box>
+			) : null}
+			{hints.length > 0 ? (
+				<Box ref={hintRef} flexShrink={0}>
+					<Text>
+						{hints.map((h, i) => {
+							const { cap, verb } = splitHint(h);
+							return (
+								<Text key={h}>
+									{i > 0 ? KEY_CAP_GAP : ""}
+									<KeyCap cap={cap} verb={verb} pressed={pressed === `footer:hint:${h}`} />
+								</Text>
+							);
+						})}
+					</Text>
+				</Box>
+			) : null}
+		</Box>
+	);
+}

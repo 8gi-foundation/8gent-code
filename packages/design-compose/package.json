@@ -1,0 +1,24 @@
+{
+	"name": "@8gent/design-compose",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Deterministic design substrate: an officer states intent, code composes the spec. The design space is traversed by executing code, not by reasoning in a context window.",
+	"main": "index.ts",
+	"types": "index.ts",
+	"exports": {
+		".": {
+			"import": "./index.ts",
+			"types": "./index.ts"
+		}
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "bun test",
+		"demo": "bun run demo.ts",
+		"space": "bun run space.ts"
+	},
+	"devDependencies": {
+		"typescript": "^5.3.0"
+	}
+}

@@ -1,0 +1,1644 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer decide/probe listOllamaModels :: models 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": [
+      {
+        "name": "qwen3.8:27b-mlx",
+        "model": "qwen3.8:27b-mlx",
+        "size": 17000000000,
+        "digest": "a1",
+        "details": {
+          "family": "qwen3"
+        }
+      },
+      {
+        "name": "nomic-embed-text:latest",
+        "model": "nomic-embed-text:latest",
+        "size": 274000000,
+        "digest": "b2"
+      },
+      {
+        "name": "llama3.2:3b",
+        "model": "llama3.2:3b",
+        "size": 2000000000,
+        "digest": "c3"
+      },
+      {
+        "name": "gemma3:4b",
+        "model": "gemma3:4b",
+        "size": 3300000000,
+        "digest": "d4"
+      },
+      {
+        "name": "eight-1.0-q3:14b",
+        "model": "eight-1.0-q3:14b",
+        "size": 9000000000,
+        "digest": "e5"
+      }
+    ]
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer decide/probe listOllamaModels :: empty 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer decide/probe listOllamaModels :: no-models-key 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer decide/probe listOllamaModels :: models-not-list 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer decide/probe listOllamaModels :: http-500 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "threw": "Error",
+    "message": "ollama /api/tags 500"
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer decide/probe listOllamaModels :: bad-json 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "threw": "SyntaxError",
+    "message": "<runtime>"
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer decide/probe listOllamaModels :: refused 1`] = `
+"{
+  "requests": [],
+  "result": {
+    "threw": "<runtime>",
+    "message": "<runtime>"
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer self-autonomy/onboarding probeOllama :: models 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "status": "found",
+      "host": "<fake>",
+      "models": [
+        "qwen3.8:27b-mlx",
+        "nomic-embed-text:latest",
+        "llama3.2:3b",
+        "gemma3:4b",
+        "eight-1.0-q3:14b"
+      ]
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer self-autonomy/onboarding probeOllama :: empty 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "status": "found",
+      "host": "<fake>",
+      "models": []
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer self-autonomy/onboarding probeOllama :: no-models-key 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "status": "found",
+      "host": "<fake>",
+      "models": []
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer self-autonomy/onboarding probeOllama :: models-not-list 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "status": "unreachable",
+      "host": "<fake>",
+      "reason": "connection refused or no route",
+      "configured": true,
+      "timedOut": false
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer self-autonomy/onboarding probeOllama :: http-500 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "status": "unreachable",
+      "host": "<fake>",
+      "reason": "answered HTTP 500",
+      "configured": true,
+      "timedOut": false
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer self-autonomy/onboarding probeOllama :: bad-json 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "status": "unreachable",
+      "host": "<fake>",
+      "reason": "connection refused or no route",
+      "configured": true,
+      "timedOut": false
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer self-autonomy/onboarding probeOllama :: refused 1`] = `
+"{
+  "requests": [],
+  "result": {
+    "returned": {
+      "status": "unreachable",
+      "host": "<refused>",
+      "reason": "connection refused or no route",
+      "configured": true,
+      "timedOut": false
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui OnboardingScreen fetchProviderModels(ollama) :: models 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": [
+      "qwen3.8:27b-mlx",
+      "llama3.2:3b",
+      "gemma3:4b",
+      "eight-1.0-q3:14b"
+    ]
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui OnboardingScreen fetchProviderModels(ollama) :: empty 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui OnboardingScreen fetchProviderModels(ollama) :: no-models-key 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui OnboardingScreen fetchProviderModels(ollama) :: models-not-list 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui OnboardingScreen fetchProviderModels(ollama) :: http-500 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui OnboardingScreen fetchProviderModels(ollama) :: bad-json 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui OnboardingScreen fetchProviderModels(ollama) :: refused 1`] = `
+"{
+  "requests": [],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui provider-health probeProviders :: models 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "live": 1,
+      "total": 3,
+      "statuses": [
+        {
+          "name": "apfel",
+          "live": false
+        },
+        {
+          "name": "lmstudio",
+          "live": false
+        },
+        {
+          "name": "ollama",
+          "live": true
+        }
+      ]
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui provider-health probeProviders :: empty 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "live": 1,
+      "total": 3,
+      "statuses": [
+        {
+          "name": "apfel",
+          "live": false
+        },
+        {
+          "name": "lmstudio",
+          "live": false
+        },
+        {
+          "name": "ollama",
+          "live": true
+        }
+      ]
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui provider-health probeProviders :: no-models-key 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "live": 1,
+      "total": 3,
+      "statuses": [
+        {
+          "name": "apfel",
+          "live": false
+        },
+        {
+          "name": "lmstudio",
+          "live": false
+        },
+        {
+          "name": "ollama",
+          "live": true
+        }
+      ]
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui provider-health probeProviders :: models-not-list 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "live": 1,
+      "total": 3,
+      "statuses": [
+        {
+          "name": "apfel",
+          "live": false
+        },
+        {
+          "name": "lmstudio",
+          "live": false
+        },
+        {
+          "name": "ollama",
+          "live": true
+        }
+      ]
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui provider-health probeProviders :: http-500 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "live": 0,
+      "total": 3,
+      "statuses": [
+        {
+          "name": "apfel",
+          "live": false
+        },
+        {
+          "name": "lmstudio",
+          "live": false
+        },
+        {
+          "name": "ollama",
+          "live": false
+        }
+      ]
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui provider-health probeProviders :: bad-json 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "live": 1,
+      "total": 3,
+      "statuses": [
+        {
+          "name": "apfel",
+          "live": false
+        },
+        {
+          "name": "lmstudio",
+          "live": false
+        },
+        {
+          "name": "ollama",
+          "live": true
+        }
+      ]
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer tui provider-health probeProviders :: refused 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": {
+      "live": 0,
+      "total": 3,
+      "statuses": [
+        {
+          "name": "apfel",
+          "live": false
+        },
+        {
+          "name": "lmstudio",
+          "live": false
+        },
+        {
+          "name": "ollama",
+          "live": false
+        }
+      ]
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer eight/clients OllamaClient.isAvailable :: models 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": true
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer eight/clients OllamaClient.isAvailable :: empty 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": true
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer eight/clients OllamaClient.isAvailable :: no-models-key 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": true
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer eight/clients OllamaClient.isAvailable :: models-not-list 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": true
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer eight/clients OllamaClient.isAvailable :: http-500 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": false
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer eight/clients OllamaClient.isAvailable :: bad-json 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": true
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer eight/clients OllamaClient.isAvailable :: refused 1`] = `
+"{
+  "requests": [],
+  "result": {
+    "returned": false
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer orchestration/local-model-detect detectOllama :: models 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": [
+      {
+        "provider": "ollama",
+        "model": "qwen3.8:27b-mlx",
+        "score": 27
+      },
+      {
+        "provider": "ollama",
+        "model": "llama3.2:3b",
+        "score": 3
+      },
+      {
+        "provider": "ollama",
+        "model": "gemma3:4b",
+        "score": 4
+      },
+      {
+        "provider": "ollama",
+        "model": "eight-1.0-q3:14b",
+        "score": 14
+      }
+    ]
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer orchestration/local-model-detect detectOllama :: empty 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer orchestration/local-model-detect detectOllama :: no-models-key 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer orchestration/local-model-detect detectOllama :: models-not-list 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "threw": "TypeError",
+    "message": "<runtime>"
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer orchestration/local-model-detect detectOllama :: http-500 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer orchestration/local-model-detect detectOllama :: bad-json 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer orchestration/local-model-detect detectOllama :: refused 1`] = `
+"{
+  "requests": [],
+  "result": {
+    "returned": []
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer providers/local-judge SeleneJudge.isAvailable :: models 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": true
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer providers/local-judge SeleneJudge.isAvailable :: empty 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": true
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer providers/local-judge SeleneJudge.isAvailable :: no-models-key 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": true
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer providers/local-judge SeleneJudge.isAvailable :: models-not-list 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": true
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer providers/local-judge SeleneJudge.isAvailable :: http-500 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": false
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer providers/local-judge SeleneJudge.isAvailable :: bad-json 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "returned": true
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites are unchanged by the local model server layer providers/local-judge SeleneJudge.isAvailable :: refused 1`] = `
+"{
+  "requests": [],
+  "result": {
+    "returned": false
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites (subprocess) ai/task-router TaskRouter.autoAssign :: models 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "changes": [
+      "reasoning → eight-1.0-q3:14b",
+      "code → eight-1.0-q3:14b",
+      "default → eight-1.0-q3:14b",
+      "simple → gemma3:4b",
+      "classifier → gemma3:4b"
+    ],
+    "saved": {
+      "slots": {
+        "code": {
+          "model": "eight-1.0-q3:14b",
+          "provider": "ollama"
+        },
+        "reasoning": {
+          "model": "eight-1.0-q3:14b",
+          "provider": "ollama"
+        },
+        "simple": {
+          "model": "gemma3:4b",
+          "provider": "ollama"
+        },
+        "creative": {
+          "model": "eight:latest",
+          "provider": "ollama"
+        }
+      },
+      "classifierModel": "gemma3:4b",
+      "defaultModel": {
+        "model": "eight-1.0-q3:14b",
+        "provider": "ollama"
+      }
+    }
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites (subprocess) ai/task-router TaskRouter.autoAssign :: empty 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "changes": [],
+    "saved": null
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites (subprocess) ai/task-router TaskRouter.autoAssign :: no-models-key 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "changes": [],
+    "saved": null
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites (subprocess) ai/task-router TaskRouter.autoAssign :: models-not-list 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "changes": [],
+    "saved": null
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites (subprocess) ai/task-router TaskRouter.autoAssign :: http-500 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "changes": [],
+    "saved": null
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites (subprocess) ai/task-router TaskRouter.autoAssign :: bad-json 1`] = `
+"{
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/tags",
+      "headers": {
+        "accept": "*/*",
+        "accept-encoding": "<accept-encoding>",
+        "connection": "keep-alive",
+        "host": "<host>",
+        "user-agent": "<user-agent>"
+      },
+      "body": ""
+    }
+  ],
+  "result": {
+    "changes": [],
+    "saved": null
+  }
+}"
+`;
+
+exports[`phase 1 /api/tags call sites (subprocess) ai/task-router TaskRouter.autoAssign :: refused 1`] = `
+"{
+  "requests": [],
+  "result": {
+    "changes": [],
+    "saved": null
+  }
+}"
+`;

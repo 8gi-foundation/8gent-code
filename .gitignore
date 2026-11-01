@@ -1,0 +1,143 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage/
+.nyc_output/
+
+# SQLite databases (user data)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Research outputs (keep structure, ignore data)
+research-results.tsv
+research.log
+
+# Benchmark results (regenerate with `8gent benchmark`)
+benchmark-results.json
+
+# 8gent local data (session-specific, not versioned)
+.8gent/context/
+.8gent/evolution.log
+.8gent/tenants/
+
+# But DO include skills and config:
+# .8gent/skills/*.md
+# .8gent/config.json
+
+# Lock files (bun.lockb is binary, keep it)
+package-lock.json
+yarn.lock
+.next/
+.history/
+.bmad/
+
+# Claude worktrees (isolated agent workspaces, never commit)
+.claude/worktrees/
+
+# Local-only Claude/Claire settings + sub-agent worktrees (never commit)
+.claude/settings.local.json
+.claire/
+
+# Personal Claude skills (not part of the public agent kernel)
+.claude/skills/babysit-8gent.md
+.claude/skills/billiondollarboardroom/
+
+# Plan exports (one-off dumps)
+.exports/
+
+# Audio files (too large for git, regenerate with sync-audio.ts)
+docs/audio/*.aiff
+docs/branch-audio/*.aiff
+
+# UI sample outputs (artifacts belong in 8gent-world, not the harness)
+benchmarks/ui-samples/
+benchmarks/artifacts/
+benchmarks/results/
+benchmarks/work/
+
+# Ecosystem media (canonical: 8gent-world public/media)
+/media/
+
+# Local reference clone (nested .git; do not commit)
+claude-code/
+
+# Content drafts (belong in [REDACTED-PATH]/content/)
+docs/content/
+
+# Lil Eight build artifacts (rebuild with: bun run pet:build)
+apps/lil-eight/build/
+
+# Large media files
+*.mp4
+*.wav
+
+# Deck voiceovers are intentional product deliverables — allow through
+!docs/decks/**/*.wav
+!docs/decks/**/*.mp4
+
+# Archived media/video/audio directories (moved to 8gent-code-archive)
+video-8gent-app/
+smoke-and-fly/
+docs/audio/
+docs/branch-audio/
+
+# Session plan dumps
+*-plan-location-*.txt
+
+# Swift Package Manager build artifacts (rebuild with: bun run install:apple-foundation)
+bin/apple-foundation-bridge/.build/
+bin/apple-foundation-bridge/Package.resolved
+
+# Eyes native AX bridge build artifacts (rebuild with: bun run build:eyes-bridge)
+packages/eyes/native/swift/.build/
+packages/eyes/native/swift/Package.resolved
+
+# dogfood/QA session artifacts - screenshots and reports, never commit
+dogfood-output/
+
+# adaptive-pipeline outputs - never commit generated artifacts
+pipeline-output/
+benchmarks/autoresearch/arena/round-*/
+*-portfolio/
+celtic_hero_standalone.html
+
+# Linux packaging staging file (built by scripts/package-linux.sh)
+packaging/linux/staged-8gent
+
+# scratch files the local model is told to write (#3865)
+.tmp/
+
+# Failure ledger (#3420), written only with EIGHT_FAILURE_LEDGER=1
+benchmarks/autoresearch/failure-ledger.jsonl

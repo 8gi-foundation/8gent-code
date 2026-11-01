@@ -1,0 +1,14 @@
+From: Harbour dashboard team
+Subject: Re: two quick questions
+
+Hi Dana,
+
+Happy to clear these up:
+
+1. Delivery date: 24 November 2026. (The earlier 3 November date was superseded after the data migration slipped.)
+2. CSV export: it is not included in the first release. It is planned for release 1.1.
+
+In case it helps, single sign-on *is* included in the first release, and support hours are weekdays 09:00 to 17:00.
+
+Thanks,
+Harbour dashboard team

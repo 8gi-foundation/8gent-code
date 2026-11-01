@@ -1,0 +1,16 @@
+{
+	"kind": "locate-mode",
+	"model": "hf.co/AtlaAI/Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF:latest",
+	"backend": "ollama",
+	"threshold": 0.3615,
+	"fittedOn": "eval/results/2026-09-28-locate-prose-hf.co_AtlaAI_Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF_latest.json",
+	"n": 40,
+	"rawAccuracy": 0.525,
+	"heldOut": {
+		"accuracy": 0.6,
+		"coverage": 0.6,
+		"acceptedAccuracy": 0.7917,
+		"method": "leave-one-out"
+	},
+	"note": "PROVISIONAL: fitted on 40 hand-labelled synthetic prose queries (one labeller). Keep the model's mode when its choice confidence >= threshold, else hybrid."
+}

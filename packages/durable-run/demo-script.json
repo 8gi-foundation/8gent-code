@@ -1,0 +1,20 @@
+[
+	{
+		"toolCalls": [{ "id": "call-search", "name": "search_notes", "args": { "query": "durable" } }]
+	},
+	{
+		"toolCalls": [
+			{
+				"id": "call-write",
+				"name": "write_file",
+				"args": { "path": "notes.txt", "content": "release notes: durable runs\n" }
+			}
+		]
+	},
+	{
+		"toolCalls": [
+			{ "id": "call-send", "name": "telegram_send", "args": { "text": "notes written" } }
+		]
+	},
+	{ "text": "done" }
+]

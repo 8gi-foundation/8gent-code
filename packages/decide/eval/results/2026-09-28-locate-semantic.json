@@ -1,0 +1,1836 @@
+{
+	"summary": {
+		"date": "2026-09-28T23:42:53.952Z",
+		"anchor": "551ef3360acdb947cee54830af5a2e17257f8497",
+		"set": "locate-queries-prose.json",
+		"synthetic": true,
+		"machine": {
+			"os": "darwin",
+			"arch": "arm64",
+			"cpus": "Apple M2 Max"
+		},
+		"index": {
+			"files": 1488,
+			"symbols": 34692,
+			"firstBuild": {
+				"fromCache": false,
+				"parsed": 1488,
+				"reused": 0,
+				"removed": 0,
+				"ms": 74738
+			},
+			"warmLoadMs": [
+				1025,
+				1281,
+				918
+			],
+			"loadavgAtWarm": [
+				107.2,
+				89.4,
+				108
+			]
+		},
+		"semanticIndex": {
+			"state": "ready",
+			"count": 11538,
+			"buildMs": 1652096
+		},
+		"n": 40,
+		"rules": {
+			"top5": 0.5,
+			"ms": {
+				"p50": 697,
+				"p95": 1653
+			}
+		},
+		"semantic": {
+			"top5": 0.55,
+			"ms": {
+				"p50": 360,
+				"p95": 922
+			}
+		},
+		"oracle": {
+			"top5": 0.625,
+			"ms": {
+				"p50": 360,
+				"p95": 883
+			}
+		},
+		"byMode": {
+			"symbol": {
+				"n": 10,
+				"rulesTop5": 0.6,
+				"semanticTop5": 1,
+				"oracleTop5": 0.7
+			},
+			"grep": {
+				"n": 8,
+				"rulesTop5": 0.375,
+				"semanticTop5": 0.375,
+				"oracleTop5": 0.375
+			},
+			"path": {
+				"n": 8,
+				"rulesTop5": 0.625,
+				"semanticTop5": 0.25,
+				"oracleTop5": 0.875
+			},
+			"semantic": {
+				"n": 8,
+				"rulesTop5": 0,
+				"semanticTop5": 0.25,
+				"oracleTop5": 0.25
+			},
+			"hybrid": {
+				"n": 6,
+				"rulesTop5": 1,
+				"semanticTop5": 0.8333333333333334,
+				"oracleTop5": 1
+			}
+		},
+		"loadavgEnd": [
+			69,
+			75.6,
+			91.9
+		],
+		"target": {
+			"conceptTop5": 0.7,
+			"warmLoadMs": 1000
+		}
+	},
+	"rows": [
+		{
+			"id": "prose-01",
+			"query": "the function that turns token logprobs into a distribution over answer letters",
+			"label": "symbol",
+			"files": [
+				"packages/decide/backends/ollama.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 433,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/decide/backends/ollama.ts",
+					"packages/db/convex/admin.ts",
+					"packages/decide/decide.test.ts",
+					"packages/ai/tools.ts"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 243.3,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/decide/backends/ollama.ts",
+					"packages/decide/backends/ollama.ts",
+					"packages/telegram/index.ts",
+					"packages/decide/backends/llamacpp.test.ts",
+					"packages/decide/backends/llamacpp.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 205.3,
+				"route": "symbol/system_one",
+				"top": [
+					"packages/decide/backends/llamacpp.ts",
+					"packages/decide/backends/ollama.ts",
+					"scripts/run-eval-set.ts",
+					"packages/design-compose/motion.ts",
+					"scripts/run-eval-set.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-02",
+			"query": "which class runs every tool call the agent makes",
+			"label": "symbol",
+			"files": [
+				"packages/eight/tools.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 349,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"docs/STRESS-TEST-1M.md",
+					"packages/secrets/libsecret.ts",
+					"packages/decide/README.md",
+					"SOUL.md"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 148.3,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/eight/tools.ts",
+					"packages/eight/tools.ts",
+					"packages/ai/agent.ts",
+					"packages/telegram/index.ts",
+					"packages/eight/repl.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 33.1,
+				"route": "symbol/system_one",
+				"top": [
+					"packages/ai/tools.ts",
+					"packages/eight/pre-tool-router.ts",
+					"packages/eight/tools.ts",
+					"packages/secrets/libsecret.ts",
+					"packages/permissions/maker-checker-enforcer.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-03",
+			"query": "the function that picks which installed local model answers decisions",
+			"label": "symbol",
+			"files": [
+				"packages/decide/probe.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 403.9,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/decide/probe.ts",
+					"README.md",
+					"packages/orchestration/local-model-detect.ts",
+					"packages/providers/model-reroute.ts",
+					"CHANGELOG.md"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 322.1,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/decide/probe.ts",
+					"apps/tui/src/lib/model-selection.ts",
+					"packages/orchestration/local-model-detect.ts",
+					"packages/providers/model-reroute.ts",
+					"apps/tui/src/components/select-input.tsx"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 212,
+				"route": "symbol/system_one",
+				"top": [
+					"packages/providers/model-reroute.test.ts",
+					"packages/providers/model-reroute.test.ts",
+					"packages/providers/model-reroute.ts",
+					"packages/providers/model-reroute.ts",
+					"packages/decide/probe.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-04",
+			"query": "the helper that fits temperature and bias for guard calibration",
+			"label": "symbol",
+			"files": [
+				"packages/decide/calibrate.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 336.8,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/decide/calibrate.ts",
+					"packages/decide/calibrate.ts",
+					"packages/decide/calibrate.ts"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 248,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/decide/calibrate.ts",
+					"benchmarks/fixtures/documentation/DOC002-state-machine.ts",
+					"packages/decide/calibrate.ts",
+					"tests/security/decide-guard.test.ts",
+					"apps/tui/src/components/evidence-panel.tsx"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 133.7,
+				"route": "symbol/system_one",
+				"top": [
+					"bin/8gent.ts",
+					"packages/providers/host-placement.ts",
+					"benchmarks/autoresearch/multi-model-harness.ts",
+					"scripts/smoke.ts",
+					"packages/decide/calibrate.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-05",
+			"query": "where is the offline mock backend class for system one",
+			"label": "symbol",
+			"files": [
+				"packages/decide/backends/mock.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 226.8,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/decide/backends/mock.ts",
+					"packages/decide/backends/mock.ts",
+					"packages/decide/backends/mock.ts",
+					"tests/security/README.md"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 155.2,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/decide/backends/mock.ts",
+					"packages/decide/backends/mock.ts",
+					"benchmarks/fixtures/mock-git.ts",
+					"apps/8gent-computer/scripts/mock-daemon.ts",
+					"packages/permissions/turth.test.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 37,
+				"route": "symbol/system_one",
+				"top": [
+					"packages/decide/backends/mock.ts",
+					"benchmarks/fixtures/mock-git.ts",
+					"packages/decide/backends/mock.ts",
+					"tests/dispatch/dispatch.smoke-test.ts",
+					"packages/eight/verdict.test.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-06",
+			"query": "the class that detects doom loops in tool calls",
+			"label": "symbol",
+			"files": [
+				"packages/eight/tool-loop-detector.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 462.6,
+				"route": "hybrid/prose",
+				"top": [
+					"scripts/nightly-train.ts",
+					"packages/eight/tool-loop-detector.ts",
+					"packages/eight/tool-loop-detector.ts"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 281.9,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/eight/tool-loop-detector.ts",
+					"packages/eight/tool-loop-detector.ts",
+					"packages/handeyes/engagement-loop.ts",
+					"packages/eight/__tests__/tool-loop-detector.test.ts",
+					"packages/gamedev/harness.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 133.2,
+				"route": "symbol/system_one",
+				"top": [
+					"packages/eight/loops/computer-use.ts",
+					"packages/eight/tool-loop-detector.ts",
+					"packages/eight/loops/computer-use.ts",
+					"packages/handeyes/__tests__/triggers.test.ts",
+					"packages/ai/task-router.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-07",
+			"query": "the function that resolves the ollama base url from the environment",
+			"label": "symbol",
+			"files": [
+				"packages/decide/backends/ollama.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 521.1,
+				"route": "hybrid/prose",
+				"top": [
+					"benchmarks/head-to-head.ts",
+					"docs/MODELS.md",
+					"packages/table/officers.ts",
+					"scripts/smoke.ts",
+					"scripts/utility-factory.ts"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 279,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/eight/clients/ollama.ts",
+					"packages/decide/backends/ollama.ts",
+					"benchmarks/autoresearch/multi-model-harness.ts",
+					"packages/eight/clients/apfel.ts",
+					"packages/orchestration/local-model-detect.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 237.6,
+				"route": "symbol/system_one",
+				"top": [
+					"benchmarks/head-to-head.ts",
+					"packages/table/officers.ts",
+					"scripts/utility-factory.ts",
+					"packages/ai/edge-inference.ts",
+					"packages/eight/clui-bridge.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-08",
+			"query": "the memory store class backed by sqlite",
+			"label": "symbol",
+			"files": [
+				"packages/memory/store.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 1263.5,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/memory/store.ts",
+					"packages/table/SPEC.md",
+					"packages/memory/store.ts",
+					"packages/memory/store.test.ts",
+					"packages/control-plane/tenant.ts"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 555.9,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/memory/store.ts",
+					"packages/memory/recall.ts",
+					"packages/memory/sqlite-vec.ts",
+					"packages/memory/promote.ts",
+					"packages/memory/store.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 464.8,
+				"route": "symbol/system_one",
+				"top": [
+					"packages/daemon/routes/store/kg.ts",
+					"packages/memory/scripts/traces.ts",
+					"packages/memory/migrate.ts",
+					"packages/memory/migrate.ts",
+					"packages/memory/bus.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-09",
+			"query": "the class that keeps secrets in the macos keychain",
+			"label": "symbol",
+			"files": [
+				"packages/secrets/keychain.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 1353.7,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/hands/index.ts",
+					"docs/guides/DEPLOYMENT.md",
+					"packages/decide/calibrate.ts"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 921.8,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/secrets/keychain.ts",
+					"packages/hands/index.ts",
+					"packages/secrets/keychain.ts",
+					"packages/auth/github.ts",
+					"packages/secrets/keys.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 271.3,
+				"route": "symbol/system_one",
+				"top": [
+					"packages/hands/index.ts",
+					"packages/voice/tts-engine.ts",
+					"packages/ai/task-router.ts",
+					"packages/eight/harness/vault.ts",
+					"packages/voice/tts-engine.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-10",
+			"query": "the bandit class that learns which model provider to route to",
+			"label": "symbol",
+			"files": [
+				"packages/providers/router-bandit.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 1125.2,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/providers/host-placement.ts",
+					"README.md",
+					"CHANGELOG.md"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 392,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/providers/router-bandit.ts",
+					"packages/providers/router-bandit.ts",
+					"packages/providers/model-reroute.ts",
+					"packages/orchestration/local-model-detect.ts",
+					"packages/orchestration/local-model-detect.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 353,
+				"route": "symbol/system_one",
+				"top": [
+					"packages/providers/router-bandit.ts",
+					"packages/daemon/moa-verb.test.ts",
+					"packages/ai/task-router.ts",
+					"packages/self-autonomy/learned-skills.ts",
+					"scripts/e2e-tests.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-11",
+			"query": "where do we set temperature zero and one predicted token for the judge request",
+			"label": "grep",
+			"files": [
+				"packages/decide/backends/ollama.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 889.7,
+				"route": "hybrid/prose",
+				"top": [
+					"SOUL.md",
+					"scripts/night-tasks.ts",
+					"docs/HYPERAGENT-SPEC.md"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 549.9,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/providers/local-judge.ts",
+					"packages/goal/judge.ts",
+					"packages/goal/judge-failover.ts",
+					"packages/goal/persistence-integration.test.ts",
+					"packages/kernel/version-manager.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 726.1,
+				"route": "grep/system_one",
+				"top": [
+					"SOUL.md",
+					"scripts/night-tasks.ts",
+					"docs/HYPERAGENT-SPEC.md",
+					"apps/8gent-eyes/README.md",
+					"packages/eight/honesty.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-12",
+			"query": "which lines read the ollama host environment variable",
+			"label": "grep",
+			"files": [
+				"packages/decide/backends/ollama.ts",
+				"packages/memory/embeddings.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 596.3,
+				"route": "hybrid/prose",
+				"top": [
+					"scripts/board-vessel/daemon.ts",
+					"packages/decide/docs/ENGINE.md",
+					"packages/board-vessel/inference.ts",
+					"AGENTS.md",
+					"apps/tui/src/lib/provider-health.ts"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 283.9,
+				"route": "semantic/system_one",
+				"top": [
+					"apps/tui/src/hooks/useChatTabState.ts",
+					"benchmarks/autoresearch/multi-model-harness.ts",
+					"packages/decide/backends/llamacpp.ts",
+					"benchmarks/autoresearch/autoresearch-loop.ts",
+					"packages/decide/backends/llamacpp.test.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 645.6,
+				"route": "grep/system_one",
+				"top": [
+					"README.md",
+					"packages/decide/README.md",
+					"packages/decide/docs/ENGINE.md",
+					"apps/tui/src/lib/provider-readiness.ts",
+					"AGENTS.md"
+				]
+			}
+		},
+		{
+			"id": "prose-13",
+			"query": "where is the comment about float output drifting between identical calls",
+			"label": "grep",
+			"files": [
+				"packages/decide/index.ts",
+				"packages/decide/README.md"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 736.9,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/decide/index.ts",
+					"packages/decide/README.md"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 220.5,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/self-autonomy/heartbeat.ts",
+					"apps/video/src/templates/CloudOverlay.tsx",
+					"packages/daemon/huddle-stage.ts",
+					"benchmarks/gate.ts",
+					"apps/tui/src/components/fade-transition.tsx"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 848.3,
+				"route": "grep/system_one",
+				"top": [
+					"packages/decide/index.ts",
+					"packages/decide/README.md",
+					"SOUL.md",
+					"AGENTS.md",
+					"AGENTS.md"
+				]
+			}
+		},
+		{
+			"id": "prose-14",
+			"query": "where does the readme mention the no think prefix for reasoning models",
+			"label": "grep",
+			"files": [
+				"packages/decide/README.md"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 696.5,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/decide/README.md",
+					"packages/personality/voice.ts",
+					"packages/decide/docs/ENGINE.md"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 307.4,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/providers/model-reroute.ts",
+					"scripts/table-live-mesh.ts",
+					"packages/providers/thinking-level.ts",
+					"packages/decide/backends/ollama.ts",
+					"packages/eight/vision-router.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 396.6,
+				"route": "grep/system_one",
+				"top": [
+					"packages/decide/README.md",
+					"README.md",
+					"README.md",
+					"apps/proxy/README.md",
+					"packages/decide/README.md"
+				]
+			}
+		},
+		{
+			"id": "prose-15",
+			"query": "where is the default localhost port for ollama written",
+			"label": "grep",
+			"files": [
+				"packages/decide/backends/ollama.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 462.9,
+				"route": "hybrid/prose",
+				"top": [
+					"apps/proxy/src/server.ts",
+					"packages/decide/backends/ollama.ts",
+					"apps/8gent-flow/src/index.ts",
+					"docs/MODELS.md",
+					"packages/decide/backends/llamacpp.ts"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 166,
+				"route": "semantic/system_one",
+				"top": [
+					"benchmarks/autoresearch/multi-model-harness.ts",
+					"apps/tui/src/hooks/useChatTabState.ts",
+					"apps/tui/src/lib/provider-readiness.test.ts",
+					"packages/decide/backends/llamacpp.ts",
+					"packages/decide/backends/ollama.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 359.6,
+				"route": "grep/system_one",
+				"top": [
+					"packages/decide/backends/ollama.ts",
+					"docs/MODELS.md",
+					"packages/kernel/proxy.ts",
+					"packages/settings/defaults.ts",
+					"quarantine/model-comparison.md"
+				]
+			}
+		},
+		{
+			"id": "prose-16",
+			"query": "where is the log line printed when the index build finishes",
+			"label": "grep",
+			"files": [
+				"packages/eight/tools.ts",
+				"packages/eight/agent.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 401.2,
+				"route": "hybrid/prose",
+				"top": [
+					"apps/tui/src/components/pulse-logo.tsx",
+					"demo.tape",
+					"docs/frameworks.md"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 204.5,
+				"route": "semantic/system_one",
+				"top": [
+					"benchmarks/fixtures/code-review/CR002-performance-issues.ts",
+					"packages/design-agent/index.ts",
+					"packages/specifications/session/index.ts",
+					"apps/tui/src/hooks/useGitSync.ts",
+					"packages/audit/index.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 443.5,
+				"route": "grep/system_one",
+				"top": [
+					"packages/daemon/index.ts",
+					"packages/permissions/index.ts",
+					"packages/ast-index/test-parser.ts",
+					"packages/ast-index/test-parser.ts",
+					"apps/tui/src/components/pulse-logo.tsx"
+				]
+			}
+		},
+		{
+			"id": "prose-17",
+			"query": "where do we write the blocked marker into a shell error message",
+			"label": "grep",
+			"files": [
+				"packages/permissions/system-one-gate.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 726.7,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/eight/honesty.test.ts",
+					"packages/decide/guard.ts",
+					"packages/eight/honesty.test.ts",
+					"packages/decide/guard.ts",
+					"packages/ai/text-tool-loop.ts"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 524.6,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/permissions/system-one-gate.ts",
+					"packages/telegram-bot/task-runner.ts",
+					"packages/telegram-bot/unified-portal.ts",
+					"packages/verify/marker.ts",
+					"packages/design-compose/marker.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 727.2,
+				"route": "grep/system_one",
+				"top": [
+					"packages/decide/guard.ts",
+					"packages/decide/guard.ts",
+					"packages/verify/index.ts",
+					"packages/decide/README.md",
+					"packages/verify/marker.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-18",
+			"query": "which config line sets the timeout for a system one gate call",
+			"label": "grep",
+			"files": [
+				"packages/permissions/system-one-gate.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 1652.5,
+				"route": "hybrid/prose",
+				"top": [
+					"AGENTS.md",
+					"SIGNING.md",
+					"benchmarks/grader.ts"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 447.8,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/permissions/system-one-gate.ts",
+					"packages/permissions/system-one-gate.ts",
+					"scripts/table-live-mesh.ts",
+					"packages/table/helm-bridge.ts",
+					"packages/permissions/system-one-gate.test.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 713.1,
+				"route": "grep/system_one",
+				"top": [
+					"AGENTS.md",
+					"SIGNING.md",
+					"benchmarks/grader.ts",
+					"packages/db/client.ts",
+					"packages/db/client.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-19",
+			"query": "the calibration files for the bash guard",
+			"label": "path",
+			"files": [
+				"packages/decide/calibration/ollama-hf.co_openbmb_MiniCPM5-1B-GGUF_Q8_0.json",
+				"packages/decide/calibration/ollama-llama3.2_3b.json",
+				"packages/decide/calibration/ollama-hf.co_AtlaAI_Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF_latest.json",
+				"packages/decide/calibration/llamacpp-hf.co_AtlaAI_Selene-1-Mini-Llama-3.1-8B-Q4_K_M-GGUF_latest.json",
+				"packages/decide/calibration/ollama-qwen3.8_27b-mlx.json",
+				"packages/decide/calibrate.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 1388,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/decide/guard.ts",
+					"packages/decide/calibrate.ts",
+					"packages/decide/guard.ts",
+					"packages/decide/calibrate.ts",
+					"packages/decide/guard.ts"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 466.9,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/decide/calibrate.ts",
+					"packages/decide/guard.ts",
+					"packages/decide/guard.ts",
+					"packages/permissions/system-one-gate.ts",
+					"packages/permissions/toolg8.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 882.9,
+				"route": "path/system_one",
+				"top": [
+					"packages/decide/calibration/ollama-llama3.2_3b.json",
+					"packages/tools/bash-tool.ts",
+					"packages/decide/guard.ts",
+					"packages/decide/calibration/ollama-qwen3.8_27b-mlx.json",
+					"packages/tools/bash-parser.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-20",
+			"query": "the readme for the decision engine package",
+			"label": "path",
+			"files": [
+				"packages/decide/README.md"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 1581.1,
+				"route": "hybrid/prose",
+				"top": [
+					"SOUL.md",
+					"packages/pet/README.md",
+					"AGENTS.md",
+					"packages/eyes/README.md",
+					"AGENTS.md"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 1001.9,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/orchestration/adaptive-pipeline.ts",
+					"packages/audit/decision-store.ts",
+					"packages/runtime/contract-validator.ts",
+					"packages/orchestration/worktree-messaging.ts",
+					"packages/audit/decision-store.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 474.6,
+				"route": "path/system_one",
+				"top": [
+					"packages/voice/tts-engine.ts",
+					"packages/audit/decision-store.ts",
+					"packages/decide/docs/ENGINE.md",
+					"packages/audit/decision-store.test.ts",
+					"packages/proactive/revenue-engine.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-21",
+			"query": "the default permission policies yaml",
+			"label": "path",
+			"files": [
+				"packages/permissions/default-policies.yaml"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 1351.2,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/hooks/index.ts",
+					"CONVENTIONS.md",
+					"packages/permissions/default-policies.yaml",
+					"docs/VESSEL-ABILITIES.md",
+					"docs/specs/MEMORY-TRUST.md"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 660.1,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/permissions/policy-engine.ts",
+					"packages/permissions/policy-engine.ts",
+					"packages/permissions/dispatch-policy.test.ts",
+					"packages/permissions/user-policy.ts",
+					"packages/permissions/system-one-gate.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 453.8,
+				"route": "path/system_one",
+				"top": [
+					"packages/permissions/default-policies.yaml",
+					"packages/hooks/defaults.ts",
+					"docs/guides/permissions.md",
+					"config/board-vessels.yaml",
+					"packages/settings/defaults.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-22",
+			"query": "the brand guide at the repo root",
+			"label": "path",
+			"files": [
+				"BRAND.md"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 1749.1,
+				"route": "hybrid/prose",
+				"top": [
+					"bin/8gent.ts",
+					"docs/prd/8gent-computer/ux-spec.md",
+					"scripts/research-scraper.ts",
+					"BRAND.md",
+					"scripts/research-evaluate.ts"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 716.3,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/auth/github-tools.ts",
+					"packages/repo-context/mapper.ts",
+					"packages/repo-context/index.ts",
+					"packages/ast-index/index.ts",
+					"packages/ast-index/index.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 323.9,
+				"route": "path/system_one",
+				"top": [
+					"BRAND.md",
+					"docs/guides/hooks.md",
+					"packages/reporting/index.ts",
+					"apps/video/src/Root.tsx",
+					"brand/BRAND_HEART.md"
+				]
+			}
+		},
+		{
+			"id": "prose-23",
+			"query": "the daemon websocket protocol spec",
+			"label": "path",
+			"files": [
+				"docs/specs/DAEMON-PROTOCOL.md"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 1449.8,
+				"route": "hybrid/prose",
+				"top": [
+					"docs/README.md",
+					"docs/specs/DAEMON-PROTOCOL.md",
+					"AGENTS.md",
+					"README.md"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 509.4,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/telegram-bot/daemon-client.ts",
+					"packages/telegram-bot/daemon-client.ts",
+					"packages/telegram-bot/daemon-client.test.ts",
+					"packages/daemon/dispatch.ts",
+					"scripts/scan-to-table.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 638.9,
+				"route": "path/system_one",
+				"top": [
+					"docs/specs/DAEMON-PROTOCOL.md",
+					"packages/daemon/cron.ts",
+					"packages/table/SPEC.md",
+					"packages/daemon/index.ts",
+					"packages/eyes/marlin/tests/test_protocol.py"
+				]
+			}
+		},
+		{
+			"id": "prose-24",
+			"query": "the theme file for the terminal ui",
+			"label": "path",
+			"files": [
+				"apps/tui/src/theme.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 1217.6,
+				"route": "hybrid/prose",
+				"top": [
+					"AGENTS.md",
+					"AGENTS.md",
+					"CONVENTIONS.md"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 1077.2,
+				"route": "semantic/system_one",
+				"top": [
+					"apps/tui/src/theme/index.ts",
+					"apps/tui/src/hooks/useTerminal.ts",
+					"apps/tui/src/theme.ts",
+					"apps/tui/src/hooks/useTerminal.ts",
+					"packages/table/slide-theme.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 623.7,
+				"route": "path/system_one",
+				"top": [
+					"apps/tui/src/theme.ts",
+					"benchmarks/TERMINAL-BENCH.md",
+					"apps/tui/src/theme/index.ts",
+					"packages/pet/terminal-pet.ts",
+					"apps/tui/src/theme/tokens.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-25",
+			"query": "the python script that trains lora adapters",
+			"label": "path",
+			"files": [
+				"packages/kernel/train_lora.py"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 958.1,
+				"route": "hybrid/prose",
+				"top": [
+					"scripts/social-feed-research.ts",
+					"packages/kernel/local-trainer.ts",
+					"docs/BENCHMARKS.md",
+					"packages/eight/repl.ts"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 543.9,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/kernel/pair-adapter.ts",
+					"packages/kernel/local-trainer.ts",
+					"packages/kernel/pair-adapter.test.ts",
+					"packages/kernel/pair-adapter.ts",
+					"scripts/nightly-train.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 433.2,
+				"route": "path/system_one",
+				"top": [
+					"scripts/smoke.ts",
+					"packages/kernel/train_lora.py",
+					"scripts/test-bot.ts",
+					"scripts/benchmark.ts",
+					"scripts/e2e-tests.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-26",
+			"query": "the hyperagent spec document",
+			"label": "path",
+			"files": [
+				"docs/HYPERAGENT-SPEC.md"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 2175.3,
+				"route": "hybrid/prose",
+				"top": [
+					"AGENTS.md",
+					"docs/HYPERAGENT-SPEC.md",
+					"README.md",
+					"README.md"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 575.7,
+				"route": "semantic/system_one",
+				"top": [
+					"apps/linkedin-vessel/src/hyperagent.ts",
+					"apps/linkedin-vessel/src/hyperagent.ts",
+					"packages/toolshed/skill-registry.ts",
+					"packages/orchestration/subagent.ts",
+					"packages/orchestration/subagent.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 532.8,
+				"route": "path/system_one",
+				"top": [
+					"docs/HYPERAGENT-SPEC.md",
+					"packages/table/SPEC.md",
+					"benchmarks/categories/documentation/benchmarks.ts",
+					"apps/linkedin-vessel/src/hyperagent.ts",
+					"benchmarks/fixtures/documentation/DOC001-api-module.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-27",
+			"query": "how does the agent notice it keeps repeating the same action",
+			"label": "semantic",
+			"files": [
+				"packages/eight/tool-loop-detector.ts",
+				"packages/daemon/loop-guard.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 671.8,
+				"route": "hybrid/prose",
+				"top": [
+					"scripts/night-tasks.ts",
+					"docs/specs/EYES-SPEC.md",
+					"packages/harness/local.ts"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 338.3,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/telegram-bot/agent-mode.ts",
+					"packages/telegram-bot/agent-mode.ts",
+					"packages/daemon/table-presence.ts",
+					"apps/tui/src/lib/activity-rail-derivation.ts",
+					"packages/eight/repl.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 326.7,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/telegram-bot/agent-mode.ts",
+					"packages/telegram-bot/agent-mode.ts",
+					"packages/daemon/table-presence.ts",
+					"apps/tui/src/lib/activity-rail-derivation.ts",
+					"packages/eight/repl.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-28",
+			"query": "how do we stop the agent claiming it finished work it did not do",
+			"label": "semantic",
+			"files": [
+				"packages/eight/honesty.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 952.5,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/orchestration/universal-spawner.ts",
+					"docs/MODEL-SHOOTOUT.md",
+					"docs/PERSONALIZATION.md",
+					"quarantine/string-pad.md"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 694.9,
+				"route": "semantic/system_one",
+				"top": [
+					"apps/tui/src/lib/external-agent-runner.ts",
+					"packages/orchestration/worktree-pool-agent.ts",
+					"apps/tui/src/lib/external-agent-runner.ts",
+					"benchmarks/swebench/runner.ts",
+					"packages/ai/agent.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 279.8,
+				"route": "semantic/system_one",
+				"top": [
+					"apps/tui/src/lib/external-agent-runner.ts",
+					"packages/orchestration/worktree-pool-agent.ts",
+					"apps/tui/src/lib/external-agent-runner.ts",
+					"benchmarks/swebench/runner.ts",
+					"packages/ai/agent.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-29",
+			"query": "how is personal information kept out of prompts sent to cloud models",
+			"label": "semantic",
+			"files": [
+				"packages/permissions/pii-anonymizer.ts",
+				"packages/permissions/privacy-router.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 657.5,
+				"route": "hybrid/prose",
+				"top": [
+					"AUP.md",
+					"packages/memory/ask.ts",
+					"docs/PERSONALIZATION.md"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 186.5,
+				"route": "semantic/system_one",
+				"top": [
+					"apps/tui/src/components/VoiceIndicator.tsx",
+					"packages/orchestration/worktree-messaging.ts",
+					"packages/orchestration/sequential-pipeline.ts",
+					"benchmarks/autoresearch/multi-model-harness.ts",
+					"packages/permissions/privacy-router.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 167.6,
+				"route": "semantic/system_one",
+				"top": [
+					"apps/tui/src/components/VoiceIndicator.tsx",
+					"packages/orchestration/worktree-messaging.ts",
+					"packages/orchestration/sequential-pipeline.ts",
+					"benchmarks/autoresearch/multi-model-harness.ts",
+					"packages/permissions/privacy-router.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-30",
+			"query": "how are passwords and tokens scrubbed from text before it is saved",
+			"label": "semantic",
+			"files": [
+				"packages/eight/secret-scanner.ts",
+				"packages/memory/redact.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 557.8,
+				"route": "hybrid/prose",
+				"top": [
+					"docs/specs/MEMORY-TRUST.md",
+					"AGENTS.md",
+					"bin/debug.ts"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 239,
+				"route": "semantic/system_one",
+				"top": [
+					"apps/tui/src/components/status-bar.tsx",
+					"packages/kernel/trace-capture.ts",
+					"packages/auth/github.ts",
+					"packages/auth/token-store.ts",
+					"packages/auth/token-store.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 204.2,
+				"route": "semantic/system_one",
+				"top": [
+					"apps/tui/src/components/status-bar.tsx",
+					"packages/kernel/trace-capture.ts",
+					"packages/auth/github.ts",
+					"packages/auth/token-store.ts",
+					"packages/auth/token-store.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-31",
+			"query": "what happens when a turn runs for too long",
+			"label": "semantic",
+			"files": [
+				"packages/eight/turn-timeout.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 753.9,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/secrets/libsecret.ts",
+					"packages/table/tools/post-to-channel.ts",
+					"README.md",
+					"docs/HARNESS-PLAN.md"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 449,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/eight/__tests__/turn-journal.test.ts",
+					"packages/daemon/huddle-stage.ts",
+					"packages/self-autonomy/improvement-loop.ts",
+					"packages/eight/turn-timeout.ts",
+					"packages/daemon/__tests__/huddle-minutes.test.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 258.2,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/eight/__tests__/turn-journal.test.ts",
+					"packages/daemon/huddle-stage.ts",
+					"packages/self-autonomy/improvement-loop.ts",
+					"packages/eight/turn-timeout.ts",
+					"packages/daemon/__tests__/huddle-minutes.test.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-32",
+			"query": "how does the conversation get shorter when the context window fills up",
+			"label": "semantic",
+			"files": [
+				"packages/eight/compaction.ts",
+				"packages/eight/two-stage-compactor.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 554.6,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/memory/types.ts",
+					"docs/PERSONALIZATION.md",
+					"packages/memory/types.ts",
+					"scripts/utility-queue.json",
+					"packages/eight/context-engineering.ts"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 144,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/eight/context-engineering.ts",
+					"packages/memory/bus.ts",
+					"packages/eight/context-engineering.ts",
+					"packages/orchestration/context-manager.ts",
+					"packages/telegram-bot/memory.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 294.2,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/eight/context-engineering.ts",
+					"packages/memory/bus.ts",
+					"packages/eight/context-engineering.ts",
+					"packages/orchestration/context-manager.ts",
+					"packages/telegram-bot/memory.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-33",
+			"query": "how does the system switch to another model when one stops answering",
+			"label": "semantic",
+			"files": [
+				"packages/providers/failover.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 885.8,
+				"route": "hybrid/prose",
+				"top": [
+					"README.md",
+					"bin/8gent.ts",
+					"docs/frameworks.md"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 430.2,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/decide/calibrate.ts",
+					"packages/providers/model-reroute.ts",
+					"packages/providers/model-reroute.ts",
+					"benchmarks/autoresearch/validate-holdout.ts",
+					"apps/tui/src/lib/model-selection.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 180,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/decide/calibrate.ts",
+					"packages/providers/model-reroute.ts",
+					"packages/providers/model-reroute.ts",
+					"benchmarks/autoresearch/validate-holdout.ts",
+					"apps/tui/src/lib/model-selection.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-34",
+			"query": "how are memories turned into vectors for similarity search",
+			"label": "semantic",
+			"files": [
+				"packages/memory/embeddings.ts"
+			],
+			"rules": {
+				"top5": false,
+				"ms": 361.4,
+				"route": "hybrid/prose",
+				"top": [
+					"docs/STRESS-TEST-1M.md",
+					"docs/VESSEL-ABILITIES.md",
+					"scripts/utility-queue.json"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 180,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/ai/embedding-cache.ts",
+					"packages/memory/store.ts",
+					"packages/memory/migrate.ts",
+					"packages/memory/store.ts",
+					"packages/ai/edge-inference.ts"
+				]
+			},
+			"oracle": {
+				"top5": false,
+				"ms": 168.5,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/ai/embedding-cache.ts",
+					"packages/memory/store.ts",
+					"packages/memory/migrate.ts",
+					"packages/memory/store.ts",
+					"packages/ai/edge-inference.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-35",
+			"query": "keychain vault on linux",
+			"label": "hybrid",
+			"files": [
+				"packages/secrets/libsecret.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 384.8,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/secrets/keychain.ts",
+					"packages/secrets/libsecret.ts",
+					"packages/secrets/keychain.ts",
+					"ROADMAP.md",
+					"packages/secrets/keychain.ts"
+				]
+			},
+			"semantic": {
+				"top5": false,
+				"ms": 320.2,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/auth/github.ts",
+					"packages/secrets/keychain.ts",
+					"packages/auth/github.ts",
+					"packages/secrets/keychain.ts",
+					"packages/eight/harness/vault.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 334.7,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/secrets/keychain.ts",
+					"packages/secrets/libsecret.ts",
+					"packages/secrets/keychain.ts",
+					"ROADMAP.md",
+					"packages/secrets/keychain.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-36",
+			"query": "memory consolidation schema",
+			"label": "hybrid",
+			"files": [
+				"packages/memory/consolidation.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 469.7,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/memory/consolidation.ts",
+					"AGENTS.md",
+					"packages/memory/consolidation.ts",
+					"README.md",
+					"CONVENTIONS.md"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 294.3,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/memory/consolidation.ts",
+					"packages/memory/consolidation.ts",
+					"packages/memory/types.ts",
+					"packages/memory/wiki.ts",
+					"packages/memory/index.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 512.2,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/memory/consolidation.ts",
+					"AGENTS.md",
+					"packages/memory/consolidation.ts",
+					"README.md",
+					"CONVENTIONS.md"
+				]
+			}
+		},
+		{
+			"id": "prose-37",
+			"query": "session manager",
+			"label": "hybrid",
+			"files": [
+				"packages/eight/session-manager.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 605.8,
+				"route": "hybrid/prose",
+				"top": [
+					"bin/8gent.ts",
+					"packages/eight/session-manager.ts",
+					"bin/8gent.ts",
+					"apps/tui/src/app.tsx"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 388.1,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/daemon/routes/store/session.ts",
+					"packages/eight/session-manager.ts",
+					"packages/eight/session-manager.ts",
+					"bin/8gent.ts",
+					"packages/eight/session-sync.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 1064.6,
+				"route": "hybrid/prose",
+				"top": [
+					"bin/8gent.ts",
+					"packages/eight/session-manager.ts",
+					"bin/8gent.ts",
+					"apps/tui/src/app.tsx"
+				]
+			}
+		},
+		{
+			"id": "prose-38",
+			"query": "auto commit",
+			"label": "hybrid",
+			"files": [
+				"packages/eight/auto-commit.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 577,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/eight/auto-commit.ts",
+					"docs/PERSONALIZATION.md",
+					"packages/eight/auto-commit.ts",
+					"packages/skills/index.ts",
+					"packages/skills/README.md"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 359.8,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/eight/auto-commit.ts",
+					"packages/self-autonomy/index.ts",
+					"packages/ai/task-router.ts",
+					"packages/self-autonomy/index.ts",
+					"benchmarks/competition/sync-results.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 526,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/eight/auto-commit.ts",
+					"docs/PERSONALIZATION.md",
+					"packages/eight/auto-commit.ts",
+					"packages/skills/index.ts",
+					"packages/skills/README.md"
+				]
+			}
+		},
+		{
+			"id": "prose-39",
+			"query": "maker checker enforcer",
+			"label": "hybrid",
+			"files": [
+				"packages/permissions/maker-checker-enforcer.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 856.3,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/eight/tools.ts",
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/daemon/maker-checker.ts",
+					"packages/eight/tools.ts"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 536.2,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/daemon/maker-checker.ts",
+					"packages/daemon/maker-checker.ts",
+					"packages/permissions/maker-checker-enforcer.test.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 685,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/eight/tools.ts",
+					"packages/permissions/maker-checker-enforcer.ts",
+					"packages/daemon/maker-checker.ts",
+					"packages/eight/tools.ts"
+				]
+			}
+		},
+		{
+			"id": "prose-40",
+			"query": "loop guard in the daemon",
+			"label": "hybrid",
+			"files": [
+				"packages/daemon/loop-guard.ts"
+			],
+			"rules": {
+				"top5": true,
+				"ms": 1029.3,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/table-routes.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.test.ts"
+				]
+			},
+			"semantic": {
+				"top5": true,
+				"ms": 613.9,
+				"route": "semantic/system_one",
+				"top": [
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/__tests__/table-presence.test.ts",
+					"packages/daemon/huddle-routes.ts",
+					"packages/daemon/routes/dispatch.ts"
+				]
+			},
+			"oracle": {
+				"top5": true,
+				"ms": 895.5,
+				"route": "hybrid/prose",
+				"top": [
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/table-routes.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.ts",
+					"packages/daemon/loop-guard.test.ts"
+				]
+			}
+		}
+	]
+}

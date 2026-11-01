@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "terminal-pet.ts",
+    "PetWidget.tsx"
+  ],
+  "project": ["**/*.{ts,tsx}!"],
+  "ignore": [
+    "PetWidget.tsx"
+  ]
+}

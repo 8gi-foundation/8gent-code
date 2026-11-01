@@ -1,0 +1,599 @@
+/**
+ * 8gent Code - Workspace Tabs Hook
+ *
+ * Manages tabbed workspace state: multiple chat tabs + singleton utility tabs.
+ * Persists tab state to ~/.8gent/tabs/state.json.
+ *
+ * Features:
+ * - Pinned tabs (can't be closed)
+ * - Badge counts for unread/pending indicators
+ * - Singleton enforcement for non-chat types
+ * - Max 20 tabs
+ * - Ordered: pinned first, then by lastAccessedAt
+ */
+
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getRunnerConfig } from "../../../../packages/orchestration/role-registry.js";
+// Cross-workspace import of a package's public entrypoint (packages/*/index.ts).
+// These are the canonical surface for inter-package use; deep imports would
+// bypass each package's documented API. Suppressed by design.
+// react-doctor-disable-next-line react-doctor/no-barrel-import
+import {
+	SECRET_NAME_RESET_NOTICE,
+	looksLikeSecret,
+	resolveRoleName,
+	scrubSecretAgentNames,
+} from "../../../../packages/settings/index.js";
+import {
+	deleteSession as deleteWindowSession,
+	isPidAlive,
+	pruneDead as pruneDeadSessions,
+} from "../../../../packages/terminal-tab/index.js";
+
+// ============================================
+// Types
+// ============================================
+
+export type TabType =
+	| "chat"
+	| "notes"
+	| "ideas"
+	| "btw"
+	| "questions"
+	| "kanban"
+	| "music"
+	| "projects"
+	| "terminal"
+	| "settings"
+	| "control";
+
+export interface WorkspaceTab {
+	id: string;
+	type: TabType;
+	title: string;
+	active: boolean;
+	createdAt: string;
+	lastAccessedAt: string;
+	pinned: boolean;
+	badge?: number;
+	data: Record<string, unknown>;
+}
+
+export interface TabIcon {
+	type: TabType;
+	icon: string;
+	label: string;
+}
+
+export const TAB_ICONS: TabIcon[] = [
+	{ type: "chat", icon: ">>", label: "Chat" },
+	{ type: "notes", icon: "N:", label: "Notes" },
+	{ type: "ideas", icon: "*:", label: "Ideas" },
+	{ type: "btw", icon: "!:", label: "BTW" },
+	{ type: "questions", icon: "?:", label: "Questions" },
+	{ type: "kanban", icon: "#:", label: "Kanban" },
+	{ type: "music", icon: "~:", label: "Music" },
+	{ type: "projects", icon: "P:", label: "Projects" },
+	{ type: "terminal", icon: "$:", label: "Terminal" },
+	{ type: "settings", icon: "=:", label: "Settings" },
+	{ type: "control", icon: "+:", label: "Control" },
+];
+
+/** Singleton tab types (only one instance allowed) */
+const SINGLETON_TYPES: TabType[] = [
+	"notes",
+	"ideas",
+	"btw",
+	"questions",
+	"kanban",
+	"music",
+	"projects",
+	// "terminal" is intentionally NOT singleton — each /term spawn opens a
+	// new tab so users can run claude + openclaw side by side.
+	"settings", // one settings tab max
+	"control", // one control tab max
+];
+
+const MAX_TABS = 20;
+
+const TABS_DIR = path.join(process.env.HOME || "~", ".8gent", "tabs");
+const STATE_FILE = path.join(TABS_DIR, "state.json");
+
+// ============================================
+// Persistence
+// ============================================
+
+function ensureDir(): void {
+	try {
+		if (!fs.existsSync(TABS_DIR)) {
+			fs.mkdirSync(TABS_DIR, { recursive: true });
+		}
+	} catch {
+		// Silently fail — persistence is best-effort
+	}
+}
+
+/** Migrate legacy tabs that lack new fields */
+function migrateTab(raw: Record<string, unknown>): WorkspaceTab {
+	const now = new Date().toISOString();
+	return {
+		id: (raw.id as string) || `unknown-${Date.now()}`,
+		type: (raw.type as TabType) || "chat",
+		title: (raw.title as string) || "Untitled",
+		active: Boolean(raw.active),
+		createdAt: (raw.createdAt as string) || now,
+		lastAccessedAt: (raw.lastAccessedAt as string) || (raw.createdAt as string) || now,
+		pinned: Boolean(raw.pinned),
+		badge: typeof raw.badge === "number" ? raw.badge : undefined,
+		data: (raw.data as Record<string, unknown>) || {},
+	};
+}
+
+/**
+ * Reconcile chat-tab titles with the live settings.agents.names map. Persisted
+ * tab state (~/.8gent/tabs/state.json) was written with whatever title the
+ * user had at the time. When the user renames their agents during onboarding
+ * (or via /settings), settings.agents.names changes but the persisted state
+ * keeps the stale title forever. This pass overrides the title for any chat
+ * tab that has a known role, on every load. Non-chat tabs and tabs without
+ * roles are left alone.
+ */
+function reconcileTitlesWithSettings(tabs: WorkspaceTab[]): WorkspaceTab[] {
+	return tabs.map((t) => {
+		if (t.type !== "chat") return t;
+		const role = (t.data as { role?: string } | undefined)?.role;
+		if (role !== "orchestrator" && role !== "engineer" && role !== "qa") return t;
+		const fresh = resolveRoleName(role as "orchestrator" | "engineer" | "qa");
+		return fresh && fresh !== t.title ? { ...t, title: fresh } : t;
+	});
+}
+
+/**
+ * Drop window-mode terminal tabs whose backing OS process is no longer
+ * alive, and clean up the matching session-store JSON file. Runs once
+ * at boot so users don't see ghost tabs for windows they've closed.
+ */
+function pruneDeadWindowTabs(tabs: WorkspaceTab[]): WorkspaceTab[] {
+	// Best-effort sweep of the session store regardless of tab state —
+	// keeps ~/.8gent/sessions/ from accumulating stale files.
+	try {
+		pruneDeadSessions();
+	} catch {
+		/* best-effort */
+	}
+	return tabs.filter((t) => {
+		if (t.type !== "terminal") return true;
+		const data = t.data as { mode?: string; pid?: number; sessionId?: string };
+		if (data?.mode !== "window") return true;
+		if (typeof data.pid !== "number" || !isPidAlive(data.pid)) {
+			if (data.sessionId) {
+				try {
+					deleteWindowSession(data.sessionId);
+				} catch {
+					/* best-effort */
+				}
+			}
+			return false;
+		}
+		return true;
+	});
+}
+
+let scrubNoticePending = false;
+
+/**
+ * On start: a saved agent name or tab title that looks like a key (#5098) is
+ * replaced with the role default in settings.json and tabs/state.json. A tab
+ * without a role gets "Untitled". The value is never printed or logged.
+ * Returns true when something was reset.
+ */
+export function scrubSecretNames(stateFile: string = STATE_FILE): boolean {
+	let hit = scrubSecretAgentNames();
+	try {
+		if (fs.existsSync(stateFile)) {
+			const data = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
+			if (Array.isArray(data)) {
+				let changed = false;
+				for (const t of data as Array<Record<string, unknown>>) {
+					if (!looksLikeSecret(t?.title)) continue;
+					const role = (t.data as { role?: string } | undefined)?.role;
+					t.title =
+						role === "orchestrator" || role === "engineer" || role === "qa"
+							? resolveRoleName(role)
+							: "Untitled";
+					changed = true;
+				}
+				if (changed) {
+					const tmp = `${stateFile}.${process.pid}.tmp`;
+					fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
+					fs.renameSync(tmp, stateFile);
+					hit = true;
+				}
+			}
+		}
+	} catch {
+		// Best-effort: a corrupt state file is reset elsewhere.
+	}
+	if (hit) scrubNoticePending = true;
+	return hit;
+}
+
+/** The one notice a scrub earns, once; null when nothing was reset. */
+export function takeNameScrubNotice(): string | null {
+	if (!scrubNoticePending) return null;
+	scrubNoticePending = false;
+	return SECRET_NAME_RESET_NOTICE;
+}
+
+function loadState(): WorkspaceTab[] | null {
+	scrubSecretNames();
+	try {
+		if (fs.existsSync(STATE_FILE)) {
+			const raw = fs.readFileSync(STATE_FILE, "utf-8");
+			const data = JSON.parse(raw);
+			if (Array.isArray(data) && data.length > 0) {
+				const migrated = data.map((item: Record<string, unknown>) => migrateTab(item));
+				return pruneDeadWindowTabs(reconcileTitlesWithSettings(migrated));
+			}
+		}
+	} catch {
+		// Corrupt state — will reset
+	}
+	return null;
+}
+
+/** The Telegram tab is a live link, not a saved workspace: it is never written to disk (#4834). */
+export function tabsToPersist(tabs: WorkspaceTab[]): WorkspaceTab[] {
+	return tabs.filter((t) => !(t.data as { telegramHome?: unknown } | undefined)?.telegramHome);
+}
+
+function saveState(tabs: WorkspaceTab[]): void {
+	try {
+		ensureDir();
+		fs.writeFileSync(STATE_FILE, JSON.stringify(tabsToPersist(tabs), null, 2), "utf-8");
+	} catch {
+		// Best-effort persistence
+	}
+}
+
+// ============================================
+// Ordering
+// ============================================
+
+/** Sort tabs: pinned first, then by lastAccessedAt descending */
+function sortTabs(tabs: WorkspaceTab[]): WorkspaceTab[] {
+	return tabs.toSorted((a, b) => {
+		// Pinned first
+		if (a.pinned && !b.pinned) return -1;
+		if (!a.pinned && b.pinned) return 1;
+		// Within same pin group, stable creation order
+		return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+	});
+}
+
+// ============================================
+// Default state
+// ============================================
+
+function makeDefaultTabs(): WorkspaceTab[] {
+	const now = new Date().toISOString();
+	// Tab titles read from settings.agents.names so renaming during onboarding
+	// (steps 9-11) flows through to the tab strip on first launch. Falls back
+	// to the role-registry default ("Orchestrator", "Engineer", "QA") when the
+	// settings file is missing or the user kept defaults.
+	return [
+		{
+			id: "tab-orchestrator",
+			type: "chat",
+			title: resolveRoleName("orchestrator"),
+			active: true,
+			createdAt: now,
+			lastAccessedAt: now,
+			pinned: true,
+			data: {
+				role: "orchestrator",
+				systemPrompt: getRunnerConfig("orchestrator").systemPrompt,
+				modelSelected: false,
+			},
+		},
+		{
+			id: "tab-engineer",
+			type: "chat",
+			title: resolveRoleName("engineer"),
+			active: false,
+			createdAt: now,
+			lastAccessedAt: now,
+			pinned: true,
+			data: {
+				role: "engineer",
+				systemPrompt: getRunnerConfig("engineer").systemPrompt,
+				modelSelected: false,
+			},
+		},
+		{
+			id: "tab-qa",
+			type: "chat",
+			title: resolveRoleName("qa"),
+			active: false,
+			createdAt: now,
+			lastAccessedAt: now,
+			pinned: true,
+			data: {
+				role: "qa",
+				systemPrompt: getRunnerConfig("qa").systemPrompt,
+				modelSelected: false,
+			},
+		},
+		{
+			id: "tab-notes",
+			type: "notes",
+			title: "Notes",
+			active: false,
+			createdAt: now,
+			lastAccessedAt: now,
+			pinned: true,
+			data: {},
+		},
+	];
+}
+
+function generateId(type: TabType): string {
+	return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+// ============================================
+// Hook
+// ============================================
+
+export function useWorkspaceTabs() {
+	const [tabs, setTabs] = useState<WorkspaceTab[]>(() => {
+		return loadState() || makeDefaultTabs();
+	});
+
+	const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	// Debounced save — persist on every mutation
+	const scheduleSave = useCallback((newTabs: WorkspaceTab[]) => {
+		if (saveTimeout.current) clearTimeout(saveTimeout.current);
+		saveTimeout.current = setTimeout(() => saveState(newTabs), 300);
+	}, []);
+
+	// Save on every change
+	useEffect(() => {
+		scheduleSave(tabs);
+	}, [tabs, scheduleSave]);
+
+	// Flush pending save on unmount
+	useEffect(() => {
+		return () => {
+			if (saveTimeout.current) {
+				clearTimeout(saveTimeout.current);
+				saveState(tabs);
+			}
+		};
+	}, [tabs]);
+
+	// Computed: sorted tabs for display
+	const sortedTabs = useMemo(() => sortTabs(tabs), [tabs]);
+
+	// Computed: current active tab
+	const activeTab = useMemo(() => tabs.find((t) => t.active) || tabs[0], [tabs]);
+
+	// ----------------------------------------
+	// addTab
+	// ----------------------------------------
+	const addTab = useCallback(
+		(type: TabType, title?: string, initialData?: Record<string, unknown>): WorkspaceTab | null => {
+			let newTab: WorkspaceTab | null = null;
+
+			setTabs((prev) => {
+				if (prev.length >= MAX_TABS) return prev;
+
+				// For singleton types, switch to existing instead of creating new
+				if (SINGLETON_TYPES.includes(type)) {
+					const existing = prev.find((t) => t.type === type);
+					if (existing) {
+						const now = new Date().toISOString();
+						return prev.map((t) => ({
+							...t,
+							active: t.id === existing.id,
+							lastAccessedAt: t.id === existing.id ? now : t.lastAccessedAt,
+						}));
+					}
+				}
+
+				const icon = TAB_ICONS.find((i) => i.type === type);
+				const chatCount = type === "chat" ? prev.filter((t) => t.type === "chat").length + 1 : 0;
+				const defaultTitle = type === "chat" ? `Chat ${chatCount}` : icon?.label || type;
+
+				const now = new Date().toISOString();
+				newTab = {
+					id: generateId(type),
+					type,
+					title: title || defaultTitle,
+					active: true,
+					createdAt: now,
+					lastAccessedAt: now,
+					pinned: false,
+					data: initialData ?? {},
+				};
+
+				return [...prev.map((t) => ({ ...t, active: false })), newTab];
+			});
+
+			return newTab;
+		},
+		[],
+	);
+
+	// ----------------------------------------
+	// removeTab
+	// ----------------------------------------
+	const removeTab = useCallback((tabId: string) => {
+		setTabs((prev) => {
+			const target = prev.find((t) => t.id === tabId);
+			if (!target) return prev;
+
+			// Cannot close pinned tabs
+			if (target.pinned) return prev;
+
+			// Cannot close the last chat tab
+			const chatTabs = prev.filter((t) => t.type === "chat");
+			if (target.type === "chat" && chatTabs.length <= 1) return prev;
+
+			// Cannot close if it's the only tab
+			if (prev.length <= 1) return prev;
+
+			const idx = prev.findIndex((t) => t.id === tabId);
+			const wasActive = target.active;
+			const next = prev.filter((t) => t.id !== tabId);
+
+			// If we removed the active tab, activate the nearest one
+			if (wasActive && next.length > 0) {
+				const newActiveIdx = Math.min(idx, next.length - 1);
+				const now = new Date().toISOString();
+				next[newActiveIdx] = {
+					...next[newActiveIdx],
+					active: true,
+					lastAccessedAt: now,
+				};
+			}
+
+			return next;
+		});
+	}, []);
+
+	// ----------------------------------------
+	// switchTab
+	// ----------------------------------------
+	const switchTab = useCallback((tabId: string) => {
+		setTabs((prev) => {
+			const target = prev.find((t) => t.id === tabId);
+			if (!target || target.active) return prev;
+
+			const now = new Date().toISOString();
+			return prev.map((t) => ({
+				...t,
+				active: t.id === tabId,
+				lastAccessedAt: t.id === tabId ? now : t.lastAccessedAt,
+			}));
+		});
+	}, []);
+
+	// ----------------------------------------
+	// switchTabByIndex (for Ctrl+1-9)
+	// ----------------------------------------
+	const switchToIndex = useCallback((index: number) => {
+		setTabs((prev) => {
+			const sorted = sortTabs(prev);
+			if (index < 0 || index >= sorted.length) return prev;
+
+			const targetId = sorted[index].id;
+			const now = new Date().toISOString();
+			return prev.map((t) => ({
+				...t,
+				active: t.id === targetId,
+				lastAccessedAt: t.id === targetId ? now : t.lastAccessedAt,
+			}));
+		});
+	}, []);
+
+	// ----------------------------------------
+	// cycleTab (Shift+Tab)
+	// ----------------------------------------
+	const cycleTab = useCallback((direction: 1 | -1 = 1, skipTypes?: string[]) => {
+		setTabs((prev) => {
+			const sorted = sortTabs(prev);
+			const activeIdx = sorted.findIndex((t) => t.active);
+			if (activeIdx === -1) return prev;
+
+			const skipSet = skipTypes ? new Set(skipTypes) : null;
+
+			// Find next tab that isn't in skipSet, wrapping around
+			let offset = direction;
+			let attempts = 0;
+			while (attempts < sorted.length) {
+				const candidateIdx = (activeIdx + offset + sorted.length) % sorted.length;
+				const candidate = sorted[candidateIdx];
+				if (!skipSet || !skipSet.has(candidate.type)) {
+					const targetId = candidate.id;
+					const now = new Date().toISOString();
+					return prev.map((t) => ({
+						...t,
+						active: t.id === targetId,
+						lastAccessedAt: t.id === targetId ? now : t.lastAccessedAt,
+					}));
+				}
+				offset += direction;
+				attempts++;
+			}
+			return prev; // All tabs are skipped types — don't change
+		});
+	}, []);
+
+	// ----------------------------------------
+	// renameTab
+	// ----------------------------------------
+	const renameTab = useCallback((tabId: string, title: string) => {
+		// A key is never a tab title: it would be saved in tabs/state.json (#5098).
+		if (looksLikeSecret(title)) return;
+		setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, title } : t)));
+	}, []);
+
+	// ----------------------------------------
+	// pinTab / unpinTab
+	// ----------------------------------------
+	const pinTab = useCallback((tabId: string) => {
+		setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, pinned: true } : t)));
+	}, []);
+
+	const unpinTab = useCallback((tabId: string) => {
+		setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, pinned: false } : t)));
+	}, []);
+
+	// ----------------------------------------
+	// updateBadge
+	// ----------------------------------------
+	const updateBadge = useCallback((tabId: string, count: number) => {
+		setTabs((prev) =>
+			prev.map((t) => (t.id === tabId ? { ...t, badge: count > 0 ? count : undefined } : t)),
+		);
+	}, []);
+
+	// ----------------------------------------
+	// getTabsByType
+	// ----------------------------------------
+	const getTabsByType = useCallback(
+		(type: TabType): WorkspaceTab[] => {
+			return tabs.filter((t) => t.type === type);
+		},
+		[tabs],
+	);
+
+	// ----------------------------------------
+	// updateTabData (backward compat with app.tsx)
+	// ----------------------------------------
+	const updateTabData = useCallback((tabId: string, data: Record<string, unknown>) => {
+		setTabs((prev) =>
+			prev.map((t) => (t.id === tabId ? { ...t, data: { ...t.data, ...data } } : t)),
+		);
+	}, []);
+
+	return {
+		tabs: sortedTabs,
+		activeTab,
+		addTab,
+		removeTab,
+		switchTab,
+		switchToIndex,
+		cycleTab,
+		renameTab,
+		pinTab,
+		unpinTab,
+		updateBadge,
+		getTabsByType,
+		updateTabData,
+	};
+}

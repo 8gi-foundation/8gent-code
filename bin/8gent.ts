@@ -1,0 +1,3237 @@
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
+/**
+ * 8gent Code - Main CLI Entry Point
+ *
+ * The terminal-first coding experience.
+ */
+
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { safeBunFlags } from "../packages/core/bun-flags";
+import { normalizeSubcommand, unknownSubcommandLines } from "../packages/eight/subcommand-match.ts";
+import { refuseIfNested } from "../packages/permissions/nested-guard";
+import { petRequested } from "../packages/pet/opt-in";
+import { nodeExecPath, tuiProcessEnv } from "./termux-exec.js";
+
+// An 8gent tool shell marks its child env; a second 8gent inside it refuses to start (#4715).
+refuseIfNested();
+
+const VERSION = "0.20.42";
+const RELAUNCH_EXIT_CODE = 75; // packages/eight/update-resume.ts
+
+// Two different "here" directories matter, and conflating them is what broke
+// the compiled build:
+//
+//   MODULE_DIR - the directory this *module* was loaded from. Under an npm
+//     install that is `<pkg>/dist` (the module is the bundled `dist/cli.js`);
+//     from a git checkout it is `<repo>/bin`. Correct for anything that ships
+//     next to this file, e.g. `dist/tui.js` or `bin/lil-eight.sh`.
+//
+//   EXEC_DIR - the directory of the *running executable*. `bun build --compile`
+//     embeds the module graph in Bun's virtual filesystem, where
+//     `import.meta.url` is `B:/~BUN/root/<entry>` (Windows) or
+//     `/$bunfs/root/<entry>` (POSIX) instead of a real path. `process.execPath`
+//     is the only valid anchor there. (`process.argv[0]` is literally "bun" in
+//     a compiled binary, so it is no help.)
+//
+// `import.meta.url` is reliable under Bun, Node ESM, and a non-compiled bundle;
+// only the compiled case needs EXEC_DIR.
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const EXEC_DIR = path.dirname(process.execPath);
+
+// MODULE_DIR points into Bun's embedded filesystem rather than the user's disk.
+// It still passes `fs.existsSync`, but only the embedded modules are readable
+// there, so joining paths onto it is meaningless.
+const MODULE_IS_EMBEDDED = /(^|[\\/])(\$bunfs|~BUN)([\\/]|$)/i.test(MODULE_DIR);
+
+// The compiled binary carries the TUI in its own module graph (#4671):
+// scripts/build-binaries.ts compiles an entry that imports apps/tui/src/index.tsx
+// when COMPILED_TUI_ENV is "1" and bin/8gent.ts otherwise, and sets this marker.
+// The launcher starts the TUI by running its own executable with that variable,
+// so no file is written, no path from the build machine is read, and no Bun is
+// needed on PATH. A compiled build without the marker has no TUI to start.
+const COMPILED_TUI_ENV = "EIGHT_COMPILED_TUI";
+const EMBEDDED_TUI = "<embedded>";
+const HAS_COMPILED_TUI =
+	MODULE_IS_EMBEDDED && (globalThis as Record<string, unknown>).__EIGHT_COMPILED_TUI === true;
+
+// Walk up from MODULE_DIR to find the source tree root. When installed via
+// npm we only ship `dist/cli.js` + `dist/tui.js`, so packages/apps/
+// scripts don't exist alongside the bundle, so `repoRoot()` returns null in
+// that case, and always in a compiled binary, where there is no source tree
+// to find relative to a virtual module path. Dev-only commands then print a
+// clear error instead of trying to spawn a missing file with a Windows path
+// that has never existed.
+function repoRoot(): string | null {
+	if (MODULE_IS_EMBEDDED) return null;
+	const candidates = [path.join(MODULE_DIR, ".."), path.join(MODULE_DIR, "..", "..")];
+	for (const candidate of candidates) {
+		if (
+			fs.existsSync(path.join(candidate, "apps", "tui", "src", "index.tsx")) ||
+			fs.existsSync(path.join(candidate, "packages", "eight"))
+		) {
+			return candidate;
+		}
+	}
+	return null;
+}
+// The argv a background service uses to run `8gent daemon run` through this
+// same install: the compiled binary alone, or the runtime plus this module
+// (bin/8gent.ts from a checkout, dist/cli.js from npm).
+function daemonProgram(): string[] {
+	// The service starts in $HOME: Bun must not read a bunfig.toml or .env there (#4013).
+	// A compiled binary is built with config autoload off (scripts/build-binaries.ts).
+	const self = MODULE_IS_EMBEDDED ? [] : [...safeBunFlags(), fileURLToPath(import.meta.url)];
+	return [process.execPath, ...self, "daemon", "run"];
+}
+
+const HELP = `
+8gent Code v${VERSION}
+
+USAGE:
+  8gent <command> [options]
+
+COMMANDS:
+  tui [--name=<n>] [--resume=<n>]  Launch TUI (--name to name session, --resume to restore)
+  run <prompt>                One-shot agent run. Pairs with --output-format stream-json for Orchestra/cmux/etc.
+                              --image <path> attaches one png/jpg/gif/webp: max 20 MB, downscaled to fit 2560x2560,
+                              must be inside the working directory (local vision model, text-tool path only)
+  doctor                      Check system health (Ollama, models, tools, config)
+  model-pin [model]           Accept the current digest and quantisation of a pinned local model
+  deck render <spec.json> [out.mp4]  Render a JSON deck spec into an mp4: the same deterministic
+                              renderer as the render_video_deck tool, paths inside the current directory
+  update [--check]            Update 8gent through the channel it was installed from (binary release
+                              or npm); never installs a lower version. --check only reports.
+  permissions                 Diagnose macOS Accessibility + Screen Recording grants for your terminal
+                              Use --open to auto-launch System Settings panes for missing grants
+  keys set <provider>         Save an API key from a hidden prompt (works over SSH and on a phone)
+  keys [reload|status|open]   Open ~/.8gent/keys.env in your editor for API keys
+                              "keys reload" re-reads the file into the running env (default action)
+                              "keys status" lists which provider keys are present (no values shown)
+  install <preset>            Interactively install a /spawn preset CLI (claude, codex,
+                              hermes, openclaw, pi, 8gent). Runs the install recipe with
+                              full stdio so you can answer prompts + complete OAuth.
+  install npm:<name>@<ver>    Install an npm package into ~/.8gent/packages, pinned by the
+                              registry integrity. No scripts run, no dependencies installed.
+  packages [list|remove|verify]  Installed packages: list them, remove one, re-check one
+  pet                         Optional Lil Eight dock companion (off unless you run this)
+  chat <message>              Send a message (non-interactive, pipe-friendly)
+  agent <sub>                 Multi-agent orchestration
+  session <sub>               Session history & resume
+  preferences <sub>           Get/set user preferences
+  memory <sub>                Remember, recall, forget
+  onboard                     Run onboarding (auto-detect + configure)
+  status                      Show full system status
+  init                        Initialize 8gent in current directory
+  outline <file>              Get symbol outline of a file
+  symbol <file>::<name>       Get source code for a specific symbol
+  search <query>              Search for symbols across files
+  benchmark                   Run efficiency benchmarks
+  infinite <task>             Run task in autonomous infinite mode
+  pipeline <task>             Adaptive three-model build pipeline (local models)
+  export <session-id|--last>    Export a session as self-contained HTML
+  review                      Review current git diff for bugs/security/style
+  review --pr <number>        Review a specific PR diff
+  auth <sub>                  Authentication (login, logout, status)
+  cron <sub>                  Scheduled jobs (list, add, remove, enable, disable)
+  daemon <sub>                Always-on daemon (run, install, uninstall, start, stop, status)
+  rpc                         Start JSON-RPC 2.0 server (stdin/stdout)
+  mcp-server [--tools=safe]   Start MCP server (expose 8gent tools to external clients)
+  publish <app-dir>           Build a .8gent-app.tar.gz archive for marketplace submission
+                              Flags: --out=<path> --max-size=<mb> --allow-dangerous --strict-lint --json
+  passport <sub>              Your skills and plugs in one file you hold (export, import, show, delete)
+
+AGENT COMMANDS:
+  agent list                  List active sub-agents
+  agent spawn <persona> <task>  Spawn a BMAD agent (winston/larry/curly/mo/doc)
+  agent kill <id>             Kill a sub-agent
+  agent message <id> <msg>    Send message to a sub-agent
+  agent auto [on|off]         Toggle auto-spawn permission
+  agent status                Show orchestration status
+
+SESSION COMMANDS:
+  session list [--limit=N]    List recent sessions
+  session resume <name-or-id> Resume a session by name or ID
+  session checkpoint          Save current session checkpoint
+  session compact             Compress current session history
+
+PREFERENCES COMMANDS:
+  preferences get             Show all preferences
+  preferences set <key> <val> Set a preference
+  preferences sync            Sync with cloud (requires auth)
+  preferences reset           Reset to defaults
+
+MEMORY COMMANDS:
+  memory recall <query>       Search memory
+  memory remember <fact>      Store a memory
+  memory forget <id>          Delete a memory
+  memory stats                Show memory statistics
+  memory serve                Serve memory read-only over stdio for other tools
+
+CRON COMMANDS:
+  cron list                   List scheduled jobs
+  cron add <name> <schedule> <command>  Add a cron job
+  cron remove <id>            Remove a cron job
+  cron enable <id>            Enable a job
+  cron disable <id>           Disable a job
+
+DAEMON COMMANDS:
+  daemon run                  Run the daemon in the foreground
+  daemon install              Install and start it as a login service
+                              (launchd on macOS, systemd --user on Linux,
+                              a Scheduled Task on Windows; no admin needed)
+  daemon uninstall            Stop and remove the login service
+  daemon start | stop         Start or stop the installed service
+  daemon status               Show whether the service is installed and running
+
+OPTIONS:
+  -h, --help     Show this help message
+  -v, --version  Show version
+  --json         Output as JSON (machine-readable)
+  --yes          Auto-approve all prompts (non-interactive)
+  --output-format <fmt>  run-only: 'stream-json' emits one NDJSON event per line.
+  --model=<m>    Override model (e.g., --model=qwen3:14b)
+  --provider=<p> Override provider (e.g., --provider=ollama)
+  --text-tools   chat: drive a tool-incapable local model agentically via the
+                 harness-side text tool-call protocol (auto-on for lmstudio/ollama)
+  --cwd=<dir>    Override working directory
+  --fast         Start in fast mode (use fastest available model)
+  --resume       Resume last session (or --resume=<name> for specific)
+  --continue [id] Resume this folder's latest session (or the one named by id)
+  --no-durable   Turn off durable turns (on by default in the TUI: a killed turn resumes where it stopped, no write redone)
+  --durable-retry With -p --resume <id>: check what an interrupted turn left open, redo only what is missing (read-only tools and verifiable writes only)
+  --durable-skip With -p --resume <id>: leave an interrupted turn's open calls as they are
+  -p, --print    Run one prompt and exit; piped stdin is added (git diff | 8gent -p "review")
+  --mode <m>     With -p: json (one event per line, docs/specs/JSON-EVENTS.md) or text; rpc = --rpc
+  --tools a,b    With -p: allow only these tools
+  --no-session   With -p: do not save the run
+  --session-dir <dir>  With -p: read and write sessions there
+  --infinite     Enable infinite mode (autonomous until done)
+  --pet          Also start the Lil Eight dock companion (off by default)
+  --rpc          Start in JSON-RPC mode (headless, stdin/stdout)
+
+EXAMPLES:
+  # Non-interactive chat (pipe-friendly)
+  8gent chat "Fix the auth middleware" --json
+  echo "Explain this code" | 8gent chat --stdin
+
+  # Multi-agent orchestration
+  8gent agent spawn winston "Design the multi-tenant schema"
+  8gent agent list --json
+  8gent agent message winston-1 "Focus on data isolation"
+
+  # Session management
+  8gent session list --json --limit=5
+  8gent session resume sess_abc123
+
+  # Preferences
+  8gent preferences get --json
+  8gent preferences set model qwen3:14b
+
+  # Memory
+  8gent memory recall "auth middleware" --json
+  8gent memory remember "Uses JWT with RS256 for auth"
+
+  # Autonomous execution
+  8gent infinite "Build a REST API for user management"
+  8gent chat "Add tests" --yes --infinite
+
+MACHINE INTEGRATION:
+  All commands support --json for structured output.
+  Use --yes for non-interactive execution (no prompts).
+  Exit codes: 0=success, 1=error, 2=auth required.
+  Designed for orchestration by Claude Code, Cursor, aider, etc.
+
+RUN DONE GATE (8gent run):
+  Before and after a run, 8gent runs the project's check (Cargo.toml: cargo test;
+  package.json test script; go.mod: go test ./...). If the run made it worse (green
+  before and red after, or new failures), the failure goes back to the agent to fix;
+  still worse ends the run with exit 1 and a result/error event. Failures that were
+  already there before the run are reported as pre-existing, exit 0. A check that
+  times out or cannot run is reported as NOT VERIFIED in the final message.
+  Trade-off: failures are only told apart for cargo/rustc, bun, go and tsc output.
+  If the project was already red and its runner prints anything else (jest, vitest,
+  mocha, free text), the run is NOT VERIFIED, exit 0: new failures are not caught.
+  The check runs the project's own build and test code, so it runs only with --yes
+  (until run_command has an OS sandbox) and with credential variables (*_KEY,
+  *_TOKEN, *_SECRET, *_PASSWORD, npm _auth settings, URLs with user:pass@)
+  removed from its environment. Without --yes
+  the result says "done gate skipped (needs --yes)".
+  EIGHT_DONE_GATE=0              Turn the gate off (old behaviour, nothing checked)
+  EIGHT_DONE_GATE_ATTEMPTS=<n>   Fix rounds sent back to the agent (default 2, max 5)
+  EIGHT_DONE_GATE_TIMEOUT_SEC=<s>  Bound on each check run (default and max 300)
+
+Learn more: https://github.com/8gi-foundation/8gent-code
+`;
+
+/**
+ * Invocations a process past MAX_AGENT_DEPTH may still run (#3341): they never
+ * start a model loop. Deny by default, so a new subcommand is refused until it
+ * is added here. --rpc and --cli start model loops before any other check, so
+ * they are never exempt; --resume and --continue rewrite any command into a
+ * TUI launch, so a command carrying them is not exempt either.
+ */
+const DEPTH_EXEMPT_FLAGS = ["-h", "--help", "-v", "--version"];
+const DEPTH_EXEMPT_COMMANDS = new Set([
+	"outline",
+	"symbol",
+	"search",
+	"doctor",
+	"model-pin",
+	"deck",
+	"bug",
+]);
+
+function depthExempt(args: string[]): boolean {
+	if (args.includes("--rpc") || args.includes("--cli")) return false;
+	if (DEPTH_EXEMPT_FLAGS.some((f) => args.includes(f))) return true;
+	if (args.includes("--resume") || args.includes("--continue")) return false;
+	return DEPTH_EXEMPT_COMMANDS.has(args[0] ?? "");
+}
+
+async function main() {
+	// A process started by an agent at MAX_AGENT_DEPTH does not start another
+	// model loop (#3341). First, before keys load and before --rpc / --cli,
+	// which start model loops without reaching the command switch.
+	// Unset or blank EIGHT_AGENT_DEPTH is depth 0 by the parser's own rule, so a
+	// user's session skips the import (about 20 ms); any other value, malformed
+	// included, goes through the fail-closed parse in orchestration.
+	if (process.env.EIGHT_AGENT_DEPTH?.trim()) {
+		const { AGENT_DEPTH_EXIT_CODE, processAgentDepthRefusal } = await import(
+			"../packages/orchestration/index.ts"
+		);
+		const depthRefusal = processAgentDepthRefusal();
+		if (depthRefusal && !depthExempt(process.argv.slice(2))) {
+			console.error(depthRefusal);
+			process.exit(AGENT_DEPTH_EXIT_CODE);
+		}
+	}
+
+	// Load API keys from ~/.8gent/keys.env into process.env BEFORE any
+	// subcommand reads provider config. Existing env vars win — a
+	// shell export or CI secret always overrides the file.
+	// The passport never holds keys: it does not load them either (#5086).
+	try {
+		if ((process.argv[2] ?? "").toLowerCase() !== "passport") {
+			const { loadKeysIntoEnv } = await import("../packages/secrets/keys.ts");
+			loadKeysIntoEnv();
+		}
+	} catch {
+		/* secrets package unavailable — proceed; subcommands handle their own env */
+	}
+
+	let args = process.argv.slice(2);
+
+	// -p / --print / --mode json|text: one prompt, no TUI (stdin is prepended when piped).
+	// --mode rpc is the same server as --rpc.
+	const { headlessRoute, continueTarget } = await import("../packages/eight/run.ts");
+	const headless = headlessRoute(args);
+	if (headless === "run") {
+		const { runRunCommand } = await import("../packages/eight/run.ts");
+		process.exit(await runRunCommand(args));
+	}
+
+	// --rpc flag: JSON-RPC 2.0 headless mode over stdin/stdout
+	if (args.includes("--rpc") || headless === "rpc") {
+		const { startRPCServer } = await import("../packages/eight/rpc-server.ts");
+		await startRPCServer();
+		return;
+	}
+
+	// --cli flag: non-interactive subagent mode - bypasses TUI entirely
+	if (args.includes("--cli")) {
+		const { runCLI } = await import("../packages/eight/cli.ts");
+		await runCLI(args);
+		return;
+	}
+
+	if (args.includes("-h") || args.includes("--help")) {
+		console.log(HELP);
+		return;
+	}
+
+	// No args = launch TUI with pet (the default experience)
+	if (args.length === 0) {
+		await tuiCommand([]);
+		return;
+	}
+
+	if (args.includes("-v") || args.includes("--version")) {
+		console.log(`8gent Code v${VERSION}`);
+		return;
+	}
+
+	// Check for --infinite flag (can be used with any command)
+	// Supports: --infinite, -infinite, -i
+	const hasInfiniteFlag =
+		args.includes("--infinite") || args.includes("-infinite") || args.includes("-i");
+	if (hasInfiniteFlag) {
+		// Import and enable infinite mode globally
+		const { enableInfiniteMode } = await import("../packages/permissions");
+		enableInfiniteMode();
+		// Remove the flag from args
+		const filteredArgs = args.filter((a) => a !== "--infinite" && a !== "-infinite" && a !== "-i");
+		args.length = 0;
+		args.push(...filteredArgs);
+	}
+
+	// If just --infinite with no command, launch TUI in infinite mode
+	if (args.length === 0 && hasInfiniteFlag) {
+		args.push("tui");
+	}
+
+	// Check for --fast flag - start in fast mode (fastest available model)
+	const hasFastFlag = args.includes("--fast");
+	if (hasFastFlag) {
+		const { getModeManager, FAST_MODE_MODELS } = await import("../packages/eight/modes.ts");
+		const mm = getModeManager();
+		mm.enableFastMode("default");
+
+		// Try to find fastest available model and set it
+		let fastModel: string | null = null;
+		for (const candidate of FAST_MODE_MODELS) {
+			if (candidate.provider === "ollama") {
+				try {
+					const resp = await fetch("http://localhost:11434/api/tags");
+					const data = (await resp.json()) as {
+						models?: Array<{ name: string }>;
+					};
+					const available = (data.models || []).map((m: { name: string }) => m.name);
+					if (available.some((m: string) => m.startsWith(candidate.model.split(":")[0]))) {
+						fastModel = candidate.model;
+						console.log(`\x1b[33mFast mode:\x1b[0m ${candidate.label}`);
+						break;
+					}
+				} catch {}
+			} else {
+				fastModel = candidate.model;
+				console.log(`\x1b[33mFast mode:\x1b[0m ${candidate.label}`);
+				break;
+			}
+		}
+
+		// Set as model override if found
+		if (fastModel && !args.some((a) => a.startsWith("--model="))) {
+			args.push(`--model=${fastModel}`);
+		}
+
+		args = args.filter((a) => a !== "--fast");
+	}
+
+	// Handle --pet / -pet as standalone (same as 8gent pet start)
+	if (args.includes("--pet") || args.includes("-pet")) {
+		const filtered = args.filter((a) => a !== "--pet" && a !== "-pet");
+		if (filtered.length === 0) {
+			await tuiCommand(["--pet"]);
+			return;
+		}
+		// Otherwise it's a flag on another command - handled by tuiCommand
+	}
+
+	// --resume (no arg) = resume last session
+	if (args.includes("--resume") && !args.some((a) => a.startsWith("--resume="))) {
+		const { SessionManager } = await import("../packages/eight/session-manager.ts");
+		const sm = new SessionManager();
+		const last = sm.getLast();
+		if (last) {
+			console.log(
+				`Resuming session: ${last.name || last.id} (${last.model}, ${last.messageCount} msgs)`,
+			);
+			args = args.filter((a) => a !== "--resume");
+			args.unshift("tui", `--resume=${last.name || last.id}`);
+		} else {
+			console.log("No previous sessions found. Starting fresh.");
+			args = args.filter((a) => a !== "--resume");
+			args.unshift("tui");
+		}
+	}
+
+	// --continue = the latest session of this folder; --continue <id> = that session.
+	const cont = continueTarget(args);
+	if (cont) {
+		let sessionId = cont.id;
+		if (!sessionId) {
+			const { defaultRunSessionStore } = await import("../packages/eight/run-session.ts");
+			const latest = defaultRunSessionStore().latestForCwd(process.cwd());
+			if (latest) {
+				console.log(
+					`Continuing session: ${latest.name || latest.id} (${latest.model ?? "unknown"}, ${latest.messageCount} msgs)`,
+				);
+				sessionId = latest.id;
+			} else {
+				console.log("No earlier session in this folder. Starting fresh.");
+			}
+		}
+		args = cont.rest;
+		args.unshift("tui", ...(sessionId ? [`--resume=${sessionId}`] : []));
+	}
+
+	// Implicit TUI: `8gent --provider=lmstudio` so global flags reach the TUI child process
+	if (args.length > 0 && args[0].startsWith("-")) {
+		args = ["tui", ...args];
+	}
+
+	const command = normalizeSubcommand(args[0]);
+	const restArgs = args.slice(1);
+
+	switch (command) {
+		case "init":
+			await initCommand(restArgs);
+			break;
+
+		case "outline":
+			await outlineCommand(restArgs);
+			break;
+
+		case "symbol":
+			await symbolCommand(restArgs);
+			break;
+
+		case "search":
+			await searchCommand(restArgs);
+			break;
+
+		case "benchmark":
+			await benchmarkCommand(restArgs);
+			break;
+
+		case "demo":
+			await demoCommand(restArgs);
+			break;
+
+		case "tui":
+			await tuiCommand(restArgs);
+			break;
+
+		case "run": {
+			const { runRunCommand } = await import("../packages/eight/run.ts");
+			const code = await runRunCommand(restArgs);
+			process.exit(code);
+			break;
+		}
+
+		case "pipeline": {
+			const { runPipelineCommand } = await import("../packages/orchestration/pipeline-cli.ts");
+			const code = await runPipelineCommand(restArgs);
+			process.exit(code);
+			break;
+		}
+
+		case "pet":
+			await petCommand(restArgs);
+			break;
+
+		case "infinite":
+			await infiniteCommand(restArgs);
+			break;
+
+		case "chat":
+			await chatCommand(restArgs);
+			break;
+
+		case "agent":
+			await agentCommand(restArgs);
+			break;
+
+		case "session":
+			await sessionCommand(restArgs);
+			break;
+
+		case "export":
+			await exportCommand(restArgs);
+			break;
+
+		case "preferences":
+			await preferencesCommand(restArgs);
+			break;
+
+		case "memory":
+			await memoryCommand(restArgs);
+			break;
+
+		case "airdrop":
+		case "drop":
+			await airdropCommand(restArgs);
+			break;
+
+		case "onboard":
+			await onboardCommand(restArgs);
+			break;
+
+		case "status":
+			await statusCommand(restArgs);
+			break;
+
+		case "auth":
+			await authCommand(restArgs);
+			break;
+
+		case "cron":
+			await cronCommand(restArgs);
+			break;
+
+		case "blueprint":
+			await blueprintCommand(restArgs);
+			break;
+
+		case "selfimprove": {
+			// One self-improvement round on a vessel cell (#4937). Refuses outside a cell.
+			const { selfImproveCommand } = await import("../packages/self-autonomy/selfimprove.ts");
+			process.exitCode = await selfImproveCommand(restArgs);
+			break;
+		}
+
+		case "scout":
+			await scoutCommand(restArgs);
+			break;
+
+		case "prepared": {
+			// Owned Duet (#5233): work prepared while idle, waiting for approve or reject.
+			const { preparedCommand } = await import("../packages/prepared/cli.ts");
+			process.exitCode = await preparedCommand(restArgs);
+			break;
+		}
+
+		case "voice": {
+			// Only the explicit fallback: build whisper.cpp on a phone when 8gent's prebuilt binary is missing.
+			if (restArgs[0] !== "build-whisper") {
+				console.error("Usage: 8gent voice build-whisper");
+				process.exitCode = 2;
+				break;
+			}
+			const { offerWhisperBuild } = await import("../packages/eight/android-setup.ts");
+			const out = await offerWhisperBuild();
+			process.exitCode = out === "installed" ? 0 : 1;
+			break;
+		}
+
+		case "flow": {
+			const { runFlowCommand } = await import("../packages/tools/flow-bridge.ts");
+			process.exitCode = await runFlowCommand(restArgs);
+			break;
+		}
+
+		case "daemon": {
+			const { daemonCommand } = await import("../packages/daemon/service.ts");
+			const code = await daemonCommand(restArgs, daemonProgram());
+			if (code !== null) process.exit(code);
+			break;
+		}
+
+		case "rpc": {
+			const { startRPCServer } = await import("../packages/eight/rpc-server.ts");
+			await startRPCServer();
+			break;
+		}
+
+		case "mcp-server": {
+			const { startMCPServer } = await import("../packages/mcp/server.ts");
+			await startMCPServer(restArgs);
+			break;
+		}
+
+		case "review":
+			await reviewCommand(restArgs);
+			break;
+
+		case "doctor":
+			await doctorCommand();
+			break;
+
+		case "durable-run": {
+			// Slice 1 of #4883, behind EIGHT_DURABLE_RUN=1: the scripted run the kill test drives.
+			const { durableRunEnabled } = await import("../packages/durable-run/flag.ts");
+			if (!durableRunEnabled()) {
+				console.error("durable-run is experimental: set EIGHT_DURABLE_RUN=1");
+				process.exit(1);
+			}
+			const { runDemo } = await import("../packages/durable-run/demo.ts");
+			const { flags, rest } = parseFlags(restArgs);
+			const dir = rest[0];
+			if (!dir) {
+				console.error(
+					"Usage: 8gent durable-run <dir> [--variant key|nokey|undeclared] [--kill-at n] [--client name]",
+				);
+				process.exit(1);
+			}
+			const result = await runDemo({
+				dir,
+				variant: (flags.variant as "key" | "nokey" | "undeclared" | undefined) ?? "key",
+				killAt: flags["kill-at"] ? Number(flags["kill-at"]) : undefined,
+				client: (flags.client as string | undefined) ?? "tui",
+				tickLog: flags["tick-log"] ? String(flags["tick-log"]) : undefined,
+			});
+			console.log(JSON.stringify(result));
+			process.exit(0);
+			break;
+		}
+
+		case "stack":
+			await stackCommand();
+			break;
+
+		case "model-pin":
+			await modelPinCommand(restArgs);
+			break;
+
+		case "deck": {
+			// `8gent deck render <spec.json> [out.mp4]`: the shell door to render_video_deck.
+			// Never starts a model loop (depth-exempt above).
+			const { runDeckCommand } = await import("../packages/eight/deck-cli.ts");
+			process.exitCode = await runDeckCommand(restArgs);
+			break;
+		}
+
+		case "bug": {
+			// `8gent bug "<description>"`: one local, secret-free report folder. Uploads nothing,
+			// never starts a model loop (depth-exempt above).
+			const { runBugCommand } = await import("../packages/eight/bug-command.ts");
+			const r = runBugCommand(restArgs, { version: VERSION });
+			(r.code === 0 ? console.log : console.error)(r.text);
+			process.exitCode = r.code;
+			break;
+		}
+
+		case "update":
+		case "upgrade":
+			await updateCommand(restArgs);
+			break;
+
+		case "permissions":
+		case "perms":
+			await permissionsCommand(restArgs);
+			break;
+
+		case "keys":
+		case "env":
+			await keysCommand(restArgs);
+			break;
+
+		case "me": {
+			// #4708: `8gent me import <dir>` copies a memory folder into ~/.8gent/me/.
+			const { importMe, meDir } = await import("../packages/memory/me.ts");
+			if (restArgs[0] !== "import" || !restArgs[1]) {
+				console.error("Usage: 8gent me import <dir>");
+				process.exitCode = 2;
+				break;
+			}
+			try {
+				const r = importMe(restArgs[1], meDir());
+				console.log(
+					`Imported ${r.imported}, skipped ${r.skipped} existing, ignored ${r.ignored} without frontmatter. Index: ${r.index}. Folder: ${meDir()}`,
+				);
+			} catch (e) {
+				console.error(`8gent me import failed: ${e instanceof Error ? e.message : String(e)}`);
+				process.exitCode = 1;
+			}
+			break;
+		}
+
+		case "install":
+			await installCommand(restArgs);
+			break;
+
+		case "packages": {
+			const { runPackagesCommand } = await import("../packages/eight/cli-maintenance.ts");
+			process.exitCode = runPackagesCommand(restArgs);
+			break;
+		}
+
+		case "publish":
+			await publishCommand(restArgs);
+			break;
+
+		case "passport": {
+			// #5086: skills and plugs in one self-issued file the owner holds. Local only.
+			const { runPassport } = await import("../packages/eight/passport.ts");
+			process.exitCode = await runPassport(restArgs);
+			break;
+		}
+
+		default:
+			{
+				const [first, ...more] = unknownSubcommandLines(String(args[0]));
+				console.error(first);
+				for (const line of more) console.log(line);
+			}
+			process.exit(1);
+	}
+}
+
+/**
+ * `8gent update [--check]`: packages/eight/self-update.ts decides and installs.
+ * It updates through the channel this 8gent was installed from (a release
+ * binary, or npm) and never installs a lower version. `--check` reports only.
+ */
+async function updateCommand(args: string[]): Promise<void> {
+	const { runUpdateCommand } = await import("../packages/eight/cli-maintenance.ts");
+	process.exitCode = await runUpdateCommand(args, {
+		currentVersion: VERSION,
+		modulePath: import.meta.url,
+		embedded: MODULE_IS_EMBEDDED,
+		execPath: process.execPath,
+	});
+	// A fresh version is the moment to offer the safety judge (#4811). Asks once, never blocks.
+	if (process.exitCode === 0 || process.exitCode === undefined) await offerSafetyJudge(true);
+}
+
+/** Offer the safety judge when none is reachable (#4811). Interactive only; any failure is swallowed. */
+async function offerSafetyJudge(afterUpdate = false): Promise<void> {
+	try {
+		const { isInteractiveTerminal } = await import("../packages/eight/cli-maintenance.ts");
+		if (!isInteractiveTerminal()) return;
+		const { offerJudge } = await import("../packages/eight/judge-install.ts");
+		// Every judge question defaults to No: a stray Enter never starts a download (#4906).
+		// "launch": before the TUI draws, a phone never gets the download question; it only restarts
+		// an installed judge. The running TUI asks the first-time question once (apps/tui/src/app.tsx).
+		await offerJudge("launch");
+	} catch {}
+	// Android (#4833): the same moment offers the DJ's tools and voice input, one yes. A no-op elsewhere.
+	try {
+		const { isInteractiveTerminal } = await import("../packages/eight/cli-maintenance.ts");
+		if (!isInteractiveTerminal()) return;
+		const { offerAndroidSetup } = await import("../packages/eight/android-setup.ts");
+		await offerAndroidSetup("auto");
+	} catch {}
+}
+
+/**
+ * `8gent permissions [--open]` — diagnose macOS TCC grants for the
+ * host terminal. macOS attaches privacy permissions to the parent
+ * process (Terminal/iTerm/Warp/etc), not to bun, so 8gent inherits
+ * whatever grants the terminal has. Without Accessibility +
+ * Screen Recording the hands tools (desktop_screenshot, click,
+ * type) silently no-op.
+ *
+ * With `--open`, this command also launches the relevant System
+ * Settings → Privacy panes for whichever permissions are missing,
+ * so the user can grant them in two clicks.
+ */
+async function permissionsCommand(args: string[]): Promise<void> {
+	const { checkPermissions, openPrivacyPane } = await import("../packages/hands/index.ts");
+	const shouldOpen = args.includes("--open") || args.includes("-o");
+	const report = checkPermissions();
+
+	const tick = (ok: boolean) => (ok ? "✓" : "✗");
+	console.log(`\n8gent permissions check (terminal: ${report.terminalApp})\n`);
+	console.log(
+		`  ${tick(report.accessibility.granted)} Accessibility       ${report.accessibility.detail}`,
+	);
+	console.log(
+		`  ${tick(report.screenRecording.granted)} Screen Recording    ${report.screenRecording.detail}`,
+	);
+	console.log("");
+
+	if (report.allGranted) {
+		console.log(`All permissions granted. The hands tools should work.\n`);
+		return;
+	}
+
+	console.log(`To fix, grant ${report.terminalApp} the missing permission(s) in:`);
+	console.log(`  System Settings → Privacy & Security → ...`);
+	console.log("");
+	if (!report.accessibility.granted) {
+		console.log(`    Accessibility    (lets cliclick/osascript drive the cursor + keyboard)`);
+	}
+	if (!report.screenRecording.granted) {
+		console.log(`    Screen Recording (lets screencapture see the desktop)`);
+	}
+	console.log("");
+	console.log(
+		`Then **fully quit and relaunch ${report.terminalApp}** — macOS only re-checks permissions on relaunch.\n`,
+	);
+
+	if (shouldOpen) {
+		console.log(`Opening System Settings panes...`);
+		if (!report.accessibility.granted) openPrivacyPane("accessibility");
+		if (!report.screenRecording.granted) openPrivacyPane("screen-recording");
+	} else {
+		console.log(
+			`Re-run with \`8gent permissions --open\` to auto-launch the right System Settings panes.\n`,
+		);
+	}
+}
+
+/**
+ * `8gent keys [open|reload|status]` — manage the ~/.8gent/keys.env file
+ * that holds API keys outside the chat. Default subcommand `open`
+ * launches the file in the user's default editor with placeholder
+ * lines pre-filled; the user drops keys in, saves, closes — no
+ * credentials in chat.
+ *
+ * `keys reload` re-reads the file into the running process env.
+ * `keys status` lists which provider keys are populated (names only,
+ *   never values — values are still secrets even from a status print).
+ */
+async function keysCommand(args: string[]): Promise<void> {
+	const sub = (args[0] || "open").toLowerCase();
+	const { KEYS_PATH, ensureKeysFile, loadKeysIntoEnv, openKeysFile, readKeysFile } = await import(
+		"../packages/secrets/index.ts"
+	);
+
+	if (sub === "open" || sub === "edit" || sub === "") {
+		const path = openKeysFile();
+		console.log(`Opened ${path} in your default editor.`);
+		console.log(`Drop your API keys in, save, and close.`);
+		console.log(`Then run \`8gent keys reload\` (or just relaunch \`8gent\`) to apply.`);
+		return;
+	}
+
+	if (sub === "reload" || sub === "load") {
+		ensureKeysFile();
+		const merged = loadKeysIntoEnv();
+		console.log(`Reloaded ${KEYS_PATH}: merged ${merged} key${merged === 1 ? "" : "s"} into env.`);
+		return;
+	}
+
+	if (sub === "status" || sub === "list") {
+		ensureKeysFile();
+		const keys = readKeysFile();
+		const names = Object.keys(keys).sort();
+		if (names.length === 0) {
+			console.log(
+				`No keys set in ${KEYS_PATH}. Run \`8gent keys set <provider>\` to add one, or \`8gent keys\` to open the file.`,
+			);
+			return;
+		}
+		console.log(`Keys present in ${KEYS_PATH}:`);
+		for (const name of names) {
+			const v = keys[name] || "";
+			const preview = v.length > 8 ? `${v.slice(0, 4)}…${v.slice(-4)}` : "set";
+			console.log(`  ${name.padEnd(24)} ${preview}`);
+		}
+		return;
+	}
+
+	if (sub === "set") {
+		const name = (args[1] || "").toLowerCase();
+		const { getProviderManager } = await import("../packages/providers/index.ts");
+		const pm = getProviderManager();
+		if (!name || !pm.isKnownProvider(name) || !pm.getProvider(name).apiKeyEnv) {
+			console.error("Usage: 8gent keys set <provider>   (e.g. 8gent keys set minimax)");
+			process.exit(1);
+		}
+		const cfg = pm.getProvider(name);
+		const { setKeyInFile } = await import("../packages/secrets/index.ts");
+		const { readHidden } = await import("../packages/secrets/read-hidden.ts");
+		const value = await readHidden(`Paste your ${cfg.displayName} key (hidden): `);
+		const err = setKeyInFile(cfg.apiKeyEnv, value);
+		if (err) {
+			console.error(err);
+			process.exit(1);
+		}
+		console.log(`Saved ${cfg.apiKeyEnv} to ${KEYS_PATH}.`);
+		return;
+	}
+
+	console.error(`Unknown subcommand: keys ${sub}`);
+	console.error(`Try: keys open | keys reload | keys status | keys set <provider>`);
+	process.exit(1);
+}
+
+/**
+ * `8gent install <preset>` — interactive install for a /spawn preset.
+ *
+ * Runs the preset's install recipe with full stdio inheritance so the
+ * user sees real prompts, colored output, and can complete OAuth or
+ * setup wizards inline. Complements the silent auto-installer that
+ * runs from inside /spawn (which suppresses output to keep the chat
+ * clean) — same recipe, different UX.
+ *
+ * After the install command exits, we re-probe the preset's binary
+ * via isInstalled() and report success/failure with next steps.
+ */
+async function installCommand(args: string[]): Promise<void> {
+	const spec = (args[0] || "").trim();
+	// `npm:<name>@<version>` is a package, pinned by integrity (packages/marketplace/install.ts).
+	if (spec.startsWith("npm:")) {
+		const { runInstallNpmCommand } = await import("../packages/eight/cli-maintenance.ts");
+		process.exitCode = await runInstallNpmCommand(spec);
+		return;
+	}
+	const presetId = spec.toLowerCase();
+	if (!presetId) {
+		console.error(`Usage: 8gent install <preset> | npm:<name>@<version>`);
+		console.error(`Available presets: claude, codex, hermes, openclaw, pi, 8gent`);
+		process.exit(1);
+	}
+
+	// Resolve the preset from the canonical registry. It lives in
+	// apps/tui (close to its consumer) but is plain data, so we pull
+	// it across package boundaries here. Layering can be tightened in
+	// a later PR by lifting the registry into its own package.
+	const { getPreset, isInstalled } = await import("../apps/tui/src/lib/external-agent-runner.ts");
+	const preset = getPreset(presetId);
+	if (!preset) {
+		console.error(`Unknown preset: ${presetId}`);
+		console.error(`Available: claude, codex, hermes, openclaw, pi, 8gent`);
+		process.exit(1);
+	}
+
+	const { formatInstallHeader, runInstall, planInstallRun } = await import(
+		"../packages/install-runner/index.ts"
+	);
+
+	const plan = planInstallRun({ preset });
+	if (!plan.canRun || !plan.command) {
+		console.error(plan.notes);
+		process.exit(1);
+	}
+
+	if (isInstalled(preset)) {
+		console.log(
+			`${preset.label} is already installed at ${preset.command}. Re-run with --force to reinstall.`,
+		);
+		const force = args.includes("--force") || args.includes("-f");
+		if (!force) return;
+	}
+
+	console.log(formatInstallHeader({ preset, command: plan.command }));
+	const result = await runInstall({ preset, stdio: "inherit" });
+
+	if (result.action !== "ran") {
+		console.error(`Install did not run (${result.action}).`);
+		process.exit(1);
+	}
+
+	if (result.exitCode !== 0) {
+		console.error(`\nInstall command exited ${result.exitCode}.`);
+		console.error(`Recipe was: ${result.command}`);
+		process.exit(result.exitCode ?? 1);
+	}
+
+	// Re-probe to confirm the binary is on PATH now.
+	const installed = isInstalled(preset);
+	if (installed) {
+		console.log(`\n✓ ${preset.label} installed and on PATH.`);
+	} else {
+		console.log(`\n⚠ Install reported success but \`${preset.command}\` is not on PATH yet.`);
+		console.log(`  Open a new shell, or check the install notes:\n`);
+	}
+	if (plan.notes) console.log(`  ${plan.notes}`);
+}
+
+async function initCommand(args: string[]) {
+	console.log("Initializing 8gent Code...\n");
+
+	const configPath = path.join(process.cwd(), ".8gent");
+	const indexPath = path.join(configPath, "index");
+
+	if (!fs.existsSync(configPath)) {
+		fs.mkdirSync(configPath, { recursive: true });
+		fs.mkdirSync(indexPath, { recursive: true });
+
+		const config = {
+			version: VERSION,
+			initialized: new Date().toISOString(),
+			settings: {
+				preferAstFirst: true,
+				autoIndex: true,
+				indexPatterns: ["**/*.{ts,tsx,js,jsx}"],
+				ignorePatterns: ["**/node_modules/**", "**/dist/**"],
+			},
+		};
+
+		fs.writeFileSync(path.join(configPath, "config.json"), JSON.stringify(config, null, 2));
+
+		console.log("✅ Created .8gent directory");
+		console.log("✅ Created config.json");
+		console.log("\n🚀 8gent Code is ready!");
+		console.log("   Run '8gent outline <file>' to get started.");
+	} else {
+		console.log("8gent is already initialized in this directory.");
+	}
+}
+
+async function outlineCommand(args: string[]) {
+	if (args.length === 0) {
+		console.error("Usage: 8gent outline <file>");
+		process.exit(1);
+	}
+
+	const filePath = args[0];
+	const isJson = args.includes("--json");
+
+	// Dynamic import to avoid loading heavy modules for help
+	const { parseTypeScriptFile } = await import("../packages/ast-index/typescript-parser");
+
+	const start = performance.now();
+	const outline = parseTypeScriptFile(filePath);
+	const time = performance.now() - start;
+
+	// Calculate savings
+	const fileSize = fs.statSync(filePath).size;
+	const fullTokens = Math.ceil(fileSize / 4);
+	const outlineJson = JSON.stringify(outline.symbols);
+	const outlineTokens = Math.ceil(outlineJson.length / 4);
+	const saved = fullTokens - outlineTokens;
+	const percent = ((saved / fullTokens) * 100).toFixed(1);
+
+	if (isJson) {
+		console.log(
+			JSON.stringify(
+				{
+					filePath: outline.filePath,
+					language: outline.language,
+					symbolCount: outline.symbols.length,
+					symbols: outline.symbols.map((s) => ({
+						name: s.name,
+						kind: s.kind,
+						lines: `${s.startLine}-${s.endLine}`,
+						signature: s.signature,
+					})),
+					efficiency: {
+						traditionalTokens: fullTokens,
+						astTokens: outlineTokens,
+						tokensSaved: saved,
+						savingsPercent: Number.parseFloat(percent),
+					},
+				},
+				null,
+				2,
+			),
+		);
+	} else {
+		console.log(`\n📄 ${path.basename(filePath)} (${outline.language})`);
+		console.log(
+			`   ${outline.symbols.length} symbols • ${time.toFixed(1)}ms • ${percent}% token savings\n`,
+		);
+
+		for (const symbol of outline.symbols) {
+			const icon = getSymbolIcon(symbol.kind);
+			console.log(`   ${icon} ${symbol.kind.padEnd(10)} ${symbol.name}`);
+			if (symbol.signature) {
+				console.log(
+					`      └─ ${symbol.signature.slice(0, 60)}${symbol.signature.length > 60 ? "..." : ""}`,
+				);
+			}
+		}
+
+		console.log(
+			`\n   💡 Saved ${saved.toLocaleString()} tokens (${percent}% less than full file read)`,
+		);
+	}
+}
+
+async function symbolCommand(args: string[]) {
+	if (args.length === 0) {
+		console.error("Usage: 8gent symbol <file>::<symbolName>");
+		process.exit(1);
+	}
+
+	const symbolId = args[0];
+	const contextLines = Number.parseInt(
+		args.find((a) => a.startsWith("--context="))?.split("=")[1] || "0",
+	);
+
+	const separatorIndex = symbolId.lastIndexOf("::");
+	if (separatorIndex === -1) {
+		console.error("Invalid symbol ID. Format: path/to/file.ts::symbolName");
+		process.exit(1);
+	}
+
+	const filePath = symbolId.slice(0, separatorIndex);
+	const symbolName = symbolId.slice(separatorIndex + 2);
+
+	const { parseTypeScriptFile, getSymbolSource } = await import(
+		"../packages/ast-index/typescript-parser"
+	);
+
+	const outline = parseTypeScriptFile(filePath);
+	const symbol = outline.symbols.find((s) => s.name === symbolName);
+
+	if (!symbol) {
+		console.error(`Symbol '${symbolName}' not found in ${filePath}`);
+		console.log("\nAvailable symbols:");
+		for (const s of outline.symbols) {
+			console.log(`  • ${s.name} (${s.kind})`);
+		}
+		process.exit(1);
+	}
+
+	const source = getSymbolSource(filePath, symbol.startLine, symbol.endLine, contextLines);
+
+	// Calculate savings
+	const fileSize = fs.statSync(filePath).size;
+	const fullTokens = Math.ceil(fileSize / 4);
+	const symbolTokens = Math.ceil(source.length / 4);
+	const saved = fullTokens - symbolTokens;
+	const percent = ((saved / fullTokens) * 100).toFixed(1);
+
+	console.log(`\n${getSymbolIcon(symbol.kind)} ${symbol.name} (${symbol.kind})`);
+	console.log(`   Lines ${symbol.startLine}-${symbol.endLine} in ${path.basename(filePath)}`);
+	if (symbol.signature) {
+		console.log(`   ${symbol.signature}`);
+	}
+	console.log(`\n${"─".repeat(60)}\n`);
+	console.log(source);
+	console.log(`\n${"─".repeat(60)}`);
+	console.log(`\n   💡 Saved ${saved.toLocaleString()} tokens (${percent}% less than full file)`);
+}
+
+async function searchCommand(args: string[]) {
+	if (args.length === 0) {
+		console.error("Usage: 8gent search <query> [--kinds=function,class] [--dir=src/]");
+		process.exit(1);
+	}
+
+	const query = args[0];
+	const kindsArg = args.find((a) => a.startsWith("--kinds="))?.split("=")[1];
+	const dirArg = args.find((a) => a.startsWith("--dir="))?.split("=")[1] || ".";
+	const limit = Number.parseInt(args.find((a) => a.startsWith("--limit="))?.split("=")[1] || "20");
+
+	console.log(`\n🔍 Searching for "${query}"...\n`);
+
+	const { glob } = await import("glob");
+	const { parseTypeScriptFile } = await import("../packages/ast-index/typescript-parser");
+
+	const files = await glob("**/*.{ts,tsx,js,jsx}", {
+		cwd: dirArg,
+		absolute: true,
+		ignore: ["**/node_modules/**", "**/dist/**"],
+	});
+
+	const kinds = kindsArg?.split(",") || null;
+	const queryLower = query.toLowerCase();
+	const matches: { symbol: any; file: string }[] = [];
+
+	for (const file of files) {
+		if (matches.length >= limit) break;
+		try {
+			const outline = parseTypeScriptFile(file);
+			for (const symbol of outline.symbols) {
+				if (matches.length >= limit) break;
+				if (kinds && !kinds.includes(symbol.kind)) continue;
+				if (
+					symbol.name.toLowerCase().includes(queryLower) ||
+					symbol.signature?.toLowerCase().includes(queryLower)
+				) {
+					matches.push({ symbol, file });
+				}
+			}
+		} catch {
+			// Skip unparseable files
+		}
+	}
+
+	if (matches.length === 0) {
+		console.log("   No matches found.");
+	} else {
+		for (const { symbol, file } of matches) {
+			const icon = getSymbolIcon(symbol.kind);
+			console.log(
+				`   ${icon} ${symbol.name.padEnd(30)} ${symbol.kind.padEnd(10)} ${path.relative(process.cwd(), file)}`,
+			);
+		}
+		console.log(`\n   Found ${matches.length} match${matches.length === 1 ? "" : "es"}`);
+	}
+}
+
+async function benchmarkCommand(args: string[]) {
+	const root = repoRoot();
+	if (!root) {
+		console.error(
+			"`8gent benchmark` requires running from a source checkout. Clone https://github.com/8gi-foundation/8gent-code and run `bun run benchmark` there.",
+		);
+		process.exit(1);
+	}
+	const benchmarkPath = path.join(root, "scripts", "benchmark.ts");
+	const { spawn } = await import("node:child_process");
+	// cwd is the 8gent checkout, which can be a workspace: no bunfig.toml or .env from it (#4013).
+	const proc = spawn("bun", [...safeBunFlags(), "run", benchmarkPath, ...args], {
+		stdio: "inherit",
+		cwd: root,
+	});
+	proc.on("exit", (code) => process.exit(code || 0));
+}
+
+async function demoCommand(args: string[]) {
+	const root = repoRoot();
+	if (!root) {
+		console.error(
+			"`8gent demo` requires running from a source checkout. Clone https://github.com/8gi-foundation/8gent-code and run `bun run demo` there.",
+		);
+		process.exit(1);
+	}
+	const demoPath = path.join(root, "scripts", "demo-savings.ts");
+	const { spawn } = await import("node:child_process");
+	// cwd is the 8gent checkout, which can be a workspace: no bunfig.toml or .env from it (#4013).
+	const proc = spawn("bun", [...safeBunFlags(), "run", demoPath, ...args], {
+		stdio: "inherit",
+		cwd: root,
+	});
+	proc.on("exit", (code) => process.exit(code || 0));
+}
+
+// Spawn Lil Eight dock pet (non-blocking, idempotent)
+async function spawnPet(sessionId?: string) {
+	const { spawn: spawnProc, execSync } = await import("node:child_process");
+	const platform = process.platform; // darwin, win32, linux
+
+	// macOS: native Swift dock pet
+	// Windows/Linux: terminal-rendered pet (future: Electron/Tauri)
+	if (platform !== "darwin") {
+		console.log("\x1b[36m[pet] Lil Eight terminal mode (cross-platform)\x1b[0m");
+
+		// Start terminal pet in background
+		try {
+			const root = repoRoot();
+			const petPath = root ? path.join(root, "packages", "pet", "terminal-pet.ts") : "";
+			if (petPath && fs.existsSync(petPath)) {
+				const { TerminalPet } = await import(petPath);
+				const pet = new TerminalPet({ label: sessionId || "eight" });
+
+				const rows = process.stdout.rows || 24;
+				const petHeight = 8;
+
+				pet.onRender = (lines: string[], x: number, label: string) => {
+					const startRow = rows - petHeight - 1;
+					const padding = " ".repeat(Math.max(0, x));
+					process.stdout.write("\x1b7");
+					for (let i = 0; i < lines.length; i++) {
+						process.stdout.write(`\x1b[${startRow + i};1H\x1b[2K${padding}${lines[i]}`);
+					}
+					process.stdout.write(
+						`\x1b[${startRow + lines.length};1H\x1b[2K${" ".repeat(Math.max(0, x + 4))}\x1b[2m${label}\x1b[0m`,
+					);
+					process.stdout.write("\x1b8");
+				};
+
+				pet.start();
+				process.on("exit", () => pet.stop());
+			}
+		} catch (e) {
+			// Terminal pet failed - continue without it
+		}
+
+		// Register with mesh
+		try {
+			const { homedir } = await import("node:os");
+			const meshDir = path.join(homedir(), ".8gent", "mesh");
+			fs.mkdirSync(meshDir, { recursive: true });
+			const registryPath = path.join(meshDir, "registry.json");
+			let registry: Record<string, any> = {};
+			try {
+				registry = JSON.parse(fs.readFileSync(registryPath, "utf-8"));
+			} catch {}
+			const agentId = sessionId || `eight-tui-${process.pid}`;
+			registry[agentId] = {
+				id: agentId,
+				type: "eight",
+				name: "TUI",
+				pid: process.pid,
+				cwd: process.cwd(),
+				capabilities: ["code", "orchestrate"],
+				startedAt: Date.now(),
+				lastHeartbeat: Date.now(),
+				channel: "terminal",
+			};
+			fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2));
+		} catch {}
+		return;
+	}
+
+	// Generate companion and write JSON for dock pet to read
+	try {
+		const { generateCompanion } = await import("../packages/pet/companion.js");
+		const companion = generateCompanion(sessionId || `session-${Date.now()}`);
+		const { homedir } = await import("node:os");
+		const home = homedir();
+		fs.mkdirSync(path.join(home, ".8gent"), { recursive: true });
+		fs.writeFileSync(
+			path.join(home, ".8gent", "active-companion.json"),
+			JSON.stringify(
+				{
+					fullName: companion.fullName,
+					species: companion.species,
+					element: companion.element,
+					rarity: companion.rarity,
+					accessory: companion.accessory,
+					shiny: companion.shiny,
+					palette: companion.palette,
+					lore: companion.lore,
+					stats: companion.stats,
+				},
+				null,
+				2,
+			),
+		);
+	} catch {}
+
+	const root = repoRoot();
+	// `bin/lil-eight.sh` is a source-checkout sibling of this module; it is not
+	// shipped in dist or embedded in a compiled binary, so MODULE_DIR is right.
+	const lilEightScript = path.join(MODULE_DIR, "lil-eight.sh");
+
+	// Kill existing pets, then spawn fresh
+	try {
+		execSync("pkill -f LilEight 2>/dev/null", { stdio: "pipe" });
+	} catch {}
+	// Not running - spawn it
+	if (fs.existsSync(lilEightScript)) {
+		const pet = spawnProc("bash", [lilEightScript, "start"], {
+			detached: true,
+			stdio: "ignore",
+		});
+		pet.unref();
+		console.log("\x1b[36m[pet] Lil Eight spawned on Dock\x1b[0m");
+	} else if (root) {
+		// Try build first
+		const buildScript = path.join(root, "apps", "lil-eight", "build.sh");
+		if (fs.existsSync(buildScript)) {
+			console.log("\x1b[36m[pet] Building Lil Eight...\x1b[0m");
+			try {
+				execSync(`bash "${buildScript}"`, { stdio: "pipe" });
+				const pet = spawnProc("bash", [lilEightScript, "start"], {
+					detached: true,
+					stdio: "ignore",
+				});
+				pet.unref();
+				console.log("\x1b[36m[pet] Lil Eight spawned on Dock\x1b[0m");
+			} catch (e) {
+				console.log("\x1b[33m[pet] Could not build Lil Eight\x1b[0m");
+			}
+		}
+	}
+
+	// Register this session with the Agent Mesh
+	try {
+		const { homedir } = await import("node:os");
+		const meshDir = path.join(homedir(), ".8gent", "mesh");
+		const registryPath = path.join(meshDir, "registry.json");
+		fs.mkdirSync(meshDir, { recursive: true });
+
+		const agentId = sessionId || `eight-tui-${process.pid}`;
+		let registry: Record<string, any> = {};
+		try {
+			registry = JSON.parse(fs.readFileSync(registryPath, "utf-8"));
+		} catch {}
+
+		registry[agentId] = {
+			id: agentId,
+			type: "eight",
+			name: "TUI",
+			pid: process.pid,
+			cwd: process.cwd(),
+			capabilities: ["code", "orchestrate", "memory", "tools"],
+			startedAt: Date.now(),
+			lastHeartbeat: Date.now(),
+			channel: "terminal",
+		};
+
+		fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2));
+
+		// Clean up on exit
+		const cleanup = () => {
+			try {
+				const reg = JSON.parse(fs.readFileSync(registryPath, "utf-8"));
+				delete reg[agentId];
+				fs.writeFileSync(registryPath, JSON.stringify(reg, null, 2));
+			} catch {}
+		};
+		process.on("exit", cleanup);
+		process.on("SIGINT", () => {
+			cleanup();
+			process.exit(0);
+		});
+		process.on("SIGTERM", () => {
+			cleanup();
+			process.exit(0);
+		});
+	} catch {}
+}
+
+async function tuiCommand(args: string[]) {
+	// The pet is opt-in: `8gent --pet` (C2). --no-pet is still accepted and wins.
+	const wantPet = petRequested(args);
+	const filteredArgs = args.filter((a) => a !== "--no-pet" && a !== "--pet");
+
+	if (wantPet) {
+		await spawnPet();
+	}
+
+	// First run on a fresh install: offer the safety judge once (#4811).
+	await offerSafetyJudge();
+
+	console.log("Launching 8gent...\n");
+
+	const tuiPath = resolveTuiEntry();
+	if (!tuiPath) {
+		console.error(
+			"TUI entry not found. Reinstall with `npm install -g @8gi-foundation/8gent-code` or run from a source checkout.",
+		);
+		process.exit(1);
+	}
+
+	await spawnTui(tuiPath, filteredArgs);
+}
+
+/**
+ * Run the TUI in the folder the user launched `8gent` from (#3264).
+ *
+ * The child used to get `cwd: path.dirname(tuiPath)`, which for an npm install
+ * is the package's dist/ folder, so the header showed that folder with
+ * "no repo" and the TUI's own `.env` and git lookups ran against the package.
+ * The child now inherits the launch folder.
+ *
+ * Trust: Bun reads `bunfig.toml` (including `preload`) and `.env` from its
+ * working folder. That is not new exposure: bin/8gent-run.js already runs
+ * `bun dist/cli.js` in the launch folder, so the user's bunfig and .env were
+ * loaded before this change too. 8gent's own scripts (bin/debug.ts,
+ * bin/lil-eight.sh) resolve from the package, never from this folder; see
+ * apps/tui/src/lib/package-scripts.ts.
+ */
+async function spawnTui(tuiPath: string, args: string[]): Promise<void> {
+	const { spawn } = await import("node:child_process");
+	// The TUI cannot tell which install it is from its own path (a compiled binary runs a cached
+	// bundle), so the launcher says: version, entry module and embedded-ness, for /update and the
+	// update notice (packages/eight/update-notice.ts).
+	const launcherEnv = {
+		EIGHT_RUNNING_VERSION: VERSION,
+		EIGHT_LAUNCHER_MODULE: import.meta.url,
+		EIGHT_LAUNCHER_EMBEDDED: MODULE_IS_EMBEDDED ? "1" : "0",
+	};
+	// A compiled binary runs itself in TUI mode (see HAS_COMPILED_TUI). It was
+	// built with cwd bunfig.toml and .env autoload off, so a hostile working
+	// directory is not read (#3894), and user args reach the TUI unparsed.
+	let proc: ReturnType<typeof spawn>;
+	if (tuiPath === EMBEDDED_TUI) {
+		proc = spawn(process.execPath, args, {
+			stdio: "inherit",
+			env: { ...process.env, ...launcherEnv, [COMPILED_TUI_ENV]: "1" },
+		});
+	} else if (!(process.versions as Record<string, string | undefined>).bun) {
+		// Running on Node (dist/node/cli.js): the TUI is the sibling Node bundle, run by this same
+		// Node, by absolute path. On Termux the TUI process starts without LD_PRELOAD and puts it
+		// back for its own children (bin/termux-exec.js, apps/tui/src/lib/termux-handoff.ts, #4682).
+		proc = spawn(
+			nodeExecPath(),
+			["--experimental-sqlite", "--disable-warning=ExperimentalWarning", tuiPath, ...args],
+			{ stdio: "inherit", env: tuiProcessEnv({ ...process.env, ...launcherEnv }) },
+		);
+	} else {
+		// Same as the compiled path: never the user's cwd bunfig.toml or .env (#4013).
+		proc = spawn("bun", [...safeBunFlags(), "run", tuiPath, ...args], {
+			stdio: "inherit",
+			env: { ...process.env, ...launcherEnv },
+		});
+	}
+	proc.on("error", (err) => {
+		console.error(`Could not start the TUI: ${err.message}`);
+		process.exit(1);
+	});
+	proc.on("exit", async (code, signal) => {
+		// /update asked for a restart: start a fresh 8gent (the new code) on the same session.
+		if (code === RELAUNCH_EXIT_CODE) {
+			const { consumeResumeRequest, relaunchCommand } = await import(
+				"../packages/eight/update-resume.ts"
+			);
+			const req = consumeResumeRequest();
+			if (req) {
+				const cmd = relaunchCommand({
+					embedded: MODULE_IS_EMBEDDED,
+					execPath: process.execPath,
+					entryScript: process.argv[1],
+					req,
+				});
+				const next = spawn(cmd.command, cmd.args, { stdio: "inherit", env: cmd.env });
+				next.on("error", (err) => {
+					console.error(`Could not restart 8gent: ${err.message}. Run: 8gent --resume`);
+					process.exit(1);
+				});
+				next.on("exit", (c, sig) => process.exit(c ?? (sig ? 1 : 0)));
+				return;
+			}
+		}
+		process.exit(code ?? (signal ? 1 : 0));
+	});
+}
+
+/**
+ * Find the TUI entry, trying each layout the tool can be installed in:
+ *
+ *   1. EMBEDDED_TUI: a compiled binary whose own module graph holds the TUI.
+ *   2. `tui.js` next to this module: the npm/bundled layout, where it ships
+ *      as `dist/tui.js` beside `dist/cli.js`.
+ *   3. `tui.js` next to the executable: a compiled build without the TUI.
+ *   4. `apps/tui/src/index.tsx`: running from a git checkout.
+ *
+ * Returns null when none exists so the caller can print a clear error instead
+ * of spawning bun against a phantom path.
+ */
+function resolveTuiEntry(): string | null {
+	if (HAS_COMPILED_TUI) return EMBEDDED_TUI;
+	for (const dir of MODULE_IS_EMBEDDED ? [EXEC_DIR] : [MODULE_DIR, EXEC_DIR]) {
+		const bundled = path.join(dir, "tui.js");
+		if (fs.existsSync(bundled)) return bundled;
+	}
+	const root = repoRoot();
+	if (root) {
+		const src = path.join(root, "apps", "tui", "src", "index.tsx");
+		if (fs.existsSync(src)) return src;
+	}
+	return null;
+}
+
+async function airdropCommand(args: string[]) {
+	if (process.platform !== "darwin") {
+		console.log("AirDrop is macOS only. Use 8gent send for cross-platform sharing.");
+		return;
+	}
+
+	if (args.length === 0) {
+		console.log("Usage: 8gent airdrop <file|text>");
+		console.log("  8gent airdrop ./report.pdf     - AirDrop a file");
+		console.log('  8gent airdrop "Hello from 8gent" - AirDrop text as a note');
+		console.log("  8gent drop ./file.txt          - shorthand");
+		return;
+	}
+
+	const target = args.join(" ");
+	const { execSync } = await import("node:child_process");
+
+	// Check if it's a file path
+	if (fs.existsSync(target) || fs.existsSync(path.resolve(target))) {
+		const resolved = path.resolve(target);
+		console.log(`AirDropping: ${resolved}`);
+
+		// Use osascript to trigger AirDrop via Finder
+		const script = `
+      tell application "Finder"
+        activate
+        set theFile to POSIX file "${resolved}" as alias
+        set theWindow to make new Finder window
+        set target of theWindow to theFile
+      end tell
+      tell application "System Events"
+        tell process "Finder"
+          delay 0.5
+          click menu item "AirDrop" of menu "Go" of menu bar 1
+        end tell
+      end tell
+    `;
+
+		// Simpler approach: open the share sheet via NSSharingService from a helper
+		const swiftHelper = `
+      import Cocoa
+      let url = URL(fileURLWithPath: "${resolved}")
+      if let service = NSSharingService(named: .sendViaAirDrop) {
+        if service.canPerform(withItems: [url]) {
+          service.perform(withItems: [url])
+          RunLoop.main.run(until: Date(timeIntervalSinceNow: 30))
+        } else {
+          print("AirDrop not available - check Bluetooth and WiFi")
+          exit(1)
+        }
+      }
+    `;
+
+		const tmpSwift = "/tmp/eight-airdrop.swift";
+		fs.writeFileSync(tmpSwift, swiftHelper);
+		try {
+			execSync(
+				`swiftc -o /tmp/eight-airdrop -framework Cocoa "${tmpSwift}" && /tmp/eight-airdrop`,
+				{
+					stdio: "inherit",
+					timeout: 60000,
+				},
+			);
+		} catch {
+			console.log("AirDrop window closed or timed out");
+		}
+	} else {
+		// It's text - write to temp file and AirDrop
+		const tmpFile = `/tmp/eight-note-${Date.now()}.txt`;
+		fs.writeFileSync(tmpFile, target);
+		console.log(`AirDropping note: "${target.slice(0, 50)}..."`);
+		await airdropCommand([tmpFile]);
+	}
+}
+
+async function petCommand(args: string[]) {
+	const subCmd = args[0] || "start";
+	const { execSync } = await import("node:child_process");
+	// Same checkout-only sibling asset as in spawnPet(): MODULE_DIR, not EXEC_DIR.
+	const lilEightScript = path.join(MODULE_DIR, "lil-eight.sh");
+	const root = repoRoot();
+
+	if (!fs.existsSync(lilEightScript)) {
+		if (!root) {
+			console.error(
+				"Lil Eight dock pet requires a source checkout to build. Clone https://github.com/8gi-foundation/8gent-code and run `bun run pet` there.",
+			);
+			process.exit(1);
+		}
+		console.log("Building Lil Eight first...");
+		const buildScript = path.join(root, "apps", "lil-eight", "build.sh");
+		execSync(`bash "${buildScript}"`, { stdio: "inherit" });
+	}
+
+	switch (subCmd) {
+		case "start":
+		case "open":
+			await spawnPet();
+			break;
+		case "stop":
+		case "kill":
+			try {
+				execSync("pkill -f LilEight");
+				console.log("Lil Eight stopped");
+			} catch {
+				console.log("Not running");
+			}
+			break;
+		case "restart":
+			try {
+				execSync("pkill -f LilEight");
+			} catch {}
+			setTimeout(() => spawnPet(), 1000);
+			break;
+		case "build":
+			if (!root) {
+				console.error(
+					"`8gent pet build` requires a source checkout. Clone https://github.com/8gi-foundation/8gent-code.",
+				);
+				process.exit(1);
+			}
+			execSync(`bash "${path.join(root, "apps", "lil-eight", "build.sh")}"`, {
+				stdio: "inherit",
+			});
+			break;
+		case "log":
+		case "logs": {
+			const { spawn: sp } = await import("node:child_process");
+			const { homedir } = await import("node:os");
+			const logPath = path.join(homedir(), ".8gent", "lil-eight.log");
+			sp("tail", ["-f", logPath], { stdio: "inherit" });
+			break;
+		}
+		case "status":
+			try {
+				execSync("pgrep -f LilEight", { stdio: "pipe" });
+				console.log("Lil Eight is running");
+				const { homedir } = await import("node:os");
+				const logP = path.join(homedir(), ".8gent", "lil-eight.log");
+				if (fs.existsSync(logP)) {
+					const lines = fs.readFileSync(logP, "utf-8").trim().split("\n").slice(-3);
+					lines.forEach((l) => console.log(`  ${l}`));
+				}
+			} catch {
+				console.log("Lil Eight is not running");
+			}
+			break;
+		default:
+			console.log("Usage: 8gent pet [start|stop|restart|build|log|status]");
+	}
+}
+
+async function infiniteCommand(args: string[]) {
+	console.log("🔄 INFINITE MODE - Autonomous execution until done\n");
+
+	if (args.length === 0) {
+		console.error("Usage: 8gent infinite <task description>");
+		console.log('\nExample: 8gent infinite "Build a Next.js landing page with dark theme"');
+		process.exit(1);
+	}
+
+	const task = args.join(" ");
+	const maxIterations = Number.parseInt(
+		args.find((a) => a.startsWith("--max="))?.split("=")[1] || "100",
+	);
+	const maxTimeMin = Number.parseInt(
+		args.find((a) => a.startsWith("--time="))?.split("=")[1] || "30",
+	);
+
+	console.log(`Task: ${task}`);
+	console.log(`Max iterations: ${maxIterations}`);
+	console.log(`Max time: ${maxTimeMin} minutes`);
+	console.log("─".repeat(60));
+	console.log("");
+
+	try {
+		const { runInfinite, formatInfiniteState } = await import("../packages/infinite");
+
+		const state = await runInfinite(task, {
+			maxIterations,
+			maxTimeMs: maxTimeMin * 60 * 1000,
+			workingDirectory: process.cwd(),
+			onIteration: (s) => {
+				process.stdout.write(`\r${formatInfiniteState(s)}`);
+			},
+			onErrorRecovered: (err, s) => {
+				console.log(`\n⚠️  Error recovered: ${err.message.slice(0, 50)}...`);
+			},
+		});
+
+		console.log("\n");
+		console.log("─".repeat(60));
+
+		if (state.phase === "complete") {
+			console.log("✅ TASK COMPLETED SUCCESSFULLY");
+			console.log(`   Iterations: ${state.iteration}`);
+			console.log(`   Time: ${(state.elapsedMs / 1000).toFixed(1)}s`);
+			console.log(`   Files changed: ${state.filesChanged.length}`);
+			console.log(`   Errors recovered: ${state.recoveredErrors.length}`);
+		} else {
+			console.log("❌ TASK FAILED OR TIMED OUT");
+			console.log(`   Phase: ${state.phase}`);
+			console.log(`   Iterations: ${state.iteration}`);
+			if (state.recoveredErrors.length > 0) {
+				console.log(`   Last error: ${state.recoveredErrors.slice(-1)[0]?.error.message}`);
+			}
+		}
+	} catch (err) {
+		console.error("Failed to run infinite mode:", err);
+		process.exit(1);
+	}
+}
+
+async function authCommand(args: string[]) {
+	const subcommand = args[0] || "help";
+
+	switch (subcommand) {
+		case "login": {
+			console.log("Authenticating with 8gent...\n");
+
+			const { login } = await import("../packages/auth");
+
+			const state = await login({
+				onDeviceCode: (code, uri) => {
+					console.log("Opening browser for authentication...\n");
+					console.log(`  If the browser doesn't open, visit:`);
+					console.log(`  ${uri}\n`);
+					console.log(`  Enter code: ${code}\n`);
+					console.log("Waiting for approval...");
+				},
+				onPollAttempt: (attempt) => {
+					process.stdout.write(`\rPolling... (attempt ${attempt})`);
+				},
+				onLoginSuccess: (user) => {
+					console.log(`\n\nLogged in as @${user.githubUsername} (${user.plan} plan)`);
+					console.log(`Email: ${user.email}`);
+				},
+				onLoginError: (error) => {
+					console.error(`\nLogin failed: ${error}`);
+				},
+			});
+
+			if (state.state !== "authenticated") {
+				process.exit(1);
+			}
+			break;
+		}
+
+		case "logout": {
+			const { logout } = await import("../packages/auth");
+			await logout();
+			console.log("Logged out successfully.");
+			break;
+		}
+
+		case "status": {
+			const { initAuth, getVesselId, getProxyUrl, isProxyAvailable } = await import(
+				"../packages/auth"
+			);
+			const state = await initAuth();
+
+			if (state.state === "authenticated") {
+				const { user, tokenExpiresAt } = state;
+				console.log(`Logged in as @${user.githubUsername}`);
+				console.log(`  Email:   ${user.email}`);
+				console.log(`  Plan:    ${user.plan}`);
+				console.log(`  Name:    ${user.displayName}`);
+
+				const expiresIn = tokenExpiresAt - Date.now();
+				if (expiresIn > 0) {
+					const hours = Math.floor(expiresIn / (1000 * 60 * 60));
+					const minutes = Math.floor((expiresIn % (1000 * 60 * 60)) / (1000 * 60));
+					console.log(`  Token:   expires in ${hours}h ${minutes}m`);
+				} else {
+					console.log("  Token:   expired (will refresh on next use)");
+				}
+
+				// Show proxy and vessel info
+				const vesselId = getVesselId();
+				const proxyUrl = getProxyUrl();
+				console.log(`  Vessel:  ${vesselId}`);
+				console.log(`  Proxy:   ${proxyUrl}`);
+
+				const proxyUp = await isProxyAvailable(proxyUrl);
+				console.log(
+					`  Status:  proxy ${proxyUp ? "reachable" : "unreachable (will use local Ollama)"}`,
+				);
+			} else {
+				console.log("Not logged in.");
+				console.log("Run `8gent auth login` to authenticate with GitHub.");
+
+				// Still show vessel ID - it exists regardless of auth
+				const vesselId = getVesselId();
+				console.log(`\n  Vessel:  ${vesselId} (local-only mode)`);
+			}
+			break;
+		}
+
+		case "whoami": {
+			const { initAuth } = await import("../packages/auth");
+			const state = await initAuth();
+
+			if (state.state === "authenticated") {
+				console.log(`@${state.user.githubUsername} (${state.user.plan})`);
+			} else {
+				console.log("anonymous");
+			}
+			break;
+		}
+		default:
+			console.log(`
+8gent auth — Authentication Commands
+
+USAGE:
+  8gent auth <subcommand>
+
+SUBCOMMANDS:
+  login     Authenticate with GitHub (device code flow)
+  logout    Clear stored credentials
+  status    Show current auth state and usage
+  whoami    Quick identity check (one line)
+`);
+			break;
+	}
+}
+
+// ── Helper: Parse global flags ────────────────────────────────────
+
+function parseFlags(args: string[]): {
+	flags: Record<string, string | boolean>;
+	rest: string[];
+} {
+	const flags: Record<string, string | boolean> = {};
+	const rest: string[] = [];
+	for (const arg of args) {
+		if (arg.startsWith("--")) {
+			const [key, val] = arg.slice(2).split("=");
+			flags[key] = val || true;
+		} else {
+			rest.push(arg);
+		}
+	}
+	return { flags, rest };
+}
+
+function jsonOut(data: unknown): void {
+	console.log(JSON.stringify(data, null, 2));
+}
+
+// ── Cron Command ──────────────────────────────────────────────────
+
+async function cronCommand(args: string[]) {
+	const { CronManager } = await import("../packages/cron/index.ts");
+	const mgr = new CronManager();
+	const sub = args[0];
+
+	if (!sub || sub === "list") {
+		const jobs = mgr.list();
+		if (jobs.length === 0) {
+			console.log("No cron jobs configured. Use: 8gent cron add <name> <schedule> <command>");
+			return;
+		}
+		console.log("Cron Jobs:\n");
+		for (const j of jobs) {
+			const status = j.enabled ? "ON" : "OFF";
+			const last = j.lastRun ? ` (last: ${j.lastRun})` : "";
+			console.log(`  [${status}] ${j.id}  ${j.name}  ${j.schedule}  -> ${j.command}${last}`);
+		}
+	} else if (sub === "add") {
+		if (args.length < 4) {
+			console.error("Usage: 8gent cron add <name> <schedule> <command>");
+			console.error(
+				'Example: 8gent cron add "deploy-check" "0 */6 * * *" "chat \'check deploy status\'"',
+			);
+			process.exit(1);
+		}
+		const name = args[1];
+		const schedule = args[2];
+		const command = args.slice(3).join(" ");
+		const job = mgr.add({ name, schedule, command, enabled: true });
+		console.log(`Added cron job: ${job.id} (${job.name}) - ${job.schedule} -> ${job.command}`);
+	} else if (sub === "remove") {
+		if (!args[1]) {
+			console.error("Usage: 8gent cron remove <id>");
+			process.exit(1);
+		}
+		const removed = mgr.remove(args[1]);
+		console.log(removed ? `Removed job ${args[1]}` : `Job ${args[1]} not found`);
+	} else if (sub === "enable") {
+		if (!args[1]) {
+			console.error("Usage: 8gent cron enable <id>");
+			process.exit(1);
+		}
+		mgr.enable(args[1]);
+		console.log(`Enabled job ${args[1]}`);
+	} else if (sub === "disable") {
+		if (!args[1]) {
+			console.error("Usage: 8gent cron disable <id>");
+			process.exit(1);
+		}
+		mgr.disable(args[1]);
+		console.log(`Disabled job ${args[1]}`);
+	} else {
+		console.error(`Unknown cron subcommand: ${sub}`);
+		console.log("Available: list, add, remove, enable, disable");
+		process.exit(1);
+	}
+}
+
+// ── Scout Command (#4926) ─────────────────────────────────────────
+
+async function scoutCommand(args: string[]) {
+	const { getRoutineManager } = await import("../packages/cron/routines.ts");
+	const { runScoutCommand } = await import("../packages/cron/scout-cli.ts");
+	process.exitCode = await runScoutCommand(args, { manager: getRoutineManager() });
+}
+
+// ── Blueprint Command (trial, EIGHT_BLUEPRINTS=1 only, #3463) ─────
+
+async function blueprintCommand(args: string[]) {
+	const bp = await import("../packages/cron/blueprints.ts");
+	if (!bp.blueprintsEnabled()) {
+		console.error("Blueprints are off. Set EIGHT_BLUEPRINTS=1 to try them.");
+		process.exit(1);
+	}
+	const { getRoutineManager } = await import("../packages/cron/routines.ts");
+	const [sub, target, ...pairs] = args;
+	if (!sub || sub === "list") {
+		for (const b of bp.BLUEPRINTS) {
+			console.log(`${b.name}  ${b.description}`);
+			for (const s of b.slots)
+				console.log(`  ${s.key}: ${s.label}${s.default ? ` (default ${s.default})` : ""}`);
+		}
+		return;
+	}
+	if (sub === "add" && target) {
+		const slots: Record<string, string> = Object.create(null);
+		for (const p of pairs) {
+			const i = p.indexOf("=");
+			const key = p.slice(0, i);
+			let why = "";
+			if (i < 1) why = `Expected key=value, got ${JSON.stringify(p)}`;
+			else if (key === "__proto__") why = `Not a slot name: ${JSON.stringify(key)}`;
+			else if (key in slots) why = `Slot given twice: ${JSON.stringify(key)}`;
+			if (why) {
+				console.error(why);
+				process.exit(1);
+			}
+			slots[key] = p.slice(i + 1);
+		}
+		try {
+			const r = bp.createFromBlueprint(getRoutineManager(), target, slots);
+			console.log(`Saved routine ${r.id} (${r.name}), cron pattern "${r.schedule}".`);
+			console.log("Nothing runs routines yet; this trial only saves them.");
+		} catch (e) {
+			console.error(e instanceof Error ? e.message : String(e));
+			process.exit(1);
+		}
+		return;
+	}
+	console.error("Usage: 8gent blueprint list | add <name> key=value...");
+	process.exit(1);
+}
+
+// ── Chat Command (non-interactive, pipe-friendly) ─────────────────
+
+// ── Text-Tool Chat (local-model agentic loop) ─────────────────────
+//
+// Drives a tool-incapable local model agentically via the harness-side text
+// tool-call protocol. Builds a direct `call` against the provider's
+// OpenAI-compatible chat completions endpoint (no native `tools` payload), then
+// runs the read-only demo tools through runTextToolAgent. Named *Demo* to
+// distinguish it from Agent.runTextToolChat (packages/eight/agent.ts), which
+// drives the REAL executor tools and is the path the TUI + Pill use.
+
+async function runDemoTextToolChat(opts: {
+	message: string;
+	provider: string;
+	model: string;
+}): Promise<{
+	content: string;
+	rounds: number;
+	toolLog: Array<{ name: string; args: Record<string, unknown>; result: string }>;
+}> {
+	const { runTextToolAgent } = await import("../packages/ai/text-tool-loop");
+	const { buildTextToolCall } = await import("../packages/ai/text-tool-endpoint");
+	const { getDemoTools } = await import("../packages/ai/text-tool-demo-tools");
+
+	const call = buildTextToolCall({ provider: opts.provider, model: opts.model });
+
+	const result = await runTextToolAgent({
+		messages: [{ role: "user", content: opts.message }],
+		tools: getDemoTools(),
+		call,
+		maxRounds: 6,
+	});
+
+	return {
+		content: result.content,
+		rounds: result.rounds,
+		toolLog: result.toolLog,
+	};
+}
+
+async function chatCommand(args: string[]) {
+	const { flags, rest } = parseFlags(args);
+	const isJson = !!flags.json;
+	const useStdin = !!flags.stdin;
+	const model = (flags.model as string) || undefined;
+	const provider = (flags.provider as string) || undefined;
+	const cwd = (flags.cwd as string) || process.cwd();
+
+	let message = rest.join(" ");
+
+	// Read from stdin if --stdin flag or no message provided
+	if (useStdin || (!message && !process.stdin.isTTY)) {
+		const chunks: Buffer[] = [];
+		for await (const chunk of process.stdin) {
+			chunks.push(chunk);
+		}
+		message = Buffer.concat(chunks).toString("utf-8").trim();
+	}
+
+	if (!message) {
+		console.error("Usage: 8gent chat <message> [--json] [--model=<m>] [--stdin]");
+		process.exit(1);
+	}
+
+	// Provider + model: --provider/--model, else the choice saved by onboarding,
+	// else the router (#4362). A saved provider that does not answer falls back
+	// with a stated reason on stderr.
+	const { resolveChatChoice, liveProviderChoiceDeps, modelForOneShotWithReason, noModelNotice } =
+		await import("../packages/eight/run.ts");
+	const choice = await resolveChatChoice({ provider, model }, liveProviderChoiceDeps());
+	if (choice.notice) console.error(choice.notice);
+	let resolvedModel = choice.model;
+	let modelError: unknown;
+	if (!resolvedModel && choice.provider !== "ollama") {
+		const picked = await modelForOneShotWithReason(choice.provider, undefined);
+		resolvedModel = picked.model;
+		modelError = picked.error;
+	}
+	if (!resolvedModel) {
+		const errMsg =
+			choice.provider === "ollama"
+				? "No Ollama models available. Pull a model first: ollama pull qwen3:14b"
+				: await noModelNotice(choice.provider, modelError);
+		if (isJson) {
+			jsonOut({ success: false, error: errMsg });
+		} else {
+			console.error(errMsg);
+		}
+		process.exit(1);
+	}
+
+	// Text-tool path: local models whose chat template 400s on a native `tools`
+	// payload cannot do native tool calling. For those we keep tool orchestration
+	// in the harness, driving the model agentically through fenced `tool_call`
+	// blocks. Forced with --text-tools, auto-detected for lmstudio/ollama.
+	const resolvedProvider = choice.provider;
+	const forceTextTools = !!flags["text-tools"];
+	const useTextTools =
+		forceTextTools || resolvedProvider === "lmstudio" || resolvedProvider === "ollama";
+
+	if (useTextTools) {
+		try {
+			const out = await runDemoTextToolChat({
+				message,
+				provider: resolvedProvider,
+				model: resolvedModel,
+			});
+			if (isJson) {
+				jsonOut({
+					success: true,
+					message,
+					response: out.content,
+					model: resolvedModel,
+					provider: resolvedProvider,
+					rounds: out.rounds,
+					toolLog: out.toolLog,
+				});
+			} else {
+				console.log(out.content);
+			}
+			return;
+		} catch (err) {
+			const errMsg = err instanceof Error ? err.message : String(err);
+			if (isJson) {
+				jsonOut({ success: false, error: errMsg });
+			} else {
+				console.error(`Error: ${errMsg}`);
+			}
+			process.exit(1);
+		}
+	}
+
+	try {
+		const { Agent } = await import("../packages/eight/agent");
+
+		const agent = new Agent({
+			model: resolvedModel,
+			runtime: resolvedProvider as
+				| "ollama"
+				| "lmstudio"
+				| "openrouter"
+				| "apple-foundation"
+				| "apfel"
+				| "deepseek",
+			workingDirectory: cwd,
+			maxTurns: 30,
+		});
+
+		const response = await agent.chat(message);
+		await agent.cleanup();
+
+		if (isJson) {
+			jsonOut({
+				success: true,
+				message,
+				response,
+				model: resolvedModel,
+				provider: resolvedProvider,
+			});
+		} else {
+			console.log(response);
+		}
+	} catch (err) {
+		const errMsg = err instanceof Error ? err.message : String(err);
+		if (isJson) {
+			jsonOut({ success: false, error: errMsg });
+		} else {
+			console.error(`Error: ${errMsg}`);
+		}
+		process.exit(1);
+	}
+}
+
+// ── Agent Command (multi-agent orchestration) ─────────────────────
+
+async function agentCommand(args: string[]) {
+	const { flags, rest } = parseFlags(args);
+	const isJson = !!flags.json;
+	const sub = rest[0] || "list";
+
+	const { getOrchestratorBus } = await import("../packages/orchestration/orchestrator-bus");
+	const { getPersona, listPersonas } = await import("../packages/orchestration/personas");
+	const bus = getOrchestratorBus();
+
+	switch (sub) {
+		case "list": {
+			const agents = bus.getAgents();
+			if (isJson) {
+				jsonOut({
+					count: agents.length,
+					agents: agents.map((a) => ({
+						id: a.id,
+						persona: a.persona.id,
+						name: a.persona.name,
+						role: a.persona.role,
+						task: a.task,
+						status: a.status,
+						spawnedAt: a.spawnedAt.toISOString(),
+					})),
+				});
+			} else {
+				if (agents.length === 0) {
+					console.log("No active sub-agents.");
+				} else {
+					for (const a of agents) {
+						console.log(`${a.persona.icon} ${a.id} — ${a.persona.name} (${a.persona.role})`);
+						console.log(`  Task: ${a.task}`);
+						console.log(`  Status: ${a.status}`);
+					}
+				}
+			}
+			break;
+		}
+
+		case "spawn": {
+			const personaId = rest[1];
+			const task = rest.slice(2).join(" ");
+			if (!personaId) {
+				const personas = listPersonas();
+				if (isJson) {
+					jsonOut({
+						error: "persona required",
+						available: personas.map((p) => ({
+							id: p.id,
+							name: p.name,
+							role: p.role,
+						})),
+					});
+				} else {
+					console.log("Usage: 8gent agent spawn <persona> <task>\n");
+					console.log("Available personas:");
+					for (const p of personas) {
+						console.log(`  ${p.icon} ${p.id.padEnd(10)} ${p.name} — ${p.role}`);
+					}
+				}
+				process.exit(1);
+			}
+
+			const persona = getPersona(personaId);
+			if (!persona) {
+				console.error(`Unknown persona: ${personaId}`);
+				process.exit(1);
+			}
+
+			const request = bus.requestSpawn(personaId, task || "General assistance", "CLI spawn");
+
+			if (isJson) {
+				jsonOut({
+					success: true,
+					requestId: request.id,
+					persona: personaId,
+					task,
+					status: request.status,
+				});
+			} else {
+				console.log(`Spawn request: ${persona.icon} ${persona.name} (${persona.role})`);
+				console.log(`Task: ${task || "General assistance"}`);
+				console.log(`Status: ${request.status}`);
+			}
+			break;
+		}
+
+		case "kill": {
+			const killId = rest[1];
+			if (!killId) {
+				console.error("Usage: 8gent agent kill <agent-id>");
+				process.exit(1);
+			}
+			const killed = bus.killAgent(killId);
+			if (isJson) {
+				jsonOut({ success: !!killed, agentId: killId });
+			} else {
+				console.log(killed ? `Killed: ${killed.persona.name}` : `Agent "${killId}" not found.`);
+			}
+			break;
+		}
+
+		case "message": {
+			const targetId = rest[1];
+			const msg = rest.slice(2).join(" ");
+			if (!targetId || !msg) {
+				console.error("Usage: 8gent agent message <agent-id> <message>");
+				process.exit(1);
+			}
+			bus.routeMessage(targetId, {
+				id: `cli-${Date.now()}`,
+				role: "user",
+				content: msg,
+				agentId: "cli",
+				timestamp: new Date(),
+			});
+			if (isJson) {
+				jsonOut({ success: true, agentId: targetId, message: msg });
+			} else {
+				console.log(`Message sent to ${targetId}`);
+			}
+			break;
+		}
+
+		case "auto": {
+			const setting = rest[1];
+			if (setting === "on") bus.setAutoSpawn(true);
+			else if (setting === "off") bus.setAutoSpawn(false);
+			else bus.setAutoSpawn(!bus.isAutoSpawnEnabled());
+
+			if (isJson) {
+				jsonOut({ autoSpawn: bus.isAutoSpawnEnabled() });
+			} else {
+				console.log(`Auto-spawn: ${bus.isAutoSpawnEnabled() ? "enabled" : "disabled"}`);
+			}
+			break;
+		}
+
+		case "status": {
+			const agents = bus.getAgents();
+			const pending = bus.getPendingSpawns();
+			if (isJson) {
+				jsonOut({
+					agentCount: agents.length,
+					pendingSpawns: pending.length,
+					autoSpawn: bus.isAutoSpawnEnabled(),
+					agents: agents.map((a) => ({
+						id: a.id,
+						persona: a.persona.id,
+						status: a.status,
+						task: a.task,
+					})),
+				});
+			} else {
+				console.log(`Agents: ${agents.length} active`);
+				console.log(`Pending spawns: ${pending.length}`);
+				console.log(`Auto-spawn: ${bus.isAutoSpawnEnabled() ? "on" : "off"}`);
+			}
+			break;
+		}
+
+		default:
+			console.error(`Unknown agent subcommand: ${sub}`);
+			console.log("Available: list, spawn, kill, message, auto, status");
+			process.exit(1);
+	}
+}
+
+// ── Session Command ───────────────────────────────────────────────
+
+async function sessionCommand(args: string[]) {
+	const { flags, rest } = parseFlags(args);
+	const isJson = !!flags.json;
+	const sub = rest[0] || "list";
+	const { SessionManager } = await import("../packages/eight/session-manager");
+	const mgr = new SessionManager();
+
+	switch (sub) {
+		case "list": {
+			const limit = Number.parseInt((flags.limit as string) || "10");
+			const sessions = mgr.list(limit);
+			if (isJson) {
+				jsonOut({ count: sessions.length, sessions });
+			} else {
+				if (sessions.length === 0) {
+					console.log("No sessions found. Use the TUI to create one.");
+				} else {
+					for (const s of sessions) {
+						const ago = Math.floor((Date.now() - new Date(s.lastActiveAt).getTime()) / 60000);
+						const timeStr = ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`;
+						const label = s.name || `Session ${s.createdAt.slice(0, 10)}`;
+						console.log(
+							`${s.id}  ${label.slice(0, 40).padEnd(40)}  ${s.model}  ${s.messageCount} msgs  ${timeStr}`,
+						);
+					}
+				}
+			}
+			break;
+		}
+
+		case "resume": {
+			const nameOrId = rest[1];
+			if (!nameOrId) {
+				console.error("Usage: 8gent session resume <name-or-id>");
+				process.exit(1);
+			}
+			// Resume launches TUI with session context
+			const tuiPath = resolveTuiEntry();
+			if (!tuiPath) {
+				console.error(
+					"TUI entry not found. Reinstall with `npm install -g @8gi-foundation/8gent-code` or run from a source checkout.",
+				);
+				process.exit(1);
+			}
+			await spawnTui(tuiPath, ["--resume", nameOrId]);
+			break;
+		}
+
+		case "compact":
+		case "checkpoint": {
+			if (isJson) {
+				jsonOut({
+					success: true,
+					message: `${sub} is a TUI operation - use /compact or /checkpoint in the TUI`,
+				});
+			} else {
+				console.log(`${sub} is a TUI operation. Launch the TUI and use /${sub}.`);
+			}
+			break;
+		}
+
+		default:
+			console.error(`Unknown session subcommand: ${sub}`);
+			console.log("Available: list, resume, compact, checkpoint");
+			process.exit(1);
+	}
+}
+
+// ── Export Command ────────────────────────────────────────────────
+
+async function exportCommand(args: string[]) {
+	const { flags, rest } = parseFlags(args);
+	const isJson = !!flags.json;
+	const isLast = !!flags.last;
+	const sessionId = rest[0];
+
+	if (!sessionId && !isLast) {
+		console.error("Usage: 8gent export <session-id> or 8gent export --last");
+		process.exit(1);
+	}
+
+	const { SessionSyncManager } = await import("../packages/eight/session-sync");
+	const sync = new SessionSyncManager(true);
+
+	// Resolve which session to export
+	let targetId = sessionId;
+	if (isLast) {
+		const convos = await sync.getRecentConversations(1);
+		if (!convos || convos.length === 0) {
+			console.error("No sessions found. Requires authentication for cloud sessions.");
+			process.exit(1);
+		}
+		targetId = (convos[0] as any).sessionId;
+	}
+
+	// Fetch conversation messages. The only stored transcript of a synced
+	// session is its checkpoint, which restoreFromRemote decodes.
+	const convo = await sync.restoreFromRemote(targetId);
+	if (!convo || convo.messages.length === 0) {
+		console.error(`Session ${targetId} not found or has no messages.`);
+		process.exit(1);
+	}
+
+	// Checkpoints store role and content only, so there is no per-message
+	// timestamp or session duration to carry into the export.
+	const exportedAt = new Date();
+	const { saveSessionExport } = await import("../packages/eight/session-export");
+	const filePath = await saveSessionExport(
+		convo.messages.map((m) => ({
+			role: m.role || "system",
+			content: m.content || "",
+			timestamp: exportedAt,
+		})),
+		{
+			sessionId: targetId,
+			model: convo.model || "unknown",
+			duration: "unknown",
+		},
+	);
+
+	if (isJson) {
+		jsonOut({ success: true, path: filePath, sessionId: targetId });
+	} else {
+		console.log(`Session exported to ${filePath}`);
+	}
+}
+
+// ── Preferences Command ───────────────────────────────────────────
+
+async function preferencesCommand(args: string[]) {
+	const { flags, rest } = parseFlags(args);
+	const isJson = !!flags.json;
+	const sub = rest[0] || "get";
+	const cwd = (flags.cwd as string) || process.cwd();
+
+	const { OnboardingManager } = await import("../packages/self-autonomy/onboarding");
+	const mgr = new OnboardingManager(cwd);
+
+	switch (sub) {
+		case "get": {
+			const user = mgr.getUser();
+			if (isJson) {
+				jsonOut(user);
+			} else {
+				console.log(`Name: ${user.identity.name || "Not set"}`);
+				console.log(`Role: ${user.identity.role || "Not set"}`);
+				console.log(`Style: ${user.identity.communicationStyle || "Not set"}`);
+				console.log(`Language: ${user.identity.language}`);
+				console.log(`Model: ${user.preferences.model.default || "auto"}`);
+				console.log(`Provider: ${user.preferences.model.provider || "ollama"}`);
+				console.log(`Voice: ${user.preferences.voice.enabled ? "on" : "off"}`);
+				console.log(`Autonomy: ${user.preferences.autonomy.askThreshold}`);
+				console.log(`Understanding: ${Math.round(user.understanding.confidenceScore * 100)}%`);
+				console.log(`Onboarded: ${user.onboardingComplete ? "yes" : "no"}`);
+			}
+			break;
+		}
+
+		case "set": {
+			const key = rest[1];
+			const value = rest.slice(2).join(" ");
+			if (!key || !value) {
+				console.error("Usage: 8gent preferences set <key> <value>");
+				console.log(
+					"\nKeys: name, role, style, language, model, provider, voice, autonomy, branch-prefix",
+				);
+				process.exit(1);
+			}
+
+			const user = mgr.getUser();
+			switch (key) {
+				case "name":
+					user.identity.name = value;
+					break;
+				case "role":
+					user.identity.role = value;
+					break;
+				case "style": {
+					// #3487: only a style from the fixed set is stored.
+					const { COMMUNICATION_STYLES, isCommunicationStyle } = await import(
+						"../packages/self-autonomy/communication-style"
+					);
+					if (!isCommunicationStyle(value)) {
+						console.error(`Unknown style. Use one of: ${COMMUNICATION_STYLES.join(", ")}`);
+						process.exit(1);
+					}
+					user.identity.communicationStyle = value;
+					break;
+				}
+				case "language":
+					user.identity.language = value;
+					break;
+				case "model":
+					user.preferences.model.default = value;
+					break;
+				case "provider":
+					user.preferences.model.provider = value as any;
+					break;
+				case "voice":
+					user.preferences.voice.enabled = value === "on" || value === "true";
+					break;
+				case "autonomy":
+					user.preferences.autonomy.askThreshold = value as any;
+					break;
+				case "branch-prefix":
+					user.preferences.git.branchPrefix = value;
+					break;
+				default:
+					console.error(`Unknown preference key: ${key}`);
+					process.exit(1);
+			}
+
+			// Save via updatePreferences
+			mgr.updatePreferences(user.preferences);
+			if (isJson) {
+				jsonOut({ success: true, key, value });
+			} else {
+				console.log(`Set ${key} = ${value}`);
+			}
+			break;
+		}
+
+		case "sync": {
+			const { PreferencesSyncManager } = await import("../packages/self-autonomy/preferences-sync");
+			const sync = new PreferencesSyncManager(cwd);
+			try {
+				const { initAuth } = await import("../packages/auth");
+				const authState = await initAuth();
+				if (authState.state !== "authenticated") {
+					console.error("Not authenticated. Run `8gent auth login` first.");
+					process.exit(2);
+				}
+				await sync.syncOnLogin(authState.user.clerkId);
+				if (isJson) {
+					jsonOut({ success: true, message: "Preferences synced from cloud" });
+				} else {
+					console.log("Preferences synced from cloud.");
+				}
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				if (isJson) jsonOut({ success: false, error: msg });
+				else console.error(`Sync failed: ${msg}`);
+				process.exit(1);
+			}
+			break;
+		}
+
+		case "reset": {
+			mgr.reset();
+			if (isJson) {
+				jsonOut({ success: true, message: "Preferences reset to defaults" });
+			} else {
+				console.log("Preferences reset to defaults.");
+			}
+			break;
+		}
+
+		default:
+			console.error(`Unknown preferences subcommand: ${sub}`);
+			console.log("Available: get, set, sync, reset");
+			process.exit(1);
+	}
+}
+
+// ── Memory Command ────────────────────────────────────────────────
+
+async function memoryCommand(args: string[]) {
+	const { flags, rest } = parseFlags(args);
+	const isJson = !!flags.json;
+	const sub = rest[0] || "stats";
+	const cwd = (flags.cwd as string) || process.cwd();
+
+	// Before getMemoryManager: serving must never create or open a store for writing (#4867).
+	if (sub === "serve") {
+		const { serveStdio } = await import("../packages/memory/serve.ts");
+		process.exit(await serveStdio());
+	}
+
+	const { getMemoryManager } = await import("../packages/memory");
+	const memory = getMemoryManager(cwd);
+
+	switch (sub) {
+		case "recall": {
+			const query = rest.slice(1).join(" ");
+			if (!query) {
+				console.error("Usage: 8gent memory recall <query>");
+				process.exit(1);
+			}
+			const results = await memory.recall(query, 10);
+			if (isJson) {
+				jsonOut({ query, count: results.length, results });
+			} else {
+				if (results.length === 0) {
+					console.log("No memories found.");
+				} else {
+					for (const r of results as any[]) {
+						const entry = r.entry || r.memory;
+						const fact = entry?.fact || entry?.value || entry?.content || JSON.stringify(entry);
+						console.log(`[${(r.score || 0).toFixed(2)}] ${fact.slice(0, 120)}`);
+					}
+				}
+			}
+			break;
+		}
+
+		case "remember": {
+			const fact = rest.slice(1).join(" ");
+			if (!fact) {
+				console.error("Usage: 8gent memory remember <fact>");
+				process.exit(1);
+			}
+			const id = await memory.remember(fact, "project", { source: "user:cli" });
+			if (isJson) {
+				jsonOut({ success: true, id, fact });
+			} else {
+				console.log(`Remembered: ${fact.slice(0, 80)}${fact.length > 80 ? "..." : ""}`);
+				console.log(`ID: ${id}`);
+			}
+			break;
+		}
+
+		case "forget": {
+			const id = rest[1];
+			if (!id) {
+				console.error("Usage: 8gent memory forget <id>");
+				process.exit(1);
+			}
+			const success = await memory.forget(id);
+			if (isJson) {
+				jsonOut({ success, id });
+			} else {
+				console.log(success ? `Forgot: ${id}` : `Memory "${id}" not found.`);
+			}
+			break;
+		}
+
+		case "stats": {
+			try {
+				// Count the stores themselves. A context window is a ranked,
+				// token-capped selection, so its stats are not a total.
+				const counts = await memory.getStats();
+				const byType: Record<string, number> = {};
+				for (const scope of [counts.v2?.project, counts.v2?.global]) {
+					for (const [type, n] of Object.entries(scope?.byType ?? {})) {
+						byType[type] = (byType[type] ?? 0) + n;
+					}
+				}
+				const stats = { totalMemories: counts.project + counts.global, byType };
+				if (isJson) {
+					jsonOut({ stats });
+				} else {
+					console.log(`Total memories: ${stats.totalMemories}`);
+					console.log(`By type: ${JSON.stringify(stats.byType)}`);
+				}
+			} catch {
+				if (isJson) {
+					jsonOut({ stats: { totalMemories: 0, byType: {} } });
+				} else {
+					console.log("Memory system not initialized or empty.");
+				}
+			}
+			break;
+		}
+
+		default:
+			console.error(`Unknown memory subcommand: ${sub}`);
+			console.log("Available: recall, remember, forget, stats, serve");
+			process.exit(1);
+	}
+}
+
+// ── Onboard Command (non-interactive auto-detect) ─────────────────
+
+async function onboardCommand(args: string[]) {
+	const { flags } = parseFlags(args);
+	const isJson = !!flags.json;
+	const cwd = (flags.cwd as string) || process.cwd();
+
+	const { OnboardingManager } = await import("../packages/self-autonomy/onboarding");
+
+	console.error("Auto-detecting environment...");
+	const detected = await OnboardingManager.autoDetect();
+
+	const mgr = new OnboardingManager(cwd);
+	mgr.applyAutoDetected(detected);
+
+	// If --yes, auto-complete onboarding with defaults
+	if (flags.yes) {
+		// getUser() is a shallow copy: a top-level flag set on it never reaches
+		// disk (#3329). identity is a shared reference, so this default does.
+		const user = mgr.getUser();
+		if (!user.identity.communicationStyle) {
+			user.identity.communicationStyle = "concise";
+		}
+		// skipAll() sets onboardingComplete and confidence, then writes user.json.
+		mgr.skipAll();
+	}
+
+	if (isJson) {
+		jsonOut({
+			detected,
+			user: mgr.getUser(),
+			onboardingComplete: mgr.getUser().onboardingComplete,
+		});
+	} else {
+		console.log(`Name: ${detected.name || "not detected"}`);
+		console.log(`Email: ${detected.email || "not detected"}`);
+		console.log(`GitHub: ${detected.githubUsername || "not detected"}`);
+		console.log(`Provider: ${detected.preferredProvider || "not detected"}`);
+		console.log(
+			`Ollama models: ${detected.ollamaModels.length > 0 ? detected.ollamaModels.join(", ") : "none"}`,
+		);
+		console.log("\nApplied to .8gent/user.json");
+		if (!mgr.getUser().onboardingComplete) {
+			console.log("Run with --yes to auto-complete onboarding with defaults.");
+		}
+	}
+}
+
+// ── Status Command ────────────────────────────────────────────────
+
+async function statusCommand(args: string[]) {
+	const { flags } = parseFlags(args);
+	const isJson = !!flags.json;
+	const cwd = (flags.cwd as string) || process.cwd();
+
+	const status: Record<string, unknown> = {
+		version: VERSION,
+		cwd,
+		platform: process.platform,
+		runtime: "bun",
+	};
+
+	// Check .8gent config
+	try {
+		const configPath = path.join(cwd, ".8gent", "config.json");
+		if (fs.existsSync(configPath)) {
+			status.config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+		}
+	} catch {}
+
+	// Check user config
+	try {
+		const { OnboardingManager } = await import("../packages/self-autonomy/onboarding");
+		const mgr = new OnboardingManager(cwd);
+		const user = mgr.getUser();
+		status.user = {
+			name: user.identity.name,
+			onboarded: user.onboardingComplete,
+			model: user.preferences.model.default,
+			provider: user.preferences.model.provider,
+			style: user.identity.communicationStyle,
+		};
+	} catch {}
+
+	// Check auth
+	try {
+		const { initAuth } = await import("../packages/auth");
+		const authState = await initAuth();
+		status.auth =
+			authState.state === "authenticated"
+				? {
+						state: "authenticated",
+						user: authState.user.githubUsername,
+						plan: authState.user.plan,
+					}
+				: { state: "anonymous" };
+	} catch {
+		status.auth = { state: "unknown" };
+	}
+
+	// Check Ollama
+	try {
+		const { exec } = await import("node:child_process");
+		const { promisify } = await import("node:util");
+		const execAsync = promisify(exec);
+		const { stdout } = await execAsync("ollama list 2>/dev/null");
+		const models = stdout
+			.split("\n")
+			.slice(1)
+			.map((l) => l.split(/\s+/)[0])
+			.filter(Boolean);
+		status.ollama = { available: true, models, count: models.length };
+	} catch {
+		status.ollama = { available: false, models: [], count: 0 };
+	}
+
+	// Check orchestration
+	try {
+		const { getOrchestratorBus } = await import("../packages/orchestration/orchestrator-bus");
+		const bus = getOrchestratorBus();
+		status.agents = {
+			count: bus.getAgentCount(),
+			autoSpawn: bus.isAutoSpawnEnabled(),
+		};
+	} catch {
+		status.agents = { count: 0, autoSpawn: false };
+	}
+
+	// Check kernel
+	try {
+		const { KernelManager } = await import("../packages/kernel/manager");
+		const km = KernelManager.fromProjectConfig(cwd);
+		status.kernel = {
+			enabled: km.isEnabled,
+			pairCount: km.getTrainingPairCount(),
+		};
+	} catch {
+		status.kernel = { enabled: false };
+	}
+
+	// Git status
+	try {
+		const { exec } = await import("node:child_process");
+		const { promisify } = await import("node:util");
+		const execAsync = promisify(exec);
+		const { stdout: branch } = await execAsync("git rev-parse --abbrev-ref HEAD", { cwd });
+		const { stdout: hash } = await execAsync("git rev-parse --short HEAD", {
+			cwd,
+		});
+		status.git = { branch: branch.trim(), commit: hash.trim() };
+	} catch {
+		status.git = { branch: null, commit: null };
+	}
+
+	if (isJson) {
+		jsonOut(status);
+	} else {
+		console.log(`8gent Code v${VERSION}`);
+		console.log("─────────────────────────");
+		for (const [key, val] of Object.entries(status)) {
+			if (key === "version") continue;
+			if (typeof val === "object" && val !== null) {
+				console.log(`${key}:`);
+				for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+					const display = Array.isArray(v) ? `[${(v as any[]).length}]` : String(v);
+					console.log(`  ${k}: ${display}`);
+				}
+			} else {
+				console.log(`${key}: ${val}`);
+			}
+		}
+	}
+}
+
+function getSymbolIcon(kind: string): string {
+	const icons: Record<string, string> = {
+		function: "ƒ",
+		method: "μ",
+		class: "◆",
+		interface: "◇",
+		type: "τ",
+		constant: "π",
+		variable: "ν",
+		module: "□",
+	};
+	return icons[kind] || "·";
+}
+
+async function reviewCommand(args: string[]) {
+	const { flags } = parseFlags(args);
+	const isJson = !!flags.json;
+	const prNumber = flags.pr as string | undefined;
+	const diffFile = flags.diff as string | undefined;
+
+	const { reviewDiff } = await import("../packages/ci/review");
+	const { execSync } = await import("node:child_process");
+
+	let diff: string;
+	try {
+		if (diffFile) {
+			diff = fs.readFileSync(diffFile, "utf-8");
+		} else if (prNumber) {
+			diff = execSync(`gh pr diff ${prNumber}`, { encoding: "utf-8" });
+		} else {
+			diff = execSync("git diff HEAD", { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+			if (!diff.trim())
+				diff = execSync("git diff --cached", {
+					encoding: "utf-8",
+					stdio: ["ignore", "pipe", "pipe"],
+				});
+		}
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		if (isJson) {
+			jsonOut({ success: false, error: msg });
+		} else {
+			console.error(`Failed to get diff: ${msg}`);
+		}
+		process.exit(1);
+	}
+
+	if (!diff.trim()) {
+		if (isJson) {
+			jsonOut({ success: true, review: "No changes to review." });
+		} else {
+			console.log("No changes to review.");
+		}
+		return;
+	}
+
+	const review = await reviewDiff(diff);
+	if (isJson) {
+		jsonOut({ success: true, review, pr: prNumber || null });
+	} else {
+		console.log(review);
+	}
+}
+
+async function publishCommand(args: string[]) {
+	const { flags, rest } = parseFlags(args);
+	const isJson = !!flags.json;
+
+	const appDir = rest[0];
+	if (!appDir) {
+		const msg = "publish requires an app directory: 8gent publish <app-dir>";
+		if (isJson) jsonOut({ success: false, error: msg });
+		else console.error(msg);
+		process.exit(1);
+	}
+
+	const { runPublish } = await import("../packages/marketplace/index.ts");
+
+	const maxBytes =
+		typeof flags["max-size"] === "string"
+			? Math.floor(Number(flags["max-size"]) * 1024 * 1024)
+			: undefined;
+	if (maxBytes !== undefined && (Number.isNaN(maxBytes) || maxBytes <= 0)) {
+		const msg = `--max-size must be a positive number of megabytes, got ${flags["max-size"]}`;
+		if (isJson) jsonOut({ success: false, error: msg });
+		else console.error(msg);
+		process.exit(1);
+	}
+
+	const result = await runPublish({
+		appDir: path.resolve(appDir),
+		outPath: typeof flags.out === "string" ? path.resolve(flags.out) : undefined,
+		maxBytes,
+		allowDangerous: !!flags["allow-dangerous"],
+		strictLint: !!flags["strict-lint"],
+	});
+
+	if (isJson) {
+		jsonOut({
+			success: result.ok,
+			exitCode: result.exitCode,
+			archive: result.archivePath ?? null,
+			manifest: result.manifest ?? null,
+			checks: result.checks,
+			errors: result.errors,
+		});
+	} else {
+		for (const c of result.checks) {
+			const tag = c.level === "ok" ? "ok " : c.level === "warn" ? "warn" : "FAIL";
+			console.log(`[${tag}] ${c.name}: ${c.message}`);
+		}
+		if (result.ok && result.archivePath) {
+			console.log(`\nArchive: ${result.archivePath}`);
+		}
+		if (result.errors.length > 0) {
+			console.error("\nErrors:");
+			for (const e of result.errors) console.error(`  - ${e}`);
+		}
+	}
+
+	process.exit(result.exitCode);
+}
+
+/** `8gent model-pin [model] [--provider <p>]`: accept the live identity of a pinned local model (#4609). */
+async function modelPinCommand(args: string[]) {
+	const { readLedger, repinModel } = await import("../packages/local-model-server/model-ledger.ts");
+	const pi = args.indexOf("--provider");
+	const provider = pi >= 0 ? args[pi + 1] : undefined;
+	const model = args.find((a, i) => !a.startsWith("--") && i !== pi + 1);
+	const pins = Object.values(readLedger().pins).filter(
+		(p) => !p.cloud && (!model || p.model === model) && (!provider || p.provider === provider),
+	);
+	if (pins.length === 0) {
+		console.log(
+			model
+				? `No pinned local model named ${model}.`
+				: "No pinned local models yet. Start a session first.",
+		);
+		return;
+	}
+	for (const p of pins)
+		for (const l of (await repinModel(p.provider, p.model)).lines) console.log(l);
+}
+
+/**
+ * `8gent stack` (#4779): what the next turn would send, per source, sized from
+ * the same builders a turn uses. Provider and model are the saved choice, read
+ * from disk: no network, no model call.
+ */
+async function stackCommand(): Promise<void> {
+	const { Agent, formatStackReport } = await import("../packages/eight/agent.ts");
+	const { getProviderManager } = await import("../packages/providers/index.ts");
+	const pm = getProviderManager();
+	const active = pm.getActiveProvider();
+	// Agent setup logs to stdout; keep stdout for the report.
+	const log = console.log;
+	console.log = (...a: unknown[]) => process.stderr.write(`${a.map(String).join(" ")}\n`);
+	let agent: InstanceType<typeof Agent> | null = null;
+	let text = "";
+	try {
+		agent = new Agent({
+			model: pm.getActiveModel(),
+			runtime: active.name as "ollama",
+			baseUrl: active.declared ? active.baseUrl : undefined,
+			workingDirectory: process.cwd(),
+			// A report: no hooks, no session file, no Telegram, no probes.
+			inspectOnly: true,
+		});
+		text = formatStackReport(await agent.stackReport());
+	} finally {
+		console.log = log;
+		await agent?.cleanup().catch(() => {});
+	}
+	console.log(text);
+}
+
+async function doctorCommand() {
+	const { execSync } = require("node:child_process");
+	const green = (s: string) => `\x1b[32m\u2713 ${s}\x1b[0m`;
+	const red = (s: string) => `\x1b[31m\u2717 ${s}\x1b[0m`;
+	const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
+	console.log(`\n8gent Doctor v${VERSION}\n`);
+	let issues = 0;
+	try {
+		const { resolveOllamaBaseUrl } = await import("../packages/local-model-server/ollama-host.ts");
+		const res = await fetch(`${resolveOllamaBaseUrl()}/api/tags`, {
+			signal: AbortSignal.timeout(3000),
+		});
+		const data = (await res.json()) as any;
+		const models = (data.models || []).map((m: any) => m.name);
+		console.log(green(`Ollama running - ${models.length} models available`));
+		models.forEach((m: string) => console.log(dim(`  ${m}`)));
+	} catch {
+		console.log(red("Ollama not reachable"));
+		issues++;
+	}
+	// Every hosted provider with a key, and whether it answered (#4720). Keys
+	// reach process.env from keys.env at start-up, so this sees what a run sees.
+	{
+		const { providerDoctorRows } = await import("../packages/eight/auto-provider.ts");
+		const rows = await providerDoctorRows();
+		if (rows.length === 0)
+			console.log(dim("  No hosted provider has a key (8gent keys set <provider>)"));
+		for (const r of rows) {
+			const text = `${r.label}: key set, ${r.detail}`;
+			if (r.state === "answered") console.log(green(text));
+			else {
+				console.log(red(text));
+				issues++;
+			}
+		}
+	}
+	for (const t of ["mpv", "yt-dlp", "rg"]) {
+		try {
+			execSync(`which ${t}`, { stdio: "ignore" });
+			console.log(green(`${t} installed`));
+		} catch {
+			console.log(red(`${t} not found`));
+			issues++;
+		}
+	}
+	// Paths mirror the stores that write them (#3328): packages/memory/index.ts,
+	// packages/self-autonomy/onboarding.ts, packages/settings/store.ts. These checks
+	// only read; they never create these files. (The NemoClaw check below still
+	// writes ~/.8gent/policy-checksum on first run, tracked in #3344.)
+	const { resolveHome } = await import("../packages/core/home.ts");
+	const eightDir = path.join(resolveHome(), ".8gent");
+	const dbPath = path.join(process.env.EIGHT_DATA_DIR || eightDir, "memory", "memory.db");
+	console.log(
+		fs.existsSync(dbPath)
+			? green(`Memory DB (${(fs.statSync(dbPath).size / 1024).toFixed(0)} KB)`)
+			: dim("  No memory DB yet"),
+	);
+	const userPath = path.join(eightDir, "user.json");
+	if (fs.existsSync(userPath)) {
+		try {
+			const u = JSON.parse(fs.readFileSync(userPath, "utf-8"));
+			console.log(
+				green(`User profile (onboarding ${u.onboardingComplete ? "complete" : "incomplete"})`),
+			);
+		} catch {
+			console.log(red("User profile invalid JSON (~/.8gent/user.json)"));
+			issues++;
+		}
+	} else console.log(dim("  No user profile yet (run: 8gent onboard)"));
+	const cfgPath = path.join(eightDir, "settings.json");
+	if (fs.existsSync(cfgPath)) {
+		try {
+			JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+			console.log(green("Settings valid"));
+		} catch {
+			console.log(red("Settings invalid JSON (~/.8gent/settings.json)"));
+			issues++;
+		}
+	} else console.log(dim("  No settings (using defaults)"));
+	try {
+		const { verifyPolicies } = await import("../packages/permissions/policy-engine.ts");
+		const r = verifyPolicies();
+		console.log(r.valid ? green("NemoClaw verified") : red(`NemoClaw: ${r.reason}`));
+		if (!r.valid) issues++;
+	} catch {
+		console.log(dim("  NemoClaw skip"));
+	}
+	const mcpPath = path.join(process.env.HOME || "", ".8gent", "mcp.json");
+	if (fs.existsSync(mcpPath)) {
+		try {
+			const m = JSON.parse(fs.readFileSync(mcpPath, "utf-8"));
+			console.log(green(`MCP: ${Object.keys(m.servers || m.mcpServers || {}).length} servers`));
+		} catch {
+			console.log(red("MCP config invalid"));
+			issues++;
+		}
+	} else console.log(dim("  No MCP servers (~/.8gent/mcp.json)"));
+	{
+		const { modelLedgerDoctorLines } = await import(
+			"../packages/local-model-server/model-ledger.ts"
+		);
+		const pinned = modelLedgerDoctorLines();
+		if (pinned.length > 0) console.log(`\n${pinned.join("\n")}`);
+	}
+	{
+		const { readBootTraceTail, bootTracePath } = await import("../apps/tui/src/lib/boot-trace.ts");
+		console.log("\nBoot trace");
+		const tail = readBootTraceTail(30);
+		if (tail.length === 0) console.log(dim(`  none yet (${bootTracePath()})`));
+		else for (const l of tail) console.log(dim(`  ${l}`));
+	}
+	console.log(
+		issues === 0
+			? `\n${green("All checks passed.")}\n`
+			: `\n\x1b[33m${issues} issue(s) found.\x1b[0m\n`,
+	);
+}
+
+main().catch(async (error) => {
+	// A refusal first seen at Agent construction (the backstop in
+	// packages/eight/agent.ts) exits like the entrypoint refusal: 77, clean message.
+	const { AGENT_DEPTH_EXIT_CODE, AgentDepthError } = await import(
+		"../packages/orchestration/index.ts"
+	).catch(() => ({ AGENT_DEPTH_EXIT_CODE: 1, AgentDepthError: null }));
+	if (AgentDepthError && error instanceof AgentDepthError) {
+		console.error(error.message);
+		process.exit(AGENT_DEPTH_EXIT_CODE);
+	}
+	console.error("Error:", error.message);
+	process.exit(1);
+});

@@ -1,0 +1,22 @@
+{
+	"name": "@8gent/8dk",
+	"version": "0.1.0",
+	"private": true,
+	"description": "8DK, the 8gent Device Kit: typed device capabilities, consent-gated pairing, permission-gated agent tools. #3362.",
+	"main": "index.ts",
+	"types": "index.ts",
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./index.ts",
+			"types": "./index.ts"
+		}
+	},
+	"scripts": {
+		"test": "bun test",
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"typescript": "^5.3.0"
+	}
+}

@@ -1,0 +1,1 @@
+{ "name": "ok-parent", "version": "1.0.0", "dependencies": { "bad-transitive": "1" } }

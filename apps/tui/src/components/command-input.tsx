@@ -1,0 +1,1373 @@
+/**
+ * 8gent Code - Animated Command Input Component
+ *
+ * Features:
+ * - Animated spinner with status text
+ * - A still prompt chevron (an idle prompt never redraws the screen)
+ * - Step indicator for multi-step operations
+ * - Ghost text suggestions (Tab to accept)
+ * - Slash command support (/kanban, /predict, /avenues)
+ */
+
+import { Box, Text, useInput, useStdout } from "ink";
+import TextInput from "ink-text-input";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+	type ContextSuggestion,
+	getSuggestionSourceLabel,
+	useGhostSuggestion,
+} from "../hooks/use-ghost-suggestion.js";
+import { type ClickSpan, useClickSpans, usePressedIn } from "../lib/click-targets.js";
+import { applyMention, listProjectFiles, mentionAtEnd, rankFiles } from "../lib/file-mention.js";
+import { GO_HELP_LINES, type GoalClient, parseGoCommand } from "../lib/goal-client.js";
+import { cellWidth } from "../lib/header-layout.js";
+import { setWheelInputEmpty } from "../lib/mouse-input.js";
+import { type SlashCommand, isCoreSlashCommand } from "../lib/slash-commands.js";
+import {
+	type SlashRegistryEntry,
+	getBuiltInSlashCommands,
+	getBuiltInSlashRegistry,
+	getSlashRegistry,
+	isBareSlash,
+	nearestNames,
+	resolveSlashInput,
+	slashCollisionNotice,
+	toGhostSuggestions,
+	unknownSlashAnswer,
+} from "../lib/slash-registry.js";
+import { t } from "../theme.js";
+import { AnimatedSpinner, StatusIndicator, StepIndicator } from "./animated-spinner.js";
+import { BufferedTextInput } from "./buffered-text-input.js";
+import { Blink } from "./fade-transition.js";
+import { FigureEight } from "./figure-eight-spinner.js";
+import { AppText, Label, MutedText } from "./primitives/AppText.js";
+import { Inline } from "./primitives/Inline.js";
+import { ShortcutHint } from "./primitives/ShortcutHint.js";
+import { WaveProgress } from "./progress-bar.js";
+
+// Stable empty-array defaults so prop = EMPTY_X doesn't allocate per render.
+const EMPTY_RECENT: string[] = [];
+const EMPTY_SUGGESTIONS: string[] = [];
+
+interface CommandInputProps {
+	onSubmit: (input: string) => void;
+	isProcessing: boolean;
+	/** Idle placeholder override: what a waiting question expects ("Your name"). */
+	placeholder?: string;
+	processingStage?: "planning" | "toolshed" | "executing" | "complete";
+	showAnimations?: boolean;
+	// Real-time agent progress
+	activeTool?: string | null;
+	stepCount?: number;
+	toolCount?: number;
+	totalTokens?: number;
+	// Ghost suggestion options
+	isGitRepo?: boolean;
+	currentBranch?: string | null;
+	planNextStep?: string | null;
+	recentCommands?: string[];
+	// Slash command handlers
+	onSlashCommand?: (command: SlashCommand, args: string[]) => void;
+	/** Optional /goal client. When present, /goal and /subgoal are handled in
+	 *  this component (daemon RPC dispatched directly) instead of bubbling
+	 *  up to onSlashCommand. Keeps the goal protocol localized to one file. */
+	goalClient?: GoalClient | null;
+	/** Same readiness answer the chat uses. /goal start refuses before turn 1 unless it says ready. */
+	goalReadiness?: () => GoalReadiness | null;
+	/** Current session id, used for goal.start. Defaults to "tui" if absent. */
+	sessionId?: string;
+	/** Hook for surfacing system-line messages without coupling to app.tsx. */
+	onSystemMessage?: (line: string) => void;
+	/** Text injected from voice transcription — appended to current input for review */
+	injectedText?: string | null;
+	/** Whether the input is focused (false when non-chat views are active) */
+	focused?: boolean;
+	/**
+	 * Another surface has the keyboard (the DJ deck's keys, #3188): the text
+	 * field takes no keys at all, so a deck key never types into the chat.
+	 */
+	typingPaused?: boolean;
+	/** Rewrite the input on each change (e.g. consume a lone pasted file path into an attachment) */
+	transformInputValue?: (value: string) => string;
+	/** Show nothing of what is typed, only the placeholder (a key being pasted). */
+	maskInput?: boolean;
+	/** When true, Enter with an empty line still calls onSubmit (for empty send) */
+	allowEmptySubmit?: boolean;
+	/**
+	 * Enter on an empty line, when nothing is sent: the folded trace's status row
+	 * opens and folds on it (#5170).
+	 */
+	onEmptyEnter?: () => void;
+	/** An approval card is pending: the status line says the turn waits on the
+	 *  person and stops spinning, and the placeholder points at the card (#3118). */
+	approvalPending?: boolean;
+	/** Project folder the `@` file list comes from. Defaults to process.cwd(). */
+	cwd?: string;
+	/**
+	 * Alt+Enter or Ctrl+Q: the text goes here instead of onSubmit, to be queued
+	 * for after the running task (#3918 D1). Without it both keys send as Enter.
+	 */
+	onFollowUp?: (input: string) => void;
+	/**
+	 * Text handed back to the input (Esc returned queued messages). A new `seq`
+	 * applies it once; it goes in front of whatever is being typed.
+	 */
+	restoreInput?: { text: string; seq: number } | null;
+	/** Told when the / menu opens or closes (a short terminal makes room for it). */
+	onSlashMenuChange?: (open: boolean) => void;
+}
+
+/** Below this many columns the busy placeholder drops to its short form. */
+export const BUSY_PLACEHOLDER_NARROW_COLUMNS = 60;
+/** The input placeholder while a task runs: Enter steers, the other keys queue. */
+export const STEER_PLACEHOLDER = "Enter steers. Alt+Enter queues a follow-up for after this task.";
+/** The same on a phone-width terminal. */
+export const STEER_PLACEHOLDER_NARROW = "Enter steers. Alt+Enter queues.";
+/** The busy placeholder that fits `columns`. */
+export function busyPlaceholder(columns: number): string {
+	return columns < BUSY_PLACEHOLDER_NARROW_COLUMNS ? STEER_PLACEHOLDER_NARROW : STEER_PLACEHOLDER;
+}
+/** The idle placeholder. */
+export const IDLE_PLACEHOLDER = "Type a command or ask a question...";
+/** The same on a phone-width terminal: one row, and it still says "/" opens commands. */
+export const IDLE_PLACEHOLDER_NARROW = "Ask, or type / for commands";
+/** The idle placeholder that fits `columns`. */
+export function idlePlaceholder(columns: number): string {
+	return columns < BUSY_PLACEHOLDER_NARROW_COLUMNS ? IDLE_PLACEHOLDER_NARROW : IDLE_PLACEHOLDER;
+}
+/** Said when Ctrl+Q or Alt+Enter is pressed with nothing typed. */
+export const NOTHING_TO_QUEUE = "Nothing to queue: type a message first.";
+
+/** The status line while an approval card waits on the person (#3118). */
+export const WAITING_LINE = "Waiting for you. Nothing runs until you answer.";
+/** The input placeholder then: the card owns Y, N, E and S. */
+export const WAITING_PLACEHOLDER = "Answer the card above first";
+
+// Processing stages for multi-step indicator
+const _PROCESSING_STAGES = ["Plan", "Tools", "Execute"];
+
+function buildBuiltInSlashGhostSuggestions(): ContextSuggestion[] {
+	const out: ContextSuggestion[] = [];
+	for (const cmd of getBuiltInSlashCommands()) {
+		out.push({ trigger: `/${cmd.name}`, suggestion: "", confidence: 0.87 });
+		for (const a of cmd.aliases) {
+			if (a.length < 1) continue;
+			out.push({ trigger: `/${a}`, suggestion: "", confidence: 0.83 });
+		}
+	}
+	return out.sort((a, b) => b.trigger.length - a.trigger.length);
+}
+
+/**
+ * Ink emits one input event per stdin read. When the event loop is busy
+ * (a heavy TUI re-render) the typed text and the Enter byte land in the
+ * same read, e.g. "hello\r". Ink only flags an event as Enter when it is
+ * exactly "\r", so the text input inserts the CR into the value and the
+ * message is not sent until a second Enter. A value that now ends in a
+ * line break therefore means the user pressed Enter: strip the break and
+ * submit. Line breaks inside the value (a multi-line paste with no
+ * trailing newline) are left alone.
+ */
+export function splitTrailingEnter(value: string): { text: string; submit: boolean } {
+	const trailing = /[\r\n]+$/;
+	if (!trailing.test(value)) return { text: value, submit: false };
+	return { text: value.replace(trailing, ""), submit: true };
+}
+
+// ============================================
+// Main Command Input
+// ============================================
+
+// Module-level so remounts of the input (tab switches) do not repeat the line.
+let collisionLineShown = false;
+
+/** Rows the draft would take at this width (a long paste otherwise pushes the whole screen away). */
+export function draftRows(value: string, width: number): number {
+	const w = Math.max(8, width);
+	return value.split("\n").reduce((n, line) => n + Math.max(1, Math.ceil(line.length / w)), 0);
+}
+
+/** Above this many rows the draft folds to a summary plus its first line. */
+export const DRAFT_FOLD_ROWS = 8;
+
+export function draftSummary(value: string, narrow: boolean): string {
+	const lines = value.split("\n").length;
+	const what = lines > 1 ? `${lines} lines` : `${value.length} chars`;
+	return narrow ? `${what} - Enter sends` : `${what} - Enter sends, Backspace trims the end`;
+}
+
+export function CommandInput({
+	onSubmit,
+	onEmptyEnter,
+	isProcessing,
+	placeholder,
+	maskInput = false,
+	processingStage = "planning",
+	showAnimations = true,
+	activeTool = null,
+	stepCount = 0,
+	toolCount = 0,
+	totalTokens = 0,
+	isGitRepo = false,
+	currentBranch = null,
+	planNextStep = null,
+	recentCommands = EMPTY_RECENT,
+	onSlashCommand,
+	goalClient = null,
+	goalReadiness,
+	sessionId = "tui",
+	onSystemMessage,
+	injectedText = null,
+	focused = true,
+	typingPaused = false,
+	transformInputValue,
+	allowEmptySubmit = false,
+	approvalPending = false,
+	cwd = process.cwd(),
+	onFollowUp,
+	restoreInput = null,
+	onSlashMenuChange,
+	// Multiple useState calls model independent slices with different update sources; a reducer would conflate orthogonal events.
+	// react-doctor-disable-next-line react-doctor/prefer-useReducer
+}: CommandInputProps) {
+	const [value, setValue] = useState("");
+	// History navigation: -1 = at draft (bottom), 0..N-1 = index into recentCommands
+	const [historyIndex, setHistoryIndex] = useState(-1);
+	const draftRef = useRef("");
+	// The mouse layer reads a burst of arrows as the wheel only while this is empty (#5094).
+	useEffect(() => {
+		setWheelInputEmpty(value === "");
+	}, [value]);
+	const [showSlashHelp, setShowSlashHelp] = useState(false);
+	// Built-ins are known at once: a command typed before the skill scan lands, or
+	// after it fails, must still run and never reach the model as chat.
+	const [initialRegistry] = useState(getBuiltInSlashRegistry);
+	const [slashRegistryEntries, setSlashRegistryEntries] = useState<SlashRegistryEntry[]>(
+		initialRegistry.entries,
+	);
+	const [slashByToken, setSlashByToken] = useState<Map<string, SlashRegistryEntry>>(
+		initialRegistry.byToken,
+	);
+
+	const builtInSlashGhosts = useMemo(() => buildBuiltInSlashGhostSuggestions(), []);
+	const extraSlashContext = useMemo(
+		() => [
+			...builtInSlashGhosts,
+			...toGhostSuggestions({
+				entries: slashRegistryEntries,
+				byToken: slashByToken,
+				collisions: [],
+			}),
+		],
+		[builtInSlashGhosts, slashRegistryEntries, slashByToken],
+	);
+
+	// Text Esc handed back (queued messages the stopped task never took).
+	const lastRestoreSeq = useRef<number | null>(null);
+	useEffect(() => {
+		if (!restoreInput || restoreInput.seq === lastRestoreSeq.current) return;
+		lastRestoreSeq.current = restoreInput.seq;
+		const back = restoreInput.text;
+		if (!back) return;
+		setValue((prev) => (prev ? `${back}\n${prev}` : back));
+	}, [restoreInput]);
+
+	// Inject text from voice transcription (appends to current input)
+	const lastInjectedRef = useRef<string | null>(null);
+	useEffect(() => {
+		if (injectedText && injectedText !== lastInjectedRef.current) {
+			lastInjectedRef.current = injectedText;
+			setValue((prev) => (prev ? `${prev} ${injectedText}` : injectedText));
+		}
+	}, [injectedText]);
+
+	// Cascading set-state is intentional sequencing across distinct event classes; consolidating to a reducer would lose per-event identity.
+	// react-doctor-disable-next-line react-doctor/no-cascading-set-state
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			try {
+				const registry = await getSlashRegistry();
+				if (cancelled) return;
+				setSlashRegistryEntries(registry.entries);
+				setSlashByToken(registry.byToken);
+				// Once per process: name any skill trigger that lost to a
+				// builtin so the user learns why /voice is not their skill (#2932).
+				const collisionLine = slashCollisionNotice(registry.collisions);
+				if (collisionLine && !collisionLineShown) {
+					collisionLineShown = true;
+					onSystemMessage?.(collisionLine);
+				}
+			} catch {
+				if (!cancelled) {
+					setSlashRegistryEntries(initialRegistry.entries);
+					setSlashByToken(initialRegistry.byToken);
+				}
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	// `@` file mention (#3918 D2): the files matching the @token at the end
+	// of the input. Each time a mention opens, the list reloads in the
+	// background from the project folder (the old list shows meanwhile), so
+	// new files appear and typing never waits on git.
+	// A masked value (a key) never opens the file list: its text stays unread.
+	const mention = useMemo(() => (maskInput ? null : mentionAtEnd(value)), [value, maskInput]);
+	const mentionActive = mention !== null;
+	const [projectFiles, setProjectFiles] = useState<{ cwd: string; files: string[] } | null>(null);
+	const [mentionIndex, setMentionIndex] = useState(0);
+	useEffect(() => {
+		if (!mentionActive) return;
+		let cancelled = false;
+		void listProjectFiles(cwd).then((files) => {
+			if (!cancelled) setProjectFiles({ cwd, files });
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [mentionActive, cwd]);
+	const mentionMatches = useMemo(
+		() =>
+			mention && projectFiles ? rankFiles(projectFiles.files, mention.query, MENTION_ROWS) : [],
+		[mention, projectFiles],
+	);
+	useEffect(() => setMentionIndex(0), [mention?.query]);
+	const mentionOpen = mention !== null && mentionMatches.length > 0;
+
+	// Ghost suggestion hook
+	const {
+		suggestion,
+		accept,
+		dismiss,
+		isVisible: ghostShown,
+	} = useGhostSuggestion(value, {
+		isGitRepo,
+		currentBranch,
+		planNextStep,
+		recentCommands,
+		extraContextSuggestions: extraSlashContext,
+	});
+	// Never offer a shell line: Tab would complete a command nobody typed
+	// (#3918 D5, 8SO).
+	const isVisible = !maskInput && ghostShown && !isShellSuggestion(value, suggestion?.text);
+
+	// Slash palette: show while typing the command token (no space yet) so long names like /billiondollarboardroom work
+	useEffect(() => {
+		const t = value.trimStart();
+		setShowSlashHelp(!maskInput && t.startsWith("/") && !t.slice(1).includes(" "));
+	}, [value, maskInput]);
+
+	// The menu's rows, how many fit this terminal, and the picked one.
+	// Up/Down scroll through every row; Tab puts the picked command in.
+	const { stdout } = useStdout();
+	const terminalRows = stdout?.rows ?? 24;
+	const cols = stdout?.columns ?? 80;
+	const folded = !isProcessing && !maskInput && draftRows(value, cols - 4) > DRAFT_FOLD_ROWS;
+	const slashVisible = slashMenuVisibleRows(terminalRows);
+	const slashFilter = value.trimStart().slice(1);
+	const slashRows = useMemo(
+		() => (showSlashHelp ? slashMenuRows(slashFilter, slashRegistryEntries) : []),
+		[showSlashHelp, slashFilter, slashRegistryEntries],
+	);
+	const [slashIndex, setSlashIndex] = useState(0);
+	// The person moved the pick with Up/Down: Enter then runs that row.
+	const slashMoved = useRef(false);
+	useEffect(() => {
+		setSlashIndex(0);
+		slashMoved.current = false;
+	}, [slashFilter]);
+	const slashOpen = !isProcessing && showSlashHelp && slashRows.length > 0;
+	useEffect(() => onSlashMenuChange?.(slashOpen), [slashOpen, onSlashMenuChange]);
+
+	// A tap on the grey suggestion's hint does what Tab does (#4934).
+	const acceptRef = useRef(null);
+	useClickSpans(
+		acceptRef,
+		!isProcessing && isVisible && suggestion
+			? [
+					{
+						id: "slash:accept",
+						dx: 0,
+						// "  [Tab] or tap to accept (label)" plus 3 cells; the rest of the line is not the button.
+						w:
+							2 +
+							cellWidth(`[Tab] or tap to accept (${getSuggestionSourceLabel(suggestion.source)})`) +
+							3,
+						action: () => setValue(accept()),
+					},
+				]
+			: [],
+		5,
+		0,
+	);
+
+	// Handle keyboard input
+	useInput(
+		(_input, key) => {
+			// An open @ file list takes Tab, Up and Down before anything else.
+			if (mentionOpen && mention) {
+				if (key.tab && !key.shift) {
+					const file = mentionMatches[Math.min(mentionIndex, mentionMatches.length - 1)];
+					if (file) setValue(applyMention(value, mention.start, file));
+					return;
+				}
+				if (key.upArrow) {
+					setMentionIndex((i) => Math.max(0, i - 1));
+					return;
+				}
+				if (key.downArrow) {
+					setMentionIndex((i) => Math.min(mentionMatches.length - 1, i + 1));
+					return;
+				}
+			}
+
+			// An open / menu takes Up, Down and Tab.
+			if (slashOpen) {
+				if (key.upArrow) {
+					slashMoved.current = true;
+					setSlashIndex((i) => Math.max(0, i - 1));
+					return;
+				}
+				if (key.downArrow) {
+					slashMoved.current = true;
+					setSlashIndex((i) => Math.min(slashRows.length - 1, i + 1));
+					return;
+				}
+				if (key.tab && !key.shift) {
+					const row = slashRows[Math.min(slashIndex, slashRows.length - 1)];
+					if (row) setValue(`/${row.name} `);
+					return;
+				}
+			}
+
+			// Tab to accept ghost suggestion. Not Shift+Tab: Ink sets key.tab for
+			// it too, and Shift+Tab switches the permission mode (#3170).
+			if (key.tab && !key.shift && isVisible && suggestion) {
+				const newValue = accept();
+				setValue(newValue);
+				return;
+			}
+
+			// Escape to dismiss suggestion
+			if (key.escape && isVisible) {
+				dismiss();
+				return;
+			}
+
+			// Up arrow: navigate to older history entry
+			if (key.upArrow && recentCommands.length > 0) {
+				const nextIndex =
+					historyIndex < recentCommands.length - 1 ? historyIndex + 1 : historyIndex;
+				if (nextIndex !== historyIndex) {
+					if (historyIndex === -1) draftRef.current = value;
+					setHistoryIndex(nextIndex);
+					setValue(recentCommands[nextIndex] ?? "");
+				}
+				return;
+			}
+
+			// Down arrow: navigate to newer entry or restore draft
+			if (key.downArrow && historyIndex >= 0) {
+				const nextIndex = historyIndex - 1;
+				setHistoryIndex(nextIndex);
+				setValue(nextIndex < 0 ? draftRef.current : (recentCommands[nextIndex] ?? ""));
+				return;
+			}
+		},
+		{ isActive: !isProcessing && focused },
+	);
+
+	// Alt+Enter and Ctrl+Q queue a follow-up for after the running task
+	// (#3918 D1). They work while a task runs, when the handler above is off.
+	// The text input ignores Alt+Enter and never types a Ctrl letter, so the
+	// value is intact here. On Windows Terminal Alt+Enter may not arrive;
+	// Ctrl+Q is the same thing there.
+	useInput(
+		(input, key) => {
+			const followUpKey = (key.return && key.meta) || (key.ctrl && input === "q");
+			if (!followUpKey) return;
+			if (!value.trim()) {
+				onSystemMessage?.(NOTHING_TO_QUEUE);
+				return;
+			}
+			setHistoryIndex(-1);
+			draftRef.current = "";
+			setValue("");
+			if (onFollowUp) onFollowUp(value);
+			else onSubmit(value);
+		},
+		{ isActive: focused && !typingPaused },
+	);
+
+	const submitNow = useCallback(
+		(input: string) => {
+			const trimmed = input.trim();
+			if (!trimmed && !allowEmptySubmit) {
+				onEmptyEnter?.();
+				return;
+			}
+
+			// Reset history navigation on submit
+			setHistoryIndex(-1);
+			draftRef.current = "";
+
+			// Check for slash command. A masked value (a key) is never one.
+			if (!maskInput && trimmed.startsWith("/")) {
+				const registry = {
+					entries: slashRegistryEntries,
+					byToken: slashByToken,
+					collisions: [],
+				};
+				const resolved = resolveSlashInput(input, registry);
+
+				// /goal and /subgoal: handled in-component when a GoalClient is
+				// wired in. Falls through to onSlashCommand otherwise so the
+				// app can render a clean "goal loop not connected" message.
+				if (
+					resolved?.entry.kind === "builtin" &&
+					(resolved.entry.builtInName === "goal" || resolved.entry.builtInName === "subgoal") &&
+					goalClient
+				) {
+					handleGoCommand(
+						resolved.entry.builtInName,
+						resolved.args,
+						goalClient,
+						sessionId,
+						onSystemMessage,
+						goalReadiness?.() ?? null,
+					);
+					setValue("");
+					return;
+				}
+
+				if (
+					resolved &&
+					resolved.entry.kind === "builtin" &&
+					resolved.entry.builtInName &&
+					onSlashCommand
+				) {
+					onSlashCommand(resolved.entry.builtInName, resolved.args);
+					setValue("");
+					return;
+				}
+			}
+
+			// Regular command
+			onSubmit(input);
+			setValue("");
+		},
+		[
+			onSubmit,
+			onEmptyEnter,
+			onSlashCommand,
+			allowEmptySubmit,
+			maskInput,
+			slashRegistryEntries,
+			slashByToken,
+			goalClient,
+			goalReadiness,
+			sessionId,
+			onSystemMessage,
+		],
+	);
+
+	// Nothing goes straight to the model (#4530): a slash line the registry does
+	// not know is checked against skills and prompt templates read now, and only
+	// when nothing claims it is it answered here and never submitted.
+	const handleSubmit = useCallback(
+		(input: string) => {
+			// A key being pasted is an answer, never a slash line or a command.
+			if (maskInput) return submitNow(input);
+			const trimmed = input.trim();
+			// Enter on a slash prefix completes it: one match runs, an ambiguous prefix keeps the list.
+			const act = slashEnterAction(
+				input,
+				slashRegistryEntries,
+				slashMoved.current ? (slashRows[Math.min(slashIndex, slashRows.length - 1)] ?? null) : null,
+			);
+			if (act.kind === "run") return submitNow(`/${act.name}`);
+			if (act.kind === "keep") return;
+			// A bare "/" opens the same thing /help does, never an error.
+			if (isBareSlash(input)) return submitNow("/help");
+			if (!trimmed.startsWith("/")) return submitNow(input);
+			const registry = { entries: slashRegistryEntries, byToken: slashByToken, collisions: [] };
+			if (resolveSlashInput(input, registry)) return submitNow(input);
+			setValue("");
+			void unknownSlashAnswer(input, registry).then((unknown) => {
+				if (unknown === null) return submitNow(input);
+				emitSystem(onSystemMessage, unknown);
+			});
+		},
+		[
+			submitNow,
+			slashRegistryEntries,
+			slashByToken,
+			onSystemMessage,
+			maskInput,
+			slashRows,
+			slashIndex,
+		],
+	);
+
+	// Get current step index
+	const _getCurrentStep = (): number => {
+		switch (processingStage) {
+			case "planning":
+				return 0;
+			case "toolshed":
+				return 1;
+			case "executing":
+				return 2;
+			case "complete":
+				return 3;
+			default:
+				return 0;
+		}
+	};
+
+	// Build processing status line (shown above input when agent is working)
+	const processingStatusLine = isProcessing
+		? (() => {
+				const label = activeTool
+					? `Running ${activeTool}`
+					: stepCount === 0
+						? "Thinking"
+						: "Reasoning";
+
+				const stats = [];
+				if (stepCount > 0) stats.push(`step ${stepCount}`);
+				if (toolCount > 0) stats.push(`${toolCount} tool${toolCount > 1 ? "s" : ""}`);
+				if (totalTokens > 0) stats.push(`${(totalTokens / 1000).toFixed(1)}k tok`);
+
+				return { label, stats };
+			})()
+		: null;
+
+	return (
+		<Box flexDirection="column" paddingX={1}>
+			{/* Processing status — compact line above input, not replacing it */}
+			{approvalPending ? (
+				<Box marginBottom={0}>
+					<Text color={t.orange}>{WAITING_LINE}</Text>
+				</Box>
+			) : (
+				processingStatusLine && (
+					<Box marginBottom={0}>
+						<AnimatedSpinner
+							color={t.teal}
+							label={processingStatusLine.label}
+							showDots={showAnimations}
+							animate={showAnimations}
+						/>
+						{processingStatusLine.stats.length > 0 && (
+							<MutedText> ({processingStatusLine.stats.join(" · ")})</MutedText>
+						)}
+					</Box>
+				)
+			)}
+
+			{/* Main input row — ALWAYS visible */}
+			<Box>
+				{/* Animated prompt */}
+				<PromptIndicator />
+				<Text> </Text>
+
+				{/* Text input with ghost overlay; a long paste folds to its first row plus a summary */}
+				<Box height={folded ? 1 : undefined} overflowY={folded ? "hidden" : "visible"}>
+					<BufferedTextInput
+						focus={focused && !typingPaused}
+						mask={maskInput}
+						value={value}
+						onChange={(v) => {
+							// Any manual edit exits history navigation and updates the draft
+							if (historyIndex !== -1) {
+								setHistoryIndex(-1);
+								draftRef.current = "";
+							}
+							const { text, submit } = splitTrailingEnter(v);
+							const next = transformInputValue ? transformInputValue(text) : text;
+							setValue(next);
+							// Enter arrived in the same stdin read as the text, so it
+							// reached the input as text, not as a return key.
+							if (submit) handleSubmit(next);
+						}}
+						onSubmit={handleSubmit}
+						placeholder={
+							approvalPending
+								? WAITING_PLACEHOLDER
+								: isProcessing
+									? busyPlaceholder(stdout?.columns ?? 80)
+									: isVisible
+										? ""
+										: (placeholder ?? idlePlaceholder(stdout?.columns ?? 80))
+						}
+					/>
+
+					{/* Ghost suggestion text */}
+					{!isProcessing && isVisible && suggestion && <MutedText>{suggestion.text}</MutedText>}
+				</Box>
+			</Box>
+
+			{folded && (
+				<Box paddingLeft={2}>
+					<MutedText>{draftSummary(value, cols < 60)}</MutedText>
+				</Box>
+			)}
+
+			{/* Ghost suggestion hint */}
+			{!isProcessing && isVisible && suggestion && (
+				<Box paddingLeft={2} ref={acceptRef}>
+					<ShortcutHint
+						keys="[Tab]"
+						description={`or tap to accept (${getSuggestionSourceLabel(suggestion.source)})`}
+					/>
+				</Box>
+			)}
+
+			{/* @ file mention list */}
+			{!isProcessing && mentionOpen && (
+				<FileMentionList files={mentionMatches} selected={mentionIndex} />
+			)}
+
+			{/* Slash command help */}
+			{!isProcessing && showSlashHelp && slashRows.length === 0 && slashFilter !== "" && (
+				<Text color={t.textTertiary} wrap="truncate-end">
+					{slashNoMatchLine(slashFilter)}
+				</Text>
+			)}
+			{!isProcessing && showSlashHelp && (
+				<SlashCommandHelp
+					rows={slashRows}
+					selected={slashIndex}
+					visible={slashVisible}
+					compact={slashMenuCompact(terminalRows)}
+					columns={stdout?.columns ?? 80}
+					onPick={(name) => submitNow(`/${name}`)}
+				/>
+			)}
+		</Box>
+	);
+}
+
+// ============================================
+// /goal + /subgoal dispatch
+// ============================================
+//
+// Lives in this file rather than app.tsx so the goal protocol stays
+// localized to one place. The component handles parsing + dispatch, the
+// daemon (via GoalClient transport) owns execution, and the surface
+// messages (verdicts, help) are 8DO-owned copy imported through the
+// goal-client barrel and the verdicts module.
+
+function emitSystem(onSystemMessage: ((line: string) => void) | undefined, line: string): void {
+	if (onSystemMessage) {
+		onSystemMessage(line);
+	}
+}
+
+export interface GoalReadiness {
+	state: string;
+	reason?: string | null;
+}
+
+export function handleGoCommand(
+	commandName: "goal" | "subgoal",
+	args: readonly string[],
+	client: GoalClient,
+	sessionId: string,
+	onSystemMessage?: (line: string) => void,
+	readiness: GoalReadiness | null = null,
+): void {
+	if (commandName === "subgoal") {
+		const text = args.join(" ").trim();
+		if (!text) {
+			emitSystem(onSystemMessage, "/subgoal: text required. Try /subgoal <text>.");
+			return;
+		}
+		try {
+			client.subgoal(text);
+			emitSystem(onSystemMessage, "Subgoal sent.");
+		} catch (err) {
+			emitSystem(onSystemMessage, `/subgoal: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		return;
+	}
+
+	const parsed = parseGoCommand(args);
+	switch (parsed.kind) {
+		case "help": {
+			emitSystem(onSystemMessage, GO_HELP_LINES.join("\n"));
+			return;
+		}
+		case "invalid": {
+			emitSystem(onSystemMessage, `/goal: ${parsed.reason}`);
+			return;
+		}
+		case "start": {
+			// Before turn 1: the chat's own readiness answer. No model means no
+			// run, and never a "Goal met" (#4721).
+			if (readiness && readiness.state !== "ready") {
+				emitSystem(
+					onSystemMessage,
+					`/goal: not started. ${readiness.reason || "No model is ready."}`,
+				);
+				return;
+			}
+			try {
+				client.start(sessionId, parsed.goal);
+				// Acknowledgement copy is intentionally minimal. The verdict
+				// stream from LiveFocalStrip is the real surface.
+				emitSystem(onSystemMessage, `Going. ${parsed.goal}`);
+			} catch (err) {
+				emitSystem(onSystemMessage, `/goal: ${err instanceof Error ? err.message : String(err)}`);
+			}
+			return;
+		}
+		case "status": {
+			try {
+				client.status();
+			} catch (err) {
+				emitSystem(
+					onSystemMessage,
+					`/goal status: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+			return;
+		}
+		case "stop": {
+			try {
+				client.abort();
+				emitSystem(onSystemMessage, "Stopping.");
+			} catch (err) {
+				emitSystem(
+					onSystemMessage,
+					`/goal stop: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+			return;
+		}
+		case "resume": {
+			try {
+				client.resume();
+				emitSystem(onSystemMessage, "Resuming.");
+			} catch (err) {
+				emitSystem(
+					onSystemMessage,
+					`/goal resume: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+			return;
+		}
+		case "clear": {
+			client.clear();
+			emitSystem(onSystemMessage, "Cleared.");
+			return;
+		}
+	}
+}
+
+// ============================================
+// Sub-Components
+// ============================================
+
+// Prompt chevron. It holds still: the HUD motion language (lib/motion.ts)
+// says nothing loops, and every React commit makes Ink lay out and rewrite
+// the whole screen. The old 300 ms colour cycle (plus an 800 ms pulse
+// toggle that changed nothing on screen) was 4.6 full-screen redraws a
+// second on an idle TUI, most of its idle CPU.
+function PromptIndicator() {
+	return (
+		<Text color={t.orange as any} bold>
+			{"\u276F"}
+		</Text>
+	);
+}
+
+function getProcessingLabel(stage: string): string {
+	switch (stage) {
+		case "planning":
+			return "Planning approach";
+		case "toolshed":
+			return "Querying toolshed";
+		case "executing":
+			return "Executing";
+		case "complete":
+			return "Finalizing";
+		default:
+			return "Processing";
+	}
+}
+
+function isCoreEntry(entry: SlashRegistryEntry): boolean {
+	return (
+		entry.kind === "builtin" &&
+		entry.builtInName !== undefined &&
+		entry.name === entry.canonicalName &&
+		isCoreSlashCommand(entry.builtInName)
+	);
+}
+
+/**
+ * Rows for the `/` menu. A bare `/` lists the core commands only; once a
+ * letter is typed every command and skill whose name starts with it shows,
+ * core commands first. Nothing is removed: a hidden command still runs when
+ * typed (#3918, Pi gap D9).
+ */
+export function slashMenuRows(filter: string, entries: SlashRegistryEntry[]): SlashRegistryEntry[] {
+	const f = filter.toLowerCase();
+	if (f === "") {
+		return entries.filter(isCoreEntry).toSorted((a, b) => a.name.localeCompare(b.name));
+	}
+	const matches = entries.filter((entry) => entry.name.toLowerCase().startsWith(f));
+	if (matches.length > 0) {
+		return [...matches.filter(isCoreEntry), ...matches.filter((e) => !isCoreEntry(e))];
+	}
+	// Nothing starts with it: show the closest instead of an empty menu.
+	const near = new Set(
+		nearestNames(
+			f,
+			entries.map((e) => e.name),
+			5,
+		),
+	);
+	return entries.filter((e) => near.has(e.name.toLowerCase()));
+}
+
+export type SlashEnter = { kind: "run"; name: string } | { kind: "keep" } | { kind: "pass" };
+
+/** Commands that end the session or discard work: never run from a prefix, only by full name or a picked row. */
+export const SLASH_NEVER_FROM_PREFIX: ReadonlySet<string> = new Set([
+	"quit",
+	"exit",
+	"export",
+	"clear",
+	"rewind",
+	"fork",
+]);
+
+/**
+ * What Enter does on a typed slash line (#4934). Only a bare command word that
+ * starts with "/" is ever completed; a message, or a command with arguments,
+ * passes through, and so does every exact name or alias: what is typed in full
+ * runs as typed. A prefix runs only when exactly one command in the whole
+ * registry (built-ins, skills, aliases) starts with it, and never for a command
+ * that ends the session or discards work. A row the person moved to with
+ * Up/Down is an explicit pick and runs. Anything else keeps the list and runs
+ * nothing.
+ */
+export function slashEnterAction(
+	input: string,
+	entries: SlashRegistryEntry[],
+	picked: SlashRegistryEntry | null,
+): SlashEnter {
+	const line = input.trim();
+	if (!line.startsWith("/") || line === "/" || /\s/.test(line)) return { kind: "pass" };
+	const word = line.slice(1).toLowerCase();
+	const matches = entries.filter((e) => e.name.toLowerCase().startsWith(word));
+	if (matches.length === 0) return { kind: "pass" };
+	if (matches.some((e) => e.name.toLowerCase() === word)) return { kind: "pass" };
+	if (picked && matches.includes(picked)) return { kind: "run", name: picked.name };
+	const target = (e: SlashRegistryEntry) => e.builtInName ?? e.token;
+	const distinct = [...new Map(matches.map((e) => [target(e), e])).values()];
+	const only = distinct[0] as SlashRegistryEntry;
+	if (distinct.length === 1 && !SLASH_NEVER_FROM_PREFIX.has(only.builtInName ?? only.name))
+		return { kind: "run", name: only.name };
+	return { kind: "keep" };
+}
+
+/** One quiet row when nothing in the registry is near what was typed, so the dead end is named before Enter clears the line. */
+export function slashNoMatchLine(filter: string): string {
+	const word = filter.length > 12 ? `${filter.slice(0, 11)}…` : filter;
+	return `No command /${word}. Try /help.`;
+}
+
+export const SLASH_MENU_ROWS = 14;
+/** Below this many terminal rows the menu drops its frame and the focal strip steps aside. */
+export const SLASH_MENU_COMPACT_BELOW = 30;
+/**
+ * Terminal rows the TUI keeps around the menu, measured in the real App
+ * (slash-menu-height.test.tsx). Framed: header, tabs, frame, focal strip,
+ * input, footer, and the menu's margin, border, title and position line.
+ * Compact: the same without the focal strip, margin, border and title. The
+ * App's frame is itself two rows shorter than the terminal.
+ */
+export const SLASH_MENU_CHROME = { framed: 18, compact: 11 } as const;
+
+export function slashMenuCompact(terminalRows: number): boolean {
+	return terminalRows < SLASH_MENU_COMPACT_BELOW;
+}
+
+/** Menu rows that fit a terminal `terminalRows` tall: min(14, rows - chrome), at least 1. */
+export function slashMenuVisibleRows(terminalRows: number): number {
+	const chrome = slashMenuCompact(terminalRows)
+		? SLASH_MENU_CHROME.compact
+		: SLASH_MENU_CHROME.framed;
+	return Math.max(1, Math.min(SLASH_MENU_ROWS, terminalRows - chrome));
+}
+
+/** The window of `total` rows, `visible` tall, that keeps `selected` in view. */
+export function slashMenuWindow(
+	total: number,
+	selected: number,
+	visible: number,
+): { start: number; end: number } {
+	if (total <= visible) return { start: 0, end: total };
+	const start = Math.max(0, Math.min(selected - Math.floor(visible / 2), total - visible));
+	return { start, end: start + visible };
+}
+
+/** Below this many columns the rows show names only and the picked row's description sits under the list. */
+export const SLASH_NARROW_COLUMNS = 60;
+
+/** The picked row's description, in at most two lines of `width` cells, cut with an ellipsis only past that. */
+export function pickedDescription(text: string, width: number): string[] {
+	const w = Math.max(8, width);
+	const lines: string[] = [];
+	let rest = text.trim();
+	while (rest && lines.length < 2) {
+		if (rest.length <= w) {
+			lines.push(rest);
+			rest = "";
+			break;
+		}
+		const cut = rest.lastIndexOf(" ", w);
+		const at = cut > w / 2 ? cut : w;
+		lines.push(rest.slice(0, at).trimEnd());
+		rest = rest.slice(at).trimStart();
+	}
+	if (rest && lines.length)
+		lines[lines.length - 1] = `${(lines[lines.length - 1] ?? "").slice(0, w - 1)}…`;
+	return lines;
+}
+
+// Slash command help dropdown (built-ins + loaded skills)
+export function SlashCommandHelp({
+	rows,
+	selected,
+	visible,
+	compact = false,
+	columns = 80,
+	onPick,
+}: {
+	rows: SlashRegistryEntry[];
+	selected: number;
+	visible: number;
+	compact?: boolean;
+	columns?: number;
+	/** A tap on a row: run it, as Enter on it does (#4934). */
+	onPick?: (name: string) => void;
+}) {
+	if (rows.length === 0) return null;
+	const { start, end } = slashMenuWindow(rows.length, selected, visible);
+	const narrow = columns < SLASH_NARROW_COLUMNS;
+	const shown = rows.slice(start, end);
+	const combined = shown.map((entry, i) => ({
+		key: `${entry.kind}:${entry.token}`,
+		label: entry.name,
+		description: entry.description,
+		picked: start + i === selected,
+	}));
+	const picked = rows[Math.min(selected, rows.length - 1)];
+
+	return (
+		<Box
+			flexDirection="column"
+			borderStyle={compact ? undefined : "round"}
+			borderColor={t.frame}
+			paddingX={1}
+			marginTop={compact ? 0 : 1}
+			flexShrink={0}
+		>
+			{!compact && (
+				<Text color={t.heading} bold>
+					COMMANDS
+				</Text>
+			)}
+			<SlashRows rows={shown} combined={combined} narrow={narrow} onPick={onPick} />
+			{narrow && picked
+				? pickedDescription(picked.description ?? "", columns - 4).map((line, i) => (
+						<Text key={i} color={t.textTertiary}>
+							{line}
+						</Text>
+					))
+				: null}
+			{rows.length > end - start && (
+				<Text color={t.textTertiary} wrap="truncate-end">
+					{narrow
+						? `${start + 1}-${end} of ${rows.length}  tap or Enter`
+						: `${start + 1}-${end} of ${rows.length}, Up/Down to scroll, Tab to pick, Enter to run`}
+				</Text>
+			)}
+		</Box>
+	);
+}
+
+/** The rows, each a tap target that runs its command (#4934). A row is its whole line wide. */
+function SlashRows({
+	rows,
+	combined,
+	narrow,
+	onPick,
+}: {
+	rows: SlashRegistryEntry[];
+	combined: { key: string; label: string; description?: string; picked: boolean }[];
+	narrow: boolean;
+	onPick?: (name: string) => void;
+}) {
+	const ref = useRef(null);
+	const spans: ClickSpan[] = onPick
+		? rows.map((entry, i) => ({
+				id: `slash:${entry.name}`,
+				dx: 0,
+				dy: i,
+				// The row's visible text plus 3 cells: a thumb gets room, the empty line does not.
+				w: cellWidth(`  /${entry.name}${narrow ? "" : ` ${entry.description ?? ""}`}`) + 3,
+				action: () => onPick(entry.name),
+			}))
+		: [];
+	useClickSpans(ref, spans, 5, 0);
+	const pressed = usePressedIn("slash:");
+	return (
+		<Box ref={ref} flexDirection="column" flexShrink={0}>
+			{combined.map((row) => (
+				// One line per row, cut at the edge: a wrapped row would push the
+				// menu past the rows the terminal has.
+				<Text key={row.key} wrap="truncate-end" inverse={pressed === `slash:${row.label}`}>
+					<Text color={row.picked ? t.heading : t.textPrimary}>
+						{row.picked ? "> " : "  "}/{row.label}
+					</Text>
+					{narrow ? null : <Text color={t.textTertiary}> {row.description}</Text>}
+				</Text>
+			))}
+		</Box>
+	);
+}
+
+const MENTION_ROWS = 8;
+
+// The @ file list: matching files, the picked one marked, Tab to insert.
+function FileMentionList({ files, selected }: { files: string[]; selected: number }) {
+	return (
+		<Box
+			flexDirection="column"
+			borderStyle="round"
+			borderColor={t.frame}
+			paddingX={1}
+			marginTop={1}
+		>
+			<Text color={t.heading} bold>
+				FILES <Text color={t.textTertiary}>Up/Down to pick, Tab to insert</Text>
+			</Text>
+			{files.map((file, i) => (
+				<Text key={file} color={i === selected ? t.textPrimary : t.textTertiary}>
+					{i === selected ? "> " : "  "}
+					{file}
+				</Text>
+			))}
+		</Box>
+	);
+}
+
+// ============================================
+// Minimal Command Input
+// ============================================
+
+export function MinimalCommandInput({ onSubmit, isProcessing }: CommandInputProps) {
+	const [value, setValue] = useState("");
+
+	const handleSubmit = (input: string) => {
+		if (!input.trim()) return;
+		onSubmit(input);
+		setValue("");
+	};
+
+	return (
+		<Box paddingX={1}>
+			{isProcessing ? (
+				<Box>
+					<AppText color="cyan">
+						<FigureEight />
+					</AppText>
+					<MutedText> Working…</MutedText>
+				</Box>
+			) : (
+				<Box>
+					<Label color="cyan">$ </Label>
+					<TextInput
+						value={value}
+						onChange={setValue}
+						onSubmit={handleSubmit}
+						placeholder="Enter command..."
+					/>
+				</Box>
+			)}
+		</Box>
+	);
+}
+
+// ============================================
+// Multi-line Command Input
+// ============================================
+
+interface MultiLineInputProps {
+	onSubmit: (input: string) => void;
+	isProcessing: boolean;
+}
+
+export function MultiLineInput({ onSubmit, isProcessing }: MultiLineInputProps) {
+	const [lines, _setLines] = useState<string[]>([""]);
+	const [currentLine, _setCurrentLine] = useState(0);
+
+	// Not fully implemented - placeholder for future
+	return (
+		<Box flexDirection="column" paddingX={1}>
+			<MutedText>Multi-line mode (Ctrl+Enter to submit)</MutedText>
+			{/* Placeholder multi-line buffer (not fully implemented). Lines are positional rows of a draft and re-render-from-state on every change; no stable per-line identity exists in current schema. */}
+			{lines.map((line, index) => (
+				// react-doctor-disable-next-line react-doctor/no-array-index-as-key
+				<Box key={index}>
+					<MutedText>{index === currentLine ? "\u276F" : " "} </MutedText>
+					<Text>{line}</Text>
+				</Box>
+			))}
+		</Box>
+	);
+}
+
+// ============================================
+// Command Palette Style Input
+// ============================================
+
+interface CommandPaletteProps {
+	onSubmit: (input: string) => void;
+	suggestions?: string[];
+}
+
+export function CommandPalette({ onSubmit, suggestions = EMPTY_SUGGESTIONS }: CommandPaletteProps) {
+	const [value, setValue] = useState("");
+	const [selectedIndex, setSelectedIndex] = useState(0);
+
+	const filteredSuggestions = suggestions.filter((s) =>
+		s.toLowerCase().includes(value.toLowerCase()),
+	);
+
+	useInput((_input, key) => {
+		if (key.downArrow) {
+			setSelectedIndex((prev) => Math.min(prev + 1, filteredSuggestions.length - 1));
+		} else if (key.upArrow) {
+			setSelectedIndex((prev) => Math.max(prev - 1, 0));
+		}
+	});
+
+	return (
+		<Box flexDirection="column" paddingX={1}>
+			<Box borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
+				<Box>
+					<Label color="cyan">{"\u276F"} </Label>
+					<TextInput
+						value={value}
+						onChange={(v) => {
+							setValue(v);
+							setSelectedIndex(0);
+						}}
+						onSubmit={() => {
+							const selected = filteredSuggestions[selectedIndex] || value;
+							onSubmit(selected);
+							setValue("");
+						}}
+					/>
+				</Box>
+
+				{value && filteredSuggestions.length > 0 && (
+					<Box flexDirection="column" marginTop={1}>
+						{filteredSuggestions.slice(0, 5).map((suggestion, index) => (
+							<Box key={suggestion}>
+								<Text
+									color={index === selectedIndex ? "cyan" : "gray"}
+									bold={index === selectedIndex}
+								>
+									{index === selectedIndex ? "\u25B8 " : "  "}
+									{suggestion}
+								</Text>
+							</Box>
+						))}
+					</Box>
+				)}
+			</Box>
+		</Box>
+	);
+}
+
+// ============================================
+// Ghost-Enhanced Command Input
+// ============================================
+
+interface GhostCommandInputProps {
+	onSubmit: (input: string) => void;
+	isProcessing: boolean;
+	isGitRepo?: boolean;
+	currentBranch?: string | null;
+	planNextStep?: string | null;
+	recentCommands?: string[];
+	onSlashCommand?: (command: SlashCommand, args: string[]) => void;
+}
+
+function GhostCommandInput({
+	onSubmit,
+	isProcessing,
+	isGitRepo = false,
+	currentBranch = null,
+	planNextStep = null,
+	recentCommands = EMPTY_RECENT,
+	onSlashCommand,
+}: GhostCommandInputProps) {
+	return (
+		<CommandInput
+			onSubmit={onSubmit}
+			isProcessing={isProcessing}
+			isGitRepo={isGitRepo}
+			currentBranch={currentBranch}
+			planNextStep={planNextStep}
+			recentCommands={recentCommands}
+			onSlashCommand={onSlashCommand}
+		/>
+	);
+}
+
+// ============================================
+// Export Slash Commands for External Use
+// ============================================
+
+function getSlashCommands() {
+	return getBuiltInSlashCommands();
+}
+
+function isSlashCommand(input: string): boolean {
+	if (!input.startsWith("/")) return false;
+	const cmdName = input.slice(1).split(/\s+/)[0].toLowerCase();
+	return getBuiltInSlashCommands().some((c) => c.name === cmdName || c.aliases.includes(cmdName));
+}
+
+function parseSlashCommand(input: string): { command: SlashCommand; args: string[] } | null {
+	if (!input.startsWith("/")) return null;
+
+	const parts = input.slice(1).split(/\s+/);
+	const cmdName = parts[0].toLowerCase();
+	const args = parts.slice(1);
+
+	const cmd = getBuiltInSlashCommands().find(
+		(c) => c.name === cmdName || c.aliases.includes(cmdName),
+	);
+
+	if (!cmd) return null;
+
+	return { command: cmd.name, args };
+}
+
+/** True when accepting the ghost text would leave a `!` shell line in the input. */
+export function isShellSuggestion(value: string, ghost: string | undefined): boolean {
+	return `${value}${ghost ?? ""}`.trimStart().startsWith("!");
+}

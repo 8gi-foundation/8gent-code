@@ -1,0 +1,24 @@
+diff --git a/build/log-update.js b/build/log-update.js
+index 73e297d0185fa4861c33eaa11761d1418588f0c9..85bfda2ee3e306d239ca9845b88b7fe9982465d9 100644
+--- a/build/log-update.js
++++ b/build/log-update.js
+@@ -160,13 +160,16 @@ const createIncremental = (stream, { showCursor = false } = {}) => {
+             const extraSlot = previousHadTrailingNewline ? 1 : 0;
+             buffer.push(ansiEscapes.eraseLines(previousVisible - visibleCount + extraSlot), ansiEscapes.cursorUp(visibleCount));
+         }
+-        else {
+-            buffer.push(ansiEscapes.cursorUp(previousVisible - 1));
++        else if (previousLines.length > 1) {
++            // 8gent #4970: the cursor sits on the row after the last line when the
++            // frame ends in a newline, so climb one row per split entry (Ink 8 fix).
++            buffer.push(ansiEscapes.cursorUp(previousLines.length - 1));
+         }
+         for (let i = 0; i < visibleCount; i++) {
+             const isLastLine = i === visibleCount - 1;
+             // We do not write lines if the contents are the same. This prevents flickering during renders.
+-            if (nextLines[i] === previousLines[i]) {
++            // 8gent #4970: a row past the previous frame needs its line feed to scroll (Ink 8 fix).
++            if (i < previousVisible && nextLines[i] === previousLines[i]) {
+                 // Don't move past the last line when there's no trailing newline,
+                 // otherwise the cursor overshoots the rendered block.
+                 if (!isLastLine || hasTrailingNewline) {

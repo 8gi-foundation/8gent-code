@@ -1,0 +1,483 @@
+/**
+ * @8gent/eight — term-tools.ts
+ *
+ * Agent-callable tools for orchestrating external CLI sessions running
+ * in real Terminal.app windows via tmux. The boss-tab agent uses these
+ * to autonomously dispatch work to claude, openclaw, pi, etc., read
+ * their output back, and decide what to do next.
+ *
+ * Architecture: see packages/terminal-tab/tmux-session.ts.
+ *
+ * Two-line wiring in tools.ts:
+ *   1. spread `getTermToolDefs()` into `getToolDefinitions()`
+ *   2. delegate `term_*` cases in `execute()` to `executeTermTool()`
+ *
+ * The agent does not need to know about pty-bridges, osascript, or
+ * window IDs. It just calls term_spawn / term_send / term_read.
+ */
+
+import { commandSegments } from "../permissions/command-policy.js";
+import { getPermissionManager } from "../permissions/index.js";
+import { sanitizeShellCommand } from "../permissions/shell-sanitizer";
+import {
+	type WindowSession,
+	attachInTerminal,
+	composeShellCommand,
+	deleteSession,
+	getSession,
+	hasTmuxSession,
+	isTmuxAvailable,
+	killTmuxSession,
+	listTmuxSessions,
+	loadSessions,
+	readSessionLog,
+	saveSession,
+	sendTmuxKeys,
+	spawnTmuxSession,
+} from "../terminal-tab/index.js";
+
+// ---------------- Per-session read offsets ----------------
+//
+// Each session log grows over time.  We track per-session "last byte we
+// already returned to the agent" so successive `term_read` calls only
+// surface new output.  Lives in this module because the agent is
+// stateless across tool calls but the cursor needs to persist.
+//
+const readOffsets = new Map<string, number>();
+
+// ---------------- Command policy (#3767) ----------------
+//
+// term_spawn starts a program and term_send types into a live session, so
+// both reach a shell the same way run_command does. Every command line they
+// carry goes through the same command policy: the always-blocked list is
+// refused, the ask-every-time list asks a person (refused with no terminal),
+// in every mode including Infinite. Text that cannot be read with confidence
+// as a command is treated as needing a person.
+
+/** Typed but not yet submitted, per session, so a later Enter is judged with it. */
+const pendingInput = new Map<string, string>();
+
+/** Most unsubmitted text held per session; past it term_send is refused and the hold is kept. */
+export const MAX_PENDING_INPUT = 64 * 1024;
+
+// Tab (0x09) counts: in a shell it triggers completion and can rewrite the line.
+const CONTROL_CHARS = /[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/;
+
+/** True when the line has quotes or shell constructs we cannot read for sure. */
+function unreadable(text: string): boolean {
+	if (CONTROL_CHARS.test(text)) return true;
+	// Known imprecision: $$' is read here as an ANSI-C quote, but bash sees $$ (the pid) then a
+	// plain quote. It only errs toward asking, and the quote tracker asks on every piece.
+	// $'...' (ANSI-C quoting) treats a backslash as an escape inside single quotes,
+	// which the quote tracking below does not model; a person reads it instead.
+	if (/\$\(|`|<<|<\(|>\(|\$'/.test(text)) return true;
+	let quote: string | null = null;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		// A line break inside an open quote, or right after a backslash, joins
+		// two lines into one command; judged line by line it would slip through.
+		if ((c === "\r" || c === "\n") && quote !== null) return true;
+		if (c === "\\" && quote !== "'") {
+			i++;
+			if (i >= text.length) return true;
+			if (text[i] === "\r" || text[i] === "\n") return true;
+			continue;
+		}
+		if (quote) {
+			if (c === quote) quote = null;
+		} else if (c === "'" || c === '"') {
+			quote = c;
+		}
+	}
+	return quote !== null;
+}
+
+/**
+ * What is still on the shell's line after `line` is typed. A newline submits,
+ * except right after a backslash or inside an open quote, where the shell
+ * keeps reading the same command: that text stays pending, so a later piece
+ * is judged together with it. Enter counts as a final newline.
+ */
+function unsubmitted(line: string, enter: boolean): string {
+	const text = enter ? `${line}\n` : line;
+	let quote: string | null = null;
+	let start = 0;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (c === "\\" && quote !== "'") {
+			i++;
+			continue;
+		}
+		if (c === "\n" || c === "\r") {
+			if (quote === null) start = i + 1;
+		} else if (quote) {
+			if (c === (quote === "$'" ? "'" : quote)) quote = null;
+		} else if (c === "$" && text[i + 1] === "'") {
+			// ANSI-C quote: a backslash escapes inside it, unlike a plain single quote.
+			quote = "$'";
+			i++;
+		} else if (c === "'" || c === '"') {
+			quote = c;
+		}
+	}
+	return text.slice(start);
+}
+
+/** What a prompt shows of long text: the tail, since the end is what a joined command finishes with. */
+const PROMPT_TAIL = 4096;
+const tail = (t: string) => (t.length > PROMPT_TAIL ? `...${t.slice(-PROMPT_TAIL)}` : t);
+
+/** Null when the input may go ahead, else the refusal to hand back to the agent. */
+export async function gateInput(tool: string, text: string): Promise<string | null> {
+	const pm = getPermissionManager();
+	const lines = text.split(/[\r\n]+/).filter((l) => l.trim() !== "");
+	const refuse = (why: string) => `[PERMISSION DENIED] ${tool}: ${why}. Nothing was sent.`;
+
+	// The whole text as the shell may read it: line breaks as separators, and
+	// with a backslash continuation joined. A command split across lines is
+	// judged whole as well as piece by piece.
+	const wholes = [text.replace(/[\r\n]+/g, ";"), text.replace(/\\[\r\n]+/g, "")];
+	for (const whole of wholes) {
+		for (const part of [whole, ...commandSegments(whole)]) {
+			const blocked = pm.alwaysBlockedReason(part);
+			if (blocked) return refuse(`blocked by security policy (${blocked}): ${text}`);
+		}
+	}
+
+	for (const line of lines) {
+		for (const part of [line, ...commandSegments(line)]) {
+			const blocked = pm.alwaysBlockedReason(part);
+			if (blocked) return refuse(`blocked by security policy (${blocked}): ${line}`);
+		}
+		if (pm.checkPermission(line) === "denied") {
+			return refuse(`blocked by security policy: ${line}`);
+		}
+	}
+
+	if (unreadable(text)) {
+		const ok = await pm.askPerson(
+			"Type Into Terminal Session",
+			"The agent wants to type text that cannot be read as a plain command.",
+			tail(text),
+		);
+		return ok
+			? null
+			: refuse(`a person declined input that could not be read as a command: ${text}`);
+	}
+
+	for (const line of lines) {
+		if (pm.checkPermission(line) === "ask") {
+			const ok = await pm.requestPermission(
+				"Execute Shell Command",
+				"The agent wants to run a command in a terminal session.",
+				tail(line),
+			);
+			if (!ok) return refuse(`user declined to run: ${line}`);
+		}
+	}
+	return null;
+}
+
+/**
+ * The gate for write_terminal. The text goes through the same command policy as
+ * term_send, then the first send to each tab asks a person, in every mode
+ * including Infinite (a tab can hold another program such as pi or Hermes, so
+ * typing into it is a different trust than running a command). The approval
+ * lives on the tab's registry entry, so it ends with the session and when the
+ * tab closes. Null means go ahead.
+ */
+export async function gateTabInput(tabId: string, text: string): Promise<string | null> {
+	const tabs = await import("../../apps/tui/src/hooks/useTerminal.js");
+	const label = tabs.describeTerminal(tabId);
+	if (label === null) return `No terminal open for tab ${tabId}. Nothing was sent.`;
+	const denied = await gateInput("write_terminal", text);
+	if (denied) return denied;
+	if (tabs.isTerminalWriteApproved(tabId)) return null;
+	const ok = await getPermissionManager().askPerson(
+		"Type Into Terminal Tab",
+		`The assistant wants to type into terminal tab ${tabId} (running ${label}), which also lets it read that tab. Approving covers this tab until it closes.`,
+		tail(text),
+	);
+	if (!ok) {
+		return `[PERMISSION DENIED] write_terminal: a person did not approve typing into tab ${tabId}. Nothing was sent.`;
+	}
+	tabs.approveTerminalWrite(tabId);
+	return null;
+}
+
+/**
+ * The gate for read_terminal. Output read from a tab goes into the model's
+ * context, so a read needs a first-time per-tab approval (Infinite mode
+ * included). That approval is read only: it never lets write_terminal type, while
+ * a write approval also covers reads. Null means go ahead.
+ */
+export async function gateTabRead(tabId: string): Promise<string | null> {
+	const tabs = await import("../../apps/tui/src/hooks/useTerminal.js");
+	const label = tabs.describeTerminal(tabId);
+	if (label === null) return `No terminal open for tab ${tabId}.`;
+	if (tabs.isTerminalReadApproved(tabId)) return null;
+	const ok = await getPermissionManager().askPerson(
+		"Read Terminal Tab",
+		`The assistant wants to read the output of terminal tab ${tabId} (running ${label}). This is read only: typing into the tab needs its own approval. Approving covers this tab until it closes.`,
+	);
+	if (!ok) {
+		return `[PERMISSION DENIED] read_terminal: a person did not approve reading tab ${tabId}. Nothing was read.`;
+	}
+	tabs.approveTerminalRead(tabId);
+	return null;
+}
+
+// ---------------- Tool definitions ----------------
+
+export function getTermToolDefs(): object[] {
+	return [
+		{
+			type: "function",
+			function: {
+				name: "term_spawn",
+				description:
+					"[ORCHESTRATION] Spawns command (a CLI binary on $PATH) in a real Terminal.app window via tmux. Returns a sessionId you can use with term_send / term_read. Examples of valid commands: 'claude', 'openclaw', 'pi', '/bin/sh'. Use this when delegating a task to a different agent CLI is cheaper than answering yourself, or when you want to parallelise work across multiple sub-agents.",
+				parameters: {
+					type: "object",
+					properties: {
+						command: {
+							type: "string",
+							description: "Binary on $PATH, for example 'claude', 'openclaw' or 'pi'.",
+						},
+						args: {
+							type: "array",
+							items: { type: "string" },
+							description: "Optional argv passed to the command.",
+						},
+						label: {
+							type: "string",
+							description: "Human-readable label for the session, shown to the user.",
+						},
+					},
+					required: ["command"],
+				},
+			},
+		},
+		{
+			type: "function",
+			function: {
+				name: "term_send",
+				description:
+					"[ORCHESTRATION] Sends text as keystrokes to the running session sessionId (from term_spawn) via tmux send-keys. Pair with term_read after a short delay to see the response. By default Enter is appended so the prompt is submitted.",
+				parameters: {
+					type: "object",
+					properties: {
+						sessionId: { type: "string", description: "Session id from term_spawn." },
+						text: { type: "string", description: "Text to inject as keystrokes." },
+						appendEnter: {
+							type: "boolean",
+							description: "Whether to press Enter after the text. Default true.",
+						},
+					},
+					required: ["sessionId", "text"],
+				},
+			},
+		},
+		{
+			type: "function",
+			function: {
+				name: "term_read",
+				description:
+					"[ORCHESTRATION] Reads new output from session sessionId (from term_spawn) since the last term_read call. Returns lines with ANSI control sequences stripped. Call repeatedly to poll for the response.",
+				parameters: {
+					type: "object",
+					properties: {
+						sessionId: { type: "string", description: "Session id from term_spawn." },
+						resetCursor: {
+							type: "boolean",
+							description: "If true, read from the start of the log instead of last cursor.",
+						},
+					},
+					required: ["sessionId"],
+				},
+			},
+		},
+		{
+			type: "function",
+			function: {
+				name: "term_list",
+				description:
+					"[ORCHESTRATION] List all active windowed sessions 8gent is currently orchestrating, with their command, label, and uptime.",
+				parameters: { type: "object", properties: {}, required: [] },
+			},
+		},
+		{
+			type: "function",
+			function: {
+				name: "term_kill",
+				description:
+					"[ORCHESTRATION] Kills session sessionId and closes its tmux + Terminal.app window state.",
+				parameters: {
+					type: "object",
+					properties: {
+						sessionId: { type: "string", description: "Session id from term_spawn." },
+					},
+					required: ["sessionId"],
+				},
+			},
+		},
+	];
+}
+
+// ---------------- Tool execution ----------------
+
+export function isTermTool(name: string): boolean {
+	return name.startsWith("term_");
+}
+
+export async function executeTermTool(
+	name: string,
+	args: Record<string, unknown>,
+): Promise<string> {
+	if (!isTmuxAvailable()) {
+		return "ERR: tmux is not installed. Run `brew install tmux` (macOS) or `apt install tmux` (Linux) so 8gent can orchestrate windowed sessions.";
+	}
+
+	switch (name) {
+		case "term_spawn":
+			return termSpawn(args);
+		case "term_send":
+			return termSend(args);
+		case "term_read":
+			return termRead(args);
+		case "term_list":
+			return termList();
+		case "term_kill":
+			return termKill(args);
+		default:
+			return `ERR: unknown term tool "${name}"`;
+	}
+}
+
+async function termSpawn(args: Record<string, unknown>): Promise<string> {
+	const command = String(args.command ?? "").trim();
+	if (!command) return "ERR: term_spawn needs a command.";
+	// The command is run by a shell inside the session: same guard as run_command (#3763).
+	const validation = sanitizeShellCommand(command);
+	if (!validation.safe) return `[BLOCKED] ${validation.reason}. Command: ${command}`;
+	const cmdArgs = Array.isArray(args.args) ? (args.args as string[]).map(String) : [];
+	const label = (args.label as string | undefined) ?? command;
+
+	const denied = await gateInput("term_spawn", composeShellCommand(command, cmdArgs));
+	if (denied) return denied;
+
+	const handle = await spawnTmuxSession({
+		command,
+		args: cmdArgs,
+		cwd: process.cwd(),
+		cols: 200,
+		rows: 50,
+	});
+
+	// Open a Terminal.app window so the human can watch / take over.
+	try {
+		await attachInTerminal(handle.sessionId);
+	} catch {
+		/* attaching is best-effort; tmux session is still running detached */
+	}
+
+	// Persist for cross-restart reconnection.
+	const session: WindowSession = {
+		sessionId: handle.sessionId,
+		command: handle.command,
+		args: handle.args,
+		label,
+		pid: handle.pid,
+		cwd: handle.cwd,
+		startedAt: handle.startedAt,
+		source: "preset",
+	};
+	saveSession(session);
+
+	return JSON.stringify({
+		ok: true,
+		sessionId: handle.sessionId,
+		pid: handle.pid,
+		logPath: handle.logPath,
+		label,
+		command: handle.command,
+	});
+}
+
+async function termSend(args: Record<string, unknown>): Promise<string> {
+	const sessionId = String(args.sessionId ?? "").trim();
+	const text = String(args.text ?? "");
+	if (!sessionId) return "ERR: term_send needs sessionId.";
+	if (!(await hasTmuxSession(sessionId))) {
+		return `ERR: session "${sessionId}" is not running.`;
+	}
+	const appendEnter = args.appendEnter !== false;
+	// Judge what is on the line, including text typed earlier and not yet submitted.
+	const line = (pendingInput.get(sessionId) ?? "") + text;
+	if (line.length > MAX_PENDING_INPUT) {
+		// Refuse and leave the hold exactly as it is. Clearing it would not clear the
+		// shell's line: the bytes already typed stay there, and padding past the cap
+		// would let the next piece be judged alone. Only term_kill clears the hold.
+		return `[PERMISSION DENIED] term_send: the pending unsubmitted text is over the ${MAX_PENDING_INPUT} byte cap, so it cannot be checked as one command line. Nothing was sent and the pending text is kept. Use term_kill to end this session and start clean.`;
+	}
+	const denied = await gateInput("term_send", line);
+	if (denied) return denied;
+	const rest = unsubmitted(line, appendEnter);
+	if (rest === "") pendingInput.delete(sessionId);
+	else pendingInput.set(sessionId, rest);
+	await sendTmuxKeys(sessionId, text, { appendEnter });
+	return JSON.stringify({ ok: true, sessionId, sent: text, enter: appendEnter });
+}
+
+async function termRead(args: Record<string, unknown>): Promise<string> {
+	const sessionId = String(args.sessionId ?? "").trim();
+	if (!sessionId) return "ERR: term_read needs sessionId.";
+
+	const session = getSession(sessionId);
+	if (!session) return `ERR: no persisted session for "${sessionId}".`;
+
+	// Resolve log path from the tmux session's expected location.
+	const logPath = `${process.env.HOME}/.8gent/sessions/${sessionId}.log`;
+
+	const cursor = args.resetCursor === true ? 0 : (readOffsets.get(sessionId) ?? 0);
+	const tail = readSessionLog(logPath, cursor);
+	readOffsets.set(sessionId, tail.nextOffset);
+
+	return JSON.stringify({
+		ok: true,
+		sessionId,
+		newLines: tail.lines,
+		nextOffset: tail.nextOffset,
+		stillRunning: await hasTmuxSession(sessionId),
+	});
+}
+
+async function termList(): Promise<string> {
+	const tmuxNames = await listTmuxSessions();
+	const persisted = loadSessions();
+	const live = persisted.filter((s) => tmuxNames.includes(s.sessionId));
+
+	const rows = live.map((s) => {
+		const elapsedMs = Date.now() - new Date(s.startedAt).getTime();
+		return {
+			sessionId: s.sessionId,
+			label: s.label,
+			command: s.command,
+			args: s.args,
+			pid: s.pid,
+			elapsedSeconds: Math.round(elapsedMs / 1000),
+		};
+	});
+
+	return JSON.stringify({ ok: true, count: rows.length, sessions: rows });
+}
+
+async function termKill(args: Record<string, unknown>): Promise<string> {
+	const sessionId = String(args.sessionId ?? "").trim();
+	if (!sessionId) return "ERR: term_kill needs sessionId.";
+	await killTmuxSession(sessionId);
+	deleteSession(sessionId);
+	readOffsets.delete(sessionId);
+	pendingInput.delete(sessionId);
+	return JSON.stringify({ ok: true, sessionId, killed: true });
+}

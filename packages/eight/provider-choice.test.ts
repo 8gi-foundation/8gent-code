@@ -1,0 +1,238 @@
+/**
+ * #4362 / #4363: `8gent chat` and `8gent run` honour the provider and model
+ * saved by onboarding. Order: --provider flag > saved choice > adaptive router.
+ * A saved provider is skipped only when unreachable, and the skip is worded.
+ */
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { rmRetry } from "../../tests/rm-retry";
+import {
+	type ProviderChoiceDeps,
+	providerRouteNotice,
+	readSavedProviderChoice,
+	resolveChatChoice,
+	resolveProviderChoice,
+	shouldShowRouteNotice,
+} from "./run";
+
+function deps(over: Partial<ProviderChoiceDeps> = {}): ProviderChoiceDeps {
+	return {
+		saved: { provider: "lmstudio", model: "gemma-4-26b-a4b-it" },
+		reachable: async () => true,
+		ollamaUp: async () => true,
+		ollamaModel: async () => "8gate:latest",
+		...over,
+	};
+}
+
+describe("resolveProviderChoice", () => {
+	test("a saved choice beats the default router, model included", async () => {
+		const c = await resolveProviderChoice({}, deps());
+		expect(c).toEqual({ provider: "lmstudio", model: "gemma-4-26b-a4b-it", source: "saved" });
+	});
+
+	test("--provider and --model beat the saved choice", async () => {
+		const c = await resolveProviderChoice({ provider: "ollama", model: "qwen3:14b" }, deps());
+		expect(c).toMatchObject({ provider: "ollama", model: "qwen3:14b", source: "flag" });
+	});
+
+	test("--provider alone takes the saved model only when it is the same provider", async () => {
+		const same = await resolveProviderChoice({ provider: "lmstudio" }, deps());
+		expect(same.model).toBe("gemma-4-26b-a4b-it");
+		const other = await resolveProviderChoice({ provider: "ollama" }, deps());
+		expect(other.model).toBe("8gate:latest");
+	});
+
+	test("nothing saved: the router picks Ollama when it answers, else OpenRouter", async () => {
+		const up = await resolveProviderChoice({}, deps({ saved: undefined }));
+		expect(up).toMatchObject({ provider: "ollama", model: "8gate:latest", source: "router" });
+		expect(up.notice).toBeUndefined();
+		const down = await resolveProviderChoice(
+			{},
+			deps({ saved: undefined, ollamaUp: async () => false }),
+		);
+		expect(down.provider).toBe("openrouter");
+		const chat = await resolveProviderChoice(
+			{ routerFallback: "ollama" },
+			deps({ saved: undefined, ollamaUp: async () => false }),
+		);
+		expect(chat.provider).toBe("ollama");
+	});
+
+	test("an unreachable saved provider falls back and says so", async () => {
+		const c = await resolveProviderChoice({}, deps({ reachable: async () => false }));
+		expect(c.provider).toBe("ollama");
+		expect(c.source).toBe("router");
+		expect(c.notice).toBe("LM Studio not reachable, using Ollama 8gate:latest");
+	});
+
+	test("the saved provider is probed by name, not Ollama", async () => {
+		const probed: string[] = [];
+		await resolveProviderChoice(
+			{},
+			deps({
+				reachable: async (p) => {
+					probed.push(p);
+					return true;
+				},
+			}),
+		);
+		expect(probed).toEqual(["lmstudio"]);
+	});
+});
+
+describe("readSavedProviderChoice", () => {
+	const dirs: string[] = [];
+	afterAll(() => {
+		for (const d of dirs) rmRetry(d);
+	});
+	const homeWith = (body: unknown | undefined): string => {
+		const home = mkdtempSync(join(tmpdir(), "choice4362-"));
+		dirs.push(home);
+		mkdirSync(join(home, ".8gent"), { recursive: true });
+		if (body !== undefined) {
+			writeFileSync(join(home, ".8gent", "providers.json"), JSON.stringify(body));
+		}
+		return home;
+	};
+
+	test("reads what onboarding wrote", () => {
+		const home = homeWith({ activeProvider: "lmstudio", activeModel: "gemma-4-26b-a4b-it" });
+		expect(readSavedProviderChoice({}, home)).toEqual({
+			provider: "lmstudio",
+			model: "gemma-4-26b-a4b-it",
+		});
+	});
+
+	test("no file, no activeProvider, or a broken file is no choice", () => {
+		expect(readSavedProviderChoice({}, homeWith(undefined))).toBeUndefined();
+		expect(readSavedProviderChoice({}, homeWith({ providers: {} }))).toBeUndefined();
+		const broken = homeWith(undefined);
+		writeFileSync(join(broken, ".8gent", "providers.json"), "{nope");
+		expect(readSavedProviderChoice({}, broken)).toBeUndefined();
+	});
+
+	test("EIGHT_PROVIDERS_SETTINGS_PATH wins over the home directory", () => {
+		const home = homeWith({ activeProvider: "ollama" });
+		const alt = join(home, "alt.json");
+		writeFileSync(alt, JSON.stringify({ activeProvider: "openrouter" }));
+		expect(readSavedProviderChoice({ EIGHT_PROVIDERS_SETTINGS_PATH: alt }, home)?.provider).toBe(
+			"openrouter",
+		);
+	});
+});
+
+describe("providerRouteNotice", () => {
+	test("did not answer (no reason)", () => {
+		expect(providerRouteNotice("gemma-4-26b-a4b-it", "ollama", "8gate:latest")).toBe(
+			"Asked for gemma-4-26b-a4b-it; Ollama 8gate:latest is answering instead, because it did not answer.",
+		);
+	});
+
+	test("capability switch is worded as a step-level choice", () => {
+		expect(providerRouteNotice("gemma-4", "lmstudio", "ornith-1.0-9b", "capability")).toBe(
+			"Asked for gemma-4; LM Studio ornith-1.0-9b is answering instead, because it cannot call tools.",
+		);
+	});
+
+	test("a missing model says it is not installed", () => {
+		expect(providerRouteNotice("qwen3:14b", "ollama", "8gate:latest", "missing")).toBe(
+			"Asked for qwen3:14b; Ollama 8gate:latest is answering instead, because it is not installed locally.",
+		);
+	});
+});
+
+describe("shouldShowRouteNotice", () => {
+	test("A, B, A prints A and B once each: two lines, not three", () => {
+		const shown = new Set<string>();
+		const printed = ["A", "B", "A"].filter((k) => shouldShowRouteNotice(shown, k));
+		expect(printed).toEqual(["A", "B"]);
+	});
+
+	test("the same route with a different reason is a different notice", () => {
+		const shown = new Set<string>();
+		expect(shouldShowRouteNotice(shown, "a>b|missing")).toBe(true);
+		expect(shouldShowRouteNotice(shown, "a>b|capability")).toBe(true);
+	});
+});
+
+describe("resolveChatChoice", () => {
+	test("a saved provider chat cannot run falls back to the router with the reason", async () => {
+		// anthropic speaks its own wire shape, so it still has no chat runtime here.
+		const c = await resolveChatChoice(
+			{},
+			deps({ saved: { provider: "anthropic", model: "claude" } }),
+		);
+		expect(c.provider).toBe("ollama");
+		expect(c.source).toBe("router");
+		expect(c.notice).toBe("anthropic is not a chat provider, using Ollama 8gate:latest");
+	});
+
+	test("a keyed hosted provider such as groq is a chat runtime and is honoured (#4622)", async () => {
+		const c = await resolveChatChoice({}, deps({ saved: { provider: "groq", model: "llama" } }));
+		expect(c.provider).toBe("groq");
+		expect(c.source).toBe("saved");
+		expect(c.notice).toBeUndefined();
+	});
+
+	test("a saved chat runtime is honoured, and an unreachable one keeps its own notice", async () => {
+		expect((await resolveChatChoice({}, deps())).provider).toBe("lmstudio");
+		const down = await resolveChatChoice({}, deps({ reachable: async () => false }));
+		expect(down.notice).toBe("LM Studio not reachable, using Ollama 8gate:latest");
+	});
+});
+
+describe("resolveProviderChoice: one hosted key, no local runtime (#4720)", () => {
+	const keyed = (names: string[]) => ({ hostedKeyed: async () => names });
+	test("Ollama down, nothing saved, one key: that provider, and where it came from", async () => {
+		const c = await resolveProviderChoice(
+			{},
+			deps({ saved: undefined, ollamaUp: async () => false, ...keyed(["minimax"]) }),
+		);
+		expect(c).toMatchObject({ provider: "minimax", source: "router", switchedFrom: "ollama" });
+	});
+	test("a saved local choice that is down gives way to the one keyed provider too", async () => {
+		const c = await resolveProviderChoice(
+			{},
+			deps({
+				saved: { provider: "ollama", model: "x" },
+				reachable: async () => false,
+				ollamaUp: async () => false,
+				...keyed(["minimax"]),
+			}),
+		);
+		expect(c).toMatchObject({ provider: "minimax", switchedFrom: "ollama" });
+	});
+	test("a saved hosted choice is kept over the local default", async () => {
+		const c = await resolveProviderChoice(
+			{},
+			deps({
+				saved: { provider: "minimax", model: "m" },
+				ollamaUp: async () => true,
+				...keyed(["minimax"]),
+			}),
+		);
+		expect(c).toMatchObject({ provider: "minimax", model: "m", source: "saved" });
+	});
+	test("two keys: no guess, the old router fallback stands", async () => {
+		const c = await resolveProviderChoice(
+			{},
+			deps({ saved: undefined, ollamaUp: async () => false, ...keyed(["minimax", "openrouter"]) }),
+		);
+		expect(c.switchedFrom).toBeUndefined();
+		expect(c.provider).toBe("openrouter");
+	});
+	test("--provider is never swapped", async () => {
+		const c = await resolveProviderChoice(
+			{ provider: "ollama" },
+			deps({ ollamaUp: async () => false, ...keyed(["minimax"]) }),
+		);
+		expect(c).toMatchObject({ provider: "ollama", source: "flag" });
+	});
+	test("Ollama up wins over a lone key when nothing is saved", async () => {
+		const c = await resolveProviderChoice({}, deps({ saved: undefined, ...keyed(["minimax"]) }));
+		expect(c.provider).toBe("ollama");
+	});
+});

@@ -1,0 +1,2 @@
+# Written by 8gent: the workspace state DB and its WAL/SHM files are local.
+state.db*

@@ -1,0 +1,12 @@
+{
+	"name": "@8gent/film-craft",
+	"version": "0.1.0",
+	"description": "The 8GI film look as presets (palette, type, title card, lower third, grade, camera move, transition, pacing, music bed) and the magick + ffmpeg recipe that applies them",
+	"type": "module",
+	"main": "index.ts",
+	"types": "index.ts",
+	"scripts": {
+		"test": "bun test"
+	},
+	"license": "Apache-2.0"
+}

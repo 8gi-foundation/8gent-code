@@ -1,0 +1,55 @@
+name: Semgrep Static Analysis
+
+# Container pull + full scan is expensive. Run on PRs (catches issues before
+# merge) and weekly (catches drift). Push-to-main was redundant with PR.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: semgrep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    # NON-blocking - informational only
+    continue-on-error: true
+    permissions:
+      contents: read
+    container:
+      image: returntocorp/semgrep
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Run Semgrep
+        run: semgrep scan --config auto --sarif --output semgrep-results.sarif
+
+      # Was github/codeql-action/upload-sarif@v3. That step failed on EVERY PR
+      # with "Resource not accessible by integration", which turned the whole
+      # "Static Analysis" check red while the scan itself passed - a red X that
+      # said nothing about the code.
+      #
+      # Adding `security-events: write` does NOT fix it. 8gent-code is a PRIVATE
+      # repo on an org with the Team plan, and Code Security is disabled:
+      #   gh api repos/8gi-foundation/8gent-code/code-scanning/analyses
+      #   -> 403 "Code Security must be enabled for this repository to use code scanning."
+      # Code scanning on private repos needs GitHub Advanced Security, which the
+      # Team plan does not include. The permission would only change the error
+      # text, not the outcome.
+      #
+      # So the SARIF goes somewhere it can actually go: a build artifact. The
+      # findings stay retrievable, and the check now means "the scan ran".
+      # If Code Security is ever enabled here, restore upload-sarif and add
+      # `security-events: write` + `actions: read` to the permissions block above.
+      - name: Upload SARIF as artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: semgrep-results
+          path: semgrep-results.sarif
+          retention-days: 30
+          if-no-files-found: warn

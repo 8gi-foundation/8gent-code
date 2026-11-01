@@ -1,0 +1,2 @@
+# Empty on purpose: bin/8gent-run.js passes this as --config so a bunfig.toml
+# in the user's working directory is never loaded (#4013).

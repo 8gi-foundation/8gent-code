@@ -1,0 +1,51 @@
+# Pre-commit Configuration for 8gent-code
+# Catches secrets and issues BEFORE they're committed
+#
+# Setup:
+#   pip install pre-commit && pre-commit install
+#   Commits will now be scanned automatically
+
+repos:
+  # Gitleaks - Secret Detection
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=10240']  # 10MB - sprites, media assets
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-yaml
+        args: ['--unsafe']  # Allow custom tags
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  # Biome - lint staged TypeScript / TSX files
+  # Runs only on what you're about to commit, so existing
+  # warnings in untouched files don't block your commit.
+  - repo: local
+    hooks:
+      - id: biome-lint-staged
+        name: Biome lint (staged)
+        entry: bunx biome check --staged --no-errors-on-unmatched
+        language: system
+        types_or: [ts, tsx, js, jsx, json]
+        pass_filenames: false
+
+# Exclude patterns
+exclude: |
+  (?x)^(
+    .*\.min\.js|
+    .*\.min\.css|
+    node_modules/|
+    \.git/|
+    dist/|
+    build/|
+    __pycache__/
+  )$

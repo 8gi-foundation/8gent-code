@@ -1,0 +1,1226 @@
+/**
+ * 8gent Code - Multi-Agent Orchestration
+ *
+ * Enables spawning multiple agents to work in parallel on complex tasks.
+ * Features:
+ * - AgentPool: Manages multiple Agent instances
+ * - TaskQueue: Distributes work across agents
+ * - Message passing between agents via shared context
+ * - Background agent execution with /spawn, /agents, /join commands
+ */
+
+import { AsyncLocalStorage } from "node:async_hooks";
+import { EventEmitter } from "node:events";
+import * as os from "node:os";
+import * as path from "node:path";
+import { pruneDoneJobs, writeJobFile } from "../core/job-file";
+import type { AgentConfig as EightAgentConfig } from "../eight/types";
+import type { PermissionModeHolder } from "../permissions/permission-mode";
+import { hostedAllowed, isHostedProvider } from "../providers/failover";
+import { withChildGuidance } from "./child-guidance";
+import { currentProviderPin, inheritedProviderFields } from "./provider-pin";
+import { type FileVerdict, type ScopeBaseline, snapshotScope, verifyScope } from "./verify-scope";
+
+// ============================================
+// Agent depth (#3331, 8SO ruling msg 3552)
+// ============================================
+
+/**
+ * The deepest an agent may be. The user's own agent is depth 0; each spawn
+ * makes a child one deeper, and a spawn that would make a child deeper than
+ * this is refused at dispatch. Enforced in code, never in a prompt.
+ */
+export const MAX_AGENT_DEPTH = 3;
+
+/** Env var a process child (claude / shell runtime) is started with: its depth. */
+export const AGENT_DEPTH_ENV = "EIGHT_AGENT_DEPTH";
+
+/**
+ * This process's own depth, read once at load: 0 for a user's session, N for
+ * a process an agent at depth N-1 started. Read once, so nothing that runs in
+ * the process later can lower it by changing the env.
+ *
+ * Fails closed: unset or empty is 0, but any value that is not a plain
+ * non-negative decimal integer (abc, -1, 3.5, 1e309, 0x3) is treated as
+ * MAX_AGENT_DEPTH, so a corrupted or tampered env can never reset the budget.
+ */
+const PROCESS_AGENT_DEPTH = (() => {
+	const raw = process.env[AGENT_DEPTH_ENV]?.trim();
+	if (raw === undefined || raw === "") return 0;
+	if (!/^\d+$/.test(raw)) return MAX_AGENT_DEPTH;
+	const n = Number(raw);
+	return Number.isSafeInteger(n) ? n : MAX_AGENT_DEPTH;
+})();
+
+/** The depth of the agent whose call is in flight, bound by the pool around each child's run. */
+const _depth = new AsyncLocalStorage<number>();
+
+/** The depth of the agent making this call. Never below the process's own depth. */
+export function currentAgentDepth(): number {
+	return Math.max(_depth.getStore() ?? 0, PROCESS_AGENT_DEPTH);
+}
+
+/**
+ * Run fn as an agent at `depth`. It can only deepen: binding a shallower depth
+ * than the current one keeps the current one, so a child cannot reset itself.
+ */
+export function runAtAgentDepth<T>(depth: number, fn: () => T): T {
+	return _depth.run(Math.max(depth, currentAgentDepth()), fn);
+}
+
+/** Null when an agent at the current depth may spawn; otherwise the tool error to return. */
+export function agentDepthRefusal(): string | null {
+	const depth = currentAgentDepth();
+	if (depth < MAX_AGENT_DEPTH) return null;
+	return `[AGENT DEPTH BLOCKED] spawn_agent did NOT run: this agent is at depth ${depth} and MAX_AGENT_DEPTH is ${MAX_AGENT_DEPTH}, so it may not start another agent. Do the work yourself, or finish and report back to the agent that started you.`;
+}
+
+/**
+ * Env to merge LAST into any process an agent starts (#3341): the child's
+ * depth, one deeper than the agent whose call is in flight. Spread after
+ * process.env and after any caller env, so neither can lower it.
+ *
+ * Fails closed: if the child's depth would not be a safe non-negative integer
+ * (NaN, Infinity, past 2^53), the child would parse it as MAX_AGENT_DEPTH and
+ * run, so it is given MAX_AGENT_DEPTH + 1 instead and refuses.
+ */
+export function childAgentEnv(): { [AGENT_DEPTH_ENV]: string } {
+	const child = currentAgentDepth() + 1;
+	const safe = Number.isSafeInteger(child) && child >= 0;
+	return { [AGENT_DEPTH_ENV]: String(safe ? child : MAX_AGENT_DEPTH + 1) };
+}
+
+/** This process's inherited depth, as parsed fail-closed at load. */
+export function processAgentDepth(): number {
+	return PROCESS_AGENT_DEPTH;
+}
+
+/**
+ * Null when this process may run a model loop; otherwise the message to print.
+ * A process at MAX_AGENT_DEPTH runs (its spawns are refused by
+ * agentDepthRefusal); one deeper than that does not start at all.
+ */
+export function processAgentDepthRefusal(): string | null {
+	if (PROCESS_AGENT_DEPTH <= MAX_AGENT_DEPTH) return null;
+	return `[AGENT DEPTH BLOCKED] 8gent did NOT start: this process was started by an agent at depth ${PROCESS_AGENT_DEPTH - 1} (${AGENT_DEPTH_ENV}=${PROCESS_AGENT_DEPTH}) and MAX_AGENT_DEPTH is ${MAX_AGENT_DEPTH}. Do the work in the calling agent instead.`;
+}
+
+/** Thrown where a model loop would start in a process deeper than MAX_AGENT_DEPTH. */
+export class AgentDepthError extends Error {
+	override name = "AgentDepthError";
+}
+
+/** Exit code for a refused start: sysexits EX_NOPERM, distinct from a crash (1). */
+export const AGENT_DEPTH_EXIT_CODE = 77;
+
+// ============================================
+// Parent session (#3710)
+// ============================================
+
+/** Where an agent's model runs: what a child inherits from the session that spawns it. */
+export interface ChildRuntime {
+	runtime: string;
+	model: string;
+	baseUrl?: string;
+}
+
+/** The provider of the agent whose turn is in flight, read when a child is spawned. */
+const _parentSession = new AsyncLocalStorage<() => ChildRuntime>();
+
+/**
+ * Run fn as a session whose children inherit `get()`. A getter, not a value,
+ * so a child spawned after a reroute or a /model switch gets the model the
+ * parent is on now. Agent.chat binds it around each turn.
+ */
+export function runAsParentSession<T>(get: () => ChildRuntime, fn: () => T): T {
+	return _parentSession.run(get, fn);
+}
+
+/** The spawning session's provider, model and baseUrl; undefined outside any session. */
+export function currentParentSession(): ChildRuntime | undefined {
+	const get = _parentSession.getStore();
+	if (!get) return undefined;
+	const { runtime, model, baseUrl } = get();
+	return { runtime, model, ...(baseUrl ? { baseUrl } : {}) };
+}
+
+/**
+ * The provider a child runs on when no session spawned it (a /spawn from the
+ * REPL, a direct pool call): the same local default the `8gent` CLI uses.
+ */
+function localDefaultRuntime(): ChildRuntime {
+	return { runtime: "ollama", model: process.env.EIGHT_MODEL?.trim() || "eight-1.0-q3:14b" };
+}
+
+/** Null when a child may run on `runtime`; otherwise why not. */
+export function hostedChildRefusal(runtime: string, model: string): string | null {
+	if (!isHostedProvider(runtime) || hostedAllowed()) return null;
+	return `[HOSTED BLOCKED] spawn_agent did NOT run: the child would use the hosted provider "${runtime}" (model "${model}"). Hosted providers are off unless the user sets EIGHT_ALLOW_HOSTED=1. Omit model to run the child on this session's model.`;
+}
+
+// ============================================
+// Types
+// ============================================
+
+type AgentRuntimeName = EightAgentConfig["runtime"];
+
+export type AgentStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
+
+export interface AgentTask {
+	id: string;
+	description: string;
+	priority: number;
+	createdAt: Date;
+	startedAt?: Date;
+	completedAt?: Date;
+	status: AgentStatus;
+	result?: unknown;
+	error?: string;
+	agentId?: string;
+	parentTaskId?: string;
+	subtasks?: string[];
+}
+
+export interface AgentConfig {
+	id: string;
+	model: string;
+	/** Its provider: the spawning session's unless the caller names one (#3710). */
+	runtime: string;
+	/** Its endpoint: the spawning session's when the provider is inherited. */
+	baseUrl?: string;
+	systemPrompt?: string;
+	maxTurns?: number;
+	workingDirectory: string;
+	capabilities?: string[];
+	/** Files (or directories) the agent may write or edit; undefined = no limit (#3101). */
+	allowedPaths?: string[];
+	/** Its permission mode, clamped to and linked with its parent's (#3170); undefined = none. */
+	permission?: PermissionModeHolder;
+	/**
+	 * Set only when its spawner was pinned to a provider the user named (#3762):
+	 * the child runs on that runtime, pinned, and never fails over.
+	 */
+	providerPinned?: boolean;
+	/** Its depth: its spawner's depth + 1, set by the pool, never by the caller (#3331). */
+	depth: number;
+}
+
+export interface SpawnedAgent {
+	id: string;
+	config: AgentConfig;
+	task: AgentTask;
+	status: AgentStatus;
+	startedAt: Date;
+	completedAt?: Date;
+	messages: AgentMessage[];
+	tokenCount: number;
+	/**
+	 * Files this agent changed: every successful write_file / edit_file (and
+	 * other scoped write) it ran, relative to its working directory. check_agent
+	 * reports it, so an agent that ended having changed nothing is visible.
+	 */
+	filesChanged: string[];
+	/** Hash of each scoped file at spawn (#3126); compared when the agent ends. */
+	scopeBaseline: ScopeBaseline;
+	/** Per scoped file: unchanged, fixed (its test passes), test fails, or not verified. */
+	verification?: FileVerdict[];
+}
+
+export interface AgentMessage {
+	id: string;
+	fromAgent: string;
+	toAgent: string | "broadcast";
+	type: "request" | "response" | "notification" | "result";
+	content: unknown;
+	timestamp: Date;
+}
+
+export interface SharedContext {
+	key: string;
+	value: unknown;
+	setBy: string;
+	timestamp: Date;
+}
+
+export interface QueuedTask extends AgentTask {
+	dependencies: string[];
+	retryCount: number;
+	maxRetries: number;
+}
+
+// ============================================
+// Agent Pool
+// ============================================
+
+/** The Control-tab row for one background run, from its status now. */
+function reportHelperJob(a: SpawnedAgent): void {
+	const state =
+		a.status === "running"
+			? "running"
+			: a.status === "idle"
+				? "queued"
+				: a.status === "failed"
+					? "waiting-on-you"
+					: "done";
+	writeJobFile({
+		kind: "helper",
+		name: `helper-${a.id}`,
+		state,
+		stage: a.status === "idle" ? "waiting for a free slot" : a.status,
+		last: (a.completedAt ?? a.startedAt).toISOString(),
+		waitingOn:
+			a.status === "failed" ? `check ${a.id}: ${a.task.error ?? "run failed"}`.slice(0, 160) : null,
+		detail: a.task.description.slice(0, 80),
+	});
+}
+
+export class AgentPool extends EventEmitter {
+	private agents: Map<string, SpawnedAgent> = new Map();
+	private sharedContext: Map<string, SharedContext> = new Map();
+	private maxConcurrent: number;
+	private runningCount = 0;
+	private idCounter = 0;
+
+	constructor(maxConcurrent = 4) {
+		super();
+		this.maxConcurrent = maxConcurrent;
+		// One Control-tab row per run (#5073), written on the events the pool
+		// already emits. Nothing here polls.
+		for (const ev of [
+			"agent:spawned",
+			"agent:started",
+			"agent:completed",
+			"agent:failed",
+			"agent:cancelled",
+		]) {
+			this.on(ev, (a: SpawnedAgent) => reportHelperJob(a));
+		}
+	}
+
+	/**
+	 * Spawn a new background agent with a task
+	 */
+	async spawnAgent(taskDescription: string, config?: Partial<AgentConfig>): Promise<SpawnedAgent> {
+		// The backstop for every in-process spawn path (#3331). The depth comes
+		// from the spawner's bound context; a depth in config is ignored.
+		const refusal = agentDepthRefusal();
+		if (refusal) throw new Error(refusal);
+		const depth = currentAgentDepth() + 1;
+		// The child runs where its parent runs (#3710). A named model keeps the
+		// parent's provider and endpoint; a named runtime brings its own.
+		const parent = currentParentSession() ?? localDefaultRuntime();
+		// A pinned spawner's provider rides to the child, captured here: a queued
+		// child starts later, outside the spawner's context (#3762).
+		const inherited = inheritedProviderFields(currentProviderPin(), config?.model);
+		const runtime = inherited.runtime ?? (config?.runtime || parent.runtime);
+		const sameRuntime = runtime === parent.runtime;
+		const model = config?.model || (sameRuntime ? parent.model : "") || inherited.model || "";
+		if (!model) throw new Error(`No model given for a child on runtime "${runtime}"`);
+		const hosted = hostedChildRefusal(runtime, model);
+		if (hosted) throw new Error(hosted);
+		const baseUrl = config?.baseUrl ?? (sameRuntime ? parent.baseUrl : undefined);
+		// A new run is the moment to drop yesterday's finished rows (an event, not a timer).
+		pruneDoneJobs(24 * 60 * 60 * 1000);
+		const agentId = this.generateId("agent");
+		const taskId = this.generateId("task");
+
+		const agentConfig: AgentConfig = {
+			id: agentId,
+			model,
+			runtime,
+			...(baseUrl ? { baseUrl } : {}),
+			...(inherited.providerPinned ? { providerPinned: true } : {}),
+			systemPrompt: config?.systemPrompt,
+			maxTurns: config?.maxTurns || 20,
+			workingDirectory: config?.workingDirectory || process.cwd(),
+			capabilities: config?.capabilities || [],
+			allowedPaths: config?.allowedPaths,
+			permission: config?.permission,
+			depth,
+		};
+
+		const task: AgentTask = {
+			id: taskId,
+			description: taskDescription,
+			priority: 1,
+			createdAt: new Date(),
+			status: "idle",
+		};
+
+		const spawnedAgent: SpawnedAgent = {
+			id: agentId,
+			config: agentConfig,
+			task,
+			status: "idle",
+			startedAt: new Date(),
+			messages: [],
+			tokenCount: 0,
+			filesChanged: [],
+			scopeBaseline: snapshotScope(agentConfig.workingDirectory, agentConfig.allowedPaths),
+		};
+
+		this.agents.set(agentId, spawnedAgent);
+
+		// Start execution if under concurrency limit
+		if (this.runningCount < this.maxConcurrent) {
+			this.executeAgent(agentId);
+		}
+
+		this.emit("agent:spawned", spawnedAgent);
+		return spawnedAgent;
+	}
+
+	/**
+	 * Execute an agent's task at its own depth. Bound here, not inherited from
+	 * whoever calls: a queued agent is started from a sibling's finish, and must
+	 * still run at the depth it was spawned with.
+	 */
+	private executeAgent(agentId: string): Promise<void> {
+		const depth = this.agents.get(agentId)?.config.depth ?? MAX_AGENT_DEPTH;
+		return _depth.run(Math.max(depth, PROCESS_AGENT_DEPTH), () => this.runAgent(agentId));
+	}
+
+	/** The agent's model loop, run inside executeAgent's depth binding. */
+	private async runAgent(agentId: string): Promise<void> {
+		const spawnedAgent = this.agents.get(agentId);
+		if (!spawnedAgent) return;
+
+		spawnedAgent.status = "running";
+		spawnedAgent.task.status = "running";
+		spawnedAgent.task.startedAt = new Date();
+		this.runningCount++;
+
+		this.emit("agent:started", spawnedAgent);
+
+		try {
+			// Import the Agent class dynamically to avoid circular deps
+			const { Agent } = await import("../eight");
+			const { SCOPED_WRITE_TOOLS, scopedWriteTarget } = await import("../permissions/edit-guards");
+			const { relativeTo } = await import("./agent-outcome");
+
+			const agent = new Agent({
+				model: spawnedAgent.config.model,
+				runtime: spawnedAgent.config.runtime as AgentRuntimeName,
+				baseUrl: spawnedAgent.config.baseUrl,
+				...(spawnedAgent.config.providerPinned ? { providerPinned: true } : {}),
+				systemPrompt: spawnedAgent.config.systemPrompt,
+				maxTurns: spawnedAgent.config.maxTurns,
+				workingDirectory: spawnedAgent.config.workingDirectory,
+				allowedPaths: spawnedAgent.config.allowedPaths,
+				permission: spawnedAgent.config.permission,
+				// A sub-agent never opens windows on the user's screen (#3107).
+				openOnWrite: false,
+				events: {
+					onToolEnd: (e) => {
+						const file = scopedWriteTarget(e.toolName, e.args);
+						if (!e.success || !SCOPED_WRITE_TOOLS.has(e.toolName) || typeof file !== "string")
+							return;
+						const rel = relativeTo(spawnedAgent.config.workingDirectory, file);
+						if (!spawnedAgent.filesChanged.includes(rel)) spawnedAgent.filesChanged.push(rel);
+					},
+				},
+			});
+
+			if (!(await agent.isReady())) {
+				throw new Error(
+					`${spawnedAgent.config.runtime} is not reachable for model ${spawnedAgent.config.model}`,
+				);
+			}
+
+			// Execute the task
+			let result = await agent.chat(withChildGuidance(spawnedAgent.task.description));
+
+			// A child that ended with part of its scope unwritten (the note beside
+			// its edit) is asked to finish by the same child, which still holds the
+			// task in its history, instead of leaving a new child to write it.
+			const { unwrittenScopeFiles, finishScopePrompt, MAX_FINISH_FOLLOW_UPS } = await import(
+				"./agent-outcome"
+			);
+			for (let i = 0; i < MAX_FINISH_FOLLOW_UPS; i++) {
+				if (spawnedAgent.status !== "running") break;
+				const unwritten = unwrittenScopeFiles(
+					spawnedAgent,
+					Object.keys(spawnedAgent.scopeBaseline),
+				);
+				if (unwritten.length === 0) break;
+				result = await agent.chat(finishScopePrompt(unwritten));
+			}
+
+			// Evidence before "completed": did the scoped files change, and do their tests pass?
+			if (Object.keys(spawnedAgent.scopeBaseline).length > 0) {
+				try {
+					// Run the test the way the sub-agent's own run_command would: an
+					// executor built exactly as the Agent builds its own, so every gate
+					// (maker-checker, ToolG8, permissions, sanitizer, System One) applies.
+					const { ToolExecutor } = await import("../eight/tools");
+					const gated = new ToolExecutor(
+						spawnedAgent.config.workingDirectory,
+						"primary",
+						undefined,
+						{
+							unattended: false,
+							allowedPaths: spawnedAgent.config.allowedPaths,
+							openOnWrite: false,
+							permission: spawnedAgent.config.permission,
+						},
+					);
+					spawnedAgent.verification = await verifyScope(
+						spawnedAgent.config.workingDirectory,
+						spawnedAgent.scopeBaseline,
+						(command, timeoutMs) =>
+							gated.execute("run_command", { command, timeout: timeoutMs / 1000 }),
+					);
+				} catch {
+					// No verdict is better than a wrong one: the outcome falls back to "not verified".
+				}
+			}
+
+			// Read through a function: cancel() can flip status during the awaits above,
+			// which the compiler's narrowing from the earlier loop guard cannot see.
+			const wasCancelled = (): boolean => spawnedAgent.status === "cancelled";
+			if (wasCancelled()) return;
+			spawnedAgent.status = "completed";
+			spawnedAgent.task.status = "completed";
+			spawnedAgent.task.result = result;
+			spawnedAgent.completedAt = new Date();
+			spawnedAgent.task.completedAt = new Date();
+			spawnedAgent.tokenCount = agent.getHistoryLength() * 100; // Rough estimate
+
+			this.emit("agent:completed", spawnedAgent);
+		} catch (err) {
+			spawnedAgent.status = "failed";
+			spawnedAgent.task.status = "failed";
+			spawnedAgent.task.error = err instanceof Error ? err.message : String(err);
+			spawnedAgent.completedAt = new Date();
+			spawnedAgent.task.completedAt = new Date();
+
+			this.emit("agent:failed", spawnedAgent);
+		} finally {
+			this.runningCount--;
+			this.processQueue();
+		}
+	}
+
+	/**
+	 * Process any queued agents
+	 */
+	private processQueue(): void {
+		for (const [agentId, agent] of this.agents) {
+			if (agent.status === "idle" && this.runningCount < this.maxConcurrent) {
+				this.executeAgent(agentId);
+			}
+		}
+	}
+
+	/**
+	 * Get an agent by ID
+	 */
+	getAgent(agentId: string): SpawnedAgent | undefined {
+		return this.agents.get(agentId);
+	}
+
+	/**
+	 * List all agents
+	 */
+	listAgents(): SpawnedAgent[] {
+		return Array.from(this.agents.values());
+	}
+
+	/**
+	 * List running agents
+	 */
+	listRunningAgents(): SpawnedAgent[] {
+		return this.listAgents().filter((a) => a.status === "running");
+	}
+
+	/**
+	 * List completed agents
+	 */
+	listCompletedAgents(): SpawnedAgent[] {
+		return this.listAgents().filter((a) => a.status === "completed");
+	}
+
+	/**
+	 * Resolve when any agent in the pool finishes or fails, or after `timeoutMs`,
+	 * whichever comes first; at once when `agentId` is not running. check_agent
+	 * waits here instead of the Orchestrator guessing a sleep, so a sibling that
+	 * ends early is reported while the others still run.
+	 */
+	waitForAnyFinish(agentId: string, timeoutMs: number): Promise<void> {
+		const agent = this.agents.get(agentId);
+		if (!agent || timeoutMs <= 0 || (agent.status !== "running" && agent.status !== "idle")) {
+			return Promise.resolve();
+		}
+		return new Promise((resolve) => {
+			const done = () => {
+				clearTimeout(timer);
+				this.off("agent:completed", done);
+				this.off("agent:failed", done);
+				resolve();
+			};
+			const timer = setTimeout(done, timeoutMs);
+			this.on("agent:completed", done);
+			this.on("agent:failed", done);
+		});
+	}
+
+	/**
+	 * Wait for an agent to complete
+	 */
+	async joinAgent(agentId: string, timeoutMs = 300000): Promise<SpawnedAgent> {
+		const agent = this.agents.get(agentId);
+		if (!agent) {
+			throw new Error(`Agent not found: ${agentId}`);
+		}
+
+		if (agent.status === "completed" || agent.status === "failed") {
+			return agent;
+		}
+
+		return new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => {
+				reject(new Error(`Timeout waiting for agent ${agentId}`));
+			}, timeoutMs);
+
+			const checkComplete = (completedAgent: SpawnedAgent) => {
+				if (completedAgent.id === agentId) {
+					clearTimeout(timeout);
+					this.off("agent:completed", checkComplete);
+					this.off("agent:failed", checkComplete);
+					resolve(completedAgent);
+				}
+			};
+
+			this.on("agent:completed", checkComplete);
+			this.on("agent:failed", checkComplete);
+		});
+	}
+
+	/**
+	 * Cancel an agent
+	 */
+	cancelAgent(agentId: string): boolean {
+		const agent = this.agents.get(agentId);
+		if (!agent || agent.status !== "running") return false;
+
+		agent.status = "cancelled";
+		agent.task.status = "cancelled";
+		agent.completedAt = new Date();
+		agent.task.completedAt = new Date();
+
+		this.emit("agent:cancelled", agent);
+		return true;
+	}
+
+	/**
+	 * Send a message to an agent
+	 */
+	sendMessage(fromAgentId: string, toAgentId: string | "broadcast", content: unknown): void {
+		const message: AgentMessage = {
+			id: this.generateId("msg"),
+			fromAgent: fromAgentId,
+			toAgent: toAgentId,
+			type: "notification",
+			content,
+			timestamp: new Date(),
+		};
+
+		if (toAgentId === "broadcast") {
+			// Send to all agents
+			for (const agent of this.agents.values()) {
+				agent.messages.push(message);
+			}
+		} else {
+			const targetAgent = this.agents.get(toAgentId);
+			if (targetAgent) {
+				targetAgent.messages.push(message);
+			}
+		}
+
+		this.emit("message", message);
+	}
+
+	/**
+	 * Set shared context value
+	 */
+	setContext(key: string, value: unknown, setBy: string): void {
+		this.sharedContext.set(key, {
+			key,
+			value,
+			setBy,
+			timestamp: new Date(),
+		});
+
+		this.emit("context:updated", { key, value, setBy });
+	}
+
+	/**
+	 * Get shared context value
+	 */
+	getContext(key: string): unknown {
+		return this.sharedContext.get(key)?.value;
+	}
+
+	/**
+	 * Get all shared context
+	 */
+	getAllContext(): Record<string, unknown> {
+		const context: Record<string, unknown> = {};
+		for (const [key, ctx] of this.sharedContext) {
+			context[key] = ctx.value;
+		}
+		return context;
+	}
+
+	/**
+	 * Clear shared context
+	 */
+	clearContext(): void {
+		this.sharedContext.clear();
+	}
+
+	/**
+	 * Generate unique ID
+	 */
+	private generateId(prefix: string): string {
+		this.idCounter++;
+		return `${prefix}-${Date.now()}-${this.idCounter}`;
+	}
+
+	/**
+	 * Get pool stats
+	 */
+	getStats(): {
+		totalAgents: number;
+		running: number;
+		completed: number;
+		failed: number;
+		idle: number;
+	} {
+		const agents = this.listAgents();
+		return {
+			totalAgents: agents.length,
+			running: agents.filter((a) => a.status === "running").length,
+			completed: agents.filter((a) => a.status === "completed").length,
+			failed: agents.filter((a) => a.status === "failed").length,
+			idle: agents.filter((a) => a.status === "idle").length,
+		};
+	}
+
+	/**
+	 * Clear completed/failed agents
+	 */
+	clearFinished(): number {
+		let cleared = 0;
+		for (const [id, agent] of this.agents) {
+			if (
+				agent.status === "completed" ||
+				agent.status === "failed" ||
+				agent.status === "cancelled"
+			) {
+				this.agents.delete(id);
+				cleared++;
+			}
+		}
+		return cleared;
+	}
+
+	/**
+	 * Get maximum concurrent agents
+	 */
+	getMaxConcurrent(): number {
+		return this.maxConcurrent;
+	}
+
+	/**
+	 * Set maximum concurrent agents
+	 */
+	setMaxConcurrent(max: number): void {
+		this.maxConcurrent = max;
+		this.processQueue();
+	}
+}
+
+// ============================================
+// Task Queue
+// ============================================
+
+export class TaskQueue extends EventEmitter {
+	private queue: QueuedTask[] = [];
+	private processing: Map<string, QueuedTask> = new Map();
+	private completed: Map<string, QueuedTask> = new Map();
+	private agentPool: AgentPool;
+	private isProcessing = false;
+	private idCounter = 0;
+
+	constructor(agentPool: AgentPool) {
+		super();
+		this.agentPool = agentPool;
+
+		// Listen for agent completions to process dependencies
+		this.agentPool.on("agent:completed", (agent: SpawnedAgent) => {
+			this.onTaskCompleted(agent.task.id);
+		});
+
+		this.agentPool.on("agent:failed", (agent: SpawnedAgent) => {
+			this.onTaskFailed(agent.task.id);
+		});
+	}
+
+	/**
+	 * Add a task to the queue
+	 */
+	enqueue(
+		description: string,
+		options?: {
+			priority?: number;
+			dependencies?: string[];
+			maxRetries?: number;
+		},
+	): QueuedTask {
+		const task: QueuedTask = {
+			id: this.generateId("qtask"),
+			description,
+			priority: options?.priority || 1,
+			dependencies: options?.dependencies || [],
+			retryCount: 0,
+			maxRetries: options?.maxRetries || 3,
+			createdAt: new Date(),
+			status: "idle",
+		};
+
+		// Insert sorted by priority (higher priority first)
+		const insertIndex = this.queue.findIndex((t) => t.priority < task.priority);
+		if (insertIndex === -1) {
+			this.queue.push(task);
+		} else {
+			this.queue.splice(insertIndex, 0, task);
+		}
+
+		this.emit("task:enqueued", task);
+		this.processQueue();
+
+		return task;
+	}
+
+	/**
+	 * Process the task queue
+	 */
+	private async processQueue(): Promise<void> {
+		if (this.isProcessing) return;
+		this.isProcessing = true;
+
+		while (this.queue.length > 0) {
+			// Find next task with satisfied dependencies
+			const taskIndex = this.queue.findIndex((task) => this.areDependenciesSatisfied(task));
+
+			if (taskIndex === -1) break; // No tasks ready
+
+			const task = this.queue.splice(taskIndex, 1)[0];
+			this.processing.set(task.id, task);
+
+			try {
+				const agent = await this.agentPool.spawnAgent(task.description);
+				task.agentId = agent.id;
+				task.status = "running";
+				task.startedAt = new Date();
+
+				this.emit("task:started", task);
+			} catch (err) {
+				task.status = "failed";
+				task.error = err instanceof Error ? err.message : String(err);
+				this.processing.delete(task.id);
+				this.completed.set(task.id, task);
+
+				this.emit("task:failed", task);
+			}
+		}
+
+		this.isProcessing = false;
+	}
+
+	/**
+	 * Check if task dependencies are satisfied
+	 */
+	private areDependenciesSatisfied(task: QueuedTask): boolean {
+		for (const depId of task.dependencies) {
+			const dep = this.completed.get(depId);
+			if (!dep || dep.status !== "completed") {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Handle task completion
+	 */
+	private onTaskCompleted(taskId: string): void {
+		const task = this.processing.get(taskId);
+		if (!task) return;
+
+		task.status = "completed";
+		task.completedAt = new Date();
+		this.processing.delete(taskId);
+		this.completed.set(taskId, task);
+
+		this.emit("task:completed", task);
+		this.processQueue(); // Process any dependent tasks
+	}
+
+	/**
+	 * Handle task failure
+	 */
+	private onTaskFailed(taskId: string): void {
+		const task = this.processing.get(taskId);
+		if (!task) return;
+
+		if (task.retryCount < task.maxRetries) {
+			// Retry the task
+			task.retryCount++;
+			task.status = "idle";
+			this.processing.delete(taskId);
+			this.queue.unshift(task); // Add back to front of queue
+
+			this.emit("task:retry", task);
+			this.processQueue();
+		} else {
+			// Mark as permanently failed
+			task.status = "failed";
+			task.completedAt = new Date();
+			this.processing.delete(taskId);
+			this.completed.set(taskId, task);
+
+			this.emit("task:failed", task);
+		}
+	}
+
+	/**
+	 * Get a task by ID
+	 */
+	getTask(taskId: string): QueuedTask | undefined {
+		return (
+			this.queue.find((t) => t.id === taskId) ||
+			this.processing.get(taskId) ||
+			this.completed.get(taskId)
+		);
+	}
+
+	/**
+	 * List all queued tasks
+	 */
+	listQueued(): QueuedTask[] {
+		return [...this.queue];
+	}
+
+	/**
+	 * List processing tasks
+	 */
+	listProcessing(): QueuedTask[] {
+		return Array.from(this.processing.values());
+	}
+
+	/**
+	 * List completed tasks
+	 */
+	listCompleted(): QueuedTask[] {
+		return Array.from(this.completed.values());
+	}
+
+	/**
+	 * Get queue stats
+	 */
+	getStats(): {
+		queued: number;
+		processing: number;
+		completed: number;
+		failed: number;
+	} {
+		const completedTasks = this.listCompleted();
+		return {
+			queued: this.queue.length,
+			processing: this.processing.size,
+			completed: completedTasks.filter((t) => t.status === "completed").length,
+			failed: completedTasks.filter((t) => t.status === "failed").length,
+		};
+	}
+
+	/**
+	 * Clear completed tasks
+	 */
+	clearCompleted(): number {
+		const count = this.completed.size;
+		this.completed.clear();
+		return count;
+	}
+
+	/**
+	 * Cancel a queued task
+	 */
+	cancelTask(taskId: string): boolean {
+		const queueIndex = this.queue.findIndex((t) => t.id === taskId);
+		if (queueIndex !== -1) {
+			const task = this.queue.splice(queueIndex, 1)[0];
+			task.status = "cancelled";
+			this.completed.set(taskId, task);
+			this.emit("task:cancelled", task);
+			return true;
+		}
+
+		const processingTask = this.processing.get(taskId);
+		if (processingTask?.agentId) {
+			return this.agentPool.cancelAgent(processingTask.agentId);
+		}
+
+		return false;
+	}
+
+	/**
+	 * Generate unique ID
+	 */
+	private generateId(prefix: string): string {
+		this.idCounter++;
+		return `${prefix}-${Date.now()}-${this.idCounter}`;
+	}
+}
+
+// ============================================
+// Singleton Instances
+// ============================================
+
+let agentPoolInstance: AgentPool | null = null;
+let taskQueueInstance: TaskQueue | null = null;
+
+export function getAgentPool(maxConcurrent?: number): AgentPool {
+	if (!agentPoolInstance) {
+		agentPoolInstance = new AgentPool(maxConcurrent);
+	}
+	return agentPoolInstance;
+}
+
+export function getTaskQueue(): TaskQueue {
+	if (!taskQueueInstance) {
+		taskQueueInstance = new TaskQueue(getAgentPool());
+	}
+	return taskQueueInstance;
+}
+
+export function resetOrchestration(): void {
+	agentPoolInstance = null;
+	taskQueueInstance = null;
+}
+
+// ============================================
+// Utility Functions
+// ============================================
+
+/**
+ * Format agent status for display
+ */
+export function formatAgentStatus(agent: SpawnedAgent): string {
+	const statusColors: Record<AgentStatus, string> = {
+		idle: "\x1b[33m", // Yellow
+		running: "\x1b[36m", // Cyan
+		completed: "\x1b[32m", // Green
+		failed: "\x1b[31m", // Red
+		cancelled: "\x1b[90m", // Gray
+	};
+
+	const color = statusColors[agent.status] || "";
+	const reset = "\x1b[0m";
+	const elapsed = agent.completedAt
+		? `${((agent.completedAt.getTime() - agent.startedAt.getTime()) / 1000).toFixed(1)}s`
+		: "...";
+
+	return `${color}[${agent.status.toUpperCase()}]${reset} ${agent.id} - ${agent.task.description.slice(0, 40)}... (${elapsed})`;
+}
+
+/**
+ * Parse /spawn command
+ */
+export function parseSpawnCommand(
+	input: string,
+): { task: string; options: Partial<AgentConfig> } | null {
+	if (!input.startsWith("/spawn ")) return null;
+
+	const rest = input.slice(7).trim();
+
+	// Check for options
+	const options: Partial<AgentConfig> = {};
+	let task = rest;
+
+	// Parse --model flag
+	const modelMatch = rest.match(/--model\s+(\S+)/);
+	if (modelMatch) {
+		options.model = modelMatch[1];
+		task = task.replace(modelMatch[0], "").trim();
+	}
+
+	// Parse --dir flag
+	const dirMatch = rest.match(/--dir\s+"([^"]+)"|--dir\s+(\S+)/);
+	if (dirMatch) {
+		options.workingDirectory = dirMatch[1] || dirMatch[2];
+		task = task.replace(dirMatch[0], "").trim();
+	}
+
+	return { task, options };
+}
+
+// ============================================
+// Re-export Universal CLI Spawner
+// ============================================
+
+export {
+	spawnCLIAgent,
+	getCLIAgent,
+	listCLIAgents,
+	getCLIAgentStatus,
+	clearFinishedCLIAgents,
+	resetCLIAgents,
+	type AgentRuntime,
+	type CLIAgentOptions,
+	type CLIAgentResult,
+	type RunningCLIAgent,
+} from "./universal-spawner";
+
+// ============================================
+// Re-export Subagent System
+// ============================================
+
+export {
+	SubAgentManager,
+	getSubAgentManager,
+	resetSubAgentManager,
+	formatSubAgentStatus,
+	formatSubAgentEvidence,
+	type SubAgent,
+	type SubAgentConfig,
+	type SubAgentStatus,
+	type SubAgentMessage,
+	type SubAgentEvent,
+} from "./subagent";
+
+// Enhanced Delegation System
+export {
+	DelegationManager,
+	getDelegationManager,
+	resetDelegationManager,
+	generateDelegationPrompt,
+	generateHandoffPrompt,
+	generateDecompositionPrompt,
+	type DelegationRequest,
+	type DelegationContext,
+	type DelegationConstraints,
+	type DelegationResult,
+} from "./delegation";
+
+// Multi-agent orchestration
+export { OrchestratorBus, getOrchestratorBus } from "./orchestrator-bus";
+export type {
+	OrchestratedAgent,
+	SpawnRequest,
+	ChatMessage,
+	BusEvent,
+} from "./orchestrator-bus";
+export { PERSONAS, matchPersona, getPersona, listPersonas } from "./personas";
+export type { BMADPersona } from "./personas";
+export { WorktreeManager } from "./worktree-manager";
+export type { WorktreeInfo } from "./worktree-manager";
+
+// Context isolation for multi-agent orchestration
+export { ContextManager, getContextManager } from "./context-manager";
+export type { ContextPolicy, ContextSlice } from "./context-manager";
+
+// Macro Action Decomposer — coarse-grained parallel task planning
+export {
+	decompose,
+	findParallelGroups,
+	findCriticalPath,
+	estimatePlan,
+	buildPlan,
+	createAction,
+	formatPlan,
+	type MacroAction,
+	type MacroActionPlan,
+	type DecomposeContext,
+	type PlanEstimate,
+} from "./macro-actions";
+
+// Token Throughput Tracker — global TPS metrics across agents/sessions/benchmarks
+export {
+	ThroughputTracker,
+	getThroughputTracker,
+	resetThroughputTracker,
+} from "./throughput-tracker";
+export type {
+	TokenEvent,
+	ThroughputSnapshot,
+	DailyReport,
+	AgentUtilization,
+} from "./throughput-tracker";
+
+// Worktree Pool — parallel sub-agent execution with git isolation
+export { WorktreePool } from "./worktree-pool";
+export { WorktreeMessaging } from "./worktree-messaging";
+export type {
+	WorktreeTask,
+	WorktreeResult,
+	AgentMessage as WorktreeAgentMessage,
+	WorktreePoolOptions,
+	WorktreeTaskStatus,
+} from "./worktree-pool-types";
+
+// HyperAgent Sequential Pipeline — Analyst → Critic → Implementer (Run D)
+export {
+	type InferenceParams,
+	type HyperAgentOptions,
+	type RunCheckpoint,
+	defaultParams,
+	inferenceChat,
+	adaptiveSequentialPreProcess,
+	critiqueResponse,
+	parseStructuredVerdict,
+	saveCheckpoint,
+	loadCheckpoint,
+	clearCheckpoint,
+} from "./sequential-pipeline";
+
+// Provider capability resolver — single source of {tools, json, context, vision}
+export {
+	type ToolMode,
+	type ProviderCapabilities,
+	type NativeToolsProbe,
+	type ContextWindowLookup,
+	capabilityToolMode,
+	resolveCapabilities,
+	knownContextWindow,
+	providerSupportsJsonMode,
+	saveCapabilities,
+	loadCapabilities,
+	capabilitiesPath,
+	CONTEXT_WINDOW_FLOOR,
+} from "./local-model-detect";
+
+// Role Registry — role-based runner configs for orchestrator, engineer, qa
+export {
+	ROLE_REGISTRY,
+	getRunnerConfig,
+	type RunnerConfig,
+} from "./role-registry.js";
+
+// TaskDispatcher — atomic task dispatch with claimed map + state machine
+export {
+	TaskDispatcher,
+	globalDispatcher,
+	type DispatchedTask,
+	type TaskState,
+} from "./task-dispatcher.js";
+
+// Vessel Mesh — P2P communication between remote vessels
+export { VesselMesh } from "./vessel-mesh";
+export type {
+	VesselInfo,
+	VesselMessage,
+	TaskPayload,
+	TaskResult,
+} from "./vessel-mesh";

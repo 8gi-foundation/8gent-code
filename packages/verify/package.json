@@ -1,0 +1,22 @@
+{
+	"name": "@8gent/verify",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Deterministic verification substrate: officers write references, code resolves values, the checker strips what fails, the ledger records the derivation.",
+	"main": "index.ts",
+	"types": "index.ts",
+	"exports": {
+		".": {
+			"import": "./index.ts",
+			"types": "./index.ts"
+		}
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "bun test"
+	},
+	"devDependencies": {
+		"typescript": "^5.3.0"
+	}
+}

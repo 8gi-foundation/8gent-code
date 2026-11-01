@@ -1,0 +1,13 @@
+# Python build / cache artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Local virtualenvs (provisioned at install time under ~/.8gent/venvs/marlin/)
+.venv/
+.venv-test/

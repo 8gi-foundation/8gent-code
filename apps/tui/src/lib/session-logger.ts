@@ -1,0 +1,504 @@
+/**
+ * Session Logger — writes structured session events to ~/.8gent/sessions/ as JSONL.
+ *
+ * Each line is one JSON object with { type, timestamp, sequenceNumber, ... }.
+ * The debugger webapp reads these .jsonl files via SSE streaming.
+ *
+ * Consumers must pair step_start with step_finish on (tabId, stepNumber), never
+ * stepNumber alone: every tab numbers its steps from 0 in this one file.
+ * step_finish records textLength, not the model text.
+ *
+ * Event types match the debugger schema:
+ *   session_start, user_message, assistant_message, tool_call, tool_result,
+ *   step_start, step_finish, error, tab_switch, session_end
+ */
+
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+// ============================================
+// Types
+// ============================================
+
+interface SessionEvent {
+	type: string;
+	timestamp: string;
+	sequenceNumber: number;
+	[key: string]: unknown;
+}
+
+interface SessionLog {
+	id: string;
+	name: string;
+	startedAt: string;
+	lastUpdatedAt: string;
+	model: string;
+	provider: string;
+	tabId: string;
+	tabName: string;
+	events: SessionEvent[];
+	stats: {
+		messageCount: number;
+		toolCalls: number;
+		totalTokens: number;
+		errors: number;
+		durationMs: number;
+	};
+}
+
+// ============================================
+// State
+// ============================================
+
+let sessionId: string | null = null;
+let sessionFilePath: string | null = null;
+let sessionStartedAt: string | null = null;
+let sessionModel: string | null = null;
+let sessionProvider: string | null = null;
+let sessionName: string | null = null;
+let sequenceNumber = 0;
+
+// In-memory event buffer for getSessionLog / getSessionSummary
+let events: SessionEvent[] = [];
+
+// Stats counters (incremental — no need to recompute)
+let statMessages = 0;
+let statToolCalls = 0;
+let statTotalTokens = 0;
+let statErrors = 0;
+let stepCount = 0;
+// Start time (ms) of each open step, keyed by tabId:stepNumber, for durationMs.
+// Every tab numbers its steps from 0 in one shared file, so step number alone collides.
+const stepStartedAt = new Map<string, number>();
+const stepKey = (tabId: string, stepNumber: number): string => `${tabId}:${stepNumber}`;
+
+// Pending writes buffer (batched via flush timer)
+let pendingLines: string[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+const SESSIONS_DIR = path.join(
+	process.env.HOME || process.env.USERPROFILE || "",
+	".8gent",
+	"sessions",
+);
+
+const FLUSH_INTERVAL_MS = 500;
+
+// ============================================
+// Internal helpers
+// ============================================
+
+function ensureSessionsDir(): void {
+	if (!fs.existsSync(SESSIONS_DIR)) {
+		fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+	}
+}
+
+function getGitBranch(): string | null {
+	try {
+		const headPath = path.join(process.cwd(), ".git", "HEAD");
+		if (fs.existsSync(headPath)) {
+			const head = fs.readFileSync(headPath, "utf-8").trim();
+			if (head.startsWith("ref: refs/heads/")) {
+				return head.slice("ref: refs/heads/".length);
+			}
+			return head.slice(0, 8); // detached HEAD
+		}
+	} catch {
+		// ignore
+	}
+	return null;
+}
+
+function appendLine(event: SessionEvent): void {
+	events.push(event);
+	pendingLines.push(JSON.stringify(event));
+	scheduleFlush();
+}
+
+function scheduleFlush(): void {
+	if (flushTimer) return;
+	flushTimer = setTimeout(() => {
+		flushTimer = null;
+		writePending();
+	}, FLUSH_INTERVAL_MS);
+}
+
+function writePending(): void {
+	if (!sessionFilePath || pendingLines.length === 0) return;
+	const chunk = `${pendingLines.join("\n")}\n`;
+	pendingLines = [];
+	try {
+		fs.appendFileSync(sessionFilePath, chunk, "utf-8");
+	} catch {
+		// Silently ignore write failures — don't crash the TUI
+	}
+}
+
+function nextSeq(): number {
+	return sequenceNumber++;
+}
+
+function now(): string {
+	return new Date().toISOString();
+}
+
+function getDurationMs(): number {
+	if (!sessionStartedAt) return 0;
+	return Date.now() - new Date(sessionStartedAt).getTime();
+}
+
+// ============================================
+// Public API
+// ============================================
+
+export function initSessionLogger(id: string, model: string, provider: string): void {
+	ensureSessionsDir();
+
+	const ts = new Date();
+	const tsStr = ts.toISOString().replace(/[:.]/g, "-").slice(0, 19);
+	const random = Math.random().toString(36).slice(2, 8);
+	const filename = `session_${tsStr}_${random}.jsonl`;
+	sessionFilePath = path.join(SESSIONS_DIR, filename);
+
+	sessionId = id;
+	sessionStartedAt = ts.toISOString();
+	sessionModel = model;
+	sessionProvider = provider;
+	sessionName = id;
+	sequenceNumber = 0;
+	events = [];
+	pendingLines = [];
+	statMessages = 0;
+	statToolCalls = 0;
+	statTotalTokens = 0;
+	statErrors = 0;
+	stepCount = 0;
+	stepStartedAt.clear();
+
+	// Write the session_start event immediately (not batched)
+	const startEvent: SessionEvent = {
+		type: "session_start",
+		timestamp: sessionStartedAt,
+		sequenceNumber: nextSeq(),
+		meta: {
+			sessionId: id,
+			version: 2,
+			startedAt: sessionStartedAt,
+			agent: {
+				model,
+				runtime: `bun@${typeof Bun !== "undefined" ? Bun.version : "unknown"}`,
+			},
+			environment: {
+				workingDirectory: process.cwd(),
+				gitBranch: getGitBranch(),
+			},
+		},
+	};
+
+	events.push(startEvent);
+	try {
+		fs.writeFileSync(sessionFilePath, `${JSON.stringify(startEvent)}\n`, "utf-8");
+	} catch {
+		// ignore
+	}
+}
+
+export function logMessage(tabId: string, tabName: string, role: string, content: string): void {
+	if (!sessionId) return;
+
+	// Set session name from first user message
+	if (role === "user" && sessionName === sessionId) {
+		sessionName = content.slice(0, 50).trim() || sessionId;
+	}
+
+	statMessages++;
+
+	const type = role === "user" ? "user_message" : "assistant_message";
+	appendLine({
+		type,
+		timestamp: now(),
+		sequenceNumber: nextSeq(),
+		message: {
+			role,
+			content: content.slice(0, 2000),
+		},
+		tabId,
+		tabName,
+	});
+}
+
+/** Longest string value kept in a logged tool_call preview. */
+const ARG_PREVIEW_MAX_CHARS = 2000;
+
+function previewValue(value: unknown, seen: WeakSet<object>): unknown {
+	if (typeof value === "string") {
+		if (value.length <= ARG_PREVIEW_MAX_CHARS) return value;
+		return `${value.slice(0, ARG_PREVIEW_MAX_CHARS)}... [${value.length - ARG_PREVIEW_MAX_CHARS} more chars]`;
+	}
+	if (value === null || typeof value !== "object") return value;
+	if (seen.has(value)) return "[circular]";
+	seen.add(value);
+	if (Array.isArray(value)) return value.map((v) => previewValue(v, seen));
+	const out: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(value)) out[k] = previewValue(v, seen);
+	return out;
+}
+
+/**
+ * Bounded copy of a tool call's args for the session log. Long string values
+ * are shortened per value, so the result is always a valid object.
+ *
+ * This used to be `JSON.parse(JSON.stringify(args).slice(0, 2000))`, which cut
+ * the serialized JSON mid-string and threw "JSON Parse error: Unterminated
+ * string" for any call whose args serialized past 2000 chars. logToolStart runs
+ * inside the agent's onToolStart callback, BEFORE the tool executes, so that
+ * throw failed the tool call itself: every write_file over ~2 KB never ran.
+ * A logger must never be able to break a tool, so this never throws.
+ */
+export function previewToolArgs(args: unknown): Record<string, unknown> {
+	try {
+		const preview = previewValue(args ?? {}, new WeakSet());
+		return preview !== null && typeof preview === "object" && !Array.isArray(preview)
+			? (preview as Record<string, unknown>)
+			: { value: preview };
+	} catch {
+		return { preview: "[unavailable]" };
+	}
+}
+
+export function logToolStart(
+	tabId: string,
+	tabName: string,
+	toolName: string,
+	toolCallId: string,
+	args: Record<string, unknown>,
+): void {
+	if (!sessionId) return;
+
+	appendLine({
+		type: "tool_call",
+		timestamp: now(),
+		sequenceNumber: nextSeq(),
+		toolCall: {
+			toolCallId,
+			name: toolName,
+			arguments: previewToolArgs(args),
+		},
+		tabId,
+		tabName,
+	});
+}
+
+export function logToolEnd(
+	toolCallId: string,
+	success: boolean,
+	durationMs: number,
+	resultPreview?: string,
+): void {
+	if (!sessionId) return;
+
+	statToolCalls++;
+
+	// Find the matching tool_call to get tabId/tabName
+	let tabId = "default";
+	let tabName = "Chat";
+	for (let i = events.length - 1; i >= 0; i--) {
+		const e = events[i];
+		if (
+			e.type === "tool_call" &&
+			(e.toolCall as { toolCallId: string })?.toolCallId === toolCallId
+		) {
+			tabId = (e.tabId as string) || "default";
+			tabName = (e.tabName as string) || "Chat";
+			break;
+		}
+	}
+
+	appendLine({
+		type: "tool_result",
+		timestamp: now(),
+		sequenceNumber: nextSeq(),
+		toolCallId,
+		result: resultPreview?.slice(0, 500) ?? null,
+		success,
+		durationMs,
+		tabId,
+		tabName,
+	});
+}
+
+/**
+ * Record the start of a model call. Fields are the step index, provider and
+ * model name only: no prompt text, tool args or output ever reaches this event.
+ */
+export function logStepStart(
+	tabId: string,
+	tabName: string,
+	stepNumber: number,
+	provider: string,
+	model: string,
+): void {
+	if (!sessionId) return;
+
+	const at = Date.now();
+	stepStartedAt.set(stepKey(tabId, stepNumber), at);
+	appendLine({
+		type: "step_start",
+		timestamp: new Date(at).toISOString(),
+		sequenceNumber: nextSeq(),
+		stepNumber,
+		provider: String(provider).slice(0, 100),
+		model: String(model).slice(0, 200),
+		tabId,
+		tabName,
+	});
+}
+
+export function logStep(
+	tabId: string,
+	tabName: string,
+	stepNumber: number,
+	totalTokens: number,
+	text?: string,
+	split?: { promptTokens?: number; completionTokens?: number },
+): void {
+	if (!sessionId) return;
+
+	// Real provider split only (Ollama/LM Studio eval counts, OpenAI-style usage).
+	// Absent, NaN or an all-zero pair means the backend gave none: null, never an estimate.
+	const p = split?.promptTokens;
+	const c = split?.completionTokens;
+	const real = Number.isFinite(p) && Number.isFinite(c) && (p as number) + (c as number) > 0;
+
+	statTotalTokens += totalTokens;
+	stepCount = Math.max(stepCount, stepNumber);
+
+	// Measured wall time since this step's step_start; absent when no start was seen.
+	const at = Date.now();
+	const key = stepKey(tabId, stepNumber);
+	const startedAt = stepStartedAt.get(key);
+	stepStartedAt.delete(key);
+
+	appendLine({
+		type: "step_finish",
+		timestamp: new Date(at).toISOString(),
+		sequenceNumber: nextSeq(),
+		stepNumber,
+		finishReason: "stop",
+		durationMs: startedAt === undefined ? undefined : at - startedAt,
+		totalTokens,
+		promptTokens: real ? p : null,
+		completionTokens: real ? c : null,
+		// Length only: model output is never persisted in the session log.
+		textLength: text?.length ?? 0,
+		tabId,
+		tabName,
+	});
+}
+
+export function logError(tabId: string, tabName: string, error: string): void {
+	if (!sessionId) return;
+
+	statErrors++;
+
+	appendLine({
+		type: "error",
+		timestamp: now(),
+		sequenceNumber: nextSeq(),
+		error: {
+			message: error.slice(0, 2000),
+		},
+		tabId,
+		tabName,
+	});
+}
+
+export function logTabSwitch(fromTabId: string, toTabId: string, toTabName: string): void {
+	if (!sessionId) return;
+
+	appendLine({
+		type: "tab_switch",
+		timestamp: now(),
+		sequenceNumber: nextSeq(),
+		fromTabId,
+		toTabId,
+		toTabName,
+		tabId: toTabId,
+		tabName: toTabName,
+	});
+}
+
+function getSessionLog(): SessionLog {
+	if (!sessionId) {
+		throw new Error("Session logger not initialized");
+	}
+	return {
+		id: sessionId,
+		name: sessionName || sessionId,
+		startedAt: sessionStartedAt || new Date().toISOString(),
+		lastUpdatedAt: now(),
+		model: sessionModel || "",
+		provider: sessionProvider || "",
+		tabId: "default",
+		tabName: "Chat",
+		events,
+		stats: {
+			messageCount: statMessages,
+			toolCalls: statToolCalls,
+			totalTokens: statTotalTokens,
+			errors: statErrors,
+			durationMs: getDurationMs(),
+		},
+	};
+}
+
+function getSessionPath(): string {
+	if (!sessionFilePath) {
+		throw new Error("Session logger not initialized");
+	}
+	return sessionFilePath;
+}
+
+function getSessionSummary(): string {
+	if (!sessionId) return "No active session";
+	const dur = (getDurationMs() / 1000 / 60).toFixed(1);
+	return [
+		`Session: ${sessionName}`,
+		`Model: ${sessionModel} (${sessionProvider})`,
+		`Duration: ${dur}m`,
+		`Messages: ${statMessages}`,
+		`Tool calls: ${statToolCalls}`,
+		`Tokens: ${statTotalTokens.toLocaleString()}`,
+		`Errors: ${statErrors}`,
+	].join(" | ");
+}
+
+export function flushSession(): void {
+	if (flushTimer) {
+		clearTimeout(flushTimer);
+		flushTimer = null;
+	}
+
+	// Write session_end event
+	if (sessionId) {
+		const endEvent: SessionEvent = {
+			type: "session_end",
+			timestamp: now(),
+			sequenceNumber: nextSeq(),
+			summary: {
+				exitReason: "user_exit",
+				durationMs: getDurationMs(),
+				totalSteps: stepCount,
+				messageCount: statMessages,
+				toolCalls: statToolCalls,
+				totalTokens: statTotalTokens,
+				errors: statErrors,
+			},
+		};
+		events.push(endEvent);
+		pendingLines.push(JSON.stringify(endEvent));
+	}
+
+	writePending();
+}

@@ -1,0 +1,6545 @@
+{
+	"summary": {
+		"date": "2026-09-28T19:30:47.368Z",
+		"anchor": "3584c0c7be63f8bd297dd1920a79c3833d76d95e",
+		"set": "locate-queries-picoclaw-go.json",
+		"repo": "https://github.com/sipeed/picoclaw.git",
+		"lang": "go",
+		"machine": {
+			"os": "darwin",
+			"arch": "arm64",
+			"cpus": "Apple M2 Max"
+		},
+		"index": {
+			"files": 0,
+			"symbols": 0,
+			"buildMs": 5
+		},
+		"lineTolerance": 2,
+		"locate": {
+			"n": 140,
+			"top1": 0.9714285714285714,
+			"top5": 0.9928571428571429,
+			"lineHitTop5": 1,
+			"lineN": 105,
+			"p50Ms": 22.2,
+			"p95Ms": 24.7,
+			"meanTokens": 60,
+			"p95Tokens": 132,
+			"maxTokens": 173,
+			"routeAccuracy": 0.9928571428571429,
+			"byClass": {
+				"identifier": {
+					"n": 70,
+					"top1": 0.9571428571428572,
+					"top5": 1,
+					"lineHitTop5": 1,
+					"lineN": 70,
+					"p50Ms": 22.6,
+					"p95Ms": 24.7,
+					"meanTokens": 77,
+					"p95Tokens": 141,
+					"maxTokens": 173
+				},
+				"path": {
+					"n": 35,
+					"top1": 0.9714285714285714,
+					"top5": 0.9714285714285714,
+					"lineHitTop5": null,
+					"lineN": 0,
+					"p50Ms": 19.3,
+					"p95Ms": 47.3,
+					"meanTokens": 44,
+					"p95Tokens": 97,
+					"maxTokens": 105
+				},
+				"string": {
+					"n": 35,
+					"top1": 1,
+					"top5": 1,
+					"lineHitTop5": 1,
+					"lineN": 35,
+					"p50Ms": 22.5,
+					"p95Ms": 24.4,
+					"meanTokens": 42,
+					"p95Tokens": 57,
+					"maxTokens": 60
+				}
+			}
+		},
+		"baselineA": {
+			"n": 140,
+			"top1": 0.5,
+			"top5": 0.5,
+			"lineHitTop5": 0.3333333333333333,
+			"lineN": 105,
+			"p50Ms": 5.3,
+			"p95Ms": 24.6,
+			"meanTokens": 16,
+			"p95Tokens": 31,
+			"maxTokens": 36,
+			"byClass": {
+				"identifier": {
+					"n": 70,
+					"top1": 0,
+					"top5": 0,
+					"lineHitTop5": 0,
+					"lineN": 70,
+					"p50Ms": 3.6,
+					"p95Ms": 4.4,
+					"meanTokens": 16,
+					"p95Tokens": 23,
+					"maxTokens": 25
+				},
+				"path": {
+					"n": 35,
+					"top1": 1,
+					"top5": 1,
+					"lineHitTop5": null,
+					"lineN": 0,
+					"p50Ms": 13.6,
+					"p95Ms": 16.5,
+					"meanTokens": 8,
+					"p95Tokens": 11,
+					"maxTokens": 11
+				},
+				"string": {
+					"n": 35,
+					"top1": 1,
+					"top5": 1,
+					"lineHitTop5": 1,
+					"lineN": 35,
+					"p50Ms": 23.5,
+					"p95Ms": 30.7,
+					"meanTokens": 27,
+					"p95Tokens": 35,
+					"maxTokens": 36
+				}
+			}
+		},
+		"target": {
+			"top5": 0.9,
+			"p95Ms": 250
+		}
+	},
+	"rows": [
+		{
+			"id": "identifier-001",
+			"class": "identifier",
+			"query": "DoRequestWithRetry",
+			"label": {
+				"file": "pkg/utils/http_retry.go",
+				"line": 19
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/utils/http_retry.go",
+					"line": 19
+				},
+				{
+					"file": "pkg/skills/installer.go",
+					"line": 49
+				},
+				{
+					"file": "pkg/skills/installer.go",
+					"line": 99
+				},
+				{
+					"file": "pkg/utils/http_retry_test.go",
+					"line": 13
+				},
+				{
+					"file": "pkg/utils/http_retry_test.go",
+					"line": 62
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.9,
+			"tokens": 128
+		},
+		{
+			"id": "identifier-001",
+			"class": "identifier",
+			"query": "DoRequestWithRetry",
+			"label": {
+				"file": "pkg/utils/http_retry.go",
+				"line": 19
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 5.3,
+			"tokens": 13
+		},
+		{
+			"id": "identifier-002",
+			"class": "identifier",
+			"query": "TestDoRequestWithRetry",
+			"label": {
+				"file": "pkg/utils/http_retry_test.go",
+				"line": 13
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/utils/http_retry_test.go",
+					"line": 13
+				},
+				{
+					"file": "pkg/utils/http_retry_test.go",
+					"line": 80
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.2,
+			"tokens": 57
+		},
+		{
+			"id": "identifier-002",
+			"class": "identifier",
+			"query": "TestDoRequestWithRetry",
+			"label": {
+				"file": "pkg/utils/http_retry_test.go",
+				"line": 13
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.6,
+			"tokens": 14
+		},
+		{
+			"id": "identifier-003",
+			"class": "identifier",
+			"query": "TestDefaultConfig_DMScope",
+			"label": {
+				"file": "pkg/config/config_test.go",
+				"line": 418
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/config_test.go",
+					"line": 418
+				},
+				{
+					"file": "pkg/config/config_test.go",
+					"line": 417
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.7,
+			"tokens": 62
+		},
+		{
+			"id": "identifier-003",
+			"class": "identifier",
+			"query": "TestDefaultConfig_DMScope",
+			"label": {
+				"file": "pkg/config/config_test.go",
+				"line": 418
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.3,
+			"tokens": 15
+		},
+		{
+			"id": "identifier-004",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_RequestTimeout",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 169
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/migration_test.go",
+					"line": 169
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.6,
+			"tokens": 48
+		},
+		{
+			"id": "identifier-004",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_RequestTimeout",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 169
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 20
+		},
+		{
+			"id": "identifier-005",
+			"class": "identifier",
+			"query": "TestModelConfig_RequestTimeoutParsing",
+			"label": {
+				"file": "pkg/config/model_config_test.go",
+				"line": 369
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/model_config_test.go",
+					"line": 369
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.1,
+			"tokens": 44
+		},
+		{
+			"id": "identifier-005",
+			"class": "identifier",
+			"query": "TestModelConfig_RequestTimeoutParsing",
+			"label": {
+				"file": "pkg/config/model_config_test.go",
+				"line": 369
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.3,
+			"tokens": 18
+		},
+		{
+			"id": "identifier-006",
+			"class": "identifier",
+			"query": "FormatBuildInfo",
+			"label": {
+				"file": "cmd/picoclaw/internal/helpers.go",
+				"line": 40
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "cmd/picoclaw/internal/helpers.go",
+					"line": 40
+				},
+				{
+					"file": "cmd/picoclaw/internal/helpers.go",
+					"line": 39
+				},
+				{
+					"file": "cmd/picoclaw/internal/helpers_test.go",
+					"line": 42
+				},
+				{
+					"file": "cmd/picoclaw/internal/helpers_test.go",
+					"line": 49
+				},
+				{
+					"file": "cmd/picoclaw/internal/status/helpers.go",
+					"line": 22
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.7,
+			"tokens": 132
+		},
+		{
+			"id": "identifier-006",
+			"class": "identifier",
+			"query": "FormatBuildInfo",
+			"label": {
+				"file": "cmd/picoclaw/internal/helpers.go",
+				"line": 40
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.6,
+			"tokens": 13
+		},
+		{
+			"id": "string-001",
+			"class": "string",
+			"query": "manual input canceled",
+			"label": {
+				"file": "pkg/auth/oauth.go",
+				"line": 159
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "pkg/auth/oauth.go",
+					"line": 159
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.4,
+			"tokens": 30
+		},
+		{
+			"id": "string-001",
+			"class": "string",
+			"query": "manual input canceled",
+			"label": {
+				"file": "pkg/auth/oauth.go",
+				"line": 159
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/auth/oauth.go",
+					"line": 159
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.6,
+			"tokens": 19
+		},
+		{
+			"id": "identifier-007",
+			"class": "identifier",
+			"query": "NewAgentCommand",
+			"label": {
+				"file": "cmd/picoclaw/internal/agent/command.go",
+				"line": 7
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "cmd/picoclaw/internal/agent/command.go",
+					"line": 7
+				},
+				{
+					"file": "cmd/picoclaw/main.go",
+					"line": 38
+				},
+				{
+					"file": "cmd/picoclaw/internal/agent/command_test.go",
+					"line": 10
+				},
+				{
+					"file": "cmd/picoclaw/internal/agent/command_test.go",
+					"line": 11
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.8,
+			"tokens": 92
+		},
+		{
+			"id": "identifier-007",
+			"class": "identifier",
+			"query": "NewAgentCommand",
+			"label": {
+				"file": "cmd/picoclaw/internal/agent/command.go",
+				"line": 7
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.7,
+			"tokens": 13
+		},
+		{
+			"id": "identifier-008",
+			"class": "identifier",
+			"query": "TestNewAgentCommand",
+			"label": {
+				"file": "cmd/picoclaw/internal/agent/command_test.go",
+				"line": 10
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "cmd/picoclaw/internal/agent/command_test.go",
+					"line": 10
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23,
+			"tokens": 38
+		},
+		{
+			"id": "identifier-008",
+			"class": "identifier",
+			"query": "TestNewAgentCommand",
+			"label": {
+				"file": "cmd/picoclaw/internal/agent/command_test.go",
+				"line": 10
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 14
+		},
+		{
+			"id": "string-002",
+			"class": "string",
+			"query": "\"either --every or --cron must be specified\"",
+			"label": {
+				"file": "cmd/picoclaw/internal/cron/add.go",
+				"line": 28
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "cmd/picoclaw/internal/cron/add.go",
+					"line": 28
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.3,
+			"tokens": 43
+		},
+		{
+			"id": "string-002",
+			"class": "string",
+			"query": "\"either --every or --cron must be specified\"",
+			"label": {
+				"file": "cmd/picoclaw/internal/cron/add.go",
+				"line": 28
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "cmd/picoclaw/internal/cron/add.go",
+					"line": 28
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.8,
+			"tokens": 27
+		},
+		{
+			"id": "string-003",
+			"class": "string",
+			"query": "error adding job: %w",
+			"label": {
+				"file": "cmd/picoclaw/internal/cron/add.go",
+				"line": 42
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "cmd/picoclaw/internal/cron/add.go",
+					"line": 42
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.8,
+			"tokens": 34
+		},
+		{
+			"id": "string-003",
+			"class": "string",
+			"query": "error adding job: %w",
+			"label": {
+				"file": "cmd/picoclaw/internal/cron/add.go",
+				"line": 42
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "cmd/picoclaw/internal/cron/add.go",
+					"line": 42
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.5,
+			"tokens": 22
+		},
+		{
+			"id": "identifier-009",
+			"class": "identifier",
+			"query": "BuildSystemPromptWithCache",
+			"label": {
+				"file": "pkg/agent/context.go",
+				"line": 120
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/agent/context.go",
+					"line": 117
+				},
+				{
+					"file": "pkg/agent/context.go",
+					"line": 120
+				},
+				{
+					"file": "pkg/agent/context_cache_test.go",
+					"line": 164
+				},
+				{
+					"file": "pkg/agent/context_cache_test.go",
+					"line": 183
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.4,
+			"tokens": 107
+		},
+		{
+			"id": "identifier-009",
+			"class": "identifier",
+			"query": "BuildSystemPromptWithCache",
+			"label": {
+				"file": "pkg/agent/context.go",
+				"line": 120
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.6,
+			"tokens": 15
+		},
+		{
+			"id": "identifier-010",
+			"class": "identifier",
+			"query": "InvalidateCache",
+			"label": {
+				"file": "pkg/agent/context.go",
+				"line": 162
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/agent/context.go",
+					"line": 159
+				},
+				{
+					"file": "pkg/agent/context.go",
+					"line": 162
+				},
+				{
+					"file": "pkg/agent/context_cache_test.go",
+					"line": 130
+				},
+				{
+					"file": "pkg/agent/context_cache_test.go",
+					"line": 182
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.9,
+			"tokens": 103
+		},
+		{
+			"id": "identifier-010",
+			"class": "identifier",
+			"query": "InvalidateCache",
+			"label": {
+				"file": "pkg/agent/context.go",
+				"line": 162
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.8,
+			"tokens": 13
+		},
+		{
+			"id": "identifier-011",
+			"class": "identifier",
+			"query": "TestSpawnTool_Execute_EmptyTask",
+			"label": {
+				"file": "pkg/tools/spawn_test.go",
+				"line": 9
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/tools/spawn_test.go",
+					"line": 9
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24,
+			"tokens": 38
+		},
+		{
+			"id": "identifier-011",
+			"class": "identifier",
+			"query": "TestSpawnTool_Execute_EmptyTask",
+			"label": {
+				"file": "pkg/tools/spawn_test.go",
+				"line": 9
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 4.1,
+			"tokens": 17
+		},
+		{
+			"id": "identifier-012",
+			"class": "identifier",
+			"query": "TestSpawnTool_Execute_ValidTask",
+			"label": {
+				"file": "pkg/tools/spawn_test.go",
+				"line": 43
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/tools/spawn_test.go",
+					"line": 43
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.1,
+			"tokens": 39
+		},
+		{
+			"id": "identifier-012",
+			"class": "identifier",
+			"query": "TestSpawnTool_Execute_ValidTask",
+			"label": {
+				"file": "pkg/tools/spawn_test.go",
+				"line": 43
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 4.4,
+			"tokens": 17
+		},
+		{
+			"id": "string-004",
+			"class": "string",
+			"query": "\"empty response from copilot\"",
+			"label": {
+				"file": "pkg/providers/github_copilot_provider.go",
+				"line": 108
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/providers/github_copilot_provider.go",
+					"line": 108
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.4,
+			"tokens": 39
+		},
+		{
+			"id": "string-004",
+			"class": "string",
+			"query": "\"empty response from copilot\"",
+			"label": {
+				"file": "pkg/providers/github_copilot_provider.go",
+				"line": 108
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/github_copilot_provider.go",
+					"line": 108
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.4,
+			"tokens": 26
+		},
+		{
+			"id": "string-005",
+			"class": "string",
+			"query": "no content in copilot response",
+			"label": {
+				"file": "pkg/providers/github_copilot_provider.go",
+				"line": 111
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "pkg/providers/github_copilot_provider.go",
+					"line": 111
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.3,
+			"tokens": 40
+		},
+		{
+			"id": "string-005",
+			"class": "string",
+			"query": "no content in copilot response",
+			"label": {
+				"file": "pkg/providers/github_copilot_provider.go",
+				"line": 111
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/github_copilot_provider.go",
+					"line": 111
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.1,
+			"tokens": 26
+		},
+		{
+			"id": "identifier-013",
+			"class": "identifier",
+			"query": "StatefulProvider",
+			"label": {
+				"file": "pkg/providers/types.go",
+				"line": 35
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/providers/types.go",
+					"line": 35
+				},
+				{
+					"file": "cmd/picoclaw/internal/gateway/helpers.go",
+					"line": 206
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.1,
+			"tokens": 57
+		},
+		{
+			"id": "identifier-013",
+			"class": "identifier",
+			"query": "StatefulProvider",
+			"label": {
+				"file": "pkg/providers/types.go",
+				"line": 35
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.9,
+			"tokens": 13
+		},
+		{
+			"id": "identifier-014",
+			"class": "identifier",
+			"query": "TestSanitizeHistoryForProvider_EmptyHistory",
+			"label": {
+				"file": "pkg/agent/context_test.go",
+				"line": 25
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/agent/context_test.go",
+					"line": 25
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23,
+			"tokens": 45
+		},
+		{
+			"id": "identifier-014",
+			"class": "identifier",
+			"query": "TestSanitizeHistoryForProvider_EmptyHistory",
+			"label": {
+				"file": "pkg/agent/context_test.go",
+				"line": 25
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.7,
+			"tokens": 20
+		},
+		{
+			"id": "identifier-015",
+			"class": "identifier",
+			"query": "TestSanitizeHistoryForProvider_SingleToolCall",
+			"label": {
+				"file": "pkg/agent/context_test.go",
+				"line": 37
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/agent/context_test.go",
+					"line": 37
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.7,
+			"tokens": 46
+		},
+		{
+			"id": "identifier-015",
+			"class": "identifier",
+			"query": "TestSanitizeHistoryForProvider_SingleToolCall",
+			"label": {
+				"file": "pkg/agent/context_test.go",
+				"line": 37
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.6,
+			"tokens": 20
+		},
+		{
+			"id": "identifier-016",
+			"class": "identifier",
+			"query": "TestLoadConfig_WebToolsProxy",
+			"label": {
+				"file": "pkg/config/config_test.go",
+				"line": 396
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/config_test.go",
+					"line": 396
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.6,
+			"tokens": 38
+		},
+		{
+			"id": "identifier-016",
+			"class": "identifier",
+			"query": "TestLoadConfig_WebToolsProxy",
+			"label": {
+				"file": "pkg/config/config_test.go",
+				"line": 396
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 16
+		},
+		{
+			"id": "string-006",
+			"class": "string",
+			"query": "\"invalid proxy URL: %w\"",
+			"label": {
+				"file": "pkg/tools/web.go",
+				"line": 48
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/tools/web.go",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.9,
+			"tokens": 31
+		},
+		{
+			"id": "string-006",
+			"class": "string",
+			"query": "\"invalid proxy URL: %w\"",
+			"label": {
+				"file": "pkg/tools/web.go",
+				"line": 48
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/tools/web.go",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.5,
+			"tokens": 19
+		},
+		{
+			"id": "string-007",
+			"class": "string",
+			"query": "invalid proxy URL: missing host",
+			"label": {
+				"file": "pkg/tools/web.go",
+				"line": 60
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "pkg/tools/web.go",
+					"line": 60
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.7,
+			"tokens": 36
+		},
+		{
+			"id": "string-007",
+			"class": "string",
+			"query": "invalid proxy URL: missing host",
+			"label": {
+				"file": "pkg/tools/web.go",
+				"line": 60
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/tools/web.go",
+					"line": 60
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23,
+			"tokens": 21
+		},
+		{
+			"id": "identifier-017",
+			"class": "identifier",
+			"query": "DuckDuckGoSearchProvider",
+			"label": {
+				"file": "pkg/tools/web.go",
+				"line": 228
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/tools/web.go",
+					"line": 228
+				},
+				{
+					"file": "pkg/tools/web.go",
+					"line": 232
+				},
+				{
+					"file": "pkg/tools/web_test.go",
+					"line": 494
+				},
+				{
+					"file": "pkg/tools/web_test.go",
+					"line": 496
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.6,
+			"tokens": 113
+		},
+		{
+			"id": "identifier-017",
+			"class": "identifier",
+			"query": "DuckDuckGoSearchProvider",
+			"label": {
+				"file": "pkg/tools/web.go",
+				"line": 228
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 15
+		},
+		{
+			"id": "identifier-018",
+			"class": "identifier",
+			"query": "TestListSkillsWorkspaceOverridesGlobal",
+			"label": {
+				"file": "pkg/skills/loader_test.go",
+				"line": 150
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/skills/loader_test.go",
+					"line": 150
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.3,
+			"tokens": 43
+		},
+		{
+			"id": "identifier-018",
+			"class": "identifier",
+			"query": "TestListSkillsWorkspaceOverridesGlobal",
+			"label": {
+				"file": "pkg/skills/loader_test.go",
+				"line": 150
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.7,
+			"tokens": 18
+		},
+		{
+			"id": "identifier-019",
+			"class": "identifier",
+			"query": "TestListSkillsGlobalOverridesBuiltin",
+			"label": {
+				"file": "pkg/skills/loader_test.go",
+				"line": 166
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/skills/loader_test.go",
+					"line": 166
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.3,
+			"tokens": 42
+		},
+		{
+			"id": "identifier-019",
+			"class": "identifier",
+			"query": "TestListSkillsGlobalOverridesBuiltin",
+			"label": {
+				"file": "pkg/skills/loader_test.go",
+				"line": 166
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.7,
+			"tokens": 18
+		},
+		{
+			"id": "identifier-020",
+			"class": "identifier",
+			"query": "NewEditFileTool",
+			"label": {
+				"file": "pkg/tools/edit.go",
+				"line": 18
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/tools/edit.go",
+					"line": 18
+				},
+				{
+					"file": "pkg/tools/edit.go",
+					"line": 17
+				},
+				{
+					"file": "pkg/agent/instance.go",
+					"line": 55
+				},
+				{
+					"file": "pkg/tools/edit_test.go",
+					"line": 19
+				},
+				{
+					"file": "pkg/tools/edit_test.go",
+					"line": 63
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.7,
+			"tokens": 124
+		},
+		{
+			"id": "identifier-020",
+			"class": "identifier",
+			"query": "NewEditFileTool",
+			"label": {
+				"file": "pkg/tools/edit.go",
+				"line": 18
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 13
+		},
+		{
+			"id": "string-008",
+			"class": "string",
+			"query": "\"old_text not found in file. Make sure it matches exactly\"",
+			"label": {
+				"file": "pkg/tools/edit.go",
+				"line": 167
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/tools/edit.go",
+					"line": 167
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.1,
+			"tokens": 48
+		},
+		{
+			"id": "string-008",
+			"class": "string",
+			"query": "\"old_text not found in file. Make sure it matches exactly\"",
+			"label": {
+				"file": "pkg/tools/edit.go",
+				"line": 167
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/tools/edit.go",
+					"line": 167
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.3,
+			"tokens": 27
+		},
+		{
+			"id": "string-009",
+			"class": "string",
+			"query": "old_text appears %d times. Please provide more context to make it unique",
+			"label": {
+				"file": "pkg/tools/edit.go",
+				"line": 172
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "pkg/tools/edit.go",
+					"line": 172
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.5,
+			"tokens": 57
+		},
+		{
+			"id": "string-009",
+			"class": "string",
+			"query": "old_text appears %d times. Please provide more context to make it unique",
+			"label": {
+				"file": "pkg/tools/edit.go",
+				"line": 172
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/tools/edit.go",
+					"line": 172
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.3,
+			"tokens": 33
+		},
+		{
+			"id": "identifier-021",
+			"class": "identifier",
+			"query": "TestReplaceEditContent",
+			"label": {
+				"file": "pkg/tools/edit_test.go",
+				"line": 298
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/tools/edit_test.go",
+					"line": 298
+				},
+				{
+					"file": "pkg/tools/edit_test.go",
+					"line": 297
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.8,
+			"tokens": 61
+		},
+		{
+			"id": "identifier-021",
+			"class": "identifier",
+			"query": "TestReplaceEditContent",
+			"label": {
+				"file": "pkg/tools/edit_test.go",
+				"line": 298
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.8,
+			"tokens": 14
+		},
+		{
+			"id": "identifier-022",
+			"class": "identifier",
+			"query": "GetModelName",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 185
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/config.go",
+					"line": 183
+				},
+				{
+					"file": "pkg/config/config.go",
+					"line": 185
+				},
+				{
+					"file": "pkg/agent/instance.go",
+					"line": 135
+				},
+				{
+					"file": "pkg/config/migration.go",
+					"line": 44
+				},
+				{
+					"file": "pkg/providers/factory.go",
+					"line": 39
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.2,
+			"tokens": 114
+		},
+		{
+			"id": "identifier-022",
+			"class": "identifier",
+			"query": "GetModelName",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 185
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.8,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-023",
+			"class": "identifier",
+			"query": "TestAgentDefaults_GetModelName_BackwardCompat",
+			"label": {
+				"file": "pkg/config/model_config_test.go",
+				"line": 118
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/model_config_test.go",
+					"line": 118
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.5,
+			"tokens": 48
+		},
+		{
+			"id": "identifier-023",
+			"class": "identifier",
+			"query": "TestAgentDefaults_GetModelName_BackwardCompat",
+			"label": {
+				"file": "pkg/config/model_config_test.go",
+				"line": 118
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.8,
+			"tokens": 20
+		},
+		{
+			"id": "identifier-024",
+			"class": "identifier",
+			"query": "TavilyConfig",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 435
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/config.go",
+					"line": 435
+				},
+				{
+					"file": "pkg/config/config.go",
+					"line": 455
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.8,
+			"tokens": 44
+		},
+		{
+			"id": "identifier-024",
+			"class": "identifier",
+			"query": "TavilyConfig",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 435
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.8,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-025",
+			"class": "identifier",
+			"query": "TavilySearchProvider",
+			"label": {
+				"file": "pkg/tools/web.go",
+				"line": 142
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/tools/web.go",
+					"line": 142
+				},
+				{
+					"file": "pkg/tools/web.go",
+					"line": 148
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.7,
+			"tokens": 62
+		},
+		{
+			"id": "identifier-025",
+			"class": "identifier",
+			"query": "TavilySearchProvider",
+			"label": {
+				"file": "pkg/tools/web.go",
+				"line": 142
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.7,
+			"tokens": 14
+		},
+		{
+			"id": "string-010",
+			"class": "string",
+			"query": "\"tavily api error (status %d): %s\"",
+			"label": {
+				"file": "pkg/tools/web.go",
+				"line": 193
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/tools/web.go",
+					"line": 193
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.9,
+			"tokens": 43
+		},
+		{
+			"id": "string-010",
+			"class": "string",
+			"query": "\"tavily api error (status %d): %s\"",
+			"label": {
+				"file": "pkg/tools/web.go",
+				"line": 193
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/tools/web.go",
+					"line": 193
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.4,
+			"tokens": 28
+		},
+		{
+			"id": "string-011",
+			"class": "string",
+			"query": "stdio mode not implemented",
+			"label": {
+				"file": "pkg/providers/github_copilot_provider.go",
+				"line": 30
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "pkg/providers/github_copilot_provider.go",
+					"line": 30
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.8,
+			"tokens": 38
+		},
+		{
+			"id": "string-011",
+			"class": "string",
+			"query": "stdio mode not implemented",
+			"label": {
+				"file": "pkg/providers/github_copilot_provider.go",
+				"line": 30
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/github_copilot_provider.go",
+					"line": 30
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.8,
+			"tokens": 25
+		},
+		{
+			"id": "string-012",
+			"class": "string",
+			"query": "\"create session failed: %w\"",
+			"label": {
+				"file": "pkg/providers/github_copilot_provider.go",
+				"line": 48
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/providers/github_copilot_provider.go",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.8,
+			"tokens": 39
+		},
+		{
+			"id": "string-012",
+			"class": "string",
+			"query": "\"create session failed: %w\"",
+			"label": {
+				"file": "pkg/providers/github_copilot_provider.go",
+				"line": 48
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/github_copilot_provider.go",
+					"line": 48
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.5,
+			"tokens": 26
+		},
+		{
+			"id": "identifier-026",
+			"class": "identifier",
+			"query": "TestNewToolRegistry",
+			"label": {
+				"file": "pkg/tools/registry_test.go",
+				"line": 61
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/tools/registry_test.go",
+					"line": 61
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.8,
+			"tokens": 33
+		},
+		{
+			"id": "identifier-026",
+			"class": "identifier",
+			"query": "TestNewToolRegistry",
+			"label": {
+				"file": "pkg/tools/registry_test.go",
+				"line": 61
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.9,
+			"tokens": 14
+		},
+		{
+			"id": "identifier-027",
+			"class": "identifier",
+			"query": "TestToolRegistry_RegisterAndGet",
+			"label": {
+				"file": "pkg/tools/registry_test.go",
+				"line": 71
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/tools/registry_test.go",
+					"line": 71
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.7,
+			"tokens": 39
+		},
+		{
+			"id": "identifier-027",
+			"class": "identifier",
+			"query": "TestToolRegistry_RegisterAndGet",
+			"label": {
+				"file": "pkg/tools/registry_test.go",
+				"line": 71
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 17
+		},
+		{
+			"id": "identifier-028",
+			"class": "identifier",
+			"query": "TestProviderChat_ParsesReasoningContent",
+			"label": {
+				"file": "pkg/providers/openai_compat/provider_test.go",
+				"line": 105
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/providers/openai_compat/provider_test.go",
+					"line": 105
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.3,
+			"tokens": 48
+		},
+		{
+			"id": "identifier-028",
+			"class": "identifier",
+			"query": "TestProviderChat_ParsesReasoningContent",
+			"label": {
+				"file": "pkg/providers/openai_compat/provider_test.go",
+				"line": 105
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 19
+		},
+		{
+			"id": "identifier-029",
+			"class": "identifier",
+			"query": "TestShellTool_WorkingDir_OutsideWorkspace",
+			"label": {
+				"file": "pkg/tools/shell_test.go",
+				"line": 190
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/tools/shell_test.go",
+					"line": 190
+				},
+				{
+					"file": "pkg/tools/shell_test.go",
+					"line": 189
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.1,
+			"tokens": 79
+		},
+		{
+			"id": "identifier-029",
+			"class": "identifier",
+			"query": "TestShellTool_WorkingDir_OutsideWorkspace",
+			"label": {
+				"file": "pkg/tools/shell_test.go",
+				"line": 190
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 19
+		},
+		{
+			"id": "identifier-030",
+			"class": "identifier",
+			"query": "TestShellTool_WorkingDir_SymlinkEscape",
+			"label": {
+				"file": "pkg/tools/shell_test.go",
+				"line": 217
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/tools/shell_test.go",
+					"line": 217
+				},
+				{
+					"file": "pkg/tools/shell_test.go",
+					"line": 215
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.7,
+			"tokens": 73
+		},
+		{
+			"id": "identifier-030",
+			"class": "identifier",
+			"query": "TestShellTool_WorkingDir_SymlinkEscape",
+			"label": {
+				"file": "pkg/tools/shell_test.go",
+				"line": 217
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 18
+		},
+		{
+			"id": "identifier-031",
+			"class": "identifier",
+			"query": "BuildMessages",
+			"label": {
+				"file": "pkg/agent/context.go",
+				"line": 378
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 414
+				},
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 578
+				},
+				{
+					"file": "pkg/agent/context.go",
+					"line": 378
+				},
+				{
+					"file": "pkg/agent/context.go",
+					"line": 488
+				},
+				{
+					"file": "pkg/agent/context_cache_test.go",
+					"line": 34
+				}
+			],
+			"top1": false,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.5,
+			"tokens": 122
+		},
+		{
+			"id": "identifier-031",
+			"class": "identifier",
+			"query": "BuildMessages",
+			"label": {
+				"file": "pkg/agent/context.go",
+				"line": 378
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.9,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-032",
+			"class": "identifier",
+			"query": "AddToolResult",
+			"label": {
+				"file": "pkg/agent/context.go",
+				"line": 544
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/agent/context.go",
+					"line": 544
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21,
+			"tokens": 31
+		},
+		{
+			"id": "identifier-032",
+			"class": "identifier",
+			"query": "AddToolResult",
+			"label": {
+				"file": "pkg/agent/context.go",
+				"line": 544
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.6,
+			"tokens": 12
+		},
+		{
+			"id": "string-013",
+			"class": "string",
+			"query": "Failed to record last channel",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 399
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 399
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.8,
+			"tokens": 45
+		},
+		{
+			"id": "string-013",
+			"class": "string",
+			"query": "Failed to record last channel",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 399
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 399
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.1,
+			"tokens": 30
+		},
+		{
+			"id": "string-014",
+			"class": "string",
+			"query": "\"Context window error detected, attempting compression\"",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 562
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 562
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.6,
+			"tokens": 50
+		},
+		{
+			"id": "string-014",
+			"class": "string",
+			"query": "\"Context window error detected, attempting compression\"",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 562
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 562
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.2,
+			"tokens": 31
+		},
+		{
+			"id": "identifier-033",
+			"class": "identifier",
+			"query": "WeComVerifySignature",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 486
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 486
+				},
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 222
+				},
+				{
+					"file": "pkg/channels/wecom_app.go",
+					"line": 282
+				},
+				{
+					"file": "pkg/channels/wecom_app.go",
+					"line": 360
+				},
+				{
+					"file": "pkg/channels/wecom_test.go",
+					"line": 180
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.8,
+			"tokens": 168
+		},
+		{
+			"id": "identifier-033",
+			"class": "identifier",
+			"query": "WeComVerifySignature",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 486
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 4.3,
+			"tokens": 14
+		},
+		{
+			"id": "identifier-034",
+			"class": "identifier",
+			"query": "WeComDecryptMessage",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 508
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 508
+				},
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 231
+				},
+				{
+					"file": "pkg/channels/wecom_app.go",
+					"line": 301
+				},
+				{
+					"file": "pkg/channels/wecom_app.go",
+					"line": 368
+				},
+				{
+					"file": "pkg/channels/wecom_test.go",
+					"line": 226
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.8,
+			"tokens": 173
+		},
+		{
+			"id": "identifier-034",
+			"class": "identifier",
+			"query": "WeComDecryptMessage",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 508
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 4.1,
+			"tokens": 14
+		},
+		{
+			"id": "string-015",
+			"class": "string",
+			"query": "failed to decode AES key: %w",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 527
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 527
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.3,
+			"tokens": 37
+		},
+		{
+			"id": "string-015",
+			"class": "string",
+			"query": "failed to decode AES key: %w",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 527
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 527
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.8,
+			"tokens": 22
+		},
+		{
+			"id": "string-016",
+			"class": "string",
+			"query": "\"failed to decode message: %w\"",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 533
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 533
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.5,
+			"tokens": 36
+		},
+		{
+			"id": "string-016",
+			"class": "string",
+			"query": "\"failed to decode message: %w\"",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 533
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 533
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.9,
+			"tokens": 22
+		},
+		{
+			"id": "string-017",
+			"class": "string",
+			"query": "Missing parameters in verification request",
+			"label": {
+				"file": "pkg/channels/wecom_app.go",
+				"line": 276
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "pkg/channels/wecom_app.go",
+					"line": 276
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.8,
+			"tokens": 45
+		},
+		{
+			"id": "string-017",
+			"class": "string",
+			"query": "Missing parameters in verification request",
+			"label": {
+				"file": "pkg/channels/wecom_app.go",
+				"line": 276
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/channels/wecom_app.go",
+					"line": 276
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.9,
+			"tokens": 27
+		},
+		{
+			"id": "string-018",
+			"class": "string",
+			"query": "\"failed to get bot user: %w\"",
+			"label": {
+				"file": "pkg/channels/discord.go",
+				"line": 73
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/channels/discord.go",
+					"line": 73
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23,
+			"tokens": 34
+		},
+		{
+			"id": "string-018",
+			"class": "string",
+			"query": "\"failed to get bot user: %w\"",
+			"label": {
+				"file": "pkg/channels/discord.go",
+				"line": 73
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/channels/discord.go",
+					"line": 73
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.8,
+			"tokens": 21
+		},
+		{
+			"id": "identifier-035",
+			"class": "identifier",
+			"query": "SkillsToolsConfig",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 479
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/config.go",
+					"line": 479
+				},
+				{
+					"file": "pkg/config/config.go",
+					"line": 476
+				},
+				{
+					"file": "pkg/config/defaults.go",
+					"line": 302
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 29.5,
+			"tokens": 62
+		},
+		{
+			"id": "identifier-035",
+			"class": "identifier",
+			"query": "SkillsToolsConfig",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 479
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 13
+		},
+		{
+			"id": "identifier-036",
+			"class": "identifier",
+			"query": "SearchCacheConfig",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 485
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/config.go",
+					"line": 485
+				},
+				{
+					"file": "pkg/config/config.go",
+					"line": 482
+				},
+				{
+					"file": "pkg/config/defaults.go",
+					"line": 310
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.4,
+			"tokens": 66
+		},
+		{
+			"id": "identifier-036",
+			"class": "identifier",
+			"query": "SearchCacheConfig",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 485
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.7,
+			"tokens": 13
+		},
+		{
+			"id": "string-019",
+			"class": "string",
+			"query": "search request failed: %w",
+			"label": {
+				"file": "pkg/skills/clawhub_registry.go",
+				"line": 120
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "pkg/skills/clawhub_registry.go",
+					"line": 120
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.5,
+			"tokens": 38
+		},
+		{
+			"id": "string-019",
+			"class": "string",
+			"query": "search request failed: %w",
+			"label": {
+				"file": "pkg/skills/clawhub_registry.go",
+				"line": 120
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/skills/clawhub_registry.go",
+					"line": 120
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25,
+			"tokens": 24
+		},
+		{
+			"id": "string-020",
+			"class": "string",
+			"query": "\"failed to parse search response: %w\"",
+			"label": {
+				"file": "pkg/skills/clawhub_registry.go",
+				"line": 125
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/skills/clawhub_registry.go",
+					"line": 125
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.3,
+			"tokens": 42
+		},
+		{
+			"id": "string-020",
+			"class": "string",
+			"query": "\"failed to parse search response: %w\"",
+			"label": {
+				"file": "pkg/skills/clawhub_registry.go",
+				"line": 125
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/skills/clawhub_registry.go",
+					"line": 125
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.9,
+			"tokens": 26
+		},
+		{
+			"id": "identifier-037",
+			"class": "identifier",
+			"query": "WeComBotMessage",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 44
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 44
+				},
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 43
+				},
+				{
+					"file": "pkg/channels/wecom_test.go",
+					"line": 575
+				},
+				{
+					"file": "pkg/channels/wecom_test.go",
+					"line": 590
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.8,
+			"tokens": 87
+		},
+		{
+			"id": "identifier-037",
+			"class": "identifier",
+			"query": "WeComBotMessage",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 44
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 13
+		},
+		{
+			"id": "identifier-038",
+			"class": "identifier",
+			"query": "TestWeComBotReplyMessage",
+			"label": {
+				"file": "pkg/channels/wecom_test.go",
+				"line": 732
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/channels/wecom_test.go",
+					"line": 732
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.1,
+			"tokens": 36
+		},
+		{
+			"id": "identifier-038",
+			"class": "identifier",
+			"query": "TestWeComBotReplyMessage",
+			"label": {
+				"file": "pkg/channels/wecom_test.go",
+				"line": 732
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 15
+		},
+		{
+			"id": "string-021",
+			"class": "string",
+			"query": "Failed to initialize WeCom channel",
+			"label": {
+				"file": "pkg/channels/manager.go",
+				"line": 183
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "pkg/channels/manager.go",
+					"line": 183
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21,
+			"tokens": 44
+		},
+		{
+			"id": "string-021",
+			"class": "string",
+			"query": "Failed to initialize WeCom channel",
+			"label": {
+				"file": "pkg/channels/manager.go",
+				"line": 183
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/channels/manager.go",
+					"line": 183
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.8,
+			"tokens": 28
+		},
+		{
+			"id": "string-022",
+			"class": "string",
+			"query": "\"Failed to initialize WeCom App channel\"",
+			"label": {
+				"file": "pkg/channels/manager.go",
+				"line": 196
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/channels/manager.go",
+					"line": 196
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.9,
+			"tokens": 45
+		},
+		{
+			"id": "string-022",
+			"class": "string",
+			"query": "\"Failed to initialize WeCom App channel\"",
+			"label": {
+				"file": "pkg/channels/manager.go",
+				"line": 196
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/channels/manager.go",
+					"line": 196
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.9,
+			"tokens": 29
+		},
+		{
+			"id": "identifier-039",
+			"class": "identifier",
+			"query": "WeComBotChannel",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 33
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 33
+				},
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 31
+				},
+				{
+					"file": "pkg/channels/manager.go",
+					"line": 181
+				},
+				{
+					"file": "pkg/channels/wecom_test.go",
+					"line": 91
+				},
+				{
+					"file": "pkg/channels/wecom_test.go",
+					"line": 99
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.4,
+			"tokens": 120
+		},
+		{
+			"id": "identifier-039",
+			"class": "identifier",
+			"query": "WeComBotChannel",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 33
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.6,
+			"tokens": 13
+		},
+		{
+			"id": "identifier-040",
+			"class": "identifier",
+			"query": "WeComBotReplyMessage",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 86
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 86
+				},
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 85
+				},
+				{
+					"file": "pkg/channels/wecom_test.go",
+					"line": 732
+				},
+				{
+					"file": "pkg/channels/wecom_test.go",
+					"line": 733
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.3,
+			"tokens": 92
+		},
+		{
+			"id": "identifier-040",
+			"class": "identifier",
+			"query": "WeComBotReplyMessage",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 86
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 14
+		},
+		{
+			"id": "identifier-041",
+			"class": "identifier",
+			"query": "TestBuildModelWithProtocol_NoPrefix",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 529
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/migration_test.go",
+					"line": 529
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.7,
+			"tokens": 42
+		},
+		{
+			"id": "identifier-041",
+			"class": "identifier",
+			"query": "TestBuildModelWithProtocol_NoPrefix",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 529
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 18
+		},
+		{
+			"id": "identifier-042",
+			"class": "identifier",
+			"query": "TestBuildModelWithProtocol_AlreadyHasPrefix",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 536
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/migration_test.go",
+					"line": 536
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.4,
+			"tokens": 46
+		},
+		{
+			"id": "identifier-042",
+			"class": "identifier",
+			"query": "TestBuildModelWithProtocol_AlreadyHasPrefix",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 536
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.3,
+			"tokens": 20
+		},
+		{
+			"id": "identifier-043",
+			"class": "identifier",
+			"query": "IsEmpty",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 342
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/config.go",
+					"line": 75
+				},
+				{
+					"file": "pkg/config/config.go",
+					"line": 340
+				},
+				{
+					"file": "docs/design/provider-refactoring.md",
+					"line": 227
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21,
+			"tokens": 73
+		},
+		{
+			"id": "identifier-043",
+			"class": "identifier",
+			"query": "IsEmpty",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 342
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.6,
+			"tokens": 11
+		},
+		{
+			"id": "identifier-044",
+			"class": "identifier",
+			"query": "ProcessDirectWithChannel",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 239
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 236
+				},
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 239
+				},
+				{
+					"file": "pkg/tools/cron.go",
+					"line": 17
+				},
+				{
+					"file": "pkg/tools/cron.go",
+					"line": 319
+				},
+				{
+					"file": "pkg/agent/loop_test.go",
+					"line": 601
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.1,
+			"tokens": 131
+		},
+		{
+			"id": "identifier-044",
+			"class": "identifier",
+			"query": "ProcessDirectWithChannel",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 239
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 15
+		},
+		{
+			"id": "string-023",
+			"class": "string",
+			"query": "Context window error detected, attempting compression",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 562
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 562
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.6,
+			"tokens": 51
+		},
+		{
+			"id": "string-023",
+			"class": "string",
+			"query": "Context window error detected, attempting compression",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 562
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 562
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.1,
+			"tokens": 31
+		},
+		{
+			"id": "string-024",
+			"class": "string",
+			"query": "\"Forced compression executed\"",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 815
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 815
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.8,
+			"tokens": 37
+		},
+		{
+			"id": "string-024",
+			"class": "string",
+			"query": "\"Forced compression executed\"",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 815
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 815
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.6,
+			"tokens": 24
+		},
+		{
+			"id": "identifier-045",
+			"class": "identifier",
+			"query": "GetStartupInfo",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 823
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 822
+				},
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 823
+				},
+				{
+					"file": "pkg/agent/loop_test.go",
+					"line": 171
+				},
+				{
+					"file": "pkg/agent/loop_test.go",
+					"line": 173
+				},
+				{
+					"file": "cmd/picoclaw/internal/agent/helpers.go",
+					"line": 54
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 48.9,
+			"tokens": 126
+		},
+		{
+			"id": "identifier-045",
+			"class": "identifier",
+			"query": "GetStartupInfo",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 823
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-046",
+			"class": "identifier",
+			"query": "TestNewAgentInstance_UsesDefaultsTemperatureAndMaxTokens",
+			"label": {
+				"file": "pkg/agent/instance_test.go",
+				"line": 10
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/agent/instance_test.go",
+					"line": 10
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.6,
+			"tokens": 52
+		},
+		{
+			"id": "identifier-046",
+			"class": "identifier",
+			"query": "TestNewAgentInstance_UsesDefaultsTemperatureAndMaxTokens",
+			"label": {
+				"file": "pkg/agent/instance_test.go",
+				"line": 10
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.7,
+			"tokens": 23
+		},
+		{
+			"id": "identifier-047",
+			"class": "identifier",
+			"query": "TestNewAgentInstance_DefaultsTemperatureWhenZero",
+			"label": {
+				"file": "pkg/agent/instance_test.go",
+				"line": 42
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/agent/instance_test.go",
+					"line": 42
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23,
+			"tokens": 48
+		},
+		{
+			"id": "identifier-047",
+			"class": "identifier",
+			"query": "TestNewAgentInstance_DefaultsTemperatureWhenZero",
+			"label": {
+				"file": "pkg/agent/instance_test.go",
+				"line": 42
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.7,
+			"tokens": 21
+		},
+		{
+			"id": "identifier-048",
+			"class": "identifier",
+			"query": "ExtraContent",
+			"label": {
+				"file": "pkg/providers/protocoltypes/types.go",
+				"line": 13
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/providers/protocoltypes/types.go",
+					"line": 13
+				},
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 635
+				},
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 636
+				},
+				{
+					"file": "pkg/providers/types.go",
+					"line": 18
+				},
+				{
+					"file": "pkg/providers/protocoltypes/types.go",
+					"line": 10
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.5,
+			"tokens": 116
+		},
+		{
+			"id": "identifier-048",
+			"class": "identifier",
+			"query": "ExtraContent",
+			"label": {
+				"file": "pkg/providers/protocoltypes/types.go",
+				"line": 13
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 4,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-049",
+			"class": "identifier",
+			"query": "GoogleExtra",
+			"label": {
+				"file": "pkg/providers/protocoltypes/types.go",
+				"line": 17
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/providers/protocoltypes/types.go",
+					"line": 17
+				},
+				{
+					"file": "pkg/providers/types.go",
+					"line": 19
+				},
+				{
+					"file": "pkg/providers/protocoltypes/types.go",
+					"line": 14
+				},
+				{
+					"file": "pkg/providers/openai_compat/provider.go",
+					"line": 27
+				},
+				{
+					"file": "pkg/providers/openai_compat/provider.go",
+					"line": 265
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.5,
+			"tokens": 111
+		},
+		{
+			"id": "identifier-049",
+			"class": "identifier",
+			"query": "GoogleExtra",
+			"label": {
+				"file": "pkg/providers/protocoltypes/types.go",
+				"line": 17
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 4.4,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-050",
+			"class": "identifier",
+			"query": "TestCreateProviderReturnsClaudeCliProviderForClaudeCli",
+			"label": {
+				"file": "pkg/providers/factory_test.go",
+				"line": 240
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/providers/factory_test.go",
+					"line": 240
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.6,
+			"tokens": 52
+		},
+		{
+			"id": "identifier-050",
+			"class": "identifier",
+			"query": "TestCreateProviderReturnsClaudeCliProviderForClaudeCli",
+			"label": {
+				"file": "pkg/providers/factory_test.go",
+				"line": 240
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 4.4,
+			"tokens": 22
+		},
+		{
+			"id": "identifier-051",
+			"class": "identifier",
+			"query": "NewProviderWithMaxTokensField",
+			"label": {
+				"file": "pkg/providers/openai_compat/provider.go",
+				"line": 86
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/providers/openai_compat/provider.go",
+					"line": 86
+				},
+				{
+					"file": "pkg/providers/openai_compat/provider.go",
+					"line": 90
+				},
+				{
+					"file": "pkg/providers/openai_compat/provider_test.go",
+					"line": 331
+				},
+				{
+					"file": "pkg/providers/openai_compat/provider_test.go",
+					"line": 338
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.8,
+			"tokens": 149
+		},
+		{
+			"id": "identifier-051",
+			"class": "identifier",
+			"query": "NewProviderWithMaxTokensField",
+			"label": {
+				"file": "pkg/providers/openai_compat/provider.go",
+				"line": 86
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 16
+		},
+		{
+			"id": "string-025",
+			"class": "string",
+			"query": "Failed to get_login_info",
+			"label": {
+				"file": "pkg/channels/onebot.go",
+				"line": 226
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "pkg/channels/onebot.go",
+					"line": 226
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.1,
+			"tokens": 38
+		},
+		{
+			"id": "string-025",
+			"class": "string",
+			"query": "Failed to get_login_info",
+			"label": {
+				"file": "pkg/channels/onebot.go",
+				"line": 226
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/channels/onebot.go",
+					"line": 226
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 30.7,
+			"tokens": 25
+		},
+		{
+			"id": "string-026",
+			"class": "string",
+			"query": "\"Could not parse self ID from get_login_info response\"",
+			"label": {
+				"file": "pkg/channels/onebot.go",
+				"line": 264
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/channels/onebot.go",
+					"line": 264
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.2,
+			"tokens": 51
+		},
+		{
+			"id": "string-026",
+			"class": "string",
+			"query": "\"Could not parse self ID from get_login_info response\"",
+			"label": {
+				"file": "pkg/channels/onebot.go",
+				"line": 264
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/channels/onebot.go",
+					"line": 264
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 33.8,
+			"tokens": 31
+		},
+		{
+			"id": "identifier-052",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_NoProviderField_SingleProvider",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 432
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/migration_test.go",
+					"line": 432
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.2,
+			"tokens": 56
+		},
+		{
+			"id": "identifier-052",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_NoProviderField_SingleProvider",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 432
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.9,
+			"tokens": 24
+		},
+		{
+			"id": "identifier-053",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_NoProviderField_MultipleProviders",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 466
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/migration_test.go",
+					"line": 466
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 24.7,
+			"tokens": 57
+		},
+		{
+			"id": "identifier-053",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_NoProviderField_MultipleProviders",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 466
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 5.2,
+			"tokens": 25
+		},
+		{
+			"id": "identifier-054",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_PreservesUserModel_DeepSeek",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 210
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/migration_test.go",
+					"line": 210
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 30.9,
+			"tokens": 54
+		},
+		{
+			"id": "identifier-054",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_PreservesUserModel_DeepSeek",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 210
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 4,
+			"tokens": 24
+		},
+		{
+			"id": "identifier-055",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_PreservesUserModel_OpenAI",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 235
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/migration_test.go",
+					"line": 235
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.6,
+			"tokens": 53
+		},
+		{
+			"id": "identifier-055",
+			"class": "identifier",
+			"query": "TestConvertProvidersToModelList_PreservesUserModel_OpenAI",
+			"label": {
+				"file": "pkg/config/migration_test.go",
+				"line": 235
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 23
+		},
+		{
+			"id": "identifier-056",
+			"class": "identifier",
+			"query": "TestWebFetchTool_extractText",
+			"label": {
+				"file": "pkg/tools/web_test.go",
+				"line": 243
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/tools/web_test.go",
+					"line": 243
+				},
+				{
+					"file": "pkg/tools/web_test.go",
+					"line": 242
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.7,
+			"tokens": 64
+		},
+		{
+			"id": "identifier-056",
+			"class": "identifier",
+			"query": "TestWebFetchTool_extractText",
+			"label": {
+				"file": "pkg/tools/web_test.go",
+				"line": 243
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.2,
+			"tokens": 16
+		},
+		{
+			"id": "identifier-057",
+			"class": "identifier",
+			"query": "TestSplitMessage",
+			"label": {
+				"file": "pkg/utils/message_test.go",
+				"line": 8
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/utils/message_test.go",
+					"line": 8
+				},
+				{
+					"file": "pkg/utils/message_test.go",
+					"line": 124
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22,
+			"tokens": 55
+		},
+		{
+			"id": "identifier-057",
+			"class": "identifier",
+			"query": "TestSplitMessage",
+			"label": {
+				"file": "pkg/utils/message_test.go",
+				"line": 8
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 13
+		},
+		{
+			"id": "identifier-058",
+			"class": "identifier",
+			"query": "TestSplitMessage_CodeBlockIntegrity",
+			"label": {
+				"file": "pkg/utils/message_test.go",
+				"line": 124
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/utils/message_test.go",
+					"line": 124
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 20.7,
+			"tokens": 41
+		},
+		{
+			"id": "identifier-058",
+			"class": "identifier",
+			"query": "TestSplitMessage_CodeBlockIntegrity",
+			"label": {
+				"file": "pkg/utils/message_test.go",
+				"line": 124
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 18
+		},
+		{
+			"id": "identifier-059",
+			"class": "identifier",
+			"query": "SplitMessage",
+			"label": {
+				"file": "pkg/utils/message.go",
+				"line": 12
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/utils/message.go",
+					"line": 12
+				},
+				{
+					"file": "pkg/utils/message.go",
+					"line": 7
+				},
+				{
+					"file": "pkg/channels/discord.go",
+					"line": 129
+				},
+				{
+					"file": "pkg/utils/message_test.go",
+					"line": 8
+				},
+				{
+					"file": "pkg/utils/message_test.go",
+					"line": 99
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.9,
+			"tokens": 136
+		},
+		{
+			"id": "identifier-059",
+			"class": "identifier",
+			"query": "SplitMessage",
+			"label": {
+				"file": "pkg/utils/message.go",
+				"line": 12
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-060",
+			"class": "identifier",
+			"query": "AddAssistantMessage",
+			"label": {
+				"file": "pkg/agent/context.go",
+				"line": 556
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/agent/context.go",
+					"line": 556
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22,
+			"tokens": 34
+		},
+		{
+			"id": "identifier-060",
+			"class": "identifier",
+			"query": "AddAssistantMessage",
+			"label": {
+				"file": "pkg/agent/context.go",
+				"line": 556
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 14
+		},
+		{
+			"id": "identifier-061",
+			"class": "identifier",
+			"query": "GetSkillsInfo",
+			"label": {
+				"file": "pkg/agent/context.go",
+				"line": 571
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 839
+				},
+				{
+					"file": "pkg/agent/context.go",
+					"line": 570
+				},
+				{
+					"file": "pkg/agent/context.go",
+					"line": 571
+				}
+			],
+			"top1": false,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.4,
+			"tokens": 78
+		},
+		{
+			"id": "identifier-061",
+			"class": "identifier",
+			"query": "GetSkillsInfo",
+			"label": {
+				"file": "pkg/agent/context.go",
+				"line": 571
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 12
+		},
+		{
+			"id": "string-027",
+			"class": "string",
+			"query": "Forced compression executed",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 815
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 815
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23,
+			"tokens": 37
+		},
+		{
+			"id": "string-027",
+			"class": "string",
+			"query": "Forced compression executed",
+			"label": {
+				"file": "pkg/agent/loop.go",
+				"line": 815
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/agent/loop.go",
+					"line": 815
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.3,
+			"tokens": 24
+		},
+		{
+			"id": "string-028",
+			"class": "string",
+			"query": "\"Feishu websocket stopped with error\"",
+			"label": {
+				"file": "pkg/channels/feishu_64.go",
+				"line": 68
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/channels/feishu_64.go",
+					"line": 68
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.4,
+			"tokens": 43
+		},
+		{
+			"id": "string-028",
+			"class": "string",
+			"query": "\"Feishu websocket stopped with error\"",
+			"label": {
+				"file": "pkg/channels/feishu_64.go",
+				"line": 68
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/channels/feishu_64.go",
+					"line": 68
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.7,
+			"tokens": 28
+		},
+		{
+			"id": "identifier-062",
+			"class": "identifier",
+			"query": "TestExtractFrontmatter",
+			"label": {
+				"file": "pkg/skills/loader_test.go",
+				"line": 82
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/skills/loader_test.go",
+					"line": 82
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.1,
+			"tokens": 35
+		},
+		{
+			"id": "identifier-062",
+			"class": "identifier",
+			"query": "TestExtractFrontmatter",
+			"label": {
+				"file": "pkg/skills/loader_test.go",
+				"line": 82
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.9,
+			"tokens": 14
+		},
+		{
+			"id": "identifier-063",
+			"class": "identifier",
+			"query": "TestStripFrontmatter",
+			"label": {
+				"file": "pkg/skills/loader_test.go",
+				"line": 269
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/skills/loader_test.go",
+					"line": 269
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.5,
+			"tokens": 34
+		},
+		{
+			"id": "identifier-063",
+			"class": "identifier",
+			"query": "TestStripFrontmatter",
+			"label": {
+				"file": "pkg/skills/loader_test.go",
+				"line": 269
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.3,
+			"tokens": 14
+		},
+		{
+			"id": "identifier-064",
+			"class": "identifier",
+			"query": "NewHTTPProviderWithMaxTokensField",
+			"label": {
+				"file": "pkg/providers/http_provider.go",
+				"line": 26
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/providers/http_provider.go",
+					"line": 26
+				},
+				{
+					"file": "pkg/providers/http_provider.go",
+					"line": 27
+				},
+				{
+					"file": "pkg/providers/factory_provider.go",
+					"line": 87
+				},
+				{
+					"file": "pkg/providers/factory_provider.go",
+					"line": 106
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.1,
+			"tokens": 140
+		},
+		{
+			"id": "identifier-064",
+			"class": "identifier",
+			"query": "NewHTTPProviderWithMaxTokensField",
+			"label": {
+				"file": "pkg/providers/http_provider.go",
+				"line": 26
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 17
+		},
+		{
+			"id": "string-029",
+			"class": "string",
+			"query": "api_key is required for anthropic protocol (model: %s)",
+			"label": {
+				"file": "pkg/providers/factory_provider.go",
+				"line": 129
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "pkg/providers/factory_provider.go",
+					"line": 129
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.8,
+			"tokens": 55
+		},
+		{
+			"id": "string-029",
+			"class": "string",
+			"query": "api_key is required for anthropic protocol (model: %s)",
+			"label": {
+				"file": "pkg/providers/factory_provider.go",
+				"line": 129
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/factory_provider.go",
+					"line": 129
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.7,
+			"tokens": 35
+		},
+		{
+			"id": "string-030",
+			"class": "string",
+			"query": "\"no providers configured. Please add entries to model_list in your config\"",
+			"label": {
+				"file": "pkg/providers/legacy_provider.go",
+				"line": 40
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/providers/legacy_provider.go",
+					"line": 40
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.8,
+			"tokens": 60
+		},
+		{
+			"id": "string-030",
+			"class": "string",
+			"query": "\"no providers configured. Please add entries to model_list in your config\"",
+			"label": {
+				"file": "pkg/providers/legacy_provider.go",
+				"line": 40
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/legacy_provider.go",
+					"line": 40
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22,
+			"tokens": 36
+		},
+		{
+			"id": "string-031",
+			"class": "string",
+			"query": "model %q not found in model_list or providers",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 637
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "pkg/config/config.go",
+					"line": 637
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.5,
+			"tokens": 47
+		},
+		{
+			"id": "string-031",
+			"class": "string",
+			"query": "model %q not found in model_list or providers",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 637
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/config/config.go",
+					"line": 637
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.2,
+			"tokens": 28
+		},
+		{
+			"id": "identifier-065",
+			"class": "identifier",
+			"query": "DefaultConfig",
+			"label": {
+				"file": "pkg/config/defaults.go",
+				"line": 9
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/defaults.go",
+					"line": 9
+				},
+				{
+					"file": "pkg/config/config.go",
+					"line": 507
+				},
+				{
+					"file": "pkg/config/config.go",
+					"line": 520
+				},
+				{
+					"file": "pkg/migrate/config.go",
+					"line": 71
+				},
+				{
+					"file": "pkg/config/defaults.go",
+					"line": 8
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.3,
+			"tokens": 108
+		},
+		{
+			"id": "identifier-065",
+			"class": "identifier",
+			"query": "DefaultConfig",
+			"label": {
+				"file": "pkg/config/defaults.go",
+				"line": 9
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.4,
+			"tokens": 12
+		},
+		{
+			"id": "identifier-066",
+			"class": "identifier",
+			"query": "ConvertProvidersToModelList",
+			"label": {
+				"file": "pkg/config/migration.go",
+				"line": 37
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/migration.go",
+					"line": 37
+				},
+				{
+					"file": "pkg/config/config.go",
+					"line": 541
+				},
+				{
+					"file": "pkg/config/migration.go",
+					"line": 34
+				},
+				{
+					"file": "pkg/config/migration_test.go",
+					"line": 13
+				},
+				{
+					"file": "pkg/config/migration_test.go",
+					"line": 25
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.9,
+			"tokens": 136
+		},
+		{
+			"id": "identifier-066",
+			"class": "identifier",
+			"query": "ConvertProvidersToModelList",
+			"label": {
+				"file": "pkg/config/migration.go",
+				"line": 37
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.5,
+			"tokens": 16
+		},
+		{
+			"id": "string-032",
+			"class": "string",
+			"query": "\"unknown protocol %q in model %q\"",
+			"label": {
+				"file": "pkg/providers/factory_provider.go",
+				"line": 172
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/providers/factory_provider.go",
+					"line": 172
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.1,
+			"tokens": 45
+		},
+		{
+			"id": "string-032",
+			"class": "string",
+			"query": "\"unknown protocol %q in model %q\"",
+			"label": {
+				"file": "pkg/providers/factory_provider.go",
+				"line": 172
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/factory_provider.go",
+					"line": 172
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.6,
+			"tokens": 31
+		},
+		{
+			"id": "identifier-067",
+			"class": "identifier",
+			"query": "Validate",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 414
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/utils/skills.go",
+					"line": 8
+				},
+				{
+					"file": "pkg/utils/skills.go",
+					"line": 10
+				},
+				{
+					"file": "pkg/config/config.go",
+					"line": 413
+				},
+				{
+					"file": "pkg/config/config.go",
+					"line": 414
+				},
+				{
+					"file": "pkg/skills/loader_test.go",
+					"line": 12
+				}
+			],
+			"top1": false,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.7,
+			"tokens": 127
+		},
+		{
+			"id": "identifier-067",
+			"class": "identifier",
+			"query": "Validate",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 414
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.3,
+			"tokens": 11
+		},
+		{
+			"id": "identifier-068",
+			"class": "identifier",
+			"query": "GetModelConfig",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 634
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/config.go",
+					"line": 631
+				},
+				{
+					"file": "pkg/config/config.go",
+					"line": 634
+				},
+				{
+					"file": "pkg/config/migration.go",
+					"line": 374
+				},
+				{
+					"file": "pkg/config/migration_test.go",
+					"line": 490
+				},
+				{
+					"file": "pkg/config/model_config_test.go",
+					"line": 15
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23,
+			"tokens": 141
+		},
+		{
+			"id": "identifier-068",
+			"class": "identifier",
+			"query": "GetModelConfig",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 634
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 4.1,
+			"tokens": 12
+		},
+		{
+			"id": "string-033",
+			"class": "string",
+			"query": "unknown protocol %q in model %q",
+			"label": {
+				"file": "pkg/providers/factory_provider.go",
+				"line": 172
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "phrase",
+			"top": [
+				{
+					"file": "pkg/providers/factory_provider.go",
+					"line": 172
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.2,
+			"tokens": 45
+		},
+		{
+			"id": "string-033",
+			"class": "string",
+			"query": "unknown protocol %q in model %q",
+			"label": {
+				"file": "pkg/providers/factory_provider.go",
+				"line": 172
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/factory_provider.go",
+					"line": 172
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 25.7,
+			"tokens": 31
+		},
+		{
+			"id": "identifier-069",
+			"class": "identifier",
+			"query": "ExecConfig",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 467
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/config/config.go",
+					"line": 467
+				},
+				{
+					"file": "pkg/config/config.go",
+					"line": 475
+				},
+				{
+					"file": "pkg/config/defaults.go",
+					"line": 299
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.4,
+			"tokens": 54
+		},
+		{
+			"id": "identifier-069",
+			"class": "identifier",
+			"query": "ExecConfig",
+			"label": {
+				"file": "pkg/config/config.go",
+				"line": 467
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.9,
+			"tokens": 11
+		},
+		{
+			"id": "identifier-070",
+			"class": "identifier",
+			"query": "NewCronTool",
+			"label": {
+				"file": "pkg/tools/cron.go",
+				"line": 33
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "pkg/tools/cron.go",
+					"line": 33
+				},
+				{
+					"file": "pkg/tools/cron.go",
+					"line": 31
+				},
+				{
+					"file": "cmd/picoclaw/internal/gateway/helpers.go",
+					"line": 235
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.2,
+			"tokens": 78
+		},
+		{
+			"id": "identifier-070",
+			"class": "identifier",
+			"query": "NewCronTool",
+			"label": {
+				"file": "pkg/tools/cron.go",
+				"line": 33
+			},
+			"system": "baselineA",
+			"top": [],
+			"top1": false,
+			"top5": false,
+			"lineHit": false,
+			"ms": 3.3,
+			"tokens": 12
+		},
+		{
+			"id": "string-034",
+			"class": "string",
+			"query": "\"Failed to read skill metadata\"",
+			"label": {
+				"file": "pkg/skills/loader.go",
+				"line": 198
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "quoted",
+			"top": [
+				{
+					"file": "pkg/skills/loader.go",
+					"line": 198
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.8,
+			"tokens": 35
+		},
+		{
+			"id": "string-034",
+			"class": "string",
+			"query": "\"Failed to read skill metadata\"",
+			"label": {
+				"file": "pkg/skills/loader.go",
+				"line": 198
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/skills/loader.go",
+					"line": 198
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 22.5,
+			"tokens": 21
+		},
+		{
+			"id": "string-035",
+			"class": "string",
+			"query": "Skipping invalid tool call in history",
+			"label": {
+				"file": "pkg/providers/codex_provider.go",
+				"line": 248
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "error_like",
+			"top": [
+				{
+					"file": "pkg/providers/codex_provider.go",
+					"line": 248
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 21.1,
+			"tokens": 49
+		},
+		{
+			"id": "string-035",
+			"class": "string",
+			"query": "Skipping invalid tool call in history",
+			"label": {
+				"file": "pkg/providers/codex_provider.go",
+				"line": 248
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/codex_provider.go",
+					"line": 248
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": true,
+			"ms": 23.1,
+			"tokens": 33
+		},
+		{
+			"id": "path-001",
+			"class": "path",
+			"query": "pkg/utils/http_retry.go",
+			"label": {
+				"file": "pkg/utils/http_retry.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/utils/http_retry.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/utils/http_retry_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 18.6,
+			"tokens": 35
+		},
+		{
+			"id": "path-001",
+			"class": "path",
+			"query": "pkg/utils/http_retry.go",
+			"label": {
+				"file": "pkg/utils/http_retry.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/utils/http_retry.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13,
+			"tokens": 6
+		},
+		{
+			"id": "path-002",
+			"class": "path",
+			"query": "utils/http_retry_test.go",
+			"label": {
+				"file": "pkg/utils/http_retry_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/utils/http_retry_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16.3,
+			"tokens": 24
+		},
+		{
+			"id": "path-002",
+			"class": "path",
+			"query": "utils/http_retry_test.go",
+			"label": {
+				"file": "pkg/utils/http_retry_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/utils/http_retry_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13.5,
+			"tokens": 7
+		},
+		{
+			"id": "path-003",
+			"class": "path",
+			"query": "agent/command.go",
+			"label": {
+				"file": "cmd/picoclaw/internal/agent/command.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "cmd/picoclaw/internal/agent/command.go",
+					"line": 1
+				},
+				{
+					"file": "cmd/picoclaw/internal/auth/command.go",
+					"line": 1
+				},
+				{
+					"file": "cmd/picoclaw/internal/cron/command.go",
+					"line": 1
+				},
+				{
+					"file": "cmd/picoclaw/internal/skills/command.go",
+					"line": 1
+				},
+				{
+					"file": "cmd/picoclaw/internal/status/command.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 17.8,
+			"tokens": 84
+		},
+		{
+			"id": "path-003",
+			"class": "path",
+			"query": "agent/command.go",
+			"label": {
+				"file": "cmd/picoclaw/internal/agent/command.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "cmd/picoclaw/internal/agent/command.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 12.9,
+			"tokens": 10
+		},
+		{
+			"id": "path-004",
+			"class": "path",
+			"query": "cmd/picoclaw/internal/agent/command_test.go",
+			"label": {
+				"file": "cmd/picoclaw/internal/agent/command_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "cmd/picoclaw/internal/agent/command_test.go",
+					"line": 1
+				},
+				{
+					"file": "cmd/picoclaw/internal/auth/command_test.go",
+					"line": 1
+				},
+				{
+					"file": "cmd/picoclaw/internal/cron/command_test.go",
+					"line": 1
+				},
+				{
+					"file": "cmd/picoclaw/internal/skills/command_test.go",
+					"line": 1
+				},
+				{
+					"file": "cmd/picoclaw/internal/status/command_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16.8,
+			"tokens": 97
+		},
+		{
+			"id": "path-004",
+			"class": "path",
+			"query": "cmd/picoclaw/internal/agent/command_test.go",
+			"label": {
+				"file": "cmd/picoclaw/internal/agent/command_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "cmd/picoclaw/internal/agent/command_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13.1,
+			"tokens": 11
+		},
+		{
+			"id": "path-005",
+			"class": "path",
+			"query": "agent/context_cache_test.go",
+			"label": {
+				"file": "pkg/agent/context_cache_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/agent/context_cache_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 18,
+			"tokens": 25
+		},
+		{
+			"id": "path-005",
+			"class": "path",
+			"query": "agent/context_cache_test.go",
+			"label": {
+				"file": "pkg/agent/context_cache_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/agent/context_cache_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13.1,
+			"tokens": 8
+		},
+		{
+			"id": "path-006",
+			"class": "path",
+			"query": "spawn_test.go",
+			"label": {
+				"file": "pkg/tools/spawn_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/tools/spawn_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16.7,
+			"tokens": 20
+		},
+		{
+			"id": "path-006",
+			"class": "path",
+			"query": "spawn_test.go",
+			"label": {
+				"file": "pkg/tools/spawn_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/tools/spawn_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13.5,
+			"tokens": 6
+		},
+		{
+			"id": "path-007",
+			"class": "path",
+			"query": "pkg/agent/context_test.go",
+			"label": {
+				"file": "pkg/agent/context_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/agent/context_test.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/agent/context_cache_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16.8,
+			"tokens": 37
+		},
+		{
+			"id": "path-007",
+			"class": "path",
+			"query": "pkg/agent/context_test.go",
+			"label": {
+				"file": "pkg/agent/context_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/agent/context_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13.6,
+			"tokens": 7
+		},
+		{
+			"id": "path-008",
+			"class": "path",
+			"query": "tools/registry_test.go",
+			"label": {
+				"file": "pkg/tools/registry_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/tools/registry_test.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/agent/registry_test.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/skills/registry_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 45.9,
+			"tokens": 47
+		},
+		{
+			"id": "path-008",
+			"class": "path",
+			"query": "tools/registry_test.go",
+			"label": {
+				"file": "pkg/tools/registry_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/tools/registry_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13.3,
+			"tokens": 7
+		},
+		{
+			"id": "path-009",
+			"class": "path",
+			"query": "string_test.go",
+			"label": {
+				"file": "pkg/utils/string_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/utils/string_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 18.6,
+			"tokens": 20
+		},
+		{
+			"id": "path-009",
+			"class": "path",
+			"query": "string_test.go",
+			"label": {
+				"file": "pkg/utils/string_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/utils/string_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13.2,
+			"tokens": 6
+		},
+		{
+			"id": "path-010",
+			"class": "path",
+			"query": "docs/channels/dingtalk/README.zh.md",
+			"label": {
+				"file": "docs/channels/dingtalk/README.zh.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/channels/dingtalk/README.zh.md",
+					"line": 1
+				},
+				{
+					"file": "README.zh.md",
+					"line": 1
+				},
+				{
+					"file": "docs/channels/qq/README.zh.md",
+					"line": 1
+				},
+				{
+					"file": "docs/channels/line/README.zh.md",
+					"line": 1
+				},
+				{
+					"file": "docs/channels/slack/README.zh.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 19.7,
+			"tokens": 70
+		},
+		{
+			"id": "path-010",
+			"class": "path",
+			"query": "docs/channels/dingtalk/README.zh.md",
+			"label": {
+				"file": "docs/channels/dingtalk/README.zh.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/channels/dingtalk/README.zh.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15,
+			"tokens": 9
+		},
+		{
+			"id": "path-011",
+			"class": "path",
+			"query": "discord/README.zh.md",
+			"label": {
+				"file": "docs/channels/discord/README.zh.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/channels/discord/README.zh.md",
+					"line": 1
+				},
+				{
+					"file": "README.zh.md",
+					"line": 1
+				},
+				{
+					"file": "docs/channels/qq/README.zh.md",
+					"line": 1
+				},
+				{
+					"file": "docs/channels/line/README.zh.md",
+					"line": 1
+				},
+				{
+					"file": "docs/channels/slack/README.zh.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 48.3,
+			"tokens": 68
+		},
+		{
+			"id": "path-011",
+			"class": "path",
+			"query": "discord/README.zh.md",
+			"label": {
+				"file": "docs/channels/discord/README.zh.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/channels/discord/README.zh.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.9,
+			"tokens": 9
+		},
+		{
+			"id": "path-012",
+			"class": "path",
+			"query": "wecom-app-configuration.md",
+			"label": {
+				"file": "docs/wecom-app-configuration.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/wecom-app-configuration.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 20.9,
+			"tokens": 29
+		},
+		{
+			"id": "path-012",
+			"class": "path",
+			"query": "wecom-app-configuration.md",
+			"label": {
+				"file": "docs/wecom-app-configuration.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/wecom-app-configuration.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16.5,
+			"tokens": 8
+		},
+		{
+			"id": "path-013",
+			"class": "path",
+			"query": "pkg/skills/clawhub_registry.go",
+			"label": {
+				"file": "pkg/skills/clawhub_registry.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/skills/clawhub_registry.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/skills/clawhub_registry_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 19.9,
+			"tokens": 41
+		},
+		{
+			"id": "path-013",
+			"class": "path",
+			"query": "pkg/skills/clawhub_registry.go",
+			"label": {
+				"file": "pkg/skills/clawhub_registry.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/skills/clawhub_registry.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.4,
+			"tokens": 8
+		},
+		{
+			"id": "path-014",
+			"class": "path",
+			"query": "skills/clawhub_registry_test.go",
+			"label": {
+				"file": "pkg/skills/clawhub_registry_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/skills/clawhub_registry_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 20.8,
+			"tokens": 28
+		},
+		{
+			"id": "path-014",
+			"class": "path",
+			"query": "skills/clawhub_registry_test.go",
+			"label": {
+				"file": "pkg/skills/clawhub_registry_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/skills/clawhub_registry_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.6,
+			"tokens": 9
+		},
+		{
+			"id": "path-015",
+			"class": "path",
+			"query": "wecom.go",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/channels/wecom_app.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/channels/wecom_test.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/channels/wecom_app_test.go",
+					"line": 1
+				},
+				{
+					"file": "cmd/picoclaw/internal/cron/remove.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 21.5,
+			"tokens": 105
+		},
+		{
+			"id": "path-015",
+			"class": "path",
+			"query": "wecom.go",
+			"label": {
+				"file": "pkg/channels/wecom.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/channels/wecom.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.5,
+			"tokens": 6
+		},
+		{
+			"id": "path-016",
+			"class": "path",
+			"query": "pkg/channels/wecom_app.go",
+			"label": {
+				"file": "pkg/channels/wecom_app.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/channels/wecom_app.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/channels/wecom_app_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 21.5,
+			"tokens": 54
+		},
+		{
+			"id": "path-016",
+			"class": "path",
+			"query": "pkg/channels/wecom_app.go",
+			"label": {
+				"file": "pkg/channels/wecom_app.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/channels/wecom_app.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.7,
+			"tokens": 7
+		},
+		{
+			"id": "path-017",
+			"class": "path",
+			"query": "agent/instance_test.go",
+			"label": {
+				"file": "pkg/agent/instance_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/agent/instance_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 21.8,
+			"tokens": 23
+		},
+		{
+			"id": "path-017",
+			"class": "path",
+			"query": "agent/instance_test.go",
+			"label": {
+				"file": "pkg/agent/instance_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/agent/instance_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.6,
+			"tokens": 7
+		},
+		{
+			"id": "path-018",
+			"class": "path",
+			"query": "mock_provider_test.go",
+			"label": {
+				"file": "pkg/agent/mock_provider_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/agent/mock_provider_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 19.8,
+			"tokens": 24
+		},
+		{
+			"id": "path-018",
+			"class": "path",
+			"query": "mock_provider_test.go",
+			"label": {
+				"file": "pkg/agent/mock_provider_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/agent/mock_provider_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.8,
+			"tokens": 8
+		},
+		{
+			"id": "path-019",
+			"class": "path",
+			"query": "pkg/providers/toolcall_utils.go",
+			"label": {
+				"file": "pkg/providers/toolcall_utils.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/providers/toolcall_utils.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 19.7,
+			"tokens": 35
+		},
+		{
+			"id": "path-019",
+			"class": "path",
+			"query": "pkg/providers/toolcall_utils.go",
+			"label": {
+				"file": "pkg/providers/toolcall_utils.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/toolcall_utils.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 12.9,
+			"tokens": 8
+		},
+		{
+			"id": "path-020",
+			"class": "path",
+			"query": "utils/message_test.go",
+			"label": {
+				"file": "pkg/utils/message_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/utils/message_test.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/tools/message_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 17.9,
+			"tokens": 34
+		},
+		{
+			"id": "path-020",
+			"class": "path",
+			"query": "utils/message_test.go",
+			"label": {
+				"file": "pkg/utils/message_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/utils/message_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 12.8,
+			"tokens": 7
+		},
+		{
+			"id": "path-021",
+			"class": "path",
+			"query": "utils/message.go",
+			"label": {
+				"file": "pkg/utils/message.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/utils/message.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/tools/message.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/utils/message_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16.5,
+			"tokens": 42
+		},
+		{
+			"id": "path-021",
+			"class": "path",
+			"query": "utils/message.go",
+			"label": {
+				"file": "pkg/utils/message.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/utils/message.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 12.9,
+			"tokens": 5
+		},
+		{
+			"id": "path-022",
+			"class": "path",
+			"query": "docs/design/provider-refactoring-tests.md",
+			"label": {
+				"file": "docs/design/provider-refactoring-tests.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/design/provider-refactoring-tests.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 18.3,
+			"tokens": 42
+		},
+		{
+			"id": "path-022",
+			"class": "path",
+			"query": "docs/design/provider-refactoring-tests.md",
+			"label": {
+				"file": "docs/design/provider-refactoring-tests.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/design/provider-refactoring-tests.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13.5,
+			"tokens": 11
+		},
+		{
+			"id": "path-023",
+			"class": "path",
+			"query": "design/provider-refactoring.md",
+			"label": {
+				"file": "docs/design/provider-refactoring.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/design/provider-refactoring.md",
+					"line": 1
+				},
+				{
+					"file": "docs/design/provider-refactoring-tests.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 17.3,
+			"tokens": 61
+		},
+		{
+			"id": "path-023",
+			"class": "path",
+			"query": "design/provider-refactoring.md",
+			"label": {
+				"file": "docs/design/provider-refactoring.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/design/provider-refactoring.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13,
+			"tokens": 9
+		},
+		{
+			"id": "path-024",
+			"class": "path",
+			"query": "model-list-migration.md",
+			"label": {
+				"file": "docs/migration/model-list-migration.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/migration/model-list-migration.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 17.6,
+			"tokens": 36
+		},
+		{
+			"id": "path-024",
+			"class": "path",
+			"query": "model-list-migration.md",
+			"label": {
+				"file": "docs/migration/model-list-migration.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/migration/model-list-migration.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13,
+			"tokens": 10
+		},
+		{
+			"id": "path-025",
+			"class": "path",
+			"query": "pkg/providers/factory_provider.go",
+			"label": {
+				"file": "pkg/providers/factory_provider.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/providers/factory_provider.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/providers/factory_provider_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 18.2,
+			"tokens": 60
+		},
+		{
+			"id": "path-025",
+			"class": "path",
+			"query": "pkg/providers/factory_provider.go",
+			"label": {
+				"file": "pkg/providers/factory_provider.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/factory_provider.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 14.8,
+			"tokens": 9
+		},
+		{
+			"id": "path-026",
+			"class": "path",
+			"query": "docs/tools_configuration.md",
+			"label": {
+				"file": "docs/tools_configuration.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/tools_configuration.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 47.3,
+			"tokens": 26
+		},
+		{
+			"id": "path-026",
+			"class": "path",
+			"query": "docs/tools_configuration.md",
+			"label": {
+				"file": "docs/tools_configuration.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/tools_configuration.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 14.3,
+			"tokens": 7
+		},
+		{
+			"id": "path-027",
+			"class": "path",
+			"query": "shell_process_unix.go",
+			"label": {
+				"file": "pkg/tools/shell_process_unix.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/tools/shell_process_unix.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 23.3,
+			"tokens": 25
+		},
+		{
+			"id": "path-027",
+			"class": "path",
+			"query": "shell_process_unix.go",
+			"label": {
+				"file": "pkg/tools/shell_process_unix.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/tools/shell_process_unix.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 19.2,
+			"tokens": 8
+		},
+		{
+			"id": "path-028",
+			"class": "path",
+			"query": "pkg/tools/shell_process_windows.go",
+			"label": {
+				"file": "pkg/tools/shell_process_windows.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/tools/shell_process_windows.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 20.6,
+			"tokens": 29
+		},
+		{
+			"id": "path-028",
+			"class": "path",
+			"query": "pkg/tools/shell_process_windows.go",
+			"label": {
+				"file": "pkg/tools/shell_process_windows.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/tools/shell_process_windows.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 16.5,
+			"tokens": 9
+		},
+		{
+			"id": "path-029",
+			"class": "path",
+			"query": "protocoltypes/types.go",
+			"label": {
+				"file": "pkg/providers/protocoltypes/types.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/providers/protocoltypes/types.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/bus/types.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/tools/types.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/providers/types.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 19.6,
+			"tokens": 58
+		},
+		{
+			"id": "path-029",
+			"class": "path",
+			"query": "protocoltypes/types.go",
+			"label": {
+				"file": "pkg/providers/protocoltypes/types.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/protocoltypes/types.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.8,
+			"tokens": 9
+		},
+		{
+			"id": "path-030",
+			"class": "path",
+			"query": "antigravity_provider_test.go",
+			"label": {
+				"file": "pkg/providers/antigravity_provider_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/providers/antigravity_provider_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 20.9,
+			"tokens": 29
+		},
+		{
+			"id": "path-030",
+			"class": "path",
+			"query": "antigravity_provider_test.go",
+			"label": {
+				"file": "pkg/providers/antigravity_provider_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/providers/antigravity_provider_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 15.8,
+			"tokens": 11
+		},
+		{
+			"id": "path-031",
+			"class": "path",
+			"query": "docs/ANTIGRAVITY_AUTH.md",
+			"label": {
+				"file": "docs/ANTIGRAVITY_AUTH.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/ANTIGRAVITY_AUTH.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 17.8,
+			"tokens": 32
+		},
+		{
+			"id": "path-031",
+			"class": "path",
+			"query": "docs/ANTIGRAVITY_AUTH.md",
+			"label": {
+				"file": "docs/ANTIGRAVITY_AUTH.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/ANTIGRAVITY_AUTH.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 12.9,
+			"tokens": 6
+		},
+		{
+			"id": "path-032",
+			"class": "path",
+			"query": "docs/ANTIGRAVITY_USAGE.md",
+			"label": {
+				"file": "docs/ANTIGRAVITY_USAGE.md",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "docs/ANTIGRAVITY_USAGE.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 17.7,
+			"tokens": 30
+		},
+		{
+			"id": "path-032",
+			"class": "path",
+			"query": "docs/ANTIGRAVITY_USAGE.md",
+			"label": {
+				"file": "docs/ANTIGRAVITY_USAGE.md",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "docs/ANTIGRAVITY_USAGE.md",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13.6,
+			"tokens": 7
+		},
+		{
+			"id": "path-033",
+			"class": "path",
+			"query": "termux.jpg",
+			"label": {
+				"file": "assets/termux.jpg",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "grep",
+			"rule": "identifier_no_symbol",
+			"top": [
+				{
+					"file": "README.md",
+					"line": 123
+				},
+				{
+					"file": "README.fr.md",
+					"line": 120
+				},
+				{
+					"file": "README.zh.md",
+					"line": 121
+				},
+				{
+					"file": "README.pt-br.md",
+					"line": 121
+				}
+			],
+			"top1": false,
+			"top5": false,
+			"lineHit": null,
+			"ms": 23.7,
+			"tokens": 92
+		},
+		{
+			"id": "path-033",
+			"class": "path",
+			"query": "termux.jpg",
+			"label": {
+				"file": "assets/termux.jpg",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "assets/termux.jpg",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13.5,
+			"tokens": 5
+		},
+		{
+			"id": "path-034",
+			"class": "path",
+			"query": "pkg/cron/service_test.go",
+			"label": {
+				"file": "pkg/cron/service_test.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/cron/service_test.go",
+					"line": 1
+				},
+				{
+					"file": "pkg/heartbeat/service_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 19.3,
+			"tokens": 36
+		},
+		{
+			"id": "path-034",
+			"class": "path",
+			"query": "pkg/cron/service_test.go",
+			"label": {
+				"file": "pkg/cron/service_test.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/cron/service_test.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 13.7,
+			"tokens": 6
+		},
+		{
+			"id": "path-035",
+			"class": "path",
+			"query": "channels/telegram_commands.go",
+			"label": {
+				"file": "pkg/channels/telegram_commands.go",
+				"line": 1
+			},
+			"system": "locate",
+			"mode": "path",
+			"rule": "path",
+			"top": [
+				{
+					"file": "pkg/channels/telegram_commands.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 18,
+			"tokens": 27
+		},
+		{
+			"id": "path-035",
+			"class": "path",
+			"query": "channels/telegram_commands.go",
+			"label": {
+				"file": "pkg/channels/telegram_commands.go",
+				"line": 1
+			},
+			"system": "baselineA",
+			"top": [
+				{
+					"file": "pkg/channels/telegram_commands.go",
+					"line": 1
+				}
+			],
+			"top1": true,
+			"top5": true,
+			"lineHit": null,
+			"ms": 14.1,
+			"tokens": 9
+		}
+	]
+}

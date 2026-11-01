@@ -1,0 +1,343 @@
+/**
+ * Tests for path-guard.ts - issue #2465
+ *
+ * Acceptance criteria mapped 1:1 to test cases below.
+ */
+
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { validatePath } from "../path-guard";
+import { evaluatePolicy } from "../policy-engine";
+
+// Real on-disk fixtures so realpathSync resolves symlinks.
+const FAKE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "pg-home-"));
+const FAKE_PROJ = fs.mkdtempSync(path.join(os.tmpdir(), "pg-proj-"));
+
+beforeAll(() => {
+	// Build a fake ~/.ssh with a key so the symlink target exists.
+	fs.mkdirSync(path.join(FAKE_HOME, ".ssh"), { recursive: true });
+	fs.writeFileSync(path.join(FAKE_HOME, ".ssh", "id_rsa"), "FAKE-KEY");
+	fs.writeFileSync(path.join(FAKE_PROJ, "ok.txt"), "hi");
+	process.env.EIGHT_FAKE_HOME = FAKE_HOME;
+});
+
+afterAll(() => {
+	fs.rmSync(FAKE_HOME, { recursive: true, force: true });
+	fs.rmSync(FAKE_PROJ, { recursive: true, force: true });
+	delete process.env.EIGHT_FAKE_HOME;
+});
+
+afterEach(() => {
+	delete process.env.SAFE_PATHS;
+});
+
+// --- #3838: the configured post_message bot env file ---
+describe("#3838: the bot env file named in settings is a credential file", () => {
+	test("denied by absolute path and from a cwd of HOME; unconfigured files stay allowed", () => {
+		const dir = path.join(FAKE_HOME, ".config", "bot");
+		fs.mkdirSync(dir, { recursive: true });
+		fs.mkdirSync(path.join(FAKE_HOME, ".8gent"), { recursive: true });
+		const envFile = path.join(dir, "bot.env");
+		fs.writeFileSync(envFile, "TELEGRAM_BOT_TOKEN=x\n");
+		fs.writeFileSync(path.join(dir, "other.env"), "A=1\n");
+		const settings = path.join(FAKE_HOME, ".8gent", "settings.json");
+		fs.writeFileSync(
+			settings,
+			JSON.stringify({ postMessage: { botEnvFile: "~/.config/bot/bot.env" } }),
+		);
+		try {
+			expect(validatePath(envFile, FAKE_PROJ)).toEqual({
+				ok: false,
+				reason: "protected credential file",
+			});
+			expect(validatePath(".config/bot/bot.env", FAKE_HOME).ok).toBe(false);
+			expect(validatePath("~/.config/bot/bot.env", FAKE_PROJ).ok).toBe(false);
+			expect(validatePath(path.join(dir, "other.env"), FAKE_PROJ).ok).toBe(true);
+		} finally {
+			fs.rmSync(settings, { force: true });
+		}
+		expect(validatePath(envFile, FAKE_PROJ).ok).toBe(true);
+	});
+});
+
+// --- AC1: protected credential file ---
+describe("AC1: protected credential file under ~/.ssh", () => {
+	test("rejects /Users/x/.ssh/id_rsa with reason 'protected credential file'", () => {
+		const r = validatePath(path.join(FAKE_HOME, ".ssh", "id_rsa"), FAKE_PROJ);
+		expect(r.ok).toBe(false);
+		if (!r.ok) expect(r.reason).toMatch(/protected credential file/i);
+	});
+
+	test("rejects ~/.aws/credentials", () => {
+		const p = path.join(FAKE_HOME, ".aws", "credentials");
+		const r = validatePath(p, FAKE_PROJ);
+		expect(r.ok).toBe(false);
+	});
+
+	test("rejects ~/.kube/config", () => {
+		const p = path.join(FAKE_HOME, ".kube", "config");
+		const r = validatePath(p, FAKE_PROJ);
+		expect(r.ok).toBe(false);
+	});
+});
+
+// --- AC2: workspace-internal path accepted ---
+describe("AC2: workspace-internal paths accepted", () => {
+	test("accepts /Users/x/proj/src/index.ts", () => {
+		const r = validatePath(path.join(FAKE_PROJ, "src", "index.ts"), FAKE_PROJ);
+		expect(r.ok).toBe(true);
+	});
+});
+
+// --- AC3: path resolution catches escapes via .. ---
+describe("AC3: '..' escape into protected dir", () => {
+	test("rejects /Users/x/proj/../../.aws/credentials when target is protected", () => {
+		// Build a path that escapes into FAKE_HOME/.aws/credentials via '..'
+		// Note: validatePath resolves first, then checks against protected dirs.
+		const escaped = path.join(FAKE_PROJ, "..", path.basename(FAKE_HOME), ".aws", "credentials");
+		const r = validatePath(escaped, FAKE_PROJ);
+		expect(r.ok).toBe(false);
+	});
+});
+
+// --- AC4: device files ---
+// POSIX only: /dev device files do not exist on Windows.
+describe.skipIf(process.platform === "win32")("AC4: device files", () => {
+	test("rejects /dev/zero with reason 'device file'", () => {
+		const r = validatePath("/dev/zero", "/tmp");
+		expect(r.ok).toBe(false);
+		if (!r.ok) expect(r.reason).toMatch(/device file/i);
+	});
+
+	test("rejects /dev/null", () => {
+		const r = validatePath("/dev/null", "/tmp");
+		expect(r.ok).toBe(false);
+	});
+});
+
+// --- AC5: UNC paths ---
+describe("AC5: UNC paths rejected", () => {
+	test("rejects //server/share/x with reason 'UNC path not allowed'", () => {
+		const r = validatePath("//server/share/x", "/tmp");
+		expect(r.ok).toBe(false);
+		if (!r.ok) expect(r.reason).toMatch(/UNC path not allowed/i);
+	});
+
+	test("rejects \\\\server\\share\\x", () => {
+		const r = validatePath("\\\\server\\share\\x", "/tmp");
+		expect(r.ok).toBe(false);
+	});
+});
+
+// --- AC6: symlink to ~/.ssh rejected (real symlink fixture) ---
+describe("AC6: symlink that points into ~/.ssh", () => {
+	test("rejects a symlink inside the project that targets the credential dir", () => {
+		const linkPath = path.join(FAKE_PROJ, "sneaky-link");
+		// Skip if symlink unsupported (Windows w/o privilege)
+		try {
+			if (fs.existsSync(linkPath)) fs.unlinkSync(linkPath);
+			fs.symlinkSync(path.join(FAKE_HOME, ".ssh", "id_rsa"), linkPath);
+		} catch {
+			return; // Cannot create symlink in this environment
+		}
+		const r = validatePath(linkPath, FAKE_PROJ);
+		expect(r.ok).toBe(false);
+		fs.unlinkSync(linkPath);
+	});
+});
+
+// --- AC7: cross-platform Windows device names ---
+describe("AC7: Windows device names", () => {
+	test("on darwin/linux NUL/CON/PRN inside project are harmless", () => {
+		if (process.platform === "win32") return;
+		const p = path.join(FAKE_PROJ, "NUL");
+		const r = validatePath(p, FAKE_PROJ);
+		expect(r.ok).toBe(true);
+	});
+
+	// Pure-logic check that the win32 branch rejects the names.
+	// We invoke the exported helper rather than mocking process.platform.
+	test("isWindowsDeviceName recognises NUL/CON/PRN/AUX/COM1/LPT1", async () => {
+		const { isWindowsDeviceName } = await import("../path-guard");
+		expect(isWindowsDeviceName("NUL")).toBe(true);
+		expect(isWindowsDeviceName("CON")).toBe(true);
+		expect(isWindowsDeviceName("PRN")).toBe(true);
+		expect(isWindowsDeviceName("AUX")).toBe(true);
+		expect(isWindowsDeviceName("COM1")).toBe(true);
+		expect(isWindowsDeviceName("LPT1")).toBe(true);
+		expect(isWindowsDeviceName("nul.txt")).toBe(true); // base name w/ extension still device
+		expect(isWindowsDeviceName("hello.txt")).toBe(false);
+	});
+});
+
+// --- AC8: SAFE_PATHS allowlist override ---
+describe("AC8: SAFE_PATHS env override", () => {
+	test("override permits a single protected path", () => {
+		const target = path.join(FAKE_HOME, ".gitconfig");
+		fs.writeFileSync(target, "[user]\n  name = test\n");
+		// Without override: rejected
+		const blocked = validatePath(target, FAKE_PROJ);
+		expect(blocked.ok).toBe(false);
+
+		// With override: allowed
+		process.env.SAFE_PATHS = target;
+		const allowed = validatePath(target, FAKE_PROJ);
+		expect(allowed.ok).toBe(true);
+
+		// Override does NOT leak to other protected paths
+		const otherBlocked = validatePath(path.join(FAKE_HOME, ".ssh", "id_rsa"), FAKE_PROJ);
+		expect(otherBlocked.ok).toBe(false);
+
+		fs.unlinkSync(target);
+	});
+
+	test("comma-separated SAFE_PATHS parses multiple entries", () => {
+		const a = path.join(FAKE_HOME, ".npmrc");
+		const b = path.join(FAKE_HOME, ".pypirc");
+		fs.writeFileSync(a, "");
+		fs.writeFileSync(b, "");
+		process.env.SAFE_PATHS = `${a},${b}`;
+		expect(validatePath(a, FAKE_PROJ).ok).toBe(true);
+		expect(validatePath(b, FAKE_PROJ).ok).toBe(true);
+		// Other still blocked
+		expect(validatePath(path.join(FAKE_HOME, ".ssh", "id_rsa"), FAKE_PROJ).ok).toBe(false);
+		fs.unlinkSync(a);
+		fs.unlinkSync(b);
+	});
+});
+
+// --- Credential basenames ---
+describe("Credential basenames", () => {
+	test.each([
+		"id_rsa",
+		"id_rsa.pub",
+		"id_ed25519",
+		"id_ed25519.pub",
+		"id_ecdsa",
+		"id_ecdsa.pub",
+		"id_dsa",
+		"id_dsa.pub",
+		".netrc",
+		".gitconfig",
+		".npmrc",
+		".pypirc",
+		"credentials",
+	])("rejects basename %s anywhere", (name) => {
+		const p = path.join(FAKE_PROJ, name);
+		const r = validatePath(p, FAKE_PROJ);
+		expect(r.ok).toBe(false);
+	});
+});
+
+// --- Integration: policy-engine routes through validatePath FIRST ---
+describe("Integration: evaluatePolicy denies before consulting other rules", () => {
+	test("read_file on ~/.ssh/id_rsa is denied via path-guard", () => {
+		const decision = evaluatePolicy("read_file", {
+			path: path.join(FAKE_HOME, ".ssh", "id_rsa"),
+			workingDirectory: FAKE_PROJ,
+		});
+		expect(decision.allowed).toBe(false);
+		if (!decision.allowed) expect(decision.reason).toMatch(/path-guard/i);
+	});
+
+	// POSIX only: /dev device files do not exist on Windows.
+	test.skipIf(process.platform === "win32")(
+		"write_file on /dev/zero is denied via path-guard",
+		() => {
+			const decision = evaluatePolicy("write_file", {
+				path: "/dev/zero",
+				workingDirectory: FAKE_PROJ,
+			});
+			expect(decision.allowed).toBe(false);
+		},
+	);
+
+	test("read_file inside project still allowed by path-guard layer", () => {
+		const decision = evaluatePolicy("read_file", {
+			path: path.join(FAKE_PROJ, "ok.txt"),
+			workingDirectory: FAKE_PROJ,
+			workspaceRoot: FAKE_PROJ,
+		});
+		// May still be allowed or blocked by other rules; we only assert path-guard
+		// did not produce a denial reason.
+		if (!decision.allowed) {
+			expect(decision.reason).not.toMatch(/path-guard/i);
+		}
+	});
+});
+
+describe("agent settings file (#3595)", () => {
+	const home = "/Users/someone";
+	test("~/.8gent/settings.json is denied however it is spelled", () => {
+		for (const raw of [
+			"/Users/someone/.8gent/settings.json",
+			".8gent/settings.json",
+			"./x/../.8gent/settings.json",
+		]) {
+			const r = validatePath(raw, home, { platform: "linux", home });
+			expect(r.ok).toBe(false);
+		}
+	});
+	test("other files under ~/.8gent and a settings.json elsewhere are not caught", () => {
+		expect(validatePath(".8gent/other.json", home, { platform: "linux", home }).ok).toBe(true);
+		expect(validatePath("/work/proj/settings.json", home, { platform: "linux", home }).ok).toBe(
+			true,
+		);
+	});
+
+	test("a leading ~ is expanded before the compare: settings, confirmation file and credentials", () => {
+		for (const raw of ["~/.8gent/settings.json", "~/.ssh/id_rsa", "~/.aws/credentials"]) {
+			expect(validatePath(raw, home, { platform: "linux", home }).ok).toBe(false);
+		}
+		expect(validatePath("~/notes.txt", home, { platform: "linux", home }).ok).toBe(true);
+	});
+});
+
+describe("8gent Browser control tokens and profiles (#3622, 8SO HIGH-2)", () => {
+	const home = "/Users/someone";
+	test("the default control token and everything under browser-profiles are denied", () => {
+		for (const raw of [
+			"/Users/someone/.8gent/browser-control.token",
+			"~/.8gent/browser-control.token",
+			".8gent/browser-control.token",
+			"./x/../.8gent/browser-control.token",
+			"/Users/someone/.8gent/browser-profiles",
+			"/Users/someone/.8gent/browser-profiles/eightgent/browser-control.token",
+			"~/.8gent/browser-profiles/eightgent/browser-control.port",
+			".8gent/browser-profiles/eightgent/electron/Cookies",
+		]) {
+			expect(validatePath(raw, home, { platform: "linux", home }).ok).toBe(false);
+		}
+	});
+	test("neighbours are not caught", () => {
+		expect(validatePath(".8gent/browser-shots/a.png", home, { platform: "linux", home }).ok).toBe(
+			true,
+		);
+		expect(validatePath("/work/browser-profiles/x", home, { platform: "linux", home }).ok).toBe(
+			true,
+		);
+	});
+});
+
+describe("default Telegram bot key file (#4594, 8SO F1)", () => {
+	const home = "/Users/someone";
+	test("~/.8gent/secrets is refused for read and write before any settings exist", () => {
+		for (const raw of [
+			"~/.8gent/secrets/telegram-bot.env",
+			"/Users/someone/.8gent/secrets/telegram-bot.env",
+			".8gent/secrets",
+			"./x/../.8gent/secrets/other.env",
+		]) {
+			for (const access of ["read", "write"] as const) {
+				expect(validatePath(raw, home, { platform: "linux", home }, access).ok).toBe(false);
+			}
+		}
+	});
+	test("a neighbour is not caught", () => {
+		expect(validatePath(".8gent/secrets-notes.md", home, { platform: "linux", home }).ok).toBe(
+			true,
+		);
+	});
+});

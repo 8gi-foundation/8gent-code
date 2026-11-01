@@ -1,0 +1,6 @@
+# A Windows checkout with core.autocrlf=true rewrites text files to CRLF, and
+# bash then fails on every script with "$'\r': command not found". Pin LF in
+# the working tree on every OS; git still detects binaries on its own.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf

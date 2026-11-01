@@ -1,0 +1,16 @@
+lockfileVersion: '9.0'
+importers:
+  .:
+    dependencies:
+      axios:
+        specifier: ^0.21.0
+        version: 0.21.1
+packages:
+  axios@0.21.1:
+    resolution: {integrity: sha512-x}
+  '@babel/core@7.0.0(@types/node@20.0.0)':
+    resolution: {integrity: sha512-y}
+  /old-style/1.0.0:
+    resolution: {integrity: sha512-z}
+snapshots:
+  axios@0.21.1: {}

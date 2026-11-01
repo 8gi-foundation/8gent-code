@@ -1,0 +1,16 @@
+# 8gent release signing key (minisign public key).
+#
+# release-binaries.yml signs each release's SHA256SUMS with the matching secret
+# key (repository secret MINISIGN_SECRET_KEY) and attaches SHA256SUMS.minisig.
+# scripts/install.sh, scripts/install.ps1 and packages/eight/self-update.ts
+# embed the key on the line below and verify that signature before trusting the
+# checksums. Tests keep all copies identical to this file.
+#
+# Empty = no release key yet: releases are not signed and nothing checks a
+# signature. To create it (maintainer only, once):
+#   minisign -G -W -p 8gent-release.pub -s 8gent-release.key
+#   - put the whole of 8gent-release.key into the MINISIGN_SECRET_KEY secret
+#   - put the second line of 8gent-release.pub (base64, starts with RW) below
+#     and in the three embedded copies, in one PR
+# Keep 8gent-release.key offline after that; never commit it.
+

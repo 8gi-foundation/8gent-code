@@ -1,0 +1,11 @@
+version = 3
+
+[[package]]
+name = "demo"
+version = "0.1.0"
+
+[[package]]
+name = "smallvec"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "abc"

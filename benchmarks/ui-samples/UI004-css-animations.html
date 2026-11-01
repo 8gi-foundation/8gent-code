@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSS Animation Showcase</title>
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --card-bg: #2d2d2d;
+            --text-color: #f0f0f0;
+            --accent-color: #4a90e2;
+            --danger-color: #e74c3c;
+            --success-color: #2ecc71;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            margin-bottom: 2rem;
+            font-weight: 300;
+            letter-spacing: 1px;
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .demo-section {
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            border: 1px solid #3d3d3d;
+        }
+
+        .demo-label {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 1rem;
+            color: #888;
+        }
+
+        /* --- 1. Loading Spinner --- */
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top-color: var(--accent-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* --- 2. Bouncing Ball --- */
+        .ball {
+            width: 40px;
+            height: 40px;
+            background-color: var(--danger-color);
+            border-radius: 50%;
+            animation: bounce 2s ease-in-out infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-100px); }
+        }
+
+        /* --- 3. Pulsing Notification --- */
+        .notification-dot {
+            width: 12px;
+            height: 12px;
+            background-color: var(--success-color);
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.5); opacity: 0.5; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* --- 4. Typing Effect --- */
+        .typing-container {
+            width: 100%;
+            overflow: hidden;
+            border-left: 2px solid var(--accent-color);
+            padding-left: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 1.1rem;
+            line-height: 1.5;
+            color: #ccc;
+        }
+
+        .typing-text {
+            animation: typing 3s steps(15, end) infinite alternate;
+        }
+
+        @keyframes typing {
+            0% { width: 0; }
+            100% { width: 100%; }
+        }
+
+        /* --- 5. Card Flip --- */
+        .card-container {
+            width: 100%;
+            height: 150px;
+            perspective: 1000px;
+            cursor: pointer;
+        }
+
+        .card {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.6s;
+        }
+
+        .card-container:hover .card {
+            transform: rotateY(180deg);
+        }
+
+        .card-face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 1.2rem;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .card-front {
+            background-color: var(--accent-color);
+            color: white;
+        }
+
+        .card-back {
+            background-color: #333;
+            color: #888;
+            transform: rotateY(180deg);
+        }
+
+    </style>
+</head>
+<body>
+
+    <h1>CSS Animation Showcase</h1>
+
+    <div class="grid-container">
+        
+        <!-- 1. Loading Spinner -->
+        <div class="demo-section">
+            <div class="demo-label">1. Loading Spinner</div>
+            <div class="spinner"></div>
+        </div>
+
+        <!-- 2. Bouncing Ball -->
+        <div class="demo-section">
+            <div class="demo-label">2. Bouncing Ball</div>
+            <div class="ball"></div>
+        </div>
+
+        <!-- 3. Pulsing Notification -->
+        <div class="demo-section">
+            <div class="demo-label">3. Pulsing Notification</div>
+            <div class="notification-dot"></div>
+        </div>
+
+        <!-- 4. Typing Effect -->
+        <div class="demo-section">
+            <div class="demo-label">4. Typing Effect</div>
+            <div class="typing-container">
+                <span class="typing-text">Hello World! This is a CSS typing effect using steps() and overflow hidden.</span>
+            </div>
+        </div>
+
+        <!-- 5. Card Flip -->
+        <div class="demo-section">
+            <div class="demo-label">5. Card Flip (Hover)</div>
+            <div class="card-container">
+                <div class="card">
+                    <div class="card-face card-front">Front Face</div>
+                    <div class="card-face card-back">Back Face</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>

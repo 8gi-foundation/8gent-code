@@ -1,0 +1,16 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"skipLibCheck": true,
+		"allowImportingTsExtensions": true
+	},
+	"include": [
+		"bin/**/*.ts",
+		"apps/tui/src/**/*.ts",
+		"apps/tui/src/**/*.tsx",
+		"packages/eight/**/*.ts",
+		"packages/memory/sql.d.ts"
+	],
+	"exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
+}

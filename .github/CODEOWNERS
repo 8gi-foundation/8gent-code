@@ -1,0 +1,32 @@
+# 8gent Code - CODEOWNERS
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+* @podjamz
+
+# Security-critical - policy engine, permissions
+packages/permissions/ @podjamz
+
+# CI/CD workflows and GitHub config
+.github/ @podjamz
+
+# Vessel infrastructure - daemon, kernel
+packages/daemon/ @podjamz
+packages/kernel/ @podjamz
+
+# Agent instructions - controls all agent behavior
+CLAUDE.md @podjamz
+
+# Security policy (ecosystem governance docs live in 8gi-governance)
+SECURITY.md @podjamz
+
+# Package publishing config
+package.json @podjamz
+
+# Release trust chain: one-line installers, the release signing key and its
+# helpers, and self-update all decide what code lands on users' machines (#3981)
+scripts/install.sh @podjamz
+scripts/install.ps1 @podjamz
+scripts/release-signing.pub @podjamz
+scripts/release-*.sh @podjamz
+packages/eight/self-update.ts @podjamz

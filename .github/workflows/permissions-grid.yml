@@ -1,0 +1,71 @@
+name: Permissions grid
+
+# Runs the spelling grid (scripts/permissions-grid.ts, #4509) on every PR that touches the
+# permissions package: the real commandArgvs + blockedReason from the PR head and from the base,
+# over every shell spelling of a wipe in five contexts. A row the head allows and the base blocks
+# fails the job. Wipes both trees allow are listed as named gaps and do not fail it.
+# No Docker, no matrix: git archive of two directories and about a thousand stubbed shell runs.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/permissions/**"
+      - "packages/core/**"
+      - "scripts/permissions-grid*"
+      - ".github/workflows/permissions-grid.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: permissions-grid-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  grid:
+    name: Permissions grid
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+
+      # The probe runs each row under bash and zsh; the runner has no zsh by default.
+      - name: Install zsh
+        run: sudo apt-get install -y --no-install-recommends zsh
+
+      # The gate runs the BASE ref's script and rows, so a PR cannot weaken its own check. The head's
+      # copy is used only when the base has no script yet (the PR that introduces it); the step says which.
+      - name: Grid against the PR base
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if git cat-file -e "origin/$BASE_REF:scripts/permissions-grid.ts" 2>/dev/null; then
+            mkdir -p "$RUNNER_TEMP/base"
+            git archive "origin/$BASE_REF" scripts/permissions-grid.ts scripts/permissions-grid-isolate.ts scripts/permissions-grid.rows.json | tar -x -C "$RUNNER_TEMP/base"
+            echo "grid script: from base origin/$BASE_REF" | tee -a "$RUNNER_TEMP/grid.out"
+            # cwd is the base copy, so a bunfig.toml in the PR is never read; git finds the repo by GIT_DIR
+            cd "$RUNNER_TEMP/base"
+            export GIT_DIR="$GITHUB_WORKSPACE/.git"
+          else
+            echo "grid script: from the PR head (the base has none yet)" | tee -a "$RUNNER_TEMP/grid.out"
+          fi
+          bun scripts/permissions-grid.ts --pr-head "$HEAD_SHA" --base "origin/$BASE_REF" | tee -a "$RUNNER_TEMP/grid.out"
+
+      # Readable from the job summary without the log host.
+      - name: Probe isolation and counts to the summary
+        if: always()
+        run: |
+          { echo '```'; grep -E '^(grid script|probe |rows |result:)' "$RUNNER_TEMP/grid.out" || echo "no grid output"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Grid script tests
+        run: bun test scripts/permissions-grid.test.ts

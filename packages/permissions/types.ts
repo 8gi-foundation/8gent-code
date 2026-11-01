@@ -1,0 +1,102 @@
+/**
+ * 8gent Code - Permission + Policy Types
+ *
+ * Extends the base permission system with structured policy rules.
+ * Policy engine inspired by NemoClaw (https://github.com/nemo-claw) — rebuilt from scratch.
+ */
+
+// ============================================
+// Existing permission types (re-exported)
+// ============================================
+
+export type {
+	PermissionConfig,
+	PermissionRequest,
+	PermissionLog,
+} from "./index.js";
+
+// ============================================
+// Policy types
+// ============================================
+
+/** The action category being evaluated */
+export type PolicyActionType =
+	| "write_file"
+	| "read_file"
+	| "delete_file"
+	/**
+	 * Render an HTML page headless and measure it (compare_layout, #4080). READ-ONLY:
+	 * reads files in the workspace, writes nothing there (the browser profile and
+	 * screenshot live in an OS temp dir removed afterwards), so it is allowed in
+	 * plan, architect and review modes and is not a shadow-denied side effect.
+	 */
+	| "render_page"
+	| "run_command"
+	| "git_push"
+	| "git_commit"
+	| "network_request"
+	| "env_access"
+	| "secret_write"
+	| "agent_mail_send"
+	| "agent_mail_read"
+	| "peers_send"
+	| "peers_subscribe"
+	| "email_send"
+	| "email_receive"
+	| "issue_email_address"
+	/** Any call to a tool on an MCP server (#3230). Asks by default. */
+	| "mcp_call"
+	/** A call to a paired device's granted capability (8DK, #3362). */
+	| "device_use"
+	/** A call to a tool a one-file extension registered (G1); context.tool names it. */
+	| "extension_call";
+
+/** What the policy engine decides */
+export type PolicyDecision =
+	| { allowed: true }
+	| { allowed: false; reason: string; requiresApproval?: boolean };
+
+/** A single policy rule loaded from YAML */
+export interface PolicyRule {
+	name: string;
+	action: PolicyActionType | "*";
+	/** Plain-English condition — evaluated by the engine via keyword matching */
+	condition: string;
+	/** block = hard deny | require_approval = soft deny with user gate | allow = explicit allow */
+	decision: "block" | "require_approval" | "allow";
+	message: string;
+	/** Optional: only active in these environments */
+	environments?: string[];
+	/** Whether this rule is active (default: true) */
+	enabled?: boolean;
+	/** Whether this rule is immutable (cannot be overridden by addPolicy). Set automatically for default rules. */
+	immutable?: boolean;
+	/** Agent scope - if set, rule only applies to matching agent IDs. Empty/undefined = global (all agents). */
+	agentScope?: string;
+}
+
+/** Top-level YAML policy file structure */
+export interface PolicyFile {
+	version?: number;
+	policies: PolicyRule[];
+}
+
+/** Context passed to evaluatePolicy — keys vary by action */
+export interface PolicyContext {
+	/** For write_file / read_file / delete_file */
+	path?: string;
+	/** For write_file — content being written */
+	content?: string;
+	/** For run_command */
+	command?: string;
+	/** For git_push / git_commit */
+	branch?: string;
+	/** For network_request */
+	url?: string;
+	/** For env_access / secret_write */
+	key?: string;
+	/** Agent ID for per-agent policy scoping */
+	agentId?: string;
+	/** Freeform extra fields */
+	[key: string]: unknown;
+}
