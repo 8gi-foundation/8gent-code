@@ -104,10 +104,11 @@ export interface UISettings {
 	 */
 	tapHaptics: boolean;
 	/**
-	 * Full mouse reporting: clicks on key caps, tabs and chips, in-app drag copy.
-	 * Unset = the platform default: on for Android/Termux, off elsewhere,
-	 * because reporting makes a desktop terminal hand every drag to the app and
-	 * native select and copy stop working (#5094). Read at start.
+	 * Full mouse reporting: clicks on key caps, tabs and chips, and in-app drag
+	 * select and copy. Unset = the platform default: on for macOS and
+	 * Android/Termux, off elsewhere. Reporting makes a terminal hand every drag
+	 * to the app, so the app selects and copies itself; off gives the drag back
+	 * to the terminal (#5094). Read at start.
 	 */
 	mouseCapture?: boolean;
 	/**

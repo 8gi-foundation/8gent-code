@@ -369,9 +369,9 @@ const CATEGORIES: Category[] = [
 				id: "ui.mouseCapture",
 				label: "Mouse clicks",
 				description:
-					"On: click key caps and tabs, but the terminal stops selecting text. Off: select and copy with the mouse. Takes effect on restart.",
+					"On: click key caps and tabs, and drag to select text inside the TUI (copied on release). Off: the terminal selects and copies, key caps are not clickable. Takes effect on restart.",
 				kind: "toggle",
-				get: (s) => s.ui.mouseCapture ?? isAndroidHost(),
+				get: (s) => s.ui.mouseCapture ?? (isAndroidHost() || process.platform === "darwin"),
 				set: (s, v) => ({ ...s, ui: { ...s.ui, mouseCapture: Boolean(v) } }),
 			},
 			{

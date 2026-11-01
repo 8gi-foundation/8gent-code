@@ -111,12 +111,16 @@ function Keys({ children }: { children: React.ReactNode }) {
 	return <Box flexDirection="column">{children}</Box>;
 }
 
-function wire(frame: () => string) {
+function wire(frame: () => string, cols = 0) {
 	const wrote: string[] = [];
 	const heard: number[] = [];
-	setSelectionIO(frame, (text) => {
-		copyText(text, { write: (s) => wrote.push(s), env: {}, platform: "linux" });
-	});
+	setSelectionIO(
+		frame,
+		(text) => {
+			copyText(text, { write: (s) => wrote.push(s), env: {}, platform: "linux" });
+		},
+		() => cols,
+	);
 	offs.push(onCopied((n) => heard.push(n)));
 	return { wrote, heard };
 }
@@ -137,6 +141,25 @@ describe("drag select over rendered text", () => {
 		expect(wrote).toEqual([osc52("beta gamma\ndelt")]);
 		expect(wrote[0]).not.toContain("\x1b[31m");
 		expect(heard).toEqual([15]);
+	});
+
+	test("a paragraph Ink wrapped copies as one line", async () => {
+		const para = `${"lorem ipsum dolor sit amet ".repeat(5)}end`;
+		const { stdin, frame } = await mount(
+			<Keys>
+				<Text>{para}</Text>
+			</Keys>,
+		);
+		expect(frame().split("\n").length).toBeGreaterThan(1);
+		const { wrote } = wire(frame, 100);
+		stdin.feed(sgr("press", 0, 0));
+		stdin.feed(sgr("drag", 30, 1));
+		stdin.feed(sgr("release", 30, 1));
+		await tick();
+		expect(wrote).toHaveLength(1);
+		const text = Buffer.from(wrote[0].slice("\x1b]52;c;".length, -1), "base64").toString("utf8");
+		expect(text).not.toContain("\n");
+		expect(para.startsWith(text)).toBe(true);
 	});
 
 	test("double click selects the word, triple click the line", async () => {
@@ -237,6 +260,75 @@ describe("the real wiring (wireSelection, as startMouse uses it)", () => {
 		const before = screen.length;
 		clearSelection();
 		expect(screen.slice(before).join("")).not.toContain("\x1b[7m");
+	});
+
+	test("on a local Mac the copy goes out as OSC 52 and through pbcopy", async () => {
+		const { stdin, frame } = await mount(
+			<Keys>
+				<Text>alpha beta gamma</Text>
+			</Keys>,
+			false,
+		);
+		const screen: string[] = [];
+		const ran: Array<[string[], string]> = [];
+		const heard: Array<[number, boolean]> = [];
+		offs.push(onCopied((n, ok) => heard.push([n, ok])));
+		const w = wireSelection({
+			raw: frame,
+			plain: frame,
+			out: { write: (s) => screen.push(s) },
+			copyDeps: {
+				env: {},
+				platform: "darwin",
+				runNative: (argv, text) => {
+					ran.push([argv, text]);
+					return true;
+				},
+			},
+		});
+		offs.push(w.off);
+		stdin.feed(sgr("press", 6, 0));
+		stdin.feed(sgr("drag", 9, 0));
+		stdin.feed(sgr("release", 9, 0));
+		await tick();
+		expect(screen).toContain(osc52("beta"));
+		expect(ran).toEqual([[["pbcopy"], "beta"]]);
+		expect(heard).toEqual([[4, true]]);
+	});
+
+	test("pbcopy alone is enough when the terminal drops the OSC 52 payload", async () => {
+		const { stdin, frame } = await mount(
+			<Keys>
+				<Text>{"y".repeat(60)}</Text>
+			</Keys>,
+			false,
+		);
+		const screen: string[] = [];
+		const ran: string[][] = [];
+		const heard: Array<[number, boolean]> = [];
+		offs.push(onCopied((n, ok) => heard.push([n, ok])));
+		const w = wireSelection({
+			raw: frame,
+			plain: frame,
+			out: { write: (s) => screen.push(s) },
+			copyDeps: {
+				env: {},
+				platform: "darwin",
+				maxEncoded: 10,
+				runNative: (argv) => {
+					ran.push(argv);
+					return true;
+				},
+			},
+		});
+		offs.push(w.off);
+		stdin.feed(sgr("press", 0, 0));
+		stdin.feed(sgr("drag", 40, 0));
+		stdin.feed(sgr("release", 40, 0));
+		await tick();
+		expect(screen.some((s) => s.startsWith("\x1b]52;"))).toBe(false);
+		expect(ran).toEqual([["pbcopy"]]);
+		expect(heard).toEqual([[41, true]]);
 	});
 
 	test("over the OSC 52 cap with no local command, the notice says it was not copied", async () => {

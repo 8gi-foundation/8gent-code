@@ -53,8 +53,28 @@ afterEach(() => {
 });
 
 describe("mouseMode", () => {
-	test("default on a desktop is select: no reporting, native select and copy", () => {
-		expect(mouseMode(TTY, true, null, undefined, false)).toBe("select");
+	test("default on macOS is full: clicks work and a drag selects and copies inside the TUI", () => {
+		expect(mouseMode(TTY, true, null, undefined, false, "darwin")).toBe("full");
+	});
+	test("default on other desktops stays select: the terminal selects and copies", () => {
+		expect(mouseMode(TTY, true, null, undefined, false, "linux")).toBe("select");
+		expect(mouseMode(TTY, true, null, undefined, false, "win32")).toBe("select");
+	});
+	test("select stays available on macOS as an opt-out: env, config or Settings", () => {
+		expect(
+			mouseMode({ ...TTY, EIGHT_MOUSE: "select" }, true, null, undefined, false, "darwin"),
+		).toBe("select");
+		expect(mouseMode(TTY, true, "select", undefined, false, "darwin")).toBe("select");
+		expect(mouseMode(TTY, true, null, false, false, "darwin")).toBe("select");
+	});
+	test("off stays off on macOS", () => {
+		expect(mouseMode({ ...TTY, EIGHT_MOUSE: "0" }, true, null, undefined, false, "darwin")).toBe(
+			"off",
+		);
+		expect(mouseMode({ ...TTY, EIGHT_MOUSE: "off" }, true, null, undefined, false, "darwin")).toBe(
+			"off",
+		);
+		expect(mouseMode(TTY, true, "off", undefined, false, "darwin")).toBe("off");
 	});
 	test("default on Android/Termux keeps full reporting, so tap targets and haptics stay", () => {
 		expect(mouseMode(TTY, true, null, undefined, true)).toBe("full");
@@ -85,6 +105,15 @@ describe("mouseMode", () => {
 });
 
 describe("escape sequences on start and exit", () => {
+	test("off mode writes nothing, on start or exit", () => {
+		const out = new FakeStdout();
+		const inst = installMouse(new FakeStdin() as unknown as NodeJS.ReadStream, out, {
+			mode: "off",
+			processHooks: false,
+		});
+		expect(inst).toBeNull();
+		expect(out.written).toBe("");
+	});
 	test("select mode asks for no mouse reporting at all", () => {
 		const out = new FakeStdout();
 		const inst = installMouse(new FakeStdin() as unknown as NodeJS.ReadStream, out, {

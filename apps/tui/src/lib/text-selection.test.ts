@@ -6,6 +6,7 @@ import {
 	TextSelection,
 	copiedNotice,
 	extractText,
+	isSoftWrap,
 	osc52,
 	paintSelection,
 	sliceCells,
@@ -28,6 +29,30 @@ describe("extractText and cells", () => {
 	test("rows are trimmed and the drag may run backwards", () => {
 		expect(extractText(SCREEN, { x0: 6, y0: 0, x1: 2, y1: 1 })).toBe("brave world\nsec");
 		expect(sliceCells("中b", 2, 3)).toBe("b");
+	});
+	test("rows the wrapper cut are joined, writer's line breaks stay", () => {
+		// 20 columns: "the quick brown fox" fits, "jumps" would not have.
+		const screen = ["the quick brown fox", "jumps over the dog", "", "next paragraph"].join("\n");
+		const all = { x0: 0, y0: 0, x1: 40, y1: 3 };
+		expect(extractText(screen, all, 20)).toBe(
+			"the quick brown fox jumps over the dog\n\nnext paragraph",
+		);
+		expect(extractText(screen, all, 0)).toBe(
+			"the quick brown fox\njumps over the dog\n\nnext paragraph",
+		);
+	});
+	test("a short row followed by a word that would have fit is a real break", () => {
+		expect(extractText("one two\nthree", { x0: 0, y0: 0, x1: 9, y1: 1 }, 20)).toBe(
+			"one two\nthree",
+		);
+	});
+	test("a different indent is a new block, not a continuation", () => {
+		expect(isSoftWrap("- a long list item here", "  nested", 24)).toBe(false);
+		expect(isSoftWrap("  indented wrapped line", "  continues", 24)).toBe(true);
+	});
+	test("a wrapped row across wide characters uses cell width", () => {
+		expect(isSoftWrap("中文中文中文", "字", 14)).toBe(true);
+		expect(isSoftWrap("中文中文中文", "字", 15)).toBe(false);
 	});
 	test("wordAt finds the word, skips spaces, leaves the trailing dot", () => {
 		expect(wordAt("hello brave world", 8)).toEqual({ from: 6, to: 11 });
