@@ -3,7 +3,7 @@
  * AgentPool.chat: both the text-tools and the native path debit tenant 8gi with
  * the endpoint-reported totals, and a turn after clearHistory() never re-debits.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,12 +15,14 @@ const ENV: Record<string, string> = {
 	EIGHT_TOOL_CAPABILITY_GATE: "0",
 	"8GENT_TWO_STAGE_COMPACT": "0",
 	EIGHT_TURN_TIMEOUT_MS: "20000",
+	EIGHT_CREDITS: "1",
 };
 let home: string;
 let server: ReturnType<typeof Bun.serve>;
 let usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null;
 let AgentPool: typeof import("../daemon/agent-pool").AgentPool;
 let n = 0;
+const savedTextTools = process.env.EIGHT_TEXT_TOOLS;
 
 beforeAll(async () => {
 	home = mkdtempSync(join(tmpdir(), "credit-agent-"));
@@ -55,6 +57,12 @@ beforeAll(async () => {
 	});
 	({ AgentPool } = await import("../daemon/agent-pool"));
 	topup(TENANT_ZERO, 1_000_000, { payment_ref: "pay-seed" });
+});
+
+afterEach(() => {
+	// session() sets EIGHT_TEXT_TOOLS per test; put it back after each one.
+	Reflect.deleteProperty(process.env, "EIGHT_TEXT_TOOLS");
+	if (savedTextTools !== undefined) process.env.EIGHT_TEXT_TOOLS = savedTextTools;
 });
 
 afterAll(() => {

@@ -1,23 +1,24 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TENANT_ZERO, balance, closeLedger, ledgerPath, ledgerSnapshot, rows, spend, topup } from "./ledger";
 
 let dir: string;
-const saved = { db: process.env.EIGHT_CREDITS_DB, data: process.env.EIGHT_DATA_DIR };
+const saved = { db: process.env.EIGHT_CREDITS_DB, data: process.env.EIGHT_DATA_DIR, on: process.env.EIGHT_CREDITS };
 let AgentPool: typeof import("../daemon/agent-pool").AgentPool;
 
 beforeAll(async () => {
 	dir = mkdtempSync(join(tmpdir(), "credits-"));
 	process.env.EIGHT_CREDITS_DB = join(dir, "credits.db");
 	process.env.EIGHT_DATA_DIR = dir;
+	process.env.EIGHT_CREDITS = "1";
 	({ AgentPool } = await import("../daemon/agent-pool"));
 });
 
 afterAll(() => {
 	closeLedger();
-	for (const [k, v] of [["EIGHT_CREDITS_DB", saved.db], ["EIGHT_DATA_DIR", saved.data]] as const) {
+	for (const [k, v] of [["EIGHT_CREDITS_DB", saved.db], ["EIGHT_DATA_DIR", saved.data], ["EIGHT_CREDITS", saved.on]] as const) {
 		if (v === undefined) Reflect.deleteProperty(process.env, k);
 		else process.env[k] = v;
 	}
@@ -105,5 +106,33 @@ describe("credit ledger", () => {
 		await pool.chat("led-2", "hi");
 		expect(balance(TENANT_ZERO)).toBe(before);
 		pool.destroySession("led-2");
+	});
+
+	test("flag off (default): a turn opens and creates no db file", async () => {
+		const off = join(dir, "off.db");
+		closeLedger();
+		process.env.EIGHT_CREDITS_DB = off;
+		Reflect.deleteProperty(process.env, "EIGHT_CREDITS");
+		try {
+			const pool = new AgentPool({ runtime: "ollama", model: "fake" });
+			pool.createSession("led-off", "api");
+			const agent = {
+				getRuntime: () => "ollama",
+				getModel: () => "fake",
+				getWorkingDirectory: () => "/w",
+				getLastUsage: () => ({ promptTokens: 5, completionTokens: 5, totalTokens: 10 }),
+				async chat() {
+					return "ok";
+				},
+			};
+			// biome-ignore lint/suspicious/noExplicitAny: test swaps the private Agent for a fake
+			(pool as any).sessions.get("led-off").agent = agent;
+			expect(await pool.chat("led-off", "hi")).toBe("ok");
+			expect(existsSync(off)).toBe(false);
+			pool.destroySession("led-off");
+		} finally {
+			process.env.EIGHT_CREDITS_DB = join(dir, "credits.db");
+			process.env.EIGHT_CREDITS = "1";
+		}
 	});
 });

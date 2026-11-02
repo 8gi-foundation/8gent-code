@@ -705,7 +705,11 @@ export class AgentPool {
 			const completionTokens = reported ? real!.completionTokens : Math.ceil(response.length / 4);
 			// Credit ledger (epic #3): debit tenant zero once per turn, keyed by
 			// a job id so a re-report is a no-op. Never fails the turn.
-			if (reported) {
+			// Opt-in (EIGHT_CREDITS=1, off by default): a public install never opens
+			// or creates the ledger db. 8GI's own daemon sets the flag.
+			if (process.env.EIGHT_CREDITS !== "1") {
+				// ledger off: nothing to record
+			} else if (reported) {
 				try {
 					spend(TENANT_ZERO, real!.totalTokens, `${sessionId}:${startMs}:${entry.messageCount}`, entry.agent.getModel());
 				} catch (err) {
