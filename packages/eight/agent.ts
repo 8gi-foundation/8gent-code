@@ -507,6 +507,8 @@ export class Agent {
 	private sessionStartTime: number;
 	private enableReporting = true;
 	private totalCost: number | null = null;
+	/** Real token totals of the most recent chat() turn (same object chat() accumulates into). */
+	private lastUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 	private sessionWriter: SessionWriter;
 	/** Per-session friction counts (#4511); one record is written at cleanup. */
 	private friction = new Friction();
@@ -2140,6 +2142,7 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Model calls begun so far on this text-tools path; step_start fires per call.
 		let startedSteps = 0;
 		const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+		this.lastUsage = usageTotals;
 		const onUsage = (usage: TextToolUsage) => {
 			usageTotals.promptTokens += usage.promptTokens;
 			usageTotals.completionTokens += usage.completionTokens;
@@ -4947,6 +4950,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 */
 	getRuntime(): string {
 		return this.config.runtime;
+	}
+
+	/** Real endpoint-reported token totals for the last turn (zeros when none reported). */
+	getLastUsage(): { promptTokens: number; completionTokens: number; totalTokens: number } {
+		return this.lastUsage;
 	}
 
 	getHistoryLength(): number {
