@@ -696,19 +696,23 @@ export class AgentPool {
 				? withChannelApprovals(sessionId, turn, entry.agent.getWorkingDirectory(), modelCall)
 				: modelCall());
 
-			// Real endpoint-reported totals for the turn; no chars/4 estimate. A
-			// session whose agent reports none records zeros and debits nothing.
+			// Real endpoint-reported totals for the turn. When the endpoint reported
+			// none, the chars/4 estimate feeds the BUDGET GATE only: the ledger is
+			// never debited from an estimate.
 			const real = entry.agent.getLastUsage?.();
-			const promptTokens = real?.promptTokens ?? 0;
-			const completionTokens = real?.completionTokens ?? 0;
+			const reported = (real?.totalTokens ?? 0) > 0;
+			const promptTokens = reported ? real!.promptTokens : Math.ceil(text.length / 4);
+			const completionTokens = reported ? real!.completionTokens : Math.ceil(response.length / 4);
 			// Credit ledger (epic #3): debit tenant zero once per turn, keyed by
 			// a job id so a re-report is a no-op. Never fails the turn.
-			if (real && real.totalTokens > 0) {
+			if (reported) {
 				try {
-					spend(TENANT_ZERO, real.totalTokens, `${sessionId}:${startMs}:${entry.messageCount}`, entry.agent.getModel());
+					spend(TENANT_ZERO, real!.totalTokens, `${sessionId}:${startMs}:${entry.messageCount}`, entry.agent.getModel());
 				} catch (err) {
 					console.warn(`[agent-pool] credit ledger spend failed: ${err instanceof Error ? err.message : err}`);
 				}
+			} else {
+				console.warn(`[agent-pool] no real usage reported for ${sessionId}; ledger not debited (estimate feeds the budget gate only)`);
 			}
 			// Wave 4 GATE: per-tenant attribution. Mirrors local budget AND
 			// emits an `llm` event for off-box shipping via Vector + Loki.

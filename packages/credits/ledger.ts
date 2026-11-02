@@ -4,11 +4,11 @@
  * Rows are topup or spend, in tokens only. Balance is derived (topups minus
  * spends), never stored. A spend carries a job_id that is UNIQUE, so a job
  * reported twice debits once. Every read takes a tenant and filters on it.
- * Local bun:sqlite file; nothing leaves the device. No prices, no payment rail:
- * payment_ref is optional and stays null until a rail exists.
+ * Local bun:sqlite file (mode 0600); nothing leaves the device. No prices, no
+ * payment rail: a topup must carry a payment_ref, a spend never does.
  */
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -46,6 +46,7 @@ function db(): Database {
 	if (!d) {
 		if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
 		d = new Database(path, { create: true });
+		if (path !== ":memory:") chmodSync(path, 0o600);
 		d.run(`CREATE TABLE IF NOT EXISTS ledger (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			ts TEXT NOT NULL,
@@ -84,7 +85,8 @@ function append(
 	return r.changes === 1;
 }
 
-export function topup(tenant: string, tokens: number, opts: { payment_ref?: string | null; note?: string } = {}): void {
+export function topup(tenant: string, tokens: number, opts: { payment_ref: string; note?: string }): void {
+	if (!opts?.payment_ref) throw new Error("ledger: a topup needs a payment_ref");
 	append("topup", tenant, tokens, opts);
 }
 

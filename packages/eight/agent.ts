@@ -2142,8 +2142,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		// Model calls begun so far on this text-tools path; step_start fires per call.
 		let startedSteps = 0;
 		const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-		this.lastUsage = usageTotals;
 		const onUsage = (usage: TextToolUsage) => {
+			this.addTurnUsage(usage.promptTokens, usage.completionTokens, usage.totalTokens);
 			usageTotals.promptTokens += usage.promptTokens;
 			usageTotals.completionTokens += usage.completionTokens;
 			usageTotals.totalTokens += usage.totalTokens;
@@ -3016,6 +3016,8 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 		imageMimeType?: string,
 		imageOriginal?: { width: number; height: number },
 	): Promise<string> {
+		// Real usage is per turn: zero it so a turn that reports none never inherits the last one's.
+		this.lastUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 		// Reset circuit breaker, privacy tracker, and honesty ledger for each new turn
 		this.loopDetector.reset();
 		// A stop latched while idle belongs to no turn; it must not cancel this
@@ -3852,6 +3854,11 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 				};
 
 				totalTokensUsed += event.usage.totalTokens;
+				this.addTurnUsage(
+					event.usage.promptTokens,
+					event.usage.completionTokens,
+					event.usage.totalTokens,
+				);
 				lastPromptTokens = event.usage.promptTokens || lastPromptTokens;
 
 				// Record tokens for Convex session sync (fire-and-forget)
@@ -4950,6 +4957,13 @@ Maintain a tone that is sophisticated yet approachable, like a well-dressed engi
 	 */
 	getRuntime(): string {
 		return this.config.runtime;
+	}
+
+	/** Add one model call's endpoint-reported usage to this turn's totals (text and native paths). */
+	private addTurnUsage(prompt: number, completion: number, total: number): void {
+		this.lastUsage.promptTokens += prompt || 0;
+		this.lastUsage.completionTokens += completion || 0;
+		this.lastUsage.totalTokens += total || 0;
 	}
 
 	/** Real endpoint-reported token totals for the last turn (zeros when none reported). */

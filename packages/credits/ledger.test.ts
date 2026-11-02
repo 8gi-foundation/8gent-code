@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TENANT_ZERO, balance, closeLedger, ledgerSnapshot, rows, spend, topup } from "./ledger";
+import { TENANT_ZERO, balance, closeLedger, ledgerPath, ledgerSnapshot, rows, spend, topup } from "./ledger";
 
 let dir: string;
 const saved = { db: process.env.EIGHT_CREDITS_DB, data: process.env.EIGHT_DATA_DIR };
@@ -26,8 +26,8 @@ afterAll(() => {
 
 describe("credit ledger", () => {
 	test("balance equals topups minus spends exactly", () => {
-		topup("t-bal", 1000);
-		topup("t-bal", 500, { payment_ref: null, note: "second" });
+		topup("t-bal", 1000, { payment_ref: "pay-test" });
+		topup("t-bal", 500, { payment_ref: "pay-2", note: "second" });
 		spend("t-bal", 300, "j1");
 		spend("t-bal", 1, "j2");
 		expect(balance("t-bal")).toBe(1199);
@@ -35,20 +35,28 @@ describe("credit ledger", () => {
 	});
 
 	test("a re-reported job_id does not double-debit", () => {
-		topup("t-dup", 100);
+		topup("t-dup", 100, { payment_ref: "pay-test" });
 		expect(spend("t-dup", 40, "same")).toBe(true);
 		expect(spend("t-dup", 40, "same")).toBe(false);
 		expect(balance("t-dup")).toBe(60);
 	});
 
+	test("a topup without a payment_ref is rejected; the db file is 0600", () => {
+		// biome-ignore lint/suspicious/noExplicitAny: proving the runtime guard
+		expect(() => (topup as any)("t-nopay", 5)).toThrow();
+		expect(() => topup("t-nopay", 5, { payment_ref: "" })).toThrow();
+		expect(balance("t-nopay")).toBe(0);
+		expect(statSync(ledgerPath()).mode & 0o777).toBe(0o600);
+	});
+
 	test("rejects non-positive or fractional tokens and empty tenant", () => {
 		expect(() => spend("t-bad", 0, "x")).toThrow();
 		expect(() => spend("t-bad", 1.5, "x")).toThrow();
-		expect(() => topup("", 5)).toThrow();
+		expect(() => topup("", 5, { payment_ref: "pay-test" })).toThrow();
 	});
 
 	test("a second tenant reads nothing of 8gi", () => {
-		topup(TENANT_ZERO, 777);
+		topup(TENANT_ZERO, 777, { payment_ref: "pay-test" });
 		expect(balance("other")).toBe(0);
 		expect(rows("other")).toEqual([]);
 		expect(ledgerSnapshot("other")).toMatchObject({ balance: 0, topped_up: 0, spent: 0, jobs_today: 0, updated: null });
@@ -70,7 +78,7 @@ describe("credit ledger", () => {
 		};
 		// biome-ignore lint/suspicious/noExplicitAny: test swaps the private Agent for a fake
 		(pool as any).sessions.get("led-1").agent = agent;
-		topup(TENANT_ZERO, 10000);
+		topup(TENANT_ZERO, 10000, { payment_ref: "pay-test" });
 		const before = balance(TENANT_ZERO);
 		await pool.chat("led-1", "hi");
 		expect(balance(TENANT_ZERO)).toBe(before - 1545);
