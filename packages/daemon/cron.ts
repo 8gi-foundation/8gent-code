@@ -5,7 +5,8 @@
  * persistence to ~/.8gent/cron.json, and restart catchup.
  */
 
-import { join } from "node:path";
+import { mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { writeJobFile } from "../core/job-file";
 import { killProcessTree, shellInvocation, spawnShell } from "../core/shell";
 import { getDataDir } from "./data-dir";
@@ -52,8 +53,96 @@ export async function loadJobs(): Promise<CronJob[]> {
 	}
 }
 
-async function saveJobs(): Promise<void> {
-	await Bun.write(cronPath(), JSON.stringify(jobs, null, 2));
+let saveChain: Promise<void> = Promise.resolve();
+
+/**
+ * Read cron.json fresh, apply one change, write it back atomically. Two daemons (or a daemon and a hand edit)
+ * share this file, so a save must never write the whole in-memory list over what the other side added.
+ * Saves in this process are serialised so two jobs finishing together cannot interleave read and write.
+ */
+function persist(apply: (disk: CronJob[]) => CronJob[]): Promise<void> {
+	saveChain = saveChain.then(async () => {
+		let disk: CronJob[] = jobs;
+		try {
+			const f = Bun.file(cronPath());
+			if (await f.exists()) disk = await f.json();
+		} catch {
+			// Unreadable file: keep what we hold rather than overwrite with a guess.
+		}
+		jobs = apply(disk);
+		const tmp = `${cronPath()}.${process.pid}.tmp`;
+		await Bun.write(tmp, JSON.stringify(jobs, null, 2));
+		renameSync(tmp, cronPath());
+	});
+	return saveChain.catch((err) => console.error("[cron] save failed:", err));
+}
+
+/** Write one job's run state onto the on-disk copy of that job; a job removed meanwhile stays removed. */
+function saveRun(job: CronJob): Promise<void> {
+	return persist((disk) =>
+		disk.map((j) =>
+			j.id === job.id
+				? { ...j, lastRun: job.lastRun, enabled: job.enabled, skips: job.skips, nextRun: job.nextRun }
+				: j,
+		),
+	);
+}
+
+/** Only one process per data dir ticks cron. The lock holds the pid and a heartbeat; 3 minutes silent is stale. */
+export const RUNNER_STALE_MS = 180_000;
+let isRunner = false;
+
+export function runnerLockPath(): string {
+	return join(getDataDir(), "cron.runner.lock");
+}
+
+/** Take the runner lock, or refresh it if it is already ours. False when a live process holds it. */
+export function acquireRunner(now = Date.now(), pid = process.pid): boolean {
+	const p = runnerLockPath();
+	const body = () => JSON.stringify({ pid, heartbeat: now });
+	try {
+		mkdirSync(dirname(p), { recursive: true });
+	} catch {
+		return false;
+	}
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			writeFileSync(p, body(), { flag: "wx" });
+			return true;
+		} catch (e) {
+			if ((e as NodeJS.ErrnoException).code !== "EEXIST") return false;
+		}
+		let heartbeat = 0;
+		let holder = -1;
+		try {
+			const held = JSON.parse(readFileSync(p, "utf8"));
+			holder = held.pid;
+			heartbeat = Number(held.heartbeat) || 0;
+		} catch {
+			try {
+				heartbeat = statSync(p).mtimeMs; // half-written or garbled: judge by file age
+			} catch {
+				continue; // vanished, try the create again
+			}
+		}
+		if (holder === pid) {
+			writeFileSync(p, body());
+			return true;
+		}
+		if (now - heartbeat < RUNNER_STALE_MS) return false;
+		try {
+			unlinkSync(p); // stale: take over. A lost race here corrects itself, see the heartbeat check.
+		} catch {}
+	}
+	return false;
+}
+
+/** Give the lock up on a clean stop, only if it is ours. */
+export function releaseRunner(pid = process.pid): void {
+	try {
+		if (JSON.parse(readFileSync(runnerLockPath(), "utf8")).pid === pid) unlinkSync(runnerLockPath());
+	} catch {}
+	isRunner = false;
 }
 
 /** Parse a simple cron expression and check if it matches the current minute */
@@ -161,7 +250,7 @@ async function executeJob(job: CronJob): Promise<void> {
 				job.enabled = false;
 				console.log(`[cron] when: ${job.name} is a one-shot, skip consumed it, will not run`);
 			}
-			await saveJobs();
+			await saveRun(job);
 			return;
 		}
 		job.skips = 0;
@@ -216,7 +305,7 @@ async function executeJob(job: CronJob): Promise<void> {
 
 	job.lastRun = new Date().toISOString();
 	if (!job.recurring) job.enabled = false;
-	await saveJobs();
+	await saveRun(job);
 	// A failed run stays visible until someone looks; a clean one moves to done.
 	if (failure) {
 		reportCron(job, "waiting-on-you", {
@@ -247,7 +336,17 @@ function reportCron(
 	});
 }
 
-function tick(): void {
+async function tick(): Promise<void> {
+	const was = isRunner;
+	isRunner = acquireRunner();
+	if (!isRunner) {
+		if (was) console.log("[cron] lost the runner lock, standing by");
+		return;
+	}
+	if (!was) {
+		console.log("[cron] took the runner lock");
+		await loadJobs(); // jobs changed on disk while another process was the runner
+	}
 	const now = new Date();
 	// Saved routines (scouts by default): RoutineManager.tick had no caller before #4926.
 	void tickRoutines({ now });
@@ -279,9 +378,11 @@ async function catchup(): Promise<void> {
 
 export async function startCron(): Promise<void> {
 	await loadJobs();
-	await catchup();
-	// Tick every 60 seconds
-	tickTimer = setInterval(tick, 60_000);
+	isRunner = acquireRunner();
+	if (isRunner) await catchup();
+	else console.log("[cron] another process holds the runner lock, standing by");
+	// Tick every 60 seconds; a standby process retakes the lock if the runner goes quiet for 3 minutes
+	tickTimer = setInterval(() => void tick(), 60_000);
 }
 
 export function stopCron(): void {
@@ -289,18 +390,19 @@ export function stopCron(): void {
 		clearInterval(tickTimer);
 		tickTimer = null;
 	}
+	releaseRunner();
 }
 
 export function addJob(job: CronJob): void {
 	jobs.push(job);
-	saveJobs().catch(console.error);
+	void persist((disk) => (disk.some((j) => j.id === job.id) ? disk : [...disk, job]));
 }
 
 export function removeJob(id: string): boolean {
 	const idx = jobs.findIndex((j) => j.id === id);
 	if (idx === -1) return false;
 	jobs.splice(idx, 1);
-	saveJobs().catch(console.error);
+	void persist((disk) => disk.filter((j) => j.id !== id));
 	return true;
 }
 
