@@ -853,6 +853,24 @@ describe("binary channel", () => {
 	test("picks the newest published, non-prerelease release that carries the binary", async () => {
 		const rel = await latestBinaryRelease(fakeFetch(routes()), asset, RELEASES);
 		expect(rel?.version).toBe("0.20.0");
+		// v0.21.0 is published without the asset: say so, do not hide it.
+		expect(rel?.skippedNewer).toBe("0.21.0");
+	});
+
+	test("falls back to the older release and says so plainly", async () => {
+		const exe = join(dir, "8gent");
+		writeFileSync(exe, "OLD");
+		const lines: string[] = [];
+		const r = await base(exe, fakeFetch(routes()), { log: (l: string) => lines.push(l) });
+		expect(r.status).toBe("updated");
+		expect(lines.join("\n")).toContain(
+			"v0.21.0 is published but has no 8gent-linux-x64 yet; using v0.20.0",
+		);
+	});
+
+	test("no skippedNewer when the newest release carries the asset", async () => {
+		const only = fakeFetch({ [RELEASES]: { body: [release("v0.20.0")] } });
+		expect((await latestBinaryRelease(only, asset, RELEASES))?.skippedNewer).toBeUndefined();
 	});
 
 	test("asset names match build-binaries.ts; Windows falls back to baseline", () => {
