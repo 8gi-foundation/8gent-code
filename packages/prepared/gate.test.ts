@@ -8,7 +8,12 @@ import { type Packet, packetId, wrapUntrusted } from "./packet.js";
 import { modelDrafter, runPass } from "./pass.js";
 import { cand, diffDrafter, fixture } from "./testkit.js";
 
-const NOW = new Date("2026-10-27T20:00:00");
+// Today at 20:00 local: the CLI reads the real clock, so a fixed date expired the packets.
+const NOW = (() => {
+	const d = new Date();
+	d.setHours(20, 0, 0, 0);
+	return d;
+})();
 const noRun = () => {
 	throw new Error("must not run");
 };
