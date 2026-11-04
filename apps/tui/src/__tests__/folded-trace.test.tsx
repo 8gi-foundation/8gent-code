@@ -66,7 +66,9 @@ for (const cols of [100, 40]) {
 		const done = find(events, "finished");
 		expect(done?.hasAnswer).toBeTrue();
 		expect(done?.hasStatusRow).toBeFalse();
-		if (cols >= 80) {
+		// A "sandbox off" chip outranks the hint when the row is full (StatusFooter priorities).
+		const sandboxChip = /sandbox off/.test(String(folded?.frame));
+		if (cols >= 80 && !sandboxChip) {
 			expect(folded?.footerHint).toBeTrue();
 			expect(open?.footerHint).toBeTrue();
 		}

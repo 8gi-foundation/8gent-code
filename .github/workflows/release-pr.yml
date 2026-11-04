@@ -39,6 +39,8 @@ name: Release PR
 # permissions its path needs.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       bump:
