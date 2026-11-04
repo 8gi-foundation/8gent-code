@@ -8,9 +8,15 @@
  * payment rail: a topup must carry a payment_ref, a spend never does.
  *
  * Integrity: each row stores hash = sha256(prev_hash + row fields), chained per
- * tenant. verifyChain() recomputes and reports the first row that was edited,
- * or whose predecessor was removed. Removing the newest row leaves a valid
- * chain (no external anchor yet), so that case is not detected.
+ * tenant, and ledger_head(tenant, count, hash) is updated in the same
+ * transaction as every append. verifyChain() walks every row of the tenant (the
+ * same set balance() sums): a NULL hash, an edited, reordered or removed row, or
+ * a count/tail that disagrees with the head, fails with a reason. balance() and
+ * ledgerSnapshot() refuse (throw) when verify fails. A ledger with unchained
+ * rows is refused on open until migrateLedger() chains it once and records a
+ * ledger_meta entry. Limit: the head lives in the same file, so this stops
+ * accidental and naive tampering, not someone who rewrites both tables; a
+ * signed or out-of-file anchor is a follow-up.
  */
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
@@ -38,6 +44,7 @@ export interface ChainResult {
 	checked: number;
 	/** id of the first row that does not verify, when ok is false. */
 	brokenAt?: number;
+	reason?: "unchained" | "broken" | "truncated" | "no-head";
 }
 
 export interface LedgerSnapshot {
@@ -55,7 +62,7 @@ export function ledgerPath(): string {
 
 const open = new Map<string, Database>();
 
-function db(): Database {
+function db(allowLegacy = false): Database {
 	const path = ledgerPath();
 	let d = open.get(path);
 	if (!d) {
@@ -78,6 +85,13 @@ function db(): Database {
 		if (!cols.includes("hash")) {
 			d.run("ALTER TABLE ledger ADD COLUMN prev_hash TEXT");
 			d.run("ALTER TABLE ledger ADD COLUMN hash TEXT");
+		}
+		d.run("CREATE TABLE IF NOT EXISTS ledger_head (tenant TEXT PRIMARY KEY, count INTEGER NOT NULL, hash TEXT NOT NULL)");
+		d.run("CREATE TABLE IF NOT EXISTS ledger_meta (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, event TEXT NOT NULL, detail TEXT)");
+		const legacy = d.query("SELECT COUNT(*) AS n FROM ledger WHERE hash IS NULL").get() as { n: number };
+		if (legacy.n > 0 && !allowLegacy) {
+			d.close();
+			throw new Error(`ledger: ${legacy.n} unchained row(s) in ${path}; refusing to open. Run migrateLedger() once to chain them.`);
 		}
 		d.run("CREATE UNIQUE INDEX IF NOT EXISTS ledger_spend_job ON ledger(job_id) WHERE kind = 'spend'");
 		d.run("CREATE INDEX IF NOT EXISTS ledger_tenant ON ledger(tenant)");
@@ -105,18 +119,25 @@ function append(
 	const job_id = extra.job_id ?? null;
 	const payment_ref = extra.payment_ref ?? null;
 	const note = extra.note ?? null;
-	return d.transaction(() => {
-		const last = d
-			.query("SELECT hash FROM ledger WHERE tenant = ? AND hash IS NOT NULL ORDER BY id DESC LIMIT 1")
-			.get(tenant) as { hash: string } | null;
-		const prev = last?.hash ?? null;
-		const hash = rowHash(prev, { ts, tenant, kind, tokens, job_id, payment_ref, note });
-		const r = d.run(
-			"INSERT OR IGNORE INTO ledger (ts, tenant, kind, tokens, job_id, payment_ref, note, prev_hash, hash) VALUES (?,?,?,?,?,?,?,?,?)",
-			[ts, tenant, kind, tokens, job_id, payment_ref, note, prev, hash],
-		);
-		return r.changes === 1;
-	})();
+	return d
+		.transaction(() => {
+			const head = d.query("SELECT count, hash FROM ledger_head WHERE tenant = ?").get(tenant) as { count: number; hash: string } | null;
+			const last = d.query("SELECT hash FROM ledger WHERE tenant = ? ORDER BY id DESC LIMIT 1").get(tenant) as { hash: string | null } | null;
+			if ((head?.hash ?? null) !== (last?.hash ?? null)) throw new Error(`ledger: head does not match the last row for ${tenant}; refusing to append`);
+			const prev = head?.hash ?? null;
+			const hash = rowHash(prev, { ts, tenant, kind, tokens, job_id, payment_ref, note });
+			const r = d.run(
+				"INSERT OR IGNORE INTO ledger (ts, tenant, kind, tokens, job_id, payment_ref, note, prev_hash, hash) VALUES (?,?,?,?,?,?,?,?,?)",
+				[ts, tenant, kind, tokens, job_id, payment_ref, note, prev, hash],
+			);
+			if (r.changes !== 1) return false;
+			d.run(
+				"INSERT INTO ledger_head (tenant, count, hash) VALUES (?,1,?) ON CONFLICT(tenant) DO UPDATE SET count = count + 1, hash = excluded.hash",
+				[tenant, hash],
+			);
+			return true;
+		})
+		.immediate();
 }
 
 function rowHash(
@@ -128,15 +149,54 @@ function rowHash(
 		.digest("hex");
 }
 
-/** Recompute the tenant's chain. Rows written before the chain existed (hash null) are skipped. */
+/** Recompute the tenant's chain over every row and check it against the head. */
 export function verifyChain(tenant: string): ChainResult {
-	const all = db().query("SELECT * FROM ledger WHERE tenant = ? AND hash IS NOT NULL ORDER BY id").all(tenant) as LedgerRow[];
+	const d = db();
+	const all = d.query("SELECT * FROM ledger WHERE tenant = ? ORDER BY id").all(tenant) as LedgerRow[];
 	let prev: string | null = null;
 	for (const r of all) {
-		if (r.prev_hash !== prev || rowHash(prev, r) !== r.hash) return { ok: false, checked: all.length, brokenAt: r.id };
+		if (r.hash === null) return { ok: false, checked: all.length, brokenAt: r.id, reason: "unchained" };
+		if (r.prev_hash !== prev || rowHash(prev, r) !== r.hash) return { ok: false, checked: all.length, brokenAt: r.id, reason: "broken" };
 		prev = r.hash;
 	}
+	const head = d.query("SELECT count, hash FROM ledger_head WHERE tenant = ?").get(tenant) as { count: number; hash: string } | null;
+	if (!head) return all.length === 0 ? { ok: true, checked: 0 } : { ok: false, checked: all.length, reason: "no-head" };
+	if (head.count !== all.length || head.hash !== prev) return { ok: false, checked: all.length, reason: "truncated" };
 	return { ok: true, checked: all.length };
+}
+
+function assertVerified(tenant: string): void {
+	const v = verifyChain(tenant);
+	if (!v.ok) throw new Error(`ledger: chain for ${tenant} failed verification (${v.reason}${v.brokenAt ? ` at row ${v.brokenAt}` : ""}); refusing to compute a balance`);
+}
+
+/**
+ * One-time, explicit migration of a pre-chain ledger: chains every row of every
+ * tenant in id order, writes the heads and records a ledger_meta entry.
+ * Returns the number of rows that were unchained (0 = nothing to do).
+ */
+export function migrateLedger(): number {
+	const d = db(true);
+	return d
+		.transaction(() => {
+			const legacy = (d.query("SELECT COUNT(*) AS n FROM ledger WHERE hash IS NULL").get() as { n: number }).n;
+			if (legacy === 0) return 0;
+			const tenants = d.query("SELECT DISTINCT tenant FROM ledger").all() as { tenant: string }[];
+			for (const { tenant } of tenants) {
+				let prev: string | null = null;
+				let count = 0;
+				for (const r of d.query("SELECT * FROM ledger WHERE tenant = ? ORDER BY id").all(tenant) as LedgerRow[]) {
+					const hash = rowHash(prev, r);
+					d.run("UPDATE ledger SET prev_hash = ?, hash = ? WHERE id = ?", [prev, hash, r.id]);
+					prev = hash;
+					count++;
+				}
+				d.run("INSERT OR REPLACE INTO ledger_head (tenant, count, hash) VALUES (?,?,?)", [tenant, count, prev]);
+			}
+			d.run("INSERT INTO ledger_meta (ts, event, detail) VALUES (?,?,?)", [new Date().toISOString(), "migrate-chain", `${legacy} unchained rows`]);
+			return legacy;
+		})
+		.immediate();
 }
 
 export function topup(tenant: string, tokens: number, opts: { payment_ref: string; note?: string }): void {
@@ -158,6 +218,7 @@ function sum(tenant: string, kind: "topup" | "spend"): number {
 }
 
 export function balance(tenant: string): number {
+	assertVerified(tenant);
 	return sum(tenant, "topup") - sum(tenant, "spend");
 }
 
@@ -167,6 +228,7 @@ export function rows(tenant: string): LedgerRow[] {
 
 /** Read for the world view: derived from rows, nothing cached. */
 export function ledgerSnapshot(tenant: string = TENANT_ZERO): LedgerSnapshot {
+	assertVerified(tenant);
 	const topped_up = sum(tenant, "topup");
 	const spent = sum(tenant, "spend");
 	const today = new Date().toISOString().slice(0, 10);
