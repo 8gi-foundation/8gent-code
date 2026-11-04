@@ -41,10 +41,12 @@ concurrency:
 jobs:
   linux:
     name: Linux install, typecheck, test, build
-    # Hosted, ephemeral VM, read-only token, no secrets: fork pull requests run too
-    # (the old fork guard protected the shared Mac, which this no longer touches).
-    # 4 vCPU instead of the Mac's 6, so the timeouts carry headroom.
-    runs-on: ubuntu-latest
+    # Same-repo pull requests and pushes run on the Hetzner runner (ephemeral, one job per container, read-only
+    # token, no secrets). Fork pull requests fall back to the hosted label below and never touch it.
+    # See docs/ops/ci-on-hetzner.md in 8gi-governance.
+    # Hetzner self-hosted runner (docs/ops/ci-on-hetzner.md in 8gi-governance). A fork PR never runs on
+    # self-hosted: it falls back to the hosted label, so the required check still runs and still gates.
+    runs-on: ${{ fromJSON(github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","hetzner-linux"]') }}
     timeout-minutes: 60
     env:
       CONTAINER: 8gent-linux-ci-${{ github.run_id }}-${{ github.run_attempt }}
