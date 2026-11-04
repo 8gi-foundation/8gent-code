@@ -215,6 +215,8 @@ export interface ReleaseBinary {
 	/** asset name -> download URL, for every asset on the release */
 	urls: Record<string, string>;
 	asset: string;
+	/** Newest published release that exists but lacks this asset, when newer than `version`. */
+	skippedNewer?: string;
 }
 
 interface GhRelease {
@@ -240,6 +242,7 @@ export async function latestBinaryRelease(
 	if (!res.ok) throw new Error(`GitHub releases answered ${res.status}`);
 	const list = (await res.json()) as GhRelease[];
 	let best: ReleaseBinary | null = null;
+	let newestWithout: string | undefined;
 	for (const r of Array.isArray(list) ? list : []) {
 		if (r.draft || r.prerelease || !r.tag_name) continue;
 		const v = /^v(\d+\.\d+\.\d+)$/.exec(r.tag_name)?.[1];
@@ -249,9 +252,14 @@ export async function latestBinaryRelease(
 		for (const a of r.assets ?? []) {
 			if (a.name && a.browser_download_url) urls[a.name] = a.browser_download_url;
 		}
-		if (!urls[asset] || !urls.SHA256SUMS) continue;
+		if (!urls[asset] || !urls.SHA256SUMS) {
+			if (!newestWithout || compareVersions(v, newestWithout) > 0) newestWithout = v;
+			continue;
+		}
 		if (!best || compareVersions(v, best.version) > 0) best = { version: v, urls, asset };
 	}
+	if (best && newestWithout && compareVersions(newestWithout, best.version) > 0)
+		best.skippedNewer = newestWithout;
 	return best;
 }
 
@@ -827,6 +835,10 @@ export async function runSelfUpdate(opts: SelfUpdateOptions): Promise<SelfUpdate
 		const rel = await latestBinaryRelease(o.fetchImpl, names[0], o.releasesUrl);
 		if (!rel)
 			return { status: "failed", channel: ch, message: `no release carries ${names[0]} yet` };
+		if (rel.skippedNewer)
+			o.log(
+				`v${rel.skippedNewer} is published but has no ${names[0]} yet; using v${rel.version}, the newest release that does.`,
+			);
 		o.log(`Latest version: v${rel.version} (GitHub release).`);
 		const d = decideUpdate(o.currentVersion, rel.version);
 		if (d.action === "current") {

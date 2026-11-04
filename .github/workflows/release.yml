@@ -85,6 +85,8 @@ jobs:
             echo "::error::package.json is ${PKG} but the tag is ${GITHUB_REF_NAME}"
             exit 1
           fi
+          # One version, one build: fail loudly if npm already has it from another tree.
+          GH_TOKEN="${{ github.token }}" bash scripts/release-npm-guard.sh "$PKG" "$GITHUB_REF_NAME"
           OIDC=0
           ID_TOKEN="$(curl -fsS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" \
