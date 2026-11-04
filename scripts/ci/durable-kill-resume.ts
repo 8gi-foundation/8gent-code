@@ -168,6 +168,9 @@ function startDaemon(n: number): ChildProcess {
 			DEFAULT_MODEL: "stub",
 			OLLAMA_HOST: `http://127.0.0.1:${MODEL_PORT}`,
 			EIGHT_DECIDE_OLLAMA_HOST: "http://127.0.0.1:9",
+			// This proof is about the journal, not the judge. With no judge model System One escalates
+			// `sh slow.sh` and, with no approval channel, blocks it, so the command never starts.
+			EIGHT_SYSTEM_ONE: "0",
 		},
 	});
 	fs.closeSync(log);
