@@ -435,7 +435,8 @@ describe("runQuickAnswer (#3411)", () => {
 		if (!out.ok) expect(out.reason).toBe("model said it could not answer");
 	});
 
-	for (const [shape, reply] of [
+	// The loop strips a <tool_call> block before the markup check, so that shape leaves "DONE:" and no answer.
+	for (const [shape, reply, reason = "tool-call markup in the answer"] of [
 		[
 			"name then arguments",
 			'Checking. {"name": "read_file", "arguments": {"path": "src/ports.ts"}}',
@@ -444,7 +445,11 @@ describe("runQuickAnswer (#3411)", () => {
 			"arguments then name",
 			'Checking. {"arguments": {"path": "src/ports.ts"}, "name": "read_file"}',
 		],
-		["<tool_call> tags, bare args", "<tool_call>read_file src/ports.ts</tool_call>"],
+		[
+			"<tool_call> tags, bare args",
+			"<tool_call>read_file src/ports.ts</tool_call>",
+			"no answer after 1 tool calls",
+		],
 		["tool_call fence", '```tool_call\n{"name": "read_file"'],
 	] as const) {
 		test(`leftover tool-call markup is not an answer: ${shape} (8SO L2)`, async () => {
@@ -455,7 +460,7 @@ describe("runQuickAnswer (#3411)", () => {
 				makeCall: m.makeCall,
 			});
 			expect(out.ok).toBe(false);
-			if (!out.ok) expect(out.reason).toBe("tool-call markup in the answer");
+			if (!out.ok) expect(out.reason).toBe(reason);
 		});
 	}
 
