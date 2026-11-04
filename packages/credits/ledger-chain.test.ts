@@ -111,8 +111,36 @@ describe("8SO exploits on #28", () => {
 		expect(migrateLedger()).toBe(2);
 		expect(verifyChain("t-old")).toEqual({ ok: true, checked: 2 });
 		expect(balance("t-old")).toBe(480);
-		expect(migrateLedger()).toBe(0);
+		expect(() => migrateLedger()).toThrow(/never re-chained/);
 		raw((d) => expect((d.query("SELECT COUNT(*) AS n FROM ledger_meta WHERE event = 'migrate-chain'").get() as { n: number }).n).toBe(1));
+		closeLedger();
+		process.env.EIGHT_CREDITS_DB = join(dir, "credits.db");
+	});
+
+	test("migration refuses a forged chained ledger, a truncated one, and a second run", () => {
+		closeLedger();
+		process.env.EIGHT_CREDITS_DB = join(dir, "forged.db");
+		topup("t-m", 100, { payment_ref: "pm" });
+		spend("t-m", 10, "m1");
+		spend("t-m", 10, "m2");
+		raw((d) => d.run("INSERT INTO ledger (ts,tenant,kind,tokens,payment_ref) VALUES ('2026-01-01','t-m','topup',1000000,'x')"));
+		expect(() => migrateLedger()).toThrow(/refusing to migrate/);
+		expect(verifyChain("t-m").ok).toBe(false);
+		closeLedger();
+
+		process.env.EIGHT_CREDITS_DB = join(dir, "trunc.db");
+		topup("t-m", 100, { payment_ref: "pm" });
+		spend("t-m", 10, "m1");
+		raw((d) => d.run("DELETE FROM ledger WHERE job_id = 'm1'"));
+		expect(() => migrateLedger()).toThrow(/refusing to migrate/);
+		expect(verifyChain("t-m")).toMatchObject({ ok: false, reason: "truncated" });
+		closeLedger();
+
+		// chain fields stripped but head still there: still refused
+		process.env.EIGHT_CREDITS_DB = join(dir, "stripped.db");
+		topup("t-m", 100, { payment_ref: "pm" });
+		raw((d) => d.run("UPDATE ledger SET hash = NULL, prev_hash = NULL"));
+		expect(() => migrateLedger()).toThrow(/refusing to migrate/);
 		closeLedger();
 		process.env.EIGHT_CREDITS_DB = join(dir, "credits.db");
 	});

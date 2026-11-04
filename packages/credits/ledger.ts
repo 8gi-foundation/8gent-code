@@ -88,6 +88,8 @@ function db(allowLegacy = false): Database {
 		}
 		d.run("CREATE TABLE IF NOT EXISTS ledger_head (tenant TEXT PRIMARY KEY, count INTEGER NOT NULL, hash TEXT NOT NULL)");
 		d.run("CREATE TABLE IF NOT EXISTS ledger_meta (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, event TEXT NOT NULL, detail TEXT)");
+		d.run("CREATE TRIGGER IF NOT EXISTS ledger_meta_no_update BEFORE UPDATE ON ledger_meta BEGIN SELECT RAISE(ABORT, 'ledger_meta is append-only'); END");
+		d.run("CREATE TRIGGER IF NOT EXISTS ledger_meta_no_delete BEFORE DELETE ON ledger_meta BEGIN SELECT RAISE(ABORT, 'ledger_meta is append-only'); END");
 		const legacy = d.query("SELECT COUNT(*) AS n FROM ledger WHERE hash IS NULL").get() as { n: number };
 		if (legacy.n > 0 && !allowLegacy) {
 			d.close();
@@ -171,17 +173,29 @@ function assertVerified(tenant: string): void {
 }
 
 /**
- * One-time, explicit migration of a pre-chain ledger: chains every row of every
- * tenant in id order, writes the heads and records a ledger_meta entry.
- * Returns the number of rows that were unchained (0 = nothing to do).
+ * One-time, explicit migration of a genuinely pre-chain ledger. It refuses, loudly,
+ * unless every row is unchained and no head or earlier migration entry exists: a
+ * ledger that has ever been chained, or has a checkpoint, is never re-chained, so
+ * migration cannot launder a forged or truncated chain. On success it chains every
+ * row, writes the heads and an append-only "migrated at N rows, hash H" meta entry
+ * (update and delete are blocked by trigger). Only an operator command calls this
+ * (see migrate-cli.ts); nothing runs it automatically.
+ * Returns the number of rows chained (0 = empty ledger, nothing to do).
  */
 export function migrateLedger(): number {
 	const d = db(true);
 	return d
 		.transaction(() => {
-			const legacy = (d.query("SELECT COUNT(*) AS n FROM ledger WHERE hash IS NULL").get() as { n: number }).n;
-			if (legacy === 0) return 0;
-			const tenants = d.query("SELECT DISTINCT tenant FROM ledger").all() as { tenant: string }[];
+			const total = (d.query("SELECT COUNT(*) AS n FROM ledger").get() as { n: number }).n;
+			const chained = (d.query("SELECT COUNT(*) AS n FROM ledger WHERE hash IS NOT NULL OR prev_hash IS NOT NULL").get() as { n: number }).n;
+			const heads = (d.query("SELECT COUNT(*) AS n FROM ledger_head").get() as { n: number }).n;
+			const done = (d.query("SELECT COUNT(*) AS n FROM ledger_meta WHERE event = 'migrate-chain'").get() as { n: number }).n;
+			if (chained > 0 || heads > 0 || done > 0) {
+				throw new Error(`ledger: refusing to migrate; it has chain data (${chained} chained rows, ${heads} heads, ${done} prior migrations). A chained ledger is never re-chained.`);
+			}
+			if (total === 0) return 0;
+			const tails: string[] = [];
+			const tenants = d.query("SELECT DISTINCT tenant FROM ledger ORDER BY tenant").all() as { tenant: string }[];
 			for (const { tenant } of tenants) {
 				let prev: string | null = null;
 				let count = 0;
@@ -191,10 +205,12 @@ export function migrateLedger(): number {
 					prev = hash;
 					count++;
 				}
-				d.run("INSERT OR REPLACE INTO ledger_head (tenant, count, hash) VALUES (?,?,?)", [tenant, count, prev]);
+				d.run("INSERT INTO ledger_head (tenant, count, hash) VALUES (?,?,?)", [tenant, count, prev]);
+				tails.push(`${tenant}:${prev}`);
 			}
-			d.run("INSERT INTO ledger_meta (ts, event, detail) VALUES (?,?,?)", [new Date().toISOString(), "migrate-chain", `${legacy} unchained rows`]);
-			return legacy;
+			const H = createHash("sha256").update(tails.join("\n")).digest("hex");
+			d.run("INSERT INTO ledger_meta (ts, event, detail) VALUES (?,?,?)", [new Date().toISOString(), "migrate-chain", `migrated at ${total} rows, hash ${H}`]);
+			return total;
 		})
 		.immediate();
 }
