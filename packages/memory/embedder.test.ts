@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { LlamaCppEmbeddingProvider, type EmbeddingProvider } from "./embeddings.js";
-import { EMBEDDER, askYesNo, checkLlamaServer, downloadModel, enableEmbedder, isAllowedHost, isAttended } from "./embedder-setup.js";
+import { EMBEDDER, askYesNo, checkLlamaServer, statusLine, downloadModel, enableEmbedder, isAllowedHost, isAttended } from "./embedder-setup.js";
 import { MemoryStore } from "./store.js";
 import type { SemanticMemory } from "./types.js";
 
@@ -175,6 +175,25 @@ describe("check the runtime before downloading", () => {
 		const out = await run({ ok: true });
 		expect(out.asked).toBe(true);
 		expect(out.downloaded).toBe(true);
+	});
+});
+
+describe("status line", () => {
+	test("downloaded but no runtime: gives the reason and never claims nothing was downloaded", () => {
+		for (const check of [
+			checkLlamaServer(() => null),
+			checkLlamaServer(() => "/bin/llama-server", () => "version: 0.5.0 (build 1)"),
+		]) {
+			const line = statusLine(true, check);
+			expect(line).toContain("downloaded, but it cannot run");
+			expect(line).toContain(check.reason as string);
+			expect(line).not.toContain("Nothing was downloaded");
+		}
+	});
+
+	test("on, and off", () => {
+		expect(statusLine(true, { ok: true })).toContain("on (embeddinggemma-2");
+		expect(statusLine(false, { ok: true })).toContain("off. Recommended: 8gent memory embedder enable embeddinggemma-2");
 	});
 });
 

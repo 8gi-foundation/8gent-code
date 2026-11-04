@@ -50,7 +50,7 @@ export function checkLlamaServer(
 ): LlamaServerCheck {
 	const bin = which("llama-server");
 	if (!bin) {
-		return { ok: false, reason: "llama.cpp is not installed (no llama-server found). Install it first, then run this again. Nothing was downloaded." };
+		return { ok: false, reason: "llama.cpp is not installed (no llama-server found). Install it first, then run this again." };
 	}
 	const m = /version:\s*(\d+)\.(\d+)\.(\d+)/.exec(versionOutput(bin));
 	const want = EMBEDDER.minLlamaCpp;
@@ -59,7 +59,7 @@ export function checkLlamaServer(
 	if (!newEnough) {
 		return {
 			ok: false,
-			reason: `Your llama.cpp (${have ? have.join(".") : "version unknown"}) is too old for EmbeddingGemma 2; it needs ${want.join(".")} or newer. Update it, then run this again. Nothing was downloaded.`,
+			reason: `Your llama.cpp (${have ? have.join(".") : "version unknown"}) is too old for EmbeddingGemma 2; it needs ${want.join(".")} or newer. Update it, then run this again.`,
 		};
 	}
 	return { ok: true };
@@ -184,6 +184,14 @@ export function askYesNo(question: string, input: NodeJS.ReadableStream = proces
 	});
 }
 
+/** The one line `8gent memory embedder status` prints. */
+export function statusLine(enabled: boolean, runtime: LlamaServerCheck): string {
+	if (!enabled) return `Search by meaning: off. Recommended: 8gent memory embedder enable ${EMBEDDER.id}`;
+	return runtime.ok
+		? `Search by meaning: on (${EMBEDDER.id}, on this machine)`
+		: `Search by meaning: downloaded, but it cannot run. ${runtime.reason}`;
+}
+
 export type EnableResult = "enabled" | "declined" | "unattended" | "already-enabled" | "no-runtime";
 
 /** Unattended means no: no TTY, CI, or a daemon never prompts and never downloads. */
@@ -203,7 +211,7 @@ export async function enableEmbedder(opts: {
 	if (readEmbedderConfig(opts.base)) return "already-enabled";
 	const runtime = (opts.checkRuntime ?? checkLlamaServer)();
 	if (!runtime.ok) {
-		log(`embedder: not enabled. ${runtime.reason}`);
+		log(`embedder: not enabled. ${runtime.reason} Nothing was downloaded.`);
 		return "no-runtime";
 	}
 	if (!(opts.attended ?? isAttended())) {

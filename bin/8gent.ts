@@ -2676,14 +2676,7 @@ async function memoryCommand(args: string[]) {
 			setup.disableEmbedder();
 			console.log("Memory search by meaning is off. The downloaded file is kept in ~/.8gent/models.");
 		} else if (action === "status") {
-			const rt = setup.checkLlamaServer();
-			console.log(
-				setup.readEmbedderConfig()
-					? rt.ok
-						? `Search by meaning: on (${setup.EMBEDDER.id}, on this machine)`
-						: `Search by meaning: downloaded, but it cannot run. ${rt.reason}`
-					: `Search by meaning: off. Recommended: 8gent memory embedder enable ${setup.EMBEDDER.id}`,
-			);
+			console.log(setup.statusLine(!!setup.readEmbedderConfig(), setup.checkLlamaServer()));
 		} else {
 			console.error("Usage: 8gent memory embedder [status|enable|disable]");
 			process.exit(1);
