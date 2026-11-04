@@ -41,12 +41,13 @@ concurrency:
 jobs:
   linux:
     name: Linux install, typecheck, test, build
-    # Same-repo pull requests and pushes run on the Hetzner runner (ephemeral, one job per container, read-only
-    # token, no secrets). Fork pull requests fall back to the hosted label below and never touch it.
-    # See docs/ops/ci-on-hetzner.md in 8gi-governance.
-    # Hetzner self-hosted runner (docs/ops/ci-on-hetzner.md in 8gi-governance). A fork PR never runs on
-    # self-hosted: it falls back to the hosted label, so the required check still runs and still gates.
-    runs-on: ${{ fromJSON(github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","hetzner-linux"]') }}
+    # Same-repo pull requests and manual dispatches run on the Hetzner runner (ephemeral, one job per container,
+    # read-only token, no repository secrets in this workflow). Fork pull requests get the hosted label below and
+    # never touch it. See docs/ops/ci-on-hetzner.md in 8gi-governance.
+    # Hetzner self-hosted runner (docs/ops/ci-on-hetzner.md in 8gi-governance). Fails closed: only a push or a
+    # same-repo pull request gets the self-hosted label; anything else, including an unreadable head repo, gets the
+    # hosted label, so the required check still runs and still gates. The runner also refuses the job itself.
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","hetzner-linux"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 60
     env:
       CONTAINER: 8gent-linux-ci-${{ github.run_id }}-${{ github.run_attempt }}

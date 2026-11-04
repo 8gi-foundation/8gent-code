@@ -11,9 +11,10 @@ concurrency:
 jobs:
   validate:
     name: Validate
-    # Hetzner self-hosted runner (docs/ops/ci-on-hetzner.md in 8gi-governance). A fork PR never runs on
-    # self-hosted: it falls back to the hosted label, so the required check still runs and still gates.
-    runs-on: ${{ fromJSON(github.event.pull_request.head.repo.fork && '["ubuntu-latest"]' || '["self-hosted","hetzner-linux"]') }}
+    # Hetzner self-hosted runner (docs/ops/ci-on-hetzner.md in 8gi-governance). Fails closed: only a push or a
+    # same-repo pull request gets the self-hosted label; anything else, including an unreadable head repo, gets the
+    # hosted label, so the required check still runs and still gates. The runner also refuses the job itself.
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","hetzner-linux"]' || '["ubuntu-latest"]') }}
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
