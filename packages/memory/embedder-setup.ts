@@ -19,13 +19,51 @@ export const EMBEDDER = {
 	model: "embeddinggemma-2-q8_0",
 	dimensions: 768,
 	licence: "Apache-2.0 (card) with the Gemma Prohibited Use Policy",
-	policyUrl: "https://ai.google.dev/gemma/docs/gemma_4_license",
+	policyUrl: "https://ai.google.dev/gemma/prohibited_use_policy",
 	url: "https://huggingface.co/ggml-org/embeddinggemma-2-GGUF/resolve/main/embeddinggemma-2-Q8_0.gguf",
 	file: "embeddinggemma-2-Q8_0.gguf",
 	bytes: 309_855_456,
 	sha256: "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135",
 	port: 8189,
+	/** Oldest llama.cpp release known to load gemma-embedding2 (0.8.0 loads it; 0.5.0 does not). */
+	minLlamaCpp: [0, 8, 0],
 } as const;
+
+function compareVersions(a: readonly number[], b: readonly number[]): number {
+	for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+	return 0;
+}
+
+export interface LlamaServerCheck {
+	ok: boolean;
+	/** Plain-language reason when not ok. */
+	reason?: string;
+}
+
+/** Is llama-server present, and new enough to load EmbeddingGemma 2? Runs `llama-server --version` only. */
+export function checkLlamaServer(
+	which: (b: string) => string | null = (b) => Bun.which(b),
+	versionOutput: (bin: string) => string = (bin) => {
+		const r = Bun.spawnSync([bin, "--version"], { stdout: "pipe", stderr: "pipe" });
+		return `${r.stdout.toString()}${r.stderr.toString()}`;
+	},
+): LlamaServerCheck {
+	const bin = which("llama-server");
+	if (!bin) {
+		return { ok: false, reason: "llama.cpp is not installed (no llama-server found). Install it first, then run this again. Nothing was downloaded." };
+	}
+	const m = /version:\s*(\d+)\.(\d+)\.(\d+)/.exec(versionOutput(bin));
+	const want = EMBEDDER.minLlamaCpp;
+	const have = m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+	const newEnough = have !== null && compareVersions(have, want) >= 0;
+	if (!newEnough) {
+		return {
+			ok: false,
+			reason: `Your llama.cpp (${have ? have.join(".") : "version unknown"}) is too old for EmbeddingGemma 2; it needs ${want.join(".")} or newer. Update it, then run this again. Nothing was downloaded.`,
+		};
+	}
+	return { ok: true };
+}
 
 /** The only hosts a download may touch, including redirect hops. */
 export function isAllowedHost(host: string): boolean {
@@ -146,7 +184,7 @@ export function askYesNo(question: string, input: NodeJS.ReadableStream = proces
 	});
 }
 
-export type EnableResult = "enabled" | "declined" | "unattended" | "already-enabled";
+export type EnableResult = "enabled" | "declined" | "unattended" | "already-enabled" | "no-runtime";
 
 /** Unattended means no: no TTY, CI, or a daemon never prompts and never downloads. */
 export function isAttended(env: NodeJS.ProcessEnv = process.env, tty = !!process.stdin.isTTY && !!process.stdout.isTTY): boolean {
@@ -158,10 +196,16 @@ export async function enableEmbedder(opts: {
 	attended?: boolean;
 	ask?: (q: string) => Promise<boolean>;
 	download?: typeof downloadModel;
+	checkRuntime?: () => LlamaServerCheck;
 	log?: (s: string) => void;
 } = {}): Promise<EnableResult> {
 	const log = opts.log ?? ((s: string) => console.log(s));
 	if (readEmbedderConfig(opts.base)) return "already-enabled";
+	const runtime = (opts.checkRuntime ?? checkLlamaServer)();
+	if (!runtime.ok) {
+		log(`embedder: not enabled. ${runtime.reason}`);
+		return "no-runtime";
+	}
 	if (!(opts.attended ?? isAttended())) {
 		log("embedder: not enabled. No terminal to ask in, so nothing was downloaded.");
 		return "unattended";

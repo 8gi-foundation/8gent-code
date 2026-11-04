@@ -5,12 +5,12 @@
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { LlamaCppEmbeddingProvider, type EmbeddingProvider } from "./embeddings.js";
-import { EMBEDDER, askYesNo, downloadModel, enableEmbedder, isAllowedHost, isAttended } from "./embedder-setup.js";
+import { EMBEDDER, askYesNo, checkLlamaServer, downloadModel, enableEmbedder, isAllowedHost, isAttended } from "./embedder-setup.js";
 import { MemoryStore } from "./store.js";
 import type { SemanticMemory } from "./types.js";
 
@@ -78,6 +78,7 @@ describe("consent: default is No, unattended is No", () => {
 		let downloaded = false;
 		const lines: string[] = [];
 		const r = await enableEmbedder({
+			checkRuntime: () => ({ ok: true }),
 			base: tmp(),
 			attended: false,
 			ask: async () => ((asked = true), true),
@@ -99,6 +100,7 @@ describe("consent: default is No, unattended is No", () => {
 	test("answering No downloads nothing", async () => {
 		let downloaded = false;
 		const r = await enableEmbedder({
+			checkRuntime: () => ({ ok: true }),
 			base: tmp(),
 			attended: true,
 			ask: async () => false,
@@ -119,13 +121,60 @@ describe("consent: default is No, unattended is No", () => {
 
 	test("the consent text names model, licence, size, source", async () => {
 		const lines: string[] = [];
-		await enableEmbedder({ base: tmp(), attended: true, ask: async () => false, log: (s) => lines.push(s) });
+		await enableEmbedder({ checkRuntime: () => ({ ok: true }), base: tmp(), attended: true, ask: async () => false, log: (s) => lines.push(s) });
 		const text = lines.join("\n");
-		for (const needle of ["embeddinggemma-2", "Apache-2.0", "310 MB", "huggingface.co", "Prohibited Use"]) {
+		for (const needle of ["embeddinggemma-2", "Apache-2.0", "310 MB", "huggingface.co", "Prohibited Use", "https://ai.google.dev/gemma/prohibited_use_policy"]) {
 			expect(text).toContain(needle);
 		}
 		expect(text).not.toMatch(/\bagent/i);
 		expect(text).not.toContain(String.fromCharCode(0x2014));
+	});
+});
+
+describe("check the runtime before downloading", () => {
+	const run = async (check: ReturnType<typeof checkLlamaServer>) => {
+		let asked = false;
+		let downloaded = false;
+		const lines: string[] = [];
+		const base = tmp();
+		const r = await enableEmbedder({
+			base,
+			attended: true,
+			checkRuntime: () => check,
+			ask: async () => ((asked = true), true),
+			download: async () => ((downloaded = true), mkdirSync(join(base, "models"), { recursive: true }), ""),
+			log: (s) => lines.push(s),
+		});
+		return { r, asked, downloaded, text: lines.join("\n") };
+	};
+
+	test("no llama-server: says so, never asks, never downloads", async () => {
+		const out = await run(checkLlamaServer(() => null));
+		expect(out.r).toBe("no-runtime");
+		expect([out.asked, out.downloaded]).toEqual([false, false]);
+		expect(out.text).toContain("llama.cpp is not installed");
+		expect(out.text).toContain("Nothing was downloaded");
+	});
+
+	test("llama.cpp 0.5.0 is too old: says so, never asks, never downloads", async () => {
+		const out = await run(checkLlamaServer(() => "/bin/llama-server", () => "version: 0.5.0 (build 11146)"));
+		expect(out.r).toBe("no-runtime");
+		expect([out.asked, out.downloaded]).toEqual([false, false]);
+		expect(out.text).toContain("0.5.0");
+		expect(out.text).toContain("0.8.0 or newer");
+	});
+
+	test("unparseable version output counts as too old", () => {
+		expect(checkLlamaServer(() => "/bin/llama-server", () => "garbage").ok).toBe(false);
+	});
+
+	test("0.8.0 and newer pass, and enable proceeds to the prompt", async () => {
+		for (const v of ["0.8.0", "0.8.1", "0.10.0", "1.0.0"]) {
+			expect(checkLlamaServer(() => "/bin/llama-server", () => `version: ${v} (build 1)`).ok).toBe(true);
+		}
+		const out = await run({ ok: true });
+		expect(out.asked).toBe(true);
+		expect(out.downloaded).toBe(true);
 	});
 });
 
