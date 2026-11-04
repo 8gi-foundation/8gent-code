@@ -125,7 +125,7 @@ describe("consent: default is No, unattended is No", () => {
 			expect(text).toContain(needle);
 		}
 		expect(text).not.toMatch(/\bagent/i);
-		expect(text).not.toContain("—");
+		expect(text).not.toContain(String.fromCharCode(0x2014));
 	});
 });
 
