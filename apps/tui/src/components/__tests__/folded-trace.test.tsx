@@ -128,14 +128,15 @@ async function baseMessageList(): Promise<typeof MessageList> {
 	const sh = (args: string[]) => spawnSync("git", args, { cwd: here, encoding: "utf8" });
 	const top = sh(["rev-parse", "--show-toplevel"]).stdout.trim();
 	let base = "";
-	for (const ref of ["origin/main", "main"]) {
+	// "public" is the remote name in this repo's working clones; "origin" in CI and forks.
+	for (const ref of ["public/main", "origin/main", "main"]) {
 		const r = sh(["merge-base", "HEAD", ref]);
 		if (r.status === 0) {
 			base = r.stdout.trim();
 			break;
 		}
 	}
-	if (!base) throw new Error("no merge-base with origin/main: fetch main to run this test");
+	if (!base) throw new Error("no merge-base with public/main or origin/main: fetch main to run this test");
 	const src = sh(["show", `${base}:apps/tui/src/components/message-list.tsx`]);
 	if (src.status !== 0) throw new Error("cannot read message-list.tsx at the merge-base");
 	const file = join(top, "apps/tui/src/components", `message-list.base-${process.pid}.tmp.tsx`);

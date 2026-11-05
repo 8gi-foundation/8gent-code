@@ -69,7 +69,9 @@ beforeEach(() => {
 
 afterEach(() => {
 	globalThis.fetch = realFetch;
-	process.env = { ...savedEnv };
+	// In place: assigning a new object detaches process.env from the real environment.
+	for (const k of Object.keys(process.env)) if (!(k in savedEnv)) delete process.env[k];
+	Object.assign(process.env, savedEnv);
 	resetOrchestration();
 	resetFreeModelCache();
 	rmSync(dir, { recursive: true, force: true });

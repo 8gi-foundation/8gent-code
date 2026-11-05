@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { resetKeyVault } from "../secrets/key-vault";
 
 // Fake values only. Never a real key.
 const FAKE_KEY = "fake-minimax-key-for-tests";
@@ -14,6 +15,7 @@ const ENV = [
 	"MINIMAX_BASE_URL",
 	"EIGHT_DATA_DIR",
 	"EIGHT_PROVIDERS_SETTINGS_PATH",
+	"EIGHT_KEY_BACKEND",
 ];
 
 beforeEach(() => {
@@ -24,6 +26,9 @@ beforeEach(() => {
 	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "minimax-builtin-"));
 	settingsPath = path.join(tmpDir, "providers.json");
 	process.env.EIGHT_DATA_DIR = tmpDir;
+	// The host OS keychain may hold a real minimax key; read only the empty file vault.
+	process.env.EIGHT_KEY_BACKEND = "file";
+	resetKeyVault();
 });
 
 afterEach(() => {
@@ -32,6 +37,7 @@ afterEach(() => {
 		else process.env[k] = saved[k];
 	}
 	fs.rmSync(tmpDir, { recursive: true, force: true });
+	resetKeyVault();
 });
 
 // Fresh module instance per call so module-load env (MINIMAX_BASE_URL) is re-read.

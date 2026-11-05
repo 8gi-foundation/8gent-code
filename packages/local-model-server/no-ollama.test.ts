@@ -106,7 +106,9 @@ describe("onboarding: probeOllama", () => {
 
 describe("System One: detectBackend", () => {
 	const opts = (env: Record<string, string>) => ({
-		env: { ...env, LAYA_URL: CLOSED, HOME: "/nonexistent-home" },
+		// The shared judge defaults to the machine's Ollama on :11434 (probe.ts resolveSharedJudgeHost);
+		// point it at the sentinel so a real Ollama on the host cannot answer instead.
+		env: { ...env, LAYA_URL: CLOSED, EIGHT_DECIDE_OLLAMA_HOST: OLLAMA, HOME: "/nonexistent-home" },
 		llamacppLoader: null,
 		timeoutMs: 2000,
 	});

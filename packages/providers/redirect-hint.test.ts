@@ -35,7 +35,9 @@ beforeAll(() => {
 
 afterAll(() => {
 	stub.stop(true);
-	process.env = SAVED;
+	// In place: assigning a new object detaches process.env from the real environment.
+	for (const k of Object.keys(process.env)) if (!(k in SAVED)) delete process.env[k];
+	Object.assign(process.env, SAVED);
 	cleanupTempDirs();
 });
 

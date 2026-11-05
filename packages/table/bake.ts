@@ -138,10 +138,16 @@ export function writeSlide(huddleId: string, turnId: string, spec: SlideSpec, ct
 
 /** Screenshot one slide. Same flags deck2video.py::screenshot uses. */
 export function slideToPng(htmlPath: string, pngPath: string, chrome: string): boolean {
+	// A throwaway profile next to the PNG: without it headless Chrome opens the
+	// operator's default profile, and when that Chrome is already running the new
+	// process hands off to it and exits with no screenshot.
+	const profile = `${pngPath}.profile`;
 	const r = spawnSync(
 		chrome,
 		[
 			"--headless=new",
+			`--user-data-dir=${profile}`,
+			"--no-first-run",
 			"--hide-scrollbars",
 			"--disable-gpu",
 			"--force-device-scale-factor=1",
@@ -152,6 +158,7 @@ export function slideToPng(htmlPath: string, pngPath: string, chrome: string): b
 		],
 		{ encoding: "utf8", timeout: 60_000 },
 	);
+	rmSync(profile, { recursive: true, force: true });
 	return r.status === 0 && existsSync(pngPath);
 }
 
