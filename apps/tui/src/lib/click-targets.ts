@@ -198,7 +198,9 @@ export function currentPressed(): string | null {
 export function setSelectionIO(
 	read: (() => string) | null,
 	copy: ((text: string) => unknown) | null,
+	cols?: () => number,
 ): void {
+	if (cols) selection.setColumns(cols);
 	screenReader = read;
 	copier = copy;
 }

@@ -20,14 +20,17 @@
  * - hands parsed events to subscribers, and lets a click inject the bytes of
  *   the key it stands for, so a click does exactly what the key does.
  *
- * Three modes (#5094). Reporting captures every drag, so the terminal's own
- * select and copy never happen. The default is therefore "select": no
- * reporting; the alternate screen plus alternate scroll mode (?1049 ?1007),
- * so the wheel arrives as arrow keys and a burst of them scrolls the chat
- * while the input is empty. "full" is the reporting layer above, for people
- * who want the click targets (the default on Android/Termux, where a phone
- * selects with a long press): EIGHT_MOUSE=1, `"mouse": "on"` in
- * ~/.8gent/config.json, or ui.mouseCapture in Settings. "off" is
+ * Three modes (#5094, default changed again by the click-and-drag change).
+ * Reporting captures every drag, so the terminal's own select and copy never
+ * happen; "full" makes up for that inside the TUI: a press and release on one
+ * cell is a click, a drag highlights cells and copies on release (OSC 52, plus
+ * pbcopy on a local Mac). "full" is the default on macOS and Android/Termux.
+ * "select" is the opt-in (EIGHT_MOUSE=select, `"mouse": "select"` in
+ * ~/.8gent/config.json, or ui.mouseCapture off in Settings) and the default
+ * elsewhere: no reporting; the alternate screen plus alternate scroll mode
+ * (?1049 ?1007), so the wheel arrives as arrow keys and a burst of them
+ * scrolls the chat while the input is empty, and the terminal selects. "full"
+ * can also be forced with EIGHT_MOUSE=1, `"mouse": "on"`. "off" is
  * EIGHT_MOUSE=0 or `"mouse": "off"`: nothing is written at all.
  * Off for non-TTY, TERM=dumb and INK_SCREEN_READER=true. NO_COLOR keeps the
  * mouse on: it is a colour preference, not an input one (James's open call;
@@ -204,6 +207,7 @@ export function mouseMode(
 	configMouse: string | null = readConfigMouse(),
 	settingCapture: boolean | undefined = readSettingCapture(),
 	android: boolean = isAndroidHost(process.platform, env),
+	platform: string = process.platform,
 ): MouseMode {
 	if (!isTTY) return "off";
 	const flag = (env.EIGHT_MOUSE ?? "").toLowerCase();
@@ -216,9 +220,11 @@ export function mouseMode(
 	if (flag === "select") return "select";
 	if (configMouse === "on" || configMouse === "full") return "full";
 	if (configMouse === "select") return "select";
-	// No owner choice: Termux keeps its tap targets (a phone selects with a
-	// long press), every desktop terminal gets native select and copy.
-	if (settingCapture === undefined) return android ? "full" : "select";
+	// No owner choice: Termux and macOS run the reporting layer. A press and
+	// release on one cell is a click, a drag is selected inside the TUI and
+	// copied on release (text-selection.ts), so both work at once. Other
+	// desktops keep the terminal's own select and copy until they are tried.
+	if (settingCapture === undefined) return android || platform === "darwin" ? "full" : "select";
 	return settingCapture ? "full" : "select";
 }
 

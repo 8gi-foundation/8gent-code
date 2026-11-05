@@ -60,17 +60,49 @@ export function ordered(sel: SelRange): [{ x: number; y: number }, { x: number; 
 			];
 }
 
-/** The text a range covers, row by row, trailing spaces trimmed. */
-export function extractText(screen: string, sel: SelRange): string {
+/** Leading spaces of a row. */
+function indentOf(line: string): number {
+	return line.length - line.trimStart().length;
+}
+
+/**
+ * Was row `a` cut by the wrapper rather than ended by the writer? Ink breaks
+ * at a space, so the row ended short of the edge, but the first word of the
+ * next row would not have fit on it. Same indent on both rows keeps a list or
+ * a code block from being folded into the line above.
+ */
+export function isSoftWrap(a: string, b: string, cols: number): boolean {
+	if (cols <= 0) return false;
+	const left = a.trimEnd();
+	const right = b.trimStart();
+	if (!left.trim() || !right) return false;
+	if (indentOf(left) !== indentOf(b)) return false;
+	const word = right.split(/\s/)[0] ?? "";
+	return lineWidth(left) + 1 + lineWidth(word) > cols;
+}
+
+/**
+ * The text a range covers, trailing spaces trimmed. Rows the wrapper cut are
+ * joined with one space; every other row break stays a newline. `cols` is the
+ * screen width (0 turns joining off).
+ */
+export function extractText(screen: string, sel: SelRange, cols = 0): string {
 	const lines = screen.split("\n");
 	const [a, b] = ordered(sel);
-	const out: string[] = [];
+	let out = "";
 	for (let y = a.y; y <= b.y; y++) {
 		const from = y === a.y ? a.x : 0;
 		const to = y === b.y ? b.x + 1 : Number.POSITIVE_INFINITY;
-		out.push(sliceCells(lines[y] ?? "", from, to).trimEnd());
+		const seg = sliceCells(lines[y] ?? "", from, to).trimEnd();
+		if (y === a.y) {
+			out = seg;
+		} else if (isSoftWrap(lines[y - 1] ?? "", lines[y] ?? "", cols)) {
+			out += ` ${seg.trimStart()}`;
+		} else {
+			out += `\n${seg}`;
+		}
 	}
-	return out.join("\n").replace(CONTROL, "");
+	return out.replace(CONTROL, "");
 }
 
 /** Everything but newline and tab: model output must not reach a clipboard command or OSC 52 as escapes. */
@@ -110,10 +142,17 @@ export class TextSelection {
 	private lastPress: { x: number; y: number; at: number } | null = null;
 	private current: SelRange | null = null;
 
+	private cols: () => number = () => process.stdout.columns ?? 0;
+
 	constructor(
 		private read: () => string,
 		private now: () => number = Date.now,
 	) {}
+
+	/** Swap where the screen width comes from (wrapped rows are joined at it). */
+	setColumns(cols: () => number): void {
+		this.cols = cols;
+	}
 
 	/** Swap where the screen text comes from. */
 	setReader(read: () => string): void {
@@ -170,7 +209,7 @@ export class TextSelection {
 			this.current = { x0: this.anchor.x, y0: this.anchor.y, x1: x, y1: y };
 		}
 		if (!this.current) return { kind: "none" };
-		const text = extractText(this.read(), this.current);
+		const text = extractText(this.read(), this.current, this.cols());
 		if (text.trim().length === 0) {
 			this.current = null;
 			return { kind: "none" };
