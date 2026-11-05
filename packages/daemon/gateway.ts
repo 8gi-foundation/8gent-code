@@ -700,8 +700,13 @@ function dispatchMessage(ws: any, config: GatewayConfig, raw: string): void {
 				return;
 			}
 
-			// Queuing is on by default, so bound what one prompt can put in memory.
-			if (typeof msg.text === "string" && Buffer.byteLength(msg.text) > PROMPT_MAX_BYTES) {
+			// Queuing is on by default, so bound what one prompt can put in memory:
+			// text must be a string, and a string of at most PROMPT_MAX_BYTES.
+			if (typeof msg.text !== "string") {
+				send(ws, { type: "error", message: "prompt text must be a string" });
+				return;
+			}
+			if (Buffer.byteLength(msg.text) > PROMPT_MAX_BYTES) {
 				send(ws, {
 					type: "error",
 					message: `prompt too large (limit ${PROMPT_MAX_BYTES} bytes); send it in smaller parts`,
