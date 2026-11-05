@@ -211,7 +211,7 @@ export async function checkModel(
 		return {
 			status: "unreachable",
 			lines: [
-				`Model ledger: the identity of ${model} on ${provider} could not be read, so it was not checked.`,
+				`Could not read which build of ${model} is running on ${provider}, so a change to it will not be flagged.`,
 			],
 		};
 	}
@@ -221,7 +221,7 @@ export async function checkModel(
 		try {
 			writeLedger(home, ledger);
 		} catch {}
-		return { status: "pinned", lines: [`Model ledger: pinned ${describe(model, live)}.`] };
+		return { status: "pinned", lines: [`Remembering ${describe(model, live)}. You will be told if it changes.`] };
 	}
 
 	const changes: string[] = [];
@@ -235,7 +235,7 @@ export async function checkModel(
 	return {
 		status: "changed",
 		lines: [
-			`Model ledger: ${model} on ${provider} is not the model you pinned on ${dayOf(pin.firstSeen)}. ${changes.join("; ")}.`,
+			`${model} on ${provider} is not the model you pinned on ${dayOf(pin.firstSeen)}. ${changes.join("; ")}.`,
 			`If you meant this, accept it with: 8gent model-pin ${model}`,
 		],
 	};
@@ -265,7 +265,7 @@ export async function repinModel(
 	const now = (deps.now ?? (() => new Date()))().toISOString();
 	ledger.pins[keyOf(provider, model)] = { provider, model, ...live, firstSeen: now };
 	writeLedger(home, ledger);
-	return { status: "pinned", lines: [`Model ledger: pinned ${describe(model, live)}.`] };
+	return { status: "pinned", lines: [`Remembering ${describe(model, live)}. You will be told if it changes.`] };
 }
 
 /** Lines for `8gent doctor`: every pinned model. Empty when nothing is pinned yet. */
