@@ -495,7 +495,7 @@ export const BUILT_IN_SLASH_COMMANDS: BuiltInSlashCommandDef[] = [
 	{
 		name: "settings",
 		aliases: [],
-		description: "Open settings (voice, performance, providers, models)",
+		description: "Open settings view (voice, performance, models)",
 		usage: "/settings",
 	},
 	{
