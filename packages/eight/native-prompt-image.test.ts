@@ -9,7 +9,7 @@
  * asserted. $HOME is faked.
  */
 
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -82,6 +82,7 @@ let home: string;
 let repo: string;
 let server: ReturnType<typeof Bun.serve>;
 let bodies: Body[] = [];
+let fetchSpy: { mockRestore: () => void } | undefined;
 
 beforeAll(async () => {
 	home = mkdtempSync(join(tmpdir(), "nativeimg4287-home-"));
@@ -94,6 +95,15 @@ beforeAll(async () => {
 		process.env[k] = v;
 	}
 	({ Agent } = await import("./agent"));
+	// A text-only model still starts a background vision lookup on openrouter.ai. Refuse it
+	// here, at once: left to the real network it outlives this file and lands in the next
+	// file's fetch spy (vision-key-isolation.test.ts).
+	const realFetch = globalThis.fetch;
+	fetchSpy = spyOn(globalThis, "fetch").mockImplementation(((input: RequestInfo | URL, init?: RequestInit) => {
+		const host = new URL(input instanceof Request ? input.url : String(input)).hostname;
+		if (host === "openrouter.ai") return Promise.reject(new Error("test blocks network to openrouter.ai"));
+		return realFetch(input, init);
+	}) as typeof fetch);
 	server = Bun.serve({
 		port: 0,
 		async fetch(req) {
@@ -123,7 +133,11 @@ afterEach(() => {
 	bodies = [];
 });
 
-afterAll(() => {
+afterAll(async () => {
+	// The text-only turn's vision lookup is fire-and-forget; let it hit the refusing stub
+	// before the stub goes, or it reaches the real network during the next file.
+	await new Promise((r) => setTimeout(r, 2000));
+	fetchSpy?.mockRestore();
 	server?.stop(true);
 	for (const [k, v] of Object.entries(saved)) {
 		if (v === undefined) delete process.env[k];

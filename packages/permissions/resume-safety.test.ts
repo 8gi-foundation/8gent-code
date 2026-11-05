@@ -47,7 +47,10 @@ beforeEach(() => {
 });
 afterEach(() => {
 	registerTuiApprovalHandler(null);
-	process.env = { ...savedEnv };
+	// Restore in place. Assigning a new object to process.env detaches it from the real
+	// environment, so os.tmpdir() and child processes stop seeing later test files' changes.
+	for (const k of Object.keys(process.env)) if (!(k in savedEnv)) delete process.env[k];
+	Object.assign(process.env, savedEnv);
 	(process.stdin as { isTTY?: boolean }).isTTY = savedTTY;
 });
 afterAll(() => {

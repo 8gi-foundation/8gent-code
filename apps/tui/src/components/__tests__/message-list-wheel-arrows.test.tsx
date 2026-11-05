@@ -3,7 +3,7 @@
  * layer turns a burst into wheel events, and the real MessageList scrolls.
  * A lone arrow is left for the input's history and moves nothing here.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { Writable } from "node:stream";
 import { type Instance, render } from "ink";
@@ -63,6 +63,8 @@ const messages: Message[] = Array.from({ length: 40 }, (_, i) => ({
 }));
 
 let instance: Instance | null = null;
+// Another test file may have left the input "holding a draft" (module state); start empty.
+beforeEach(() => setWheelInputEmpty(true));
 afterEach(() => {
 	instance?.unmount();
 	instance = null;

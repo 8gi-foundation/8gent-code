@@ -30,7 +30,9 @@ beforeEach(() => {
 	process.env.HOME = dir;
 });
 afterEach(() => {
-	process.env = { ...saved };
+	// In place: assigning a new object detaches process.env from the real environment.
+	for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+	Object.assign(process.env, saved);
 	fs.rmSync(dir, { recursive: true, force: true });
 });
 
