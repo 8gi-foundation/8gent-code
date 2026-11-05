@@ -36,7 +36,13 @@ describe("ToolArgGuard", () => {
 		delete process.env.EIGHT_SCHEMA_CHECK;
 		const lines: string[] = [];
 		let built = 0;
-		const g = new ToolArgGuard(() => (built++, defs()), (l) => lines.push(l));
+		const g = new ToolArgGuard(
+			() => {
+				built++;
+				return defs();
+			},
+			(l) => lines.push(l),
+		);
 		g.observe("read_file", {});
 		expect(lines).toEqual([]);
 		expect(built).toBe(0);
