@@ -71,6 +71,8 @@ afterEach(() => {
 });
 
 async function feedArrows(chunk: string, settled?: (frame: string) => boolean) {
+	// installMouse returns the layer another test file left installed on its own stdin; start clean.
+	_disposeMouse();
 	const stdin = new FakeStdin();
 	const stdout = makeStdout();
 	const mouseOut = { write: (_s: string) => true };

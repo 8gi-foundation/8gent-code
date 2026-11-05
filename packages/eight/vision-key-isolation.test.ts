@@ -11,9 +11,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "b
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resetProviderManager } from "../providers";
+import { resetKeyVault } from "../secrets/key-vault";
 
 const PNG_B64 =
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
 const MM_KEY = "mm-secret-5100";
 const OR_KEY = "or-key-5100";
 const OR_ENV_KEY = "or-env-5100";
@@ -22,6 +25,8 @@ const saved: Record<string, string | undefined> = {};
 const ENV: Record<string, string | undefined> = {
 	OPENROUTER_API_KEY: OR_ENV_KEY,
 	MINIMAX_API_KEY: undefined,
+	// The host OS keychain can hold a real minimax key; read only the empty file vault.
+	EIGHT_KEY_BACKEND: "file",
 	EIGHT_TOOL_CAPABILITY_GATE: "0",
 	EIGHT_TEXT_TOOLS: "0",
 	"8GENT_TWO_STAGE_COMPACT": "0",
@@ -39,6 +44,9 @@ beforeAll(async () => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 	}
+	// Other test files may have built these against another data dir or the real keychain.
+	resetKeyVault();
+	resetProviderManager();
 	fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
 		input: RequestInfo | URL,
 		init?: RequestInit,
@@ -81,6 +89,8 @@ afterEach(() => {
 
 afterAll(() => {
 	fetchSpy?.mockRestore();
+	resetKeyVault();
+	resetProviderManager();
 	for (const [k, v] of Object.entries(saved)) {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
