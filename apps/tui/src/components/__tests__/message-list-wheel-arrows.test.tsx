@@ -47,6 +47,12 @@ function makeStdout(columns = 52) {
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
 const stripAnsi = (s: string) => s.replace(/\u001B\[[0-9;?]*[A-Za-z]/g, "");
 const tick = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+
+/** Wait until the frame satisfies `done`, up to `ms`: a fixed sleep flakes on a loaded machine. */
+async function until(frame: () => string, done: (s: string) => boolean, ms = 4000) {
+	const end = Date.now() + ms;
+	while (Date.now() < end && !done(stripAnsi(frame()))) await tick(20);
+}
 const UP = "\u001B[A";
 
 const messages: Message[] = Array.from({ length: 40 }, (_, i) => ({
@@ -64,7 +70,7 @@ afterEach(() => {
 	setWheelInputEmpty(true);
 });
 
-async function feedArrows(chunk: string) {
+async function feedArrows(chunk: string, settled?: (frame: string) => boolean) {
 	const stdin = new FakeStdin();
 	const stdout = makeStdout();
 	const mouseOut = { write: (_s: string) => true };
@@ -90,16 +96,18 @@ async function feedArrows(chunk: string) {
 			patchConsole: false,
 		},
 	);
-	await tick(120);
+	await until(() => stdout.last, (f) => f.includes("line-40"));
 	const before = stripAnsi(stdout.last);
 	stdin.feed(chunk);
 	await tick(120);
+	// Tests that expect a scroll say what the scrolled frame looks like and wait for it.
+	if (settled) await until(() => stdout.last, settled);
 	return { before, after: stripAnsi(stdout.last) };
 }
 
 describe("MessageList wheel as arrows", () => {
 	test("a burst of up arrows scrolls the chat back", async () => {
-		const { before, after } = await feedArrows(UP.repeat(6));
+		const { before, after } = await feedArrows(UP.repeat(6), (f) => !f.includes("line-40"));
 		expect(before).toContain("line-40");
 		expect(after).not.toContain("line-40");
 	});
