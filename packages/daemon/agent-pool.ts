@@ -54,6 +54,8 @@ interface SessionEntry {
 	 * session ends before its turn.
 	 */
 	queue: Array<(admitted: boolean) => void>;
+	/** Recent caller-supplied message ids, oldest first, for dedupe (D1). */
+	seenIds: Set<string>;
 	/** Tenant attribution for Wave 4 multi-tenant rollout. */
 	tenantId: string;
 	/** Optional Clerk ID — useful when tenantId is internal. */
@@ -124,15 +126,27 @@ async function defaultListModels(runtime: string): Promise<string[]> {
 const MAX_SESSIONS = 10;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
-/** #3554: queue messages to a busy session instead of refusing them. Off by default. */
+/**
+ * #3554: queue messages to a busy session instead of refusing them. On by
+ * default (D1): a refusal loses the text. EIGHT_SESSION_QUEUE=0 restores it.
+ */
 function sessionQueueEnabled(): boolean {
-	return process.env.EIGHT_SESSION_QUEUE === "1";
+	return process.env.EIGHT_SESSION_QUEUE !== "0";
 }
+
+/** Default cap on messages waiting per session; past it the sender is told, never dropped silently. */
+const DEFAULT_SESSION_QUEUE_MAX = 20;
+/** Longest message id chat() accepts. */
+const MESSAGE_ID_MAX = 128;
+/** Message ids remembered per session for dedupe. */
+const SEEN_IDS_MAX = 200;
 
 /** #3554: max messages waiting per session (not counting the one running). */
 function sessionQueueMax(): number {
 	const n = Number(process.env.EIGHT_SESSION_QUEUE_MAX);
-	return Number.isInteger(n) && n >= 0 ? n : 32;
+	return process.env.EIGHT_SESSION_QUEUE_MAX !== undefined && Number.isInteger(n) && n >= 0
+		? n
+		: DEFAULT_SESSION_QUEUE_MAX;
 }
 
 /** #4254: durable work queue in front of the pool. Off by default. */
@@ -569,6 +583,7 @@ export class AgentPool {
 			messageCount: 0,
 			busy: false,
 			queue: [],
+			seenIds: new Set(),
 			tenantId,
 			clerkId: overrides?.clerkId,
 		});
@@ -607,12 +622,18 @@ export class AgentPool {
 		sessionId: string,
 		text: string,
 		turn?: ApprovalTurn,
-		options: { continuation?: boolean } = {},
+		options: { continuation?: boolean; messageId?: string } = {},
 	): Promise<string> {
 		const entry = this.sessions.get(sessionId);
 		if (!entry) {
 			bus.emit("agent:error", { sessionId, error: "session not found" });
 			return "[error] session not found";
+		}
+
+		const messageId = options.messageId;
+		if (messageId !== undefined && messageId.length > MESSAGE_ID_MAX) {
+			bus.emit("agent:error", { sessionId, error: "message id too long" });
+			return "[error] message id too long";
 		}
 
 		// The one choke point before the model (#4530): every caller of chat(), the
@@ -639,6 +660,24 @@ export class AgentPool {
 			}
 		}
 
+		// D1: a message id seen before on this session is a redelivery. The id is
+		// recorded only once the message is admitted (queued or running) and is
+		// forgotten again on every later refusal, so a retry of a refused message runs.
+		if (messageId !== undefined && entry.seenIds.has(messageId)) {
+			return "[duplicate] message already received";
+		}
+		const forget = (): void => {
+			if (messageId !== undefined) entry.seenIds.delete(messageId);
+		};
+		const remember = (): void => {
+			if (messageId === undefined) return;
+			entry.seenIds.add(messageId);
+			if (entry.seenIds.size > SEEN_IDS_MAX) {
+				const oldest = entry.seenIds.values().next().value;
+				if (oldest !== undefined) entry.seenIds.delete(oldest);
+			}
+		};
+
 		if (entry.busy) {
 			if (!sessionQueueEnabled()) {
 				bus.emit("agent:error", {
@@ -653,8 +692,14 @@ export class AgentPool {
 				bus.emit("agent:error", { sessionId, error: "session queue full" });
 				return "[error] session queue full";
 			}
+			remember();
 			const admitted = await new Promise<boolean>((resolve) => entry.queue.push(resolve));
-			if (!admitted) return "[error] session ended";
+			if (!admitted) {
+				forget();
+				return "[error] session ended";
+			}
+		} else {
+			remember();
 		}
 		entry.busy = true;
 
@@ -664,6 +709,7 @@ export class AgentPool {
 		if (!budget.allowed) {
 			const msg = `[budget exceeded] ${budget.reason}. Vessels paused until limits reset.`;
 			bus.emit("agent:error", { sessionId, error: msg });
+			forget();
 			this.release(entry);
 			return msg;
 		}
@@ -729,6 +775,7 @@ export class AgentPool {
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			bus.emit("agent:error", { sessionId, error: errorMsg });
+			forget(); // a turn that failed is retryable under the same id
 			return `[error] ${errorMsg}`;
 		} finally {
 			// A call aborted mid-turn never sends onToolEnd; the turn is over,
@@ -827,6 +874,8 @@ export class AgentPool {
 	abort(sessionId: string): boolean {
 		const entry = this.sessions.get(sessionId);
 		if (!entry || !entry.busy) return false;
+		// Stop clears the line too: queued messages are refused, not run after it (D1).
+		for (const waiter of entry.queue.splice(0)) waiter(false);
 		entry.agent.abort();
 		return true;
 	}

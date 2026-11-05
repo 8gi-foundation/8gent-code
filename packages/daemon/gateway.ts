@@ -154,7 +154,7 @@ type InboundMessage =
 	| { type: "session:compact"; sessionId: string }
 	| { type: "session:destroy"; sessionId: string }
 	/** `turn` counts only from the registered approval bridge (#3621). */
-	| { type: "prompt"; text: string; turn?: unknown }
+	| { type: "prompt"; text: string; turn?: unknown; messageId?: string }
 	| { type: "approvals:register"; secret: string }
 	| { type: "sessions:list" }
 	| { type: "cron:list" }
@@ -314,6 +314,11 @@ function send(ws: any, msg: OutboundMessage): void {
  * turn-output event carries `origin`. Taken from the turn's own async context; failing that,
  * from the one turn in flight on the session; ambiguous means null, and the bridge drops it.
  */
+/** Largest prompt text the gateway accepts, in bytes. */
+const PROMPT_MAX_BYTES = 64 * 1024;
+/** Longest messageId the gateway accepts, in characters. */
+const MESSAGE_ID_MAX = 128;
+
 const turnContext = new AsyncLocalStorage<{ origin: string }>();
 const inflightTurns = new Map<string, Map<number, string>>();
 let turnSeq = 0;
@@ -695,6 +700,27 @@ function dispatchMessage(ws: any, config: GatewayConfig, raw: string): void {
 				return;
 			}
 
+			// Queuing is on by default, so bound what one prompt can put in memory:
+			// text must be a string, and a string of at most PROMPT_MAX_BYTES.
+			if (typeof msg.text !== "string") {
+				send(ws, { type: "error", message: "prompt text must be a string" });
+				return;
+			}
+			if (Buffer.byteLength(msg.text) > PROMPT_MAX_BYTES) {
+				send(ws, {
+					type: "error",
+					message: `prompt too large (limit ${PROMPT_MAX_BYTES} bytes); send it in smaller parts`,
+				});
+				return;
+			}
+			if (typeof msg.messageId === "string" && msg.messageId.length > MESSAGE_ID_MAX) {
+				send(ws, {
+					type: "error",
+					message: `messageId too long (limit ${MESSAGE_ID_MAX} characters)`,
+				});
+				return;
+			}
+
 			// Route the message to the agent via the pool
 			// This runs async - events will be broadcast as the agent works
 			const sid = state.sessionId;
@@ -716,7 +742,12 @@ function dispatchMessage(ws: any, config: GatewayConfig, raw: string): void {
 			const inTurn = <T>(fn: () => T): T => turnContext.run({ origin }, fn);
 			const runModelTurn = (): void => {
 				const turnId = beginTurn(sid, origin);
-				const run = () => inTurn(() => pool.chat(sid, msg.text, turn));
+				const run = () =>
+					inTurn(() =>
+						pool.chat(sid, msg.text, turn, {
+							messageId: typeof msg.messageId === "string" ? msg.messageId : undefined,
+						}),
+					);
 				(noCard ? runWithoutApprovalSurface(run) : run())
 					.then((_response) => {
 						// Final response - signal session:end for this turn
