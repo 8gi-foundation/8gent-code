@@ -194,7 +194,7 @@ function build(s: unknown, at: string): Node {
 				for (const k of Object.keys(v)) {
 					if (!allowed.has(k)) {
 						if (e === null) return false;
-						e.push(`${p}.${k}: not allowed`);
+						e.push(`${p}.${safeKey(k)}: not allowed`);
 						good = false;
 					}
 				}
@@ -228,4 +228,11 @@ export function compile(schema: unknown): Compiled {
 			return out;
 		},
 	};
+}
+
+/** A key the model chose, made safe to print: control characters escaped as \\uXXXX, and bounded. */
+function safeKey(k: string): string {
+	const short = k.length > 64 ? `${k.slice(0, 64)}...` : k;
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
+	return short.replace(/[\u0000-\u001f\u007f-\u009f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }

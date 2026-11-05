@@ -6,6 +6,9 @@
  */
 import { type Compiled, compile } from "./index";
 
+const MAX_SHOWN = 20;
+const MAX_LINE = 2000;
+
 export const schemaCheckOn = (): boolean => process.env.EIGHT_SCHEMA_CHECK === "1";
 
 type Def = { function?: { name?: unknown; parameters?: unknown } };
@@ -40,12 +43,21 @@ export class ToolArgGuard {
 		return c ? c.errors(args) : [];
 	}
 
+	/** One bounded, control-free log line: first MAX_SHOWN problems, then a count. */
+	private line(toolName: string, bad: string[]): string {
+		const shown = bad.slice(0, MAX_SHOWN).join("; ");
+		const more = bad.length > MAX_SHOWN ? `; and ${bad.length - MAX_SHOWN} more` : "";
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control characters is the point
+		const text = `[schema-check] tool=${toolName} rejected: ${shown}${more}`.replace(/[\u0000-\u001f\u007f-\u009f]/g, "?");
+		return text.length > MAX_LINE ? `${text.slice(0, MAX_LINE - 3)}...` : text;
+	}
+
 	/** Log a rejection. Never throws. */
 	observe(toolName: string, args: unknown): void {
 		if (!schemaCheckOn()) return;
 		try {
 			const bad = this.problems(toolName, args);
-			if (bad.length > 0) this.log(`[schema-check] tool=${toolName} rejected: ${bad.join("; ")}`);
+			if (bad.length > 0) this.log(this.line(toolName, bad));
 		} catch {
 			// A guard that fails must never take a tool call with it.
 		}
