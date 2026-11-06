@@ -9,6 +9,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.44] - 2026-11-05
+
+### Added
+- schema: 8gent-schema slice 1, compiled JSON Schema checks, zero deps ([#13](https://github.com/8gi-foundation/8gent-code/pull/13))
+
+### Changed
+- plain copy for the launch notice and the slash menu rows ([#14](https://github.com/8gi-foundation/8gent-code/pull/14))
+- make main green (host and cross-file leaks) ([#35](https://github.com/8gi-foundation/8gent-code/pull/35))
+
+### Fixed
+- daemon: a busy session queues messages by default, dedupes by message id, caps at 20 ([#16](https://github.com/8gi-foundation/8gent-code/pull/16))
+- tui: clicks and drag-to-copy both work by default on macOS (#5317) ([#15](https://github.com/8gi-foundation/8gent-code/pull/15))
+
 ## [0.20.42] - 2026-10-27
 
 ### Changed
