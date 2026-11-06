@@ -82,3 +82,10 @@ const allowed = await requestCommandPermission("npm run build");
 manager.allowPattern("docker *");
 manager.denyPattern("docker rm *");
 ```
+
+## Web tools and unattended runs
+
+- `web_search` sends your query and `web_fetch` sends a URL off the device, so in Plan, Ask and Guarded they are not treated as reads: Plan refuses them, and Ask and Guarded show an approval card with No as the default. Infinite runs them without a card.
+- With no terminal to ask on (a headless run, a daemon turn with no card), anything that would show a card is refused. This is the default: unattended means no.
+- To let a headless run approve what is not flagged dangerous, set `EIGHT_HEADLESS_APPROVE=1` for that process. It is never saved to a file. Dangerous and ask-every-time commands are still refused with no one to ask, opt-in or not.
+- Nothing is sent to a hosted provider (such as OpenRouter) until you add a key for it or pick it yourself. With no local model and no key, the first screen says to start a local model or add a key.

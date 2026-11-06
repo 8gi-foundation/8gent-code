@@ -34,7 +34,6 @@ import {
 import { PLAN_STATUSES, UPDATE_PLAN_DESCRIPTION, updatePlan } from "../ai/update-plan";
 import { writeScopeLine } from "../ai/write-scope";
 import { writeShapeLine } from "../ai/write-shape";
-import { ToolArgGuard } from "../schema/tool-args";
 import {
 	type FileOutline,
 	type RepoIndex,
@@ -214,6 +213,7 @@ import { systemOneGate, systemOneMode } from "../permissions/system-one-gate";
 import { ToolG8 } from "../permissions/toolg8.js";
 import { hasTuiApprovalHandler, requestTuiApproval } from "../permissions/tui-approval-channel";
 import type { PolicyActionType } from "../permissions/types.js";
+import { webApprovalRefusal } from "../permissions/web-approval";
 import { gateWriteTool } from "../permissions/write-content-gate.js";
 import {
 	WRITE_CONTENT_TOOLS,
@@ -224,6 +224,7 @@ import {
 	resolveEdit,
 	writtenContentFor,
 } from "../permissions/write-content-gate.js";
+import { ToolArgGuard } from "../schema/tool-args";
 import { loadSettings } from "../settings/store";
 import {
 	formatTaskOutput,
@@ -4516,6 +4517,8 @@ export class ToolExecutor {
 	// ============================================
 
 	private async handleWebSearch(query: string, maxResults?: number): Promise<string> {
+		const refused = await webApprovalRefusal(this.permissionManager, "web_search", String(query));
+		if (refused) return refused;
 		try {
 			const results = await webSearch(query, { maxResults: maxResults || 10 });
 			return formatSearchResults(results);
@@ -4525,6 +4528,8 @@ export class ToolExecutor {
 	}
 
 	private async handleWebFetch(url: string): Promise<string> {
+		const refused = await webApprovalRefusal(this.permissionManager, "web_fetch", String(url));
+		if (refused) return refused;
 		try {
 			const result = await webFetch(url);
 			return formatFetchResult(result);

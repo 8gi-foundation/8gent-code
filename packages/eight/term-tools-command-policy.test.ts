@@ -5,12 +5,20 @@
  * cannot be read as a command needs a person; ordinary input still flows.
  */
 
-import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 
 // bun's mock.module outlives this file. Keep the real barrel and put it back afterwards so
 // later files (the terminal-tab session-store tests) see the real saveSession and loadSessions.
 const realTerminalTab = { ...(await import("../terminal-tab/index.js")) };
+const savedApprove = process.env.EIGHT_HEADLESS_APPROVE;
+beforeAll(() => {
+	// No terminal in a test run: opt in so the scripted commands run.
+	process.env.EIGHT_HEADLESS_APPROVE = "1";
+});
+
 afterAll(() => {
+	if (savedApprove === undefined) delete process.env.EIGHT_HEADLESS_APPROVE;
+	else process.env.EIGHT_HEADLESS_APPROVE = savedApprove;
 	mock.module("../terminal-tab/index.js", () => realTerminalTab);
 });
 

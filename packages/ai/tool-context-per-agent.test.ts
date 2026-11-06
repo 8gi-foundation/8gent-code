@@ -12,7 +12,7 @@
  * after agent A, which is the order that broke A.
  */
 
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -29,7 +29,15 @@ process.env.EIGHT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "toolctx-data
 const servers: { stop: (force?: boolean) => void }[] = [];
 const dirs: string[] = [];
 
+const savedApprove = process.env.EIGHT_HEADLESS_APPROVE;
+beforeAll(() => {
+	// No terminal in a test run: opt in so the scripted commands run.
+	process.env.EIGHT_HEADLESS_APPROVE = "1";
+});
+
 afterAll(() => {
+	if (savedApprove === undefined) delete process.env.EIGHT_HEADLESS_APPROVE;
+	else process.env.EIGHT_HEADLESS_APPROVE = savedApprove;
 	for (const s of servers) s.stop(true);
 	// The per-agent memory managers hold their project databases open; Windows cannot remove the dirs until they close.
 	resetMemoryManager();

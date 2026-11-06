@@ -701,10 +701,10 @@ async function detectBestLocalProviderUntraced(): Promise<{ provider: string; mo
 	const _onlyKeyed = hostedKeyedProviders();
 	if (_onlyKeyed.length === 1) return { provider: _onlyKeyed[0], model: "" };
 
-	// No local provider answered. Default to OpenRouter free tier so a fresh
-	// Windows / Linux install boots into a working state instead of pointing
-	// at an ollama that isn't there.
-	return { provider: "openrouter", model: "auto:free" };
+	// Nothing local answered and no hosted key exists. Stay on the local provider with
+	// no model: no request goes to any hosted service until the person adds a key or
+	// picks one. The readiness gate then shows the first-run message.
+	return { provider: "ollama", model: "" };
 }
 
 loadEnvFile();
@@ -2178,6 +2178,8 @@ export function App({
 						const chatModels = allModels.filter((id: string) => !isLikelyEmbeddingModelId(id));
 						if (!cancelled) setAvailableModels(chatModels.length > 0 ? chatModels : allModels);
 					}
+				} else if (currentProvider === "openrouter-free" && !process.env.OPENROUTER_API_KEY) {
+					if (!cancelled) setAvailableModels([]);
 				} else if (currentProvider === "openrouter-free") {
 					// Fetch free models from OpenRouter API
 					const apiKey = process.env.OPENROUTER_API_KEY || "";
@@ -2194,6 +2196,9 @@ export function App({
 								freeModels.length > 0 ? freeModels : ["google/gemini-2.5-flash:free"],
 							);
 					}
+				} else if (currentProvider === "openrouter" && !process.env.OPENROUTER_API_KEY) {
+					// No key: nothing is sent to openrouter.ai. Add a key to list its models.
+					if (!cancelled) setAvailableModels([]);
 				} else if (currentProvider === "openrouter") {
 					// Fetch all OpenRouter models (top 20 by context length)
 					const apiKey = process.env.OPENROUTER_API_KEY || "";

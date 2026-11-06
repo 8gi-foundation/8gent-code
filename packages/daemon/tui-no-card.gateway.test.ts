@@ -195,8 +195,18 @@ describe("a daemon turn on the TUI channel", () => {
 		other.close();
 	});
 
-	it("leaves every other channel exactly as it was", async () => {
-		expect(await turn("api")).toBe(true);
+	it("every other channel is refused too unless the headless opt-in is set", async () => {
+		delete process.env.EIGHT_HEADLESS_APPROVE;
+		expect(await turn("api")).toBe(false);
+	});
+
+	it("with EIGHT_HEADLESS_APPROVE=1 another channel runs it, as before", async () => {
+		process.env.EIGHT_HEADLESS_APPROVE = "1";
+		try {
+			expect(await turn("api")).toBe(true);
+		} finally {
+			delete process.env.EIGHT_HEADLESS_APPROVE;
+		}
 	});
 });
 
