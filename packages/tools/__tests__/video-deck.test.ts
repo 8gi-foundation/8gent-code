@@ -1,5 +1,5 @@
 /** render_video_deck: schema, deterministic render, cwd confinement, no network. */
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -40,6 +40,11 @@ import {
 } from "../video-deck";
 
 afterAll(cleanupTempDirs);
+
+// Real ffmpeg renders take 2-3s idle and well over bun's 5s default on a loaded host. A test that
+// times out leaves its render running; that render later rejects with nobody awaiting it, and bun
+// reports "Unhandled error between tests". A generous timeout lets every render settle in-test.
+setDefaultTimeout(120_000);
 
 const hasFfmpeg =
 	spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
